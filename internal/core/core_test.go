@@ -29,6 +29,15 @@ func TestBindEvidence(t *testing.T) {
 	}
 }
 
+func TestCheckRepo(t *testing.T) {
+	if err := CheckRepo(""); err != ErrEmptyRepo {
+		t.Fatalf("expected REP-001 error, got %v", err)
+	}
+	if err := CheckRepo("hiono/taxion"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestCheckReady(t *testing.T) {
 	if err := CheckReady([]Checkpoint{{Name: "plan", Done: true}}); err != nil {
 		t.Fatalf("unexpected error: %v", err)

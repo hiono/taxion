@@ -9,17 +9,22 @@ import (
 	"time"
 )
 
-// Task is the unit of ordered work.
+// Task is the unit of ordered work. Repo records the explicit repository
+// identity given at creation (REP-001).
 type Task struct {
 	ID        string
 	Title     string
+	Repo      string
 	CreatedAt time.Time
 }
 
 // Dispatch binds a Task to an isolated execution context (ROLE-001).
+// Repo records the explicit repository identity the dispatch is bound to;
+// it must come from an explicit --repo flag, never inferred (REP-001).
 type Dispatch struct {
 	ID        string
 	TaskID    string
+	Repo      string
 	Active    bool
 	CreatedAt time.Time
 }
@@ -43,6 +48,7 @@ var (
 	ErrNotReady             = errors.New("taxion: checkpoint sequence incomplete (CHK-001)")
 	ErrOutOfOrder           = errors.New("taxion: checkpoint completed out of order (CHK-002)")
 	ErrUnknownCheckpoint    = errors.New("taxion: unknown checkpoint name (CHK-002)")
+	ErrEmptyRepo            = errors.New("taxion: repo identity must be given explicitly via --repo (REP-001)")
 )
 
 // GuardActiveDispatch enforces DSP-001: an active Dispatch must never be
@@ -63,6 +69,16 @@ func BindEvidence(taskID, sha string) (Evidence, error) {
 		return Evidence{}, ErrEmptySHA
 	}
 	return Evidence{TaskID: taskID, SHA: sha, CreatedAt: time.Now().UTC()}, nil
+}
+
+// CheckRepo enforces REP-001: the repository identity an operation binds to
+// must be stated explicitly. Empty means "infer from cwd", which caused the
+// generalized repository-confusion failure and is therefore rejected.
+func CheckRepo(repo string) error {
+	if repo == "" {
+		return ErrEmptyRepo
+	}
+	return nil
 }
 
 // CheckReady enforces CHK-001: all checkpoints must be done.
