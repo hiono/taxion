@@ -1,18 +1,20 @@
-// Package server exposes a read-only HTTP API over the CLI-owned ledger file.
+// Package server exposes the Taxion HTTP API over the CLI-owned ledger file.
 //
-// M2 scope: GET only, localhost only, no auth (auth is M5). The server reads
-// the same JSON ledger file the CLI writes (default .taxion/ledger.json), so
-// the CLI remains the single writer and this server never mutates state.
-// Reads go through the core.Ledger shape, so a sqlite backend (LED-001,
-// internal/store) can plug in later without changing the wire format.
+// M4 scope: reads (GET) plus the CLI mutation surface (POST), localhost
+// only, no auth (auth is M5). The server is the sole writer besides the CLI;
+// both go through the core.Ledger shape and the same guards (REP-001,
+// DSP-001, SHA-001). No ledger keys are added (M2-3 wire freeze); POST
+// request bodies are versioned separately in docs/05.
 //
-// Fail-closed: if the ledger cannot be loaded the server answers 500 — it
-// never serves an empty ledger as if that were the truth.
+// Fail-closed: unreadable ledger answers 500; guard violations answer
+// 400/404/409 with a JSON error — never a silent success.
 package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
 )
@@ -23,13 +25,14 @@ type Server struct {
 	StorePath string
 }
 
-// Handler returns the read-only route table.
+// Handler returns the route table: GET reads, POST mutations, 405 otherwise.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/ledger", s.handleLedger)
 	mux.HandleFunc("/api/tasks", s.handleTasks)
 	mux.HandleFunc("/api/dispatches", s.handleDispatches)
 	mux.HandleFunc("/api/evidence", s.handleEvidence)
+	mux.HandleFunc("/api/reviews", s.handleReviews)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not found")
 	})
@@ -45,6 +48,28 @@ func (s *Server) load(w http.ResponseWriter) (core.Ledger, bool) {
 	return l, true
 }
 
+func (s *Server) save(w http.ResponseWriter, l core.Ledger) bool {
+	if err := l.Save(s.StorePath); err != nil {
+		writeErr(w, http.StatusInternalServerError, "cannot save ledger")
+		return false
+	}
+	return true
+}
+
+// decode limits and parses a JSON request body.
+func decode(w http.ResponseWriter, r *http.Request, v any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return false
+	}
+	return true
+}
+
+func newID(prefix string) string {
+	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+}
+
 func (s *Server) handleLedger(w http.ResponseWriter, r *http.Request) {
 	if !guardGet(w, r) {
 		return
@@ -57,9 +82,17 @@ func (s *Server) handleLedger(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
-	if !guardGet(w, r) {
-		return
+	switch r.Method {
+	case http.MethodGet:
+		s.listTasks(w, r)
+	case http.MethodPost:
+		s.createTask(w, r)
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "GET or POST only")
 	}
+}
+
+func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	l, ok := s.load(w)
 	if !ok {
 		return
@@ -74,10 +107,49 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, tasks)
 }
 
-func (s *Server) handleDispatches(w http.ResponseWriter, r *http.Request) {
-	if !guardGet(w, r) {
+// createTask mirrors `taxion task create`: title and an explicit repo
+// (REP-001) are required.
+func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Title string `json:"title"`
+		Repo  string `json:"repo"`
+	}
+	if !decode(w, r, &body) {
 		return
 	}
+	if body.Title == "" {
+		writeErr(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	if err := core.CheckRepo(body.Repo); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	l, ok := s.load(w)
+	if !ok {
+		return
+	}
+	t := core.Task{ID: newID("t"), Title: body.Title, Repo: body.Repo, CreatedAt: time.Now().UTC()}
+	l.Tasks = append(l.Tasks, t)
+	if !s.save(w, l) {
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, t)
+}
+
+func (s *Server) handleDispatches(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.listDispatches(w, r)
+	case http.MethodPost:
+		s.createDispatch(w, r)
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (s *Server) listDispatches(w http.ResponseWriter, r *http.Request) {
 	l, ok := s.load(w)
 	if !ok {
 		return
@@ -90,6 +162,93 @@ func (s *Server) handleDispatches(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, ds)
+}
+
+// createDispatch mirrors `taxion dispatch`: the task must exist, the repo is
+// explicit (REP-001), and at most one dispatch may be active (DSP-001 → 409).
+func (s *Server) createDispatch(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Task string `json:"task"`
+		Repo string `json:"repo"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.Task == "" {
+		writeErr(w, http.StatusBadRequest, "task is required")
+		return
+	}
+	if err := core.CheckRepo(body.Repo); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	l, ok := s.load(w)
+	if !ok {
+		return
+	}
+	found := false
+	for _, t := range l.Tasks {
+		if t.ID == body.Task {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, fmt.Sprintf("unknown task %q", body.Task))
+		return
+	}
+	if err := core.GuardActiveDispatch(l.Dispatches); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	d := core.Dispatch{ID: newID("d"), TaskID: body.Task, Repo: body.Repo, Active: true, CreatedAt: time.Now().UTC()}
+	l.Dispatches = append(l.Dispatches, d)
+	if !s.save(w, l) {
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, d)
+}
+
+// handleReviews creates evidence bindings (POST only). It mirrors
+// `taxion review`: repo is explicit (REP-001) and the sha is required and
+// kept exact (SHA-001).
+func (s *Server) handleReviews(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	var body struct {
+		Task string `json:"task"`
+		Repo string `json:"repo"`
+		SHA  string `json:"sha"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.Task == "" {
+		writeErr(w, http.StatusBadRequest, "task is required")
+		return
+	}
+	if err := core.CheckRepo(body.Repo); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ev, err := core.BindEvidence(body.Task, body.SHA) // SHA-001
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	l, ok := s.load(w)
+	if !ok {
+		return
+	}
+	l.Evidence = append(l.Evidence, ev)
+	if !s.save(w, l) {
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, ev)
 }
 
 func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +269,7 @@ func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, ev)
 }
 
-// guardGet rejects non-GET methods. Read-only by construction.
+// guardGet rejects non-GET methods on read-only routes.
 func guardGet(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		writeErr(w, http.StatusMethodNotAllowed, "read-only: GET only")

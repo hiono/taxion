@@ -293,7 +293,7 @@ func serveCmd(args []string) error {
 		return err
 	}
 	srv := &server.Server{StorePath: storePath}
-	fmt.Printf("taxion: serving read-only API on %s from %s\n", *addr, storePath)
+	fmt.Printf("taxion: serving API on %s from %s\n", *addr, storePath)
 	return http.ListenAndServe(*addr, srv.Handler())
 }
 
