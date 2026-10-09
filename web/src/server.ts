@@ -1,8 +1,11 @@
-// Read-only Task Graph view. Serves one HTML page plus a JSON API proxied
-// from `taxion serve` (M2). Guarantees: only GET routes exist; non-GET
-// methods get 405; this slice never reads ledger files and never mutates —
-// upstream failure surfaces as 502, never as an empty ledger pretending to
-// be the truth (fail-closed display).
+// Local order counter. Serves one HTML page with order forms (create task,
+// dispatch, review) plus a JSON API proxied to `taxion serve` (M4).
+// Guarantees: GET + the three order POSTs exist; every other method gets
+// 405; this slice never reads ledger files and never mutates on its own —
+// all writes go to the upstream API, and upstream failure surfaces as 502,
+// never as a silent success (fail-closed display).
+//
+// Localhost scope (M4): no auth. Do not expose beyond loopback (auth is M5).
 //
 // Usage: TAXION_API=http://127.0.0.1:3938 node src/server.ts [--port N] [--api URL]
 import { createServer } from "node:http";
@@ -21,18 +24,49 @@ export function apiBase(argv: string[] = process.argv.slice(2)): string {
   );
 }
 
+// Order POSTs are passed through to the upstream API untouched, so guard
+// semantics (400/404/409) stay in one place: the Go server.
 const PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>Taxion — Task Graph (read-only)</title>
+<title>Taxion — Task Graph (localhost console)</title>
 <style>body{font-family:system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem}
 table{border-collapse:collapse;width:100%;margin-bottom:2rem}
 th,td{border:1px solid #ccc;padding:.4rem .6rem;text-align:left;font-size:.9rem}
 th{background:#f4f4f4}.active{font-weight:bold;color:#0a6b0a}
-.badge{display:inline-block;font-size:.75rem;background:#eee;border-radius:4px;padding:.1rem .4rem;margin-left:.5rem}</style>
+.badge{display:inline-block;font-size:.75rem;background:#eee;border-radius:4px;padding:.1rem .4rem;margin-left:.5rem}
+form{margin-bottom:1.5rem}input{margin-right:.5rem;padding:.25rem .4rem}
+#msg{min-height:1.5em;font-weight:bold}</style>
 </head><body>
-<h1>Taxion Task Graph<span class="badge">read-only</span></h1>
+<h1>Taxion Task Graph<span class="badge">localhost console</span></h1>
+<div id="msg"></div>
+<h2>Order — create task</h2>
+<form id="f-task"><input name="title" placeholder="title" required><input name="repo" placeholder="repo (required)" required><button>Create</button></form>
+<h2>Order — dispatch</h2>
+<form id="f-dispatch"><input name="task" placeholder="task id" required><input name="repo" placeholder="repo (required)" required><button>Dispatch</button></form>
+<h2>Order — review</h2>
+<form id="f-review"><input name="task" placeholder="task id" required><input name="repo" placeholder="repo (required)" required><input name="sha" placeholder="sha (required)" required><button>Bind evidence</button></form>
 <div id="app">Loading…</div>
 <script>
+const msg=(t)=>{document.getElementById("msg").textContent=t};
+async function order(path,body){
+  const r=await fetch(path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(!r.ok) throw new Error(j.error??("HTTP "+r.status));
+  return j;
+}
+const form=(id,path,names)=>{
+  document.getElementById(id).addEventListener("submit",async e=>{
+    e.preventDefault();
+    const fd=new FormData(e.target),body={};
+    for(const n of names) body[n]=String(fd.get(n)??"");
+    try{const j=await order(path,body);msg("OK: "+JSON.stringify(j));load();}
+    catch(err){msg("Failed: "+err);}
+  });
+};
+form("f-task","/api/tasks",["title","repo"]);
+form("f-dispatch","/api/dispatches",["task","repo"]);
+form("f-review","/api/reviews",["task","repo","sha"]);
+function load(){
 fetch("/api/ledger").then(r=>r.json()).then(l=>{
   const t=(o)=>Object.values(o??{}).length?o:[];
   const esc=(s)=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -43,9 +77,11 @@ fetch("/api/ledger").then(r=>r.json()).then(l=>{
     "<h2>Dispatches</h2>"+tbl(["ID","Task","Active"],t(l.dispatches).map(x=>[esc(x.id),esc(x.taskId),x.active?'<span class="active">yes</span>':"no"]))+
     "<h2>Evidence</h2>"+tbl(["Task","SHA"],t(l.evidence).map(x=>[esc(x.taskId),esc(x.sha)]));
 }).catch(e=>{document.getElementById("app").textContent="Failed to load ledger: "+e});
+}
+load();
 </script></body></html>`;
 
-async function proxyLedger(upstream: string): Promise<{ status: number; body: string }> {
+async function proxyGet(upstream: string): Promise<{ status: number; body: string }> {
   try {
     const res = await fetch(`${upstream}/api/ledger`);
     const body = await res.text();
@@ -55,24 +91,50 @@ async function proxyLedger(upstream: string): Promise<{ status: number; body: st
   }
 }
 
+async function proxyOrder(
+  upstream: string,
+  path: string,
+  req: import("node:http").IncomingMessage,
+): Promise<{ status: number; body: string }> {
+  try {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const res = await fetch(`${upstream}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: Buffer.concat(chunks),
+    });
+    return { status: res.status, body: await res.text() };
+  } catch {
+    return { status: 502, body: JSON.stringify({ error: "upstream unavailable" }) };
+  }
+}
+
 export function createApp(upstream: string) {
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
-    if (req.method !== "GET") {
-      res.writeHead(405, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "read-only: GET only" }));
-      return;
-    }
-    if (url.pathname === "/") {
+    if (url.pathname === "/" && req.method === "GET") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(PAGE);
       return;
     }
-    if (url.pathname === "/api/ledger") {
-      proxyLedger(upstream).then(({ status, body }) => {
+    if (url.pathname === "/api/ledger" && req.method === "GET") {
+      proxyGet(upstream).then(({ status, body }) => {
         res.writeHead(status, { "content-type": "application/json" });
         res.end(body);
       });
+      return;
+    }
+    if (req.method === "POST" && url.pathname.startsWith("/api/")) {
+      proxyOrder(upstream, url.pathname + url.search, req).then(({ status, body }) => {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(body);
+      });
+      return;
+    }
+    if (req.method !== "GET" && req.method !== "POST") {
+      res.writeHead(405, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "GET + order POSTs only" }));
       return;
     }
     res.writeHead(404, { "content-type": "application/json" });
@@ -87,5 +149,5 @@ if (isMain) {
   const argv = process.argv.slice(2);
   const port = Number(flagValue(argv, "--port") ?? 3939);
   const server = createApp(apiBase(argv));
-  server.listen(port, () => console.log(`taxion web (read-only) on :${port}`));
+  server.listen(port, () => console.log(`taxion web (localhost console) on :${port}`));
 }

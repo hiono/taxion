@@ -1,13 +1,17 @@
-# @taxion/web — read-only Task Graph view
+# @taxion/web — localhost order counter
 
 Separate directory, zero dependencies, no build step (Node ≥22.18 strips
-types natively). Fetches the ledger from `taxion serve` (M2 API) and serves
-one HTML page plus `GET /api/ledger` (proxied).
+types natively). One HTML page with order forms (create task, dispatch,
+review) plus a JSON API proxied to `taxion serve` (M4).
 
-Read-only guarantee: only GET routes exist; every other method gets 405;
-this slice never reads ledger files and never writes. Upstream failure
-surfaces as 502, never as an empty ledger. All mutations stay in the
-Go CLI (`taxion task/dispatch/review`).
+Counter guarantee: the page GETs; order forms POST to `/api/*`, which this
+slice passes through to the upstream API untouched — guard semantics
+(400/404/409) live in exactly one place (the Go server). Upstream failure
+surfaces as 502, never as a silent success. This slice never reads ledger
+files and never mutates on its own. All writes land in the CLI-owned ledger
+via the API.
+
+Localhost scope (M4): no auth. Do not expose beyond loopback (auth is M5).
 
 ```sh
 npm test
