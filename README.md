@@ -20,7 +20,7 @@ Taxion Core (SDK-neutral)
  └─ Runtime adapters (plugins, e.g. Copilot SDK for Go as first candidate)
 ```
 
-## Non-goals (Day2)
+## Non-goals (Foundation → Local)
 
 - Not a Copilot SDK wrapper — SDK types never appear in `internal/core`.
 - No Git history / Issues / code ported from private predecessors.
@@ -37,13 +37,13 @@ go run ./cmd/taxion --help
 
 ## Docs
 
-- `docs/00-charter.md` — scope, non-goals, Day2→Day4 roadmap
+- `docs/00-charter.md` — scope, non-goals, phase roadmap
 - `docs/01-guardrails.md` — behavioral invariants with IDs
 - `docs/02-privacy-provenance.md` — sanitization policy
 - `docs/03-runtime-contract.md` — SDK-neutral Runtime interface
 - `docs/04-roadmap.md` — task breakdown
 
-## CLI (Day2 minimal)
+## CLI (Local phase, minimal)
 
 ```bash
 taxion init
@@ -53,4 +53,4 @@ taxion review --sha <coder-sha>
 taxion resume --session <id>
 ```
 
-Day2 CLI is local-first and deterministic. Server / ACP / Web arrive in Day3+.
+Local-phase CLI is local-first and deterministic. Server / ACP / Web arrive in Server / Platform phases.

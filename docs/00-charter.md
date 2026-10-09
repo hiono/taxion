@@ -8,25 +8,29 @@ from any private predecessor.
 Only generalized requirements, guardrails, procedures, and failure lessons — after
 privacy/provenance sanitization — may serve as input.
 
-## Public scope (Day2)
+## Public scope (Foundation → Local)
 
 - SDK-neutral governance core (`internal/core`): Task / Dispatch / Evidence / Checkpoint.
 - Runtime contract (`internal/runtime`): `Start / Resume / Stop / Events` only.
 - Local-first CLI: `init / task create / dispatch / review / resume`.
 - Conformance tests for DSP-001 / SHA-001 / CHK-001 / ROLE-001.
 
-## Non-goals (Day2)
+## Non-goals (Foundation → Local)
 
-- Server / ACP / Web UI (Day3+).
-- Copilot SDK adoption (evaluation task, not decision).
+- Server / ACP / Web UI (Server / Platform phases).
+- Copilot SDK adoption (Adapter phase evaluation task, not decision).
 - Multi-provider orchestration, fleet, workflows.
-- Any private-repo-specific behavior (GitLab-only assumptions, internal hosts).
+- Any private-repo-specific behavior (provider-specific assumptions, internal hosts).
 
-## Roadmap
+## Roadmap (phase names — no DayN)
 
-- **Day2**: Go core + CLI stub + SDK feasibility evaluation (Go has SDK → fastest validation).
-- **Day3**: Server-ization (Task Graph / Ledgers as source of truth), ACP server, Web UI.
-- **Day4+**: only if contracts stabilize — consider Rust core split
+- **Foundation**: repo, CI, charter, guardrails. ✅ (this commit)
+- **Core**: Go governance core + conformance tests.
+- **Local**: local-first CLI UX + `--repo` identity gate.
+- **Adapter**: runtime adapter feasibility evaluation as plugin (first candidate: Copilot SDK for Go).
+- **Server**: server-ization (Task Graph / Ledgers as source of truth).
+- **Platform**: ACP server + Web UI for multi-client use.
+- **Future**: only if contracts stabilize — consider Rust core split
   (`taxion-server` / `taxion-acp` in Rust, `taxion-runtime-copilot` in Go, `taxion-web` in TS).
 
 ## Traceability

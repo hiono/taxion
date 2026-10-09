@@ -1,7 +1,7 @@
 // Command taxion is the human-facing CLI for the Taxion control plane.
 //
-// Day2 scope: local-first, deterministic, no network, no SDK dependency.
-// Future: thin client over Taxion Server (Day3+) with ACP support.
+// Local phase scope: local-first, deterministic, no network, no SDK dependency.
+// Future: thin client over Taxion Server (Server phase+) with ACP support (Platform phase).
 package main
 
 import (
@@ -33,7 +33,7 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "init":
-		fmt.Println("taxion: initialized (day2 local stub)")
+		fmt.Println("taxion: initialized (local stub)")
 	case "task":
 		taskCmd(os.Args[2:])
 	case "dispatch":
@@ -44,7 +44,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "dispatch: --task is required")
 			os.Exit(2)
 		}
-		fmt.Printf("taxion: dispatched task %s (day2 local stub)\n", *task)
+		fmt.Printf("taxion: dispatched task %s (local stub)\n", *task)
 	case "review":
 		fs := flag.NewFlagSet("review", flag.ExitOnError)
 		sha := fs.String("sha", "", "coder output SHA")
@@ -53,7 +53,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "review: --sha is required (SHA-001)")
 			os.Exit(2)
 		}
-		fmt.Printf("taxion: review bound to SHA %s (day2 local stub)\n", *sha)
+		fmt.Printf("taxion: review bound to SHA %s (local stub)\n", *sha)
 	case "resume":
 		fs := flag.NewFlagSet("resume", flag.ExitOnError)
 		session := fs.String("session", "", "session id")
@@ -62,7 +62,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "resume: --session is required")
 			os.Exit(2)
 		}
-		fmt.Printf("taxion: resumed session %s (day2 local stub)\n", *session)
+		fmt.Printf("taxion: resumed session %s (local stub)\n", *session)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -83,5 +83,5 @@ func taskCmd(args []string) {
 		fmt.Fprintln(os.Stderr, "task create: --title is required")
 		os.Exit(2)
 	}
-	fmt.Printf("taxion: task created %q (day2 local stub)\n", *title)
+	fmt.Printf("taxion: task created %q (local stub)\n", *title)
 }
