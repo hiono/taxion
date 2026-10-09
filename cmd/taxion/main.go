@@ -6,6 +6,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/hiono/taxion/internal/acp"
 	"github.com/hiono/taxion/internal/core"
 )
 
@@ -29,6 +31,7 @@ Commands:
   dispatch list       List dispatches ([--repo] filter, [--json])
   review              Review a coder output (--task, --sha and --repo required)
   resume              Resume a session (--session required)
+  acp                 Serve ACP v1 over stdio (spike)
 
 Identity gate (REP-001): mutating commands require an explicit --repo.
 The target is never inferred from the working directory.
@@ -59,6 +62,8 @@ func main() {
 		err = reviewCmd(args[1:])
 	case "resume":
 		err = resumeCmd(args[1:])
+	case "acp":
+		err = acp.New(storePath).Serve(context.Background(), os.Stdin, os.Stdout)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
