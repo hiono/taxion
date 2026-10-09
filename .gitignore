@@ -23,6 +23,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+.tgrep/
 
 # Secrets — never commit
 .env
