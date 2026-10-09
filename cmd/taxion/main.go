@@ -10,12 +10,14 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/hiono/taxion/internal/acp"
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/server"
 )
 
 const usage = `taxion — Evidence-governed control plane for coding agents
@@ -32,6 +34,7 @@ Commands:
   review              Review a coder output (--task, --sha and --repo required)
   resume              Resume a session (--session required)
   acp                 Serve ACP v1 over stdio (spike)
+  serve               Serve read-only HTTP API over the ledger ([--addr] localhost only)
 
 Identity gate (REP-001): mutating commands require an explicit --repo.
 The target is never inferred from the working directory.
@@ -64,6 +67,8 @@ func main() {
 		err = resumeCmd(args[1:])
 	case "acp":
 		err = acp.New(storePath).Serve(context.Background(), os.Stdin, os.Stdout)
+	case "serve":
+		err = serveCmd(args[1:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -277,6 +282,19 @@ func resumeCmd(args []string) error {
 	}
 	fmt.Printf("taxion: resumed session %s (local stub)\n", *session)
 	return nil
+}
+
+// serveCmd runs the read-only HTTP API (M2). Localhost only by default;
+// pass an explicit --addr to bind elsewhere at your own risk (M5 adds auth).
+func serveCmd(args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	addr := fs.String("addr", "127.0.0.1:3938", "listen address (localhost only in M2)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	srv := &server.Server{StorePath: storePath}
+	fmt.Printf("taxion: serving read-only API on %s from %s\n", *addr, storePath)
+	return http.ListenAndServe(*addr, srv.Handler())
 }
 
 func printJSON(v any) error {
