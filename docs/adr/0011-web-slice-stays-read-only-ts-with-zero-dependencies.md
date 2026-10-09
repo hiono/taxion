@@ -23,3 +23,13 @@ stay in the Go CLI.
 
 - Viewing tasks/dispatches/evidence needs only node + the ledger path.
 - Any future write-capable UI must revisit this ADR explicitly.
+
+## Amendment (2026-10-10, milestone M4, issues #15–#17)
+
+Revisited as required above. `web/` is now a localhost order counter: three
+forms POST to same-origin `/api/*`, proxied untouched to the `taxion serve`
+write API. The no-second-writer rule is preserved in a new form — the browser
+never writes the ledger itself; the Go server remains the single writer and
+guard semantics (DSP-001/SHA-001/REP-001) live in exactly one place. Scope
+stays localhost-only with no auth (auth is M5); exposing beyond loopback
+requires a new ADR. Zero-dependency, no-build-step policy unchanged.

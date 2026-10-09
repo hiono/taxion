@@ -16,5 +16,8 @@ Phases: Foundation → Core → Local → Adapter → Server → Platform → Fu
 - [x] M3 / `proc-runtime` (#12) — process-backed Runtime, real worker supervision (stdlib only).
 - [x] M3 / `acp-methods` (#13) — explicit taxion/dispatch + taxion/review, convention deprecated.
 - [x] M3 / `split-reeval-2` (#14) — ADR-0013: DEFER again, new triggers recorded.
+- [x] M4 / `write-api` (#15) — POST tasks/dispatches/reviews, CLI-identical guards.
+- [x] M4 / `web-counter` (#16) — order forms + POST passthrough, 502 fail-closed.
+- [x] M4 / `adr-revisits` (#17) — ADR-0011 amended, ADR-0014 stay-split-free, schema write section.
 
 Each step: small PR, `gofmt + vet + test`, sanitized docs, SHA-bound review.
