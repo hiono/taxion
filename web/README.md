@@ -11,7 +11,10 @@ surfaces as 502, never as a silent success. This slice never reads ledger
 files and never mutates on its own. All writes land in the CLI-owned ledger
 via the API.
 
-Localhost scope (M4): no auth. Do not expose beyond loopback (auth is M5).
+Localhost scope (M4): no auth. Listens on 127.0.0.1 by default; `--host`
+or `TAXION_HOST` overrides (e.g. `--host 0.0.0.0`). Do not expose beyond
+loopback (auth is M5) — remote access goes over SSH tunnels, see
+`../docs/06-remote-access.md`.
 
 ```sh
 npm test

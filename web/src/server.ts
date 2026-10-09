@@ -7,7 +7,9 @@
 //
 // Localhost scope (M4): no auth. Do not expose beyond loopback (auth is M5).
 //
-// Usage: TAXION_API=http://127.0.0.1:3938 node src/server.ts [--port N] [--api URL]
+// Usage: TAXION_API=http://127.0.0.1:3938 node src/server.ts [--port N] [--api URL] [--host ADDR]
+// Security default: listens on 127.0.0.1 only. Pass --host 0.0.0.0 to expose
+// (see docs/06-remote-access.md — beyond-loopback needs care until M5 auth).
 import { createServer } from "node:http";
 import type { Ledger } from "./types.ts";
 
@@ -142,12 +144,21 @@ export function createApp(upstream: string) {
   });
 }
 
+export function listenHost(argv: string[] = process.argv.slice(2)): string {
+  return (
+    flagValue(argv, "--host") ??
+    process.env["TAXION_HOST"] ??
+    "127.0.0.1"
+  );
+}
+
 export type { Ledger };
 
 const isMain = process.argv[1]?.endsWith("server.ts") ?? false;
 if (isMain) {
   const argv = process.argv.slice(2);
   const port = Number(flagValue(argv, "--port") ?? 3939);
+  const host = listenHost(argv);
   const server = createApp(apiBase(argv));
-  server.listen(port, () => console.log(`taxion web (localhost console) on :${port}`));
+  server.listen(port, host, () => console.log(`taxion web (order counter) on ${host}:${port}`));
 }

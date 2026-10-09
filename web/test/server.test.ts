@@ -2,7 +2,7 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { createApp } from "../src/server.ts";
+import { createApp, listenHost } from "../src/server.ts";
 
 const LEDGER = {
   tasks: [{ id: "t-1", title: "demo", repo: "/repo/demo" }],
@@ -141,5 +141,15 @@ describe("localhost console (API-backed)", () => {
   it("returns 404 for unknown paths", async () => {
     const res = await fetch(`${base}/nope`);
     assert.equal(res.status, 404);
+  });
+});
+
+describe("listen host (secure default)", () => {
+  it("defaults to localhost", () => {
+    assert.equal(listenHost([]), "127.0.0.1");
+  });
+
+  it("accepts --host override", () => {
+    assert.equal(listenHost(["--host", "0.0.0.0"]), "0.0.0.0");
   });
 });
