@@ -42,6 +42,9 @@ go run ./cmd/taxion --help
 - `docs/02-privacy-provenance.md` — sanitization policy
 - `docs/03-runtime-contract.md` — SDK-neutral Runtime interface
 - `docs/04-roadmap.md` — task breakdown
+- `docs/05-ledger-schema.md` — frozen ledger wire format + HTTP surface
+- `docs/06-remote-access.md` — SSH-tunnel-first remote access (SSH + docker),
+  loopback-by-default policy. **Start here before exposing any port.**
 
 ## CLI (Local phase, minimal)
 
