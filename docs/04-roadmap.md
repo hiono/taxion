@@ -13,5 +13,8 @@ Phases: Foundation → Core → Local → Adapter → Server → Platform → Fu
 - [x] M2 / `http-read-api` (#9) — read-only HTTP API over the ledger (GET only, localhost).
 - [x] M2 / `web-api-client` (#10) — web reads via `taxion serve`, 502 fail-closed.
 - [x] M2 / `wire-freeze` (#11) — schema doc (05) + CI key pinning + ADR-0012 freeze note.
+- [x] M3 / `proc-runtime` (#12) — process-backed Runtime, real worker supervision (stdlib only).
+- [x] M3 / `acp-methods` (#13) — explicit taxion/dispatch + taxion/review, convention deprecated.
+- [x] M3 / `split-reeval-2` (#14) — ADR-0013: DEFER again, new triggers recorded.
 
 Each step: small PR, `gofmt + vet + test`, sanitized docs, SHA-bound review.
