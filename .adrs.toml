@@ -1,0 +1,8 @@
+# adrs project configuration (see https://joshrotenberg.com/adrs/configuration.html)
+# Managed in-repo; user-wide defaults (if any) live in ~/.config/adrs/config.toml.
+adr_dir = "docs/adr"
+mode = "compatible"
+
+[templates]
+format = "nygard"
+variant = "full"
