@@ -1,0 +1,31 @@
+# Binaries / build output
+/taxion
+/bin/
+/dist/
+
+# Go
+*.exe
+*.test
+*.out
+/vendor/
+
+# Mise / local toolchains
+.mise/
+mise.local.toml
+
+# Test / coverage
+coverage.out
+coverage.html
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Secrets — never commit
+.env
+.env.*
+*.pem
+*.key
