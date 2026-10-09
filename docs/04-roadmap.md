@@ -10,5 +10,8 @@ Phases: Foundation → Core → Local → Adapter → Server → Platform → Fu
 - [x] Platform / `acp-spike` — minimal ACP v1 server over stdio (dispatch/review).
 - [x] Platform / `web-slice` — read-only Task Graph view (`web/`, TS, zero-dep).
 - [x] Future / `language-split-eval` — evaluated, deferred until core freeze (ADR-0012).
+- [x] M2 / `http-read-api` (#9) — read-only HTTP API over the ledger (GET only, localhost).
+- [x] M2 / `web-api-client` (#10) — web reads via `taxion serve`, 502 fail-closed.
+- [x] M2 / `wire-freeze` (#11) — schema doc (05) + CI key pinning + ADR-0012 freeze note.
 
 Each step: small PR, `gofmt + vet + test`, sanitized docs, SHA-bound review.
