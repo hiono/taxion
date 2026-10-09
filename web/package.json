@@ -1,0 +1,14 @@
+{
+  "name": "@taxion/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only Task Graph view for Taxion (separate dir, no mutation surface)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/server.ts",
+    "test": "node --test \"test/*.test.ts\""
+  }
+}

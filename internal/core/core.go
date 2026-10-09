@@ -12,34 +12,34 @@ import (
 // Task is the unit of ordered work. Repo records the explicit repository
 // identity given at creation (REP-001).
 type Task struct {
-	ID        string
-	Title     string
-	Repo      string
-	CreatedAt time.Time
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Repo      string    `json:"repo"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // Dispatch binds a Task to an isolated execution context (ROLE-001).
 // Repo records the explicit repository identity the dispatch is bound to;
 // it must come from an explicit --repo flag, never inferred (REP-001).
 type Dispatch struct {
-	ID        string
-	TaskID    string
-	Repo      string
-	Active    bool
-	CreatedAt time.Time
+	ID        string    `json:"id"`
+	TaskID    string    `json:"taskId"`
+	Repo      string    `json:"repo"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // Evidence is an immutable record bound to an exact output SHA (SHA-001).
 type Evidence struct {
-	SHA       string // exact retained coder output SHA
-	TaskID    string
-	CreatedAt time.Time
+	SHA       string    `json:"sha"` // exact retained coder output SHA
+	TaskID    string    `json:"taskId"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // Checkpoint gates readiness: incomplete sequence must never report ready (CHK-001).
 type Checkpoint struct {
-	Name string
-	Done bool
+	Name string `json:"name"`
+	Done bool   `json:"done"`
 }
 
 var (

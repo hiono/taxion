@@ -8,6 +8,6 @@ Phases: Foundation → Core → Local → Adapter → Server → Platform → Fu
 - [x] Adapter / `runtime-wiring` — in-process local Runtime, fail-closed.
 - [x] Server / `sqlite-ledger` — sqlite store + outbox, pure-Go (ADR-0009).
 - [x] Platform / `acp-spike` — minimal ACP v1 server over stdio (dispatch/review).
-- [ ] Platform / `web-slice` — read-only Task Graph view (TS, separate dir when started).
+- [x] Platform / `web-slice` — read-only Task Graph view (`web/`, TS, zero-dep).
 
 Each step: small PR, `gofmt + vet + test`, sanitized docs, SHA-bound review.
