@@ -1,10 +1,11 @@
-// Read-only Task Graph view. Serves one HTML page plus a JSON API over the
-// CLI-owned ledger file. Guarantees: only GET routes exist; non-GET methods
-// get 405; the ledger file is opened read-only and never written.
+// Read-only Task Graph view. Serves one HTML page plus a JSON API proxied
+// from `taxion serve` (M2). Guarantees: only GET routes exist; non-GET
+// methods get 405; this slice never reads ledger files and never mutates —
+// upstream failure surfaces as 502, never as an empty ledger pretending to
+// be the truth (fail-closed display).
 //
-// Usage: TAXION_STORE=/path/to/ledger.json node src/server.ts [--port N] [--store PATH]
+// Usage: TAXION_API=http://127.0.0.1:3938 node src/server.ts [--port N] [--api URL]
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
 import type { Ledger } from "./types.ts";
 
 function flagValue(argv: string[], name: string): string | undefined {
@@ -12,20 +13,12 @@ function flagValue(argv: string[], name: string): string | undefined {
   return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined;
 }
 
-export function storePath(argv: string[] = process.argv.slice(2)): string {
+export function apiBase(argv: string[] = process.argv.slice(2)): string {
   return (
-    flagValue(argv, "--store") ??
-    process.env["TAXION_STORE"] ??
-    ".taxion/ledger.json"
+    flagValue(argv, "--api") ??
+    process.env["TAXION_API"] ??
+    "http://127.0.0.1:3938"
   );
-}
-
-export function loadLedger(path: string): Ledger {
-  try {
-    return JSON.parse(readFileSync(path, "utf8")) as Ledger;
-  } catch {
-    return { tasks: [], dispatches: [], evidence: [] };
-  }
 }
 
 const PAGE = `<!doctype html>
@@ -52,7 +45,17 @@ fetch("/api/ledger").then(r=>r.json()).then(l=>{
 }).catch(e=>{document.getElementById("app").textContent="Failed to load ledger: "+e});
 </script></body></html>`;
 
-export function createApp(ledgerPath: string) {
+async function proxyLedger(upstream: string): Promise<{ status: number; body: string }> {
+  try {
+    const res = await fetch(`${upstream}/api/ledger`);
+    const body = await res.text();
+    return { status: res.status, body };
+  } catch {
+    return { status: 502, body: JSON.stringify({ error: "upstream unavailable" }) };
+  }
+}
+
+export function createApp(upstream: string) {
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (req.method !== "GET") {
@@ -66,8 +69,10 @@ export function createApp(ledgerPath: string) {
       return;
     }
     if (url.pathname === "/api/ledger") {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify(loadLedger(ledgerPath)));
+      proxyLedger(upstream).then(({ status, body }) => {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(body);
+      });
       return;
     }
     res.writeHead(404, { "content-type": "application/json" });
@@ -75,10 +80,12 @@ export function createApp(ledgerPath: string) {
   });
 }
 
+export type { Ledger };
+
 const isMain = process.argv[1]?.endsWith("server.ts") ?? false;
 if (isMain) {
   const argv = process.argv.slice(2);
   const port = Number(flagValue(argv, "--port") ?? 3939);
-  const server = createApp(storePath(argv));
+  const server = createApp(apiBase(argv));
   server.listen(port, () => console.log(`taxion web (read-only) on :${port}`));
 }
