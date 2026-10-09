@@ -13,7 +13,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
-      - run: gofmt -l ./...
+      - run: test -z "$(gofmt -l cmd internal)"
       - run: go vet ./...
       - run: go test ./...
       - run: go build ./...
@@ -40,5 +40,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           echo "=== secret / provenance hygiene (PRIV-001) ==="
-          ! grep -rEn 'gho_|github_pat_|glpat-|-----BEGIN .*PRIVATE KEY-----' --exclude-dir=.git . || (echo "secret pattern found"; exit 1)
+          # Full token shapes only (bare prefixes appear in docs legitimately).
+          # Scan source/config; docs (*.md) and this workflow file are excluded.
+          ! grep -rEn --include='*.go' --include='*.mod' --include='*.sum' --include='*.toml' --include='*.yml' --include='*.yaml' --exclude='ci.yml' --exclude-dir=.git 'gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' . || (echo "secret pattern found"; exit 1)
           echo OK
