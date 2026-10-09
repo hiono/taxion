@@ -5,8 +5,9 @@
 // change — all governance (DSP-001, SHA-001, CHK-002, REP-001) is enforced
 // by internal/core and internal/runtime/local. Stdlib only.
 //
-// Prompt convention (spike): plain text dispatches the session task to the
-// coder adapter; text starting with "review <sha>" binds evidence (SHA-001).
+// Prompt convention (deprecated fallback): plain text dispatches the session
+// task to the coder adapter; text starting with "review <sha>" binds evidence
+// (SHA-001). Prefer the explicit taxion/dispatch and taxion/review methods.
 // The client-provided cwd acts as the explicit repo identity (REP-001).
 package acp
 
@@ -195,6 +196,44 @@ func (s *Server) handle(ctx context.Context, req Request, out *bufio.Writer) {
 		_ = json.Unmarshal(req.Params, &p)
 		s.cancel(ctx, p.SessionID)
 		// notification: no response
+	case "taxion/dispatch":
+		var p struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil || p.SessionID == "" {
+			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("taxion/dispatch: sessionId is required"))
+			return
+		}
+		sess, err := s.lookup(p.SessionID)
+		if err != nil {
+			s.fail(out, req.ID, ErrServer, err)
+			return
+		}
+		did, err := s.dispatch(p.SessionID, sess, out)
+		if err != nil {
+			s.fail(out, req.ID, ErrServer, err)
+			return
+		}
+		s.respond(out, req.ID, map[string]any{"stopReason": "end_turn", "dispatchId": did}, nil)
+	case "taxion/review":
+		var p struct {
+			SessionID string `json:"sessionId"`
+			SHA       string `json:"sha"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil || p.SessionID == "" {
+			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("taxion/review: sessionId and sha are required"))
+			return
+		}
+		sess, err := s.lookup(p.SessionID)
+		if err != nil {
+			s.fail(out, req.ID, ErrServer, err)
+			return
+		}
+		if err := s.review(p.SessionID, sess, p.SHA, out); err != nil {
+			s.fail(out, req.ID, ErrServer, err)
+			return
+		}
+		s.respond(out, req.ID, map[string]any{"stopReason": "end_turn", "sha": strings.TrimSpace(p.SHA)}, nil)
 	default:
 		s.fail(out, req.ID, ErrMethodNotFound, fmt.Errorf("method not found: %s", req.Method))
 	}
@@ -247,31 +286,56 @@ func (s *Server) lookup(sid string) (*acpSession, error) {
 	return sess, nil
 }
 
-// prompt implements the spike convention: "review <sha>" binds evidence,
-// anything else dispatches the session task.
+// prompt implements the deprecated spike convention: "review <sha>" binds
+// evidence, anything else dispatches the session task. Prefer the explicit
+// taxion/dispatch and taxion/review methods; this fallback stays for older
+// clients and enforces the same guards.
 func (s *Server) prompt(ctx context.Context, sid, text string, out *bufio.Writer) (string, error) {
 	sess, err := s.lookup(sid)
 	if err != nil {
 		return "", err
 	}
+	if sha, ok := strings.CutPrefix(text, "review "); ok {
+		if err := s.review(sid, sess, sha, out); err != nil {
+			return "", err
+		}
+		return "end_turn", nil
+	}
+	if _, err := s.dispatch(sid, sess, out); err != nil {
+		return "", err
+	}
+	return "end_turn", nil
+}
+
+// review binds coder-output evidence to the session task (SHA-001: sha is
+// required and kept exact, never "latest").
+func (s *Server) review(sid string, sess *acpSession, sha string, out *bufio.Writer) error {
+	l, err := s.load()
+	if err != nil {
+		return err
+	}
+	ev, err := core.BindEvidence(sess.taskID, strings.TrimSpace(sha)) // SHA-001
+	if err != nil {
+		return err
+	}
+	l.Evidence = append(l.Evidence, ev)
+	if err := l.Save(s.storePath); err != nil {
+		return err
+	}
+	s.notify(out, sid, map[string]any{
+		"sessionUpdate": "agent_message_chunk",
+		"content":       map[string]any{"type": "text", "text": fmt.Sprintf("Evidence bound to %s for %s.", ev.SHA, sess.taskID)},
+	})
+	return nil
+}
+
+// dispatch records a dispatch for the session task (DSP-001: at most one
+// active). The session cwd is the explicit repo identity (REP-001).
+// It returns the dispatch ID.
+func (s *Server) dispatch(sid string, sess *acpSession, out *bufio.Writer) (string, error) {
 	l, err := s.load()
 	if err != nil {
 		return "", err
-	}
-	if sha, ok := strings.CutPrefix(text, "review "); ok {
-		ev, err := core.BindEvidence(sess.taskID, strings.TrimSpace(sha)) // SHA-001
-		if err != nil {
-			return "", err
-		}
-		l.Evidence = append(l.Evidence, ev)
-		if err := l.Save(s.storePath); err != nil {
-			return "", err
-		}
-		s.notify(out, sid, map[string]any{
-			"sessionUpdate": "agent_message_chunk",
-			"content":       map[string]any{"type": "text", "text": fmt.Sprintf("Evidence bound to %s for %s.", ev.SHA, sess.taskID)},
-		})
-		return "end_turn", nil
 	}
 	if err := core.GuardActiveDispatch(l.Dispatches); err != nil { // DSP-001
 		return "", err
@@ -293,7 +357,7 @@ func (s *Server) prompt(ctx context.Context, sid, text string, out *bufio.Writer
 		"sessionUpdate": "agent_message_chunk",
 		"content":       map[string]any{"type": "text", "text": fmt.Sprintf("Dispatched %s for %s in %s.", d.ID, sess.taskID, sess.cwd)},
 	})
-	return "end_turn", nil
+	return d.ID, nil
 }
 
 func (s *Server) cancel(ctx context.Context, sid string) {
