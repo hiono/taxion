@@ -6,6 +6,8 @@
 | ROLE-001 | Coder and Reviewer must use independently isolated execution contexts. | `runtime.Runtime` contract doc + future server |
 | SHA-001 | Reviewer execution must be bound to the exact retained Coder output SHA. | `core.BindEvidence`, CLI `review --sha` required |
 | CHK-001 | An incomplete checkpoint sequence must never report readiness. | `core.CheckReady` |
+| CHK-002 | Checkpoints must complete in declaration order; out-of-order, unknown, or post-completion advances are rejected. | `core.Sequence.Advance` |
+| LED-001 | Ledger (tasks/dispatches/evidence/checkpoints) must survive a save/load round-trip; sqlite backend deferred to Server phase must preserve this shape. | `core.Ledger.Save/LoadLedger` |
 | DSP-001 | An active Dispatch must never be silently replaced. | `core.GuardActiveDispatch` |
 | SDK-001 | SDK-specific types must not appear in the governance core. | `internal/core` imports stdlib only (CI `go list` check) |
 

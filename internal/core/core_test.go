@@ -37,3 +37,33 @@ func TestCheckReady(t *testing.T) {
 		t.Fatalf("expected CHK-001 error, got %v", err)
 	}
 }
+
+func TestSequenceOrder(t *testing.T) {
+	s := NewSequence("plan", "dispatch", "review")
+	if s.Ready() {
+		t.Fatal("fresh sequence must not be ready")
+	}
+	if err := s.Advance("dispatch"); err != ErrOutOfOrder {
+		t.Fatalf("expected CHK-002 out-of-order error, got %v", err)
+	}
+	if err := s.Advance("unknown"); err != ErrUnknownCheckpoint {
+		t.Fatalf("expected CHK-002 unknown error, got %v", err)
+	}
+	for _, name := range []string{"plan", "dispatch", "review"} {
+		if err := s.Advance(name); err != nil {
+			t.Fatalf("advance %s: unexpected error %v", name, err)
+		}
+	}
+	if !s.Ready() {
+		t.Fatal("completed sequence must be ready")
+	}
+	if err := s.Advance("review"); err != ErrOutOfOrder {
+		t.Fatalf("expected CHK-002 error on completed sequence, got %v", err)
+	}
+}
+
+func TestEmptySequenceReady(t *testing.T) {
+	if !NewSequence().Ready() {
+		t.Fatal("empty sequence has no gates and must report ready")
+	}
+}
