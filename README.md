@@ -35,6 +35,13 @@ go test ./...
 go run ./cmd/taxion --help
 ```
 
+Serve the API with a token (required beyond local use; see `docs/06-remote-access.md`):
+
+```bash
+go run ./cmd/taxion gen-token                          # once: store it outside the repo
+TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
+```
+
 ## Docs
 
 - `docs/00-charter.md` — scope, non-goals, phase roadmap
