@@ -32,6 +32,10 @@ implementation results; the reference documents linked from
 - [x] M6 / `memory-model` (#27) — ADR-0017 layers×ranges×promotion, docs/08.
 - [x] M6 / `guideline-promotion` (#29) — configurable warning threshold,
   explicit structured approval, and shared dispatch checks (MEM-001, ADR-0019).
+- [x] M7 / `memory-export-and-scope` (#39–#40) — sanitized stdout-only
+  export and explicit global writes; current commands are in docs/08.
+- [x] M8 / `server-hardening` (#41–#43) — self-asserted operator labels,
+  default five-failure lockout, and audit-chain verification with documented limits.
 - [x] Future / `browser-terminal-eval` (#21) — approach and shell-access threat
   model recorded in ADR-0018. Implementation remains deferred; use SSH/editor
   access in docs/06 Pattern D. A terminal implementation needs its own Issue

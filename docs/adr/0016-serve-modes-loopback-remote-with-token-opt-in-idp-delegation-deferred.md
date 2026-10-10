@@ -50,3 +50,14 @@ asking for shared LAN use). On the third, this ADR is reopened.
   interaction. The mode switch clarifies configuration without changing
   the authentication mechanism.
 - D/E/G remain open as independent follow-ups; none is a precondition.
+
+## Implementation status (M8)
+
+The consequences above describe the initial F-lite implementation.
+The D/E/G follow-ups are now implemented: self-asserted `who`, IP-based
+failure counting and lockout, and audit hash-chain verification. M8
+acceptance is recorded in Issues #41–#43; current fields, fixed thresholds,
+and verification limits belong in [the audit reference](../07-audit-log.md).
+The original "no rate limit" statement no longer describes current behavior.
+Shared-token identity, lack of built-in TLS, and deferred IdP delegation
+remain unchanged.
