@@ -44,6 +44,11 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
 
 ## Docs
 
+- [ADR-0020](docs/adr/0020-layered-memory-and-role-sessions-for-orchestration.md) —
+  採択した到達条件、階層化した Memory、Go Copilot SDK の役割別 Session。
+  現在の実装状況とは区別する。
+- [ADR-0021](docs/adr/0021-durable-task-graph-and-dispatch-change-control.md) —
+  Task Graph の情報、依存と完了条件、Dispatch の変更管理。
 - `CONTRIBUTING.md` — development checks, document ownership, and comment rules
 - `docs/00-charter.md` — founding scope and project constraints
 - `docs/01-guardrails.md` — behavioral invariants with IDs

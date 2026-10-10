@@ -40,9 +40,27 @@ implementation results; the reference documents linked from
   model recorded in ADR-0018. Implementation remains deferred; use SSH/editor
   access in docs/06 Pattern D. A terminal implementation needs its own Issue
   and browser-user authentication, not only the upstream M5 token.
-- [ ] Adapter / `copilot-sdk-eval` — evaluate session start/resume fidelity,
-  event mapping cost, authentication requirements, and version pinning
-  before adding an SDK adapter. There is no vendored
-  `internal/runtime/copilot/`; a failed evaluation leaves core untouched.
+- [ ] Adapter / `copilot-sdk-eval` — Go SDK の対応確認と adapter 実装は
+  下記 M11 の #49〜#51 で追跡する。SDK 採用と役割別 Session の目的は
+  ADR-0020 に記録した。非対応は blocker として扱う。
 
 Each step: small PR, `gofmt + vet + test`, sanitized docs, SHA-bound review.
+
+## 階層化した Memory と自動実行の計画
+
+[ADR-0020](adr/0020-layered-memory-and-role-sessions-for-orchestration.md)
+を採択した実装方針とする。既存の完了記録は個別の成果であり、
+この到達条件の達成を意味しない。
+Memory の保存・参照・指示への反映は M10〜M12 に含め、
+M14 まで延期しない。各 Issue の前提と完了条件は
+[#46](https://github.com/hiono/taxion/issues/46) から参照できる。
+
+| 段階 | 対象 | Issue |
+| --- | --- | --- |
+| [M10](https://github.com/hiono/taxion/milestone/16) | 階層化した Memory、Task Graph、Task lost の防止、実行契約 | #46〜#48・#66 |
+| [M11](https://github.com/hiono/taxion/milestone/17) | Go Copilot SDK、役割別 Session、system prompt・履歴の分離 | #49〜#51 |
+| [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映し、再説明なしで進める自動実装・独立レビュー | #52〜#54・#67 |
+| [M13](https://github.com/hiono/taxion/milestone/19) | 再起動からの復旧、永続的な作業記録 | #55〜#57 |
+| [M14](https://github.com/hiono/taxion/milestone/20) | 仕様検索、Memory の移行、skills・tools 連携 | #58〜#61 |
+| [M15](https://github.com/hiono/taxion/milestone/21) | ACP・Web と到達条件の検証 | #62〜#63 |
+| [M16](https://github.com/hiono/taxion/milestone/22) | Planner 採用と Rust 導入の評価 | #64〜#65 |
