@@ -2,7 +2,8 @@
 
 Task Graph と Ledger は SQLite の `workspace.db` に同時に保存する。
 既存の `.taxion/ledger.json` と `.graph.json` は初回移行に限り読み込み、
-移行後もバックアップとして残す。以後の更新元は SQLite workspace となる。
+移行確認のため一時的に残す。これらの JSON は移行後に更新せず、正本やバックアップとして
+利用しない。取り込みを確認した後に削除する。以後の更新元は SQLite workspace となる。
 設計の理由と移行の決定は
 [ADR-0022](adr/0022-versioned-task-graph-beside-legacy-ledger.md) を参照する。
 
@@ -139,6 +140,7 @@ Graph の保存は検証後の rename とし、失敗した登録・遷移では
 CLI・HTTP・ACP の更新は SQLite transaction で Ledger と Graph を一緒に変更する。
 SQLite が同時 writer の更新を受け入れられない場合は明示的なエラーとなり、
 呼び出し元は成功として扱わず再試行できる。
+移行元 JSON を残している間も SQLite との同期は行わないため、SQLite の復元には使えない。
 Graph の破損、非対応の version、未知のキー、履歴と現状態の不一致はエラーとする。
 この履歴検査は改ざん防止や管理者による全体の書き換え検出を保証しない。
 

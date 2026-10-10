@@ -37,20 +37,25 @@ dispatch 発行時は Graph の Task を ACTIVE にし、Dispatch の初期状�
 Active projection を同時に保存する。終了遷移では三者を同じ transaction で更新する。
 既存 Graph の破損、非対応の版、未知のキー、読み取り失敗はエラーとする。
 初回アクセス時に旧 Ledger と任意の Graph を SQLite へ一度だけ取り込む。
-元ファイルは移行元・バックアップとして残し、破損や未解決の active Dispatch を
-inactive として再作成しない。Graph 導入時に解決されていない active Dispatch があれば拒否する。
+JSON は旧 workspace からの一時的な移行入力に限り、移行後の正本・バックアップ・
+互換出力として維持しない。現実装は移行元を自動削除しないため、SQLite の取り込みを
+確認した後に管理者が削除する。JSON が残っていても SQLite と同期せず、SQLite を失った際の
+復元元にはならない。破損や未解決の active Dispatch を inactive として再作成せず、
+Graph 導入時に解決されていない active Dispatch があれば拒否する。
 Graph のない workspace は旧 dispatch 検査の互換動作を維持する。
 
 SQLite transaction が状態変更の原子性を担保する。SQLite が writer contention を
 解決できない場合は更新エラーを返し、成功したように扱わない。既存 JSON Ledger と
-Graph は移行後に更新しない。
+Graph は移行後に更新しない。SQLite から別の永続化方式へ移る場合は別途判断し、
+Dolt は将来の候補であって現時点の実装要件ではない。
 
 ## Consequences
 
 旧 client の JSON shape と wire tests を変更せずに、SQLite 内で Task Graph を利用できる。
 HTTP・ACP の既存 read API は従来どおり Ledger を返す。
 外部 client の会話接続は後続段階で実装する。
-移行元 JSON は自動削除しない。SQLite 内の Graph と Ledger は整合性検証の対象であり、
+移行元 JSON は検証中の一時ファイルであり、保持期間中も SQLite のバックアップとして扱わない。
+SQLite 内の Graph と Ledger は整合性検証の対象であり、
 active Dispatch の状態と履歴の不一致を読み込み・commit 時に拒否する。
 
 approval・completion の proof は必須の証拠参照、acceptance、
