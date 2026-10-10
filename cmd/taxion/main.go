@@ -398,7 +398,7 @@ func openMemory() (*memory.Store, error) {
 
 func memoryCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: taxion memory put|get|list|warn|search …")
+		return fmt.Errorf("usage: taxion memory put|get|list|warn|search|export …")
 	}
 	switch args[0] {
 	case "put":
@@ -512,9 +512,33 @@ func memoryCmd(args []string) error {
 			fmt.Printf("%s:%d\t%s\t%s\n", h.Kind, h.ID, h.Scope, h.Title)
 		}
 		return nil
+	case "export":
+		return memoryExportCmd(args[1:])
 	default:
-		return fmt.Errorf("usage: taxion memory put|get|list|warn|search …")
+		return fmt.Errorf("usage: taxion memory put|get|list|warn|search|export …")
 	}
+}
+
+// memoryExportCmd prints the export trial print to stdout only (M7-2).
+// Nothing is sent or shared; --sanitize defaults on (self-protection first).
+func memoryExportCmd(args []string) error {
+	fs := flag.NewFlagSet("memory export", flag.ContinueOnError)
+	scope := fs.String("scope", "", "filter by scope (project|global, empty = all)")
+	sanitize := fs.Bool("sanitize", true, "redact secrets before printing")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	s, err := openMemory()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	entries, err := memory.Export(s, *scope, *sanitize)
+	if err != nil {
+		return err
+	}
+	memory.PrintExport(os.Stdout, entries, *sanitize)
+	return nil
 }
 
 func memoryWarnCmd(args []string) error {
