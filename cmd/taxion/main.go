@@ -20,6 +20,7 @@ import (
 
 	"github.com/hiono/taxion/internal/acp"
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/memory"
 	"github.com/hiono/taxion/internal/server"
 )
 
@@ -39,6 +40,9 @@ Commands:
   acp                 Serve ACP v1 over stdio (spike)
   serve               Serve HTTP API over the ledger ([--addr], [--mode], [--token]/TAXION_TOKEN, [--audit])
   gen-token           Print a random Bearer token for serve (M5 auth)
+  memory put          Store a memory entry (--kind, --title, [--body, --scope])
+  memory get          Fetch one memory entry (--kind and --id required)
+  memory list         List memory entries (--kind required, [--scope] filter)
 
 Identity gate (REP-001): mutating commands require an explicit --repo.
 The target is never inferred from the working directory.
@@ -75,6 +79,8 @@ func main() {
 		err = serveCmd(args[1:])
 	case "gen-token":
 		err = genTokenCmd()
+	case "memory":
+		err = memoryCmd(args[1:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -374,6 +380,110 @@ func genTokenCmd() error {
 	}
 	fmt.Println(hex.EncodeToString(b[:]))
 	return nil
+}
+
+// memStorePath is the SQLite memory file next to the ledger (M6: memory
+// starts on SQLite, never file-first). The workspace dir is created on init.
+func memStorePath() string {
+	return filepath.Join(filepath.Dir(storePath), "memory.db")
+}
+
+func openMemory() (*memory.Store, error) {
+	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
+		return nil, err
+	}
+	return memory.Open(memStorePath())
+}
+
+func memoryCmd(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: taxion memory put|get|list …")
+	}
+	switch args[0] {
+	case "put":
+		fs := flag.NewFlagSet("memory put", flag.ContinueOnError)
+		kind := fs.String("kind", "", "lesson|decision|guardrail|concern (required)")
+		title := fs.String("title", "", "entry title (required)")
+		body := fs.String("body", "", "entry body")
+		scope := fs.String("scope", "project", "project|global")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *kind == "" {
+			return fmt.Errorf("memory put: --kind is required")
+		}
+		if *title == "" {
+			return fmt.Errorf("memory put: --title is required")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		id, err := s.Put(*kind, memory.Entry{Title: *title, Body: *body, Scope: *scope})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("taxion: memory %s %d stored (%s)\n", *kind, id, *scope)
+		return nil
+	case "get":
+		fs := flag.NewFlagSet("memory get", flag.ContinueOnError)
+		kind := fs.String("kind", "", "lesson|decision|guardrail|concern (required)")
+		id := fs.Int64("id", 0, "entry id (required)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *kind == "" {
+			return fmt.Errorf("memory get: --kind is required")
+		}
+		if *id <= 0 {
+			return fmt.Errorf("memory get: --id is required")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		e, err := s.Get(*kind, *id)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("[%s %d] %s (%s, %s)\n%s\n", *kind, e.ID, e.Title, e.Scope, e.Status, e.Body)
+		return nil
+	case "list":
+		fs := flag.NewFlagSet("memory list", flag.ContinueOnError)
+		kind := fs.String("kind", "", "lesson|decision|guardrail|concern (required)")
+		scope := fs.String("scope", "", "filter by scope (project|global)")
+		asJSON := fs.Bool("json", false, "JSON output")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *kind == "" {
+			return fmt.Errorf("memory list: --kind is required")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		entries, err := s.List(*kind, *scope)
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			return printJSON(entries)
+		}
+		if len(entries) == 0 {
+			fmt.Println("taxion: no memory entries")
+			return nil
+		}
+		for _, e := range entries {
+			fmt.Printf("%d\t%s\t%s\t%s\n", e.ID, e.Scope, e.Status, e.Title)
+		}
+		return nil
+	default:
+		return fmt.Errorf("usage: taxion memory put|get|list …")
+	}
 }
 
 func printJSON(v any) error {
