@@ -45,6 +45,8 @@ go run ./cmd/taxion --help
 - `docs/05-ledger-schema.md` — frozen ledger wire format + HTTP surface
 - `docs/06-remote-access.md` — SSH-tunnel-first remote access (SSH + docker),
   loopback-by-default policy. **Start here before exposing any port.**
+- `docs/07-audit-log.md` — append-only audit log (mutations + denials) and
+  retention policy.
 
 ## CLI (Local phase, minimal)
 

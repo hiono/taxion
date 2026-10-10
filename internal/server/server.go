@@ -32,9 +32,24 @@ type Server struct {
 	StorePath string
 	// Token enables Bearer auth when non-empty. Empty keeps pre-M5 behavior.
 	Token string
+	// AuditPath enables the append-only audit log (M5-2, docs/07). Empty
+	// disables it. The log records mutations and auth denials only —
+	// never tokens, bodies, or query strings.
+	AuditPath string
 }
 
-// Handler returns the route table behind the auth gate.
+// CheckAudit fails fast when the audit destination is unwritable. Call it
+// before ListenAndServe: a camera that cannot record must stop startup,
+// not wave traffic through.
+func (s *Server) CheckAudit() error {
+	if s.AuditPath == "" {
+		return nil
+	}
+	return (&auditor{path: s.AuditPath}).probe()
+}
+
+// Handler returns the route table behind the auth gate, with audit
+// recording mutations and denials when AuditPath is set.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/ledger", s.handleLedger)
@@ -45,12 +60,24 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not found")
 	})
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.authorize(w, r) {
 			return
 		}
 		mux.ServeHTTP(w, r)
 	})
+	h = (&auditor{path: s.AuditPath}).withAudit(s, h)
+	return h
+}
+
+// validBearer is the single Bearer comparison behind both the authorize
+// gate and the audit verdict — one comparison, no oracle drift.
+func validBearer(r *http.Request, token string) bool {
+	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
 }
 
 // authorize enforces the Bearer token when one is configured. Missing and
@@ -59,8 +86,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) bool {
 	if s.Token == "" {
 		return true
 	}
-	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) != 1 {
+	if !validBearer(r, s.Token) {
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return false
 	}

@@ -37,7 +37,7 @@ Commands:
   review              Review a coder output (--task, --sha and --repo required)
   resume              Resume a session (--session required)
   acp                 Serve ACP v1 over stdio (spike)
-  serve               Serve HTTP API over the ledger ([--addr], [--token]/TAXION_TOKEN)
+  serve               Serve HTTP API over the ledger ([--addr], [--token]/TAXION_TOKEN, [--audit])
   gen-token           Print a random Bearer token for serve (M5 auth)
 
 Identity gate (REP-001): mutating commands require an explicit --repo.
@@ -290,24 +290,40 @@ func resumeCmd(args []string) error {
 	return nil
 }
 
-// serveCmd runs the HTTP API (M5: optional Bearer auth). Localhost only by
-// default; binding elsewhere requires --token (or TAXION_TOKEN) — serving
-// beyond loopback without auth is refused.
+// serveCmd runs the HTTP API (M5: optional Bearer auth, M5-2 audit log).
+// Localhost only by default; binding elsewhere requires --token (or
+// TAXION_TOKEN) — serving beyond loopback without auth is refused.
+// The audit log defaults next to the ledger; empty --audit disables it.
 func serveCmd(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:3938", "listen address")
 	token := fs.String("token", os.Getenv("TAXION_TOKEN"), "Bearer token (or TAXION_TOKEN env)")
+	defAudit := filepath.Join(filepath.Dir(storePath), "audit.jsonl")
+	audit := fs.String("audit", defAudit, "audit log path (empty disables)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if !isLoopback(*addr) && *token == "" {
 		return fmt.Errorf("serve: binding beyond loopback requires --token (M5 auth)")
 	}
-	srv := &server.Server{StorePath: storePath, Token: *token}
+	if *audit != "" {
+		if err := os.MkdirAll(filepath.Dir(*audit), 0o755); err != nil {
+			return err
+		}
+	}
+	srv := &server.Server{StorePath: storePath, Token: *token, AuditPath: *audit}
+	if err := srv.CheckAudit(); err != nil {
+		return fmt.Errorf("serve: audit log unwritable: %w", err)
+	}
 	if *token == "" {
-		fmt.Printf("taxion: serving API on %s from %s (no auth: localhost only)\n", *addr, storePath)
+		fmt.Printf("taxion: serving API on %s from %s (no auth: localhost only)", *addr, storePath)
 	} else {
-		fmt.Printf("taxion: serving API on %s from %s (auth on)\n", *addr, storePath)
+		fmt.Printf("taxion: serving API on %s from %s (auth on)", *addr, storePath)
+	}
+	if *audit == "" {
+		fmt.Printf(" (audit off)\n")
+	} else {
+		fmt.Printf(" (audit: %s)\n", *audit)
 	}
 	return http.ListenAndServe(*addr, srv.Handler())
 }
