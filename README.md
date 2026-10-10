@@ -68,6 +68,8 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
 - `docs/08-memory-model.md` — current Memory storage, scopes, promotion, search, and export.
 - [docs/09-orchestration-requirements.md](docs/09-orchestration-requirements.md) —
   製品要件、段階別の完了条件、現在の実装との差分。
+- [docs/10-task-graph.md](docs/10-task-graph.md) —
+  版付き Task Graph の登録・遷移、scope out の保持、dispatch 検査と制約。
 - `docs/adr/` — design decisions and rationale; Issues record implementation results.
 
 ## CLI (Local phase, minimal)

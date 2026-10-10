@@ -69,6 +69,24 @@ func result(t *testing.T, m msg) msg {
 	return r
 }
 
+func TestDispatchRejectsUntrackedGraphTask(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ledger.json")
+	srv := New(path)
+	msgs := run(t, srv, req(0, "initialize", msg{"protocolVersion": 1}), req(1, "session/new", msg{"cwd": "owner/repo"}))
+	sid := result(t, msgs[1])["sessionId"].(string)
+	if err := (core.TaskGraph{Version: 1}).Save(core.GraphPath(path)); err != nil {
+		t.Fatal(err)
+	}
+	msgs = run(t, srv, req(2, "taxion/dispatch", msg{"sessionId": sid}))
+	if len(msgs) != 1 || msgs[0]["error"] == nil {
+		t.Fatalf("untracked task dispatched: %v", msgs)
+	}
+	l, err := core.LoadLedger(path)
+	if err != nil || len(l.Dispatches) != 0 {
+		t.Fatal("graph rejection mutated ledger", err)
+	}
+}
+
 func TestFullFlow(t *testing.T) {
 	srv := New(filepath.Join(t.TempDir(), "ledger.json"))
 	msgs := run(t, srv,
@@ -78,6 +96,7 @@ func TestFullFlow(t *testing.T) {
 	if v := result(t, msgs[0])["protocolVersion"]; v != float64(1) {
 		t.Fatalf("expected protocolVersion 1, got %v", v)
 	}
+
 	sid := result(t, msgs[1])["sessionId"].(string)
 
 	msgs = run(t, srv,

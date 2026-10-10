@@ -1,5 +1,11 @@
 # 05 — Ledger wire format (FROZEN since M2)
 
+この文書は既存 Ledger の wire を定義する。
+版付き Task Graph は別ファイルとして導入し、ここにあるキーを変更しない。
+現在の操作は [Task Graph reference](10-task-graph.md)、
+分離と移行の決定は
+[ADR-0022](adr/0022-versioned-task-graph-beside-legacy-ledger.md) を参照する。
+
 The JSON shapes below are the frozen contract between the Go core/CLI/API
 (`internal/core`, `internal/server`) and the TypeScript view (`web/`).
 Frozen on 2026-10-10 at the close of milestone M2 (issues #9–#11).

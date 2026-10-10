@@ -341,6 +341,9 @@ func (s *Server) dispatch(sid string, sess *acpSession, out *bufio.Writer) (stri
 	if !found {
 		return "", fmt.Errorf("unknown task: %s", sess.taskID)
 	}
+	if err := core.CheckGraphDispatch(s.storePath, task, sess.cwd); err != nil {
+		return "", err
+	}
 	if err := memory.CheckDispatch(s.storePath, task, sess.cwd); err != nil {
 		return "", err
 	}

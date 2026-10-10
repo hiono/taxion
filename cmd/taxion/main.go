@@ -29,6 +29,9 @@ Commands:
   init                Initialize a local workspace ledger
   task create         Create a task (--title and --repo required)
   task list           List tasks ([--repo] filter, [--json])
+  task track          Register/update a durable Task Graph contract (--file JSON)
+  task transition     Validate and record a Task Graph transition (--file JSON)
+  task graph          Print the versioned Task Graph and history
   dispatch            Dispatch a task (--task and --repo required)
   dispatch list       List dispatches ([--repo] filter, [--json])
   review              Bind coder-output evidence (--task, --sha and --repo required)
@@ -129,6 +132,8 @@ func taskCmd(args []string) error {
 		return fmt.Errorf("usage: taxion task create|list …")
 	}
 	switch args[0] {
+	case "track", "transition", "graph":
+		return taskGraphCmd(args[0], args[1:])
 	case "create":
 		fs := flag.NewFlagSet("task create", flag.ContinueOnError)
 		title := fs.String("title", "", "task title")
@@ -248,6 +253,9 @@ func dispatchCmd(args []string) error {
 		return fmt.Errorf("dispatch: unknown task %q", *task)
 	}
 	if err := core.GuardActiveDispatch(l.Dispatches); err != nil {
+		return err
+	}
+	if err := core.CheckGraphDispatch(storePath, selected, *repo); err != nil {
 		return err
 	}
 	if err := memory.CheckDispatch(storePath, selected, *repo); err != nil {

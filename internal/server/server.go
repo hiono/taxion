@@ -250,6 +250,14 @@ func (s *Server) createDispatch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
+	if err := core.CheckGraphDispatch(s.StorePath, selected, body.Repo); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, core.ErrGraphRejected) {
+			status = http.StatusConflict
+		}
+		writeErr(w, status, err.Error())
+		return
+	}
 	if err := memory.CheckDispatch(s.StorePath, selected, body.Repo); err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, memory.ErrGuardrailRejected) {

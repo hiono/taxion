@@ -39,6 +39,7 @@ maintenance complete.
 | `docs/07-audit-log.md` | Audit fields, verification limits, and retention procedures | Audit implementation history |
 | `docs/08-memory-model.md` | Current Memory storage, scopes, promotion, search, and export | The original proposed model |
 | `docs/09-orchestration-requirements.md` | Accepted product requirements, staged acceptance, and implementation gaps | Current command reference or completion evidence |
+| `docs/10-task-graph.md` | Current Task Graph commands, persistence, transition checks and limits | Runtime execution claims or Memory design rationale |
 | `docs/adr/` | Decisions, alternatives, reasons, and subsequent clarifications | Duplicated current command references |
 | `web/README.md` | Web console setup and proxy behavior | A second API specification |
 | `SECURITY.md` | Private reporting, controls, and known limits | A promise of complete protection |

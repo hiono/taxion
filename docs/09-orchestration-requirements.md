@@ -99,7 +99,7 @@ credential、非公開の資料や会話を公開 Issue・PR・ログへ転記�
 
 | 対象 | 現在の部品 | この到達条件に向けて未実装の内容 |
 | --- | --- | --- |
-| Task・Dispatch | JSON Ledger と基本の記録・検査 | 完全な Task Graph、状態遷移、実行権限、変更管理、Task lost の検査 |
+| Task・Dispatch | JSON Ledger、版付き Task Graph の登録・遷移・依存検査、明示された concern の ID 未付与の拒否、scope out の保持 | 会話からの Task 抽出、実行権限の確認、Dispatch の変更管理、実行状態との一貫した更新 |
 | Runtime | local・proc adapter | Go Copilot SDK 接続、役割別 Session、会話からの自動 dispatch と結果回収 |
 | Review | SHA を Evidence に記録 | Git の事実との照合、独立 Reviewer の実行、修正・再レビュー |
 | Memory | SQLite、候補生成、明示承認と限定した条件検査、検索・export | 階層の出典・版と Task の連携、指示への反映、更新・失効、実際の project/global 保存・移行 |
@@ -109,6 +109,7 @@ credential、非公開の資料や会話を公開 Issue・PR・ログへ転記�
 
 現在の挙動は [Ledger schema](05-ledger-schema.md)、
 [Runtime contract](03-runtime-contract.md)、
-[Memory reference](08-memory-model.md) を参照する。
+[Memory reference](08-memory-model.md)、
+[Task Graph reference](10-task-graph.md) を参照する。
 SDK の対応や利用条件、cache の保持・命中、仕様書検索の接続可否は未確認であり、
 実装の着手条件または実際の検証結果として追跡する。

@@ -36,6 +36,39 @@ func seed(t *testing.T) (string, core.Ledger) {
 	return path, l
 }
 
+func TestDispatchTaskGraphGate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ledger.json")
+	task := core.Task{ID: "t", Title: "task", Repo: "owner/repo"}
+	if err := (core.Ledger{Tasks: []core.Task{task}}).Save(path); err != nil {
+		t.Fatal(err)
+	}
+	g := core.TaskGraph{Version: 1}
+	gt := core.GraphTask{ID: task.ID, Title: task.Title, Repo: task.Repo, Type: "IMPLEMENTATION",
+		Status: core.Draft, Issue: "Issue #47", CreatedFrom: "request"}
+	if err := g.Track(gt, "human", "track"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Save(core.GraphPath(path)); err != nil {
+		t.Fatal(err)
+	}
+	h := (&Server{StorePath: path}).Handler()
+	rec := post(t, h, "/api/dispatches", `{"task":"t","repo":"owner/repo"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("graph gate: %d %s", rec.Code, rec.Body.String())
+	}
+	l, err := core.LoadLedger(path)
+	if err != nil || len(l.Dispatches) != 0 {
+		t.Fatal("rejected dispatch saved", err)
+	}
+	if err := os.WriteFile(core.GraphPath(path), []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rec = post(t, h, "/api/dispatches", `{"task":"t","repo":"owner/repo"}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("broken graph: %d", rec.Code)
+	}
+}
+
 func get(t *testing.T, h http.Handler, target string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, target, nil)
