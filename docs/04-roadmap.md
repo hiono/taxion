@@ -22,6 +22,8 @@ Phases: Foundation → Core → Local → Adapter → Server → Platform → Fu
 - [x] M5 / `token-auth` (#22) — Bearer gate, gen-token, web forwarding, loopback refusal.
 - [x] M5 / `audit-trail` (#23) — append-only JSONL of mutations + denials, operator rotates.
 - [x] M5 / `public-prep` (#24) — ADR-0015 security model, history scan clean, public release.
+- [x] M5 / `mode-switch` (#25) — F-lite: --mode loopback|remote, ADR-0016, IdP deferred.
+- [x] M6 / `memory-model` (#27) — ADR-0017 layers×ranges×promotion, docs/08.
 - [ ] Future / `browser-terminal` (#21) — someday: in-browser terminal editing via a
   terminal-emulator library (libghostty-class) behind the web counter, over the
   SSH tunnel to the work container. Needs M5 (auth) first; revisit triggers on
