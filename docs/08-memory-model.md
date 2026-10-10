@@ -4,7 +4,7 @@ This document describes the current CLI and store. The proposed
 log / lesson / decision / guardrail model, intended storage locations,
 and promotion rationale are recorded in
 [ADR-0017](adr/0017-memory-layers-ranges-and-promotion-path.md).
-Implementation results are recorded in Issues #28–#34 and #38.
+Implementation results are recorded in Issues #28–#34, #38, and #66.
 
 ## Storage and scopes
 
@@ -23,6 +23,43 @@ Reads (`list`, `search`, and `export`) include both scopes unless filtered
 with `--scope`. There are no separate project and global storage
 directories in the current CLI.
 
+## Sources and lifecycle
+
+Entries retain source references, a version, the replaced entry ID, and
+creation/update times. A source reference identifies a record or external
+evidence; it does not copy or independently verify that evidence. Repeat
+`--source` to record more than one source:
+
+```sh
+taxion memory put --kind decision --title "Use SQLite" \
+  --source task:T-1 --source dispatch:D-1
+taxion memory warn --body "Verify the target before dispatch" --source dispatch:D-1
+```
+
+Each warning occurrence is recorded. A promoted candidate refers to those
+occurrences and their supplied source IDs. Resolve a `warning:<id>` reference
+with `memory source --warning-id ID`. Older databases kept only an aggregate
+warning count; migration records it as `legacy:aggregate-count-only` rather
+than fabricating individual evidence.
+
+`memory revise --kind KIND --id ID --title TITLE --actor ACTOR --reason REASON`
+creates a new proposed version and marks the previous version superseded.
+Omitting `--source` preserves the previous source list. `memory revoke` takes
+the same kind, ID, actor, and reason and disables an entry without deleting
+its content. Revising or revoking an approved candidate lesson also revokes
+the guardrail created from it. The new lesson must be approved again before
+its guardrail is enforced. `memory history --kind KIND --id ID` prints
+lifecycle events. Search omits superseded and revoked entries; `get` and
+`list` retain them for audit.
+
+The Task Graph owns the current list of Memory references. Set `memoryRefs`
+to canonical IDs such as `lesson:12` or `decision:4`. CLI, HTTP, and ACP
+dispatch reject missing, revoked, superseded, or non-approved guardrail
+references. The Task Graph stores only IDs and does not duplicate Memory text.
+Revision links make contradictions across versions of one entry explicit;
+Taxion does not infer semantic conflicts between unrelated entries. Such
+conflicts need an explicit decision or revision before they can be enforced.
+
 ## Warning promotion
 
 `memory warn` counts identical `(body, scope)` pairs. At the configured
@@ -31,7 +68,8 @@ candidate. The default is three. Set a positive threshold for the selected
 workspace with `memory configure --promote-after N`. It persists in
 `memory.db` and affects subsequent warnings, including existing counters.
 Changing it never removes an existing candidate. The counter, candidate,
-and their link commit in one transaction.
+and their link commit in one transaction. The Memory database also records
+each new occurrence with its optional source reference.
 
 ## Approval and dispatch checks
 
@@ -67,10 +105,11 @@ does not silently disable checks.
 
 Project/global identify entries within the selected workspace DB, not
 separate repo databases. Approved checks apply to every dispatch using that
-DB. The initial implementation has no policy-edit/revoke command; review
-the value and scope before approving. Enforcement checks a snapshot before
-the JSON ledger save, not an atomic Memory-plus-ledger transaction. It does
-not constrain shell commands, worker output, or future task edits.
+DB. Revoking a guardrail or its approved source lesson disables the check;
+revising a source lesson also revokes its prior check until a human approves
+the new version. Enforcement reads Memory separately from the SQLite
+workspace transaction, so changes across the two databases are not atomic.
+It does not constrain shell commands, worker output, or future Task edits.
 
 ## Search
 
@@ -78,7 +117,8 @@ not constrain shell commands, worker output, or future task edits.
 titles and bodies. Queries of three or more characters use FTS5 trigram
 with BM25 ranking. Shorter queries and FTS queries with no matches fall
 back to LIKE. The database index is updated by SQLite insert/delete
-triggers; callers do not update it separately.
+triggers; callers do not update it separately. Superseded and revoked entries
+remain stored for audit but do not appear in search results.
 
 ## Export
 
@@ -87,9 +127,9 @@ Sanitizing defaults on. It does not transmit data, and there are no
 `--profile` or `--dry-run` flags.
 
 The default sanitizer masks matching private-key blocks, token patterns,
-email addresses, IPv4-shaped text, and home-directory paths in titles and
-bodies. Rules are shared across both scopes. Unmatched text and other
-entry fields pass through unchanged; sanitizing is not a guarantee that
+email addresses, IPv4-shaped text, and home-directory paths in titles,
+bodies, and source references. Rules are shared across both scopes. Unmatched
+text and other entry fields pass through unchanged; sanitizing is not a guarantee that
 all sensitive data is removed. Check the preview before sharing it.
 `--sanitize=false` displays the original text with an UNSANITIZED header.
 Export contains entry text, not the structured predicates or threshold;

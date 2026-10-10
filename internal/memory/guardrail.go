@@ -2,6 +2,7 @@ package memory
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -112,26 +113,31 @@ func (s *Store) Approve(lessonID int64, kind, value string) (int64, error) {
 	if err != sql.ErrNoRows {
 		return 0, err
 	}
-	var title, body, scope, status string
-	err = tx.QueryRow(
-		`SELECT title,body,scope,status FROM lessons
+	candidate, err := scanEntry(tx.QueryRow(
+		`SELECT `+entrySelect+` FROM lessons
 		 WHERE id=? AND EXISTS(SELECT 1 FROM warnings WHERE lesson_id=lessons.id)`,
-		lessonID).Scan(&title, &body, &scope, &status)
+		lessonID))
 	if err == sql.ErrNoRows {
 		return 0, fmt.Errorf("%w: warning candidate %d", ErrNotFound, lessonID)
 	}
 	if err != nil {
 		return 0, err
 	}
-	if status != "proposed" {
+	if candidate.Status != "proposed" {
 		return 0, fmt.Errorf("taxion: candidate %d is not proposed", lessonID)
 	}
-	if err := checkScope(scope); err != nil {
+	if err := checkScope(candidate.Scope); err != nil {
 		return 0, err
 	}
+	refs, err := json.Marshal(candidate.SourceRefs)
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now().UTC()
 	res, err := tx.Exec(
-		`INSERT INTO guardrails(title,body,scope,status,created_at) VALUES(?,?,?,'approved',?)`,
-		title, body, scope, ts(time.Now()))
+		`INSERT INTO guardrails(title,body,scope,status,created_at,source_refs,version,supersedes_id,updated_at)
+		 VALUES(?,?,?,'approved',?,?,1,0,?)`,
+		candidate.Title, candidate.Body, candidate.Scope, ts(now), string(refs), ts(now))
 	if err != nil {
 		return 0, err
 	}
@@ -144,7 +150,15 @@ func (s *Store) Approve(lessonID int64, kind, value string) (int64, error) {
 		id, lessonID, kind, value); err != nil {
 		return 0, err
 	}
-	if _, err := tx.Exec(`UPDATE lessons SET status='approved' WHERE id=?`, lessonID); err != nil {
+	if _, err := tx.Exec(`UPDATE lessons SET status='approved',updated_at=? WHERE id=?`, ts(now), lessonID); err != nil {
+		return 0, err
+	}
+	if err := recordEntryEvent(tx, KindLesson, lessonID, "approved", "human",
+		fmt.Sprintf("guardrail %d approved with %s=%s", id, kind, value), now); err != nil {
+		return 0, err
+	}
+	if err := recordEntryEvent(tx, KindGuardrail, id, "approved", "human",
+		fmt.Sprintf("candidate lesson %d approved with %s=%s", lessonID, kind, value), now); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -153,13 +167,27 @@ func (s *Store) Approve(lessonID int64, kind, value string) (int64, error) {
 	return id, nil
 }
 
+// CheckReferences rejects missing, revoked, or superseded records before
+// dispatch. Task Graph remains authoritative for the list of references.
+func (s *Store) CheckReferences(refs []string) error {
+	for _, ref := range refs {
+		if _, err := s.ResolveReference(ref); err != nil {
+			return fmt.Errorf("taxion: resolve Task Memory reference %q: %w", ref, err)
+		}
+	}
+	return nil
+}
+
 // CheckDispatch evaluates all approved checks in both workspace scopes.
 // Absence preserves pre-Memory workspaces; unreadable or malformed policy
 // fails explicitly rather than silently disabling enforcement.
-func CheckDispatch(ledgerPath string, task core.Task, repo string) error {
+func CheckDispatch(ledgerPath string, task core.Task, repo string, refs ...string) error {
 	path := PathForLedger(ledgerPath)
 	if _, err := os.Lstat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if len(refs) != 0 {
+				return fmt.Errorf("taxion: Task has Memory references but workspace Memory database is missing")
+			}
 			return nil
 		}
 		return fmt.Errorf("taxion: inspect Memory policy: %w", err)
@@ -176,6 +204,9 @@ func CheckDispatch(ledgerPath string, task core.Task, repo string) error {
 		return fmt.Errorf("taxion: open Memory policy: %w", err)
 	}
 	defer s.Close()
+	if err := s.CheckReferences(refs); err != nil {
+		return err
+	}
 	checks, err := s.ApprovedChecks()
 	if err != nil {
 		return err

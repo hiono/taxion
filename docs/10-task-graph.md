@@ -66,6 +66,10 @@ decision は ID、source、text を持ち、以前の decision の削除・上�
 人間の選択が必要な場合は `humanDecision` に質問、選択肢、推奨選択肢と理由を記録し、
 Task を `HUMAN_DECISION_REQUIRED` にする。選択した option ID と対応する decision record を
 追記するまで READY に戻せず、実行もできない。
+`memoryRefs` は `lesson:ID`、`decision:ID`、`guardrail:ID`、`concern:ID` の形式で
+Memory 記録を参照する。Task Graph は参照 ID だけを保持し、Memory 本文を複製しない。
+dispatch 時に参照先が存在し、失効・置換されていないことを確認する。
+guardrail の参照先は承認済みでなければならない。Memory DB がないのに参照が設定されている場合も拒否する。
 issue は URL、`Issue #番号`、`INHERITED: Issue #番号`、
 `PENDING: 登録TaskID`、または理由付きの `NOT_REQUIRED:` を使う。
 PENDING は登録 Task の COMPLETED を依存に持ち、実行前に実際の参照へ更新する。

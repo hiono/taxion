@@ -336,7 +336,11 @@ func (s *Server) createDispatch(w http.ResponseWriter, r *http.Request) {
 			if !found {
 				return apiError{status: http.StatusNotFound, message: fmt.Sprintf("unknown task %q", body.Task)}
 			}
-			if err := memory.CheckDispatch(s.StorePath, selected, body.Repo); err != nil {
+			var refs []string
+			if state.HasGraph {
+				refs, _ = state.Graph.TaskMemoryRefs(body.Task)
+			}
+			if err := memory.CheckDispatch(s.StorePath, selected, body.Repo, refs...); err != nil {
 				return apiError{status: http.StatusConflict, message: err.Error()}
 			}
 			if selected.Repo != body.Repo {

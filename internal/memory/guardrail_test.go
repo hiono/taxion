@@ -3,8 +3,10 @@ package memory
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -30,15 +32,22 @@ func TestExistingCandidateMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldWarnings := strings.ReplaceAll(warningsSchema,
-		"CREATE UNIQUE INDEX IF NOT EXISTS idx_warnings_unique ON warnings(body, scope);", "")
-	if _, err := db.Exec(schema + oldWarnings); err != nil {
+	if _, err := db.Exec(`CREATE TABLE lessons (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,
+		body TEXT NOT NULL DEFAULT '', scope TEXT NOT NULL DEFAULT 'project',
+		status TEXT NOT NULL DEFAULT 'proposed', created_at TEXT NOT NULL);
+		CREATE TABLE warnings (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL,
+		scope TEXT NOT NULL DEFAULT 'project', count INTEGER NOT NULL DEFAULT 1,
+		lesson_id INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+		CREATE UNIQUE INDEX idx_warnings_unique ON warnings(body,scope);`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO lessons(id,title,body,scope,status,created_at)
-		VALUES(7,'existing candidate','old warning','project','proposed','');
+		VALUES(7,'existing candidate','old warning','project','proposed','2026-01-01T00:00:00Z');
 		INSERT INTO warnings(body,scope,count,lesson_id,created_at,updated_at)
-		VALUES('old warning','project',3,7,'','');`); err != nil {
+		VALUES('old warning','project',3,7,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -49,6 +58,18 @@ func TestExistingCandidateMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	candidate, err := s.Get(KindLesson, 7)
+	if err != nil || len(candidate.SourceRefs) != 1 {
+		t.Fatalf("legacy candidate source was not migrated: %+v, %v", candidate, err)
+	}
+	sourceID, err := strconv.ParseInt(strings.TrimPrefix(candidate.SourceRefs[0], "warning:"), 10, 64)
+	if err != nil {
+		t.Fatalf("invalid migrated source reference: %+v", candidate.SourceRefs)
+	}
+	source, err := s.WarningOccurrence(sourceID)
+	if err != nil || source.OccurrenceCount != 3 || source.SourceRef != "legacy:aggregate-count-only" {
+		t.Fatalf("legacy aggregate source was not preserved honestly: %+v, %v", source, err)
+	}
 	if n, id, err := s.Warn("old warning", ScopeProject); err != nil || n != 4 || id != 7 {
 		t.Fatalf("migration lost existing count/candidate: %d %d %v", n, id, err)
 	}
@@ -288,6 +309,7 @@ func TestDispatchPolicyFailuresAndCompatibility(t *testing.T) {
 	if err := CheckDispatch(ledger, core.Task{}, "repo"); err != nil {
 		t.Fatalf("workspace without Memory must still work: %v", err)
 	}
+
 	if _, err := os.Stat(PathForLedger(ledger)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("dispatch must not create absent Memory")
 	}
@@ -310,5 +332,40 @@ func TestDispatchPolicyFailuresAndCompatibility(t *testing.T) {
 	}
 	if err := CheckDispatch(ledger, core.Task{}, "repo"); err == nil || !strings.Contains(err.Error(), "no structured check") {
 		t.Fatalf("malformed approved policy must not be skipped: %v", err)
+	}
+}
+
+func TestDispatchRejectsMissingOrStaleTaskMemoryReferences(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "ledger.json")
+	if err := CheckDispatch(ledger, core.Task{}, "repo", "decision:1"); err == nil {
+		t.Fatal("reference without a Memory database was accepted")
+	}
+	s, err := Open(PathForLedger(ledger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.Put(KindDecision, Entry{Title: "current decision"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ref := fmt.Sprintf("decision:%d", id)
+	if err := CheckDispatch(ledger, core.Task{}, "repo", ref); err != nil {
+		t.Fatalf("valid Task Memory reference rejected: %v", err)
+	}
+	s, err = Open(PathForLedger(ledger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Revoke(KindDecision, id, "human", "decision invalidated"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckDispatch(ledger, core.Task{}, "repo", ref); err == nil {
+		t.Fatal("revoked Task Memory reference was accepted")
 	}
 }

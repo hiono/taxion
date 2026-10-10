@@ -56,9 +56,10 @@ func TestRedactCleanPassthrough(t *testing.T) {
 func TestRedactEntry(t *testing.T) {
 	e := RedactEntry(Entry{
 		ID: 3, Title: "contact hiono@example.com", Body: "key at /home/onohr/.ssh/id",
-		Scope: ScopeGlobal, Status: "proposed",
+		Scope: ScopeGlobal, Status: "proposed", SourceRefs: []string{"owner hiono@example.com"},
 	})
-	if strings.Contains(e.Title, "hiono@example.com") || strings.Contains(e.Body, "/home/onohr/.ssh/id") {
+	if strings.Contains(e.Title, "hiono@example.com") || strings.Contains(e.Body, "/home/onohr/.ssh/id") ||
+		strings.Contains(e.SourceRefs[0], "hiono@example.com") {
 		t.Fatalf("entry secrets leaked: %+v", e)
 	}
 	if e.ID != 3 || e.Scope != ScopeGlobal || e.Status != "proposed" {

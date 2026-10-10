@@ -122,10 +122,28 @@ func (s *Store) Search(query, scope, kind string) ([]Hit, error) {
 			return nil, err
 		}
 		if len(hits) > 0 {
-			return hits, nil
+			return s.currentHits(hits)
 		}
 	}
-	return s.searchLIKE(query, scope, kinds)
+	hits, err := s.searchLIKE(query, scope, kinds)
+	if err != nil {
+		return nil, err
+	}
+	return s.currentHits(hits)
+}
+
+func (s *Store) currentHits(hits []Hit) ([]Hit, error) {
+	out := make([]Hit, 0, len(hits))
+	for _, hit := range hits {
+		entry, err := s.Get(hit.Kind, hit.ID)
+		if err != nil {
+			return nil, err
+		}
+		if entry.Status != "revoked" && entry.Status != "superseded" {
+			out = append(out, hit)
+		}
+	}
+	return out, nil
 }
 
 func ftsFilter(kinds []string, scope string) (string, []any) {

@@ -33,11 +33,14 @@ func Redact(rules []Rule, text string) string {
 	return out
 }
 
-// RedactEntry cleans the free-text fields of an entry (Title, Body) with
+// RedactEntry cleans the free-text fields of an entry (Title, Body, SourceRefs) with
 // the DefaultRules. Identity fields (ID, Scope, Status, CreatedAt) pass
 // through untouched. Custom rule sets go through Redact directly.
 func RedactEntry(e Entry) Entry {
 	e.Title = Redact(DefaultRules, e.Title)
 	e.Body = Redact(DefaultRules, e.Body)
+	for i := range e.SourceRefs {
+		e.SourceRefs[i] = Redact(DefaultRules, e.SourceRefs[i])
+	}
 	return e
 }

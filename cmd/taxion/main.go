@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/hiono/taxion/internal/acp"
@@ -43,9 +45,13 @@ Commands:
   serve               Serve HTTP API over the ledger ([--addr], [--mode], [--token]/TAXION_TOKEN, [--audit])
   gen-token           Print a random Bearer token for serve (M5 auth)
   audit verify        Verify the audit log hash chain ([--audit])
-  memory put          Store a memory entry (--kind, --title, [--body, --scope])
+  memory put          Store a memory entry (--kind, --title, [--body, --scope, --source])
   memory get          Fetch one memory entry (--kind and --id required)
   memory list         List memory entries (--kind required, [--scope] filter)
+  memory revise       Append a new version (--kind, --id, --title, --actor, --reason)
+  memory revoke       Disable an entry without deleting its history
+  memory history      Show entry lifecycle events (--kind and --id required)
+  memory source       Resolve a warning source (--warning-id required)
   memory warn         Record a repeated warning (--body required, [--scope])
   memory configure    Set the warning threshold (--promote-after required)
   memory approve      Approve a candidate (--id, --check, --value required; MEM-001)
@@ -279,15 +285,22 @@ func dispatchCmd(args []string) error {
 	if err := core.CheckRepo(*repo); err != nil {
 		return err
 	}
-	ledger, err := loadStore()
+	preflightDB, preflightState, err := loadWorkspace()
 	if err != nil {
 		return err
 	}
-	preflightTask, found := findTask(ledger, *task)
+	if err := preflightDB.Close(); err != nil {
+		return err
+	}
+	preflightTask, found := findTask(preflightState.Ledger, *task)
 	if !found {
 		return fmt.Errorf("dispatch: unknown task %q", *task)
 	}
-	if err := memory.CheckDispatch(storePath, preflightTask, *repo); err != nil {
+	var preflightRefs []string
+	if preflightState.HasGraph {
+		preflightRefs, _ = preflightState.Graph.TaskMemoryRefs(*task)
+	}
+	if err := memory.CheckDispatch(storePath, preflightTask, *repo, preflightRefs...); err != nil {
 		return err
 	}
 	if preflightTask.Repo != *repo {
@@ -314,7 +327,17 @@ func dispatchCmd(args []string) error {
 		if selected != preflightTask {
 			return fmt.Errorf("dispatch: task changed during policy validation; retry")
 		}
-		if err := memory.CheckDispatch(storePath, selected, *repo); err != nil {
+		if state.HasGraph != preflightState.HasGraph {
+			return fmt.Errorf("dispatch: Task Graph changed during policy validation; retry")
+		}
+		var refs []string
+		if state.HasGraph {
+			refs, _ = state.Graph.TaskMemoryRefs(*task)
+		}
+		if !slices.Equal(refs, preflightRefs) {
+			return fmt.Errorf("dispatch: Task Memory references changed during policy validation; retry")
+		}
+		if err := memory.CheckDispatch(storePath, selected, *repo, refs...); err != nil {
 			return err
 		}
 		if selected.Repo != *repo {
@@ -535,9 +558,17 @@ func openMemory() (*memory.Store, error) {
 	return memory.Open(memStorePath())
 }
 
+type stringListFlag []string
+
+func (f *stringListFlag) String() string { return fmt.Sprint([]string(*f)) }
+func (f *stringListFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
 func memoryCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: taxion memory put|get|list|warn|configure|approve|checks|search|export …")
+		return fmt.Errorf("usage: taxion memory put|get|list|revise|revoke|history|source|warn|configure|approve|checks|search|export …")
 	}
 	switch args[0] {
 	case "configure":
@@ -618,6 +649,8 @@ func memoryCmd(args []string) error {
 		title := fs.String("title", "", "entry title (required)")
 		body := fs.String("body", "", "entry body")
 		scope := fs.String("scope", "project", "project|global")
+		var sources stringListFlag
+		fs.Var(&sources, "source", "source reference (repeatable; e.g. task:TASK-ID or dispatch:ID)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -632,7 +665,7 @@ func memoryCmd(args []string) error {
 			return err
 		}
 		defer s.Close()
-		id, err := s.Put(*kind, memory.Entry{Title: *title, Body: *body, Scope: *scope})
+		id, err := s.Put(*kind, memory.Entry{Title: *title, Body: *body, Scope: *scope, SourceRefs: sources})
 		if err != nil {
 			return err
 		}
@@ -641,6 +674,97 @@ func memoryCmd(args []string) error {
 		}
 		fmt.Printf("taxion: memory %s %d stored (%s)\n", *kind, id, *scope)
 		return nil
+	case "revise":
+		fs := flag.NewFlagSet("memory revise", flag.ContinueOnError)
+		kind := fs.String("kind", "", "lesson|decision|guardrail|concern (required)")
+		id := fs.Int64("id", 0, "current entry ID (required)")
+		title := fs.String("title", "", "new entry title (required)")
+		body := fs.String("body", "", "new entry body")
+		scope := fs.String("scope", "", "project|global (default: preserve current scope)")
+		actor := fs.String("actor", "", "person or process recording the change (required)")
+		reason := fs.String("reason", "", "why the entry is changing (required)")
+		var sources stringListFlag
+		fs.Var(&sources, "source", "replacement source reference (repeatable; omitted preserves existing references)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *kind == "" || *id < 1 || *title == "" || *actor == "" || *reason == "" || fs.NArg() != 0 {
+			return fmt.Errorf("memory revise: --kind, positive --id, --title, --actor, and --reason are required")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		newID, err := s.Revise(*kind, *id, memory.Entry{
+			Title: *title, Body: *body, Scope: *scope, SourceRefs: sources,
+		}, *actor, *reason)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("taxion: memory %s %d revised as %d\n", *kind, *id, newID)
+		return nil
+	case "revoke":
+		fs := flag.NewFlagSet("memory revoke", flag.ContinueOnError)
+		kind := fs.String("kind", "", "lesson|decision|guardrail|concern (required)")
+		id := fs.Int64("id", 0, "entry ID (required)")
+		actor := fs.String("actor", "", "person or process recording the change (required)")
+		reason := fs.String("reason", "", "why the entry is being revoked (required)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *kind == "" || *id < 1 || *actor == "" || *reason == "" || fs.NArg() != 0 {
+			return fmt.Errorf("memory revoke: --kind, positive --id, --actor, and --reason are required")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		if err := s.Revoke(*kind, *id, *actor, *reason); err != nil {
+			return err
+		}
+		fmt.Printf("taxion: memory %s %d revoked\n", *kind, *id)
+		return nil
+	case "history":
+		fs := flag.NewFlagSet("memory history", flag.ContinueOnError)
+		kind := fs.String("kind", "", "lesson|decision|guardrail|concern (required)")
+		id := fs.Int64("id", 0, "entry ID (required)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *kind == "" || *id < 1 || fs.NArg() != 0 {
+			return fmt.Errorf("memory history: --kind and positive --id are required")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		events, err := s.Events(*kind, *id)
+		if err != nil {
+			return err
+		}
+		return printJSON(events)
+	case "source":
+		fs := flag.NewFlagSet("memory source", flag.ContinueOnError)
+		id := fs.Int64("warning-id", 0, "warning occurrence ID from a warning:<id> source reference")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *id < 1 || fs.NArg() != 0 {
+			return fmt.Errorf("memory source: positive --warning-id is required")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		source, err := s.WarningOccurrence(*id)
+		if err != nil {
+			return err
+		}
+		return printJSON(source)
 	case "get":
 		fs := flag.NewFlagSet("memory get", flag.ContinueOnError)
 		kind := fs.String("kind", "", "lesson|decision|guardrail|concern (required)")
@@ -663,7 +787,8 @@ func memoryCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("[%s %d] %s (%s, %s)\n%s\n", *kind, e.ID, e.Title, e.Scope, e.Status, e.Body)
+		fmt.Printf("[%s %d v%d] %s (%s, %s)\n%s\nsources: %s\n",
+			*kind, e.ID, e.Version, e.Title, e.Scope, e.Status, e.Body, strings.Join(e.SourceRefs, ", "))
 		return nil
 	case "list":
 		fs := flag.NewFlagSet("memory list", flag.ContinueOnError)
@@ -693,7 +818,7 @@ func memoryCmd(args []string) error {
 			return nil
 		}
 		for _, e := range entries {
-			fmt.Printf("%d\t%s\t%s\t%s\n", e.ID, e.Scope, e.Status, e.Title)
+			fmt.Printf("%d\tv%d\t%s\t%s\t%s\n", e.ID, e.Version, e.Scope, e.Status, e.Title)
 		}
 		return nil
 	case "warn":
@@ -729,7 +854,7 @@ func memoryCmd(args []string) error {
 	case "export":
 		return memoryExportCmd(args[1:])
 	default:
-		return fmt.Errorf("usage: taxion memory put|get|list|warn|configure|approve|checks|search|export …")
+		return fmt.Errorf("usage: taxion memory put|get|list|revise|revoke|history|source|warn|configure|approve|checks|search|export …")
 	}
 }
 
@@ -758,6 +883,7 @@ func memoryWarnCmd(args []string) error {
 	fs := flag.NewFlagSet("memory warn", flag.ContinueOnError)
 	body := fs.String("body", "", "warning text (required)")
 	scope := fs.String("scope", "project", "project|global")
+	source := fs.String("source", "", "source reference for this occurrence")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -769,7 +895,7 @@ func memoryWarnCmd(args []string) error {
 		return err
 	}
 	defer s.Close()
-	n, lid, err := s.Warn(*body, *scope)
+	n, lid, err := s.WarnWithSource(*body, *scope, *source)
 	if err != nil {
 		return err
 	}

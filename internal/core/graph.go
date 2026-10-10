@@ -269,6 +269,12 @@ func (g TaskGraph) task(id string) (GraphTask, bool) {
 	return GraphTask{}, false
 }
 
+// TaskMemoryRefs returns the Task's immutable-by-value Memory reference list.
+func (g TaskGraph) TaskMemoryRefs(id string) ([]string, bool) {
+	task, ok := g.task(id)
+	return slices.Clone(task.MemoryRefs), ok
+}
+
 func (g TaskGraph) GraphTask(id string) (GraphTask, bool) { return g.task(id) }
 
 func (g TaskGraph) dispatch(id string) (GraphDispatch, bool) {

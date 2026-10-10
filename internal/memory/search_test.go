@@ -84,6 +84,7 @@ func TestSearchGuards(t *testing.T) {
 	if _, err := s.Search("", "", ""); err == nil {
 		t.Fatal("empty query must fail")
 	}
+
 	if _, err := s.Search("  ", "", ""); err == nil {
 		t.Fatal("blank query must fail")
 	}
@@ -98,5 +99,33 @@ func TestSearchGuards(t *testing.T) {
 	}
 	if _, err := s.Search(`"quoted" (paren) *star*`, "", ""); err != nil {
 		t.Fatalf("special chars: %v", err)
+	}
+}
+
+func TestSearchOmitsSupersededAndRevokedEntries(t *testing.T) {
+	s := seedSearch(t)
+	id, err := s.Put(KindLesson, Entry{Title: "old deployment convention", Body: "obsolete rule"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Revise(KindLesson, id, Entry{Title: "new deployment convention", Body: "current rule"},
+		"human", "deployment policy changed"); err != nil {
+		t.Fatal(err)
+	}
+	oldHits, err := s.Search("obsolete rule", "", KindLesson)
+	if err != nil || len(oldHits) != 0 {
+		t.Fatalf("superseded entry remains searchable: %+v, %v", oldHits, err)
+	}
+	currentHits, err := s.Search("current rule", "", KindLesson)
+	if err != nil || len(currentHits) != 1 || currentHits[0].Title != "new deployment convention" {
+		t.Fatalf("current revision missing from search: %+v, %v", currentHits, err)
+	}
+	newID := currentHits[0].ID
+	if err := s.Revoke(KindLesson, newID, "human", "no longer applicable"); err != nil {
+		t.Fatal(err)
+	}
+	revokedHits, err := s.Search("current rule", "", KindLesson)
+	if err != nil || len(revokedHits) != 0 {
+		t.Fatalf("revoked entry remains searchable: %+v, %v", revokedHits, err)
 	}
 }

@@ -52,6 +52,8 @@ func PrintExport(w io.Writer, entries []ExportedEntry, sanitize bool) {
 		return
 	}
 	for _, ee := range entries {
-		fmt.Fprintf(w, "[%s %d] %s (%s, %s)\n%s\n", ee.Kind, ee.Entry.ID, ee.Entry.Title, ee.Entry.Scope, ee.Entry.Status, ee.Entry.Body)
+		fmt.Fprintf(w, "[%s %d v%d] %s (%s, %s)\n%s\nsources: %v\n",
+			ee.Kind, ee.Entry.ID, ee.Entry.Version, ee.Entry.Title, ee.Entry.Scope, ee.Entry.Status,
+			ee.Entry.Body, ee.Entry.SourceRefs)
 	}
 }

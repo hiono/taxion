@@ -75,3 +75,11 @@ and dispatch enforcement. The accepted predicate boundary is recorded in
 [ADR-0019](0019-structured-memory-approval-and-dispatch-checks.md);
 current commands and limitations remain in the Memory reference. The
 initial three-occurrence implementation described above is historical.
+
+M10 Issue #66 adds source references, versioned revisions, revocation, and
+lifecycle events to the SQLite Memory store. Task Graph `memoryRefs` point to
+Memory IDs; dispatch rejects missing, superseded, revoked, and unapproved
+guardrail references. Project and global remain scopes in the same
+workspace-adjacent `memory.db`, not separate storage locations. Older warning
+counters did not retain individual evidence, so migration labels their
+aggregate source instead of reconstructing occurrence history.
