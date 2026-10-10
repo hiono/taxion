@@ -30,10 +30,10 @@ implementation results; the reference documents linked from
 - [x] M5 / `public-prep` (#24) — ADR-0015 security model, history scan clean, public release.
 - [x] M5 / `mode-switch` (#25) — F-lite: --mode loopback|remote, ADR-0016, IdP deferred.
 - [x] M6 / `memory-model` (#27) — ADR-0017 layers×ranges×promotion, docs/08.
-- [ ] Future / `browser-terminal` (#21) — someday: in-browser terminal editing via a
-  terminal-emulator library (libghostty-class) connected to the web console, over the
-  SSH tunnel to the work container. Needs M5 (auth) first; revisit triggers on
-  ADR-0013/0014 when touched.
+- [x] Future / `browser-terminal-eval` (#21) — approach and shell-access threat
+  model recorded in ADR-0018. Implementation remains deferred; use SSH/editor
+  access in docs/06 Pattern D. A terminal implementation needs its own Issue
+  and browser-user authentication, not only the upstream M5 token.
 - [ ] Adapter / `copilot-sdk-eval` — evaluate session start/resume fidelity,
   event mapping cost, authentication requirements, and version pinning
   before adding an SDK adapter. There is no vendored
