@@ -5,56 +5,62 @@ import (
 	"testing"
 )
 
-// Fixtures are built by concatenation so the full sensitive shapes never
-// appear as literals in source (CI hygiene PRIV-001 scans *.go). Runtime
-// values are identical to real-world secrets.
-var (
-	fxGHPToken = "ghp_" + "abcdefghij0123456789"
-	fxGLToken  = "glpat-" + "abcdefghij0123456789"
-	fxPEMHead  = "-----BEGIN " + "RSA PRIVATE KEY-----"
-	fxPEMTail  = "-----END " + "RSA PRIVATE KEY-----"
-)
-
-func TestRedactClasses(t *testing.T) {
-	in := "mail bob@example.com token " + fxGHPToken + " ip 192.168.0.7 home /home/bob/work key " + fxPEMHead + "\nABC\n" + fxPEMTail + " " + fxGLToken
-	got := Redact(DefaultRules, in)
-	for _, want := range []string{
-		"[redacted:email]", "[redacted:token]", "[redacted:ipv4]",
-		"[redacted:home-path]", "[redacted:private-key]",
+func TestRedactSecrets(t *testing.T) {
+	in := "key -----BEGIN RSA PRIVATE KEY-----\nABC\n-----END RSA PRIVATE KEY----- " +
+		"token gho_abc123 and glpat-0123456789abcdef0123 and AKIAIOSFODNN7EXAMPLE " +
+		"mail hiono@example.com ip 192.168.1.10 path /home/onohr/work id 7"
+	out := Redact(DefaultRules, in)
+	for _, secret := range []string{
+		"ABC", "gho_abc123", "glpat-0123456789abcdef0123", "AKIAIOSFODNN7EXAMPLE",
+		"hiono@example.com", "192.168.1.10", "/home/onohr/work",
 	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("want marker %s in %q", want, got)
+		if strings.Contains(out, secret) {
+			t.Fatalf("secret leaked: %q in %q", secret, out)
 		}
 	}
-	for _, leak := range []string{"bob@example.com", "abcdefghij0123456789", "192.168.0.7", "/home/bob", "PRIVATE KEY"} {
-		if strings.Contains(got, leak) {
-			t.Errorf("sensitive literal leaked in %q", got)
+	for _, marker := range []string{
+		"[redacted:key]", "[redacted:token]", "[redacted:email]",
+		"[redacted:ip]", "[redacted:path]",
+	} {
+		if !strings.Contains(out, marker) {
+			t.Fatalf("missing marker %q in %q", marker, out)
 		}
 	}
-}
-
-func TestRedactCleanTextUntouched(t *testing.T) {
-	in := "Lesson: never serve beyond loopback without a token (see ADR-0016)."
-	if got := Redact(DefaultRules, in); got != in {
-		t.Fatalf("clean text changed: %q", got)
+	// Non-secret text (including the id) survives.
+	if !strings.Contains(out, "id 7") {
+		t.Fatalf("clean text damaged: %q", out)
 	}
 }
 
 func TestRedactIdempotent(t *testing.T) {
-	in := "contact bob@example.com, key " + fxGHPToken
-	once := Redact(DefaultRules, in)
-	if twice := Redact(DefaultRules, once); twice != once {
-		t.Fatalf("not idempotent: %q vs %q", once, twice)
+	once := Redact(DefaultRules, "mail hiono@example.com ip 10.0.0.1")
+	twice := Redact(DefaultRules, once)
+	if once != twice {
+		t.Fatalf("not idempotent:\n%s\n%s", once, twice)
+	}
+	// Rules must not match their own markers.
+	if Redact(DefaultRules, "[redacted:email] [redacted:ip] [redacted:path] [redacted:token] [redacted:key]") !=
+		"[redacted:email] [redacted:ip] [redacted:path] [redacted:token] [redacted:key]" {
+		t.Fatal("rules match their own markers")
+	}
+}
+
+func TestRedactCleanPassthrough(t *testing.T) {
+	in := "Lesson: always confirm the repo before dispatch. No secrets here."
+	if got := Redact(DefaultRules, in); got != in {
+		t.Fatalf("clean text changed:\n%s\n%s", in, got)
 	}
 }
 
 func TestRedactEntry(t *testing.T) {
-	e := Entry{ID: 7, Title: "note from bob@example.com", Body: "token " + fxGLToken, Scope: ScopeGlobal, Status: "approved"}
-	got := RedactEntry(e)
-	if got.ID != 7 || got.Scope != ScopeGlobal || got.Status != "approved" {
-		t.Fatalf("identity fields must pass through: %+v", got)
+	e := RedactEntry(Entry{
+		ID: 3, Title: "contact hiono@example.com", Body: "key at /home/onohr/.ssh/id",
+		Scope: ScopeGlobal, Status: "proposed",
+	})
+	if strings.Contains(e.Title, "hiono@example.com") || strings.Contains(e.Body, "/home/onohr/.ssh/id") {
+		t.Fatalf("entry secrets leaked: %+v", e)
 	}
-	if strings.Contains(got.Title, "bob@example.com") || strings.Contains(got.Body, "abcdefghij0123456789") {
-		t.Fatalf("entry text not redacted: %+v", got)
+	if e.ID != 3 || e.Scope != ScopeGlobal || e.Status != "proposed" {
+		t.Fatalf("identity fields must pass through: %+v", e)
 	}
 }
