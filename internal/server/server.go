@@ -4,7 +4,9 @@
 package server
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,17 +16,35 @@ import (
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
+	"github.com/hiono/taxion/internal/store"
 )
 
 // Server serves the Taxion API from a JSON ledger file.
 type Server struct {
-	StorePath string
+	StorePath     string
+	WorkspacePath string
 	// Token gates requests when non-empty; an empty value leaves them unauthenticated.
 	Token string
 	// AuditPath enables auditing; empty disables it.
 	AuditPath string
 
 	lim *limiter
+}
+
+type apiError struct {
+	status  int
+	message string
+}
+
+func (e apiError) Error() string { return e.message }
+
+func findTask(ledger core.Ledger, id string) (core.Task, bool) {
+	for _, task := range ledger.Tasks {
+		if task.ID == id {
+			return task, true
+		}
+	}
+	return core.Task{}, false
 }
 
 // CheckAudit checks startup writability so serving does not begin with a
@@ -92,6 +112,21 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) load(w http.ResponseWriter) (core.Ledger, bool) {
+	if s.WorkspacePath != "" {
+		db, err := store.Open(s.WorkspacePath)
+		if err == nil {
+			defer db.Close()
+			state, loadErr := db.LoadWorkspace()
+			if loadErr == nil {
+				return state.Ledger, true
+			}
+			err = loadErr
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "cannot load ledger")
+			return core.Ledger{}, false
+		}
+	}
 	l, err := core.LoadLedger(s.StorePath)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "cannot load ledger")
@@ -101,11 +136,35 @@ func (s *Server) load(w http.ResponseWriter) (core.Ledger, bool) {
 }
 
 func (s *Server) save(w http.ResponseWriter, l core.Ledger) bool {
+	if s.WorkspacePath != "" {
+		db, err := store.Open(s.WorkspacePath)
+		if err == nil {
+			defer db.Close()
+			err = db.UpdateWorkspace(func(state *store.Workspace) error {
+				state.Ledger = l
+				return nil
+			})
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "cannot save ledger")
+			return false
+		}
+		return true
+	}
 	if err := l.Save(s.StorePath); err != nil {
 		writeErr(w, http.StatusInternalServerError, "cannot save ledger")
 		return false
 	}
 	return true
+}
+
+func (s *Server) updateWorkspace(update func(*store.Workspace) error) error {
+	db, err := store.Open(s.WorkspacePath)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	return db.UpdateWorkspace(update)
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -174,11 +233,23 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	t := core.Task{ID: newID("t"), Title: body.Title, Repo: body.Repo, CreatedAt: time.Now().UTC()}
+	if s.WorkspacePath != "" {
+		if err := s.updateWorkspace(func(state *store.Workspace) error {
+			state.Ledger.Tasks = append(state.Ledger.Tasks, t)
+			return nil
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, "cannot save ledger")
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, t)
+		return
+	}
 	l, ok := s.load(w)
 	if !ok {
 		return
 	}
-	t := core.Task{ID: newID("t"), Title: body.Title, Repo: body.Repo, CreatedAt: time.Now().UTC()}
 	l.Tasks = append(l.Tasks, t)
 	if !s.save(w, l) {
 		return
@@ -227,6 +298,56 @@ func (s *Server) createDispatch(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := core.CheckRepo(body.Repo); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if s.WorkspacePath != "" {
+		d := core.Dispatch{ID: newID("d"), TaskID: body.Task, Repo: body.Repo, Active: true, CreatedAt: time.Now().UTC()}
+		err := s.updateWorkspace(func(state *store.Workspace) error {
+			selected, found := findTask(state.Ledger, body.Task)
+			if !found {
+				return apiError{status: http.StatusNotFound, message: fmt.Sprintf("unknown task %q", body.Task)}
+			}
+			if err := memory.CheckDispatch(s.StorePath, selected, body.Repo); err != nil {
+				return apiError{status: http.StatusConflict, message: err.Error()}
+			}
+			if selected.Repo != body.Repo {
+				return apiError{status: http.StatusConflict, message: "dispatch: repository does not match task"}
+			}
+			if err := core.GuardActiveDispatch(state.Ledger.Dispatches); err != nil {
+				return apiError{status: http.StatusConflict, message: err.Error()}
+			}
+			if state.HasGraph {
+				if err := state.Graph.CheckExecutable(body.Task, body.Repo); err != nil {
+					return apiError{status: http.StatusConflict, message: err.Error()}
+				}
+				task, _ := state.Graph.GraphTask(body.Task)
+				contract, err := json.Marshal(task)
+				if err != nil {
+					return err
+				}
+				hash := sha256.Sum256(contract)
+				if err := state.Graph.IssueDispatch(core.GraphDispatch{
+					ID: d.ID, TaskID: body.Task, Repository: body.Repo, Recipient: task.Owner,
+					InstructionSummary: task.Objective, InstructionHash: hex.EncodeToString(hash[:]),
+					IssuedEvidence: task.RequiredEvidence,
+				}, "http", "dispatch issued"); err != nil {
+					return apiError{status: http.StatusConflict, message: err.Error()}
+				}
+			}
+			state.Ledger.Dispatches = append(state.Ledger.Dispatches, d)
+			return nil
+		})
+		if err != nil {
+			var response apiError
+			if errors.As(err, &response) {
+				writeErr(w, response.status, response.message)
+			} else {
+				writeErr(w, http.StatusInternalServerError, "cannot save ledger")
+			}
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, d)
 		return
 	}
 	l, ok := s.load(w)
@@ -299,6 +420,18 @@ func (s *Server) handleReviews(w http.ResponseWriter, r *http.Request) {
 	ev, err := core.BindEvidence(body.Task, body.SHA)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if s.WorkspacePath != "" {
+		if err := s.updateWorkspace(func(state *store.Workspace) error {
+			state.Ledger.Evidence = append(state.Ledger.Evidence, ev)
+			return nil
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, "cannot save ledger")
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, ev)
 		return
 	}
 	l, ok := s.load(w)

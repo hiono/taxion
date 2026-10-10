@@ -1,8 +1,8 @@
 # 10 — Task Graph の登録・遷移・保持
 
-Task Graph は既存 Ledger と別の `version: 1` JSON ファイルに保存する。
-選択した Ledger が `.taxion/ledger.json` なら保存先は
-`.taxion/ledger.json.graph.json` となる。
+Task Graph と Ledger は SQLite の `workspace.db` に同時に保存する。
+既存の `.taxion/ledger.json` と `.graph.json` は初回移行に限り読み込み、
+移行後もバックアップとして残す。以後の更新元は SQLite workspace となる。
 設計の理由と移行の決定は
 [ADR-0022](adr/0022-versioned-task-graph-beside-legacy-ledger.md) を参照する。
 
@@ -136,13 +136,12 @@ Web は HTTP の拒否を返す。Graph の read/edit HTTP・ACP API はまだ�
 既存 Ledger の wire は変更しない。
 
 Graph の保存は検証後の rename とし、失敗した登録・遷移では保存内容を変更しない。
-CLI 更新は `.graph.json.lock` で直列化する。
-異常終了後の lock は、他の更新が動いていないことを確認してから
-その特定ファイルを復旧する必要がある。自動の lock 回収はない。
+CLI・HTTP・ACP の更新は SQLite transaction で Ledger と Graph を一緒に変更する。
+SQLite が同時 writer の更新を受け入れられない場合は明示的なエラーとなり、
+呼び出し元は成功として扱わず再試行できる。
 Graph の破損、非対応の version、未知のキー、履歴と現状態の不一致はエラーとする。
 この履歴検査は改ざん防止や管理者による全体の書き換え検出を保証しない。
 
-Graph と Ledger の同時 transaction、複数の入口にまたがる排他的な実行、
 Memory の参照先の検証と指示生成、Session の実行・再開、
 Human の実際の認証・承認確認は後続 Issue で実装する。
 保存した actor・decision・proof は caller が供給する記録であり、

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -66,6 +67,44 @@ func TestSaveReplaces(t *testing.T) {
 	}
 	if len(got.Tasks) != 0 {
 		t.Fatalf("expected empty ledger after replace, got %+v", got.Tasks)
+	}
+}
+
+func TestWorkspaceInitializeAndRollback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspace.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Workspace{Ledger: core.Ledger{Tasks: []core.Task{{ID: "t1", Title: "task", Repo: "owner/repo"}}}}
+	inserted, err := s.InitializeWorkspace(want)
+	if err != nil || !inserted {
+		t.Fatalf("initialize: inserted=%v err=%v", inserted, err)
+	}
+	inserted, err = s.InitializeWorkspace(Workspace{})
+	if err != nil || inserted {
+		t.Fatalf("initialize twice: inserted=%v err=%v", inserted, err)
+	}
+	if err := s.UpdateWorkspace(func(state *Workspace) error {
+		state.Ledger.Tasks[0].Title = "uncommitted"
+		return fmt.Errorf("reject update")
+	}); err == nil {
+		t.Fatal("expected callback failure")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	got, err := s.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Ledger.Tasks) != 1 || got.Ledger.Tasks[0].Title != "task" {
+		t.Fatalf("rollback/reopen lost state: %+v", got)
 	}
 }
 

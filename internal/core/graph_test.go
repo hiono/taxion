@@ -89,6 +89,35 @@ func TestGraphLifecycleAndProof(t *testing.T) {
 	}
 }
 
+func TestDispatchLifecycleRequiresAcknowledgement(t *testing.T) {
+	g := trackedGraph(t, graphTask("task"))
+	move(t, &g, "task", Ready, TransitionProof{})
+	if err := g.IssueDispatch(GraphDispatch{
+		ID: "dispatch", TaskID: "task", Repository: "owner/repo", Recipient: "CODER",
+		InstructionSummary: "fix", InstructionHash: "hash",
+	}, "controller", "issue"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.TransitionDispatch("dispatch", DispatchAcknowledged, "worker", "ack", false, false); err == nil {
+		t.Fatal("accepted acknowledgement without confirmation")
+	}
+	if err := g.TransitionDispatch("dispatch", DispatchRunning, "worker", "start", true, true); err == nil {
+		t.Fatal("accepted start without persisted acknowledgement")
+	}
+	if err := g.TransitionDispatch("dispatch", DispatchAcknowledged, "worker", "ack", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.TransitionDispatch("dispatch", DispatchRunning, "worker", "start", true, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.TransitionDispatch("dispatch", DispatchSucceeded, "worker", "finish", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.TransitionDispatch("dispatch", DispatchSucceeded, "worker", "stale result", false, false); err == nil {
+		t.Fatal("accepted stale result")
+	}
+}
+
 func TestGraphDependenciesAndCycles(t *testing.T) {
 	a, b := graphTask("a"), graphTask("b")
 	b.DependsOn = []TaskDependency{{TaskID: "a", State: Approved}}

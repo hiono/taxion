@@ -1,13 +1,15 @@
-// Package store provides the sqlite-backed durable ledger (Server phase).
+// Package store provides SQLite-backed workspace state and the durable ledger.
 //
 // The schema preserves core.Ledger so changing persistence does not change
 // governance types. The pure-Go driver avoids a cgo build requirement
-// (ADR-0009). CLI/API use the separate JSON backend.
+// (ADR-0009). Workspace state keeps the existing Ledger JSON shape.
 package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
@@ -29,11 +31,24 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 CREATE TABLE IF NOT EXISTS outbox (
   id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL,
   payload TEXT NOT NULL, created_at TEXT NOT NULL, sent_at TEXT);
+CREATE TABLE IF NOT EXISTS workspace_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  revision INTEGER NOT NULL,
+  ledger_json TEXT NOT NULL,
+  graph_json TEXT NOT NULL,
+  graph_present INTEGER NOT NULL);
 `
 
 // Store is a sqlite-backed ledger.
 type Store struct {
 	db *sql.DB
+	mu sync.Mutex
+}
+
+type Workspace struct {
+	Ledger   core.Ledger
+	Graph    core.TaskGraph
+	HasGraph bool
 }
 
 // Open opens (creating if needed) the sqlite file at path and migrates the schema.
@@ -52,6 +67,132 @@ func Open(path string) (*Store, error) {
 // Close releases the database handle.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+func (s *Store) LoadWorkspace() (Workspace, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadWorkspace(s.db)
+}
+
+func (s *Store) WorkspaceInitialized() (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var exists int
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM workspace_state WHERE id=1)`).Scan(&exists)
+	return exists != 0, err
+}
+
+func (s *Store) InitializeWorkspace(state Workspace) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if state.HasGraph {
+		if err := state.Graph.Validate(); err != nil {
+			return false, err
+		}
+		if err := state.Graph.CheckLedger(state.Ledger); err != nil {
+			return false, err
+		}
+	}
+	ledger, err := json.Marshal(state.Ledger)
+	if err != nil {
+		return false, err
+	}
+	graph, err := json.Marshal(state.Graph)
+	if err != nil {
+		return false, err
+	}
+	result, err := s.db.Exec(`INSERT INTO workspace_state(id,revision,ledger_json,graph_json,graph_present)
+		VALUES(1,1,?,?,?) ON CONFLICT(id) DO NOTHING`,
+		string(ledger), string(graph), boolInt(state.HasGraph))
+	if err != nil {
+		return false, err
+	}
+	inserted, err := result.RowsAffected()
+	return inserted == 1, err
+}
+
+func (s *Store) loadWorkspace(q interface {
+	QueryRow(string, ...any) *sql.Row
+}) (Workspace, error) {
+	var state Workspace
+	var ledgerJSON, graphJSON string
+	var present int
+	err := q.QueryRow(`SELECT ledger_json,graph_json,graph_present FROM workspace_state WHERE id=1`).
+		Scan(&ledgerJSON, &graphJSON, &present)
+	if err == sql.ErrNoRows {
+		return Workspace{Ledger: core.Ledger{Tasks: []core.Task{}, Dispatches: []core.Dispatch{}, Evidence: []core.Evidence{}, Checkpoints: []core.Checkpoint{}}}, nil
+	}
+	if err != nil {
+		return Workspace{}, err
+	}
+	if err := json.Unmarshal([]byte(ledgerJSON), &state.Ledger); err != nil {
+		return Workspace{}, fmt.Errorf("decode workspace ledger: %w", err)
+	}
+	if err := json.Unmarshal([]byte(graphJSON), &state.Graph); err != nil {
+		return Workspace{}, fmt.Errorf("decode workspace graph: %w", err)
+	}
+	state.HasGraph = present != 0
+	if state.HasGraph {
+		if err := state.Graph.Validate(); err != nil {
+			return Workspace{}, err
+		}
+		if err := state.Graph.CheckLedger(state.Ledger); err != nil {
+			return Workspace{}, err
+		}
+	}
+	return state, nil
+}
+
+// UpdateWorkspace commits the ledger projection and Task Graph in one SQLite
+// transaction. The callback must not perform external side effects.
+func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	state, err := s.loadWorkspace(tx)
+	if err != nil {
+		return err
+	}
+	if err := update(&state); err != nil {
+		return err
+	}
+	if state.HasGraph {
+		if err := state.Graph.Validate(); err != nil {
+			return err
+		}
+		if err := state.Graph.CheckLedger(state.Ledger); err != nil {
+			return err
+		}
+	}
+	ledger, err := json.Marshal(state.Ledger)
+	if err != nil {
+		return err
+	}
+	graph, err := json.Marshal(state.Graph)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO workspace_state(id,revision,ledger_json,graph_json,graph_present)
+		VALUES(1,1,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET revision=workspace_state.revision+1,
+		ledger_json=excluded.ledger_json,graph_json=excluded.graph_json,graph_present=excluded.graph_present`,
+		string(ledger), string(graph), boolInt(state.HasGraph))
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func ts(t time.Time) string {

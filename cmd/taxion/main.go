@@ -4,8 +4,10 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -18,6 +20,7 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
 	"github.com/hiono/taxion/internal/server"
+	"github.com/hiono/taxion/internal/store"
 )
 
 const usage = `taxion — Evidence-governed control plane for coding agents
@@ -33,6 +36,7 @@ Commands:
   task transition     Validate and record a Task Graph transition (--file JSON)
   task graph          Print the versioned Task Graph and history
   dispatch            Dispatch a task (--task and --repo required)
+  dispatch transition Record a Dispatch lifecycle transition (--id, --status, --reason)
   dispatch list       List dispatches ([--repo] filter, [--json])
   review              Bind coder-output evidence (--task, --sha and --repo required)
   resume              Print a resume acknowledgement (local stub; --session required)
@@ -79,7 +83,7 @@ func main() {
 	case "resume":
 		err = resumeCmd(args[1:])
 	case "acp":
-		err = acp.New(storePath).Serve(context.Background(), os.Stdin, os.Stdout)
+		err = runACP()
 	case "serve":
 		err = serveCmd(args[1:])
 	case "gen-token":
@@ -101,26 +105,60 @@ func main() {
 }
 
 func loadStore() (core.Ledger, error) {
-	l, err := core.LoadLedger(storePath)
+	db, state, err := loadWorkspace()
 	if err != nil {
-		return core.Ledger{}, fmt.Errorf("cannot load %s (run 'taxion init' first): %w", storePath, err)
+		return core.Ledger{}, err
 	}
-	return l, nil
+	defer db.Close()
+	return state.Ledger, nil
+}
+
+func saveLedger(l core.Ledger) error {
+	return updateWorkspace(func(state *store.Workspace) error {
+		state.Ledger = l
+		return nil
+	})
 }
 
 func initCmd() error {
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
 		return err
 	}
-	if _, err := os.Stat(storePath); err == nil {
-		fmt.Printf("taxion: workspace already initialized at %s\n", storePath)
-		return nil
-	}
-	if err := (core.Ledger{}).Save(storePath); err != nil {
+	db, err := store.Open(workspaceDBPath())
+	if err != nil {
 		return err
 	}
-	fmt.Printf("taxion: initialized workspace at %s\n", storePath)
-	return nil
+	initialized, err := db.WorkspaceInitialized()
+	if err != nil {
+		db.Close()
+		return err
+	}
+	if initialized {
+		db.Close()
+		fmt.Printf("taxion: workspace already initialized at %s\n", workspaceDBPath())
+		return nil
+	}
+	db.Close()
+	if _, err := os.Stat(storePath); err == nil {
+		db, err := openWorkspace()
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		fmt.Printf("taxion: workspace already initialized at %s\n", storePath)
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	db, err = store.Open(workspaceDBPath())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.InitializeWorkspace(store.Workspace{
+		Ledger: core.Ledger{Tasks: []core.Task{}, Dispatches: []core.Dispatch{}, Evidence: []core.Evidence{}, Checkpoints: []core.Checkpoint{}},
+	})
+	return err
 }
 
 func newID(prefix string) string {
@@ -147,13 +185,11 @@ func taskCmd(args []string) error {
 		if err := core.CheckRepo(*repo); err != nil {
 			return err
 		}
-		l, err := loadStore()
-		if err != nil {
-			return err
-		}
 		t := core.Task{ID: newID("t"), Title: *title, Repo: *repo, CreatedAt: time.Now().UTC()}
-		l.Tasks = append(l.Tasks, t)
-		if err := l.Save(storePath); err != nil {
+		if err := updateWorkspace(func(state *store.Workspace) error {
+			state.Ledger.Tasks = append(state.Ledger.Tasks, t)
+			return nil
+		}); err != nil {
 			return err
 		}
 		fmt.Printf("taxion: task %s created in %s\n", t.ID, *repo)
@@ -165,10 +201,12 @@ func taskCmd(args []string) error {
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		l, err := loadStore()
+		db, state, err := loadWorkspace()
 		if err != nil {
 			return err
 		}
+		defer db.Close()
+		l := state.Ledger
 		var tasks []core.Task
 		for _, t := range l.Tasks {
 			if *repo == "" || t.Repo == *repo {
@@ -194,6 +232,9 @@ func taskCmd(args []string) error {
 func dispatchCmd(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: taxion dispatch --task ID --repo REPO | taxion dispatch list …")
+	}
+	if args[0] == "transition" {
+		return dispatchTransitionCmd(args[1:])
 	}
 	if args[0] == "list" {
 		fs := flag.NewFlagSet("dispatch list", flag.ContinueOnError)
@@ -236,38 +277,79 @@ func dispatchCmd(args []string) error {
 	if err := core.CheckRepo(*repo); err != nil {
 		return err
 	}
-	l, err := loadStore()
+	ledger, err := loadStore()
 	if err != nil {
 		return err
 	}
-	found := false
-	var selected core.Task
-	for _, t := range l.Tasks {
-		if t.ID == *task {
-			found = true
-			selected = t
-			break
-		}
-	}
+	preflightTask, found := findTask(ledger, *task)
 	if !found {
 		return fmt.Errorf("dispatch: unknown task %q", *task)
 	}
-	if err := core.GuardActiveDispatch(l.Dispatches); err != nil {
+	if err := memory.CheckDispatch(storePath, preflightTask, *repo); err != nil {
 		return err
 	}
-	if err := core.CheckGraphDispatch(storePath, selected, *repo); err != nil {
+	if preflightTask.Repo != *repo {
+		return fmt.Errorf("dispatch: repository does not match task")
+	}
+	var did string
+	selected := core.Task{}
+	if err := updateWorkspace(func(state *store.Workspace) error {
+		var found bool
+		for _, t := range state.Ledger.Tasks {
+			if t.ID == *task {
+				selected = t
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("dispatch: unknown task %q", *task)
+		}
+		if err := core.GuardActiveDispatch(state.Ledger.Dispatches); err != nil {
+			return err
+		}
+		if selected != preflightTask {
+			return fmt.Errorf("dispatch: task changed during policy validation; retry")
+		}
+		if err := memory.CheckDispatch(storePath, selected, *repo); err != nil {
+			return err
+		}
+		if selected.Repo != *repo {
+			return fmt.Errorf("dispatch: repository does not match task")
+		}
+		if state.HasGraph {
+			if err := state.Graph.CheckExecutable(*task, *repo); err != nil {
+				return err
+			}
+
+			gt, _ := state.Graph.GraphTask(*task)
+			did = newID("d")
+			contract, _ := json.Marshal(gt)
+			hash := sha256.Sum256(contract)
+			dispatch := core.GraphDispatch{ID: did, TaskID: *task, Repository: *repo, Recipient: gt.Owner,
+				InstructionSummary: gt.Objective, InstructionHash: hex.EncodeToString(hash[:]), IssuedEvidence: gt.RequiredEvidence}
+			if err := state.Graph.IssueDispatch(dispatch, "controller", "dispatch issued"); err != nil {
+				return err
+			}
+		} else {
+			did = newID("d")
+		}
+		state.Ledger.Dispatches = append(state.Ledger.Dispatches, core.Dispatch{ID: did, TaskID: *task, Repo: *repo, Active: true, CreatedAt: time.Now().UTC()})
+		return nil
+	}); err != nil {
 		return err
 	}
-	if err := memory.CheckDispatch(storePath, selected, *repo); err != nil {
-		return err
-	}
-	d := core.Dispatch{ID: newID("d"), TaskID: *task, Repo: *repo, Active: true, CreatedAt: time.Now().UTC()}
-	l.Dispatches = append(l.Dispatches, d)
-	if err := l.Save(storePath); err != nil {
-		return err
-	}
-	fmt.Printf("taxion: dispatched %s for task %s in %s\n", d.ID, *task, *repo)
+	fmt.Printf("taxion: dispatched %s for task %s in %s\n", did, *task, *repo)
 	return nil
+}
+
+func findTask(ledger core.Ledger, id string) (core.Task, bool) {
+	for _, task := range ledger.Tasks {
+		if task.ID == id {
+			return task, true
+		}
+	}
+	return core.Task{}, false
 }
 
 func reviewCmd(args []string) error {
@@ -288,12 +370,10 @@ func reviewCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	l, err := loadStore()
-	if err != nil {
-		return err
-	}
-	l.Evidence = append(l.Evidence, ev)
-	if err := l.Save(storePath); err != nil {
+	if err := updateWorkspace(func(state *store.Workspace) error {
+		state.Ledger.Evidence = append(state.Ledger.Evidence, ev)
+		return nil
+	}); err != nil {
 		return err
 	}
 	fmt.Printf("taxion: review of task %s bound to SHA %s in %s\n", *task, *sha, *repo)
@@ -311,6 +391,15 @@ func resumeCmd(args []string) error {
 	}
 	fmt.Printf("taxion: resumed session %s (local stub)\n", *session)
 	return nil
+}
+
+func runACP() error {
+	db, err := openWorkspace()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	return acp.NewWithWorkspace(storePath, workspaceDBPath()).Serve(context.Background(), os.Stdin, os.Stdout)
 }
 
 func serveCmd(args []string) error {
@@ -331,7 +420,14 @@ func serveCmd(args []string) error {
 			return err
 		}
 	}
-	srv := &server.Server{StorePath: storePath, Token: *token, AuditPath: *audit}
+	db, err := openWorkspace()
+	if err != nil {
+		return err
+	}
+	if err := db.Close(); err != nil {
+		return err
+	}
+	srv := &server.Server{StorePath: storePath, WorkspacePath: workspaceDBPath(), Token: *token, AuditPath: *audit}
 	if err := srv.CheckAudit(); err != nil {
 		return fmt.Errorf("serve: audit log unwritable: %w", err)
 	}

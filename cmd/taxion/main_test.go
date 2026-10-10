@@ -90,13 +90,13 @@ func TestMemoryPromotionCLIAndDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := core.Ledger{Tasks: []core.Task{{ID: "t", Title: "fix: target", Repo: "target"}}}
-	if err := l.Save(storePath); err != nil {
+	if err := saveLedger(l); err != nil {
 		t.Fatal(err)
 	}
 	if err := dispatchCmd([]string{"--task", "t", "--repo", "other"}); !errors.Is(err, memory.ErrGuardrailRejected) {
 		t.Fatalf("CLI dispatch must enforce approved policy: %v", err)
 	}
-	got, err := core.LoadLedger(storePath)
+	got, err := loadStore()
 	if err != nil || len(got.Dispatches) != 0 {
 		t.Fatalf("rejected CLI dispatch changed ledger: %+v %v", got, err)
 	}

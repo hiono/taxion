@@ -98,6 +98,61 @@ type GraphEvent struct {
 	Proof  *TransitionProof `json:"proof,omitempty"`
 }
 
+type DispatchStatus string
+
+const (
+	DispatchIssued          DispatchStatus = "ISSUED"
+	DispatchAcknowledged    DispatchStatus = "ACKNOWLEDGED"
+	DispatchRunning         DispatchStatus = "RUNNING"
+	DispatchCancelRequested DispatchStatus = "CANCEL_REQUESTED"
+	DispatchSuspended       DispatchStatus = "SUSPENDED"
+	DispatchSucceeded       DispatchStatus = "SUCCEEDED"
+	DispatchFailed          DispatchStatus = "FAILED"
+	DispatchCancelled       DispatchStatus = "CANCELLED"
+	DispatchSuperseded      DispatchStatus = "SUPERSEDED"
+)
+
+type DispatchRelationship string
+
+const (
+	RelationshipNone        DispatchRelationship = "NONE"
+	RelationshipContinues   DispatchRelationship = "CONTINUES"
+	RelationshipAmends      DispatchRelationship = "AMENDS"
+	RelationshipSupersedes  DispatchRelationship = "SUPERSEDES"
+	RelationshipCancels     DispatchRelationship = "CANCELS"
+	RelationshipSuspends    DispatchRelationship = "SUSPENDS"
+	RelationshipResumes     DispatchRelationship = "RESUMES"
+	RelationshipIndependent DispatchRelationship = "INDEPENDENT"
+)
+
+type GraphDispatch struct {
+	ID                 string               `json:"id"`
+	TaskID             string               `json:"taskId"`
+	Repository         string               `json:"repository"`
+	Recipient          string               `json:"recipient"`
+	Status             DispatchStatus       `json:"status"`
+	Relationship       DispatchRelationship `json:"relationship"`
+	RelatedID          string               `json:"relatedDispatchId"`
+	InstructionSummary string               `json:"instructionSummary"`
+	InstructionHash    string               `json:"instructionHash"`
+	IssuedEvidence     []string             `json:"issuedEvidence"`
+	Acknowledged       bool                 `json:"acknowledged"`
+	ExecutionStarted   bool                 `json:"executionStarted"`
+	Result             string               `json:"result"`
+	LastUpdatedBy      string               `json:"lastUpdatedBy"`
+	LastTransition     string               `json:"lastTransition"`
+	CreatedAt          time.Time            `json:"createdAt"`
+	UpdatedAt          time.Time            `json:"updatedAt"`
+}
+
+type DispatchEvent struct {
+	DispatchID string         `json:"dispatchId"`
+	Status     DispatchStatus `json:"status"`
+	Actor      string         `json:"actor"`
+	Reason     string         `json:"reason"`
+	At         time.Time      `json:"at"`
+}
+
 type TransitionProof struct {
 	ActionPerformed bool         `json:"actionPerformed"`
 	Evidence        []string     `json:"evidence"`
@@ -116,10 +171,12 @@ type TaskWaiver struct {
 }
 
 type TaskGraph struct {
-	Version  int          `json:"version"`
-	Tasks    []GraphTask  `json:"tasks"`
-	Concerns []Concern    `json:"concerns"`
-	History  []GraphEvent `json:"history"`
+	Version         int             `json:"version"`
+	Tasks           []GraphTask     `json:"tasks"`
+	Concerns        []Concern       `json:"concerns"`
+	History         []GraphEvent    `json:"history"`
+	Dispatches      []GraphDispatch `json:"dispatches"`
+	DispatchHistory []DispatchEvent `json:"dispatchHistory"`
 }
 
 func graphError(format string, args ...any) error {
@@ -133,6 +190,128 @@ func (g TaskGraph) task(id string) (GraphTask, bool) {
 		}
 	}
 	return GraphTask{}, false
+}
+
+func (g TaskGraph) GraphTask(id string) (GraphTask, bool) { return g.task(id) }
+
+func (g TaskGraph) dispatch(id string) (GraphDispatch, bool) {
+	for _, d := range g.Dispatches {
+		if d.ID == id {
+			return d, true
+		}
+	}
+	return GraphDispatch{}, false
+}
+
+func validDispatchStatus(s DispatchStatus) bool {
+	return slices.Contains([]DispatchStatus{DispatchIssued, DispatchAcknowledged, DispatchRunning,
+		DispatchCancelRequested, DispatchSuspended, DispatchSucceeded, DispatchFailed,
+		DispatchCancelled, DispatchSuperseded}, s)
+}
+
+func validRelationship(r DispatchRelationship) bool {
+	return slices.Contains([]DispatchRelationship{RelationshipNone, RelationshipContinues, RelationshipAmends,
+		RelationshipSupersedes, RelationshipCancels, RelationshipSuspends, RelationshipResumes,
+		RelationshipIndependent}, r)
+}
+
+func dispatchActive(s DispatchStatus) bool {
+	return slices.Contains([]DispatchStatus{DispatchIssued, DispatchAcknowledged, DispatchRunning,
+		DispatchCancelRequested, DispatchSuspended}, s)
+}
+
+func dispatchTransitionAllowed(from, to DispatchStatus) bool {
+	switch from {
+	case DispatchIssued:
+		return to == DispatchAcknowledged || to == DispatchCancelled || to == DispatchSuperseded
+	case DispatchAcknowledged:
+		return to == DispatchRunning || to == DispatchCancelled || to == DispatchSuspended
+	case DispatchRunning:
+		return to == DispatchCancelRequested || to == DispatchSuspended || to == DispatchSucceeded || to == DispatchFailed
+	case DispatchCancelRequested:
+		return to == DispatchCancelled || to == DispatchSuspended || to == DispatchFailed
+	case DispatchSuspended:
+		return to == DispatchCancelled || to == DispatchSuperseded
+	}
+	return false
+}
+
+func (g *TaskGraph) IssueDispatch(d GraphDispatch, actor, reason string) error {
+	next := cloneGraph(*g)
+	now := time.Now().UTC()
+	d.CreatedAt, d.UpdatedAt = now, now
+	d.Status, d.Relationship = DispatchIssued, RelationshipNone
+	d.LastUpdatedBy, d.LastTransition = actor, reason
+	task, ok := next.task(d.TaskID)
+	if !ok || task.Status != Ready || task.Repo != d.Repository {
+		return graphError("dispatch requires a matching READY task and repository")
+	}
+	if err := next.CheckExecutable(d.TaskID, d.Repository); err != nil {
+		return err
+	}
+	for _, old := range next.Dispatches {
+		if old.TaskID == d.TaskID && dispatchActive(old.Status) {
+			return graphError("active dispatch already exists")
+		}
+	}
+	task.Status = Active
+	for i := range next.Tasks {
+		if next.Tasks[i].ID == task.ID {
+			next.Tasks[i] = task
+		}
+	}
+	next.Dispatches = append(next.Dispatches, d)
+	next.DispatchHistory = append(next.DispatchHistory, DispatchEvent{DispatchID: d.ID, Status: d.Status, Actor: actor, Reason: reason, At: now})
+	next.History = append(next.History, GraphEvent{TaskID: task.ID, Actor: actor, Reason: reason, At: now, Task: task})
+	if err := next.Validate(); err != nil {
+		return err
+	}
+	*g = next
+	return nil
+}
+
+func (g *TaskGraph) TransitionDispatch(id string, status DispatchStatus, actor, reason string, acknowledged, started bool) error {
+	next := cloneGraph(*g)
+	d, ok := next.dispatch(id)
+	if !ok || !dispatchTransitionAllowed(d.Status, status) {
+		return graphError("invalid dispatch transition")
+	}
+	if (status == DispatchAcknowledged && !acknowledged) ||
+		(status == DispatchRunning && (!d.Acknowledged || !acknowledged || !started)) ||
+		(status == DispatchSucceeded && !d.ExecutionStarted) ||
+		(acknowledged && status != DispatchAcknowledged && status != DispatchRunning) ||
+		(started && status != DispatchRunning) {
+		return graphError("dispatch transition lacks required acknowledgement or start confirmation")
+	}
+	d.Status = status
+	d.Acknowledged = d.Acknowledged || acknowledged
+	d.ExecutionStarted = d.ExecutionStarted || started
+	d.UpdatedAt = time.Now().UTC()
+	d.LastUpdatedBy = actor
+	d.LastTransition = reason
+	for i := range next.Dispatches {
+		if next.Dispatches[i].ID == id {
+			next.Dispatches[i] = d
+		}
+	}
+	next.DispatchHistory = append(next.DispatchHistory, DispatchEvent{DispatchID: id, Status: status, Actor: actor, Reason: reason, At: d.UpdatedAt})
+	if !dispatchActive(status) {
+		for i := range next.Tasks {
+			t := &next.Tasks[i]
+			if t.ID == d.TaskID && t.Status == Active {
+				t.Status = Blocked
+				t.DeferredReason = "Dispatch ended: " + string(status)
+				t.ResumeCondition = "record the result and explicitly authorize the next transition"
+				t.NextAction = "inspect Dispatch result and update the Task contract"
+				next.History = append(next.History, GraphEvent{TaskID: t.ID, Actor: actor, Reason: reason, At: d.UpdatedAt, Task: *t})
+			}
+		}
+	}
+	if err := next.Validate(); err != nil {
+		return err
+	}
+	*g = next
+	return nil
 }
 
 func validStatus(s TaskStatus) bool {
@@ -187,6 +366,63 @@ func (g TaskGraph) Validate() error {
 			return graphError("missing or duplicate task ID %q", t.ID)
 		}
 		ids[t.ID] = true
+	}
+	dispatchIDs := map[string]bool{}
+	activeDispatches := map[string]string{}
+	for _, d := range g.Dispatches {
+		if !nonempty(d.ID) || dispatchIDs[d.ID] || !ids[d.TaskID] || !nonempty(d.Repository) ||
+			!slices.Contains([]string{"CODER", "REVIEWER"}, d.Recipient) || !validDispatchStatus(d.Status) ||
+			!validRelationship(d.Relationship) || !nonempty(d.InstructionSummary) || !nonempty(d.InstructionHash) ||
+			!nonempty(d.LastUpdatedBy) || !nonempty(d.LastTransition) || d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
+			return graphError("invalid dispatch contract %q", d.ID)
+		}
+		dispatchIDs[d.ID] = true
+		if dispatchActive(d.Status) {
+			if previous := activeDispatches[d.TaskID]; previous != "" {
+				return graphError("conflicting active dispatches %s and %s", previous, d.ID)
+			}
+			activeDispatches[d.TaskID] = d.ID
+		}
+	}
+	dispatchStatuses := map[string]DispatchStatus{}
+	for _, event := range g.DispatchHistory {
+		if !dispatchIDs[event.DispatchID] || !nonempty(event.Actor) || !nonempty(event.Reason) ||
+			event.At.IsZero() || !validDispatchStatus(event.Status) {
+			return graphError("invalid dispatch history")
+		}
+		previous, ok := dispatchStatuses[event.DispatchID]
+		if !ok && event.Status != DispatchIssued {
+			return graphError("dispatch history must begin at ISSUED")
+		}
+		if ok && !dispatchTransitionAllowed(previous, event.Status) {
+			return graphError("invalid dispatch history transition")
+		}
+		dispatchStatuses[event.DispatchID] = event.Status
+	}
+	for _, d := range g.Dispatches {
+		if dispatchStatuses[d.ID] != d.Status {
+			return graphError("dispatch %s does not match history", d.ID)
+		}
+		if d.Relationship == RelationshipNone && d.RelatedID != "" {
+			return graphError("NONE cannot relate to a prior dispatch")
+		}
+		if d.Relationship != RelationshipNone && d.Relationship != RelationshipIndependent && d.RelatedID == "" {
+			return graphError("dispatch relationship %s requires a related dispatch", d.Relationship)
+		}
+		if d.RelatedID != "" {
+			related, ok := g.dispatch(d.RelatedID)
+			if !ok || related.TaskID != d.TaskID {
+				return graphError("related dispatch must belong to the same task")
+			}
+			if d.Relationship == RelationshipIndependent {
+				return graphError("INDEPENDENT dispatch requires a different task")
+			}
+			if d.Relationship == RelationshipSupersedes && related.Status != DispatchSuperseded {
+				return graphError("superseded dispatch status mismatch")
+			}
+		}
+	}
+	for _, t := range g.Tasks {
 		if !nonempty(t.Title) || !nonempty(t.CreatedFrom) || len(strings.Split(t.Repo, "/")) != 2 ||
 			strings.ContainsAny(t.Repo, " \t\n") || strings.HasPrefix(t.Repo, "/") || strings.HasSuffix(t.Repo, "/") {
 			return graphError("task %s requires title, source and namespace/repository", t.ID)
@@ -411,6 +647,11 @@ func cloneGraph(g TaskGraph) TaskGraph {
 		copy.Tasks[i] = cloneTask(copy.Tasks[i])
 	}
 	copy.Concerns = slices.Clone(g.Concerns)
+	copy.Dispatches = slices.Clone(g.Dispatches)
+	for i := range copy.Dispatches {
+		copy.Dispatches[i].IssuedEvidence = slices.Clone(copy.Dispatches[i].IssuedEvidence)
+	}
+	copy.DispatchHistory = slices.Clone(g.DispatchHistory)
 	copy.History = slices.Clone(g.History)
 	for i := range copy.History {
 		copy.History[i].Task = cloneTask(copy.History[i].Task)
@@ -735,6 +976,28 @@ func (g TaskGraph) CheckLedger(ledger Ledger) error {
 		}
 		if !found {
 			return graphError("Task lost: tracked task %s missing from ledger", tracked.ID)
+		}
+	}
+	graphDispatches := make(map[string]GraphDispatch, len(g.Dispatches))
+	for _, dispatch := range g.Dispatches {
+		graphDispatches[dispatch.ID] = dispatch
+	}
+	ledgerDispatches := make(map[string]Dispatch, len(ledger.Dispatches))
+	for _, dispatch := range ledger.Dispatches {
+		ledgerDispatches[dispatch.ID] = dispatch
+	}
+	for _, dispatch := range g.Dispatches {
+		projected, ok := ledgerDispatches[dispatch.ID]
+		if !ok || projected.TaskID != dispatch.TaskID || projected.Repo != dispatch.Repository ||
+			projected.Active != dispatchActive(dispatch.Status) {
+			return graphError("dispatch ledger projection mismatch for %s", dispatch.ID)
+		}
+	}
+	for _, dispatch := range ledger.Dispatches {
+		if dispatch.Active {
+			if _, ok := graphDispatches[dispatch.ID]; !ok {
+				return graphError("active ledger dispatch %s is missing from Task Graph", dispatch.ID)
+			}
 		}
 	}
 	return nil

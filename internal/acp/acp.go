@@ -7,9 +7,13 @@ package acp
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +21,7 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
 	"github.com/hiono/taxion/internal/runtime/local"
+	"github.com/hiono/taxion/internal/store"
 )
 
 const (
@@ -60,7 +65,8 @@ type acpSession struct {
 // Server is a single-connection ACP agent over stdio. Dispatch records
 // ledger operations; it does not execute a worker.
 type Server struct {
-	storePath string
+	storePath     string
+	workspacePath string
 
 	mu       sync.Mutex
 	sessions map[string]*acpSession
@@ -70,6 +76,10 @@ type Server struct {
 // New returns a Server persisting its ledger to storePath.
 func New(storePath string) *Server {
 	return &Server{storePath: storePath, sessions: map[string]*acpSession{}}
+}
+
+func NewWithWorkspace(storePath, workspacePath string) *Server {
+	return &Server{storePath: storePath, workspacePath: workspacePath, sessions: map[string]*acpSession{}}
 }
 
 // Serve reads newline-delimited JSON-RPC from r and writes responses and
@@ -234,20 +244,42 @@ func (s *Server) handle(ctx context.Context, req Request, out *bufio.Writer) {
 }
 
 func (s *Server) load() (core.Ledger, error) {
-	l, err := core.LoadLedger(s.storePath)
-	if err != nil {
-		// The spike starts empty on any load error, not just a missing file.
-		// Do not treat this fallback as recovery of the previous ledger.
-		return core.Ledger{}, nil
+	if s.workspacePath != "" {
+		db, err := store.Open(s.workspacePath)
+		if err != nil {
+			return core.Ledger{}, err
+		}
+		defer db.Close()
+		state, err := db.LoadWorkspace()
+		return state.Ledger, err
 	}
-	return l, nil
+	l, err := core.LoadLedger(s.storePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return core.Ledger{Tasks: []core.Task{}, Dispatches: []core.Dispatch{}, Evidence: []core.Evidence{}, Checkpoints: []core.Checkpoint{}}, nil
+	}
+	return l, err
+}
+
+func (s *Server) update(update func(*store.Workspace) error, legacy func(*core.Ledger) error) error {
+	if s.workspacePath != "" {
+		db, err := store.Open(s.workspacePath)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		return db.UpdateWorkspace(update)
+	}
+	l, err := s.load()
+	if err != nil {
+		return err
+	}
+	if err := legacy(&l); err != nil {
+		return err
+	}
+	return l.Save(s.storePath)
 }
 
 func (s *Server) newSession(cwd string) (string, error) {
-	l, err := s.load()
-	if err != nil {
-		return "", err
-	}
 	s.mu.Lock()
 	s.seq++
 	sid := fmt.Sprintf("sess-%d-%d", time.Now().UnixNano(), s.seq)
@@ -259,8 +291,14 @@ func (s *Server) newSession(cwd string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	l.Tasks = append(l.Tasks, core.Task{ID: tid, Title: "acp session " + sid, Repo: cwd, CreatedAt: time.Now().UTC()})
-	if err := l.Save(s.storePath); err != nil {
+	task := core.Task{ID: tid, Title: "acp session " + sid, Repo: cwd, CreatedAt: time.Now().UTC()}
+	if err := s.update(func(state *store.Workspace) error {
+		state.Ledger.Tasks = append(state.Ledger.Tasks, task)
+		return nil
+	}, func(l *core.Ledger) error {
+		l.Tasks = append(l.Tasks, task)
+		return nil
+	}); err != nil {
 		return "", err
 	}
 	s.mu.Lock()
@@ -302,16 +340,17 @@ func (s *Server) prompt(ctx context.Context, sid, text string, out *bufio.Writer
 }
 
 func (s *Server) review(sid string, sess *acpSession, sha string, out *bufio.Writer) error {
-	l, err := s.load()
-	if err != nil {
-		return err
-	}
 	ev, err := core.BindEvidence(sess.taskID, strings.TrimSpace(sha))
 	if err != nil {
 		return err
 	}
-	l.Evidence = append(l.Evidence, ev)
-	if err := l.Save(s.storePath); err != nil {
+	if err := s.update(func(state *store.Workspace) error {
+		state.Ledger.Evidence = append(state.Ledger.Evidence, ev)
+		return nil
+	}, func(l *core.Ledger) error {
+		l.Evidence = append(l.Evidence, ev)
+		return nil
+	}); err != nil {
 		return err
 	}
 	s.notify(out, sid, map[string]any{
@@ -322,35 +361,55 @@ func (s *Server) review(sid string, sess *acpSession, sha string, out *bufio.Wri
 }
 
 func (s *Server) dispatch(sid string, sess *acpSession, out *bufio.Writer) (string, error) {
-	l, err := s.load()
-	if err != nil {
-		return "", err
-	}
-	if err := core.GuardActiveDispatch(l.Dispatches); err != nil {
-		return "", err
-	}
-	var task core.Task
-	found := false
-	for _, candidate := range l.Tasks {
-		if candidate.ID == sess.taskID {
-			task = candidate
-			found = true
-			break
-		}
-	}
-	if !found {
-		return "", fmt.Errorf("unknown task: %s", sess.taskID)
-	}
-	if err := core.CheckGraphDispatch(s.storePath, task, sess.cwd); err != nil {
-		return "", err
-	}
-	if err := memory.CheckDispatch(s.storePath, task, sess.cwd); err != nil {
-		return "", err
-	}
 	d := core.Dispatch{ID: fmt.Sprintf("d-%d", time.Now().UnixNano()),
 		TaskID: sess.taskID, Repo: sess.cwd, Active: true, CreatedAt: time.Now().UTC()}
-	l.Dispatches = append(l.Dispatches, d)
-	if err := l.Save(s.storePath); err != nil {
+	if err := s.update(func(state *store.Workspace) error {
+		if err := core.GuardActiveDispatch(state.Ledger.Dispatches); err != nil {
+			return err
+		}
+		task, found := findTask(state.Ledger, sess.taskID)
+		if !found {
+			return fmt.Errorf("unknown task: %s", sess.taskID)
+		}
+		if err := memory.CheckDispatch(s.storePath, task, sess.cwd); err != nil {
+			return err
+		}
+		if state.HasGraph {
+			if err := state.Graph.CheckExecutable(task.ID, sess.cwd); err != nil {
+				return err
+			}
+			gt, _ := state.Graph.GraphTask(task.ID)
+			contract, err := json.Marshal(gt)
+			if err != nil {
+				return err
+			}
+			hash := sha256.Sum256(contract)
+			if err := state.Graph.IssueDispatch(core.GraphDispatch{ID: d.ID, TaskID: task.ID,
+				Repository: sess.cwd, Recipient: gt.Owner, InstructionSummary: gt.Objective,
+				InstructionHash: hex.EncodeToString(hash[:]), IssuedEvidence: gt.RequiredEvidence},
+				"acp", "dispatch issued"); err != nil {
+				return err
+			}
+		}
+		state.Ledger.Dispatches = append(state.Ledger.Dispatches, d)
+		return nil
+	}, func(l *core.Ledger) error {
+		if err := core.GuardActiveDispatch(l.Dispatches); err != nil {
+			return err
+		}
+		task, found := findTask(*l, sess.taskID)
+		if !found {
+			return fmt.Errorf("unknown task: %s", sess.taskID)
+		}
+		if err := core.CheckGraphDispatch(s.storePath, task, sess.cwd); err != nil {
+			return err
+		}
+		if err := memory.CheckDispatch(s.storePath, task, sess.cwd); err != nil {
+			return err
+		}
+		l.Dispatches = append(l.Dispatches, d)
+		return nil
+	}); err != nil {
 		return "", err
 	}
 	entries := []map[string]any{}
@@ -365,6 +424,15 @@ func (s *Server) dispatch(sid string, sess *acpSession, out *bufio.Writer) (stri
 		"content":       map[string]any{"type": "text", "text": fmt.Sprintf("Dispatched %s for %s in %s.", d.ID, sess.taskID, sess.cwd)},
 	})
 	return d.ID, nil
+}
+
+func findTask(ledger core.Ledger, id string) (core.Task, bool) {
+	for _, task := range ledger.Tasks {
+		if task.ID == id {
+			return task, true
+		}
+	}
+	return core.Task{}, false
 }
 
 func (s *Server) cancel(ctx context.Context, sid string) {

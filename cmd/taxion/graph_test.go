@@ -57,13 +57,35 @@ func TestTaskGraphCommandsAndDispatchGate(t *testing.T) {
 	if err := dispatchCmd([]string{"--task", task.ID, "--repo", task.Repo}); err != nil {
 		t.Fatal(err)
 	}
-	l, err := core.LoadLedger(storePath)
-	if err != nil || len(l.Dispatches) != 1 {
+	db, state, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if len(state.Ledger.Dispatches) != 1 {
 		t.Fatal("dispatch missing", err)
 	}
-	g, err := core.LoadTaskGraph(core.GraphPath(storePath))
-	if err != nil || len(g.Concerns) != 1 || len(g.History) != 3 {
+	g := state.Graph
+	if len(g.Concerns) != 1 || len(g.History) != 4 {
 		t.Fatal("history lost", err)
+	}
+	dispatchID := state.Ledger.Dispatches[0].ID
+	if err := dispatchCmd([]string{"transition", "--id", dispatchID, "--status", string(core.DispatchAcknowledged), "--actor", "worker", "--reason", "accepted"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatchCmd([]string{"transition", "--id", dispatchID, "--status", string(core.DispatchRunning), "--actor", "worker", "--reason", "started"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatchCmd([]string{"transition", "--id", dispatchID, "--status", string(core.DispatchSucceeded), "--actor", "worker", "--reason", "finished"}); err != nil {
+		t.Fatal(err)
+	}
+	db, state, err = loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if state.Ledger.Dispatches[0].Active || state.Graph.Dispatches[0].Status != core.DispatchSucceeded {
+		t.Fatalf("dispatch transition not projected atomically: %+v %+v", state.Ledger.Dispatches[0], state.Graph.Dispatches[0])
 	}
 	write(map[string]any{"taskId": task.ID, "status": core.Completed, "actor": "human", "reason": "skip"})
 	if err := taskCmd([]string{"transition", "--file", file}); err == nil {
