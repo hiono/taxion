@@ -39,7 +39,14 @@ before(async () => {
       return;
     }
     if (req.method === "POST" && req.url === "/api/dispatches") {
-      json(409, { error: "another dispatch is active" });
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        const p = JSON.parse(body);
+        json(409, { error: p.task === "memory-policy-denied"
+          ? "taxion: MEM-001 guardrail rejected dispatch: guardrail 1 (repo-equals)"
+          : "another dispatch is active" });
+      });
       return;
     }
     if (req.method !== "GET" && req.method !== "POST") {
@@ -126,10 +133,23 @@ describe("localhost console (API-backed)", () => {
         headers: { "content-type": "application/json" },
         body: "{}",
       });
+
       assert.equal(post.status, 502);
     } finally {
       await new Promise<void>((resolve) => dead.close(() => resolve()));
     }
+  });
+
+  it("preserves Memory policy denials from the Go API", async () => {
+    const res = await fetch(`${base}/api/dispatches`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task: "memory-policy-denied", repo: "other" }),
+    });
+    assert.equal(res.status, 409);
+    assert.deepEqual(await res.json(), {
+      error: "taxion: MEM-001 guardrail rejected dispatch: guardrail 1 (repo-equals)",
+    });
   });
 
   it("rejects PUT/PATCH/DELETE (only GET + operation POSTs exist)", async () => {

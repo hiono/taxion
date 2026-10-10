@@ -9,6 +9,7 @@
 | CHK-002 | Checkpoints must complete in declaration order; out-of-order, unknown, or post-completion advances are rejected. | `core.Sequence.Advance` |
 | LED-001 | Ledger (tasks/dispatches/evidence/checkpoints) must survive a save/load round-trip; sqlite backend deferred to Server phase must preserve this shape. | `core.Ledger.Save/LoadLedger` |
 | DSP-001 | An active Dispatch must never be silently replaced. | `core.GuardActiveDispatch` |
+| MEM-001 | Every approved structured Memory check in the selected workspace must match before dispatch; unreadable or malformed policy must fail. | `memory.CheckDispatch`, CLI/HTTP/ACP dispatch; Web uses the HTTP verdict |
 | SDK-001 | SDK-specific types must not appear in the governance core. | `internal/core` imports stdlib only (CI `go list` check) |
 | REP-001 | Task creation, dispatch, and evidence binding require an explicit `--repo`; the target is never inferred from cwd. | `core.CheckRepo`, CLI `task create`/`dispatch`/`review` |
 

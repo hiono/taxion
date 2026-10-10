@@ -30,6 +30,8 @@ implementation results; the reference documents linked from
 - [x] M5 / `public-prep` (#24) — ADR-0015 security model, history scan clean, public release.
 - [x] M5 / `mode-switch` (#25) — F-lite: --mode loopback|remote, ADR-0016, IdP deferred.
 - [x] M6 / `memory-model` (#27) — ADR-0017 layers×ranges×promotion, docs/08.
+- [x] M6 / `guideline-promotion` (#29) — configurable warning threshold,
+  explicit structured approval, and shared dispatch checks (MEM-001, ADR-0019).
 - [x] Future / `browser-terminal-eval` (#21) — approach and shell-access threat
   model recorded in ADR-0018. Implementation remains deferred; use SSH/editor
   access in docs/06 Pattern D. A terminal implementation needs its own Issue

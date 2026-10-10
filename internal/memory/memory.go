@@ -75,6 +75,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := db.Exec(promotionSchema); err != nil {
+		db.Close()
+		return nil, err
+	}
 	s := &Store{db: db}
 	if err := s.ensureFTS(); err != nil {
 		db.Close()
@@ -136,6 +140,9 @@ func (s *Store) Put(kind string, e Entry) (int64, error) {
 	}
 	if e.Status == "" {
 		e.Status = "proposed"
+	}
+	if kind == KindGuardrail && e.Status == "approved" {
+		return 0, fmt.Errorf("taxion: approved guardrails require candidate approval with a structured check")
 	}
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = time.Now().UTC()

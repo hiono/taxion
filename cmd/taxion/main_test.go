@@ -1,8 +1,14 @@
 package main
 
 import (
+	"errors"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/memory"
 )
 
 func TestUsageDescribesCurrentCommands(t *testing.T) {
@@ -10,10 +16,12 @@ func TestUsageDescribesCurrentCommands(t *testing.T) {
 		"memory search", "--query required", "memory export", "no transmission",
 		"Bind coder-output evidence", "local stub",
 		"task create, dispatch and review require an explicit --repo",
+		"memory configure", "memory approve", "memory checks",
 	} {
 		if !strings.Contains(usage, text) {
 			t.Errorf("usage missing %q", text)
 		}
+
 	}
 }
 
@@ -38,5 +46,61 @@ func TestCheckServeMode(t *testing.T) {
 		if (err != nil) != tc.wantErr {
 			t.Errorf("%s: err = %v, wantErr = %v", tc.name, err, tc.wantErr)
 		}
+	}
+}
+
+func TestMemoryPromotionCLIAndDispatch(t *testing.T) {
+	previous := storePath
+	storePath = filepath.Join(t.TempDir(), "ledger.json")
+	t.Cleanup(func() { storePath = previous })
+	if err := initCmd(); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"0", "-1", "bad"} {
+		if err := memoryCmd([]string{"configure", "--promote-after", n}); err == nil {
+			t.Fatalf("invalid threshold accepted: %s", n)
+		}
+	}
+	if err := memoryCmd([]string{"configure", "--promote-after", "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryCmd([]string{"warn", "--body", "use target", "--scope", "global"}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := openMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lessons, err := s.List(memory.KindLesson, memory.ScopeGlobal)
+	if err != nil || len(lessons) != 1 {
+		t.Fatalf("CLI candidate: %+v %v", lessons, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"approve", "--id", fmt.Sprint(lessons[0].ID),
+		"--check", memory.CheckRepoEquals, "--value", "target"}
+	if err := memoryCmd(args); err == nil {
+		t.Fatal("global approval must require explicit scope")
+	}
+	if err := memoryCmd(append(args, "--scope", "global")); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryCmd([]string{"checks"}); err != nil {
+		t.Fatal(err)
+	}
+	l := core.Ledger{Tasks: []core.Task{{ID: "t", Title: "fix: target", Repo: "target"}}}
+	if err := l.Save(storePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatchCmd([]string{"--task", "t", "--repo", "other"}); !errors.Is(err, memory.ErrGuardrailRejected) {
+		t.Fatalf("CLI dispatch must enforce approved policy: %v", err)
+	}
+	got, err := core.LoadLedger(storePath)
+	if err != nil || len(got.Dispatches) != 0 {
+		t.Fatalf("rejected CLI dispatch changed ledger: %+v %v", got, err)
+	}
+	if err := dispatchCmd([]string{"--task", "t", "--repo", "target"}); err != nil {
+		t.Fatalf("matching CLI dispatch failed: %v", err)
 	}
 }

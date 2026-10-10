@@ -62,10 +62,16 @@ The following tables describe the intended model, not the current store:
 
 ## Implementation status
 
-The decision above records the intended model. M6-3 implemented warning
+The decision above records the intended model. The initial M6-3 implementation provided warning
 counting and guideline-candidate creation at a fixed threshold of three
 occurrences; it did not implement configurable thresholds or promotion
 to enforced guardrails. The CLI stores both scopes in one `memory.db`,
 rather than separate project and global directories. Current behavior
 is documented in [the Memory reference](../08-memory-model.md);
 implementation results are recorded in Issues #28–#34.
+
+M6-3 was reopened to complete threshold configuration, explicit approval,
+and dispatch enforcement. The accepted predicate boundary is recorded in
+[ADR-0019](0019-structured-memory-approval-and-dispatch-checks.md);
+current commands and limitations remain in the Memory reference. The
+initial three-occurrence implementation described above is historical.

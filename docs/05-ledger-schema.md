@@ -87,7 +87,10 @@ serving modes and token requirements are described in
 
 - `POST /api/tasks` `{title, repo}` → 201 Task. Missing title/repo → 400 (REP-001).
 - `POST /api/dispatches` `{task, repo}` → 201 Dispatch. Unknown task → 404;
-  another dispatch active → 409 (DSP-001). Missing task/repo → 400.
+  another dispatch active → 409 (DSP-001); approved Memory predicate mismatch
+  → 409 (MEM-001); unreadable or malformed Memory policy → 500.
+  Missing task/repo → 400. See [Memory reference](08-memory-model.md) for
+  predicate semantics. Dispatch request and ledger keys are unchanged.
 - `POST /api/reviews` `{task, repo, sha}` → 201 Evidence. Empty sha → 400
   (SHA-001). Missing task/repo → 400.
 - Request bodies share the CLI guards exactly; web passes POST requests through

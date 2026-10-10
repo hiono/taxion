@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/memory"
 )
 
 func seed(t *testing.T) (string, core.Ledger) {
@@ -26,6 +28,7 @@ func seed(t *testing.T) (string, core.Ledger) {
 			{SHA: "abc123", TaskID: "t-1", CreatedAt: time.Now().UTC()},
 		},
 	}
+
 	path := filepath.Join(t.TempDir(), "ledger.json")
 	if err := l.Save(path); err != nil {
 		t.Fatal(err)
@@ -265,5 +268,70 @@ func TestNoTokenKeepsLegacyBehavior(t *testing.T) {
 	h := (&Server{StorePath: path}).Handler()
 	if rec := authed(t, h, http.MethodGet, "/api/ledger", "", ""); rec.Code != http.StatusOK {
 		t.Fatalf("no-token GET = %d, want 200", rec.Code)
+	}
+}
+
+func TestDispatchMemoryDatabaseFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ledger.json")
+	l := core.Ledger{Tasks: []core.Task{{ID: "t", Title: "task", Repo: "repo"}}}
+	if err := l.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(memory.PathForLedger(path), []byte("corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := post(t, (&Server{StorePath: path}).Handler(), "/api/dispatches", `{"task":"t","repo":"repo"}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("storage failure must be 500, not policy denial/success: %d %s", rec.Code, rec.Body.String())
+	}
+	got, err := core.LoadLedger(path)
+	if err != nil || len(got.Dispatches) != 0 {
+		t.Fatalf("storage failure changed ledger: %+v %v", got, err)
+	}
+}
+
+func TestDispatchMemoryPolicy(t *testing.T) {
+	for _, kind := range []string{memory.CheckRepoEquals, memory.CheckTaskTitleMatches} {
+		t.Run(kind, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ledger.json")
+			l := core.Ledger{Tasks: []core.Task{
+				{ID: "good", Title: "fix: safe", Repo: "target"},
+				{ID: "bad", Title: "unsafe", Repo: "target"},
+			}}
+			if err := l.Save(path); err != nil {
+				t.Fatal(err)
+			}
+			s, err := memory.Open(memory.PathForLedger(path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			if err := s.SetPromoteAfter(1); err != nil {
+				t.Fatal(err)
+			}
+			_, candidate, err := s.Warn("check dispatch", memory.ScopeProject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			value := "target"
+			if kind == memory.CheckTaskTitleMatches {
+				value = "^fix:"
+			}
+			if _, err := s.Approve(candidate, kind, value); err != nil {
+				t.Fatal(err)
+			}
+			h := (&Server{StorePath: path}).Handler()
+			bad := `{"task":"bad","repo":"other"}`
+			if rec := post(t, h, "/api/dispatches", bad); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "MEM-001") {
+				t.Fatalf("policy denial: %d %s", rec.Code, rec.Body.String())
+			}
+			got, err := core.LoadLedger(path)
+			if err != nil || len(got.Dispatches) != 0 {
+				t.Fatalf("denial changed ledger: %+v %v", got, err)
+			}
+			if rec := post(t, h, "/api/dispatches", `{"task":"good","repo":"target"}`); rec.Code != http.StatusCreated {
+				t.Fatalf("matching policy: %d %s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }

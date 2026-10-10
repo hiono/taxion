@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/memory"
 )
 
 type msg = map[string]any
@@ -18,6 +22,7 @@ func run(t *testing.T, srv *Server, lines ...string) []msg {
 	if err := srv.Serve(context.Background(), strings.NewReader(in), &out); err != nil {
 		t.Fatalf("serve: %v", err)
 	}
+
 	var msgs []msg
 	trimmed := strings.TrimSpace(out.String())
 	if trimmed == "" {
@@ -185,5 +190,53 @@ func TestGates(t *testing.T) {
 	}}))
 	if _, ok := msgs[0]["error"]; !ok {
 		t.Fatalf("expected cancelled-session error, got %v", msgs[0])
+	}
+}
+
+func TestDispatchMemoryPolicyOnExplicitAndPromptMethods(t *testing.T) {
+	for _, method := range []string{"taxion/dispatch", "session/prompt"} {
+		t.Run(method, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ledger.json")
+			srv := New(path)
+			msgs := run(t, srv, req(1, "session/new", msg{"cwd": "/target"}))
+			sid := result(t, msgs[0])["sessionId"].(string)
+			s, err := memory.Open(memory.PathForLedger(path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.SetPromoteAfter(1); err != nil {
+				t.Fatal(err)
+			}
+			_, candidate, err := s.Warn("check target", memory.ScopeGlobal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Approve(candidate, memory.CheckRepoEquals, "/other"); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			params := msg{"sessionId": sid}
+			if method == "session/prompt" {
+				params["prompt"] = []any{msg{"type": "text", "text": "dispatch"}}
+			}
+			msgs = run(t, srv, req(2, method, params))
+			if len(msgs) != 1 || !strings.Contains(string(mustJSON(msgs[0])), "MEM-001") {
+				t.Fatalf("ACP policy denial: %+v", msgs)
+			}
+			l, err := core.LoadLedger(path)
+			if err != nil || len(l.Dispatches) != 0 {
+				t.Fatalf("ACP denial changed ledger: %+v %v", l, err)
+			}
+			// A corrupt policy must not turn into an empty/no-policy fallback.
+			if err := os.WriteFile(memory.PathForLedger(path), []byte("corrupt"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			msgs = run(t, srv, req(3, method, params))
+			if len(msgs) != 1 || msgs[0]["error"] == nil {
+				t.Fatalf("corrupt ACP policy must fail: %+v", msgs)
+			}
+		})
 	}
 }

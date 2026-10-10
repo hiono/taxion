@@ -11,6 +11,11 @@ surfaces as 502, never as a silent success. This slice never reads ledger
 files and never mutates on its own. All writes land in the CLI-owned ledger
 via the API.
 
+Approved [Memory checks](../docs/08-memory-model.md#approval-and-dispatch-checks)
+are evaluated by Go before dispatch. The console preserves policy denials
+(409, MEM-001) and storage/configuration failures (500); it does not interpret
+guidelines or add conditions to the dispatch request.
+
 Localhost scope with M5 auth: when the upstream API requires a Bearer token,
 pass `--token` or `TAXION_TOKEN` — it is attached server-side to upstream
 fetches and never sent to the browser. Listens on 127.0.0.1 by default;

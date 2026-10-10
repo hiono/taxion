@@ -6,12 +6,14 @@ package server
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/memory"
 )
 
 // Server serves the Taxion API from a JSON ledger file.
@@ -232,9 +234,11 @@ func (s *Server) createDispatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	found := false
+	var selected core.Task
 	for _, t := range l.Tasks {
 		if t.ID == body.Task {
 			found = true
+			selected = t
 			break
 		}
 	}
@@ -244,6 +248,14 @@ func (s *Server) createDispatch(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := core.GuardActiveDispatch(l.Dispatches); err != nil {
 		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err := memory.CheckDispatch(s.StorePath, selected, body.Repo); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, memory.ErrGuardrailRejected) {
+			status = http.StatusConflict
+		}
+		writeErr(w, status, err.Error())
 		return
 	}
 	d := core.Dispatch{ID: newID("d"), TaskID: body.Task, Repo: body.Repo, Active: true, CreatedAt: time.Now().UTC()}

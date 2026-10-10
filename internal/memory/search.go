@@ -23,8 +23,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
 `
 
 // Triggers cover both Put and promotion without duplicating index updates
-// in callers. Entry updates need a corresponding trigger before adding
-// an UPDATE path.
+// in callers. Status-only approval leaves indexed fields unchanged; changes
+// to title/body/scope need an UPDATE trigger before adding such a path.
 const ftsTriggers = `
 CREATE TRIGGER IF NOT EXISTS lessons_ai AFTER INSERT ON lessons BEGIN
   INSERT INTO memory_fts(title,body,kind,ref_id,scope)

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/memory"
 	"github.com/hiono/taxion/internal/runtime/local"
 )
 
@@ -326,6 +327,21 @@ func (s *Server) dispatch(sid string, sess *acpSession, out *bufio.Writer) (stri
 		return "", err
 	}
 	if err := core.GuardActiveDispatch(l.Dispatches); err != nil {
+		return "", err
+	}
+	var task core.Task
+	found := false
+	for _, candidate := range l.Tasks {
+		if candidate.ID == sess.taskID {
+			task = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("unknown task: %s", sess.taskID)
+	}
+	if err := memory.CheckDispatch(s.storePath, task, sess.cwd); err != nil {
 		return "", err
 	}
 	d := core.Dispatch{ID: fmt.Sprintf("d-%d", time.Now().UnixNano()),

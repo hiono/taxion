@@ -41,6 +41,9 @@ Commands:
   memory get          Fetch one memory entry (--kind and --id required)
   memory list         List memory entries (--kind required, [--scope] filter)
   memory warn         Record a repeated warning (--body required, [--scope])
+  memory configure    Set the warning threshold (--promote-after required)
+  memory approve      Approve a candidate (--id, --check, --value required; MEM-001)
+  memory checks       List approved structured dispatch checks
   memory search       Search memory entries (--query required, [--kind, --scope])
   memory export       Print memory entries ([--scope], [--sanitize], no transmission)
 
@@ -233,9 +236,11 @@ func dispatchCmd(args []string) error {
 		return err
 	}
 	found := false
+	var selected core.Task
 	for _, t := range l.Tasks {
 		if t.ID == *task {
 			found = true
+			selected = t
 			break
 		}
 	}
@@ -243,6 +248,9 @@ func dispatchCmd(args []string) error {
 		return fmt.Errorf("dispatch: unknown task %q", *task)
 	}
 	if err := core.GuardActiveDispatch(l.Dispatches); err != nil {
+		return err
+	}
+	if err := memory.CheckDispatch(storePath, selected, *repo); err != nil {
 		return err
 	}
 	d := core.Dispatch{ID: newID("d"), TaskID: *task, Repo: *repo, Active: true, CreatedAt: time.Now().UTC()}
@@ -399,7 +407,7 @@ func auditCmd(args []string) error {
 // Keep Memory beside the selected ledger so --store selects one workspace
 // for both kinds of state.
 func memStorePath() string {
-	return filepath.Join(filepath.Dir(storePath), "memory.db")
+	return memory.PathForLedger(storePath)
 }
 
 func openMemory() (*memory.Store, error) {
@@ -411,9 +419,81 @@ func openMemory() (*memory.Store, error) {
 
 func memoryCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: taxion memory put|get|list|warn|search|export …")
+		return fmt.Errorf("usage: taxion memory put|get|list|warn|configure|approve|checks|search|export …")
 	}
 	switch args[0] {
+	case "configure":
+		fs := flag.NewFlagSet("memory configure", flag.ContinueOnError)
+		n := fs.Int("promote-after", 0, "positive warning threshold (required)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *n < 1 || fs.NArg() != 0 {
+			return fmt.Errorf("memory configure: --promote-after must be positive and no positional arguments are accepted")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		if err := s.SetPromoteAfter(*n); err != nil {
+			return err
+		}
+		fmt.Printf("taxion: warning promotion threshold set to %d\n", *n)
+		return nil
+	case "approve":
+		fs := flag.NewFlagSet("memory approve", flag.ContinueOnError)
+		id := fs.Int64("id", 0, "candidate lesson id (required)")
+		check := fs.String("check", "", "repo-equals|task-title-matches (required)")
+		value := fs.String("value", "", "exact repository identity or Go regular expression (required)")
+		scope := fs.String("scope", "project", "candidate scope; global approval requires --scope global")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *id < 1 || *check == "" || *value == "" || fs.NArg() != 0 {
+			return fmt.Errorf("memory approve: positive --id, --check and --value are required; no positional arguments accepted")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		candidate, err := s.Get(memory.KindLesson, *id)
+		if err != nil {
+			return err
+		}
+		if candidate.Scope != *scope {
+			return fmt.Errorf("memory approve: candidate scope is %s; pass --scope %s explicitly", candidate.Scope, candidate.Scope)
+		}
+		gid, err := s.Approve(*id, *check, *value)
+		if err != nil {
+			return err
+		}
+		if notice := memory.ScopeWriteNotice(candidate.Scope); notice != "" {
+			fmt.Println(notice)
+		}
+		fmt.Printf("taxion: candidate %d approved as guardrail %d (%s, %s)\n", *id, gid, candidate.Scope, *check)
+		return nil
+	case "checks":
+		if len(args) != 1 {
+			return fmt.Errorf("memory checks: no arguments accepted")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		checks, err := s.ApprovedChecks()
+		if err != nil {
+			return err
+		}
+		if len(checks) == 0 {
+			fmt.Println("taxion: no approved Memory checks")
+		}
+		for _, check := range checks {
+			fmt.Printf("%d\tlesson=%d\t%s\t%s\t%q\n", check.ID, check.LessonID, check.Scope, check.Kind, check.Value)
+		}
+		return nil
 	case "put":
 		fs := flag.NewFlagSet("memory put", flag.ContinueOnError)
 		kind := fs.String("kind", "", "lesson|decision|guardrail|concern (required)")
@@ -531,7 +611,7 @@ func memoryCmd(args []string) error {
 	case "export":
 		return memoryExportCmd(args[1:])
 	default:
-		return fmt.Errorf("usage: taxion memory put|get|list|warn|search|export …")
+		return fmt.Errorf("usage: taxion memory put|get|list|warn|configure|approve|checks|search|export …")
 	}
 }
 
