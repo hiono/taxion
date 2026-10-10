@@ -10,8 +10,8 @@ import (
 )
 
 // Ledger is the durable record of tasks, dispatches, evidence, and
-// checkpoints (LED-001). The file backend uses stdlib JSON; a sqlite backend
-// is deferred to the Server phase and must preserve this shape.
+// checkpoints (LED-001). CLI/API use stdlib JSON; internal/store provides
+// a separate SQLite backend preserving this shape.
 type Ledger struct {
 	Tasks       []Task       `json:"tasks"`
 	Dispatches  []Dispatch   `json:"dispatches"`

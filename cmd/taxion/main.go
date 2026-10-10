@@ -1,8 +1,7 @@
 // Command taxion is the human-facing CLI for the Taxion control plane.
 //
-// Local phase scope: local-first, deterministic, no network, no SDK dependency.
-// State lives in a JSON ledger file (default .taxion/ledger.json).
-// Future: thin client over Taxion Server (Server phase+) with ACP support (Platform phase).
+// Task operations use a JSON ledger (default .taxion/ledger.json); Memory
+// uses SQLite beside it. serve exposes HTTP and acp exposes stdio JSON-RPC.
 package main
 
 import (
@@ -35,8 +34,8 @@ Commands:
   task list           List tasks ([--repo] filter, [--json])
   dispatch            Dispatch a task (--task and --repo required)
   dispatch list       List dispatches ([--repo] filter, [--json])
-  review              Review a coder output (--task, --sha and --repo required)
-  resume              Resume a session (--session required)
+  review              Bind coder-output evidence (--task, --sha and --repo required)
+  resume              Print a resume acknowledgement (local stub; --session required)
   acp                 Serve ACP v1 over stdio (spike)
   serve               Serve HTTP API over the ledger ([--addr], [--mode], [--token]/TAXION_TOKEN, [--audit])
   gen-token           Print a random Bearer token for serve (M5 auth)
@@ -45,8 +44,10 @@ Commands:
   memory get          Fetch one memory entry (--kind and --id required)
   memory list         List memory entries (--kind required, [--scope] filter)
   memory warn         Record a repeated warning (--body required, [--scope])
+  memory search       Search memory entries (--query required, [--kind, --scope])
+  memory export       Print memory entries ([--scope], [--sanitize], no transmission)
 
-Identity gate (REP-001): mutating commands require an explicit --repo.
+Identity gate (REP-001): task create, dispatch and review require an explicit --repo.
 The target is never inferred from the working directory.
 `
 

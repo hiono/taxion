@@ -1,7 +1,8 @@
 // Local console. Serves one HTML page with task operation forms (create task,
 // dispatch, review) plus a JSON API proxied to `taxion serve` (M4).
-// Guarantees: GET + the three operation POSTs exist; every other method gets
-// 405; this slice never reads ledger files and never mutates on its own —
+// GET serves the page and ledger; POST under /api/ is proxied upstream.
+// Other methods get 405 and unknown GET/POST paths get 404.
+// This slice never reads ledger files and never mutates on its own —
 // all writes go to the upstream API, and upstream failure surfaces as 502,
 // never as a silent success (fail-closed display).
 //
@@ -153,7 +154,7 @@ export function createApp(upstream: string, token = "") {
     }
     if (req.method !== "GET" && req.method !== "POST") {
       res.writeHead(405, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "GET + order POSTs only" }));
+      res.end(JSON.stringify({ error: "GET and API POSTs only" }));
       return;
     }
     res.writeHead(404, { "content-type": "application/json" });

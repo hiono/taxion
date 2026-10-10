@@ -62,8 +62,9 @@ func GuardActiveDispatch(existing []Dispatch) error {
 	return nil
 }
 
-// BindEvidence enforces SHA-001: reviewer execution must bind to the exact
-// retained coder output SHA — empty or ambiguous SHAs are rejected.
+// BindEvidence records the caller-supplied output SHA (SHA-001). Empty
+// values are rejected; format, Git existence, and reviewer execution are
+// not checked here.
 func BindEvidence(taskID, sha string) (Evidence, error) {
 	if sha == "" {
 		return Evidence{}, ErrEmptySHA

@@ -14,6 +14,8 @@ import (
 // prev (genesis). The chain detects modification, insertion, deletion, and
 // reordering of covered lines — NOT silent tail truncation (a removed tail
 // leaves a valid shorter chain; watch line counts externally).
+// It checks internal consistency, not authenticity: a fully rewritten log
+// with recomputed hashes also verifies.
 //
 // Old-line compat: lines without prev are "legacy" — valid only as a leading
 // run before the first chained line (pre-M8-G logs keep working after

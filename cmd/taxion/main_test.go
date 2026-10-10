@@ -1,6 +1,21 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestUsageDescribesCurrentCommands(t *testing.T) {
+	for _, text := range []string{
+		"memory search", "--query required", "memory export", "no transmission",
+		"Bind coder-output evidence", "local stub",
+		"task create, dispatch and review require an explicit --repo",
+	} {
+		if !strings.Contains(usage, text) {
+			t.Errorf("usage missing %q", text)
+		}
+	}
+}
 
 func TestCheckServeMode(t *testing.T) {
 	cases := []struct {

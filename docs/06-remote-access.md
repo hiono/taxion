@@ -10,7 +10,7 @@ loopback**:
   `--mode remote` is the named opt-in for LAN/docker use and requires
   `--token` (ADR-0016). Binding beyond loopback without a token is refused
   outright.
-- web console — default `--host 127.0.0.1:3939`; `--token` /
+- web console — default `--host 127.0.0.1` and `--port 3939`; `--token` /
   `TAXION_TOKEN` is forwarded server-side to the upstream API, never to the
   browser.
 
@@ -119,7 +119,7 @@ evidence binding, and a separate SSH channel for editing, building, and
 testing in the development container:
 
 ```sh
-# 1. tunnels (home): API + web + your editor's channel
+# 1. tunnels (home): API + web; the editor uses a separate SSH connection
 ssh -L 3938:localhost:3938 -L 3939:localhost:3939 user@work-host
 # 2. API in docker (work-host): Pattern B, loopback-published only
 docker run -d --name taxion \

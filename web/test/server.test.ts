@@ -137,6 +137,7 @@ describe("localhost console (API-backed)", () => {
     for (const method of ["PUT", "PATCH", "DELETE"]) {
       const res = await fetch(`${base}/api/ledger`, { method });
       assert.equal(res.status, 405, method);
+      assert.deepEqual(await res.json(), { error: "GET and API POSTs only" });
       const home = await fetch(`${base}/`, { method });
       assert.equal(home.status, 405, `${method} /`);
     }

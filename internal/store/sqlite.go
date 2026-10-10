@@ -5,8 +5,8 @@
 // driver (modernc.org/sqlite) — no cgo toolchain required.
 //
 // The outbox table implements the outbox pattern for future server delivery:
-// writers enqueue events in the same transaction as state changes; a relay
-// claims unsent rows and marks them sent after delivery.
+// callers enqueue events, read unsent rows, and mark them sent after delivery.
+// Enqueue is separate from SaveLedger; no relay is wired into the CLI/API.
 package store
 
 import (

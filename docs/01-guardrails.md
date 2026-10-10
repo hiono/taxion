@@ -10,7 +10,13 @@
 | LED-001 | Ledger (tasks/dispatches/evidence/checkpoints) must survive a save/load round-trip; sqlite backend deferred to Server phase must preserve this shape. | `core.Ledger.Save/LoadLedger` |
 | DSP-001 | An active Dispatch must never be silently replaced. | `core.GuardActiveDispatch` |
 | SDK-001 | SDK-specific types must not appear in the governance core. | `internal/core` imports stdlib only (CI `go list` check) |
-| REP-001 | Every mutating CLI command requires an explicit `--repo`; the target is never inferred from cwd. | `core.CheckRepo`, CLI `task create`/`dispatch`/`review` |
+| REP-001 | Task creation, dispatch, and evidence binding require an explicit `--repo`; the target is never inferred from cwd. | `core.CheckRepo`, CLI `task create`/`dispatch`/`review` |
+
+These statements define the intended constraints. Current `review`
+operations bind evidence only: they require a non-empty SHA but do not
+verify its format, existence in Git, or reviewer execution. ROLE-001
+is an adapter-isolation requirement, not a claim that the CLI/API
+starts independent coder and reviewer processes.
 
 ## Failure lessons (generalized, no provenance)
 

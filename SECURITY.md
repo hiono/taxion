@@ -32,3 +32,18 @@ Do not include PoC data containing personal information, credentials, or interna
 - Single shared token (rotation is revocation; no per-user identity yet).
 - No TLS in Taxion itself — terminate in front for anything beyond trusted nets.
 - Audit log grows until the operator rotates it.
+
+## Current implementation notes
+
+`--mode loopback` is the default and rejects non-loopback binding even
+with a token. `--mode remote` requires a token. Authentication failures
+are subject to IP-based rate limiting and lockout (M8-E); audit entries
+include self-asserted operator labels (M8-D) and a hash chain (M8-G).
+Operator labels do not authenticate identity, and the chain does not
+detect tail truncation or a fully rewritten log with recomputed hashes.
+See `docs/07-audit-log.md` for these limits.
+
+The SHA constraint above is a requirement on review inputs. Current
+CLI/API review operations record a non-empty SHA but do not execute a
+reviewer or verify the revision in Git. CI hygiene checks token patterns
+and private-key headers, not arbitrary private hosts or personal data.

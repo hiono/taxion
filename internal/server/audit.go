@@ -153,7 +153,7 @@ func (a *auditor) log(e auditEntry) error {
 // withAudit wraps next: it serves the request, then records mutations and
 // denials. Authed reflects whether THIS request presented the valid token
 // (false when auth is off or the check failed) — the token itself is never
-// read here, only the authorize() verdict.
+// persisted here; the shared comparison is used to compute the verdict.
 func (a *auditor) withAudit(s *Server, next http.Handler) http.Handler {
 	if !a.enabled() {
 		return next

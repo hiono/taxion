@@ -18,7 +18,8 @@ it is the precondition for the M3/M4 work and for revisiting ADR-0012.
 
 ## Top-level ledger object
 
-Keys (all present, arrays, insertion order significant):
+Keys (all present, arrays or `null` for uninitialized slices; insertion
+order significant):
 
 | key           | element |
 | ------------- | ------- |
@@ -50,7 +51,7 @@ Keys (all present, arrays, insertion order significant):
 
 | key         | type   |
 | ----------- | ------ |
-| `sha`       | string (exact coder-output SHA, never `"latest"`) |
+| `sha`       | string (caller-supplied coder-output SHA; validation limits below) |
 | `taskId`    | string |
 | `createdAt` | string (RFC3339Nano, UTC) |
 
@@ -74,9 +75,15 @@ Reads:
 - `GET /api/tasks[?repo=]` → Task array
 - `GET /api/dispatches[?repo=]` → Dispatch array
 - `GET /api/evidence[?task=]` → Evidence array
-- non-GET on a read route → 405; unknown path → 404; unreadable ledger → 500 (fail-closed)
+- `/api/ledger` and `/api/evidence` are GET-only (405 otherwise).
+  `/api/tasks` and `/api/dispatches` also accept POST as described below.
+  Unknown path → 404; unreadable ledger → 500 (fail-closed).
 
-Writes (v1, added M4; localhost only, no auth — auth is M5):
+Writes (v1, added M4):
+
+The initial M4 scope was localhost-only without authentication. Current
+serving modes and token requirements are described in
+`docs/06-remote-access.md`.
 
 - `POST /api/tasks` `{title, repo}` → 201 Task. Missing title/repo → 400 (REP-001).
 - `POST /api/dispatches` `{task, repo}` → 201 Dispatch. Unknown task → 404;
@@ -85,3 +92,7 @@ Writes (v1, added M4; localhost only, no auth — auth is M5):
   (SHA-001). Missing task/repo → 400.
 - Request bodies share the CLI guards exactly; web passes POST requests through
   untouched. No ledger keys were added for writes (freeze intact).
+
+`review` records the supplied SHA as evidence. It does not execute a
+reviewer or check that the SHA exists in Git. The current guard rejects
+an empty SHA; callers must supply the exact intended output revision.

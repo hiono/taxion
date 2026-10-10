@@ -48,7 +48,7 @@ any `X-Operator` value. It labels callers by self-declaration but does not
 authenticate their identities. Per-operator
 identity is the deferred IdP work (ADR-0016).
 
-## Fail-closed behavior
+## Audit destination failures
 
 - `serve` probes the audit destination at startup (`CheckAudit`) and refuses
   to start when it is unwritable.
@@ -72,9 +72,12 @@ Exit 0 prints `chain OK`; exit 1 names the first broken line — treat every
 line from there on as untrusted and investigate before continuing to append.
 
 What the chain catches: modification, insertion, deletion, and reordering
-of covered lines. What it does NOT catch: silent tail truncation (a cut
-tail is still a valid shorter chain) — watch line counts externally, and
-back the file up with the ledger.
+of covered lines when the stored hashes no longer match. It does not
+authenticate the log: replacing the entire file and recomputing its
+hashes produces another internally consistent chain. It also does not
+catch tail truncation (a cut tail is still a valid shorter chain).
+Preserve an independently trusted copy or hash and monitor line counts
+outside Taxion when those changes must be detected.
 
 Old-line compat: lines without `prev` are "legacy" and valid only as a
 leading run (pre-M8-G logs keep verifying after upgrade; the first chained
@@ -87,8 +90,9 @@ archived file so its prefix stays verifiable.
 - The log is append-only: Taxion never rotates, truncates, or deletes it.
   Deleting audit history would destroy the evidence the log exists to keep.
 - File mode is 0600 on creation. Back it up alongside the ledger file.
-- Operators rotate externally when it grows (e.g. move aside + `logrotate`
-  with `copytruncate`, or monthly archival). Rotation is an operator act,
-  recorded outside Taxion — same as ledger backups.
+- To rotate, stop `serve`, archive the log, and restart with an empty or
+  new audit path. The server keeps an open file handle and the last hash;
+  moving or truncating the file while it runs does not reset that state.
+  Record rotation outside Taxion and retain the archived log.
 - Keep retention aligned with the ledger: as long as a ledger generation is
   kept, its audit lines are kept.

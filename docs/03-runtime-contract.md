@@ -23,10 +23,19 @@ type Runtime interface {
 - `internal/runtime/local`: in-process reference adapter. Runs a `core.Sequence`
   per session (`CompleteStep` enforces CHK-002 order), emits neutral
   `checkpoint`/`done` events, one instance per role (ROLE-001 isolation).
+- `internal/runtime/proc`: starts a configured external command, streams stdout
+  and stderr as `output` events, and reports `done` or `failed` at process exit.
+  `Resume` validates an existing session; it does not restart a process.
+  Checkpoint sequencing remains separate from this adapter.
 - `internal/runtime/copilot/` (evaluation task; not yet vendored):
   - Evaluation criteria: session start/resume fidelity, event mapping cost,
     authentication requirements (no secret in repo), version pinning.
   - If evaluation fails, core remains untouched.
+
+The current ACP server uses `internal/runtime/local`, not `proc`. Its
+dispatch/review methods record ledger operations; they do not run an LLM
+or an independent reviewer. The CLI `resume` command is a local stub,
+separate from the Runtime interface.
 
 ## Anti-pattern (must avoid)
 

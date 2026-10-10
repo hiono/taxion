@@ -23,5 +23,7 @@
 
 ## CI
 
-- `hygiene` job greps for known secret prefixes and internal-host patterns.
-  Findings block merge; false positives are allow-listed explicitly in the workflow file.
+- `hygiene` scans Go source and selected configuration files for full token
+  patterns and private-key headers. Markdown and the workflow itself are
+  excluded. It does not check personal names, internal hosts, or arbitrary
+  sensitive data; those require review. A match fails the job.

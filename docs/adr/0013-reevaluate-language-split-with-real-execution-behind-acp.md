@@ -43,3 +43,11 @@ for M4, remains open). Revisit triggers from here:
 2. A write-capable web UI is proposed (revisits ADR-0011 first, then this).
 3. A worker runtime appears that Go cannot supervise (e.g. browser-only
    agent harness) — genuine multi-language pressure.
+
+## Implementation clarification
+
+The evaluation above treated proc-backed execution as an ACP integration.
+The current code provides `internal/runtime/proc` separately, while ACP
+constructs a `local.Adapter`. ACP dispatch records the ledger operation
+and emits notifications; it does not start the configured worker process.
+The decision to defer a language split remains unchanged.
