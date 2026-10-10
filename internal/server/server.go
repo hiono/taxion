@@ -4,9 +4,7 @@
 package server
 
 import (
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/ledger", s.handleLedger)
 	mux.HandleFunc("/api/tasks", s.handleTasks)
 	mux.HandleFunc("/api/dispatches", s.handleDispatches)
+	mux.HandleFunc("GET /api/dispatches/{id}/instruction", s.handleDispatchInstruction)
 	mux.HandleFunc("/api/evidence", s.handleEvidence)
 	mux.HandleFunc("/api/reviews", s.handleReviews)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +78,33 @@ func (s *Server) Handler() http.Handler {
 	})
 	h = (&auditor{path: s.AuditPath}).withAudit(s, h)
 	return h
+}
+
+func (s *Server) handleDispatchInstruction(w http.ResponseWriter, r *http.Request) {
+	if s.WorkspacePath == "" {
+		writeErr(w, http.StatusNotFound, "dispatch instruction not available")
+		return
+	}
+	db, err := store.Open(s.WorkspacePath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "cannot load dispatch instruction")
+		return
+	}
+	defer db.Close()
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "cannot load dispatch instruction")
+		return
+	}
+	dispatch, ok := state.Graph.GraphDispatch(r.PathValue("id"))
+	if !state.HasGraph || !ok {
+		writeErr(w, http.StatusNotFound, "dispatch instruction not found")
+		return
+	}
+	writeJSON(w, map[string]any{
+		"instruction":     dispatch.Instruction,
+		"instructionHash": dispatch.InstructionHash,
+	})
 }
 
 // Share the comparison with audit reporting so authentication and
@@ -286,8 +312,11 @@ func (s *Server) listDispatches(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createDispatch(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Task string `json:"task"`
-		Repo string `json:"repo"`
+		Task               string `json:"task"`
+		Repo               string `json:"repo"`
+		Relationship       string `json:"relationship"`
+		RelatedDispatchID  string `json:"relatedDispatchId"`
+		RelationshipReason string `json:"relationshipReason"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -320,17 +349,16 @@ func (s *Server) createDispatch(w http.ResponseWriter, r *http.Request) {
 				if err := state.Graph.CheckExecutable(body.Task, body.Repo); err != nil {
 					return apiError{status: http.StatusConflict, message: err.Error()}
 				}
-				task, _ := state.Graph.GraphTask(body.Task)
-				contract, err := json.Marshal(task)
-				if err != nil {
-					return err
+				relationship := core.DispatchRelationship(body.Relationship)
+				if relationship == "" {
+					relationship = core.RelationshipNone
 				}
-				hash := sha256.Sum256(contract)
-				if err := state.Graph.IssueDispatch(core.GraphDispatch{
-					ID: d.ID, TaskID: body.Task, Repository: body.Repo, Recipient: task.Owner,
-					InstructionSummary: task.Objective, InstructionHash: hex.EncodeToString(hash[:]),
-					IssuedEvidence: task.RequiredEvidence,
-				}, "http", "dispatch issued"); err != nil {
+				graphDispatch, err := core.NewGraphDispatch(state.Graph, d.ID, body.Task, body.Repo,
+					relationship, body.RelatedDispatchID, body.RelationshipReason)
+				if err != nil {
+					return apiError{status: http.StatusConflict, message: err.Error()}
+				}
+				if err := state.Graph.IssueDispatch(graphDispatch, "http", "dispatch issued"); err != nil {
 					return apiError{status: http.StatusConflict, message: err.Error()}
 				}
 			}
@@ -348,6 +376,10 @@ func (s *Server) createDispatch(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusCreated)
 		writeJSON(w, d)
+		return
+	}
+	if body.Relationship != "" || body.RelatedDispatchID != "" || body.RelationshipReason != "" {
+		writeErr(w, http.StatusConflict, "dispatch relationships require an initialized Task Graph")
 		return
 	}
 	l, ok := s.load(w)

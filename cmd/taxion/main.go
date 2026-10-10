@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -35,7 +34,7 @@ Commands:
   task track          Register/update a durable Task Graph contract (--file JSON)
   task transition     Validate and record a Task Graph transition (--file JSON)
   task graph          Print the versioned Task Graph and history
-  dispatch            Dispatch a task (--task and --repo required)
+  dispatch            Dispatch a task (--task and --repo required; revised Dispatches need an explicit relationship)
   dispatch transition Record a Dispatch lifecycle transition (--id, --status, --reason)
   dispatch list       List dispatches ([--repo] filter, [--json])
   review              Bind coder-output evidence (--task, --sha and --repo required)
@@ -268,6 +267,9 @@ func dispatchCmd(args []string) error {
 	fs := flag.NewFlagSet("dispatch", flag.ContinueOnError)
 	task := fs.String("task", "", "task id")
 	repo := fs.String("repo", "", "repository identity (required, REP-001)")
+	relationship := fs.String("relationship", string(core.RelationshipNone), "relationship to prior Dispatch")
+	relatedDispatch := fs.String("related-dispatch", "", "related prior Dispatch ID")
+	relationshipReason := fs.String("relationship-reason", "", "reason for the Dispatch relationship")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -293,6 +295,7 @@ func dispatchCmd(args []string) error {
 	}
 	var did string
 	selected := core.Task{}
+	var instruction string
 	if err := updateWorkspace(func(state *store.Workspace) error {
 		var found bool
 		for _, t := range state.Ledger.Tasks {
@@ -322,16 +325,23 @@ func dispatchCmd(args []string) error {
 				return err
 			}
 
-			gt, _ := state.Graph.GraphTask(*task)
 			did = newID("d")
-			contract, _ := json.Marshal(gt)
-			hash := sha256.Sum256(contract)
-			dispatch := core.GraphDispatch{ID: did, TaskID: *task, Repository: *repo, Recipient: gt.Owner,
-				InstructionSummary: gt.Objective, InstructionHash: hex.EncodeToString(hash[:]), IssuedEvidence: gt.RequiredEvidence}
+			dispatch, err := core.NewGraphDispatch(state.Graph, did, *task, *repo, core.DispatchRelationship(*relationship), *relatedDispatch, *relationshipReason)
+			if err != nil {
+				return err
+			}
 			if err := state.Graph.IssueDispatch(dispatch, "controller", "dispatch issued"); err != nil {
 				return err
 			}
+			instruction, err = core.RenderDispatchInstruction(dispatch)
+			if err != nil {
+				return err
+			}
 		} else {
+			if core.DispatchRelationship(*relationship) != core.RelationshipNone ||
+				*relatedDispatch != "" || *relationshipReason != "" {
+				return fmt.Errorf("dispatch relationships require an initialized Task Graph")
+			}
 			did = newID("d")
 		}
 		state.Ledger.Dispatches = append(state.Ledger.Dispatches, core.Dispatch{ID: did, TaskID: *task, Repo: *repo, Active: true, CreatedAt: time.Now().UTC()})
@@ -339,7 +349,11 @@ func dispatchCmd(args []string) error {
 	}); err != nil {
 		return err
 	}
-	fmt.Printf("taxion: dispatched %s for task %s in %s\n", did, *task, *repo)
+	if instruction != "" {
+		fmt.Println(instruction)
+	} else {
+		fmt.Printf("taxion: dispatched %s for task %s in %s\n", did, *task, *repo)
+	}
 	return nil
 }
 

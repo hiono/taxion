@@ -1,6 +1,8 @@
 package core
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,46 +42,65 @@ type TaskDependency struct {
 	State  TaskStatus `json:"state"`
 }
 
+const DispatchInstructionVersion = 1
+
 type TaskDecision struct {
 	ID     string `json:"id"`
 	Source string `json:"source"`
 	Text   string `json:"text"`
 }
 
+type HumanDecisionOption struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+
+type HumanDecisionRequest struct {
+	ID                   string                `json:"id"`
+	Question             string                `json:"question"`
+	Options              []HumanDecisionOption `json:"options"`
+	RecommendedOptionID  string                `json:"recommendedOptionId"`
+	RecommendationReason string                `json:"recommendationReason"`
+	SelectedOptionID     string                `json:"selectedOptionId"`
+	DecisionRecordID     string                `json:"decisionRecordId"`
+}
+
 // GraphTask extends the execution model without changing the legacy Task wire.
 // Parent/children, siblings and blocks are derived from parentId and dependsOn.
 type GraphTask struct {
-	ID               string           `json:"id"`
-	Title            string           `json:"title"`
-	Repo             string           `json:"repo"`
-	Type             string           `json:"type"`
-	Issue            string           `json:"issue"`
-	ChangeRef        string           `json:"changeRef"`
-	ParentID         string           `json:"parentId"`
-	DependsOn        []TaskDependency `json:"dependsOn"`
-	Supersedes       string           `json:"supersedes"`
-	Owner            string           `json:"owner"`
-	Reviewer         string           `json:"reviewer"`
-	Status           TaskStatus       `json:"status"`
-	Priority         string           `json:"priority"`
-	Objective        string           `json:"objective"`
-	Scope            []string         `json:"scope"`
-	OutOfScope       []string         `json:"outOfScope"`
-	Acceptance       []string         `json:"acceptance"`
-	RequiredEvidence []string         `json:"requiredEvidence"`
-	Branch           string           `json:"branch"`
-	BaselineSHA      string           `json:"baselineSha"`
-	TargetSHA        string           `json:"targetSha"`
-	Risk             string           `json:"risk"`
-	ExceptionIDs     []string         `json:"exceptionIds"`
-	CreatedFrom      string           `json:"createdFrom"`
-	NextAction       string           `json:"nextAction"`
-	ExitCondition    string           `json:"exitCondition"`
-	DeferredReason   string           `json:"deferredReason"`
-	ResumeCondition  string           `json:"resumeCondition"`
-	AuthorizationID  string           `json:"authorizationId"`
-	Decisions        []TaskDecision   `json:"decisions"`
-	MemoryRefs       []string         `json:"memoryRefs"`
+	ID               string                `json:"id"`
+	Title            string                `json:"title"`
+	Repo             string                `json:"repo"`
+	Type             string                `json:"type"`
+	Issue            string                `json:"issue"`
+	ChangeRef        string                `json:"changeRef"`
+	ParentID         string                `json:"parentId"`
+	DependsOn        []TaskDependency      `json:"dependsOn"`
+	Supersedes       string                `json:"supersedes"`
+	Owner            string                `json:"owner"`
+	Reviewer         string                `json:"reviewer"`
+	Status           TaskStatus            `json:"status"`
+	Priority         string                `json:"priority"`
+	Objective        string                `json:"objective"`
+	Scope            []string              `json:"scope"`
+	OutOfScope       []string              `json:"outOfScope"`
+	Acceptance       []string              `json:"acceptance"`
+	RequiredEvidence []string              `json:"requiredEvidence"`
+	Branch           string                `json:"branch"`
+	Worktree         string                `json:"worktree"`
+	BaselineSHA      string                `json:"baselineSha"`
+	TargetSHA        string                `json:"targetSha"`
+	Risk             string                `json:"risk"`
+	ExceptionIDs     []string              `json:"exceptionIds"`
+	CreatedFrom      string                `json:"createdFrom"`
+	NextAction       string                `json:"nextAction"`
+	ExitCondition    string                `json:"exitCondition"`
+	DeferredReason   string                `json:"deferredReason"`
+	ResumeCondition  string                `json:"resumeCondition"`
+	AuthorizationID  string                `json:"authorizationId"`
+	Decisions        []TaskDecision        `json:"decisions"`
+	HumanDecision    *HumanDecisionRequest `json:"humanDecision,omitempty"`
+	MemoryRefs       []string              `json:"memoryRefs"`
 }
 
 type Concern struct {
@@ -126,31 +147,87 @@ const (
 )
 
 type GraphDispatch struct {
-	ID                 string               `json:"id"`
-	TaskID             string               `json:"taskId"`
-	Repository         string               `json:"repository"`
-	Recipient          string               `json:"recipient"`
-	Status             DispatchStatus       `json:"status"`
-	Relationship       DispatchRelationship `json:"relationship"`
-	RelatedID          string               `json:"relatedDispatchId"`
-	InstructionSummary string               `json:"instructionSummary"`
-	InstructionHash    string               `json:"instructionHash"`
-	IssuedEvidence     []string             `json:"issuedEvidence"`
-	Acknowledged       bool                 `json:"acknowledged"`
-	ExecutionStarted   bool                 `json:"executionStarted"`
-	Result             string               `json:"result"`
-	LastUpdatedBy      string               `json:"lastUpdatedBy"`
-	LastTransition     string               `json:"lastTransition"`
-	CreatedAt          time.Time            `json:"createdAt"`
-	UpdatedAt          time.Time            `json:"updatedAt"`
+	ID               string               `json:"id"`
+	TaskID           string               `json:"taskId"`
+	Repository       string               `json:"repository"`
+	Recipient        string               `json:"recipient"`
+	Status           DispatchStatus       `json:"status"`
+	Relationship     DispatchRelationship `json:"relationship"`
+	RelatedID        string               `json:"relatedDispatchId"`
+	Instruction      DispatchInstruction  `json:"instruction"`
+	InstructionHash  string               `json:"instructionHash"`
+	IssuedEvidence   []string             `json:"issuedEvidence"`
+	Acknowledged     bool                 `json:"acknowledged"`
+	ExecutionStarted bool                 `json:"executionStarted"`
+	Result           *DispatchResult      `json:"result,omitempty"`
+	LastUpdatedBy    string               `json:"lastUpdatedBy"`
+	LastTransition   string               `json:"lastTransition"`
+	CreatedAt        time.Time            `json:"createdAt"`
+	UpdatedAt        time.Time            `json:"updatedAt"`
+}
+
+type DispatchValidation struct {
+	Command  string `json:"command"`
+	ExitCode int    `json:"exitCode"`
+}
+
+type DispatchResult struct {
+	DispatchID      string               `json:"dispatchId"`
+	TaskID          string               `json:"taskId"`
+	Recipient       string               `json:"recipient"`
+	Repository      string               `json:"repository"`
+	Status          DispatchStatus       `json:"status"`
+	StartedSHA      string               `json:"startedSha"`
+	OutputSHA       string               `json:"outputSha"`
+	ChangedFiles    []string             `json:"changedFiles"`
+	Validations     []DispatchValidation `json:"validations"`
+	Evidence        []string             `json:"evidence"`
+	Blockers        []string             `json:"blockers"`
+	NextTransition  TaskStatus           `json:"nextTransition"`
+	ResumeCondition string               `json:"resumeCondition,omitempty"`
+}
+
+type DispatchInstruction struct {
+	Version            int                   `json:"version"`
+	DispatchTo         string                `json:"dispatchTo"`
+	DispatchID         string                `json:"dispatchId"`
+	Relationship       DispatchRelationship  `json:"relationship"`
+	RelatedDispatchID  string                `json:"relatedDispatchId"`
+	RelationshipReason string                `json:"relationshipReason"`
+	ChangedFields      []string              `json:"changedFields"`
+	PreservedFields    []string              `json:"preservedFields"`
+	TaskID             string                `json:"taskId"`
+	TaskType           string                `json:"taskType"`
+	Title              string                `json:"title"`
+	Repository         string                `json:"repository"`
+	Issue              string                `json:"issue"`
+	ParentTaskID       string                `json:"parentTaskId"`
+	SiblingTaskIDs     []string              `json:"siblingTaskIds"`
+	DependsOn          []TaskDependency      `json:"dependsOn"`
+	Blocks             []string              `json:"blocks"`
+	Objective          string                `json:"objective"`
+	AuthorizedActions  []string              `json:"authorizedActions"`
+	ForbiddenActions   []string              `json:"forbiddenActions"`
+	RequiredEvidence   []string              `json:"requiredEvidence"`
+	ExitCondition      string                `json:"exitCondition"`
+	Worktree           string                `json:"worktree"`
+	Branch             string                `json:"branch"`
+	BaselineSHA        string                `json:"baselineSha"`
+	TargetSHA          string                `json:"targetSha"`
+	AuthorizationID    string                `json:"authorizationId"`
+	Decisions          []TaskDecision        `json:"decisions"`
+	HumanDecision      *HumanDecisionRequest `json:"humanDecision,omitempty"`
+	MemoryRefs         []string              `json:"memoryRefs"`
+	ReturnFormat       []string              `json:"returnFormat"`
 }
 
 type DispatchEvent struct {
-	DispatchID string         `json:"dispatchId"`
-	Status     DispatchStatus `json:"status"`
-	Actor      string         `json:"actor"`
-	Reason     string         `json:"reason"`
-	At         time.Time      `json:"at"`
+	DispatchID string          `json:"dispatchId"`
+	Status     DispatchStatus  `json:"status"`
+	Actor      string          `json:"actor"`
+	Reason     string          `json:"reason"`
+	At         time.Time       `json:"at"`
+	Result     *DispatchResult `json:"result,omitempty"`
 }
 
 type TransitionProof struct {
@@ -203,6 +280,325 @@ func (g TaskGraph) dispatch(id string) (GraphDispatch, bool) {
 	return GraphDispatch{}, false
 }
 
+func (g TaskGraph) GraphDispatch(id string) (GraphDispatch, bool) { return g.dispatch(id) }
+
+var dispatchReturnFormat = []string{
+	"dispatchId, taskId, recipient, repository, status",
+	"startedSha, outputSha, changedFiles",
+	"validations[{command, exitCode}], evidence, blockers, nextTransition, resumeCondition",
+}
+
+func NewGraphDispatch(g TaskGraph, id, taskID, repo string, relationship DispatchRelationship, relatedID, relationshipReason string) (GraphDispatch, error) {
+	task, ok := g.task(taskID)
+	if !ok || task.Status != Ready || task.Repo != repo {
+		return GraphDispatch{}, graphError("dispatch requires a matching READY task and repository")
+	}
+	if err := g.CheckExecutable(taskID, repo); err != nil {
+		return GraphDispatch{}, err
+	}
+	instruction, err := dispatchInstruction(g, task, id, relationship, relatedID, relationshipReason)
+	if err != nil {
+		return GraphDispatch{}, err
+	}
+	serialized, err := json.Marshal(instruction)
+	if err != nil {
+		return GraphDispatch{}, err
+	}
+	hash := sha256.Sum256(serialized)
+	return GraphDispatch{
+		ID: id, TaskID: task.ID, Repository: task.Repo, Recipient: task.Owner,
+		Relationship: relationship, RelatedID: relatedID, Instruction: instruction,
+		InstructionHash: hex.EncodeToString(hash[:]), IssuedEvidence: slices.Clone(task.RequiredEvidence),
+	}, nil
+}
+
+func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship DispatchRelationship, relatedID, relationshipReason string) (DispatchInstruction, error) {
+	if !nonempty(id) || !validRelationship(relationship) {
+		return DispatchInstruction{}, graphError("dispatch requires an ID and valid relationship")
+	}
+	if (relationship == RelationshipNone && (relatedID != "" || relationshipReason != "")) ||
+		(relationship != RelationshipNone && relationship != RelationshipIndependent && relatedID == "") {
+		return DispatchInstruction{}, graphError("dispatch relationship requires a matching related dispatch")
+	}
+	if relationship != RelationshipNone && !nonempty(relationshipReason) {
+		return DispatchInstruction{}, graphError("dispatch relationship requires a reason")
+	}
+	var related *GraphDispatch
+	var latestForTask *GraphDispatch
+	for index := range g.Dispatches {
+		candidate := &g.Dispatches[index]
+		if candidate.TaskID == task.ID {
+			latestForTask = candidate
+		}
+		if relationship == RelationshipIndependent {
+			if candidate.ID == relatedID {
+				related = candidate
+			}
+		}
+	}
+	if relationship == RelationshipIndependent {
+		if latestForTask != nil || related == nil || related.TaskID == task.ID {
+			return DispatchInstruction{}, graphError("INDEPENDENT requires a Dispatch for a different Task")
+		}
+	} else if relationship == RelationshipNone && latestForTask != nil {
+		return DispatchInstruction{}, graphError("existing Task Dispatch requires an explicit relationship")
+	} else if relationship != RelationshipNone {
+		related = latestForTask
+		if related == nil || related.ID != relatedID || dispatchActive(related.Status) {
+			return DispatchInstruction{}, graphError("related Dispatch must be the latest inactive Dispatch for this Task")
+		}
+	}
+	siblings := make([]string, 0)
+	blocks := make([]string, 0)
+	for _, candidate := range g.Tasks {
+		if task.ParentID != "" && candidate.ParentID == task.ParentID && candidate.ID != task.ID {
+			siblings = append(siblings, candidate.ID)
+		}
+		for _, dependency := range candidate.DependsOn {
+			if dependency.TaskID == task.ID {
+				blocks = append(blocks, candidate.ID)
+				break
+			}
+		}
+	}
+	instruction := DispatchInstruction{
+		Version:    DispatchInstructionVersion,
+		DispatchTo: task.Owner, DispatchID: id, Relationship: relationship, RelatedDispatchID: relatedID,
+		RelationshipReason: relationshipReason,
+		ChangedFields:      []string{}, PreservedFields: []string{},
+		TaskID: task.ID, TaskType: task.Type, Title: task.Title, Repository: task.Repo, Issue: task.Issue,
+		ParentTaskID: task.ParentID, SiblingTaskIDs: siblings, DependsOn: slices.Clone(task.DependsOn),
+		Blocks: blocks, Objective: task.Objective, AuthorizedActions: slices.Clone(task.Scope),
+		ForbiddenActions: slices.Clone(task.OutOfScope), RequiredEvidence: slices.Clone(task.RequiredEvidence),
+		ExitCondition: task.ExitCondition, Worktree: task.Worktree, Branch: task.Branch,
+		BaselineSHA: task.BaselineSHA, TargetSHA: task.TargetSHA, AuthorizationID: task.AuthorizationID,
+		Decisions: slices.Clone(task.Decisions), HumanDecision: cloneHumanDecision(task.HumanDecision),
+		MemoryRefs:   slices.Clone(task.MemoryRefs),
+		ReturnFormat: slices.Clone(dispatchReturnFormat),
+	}
+	if relationship != RelationshipNone && relationship != RelationshipIndependent {
+		instruction.ChangedFields, instruction.PreservedFields = compareDispatchInstructions(related.Instruction, instruction)
+		if relationship == RelationshipContinues && len(instruction.ChangedFields) != 0 {
+			return DispatchInstruction{}, graphError("CONTINUES cannot change the prior Dispatch instruction")
+		}
+		if relationship == RelationshipAmends && len(instruction.ChangedFields) == 0 {
+			return DispatchInstruction{}, graphError("AMENDS requires a changed instruction field")
+		}
+	}
+	return instruction, nil
+}
+
+func compareDispatchInstructions(previous, current DispatchInstruction) ([]string, []string) {
+	oldValue, newValue := reflect.ValueOf(previous), reflect.ValueOf(current)
+	changed, preserved := make([]string, 0), make([]string, 0)
+	for i := 0; i < oldValue.NumField(); i++ {
+		field := oldValue.Type().Field(i)
+		switch field.Name {
+		case "DispatchID", "Relationship", "RelatedDispatchID", "RelationshipReason", "ChangedFields", "PreservedFields":
+			continue
+		}
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if reflect.DeepEqual(oldValue.Field(i).Interface(), newValue.Field(i).Interface()) {
+			preserved = append(preserved, name)
+		} else {
+			changed = append(changed, name)
+		}
+	}
+	return changed, preserved
+}
+
+func dispatchInstructionHash(instruction DispatchInstruction) (string, error) {
+	serialized, err := json.Marshal(instruction)
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(serialized)
+	return hex.EncodeToString(hash[:]), nil
+}
+
+func dispatchInstructionMatchesTask(d GraphDispatch, task GraphTask) bool {
+	i := d.Instruction
+	return i.DispatchTo == task.Owner && i.DispatchID == d.ID && i.Relationship == d.Relationship &&
+		i.RelatedDispatchID == d.RelatedID && i.TaskID == task.ID && i.TaskType == task.Type &&
+		i.Title == task.Title && i.Repository == task.Repo && i.Issue == task.Issue &&
+		i.ParentTaskID == task.ParentID && reflect.DeepEqual(i.DependsOn, task.DependsOn) &&
+		i.Objective == task.Objective && slices.Equal(i.AuthorizedActions, task.Scope) &&
+		slices.Equal(i.ForbiddenActions, task.OutOfScope) &&
+		slices.Equal(i.RequiredEvidence, task.RequiredEvidence) && i.ExitCondition == task.ExitCondition &&
+		i.Worktree == task.Worktree && i.Branch == task.Branch && i.BaselineSHA == task.BaselineSHA &&
+		i.TargetSHA == task.TargetSHA && i.AuthorizationID == task.AuthorizationID &&
+		reflect.DeepEqual(i.Decisions, task.Decisions) &&
+		reflect.DeepEqual(i.HumanDecision, task.HumanDecision) && slices.Equal(i.MemoryRefs, task.MemoryRefs) &&
+		slices.Equal(d.IssuedEvidence, task.RequiredEvidence) &&
+		slices.Equal(i.ReturnFormat, dispatchReturnFormat)
+}
+
+func dispatchInstructionIdentityMatchesTask(d GraphDispatch, task GraphTask) bool {
+	i := d.Instruction
+	return i.Version == DispatchInstructionVersion && i.DispatchID == d.ID &&
+		i.TaskID == d.TaskID && i.Repository == d.Repository &&
+		i.Title == task.Title && task.Repo == d.Repository &&
+		i.DispatchTo == d.Recipient && i.Relationship == d.Relationship &&
+		i.RelatedDispatchID == d.RelatedID
+}
+
+func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *DispatchResult) error {
+	if result == nil || result.DispatchID != d.ID || result.TaskID != d.TaskID ||
+		result.Recipient != d.Recipient || result.Repository != d.Repository || result.Status != status ||
+		result.StartedSHA != d.Instruction.BaselineSHA || !validStatus(result.NextTransition) {
+		return graphError("dispatch result does not match the active instruction")
+	}
+	for _, values := range [][]string{result.ChangedFiles, result.Evidence, result.Blockers} {
+		if !validList(values) {
+			return graphError("dispatch result contains an empty or duplicate value")
+		}
+	}
+	for _, validation := range result.Validations {
+		if !nonempty(validation.Command) {
+			return graphError("dispatch result has an empty validation command")
+		}
+		if status == DispatchSucceeded && validation.ExitCode != 0 {
+			return graphError("successful dispatch contains a failed validation")
+		}
+	}
+	if status == DispatchSuspended && (len(result.Evidence) == 0 || !nonempty(result.ResumeCondition)) {
+		return graphError("suspension requires stop evidence and a resume condition")
+	}
+	if status == DispatchSucceeded {
+		if !nonempty(result.OutputSHA) || len(result.Validations) == 0 || len(result.Evidence) == 0 || len(result.Blockers) != 0 {
+			return graphError("successful dispatch requires output SHA, validation and evidence")
+		}
+		for _, required := range d.Instruction.RequiredEvidence {
+			if !slices.Contains(result.Evidence, required) {
+				return graphError("dispatch result is missing required evidence %s", required)
+			}
+		}
+	}
+	if status == DispatchCancelled || status == DispatchSuperseded {
+		if len(result.Evidence) == 0 {
+			return graphError("cancellation or supersession requires stop evidence")
+		}
+	}
+	return nil
+}
+
+func RenderDispatchInstruction(d GraphDispatch) (string, error) {
+	i := d.Instruction
+	lines := []struct{ label, value string }{
+		{"DISPATCH TO", i.DispatchTo},
+		{"DISPATCH ID", i.DispatchID},
+		{"RELATIONSHIP", string(i.Relationship)},
+		{"RELATED DISPATCH ID", i.RelatedDispatchID},
+		{"RELATIONSHIP REASON", i.RelationshipReason},
+		{"TASK ID", i.TaskID},
+		{"TASK TYPE", i.TaskType},
+		{"TITLE", i.Title},
+		{"REPOSITORY", i.Repository},
+		{"ISSUE", i.Issue},
+		{"PARENT TASK ID", i.ParentTaskID},
+	}
+	var output strings.Builder
+	for _, line := range lines {
+		value, err := json.Marshal(line.value)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&output, "%s: %s\n", line.label, value)
+		if line.label == "DISPATCH ID" {
+			fmt.Fprintf(&output, "INSTRUCTION VERSION: %d\n", i.Version)
+		}
+	}
+	for _, line := range []struct {
+		label string
+		value any
+	}{
+		{"SIBLING TASK IDS", i.SiblingTaskIDs},
+		{"DEPENDS ON", i.DependsOn},
+		{"BLOCKS", i.Blocks},
+		{"CHANGED FIELDS", i.ChangedFields},
+		{"PRESERVED FIELDS", i.PreservedFields},
+	} {
+		value, err := json.Marshal(line.value)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&output, "%s: %s\n", line.label, value)
+	}
+	for _, line := range []struct{ label, value string }{
+		{"OBJECTIVE", i.Objective},
+		{"AUTHORIZATION ID", i.AuthorizationID},
+	} {
+		value, err := json.Marshal(line.value)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&output, "%s: %s\n", line.label, value)
+	}
+	for _, line := range []struct {
+		label string
+		value any
+	}{
+		{"DECISIONS", i.Decisions},
+		{"HUMAN DECISION", i.HumanDecision},
+		{"MEMORY REFS", i.MemoryRefs},
+	} {
+		value, err := json.Marshal(line.value)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&output, "%s: %s\n", line.label, value)
+	}
+	for _, line := range []struct{ label, value string }{
+		{"DISPATCH EFFECT", dispatchEffect(i)},
+	} {
+		value, err := json.Marshal(line.value)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&output, "%s: %s\n", line.label, value)
+	}
+	for _, line := range []struct {
+		label string
+		value any
+	}{
+		{"AUTHORIZED ACTIONS", i.AuthorizedActions},
+		{"FORBIDDEN ACTIONS", i.ForbiddenActions},
+		{"REQUIRED EVIDENCE", i.RequiredEvidence},
+	} {
+		value, err := json.Marshal(line.value)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&output, "%s: %s\n", line.label, value)
+	}
+	for _, line := range []struct{ label, value string }{
+		{"EXIT CONDITION", i.ExitCondition},
+		{"WORKTREE", i.Worktree},
+		{"BRANCH", i.Branch},
+		{"BASELINE SHA", i.BaselineSHA},
+		{"TARGET SHA", i.TargetSHA},
+	} {
+		value, err := json.Marshal(line.value)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&output, "%s: %s\n", line.label, value)
+	}
+	value, err := json.Marshal(i.ReturnFormat)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintf(&output, "RETURN FORMAT: %s", value)
+	return output.String(), nil
+}
+
+func dispatchEffect(instruction DispatchInstruction) string {
+	if instruction.Relationship == RelationshipNone {
+		return "Perform only the authorized work for this Dispatch; do not change unrelated task state."
+	}
+	return string(instruction.Relationship) + ": " + instruction.RelationshipReason
+}
+
 func validDispatchStatus(s DispatchStatus) bool {
 	return slices.Contains([]DispatchStatus{DispatchIssued, DispatchAcknowledged, DispatchRunning,
 		DispatchCancelRequested, DispatchSuspended, DispatchSucceeded, DispatchFailed,
@@ -231,7 +627,7 @@ func dispatchTransitionAllowed(from, to DispatchStatus) bool {
 	case DispatchCancelRequested:
 		return to == DispatchCancelled || to == DispatchSuspended || to == DispatchFailed
 	case DispatchSuspended:
-		return to == DispatchCancelled || to == DispatchSuperseded
+		return to == DispatchRunning || to == DispatchCancelled || to == DispatchSuperseded
 	}
 	return false
 }
@@ -239,9 +635,6 @@ func dispatchTransitionAllowed(from, to DispatchStatus) bool {
 func (g *TaskGraph) IssueDispatch(d GraphDispatch, actor, reason string) error {
 	next := cloneGraph(*g)
 	now := time.Now().UTC()
-	d.CreatedAt, d.UpdatedAt = now, now
-	d.Status, d.Relationship = DispatchIssued, RelationshipNone
-	d.LastUpdatedBy, d.LastTransition = actor, reason
 	task, ok := next.task(d.TaskID)
 	if !ok || task.Status != Ready || task.Repo != d.Repository {
 		return graphError("dispatch requires a matching READY task and repository")
@@ -249,6 +642,24 @@ func (g *TaskGraph) IssueDispatch(d GraphDispatch, actor, reason string) error {
 	if err := next.CheckExecutable(d.TaskID, d.Repository); err != nil {
 		return err
 	}
+	instruction, err := dispatchInstruction(next, task, d.ID, d.Relationship, d.RelatedID, d.Instruction.RelationshipReason)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(instruction, d.Instruction) {
+		return graphError("dispatch instruction does not match the authorized Task contract")
+	}
+	hash, err := dispatchInstructionHash(d.Instruction)
+	if err != nil {
+		return err
+	}
+	if hash != d.InstructionHash {
+		return graphError("dispatch instruction hash mismatch")
+	}
+	d = cloneDispatch(d)
+	d.CreatedAt, d.UpdatedAt = now, now
+	d.Status = DispatchIssued
+	d.LastUpdatedBy, d.LastTransition = actor, reason
 	for _, old := range next.Dispatches {
 		if old.TaskID == d.TaskID && dispatchActive(old.Status) {
 			return graphError("active dispatch already exists")
@@ -270,12 +681,20 @@ func (g *TaskGraph) IssueDispatch(d GraphDispatch, actor, reason string) error {
 	return nil
 }
 
-func (g *TaskGraph) TransitionDispatch(id string, status DispatchStatus, actor, reason string, acknowledged, started bool) error {
+func (g *TaskGraph) TransitionDispatch(id string, status DispatchStatus, actor, reason string, acknowledged, started bool, result *DispatchResult) error {
 	next := cloneGraph(*g)
 	d, ok := next.dispatch(id)
 	if !ok || !dispatchTransitionAllowed(d.Status, status) {
 		return graphError("invalid dispatch transition")
 	}
+	if !dispatchActive(status) || status == DispatchSuspended {
+		if err := validateDispatchResult(d, status, result); err != nil {
+			return err
+		}
+	} else if result != nil {
+		return graphError("result is only accepted when a Dispatch ends")
+	}
+	previousStatus := d.Status
 	if (status == DispatchAcknowledged && !acknowledged) ||
 		(status == DispatchRunning && (!d.Acknowledged || !acknowledged || !started)) ||
 		(status == DispatchSucceeded && !d.ExecutionStarted) ||
@@ -286,6 +705,13 @@ func (g *TaskGraph) TransitionDispatch(id string, status DispatchStatus, actor, 
 	d.Status = status
 	d.Acknowledged = d.Acknowledged || acknowledged
 	d.ExecutionStarted = d.ExecutionStarted || started
+	if status == DispatchSuspended {
+		d.Result = cloneDispatchResult(result)
+	} else if previousStatus == DispatchSuspended {
+		d.Result = nil
+	} else if !dispatchActive(status) {
+		d.Result = cloneDispatchResult(result)
+	}
 	d.UpdatedAt = time.Now().UTC()
 	d.LastUpdatedBy = actor
 	d.LastTransition = reason
@@ -294,7 +720,9 @@ func (g *TaskGraph) TransitionDispatch(id string, status DispatchStatus, actor, 
 			next.Dispatches[i] = d
 		}
 	}
-	next.DispatchHistory = append(next.DispatchHistory, DispatchEvent{DispatchID: id, Status: status, Actor: actor, Reason: reason, At: d.UpdatedAt})
+	next.DispatchHistory = append(next.DispatchHistory, DispatchEvent{
+		DispatchID: id, Status: status, Actor: actor, Reason: reason, At: d.UpdatedAt, Result: cloneDispatchResult(result),
+	})
 	if !dispatchActive(status) {
 		for i := range next.Tasks {
 			t := &next.Tasks[i]
@@ -336,6 +764,46 @@ func validList(values []string) bool {
 	return true
 }
 
+func validateHumanDecision(task GraphTask) error {
+	request := task.HumanDecision
+	if request == nil {
+		if task.Status == HumanDecisionRequired {
+			return graphError("task %s requires a recorded human decision request", task.ID)
+		}
+		return nil
+	}
+	if !nonempty(request.ID) || !nonempty(request.Question) || len(request.Options) < 2 ||
+		!nonempty(request.RecommendedOptionID) || !nonempty(request.RecommendationReason) {
+		return graphError("task %s has an incomplete human decision request", task.ID)
+	}
+	options := make(map[string]bool, len(request.Options))
+	for _, option := range request.Options {
+		if !nonempty(option.ID) || !nonempty(option.Description) || options[option.ID] {
+			return graphError("task %s has invalid human decision options", task.ID)
+		}
+		options[option.ID] = true
+	}
+	if !options[request.RecommendedOptionID] {
+		return graphError("task %s recommendation is not one of its options", task.ID)
+	}
+	if request.SelectedOptionID == "" {
+		if request.DecisionRecordID != "" ||
+			(task.Status != Draft && task.Status != Blocked && task.Status != HumanDecisionRequired) {
+			return graphError("task %s cannot execute before its human decision is recorded", task.ID)
+		}
+		return nil
+	}
+	if !options[request.SelectedOptionID] || !nonempty(request.DecisionRecordID) {
+		return graphError("task %s has an invalid selected human decision", task.ID)
+	}
+	for _, decision := range task.Decisions {
+		if decision.ID == request.DecisionRecordID {
+			return nil
+		}
+	}
+	return graphError("task %s selected human decision has no decision record", task.ID)
+}
+
 func validIssue(ref string) bool {
 	if strings.HasPrefix(ref, "https://") {
 		u, err := url.Parse(ref)
@@ -369,12 +837,23 @@ func (g TaskGraph) Validate() error {
 	}
 	dispatchIDs := map[string]bool{}
 	activeDispatches := map[string]string{}
+	tasksByID := make(map[string]GraphTask, len(g.Tasks))
+	for _, task := range g.Tasks {
+		tasksByID[task.ID] = task
+	}
 	for _, d := range g.Dispatches {
 		if !nonempty(d.ID) || dispatchIDs[d.ID] || !ids[d.TaskID] || !nonempty(d.Repository) ||
 			!slices.Contains([]string{"CODER", "REVIEWER"}, d.Recipient) || !validDispatchStatus(d.Status) ||
-			!validRelationship(d.Relationship) || !nonempty(d.InstructionSummary) || !nonempty(d.InstructionHash) ||
+			!validRelationship(d.Relationship) || !nonempty(d.InstructionHash) ||
 			!nonempty(d.LastUpdatedBy) || !nonempty(d.LastTransition) || d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
 			return graphError("invalid dispatch contract %q", d.ID)
+		}
+		if !dispatchInstructionIdentityMatchesTask(d, tasksByID[d.TaskID]) {
+			return graphError("dispatch instruction identity mismatch for Task %s", d.TaskID)
+		}
+		hash, err := dispatchInstructionHash(d.Instruction)
+		if err != nil || hash != d.InstructionHash {
+			return graphError("dispatch instruction hash mismatch for %s", d.ID)
 		}
 		dispatchIDs[d.ID] = true
 		if dispatchActive(d.Status) {
@@ -385,6 +864,50 @@ func (g TaskGraph) Validate() error {
 		}
 	}
 	dispatchStatuses := map[string]DispatchStatus{}
+	seenDispatches := map[string]bool{}
+	latestByTask := map[string]GraphDispatch{}
+	for _, d := range g.Dispatches {
+		instruction := d.Instruction
+		latest, hasPrevious := latestByTask[d.TaskID]
+		switch d.Relationship {
+		case RelationshipNone:
+			if hasPrevious || d.RelatedID != "" || instruction.RelationshipReason != "" {
+				return graphError("NONE is only valid for the first Dispatch of a Task")
+			}
+		case RelationshipIndependent:
+			if hasPrevious || !seenDispatches[d.RelatedID] || !nonempty(instruction.RelationshipReason) {
+				return graphError("invalid INDEPENDENT Dispatch relationship")
+			}
+			if len(instruction.ChangedFields) != 0 || len(instruction.PreservedFields) != 0 {
+				return graphError("INDEPENDENT cannot compare unrelated Dispatch instructions")
+			}
+		default:
+			if !hasPrevious || latest.ID != d.RelatedID || dispatchActive(latest.Status) ||
+				!nonempty(instruction.RelationshipReason) {
+				return graphError("Dispatch relationship must name the latest inactive Dispatch")
+			}
+			changed, preserved := compareDispatchInstructions(latest.Instruction, instruction)
+			if !slices.Equal(instruction.ChangedFields, changed) ||
+				!slices.Equal(instruction.PreservedFields, preserved) {
+				return graphError("Dispatch relationship field comparison is inconsistent")
+			}
+			if d.Relationship == RelationshipContinues && len(changed) != 0 {
+				return graphError("CONTINUES cannot change the prior Dispatch instruction")
+			}
+			if d.Relationship == RelationshipAmends && len(changed) == 0 {
+				return graphError("AMENDS requires a changed instruction field")
+			}
+		}
+		if d.Relationship == RelationshipNone &&
+			(len(instruction.ChangedFields) != 0 || len(instruction.PreservedFields) != 0) {
+			return graphError("first Dispatch cannot compare a prior instruction")
+		}
+		if d.Relationship == RelationshipSupersedes && latest.Status != DispatchSuperseded {
+			return graphError("SUPERSEDES requires a superseded prior Dispatch")
+		}
+		seenDispatches[d.ID] = true
+		latestByTask[d.TaskID] = d
+	}
 	for _, event := range g.DispatchHistory {
 		if !dispatchIDs[event.DispatchID] || !nonempty(event.Actor) || !nonempty(event.Reason) ||
 			event.At.IsZero() || !validDispatchStatus(event.Status) {
@@ -397,11 +920,30 @@ func (g TaskGraph) Validate() error {
 		if ok && !dispatchTransitionAllowed(previous, event.Status) {
 			return graphError("invalid dispatch history transition")
 		}
+		dispatch, _ := g.dispatch(event.DispatchID)
+		if event.Status == DispatchSuspended || !dispatchActive(event.Status) {
+			if err := validateDispatchResult(dispatch, event.Status, event.Result); err != nil {
+				return err
+			}
+		} else if event.Result != nil {
+			return graphError("non-suspended active Dispatch history cannot contain a result")
+		}
 		dispatchStatuses[event.DispatchID] = event.Status
 	}
 	for _, d := range g.Dispatches {
 		if dispatchStatuses[d.ID] != d.Status {
 			return graphError("dispatch %s does not match history", d.ID)
+		}
+		if d.Status == DispatchSuspended {
+			if err := validateDispatchResult(d, d.Status, d.Result); err != nil {
+				return err
+			}
+		} else if !dispatchActive(d.Status) {
+			if err := validateDispatchResult(d, d.Status, d.Result); err != nil {
+				return err
+			}
+		} else if d.Result != nil {
+			return graphError("active dispatch %s has an unexpected result", d.ID)
 		}
 		if d.Relationship == RelationshipNone && d.RelatedID != "" {
 			return graphError("NONE cannot relate to a prior dispatch")
@@ -411,11 +953,9 @@ func (g TaskGraph) Validate() error {
 		}
 		if d.RelatedID != "" {
 			related, ok := g.dispatch(d.RelatedID)
-			if !ok || related.TaskID != d.TaskID {
-				return graphError("related dispatch must belong to the same task")
-			}
-			if d.Relationship == RelationshipIndependent {
-				return graphError("INDEPENDENT dispatch requires a different task")
+			if !ok || (d.Relationship != RelationshipIndependent && related.TaskID != d.TaskID) ||
+				(d.Relationship == RelationshipIndependent && related.TaskID == d.TaskID) {
+				return graphError("related dispatch does not match relationship")
 			}
 			if d.Relationship == RelationshipSupersedes && related.Status != DispatchSuperseded {
 				return graphError("superseded dispatch status mismatch")
@@ -446,6 +986,9 @@ func (g TaskGraph) Validate() error {
 				return graphError("conflicting decision %s", d.ID)
 			}
 			decisionIDs[d.ID] = d
+		}
+		if err := validateHumanDecision(t); err != nil {
+			return err
 		}
 		if t.DeferredReason != "" && ((t.Status != Blocked && !terminal(t.Status)) || !nonempty(t.ResumeCondition) || !nonempty(t.NextAction)) {
 			return graphError("deferred task %s requires BLOCKED, next action and resume condition", t.ID)
@@ -605,8 +1148,9 @@ func equalJSON(a, b any) bool {
 func (g TaskGraph) executable(t GraphTask) error {
 	if t.DeferredReason != "" || !nonempty(t.AuthorizationID) || !nonempty(t.Objective) ||
 		len(t.Scope) == 0 || len(t.Acceptance) == 0 || len(t.RequiredEvidence) == 0 || !nonempty(t.ExitCondition) ||
+		!nonempty(t.Worktree) || !nonempty(t.Branch) || !nonempty(t.BaselineSHA) ||
 		(t.Owner != "CODER" && t.Owner != "REVIEWER") || strings.HasPrefix(t.Issue, "PENDING:") {
-		return graphError("task %s lacks authorization, execution fields or Issue registration", t.ID)
+		return graphError("task %s lacks authorization, execution, worktree, baseline or Issue registration", t.ID)
 	}
 	found := false
 	for _, d := range t.Decisions {
@@ -649,9 +1193,12 @@ func cloneGraph(g TaskGraph) TaskGraph {
 	copy.Concerns = slices.Clone(g.Concerns)
 	copy.Dispatches = slices.Clone(g.Dispatches)
 	for i := range copy.Dispatches {
-		copy.Dispatches[i].IssuedEvidence = slices.Clone(copy.Dispatches[i].IssuedEvidence)
+		copy.Dispatches[i] = cloneDispatch(copy.Dispatches[i])
 	}
 	copy.DispatchHistory = slices.Clone(g.DispatchHistory)
+	for i := range copy.DispatchHistory {
+		copy.DispatchHistory[i].Result = cloneDispatchResult(copy.DispatchHistory[i].Result)
+	}
 	copy.History = slices.Clone(g.History)
 	for i := range copy.History {
 		copy.History[i].Task = cloneTask(copy.History[i].Task)
@@ -664,6 +1211,34 @@ func cloneGraph(g TaskGraph) TaskGraph {
 		}
 	}
 	return copy
+}
+
+func cloneDispatch(d GraphDispatch) GraphDispatch {
+	d.IssuedEvidence = slices.Clone(d.IssuedEvidence)
+	d.Instruction.SiblingTaskIDs = slices.Clone(d.Instruction.SiblingTaskIDs)
+	d.Instruction.DependsOn = slices.Clone(d.Instruction.DependsOn)
+	d.Instruction.Blocks = slices.Clone(d.Instruction.Blocks)
+	d.Instruction.AuthorizedActions = slices.Clone(d.Instruction.AuthorizedActions)
+	d.Instruction.ForbiddenActions = slices.Clone(d.Instruction.ForbiddenActions)
+	d.Instruction.RequiredEvidence = slices.Clone(d.Instruction.RequiredEvidence)
+	d.Instruction.Decisions = slices.Clone(d.Instruction.Decisions)
+	d.Instruction.HumanDecision = cloneHumanDecision(d.Instruction.HumanDecision)
+	d.Instruction.MemoryRefs = slices.Clone(d.Instruction.MemoryRefs)
+	d.Instruction.ReturnFormat = slices.Clone(d.Instruction.ReturnFormat)
+	d.Result = cloneDispatchResult(d.Result)
+	return d
+}
+
+func cloneDispatchResult(result *DispatchResult) *DispatchResult {
+	if result == nil {
+		return nil
+	}
+	copy := *result
+	copy.ChangedFiles = slices.Clone(result.ChangedFiles)
+	copy.Validations = slices.Clone(result.Validations)
+	copy.Evidence = slices.Clone(result.Evidence)
+	copy.Blockers = slices.Clone(result.Blockers)
+	return &copy
 }
 
 func cloneWaivers(waivers []TaskWaiver) []TaskWaiver {
@@ -684,8 +1259,18 @@ func cloneTask(t GraphTask) GraphTask {
 	t.RequiredEvidence = slices.Clone(t.RequiredEvidence)
 	t.ExceptionIDs = slices.Clone(t.ExceptionIDs)
 	t.Decisions = slices.Clone(t.Decisions)
+	t.HumanDecision = cloneHumanDecision(t.HumanDecision)
 	t.MemoryRefs = slices.Clone(t.MemoryRefs)
 	return t
+}
+
+func cloneHumanDecision(request *HumanDecisionRequest) *HumanDecisionRequest {
+	if request == nil {
+		return nil
+	}
+	copy := *request
+	copy.Options = slices.Clone(request.Options)
+	return &copy
 }
 
 func (g *TaskGraph) Track(t GraphTask, actor, reason string) error {

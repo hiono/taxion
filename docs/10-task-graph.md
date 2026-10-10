@@ -5,7 +5,7 @@ Task Graph と Ledger は SQLite の `workspace.db` に同時に保存する。
 移行確認のため一時的に残す。これらの JSON は移行後に更新せず、正本やバックアップとして
 利用しない。取り込みを確認した後に削除する。以後の更新元は SQLite workspace となる。
 設計の理由と移行の決定は
-[ADR-0022](adr/0022-versioned-task-graph-beside-legacy-ledger.md) を参照する。
+[ADR-0022](adr/0022-sqlite-atomic-workspace-state.md) を参照する。
 
 ## 登録と読み出し
 
@@ -58,8 +58,14 @@ APPROVED の依存は COMPLETED に進んだ後も満たされる。
 READY には `owner`（CODER または REVIEWER）、objective、scope、
 acceptance、requiredEvidence、exitCondition、
 `authorizationId` と同じ ID の decision を要求する。
+dispatch 前には branch、worktree、baselineSha も要求する。これらは Task の契約から
+Dispatch 指示へ複写される。targetSha は dispatch 時点で未確定でもよく、
+指示にはその時点の値を保存する。
 decision は ID、source、text を持ち、以前の decision の削除・上書きはできない。
 新しい判断は別 ID で追加する。
+人間の選択が必要な場合は `humanDecision` に質問、選択肢、推奨選択肢と理由を記録し、
+Task を `HUMAN_DECISION_REQUIRED` にする。選択した option ID と対応する decision record を
+追記するまで READY に戻せず、実行もできない。
 issue は URL、`Issue #番号`、`INHERITED: Issue #番号`、
 `PENDING: 登録TaskID`、または理由付きの `NOT_REQUIRED:` を使う。
 PENDING は登録 Task の COMPLETED を依存に持ち、実行前に実際の参照へ更新する。
@@ -122,8 +128,60 @@ proof の `waivers` に decisionId と免除する acceptance・evidence・child
 これは構造化した結果の照合であり、Git の object や検証レポートの実在、
 Reviewer process の独立性を保証するものではない。
 既存の `review` による SHA 記録だけで Graph は承認・完了へ進まない。
-dispatch は Graph の READY を検査するが、Graph を自動で ACTIVE にする処理と
-dispatch の終了・差し替えは #48 の対象として残る。
+dispatch は Graph の READY、依存、承認済み scope、worktree、baseline SHA を検査する。
+発行時に Task を ACTIVE にし、Task の関係、実行範囲、必要証拠、返却形式を含む
+Dispatch 指示を不変の snapshot として保存する。指示 hash は保存内容から計算し、
+CLI と ACP は同じ snapshot を人が読める形で表示する。
+指示には `DISPATCH TO` を先頭に、Dispatch の関係、Task の親子・依存関係、
+目的、scope、証拠と終了条件、worktree・branch・SHA、返却形式を含める。
+`AUTHORIZED ACTIONS` は Task の `scope`、`FORBIDDEN ACTIONS` は `outOfScope` から作る。
+これらは指示に保存する制約であり、OS や Git の操作を隔離する sandbox ではない。
+後続 Dispatch は変更・維持した instruction field を保存する。`CONTINUES` はすべての
+実行契約 field が前回と一致するときに限り、`AMENDS` は少なくとも一つを変更するときに使う。
+`INDEPENDENT` は別 Task を参照するため、前回 instruction との比較は行わない。
+
+```sh
+taxion dispatch --task TASK-ID --repo owner/repository
+taxion dispatch transition --id DISPATCH-ID --status ACKNOWLEDGED --actor worker --reason accepted
+taxion dispatch transition --id DISPATCH-ID --status RUNNING --actor worker --reason started
+taxion dispatch transition --id DISPATCH-ID --status SUCCEEDED --actor worker --reason finished --result-file RESULT.json
+```
+
+終端状態への遷移には `DispatchResult` JSON を必要とする。result の Dispatch ID、
+Task ID、recipient、repository、status が対象 Dispatch と一致し、startedSha が
+指示の baselineSha と一致することを検査する。SUCCEEDED には outputSha、成功した
+validation、必須 evidence を要求する。終端 Dispatch の状態は再遷移できないため、
+以前の Dispatch に属する結果で新しい Dispatch を完了させることはできない。
+結果の SHA や検証内容は caller が申告した値であり、Git object・コマンド実行・証拠の
+実在をこの検査だけで確認するわけではない。
+
+result の形は次のとおりとする。
+
+```json
+{
+  "dispatchId": "DISPATCH-ID",
+  "taskId": "TASK-ID",
+  "recipient": "CODER",
+  "repository": "owner/repository",
+  "status": "SUCCEEDED",
+  "startedSha": "BASELINE-SHA",
+  "outputSha": "OUTPUT-SHA",
+  "changedFiles": ["src/example.go"],
+  "validations": [{"command": "go test ./...", "exitCode": 0}],
+  "evidence": ["test-report:1"],
+  "blockers": [],
+  "nextTransition": "WAITING_FOR_EVIDENCE",
+  "resumeCondition": ""
+}
+```
+
+以前の Dispatch がある Task の再発行では、relationship、related Dispatch ID、
+relationship reason を明示する。最初の Dispatch だけが `NONE` を使える。
+関連 Dispatch は同じ Task の直近の inactive Dispatch（`INDEPENDENT` は別 Task）に限る。
+指示には relationship reason と比較対象 field の一覧を含める。
+`SUSPENDED` の result は停止 evidence と `resumeCondition` を必須とし、履歴にも保存する。
+停止中の Dispatch は active として扱い、同じ Task の競合 Dispatch を防ぐ。
+現在の実装は Dispatch 指示を記録・表示するが、Copilot SDK session や worker を起動しない。
 
 ## 保存・互換性と制約
 

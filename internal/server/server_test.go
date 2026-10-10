@@ -12,6 +12,7 @@ import (
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
+	"github.com/hiono/taxion/internal/store"
 )
 
 func seed(t *testing.T) (string, core.Ledger) {
@@ -66,6 +67,63 @@ func TestDispatchTaskGraphGate(t *testing.T) {
 	rec = post(t, h, "/api/dispatches", `{"task":"t","repo":"owner/repo"}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("broken graph: %d", rec.Code)
+	}
+}
+
+func TestWorkspaceDispatchInstructionEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ledger.json")
+	workspace := filepath.Join(dir, "workspace.db")
+	task := core.Task{ID: "t", Title: "task", Repo: "owner/repo", CreatedAt: time.Now().UTC()}
+	graph := core.TaskGraph{Version: 1}
+	graphTask := core.GraphTask{
+		ID: task.ID, Title: task.Title, Repo: task.Repo, Type: "IMPLEMENTATION", Issue: "Issue #47",
+		Status: core.Draft, Owner: "CODER", CreatedFrom: "request:1", Objective: "implement",
+		Scope: []string{"src"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
+		ExitCondition: "report", Worktree: "/work/tree", Branch: "feature", BaselineSHA: strings.Repeat("a", 40),
+		AuthorizationID: "decision:1", Decisions: []core.TaskDecision{{ID: "decision:1", Source: "human:1", Text: "approved"}},
+	}
+	if err := graph.Track(graphTask, "human", "register"); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.Transition(task.ID, core.Ready, "human", "ready", core.TransitionProof{}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InitializeWorkspace(store.Workspace{
+		Ledger: core.Ledger{Tasks: []core.Task{task}, Dispatches: []core.Dispatch{}, Evidence: []core.Evidence{}, Checkpoints: []core.Checkpoint{}},
+		Graph:  graph, HasGraph: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	handler := (&Server{StorePath: path, WorkspacePath: workspace}).Handler()
+	created := post(t, handler, "/api/dispatches", `{"task":"t","repo":"owner/repo"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("dispatch: %d %s", created.Code, created.Body.String())
+	}
+	var dispatch core.Dispatch
+	if err := json.Unmarshal(created.Body.Bytes(), &dispatch); err != nil {
+		t.Fatal(err)
+	}
+	response := get(t, handler, "/api/dispatches/"+dispatch.ID+"/instruction")
+	if response.Code != http.StatusOK {
+		t.Fatalf("instruction: %d %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Instruction core.DispatchInstruction `json:"instruction"`
+		Hash        string                   `json:"instructionHash"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Instruction.DispatchID != dispatch.ID || body.Instruction.Worktree != "/work/tree" || body.Hash == "" {
+		t.Fatalf("incomplete instruction response: %+v", body)
 	}
 }
 

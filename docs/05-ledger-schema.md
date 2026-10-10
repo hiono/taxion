@@ -4,7 +4,7 @@
 版付き Task Graph は別ファイルとして導入し、ここにあるキーを変更しない。
 現在の操作は [Task Graph reference](10-task-graph.md)、
 分離と移行の決定は
-[ADR-0022](adr/0022-versioned-task-graph-beside-legacy-ledger.md) を参照する。
+[ADR-0022](adr/0022-sqlite-atomic-workspace-state.md) を参照する。
 
 The JSON shapes below are the frozen contract between the Go core/CLI/API
 (`internal/core`, `internal/server`) and the TypeScript view (`web/`).
@@ -80,6 +80,8 @@ Reads:
 - `GET /api/ledger` → full ledger object above
 - `GET /api/tasks[?repo=]` → Task array
 - `GET /api/dispatches[?repo=]` → Dispatch array
+- `GET /api/dispatches/{id}/instruction` → immutable Dispatch instruction and
+  `instructionHash` (SQLite workspace only; unknown Dispatch → 404)
 - `GET /api/evidence[?task=]` → Evidence array
 - `/api/ledger` and `/api/evidence` are GET-only (405 otherwise).
   `/api/tasks` and `/api/dispatches` also accept POST as described below.
@@ -92,11 +94,13 @@ serving modes and token requirements are described in
 `docs/06-remote-access.md`.
 
 - `POST /api/tasks` `{title, repo}` → 201 Task. Missing title/repo → 400 (REP-001).
-- `POST /api/dispatches` `{task, repo}` → 201 Dispatch. Unknown task → 404;
+- `POST /api/dispatches` `{task, repo}` → 201 Dispatch. When a Task Graph exists,
+  optional `{relationship, relatedDispatchId, relationshipReason}` identify a
+  later Dispatch; an initial Dispatch uses no relationship. Unknown task → 404;
   another dispatch active → 409 (DSP-001); approved Memory predicate mismatch
   → 409 (MEM-001); unreadable or malformed Memory policy → 500.
   Missing task/repo → 400. See [Memory reference](08-memory-model.md) for
-  predicate semantics. Dispatch request and ledger keys are unchanged.
+  predicate semantics. The Ledger wire keys are unchanged.
 - `POST /api/reviews` `{task, repo, sha}` → 201 Evidence. Empty sha → 400
   (SHA-001). Missing task/repo → 400.
 - Request bodies share the CLI guards exactly; web passes POST requests through

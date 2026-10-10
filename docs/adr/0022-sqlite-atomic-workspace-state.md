@@ -35,6 +35,16 @@ Graph を導入した workspace の dispatch は CLI・HTTP・ACP で同じ tran
 未登録 Task、repository の不一致、READY 以外、必須情報不足、未充足の依存を拒否する。
 dispatch 発行時は Graph の Task を ACTIVE にし、Dispatch の初期状態・履歴と Ledger の
 Active projection を同時に保存する。終了遷移では三者を同じ transaction で更新する。
+発行時には version 付き実行指示を Task の許可済み契約から生成し、依存・親子・sibling、
+許可／禁止 scope、Memory と decision の参照、worktree、branch、SHA、返却形式を
+immutable snapshot として保存する。保存した指示の hash を検査し、CLI・ACP は同じ
+snapshot を表示する。HTTP は Dispatch ID から snapshot と hash を読み出せる。
+2 回目以降の Dispatch は直近の inactive Dispatch と関係・理由を明示する。
+終端結果は Dispatch ID・Task ID・role・repository・開始／出力 SHA・変更ファイル・
+検証結果・証拠・blocker・要求する次の遷移を含み、対象の active Dispatch と照合する。
+終端 Dispatch は再遷移できず、以前の結果で新しい Dispatch を完了させない。
+これらの値は caller が申告した記録であり、Git・コマンド実行・証拠の実在を保証しない。
+Human decision は選択肢・推奨と理由を記録し、選択を decision として残すまで READY にできない。
 既存 Graph の破損、非対応の版、未知のキー、読み取り失敗はエラーとする。
 初回アクセス時に旧 Ledger と任意の Graph を SQLite へ一度だけ取り込む。
 JSON は旧 workspace からの一時的な移行入力に限り、移行後の正本・バックアップ・

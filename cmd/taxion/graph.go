@@ -97,11 +97,25 @@ func dispatchTransitionCmd(args []string) error {
 	status := fs.String("status", "", "target status")
 	actor := fs.String("actor", "", "actor")
 	reason := fs.String("reason", "", "reason")
+	resultFile := fs.String("result-file", "", "JSON result file required when ending a Dispatch")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *id == "" || *status == "" || *actor == "" || *reason == "" {
 		return fmt.Errorf("dispatch transition: --id, --status, --actor and --reason are required")
+	}
+	var result *core.DispatchResult
+	if *resultFile != "" {
+		file, err := os.Open(*resultFile)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		var decoded core.DispatchResult
+		if err := core.DecodeGraphInput(file, &decoded); err != nil {
+			return fmt.Errorf("dispatch transition result: %w", err)
+		}
+		result = &decoded
 	}
 	return updateWorkspace(func(state *store.Workspace) error {
 		if !state.HasGraph {
@@ -110,7 +124,7 @@ func dispatchTransitionCmd(args []string) error {
 		target := core.DispatchStatus(*status)
 		ack := target == core.DispatchAcknowledged || target == core.DispatchRunning
 		started := target == core.DispatchRunning
-		if err := state.Graph.TransitionDispatch(*id, target, *actor, *reason, ack, started); err != nil {
+		if err := state.Graph.TransitionDispatch(*id, target, *actor, *reason, ack, started, result); err != nil {
 			return err
 		}
 		for i := range state.Ledger.Dispatches {

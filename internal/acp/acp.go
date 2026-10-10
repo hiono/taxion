@@ -7,8 +7,6 @@ package acp
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -363,6 +361,8 @@ func (s *Server) review(sid string, sess *acpSession, sha string, out *bufio.Wri
 func (s *Server) dispatch(sid string, sess *acpSession, out *bufio.Writer) (string, error) {
 	d := core.Dispatch{ID: fmt.Sprintf("d-%d", time.Now().UnixNano()),
 		TaskID: sess.taskID, Repo: sess.cwd, Active: true, CreatedAt: time.Now().UTC()}
+	var instruction *core.GraphDispatch
+	var rendered string
 	if err := s.update(func(state *store.Workspace) error {
 		if err := core.GuardActiveDispatch(state.Ledger.Dispatches); err != nil {
 			return err
@@ -378,18 +378,18 @@ func (s *Server) dispatch(sid string, sess *acpSession, out *bufio.Writer) (stri
 			if err := state.Graph.CheckExecutable(task.ID, sess.cwd); err != nil {
 				return err
 			}
-			gt, _ := state.Graph.GraphTask(task.ID)
-			contract, err := json.Marshal(gt)
+			graphDispatch, err := core.NewGraphDispatch(state.Graph, d.ID, task.ID, sess.cwd, core.RelationshipNone, "", "")
 			if err != nil {
 				return err
 			}
-			hash := sha256.Sum256(contract)
-			if err := state.Graph.IssueDispatch(core.GraphDispatch{ID: d.ID, TaskID: task.ID,
-				Repository: sess.cwd, Recipient: gt.Owner, InstructionSummary: gt.Objective,
-				InstructionHash: hex.EncodeToString(hash[:]), IssuedEvidence: gt.RequiredEvidence},
-				"acp", "dispatch issued"); err != nil {
+			if err := state.Graph.IssueDispatch(graphDispatch, "acp", "dispatch issued"); err != nil {
 				return err
 			}
+			rendered, err = core.RenderDispatchInstruction(graphDispatch)
+			if err != nil {
+				return err
+			}
+			instruction = &graphDispatch
 		}
 		state.Ledger.Dispatches = append(state.Ledger.Dispatches, d)
 		return nil
@@ -421,9 +421,16 @@ func (s *Server) dispatch(sid string, sess *acpSession, out *bufio.Writer) (stri
 	s.notify(out, sid, map[string]any{"sessionUpdate": "plan", "entries": entries})
 	s.notify(out, sid, map[string]any{
 		"sessionUpdate": "agent_message_chunk",
-		"content":       map[string]any{"type": "text", "text": fmt.Sprintf("Dispatched %s for %s in %s.", d.ID, sess.taskID, sess.cwd)},
+		"content":       map[string]any{"type": "text", "text": dispatchNotice(d, instruction, rendered, sess)},
 	})
 	return d.ID, nil
+}
+
+func dispatchNotice(d core.Dispatch, instruction *core.GraphDispatch, rendered string, sess *acpSession) string {
+	if instruction == nil {
+		return fmt.Sprintf("Dispatched %s for %s in %s.", d.ID, sess.taskID, sess.cwd)
+	}
+	return rendered
 }
 
 func findTask(ledger core.Ledger, id string) (core.Task, bool) {

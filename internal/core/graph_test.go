@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -13,7 +14,8 @@ func graphTask(id string) GraphTask {
 	return GraphTask{ID: id, Title: id, Repo: "owner/repo", Type: "IMPLEMENTATION", Issue: "Issue #47",
 		Status: Draft, Owner: "CODER", Reviewer: "reviewer-run", CreatedFrom: "request:1",
 		Objective: "fix", Scope: []string{"src"}, Acceptance: []string{"tests pass"},
-		RequiredEvidence: []string{"test-report"}, ExitCondition: "report",
+		RequiredEvidence: []string{"test-report"}, ExitCondition: "report", Worktree: "/work/task",
+		Branch: "work/task", BaselineSHA: strings.Repeat("a", 40),
 		AuthorizationID: "decision:1", Decisions: []TaskDecision{{ID: "decision:1", Source: "human:1", Text: "allow scope"}}}
 }
 
@@ -92,29 +94,160 @@ func TestGraphLifecycleAndProof(t *testing.T) {
 func TestDispatchLifecycleRequiresAcknowledgement(t *testing.T) {
 	g := trackedGraph(t, graphTask("task"))
 	move(t, &g, "task", Ready, TransitionProof{})
-	if err := g.IssueDispatch(GraphDispatch{
-		ID: "dispatch", TaskID: "task", Repository: "owner/repo", Recipient: "CODER",
-		InstructionSummary: "fix", InstructionHash: "hash",
-	}, "controller", "issue"); err != nil {
+	dispatch, err := NewGraphDispatch(g, "dispatch", "task", "owner/repo", RelationshipNone, "", "")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := g.TransitionDispatch("dispatch", DispatchAcknowledged, "worker", "ack", false, false); err == nil {
+	if err := g.IssueDispatch(dispatch, "controller", "issue"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.TransitionDispatch("dispatch", DispatchAcknowledged, "worker", "ack", false, false, nil); err == nil {
 		t.Fatal("accepted acknowledgement without confirmation")
 	}
-	if err := g.TransitionDispatch("dispatch", DispatchRunning, "worker", "start", true, true); err == nil {
+	if err := g.TransitionDispatch("dispatch", DispatchRunning, "worker", "start", true, true, nil); err == nil {
 		t.Fatal("accepted start without persisted acknowledgement")
 	}
-	if err := g.TransitionDispatch("dispatch", DispatchAcknowledged, "worker", "ack", true, false); err != nil {
+	if err := g.TransitionDispatch("dispatch", DispatchAcknowledged, "worker", "ack", true, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.TransitionDispatch("dispatch", DispatchRunning, "worker", "start", true, true); err != nil {
+	if err := g.TransitionDispatch("dispatch", DispatchRunning, "worker", "start", true, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.TransitionDispatch("dispatch", DispatchSucceeded, "worker", "finish", false, false); err != nil {
+	suspended := &DispatchResult{
+		DispatchID: "dispatch", TaskID: "task", Recipient: "CODER", Repository: "owner/repo",
+		Status: DispatchSuspended, StartedSHA: strings.Repeat("a", 40), Evidence: []string{"safe-stop:1"},
+		NextTransition: Active, ResumeCondition: "human authorizes continued execution",
+	}
+	if err := g.TransitionDispatch("dispatch", DispatchSuspended, "worker", "safe stop", false, false, suspended); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.TransitionDispatch("dispatch", DispatchSucceeded, "worker", "stale result", false, false); err == nil {
+	if err := g.TransitionDispatch("dispatch", DispatchRunning, "worker", "resume", true, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	result := &DispatchResult{
+		DispatchID: "dispatch", TaskID: "task", Recipient: "CODER", Repository: "owner/repo",
+		Status: DispatchSucceeded, StartedSHA: strings.Repeat("a", 40), OutputSHA: strings.Repeat("b", 40),
+		ChangedFiles: []string{"src/file.go"}, Validations: []DispatchValidation{{Command: "go test ./...", ExitCode: 0}},
+		Evidence: []string{"test-report"}, NextTransition: WaitingForEvidence,
+	}
+	if err := g.TransitionDispatch("dispatch", DispatchSucceeded, "worker", "finish", false, false, result); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.TransitionDispatch("dispatch", DispatchSucceeded, "worker", "stale result", false, false, result); err == nil {
 		t.Fatal("accepted stale result")
+	}
+	task := g.Tasks[0]
+	task.DeferredReason = ""
+	task.ResumeCondition = ""
+	task.Objective = "complete the remaining scoped work"
+	task.AuthorizationID = "decision:2"
+	task.Decisions = append(task.Decisions, TaskDecision{ID: "decision:2", Source: "human:2", Text: "continue with the remaining scope"})
+	if err := g.Track(task, "human", "authorize follow-up"); err != nil {
+		t.Fatal(err)
+	}
+	move(t, &g, "task", Ready, TransitionProof{})
+	next, err := NewGraphDispatch(g, "dispatch-2", "task", "owner/repo", RelationshipAmends, "dispatch", "Clarified remaining scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(next.Instruction.ChangedFields, "objective") ||
+		!slices.Contains(next.Instruction.ChangedFields, "authorizationId") ||
+		!slices.Contains(next.Instruction.PreservedFields, "baselineSha") {
+		t.Fatalf("amendment comparison missing changes or preserved fields: %+v", next.Instruction)
+	}
+	if err := g.IssueDispatch(next, "controller", "issue amended work"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.TransitionDispatch("dispatch-2", DispatchAcknowledged, "worker", "ack", true, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.TransitionDispatch("dispatch-2", DispatchRunning, "worker", "start", true, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.TransitionDispatch("dispatch-2", DispatchSucceeded, "worker", "stale result", false, false, result); err == nil {
+		t.Fatal("old Dispatch result completed a newer Dispatch")
+	}
+	rendered, err := RenderDispatchInstruction(dispatch)
+	if err != nil || !strings.HasPrefix(rendered, "DISPATCH TO: \"CODER\"\n") {
+		t.Fatalf("recipient must be first: %q %v", rendered, err)
+	}
+	for _, field := range []string{"AUTHORIZED ACTIONS:", "FORBIDDEN ACTIONS:", "WORKTREE:", "BASELINE SHA:", "RETURN FORMAT:"} {
+		if !strings.Contains(rendered, field) {
+			t.Fatalf("instruction missing %s: %s", field, rendered)
+		}
+	}
+	g.Dispatches[0].Instruction.Objective = "tampered"
+	if err := g.Validate(); err == nil {
+		t.Fatal("tampered instruction accepted")
+	}
+}
+
+func TestDispatchRelationshipAndDerivedTaskLinks(t *testing.T) {
+	parent := graphTask("parent")
+	first := graphTask("first")
+	first.ParentID = parent.ID
+	second := graphTask("second")
+	second.ParentID = parent.ID
+	blocked := graphTask("blocked")
+	blocked.ParentID = parent.ID
+	blocked.DependsOn = []TaskDependency{{TaskID: first.ID, State: Approved}}
+	g := trackedGraph(t, parent, first, second, blocked)
+	move(t, &g, "first", Ready, TransitionProof{})
+	move(t, &g, "second", Ready, TransitionProof{})
+	firstDispatch, err := NewGraphDispatch(g, "d-first", "first", "owner/repo", RelationshipNone, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(firstDispatch.Instruction.SiblingTaskIDs, []string{"second", "blocked"}) ||
+		!slices.Equal(firstDispatch.Instruction.Blocks, []string{"blocked"}) {
+		t.Fatalf("task relations not included in instruction: %+v", firstDispatch.Instruction)
+	}
+	if err := g.IssueDispatch(firstDispatch, "controller", "issue"); err != nil {
+		t.Fatal(err)
+	}
+	secondDispatch, err := NewGraphDispatch(g, "d-second", "second", "owner/repo", RelationshipIndependent,
+		"d-first", "Separate Task with independent scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.IssueDispatch(secondDispatch, "controller", "issue"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewGraphDispatch(g, "d-retry", "first", "owner/repo", RelationshipNone, "", ""); err == nil {
+		t.Fatal("reissued Task accepted without explicit relation")
+	}
+}
+
+func TestHumanDecisionMustBeRecordedBeforeDispatch(t *testing.T) {
+	task := graphTask("task")
+	task.HumanDecision = &HumanDecisionRequest{
+		ID: "question:1", Question: "Which package should be changed?",
+		Options: []HumanDecisionOption{
+			{ID: "a", Description: "Change package A"},
+			{ID: "b", Description: "Change package B"},
+		},
+		RecommendedOptionID: "a", RecommendationReason: "A owns the affected behavior",
+	}
+	g := trackedGraph(t, task)
+	move(t, &g, task.ID, HumanDecisionRequired, TransitionProof{})
+	if err := g.CheckExecutable(task.ID, task.Repo); err == nil {
+		t.Fatal("dispatched while a decision was pending")
+	}
+	task = g.Tasks[0]
+	task.HumanDecision.SelectedOptionID = "a"
+	task.HumanDecision.DecisionRecordID = "decision:human"
+	task.Decisions = append(task.Decisions, TaskDecision{
+		ID: "decision:human", Source: "human:1", Text: "Selected option a",
+	})
+	if err := g.Track(task, "human", "recorded decision"); err != nil {
+		t.Fatal(err)
+	}
+	move(t, &g, task.ID, Ready, TransitionProof{})
+	if err := g.CheckExecutable(task.ID, task.Repo); err != nil {
+		t.Fatalf("recorded decision did not unblock task: %v", err)
 	}
 }
 

@@ -20,7 +20,8 @@ func TestTaskGraphCommandsAndDispatchGate(t *testing.T) {
 	}
 	gt := core.GraphTask{ID: task.ID, Title: task.Title, Repo: task.Repo, Type: "INVESTIGATION", Status: core.Blocked,
 		Issue: "Issue #47", CreatedFrom: "human:1", DeferredReason: "scope out", ResumeCondition: "approved", NextAction: "investigate",
-		Owner: "CODER", Objective: "investigate", Scope: []string{"docs"}, Acceptance: []string{"report"}, RequiredEvidence: []string{"report"}, ExitCondition: "report"}
+		Owner: "CODER", Objective: "investigate", Scope: []string{"docs"}, Acceptance: []string{"report"}, RequiredEvidence: []string{"report"}, ExitCondition: "report",
+		Worktree: "/work/task", Branch: "work/task", BaselineSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 	file := filepath.Join(t.TempDir(), "request.json")
 	write := func(value any) {
 		t.Helper()
@@ -76,7 +77,20 @@ func TestTaskGraphCommandsAndDispatchGate(t *testing.T) {
 	if err := dispatchCmd([]string{"transition", "--id", dispatchID, "--status", string(core.DispatchRunning), "--actor", "worker", "--reason", "started"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := dispatchCmd([]string{"transition", "--id", dispatchID, "--status", string(core.DispatchSucceeded), "--actor", "worker", "--reason", "finished"}); err != nil {
+	resultFile := filepath.Join(t.TempDir(), "result.json")
+	result := core.DispatchResult{
+		DispatchID: dispatchID, TaskID: task.ID, Recipient: "CODER", Repository: task.Repo,
+		Status: core.DispatchSucceeded, StartedSHA: gt.BaselineSHA,
+		OutputSHA:    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		ChangedFiles: []string{"docs/guide.md"},
+		Validations:  []core.DispatchValidation{{Command: "go test ./...", ExitCode: 0}},
+		Evidence:     []string{"report"}, NextTransition: core.WaitingForEvidence,
+	}
+	write(result)
+	if err := os.Rename(file, resultFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatchCmd([]string{"transition", "--id", dispatchID, "--status", string(core.DispatchSucceeded), "--actor", "worker", "--reason", "finished", "--result-file", resultFile}); err != nil {
 		t.Fatal(err)
 	}
 	db, state, err = loadWorkspace()
