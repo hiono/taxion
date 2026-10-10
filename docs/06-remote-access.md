@@ -6,7 +6,10 @@ loopback**:
 
 - `taxion serve` — default `--addr 127.0.0.1:3938`; `--token` / `TAXION_TOKEN`
   env enables Bearer auth on every route (missing/wrong → identical 401).
-  Binding beyond loopback without a token is refused outright.
+  `--mode loopback` (default) refuses any non-loopback bind, token or not;
+  `--mode remote` is the named opt-in for LAN/docker use and requires
+  `--token` (ADR-0016). Binding beyond loopback without a token is refused
+  outright.
 - web order counter — default `--host 127.0.0.1:3939`; `--token` /
   `TAXION_TOKEN` is forwarded server-side to the upstream API, never to the
   browser.
@@ -43,8 +46,8 @@ exposure without TLS termination in front is out of scope (ADR-0015).
 
 > Prefer the tunnel: keep the API on localhost, pull it with `ssh -L`.
 > Tokened serving beyond loopback is authorized by ADR-0015 (token = gate,
-> audit log = camera). Untokened `0.0.0.0` exposure is still forbidden —
-> refused at startup.
+> audit log = camera) and named by ADR-0016 (`--mode remote`, token mandatory).
+> Untokened `0.0.0.0` exposure is still forbidden — refused at startup.
 
 ## Pattern A — API on a remote host, web + browser local (recommended)
 
@@ -75,15 +78,20 @@ Bind the container port to the *host's loopback only* (never bare `-p 3938:3938`
 docker run -d --name taxion \
   -p 127.0.0.1:3938:3938 \
   -v taxion-data:/data \
-  taxion taxion serve --addr 0.0.0.0:3938 --store /data/ledger.json
+  -e TAXION_TOKEN \
+  taxion taxion serve --mode remote --addr 0.0.0.0:3938 --store /data/ledger.json
 ```
 
 `-p 127.0.0.1:…` keeps the published port off the LAN; the container itself
-must listen on `0.0.0.0` to receive docker-forwarded traffic, but that socket
-is reachable only via the host loopback. Then apply Pattern A:
+must listen on `0.0.0.0` to receive docker-forwarded traffic, so `--mode
+remote` plus a token is required even here (the socket also touches the
+docker bridge — other containers could reach it). Reachable only via the
+host loopback in practice. Then apply Pattern A, adding the token:
 
 ```sh
 ssh -L 3938:localhost:3938 user@remote-host
+# web/curl need the same token the remote serve was started with:
+export TAXION_TOKEN   # value from the operator, never from chat/logs
 ```
 
 Alternative without publishing a port at all — reach the container over SSH:
@@ -116,7 +124,8 @@ ssh -L 3938:localhost:3938 -L 3939:localhost:3939 user@work-host
 docker run -d --name taxion \
   -p 127.0.0.1:3938:3938 \
   -v taxion-data:/data \
-  taxion taxion serve --addr 0.0.0.0:3938 --store /data/ledger.json
+  -e TAXION_TOKEN \
+  taxion taxion serve --mode remote --addr 0.0.0.0:3938 --store /data/ledger.json
 # 3. web counter (either end, localhost-only): Pattern A or C
 TAXION_API=http://127.0.0.1:3938 npm start -- --port 3939
 # 4. browser (home): http://127.0.0.1:3939 — create/dispatch/review
@@ -129,9 +138,12 @@ who approved); the editor rail does the work (code, build, test). Taxion
 never sees your source — only task titles, repo paths, and SHAs in the
 ledger, which stay inside the tunnel.
 
-## Explicit opt-out (advanced, M5 territory)
-`taxion serve --addr 0.0.0.0:3938` or web `--host 0.0.0.0` exposes the full
-API — including order POSTs (task/dispatch/review) — to anyone who can reach
-the port, with no authentication. Do this only behind a firewall/VPN you
-control, and record a new ADR first (required by the ADR-0011 amendment).
-M5 (auth + audit + public release) removes this restriction properly.
+## Explicit opt-out (advanced, ADR-0016 territory)
+
+`taxion serve --mode remote --addr 0.0.0.0:3938 --token …` is the named,
+ADR-0016-authorized way to serve the LAN: token gate on every route, audit
+log on every write. Residual risks stay yours (single shared token, plain
+HTTP — trusted networks only, never the open internet without TLS in
+front). Web `--host 0.0.0.0` only widens the page/proxy; the upstream API
+stays token-gated. Anything beyond this posture (IdP, per-user keys) is a
+new ADR — see ADR-0016's deferred H with its numeric trigger.

@@ -37,7 +37,7 @@ Commands:
   review              Review a coder output (--task, --sha and --repo required)
   resume              Resume a session (--session required)
   acp                 Serve ACP v1 over stdio (spike)
-  serve               Serve HTTP API over the ledger ([--addr], [--token]/TAXION_TOKEN, [--audit])
+  serve               Serve HTTP API over the ledger ([--addr], [--mode], [--token]/TAXION_TOKEN, [--audit])
   gen-token           Print a random Bearer token for serve (M5 auth)
 
 Identity gate (REP-001): mutating commands require an explicit --repo.
@@ -290,21 +290,22 @@ func resumeCmd(args []string) error {
 	return nil
 }
 
-// serveCmd runs the HTTP API (M5: optional Bearer auth, M5-2 audit log).
-// Localhost only by default; binding elsewhere requires --token (or
-// TAXION_TOKEN) — serving beyond loopback without auth is refused.
-// The audit log defaults next to the ledger; empty --audit disables it.
+// serveCmd runs the HTTP API (M5: optional Bearer auth, M5-2 audit log,
+// F-lite modes). loopback (default) binds a loopback interface only and
+// refuses anything else, token or not. remote requires --token (TAXION_TOKEN)
+// — the flag itself is the explicit opt-in to beyond-loopback serving.
 func serveCmd(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:3938", "listen address")
+	mode := fs.String("mode", "loopback", "loopback | remote (remote requires --token)")
 	token := fs.String("token", os.Getenv("TAXION_TOKEN"), "Bearer token (or TAXION_TOKEN env)")
 	defAudit := filepath.Join(filepath.Dir(storePath), "audit.jsonl")
 	audit := fs.String("audit", defAudit, "audit log path (empty disables)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if !isLoopback(*addr) && *token == "" {
-		return fmt.Errorf("serve: binding beyond loopback requires --token (M5 auth)")
+	if err := checkServeMode(*mode, *addr, *token); err != nil {
+		return err
 	}
 	if *audit != "" {
 		if err := os.MkdirAll(filepath.Dir(*audit), 0o755); err != nil {
@@ -326,6 +327,26 @@ func serveCmd(args []string) error {
 		fmt.Printf(" (audit: %s)\n", *audit)
 	}
 	return http.ListenAndServe(*addr, srv.Handler())
+}
+
+// checkServeMode enforces the F-lite bind policy (ADR-0016): loopback mode
+// refuses any non-loopback bind even when tokened; remote mode is the
+// explicit opt-in to beyond-loopback serving and requires a token.
+func checkServeMode(mode, addr, token string) error {
+	switch mode {
+	case "loopback":
+		if !isLoopback(addr) {
+			return fmt.Errorf("serve: --mode loopback refuses non-loopback bind %q (use --mode remote with --token)", addr)
+		}
+		return nil
+	case "remote":
+		if token == "" {
+			return fmt.Errorf("serve: --mode remote requires --token (M5 auth)")
+		}
+		return nil
+	default:
+		return fmt.Errorf("serve: unknown --mode %q (want loopback|remote)", mode)
+	}
 }
 
 // isLoopback reports whether addr binds a loopback interface only.
