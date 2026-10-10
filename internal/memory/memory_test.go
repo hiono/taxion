@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/hiono/taxion/internal/core"
 )
 
 func openTest(t *testing.T) *Store {
@@ -215,6 +217,66 @@ func TestEntryWithMissingTimestampFailsClosed(t *testing.T) {
 	}
 	if _, err := s.Get(KindDecision, id); err == nil {
 		t.Fatal("entry with a missing creation timestamp was accepted")
+	}
+}
+
+func TestExplicitConflictBlocksDispatchUntilHumanResolution(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "ledger.json")
+	s, err := Open(PathForLedger(ledger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	decisionID, err := s.Put(KindDecision, Entry{Title: "Use SQLite"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lessonID, err := s.Put(KindLesson, Entry{Title: "Use JSON"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisionRef := fmt.Sprintf("%s:%d", KindDecision, decisionID)
+	lessonRef := fmt.Sprintf("%s:%d", KindLesson, lessonID)
+	conflictID, err := s.AddConflict(lessonRef, decisionRef, "human", "different persistence decisions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddConflict(decisionRef, lessonRef, "human", "duplicate relation"); err == nil {
+		t.Fatal("duplicate active conflict was accepted")
+	}
+	for _, ref := range []string{decisionRef, lessonRef} {
+		if err := CheckDispatch(ledger, core.Task{}, "repo", ref); err == nil {
+			t.Fatalf("dispatch accepted unresolved conflicting reference %s", ref)
+		}
+	}
+	conflicts, err := s.Conflicts(decisionRef)
+	if err != nil || len(conflicts) != 1 || conflicts[0].ID != conflictID || conflicts[0].Status != "active" {
+		t.Fatalf("conflict relation was not listed: %+v, %v", conflicts, err)
+	}
+	if err := s.ResolveConflict(conflictID, "human", "the newer decision applies to this workspace"); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{decisionRef, lessonRef} {
+		if err := CheckDispatch(ledger, core.Task{}, "repo", ref); err != nil {
+			t.Fatalf("resolved conflict still blocks %s: %v", ref, err)
+		}
+	}
+	conflicts, err = s.Conflicts(decisionRef)
+	if err != nil || len(conflicts) != 1 || conflicts[0].Status != "resolved" ||
+		conflicts[0].ResolvedBy != "human" || conflicts[0].ResolvedAt == nil ||
+		conflicts[0].ResolvedAt.IsZero() {
+		t.Fatalf("conflict resolution was not retained: %+v, %v", conflicts, err)
+	}
+	for _, ref := range []string{decisionRef, lessonRef} {
+		kind, id, err := parseReference(ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events, err := s.Events(kind, id)
+		if err != nil || len(events) != 3 || events[1].Action != "conflict-recorded" ||
+			events[2].Action != "conflict-resolved" {
+			t.Fatalf("conflict history missing for %s: %+v, %v", ref, events, err)
+		}
 	}
 }
 

@@ -51,6 +51,7 @@ Commands:
   memory revise       Append a new version (--kind, --id, --title, --actor, --reason)
   memory revoke       Disable an entry without deleting its history
   memory history      Show entry lifecycle events (--kind and --id required)
+  memory conflict     Record, inspect, or resolve explicit Memory conflicts
   memory source       Resolve a warning source (--warning-id required)
   memory warn         Record a repeated warning (--body required, [--scope])
   memory configure    Set the warning threshold (--promote-after required)
@@ -568,7 +569,7 @@ func (f *stringListFlag) Set(value string) error {
 
 func memoryCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: taxion memory put|get|list|revise|revoke|history|source|warn|configure|approve|checks|search|export …")
+		return fmt.Errorf("usage: taxion memory put|get|list|revise|revoke|history|conflict|source|warn|configure|approve|checks|search|export …")
 	}
 	switch args[0] {
 	case "configure":
@@ -765,6 +766,8 @@ func memoryCmd(args []string) error {
 			return err
 		}
 		return printJSON(source)
+	case "conflict":
+		return memoryConflictCmd(args[1:])
 	case "get":
 		fs := flag.NewFlagSet("memory get", flag.ContinueOnError)
 		kind := fs.String("kind", "", "lesson|decision|guardrail|concern (required)")
@@ -854,7 +857,80 @@ func memoryCmd(args []string) error {
 	case "export":
 		return memoryExportCmd(args[1:])
 	default:
-		return fmt.Errorf("usage: taxion memory put|get|list|revise|revoke|history|source|warn|configure|approve|checks|search|export …")
+		return fmt.Errorf("usage: taxion memory put|get|list|revise|revoke|history|conflict|source|warn|configure|approve|checks|search|export …")
+	}
+}
+
+func memoryConflictCmd(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: taxion memory conflict add|list|resolve …")
+	}
+	switch args[0] {
+	case "add":
+		fs := flag.NewFlagSet("memory conflict add", flag.ContinueOnError)
+		left := fs.String("left", "", "first Memory reference (kind:id)")
+		right := fs.String("right", "", "second Memory reference (kind:id)")
+		actor := fs.String("actor", "", "person recording the conflict (required)")
+		reason := fs.String("reason", "", "why these entries conflict (required)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *left == "" || *right == "" || *actor == "" || *reason == "" || fs.NArg() != 0 {
+			return fmt.Errorf("memory conflict add: --left, --right, --actor, and --reason are required")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		id, err := s.AddConflict(*left, *right, *actor, *reason)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("taxion: Memory conflict %d recorded (%s, %s)\n", id, *left, *right)
+		return nil
+	case "list":
+		fs := flag.NewFlagSet("memory conflict list", flag.ContinueOnError)
+		ref := fs.String("ref", "", "Memory reference (kind:id; required)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *ref == "" || fs.NArg() != 0 {
+			return fmt.Errorf("memory conflict list: --ref is required")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		conflicts, err := s.Conflicts(*ref)
+		if err != nil {
+			return err
+		}
+		return printJSON(conflicts)
+	case "resolve":
+		fs := flag.NewFlagSet("memory conflict resolve", flag.ContinueOnError)
+		id := fs.Int64("id", 0, "conflict ID (required)")
+		actor := fs.String("actor", "", "person recording the resolution (required)")
+		reason := fs.String("reason", "", "how the conflict was resolved (required)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *id < 1 || *actor == "" || *reason == "" || fs.NArg() != 0 {
+			return fmt.Errorf("memory conflict resolve: positive --id, --actor, and --reason are required")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		if err := s.ResolveConflict(*id, *actor, *reason); err != nil {
+			return err
+		}
+		fmt.Printf("taxion: Memory conflict %d resolved\n", *id)
+		return nil
+	default:
+		return fmt.Errorf("usage: taxion memory conflict add|list|resolve …")
 	}
 }
 

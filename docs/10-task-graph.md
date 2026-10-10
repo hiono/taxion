@@ -70,6 +70,7 @@ Task を `HUMAN_DECISION_REQUIRED` にする。選択した option ID と対応�
 Memory 記録を参照する。Task Graph は参照 ID だけを保持し、Memory 本文を複製しない。
 dispatch 時に参照先が存在し、失効・置換されていないことを確認する。
 guardrail の参照先は承認済みでなければならない。Memory DB がないのに参照が設定されている場合も拒否する。
+Memory 間の矛盾は `memory conflict` で人が明示し、未解決ならどちらの参照も dispatch できない。
 issue は URL、`Issue #番号`、`INHERITED: Issue #番号`、
 `PENDING: 登録TaskID`、または理由付きの `NOT_REQUIRED:` を使う。
 PENDING は登録 Task の COMPLETED を依存に持ち、実行前に実際の参照へ更新する。

@@ -56,9 +56,20 @@ The Task Graph owns the current list of Memory references. Set `memoryRefs`
 to canonical IDs such as `lesson:12` or `decision:4`. CLI, HTTP, and ACP
 dispatch reject missing, revoked, superseded, or non-approved guardrail
 references. The Task Graph stores only IDs and does not duplicate Memory text.
-Revision links make contradictions across versions of one entry explicit;
-Taxion does not infer semantic conflicts between unrelated entries. Such
-conflicts need an explicit decision or revision before they can be enforced.
+Record contradictions between entries explicitly; Taxion does not infer
+semantic conflicts from free text. An unresolved conflict blocks dispatch
+when either entry is referenced:
+
+```sh
+taxion memory conflict add --left decision:4 --right lesson:12 \
+  --actor human --reason "The entries prescribe different storage sources"
+taxion memory conflict list --ref decision:4
+taxion memory conflict resolve --id 1 --actor human \
+  --reason "Decision 4 supersedes the lesson for this workspace"
+```
+
+Conflict creation and resolution are retained in both entries' lifecycle
+histories. Resolving a conflict requires a recorded human explanation.
 
 ## Warning promotion
 

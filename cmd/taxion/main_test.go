@@ -17,11 +17,64 @@ func TestUsageDescribesCurrentCommands(t *testing.T) {
 		"Bind coder-output evidence", "local stub",
 		"task create, dispatch and review require an explicit --repo",
 		"memory configure", "memory approve", "memory checks",
+		"memory conflict",
 	} {
 		if !strings.Contains(usage, text) {
 			t.Errorf("usage missing %q", text)
 		}
 
+	}
+}
+
+func TestMemoryConflictCLI(t *testing.T) {
+	previous := storePath
+	storePath = filepath.Join(t.TempDir(), "ledger.json")
+	t.Cleanup(func() { storePath = previous })
+	if err := initCmd(); err != nil {
+		t.Fatal(err)
+	}
+	for _, title := range []string{"Use SQLite", "Use JSON"} {
+		if err := memoryCmd([]string{"put", "--kind", "decision", "--title", title}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := openMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := s.List(memory.KindDecision, "")
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("Memory entries = %+v, %v", entries, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	left, right := fmt.Sprintf("decision:%d", entries[0].ID), fmt.Sprintf("decision:%d", entries[1].ID)
+	if err := memoryCmd([]string{
+		"conflict", "add", "--left", left, "--right", right,
+		"--actor", "human", "--reason", "contradictory storage choices",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s, err = openMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflicts, err := s.Conflicts(left)
+	if err != nil || len(conflicts) != 1 {
+		t.Fatalf("conflicts = %+v, %v", conflicts, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryCmd([]string{
+		"conflict", "resolve", "--id", fmt.Sprint(conflicts[0].ID),
+		"--actor", "human", "--reason", "SQLite applies; JSON is temporary input",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryCmd([]string{"conflict", "list", "--ref", left}); err != nil {
+		t.Fatal(err)
 	}
 }
 

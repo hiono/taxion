@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -63,6 +62,14 @@ CREATE TABLE IF NOT EXISTS warning_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT, warning_id INTEGER NOT NULL,
   source_ref TEXT NOT NULL DEFAULT '', occurred_at TEXT NOT NULL,
   occurrence_count INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS memory_conflicts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, left_ref TEXT NOT NULL, right_ref TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('active','resolved')),
+  actor TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL,
+  resolved_by TEXT NOT NULL DEFAULT '', resolution TEXT NOT NULL DEFAULT '',
+  resolved_at TEXT NOT NULL DEFAULT '', CHECK(left_ref<right_ref));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_conflicts_active_pair
+  ON memory_conflicts(left_ref,right_ref) WHERE status='active';
 `
 
 // Entry is one memory row in any of the four tables.
@@ -608,13 +615,9 @@ func revokeLinkedGuardrail(tx *sql.Tx, lessonID int64, actor, reason string, now
 // ResolveReference validates a stable kind:id Task reference and rejects stale
 // records so a revoked or superseded decision cannot silently drive a dispatch.
 func (s *Store) ResolveReference(ref string) (Entry, error) {
-	kind, idText, ok := strings.Cut(ref, ":")
-	if !ok {
-		return Entry{}, fmt.Errorf("taxion: invalid Memory reference %q (want kind:id)", ref)
-	}
-	id, err := strconv.ParseInt(idText, 10, 64)
-	if err != nil || fmt.Sprintf("%s:%d", kind, id) != ref || id < 1 {
-		return Entry{}, fmt.Errorf("taxion: invalid Memory reference %q (want kind:id)", ref)
+	kind, id, err := parseReference(ref)
+	if err != nil {
+		return Entry{}, err
 	}
 	e, err := s.Get(kind, id)
 	if err != nil {
@@ -623,6 +626,19 @@ func (s *Store) ResolveReference(ref string) (Entry, error) {
 	if e.Status == "revoked" || e.Status == "superseded" ||
 		(kind == KindGuardrail && e.Status != "approved") {
 		return Entry{}, fmt.Errorf("taxion: Memory reference %s is not active", ref)
+	}
+	var conflictID int64
+	var otherRef string
+	err = s.db.QueryRow(
+		`SELECT id,CASE WHEN left_ref=? THEN right_ref ELSE left_ref END
+		 FROM memory_conflicts WHERE status='active' AND (left_ref=? OR right_ref=?)
+		 ORDER BY id LIMIT 1`, ref, ref, ref).Scan(&conflictID, &otherRef)
+	if err != nil && err != sql.ErrNoRows {
+		return Entry{}, err
+	}
+	if err == nil {
+		return Entry{}, fmt.Errorf("taxion: Memory reference %s has unresolved conflict %d with %s",
+			ref, conflictID, otherRef)
 	}
 	return e, nil
 }

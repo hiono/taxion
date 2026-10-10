@@ -83,3 +83,5 @@ guardrail references. Project and global remain scopes in the same
 workspace-adjacent `memory.db`, not separate storage locations. Older warning
 counters did not retain individual evidence, so migration labels their
 aggregate source instead of reconstructing occurrence history.
+Conflicts between unrelated entries are explicit, human-recorded relations;
+an unresolved relation blocks dispatch references to either entry.
