@@ -43,6 +43,7 @@ Commands:
   memory put          Store a memory entry (--kind, --title, [--body, --scope])
   memory get          Fetch one memory entry (--kind and --id required)
   memory list         List memory entries (--kind required, [--scope] filter)
+  memory warn         Record a repeated warning (--body required, [--scope])
 
 Identity gate (REP-001): mutating commands require an explicit --repo.
 The target is never inferred from the working directory.
@@ -397,7 +398,7 @@ func openMemory() (*memory.Store, error) {
 
 func memoryCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: taxion memory put|get|list …")
+		return fmt.Errorf("usage: taxion memory put|get|list|warn …")
 	}
 	switch args[0] {
 	case "put":
@@ -481,9 +482,38 @@ func memoryCmd(args []string) error {
 			fmt.Printf("%d\t%s\t%s\t%s\n", e.ID, e.Scope, e.Status, e.Title)
 		}
 		return nil
+	case "warn":
+		return memoryWarnCmd(args[1:])
 	default:
-		return fmt.Errorf("usage: taxion memory put|get|list …")
+		return fmt.Errorf("usage: taxion memory put|get|list|warn …")
 	}
+}
+
+func memoryWarnCmd(args []string) error {
+	fs := flag.NewFlagSet("memory warn", flag.ContinueOnError)
+	body := fs.String("body", "", "warning text (required)")
+	scope := fs.String("scope", "project", "project|global")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *body == "" {
+		return fmt.Errorf("memory warn: --body is required")
+	}
+	s, err := openMemory()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	n, lid, err := s.Warn(*body, *scope)
+	if err != nil {
+		return err
+	}
+	if lid != 0 {
+		fmt.Printf("taxion: warning %d time(s); promoted to lesson %d (%s)\n", n, lid, *scope)
+		return nil
+	}
+	fmt.Printf("taxion: warning %d time(s) (%s)\n", n, *scope)
+	return nil
 }
 
 func printJSON(v any) error {
