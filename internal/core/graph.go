@@ -147,23 +147,36 @@ const (
 )
 
 type GraphDispatch struct {
-	ID               string               `json:"id"`
-	TaskID           string               `json:"taskId"`
-	Repository       string               `json:"repository"`
-	Recipient        string               `json:"recipient"`
-	Status           DispatchStatus       `json:"status"`
-	Relationship     DispatchRelationship `json:"relationship"`
-	RelatedID        string               `json:"relatedDispatchId"`
-	Instruction      DispatchInstruction  `json:"instruction"`
-	InstructionHash  string               `json:"instructionHash"`
-	IssuedEvidence   []string             `json:"issuedEvidence"`
-	Acknowledged     bool                 `json:"acknowledged"`
-	ExecutionStarted bool                 `json:"executionStarted"`
-	Result           *DispatchResult      `json:"result,omitempty"`
-	LastUpdatedBy    string               `json:"lastUpdatedBy"`
-	LastTransition   string               `json:"lastTransition"`
-	CreatedAt        time.Time            `json:"createdAt"`
-	UpdatedAt        time.Time            `json:"updatedAt"`
+	ID                string               `json:"id"`
+	TaskID            string               `json:"taskId"`
+	Repository        string               `json:"repository"`
+	Recipient         string               `json:"recipient"`
+	RuntimeSessionID  string               `json:"runtimeSessionId,omitempty"`
+	RuntimeConfigHash string               `json:"runtimeConfigHash,omitempty"`
+	RuntimeUsage      []DispatchUsage      `json:"runtimeUsage,omitempty"`
+	Status            DispatchStatus       `json:"status"`
+	Relationship      DispatchRelationship `json:"relationship"`
+	RelatedID         string               `json:"relatedDispatchId"`
+	Instruction       DispatchInstruction  `json:"instruction"`
+	InstructionHash   string               `json:"instructionHash"`
+	IssuedEvidence    []string             `json:"issuedEvidence"`
+	Acknowledged      bool                 `json:"acknowledged"`
+	ExecutionStarted  bool                 `json:"executionStarted"`
+	Result            *DispatchResult      `json:"result,omitempty"`
+	LastUpdatedBy     string               `json:"lastUpdatedBy"`
+	LastTransition    string               `json:"lastTransition"`
+	CreatedAt         time.Time            `json:"createdAt"`
+	UpdatedAt         time.Time            `json:"updatedAt"`
+}
+
+type DispatchUsage struct {
+	Model            string    `json:"model"`
+	IsAuto           *bool     `json:"isAuto,omitempty"`
+	InputTokens      *int64    `json:"inputTokens,omitempty"`
+	OutputTokens     *int64    `json:"outputTokens,omitempty"`
+	CacheReadTokens  *int64    `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens *int64    `json:"cacheWriteTokens,omitempty"`
+	ObservedAt       time.Time `json:"observedAt"`
 }
 
 type DispatchValidation struct {
@@ -287,6 +300,38 @@ func (g TaskGraph) dispatch(id string) (GraphDispatch, bool) {
 }
 
 func (g TaskGraph) GraphDispatch(id string) (GraphDispatch, bool) { return g.dispatch(id) }
+
+// BindRuntimeSession durably associates a runtime session and its role
+// configuration with an active Dispatch.
+func (g *TaskGraph) BindRuntimeSession(dispatchID, sessionID, configHash string) error {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(configHash) == "" {
+		return graphError("runtime session ID and configuration hash must not be empty")
+	}
+	next := cloneGraph(*g)
+	d, ok := next.dispatch(dispatchID)
+	if !ok || !dispatchActive(d.Status) {
+		return graphError("runtime session requires an active Dispatch")
+	}
+	if d.RuntimeSessionID != "" &&
+		(d.RuntimeSessionID != sessionID || d.RuntimeConfigHash != configHash) {
+		return graphError("Dispatch is already bound to another runtime session configuration")
+	}
+	for _, other := range next.Dispatches {
+		if other.ID != dispatchID && other.RuntimeSessionID == sessionID &&
+			(other.TaskID != d.TaskID || other.Recipient != d.Recipient || other.RuntimeConfigHash != configHash) {
+			return graphError("runtime session cannot cross Task, role, or configuration boundaries")
+		}
+	}
+	for i := range next.Dispatches {
+		if next.Dispatches[i].ID == dispatchID {
+			next.Dispatches[i].RuntimeSessionID = sessionID
+			next.Dispatches[i].RuntimeConfigHash = configHash
+			*g = next
+			return nil
+		}
+	}
+	return graphError("Dispatch not found")
+}
 
 var dispatchReturnFormat = []string{
 	"dispatchId, taskId, recipient, repository, status",
@@ -829,6 +874,10 @@ func validIssue(ref string) bool {
 	return false
 }
 
+func validOptionalCount(value *int64) bool {
+	return value == nil || *value >= 0
+}
+
 func (g TaskGraph) Validate() error {
 	if g.Version != 1 {
 		return graphError("unsupported version %d", g.Version)
@@ -842,6 +891,7 @@ func (g TaskGraph) Validate() error {
 		ids[t.ID] = true
 	}
 	dispatchIDs := map[string]bool{}
+	runtimeSessionRoles := map[string]GraphDispatch{}
 	activeDispatches := map[string]string{}
 	tasksByID := make(map[string]GraphTask, len(g.Tasks))
 	for _, task := range g.Tasks {
@@ -862,6 +912,26 @@ func (g TaskGraph) Validate() error {
 			return graphError("dispatch instruction hash mismatch for %s", d.ID)
 		}
 		dispatchIDs[d.ID] = true
+		if (d.RuntimeSessionID == "") != (d.RuntimeConfigHash == "") {
+			return graphError("runtime session binding is incomplete for Dispatch %s", d.ID)
+		}
+		if d.RuntimeSessionID == "" && len(d.RuntimeUsage) != 0 {
+			return graphError("runtime usage has no session binding for Dispatch %s", d.ID)
+		}
+		if d.RuntimeSessionID != "" {
+			for _, usage := range d.RuntimeUsage {
+				if !nonempty(usage.Model) || usage.ObservedAt.IsZero() ||
+					!validOptionalCount(usage.InputTokens) || !validOptionalCount(usage.OutputTokens) ||
+					!validOptionalCount(usage.CacheReadTokens) || !validOptionalCount(usage.CacheWriteTokens) {
+					return graphError("invalid runtime usage record for Dispatch %s", d.ID)
+				}
+			}
+			if previous, exists := runtimeSessionRoles[d.RuntimeSessionID]; exists &&
+				(previous.TaskID != d.TaskID || previous.Recipient != d.Recipient || previous.RuntimeConfigHash != d.RuntimeConfigHash) {
+				return graphError("runtime session crosses Task, role, or configuration boundaries")
+			}
+			runtimeSessionRoles[d.RuntimeSessionID] = d
+		}
 		if dispatchActive(d.Status) {
 			if previous := activeDispatches[d.TaskID]; previous != "" {
 				return graphError("conflicting active dispatches %s and %s", previous, d.ID)
@@ -869,6 +939,7 @@ func (g TaskGraph) Validate() error {
 			activeDispatches[d.TaskID] = d.ID
 		}
 	}
+
 	dispatchStatuses := map[string]DispatchStatus{}
 	seenDispatches := map[string]bool{}
 	latestByTask := map[string]GraphDispatch{}
@@ -1221,6 +1292,18 @@ func cloneGraph(g TaskGraph) TaskGraph {
 
 func cloneDispatch(d GraphDispatch) GraphDispatch {
 	d.IssuedEvidence = slices.Clone(d.IssuedEvidence)
+	d.RuntimeUsage = slices.Clone(d.RuntimeUsage)
+	for i := range d.RuntimeUsage {
+		usage := &d.RuntimeUsage[i]
+		if usage.IsAuto != nil {
+			value := *usage.IsAuto
+			usage.IsAuto = &value
+		}
+		usage.InputTokens = cloneCount(usage.InputTokens)
+		usage.OutputTokens = cloneCount(usage.OutputTokens)
+		usage.CacheReadTokens = cloneCount(usage.CacheReadTokens)
+		usage.CacheWriteTokens = cloneCount(usage.CacheWriteTokens)
+	}
 	d.Instruction.SiblingTaskIDs = slices.Clone(d.Instruction.SiblingTaskIDs)
 	d.Instruction.DependsOn = slices.Clone(d.Instruction.DependsOn)
 	d.Instruction.Blocks = slices.Clone(d.Instruction.Blocks)
@@ -1233,6 +1316,14 @@ func cloneDispatch(d GraphDispatch) GraphDispatch {
 	d.Instruction.ReturnFormat = slices.Clone(d.Instruction.ReturnFormat)
 	d.Result = cloneDispatchResult(d.Result)
 	return d
+}
+
+func cloneCount(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func cloneDispatchResult(result *DispatchResult) *DispatchResult {

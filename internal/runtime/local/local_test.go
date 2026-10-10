@@ -32,6 +32,26 @@ func TestOrderedExecution(t *testing.T) {
 	}
 }
 
+func TestSendRecordsInputWithoutClaimingWorkerOutput(t *testing.T) {
+	ctx := context.Background()
+	a := New("coder", "verify")
+	sid, err := a.Start(ctx, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Send(ctx, sid, "inspect the change"); err != nil {
+		t.Fatal(err)
+	}
+	events := mustEvents(t, ctx, a, sid)
+	event := <-events
+	if event.Type != runtime.EventInput || event.Payload != "inspect the change" {
+		t.Fatalf("unexpected input event: %+v", event)
+	}
+	if err := a.Send(ctx, sid, " "); err == nil {
+		t.Fatal("whitespace-only prompt must be rejected")
+	}
+}
+
 func TestFailClosed(t *testing.T) {
 	ctx := context.Background()
 	a := New("reviewer", "plan", "verify")
@@ -41,6 +61,7 @@ func TestFailClosed(t *testing.T) {
 	sid, _ := a.Start(ctx, "t1")
 	bogus := "reviewer-0-0"
 	for _, err := range []error{
+		a.Send(ctx, bogus, "prompt"),
 		a.CompleteStep(ctx, bogus, "plan"),
 		a.Resume(ctx, bogus),
 		a.Stop(ctx, bogus),
@@ -59,6 +80,9 @@ func TestFailClosed(t *testing.T) {
 		t.Fatalf("expected stopped-session error, got %v", err)
 	}
 	if err := a.Resume(ctx, sid); err != ErrStoppedSession {
+		t.Fatalf("expected stopped-session error, got %v", err)
+	}
+	if err := a.Send(ctx, sid, "prompt"); err != ErrStoppedSession {
 		t.Fatalf("expected stopped-session error, got %v", err)
 	}
 }

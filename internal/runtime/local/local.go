@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,8 +17,9 @@ import (
 )
 
 var (
-	ErrUnknownSession = errors.New("taxion: unknown session")
-	ErrStoppedSession = errors.New("taxion: session is stopped")
+	ErrUnknownSession   = errors.New("taxion: unknown session")
+	ErrStoppedSession   = errors.New("taxion: session is stopped")
+	ErrCompletedSession = errors.New("taxion: session is completed")
 )
 
 var _ runtime.Runtime = (*Adapter)(nil)
@@ -93,6 +95,35 @@ func (a *Adapter) CompleteStep(_ context.Context, sessionID, name string) error 
 			close(w)
 		}
 		s.watchers = nil
+	}
+	return nil
+}
+
+// Send records an instruction accepted by this deterministic test adapter.
+// It does not execute a worker or produce an assistant response.
+func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
+	if strings.TrimSpace(prompt) == "" {
+		return fmt.Errorf("taxion: prompt must not be empty")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s, ok := a.sessions[sessionID]
+	if !ok {
+		return ErrUnknownSession
+	}
+	if s.stopped {
+		return ErrStoppedSession
+	}
+	if s.done {
+		return ErrCompletedSession
+	}
+	ev := runtime.Event{Type: runtime.EventInput, Payload: prompt}
+	s.events = append(s.events, ev)
+	for _, w := range s.watchers {
+		w <- ev
 	}
 	return nil
 }

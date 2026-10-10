@@ -15,8 +15,9 @@ wrapper and block future runtimes (ACP, other providers).
 ## Decision
 
 `internal/core` depends only on the stdlib and on the minimal interface
-(`internal/runtime`: `Start / Resume / Stop / Events`). Concrete adapters live
-outside core as plugins. Enforced by the `core-purity` CI job (SDK-001).
+(`internal/runtime`: `Start / Send / Resume / Stop / Events`). Concrete
+adapters live outside core as plugins. Enforced by the `core-purity` CI job
+(SDK-001).
 
 ## Consequences
 

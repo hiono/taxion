@@ -54,6 +54,30 @@ func TestEchoReportsOutputThenDone(t *testing.T) {
 	}
 }
 
+func TestSendWritesInstructionToWorker(t *testing.T) {
+	p := New("coder", "sh", []string{"-c", "IFS= read -r value; printf 'received:%s\\n' \"$value\""}, "")
+	sid, err := p.Start(context.Background(), "t-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Send(context.Background(), sid, "inspect the change"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	ch, err := p.Events(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawInput bool
+	for _, ev := range collect(t, ch) {
+		if ev.Type == runtime.EventOutput && ev.Payload == "received:inspect the change" {
+			sawInput = true
+		}
+	}
+	if !sawInput {
+		t.Fatal("worker did not receive the instruction")
+	}
+}
+
 func TestNonZeroExitFailsClosed(t *testing.T) {
 	p := New("coder", "sh", []string{"-c", "exit 3"}, "")
 	sid, err := p.Start(context.Background(), "t-1")
@@ -113,6 +137,9 @@ func TestGuards(t *testing.T) {
 	}
 	if _, err := p.Events(ctx, "nope"); err != ErrUnknownSession {
 		t.Fatalf("Events unknown = %v", err)
+	}
+	if err := p.Send(ctx, "nope", "prompt"); err != ErrUnknownSession {
+		t.Fatalf("Send unknown = %v", err)
 	}
 	if err := p.Stop(ctx, "nope"); err != ErrUnknownSession {
 		t.Fatalf("Stop unknown = %v", err)

@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,6 +106,72 @@ func TestWorkspaceInitializeAndRollback(t *testing.T) {
 	}
 	if len(got.Ledger.Tasks) != 1 || got.Ledger.Tasks[0].Title != "task" {
 		t.Fatalf("rollback/reopen lost state: %+v", got)
+	}
+}
+
+func TestRuntimeSessionBindingPersistsInWorkspaceSQLite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspace.db")
+	now := time.Now().UTC()
+	task := core.GraphTask{
+		ID: "t1", Title: "task", Repo: "owner/repo", Type: "IMPLEMENTATION", Issue: "Issue #50",
+		Owner: "CODER", Status: core.Draft, CreatedFrom: "request:1", Objective: "implement",
+		Scope: []string{"src"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"report"},
+		Worktree: "/work/t1", Branch: "work/t1", BaselineSHA: strings.Repeat("a", 40),
+		ExitCondition: "report", AuthorizationID: "decision:1",
+		Decisions: []core.TaskDecision{{ID: "decision:1", Source: "human:1", Text: "approved"}},
+	}
+	graph := core.TaskGraph{Version: 1}
+	if err := graph.Track(task, "human", "register"); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.Transition("t1", core.Ready, "human", "approve", core.TransitionProof{}); err != nil {
+		t.Fatal(err)
+	}
+	dispatch, err := core.NewGraphDispatch(graph, "d1", "t1", "owner/repo", core.RelationshipNone, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.IssueDispatch(dispatch, "controller", "issue"); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := Workspace{
+		Ledger: core.Ledger{
+			Tasks: []core.Task{{ID: "t1", Title: "task", Repo: "owner/repo", CreatedAt: now}},
+			Dispatches: []core.Dispatch{{
+				ID: "d1", TaskID: "t1", Repo: "owner/repo", Active: true, CreatedAt: now,
+			}},
+		},
+		Graph: graph, HasGraph: true,
+	}
+	if _, err := store.InitializeWorkspace(state); err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	if err := store.UpdateWorkspace(func(state *Workspace) error {
+		return state.Graph.BindRuntimeSession("d1", "sdk-session-1", "role-config-hash")
+	}); err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	got, err := store.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, ok := got.Graph.GraphDispatch("d1")
+	if !ok || bound.RuntimeSessionID != "sdk-session-1" || bound.RuntimeConfigHash != "role-config-hash" {
+		t.Fatalf("runtime binding did not survive SQLite reopen: %+v", bound)
 	}
 }
 

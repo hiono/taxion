@@ -9,17 +9,23 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/hiono/taxion/internal/acp"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
+	"github.com/hiono/taxion/internal/runtime"
+	"github.com/hiono/taxion/internal/runtime/controller"
+	"github.com/hiono/taxion/internal/runtime/copilot"
 	"github.com/hiono/taxion/internal/server"
 	"github.com/hiono/taxion/internal/store"
 )
@@ -39,6 +45,11 @@ Commands:
   dispatch            Dispatch a task (--task and --repo required; revised Dispatches need an explicit relationship)
   dispatch transition Record a Dispatch lifecycle transition (--id, --status, --reason)
   dispatch list       List dispatches ([--repo] filter, [--json])
+  runtime start       Start the Copilot session bound to an active Dispatch and send its authorized instruction
+  runtime send        Send a follow-up prompt to the Dispatch session (--prompt-file required)
+  runtime resume      Resume the Dispatch session
+  runtime events      Stream events from the Dispatch session
+  runtime stop        Stop the Dispatch session
   review              Bind coder-output evidence (--task, --sha and --repo required)
   resume              Print a resume acknowledgement (local stub; --session required)
   acp                 Serve ACP v1 over stdio (spike)
@@ -84,6 +95,8 @@ func main() {
 		err = taskCmd(args[1:])
 	case "dispatch":
 		err = dispatchCmd(args[1:])
+	case "runtime":
+		err = runtimeCmd(args[1:])
 	case "review":
 		err = reviewCmd(args[1:])
 	case "resume":
@@ -429,6 +442,191 @@ func resumeCmd(args []string) error {
 	}
 	fmt.Printf("taxion: resumed session %s (local stub)\n", *session)
 	return nil
+}
+
+func runtimeCmd(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: taxion runtime {start|send|resume|events|stop} --dispatch ID --system-prompt-file PATH")
+	}
+	action := args[0]
+	switch action {
+	case "start", "send", "resume", "events", "stop":
+	default:
+		return fmt.Errorf("runtime: unknown action %q", action)
+	}
+	fs := flag.NewFlagSet("runtime "+action, flag.ContinueOnError)
+	dispatchID := fs.String("dispatch", "", "active Dispatch ID")
+	systemPromptFile := fs.String("system-prompt-file", "", "role-specific system prompt")
+	cliPath := fs.String("cli", "", "Copilot CLI path (default: PATH)")
+	baseDirectory := fs.String("base-directory", "", "Copilot state directory (default: ~/.copilot)")
+	tools := fs.String("tools", "", "comma-separated SDK tool allowlist (default: none)")
+	promptFile := fs.String("prompt-file", "", "follow-up instruction file (send only)")
+	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for a turn or event stream")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *dispatchID == "" || *systemPromptFile == "" {
+		return fmt.Errorf("runtime %s: --dispatch and --system-prompt-file are required", action)
+	}
+	if *timeout <= 0 {
+		return fmt.Errorf("runtime %s: --timeout must be positive", action)
+	}
+	if action == "send" && *promptFile == "" {
+		return fmt.Errorf("runtime send: --prompt-file is required")
+	}
+
+	db, err := openWorkspace()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	if !state.HasGraph {
+		return fmt.Errorf("runtime: Task Graph is not initialized")
+	}
+	dispatch, ok := state.Graph.GraphDispatch(*dispatchID)
+	if !ok {
+		return fmt.Errorf("runtime: Dispatch %q not found", *dispatchID)
+	}
+	systemPrompt, err := os.ReadFile(*systemPromptFile)
+	if err != nil {
+		return fmt.Errorf("runtime: read system prompt: %w", err)
+	}
+	availableTools := make([]string, 0)
+	if strings.TrimSpace(*tools) != "" {
+		for _, tool := range strings.Split(*tools, ",") {
+			tool = strings.TrimSpace(tool)
+			if tool == "" || slices.Contains(availableTools, tool) {
+				return fmt.Errorf("runtime: tool list contains an empty or duplicate name")
+			}
+			availableTools = append(availableTools, tool)
+		}
+	}
+	worker, err := copilot.New(copilot.Config{
+		Role: dispatch.Recipient, SystemPrompt: string(systemPrompt),
+		WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: *cliPath,
+		BaseDirectory: *baseDirectory, AvailableTools: availableTools,
+	})
+	if err != nil {
+		return err
+	}
+	control, err := controller.New(db, worker)
+	if err != nil {
+		_ = worker.Close()
+		return err
+	}
+
+	ctx, cancel := signalContext(*timeout)
+	defer cancel()
+	var operationErr error
+	switch action {
+	case "start":
+		if dispatch.RuntimeSessionID != "" {
+			operationErr = fmt.Errorf("runtime start: Dispatch already has a session; use send or resume")
+			break
+		}
+		var sessionID string
+		sessionID, operationErr = control.Start(ctx, dispatch.ID)
+		if operationErr == nil {
+			var instruction string
+			instruction, operationErr = core.RenderDispatchInstruction(dispatch)
+			if operationErr == nil {
+				operationErr = control.Send(ctx, dispatch.ID, instruction)
+			}
+		}
+		if operationErr == nil {
+			fmt.Fprintf(os.Stderr, "taxion: started runtime session %s for Dispatch %s\n", sessionID, dispatch.ID)
+			operationErr = streamEvents(ctx, control, dispatch.ID, os.Stdout)
+		}
+	case "send":
+		var prompt []byte
+		prompt, operationErr = os.ReadFile(*promptFile)
+		if operationErr == nil {
+			operationErr = control.Send(ctx, dispatch.ID, string(prompt))
+		}
+		if operationErr == nil {
+			operationErr = streamEvents(ctx, control, dispatch.ID, os.Stdout)
+		}
+	case "resume":
+		operationErr = control.Resume(ctx, dispatch.ID)
+		if operationErr == nil {
+			fmt.Printf("taxion: resumed runtime session %s for Dispatch %s\n", dispatch.RuntimeSessionID, dispatch.ID)
+		}
+	case "events":
+		operationErr = control.Resume(ctx, dispatch.ID)
+		if operationErr == nil {
+			operationErr = streamEvents(ctx, control, dispatch.ID, os.Stdout)
+		}
+	case "stop":
+		operationErr = control.Resume(ctx, dispatch.ID)
+		if operationErr == nil {
+			operationErr = control.Stop(ctx, dispatch.ID)
+		}
+	}
+	closeErr := worker.Close()
+	if closeErr != nil {
+		closeErr = fmt.Errorf("runtime: close Copilot adapter: %w", closeErr)
+	}
+	return errors.Join(operationErr, closeErr)
+}
+
+func signalContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	notified, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	return notified, func() {
+		stop()
+		cancel()
+	}
+}
+
+func streamEvents(ctx context.Context, control *controller.Controller, dispatchID string, out io.Writer) error {
+	events, err := control.Events(ctx, dispatchID)
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(out)
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				return fmt.Errorf("runtime: event stream ended before a terminal turn event")
+			}
+			if err := encoder.Encode(event); err != nil {
+				return fmt.Errorf("runtime: write event: %w", err)
+			}
+			if event.Type == runtime.EventUsage {
+				var usage core.DispatchUsage
+				if err := json.Unmarshal([]byte(event.Payload), &usage); err != nil {
+					return fmt.Errorf("runtime: decode usage event: %w", err)
+				}
+				usage.ObservedAt = time.Now().UTC()
+				if err := control.RecordUsage(dispatchID, usage); err != nil {
+					return fmt.Errorf("runtime: persist usage event: %w", err)
+				}
+			}
+			switch event.Type {
+			case runtime.EventTurnFinished:
+				return nil
+			case runtime.EventFailed:
+				failErr := control.Fail(dispatchID, event.Payload)
+				return errors.Join(fmt.Errorf("runtime: execution failed: %s", event.Payload), failErr)
+			case runtime.EventCancelled:
+				stopErr := control.Stop(context.Background(), dispatchID)
+				return errors.Join(fmt.Errorf("runtime: execution cancelled: %s", event.Payload), stopErr)
+			}
+		case <-ctx.Done():
+			stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			stopErr := control.Stop(stopCtx, dispatchID)
+			cancel()
+			if stopErr != nil {
+				stopErr = fmt.Errorf("runtime: stop timed-out execution: %w", stopErr)
+			}
+			return errors.Join(fmt.Errorf("runtime: wait for event: %w", ctx.Err()), stopErr)
+		}
+	}
 }
 
 func runACP() error {

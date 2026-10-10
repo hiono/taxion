@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +45,8 @@ type Proc struct {
 type session struct {
 	taskID   string
 	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	sendMu   sync.Mutex
 	stopped  bool
 	finished bool
 	events   []runtime.Event
@@ -74,24 +77,66 @@ func (p *Proc) Start(_ context.Context, taskID string) (string, error) {
 	if p.dir != "" {
 		cmd.Dir = p.dir
 	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return "", err
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		stdin.Close()
 		return "", err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		stdin.Close()
 		return "", err
 	}
 	if err := cmd.Start(); err != nil {
+		stdin.Close()
 		return "", err
 	}
 	p.mu.Lock()
 	id := p.nextID()
-	s := &session{taskID: taskID, cmd: cmd}
+	s := &session{taskID: taskID, cmd: cmd, stdin: stdin}
 	p.sessions[id] = s
 	p.mu.Unlock()
 	go p.pump(s, stdout, stderr, cmd)
 	return id, nil
+}
+
+// Send writes one newline-delimited instruction to the worker's stdin.
+func (p *Proc) Send(ctx context.Context, sessionID, prompt string) error {
+	if strings.TrimSpace(prompt) == "" {
+		return fmt.Errorf("taxion: prompt must not be empty")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	s, ok := p.sessions[sessionID]
+	if !ok {
+		p.mu.Unlock()
+		return ErrUnknownSession
+	}
+	if s.stopped {
+		p.mu.Unlock()
+		return ErrStoppedSession
+	}
+	if s.finished {
+		p.mu.Unlock()
+		return fmt.Errorf("taxion: worker session is finished")
+	}
+	p.mu.Unlock()
+
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(s.stdin, prompt+"\n"); err != nil {
+		return fmt.Errorf("taxion: send instruction to worker: %w", err)
+	}
+	return nil
 }
 
 func (p *Proc) pump(s *session, stdout, stderr io.Reader, cmd *exec.Cmd) {
@@ -169,7 +214,11 @@ func (p *Proc) Stop(_ context.Context, sessionID string) error {
 	}
 	s.watchers = nil
 	cmd := s.cmd
+	stdin := s.stdin
 	p.mu.Unlock()
+	if stdin != nil {
+		stdin.Close()
+	}
 	if cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}

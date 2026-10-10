@@ -186,7 +186,17 @@ relationship reason を明示する。最初の Dispatch だけが `NONE` を使
 指示には relationship reason と比較対象 field の一覧を含める。
 `SUSPENDED` の result は停止 evidence と `resumeCondition` を必須とし、履歴にも保存する。
 停止中の Dispatch は active として扱い、同じ Task の競合 Dispatch を防ぐ。
-現在の実装は Dispatch 指示を記録・表示するが、Copilot SDK session や worker を起動しない。
+`runtimeSessionId` と `runtimeConfigHash` は Dispatch に結び、SQLite の workspace state に保存する。
+同じ SDK session は同一 Task・recipient・設定 hash の範囲だけで再利用できる。
+`runtimeUsage` は SDK が返す model、Auto 選択、input/output token、cache read/write token を保持する。
+取得できない値は省略し、ゼロとして扱わない。usage event は計測時刻とともに Dispatch に保存する。
+resume 時は role prompt、worktree、tool allowlist、permission policy を再指定し、設定 hash の一致を照合する。
+Reviewer は SDK permission handler で worktree 内の file read だけを許可し、write・shell 等を拒否する。
+この handler は OS sandbox ではなく、Git 操作やすべての外部 tool の隔離を証明しない。
+
+CLI `runtime start` は Dispatch の保存済み指示を明示的に SDK session へ送り、`send` は追加指示を渡す。
+turn の完了や出力イベントは Dispatch 成功の証拠にならず、終了時は結果 schema に従った明示的な遷移が必要。
+ACP と HTTP API は Copilot session を自動起動しない。
 
 ## 保存・互換性と制約
 

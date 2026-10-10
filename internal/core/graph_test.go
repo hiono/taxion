@@ -182,6 +182,48 @@ func TestDispatchLifecycleRequiresAcknowledgement(t *testing.T) {
 	}
 }
 
+func TestRuntimeSessionBindingPersistsTaskRoleAndConfiguration(t *testing.T) {
+	coderTask := graphTask("coder-task")
+	reviewerTask := graphTask("reviewer-task")
+	reviewerTask.Owner = "REVIEWER"
+	g := trackedGraph(t, coderTask, reviewerTask)
+	move(t, &g, "coder-task", Ready, TransitionProof{})
+	move(t, &g, "reviewer-task", Ready, TransitionProof{})
+	coderDispatch, err := NewGraphDispatch(g, "coder-dispatch", "coder-task", "owner/repo", RelationshipNone, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.IssueDispatch(coderDispatch, "controller", "issue coder"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.BindRuntimeSession("coder-dispatch", "sdk-session", "config-hash"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.BindRuntimeSession("coder-dispatch", "sdk-session", "config-hash"); err != nil {
+		t.Fatalf("idempotent bind: %v", err)
+	}
+	if err := g.BindRuntimeSession("coder-dispatch", "sdk-session", "changed-config"); err == nil {
+		t.Fatal("changed role configuration reused an existing session")
+	}
+	reviewDispatch, err := NewGraphDispatch(g, "review-dispatch", "reviewer-task", "owner/repo",
+		RelationshipIndependent, "coder-dispatch", "independent review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.IssueDispatch(reviewDispatch, "controller", "issue reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.BindRuntimeSession("review-dispatch", "sdk-session", "config-hash"); err == nil {
+		t.Fatal("runtime session crossed Task and role boundaries")
+	}
+	if err := g.BindRuntimeSession("review-dispatch", "review-session", "review-config"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Validate(); err != nil {
+		t.Fatalf("valid bindings rejected: %v", err)
+	}
+}
+
 func TestDispatchRelationshipAndDerivedTaskLinks(t *testing.T) {
 	parent := graphTask("parent")
 	first := graphTask("first")

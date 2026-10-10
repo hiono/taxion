@@ -19,15 +19,15 @@ procedures, and failure lessons are carried over as sanitized docs.
 ```
 Taxion Core (SDK-neutral)
  ├─ Server (Task Graph / Dispatch Ledger / Evidence Ledger / Policy / Checkpoint)
- ├─ CLI (human interface: init / task / dispatch / review / resume)
+ ├─ CLI (human interface: init / task / dispatch / runtime / review)
  ├─ Web UI (task/dispatch/review forms + HTTP API proxy)
  ├─ ACP Server (stdio agent with dispatch/review methods)
- └─ Runtime adapters (local and process-backed; Go Copilot SDK adapter not yet implemented)
+ └─ Runtime adapters (local, process-backed, and Go Copilot SDK)
 ```
 
 ## Non-goals (Foundation → Local)
 
-- Not a Copilot SDK wrapper — SDK types never appear in `internal/core`.
+- The governance core is not coupled to a Copilot SDK; SDK types stay outside `internal/core`.
 - No Git history / Issues / code ported from private predecessors.
 - No personal data, internal hostnames, or org-specific repo names in public artifacts (PRIV-001).
 
@@ -72,16 +72,29 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
   版付き Task Graph の登録・遷移、scope out の保持、dispatch 検査と制約。
 - `docs/adr/` — design decisions and rationale; Issues record implementation results.
 
-## CLI (Local phase, minimal)
+## CLI
 
 ```bash
 taxion init
 taxion task create --title "…" --repo <repo>
 taxion dispatch --task <id> --repo <repo>
+taxion runtime start --dispatch <id> --system-prompt-file <path>
+taxion runtime send --dispatch <id> --system-prompt-file <path> --prompt-file <path>
+taxion runtime resume --dispatch <id> --system-prompt-file <path>
+taxion runtime events --dispatch <id> --system-prompt-file <path>
+taxion runtime stop --dispatch <id> --system-prompt-file <path>
 taxion review --task <id> --sha <coder-sha> --repo <repo>
-taxion resume --session <id>
 ```
 
-The CLI is local-first and deterministic. `taxion serve` provides the HTTP
-API, `taxion acp` provides ACP over stdio, and `web/` provides the browser
-console.
+Runtime commands require an active Task Graph Dispatch and a role-specific
+system prompt file. The Task's worktree and Dispatch recipient select the
+runtime role and workspace. Tool access defaults to none; use `--tools` only
+for an explicit SDK allowlist. Reviewer sessions reject writes, shell commands,
+and reads outside their assigned worktree. These permission checks are not an
+OS sandbox. Resume requires the original prompt, CLI, worktree, and tool
+configuration to match the persisted hash. Usage events record the selected
+model and available token/cache counts in SQLite; absent SDK values remain
+unknown. A finished model turn is not a successful Dispatch result.
+
+The CLI is local-first. `taxion serve` provides the HTTP API, `taxion acp`
+provides ACP over stdio, and `web/` provides the browser console.

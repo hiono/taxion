@@ -12,9 +12,25 @@ type Event struct {
 	Payload string
 }
 
+const (
+	EventInput        = "input"
+	EventOutput       = "output"
+	EventOutputDelta  = "output_delta"
+	EventTurnStarted  = "turn_started"
+	EventTurnEnded    = "turn_ended"
+	EventTurnFinished = "turn_finished"
+	EventFailed       = "failed"
+	EventCancelled    = "cancelled"
+	EventUsage        = "usage"
+	EventContextUsage = "context_usage"
+	EventCompaction   = "compaction"
+	EventPermission   = "permission"
+)
+
 // Runtime is the minimal control-plane contract:
 //
 //	Start   — begin isolated execution for a task
+//	Send    — send another instruction to the same session
 //	Resume  — validate a prior session handle (adapters need not restart it)
 //	Stop    — halt execution
 //	Events  — stream neutral events
@@ -22,7 +38,17 @@ type Event struct {
 // Implementations must isolate Coder and Reviewer contexts (ROLE-001).
 type Runtime interface {
 	Start(ctx context.Context, taskID string) (sessionID string, err error)
+	Send(ctx context.Context, sessionID, prompt string) error
 	Resume(ctx context.Context, sessionID string) error
 	Stop(ctx context.Context, sessionID string) error
 	Events(ctx context.Context, sessionID string) (<-chan Event, error)
+}
+
+// Identity exposes the role and configuration boundary used for durable
+// Dispatch-to-session binding.
+type Identity interface {
+	Runtime
+	Role() string
+	ConfigHash() string
+	Worktree() string
 }
