@@ -58,6 +58,27 @@ func TestKeyOfIgnoresForwardedHeaders(t *testing.T) {
 	}
 }
 
+func TestDefaultLockoutPolicy(t *testing.T) {
+	dir := t.TempDir()
+	srv := &Server{StorePath: seedAudit(t), Token: "test-token", AuditPath: filepath.Join(dir, "audit.jsonl")}
+	h := srv.Handler()
+	if srv.lim.maxFails != 5 || srv.lim.window != time.Minute || srv.lim.lockout != 5*time.Minute {
+		t.Fatalf("default policy changed: %d %s %s", srv.lim.maxFails, srv.lim.window, srv.lim.lockout)
+	}
+	for i := 0; i < 5; i++ {
+		if rec := doReq(h, http.MethodGet, "/api/ledger", "", "wrong"); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("failure %d: want 401, got %d", i+1, rec.Code)
+		}
+	}
+	if rec := doReq(h, http.MethodGet, "/api/ledger", "", "test-token"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("valid token during default lockout: want 429, got %d", rec.Code)
+	}
+	lines := readLines(t, srv.AuditPath)
+	if len(lines) != 6 || lines[5]["reason"] != "lockout" || lines[5]["status"] != float64(429) {
+		t.Fatalf("default lockout audit: %+v", lines)
+	}
+}
+
 func TestLockoutIntegration(t *testing.T) {
 	dir := t.TempDir()
 	ledger := filepath.Join(dir, "ledger.json")

@@ -107,6 +107,45 @@ func TestChainDetectsTamper(t *testing.T) {
 	}
 }
 
+func TestChainDoesNotAuthenticateOrDetectTailTruncation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	writeEntries(t, path, 3)
+	lines := readRawLines(t, path)
+	if err := os.WriteFile(path, []byte(strings.Join(lines[:2], "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, bad, err := Verify(path); err != nil || bad != 0 {
+		t.Fatalf("a truncated tail is still internally consistent: %d %v", bad, err)
+	}
+	// Recompute every predecessor after rewriting payloads: without an
+	// independently trusted hash, verification cannot distinguish this log.
+	var previous string
+	for i, line := range lines {
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatal(err)
+		}
+		entry["status"] = 204
+		if i == 0 {
+			delete(entry, "prev")
+		} else {
+			entry["prev"] = chainHash([]byte(previous + "\n"))
+		}
+		data, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines[i] = string(data)
+		previous = lines[i]
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, bad, err := Verify(path); err != nil || bad != 0 {
+		t.Fatalf("a recomputed rewrite is still internally consistent: %d %v", bad, err)
+	}
+}
+
 func TestLegacyPrefixCompat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	// Start with an old-format line to exercise upgrade compatibility.
