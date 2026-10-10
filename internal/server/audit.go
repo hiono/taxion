@@ -6,18 +6,22 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
 
-// auditEntry is one JSONL line in the audit log. It records WHAT was done,
-// never secrets: no tokens, no Authorization header, no request body (titles,
-// SHAs), no query string.
+// auditEntry is one JSONL line in the audit log. It records WHAT was done
+// and WHO claimed to do it, never secrets: no tokens, no Authorization
+// header, no request body (titles, SHAs), no query string. Who is a
+// self-asserted operator label (X-Operator), not an identity proof — under a
+// single shared token it distinguishes callers by claim, not by credential.
 type auditEntry struct {
 	TS     string `json:"ts"`
 	Method string `json:"method"`
 	Path   string `json:"path"`
 	Repo   string `json:"repo,omitempty"`
+	Who    string `json:"who,omitempty"`
 	Status int    `json:"status"`
 	Authed bool   `json:"authed"`
 }
@@ -58,6 +62,28 @@ func shouldLog(r *http.Request, status int) bool {
 		return true
 	}
 	return status == http.StatusUnauthorized || status == http.StatusForbidden
+}
+
+// whoOf extracts the self-asserted operator label. It is scrubbed to a
+// safe alphabet and capped: a log line must stay one clean JSON line, and
+// a hostile label must not smuggle control characters or megabytes in.
+func whoOf(r *http.Request) string {
+	const maxWho = 64
+	w := strings.TrimSpace(r.Header.Get("X-Operator"))
+	if w == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, c := range w {
+		if c < 0x20 || c == 0x7f || c > 0x7e {
+			continue
+		}
+		if b.Len() >= maxWho {
+			break
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
 }
 
 // repoOf extracts the top-level "repo" from a JSON POST body without keeping
@@ -130,6 +156,7 @@ func (a *auditor) withAudit(s *Server, next http.Handler) http.Handler {
 			Method: r.Method,
 			Path:   r.URL.Path,
 			Repo:   repo,
+			Who:    whoOf(r),
 			Status: status,
 			Authed: authed,
 		}); err != nil {

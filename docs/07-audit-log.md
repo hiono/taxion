@@ -1,4 +1,4 @@
-# 07 — Audit log (M5-2)
+# 07 — Audit log (M5-2, M8-D adds `who`)
 
 The serve API keeps an append-only audit log: the "camera" next to the M5-1
 "key". Default location is next to the ledger (`.taxion/audit.jsonl`);
@@ -9,7 +9,7 @@ override with `serve --audit PATH`, disable with `serve --audit ""`.
 One JSON object per line:
 
 ```json
-{"ts":"2026-10-10T...Z","method":"POST","path":"/api/tasks","repo":"demo","status":201,"authed":true}
+{"ts":"2026-10-10T...Z","method":"POST","path":"/api/tasks","repo":"demo","who":"hiono","status":201,"authed":true}
 ```
 
 | field    | content |
@@ -18,6 +18,7 @@ One JSON object per line:
 | `method` | HTTP method |
 | `path`   | request path only (no query string) |
 | `repo`   | explicit repo identity from the POST body, if present |
+| `who`    | self-asserted operator label from `X-Operator`, if present (M8-D) |
 | `status` | response code — including guard denials (400/404/409) |
 | `authed` | whether this request presented the valid token |
 
@@ -29,6 +30,11 @@ not logged — a read-heavy day leaves the log quiet.
 
 Tokens, `Authorization` headers, request bodies (task titles, SHAs), and
 query strings. The log proves *what was done*, never *with which secret*.
+
+`who` is a claim, not a proof: any caller holding the shared token can send
+any `X-Operator` value. It distinguishes operators by declaration so a
+two-person day is readable — it does not authenticate them. Per-operator
+identity is the deferred IdP work (ADR-0016).
 
 ## Fail-closed behavior
 

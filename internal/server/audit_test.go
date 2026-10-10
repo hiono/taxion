@@ -57,7 +57,50 @@ func readLines(t *testing.T, path string) []map[string]any {
 	return out
 }
 
+func TestWhoColumn(t *testing.T) {
+	dir := t.TempDir()
+	srv := &Server{StorePath: seedAudit(t), Token: "tok", AuditPath: filepath.Join(dir, "audit.jsonl")}
+	h := srv.Handler()
+
+	post := func(who string) {
+		req := httptest.NewRequest(http.MethodPost, "/api/tasks",
+			strings.NewReader(`{"title":"x","repo":"r"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer tok")
+		if who != "" {
+			req.Header.Set("X-Operator", who)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("want 201, got %d", rec.Code)
+		}
+	}
+	post("hiono")
+	post("")                                // absent header → no who key
+	post("evil\nline\r\n{\"token\":\"x\"}") // control chars + JSON smuggling
+	post(strings.Repeat("a", 200))          // overlong label
+
+	lines := readLines(t, srv.AuditPath)
+	if len(lines) != 4 {
+		t.Fatalf("want 4 lines, got %d", len(lines))
+	}
+	if lines[0]["who"] != "hiono" {
+		t.Fatalf("who = %v", lines[0]["who"])
+	}
+	if _, ok := lines[1]["who"]; ok {
+		t.Fatalf("absent header must omit who, got %v", lines[1])
+	}
+	if got := lines[2]["who"]; got == nil || strings.ContainsAny(got.(string), "\n\r") {
+		t.Fatalf("who must be single-line clean, got %q", got)
+	}
+	if got, ok := lines[3]["who"].(string); !ok || len(got) != 64 {
+		t.Fatalf("who must cap at 64 chars, got %q", lines[3]["who"])
+	}
+}
+
 func TestAuditLogsMutation(t *testing.T) {
+
 	dir := t.TempDir()
 	srv := &Server{StorePath: seedAudit(t), AuditPath: filepath.Join(dir, "audit.jsonl")}
 	h := srv.Handler()
