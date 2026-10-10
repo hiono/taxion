@@ -6,6 +6,10 @@
 //
 // The rules must never match their own markers (idempotence): markers carry
 // no @, no dotted quads, no slashes, and no token prefixes.
+//
+// Anything not matching a rule passes through unchanged; unknown sensitivity
+// classes fail open by design here (the export path, not this package,
+// decides what may leave the machine).
 package memory
 
 import "regexp"
