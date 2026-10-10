@@ -11,13 +11,18 @@ procedures, and failure lessons are carried over as sanitized docs.
 
 ## What it is
 
+採択した製品要件は [Taxion の要件と到達条件](docs/09-orchestration-requirements.md)
+を参照する。階層化した Memory と Go Copilot SDK の役割別 Session による
+自動実装・独立レビューは、現在の部品から実装する次の到達条件である。
+以下は現在の構成であり、この到達条件の達成を意味しない。
+
 ```
 Taxion Core (SDK-neutral)
  ├─ Server (Task Graph / Dispatch Ledger / Evidence Ledger / Policy / Checkpoint)
  ├─ CLI (human interface: init / task / dispatch / review / resume)
  ├─ Web UI (task/dispatch/review forms + HTTP API proxy)
  ├─ ACP Server (stdio agent with dispatch/review methods)
- └─ Runtime adapters (local and process-backed; SDK integrations evaluated separately)
+ └─ Runtime adapters (local and process-backed; Go Copilot SDK adapter not yet implemented)
 ```
 
 ## Non-goals (Foundation → Local)
@@ -61,6 +66,8 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
 - `docs/07-audit-log.md` — append-only audit log (mutations + denials) and
   retention policy.
 - `docs/08-memory-model.md` — current Memory storage, scopes, promotion, search, and export.
+- [docs/09-orchestration-requirements.md](docs/09-orchestration-requirements.md) —
+  製品要件、段階別の完了条件、現在の実装との差分。
 - `docs/adr/` — design decisions and rationale; Issues record implementation results.
 
 ## CLI (Local phase, minimal)

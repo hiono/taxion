@@ -51,6 +51,7 @@ Each step: small PR, `gofmt + vet + test`, sanitized docs, SHA-bound review.
 [ADR-0020](adr/0020-layered-memory-and-role-sessions-for-orchestration.md)
 を採択した実装方針とする。既存の完了記録は個別の成果であり、
 この到達条件の達成を意味しない。
+要件と検証条件は [Taxion の要件と到達条件](09-orchestration-requirements.md) に定義する。
 Memory の保存・参照・指示への反映は M10〜M12 に含め、
 M14 まで延期しない。各 Issue の前提と完了条件は
 [#46](https://github.com/hiono/taxion/issues/46) から参照できる。
