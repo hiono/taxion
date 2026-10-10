@@ -73,8 +73,33 @@ ssh -L 3938:localhost:3938 -L 3939:localhost:3939 user@remote-host
 # browser (local):     http://127.0.0.1:3939
 ```
 
-## Explicit opt-out (advanced, M5 territory)
+## Pattern D — home client develops in a work docker container (combined)
 
+Patterns A+B combined into one flow: from home you drive the Taxion ledger
+(order/approve) in the browser while doing the real work (edit/terminal) over
+a second SSH channel. Two rails, both inside SSH:
+
+```sh
+# 1. tunnels (home): API + web + your editor's channel
+ssh -L 3938:localhost:3938 -L 3939:localhost:3939 user@work-host
+# 2. API in docker (work-host): Pattern B, loopback-published only
+docker run -d --name taxion \
+  -p 127.0.0.1:3938:3938 \
+  -v taxion-data:/data \
+  taxion taxion serve --addr 0.0.0.0:3938 --store /data/ledger.json
+# 3. web counter (either end, localhost-only): Pattern A or C
+TAXION_API=http://127.0.0.1:3938 npm start -- --port 3939
+# 4. browser (home): http://127.0.0.1:3939 — create/dispatch/review
+# 5. real work (home): VS Code Remote SSH to work-host, then
+#    `docker exec -it <dev-container> bash` — edit, build, test as usual
+```
+
+What each rail covers: the browser rail operates the ledger (what to do,
+who approved); the editor rail does the work (code, build, test). Taxion
+never sees your source — only task titles, repo paths, and SHAs in the
+ledger, which stay inside the tunnel.
+
+## Explicit opt-out (advanced, M5 territory)
 `taxion serve --addr 0.0.0.0:3938` or web `--host 0.0.0.0` exposes the full
 API — including order POSTs (task/dispatch/review) — to anyone who can reach
 the port, with no authentication. Do this only behind a firewall/VPN you
