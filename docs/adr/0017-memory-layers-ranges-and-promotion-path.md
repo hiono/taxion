@@ -45,3 +45,12 @@ Details and the layer×range table: `docs/08-memory-model.md`.
 - M6-3 implements the promotion flow (counter → proposal → guardrail).
 - M6-4 evaluates the retrieval layer (SQLite FTS vs dolt vs QMD-embedded).
 - Sanitizer/export (self-protection) is out of M6 scope, deferred to M7+.
+
+## Implementation status
+
+The decision above records the intended model. M6-3 implemented warning
+counting and guideline-candidate creation at a fixed threshold of three
+occurrences; it did not implement configurable thresholds or promotion
+to enforced guardrails. The CLI stores both scopes in one `memory.db`,
+rather than separate project and global directories. See
+`docs/08-memory-model.md` for the current implementation and export flags.

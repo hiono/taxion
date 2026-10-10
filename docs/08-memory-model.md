@@ -21,7 +21,7 @@ and rationale for reference, rather than an event or an enforced check.
 | project | `.taxion/` | the repo | task memory, repo-local guidelines |
 | global | `.config`-shaped | the operator | cross-repo lessons, personal rules |
 
-## Promotion path
+## Promotion path (design)
 
 ```
 repeated warning (counted, threshold N configurable)
@@ -32,7 +32,25 @@ repeated warning (counted, threshold N configurable)
 Private knowledge is shared through issues/MRs ([155]); the
 standalone private layout sketch ([157]) is the project-range template.
 
+## Current implementation
+
+`memory warn` counts identical `(body, scope)` pairs. On the third occurrence,
+it creates one lesson with status `proposed` as a guideline candidate. The
+threshold is fixed at `PromoteAfter = 3`; it is not a CLI setting. Promotion
+to a guardrail and dispatch-time enforcement of Memory entries are not
+implemented. Existing core checks such as DSP-001 remain separate.
+
+The CLI stores both `project` and `global` entries in `memory.db` next to
+the selected ledger, distinguished by the `scope` column. The locations
+in the range table describe the design, not separate storage directories
+implemented by the current CLI.
+
+`memory export [--scope] [--sanitize]` prints a preview to stdout only.
+Sanitizing defaults on. It does not transmit data, and there are no
+`--profile` or `--dry-run` flags.
+
 ## Out of M6 scope
 
-Sanitizer / `export --profile` (M7 self-protection), cost control (M8
-candidate), real-agent wiring behind proc (M3 remainder).
+The M6 design deferred sanitizer/export to M7, considered cost control
+as an M8 candidate, and left real-agent wiring behind proc as an M3
+remainder. The implemented export command is described above.
