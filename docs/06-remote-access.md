@@ -1,10 +1,21 @@
 # 06 — Remote access (SSH tunnel first)
 
 Security and personal-information protection are top priority. Until M5
-(auth + audit), **no Taxion surface listens beyond loopback by default**:
+(auth + audit) is complete, **no Taxion surface listens beyond loopback
+without a token**:
 
-- `taxion serve` — default `--addr 127.0.0.1:3938`
-- web order counter — default `--host 127.0.0.1:3939`
+- `taxion serve` — default `--addr 127.0.0.1:3938`; `--token` / `TAXION_TOKEN`
+  env enables Bearer auth on every route (missing/wrong → identical 401).
+  Binding beyond loopback without a token is refused outright.
+- web order counter — default `--host 127.0.0.1:3939`; `--token` /
+  `TAXION_TOKEN` is forwarded server-side to the upstream API, never to the
+  browser.
+
+Mint a token once and keep it outside the repo (env file, secret store):
+
+```sh
+taxion gen-token
+```
 
 The ledger file holds task titles and repo paths. Treat it as sensitive:
 never place it on a shared volume unencrypted, and never expose the API

@@ -1,31 +1,40 @@
 // Package server exposes the Taxion HTTP API over the CLI-owned ledger file.
 //
-// M4 scope: reads (GET) plus the CLI mutation surface (POST), localhost
-// only, no auth (auth is M5). The server is the sole writer besides the CLI;
-// both go through the core.Ledger shape and the same guards (REP-001,
-// DSP-001, SHA-001). No ledger keys are added (M2-3 wire freeze); POST
-// request bodies are versioned separately in docs/05.
+// M5 scope: reads (GET) plus the CLI mutation surface (POST), plus optional
+// Bearer-token auth. The server is the sole writer besides the CLI; both go
+// through the core.Ledger shape and the same guards (REP-001, DSP-001,
+// SHA-001). No ledger keys are added (M2-3 wire freeze); POST request bodies
+// are versioned separately in docs/05.
+//
+// Auth: when Token is set, every route requires
+// `Authorization: Bearer <token>` (constant-time compare, 401 otherwise).
+// When Token is empty, the server keeps the pre-M5 localhost behavior.
+// Tokens travel via flag/env only — never in the ledger, logs, or URLs.
 //
 // Fail-closed: unreadable ledger answers 500; guard violations answer
 // 400/404/409 with a JSON error — never a silent success.
 package server
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
 )
 
-// Server serves ledger reads from a JSON ledger file.
+// Server serves the Taxion API from a JSON ledger file.
 type Server struct {
-	// StorePath is the CLI-owned ledger file. Read-only use.
+	// StorePath is the CLI-owned ledger file.
 	StorePath string
+	// Token enables Bearer auth when non-empty. Empty keeps pre-M5 behavior.
+	Token string
 }
 
-// Handler returns the route table: GET reads, POST mutations, 405 otherwise.
+// Handler returns the route table behind the auth gate.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/ledger", s.handleLedger)
@@ -36,7 +45,26 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not found")
 	})
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.authorize(w, r) {
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+// authorize enforces the Bearer token when one is configured. Missing and
+// wrong credentials get the identical 401 — no oracle for attackers.
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request) bool {
+	if s.Token == "" {
+		return true
+	}
+	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) != 1 {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	return true
 }
 
 func (s *Server) load(w http.ResponseWriter) (core.Ledger, bool) {

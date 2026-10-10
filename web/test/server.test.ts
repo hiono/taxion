@@ -153,3 +153,85 @@ describe("listen host (secure default)", () => {
     assert.equal(listenHost(["--host", "0.0.0.0"]), "0.0.0.0");
   });
 });
+
+describe("upstream token forwarding (M5)", () => {
+  const SECRET = "upstream-secret-xyz";
+  let gated: ReturnType<typeof createServer>;
+  let gatedBase = "";
+  let app: ReturnType<typeof createApp>;
+  let appBase = "";
+  let bare: ReturnType<typeof createApp>;
+  let bareBase = "";
+
+  before(async () => {
+    // Gated upstream: 401 unless the exact Bearer token arrives.
+    gated = createServer((req, res) => {
+      const json = (code: number, v: unknown) => {
+        res.writeHead(code, { "content-type": "application/json" });
+        res.end(JSON.stringify(v));
+      };
+      if (req.headers["authorization"] !== `Bearer ${SECRET}`) {
+        json(401, { error: "unauthorized" });
+        return;
+      }
+      if (req.method === "GET" && req.url === "/api/ledger") {
+        json(200, LEDGER);
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/tasks") {
+        json(201, { id: "t-9" });
+        return;
+      }
+      json(404, { error: "not found" });
+    });
+    await new Promise<void>((resolve) => gated.listen(0, resolve));
+    gatedBase = `http://localhost:${(gated.address() as AddressInfo).port}`;
+    app = createApp(gatedBase, SECRET);
+    await new Promise<void>((resolve) => app.listen(0, resolve));
+    appBase = `http://localhost:${(app.address() as AddressInfo).port}`;
+    bare = createApp(gatedBase);
+    await new Promise<void>((resolve) => bare.listen(0, resolve));
+    bareBase = `http://localhost:${(bare.address() as AddressInfo).port}`;
+  });
+
+  after(
+    () =>
+      new Promise<void>((resolve, reject) =>
+        gated.close((e) => (e ? reject(e) : resolve())),
+      ),
+  );
+  after(
+    () =>
+      new Promise<void>((resolve, reject) =>
+        app.close((e) => (e ? reject(e) : resolve())),
+      ),
+  );
+  after(
+    () =>
+      new Promise<void>((resolve, reject) =>
+        bare.close((e) => (e ? reject(e) : resolve())),
+      ),
+  );
+
+  it("forwards the token: GET + POST reach the gated upstream", async () => {
+    const get = await fetch(`${appBase}/api/ledger`);
+    assert.equal(get.status, 200);
+    assert.deepEqual(await get.json(), LEDGER);
+    const post = await fetch(`${appBase}/api/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "x", repo: "r" }),
+    });
+    assert.equal(post.status, 201);
+  });
+
+  it("passes upstream 401 through when no token is configured", async () => {
+    const res = await fetch(`${bareBase}/api/ledger`);
+    assert.equal(res.status, 401);
+  });
+
+  it("never exposes the token to the browser", async () => {
+    const html = await (await fetch(`${appBase}/`)).text();
+    assert.doesNotMatch(html, new RegExp(SECRET));
+  });
+});

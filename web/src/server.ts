@@ -7,6 +7,12 @@
 //
 // Localhost scope (M4): no auth. Do not expose beyond loopback (auth is M5).
 //
+// M5: when the upstream API requires a Bearer token, pass --token (or
+// TAXION_TOKEN env). The token lives server-side only: it is attached to
+// upstream fetches and never sent to the browser.
+//
+// Usage: TAXION_API=http://127.0.0.1:3938 node src/server.ts [--port N] [--api URL] [--host ADDR] [--token TOK]
+//
 // Usage: TAXION_API=http://127.0.0.1:3938 node src/server.ts [--port N] [--api URL] [--host ADDR]
 // Security default: listens on 127.0.0.1 only. Pass --host 0.0.0.0 to expose
 // (see docs/06-remote-access.md — beyond-loopback needs care until M5 auth).
@@ -83,9 +89,21 @@ fetch("/api/ledger").then(r=>r.json()).then(l=>{
 load();
 </script></body></html>`;
 
-async function proxyGet(upstream: string): Promise<{ status: number; body: string }> {
+export function apiToken(argv: string[] = process.argv.slice(2)): string {
+  return flagValue(argv, "--token") ?? process.env["TAXION_TOKEN"] ?? "";
+}
+
+function authHeaders(token: string): Record<string, string> {
+  const h: Record<string, string> = { "content-type": "application/json" };
+  if (token !== "") h["authorization"] = `Bearer ${token}`;
+  return h;
+}
+
+async function proxyGet(upstream: string, token: string): Promise<{ status: number; body: string }> {
   try {
-    const res = await fetch(`${upstream}/api/ledger`);
+    const res = await fetch(`${upstream}/api/ledger`, {
+      headers: token !== "" ? { authorization: `Bearer ${token}` } : {},
+    });
     const body = await res.text();
     return { status: res.status, body };
   } catch {
@@ -95,6 +113,7 @@ async function proxyGet(upstream: string): Promise<{ status: number; body: strin
 
 async function proxyOrder(
   upstream: string,
+  token: string,
   path: string,
   req: import("node:http").IncomingMessage,
 ): Promise<{ status: number; body: string }> {
@@ -103,7 +122,7 @@ async function proxyOrder(
     for await (const c of req) chunks.push(c as Buffer);
     const res = await fetch(`${upstream}${path}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: authHeaders(token),
       body: Buffer.concat(chunks),
     });
     return { status: res.status, body: await res.text() };
@@ -112,7 +131,7 @@ async function proxyOrder(
   }
 }
 
-export function createApp(upstream: string) {
+export function createApp(upstream: string, token = "") {
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname === "/" && req.method === "GET") {
@@ -121,14 +140,14 @@ export function createApp(upstream: string) {
       return;
     }
     if (url.pathname === "/api/ledger" && req.method === "GET") {
-      proxyGet(upstream).then(({ status, body }) => {
+      proxyGet(upstream, token).then(({ status, body }) => {
         res.writeHead(status, { "content-type": "application/json" });
         res.end(body);
       });
       return;
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/")) {
-      proxyOrder(upstream, url.pathname + url.search, req).then(({ status, body }) => {
+      proxyOrder(upstream, token, url.pathname + url.search, req).then(({ status, body }) => {
         res.writeHead(status, { "content-type": "application/json" });
         res.end(body);
       });
@@ -159,6 +178,6 @@ if (isMain) {
   const argv = process.argv.slice(2);
   const port = Number(flagValue(argv, "--port") ?? 3939);
   const host = listenHost(argv);
-  const server = createApp(apiBase(argv));
+  const server = createApp(apiBase(argv), apiToken(argv));
   server.listen(port, host, () => console.log(`taxion web (order counter) on ${host}:${port}`));
 }

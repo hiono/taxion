@@ -7,9 +7,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,7 +37,8 @@ Commands:
   review              Review a coder output (--task, --sha and --repo required)
   resume              Resume a session (--session required)
   acp                 Serve ACP v1 over stdio (spike)
-  serve               Serve read-only HTTP API over the ledger ([--addr] localhost only)
+  serve               Serve HTTP API over the ledger ([--addr], [--token]/TAXION_TOKEN)
+  gen-token           Print a random Bearer token for serve (M5 auth)
 
 Identity gate (REP-001): mutating commands require an explicit --repo.
 The target is never inferred from the working directory.
@@ -69,6 +73,8 @@ func main() {
 		err = acp.New(storePath).Serve(context.Background(), os.Stdin, os.Stdout)
 	case "serve":
 		err = serveCmd(args[1:])
+	case "gen-token":
+		err = genTokenCmd()
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -284,17 +290,53 @@ func resumeCmd(args []string) error {
 	return nil
 }
 
-// serveCmd runs the read-only HTTP API (M2). Localhost only by default;
-// pass an explicit --addr to bind elsewhere at your own risk (M5 adds auth).
+// serveCmd runs the HTTP API (M5: optional Bearer auth). Localhost only by
+// default; binding elsewhere requires --token (or TAXION_TOKEN) — serving
+// beyond loopback without auth is refused.
 func serveCmd(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	addr := fs.String("addr", "127.0.0.1:3938", "listen address (localhost only in M2)")
+	addr := fs.String("addr", "127.0.0.1:3938", "listen address")
+	token := fs.String("token", os.Getenv("TAXION_TOKEN"), "Bearer token (or TAXION_TOKEN env)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	srv := &server.Server{StorePath: storePath}
-	fmt.Printf("taxion: serving API on %s from %s\n", *addr, storePath)
+	if !isLoopback(*addr) && *token == "" {
+		return fmt.Errorf("serve: binding beyond loopback requires --token (M5 auth)")
+	}
+	srv := &server.Server{StorePath: storePath, Token: *token}
+	if *token == "" {
+		fmt.Printf("taxion: serving API on %s from %s (no auth: localhost only)\n", *addr, storePath)
+	} else {
+		fmt.Printf("taxion: serving API on %s from %s (auth on)\n", *addr, storePath)
+	}
 	return http.ListenAndServe(*addr, srv.Handler())
+}
+
+// isLoopback reports whether addr binds a loopback interface only.
+func isLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	switch host {
+	case "127.0.0.1", "::1", "localhost", "":
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// genTokenCmd prints a fresh random token for `serve --token`. Keep it in an
+// env file or secret store — never in the repo.
+func genTokenCmd() error {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return err
+	}
+	fmt.Println(hex.EncodeToString(b[:]))
+	return nil
 }
 
 func printJSON(v any) error {

@@ -219,3 +219,64 @@ func TestCreateReview(t *testing.T) {
 		t.Fatalf("GET /api/reviews code = %d, want 405", grec.Code)
 	}
 }
+
+func authed(t *testing.T, h http.Handler, method, target, token, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	var req *http.Request
+	if body == "" {
+		req = httptest.NewRequest(method, target, nil)
+	} else {
+		req = httptest.NewRequest(method, target, strings.NewReader(body))
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// TestAuthGate: with Token set, every route needs the exact Bearer token.
+// Missing and wrong credentials get the identical 401 (no oracle).
+func TestAuthGate(t *testing.T) {
+	path, _ := seed(t)
+	h := (&Server{StorePath: path, Token: "s3cret"}).Handler()
+	for _, tc := range []struct{ method, target, body string }{
+		{http.MethodGet, "/api/ledger", ""},
+		{http.MethodGet, "/api/tasks", ""},
+		{http.MethodPost, "/api/tasks", `{"title":"x","repo":"r-a"}`},
+		{http.MethodPost, "/api/reviews", `{"task":"t-1","repo":"r-a","sha":"abc"}`},
+	} {
+		if rec := authed(t, h, tc.method, tc.target, "", tc.body); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s without token = %d, want 401", tc.method, tc.target, rec.Code)
+		}
+		rec := authed(t, h, tc.method, tc.target, "wrong", tc.body)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s wrong token = %d, want 401", tc.method, tc.target, rec.Code)
+		}
+		var e map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &e); err != nil || e["error"] != "unauthorized" {
+			t.Fatalf("%s %s wrong-token body = %q, want identical 401", tc.method, tc.target, rec.Body.String())
+		}
+		if rec := authed(t, h, tc.method, tc.target, "s3cret", tc.body); rec.Code >= 400 && rec.Code != http.StatusConflict {
+			t.Fatalf("%s %s correct token = %d, want success", tc.method, tc.target, rec.Code)
+		}
+	}
+	// Non-bearer schemes are rejected too.
+	req := httptest.NewRequest(http.MethodGet, "/api/ledger", nil)
+	req.Header.Set("Authorization", "Basic c3M=")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("basic auth = %d, want 401", rec.Code)
+	}
+}
+
+// TestNoTokenKeepsLegacyBehavior: empty Token means pre-M5 open localhost.
+func TestNoTokenKeepsLegacyBehavior(t *testing.T) {
+	path, _ := seed(t)
+	h := (&Server{StorePath: path}).Handler()
+	if rec := authed(t, h, http.MethodGet, "/api/ledger", "", ""); rec.Code != http.StatusOK {
+		t.Fatalf("no-token GET = %d, want 200", rec.Code)
+	}
+}
