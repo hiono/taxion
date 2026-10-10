@@ -425,6 +425,9 @@ func memoryCmd(args []string) error {
 		if err != nil {
 			return err
 		}
+		if notice := memory.ScopeWriteNotice(*scope); notice != "" {
+			fmt.Println(notice)
+		}
 		fmt.Printf("taxion: memory %s %d stored (%s)\n", *kind, id, *scope)
 		return nil
 	case "get":
@@ -559,6 +562,9 @@ func memoryWarnCmd(args []string) error {
 	n, lid, err := s.Warn(*body, *scope)
 	if err != nil {
 		return err
+	}
+	if notice := memory.ScopeWriteNotice(*scope); notice != "" {
+		fmt.Println(notice)
 	}
 	if lid != 0 {
 		fmt.Printf("taxion: warning %d time(s); promoted to lesson %d (%s)\n", n, lid, *scope)
