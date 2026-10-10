@@ -17,6 +17,23 @@ Mint a token once and keep it outside the repo (env file, secret store):
 taxion gen-token
 ```
 
+## Token hygiene (best practice)
+
+`gen-token` is stateless: running it twice mints two independent values and
+revokes nothing. The only live key is the one `serve` was started with. So:
+
+- Issue once. Re-issue only to **rotate** (suspected leak, member change).
+- Never pass the token inline (`TAXION_TOKEN=<tok> …` stays in shell
+  history). Load it from a `0600` env file outside the repo, or `read -s`:
+  `read -rs TAXION_TOKEN < /dev/tty; export TAXION_TOKEN`.
+- Rotate by restarting `serve` with the new value — the old key dies at
+  restart. Tell everyone sharing the key *before* you restart.
+- Unused minted values are harmless but treat them as live until you are
+  sure they were never deployed: delete them from history/notes.
+- Known limit (ADR-0015): one shared token, no per-operator keys yet. If the
+  sharing circle grows, that is the next auth milestone, not more `gen-token`
+  runs.
+
 The ledger file holds task titles and repo paths. Treat it as sensitive:
 never place it on a shared volume unencrypted. Plain HTTP stays inside
 trusted networks (loopback, SSH tunnel, VPN, docker bridge); public-internet
