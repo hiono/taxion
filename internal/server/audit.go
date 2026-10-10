@@ -24,6 +24,9 @@ type auditEntry struct {
 	Who    string `json:"who,omitempty"`
 	Status int    `json:"status"`
 	Authed bool   `json:"authed"`
+	// Reason names WHY a denial happened (M8-E): "lockout" for 429s.
+	// Successes and ordinary 401s carry no reason.
+	Reason string `json:"reason,omitempty"`
 }
 
 // statusCatcher records the response code for the audit middleware.
@@ -54,14 +57,15 @@ type auditor struct {
 
 func (a *auditor) enabled() bool { return a.path != "" }
 
-// shouldLog covers the mutation surface plus every auth denial —
-// successful reads are noise and stay out of the log.
+// shouldLog covers the mutation surface plus every auth denial (401/403)
+// and rate-limit lockout (429) — successful reads are noise and stay out.
 func shouldLog(r *http.Request, status int) bool {
 	switch r.Method {
 	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 		return true
 	}
-	return status == http.StatusUnauthorized || status == http.StatusForbidden
+	return status == http.StatusUnauthorized || status == http.StatusForbidden ||
+		status == http.StatusTooManyRequests
 }
 
 // whoOf extracts the self-asserted operator label. It is scrubbed to a
@@ -151,6 +155,12 @@ func (a *auditor) withAudit(s *Server, next http.Handler) http.Handler {
 			return
 		}
 		authed := s.Token != "" && authorized(r, s.Token)
+		reason := ""
+		if status == http.StatusTooManyRequests {
+			// Only the authorize lockout path produces 429, so the
+			// mapping is exact — no other handler may use 429.
+			reason = "lockout"
+		}
 		if err := a.log(auditEntry{
 			TS:     time.Now().UTC().Format(time.RFC3339Nano),
 			Method: r.Method,
@@ -159,6 +169,7 @@ func (a *auditor) withAudit(s *Server, next http.Handler) http.Handler {
 			Who:    whoOf(r),
 			Status: status,
 			Authed: authed,
+			Reason: reason,
 		}); err != nil {
 			// Headers are already sent; the failure is visible in the
 			// server stderr and the entry is missing — operators must

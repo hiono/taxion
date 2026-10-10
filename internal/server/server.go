@@ -36,6 +36,10 @@ type Server struct {
 	// disables it. The log records mutations and auth denials only —
 	// never tokens, bodies, or query strings.
 	AuditPath string
+
+	// lim is the brute-force limiter (M8-E). Built in Handler when a
+	// token is configured; tests may inject a short-window one.
+	lim *limiter
 }
 
 // CheckAudit fails fast when the audit destination is unwritable. Call it
@@ -51,6 +55,9 @@ func (s *Server) CheckAudit() error {
 // Handler returns the route table behind the auth gate, with audit
 // recording mutations and denials when AuditPath is set.
 func (s *Server) Handler() http.Handler {
+	if s.Token != "" && s.lim == nil {
+		s.lim = newLimiter(rateMaxFails, rateWindow, rateLockout)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/ledger", s.handleLedger)
 	mux.HandleFunc("/api/tasks", s.handleTasks)
@@ -82,14 +89,22 @@ func validBearer(r *http.Request, token string) bool {
 
 // authorize enforces the Bearer token when one is configured. Missing and
 // wrong credentials get the identical 401 — no oracle for attackers.
+// Repeated failures from one IP earn a 429 lockout (M8-E).
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) bool {
 	if s.Token == "" {
 		return true
 	}
+	ip := keyOf(r)
+	if !s.lim.allow(ip, time.Now()) {
+		writeErr(w, http.StatusTooManyRequests, "locked out: too many failed logins")
+		return false
+	}
 	if !validBearer(r, s.Token) {
+		s.lim.fail(ip, time.Now())
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return false
 	}
+	s.lim.reset(ip)
 	return true
 }
 

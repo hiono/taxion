@@ -1,4 +1,4 @@
-# 07 — Audit log (M5-2, M8-D adds `who`)
+# 07 — Audit log (M5-2, M8-D adds `who`, M8-E adds `reason` + 429)
 
 The serve API keeps an append-only audit log: the "camera" next to the M5-1
 "key". Default location is next to the ledger (`.taxion/audit.jsonl`);
@@ -19,12 +19,23 @@ One JSON object per line:
 | `path`   | request path only (no query string) |
 | `repo`   | explicit repo identity from the POST body, if present |
 | `who`    | self-asserted operator label from `X-Operator`, if present (M8-D) |
-| `status` | response code — including guard denials (400/404/409) |
+| `status` | response code — including guard denials (400/404/409) and lockout (429) |
 | `authed` | whether this request presented the valid token |
+| `reason` | why a denial happened — `"lockout"` on 429s only (M8-E) |
 
 Logged: every mutation attempt (POST/PUT/PATCH/DELETE, any outcome) and
-every auth denial (401/403, any method). Successful reads are noise and are
+every auth denial (401/403, any method) plus every rate-limit lockout
+(429, any method). Successful reads are noise and are
 not logged — a read-heavy day leaves the log quiet.
+
+## Brute-force lockout (M8-E)
+
+Fixed policy, no flags: 5 failed logins from one IP within 1 minute locks
+that IP out for 5 minutes. Locked-out requests answer 429 (with
+`"reason":"lockout"` in the log) — even with the right token, until the
+lockout expires. One success resets the IP's counter, so typos do not
+accumulate. The key is the connection's RemoteAddr host; no
+`X-Forwarded-For` is trusted.
 
 ## What is NEVER recorded
 
