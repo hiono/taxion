@@ -44,7 +44,8 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
 
 ## Docs
 
-- `docs/00-charter.md` — scope, non-goals, phase roadmap
+- `CONTRIBUTING.md` — development checks, document ownership, and comment rules
+- `docs/00-charter.md` — founding scope and project constraints
 - `docs/01-guardrails.md` — behavioral invariants with IDs
 - `docs/02-privacy-provenance.md` — sanitization policy
 - `docs/03-runtime-contract.md` — SDK-neutral Runtime interface
@@ -54,7 +55,8 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
   loopback-by-default policy. **Start here before exposing any port.**
 - `docs/07-audit-log.md` — append-only audit log (mutations + denials) and
   retention policy.
-- `docs/08-memory-model.md` — memory layers, scopes, and promotion model.
+- `docs/08-memory-model.md` — current Memory storage, scopes, promotion, search, and export.
+- `docs/adr/` — design decisions and rationale; Issues record implementation results.
 
 ## CLI (Local phase, minimal)
 

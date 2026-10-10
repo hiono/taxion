@@ -36,7 +36,6 @@ func TestWarnCountsAndPromotesOnce(t *testing.T) {
 		t.Fatalf("promoted lesson wrong: %+v", got)
 	}
 
-	// Fourth repeat increments the count without creating another candidate.
 	n2, lid2, err := s.Warn("never deploy on friday", ScopeProject)
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +88,6 @@ func TestWarnGuards(t *testing.T) {
 	if _, _, err := s.Warn("x", "nope"); err == nil {
 		t.Fatal("unknown scope must fail")
 	}
-	// Empty scope defaults to project and counts there.
 	if n, _, err := s.Warn("defaulted", ""); err != nil || n != 1 {
 		t.Fatalf("empty scope: n=%d err=%v, want default project", n, err)
 	}

@@ -1,20 +1,6 @@
-// Local console. Serves one HTML page with task operation forms (create task,
-// dispatch, review) plus a JSON API proxied to `taxion serve` (M4).
-// GET serves the page and ledger; POST under /api/ is proxied upstream.
-// Other methods get 405 and unknown GET/POST paths get 404.
-// This slice never reads ledger files and never mutates on its own —
-// all writes go to the upstream API, and upstream failure surfaces as 502,
-// never as a silent success (fail-closed display).
-//
-// M5: when the upstream API requires a Bearer token, pass --token (or
-// TAXION_TOKEN env). The token lives server-side only: it is attached to
-// upstream fetches and never sent to the browser.
-//
-// Usage: TAXION_API=http://127.0.0.1:3938 node src/server.ts [--port N] [--api URL] [--host ADDR] [--token TOK]
-//
-// Security default: listens on 127.0.0.1 only. Pass --host 0.0.0.0 to expose
-// on other interfaces (see docs/06-remote-access.md for authentication and
-// remote-access requirements).
+// Proxy mutations rather than implementing guards in TypeScript so the
+// Go API remains the authority for task, dispatch, and evidence constraints.
+// Keep credentials on the server; browser callers must not receive them.
 import { createServer } from "node:http";
 import type { Ledger } from "./types.ts";
 
@@ -31,8 +17,6 @@ export function apiBase(argv: string[] = process.argv.slice(2)): string {
   );
 }
 
-// Operation POSTs are passed through to the upstream API untouched, so guard
-// semantics (400/404/409) stay in one place: the Go server.
 const PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>Taxion — Task Graph (localhost console)</title>

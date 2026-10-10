@@ -80,7 +80,6 @@ func TestFullFlow(t *testing.T) {
 			map[string]any{"type": "text", "text": "implement feature X"},
 		}}),
 	)
-	// plan + agent_message_chunk notifications, then end_turn response.
 	if len(msgs) != 3 {
 		t.Fatalf("expected 2 notifications + response, got %d: %v", len(msgs), msgs)
 	}
@@ -88,7 +87,6 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("expected end_turn, got %v", msgs[2])
 	}
 
-	// Second prompt while a dispatch is active must fail closed (DSP-001).
 	msgs = run(t, srv,
 		req(3, "session/prompt", msg{"sessionId": sid, "prompt": []any{
 			map[string]any{"type": "text", "text": "another task"},
@@ -98,7 +96,6 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("expected DSP-001 error, got %v", msgs[0])
 	}
 
-	// Review path binds evidence (SHA-001); empty sha is rejected.
 	msgs = run(t, srv,
 		req(4, "session/prompt", msg{"sessionId": sid, "prompt": []any{
 			map[string]any{"type": "text", "text": "review deadbeef"},
@@ -122,7 +119,6 @@ func TestExplicitMethods(t *testing.T) {
 	msgs := run(t, srv, req(1, "session/new", msg{"cwd": "/repo/demo"}))
 	sid := result(t, msgs[0])["sessionId"].(string)
 
-	// taxion/dispatch: plan + chunk notifications, end_turn + dispatchId.
 	msgs = run(t, srv, req(2, "taxion/dispatch", msg{"sessionId": sid}))
 	if len(msgs) != 3 {
 		t.Fatalf("expected 2 notifications + response, got %d: %v", len(msgs), msgs)
@@ -132,13 +128,11 @@ func TestExplicitMethods(t *testing.T) {
 		t.Fatalf("expected end_turn + dispatchId, got %v", r)
 	}
 
-	// Second dispatch while one is active must fail closed (DSP-001).
 	msgs = run(t, srv, req(3, "taxion/dispatch", msg{"sessionId": sid}))
 	if _, ok := msgs[0]["error"]; !ok {
 		t.Fatalf("expected DSP-001 error, got %v", msgs[0])
 	}
 
-	// taxion/review binds evidence (SHA-001); empty sha is rejected.
 	msgs = run(t, srv, req(4, "taxion/review", msg{"sessionId": sid, "sha": "cafef00d"}))
 	if len(msgs) != 2 || result(t, msgs[1])["stopReason"] != "end_turn" {
 		t.Fatalf("expected evidence receipt + end_turn, got %v", msgs)
@@ -148,7 +142,6 @@ func TestExplicitMethods(t *testing.T) {
 		t.Fatalf("expected SHA-001 error, got %v", msgs[0])
 	}
 
-	// Unknown session fails closed on both methods.
 	msgs = run(t, srv, req(6, "taxion/dispatch", msg{"sessionId": "nope"}))
 	if _, ok := msgs[0]["error"]; !ok {
 		t.Fatalf("expected unknown-session error, got %v", msgs[0])
@@ -157,7 +150,6 @@ func TestExplicitMethods(t *testing.T) {
 	if _, ok := msgs[0]["error"]; !ok {
 		t.Fatalf("expected unknown-session error, got %v", msgs[0])
 	}
-	// Missing params are invalid.
 	msgs = run(t, srv, req(8, "taxion/dispatch", msg{}))
 	if e, ok := msgs[0]["error"].(map[string]any); !ok || int(e["code"].(float64)) != ErrInvalidParams {
 		t.Fatalf("expected invalid-params, got %v", msgs[0])
@@ -182,7 +174,6 @@ func TestGates(t *testing.T) {
 		}
 	}
 
-	// Cancel is a notification: no response; later prompts fail closed.
 	msgs = run(t, srv, req(1, "session/new", msg{"cwd": "/repo/demo"}))
 	sid := result(t, msgs[0])["sessionId"].(string)
 	msgs = run(t, srv, notif("session/cancel", msg{"sessionId": sid}))

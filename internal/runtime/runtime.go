@@ -1,8 +1,7 @@
 // Package runtime defines the SDK-neutral execution contract.
 //
-// The governance core (internal/core) only depends on this interface,
-// never on concrete SDK types. Concrete adapters (e.g. Copilot SDK for Go)
-// live outside core and are evaluated as plugins (Adapter phase).
+// Adapter events use neutral types so provider-specific SDK contracts do
+// not become governance-core dependencies (ADR-0003).
 package runtime
 
 import "context"
@@ -16,7 +15,7 @@ type Event struct {
 // Runtime is the minimal control-plane contract:
 //
 //	Start   — begin isolated execution for a task
-//	Resume  — resume a prior session
+//	Resume  — validate a prior session handle (adapters need not restart it)
 //	Stop    — halt execution
 //	Events  — stream neutral events
 //

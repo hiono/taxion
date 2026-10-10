@@ -1,7 +1,4 @@
 // Command taxion is the human-facing CLI for the Taxion control plane.
-//
-// Task operations use a JSON ledger (default .taxion/ledger.json); Memory
-// uses SQLite beside it. serve exposes HTTP and acp exposes stdio JSON-RPC.
 package main
 
 import (
@@ -55,7 +52,6 @@ var storePath = ".taxion/ledger.json"
 
 func main() {
 	args := os.Args[1:]
-	// Optional global --store before the command.
 	if len(args) >= 2 && args[0] == "--store" {
 		storePath = args[1]
 		args = args[2:]
@@ -272,7 +268,7 @@ func reviewCmd(args []string) error {
 	if err := core.CheckRepo(*repo); err != nil {
 		return err
 	}
-	ev, err := core.BindEvidence(*task, *sha) // SHA-001: --sha required, never "latest"
+	ev, err := core.BindEvidence(*task, *sha)
 	if err != nil {
 		return err
 	}
@@ -301,10 +297,6 @@ func resumeCmd(args []string) error {
 	return nil
 }
 
-// serveCmd runs the HTTP API (M5: optional Bearer auth, M5-2 audit log,
-// F-lite modes). loopback (default) binds a loopback interface only and
-// refuses anything else, token or not. remote requires --token (TAXION_TOKEN)
-// — the flag itself is the explicit opt-in to beyond-loopback serving.
 func serveCmd(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:3938", "listen address")
@@ -340,9 +332,8 @@ func serveCmd(args []string) error {
 	return http.ListenAndServe(*addr, srv.Handler())
 }
 
-// checkServeMode enforces the F-lite bind policy (ADR-0016): loopback mode
-// refuses any non-loopback bind even when tokened; remote mode is the
-// explicit opt-in to beyond-loopback serving and requires a token.
+// Requiring a named remote mode prevents a token flag alone from changing
+// the exposure policy (ADR-0016).
 func checkServeMode(mode, addr, token string) error {
 	switch mode {
 	case "loopback":
@@ -360,7 +351,6 @@ func checkServeMode(mode, addr, token string) error {
 	}
 }
 
-// isLoopback reports whether addr binds a loopback interface only.
 func isLoopback(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -376,8 +366,6 @@ func isLoopback(addr string) bool {
 	return false
 }
 
-// genTokenCmd prints a fresh random token for `serve --token`. Keep it in an
-// env file or secret store — never in the repo.
 func genTokenCmd() error {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -387,9 +375,6 @@ func genTokenCmd() error {
 	return nil
 }
 
-// auditCmd verifies the audit log hash chain (M8-G). Exit 0 = chain OK,
-// exit 1 = broken or unreadable. A broken chain means every line from the
-// reported line on is untrusted; investigate before continuing to append.
 func auditCmd(args []string) error {
 	if len(args) < 1 || args[0] != "verify" {
 		return fmt.Errorf("usage: taxion audit verify [--audit PATH]")
@@ -411,8 +396,8 @@ func auditCmd(args []string) error {
 	return nil
 }
 
-// memStorePath is the SQLite memory file next to the ledger (M6: memory
-// starts on SQLite, never file-first). The workspace dir is created on init.
+// Keep Memory beside the selected ledger so --store selects one workspace
+// for both kinds of state.
 func memStorePath() string {
 	return filepath.Join(filepath.Dir(storePath), "memory.db")
 }
@@ -550,8 +535,7 @@ func memoryCmd(args []string) error {
 	}
 }
 
-// memoryExportCmd prints the export preview to stdout only (M7-2).
-// No data is sent or shared; --sanitize defaults on.
+// Export remains stdout-only so inspecting Memory cannot implicitly share it.
 func memoryExportCmd(args []string) error {
 	fs := flag.NewFlagSet("memory export", flag.ContinueOnError)
 	scope := fs.String("scope", "", "filter by scope (project|global, empty = all)")

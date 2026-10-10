@@ -1,10 +1,3 @@
-// Export renders memory rows as a preview to stdout only.
-//
-// M7 scope is a preview for human review before any future sharing step.
-// There is no file, network, or clipboard sink; adding one requires a new ADR.
-//
-// Sanitizing defaults ON. Passing sanitize=false displays the original text
-// with an UNSANITIZED header.
 package memory
 
 import (
@@ -46,9 +39,8 @@ func Export(s *Store, scope string, sanitize bool) ([]ExportedEntry, error) {
 	return out, nil
 }
 
-// PrintExport writes the preview. The header states whether the text is
-// sanitized and that nothing leaves the machine — the reader must verify
-// this before any future send step.
+// PrintExport labels the preview so sanitized and original output cannot
+// be mistaken for each other when reviewed before sharing.
 func PrintExport(w io.Writer, entries []ExportedEntry, sanitize bool) {
 	if sanitize {
 		fmt.Fprintln(w, "taxion memory export — SANITIZED preview (no data is transmitted)")

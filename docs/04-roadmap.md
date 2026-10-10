@@ -2,7 +2,13 @@
 
 Phases: Foundation → Core → Local → Adapter → Server → Platform → Future.
 
-- [x] Foundation / `bootstrap` — repo, CI, charter, guardrails (this commit).
+Checked items record completed work at that phase; they are not a current
+feature inventory. In particular, the original read-only Web and
+localhost-only API scopes were extended later. Issues hold detailed
+implementation results; the reference documents linked from
+[README](../README.md) describe current behavior.
+
+- [x] Foundation / `bootstrap` — repo, CI, charter, guardrails.
 - [x] Core / `core-conformance` — ordered Sequence (CHK-002), JSON Ledger (LED-001).
 - [x] Local / `cli-ux` — `task list`, `dispatch list`, JSON output, `--repo` gate (REP-001).
 - [x] Adapter / `runtime-wiring` — in-process local Runtime, fail-closed.
@@ -28,5 +34,9 @@ Phases: Foundation → Core → Local → Adapter → Server → Platform → Fu
   terminal-emulator library (libghostty-class) connected to the web console, over the
   SSH tunnel to the work container. Needs M5 (auth) first; revisit triggers on
   ADR-0013/0014 when touched.
+- [ ] Adapter / `copilot-sdk-eval` — evaluate session start/resume fidelity,
+  event mapping cost, authentication requirements, and version pinning
+  before adding an SDK adapter. There is no vendored
+  `internal/runtime/copilot/`; a failed evaluation leaves core untouched.
 
 Each step: small PR, `gofmt + vet + test`, sanitized docs, SHA-bound review.

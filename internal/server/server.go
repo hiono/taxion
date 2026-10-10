@@ -1,18 +1,6 @@
-// Package server exposes the Taxion HTTP API over the CLI-owned ledger file.
-//
-// M5 scope: reads (GET) plus the CLI mutation surface (POST), plus optional
-// Bearer-token auth. The server is the sole writer besides the CLI; both go
-// through the core.Ledger shape and the same guards (REP-001, DSP-001,
-// SHA-001). No ledger keys are added (M2-3 wire freeze); POST request bodies
-// are versioned separately in docs/05.
-//
-// Auth: when Token is set, every route requires
-// `Authorization: Bearer <token>` (constant-time compare, 401 otherwise).
-// When Token is empty, the server keeps the pre-M5 localhost behavior.
-// Tokens travel via flag/env only — never in the ledger, logs, or URLs.
-//
-// Fail-closed: unreadable ledger answers 500; guard violations answer
-// 400/404/409 with a JSON error — never a silent success.
+// Package server exposes the HTTP API over the CLI-owned ledger.
+// Shared core guards keep HTTP and CLI operations subject to the same
+// constraints; endpoint contracts belong in docs/05-ledger-schema.md.
 package server
 
 import (
@@ -28,22 +16,17 @@ import (
 
 // Server serves the Taxion API from a JSON ledger file.
 type Server struct {
-	// StorePath is the CLI-owned ledger file.
 	StorePath string
-	// Token enables Bearer auth when non-empty. Empty keeps pre-M5 behavior.
+	// Token gates requests when non-empty; an empty value leaves them unauthenticated.
 	Token string
-	// AuditPath enables the append-only audit log (M5-2, docs/07). Empty
-	// disables it. The log records mutations and auth denials only —
-	// never tokens, bodies, or query strings.
+	// AuditPath enables auditing; empty disables it.
 	AuditPath string
 
-	// lim is the brute-force limiter (M8-E). Built in Handler when a
-	// token is configured; tests may inject a short-window one.
 	lim *limiter
 }
 
-// CheckAudit fails fast when the audit destination is unwritable. Call it
-// before ListenAndServe to refuse startup if logging is unavailable.
+// CheckAudit checks startup writability so serving does not begin with a
+// known unavailable audit destination. It does not guarantee later writes.
 func (s *Server) CheckAudit() error {
 	if s.AuditPath == "" {
 		return nil
@@ -76,8 +59,8 @@ func (s *Server) Handler() http.Handler {
 	return h
 }
 
-// validBearer is the single Bearer comparison behind both the authorize
-// gate and the audit result, ensuring both use the same comparison.
+// Share the comparison with audit reporting so authentication and
+// the recorded verdict cannot apply different token checks.
 func validBearer(r *http.Request, token string) bool {
 	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok {
@@ -86,9 +69,8 @@ func validBearer(r *http.Request, token string) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
 }
 
-// authorize enforces the Bearer token when one is configured. Missing and
-// wrong credentials get the identical 401 — no oracle for attackers.
-// Repeated failures from one IP trigger a 429 lockout (M8-E).
+// Missing and incorrect credentials receive the same response to
+// avoid distinguishing authentication failure cases.
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) bool {
 	if s.Token == "" {
 		return true
@@ -124,7 +106,6 @@ func (s *Server) save(w http.ResponseWriter, l core.Ledger) bool {
 	return true
 }
 
-// decode limits and parses a JSON request body.
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
@@ -175,8 +156,6 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, tasks)
 }
 
-// createTask mirrors `taxion task create`: title and an explicit repo
-// (REP-001) are required.
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Title string `json:"title"`
@@ -232,8 +211,6 @@ func (s *Server) listDispatches(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, ds)
 }
 
-// createDispatch mirrors `taxion dispatch`: the task must exist, the repo is
-// explicit (REP-001), and at most one dispatch may be active (DSP-001 → 409).
 func (s *Server) createDispatch(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Task string `json:"task"`
@@ -278,9 +255,6 @@ func (s *Server) createDispatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, d)
 }
 
-// handleReviews creates evidence bindings (POST only). It mirrors
-// `taxion review`: repo is explicit (REP-001) and the sha is required and
-// kept exact (SHA-001).
 func (s *Server) handleReviews(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErr(w, http.StatusMethodNotAllowed, "POST only")
@@ -302,7 +276,7 @@ func (s *Server) handleReviews(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	ev, err := core.BindEvidence(body.Task, body.SHA) // SHA-001
+	ev, err := core.BindEvidence(body.Task, body.SHA)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -337,7 +311,6 @@ func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, ev)
 }
 
-// guardGet rejects non-GET methods on read-only routes.
 func guardGet(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		writeErr(w, http.StatusMethodNotAllowed, "read-only: GET only")

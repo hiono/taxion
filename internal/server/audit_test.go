@@ -77,9 +77,9 @@ func TestWhoColumn(t *testing.T) {
 		}
 	}
 	post("hiono")
-	post("")                                // absent header → no who key
-	post("evil\nline\r\n{\"token\":\"x\"}") // control chars + JSON smuggling
-	post(strings.Repeat("a", 200))          // overlong label
+	post("")
+	post("evil\nline\r\n{\"token\":\"x\"}")
+	post(strings.Repeat("a", 200))
 
 	lines := readLines(t, srv.AuditPath)
 	if len(lines) != 4 {
@@ -132,12 +132,10 @@ func TestAuditLogsDenialAndMarksAuthed(t *testing.T) {
 	dir := t.TempDir()
 	srv := &Server{StorePath: seedAudit(t), Token: "tok", AuditPath: filepath.Join(dir, "audit.jsonl")}
 	h := srv.Handler()
-	// Wrong token on a read: denial, authed false.
 	rec := doReq(h, http.MethodGet, "/api/tasks", "", "wrong")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("code = %d", rec.Code)
 	}
-	// Valid token mutation: authed true.
 	rec = doReq(h, http.MethodPost, "/api/tasks", `{"title":"x","repo":"demo"}`, "tok")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("code = %d", rec.Code)

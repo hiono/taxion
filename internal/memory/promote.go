@@ -1,13 +1,3 @@
-// Promotion implements the Nth-warning → guideline path (M6-3).
-//
-// Repeated warnings are stored in the warnings table, counted by exact
-// (body, scope) match. When a warning's count reaches PromoteAfter, the
-// store distills it into a lesson with status "proposed" — a guideline
-// candidate. Guideline → guardrail stays a human decision (out of scope:
-// nothing here writes guardrails).
-//
-// Promotion fires exactly once per (body, scope): the warning row records
-// the lesson id; later repeats only increment the count.
 package memory
 
 import (
@@ -16,7 +6,7 @@ import (
 	"time"
 )
 
-// PromoteAfter is the warning count that distills a guideline candidate.
+// PromoteAfter is the fixed occurrence count for proposing a guideline.
 const PromoteAfter = 3
 
 const warningsSchema = `
@@ -29,9 +19,8 @@ CREATE INDEX IF NOT EXISTS idx_warnings_body_scope ON warnings(body, scope);
 `
 
 // Warn records one warning occurrence and returns the running count.
-// On reaching PromoteAfter it also returns the new guideline-candidate
-// lesson id (0 when not promoted by this call). Empty bodies fail closed;
-// empty scope defaults to project.
+// It returns the candidate lesson id once one exists, including on later
+// repeats (0 before promotion). Empty scope defaults to project.
 func (s *Store) Warn(body, scope string) (count int, lessonID int64, err error) {
 	if body == "" {
 		return 0, 0, fmt.Errorf("taxion: warning body must not be empty")
@@ -71,6 +60,8 @@ func (s *Store) Warn(body, scope string) (count int, lessonID int64, err error) 
 		return 0, 0, qerr
 	}
 	if count >= PromoteAfter && lesson == 0 {
+		// Reuse the recorded candidate on later warnings to avoid duplicate
+		// proposals. A proposal is not an automatically enforced guardrail.
 		title := body
 		if len([]rune(title)) > 80 {
 			title = string([]rune(title)[:80]) + "…"
@@ -97,7 +88,8 @@ func (s *Store) Warn(body, scope string) (count int, lessonID int64, err error) 
 	return count, lesson, nil
 }
 
-// WarningCount returns the current count for a (body, scope), or 0.
+// WarningCount returns the current count for a (body, scope). Missing rows
+// and query errors both return 0; callers cannot use it to prove database health.
 func (s *Store) WarningCount(body, scope string) int {
 	var n int
 	if err := s.db.QueryRow(

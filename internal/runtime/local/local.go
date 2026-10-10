@@ -1,12 +1,7 @@
 // Package local provides an in-process runtime.Runtime adapter.
 //
-// It executes an ordered checkpoint sequence (core.Sequence, CHK-002) per
-// session and is fail-closed: any violation (unknown session, out-of-order
-// step, stopped session) returns an error and never advances or reports
-// readiness. It uses stdlib only — no SDK dependency (SDK-001).
-//
-// ROLE-001: Coder and Reviewer must use separate Adapter instances so their
-// session registries never mix.
+// Separate Adapter instances keep coder and reviewer session registries
+// isolated; sharing an instance would violate ROLE-001.
 package local
 
 import (
@@ -57,7 +52,7 @@ func (a *Adapter) nextID() string {
 	return fmt.Sprintf("%s-%d-%d", a.role, time.Now().UnixNano(), a.seq)
 }
 
-// Start begins isolated execution for a task with a fresh checkpoint sequence.
+// Start creates a session with its own checkpoint sequence; it runs no worker.
 func (a *Adapter) Start(_ context.Context, taskID string) (string, error) {
 	if taskID == "" {
 		return "", fmt.Errorf("taxion: task id must not be empty")
@@ -116,7 +111,7 @@ func (a *Adapter) Resume(_ context.Context, sessionID string) error {
 	return nil
 }
 
-// Stop halts execution. The session can never become ready afterwards.
+// Stop prevents further advancement and closes live event streams.
 func (a *Adapter) Stop(_ context.Context, sessionID string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -133,8 +128,8 @@ func (a *Adapter) Stop(_ context.Context, sessionID string) error {
 }
 
 // Events streams neutral events for a session: replays history, then follows
-// live. Unknown sessions are an error; the channel closes on done/stop or
-// when ctx is cancelled.
+// live. Unknown sessions are an error; the channel closes on done/stop.
+// Cancelling ctx unregisters the watcher but does not close its channel.
 func (a *Adapter) Events(ctx context.Context, sessionID string) (<-chan runtime.Event, error) {
 	a.mu.Lock()
 	s, ok := a.sessions[sessionID]

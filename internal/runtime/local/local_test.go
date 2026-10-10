@@ -23,7 +23,6 @@ func TestOrderedExecution(t *testing.T) {
 			t.Fatalf("step %s: %v", step, err)
 		}
 	}
-	// Drain events: 3 checkpoints + done.
 	var types []string
 	for ev := range mustEvents(t, ctx, a, sid) {
 		types = append(types, ev.Type)
@@ -56,7 +55,6 @@ func TestFailClosed(t *testing.T) {
 	if err := a.Stop(ctx, sid); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
-	// Stopped session: nothing may advance or resume.
 	if err := a.CompleteStep(ctx, sid, "plan"); err != ErrStoppedSession {
 		t.Fatalf("expected stopped-session error, got %v", err)
 	}

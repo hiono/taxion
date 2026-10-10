@@ -1,7 +1,4 @@
 // Package core implements the SDK-neutral governance core of Taxion.
-//
-// SDK-001: no SDK-specific, network, or provider types may appear here.
-// Only plain stdlib types: strings, times, maps, slices.
 package core
 
 import (
@@ -19,8 +16,8 @@ type Ledger struct {
 	Checkpoints []Checkpoint `json:"checkpoints"`
 }
 
-// Save writes the ledger atomically enough for local single-writer use:
-// write temp file in the same directory, then rename.
+// Save replaces the ledger via a same-directory rename so readers do not
+// observe a partially written JSON file. Callers must serialize writers.
 func (l Ledger) Save(path string) error {
 	data, err := json.MarshalIndent(l, "", "  ")
 	if err != nil {

@@ -1,5 +1,4 @@
-# adrs project configuration (see https://joshrotenberg.com/adrs/configuration.html)
-# Managed in-repo; user-wide defaults (if any) live in ~/.config/adrs/config.toml.
+# Keep ADR settings in the repository so contributors use the same format.
 adr_dir = "docs/adr"
 mode = "compatible"
 

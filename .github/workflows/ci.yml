@@ -29,7 +29,7 @@ jobs:
           echo "=== imports of internal/core ==="
           go list -f '{{ join .Imports "\n" }}' ./internal/core | sort -u
           if go list -f '{{ join .Imports "\n" }}' ./internal/core | grep -vE '^([a-z0-9_/]+[.][a-z]+)?(errors|fmt|sort|strings|time|sync|context|encoding|os|io|net|regexp|strconv|testing)$' | grep -v '^$' | grep .; then
-            # allow only stdlib: crude check — fail on dots (external modules)
+            # Check dependency paths too so indirect external imports violate SDK-001.
             if go list -f '{{ join .Deps "\n" }}' ./internal/core | grep '\.' | grep -v '^vendor' | grep -E 'github\.|golang\.|google\.'; then
               echo "SDK-001 violation: external dep in internal/core"; exit 1
             fi
@@ -41,6 +41,5 @@ jobs:
       - run: |
           echo "=== secret / provenance hygiene (PRIV-001) ==="
           # Full token shapes only (bare prefixes appear in docs legitimately).
-          # Scan source/config; docs (*.md) and this workflow file are excluded.
           ! grep -rEn --include='*.go' --include='*.mod' --include='*.sum' --include='*.toml' --include='*.yml' --include='*.yaml' --exclude='ci.yml' --exclude-dir=.git 'gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' . || (echo "secret pattern found"; exit 1)
           echo OK

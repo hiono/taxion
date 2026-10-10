@@ -1,14 +1,7 @@
 // Package acp is a minimal ACP (Agent Client Protocol v1) agent spike.
 //
-// It exposes Taxion dispatch/review over newline-delimited JSON-RPC 2.0 on
-// stdio: initialize, session/new, session/prompt, session/cancel. No core
-// change — all governance (DSP-001, SHA-001, CHK-002, REP-001) is enforced
-// by internal/core and internal/runtime/local. Stdlib only.
-//
-// Prompt convention (deprecated fallback): plain text dispatches the session
-// task to the coder adapter; text starting with "review <sha>" binds evidence
-// (SHA-001). Prefer the explicit taxion/dispatch and taxion/review methods.
-// The client-provided cwd acts as the explicit repo identity (REP-001).
+// The client-provided cwd is the explicit repository identity so an editor
+// session cannot silently target the server's working directory (REP-001).
 package acp
 
 import (
@@ -25,7 +18,6 @@ import (
 	"github.com/hiono/taxion/internal/runtime/local"
 )
 
-// JSON-RPC error codes.
 const (
 	ErrParse          = -32700
 	ErrInvalidRequest = -32600
@@ -64,7 +56,8 @@ type acpSession struct {
 	cancelled  bool
 }
 
-// Server is a single-connection ACP agent over stdio.
+// Server is a single-connection ACP agent over stdio. Dispatch records
+// ledger operations; it does not execute a worker.
 type Server struct {
 	storePath string
 
@@ -119,7 +112,7 @@ func (s *Server) notify(out *bufio.Writer, sessionID string, update any) {
 
 func (s *Server) respond(out *bufio.Writer, id *json.RawMessage, result any, rpcErr *RPCError) {
 	if id == nil {
-		return // notification: no response
+		return // JSON-RPC notifications have no response ID.
 	}
 	s.write(out, Response{JSONRPC: "2.0", ID: id, Result: result, Error: rpcErr})
 }
@@ -137,7 +130,7 @@ func (s *Server) handle(ctx context.Context, req Request, out *bufio.Writer) {
 		_ = json.Unmarshal(req.Params, &p)
 		version := 1
 		if p.ProtocolVersion < 1 {
-			version = 1 // our latest supported
+			version = 1
 		}
 		s.respond(out, req.ID, map[string]any{
 			"protocolVersion": version,
@@ -195,7 +188,7 @@ func (s *Server) handle(ctx context.Context, req Request, out *bufio.Writer) {
 		}
 		_ = json.Unmarshal(req.Params, &p)
 		s.cancel(ctx, p.SessionID)
-		// notification: no response
+		// session/cancel is an ACP notification, not a request.
 	case "taxion/dispatch":
 		var p struct {
 			SessionID string `json:"sessionId"`
@@ -242,7 +235,9 @@ func (s *Server) handle(ctx context.Context, req Request, out *bufio.Writer) {
 func (s *Server) load() (core.Ledger, error) {
 	l, err := core.LoadLedger(s.storePath)
 	if err != nil {
-		return core.Ledger{}, nil // spike: missing store starts empty
+		// The spike starts empty on any load error, not just a missing file.
+		// Do not treat this fallback as recovery of the previous ledger.
+		return core.Ledger{}, nil
 	}
 	return l, nil
 }
@@ -286,10 +281,8 @@ func (s *Server) lookup(sid string) (*acpSession, error) {
 	return sess, nil
 }
 
-// prompt implements the deprecated spike convention: "review <sha>" binds
-// evidence, anything else dispatches the session task. Prefer the explicit
-// taxion/dispatch and taxion/review methods; this fallback stays for older
-// clients and enforces the same guards.
+// Keep the deprecated prompt form for older clients, sharing dispatch/review
+// helpers so its constraints do not diverge from the explicit methods.
 func (s *Server) prompt(ctx context.Context, sid, text string, out *bufio.Writer) (string, error) {
 	sess, err := s.lookup(sid)
 	if err != nil {
@@ -307,14 +300,12 @@ func (s *Server) prompt(ctx context.Context, sid, text string, out *bufio.Writer
 	return "end_turn", nil
 }
 
-// review binds coder-output evidence to the session task (SHA-001: sha is
-// required and kept exact, never "latest").
 func (s *Server) review(sid string, sess *acpSession, sha string, out *bufio.Writer) error {
 	l, err := s.load()
 	if err != nil {
 		return err
 	}
-	ev, err := core.BindEvidence(sess.taskID, strings.TrimSpace(sha)) // SHA-001
+	ev, err := core.BindEvidence(sess.taskID, strings.TrimSpace(sha))
 	if err != nil {
 		return err
 	}
@@ -329,15 +320,12 @@ func (s *Server) review(sid string, sess *acpSession, sha string, out *bufio.Wri
 	return nil
 }
 
-// dispatch records a dispatch for the session task (DSP-001: at most one
-// active). The session cwd is the explicit repo identity (REP-001).
-// It returns the dispatch ID.
 func (s *Server) dispatch(sid string, sess *acpSession, out *bufio.Writer) (string, error) {
 	l, err := s.load()
 	if err != nil {
 		return "", err
 	}
-	if err := core.GuardActiveDispatch(l.Dispatches); err != nil { // DSP-001
+	if err := core.GuardActiveDispatch(l.Dispatches); err != nil {
 		return "", err
 	}
 	d := core.Dispatch{ID: fmt.Sprintf("d-%d", time.Now().UnixNano()),

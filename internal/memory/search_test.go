@@ -45,7 +45,7 @@ func TestSearchFTSHits(t *testing.T) {
 
 func TestSearchShortQueryFallsToLIKE(t *testing.T) {
 	s := seedSearch(t)
-	hits, err := s.Search("秘密", "", "") // 2 chars: shorter than a trigram
+	hits, err := s.Search("秘密", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,6 @@ func TestSearchGuards(t *testing.T) {
 	if hits, err := s.Search("存在しない語", "", ""); err != nil || len(hits) != 0 {
 		t.Fatalf("no match: hits=%v err=%v", hits, err)
 	}
-	// FTS syntax characters must not break the query.
 	if _, err := s.Search(`"quoted" (paren) *star*`, "", ""); err != nil {
 		t.Fatalf("special chars: %v", err)
 	}

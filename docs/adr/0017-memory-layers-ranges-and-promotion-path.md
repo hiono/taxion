@@ -37,7 +37,18 @@ log (raw: what happened)
   other checks at dispatch time. Private knowledge is shared via
   issues/MRs ([155]) and the standalone layout sketch ([157]).
 
-Details and the layer×range table: `docs/08-memory-model.md`.
+The following tables describe the intended model, not the current store:
+
+| layer | contents | examples | intended enforcement |
+| --- | --- | --- | --- |
+| log | raw records of what happened | task/dispatch/evidence rows, audit JSONL | none; append-only |
+| lesson / decision | distilled knowledge | failure lessons, ADRs | versioned and referenced |
+| guardrail | checks that must pass | DSP-001, SHA-001, promoted guidelines | dispatch-time |
+
+| range | intended location | associated with | contents |
+| --- | --- | --- | --- |
+| project | `.taxion/` | repository | task memory, repo-local guidelines |
+| global | `.config`-shaped | operator | cross-repo lessons, personal rules |
 
 ## Consequences
 
@@ -45,6 +56,9 @@ Details and the layer×range table: `docs/08-memory-model.md`.
 - M6-3 implements the promotion flow (counter → proposal → guardrail).
 - M6-4 evaluates the retrieval layer (SQLite FTS vs dolt vs QMD-embedded).
 - Sanitizer/export (self-protection) is out of M6 scope, deferred to M7+.
+- The M6 planning also considered cost control as an M8 candidate and
+  left real-agent wiring behind proc as an M3 remainder. These are planning
+  context, not a current implementation inventory.
 
 ## Implementation status
 
@@ -52,5 +66,6 @@ The decision above records the intended model. M6-3 implemented warning
 counting and guideline-candidate creation at a fixed threshold of three
 occurrences; it did not implement configurable thresholds or promotion
 to enforced guardrails. The CLI stores both scopes in one `memory.db`,
-rather than separate project and global directories. See
-`docs/08-memory-model.md` for the current implementation and export flags.
+rather than separate project and global directories. Current behavior
+is documented in [the Memory reference](../08-memory-model.md);
+implementation results are recorded in Issues #28–#34.

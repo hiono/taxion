@@ -16,7 +16,6 @@ let upstream: ReturnType<typeof createServer>;
 let upstreamBase = "";
 
 before(async () => {
-  // Mock `taxion serve`: the web slice must only ever talk to the API.
   upstream = createServer((req, res) => {
     const json = (code: number, v: unknown) => {
       res.writeHead(code, { "content-type": "application/json" });
@@ -169,7 +168,6 @@ describe("upstream token forwarding (M5)", () => {
   let bareBase = "";
 
   before(async () => {
-    // Gated upstream: 401 unless the exact Bearer token arrives.
     gated = createServer((req, res) => {
       const json = (code: number, v: unknown) => {
         res.writeHead(code, { "content-type": "application/json" });

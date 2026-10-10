@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// Default writes must use project: without an explicit --scope global,
-// nothing may ever reach the global range.
 func TestDefaultWriteNeverReachesGlobal(t *testing.T) {
 	s := openTest(t)
 	for _, kind := range []string{KindLesson, KindDecision, KindGuardrail, KindConcern} {
@@ -32,7 +30,6 @@ func TestDefaultWriteNeverReachesGlobal(t *testing.T) {
 	}
 }
 
-// Explicit global writes use global only and are excluded from project lists.
 func TestExplicitGlobalWriteStaysGlobal(t *testing.T) {
 	s := openTest(t)
 	if _, err := s.Put(KindLesson, Entry{Title: "g", Scope: ScopeGlobal}); err != nil {
@@ -47,7 +44,6 @@ func TestExplicitGlobalWriteStaysGlobal(t *testing.T) {
 	}
 }
 
-// Warnings follow the same rule: default project, explicit global only.
 func TestWarnScopeDefaults(t *testing.T) {
 	s := openTest(t)
 	if _, _, err := s.Warn("w1", ""); err != nil {

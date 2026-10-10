@@ -28,22 +28,18 @@ func TestLimiterUnit(t *testing.T) {
 	if l.allow("1.2.3.4", now.Add(4*time.Second)) {
 		t.Fatal("at threshold the IP must lock out")
 	}
-	// Other IPs are unaffected.
 	if !l.allow("5.6.7.8", now.Add(4*time.Second)) {
 		t.Fatal("lockout must be per-IP")
 	}
-	// Lockout expires.
 	if !l.allow("1.2.3.4", now.Add(6*time.Minute)) {
 		t.Fatal("lockout must expire")
 	}
-	// Old failures slide out of the window.
 	l2 := newLimiter(2, time.Minute, 5*time.Minute)
 	l2.fail("9.9.9.9", now)
 	l2.fail("9.9.9.9", now.Add(2*time.Minute))
 	if !l2.allow("9.9.9.9", now.Add(2*time.Minute)) {
 		t.Fatal("stale failures must not lock out")
 	}
-	// One success clears typos.
 	l3 := newLimiter(2, time.Minute, 5*time.Minute)
 	l3.fail("7.7.7.7", now)
 	l3.reset("7.7.7.7")
@@ -62,8 +58,6 @@ func TestKeyOfIgnoresForwardedHeaders(t *testing.T) {
 	}
 }
 
-// TestLockoutIntegration checks authorization: repeated bad tokens trigger 429, the
-// audit log names the lockout, and one success resets the counter.
 func TestLockoutIntegration(t *testing.T) {
 	dir := t.TempDir()
 	ledger := filepath.Join(dir, "ledger.json")
@@ -98,7 +92,6 @@ func TestLockoutIntegration(t *testing.T) {
 	if code := bad().Code; code != http.StatusUnauthorized {
 		t.Fatalf("2nd bad = %d, want 401", code)
 	}
-	// A success between failures resets the counter — no lockout.
 	if code := good().Code; code != http.StatusOK {
 		t.Fatalf("good = %d, want 200", code)
 	}
@@ -116,7 +109,6 @@ func TestLockoutIntegration(t *testing.T) {
 	if code := bad().Code; code != http.StatusTooManyRequests {
 		t.Fatalf("post-lock bad = %d, want 429", code)
 	}
-	// Locked out: even the right token is refused while locked.
 	if code := good().Code; code != http.StatusTooManyRequests {
 		t.Fatalf("good-while-locked = %d, want 429", code)
 	}

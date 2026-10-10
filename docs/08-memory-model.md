@@ -1,38 +1,29 @@
-# 08 — Memory model (layers × ranges × promotion)
+# 08 — Memory reference
 
-Frozen by ADR-0017 (M6-1, issue #27). Origin: 2026-10-09 design discussion entries
-[127][129][131][141][143][155][157].
+This document describes the current CLI and store. The proposed
+log / lesson / decision / guardrail model, intended storage locations,
+and promotion rationale are recorded in
+[ADR-0017](adr/0017-memory-layers-ranges-and-promotion-path.md).
+Implementation results are recorded in Issues #28–#34 and #38.
 
-## Layers
+## Storage and scopes
 
-| layer | contents | examples | enforced? |
-| ----- | -------- | -------- | --------- |
-| log | raw records of what happened | task/dispatch/evidence rows, audit JSONL | no (append-only) |
-| lesson / decision | distilled knowledge | failure→lesson notes, **ADRs** | no (versioned, referenced) |
-| guardrail | checks that must pass | DSP-001, SHA-001, promoted guidelines | **yes (dispatch-time)** |
+`memory put`, `get`, and `list` operate on four kinds: `lesson`, `decision`,
+`guardrail`, and `concern`. New entries default to status `proposed`.
+Storing an entry with kind `guardrail` does not make it an enforced check.
 
-[129] answered: an ADR belongs to lesson/decision. It records a decision
-and rationale for reference, rather than an event or an enforced check.
+The CLI stores both `project` and `global` entries in `memory.db` next to
+the selected ledger, distinguished by the `scope` column. Use the global
+`--store PATH` option before the command to select the ledger and hence
+the Memory database directory.
 
-## Ranges
+Writes (`put` and `warn`) default to `project`. `--scope global` must be
+explicit and prints a notification; it does not ask for confirmation.
+Reads (`list`, `search`, and `export`) include both scopes unless filtered
+with `--scope`. There are no separate project and global storage
+directories in the current CLI.
 
-| range | location | associated with | contents |
-| ----- | -------- | ------------ | ----- |
-| project | `.taxion/` | the repo | task memory, repo-local guidelines |
-| global | `.config`-shaped | the operator | cross-repo lessons, personal rules |
-
-## Promotion path (design)
-
-```
-repeated warning (counted, threshold N configurable)
-  → guideline (proposed, human-approved)
-    → guardrail (checked at dispatch beside DSP-001 et al.)
-```
-
-Private knowledge is shared through issues/MRs ([155]); the
-standalone private layout sketch ([157]) is the project-range template.
-
-## Current implementation
+## Warning promotion
 
 `memory warn` counts identical `(body, scope)` pairs. On the third occurrence,
 it creates one lesson with status `proposed` as a guideline candidate. The
@@ -40,17 +31,23 @@ threshold is fixed at `PromoteAfter = 3`; it is not a CLI setting. Promotion
 to a guardrail and dispatch-time enforcement of Memory entries are not
 implemented. Existing core checks such as DSP-001 remain separate.
 
-The CLI stores both `project` and `global` entries in `memory.db` next to
-the selected ledger, distinguished by the `scope` column. The locations
-in the range table describe the design, not separate storage directories
-implemented by the current CLI.
+## Search
 
-`memory export [--scope] [--sanitize]` prints a preview to stdout only.
+`memory search --query TEXT [--kind KIND] [--scope SCOPE]` searches entry
+titles and bodies. Queries of three or more characters use FTS5 trigram
+with BM25 ranking. Shorter queries and FTS queries with no matches fall
+back to LIKE. The database index is updated by SQLite insert/delete
+triggers; callers do not update it separately.
+
+## Export
+
+`memory export [--scope SCOPE] [--sanitize=false]` prints a preview to stdout only.
 Sanitizing defaults on. It does not transmit data, and there are no
 `--profile` or `--dry-run` flags.
 
-## Out of M6 scope
-
-The M6 design deferred sanitizer/export to M7, considered cost control
-as an M8 candidate, and left real-agent wiring behind proc as an M3
-remainder. The implemented export command is described above.
+The default sanitizer masks matching private-key blocks, token patterns,
+email addresses, IPv4-shaped text, and home-directory paths in titles and
+bodies. Rules are shared across both scopes. Unmatched text and other
+entry fields pass through unchanged; sanitizing is not a guarantee that
+all sensitive data is removed. Check the preview before sharing it.
+`--sanitize=false` displays the original text with an UNSANITIZED header.

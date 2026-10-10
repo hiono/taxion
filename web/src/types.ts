@@ -1,5 +1,5 @@
-// Ledger shapes mirror internal/core JSON tags for API responses.
-// Ledger mutations are performed by the Go API rather than this module.
+// These interfaces are view projections, not the complete wire schema.
+// Shared keys must follow docs/05 so API changes do not silently break display.
 
 export interface Task {
   id: string;

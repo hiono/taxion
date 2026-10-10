@@ -1,15 +1,3 @@
-// Package memory — sanitizer (M7-1).
-//
-// Redact is a deterministic vocab-table redactor for export paths (M7-2):
-// private keys, API tokens, emails, IP addresses, and home-directory paths
-// become [redacted:<class>] markers. Stdlib regexp only — no external deps.
-//
-// The rules must never match their own markers (idempotence): markers carry
-// no @, no dotted quads, no slashes, and no token prefixes.
-//
-// Anything not matching a rule passes through unchanged; unknown sensitivity
-// classes fail open by design here (the export path, not this package,
-// decides what may leave the machine).
 package memory
 
 import "regexp"
@@ -20,8 +8,10 @@ type Rule struct {
 	Re   *regexp.Regexp
 }
 
-// DefaultRules is the export-safe vocab table. Order matters only for
-// overlapping spans (key blocks first, they are the longest).
+// DefaultRules defines the default patterns, not a complete secret detector.
+// Key blocks come first so their contents are not separately replaced and
+// the closing delimiter remains matchable. Markers avoid pattern syntax so
+// a second redaction pass leaves them unchanged.
 var DefaultRules = []Rule{
 	{"key", regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----`)},
 	{"token", regexp.MustCompile(`\b(gho|ghp|ghs|github_pat)_[A-Za-z0-9_]+`)},
@@ -33,7 +23,8 @@ var DefaultRules = []Rule{
 	{"path", regexp.MustCompile(`/(home|Users)/[^\s"']+`)},
 }
 
-// Redact applies every rule in order and returns the cleaned text.
+// Redact applies rules in order. Unmatched text passes through unchanged;
+// callers must review the result rather than treating it as safe to share.
 func Redact(rules []Rule, text string) string {
 	out := text
 	for _, r := range rules {

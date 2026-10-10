@@ -1,13 +1,3 @@
-// Package server — rate limiting (M8-E).
-//
-// Brute-force protection for the Bearer gate: per-source-IP sliding-window
-// failure counting with lockout. No X-Forwarded-For is trusted (spoofable)
-// — the key is always the connection's RemoteAddr host.
-//
-// Policy (fixed, no flags): 5 failed logins within 1 minute locks the IP out
-// for 5 minutes; locked-out requests answer 429. One success resets the IP's
-// counter. When no token is configured there is nothing to guess, so the
-// limiter stays out of the way.
 package server
 
 import (
@@ -23,7 +13,6 @@ const (
 	rateLockout  = 5 * time.Minute
 )
 
-// limiter counts auth failures per IP and locks out brute forcers.
 type limiter struct {
 	maxFails int
 	window   time.Duration
@@ -44,7 +33,8 @@ func newLimiter(maxFails int, window, lockout time.Duration) *limiter {
 	}
 }
 
-// keyOf returns the connection's host — never a client-supplied header.
+// Do not trust X-Forwarded-For: without a trusted-proxy configuration the
+// caller could forge it to bypass a per-source limit.
 func keyOf(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -53,7 +43,6 @@ func keyOf(r *http.Request) string {
 	return host
 }
 
-// allow reports whether ip may attempt auth now.
 func (l *limiter) allow(ip string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -68,7 +57,6 @@ func (l *limiter) allow(ip string, now time.Time) bool {
 	return true
 }
 
-// fail records a failed login; crossing maxFails within window locks the IP.
 func (l *limiter) fail(ip string, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -86,7 +74,8 @@ func (l *limiter) fail(ip string, now time.Time) {
 	}
 }
 
-// reset clears an IP's counter after one success — typos must not accumulate.
+// A successful authentication clears prior typos rather than accumulating
+// unrelated mistakes into a later lockout.
 func (l *limiter) reset(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

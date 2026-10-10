@@ -1,5 +1,10 @@
 # 00 — Project Charter (sanitized, clean-room)
 
+This charter records the founding Foundation → Local scope, not the
+current feature inventory. See [README](../README.md) for entry points,
+[roadmap](04-roadmap.md) for tracked work, and the reference documents
+linked from README for current behavior.
+
 ## Origin
 
 Taxion is a clean-room project.

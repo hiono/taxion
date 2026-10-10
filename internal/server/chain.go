@@ -9,26 +9,13 @@ import (
 	"strings"
 )
 
-// Hash-chain (M8-G): every audit line carries prev, the hex SHA-256 of the
-// exact previous line bytes (canonical JSON + '\n'). The first line omits
-// prev (genesis). The chain detects modification, insertion, deletion, and
-// reordering of covered lines — NOT silent tail truncation (a removed tail
-// leaves a valid shorter chain; watch line counts externally).
-// It checks internal consistency, not authenticity: a fully rewritten log
-// with recomputed hashes also verifies.
-//
-// Old-line compat: lines without prev are "legacy" — valid only as a leading
-// run before the first chained line (pre-M8-G logs keep working after
-// upgrade; the first chained line links onto the last legacy line). A legacy
-// line after a chained line is a gap and fails verification.
 func chainHash(line []byte) string {
 	sum := sha256.Sum256(line)
 	return hex.EncodeToString(sum[:])
 }
 
-// tailHash returns the hash of the last non-empty line in the file, or ""
-// when the file is missing/empty (genesis). It lets a restarted server
-// continue the chain instead of forking a second genesis.
+// Resume the existing tail across restarts; a new genesis would make a
+// continuous audit file unverifiable.
 func tailHash(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -49,6 +36,8 @@ func tailHash(path string) (string, error) {
 // Verify replays the chain in path. It returns the number of chained lines
 // checked, the number of leading legacy lines skipped, and the 1-based line
 // number of the first break (0 = OK).
+// This proves internal consistency, not authenticity: tail truncation and
+// a fully rewritten log with recomputed hashes can still verify.
 func Verify(path string) (checked, legacy, badLine int, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -73,7 +62,8 @@ func Verify(path string) (checked, legacy, badLine int, err error) {
 		lineBytes := []byte(l + "\n")
 		if e.Prev == "" {
 			if chained {
-				// Legacy line after chained lines: gap, not compat.
+				// Legacy prefixes allow pre-chain logs to survive upgrade.
+				// After chaining starts, a missing link must not pass as legacy.
 				return checked, legacy, i + 1, nil
 			}
 			legacy++
@@ -81,7 +71,7 @@ func Verify(path string) (checked, legacy, badLine int, err error) {
 			continue
 		}
 		if i == 0 {
-			// First line links to a rotated-away prefix we cannot see.
+			// A missing predecessor cannot be verified from this file alone.
 			return checked, legacy, 1, nil
 		}
 		if e.Prev != chainHash(prevLine) {

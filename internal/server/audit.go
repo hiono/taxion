@@ -13,11 +13,8 @@ import (
 	"time"
 )
 
-// auditEntry is one JSONL line in the audit log. It records the operation
-// and self-asserted operator label, never secrets: no tokens, no Authorization
-// header, no request body (titles, SHAs), no query string. Who is a
-// self-asserted operator label (X-Operator), not an identity proof — under a
-// single shared token it distinguishes callers by claim, not by credential.
+// Retain operation metadata, not credentials or free-text request bodies.
+// X-Operator is self-asserted: a shared token cannot prove caller identity.
 type auditEntry struct {
 	TS     string `json:"ts"`
 	Method string `json:"method"`
@@ -26,15 +23,10 @@ type auditEntry struct {
 	Who    string `json:"who,omitempty"`
 	Status int    `json:"status"`
 	Authed bool   `json:"authed"`
-	// Reason records the denial reason (M8-E): "lockout" for 429s.
-	// Successes and ordinary 401s carry no reason.
 	Reason string `json:"reason,omitempty"`
-	// Prev links this line to the previous one (M8-G hash chain): hex
-	// SHA-256 of the exact previous line bytes. Omitted on genesis.
-	Prev string `json:"prev,omitempty"`
+	Prev   string `json:"prev,omitempty"`
 }
 
-// statusCatcher records the response code for the audit middleware.
 type statusCatcher struct {
 	http.ResponseWriter
 	status int
@@ -52,21 +44,18 @@ func (c *statusCatcher) Write(b []byte) (int, error) {
 	return c.ResponseWriter.Write(b)
 }
 
-// auditor appends JSONL entries to AuditPath (0600). Zero value disabled.
-// M8-G: it also maintains the hash chain — last is the hash of the most
-// recently written line (nil = genesis so far), guarded by the same mutex.
 type auditor struct {
 	path string
 
-	mu   sync.Mutex
-	f    *os.File
+	mu sync.Mutex
+	f  *os.File
+	// Protect last and the append together so each line hashes its actual
+	// predecessor rather than a concurrently superseded one.
 	last []byte
 }
 
 func (a *auditor) enabled() bool { return a.path != "" }
 
-// shouldLog covers the mutation surface plus every auth denial (401/403)
-// and rate-limit lockout (429). Successful reads are excluded.
 func shouldLog(r *http.Request, status int) bool {
 	switch r.Method {
 	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
@@ -76,9 +65,8 @@ func shouldLog(r *http.Request, status int) bool {
 		status == http.StatusTooManyRequests
 }
 
-// whoOf extracts the self-asserted operator label. It is scrubbed to a
-// safe alphabet and capped: a log line must stay one clean JSON line, and
-// a hostile label must not smuggle control characters or megabytes in.
+// Restrict and cap caller-controlled labels to keep them printable and
+// prevent unbounded identity fields in audit records.
 func whoOf(r *http.Request) string {
 	const maxWho = 64
 	w := strings.TrimSpace(r.Header.Get("X-Operator"))
@@ -98,8 +86,8 @@ func whoOf(r *http.Request) string {
 	return b.String()
 }
 
-// repoOf extracts the top-level "repo" from a JSON POST body without keeping
-// the body (titles, SHAs). The body is restored for downstream handlers.
+// Restore the consumed body so audit extraction cannot change what the
+// downstream handler validates.
 func repoOf(r *http.Request) string {
 	if r.Body == nil {
 		return ""
@@ -119,8 +107,6 @@ func repoOf(r *http.Request) string {
 	return body.Repo
 }
 
-// log appends one entry and returns write errors to the caller.
-// M8-G: the entry links onto the previous line before writing.
 func (a *auditor) log(e auditEntry) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -150,10 +136,6 @@ func (a *auditor) log(e auditEntry) error {
 	return nil
 }
 
-// withAudit wraps next: it serves the request, then records mutations and
-// denials. Authed reflects whether THIS request presented the valid token
-// (false when auth is off or the check failed) — the token itself is never
-// persisted here; the shared comparison is used to compute the verdict.
 func (a *auditor) withAudit(s *Server, next http.Handler) http.Handler {
 	if !a.enabled() {
 		return next
@@ -175,8 +157,8 @@ func (a *auditor) withAudit(s *Server, next http.Handler) http.Handler {
 		authed := s.Token != "" && authorized(r, s.Token)
 		reason := ""
 		if status == http.StatusTooManyRequests {
-			// Only the authorize lockout path produces 429, so the
-			// mapping is exact — no other handler may use 429.
+			// This mapping relies on lockout being the only 429 source;
+			// adding other 429 responses requires a distinct audit reason.
 			reason = "lockout"
 		}
 		if err := a.log(auditEntry{
@@ -189,22 +171,19 @@ func (a *auditor) withAudit(s *Server, next http.Handler) http.Handler {
 			Authed: authed,
 			Reason: reason,
 		}); err != nil {
-			// Headers are already sent; the failure is visible in the
-			// server stderr and the entry is missing — operators must
-			// treat a missing line as an audit gap.
+			// The response is already sent, so changing its status cannot
+			// report this failure. stderr must expose the audit gap.
 			_, _ = io.WriteString(os.Stderr, "taxion: audit log failed: "+err.Error()+"\n")
 		}
 	})
 }
 
-// authorized recomputes the Bearer verdict without writing a response,
-// using the same comparison as the authorize gate.
 func authorized(r *http.Request, token string) bool {
 	return validBearer(r, token)
 }
 
-// initChainLocked continues the hash chain from the existing tail.
-// Call with mu held, after a.f is open. Missing/empty file = genesis.
+// Continue from the existing tail so restarting does not create an unlinked
+// genesis inside one file. Requires mu and an open a.f.
 func (a *auditor) initChainLocked() error {
 	if a.last != nil {
 		return nil
@@ -224,9 +203,6 @@ func (a *auditor) initChainLocked() error {
 	return nil
 }
 
-// open eagerly creates the log file so serve fails fast when the audit
-// destination is unwritable — before serving a single request. It also
-// continues the hash chain from the existing tail (no second genesis).
 func (a *auditor) open() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -241,8 +217,8 @@ func (a *auditor) open() error {
 	return a.initChainLocked()
 }
 
-// probe verifies writability without keeping the handle: used at startup so
-// the serving auditor opens the single live handle later.
+// Close the startup probe so the serving auditor owns the live handle and
+// initializes its chain from the tail when it actually opens the log.
 func (a *auditor) probe() error {
 	f, err := os.OpenFile(a.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {

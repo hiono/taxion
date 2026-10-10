@@ -26,7 +26,6 @@ func TestRedactSecrets(t *testing.T) {
 			t.Fatalf("missing marker %q in %q", marker, out)
 		}
 	}
-	// Non-secret text (including the id) survives.
 	if !strings.Contains(out, "id 7") {
 		t.Fatalf("clean text damaged: %q", out)
 	}
@@ -38,7 +37,6 @@ func TestRedactIdempotent(t *testing.T) {
 	if once != twice {
 		t.Fatalf("not idempotent:\n%s\n%s", once, twice)
 	}
-	// Rules must not match their own markers.
 	if Redact(DefaultRules, "[redacted:email] [redacted:ip] [redacted:path] [redacted:token] [redacted:key]") !=
 		"[redacted:email] [redacted:ip] [redacted:path] [redacted:token] [redacted:key]" {
 		t.Fatal("rules match their own markers")

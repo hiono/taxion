@@ -1,12 +1,8 @@
 // Package store provides the sqlite-backed durable ledger (Server phase).
 //
-// It preserves the core.Ledger shape (LED-001): the JSON file backend and
-// this sqlite backend are interchangeable at the Ledger level. Pure-Go
-// driver (modernc.org/sqlite) — no cgo toolchain required.
-//
-// The outbox table implements the outbox pattern for future server delivery:
-// callers enqueue events, read unsent rows, and mark them sent after delivery.
-// Enqueue is separate from SaveLedger; no relay is wired into the CLI/API.
+// The schema preserves core.Ledger so changing persistence does not change
+// governance types. The pure-Go driver avoids a cgo build requirement
+// (ADR-0009). CLI/API use the separate JSON backend.
 package store
 
 import (
@@ -201,7 +197,8 @@ type OutboxEntry struct {
 	CreatedAt time.Time
 }
 
-// Enqueue records an event for later relay delivery.
+// Enqueue records an event for later delivery in a separate transaction
+// from SaveLedger. Callers must not assume the state and event are atomic.
 func (s *Store) Enqueue(typ, payload string) (int64, error) {
 	res, err := s.db.Exec(`INSERT INTO outbox(type,payload,created_at) VALUES(?,?,?)`,
 		typ, payload, ts(time.Now().UTC()))
@@ -211,7 +208,8 @@ func (s *Store) Enqueue(typ, payload string) (int64, error) {
 	return res.LastInsertId()
 }
 
-// Claim returns up to limit unsent entries in FIFO order.
+// Claim returns up to limit unsent entries in FIFO order. It does not reserve
+// them; concurrent consumers can receive the same entries.
 func (s *Store) Claim(limit int) ([]OutboxEntry, error) {
 	rows, err := s.db.Query(`SELECT id,type,payload,created_at FROM outbox WHERE sent_at IS NULL ORDER BY id LIMIT ?`, limit)
 	if err != nil {

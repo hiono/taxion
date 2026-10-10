@@ -1,12 +1,4 @@
 // Package memory is the SQLite-backed memory store (M6 Memory).
-//
-// Memory starts on SQLite, never file-first: lessons, decisions, guardrails,
-// and concerns use four tables with a shared shape. Repeated warnings are
-// counted in the warnings table; extracted knowledge is stored in
-// lessons/decisions. The guardrails table stores rules. The promotion model
-// is documented in docs/08-memory-model.md and ADR-0017.
-//
-// Pure-Go driver (modernc.org/sqlite, same as internal/store) — no cgo.
 package memory
 
 import (
@@ -29,7 +21,7 @@ const (
 	KindConcern   = "concern"
 )
 
-// Scopes are the memory ranges (docs/08).
+// Scopes distinguish repository-specific entries from cross-repository ones.
 const (
 	ScopeProject = "project"
 	ScopeGlobal  = "global"
@@ -104,7 +96,8 @@ func checkKind(kind string) error {
 	return fmt.Errorf("taxion: unknown memory kind %q (lesson|decision|guardrail|concern)", kind)
 }
 
-// tableFor maps a kind to its table. checkKind must pass first.
+// Validate kind before interpolating a table name; SQL parameters cannot
+// bind identifiers.
 func tableFor(kind string) string {
 	return kind + "s"
 }
@@ -126,8 +119,8 @@ func parseTs(v string) time.Time {
 	return t
 }
 
-// Put appends an entry to the kind table and returns its id.
-// Empty titles, unknown kinds, and unknown scopes fail closed.
+// Put appends an entry and returns its id. Empty scope defaults to project
+// to avoid making repository-specific knowledge global implicitly.
 func (s *Store) Put(kind string, e Entry) (int64, error) {
 	if err := checkKind(kind); err != nil {
 		return 0, err

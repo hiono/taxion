@@ -1,21 +1,8 @@
 // Package proc provides a process-backed runtime.Runtime adapter.
 //
-// Taxion ships no LLM: it supervises a configured worker command.
-// Start spawns the command; stdout/stderr lines
-// become output events; exit code 0 becomes done, anything else becomes
-// failed (fail-closed — a crashed worker never reports readiness). Stop kills
-// the process; the session can never become done afterwards.
-//
-// Backpressure: live watchers are buffered (256); a consumer that stops
-// draining blocks the pump. This mirrors internal/runtime/local and is
-// deliberate — the supervisor must not silently drop worker output.
-//
-// ROLE-001: create one Proc per role (coder, reviewer) so registries never
-// mix. Checkpoint sequencing (CHK-002) stays in the local/ACP layer; proc
-// reports raw execution only. No ledger keys are added (M2-3 wire freeze);
-// "output"/"done"/"failed" are runtime-internal event types.
-//
-// Stdlib only (os/exec) — no SDK dependency (SDK-001).
+// Use separate instances per role to avoid mixing coder and reviewer
+// session registries (ROLE-001). Process exit is not evidence that an
+// ordered checkpoint sequence completed; that constraint stays separate.
 package proc
 
 import (
@@ -38,7 +25,8 @@ var (
 
 var _ runtime.Runtime = (*Proc)(nil)
 
-// watcherBuf caps live event buffering per watcher (see backpressure note).
+// Bound watcher buffering without silently discarding worker output.
+// A consumer that stops draining eventually blocks the producer.
 const watcherBuf = 256
 
 // Proc supervises one worker command per session. Create one per role.
@@ -106,7 +94,6 @@ func (p *Proc) Start(_ context.Context, taskID string) (string, error) {
 	return id, nil
 }
 
-// pump streams worker output as events, then reports done/failed exactly once.
 func (p *Proc) pump(s *session, stdout, stderr io.Reader, cmd *exec.Cmd) {
 	scan := func(r io.Reader) {
 		sc := bufio.NewScanner(r)
@@ -134,8 +121,8 @@ func (p *Proc) pump(s *session, stdout, stderr io.Reader, cmd *exec.Cmd) {
 	p.mu.Unlock()
 }
 
-// emit appends to history and broadcasts to live watchers. Terminal state
-// (stopped) discards late worker output.
+// Discard late output after Stop so it cannot publish a done event for a
+// session the caller has cancelled.
 func (p *Proc) emit(s *session, ev runtime.Event) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -191,7 +178,7 @@ func (p *Proc) Stop(_ context.Context, sessionID string) error {
 
 // Events streams neutral events for a session: replays history, then follows
 // live. Unknown sessions are an error; the channel closes on done/failed/
-// stop or when ctx is cancelled.
+// stop. Cancelling ctx unregisters the watcher but does not close its channel.
 func (p *Proc) Events(ctx context.Context, sessionID string) (<-chan runtime.Event, error) {
 	p.mu.Lock()
 	s, ok := p.sessions[sessionID]

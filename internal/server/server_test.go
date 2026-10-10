@@ -104,7 +104,6 @@ func TestEvidenceTaskFilter(t *testing.T) {
 func TestReadOnlyAndNotFound(t *testing.T) {
 	path, _ := seed(t)
 	h := (&Server{StorePath: path}).Handler()
-	// GET-only routes reject every mutation with 405.
 	for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		req := httptest.NewRequest(m, "/api/ledger", nil)
 		rec := httptest.NewRecorder()
@@ -113,7 +112,6 @@ func TestReadOnlyAndNotFound(t *testing.T) {
 			t.Fatalf("%s /api/ledger code = %d, want 405", m, rec.Code)
 		}
 	}
-	// Write routes reject non-GET/POST with 405; empty POST is 400 (bad body).
 	for _, m := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		req := httptest.NewRequest(m, "/api/tasks", nil)
 		rec := httptest.NewRecorder()
@@ -153,7 +151,6 @@ func TestCreateTask(t *testing.T) {
 	if created.Title != "via api" || created.Repo != "r-a" || created.ID == "" {
 		t.Fatalf("created task mismatch: %+v", created)
 	}
-	// Persisted: visible via GET.
 	got := get(t, h, "/api/tasks")
 	var tasks []core.Task
 	if err := json.Unmarshal(got.Body.Bytes(), &tasks); err != nil {
@@ -162,7 +159,6 @@ func TestCreateTask(t *testing.T) {
 	if len(tasks) != 1 || tasks[0].ID != created.ID {
 		t.Fatalf("task not persisted: %+v", tasks)
 	}
-	// Guards: missing title and missing/invalid repo are 400.
 	for _, body := range []string{`{"repo":"r-a"}`, `{"title":"x"}`, `{"title":"x","repo":""}`} {
 		if rec := post(t, h, "/api/tasks", body); rec.Code != http.StatusBadRequest {
 			t.Fatalf("body %s: code = %d, want 400", body, rec.Code)
@@ -174,17 +170,14 @@ func TestCreateTask(t *testing.T) {
 }
 
 func TestCreateDispatchGuards(t *testing.T) {
-	path, _ := seed(t) // t-1/r-a, t-2/r-b, one active dispatch on t-1
+	path, _ := seed(t)
 	h := (&Server{StorePath: path}).Handler()
-	// Unknown task → 404.
 	if rec := post(t, h, "/api/dispatches", `{"task":"nope","repo":"r-a"}`); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown task: code = %d, want 404", rec.Code)
 	}
-	// Missing repo → 400 (REP-001).
 	if rec := post(t, h, "/api/dispatches", `{"task":"t-2"}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing repo: code = %d, want 400", rec.Code)
 	}
-	// Active dispatch exists → 409 (DSP-001).
 	if rec := post(t, h, "/api/dispatches", `{"task":"t-2","repo":"r-b"}`); rec.Code != http.StatusConflict {
 		t.Fatalf("second dispatch: code = %d, want 409", rec.Code)
 	}
@@ -204,14 +197,12 @@ func TestCreateReview(t *testing.T) {
 	if ev.SHA != "beef01" || ev.TaskID != "t-1" {
 		t.Fatalf("evidence mismatch: %+v", ev)
 	}
-	// SHA-001: empty sha is 400; missing repo is 400.
 	if rec := post(t, h, "/api/reviews", `{"task":"t-1","repo":"r-a","sha":""}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("empty sha: code = %d, want 400", rec.Code)
 	}
 	if rec := post(t, h, "/api/reviews", `{"task":"t-1","sha":"x"}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing repo: code = %d, want 400", rec.Code)
 	}
-	// Reviews route is POST only.
 	req := httptest.NewRequest(http.MethodGet, "/api/reviews", nil)
 	grec := httptest.NewRecorder()
 	h.ServeHTTP(grec, req)
@@ -236,8 +227,6 @@ func authed(t *testing.T, h http.Handler, method, target, token, body string) *h
 	return rec
 }
 
-// TestAuthGate: with Token set, every route needs the exact Bearer token.
-// Missing and wrong credentials get the identical 401 (no oracle).
 func TestAuthGate(t *testing.T) {
 	path, _ := seed(t)
 	h := (&Server{StorePath: path, Token: "s3cret"}).Handler()
@@ -262,7 +251,6 @@ func TestAuthGate(t *testing.T) {
 			t.Fatalf("%s %s correct token = %d, want success", tc.method, tc.target, rec.Code)
 		}
 	}
-	// Non-bearer schemes are rejected too.
 	req := httptest.NewRequest(http.MethodGet, "/api/ledger", nil)
 	req.Header.Set("Authorization", "Basic c3M=")
 	rec := httptest.NewRecorder()
@@ -272,7 +260,6 @@ func TestAuthGate(t *testing.T) {
 	}
 }
 
-// TestNoTokenKeepsLegacyBehavior: empty Token means pre-M5 open localhost.
 func TestNoTokenKeepsLegacyBehavior(t *testing.T) {
 	path, _ := seed(t)
 	h := (&Server{StorePath: path}).Handler()

@@ -13,7 +13,8 @@ type Runtime interface {
 
 ## Rules
 
-- Core (`internal/core`) depends on this interface only — never on SDK structs.
+- Core (`internal/core`) uses standard-library types, never SDK structs.
+  Adapters implement the Runtime interface outside core.
 - Each `Runtime` implementation MUST isolate Coder vs Reviewer sessions (ROLE-001).
 - Events are neutral `{Type, Payload}` — no SDK event types leak into core.
 - Adapters MUST be fail-closed: unknown/stopped sessions, out-of-order steps,
@@ -27,21 +28,19 @@ type Runtime interface {
   and stderr as `output` events, and reports `done` or `failed` at process exit.
   `Resume` validates an existing session; it does not restart a process.
   Checkpoint sequencing remains separate from this adapter.
-- `internal/runtime/copilot/` (evaluation task; not yet vendored):
-  - Evaluation criteria: session start/resume fidelity, event mapping cost,
-    authentication requirements (no secret in repo), version pinning.
-  - If evaluation fails, core remains untouched.
 
 The current ACP server uses `internal/runtime/local`, not `proc`. Its
 dispatch/review methods record ledger operations; they do not run an LLM
 or an independent reviewer. The CLI `resume` command is a local stub,
 separate from the Runtime interface.
 
-## Anti-pattern (must avoid)
+## Event subscription lifetime
 
-```
-Taxion → Go → Copilot SDK types everywhere → Copilot SDK Wrapper
-```
+Both adapters replay recorded events before following live ones. Stop or
+completion closes the channel. Cancelling the subscription context removes
+the live watcher but does not close its channel; consumers must also observe
+their context rather than waiting only for channel closure.
 
-This would make the core depend on SDK types. The Runtime interface keeps
-SDK-specific types confined to adapters.
+The SDK-neutral boundary is justified in
+[ADR-0003](adr/0003-keep-governance-core-sdk-neutral-behind-runtime-interface.md).
+Planned adapter evaluation belongs in [the roadmap](04-roadmap.md).

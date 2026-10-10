@@ -1,7 +1,4 @@
 // Package core implements the SDK-neutral governance core of Taxion.
-//
-// SDK-001: no SDK-specific, network, or provider types may appear here.
-// Only plain stdlib types: strings, times, maps, slices.
 package core
 
 import (
@@ -18,9 +15,9 @@ type Task struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// Dispatch binds a Task to an isolated execution context (ROLE-001).
-// Repo records the explicit repository identity the dispatch is bound to;
-// it must come from an explicit --repo flag, never inferred (REP-001).
+// Dispatch records an assignment; callers supply the execution context.
+// Repo is explicit so the working directory cannot silently choose a target
+// repository (REP-001).
 type Dispatch struct {
 	ID        string    `json:"id"`
 	TaskID    string    `json:"taskId"`
@@ -29,9 +26,9 @@ type Dispatch struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// Evidence is an immutable record bound to an exact output SHA (SHA-001).
+// Evidence records the caller-supplied output SHA for a task (SHA-001).
 type Evidence struct {
-	SHA       string    `json:"sha"` // exact retained coder output SHA
+	SHA       string    `json:"sha"`
 	TaskID    string    `json:"taskId"`
 	CreatedAt time.Time `json:"createdAt"`
 }
@@ -72,9 +69,8 @@ func BindEvidence(taskID, sha string) (Evidence, error) {
 	return Evidence{TaskID: taskID, SHA: sha, CreatedAt: time.Now().UTC()}, nil
 }
 
-// CheckRepo enforces REP-001: the repository identity an operation binds to
-// must be stated explicitly. Empty means "infer from cwd", which caused the
-// generalized repository-confusion failure and is therefore rejected.
+// CheckRepo rejects an empty identity so callers cannot silently substitute
+// their working directory for the intended repository (REP-001).
 func CheckRepo(repo string) error {
 	if repo == "" {
 		return ErrEmptyRepo
@@ -119,7 +115,7 @@ func (s *Sequence) Advance(name string) error {
 		}
 	}
 	if next == -1 {
-		return ErrOutOfOrder // sequence already complete
+		return ErrOutOfOrder
 	}
 	known := false
 	for _, c := range s.steps {

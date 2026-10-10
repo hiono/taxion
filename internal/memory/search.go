@@ -1,15 +1,3 @@
-// Full-text search over the memory store (M6-5, verdict of #30).
-//
-// Phase 1 is FTS5 with the trigram tokenizer: zero new dependencies, same
-// memory.db, BM25 ranking. The index is trigger-maintained so every write
-// path (Put, promotion, any future raw-SQL insert) is indexed without
-// touching application code; legacy rows pre-dating the index are backfilled
-// once on Open. QMD stays a sidecar (never embedded); dolt is rejected.
-//
-// Trigram matches need 3+ characters. Queries shorter than that
-// use LIKE, which also serves as the fallback when FTS finds
-// nothing. Search never includes tokens, headers, or bodies beyond the
-// entry title/body the caller already owns — it only reads memory.db.
 package memory
 
 import (
@@ -34,8 +22,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
   tokenize='trigram');
 `
 
-// ftsTriggers keeps memory_fts in sync with the four tables. No UPDATE path
-// exists in the codebase (Put/Get/List only), so insert+delete suffice.
+// Triggers cover both Put and promotion without duplicating index updates
+// in callers. Entry updates need a corresponding trigger before adding
+// an UPDATE path.
 const ftsTriggers = `
 CREATE TRIGGER IF NOT EXISTS lessons_ai AFTER INSERT ON lessons BEGIN
   INSERT INTO memory_fts(title,body,kind,ref_id,scope)
@@ -67,8 +56,8 @@ CREATE TRIGGER IF NOT EXISTS concerns_ad AFTER DELETE ON concerns BEGIN
 END;
 `
 
-// ensureFTS creates the index, its triggers, and backfills legacy rows once
-// (an empty index with existing table rows means pre-feature data).
+// Backfill an empty index so entries saved before FTS was added remain
+// searchable after opening an existing database.
 func (s *Store) ensureFTS() error {
 	if _, err := s.db.Exec(ftsSchema); err != nil {
 		return err
@@ -93,12 +82,12 @@ func (s *Store) ensureFTS() error {
 	return nil
 }
 
-// ftsEscape quotes one MATCH phrase so user input cannot break FTS5 syntax.
+// Treat input as one literal phrase, not caller-supplied FTS operators.
 func ftsEscape(q string) string {
 	return `"` + strings.ReplaceAll(q, `"`, `""`) + `"`
 }
 
-// likeEscape escapes LIKE wildcards in user input.
+// Escape wildcards so the LIKE fallback keeps literal substring semantics.
 func likeEscape(q string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return r.Replace(q)
@@ -125,6 +114,8 @@ func (s *Store) Search(query, scope, kind string) ([]Hit, error) {
 	if kind != "" {
 		kinds = []string{kind}
 	}
+	// Trigrams cannot match fewer than three characters. FTS misses use
+	// LIKE as well so a zero-result FTS path does not hide substring matches.
 	if utf8.RuneCountInString(query) >= 3 {
 		hits, err := s.searchFTS(query, scope, kinds)
 		if err != nil {

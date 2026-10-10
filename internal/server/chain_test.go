@@ -67,7 +67,7 @@ func TestChainLinks(t *testing.T) {
 func TestChainContinuesAfterRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	writeEntries(t, path, 2)
-	// New auditor = restarted server: must link onto the tail, not fork.
+	// A fresh auditor models a restart without retaining the previous hash.
 	writeEntries(t, path, 1)
 	lines := readRawLines(t, path)
 	var e struct {
@@ -88,7 +88,8 @@ func TestChainDetectsTamper(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	writeEntries(t, path, 3)
 	lines := readRawLines(t, path)
-	// Modify line 2 content (keep its prev): line 3's link must break.
+	// Keep stored hashes unchanged so the next line, not the edited line,
+	// is where the predecessor mismatch becomes detectable.
 	tampered := strings.Replace(lines[1], "201", "200", 1)
 	if tampered == lines[1] {
 		t.Fatal("test setup: nothing to tamper")
@@ -108,7 +109,7 @@ func TestChainDetectsTamper(t *testing.T) {
 
 func TestLegacyPrefixCompat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	// Pre-chain legacy line, then chained lines link onto it (upgrade path).
+	// Start with an old-format line to exercise upgrade compatibility.
 	if err := os.WriteFile(path, []byte("{\"ts\":\"t\",\"method\":\"POST\",\"path\":\"/x\",\"status\":201,\"authed\":true}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,6 @@ func TestLegacyPrefixCompat(t *testing.T) {
 	if err != nil || bad != 0 || legacy != 1 || checked != 2 {
 		t.Fatalf("legacy prefix must verify: checked=%d legacy=%d bad=%d err=%v", checked, legacy, bad, err)
 	}
-	// A legacy line AFTER chained lines is a gap, not compat.
 	lines := readRawLines(t, path)
 	legacyLine := "{\"ts\":\"t\",\"method\":\"POST\",\"path\":\"/y\",\"status\":201,\"authed\":true}"
 	lines = append(lines, legacyLine)
