@@ -19,6 +19,9 @@ Phases: Foundation → Core → Local → Adapter → Server → Platform → Fu
 - [x] M4 / `write-api` (#15) — POST tasks/dispatches/reviews, CLI-identical guards.
 - [x] M4 / `web-counter` (#16) — order forms + POST passthrough, 502 fail-closed.
 - [x] M4 / `adr-revisits` (#17) — ADR-0011 amended, ADR-0014 stay-split-free, schema write section.
+- [x] M5 / `token-auth` (#22) — Bearer gate, gen-token, web forwarding, loopback refusal.
+- [x] M5 / `audit-trail` (#23) — append-only JSONL of mutations + denials, operator rotates.
+- [x] M5 / `public-prep` (#24) — ADR-0015 security model, history scan clean, public release.
 - [ ] Future / `browser-terminal` (#21) — someday: in-browser terminal editing via a
   terminal-emulator library (libghostty-class) behind the web counter, over the
   SSH tunnel to the work container. Needs M5 (auth) first; revisit triggers on

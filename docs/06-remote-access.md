@@ -1,8 +1,8 @@
 # 06 — Remote access (SSH tunnel first)
 
-Security and personal-information protection are top priority. Until M5
-(auth + audit) is complete, **no Taxion surface listens beyond loopback
-without a token**:
+Security and personal-information protection are top priority. Since M5
+(ADR-0015), the rule is: **loopback-only by default, token required beyond
+loopback**:
 
 - `taxion serve` — default `--addr 127.0.0.1:3938`; `--token` / `TAXION_TOKEN`
   env enables Bearer auth on every route (missing/wrong → identical 401).
@@ -18,14 +18,16 @@ taxion gen-token
 ```
 
 The ledger file holds task titles and repo paths. Treat it as sensitive:
-never place it on a shared volume unencrypted, and never expose the API
-without a tunnel until M5.
+never place it on a shared volume unencrypted. Plain HTTP stays inside
+trusted networks (loopback, SSH tunnel, VPN, docker bridge); public-internet
+exposure without TLS termination in front is out of scope (ADR-0015).
 
 ## Rule
 
-> Keep the API on localhost. Pull it to your machine with `ssh -L`.
-> Direct `0.0.0.0` exposure without auth is forbidden before M5
-> (beyond-loopback serving needs a new ADR per the ADR-0011 amendment).
+> Prefer the tunnel: keep the API on localhost, pull it with `ssh -L`.
+> Tokened serving beyond loopback is authorized by ADR-0015 (token = gate,
+> audit log = camera). Untokened `0.0.0.0` exposure is still forbidden —
+> refused at startup.
 
 ## Pattern A — API on a remote host, web + browser local (recommended)
 
