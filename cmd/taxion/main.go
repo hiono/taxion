@@ -398,7 +398,7 @@ func openMemory() (*memory.Store, error) {
 
 func memoryCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: taxion memory put|get|list|warn …")
+		return fmt.Errorf("usage: taxion memory put|get|list|warn|search …")
 	}
 	switch args[0] {
 	case "put":
@@ -484,8 +484,36 @@ func memoryCmd(args []string) error {
 		return nil
 	case "warn":
 		return memoryWarnCmd(args[1:])
+	case "search":
+		fs := flag.NewFlagSet("memory search", flag.ContinueOnError)
+		query := fs.String("query", "", "search text (required)")
+		kind := fs.String("kind", "", "filter by kind (lesson|decision|guardrail|concern)")
+		scope := fs.String("scope", "", "filter by scope (project|global)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *query == "" {
+			return fmt.Errorf("memory search: --query is required")
+		}
+		s, err := openMemory()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		hits, err := s.Search(*query, *scope, *kind)
+		if err != nil {
+			return err
+		}
+		if len(hits) == 0 {
+			fmt.Println("taxion: no memory matches")
+			return nil
+		}
+		for _, h := range hits {
+			fmt.Printf("%s:%d\t%s\t%s\n", h.Kind, h.ID, h.Scope, h.Title)
+		}
+		return nil
 	default:
-		return fmt.Errorf("usage: taxion memory put|get|list|warn …")
+		return fmt.Errorf("usage: taxion memory put|get|list|warn|search …")
 	}
 }
 
