@@ -2,6 +2,8 @@ package server
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -27,6 +29,9 @@ type auditEntry struct {
 	// Reason names WHY a denial happened (M8-E): "lockout" for 429s.
 	// Successes and ordinary 401s carry no reason.
 	Reason string `json:"reason,omitempty"`
+	// Prev links this line to the previous one (M8-G hash chain): hex
+	// SHA-256 of the exact previous line bytes. Omitted on genesis.
+	Prev string `json:"prev,omitempty"`
 }
 
 // statusCatcher records the response code for the audit middleware.
@@ -48,11 +53,14 @@ func (c *statusCatcher) Write(b []byte) (int, error) {
 }
 
 // auditor appends JSONL entries to AuditPath (0600). Zero value disabled.
+// M8-G: it also maintains the hash chain — last is the hash of the most
+// recently written line (nil = genesis so far), guarded by the same mutex.
 type auditor struct {
 	path string
 
-	mu sync.Mutex
-	f  *os.File
+	mu   sync.Mutex
+	f    *os.File
+	last []byte
 }
 
 func (a *auditor) enabled() bool { return a.path != "" }
@@ -113,6 +121,7 @@ func repoOf(r *http.Request) string {
 
 // log appends one entry. Errors fail closed: the caller turns them into 500
 // — a camera that cannot record must stop the action, not wave it through.
+// M8-G: the entry links onto the previous line before writing.
 func (a *auditor) log(e auditEntry) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -122,14 +131,24 @@ func (a *auditor) log(e auditEntry) error {
 			return err
 		}
 		a.f = f
+		if err := a.initChainLocked(); err != nil {
+			return err
+		}
+	}
+	if a.last != nil {
+		e.Prev = hex.EncodeToString(a.last)
 	}
 	data, err := json.Marshal(e)
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
-	_, err = a.f.Write(data)
-	return err
+	if _, err = a.f.Write(data); err != nil {
+		return err
+	}
+	sum := sha256.Sum256(data)
+	a.last = sum[:]
+	return nil
 }
 
 // withAudit wraps next: it serves the request, then records mutations and
@@ -185,8 +204,30 @@ func authorized(r *http.Request, token string) bool {
 	return validBearer(r, token)
 }
 
+// initChainLocked continues the hash chain from the existing tail.
+// Call with mu held, after a.f is open. Missing/empty file = genesis.
+func (a *auditor) initChainLocked() error {
+	if a.last != nil {
+		return nil
+	}
+	h, err := tailHash(a.path)
+	if err != nil {
+		return err
+	}
+	if h == "" {
+		return nil
+	}
+	raw, err := hex.DecodeString(h)
+	if err != nil {
+		return err
+	}
+	a.last = raw
+	return nil
+}
+
 // open eagerly creates the log file so serve fails fast when the audit
-// destination is unwritable — before serving a single request.
+// destination is unwritable — before serving a single request. It also
+// continues the hash chain from the existing tail (no second genesis).
 func (a *auditor) open() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -198,7 +239,7 @@ func (a *auditor) open() error {
 		return err
 	}
 	a.f = f
-	return nil
+	return a.initChainLocked()
 }
 
 // probe verifies writability without keeping the handle: used at startup so

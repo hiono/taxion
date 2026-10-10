@@ -1,4 +1,4 @@
-# 07 — Audit log (M5-2, M8-D adds `who`, M8-E adds `reason` + 429)
+# 07 — Audit log (M5-2, M8-D adds `who`, M8-E adds `reason` + 429, M8-G adds `prev` chain)
 
 The serve API keeps an append-only audit log: the "camera" next to the M5-1
 "key". Default location is next to the ledger (`.taxion/audit.jsonl`);
@@ -22,6 +22,7 @@ One JSON object per line:
 | `status` | response code — including guard denials (400/404/409) and lockout (429) |
 | `authed` | whether this request presented the valid token |
 | `reason` | why a denial happened — `"lockout"` on 429s only (M8-E) |
+| `prev`   | hex SHA-256 of the exact previous line bytes; omitted on the first line (M8-G) |
 
 Logged: every mutation attempt (POST/PUT/PATCH/DELETE, any outcome) and
 every auth denial (401/403, any method) plus every rate-limit lockout
@@ -54,6 +55,33 @@ identity is the deferred IdP work (ADR-0016).
   opening, it does not wave traffic through.
 - A mid-run write failure is reported on server stderr. Operators must treat
   a missing line as a gap, never as quiet success.
+
+## Tamper-evidence hash chain (M8-G)
+
+Every line links to the previous one: `prev` is the hex SHA-256 of the
+exact previous line bytes. The first line omits `prev` (genesis). A
+restarted server continues the chain from the existing tail — it never
+forks a second genesis.
+
+Verify any time:
+
+```sh
+taxion audit verify [--audit PATH]   # default: next to the ledger
+```
+
+Exit 0 prints `chain OK`; exit 1 names the first broken line — treat every
+line from there on as untrusted, investigate, do not append and hope.
+
+What the chain catches: modification, insertion, deletion, and reordering
+of covered lines. What it does NOT catch: silent tail truncation (a cut
+tail is still a valid shorter chain) — watch line counts externally, and
+back the file up with the ledger.
+
+Old-line compat: lines without `prev` are "legacy" and valid only as a
+leading run (pre-M8-G logs keep verifying after upgrade; the first chained
+line links onto the last legacy line). A legacy line after a chained line
+is a gap and fails verification. Rotation starts a new genesis — keep the
+archived file so its prefix stays verifiable.
 
 ## Retention policy (local-first)
 

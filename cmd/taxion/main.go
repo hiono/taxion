@@ -40,6 +40,7 @@ Commands:
   acp                 Serve ACP v1 over stdio (spike)
   serve               Serve HTTP API over the ledger ([--addr], [--mode], [--token]/TAXION_TOKEN, [--audit])
   gen-token           Print a random Bearer token for serve (M5 auth)
+  audit verify        Verify the audit log hash chain ([--audit])
   memory put          Store a memory entry (--kind, --title, [--body, --scope])
   memory get          Fetch one memory entry (--kind and --id required)
   memory list         List memory entries (--kind required, [--scope] filter)
@@ -80,6 +81,8 @@ func main() {
 		err = serveCmd(args[1:])
 	case "gen-token":
 		err = genTokenCmd()
+	case "audit":
+		err = auditCmd(args[1:])
 	case "memory":
 		err = memoryCmd(args[1:])
 	case "-h", "--help", "help":
@@ -380,6 +383,30 @@ func genTokenCmd() error {
 		return err
 	}
 	fmt.Println(hex.EncodeToString(b[:]))
+	return nil
+}
+
+// auditCmd verifies the audit log hash chain (M8-G). Exit 0 = chain OK,
+// exit 1 = broken or unreadable. A broken chain means every line from the
+// reported line on is untrusted — investigate, do not append and hope.
+func auditCmd(args []string) error {
+	if len(args) < 1 || args[0] != "verify" {
+		return fmt.Errorf("usage: taxion audit verify [--audit PATH]")
+	}
+	fs := flag.NewFlagSet("audit verify", flag.ContinueOnError)
+	defAudit := filepath.Join(filepath.Dir(storePath), "audit.jsonl")
+	audit := fs.String("audit", defAudit, "audit log path")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	checked, legacy, bad, err := server.Verify(*audit)
+	if err != nil {
+		return fmt.Errorf("audit verify: %v", err)
+	}
+	fmt.Print(server.FormatVerify(*audit, checked, legacy, bad))
+	if bad != 0 {
+		return fmt.Errorf("audit verify: chain broken at line %d", bad)
+	}
 	return nil
 }
 
