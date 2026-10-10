@@ -20,7 +20,7 @@ What M5 built:
   constant-time compare, identical 401 for missing/wrong (no oracle).
   Untokened binding beyond loopback is refused at startup.
 - `taxion gen-token`: 32-byte crypto-random hex, never logged.
-- Web counter forwards the token server-side only; the page never contains it.
+- Web console forwards the token server-side only; the page never contains it.
 - Append-only JSONL audit of every mutation attempt and denial
   (`{ts,method,path,repo,status,authed}`); no tokens, bodies, or queries;
   fail-fast startup check; Taxion never deletes — the operator rotates.
@@ -32,8 +32,7 @@ Declare the pre-public model sufficient and lift the loopback-only rule
 **for tokened serving only**:
 
 1. `serve` with `--token` may bind beyond loopback (LAN, docker `-p`,
-   SSH-forwarded remotes) — the token is the gate, the audit log is the
-   camera.
+   SSH-forwarded remotes), with token authentication and audit logging.
 2. Untokened serving stays loopback-only, enforced by startup refusal.
 3. Plain-HTTP Bearer is accepted on trusted networks (loopback, SSH tunnel,
    VPN, docker bridge) — documented, not hidden. Public-internet exposure
@@ -47,5 +46,5 @@ Declare the pre-public model sufficient and lift the loopback-only rule
 - SECURITY.md is updated to the M5 control set; private advisories stay the
   disclosure channel.
 - Residual risks, owned openly: single shared token (no per-user identity —
-  rotation is the revocation story), no TLS in Taxion itself, audit log
-  grows unbounded until the operator rotates it.
+  rotation by server restart is the revocation mechanism), no TLS in Taxion
+  itself, audit log grows unbounded until the operator rotates it.

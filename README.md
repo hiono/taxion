@@ -15,9 +15,9 @@ procedures, and failure lessons are carried over as sanitized docs.
 Taxion Core (SDK-neutral)
  ├─ Server (Task Graph / Dispatch Ledger / Evidence Ledger / Policy / Checkpoint)
  ├─ CLI (human interface: init / task / dispatch / review / resume)
- ├─ Web UI (future)
- ├─ ACP Server (future: for opencode / cursor / copilot-cli / custom tools)
- └─ Runtime adapters (plugins, e.g. Copilot SDK for Go as first candidate)
+ ├─ Web UI (task/dispatch/review forms + HTTP API proxy)
+ ├─ ACP Server (stdio agent with dispatch/review methods)
+ └─ Runtime adapters (local and process-backed; SDK integrations evaluated separately)
 ```
 
 ## Non-goals (Foundation → Local)
@@ -54,15 +54,18 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
   loopback-by-default policy. **Start here before exposing any port.**
 - `docs/07-audit-log.md` — append-only audit log (mutations + denials) and
   retention policy.
+- `docs/08-memory-model.md` — memory layers, scopes, and promotion model.
 
 ## CLI (Local phase, minimal)
 
 ```bash
 taxion init
-taxion task create --title "…"
-taxion dispatch --task <id>
-taxion review --sha <coder-sha>
+taxion task create --title "…" --repo <repo>
+taxion dispatch --task <id> --repo <repo>
+taxion review --task <id> --sha <coder-sha> --repo <repo>
 taxion resume --session <id>
 ```
 
-Local-phase CLI is local-first and deterministic. Server / ACP / Web arrive in Server / Platform phases.
+The CLI is local-first and deterministic. `taxion serve` provides the HTTP
+API, `taxion acp` provides ACP over stdio, and `web/` provides the browser
+console.

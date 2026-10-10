@@ -40,8 +40,8 @@ func TestExportSanitizedByDefault(t *testing.T) {
 	if !strings.Contains(out, "[redacted:email]") {
 		t.Fatalf("sanitized export lost the marker:\n%s", out)
 	}
-	if !strings.Contains(out, "SANITIZED") || !strings.Contains(out, "nothing is sent anywhere") {
-		t.Fatalf("trial print must say sanitized + unsent:\n%s", out)
+	if !strings.Contains(out, "SANITIZED preview") || !strings.Contains(out, "no data is transmitted") {
+		t.Fatalf("preview must identify sanitization and no transmission:\n%s", out)
 	}
 }
 
@@ -59,6 +59,9 @@ func TestExportRawOptOut(t *testing.T) {
 	}
 	if !strings.Contains(out, "UNSANITIZED") {
 		t.Fatalf("raw export must say UNSANITIZED:\n%s", out)
+	}
+	if !strings.Contains(out, "preview (no data is transmitted)") {
+		t.Fatalf("unsanitized preview must state no transmission:\n%s", out)
 	}
 }
 

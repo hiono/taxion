@@ -10,11 +10,11 @@ loopback**:
   `--mode remote` is the named opt-in for LAN/docker use and requires
   `--token` (ADR-0016). Binding beyond loopback without a token is refused
   outright.
-- web order counter — default `--host 127.0.0.1:3939`; `--token` /
+- web console — default `--host 127.0.0.1:3939`; `--token` /
   `TAXION_TOKEN` is forwarded server-side to the upstream API, never to the
   browser.
 
-Mint a token once and keep it outside the repo (env file, secret store):
+Generate a token once and keep it outside the repo (env file, secret store):
 
 ```sh
 taxion gen-token
@@ -22,20 +22,21 @@ taxion gen-token
 
 ## Token hygiene (best practice)
 
-`gen-token` is stateless: running it twice mints two independent values and
-revokes nothing. The only live key is the one `serve` was started with. So:
+`gen-token` is stateless: running it twice generates two independent values
+and does not revoke previous values. Only the token supplied to `serve` is
+accepted:
 
 - Issue once. Re-issue only to **rotate** (suspected leak, member change).
 - Never pass the token inline (`TAXION_TOKEN=<tok> …` stays in shell
   history). Load it from a `0600` env file outside the repo, or `read -s`:
   `read -rs TAXION_TOKEN < /dev/tty; export TAXION_TOKEN`.
-- Rotate by restarting `serve` with the new value — the old key dies at
-  restart. Tell everyone sharing the key *before* you restart.
-- Unused minted values are harmless but treat them as live until you are
+- Rotate by restarting `serve` with the new value. The previous token is no
+  longer accepted after restart. Notify everyone sharing it before restarting.
+- Treat unused generated values as active credentials until you are
   sure they were never deployed: delete them from history/notes.
 - Known limit (ADR-0015): one shared token, no per-operator keys yet. If the
-  sharing circle grows, that is the next auth milestone, not more `gen-token`
-  runs.
+  number of operators grows, evaluate per-user authentication rather than
+  generating more shared tokens.
 
 The ledger file holds task titles and repo paths. Treat it as sensitive:
 never place it on a shared volume unencrypted. Plain HTTP stays inside
@@ -44,9 +45,9 @@ exposure without TLS termination in front is out of scope (ADR-0015).
 
 ## Rule
 
-> Prefer the tunnel: keep the API on localhost, pull it with `ssh -L`.
-> Tokened serving beyond loopback is authorized by ADR-0015 (token = gate,
-> audit log = camera) and named by ADR-0016 (`--mode remote`, token mandatory).
+> Prefer SSH forwarding: keep the API on localhost and connect with `ssh -L`.
+> Token-authenticated serving beyond loopback is authorized by ADR-0015
+> and selected with ADR-0016's `--mode remote` (token mandatory).
 > Untokened `0.0.0.0` exposure is still forbidden — refused at startup.
 
 ## Pattern A — API on a remote host, web + browser local (recommended)
@@ -58,7 +59,7 @@ ssh -L 3938:localhost:3938 user@remote-host
 # now http://127.0.0.1:3938 responds with the remote ledger
 ```
 
-Then run the web counter locally against the tunnel (defaults are
+Then run the web console locally against the tunnel (defaults are
 localhost-only on both ends, nothing is exposed):
 
 ```sh
@@ -100,7 +101,7 @@ Alternative without publishing a port at all — reach the container over SSH:
 ssh user@remote-host docker exec taxion taxion --store /data/ledger.json task list
 ```
 
-## Pattern C — web counter also remote
+## Pattern C — web console also remote
 
 Keep both ends on loopback and forward twice:
 
@@ -113,9 +114,9 @@ ssh -L 3938:localhost:3938 -L 3939:localhost:3939 user@remote-host
 
 ## Pattern D — home client develops in a work docker container (combined)
 
-Patterns A+B combined into one flow: from home you drive the Taxion ledger
-(order/approve) in the browser while doing the real work (edit/terminal) over
-a second SSH channel. Two rails, both inside SSH:
+Patterns A+B combined: use the browser for task creation, dispatch, and
+evidence binding, and a separate SSH channel for editing, building, and
+testing in the development container:
 
 ```sh
 # 1. tunnels (home): API + web + your editor's channel
@@ -126,24 +127,25 @@ docker run -d --name taxion \
   -v taxion-data:/data \
   -e TAXION_TOKEN \
   taxion taxion serve --mode remote --addr 0.0.0.0:3938 --store /data/ledger.json
-# 3. web counter (either end, localhost-only): Pattern A or C
+# 3. web console (either end, localhost-only): Pattern A or C
 TAXION_API=http://127.0.0.1:3938 npm start -- --port 3939
 # 4. browser (home): http://127.0.0.1:3939 — create/dispatch/review
-# 5. real work (home): VS Code Remote SSH to work-host, then
+# 5. development (home): VS Code Remote SSH to work-host, then
 #    `docker exec -it <dev-container> bash` — edit, build, test as usual
 ```
 
-What each rail covers: the browser rail operates the ledger (what to do,
-who approved); the editor rail does the work (code, build, test). Taxion
-never sees your source — only task titles, repo paths, and SHAs in the
-ledger, which stay inside the tunnel.
+The browser operates on the ledger's tasks, dispatches, and evidence.
+The editor and terminal are used to modify code, build, and test. These
+ledger API operations transmit task titles, repo paths, and SHAs rather
+than source files. Both connections use SSH.
 
-## Explicit opt-out (advanced, ADR-0016 territory)
+## Explicit remote mode (advanced, ADR-0016)
 
 `taxion serve --mode remote --addr 0.0.0.0:3938 --token …` is the named,
 ADR-0016-authorized way to serve the LAN: token gate on every route, audit
-log on every write. Residual risks stay yours (single shared token, plain
-HTTP — trusted networks only, never the open internet without TLS in
-front). Web `--host 0.0.0.0` only widens the page/proxy; the upstream API
-stays token-gated. Anything beyond this posture (IdP, per-user keys) is a
-new ADR — see ADR-0016's deferred H with its numeric trigger.
+log on every write. Operators must account for residual risks (single shared
+token, plain HTTP — trusted networks only, never the open internet without
+TLS in front). Web `--host 0.0.0.0` only widens the page/proxy; the upstream
+API stays token-authenticated. Additional authentication features (IdP,
+per-user keys) require a new ADR — see ADR-0016's deferred H with its numeric
+trigger.

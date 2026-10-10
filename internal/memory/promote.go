@@ -1,13 +1,13 @@
 // Promotion implements the Nth-warning → guideline path (M6-3).
 //
-// Raw repeated warnings land in the warnings table, counted by exact
+// Repeated warnings are stored in the warnings table, counted by exact
 // (body, scope) match. When a warning's count reaches PromoteAfter, the
 // store distills it into a lesson with status "proposed" — a guideline
 // candidate. Guideline → guardrail stays a human decision (out of scope:
 // nothing here writes guardrails).
 //
 // Promotion fires exactly once per (body, scope): the warning row records
-// the lesson id, later repeats only bump the count.
+// the lesson id; later repeats only increment the count.
 package memory
 
 import (

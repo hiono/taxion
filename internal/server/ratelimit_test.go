@@ -62,7 +62,7 @@ func TestKeyOfIgnoresForwardedHeaders(t *testing.T) {
 	}
 }
 
-// TestLockoutIntegration drives the real gate: bad tokens earn 429, the
+// TestLockoutIntegration checks authorization: repeated bad tokens trigger 429, the
 // audit log names the lockout, and one success resets the counter.
 func TestLockoutIntegration(t *testing.T) {
 	dir := t.TempDir()
@@ -109,7 +109,7 @@ func TestLockoutIntegration(t *testing.T) {
 		t.Fatalf("bad = %d, want 401", code)
 	}
 	// The 3rd consecutive failure trips the lock but answers 401 itself;
-	// the lockout bites from the next request on.
+	// the lockout applies from the next request on.
 	if code := bad().Code; code != http.StatusUnauthorized {
 		t.Fatalf("lock-tripping bad = %d, want 401", code)
 	}

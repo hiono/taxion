@@ -25,7 +25,7 @@ type Runtime interface {
   `checkpoint`/`done` events, one instance per role (ROLE-001 isolation).
 - `internal/runtime/copilot/` (evaluation task; not yet vendored):
   - Evaluation criteria: session start/resume fidelity, event mapping cost,
-    auth story (no secret in repo), version pinning story.
+    authentication requirements (no secret in repo), version pinning.
   - If evaluation fails, core remains untouched.
 
 ## Anti-pattern (must avoid)
@@ -34,4 +34,5 @@ type Runtime interface {
 Taxion → Go → Copilot SDK types everywhere → Copilot SDK Wrapper
 ```
 
-This collapses Taxion into a wrapper. The interface above is the firewall.
+This would make the core depend on SDK types. The Runtime interface keeps
+SDK-specific types confined to adapters.

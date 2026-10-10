@@ -1,5 +1,5 @@
-// Ledger shapes mirror internal/core JSON tags. Read-only: the web slice
-// never constructs mutations, it only renders what the CLI wrote.
+// Ledger shapes mirror internal/core JSON tags for API responses.
+// Ledger mutations are performed by the Go API rather than this module.
 
 export interface Task {
   id: string;

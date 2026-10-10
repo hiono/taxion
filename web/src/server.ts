@@ -1,11 +1,9 @@
-// Local order counter. Serves one HTML page with order forms (create task,
+// Local console. Serves one HTML page with task operation forms (create task,
 // dispatch, review) plus a JSON API proxied to `taxion serve` (M4).
-// Guarantees: GET + the three order POSTs exist; every other method gets
+// Guarantees: GET + the three operation POSTs exist; every other method gets
 // 405; this slice never reads ledger files and never mutates on its own —
 // all writes go to the upstream API, and upstream failure surfaces as 502,
 // never as a silent success (fail-closed display).
-//
-// Localhost scope (M4): no auth. Do not expose beyond loopback (auth is M5).
 //
 // M5: when the upstream API requires a Bearer token, pass --token (or
 // TAXION_TOKEN env). The token lives server-side only: it is attached to
@@ -13,9 +11,9 @@
 //
 // Usage: TAXION_API=http://127.0.0.1:3938 node src/server.ts [--port N] [--api URL] [--host ADDR] [--token TOK]
 //
-// Usage: TAXION_API=http://127.0.0.1:3938 node src/server.ts [--port N] [--api URL] [--host ADDR]
 // Security default: listens on 127.0.0.1 only. Pass --host 0.0.0.0 to expose
-// (see docs/06-remote-access.md — beyond-loopback needs care until M5 auth).
+// on other interfaces (see docs/06-remote-access.md for authentication and
+// remote-access requirements).
 import { createServer } from "node:http";
 import type { Ledger } from "./types.ts";
 
@@ -32,7 +30,7 @@ export function apiBase(argv: string[] = process.argv.slice(2)): string {
   );
 }
 
-// Order POSTs are passed through to the upstream API untouched, so guard
+// Operation POSTs are passed through to the upstream API untouched, so guard
 // semantics (400/404/409) stay in one place: the Go server.
 const PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -47,11 +45,11 @@ form{margin-bottom:1.5rem}input{margin-right:.5rem;padding:.25rem .4rem}
 </head><body>
 <h1>Taxion Task Graph<span class="badge">localhost console</span></h1>
 <div id="msg"></div>
-<h2>Order — create task</h2>
+<h2>Create task</h2>
 <form id="f-task"><input name="title" placeholder="title" required><input name="repo" placeholder="repo (required)" required><button>Create</button></form>
-<h2>Order — dispatch</h2>
+<h2>Dispatch task</h2>
 <form id="f-dispatch"><input name="task" placeholder="task id" required><input name="repo" placeholder="repo (required)" required><button>Dispatch</button></form>
-<h2>Order — review</h2>
+<h2>Bind review evidence</h2>
 <form id="f-review"><input name="task" placeholder="task id" required><input name="repo" placeholder="repo (required)" required><input name="sha" placeholder="sha (required)" required><button>Bind evidence</button></form>
 <div id="app">Loading…</div>
 <script>
@@ -179,5 +177,5 @@ if (isMain) {
   const port = Number(flagValue(argv, "--port") ?? 3939);
   const host = listenHost(argv);
   const server = createApp(apiBase(argv), apiToken(argv));
-  server.listen(port, host, () => console.log(`taxion web (order counter) on ${host}:${port}`));
+  server.listen(port, host, () => console.log(`taxion web (console) on ${host}:${port}`));
 }

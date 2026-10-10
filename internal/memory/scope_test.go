@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Default writes must land in project: without an explicit --scope global,
+// Default writes must use project: without an explicit --scope global,
 // nothing may ever reach the global range.
 func TestDefaultWriteNeverReachesGlobal(t *testing.T) {
 	s := openTest(t)
@@ -27,12 +27,12 @@ func TestDefaultWriteNeverReachesGlobal(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(proj) != 1 {
-			t.Fatalf("%s: default put should land in project, got %+v", kind, proj)
+			t.Fatalf("%s: default put should use project, got %+v", kind, proj)
 		}
 	}
 }
 
-// Explicit global writes land in global only — and stay out of project lists.
+// Explicit global writes use global only and are excluded from project lists.
 func TestExplicitGlobalWriteStaysGlobal(t *testing.T) {
 	s := openTest(t)
 	if _, err := s.Put(KindLesson, Entry{Title: "g", Scope: ScopeGlobal}); err != nil {

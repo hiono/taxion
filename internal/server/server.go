@@ -43,8 +43,7 @@ type Server struct {
 }
 
 // CheckAudit fails fast when the audit destination is unwritable. Call it
-// before ListenAndServe: a camera that cannot record must stop startup,
-// not wave traffic through.
+// before ListenAndServe to refuse startup if logging is unavailable.
 func (s *Server) CheckAudit() error {
 	if s.AuditPath == "" {
 		return nil
@@ -78,7 +77,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 // validBearer is the single Bearer comparison behind both the authorize
-// gate and the audit verdict — one comparison, no oracle drift.
+// gate and the audit result, ensuring both use the same comparison.
 func validBearer(r *http.Request, token string) bool {
 	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok {
@@ -89,7 +88,7 @@ func validBearer(r *http.Request, token string) bool {
 
 // authorize enforces the Bearer token when one is configured. Missing and
 // wrong credentials get the identical 401 — no oracle for attackers.
-// Repeated failures from one IP earn a 429 lockout (M8-E).
+// Repeated failures from one IP trigger a 429 lockout (M8-E).
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) bool {
 	if s.Token == "" {
 		return true

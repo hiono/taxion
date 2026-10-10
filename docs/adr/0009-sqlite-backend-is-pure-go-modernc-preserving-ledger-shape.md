@@ -17,12 +17,12 @@ toolchain, which complicates builds on minimal hosts and CI.
 Use pure-Go `modernc.org/sqlite` (v1.60.1) under `internal/store`.
 Schema mirrors `core.Ledger` 1:1 (tasks/dispatches/evidence/checkpoints) so
 the JSON file backend and sqlite stay interchangeable at the Ledger level
-(LED-001). Outbox table (enqueue/claim/mark-sent) rides along for the
+(LED-001). An outbox table (enqueue/claim/mark-sent) is included for the
 future server relay.
 
 ## Consequences
 
 - No cgo toolchain needed anywhere; `go build`/`go test` suffice.
-- Larger binary and slower first compile vs cgo driver; accepted for Day-1 portability.
+- Larger binary and slower first compile vs cgo driver; accepted for initial build portability.
 - If performance ever demands it, the driver can be swapped behind
   `internal/store` without touching `core`.

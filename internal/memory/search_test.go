@@ -45,7 +45,7 @@ func TestSearchFTSHits(t *testing.T) {
 
 func TestSearchShortQueryFallsToLIKE(t *testing.T) {
 	s := seedSearch(t)
-	hits, err := s.Search("秘密", "", "") // 2 chars: below the trigram floor
+	hits, err := s.Search("秘密", "", "") // 2 chars: shorter than a trigram
 	if err != nil {
 		t.Fatal(err)
 	}

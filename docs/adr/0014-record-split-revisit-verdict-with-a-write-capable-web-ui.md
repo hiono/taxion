@@ -9,7 +9,7 @@ Accepted
 ## Context
 
 Issue #17 (M4, fires ADR-0013 revisit trigger 2): the web slice is now a
-write-capable order counter (M4-1 write API, M4-2 forms + POST passthrough).
+write-capable browser console (M4-1 write API, M4-2 forms + POST passthrough).
 The split question must be re-answered against this code.
 
 Findings from the M4 implementation:
@@ -26,11 +26,11 @@ Findings from the M4 implementation:
 ## Decision
 
 STAY SPLIT-FREE. Go keeps core/runtime/ACP/store/API; TS keeps the
-browser counter. No language split now.
+browser console. No language split now.
 
 ## Consequences
 
 ADR-0013 trigger 2 is discharged for the write-UI case. Remaining triggers
-(from ADR-0013): MCP passthrough / auth landing (M5), or a worker runtime
+(from ADR-0013): MCP passthrough / authentication requirements (M5), or a worker runtime
 Go cannot supervise. Any future proposal to move guard logic into TS must
 revisit this ADR and ADR-0011 together.

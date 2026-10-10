@@ -20,5 +20,6 @@ Platform → Future. No DayN references in code, docs, or GitHub milestones.
 ## Consequences
 
 - Roadmap reads as scope ordering, not a schedule promise.
-- GitHub milestones mirror these exact phase names (see ADR-0007).
+- GitHub milestones retain these phase identifiers, with descriptive labels
+  where needed (see ADR-0007).
 - Old DayN terms must be translated when importing prototype lessons.

@@ -1,7 +1,7 @@
 // Package proc provides a process-backed runtime.Runtime adapter.
 //
-// Taxion ships no LLM: it supervises a configured worker command (the "real
-// worker" behind the window). Start spawns the command; stdout/stderr lines
+// Taxion ships no LLM: it supervises a configured worker command.
+// Start spawns the command; stdout/stderr lines
 // become output events; exit code 0 becomes done, anything else becomes
 // failed (fail-closed — a crashed worker never reports readiness). Stop kills
 // the process; the session can never become done afterwards.
@@ -135,7 +135,7 @@ func (p *Proc) pump(s *session, stdout, stderr io.Reader, cmd *exec.Cmd) {
 }
 
 // emit appends to history and broadcasts to live watchers. Terminal state
-// (stopped) swallows late worker output — a killed worker reports nothing.
+// (stopped) discards late worker output.
 func (p *Proc) emit(s *session, ev runtime.Event) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -162,7 +162,7 @@ func (p *Proc) Resume(_ context.Context, sessionID string) error {
 	return nil
 }
 
-// Stop kills the worker. Late output is swallowed and the session can never
+// Stop kills the worker. Late output is discarded and the session can never
 // become done afterwards. Stopping an unknown session is an error; stopping
 // twice is a no-op.
 func (p *Proc) Stop(_ context.Context, sessionID string) error {

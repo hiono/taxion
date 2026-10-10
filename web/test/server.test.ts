@@ -71,7 +71,7 @@ after(
 );
 
 describe("localhost console (API-backed)", () => {
-  it("serves the HTML page with order forms", async () => {
+  it("serves the HTML page with task operation forms", async () => {
     const res = await fetch(`${base}/`);
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") ?? "", /text\/html/);
@@ -79,6 +79,10 @@ describe("localhost console (API-backed)", () => {
     assert.match(html, /f-task/);
     assert.match(html, /f-dispatch/);
     assert.match(html, /f-review/);
+    assert.match(html, /<h2>Create task<\/h2>/);
+    assert.match(html, /<h2>Dispatch task<\/h2>/);
+    assert.match(html, /<h2>Bind review evidence<\/h2>/);
+    assert.doesNotMatch(html, /Order —/);
   });
 
   it("proxies the ledger as JSON from the upstream API", async () => {
@@ -87,7 +91,7 @@ describe("localhost console (API-backed)", () => {
     assert.deepEqual(await res.json(), LEDGER);
   });
 
-  it("passes order POSTs through with upstream status/body", async () => {
+  it("passes operation POSTs through with upstream status/body", async () => {
     const ok = await fetch(`${base}/api/tasks`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -129,7 +133,7 @@ describe("localhost console (API-backed)", () => {
     }
   });
 
-  it("rejects PUT/PATCH/DELETE (only GET + order POSTs exist)", async () => {
+  it("rejects PUT/PATCH/DELETE (only GET + operation POSTs exist)", async () => {
     for (const method of ["PUT", "PATCH", "DELETE"]) {
       const res = await fetch(`${base}/api/ledger`, { method });
       assert.equal(res.status, 405, method);

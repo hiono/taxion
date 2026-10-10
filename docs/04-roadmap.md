@@ -1,4 +1,4 @@
-# 04 — Roadmap (phase names, small dispatches, no big-bang)
+# 04 — Roadmap
 
 Phases: Foundation → Core → Local → Adapter → Server → Platform → Future.
 
@@ -13,11 +13,11 @@ Phases: Foundation → Core → Local → Adapter → Server → Platform → Fu
 - [x] M2 / `http-read-api` (#9) — read-only HTTP API over the ledger (GET only, localhost).
 - [x] M2 / `web-api-client` (#10) — web reads via `taxion serve`, 502 fail-closed.
 - [x] M2 / `wire-freeze` (#11) — schema doc (05) + CI key pinning + ADR-0012 freeze note.
-- [x] M3 / `proc-runtime` (#12) — process-backed Runtime, real worker supervision (stdlib only).
+- [x] M3 / `proc-runtime` (#12) — process-backed Runtime, worker process supervision (stdlib only).
 - [x] M3 / `acp-methods` (#13) — explicit taxion/dispatch + taxion/review, convention deprecated.
 - [x] M3 / `split-reeval-2` (#14) — ADR-0013: DEFER again, new triggers recorded.
 - [x] M4 / `write-api` (#15) — POST tasks/dispatches/reviews, CLI-identical guards.
-- [x] M4 / `web-counter` (#16) — order forms + POST passthrough, 502 fail-closed.
+- [x] M4 / `web-console` (#16) — task/dispatch/review forms + POST passthrough, 502 fail-closed.
 - [x] M4 / `adr-revisits` (#17) — ADR-0011 amended, ADR-0014 stay-split-free, schema write section.
 - [x] M5 / `token-auth` (#22) — Bearer gate, gen-token, web forwarding, loopback refusal.
 - [x] M5 / `audit-trail` (#23) — append-only JSONL of mutations + denials, operator rotates.
@@ -25,7 +25,7 @@ Phases: Foundation → Core → Local → Adapter → Server → Platform → Fu
 - [x] M5 / `mode-switch` (#25) — F-lite: --mode loopback|remote, ADR-0016, IdP deferred.
 - [x] M6 / `memory-model` (#27) — ADR-0017 layers×ranges×promotion, docs/08.
 - [ ] Future / `browser-terminal` (#21) — someday: in-browser terminal editing via a
-  terminal-emulator library (libghostty-class) behind the web counter, over the
+  terminal-emulator library (libghostty-class) connected to the web console, over the
   SSH tunnel to the work container. Needs M5 (auth) first; revisit triggers on
   ADR-0013/0014 when touched.
 

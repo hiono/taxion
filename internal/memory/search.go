@@ -6,8 +6,8 @@
 // touching application code; legacy rows pre-dating the index are backfilled
 // once on Open. QMD stays a sidecar (never embedded); dolt is rejected.
 //
-// Known floor: trigram matches need 3+ characters. Queries shorter than that
-// take the LIKE path, which also serves as the safety net when FTS finds
+// Trigram matches need 3+ characters. Queries shorter than that
+// use LIKE, which also serves as the fallback when FTS finds
 // nothing. Search never includes tokens, headers, or bodies beyond the
 // entry title/body the caller already owns — it only reads memory.db.
 package memory

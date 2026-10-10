@@ -1,7 +1,7 @@
 # 07 — Audit log (M5-2, M8-D adds `who`, M8-E adds `reason` + 429, M8-G adds `prev` chain)
 
-The serve API keeps an append-only audit log: the "camera" next to the M5-1
-"key". Default location is next to the ledger (`.taxion/audit.jsonl`);
+The serve API keeps an append-only audit log of mutation attempts and
+access denials. Default location is next to the ledger (`.taxion/audit.jsonl`);
 override with `serve --audit PATH`, disable with `serve --audit ""`.
 
 ## What is recorded
@@ -9,7 +9,7 @@ override with `serve --audit PATH`, disable with `serve --audit ""`.
 One JSON object per line:
 
 ```json
-{"ts":"2026-10-10T...Z","method":"POST","path":"/api/tasks","repo":"demo","who":"hiono","status":201,"authed":true}
+{"ts":"2026-10-10T...Z","method":"POST","path":"/api/tasks","repo":"demo","who":"operator-1","status":201,"authed":true}
 ```
 
 | field    | content |
@@ -26,8 +26,7 @@ One JSON object per line:
 
 Logged: every mutation attempt (POST/PUT/PATCH/DELETE, any outcome) and
 every auth denial (401/403, any method) plus every rate-limit lockout
-(429, any method). Successful reads are noise and are
-not logged — a read-heavy day leaves the log quiet.
+(429, any method). Successful reads are not logged.
 
 ## Brute-force lockout (M8-E)
 
@@ -41,20 +40,20 @@ accumulate. The key is the connection's RemoteAddr host; no
 ## What is NEVER recorded
 
 Tokens, `Authorization` headers, request bodies (task titles, SHAs), and
-query strings. The log proves *what was done*, never *with which secret*.
+query strings. The log records the operation and result without recording
+the credential used.
 
 `who` is a claim, not a proof: any caller holding the shared token can send
-any `X-Operator` value. It distinguishes operators by declaration so a
-two-person day is readable — it does not authenticate them. Per-operator
+any `X-Operator` value. It labels callers by self-declaration but does not
+authenticate their identities. Per-operator
 identity is the deferred IdP work (ADR-0016).
 
 ## Fail-closed behavior
 
 - `serve` probes the audit destination at startup (`CheckAudit`) and refuses
-  to start when it is unwritable — a camera that cannot record stops the
-  opening, it does not wave traffic through.
+  to start when it is unwritable.
 - A mid-run write failure is reported on server stderr. Operators must treat
-  a missing line as a gap, never as quiet success.
+  a missing line as an audit gap.
 
 ## Tamper-evidence hash chain (M8-G)
 
@@ -70,7 +69,7 @@ taxion audit verify [--audit PATH]   # default: next to the ledger
 ```
 
 Exit 0 prints `chain OK`; exit 1 names the first broken line — treat every
-line from there on as untrusted, investigate, do not append and hope.
+line from there on as untrusted and investigate before continuing to append.
 
 What the chain catches: modification, insertion, deletion, and reordering
 of covered lines. What it does NOT catch: silent tail truncation (a cut

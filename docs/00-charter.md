@@ -28,7 +28,7 @@ privacy/provenance sanitization — may serve as input.
 - **Core**: Go governance core + conformance tests.
 - **Local**: local-first CLI UX + `--repo` identity gate.
 - **Adapter**: runtime adapter feasibility evaluation as plugin (first candidate: Copilot SDK for Go).
-- **Server**: server-ization (Task Graph / Ledgers as source of truth).
+- **Server**: persistence and API design (Task Graph / Ledgers as source of truth).
 - **Platform**: ACP server + Web UI for multi-client use.
 - **Future**: only if contracts stabilize — consider Rust core split
   (`taxion-server` / `taxion-acp` in Rust, `taxion-runtime-copilot` in Go, `taxion-web` in TS).

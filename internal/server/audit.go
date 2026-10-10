@@ -13,8 +13,8 @@ import (
 	"time"
 )
 
-// auditEntry is one JSONL line in the audit log. It records WHAT was done
-// and WHO claimed to do it, never secrets: no tokens, no Authorization
+// auditEntry is one JSONL line in the audit log. It records the operation
+// and self-asserted operator label, never secrets: no tokens, no Authorization
 // header, no request body (titles, SHAs), no query string. Who is a
 // self-asserted operator label (X-Operator), not an identity proof — under a
 // single shared token it distinguishes callers by claim, not by credential.
@@ -26,7 +26,7 @@ type auditEntry struct {
 	Who    string `json:"who,omitempty"`
 	Status int    `json:"status"`
 	Authed bool   `json:"authed"`
-	// Reason names WHY a denial happened (M8-E): "lockout" for 429s.
+	// Reason records the denial reason (M8-E): "lockout" for 429s.
 	// Successes and ordinary 401s carry no reason.
 	Reason string `json:"reason,omitempty"`
 	// Prev links this line to the previous one (M8-G hash chain): hex
@@ -66,7 +66,7 @@ type auditor struct {
 func (a *auditor) enabled() bool { return a.path != "" }
 
 // shouldLog covers the mutation surface plus every auth denial (401/403)
-// and rate-limit lockout (429) — successful reads are noise and stay out.
+// and rate-limit lockout (429). Successful reads are excluded.
 func shouldLog(r *http.Request, status int) bool {
 	switch r.Method {
 	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
@@ -119,8 +119,7 @@ func repoOf(r *http.Request) string {
 	return body.Repo
 }
 
-// log appends one entry. Errors fail closed: the caller turns them into 500
-// — a camera that cannot record must stop the action, not wave it through.
+// log appends one entry and returns write errors to the caller.
 // M8-G: the entry links onto the previous line before writing.
 func (a *auditor) log(e auditEntry) error {
 	a.mu.Lock()
@@ -192,7 +191,7 @@ func (a *auditor) withAudit(s *Server, next http.Handler) http.Handler {
 		}); err != nil {
 			// Headers are already sent; the failure is visible in the
 			// server stderr and the entry is missing — operators must
-			// treat a missing line as a gap, never as quiet success.
+			// treat a missing line as an audit gap.
 			_, _ = io.WriteString(os.Stderr, "taxion: audit log failed: "+err.Error()+"\n")
 		}
 	})

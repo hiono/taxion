@@ -21,6 +21,6 @@ single MADR record may be used as an exception (`adrs new --format madr`).
 
 ## Consequences
 
-- Records stay cheap to write, which keeps them written.
+- The format reduces the effort required to maintain decision records.
 - No decision-maker tracking; history of who decided lives in git/issues.
 - Mixed formats remain possible per record without migration.

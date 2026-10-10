@@ -83,5 +83,5 @@ Writes (v1, added M4; localhost only, no auth — auth is M5):
   another dispatch active → 409 (DSP-001). Missing task/repo → 400.
 - `POST /api/reviews` `{task, repo, sha}` → 201 Evidence. Empty sha → 400
   (SHA-001). Missing task/repo → 400.
-- Request bodies share the CLI guards exactly; web passes orders through
+- Request bodies share the CLI guards exactly; web passes POST requests through
   untouched. No ledger keys were added for writes (freeze intact).

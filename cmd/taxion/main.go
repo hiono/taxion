@@ -388,7 +388,7 @@ func genTokenCmd() error {
 
 // auditCmd verifies the audit log hash chain (M8-G). Exit 0 = chain OK,
 // exit 1 = broken or unreadable. A broken chain means every line from the
-// reported line on is untrusted — investigate, do not append and hope.
+// reported line on is untrusted; investigate before continuing to append.
 func auditCmd(args []string) error {
 	if len(args) < 1 || args[0] != "verify" {
 		return fmt.Errorf("usage: taxion audit verify [--audit PATH]")
@@ -549,8 +549,8 @@ func memoryCmd(args []string) error {
 	}
 }
 
-// memoryExportCmd prints the export trial print to stdout only (M7-2).
-// Nothing is sent or shared; --sanitize defaults on (self-protection first).
+// memoryExportCmd prints the export preview to stdout only (M7-2).
+// No data is sent or shared; --sanitize defaults on.
 func memoryExportCmd(args []string) error {
 	fs := flag.NewFlagSet("memory export", flag.ContinueOnError)
 	scope := fs.String("scope", "", "filter by scope (project|global, empty = all)")

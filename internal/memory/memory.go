@@ -1,11 +1,10 @@
 // Package memory is the SQLite-backed memory store (M6 Memory).
 //
 // Memory starts on SQLite, never file-first: lessons, decisions, guardrails,
-// and concerns live in four tables with a shared shape. Raw warnings land in
-// concerns (counted); distilled knowledge lands in lessons/decisions;
-// human-approved, dispatch-checked rules land in guardrails. The promotion
-// path between them (docs/08-memory-model.md, ADR-0017) is M6-3; this
-// package is the durable floor it stands on.
+// and concerns use four tables with a shared shape. Repeated warnings are
+// counted in the warnings table; extracted knowledge is stored in
+// lessons/decisions. The guardrails table stores rules. The promotion model
+// is documented in docs/08-memory-model.md and ADR-0017.
 //
 // Pure-Go driver (modernc.org/sqlite, same as internal/store) — no cgo.
 package memory

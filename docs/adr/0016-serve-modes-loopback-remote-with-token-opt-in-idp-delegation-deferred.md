@@ -8,9 +8,9 @@ Accepted
 
 ## Context
 
-M5 gave `taxion serve` token auth (ADR-0015) but left a trap: `--addr
+M5 added `taxion serve` token auth (ADR-0015), but mode selection was implicit: `--addr
 0.0.0.0:3938` without `--token` was refused at startup (good), yet the
-refusal lived in an obscure flag interaction — nothing in the interface said
+refusal depended on the interaction between flags. The interface did not state that
 "remote serving is a deliberate, named choice". A non-technical operator
 copying a LAN example could land on plain-HTTP bearer auth without
 understanding the exposure, and a security review would rightly call the
@@ -20,8 +20,8 @@ Evaluated alternatives (issue #25 discussion): audit operator-ID (D), 401
 rate limit + lockout (E), hash-chained audit (G), delegating auth to OS/IdP
 reverse proxy (H). H is the architecturally ideal end state but premature:
 validated demand is single-user-over-SSH-tunnel; multi-user LAN demand is
-hypothetical, and H would saddle a single maintainer with identity-provider
-promises while complicating the non-technical path.
+hypothetical. H would add identity-provider integration and maintenance
+requirements while making single-user setup more complex.
 
 ## Decision
 
@@ -43,9 +43,10 @@ asking for shared LAN use). On the third, this ADR is reopened.
 
 ## Consequences
 
-- Non-technical operators get one safe default and one scary-named,
-  token-mandatory option; docs/06 teaches tunnel-first, mode-second.
+- Operators get a loopback-only default and an explicit remote mode
+  requiring a token; docs/06 documents SSH forwarding before remote mode.
 - The expert-visible residual risks (single token, no TLS, no rate limit)
   are unchanged but now sit behind an explicit opt-in instead of a flag
-  accident — honest posture, not a stronger lock.
+  interaction. The mode switch clarifies configuration without changing
+  the authentication mechanism.
 - D/E/G remain open as independent follow-ups; none is a precondition.

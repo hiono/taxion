@@ -8,11 +8,11 @@ Accepted
 
 ## Context
 
-Issue #27 (M6 Memory). The 2026-10-09 wall log shows memory was the
-biggest unbuilt gap: logs should feed next/future tasks ([127]),
+Issue #27 (M6 Memory). The 2026-10-09 design discussion identified
+requirements for memory: logs should inform subsequent tasks ([127]),
 repeated warnings should escalate to guidelines and then guardrails
 ([127]), failures/lessons/guardrails are shared via issues/MRs ([155]),
-and open questions remained about where ADRs sit in the memory tree
+and open questions remained about which memory layer contains ADRs
 ([129]), how global and project memory split ([131]), and where each
 lives ([141] project under `.taxion/`, [143] global as `.config`-shaped).
 
@@ -34,14 +34,14 @@ log (raw: what happened)
 - Promotion path ([127][155]): a repeated warning (Nth occurrence,
   threshold configurable) is proposed for guideline promotion; an
   approved guideline becomes a guardrail checked beside DSP-001 and
-  friends at dispatch time. Private knowledge graduates to shared via
+  other checks at dispatch time. Private knowledge is shared via
   issues/MRs ([155]) and the standalone layout sketch ([157]).
 
 Details and the layer×range table: `docs/08-memory-model.md`.
 
 ## Consequences
 
-- M6-2 implements the project-range store (SQLite from day one).
+- M6-2 implements the project-range store (SQLite in the initial implementation).
 - M6-3 implements the promotion flow (counter → proposal → guardrail).
 - M6-4 evaluates the retrieval layer (SQLite FTS vs dolt vs QMD-embedded).
 - Sanitizer/export (self-protection) is out of M6 scope, deferred to M7+.

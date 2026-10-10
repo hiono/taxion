@@ -26,7 +26,7 @@ stay in the Go CLI.
 
 ## Amendment (2026-10-10, milestone M4, issues #15–#17)
 
-Revisited as required above. `web/` is now a localhost order counter: three
+Revisited as required above. `web/` is now a localhost console: three
 forms POST to same-origin `/api/*`, proxied untouched to the `taxion serve`
 write API. The no-second-writer rule is preserved in a new form — the browser
 never writes the ledger itself; the Go server remains the single writer and

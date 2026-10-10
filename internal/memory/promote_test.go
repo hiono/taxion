@@ -36,7 +36,7 @@ func TestWarnCountsAndPromotesOnce(t *testing.T) {
 		t.Fatalf("promoted lesson wrong: %+v", got)
 	}
 
-	// Fourth repeat bumps the count but never double-promotes.
+	// Fourth repeat increments the count without creating another candidate.
 	n2, lid2, err := s.Warn("never deploy on friday", ScopeProject)
 	if err != nil {
 		t.Fatal(err)

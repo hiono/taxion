@@ -39,7 +39,7 @@ Supersedes the trigger-2 portion of ADR-0012 (trigger 3, write-capable web
 for M4, remains open). Revisit triggers from here:
 
 1. An MCP passthrough or auth requirement lands (M5) — a second language
-   runtime or a conformant ACP library may beat hand-rolled stdlib.
+   runtime or a conformant ACP library may be preferable to a custom implementation.
 2. A write-capable web UI is proposed (revisits ADR-0011 first, then this).
 3. A worker runtime appears that Go cannot supervise (e.g. browser-only
    agent harness) — genuine multi-language pressure.

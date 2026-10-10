@@ -1,10 +1,10 @@
-# @taxion/web — localhost order counter
+# @taxion/web — localhost console
 
 Separate directory, zero dependencies, no build step (Node ≥22.18 strips
-types natively). One HTML page with order forms (create task, dispatch,
+types natively). One HTML page with task operation forms (create task, dispatch,
 review) plus a JSON API proxied to `taxion serve` (M4).
 
-Counter guarantee: the page GETs; order forms POST to `/api/*`, which this
+Request handling: the page GETs; forms POST to `/api/*`, which this
 slice passes through to the upstream API untouched — guard semantics
 (400/404/409) live in exactly one place (the Go server). Upstream failure
 surfaces as 502, never as a silent success. This slice never reads ledger

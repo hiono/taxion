@@ -1,11 +1,10 @@
-// Export renders memory rows as a trial print to stdout only.
+// Export renders memory rows as a preview to stdout only.
 //
-// M7 scope is the trial print: a human reads what WOULD leave the machine
-// before anything is ever sent or shared. There is deliberately no file,
-// network, or clipboard sink here — adding one is a new ADR, not a flag.
+// M7 scope is a preview for human review before any future sharing step.
+// There is no file, network, or clipboard sink; adding one requires a new ADR.
 //
-// Sanitizing defaults ON (self-protection first): pass sanitize=false only
-// when you have a reason to see the raw text, and the print says so loudly.
+// Sanitizing defaults ON. Passing sanitize=false displays the original text
+// with an UNSANITIZED header.
 package memory
 
 import (
@@ -47,14 +46,14 @@ func Export(s *Store, scope string, sanitize bool) ([]ExportedEntry, error) {
 	return out, nil
 }
 
-// PrintExport writes the trial print. The header states whether the text is
+// PrintExport writes the preview. The header states whether the text is
 // sanitized and that nothing leaves the machine — the reader must verify
 // this before any future send step.
 func PrintExport(w io.Writer, entries []ExportedEntry, sanitize bool) {
 	if sanitize {
-		fmt.Fprintln(w, "taxion memory export — SANITIZED trial print (nothing is sent anywhere)")
+		fmt.Fprintln(w, "taxion memory export — SANITIZED preview (no data is transmitted)")
 	} else {
-		fmt.Fprintln(w, "taxion memory export — UNSANITIZED trial print (nothing is sent anywhere)")
+		fmt.Fprintln(w, "taxion memory export — UNSANITIZED preview (no data is transmitted)")
 	}
 	if len(entries) == 0 {
 		fmt.Fprintln(w, "taxion: no memory entries to export")
