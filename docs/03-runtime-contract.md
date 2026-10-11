@@ -60,6 +60,21 @@ the Dispatch transition, which validates its required fields before changing
 state. The ACP server uses `internal/runtime/local`; Copilot sessions start
 through the explicit runtime commands.
 
+`runtime auth` is an explicit preflight, not an execution action. Fixed
+configuration and current/saved Dispatch approvals are checked before the
+Copilot adapter calls `auth.getStatus`. `CheckAuthentication` verifies an
+authenticated account matching the requested account and an explicit
+`github.com` host. It creates no SDK session, does not cache the result, and
+does not alter the adapter's configuration hash. Provider status messages
+and raw RPC errors are withheld from its returned errors; cancellation
+remains identifiable.
+
+This does not resolve credential references, select the repository actor,
+establish contract eligibility or bind the configuration durably. Runtime
+start/resume/send and safe stop keep their existing behavior. Those execution
+and reauthorization gates remain in #69; local protocol fixtures do not
+demonstrate signed-in acceptance.
+
 `runtime commit` is a host operation that scans a locked index snapshot and
 message before publishing its exact tree. It does not stage files or complete
 the Task. `runtime start --managed-commit` and `workflow run --managed-commit` explicitly

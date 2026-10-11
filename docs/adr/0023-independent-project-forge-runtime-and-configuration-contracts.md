@@ -163,5 +163,12 @@ directory の再帰追加、force add、任意 shell は許可しない。
 Git の clean filter は適用され、検査対象は変換後の blob とする。
 検査失敗時にも local object database に未参照 blob が残る場合があり、
 この gate は秘密値の local 保存全体を防ぐ sandbox ではない。
+`runtime auth` は固定設定と現在／発行時の承認を照合してから、
+SDK の認証状態を問い合わせる。認証済み account が選択した account と一致し、
+host が明示的に github.com であることを要求する。
+session 作成・再開や model 呼出しは行わず、照合結果を実行許可として保存しない。
+credential 参照の解決、repository 操作主体の選択、契約上の利用可能性は未確認とする。
+SDK の既存の環境変数／保存済みログインの選択規則は維持し、
+開始・再開・送信と安全な停止の挙動は変更しない。
 共有 Memory の配置、runtime 開始・再開への設定接続、
 signed-in SDK の tool 受入れ、公開前の全コミット・外部記録検査は後続実装として追跡する。

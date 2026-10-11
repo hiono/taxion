@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -121,6 +122,15 @@ execution:
 		strings.Contains(output.String(), "ai-credential") {
 		t.Fatal("Dispatch approval check exposed references or claimed runtime verification")
 	}
+	db, beforeAuth, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	authArgs := []string{"auth", "--dispatch", "dispatch", "--system-prompt-file", "missing-prompt", "--cli", "missing-copilot"}
+	if err := runtimeCmd(authArgs); err == nil || !strings.Contains(err.Error(), "read system prompt") {
+		t.Fatal("approved auth probe did not reach local adapter inputs", err)
+	}
 	if err := os.Mkdir(".taxion", 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -136,6 +146,15 @@ execution:
 		!strings.Contains(output.String(), "runtime.contractRef: user") ||
 		strings.Contains(output.String(), "selected-account") {
 		t.Fatal("field origins missing or selected value exposed")
+	}
+	if err := runtimeCmd(authArgs); err == nil ||
+		!strings.Contains(err.Error(), "outside the recorded approval") ||
+		strings.Contains(err.Error(), "selected-account") {
+		t.Fatal("unapproved auth probe reached adapter inputs or exposed configuration", err)
+	}
+	afterAuth, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(beforeAuth, afterAuth) {
+		t.Fatal("auth preflight changed the workspace", err)
 	}
 	for _, args := range [][]string{
 		nil, {"show"}, {"check", "extra"},

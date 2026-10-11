@@ -489,6 +489,23 @@ integration, credential selection, effective authentication and contract
 eligibility still remain in #69; successful output names those unchecked
 boundaries explicitly.
 
+`runtime auth --dispatch <id> --system-prompt-file <path>` resolves those same
+fixed settings and requires the current Task and saved Dispatch approvals
+before contacting Copilot. It uses the runtime's `--cli`, `--base-directory`,
+and assigned worktree, but only calls the SDK authentication-status RPC:
+no session is created or resumed and no model request is sent. The reported
+account must match `runtime.account` (case-insensitively for GitHub accounts),
+and the authentication host must be explicitly `github.com`. Missing fields,
+unauthenticated status, a mismatch, and unavailable status are errors.
+
+The probe retains the SDK's existing environment/saved-login selection; it
+does not resolve `runtime.credentialRef`, select the GitHub repository actor,
+or verify contract eligibility or billing. Provider status messages and error
+details are not included in returned authentication errors. Results are
+point-in-time checks, are not persisted as execution authorization, and do
+not change existing session hashes. Start/resume/send and safe stop remain
+unchanged until the durable configuration and reauthorization gates are wired.
+
 Runtime commands require an active Task Graph Dispatch and a role-specific
 system prompt file. The Task's worktree and Dispatch recipient select the
 runtime role and workspace. The saved Dispatch snapshot is appended to the

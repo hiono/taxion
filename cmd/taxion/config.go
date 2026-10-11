@@ -36,26 +36,7 @@ func checkConfig(args []string, output io.Writer) error {
 	if *task != "" && *dispatch != "" {
 		return fmt.Errorf("config check selects either --task or --dispatch, not both")
 	}
-	userDir, err := os.UserConfigDir()
-	if err != nil {
-		return fmt.Errorf("locate user configuration directory: %w", err)
-	}
-	projectDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("locate project configuration directory: %w", err)
-	}
-	layers, err := config.ReadFiles(userDir, projectDir)
-	if err != nil {
-		return err
-	}
-	environment, present, err := config.EnvironmentLayer(os.LookupEnv)
-	if err != nil {
-		return err
-	}
-	if present {
-		layers = append(layers, environment)
-	}
-	resolved, err := config.Resolve(layers)
+	resolved, err := resolveConfiguration()
 	if err != nil {
 		return err
 	}
@@ -97,4 +78,27 @@ func checkConfig(args []string, output io.Writer) error {
 	}
 	_, err = fmt.Fprintln(output, "Configuration schema and required references are valid. Authentication, approval authority, contract eligibility, and adapter availability have not been verified.")
 	return err
+}
+
+func resolveConfiguration() (config.Resolution, error) {
+	userDir, err := os.UserConfigDir()
+	if err != nil {
+		return config.Resolution{}, fmt.Errorf("locate user configuration directory: %w", err)
+	}
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return config.Resolution{}, fmt.Errorf("locate project configuration directory: %w", err)
+	}
+	layers, err := config.ReadFiles(userDir, projectDir)
+	if err != nil {
+		return config.Resolution{}, err
+	}
+	environment, present, err := config.EnvironmentLayer(os.LookupEnv)
+	if err != nil {
+		return config.Resolution{}, err
+	}
+	if present {
+		layers = append(layers, environment)
+	}
+	return config.Resolve(layers)
 }

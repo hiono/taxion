@@ -48,6 +48,7 @@ Commands:
   dispatch            Dispatch a task (--task and --repo required; revised Dispatches need an explicit relationship)
   dispatch transition Record a Dispatch lifecycle transition (--id, --status, --reason)
   dispatch list       List dispatches ([--repo] filter, [--json])
+  runtime auth        Check the effective Copilot account against approved Dispatch configuration without creating a session
   runtime start       Start the Copilot session bound to an active Dispatch and send its authorized instruction
   runtime send        Send a follow-up prompt to the Dispatch session (--prompt-file required)
   runtime resume      Resume the Dispatch session
@@ -468,11 +469,11 @@ func resumeCmd(args []string) error {
 
 func runtimeCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion runtime {start|send|resume|events|stop} --dispatch ID --system-prompt-file PATH")
+		return fmt.Errorf("usage: taxion runtime {auth|start|send|resume|events|stop|commit} --dispatch ID --system-prompt-file PATH")
 	}
 	action := args[0]
 	switch action {
-	case "start", "send", "resume", "events", "stop", "commit":
+	case "auth", "start", "send", "resume", "events", "stop", "commit":
 	default:
 		return fmt.Errorf("runtime: unknown action %q", action)
 	}
@@ -539,6 +540,17 @@ func runtimeCmd(args []string) error {
 	if dispatch.Instruction.Version < core.DispatchInstructionVersion {
 		return fmt.Errorf("runtime: Dispatch %q predates the current execution contract; issue a new Dispatch", *dispatchID)
 	}
+	var expectedAccount string
+	if action == "auth" {
+		resolved, err := resolveConfiguration()
+		if err != nil {
+			return err
+		}
+		if _, err := controller.CheckDispatchConfiguration(db, dispatch.ID, resolved.Config); err != nil {
+			return err
+		}
+		expectedAccount = resolved.Config.Runtime.Account
+	}
 	if *reviewSource != "" && (action != "start" || dispatch.Recipient != "REVIEWER") {
 		return fmt.Errorf("runtime: --review-source-worktree applies to Reviewer start")
 	}
@@ -584,6 +596,11 @@ func runtimeCmd(args []string) error {
 
 	var operationErr error
 	switch action {
+	case "auth":
+		operationErr = worker.CheckAuthentication(ctx, expectedAccount)
+		if operationErr == nil {
+			fmt.Println("taxion: effective Copilot account matches the approved Dispatch configuration on github.com. Credential reference selection, contract eligibility, and durable runtime configuration binding remain unverified; no session was created or resumed.")
+		}
 	case "start":
 		if dispatch.RuntimeSessionID != "" {
 			operationErr = fmt.Errorf("runtime start: Dispatch already has a session; use send or resume")
