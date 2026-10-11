@@ -13,12 +13,14 @@ type FeedbackRequest struct {
 }
 
 type FeedbackObservation struct {
-	FlowID             string              `json:"flowId"`
-	ExpectedChangeID   string              `json:"expectedChangeId"`
-	Target             core.FeedbackTarget `json:"target"`
-	PendingFeedbackIDs []string            `json:"pendingFeedbackIds"`
-	ExpectedDraftID    string              `json:"expectedDraftId"`
-	PendingDraftID     string              `json:"pendingDraftId"`
+	FlowID               string              `json:"flowId"`
+	ExpectedChangeID     string              `json:"expectedChangeId"`
+	Target               core.FeedbackTarget `json:"target"`
+	PendingFeedbackIDs   []string            `json:"pendingFeedbackIds"`
+	ExpectedDraftID      string              `json:"expectedDraftId"`
+	PendingDraftID       string              `json:"pendingDraftId"`
+	DraftContractHash    string              `json:"draftContractHash"`
+	FeedbackDispositions map[string]string   `json:"feedbackDispositions"`
 }
 
 func ObserveFeedback(db *store.Store, flowID string) (FeedbackObservation, error) {
@@ -43,6 +45,31 @@ func ObserveFeedback(db *store.Store, flowID string) (FeedbackObservation, error
 		observation.ExpectedDraftID = flow.InstructionDrafts[len(flow.InstructionDrafts)-1].ID
 	}
 	observation.PendingDraftID = flow.PendingDraftID()
+	observation.DraftContractHash, err = flow.DraftContractHash()
+	if err != nil {
+		return FeedbackObservation{}, err
+	}
+	observation.FeedbackDispositions = map[string]string{}
+	for _, feedback := range flow.Feedback {
+		status := "PENDING"
+		if feedback.Resolution != nil {
+			status = "KEEP_CONTRACT"
+		}
+		for _, draft := range flow.InstructionDrafts {
+			if draft.Approval == nil || draft.Discard != nil {
+				continue
+			}
+			for _, id := range draft.FeedbackIDs {
+				if id == feedback.ID {
+					status = "APPROVED_FOR_HANDOFF"
+					if draft.Publication != nil {
+						status = "INSTRUCTION_PUBLISHED"
+					}
+				}
+			}
+		}
+		observation.FeedbackDispositions[feedback.ID] = status
+	}
 	if len(flow.HandoffChanges) != 0 {
 		observation.ExpectedChangeID = flow.HandoffChanges[len(flow.HandoffChanges)-1].ID
 	}

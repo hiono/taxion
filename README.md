@@ -96,6 +96,7 @@ taxion workflow feedback --file <targeted-feedback.json>
 taxion workflow feedback-resolve --file <keep-contract-decision.json>
 taxion workflow draft --file <instruction-proposal.json>
 taxion workflow draft-discard --file <discard-proposal.json>
+taxion workflow draft-approve --file <approve-supplement.json>
 taxion dispatch --task <id> --repo <repo>
 taxion runtime start --dispatch <id> --system-prompt-file <path>
 taxion runtime send --dispatch <id> --system-prompt-file <path> --prompt-file <path>
@@ -648,8 +649,17 @@ each version's text, proposed next role and operation, evidence, unconfirmed
 items and feedback references. The latest undiscarded draft also blocks release.
 `workflow draft-discard` records a sourced decision to abandon that exact draft;
 it does not resolve feedback or release the hold. These commands do not yet
-approve, apply or publish the proposal as a Dispatch.
-Natural-language intervention, draft approval/publication and side questions
+approve, apply or publish the proposal as a Dispatch by themselves.
+`workflow draft-approve` records `APPROVE_SUPPLEMENT` for the latest draft at a
+successful Coder-to-review or review-to-repair boundary. It binds the exact draft,
+result, hold and unchanged flow contract. After explicit release, `advance` or
+`run` includes the approved supplement in the next Dispatch's `DECISIONS` and
+records its instruction hash atomically. Referenced feedback is shown as
+`APPROVED_FOR_HANDOFF` before issuance and `INSTRUCTION_PUBLISHED` afterward;
+neither state proves that a worker has performed the requested checks.
+Scope, acceptance, role, execution configuration and budget changes are not
+authorized by supplementary approval. Natural-language intervention, changed
+contract reapproval and side questions
 remain tracked in #73 and #74.
 Controller-managed Coder Git operations and live SDK acceptance remain tracked
 in #53 and #54.

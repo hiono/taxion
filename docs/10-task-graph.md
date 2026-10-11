@@ -427,7 +427,8 @@ RUNNING flow に未処理の補足がある場合、通常の `RELEASE` は拒�
 単なる既読、修正指示の適用、レビューの承認、例外の承認ではない。
 補足の本文を実行したことや調査が完了したことも、この操作だけでは証明しない。
 必要な変更がある場合はこの処理で済ませず、保留を維持して承認と指示の変更へ進む。
-指示案への適用経路は #73・#74 の未実装項目に残る。
+契約を維持する補足の反映は後述の `workflow draft-approve` で行う。
+scope・acceptance・実行主体・上限を変える場合の再承認は #73 の未実装項目に残る。
 
 判断は補足の `resolution` に ID、現在の観測対象、保留 ID、操作、actor、
 出典、理由、controller が付けた UTC 時刻を保存する。
@@ -486,7 +487,7 @@ transaction 内で最新の案 ID、保留変更 ID、保存済み対象を照�
 現在の ROLE が実行中でも提案を保存できるが、後から成果が保存された場合は
 新しい対象を観測して改訂する。元の版の観測対象は変更しない。
 
-未破棄の最新案がある RUNNING flow の `RELEASE` は拒否する。
+未承認・未破棄の最新案がある RUNNING flow の `RELEASE` は拒否する。
 案を採用しない場合は、現在の対象を再観測して明示的に破棄する。
 
 ```bash
@@ -507,12 +508,73 @@ taxion workflow draft-discard --file discard.json
 未処理の補足について契約維持を判断した場合は `workflow feedback-resolve` が別途必要となる。
 STOPPED flow は保留解除後も実行できず、未破棄の案を記録に残す。
 
-案の承認、変更契約の再承認、本文の指示への適用と Dispatch 発行は #73 の未実装項目に残る。
-現時点で続行できるのは、案を明示的に破棄し、必要な補足の処理判断と解除を行って
-元の承認済み契約を使う経路である。案の保存や破棄で発行済みの instruction、
+案を採用しない場合は、明示的に破棄し、必要な補足の処理判断と解除を行って
+元の承認済み契約を使う。案の保存や破棄で発行済みの instruction、
 Reviewer の verdict、Task の承認、ROLE session へ送る本文は変更しない。
 `workflow show` と共通の計画出力で、SQLite 再起動後も全版を確認できる。
 actor と source は入力された出典情報であり、認証済み Human の本人証明ではない。
+
+### 契約を維持する補足を承認し、次の指示へ反映する
+
+`workflow draft-approve --file REQUEST.json` は最新の案を
+`APPROVE_SUPPLEMENT` として承認する。変更できるのは次の指示に加える説明であり、
+scope、acceptance、禁止操作、実行主体・設定、費用・上限を変更する承認ではない。
+レビューへの異議を承認して元の verdict を覆す操作にも使わない。
+
+承認できるのは、現在の ROLE の成功結果と Git 証拠が保存された受け渡し境界に限る。
+Coder の後は REVIEWER、REQUEST_CHANGES を返した Reviewer の後は
+既存の修正回数内で CODER を指定する。APPROVE・BLOCKED のレビュー結果を
+この操作で修正実行へ変更する要求は拒否する。
+実行中に作った案は、結果の保存後に再観測して新しい版へ改訂する必要がある。
+
+```bash
+taxion workflow feedback-target --id application-flow |
+  jq '{
+    flowId, expectedChangeId, target,
+    id: "approve-draft-1",
+    draftId: .expectedDraftId,
+    contractHash: .draftContractHash,
+    action: "APPROVE_SUPPLEMENT",
+    actor: "human",
+    source: "human:supplement-approval",
+    reason: "承認済み契約を維持したまま、この版の補足を次の指示へ加える"
+  }' > approval.json
+taxion workflow draft-approve --file approval.json
+```
+
+承認 transaction は案 ID、案の観測対象、現在の対象、保留 ID、
+現在の Task と保持した契約を照合する。
+`draftContractHash` は保持した Task 契約、flow の承認、review root、
+修正回数上限、token 上限、期限の JSON 内容 hash である。
+認証やライブの状態確認を代替する値ではない。
+承認が付いた未発行案を改訂する場合は、保留中に先にその承認付き案を破棄する。
+
+承認だけでは保留を解除せず、Dispatch も発行しない。
+案の `feedbackIds` に指定した補足は承認待ちの対象から外れるが、
+発行前は `feedbackDispositions` に `APPROVED_FOR_HANDOFF` と表示する。
+案で参照していない未処理の補足は引き続き解除を止める。
+承認済みの案を破棄すれば、その案に結び付く補足は未処理に戻る。
+契約維持の処理済み補足を再適用したり、複数の承認済み案へ同じ補足を割り当てたりする操作は拒否する。
+
+明示的に保留を解除して run/advance を呼ぶと、既存の安全条件と
+承認した案の対象を再照合する。次の Task の `DECISIONS` に
+案の本文・版・証拠・未確認事項・承認を含む出典付き補足を加え、
+その Task から既存の生成処理で Dispatch を発行する。
+案の `publication` に Dispatch ID、instruction hash、時刻を
+同じ workspace transaction で保存する。
+指示へ反映された補足は `INSTRUCTION_PUBLISHED` と表示する。
+worker の開始や本文に書かれた検証の完了を、この表示だけで証明しない。
+
+新しい指示にも元の scope・acceptance・禁止操作・証拠条件を保持する。
+既存の結果・verdict・instruction と過去の版は書き換えず、
+修正は既存の AMENDS、独立レビューは INDEPENDENT の関係を使う。
+設定・認証の開始検査も維持する。Task・Memory の変更、期限・token・修正回数の
+上限違反があれば承認後も停止する。発行失敗時は新しい Task・Dispatch・反映記録を
+部分的に保存せず、安全停止を明示する。
+発行後の再送で二重発行せず、発行済みの案を破棄して履歴を取り消す操作は拒否する。
+
+scope・acceptance・実行主体・設定・上限を変える契約改訂、
+自然言語の質問・追加調査、実認証での SDK 受入れは引き続き未実装である。
 
 ## 状態遷移と完了
 

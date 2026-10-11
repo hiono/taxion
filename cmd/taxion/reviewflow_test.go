@@ -204,6 +204,25 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 	if err != nil || observed.ExpectedDraftID != "draft-1" || observed.PendingDraftID != "draft-1" {
 		t.Fatal("CLI draft missing from readout", err)
 	}
+	approvalFile := filepath.Join(dir, "approval.json")
+	approval, err := json.Marshal(controller.DraftApprovalRequest{
+		FlowID: flow.ID, DraftApproval: core.DraftApproval{
+			ID: "approval-1", DraftID: observed.ExpectedDraftID,
+			ExpectedChangeID: observed.ExpectedChangeID, Target: observed.Target,
+			ContractHash: observed.DraftContractHash, Action: "APPROVE_SUPPLEMENT",
+			Actor: "human", Source: "human:approval", Reason: "Approve the supplementary instruction",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(approvalFile, approval, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"draft-approve", "--file", approvalFile}); err == nil ||
+		!strings.Contains(err.Error(), "successful saved result") {
+		t.Fatal("CLI approval did not enforce completed-result boundary", err)
+	}
 	writeHandoff(controller.HandoffRequest{
 		FlowID: flow.ID, HandoffChange: core.HandoffChange{
 			ID: "feedback-release", ExpectedChangeID: "feedback:feedback", Action: "RELEASE",
@@ -254,6 +273,7 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 		{"feedback-resolve"}, {"feedback-resolve", "--file", file},
 		{"draft"}, {"draft", "--file", file}, {"draft", "--file", file, "--id", request.ID},
 		{"draft-discard"}, {"draft-discard", "--file", draftFile},
+		{"draft-approve"}, {"draft-approve", "--file", draftFile},
 	} {
 		if err := workflowCmd(args); err == nil {
 			t.Fatalf("invalid workflow invocation accepted: %v", args)

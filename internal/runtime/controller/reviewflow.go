@@ -165,6 +165,17 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 			stopped = fmt.Errorf("%w: %s", core.ErrHandoffHeld, flow.ID)
 			return nil
 		}
+		if err := state.Graph.CheckApprovedDraft(flow); err != nil {
+			return stop("approved draft no longer matches the handoff: " + err.Error())
+		}
+		var supplement *core.TaskDecision
+		if flow.PendingDraftID() != "" {
+			decision, err := flow.InstructionDrafts[len(flow.InstructionDrafts)-1].SupplementalDecision()
+			if err != nil {
+				return err
+			}
+			supplement = &decision
+		}
 		sourceDecision, err := flowResultDecision(last)
 		if err != nil {
 			return err
@@ -202,6 +213,9 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 				Text: flow.Authorization.Text + "; independently review the recorded Coder result",
 			}, sourceDecision)
 			review.HumanDecision = nil
+			if supplement != nil {
+				review.Decisions = append(review.Decisions, *supplement)
+			}
 			if err := state.Graph.Track(review, "controller", "independent review authorized by flow"); err != nil {
 				return err
 			}
@@ -241,6 +255,9 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 				}
 				task, _ = state.Graph.GraphTask(task.ID)
 				task.Decisions = append(task.Decisions, sourceDecision)
+				if supplement != nil {
+					task.Decisions = append(task.Decisions, *supplement)
+				}
 				task.DeferredReason, task.ResumeCondition = "", ""
 				if err := state.Graph.Track(task, "controller", "preserve findings and acceptance for authorized repair"); err != nil {
 					return err
@@ -297,6 +314,16 @@ func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.Rev
 		ID: dispatch.ID, TaskID: task.ID, Repo: task.Repo, Active: true, CreatedAt: time.Now().UTC(),
 	})
 	flow.DispatchIDs = append(flow.DispatchIDs, dispatch.ID)
+	if flow.PendingDraftID() != "" {
+		index := len(flow.InstructionDrafts) - 1
+		draft := &flow.InstructionDrafts[index]
+		if draft.Approval == nil || draft.NextRole != dispatch.Recipient {
+			return fmt.Errorf("taxion: issued instruction cannot consume an unapproved or mismatched draft")
+		}
+		draft.Publication = &core.DraftPublication{
+			DispatchID: dispatch.ID, InstructionHash: dispatch.InstructionHash, At: time.Now().UTC(),
+		}
+	}
 	return nil
 }
 
@@ -326,6 +353,16 @@ func flowContractMatches(graph core.TaskGraph, flow core.ReviewFlow, current cor
 			continue
 		}
 		recognized := false
+		for _, draft := range flow.InstructionDrafts {
+			if draft.Publication == nil || draft.NextRole != "CODER" {
+				continue
+			}
+			expected, err := draft.SupplementalDecision()
+			if err == nil && decision == expected {
+				recognized = true
+				break
+			}
+		}
 		for _, id := range flow.DispatchIDs {
 			dispatch, _ := graph.GraphDispatch(id)
 			if dispatch.Result == nil {

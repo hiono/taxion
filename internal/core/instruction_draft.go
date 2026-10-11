@@ -9,22 +9,24 @@ import (
 
 // InstructionDraft is a proposal, not an executable Dispatch or approval.
 type InstructionDraft struct {
-	ID               string         `json:"id"`
-	ExpectedDraftID  string         `json:"expectedDraftId"`
-	ExpectedChangeID string         `json:"expectedChangeId"`
-	Target           FeedbackTarget `json:"target"`
-	NextRole         string         `json:"nextRole"`
-	Operation        string         `json:"operation"`
-	Text             string         `json:"text"`
-	Actor            string         `json:"actor"`
-	Source           string         `json:"source"`
-	Reason           string         `json:"reason"`
-	Evidence         []string       `json:"evidence"`
-	Unconfirmed      []string       `json:"unconfirmed"`
-	FeedbackIDs      []string       `json:"feedbackIds"`
-	Version          int            `json:"version,omitempty"`
-	At               time.Time      `json:"at,omitempty"`
-	Discard          *DraftDiscard  `json:"discard,omitempty"`
+	ID               string            `json:"id"`
+	ExpectedDraftID  string            `json:"expectedDraftId"`
+	ExpectedChangeID string            `json:"expectedChangeId"`
+	Target           FeedbackTarget    `json:"target"`
+	NextRole         string            `json:"nextRole"`
+	Operation        string            `json:"operation"`
+	Text             string            `json:"text"`
+	Actor            string            `json:"actor"`
+	Source           string            `json:"source"`
+	Reason           string            `json:"reason"`
+	Evidence         []string          `json:"evidence"`
+	Unconfirmed      []string          `json:"unconfirmed"`
+	FeedbackIDs      []string          `json:"feedbackIds"`
+	Version          int               `json:"version,omitempty"`
+	At               time.Time         `json:"at,omitempty"`
+	Discard          *DraftDiscard     `json:"discard,omitempty"`
+	Approval         *DraftApproval    `json:"approval,omitempty"`
+	Publication      *DraftPublication `json:"publication,omitempty"`
 }
 
 type DraftDiscard struct {
@@ -66,6 +68,14 @@ func cloneInstructionDrafts(drafts []InstructionDraft) []InstructionDraft {
 			discard := *drafts[i].Discard
 			copy[i].Discard = &discard
 		}
+		if drafts[i].Approval != nil {
+			approval := *drafts[i].Approval
+			copy[i].Approval = &approval
+		}
+		if drafts[i].Publication != nil {
+			publication := *drafts[i].Publication
+			copy[i].Publication = &publication
+		}
 	}
 	return copy
 }
@@ -75,7 +85,7 @@ func (f ReviewFlow) PendingDraftID() string {
 		return ""
 	}
 	last := f.InstructionDrafts[len(f.InstructionDrafts)-1]
-	if last.Discard != nil {
+	if last.Discard != nil || last.Publication != nil {
 		return ""
 	}
 	return last.ID
@@ -97,7 +107,7 @@ func (g TaskGraph) checkDraftTarget(flow ReviewFlow, target FeedbackTarget, chan
 }
 
 func (g *TaskGraph) RecordInstructionDraft(flowID string, draft InstructionDraft) (ReviewFlow, error) {
-	if !validInstructionDraft(draft) || draft.Version != 0 || !draft.At.IsZero() || draft.Discard != nil {
+	if !validInstructionDraft(draft) || draft.Version != 0 || !draft.At.IsZero() || draft.Discard != nil || draft.Approval != nil || draft.Publication != nil {
 		return ReviewFlow{}, graphError("instruction draft requires sourced text, next role, operation and explicit evidence, unconfirmed and feedback ID lists; version, time and discard are controller-owned")
 	}
 	if err := g.Validate(); err != nil {
@@ -109,7 +119,7 @@ func (g *TaskGraph) RecordInstructionDraft(flowID string, draft InstructionDraft
 	}
 	for _, previous := range flow.InstructionDrafts {
 		if previous.ID == draft.ID {
-			previous.Version, previous.At, previous.Discard = 0, time.Time{}, nil
+			previous.Version, previous.At, previous.Discard, previous.Approval, previous.Publication = 0, time.Time{}, nil, nil, nil
 			if !reflect.DeepEqual(previous, draft) {
 				return ReviewFlow{}, graphError("instruction draft ID was reused with different content")
 			}
@@ -128,6 +138,12 @@ func (g *TaskGraph) RecordInstructionDraft(flowID string, draft InstructionDraft
 	}
 	if draft.ExpectedDraftID != priorID {
 		return ReviewFlow{}, graphError("instruction draft version changed; observe the latest draft before revising")
+	}
+	if len(flow.InstructionDrafts) != 0 {
+		last := flow.InstructionDrafts[len(flow.InstructionDrafts)-1]
+		if last.Approval != nil && last.Discard == nil && last.Publication == nil {
+			return ReviewFlow{}, graphError("discard the approved pending draft before revising")
+		}
 	}
 	for _, id := range draft.FeedbackIDs {
 		if !slices.ContainsFunc(flow.Feedback, func(feedback FlowFeedback) bool { return feedback.ID == id }) {
@@ -161,7 +177,7 @@ func (g *TaskGraph) DiscardInstructionDraft(flowID string, discard DraftDiscard)
 		}
 	}
 	index := len(flow.InstructionDrafts) - 1
-	if flow.InstructionDrafts[index].ID != discard.DraftID || flow.InstructionDrafts[index].Discard != nil {
+	if flow.InstructionDrafts[index].ID != discard.DraftID || flow.InstructionDrafts[index].Discard != nil || flow.InstructionDrafts[index].Publication != nil {
 		return ReviewFlow{}, graphError("only the current undiscarded instruction draft can be discarded")
 	}
 	if err := g.checkDraftTarget(flow, discard.Target, discard.ExpectedChangeID); err != nil {
@@ -216,6 +232,9 @@ func (g TaskGraph) validateInstructionDrafts(flow ReviewFlow) error {
 				return err
 			}
 			discards[discard.ID] = true
+		}
+		if err := g.validateDraftApproval(flow, draft, i); err != nil {
+			return err
 		}
 		ids[draft.ID], priorID = true, draft.ID
 	}

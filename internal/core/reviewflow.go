@@ -77,7 +77,8 @@ func (g TaskGraph) validateReviewFlows() error {
 		if err := g.validateInstructionDrafts(flow); err != nil {
 			return err
 		}
-		if flow.Status == "RUNNING" && flow.PendingDraftID() != "" && !flow.HandoffHeld() {
+		if flow.Status == "RUNNING" && flow.PendingDraftID() != "" && !flow.HandoffHeld() &&
+			flow.InstructionDrafts[len(flow.InstructionDrafts)-1].Approval == nil {
 			return graphError("running flow with an unissued instruction draft must retain its handoff hold")
 		}
 		for _, recovery := range flow.Recoveries {

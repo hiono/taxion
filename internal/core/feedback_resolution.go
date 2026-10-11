@@ -31,11 +31,25 @@ func validFeedbackResolution(resolution FeedbackResolution) bool {
 func (f ReviewFlow) PendingFeedbackIDs() []string {
 	pending := []string{}
 	for _, feedback := range f.Feedback {
-		if feedback.Resolution == nil {
+		if feedback.Resolution == nil && !f.FeedbackHasApprovedDraft(feedback.ID) {
 			pending = append(pending, feedback.ID)
 		}
 	}
 	return pending
+}
+
+func (f ReviewFlow) FeedbackHasApprovedDraft(id string) bool {
+	for i, draft := range f.InstructionDrafts {
+		if draft.Approval != nil && draft.Discard == nil &&
+			(draft.Publication != nil || i == len(f.InstructionDrafts)-1) {
+			for _, feedbackID := range draft.FeedbackIDs {
+				if feedbackID == id {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (g *TaskGraph) ResolveFlowFeedback(flowID, feedbackID string, resolution FeedbackResolution) (ReviewFlow, error) {
@@ -68,6 +82,9 @@ func (g *TaskGraph) ResolveFlowFeedback(flowID, feedbackID string, resolution Fe
 			return ReviewFlow{}, graphError("feedback resolution cannot be rewritten")
 		}
 		return flow, nil
+	}
+	if flow.FeedbackHasApprovedDraft(feedbackID) {
+		return ReviewFlow{}, graphError("feedback already belongs to an approved instruction supplement")
 	}
 	if !flow.HandoffHeld() {
 		return ReviewFlow{}, graphError("feedback resolution requires a held handoff")

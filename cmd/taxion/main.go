@@ -69,6 +69,7 @@ Commands:
   workflow feedback-resolve Record an explicit KEEP_CONTRACT disposition before handoff release (--file JSON)
   workflow draft      Save or revise a versioned, unissued instruction proposal while held (--file JSON)
   workflow draft-discard Explicitly discard the latest proposal without applying it (--file JSON)
+  workflow draft-approve Approve the latest supplement within the unchanged flow contract (--file JSON)
   review              Bind coder-output evidence (--task, --sha and --repo required)
   resume              Print a resume acknowledgement (local stub; --session required)
   acp                 Serve ACP v1 over stdio (spike)
