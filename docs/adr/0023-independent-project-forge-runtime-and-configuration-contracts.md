@@ -65,7 +65,14 @@ Project は現在のディレクトリの `.taxion/config.yaml` とする。
 `.taxion/` は実設定・実行状態・cache 等のローカル用ディレクトリとし、
 ディレクトリ全体を Git ignore の対象にする。
 配下の追跡済みファイルと、ignore を打ち消す例外を検査する。
-共有する仕様・判断・Memory の配置は、ローカル用ディレクトリと分けて定義する。
+共有する仕様は `docs/`、採択した設計判断は `docs/adr/`、
+再利用する lesson・decision・guardrail の公開用記録は `docs/memory/` に置く。
+共有記録の追加は内容と出典の明示レビューを経て行い、
+ローカルの database・session・承認・契約利用量を一括公開しない。
+既存の `memory.db` は選択した ledger の隣に保持する。
+`project` と `global` は現在の同一 database 内の scope であり、
+設定ファイルの Global／Project 配置とは別の区分である。
+具体的な配置と既存記録の移行は `docs/08-memory-model.md` に記載する。
 読み込む実設定はローカルの管理対象とする。
 Git worktree 内の実設定は、`git ls-files` に含まれない未追跡状態と
 Git ignore の適用を両方満たす場合に読み込む。

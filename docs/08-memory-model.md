@@ -23,6 +23,46 @@ Reads (`list`, `search`, and `export`) include both scopes unless filtered
 with `--scope`. There are no separate project and global storage
 directories in the current CLI.
 
+### Local state and shared knowledge
+
+The default ledger is `.taxion/ledger.json`; `memory.db` and `workspace.db`
+are beside it. The whole `.taxion/` directory is local and ignored. A custom
+`--store` selects a different local directory, not a shared knowledge source.
+Keep its permissions and backups under the owner's control. Runtime session
+files and private authentication or usage observations remain local as well.
+
+Shared specifications belong in `docs/`, accepted architectural decisions in
+`docs/adr/`, and explicitly reviewed reusable Memory records in
+`docs/memory/`. These Markdown records are documentation, not automatically
+loaded or approved runtime entries. Give each record a stable identifier,
+revision, applicable scope, source references, and the decision or lesson it
+preserves. Do not include credential values, local settings, private usage
+details, or an unreviewed dump of the local database.
+
+To share an existing entry, preserve the original local database and inspect
+that entry's text, sources, version and approval separately. `memory export
+--scope project` can provide a sanitized preview; it is not a database migration
+or an executable-policy export. Select and review the intended knowledge,
+then record it outside `.taxion/` with provenance to the original record.
+Sanitization may change meaning and does not guarantee removal of private data.
+Review the proposed file and commit it through the normal scope and secret
+checks; do not move or force-add the local database.
+
+To reuse a shared record in another local store, use `memory put` with the
+appropriate kind, text and scope, and a `--source` reference identifying the
+shared repository revision, path, record identifier and revision. The imported
+text is proposed knowledge; file publication and old local approval do not
+grant execution permission in the new store. For a guardrail, reconstruct its
+structured predicates and obtain explicit local approval before enforcing it.
+Retain a mapping to the old local ID/version when replacing a reference in a
+new Task. Do not rewrite issued Dispatch snapshots or delete the old database
+while saved Tasks or Dispatches still depend on its records.
+
+There is no automatic shared-file importer, cross-store ID migration or approval
+transfer. `memory export` omits structured guardrail predicates and thresholds;
+the steps above deliberately preserve local history and require review rather
+than claiming a lossless export/import round trip.
+
 ## Sources and lifecycle
 
 Entries retain source references, a version, the replaced entry ID, and
