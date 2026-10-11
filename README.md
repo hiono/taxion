@@ -562,6 +562,45 @@ configuration choices. It rejects missing or stopped Dispatches, inactive
 Tasks, mismatched repositories, and combinations absent from the saved
 approval. `--task` and `--dispatch` are mutually exclusive.
 
+### Saved-record side questions
+
+```bash
+taxion conversation ask --task <task-id> \
+  --question "Which evidence supports the current review result?" \
+  --max-tokens 20000 --timeout 2m --max-ai-credits 30
+```
+
+This is a paid, separately bounded Orchestrator session with **no tools**.
+It verifies the Task's sourced configuration approval, effective Copilot
+account, repository read access and provider service state, and rechecks
+approval before sending and while waiting. The selected tuple must also match
+the Task's issued configuration selections. All three ceilings are explicit:
+token use is checked after reported calls, time limits waiting, and the SDK's
+credit limit is a per-session soft ceiling. None guarantees a hard total bill.
+
+The response separates `confirmed`, `assumptions` and `unconfirmed`. Confirmed
+claims cite resolvable JSON pointers into the supplied saved Task, Dispatch,
+Memory versions or review-flow records. They describe recorded evidence, not
+independent verification of its truth. The context includes observation times
+and a content hash. If records change while answering, the original context is
+retained and `recordsChangedDuringAnswer` is true; the answer is not silently
+retargeted. The context is limited to the selected Task and its flows.
+
+Questions do not bind a Dispatch, update the graph, resolve feedback, edit
+instructions, acquire Human approval, or enter Coder/Reviewer histories.
+The result contains the separate session ID and reported token usage even on
+a failed attempt, allowing private SDK credit reconciliation before another
+paid attempt. Missing usage, invalid citations, provider failures and exceeded
+ceilings are errors. The question session is stopped even after cancellation;
+cleanup failures remain visible. Inputs over 128 KiB and final answers over
+64 KiB are rejected rather than silently truncated.
+
+This command reads saved records only. It does not perform additional live
+investigation, hold/release a handoff, or apply an answer to an instruction.
+Use the explicit `workflow handoff`, feedback and versioned draft operations
+for those changes. The request-to-plan conversation and conversational
+investigation/application remain part of M12's unfinished acceptance.
+
 `config bind --dispatch <dispatch-id>` saves one approved complete tuple, its
 decision reference, field origins and recording time with the Dispatch in
 SQLite. The current Task and issued instruction must authorize that tuple.

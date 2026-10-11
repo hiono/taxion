@@ -49,6 +49,7 @@ Commands:
   dispatch transition Record a Dispatch lifecycle transition (--id, --status, --reason)
   dispatch list       List dispatches ([--repo] filter, [--json])
   config bind         Save an approved fixed-file configuration selection for an unbound Dispatch
+  conversation ask    Answer a bounded side question from saved Task records without changing the main workflow
   runtime auth        Check the effective Copilot account against approved Dispatch configuration without creating a session
   runtime start       Start the Copilot session bound to an active Dispatch and send its authorized instruction
   runtime send        Send a follow-up prompt to the Dispatch session (--prompt-file required)
@@ -123,6 +124,8 @@ func main() {
 		err = runtimeCmd(args[1:])
 	case "workflow":
 		err = workflowCmd(args[1:])
+	case "conversation":
+		err = conversationCmd(args[1:], os.Stdout)
 	case "review":
 		err = reviewCmd(args[1:])
 	case "resume":

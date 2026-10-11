@@ -47,6 +47,15 @@ type Runtime interface {
   The same sourced Human approval must cover the selected account and contract
   reference in the current Task and issued instruction. Its reason records the
   approved use; checking that record does not verify the legal truth of its text.
+- Saved-record side questions use a separate, tool-free Orchestrator runtime.
+  They require sourced Task configuration approval, fresh authentication,
+  repository read access, provider service checks and explicit time/token limits.
+  Answers cite existing fields in the supplied observation and separate recorded
+  facts, assumptions and unknowns. The observation is never a live-state proof.
+  No Dispatch is bound, no workspace history or approval is changed, and returned
+  session/usage information belongs to this question, not the main flow.
+  Unknown usage and invalid citations stop the query. Safe cleanup uses its own
+  bounded context after cancellation; errors are not suppressed.
 ## Adapters
 
 - `internal/runtime/local`: in-process reference adapter for state transitions.
