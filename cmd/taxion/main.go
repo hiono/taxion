@@ -763,6 +763,11 @@ func dispatchResultSchema(dispatch core.GraphDispatch) map[string]any {
 func strictDispatchResultSchema(dispatch core.GraphDispatch) map[string]any {
 	schema := dispatchResultSchema(dispatch)
 	properties := schema["properties"].(map[string]any)
+	properties["nextTransition"] = map[string]any{"type": "string", "enum": []core.TaskStatus{
+		core.Draft, core.Ready, core.Active, core.WaitingForEvidence, core.WaitingForReview,
+		core.RequestChanges, core.Blocked, core.HumanDecisionRequired, core.Approved,
+		core.Completed, core.Rejected, core.Cancelled, core.Superseded,
+	}}
 	for field, value := range map[string]string{
 		"dispatchId": dispatch.ID, "taskId": dispatch.TaskID, "recipient": dispatch.Recipient,
 		"repository": dispatch.Repository, "startedSha": dispatch.ExpectedStartSHA(),

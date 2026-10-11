@@ -49,6 +49,14 @@ func TestStrictResultSchemaPinsIssuedIdentitiesAndRepairStart(t *testing.T) {
 			dispatch.Instruction.TargetSHA = test.target
 			ordinary := dispatchResultSchema(dispatch)["properties"].(map[string]any)
 			strict := strictDispatchResultSchema(dispatch)["properties"].(map[string]any)
+			transitions := strict["nextTransition"].(map[string]any)["enum"].([]core.TaskStatus)
+			if !reflect.DeepEqual(transitions, []core.TaskStatus{
+				core.Draft, core.Ready, core.Active, core.WaitingForEvidence, core.WaitingForReview,
+				core.RequestChanges, core.Blocked, core.HumanDecisionRequired, core.Approved,
+				core.Completed, core.Rejected, core.Cancelled, core.Superseded,
+			}) || ordinary["nextTransition"].(map[string]any)["enum"] != nil {
+				t.Fatal("strict schema must allow actual Task states without changing legacy schemas")
+			}
 			for field, expected := range map[string]string{
 				"dispatchId": dispatch.ID, "taskId": dispatch.TaskID, "recipient": dispatch.Recipient,
 				"repository": dispatch.Repository, "startedSha": test.expectedStart,

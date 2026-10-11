@@ -106,7 +106,9 @@ through the explicit runtime commands.
 Dispatch ID, Task ID, role, repository and expected execution-start SHA.
 Repair uses its immutable target SHA rather than the initial baseline.
 Output SHA and verdict remain reported facts subject to independent controller
-verification. The option changes the configuration hash and must be repeated
+verification. The strict schema also limits `nextTransition` to the existing
+Task status vocabulary, without selecting a transition or changing saved state.
+The option changes the configuration hash and must be repeated
 on session attachment and safe stop. The default schema remains unchanged for
 older sessions; rejected responses are not repaired into successful results.
 Agents without shell permission can submit `validations: []`; the controller
