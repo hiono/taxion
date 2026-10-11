@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime/controller"
@@ -26,6 +29,9 @@ func TestConversationQuestionRequiresExplicitLimitsBeforeOpeningWorkspace(t *tes
 		{"ask", "--task", "task", "--question", "status?", "--max-tokens", "1000", "--timeout", "1m", "--max-ai-credits", "30", "extra"},
 		{"plan", "--task", "task", "--question", "Repair or replan?"},
 		{"plan", "--task", "task", "--question", "Repair or replan?", "--max-tokens", "1000", "--timeout", "1m", "--max-ai-credits", "1"},
+		{"investigate", "--task", "task", "--question", "Read a file"},
+		{"investigate", "--task", "task", "--question", "Read a file", "--max-tokens", "1000", "--timeout", "1m", "--max-ai-credits", "30"},
+		{"investigate", "--task", "task", "--question", "Read a file", "--max-tokens", "1000", "--timeout", "1m", "--max-ai-credits", "30", "--path", "src/a.go", "--max-bytes", "65537"},
 	} {
 		var output bytes.Buffer
 		if err := conversationCmd(args, &output); err == nil || output.Len() != 0 {
@@ -101,7 +107,7 @@ func (r checkedConversationReader) Read(p []byte) (int, error) {
 }
 
 func TestWatchedConversationHoldsBeforeInputAndNeverApprovesOnEOF(t *testing.T) {
-	for _, text := range []string{"", "現在どうなっていますか？\n", "/adopt\n/quit\n", "/plan Should we revise the plan?\n/adopt\n/quit\n", "/draft Check the saved acceptance carefully.\n/approve\n/quit\n", "/step\n/quit\n"} {
+	for _, text := range []string{"", "interactive", "現在どうなっていますか？\n", "/adopt\n/quit\n", "/apply REVIEWER 0 Check the finding\n/quit\n", "/investigate src/a.go Read this file\n/apply REVIEWER 0 Check the finding\n/quit\n", "/plan Should we revise the plan?\n/adopt\n/quit\n", "/draft Check the saved acceptance carefully.\n/approve\n/quit\n", "/step\n/quit\n"} {
 		t.Run(text, func(t *testing.T) {
 			old := storePath
 			dir := t.TempDir()
@@ -153,8 +159,40 @@ func TestWatchedConversationHoldsBeforeInputAndNeverApprovesOnEOF(t *testing.T) 
 				}
 			}}
 			var output bytes.Buffer
-			if err := conversationWatch([]string{"--flow", flow.ID, "--actor", "human", "--source", "human:terminal"}, reader, &output); err != nil {
-				t.Fatal(err)
+			args := []string{"--flow", flow.ID, "--actor", "human", "--source", "human:terminal"}
+			if text == "interactive" {
+				input, writer := io.Pipe()
+				defer input.Close()
+				started := make(chan struct{})
+				run := func(ctx context.Context, args []string, out io.Writer) error {
+					close(started)
+					if _, err := io.WriteString(out, "progress while Human input is available\n"); err != nil {
+						return err
+					}
+					<-ctx.Done()
+					return ctx.Err()
+				}
+				go func() {
+					defer writer.Close()
+					if _, err := io.WriteString(writer, "/step\n"); err != nil {
+						return
+					}
+					select {
+					case <-started:
+						_, _ = io.WriteString(writer, "/step\n/hold\n/quit\n")
+					case <-time.After(5 * time.Second):
+						_ = writer.CloseWithError(errors.New("interactive runner never started"))
+					}
+				}()
+				err := watchedConversation(append(args, "--interactive-execution"), input, &output, run)
+				if !errors.Is(err, context.Canceled) || !strings.Contains(output.String(), "already owns an execution") ||
+					!strings.Contains(output.String(), "progress while Human input") {
+					t.Fatal("interactive input blocked, allowed a second runner or ignored EOF safe stop", err, output.String())
+				}
+			} else {
+				if err := conversationWatch(args, reader, &output); err != nil {
+					t.Fatal(err)
+				}
 			}
 			state, err := db.LoadWorkspace()
 			if err != nil {

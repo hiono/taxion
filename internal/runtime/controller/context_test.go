@@ -71,6 +71,41 @@ func testCompactPlanningContext(t *testing.T, db *store.Store, ledger string, be
 	if err != nil || repeated.Observation.ContentHash != planning.Observation.ContentHash {
 		t.Fatal("observation times changed the content identity", err)
 	}
+	plan, err := Plan(db, ledger, review.Repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rawQuestion QuestionContext
+	for _, task := range plan.Tasks {
+		if task.Task.ID == before.Graph.ReviewFlows[0].TaskID {
+			rawQuestion = QuestionContext{Task: task, Flows: plan.ReviewFlows}
+		}
+	}
+	compactQuestion, err := ObserveQuestion(db, ledger, review.Repository, rawQuestion.Task.Task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawInput, err := json.Marshal(struct {
+		Question string          `json:"question"`
+		Context  QuestionContext `json:"context"`
+	}{"status?", rawQuestion})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compactInput, err := json.Marshal(struct {
+		Question string          `json:"question"`
+		Context  QuestionContext `json:"context"`
+	}{"status?", compactQuestion})
+	if err != nil || len(compactInput)*2 >= len(rawInput) || len(compactInput) > 128*1024 || compactQuestion.Projection == "" {
+		t.Fatalf("question input did not remove recursive history: %d versus %d, %v", len(compactInput), len(rawInput), err)
+	}
+	for _, dispatch := range compactQuestion.Task.Dispatches {
+		source, _ := before.Graph.GraphDispatch(dispatch.ID)
+		if !reflect.DeepEqual(dispatch.Result, source.Result) || dispatch.InstructionHash != source.InstructionHash ||
+			!reflect.DeepEqual(dispatch.Instruction.MemoryContext, source.Instruction.MemoryContext) {
+			t.Fatal("question input compression lost result evidence, source hash or Memory")
+		}
+	}
 	after, err := db.LoadWorkspace()
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("context generation mutated durable history or approval", err)

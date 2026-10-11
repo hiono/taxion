@@ -56,6 +56,35 @@ type Runtime interface {
   session/usage information belongs to this question, not the main flow.
   Unknown usage and invalid citations stop the query. Safe cleanup uses its own
   bounded context after cancellation; errors are not suppressed.
+  Prior result decisions are checked against their actual saved Dispatch and
+  compacted across Task/history, instructions and flow contracts. Exact results,
+  Memory and source hashes remain; `projection` explains that original instruction
+  hashes do not hash the projected instruction. Durable histories are unchanged.
+  A four-role question-input regression requires less than half the original
+  JSON input size without an additional model call.
+- `AskInvestigation` uses those same checks and ceilings, with explicitly selected
+  committed UTF-8 files added before the model-only send. `ReadCommittedFiles`
+  permits only fixed-SHA Git object reads, canonical scoped paths, 1-16 files
+  and a total source ceiling up to 64 KiB. It rejects missing/binary/oversize
+  content without returning partial evidence and ignores ambient Git routing
+  variables. No working files, shell commands, hooks, textconv or agent tools
+  are used. The separate Git observation identifies this investigation, never
+  previous reasoning or successful validation.
+- `RecordQuestionDraft` shares the Planner adoption transaction and existing
+  supplement approval/publication path. Only selected confirmed indices and an
+  explicit Human instruction are applied; normal chat is not silently copied.
+  Saved context, Memory, role, repair ceiling and current result targets are
+  checked. Investigation SHA, file bytes and hash are reconstructed before
+  adoption. Its bounded source snapshot, selected claims, uncertainty and
+  proposal hash remain durable. Native session IDs remain supplied provenance.
+  A proposal is neither authenticated provider output nor semantic correctness.
+- `RequestFlowInterrupt` atomically records targeted feedback/hold and, for
+  running execution, `CANCEL_REQUESTED`. It never records stop confirmation or
+  Task cancellation. The owning runner performs safe stop through existing
+  monitoring/cleanup; failure leaves the request unconfirmed and cannot
+  authorize continuation. Issued execution is held, not fictitiously stopped.
+  Exact replay is checked before applying a new request to current state.
+  Partial work and issued instructions are preserved.
 - `StepReviewFlow` uses the same runtime and durable runner claim as automatic
   execution, but executes at most one role and does not issue its successor after
   completing the turn. Further progression requires another explicit request.
@@ -63,6 +92,10 @@ type Runtime interface {
   continuation. Observed continuation compares the displayed target, draft,
   contract and hold version transactionally. Supplement approval and publication
   remain separate; existing automatic runner behavior is unchanged.
+  `--interactive-execution` keeps watched input available during its selected
+  runner, serializes concurrent output, rejects a second owned execution and
+  reports failures. EOF/quit cancels and awaits only that console's owned runner;
+  without the opt-in flag, synchronous watched behavior is retained.
 ## Adapters
 
 - `internal/runtime/local`: in-process reference adapter for state transitions.

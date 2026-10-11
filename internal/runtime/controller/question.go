@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
 )
@@ -20,10 +22,23 @@ import (
 // QuestionContext is an observation of saved records, not live execution.
 // It is deliberately separate from Dispatch instructions and main-role history.
 type QuestionContext struct {
-	Task        PlanningTask      `json:"task"`
-	Flows       []core.ReviewFlow `json:"flows"`
-	Observation *PlanObservation  `json:"observation"`
-	Planner     *PlannerContext   `json:"planner,omitempty"`
+	Task          PlanningTask       `json:"task"`
+	Flows         []core.ReviewFlow  `json:"flows"`
+	Observation   *PlanObservation   `json:"observation"`
+	Planner       *PlannerContext    `json:"planner,omitempty"`
+	Investigation *FileInvestigation `json:"investigation,omitempty"`
+	Projection    string             `json:"projection,omitempty"`
+}
+
+type InvestigationRequest struct {
+	Paths    []string `json:"paths"`
+	MaxBytes int      `json:"maxBytes"`
+}
+
+type FileInvestigation struct {
+	SHA         string                      `json:"sha"`
+	Files       []gitproof.InvestigatedFile `json:"files"`
+	Observation PlanObservation             `json:"observation"`
 }
 
 type QuestionClaim struct {
@@ -56,12 +71,67 @@ func ObserveQuestion(db *store.Store, ledgerPath, repository, taskID string) (Qu
 			continue
 		}
 		context := QuestionContext{Task: task, Flows: []core.ReviewFlow{}, Observation: plan.Observation}
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			return QuestionContext{}, err
+		}
+		current, ok := state.Graph.GraphTask(taskID)
+		if !state.HasGraph || !ok || !reflect.DeepEqual(current, task.Task) {
+			return QuestionContext{}, core.ErrFeedbackStale
+		}
+		context.Task.Task.Decisions, err = compactResultDecisions(state.Graph, task.Task.Decisions)
+		if err != nil {
+			return QuestionContext{}, err
+		}
+		projected := !reflect.DeepEqual(context.Task.Task.Decisions, task.Task.Decisions)
+		history := []core.GraphEvent{}
+		for _, event := range state.Graph.History {
+			if event.TaskID == taskID {
+				history = append(history, event)
+			}
+		}
+		if !reflect.DeepEqual(history, context.Task.History) {
+			return QuestionContext{}, core.ErrFeedbackStale
+		}
+		for i, event := range context.Task.History {
+			decisions, err := compactResultDecisions(state.Graph, event.Task.Decisions)
+			if err != nil {
+				return QuestionContext{}, err
+			}
+			projected = projected || !reflect.DeepEqual(decisions, event.Task.Decisions)
+			context.Task.History[i].Task.Decisions = decisions
+		}
+		for i, dispatch := range context.Task.Dispatches {
+			saved, ok := state.Graph.GraphDispatch(dispatch.ID)
+			if !ok || !reflect.DeepEqual(saved, dispatch) {
+				return QuestionContext{}, core.ErrFeedbackStale
+			}
+			decisions, err := compactResultDecisions(state.Graph, dispatch.Instruction.Decisions)
+			if err != nil {
+				return QuestionContext{}, err
+			}
+			projected = projected || !reflect.DeepEqual(decisions, dispatch.Instruction.Decisions)
+			context.Task.Dispatches[i].Instruction.Decisions = decisions
+		}
 		for _, flow := range plan.ReviewFlows {
 			if flow.TaskID == taskID || slices.ContainsFunc(flow.DispatchIDs, func(id string) bool {
 				return slices.ContainsFunc(task.Dispatches, func(d core.GraphDispatch) bool { return d.ID == id })
 			}) {
+				saved, ok := state.Graph.ReviewFlow(flow.ID)
+				if !ok || !reflect.DeepEqual(saved, flow) {
+					return QuestionContext{}, core.ErrFeedbackStale
+				}
+				decisions, err := compactResultDecisions(state.Graph, flow.Contract.Decisions)
+				if err != nil {
+					return QuestionContext{}, err
+				}
+				projected = projected || !reflect.DeepEqual(decisions, flow.Contract.Decisions)
+				flow.Contract.Decisions = decisions
 				context.Flows = append(context.Flows, flow)
 			}
+		}
+		if projected {
+			context.Projection = "Prior result decisions retain exact saved results and source hashes, but omit recursively repeated instructions. Instruction hashes identify the original saved instruction, not this projection; task graph retains the full source."
 		}
 		context.Observation = nil
 		content, err := json.Marshal(context)
@@ -81,18 +151,25 @@ func ObserveQuestion(db *store.Store, ledgerPath, repository, taskID string) (Qu
 // Human approval. The caller supplies a separately bounded, isolated runtime.
 func AskQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text string, selected config.Config,
 	maxTokens int64, worker runtime.ConfigurationIdentity) (result QuestionResult, err error) {
-	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, maxTokens, worker, false)
+	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, maxTokens, worker, false, nil)
 }
 
 // AskPlanner recommends an action from saved Memory and results in an isolated
 // session. It cannot release a handoff, approve work or issue a Dispatch.
 func AskPlanner(ctx context.Context, db *store.Store, ledgerPath, taskID, text string, selected config.Config,
 	maxTokens int64, worker runtime.ConfigurationIdentity) (QuestionResult, error) {
-	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, maxTokens, worker, true)
+	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, maxTokens, worker, true, nil)
+}
+
+// AskInvestigation supplies bounded committed files to a tool-free isolated
+// question. Its new Git observation is not evidence of prior consideration.
+func AskInvestigation(ctx context.Context, db *store.Store, ledgerPath, taskID, text string, selected config.Config,
+	maxTokens int64, worker runtime.ConfigurationIdentity, request InvestigationRequest) (QuestionResult, error) {
+	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, maxTokens, worker, false, &request)
 }
 
 func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text string, selected config.Config,
-	maxTokens int64, worker runtime.ConfigurationIdentity, planner bool) (result QuestionResult, err error) {
+	maxTokens int64, worker runtime.ConfigurationIdentity, planner bool, investigation *InvestigationRequest) (result QuestionResult, err error) {
 	result.Usage = []core.DispatchUsage{}
 	if worker == nil || worker.Role() != "ORCHESTRATOR" || strings.TrimSpace(text) == "" || maxTokens <= 0 {
 		return result, fmt.Errorf("taxion: side question requires an isolated Orchestrator, text and explicit token ceiling")
@@ -124,16 +201,6 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 			return result, err
 		}
 	}
-	input, err := json.Marshal(struct {
-		Question string          `json:"question"`
-		Context  QuestionContext `json:"context"`
-	}{text, result.Context})
-	if err != nil {
-		return result, err
-	}
-	if len(input) > 128*1024 {
-		return result, fmt.Errorf("taxion: question and context exceed the 128 KiB input ceiling")
-	}
 	if err := worker.CheckAuthentication(ctx, selected.Runtime.Account); err != nil {
 		return result, err
 	}
@@ -152,6 +219,22 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 	}
 	if err := recheck(); err != nil {
 		return result, err
+	}
+	if investigation != nil {
+		result.Context.Investigation, err = investigateFiles(ctx, result.Context, *investigation)
+		if err != nil {
+			return result, err
+		}
+	}
+	input, err := json.Marshal(struct {
+		Question string          `json:"question"`
+		Context  QuestionContext `json:"context"`
+	}{text, result.Context})
+	if err != nil {
+		return result, err
+	}
+	if len(input) > 128*1024 {
+		return result, fmt.Errorf("taxion: question and context exceed the 128 KiB input ceiling")
 	}
 	result.SessionID, err = worker.Start(ctx, taskID)
 	if err != nil {
@@ -241,6 +324,8 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 					return result, err
 				}
 				result.Changed = now.Observation.ContentHash != result.Context.Observation.ContentHash
+				// The independently hashed Git observation is attached separately
+				// from the saved-record observation and never uses mutable HEAD.
 				result.Answer = &answer
 				return result, nil
 			}
@@ -286,7 +371,8 @@ func validateQuestionAnswer(answer QuestionAnswer, context QuestionContext) erro
 		for _, source := range claim.Sources {
 			// JSON pointers name the exact fields within the supplied context.
 			if !strings.HasPrefix(source, "/task/") && !strings.HasPrefix(source, "/flows/") && !strings.HasPrefix(source, "/observation/") &&
-				!(context.Planner != nil && strings.HasPrefix(source, "/planner/")) {
+				!(context.Planner != nil && strings.HasPrefix(source, "/planner/")) &&
+				!(context.Investigation != nil && strings.HasPrefix(source, "/investigation/")) {
 				return fmt.Errorf("taxion: question source must identify a supplied saved record")
 			}
 			current := records

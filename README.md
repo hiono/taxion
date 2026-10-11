@@ -91,9 +91,12 @@ taxion workflow run --id <flow-id> --coder-prompt-file <path> --reviewer-prompt-
 taxion workflow show --id <flow-id>
 taxion workflow planning-context --id <flow-id>
 taxion workflow planner-draft --file <selected-planning-proposal.json>
+taxion workflow question-draft --file <selected-question-findings.json>
 taxion conversation plan --task <id> --question "Repair or revisit the plan?" --max-tokens 8000 --timeout 2m --max-ai-credits 30
+taxion conversation investigate --task <id> --path src/app.go --question "What did the saved implementation miss?" --max-bytes 8192 --max-tokens 8000 --timeout 2m --max-ai-credits 30
 taxion workflow recover --file <recovery-confirmation.json>
 taxion workflow handoff --file <hold-or-release.json>
+taxion workflow interrupt --file <targeted-interruption.json>
 taxion workflow feedback-target --id <flow-id>
 taxion workflow feedback --file <targeted-feedback.json>
 taxion workflow feedback-resolve --file <keep-contract-decision.json>
@@ -154,6 +157,64 @@ identity. Semantic validity and contract preservation still require the explicit
 Human supplement approval. Scope, acceptance, identities or budget revisions,
 unattended Orchestrator-selected execution and new-request intake remain
 incomplete.
+
+Side-question observations also project prior result decisions in Task history,
+Dispatch instructions and flow contracts: exact results and their source hashes
+remain, but recursively repeated instructions are omitted. `projection` describes
+this when present; instruction hashes still identify the original saved records,
+which remain available through `task graph`. This uses no additional model call.
+
+`conversation investigate` performs a separate, explicitly bounded investigation.
+It checks the sourced configuration approval and fresh authentication/repository
+access, then reads only explicitly selected UTF-8 committed files within the
+saved scope and outside forbidden paths. The source is the last saved successful
+Coder SHA (or the Task baseline), **not mutable HEAD or working files**.
+`--path` is repeatable (1-16 files); `--max-bytes` is a required total source
+ceiling up to 65536. Overflow, missing files and binary content are errors, not
+truncated evidence. No shell commands, filters, external diff tools or model
+tools are permitted. The isolated question retains its usual explicit time,
+token and per-session credit ceilings and service admission check. New Git
+evidence has its own SHA, observation interval and content hash; it never implies
+the earlier role considered the file, ran tests or checked live execution.
+
+The watched equivalent is `/investigate PATH QUESTION`, using
+`--investigation-max-bytes` and the configured question ceilings.
+`/apply REVIEWER 0,2 HUMAN-INSTRUCTION` explicitly selects zero-based confirmed
+finding indices from the last successful question or investigation. Use `CODER`
+only after a saved independent `REQUEST_CHANGES` within the repair ceiling.
+The operation proposes an unapproved supplement, retaining selected claims,
+their citations, uncertainty, source targets, Memory versions and bounded
+investigation evidence. Unselected chat is not copied into the next instruction.
+`/approve` and `/step` remain separate. Changed records, forged source bytes/hash,
+invalid indices and incompatible roles are rejected. Failed questions clear the
+cached question answer; no ordinary question is automatically applied.
+`workflow question-draft --file PATH` accepts the same fields as `planner-draft`,
+plus `nextRole`, `selected` (integer indices) and `humanInstruction`, with
+`proposal` containing the exact `conversation ask|investigate` result. Imported
+responses and session identifiers are supplied provenance, not proof of model
+origin. Approval must still assess the selected reasoning and unchanged contract.
+
+`workflow interrupt` takes `flowId`, `id`, `expectedChangeId`, the displayed
+`target`, `actor`, `source` and `reason`. It atomically saves a targeted interruption
+request and handoff hold. A running Dispatch becomes `CANCEL_REQUESTED`, without
+inventing a stopped result or cancelling the Task. The owning runner observes
+that state and performs runtime safe stop; only successful stop records
+`runtime-stop:` evidence and a cancelled Dispatch. Failed stop stays unconfirmed
+and blocks continuation. Issued/unstarted execution is held without fictitious
+stop evidence. Exact input replay cannot interrupt another role; ended or stale
+targets are rejected. Partial files and Git history are never rolled back.
+If no runner owns the active session, attach its exact saved configuration with
+`runtime stop`, then reconcile ownership before any newly authorized execution.
+
+Watched `/interrupt` (or `いま止める`) is distinct from `/hold` and Task cancellation.
+`conversation watch --interactive-execution` opts into accepting Human input
+while its selected `/step` or `/auto` runs. It rejects a second owned run, reports
+progress and execution failures, and keeps targeted hold/interruption operations
+available. EOF or `/quit` safely interrupts **only this console's owned execution**
+and waits for cleanup; another process's execution is not cancelled. Without the
+flag, watched execution remains synchronous. Noninteractive workflow defaults
+and the immutable flow ceilings are unchanged. Interruption stops the flow;
+it is not permission to resume or to change the contract.
 
 `runtime` and `workflow run|step` accept `--compact-context` to omit recursively
 nested prior instructions from the role prompt. Exact prior results, findings,
