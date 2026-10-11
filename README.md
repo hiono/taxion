@@ -245,34 +245,49 @@ generated, unissued GitHub-token-shaped fixture were checked locally, without
 API validation. Findings are not automatically allowlisted or treated as
 proof that a credential is active.
 
-Install the path-only pre-commit hook explicitly from a persistent Taxion
+Install the pre-commit hook explicitly from a persistent Taxion
 binary:
 
 ```bash
-taxion git hook install --paths-only
+taxion git hook install --scanner /absolute/path/to/betterleaks
 taxion git hook status
 taxion git hook uninstall
 ```
+
+`install` without options finds Betterleaks on PATH and requires version
+`1.9.0`; it does not fall back to path-only protection when the scanner is
+missing. The full hook runs `git check-index --secrets` using its recorded
+scanner. To explicitly accept only prohibited-path checks, use
+`taxion git hook install --paths-only` instead. Combining `--paths-only` with
+`--scanner` is an error.
 
 The installer uses Git's effective hooks directory, including `core.hooksPath`
 and linked worktrees; a shared hooks location affects every repository or
 worktree using it. It creates a hook only when none exists and leaves custom,
 edited, nonexecutable, and symlink hooks unchanged with an explicit error.
-For an existing hook, integrate `taxion git check-index` manually while
+For an existing hook, integrate
+`taxion git check-index --secrets --scanner /absolute/path/to/betterleaks` manually while
 preserving its existing checks. Reinstallation of the identical hook is
 idempotent; uninstall removes only the exact hook for the running binary.
+An existing path-only hook is not upgraded automatically. To change modes or
+scanner paths, explicitly uninstall the old managed hook and install the
+desired one. Custom or edited hooks require manual review.
 
-The hook records that binary's absolute path, including shell quoting.
+The hook records the Taxion and scanner absolute paths, including shell quoting.
 Use the same installation path for status and uninstall. A moved or edited
 installation requires manual review rather than automatic replacement.
 Do not install using `go run`: its temporary executable will disappear.
-Status checks that the hook and binary are executable; a missing binary
-causes hook execution to fail and stops the commit. Installation currently
+Status recognizes the installed mode, checks that the hook and Taxion binary
+are executable, and verifies the recorded scanner's version for full hooks.
+Missing or incompatible scanners stop commits and make status fail.
+Uninstall of an exact hook still works when its scanner has disappeared.
+A missing Taxion binary also stops the commit. Installation currently
 requires Unix executable permissions.
 
-`--paths-only` explicitly accepts limited coverage: this generated hook does
-not invoke the content scanner. The `--secrets` check is separate until full
-hook integration is completed. Local hooks can be skipped with `--no-verify`, replaced, or
+`--paths-only` explicitly accepts limited coverage and does not invoke the
+content scanner. Full hooks retain the documented scanner rule and path-filter
+limits. Both modes use Git's actual index, including partial commit indexes.
+Local hooks can be skipped with `--no-verify`, replaced, or
 disabled and are not carried into new clones. The controller must enforce
 its own commit check independently; that connection remains in #72.
 

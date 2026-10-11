@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 
 	"github.com/hiono/taxion/internal/gitguard"
 )
@@ -55,19 +57,43 @@ func checkGitIndex(args []string, output io.Writer) error {
 
 func gitHook(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("git hook requires install --paths-only, status, or uninstall")
+		return fmt.Errorf("git hook requires install [--scanner PATH | --paths-only], status, or uninstall")
 	}
+	var scannerPath string
 	switch args[0] {
 	case "install":
-		if len(args) != 2 || args[1] != "--paths-only" {
-			return fmt.Errorf("git hook install requires --paths-only; secret content scanning is not yet available")
+		fs := flag.NewFlagSet("git hook install", flag.ContinueOnError)
+		pathsOnly := fs.Bool("paths-only", false, "explicitly install without secret content scanning")
+		scanner := fs.String("scanner", "betterleaks", "trusted Betterleaks 1.9.0 executable")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 {
+			return fmt.Errorf("git hook install accepts no positional arguments")
+		}
+		scannerSelected := false
+		fs.Visit(func(option *flag.Flag) {
+			scannerSelected = scannerSelected || option.Name == "scanner"
+		})
+		if *pathsOnly && scannerSelected {
+			return fmt.Errorf("git hook install --paths-only cannot select a scanner")
+		}
+		if !*pathsOnly {
+			path, err := exec.LookPath(*scanner)
+			if err != nil {
+				return fmt.Errorf("required Betterleaks scanner is unavailable; install version 1.9.0 or explicitly select --paths-only")
+			}
+			scannerPath, err = filepath.Abs(path)
+			if err != nil {
+				return fmt.Errorf("resolve hook scanner: %w", err)
+			}
 		}
 	case "status", "uninstall":
 		if len(args) != 1 {
 			return fmt.Errorf("git hook status and uninstall accept no options or positional arguments")
 		}
 	default:
-		return fmt.Errorf("git hook requires install --paths-only, status, or uninstall")
+		return fmt.Errorf("git hook requires install [--scanner PATH | --paths-only], status, or uninstall")
 	}
 	directory, err := os.Getwd()
 	if err != nil {
@@ -77,11 +103,13 @@ func gitHook(args []string, output io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("locate Taxion hook executable: %w", err)
 	}
-	installed, err := gitguard.ManageHook(context.Background(), directory, executable, args[0])
+	installed, secrets, err := gitguard.ManageConfiguredHook(context.Background(), directory, executable, args[0], scannerPath)
 	if err != nil {
 		return err
 	}
-	if installed {
+	if installed && secrets {
+		_, err = fmt.Fprintln(output, "Taxion pre-commit hook is installed for prohibited paths and local Betterleaks 1.9.0 content checks at Git's effective hooks location (possibly shared). Detection has documented limits; local hooks can be bypassed.")
+	} else if installed {
 		_, err = fmt.Fprintln(output, "Taxion pre-commit hook is installed for prohibited paths only at Git's effective hooks location (possibly shared). Secret content scanning is not configured; local hooks can be bypassed.")
 	} else {
 		_, err = fmt.Fprintln(output, "Taxion pre-commit hook is not installed. Commits are not automatically checked by Taxion.")

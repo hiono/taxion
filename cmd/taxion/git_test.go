@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,7 +66,8 @@ func TestGitHookExplicitPathOnlyLifecycle(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{
-		{"hook"}, {"hook", "install"}, {"hook", "install", "--scanner"},
+		{"hook"}, {"hook", "install", "--scanner", "/missing-betterleaks"}, {"hook", "install", "--scanner"},
+		{"hook", "install", "--paths-only", "--scanner", "betterleaks"},
 		{"hook", "status", "extra"}, {"hook", "uninstall", "--force"}, {"hook", "replace"},
 	} {
 		var output bytes.Buffer
@@ -120,6 +122,52 @@ func TestGitInstalledHookWithPersistentCLI(t *testing.T) {
 	}
 	run("git", "hook", "uninstall")
 	run("git", "hook", "status")
+	git("rm", "--cached", ".env")
+	scanner := filepath.Join(t.TempDir(), "scanner binary's path")
+	script := "#!/bin/sh\nif [ \"$1\" = version ]; then printf '1.9.0\\n'; exit 0; fi\ncontent=$(cat)\ncase \"$content\" in *fake-private-payload*) printf '[{\"Secret\":\"private-payload\"}]'; exit 10;; esac\nprintf '[]'\n"
+	if err := os.WriteFile(scanner, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	run("git", "hook", "install", "--scanner", scanner)
+	run("git", "hook", "status")
+	git("commit", "--allow-empty", "-qm", "full hook safe baseline")
+	if err := os.WriteFile(filepath.Join(root, "source.txt"), []byte("fake-private-payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "source.txt")
+	head, index = git("rev-parse", "HEAD"), git("ls-files", "--stage")
+	command = exec.Command("git", "-C", root, "commit", "-qm", "must reject source copy")
+	output, err = command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "potential secret findings") ||
+		strings.Contains(string(output), "private-payload") {
+		t.Fatal("full hook did not safely reject source finding", string(output), err)
+	}
+	if head != git("rev-parse", "HEAD") || index != git("ls-files", "--stage") {
+		t.Fatal("full hook rejection changed HEAD or index")
+	}
+	if err := os.WriteFile(filepath.Join(root, "safe.txt"), []byte("safe change"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "safe.txt")
+	git("commit", "--only", "safe.txt", "-qm", "safe full-hook partial commit")
+	if err := os.Remove(scanner); err != nil {
+		t.Fatal(err)
+	}
+	head = git("rev-parse", "HEAD")
+	command = exec.Command("git", "-C", root, "commit", "--allow-empty", "-qm", "missing scanner")
+	if _, err := command.CombinedOutput(); err == nil {
+		t.Fatal("full hook allowed commit with missing scanner")
+	}
+	if head != git("rev-parse", "HEAD") {
+		t.Fatal("missing scanner rejection advanced HEAD")
+	}
+	status := exec.Command(executable, "git", "hook", "status")
+	status.Dir = root
+	if _, err := status.CombinedOutput(); err == nil {
+		t.Fatal("full hook status ignored missing scanner")
+	}
+	run("git", "hook", "uninstall")
+	run("git", "hook", "status")
 }
 
 func TestGitCheckIndexSecretMode(t *testing.T) {
@@ -146,5 +194,66 @@ func TestGitCheckIndexSecretMode(t *testing.T) {
 		if err := checkGitIndex(args, &output); err == nil || output.Len() != 0 {
 			t.Fatal("invalid secret invocation succeeded", args, err)
 		}
+	}
+}
+
+func TestGitFullHookWithPinnedBetterleaks(t *testing.T) {
+	scanner := os.Getenv("TAXION_TEST_BETTERLEAKS")
+	if scanner == "" {
+		t.Skip("set TAXION_TEST_BETTERLEAKS to verified Betterleaks 1.9.0")
+	}
+	executable := filepath.Join(t.TempDir(), "taxion")
+	if output, err := exec.Command("go", "build", "-o", executable, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build hook executable: %s: %v", output, err)
+	}
+	root := t.TempDir()
+	run := func(program string, args ...string) ([]byte, error) {
+		command := exec.Command(program, args...)
+		command.Dir = root
+		return command.CombinedOutput()
+	}
+	for _, args := range [][]string{
+		{"init", "-q"}, {"config", "user.name", "Test"}, {"config", "user.email", "test@example.com"},
+	} {
+		if output, err := run("git", args...); err != nil {
+			t.Fatalf("prepare Git: %s: %v", output, err)
+		}
+	}
+	if output, err := run(executable, "git", "hook", "install", "--scanner", scanner); err != nil {
+		t.Fatalf("install real scanner hook: %s: %v", output, err)
+	}
+	if output, err := run("git", "commit", "--allow-empty", "-qm", "safe baseline"); err != nil {
+		t.Fatalf("safe real scanner commit: %s: %v", output, err)
+	}
+	random := rand.New(rand.NewSource(72))
+	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	var token strings.Builder
+	token.WriteString("ghp_")
+	for range 36 {
+		token.WriteByte(alphabet[random.Intn(len(alphabet))])
+	}
+	// Generated fixture, never issued and never sent to credential validation.
+	payload := "token = \"" + token.String() + "\"\n"
+	if err := os.WriteFile(filepath.Join(root, "source.txt"), []byte(payload), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := run("git", "add", "source.txt"); err != nil {
+		t.Fatalf("stage fixture: %s: %v", output, err)
+	}
+	before, err := run("git", "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := run("git", "commit", "-qm", "must reject fixture")
+	if err == nil || !strings.Contains(string(output), "potential secret findings") ||
+		strings.Contains(string(output), token.String()) {
+		t.Fatal("real scanner hook failed to safely reject generated fixture", err)
+	}
+	after, err := run("git", "rev-parse", "HEAD")
+	if err != nil || string(before) != string(after) {
+		t.Fatal("real scanner rejection changed HEAD", err)
+	}
+	if output, err := run(executable, "git", "hook", "uninstall"); err != nil {
+		t.Fatalf("remove real scanner hook: %s: %v", output, err)
 	}
 }

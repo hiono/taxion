@@ -169,3 +169,96 @@ func TestHookRejectsInvalidInputs(t *testing.T) {
 		t.Fatal("cancelled path inspection accepted")
 	}
 }
+
+func TestContentHookLifecycleAndMissingScanner(t *testing.T) {
+	root := t.TempDir()
+	gitTest(t, root, "init", "-q")
+	scanner := fakeScanner(t, "clean")
+	for _, operation := range []string{"install", "install", "status"} {
+		selected := scanner
+		if operation == "status" {
+			selected = ""
+		}
+		installed, secrets, err := ManageConfiguredHook(context.Background(), root, os.Args[0], operation, selected)
+		if err != nil || !installed || !secrets {
+			t.Fatal("full hook lifecycle failed", operation, err)
+		}
+	}
+	if err := os.Remove(scanner); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ManageConfiguredHook(context.Background(), root, os.Args[0], "status", ""); err == nil {
+		t.Fatal("missing stored scanner reported healthy")
+	}
+	if installed, _, err := ManageConfiguredHook(context.Background(), root, os.Args[0], "uninstall", ""); err != nil || installed {
+		t.Fatal("scanner missing prevented exact hook removal", err)
+	}
+	if _, _, err := ManageConfiguredHook(context.Background(), root, os.Args[0], "install", scanner); err == nil {
+		t.Fatal("missing scanner installation accepted")
+	}
+	path := filepath.Join(root, ".git", "hooks", "pre-commit")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("missing scanner created a hook", err)
+	}
+	scanner = fakeScanner(t, "clean")
+	if err := os.WriteFile(scanner, []byte("#!/bin/sh\nprintf '2.0.0\\n'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ManageConfiguredHook(context.Background(), root, os.Args[0], "install", scanner); err == nil {
+		t.Fatal("wrong scanner version installed")
+	}
+}
+
+func TestHookModesRequireExplicitRemovalToSwitch(t *testing.T) {
+	root := t.TempDir()
+	gitTest(t, root, "init", "-q")
+	scanner := fakeScanner(t, "clean")
+	if _, err := ManageHook(context.Background(), root, os.Args[0], "install"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".git", "hooks", "pre-commit")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ManageConfiguredHook(context.Background(), root, os.Args[0], "install", scanner); err == nil {
+		t.Fatal("path-only hook silently upgraded")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(before) != string(after) {
+		t.Fatal("existing path-only hook changed", err)
+	}
+	if _, err := ManageHook(context.Background(), root, os.Args[0], "uninstall"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ManageConfiguredHook(context.Background(), root, os.Args[0], "install", scanner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ManageHook(context.Background(), root, os.Args[0], "install"); err == nil {
+		t.Fatal("content hook silently downgraded")
+	}
+}
+
+func TestFullHookScannerReferenceDoesNotAuthorizeEditedScript(t *testing.T) {
+	root := t.TempDir()
+	gitTest(t, root, "init", "-q")
+	scanner := fakeScanner(t, "clean")
+	script, err := secretHookScript(os.Args[0], scanner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script = append(script, []byte("# additional custom behavior\n")...)
+	path := filepath.Join(root, ".git", "hooks", "pre-commit")
+	if err := os.WriteFile(path, script, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"status", "uninstall"} {
+		if _, _, err := ManageConfiguredHook(context.Background(), root, os.Args[0], operation, ""); err == nil {
+			t.Fatal("metadata accepted edited script", operation)
+		}
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(script) {
+		t.Fatal("edited script changed", err)
+	}
+}

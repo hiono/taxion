@@ -47,14 +47,8 @@ func CheckSecrets(ctx context.Context, directory, scanner string) error {
 	// HOME and the working directory are private and empty; explicit config and
 	// disabled validation avoid project discovery and credential API requests.
 	environment := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + temporary}
-	version := exec.CommandContext(ctx, executable, "version")
-	version.Dir, version.Env = temporary, environment
-	output, err := version.Output()
-	if ctx.Err() != nil {
-		return fmt.Errorf("secret scan interrupted: %w", ctx.Err())
-	}
-	if err != nil || strings.TrimSpace(string(output)) != ScannerVersion {
-		return fmt.Errorf("secret scan requires Betterleaks %s; scanner version could not be verified", ScannerVersion)
+	if err := verifyScanner(ctx, executable, temporary, environment); err != nil {
+		return err
 	}
 	findings := 0
 	for _, entry := range entries {
@@ -107,6 +101,19 @@ func CheckSecrets(ctx context.Context, directory, scanner string) error {
 	}
 	if findings != 0 {
 		return fmt.Errorf("commit index contains %d potential secret findings; review indexed content before committing", findings)
+	}
+	return nil
+}
+
+func verifyScanner(ctx context.Context, executable, directory string, environment []string) error {
+	version := exec.CommandContext(ctx, executable, "version")
+	version.Dir, version.Env = directory, environment
+	output, err := version.Output()
+	if ctx.Err() != nil {
+		return fmt.Errorf("secret scan interrupted: %w", ctx.Err())
+	}
+	if err != nil || strings.TrimSpace(string(output)) != ScannerVersion {
+		return fmt.Errorf("secret scan requires Betterleaks %s; scanner version could not be verified", ScannerVersion)
 	}
 	return nil
 }
