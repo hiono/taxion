@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,6 +44,7 @@ type Config struct {
 	ResponseSchema   map[string]any
 	ManagedCommit    *runtime.ManagedCommit
 	Configuration    json.RawMessage
+	MaxAICredits     float64
 }
 
 type Adapter struct {
@@ -83,6 +85,9 @@ func (s *subscription) close() {
 
 // New creates one isolated Copilot client for a single role and worktree.
 func New(config Config) (*Adapter, error) {
+	if err := ValidateAICreditLimit(config.MaxAICredits); err != nil {
+		return nil, err
+	}
 	config.Role = strings.ToUpper(strings.TrimSpace(config.Role))
 	if !slices.Contains([]string{"ORCHESTRATOR", "CODER", "REVIEWER", "PLANNER"}, config.Role) {
 		return nil, fmt.Errorf("taxion: unsupported runtime role %q", config.Role)
@@ -219,6 +224,7 @@ func (a *Adapter) ConfigHash() string {
 		ManagedCommit       *runtime.ManagedCommit `json:",omitempty"`
 		ManagedCommitPolicy string                 `json:",omitempty"`
 		Configuration       json.RawMessage        `json:",omitempty"`
+		MaxAICredits        float64                `json:",omitempty"`
 	}{
 		Role:                a.config.Role,
 		SystemPrompt:        a.config.SystemPrompt,
@@ -231,6 +237,7 @@ func (a *Adapter) ConfigHash() string {
 		ManagedCommit:       a.config.ManagedCommit,
 		ManagedCommitPolicy: managedCommitPolicy,
 		Configuration:       a.config.Configuration,
+		MaxAICredits:        a.config.MaxAICredits,
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -552,6 +559,7 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 		EnableFileHooks:                    &disabled,
 		EnableOnDemandInstructionDiscovery: &disabled,
 		InfiniteSessions:                   infiniteSessions(),
+		SessionLimits:                      a.sessionLimits(),
 		OnPermissionRequest:                a.permissionHandler(),
 		OnEvent:                            onEvent,
 	}
@@ -571,9 +579,26 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		EnableFileHooks:                    &disabled,
 		EnableOnDemandInstructionDiscovery: &disabled,
 		InfiniteSessions:                   infiniteSessions(),
+		SessionLimits:                      a.sessionLimits(),
 		OnPermissionRequest:                a.permissionHandler(),
 		OnEvent:                            onEvent,
 	}
+}
+
+// ValidateAICreditLimit follows the CLI's soft-cap minimum; zero leaves limits unset.
+func ValidateAICreditLimit(limit float64) error {
+	if math.IsNaN(limit) || math.IsInf(limit, 0) || limit != 0 && limit < 30 {
+		return fmt.Errorf("taxion: AI credit limit must be finite and either zero (unset) or at least 30")
+	}
+	return nil
+}
+
+func (a *Adapter) sessionLimits() *rpc.SessionLimitsConfig {
+	if a.config.MaxAICredits == 0 {
+		return nil
+	}
+	limit := a.config.MaxAICredits
+	return &rpc.SessionLimitsConfig{MaxAiCredits: &limit}
 }
 
 func infiniteSessions() *sdk.InfiniteSessionConfig {

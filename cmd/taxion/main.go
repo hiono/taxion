@@ -490,6 +490,7 @@ func runtimeCmd(args []string) error {
 	systemPromptFile := fs.String("system-prompt-file", "", "role-specific system prompt")
 	cliPath := fs.String("cli", "", "Copilot CLI path (default: PATH)")
 	baseDirectory := fs.String("base-directory", "", "Copilot state directory (default: ~/.copilot)")
+	maxAICredits := fs.Float64("max-ai-credits", 0, "per-session soft AI-credit ceiling (zero: unset; minimum: 30)")
 	reviewSource := fs.String("review-source-worktree", "", "repository worktree used to create the independent Reviewer worktree")
 	tools := fs.String("tools", "", "comma-separated SDK tool allowlist (default: none)")
 	promptFile := fs.String("prompt-file", "", "follow-up instruction file (send only)")
@@ -499,6 +500,9 @@ func runtimeCmd(args []string) error {
 	managedStage := fs.Bool("managed-stage", false, "enable taxion_stage alongside --managed-commit")
 	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for a turn or event stream")
 	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := copilot.ValidateAICreditLimit(*maxAICredits); err != nil {
 		return err
 	}
 	if *dispatchID == "" || *systemPromptFile == "" {
@@ -597,6 +601,7 @@ func runtimeCmd(args []string) error {
 		Role: dispatch.Recipient, SystemPrompt: runtimeSystemPrompt(string(systemPrompt), dispatchContract),
 		WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: *cliPath,
 		BaseDirectory: *baseDirectory, AvailableTools: availableTools,
+		MaxAICredits:   *maxAICredits,
 		ResponseSchema: dispatchResultSchema(dispatch),
 	}, *managedCommit, *managedStage, *scanner)
 	if err != nil {

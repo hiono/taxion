@@ -28,6 +28,7 @@ func workflowCmd(args []string) error {
 	var managedCommit bool
 	var managedStage bool
 	var scanner string
+	var maxAICredits float64
 	switch action {
 	case "start", "recover", "handoff", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
@@ -39,6 +40,7 @@ func workflowCmd(args []string) error {
 		fs.StringVar(&reviewerPrompt, "reviewer-prompt-file", "", "Reviewer system prompt")
 		fs.StringVar(&cli, "cli", "", "Copilot CLI path")
 		fs.StringVar(&base, "base-directory", "", "Copilot state directory")
+		fs.Float64Var(&maxAICredits, "max-ai-credits", 0, "per-session soft AI-credit ceiling, not a flow-wide budget (zero: unset; minimum: 30)")
 		fs.StringVar(&coderTools, "coder-tools", "", "comma-separated Coder SDK tool allowlist")
 		fs.StringVar(&reviewerTools, "reviewer-tools", "", "comma-separated Reviewer SDK tool allowlist")
 		fs.BoolVar(&managedCommit, "managed-commit", false, "enable the Coder's bound taxion_commit SDK tool")
@@ -48,6 +50,9 @@ func workflowCmd(args []string) error {
 		return fmt.Errorf("unknown workflow action %q", action)
 	}
 	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := copilot.ValidateAICreditLimit(maxAICredits); err != nil {
 		return err
 	}
 	var scannerSpecified bool
@@ -218,6 +223,7 @@ func workflowCmd(args []string) error {
 			return newDispatchWorker(ctx, db, dispatch, copilot.Config{
 				Role: dispatch.Recipient, SystemPrompt: runtimeSystemPrompt(prompts[dispatch.Recipient], contract),
 				WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: cli, BaseDirectory: base,
+				MaxAICredits:   maxAICredits,
 				AvailableTools: tools[dispatch.Recipient], ResponseSchema: dispatchResultSchema(dispatch),
 			}, managedCommit && dispatch.Recipient == "CODER", managedStage && dispatch.Recipient == "CODER", scanner)
 		}, os.Stdout)

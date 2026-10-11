@@ -608,6 +608,22 @@ permission requests, while host and external tools use their own security
 controls. Resume verifies that the prompt, CLI, worktree, and tool configuration
 match the persisted hash.
 
+`runtime` commands and `workflow run` accept `--max-ai-credits` for an
+optional SDK session soft ceiling. Zero (the default) leaves it unset; other
+values must be finite and at least 30. Start and resume supply the same limit
+to the SDK, and the value participates in the saved session hash. Repeat it
+when sending, resuming, observing, committing or stopping that session.
+Omitting or changing it cannot silently alter an existing binding.
+
+The SDK measures credits after responses, so the final response can exceed
+the ceiling before further model calls are blocked. Credits and token counts
+are separate units. On `workflow run`, the flag applies independently to each
+Coder or Reviewer session; it is **not an aggregate workflow budget**. A shared
+experiment ceiling requires separate cumulative accounting and conservative
+per-session allocations. Existing workflow token, time and repair ceilings
+remain unchanged. Do not publish personal billing receipts in repository
+documentation or execution evidence.
+
 `task plan --repo <repo>` reconstructs follow-up actions from the SQLite Task
 Graph and referenced Memory. It retains deferred Tasks, their sources and resume
 conditions, existing decisions, and each Dispatch's issued contract and result.
