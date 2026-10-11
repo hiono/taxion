@@ -28,9 +28,19 @@ type configuredRuntime struct {
 	onAuth           func()
 	onStart          func()
 	onResume         func()
+	serviceErr       error
+	serviceChecks    int
+	onService        func()
 }
 
 func (f *configuredRuntime) ExecutionConfiguration() json.RawMessage { return f.selection }
+func (f *configuredRuntime) CheckServiceAccess(context.Context, string) error {
+	f.serviceChecks++
+	if f.onService != nil {
+		f.onService()
+	}
+	return f.serviceErr
+}
 func (f *configuredRuntime) CheckRepositoryAccess(context.Context) error {
 	f.repositoryChecks++
 	if f.onRepository != nil {

@@ -176,6 +176,7 @@ func (c *Controller) authorizeExecution(ctx context.Context, dispatchID, operati
 	if err != nil {
 		return err
 	}
+
 	if !state.HasGraph {
 		return fmt.Errorf("taxion: execution configuration requires a Task Graph")
 	}
@@ -209,4 +210,34 @@ func (c *Controller) authorizeExecution(ctx context.Context, dispatchID, operati
 		}
 		return state.Graph.RecordDispatchAccessCheck(dispatchID, operation, c.runtime.ConfigHash(), startedAt, completedAt)
 	})
+}
+
+func (c *Controller) checkServiceAccess(ctx context.Context, dispatchID, sessionID string) error {
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	candidate, err := c.checkExecutionConfiguration(state.Graph, dispatchID)
+	if err != nil || candidate.Version == 0 {
+		return err
+	}
+	worker, ok := c.runtime.(runtime.ConfigurationIdentity)
+	if !ok {
+		return fmt.Errorf("taxion: runtime does not support provider service access checks")
+	}
+	if err := worker.CheckServiceAccess(ctx, sessionID); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	state, err = c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	if err := state.Graph.CheckHandoffStart(dispatchID); err != nil {
+		return err
+	}
+	_, err = c.checkExecutionConfiguration(state.Graph, dispatchID)
+	return err
 }

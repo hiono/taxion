@@ -79,7 +79,7 @@ func checkConfig(args []string, output io.Writer) error {
 		}
 	}
 	if *capabilities {
-		if _, err := fmt.Fprintf(output, "repository.access.adapter: %s\nruntime.adapter: COPILOT_SDK\nruntime.contract.verification: UNIMPLEMENTED\nruntime.contract.billing: UNIMPLEMENTED\nImplementation coverage only; credentials, live access and contract eligibility have not been verified.\n",
+		if _, err := fmt.Fprintf(output, "repository.access.adapter: %s\nruntime.adapter: COPILOT_SDK\nruntime.service.access: COPILOT_SESSION_QUOTA\nruntime.contract.verification: UNIMPLEMENTED\nruntime.contract.billing: UNIMPLEMENTED\nImplementation coverage only; credentials, live access and contract eligibility have not been verified.\n",
 			forge.RepositoryAccessAdapter(resolved.Config)); err != nil {
 			return err
 		}

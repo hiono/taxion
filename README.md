@@ -469,7 +469,7 @@ The execution contract distinguishes these facts:
 | --- | --- |
 | Authentication | A fresh provider query confirms the selected effective account. Possessing a credential alone does not prove a match. |
 | Authorization | The current Task and immutable Dispatch instruction carry the same sourced approval for the complete selected tuple. Provider access is checked separately. |
-| AI eligibility | The provider determines service eligibility. `contractRef` names the intended agreement; it does not select an SDK billing agreement or prove eligibility. Connecting available official API evidence and Human-approved usage grounds remains unimplemented; independent contract authentication is out of scope. |
+| AI eligibility | The provider determines service eligibility. Selected Dispatches check the official session quota API's explicit account access/capacity verdicts alongside their sourced Human approval. `contractRef` names the intended agreement; it does not select an SDK billing agreement or prove contractual eligibility. Independent contract authentication is out of scope. |
 | Contractual payer | The party responsible for payment comes from the agreement or an authorized external record, not the account name or token owner. Provider payer/invoice information is unavailable through the implemented adapter. |
 | Measured use | Tokens, model cost multipliers and AI credits are distinct quantities. Complete private SDK usage receipts can report measured credits; missing or incomplete reports are unconfirmed, never zero or free. The optional SDK credit ceiling is per session and soft, not a project budget or bill. |
 
@@ -499,9 +499,10 @@ including nested namespace paths, and `copilot` runtime identities. This
 describes configuration, not implemented adapter coverage. Checking a file
 performs no network calls or credential resolution and does not validate
 approval authority, account access, or contract eligibility. Runtime and workflow
-commands bind the selected tuple and check its recorded approval and effective
-Copilot account. Repository actor selection and contract eligibility remain
-tracked in [#69](https://github.com/hiono/taxion/issues/69).
+commands bind the selected tuple and check its recorded approval, effective
+Copilot account, repository permissions and provider service state as described
+below. Contractual eligibility and payer remain unverified; the responsibility
+boundary is tracked in [#69](https://github.com/hiono/taxion/issues/69).
 TOML and JSON configuration inputs are future extensions; existing JSON APIs
 and machine artifacts keep their current formats.
 
@@ -543,7 +544,15 @@ mixed. The Task repository path and approval reference must match, and pending
 Human decisions and terminal Tasks are rejected. Checking preserves the Task
 state. A recorded decision is local authorization evidence: this command does
 not authenticate its author, validate external credentials, or authorize a
-runtime operation. Those gates and durable runtime bindings remain in #69.
+runtime operation. Runtime operations perform the independent checks below.
+
+The Human approval's `reason` records the intended use and its approved basis
+for the selected account and `contractRef`; its `source` identifies the actual
+decision. Start/resume/send require this same sourced record in both the current
+Task and issued Dispatch, before and after provider checks. A reference alone
+or a successful provider query is not Human approval. Taxion checks the record
+and tuple, not the legal truth of a free-text reason, and cannot identify a payer
+from the provider quota response.
 
 `config check --dispatch <dispatch-id>` checks the same fixed Global/Project
 files and environment against both the current Task approval and the saved
@@ -617,6 +626,22 @@ a new session binding and before marking execution running. Selected
 Dispatches also recheck their tuple and approval inside the managed Git
 authorization transaction. These checks do not establish contract eligibility
 or resolve arbitrary protected credential-store references.
+
+Selected Dispatches also query the session's provider quota API after creation
+or attachment, and again before every instruction send. The Copilot adapter
+requires a successfully acquired account snapshot with explicit allowed (or
+quota-not-required) access and available, unlimited, not-required or
+not-applicable capacity. Missing observations, denied access, exhaustion,
+unknown states and query failures stop execution; numeric balances, plan names
+and model catalogs do not substitute for these verdicts. A rejected new session
+is disconnected before binding; resumed sessions remain bound and can be safely
+stopped. Admission observations from earlier turns are not reused as account
+snapshots. This model-free check is a point-in-time provider observation, not a
+guarantee that the next request will be admitted, a billing contract check or a
+usage ceiling. Provider errors during the actual request remain authoritative.
+The existing access receipts still describe only the preceding authentication
+and repository checks; no service or payer verification is inferred from them.
+Configuration-less legacy controllers retain their previous behavior.
 
 Repository access currently supports GitHub.com through `gh api`. Set
 `repository.credentialRef: gh:active` to use the stored `gh` login, with ambient

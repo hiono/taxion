@@ -34,7 +34,19 @@ type Runtime interface {
   The first observation fixes the checked runtime identity even before a session
   exists. Earlier checks are not reused after restart; absent legacy observations
   imply no confirmation. These checks are not AI contract verification or Git push
-  authentication. Safe stop does not require either check.
+  authentication. After session creation/attachment, and before each model send,
+  selected Dispatches also call the adapter's SDK-neutral `CheckServiceAccess`.
+  The Copilot adapter queries `session.quota.get`, requires successfully acquired
+  account snapshots with explicit service access and capacity, and rejects missing,
+  denied, exhausted or unknown observations without consulting numeric balances.
+  A prior turn's admission observation is not an account snapshot. Approval is
+  rechecked after this query; a rejected newly created session is stopped without
+  binding it. These observations are not added to the preceding access receipts
+  and do not identify the payer or guarantee future admission. Safe stop bypasses
+  all three external checks. Configuration-less legacy controllers are unchanged.
+  The same sourced Human approval must cover the selected account and contract
+  reference in the current Task and issued instruction. Its reason records the
+  approved use; checking that record does not verify the legal truth of its text.
 ## Adapters
 
 - `internal/runtime/local`: in-process reference adapter for state transitions.

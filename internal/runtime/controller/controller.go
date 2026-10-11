@@ -120,11 +120,20 @@ func (c *Controller) Start(ctx context.Context, dispatchID string) (string, erro
 		if err := c.runtime.Resume(ctx, dispatch.RuntimeSessionID); err != nil {
 			return "", err
 		}
+		if err := c.checkServiceAccess(ctx, dispatchID, dispatch.RuntimeSessionID); err != nil {
+			return "", err
+		}
 		return dispatch.RuntimeSessionID, nil
 	}
 
 	sessionID, err := c.runtime.Start(ctx, dispatch.TaskID)
 	if err != nil {
+		return "", err
+	}
+	if err := c.checkServiceAccess(ctx, dispatchID, sessionID); err != nil {
+		if stopErr := c.runtime.Stop(ctx, sessionID); stopErr != nil {
+			return "", errors.Join(err, fmt.Errorf("taxion: stop unbound runtime session: %w", stopErr))
+		}
 		return "", err
 	}
 	err = c.store.UpdateWorkspace(func(state *store.Workspace) error {
@@ -167,6 +176,9 @@ func (c *Controller) Send(ctx context.Context, dispatchID, prompt string) error 
 	if err := c.runtime.Resume(ctx, dispatch.RuntimeSessionID); err != nil {
 		return err
 	}
+	if err := c.checkServiceAccess(ctx, dispatchID, dispatch.RuntimeSessionID); err != nil {
+		return err
+	}
 	if err := c.markRunning(dispatchID); err != nil {
 		return err
 	}
@@ -190,7 +202,10 @@ func (c *Controller) Resume(ctx context.Context, dispatchID string) error {
 	if err := c.authorizeExecution(ctx, dispatchID, "RESUME"); err != nil {
 		return err
 	}
-	return c.runtime.Resume(ctx, dispatch.RuntimeSessionID)
+	if err := c.runtime.Resume(ctx, dispatch.RuntimeSessionID); err != nil {
+		return err
+	}
+	return c.checkServiceAccess(ctx, dispatchID, dispatch.RuntimeSessionID)
 }
 
 func (c *Controller) Stop(ctx context.Context, dispatchID string) error {

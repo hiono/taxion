@@ -59,6 +59,7 @@ execution: {requester: private-requester, worker: private-worker, approvalRef: p
 			for _, expected := range []string{
 				"repository.access.adapter: " + test.adapter,
 				"runtime.adapter: COPILOT_SDK",
+				"runtime.service.access: COPILOT_SESSION_QUOTA",
 				"runtime.contract.verification: UNIMPLEMENTED",
 				"runtime.contract.billing: UNIMPLEMENTED",
 				"Implementation coverage only", "have not been verified", "repository.provider: user",

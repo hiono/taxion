@@ -58,12 +58,14 @@ type Identity interface {
 }
 
 // ConfigurationIdentity exposes the selected tuple without provider SDK types.
-// Runtime authentication and repository access do not establish AI contract eligibility.
+// Authentication, repository access and provider service state do not establish
+// AI contract eligibility or the contractual payer.
 type ConfigurationIdentity interface {
 	Identity
 	ExecutionConfiguration() json.RawMessage
 	CheckAuthentication(ctx context.Context, expectedAccount string) error
 	CheckRepositoryAccess(ctx context.Context) error
+	CheckServiceAccess(ctx context.Context, sessionID string) error
 }
 
 type EventCursor interface {
