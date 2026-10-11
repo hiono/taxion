@@ -93,6 +93,7 @@ taxion runtime send --dispatch <id> --system-prompt-file <path> --prompt-file <p
 taxion runtime resume --dispatch <id> --system-prompt-file <path>
 taxion runtime events --dispatch <id> --system-prompt-file <path>
 taxion runtime stop --dispatch <id> --system-prompt-file <path>
+taxion runtime commit --dispatch <id> --system-prompt-file <path> --message-file <path> --scanner <path>
 taxion review --task <id> --sha <coder-sha> --repo <repo>
 ```
 
@@ -207,11 +208,11 @@ The command preserves Git's repository and index selection, including
 subdirectory still checks the whole index. Errors report category counts, not
 file names or values; an unreadable or unmerged index fails the check.
 Run it immediately before a manual commit, or invoke it from a pre-commit
-hook. It does not install a hook or run automatically in the controller.
+hook. This command does not install a hook; managed controller commits invoke
+the same checks directly as described below.
 Only paths are checked: secrets copied into source files, a shared example,
 or `mise.toml` require content scanning. Add `--secrets` for the local content
-check described below. Controller commit enforcement remains in
-[#72](https://github.com/hiono/taxion/issues/72).
+check described below.
 
 `git check-index --secrets` requires a trusted
 [Betterleaks 1.9.0](https://github.com/betterleaks/betterleaks/releases/tag/v1.9.0)
@@ -288,8 +289,39 @@ requires Unix executable permissions.
 content scanner. Full hooks retain the documented scanner rule and path-filter
 limits. Both modes use Git's actual index, including partial commit indexes.
 Local hooks can be skipped with `--no-verify`, replaced, or
-disabled and are not carried into new clones. The controller must enforce
-its own commit check independently; that connection remains in #72.
+disabled and are not carried into new clones. Managed controller commits
+enforce their own checks independently of installed hooks.
+
+`runtime commit` is a host operation for a running Coder Dispatch bound to the
+same role, runtime configuration hash, and worktree. Use the same system prompt
+and runtime options as the saved session. It does not start or resume an SDK
+session, stage files, or mark the Task or Dispatch complete. The message file
+must use the Dispatch's Conventional/Contextual policy.
+
+The controller verifies the repository, branch, baseline, execution-start
+ancestry, authored commit messages, and authorized/forbidden paths. It holds
+the real index lock, ignores ambient Git redirection, copies the staged index
+to a private snapshot, and scans all its blobs plus the proposed commit message.
+The committed tree is that snapshot, not working-file content. Split indexes
+and linked worktrees are supported. Concurrent branch movement makes the
+compare-and-swap publication fail without replacing the external update.
+Unmerged indexes, active merge/rebase operations, empty changes, invalid scope,
+and unavailable or failed scanners stop the operation.
+
+Publication uses `commit-tree` and `update-ref`, not Git's commit porcelain,
+so project hooks are not executed. `commit.gpgsign=true` requests signing with
+the configured Git signer; signing failures do not fall back to unsigned commits.
+The real index and working files are left unchanged by Taxion. A failed branch
+update can leave a scanned, unreachable commit object. Git publication and the
+workspace database are not one transaction: a database failure after publication
+reports the published SHA explicitly.
+
+This is not a sandbox against other processes changing Git files directly.
+It does not inspect earlier commits for secrets or enforce publication checks;
+those remain in #56. Scanner rule/filter limits still apply. Automatic Coder
+SDK tool access to this host operation remains in #53/#72; arbitrary shell
+commit permission is not enabled. Independent review and acceptance are still
+required after a successful managed commit.
 
 ```yaml
 version: 1

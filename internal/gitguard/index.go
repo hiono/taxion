@@ -40,12 +40,16 @@ func gitEnvironment() []string {
 }
 
 func readIndex(ctx context.Context, directory string) ([]indexEntry, error) {
+	return readIndexEnvironment(ctx, directory, gitEnvironment())
+}
+
+func readIndexEnvironment(ctx context.Context, directory string, environment []string) ([]indexEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "git", "-C", directory, "ls-files", "--cached", "--stage", "--full-name", "-z", "--", ":/")
 	// Pathspec environment settings must not turn the root selector into a
 	// literal path. Retain the hook's actual repository and index selection.
-	command.Env = gitEnvironment()
+	command.Env = environment
 	output, err := command.Output()
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("commit index inspection interrupted: %w", ctx.Err())

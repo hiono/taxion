@@ -112,6 +112,11 @@ commit 前の index 検査、公開前の未公開コミットと外部記録の
 検査結果は秘密値を除いた形式で保持する。
 ローカル hook は直接 Git を操作する開発者への補助とし、
 controller 管理の commit は同じ検査を直接実行する。
+検査した index snapshot を commit tree に固定し、提案する message も内容検査する。
+Git の通常 commit と project hook は実行せず、単一 parent の commit と
+旧 HEAD を条件にした branch 更新を用いる。署名設定は維持し、署名失敗時に
+無署名へ切り替えない。Git 公開後に workspace 保存が失敗した場合は、
+公開済み SHA と部分失敗を明示する。
 CI・基盤側の保護は各 provider の対応能力と承認条件に従って設定する。
 漏えい対応は credential の失効・交換を優先し、
 履歴の書き換えは影響する SHA・レビュー・証拠と clone の再照合を伴う
@@ -144,5 +149,7 @@ M15 #71 は複数開発者の参加・離脱・契約選択・session 所有権�
 各機能の実装・実環境検証の進捗は、参照する Issue と Milestone で追跡する。
 2026-10-11 に `config check` を固定配置へ移行し、
 `.taxion/` 全体と cwd の実 `.env` の追跡・ignore 検査を追加した。
+`runtime commit` は実行中の Coder に結びついた host 操作として、
+禁止パス・内容・message・scope の直接検査と検査済み tree の公開を行う。
 共有 Memory の配置、runtime 開始・再開への設定接続、
-commit・公開前の検査は後続実装として追跡する。
+管理 commit の自動 SDK tool 接続、公開前の全コミット・外部記録検査は後続実装として追跡する。

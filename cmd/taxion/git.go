@@ -45,7 +45,7 @@ func checkGitIndex(args []string, output io.Writer) error {
 		if err := gitguard.CheckSecrets(context.Background(), directory, *scanner); err != nil {
 			return err
 		}
-		_, err = fmt.Fprintln(output, "Commit index passed prohibited-path and local Betterleaks 1.9.0 content checks. This does not guarantee absence of secrets; controller enforcement is not yet connected.")
+		_, err = fmt.Fprintln(output, "Commit index passed prohibited-path and local Betterleaks 1.9.0 content checks. This does not guarantee absence of secrets; rerun after changing the index.")
 		return err
 	}
 	if err := gitguard.CheckIndex(context.Background(), directory); err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,9 +19,13 @@ const ScannerVersion = "1.9.0"
 // CheckSecrets scans indexed blobs locally with their path metadata. Scanner configuration
 // and credentials from the project or environment are never forwarded.
 func CheckSecrets(ctx context.Context, directory, scanner string) error {
+	return checkSecrets(ctx, directory, scanner, gitEnvironment(), "")
+}
+
+func checkSecrets(ctx context.Context, directory, scanner string, gitEnv []string, message string) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	entries, err := readIndex(ctx, directory)
+	entries, err := readIndexEnvironment(ctx, directory, gitEnv)
 	if err != nil {
 		return err
 	}
@@ -57,7 +62,7 @@ func CheckSecrets(ctx context.Context, directory, scanner string) error {
 			continue
 		}
 		blob := exec.CommandContext(ctx, "git", "-C", directory, "cat-file", "blob", entry.object)
-		blob.Env = append(gitEnvironment(), "GIT_NO_REPLACE_OBJECTS=1")
+		blob.Env = append(gitEnv, "GIT_NO_REPLACE_OBJECTS=1")
 		input, err := blob.StdoutPipe()
 		if err != nil {
 			return fmt.Errorf("prepare indexed content stream: %w", err)
@@ -66,16 +71,7 @@ func CheckSecrets(ctx context.Context, directory, scanner string) error {
 			input.Close()
 			return fmt.Errorf("cannot read indexed content: %w", err)
 		}
-		scan := exec.CommandContext(ctx, executable, "stdin",
-			"--set-attr", "path="+entry.name,
-			"--config", configPath, "--gitleaks-ignore-path", temporary,
-			"--ignore-gitleaks-allow", "--validation=false", "--no-banner", "--no-color",
-			"--redact=100", "--log-level=error", "--report-format=json", "--report-path=-",
-			"--exit-code=10")
-		scan.Dir, scan.Env, scan.Stdin = temporary, environment, input
-		var report bytes.Buffer
-		scan.Stdout = &report
-		scanErr := scan.Run()
+		count, scanErr := scanContent(ctx, executable, temporary, configPath, environment, input, entry.name)
 		input.Close()
 		blobErr := blob.Wait()
 		if ctx.Err() != nil {
@@ -85,24 +81,51 @@ func CheckSecrets(ctx context.Context, directory, scanner string) error {
 			return fmt.Errorf("cannot read complete indexed content")
 		}
 		if scanErr != nil {
-			var exit *exec.ExitError
-			if !errors.As(scanErr, &exit) || exit.ExitCode() != 10 {
-				return fmt.Errorf("secret scanner failed; commit content was not verified")
-			}
+			return scanErr
 		}
-		var detected []json.RawMessage
-		if err := json.Unmarshal(report.Bytes(), &detected); err != nil || detected == nil {
-			return fmt.Errorf("secret scanner returned an invalid report")
+		findings += count
+	}
+	if message != "" {
+		count, err := scanContent(ctx, executable, temporary, configPath, environment, strings.NewReader(message), "commit-message.txt")
+		if err != nil {
+			return err
 		}
-		if (scanErr != nil) != (len(detected) != 0) {
-			return fmt.Errorf("secret scanner exit status disagrees with its report")
-		}
-		findings += len(detected)
+		findings += count
 	}
 	if findings != 0 {
-		return fmt.Errorf("commit index contains %d potential secret findings; review indexed content before committing", findings)
+		return fmt.Errorf("commit content contains %d potential secret findings; review indexed content and any proposed message before committing", findings)
 	}
 	return nil
+}
+
+func scanContent(ctx context.Context, executable, directory, configPath string, environment []string, input io.Reader, path string) (int, error) {
+	scan := exec.CommandContext(ctx, executable, "stdin",
+		"--set-attr", "path="+path,
+		"--config", configPath, "--gitleaks-ignore-path", directory,
+		"--ignore-gitleaks-allow", "--validation=false", "--no-banner", "--no-color",
+		"--redact=100", "--log-level=error", "--report-format=json", "--report-path=-",
+		"--exit-code=10")
+	scan.Dir, scan.Env, scan.Stdin = directory, environment, input
+	var report bytes.Buffer
+	scan.Stdout = &report
+	err := scan.Run()
+	if ctx.Err() != nil {
+		return 0, fmt.Errorf("secret scan interrupted: %w", ctx.Err())
+	}
+	if err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 10 {
+			return 0, fmt.Errorf("secret scanner failed; commit content was not verified")
+		}
+	}
+	var detected []json.RawMessage
+	if json.Unmarshal(report.Bytes(), &detected) != nil || detected == nil {
+		return 0, fmt.Errorf("secret scanner returned an invalid report")
+	}
+	if (err != nil) != (len(detected) != 0) {
+		return 0, fmt.Errorf("secret scanner exit status disagrees with its report")
+	}
+	return len(detected), nil
 }
 
 func verifyScanner(ctx context.Context, executable, directory string, environment []string) error {

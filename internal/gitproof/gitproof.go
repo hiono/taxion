@@ -118,11 +118,8 @@ func Verify(dispatch core.GraphDispatch, result *core.DispatchResult) error {
 	if !sameFiles(files, result.ChangedFiles) {
 		return fmt.Errorf("Git changed files %v do not match reported files %v", files, result.ChangedFiles)
 	}
-	for _, file := range files {
-		if dispatch.Recipient == "REVIEWER" || !withinAny(file, dispatch.Instruction.AuthorizedActions) ||
-			withinAny(file, dispatch.Instruction.ForbiddenActions) {
-			return fmt.Errorf("Git change %q is outside the authorized scope", file)
-		}
+	if err := CheckChangedPaths(dispatch, files); err != nil {
+		return err
 	}
 	status, err := git(root, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
@@ -284,6 +281,11 @@ func repositoryIdentity(remote string) string {
 	return strings.Join(parts[len(parts)-2:], "/")
 }
 
+// RepositoryIdentity preserves the existing origin identity used by Git proof.
+func RepositoryIdentity(remote string) string {
+	return repositoryIdentity(remote)
+}
+
 func changedFiles(directory, baseline, head string) ([]string, error) {
 	command := exec.Command("git", "-C", directory, "diff", "--no-renames", "--name-only", "-z", baseline, head)
 	output, err := command.Output()
@@ -319,4 +321,16 @@ func withinAny(path string, scopes []string) bool {
 		}
 	}
 	return false
+}
+
+// CheckChangedPaths applies the same Dispatch scope to pre-commit trees and
+// final Git evidence. Callers obtain the paths from Git, not agent reports.
+func CheckChangedPaths(dispatch core.GraphDispatch, files []string) error {
+	for _, file := range files {
+		if dispatch.Recipient == "REVIEWER" || !withinAny(file, dispatch.Instruction.AuthorizedActions) ||
+			withinAny(file, dispatch.Instruction.ForbiddenActions) {
+			return fmt.Errorf("Git change %q is outside the authorized scope", file)
+		}
+	}
+	return nil
 }

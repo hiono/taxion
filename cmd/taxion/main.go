@@ -53,6 +53,7 @@ Commands:
   runtime resume      Resume the Dispatch session
   runtime events      Stream events from the Dispatch session
   runtime stop        Stop the Dispatch session
+  runtime commit      Publish scanned staged changes for the bound running Coder (--message-file, --scanner)
   workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON)
   workflow advance    Issue review/repair from the latest verified result (--id required)
   workflow run        Execute review/repair continuously with saved ceilings (--id and role prompt files required)
@@ -469,7 +470,7 @@ func runtimeCmd(args []string) error {
 	}
 	action := args[0]
 	switch action {
-	case "start", "send", "resume", "events", "stop":
+	case "start", "send", "resume", "events", "stop", "commit":
 	default:
 		return fmt.Errorf("runtime: unknown action %q", action)
 	}
@@ -481,6 +482,8 @@ func runtimeCmd(args []string) error {
 	reviewSource := fs.String("review-source-worktree", "", "repository worktree used to create the independent Reviewer worktree")
 	tools := fs.String("tools", "", "comma-separated SDK tool allowlist (default: none)")
 	promptFile := fs.String("prompt-file", "", "follow-up instruction file (send only)")
+	messageFile := fs.String("message-file", "", "Conventional/Contextual commit message file (commit only)")
+	scanner := fs.String("scanner", "betterleaks", "trusted Betterleaks 1.9.0 executable (commit only)")
 	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for a turn or event stream")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -493,6 +496,21 @@ func runtimeCmd(args []string) error {
 	}
 	if action == "send" && *promptFile == "" {
 		return fmt.Errorf("runtime send: --prompt-file is required")
+	}
+	if action == "commit" && *messageFile == "" {
+		return fmt.Errorf("runtime commit: --message-file is required")
+	}
+	if action != "commit" && *messageFile != "" {
+		return fmt.Errorf("runtime: --message-file applies only to commit")
+	}
+	var scannerSpecified bool
+	fs.Visit(func(option *flag.Flag) {
+		if option.Name == "scanner" {
+			scannerSpecified = true
+		}
+	})
+	if action != "commit" && scannerSpecified {
+		return fmt.Errorf("runtime: --scanner applies only to commit")
 	}
 
 	db, err := openWorkspace()
@@ -603,6 +621,16 @@ func runtimeCmd(args []string) error {
 		}
 	case "stop":
 		operationErr = control.Stop(ctx, dispatch.ID)
+	case "commit":
+		var message []byte
+		message, operationErr = os.ReadFile(*messageFile)
+		if operationErr == nil {
+			var sha string
+			sha, operationErr = control.Commit(ctx, dispatch.ID, string(message), *scanner)
+			if operationErr == nil {
+				fmt.Printf("taxion: committed %s for Dispatch %s; independent review and acceptance remain required\n", sha, dispatch.ID)
+			}
+		}
 	}
 	closeErr := worker.Close()
 	if closeErr != nil {
