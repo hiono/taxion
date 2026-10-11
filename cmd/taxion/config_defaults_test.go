@@ -42,4 +42,29 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 		!strings.Contains(output.String(), "runtime.contractRef: user") {
 		t.Fatal("default provenance not reported")
 	}
+	t.Setenv("TAXION_RUNTIME_ACCOUNT", "selected-account")
+	output.Reset()
+	if err := checkConfig([]string{"check", "--sources"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "runtime.account: environment") ||
+		strings.Contains(output.String(), "selected-account") {
+		t.Fatal("environment precedence or safe provenance output incorrect")
+	}
+	override := filepath.Join(t.TempDir(), "override.yaml")
+	if err := os.WriteFile(override, []byte("version: 1\nruntime:\n  account: final-account\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := checkConfig([]string{"check", "--file", override, "--sources"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "runtime.account: invocation") {
+		t.Fatal("environment overrode invocation file")
+	}
+	t.Setenv("TAXION_RUNTIME_ACCOUNT", "")
+	output.Reset()
+	if err := checkConfig([]string{"check", "--file", override}, &output); err == nil || output.Len() != 0 {
+		t.Fatal("higher-priority invocation hid an invalid environment value")
+	}
 }

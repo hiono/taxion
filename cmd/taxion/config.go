@@ -47,6 +47,19 @@ func checkConfig(args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
+	environment, present, err := config.EnvironmentLayer(os.LookupEnv)
+	if err != nil {
+		return err
+	}
+	if present {
+		index := len(layers)
+		if index > 0 && layers[index-1].Source == "invocation" {
+			index--
+		}
+		ordered := append([]config.Layer{}, layers[:index]...)
+		ordered = append(ordered, environment)
+		layers = append(ordered, layers[index:]...)
+	}
 	resolved, err := config.Resolve(layers)
 	if err != nil {
 		return err

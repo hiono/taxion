@@ -110,13 +110,38 @@ are errors. If no files are found, the command reports an error.
 Optional `--user-file` and `--project-file` replace their respective default
 paths. A missing explicit file is an error. `--file` supplies an optional
 highest-priority invocation file.
-Precedence is `--file` (invocation) > `--project-file` > `--user-file`.
+Precedence is `--file` (invocation) > supported environment values >
+`--project-file` > `--user-file`.
 Every file requires `version: 1`; other fields can be omitted in a layer and
 are inherited from lower layers. Explicit empty or null values are errors.
 Each layer is checked before merging, so a higher-priority value cannot hide
 an invalid lower-priority value. `--sources` prints each field's winning layer
-without printing its value. Environment overrides of configuration values
-remain pending.
+without printing its value. An environment override is reported as
+`environment`. At least one default or explicit YAML file is required;
+environment values supplement the file settings.
+
+| Environment variable | Configuration field |
+| --- | --- |
+| `TAXION_PROJECT_ID` | `project.id` |
+| `TAXION_REPOSITORY_PROVIDER` | `repository.provider` |
+| `TAXION_REPOSITORY_HOST` | `repository.host` |
+| `TAXION_REPOSITORY_PATH` | `repository.path` |
+| `TAXION_REPOSITORY_ACCOUNT` | `repository.account` |
+| `TAXION_REPOSITORY_CREDENTIAL_REF` | `repository.credentialRef` |
+| `TAXION_RUNTIME_PROVIDER` | `runtime.provider` |
+| `TAXION_RUNTIME_ACCOUNT` | `runtime.account` |
+| `TAXION_RUNTIME_CREDENTIAL_REF` | `runtime.credentialRef` |
+| `TAXION_RUNTIME_CONTRACT_REF` | `runtime.contractRef` |
+| `TAXION_EXECUTION_REQUESTER` | `execution.requester` |
+| `TAXION_EXECUTION_WORKER` | `execution.worker` |
+| `TAXION_EXECUTION_APPROVAL_REF` | `execution.approvalRef` |
+
+Set environment values are strings, including numeric-looking identifiers.
+An explicitly empty or invalid value is an error even when `--file` overrides
+that field. Unset variables preserve the lower layer. Only the listed variables
+are read for configuration overrides; `TAXION_TOKEN`, `GH_TOKEN`,
+`GITHUB_TOKEN`, and `COPILOT_GITHUB_TOKEN` retain their separate credential
+uses and are not copied into this configuration.
 
 ```yaml
 version: 1
@@ -153,7 +178,7 @@ describes configuration, not implemented adapter coverage. Checking a file
 performs no network calls or credential resolution and does not validate
 approval authority, account access, or contract eligibility. Existing runtime
 and workflow commands do not yet consume this configuration. Automatic
-environment overrides, durable execution bindings, and authentication
+durable execution bindings and authentication
 preflight remain tracked in [#69](https://github.com/hiono/taxion/issues/69).
 TOML and JSON configuration inputs are future extensions; existing JSON APIs
 and machine artifacts keep their current formats.
