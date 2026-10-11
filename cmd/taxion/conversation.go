@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,8 +51,17 @@ Do not invent citations, evidence, legal eligibility or a payer.`
 const plannerSystemPrompt = `Evaluate the user's planning question from the supplied compact saved context.
 Use /planner/task, /planner/memory, /planner/results, /planner/concerns,
 /planner/unmetDependencies and /planner/flows. Distinguish current evidence
-from earlier attempts, assumptions and missing information. Evaluate saved
-Memory versions and actual findings rather than automatically routing every
+from earlier attempts, assumptions and missing information.
+The input is {"question": ..., "context": ...}; sources are relative to context,
+not the outer input. /planner/task is the GraphTask itself, NOT a PlanningTask
+wrapper: cite /planner/task/acceptance/0 or /planner/task/status, NEVER
+/planner/task/task/acceptance/0. /task/task is a different, legacy wrapper.
+Results are /planner/results/N/result, Memory is /planner/memory/N, and
+flow boundaries are /planner/flows/N/held and /planner/flows/N/maxRepairs.
+Use only properties actually present in the supplied JSON; omit a claim rather
+than invent an extra wrapper or an absent index. Verify every source path against
+that exact structure before returning. One precise source per claim is enough.
+Evaluate saved Memory versions and actual findings rather than automatically routing every
 REQUEST_CHANGES back to Coder. Check repeated failures, scope, acceptance,
 unmet dependencies and immutable flow ceilings before proposing further work.
 Return recommendation: REVIEW, REPAIR, REPLAN, INVESTIGATE, HOLD,
@@ -182,6 +192,34 @@ func conversationCmd(args []string, output io.Writer) error {
 	if args[0] == "plan" {
 		prompt, schema, ask = plannerSystemPrompt, plannerResponseSchema(), controller.AskPlanner
 	}
+	var citationContext any
+	if args[0] == "plan" {
+		planning, err := controller.ObservePlannerContext(db, storePath, resolved.Config.Repository.Path, *task)
+		if err != nil {
+			return err
+		}
+		citationContext = map[string]any{"planner": planning}
+	} else {
+		citationContext, err = controller.ObserveQuestion(db, storePath, resolved.Config.Repository.Path, *task)
+		if err != nil {
+			return err
+		}
+	}
+	sources, err := questionCitationPaths(citationContext)
+	if err != nil {
+		return err
+	}
+	if args[0] == "investigate" {
+		sources = append(sources, "/investigation/sha", "/investigation/observation/contentHash")
+		for i := range paths {
+			sources = append(sources, fmt.Sprintf("/investigation/files/%d/content", i))
+		}
+	}
+	claims := schema["properties"].(map[string]any)["confirmed"].(map[string]any)["items"].(map[string]any)
+	claims["properties"].(map[string]any)["sources"] = map[string]any{
+		"type": "array", "minItems": 1, "items": map[string]any{"type": "string", "enum": sources},
+	}
+	prompt += "\nChoose sources only from the response schema's allowed paths. A composite record is a valid source; do not add guessed child paths."
 	worker, err := copilot.New(copilot.Config{
 		Role: "ORCHESTRATOR", SystemPrompt: prompt,
 		WorkingDirectory: tracked.Worktree, Configuration: selection,
@@ -531,6 +569,55 @@ func questionResponseSchema() map[string]any {
 			"assumptions": strings, "unconfirmed": strings,
 		},
 	}
+}
+
+func questionCitationPaths(context any) ([]string, error) {
+	content, err := json.Marshal(context)
+	if err != nil {
+		return nil, err
+	}
+	var records any
+	if err := json.Unmarshal(content, &records); err != nil {
+		return nil, err
+	}
+	paths := []string{}
+	var visit func(any, string, int)
+	visit = func(value any, path string, depth int) {
+		if value == nil {
+			return
+		}
+		if depth >= 2 {
+			paths = append(paths, path)
+		}
+		if depth == 4 {
+			return
+		}
+		switch node := value.(type) {
+		case map[string]any:
+			keys := make([]string, 0, len(node))
+			for key := range node {
+				keys = append(keys, key)
+			}
+			slices.Sort(keys)
+			for _, key := range keys {
+				child := path + "/" + strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
+				switch key {
+				case "history", "decisions", "instruction", "contract":
+					if node[key] != nil && depth >= 1 {
+						paths = append(paths, child)
+					}
+				default:
+					visit(node[key], child, depth+1)
+				}
+			}
+		case []any:
+			for i, item := range node {
+				visit(item, fmt.Sprintf("%s/%d", path, i), depth+1)
+			}
+		}
+	}
+	visit(records, "", 0)
+	return paths, nil
 }
 
 func plannerResponseSchema() map[string]any {

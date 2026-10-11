@@ -40,6 +40,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	var managedStage bool
 	var strictResult bool
 	var compactContext bool
+	var validationSubmission bool
 	var scanner string
 	var maxAICredits float64
 	switch action {
@@ -60,6 +61,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		fs.BoolVar(&managedStage, "managed-stage", false, "enable taxion_stage alongside --managed-commit")
 		fs.BoolVar(&strictResult, "strict-result-identities", false, "constrain final identities and start SHA to the saved Dispatch")
 		fs.BoolVar(&compactContext, "compact-context", false, "include exact prior results without nested instructions")
+		fs.BoolVar(&validationSubmission, "controller-validation-submission", false, "separate submission from controller-run checks; repeat on session attachment")
 		fs.StringVar(&scanner, "scanner", "betterleaks", "trusted Betterleaks executable (--managed-commit only)")
 	default:
 		return fmt.Errorf("unknown workflow action %q", action)
@@ -299,7 +301,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 				responseSchema = strictDispatchResultSchema(dispatch)
 			}
 			return newDispatchWorker(ctx, db, dispatch, copilot.Config{
-				Role: dispatch.Recipient, SystemPrompt: runtimeSystemPrompt(prompts[dispatch.Recipient], contract),
+				Role: dispatch.Recipient, SystemPrompt: runtimeSubmissionPrompt(prompts[dispatch.Recipient], contract, validationSubmission),
 				WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: cli, BaseDirectory: base,
 				MaxAICredits:   maxAICredits,
 				AvailableTools: tools[dispatch.Recipient], ResponseSchema: responseSchema,

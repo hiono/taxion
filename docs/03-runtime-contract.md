@@ -98,6 +98,18 @@ type Runtime interface {
   repairs. They retain the held boundary until explicit disposition, separate
   investigation or successor reapproval. Exact replay cannot apply old advice
   to another role. No extra model call is inserted in automatic progression.
+- Isolated CLI questions constrain citations to actual supplied record paths in
+  the native response schema. Composite records are valid sources; nested
+  histories need not be copied into that catalog. Adoption still independently
+  verifies the full current context, hashes and source content. Formatting a
+  JSON configuration cannot make unchanged evidence stale, but changing its
+  values while retaining an old observation hash is rejected.
+- `--controller-validation-submission` on runtime or workflow execution separates
+  model submission from controller-run validation: the role returns its genuine
+  result with no invented checks, and the controller validates before saving
+  success. Missing output, failed checks and unsupported Reviewer acceptance
+  still block progress. Repeat the flag on session attachment; default prompt
+  text remains unchanged so existing session configuration hashes are preserved.
 - `StepReviewFlow` uses the same runtime and durable runner claim as automatic
   execution, but executes at most one role and does not issue its successor after
   completing the turn. Further progression requires another explicit request.

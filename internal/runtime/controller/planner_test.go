@@ -50,6 +50,10 @@ func TestPlannerUsesIsolatedBoundedQuestionWithoutApplyingRecommendation(t *test
 	if err := validateQuestionAnswer(invalid, result.Context); err == nil {
 		t.Fatal("planner accepted nonexistent evidence")
 	}
+	invalid.Confirmed = []QuestionClaim{{Text: "Task state", Sources: []string{"/planner/task/task/status"}}}
+	if err := validateQuestionAnswer(invalid, result.Context); err == nil {
+		t.Fatal("planner accepted the legacy PlanningTask wrapper inside its GraphTask")
+	}
 	ordinary := result.Context
 	ordinary.Planner = nil
 	if err := validateQuestionAnswer(*result.Answer, ordinary); err == nil {

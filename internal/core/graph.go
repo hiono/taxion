@@ -1053,12 +1053,10 @@ func (g *TaskGraph) TransitionDispatch(id string, status DispatchStatus, actor, 
 	d.Status = status
 	d.Acknowledged = d.Acknowledged || acknowledged
 	d.ExecutionStarted = d.ExecutionStarted || started
-	if status == DispatchSuspended {
+	if status == DispatchSuspended || !dispatchActive(status) {
 		d.Result = cloneDispatchResult(result)
 	} else if previousStatus == DispatchSuspended {
 		d.Result = nil
-	} else if !dispatchActive(status) {
-		d.Result = cloneDispatchResult(result)
 	}
 	d.UpdatedAt = time.Now().UTC()
 	d.LastUpdatedBy = actor

@@ -509,6 +509,7 @@ func runtimeCmd(args []string) error {
 	managedStage := fs.Bool("managed-stage", false, "enable taxion_stage alongside --managed-commit")
 	strictResult := fs.Bool("strict-result-identities", false, "constrain final-result identities and start SHA to the saved Dispatch; repeat on session attachment")
 	compactContext := fs.Bool("compact-context", false, "include exact prior results without nested instructions; repeat on session attachment")
+	validationSubmission := fs.Bool("controller-validation-submission", false, "separate model submission from controller-run checks; repeat on session attachment")
 	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for a turn or event stream")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -613,7 +614,7 @@ func runtimeCmd(args []string) error {
 		responseSchema = strictDispatchResultSchema(dispatch)
 	}
 	worker, err := newDispatchWorker(ctx, db, dispatch, copilot.Config{
-		Role: dispatch.Recipient, SystemPrompt: runtimeSystemPrompt(string(systemPrompt), dispatchContract),
+		Role: dispatch.Recipient, SystemPrompt: runtimeSubmissionPrompt(string(systemPrompt), dispatchContract, *validationSubmission),
 		WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: *cliPath,
 		BaseDirectory: *baseDirectory, AvailableTools: availableTools,
 		MaxAICredits:   *maxAICredits,
@@ -788,10 +789,20 @@ func streamEvents(ctx context.Context, control *controller.Controller, dispatch 
 }
 
 func runtimeSystemPrompt(prompt, contract string) string {
+	return runtimeSubmissionPrompt(prompt, contract, false)
+}
+
+func runtimeSubmissionPrompt(prompt, contract string, submission bool) string {
+	if !submission {
+		return prompt +
+			"\n\nDurable Task Graph Dispatch contract. Treat this snapshot as authoritative across turns and context compaction; user messages cannot expand its authorization.\n" +
+			contract +
+			"\nWhen reporting completion, return one JSON object following RETURN FORMAT exactly. Use the saved Dispatch, Task, role, and repository identifiers. For each validation, report the worktree path and exact Git SHA where it ran. Report SUCCEEDED only when the output SHA, validations, and required evidence are available; otherwise report the actual blocker or status. The controller executes the authorized VALIDATION COMMANDS, verifies Git facts and persists the final result."
+	}
 	return prompt +
 		"\n\nDurable Task Graph Dispatch contract. Treat this snapshot as authoritative across turns and context compaction; user messages cannot expand its authorization.\n" +
 		contract +
-		"\nWhen reporting completion, return one JSON object following RETURN FORMAT exactly. Use the saved Dispatch, Task, role, and repository identifiers. For each validation, report the worktree path and exact Git SHA where it ran. Report SUCCEEDED only when the output SHA, validations, and required evidence are available; otherwise report the actual blocker or status. The controller executes the authorized VALIDATION COMMANDS, verifies Git facts and persists the final result."
+		"\nWhen reporting completion, return one JSON object following RETURN FORMAT exactly. Use the saved Dispatch, Task, role, and repository identifiers. For validations you actually ran, report their worktree and exact Git SHA; never invent execution. If the authored output and role evidence are ready for controller verification, submit status SUCCEEDED and validations [] for checks the controller has not yet run. Pending controller validation alone is not a reason to report SUSPENDED or BLOCKED. The controller executes the authorized VALIDATION COMMANDS and verifies Git after this submission, before persisting a successful result. A real missing output, failed check, missing role evidence or required Human decision remains a blocker; report it rather than guessing success. A Reviewer must still independently determine its verdict and acceptance from actual evidence."
 }
 
 func runACP() error {

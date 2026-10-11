@@ -16,7 +16,7 @@ import (
 // adopting a gap never turns it into a repair instruction.
 func RecordPlannerAction(db *store.Store, ledgerPath string, request PlannerDraftRequest) (core.ReviewFlow, error) {
 	if db == nil || request.Proposal.Answer == nil || request.Proposal.Context.Planner == nil ||
-		request.Proposal.Context.Observation == nil || request.Proposal.Changed ||
+		request.Proposal.Context.Observation == nil || request.Proposal.Context.Investigation != nil || request.Proposal.Changed ||
 		!slices.Contains([]string{"REPLAN", "INVESTIGATE", "HOLD", "HUMAN_REQUIRED", "REPORT"}, request.Proposal.Answer.Recommendation) {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: planner action requires unchanged sourced non-execution advice")
 	}
@@ -57,8 +57,11 @@ func RecordPlannerAction(db *store.Store, ledgerPath string, request PlannerDraf
 	if current.Observation.ContentHash != request.Proposal.Context.Observation.ContentHash {
 		return core.ReviewFlow{}, core.ErrFeedbackStale
 	}
-	current.Observation = request.Proposal.Context.Observation
-	if !reflect.DeepEqual(current, request.Proposal.Context) || request.ExpectedDraftID != latestDraftID(flow) {
+	matching, err := questionContextsEqual(current, request.Proposal.Context)
+	if err != nil {
+		return core.ReviewFlow{}, err
+	}
+	if !matching || request.ExpectedDraftID != latestDraftID(flow) {
 		return core.ReviewFlow{}, core.ErrFeedbackStale
 	}
 	err = db.UpdateWorkspace(func(state *store.Workspace) error {

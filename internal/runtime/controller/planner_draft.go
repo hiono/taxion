@@ -184,11 +184,11 @@ func recordAdviceDraft(db *store.Store, ledgerPath string, request PlannerDraftR
 	if err != nil {
 		return core.ReviewFlow{}, err
 	}
-	if current.Observation.ContentHash != request.Proposal.Context.Observation.ContentHash ||
-		!reflect.DeepEqual(current.Planner, request.Proposal.Context.Planner) ||
-		!reflect.DeepEqual(current.Task, request.Proposal.Context.Task) ||
-		!reflect.DeepEqual(current.Flows, request.Proposal.Context.Flows) ||
-		current.Projection != request.Proposal.Context.Projection {
+	matching, err := questionContextsEqual(current, request.Proposal.Context)
+	if err != nil {
+		return core.ReviewFlow{}, err
+	}
+	if current.Observation.ContentHash != request.Proposal.Context.Observation.ContentHash || !matching {
 		return core.ReviewFlow{}, core.ErrFeedbackStale
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

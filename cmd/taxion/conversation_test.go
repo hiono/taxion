@@ -7,6 +7,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,60 @@ func TestPlannerSchemaRequiresAdvisoryActionWithoutChangingSideQuestionSchema(t 
 	actions := planner["properties"].(map[string]any)["recommendation"].(map[string]any)["enum"]
 	if !reflect.DeepEqual(actions, []string{"REVIEW", "REPAIR", "REPLAN", "INVESTIGATE", "HOLD", "HUMAN_REQUIRED", "REPORT"}) {
 		t.Fatal("planner schema authorizes execution or review approval")
+	}
+	for _, description := range []string{"/planner/task is the GraphTask itself", "/planner/task/acceptance/0",
+		"/planner/results/N/result", "/planner/memory/N", "/planner/flows/N/held"} {
+		if !strings.Contains(plannerSystemPrompt, description) {
+			t.Fatal("Planner prompt no longer distinguishes its actual citation shape", description)
+		}
+	}
+}
+
+func TestQuestionCitationPathsUseActualRecordsWithoutInventedWrappers(t *testing.T) {
+	paths, err := questionCitationPaths(map[string]any{
+		"planner": map[string]any{
+			"task":    map[string]any{"status": "READY", "acceptance": []string{"criterion"}},
+			"results": []any{map[string]any{"result": map[string]any{"status": "SUCCEEDED"}}},
+		},
+		"task": map[string]any{"task": map[string]any{"status": "READY"}, "absent": nil,
+			"history": []any{map[string]any{"task": map[string]any{"status": "DRAFT"}}}},
+		"observation": map[string]any{"contentHash": "hash", "a/b~c": "escaped"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, valid := range []string{"/planner/task/status", "/planner/task/acceptance/0",
+		"/planner/results/0/result", "/task/task/status", "/task/history", "/observation/a~1b~0c"} {
+		if !slices.Contains(paths, valid) {
+			t.Fatal("missing actual record source", valid)
+		}
+	}
+	for _, invalid := range []string{"/planner/task/task/status", "/task/task/proof/actionPerformed",
+		"/task/absent", "/task/history/0/task/status", "/planner/results/0/result/missing"} {
+		if slices.Contains(paths, invalid) {
+			t.Fatal("citation schema permits invented or recursively repeated evidence", invalid)
+		}
+	}
+	again, err := questionCitationPaths(map[string]any{
+		"b": map[string]any{"z": 1, "a": 2}, "a": map[string]any{"b": 3},
+	})
+	if err != nil || !reflect.DeepEqual(again, []string{"/a/b", "/b/a", "/b/z"}) {
+		t.Fatal("citation ordering is not deterministic", again, err)
+	}
+}
+
+func TestRuntimePromptSeparatesSubmissionFromControllerValidation(t *testing.T) {
+	prompt := runtimeSubmissionPrompt("Independent role", "immutable-contract", true)
+	for _, requirement := range []string{"immutable-contract", "never invent execution",
+		"submit status SUCCEEDED and validations []", "Pending controller validation alone",
+		"before persisting a successful result", "independently determine its verdict"} {
+		if !strings.Contains(prompt, requirement) {
+			t.Fatal("runtime prompt lost the submission/verification boundary", requirement)
+		}
+	}
+	if runtimeSystemPrompt("Independent role", "immutable-contract") != runtimeSubmissionPrompt("Independent role", "immutable-contract", false) ||
+		strings.Contains(runtimeSystemPrompt("Independent role", "immutable-contract"), "Pending controller validation alone") {
+		t.Fatal("opt-in submission policy changed the legacy prompt or saved-session identity")
 	}
 }
 

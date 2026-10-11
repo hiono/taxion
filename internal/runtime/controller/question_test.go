@@ -23,6 +23,37 @@ type questionRuntime struct {
 	stopErr error
 }
 
+func TestQuestionContextComparisonPreservesFormattedConfigurationAndRejectsForgedContent(t *testing.T) {
+	current := QuestionContext{
+		Task: PlanningTask{Dispatches: []core.GraphDispatch{{
+			Configuration: &core.DispatchConfiguration{
+				DecisionID: "approval", Selection: json.RawMessage(`{"runtime":{"account":"approved"}}`),
+			},
+		}}},
+		Observation: &PlanObservation{ContentHash: "unchanged-observation"},
+	}
+	input, err := json.MarshalIndent(current, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var supplied QuestionContext
+	if err := json.Unmarshal(input, &supplied); err != nil {
+		t.Fatal(err)
+	}
+	if reflect.DeepEqual(current.Task.Dispatches, supplied.Task.Dispatches) {
+		t.Fatal("fixture did not exercise formatted RawMessage")
+	}
+	matching, err := questionContextsEqual(current, supplied)
+	if err != nil || !matching {
+		t.Fatal("formatted CLI configuration became stale evidence", err)
+	}
+	supplied.Task.Dispatches[0].Configuration.Selection = json.RawMessage(`{"runtime":{"account":"other"}}`)
+	matching, err = questionContextsEqual(current, supplied)
+	if err != nil || matching {
+		t.Fatal("copied observation hash concealed changed configuration", err)
+	}
+}
+
 func (q *questionRuntime) Events(context.Context, string) (<-chan runtime.Event, error) {
 	return q.events, nil
 }

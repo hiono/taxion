@@ -275,6 +275,15 @@ fresh sessions and repeat it on attachment and safe stop. Existing sessions
 retain their original options. This reduces repeated input, not a guarantee
 about provider credits; there is no extra model call for context generation.
 
+`--controller-validation-submission` on `runtime` or `workflow run|step` explicitly
+separates model submission from controller-run checks. A role submits its actual
+output and evidence with no invented validations; the controller runs authorized
+commands and verifies Git before saving success. Pending controller checks alone
+do not require suspension, but genuine failures, missing output, unsupported
+Reviewer acceptance and Human decisions still block progress. Use the option on
+fresh sessions and repeat it on attachment and stop. The default prompt is
+unchanged for existing sessions.
+
 `config check` validates fixed Global/Project YAML settings and supported
 environment overrides against the
 versioned configuration schema. All fields below are required in the resolved

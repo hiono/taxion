@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -59,6 +60,22 @@ type QuestionResult struct {
 	Answer    *QuestionAnswer      `json:"answer,omitempty"`
 	Usage     []core.DispatchUsage `json:"usage"`
 	Changed   bool                 `json:"recordsChangedDuringAnswer"`
+}
+
+func questionContextsEqual(current, supplied QuestionContext) (bool, error) {
+	current.Observation = supplied.Observation
+	current.Investigation, supplied.Investigation = nil, nil
+	currentJSON, err := json.Marshal(current)
+	if err != nil {
+		return false, err
+	}
+	suppliedJSON, err := json.Marshal(supplied)
+	if err != nil {
+		return false, err
+	}
+	// RawMessage configuration whitespace changes when CLI input is formatted.
+	// Marshal compacts it while retaining every recorded field and source hash.
+	return bytes.Equal(currentJSON, suppliedJSON), nil
 }
 
 func ObserveQuestion(db *store.Store, ledgerPath, repository, taskID string) (QuestionContext, error) {

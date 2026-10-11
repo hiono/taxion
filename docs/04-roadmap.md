@@ -73,6 +73,12 @@ M12 の #73 は受け渡し保留・途中中断・指示案の改訂、#74 は�
 M15 の #62・#63 は ACP・Web の共通操作と組合せ別の受入れを担当する。
 質問の観測は保留機能から独立して着手し、本流への反映は #73 と接続する。
 
+M12 の実 SDK 受入れを 2026-10-12 に完了した。
+修正・新 SHA の独立再レビューは既存の実行証拠を保持し、
+最終検証で依頼受付、変更契約の再承認、Memory に基づく Planner 判断、
+質問・追加調査の選択反映、独立承認と SDK 中断を確認した。
+利用量と残る制約は [M12 の実 SDK 受入れ結果](09-orchestration-requirements.md#m12-の実-sdk-受入れ結果) を参照する。
+
 ## project・開発基盤・AI 契約の独立した管理
 
 [ADR-0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md)

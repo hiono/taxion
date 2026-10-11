@@ -124,6 +124,18 @@ func TestDispatchLifecycleRequiresAcknowledgement(t *testing.T) {
 	if err := g.TransitionDispatch("dispatch", DispatchSuspended, "worker", "safe stop", false, false, suspended); err != nil {
 		t.Fatal(err)
 	}
+	stopped := cloneGraph(g)
+	cancelled := *suspended
+	cancelled.Status, cancelled.NextTransition = DispatchCancelled, Blocked
+	cancelled.Evidence = []string{"runtime-stop:session"}
+	if err := stopped.TransitionDispatch("dispatch", DispatchCancelled, "worker", "confirmed stop", false, false, &cancelled); err != nil {
+		t.Fatal("terminal stop lost its result when leaving SUSPENDED", err)
+	}
+	savedStop, _ := stopped.GraphDispatch("dispatch")
+	if savedStop.Result == nil || savedStop.Result.Status != DispatchCancelled ||
+		stopped.DispatchHistory[len(stopped.DispatchHistory)-2].Result.Status != DispatchSuspended {
+		t.Fatal("cancelled result or original suspension history was lost")
+	}
 	if err := g.TransitionDispatch("dispatch", DispatchRunning, "worker", "resume", true, true, nil); err != nil {
 		t.Fatal(err)
 	}

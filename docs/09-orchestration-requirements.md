@@ -118,19 +118,62 @@ credential、非公開の資料や会話を公開 Issue・PR・ログへ転記�
 
 | 対象 | 現在の部品 | この到達条件に向けて未実装の内容 |
 | --- | --- | --- |
-| Task・Dispatch | JSON Ledger、版付き Task Graph の登録・遷移・依存検査、明示された concern の ID 未付与の拒否、scope out の保持 | 会話からの Task 抽出、実行権限の確認、Dispatch の変更管理、実行状態との一貫した更新 |
-| Runtime | local・proc adapter | Go Copilot SDK 接続、役割別 Session、会話からの自動 dispatch と結果回収 |
-| Review | SHA を Evidence に記録 | Git の事実との照合、独立 Reviewer の実行、修正・再レビュー |
-| Memory | SQLite、候補生成、明示承認と限定した条件検査、検索・export | 階層の出典・版と Task の連携、指示への反映、更新・失効、実際の project/global 保存・移行 |
+| Task・Dispatch | 版付き Task Graph、依存・concern ID 検査、scope out の保持、元の依頼の保存、契約 hash と設定の明示承認、停止確認後の後続契約の再承認、発行済み指示と変更関係・結果の保持 | 自然言語からの契約の全自動生成、参加者の本人認証 |
+| Runtime | local・proc と Go Copilot SDK、役割別 Session と system prompt、明示的な上限付き自動 dispatch・結果回収、実効認証・停止証拠 | M13 の再起動・外部更新の復旧、M15 の利用者別所有権 |
+| Review | controller の Git・検証結果照合、読み取り専用の独立 Reviewer、指摘からの修正と新 SHA の再レビュー、古い結果の再送拒否 | M13 のレビュー中の復旧、M15 の組合せ別受入れ |
+| Memory | SQLite、階層・出典・版と Task の連携、Coder・Reviewer 指示の保存時の参照、計画の再構成、更新・失効時の検査、検索・export | M14 の共有保存・移行・仕様検索連携 |
 | 復旧・外部記録 | Ledger 保存、別の SQLite store・outbox 部品 | 実行と Session の復旧、整合した outbox 更新、Issue・PR の自動記録 |
 | CLI・ACP・Web | CLI 操作、ACP の Ledger 操作、Web forms・API proxy | 共通の会話 controller、Human の選択、実行の進行・再開と利用者別の所有権 |
-| Human の途中介入・質問 | 観測時刻・内容 hash 付き計画の共通再構成、`workflow handoff` の出典付き保留・解除と発行・開始の検査、`workflow feedback-target` の保存済み指示・結果の識別と `workflow feedback` の対象付き補足・保留の同時保存、`workflow feedback-resolve` の契約維持判断、`workflow draft` の版付き提案・改訂と `workflow draft-discard` の明示破棄、`workflow draft-approve` の契約内の補足承認と次 Dispatch への反映・instruction hash 記録、未処理補足・未承認案の解除拒否、現在の結果保持、Dispatch の取消と SDK 中断、busy session への追加送信拒否 | 自然言語の保留・中断受付、scope・acceptance・実行主体・上限を変える契約改訂と再承認（#73）、本流を変更しない自然言語の質問・追加調査（#74）、実 SDK 受入れ（#54） |
+| Human の途中介入・質問 | 観測時刻・hash と対象付き補足、保留・解除と中断要求・停止証拠の分離、版付き指示案の改訂・承認・発行、変更契約の再承認、本流を変えない質問、固定 SHA の読み取り専用調査、選択した発見事項の明示反映、Memory に基づく Planner 助言と非実行判断の保存、CLI と実 SDK の受入れ | M13 の復旧・競合照合、M15 の ACP・Web 共通操作と本人認証 |
 | 仕様書 | connector なし | 許可された検索・取得、出典付きの受け渡し |
-| 設定・認証主体 | `config check` による厳密な設定検査、固定 Global・cwd Project・環境変数の解決と出典、`.taxion/` 全体と cwd の実 `.env` の追跡・ignore 検査、`--task` による出典付き判断の許可組合せとの照合、`git check-index` の禁止パス検査と `--secrets` のローカル内容検査、内容検査 hook と明示的な path-only hook の導入・状態確認・解除、`runtime commit` の直接検査と Git 公開、`--managed-commit`・`--managed-stage` による Coder SDK tool の作成・再開接続、invocation session と stage 対象・検査済み index の照合 | 共有 Memory の配置、承認者の認証、実効認証・契約の確認、Dispatch・session への接続と再開照合（#69）、signed-in SDK の stage→管理 commit→独立レビュー受入れ（#53・#54・#72） |
+| 設定・認証主体 | 固定 Global・Project・環境参照と出典、設定の追跡・ignore 検査、repository と Copilot の主体・credential 参照・契約参照の分離、許可組合せと Dispatch・Session の照合、実効認証・権限の観測、SDK の管理 stage・commit と直接の index・秘密検査、signed-in SDK から独立レビューまでの受入れ | 共有 Memory の配置、承認者の本人認証、法的な契約適格性の保証、M13 の開発基盤別評価 |
 
 現在の挙動は [Ledger schema](05-ledger-schema.md)、
 [Runtime contract](03-runtime-contract.md)、
 [Memory reference](08-memory-model.md)、
 [Task Graph reference](10-task-graph.md) を参照する。
-SDK の対応や利用条件、cache の保持・命中、仕様書検索の接続可否は未確認であり、
-実装の着手条件または実際の検証結果として追跡する。
+SDK の確認結果は次節の検証範囲に限る。cache の命中保証、
+法的な契約適格性、仕様書検索の接続可否は個別の検証・判断を必要とする。
+
+## M12 の実 SDK 受入れ結果
+
+2026-10-12 に、許可された私有 Git worktree と実 Copilot SDK で M12 の受入れを完了した。
+最終成果 SHA は `9db733f809b043d3869266c4e12c9b9873e214bd`。
+読み取り専用の独立 Reviewer が全 acceptance を PASS、verdict を APPROVE とし、
+controller が固定テストと Git を照合した後に flow と Task を COMPLETED にした。
+検証用 branch と生の receipt は私有領域に保持し、push はしていない。
+
+| 確認対象 | 実行証拠 |
+| --- | --- |
+| 修正と再レビュー | 既存の４独立 SDK Session で、無変更 baseline、実際の REQUEST_CHANGES、修正、新 SHA の APPROVE を確認。古い指摘の再送は現在の Task と Graph を変更しなかった |
+| 受付と契約変更 | 元の依頼を DRAFT として保存し、表示した hash・設定・Reviewer の Task ID を明示承認。変更後は停止可能な保留境界を照合し、元の契約・結果・上限を保持して別 Task と flow を承認 |
+| Planner と Memory | 実 Planner が保存済み acceptance、結果、Memory、修正上限を参照し、契約変更には HUMAN_REQUIRED を返した。助言の採択だけでは実行せず、未処理判断を保存した |
+| 質問と追加調査 | 質問と固定 SHA の scoped 調査は Graph を変更しなかった。Human が選んだソース確認事項を未承認案に保存し、別の明示承認後に対象 Reviewer の instruction hash と発行記録へ接続した |
+| 中断と停止確認 | owned SDK Session の RUNNING を観測して中断を要求し、実停止後の `runtime-stop:` 証拠、Dispatch CANCELLED、flow STOPPED を確認。Task 取消や Git 巻き戻しは行わなかった |
+
+最終検証の推論量は 157,870 tokens で、承認した合計 200,000 tokens 以内だった。
+11 推論 Session の実測課金は 9.4005324 SDK credits、
+既存実験を含む 51 推論 Session の累計は 18.21538485 SDK credits。
+これらの推論 receipt はすべて complete である。親 Copilot CLI の課金はこの集計に含まない。
+推論前に中断した別の１ SDK Session は、provider の記録で要求数・モデル turn・課金量が０、
+課金状態が unavailable だったため、complete の推論 receipt と分けて保存した。
+不明な課金を complete や無料保証に置き換えてはいない。
+
+再現には、Copilot CLI のログイン、repository 用の `gh` 等の別認証、
+ignore・未追跡の固定設定、許可した worktree・scope・baseline SHA、
+Task と設定の明示承認、ローカル Betterleaks を用意する。
+`conversation intake → proposal → confirm` の後に、別の上限付き `workflow start` を行う。
+`conversation watch` で `/plan → /adopt` または `/investigate → /apply` を選び、
+補足を `/approve` して `/step` で独立 ROLE を進める。
+`--strict-result-identities`、`--compact-context`、
+`--controller-validation-submission`、管理 Git tool と同じ scanner は Session 再接続時にも揃える。
+本流の回答を ROLE 間で手動コピーせず、controller の保存記録から次の指示を生成する。
+
+検証中に停止した Session や拒否した回答は履歴として保持し、成功に書き換えなかった。
+SUSPENDED の Reviewer 応答も完了とせず、実停止を確認して別契約で同じ SHA を再レビューした。
+controller の検証待ちとモデルの提出を分ける指示は opt-in とし、
+既存 Session の既定 prompt・configuration hash は維持する。
+受入れ時は同じ提出指示を常時適用した移行用 binary を使った。
+公開版での再現には上記 opt-in を指定する。過去の Session の prompt や hash は変更していない。
+契約案は明示された構造化入力を使い、自然言語からの全自動契約生成、
+承認者の本人認証、GitLab など別基盤の実環境受入れ、M13 の復旧を達成したとは扱わない。
