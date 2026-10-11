@@ -357,8 +357,12 @@ func (s *Server) createDispatch(w http.ResponseWriter, r *http.Request) {
 				if relationship == "" {
 					relationship = core.RelationshipNone
 				}
+				memoryContext, err := memory.ResolveDispatchContext(s.StorePath, refs)
+				if err != nil {
+					return apiError{status: http.StatusConflict, message: err.Error()}
+				}
 				graphDispatch, err := core.NewGraphDispatch(state.Graph, d.ID, body.Task, body.Repo,
-					relationship, body.RelatedDispatchID, body.RelationshipReason)
+					relationship, body.RelatedDispatchID, body.RelationshipReason, memoryContext)
 				if err != nil {
 					return apiError{status: http.StatusConflict, message: err.Error()}
 				}

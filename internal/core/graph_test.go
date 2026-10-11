@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func graphTask(id string) GraphTask {
@@ -15,7 +16,8 @@ func graphTask(id string) GraphTask {
 		Status: Draft, Owner: "CODER", Reviewer: "reviewer-run", CreatedFrom: "request:1",
 		Objective: "fix", Scope: []string{"src"}, Acceptance: []string{"tests pass"},
 		RequiredEvidence: []string{"test-report"}, ExitCondition: "report", Worktree: "/work/task",
-		Branch: "work/task", BaselineSHA: strings.Repeat("a", 40),
+		ValidationCommands: []string{"go test ./..."},
+		Branch:             "work/task", BaselineSHA: strings.Repeat("a", 40),
 		AuthorizationID: "decision:1", Decisions: []TaskDecision{{ID: "decision:1", Source: "human:1", Text: "allow scope"}}}
 }
 
@@ -98,6 +100,7 @@ func TestDispatchLifecycleRequiresAcknowledgement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := g.IssueDispatch(dispatch, "controller", "issue"); err != nil {
 		t.Fatal(err)
 	}
@@ -127,9 +130,13 @@ func TestDispatchLifecycleRequiresAcknowledgement(t *testing.T) {
 	result := &DispatchResult{
 		DispatchID: "dispatch", TaskID: "task", Recipient: "CODER", Repository: "owner/repo",
 		Status: DispatchSucceeded, StartedSHA: strings.Repeat("a", 40), OutputSHA: strings.Repeat("b", 40),
-		ChangedFiles: []string{"src/file.go"}, Validations: []DispatchValidation{{Command: "go test ./...", ExitCode: 0}},
+		ChangedFiles: []string{"src/file.go"}, Validations: []DispatchValidation{{
+			Command: "go test ./...", ExitCode: 0, Worktree: "/work/task", SHA: strings.Repeat("b", 40),
+			StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(),
+		}},
 		Evidence: []string{"test-report"}, NextTransition: WaitingForEvidence,
 	}
+	result.GitEvidence = testGitEvidence(dispatch, result)
 	if err := g.TransitionDispatch("dispatch", DispatchSucceeded, "worker", "finish", false, false, result); err != nil {
 		t.Fatal(err)
 	}
@@ -182,6 +189,36 @@ func TestDispatchLifecycleRequiresAcknowledgement(t *testing.T) {
 	}
 }
 
+func TestDispatchRequiresVersionedMemorySnapshot(t *testing.T) {
+	task := graphTask("task")
+	task.MemoryRefs = []string{"decision:4"}
+	g := trackedGraph(t, task)
+	move(t, &g, task.ID, Ready, TransitionProof{})
+	if _, err := NewGraphDispatch(g, "dispatch", task.ID, task.Repo, RelationshipNone, "", ""); err == nil {
+		t.Fatal("dispatch without the referenced Memory snapshot was accepted")
+	}
+	context := []DispatchMemoryEntry{{
+		Reference: "decision:4", Version: 2, Scope: "project", Status: "approved",
+		Title: "Review output SHA", Body: "Bind the review to the exact commit.",
+		SourceRefs: []string{"issue:52"},
+	}}
+	dispatch, err := NewGraphDispatch(g, "dispatch", task.ID, task.Repo,
+		RelationshipNone, "", "", context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.IssueDispatch(dispatch, "controller", "issue"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	context[0].SourceRefs[0] = "mutated"
+	if g.Dispatches[0].Instruction.MemoryContext[0].SourceRefs[0] != "issue:52" {
+		t.Fatal("Dispatch Memory source references were not cloned")
+	}
+}
+
 func TestRuntimeSessionBindingPersistsTaskRoleAndConfiguration(t *testing.T) {
 	coderTask := graphTask("coder-task")
 	reviewerTask := graphTask("reviewer-task")
@@ -224,6 +261,24 @@ func TestRuntimeSessionBindingPersistsTaskRoleAndConfiguration(t *testing.T) {
 	}
 }
 
+func TestLegacyDispatchResultRemainsReadable(t *testing.T) {
+	dispatch := GraphDispatch{
+		ID: "legacy-dispatch", TaskID: "task", Recipient: "CODER", Repository: "owner/repo",
+		Instruction: DispatchInstruction{Version: 3, BaselineSHA: strings.Repeat("a", 40)},
+	}
+	result := &DispatchResult{
+		DispatchID: dispatch.ID, TaskID: dispatch.TaskID, Recipient: dispatch.Recipient,
+		Repository: dispatch.Repository, Status: DispatchSucceeded,
+		StartedSHA: dispatch.Instruction.BaselineSHA, OutputSHA: strings.Repeat("b", 40),
+		ChangedFiles: []string{"src/file.go"},
+		Validations:  []DispatchValidation{{Command: "go test ./...", ExitCode: 0}},
+		Evidence:     []string{"test-report"}, NextTransition: WaitingForEvidence,
+	}
+	if err := dispatch.ValidateResult(DispatchSucceeded, result); err != nil {
+		t.Fatalf("legacy Dispatch result rejected: %v", err)
+	}
+}
+
 func TestReviewerDispatchResultValidatesAcceptanceFindingsAndWorktree(t *testing.T) {
 	task := graphTask("review")
 	task.Owner = "REVIEWER"
@@ -245,18 +300,27 @@ func TestReviewerDispatchResultValidatesAcceptanceFindingsAndWorktree(t *testing
 	worktreeChanged := false
 	result := &DispatchResult{
 		DispatchID: dispatch.ID, TaskID: task.ID, Recipient: "REVIEWER", Repository: task.Repo,
-		Status: DispatchSucceeded, StartedSHA: task.BaselineSHA, OutputSHA: strings.Repeat("b", 40),
-		ChangedFiles: []string{}, Validations: []DispatchValidation{{Command: "inspect target", ExitCode: 0}},
+		Status: DispatchSucceeded, StartedSHA: task.BaselineSHA, OutputSHA: task.BaselineSHA,
+		ChangedFiles: []string{}, Validations: []DispatchValidation{{
+			Command: "go test ./...", ExitCode: 0, Worktree: "/work/task", SHA: task.BaselineSHA,
+			StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(),
+		}},
 		Evidence: []string{"test-report", "review-report:1"}, Blockers: []string{}, ReviewVerdict: "APPROVE",
 		Acceptance: []DispatchAcceptance{{Criterion: task.Acceptance[0], Status: "PASS", Evidence: []string{"test-report"}}},
 		Findings:   []DispatchFinding{}, WorktreeChanged: &worktreeChanged,
 		NextTransition: WaitingForEvidence,
 	}
+	result.GitEvidence = testGitEvidence(dispatch, result)
 	incomplete := *result
 	incomplete.Acceptance = nil
 	if err := g.TransitionDispatch(dispatch.ID, DispatchSucceeded, "reviewer", "incomplete result", false, false, &incomplete); err == nil {
 		t.Fatal("accepted a Reviewer result without acceptance decisions")
 	}
+	result.GitEvidence.WorktreeReleased = false
+	if err := g.TransitionDispatch(dispatch.ID, DispatchSucceeded, "reviewer", "unreleased worktree", false, false, result); err == nil {
+		t.Fatal("adopted Reviewer success before worktree release")
+	}
+	result.GitEvidence.WorktreeReleased = true
 	if err := g.TransitionDispatch(dispatch.ID, DispatchSucceeded, "reviewer", "verified result", false, false, result); err != nil {
 		t.Fatal(err)
 	}
@@ -264,6 +328,16 @@ func TestReviewerDispatchResultValidatesAcceptanceFindingsAndWorktree(t *testing
 	if accepted.Result == nil || accepted.Result.WorktreeChanged == nil || *accepted.Result.WorktreeChanged ||
 		len(accepted.Result.Acceptance) != 1 || accepted.Result.ReviewVerdict != "APPROVE" {
 		t.Fatalf("Reviewer result was not preserved: %+v", accepted.Result)
+	}
+}
+
+func testGitEvidence(dispatch GraphDispatch, result *DispatchResult) *DispatchGitEvidence {
+	return &DispatchGitEvidence{
+		Worktree: "/work/task", Repository: dispatch.Repository, Branch: dispatch.Instruction.Branch,
+		BaselineSHA: dispatch.Instruction.BaselineSHA, HeadSHA: result.OutputSHA,
+		ParentSHAs: []string{}, ChangedFiles: slices.Clone(result.ChangedFiles),
+		WorktreeClean: true, VerifiedAt: time.Now().UTC(),
+		WorktreeReleased: dispatch.Recipient == "REVIEWER",
 	}
 }
 

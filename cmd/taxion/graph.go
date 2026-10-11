@@ -4,8 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -98,12 +100,18 @@ func dispatchTransitionCmd(args []string) error {
 	actor := fs.String("actor", "", "actor")
 	reason := fs.String("reason", "", "reason")
 	resultFile := fs.String("result-file", "", "JSON result file required when ending a Dispatch")
+	validationTimeout := fs.Duration("validation-timeout", 10*time.Minute, "controller validation deadline")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *id == "" || *status == "" || *actor == "" || *reason == "" {
 		return fmt.Errorf("dispatch transition: --id, --status, --actor and --reason are required")
 	}
+	if *validationTimeout <= 0 {
+		return fmt.Errorf("dispatch transition: --validation-timeout must be positive")
+	}
+	ctx, cancel := signalContext(*validationTimeout)
+	defer cancel()
 	var result *core.DispatchResult
 	if *resultFile != "" {
 		file, err := os.Open(*resultFile)
@@ -122,6 +130,44 @@ func dispatchTransitionCmd(args []string) error {
 			return fmt.Errorf("dispatch lifecycle requires a Task Graph")
 		}
 		target := core.DispatchStatus(*status)
+		if target == core.DispatchRunning {
+			dispatch, ok := state.Graph.GraphDispatch(*id)
+			if !ok {
+				return fmt.Errorf("dispatch %q not found", *id)
+			}
+			if dispatch.Instruction.Version >= 4 && dispatch.ExecutionStartSHA == "" {
+				start, err := gitproof.ObserveStart(dispatch)
+				if err != nil {
+					return err
+				}
+				for index := range state.Graph.Dispatches {
+					if state.Graph.Dispatches[index].ID == *id {
+						state.Graph.Dispatches[index].ExecutionStartSHA = start
+					}
+				}
+			}
+		}
+		if result != nil {
+			result.GitEvidence = nil
+		}
+		if target == core.DispatchSucceeded {
+			dispatch, ok := state.Graph.GraphDispatch(*id)
+			if !ok {
+				return fmt.Errorf("dispatch %q not found", *id)
+			}
+			if dispatch.Status != core.DispatchRunning || !dispatch.ExecutionStarted {
+				return fmt.Errorf("successful result requires a running Dispatch")
+			}
+			if dispatch.Recipient == "REVIEWER" {
+				return fmt.Errorf("Reviewer completion requires runtime finalization and managed worktree release")
+			}
+			if result == nil {
+				return fmt.Errorf("successful dispatch requires a result file")
+			}
+			if err := gitproof.ExecuteValidations(ctx, dispatch, result); err != nil {
+				return fmt.Errorf("dispatch Git verification: %w", err)
+			}
+		}
 		ack := target == core.DispatchAcknowledged || target == core.DispatchRunning
 		started := target == core.DispatchRunning
 		if err := state.Graph.TransitionDispatch(*id, target, *actor, *reason, ack, started, result); err != nil {

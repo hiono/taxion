@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -160,36 +159,22 @@ func TestMemoryPromotionCLIAndDispatch(t *testing.T) {
 	}
 }
 
-func TestRuntimeDispatchResultSchemaAndValidation(t *testing.T) {
+func TestRuntimeDispatchResultSchema(t *testing.T) {
 	dispatch := core.GraphDispatch{
 		ID: "dispatch-1", TaskID: "task-1", Recipient: "CODER", Repository: "owner/repo",
-		Instruction: core.DispatchInstruction{BaselineSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}
 	schema := dispatchResultSchema(dispatch)
 	if schema["additionalProperties"] != false {
 		t.Fatal("result schema must reject undocumented fields")
 	}
-	result := core.DispatchResult{
-		DispatchID: dispatch.ID, TaskID: dispatch.TaskID, Recipient: dispatch.Recipient,
-		Repository: dispatch.Repository, Status: core.DispatchSucceeded,
-		StartedSHA: dispatch.Instruction.BaselineSHA, OutputSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		ChangedFiles: []string{}, Validations: []core.DispatchValidation{{Command: "go test ./...", ExitCode: 0}},
-		Evidence: []string{"test-report:1"}, Blockers: []string{}, NextTransition: core.WaitingForEvidence,
-	}
-	payload, err := json.Marshal(result)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := validateRuntimeResult(dispatch, string(payload)); err != nil {
-		t.Fatal(err)
-	}
-	result.DispatchID = "other-dispatch"
-	payload, err = json.Marshal(result)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := validateRuntimeResult(dispatch, string(payload)); err == nil {
-		t.Fatal("accepted a result for another Dispatch")
+	properties := schema["properties"].(map[string]any)
+	validations := properties["validations"].(map[string]any)
+	validationItems := validations["items"].(map[string]any)
+	validationProperties := validationItems["properties"].(map[string]any)
+	for _, field := range []string{"worktree", "sha"} {
+		if _, ok := validationProperties[field]; !ok {
+			t.Fatalf("validation schema omits Git provenance field %s", field)
+		}
 	}
 }
 

@@ -54,8 +54,14 @@ lifecycle events. Search omits superseded and revoked entries; `get` and
 
 The Task Graph owns the current list of Memory references. Set `memoryRefs`
 to canonical IDs such as `lesson:12` or `decision:4`. CLI, HTTP, and ACP
-dispatch reject missing, revoked, superseded, or non-approved guardrail
-references. The Task Graph stores only IDs and does not duplicate Memory text.
+dispatch resolve each reference and reject missing, revoked, superseded, or
+non-approved guardrail entries. Each referenced entry must include source
+references. The Task Graph stores IDs; the immutable Dispatch instruction
+snapshot stores each selected entry's version, scope,
+status, title, body, and source references. Approved guardrails also include
+their structured predicate and source lesson ID. A worker therefore receives the exact Memory
+version selected when the Dispatch was issued.
+
 Record contradictions between entries explicitly; Taxion does not infer
 semantic conflicts from free text. An unresolved conflict blocks dispatch
 when either entry is referenced:

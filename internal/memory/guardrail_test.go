@@ -369,3 +369,41 @@ func TestDispatchRejectsMissingOrStaleTaskMemoryReferences(t *testing.T) {
 		t.Fatal("revoked Task Memory reference was accepted")
 	}
 }
+
+func TestDispatchContextCapturesSourcesAndGuardrailPredicate(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "ledger.json")
+	s, err := Open(PathForLedger(ledger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	decisionID, err := s.Put(KindDecision, Entry{
+		Title: "Use the task baseline", Body: "Compare the reviewed diff with the saved baseline.",
+		SourceRefs: []string{"issue:52"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lessonID := candidate(t, s, ScopeProject)
+	guardrailID, err := s.Approve(lessonID, CheckRepoEquals, "owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := s.DispatchContext([]string{
+		fmt.Sprintf("decision:%d", decisionID), fmt.Sprintf("guardrail:%d", guardrailID),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0].Version != 1 || entries[0].Title != "Use the task baseline" ||
+		entries[0].Body != "Compare the reviewed diff with the saved baseline." ||
+		len(entries[0].SourceRefs) != 1 || entries[0].SourceRefs[0] != "issue:52" {
+		t.Fatalf("decision context = %+v", entries)
+	}
+	if entries[1].Status != "approved" || entries[1].Guardrail == nil ||
+		entries[1].Guardrail.Kind != CheckRepoEquals || entries[1].Guardrail.Value != "owner/repo" ||
+		entries[1].Guardrail.SourceLessonReference != fmt.Sprintf("lesson:%d", lessonID) {
+		t.Fatalf("guardrail context = %+v", entries[1])
+	}
+}

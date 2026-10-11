@@ -116,7 +116,8 @@ func TestRuntimeSessionBindingPersistsInWorkspaceSQLite(t *testing.T) {
 		ID: "t1", Title: "task", Repo: "owner/repo", Type: "IMPLEMENTATION", Issue: "Issue #50",
 		Owner: "CODER", Status: core.Draft, CreatedFrom: "request:1", Objective: "implement",
 		Scope: []string{"src"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"report"},
-		Worktree: "/work/t1", Branch: "work/t1", BaselineSHA: strings.Repeat("a", 40),
+		ValidationCommands: []string{"go test ./..."},
+		Worktree:           "/work/t1", Branch: "work/t1", BaselineSHA: strings.Repeat("a", 40),
 		ExitCondition: "report", AuthorizationID: "decision:1",
 		Decisions: []core.TaskDecision{{ID: "decision:1", Source: "human:1", Text: "approved"}},
 	}

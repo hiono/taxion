@@ -42,8 +42,24 @@ type TaskDependency struct {
 	State  TaskStatus `json:"state"`
 }
 
+func validMemoryReference(ref string) bool {
+	kind, idText, ok := strings.Cut(ref, ":")
+	if !ok || !slices.Contains([]string{"lesson", "decision", "guardrail", "concern"}, kind) {
+		return false
+	}
+	id, err := strconv.Atoi(idText)
+	return err == nil && id > 0 && strconv.Itoa(id) == idText
+}
+
 func (d GraphDispatch) ValidateResult(status DispatchStatus, result *DispatchResult) error {
 	return validateDispatchResult(d, status, result)
+}
+
+func (d GraphDispatch) ExpectedStartSHA() string {
+	if d.Instruction.Version >= 4 && d.Recipient == "CODER" && d.Instruction.TargetSHA != "" {
+		return d.Instruction.TargetSHA
+	}
+	return d.Instruction.BaselineSHA
 }
 
 func validateReviewerResult(d GraphDispatch, result *DispatchResult) error {
@@ -98,7 +114,7 @@ func validateReviewerResult(d GraphDispatch, result *DispatchResult) error {
 	return nil
 }
 
-const DispatchInstructionVersion = 2
+const DispatchInstructionVersion = 4
 
 type TaskDecision struct {
 	ID     string `json:"id"`
@@ -124,39 +140,40 @@ type HumanDecisionRequest struct {
 // GraphTask extends the execution model without changing the legacy Task wire.
 // Parent/children, siblings and blocks are derived from parentId and dependsOn.
 type GraphTask struct {
-	ID               string                `json:"id"`
-	Title            string                `json:"title"`
-	Repo             string                `json:"repo"`
-	Type             string                `json:"type"`
-	Issue            string                `json:"issue"`
-	ChangeRef        string                `json:"changeRef"`
-	ParentID         string                `json:"parentId"`
-	DependsOn        []TaskDependency      `json:"dependsOn"`
-	Supersedes       string                `json:"supersedes"`
-	Owner            string                `json:"owner"`
-	Reviewer         string                `json:"reviewer"`
-	Status           TaskStatus            `json:"status"`
-	Priority         string                `json:"priority"`
-	Objective        string                `json:"objective"`
-	Scope            []string              `json:"scope"`
-	OutOfScope       []string              `json:"outOfScope"`
-	Acceptance       []string              `json:"acceptance"`
-	RequiredEvidence []string              `json:"requiredEvidence"`
-	Branch           string                `json:"branch"`
-	Worktree         string                `json:"worktree"`
-	BaselineSHA      string                `json:"baselineSha"`
-	TargetSHA        string                `json:"targetSha"`
-	Risk             string                `json:"risk"`
-	ExceptionIDs     []string              `json:"exceptionIds"`
-	CreatedFrom      string                `json:"createdFrom"`
-	NextAction       string                `json:"nextAction"`
-	ExitCondition    string                `json:"exitCondition"`
-	DeferredReason   string                `json:"deferredReason"`
-	ResumeCondition  string                `json:"resumeCondition"`
-	AuthorizationID  string                `json:"authorizationId"`
-	Decisions        []TaskDecision        `json:"decisions"`
-	HumanDecision    *HumanDecisionRequest `json:"humanDecision,omitempty"`
-	MemoryRefs       []string              `json:"memoryRefs"`
+	ID                 string                `json:"id"`
+	Title              string                `json:"title"`
+	Repo               string                `json:"repo"`
+	Type               string                `json:"type"`
+	Issue              string                `json:"issue"`
+	ChangeRef          string                `json:"changeRef"`
+	ParentID           string                `json:"parentId"`
+	DependsOn          []TaskDependency      `json:"dependsOn"`
+	Supersedes         string                `json:"supersedes"`
+	Owner              string                `json:"owner"`
+	Reviewer           string                `json:"reviewer"`
+	Status             TaskStatus            `json:"status"`
+	Priority           string                `json:"priority"`
+	Objective          string                `json:"objective"`
+	Scope              []string              `json:"scope"`
+	OutOfScope         []string              `json:"outOfScope"`
+	Acceptance         []string              `json:"acceptance"`
+	RequiredEvidence   []string              `json:"requiredEvidence"`
+	ValidationCommands []string              `json:"validationCommands,omitempty"`
+	Branch             string                `json:"branch"`
+	Worktree           string                `json:"worktree"`
+	BaselineSHA        string                `json:"baselineSha"`
+	TargetSHA          string                `json:"targetSha"`
+	Risk               string                `json:"risk"`
+	ExceptionIDs       []string              `json:"exceptionIds"`
+	CreatedFrom        string                `json:"createdFrom"`
+	NextAction         string                `json:"nextAction"`
+	ExitCondition      string                `json:"exitCondition"`
+	DeferredReason     string                `json:"deferredReason"`
+	ResumeCondition    string                `json:"resumeCondition"`
+	AuthorizationID    string                `json:"authorizationId"`
+	Decisions          []TaskDecision        `json:"decisions"`
+	HumanDecision      *HumanDecisionRequest `json:"humanDecision,omitempty"`
+	MemoryRefs         []string              `json:"memoryRefs"`
 }
 
 type Concern struct {
@@ -203,26 +220,28 @@ const (
 )
 
 type GraphDispatch struct {
-	ID                string               `json:"id"`
-	TaskID            string               `json:"taskId"`
-	Repository        string               `json:"repository"`
-	Recipient         string               `json:"recipient"`
-	RuntimeSessionID  string               `json:"runtimeSessionId,omitempty"`
-	RuntimeConfigHash string               `json:"runtimeConfigHash,omitempty"`
-	RuntimeUsage      []DispatchUsage      `json:"runtimeUsage,omitempty"`
-	Status            DispatchStatus       `json:"status"`
-	Relationship      DispatchRelationship `json:"relationship"`
-	RelatedID         string               `json:"relatedDispatchId"`
-	Instruction       DispatchInstruction  `json:"instruction"`
-	InstructionHash   string               `json:"instructionHash"`
-	IssuedEvidence    []string             `json:"issuedEvidence"`
-	Acknowledged      bool                 `json:"acknowledged"`
-	ExecutionStarted  bool                 `json:"executionStarted"`
-	Result            *DispatchResult      `json:"result,omitempty"`
-	LastUpdatedBy     string               `json:"lastUpdatedBy"`
-	LastTransition    string               `json:"lastTransition"`
-	CreatedAt         time.Time            `json:"createdAt"`
-	UpdatedAt         time.Time            `json:"updatedAt"`
+	ID                   string               `json:"id"`
+	TaskID               string               `json:"taskId"`
+	Repository           string               `json:"repository"`
+	Recipient            string               `json:"recipient"`
+	RuntimeSessionID     string               `json:"runtimeSessionId,omitempty"`
+	RuntimeConfigHash    string               `json:"runtimeConfigHash,omitempty"`
+	ReviewWorktreeSource string               `json:"reviewWorktreeSource,omitempty"`
+	ExecutionStartSHA    string               `json:"executionStartSha,omitempty"`
+	RuntimeUsage         []DispatchUsage      `json:"runtimeUsage,omitempty"`
+	Status               DispatchStatus       `json:"status"`
+	Relationship         DispatchRelationship `json:"relationship"`
+	RelatedID            string               `json:"relatedDispatchId"`
+	Instruction          DispatchInstruction  `json:"instruction"`
+	InstructionHash      string               `json:"instructionHash"`
+	IssuedEvidence       []string             `json:"issuedEvidence"`
+	Acknowledged         bool                 `json:"acknowledged"`
+	ExecutionStarted     bool                 `json:"executionStarted"`
+	Result               *DispatchResult      `json:"result,omitempty"`
+	LastUpdatedBy        string               `json:"lastUpdatedBy"`
+	LastTransition       string               `json:"lastTransition"`
+	CreatedAt            time.Time            `json:"createdAt"`
+	UpdatedAt            time.Time            `json:"updatedAt"`
 }
 
 type DispatchUsage struct {
@@ -236,8 +255,26 @@ type DispatchUsage struct {
 }
 
 type DispatchValidation struct {
-	Command  string `json:"command"`
-	ExitCode int    `json:"exitCode"`
+	Command    string    `json:"command"`
+	ExitCode   int       `json:"exitCode"`
+	Worktree   string    `json:"worktree"`
+	SHA        string    `json:"sha"`
+	Output     string    `json:"output,omitempty"`
+	StartedAt  time.Time `json:"startedAt,omitempty"`
+	FinishedAt time.Time `json:"finishedAt,omitempty"`
+}
+
+type DispatchGitEvidence struct {
+	Worktree         string    `json:"worktree"`
+	Repository       string    `json:"repository"`
+	Branch           string    `json:"branch"`
+	BaselineSHA      string    `json:"baselineSha"`
+	HeadSHA          string    `json:"headSha"`
+	ParentSHAs       []string  `json:"parentShas"`
+	ChangedFiles     []string  `json:"changedFiles"`
+	WorktreeClean    bool      `json:"worktreeClean"`
+	WorktreeReleased bool      `json:"worktreeReleased,omitempty"`
+	VerifiedAt       time.Time `json:"verifiedAt"`
 }
 
 type DispatchResult struct {
@@ -250,11 +287,12 @@ type DispatchResult struct {
 	OutputSHA       string               `json:"outputSha"`
 	ChangedFiles    []string             `json:"changedFiles"`
 	Validations     []DispatchValidation `json:"validations"`
+	GitEvidence     *DispatchGitEvidence `json:"gitEvidence,omitempty"`
 	Evidence        []string             `json:"evidence"`
 	Blockers        []string             `json:"blockers"`
 	ReviewVerdict   string               `json:"reviewVerdict,omitempty"`
 	Acceptance      []DispatchAcceptance `json:"acceptance,omitempty"`
-	Findings        []DispatchFinding    `json:"findings,omitempty"`
+	Findings        []DispatchFinding    `json:"findings"`
 	WorktreeChanged *bool                `json:"worktreeChanged,omitempty"`
 	NextTransition  TaskStatus           `json:"nextTransition"`
 	ResumeCondition string               `json:"resumeCondition,omitempty"`
@@ -297,6 +335,7 @@ type DispatchInstruction struct {
 	ForbiddenActions   []string              `json:"forbiddenActions"`
 	Acceptance         []string              `json:"acceptance,omitempty"`
 	RequiredEvidence   []string              `json:"requiredEvidence"`
+	ValidationCommands []string              `json:"validationCommands,omitempty"`
 	ExitCondition      string                `json:"exitCondition"`
 	Worktree           string                `json:"worktree"`
 	Branch             string                `json:"branch"`
@@ -306,7 +345,25 @@ type DispatchInstruction struct {
 	Decisions          []TaskDecision        `json:"decisions"`
 	HumanDecision      *HumanDecisionRequest `json:"humanDecision,omitempty"`
 	MemoryRefs         []string              `json:"memoryRefs"`
+	MemoryContext      []DispatchMemoryEntry `json:"memoryContext,omitempty"`
 	ReturnFormat       []string              `json:"returnFormat"`
+}
+
+type DispatchMemoryEntry struct {
+	Reference  string               `json:"reference"`
+	Version    int                  `json:"version"`
+	Scope      string               `json:"scope"`
+	Status     string               `json:"status"`
+	Title      string               `json:"title"`
+	Body       string               `json:"body"`
+	SourceRefs []string             `json:"sourceRefs"`
+	Guardrail  *DispatchMemoryCheck `json:"guardrail,omitempty"`
+}
+
+type DispatchMemoryCheck struct {
+	Kind                  string `json:"kind"`
+	Value                 string `json:"value"`
+	SourceLessonReference string `json:"sourceLessonReference"`
 }
 
 type DispatchEvent struct {
@@ -411,11 +468,18 @@ func (g *TaskGraph) BindRuntimeSession(dispatchID, sessionID, configHash string)
 var dispatchReturnFormat = []string{
 	"dispatchId, taskId, recipient, repository, status",
 	"startedSha, outputSha, changedFiles",
-	"validations[{command, exitCode}], evidence, blockers, nextTransition, resumeCondition",
+	"validations[{command, exitCode, worktree, sha}], evidence, blockers, nextTransition, resumeCondition",
 	"Reviewer only: reviewVerdict, acceptance[{criterion, status, evidence}], findings[{severity, title, file, lines, evidence}], worktreeChanged",
 }
 
-func NewGraphDispatch(g TaskGraph, id, taskID, repo string, relationship DispatchRelationship, relatedID, relationshipReason string) (GraphDispatch, error) {
+func NewGraphDispatch(g TaskGraph, id, taskID, repo string, relationship DispatchRelationship, relatedID, relationshipReason string, memoryContext ...[]DispatchMemoryEntry) (GraphDispatch, error) {
+	if len(memoryContext) > 1 {
+		return GraphDispatch{}, graphError("dispatch accepts one Memory snapshot")
+	}
+	var entries []DispatchMemoryEntry
+	if len(memoryContext) == 1 {
+		entries = memoryContext[0]
+	}
 	task, ok := g.task(taskID)
 	if !ok || task.Status != Ready || task.Repo != repo {
 		return GraphDispatch{}, graphError("dispatch requires a matching READY task and repository")
@@ -423,7 +487,7 @@ func NewGraphDispatch(g TaskGraph, id, taskID, repo string, relationship Dispatc
 	if err := g.CheckExecutable(taskID, repo); err != nil {
 		return GraphDispatch{}, err
 	}
-	instruction, err := dispatchInstruction(g, task, id, relationship, relatedID, relationshipReason)
+	instruction, err := dispatchInstruction(g, task, id, relationship, relatedID, relationshipReason, entries)
 	if err != nil {
 		return GraphDispatch{}, err
 	}
@@ -439,9 +503,15 @@ func NewGraphDispatch(g TaskGraph, id, taskID, repo string, relationship Dispatc
 	}, nil
 }
 
-func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship DispatchRelationship, relatedID, relationshipReason string) (DispatchInstruction, error) {
+func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship DispatchRelationship, relatedID, relationshipReason string, memoryContext []DispatchMemoryEntry) (DispatchInstruction, error) {
 	if !nonempty(id) || !validRelationship(relationship) {
 		return DispatchInstruction{}, graphError("dispatch requires an ID and valid relationship")
+	}
+	if err := validateDispatchMemoryContext(task.MemoryRefs, memoryContext); err != nil {
+		return DispatchInstruction{}, err
+	}
+	if len(task.ValidationCommands) == 0 || !validList(task.ValidationCommands) {
+		return DispatchInstruction{}, graphError("dispatch requires explicitly authorized validation commands")
 	}
 	if (relationship == RelationshipNone && (relatedID != "" || relationshipReason != "")) ||
 		(relationship != RelationshipNone && relationship != RelationshipIndependent && relatedID == "") {
@@ -497,11 +567,12 @@ func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship Di
 		ParentTaskID: task.ParentID, SiblingTaskIDs: siblings, DependsOn: slices.Clone(task.DependsOn),
 		Blocks: blocks, Objective: task.Objective, AuthorizedActions: slices.Clone(task.Scope),
 		ForbiddenActions: slices.Clone(task.OutOfScope), Acceptance: slices.Clone(task.Acceptance),
-		RequiredEvidence: slices.Clone(task.RequiredEvidence),
-		ExitCondition:    task.ExitCondition, Worktree: task.Worktree, Branch: task.Branch,
+		RequiredEvidence:   slices.Clone(task.RequiredEvidence),
+		ValidationCommands: slices.Clone(task.ValidationCommands),
+		ExitCondition:      task.ExitCondition, Worktree: task.Worktree, Branch: task.Branch,
 		BaselineSHA: task.BaselineSHA, TargetSHA: task.TargetSHA, AuthorizationID: task.AuthorizationID,
 		Decisions: slices.Clone(task.Decisions), HumanDecision: cloneHumanDecision(task.HumanDecision),
-		MemoryRefs:   slices.Clone(task.MemoryRefs),
+		MemoryRefs: slices.Clone(task.MemoryRefs), MemoryContext: cloneDispatchMemoryContext(memoryContext),
 		ReturnFormat: slices.Clone(dispatchReturnFormat),
 	}
 	if relationship != RelationshipNone && relationship != RelationshipIndependent {
@@ -554,6 +625,7 @@ func dispatchInstructionMatchesTask(d GraphDispatch, task GraphTask) bool {
 		slices.Equal(i.ForbiddenActions, task.OutOfScope) &&
 		slices.Equal(i.Acceptance, task.Acceptance) &&
 		slices.Equal(i.RequiredEvidence, task.RequiredEvidence) && i.ExitCondition == task.ExitCondition &&
+		slices.Equal(i.ValidationCommands, task.ValidationCommands) &&
 		i.Worktree == task.Worktree && i.Branch == task.Branch && i.BaselineSHA == task.BaselineSHA &&
 		i.TargetSHA == task.TargetSHA && i.AuthorizationID == task.AuthorizationID &&
 		reflect.DeepEqual(i.Decisions, task.Decisions) &&
@@ -564,9 +636,10 @@ func dispatchInstructionMatchesTask(d GraphDispatch, task GraphTask) bool {
 
 func dispatchInstructionIdentityMatchesTask(d GraphDispatch, task GraphTask) bool {
 	i := d.Instruction
-	versionMatches := i.Version == 1 || i.Version == DispatchInstructionVersion
+	versionMatches := i.Version >= 1 && i.Version <= DispatchInstructionVersion
 	acceptanceMatches := i.Version == 1 || slices.Equal(i.Acceptance, task.Acceptance)
-	return versionMatches && acceptanceMatches && i.DispatchID == d.ID &&
+	memoryMatches := i.Version < 3 || validateDispatchMemoryContext(i.MemoryRefs, i.MemoryContext) == nil
+	return versionMatches && acceptanceMatches && memoryMatches && i.DispatchID == d.ID &&
 		i.TaskID == d.TaskID && i.Repository == d.Repository &&
 		i.Title == task.Title && task.Repo == d.Repository &&
 		i.DispatchTo == d.Recipient && i.Relationship == d.Relationship &&
@@ -576,8 +649,11 @@ func dispatchInstructionIdentityMatchesTask(d GraphDispatch, task GraphTask) boo
 func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *DispatchResult) error {
 	if result == nil || result.DispatchID != d.ID || result.TaskID != d.TaskID ||
 		result.Recipient != d.Recipient || result.Repository != d.Repository || result.Status != status ||
-		result.StartedSHA != d.Instruction.BaselineSHA || !validStatus(result.NextTransition) {
+		result.StartedSHA != d.ExpectedStartSHA() || !validStatus(result.NextTransition) {
 		return graphError("dispatch result does not match the active instruction")
+	}
+	if d.ExecutionStartSHA != "" && result.StartedSHA != d.ExecutionStartSHA {
+		return graphError("dispatch result does not match the observed execution start SHA")
 	}
 	for _, values := range [][]string{result.ChangedFiles, result.Evidence, result.Blockers} {
 		if !validList(values) {
@@ -588,8 +664,13 @@ func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *Disp
 		if !nonempty(validation.Command) {
 			return graphError("dispatch result has an empty validation command")
 		}
-		if status == DispatchSucceeded && validation.ExitCode != 0 {
+		if status == DispatchSucceeded && validation.ExitCode != 0 &&
+			(d.Recipient != "REVIEWER" || result.ReviewVerdict == "APPROVE") {
 			return graphError("successful dispatch contains a failed validation")
+		}
+		if status == DispatchSucceeded && d.Instruction.Version >= 4 &&
+			(!nonempty(validation.Worktree) || !nonempty(validation.SHA)) {
+			return graphError("successful dispatch has incomplete validation provenance")
 		}
 	}
 	if status == DispatchSuspended && (len(result.Evidence) == 0 || !nonempty(result.ResumeCondition)) {
@@ -598,6 +679,20 @@ func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *Disp
 	if status == DispatchSucceeded {
 		if !nonempty(result.OutputSHA) || len(result.Validations) == 0 || len(result.Evidence) == 0 || len(result.Blockers) != 0 {
 			return graphError("successful dispatch requires output SHA, validation and evidence")
+		}
+		if d.Instruction.Version >= 4 {
+			if len(result.Validations) != len(d.Instruction.ValidationCommands) {
+				return graphError("successful dispatch requires every authorized validation command")
+			}
+			for index, validation := range result.Validations {
+				if validation.Command != d.Instruction.ValidationCommands[index] ||
+					validation.StartedAt.IsZero() || validation.FinishedAt.Before(validation.StartedAt) {
+					return graphError("successful dispatch requires controller-observed validation results")
+				}
+			}
+			if err := validateDispatchGitEvidence(d, result); err != nil {
+				return err
+			}
 		}
 		for _, required := range d.Instruction.RequiredEvidence {
 			if !slices.Contains(result.Evidence, required) {
@@ -616,6 +711,85 @@ func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *Disp
 		}
 	}
 	return nil
+}
+
+func validateDispatchGitEvidence(d GraphDispatch, result *DispatchResult) error {
+	evidence := result.GitEvidence
+	branchMatches := evidence != nil && evidence.Branch == d.Instruction.Branch
+	if d.Recipient == "REVIEWER" && evidence != nil && evidence.Branch == "(detached)" {
+		branchMatches = true
+	}
+	if evidence == nil || evidence.Repository != d.Repository ||
+		!branchMatches ||
+		evidence.BaselineSHA != d.Instruction.BaselineSHA ||
+		evidence.HeadSHA != result.OutputSHA || !evidence.WorktreeClean ||
+		!nonempty(evidence.Worktree) || evidence.VerifiedAt.IsZero() ||
+		!validSHAList(evidence.ParentSHAs) || !validList(evidence.ChangedFiles) {
+		return graphError("successful dispatch requires matching verified Git evidence")
+	}
+	if !sameStringSet(evidence.ChangedFiles, result.ChangedFiles) {
+		return graphError("Git evidence changed files do not match the dispatch result")
+	}
+	for _, validation := range result.Validations {
+		if validation.Worktree != evidence.Worktree || validation.SHA != result.OutputSHA {
+			return graphError("validation provenance does not match verified Git evidence")
+		}
+	}
+	if d.Recipient == "REVIEWER" &&
+		(evidence.HeadSHA != evidence.BaselineSHA || len(evidence.ChangedFiles) != 0 ||
+			result.WorktreeChanged == nil || *result.WorktreeChanged) {
+		return graphError("Reviewer Git evidence requires the reviewed SHA and a clean worktree")
+	}
+	return nil
+}
+
+func validateStoredDispatchResult(d GraphDispatch, status DispatchStatus, result *DispatchResult) error {
+	if err := validateDispatchResult(d, status, result); err != nil {
+		return err
+	}
+	if status == DispatchSucceeded && d.Recipient == "REVIEWER" && d.Instruction.Version >= 4 &&
+		!result.GitEvidence.WorktreeReleased {
+		return graphError("Reviewer success requires observed worktree release")
+	}
+	return nil
+}
+
+func validSHAList(values []string) bool {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if !validSHA(value) {
+			return false
+		}
+		if _, exists := seen[value]; exists {
+			return false
+		}
+		seen[value] = struct{}{}
+	}
+	return true
+}
+
+func validSHA(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func sameStringSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	values := make(map[string]struct{}, len(left))
+	for _, value := range left {
+		values[value] = struct{}{}
+	}
+	for _, value := range right {
+		if _, ok := values[value]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func RenderDispatchInstruction(d GraphDispatch) (string, error) {
@@ -677,6 +851,7 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 		{"DECISIONS", i.Decisions},
 		{"HUMAN DECISION", i.HumanDecision},
 		{"MEMORY REFS", i.MemoryRefs},
+		{"MEMORY CONTEXT", i.MemoryContext},
 	} {
 		value, err := json.Marshal(line.value)
 		if err != nil {
@@ -701,6 +876,7 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 		{"FORBIDDEN ACTIONS", i.ForbiddenActions},
 		{"ACCEPTANCE", i.Acceptance},
 		{"REQUIRED EVIDENCE", i.RequiredEvidence},
+		{"VALIDATION COMMANDS", i.ValidationCommands},
 	} {
 		value, err := json.Marshal(line.value)
 		if err != nil {
@@ -713,6 +889,7 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 		{"WORKTREE", i.Worktree},
 		{"BRANCH", i.Branch},
 		{"BASELINE SHA", i.BaselineSHA},
+		{"START SHA", d.ExpectedStartSHA()},
 		{"TARGET SHA", i.TargetSHA},
 	} {
 		value, err := json.Marshal(line.value)
@@ -779,7 +956,8 @@ func (g *TaskGraph) IssueDispatch(d GraphDispatch, actor, reason string) error {
 	if err := next.CheckExecutable(d.TaskID, d.Repository); err != nil {
 		return err
 	}
-	instruction, err := dispatchInstruction(next, task, d.ID, d.Relationship, d.RelatedID, d.Instruction.RelationshipReason)
+	instruction, err := dispatchInstruction(next, task, d.ID, d.Relationship, d.RelatedID,
+		d.Instruction.RelationshipReason, d.Instruction.MemoryContext)
 	if err != nil {
 		return err
 	}
@@ -825,7 +1003,7 @@ func (g *TaskGraph) TransitionDispatch(id string, status DispatchStatus, actor, 
 		return graphError("invalid dispatch transition")
 	}
 	if !dispatchActive(status) || status == DispatchSuspended {
-		if err := validateDispatchResult(d, status, result); err != nil {
+		if err := validateStoredDispatchResult(d, status, result); err != nil {
 			return err
 		}
 	} else if result != nil {
@@ -1001,6 +1179,12 @@ func (g TaskGraph) Validate() error {
 		if (d.RuntimeSessionID == "") != (d.RuntimeConfigHash == "") {
 			return graphError("runtime session binding is incomplete for Dispatch %s", d.ID)
 		}
+		if d.ReviewWorktreeSource != "" && d.Recipient != "REVIEWER" {
+			return graphError("managed review worktree requires a Reviewer Dispatch")
+		}
+		if d.ExecutionStartSHA != "" && (!validSHA(d.ExecutionStartSHA) || d.ExecutionStartSHA != d.ExpectedStartSHA()) {
+			return graphError("observed execution start SHA does not match the Dispatch")
+		}
 		if d.RuntimeSessionID == "" && len(d.RuntimeUsage) != 0 {
 			return graphError("runtime usage has no session binding for Dispatch %s", d.ID)
 		}
@@ -1085,7 +1269,7 @@ func (g TaskGraph) Validate() error {
 		}
 		dispatch, _ := g.dispatch(event.DispatchID)
 		if event.Status == DispatchSuspended || !dispatchActive(event.Status) {
-			if err := validateDispatchResult(dispatch, event.Status, event.Result); err != nil {
+			if err := validateStoredDispatchResult(dispatch, event.Status, event.Result); err != nil {
 				return err
 			}
 		} else if event.Result != nil {
@@ -1098,11 +1282,11 @@ func (g TaskGraph) Validate() error {
 			return graphError("dispatch %s does not match history", d.ID)
 		}
 		if d.Status == DispatchSuspended {
-			if err := validateDispatchResult(d, d.Status, d.Result); err != nil {
+			if err := validateStoredDispatchResult(d, d.Status, d.Result); err != nil {
 				return err
 			}
 		} else if !dispatchActive(d.Status) {
-			if err := validateDispatchResult(d, d.Status, d.Result); err != nil {
+			if err := validateStoredDispatchResult(d, d.Status, d.Result); err != nil {
 				return err
 			}
 		} else if d.Result != nil {
@@ -1136,9 +1320,14 @@ func (g TaskGraph) Validate() error {
 		if !validIssue(t.Issue) {
 			return graphError("task %s requires an Issue reference or explicit NOT_REQUIRED reason", t.ID)
 		}
-		for _, values := range [][]string{t.Scope, t.OutOfScope, t.Acceptance, t.RequiredEvidence, t.ExceptionIDs, t.MemoryRefs} {
+		for _, values := range [][]string{t.Scope, t.OutOfScope, t.Acceptance, t.RequiredEvidence, t.ValidationCommands, t.ExceptionIDs, t.MemoryRefs} {
 			if !validList(values) {
 				return graphError("empty or duplicate contract value for %s", t.ID)
+			}
+		}
+		for _, ref := range t.MemoryRefs {
+			if !validMemoryReference(ref) {
+				return graphError("invalid Memory reference %q for %s", ref, t.ID)
 			}
 		}
 		for _, d := range t.Decisions {
@@ -1397,12 +1586,55 @@ func cloneDispatch(d GraphDispatch) GraphDispatch {
 	d.Instruction.ForbiddenActions = slices.Clone(d.Instruction.ForbiddenActions)
 	d.Instruction.Acceptance = slices.Clone(d.Instruction.Acceptance)
 	d.Instruction.RequiredEvidence = slices.Clone(d.Instruction.RequiredEvidence)
+	d.Instruction.ValidationCommands = slices.Clone(d.Instruction.ValidationCommands)
 	d.Instruction.Decisions = slices.Clone(d.Instruction.Decisions)
 	d.Instruction.HumanDecision = cloneHumanDecision(d.Instruction.HumanDecision)
 	d.Instruction.MemoryRefs = slices.Clone(d.Instruction.MemoryRefs)
+	d.Instruction.MemoryContext = cloneDispatchMemoryContext(d.Instruction.MemoryContext)
 	d.Instruction.ReturnFormat = slices.Clone(d.Instruction.ReturnFormat)
 	d.Result = cloneDispatchResult(d.Result)
 	return d
+}
+
+func validateDispatchMemoryContext(refs []string, entries []DispatchMemoryEntry) error {
+	if len(refs) != len(entries) {
+		return graphError("dispatch requires a Memory snapshot for every referenced entry")
+	}
+	for index, entry := range entries {
+		if entry.Reference != refs[index] || entry.Version < 1 || !nonempty(entry.Title) ||
+			(entry.Scope != "project" && entry.Scope != "global") || !nonempty(entry.Status) {
+			return graphError("dispatch has an invalid Memory snapshot for %s", refs[index])
+		}
+		if len(entry.SourceRefs) == 0 || !validList(entry.SourceRefs) {
+			return graphError("dispatch has invalid Memory source references for %s", refs[index])
+		}
+		if strings.HasPrefix(entry.Reference, "guardrail:") {
+			if entry.Status != "approved" || entry.Guardrail == nil ||
+				!slices.Contains([]string{"repo-equals", "task-title-matches"}, entry.Guardrail.Kind) ||
+				!nonempty(entry.Guardrail.Value) || !validMemoryReference(entry.Guardrail.SourceLessonReference) ||
+				!strings.HasPrefix(entry.Guardrail.SourceLessonReference, "lesson:") {
+				return graphError("dispatch has no approved structured check for %s", refs[index])
+			}
+		} else if entry.Guardrail != nil {
+			return graphError("dispatch has an unexpected guardrail check for %s", refs[index])
+		}
+	}
+	return nil
+}
+
+func cloneDispatchMemoryContext(entries []DispatchMemoryEntry) []DispatchMemoryEntry {
+	if entries == nil {
+		return nil
+	}
+	out := slices.Clone(entries)
+	for i := range out {
+		out[i].SourceRefs = slices.Clone(out[i].SourceRefs)
+		if out[i].Guardrail != nil {
+			check := *out[i].Guardrail
+			out[i].Guardrail = &check
+		}
+	}
+	return out
 }
 
 func cloneCount(value *int64) *int64 {
@@ -1439,6 +1671,12 @@ func cloneDispatchResult(result *DispatchResult) *DispatchResult {
 		copy.Findings[i].Evidence = slices.Clone(result.Findings[i].Evidence)
 	}
 	copy.WorktreeChanged = cloneBool(result.WorktreeChanged)
+	if result.GitEvidence != nil {
+		evidence := *result.GitEvidence
+		evidence.ParentSHAs = slices.Clone(result.GitEvidence.ParentSHAs)
+		evidence.ChangedFiles = slices.Clone(result.GitEvidence.ChangedFiles)
+		copy.GitEvidence = &evidence
+	}
 	return &copy
 }
 
@@ -1458,6 +1696,7 @@ func cloneTask(t GraphTask) GraphTask {
 	t.OutOfScope = slices.Clone(t.OutOfScope)
 	t.Acceptance = slices.Clone(t.Acceptance)
 	t.RequiredEvidence = slices.Clone(t.RequiredEvidence)
+	t.ValidationCommands = slices.Clone(t.ValidationCommands)
 	t.ExceptionIDs = slices.Clone(t.ExceptionIDs)
 	t.Decisions = slices.Clone(t.Decisions)
 	t.HumanDecision = cloneHumanDecision(t.HumanDecision)

@@ -2,11 +2,17 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
@@ -23,6 +29,8 @@ type fakeRuntime struct {
 	stops     int
 	sessionID string
 	sendErr   error
+	closes    int
+	closeErr  error
 }
 
 func (f *fakeRuntime) Role() string       { return f.role }
@@ -46,6 +54,10 @@ func (f *fakeRuntime) Resume(context.Context, string) error {
 func (f *fakeRuntime) Stop(context.Context, string) error {
 	f.stops++
 	return nil
+}
+func (f *fakeRuntime) Close() error {
+	f.closes++
+	return f.closeErr
 }
 func (f *fakeRuntime) Events(context.Context, string) (<-chan runtime.Event, error) {
 	return make(chan runtime.Event), nil
@@ -147,7 +159,7 @@ func TestControllerRejectsChangedRoleAndConfiguration(t *testing.T) {
 	}
 }
 
-func dispatchStore(t *testing.T) (*store.Store, string, string) {
+func dispatchStore(t *testing.T, worktree ...string) (*store.Store, string, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "workspace.db")
 	db, err := store.Open(path)
@@ -159,10 +171,22 @@ func dispatchStore(t *testing.T) (*store.Store, string, string) {
 		ID: "task-1", Title: "test", Repo: "owner/repo", Type: "IMPLEMENTATION", Issue: "Issue #50",
 		Owner: "CODER", Reviewer: "reviewer", Status: core.Draft, Objective: "test controller",
 		Scope: []string{"internal"}, Acceptance: []string{"tests pass"},
-		RequiredEvidence: []string{"test-report"}, ExitCondition: "tests pass",
+		ValidationCommands: []string{"go test ./..."},
+		RequiredEvidence:   []string{"test-report"}, ExitCondition: "tests pass",
 		Branch: "work/task", Worktree: "/tmp/task",
 		BaselineSHA: strings.Repeat("a", 40), CreatedFrom: "request:1", AuthorizationID: "decision:1",
 		Decisions: []core.TaskDecision{{ID: "decision:1", Source: "human:1", Text: "authorize test"}},
+	}
+	if len(worktree) != 0 {
+		graphTask.Worktree = worktree[0]
+		graphTask.BaselineSHA = gitTest(t, worktree[0], "rev-parse", "HEAD")
+		graphTask.ValidationCommands = []string{"printf 'controller validated'; test -s README.md"}
+		if len(worktree) > 1 {
+			graphTask.Owner = "REVIEWER"
+			graphTask.Type = "REVIEW"
+			graphTask.Worktree = worktree[1]
+			graphTask.TargetSHA = graphTask.BaselineSHA
+		}
 	}
 	graph := core.TaskGraph{Version: 1}
 	if err := graph.Track(graphTask, "human", "register"); err != nil {
@@ -178,6 +202,16 @@ func dispatchStore(t *testing.T) (*store.Store, string, string) {
 	if err := graph.IssueDispatch(gd, "controller", "issue"); err != nil {
 		t.Fatal(err)
 	}
+	if len(worktree) == 0 {
+		// M11 binding tests exercise persisted sessions without Git execution.
+		graph.Dispatches[0].Instruction.Version = 3
+		encoded, err := json.Marshal(graph.Dispatches[0].Instruction)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash := sha256.Sum256(encoded)
+		graph.Dispatches[0].InstructionHash = hex.EncodeToString(hash[:])
+	}
 	ledger := core.Ledger{
 		Tasks:      []core.Task{nowTask},
 		Dispatches: []core.Dispatch{{ID: gd.ID, TaskID: gd.TaskID, Repo: gd.Repository, Active: true, CreatedAt: gd.CreatedAt}},
@@ -187,6 +221,342 @@ func dispatchStore(t *testing.T) (*store.Store, string, string) {
 		t.Fatal(err)
 	}
 	return db, path, gd.ID
+}
+
+func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
+	root := t.TempDir()
+	gitTest(t, root, "init", "-b", "work/task")
+	gitTest(t, root, "config", "user.name", "Taxion Test")
+	gitTest(t, root, "config", "user.email", "taxion-test@example.com")
+	gitTest(t, root, "remote", "add", "origin", "https://github.com/owner/repo.git")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("baseline"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, root, "add", "README.md")
+	gitTest(t, root, "commit", "-m", "baseline")
+	baseline := gitTest(t, root, "rev-parse", "HEAD")
+	db, path, id := dispatchStore(t, root)
+	defer db.Close()
+	worker := &fakeRuntime{role: "CODER", hash: "config-v1", worktree: root}
+	control, err := New(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Start(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.Send(context.Background(), id, "execute"); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.RecordUsage(id, core.DispatchUsage{Model: "auto"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "internal"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "app.go"), []byte("package app"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, root, "add", "internal/app.go")
+	gitTest(t, root, "commit", "-m", "implementation")
+	head := gitTest(t, root, "rev-parse", "HEAD")
+	result := &core.DispatchResult{
+		DispatchID: id, TaskID: "task-1", Recipient: "CODER", Repository: "owner/repo",
+		Status: core.DispatchSucceeded, StartedSHA: baseline, OutputSHA: head,
+		ChangedFiles: []string{"internal/app.go"}, Evidence: []string{"test-report"},
+		Validations:    []core.DispatchValidation{{Command: "not executed", Worktree: root, SHA: head}},
+		NextTransition: core.WaitingForEvidence,
+	}
+	payload := func(value any) string {
+		t.Helper()
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(encoded)
+	}
+	wrong := *result
+	wrong.DispatchID = "other-dispatch"
+	if _, err := control.Finish(context.Background(), id, payload(wrong)); err == nil {
+		t.Fatal("accepted another Dispatch's response")
+	}
+	if _, err := control.Finish(context.Background(), id, payload(result)+" {}"); err == nil {
+		t.Fatal("accepted multiple JSON responses")
+	}
+	accepted, err := control.Finish(context.Background(), id, payload(result))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.GitEvidence == nil || accepted.GitEvidence.HeadSHA != head ||
+		accepted.Validations[0].Output != "controller validated" ||
+		accepted.Validations[0].StartedAt.IsZero() {
+		t.Fatalf("controller evidence missing: %+v", accepted)
+	}
+	if _, err := control.Finish(context.Background(), id, payload(result)); err == nil {
+		t.Fatal("accepted a stale response after completion")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	state, err := reopened.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, ok := state.Graph.GraphDispatch(id)
+	if !ok || saved.Status != core.DispatchSucceeded || saved.Result.GitEvidence.HeadSHA != head ||
+		saved.ExecutionStartSHA != baseline ||
+		saved.Result.Validations[0].Output != "controller validated" ||
+		state.Ledger.Dispatches[0].Active || len(saved.RuntimeUsage) != 1 {
+		t.Fatalf("verified completion lost after restart: %+v", state)
+	}
+	reviewPath := filepath.Join(t.TempDir(), "review")
+	var reviewDispatch core.GraphDispatch
+	if err := reopened.UpdateWorkspace(func(state *store.Workspace) error {
+		task := core.GraphTask{
+			ID: "review-task", Title: "Review coder output", Repo: saved.Repository,
+			Type: "REVIEW", Owner: "REVIEWER", Status: core.Draft,
+			Issue: "INHERITED: Issue #50", CreatedFrom: "dispatch:" + id,
+			Objective: "Review the verified coder SHA", Scope: []string{"internal"},
+			Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
+			ValidationCommands: []string{"test -f internal/app.go"}, ExitCondition: "review verdict",
+			Worktree: reviewPath, Branch: "review/task", BaselineSHA: head, TargetSHA: head,
+			AuthorizationID: "review-authorization",
+			Decisions:       []core.TaskDecision{{ID: "review-authorization", Source: "human:1", Text: "authorize independent review"}},
+		}
+		if err := state.Graph.Track(task, "controller", "review the verified coder output"); err != nil {
+			return err
+		}
+		if err := state.Graph.Transition(task.ID, core.Ready, "controller", "review authorized", core.TransitionProof{}); err != nil {
+			return err
+		}
+		var err error
+		reviewDispatch, err = core.NewGraphDispatch(state.Graph, "review-dispatch", task.ID, task.Repo,
+			core.RelationshipIndependent, id, "review the recorded coder result")
+		if err != nil {
+			return err
+		}
+		if err := state.Graph.IssueDispatch(reviewDispatch, "controller", "dispatch independent review"); err != nil {
+			return err
+		}
+		state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{
+			ID: task.ID, Title: task.Title, Repo: task.Repo, CreatedAt: time.Now().UTC(),
+		})
+		state.Ledger.Dispatches = append(state.Ledger.Dispatches, core.Dispatch{
+			ID: reviewDispatch.ID, TaskID: task.ID, Repo: task.Repo, Active: true,
+			CreatedAt: time.Now().UTC(),
+		})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PrepareReview(reopened, reviewDispatch.ID, root); err != nil {
+		t.Fatal(err)
+	}
+	reviewer, err := New(reopened, &fakeRuntime{
+		role: "REVIEWER", hash: "independent-review", worktree: reviewPath, sessionID: "review-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reviewer.Start(context.Background(), reviewDispatch.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := reviewer.Send(context.Background(), reviewDispatch.ID, "review recorded output"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reviewer.Finish(context.Background(), reviewDispatch.ID, payload(result)); err == nil {
+		t.Fatal("Reviewer accepted a Coder result")
+	}
+	changed := false
+	reviewResult := core.DispatchResult{
+		DispatchID: reviewDispatch.ID, TaskID: reviewDispatch.TaskID, Recipient: "REVIEWER",
+		Repository: saved.Repository, Status: core.DispatchSucceeded, StartedSHA: head, OutputSHA: head,
+		ChangedFiles: []string{}, Evidence: []string{"test-report"}, NextTransition: core.WaitingForEvidence,
+		ReviewVerdict: "APPROVE", WorktreeChanged: &changed, Findings: []core.DispatchFinding{},
+		Acceptance: []core.DispatchAcceptance{{Criterion: "tests pass", Status: "PASS", Evidence: []string{"test-report"}}},
+	}
+	if _, err := reviewer.Finish(context.Background(), reviewDispatch.ID, payload(reviewResult)); err != nil {
+		t.Fatal(err)
+	}
+	state, err = reopened.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coderRecord, _ := state.Graph.GraphDispatch(id)
+	reviewRecord, _ := state.Graph.GraphDispatch(reviewDispatch.ID)
+	if coderRecord.Result.OutputSHA != reviewRecord.Result.OutputSHA ||
+		reviewRecord.RelatedID != coderRecord.ID ||
+		coderRecord.Result.GitEvidence.Worktree == reviewRecord.Result.GitEvidence.Worktree ||
+		!reviewRecord.Result.GitEvidence.WorktreeReleased {
+		t.Fatal("Coder and independent review facts were not preserved separately")
+	}
+}
+
+func gitTest(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	output, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func TestReviewerResultRequiresRuntimeCloseAndWorktreeRelease(t *testing.T) {
+	for _, failure := range []string{"", "dirty", "locked", "close"} {
+		t.Run("failure="+failure, func(t *testing.T) {
+			root := t.TempDir()
+			gitTest(t, root, "init", "-b", "work/task")
+			gitTest(t, root, "config", "user.name", "Taxion Test")
+			gitTest(t, root, "config", "user.email", "taxion-test@example.com")
+			gitTest(t, root, "remote", "add", "origin", "https://github.com/owner/repo.git")
+			if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("target"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			gitTest(t, root, "add", "README.md")
+			gitTest(t, root, "commit", "-m", "target")
+			head := gitTest(t, root, "rev-parse", "HEAD")
+			reviewPath := filepath.Join(t.TempDir(), "review")
+			db, path, id := dispatchStore(t, root, reviewPath)
+			defer db.Close()
+			prepared, err := PrepareReview(db, id, root)
+			if err != nil || prepared.ReviewWorktreeSource != root {
+				t.Fatalf("prepare Reviewer: %+v %v", prepared, err)
+			}
+			worker := &fakeRuntime{role: "REVIEWER", hash: "review-config", worktree: reviewPath}
+			control, err := New(db, worker)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := control.Start(context.Background(), id); err != nil {
+				t.Fatal(err)
+			}
+			if err := control.Send(context.Background(), id, "review target"); err != nil {
+				t.Fatal(err)
+			}
+			switch failure {
+			case "dirty":
+				if err := os.WriteFile(filepath.Join(reviewPath, "untracked.txt"), []byte("dirty"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "locked":
+				gitTest(t, root, "worktree", "lock", reviewPath)
+			case "close":
+				worker.closeErr = errors.New("disconnect failed")
+			}
+			changed := false
+			result := core.DispatchResult{
+				DispatchID: id, TaskID: "task-1", Recipient: "REVIEWER", Repository: "owner/repo",
+				Status: core.DispatchSucceeded, StartedSHA: head, OutputSHA: head,
+				ChangedFiles: []string{}, Validations: []core.DispatchValidation{{
+					Command: "reported validation", Worktree: reviewPath, SHA: head,
+				}},
+				Evidence: []string{"test-report"}, NextTransition: core.WaitingForEvidence,
+				ReviewVerdict: "APPROVE", WorktreeChanged: &changed, Findings: []core.DispatchFinding{},
+				Acceptance: []core.DispatchAcceptance{{Criterion: "tests pass", Status: "PASS", Evidence: []string{"test-report"}}},
+			}
+			payload, err := json.Marshal(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			accepted, finishErr := control.Finish(context.Background(), id, string(payload))
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved, _ := state.Graph.GraphDispatch(id)
+			if failure != "" {
+				if finishErr == nil || accepted != nil || saved.Status != core.DispatchRunning ||
+					saved.Result != nil || !state.Ledger.Dispatches[0].Active {
+					t.Fatalf("adopted incomplete review: %+v %v %+v", accepted, finishErr, saved)
+				}
+				if _, err := os.Stat(reviewPath); err != nil {
+					t.Fatal("failed review worktree must remain for inspection", err)
+				}
+				return
+			}
+			if finishErr != nil || accepted == nil || !accepted.GitEvidence.WorktreeReleased ||
+				saved.Status != core.DispatchSucceeded || worker.closes != 1 {
+				t.Fatalf("Reviewer finalization: %+v %v closes=%d", accepted, finishErr, worker.closes)
+			}
+			if _, err := os.Stat(reviewPath); !os.IsNotExist(err) {
+				t.Fatal("review worktree was not removed", err)
+			}
+			if strings.Contains(gitTest(t, root, "worktree", "list", "--porcelain"), reviewPath) {
+				t.Fatal("review worktree remains registered")
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := store.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			state, err = reopened.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved, _ = state.Graph.GraphDispatch(id)
+			if !saved.Result.GitEvidence.WorktreeReleased || saved.ReviewWorktreeSource != root {
+				t.Fatal("review release evidence lost after database restart")
+			}
+		})
+	}
+}
+
+func TestControllerPersistsObservedValidationFailure(t *testing.T) {
+	root := t.TempDir()
+	gitTest(t, root, "init", "-b", "work/task")
+	gitTest(t, root, "config", "user.name", "Taxion Test")
+	gitTest(t, root, "config", "user.email", "taxion-test@example.com")
+	gitTest(t, root, "remote", "add", "origin", "https://github.com/owner/repo.git")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, root, "add", "README.md")
+	gitTest(t, root, "commit", "-m", "empty baseline")
+	head := gitTest(t, root, "rev-parse", "HEAD")
+	db, _, id := dispatchStore(t, root)
+	defer db.Close()
+	control, err := New(db, &fakeRuntime{role: "CODER", hash: "config-v1", worktree: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Start(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.Send(context.Background(), id, "execute"); err != nil {
+		t.Fatal(err)
+	}
+	result := core.DispatchResult{
+		DispatchID: id, TaskID: "task-1", Recipient: "CODER", Repository: "owner/repo",
+		Status: core.DispatchSucceeded, StartedSHA: head, OutputSHA: head, ChangedFiles: []string{},
+		Evidence: []string{"test-report"}, NextTransition: core.WaitingForEvidence,
+	}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, finishErr := control.Finish(context.Background(), id, string(payload))
+	if finishErr == nil || observed == nil || observed.Status != core.DispatchFailed {
+		t.Fatalf("failed validation appeared successful: %+v %v", observed, finishErr)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, _ := state.Graph.GraphDispatch(id)
+	if saved.Status != core.DispatchFailed || state.Ledger.Dispatches[0].Active ||
+		len(saved.Result.Validations) != 1 || saved.Result.Validations[0].SHA != head ||
+		saved.Result.Validations[0].ExitCode != 1 || saved.Result.Validations[0].Output != "controller validated" ||
+		saved.Result.GitEvidence != nil {
+		t.Fatalf("observed validation failure was lost: %+v", saved)
+	}
 }
 
 var _ runtime.Identity = (*fakeRuntime)(nil)

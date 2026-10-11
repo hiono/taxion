@@ -230,6 +230,71 @@ func CheckDispatch(ledgerPath string, task core.Task, repo string, refs ...strin
 	return nil
 }
 
+// ResolveDispatchContext captures the explicitly referenced Memory entries
+// with their provenance and approved guardrail predicates.
+func ResolveDispatchContext(ledgerPath string, refs []string) ([]core.DispatchMemoryEntry, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	path := PathForLedger(ledgerPath)
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("taxion: inspect Memory context: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("taxion: Memory context is not a regular database file")
+	}
+	s, err := Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("taxion: open Memory context: %w", err)
+	}
+	defer s.Close()
+	return s.DispatchContext(refs)
+}
+
+// DispatchContext resolves each Task reference in order and captures its
+// immutable content, version, sources, and structured guardrail check.
+func (s *Store) DispatchContext(refs []string) ([]core.DispatchMemoryEntry, error) {
+	checks, err := s.ApprovedChecks()
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]GuardrailCheck, len(checks))
+	for _, check := range checks {
+		byID[check.ID] = check
+	}
+	entries := make([]core.DispatchMemoryEntry, 0, len(refs))
+	for _, ref := range refs {
+		kind, id, err := parseReference(ref)
+		if err != nil {
+			return nil, err
+		}
+		entry, err := s.ResolveReference(ref)
+		if err != nil {
+			return nil, err
+		}
+		if len(entry.SourceRefs) == 0 {
+			return nil, fmt.Errorf("taxion: Memory reference %s has no source references", ref)
+		}
+		snapshot := core.DispatchMemoryEntry{
+			Reference: ref, Version: entry.Version, Scope: entry.Scope, Status: entry.Status,
+			Title: entry.Title, Body: entry.Body, SourceRefs: append([]string(nil), entry.SourceRefs...),
+		}
+		if kind == KindGuardrail {
+			check, ok := byID[id]
+			if !ok {
+				return nil, fmt.Errorf("taxion: approved guardrail %s has no structured check", ref)
+			}
+			snapshot.Guardrail = &core.DispatchMemoryCheck{
+				Kind: check.Kind, Value: check.Value,
+				SourceLessonReference: fmt.Sprintf("%s:%d", KindLesson, check.LessonID),
+			}
+		}
+		entries = append(entries, snapshot)
+	}
+	return entries, nil
+}
+
 // ApprovedChecks lists validated policy in stable order. Missing predicates
 // are errors so inspection and dispatch never silently omit approved policy.
 func (s *Store) ApprovedChecks() ([]GuardrailCheck, error) {

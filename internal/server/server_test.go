@@ -80,7 +80,8 @@ func TestWorkspaceDispatchInstructionEndpoint(t *testing.T) {
 		ID: task.ID, Title: task.Title, Repo: task.Repo, Type: "IMPLEMENTATION", Issue: "Issue #47",
 		Status: core.Draft, Owner: "CODER", CreatedFrom: "request:1", Objective: "implement",
 		Scope: []string{"src"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
-		ExitCondition: "report", Worktree: "/work/tree", Branch: "feature", BaselineSHA: strings.Repeat("a", 40),
+		ValidationCommands: []string{"go test ./..."},
+		ExitCondition:      "report", Worktree: "/work/tree", Branch: "feature", BaselineSHA: strings.Repeat("a", 40),
 		AuthorizationID: "decision:1", Decisions: []core.TaskDecision{{ID: "decision:1", Source: "human:1", Text: "approved"}},
 	}
 	if err := graph.Track(graphTask, "human", "register"); err != nil {

@@ -61,13 +61,20 @@ acceptance、requiredEvidence、exitCondition、
 dispatch 前には branch、worktree、baselineSha も要求する。これらは Task の契約から
 Dispatch 指示へ複写される。targetSha は dispatch 時点で未確定でもよく、
 指示にはその時点の値を保存する。
+`validationCommands` は Human が許可した検証コマンドを実行順に保持する。
+Dispatch の発行には一つ以上のコマンドを要求し、controller は worktree を作業ディレクトリとして
+`sh -c` で実行する。コマンドの権限は controller の実行環境に従うため、
+Task の承認時にコマンドの副作用も確認する。
 decision は一意の ID、source、text を持ち、修正した判断は新しい ID で追記する。
 人間の選択が必要な場合は `humanDecision` に質問、選択肢、推奨選択肢と理由を記録し、
 Task を `HUMAN_DECISION_REQUIRED` にする。選択後は option ID と対応する decision record を
 追記してから READY へ戻す。
 `memoryRefs` は `lesson:ID`、`decision:ID`、`guardrail:ID`、`concern:ID` の形式で
-Memory 記録を参照する。Task Graph は参照 ID だけを保持し、Memory 本文を複製しない。
-dispatch 時に参照先が存在し、失効・置換されていないことを確認する。
+Memory 記録を参照する。Task Graph は ID を保持し、Dispatch 発行時に参照先の存在、
+状態、version、source refs を照合する。source refs が空の記録は発行を停止する。
+発行済み Dispatch の instruction snapshot は
+選択した Memory の title・body・scope・status・version・source refs を保持し、
+承認済み guardrail には構造化 predicate を含める。
 guardrail の参照先は承認済みとし、Memory reference を使う workspace では Memory DB を読み込む。
 `memory conflict` に登録した矛盾は人が解決してから、その Memory reference を dispatch に使う。
 issue は URL、`Issue #番号`、`INHERITED: Issue #番号`、
@@ -155,15 +162,36 @@ taxion dispatch transition --id DISPATCH-ID --status SUCCEEDED --actor worker --
 
 終端状態への遷移には `DispatchResult` JSON を必要とする。result の Dispatch ID、
 Task ID、recipient、repository、status が対象 Dispatch と一致し、startedSha が
-指示の baselineSha と一致することを検査する。SUCCEEDED には outputSha、成功した
-validation、必須 evidence を要求する。終端状態は Dispatch ID ごとに一度確定する。
+指示の開始 SHA と一致することを検査する。最初の Coder 実行は baselineSha を開始 SHA とし、
+修正実行は前回の成果物を示す targetSha を開始 SHA とする。
+実行開始時に controller が Git HEAD を照合し、`executionStartSha` として Dispatch に保存する。
+SUCCEEDED には outputSha、実行済み validation、必須 evidence を要求する。
+Coder の成功と Reviewer の APPROVE には検証の exit code 0 を要求する。
+終端状態は Dispatch ID ごとに一度確定する。
 Dispatch ID で結果と状態遷移の対象を特定する。
 Reviewer の SUCCEEDED result には verdict、全 acceptance の判断と evidence、
 findings、worktree の変更有無を追加し、APPROVE は全件 PASS・finding なし・変更なしの場合に限る。
 runtime はこの result schema を SDK に渡し、最終応答を Task・Dispatch の保存済み条件と照合する。
-caller は照合済みの応答を `dispatch transition --result-file` に渡して状態を更新する。
-transition は caller が報告した SHA、validation、evidence の必須項目と整合性を検査する。
-Git object、検証コマンド、証拠の実物は、repository と test record を参照して別途確認する。
+最終応答は controller が受理し、結果ファイルは `dispatch transition --result-file` から受理する。
+SUCCEEDED の受理時には CLI が Git worktree から origin、branch、baseline、HEAD、commit parent、
+差分、worktree の状態を読み直し、Git evidence として result に保存する。
+HEAD は outputSha と一致し、baseline は HEAD の祖先であり、差分は result の changedFiles と
+Task の scope に一致する必要がある。rename は移動元の削除と移動先の追加として両方の scope を確認する。
+controller は保存済み `validationCommands` を実行し、command・exitCode・出力・開始終了時刻・
+実行 worktree・SHA を result に保存する。実行の前後で Git root、HEAD、clean 状態を照合する。
+agent が報告したコマンドは実行許可の根拠として使用せず、実行対象は Dispatch の保存済みコマンドから取得する。
+Reviewer の result は reviewed SHA と HEAD の一致、および変更のない clean worktree を証拠に含める。
+Reviewer の開始時は `runtime start --review-source-worktree SOURCE` を指定する。
+controller は SOURCE と同じ Git repository に、Task の `worktree` を detached worktree として作成する。
+Task の worktree は新規作成用の絶対パスとし、対象 commit を `baselineSha` と `targetSha` に指定する。
+元 repository の場所は Dispatch の `reviewWorktreeSource` に保存する。
+結果の受理時は SDK 接続を閉じ、clean 状態と対象 SHA を再確認してから
+`git worktree remove` で解放する。パスと Git 登録の解放を確認し、`worktreeReleased` を Git evidence に保存する。
+dirty、worktree lock、SDK 切断失敗では成功結果の保存を停止し、worktree を調査用に保持する。
+解放操作・解放確認の失敗もエラーとして返し、成功結果の採用を停止する。
+Reviewer の完了は runtime の最終化を通し、結果ファイルからの完了登録は Coder に使用する。
+修正時は承認済み baseline と直前の成果物 SHA を区別し、Coder の新しい HEAD と実際の parent を記録する。
+Reviewer の検証コマンドが失敗した場合は、REQUEST_CHANGES または BLOCKED の根拠として保存する。
 
 result の形は次のとおりとする。
 
@@ -177,7 +205,12 @@ result の形は次のとおりとする。
   "startedSha": "BASELINE-SHA",
   "outputSha": "OUTPUT-SHA",
   "changedFiles": ["src/example.go"],
-  "validations": [{"command": "go test ./...", "exitCode": 0}],
+  "validations": [{
+    "command": "go test ./...",
+    "exitCode": 0,
+    "worktree": "/path/to/worktree",
+    "sha": "OUTPUT-SHA"
+  }],
   "evidence": ["test-report:1"],
   "blockers": [],
   "nextTransition": "WAITING_FOR_EVIDENCE",
@@ -204,8 +237,11 @@ CLI `runtime start` は保存済み Dispatch 指示を role 固有 system prompt
 短い実行要求を送る。`send` は追加指示を渡す。event cursor で新しい turn の出力だけを読み、
 SDK compaction 後も role と Task Graph の実行契約が system context に残る。
 context 使用量と compaction の結果を event stream で確認できる。
-CLI は最終応答を Dispatch result schema と保存済み条件に照合する。
-operator は照合結果を `dispatch transition --result-file` に渡して状態を更新する。
+CLI は turn の最終応答を共有 controller に渡す。controller は result の識別と契約、
+Git の事実、承認済みコマンドの実行結果を照合し、Dispatch 結果と Ledger を SQLite に同時保存する。
+途中の出力は event として表示し、状態の確定には turn の終了を必要とする。
+operator が結果ファイルを投入する経路も同じ Git 検証とコマンド実行を通す。
+`dispatch transition --validation-timeout` は検証全体の期限を指定し、既定値は 10 分である。
 ACP と HTTP API は `internal/runtime/local` を利用し、Copilot session は明示的な runtime command から起動する。
 
 ## 保存・互換性と制約
@@ -226,7 +262,8 @@ SQLite が同時 writer の更新を受け入れられない場合は明示的�
 Graph 読み込み時は version、キー、履歴、現状態の整合性を検査する。
 履歴検査は transition と proof を照合し、不整合があればエラーを返す。
 
-Memory の参照先の検証と指示生成、Session の実行・再開、
+Memory の参照先の検証と指示生成、役割別 Session の実行・再開は保存済み契約に従う。
+instruction v1〜v3 の履歴は読み込み、現在の実行には v4 の新しい Dispatch を発行する。
 Human の実際の認証・承認確認は後続 Issue で実装する。
 actor・decision・proof は caller が供給する作業記録である。
 実行環境の権限確認と repository・test record の証拠は、それぞれの管理元で確認する。

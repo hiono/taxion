@@ -98,13 +98,25 @@ permission requests, while host and external tools use their own security
 controls. Resume verifies that the prompt, CLI, worktree, and tool configuration
 match the persisted hash.
 
+For a Reviewer Dispatch, the Task's worktree must be a new absolute path.
+Start it with `--review-source-worktree <existing-repository-worktree>` to
+create an independent detached worktree at the saved target SHA. Finalization
+closes the SDK connection and removes the clean worktree before saving review
+success. Dirty, locked, or unreleased worktrees leave the review incomplete
+with an explicit error.
+
 Usage events record the selected model and available token/cache counts in
 SQLite; missing SDK measurements remain unknown. Infinite-session compaction
 is enabled, and its context and outcome events are reported.
 
-The CLI validates the final structured response against the saved Dispatch
-contract. An operator submits that result through the explicit Dispatch
-transition, which checks the reported fields before changing state.
+The Task's `validationCommands` authorize the checks run by the controller.
+At the end of a runtime turn, the controller checks the structured response,
+verifies repository/worktree/SHA/scope against Git, executes those commands in
+the assigned worktree, and saves the observed output and completion in SQLite.
+Validation commands run as `sh -c` with the controller's host permissions;
+approve their effects when authorizing the Task. The explicit
+`dispatch transition --result-file` path performs the same verification and
+validation, with a ten-minute default `--validation-timeout`.
 
 The CLI is local-first. `taxion serve` provides the HTTP API, `taxion acp`
 provides ACP over stdio, and `web/` provides the browser console.

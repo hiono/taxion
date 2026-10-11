@@ -382,7 +382,12 @@ func (s *Server) dispatch(sid string, sess *acpSession, out *bufio.Writer) (stri
 			if err := state.Graph.CheckExecutable(task.ID, sess.cwd); err != nil {
 				return err
 			}
-			graphDispatch, err := core.NewGraphDispatch(state.Graph, d.ID, task.ID, sess.cwd, core.RelationshipNone, "", "")
+			memoryContext, err := memory.ResolveDispatchContext(s.storePath, refs)
+			if err != nil {
+				return err
+			}
+			graphDispatch, err := core.NewGraphDispatch(state.Graph, d.ID, task.ID, sess.cwd,
+				core.RelationshipNone, "", "", memoryContext)
 			if err != nil {
 				return err
 			}
