@@ -18,15 +18,25 @@ import (
 
 type configuredRuntime struct {
 	*fakeRuntime
-	selection json.RawMessage
-	accounts  []string
-	authErr   error
-	onAuth    func()
-	onStart   func()
-	onResume  func()
+	selection        json.RawMessage
+	accounts         []string
+	authErr          error
+	repositoryErr    error
+	repositoryChecks int
+	onRepository     func()
+	onAuth           func()
+	onStart          func()
+	onResume         func()
 }
 
 func (f *configuredRuntime) ExecutionConfiguration() json.RawMessage { return f.selection }
+func (f *configuredRuntime) CheckRepositoryAccess(context.Context) error {
+	f.repositoryChecks++
+	if f.onRepository != nil {
+		f.onRepository()
+	}
+	return f.repositoryErr
+}
 func (f *configuredRuntime) CheckAuthentication(_ context.Context, account string) error {
 	f.accounts = append(f.accounts, account)
 	if f.onAuth != nil {
@@ -194,6 +204,9 @@ func TestConfiguredExecutionAuthenticatesAndPreservesSafeStop(t *testing.T) {
 	if !reflect.DeepEqual(worker.accounts, []string{"ai-user", "ai-user", "ai-user"}) {
 		t.Fatal("execution did not verify the selected account on every operation", worker.accounts)
 	}
+	if worker.repositoryChecks != 3 {
+		t.Fatal("execution did not verify repository access on every operation", worker.repositoryChecks)
+	}
 	before, err := db.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +248,7 @@ func TestConfiguredExecutionAuthenticatesAndPreservesSafeStop(t *testing.T) {
 }
 
 func TestConfiguredExecutionRejectsMissingChangedAndRevokedSelection(t *testing.T) {
-	for _, failure := range []string{"missing", "changed", "auth", "revoked-during-auth", "revoked-during-start"} {
+	for _, failure := range []string{"missing", "changed", "auth", "repository", "revoked-during-auth", "revoked-during-repository", "revoked-during-start"} {
 		t.Run(failure, func(t *testing.T) {
 			db, id, worker, resolved := executionConfigurationFixture(t)
 			before, err := db.LoadWorkspace()
@@ -262,8 +275,12 @@ func TestConfiguredExecutionRejectsMissingChangedAndRevokedSelection(t *testing.
 				}
 			case "auth":
 				worker.authErr = errors.New("not authenticated")
+			case "repository":
+				worker.repositoryErr = errors.New("repository permission denied")
 			case "revoked-during-auth":
 				worker.onAuth = block
+			case "revoked-during-repository":
+				worker.onRepository = block
 			case "revoked-during-start":
 				worker.onStart = block
 			}
@@ -289,10 +306,47 @@ func TestConfiguredExecutionRejectsMissingChangedAndRevokedSelection(t *testing.
 			if dispatch.RuntimeSessionID != "" {
 				t.Fatal("rejected configuration bound a session")
 			}
-			if failure != "revoked-during-auth" && failure != "revoked-during-start" && !reflect.DeepEqual(before, after) {
+			if failure != "revoked-during-auth" && failure != "revoked-during-repository" && failure != "revoked-during-start" && !reflect.DeepEqual(before, after) {
 				t.Fatal("rejected configuration mutated durable state")
 			}
 		})
+	}
+}
+
+func TestConfiguredRepositoryRevocationPreservesSafeStop(t *testing.T) {
+	db, id, worker, _ := executionConfigurationFixture(t)
+	control, err := New(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Start(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.Send(context.Background(), id, "execute"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.repositoryErr = errors.New("repository credential revoked")
+	resumes, sends := worker.resumes, len(worker.sends)
+	for _, operation := range []func() error{
+		func() error { _, err := control.Start(context.Background(), id); return err },
+		func() error { return control.Resume(context.Background(), id) },
+		func() error { return control.Send(context.Background(), id, "continue") },
+	} {
+		if err := operation(); !errors.Is(err, worker.repositoryErr) {
+			t.Fatal("revoked repository access did not block execution", err)
+		}
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(before, after) || worker.resumes != resumes || len(worker.sends) != sends {
+		t.Fatal("rejected repository access changed state or reached SDK work", err)
+	}
+	checks := worker.repositoryChecks
+	if err := control.Stop(context.Background(), id); err != nil || worker.repositoryChecks != checks || worker.stops != 1 {
+		t.Fatal("safe stop depended on repository access", err)
 	}
 }
 

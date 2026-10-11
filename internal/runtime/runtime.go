@@ -58,11 +58,12 @@ type Identity interface {
 }
 
 // ConfigurationIdentity exposes the selected tuple without provider SDK types.
-// Authentication confirms an account, not credential selection or eligibility.
+// Runtime authentication and repository access do not establish AI contract eligibility.
 type ConfigurationIdentity interface {
 	Identity
 	ExecutionConfiguration() json.RawMessage
 	CheckAuthentication(ctx context.Context, expectedAccount string) error
+	CheckRepositoryAccess(ctx context.Context) error
 }
 
 type EventCursor interface {

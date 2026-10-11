@@ -194,6 +194,9 @@ func (c *Controller) authorizeExecution(ctx context.Context, dispatchID string) 
 	if err := worker.CheckAuthentication(ctx, candidate.Runtime.Account); err != nil {
 		return err
 	}
+	if err := worker.CheckRepositoryAccess(ctx); err != nil {
+		return err
+	}
 	// Authentication may have taken time; reject approval revocation before SDK work.
 	state, err = c.store.LoadWorkspace()
 	if err != nil {

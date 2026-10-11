@@ -8,12 +8,64 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	sdk "github.com/github/copilot-sdk/go"
+	"github.com/hiono/taxion/internal/config"
 )
+
+func TestRepositoryAccessUsesSelectedConfigurationAndRoleWithoutSDKSession(t *testing.T) {
+	selected, err := config.Load([]byte(`version: 1
+project: {id: demo}
+repository: {provider: github, host: github.com, path: owner/repo, account: scm-user, credentialRef: gh:active}
+runtime: {provider: copilot, account: ai-user, credentialRef: copilot:logged-in, contractRef: contract}
+execution: {requester: requester, worker: local, approvalRef: approval}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	script := `#!/bin/sh
+case "$4" in
+user) printf '%s' '{"login":"scm-user"}' ;;
+repos/owner/repo) printf '%s' '{"full_name":"owner/repo","permissions":{"pull":true,"push":false}}' ;;
+*) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, role := range []string{"CODER", "REVIEWER"} {
+		cfg := testConfig(t)
+		cfg.Role = role
+		cfg.Configuration, err = json.Marshal(selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		adapter, err := New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer adapter.Close()
+		err = adapter.CheckRepositoryAccess(context.Background())
+		if (err != nil) != (role == "CODER") || adapter.started || len(adapter.sessions) != 0 {
+			t.Fatal("repository check ignored role or reached SDK", role, err)
+		}
+	}
+	adapter, err := New(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	if err := adapter.CheckRepositoryAccess(context.Background()); err == nil || adapter.started {
+		t.Fatal("repository check accepted missing configuration")
+	}
+}
 
 func TestAuthenticationStatusRequiresAccountAndHost(t *testing.T) {
 	login, host := "Developer-B", "github.com"

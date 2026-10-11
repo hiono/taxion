@@ -22,6 +22,14 @@ type Runtime interface {
   and empty task IDs. They advance state and report readiness only for valid requests.
 - `runtime.Identity` exposes the role, worktree, and configuration hash needed
   to bind a runtime session to one authorized Dispatch.
+- Selected Dispatches require `runtime.ConfigurationIdentity`: the saved tuple,
+  effective runtime authentication and repository API access checks. The controller
+  calls both checks before start/resume/send and rechecks approval afterward.
+  The GitHub.com adapter selects `gh:active` or `env:NAME`, confirms the expected
+  repository account and exact target, and requires read permission (plus write
+  permission for Coder). Unknown access and unsupported providers stop execution.
+  These point-in-time checks are not AI contract verification or Git push
+  authentication. Safe stop does not require either check.
 ## Adapters
 
 - `internal/runtime/local`: in-process reference adapter for state transitions.

@@ -174,11 +174,12 @@ Git の clean filter は適用され、検査対象は変換後の blob とす�
 SDK の認証状態を問い合わせる。認証済み account が選択した account と一致し、
 host が明示的に github.com であることを要求する。
 session 作成・再開や model 呼出しは行わず、照合結果を実行許可として保存しない。
-credential 参照の解決、repository 操作主体の選択、契約上の利用可能性は未確認とする。
-SDK の既存の環境変数／保存済みログインの選択規則は維持し、
-明示的な認証検査では session を作成せず、実行時には同じ照合処理を別途呼び出す。
-共有 Memory の配置、credential 参照の解決、契約上の利用可能性の確認、
-signed-in SDK の tool 受入れ、公開前の全コミット・外部記録検査は後続実装として追跡する。
+この明示 probe は repository の権限と契約上の利用可能性を確認しない。
+実行時には同じ SDK 認証照合と、後述する repository access の照合を呼び出す。
+SDK の `copilot:logged-in` は保存済み認証を、`env:NAME` は指定した環境変数だけを選ぶ。
+任意の credential 保管先参照の解決と契約上の利用可能性の確認は後続実装とする。
+共有 Memory の配置は Decision と `docs/08-memory-model.md`、
+実 SDK の管理 stage・commit と独立レビューの受入れは #72・#54 に記録する。
 
 `config bind --dispatch` は、現在の Task と発行時 instruction の承認に一致する
 設定の組合せ、承認参照、各項目の出典、記録時刻を Dispatch に保存する。
@@ -193,15 +194,26 @@ runtime の開始・再開・送信・events・host commit は固定設定を解
 SDK adapter は保存済みの完全な組合せを正規化して session hash に含める。
 出典と記録時刻は hash に含めず、設定未保存の旧 hash は安全な停止のため維持する。
 controller は設定保存済み Dispatch の開始・再開・送信前に
-現在／発行時の承認と実効 Copilot account を照合する。
+現在／発行時の承認、実効 Copilot account と repository API の主体・権限を照合する。
 認証確認後、session の永続保存時、送信前にも承認を照合する。
 管理 Git 操作では設定と承認を公開処理と同じ workspace transaction で検査する。
 
 安全な停止では現在の設定や認証検査を要求せず、保存済みの設定で接続を試みる。
 SDK 接続自体の失敗は明示し、停止できたと扱わない。
 workflow run も同じ設定照合を要求し、生成 Task の承認を親 Task の承認から
-自動で書き換えることはしない。credential 参照の解決、repository 操作主体の選択、
-契約確認、signed-in SDK の受入れは引き続き未完了とする。
+自動で書き換えることはしない。任意の credential 保管先参照の解決、
+契約確認と会話 CLI を含む実 SDK の受入れは引き続き未完了とする。
+
+repository access は GitHub.com の `gh api` に接続した。
+`gh:active` は保存済み `gh` 認証を選び、環境の token と host の上書きを除く。
+`env:NAME` は指定した値だけを `GH_TOKEN` に渡す。
+`user` の account と対象 repository の `full_name`、明示的な read 権限を確認し、
+Coder には write 権限も要求する。開始・再開・送信のたびに確認し、
+未確認・不一致・権限不足・問い合わせ失敗は理由付きで停止する。
+GitLab・Bitbucket・GitHub Enterprise はこの実行 gate の未対応対象とする。
+API の権限は Git push の認証主体や local commit の作者を証明しない。
+この確認は公開操作を行わず、再利用できる許可として永続保存しない。
+安全な停止は repository credential の失効後も同じ経路を維持する。
 
 設定承認の任意項目 `additionalTaskIds` には、同じ完全な設定候補を使える
 追加 Task の ID を正確に列挙する。省略時は従来の単一 Task の承認範囲を維持する。

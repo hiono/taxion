@@ -411,8 +411,9 @@ scanner's documented detection/filter limits remain outside the guarantees.
 
 Registered SDK handlers were checked through controller and actual Git for
 stage→commit locally. Arbitrary shell commands and sub-agent staging/commit
-calls are not enabled. Signed-in SDK stage→commit→independent-review acceptance
-remains in #53/#54/#72.
+calls are not enabled. Live SDK stage→commit→independent review and negative
+stage refusals are recorded in #72. Conversational and repair/re-review
+acceptance remains in #53/#54.
 
 ```yaml
 version: 1
@@ -423,7 +424,7 @@ repository:
   host: github.com
   path: owner/application
   account: developer-a
-  credentialRef: scm-credential
+  credentialRef: gh:active
 runtime:
   provider: copilot
   account: developer-b
@@ -469,7 +470,7 @@ holds a structured execution-configuration approval:
       "project": {"id": "project-a"},
       "repository": {
         "provider": "github", "host": "github.com", "path": "owner/application",
-        "account": "developer-a", "credentialRef": "scm-credential"
+        "account": "developer-a", "credentialRef": "gh:active"
       },
       "runtime": {
         "provider": "copilot", "account": "developer-b",
@@ -545,8 +546,7 @@ session hash. Change the value under the same reference by constructing a new
 adapter; the effective account and existing approvals are still checked.
 Legacy arbitrary references retain the previous ambient SDK selection for
 compatibility; their credential-store resolution is not implemented. These
-policies do not select the GitHub repository actor or verify contract eligibility
-or billing. Provider status messages and error
+policies do not verify contract eligibility or billing. Provider status messages and error
 details are not included in returned authentication errors. Results are
 point-in-time checks, are not persisted as execution authorization, and do
 not change existing session hashes. Start/resume/send and safe stop remain
@@ -561,12 +561,38 @@ Dispatch; it cannot silently migrate to a new configuration.
 Shared runtime/workflow worker construction supplies the saved complete tuple
 to the adapter. It becomes part of the session configuration hash; field
 origins and recording time do not. Start, resume and each instruction send
-check current/saved approvals and verify the effective Copilot account before
-SDK session work. Approval is checked again after authentication, when saving
+check current/saved approvals and verify the effective Copilot account and
+repository API access before SDK session work. Approval is checked again after these checks, when saving
 a new session binding and before marking execution running. Selected
 Dispatches also recheck their tuple and approval inside the managed Git
 authorization transaction. These checks do not establish contract eligibility
-or resolve protected credential references.
+or resolve arbitrary protected credential-store references.
+
+Repository access currently supports GitHub.com through `gh api`. Set
+`repository.credentialRef: gh:active` to use the stored `gh` login, with ambient
+GitHub/Copilot tokens and host overrides removed from the subprocess environment.
+`env:UPPERCASE_NAME` selects that credential alone as `GH_TOKEN`, without stored-login
+fallback. Missing or malformed values and unsupported references are errors.
+Each check queries `user` and then the exact repository, requiring the expected
+`repository.account`, matching `full_name`, and explicit read permission.
+Coder also requires explicit write permission; other roles require read permission.
+Unavailable permissions, identity mismatches, missing `gh`, provider errors and
+unsupported hosts/providers stop execution. GitLab, Bitbucket and GitHub Enterprise
+remain schema-only targets for this gate.
+
+These read-only API observations are not proof of the identity used by Git SSH/HTTPS
+push or the author of a local commit, and do not publish anything. They are not
+persisted as reusable authorization; start/resume/send repeat them. Safe stop
+does not require repository access. The explicit `runtime auth` probe still
+checks only Copilot authentication. A read-only live gate check is available with
+the following command; it makes no model calls:
+
+```bash
+TAXION_GITHUB_INTEGRATION=1 \
+TAXION_TEST_GITHUB_ACCOUNT=<account> \
+TAXION_TEST_GITHUB_REPOSITORY=<owner/repo> \
+go test ./internal/forge -run '^TestLiveGitHubRepositoryAccess$'
+```
 
 `runtime stop` uses the saved tuple and original prompt/tool/scanner settings,
 without loading current fixed settings or requiring the authentication probe.

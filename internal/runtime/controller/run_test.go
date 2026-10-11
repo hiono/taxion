@@ -43,7 +43,8 @@ type configuredScriptedRuntime struct {
 	accounts  []string
 }
 
-func (s *configuredScriptedRuntime) ExecutionConfiguration() json.RawMessage { return s.selection }
+func (s *configuredScriptedRuntime) ExecutionConfiguration() json.RawMessage     { return s.selection }
+func (s *configuredScriptedRuntime) CheckRepositoryAccess(context.Context) error { return nil }
 func (s *configuredScriptedRuntime) CheckAuthentication(_ context.Context, account string) error {
 	s.accounts = append(s.accounts, account)
 	return nil

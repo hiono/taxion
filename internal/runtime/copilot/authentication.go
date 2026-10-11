@@ -2,11 +2,23 @@ package copilot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	sdk "github.com/github/copilot-sdk/go"
+	"github.com/hiono/taxion/internal/config"
+	"github.com/hiono/taxion/internal/forge"
 )
+
+// CheckRepositoryAccess makes read-only API queries, never an SDK model call.
+func (a *Adapter) CheckRepositoryAccess(ctx context.Context) error {
+	var selected config.Config
+	if len(a.config.Configuration) == 0 || json.Unmarshal(a.config.Configuration, &selected) != nil {
+		return fmt.Errorf("taxion: repository access requires the selected execution configuration")
+	}
+	return forge.CheckRepositoryAccess(ctx, selected, a.config.Role == "CODER")
+}
 
 // CheckAuthentication verifies the effective GitHub.com account selected by
 // the SDK client. It creates no session and does not establish contract eligibility.
