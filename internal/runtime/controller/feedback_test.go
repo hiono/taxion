@@ -93,6 +93,12 @@ func TestFeedbackObservationRecordingAndReplayPreserveTargetAndAuthority(t *test
 	if saved.Feedback[0].Evidence[0] != record.Evidence[0] {
 		t.Fatal("read-only flow aliases feedback evidence")
 	}
+	if _, err := ChangeHandoff(db, handoffRequest("release", record.HoldChangeID, "RELEASE")); err == nil {
+		t.Fatal("unresolved feedback was released")
+	}
+	if _, err := ResolveFeedback(db, resolutionRequest(t, db, "coder-feedback", "coder-resolution")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := ChangeHandoff(db, handoffRequest("release", record.HoldChangeID, "RELEASE")); err != nil {
 		t.Fatal(err)
 	}
@@ -199,6 +205,9 @@ func TestFeedbackRejectsChangedTargetsAndInvalidInputsWithoutPartialHold(t *test
 	}
 	if _, err := RecordFeedback(db, input); err != nil {
 		t.Fatal("replay should preserve originally observed running target", err)
+	}
+	if _, err := ResolveFeedback(db, resolutionRequest(t, db, "feedback", "resolution")); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := ChangeHandoff(db, handoffRequest("release", "feedback:feedback", "RELEASE")); err != nil {
 		t.Fatal(err)

@@ -19,7 +19,7 @@ import (
 
 func workflowCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|recover|handoff|feedback-target|feedback|show}")
+		return fmt.Errorf("usage: taxion workflow {start|advance|run|recover|handoff|feedback-target|feedback|feedback-resolve|show}")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
@@ -29,7 +29,7 @@ func workflowCmd(args []string) error {
 	var managedStage bool
 	var scanner string
 	switch action {
-	case "start", "recover", "handoff", "feedback":
+	case "start", "recover", "handoff", "feedback", "feedback-resolve":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
 	case "advance", "show", "feedback-target":
 		fs.StringVar(&id, "id", "", "review flow ID")
@@ -60,9 +60,9 @@ func workflowCmd(args []string) error {
 	if managedStage && !managedCommit {
 		return fmt.Errorf("workflow: --managed-stage requires --managed-commit")
 	}
-	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "feedback"
+	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "feedback" || action == "feedback-resolve"
 	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" {
-		return fmt.Errorf("workflow start, recover, handoff and feedback require --file; advance, run, show and feedback-target require --id")
+		return fmt.Errorf("workflow start, recover, handoff, feedback and feedback-resolve require --file; advance, run, show and feedback-target require --id")
 	}
 	db, state, err := loadWorkspace()
 	if err != nil {
@@ -70,6 +70,21 @@ func workflowCmd(args []string) error {
 	}
 	defer db.Close()
 	switch action {
+	case "feedback-resolve":
+		input, err := os.Open(file)
+		if err != nil {
+			return err
+		}
+		defer input.Close()
+		var request controller.FeedbackResolutionRequest
+		if err := core.DecodeGraphInput(input, &request); err != nil {
+			return err
+		}
+		flow, err := controller.ResolveFeedback(db, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(flow)
 	case "feedback-target":
 		target, err := controller.ObserveFeedback(db, id)
 		if err != nil {

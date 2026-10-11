@@ -29,16 +29,17 @@ type FeedbackTarget struct {
 }
 
 type FlowFeedback struct {
-	ID               string         `json:"id"`
-	ExpectedChangeID string         `json:"expectedChangeId"`
-	Target           FeedbackTarget `json:"target"`
-	Actor            string         `json:"actor"`
-	Source           string         `json:"source"`
-	Reason           string         `json:"reason"`
-	Text             string         `json:"text"`
-	Evidence         []string       `json:"evidence"`
-	HoldChangeID     string         `json:"holdChangeId,omitempty"`
-	At               time.Time      `json:"at,omitempty"`
+	ID               string              `json:"id"`
+	ExpectedChangeID string              `json:"expectedChangeId"`
+	Target           FeedbackTarget      `json:"target"`
+	Actor            string              `json:"actor"`
+	Source           string              `json:"source"`
+	Reason           string              `json:"reason"`
+	Text             string              `json:"text"`
+	Evidence         []string            `json:"evidence"`
+	HoldChangeID     string              `json:"holdChangeId,omitempty"`
+	At               time.Time           `json:"at,omitempty"`
+	Resolution       *FeedbackResolution `json:"resolution,omitempty"`
 }
 
 func ObserveFeedbackTarget(dispatch GraphDispatch) (FeedbackTarget, error) {
@@ -74,12 +75,17 @@ func cloneFlowFeedback(records []FlowFeedback) []FlowFeedback {
 	copy := slices.Clone(records)
 	for index := range copy {
 		copy[index].Evidence = slices.Clone(copy[index].Evidence)
+		if records[index].Resolution != nil {
+			resolution := *records[index].Resolution
+			copy[index].Resolution = &resolution
+		}
 	}
 	return copy
 }
 
 func (g TaskGraph) validateFlowFeedback(flow ReviewFlow) error {
 	ids := map[string]bool{}
+	resolutionIDs := map[string]bool{}
 	for _, feedback := range flow.Feedback {
 		if !validFeedbackInput(feedback) || ids[feedback.ID] || feedback.At.IsZero() ||
 			feedback.Target.UpdatedAt.IsZero() || feedback.Target.UpdatedAt.After(feedback.At) ||
@@ -113,6 +119,40 @@ func (g TaskGraph) validateFlowFeedback(flow ReviewFlow) error {
 			return graphError("feedback has no corresponding hold in flow %s", flow.ID)
 		}
 		ids[feedback.ID] = true
+		if resolution := feedback.Resolution; resolution != nil {
+			dispatch, ok := g.dispatch(resolution.Target.DispatchID)
+			if !validFeedbackResolution(*resolution) || resolution.At.Before(feedback.At) ||
+				resolution.At.IsZero() || resolutionIDs[resolution.ID] || !ok ||
+				!slices.Contains(flow.DispatchIDs, dispatch.ID) ||
+				resolution.Target.TaskID != dispatch.TaskID ||
+				resolution.Target.Repository != dispatch.Repository ||
+				resolution.Target.Recipient != dispatch.Recipient ||
+				resolution.Target.InstructionHash != dispatch.InstructionHash ||
+				resolution.Target.TargetSHA != dispatch.Instruction.TargetSHA ||
+				resolution.Target.UpdatedAt.IsZero() || resolution.Target.UpdatedAt.After(resolution.At) ||
+				!validDispatchStatus(resolution.Target.Status) {
+				return graphError("invalid feedback resolution in flow %s", flow.ID)
+			}
+			if !slices.ContainsFunc(flow.HandoffChanges, func(change HandoffChange) bool {
+				return change.ID == resolution.ExpectedChangeID && change.Action == "HOLD" && !change.At.After(resolution.At)
+			}) {
+				return graphError("feedback resolution lost its hold")
+			}
+			if resolution.Target.OutputSHA != "" && !validSHA(resolution.Target.OutputSHA) {
+				return graphError("feedback resolution output SHA is invalid")
+			}
+			if hash := resolution.Target.ResultHash; hash != "" &&
+				(!strings.HasPrefix(hash, "sha256:") || len(hash) != 71 || !validSHA(strings.TrimPrefix(hash, "sha256:"))) {
+				return graphError("feedback resolution result hash is invalid")
+			}
+			if !dispatchActive(resolution.Target.Status) {
+				target, err := ObserveFeedbackTarget(dispatch)
+				if err != nil || target != resolution.Target {
+					return graphError("feedback resolution terminal target changed")
+				}
+			}
+			resolutionIDs[resolution.ID] = true
+		}
 	}
 	return nil
 }
@@ -120,7 +160,7 @@ func (g TaskGraph) validateFlowFeedback(flow ReviewFlow) error {
 // RecordFlowFeedback records a Human response and its hold atomically.
 // It does not reinterpret that response as an instruction or an approval.
 func (g *TaskGraph) RecordFlowFeedback(flowID string, feedback FlowFeedback) (ReviewFlow, error) {
-	if !validFeedbackInput(feedback) || !feedback.At.IsZero() || feedback.HoldChangeID != "" {
+	if !validFeedbackInput(feedback) || !feedback.At.IsZero() || feedback.HoldChangeID != "" || feedback.Resolution != nil {
 		return ReviewFlow{}, graphError("feedback requires ID, actor, source, reason and text; time and hold ID are controller-owned")
 	}
 	if err := g.Validate(); err != nil {
@@ -134,7 +174,7 @@ func (g *TaskGraph) RecordFlowFeedback(flowID string, feedback FlowFeedback) (Re
 		if previous.ID != feedback.ID {
 			continue
 		}
-		previous.At, previous.HoldChangeID = time.Time{}, ""
+		previous.At, previous.HoldChangeID, previous.Resolution = time.Time{}, "", nil
 		if !reflect.DeepEqual(previous, feedback) {
 			return ReviewFlow{}, graphError("feedback ID was reused with different content")
 		}

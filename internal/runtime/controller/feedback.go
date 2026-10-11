@@ -13,9 +13,10 @@ type FeedbackRequest struct {
 }
 
 type FeedbackObservation struct {
-	FlowID           string              `json:"flowId"`
-	ExpectedChangeID string              `json:"expectedChangeId"`
-	Target           core.FeedbackTarget `json:"target"`
+	FlowID             string              `json:"flowId"`
+	ExpectedChangeID   string              `json:"expectedChangeId"`
+	Target             core.FeedbackTarget `json:"target"`
+	PendingFeedbackIDs []string            `json:"pendingFeedbackIds"`
 }
 
 func ObserveFeedback(db *store.Store, flowID string) (FeedbackObservation, error) {
@@ -35,7 +36,7 @@ func ObserveFeedback(db *store.Store, flowID string) (FeedbackObservation, error
 	if err != nil {
 		return FeedbackObservation{}, err
 	}
-	observation := FeedbackObservation{FlowID: flowID, Target: target}
+	observation := FeedbackObservation{FlowID: flowID, Target: target, PendingFeedbackIDs: flow.PendingFeedbackIDs()}
 	if len(flow.HandoffChanges) != 0 {
 		observation.ExpectedChangeID = flow.HandoffChanges[len(flow.HandoffChanges)-1].ID
 	}

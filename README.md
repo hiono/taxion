@@ -93,6 +93,7 @@ taxion workflow recover --file <recovery-confirmation.json>
 taxion workflow handoff --file <hold-or-release.json>
 taxion workflow feedback-target --id <flow-id>
 taxion workflow feedback --file <targeted-feedback.json>
+taxion workflow feedback-resolve --file <keep-contract-decision.json>
 taxion dispatch --task <id> --repo <repo>
 taxion runtime start --dispatch <id> --system-prompt-file <path>
 taxion runtime send --dispatch <id> --system-prompt-file <path> --prompt-file <path>
@@ -632,6 +633,13 @@ authorization; the text is not automatically sent to a worker or treated as an
 approved contract change. A stale target fails explicitly without recording
 feedback or a hold; use `workflow handoff` separately when the next handoff must
 be held regardless of target changes.
+Unresolved feedback blocks release of a running flow. `workflow feedback-resolve`
+records an explicit sourced `KEEP_CONTRACT` decision against a freshly observed
+target and hold ID. Resolve each pending feedback before requesting release;
+resolution itself neither releases the hold nor sends a prompt. This first
+disposition preserves the approved contract and does not implement application
+of feedback to a new instruction. Releasing a safety-stopped flow does not
+restore execution authority.
 Natural-language intervention, editable instruction drafts and side questions
 remain tracked in #73 and #74.
 Controller-managed Coder Git operations and live SDK acceptance remain tracked

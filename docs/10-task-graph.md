@@ -387,9 +387,61 @@ SQLite の再読込後も `reviewFlows[].feedback` から対象・本文・出�
 Reviewer への異議も元の verdict、指摘、SHA を保持する。
 補足の記録は worker への送信や指示案への適用ではない。
 解除して続けても本文は自動適用されず、元の承認済み契約を使う。
-自然言語の相談、補足の処理済み判定、指示案の改訂、変更の再承認、
-古い対象を明示的に再確認して扱う操作は #73・#74 に残る。
+自然言語の相談、指示案の改訂、変更の再承認は #73・#74 に残る。
 この操作は実行停止を保証せず、開始の保存が先なら現在の実行を維持する。
+
+### 補足を検討して元の契約を維持する判断
+
+RUNNING flow に未処理の補足がある場合、通常の `RELEASE` は拒否する。
+`workflow feedback-target` の `pendingFeedbackIds` で対象を確認し、
+`workflow feedback-resolve --file REQUEST.json` で補足ごとの判断を記録する。
+現在の対象と保留変更 ID は改めて観測し、受付当時の対象と混同しない。
+
+```json
+{
+  "flowId": "application-flow",
+  "feedbackId": "human-feedback-1",
+  "id": "human-resolution-1",
+  "expectedChangeId": "feedback:human-feedback-1",
+  "target": {
+    "dispatchId": "feedback-target が返した値",
+    "taskId": "feedback-target が返した値",
+    "repository": "feedback-target が返した値",
+    "recipient": "feedback-target が返した値",
+    "instructionHash": "feedback-target が返した値",
+    "status": "feedback-target が返した値",
+    "updatedAt": "feedback-target が返した時刻",
+    "targetSha": "feedback-target が返した値",
+    "outputSha": "feedback-target が返した値",
+    "resultHash": "feedback-target が返した値"
+  },
+  "action": "KEEP_CONTRACT",
+  "actor": "human",
+  "source": "human:clarification-decision",
+  "reason": "補足を検討した結果、既存の確認項目で対応できるため承認済み契約を維持する"
+}
+```
+
+初期実装が受け付ける処理は `KEEP_CONTRACT` のみとする。
+補足を検討したが指示契約を変更しないという明示的な判断であり、
+単なる既読、修正指示の適用、レビューの承認、例外の承認ではない。
+補足の本文を実行したことや調査が完了したことも、この操作だけでは証明しない。
+必要な変更がある場合はこの処理で済ませず、保留を維持して承認と指示の変更へ進む。
+指示案への適用経路は #73・#74 の未実装項目に残る。
+
+判断は補足の `resolution` に ID、現在の観測対象、保留 ID、操作、actor、
+出典、理由、controller が付けた UTC 時刻を保存する。
+同じ入力の再送は記録を維持して現在の flow を返す。
+判断を書き換えたり、同じ判断 ID を別の補足へ使ったりする操作は拒否する。
+観測後の状態・結果の変化や古い保留 ID も transaction 内で拒否する。
+補足を受けた後に現在の ROLE の結果が保存された場合は、
+新しい結果を観測して判断できるが、元の補足の対象は変更しない。
+
+すべての補足を処理した後も保留は維持する。明示的な解除と run/advance が別途必要で、
+新たな補足が届けばその補足の処理まで解除を止める。
+STOPPED flow の解除は従来どおり保留だけを取り除き、未処理の補足も記録に残す。
+これは安全停止した実行の再承認ではなく、STOPPED のまま追加実行できない。
+旧レコードの読み取りは維持し、既存の補足を自動で処理済みに移行しない。
 
 ## 状態遷移と完了
 

@@ -66,6 +66,7 @@ Commands:
   workflow handoff    Hold or release the next handoff with a sourced compare-and-swap request (--file JSON)
   workflow feedback-target Read the latest saved instruction/result target without changing execution (--id required)
   workflow feedback   Record target-bound Human feedback and hold the next handoff (--file JSON)
+  workflow feedback-resolve Record an explicit KEEP_CONTRACT disposition before handoff release (--file JSON)
   review              Bind coder-output evidence (--task, --sha and --repo required)
   resume              Print a resume acknowledgement (local stub; --session required)
   acp                 Serve ACP v1 over stdio (spike)

@@ -147,6 +147,31 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 		recorded.Feedback[0].Target != observed.Target || len(current.Graph.Dispatches) != 1 {
 		t.Fatal("CLI feedback lost target, duplicated record or advanced execution")
 	}
+	resolutionFile := filepath.Join(dir, "resolution.json")
+	observed, err = controller.ObserveFeedback(db, flow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolution, err := json.Marshal(controller.FeedbackResolutionRequest{
+		FlowID: flow.ID, FeedbackID: "feedback",
+		FeedbackResolution: core.FeedbackResolution{
+			ID: "resolution", ExpectedChangeID: observed.ExpectedChangeID, Target: observed.Target,
+			Action: "KEEP_CONTRACT", Actor: "human", Source: "human:decision",
+			Reason: "Keep the approved contract after clarification",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(resolutionFile, resolution, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"feedback-resolve", "--file", resolutionFile}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"feedback-resolve", "--file", resolutionFile}); err != nil {
+		t.Fatal("resolution replay failed", err)
+	}
 	writeHandoff(controller.HandoffRequest{
 		FlowID: flow.ID, HandoffChange: core.HandoffChange{
 			ID: "feedback-release", ExpectedChangeID: "feedback:feedback", Action: "RELEASE",
@@ -164,6 +189,7 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 		{"recover"}, {"recover", "--file", file}, {"handoff"}, {"handoff", "--file", file},
 		{"feedback"}, {"feedback", "--file", file}, {"feedback-target"},
 		{"feedback-target", "--id", "missing"},
+		{"feedback-resolve"}, {"feedback-resolve", "--file", file},
 	} {
 		if err := workflowCmd(args); err == nil {
 			t.Fatalf("invalid workflow invocation accepted: %v", args)
