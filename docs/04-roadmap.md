@@ -60,8 +60,41 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 | --- | --- | --- |
 | [M10](https://github.com/hiono/taxion/milestone/16) | 階層化した Memory、Task Graph、Task lost の防止、実行契約 | #46〜#48・#66 |
 | [M11](https://github.com/hiono/taxion/milestone/17) | Go Copilot SDK、役割別 Session、system prompt・履歴の分離 | #49〜#51 |
-| [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映し、再説明なしで進める自動実装・独立レビュー | #52〜#54・#67 |
-| [M13](https://github.com/hiono/taxion/milestone/19) | 再起動からの復旧、永続的な作業記録 | #55〜#57 |
+| [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映する自動実装・独立レビュー、実行主体・接続先・AI 契約の分離 | #52〜#54・#67・#69 |
+| [M13](https://github.com/hiono/taxion/milestone/19) | 再起動からの復旧、永続的な作業記録、外部基盤 adapter の分離・対応評価 | #55〜#57・#70 |
 | [M14](https://github.com/hiono/taxion/milestone/20) | 仕様検索、Memory の移行、skills・tools 連携 | #58〜#61 |
-| [M15](https://github.com/hiono/taxion/milestone/21) | ACP・Web と到達条件の検証 | #62〜#63 |
+| [M15](https://github.com/hiono/taxion/milestone/21) | ACP・Web、project 参加者の権限・契約・session 所有権、組合せ別の到達条件 | #62〜#63・#71 |
 | [M16](https://github.com/hiono/taxion/milestone/22) | Planner 採用と Rust 導入の評価 | #64〜#65 |
+
+## project・開発基盤・AI 契約の独立した管理
+
+Taxion の core は Task・Dispatch・判断・証拠・承認を管理し、
+外部クライアント、開発基盤、AI runtime はそれぞれの adapter を通じて接続する。
+この境界により、同じ実行契約を異なる基盤と利用者の組合せに適用する。
+
+| 管理対象 | 独立して選択・確認する情報 |
+| --- | --- |
+| project と利用者 | 参加者、依頼者、承認者、実行・レビュー・停止の権限 |
+| repository | provider、host、path、Git 操作主体とアクセス権 |
+| 作業・レビュー記録 | 接続先、Issue・PR・MR 等の種別と ID、公開・更新の権限 |
+| AI runtime | 認証主体、利用権、契約参照、費用帰属、取得可能な利用量と上限 |
+| 実行環境 | 端末・共有サーバー・CI・worker、credential 保管先、実行の分離 |
+| 再開と担当交代 | session 所有権、権限・契約の再検査、停止・引継ぎの承認 |
+
+M12 #69 で共通契約と既存 GitHub＋Copilot の明示的な主体選択を実装し、
+#54 の実 SDK 受入れで確認する。M13 #70 は GitHub・GitLab・Bitbucket の
+対応能力と外部記録 adapter の境界を評価し、追加実装を承認された後続 Issue に分ける。
+M15 #71 は複数開発者の project 参加と契約選択を管理し、
+#63 で採択した基盤・利用者・契約・worker の組合せを検証する。
+
+組合せには「GitLab repository＋外部協力者＋組織が許可した Copilot 契約＋専用 worker」
+や「Bitbucket repository＋別サービスの作業管理＋個人の Copilot 契約」を含める。
+実装済み能力、未確認の能力、後続計画を対応表に保持する。
+契約上の費用負担者と実測できる利用量は別々に記録し、
+提供側から取得できない課金情報は取得不能として明示する。
+
+実装の順序は #69 → #54、#69・#56 → #70、
+#69・#55・#62 → #71、#70・#71 → #63 とする。
+再開時の主体・接続先・契約の照合は #55、
+最初の GitHub 外部記録 adapter は #56、
+入口ごとの利用者認証は #62 が担当する。
