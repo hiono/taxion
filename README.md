@@ -475,6 +475,20 @@ state. A recorded decision is local authorization evidence: this command does
 not authenticate its author, validate external credentials, or authorize a
 runtime operation. Those gates and durable runtime bindings remain in #69.
 
+`config check --dispatch <dispatch-id>` checks the same fixed Global/Project
+files and environment against both the current Task approval and the saved
+Dispatch instruction. The approval must have been included when that Dispatch
+was issued; a later Task approval cannot expand an existing Dispatch's
+configuration choices. It rejects missing or stopped Dispatches, inactive
+Tasks, mismatched repositories, and combinations absent from the saved
+approval. `--task` and `--dispatch` are mutually exclusive.
+
+This read-only check uses one workspace snapshot and does not bind a
+configuration to a session or authenticate its actors. Runtime start/resume
+integration, credential selection, effective authentication and contract
+eligibility still remain in #69; successful output names those unchecked
+boundaries explicitly.
+
 Runtime commands require an active Task Graph Dispatch and a role-specific
 system prompt file. The Task's worktree and Dispatch recipient select the
 runtime role and workspace. The saved Dispatch snapshot is appended to the

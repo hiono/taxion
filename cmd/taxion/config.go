@@ -22,6 +22,7 @@ func checkConfig(args []string, output io.Writer) error {
 	fs := flag.NewFlagSet("config check", flag.ContinueOnError)
 	sources := fs.Bool("sources", false, "show field origins without configuration values")
 	task := fs.String("task", "", "check the resolved configuration against this Task's recorded approval")
+	dispatch := fs.String("dispatch", "", "check both current Task approval and the saved Dispatch instruction")
 	if err := fs.Parse(args[1:]); err != nil {
 		switch err.Error() {
 		case "flag provided but not defined: -file", "flag provided but not defined: -user-file", "flag provided but not defined: -project-file":
@@ -31,6 +32,9 @@ func checkConfig(args []string, output io.Writer) error {
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("config check accepts no positional arguments")
+	}
+	if *task != "" && *dispatch != "" {
+		return fmt.Errorf("config check selects either --task or --dispatch, not both")
 	}
 	userDir, err := os.UserConfigDir()
 	if err != nil {
@@ -55,14 +59,20 @@ func checkConfig(args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if *task != "" {
+	if *task != "" || *dispatch != "" {
 		db, err := openWorkspace()
 		if err != nil {
 			return err
 		}
 		defer db.Close()
-		if _, err := controller.CheckConfiguration(db, *task, resolved.Config); err != nil {
-			return err
+		if *dispatch != "" {
+			if _, err := controller.CheckDispatchConfiguration(db, *dispatch, resolved.Config); err != nil {
+				return err
+			}
+		} else {
+			if _, err := controller.CheckConfiguration(db, *task, resolved.Config); err != nil {
+				return err
+			}
 		}
 	}
 	if *sources {
@@ -76,6 +86,10 @@ func checkConfig(args []string, output io.Writer) error {
 				return err
 			}
 		}
+	}
+	if *dispatch != "" {
+		_, err = fmt.Fprintln(output, "Configuration matches the sourced Task approval and saved Dispatch instruction. Authentication, contract eligibility, and runtime configuration binding have not been verified.")
+		return err
 	}
 	if *task != "" {
 		_, err = fmt.Fprintln(output, "Configuration matches a sourced Task approval. Human identity, authentication, contract eligibility, and execution readiness have not been verified.")
