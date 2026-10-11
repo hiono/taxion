@@ -32,6 +32,9 @@ Taxion は、ユーザーとの会話から独立した担当へ作業を渡す�
 ORC-012・ORC-013 と形式に依存しない設定契約の採択判断は
 [ADR-0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md)
 に記録する。Issue はその実装・検証を追跡する。
+通常設定の優先順位は、承認済みの権限・契約・送信先の範囲内で適用する。
+開始時の主体・契約・送信先と承認を保存し、
+再開時の変更・範囲逸脱は停止と再認可として扱う。
 
 project/global は Memory の階層とは別の適用範囲である。
 Task Graph は現在の作業と関係、Memory は判断と経験の根拠、
