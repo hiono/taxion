@@ -444,6 +444,37 @@ identity, and `contractRef` identifies the intended usage contract.
 containing tokens. Execution fields identify the requester, worker, and sourced
 approval reference.
 
+The execution contract distinguishes these facts:
+
+| Fact | Required evidence and current boundary |
+| --- | --- |
+| Authentication | A fresh provider query confirms the selected effective account. Possessing a credential alone does not prove a match. |
+| Authorization | The current Task and immutable Dispatch instruction carry the same sourced approval for the complete selected tuple. Provider access is checked separately. |
+| AI eligibility | The selected account must have rights to use the effective provider agreement. `contractRef` names the intended agreement; it does not select an SDK billing agreement or prove eligibility. Automatic verification is unimplemented. |
+| Contractual payer | The party responsible for payment comes from the agreement or an authorized external record, not the account name or token owner. Provider payer/invoice information is unavailable through the implemented adapter. |
+| Measured use | Tokens, model cost multipliers and AI credits are distinct quantities. Complete private SDK usage receipts can report measured credits; missing or incomplete reports are unconfirmed, never zero or free. The optional SDK credit ceiling is per session and soft, not a project budget or bill. |
+
+Keep eligibility evidence, payer and measured use separate when approving an
+experiment. An entitlement projection or a successful model response alone
+does not establish which agreement paid for it. Configuration approval records
+the allowed combination; it does not manufacture missing provider billing data.
+
+`config check --capabilities` reports static implementation coverage without
+credentials or selected identities. It can be combined with `--sources` and
+approval checks; the default output is unchanged. It performs no network queries.
+
+| Selected repository + runtime | Repository access gate | Runtime | Contract/payer verification |
+| --- | --- | --- | --- |
+| GitHub.com + Copilot | `GITHUB_COM_GH_API` | `COPILOT_SDK` | `UNIMPLEMENTED` |
+| GitHub Enterprise + Copilot | `UNIMPLEMENTED` | `COPILOT_SDK` | `UNIMPLEMENTED` |
+| GitLab + Copilot | `UNIMPLEMENTED` | `COPILOT_SDK` | `UNIMPLEMENTED` |
+| Bitbucket + Copilot | `UNIMPLEMENTED` | `COPILOT_SDK` | `UNIMPLEMENTED` |
+
+An implemented adapter still needs a supported credential reference, the
+installed provider CLI, live access and current approval. Static coverage
+does not grant execution; unsupported repository combinations stop at the
+runtime gate.
+
 The schema accepts `github`, `gitlab`, or `bitbucket` repository identities,
 including nested namespace paths, and `copilot` runtime identities. This
 describes configuration, not implemented adapter coverage. Checking a file

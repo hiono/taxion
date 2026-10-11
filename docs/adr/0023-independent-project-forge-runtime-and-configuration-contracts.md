@@ -211,6 +211,11 @@ repository access は GitHub.com の `gh api` に接続した。
 Coder には write 権限も要求する。開始・再開・送信のたびに確認し、
 未確認・不一致・権限不足・問い合わせ失敗は理由付きで停止する。
 GitLab・Bitbucket・GitHub Enterprise はこの実行 gate の未対応対象とする。
+`config check --capabilities` は repository access と runtime の実装状況、
+契約・課金確認の未実装状態を表示する。表示は静的な能力の説明とし、
+credential や選択した個人の識別子を出さず、外部アクセスも行わない。
+認証・承認・契約上の利用権・支払者・実測利用量の違いと組合せの対応表は
+README の設定契約に記載する。契約参照から支払者や取得不能な課金情報を推定しない。
 API の権限は Git push の認証主体や local commit の作者を証明しない。
 成功した照合は Dispatch の `configuration.accessChecks` に追記する。
 操作・runtime hash・確認の開始／終了時点・役割に必要な権限を記録し、

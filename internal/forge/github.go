@@ -16,13 +16,21 @@ import (
 
 var credentialEnvironmentName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
+// RepositoryAccessAdapter reports implementation coverage, not live availability.
+func RepositoryAccessAdapter(selected config.Config) string {
+	if selected.Repository.Provider == "github" && strings.EqualFold(selected.Repository.Host, "github.com") {
+		return "GITHUB_COM_GH_API"
+	}
+	return "UNIMPLEMENTED"
+}
+
 // CheckRepositoryAccess confirms the selected API identity and permissions.
 // It does not establish the identity used by Git SSH/HTTPS or publish changes.
 func CheckRepositoryAccess(ctx context.Context, selected config.Config, write bool) error {
 	if err := selected.Validate(); err != nil {
 		return err
 	}
-	if selected.Repository.Provider != "github" || !strings.EqualFold(selected.Repository.Host, "github.com") {
+	if RepositoryAccessAdapter(selected) == "UNIMPLEMENTED" {
 		return fmt.Errorf("taxion: repository access adapter supports github.com only")
 	}
 	env, err := githubEnvironment(selected.Repository.CredentialRef)

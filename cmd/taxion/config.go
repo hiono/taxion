@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/hiono/taxion/internal/config"
+	"github.com/hiono/taxion/internal/forge"
 	"github.com/hiono/taxion/internal/runtime/controller"
 )
 
@@ -22,6 +23,7 @@ func checkConfig(args []string, output io.Writer) error {
 	bind := args[0] == "bind"
 	fs := flag.NewFlagSet("config "+args[0], flag.ContinueOnError)
 	sources := fs.Bool("sources", false, "show field origins without configuration values")
+	capabilities := fs.Bool("capabilities", false, "show adapter implementation coverage, not live access or eligibility")
 	task := fs.String("task", "", "check the resolved configuration against this Task's recorded approval")
 	dispatch := fs.String("dispatch", "", "check both current Task approval and the saved Dispatch instruction")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -74,6 +76,12 @@ func checkConfig(args []string, output io.Writer) error {
 			if _, err := fmt.Fprintf(output, "%s: %s\n", name, resolved.Sources[name]); err != nil {
 				return err
 			}
+		}
+	}
+	if *capabilities {
+		if _, err := fmt.Fprintf(output, "repository.access.adapter: %s\nruntime.adapter: COPILOT_SDK\nruntime.contract.verification: UNIMPLEMENTED\nruntime.contract.billing: UNIMPLEMENTED\nImplementation coverage only; credentials, live access and contract eligibility have not been verified.\n",
+			forge.RepositoryAccessAdapter(resolved.Config)); err != nil {
+			return err
 		}
 	}
 	if bind {
