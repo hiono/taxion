@@ -113,7 +113,7 @@ func (c *Controller) Start(ctx context.Context, dispatchID string) (string, erro
 	if dispatch.RuntimeSessionID != "" && dispatch.RuntimeConfigHash != c.runtime.ConfigHash() {
 		return "", fmt.Errorf("taxion: runtime config does not match Dispatch session binding")
 	}
-	if err := c.authorizeExecution(ctx, dispatchID); err != nil {
+	if err := c.authorizeExecution(ctx, dispatchID, "START"); err != nil {
 		return "", err
 	}
 	if dispatch.RuntimeSessionID != "" {
@@ -161,7 +161,7 @@ func (c *Controller) Send(ctx context.Context, dispatchID, prompt string) error 
 	if dispatch.Status == core.DispatchCancelRequested || dispatch.Status == core.DispatchSuspended {
 		return fmt.Errorf("taxion: Dispatch status %s does not authorize sending instructions", dispatch.Status)
 	}
-	if err := c.authorizeExecution(ctx, dispatchID); err != nil {
+	if err := c.authorizeExecution(ctx, dispatchID, "SEND"); err != nil {
 		return err
 	}
 	if err := c.runtime.Resume(ctx, dispatch.RuntimeSessionID); err != nil {
@@ -187,7 +187,7 @@ func (c *Controller) Resume(ctx context.Context, dispatchID string) error {
 	if dispatch.Status == core.DispatchCancelRequested || dispatch.Status == core.DispatchSuspended {
 		return fmt.Errorf("taxion: Dispatch status %s does not authorize runtime resume", dispatch.Status)
 	}
-	if err := c.authorizeExecution(ctx, dispatchID); err != nil {
+	if err := c.authorizeExecution(ctx, dispatchID, "RESUME"); err != nil {
 		return err
 	}
 	return c.runtime.Resume(ctx, dispatch.RuntimeSessionID)

@@ -9,18 +9,48 @@ import (
 	"time"
 )
 
-// DispatchConfiguration records a selected tuple, not external authentication
-// or permission to execute. Selection contains identifiers and protected refs.
+// DispatchConfiguration separates selected identifiers from point-in-time
+// access observations. Neither is reusable permission to execute.
 type DispatchConfiguration struct {
-	DecisionID string            `json:"decisionId"`
-	Selection  json.RawMessage   `json:"selection"`
-	Sources    map[string]string `json:"sources"`
-	RecordedAt time.Time         `json:"recordedAt"`
+	DecisionID   string                 `json:"decisionId"`
+	Selection    json.RawMessage        `json:"selection"`
+	Sources      map[string]string      `json:"sources"`
+	RecordedAt   time.Time              `json:"recordedAt"`
+	AccessChecks []ExecutionAccessCheck `json:"accessChecks,omitempty"`
+}
+
+// ExecutionAccessCheck records a successful runtime-account and repository-role
+// access check for the selected tuple, not session creation or contract eligibility.
+type ExecutionAccessCheck struct {
+	Operation            string    `json:"operation"`
+	RuntimeConfigHash    string    `json:"runtimeConfigHash"`
+	StartedAt            time.Time `json:"startedAt"`
+	CompletedAt          time.Time `json:"completedAt"`
+	RepositoryPermission string    `json:"repositoryPermission"`
+	ContractEligibility  string    `json:"contractEligibility"`
 }
 
 func (binding DispatchConfiguration) validate(dispatch GraphDispatch) error {
 	if !nonempty(binding.DecisionID) || binding.RecordedAt.IsZero() {
 		return graphError("configuration binding requires a decision and recording time")
+	}
+	observedHash := dispatch.RuntimeConfigHash
+	for _, check := range binding.AccessChecks {
+		if !slices.Contains([]string{"START", "RESUME", "SEND"}, check.Operation) ||
+			!nonempty(check.RuntimeConfigHash) || check.StartedAt.IsZero() || check.CompletedAt.IsZero() ||
+			check.CompletedAt.Before(check.StartedAt) || check.ContractEligibility != "UNVERIFIED" {
+			return graphError("execution access observation requires an operation, runtime identity, time interval and unverified contract")
+		}
+		permission := "READ"
+		if dispatch.Recipient == "CODER" {
+			permission = "READ_WRITE"
+		}
+		if observedHash == "" {
+			observedHash = check.RuntimeConfigHash
+		}
+		if check.RepositoryPermission != permission || check.RuntimeConfigHash != observedHash {
+			return graphError("execution access observation differs from the Dispatch role or runtime binding")
+		}
 	}
 	var selection map[string]any
 	if err := json.Unmarshal(binding.Selection, &selection); err != nil || len(selection) == 0 {
@@ -127,6 +157,9 @@ func (g *TaskGraph) BindDispatchConfiguration(dispatchID string, binding Dispatc
 	if dispatch.RuntimeSessionID != "" {
 		return graphError("legacy session has no configuration selection; issue a new Dispatch")
 	}
+	if len(binding.AccessChecks) != 0 {
+		return graphError("initial configuration binding cannot supply execution access observations")
+	}
 	next := cloneGraph(*g)
 	for i := range next.Dispatches {
 		if next.Dispatches[i].ID == dispatchID {
@@ -147,5 +180,41 @@ func cloneDispatchConfiguration(binding *DispatchConfiguration) *DispatchConfigu
 	copy := *binding
 	copy.Selection = slices.Clone(binding.Selection)
 	copy.Sources = maps.Clone(binding.Sources)
+	copy.AccessChecks = slices.Clone(binding.AccessChecks)
 	return &copy
+}
+
+// RecordDispatchAccessCheck preserves prior observations and never widens a
+// selected tuple. Callers must perform fresh external checks before recording.
+func (g *TaskGraph) RecordDispatchAccessCheck(dispatchID, operation, runtimeHash string, startedAt, completedAt time.Time) error {
+	dispatch, ok := g.GraphDispatch(dispatchID)
+	if !ok || dispatch.Configuration == nil {
+		return graphError("execution access observation requires a selected Dispatch")
+	}
+	if err := g.CheckHandoffStart(dispatchID); err != nil {
+		return err
+	}
+	if err := g.BindDispatchConfiguration(dispatchID, *dispatch.Configuration); err != nil {
+		return err
+	}
+	permission := "READ"
+	if dispatch.Recipient == "CODER" {
+		permission = "READ_WRITE"
+	}
+	check := ExecutionAccessCheck{
+		Operation: operation, RuntimeConfigHash: runtimeHash,
+		StartedAt: startedAt, CompletedAt: completedAt,
+		RepositoryPermission: permission, ContractEligibility: "UNVERIFIED",
+	}
+	next := cloneGraph(*g)
+	for i := range next.Dispatches {
+		if next.Dispatches[i].ID == dispatchID {
+			next.Dispatches[i].Configuration.AccessChecks = append(next.Dispatches[i].Configuration.AccessChecks, check)
+		}
+	}
+	if err := next.Validate(); err != nil {
+		return err
+	}
+	*g = next
+	return nil
 }

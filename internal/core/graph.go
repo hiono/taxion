@@ -454,6 +454,13 @@ func (g *TaskGraph) BindRuntimeSession(dispatchID, sessionID, configHash string)
 		(d.RuntimeSessionID != sessionID || d.RuntimeConfigHash != configHash) {
 		return graphError("Dispatch is already bound to another runtime session configuration")
 	}
+	if d.Configuration != nil {
+		for _, check := range d.Configuration.AccessChecks {
+			if check.RuntimeConfigHash != configHash {
+				return graphError("runtime session configuration differs from the recorded access observation")
+			}
+		}
+	}
 	for _, other := range next.Dispatches {
 		if other.ID != dispatchID && other.RuntimeSessionID == sessionID &&
 			(other.TaskID != d.TaskID || other.Recipient != d.Recipient || other.RuntimeConfigHash != configHash) {

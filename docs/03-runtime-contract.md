@@ -28,7 +28,12 @@ type Runtime interface {
   The GitHub.com adapter selects `gh:active` or `env:NAME`, confirms the expected
   repository account and exact target, and requires read permission (plus write
   permission for Coder). Unknown access and unsupported providers stop execution.
-  These point-in-time checks are not AI contract verification or Git push
+  Successful checks are appended to `configuration.accessChecks` with the operation,
+  runtime hash, observation interval, role permission and unverified contract.
+  Recording rechecks approval transactionally and does not claim session creation.
+  The first observation fixes the checked runtime identity even before a session
+  exists. Earlier checks are not reused after restart; absent legacy observations
+  imply no confirmation. These checks are not AI contract verification or Git push
   authentication. Safe stop does not require either check.
 ## Adapters
 

@@ -171,7 +171,7 @@ func (c *Controller) checkExecutionConfiguration(graph core.TaskGraph, dispatchI
 	return candidate, nil
 }
 
-func (c *Controller) authorizeExecution(ctx context.Context, dispatchID string) error {
+func (c *Controller) authorizeExecution(ctx context.Context, dispatchID, operation string) error {
 	state, err := c.store.LoadWorkspace()
 	if err != nil {
 		return err
@@ -191,20 +191,22 @@ func (c *Controller) authorizeExecution(ctx context.Context, dispatchID string) 
 	if !ok {
 		return fmt.Errorf("taxion: runtime does not support configuration authentication")
 	}
+	startedAt := time.Now().UTC()
 	if err := worker.CheckAuthentication(ctx, candidate.Runtime.Account); err != nil {
 		return err
 	}
 	if err := worker.CheckRepositoryAccess(ctx); err != nil {
 		return err
 	}
-	// Authentication may have taken time; reject approval revocation before SDK work.
-	state, err = c.store.LoadWorkspace()
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := state.Graph.CheckHandoffStart(dispatchID); err != nil {
-		return err
-	}
-	_, err = c.checkExecutionConfiguration(state.Graph, dispatchID)
-	return err
+	completedAt := time.Now().UTC()
+	// Recheck approval and save the observation together before SDK session work.
+	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		if _, err := c.checkExecutionConfiguration(state.Graph, dispatchID); err != nil {
+			return err
+		}
+		return state.Graph.RecordDispatchAccessCheck(dispatchID, operation, c.runtime.ConfigHash(), startedAt, completedAt)
+	})
 }

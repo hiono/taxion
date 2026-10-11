@@ -581,8 +581,24 @@ unsupported hosts/providers stop execution. GitLab, Bitbucket and GitHub Enterpr
 remain schema-only targets for this gate.
 
 These read-only API observations are not proof of the identity used by Git SSH/HTTPS
-push or the author of a local commit, and do not publish anything. They are not
-persisted as reusable authorization; start/resume/send repeat them. Safe stop
+push or the author of a local commit, and do not publish anything. Successful
+checks are appended to the local Dispatch's `configuration.accessChecks`,
+with the requested operation, runtime configuration hash, observation interval,
+role permission and `contractEligibility: UNVERIFIED`. The immutable selection
+identifies the expected repository/runtime accounts, project, requester,
+credential and contract references and approval. A receipt means these access
+checks matched; it does not mean an SDK session was created or execution succeeded.
+Failed access checks append no successful receipt and return an error. Approval is rechecked
+in the recording transaction. The first receipt also fixes the checked runtime
+hash before session creation, preventing competing configurations from sharing
+a Dispatch. A different runtime configuration requires a newly authorized Dispatch.
+
+Receipts are observations, not reusable authorization; start/resume/send repeat
+the external checks even after restart. Older records without `accessChecks`
+remain readable and carry no evidence of a prior check. Selection and session
+hash formats are unchanged. `task graph` and `task plan`
+include these records through the saved Dispatch. Keep them local with the
+workspace database; they are not a public usage or billing receipt. Safe stop
 does not require repository access. The explicit `runtime auth` probe still
 checks only Copilot authentication. A read-only live gate check is available with
 the following command; it makes no model calls:

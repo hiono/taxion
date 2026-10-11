@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
@@ -211,6 +212,26 @@ func TestConfiguredExecutionAuthenticatesAndPreservesSafeStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dispatch, _ := before.Graph.GraphDispatch(id)
+	checks := dispatch.Configuration.AccessChecks
+	if len(checks) != 3 {
+		t.Fatal("successful access checks were not durably recorded", checks)
+	}
+	for i, operation := range []string{"START", "RESUME", "SEND"} {
+		check := checks[i]
+		if check.Operation != operation || check.RuntimeConfigHash != worker.hash ||
+			check.RepositoryPermission != "READ_WRITE" || check.ContractEligibility != "UNVERIFIED" ||
+			check.StartedAt.IsZero() || check.CompletedAt.Before(check.StartedAt) {
+			t.Fatal("access observation claims the wrong operation, identity, permissions or contract", check)
+		}
+	}
+	dispatch.Configuration.AccessChecks[0].Operation = "MUTATED"
+	reloaded, err := db.LoadWorkspace()
+	reloadedDispatch, _ := reloaded.Graph.GraphDispatch(id)
+	if err != nil || reloadedDispatch.Configuration.AccessChecks[0].Operation != "START" {
+		t.Fatal("returned access observations mutated durable state", err)
+	}
+	before = reloaded
 	worker.authErr = errors.New("authentication revoked")
 	resumes, sends := worker.resumes, len(worker.sends)
 	for _, operation := range []func() error{
@@ -310,6 +331,75 @@ func TestConfiguredExecutionRejectsMissingChangedAndRevokedSelection(t *testing.
 				t.Fatal("rejected configuration mutated durable state")
 			}
 		})
+	}
+}
+
+func TestRecordedAccessChecksRejectChangedIdentityAndSurviveRestart(t *testing.T) {
+	db, id, worker, _ := executionConfigurationFixture(t)
+	control, err := New(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := control.authorizeExecution(context.Background(), id, "START"); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, _ := state.Graph.GraphDispatch(id)
+	if dispatch.RuntimeSessionID != "" || len(dispatch.Configuration.AccessChecks) != 1 {
+		t.Fatal("access check claimed a created SDK session")
+	}
+	original, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, operation := range []func() error{
+		func() error { return state.Graph.RecordDispatchAccessCheck(id, "STOP", worker.hash, now, now) },
+		func() error { return state.Graph.RecordDispatchAccessCheck(id, "START", "different-hash", now, now) },
+		func() error {
+			return state.Graph.RecordDispatchAccessCheck(id, "START", worker.hash, now, now.Add(-time.Second))
+		},
+		func() error { return state.Graph.BindRuntimeSession(id, "new-session", "different-hash") },
+	} {
+		if err := operation(); err == nil {
+			t.Fatal("invalid observation or changed session identity accepted")
+		}
+		content, err := json.Marshal(state)
+		if err != nil || string(content) != string(original) {
+			t.Fatal("rejected access record or binding partially mutated the graph", err)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "restart.db")
+	saved, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := saved.InitializeWorkspace(state); err != nil {
+		saved.Close()
+		t.Fatal(err)
+	}
+	if err := saved.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	reloaded, err := reopened.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(state, reloaded) {
+		t.Fatal("access observation did not survive SQLite restart", err)
+	}
+	control, err = New(reopened, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.repositoryErr = errors.New("revoked after restart")
+	if _, err := control.Start(context.Background(), id); !errors.Is(err, worker.repositoryErr) || worker.starts != 0 {
+		t.Fatal("persisted success replaced a fresh external access check", err)
 	}
 }
 

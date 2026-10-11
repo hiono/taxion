@@ -212,7 +212,15 @@ Coder には write 権限も要求する。開始・再開・送信のたびに�
 未確認・不一致・権限不足・問い合わせ失敗は理由付きで停止する。
 GitLab・Bitbucket・GitHub Enterprise はこの実行 gate の未対応対象とする。
 API の権限は Git push の認証主体や local commit の作者を証明しない。
-この確認は公開操作を行わず、再利用できる許可として永続保存しない。
+成功した照合は Dispatch の `configuration.accessChecks` に追記する。
+操作・runtime hash・確認の開始／終了時点・役割に必要な権限を記録し、
+契約上の利用可能性は `UNVERIFIED` とする。
+選択済みの組合せが project・依頼者・承認・主体・接続先・契約参照を識別する。
+記録 transaction は承認を再照合し、過去の照合結果を変更しない。
+最初の照合が確認済み runtime hash を固定し、session 作成前の競合も拒否する。
+照合の成功は session 作成や作業の成功を証明せず、次回の実行許可にも流用しない。
+旧レコードに照合結果がない場合は未確認として読み取り互換性を維持する。
+選択と session hash の形式は維持し、local database を一括公開しない。
 安全な停止は repository credential の失効後も同じ経路を維持する。
 
 設定承認の任意項目 `additionalTaskIds` には、同じ完全な設定候補を使える
