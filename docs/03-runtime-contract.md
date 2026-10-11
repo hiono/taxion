@@ -69,11 +69,10 @@ does not alter the adapter's configuration hash. Provider status messages
 and raw RPC errors are withheld from its returned errors; cancellation
 remains identifiable.
 
-This does not resolve credential references, select the repository actor,
-establish contract eligibility or bind the configuration durably. Runtime
-start/resume/send and safe stop keep their existing behavior. Those execution
-and reauthorization gates remain in #69; local protocol fixtures do not
-demonstrate signed-in acceptance.
+This probe does not resolve credential references, select the repository actor
+or establish contract eligibility. Execution-time checks use the same
+authentication method separately; local protocol fixtures do not demonstrate
+signed-in acceptance.
 
 `config bind --dispatch` records a complete approved configuration selection,
 decision reference, field origins and recording time in the Dispatch. The
@@ -86,10 +85,33 @@ Once selected, Dispatch configuration checks and the explicit authentication
 probe require that tuple. Repeating identical values keeps the initial origins
 and time. Binding different values or adding a first selection to an existing
 session requires a newly authorized Dispatch. Missing selections on legacy
-records remain readable. This record does not alter SDK configuration hashes
-or existing runtime execution/cancellation paths, and is not evidence of
-effective authentication or contract eligibility. Session binding and
-execution-time reauthorization remain in #69.
+records remain readable. The selection record alone is not evidence of
+effective authentication or contract eligibility.
+
+The Copilot adapter's optional selected tuple is validated, canonicalized,
+owned and included in its configuration hash. `runtime.ConfigurationIdentity`
+exposes only neutral JSON and an account-authentication capability. Unselected
+legacy hashes remain unchanged. The controller rejects a selected Dispatch
+with a missing or different runtime tuple; selected start/resume/send check
+current Task and saved instruction approval and the effective account before
+SDK work. Approval is rechecked after authentication, in the new session
+binding transaction and before sending an instruction. Managed Git checks the
+tuple and approval inside its own publication transaction.
+
+The runtime CLI resolves fixed configuration for start/resume/send/events/commit.
+Fresh Dispatches save their selection automatically; legacy sessions without a
+selection require a new authorized Dispatch. Shared runtime/workflow factories
+construct the adapter from the saved selection. Every workflow Task must have
+its own issued configuration approval; parent approvals are not rewritten to
+authorize generated Reviewers. Derived-Task configuration authorization
+remains in #69/#53.
+
+Safe stop reconstructs the saved session hash without current settings or an
+authentication probe. It still verifies role, worktree and session identity,
+then attempts SDK attachment and cancellation. Provider attachment can fail,
+and those errors are returned. Unconfigured local/proc usage retains existing
+behavior. Credential resolution, repository actor selection, contract
+eligibility and signed-in acceptance remain separate requirements.
 
 `runtime commit` is a host operation that scans a locked index snapshot and
 message before publishing its exact tree. It does not stage files or complete

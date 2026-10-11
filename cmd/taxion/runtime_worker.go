@@ -17,6 +17,10 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 	if managedStage && !managedCommit {
 		return nil, fmt.Errorf("runtime: --managed-stage requires --managed-commit")
 	}
+	config.Configuration = nil
+	if dispatch.Configuration != nil {
+		config.Configuration = dispatch.Configuration.Selection
+	}
 	var worker *copilot.Adapter
 	if managedCommit {
 		if dispatch.Recipient != "CODER" || dispatch.Instruction.CommitMessagePolicy != core.CommitMessagePolicy {
@@ -71,4 +75,26 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 	var err error
 	worker, err = copilot.New(config)
 	return worker, err
+}
+
+func selectDispatchConfiguration(db *store.Store, dispatch core.GraphDispatch) (core.GraphDispatch, error) {
+	resolved, err := resolveConfiguration()
+	if err != nil {
+		return core.GraphDispatch{}, err
+	}
+	if err := controller.BindConfiguration(db, dispatch.ID, resolved); err != nil {
+		return core.GraphDispatch{}, err
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		return core.GraphDispatch{}, err
+	}
+	selected, ok := state.Graph.GraphDispatch(dispatch.ID)
+	if !state.HasGraph || !ok || selected.Configuration == nil {
+		return core.GraphDispatch{}, fmt.Errorf("runtime: saved Dispatch configuration is unavailable")
+	}
+	if _, err := controller.CheckDispatchConfiguration(db, dispatch.ID, resolved.Config); err != nil {
+		return core.GraphDispatch{}, err
+	}
+	return selected, nil
 }

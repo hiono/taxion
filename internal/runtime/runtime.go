@@ -4,7 +4,10 @@
 // not become governance-core dependencies (ADR-0003).
 package runtime
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Event is a plain, SDK-neutral runtime event.
 type Event struct {
@@ -52,6 +55,14 @@ type Identity interface {
 	Role() string
 	ConfigHash() string
 	Worktree() string
+}
+
+// ConfigurationIdentity exposes the selected tuple without provider SDK types.
+// Authentication confirms an account, not credential selection or eligibility.
+type ConfigurationIdentity interface {
+	Identity
+	ExecutionConfiguration() json.RawMessage
+	CheckAuthentication(ctx context.Context, expectedAccount string) error
 }
 
 type EventCursor interface {

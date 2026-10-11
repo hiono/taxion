@@ -111,6 +111,10 @@ func workflowCmd(args []string) error {
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 		flow, err := controller.RunReviewFlow(ctx, db, storePath, id, func(dispatch core.GraphDispatch) (runtime.Identity, error) {
+			dispatch, err := selectDispatchConfiguration(db, dispatch)
+			if err != nil {
+				return nil, err
+			}
 			contract, err := core.RenderDispatchInstruction(dispatch)
 			if err != nil {
 				return nil, err

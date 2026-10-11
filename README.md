@@ -495,15 +495,12 @@ Binding requires an executable Dispatch before its first runtime session.
 Existing sessions without a selection cannot be retrofitted; issue a newly
 authorized Dispatch. Legacy records remain readable with no selection.
 This command records candidate selection only: it does not authenticate actors,
-resolve credentials, establish contract eligibility or bind the selection to
-the SDK session hash. Runtime start/resume/send and safe stop retain their
-previous behavior until the execution gates are connected in #69.
+resolve credentials or establish contract eligibility. Runtime execution uses
+the selection in its SDK session hash as described below.
 
-This read-only check uses one workspace snapshot and does not bind a
-configuration to a session or authenticate its actors. Runtime start/resume
-integration, credential selection, effective authentication and contract
-eligibility still remain in #69; successful output names those unchecked
-boundaries explicitly.
+`config check --dispatch` uses one read-only workspace snapshot and does not
+create a session or authenticate its actors. Its successful output names
+those unchecked boundaries explicitly.
 
 `runtime auth --dispatch <id> --system-prompt-file <path>` resolves those same
 fixed settings and requires the current Task and saved Dispatch approvals
@@ -520,7 +517,35 @@ or verify contract eligibility or billing. Provider status messages and error
 details are not included in returned authentication errors. Results are
 point-in-time checks, are not persisted as execution authorization, and do
 not change existing session hashes. Start/resume/send and safe stop remain
-unchanged until the durable configuration and reauthorization gates are wired.
+separate from the explicit probe.
+
+`runtime start|resume|send|events|commit` now resolve and check the fixed
+configuration before creating an adapter. A fresh Dispatch saves its approved
+selection automatically if not already bound. An existing session without a
+selection must be safely stopped and replaced with a newly authorized
+Dispatch; it cannot silently migrate to a new configuration.
+
+Shared runtime/workflow worker construction supplies the saved complete tuple
+to the adapter. It becomes part of the session configuration hash; field
+origins and recording time do not. Start, resume and each instruction send
+check current/saved approvals and verify the effective Copilot account before
+SDK session work. Approval is checked again after authentication, when saving
+a new session binding and before marking execution running. Selected
+Dispatches also recheck their tuple and approval inside the managed Git
+authorization transaction. These checks do not establish contract eligibility
+or resolve protected credential references.
+
+`runtime stop` uses the saved tuple and original prompt/tool/scanner settings,
+without loading current fixed settings or requiring the authentication probe.
+It attempts to attach and stop even after approval or settings are revoked;
+SDK attachment errors remain explicit. Legacy unselected session hashes are
+preserved for safe stop. Unconfigured local/proc controller usage is unchanged.
+
+`workflow run` applies the same selection and authentication gate to every
+worker. Each generated Task needs an approval naming that Task in its issued
+instruction. A parent Task's approval is not silently rewritten for a generated
+Reviewer Task; missing Task-specific authorization stops the flow. Authorizing
+derived review Tasks without fabricating Human decisions remains in #69/#53.
 
 Runtime commands require an active Task Graph Dispatch and a role-specific
 system prompt file. The Task's worktree and Dispatch recipient select the

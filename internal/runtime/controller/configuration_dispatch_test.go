@@ -14,7 +14,7 @@ import (
 )
 
 func TestDispatchConfigurationUsesIssuedApprovalAndCurrentTask(t *testing.T) {
-	for _, failure := range []string{"", "absent-snapshot", "candidate", "blocked", "cancelled", "cancel-requested", "suspended"} {
+	for _, failure := range []string{"", "absent-snapshot", "other-task", "candidate", "blocked", "cancelled", "cancel-requested", "suspended"} {
 		t.Run(failure, func(t *testing.T) {
 			candidate, err := config.Load([]byte(`version: 1
 project: {id: demo}
@@ -29,6 +29,9 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 			alternative := candidate
 			alternative.Runtime.Account = "other-ai-user"
 			approval.Allowed = append(approval.Allowed, alternative)
+			if failure == "other-task" {
+				approval.TaskID = "parent-task"
+			}
 			data, err := json.Marshal(approval)
 			if err != nil {
 				t.Fatal(err)

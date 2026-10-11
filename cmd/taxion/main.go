@@ -552,6 +552,12 @@ func runtimeCmd(args []string) error {
 		}
 		expectedAccount = resolved.Config.Runtime.Account
 	}
+	if action != "stop" && action != "auth" {
+		dispatch, err = selectDispatchConfiguration(db, dispatch)
+		if err != nil {
+			return err
+		}
+	}
 	if *reviewSource != "" && (action != "start" || dispatch.Recipient != "REVIEWER") {
 		return fmt.Errorf("runtime: --review-source-worktree applies to Reviewer start")
 	}

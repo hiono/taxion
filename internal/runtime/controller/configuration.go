@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -141,4 +143,59 @@ func BindConfiguration(db *store.Store, dispatchID string, resolved config.Resol
 			DecisionID: decision.ID, Selection: selection, Sources: resolved.Sources, RecordedAt: time.Now().UTC(),
 		})
 	})
+}
+
+func (c *Controller) checkExecutionConfiguration(graph core.TaskGraph, dispatchID string) (config.Config, error) {
+	dispatch, ok := graph.GraphDispatch(dispatchID)
+	if !ok {
+		return config.Config{}, fmt.Errorf("taxion: configuration Dispatch not found")
+	}
+	worker, configured := c.runtime.(runtime.ConfigurationIdentity)
+	var selection json.RawMessage
+	if configured {
+		selection = worker.ExecutionConfiguration()
+	}
+	if dispatch.Configuration == nil && len(selection) == 0 {
+		return config.Config{}, nil
+	}
+	if dispatch.Configuration == nil || len(selection) == 0 {
+		return config.Config{}, fmt.Errorf("taxion: runtime requires the saved Dispatch configuration selection")
+	}
+	var candidate config.Config
+	if err := core.DecodeGraphInput(strings.NewReader(string(selection)), &candidate); err != nil {
+		return config.Config{}, fmt.Errorf("taxion: runtime configuration selection is invalid")
+	}
+	if _, err := checkDispatchConfiguration(graph, dispatchID, candidate); err != nil {
+		return config.Config{}, err
+	}
+	return candidate, nil
+}
+
+func (c *Controller) authorizeExecution(ctx context.Context, dispatchID string) error {
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	if !state.HasGraph {
+		return fmt.Errorf("taxion: execution configuration requires a Task Graph")
+	}
+	candidate, err := c.checkExecutionConfiguration(state.Graph, dispatchID)
+	if err != nil || candidate.Version == 0 {
+		return err
+	}
+	// checkExecutionConfiguration requires this capability for selected Dispatches.
+	worker, ok := c.runtime.(runtime.ConfigurationIdentity)
+	if !ok {
+		return fmt.Errorf("taxion: runtime does not support configuration authentication")
+	}
+	if err := worker.CheckAuthentication(ctx, candidate.Runtime.Account); err != nil {
+		return err
+	}
+	// Authentication may have taken time; reject approval revocation before SDK work.
+	state, err = c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	_, err = c.checkExecutionConfiguration(state.Graph, dispatchID)
+	return err
 }

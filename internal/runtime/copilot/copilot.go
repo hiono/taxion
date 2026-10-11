@@ -17,6 +17,8 @@ import (
 
 	sdk "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/rpc"
+	executionconfig "github.com/hiono/taxion/internal/config"
+	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 )
 
@@ -40,6 +42,7 @@ type Config struct {
 	AvailableTools   []string
 	ResponseSchema   map[string]any
 	ManagedCommit    *runtime.ManagedCommit
+	Configuration    json.RawMessage
 }
 
 type Adapter struct {
@@ -124,6 +127,19 @@ func New(config Config) (*Adapter, error) {
 		config.BaseDirectory = filepath.Join(home, ".copilot")
 	}
 	config.AvailableTools = slices.Clone(config.AvailableTools)
+	if len(config.Configuration) != 0 {
+		var selected executionconfig.Config
+		if err := core.DecodeGraphInput(strings.NewReader(string(config.Configuration)), &selected); err != nil {
+			return nil, fmt.Errorf("taxion: invalid runtime configuration selection")
+		}
+		if err := selected.Validate(); err != nil {
+			return nil, err
+		}
+		config.Configuration, err = json.Marshal(selected)
+		if err != nil {
+			return nil, fmt.Errorf("taxion: encode runtime configuration selection: %w", err)
+		}
+	}
 	if config.AvailableTools == nil {
 		config.AvailableTools = []string{}
 	}
@@ -191,6 +207,7 @@ func (a *Adapter) ConfigHash() string {
 		PermissionPolicy    string
 		ManagedCommit       *runtime.ManagedCommit `json:",omitempty"`
 		ManagedCommitPolicy string                 `json:",omitempty"`
+		Configuration       json.RawMessage        `json:",omitempty"`
 	}{
 		Role:                a.config.Role,
 		SystemPrompt:        a.config.SystemPrompt,
@@ -202,6 +219,7 @@ func (a *Adapter) ConfigHash() string {
 		PermissionPolicy:    permissionPolicy,
 		ManagedCommit:       a.config.ManagedCommit,
 		ManagedCommitPolicy: managedCommitPolicy,
+		Configuration:       a.config.Configuration,
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -210,6 +228,10 @@ func (a *Adapter) ConfigHash() string {
 func (a *Adapter) Role() string { return a.config.Role }
 
 func (a *Adapter) Worktree() string { return a.config.WorkingDirectory }
+
+func (a *Adapter) ExecutionConfiguration() json.RawMessage {
+	return slices.Clone(a.config.Configuration)
+}
 
 func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 	if strings.TrimSpace(taskID) == "" {

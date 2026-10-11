@@ -107,10 +107,13 @@ func (c *Controller) Start(ctx context.Context, dispatchID string) (string, erro
 	if !sameWorktree(dispatch.Instruction.Worktree, c.runtime.Worktree()) {
 		return "", fmt.Errorf("taxion: runtime worktree does not match Dispatch worktree")
 	}
+	if dispatch.RuntimeSessionID != "" && dispatch.RuntimeConfigHash != c.runtime.ConfigHash() {
+		return "", fmt.Errorf("taxion: runtime config does not match Dispatch session binding")
+	}
+	if err := c.authorizeExecution(ctx, dispatchID); err != nil {
+		return "", err
+	}
 	if dispatch.RuntimeSessionID != "" {
-		if dispatch.RuntimeConfigHash != c.runtime.ConfigHash() {
-			return "", fmt.Errorf("taxion: runtime config does not match Dispatch session binding")
-		}
 		if err := c.runtime.Resume(ctx, dispatch.RuntimeSessionID); err != nil {
 			return "", err
 		}
@@ -129,6 +132,9 @@ func (c *Controller) Start(ctx context.Context, dispatchID string) (string, erro
 		if !ok || !active(current.Status) ||
 			current.TaskID != dispatch.TaskID || current.Recipient != dispatch.Recipient {
 			return fmt.Errorf("taxion: Dispatch changed while starting runtime session")
+		}
+		if _, err := c.checkExecutionConfiguration(state.Graph, dispatchID); err != nil {
+			return err
 		}
 		if err := state.Graph.BindRuntimeSession(dispatchID, sessionID, c.runtime.ConfigHash()); err != nil {
 			return err
@@ -152,6 +158,9 @@ func (c *Controller) Send(ctx context.Context, dispatchID, prompt string) error 
 	if dispatch.Status == core.DispatchCancelRequested || dispatch.Status == core.DispatchSuspended {
 		return fmt.Errorf("taxion: Dispatch status %s does not authorize sending instructions", dispatch.Status)
 	}
+	if err := c.authorizeExecution(ctx, dispatchID); err != nil {
+		return err
+	}
 	if err := c.runtime.Resume(ctx, dispatch.RuntimeSessionID); err != nil {
 		return err
 	}
@@ -174,6 +183,9 @@ func (c *Controller) Resume(ctx context.Context, dispatchID string) error {
 	}
 	if dispatch.Status == core.DispatchCancelRequested || dispatch.Status == core.DispatchSuspended {
 		return fmt.Errorf("taxion: Dispatch status %s does not authorize runtime resume", dispatch.Status)
+	}
+	if err := c.authorizeExecution(ctx, dispatchID); err != nil {
+		return err
 	}
 	return c.runtime.Resume(ctx, dispatch.RuntimeSessionID)
 }
@@ -397,6 +409,9 @@ func (c *Controller) dispatch(id string) (core.GraphDispatch, error) {
 
 func (c *Controller) markRunning(dispatchID string) error {
 	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		if _, err := c.checkExecutionConfiguration(state.Graph, dispatchID); err != nil {
+			return err
+		}
 		dispatch, ok := state.Graph.GraphDispatch(dispatchID)
 		if !state.HasGraph || !ok || !active(dispatch.Status) || dispatch.RuntimeSessionID == "" ||
 			dispatch.Recipient != c.runtime.Role() ||

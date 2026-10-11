@@ -62,6 +62,9 @@ func (c *Controller) managedGit(ctx context.Context, dispatchID, sessionID, publ
 		if sessionID != "" && sessionID != dispatch.RuntimeSessionID {
 			return fmt.Errorf("managed commit tool session does not match the bound Dispatch")
 		}
+		if _, err := c.checkExecutionConfiguration(state.Graph, dispatchID); err != nil {
+			return err
+		}
 		task, ok := state.Graph.GraphTask(dispatch.TaskID)
 		if !ok || task.Status != core.Active {
 			return fmt.Errorf("managed commit requires an active Task without a pending stop or Human decision")

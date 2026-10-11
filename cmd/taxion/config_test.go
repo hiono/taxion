@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/runtime/copilot"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -136,6 +138,22 @@ execution:
 		t.Fatal(err)
 	}
 	defer db.Close()
+	selectedDispatch, err := selectDispatchConfiguration(db, beforeAuth.Graph.Dispatches[0])
+	if err != nil || selectedDispatch.Configuration == nil {
+		t.Fatal("runtime did not select the approved fixed configuration", err)
+	}
+	workerConfig := copilot.Config{
+		Role: "CODER", SystemPrompt: "approved role", CLIPath: "/bin/true",
+		WorkingDirectory: selectedDispatch.Instruction.Worktree, BaseDirectory: t.TempDir(),
+	}
+	selectedWorker, err := newDispatchWorker(context.Background(), db, selectedDispatch, workerConfig, false, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer selectedWorker.Close()
+	if len(selectedWorker.ExecutionConfiguration()) == 0 {
+		t.Fatal("saved selection not supplied to the SDK identity")
+	}
 	authArgs := []string{"auth", "--dispatch", "dispatch", "--system-prompt-file", "missing-prompt", "--cli", "missing-copilot"}
 	if err := runtimeCmd(authArgs); err == nil || !strings.Contains(err.Error(), "read system prompt") {
 		t.Fatal("approved auth probe did not reach local adapter inputs", err)
@@ -161,6 +179,30 @@ execution:
 		strings.Contains(err.Error(), "selected-account") {
 		t.Fatal("unapproved auth probe reached adapter inputs or exposed configuration", err)
 	}
+	if _, err := selectDispatchConfiguration(db, selectedDispatch); err == nil {
+		t.Fatal("runtime accepted an unapproved configuration change")
+	}
+	for _, action := range []string{"start", "resume", "send", "events", "commit"} {
+		args := []string{action, "--dispatch", "dispatch", "--system-prompt-file", "missing-prompt", "--cli", "missing-copilot"}
+		if action == "send" {
+			args = append(args, "--prompt-file", "missing-input")
+		}
+		if action == "commit" {
+			args = append(args, "--message-file", "missing-message")
+		}
+		if err := runtimeCmd(args); err == nil || !strings.Contains(err.Error(), "outside the recorded approval") {
+			t.Fatal("execution action bypassed fixed configuration gate", action, err)
+		}
+	}
+	if err := runtimeCmd([]string{"stop", "--dispatch", "dispatch", "--system-prompt-file", "missing-prompt"}); err == nil ||
+		!strings.Contains(err.Error(), "read system prompt") {
+		t.Fatal("safe-stop attachment was blocked by current settings", err)
+	}
+	stopWorker, err := newDispatchWorker(context.Background(), db, selectedDispatch, workerConfig, false, false, "")
+	if err != nil || stopWorker.ConfigHash() != selectedWorker.ConfigHash() {
+		t.Fatal("saved identity cannot attach for safe stop after configuration changes", err)
+	}
+	defer stopWorker.Close()
 	afterAuth, err := db.LoadWorkspace()
 	if err != nil || !reflect.DeepEqual(beforeAuth, afterAuth) {
 		t.Fatal("auth preflight changed the workspace", err)
