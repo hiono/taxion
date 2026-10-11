@@ -58,3 +58,10 @@ type EventCursor interface {
 	EventCursor(sessionID string) (uint64, error)
 	EventsAfter(ctx context.Context, sessionID string, cursor uint64) (<-chan Event, error)
 }
+
+// ManagedCommit binds the host operation, not an agent-selected repository or scanner.
+type ManagedCommit struct {
+	DispatchID string
+	Scanner    string
+	Commit     func(ctx context.Context, sessionID, message string) (string, error) `json:"-"`
+}

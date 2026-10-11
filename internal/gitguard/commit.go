@@ -195,8 +195,10 @@ func Commit(ctx context.Context, dispatch core.GraphDispatch, message, scanner s
 	if err != nil || currentBranch != branch {
 		return "", fmt.Errorf("managed commit branch changed before publication")
 	}
-	if _, err := git("", "update-ref", "-m", "taxion managed commit", branch, sha, head); err != nil {
-		return "", fmt.Errorf("managed commit branch update failed; HEAD was not replaced by Taxion")
+	publication := exec.CommandContext(ctx, "git", "-C", directory, "update-ref", "-m", "taxion managed commit", branch, sha, head)
+	publication.Env = environment
+	if err := publication.Run(); err != nil {
+		return "", fmt.Errorf("managed commit branch update failed; publication of candidate %s was not confirmed; inspect the branch before retrying", sha)
 	}
 	return sha, nil
 }

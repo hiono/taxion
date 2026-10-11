@@ -168,6 +168,9 @@ func TestManagedCommitBranchCompareAndSwap(t *testing.T) {
 	if err == nil || sha != "" || !strings.Contains(err.Error(), "branch update failed") {
 		t.Fatal("concurrent branch update was replaced", err)
 	}
+	if !strings.Contains(err.Error(), "candidate") {
+		t.Fatal("failed publication did not report the candidate for reconciliation", err)
+	}
 	if strings.TrimSpace(gitTest(t, root, "rev-parse", "HEAD")) != other {
 		t.Fatal("managed commit lost external branch update")
 	}

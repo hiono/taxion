@@ -54,6 +54,7 @@ Commands:
   runtime events      Stream events from the Dispatch session
   runtime stop        Stop the Dispatch session
   runtime commit      Publish scanned staged changes for the bound running Coder (--message-file, --scanner)
+  runtime <action> --managed-commit  Opt into the bound Coder SDK commit tool; use the same option and scanner on resume
   workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON)
   workflow advance    Issue review/repair from the latest verified result (--id required)
   workflow run        Execute review/repair continuously with saved ceilings (--id and role prompt files required)
@@ -483,7 +484,8 @@ func runtimeCmd(args []string) error {
 	tools := fs.String("tools", "", "comma-separated SDK tool allowlist (default: none)")
 	promptFile := fs.String("prompt-file", "", "follow-up instruction file (send only)")
 	messageFile := fs.String("message-file", "", "Conventional/Contextual commit message file (commit only)")
-	scanner := fs.String("scanner", "betterleaks", "trusted Betterleaks 1.9.0 executable (commit only)")
+	scanner := fs.String("scanner", "betterleaks", "trusted Betterleaks 1.9.0 executable (commit or --managed-commit)")
+	managedCommit := fs.Bool("managed-commit", false, "enable the bound Coder's taxion_commit SDK tool")
 	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for a turn or event stream")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -509,8 +511,8 @@ func runtimeCmd(args []string) error {
 			scannerSpecified = true
 		}
 	})
-	if action != "commit" && scannerSpecified {
-		return fmt.Errorf("runtime: --scanner applies only to commit")
+	if action != "commit" && !*managedCommit && scannerSpecified {
+		return fmt.Errorf("runtime: --scanner applies only to commit or --managed-commit")
 	}
 
 	db, err := openWorkspace()
@@ -558,12 +560,14 @@ func runtimeCmd(args []string) error {
 			}
 		}
 	}
-	worker, err := copilot.New(copilot.Config{
+	ctx, cancel := signalContext(*timeout)
+	defer cancel()
+	worker, err := newDispatchWorker(ctx, db, dispatch, copilot.Config{
 		Role: dispatch.Recipient, SystemPrompt: runtimeSystemPrompt(string(systemPrompt), dispatchContract),
 		WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: *cliPath,
 		BaseDirectory: *baseDirectory, AvailableTools: availableTools,
 		ResponseSchema: dispatchResultSchema(dispatch),
-	})
+	}, *managedCommit, *scanner)
 	if err != nil {
 		return err
 	}
@@ -573,8 +577,6 @@ func runtimeCmd(args []string) error {
 		return err
 	}
 
-	ctx, cancel := signalContext(*timeout)
-	defer cancel()
 	var operationErr error
 	switch action {
 	case "start":

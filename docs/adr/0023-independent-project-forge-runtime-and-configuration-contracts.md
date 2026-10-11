@@ -151,5 +151,10 @@ M15 #71 は複数開発者の参加・離脱・契約選択・session 所有権�
 `.taxion/` 全体と cwd の実 `.env` の追跡・ignore 検査を追加した。
 `runtime commit` は実行中の Coder に結びついた host 操作として、
 禁止パス・内容・message・scope の直接検査と検査済み tree の公開を行う。
+`--managed-commit` は同じ操作を Coder SDK tool に明示接続する。
+Dispatch・scanner 配置・操作版を session の設定 hash に含め、
+作成・再開の両方で invoking session と実行状態を照合する。
+stage 済み index を対象とし、commit 成功による Task 完了や
+Reviewer への commit 権限付与は行わない。
 共有 Memory の配置、runtime 開始・再開への設定接続、
-管理 commit の自動 SDK tool 接続、公開前の全コミット・外部記録検査は後続実装として追跡する。
+管理 stage、signed-in SDK の tool 受入れ、公開前の全コミット・外部記録検査は後続実装として追跡する。

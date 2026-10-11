@@ -72,13 +72,19 @@ func TestControllerCommitRequiresRunningBoundCoderAndPreservesGraph(t *testing.T
 		}
 	}
 	head := gitTest(t, root, "rev-parse", "HEAD")
+	for _, sessionID := range []string{"", "another-session"} {
+		if _, err := control.CommitForSession(context.Background(), id, sessionID, message, scanner); err == nil {
+			t.Fatal("unmatched tool session committed")
+		}
+	}
 	if _, err := control.Commit(context.Background(), id, message, filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Fatal("missing scanner committed")
 	}
 	if head != gitTest(t, root, "rev-parse", "HEAD") {
 		t.Fatal("rejected scanner advanced HEAD")
 	}
-	sha, err := control.Commit(context.Background(), id, message, scanner)
+	dispatch, _ := before.Graph.GraphDispatch(id)
+	sha, err := control.CommitForSession(context.Background(), id, dispatch.RuntimeSessionID, message, scanner)
 	if err != nil || sha != gitTest(t, root, "rev-parse", "HEAD") {
 		t.Fatal("bound Coder commit failed", err)
 	}

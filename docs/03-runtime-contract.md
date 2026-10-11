@@ -47,6 +47,9 @@ type Runtime interface {
   active status, and configuration hash before creating, resuming, sending,
   stopping, or recording usage for its bound session. Session IDs, hashes,
   model and token/cache usage are stored with the Dispatch in SQLite.
+  Managed commits additionally require an active Task, the invoking session
+  for tool calls, and a running review flow within its saved deadline and
+  observed known-usage ceiling when the Dispatch belongs to a flow.
 
 `taxion runtime start|send|resume|events|stop` is the explicit Copilot CLI
 execution path. `start` creates a session with the saved Dispatch snapshot in
@@ -56,6 +59,34 @@ against the saved Dispatch contract. An operator submits the result through
 the Dispatch transition, which validates its required fields before changing
 state. The ACP server uses `internal/runtime/local`; Copilot sessions start
 through the explicit runtime commands.
+
+`runtime commit` is a host operation that scans a locked index snapshot and
+message before publishing its exact tree. It does not stage files or complete
+the Task. `runtime start --managed-commit` and `workflow run --managed-commit` explicitly
+enable `taxion_commit` for Coder sessions. The neutral `runtime.ManagedCommit`
+binding carries a Dispatch ID, scanner reference and host callback; SDK tool
+types remain inside the Copilot adapter.
+
+The callback receives invocation cancellation, session ID and message only.
+The registered tool cannot choose its repository, scope or scanner. It rejects
+unknown fields, missing messages, unknown/idle/stopped sessions and attributed
+sub-agent invocations. Host interruption and flow deadlines also cancel Git
+work. Permission checks remain enabled. Controller errors are failed SDK tool
+calls, including scanner failures and explicit partial-publication errors.
+Successful output contains the SHA and reminds the agent that review and
+acceptance are still required.
+
+Creation and resume register the same tool. Dispatch, absolute scanner path
+and operation version are part of the configuration hash when enabled.
+Without the option, the previous tool surface and configuration hash are
+preserved. Existing sessions cannot gain or lose the tool on resume without a
+binding mismatch. Shared runtime/workflow construction uses the same callback
+and does not register commit tools for Reviewers.
+
+This tool uses already-staged content; managed staging is not implemented.
+Local checks invoke the actual registered SDK handler through controller and
+real Git, but do not demonstrate a signed-in model's tool invocation. Live
+acceptance remains separately tracked in #54/#72.
 
 ## Event subscription lifetime
 

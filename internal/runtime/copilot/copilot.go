@@ -39,6 +39,7 @@ type Config struct {
 	BaseDirectory    string
 	AvailableTools   []string
 	ResponseSchema   map[string]any
+	ManagedCommit    *runtime.ManagedCommit
 }
 
 type Adapter struct {
@@ -135,6 +136,18 @@ func New(config Config) (*Adapter, error) {
 			return nil, fmt.Errorf("taxion: copy response schema: %w", err)
 		}
 	}
+	if slices.Contains(config.AvailableTools, ManagedCommitToolName) {
+		return nil, fmt.Errorf("taxion: managed commit tool is reserved; enable it through the host binding")
+	}
+	if config.ManagedCommit != nil {
+		binding := *config.ManagedCommit
+		if config.Role != "CODER" || strings.TrimSpace(binding.DispatchID) == "" ||
+			!filepath.IsAbs(binding.Scanner) || binding.Commit == nil {
+			return nil, fmt.Errorf("taxion: managed commit requires a Coder, Dispatch, absolute scanner path and host handler")
+		}
+		config.ManagedCommit = &binding
+		config.AvailableTools = append(config.AvailableTools, ManagedCommitToolName)
+	}
 	return &Adapter{
 		config: config,
 		client: sdk.NewClient(&sdk.ClientOptions{
@@ -151,6 +164,10 @@ func New(config Config) (*Adapter, error) {
 // ConfigHash identifies the role prompt, worktree, and tool surface that must
 // be supplied again when resuming a durable SDK session.
 func (a *Adapter) ConfigHash() string {
+	managedCommitPolicy := ""
+	if a.config.ManagedCommit != nil {
+		managedCommitPolicy = "managed-commit-v1"
+	}
 	permissionPolicy := "cli-managed-v1"
 	if a.config.Role == "CODER" {
 		permissionPolicy = "coder-worktree-write-v1"
@@ -158,23 +175,27 @@ func (a *Adapter) ConfigHash() string {
 		permissionPolicy = "reviewer-read-only-v1"
 	}
 	data, _ := json.Marshal(struct {
-		Role             string
-		SystemPrompt     string
-		WorkingDirectory string
-		CLIPath          string
-		BaseDirectory    string
-		AvailableTools   []string
-		ResponseSchema   map[string]any
-		PermissionPolicy string
+		Role                string
+		SystemPrompt        string
+		WorkingDirectory    string
+		CLIPath             string
+		BaseDirectory       string
+		AvailableTools      []string
+		ResponseSchema      map[string]any
+		PermissionPolicy    string
+		ManagedCommit       *runtime.ManagedCommit `json:",omitempty"`
+		ManagedCommitPolicy string                 `json:",omitempty"`
 	}{
-		Role:             a.config.Role,
-		SystemPrompt:     a.config.SystemPrompt,
-		WorkingDirectory: a.config.WorkingDirectory,
-		CLIPath:          a.config.CLIPath,
-		BaseDirectory:    a.config.BaseDirectory,
-		AvailableTools:   a.config.AvailableTools,
-		ResponseSchema:   a.config.ResponseSchema,
-		PermissionPolicy: permissionPolicy,
+		Role:                a.config.Role,
+		SystemPrompt:        a.config.SystemPrompt,
+		WorkingDirectory:    a.config.WorkingDirectory,
+		CLIPath:             a.config.CLIPath,
+		BaseDirectory:       a.config.BaseDirectory,
+		AvailableTools:      a.config.AvailableTools,
+		ResponseSchema:      a.config.ResponseSchema,
+		PermissionPolicy:    permissionPolicy,
+		ManagedCommit:       a.config.ManagedCommit,
+		ManagedCommitPolicy: managedCommitPolicy,
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -482,6 +503,7 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 		SystemMessage:                      &sdk.SystemMessageConfig{Mode: "append", Content: a.config.SystemPrompt},
 		WorkingDirectory:                   a.config.WorkingDirectory,
 		AvailableTools:                     slices.Clone(a.config.AvailableTools),
+		Tools:                              a.managedTools(),
 		Streaming:                          &streaming,
 		EnableConfigDiscovery:              &disabled,
 		EnableSkills:                       &disabled,
@@ -500,6 +522,7 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		SystemMessage:                      &sdk.SystemMessageConfig{Mode: "append", Content: a.config.SystemPrompt},
 		WorkingDirectory:                   a.config.WorkingDirectory,
 		AvailableTools:                     slices.Clone(a.config.AvailableTools),
+		Tools:                              a.managedTools(),
 		Streaming:                          &streaming,
 		EnableConfigDiscovery:              &disabled,
 		EnableSkills:                       &disabled,

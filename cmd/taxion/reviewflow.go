@@ -25,6 +25,8 @@ func workflowCmd(args []string) error {
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
 	var file, id string
 	var coderPrompt, reviewerPrompt, cli, base, coderTools, reviewerTools string
+	var managedCommit bool
+	var scanner string
 	switch action {
 	case "start", "recover":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
@@ -38,11 +40,20 @@ func workflowCmd(args []string) error {
 		fs.StringVar(&base, "base-directory", "", "Copilot state directory")
 		fs.StringVar(&coderTools, "coder-tools", "", "comma-separated Coder SDK tool allowlist")
 		fs.StringVar(&reviewerTools, "reviewer-tools", "", "comma-separated Reviewer SDK tool allowlist")
+		fs.BoolVar(&managedCommit, "managed-commit", false, "enable the Coder's bound taxion_commit SDK tool")
+		fs.StringVar(&scanner, "scanner", "betterleaks", "trusted Betterleaks executable (--managed-commit only)")
 	default:
 		return fmt.Errorf("unknown workflow action %q", action)
 	}
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
+	}
+	var scannerSpecified bool
+	fs.Visit(func(option *flag.Flag) {
+		scannerSpecified = scannerSpecified || option.Name == "scanner"
+	})
+	if scannerSpecified && !managedCommit {
+		return fmt.Errorf("workflow: --scanner requires --managed-commit")
 	}
 	fileAction := action == "start" || action == "recover"
 	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" {
@@ -99,11 +110,11 @@ func workflowCmd(args []string) error {
 			if err != nil {
 				return nil, err
 			}
-			return copilot.New(copilot.Config{
+			return newDispatchWorker(ctx, db, dispatch, copilot.Config{
 				Role: dispatch.Recipient, SystemPrompt: runtimeSystemPrompt(prompts[dispatch.Recipient], contract),
 				WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: cli, BaseDirectory: base,
 				AvailableTools: tools[dispatch.Recipient], ResponseSchema: dispatchResultSchema(dispatch),
-			})
+			}, managedCommit && dispatch.Recipient == "CODER", scanner)
 		}, os.Stdout)
 		if flow.ID == "" {
 			return err

@@ -312,16 +312,49 @@ Publication uses `commit-tree` and `update-ref`, not Git's commit porcelain,
 so project hooks are not executed. `commit.gpgsign=true` requests signing with
 the configured Git signer; signing failures do not fall back to unsigned commits.
 The real index and working files are left unchanged by Taxion. A failed branch
-update can leave a scanned, unreachable commit object. Git publication and the
+update can leave a scanned, unreachable commit object. A failed or interrupted
+update reports the candidate SHA so the branch can be inspected before retrying.
+Git publication and the
 workspace database are not one transaction: a database failure after publication
 reports the published SHA explicitly.
 
 This is not a sandbox against other processes changing Git files directly.
 It does not inspect earlier commits for secrets or enforce publication checks;
-those remain in #56. Scanner rule/filter limits still apply. Automatic Coder
-SDK tool access to this host operation remains in #53/#72; arbitrary shell
-commit permission is not enabled. Independent review and acceptance are still
-required after a successful managed commit.
+those remain in #56. Scanner rule/filter limits still apply. Independent
+review and acceptance are still required after a successful managed commit.
+
+Enable the Coder's `taxion_commit` SDK tool explicitly when creating a new
+session:
+
+```bash
+taxion runtime start --dispatch <id> --system-prompt-file <path> \
+  --managed-commit --scanner /absolute/path/to/betterleaks
+```
+
+Use the same `--managed-commit`, scanner, role prompt, and other runtime
+options on `send`, `resume`, `events`, `stop`, and host `commit` for that session.
+The tool binding includes the Dispatch ID, resolved absolute scanner path,
+and managed-operation version in the configuration hash. A session started
+without the tool cannot silently acquire it on resume. `--tools taxion_commit`
+is not a substitute for the host binding.
+Keep the scanner's absolute path: a missing executable at that saved path
+does not prevent attaching to stop the session, but every commit revalidates
+its availability and version and fails if it is unavailable.
+
+`workflow run --managed-commit --scanner PATH` supplies the same tool only to
+Coder sessions; Reviewer sessions receive none. The tool accepts just a
+complete `message` string, not a repository, branch, scanner, or Dispatch
+selected by the agent. The SDK registers it on creation and resume without
+skipping permission checks. Its handler checks the active root session and
+the controller verifies that invoking session against the saved Dispatch.
+Host cancellation and saved review-flow time/known-usage ceilings apply.
+Scanner and authorization failures remain failed tool calls.
+
+The tool commits **already-staged content only**. Managed staging and signed-in
+SDK acceptance remain in #53/#54/#72; arbitrary shell commands, sub-agent commit
+calls, and automatic staging are not enabled. The registered SDK handler,
+controller, and actual Git tree were checked together locally without a
+signed-in Copilot request.
 
 ```yaml
 version: 1
