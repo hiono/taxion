@@ -9,6 +9,8 @@ import (
 )
 
 func TestConfigCheckIsExplicitAndDoesNotClaimAuthentication(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
 	input := `version: 1
 project: {id: project-a}
 repository:

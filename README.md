@@ -93,21 +93,30 @@ taxion runtime stop --dispatch <id> --system-prompt-file <path>
 taxion review --task <id> --sha <coder-sha> --repo <repo>
 ```
 
-`config check --file` validates explicit YAML settings against the
+`config check` validates default or explicit YAML settings against the
 versioned configuration schema. All fields below are required in the resolved
 configuration. `version` is an
 integer; the remaining values are nonempty strings without whitespace.
 Unknown fields, duplicate keys, implicit non-string values, aliases, and
 multiple documents are rejected.
 
-Optional `--user-file` and `--project-file` supply lower-priority settings.
+By default, the user file is `taxion/config.yaml` under Go's `os.UserConfigDir()`:
+`$XDG_CONFIG_HOME` or `~/.config` on Linux, `~/Library/Application Support`
+on macOS, and `%AppData%` on Windows. The project file is
+`.taxion/config.yaml` in the current working directory. Parent directories are
+not searched. Missing default files are skipped; unreadable or invalid files
+are errors. If no files are found, the command reports an error.
+
+Optional `--user-file` and `--project-file` replace their respective default
+paths. A missing explicit file is an error. `--file` supplies an optional
+highest-priority invocation file.
 Precedence is `--file` (invocation) > `--project-file` > `--user-file`.
 Every file requires `version: 1`; other fields can be omitted in a layer and
 are inherited from lower layers. Explicit empty or null values are errors.
 Each layer is checked before merging, so a higher-priority value cannot hide
 an invalid lower-priority value. `--sources` prints each field's winning layer
-without printing its value. File discovery and environment overrides remain
-pending.
+without printing its value. Environment overrides of configuration values
+remain pending.
 
 ```yaml
 version: 1
@@ -144,7 +153,7 @@ describes configuration, not implemented adapter coverage. Checking a file
 performs no network calls or credential resolution and does not validate
 approval authority, account access, or contract eligibility. Existing runtime
 and workflow commands do not yet consume this configuration. Automatic
-discovery, environment overrides, durable execution bindings, and authentication
+environment overrides, durable execution bindings, and authentication
 preflight remain tracked in [#69](https://github.com/hiono/taxion/issues/69).
 TOML and JSON configuration inputs are future extensions; existing JSON APIs
 and machine artifacts keep their current formats.

@@ -16,7 +16,7 @@ func configCmd(args []string) error {
 
 func checkConfig(args []string, output io.Writer) error {
 	if len(args) == 0 || args[0] != "check" {
-		return fmt.Errorf("config requires check --file YAML")
+		return fmt.Errorf("config requires check")
 	}
 	fs := flag.NewFlagSet("config check", flag.ContinueOnError)
 	file := fs.String("file", "", "explicit YAML configuration path")
@@ -26,21 +26,26 @@ func checkConfig(args []string, output io.Writer) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	if *file == "" || fs.NArg() != 0 {
-		return fmt.Errorf("config check requires --file YAML and no positional arguments")
+	if fs.NArg() != 0 {
+		return fmt.Errorf("config check accepts no positional arguments")
 	}
-	var layers []config.Layer
-	for _, entry := range []struct{ source, path string }{
-		{"user", *userFile}, {"project", *projectFile}, {"invocation", *file},
-	} {
-		if entry.path == "" {
-			continue
-		}
-		input, err := os.ReadFile(entry.path)
+	var userDir string
+	if *userFile == "" {
+		var err error
+		userDir, err = os.UserConfigDir()
 		if err != nil {
-			return fmt.Errorf("read %s configuration: %w", entry.source, err)
+			return fmt.Errorf("locate user configuration directory: %w", err)
 		}
-		layers = append(layers, config.Layer{Source: entry.source, Input: input})
+	}
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("locate project configuration directory: %w", err)
+	}
+	layers, err := config.ReadFiles(userDir, projectDir, config.Files{
+		User: *userFile, Project: *projectFile, Invocation: *file,
+	})
+	if err != nil {
+		return err
 	}
 	resolved, err := config.Resolve(layers)
 	if err != nil {

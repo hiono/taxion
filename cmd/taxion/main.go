@@ -35,7 +35,7 @@ Usage:
   taxion [--store PATH] <command> [options]
 
 Commands:
-  config check        Validate YAML configuration shape and required references (--file required)
+  config check        Validate default or explicit YAML settings and required references ([--file])
   init                Initialize a local workspace ledger
   task create         Create a task (--title and --repo required)
   task list           List tasks ([--repo] filter, [--json])
