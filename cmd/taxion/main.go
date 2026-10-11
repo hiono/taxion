@@ -36,6 +36,7 @@ Usage:
 
 Commands:
   config check        Validate fixed Global/Project YAML and environment references ([--sources], [--task])
+  git check-index     Reject local Taxion and dotenv paths in the actual commit index
   init                Initialize a local workspace ledger
   task create         Create a task (--title and --repo required)
   task list           List tasks ([--repo] filter, [--json])
@@ -97,6 +98,8 @@ func main() {
 	switch args[0] {
 	case "config":
 		err = configCmd(args[1:])
+	case "git":
+		err = checkGitIndex(args[1:], os.Stdout)
 	case "init":
 		err = initCmd()
 	case "task":

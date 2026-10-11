@@ -76,6 +76,7 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
 
 ```bash
 taxion config check --sources
+taxion git check-index
 taxion init
 taxion task create --title "…" --repo <repo>
 taxion task plan --repo <repo>
@@ -188,9 +189,27 @@ The shared mise file should contain the loading reference and safe defaults,
 not credential values. mise, the shell, or CI reads/injects the environment;
 Taxion records only `environment` as its source. Arbitrary dotenv paths and
 secrets copied into other files are not covered by this path policy.
-Commit-time index scanning and hooks remain in
-[#72](https://github.com/hiono/taxion/issues/72); these configuration checks
-are not commit or publication protection.
+These configuration checks are not commit or publication protection.
+
+`git check-index` checks the complete tree in Git's actual index without
+reading working-file contents or changing Git state. It rejects any path with
+a `.taxion` component and any basename equal to `.env` or starting with
+`.env.`, including nested paths, forced additions, indexed symlinks, and
+unchanged tracked local files. Staged removal of these paths is allowed.
+For shared, value-free examples, use names such as
+`docs/environment.example` or `docs/taxion-config.example.yaml` outside
+`.taxion/`; `.env.example` is intentionally covered by the prohibited pattern.
+
+The command preserves Git's repository and index selection, including
+`GIT_INDEX_FILE` used for partial commits and linked worktrees. Running from a
+subdirectory still checks the whole index. Errors report category counts, not
+file names or values; an unreadable or unmerged index fails the check.
+Run it immediately before a manual commit, or invoke it from a pre-commit
+hook. It does not install a hook or run automatically in the controller.
+Only paths are checked: secrets copied into source files, a shared example,
+or `mise.toml` require content scanning. Scanner integration, controller
+commit enforcement, and the hook installer remain in
+[#72](https://github.com/hiono/taxion/issues/72).
 
 ```yaml
 version: 1
