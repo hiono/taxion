@@ -115,6 +115,7 @@ credential、非公開の資料や会話を公開 Issue・PR・ログへ転記�
 | 復旧・外部記録 | Ledger 保存、別の SQLite store・outbox 部品 | 実行と Session の復旧、整合した outbox 更新、Issue・PR の自動記録 |
 | CLI・ACP・Web | CLI 操作、ACP の Ledger 操作、Web forms・API proxy | 共通の会話 controller、Human の選択、実行の進行・再開と利用者別の所有権 |
 | 仕様書 | connector なし | 許可された検索・取得、出典付きの受け渡し |
+| 設定・認証主体 | `config check --file` による YAML の厳密な型・キー・必須参照検査、repository と AI 主体・契約の独立した表現 | 設定の探索・上書き、承認の解決、実効認証の確認、Dispatch・session への接続と再開照合（#69） |
 
 現在の挙動は [Ledger schema](05-ledger-schema.md)、
 [Runtime contract](03-runtime-contract.md)、

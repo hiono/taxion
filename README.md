@@ -75,6 +75,7 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
 ## CLI
 
 ```bash
+taxion config check --file <config.yaml>
 taxion init
 taxion task create --title "…" --repo <repo>
 taxion task plan --repo <repo>
@@ -91,6 +92,52 @@ taxion runtime events --dispatch <id> --system-prompt-file <path>
 taxion runtime stop --dispatch <id> --system-prompt-file <path>
 taxion review --task <id> --sha <coder-sha> --repo <repo>
 ```
+
+`config check --file` validates a single explicit YAML document against the
+versioned configuration schema. All fields below are required. `version` is an
+integer; the remaining values are nonempty strings without whitespace.
+Unknown fields, duplicate keys, implicit non-string values, aliases, and
+multiple documents are rejected.
+
+```yaml
+version: 1
+project:
+  id: project-a
+repository:
+  provider: github
+  host: github.com
+  path: owner/application
+  account: developer-a
+  credentialRef: scm-credential
+runtime:
+  provider: copilot
+  account: developer-b
+  credentialRef: ai-credential
+  contractRef: company-contract
+execution:
+  requester: developer-a
+  worker: local-worker
+  approvalRef: human-decision-1
+```
+
+`project.id` identifies the Taxion project. Repository `provider`, `host`,
+and `path` identify its source-code location; `account` names the expected
+operation identity. Runtime `account` independently names the expected Copilot
+identity, and `contractRef` identifies the intended usage contract.
+`credentialRef` values refer to credentials held separately, rather than
+containing tokens. Execution fields identify the requester, worker, and sourced
+approval reference.
+
+The schema accepts `github`, `gitlab`, or `bitbucket` repository identities,
+including nested namespace paths, and `copilot` runtime identities. This
+describes configuration, not implemented adapter coverage. Checking a file
+performs no network calls or credential resolution and does not validate
+approval authority, account access, or contract eligibility. Existing runtime
+and workflow commands do not yet consume this configuration. Automatic
+discovery, layered overrides, durable execution bindings, and authentication
+preflight remain tracked in [#69](https://github.com/hiono/taxion/issues/69).
+TOML and JSON configuration inputs are future extensions; existing JSON APIs
+and machine artifacts keep their current formats.
 
 Runtime commands require an active Task Graph Dispatch and a role-specific
 system prompt file. The Task's worktree and Dispatch recipient select the

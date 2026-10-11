@@ -35,6 +35,7 @@ Usage:
   taxion [--store PATH] <command> [options]
 
 Commands:
+  config check        Validate YAML configuration shape and required references (--file required)
   init                Initialize a local workspace ledger
   task create         Create a task (--title and --repo required)
   task list           List tasks ([--repo] filter, [--json])
@@ -94,6 +95,8 @@ func main() {
 	}
 	var err error
 	switch args[0] {
+	case "config":
+		err = configCmd(args[1:])
 	case "init":
 		err = initCmd()
 	case "task":
