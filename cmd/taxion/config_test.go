@@ -39,6 +39,19 @@ execution:
 		strings.Contains(output.String(), "ai-credential") {
 		t.Fatal("check claimed external authorization or printed credential references")
 	}
+	override := filepath.Join(filepath.Dir(path), "override.yaml")
+	if err := os.WriteFile(override, []byte("version: 1\nruntime:\n  account: selected-account\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := checkConfig([]string{"check", "--user-file", path, "--file", override, "--sources"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "runtime.account: invocation") ||
+		!strings.Contains(output.String(), "runtime.contractRef: user") ||
+		strings.Contains(output.String(), "selected-account") {
+		t.Fatal("field origins missing or selected value exposed")
+	}
 	for _, args := range [][]string{
 		nil, {"show"}, {"check"}, {"check", "--file", path, "extra"},
 		{"check", "--file", path + ".missing"},

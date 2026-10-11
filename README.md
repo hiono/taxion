@@ -93,11 +93,21 @@ taxion runtime stop --dispatch <id> --system-prompt-file <path>
 taxion review --task <id> --sha <coder-sha> --repo <repo>
 ```
 
-`config check --file` validates a single explicit YAML document against the
-versioned configuration schema. All fields below are required. `version` is an
+`config check --file` validates explicit YAML settings against the
+versioned configuration schema. All fields below are required in the resolved
+configuration. `version` is an
 integer; the remaining values are nonempty strings without whitespace.
 Unknown fields, duplicate keys, implicit non-string values, aliases, and
 multiple documents are rejected.
+
+Optional `--user-file` and `--project-file` supply lower-priority settings.
+Precedence is `--file` (invocation) > `--project-file` > `--user-file`.
+Every file requires `version: 1`; other fields can be omitted in a layer and
+are inherited from lower layers. Explicit empty or null values are errors.
+Each layer is checked before merging, so a higher-priority value cannot hide
+an invalid lower-priority value. `--sources` prints each field's winning layer
+without printing its value. File discovery and environment overrides remain
+pending.
 
 ```yaml
 version: 1
@@ -134,7 +144,7 @@ describes configuration, not implemented adapter coverage. Checking a file
 performs no network calls or credential resolution and does not validate
 approval authority, account access, or contract eligibility. Existing runtime
 and workflow commands do not yet consume this configuration. Automatic
-discovery, layered overrides, durable execution bindings, and authentication
+discovery, environment overrides, durable execution bindings, and authentication
 preflight remain tracked in [#69](https://github.com/hiono/taxion/issues/69).
 TOML and JSON configuration inputs are future extensions; existing JSON APIs
 and machine artifacts keep their current formats.
