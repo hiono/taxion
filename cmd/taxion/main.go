@@ -48,6 +48,7 @@ Commands:
   dispatch            Dispatch a task (--task and --repo required; revised Dispatches need an explicit relationship)
   dispatch transition Record a Dispatch lifecycle transition (--id, --status, --reason)
   dispatch list       List dispatches ([--repo] filter, [--json])
+  config bind         Save an approved fixed-file configuration selection for an unbound Dispatch
   runtime auth        Check the effective Copilot account against approved Dispatch configuration without creating a session
   runtime start       Start the Copilot session bound to an active Dispatch and send its authorized instruction
   runtime send        Send a follow-up prompt to the Dispatch session (--prompt-file required)

@@ -483,6 +483,22 @@ configuration choices. It rejects missing or stopped Dispatches, inactive
 Tasks, mismatched repositories, and combinations absent from the saved
 approval. `--task` and `--dispatch` are mutually exclusive.
 
+`config bind --dispatch <dispatch-id>` saves one approved complete tuple, its
+decision reference, field origins and recording time with the Dispatch in
+SQLite. The current Task and issued instruction must authorize that tuple.
+After selection, `config check --dispatch` and `runtime auth` reject another
+tuple even if the same approval allowed it. Repeating the binding for identical
+values preserves the original origins and time; changing origins alone does
+not replace the recorded selection.
+
+Binding requires an executable Dispatch before its first runtime session.
+Existing sessions without a selection cannot be retrofitted; issue a newly
+authorized Dispatch. Legacy records remain readable with no selection.
+This command records candidate selection only: it does not authenticate actors,
+resolve credentials, establish contract eligibility or bind the selection to
+the SDK session hash. Runtime start/resume/send and safe stop retain their
+previous behavior until the execution gates are connected in #69.
+
 This read-only check uses one workspace snapshot and does not bind a
 configuration to a session or authenticate its actors. Runtime start/resume
 integration, credential selection, effective authentication and contract

@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
@@ -74,18 +76,22 @@ func CheckDispatchConfiguration(db *store.Store, dispatchID string, candidate co
 	if err := state.Graph.Validate(); err != nil {
 		return core.TaskDecision{}, err
 	}
-	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+	return checkDispatchConfiguration(state.Graph, dispatchID, candidate)
+}
+
+func checkDispatchConfiguration(graph core.TaskGraph, dispatchID string, candidate config.Config) (core.TaskDecision, error) {
+	dispatch, ok := graph.GraphDispatch(dispatchID)
 	if !ok || !active(dispatch.Status) || dispatch.Status == core.DispatchCancelRequested || dispatch.Status == core.DispatchSuspended {
 		return core.TaskDecision{}, fmt.Errorf("taxion: configuration requires a Dispatch authorized to start or continue")
 	}
 	if dispatch.Repository != candidate.Repository.Path {
 		return core.TaskDecision{}, fmt.Errorf("taxion: configuration repository differs from the Dispatch")
 	}
-	decision, err := checkTaskConfiguration(state.Graph, dispatch.TaskID, candidate)
+	decision, err := checkTaskConfiguration(graph, dispatch.TaskID, candidate)
 	if err != nil {
 		return core.TaskDecision{}, err
 	}
-	task, _ := state.Graph.GraphTask(dispatch.TaskID)
+	task, _ := graph.GraphTask(dispatch.TaskID)
 	if task.Status != core.Active {
 		return core.TaskDecision{}, fmt.Errorf("taxion: configuration requires an active Dispatch Task")
 	}
@@ -99,7 +105,40 @@ func CheckDispatchConfiguration(db *store.Store, dispatchID string, candidate co
 		if err := config.CheckApproval(recorded.Text, dispatch.TaskID, recorded.ID, candidate); err != nil {
 			return core.TaskDecision{}, err
 		}
+		if dispatch.Configuration != nil {
+			var selected config.Config
+			if err := core.DecodeGraphInput(strings.NewReader(string(dispatch.Configuration.Selection)), &selected); err != nil {
+				return core.TaskDecision{}, fmt.Errorf("taxion: saved Dispatch configuration is invalid")
+			}
+			if selected != candidate || dispatch.Configuration.DecisionID != decision.ID {
+				return core.TaskDecision{}, fmt.Errorf("taxion: configuration differs from the saved Dispatch selection; issue a newly authorized Dispatch")
+			}
+		}
 		return recorded, nil
 	}
 	return core.TaskDecision{}, fmt.Errorf("taxion: configuration approval is absent from the saved Dispatch instruction; issue a newly authorized Dispatch")
+}
+
+// BindConfiguration saves a selected approved tuple before a session exists.
+// It does not authenticate actors or authorize an SDK operation.
+func BindConfiguration(db *store.Store, dispatchID string, resolved config.Resolution) error {
+	if db == nil {
+		return fmt.Errorf("taxion: configuration selection requires a workspace")
+	}
+	return db.UpdateWorkspace(func(state *store.Workspace) error {
+		if !state.HasGraph {
+			return fmt.Errorf("taxion: configuration selection requires a Task Graph")
+		}
+		decision, err := checkDispatchConfiguration(state.Graph, dispatchID, resolved.Config)
+		if err != nil {
+			return err
+		}
+		selection, err := json.Marshal(resolved.Config)
+		if err != nil {
+			return fmt.Errorf("taxion: encode selected configuration: %w", err)
+		}
+		return state.Graph.BindDispatchConfiguration(dispatchID, core.DispatchConfiguration{
+			DecisionID: decision.ID, Selection: selection, Sources: resolved.Sources, RecordedAt: time.Now().UTC(),
+		})
+	})
 }

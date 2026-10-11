@@ -122,6 +122,15 @@ execution:
 		strings.Contains(output.String(), "ai-credential") {
 		t.Fatal("Dispatch approval check exposed references or claimed runtime verification")
 	}
+	output.Reset()
+	if err := checkConfig([]string{"bind", "--dispatch", "dispatch"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "selection and field origins saved") ||
+		!strings.Contains(output.String(), "runtime session binding remain unverified") ||
+		strings.Contains(output.String(), "ai-credential") {
+		t.Fatal("configuration binding output exposed values or overstated runtime verification")
+	}
 	db, beforeAuth, err := loadWorkspace()
 	if err != nil {
 		t.Fatal(err)
@@ -163,6 +172,8 @@ execution:
 		{"check", "--dispatch", "dispatch"},
 		{"check", "--dispatch", "missing"},
 		{"check", "--task", "task", "--dispatch", "dispatch"},
+		{"bind"}, {"bind", "--task", "task"},
+		{"bind", "--dispatch", "missing"}, {"bind", "--dispatch", "dispatch"},
 	} {
 		output.Reset()
 		if err := checkConfig(args, &output); err == nil || output.Len() != 0 {

@@ -75,6 +75,22 @@ start/resume/send and safe stop keep their existing behavior. Those execution
 and reauthorization gates remain in #69; local protocol fixtures do not
 demonstrate signed-in acceptance.
 
+`config bind --dispatch` records a complete approved configuration selection,
+decision reference, field origins and recording time in the Dispatch. The
+controller uses one workspace transaction to check current Task and issued
+instruction approvals before saving it. The core stores SDK-neutral JSON and
+validates its identity, origins and membership in the saved approval; the
+configuration layer validates the complete tuple schema.
+
+Once selected, Dispatch configuration checks and the explicit authentication
+probe require that tuple. Repeating identical values keeps the initial origins
+and time. Binding different values or adding a first selection to an existing
+session requires a newly authorized Dispatch. Missing selections on legacy
+records remain readable. This record does not alter SDK configuration hashes
+or existing runtime execution/cancellation paths, and is not evidence of
+effective authentication or contract eligibility. Session binding and
+execution-time reauthorization remain in #69.
+
 `runtime commit` is a host operation that scans a locked index snapshot and
 message before publishing its exact tree. It does not stage files or complete
 the Task. `runtime start --managed-commit` and `workflow run --managed-commit` explicitly

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
@@ -13,7 +14,7 @@ import (
 )
 
 func TestDispatchConfigurationUsesIssuedApprovalAndCurrentTask(t *testing.T) {
-	for _, failure := range []string{"", "absent-snapshot", "candidate", "blocked", "cancelled"} {
+	for _, failure := range []string{"", "absent-snapshot", "candidate", "blocked", "cancelled", "cancel-requested", "suspended"} {
 		t.Run(failure, func(t *testing.T) {
 			candidate, err := config.Load([]byte(`version: 1
 project: {id: demo}
@@ -25,6 +26,9 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 				t.Fatal(err)
 			}
 			approval := config.Approval{Kind: config.ApprovalKind, TaskID: "task", Reason: "authorize this combination", Allowed: []config.Config{candidate}}
+			alternative := candidate
+			alternative.Runtime.Account = "other-ai-user"
+			approval.Allowed = append(approval.Allowed, alternative)
 			data, err := json.Marshal(approval)
 			if err != nil {
 				t.Fatal(err)
@@ -69,6 +73,27 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 					t.Fatal(err)
 				}
 			}
+			if failure == "cancel-requested" || failure == "suspended" {
+				if err := graph.TransitionDispatch(dispatch.ID, core.DispatchAcknowledged, "worker", "received", true, false, nil); err != nil {
+					t.Fatal(err)
+				}
+				if err := graph.TransitionDispatch(dispatch.ID, core.DispatchRunning, "worker", "started", true, true, nil); err != nil {
+					t.Fatal(err)
+				}
+				status := core.DispatchCancelRequested
+				var result *core.DispatchResult
+				if failure == "suspended" {
+					status = core.DispatchSuspended
+					result = &core.DispatchResult{
+						DispatchID: dispatch.ID, TaskID: task.ID, Recipient: dispatch.Recipient,
+						Repository: task.Repo, Status: status, StartedSHA: dispatch.ExpectedStartSHA(),
+						Evidence: []string{"human:pause"}, ResumeCondition: "new authorization", NextTransition: core.Blocked,
+					}
+				}
+				if err := graph.TransitionDispatch(dispatch.ID, status, "human", "stop", false, false, result); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if failure == "cancelled" {
 				result := &core.DispatchResult{DispatchID: dispatch.ID, TaskID: task.ID, Recipient: dispatch.Recipient,
 					Repository: task.Repo, Status: core.DispatchCancelled, StartedSHA: dispatch.ExpectedStartSHA(),
@@ -77,7 +102,8 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 					t.Fatal(err)
 				}
 			}
-			db, err := store.Open(filepath.Join(t.TempDir(), "workspace.db"))
+			dbPath := filepath.Join(t.TempDir(), "workspace.db")
+			db, err := store.Open(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -114,6 +140,110 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 			after, err := db.LoadWorkspace()
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatal("read-only check changed durable workspace", err)
+			}
+			input, err := json.Marshal(candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := config.Resolve([]config.Layer{{Source: "user", Input: input}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if failure != "" {
+				if err := BindConfiguration(db, dispatch.ID, resolved); err == nil {
+					t.Fatal("rejected configuration was persisted")
+				}
+				after, err := db.LoadWorkspace()
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatal("rejected binding changed workspace", err)
+				}
+				return
+			}
+			delete(resolved.Sources, "runtime.account")
+			if err := BindConfiguration(db, dispatch.ID, resolved); err == nil {
+				t.Fatal("missing field origin accepted")
+			}
+			resolved.Sources["runtime.account"] = "user"
+			legacy := before.Graph
+			if err := legacy.BindRuntimeSession(dispatch.ID, "legacy-session", "legacy-hash"); err != nil {
+				t.Fatal(err)
+			}
+			if err := legacy.BindDispatchConfiguration(dispatch.ID, core.DispatchConfiguration{
+				DecisionID: decision.ID, Selection: input, Sources: resolved.Sources, RecordedAt: time.Now().UTC(),
+			}); err == nil {
+				t.Fatal("settings retrofitted to a legacy session")
+			}
+			ownedGraph := before.Graph
+			binding := core.DispatchConfiguration{
+				DecisionID: decision.ID, Selection: append(json.RawMessage(nil), input...),
+				Sources: map[string]string{}, RecordedAt: time.Now().UTC(),
+			}
+			for field, source := range resolved.Sources {
+				binding.Sources[field] = source
+			}
+			if err := ownedGraph.BindDispatchConfiguration(dispatch.ID, binding); err != nil {
+				t.Fatal(err)
+			}
+			binding.Selection[0] = '!'
+			binding.Sources["runtime.account"] = "invalid"
+			if err := ownedGraph.Validate(); err != nil {
+				t.Fatal("caller mutated owned binding", err)
+			}
+			original, _ := before.Graph.GraphDispatch(dispatch.ID)
+			if original.Configuration != nil {
+				t.Fatal("binding modified the previous graph")
+			}
+			corrupt := ownedGraph
+			boundCopy, _ := corrupt.GraphDispatch(dispatch.ID)
+			boundCopy.Configuration.Sources["runtime.account"] = "invalid"
+			if err := corrupt.Validate(); err == nil {
+				t.Fatal("invalid stored field origins accepted")
+			}
+			if err := BindConfiguration(db, dispatch.ID, resolved); err != nil {
+				t.Fatal(err)
+			}
+			boundState, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			bound, _ := boundState.Graph.GraphDispatch(dispatch.ID)
+			if bound.Configuration == nil || bound.Configuration.DecisionID != decision.ID ||
+				!reflect.DeepEqual(bound.Configuration.Selection, json.RawMessage(input)) ||
+				!reflect.DeepEqual(bound.Configuration.Sources, resolved.Sources) {
+				t.Fatal("complete selection or origins not persisted")
+			}
+			resolved.Sources["runtime.account"] = "environment"
+			if err := BindConfiguration(db, dispatch.ID, resolved); err != nil {
+				t.Fatal("same selection cannot be checked idempotently", err)
+			}
+			repeated, err := db.LoadWorkspace()
+			if err != nil || !reflect.DeepEqual(boundState, repeated) {
+				t.Fatal("rebinding rewrote original origins or recording time", err)
+			}
+			if _, err := CheckConfiguration(db, task.ID, alternative); err != nil {
+				t.Fatal("alternative is not approved by the fixture", err)
+			}
+			if _, err := CheckDispatchConfiguration(db, dispatch.ID, alternative); err == nil {
+				t.Fatal("approved alternative replaced the selected tuple")
+			}
+			resolved.Config = alternative
+			if err := BindConfiguration(db, dispatch.ID, resolved); err == nil {
+				t.Fatal("selected configuration changed")
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := store.Open(dbPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			reloaded, err := reopened.LoadWorkspace()
+			if err != nil || !reflect.DeepEqual(boundState, reloaded) {
+				t.Fatal("saved selection did not survive SQLite reopen", err)
+			}
+			if _, err := CheckDispatchConfiguration(reopened, dispatch.ID, candidate); err != nil {
+				t.Fatal("saved selection rejected after reopen", err)
 			}
 		})
 	}

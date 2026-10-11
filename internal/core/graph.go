@@ -220,28 +220,29 @@ const (
 )
 
 type GraphDispatch struct {
-	ID                   string               `json:"id"`
-	TaskID               string               `json:"taskId"`
-	Repository           string               `json:"repository"`
-	Recipient            string               `json:"recipient"`
-	RuntimeSessionID     string               `json:"runtimeSessionId,omitempty"`
-	RuntimeConfigHash    string               `json:"runtimeConfigHash,omitempty"`
-	ReviewWorktreeSource string               `json:"reviewWorktreeSource,omitempty"`
-	ExecutionStartSHA    string               `json:"executionStartSha,omitempty"`
-	RuntimeUsage         []DispatchUsage      `json:"runtimeUsage,omitempty"`
-	Status               DispatchStatus       `json:"status"`
-	Relationship         DispatchRelationship `json:"relationship"`
-	RelatedID            string               `json:"relatedDispatchId"`
-	Instruction          DispatchInstruction  `json:"instruction"`
-	InstructionHash      string               `json:"instructionHash"`
-	IssuedEvidence       []string             `json:"issuedEvidence"`
-	Acknowledged         bool                 `json:"acknowledged"`
-	ExecutionStarted     bool                 `json:"executionStarted"`
-	Result               *DispatchResult      `json:"result,omitempty"`
-	LastUpdatedBy        string               `json:"lastUpdatedBy"`
-	LastTransition       string               `json:"lastTransition"`
-	CreatedAt            time.Time            `json:"createdAt"`
-	UpdatedAt            time.Time            `json:"updatedAt"`
+	ID                   string                 `json:"id"`
+	TaskID               string                 `json:"taskId"`
+	Repository           string                 `json:"repository"`
+	Recipient            string                 `json:"recipient"`
+	RuntimeSessionID     string                 `json:"runtimeSessionId,omitempty"`
+	RuntimeConfigHash    string                 `json:"runtimeConfigHash,omitempty"`
+	Configuration        *DispatchConfiguration `json:"configuration,omitempty"`
+	ReviewWorktreeSource string                 `json:"reviewWorktreeSource,omitempty"`
+	ExecutionStartSHA    string                 `json:"executionStartSha,omitempty"`
+	RuntimeUsage         []DispatchUsage        `json:"runtimeUsage,omitempty"`
+	Status               DispatchStatus         `json:"status"`
+	Relationship         DispatchRelationship   `json:"relationship"`
+	RelatedID            string                 `json:"relatedDispatchId"`
+	Instruction          DispatchInstruction    `json:"instruction"`
+	InstructionHash      string                 `json:"instructionHash"`
+	IssuedEvidence       []string               `json:"issuedEvidence"`
+	Acknowledged         bool                   `json:"acknowledged"`
+	ExecutionStarted     bool                   `json:"executionStarted"`
+	Result               *DispatchResult        `json:"result,omitempty"`
+	LastUpdatedBy        string                 `json:"lastUpdatedBy"`
+	LastTransition       string                 `json:"lastTransition"`
+	CreatedAt            time.Time              `json:"createdAt"`
+	UpdatedAt            time.Time              `json:"updatedAt"`
 }
 
 type DispatchUsage struct {
@@ -1196,6 +1197,11 @@ func (g TaskGraph) Validate() error {
 		if (d.RuntimeSessionID == "") != (d.RuntimeConfigHash == "") {
 			return graphError("runtime session binding is incomplete for Dispatch %s", d.ID)
 		}
+		if d.Configuration != nil {
+			if err := d.Configuration.validate(d); err != nil {
+				return err
+			}
+		}
 		if d.ReviewWorktreeSource != "" && d.Recipient != "REVIEWER" {
 			return graphError("managed review worktree requires a Reviewer Dispatch")
 		}
@@ -1589,6 +1595,7 @@ func cloneGraph(g TaskGraph) TaskGraph {
 }
 
 func cloneDispatch(d GraphDispatch) GraphDispatch {
+	d.Configuration = cloneDispatchConfiguration(d.Configuration)
 	d.IssuedEvidence = slices.Clone(d.IssuedEvidence)
 	d.RuntimeUsage = slices.Clone(d.RuntimeUsage)
 	for i := range d.RuntimeUsage {

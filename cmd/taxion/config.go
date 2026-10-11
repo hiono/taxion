@@ -16,10 +16,11 @@ func configCmd(args []string) error {
 }
 
 func checkConfig(args []string, output io.Writer) error {
-	if len(args) == 0 || args[0] != "check" {
-		return fmt.Errorf("config requires check")
+	if len(args) == 0 || args[0] != "check" && args[0] != "bind" {
+		return fmt.Errorf("config requires check or bind")
 	}
-	fs := flag.NewFlagSet("config check", flag.ContinueOnError)
+	bind := args[0] == "bind"
+	fs := flag.NewFlagSet("config "+args[0], flag.ContinueOnError)
 	sources := fs.Bool("sources", false, "show field origins without configuration values")
 	task := fs.String("task", "", "check the resolved configuration against this Task's recorded approval")
 	dispatch := fs.String("dispatch", "", "check both current Task approval and the saved Dispatch instruction")
@@ -31,10 +32,13 @@ func checkConfig(args []string, output io.Writer) error {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("config check accepts no positional arguments")
+		return fmt.Errorf("config %s accepts no positional arguments", args[0])
 	}
 	if *task != "" && *dispatch != "" {
 		return fmt.Errorf("config check selects either --task or --dispatch, not both")
+	}
+	if bind && (*dispatch == "" || *task != "") {
+		return fmt.Errorf("config bind requires --dispatch and does not accept --task")
 	}
 	resolved, err := resolveConfiguration()
 	if err != nil {
@@ -46,7 +50,11 @@ func checkConfig(args []string, output io.Writer) error {
 			return err
 		}
 		defer db.Close()
-		if *dispatch != "" {
+		if bind {
+			if err := controller.BindConfiguration(db, *dispatch, resolved); err != nil {
+				return err
+			}
+		} else if *dispatch != "" {
 			if _, err := controller.CheckDispatchConfiguration(db, *dispatch, resolved.Config); err != nil {
 				return err
 			}
@@ -67,6 +75,10 @@ func checkConfig(args []string, output io.Writer) error {
 				return err
 			}
 		}
+	}
+	if bind {
+		_, err = fmt.Fprintln(output, "Approved configuration selection and field origins saved for the Dispatch. Authentication, credential selection, contract eligibility, and runtime session binding remain unverified.")
+		return err
 	}
 	if *dispatch != "" {
 		_, err = fmt.Fprintln(output, "Configuration matches the sourced Task approval and saved Dispatch instruction. Authentication, contract eligibility, and runtime configuration binding have not been verified.")
