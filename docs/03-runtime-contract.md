@@ -115,6 +115,19 @@ stores actual exit codes, timestamps and Git provenance. They must not fabricate
 an earlier command execution or treat pending controller validation as evidence
 that tests passed.
 
+After completed controller execution and Git verification, the controller adds
+the `controller-validation` evidence marker if absent. Agents need not claim
+that stage before it occurs. It is not generated if controller validation returns
+an error, is cancelled or is unexecuted; no unrelated source references or
+verdicts are invented. The marker means commands were observed, not that every
+test passed: a valid REQUEST_CHANGES review may retain an actual nonzero test
+exit code.
+
+Reviewer `acceptance[].evidence` and `findings[].evidence` must reference
+strings also present verbatim in the result's top-level `evidence` array.
+Dangling references are rejected even when the proposed verdict or finding is
+otherwise plausible; source analysis must not be mislabeled as an executed test.
+
 `runtime auth` is an explicit preflight, not an execution action. Fixed
 configuration and current/saved Dispatch approvals are checked before the
 Copilot adapter calls `auth.getStatus`. `CheckAuthentication` verifies an

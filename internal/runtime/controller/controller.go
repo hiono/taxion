@@ -300,6 +300,9 @@ func (c *Controller) Finish(ctx context.Context, dispatchID, payload string) (*c
 			}
 			return nil, verifyErr
 		}
+		if !slices.Contains(result.Evidence, "controller-validation") {
+			result.Evidence = append(result.Evidence, "controller-validation")
+		}
 		if dispatch.Recipient == "REVIEWER" {
 			if dispatch.ReviewWorktreeSource == "" {
 				return nil, fmt.Errorf("taxion: Reviewer result requires a controller-managed worktree")

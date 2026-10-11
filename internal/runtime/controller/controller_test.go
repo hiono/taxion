@@ -161,6 +161,11 @@ func TestControllerRejectsChangedRoleAndConfiguration(t *testing.T) {
 
 func dispatchStore(t *testing.T, worktree ...string) (*store.Store, string, string) {
 	t.Helper()
+	return dispatchStoreWithEvidence(t, "test-report", worktree...)
+}
+
+func dispatchStoreWithEvidence(t *testing.T, evidence string, worktree ...string) (*store.Store, string, string) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "workspace.db")
 	db, err := store.Open(path)
 	if err != nil {
@@ -172,7 +177,7 @@ func dispatchStore(t *testing.T, worktree ...string) (*store.Store, string, stri
 		Owner: "CODER", Reviewer: "reviewer", Status: core.Draft, Objective: "test controller",
 		Scope: []string{"internal"}, Acceptance: []string{"tests pass"},
 		ValidationCommands: []string{"go test ./..."},
-		RequiredEvidence:   []string{"test-report"}, ExitCondition: "tests pass",
+		RequiredEvidence:   []string{evidence}, ExitCondition: "tests pass",
 		Branch: "work/task", Worktree: "/tmp/task",
 		BaselineSHA: strings.Repeat("a", 40), CreatedFrom: "request:1", AuthorizationID: "decision:1",
 		Decisions: []core.TaskDecision{{ID: "decision:1", Source: "human:1", Text: "authorize test"}},
@@ -235,7 +240,7 @@ func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
 	gitTest(t, root, "add", "README.md")
 	gitTest(t, root, "commit", "-m", "baseline")
 	baseline := gitTest(t, root, "rev-parse", "HEAD")
-	db, path, id := dispatchStore(t, root)
+	db, path, id := dispatchStoreWithEvidence(t, "controller-validation", root)
 	defer db.Close()
 	worker := &fakeRuntime{role: "CODER", hash: "config-v1", worktree: root}
 	control, err := New(db, worker)
@@ -283,13 +288,17 @@ func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
 	if _, err := control.Finish(context.Background(), id, payload(result)+" {}"); err == nil {
 		t.Fatal("accepted multiple JSON responses")
 	}
-	accepted, err := control.Finish(context.Background(), id, payload(result))
+	submission := *result
+	submission.Validations = []core.DispatchValidation{}
+	submission.Evidence = []string{}
+	accepted, err := control.Finish(context.Background(), id, payload(submission))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if accepted.GitEvidence == nil || accepted.GitEvidence.HeadSHA != head ||
 		accepted.Validations[0].Output != "controller validated" ||
-		accepted.Validations[0].StartedAt.IsZero() {
+		accepted.Validations[0].StartedAt.IsZero() ||
+		len(accepted.Evidence) != 1 || accepted.Evidence[0] != "controller-validation" {
 		t.Fatalf("controller evidence missing: %+v", accepted)
 	}
 	if _, err := control.Finish(context.Background(), id, payload(result)); err == nil {
@@ -311,6 +320,7 @@ func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
 	if !ok || saved.Status != core.DispatchSucceeded || saved.Result.GitEvidence.HeadSHA != head ||
 		saved.ExecutionStartSHA != baseline ||
 		saved.Result.Validations[0].Output != "controller validated" ||
+		len(saved.Result.Evidence) != 1 || saved.Result.Evidence[0] != "controller-validation" ||
 		state.Ledger.Dispatches[0].Active || len(saved.RuntimeUsage) != 1 {
 		t.Fatalf("verified completion lost after restart: %+v", state)
 	}
@@ -566,7 +576,7 @@ func TestControllerPersistsObservedValidationFailure(t *testing.T) {
 	result := core.DispatchResult{
 		DispatchID: id, TaskID: "task-1", Recipient: "CODER", Repository: "owner/repo",
 		Status: core.DispatchSucceeded, StartedSHA: head, OutputSHA: head, ChangedFiles: []string{},
-		Evidence: []string{"test-report"}, NextTransition: core.WaitingForEvidence,
+		Evidence: []string{}, NextTransition: core.WaitingForEvidence,
 	}
 	payload, err := json.Marshal(result)
 	if err != nil {
@@ -584,7 +594,7 @@ func TestControllerPersistsObservedValidationFailure(t *testing.T) {
 	if saved.Status != core.DispatchFailed || state.Ledger.Dispatches[0].Active ||
 		len(saved.Result.Validations) != 1 || saved.Result.Validations[0].SHA != head ||
 		saved.Result.Validations[0].ExitCode != 1 || saved.Result.Validations[0].Output != "controller validated" ||
-		saved.Result.GitEvidence != nil {
+		saved.Result.GitEvidence != nil || len(saved.Result.Evidence) != 0 {
 		t.Fatalf("observed validation failure was lost: %+v", saved)
 	}
 }
