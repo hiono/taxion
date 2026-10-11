@@ -12,6 +12,7 @@ import (
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
+	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -104,6 +105,16 @@ func TestWorkspaceDispatchInstructionEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := (&Server{StorePath: path, WorkspacePath: workspace}).Handler()
+	ready := get(t, handler, "/api/tasks/plan?repo=owner/repo")
+	var readyPlan controller.FollowUpPlan
+	if err := json.Unmarshal(ready.Body.Bytes(), &readyPlan); err != nil {
+		t.Fatal(err)
+	}
+	if ready.Code != http.StatusOK || len(readyPlan.Tasks) != 1 ||
+		readyPlan.Tasks[0].Action != "DISPATCH" || len(readyPlan.Tasks[0].Gaps) != 0 ||
+		readyPlan.Tasks[0].Task.AuthorizationID != graphTask.AuthorizationID {
+		t.Fatalf("authorized contract not available for follow-up: %d %+v", ready.Code, readyPlan)
+	}
 	created := post(t, handler, "/api/dispatches", `{"task":"t","repo":"owner/repo"}`)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("dispatch: %d %s", created.Code, created.Body.String())
@@ -125,6 +136,36 @@ func TestWorkspaceDispatchInstructionEndpoint(t *testing.T) {
 	}
 	if body.Instruction.DispatchID != dispatch.ID || body.Instruction.Worktree != "/work/tree" || body.Hash == "" {
 		t.Fatalf("incomplete instruction response: %+v", body)
+	}
+	response = get(t, handler, "/api/tasks/plan?repo=owner/repo")
+	var plan struct {
+		Repository string `json:"repository"`
+		Tasks      []struct {
+			Action     string               `json:"action"`
+			Task       core.GraphTask       `json:"task"`
+			Dispatches []core.GraphDispatch `json:"dispatches"`
+		} `json:"tasks"`
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("plan: %d %s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Repository != task.Repo || len(plan.Tasks) != 1 || plan.Tasks[0].Task.ID != task.ID ||
+		plan.Tasks[0].Action != "RECONCILE_DISPATCH" || plan.Tasks[0].Dispatches[0].ID != dispatch.ID {
+		t.Fatalf("incomplete planning response: %+v", plan)
+	}
+	for _, test := range []struct {
+		target string
+		status int
+	}{
+		{"/api/tasks/plan", http.StatusBadRequest},
+		{"/api/tasks/plan?repo=missing/repo", http.StatusConflict},
+	} {
+		if response := get(t, handler, test.target); response.Code != test.status {
+			t.Fatalf("%s: %d %s", test.target, response.Code, response.Body.String())
+		}
 	}
 }
 

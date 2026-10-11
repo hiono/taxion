@@ -42,6 +42,7 @@ Commands:
   task track          Register/update a durable Task Graph contract (--file JSON)
   task transition     Validate and record a Task Graph transition (--file JSON)
   task graph          Print the versioned Task Graph and history
+  task plan           Rebuild a follow-up plan from durable contracts and evidence (--repo required)
   dispatch            Dispatch a task (--task and --repo required; revised Dispatches need an explicit relationship)
   dispatch transition Record a Dispatch lifecycle transition (--id, --status, --reason)
   dispatch list       List dispatches ([--repo] filter, [--json])
@@ -189,7 +190,7 @@ func taskCmd(args []string) error {
 		return fmt.Errorf("usage: taxion task create|list …")
 	}
 	switch args[0] {
-	case "track", "transition", "graph":
+	case "track", "transition", "graph", "plan":
 		return taskGraphCmd(args[0], args[1:])
 	case "create":
 		fs := flag.NewFlagSet("task create", flag.ContinueOnError)

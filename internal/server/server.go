@@ -14,6 +14,7 @@ import (
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
+	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -63,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/ledger", s.handleLedger)
 	mux.HandleFunc("/api/tasks", s.handleTasks)
+	mux.HandleFunc("GET /api/tasks/plan", s.handlePlan)
 	mux.HandleFunc("/api/dispatches", s.handleDispatches)
 	mux.HandleFunc("GET /api/dispatches/{id}/instruction", s.handleDispatchInstruction)
 	mux.HandleFunc("/api/evidence", s.handleEvidence)
@@ -78,6 +80,33 @@ func (s *Server) Handler() http.Handler {
 	})
 	h = (&auditor{path: s.AuditPath}).withAudit(s, h)
 	return h
+}
+
+func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(r.URL.Query().Get("repo")) == "" {
+		writeErr(w, http.StatusBadRequest, "planning requires an explicit repo")
+		return
+	}
+	if s.WorkspacePath == "" {
+		writeErr(w, http.StatusConflict, "planning requires a SQLite workspace and Task Graph")
+		return
+	}
+	db, err := store.Open(s.WorkspacePath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer db.Close()
+	plan, err := controller.Plan(db, s.StorePath, r.URL.Query().Get("repo"))
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, core.ErrGraphRejected) || errors.Is(err, memory.ErrGuardrailRejected) {
+			status = http.StatusConflict
+		}
+		writeErr(w, status, err.Error())
+		return
+	}
+	writeJSON(w, plan)
 }
 
 func (s *Server) handleDispatchInstruction(w http.ResponseWriter, r *http.Request) {

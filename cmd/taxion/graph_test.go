@@ -62,6 +62,12 @@ func TestTaskGraphCommandsAndDispatchGate(t *testing.T) {
 	if err := taskCmd([]string{"graph"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := taskCmd([]string{"plan", "--repo", task.Repo}); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskCmd([]string{"plan"}); err == nil {
+		t.Fatal("planning inferred a repository")
+	}
 	if err := dispatchCmd([]string{"--task", task.ID, "--repo", task.Repo}); !errors.Is(err, core.ErrGraphRejected) {
 		t.Fatal("scope-out dispatched", err)
 	}

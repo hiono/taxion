@@ -77,6 +77,7 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
 ```bash
 taxion init
 taxion task create --title "…" --repo <repo>
+taxion task plan --repo <repo>
 taxion dispatch --task <id> --repo <repo>
 taxion runtime start --dispatch <id> --system-prompt-file <path>
 taxion runtime send --dispatch <id> --system-prompt-file <path> --prompt-file <path>
@@ -97,6 +98,15 @@ sessions receive read access to that worktree. The handler applies to SDK
 permission requests, while host and external tools use their own security
 controls. Resume verifies that the prompt, CLI, worktree, and tool configuration
 match the persisted hash.
+
+`task plan --repo <repo>` reconstructs follow-up actions from the SQLite Task
+Graph and referenced Memory. It retains deferred Tasks, their sources and resume
+conditions, existing decisions, and each Dispatch's issued contract and result.
+Actions distinguish unresolved Human decisions, deferred-work reassessment,
+evidence collection, review reconciliation, and execution candidates. Generating
+a plan preserves the saved Task states and authorization. The same output is
+available through `GET /api/tasks/plan?repo=<repo>` and ACP `taxion/plan` with
+`{"repository":"<repo>"}`, including after a session is recreated.
 
 For a Reviewer Dispatch, the Task's worktree must be a new absolute path.
 Start it with `--review-source-worktree <existing-repository-worktree>` to

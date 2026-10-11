@@ -395,6 +395,16 @@ func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
 		!reviewRecord.Result.GitEvidence.WorktreeReleased {
 		t.Fatal("Coder and independent review facts were not preserved separately")
 	}
+	plan, err := Plan(reopened, filepath.Join(filepath.Dir(path), "ledger.json"), saved.Repository)
+	if err != nil || len(plan.Tasks) != 2 || len(plan.Tasks[1].Dispatches) != 1 {
+		t.Fatalf("review evidence missing from follow-up plan: %+v %v", plan, err)
+	}
+	reviewContext := plan.Tasks[1].Dispatches[0]
+	if reviewContext.ID != reviewDispatch.ID || reviewContext.Result.OutputSHA != head ||
+		reviewContext.Result.ReviewVerdict != "APPROVE" || reviewContext.Instruction.Acceptance[0] != "tests pass" ||
+		reviewContext.RelatedID != id || reviewContext.InstructionHash != reviewRecord.InstructionHash {
+		t.Fatalf("review plan lost source contract or SHA: %+v", reviewContext)
+	}
 }
 
 func gitTest(t *testing.T, root string, args ...string) string {
@@ -459,6 +469,14 @@ func TestReviewerResultRequiresRuntimeCloseAndWorktreeRelease(t *testing.T) {
 				ReviewVerdict: "APPROVE", WorktreeChanged: &changed, Findings: []core.DispatchFinding{},
 				Acceptance: []core.DispatchAcceptance{{Criterion: "tests pass", Status: "PASS", Evidence: []string{"test-report"}}},
 			}
+			if failure == "" {
+				result.ReviewVerdict = "REQUEST_CHANGES"
+				result.Acceptance[0].Status = "FAIL"
+				result.Findings = []core.DispatchFinding{{
+					Severity: "HIGH", Title: "Improve the acceptance coverage",
+					File: "README.md", Lines: "1", Evidence: []string{"test-report"},
+				}}
+			}
 			payload, err := json.Marshal(result)
 			if err != nil {
 				t.Fatal(err)
@@ -504,6 +522,18 @@ func TestReviewerResultRequiresRuntimeCloseAndWorktreeRelease(t *testing.T) {
 			saved, _ = state.Graph.GraphDispatch(id)
 			if !saved.Result.GitEvidence.WorktreeReleased || saved.ReviewWorktreeSource != root {
 				t.Fatal("review release evidence lost after database restart")
+			}
+			plan, err := Plan(reopened, filepath.Join(filepath.Dir(path), "ledger.json"), "owner/repo")
+			if err != nil || len(plan.Tasks) != 1 || len(plan.Tasks[0].Dispatches) != 1 {
+				t.Fatalf("review findings lost in follow-up planning: %+v %v", plan, err)
+			}
+			prior := plan.Tasks[0].Dispatches[0]
+			if prior.ID != id || prior.Result.ReviewVerdict != "REQUEST_CHANGES" ||
+				prior.Result.OutputSHA != head || len(prior.Result.Findings) != 1 ||
+				prior.Result.Findings[0].Title != result.Findings[0].Title ||
+				prior.Result.Findings[0].Evidence[0] != "test-report" ||
+				prior.Instruction.Acceptance[0] != result.Acceptance[0].Criterion {
+				t.Fatalf("review findings lost their target and source contract: %+v", prior)
 			}
 		})
 	}

@@ -43,7 +43,30 @@ request は `task`、`actor`、`reason`、任意の `concern` を持つ。
 `task graph` は現在の Tasks、concerns、履歴を JSON で表示する。
 scope out した Task も消さずに返す。concern の ID、起点、本文、
 登録済み Task ID が不足する場合は Task lost として登録全体を拒否する。
-自然文の会話から懸念を自動抽出する機能ではなく、登録入力の整合性を検査する。
+登録入力に含まれる懸念と Task の対応を検査する。
+
+`task plan --repo owner/repository` は、SQLite の Task Graph と参照先の Memory から
+後続計画を再構成する。各 Task に保存済み契約、判断、懸念と出典、状態変更の履歴、
+Memory の本文・版・出典、発行済み Dispatch の契約と結果を添える。
+保留 Task は元の ID・保留理由・nextAction・resumeCondition を使う再評価手順に含め、
+別作業の結果保存や Session の再作成後も同じ記録を参照する。
+依存待ちには必要な状態と観測した現在の状態を示す。
+
+計画の `action` は次に行う確認を表す。`REASSESS_DEFERRED` は保存済み再開条件の評価、
+`ASK_HUMAN` は未選択の質問への回答確認、`RESTORE_CONTRACT` は既存判断を使った契約の準備を示す。
+選択済みの Human decision は判断記録とともに復元し、新たな選択が必要な質問を Human に提示する。
+`DISPATCH` は READY の実行候補を示し、実行時には通常の発行検査と Git 開始照合を行う。
+`gaps` は補完が必要な scope・acceptance・証拠・SHA・権限・検証コマンドなどの項目を示す。
+計画生成は Task の状態と権限を維持し、保留解除や承認を通常の記録済み遷移で行う。
+
+過去のレビューは、その Dispatch ID、instruction hash、対象 SHA、scope、acceptance、
+findings と証拠を含む発行済み契約・結果の組として返す。
+後続計画ではこの出典を使って修正内容を確認し、現在の成果物 SHA に対応するレビューを要求する。
+必須 Memory の欠落・失効・記録済み矛盾は Task ID を含むエラーとして返す。
+HTTP の `GET /api/tasks/plan?repo=owner/repository` と ACP の
+`taxion/plan`（`{"repository":"owner/repository"}`）も同じ計画生成を使用する。
+これらの読み出しは SQLite workspace と登録済み Task Graph を使用し、
+役割 Session の履歴から独立して動作する。
 
 ## 関係と実行契約
 

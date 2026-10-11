@@ -79,6 +79,10 @@ Reads:
 
 - `GET /api/ledger` → full ledger object above
 - `GET /api/tasks[?repo=]` → Task array
+- `GET /api/tasks/plan?repo=REPOSITORY` → reconstructed follow-up plan with
+  contracts, action instructions, dependency states, Memory and Dispatch evidence
+  (SQLite Task Graph only; explicit repo required → 400; graph unavailable or
+  unknown repository → 409; unreadable records → 500).
 - `GET /api/dispatches[?repo=]` → Dispatch array
 - `GET /api/dispatches/{id}/instruction` → immutable Dispatch instruction and
   `instructionHash` (SQLite workspace only; unknown Dispatch → 404)

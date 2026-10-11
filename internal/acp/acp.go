@@ -18,6 +18,7 @@ import (
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
+	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/runtime/local"
 	"github.com/hiono/taxion/internal/store"
 )
@@ -217,6 +218,34 @@ func (s *Server) handle(ctx context.Context, req Request, out *bufio.Writer) {
 			return
 		}
 		s.respond(out, req.ID, map[string]any{"stopReason": "end_turn", "dispatchId": did}, nil)
+	case "taxion/plan":
+		var p struct {
+			Repository string `json:"repository"`
+		}
+		if err := core.DecodeGraphInput(strings.NewReader(string(req.Params)), &p); err != nil {
+			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("taxion/plan: %w", err))
+			return
+		}
+		if strings.TrimSpace(p.Repository) == "" {
+			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("taxion/plan: explicit repository is required"))
+			return
+		}
+		if s.workspacePath == "" {
+			s.fail(out, req.ID, ErrServer, fmt.Errorf("taxion/plan requires a SQLite workspace and Task Graph"))
+			return
+		}
+		db, err := store.Open(s.workspacePath)
+		if err != nil {
+			s.fail(out, req.ID, ErrServer, err)
+			return
+		}
+		defer db.Close()
+		plan, err := controller.Plan(db, s.storePath, p.Repository)
+		if err != nil {
+			s.fail(out, req.ID, ErrServer, err)
+			return
+		}
+		s.respond(out, req.ID, plan, nil)
 	case "taxion/review":
 		var p struct {
 			SessionID string `json:"sessionId"`

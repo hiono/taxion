@@ -11,6 +11,7 @@ import (
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
+	"github.com/hiono/taxion/internal/store"
 )
 
 type msg = map[string]any
@@ -67,6 +68,49 @@ func result(t *testing.T, m msg) msg {
 		t.Fatalf("expected result, got %v", m)
 	}
 	return r
+}
+
+func TestPlanRestoresWorkWithoutSessionHistory(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ledger.json")
+	workspace := filepath.Join(dir, "workspace.db")
+	task := core.GraphTask{
+		ID: "deferred", Title: "Retained concern", Repo: "owner/repo", Type: "INVESTIGATION",
+		Status: core.Blocked, Issue: "Issue #67", CreatedFrom: "human:1",
+		DeferredReason: "Follow-up investigation", ResumeCondition: "Approved scope", NextAction: "Investigate",
+	}
+	graph := core.TaskGraph{Version: 1}
+	if err := graph.Track(task, "human", "scope out"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InitializeWorkspace(store.Workspace{
+		HasGraph: true, Graph: graph,
+		Ledger: core.Ledger{Tasks: []core.Task{{ID: task.ID, Title: task.Title, Repo: task.Repo}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server := NewWithWorkspace(path, workspace)
+	messages := run(t, server, req(1, "taxion/plan", msg{"repository": task.Repo}))
+	plan := result(t, messages[0])
+	steps := plan["tasks"].([]any)
+	step := steps[0].(map[string]any)
+	contract := step["task"].(map[string]any)
+	if step["action"] != "REASSESS_DEFERRED" || contract["id"] != task.ID || contract["resumeCondition"] != task.ResumeCondition {
+		t.Fatalf("durable planning required old ACP session: %+v", plan)
+	}
+	for _, params := range []msg{{}, {"repository": ""}, {"repository": task.Repo, "sessionId": "old"}} {
+		messages := run(t, server, req(2, "taxion/plan", params))
+		if messages[0]["error"] == nil {
+			t.Fatalf("invalid planning input accepted: %+v", messages)
+		}
+	}
 }
 
 func TestDispatchRejectsUntrackedGraphTask(t *testing.T) {

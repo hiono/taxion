@@ -8,12 +8,18 @@ import (
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
+	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/store"
 )
 
 func taskGraphCmd(command string, args []string) error {
 	fs := flag.NewFlagSet("task "+command, flag.ContinueOnError)
-	file := fs.String("file", "", "JSON request file")
+	var file, repo string
+	if command == "plan" {
+		fs.StringVar(&repo, "repo", "", "explicit repository for follow-up planning")
+	} else {
+		fs.StringVar(&file, "file", "", "JSON request file")
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -25,6 +31,13 @@ func taskGraphCmd(command string, args []string) error {
 		return err
 	}
 	defer db.Close()
+	if command == "plan" {
+		plan, err := controller.Plan(db, storePath, repo)
+		if err != nil {
+			return err
+		}
+		return printJSON(plan)
+	}
 	if command == "graph" {
 		if !state.HasGraph {
 			return fmt.Errorf("task graph is not initialized; use task track")
@@ -34,10 +47,10 @@ func taskGraphCmd(command string, args []string) error {
 		}
 		return printJSON(state.Graph)
 	}
-	if *file == "" {
+	if file == "" {
 		return fmt.Errorf("task %s: --file is required", command)
 	}
-	input, err := os.Open(*file)
+	input, err := os.Open(file)
 	if err != nil {
 		return err
 	}
