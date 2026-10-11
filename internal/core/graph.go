@@ -313,40 +313,41 @@ type DispatchFinding struct {
 }
 
 type DispatchInstruction struct {
-	Version            int                   `json:"version"`
-	DispatchTo         string                `json:"dispatchTo"`
-	DispatchID         string                `json:"dispatchId"`
-	Relationship       DispatchRelationship  `json:"relationship"`
-	RelatedDispatchID  string                `json:"relatedDispatchId"`
-	RelationshipReason string                `json:"relationshipReason"`
-	ChangedFields      []string              `json:"changedFields"`
-	PreservedFields    []string              `json:"preservedFields"`
-	TaskID             string                `json:"taskId"`
-	TaskType           string                `json:"taskType"`
-	Title              string                `json:"title"`
-	Repository         string                `json:"repository"`
-	Issue              string                `json:"issue"`
-	ParentTaskID       string                `json:"parentTaskId"`
-	SiblingTaskIDs     []string              `json:"siblingTaskIds"`
-	DependsOn          []TaskDependency      `json:"dependsOn"`
-	Blocks             []string              `json:"blocks"`
-	Objective          string                `json:"objective"`
-	AuthorizedActions  []string              `json:"authorizedActions"`
-	ForbiddenActions   []string              `json:"forbiddenActions"`
-	Acceptance         []string              `json:"acceptance,omitempty"`
-	RequiredEvidence   []string              `json:"requiredEvidence"`
-	ValidationCommands []string              `json:"validationCommands,omitempty"`
-	ExitCondition      string                `json:"exitCondition"`
-	Worktree           string                `json:"worktree"`
-	Branch             string                `json:"branch"`
-	BaselineSHA        string                `json:"baselineSha"`
-	TargetSHA          string                `json:"targetSha"`
-	AuthorizationID    string                `json:"authorizationId"`
-	Decisions          []TaskDecision        `json:"decisions"`
-	HumanDecision      *HumanDecisionRequest `json:"humanDecision,omitempty"`
-	MemoryRefs         []string              `json:"memoryRefs"`
-	MemoryContext      []DispatchMemoryEntry `json:"memoryContext,omitempty"`
-	ReturnFormat       []string              `json:"returnFormat"`
+	Version             int                   `json:"version"`
+	DispatchTo          string                `json:"dispatchTo"`
+	DispatchID          string                `json:"dispatchId"`
+	Relationship        DispatchRelationship  `json:"relationship"`
+	RelatedDispatchID   string                `json:"relatedDispatchId"`
+	RelationshipReason  string                `json:"relationshipReason"`
+	ChangedFields       []string              `json:"changedFields"`
+	PreservedFields     []string              `json:"preservedFields"`
+	TaskID              string                `json:"taskId"`
+	TaskType            string                `json:"taskType"`
+	Title               string                `json:"title"`
+	Repository          string                `json:"repository"`
+	Issue               string                `json:"issue"`
+	ParentTaskID        string                `json:"parentTaskId"`
+	SiblingTaskIDs      []string              `json:"siblingTaskIds"`
+	DependsOn           []TaskDependency      `json:"dependsOn"`
+	Blocks              []string              `json:"blocks"`
+	Objective           string                `json:"objective"`
+	AuthorizedActions   []string              `json:"authorizedActions"`
+	ForbiddenActions    []string              `json:"forbiddenActions"`
+	Acceptance          []string              `json:"acceptance,omitempty"`
+	RequiredEvidence    []string              `json:"requiredEvidence"`
+	ValidationCommands  []string              `json:"validationCommands,omitempty"`
+	ExitCondition       string                `json:"exitCondition"`
+	Worktree            string                `json:"worktree"`
+	Branch              string                `json:"branch"`
+	BaselineSHA         string                `json:"baselineSha"`
+	TargetSHA           string                `json:"targetSha"`
+	AuthorizationID     string                `json:"authorizationId"`
+	Decisions           []TaskDecision        `json:"decisions"`
+	HumanDecision       *HumanDecisionRequest `json:"humanDecision,omitempty"`
+	MemoryRefs          []string              `json:"memoryRefs"`
+	MemoryContext       []DispatchMemoryEntry `json:"memoryContext,omitempty"`
+	ReturnFormat        []string              `json:"returnFormat"`
+	CommitMessagePolicy string                `json:"commitMessagePolicy,omitempty"`
 }
 
 type DispatchMemoryEntry struct {
@@ -576,6 +577,9 @@ func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship Di
 		MemoryRefs: slices.Clone(task.MemoryRefs), MemoryContext: cloneDispatchMemoryContext(memoryContext),
 		ReturnFormat: slices.Clone(dispatchReturnFormat),
 	}
+	if task.Owner == "CODER" {
+		instruction.CommitMessagePolicy = CommitMessagePolicy
+	}
 	if relationship != RelationshipNone && relationship != RelationshipIndependent {
 		instruction.ChangedFields, instruction.PreservedFields = compareDispatchInstructions(related.Instruction, instruction)
 		if relationship == RelationshipContinues && len(instruction.ChangedFields) != 0 {
@@ -596,6 +600,10 @@ func compareDispatchInstructions(previous, current DispatchInstruction) ([]strin
 		switch field.Name {
 		case "DispatchID", "Relationship", "RelatedDispatchID", "RelationshipReason", "ChangedFields", "PreservedFields":
 			continue
+		case "CommitMessagePolicy":
+			if previous.CommitMessagePolicy == "" && current.CommitMessagePolicy == "" {
+				continue
+			}
 		}
 		name := strings.Split(field.Tag.Get("json"), ",")[0]
 		if reflect.DeepEqual(oldValue.Field(i).Interface(), newValue.Field(i).Interface()) {
@@ -640,7 +648,8 @@ func dispatchInstructionIdentityMatchesTask(d GraphDispatch, task GraphTask) boo
 	versionMatches := i.Version >= 1 && i.Version <= DispatchInstructionVersion
 	acceptanceMatches := i.Version == 1 || slices.Equal(i.Acceptance, task.Acceptance)
 	memoryMatches := i.Version < 3 || validateDispatchMemoryContext(i.MemoryRefs, i.MemoryContext) == nil
-	return versionMatches && acceptanceMatches && memoryMatches && i.DispatchID == d.ID &&
+	policyMatches := i.CommitMessagePolicy == "" || i.CommitMessagePolicy == CommitMessagePolicy && d.Recipient == "CODER"
+	return versionMatches && acceptanceMatches && memoryMatches && policyMatches && i.DispatchID == d.ID &&
 		i.TaskID == d.TaskID && i.Repository == d.Repository &&
 		i.Title == task.Title && task.Repo == d.Repository &&
 		i.DispatchTo == d.Recipient && i.Relationship == d.Relationship &&
@@ -878,6 +887,7 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 		{"ACCEPTANCE", i.Acceptance},
 		{"REQUIRED EVIDENCE", i.RequiredEvidence},
 		{"VALIDATION COMMANDS", i.ValidationCommands},
+		{"COMMIT MESSAGE POLICY", i.CommitMessagePolicy},
 	} {
 		value, err := json.Marshal(line.value)
 		if err != nil {
@@ -904,6 +914,12 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 		return "", err
 	}
 	fmt.Fprintf(&output, "RETURN FORMAT: %s", value)
+	if i.CommitMessagePolicy == CommitMessagePolicy {
+		fmt.Fprintf(&output, "\nCOMMIT MESSAGE REQUIREMENT: %s", CommitMessageInstruction)
+	}
+	if d.Recipient == "REVIEWER" {
+		output.WriteString("\nCOMMIT REASONING REVIEW: When the reviewed Coder instruction declares a commit message policy, check that contextual action lines in its authored commits match the changed code, acceptance, and sourced decisions. Report unsupported reasoning as a review finding.")
+	}
 	return output.String(), nil
 }
 

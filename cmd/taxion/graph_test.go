@@ -172,7 +172,7 @@ func commitGitFile(t *testing.T, path, name, content string) string {
 		t.Fatal(err)
 	}
 	gitTest(t, path, "add", "--", name)
-	gitTest(t, path, "commit", "-m", "test commit")
+	gitTest(t, path, "commit", "-m", "test(fixture): record test change", "-m", "intent(fixture): exercise verified result persistence")
 	return gitTest(t, path, "rev-parse", "HEAD")
 }
 

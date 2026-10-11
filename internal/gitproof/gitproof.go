@@ -89,6 +89,28 @@ func Verify(dispatch core.GraphDispatch, result *core.DispatchResult) error {
 	if head != result.OutputSHA {
 		return fmt.Errorf("Git HEAD %s does not match reported output SHA %s", head, result.OutputSHA)
 	}
+	if dispatch.Recipient == "CODER" && dispatch.Instruction.CommitMessagePolicy != "" {
+		if dispatch.Instruction.CommitMessagePolicy != core.CommitMessagePolicy {
+			return fmt.Errorf("unsupported commit message policy %q", dispatch.Instruction.CommitMessagePolicy)
+		}
+		start := dispatch.ExpectedStartSHA()
+		if _, err := git(root, "merge-base", "--is-ancestor", start, head); err != nil {
+			return fmt.Errorf("output must descend from execution start SHA %s: %w", start, err)
+		}
+		commits, err := git(root, "rev-list", start+".."+head)
+		if err != nil {
+			return fmt.Errorf("read authored commits: %w", err)
+		}
+		for _, sha := range strings.Fields(commits) {
+			message, err := git(root, "show", "-s", "--format=%B", sha)
+			if err != nil {
+				return fmt.Errorf("read commit %s message: %w", sha, err)
+			}
+			if err := core.ValidateCommitMessage(message); err != nil {
+				return fmt.Errorf("commit %s violates %s: %w", sha, core.CommitMessagePolicy, err)
+			}
+		}
+	}
 	files, err := changedFiles(root, baseline, head)
 	if err != nil {
 		return err

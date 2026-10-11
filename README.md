@@ -145,6 +145,12 @@ SQLite; missing SDK measurements remain unknown. Infinite-session compaction
 is enabled, and its context and outcome events are reported.
 
 The Task's `validationCommands` authorize the checks run by the controller.
+New Coder Dispatches require Conventional Commits subjects and contextual
+commit bodies. The body records actual reasoning using `intent(scope):`,
+`decision(scope):`, `rejected(scope):`, `constraint(scope):` or `learned(scope):`
+action lines, followed by optional Git trailers. The controller checks every
+commit after the saved execution-start SHA before accepting the result; the
+independent Reviewer checks whether its reasoning matches the work.
 At the end of a runtime turn, the controller checks the structured response,
 verifies repository/worktree/SHA/scope against Git, executes those commands in
 the assigned worktree, and saves the observed output and completion in SQLite.

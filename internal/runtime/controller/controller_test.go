@@ -258,7 +258,7 @@ func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitTest(t, root, "add", "internal/app.go")
-	gitTest(t, root, "commit", "-m", "implementation")
+	gitTest(t, root, "commit", "-m", "feat(app): implement application", "-m", "intent(app): satisfy the saved implementation criterion")
 	head := gitTest(t, root, "rev-parse", "HEAD")
 	result := &core.DispatchResult{
 		DispatchID: id, TaskID: "task-1", Recipient: "CODER", Repository: "owner/repo",

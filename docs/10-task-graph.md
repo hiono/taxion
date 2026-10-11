@@ -88,6 +88,33 @@ Dispatch 指示へ複写される。targetSha は dispatch 時点で未確定で
 Dispatch の発行には一つ以上のコマンドを要求し、controller は worktree を作業ディレクトリとして
 `sh -c` で実行する。コマンドの権限は controller の実行環境に従うため、
 Task の承認時にコマンドの副作用も確認する。
+
+新しい Coder Dispatch は `commitMessagePolicy: "conventional-contextual-v1"` を
+不変の instruction snapshot に保存する。Taxion が作成・受理するコミットは
+Conventional Commits の subject と Contextual Commits の body を使用する。
+subject は `type(scope): description`（scope は任意、破壊的変更は `!`）とし、
+空行の後に実際の意図・判断・制約を表す action line を一つ以上記録する。
+action line は `intent(scope):`、`decision(scope):`、`rejected(scope):`、
+`constraint(scope):`、`learned(scope):` のいずれかを使用し、
+任意の Git trailer は action line の後に置く。
+
+```text
+feat(parser): preserve source references
+
+intent(parser): restore earlier decisions after session recreation
+decision(parser): retain the issued source version in SQLite
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+```
+
+controller は実行開始 SHA から成果物 SHA までの全コミットを Git から読み、
+subject・body・action line の形式を検査する。最新コミットだけでなく、
+途中のコミットも結果の受理条件に含める。
+形式違反は commit SHA と理由を持つエラーとして返し、成功結果の保存を停止する。
+内容の正確さと判断の根拠は独立 Reviewer が確認する。
+既存 repository の開始 SHA 以前のコミットと、
+この policy を持たない保存済み Dispatch は発行時の契約を保持する。
+
 decision は一意の ID、source、text を持ち、修正した判断は新しい ID で追記する。
 人間の選択が必要な場合は `humanDecision` に質問、選択肢、推奨選択肢と理由を記録し、
 Task を `HUMAN_DECISION_REQUIRED` にする。選択後は option ID と対応する decision record を

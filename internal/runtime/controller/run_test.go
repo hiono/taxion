@@ -70,7 +70,7 @@ func TestContinuousFlowRunsRepairAndNewSHAReview(t *testing.T) {
 					return err
 				}
 				gitTest(t, root, "add", "internal/app.go")
-				gitTest(t, root, "commit", "-m", dispatch.ID)
+				gitTest(t, root, "commit", "-m", "feat(app): "+dispatch.ID, "-m", "intent(app): satisfy the approved acceptance criterion")
 				result.OutputSHA = gitTest(t, root, "rev-parse", "HEAD")
 				result.ChangedFiles = []string{"internal/app.go"}
 			} else {

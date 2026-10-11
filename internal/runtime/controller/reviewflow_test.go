@@ -151,7 +151,7 @@ func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, ve
 				t.Fatal(err)
 			}
 			gitTest(t, dispatch.Instruction.Worktree, "add", "internal/app.go")
-			gitTest(t, dispatch.Instruction.Worktree, "commit", "-m", dispatch.ID)
+			gitTest(t, dispatch.Instruction.Worktree, "commit", "-m", "feat(app): "+dispatch.ID, "-m", "intent(app): satisfy the approved acceptance criterion")
 			result.OutputSHA = gitTest(t, dispatch.Instruction.Worktree, "rev-parse", "HEAD")
 			result.ChangedFiles = []string{"internal/app.go"}
 		} else {
