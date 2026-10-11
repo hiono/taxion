@@ -25,6 +25,7 @@ type ReviewFlow struct {
 	RunnerID       string          `json:"runnerId,omitempty"`
 	Recoveries     []FlowRecovery  `json:"recoveries,omitempty"`
 	HandoffChanges []HandoffChange `json:"handoffChanges,omitempty"`
+	Feedback       []FlowFeedback  `json:"feedback,omitempty"`
 }
 
 type FlowRecovery struct {
@@ -42,6 +43,7 @@ func (g TaskGraph) ReviewFlow(id string) (ReviewFlow, bool) {
 			flow.DispatchIDs = slices.Clone(flow.DispatchIDs)
 			flow.Recoveries = cloneFlowRecoveries(flow.Recoveries)
 			flow.HandoffChanges = slices.Clone(flow.HandoffChanges)
+			flow.Feedback = cloneFlowFeedback(flow.Feedback)
 			return flow, true
 		}
 	}
@@ -65,6 +67,9 @@ func (g TaskGraph) validateReviewFlows() error {
 		}
 		ids[flow.ID] = true
 		if err := validateHandoffChanges(flow); err != nil {
+			return err
+		}
+		if err := g.validateFlowFeedback(flow); err != nil {
 			return err
 		}
 		for _, recovery := range flow.Recoveries {

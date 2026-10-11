@@ -324,6 +324,73 @@ SDK の実際の受付時刻や停止完了を保留の成功だけで保証し�
 自然言語の入力受付、指示案の版管理・対象付き反映、会話 UI は #73、
 脇の質問と追加調査は #74、実 SDK の介入受入れは #54 に残る。
 
+### 保存済みの出力を指定した Human の補足
+
+`workflow feedback-target --id application-flow` は、最新の保存済み Dispatch と
+その結果を変更せずに読み出す。`flowId`、最新の `expectedChangeId` と
+`target` を返す。`target` は Dispatch・Task・repository・recipient、
+instruction hash、状態・更新時刻、指示の対象 SHA、結果の出力 SHA と result hash を含む。
+result hash は保存済み `DispatchResult` の JSON に対する SHA-256 で、
+`sha256:` に続く小文字の hex とする。結果が未保存なら出力 SHA と result hash は空である。
+同じ SHA でも verdict・findings・証拠が変われば result hash は異なる。
+runtime の途中出力、未保存の Git 変更、脇の質疑を観測したことにはしない。
+
+`workflow feedback --file REQUEST.json` は、この観測から `flowId`・
+`expectedChangeId`・`target` をそのまま使い、次の情報を追加する。
+
+```json
+{
+  "flowId": "application-flow",
+  "id": "human-feedback-1",
+  "expectedChangeId": "",
+  "target": {
+    "dispatchId": "application-flow-dispatch-0",
+    "taskId": "TASK-ID",
+    "repository": "owner/repository",
+    "recipient": "CODER",
+    "instructionHash": "feedback-target が返した値",
+    "status": "ISSUED",
+    "updatedAt": "feedback-target が返した時刻",
+    "targetSha": "feedback-target が返した値",
+    "outputSha": "",
+    "resultHash": ""
+  },
+  "actor": "human",
+  "source": "human:feedback-1",
+  "reason": "互換性の確認内容を相談してから次へ渡す",
+  "text": "旧設定ファイルとの互換性を確認した根拠を説明してほしい。",
+  "evidence": ["human:compatibility-question"]
+}
+```
+
+この例の `target` は説明用であり、実際には観測で取得した値を使う。
+更新時刻や hash を推測して入力しない。`evidence` は出典の参照であり、
+記録しただけで内容の正しさや Human の認証が検証されたことにはしない。
+`text` を実行指示、scope・acceptance の変更、承認として自動解釈しない。
+
+共通 controller は transaction 内で最新 Dispatch とその結果、保留変更 ID を照合し、
+補足と保留を同時に保存する。初回保留には `feedback:入力ID` を使う。
+すでに保留中ならその変更 ID を再利用し、二重の保留イベントを作らない。
+SQLite の再読込後も `reviewFlows[].feedback` から対象・本文・出典・証拠・
+受付時刻と対応する `holdChangeId` を復元できる。
+`task plan`、HTTP の計画、ACP の計画もこの flow 記録を返す。
+
+観測後に次の ROLE が発行された場合、同じ Dispatch の状態・結果が変わった場合、
+保留変更 ID が古い場合は明示的に拒否し、補足も保留も部分保存しない。
+古い対象を最新 ROLE へ付け替えない。入力を考える間も確実に次を待たせたいときは、
+先に `workflow handoff` で保留し、その状態を観測して補足する。
+同じ入力の再送は保存済み対象を維持して現在の flow を返し、
+解除後や ROLE 切替後に古い補足を再送しても新たな保留を作らない。
+同じ ID の本文・出典・対象の変更は拒否する。
+
+現在の ROLE の結果保存は保留中も継続し、記録した補足の観測時点を後から書き換えない。
+Reviewer への異議も元の verdict、指摘、SHA を保持する。
+補足の記録は worker への送信や指示案への適用ではない。
+解除して続けても本文は自動適用されず、元の承認済み契約を使う。
+自然言語の相談、補足の処理済み判定、指示案の改訂、変更の再承認、
+古い対象を明示的に再確認して扱う操作は #73・#74 に残る。
+この操作は実行停止を保証せず、開始の保存が先なら現在の実行を維持する。
+
 ## 状態遷移と完了
 
 `task transition --file REQUEST.json` は

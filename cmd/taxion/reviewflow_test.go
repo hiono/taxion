@@ -111,12 +111,59 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 	if err := workflowCmd([]string{"advance", "--id", flow.ID}); err != nil {
 		t.Fatal("release did not allow pending execution", err)
 	}
+	if err := workflowCmd([]string{"feedback-target", "--id", flow.ID}); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := controller.ObserveFeedback(db, flow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feedbackFile := filepath.Join(dir, "feedback.json")
+	feedback, err := json.Marshal(controller.FeedbackRequest{
+		FlowID: flow.ID, FlowFeedback: core.FlowFeedback{
+			ID: "feedback", ExpectedChangeID: observed.ExpectedChangeID, Target: observed.Target,
+			Actor: "human", Source: "human:feedback", Reason: "Inspect saved instructions",
+			Text: "Explain how compatibility will be checked.",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedbackFile, feedback, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"feedback", "--file", feedbackFile}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"feedback", "--file", feedbackFile}); err != nil {
+		t.Fatal("CLI replay failed", err)
+	}
+	current, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded, _ := current.Graph.ReviewFlow(flow.ID)
+	if len(recorded.Feedback) != 1 || !recorded.HandoffHeld() ||
+		recorded.Feedback[0].Target != observed.Target || len(current.Graph.Dispatches) != 1 {
+		t.Fatal("CLI feedback lost target, duplicated record or advanced execution")
+	}
+	writeHandoff(controller.HandoffRequest{
+		FlowID: flow.ID, HandoffChange: core.HandoffChange{
+			ID: "feedback-release", ExpectedChangeID: "feedback:feedback", Action: "RELEASE",
+			Actor: "human", Source: "human:continue", Reason: "Continue unchanged instructions",
+		},
+	})
+	if err := workflowCmd([]string{"handoff", "--file", handoffFile}); err != nil {
+		t.Fatal(err)
+	}
 	for _, args := range [][]string{
 		{}, {"start"}, {"advance"}, {"show", "--id", "missing"}, {"start", "--file", file},
 		{"show", "--id", request.ID, "--file", file},
 		{"run", "--id", request.ID},
 		{"run", "--id", request.ID, "--coder-prompt-file", filepath.Join(dir, "missing"), "--reviewer-prompt-file", file},
 		{"recover"}, {"recover", "--file", file}, {"handoff"}, {"handoff", "--file", file},
+		{"feedback"}, {"feedback", "--file", file}, {"feedback-target"},
+		{"feedback-target", "--id", "missing"},
 	} {
 		if err := workflowCmd(args); err == nil {
 			t.Fatalf("invalid workflow invocation accepted: %v", args)

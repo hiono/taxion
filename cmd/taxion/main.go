@@ -64,6 +64,8 @@ Commands:
   workflow show       Read the saved review flow and ceilings (--id required)
   workflow recover    Release interrupted runner ownership after recorded execution stop (--file JSON)
   workflow handoff    Hold or release the next handoff with a sourced compare-and-swap request (--file JSON)
+  workflow feedback-target Read the latest saved instruction/result target without changing execution (--id required)
+  workflow feedback   Record target-bound Human feedback and hold the next handoff (--file JSON)
   review              Bind coder-output evidence (--task, --sha and --repo required)
   resume              Print a resume acknowledgement (local stub; --session required)
   acp                 Serve ACP v1 over stdio (spike)

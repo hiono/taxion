@@ -91,6 +91,8 @@ taxion workflow run --id <flow-id> --coder-prompt-file <path> --reviewer-prompt-
 taxion workflow show --id <flow-id>
 taxion workflow recover --file <recovery-confirmation.json>
 taxion workflow handoff --file <hold-or-release.json>
+taxion workflow feedback-target --id <flow-id>
+taxion workflow feedback --file <targeted-feedback.json>
 taxion dispatch --task <id> --repo <repo>
 taxion runtime start --dispatch <id> --system-prompt-file <path>
 taxion runtime send --dispatch <id> --system-prompt-file <path> --prompt-file <path>
@@ -622,6 +624,14 @@ error and releases its claim at that boundary without cancelling the current res
 Explicit release permits later `workflow run` or `advance` under the unchanged
 contract and ceilings; it neither starts work itself nor restores a safety-stopped flow.
 The full request format and race limitations are in the Task Graph reference.
+`workflow feedback-target --id <flow-id>` reads the latest saved Dispatch's
+instruction and result identity. `workflow feedback --file <path>` compares that
+exact target and records a sourced Human response together with a handoff hold
+in one workspace transaction. It preserves the original result, verdict and
+authorization; the text is not automatically sent to a worker or treated as an
+approved contract change. A stale target fails explicitly without recording
+feedback or a hold; use `workflow handoff` separately when the next handoff must
+be held regardless of target changes.
 Natural-language intervention, editable instruction drafts and side questions
 remain tracked in #73 and #74.
 Controller-managed Coder Git operations and live SDK acceptance remain tracked
