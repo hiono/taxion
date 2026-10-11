@@ -176,6 +176,30 @@ func (c *Controller) Events(ctx context.Context, dispatchID string) (<-chan runt
 	return c.runtime.Events(ctx, dispatch.RuntimeSessionID)
 }
 
+func (c *Controller) EventCursor(dispatchID string) (uint64, error) {
+	dispatch, err := c.boundDispatch(dispatchID)
+	if err != nil {
+		return 0, err
+	}
+	source, ok := c.runtime.(runtime.EventCursor)
+	if !ok {
+		return 0, fmt.Errorf("taxion: runtime does not support event cursors")
+	}
+	return source.EventCursor(dispatch.RuntimeSessionID)
+}
+
+func (c *Controller) EventsAfter(ctx context.Context, dispatchID string, cursor uint64) (<-chan runtime.Event, error) {
+	dispatch, err := c.boundDispatch(dispatchID)
+	if err != nil {
+		return nil, err
+	}
+	source, ok := c.runtime.(runtime.EventCursor)
+	if !ok {
+		return nil, fmt.Errorf("taxion: runtime does not support event cursors")
+	}
+	return source.EventsAfter(ctx, dispatch.RuntimeSessionID, cursor)
+}
+
 func (c *Controller) RecordUsage(dispatchID string, usage core.DispatchUsage) error {
 	if !nonnegativeUsage(usage) {
 		return fmt.Errorf("taxion: invalid runtime usage record")

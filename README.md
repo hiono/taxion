@@ -88,13 +88,20 @@ taxion review --task <id> --sha <coder-sha> --repo <repo>
 
 Runtime commands require an active Task Graph Dispatch and a role-specific
 system prompt file. The Task's worktree and Dispatch recipient select the
-runtime role and workspace. Tool access defaults to none; use `--tools` only
+runtime role and workspace. The saved Dispatch snapshot is appended to the
+role prompt as the session's durable contract, so it remains part of the system
+context across turns and SDK compaction. Tool access defaults to none; use `--tools` only
 for an explicit SDK allowlist. Reviewer sessions reject writes, shell commands,
 and reads outside their assigned worktree. These permission checks are not an
 OS sandbox. Resume requires the original prompt, CLI, worktree, and tool
 configuration to match the persisted hash. Usage events record the selected
 model and available token/cache counts in SQLite; absent SDK values remain
-unknown. A finished model turn is not a successful Dispatch result.
+unknown. Infinite-session compaction is enabled and its context/compaction
+events are reported. Coder permissions allow worktree file writes and
+one-time use of explicitly allowlisted SDK tools; Reviewer permissions allow
+worktree reads only. Neither policy permits shell execution or acts as an OS
+sandbox. Model-reported results still require the explicit Dispatch result
+transition; a finished model turn is not a successful Dispatch result.
 
 The CLI is local-first. `taxion serve` provides the HTTP API, `taxion acp`
 provides ACP over stdio, and `web/` provides the browser console.

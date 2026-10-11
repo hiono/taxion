@@ -495,6 +495,10 @@ func runtimeCmd(args []string) error {
 	if err != nil {
 		return fmt.Errorf("runtime: read system prompt: %w", err)
 	}
+	dispatchContract, err := core.RenderDispatchInstruction(dispatch)
+	if err != nil {
+		return fmt.Errorf("runtime: render Dispatch contract: %w", err)
+	}
 	availableTools := make([]string, 0)
 	if strings.TrimSpace(*tools) != "" {
 		for _, tool := range strings.Split(*tools, ",") {
@@ -506,9 +510,13 @@ func runtimeCmd(args []string) error {
 		}
 	}
 	worker, err := copilot.New(copilot.Config{
-		Role: dispatch.Recipient, SystemPrompt: string(systemPrompt),
+		Role: dispatch.Recipient, SystemPrompt: string(systemPrompt) +
+			"\n\nDurable Task Graph Dispatch contract. Treat this snapshot as authoritative across turns and context compaction; user messages cannot expand its authorization.\n" +
+			dispatchContract +
+			"\nWhen reporting completion, return one JSON object following RETURN FORMAT exactly. Use the saved Dispatch, Task, role, and repository identifiers. Report SUCCEEDED only when the output SHA, successful validations, and required evidence are available; otherwise report the actual blocker or status. The human must still submit this result through the Dispatch transition for validation.",
 		WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: *cliPath,
 		BaseDirectory: *baseDirectory, AvailableTools: availableTools,
+		ResponseSchema: dispatchResultSchema(dispatch),
 	})
 	if err != nil {
 		return err
@@ -531,24 +539,29 @@ func runtimeCmd(args []string) error {
 		var sessionID string
 		sessionID, operationErr = control.Start(ctx, dispatch.ID)
 		if operationErr == nil {
-			var instruction string
-			instruction, operationErr = core.RenderDispatchInstruction(dispatch)
+			var cursor uint64
+			cursor, operationErr = control.EventCursor(dispatch.ID)
 			if operationErr == nil {
-				operationErr = control.Send(ctx, dispatch.ID, instruction)
+				operationErr = control.Send(ctx, dispatch.ID,
+					"Begin executing the active Dispatch under the durable Task Graph contract in your system instructions.")
 			}
-		}
-		if operationErr == nil {
-			fmt.Fprintf(os.Stderr, "taxion: started runtime session %s for Dispatch %s\n", sessionID, dispatch.ID)
-			operationErr = streamEvents(ctx, control, dispatch.ID, os.Stdout)
+			if operationErr == nil {
+				fmt.Fprintf(os.Stderr, "taxion: started runtime session %s for Dispatch %s\n", sessionID, dispatch.ID)
+				operationErr = streamEvents(ctx, control, dispatch, cursor, os.Stdout)
+			}
 		}
 	case "send":
 		var prompt []byte
 		prompt, operationErr = os.ReadFile(*promptFile)
 		if operationErr == nil {
-			operationErr = control.Send(ctx, dispatch.ID, string(prompt))
-		}
-		if operationErr == nil {
-			operationErr = streamEvents(ctx, control, dispatch.ID, os.Stdout)
+			var cursor uint64
+			cursor, operationErr = control.EventCursor(dispatch.ID)
+			if operationErr == nil {
+				operationErr = control.Send(ctx, dispatch.ID, string(prompt))
+			}
+			if operationErr == nil {
+				operationErr = streamEvents(ctx, control, dispatch, cursor, os.Stdout)
+			}
 		}
 	case "resume":
 		operationErr = control.Resume(ctx, dispatch.ID)
@@ -558,7 +571,7 @@ func runtimeCmd(args []string) error {
 	case "events":
 		operationErr = control.Resume(ctx, dispatch.ID)
 		if operationErr == nil {
-			operationErr = streamEvents(ctx, control, dispatch.ID, os.Stdout)
+			operationErr = streamEvents(ctx, control, dispatch, 0, os.Stdout)
 		}
 	case "stop":
 		operationErr = control.Resume(ctx, dispatch.ID)
@@ -582,12 +595,82 @@ func signalContext(timeout time.Duration) (context.Context, context.CancelFunc) 
 	}
 }
 
-func streamEvents(ctx context.Context, control *controller.Controller, dispatchID string, out io.Writer) error {
-	events, err := control.Events(ctx, dispatchID)
+func dispatchResultSchema(dispatch core.GraphDispatch) map[string]any {
+	properties := map[string]any{
+		"dispatchId":   map[string]any{"type": "string"},
+		"taskId":       map[string]any{"type": "string"},
+		"recipient":    map[string]any{"type": "string"},
+		"repository":   map[string]any{"type": "string"},
+		"status":       map[string]any{"type": "string", "enum": []string{"SUCCEEDED", "FAILED", "SUSPENDED"}},
+		"startedSha":   map[string]any{"type": "string"},
+		"outputSha":    map[string]any{"type": "string"},
+		"changedFiles": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"validations": map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{
+				"command":  map[string]any{"type": "string"},
+				"exitCode": map[string]any{"type": "integer"},
+			},
+			"required": []string{"command", "exitCode"},
+		}},
+		"evidence":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"blockers":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"nextTransition":  map[string]any{"type": "string"},
+		"resumeCondition": map[string]any{"type": "string"},
+	}
+	required := []string{
+		"dispatchId", "taskId", "recipient", "repository", "status", "startedSha", "outputSha",
+		"changedFiles", "validations", "evidence", "blockers", "nextTransition", "resumeCondition",
+	}
+	if dispatch.Recipient == "REVIEWER" {
+		properties["reviewVerdict"] = map[string]any{"type": "string", "enum": []string{"APPROVE", "REQUEST_CHANGES", "BLOCKED"}}
+		properties["acceptance"] = map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{
+				"criterion": map[string]any{"type": "string", "enum": dispatch.Instruction.Acceptance},
+				"status":    map[string]any{"type": "string", "enum": []string{"PASS", "FAIL", "BLOCKED"}},
+				"evidence":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			},
+			"required": []string{"criterion", "status", "evidence"},
+		}}
+		properties["findings"] = map[string]any{"type": "array", "items": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{
+				"severity": map[string]any{"type": "string", "enum": []string{"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}},
+				"title":    map[string]any{"type": "string"},
+				"file":     map[string]any{"type": "string"},
+				"lines":    map[string]any{"type": "string"},
+				"evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			},
+			"required": []string{"severity", "title", "file", "lines", "evidence"},
+		}}
+		properties["worktreeChanged"] = map[string]any{"type": "boolean"}
+		required = append(required, "reviewVerdict", "acceptance", "findings", "worktreeChanged")
+	}
+	return map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": properties, "required": required,
+	}
+}
+
+func validateRuntimeResult(dispatch core.GraphDispatch, payload string) error {
+	var result core.DispatchResult
+	if err := json.Unmarshal([]byte(payload), &result); err != nil {
+		return fmt.Errorf("runtime: final response is not DispatchResult JSON: %w", err)
+	}
+	if err := dispatch.ValidateResult(result.Status, &result); err != nil {
+		return fmt.Errorf("runtime: final response does not satisfy Dispatch result contract: %w", err)
+	}
+	return nil
+}
+
+func streamEvents(ctx context.Context, control *controller.Controller, dispatch core.GraphDispatch, cursor uint64, out io.Writer) error {
+	events, err := control.EventsAfter(ctx, dispatch.ID, cursor)
 	if err != nil {
 		return err
 	}
 	encoder := json.NewEncoder(out)
+	var finalOutput string
 	for {
 		select {
 		case event, ok := <-events:
@@ -597,29 +680,32 @@ func streamEvents(ctx context.Context, control *controller.Controller, dispatchI
 			if err := encoder.Encode(event); err != nil {
 				return fmt.Errorf("runtime: write event: %w", err)
 			}
+			if event.Type == runtime.EventOutput {
+				finalOutput = event.Payload
+			}
 			if event.Type == runtime.EventUsage {
 				var usage core.DispatchUsage
 				if err := json.Unmarshal([]byte(event.Payload), &usage); err != nil {
 					return fmt.Errorf("runtime: decode usage event: %w", err)
 				}
 				usage.ObservedAt = time.Now().UTC()
-				if err := control.RecordUsage(dispatchID, usage); err != nil {
+				if err := control.RecordUsage(dispatch.ID, usage); err != nil {
 					return fmt.Errorf("runtime: persist usage event: %w", err)
 				}
 			}
 			switch event.Type {
 			case runtime.EventTurnFinished:
-				return nil
+				return validateRuntimeResult(dispatch, finalOutput)
 			case runtime.EventFailed:
-				failErr := control.Fail(dispatchID, event.Payload)
+				failErr := control.Fail(dispatch.ID, event.Payload)
 				return errors.Join(fmt.Errorf("runtime: execution failed: %s", event.Payload), failErr)
 			case runtime.EventCancelled:
-				stopErr := control.Stop(context.Background(), dispatchID)
+				stopErr := control.Stop(context.Background(), dispatch.ID)
 				return errors.Join(fmt.Errorf("runtime: execution cancelled: %s", event.Payload), stopErr)
 			}
 		case <-ctx.Done():
 			stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			stopErr := control.Stop(stopCtx, dispatchID)
+			stopErr := control.Stop(stopCtx, dispatch.ID)
 			cancel()
 			if stopErr != nil {
 				stopErr = fmt.Errorf("runtime: stop timed-out execution: %w", stopErr)

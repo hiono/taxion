@@ -224,6 +224,49 @@ func TestRuntimeSessionBindingPersistsTaskRoleAndConfiguration(t *testing.T) {
 	}
 }
 
+func TestReviewerDispatchResultValidatesAcceptanceFindingsAndWorktree(t *testing.T) {
+	task := graphTask("review")
+	task.Owner = "REVIEWER"
+	g := trackedGraph(t, task)
+	move(t, &g, task.ID, Ready, TransitionProof{})
+	dispatch, err := NewGraphDispatch(g, "review-dispatch", task.ID, task.Repo, RelationshipNone, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.IssueDispatch(dispatch, "controller", "issue review"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.TransitionDispatch(dispatch.ID, DispatchAcknowledged, "reviewer", "ack", true, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.TransitionDispatch(dispatch.ID, DispatchRunning, "reviewer", "start", true, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	worktreeChanged := false
+	result := &DispatchResult{
+		DispatchID: dispatch.ID, TaskID: task.ID, Recipient: "REVIEWER", Repository: task.Repo,
+		Status: DispatchSucceeded, StartedSHA: task.BaselineSHA, OutputSHA: strings.Repeat("b", 40),
+		ChangedFiles: []string{}, Validations: []DispatchValidation{{Command: "inspect target", ExitCode: 0}},
+		Evidence: []string{"test-report", "review-report:1"}, Blockers: []string{}, ReviewVerdict: "APPROVE",
+		Acceptance: []DispatchAcceptance{{Criterion: task.Acceptance[0], Status: "PASS", Evidence: []string{"test-report"}}},
+		Findings:   []DispatchFinding{}, WorktreeChanged: &worktreeChanged,
+		NextTransition: WaitingForEvidence,
+	}
+	incomplete := *result
+	incomplete.Acceptance = nil
+	if err := g.TransitionDispatch(dispatch.ID, DispatchSucceeded, "reviewer", "incomplete result", false, false, &incomplete); err == nil {
+		t.Fatal("accepted a Reviewer result without acceptance decisions")
+	}
+	if err := g.TransitionDispatch(dispatch.ID, DispatchSucceeded, "reviewer", "verified result", false, false, result); err != nil {
+		t.Fatal(err)
+	}
+	accepted, _ := g.GraphDispatch(dispatch.ID)
+	if accepted.Result == nil || accepted.Result.WorktreeChanged == nil || *accepted.Result.WorktreeChanged ||
+		len(accepted.Result.Acceptance) != 1 || accepted.Result.ReviewVerdict != "APPROVE" {
+		t.Fatalf("Reviewer result was not preserved: %+v", accepted.Result)
+	}
+}
+
 func TestDispatchRelationshipAndDerivedTaskLinks(t *testing.T) {
 	parent := graphTask("parent")
 	first := graphTask("first")

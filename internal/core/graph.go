@@ -42,7 +42,63 @@ type TaskDependency struct {
 	State  TaskStatus `json:"state"`
 }
 
-const DispatchInstructionVersion = 1
+func (d GraphDispatch) ValidateResult(status DispatchStatus, result *DispatchResult) error {
+	return validateDispatchResult(d, status, result)
+}
+
+func validateReviewerResult(d GraphDispatch, result *DispatchResult) error {
+	if !slices.Contains([]string{"APPROVE", "REQUEST_CHANGES", "BLOCKED"}, result.ReviewVerdict) ||
+		result.Acceptance == nil || result.Findings == nil || result.WorktreeChanged == nil ||
+		len(result.Acceptance) != len(d.Instruction.Acceptance) {
+		return graphError("Reviewer result requires verdict, acceptance decisions, findings and worktree status")
+	}
+	acceptance := make(map[string]DispatchAcceptance, len(result.Acceptance))
+	for _, item := range result.Acceptance {
+		if !nonempty(item.Criterion) ||
+			!slices.Contains([]string{"PASS", "FAIL", "BLOCKED"}, item.Status) ||
+			!validList(item.Evidence) || acceptance[item.Criterion].Criterion != "" {
+			return graphError("Reviewer result contains an invalid or duplicate acceptance decision")
+		}
+		if item.Status == "PASS" && len(item.Evidence) == 0 {
+			return graphError("passing Reviewer acceptance requires evidence")
+		}
+		for _, evidence := range item.Evidence {
+			if !slices.Contains(result.Evidence, evidence) {
+				return graphError("Reviewer acceptance references evidence absent from the result")
+			}
+		}
+		acceptance[item.Criterion] = item
+	}
+	allPassed := true
+	for _, criterion := range d.Instruction.Acceptance {
+		item, ok := acceptance[criterion]
+		if !ok {
+			return graphError("Reviewer result omits acceptance criterion %s", criterion)
+		}
+		allPassed = allPassed && item.Status == "PASS"
+	}
+	for _, finding := range result.Findings {
+		if !slices.Contains([]string{"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}, finding.Severity) ||
+			!nonempty(finding.Title) || !validList(finding.Evidence) {
+			return graphError("Reviewer result contains an invalid finding")
+		}
+		for _, evidence := range finding.Evidence {
+			if !slices.Contains(result.Evidence, evidence) {
+				return graphError("Reviewer finding references evidence absent from the result")
+			}
+		}
+	}
+	if result.ReviewVerdict == "APPROVE" && (!allPassed || len(result.Findings) != 0 ||
+		*result.WorktreeChanged || len(result.ChangedFiles) != 0) {
+		return graphError("Reviewer approval conflicts with acceptance, findings or worktree changes")
+	}
+	if result.ReviewVerdict == "REQUEST_CHANGES" && allPassed && len(result.Findings) == 0 {
+		return graphError("Reviewer requested changes without a failed criterion or finding")
+	}
+	return nil
+}
+
+const DispatchInstructionVersion = 2
 
 type TaskDecision struct {
 	ID     string `json:"id"`
@@ -196,8 +252,26 @@ type DispatchResult struct {
 	Validations     []DispatchValidation `json:"validations"`
 	Evidence        []string             `json:"evidence"`
 	Blockers        []string             `json:"blockers"`
+	ReviewVerdict   string               `json:"reviewVerdict,omitempty"`
+	Acceptance      []DispatchAcceptance `json:"acceptance,omitempty"`
+	Findings        []DispatchFinding    `json:"findings,omitempty"`
+	WorktreeChanged *bool                `json:"worktreeChanged,omitempty"`
 	NextTransition  TaskStatus           `json:"nextTransition"`
 	ResumeCondition string               `json:"resumeCondition,omitempty"`
+}
+
+type DispatchAcceptance struct {
+	Criterion string   `json:"criterion"`
+	Status    string   `json:"status"`
+	Evidence  []string `json:"evidence"`
+}
+
+type DispatchFinding struct {
+	Severity string   `json:"severity"`
+	Title    string   `json:"title"`
+	File     string   `json:"file,omitempty"`
+	Lines    string   `json:"lines,omitempty"`
+	Evidence []string `json:"evidence"`
 }
 
 type DispatchInstruction struct {
@@ -221,6 +295,7 @@ type DispatchInstruction struct {
 	Objective          string                `json:"objective"`
 	AuthorizedActions  []string              `json:"authorizedActions"`
 	ForbiddenActions   []string              `json:"forbiddenActions"`
+	Acceptance         []string              `json:"acceptance,omitempty"`
 	RequiredEvidence   []string              `json:"requiredEvidence"`
 	ExitCondition      string                `json:"exitCondition"`
 	Worktree           string                `json:"worktree"`
@@ -337,6 +412,7 @@ var dispatchReturnFormat = []string{
 	"dispatchId, taskId, recipient, repository, status",
 	"startedSha, outputSha, changedFiles",
 	"validations[{command, exitCode}], evidence, blockers, nextTransition, resumeCondition",
+	"Reviewer only: reviewVerdict, acceptance[{criterion, status, evidence}], findings[{severity, title, file, lines, evidence}], worktreeChanged",
 }
 
 func NewGraphDispatch(g TaskGraph, id, taskID, repo string, relationship DispatchRelationship, relatedID, relationshipReason string) (GraphDispatch, error) {
@@ -420,8 +496,9 @@ func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship Di
 		TaskID: task.ID, TaskType: task.Type, Title: task.Title, Repository: task.Repo, Issue: task.Issue,
 		ParentTaskID: task.ParentID, SiblingTaskIDs: siblings, DependsOn: slices.Clone(task.DependsOn),
 		Blocks: blocks, Objective: task.Objective, AuthorizedActions: slices.Clone(task.Scope),
-		ForbiddenActions: slices.Clone(task.OutOfScope), RequiredEvidence: slices.Clone(task.RequiredEvidence),
-		ExitCondition: task.ExitCondition, Worktree: task.Worktree, Branch: task.Branch,
+		ForbiddenActions: slices.Clone(task.OutOfScope), Acceptance: slices.Clone(task.Acceptance),
+		RequiredEvidence: slices.Clone(task.RequiredEvidence),
+		ExitCondition:    task.ExitCondition, Worktree: task.Worktree, Branch: task.Branch,
 		BaselineSHA: task.BaselineSHA, TargetSHA: task.TargetSHA, AuthorizationID: task.AuthorizationID,
 		Decisions: slices.Clone(task.Decisions), HumanDecision: cloneHumanDecision(task.HumanDecision),
 		MemoryRefs:   slices.Clone(task.MemoryRefs),
@@ -475,6 +552,7 @@ func dispatchInstructionMatchesTask(d GraphDispatch, task GraphTask) bool {
 		i.ParentTaskID == task.ParentID && reflect.DeepEqual(i.DependsOn, task.DependsOn) &&
 		i.Objective == task.Objective && slices.Equal(i.AuthorizedActions, task.Scope) &&
 		slices.Equal(i.ForbiddenActions, task.OutOfScope) &&
+		slices.Equal(i.Acceptance, task.Acceptance) &&
 		slices.Equal(i.RequiredEvidence, task.RequiredEvidence) && i.ExitCondition == task.ExitCondition &&
 		i.Worktree == task.Worktree && i.Branch == task.Branch && i.BaselineSHA == task.BaselineSHA &&
 		i.TargetSHA == task.TargetSHA && i.AuthorizationID == task.AuthorizationID &&
@@ -486,7 +564,9 @@ func dispatchInstructionMatchesTask(d GraphDispatch, task GraphTask) bool {
 
 func dispatchInstructionIdentityMatchesTask(d GraphDispatch, task GraphTask) bool {
 	i := d.Instruction
-	return i.Version == DispatchInstructionVersion && i.DispatchID == d.ID &&
+	versionMatches := i.Version == 1 || i.Version == DispatchInstructionVersion
+	acceptanceMatches := i.Version == 1 || slices.Equal(i.Acceptance, task.Acceptance)
+	return versionMatches && acceptanceMatches && i.DispatchID == d.ID &&
 		i.TaskID == d.TaskID && i.Repository == d.Repository &&
 		i.Title == task.Title && task.Repo == d.Repository &&
 		i.DispatchTo == d.Recipient && i.Relationship == d.Relationship &&
@@ -522,6 +602,11 @@ func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *Disp
 		for _, required := range d.Instruction.RequiredEvidence {
 			if !slices.Contains(result.Evidence, required) {
 				return graphError("dispatch result is missing required evidence %s", required)
+			}
+		}
+		if d.Recipient == "REVIEWER" && d.Instruction.Version >= 2 {
+			if err := validateReviewerResult(d, result); err != nil {
+				return err
 			}
 		}
 	}
@@ -614,6 +699,7 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 	}{
 		{"AUTHORIZED ACTIONS", i.AuthorizedActions},
 		{"FORBIDDEN ACTIONS", i.ForbiddenActions},
+		{"ACCEPTANCE", i.Acceptance},
 		{"REQUIRED EVIDENCE", i.RequiredEvidence},
 	} {
 		value, err := json.Marshal(line.value)
@@ -1309,6 +1395,7 @@ func cloneDispatch(d GraphDispatch) GraphDispatch {
 	d.Instruction.Blocks = slices.Clone(d.Instruction.Blocks)
 	d.Instruction.AuthorizedActions = slices.Clone(d.Instruction.AuthorizedActions)
 	d.Instruction.ForbiddenActions = slices.Clone(d.Instruction.ForbiddenActions)
+	d.Instruction.Acceptance = slices.Clone(d.Instruction.Acceptance)
 	d.Instruction.RequiredEvidence = slices.Clone(d.Instruction.RequiredEvidence)
 	d.Instruction.Decisions = slices.Clone(d.Instruction.Decisions)
 	d.Instruction.HumanDecision = cloneHumanDecision(d.Instruction.HumanDecision)
@@ -1326,6 +1413,14 @@ func cloneCount(value *int64) *int64 {
 	return &copy
 }
 
+func cloneBool(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
 func cloneDispatchResult(result *DispatchResult) *DispatchResult {
 	if result == nil {
 		return nil
@@ -1335,6 +1430,15 @@ func cloneDispatchResult(result *DispatchResult) *DispatchResult {
 	copy.Validations = slices.Clone(result.Validations)
 	copy.Evidence = slices.Clone(result.Evidence)
 	copy.Blockers = slices.Clone(result.Blockers)
+	copy.Acceptance = slices.Clone(result.Acceptance)
+	for i := range copy.Acceptance {
+		copy.Acceptance[i].Evidence = slices.Clone(result.Acceptance[i].Evidence)
+	}
+	copy.Findings = slices.Clone(result.Findings)
+	for i := range copy.Findings {
+		copy.Findings[i].Evidence = slices.Clone(result.Findings[i].Evidence)
+	}
+	copy.WorktreeChanged = cloneBool(result.WorktreeChanged)
 	return &copy
 }
 

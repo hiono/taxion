@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -109,6 +110,7 @@ func TestMemoryPromotionCLIAndDispatch(t *testing.T) {
 	if err := initCmd(); err != nil {
 		t.Fatal(err)
 	}
+
 	for _, n := range []string{"0", "-1", "bad"} {
 		if err := memoryCmd([]string{"configure", "--promote-after", n}); err == nil {
 			t.Fatalf("invalid threshold accepted: %s", n)
@@ -155,5 +157,57 @@ func TestMemoryPromotionCLIAndDispatch(t *testing.T) {
 	}
 	if err := dispatchCmd([]string{"--task", "t", "--repo", "target"}); err != nil {
 		t.Fatalf("matching CLI dispatch failed: %v", err)
+	}
+}
+
+func TestRuntimeDispatchResultSchemaAndValidation(t *testing.T) {
+	dispatch := core.GraphDispatch{
+		ID: "dispatch-1", TaskID: "task-1", Recipient: "CODER", Repository: "owner/repo",
+		Instruction: core.DispatchInstruction{BaselineSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+	}
+	schema := dispatchResultSchema(dispatch)
+	if schema["additionalProperties"] != false {
+		t.Fatal("result schema must reject undocumented fields")
+	}
+	result := core.DispatchResult{
+		DispatchID: dispatch.ID, TaskID: dispatch.TaskID, Recipient: dispatch.Recipient,
+		Repository: dispatch.Repository, Status: core.DispatchSucceeded,
+		StartedSHA: dispatch.Instruction.BaselineSHA, OutputSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		ChangedFiles: []string{}, Validations: []core.DispatchValidation{{Command: "go test ./...", ExitCode: 0}},
+		Evidence: []string{"test-report:1"}, Blockers: []string{}, NextTransition: core.WaitingForEvidence,
+	}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRuntimeResult(dispatch, string(payload)); err != nil {
+		t.Fatal(err)
+	}
+	result.DispatchID = "other-dispatch"
+	payload, err = json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRuntimeResult(dispatch, string(payload)); err == nil {
+		t.Fatal("accepted a result for another Dispatch")
+	}
+}
+
+func TestReviewerResponseSchemaContainsAcceptanceAndFindings(t *testing.T) {
+	dispatch := core.GraphDispatch{
+		Recipient: "REVIEWER",
+		Instruction: core.DispatchInstruction{
+			Acceptance: []string{"tests pass", "scope preserved"},
+		},
+	}
+	schema := dispatchResultSchema(dispatch)
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("result schema properties = %T", schema["properties"])
+	}
+	for _, field := range []string{"reviewVerdict", "acceptance", "findings", "worktreeChanged"} {
+		if _, ok := properties[field]; !ok {
+			t.Fatalf("Reviewer response schema omits %s", field)
+		}
 	}
 }

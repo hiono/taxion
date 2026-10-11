@@ -8,8 +8,9 @@ import "context"
 
 // Event is a plain, SDK-neutral runtime event.
 type Event struct {
-	Type    string
-	Payload string
+	Type     string
+	Payload  string
+	Sequence uint64 `json:"sequence,omitempty"`
 }
 
 const (
@@ -51,4 +52,9 @@ type Identity interface {
 	Role() string
 	ConfigHash() string
 	Worktree() string
+}
+
+type EventCursor interface {
+	EventCursor(sessionID string) (uint64, error)
+	EventsAfter(ctx context.Context, sessionID string, cursor uint64) (<-chan Event, error)
 }

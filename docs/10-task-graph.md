@@ -157,6 +157,11 @@ Task ID、recipient、repository、status が対象 Dispatch と一致し、star
 指示の baselineSha と一致することを検査する。SUCCEEDED には outputSha、成功した
 validation、必須 evidence を要求する。終端 Dispatch の状態は再遷移できないため、
 以前の Dispatch に属する結果で新しい Dispatch を完了させることはできない。
+Reviewer の SUCCEEDED result には verdict、全 acceptance の判断と evidence、
+findings、worktree の変更有無を追加し、APPROVE は全件 PASS・finding なし・変更なしの場合に限る。
+runtime はこの result schema を SDK に渡し、最終応答を Task・Dispatch の保存済み条件と照合する。
+照合済みの応答も Git object や検証コマンドの実行を証明しないため、状態を変えるには
+別途 `dispatch transition --result-file` を実行する。
 結果の SHA や検証内容は caller が申告した値であり、Git object・コマンド実行・証拠の
 実在をこの検査だけで確認するわけではない。
 
@@ -190,11 +195,15 @@ relationship reason を明示する。最初の Dispatch だけが `NONE` を使
 同じ SDK session は同一 Task・recipient・設定 hash の範囲だけで再利用できる。
 `runtimeUsage` は SDK が返す model、Auto 選択、input/output token、cache read/write token を保持する。
 取得できない値は省略し、ゼロとして扱わない。usage event は計測時刻とともに Dispatch に保存する。
-resume 時は role prompt、worktree、tool allowlist、permission policy を再指定し、設定 hash の一致を照合する。
-Reviewer は SDK permission handler で worktree 内の file read だけを許可し、write・shell 等を拒否する。
-この handler は OS sandbox ではなく、Git 操作やすべての外部 tool の隔離を証明しない。
+resume 時は role prompt、Dispatch snapshot、worktree、tool allowlist、permission policy を再指定し、設定 hash の一致を照合する。
+Coder は worktree 内の file write と allowlist 済み SDK tool の一回限りの利用を許可し、shell と worktree 外の操作を拒否する。
+Reviewer は worktree 内の file read だけを許可し、write・shell 等を拒否する。
+permission handler は OS sandbox ではなく、Git 操作やすべての外部 tool の隔離を証明しない。
 
-CLI `runtime start` は Dispatch の保存済み指示を明示的に SDK session へ送り、`send` は追加指示を渡す。
+CLI `runtime start` は保存済み Dispatch 指示を role 固有 system prompt に加えて session を作り、
+短い実行要求を送る。`send` は追加指示を渡す。event cursor で新しい turn の出力だけを読み、
+SDK compaction 後も role と Task Graph の実行契約が system context に残る。
+context 使用量と compaction の結果を event stream で確認できる。
 turn の完了や出力イベントは Dispatch 成功の証拠にならず、終了時は結果 schema に従った明示的な遷移が必要。
 ACP と HTTP API は Copilot session を自動起動しない。
 

@@ -34,30 +34,36 @@ type Runtime interface {
   it does not restart a process. Checkpoint sequencing remains separate.
 - `internal/runtime/copilot`: wraps the official Go Copilot SDK. Configure one
   adapter per role and worktree; sessions use Auto and an explicit tool
-  allowlist. Resume re-supplies the same system prompt, worktree and tools.
-  Reviewer permission requests allow reads only inside its worktree and reject
-  writes, shell, and other permission categories. Permission checks are not an
-  OS sandbox.
+  allowlist. Infinite-session compaction is enabled. The CLI appends the saved
+  Dispatch snapshot to the role-specific system prompt so the authorization
+  contract remains in system context across turns and compaction. Resume
+  re-supplies the same system prompt, worktree and tools. Coder permission
+  requests allow file writes inside the worktree and one-time use of explicitly
+  allowlisted SDK tools; Reviewer allows reads inside the worktree only. Both
+  reject shell execution and path access outside the worktree. These checks
+  are not an OS sandbox.
 - `internal/runtime/controller`: checks the Dispatch role, assigned worktree,
   active status, and configuration hash before creating, resuming, sending,
   stopping, or recording usage for its bound session. Session IDs, hashes,
   model and token/cache usage are stored with the Dispatch in SQLite.
 
 `taxion runtime start|send|resume|events|stop` is the explicit Copilot CLI
-execution path. `start` sends the saved Dispatch instruction; follow-up
-instructions come from a prompt file. A model turn ending is not evidence that
-the Dispatch succeeded; its result must pass the existing Dispatch transition
-contract. The ACP server still uses `internal/runtime/local` and does not
-automatically start a Copilot session.
+execution path. `start` creates a session with the saved Dispatch snapshot in
+system context and sends a short execution request; follow-up instructions
+come from a prompt file. A model turn ending is not evidence that the Dispatch
+succeeded; its result must pass the existing Dispatch transition contract.
+The ACP server still uses `internal/runtime/local` and does not automatically
+start a Copilot session.
 
 ## Event subscription lifetime
 
 Adapters replay events recorded by the current adapter instance before
 following live ones. Copilot emits normalized message, turn, failure,
 cancellation, usage, context-window, compaction, and permission-decision
-events; usage is persisted with the bound Dispatch. A finished turn does not
-close the session stream because the same role session accepts another
-instruction. Stop closes the stream.
+events; usage is persisted with the bound Dispatch. Context and compaction
+events report SDK-provided token limits and compaction outcomes when available.
+A finished turn does not close the session stream because the same role
+session accepts another instruction. Stop closes the stream.
 Cancelling the subscription context closes only that subscription; consumers
 must still observe their context rather than waiting only for session closure.
 After a process restart, Copilot's conversation history is resumed by SDK

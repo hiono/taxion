@@ -38,6 +38,7 @@ type Config struct {
 	CLIPath          string
 	BaseDirectory    string
 	AvailableTools   []string
+	ResponseSchema   map[string]any
 }
 
 type Adapter struct {
@@ -59,6 +60,7 @@ type managedSession struct {
 	mu       sync.Mutex
 	stopped  bool
 	busy     bool
+	sequence uint64
 	history  []runtime.Event
 	watchers map[*subscription]struct{}
 }
@@ -124,6 +126,15 @@ func New(config Config) (*Adapter, error) {
 	if config.AvailableTools == nil {
 		config.AvailableTools = []string{}
 	}
+	if config.ResponseSchema != nil {
+		encoded, err := json.Marshal(config.ResponseSchema)
+		if err != nil {
+			return nil, fmt.Errorf("taxion: encode response schema: %w", err)
+		}
+		if err := json.Unmarshal(encoded, &config.ResponseSchema); err != nil {
+			return nil, fmt.Errorf("taxion: copy response schema: %w", err)
+		}
+	}
 	return &Adapter{
 		config: config,
 		client: sdk.NewClient(&sdk.ClientOptions{
@@ -141,7 +152,9 @@ func New(config Config) (*Adapter, error) {
 // be supplied again when resuming a durable SDK session.
 func (a *Adapter) ConfigHash() string {
 	permissionPolicy := "cli-managed-v1"
-	if a.config.Role == "REVIEWER" {
+	if a.config.Role == "CODER" {
+		permissionPolicy = "coder-worktree-write-v1"
+	} else if a.config.Role == "REVIEWER" {
 		permissionPolicy = "reviewer-read-only-v1"
 	}
 	data, _ := json.Marshal(struct {
@@ -151,6 +164,7 @@ func (a *Adapter) ConfigHash() string {
 		CLIPath          string
 		BaseDirectory    string
 		AvailableTools   []string
+		ResponseSchema   map[string]any
 		PermissionPolicy string
 	}{
 		Role:             a.config.Role,
@@ -159,6 +173,7 @@ func (a *Adapter) ConfigHash() string {
 		CLIPath:          a.config.CLIPath,
 		BaseDirectory:    a.config.BaseDirectory,
 		AvailableTools:   a.config.AvailableTools,
+		ResponseSchema:   a.config.ResponseSchema,
 		PermissionPolicy: permissionPolicy,
 	})
 	sum := sha256.Sum256(data)
@@ -219,7 +234,9 @@ func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
 	if stopped || session == nil {
 		return ErrStoppedSession
 	}
-	if _, err := session.Send(ctx, sdk.MessageOptions{Prompt: prompt}); err != nil {
+	if _, err := session.Send(ctx, sdk.MessageOptions{
+		Prompt: prompt, ResponseSchema: a.config.ResponseSchema,
+	}); err != nil {
 		handle.emit(runtime.Event{Type: runtime.EventFailed, Payload: err.Error()})
 		return fmt.Errorf("taxion: send Copilot instruction: %w", err)
 	}
@@ -314,6 +331,20 @@ func (a *Adapter) Stop(ctx context.Context, sessionID string) error {
 }
 
 func (a *Adapter) Events(ctx context.Context, sessionID string) (<-chan runtime.Event, error) {
+	return a.EventsAfter(ctx, sessionID, 0)
+}
+
+func (a *Adapter) EventCursor(sessionID string) (uint64, error) {
+	handle, err := a.lookup(sessionID)
+	if err != nil {
+		return 0, err
+	}
+	handle.mu.Lock()
+	defer handle.mu.Unlock()
+	return handle.sequence, nil
+}
+
+func (a *Adapter) EventsAfter(ctx context.Context, sessionID string, cursor uint64) (<-chan runtime.Event, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("taxion: event context must not be nil")
 	}
@@ -325,19 +356,29 @@ func (a *Adapter) Events(ctx context.Context, sessionID string) (<-chan runtime.
 	if handle.stopped || handle.sdk == nil {
 		out := make(chan runtime.Event, len(handle.history))
 		for _, event := range handle.history {
-			out <- event
+			if event.Sequence > cursor {
+				out <- event
+			}
 		}
 		close(out)
 		handle.mu.Unlock()
 		return out, nil
 	}
+	replay := 0
+	for _, event := range handle.history {
+		if event.Sequence > cursor {
+			replay++
+		}
+	}
 	sub := &subscription{
-		queue: make(chan runtime.Event, len(handle.history)+watcherBuffer),
+		queue: make(chan runtime.Event, replay+watcherBuffer),
 		out:   make(chan runtime.Event, watcherBuffer),
 		done:  make(chan struct{}),
 	}
 	for _, event := range handle.history {
-		sub.queue <- event
+		if event.Sequence > cursor {
+			sub.queue <- event
+		}
 	}
 	handle.watchers[sub] = struct{}{}
 	handle.mu.Unlock()
@@ -446,6 +487,7 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 		EnableSkills:                       &disabled,
 		EnableFileHooks:                    &disabled,
 		EnableOnDemandInstructionDiscovery: &disabled,
+		InfiniteSessions:                   infiniteSessions(),
 		OnPermissionRequest:                a.permissionHandler(),
 		OnEvent:                            onEvent,
 	}
@@ -463,17 +505,26 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		EnableSkills:                       &disabled,
 		EnableFileHooks:                    &disabled,
 		EnableOnDemandInstructionDiscovery: &disabled,
+		InfiniteSessions:                   infiniteSessions(),
 		OnPermissionRequest:                a.permissionHandler(),
 		OnEvent:                            onEvent,
 	}
 }
 
+func infiniteSessions() *sdk.InfiniteSessionConfig {
+	enabled := true
+	return &sdk.InfiniteSessionConfig{Enabled: &enabled}
+}
+
 func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
-	if a.config.Role != "REVIEWER" {
+	if a.config.Role != "REVIEWER" && a.config.Role != "CODER" {
 		return nil
 	}
 	return func(request sdk.PermissionRequest, invocation sdk.PermissionInvocation) (rpc.PermissionDecision, error) {
 		decision := reviewerPermissionDecision(a.config.WorkingDirectory, request)
+		if a.config.Role == "CODER" {
+			decision = coderPermissionDecision(a.config.WorkingDirectory, a.config.AvailableTools, request)
+		}
 		if handle, err := a.lookup(invocation.SessionID); err == nil {
 			payload, _ := json.Marshal(struct {
 				RequestKind string `json:"requestKind"`
@@ -483,6 +534,57 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 		}
 		return decision, nil
 	}
+}
+
+func coderPermissionDecision(worktree string, availableTools []string, request sdk.PermissionRequest) rpc.PermissionDecision {
+	reject := func() rpc.PermissionDecision {
+		reason := "Coder permissions are limited to the assigned worktree and explicitly allowlisted tools"
+		return &rpc.PermissionDecisionReject{Feedback: &reason}
+	}
+	switch permission := request.(type) {
+	case *sdk.PermissionRequestRead:
+		return reviewerPermissionDecision(worktree, permission)
+	case *sdk.PermissionRequestWrite:
+		if permission.RequestSandboxBypass != nil && *permission.RequestSandboxBypass ||
+			permission.ManagedApprovalRequired != nil && *permission.ManagedApprovalRequired {
+			return reject()
+		}
+		target := permission.FileName
+		if permission.ResolvedPath != nil && *permission.ResolvedPath != "" {
+			target = *permission.ResolvedPath
+		}
+		target, err := canonicalWriteTarget(worktree, target)
+		if err != nil || !within(worktree, target) {
+			return reject()
+		}
+		return &rpc.PermissionDecisionApproveOnce{}
+	case *sdk.PermissionRequestCustomTool:
+		if slices.Contains(availableTools, permission.ToolName) &&
+			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
+			return &rpc.PermissionDecisionApproveOnce{}
+		}
+		return reject()
+	default:
+		return reject()
+	}
+}
+
+func canonicalWriteTarget(worktree, target string) (string, error) {
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(worktree, target)
+	}
+	target, err := filepath.Abs(target)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(target); err == nil {
+		return resolved, nil
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(target))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, filepath.Base(target)), nil
 }
 
 func reviewerPermissionDecision(worktree string, request sdk.PermissionRequest) rpc.PermissionDecision {
@@ -593,6 +695,8 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			Phase                 string  `json:"phase"`
 			Success               bool    `json:"success"`
 			Model                 *string `json:"model,omitempty"`
+			SystemTokens          *int64  `json:"systemTokens,omitempty"`
+			ConversationTokens    *int64  `json:"conversationTokens,omitempty"`
 			PreCompactionTokens   *int64  `json:"preCompactionTokens,omitempty"`
 			PostCompactionTokens  *int64  `json:"postCompactionTokens,omitempty"`
 			TokensRemoved         *int64  `json:"tokensRemoved,omitempty"`
@@ -601,6 +705,7 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			MessagesRemoved       *int64  `json:"messagesRemoved,omitempty"`
 		}{
 			Phase: "completed", Success: data.Success, Model: data.BehaviorModelID,
+			SystemTokens: data.SystemTokens, ConversationTokens: data.ConversationTokens,
 			PreCompactionTokens: data.PreCompactionTokens, PostCompactionTokens: data.PostCompactionTokens,
 			TokensRemoved: data.TokensRemoved, TokenLimit: data.TokenLimit,
 			PreCompactionMessages: data.PreCompactionMessagesLength, MessagesRemoved: data.MessagesRemoved,
@@ -636,6 +741,8 @@ func (h *managedSession) emit(event runtime.Event) {
 		h.mu.Unlock()
 		return
 	}
+	h.sequence++
+	event.Sequence = h.sequence
 	switch event.Type {
 	case runtime.EventTurnFinished, runtime.EventFailed, runtime.EventCancelled:
 		h.busy = false
