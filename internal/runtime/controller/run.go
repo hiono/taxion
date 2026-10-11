@@ -62,7 +62,9 @@ func RunReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 			break
 		}
 		dispatch, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
-		if dispatch.Status != core.DispatchIssued || dispatch.RuntimeSessionID != "" {
+		releasedUnstarted := len(flow.HandoffChanges) != 0 && !flow.HandoffHeld() && !dispatch.ExecutionStarted
+		if dispatch.Status != core.DispatchIssued && !(releasedUnstarted && dispatch.Status == core.DispatchAcknowledged) ||
+			dispatch.RuntimeSessionID != "" && !releasedUnstarted {
 			err = fmt.Errorf("taxion: continuous runner requires a fresh issued Dispatch; reconcile existing session %s", dispatch.RuntimeSessionID)
 			break
 		}
@@ -99,7 +101,7 @@ func RunReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 				return checkErr
 			})
 		}
-		if setupErr != nil && control != nil {
+		if setupErr != nil && control != nil && !handoffHeldOnly(setupErr) {
 			setupErr = errors.Join(setupErr, control.stopIfExecuting(dispatch.ID))
 		}
 		err = errors.Join(setupErr, closer.Close())
@@ -112,7 +114,7 @@ func RunReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 		if !ok || stored.RunnerID != runnerID {
 			return fmt.Errorf("taxion: flow runner claim changed during execution")
 		}
-		if err != nil && stored.Status == "RUNNING" {
+		if err != nil && stored.Status == "RUNNING" && !handoffHeldOnly(err) {
 			stored.Status, stored.Reason = "STOPPED", "runner failed: "+err.Error()
 		}
 		stored.RunnerID = ""

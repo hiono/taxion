@@ -90,6 +90,7 @@ taxion workflow advance --id <flow-id>
 taxion workflow run --id <flow-id> --coder-prompt-file <path> --reviewer-prompt-file <path>
 taxion workflow show --id <flow-id>
 taxion workflow recover --file <recovery-confirmation.json>
+taxion workflow handoff --file <hold-or-release.json>
 taxion dispatch --task <id> --repo <repo>
 taxion runtime start --dispatch <id> --system-prompt-file <path>
 taxion runtime send --dispatch <id> --system-prompt-file <path> --prompt-file <path>
@@ -613,6 +614,16 @@ cancellation for its Dispatches, `workflow recover --file <path>` compares the
 observed runner ID and records the actor, reason and evidence before releasing
 ownership. Saved ceilings and outcomes continue to govern subsequent actions.
 See [Task Graph](docs/10-task-graph.md) for authorization and stop conditions.
+`workflow handoff --file <path>` records a sourced `HOLD` or `RELEASE` for an
+existing flow, comparing `expectedChangeId` with its latest saved handoff change.
+Hold prevents subsequent Dispatch issuance and unstarted execution, but preserves
+the current role's authorized work and final result. A runner returns a handoff-held
+error and releases its claim at that boundary without cancelling the current result.
+Explicit release permits later `workflow run` or `advance` under the unchanged
+contract and ceilings; it neither starts work itself nor restores a safety-stopped flow.
+The full request format and race limitations are in the Task Graph reference.
+Natural-language intervention, editable instruction drafts and side questions
+remain tracked in #73 and #74.
 Controller-managed Coder Git operations and live SDK acceptance remain tracked
 in #53 and #54.
 

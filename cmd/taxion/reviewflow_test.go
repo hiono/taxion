@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,12 +76,47 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 		flow.Authorization != request.Authorization || len(flow.DispatchIDs) != 1 || len(state.Graph.Dispatches) != 1 {
 		t.Fatalf("workflow contract lost or active execution duplicated: %+v", flow)
 	}
+	handoffFile := filepath.Join(dir, "handoff.json")
+	writeHandoff := func(change controller.HandoffRequest) {
+		t.Helper()
+		data, err := json.Marshal(change)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(handoffFile, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeHandoff(controller.HandoffRequest{
+		FlowID: flow.ID, HandoffChange: core.HandoffChange{
+			ID: "hold", Action: "HOLD", Actor: "human", Source: "human:question",
+			Reason: "Discuss before execution",
+		},
+	})
+	if err := workflowCmd([]string{"handoff", "--file", handoffFile}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"advance", "--id", flow.ID}); !errors.Is(err, core.ErrHandoffHeld) {
+		t.Fatal("CLI advance bypassed hold", err)
+	}
+	writeHandoff(controller.HandoffRequest{
+		FlowID: flow.ID, HandoffChange: core.HandoffChange{
+			ID: "release", ExpectedChangeID: "hold", Action: "RELEASE",
+			Actor: "human", Source: "human:continue", Reason: "Continue the unchanged authorized contract",
+		},
+	})
+	if err := workflowCmd([]string{"handoff", "--file", handoffFile}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"advance", "--id", flow.ID}); err != nil {
+		t.Fatal("release did not allow pending execution", err)
+	}
 	for _, args := range [][]string{
 		{}, {"start"}, {"advance"}, {"show", "--id", "missing"}, {"start", "--file", file},
 		{"show", "--id", request.ID, "--file", file},
 		{"run", "--id", request.ID},
 		{"run", "--id", request.ID, "--coder-prompt-file", filepath.Join(dir, "missing"), "--reviewer-prompt-file", file},
-		{"recover"}, {"recover", "--file", file},
+		{"recover"}, {"recover", "--file", file}, {"handoff"}, {"handoff", "--file", file},
 	} {
 		if err := workflowCmd(args); err == nil {
 			t.Fatalf("invalid workflow invocation accepted: %v", args)

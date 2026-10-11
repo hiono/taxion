@@ -447,6 +447,9 @@ func (g *TaskGraph) BindRuntimeSession(dispatchID, sessionID, configHash string)
 	if !ok || !dispatchActive(d.Status) {
 		return graphError("runtime session requires an active Dispatch")
 	}
+	if err := next.CheckHandoffStart(dispatchID); err != nil {
+		return err
+	}
 	if d.RuntimeSessionID != "" &&
 		(d.RuntimeSessionID != sessionID || d.RuntimeConfigHash != configHash) {
 		return graphError("Dispatch is already bound to another runtime session configuration")
@@ -1020,6 +1023,11 @@ func (g *TaskGraph) TransitionDispatch(id string, status DispatchStatus, actor, 
 	if !ok || !dispatchTransitionAllowed(d.Status, status) {
 		return graphError("invalid dispatch transition")
 	}
+	if status == DispatchRunning {
+		if err := next.CheckHandoff(d.TaskID); err != nil {
+			return err
+		}
+	}
 	if !dispatchActive(status) || status == DispatchSuspended {
 		if err := validateStoredDispatchResult(d, status, result); err != nil {
 			return err
@@ -1556,6 +1564,9 @@ func (g TaskGraph) CheckExecutable(id, repo string) error {
 	if t.Repo != repo || t.Status != Ready {
 		return graphError("task %s requires matching repository and READY", id)
 	}
+	if err := g.CheckHandoff(id); err != nil {
+		return err
+	}
 	return g.executable(t)
 }
 
@@ -1566,6 +1577,7 @@ func cloneGraph(g TaskGraph) TaskGraph {
 		copy.ReviewFlows[i].Contract = cloneTask(copy.ReviewFlows[i].Contract)
 		copy.ReviewFlows[i].DispatchIDs = slices.Clone(copy.ReviewFlows[i].DispatchIDs)
 		copy.ReviewFlows[i].Recoveries = cloneFlowRecoveries(copy.ReviewFlows[i].Recoveries)
+		copy.ReviewFlows[i].HandoffChanges = slices.Clone(copy.ReviewFlows[i].HandoffChanges)
 	}
 	copy.Tasks = slices.Clone(g.Tasks)
 	for i := range copy.Tasks {

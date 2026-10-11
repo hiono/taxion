@@ -54,6 +54,9 @@ func PrepareReview(db *store.Store, dispatchID, source string) (core.GraphDispat
 			return fmt.Errorf("taxion: prepare review requires an issued Reviewer Dispatch")
 		}
 		prepared = dispatch
+		if err := state.Graph.CheckHandoffStart(dispatchID); err != nil {
+			return err
+		}
 		if dispatch.ReviewWorktreeSource != "" {
 			if !sameWorktree(dispatch.ReviewWorktreeSource, source) {
 				return fmt.Errorf("taxion: review source differs from the managed worktree record")
@@ -409,10 +412,16 @@ func (c *Controller) dispatch(id string) (core.GraphDispatch, error) {
 
 func (c *Controller) markRunning(dispatchID string) error {
 	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+		if !ok {
+			return fmt.Errorf("taxion: handoff execution Dispatch not found")
+		}
+		if err := state.Graph.CheckHandoff(dispatch.TaskID); err != nil {
+			return err
+		}
 		if _, err := c.checkExecutionConfiguration(state.Graph, dispatchID); err != nil {
 			return err
 		}
-		dispatch, ok := state.Graph.GraphDispatch(dispatchID)
 		if !state.HasGraph || !ok || !active(dispatch.Status) || dispatch.RuntimeSessionID == "" ||
 			dispatch.Recipient != c.runtime.Role() ||
 			dispatch.RuntimeConfigHash != c.runtime.ConfigHash() ||

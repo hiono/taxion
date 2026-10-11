@@ -179,6 +179,9 @@ func (c *Controller) authorizeExecution(ctx context.Context, dispatchID string) 
 	if !state.HasGraph {
 		return fmt.Errorf("taxion: execution configuration requires a Task Graph")
 	}
+	if err := state.Graph.CheckHandoffStart(dispatchID); err != nil {
+		return err
+	}
 	candidate, err := c.checkExecutionConfiguration(state.Graph, dispatchID)
 	if err != nil || candidate.Version == 0 {
 		return err
@@ -194,6 +197,9 @@ func (c *Controller) authorizeExecution(ctx context.Context, dispatchID string) 
 	// Authentication may have taken time; reject approval revocation before SDK work.
 	state, err = c.store.LoadWorkspace()
 	if err != nil {
+		return err
+	}
+	if err := state.Graph.CheckHandoffStart(dispatchID); err != nil {
 		return err
 	}
 	_, err = c.checkExecutionConfiguration(state.Graph, dispatchID)

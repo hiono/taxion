@@ -19,7 +19,7 @@ import (
 
 func workflowCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|recover|show}")
+		return fmt.Errorf("usage: taxion workflow {start|advance|run|recover|handoff|show}")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
@@ -29,7 +29,7 @@ func workflowCmd(args []string) error {
 	var managedStage bool
 	var scanner string
 	switch action {
-	case "start", "recover":
+	case "start", "recover", "handoff":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
 	case "advance", "show":
 		fs.StringVar(&id, "id", "", "review flow ID")
@@ -60,9 +60,9 @@ func workflowCmd(args []string) error {
 	if managedStage && !managedCommit {
 		return fmt.Errorf("workflow: --managed-stage requires --managed-commit")
 	}
-	fileAction := action == "start" || action == "recover"
+	fileAction := action == "start" || action == "recover" || action == "handoff"
 	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" {
-		return fmt.Errorf("workflow start and recover require --file; advance, run and show require --id")
+		return fmt.Errorf("workflow start, recover and handoff require --file; advance, run and show require --id")
 	}
 	db, state, err := loadWorkspace()
 	if err != nil {
@@ -70,6 +70,21 @@ func workflowCmd(args []string) error {
 	}
 	defer db.Close()
 	switch action {
+	case "handoff":
+		input, err := os.Open(file)
+		if err != nil {
+			return err
+		}
+		defer input.Close()
+		var request controller.HandoffRequest
+		if err := core.DecodeGraphInput(input, &request); err != nil {
+			return err
+		}
+		flow, err := controller.ChangeHandoff(db, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(flow)
 	case "recover":
 		input, err := os.Open(file)
 		if err != nil {
@@ -146,7 +161,7 @@ func workflowCmd(args []string) error {
 		return printJSON(flow)
 	case "advance":
 		flow, err := controller.AdvanceReviewFlow(db, storePath, id)
-		if err != nil && !errors.Is(err, controller.ErrFlowStopped) {
+		if err != nil && !errors.Is(err, controller.ErrFlowStopped) && !errors.Is(err, core.ErrHandoffHeld) {
 			return err
 		}
 		return errors.Join(printJSON(flow), err)

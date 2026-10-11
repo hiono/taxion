@@ -3,6 +3,7 @@ package controller
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -115,10 +116,17 @@ func Plan(db *store.Store, ledgerPath, repo string) (FollowUpPlan, error) {
 				active = true
 			}
 		}
+		handoffErr := state.Graph.CheckHandoff(task.ID)
+		if handoffErr != nil && !errors.Is(handoffErr, core.ErrHandoffHeld) {
+			return FollowUpPlan{}, handoffErr
+		}
 		switch {
 		case slices.Contains([]core.TaskStatus{core.Completed, core.Rejected, core.Cancelled, core.Superseded}, task.Status):
 			step.Action = "RETAIN"
 			step.Instruction = "Reuse this Task ID, decisions and outcome when comparing later work with existing work."
+		case errors.Is(handoffErr, core.ErrHandoffHeld):
+			step.Action = "HOLD_HANDOFF"
+			step.Instruction = "Keep the next handoff on hold; observe existing execution and record an explicit release before issuing or starting another instruction."
 		case active:
 			step.Action = "RECONCILE_DISPATCH"
 			step.Instruction = "Observe the recorded Dispatch before planning another execution; preserve its issued contract."

@@ -251,6 +251,79 @@ role prompt と `--coder-tools`・`--reviewer-tools`、任意の `--cli`・`--ba
 Coder の Git 操作を controller 管理ツールへ接続する作業は #53、
 実 SDK で一連の動作を確認する作業は #54 で扱う。
 
+### 次の受け渡しの保留と解除
+
+`workflow handoff --file REQUEST.json` は、既存 flow の受け渡しを
+`HOLD` または `RELEASE` として保存する。最初の保留は次の形式とする。
+
+```json
+{
+  "flowId": "application-flow",
+  "id": "human-hold-1",
+  "expectedChangeId": "",
+  "action": "HOLD",
+  "actor": "human",
+  "source": "human:intervention-1",
+  "reason": "互換性を確認してから次へ渡す"
+}
+```
+
+解除は別の入力 ID を使い、`expectedChangeId` に最後の変更 ID を指定する。
+
+```json
+{
+  "flowId": "application-flow",
+  "id": "human-release-1",
+  "expectedChangeId": "human-hold-1",
+  "action": "RELEASE",
+  "actor": "human",
+  "source": "human:continue-1",
+  "reason": "保存済みの契約と上限で続ける"
+}
+```
+
+`workflow show` と `task plan` の `reviewFlows[].handoffChanges` は
+変更 ID、直前の ID、操作、actor、出典、理由、controller が付けた UTC 時刻を返す。
+最後の操作が `HOLD` なら保留中であり、flow 自体の `RUNNING` と区別する。
+計画の `HOLD_HANDOFF` は、現在の実行を観測して後続を待つ手順を示す。
+terminal Task の結果は従来どおり `RETAIN` として残す。
+
+変更は SQLite workspace transaction で比較・保存する。
+古い `expectedChangeId`、入力 ID の内容違い、状態が変わらない操作、
+不正な操作・空の出典・時刻の指定を拒否する。
+同じ内容の再送は最新の flow を返すだけで、以前の操作を再適用しない。
+解除後に別の保留を記録した場合も、古い解除の再送でその保留を解除しない。
+複数接続の競合では SQLite の busy error を返す場合がある。
+失敗は保留受付ではなく、最新状態を確認して再送する必要がある。
+actor と source は既存の構造化記録方式であり、承認者の認証を証明しない。
+
+保留は flow の実装 Task と、その flow に属する Reviewer Task に適用する。
+別の Task の独立作業まで保留しない。通常の Dispatch 発行、SDK session binding、
+未開始 session の attach、Reviewer worktree の作成、実行開始の遷移でも検査する。
+発行済みでも未開始の指示は保留中に開始せず、
+現在実行中の ROLE の観測・結果保存・安全停止は維持する。
+保留中の同じ session への追加 turn も拒否する。
+
+runner は現在の許可済み作業を継続し、usage と最終結果を通常どおり保存する。
+後続へ進む境界では handoff-held error と flow を返し、runner claim を解放する。
+保留だけでは `STOPPED` や Dispatch の `CANCELLED` に変更しない。
+未開始 session が既に binding 済みなら、解除後の run は同じ role・worktree・
+configuration hash を検査して再接続し、勝手に新しい session へ置き換えない。
+解除は続行を可能にする記録であり、実行そのものは別の run または advance で行う。
+
+保留中も期限、token 上限、契約・Memory 変更、判断待ち、失敗・取消の停止判定を維持する。
+保留時間も既存期限に含める。安全停止した flow の解除は保留だけを取り除き、
+`STOPPED` を `RUNNING` に戻さず、新たな実行許可の代用にしない。
+現在の実行を止める場合は別途 `runtime stop` を使い、停止証拠を確認する。
+
+実行開始の transaction と保留の transaction は順序付けるが、
+保存済み `RUNNING` と SDK `Send` は外部操作をまたぐため原子的ではない。
+開始の保存が先なら、その後の保留は現在の実行を許容し、後続を止める。
+SDK の実際の受付時刻や停止完了を保留の成功だけで保証しない。
+「いま止める」と「次を待つ」を一つの操作として扱わない。
+自然言語の入力受付、指示案の版管理・対象付き反映、会話 UI は #73、
+脇の質問と追加調査は #74、実 SDK の介入受入れは #54 に残る。
+
 ## 状態遷移と完了
 
 `task transition --file REQUEST.json` は

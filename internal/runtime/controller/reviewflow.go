@@ -139,6 +139,10 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 		if !reflect.DeepEqual(context, last.Instruction.MemoryContext) {
 			return stop("required Memory differs from the issued snapshot; confirm the updated decision with Human")
 		}
+		if flow.HandoffHeld() && !last.ExecutionStarted && active(last.Status) {
+			stopped = fmt.Errorf("%w: %s", core.ErrHandoffHeld, flow.ID)
+			return nil
+		}
 		if active(last.Status) {
 			if !known && len(last.RuntimeUsage) != 0 {
 				return stop("runtime reported incomplete input/output usage; safely stop and obtain usage evidence")
@@ -156,6 +160,10 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 		}
 		if err := last.ValidateResult(last.Status, last.Result); err != nil {
 			return stop("latest result failed contract validation: " + err.Error())
+		}
+		if flow.HandoffHeld() {
+			stopped = fmt.Errorf("%w: %s", core.ErrHandoffHeld, flow.ID)
+			return nil
 		}
 		sourceDecision, err := flowResultDecision(last)
 		if err != nil {
@@ -252,7 +260,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 		storeFlow(state, flow)
 		return nil
 	})
-	if err != nil && flow.ID != "" && !errors.Is(err, ErrFlowClaimed) {
+	if err != nil && flow.ID != "" && !errors.Is(err, ErrFlowClaimed) && !errors.Is(err, core.ErrHandoffHeld) {
 		saveErr := db.UpdateWorkspace(func(state *store.Workspace) error {
 			stored, ok := state.Graph.ReviewFlow(id)
 			if !ok || stored.Status != "RUNNING" {

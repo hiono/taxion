@@ -9,21 +9,22 @@ import (
 // ReviewFlow retains the approved execution contract and ceilings across
 // controller restarts. Dispatches carry each observed execution separately.
 type ReviewFlow struct {
-	ID            string         `json:"id"`
-	TaskID        string         `json:"taskId"`
-	Contract      GraphTask      `json:"contract"`
-	ReviewRoot    string         `json:"reviewRoot"`
-	MaxRepairs    int            `json:"maxRepairs"`
-	MaxTokens     int64          `json:"maxTokens"`
-	StartedAt     time.Time      `json:"startedAt"`
-	Deadline      time.Time      `json:"deadline"`
-	Repairs       int            `json:"repairs"`
-	DispatchIDs   []string       `json:"dispatchIds"`
-	Status        string         `json:"status"`
-	Reason        string         `json:"reason"`
-	Authorization TaskDecision   `json:"authorization"`
-	RunnerID      string         `json:"runnerId,omitempty"`
-	Recoveries    []FlowRecovery `json:"recoveries,omitempty"`
+	ID             string          `json:"id"`
+	TaskID         string          `json:"taskId"`
+	Contract       GraphTask       `json:"contract"`
+	ReviewRoot     string          `json:"reviewRoot"`
+	MaxRepairs     int             `json:"maxRepairs"`
+	MaxTokens      int64           `json:"maxTokens"`
+	StartedAt      time.Time       `json:"startedAt"`
+	Deadline       time.Time       `json:"deadline"`
+	Repairs        int             `json:"repairs"`
+	DispatchIDs    []string        `json:"dispatchIds"`
+	Status         string          `json:"status"`
+	Reason         string          `json:"reason"`
+	Authorization  TaskDecision    `json:"authorization"`
+	RunnerID       string          `json:"runnerId,omitempty"`
+	Recoveries     []FlowRecovery  `json:"recoveries,omitempty"`
+	HandoffChanges []HandoffChange `json:"handoffChanges,omitempty"`
 }
 
 type FlowRecovery struct {
@@ -40,6 +41,7 @@ func (g TaskGraph) ReviewFlow(id string) (ReviewFlow, bool) {
 			flow.Contract = cloneTask(flow.Contract)
 			flow.DispatchIDs = slices.Clone(flow.DispatchIDs)
 			flow.Recoveries = cloneFlowRecoveries(flow.Recoveries)
+			flow.HandoffChanges = slices.Clone(flow.HandoffChanges)
 			return flow, true
 		}
 	}
@@ -62,6 +64,9 @@ func (g TaskGraph) validateReviewFlows() error {
 			return graphError("invalid bounded review flow %q", flow.ID)
 		}
 		ids[flow.ID] = true
+		if err := validateHandoffChanges(flow); err != nil {
+			return err
+		}
 		for _, recovery := range flow.Recoveries {
 			if !nonempty(recovery.RunnerID) || !nonempty(recovery.Actor) || !nonempty(recovery.Reason) ||
 				recovery.At.IsZero() || len(recovery.Evidence) == 0 || !validList(recovery.Evidence) {

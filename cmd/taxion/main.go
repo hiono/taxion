@@ -63,6 +63,7 @@ Commands:
   workflow run        Execute review/repair continuously with saved ceilings (--id and role prompt files required)
   workflow show       Read the saved review flow and ceilings (--id required)
   workflow recover    Release interrupted runner ownership after recorded execution stop (--file JSON)
+  workflow handoff    Hold or release the next handoff with a sourced compare-and-swap request (--file JSON)
   review              Bind coder-output evidence (--task, --sha and --repo required)
   resume              Print a resume acknowledgement (local stub; --session required)
   acp                 Serve ACP v1 over stdio (spike)
