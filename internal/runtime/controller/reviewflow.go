@@ -161,6 +161,11 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 		if err := last.ValidateResult(last.Status, last.Result); err != nil {
 			return stop("latest result failed contract validation: " + err.Error())
 		}
+		if last.Recipient == "CODER" {
+			if err := revalidateCoderResult(last); err != nil {
+				return stop("Coder result Git revalidation failed: " + err.Error())
+			}
+		}
 		if flow.HandoffHeld() {
 			stopped = fmt.Errorf("%w: %s", core.ErrHandoffHeld, flow.ID)
 			return nil

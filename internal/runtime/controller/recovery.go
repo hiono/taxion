@@ -2,11 +2,13 @@ package controller
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -48,6 +50,12 @@ func RecoverReviewFlow(db *store.Store, request RecoveryRequest) (core.ReviewFlo
 				return fmt.Errorf("taxion: reconcile active Dispatch %s through runtime stop or recorded result before recovering ownership", id)
 			}
 		}
+		last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+		if last.Status == core.DispatchSucceeded && last.Recipient == "CODER" {
+			if err := revalidateCoderResult(last); err != nil {
+				return fmt.Errorf("taxion: recovery result revalidation: %w", err)
+			}
+		}
 		flow.Recoveries = append(flow.Recoveries, core.FlowRecovery{
 			RunnerID: flow.RunnerID, Actor: request.Actor, Reason: request.Reason,
 			Evidence: slices.Clone(request.Evidence), At: time.Now().UTC(),
@@ -57,4 +65,23 @@ func RecoverReviewFlow(db *store.Store, request RecoveryRequest) (core.ReviewFlo
 		return nil
 	})
 	return flow, err
+}
+
+func revalidateCoderResult(dispatch core.GraphDispatch) error {
+	if err := dispatch.ValidateResult(dispatch.Status, dispatch.Result); err != nil {
+		return err
+	}
+	if dispatch.Result == nil || dispatch.Result.GitEvidence == nil {
+		return fmt.Errorf("saved Coder result requires controller-observed Git evidence")
+	}
+	result := *dispatch.Result
+	result.Validations = slices.Clone(result.Validations)
+	if err := gitproof.Verify(dispatch, &result); err != nil {
+		return err
+	}
+	result.GitEvidence.VerifiedAt = dispatch.Result.GitEvidence.VerifiedAt
+	if !reflect.DeepEqual(result.GitEvidence, dispatch.Result.GitEvidence) {
+		return fmt.Errorf("current Git facts differ from saved Coder evidence")
+	}
+	return nil
 }

@@ -121,6 +121,24 @@ type Runtime interface {
   runner, serializes concurrent output, rejects a second owned execution and
   reports failures. EOF/quit cancels and awaits only that console's owned runner;
   without the opt-in flag, synchronous watched behavior is retained.
+## Saved Coder result recovery
+
+`workflow recover` releases the exact saved runner claim after process-stop
+confirmation and reconciliation of terminal Dispatches. When the latest result
+is a successful Coder submission, recovery also checks the saved result contract
+and current Git facts: repository origin, branch, HEAD, baseline ancestry,
+changed paths, clean worktree, validation provenance and commit parents.
+The fresh observation must match the saved Git evidence, with observation time
+excluded from comparison. The original result and its timestamps stay intact.
+
+Ordinary Coder-to-Reviewer handoff applies the same check. A mismatch leaves the
+recovery claim intact and returns an explicit error; a handoff mismatch records
+a STOPPED flow with its reason. A matching result proceeds to independent review
+of the exact saved output SHA. These checks read Git and saved validation records;
+validation command execution belongs to the original controller submission.
+Issue #55 tracks subsequent recovery work for released Reviewer evidence,
+runtime events and completed checkpoints.
+
 ## Adapters
 
 - `internal/runtime/local`: in-process reference adapter for state transitions.

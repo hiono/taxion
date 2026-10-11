@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -115,6 +116,73 @@ func TestRecoveryRequiresStoppedExecutionAndExactOwner(t *testing.T) {
 	}
 }
 
+func TestRecoveryRevalidatesCoderGitAfterRestart(t *testing.T) {
+	for _, change := range []string{"head", "dirty", "origin", "missing", "evidence"} {
+		t.Run(change, func(t *testing.T) {
+			db, ledger, request := reviewFlowFixture(t)
+			flow, err := StartReviewFlow(db, ledger, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := executeFlowDispatch(t, db, flow, "", true)
+			if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+				state.Graph.ReviewFlows[0].RunnerID = "interrupted-after-result"
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			switch change {
+			case "head":
+				gitTest(t, flow.Contract.Worktree, "commit", "--allow-empty", "-m", "chore: external change")
+			case "dirty":
+				if err := os.WriteFile(filepath.Join(flow.Contract.Worktree, "internal/app.go"), []byte("uncommitted"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "origin":
+				gitTest(t, flow.Contract.Worktree, "remote", "set-url", "origin", "https://github.com/other/repo.git")
+			case "missing":
+				if err := os.Rename(flow.Contract.Worktree, flow.Contract.Worktree+"-moved"); err != nil {
+					t.Fatal(err)
+				}
+			case "evidence":
+				if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+					state.Graph.Dispatches[0].Result.GitEvidence.ParentSHAs = []string{result.Result.OutputSHA}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db, err = store.Open(filepath.Join(filepath.Dir(ledger), "workspace.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			recovered, err := RecoverReviewFlow(db, RecoveryRequest{
+				FlowID: flow.ID, ExpectedRunnerID: "interrupted-after-result", PreviousProcessStopped: true,
+				Actor: "human", Reason: "Reconcile recorded result after restart", Evidence: []string{"process-stop:checked"},
+			})
+			if err == nil || recovered.RunnerID != "interrupted-after-result" {
+				t.Fatalf("changed Git evidence accepted: %+v %v", recovered, err)
+			}
+			after, err := db.LoadWorkspace()
+			if err != nil || !reflect.DeepEqual(before.Graph, after.Graph) {
+				t.Fatalf("failed recovery changed graph: %v", err)
+			}
+			stopped, err := advanceReviewFlow(db, ledger, flow.ID, "interrupted-after-result")
+			if !errors.Is(err, ErrFlowStopped) || len(stopped.DispatchIDs) != 1 {
+				t.Fatalf("handoff accepted changed Git evidence: %+v %v", stopped, err)
+			}
+		})
+	}
+}
+
 func TestRecoveryPreservesSuccessfulResultForHandoff(t *testing.T) {
 	db, ledger, request := reviewFlowFixture(t)
 	flow, err := StartReviewFlow(db, ledger, request)
@@ -128,6 +196,14 @@ func TestRecoveryPreservesSuccessfulResultForHandoff(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = store.Open(filepath.Join(filepath.Dir(ledger), "workspace.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	if _, err := RecoverReviewFlow(db, RecoveryRequest{
 		FlowID: flow.ID, ExpectedRunnerID: "interrupted-after-result", PreviousProcessStopped: true,
 		Actor: "human", Reason: "Result persisted before process exit",
@@ -146,6 +222,10 @@ func TestRecoveryPreservesSuccessfulResultForHandoff(t *testing.T) {
 	review, _ := state.Graph.GraphDispatch(flow.DispatchIDs[1])
 	if review.Recipient != "REVIEWER" || review.Instruction.TargetSHA != result.Result.OutputSHA {
 		t.Fatal("recovery bypassed exact-SHA independent review")
+	}
+	saved, _ := state.Graph.GraphDispatch(result.ID)
+	if !reflect.DeepEqual(saved.Result, result.Result) {
+		t.Fatal("revalidation changed original Coder result")
 	}
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		state.Graph.ReviewFlows[0].Recoveries[0].Evidence = nil
