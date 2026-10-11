@@ -1,0 +1,86 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/runtime/controller"
+	"github.com/hiono/taxion/internal/store"
+)
+
+func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
+	old := storePath
+	dir := t.TempDir()
+	storePath = filepath.Join(dir, "ledger.json")
+	t.Cleanup(func() { storePath = old })
+	task := core.GraphTask{
+		ID: "work", Title: "Application", Repo: "owner/repo", Type: "IMPLEMENTATION",
+		Status: core.Draft, Issue: "Issue #53", CreatedFrom: "human:1",
+		Owner: "CODER", Reviewer: "REVIEWER", Objective: "Implement application",
+		Scope: []string{"src"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
+		ValidationCommands: []string{"go test ./..."}, ExitCondition: "tests pass",
+		Worktree: filepath.Join(dir, "repo"), Branch: "work", BaselineSHA: strings.Repeat("a", 40),
+		AuthorizationID: "authorize", Decisions: []core.TaskDecision{{ID: "authorize", Source: "human:1", Text: "approve"}},
+	}
+	if err := (core.Ledger{Tasks: []core.Task{{ID: task.ID, Title: task.Title, Repo: task.Repo}}}).Save(storePath); err != nil {
+		t.Fatal(err)
+	}
+	graph := core.TaskGraph{Version: 1}
+	if err := graph.Track(task, "human", "track"); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.Transition(task.ID, core.Ready, "human", "ready", core.TransitionProof{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := updateWorkspace(func(state *store.Workspace) error {
+		state.HasGraph, state.Graph = true, graph
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	repairs := 2
+	request := controller.ReviewFlowRequest{
+		ID: "flow", TaskID: task.ID, Repository: task.Repo, ReviewRoot: filepath.Join(dir, "reviews"),
+		MaxRepairs: &repairs, MaxTokens: 5000, TimeoutSeconds: 60,
+		Authorization: core.TaskDecision{ID: "flow-authorized", Source: "human:1", Text: "authorize bounded independent reviews and repairs"},
+	}
+	file := filepath.Join(dir, "flow.json")
+	data, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"start", "--file", file}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"show", "--id", request.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"advance", "--id", request.ID}); err != nil {
+		t.Fatal(err)
+	}
+	db, state, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	flow, ok := state.Graph.ReviewFlow(request.ID)
+	if !ok || flow.MaxRepairs != *request.MaxRepairs || flow.MaxTokens != request.MaxTokens ||
+		flow.Authorization != request.Authorization || len(flow.DispatchIDs) != 1 || len(state.Graph.Dispatches) != 1 {
+		t.Fatalf("workflow contract lost or active execution duplicated: %+v", flow)
+	}
+	for _, args := range [][]string{
+		{}, {"start"}, {"advance"}, {"show", "--id", "missing"}, {"start", "--file", file},
+		{"show", "--id", request.ID, "--file", file},
+	} {
+		if err := workflowCmd(args); err == nil {
+			t.Fatalf("invalid workflow invocation accepted: %v", args)
+		}
+	}
+}

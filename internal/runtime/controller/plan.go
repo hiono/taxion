@@ -13,8 +13,9 @@ import (
 // FollowUpPlan is reconstructed from durable records, independent of a role's
 // session history. Actions describe the next check, not permission to execute.
 type FollowUpPlan struct {
-	Repository string         `json:"repository"`
-	Tasks      []PlanningTask `json:"tasks"`
+	Repository  string            `json:"repository"`
+	Tasks       []PlanningTask    `json:"tasks"`
+	ReviewFlows []core.ReviewFlow `json:"reviewFlows,omitempty"`
 }
 
 type PlanningTask struct {
@@ -48,6 +49,12 @@ func Plan(db *store.Store, ledgerPath, repo string) (FollowUpPlan, error) {
 		return FollowUpPlan{}, fmt.Errorf("%w: planning requires a Task Graph; use task track", core.ErrGraphRejected)
 	}
 	plan := FollowUpPlan{Repository: repo, Tasks: []PlanningTask{}}
+	for _, stored := range state.Graph.ReviewFlows {
+		if stored.Contract.Repo == repo {
+			flow, _ := state.Graph.ReviewFlow(stored.ID)
+			plan.ReviewFlows = append(plan.ReviewFlows, flow)
+		}
+	}
 	for _, task := range state.Graph.Tasks {
 		if task.Repo != repo {
 			continue

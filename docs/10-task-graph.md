@@ -112,6 +112,56 @@ PENDING は登録 Task の COMPLETED を依存に持ち、実行前に実際の�
 契約は DRAFT・BLOCKED・HUMAN_DECISION_REQUIRED の状態で編集する。
 active と terminal の Task は履歴を維持し、変更は後続 Task として登録する。
 
+## 上限付きレビュー進行
+
+`workflow start --file REQUEST.json` は、READY の Coder Task に対する
+独立レビューと修正の許可を保存し、最初の Dispatch を発行する。
+Task の `owner` は `CODER`、`reviewer` は `REVIEWER` とする。
+初回実行用の Task を使用し、以前の実行からの後続作業は出典を持つ新しい Task として登録する。
+`maxRepairs` は追加の Coder 実行回数、`maxTokens` は観測した input/output token の合計、
+`timeoutSeconds` は開始からの経過時間の上限を表す。
+Human は Task の実行契約とともに、この進行の上限と権限を承認する。
+
+```json
+{
+  "id": "application-flow",
+  "taskId": "TASK-ID",
+  "repository": "owner/repository",
+  "reviewRoot": "/absolute/path/reviews",
+  "maxRepairs": 2,
+  "maxTokens": 50000,
+  "timeoutSeconds": 1800,
+  "authorization": {
+    "id": "human-flow-authorization",
+    "source": "human:request",
+    "text": "保存済み scope と acceptance を保持し、独立レビューと最大2回の修正を許可する"
+  }
+}
+```
+
+`workflow advance --id application-flow` は最新の保存済み結果を照合し、
+次の Dispatch を発行する。Coder の結果から、確定した SHA の独立 Reviewer Task を登録する。
+Reviewer の `REQUEST_CHANGES` は、元の acceptance・scope・検証コマンド・Memory 参照を維持して
+Coder の修正 Dispatch を発行する。指摘は元の Dispatch ID・instruction hash・対象 SHA・
+結果とともに判断記録へ保存し、修正と再レビューの指示に含める。
+修正の開始 SHA は前回成果物 SHA とし、修正後の SHA ごとに別の Reviewer worktree を使用する。
+`APPROVE` は worktree の解放確認、現在の対象 SHA、acceptance、必須証拠、子 Task の完了を
+照合して、実装 Task を `APPROVED`、`COMPLETED` へ進める。
+Reviewer Task と Dispatch はレビューの実行契約・証拠として別に保持する。
+
+Graph の `reviewFlows` は開始時の契約、出典付き許可、開始時刻と期限、
+修正・token の上限、修正回数、実行順の Dispatch ID、進行状態と理由を SQLite に保持する。
+`workflow show --id application-flow` と後続計画からこの記録を復元できる。
+進行中の Dispatch に対する advance の再実行は、保存済みの同じ Dispatch を返す。
+停止状態は再起動後も保持し、追加の実行は新たな許可を持つ後続 Task で扱う。
+
+上限到達、scope・acceptance・権限の変更、新たな判断、実行の失敗・cancel・停止要求、
+Reviewer の `BLOCKED`、必須 Memory の失効では、理由を持つ `STOPPED` を保存する。
+input/output token を取得できない実行は利用量不明として停止し、必要な証拠の確認を要求する。
+実行中 Dispatch の安全停止は `runtime stop` で確認し、保留した worktree と証拠を調査する。
+現在の進行処理は Dispatch の発行境界で上限を照合する。
+各役割は `runtime` コマンドで実行し、連続 SDK 実行と実行中の上限監視は #53 の次の接続で扱う。
+
 ## 状態遷移と完了
 
 `task transition --file REQUEST.json` は

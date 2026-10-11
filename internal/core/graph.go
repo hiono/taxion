@@ -399,6 +399,7 @@ type TaskGraph struct {
 	History         []GraphEvent    `json:"history"`
 	Dispatches      []GraphDispatch `json:"dispatches"`
 	DispatchHistory []DispatchEvent `json:"dispatchHistory"`
+	ReviewFlows     []ReviewFlow    `json:"reviewFlows,omitempty"`
 }
 
 func graphError(format string, args ...any) error {
@@ -1490,7 +1491,7 @@ func (g TaskGraph) Validate() error {
 			}
 		}
 	}
-	return nil
+	return g.validateReviewFlows()
 }
 
 func equalJSON(a, b any) bool {
@@ -1538,6 +1539,11 @@ func (g TaskGraph) CheckExecutable(id, repo string) error {
 
 func cloneGraph(g TaskGraph) TaskGraph {
 	copy := g
+	copy.ReviewFlows = slices.Clone(g.ReviewFlows)
+	for i := range copy.ReviewFlows {
+		copy.ReviewFlows[i].Contract = cloneTask(copy.ReviewFlows[i].Contract)
+		copy.ReviewFlows[i].DispatchIDs = slices.Clone(copy.ReviewFlows[i].DispatchIDs)
+	}
 	copy.Tasks = slices.Clone(g.Tasks)
 	for i := range copy.Tasks {
 		copy.Tasks[i] = cloneTask(copy.Tasks[i])

@@ -78,6 +78,9 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
 taxion init
 taxion task create --title "…" --repo <repo>
 taxion task plan --repo <repo>
+taxion workflow start --file <authorized-flow.json>
+taxion workflow advance --id <flow-id>
+taxion workflow show --id <flow-id>
 taxion dispatch --task <id> --repo <repo>
 taxion runtime start --dispatch <id> --system-prompt-file <path>
 taxion runtime send --dispatch <id> --system-prompt-file <path> --prompt-file <path>
@@ -107,6 +110,16 @@ evidence collection, review reconciliation, and execution candidates. Generating
 a plan preserves the saved Task states and authorization. The same output is
 available through `GET /api/tasks/plan?repo=<repo>` and ACP `taxion/plan` with
 `{"repository":"<repo>"}`, including after a session is recreated.
+
+`workflow start` saves an authorized Coder contract with explicit repair,
+elapsed-time and token ceilings, then issues its initial Dispatch.
+`workflow advance` uses the latest verified result to issue an independent
+Reviewer Dispatch or a repair with the same acceptance and sourced findings.
+Approval of the current output SHA records the implementation Task as
+COMPLETED. Each role execution uses the `runtime` commands; the next Dispatch
+is generated from SQLite records. See [Task Graph](docs/10-task-graph.md) for
+the authorization format and stop conditions. Continuous SDK execution and
+in-flight ceiling enforcement are the next integration step in #53.
 
 For a Reviewer Dispatch, the Task's worktree must be a new absolute path.
 Start it with `--review-source-worktree <existing-repository-worktree>` to

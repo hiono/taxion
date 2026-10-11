@@ -51,6 +51,9 @@ Commands:
   runtime resume      Resume the Dispatch session
   runtime events      Stream events from the Dispatch session
   runtime stop        Stop the Dispatch session
+  workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON)
+  workflow advance    Issue review/repair from the latest verified result (--id required)
+  workflow show       Read the saved review flow and ceilings (--id required)
   review              Bind coder-output evidence (--task, --sha and --repo required)
   resume              Print a resume acknowledgement (local stub; --session required)
   acp                 Serve ACP v1 over stdio (spike)
@@ -98,6 +101,8 @@ func main() {
 		err = dispatchCmd(args[1:])
 	case "runtime":
 		err = runtimeCmd(args[1:])
+	case "workflow":
+		err = workflowCmd(args[1:])
 	case "review":
 		err = reviewCmd(args[1:])
 	case "resume":
