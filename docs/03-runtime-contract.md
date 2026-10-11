@@ -101,6 +101,35 @@ the Dispatch transition, which validates its required fields before changing
 state. The ACP server uses `internal/runtime/local`; Copilot sessions start
 through the explicit runtime commands.
 
+`--compact-context` on `runtime` and `workflow run|step` renders exact prior
+results once per sourced decision instead of embedding their full prior
+instructions recursively. It compares each `result:` decision with the actual
+saved Dispatch result and rejects missing or altered sources. Current contract,
+Human decisions and Memory stay intact; full immutable instructions remain in
+the Graph. Result and instruction hashes identify omitted source records.
+The default rendering is unchanged. Compact rendering changes the system
+prompt/configuration hash and must be repeated for session attachment and safe
+stop; do not switch an existing binding to the new rendering.
+
+`workflow planning-context` exposes saved Memory, acceptance, blockers,
+dependencies, concerns, related result/SHA targets and existing flow limits
+without full nested histories. It is a read-only projection with observation
+times and a content hash, not an atomic live-state snapshot, model judgment or
+execution authorization. Workspace and Memory are still read separately;
+execution must recheck its existing controller gates. No provider call occurs.
+
+`conversation plan` / `AskPlanner` reuse the isolated-question transport and
+its sourced configuration approval, authentication, repository/service checks,
+input/output/token ceilings, approval rechecks and independent cleanup.
+They send compact Planner context to a separate tool-free Orchestrator session.
+The native schema adds an advisory recommendation with explicit confirmed,
+assumed and unconfirmed evidence. Actual JSON-pointer sources are required;
+an `APPROVE` or execution verdict is not an allowed recommendation.
+The returned original observation remains attached when records change during
+reasoning. Recommendations are not applied automatically, and no model call is
+added to ordinary workflow progression. Structured versioned application of
+the chosen plan remains a separate unfinished requirement.
+
 `runtime` and `workflow run|step` optionally accept
 `--strict-result-identities`: the native response schema pins the issued
 Dispatch ID, Task ID, role, repository and expected execution-start SHA.

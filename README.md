@@ -89,6 +89,8 @@ taxion workflow start --file <authorized-flow.json>
 taxion workflow advance --id <flow-id>
 taxion workflow run --id <flow-id> --coder-prompt-file <path> --reviewer-prompt-file <path>
 taxion workflow show --id <flow-id>
+taxion workflow planning-context --id <flow-id>
+taxion conversation plan --task <id> --question "Repair or revisit the plan?" --max-tokens 8000 --timeout 2m --max-ai-credits 30
 taxion workflow recover --file <recovery-confirmation.json>
 taxion workflow handoff --file <hold-or-release.json>
 taxion workflow feedback-target --id <flow-id>
@@ -106,6 +108,39 @@ taxion runtime stop --dispatch <id> --system-prompt-file <path>
 taxion runtime commit --dispatch <id> --system-prompt-file <path> --message-file <path> --scanner <path>
 taxion review --task <id> --sha <coder-sha> --repo <repo>
 ```
+
+`workflow planning-context` reconstructs bounded Planner input from saved Task,
+Memory, concerns, unmet dependencies, flow limits and related Coder/Reviewer
+results. Targets identify each instruction, result and SHA; the observation
+hash identifies the returned content. `recordedNextCheck` is the existing
+controller's check, not an AI judgment or execution approval. The command calls
+no model and does not change records; it supplies evidence for the separate
+planning operation.
+
+`conversation plan` uses that compact input in an isolated, tool-free
+Orchestrator session to recommend `REVIEW`, `REPAIR`, `REPLAN`, `INVESTIGATE`,
+`HOLD`, `HUMAN_REQUIRED` or `REPORT`. It evaluates saved Memory, past findings,
+dependencies and limits rather than treating `REQUEST_CHANGES` as an automatic
+repair instruction. The response includes sourced confirmed claims, assumptions,
+unknowns, observation hash and reported usage. Source validation establishes
+that cited fields exist, not that the reasoning is semantically correct.
+This is an explicit paid operation requiring positive token, time and per-session
+credit ceilings; there is no automatic planner call after every role.
+`conversation watch` accepts `/plan TEXT` with its configured question ceilings.
+Advice does not release the hold, alter a verdict, issue a Dispatch or apply a
+new plan. Versioned application and an Orchestrator-selected execution path
+remain incomplete; existing automatic workflow behavior is unchanged.
+
+`runtime` and `workflow run|step` accept `--compact-context` to omit recursively
+nested prior instructions from the role prompt. Exact prior results, findings,
+validation evidence and source hashes remain; Human decisions, Memory and the
+current contract remain intact. Every projected result decision is checked
+against its actual saved Dispatch, not summarized by a model or silently
+truncated. The full history remains available through `task graph`.
+The option changes the system prompt and session configuration hash: use it on
+fresh sessions and repeat it on attachment and safe stop. Existing sessions
+retain their original options. This reduces repeated input, not a guarantee
+about provider credits; there is no extra model call for context generation.
 
 `config check` validates fixed Global/Project YAML settings and supported
 environment overrides against the

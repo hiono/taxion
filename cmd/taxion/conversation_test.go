@@ -24,11 +24,26 @@ func TestConversationQuestionRequiresExplicitLimitsBeforeOpeningWorkspace(t *tes
 		{"ask", "--task", "task", "--question", "status?", "--max-tokens", "-1", "--timeout", "1m", "--max-ai-credits", "30"},
 		{"ask", "--task", "task", "--question", "status?", "--max-tokens", "1000", "--timeout", "0s", "--max-ai-credits", "30"},
 		{"ask", "--task", "task", "--question", "status?", "--max-tokens", "1000", "--timeout", "1m", "--max-ai-credits", "30", "extra"},
+		{"plan", "--task", "task", "--question", "Repair or replan?"},
+		{"plan", "--task", "task", "--question", "Repair or replan?", "--max-tokens", "1000", "--timeout", "1m", "--max-ai-credits", "1"},
 	} {
 		var output bytes.Buffer
 		if err := conversationCmd(args, &output); err == nil || output.Len() != 0 {
 			t.Fatal("invalid conversation invocation created a result", args, err)
 		}
+	}
+}
+
+func TestPlannerSchemaRequiresAdvisoryActionWithoutChangingSideQuestionSchema(t *testing.T) {
+	ordinary := questionResponseSchema()
+	planner := plannerResponseSchema()
+	if ordinary["properties"].(map[string]any)["recommendation"] != nil ||
+		!reflect.DeepEqual(planner["required"], []string{"recommendation", "confirmed", "assumptions", "unconfirmed"}) {
+		t.Fatal("planner schema changed ordinary questions or omitted a required action")
+	}
+	actions := planner["properties"].(map[string]any)["recommendation"].(map[string]any)["enum"]
+	if !reflect.DeepEqual(actions, []string{"REVIEW", "REPAIR", "REPLAN", "INVESTIGATE", "HOLD", "HUMAN_REQUIRED", "REPORT"}) {
+		t.Fatal("planner schema authorizes execution or review approval")
 	}
 }
 
@@ -86,7 +101,7 @@ func (r checkedConversationReader) Read(p []byte) (int, error) {
 }
 
 func TestWatchedConversationHoldsBeforeInputAndNeverApprovesOnEOF(t *testing.T) {
-	for _, text := range []string{"", "現在どうなっていますか？\n", "/draft Check the saved acceptance carefully.\n/approve\n/quit\n", "/step\n/quit\n"} {
+	for _, text := range []string{"", "現在どうなっていますか？\n", "/plan Should we revise the plan?\n/quit\n", "/draft Check the saved acceptance carefully.\n/approve\n/quit\n", "/step\n/quit\n"} {
 		t.Run(text, func(t *testing.T) {
 			old := storePath
 			dir := t.TempDir()

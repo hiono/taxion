@@ -63,6 +63,12 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 	if err := workflowCmd([]string{"show", "--id", request.ID}); err != nil {
 		t.Fatal(err)
 	}
+	if err := workflowCmd([]string{"planning-context", "--id", request.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"planning-context", "--id", "missing"}); err == nil {
+		t.Fatal("planner context accepted a missing flow")
+	}
 	if err := workflowCmd([]string{"advance", "--id", request.ID}); err != nil {
 		t.Fatal(err)
 	}

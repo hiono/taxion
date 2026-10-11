@@ -19,7 +19,7 @@ import (
 
 func workflowCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|feedback-target|feedback|feedback-resolve|draft|draft-discard|draft-approve|show}")
+		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|feedback-target|planning-context|feedback|feedback-resolve|draft|draft-discard|draft-approve|show}")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
@@ -28,12 +28,13 @@ func workflowCmd(args []string) error {
 	var managedCommit bool
 	var managedStage bool
 	var strictResult bool
+	var compactContext bool
 	var scanner string
 	var maxAICredits float64
 	switch action {
 	case "start", "recover", "handoff", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
-	case "advance", "show", "feedback-target":
+	case "advance", "show", "feedback-target", "planning-context":
 		fs.StringVar(&id, "id", "", "review flow ID")
 	case "run", "step":
 		fs.StringVar(&id, "id", "", "review flow ID")
@@ -47,6 +48,7 @@ func workflowCmd(args []string) error {
 		fs.BoolVar(&managedCommit, "managed-commit", false, "enable the Coder's bound taxion_commit SDK tool")
 		fs.BoolVar(&managedStage, "managed-stage", false, "enable taxion_stage alongside --managed-commit")
 		fs.BoolVar(&strictResult, "strict-result-identities", false, "constrain final identities and start SHA to the saved Dispatch")
+		fs.BoolVar(&compactContext, "compact-context", false, "include exact prior results without nested instructions")
 		fs.StringVar(&scanner, "scanner", "betterleaks", "trusted Betterleaks executable (--managed-commit only)")
 	default:
 		return fmt.Errorf("unknown workflow action %q", action)
@@ -69,13 +71,24 @@ func workflowCmd(args []string) error {
 	}
 	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve"
 	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" {
-		return fmt.Errorf("workflow start, recover, handoff, feedback, feedback-resolve, draft, draft-discard and draft-approve require --file; advance, run, step, show and feedback-target require --id")
+		return fmt.Errorf("workflow start, recover, handoff, feedback, feedback-resolve, draft, draft-discard and draft-approve require --file; advance, run, step, show, planning-context and feedback-target require --id")
 	}
 	db, state, err := loadWorkspace()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	if action == "planning-context" {
+		flow, ok := state.Graph.ReviewFlow(id)
+		if !state.HasGraph || !ok {
+			return fmt.Errorf("workflow planning-context requires an existing flow")
+		}
+		context, err := controller.ObservePlannerContext(db, storePath, flow.Contract.Repo, flow.TaskID)
+		if err != nil {
+			return err
+		}
+		return printJSON(context)
+	}
 	switch action {
 	case "draft-approve":
 		input, err := os.Open(file)
@@ -222,7 +235,7 @@ func workflowCmd(args []string) error {
 			if err != nil {
 				return nil, err
 			}
-			contract, err := core.RenderDispatchInstruction(dispatch)
+			contract, err := controller.RenderDispatchContext(db, dispatch, compactContext)
 			if err != nil {
 				return nil, err
 			}

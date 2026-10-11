@@ -23,6 +23,7 @@ type QuestionContext struct {
 	Task        PlanningTask      `json:"task"`
 	Flows       []core.ReviewFlow `json:"flows"`
 	Observation *PlanObservation  `json:"observation"`
+	Planner     *PlannerContext   `json:"planner,omitempty"`
 }
 
 type QuestionClaim struct {
@@ -31,9 +32,10 @@ type QuestionClaim struct {
 }
 
 type QuestionAnswer struct {
-	Confirmed   []QuestionClaim `json:"confirmed"`
-	Assumptions []string        `json:"assumptions"`
-	Unconfirmed []string        `json:"unconfirmed"`
+	Confirmed      []QuestionClaim `json:"confirmed"`
+	Assumptions    []string        `json:"assumptions"`
+	Unconfirmed    []string        `json:"unconfirmed"`
+	Recommendation string          `json:"recommendation,omitempty"`
 }
 
 type QuestionResult struct {
@@ -79,6 +81,18 @@ func ObserveQuestion(db *store.Store, ledgerPath, repository, taskID string) (Qu
 // Human approval. The caller supplies a separately bounded, isolated runtime.
 func AskQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text string, selected config.Config,
 	maxTokens int64, worker runtime.ConfigurationIdentity) (result QuestionResult, err error) {
+	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, maxTokens, worker, false)
+}
+
+// AskPlanner recommends an action from saved Memory and results in an isolated
+// session. It cannot release a handoff, approve work or issue a Dispatch.
+func AskPlanner(ctx context.Context, db *store.Store, ledgerPath, taskID, text string, selected config.Config,
+	maxTokens int64, worker runtime.ConfigurationIdentity) (QuestionResult, error) {
+	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, maxTokens, worker, true)
+}
+
+func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text string, selected config.Config,
+	maxTokens int64, worker runtime.ConfigurationIdentity, planner bool) (result QuestionResult, err error) {
 	result.Usage = []core.DispatchUsage{}
 	if worker == nil || worker.Role() != "ORCHESTRATOR" || strings.TrimSpace(text) == "" || maxTokens <= 0 {
 		return result, fmt.Errorf("taxion: side question requires an isolated Orchestrator, text and explicit token ceiling")
@@ -102,6 +116,12 @@ func AskQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 		var saved config.Config
 		if err := core.DecodeGraphInput(strings.NewReader(string(dispatch.Configuration.Selection)), &saved); err != nil || saved != selected {
 			return result, fmt.Errorf("taxion: question configuration differs from the Task's issued selection")
+		}
+	}
+	if planner {
+		result.Context, err = observePlannerQuestion(db, ledgerPath, selected.Repository.Path, taskID)
+		if err != nil {
+			return result, err
 		}
 	}
 	input, err := json.Marshal(struct {
@@ -212,7 +232,11 @@ func AskQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				if err := validateQuestionAnswer(answer, result.Context); err != nil {
 					return result, err
 				}
-				now, err := ObserveQuestion(db, ledgerPath, selected.Repository.Path, taskID)
+				observe := ObserveQuestion
+				if planner {
+					observe = observePlannerQuestion
+				}
+				now, err := observe(db, ledgerPath, selected.Repository.Path, taskID)
 				if err != nil {
 					return result, err
 				}
@@ -235,6 +259,14 @@ func questionProviderError(ctx context.Context, operation string, err error) err
 }
 
 func validateQuestionAnswer(answer QuestionAnswer, context QuestionContext) error {
+	if context.Planner != nil {
+		if !slices.Contains([]string{"REVIEW", "REPAIR", "REPLAN", "INVESTIGATE", "HOLD", "HUMAN_REQUIRED", "REPORT"}, answer.Recommendation) ||
+			len(answer.Confirmed) == 0 {
+			return fmt.Errorf("taxion: planner answer requires a sourced recommendation from the allowed actions")
+		}
+	} else if answer.Recommendation != "" {
+		return fmt.Errorf("taxion: a side question cannot contain a planner recommendation")
+	}
 	if answer.Confirmed == nil || answer.Assumptions == nil || answer.Unconfirmed == nil ||
 		len(answer.Confirmed)+len(answer.Assumptions)+len(answer.Unconfirmed) == 0 {
 		return fmt.Errorf("taxion: question answer requires explicit confirmed, assumed and unconfirmed lists")
@@ -253,7 +285,8 @@ func validateQuestionAnswer(answer QuestionAnswer, context QuestionContext) erro
 		}
 		for _, source := range claim.Sources {
 			// JSON pointers name the exact fields within the supplied context.
-			if !strings.HasPrefix(source, "/task/") && !strings.HasPrefix(source, "/flows/") && !strings.HasPrefix(source, "/observation/") {
+			if !strings.HasPrefix(source, "/task/") && !strings.HasPrefix(source, "/flows/") && !strings.HasPrefix(source, "/observation/") &&
+				!(context.Planner != nil && strings.HasPrefix(source, "/planner/")) {
 				return fmt.Errorf("taxion: question source must identify a supplied saved record")
 			}
 			current := records

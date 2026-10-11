@@ -50,6 +50,7 @@ Commands:
   dispatch list       List dispatches ([--repo] filter, [--json])
   config bind         Save an approved fixed-file configuration selection for an unbound Dispatch
   conversation ask    Answer a bounded side question from saved Task records without changing the main workflow
+  conversation plan   Recommend a next action from compact Memory and results; no execution or inferred approval
   conversation watch Hold handoffs before reading Human input; choose one role step or explicit bounded automatic execution
   runtime auth        Check the effective Copilot account against approved Dispatch configuration without creating a session
   runtime start       Start the Copilot session bound to an active Dispatch and send its authorized instruction
@@ -503,6 +504,7 @@ func runtimeCmd(args []string) error {
 	managedCommit := fs.Bool("managed-commit", false, "enable the bound Coder's taxion_commit SDK tool")
 	managedStage := fs.Bool("managed-stage", false, "enable taxion_stage alongside --managed-commit")
 	strictResult := fs.Bool("strict-result-identities", false, "constrain final-result identities and start SHA to the saved Dispatch; repeat on session attachment")
+	compactContext := fs.Bool("compact-context", false, "include exact prior results without nested instructions; repeat on session attachment")
 	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for a turn or event stream")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -581,7 +583,7 @@ func runtimeCmd(args []string) error {
 	if err != nil {
 		return fmt.Errorf("runtime: read system prompt: %w", err)
 	}
-	dispatchContract, err := core.RenderDispatchInstruction(dispatch)
+	dispatchContract, err := controller.RenderDispatchContext(db, dispatch, *compactContext)
 	if err != nil {
 		return fmt.Errorf("runtime: render Dispatch contract: %w", err)
 	}

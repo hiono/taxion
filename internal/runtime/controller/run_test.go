@@ -206,6 +206,7 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 		!review.Result.GitEvidence.WorktreeReleased || !strings.Contains(out.String(), "intermediate explanation") {
 		t.Fatal("new-SHA review or intermediate event separation failed")
 	}
+	testCompactPlanningContext(t, db, ledger, state, review, decision)
 }
 
 func TestRunnerStopsExecutionForLimitsAndStreamFailures(t *testing.T) {
