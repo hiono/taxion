@@ -70,6 +70,8 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 
 [ADR-0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md)
 をこの分離と設定契約の採択判断とする。
+初期の設定入力は YAML とし、TOML・JSON の設定入力は将来拡張とする。
+Go の型付き設定を共通契約として維持する。
 
 Taxion の core は Task・Dispatch・判断・証拠・承認を管理し、
 外部クライアント、開発基盤、AI runtime はそれぞれの adapter を通じて接続する。
