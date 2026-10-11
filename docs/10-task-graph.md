@@ -178,7 +178,31 @@ runner は Graph の `runnerId` を取得して単独で進行する。
 別 runner の run と手動 advance はこの所有者を照合する。
 正常終了とエラー処理の完了後に所有者を解放し、
 プロセスが強制終了した場合は保存済み所有者を残して二重実行を防ぐ。
-再開時は以前の SDK 実行と worktree・停止証拠を調査し、所有者の回復を明示的に行う。
+再開時は以前の SDK 実行と worktree・停止証拠を調査し、
+`workflow recover --file RECOVERY.json` で所有者を回復する。
+Human は元のプロセスの終了を確認し、active Dispatch を
+`runtime stop` または実行結果の保存で終了状態にしてから回復を実行する。
+実行前の ISSUED Dispatch は通常の `dispatch transition` で取消を記録できる。
+SUSPENDED や CANCEL_REQUESTED は active な実行として照合し、停止確認を要求する。
+
+```json
+{
+  "flowId": "application-flow",
+  "expectedRunnerId": "workflow show で確認した runnerId",
+  "previousProcessStopped": true,
+  "actor": "human",
+  "reason": "元プロセスの終了と Dispatch の停止を確認した",
+  "evidence": ["process-stop:確認記録", "runtime-stop:SDK-SESSION-ID"]
+}
+```
+
+回復は保存済み runnerId との一致と、flow に属するすべての Dispatch の終了を検査する。
+確認済み所有者、actor、理由、証拠、時刻を `recoveries` に追記し、
+runnerId を解放する。古い確認入力の再送は新しい所有者を解放できない。
+保存済み期限・token 上限・修正回数・flow 状態を維持するため、
+停止済み flow の回復はその実行を再承認する操作と分けて扱う。
+成功結果が保存済みなら通常の advance でその SHA の独立レビューへ進み、
+取消・失敗の結果は通常の停止判定で Human への確認に戻る。
 role prompt と `--coder-tools`・`--reviewer-tools`、任意の `--cli`・`--base-directory` は
 既存 SDK adapter の設定・権限検査を使用する。
 Coder の Git 操作を controller 管理ツールへ接続する作業は #53、

@@ -80,12 +80,56 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 		{"show", "--id", request.ID, "--file", file},
 		{"run", "--id", request.ID},
 		{"run", "--id", request.ID, "--coder-prompt-file", filepath.Join(dir, "missing"), "--reviewer-prompt-file", file},
+		{"recover"}, {"recover", "--file", file},
 	} {
 		if err := workflowCmd(args); err == nil {
 			t.Fatalf("invalid workflow invocation accepted: %v", args)
 		}
 	}
-
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		state.Graph.ReviewFlows[0].RunnerID = "interrupted-owner"
+		dispatch, _ := state.Graph.GraphDispatch(flow.DispatchIDs[0])
+		result := &core.DispatchResult{
+			DispatchID: dispatch.ID, TaskID: task.ID, Recipient: "CODER", Repository: task.Repo,
+			Status: core.DispatchCancelled, StartedSHA: dispatch.ExpectedStartSHA(),
+			Evidence: []string{"human:cancel-before-start"}, NextTransition: core.Blocked,
+		}
+		if err := state.Graph.TransitionDispatch(dispatch.ID, core.DispatchCancelled,
+			"human", "cancel issued execution", false, false, result); err != nil {
+			return err
+		}
+		state.Ledger.Dispatches[0].Active = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	recovery := controller.RecoveryRequest{
+		FlowID: request.ID, ExpectedRunnerID: "interrupted-owner", PreviousProcessStopped: true,
+		Actor: "human", Reason: "Confirm old process ended",
+		Evidence: []string{"human:process-ended", "human:cancel-before-start"},
+	}
+	data, err = json.Marshal(recovery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"recover", "--file", file}); err != nil {
+		t.Fatal(err)
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, _ := state.Graph.ReviewFlow(request.ID)
+	if recovered.RunnerID != "" || len(recovered.Recoveries) != 1 ||
+		recovered.Recoveries[0].Actor != recovery.Actor {
+		t.Fatal("CLI did not persist recovery")
+	}
+	if err := workflowCmd([]string{"recover", "--file", file}); err == nil {
+		t.Fatal("CLI accepted stale owner recovery")
+	}
 }
 
 func TestRuntimeToolAllowlist(t *testing.T) {

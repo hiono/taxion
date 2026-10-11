@@ -19,14 +19,14 @@ import (
 
 func workflowCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|show}")
+		return fmt.Errorf("usage: taxion workflow {start|advance|run|recover|show}")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
 	var file, id string
 	var coderPrompt, reviewerPrompt, cli, base, coderTools, reviewerTools string
 	switch action {
-	case "start":
+	case "start", "recover":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
 	case "advance", "show":
 		fs.StringVar(&id, "id", "", "review flow ID")
@@ -44,8 +44,9 @@ func workflowCmd(args []string) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	if len(fs.Args()) != 0 || action == "start" && file == "" || action != "start" && id == "" {
-		return fmt.Errorf("workflow start requires --file; advance, run and show require --id")
+	fileAction := action == "start" || action == "recover"
+	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" {
+		return fmt.Errorf("workflow start and recover require --file; advance, run and show require --id")
 	}
 	db, state, err := loadWorkspace()
 	if err != nil {
@@ -53,6 +54,21 @@ func workflowCmd(args []string) error {
 	}
 	defer db.Close()
 	switch action {
+	case "recover":
+		input, err := os.Open(file)
+		if err != nil {
+			return err
+		}
+		defer input.Close()
+		var request controller.RecoveryRequest
+		if err := core.DecodeGraphInput(input, &request); err != nil {
+			return err
+		}
+		flow, err := controller.RecoverReviewFlow(db, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(flow)
 	case "run":
 		if coderPrompt == "" || reviewerPrompt == "" {
 			return fmt.Errorf("workflow run requires --coder-prompt-file and --reviewer-prompt-file")

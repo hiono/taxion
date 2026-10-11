@@ -54,6 +54,7 @@ Commands:
   workflow advance    Issue review/repair from the latest verified result (--id required)
   workflow run        Execute review/repair continuously with saved ceilings (--id and role prompt files required)
   workflow show       Read the saved review flow and ceilings (--id required)
+  workflow recover    Release interrupted runner ownership after recorded execution stop (--file JSON)
   review              Bind coder-output evidence (--task, --sha and --repo required)
   resume              Print a resume acknowledgement (local stub; --session required)
   acp                 Serve ACP v1 over stdio (spike)
@@ -594,10 +595,7 @@ func runtimeCmd(args []string) error {
 			operationErr = streamEvents(ctx, control, dispatch, 0, os.Stdout)
 		}
 	case "stop":
-		operationErr = control.Resume(ctx, dispatch.ID)
-		if operationErr == nil {
-			operationErr = control.Stop(ctx, dispatch.ID)
-		}
+		operationErr = control.Stop(ctx, dispatch.ID)
 	}
 	closeErr := worker.Close()
 	if closeErr != nil {

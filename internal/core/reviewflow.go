@@ -9,20 +9,29 @@ import (
 // ReviewFlow retains the approved execution contract and ceilings across
 // controller restarts. Dispatches carry each observed execution separately.
 type ReviewFlow struct {
-	ID            string       `json:"id"`
-	TaskID        string       `json:"taskId"`
-	Contract      GraphTask    `json:"contract"`
-	ReviewRoot    string       `json:"reviewRoot"`
-	MaxRepairs    int          `json:"maxRepairs"`
-	MaxTokens     int64        `json:"maxTokens"`
-	StartedAt     time.Time    `json:"startedAt"`
-	Deadline      time.Time    `json:"deadline"`
-	Repairs       int          `json:"repairs"`
-	DispatchIDs   []string     `json:"dispatchIds"`
-	Status        string       `json:"status"`
-	Reason        string       `json:"reason"`
-	Authorization TaskDecision `json:"authorization"`
-	RunnerID      string       `json:"runnerId,omitempty"`
+	ID            string         `json:"id"`
+	TaskID        string         `json:"taskId"`
+	Contract      GraphTask      `json:"contract"`
+	ReviewRoot    string         `json:"reviewRoot"`
+	MaxRepairs    int            `json:"maxRepairs"`
+	MaxTokens     int64          `json:"maxTokens"`
+	StartedAt     time.Time      `json:"startedAt"`
+	Deadline      time.Time      `json:"deadline"`
+	Repairs       int            `json:"repairs"`
+	DispatchIDs   []string       `json:"dispatchIds"`
+	Status        string         `json:"status"`
+	Reason        string         `json:"reason"`
+	Authorization TaskDecision   `json:"authorization"`
+	RunnerID      string         `json:"runnerId,omitempty"`
+	Recoveries    []FlowRecovery `json:"recoveries,omitempty"`
+}
+
+type FlowRecovery struct {
+	RunnerID string    `json:"runnerId"`
+	Actor    string    `json:"actor"`
+	Reason   string    `json:"reason"`
+	Evidence []string  `json:"evidence"`
+	At       time.Time `json:"at"`
 }
 
 func (g TaskGraph) ReviewFlow(id string) (ReviewFlow, bool) {
@@ -30,6 +39,7 @@ func (g TaskGraph) ReviewFlow(id string) (ReviewFlow, bool) {
 		if flow.ID == id {
 			flow.Contract = cloneTask(flow.Contract)
 			flow.DispatchIDs = slices.Clone(flow.DispatchIDs)
+			flow.Recoveries = cloneFlowRecoveries(flow.Recoveries)
 			return flow, true
 		}
 	}
@@ -52,6 +62,12 @@ func (g TaskGraph) validateReviewFlows() error {
 			return graphError("invalid bounded review flow %q", flow.ID)
 		}
 		ids[flow.ID] = true
+		for _, recovery := range flow.Recoveries {
+			if !nonempty(recovery.RunnerID) || !nonempty(recovery.Actor) || !nonempty(recovery.Reason) ||
+				recovery.At.IsZero() || len(recovery.Evidence) == 0 || !validList(recovery.Evidence) {
+				return graphError("review flow recovery requires owner, actor, reason and evidence")
+			}
+		}
 		if flow.Status == "RUNNING" {
 			if running[task.ID] {
 				return graphError("Task %s has multiple running review flows", task.ID)
@@ -108,4 +124,12 @@ func (g TaskGraph) validateReviewFlows() error {
 		}
 	}
 	return nil
+}
+
+func cloneFlowRecoveries(records []FlowRecovery) []FlowRecovery {
+	copy := slices.Clone(records)
+	for index := range copy {
+		copy[index].Evidence = slices.Clone(copy[index].Evidence)
+	}
+	return copy
 }

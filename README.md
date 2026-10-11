@@ -82,6 +82,7 @@ taxion workflow start --file <authorized-flow.json>
 taxion workflow advance --id <flow-id>
 taxion workflow run --id <flow-id> --coder-prompt-file <path> --reviewer-prompt-file <path>
 taxion workflow show --id <flow-id>
+taxion workflow recover --file <recovery-confirmation.json>
 taxion dispatch --task <id> --repo <repo>
 taxion runtime start --dispatch <id> --system-prompt-file <path>
 taxion runtime send --dispatch <id> --system-prompt-file <path> --prompt-file <path>
@@ -124,6 +125,10 @@ Memory changes, and stops runtime execution at the saved deadline or observed
 token ceiling. Role-specific `--coder-tools` and `--reviewer-tools` remain
 explicit allowlists. A durable runner claim prevents overlapping runs; an
 interrupted process's claim requires explicit reconciliation before reuse.
+After confirming the old process has ended and recording completion or
+cancellation for its Dispatches, `workflow recover --file <path>` compares the
+observed runner ID and records the actor, reason and evidence before releasing
+ownership. Saved ceilings and outcomes continue to govern subsequent actions.
 See [Task Graph](docs/10-task-graph.md) for authorization and stop conditions.
 Controller-managed Coder Git operations and live SDK acceptance remain tracked
 in #53 and #54.
