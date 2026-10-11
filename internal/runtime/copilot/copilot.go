@@ -687,12 +687,31 @@ func reviewerPermissionDecision(worktree string, request sdk.PermissionRequest) 
 	if read.ResolvedPath != nil && *read.ResolvedPath != "" {
 		target = *read.ResolvedPath
 	}
-	target, err := filepath.EvalSymlinks(target)
-	if err != nil || !within(worktree, target) {
-		reason := "Reviewer role may read only within its assigned worktree"
+	if strings.TrimSpace(target) == "" {
+		reason := "Read permission requires an explicit path"
 		return &rpc.PermissionDecisionReject{Feedback: &reason}
 	}
-	return &rpc.PermissionDecisionApproveReadOnlyForSession{Directories: []string{worktree}}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(worktree, target)
+	}
+	resolved, err := filepath.EvalSymlinks(target)
+	// A missing leaf in a resolved in-worktree parent is still an authorized
+	// read. Let the tool report absence rather than fabricate a scope denial.
+	// Existing dangling symlinks cannot use this fallback.
+	if os.IsNotExist(err) {
+		if _, entryErr := os.Lstat(target); os.IsNotExist(entryErr) {
+			if parent, parentErr := filepath.EvalSymlinks(filepath.Dir(target)); parentErr == nil {
+				resolved, err = filepath.Join(parent, filepath.Base(target)), nil
+			}
+		}
+	}
+	if err != nil || !within(worktree, resolved) {
+		reason := "Role may read only within its assigned worktree; the requested path is outside it or cannot be safely resolved"
+		return &rpc.PermissionDecisionReject{Feedback: &reason}
+	}
+	// The installed runtime rejects the session-wide read-only variant.
+	// Approve only this validated read, preserving per-request path checks.
+	return &rpc.PermissionDecisionApproveOnce{}
 }
 
 func within(root, target string) bool {

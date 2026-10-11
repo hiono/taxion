@@ -35,7 +35,7 @@ func TestManagedCommitToolCreateResumeAndIdentity(t *testing.T) {
 	hash := adapter.ConfigHash()
 	for _, tools := range [][]sdk.Tool{adapter.sessionConfig(nil).Tools, adapter.resumeConfig(nil).Tools} {
 		if len(tools) != 1 || tools[0].Name != ManagedCommitToolName || tools[0].Handler == nil ||
-			tools[0].SkipPermission || tools[0].OverridesBuiltInTool || tools[0].IsTerminal {
+			tools[0].SkipPermission || tools[0].OverridesBuiltInTool || tools[0].IsTerminal || tools[0].Defer != sdk.ToolDeferNever {
 			t.Fatal("managed tool declaration missing or bypasses ordinary permission/result handling")
 		}
 		if tools[0].Parameters["additionalProperties"] != false {

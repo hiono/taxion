@@ -351,6 +351,15 @@ Keep the scanner's absolute path: a missing executable at that saved path
 does not prevent attaching to stop the session, but every commit revalidates
 its availability and version and fails if it is unavailable.
 
+Managed stage and commit tools are preloaded rather than hidden behind tool
+search. Auto may select a model whose write tool is `apply_patch` rather than
+`create`/`edit`; initial tool metadata does not guarantee the post-selection
+surface. For scoped Coder edits, explicitly allow
+`--tools view,create,edit,apply_patch` (or the corresponding `--coder-tools`).
+Permissions still check every write against the assigned worktree; stage and
+commit separately enforce the Dispatch scope. Native final-response JSON
+formatting and the controller's strict result verification remain enabled.
+
 `workflow run --managed-commit --scanner PATH` supplies the same tool only to
 Coder sessions; Reviewer sessions receive none. The tool accepts just a
 complete `message` string, not a repository, branch, scanner, or Dispatch
@@ -603,9 +612,12 @@ role prompt as the session's durable contract, so it remains part of the system
 context across turns and SDK compaction. SDK tools require an explicit
 `--tools` allowlist. The SDK permission handler grants Coder file writes within
 the assigned worktree and one-time use of allowlisted SDK tools; Reviewer
-sessions receive read access to that worktree. The handler applies to SDK
-permission requests, while host and external tools use their own security
-controls. Resume verifies that the prompt, CLI, worktree, and tool configuration
+sessions receive individually approved read access to that worktree. Relative read paths resolve
+against the assigned worktree, including a missing leaf under
+an existing in-worktree directory so the tool can report file absence normally.
+Dangling symlinks, escaping paths and unresolved parent directories are rejected.
+The handler applies to SDK permission requests; host and external tools use their
+own security controls. Resume verifies that the prompt, CLI, worktree, and tool configuration
 match the persisted hash.
 
 `runtime` commands and `workflow run` accept `--max-ai-credits` for an

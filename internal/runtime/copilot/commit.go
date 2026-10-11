@@ -15,7 +15,8 @@ func (a *Adapter) managedTools() []sdk.Tool {
 		return nil
 	}
 	tools := []sdk.Tool{{
-		Name: ManagedCommitToolName,
+		Name:  ManagedCommitToolName,
+		Defer: sdk.ToolDeferNever,
 		Description: "Commit the already-staged index for this Coder Dispatch using host scope, message and local secret checks. " +
 			"Does not stage files or finish the Task. Independent review and acceptance remain required.",
 		Parameters: map[string]any{
@@ -29,7 +30,8 @@ func (a *Adapter) managedTools() []sdk.Tool {
 	}}
 	if a.config.ManagedCommit.Stage != nil {
 		tools = append(tools, sdk.Tool{
-			Name: ManagedStageToolName,
+			Name:  ManagedStageToolName,
+			Defer: sdk.ToolDeferNever,
 			Description: "Stage explicitly named repository-relative files or tracked deletions through host scope and secret checks. " +
 				"No directories, force add, shell, or commit. Then use taxion_commit with a Conventional/Contextual message.",
 			Parameters: map[string]any{

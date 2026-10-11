@@ -131,7 +131,7 @@ func TestReviewerPermissionHandlerAllowsOnlyWorktreeReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := decision.(*rpc.PermissionDecisionApproveReadOnlyForSession); !ok {
+	if _, ok := decision.(*rpc.PermissionDecisionApproveOnce); !ok {
 		t.Fatalf("worktree read decision = %T", decision)
 	}
 	for name, request := range map[string]sdk.PermissionRequest{
@@ -750,6 +750,52 @@ func TestLiveCoderCanUseAuthorizedWriteTool(t *testing.T) {
 	}
 	if string(content) != "authorized coder write" {
 		t.Fatalf("unexpected Coder tool output: %q", content)
+	}
+}
+
+func TestLiveCoderBuiltinWritesWithAutoAndResponseSchema(t *testing.T) {
+	if os.Getenv("TAXION_COPILOT_INTEGRATION") != "1" {
+		t.Skip("set TAXION_COPILOT_INTEGRATION=1 to use the signed-in Copilot CLI")
+	}
+	worktree := t.TempDir()
+	target := filepath.Join(worktree, "created.txt")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	adapter, err := New(Config{
+		Role: "CODER", WorkingDirectory: worktree, MaxAICredits: 30,
+		SystemPrompt:   "Use only the assigned worktree " + worktree + ". Perform the requested file write, then return the required JSON object.",
+		AvailableTools: []string{"view", "create", "edit", "apply_patch"},
+		ResponseSchema: map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"created"}}},
+			"required":   []string{"status"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	id, err := adapter.Start(ctx, "builtin-write")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := adapter.Events(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Send(ctx, id, "Create "+target+" containing exactly 'authorized coder write' followed by a newline. Use whichever allowlisted built-in write tool Auto offers; do not merely describe the file. Return status created only after writing it."); err != nil {
+		t.Fatal(err)
+	}
+	answer := awaitOutput(t, ctx, events)
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(answer), &result); err != nil || result.Status != "created" {
+		t.Fatalf("native final response contract was not preserved: %q; error=%v", answer, err)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil || string(content) != "authorized coder write\n" {
+		t.Fatalf("Auto-compatible built-in write did not occur: error=%v", err)
 	}
 }
 

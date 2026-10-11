@@ -33,7 +33,7 @@ func TestManagedStageToolBindingAndArguments(t *testing.T) {
 	}
 	for _, tools := range [][]sdk.Tool{adapter.sessionConfig(nil).Tools, adapter.resumeConfig(nil).Tools} {
 		if len(tools) != 2 || tools[1].Name != ManagedStageToolName || tools[1].Handler == nil ||
-			tools[1].SkipPermission || tools[1].OverridesBuiltInTool || tools[1].IsTerminal {
+			tools[1].SkipPermission || tools[1].OverridesBuiltInTool || tools[1].IsTerminal || tools[1].Defer != sdk.ToolDeferNever {
 			t.Fatal("stage definition missing or bypasses normal permission and turn handling")
 		}
 		if tools[1].Parameters["additionalProperties"] != false {
