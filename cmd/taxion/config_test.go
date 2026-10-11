@@ -174,6 +174,30 @@ execution:
 		strings.Contains(output.String(), "selected-account") {
 		t.Fatal("field origins missing or selected value exposed")
 	}
+	t.Setenv("TAXION_RUNTIME_ACCOUNT", "developer-b")
+	output.Reset()
+	if err := checkConfig([]string{"check", "--dispatch", "dispatch", "--sources"}, &output); err != nil {
+		t.Fatal("environment could not select the original approved tuple over the Project candidate", err)
+	}
+	if !strings.Contains(output.String(), "runtime.account: environment") ||
+		!strings.Contains(output.String(), "saved Dispatch instruction") ||
+		strings.Contains(output.String(), "developer-b") {
+		t.Fatal("approved environment selection lost provenance or exposed the account")
+	}
+	if _, err := selectDispatchConfiguration(db, selectedDispatch); err != nil {
+		t.Fatal("approved environment override could not reuse the saved selection", err)
+	}
+	unchanged, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(beforeAuth, unchanged) {
+		t.Fatal("same approved environment selection replaced stored origins or approval", err)
+	}
+	t.Setenv("TAXION_RUNTIME_ACCOUNT", "selected-account")
+	output.Reset()
+	if err := checkConfig([]string{"check", "--dispatch", "dispatch", "--sources"}, &output); err == nil ||
+		!strings.Contains(err.Error(), "outside the recorded approval") ||
+		strings.Contains(err.Error(), "selected-account") || output.Len() != 0 {
+		t.Fatal("environment precedence widened Dispatch approval or exposed rejected values", err)
+	}
 	if err := runtimeCmd(authArgs); err == nil ||
 		!strings.Contains(err.Error(), "outside the recorded approval") ||
 		strings.Contains(err.Error(), "selected-account") {
