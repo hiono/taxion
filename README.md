@@ -77,6 +77,7 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
 ```bash
 taxion config check --sources
 taxion git check-index
+taxion git check-index --secrets --scanner /absolute/path/to/betterleaks
 taxion git hook status
 taxion init
 taxion task create --title "…" --repo <repo>
@@ -208,9 +209,41 @@ file names or values; an unreadable or unmerged index fails the check.
 Run it immediately before a manual commit, or invoke it from a pre-commit
 hook. It does not install a hook or run automatically in the controller.
 Only paths are checked: secrets copied into source files, a shared example,
-or `mise.toml` require content scanning. Scanner integration and controller
-commit enforcement remain in
+or `mise.toml` require content scanning. Add `--secrets` for the local content
+check described below. Controller commit enforcement remains in
 [#72](https://github.com/hiono/taxion/issues/72).
+
+`git check-index --secrets` requires a trusted
+[Betterleaks 1.9.0](https://github.com/betterleaks/betterleaks/releases/tag/v1.9.0)
+binary (`betterleaks` on PATH, or selected with `--scanner`). Verify the release
+archive against its published checksums before installation. Taxion rejects
+missing, incompatible, failed, or interrupted scanners and malformed reports.
+No scanner package is added to Taxion's Go dependencies.
+
+The scan reads blobs from the selected index, including unchanged
+tracked content and symlink text, rather than working files or a staged diff.
+Git replacement objects cannot substitute different content. Gitlinks contain
+submodule commit IDs; files inside submodules require their own scan.
+The local scanner receives blob content on stdin with the indexed path as
+local rule metadata. It runs in
+a private temporary directory with explicit version-bundled default rules,
+no project config/ignore/baseline, no inherited credentials or scanner
+configuration variables, and credential API validation disabled.
+Inline allow comments are ignored. Reports and diagnostics are not forwarded;
+errors expose only a finding count or a failed-check reason.
+
+This check uses the index entries captured when the scan starts. Rerun after
+changing the index; the command does not lock it across a later manual commit.
+The two-minute overall timeout stops the check rather than accepting partial
+coverage. Detection remains limited to the pinned rules and their filters;
+low-entropy values, unsupported formats, encoded content, and false positives
+need review. Bundled path filters exclude Go manifests/checksums, common lockfiles,
+some vendor trees, images, and other binary formats. This avoids treating
+dependency hashes as credentials, but secrets copied into an excluded file
+remain outside this check's content coverage. Safe template acceptance and a
+generated, unissued GitHub-token-shaped fixture were checked locally, without
+API validation. Findings are not automatically allowlisted or treated as
+proof that a credential is active.
 
 Install the path-only pre-commit hook explicitly from a persistent Taxion
 binary:
@@ -237,8 +270,9 @@ Status checks that the hook and binary are executable; a missing binary
 causes hook execution to fail and stops the commit. Installation currently
 requires Unix executable permissions.
 
-`--paths-only` explicitly accepts limited coverage: no content scanner is
-configured. Local hooks can be skipped with `--no-verify`, replaced, or
+`--paths-only` explicitly accepts limited coverage: this generated hook does
+not invoke the content scanner. The `--secrets` check is separate until full
+hook integration is completed. Local hooks can be skipped with `--no-verify`, replaced, or
 disabled and are not carried into new clones. The controller must enforce
 its own commit check independently; that connection remains in #72.
 

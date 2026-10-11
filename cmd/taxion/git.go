@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -13,13 +14,37 @@ func checkGitIndex(args []string, output io.Writer) error {
 	if len(args) > 0 && args[0] == "hook" {
 		return gitHook(args[1:], output)
 	}
-	if len(args) != 1 || args[0] != "check-index" {
-		return fmt.Errorf("git requires check-index with no options or positional arguments")
+	if len(args) == 0 || args[0] != "check-index" {
+		return fmt.Errorf("git requires check-index or hook")
 	}
-
+	fs := flag.NewFlagSet("git check-index", flag.ContinueOnError)
+	secrets := fs.Bool("secrets", false, "scan indexed contents locally with Betterleaks 1.9.0")
+	scanner := fs.String("scanner", "betterleaks", "trusted Betterleaks executable (--secrets only)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("git check-index accepts no positional arguments")
+	}
+	scannerSelected := false
+	fs.Visit(func(option *flag.Flag) {
+		if option.Name == "scanner" {
+			scannerSelected = true
+		}
+	})
+	if scannerSelected && !*secrets {
+		return fmt.Errorf("git check-index --scanner requires --secrets")
+	}
 	directory, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("locate commit worktree: %w", err)
+	}
+	if *secrets {
+		if err := gitguard.CheckSecrets(context.Background(), directory, *scanner); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(output, "Commit index passed prohibited-path and local Betterleaks 1.9.0 content checks. This does not guarantee absence of secrets; controller enforcement is not yet connected.")
+		return err
 	}
 	if err := gitguard.CheckIndex(context.Background(), directory); err != nil {
 		return err

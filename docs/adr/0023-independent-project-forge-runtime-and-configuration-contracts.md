@@ -117,6 +117,15 @@ CI・基盤側の保護は各 provider の対応能力と承認条件に従っ�
 履歴の書き換えは影響する SHA・レビュー・証拠と clone の再照合を伴う
 Human 承認済み作業として扱う。
 
+初期のローカル秘密検査は MIT license の Betterleaks 1.9.0 を用いる。
+安定版の CLI・同梱規則を固定し、実 index の blob を stdin で検査する。
+開発中の v2 と既存の v1 の CLI は区別し、更新時は規則と検出結果を再評価する。
+scanner の project 設定・ignore・inline allow と credential 環境変数を取り込まず、
+credential API による有効性検証は無効とする。
+秘密値や資料を外部に送らず、検査不能は失敗として扱う。
+規則による検出と credential の実効認証は別の確認であり、
+検出漏れ・誤検知の範囲を仕様と #72 の検証記録に残す。
+
 ## Consequences
 
 M12 #69 は共通契約と既存 GitHub＋Copilot による主体の明示選択を実装し、

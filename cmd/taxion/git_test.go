@@ -121,3 +121,30 @@ func TestGitInstalledHookWithPersistentCLI(t *testing.T) {
 	run("git", "hook", "uninstall")
 	run("git", "hook", "status")
 }
+
+func TestGitCheckIndexSecretMode(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if output, err := exec.Command("git", "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("init test repository: %s: %v", output, err)
+	}
+	scanner := filepath.Join(t.TempDir(), "scanner")
+	script := "#!/bin/sh\nif [ \"$1\" = version ]; then printf '1.9.0\\n'; exit 0; fi\ncat >/dev/null\nprintf '[]'\n"
+	if err := os.WriteFile(scanner, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := checkGitIndex([]string{"check-index", "--secrets", "--scanner", scanner}, &output); err != nil ||
+		!strings.Contains(output.String(), "does not guarantee") {
+		t.Fatal("secret mode failed or overstated coverage", err)
+	}
+	for _, args := range [][]string{
+		{"check-index", "--scanner", scanner},
+		{"check-index", "--secrets", "--scanner", filepath.Join(t.TempDir(), "missing")},
+		{"check-index", "--secrets", "extra"},
+	} {
+		output.Reset()
+		if err := checkGitIndex(args, &output); err == nil || output.Len() != 0 {
+			t.Fatal("invalid secret invocation succeeded", args, err)
+		}
+	}
+}
