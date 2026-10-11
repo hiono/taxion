@@ -110,6 +110,20 @@ are errors. If no files are found, the command reports an error.
 Optional `--user-file` and `--project-file` replace their respective default
 paths. A missing explicit file is an error. `--file` supplies an optional
 highest-priority invocation file.
+Every loaded settings file inside a Git worktree must be both untracked
+(`git ls-files` returns no entry) and covered by a Git ignore rule. Tracked
+settings and unignored files are rejected before reading their contents, even
+when a later layer would override them. Symlink paths and their resolved
+targets are both checked. Files outside worktrees do not require Git ignore
+rules. Shared examples should be separate from the live settings files.
+
+For the default project file, add `/.taxion/config.yaml` to `.gitignore`, or
+use `.git/info/exclude` for a local-only rule. If the file is already tracked,
+review its contents and remove it from the index with
+`git rm --cached -- .taxion/config.yaml`; adding an ignore rule alone does not
+remove tracking or existing history. Review exposed credentials and rotate
+them where needed. Taxion reports the failure and leaves Git state unchanged.
+
 Precedence is `--file` (invocation) > supported environment values >
 `--project-file` > `--user-file`.
 Every file requires `version: 1`; other fields can be omitted in a layer and

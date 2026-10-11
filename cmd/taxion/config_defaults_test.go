@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -61,6 +62,28 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 	}
 	if !strings.Contains(output.String(), "runtime.account: invocation") {
 		t.Fatal("environment overrode invocation file")
+	}
+	command := exec.Command("git", "init", "-q")
+	if result, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("init test worktree: %s: %v", result, err)
+	}
+	output.Reset()
+	if err := checkConfig([]string{"check"}, &output); err == nil || output.Len() != 0 {
+		t.Fatal("CLI accepted unignored project configuration")
+	}
+	if err := os.WriteFile(".gitignore", []byte("/.taxion/config.yaml\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkConfig([]string{"check"}, &output); err != nil {
+		t.Fatal("CLI rejected ignored project configuration", err)
+	}
+	command = exec.Command("git", "add", "-f", ".taxion/config.yaml")
+	if result, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("track test config: %s: %v", result, err)
+	}
+	output.Reset()
+	if err := checkConfig([]string{"check", "--file", override}, &output); err == nil || output.Len() != 0 {
+		t.Fatal("explicit override bypassed tracked default gate")
 	}
 	t.Setenv("TAXION_RUNTIME_ACCOUNT", "")
 	output.Reset()
