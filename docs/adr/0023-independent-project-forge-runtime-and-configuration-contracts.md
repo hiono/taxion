@@ -31,6 +31,30 @@ Taxion は、共通の作業・承認・証拠の契約と、
 core と共通 controller が判断と実行許可を管理し、
 各 adapter が外部サービス固有の API・型・credential 取得を担当する。
 
+認証の所有者は provider CLI とする。
+Copilot は Copilot CLI、GitHub は `gh`、GitLab は `glab` に
+ログイン・ログアウト、credential の保管・更新・失効対応を委ねる。
+Taxion は独自の OAuth、token 保管庫、provider の認証ファイルの直接解析を実装しない。
+ローカル利用では provider CLI の保存済み認証を使い、
+CI・無人 worker では実行環境が provider の対応する credential を注入する。
+adapter の明示的な環境変数選択は provider に渡す credential の指定であり、
+Taxion が token を発行・永続保存する機能ではない。
+
+Taxion は承認した主体・接続先と provider が返す実効主体・権限を照合し、
+不一致・失効・確認不能を理由付きで停止する。
+provider の認証状態は Taxion の作業承認を代替しない。
+利用可否の判定と課金処理は provider に委ね、
+公式 API から取得できる事実と Human が承認した利用根拠を別々に記録する。
+独自の契約認証・課金管理は実装せず、取得不能な支払者や課金先は推定しない。
+この責務分担は 2026-10-11 の Human 指示
+「Copilot CLI の認証を利用し、repository 認証は gh・glab に任せる」により採択した。
+GitLab の `glab` adapter は M13 の後続実装であり、採択だけで対応済みとは扱わない。
+GitLab は gitlab.com と self-hosted の両方を対象とし、
+選択した API host に対して `glab` の実効主体・namespace/repository・権限を照合する。
+既定 host や別 host の同名 account へ黙って切り替えない。
+API host と Git clone の接続先・SSH port は別々に扱い、
+SSH port を API port として推定しない。社内の接続先や認証情報は公開記録に含めない。
+
 | 管理対象 | 保持・確認する情報 |
 | --- | --- |
 | project と利用者 | 参加者、依頼者、承認者、操作権限 |
@@ -177,7 +201,8 @@ session 作成・再開や model 呼出しは行わず、照合結果を実行�
 この明示 probe は repository の権限と契約上の利用可能性を確認しない。
 実行時には同じ SDK 認証照合と、後述する repository access の照合を呼び出す。
 SDK の `copilot:logged-in` は保存済み認証を、`env:NAME` は指定した環境変数だけを選ぶ。
-任意の credential 保管先参照の解決と契約上の利用可能性の確認は後続実装とする。
+任意の credential 保管庫の独自実装は行わない。
+provider が公開する利用可否の確認と Human の利用承認の接続は後続作業とする。
 共有 Memory の配置は Decision と `docs/08-memory-model.md`、
 実 SDK の管理 stage・commit と独立レビューの受入れは #72・#54 に記録する。
 
@@ -201,8 +226,8 @@ controller は設定保存済み Dispatch の開始・再開・送信前に
 安全な停止では現在の設定や認証検査を要求せず、保存済みの設定で接続を試みる。
 SDK 接続自体の失敗は明示し、停止できたと扱わない。
 workflow run も同じ設定照合を要求し、生成 Task の承認を親 Task の承認から
-自動で書き換えることはしない。任意の credential 保管先参照の解決、
-契約確認と会話 CLI を含む実 SDK の受入れは引き続き未完了とする。
+自動で書き換えることはしない。provider の利用可否と Human の利用承認の接続、
+会話 CLI を含む実 SDK の受入れは引き続き未完了とする。
 
 repository access は GitHub.com の `gh api` に接続した。
 `gh:active` は保存済み `gh` 認証を選び、環境の token と host の上書きを除く。

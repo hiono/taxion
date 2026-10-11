@@ -444,13 +444,32 @@ identity, and `contractRef` identifies the intended usage contract.
 containing tokens. Execution fields identify the requester, worker, and sourced
 approval reference.
 
+Authentication belongs to the provider tools: Copilot CLI for AI execution,
+`gh` for GitHub, and `glab` for the planned GitLab adapter. Taxion does not
+implement OAuth, a credential vault, token renewal or direct parsing of their
+authentication files. Users log in through those tools; CI/worker environments
+inject provider-supported credentials. Explicit `env:NAME` selection only
+passes a credential to the provider, without persisting it in Taxion.
+GitLab delegation is an accepted design, not an implemented adapter.
+The planned `glab` adapter includes self-hosted GitLab: it must check the
+explicit API host, account, namespace/repository and permissions without
+falling back to another host. API and Git clone endpoints are distinct;
+a nonstandard clone SSH port is not an API port. Internal deployment
+identifiers must remain outside public records.
+
+Taxion owns sourced work approval, expected-account and target checks, execution
+limits and observations. Provider login is not approval to perform a Taxion task.
+Service eligibility and billing decisions remain with the provider; official API
+observations and Human-approved usage grounds must be distinguished. Taxion will
+not implement an independent contract-authentication or billing system.
+
 The execution contract distinguishes these facts:
 
 | Fact | Required evidence and current boundary |
 | --- | --- |
 | Authentication | A fresh provider query confirms the selected effective account. Possessing a credential alone does not prove a match. |
 | Authorization | The current Task and immutable Dispatch instruction carry the same sourced approval for the complete selected tuple. Provider access is checked separately. |
-| AI eligibility | The selected account must have rights to use the effective provider agreement. `contractRef` names the intended agreement; it does not select an SDK billing agreement or prove eligibility. Automatic verification is unimplemented. |
+| AI eligibility | The provider determines service eligibility. `contractRef` names the intended agreement; it does not select an SDK billing agreement or prove eligibility. Connecting available official API evidence and Human-approved usage grounds remains unimplemented; independent contract authentication is out of scope. |
 | Contractual payer | The party responsible for payment comes from the agreement or an authorized external record, not the account name or token owner. Provider payer/invoice information is unavailable through the implemented adapter. |
 | Measured use | Tokens, model cost multipliers and AI credits are distinct quantities. Complete private SDK usage receipts can report measured credits; missing or incomplete reports are unconfirmed, never zero or free. The optional SDK credit ceiling is per session and soft, not a project budget or bill. |
 
