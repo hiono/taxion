@@ -60,7 +60,7 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 | --- | --- | --- |
 | [M10](https://github.com/hiono/taxion/milestone/16) | 階層化した Memory、Task Graph、Task lost の防止、実行契約 | #46〜#48・#66 |
 | [M11](https://github.com/hiono/taxion/milestone/17) | Go Copilot SDK、役割別 Session、system prompt・履歴の分離 | #49〜#51 |
-| [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映する自動実装・独立レビュー、実行主体・接続先・AI 契約の分離 | #52〜#54・#67・#69 |
+| [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映する自動実装・独立レビュー、実行主体・接続先・AI 契約の分離、commit 前の混入防止 | #52〜#54・#67・#69・#72 |
 | [M13](https://github.com/hiono/taxion/milestone/19) | 再起動からの復旧、永続的な作業記録、外部基盤 adapter の分離・対応評価 | #55〜#57・#70 |
 | [M14](https://github.com/hiono/taxion/milestone/20) | 仕様検索、Memory の移行、skills・tools 連携 | #58〜#61 |
 | [M15](https://github.com/hiono/taxion/milestone/21) | ACP・Web、project 参加者の権限・契約・session 所有権、組合せ別の到達条件 | #62〜#63・#71 |
@@ -72,6 +72,14 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 をこの分離と設定契約の採択判断とする。
 初期の設定入力は YAML とし、TOML・JSON の設定入力は将来拡張とする。
 Go の型付き設定を共通契約として維持する。
+設定は固定 Global／Project YAML と環境変数を用い、
+優先順位を環境変数 > Project > Global とする。
+任意ファイル指定 option の廃止と `.taxion/` 全体の Git 混入防止は
+#69 の移行作業とする。mise・CI は環境変数を注入し、
+実 `.env` はローカルの未追跡・ignore 対象として扱う。
+commit 前の index・秘密検査と明示 hook 導入は M12 #72、
+未公開コミットと外部記録の公開前検査は M13 #56、
+基盤側の保護と漏えい対応の評価は #70 で実施する。
 
 Taxion の core は Task・Dispatch・判断・証拠・承認を管理し、
 外部クライアント、開発基盤、AI runtime はそれぞれの adapter を通じて接続する。

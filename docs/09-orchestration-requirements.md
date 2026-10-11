@@ -28,8 +28,9 @@ Taxion は、ユーザーとの会話から独立した担当へ作業を渡す�
 | ORC-011 | CLI・ACP・Web が同じ controller と制約を使う。利用者の認証と Session の所有権を検査する | #54・#62・#63 |
 | ORC-012 | project 利用者、開発基盤の操作主体、AI 認証主体、利用契約・費用帰属、worker を独立して管理し、承認された組合せを Dispatch・Session に結びつける。開始・再開・担当交代時に照合する | #69・#55・#71 |
 | ORC-013 | repository と作業管理の接続先を provider・host・path・オブジェクト ID で識別する。GitHub・GitLab・Bitbucket の能力差を adapter で扱い、承認・証拠・外部更新の共通契約を保持する | #56・#70・#63 |
+| ORC-014 | 固定 Global／Project 設定と環境変数を用い、ローカル `.taxion/` と実 `.env` の追跡・ignore 状態を検査する。commit 前の index、公開前の全未公開コミットと外部記録で秘密情報の混入を検査する | #69・#72・#53・#56・#70 |
 
-ORC-012・ORC-013 と形式に依存しない設定契約の採択判断は
+ORC-012〜ORC-014 と形式に依存しない設定契約の採択判断は
 [ADR-0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md)
 に記録する。Issue はその実装・検証を追跡する。
 通常設定の優先順位は、承認済みの権限・契約・送信先の範囲内で適用する。
@@ -115,7 +116,7 @@ credential、非公開の資料や会話を公開 Issue・PR・ログへ転記�
 | 復旧・外部記録 | Ledger 保存、別の SQLite store・outbox 部品 | 実行と Session の復旧、整合した outbox 更新、Issue・PR の自動記録 |
 | CLI・ACP・Web | CLI 操作、ACP の Ledger 操作、Web forms・API proxy | 共通の会話 controller、Human の選択、実行の進行・再開と利用者別の所有権 |
 | 仕様書 | connector なし | 許可された検索・取得、出典付きの受け渡し |
-| 設定・認証主体 | `config check` による厳密な設定検査、OS 標準 user・cwd project・環境変数・実行時設定の解決と出典、`--task` による出典付き判断の許可組合せとの照合 | 承認者の認証、実効認証・契約の確認、Dispatch・session への接続と再開照合（#69） |
+| 設定・認証主体 | `config check` による厳密な設定検査、OS 標準 user・cwd project・環境変数・実行時設定の解決と出典、`--task` による出典付き判断の許可組合せとの照合 | 任意ファイル指定 option の廃止、`.taxion/` 全体と実 `.env` の保護、承認者の認証、実効認証・契約の確認、Dispatch・session への接続と再開照合（#69）、commit 前 gate（#72） |
 
 現在の挙動は [Ledger schema](05-ledger-schema.md)、
 [Runtime contract](03-runtime-contract.md)、
