@@ -105,6 +105,19 @@ func TestPlanRestoresWorkWithoutSessionHistory(t *testing.T) {
 	if step["action"] != "REASSESS_DEFERRED" || contract["id"] != task.ID || contract["resumeCondition"] != task.ResumeCondition {
 		t.Fatalf("durable planning required old ACP session: %+v", plan)
 	}
+	observation, ok := plan["observation"].(map[string]any)
+	if !ok {
+		t.Fatalf("planning observation missing: %+v", plan)
+	}
+	hash, ok := observation["contentHash"].(string)
+	if !ok || !strings.HasPrefix(hash, "sha256:") || observation["startedAt"] == nil || observation["completedAt"] == nil {
+		t.Fatalf("planning observation incomplete: %+v", observation)
+	}
+	repeated := result(t, run(t, server, req(3, "taxion/plan", msg{"repository": task.Repo}))[0])
+	repeatedObservation := repeated["observation"].(map[string]any)
+	if repeatedObservation["contentHash"] != hash {
+		t.Fatalf("ACP observation changed unchanged records: %+v", repeatedObservation)
+	}
 	for _, params := range []msg{{}, {"repository": ""}, {"repository": task.Repo, "sessionId": "old"}} {
 		messages := run(t, server, req(2, "taxion/plan", params))
 		if messages[0]["error"] == nil {

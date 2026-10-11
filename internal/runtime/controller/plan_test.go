@@ -90,7 +90,14 @@ func TestPlanRestoresDeferredWorkAndDecisionsAfterOtherWork(t *testing.T) {
 	}
 	defer reopened.Close()
 	actual, err := Plan(reopened, ledgerPath, "owner/repo")
-	if err != nil || !reflect.DeepEqual(expected, actual) {
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expected.Observation.ContentHash != actual.Observation.ContentHash {
+		t.Fatalf("observation content changed after session loss: %+v %+v", expected.Observation, actual.Observation)
+	}
+	expected.Observation = actual.Observation
+	if !reflect.DeepEqual(expected, actual) {
 		t.Fatalf("plan changed after session loss: %+v %v", actual, err)
 	}
 	step := actual.Tasks[1]

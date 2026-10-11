@@ -1,9 +1,12 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
@@ -16,6 +19,15 @@ type FollowUpPlan struct {
 	Repository  string            `json:"repository"`
 	Tasks       []PlanningTask    `json:"tasks"`
 	ReviewFlows []core.ReviewFlow `json:"reviewFlows,omitempty"`
+	Observation *PlanObservation  `json:"observation,omitempty"`
+}
+
+// PlanObservation identifies returned records, not live runtime state or
+// execution authorization. Workspace and Memory are read separately.
+type PlanObservation struct {
+	StartedAt   time.Time `json:"startedAt"`
+	CompletedAt time.Time `json:"completedAt"`
+	ContentHash string    `json:"contentHash"`
 }
 
 type PlanningTask struct {
@@ -41,6 +53,7 @@ func Plan(db *store.Store, ledgerPath, repo string) (FollowUpPlan, error) {
 	if db == nil || strings.TrimSpace(repo) == "" {
 		return FollowUpPlan{}, fmt.Errorf("taxion: planning requires a store and explicit repository")
 	}
+	startedAt := time.Now().UTC()
 	state, err := db.LoadWorkspace()
 	if err != nil {
 		return FollowUpPlan{}, err
@@ -154,6 +167,15 @@ func Plan(db *store.Store, ledgerPath, repo string) (FollowUpPlan, error) {
 	}
 	if len(plan.Tasks) == 0 {
 		return FollowUpPlan{}, fmt.Errorf("%w: no tracked Tasks for repository %q", core.ErrGraphRejected, repo)
+	}
+	content, err := json.Marshal(plan)
+	if err != nil {
+		return FollowUpPlan{}, fmt.Errorf("taxion: encode planning observation: %w", err)
+	}
+	hash := sha256.Sum256(content)
+	plan.Observation = &PlanObservation{
+		StartedAt: startedAt, CompletedAt: time.Now().UTC(),
+		ContentHash: fmt.Sprintf("sha256:%x", hash),
 	}
 	return plan, nil
 }

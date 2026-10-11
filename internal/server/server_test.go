@@ -112,7 +112,10 @@ func TestWorkspaceDispatchInstructionEndpoint(t *testing.T) {
 	}
 	if ready.Code != http.StatusOK || len(readyPlan.Tasks) != 1 ||
 		readyPlan.Tasks[0].Action != "DISPATCH" || len(readyPlan.Tasks[0].Gaps) != 0 ||
-		readyPlan.Tasks[0].Task.AuthorizationID != graphTask.AuthorizationID {
+		readyPlan.Tasks[0].Task.AuthorizationID != graphTask.AuthorizationID ||
+		readyPlan.Observation == nil || readyPlan.Observation.StartedAt.IsZero() ||
+		readyPlan.Observation.CompletedAt.Before(readyPlan.Observation.StartedAt) ||
+		!strings.HasPrefix(readyPlan.Observation.ContentHash, "sha256:") {
 		t.Fatalf("authorized contract not available for follow-up: %d %+v", ready.Code, readyPlan)
 	}
 	created := post(t, handler, "/api/dispatches", `{"task":"t","repo":"owner/repo"}`)
@@ -138,14 +141,7 @@ func TestWorkspaceDispatchInstructionEndpoint(t *testing.T) {
 		t.Fatalf("incomplete instruction response: %+v", body)
 	}
 	response = get(t, handler, "/api/tasks/plan?repo=owner/repo")
-	var plan struct {
-		Repository string `json:"repository"`
-		Tasks      []struct {
-			Action     string               `json:"action"`
-			Task       core.GraphTask       `json:"task"`
-			Dispatches []core.GraphDispatch `json:"dispatches"`
-		} `json:"tasks"`
-	}
+	var plan controller.FollowUpPlan
 	if response.Code != http.StatusOK {
 		t.Fatalf("plan: %d %s", response.Code, response.Body.String())
 	}
@@ -153,7 +149,8 @@ func TestWorkspaceDispatchInstructionEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	if plan.Repository != task.Repo || len(plan.Tasks) != 1 || plan.Tasks[0].Task.ID != task.ID ||
-		plan.Tasks[0].Action != "RECONCILE_DISPATCH" || plan.Tasks[0].Dispatches[0].ID != dispatch.ID {
+		plan.Tasks[0].Action != "RECONCILE_DISPATCH" || plan.Tasks[0].Dispatches[0].ID != dispatch.ID ||
+		plan.Observation == nil || plan.Observation.ContentHash == readyPlan.Observation.ContentHash {
 		t.Fatalf("incomplete planning response: %+v", plan)
 	}
 	for _, test := range []struct {

@@ -68,6 +68,22 @@ HTTP の `GET /api/tasks/plan?repo=owner/repository` と ACP の
 これらの読み出しは SQLite workspace と登録済み Task Graph を使用し、
 役割 Session の履歴から独立して動作する。
 
+共通の計画出力には `observation.startedAt`・`completedAt`（UTC）と
+`contentHash` を付ける。時刻は workspace と Memory の読み出し・計画構成の区間を示す。
+`contentHash` は `observation` を省いた計画 JSON の SHA-256 を
+`sha256:` に続けた小文字の hex とする。同じ返却内容なら時刻や再起動に依存せず同じ hash になり、
+含まれる契約・判断・懸念・依存状態・Dispatch 結果・Memory が変われば hash も変わる。
+フィールドと配列の順序も返却内容の一部であり、意味的に同じ並べ替えを同一視しない。
+
+これは [ADR-0024](adr/0024-human-handoff-control-and-side-questions.md) の質問用観測の基礎である。
+Task・Dispatch の状態、履歴、承認は変更せず、SDK や Git のライブ確認を行わない。
+workspace と Memory は別に読み出すため、両者の原子的な snapshot を保証しない。
+既存の Memory 読み出しは schema の初期化・移行を伴う場合があり、
+ファイルシステム全体の無書込みを保証する操作ではない。
+hash は返却内容の識別子であり、未参照の policy、実効認証、実行中の出力、
+次の指示案の版、実行許可や現在性の証明ではない。保留・反映・発行時の再照合は別途必要である。
+自然言語の脇の質問・追加調査・本流への反映は #74、受け渡し制御は #73 で実装する。
+
 ## 関係と実行契約
 
 Task は ADR-0021 の識別、担当、scope、acceptance、証拠、対象 SHA、

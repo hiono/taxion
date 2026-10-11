@@ -54,6 +54,9 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
   現在の実装状況とは区別する。
 - [ADR-0021](docs/adr/0021-durable-task-graph-and-dispatch-change-control.md) —
   Task Graph の情報、依存と完了条件、Dispatch の変更管理。
+- [ADR-0024](docs/adr/0024-human-handoff-control-and-side-questions.md) —
+  Human の受け渡し保留・途中中断、版付き指示案、本流を変更しない状況・根拠の質問。
+  採択した設計と現在の実装を区別する。
 - `CONTRIBUTING.md` — development checks, document ownership, and comment rules
 - `docs/00-charter.md` — founding scope and project constraints
 - `docs/01-guardrails.md` — behavioral invariants with IDs

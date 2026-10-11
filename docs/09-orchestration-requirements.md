@@ -29,6 +29,11 @@ Taxion は、ユーザーとの会話から独立した担当へ作業を渡す�
 | ORC-012 | project 利用者、開発基盤の操作主体、AI 認証主体、利用契約・費用帰属、worker を独立して管理し、承認された組合せを Dispatch・Session に結びつける。開始・再開・担当交代時に照合する | #69・#55・#71 |
 | ORC-013 | repository と作業管理の接続先を provider・host・path・オブジェクト ID で識別する。GitHub・GitLab・Bitbucket の能力差を adapter で扱い、承認・証拠・外部更新の共通契約を保持する | #56・#70・#63 |
 | ORC-014 | 固定 Global／Project 設定と環境変数を用い、ローカル `.taxion/` と実 `.env` の追跡・ignore 状態を検査する。commit 前の index、公開前の全未公開コミットと外部記録で秘密情報の混入を検査する | #69・#72・#53・#56・#70 |
+| ORC-015 | 次の受け渡し保留と現在の実行中断を分け、版付き指示案と Human が観測した対象を発行・開始時に照合する。発行済み履歴と停止証拠を維持する | #73・#53・#54・#55 |
+| ORC-016 | 本流を変更せず状況・根拠を確認し、確認済み・仮定・未確認と観測時点を区別する。明示的な反映だけを対象・証拠・Human 指示とともに本流へ保存する | #74・#67・#54・#62・#63 |
+
+ORC-015・ORC-016 は [ADR-0024](adr/0024-human-handoff-control-and-side-questions.md)
+で採択する。質問だけでは作業や承認を変更せず、既存の安全停止条件は維持する。
 
 ORC-012〜ORC-014 と形式に依存しない設定契約の採択判断は
 [ADR-0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md)
@@ -65,6 +70,10 @@ tmux の画面操作、別モデル API の契約、Session ごとの専用 cach
 | M16 | Planner と Rust を別々に比較評価し、採否、制約、必要な後続作業を記録する。評価を機能実装の完成と扱わない |
 
 最初の到達点は M12 とする。
+M12 は、受け渡し保留、実行中断、計画・コード・レビューへの対象付き補足、
+状況・根拠の質問から不足確認・明示反映・続行までを実 SDK で検証する。
+M13 は保留・指示案・反映記録の再起動と発行・開始との競合を照合する。
+M15 は同じ操作と権限を CLI・ACP・Web で利用し、端末間で状態を共有する。
 実装・レビューの実行に必要な仕様は、この段階では許可された明示入力でもよい。
 これは仕様検索の自動化ではなく、検索からの手動コピーをなくす条件は M14・M15 に残す。
 未許可または非対応の検索 connector は blocker として保持し、
@@ -115,6 +124,7 @@ credential、非公開の資料や会話を公開 Issue・PR・ログへ転記�
 | Memory | SQLite、候補生成、明示承認と限定した条件検査、検索・export | 階層の出典・版と Task の連携、指示への反映、更新・失効、実際の project/global 保存・移行 |
 | 復旧・外部記録 | Ledger 保存、別の SQLite store・outbox 部品 | 実行と Session の復旧、整合した outbox 更新、Issue・PR の自動記録 |
 | CLI・ACP・Web | CLI 操作、ACP の Ledger 操作、Web forms・API proxy | 共通の会話 controller、Human の選択、実行の進行・再開と利用者別の所有権 |
+| Human の途中介入・質問 | 出典付き計画の共通再構成、Dispatch の取消と SDK 中断、busy session への追加送信拒否 | 受け渡し保留・指示案の改訂・対象付き反映（#73）、本流を変更しない自然言語の質問・追加調査（#74）、実 SDK 受入れ（#54） |
 | 仕様書 | connector なし | 許可された検索・取得、出典付きの受け渡し |
 | 設定・認証主体 | `config check` による厳密な設定検査、固定 Global・cwd Project・環境変数の解決と出典、`.taxion/` 全体と cwd の実 `.env` の追跡・ignore 検査、`--task` による出典付き判断の許可組合せとの照合、`git check-index` の禁止パス検査と `--secrets` のローカル内容検査、内容検査 hook と明示的な path-only hook の導入・状態確認・解除、`runtime commit` の直接検査と Git 公開、`--managed-commit`・`--managed-stage` による Coder SDK tool の作成・再開接続、invocation session と stage 対象・検査済み index の照合 | 共有 Memory の配置、承認者の認証、実効認証・契約の確認、Dispatch・session への接続と再開照合（#69）、signed-in SDK の stage→管理 commit→独立レビュー受入れ（#53・#54・#72） |
 

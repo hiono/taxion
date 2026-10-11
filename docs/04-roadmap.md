@@ -60,11 +60,18 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 | --- | --- | --- |
 | [M10](https://github.com/hiono/taxion/milestone/16) | 階層化した Memory、Task Graph、Task lost の防止、実行契約 | #46〜#48・#66 |
 | [M11](https://github.com/hiono/taxion/milestone/17) | Go Copilot SDK、役割別 Session、system prompt・履歴の分離 | #49〜#51 |
-| [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映する自動実装・独立レビュー、実行主体・接続先・AI 契約の分離、commit 前の混入防止 | #52〜#54・#67・#69・#72 |
+| [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映する自動実装・独立レビュー、実行主体・接続先・AI 契約の分離、commit 前の混入防止、Human の途中介入と状況・根拠の質問 | #52〜#54・#67・#69・#72〜#74 |
 | [M13](https://github.com/hiono/taxion/milestone/19) | 再起動からの復旧、永続的な作業記録、外部基盤 adapter の分離・対応評価 | #55〜#57・#70 |
 | [M14](https://github.com/hiono/taxion/milestone/20) | 仕様検索、Memory の移行、skills・tools 連携 | #58〜#61 |
 | [M15](https://github.com/hiono/taxion/milestone/21) | ACP・Web、project 参加者の権限・契約・session 所有権、組合せ別の到達条件 | #62〜#63・#71 |
 | [M16](https://github.com/hiono/taxion/milestone/22) | Planner 採用と Rust 導入の評価 | #64〜#65 |
+
+[ADR-0024](adr/0024-human-handoff-control-and-side-questions.md) に基づき、
+M12 の #73 は受け渡し保留・途中中断・指示案の改訂、#74 は本流を変更しない質問と
+出典付き反映を実装する。#53 の自動進行と #67 の計画・Memory を再利用し、
+#54 の実 SDK 受入れに両方を含める。M13 の #55 は再起動と競合の復旧、
+M15 の #62・#63 は ACP・Web の共通操作と組合せ別の受入れを担当する。
+質問の観測は保留機能から独立して着手し、本流への反映は #73 と接続する。
 
 ## project・開発基盤・AI 契約の独立した管理
 
