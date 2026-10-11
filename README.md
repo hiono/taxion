@@ -183,6 +183,46 @@ preflight remain tracked in [#69](https://github.com/hiono/taxion/issues/69).
 TOML and JSON configuration inputs are future extensions; existing JSON APIs
 and machine artifacts keep their current formats.
 
+`config check --task <task-id>` additionally resolves `execution.approvalRef`
+against a sourced decision in that Task in the selected workspace. Its `text`
+holds a structured execution-configuration approval:
+
+```json
+{
+  "kind": "taxion.execution-config.v1",
+  "taskId": "task-id",
+  "reason": "Human approved these identities and this contract for the task",
+  "allowed": [
+    {
+      "version": 1,
+      "project": {"id": "project-a"},
+      "repository": {
+        "provider": "github", "host": "github.com", "path": "owner/application",
+        "account": "developer-a", "credentialRef": "scm-credential"
+      },
+      "runtime": {
+        "provider": "copilot", "account": "developer-b",
+        "credentialRef": "ai-credential", "contractRef": "company-contract"
+      },
+      "execution": {
+        "requester": "developer-a", "worker": "local-worker",
+        "approvalRef": "human-decision-1"
+      }
+    }
+  ]
+}
+```
+
+Store this object as the JSON string in the Task decision's `text`, with
+`id: "human-decision-1"` and its actual Human decision `source`, using the
+existing `task track --file` contract. Each `allowed` entry is a complete
+configuration tuple; accounts and contracts from different entries cannot be
+mixed. The Task repository path and approval reference must match, and pending
+Human decisions and terminal Tasks are rejected. Checking preserves the Task
+state. A recorded decision is local authorization evidence: this command does
+not authenticate its author, validate external credentials, or authorize a
+runtime operation. Those gates and durable runtime bindings remain in #69.
+
 Runtime commands require an active Task Graph Dispatch and a role-specific
 system prompt file. The Task's worktree and Dispatch recipient select the
 runtime role and workspace. The saved Dispatch snapshot is appended to the

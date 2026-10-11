@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/hiono/taxion/internal/config"
+	"github.com/hiono/taxion/internal/runtime/controller"
 )
 
 func configCmd(args []string) error {
@@ -23,6 +24,7 @@ func checkConfig(args []string, output io.Writer) error {
 	userFile := fs.String("user-file", "", "optional lower-priority user YAML settings")
 	projectFile := fs.String("project-file", "", "optional project YAML settings overriding user settings")
 	sources := fs.Bool("sources", false, "show field origins without configuration values")
+	task := fs.String("task", "", "check the resolved configuration against this Task's recorded approval")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -64,6 +66,16 @@ func checkConfig(args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if *task != "" {
+		db, err := openWorkspace()
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		if _, err := controller.CheckConfiguration(db, *task, resolved.Config); err != nil {
+			return err
+		}
+	}
 	if *sources {
 		var names []string
 		for name := range resolved.Sources {
@@ -75,6 +87,10 @@ func checkConfig(args []string, output io.Writer) error {
 				return err
 			}
 		}
+	}
+	if *task != "" {
+		_, err = fmt.Fprintln(output, "Configuration matches a sourced Task approval. Human identity, authentication, contract eligibility, and execution readiness have not been verified.")
+		return err
 	}
 	_, err = fmt.Fprintln(output, "Configuration schema and required references are valid. Authentication, approval authority, contract eligibility, and adapter availability have not been verified.")
 	return err
