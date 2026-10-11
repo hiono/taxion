@@ -127,8 +127,23 @@ assumed and unconfirmed evidence. Actual JSON-pointer sources are required;
 an `APPROVE` or execution verdict is not an allowed recommendation.
 The returned original observation remains attached when records change during
 reasoning. Recommendations are not applied automatically, and no model call is
-added to ordinary workflow progression. Structured versioned application of
-the chosen plan remains a separate unfinished requirement.
+added to ordinary workflow progression.
+
+`RecordPlannerDraft` / `workflow planner-draft` and watched `/adopt` select
+unchanged planning advice into an unapproved `SUPPLEMENT` draft. They compare
+the reconstructed context, result target, Memory, graph, flow contract and held
+boundary before publication. Missing/forged context fields cannot reuse a valid
+observation hash. The transaction rechecks the graph and Memory; independent
+Memory storage still does not provide a cross-database atomic snapshot.
+Only result-compatible `REVIEW` or `REPAIR` can enter the existing
+contract-preserving draft path. Observation/source metadata and uncertainty
+remain with the draft. Session IDs are reported provenance, not verified
+provider receipts. Core exact-ID replay checks preserve prior versions.
+Human draft approval and explicit handoff release remain separate operations;
+controller checks still govern dispatch and execution. `REPLAN`, `INVESTIGATE`,
+`HOLD`, `HUMAN_REQUIRED` and `REPORT` are not silently turned into a repair
+instruction. Changed-contract approval and unattended decision-driven
+progression remain unfinished.
 
 `runtime` and `workflow run|step` optionally accept
 `--strict-result-identities`: the native response schema pins the issued

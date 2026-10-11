@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -170,11 +171,12 @@ func conversationWatch(args []string, input io.Reader, output io.Writer) error {
 	if err := hold("Human opened a watched conversation; retain current execution but hold the next handoff"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(output, "Watched conversation: running flows hold the next handoff before input; existing execution is not cancelled. /step (or 続行) runs one role; /auto explicitly selects the flow's existing bounded automatic mode. /draft TEXT, /approve, /discard, /plan TEXT, /hold, /quit. /plan is isolated advisory reasoning, not permission to execute. Other text is a separate saved-record question. EOF leaves the hold unchanged."); err != nil {
+	if _, err := fmt.Fprintln(output, "Watched conversation: running flows hold the next handoff before input; existing execution is not cancelled. /step (or 続行) runs one role; /auto explicitly selects the flow's existing bounded automatic mode. /draft TEXT, /approve, /discard, /plan TEXT, /adopt, /hold, /quit. /plan is isolated advisory reasoning; /adopt proposes the last REVIEW/REPAIR advice as an unapproved draft, not permission to execute. Other text is a separate saved-record question. EOF leaves the hold unchanged."); err != nil {
 		return err
 	}
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 4096), 64*1024)
+	var lastPlan *controller.QuestionResult
 	for {
 		observation, err := controller.ObserveFeedback(db, *id)
 		if err != nil {
@@ -207,6 +209,20 @@ func conversationWatch(args []string, input io.Reader, output io.Writer) error {
 		command, body, _ := strings.Cut(text, " ")
 		var operationErr error
 		switch command {
+		case "/adopt":
+			if body != "" || lastPlan == nil {
+				operationErr = fmt.Errorf("/adopt requires the last successful /plan result and takes no text")
+				break
+			}
+			_, operationErr = controller.RecordPlannerDraft(db, storePath, controller.PlannerDraftRequest{
+				FlowID: *id, ID: "console-" + rand.Text(), ExpectedDraftID: observation.ExpectedDraftID,
+				ExpectedChangeID: observation.ExpectedChangeID, Target: observation.Target,
+				Actor: *actor, Source: *source, Reason: "Human explicitly selected the displayed Planner advice as an unapproved contract-preserving supplement",
+				Proposal: *lastPlan,
+			})
+			if operationErr == nil {
+				lastPlan = nil
+			}
 		case "/hold", "保留":
 			operationErr = hold("Human explicitly retained the handoff hold: " + text)
 		case "/draft":
@@ -276,8 +292,23 @@ func conversationWatch(args []string, input io.Reader, output io.Writer) error {
 			if command == "/plan" {
 				mode = "plan"
 			}
-			operationErr = conversationCmd([]string{mode, "--task", flow.TaskID, "--question", question,
-				"--max-tokens", fmt.Sprint(*tokens), "--timeout", timeout.String(), "--max-ai-credits", fmt.Sprint(*credits)}, output)
+			args := []string{mode, "--task", flow.TaskID, "--question", question,
+				"--max-tokens", fmt.Sprint(*tokens), "--timeout", timeout.String(), "--max-ai-credits", fmt.Sprint(*credits)}
+			if mode == "plan" {
+				lastPlan = nil
+				var captured bytes.Buffer
+				operationErr = conversationCmd(args, io.MultiWriter(output, &captured))
+				if operationErr == nil {
+					var result controller.QuestionResult
+					if err := core.DecodeGraphInput(&captured, &result); err != nil {
+						operationErr = fmt.Errorf("conversation: decode planning advice: %w", err)
+					} else {
+						lastPlan = &result
+					}
+				}
+			} else {
+				operationErr = conversationCmd(args, output)
+			}
 		}
 		if operationErr != nil {
 			if _, err := fmt.Fprintln(output, "Operation rejected:", operationErr); err != nil {

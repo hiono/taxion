@@ -101,7 +101,7 @@ func (r checkedConversationReader) Read(p []byte) (int, error) {
 }
 
 func TestWatchedConversationHoldsBeforeInputAndNeverApprovesOnEOF(t *testing.T) {
-	for _, text := range []string{"", "現在どうなっていますか？\n", "/plan Should we revise the plan?\n/quit\n", "/draft Check the saved acceptance carefully.\n/approve\n/quit\n", "/step\n/quit\n"} {
+	for _, text := range []string{"", "現在どうなっていますか？\n", "/adopt\n/quit\n", "/plan Should we revise the plan?\n/adopt\n/quit\n", "/draft Check the saved acceptance carefully.\n/approve\n/quit\n", "/step\n/quit\n"} {
 		t.Run(text, func(t *testing.T) {
 			old := storePath
 			dir := t.TempDir()

@@ -90,6 +90,7 @@ taxion workflow advance --id <flow-id>
 taxion workflow run --id <flow-id> --coder-prompt-file <path> --reviewer-prompt-file <path>
 taxion workflow show --id <flow-id>
 taxion workflow planning-context --id <flow-id>
+taxion workflow planner-draft --file <selected-planning-proposal.json>
 taxion conversation plan --task <id> --question "Repair or revisit the plan?" --max-tokens 8000 --timeout 2m --max-ai-credits 30
 taxion workflow recover --file <recovery-confirmation.json>
 taxion workflow handoff --file <hold-or-release.json>
@@ -127,9 +128,32 @@ that cited fields exist, not that the reasoning is semantically correct.
 This is an explicit paid operation requiring positive token, time and per-session
 credit ceilings; there is no automatic planner call after every role.
 `conversation watch` accepts `/plan TEXT` with its configured question ceilings.
-Advice does not release the hold, alter a verdict, issue a Dispatch or apply a
-new plan. Versioned application and an Orchestrator-selected execution path
-remain incomplete; existing automatic workflow behavior is unchanged.
+Advice does not release the hold, alter a verdict or issue a Dispatch.
+Existing automatic workflow behavior is unchanged.
+
+In a held running flow, `/adopt` selects the last successful `/plan` result
+as an **unapproved** versioned supplement. Only `REVIEW` after a saved successful
+Coder or `REPAIR` after a saved independent `REQUEST_CHANGES` within the repair
+ceiling can enter this path. `/approve` separately confirms that exact draft
+within the unchanged contract; `/step` separately releases and executes it.
+Neither planning nor adoption infers those choices. Changed observations,
+Memory, targets, hold IDs and draft versions are rejected; a failed `/plan`
+clears the console's cached proposal. Other recommendations require a separate
+investigation, replanning or Human decision, not a coerced repair.
+
+The same operation is available as `workflow planner-draft --file PATH`.
+Its request contains `flowId`, `id`, `expectedDraftId`, `expectedChangeId`,
+`target` from `workflow feedback-target`, `actor`, `source`, `reason`, and
+`proposal` containing the exact JSON result from `conversation plan`.
+The output stores observation times/hash, source result/SHA targets, Memory
+versions, reasoning and uncertainty in the draft, without recursively embedding
+full histories. Repeating identical IDs/content returns the original version;
+reusing an ID with different content is rejected. Imported session IDs and
+actor/source fields are supplied provenance, not authenticated provider/Human
+identity. Semantic validity and contract preservation still require the explicit
+Human supplement approval. Scope, acceptance, identities or budget revisions,
+unattended Orchestrator-selected execution and new-request intake remain
+incomplete.
 
 `runtime` and `workflow run|step` accept `--compact-context` to omit recursively
 nested prior instructions from the role prompt. Exact prior results, findings,

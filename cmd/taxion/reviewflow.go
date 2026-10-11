@@ -19,7 +19,7 @@ import (
 
 func workflowCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|feedback-target|planning-context|feedback|feedback-resolve|draft|draft-discard|draft-approve|show}")
+		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|feedback-target|planning-context|planner-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show}")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
@@ -32,7 +32,7 @@ func workflowCmd(args []string) error {
 	var scanner string
 	var maxAICredits float64
 	switch action {
-	case "start", "recover", "handoff", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve":
+	case "start", "recover", "handoff", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve", "planner-draft":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
 	case "advance", "show", "feedback-target", "planning-context":
 		fs.StringVar(&id, "id", "", "review flow ID")
@@ -69,15 +69,31 @@ func workflowCmd(args []string) error {
 	if managedStage && !managedCommit {
 		return fmt.Errorf("workflow: --managed-stage requires --managed-commit")
 	}
-	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve"
+	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve" || action == "planner-draft"
 	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" {
-		return fmt.Errorf("workflow start, recover, handoff, feedback, feedback-resolve, draft, draft-discard and draft-approve require --file; advance, run, step, show, planning-context and feedback-target require --id")
+		return fmt.Errorf("workflow start, recover, handoff, feedback, feedback-resolve, draft, draft-discard, draft-approve and planner-draft require --file; advance, run, step, show, planning-context and feedback-target require --id")
 	}
 	db, state, err := loadWorkspace()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	if action == "planner-draft" {
+		input, err := os.Open(file)
+		if err != nil {
+			return err
+		}
+		defer input.Close()
+		var request controller.PlannerDraftRequest
+		if err := core.DecodeGraphInput(input, &request); err != nil {
+			return err
+		}
+		flow, err := controller.RecordPlannerDraft(db, storePath, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(flow)
+	}
 	if action == "planning-context" {
 		flow, ok := state.Graph.ReviewFlow(id)
 		if !state.HasGraph || !ok {
