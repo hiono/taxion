@@ -61,27 +61,26 @@ acceptance、requiredEvidence、exitCondition、
 dispatch 前には branch、worktree、baselineSha も要求する。これらは Task の契約から
 Dispatch 指示へ複写される。targetSha は dispatch 時点で未確定でもよく、
 指示にはその時点の値を保存する。
-decision は ID、source、text を持ち、以前の decision の削除・上書きはできない。
-新しい判断は別 ID で追加する。
+decision は一意の ID、source、text を持ち、修正した判断は新しい ID で追記する。
 人間の選択が必要な場合は `humanDecision` に質問、選択肢、推奨選択肢と理由を記録し、
-Task を `HUMAN_DECISION_REQUIRED` にする。選択した option ID と対応する decision record を
-追記するまで READY に戻せず、実行もできない。
+Task を `HUMAN_DECISION_REQUIRED` にする。選択後は option ID と対応する decision record を
+追記してから READY へ戻す。
 `memoryRefs` は `lesson:ID`、`decision:ID`、`guardrail:ID`、`concern:ID` の形式で
 Memory 記録を参照する。Task Graph は参照 ID だけを保持し、Memory 本文を複製しない。
 dispatch 時に参照先が存在し、失効・置換されていないことを確認する。
-guardrail の参照先は承認済みでなければならない。Memory DB がないのに参照が設定されている場合も拒否する。
-Memory 間の矛盾は `memory conflict` で人が明示し、未解決ならどちらの参照も dispatch できない。
+guardrail の参照先は承認済みとし、Memory reference を使う workspace では Memory DB を読み込む。
+`memory conflict` に登録した矛盾は人が解決してから、その Memory reference を dispatch に使う。
 issue は URL、`Issue #番号`、`INHERITED: Issue #番号`、
 `PENDING: 登録TaskID`、または理由付きの `NOT_REQUIRED:` を使う。
 PENDING は登録 Task の COMPLETED を依存に持ち、実行前に実際の参照へ更新する。
-NOT_REQUIRED の理由の妥当性や外部 Issue の実在は、この局所検査だけでは保証しない。
+局所検査は参照形式と NOT_REQUIRED の理由記載を確認する。外部 Issue の状態は GitHub 上で確認する。
 
 `deferredReason` を持つ Task は BLOCKED と nextAction・resumeCondition を要求する。
 再開時は BLOCKED のまま `task track` で保留を解除し、
 判断と理由を残してから READY へ遷移する。
 却下・cancel・置換へ進めても以前の保留理由と履歴を保持する。
-契約の編集は DRAFT・BLOCKED・HUMAN_DECISION_REQUIRED に限定する。
-active または terminal の契約は直接書き換えない。
+契約は DRAFT・BLOCKED・HUMAN_DECISION_REQUIRED の状態で編集する。
+active と terminal の Task は履歴を維持し、変更は後続 Task として登録する。
 
 ## 状態遷移と完了
 
@@ -101,7 +100,7 @@ SUPERSEDED は置換する Task の登録を要求する。terminal 状態から
 BLOCKED・HUMAN_DECISION_REQUIRED からは DRAFT または READY へ進む。
 READY から契約を見直す場合は DRAFT に戻す。
 依存の状態変更で後続の実行条件が失われた場合は BLOCKED に変更し、
-理由を履歴に保存する。これは worker の停止が確認されたことを意味しない。
+理由を履歴に保存する。worker の停止は別の停止操作とその結果で記録する。
 
 proof の `outputSha` は証拠受け渡し時に対象 SHA を更新する。
 APPROVED・COMPLETED は次の proof を要求する。
@@ -122,17 +121,17 @@ APPROVED・COMPLETED は次の proof を要求する。
 }
 ```
 
-Task の requiredEvidence と acceptance を満たす参照、reviewer との一致、
-owner とは異なる reviewer、targetSha との一致を検査する。
+Task の requiredEvidence と acceptance、owner と異なる reviewer、targetSha との一致を検査する。
 親の承認・完了には子の完了を要求し、
 未完了の子を暗黙に達成扱いにしない。
 例外は `exceptionIds` と decision に登録した ID を使い、
 proof の `waivers` に decisionId と免除する acceptance・evidence・children を明示する。
-レビュー情報の欠落は免除しない。
+waiver の適用後も reviewer と reviewedSha の proof を要求する。
 
-これは構造化した結果の照合であり、Git の object や検証レポートの実在、
-Reviewer process の独立性を保証するものではない。
-既存の `review` による SHA 記録だけで Graph は承認・完了へ進まない。
+completion proof は報告された action、evidence、acceptance、reviewer、reviewedSha を照合する。
+Git object と検証レポートの実物は repository と test record で確認する。
+Graph は reviewer ID が Task owner と異なることと、reviewedSha が targetSha に一致することを検査する。
+既存の `review` command は SHA evidence を Ledger に記録し、Graph の承認・完了は proof を使う Task transition で行う。
 dispatch は Graph の READY、依存、承認済み scope、worktree、baseline SHA を検査する。
 発行時に Task を ACTIVE にし、Task の関係、実行範囲、必要証拠、返却形式を含む
 Dispatch 指示を不変の snapshot として保存する。指示 hash は保存内容から計算し、
@@ -140,10 +139,12 @@ CLI と ACP は同じ snapshot を人が読める形で表示する。
 指示には `DISPATCH TO` を先頭に、Dispatch の関係、Task の親子・依存関係、
 目的、scope、証拠と終了条件、worktree・branch・SHA、返却形式を含める。
 `AUTHORIZED ACTIONS` は Task の `scope`、`FORBIDDEN ACTIONS` は `outOfScope` から作る。
-これらは指示に保存する制約であり、OS や Git の操作を隔離する sandbox ではない。
+これらは role に渡す実行指示である。Copilot adapter は SDK permission request に対し、
+Coder の worktree 内 file write と allowlist 済み SDK tool、Reviewer の worktree 内 read を制御する。
+OS と Git、外部 tool の操作は、それぞれの実行環境と tool の権限で管理する。
 後続 Dispatch は変更・維持した instruction field を保存する。`CONTINUES` はすべての
 実行契約 field が前回と一致するときに限り、`AMENDS` は少なくとも一つを変更するときに使う。
-`INDEPENDENT` は別 Task を参照するため、前回 instruction との比較は行わない。
+`INDEPENDENT` は別 Task の指示を示し、その Task の契約を個別に検査する。
 
 ```sh
 taxion dispatch --task TASK-ID --repo owner/repository
@@ -155,15 +156,14 @@ taxion dispatch transition --id DISPATCH-ID --status SUCCEEDED --actor worker --
 終端状態への遷移には `DispatchResult` JSON を必要とする。result の Dispatch ID、
 Task ID、recipient、repository、status が対象 Dispatch と一致し、startedSha が
 指示の baselineSha と一致することを検査する。SUCCEEDED には outputSha、成功した
-validation、必須 evidence を要求する。終端 Dispatch の状態は再遷移できないため、
-以前の Dispatch に属する結果で新しい Dispatch を完了させることはできない。
+validation、必須 evidence を要求する。終端状態は Dispatch ID ごとに一度確定する。
+Dispatch ID で結果と状態遷移の対象を特定する。
 Reviewer の SUCCEEDED result には verdict、全 acceptance の判断と evidence、
 findings、worktree の変更有無を追加し、APPROVE は全件 PASS・finding なし・変更なしの場合に限る。
 runtime はこの result schema を SDK に渡し、最終応答を Task・Dispatch の保存済み条件と照合する。
-照合済みの応答も Git object や検証コマンドの実行を証明しないため、状態を変えるには
-別途 `dispatch transition --result-file` を実行する。
-結果の SHA や検証内容は caller が申告した値であり、Git object・コマンド実行・証拠の
-実在をこの検査だけで確認するわけではない。
+caller は照合済みの応答を `dispatch transition --result-file` に渡して状態を更新する。
+transition は caller が報告した SHA、validation、evidence の必須項目と整合性を検査する。
+Git object、検証コマンド、証拠の実物は、repository と test record を参照して別途確認する。
 
 result の形は次のとおりとする。
 
@@ -194,39 +194,39 @@ relationship reason を明示する。最初の Dispatch だけが `NONE` を使
 `runtimeSessionId` と `runtimeConfigHash` は Dispatch に結び、SQLite の workspace state に保存する。
 同じ SDK session は同一 Task・recipient・設定 hash の範囲だけで再利用できる。
 `runtimeUsage` は SDK が返す model、Auto 選択、input/output token、cache read/write token を保持する。
-取得できない値は省略し、ゼロとして扱わない。usage event は計測時刻とともに Dispatch に保存する。
+取得できた値を usage event に記録し、未取得値は未知として保持する。各 event は計測時刻とともに Dispatch に保存する。
 resume 時は role prompt、Dispatch snapshot、worktree、tool allowlist、permission policy を再指定し、設定 hash の一致を照合する。
-Coder は worktree 内の file write と allowlist 済み SDK tool の一回限りの利用を許可し、shell と worktree 外の操作を拒否する。
-Reviewer は worktree 内の file read だけを許可し、write・shell 等を拒否する。
-permission handler は OS sandbox ではなく、Git 操作やすべての外部 tool の隔離を証明しない。
+Copilot adapter の permission handler は、Coder に worktree 内の file write と allowlist 済み SDK tool の一回限りの利用を認め、
+Reviewer に worktree 内の file read を認める。shell request と worktree 外の file access は reject decision を返す。
+この handler は SDK permission request を処理し、OS・Git・外部 tool は各実行環境の権限で動作する。
 
 CLI `runtime start` は保存済み Dispatch 指示を role 固有 system prompt に加えて session を作り、
 短い実行要求を送る。`send` は追加指示を渡す。event cursor で新しい turn の出力だけを読み、
 SDK compaction 後も role と Task Graph の実行契約が system context に残る。
 context 使用量と compaction の結果を event stream で確認できる。
-turn の完了や出力イベントは Dispatch 成功の証拠にならず、終了時は結果 schema に従った明示的な遷移が必要。
-ACP と HTTP API は Copilot session を自動起動しない。
+CLI は最終応答を Dispatch result schema と保存済み条件に照合する。
+operator は照合結果を `dispatch transition --result-file` に渡して状態を更新する。
+ACP と HTTP API は `internal/runtime/local` を利用し、Copilot session は明示的な runtime command から起動する。
 
 ## 保存・互換性と制約
 
-Graph がない workspace は旧方式を維持する。
-Graph を導入した workspace は全 dispatch 対象の登録が必要で、
-CLI・HTTP・ACP の共通検査が未登録、非 READY、repository 不一致を拒否する。
-既存の active Dispatch がある場合は、新規 Graph の導入を拒否する。
-実行状態を確認して既存の Dispatch を解決してから移行し、
-active な作業を DRAFT として再登録しない。
-Web は HTTP の拒否を返す。Graph の read/edit HTTP・ACP API はまだない。
-既存 Ledger の wire は変更しない。
+Graph を持たない workspace は Ledger の旧方式で動作する。
+Graph を導入した workspace は dispatch 対象をすべて登録し、CLI・HTTP・ACP が
+登録状態、READY、repository の一致を検査する。
+移行前に既存の active Dispatch を解決し、実行中の Task 状態を保って Graph に登録する。
+Web は HTTP の検査結果を表示する。Graph の read/edit API は今後の HTTP・ACP 拡張に含める。
+既存 Ledger の wire format は維持する。
 
-Graph の保存は検証後の rename とし、失敗した登録・遷移では保存内容を変更しない。
+Graph の登録・遷移は検証後に rename で保存し、検証が完了するまで現在のファイルを維持する。
 CLI・HTTP・ACP の更新は SQLite transaction で Ledger と Graph を一緒に変更する。
 SQLite が同時 writer の更新を受け入れられない場合は明示的なエラーとなり、
 呼び出し元は成功として扱わず再試行できる。
-移行元 JSON を残している間も SQLite との同期は行わないため、SQLite の復元には使えない。
-Graph の破損、非対応の version、未知のキー、履歴と現状態の不一致はエラーとする。
-この履歴検査は改ざん防止や管理者による全体の書き換え検出を保証しない。
+移行元 JSON は初期データとして読み込み、以後の workspace 更新を SQLite に保存する。
+移行後の正本は SQLite workspace state であり、移行元 JSON は初期 snapshot として保持する。
+Graph 読み込み時は version、キー、履歴、現状態の整合性を検査する。
+履歴検査は transition と proof を照合し、不整合があればエラーを返す。
 
 Memory の参照先の検証と指示生成、Session の実行・再開、
 Human の実際の認証・承認確認は後続 Issue で実装する。
-保存した actor・decision・proof は caller が供給する記録であり、
-記録した文字列だけで実際の権限や実施を保証しない。
+actor・decision・proof は caller が供給する作業記録である。
+実行環境の権限確認と repository・test record の証拠は、それぞれの管理元で確認する。

@@ -8,30 +8,25 @@ Accepted
 
 [ADR-0020](0020-layered-memory-and-role-sessions-for-orchestration.md)
 の情報保持と実行契約を具体化する。以下は採択した設計であり、
-現在の Ledger schema や実装済み API を表すものではない。
+現在の Ledger schema と API の状態は、参照仕様と実装記録に記載する。
 
 ## Context
 
-会話に作業を記載するだけでは、保留した懸念、以前の許可、実行中の指示が
-次の担当へ引き継がれない。Task を記録しても、対象の repository、
-依存する作業、必要な証拠、指示の変更関係が不明なら安全に実行できない。
+Task Graph と Dispatch に保留した懸念、以前の許可、実行中の指示を保存し、
+repository、依存作業、必要な証拠、指示の変更関係を次の担当へ渡す。
 
-元の会話では、保守性の懸念に対して「解決策が未決なので Task を作らない」
-という扱いが提示され、ユーザーが、後で忘れて対応しなくなる扱いだと指摘した。
-問題は実装を今すぐ行わないことではなく、確認された懸念に Task ID を付与せず、
-追跡から外したことにある。この軌道修正から、scope out は実行範囲や優先順位の
-判断であって、Task の保持を解除する判断ではない、という規則に至った。
+元の会話では、保守性の懸念に解決策が未決でも Task ID を付けて記録するよう、
+ユーザーが運用を修正した。scope out は実行範囲や優先順位を決める判断として扱い、
+Task の状態と再開条件を保持する。
 
-要件の確認には、元の会話のユーザー発言と、その後に追加された規則を用いる。
-初期のテンプレートや提案をそのまま最終仕様と扱わない。
-公開文書には一般化した決定を記録し、非公開の会話本文、識別情報、
-資料の参照先を転記しない。
+要件は、元の会話で示されたユーザーの判断と、その後に追加された運用規則から定める。
+公開文書には一般化した決定を記録し、非公開情報は承認された範囲で管理する。
 
 | 要件の変化 | 採択する内容 |
 | --- | --- |
 | scope out した懸念に Task ID を付けず、追跡から失う扱いへの指摘 | 実行許可や解決策が未決でも Task ID を付け、判断・理由と再開条件を残す |
 | 改訂された運用規則で Task schema と状態を定義 | 作業、依存関係、権限、acceptance、証拠を構造化する |
-| 内部登録だけでは作業を確認できないという追加規則 | 必要な Issue または既存 Issue 内の Task 記録を実行前に用意する |
+| 作業を外部から確認する追加規則 | 必要な Issue または既存 Issue 内の Task 記録を実行前に用意する |
 | 後続の指示で以前の指示が不明になるという追加規則 | Task ID と Dispatch ID を分け、変更関係と実行状況を永続化する |
 | 古いレビュー結果が再提示された実例 | 結果を Dispatch・対象 SHA と照合し、状態を巻き戻さない |
 
@@ -40,7 +35,7 @@ Accepted
 ### Task は成果物と判断を保持する単位にする
 
 すべての実行可能な作業と、確認された重要な懸念を Task Graph に登録する。
-Task ID は不変で再利用しない。通常の retry は同じ Task ID を使い、
+Task ID は作業ごとに一意とし、通常の retry では同じ ID を使う。
 repository、実質的な scope、成果物、独立したレビューの単位が変わる場合は
 別 Task として関連づける。置き換えた Task も履歴に残す。
 
@@ -61,10 +56,9 @@ GitHub では PR に対応づける。worktree、Session、指示の版と権限
 Dispatch に保持し、Task の対象と照合する。
 
 Task Type は INVESTIGATION、DESIGN、IMPLEMENTATION、REVIEW、
-EVIDENCE_COLLECTION を区別する。調査や設計の許可だけで実装へ進めない。
+EVIDENCE_COLLECTION を区別する。実装は IMPLEMENTATION の scope と Dispatch authorization に従って行う。
 原因が不明な懸念は INVESTIGATION、選択肢が必要な懸念は DESIGN として残す。
-今は実行しないこと、親の scope 外であること、永久に却下すること、
-cancel することを同じ扱いにしない。
+保留、親の scope 外、却下、cancel はそれぞれ Task の状態と判断理由に記録する。
 
 Task を追加する前に、完了・保留・却下・cancel・置換済みも含めて同等の作業を探す。
 既存 Task を使う場合は証拠と判断の履歴を保持する。
@@ -73,15 +67,15 @@ Created From から起点となる依頼、懸念、指摘を参照できるよ�
 ### scope out による Task lost を防ぐ
 
 確認された重要な懸念に Task ID がない状態は、Task Graph の整合性エラーとする。
-「今回は対象外」「後で検討する」と会話や Memory に書くだけでは追跡を満たさない。
-懸念の保存と実装の許可を分け、原因や解決策が未決でも調査・設計 Task を作成できる。
-Task の作成は実装権限の付与を意味しない。
+scope out や後日の検討を決めた懸念は、Task ID、出典、状態、再開条件とともに Task Graph に保存する。
+懸念の保存と実装権限を分け、原因や解決策が未決の段階では INVESTIGATION または DESIGN として登録する。
+Dispatch が許可する操作は Task の実装権限と scope から構成する。
 
 scope out する際は、既存 Task との重複を確認したうえで Task ID、出典、
 対象外とした範囲と理由、現在の状態、判断待ちや依存、次の行動と再開条件を残す。
-親の scope 外なら適切な親へ関連づけるか独立した作業として保持し、
-現在の Critical Path から外れても検索と後続の計画の対象から除外しない。
-却下や cancel は明示的な判断と理由を必要とし、単なる保留から推測しない。
+親の scope 外の Task は適切な親へ関連づけるか、独立した作業として保持する。
+Critical Path の外にある Task も検索と後続の計画で参照できる。
+却下と cancel は明示的な判断・理由を付け、保留とは別の状態で記録する。
 
 検証では、懸念の提示、scope out、別の作業の進行、Session の再作成または再起動、
 後続の計画作成を順に通す。同じ Task ID と出典、保留理由、再開条件を復元でき、
@@ -90,27 +84,26 @@ Task の一覧表示だけでなく、未付与の検出と後続計画での利
 
 ### 依存関係と完了条件を検査する
 
-Depends On は Task ID と必要な状態を組にする。兄弟関係だけでは依存や順序を作らない。
+Depends On は Task ID と必要な状態を組にする。Sibling 関係は階層を示し、依存と実行順序は Depends On に記録する。
 Blocks は依存関係から整合するように管理し、状態変更時に後続 Task を再評価する。
-循環依存や未充足の必須依存を持つ作業は実行しない。
-安全な準備作業は、未決の判断を先取りしない範囲で明示的に許可する。
+実行前に依存グラフの循環と必須状態を検査し、必須条件を満たす作業を実行する。
+未決の判断がある場合は、その判断を保ったまま行える準備作業を明示的に許可する。
 
 Task の状態は DRAFT、READY、ACTIVE、WAITING_FOR_EVIDENCE、
 WAITING_FOR_REVIEW、REQUEST_CHANGES、BLOCKED、HUMAN_DECISION_REQUIRED、
 APPROVED、COMPLETED、REJECTED、CANCELLED、SUPERSEDED とする。
-APPROVED と COMPLETED は別であり、プロセスの終了だけで完了にしない。
+APPROVED は受け入れ条件と review proof の承認を示し、COMPLETED は必要な証拠と子 Task を含む完了を示す。
 COMPLETED には実施、必要な証拠、独立レビュー、acceptance の充足または
 該当する明示承認済みの例外、依存 Task の再評価を必要とする。
 
 親 Task の完了には必須の子 Task の結果を照合する。
-子の REJECTED・CANCELLED・SUPERSEDED を無条件の達成とみなさず、
-有効な判断、代替 Task の結果、または承認された免除によって
-親の acceptance が満たされることを確認する。
+子が REJECTED・CANCELLED・SUPERSEDED の場合、親の acceptance は有効な判断、
+代替 Task の結果、または承認済みの waiver で満たす。
 
 blocker は TECHNICAL、PROCESS、HUMAN_DECISION、SCOPE_BOUNDARY、
 GUIDANCE_VIOLATION、EVIDENCE_GAP、DEPENDENCY_BLOCKED を区別し、
 原因と解消条件を保持する。複数の blocker は ID で識別する。
-権限がないことを、権限を迂回・取得するための作業に置き換えない。
+権限を要する作業は、controller が認めた scope と承認経路に従って実行する。
 
 ### 必要な外部記録を実行前に用意する
 
@@ -122,14 +115,13 @@ Human の判断を必要とする作業は、Issue で追跡できるように�
 
 Issue の値は専用参照、既存 Issue からの継承、登録 Task を示す PENDING、
 または理由付きの NOT_REQUIRED に分類する。
-初期の「値がなければ NONE」という一般規則を、実行可能な Task の Issue には適用しない。
+実行可能な Task は、専用参照、継承参照、PENDING、理由付き NOT_REQUIRED のいずれかを明示する。
 NOT_REQUIRED は永続的な後続作業も独立レビューも不要な場合に限る。
-必要な Issue が未登録なら登録 Task を前提に置き、本作業を開始しない。
-実装後の報告だけでは実行前の確認機会を満たさない。
+必要な Issue がない場合は登録 Task を前提に置き、その完了後に実装へ進む。
+実行前に作業記録を提示し、scope と acceptance を確認できる状態にする。
 
 外部更新の主体と権限は controller が管理する。
-元の指示形式にあった Issue 登録担当の表記を、
-Coder に無制限の外部更新権限を与える理由にしない。
+Coder の外部更新は controller が明示した権限と scope に従う。
 
 ### Dispatch は一回の実行指示として管理する
 
@@ -150,8 +142,8 @@ Task ID は作業、Dispatch ID は特定の実行指示を識別する。
 同じ Task の実行可能な active Dispatch は原則一つとする。
 独立した並行作業は子 Task に分け、repository、branch、worktree、ファイル、
 Issue・PR、依存関係、acceptance、資源の競合を検査する。
-CONTINUES を重複実行の許可には使わない。
-AMENDS の新しい指示が正常に発行されるまでは、以前の指示を置換済みにしない。
+CONTINUES は同一作業の継続記録として使い、並行作業は独立した child Task に分ける。
+新しい AMENDS が発行されるまで、以前の Dispatch を active 指示として保持する。
 
 Dispatch には ID、Task ID、Repository、Recipient、Status、Relationship、
 Related Dispatch ID、Instruction Summary、Issued Evidence、Acknowledged、
@@ -162,19 +154,16 @@ Execution Started、Execution Result、Last Updated By、Last Transition を保�
 Human の質問・コメント・懸念は原則 NO_CHANGE とする。
 明示的な変更要求、無効になった証拠、scope 違反、必須の制約違反などがなければ
 active Dispatch を維持し、懸念は別 Task として保存する。
-実行中または開始状況が不明な作業を、即時 cancel 済みとは扱わない。
-必要な場合は安全な停止の証拠を確認してから競合する作業を発行する。
+実行中または開始状況が不明な作業は状態を確認し、安全停止の証拠を得てから競合する作業を発行する。
 完了した Dispatch は遡って取り消さず、是正・後続 Task を作る。
 
-後続の停止規則には Task の SUSPENDED という表記もあるが、
-上記の Task 状態一覧には含まれない。
-本設計では停止中の Dispatch を区別し、Task は BLOCKED と停止・再開条件で表す。
-wire の実装時に無断で別の Task 状態を追加しない。
+Dispatch の `SUSPENDED` result は停止 evidence と `resumeCondition` を保存し、
+active 扱いで同じ Task の重複発行を防ぐ。Task は `BLOCKED` とし、
+`nextAction`・`resumeCondition` に再開条件を記録する。
 
 ### 指示と返却結果を自己完結させる
 
-最終的な指示の順序は次のとおりとする。初期形式より後に追加された
-Dispatch の識別・変更関係を省略しない。
+最終的な指示の順序は次のとおりとし、Dispatch の識別と変更関係を先頭に含める。
 
 ```text
 DISPATCH TO:
@@ -203,14 +192,14 @@ RETURN FORMAT:
 Planner の実行契約は別の採用判断で定義する。
 baseline、対象 SHA、worktree は必要な証拠と操作条件に明示し、
 構造化した実行契約と表示する指示を一致させる。
-置換指示を理解するために過去の会話を組み合わせる必要をなくす。
+置換指示は Task と Dispatch の保存済み snapshot から単独で理解できる形にする。
 
 返却結果には Task・Dispatch・role・repository、status、開始・生成・検証対象の SHA、
 変更ファイル、検証コマンドと exit code、証拠の参照、blocker、
 要求する次の遷移を含める。Reviewer は verdict、findings、
 acceptance ごとの判断、worktree の変更有無を返す。
-controller が Git と保存済み契約に照合し、古い結果、途中出力、
-自己申告だけの承認を現在の完了へ変換しない。
+runtime は最終応答を保存済み契約に照合し、Task・Dispatch の遷移は構造化された result と proof を検査する。
+Git object と検証結果の実物は repository と test record で確認し、その根拠を result に関連づける。
 
 ## Consequences
 
@@ -227,4 +216,4 @@ controller が Git と保存済み契約に照合し、古い結果、途中出�
 [#67](https://github.com/hiono/taxion/issues/67) で追跡する。
 既存の [Ledger schema](../05-ledger-schema.md) は現在の wire の参照として維持し、
 拡張時には migration と互換性を定義する。
-既存の小さい Task・Dispatch 型を、この設計に対応済みとは扱わない。
+現在の Task・Dispatch 型は実装時にこの設計へ拡張し、更新した wire と migration を参照する。

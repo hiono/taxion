@@ -14,7 +14,7 @@ procedures, and failure lessons are carried over as sanitized docs.
 採択した製品要件は [Taxion の要件と到達条件](docs/09-orchestration-requirements.md)
 を参照する。階層化した Memory と Go Copilot SDK の役割別 Session による
 自動実装・独立レビューは、現在の部品から実装する次の到達条件である。
-以下は現在の構成であり、この到達条件の達成を意味しない。
+以下は現在の構成を示す。到達条件の進捗は Roadmap と対応 Issue の完了条件で確認する。
 
 ```
 Taxion Core (SDK-neutral)
@@ -90,18 +90,21 @@ Runtime commands require an active Task Graph Dispatch and a role-specific
 system prompt file. The Task's worktree and Dispatch recipient select the
 runtime role and workspace. The saved Dispatch snapshot is appended to the
 role prompt as the session's durable contract, so it remains part of the system
-context across turns and SDK compaction. Tool access defaults to none; use `--tools` only
-for an explicit SDK allowlist. Reviewer sessions reject writes, shell commands,
-and reads outside their assigned worktree. These permission checks are not an
-OS sandbox. Resume requires the original prompt, CLI, worktree, and tool
-configuration to match the persisted hash. Usage events record the selected
-model and available token/cache counts in SQLite; absent SDK values remain
-unknown. Infinite-session compaction is enabled and its context/compaction
-events are reported. Coder permissions allow worktree file writes and
-one-time use of explicitly allowlisted SDK tools; Reviewer permissions allow
-worktree reads only. Neither policy permits shell execution or acts as an OS
-sandbox. Model-reported results still require the explicit Dispatch result
-transition; a finished model turn is not a successful Dispatch result.
+context across turns and SDK compaction. SDK tools require an explicit
+`--tools` allowlist. The SDK permission handler grants Coder file writes within
+the assigned worktree and one-time use of allowlisted SDK tools; Reviewer
+sessions receive read access to that worktree. The handler applies to SDK
+permission requests, while host and external tools use their own security
+controls. Resume verifies that the prompt, CLI, worktree, and tool configuration
+match the persisted hash.
+
+Usage events record the selected model and available token/cache counts in
+SQLite; missing SDK measurements remain unknown. Infinite-session compaction
+is enabled, and its context and outcome events are reported.
+
+The CLI validates the final structured response against the saved Dispatch
+contract. An operator submits that result through the explicit Dispatch
+transition, which checks the reported fields before changing state.
 
 The CLI is local-first. `taxion serve` provides the HTTP API, `taxion acp`
 provides ACP over stdio, and `web/` provides the browser console.
