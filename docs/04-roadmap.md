@@ -74,8 +74,10 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 Go の型付き設定を共通契約として維持する。
 設定は固定 Global／Project YAML と環境変数を用い、
 優先順位を環境変数 > Project > Global とする。
-任意ファイル指定 option の廃止と `.taxion/` 全体の Git 混入防止は
-#69 の移行作業とする。mise・CI は環境変数を注入し、
+`config check` は任意ファイル指定 option を廃止し、
+`.taxion/` 全体と cwd の実 `.env` の Git 状態を検査する。
+共有 Memory の配置と runtime 接続は #69 の後続作業とする。
+mise・CI は環境変数を注入し、
 実 `.env` はローカルの未追跡・ignore 対象として扱う。
 commit 前の index・秘密検査と明示 hook 導入は M12 #72、
 未公開コミットと外部記録の公開前検査は M13 #56、

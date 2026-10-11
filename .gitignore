@@ -31,5 +31,5 @@ Thumbs.db
 *.pem
 *.key
 
-# Local Taxion configuration
-/.taxion/config.yaml
+# Local Taxion configuration, state and cache
+/.taxion/

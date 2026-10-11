@@ -23,7 +23,11 @@ func CheckGitPolicy(path string) error {
 		return fmt.Errorf("resolve configuration symlinks: %w", err)
 	}
 	for _, candidate := range []string{selected, resolved} {
-		if err := checkGitPath(candidate); err != nil {
+		info, err := os.Stat(candidate)
+		if err != nil {
+			return fmt.Errorf("inspect local configuration path: %w", err)
+		}
+		if err := checkGitPath(candidate, info.IsDir()); err != nil {
 			return err
 		}
 		if selected == resolved {
@@ -33,8 +37,50 @@ func CheckGitPolicy(path string) error {
 	return nil
 }
 
-func checkGitPath(path string) error {
+func checkProjectGitPolicy(projectDir string) error {
+	directory, err := filepath.Abs(filepath.Join(projectDir, ".taxion"))
+	if err != nil {
+		return fmt.Errorf("resolve local Taxion directory: %w", err)
+	}
+	if err := checkGitPath(directory, true); err != nil {
+		return fmt.Errorf("local .taxion directory: %w", err)
+	}
+	for _, path := range []string{directory, filepath.Join(projectDir, ".env")} {
+		_, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			if path != directory {
+				absolute, err := filepath.Abs(path)
+				if err != nil {
+					return fmt.Errorf("resolve local dotenv path: %w", err)
+				}
+				if err := checkGitPath(absolute, false); err != nil {
+					return fmt.Errorf("local dotenv Git policy: %w", err)
+				}
+			}
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect local configuration path: %w", err)
+		}
+		if err := CheckGitPolicy(path); err != nil {
+			return fmt.Errorf("local configuration Git policy: %w", err)
+		}
+	}
+	info, err := os.Stat(directory)
+	if err == nil && !info.IsDir() {
+		return fmt.Errorf("local .taxion path must be a directory")
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect local Taxion directory: %w", err)
+	}
+	return nil
+}
+
+func checkGitPath(path string, isDirectory bool) error {
 	directory := filepath.Dir(path)
+	if isDirectory {
+		directory = path
+	}
 	for {
 		_, err := os.Lstat(filepath.Join(directory, ".git"))
 		if err == nil {
@@ -59,19 +105,57 @@ func checkGitPath(path string) error {
 		return fmt.Errorf("configuration path lies outside its detected Git worktree")
 	}
 	relative = filepath.ToSlash(relative)
+	// Git cannot inspect a path beyond a symlink. Check the indexed link here;
+	// CheckGitPolicy separately checks the fully resolved target.
+	parts := strings.Split(relative, "/")
+	current := root
+	for i, part := range parts {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("inspect configuration Git path: %w", err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			relative = strings.Join(parts[:i+1], "/")
+			isDirectory = false
+			break
+		}
+	}
 	tracked, err := configGit(root, "--literal-pathspecs", "ls-files", "--cached", "-z", "--", relative)
 	if err != nil {
 		return fmt.Errorf("inspect configuration tracking: %w", err)
 	}
 	if len(tracked) != 0 {
-		return fmt.Errorf("configuration file is Git-tracked; remove it from the index and add an ignore rule before loading")
+		return fmt.Errorf("local configuration path or descendant is Git-tracked; remove it from the index and add an ignore rule before loading")
 	}
-	if _, err := configGit(root, "check-ignore", "-q", "--", relative); err != nil {
+	ignorePath := relative
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		if isDirectory {
+			ignorePath += "/"
+		} else {
+			return nil
+		}
+	} else if err != nil {
+		return fmt.Errorf("inspect local configuration path: %w", err)
+	}
+	if _, err := configGit(root, "check-ignore", "-q", "--", ignorePath); err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) && exit.ExitCode() == 1 {
-			return fmt.Errorf("configuration file requires a Git ignore rule before loading")
+			return fmt.Errorf("local configuration path requires a Git ignore rule for the entire path before loading")
 		}
 		return fmt.Errorf("inspect configuration ignore rules: %w", err)
+	}
+	if isDirectory {
+		unignored, err := configGit(root, "--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "-z", "--", relative)
+		if err != nil {
+			return fmt.Errorf("inspect local configuration ignore exceptions: %w", err)
+		}
+		if len(unignored) != 0 {
+			return fmt.Errorf("local configuration directory contains an unignored path; remove ignore exceptions before loading")
+		}
 	}
 	return nil
 }

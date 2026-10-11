@@ -52,17 +52,6 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 		strings.Contains(output.String(), "selected-account") {
 		t.Fatal("environment precedence or safe provenance output incorrect")
 	}
-	override := filepath.Join(t.TempDir(), "override.yaml")
-	if err := os.WriteFile(override, []byte("version: 1\nruntime:\n  account: final-account\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	output.Reset()
-	if err := checkConfig([]string{"check", "--file", override, "--sources"}, &output); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output.String(), "runtime.account: invocation") {
-		t.Fatal("environment overrode invocation file")
-	}
 	command := exec.Command("git", "init", "-q")
 	if result, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("init test worktree: %s: %v", result, err)
@@ -74,6 +63,12 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 	if err := os.WriteFile(".gitignore", []byte("/.taxion/config.yaml\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := checkConfig([]string{"check"}, &output); err == nil || output.Len() != 0 {
+		t.Fatal("CLI accepted a file-only ignore rule")
+	}
+	if err := os.WriteFile(".gitignore", []byte("/.taxion/\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := checkConfig([]string{"check"}, &output); err != nil {
 		t.Fatal("CLI rejected ignored project configuration", err)
 	}
@@ -82,12 +77,44 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 		t.Fatalf("track test config: %s: %v", result, err)
 	}
 	output.Reset()
-	if err := checkConfig([]string{"check", "--file", override}, &output); err == nil || output.Len() != 0 {
-		t.Fatal("explicit override bypassed tracked default gate")
+	if err := checkConfig([]string{"check"}, &output); err == nil || output.Len() != 0 {
+		t.Fatal("environment override bypassed tracked directory gate")
+	}
+}
+
+func TestConfigCheckRejectsInvalidEnvironment(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := os.Mkdir(".taxion", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(".taxion/config.yaml", []byte("version: 1\n"), 0600); err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv("TAXION_RUNTIME_ACCOUNT", "")
-	output.Reset()
-	if err := checkConfig([]string{"check", "--file", override}, &output); err == nil || output.Len() != 0 {
-		t.Fatal("higher-priority invocation hid an invalid environment value")
+	var output bytes.Buffer
+	if err := checkConfig([]string{"check"}, &output); err == nil ||
+		!strings.Contains(err.Error(), "TAXION_RUNTIME_ACCOUNT") || output.Len() != 0 {
+		t.Fatal("invalid environment value accepted", err)
+	}
+}
+
+func TestConfigCheckRejectsRemovedFileOptions(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	for _, option := range []string{"--file", "--user-file", "--project-file", "-file", "-user-file", "-project-file"} {
+		for _, args := range [][]string{{"check", option, "private-path"}, {"check", option + "=private-path"}} {
+			var output bytes.Buffer
+			err := checkConfig(args, &output)
+			if err == nil || !strings.Contains(err.Error(), "removed") ||
+				!strings.Contains(err.Error(), "Global") || !strings.Contains(err.Error(), "TAXION_*") ||
+				strings.Contains(err.Error(), "private-path") || output.Len() != 0 {
+				t.Fatal("removed option lacked safe migration guidance", args, err)
+			}
+		}
+	}
+	var output bytes.Buffer
+	if err := checkConfig([]string{"check"}, &output); err == nil || output.Len() != 0 {
+		t.Fatal("missing fixed files accepted")
 	}
 }

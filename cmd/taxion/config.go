@@ -20,32 +20,27 @@ func checkConfig(args []string, output io.Writer) error {
 		return fmt.Errorf("config requires check")
 	}
 	fs := flag.NewFlagSet("config check", flag.ContinueOnError)
-	file := fs.String("file", "", "explicit YAML configuration path")
-	userFile := fs.String("user-file", "", "optional lower-priority user YAML settings")
-	projectFile := fs.String("project-file", "", "optional project YAML settings overriding user settings")
 	sources := fs.Bool("sources", false, "show field origins without configuration values")
 	task := fs.String("task", "", "check the resolved configuration against this Task's recorded approval")
 	if err := fs.Parse(args[1:]); err != nil {
+		switch err.Error() {
+		case "flag provided but not defined: -file", "flag provided but not defined: -user-file", "flag provided but not defined: -project-file":
+			return fmt.Errorf("configuration file options have been removed; use Global taxion/config.yaml under the OS user configuration directory or cwd/.taxion/config.yaml, with TAXION_* environment overrides")
+		}
 		return err
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("config check accepts no positional arguments")
 	}
-	var userDir string
-	if *userFile == "" {
-		var err error
-		userDir, err = os.UserConfigDir()
-		if err != nil {
-			return fmt.Errorf("locate user configuration directory: %w", err)
-		}
+	userDir, err := os.UserConfigDir()
+	if err != nil {
+		return fmt.Errorf("locate user configuration directory: %w", err)
 	}
 	projectDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("locate project configuration directory: %w", err)
 	}
-	layers, err := config.ReadFiles(userDir, projectDir, config.Files{
-		User: *userFile, Project: *projectFile, Invocation: *file,
-	})
+	layers, err := config.ReadFiles(userDir, projectDir)
 	if err != nil {
 		return err
 	}
@@ -54,13 +49,7 @@ func checkConfig(args []string, output io.Writer) error {
 		return err
 	}
 	if present {
-		index := len(layers)
-		if index > 0 && layers[index-1].Source == "invocation" {
-			index--
-		}
-		ordered := append([]config.Layer{}, layers[:index]...)
-		ordered = append(ordered, environment)
-		layers = append(ordered, layers[index:]...)
+		layers = append(layers, environment)
 	}
 	resolved, err := config.Resolve(layers)
 	if err != nil {

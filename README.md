@@ -75,7 +75,7 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
 ## CLI
 
 ```bash
-taxion config check --file <config.yaml>
+taxion config check --sources
 taxion init
 taxion task create --title "…" --repo <repo>
 taxion task plan --repo <repo>
@@ -93,23 +93,25 @@ taxion runtime stop --dispatch <id> --system-prompt-file <path>
 taxion review --task <id> --sha <coder-sha> --repo <repo>
 ```
 
-`config check` validates default or explicit YAML settings against the
+`config check` validates fixed Global/Project YAML settings and supported
+environment overrides against the
 versioned configuration schema. All fields below are required in the resolved
 configuration. `version` is an
 integer; the remaining values are nonempty strings without whitespace.
 Unknown fields, duplicate keys, implicit non-string values, aliases, and
 multiple documents are rejected.
 
-By default, the user file is `taxion/config.yaml` under Go's `os.UserConfigDir()`:
+The Global file is `taxion/config.yaml` under Go's `os.UserConfigDir()`:
 `$XDG_CONFIG_HOME` or `~/.config` on Linux, `~/Library/Application Support`
 on macOS, and `%AppData%` on Windows. The project file is
 `.taxion/config.yaml` in the current working directory. Parent directories are
 not searched. Missing default files are skipped; unreadable or invalid files
 are errors. If no files are found, the command reports an error.
 
-Optional `--user-file` and `--project-file` replace their respective default
-paths. A missing explicit file is an error. `--file` supplies an optional
-highest-priority invocation file.
+`--file`, `--user-file`, and `--project-file` have been removed. Move live
+settings to the fixed Global or Project path and use supported `TAXION_*`
+variables for environment-specific overrides. Removed options report an error
+with migration guidance; they do not read the supplied path.
 Every loaded settings file inside a Git worktree must be both untracked
 (`git ls-files` returns no entry) and covered by a Git ignore rule. Tracked
 settings and unignored files are rejected before reading their contents, even
@@ -117,21 +119,37 @@ when a later layer would override them. Symlink paths and their resolved
 targets are both checked. Files outside worktrees do not require Git ignore
 rules. Shared examples should be separate from the live settings files.
 
-For the default project file, add `/.taxion/config.yaml` to `.gitignore`, or
-use `.git/info/exclude` for a local-only rule. If the file is already tracked,
-review its contents and remove it from the index with
-`git rm --cached -- .taxion/config.yaml`; adding an ignore rule alone does not
-remove tracking or existing history. Review exposed credentials and rotate
-them where needed. Taxion reports the failure and leaves Git state unchanged.
+In a Git worktree, the entire cwd `.taxion/` directory requires an ignore rule,
+even when only Global settings are loaded or the directory is absent.
+Add `/.taxion/` to `.gitignore`, or use `.git/info/exclude` for a local-only
+rule. A file-only `/.taxion/config.yaml` rule is insufficient. Tracked
+descendants and effective ignore exceptions are rejected before loading
+settings. The directory and configuration symlinks are checked at their
+selected paths and resolved targets; a directory symlink needs an ignore rule
+matching the link itself, such as `/.taxion`.
 
-Precedence is `--file` (invocation) > supported environment values >
-`--project-file` > `--user-file`.
+The cwd `.env`, when present, must also be untracked and ignored; its symlink
+target is checked too. An indexed `.env` is rejected even if its working-tree
+copy is missing. These checks run independently of whether environment
+overrides are set. Taxion does not read dotenv files or infer where environment
+values originated.
+
+`.taxion/` holds local settings, workspace state, and cache. Shared
+specifications, decisions, and reviewed Memory exports belong outside that
+directory. Existing local Memory remains in its workspace store; shared Memory
+storage and migration are still tracked in #69.
+For already tracked local files, review the indexed paths before removing
+them from the index and adding ignore rules. Ignore rules do not remove
+tracking or existing history. Review exposed credentials and rotate them where
+needed. Taxion reports failures and leaves Git state unchanged.
+
+Precedence is supported environment values > Project > Global.
 Every file requires `version: 1`; other fields can be omitted in a layer and
 are inherited from lower layers. Explicit empty or null values are errors.
 Each layer is checked before merging, so a higher-priority value cannot hide
 an invalid lower-priority value. `--sources` prints each field's winning layer
 without printing its value. An environment override is reported as
-`environment`. At least one default or explicit YAML file is required;
+`environment`. At least one fixed YAML file is required;
 environment values supplement the file settings.
 
 | Environment variable | Configuration field |
@@ -151,11 +169,28 @@ environment values supplement the file settings.
 | `TAXION_EXECUTION_APPROVAL_REF` | `execution.approvalRef` |
 
 Set environment values are strings, including numeric-looking identifiers.
-An explicitly empty or invalid value is an error even when `--file` overrides
-that field. Unset variables preserve the lower layer. Only the listed variables
+An explicitly empty or invalid value is an error. Unset variables preserve
+the lower layer. Only the listed variables
 are read for configuration overrides; `TAXION_TOKEN`, `GH_TOKEN`,
 `GITHUB_TOKEN`, and `COPILOT_GITHUB_TOKEN` retain their separate credential
 uses and are not copied into this configuration.
+
+mise is an optional way to inject environment values. A shared `mise.toml`
+may reference a local `.env`:
+
+```toml
+[env]
+_.file = ".env"
+```
+
+Keep the real `.env` untracked and covered by an ignore rule such as `/.env`.
+The shared mise file should contain the loading reference and safe defaults,
+not credential values. mise, the shell, or CI reads/injects the environment;
+Taxion records only `environment` as its source. Arbitrary dotenv paths and
+secrets copied into other files are not covered by this path policy.
+Commit-time index scanning and hooks remain in
+[#72](https://github.com/hiono/taxion/issues/72); these configuration checks
+are not commit or publication protection.
 
 ```yaml
 version: 1

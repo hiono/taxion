@@ -7,33 +7,23 @@ import (
 	"path/filepath"
 )
 
-type Files struct {
-	User       string
-	Project    string
-	Invocation string
-}
-
 // ReadFiles searches only the supplied project directory. Missing default
-// files are optional; explicit files and all other read failures are errors.
-func ReadFiles(userConfigDir, projectDir string, files Files) ([]Layer, error) {
+// files are optional; all other read failures are errors.
+func ReadFiles(userConfigDir, projectDir string) ([]Layer, error) {
+	if err := checkProjectGitPolicy(projectDir); err != nil {
+		return nil, err
+	}
 	var layers []Layer
 	for _, entry := range []struct {
-		source, explicit, fallback string
+		source, path string
 	}{
-		{"user", files.User, filepath.Join(userConfigDir, "taxion", "config.yaml")},
-		{"project", files.Project, filepath.Join(projectDir, ".taxion", "config.yaml")},
-		{"invocation", files.Invocation, ""},
+		{"user", filepath.Join(userConfigDir, "taxion", "config.yaml")},
+		{"project", filepath.Join(projectDir, ".taxion", "config.yaml")},
 	} {
-		path := entry.explicit
-		if path == "" {
-			path = entry.fallback
-		}
-		if path == "" {
-			continue
-		}
+		path := entry.path
 		_, err := os.Lstat(path)
 		if err != nil {
-			if entry.explicit == "" && errors.Is(err, os.ErrNotExist) {
+			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
 			return nil, fmt.Errorf("inspect %s configuration: %w", entry.source, err)
@@ -48,7 +38,7 @@ func ReadFiles(userConfigDir, projectDir string, files Files) ([]Layer, error) {
 		layers = append(layers, Layer{Source: entry.source, Input: input})
 	}
 	if len(layers) == 0 {
-		return nil, fmt.Errorf("no configuration files found; provide --file or create user/project config.yaml")
+		return nil, fmt.Errorf("no configuration files found; create Global taxion/config.yaml or Project .taxion/config.yaml")
 	}
 	return layers, nil
 }

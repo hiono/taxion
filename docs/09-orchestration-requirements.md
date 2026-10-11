@@ -116,7 +116,7 @@ credential、非公開の資料や会話を公開 Issue・PR・ログへ転記�
 | 復旧・外部記録 | Ledger 保存、別の SQLite store・outbox 部品 | 実行と Session の復旧、整合した outbox 更新、Issue・PR の自動記録 |
 | CLI・ACP・Web | CLI 操作、ACP の Ledger 操作、Web forms・API proxy | 共通の会話 controller、Human の選択、実行の進行・再開と利用者別の所有権 |
 | 仕様書 | connector なし | 許可された検索・取得、出典付きの受け渡し |
-| 設定・認証主体 | `config check` による厳密な設定検査、OS 標準 user・cwd project・環境変数・実行時設定の解決と出典、`--task` による出典付き判断の許可組合せとの照合 | 任意ファイル指定 option の廃止、`.taxion/` 全体と実 `.env` の保護、承認者の認証、実効認証・契約の確認、Dispatch・session への接続と再開照合（#69）、commit 前 gate（#72） |
+| 設定・認証主体 | `config check` による厳密な設定検査、固定 Global・cwd Project・環境変数の解決と出典、`.taxion/` 全体と cwd の実 `.env` の追跡・ignore 検査、`--task` による出典付き判断の許可組合せとの照合 | 共有 Memory の配置、承認者の認証、実効認証・契約の確認、Dispatch・session への接続と再開照合（#69）、commit 前 gate（#72） |
 
 現在の挙動は [Ledger schema](05-ledger-schema.md)、
 [Runtime contract](03-runtime-contract.md)、
