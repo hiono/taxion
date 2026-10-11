@@ -94,6 +94,8 @@ taxion workflow handoff --file <hold-or-release.json>
 taxion workflow feedback-target --id <flow-id>
 taxion workflow feedback --file <targeted-feedback.json>
 taxion workflow feedback-resolve --file <keep-contract-decision.json>
+taxion workflow draft --file <instruction-proposal.json>
+taxion workflow draft-discard --file <discard-proposal.json>
 taxion dispatch --task <id> --repo <repo>
 taxion runtime start --dispatch <id> --system-prompt-file <path>
 taxion runtime send --dispatch <id> --system-prompt-file <path> --prompt-file <path>
@@ -640,7 +642,14 @@ resolution itself neither releases the hold nor sends a prompt. This first
 disposition preserves the approved contract and does not implement application
 of feedback to a new instruction. Releasing a safety-stopped flow does not
 restore execution authority.
-Natural-language intervention, editable instruction drafts and side questions
+`workflow draft` saves an unissued instruction proposal with a new ID, an
+expected previous draft ID, the observed target and current hold ID. It retains
+each version's text, proposed next role and operation, evidence, unconfirmed
+items and feedback references. The latest undiscarded draft also blocks release.
+`workflow draft-discard` records a sourced decision to abandon that exact draft;
+it does not resolve feedback or release the hold. These commands do not yet
+approve, apply or publish the proposal as a Dispatch.
+Natural-language intervention, draft approval/publication and side questions
 remain tracked in #73 and #74.
 Controller-managed Coder Git operations and live SDK acceptance remain tracked
 in #53 and #54.

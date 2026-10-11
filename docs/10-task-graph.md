@@ -443,6 +443,77 @@ STOPPED flow の解除は従来どおり保留だけを取り除き、未処理�
 これは安全停止した実行の再承認ではなく、STOPPED のまま追加実行できない。
 旧レコードの読み取りは維持し、既存の補足を自動で処理済みに移行しない。
 
+### 未発行の指示案を版付きで保存・改訂する
+
+`workflow draft --file REQUEST.json` は、保留中の RUNNING flow に
+次の担当・操作・本文を提案として保存する。指示案の保存は実行指示の発行ではない。
+各版に新しい ID を付け、改訂前の ID を `expectedDraftId` へ渡す。
+controller は版番号と UTC 時刻を付け、本文、出典、理由、証拠、
+未確認事項、参照した補足 ID、根拠とした観測対象を保持する。
+
+`workflow feedback-target` は `expectedDraftId` と `pendingDraftId` も返す。
+最初の案では `expectedDraftId` は空文字列となる。
+次の例は観測対象と保留 ID を転記し、未確認事項を含む最初の案を保存する。
+
+```bash
+taxion workflow feedback-target --id application-flow |
+  jq '{
+    flowId, expectedDraftId, expectedChangeId, target,
+    id: "draft-1",
+    nextRole: "REVIEWER",
+    operation: "互換性の証拠をレビューする",
+    text: "既存の acceptance に対する互換性の証拠を確認する。",
+    actor: "human",
+    source: "human:compatibility-proposal",
+    reason: "次の受け渡し前に確認内容を相談するため",
+    evidence: [],
+    unconfirmed: ["互換性を検証した記録は未確認"],
+    feedbackIds: []
+  }' > draft.json
+taxion workflow draft --file draft.json
+```
+
+`evidence`、`unconfirmed`、`feedbackIds` は空の場合も配列を明示する。
+`feedbackIds` に既存の補足 ID を指定すると、案が参照した補足を記録できる。
+参照だけで補足を処理済みにはしない。`nextRole` は CODER または REVIEWER を提案する値で、
+担当変更の承認や、その担当に実行権限があることの証明ではない。
+`target` は保存済み指示・結果の識別であり、次の Dispatch の発行契約はまだ構成しない。
+
+改訂は再観測して `id` を新しい値へ変更し、同じコマンドで保存する。
+transaction 内で最新の案 ID、保留変更 ID、保存済み対象を照合する。
+古い版、観測後の結果変更、不明な補足 ID、同じ ID で異なる本文は拒否する。
+同じ入力の再送は現在の flow を返すだけで、過去の案を最新に戻さない。
+現在の ROLE が実行中でも提案を保存できるが、後から成果が保存された場合は
+新しい対象を観測して改訂する。元の版の観測対象は変更しない。
+
+未破棄の最新案がある RUNNING flow の `RELEASE` は拒否する。
+案を採用しない場合は、現在の対象を再観測して明示的に破棄する。
+
+```bash
+taxion workflow feedback-target --id application-flow |
+  jq '{
+    flowId, expectedChangeId, target,
+    id: "discard-draft-1",
+    draftId: .expectedDraftId,
+    actor: "human",
+    source: "human:proposal-decision",
+    reason: "提案は採用せず、承認済み契約を維持する"
+  }' > discard.json
+taxion workflow draft-discard --file discard.json
+```
+
+破棄は最新の案だけに出典付きで記録し、過去の版も保持する。
+破棄・再送は補足を処理済みにせず、保留も解除しない。
+未処理の補足について契約維持を判断した場合は `workflow feedback-resolve` が別途必要となる。
+STOPPED flow は保留解除後も実行できず、未破棄の案を記録に残す。
+
+案の承認、変更契約の再承認、本文の指示への適用と Dispatch 発行は #73 の未実装項目に残る。
+現時点で続行できるのは、案を明示的に破棄し、必要な補足の処理判断と解除を行って
+元の承認済み契約を使う経路である。案の保存や破棄で発行済みの instruction、
+Reviewer の verdict、Task の承認、ROLE session へ送る本文は変更しない。
+`workflow show` と共通の計画出力で、SQLite 再起動後も全版を確認できる。
+actor と source は入力された出典情報であり、認証済み Human の本人証明ではない。
+
 ## 状態遷移と完了
 
 `task transition --file REQUEST.json` は

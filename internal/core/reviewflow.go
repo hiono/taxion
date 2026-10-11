@@ -9,23 +9,24 @@ import (
 // ReviewFlow retains the approved execution contract and ceilings across
 // controller restarts. Dispatches carry each observed execution separately.
 type ReviewFlow struct {
-	ID             string          `json:"id"`
-	TaskID         string          `json:"taskId"`
-	Contract       GraphTask       `json:"contract"`
-	ReviewRoot     string          `json:"reviewRoot"`
-	MaxRepairs     int             `json:"maxRepairs"`
-	MaxTokens      int64           `json:"maxTokens"`
-	StartedAt      time.Time       `json:"startedAt"`
-	Deadline       time.Time       `json:"deadline"`
-	Repairs        int             `json:"repairs"`
-	DispatchIDs    []string        `json:"dispatchIds"`
-	Status         string          `json:"status"`
-	Reason         string          `json:"reason"`
-	Authorization  TaskDecision    `json:"authorization"`
-	RunnerID       string          `json:"runnerId,omitempty"`
-	Recoveries     []FlowRecovery  `json:"recoveries,omitempty"`
-	HandoffChanges []HandoffChange `json:"handoffChanges,omitempty"`
-	Feedback       []FlowFeedback  `json:"feedback,omitempty"`
+	ID                string             `json:"id"`
+	TaskID            string             `json:"taskId"`
+	Contract          GraphTask          `json:"contract"`
+	ReviewRoot        string             `json:"reviewRoot"`
+	MaxRepairs        int                `json:"maxRepairs"`
+	MaxTokens         int64              `json:"maxTokens"`
+	StartedAt         time.Time          `json:"startedAt"`
+	Deadline          time.Time          `json:"deadline"`
+	Repairs           int                `json:"repairs"`
+	DispatchIDs       []string           `json:"dispatchIds"`
+	Status            string             `json:"status"`
+	Reason            string             `json:"reason"`
+	Authorization     TaskDecision       `json:"authorization"`
+	RunnerID          string             `json:"runnerId,omitempty"`
+	Recoveries        []FlowRecovery     `json:"recoveries,omitempty"`
+	HandoffChanges    []HandoffChange    `json:"handoffChanges,omitempty"`
+	Feedback          []FlowFeedback     `json:"feedback,omitempty"`
+	InstructionDrafts []InstructionDraft `json:"instructionDrafts,omitempty"`
 }
 
 type FlowRecovery struct {
@@ -44,6 +45,7 @@ func (g TaskGraph) ReviewFlow(id string) (ReviewFlow, bool) {
 			flow.Recoveries = cloneFlowRecoveries(flow.Recoveries)
 			flow.HandoffChanges = slices.Clone(flow.HandoffChanges)
 			flow.Feedback = cloneFlowFeedback(flow.Feedback)
+			flow.InstructionDrafts = cloneInstructionDrafts(flow.InstructionDrafts)
 			return flow, true
 		}
 	}
@@ -71,6 +73,12 @@ func (g TaskGraph) validateReviewFlows() error {
 		}
 		if err := g.validateFlowFeedback(flow); err != nil {
 			return err
+		}
+		if err := g.validateInstructionDrafts(flow); err != nil {
+			return err
+		}
+		if flow.Status == "RUNNING" && flow.PendingDraftID() != "" && !flow.HandoffHeld() {
+			return graphError("running flow with an unissued instruction draft must retain its handoff hold")
 		}
 		for _, recovery := range flow.Recoveries {
 			if !nonempty(recovery.RunnerID) || !nonempty(recovery.Actor) || !nonempty(recovery.Reason) ||

@@ -82,6 +82,9 @@ func (g *TaskGraph) ChangeHandoff(flowID string, change HandoffChange) (ReviewFl
 	if change.Action == "RELEASE" && flow.Status == "RUNNING" && len(flow.PendingFeedbackIDs()) != 0 {
 		return ReviewFlow{}, graphError("handoff has unresolved feedback %v; record an explicit disposition before release", flow.PendingFeedbackIDs())
 	}
+	if change.Action == "RELEASE" && flow.Status == "RUNNING" && flow.PendingDraftID() != "" {
+		return ReviewFlow{}, graphError("handoff has unissued instruction draft %s; explicitly discard it before continuing the unchanged contract", flow.PendingDraftID())
+	}
 	change.At = time.Now().UTC()
 	flow.HandoffChanges = append(flow.HandoffChanges, change)
 	next := cloneGraph(*g)

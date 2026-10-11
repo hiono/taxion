@@ -172,12 +172,74 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 	if err := workflowCmd([]string{"feedback-resolve", "--file", resolutionFile}); err != nil {
 		t.Fatal("resolution replay failed", err)
 	}
+	draftFile := filepath.Join(dir, "draft.json")
+	observed, err = controller.ObserveFeedback(db, flow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := json.Marshal(controller.InstructionDraftRequest{
+		FlowID: flow.ID, InstructionDraft: core.InstructionDraft{
+			ID: "draft-1", ExpectedDraftID: observed.ExpectedDraftID,
+			ExpectedChangeID: observed.ExpectedChangeID, Target: observed.Target,
+			NextRole: "REVIEWER", Operation: "Review compatibility",
+			Text:  "Check compatibility evidence before the next handoff",
+			Actor: "human", Source: "human:draft", Reason: "Clarify review instructions",
+			Evidence: []string{}, Unconfirmed: []string{"Compatibility evidence remains unconfirmed"},
+			FeedbackIDs: []string{"feedback"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(draftFile, draft, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"draft", "--file", draftFile}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"draft", "--file", draftFile}); err != nil {
+		t.Fatal("draft replay failed", err)
+	}
+	observed, err = controller.ObserveFeedback(db, flow.ID)
+	if err != nil || observed.ExpectedDraftID != "draft-1" || observed.PendingDraftID != "draft-1" {
+		t.Fatal("CLI draft missing from readout", err)
+	}
 	writeHandoff(controller.HandoffRequest{
 		FlowID: flow.ID, HandoffChange: core.HandoffChange{
 			ID: "feedback-release", ExpectedChangeID: "feedback:feedback", Action: "RELEASE",
 			Actor: "human", Source: "human:continue", Reason: "Continue unchanged instructions",
 		},
 	})
+	if err := workflowCmd([]string{"handoff", "--file", handoffFile}); err == nil {
+		t.Fatal("CLI silently released an unissued proposal")
+	}
+	discardFile := filepath.Join(dir, "discard.json")
+	discard, err := json.Marshal(controller.DraftDiscardRequest{
+		FlowID: flow.ID, DraftDiscard: core.DraftDiscard{
+			ID: "discard-1", DraftID: observed.ExpectedDraftID,
+			ExpectedChangeID: observed.ExpectedChangeID, Target: observed.Target,
+			Actor: "human", Source: "human:discard", Reason: "Keep unchanged instructions after clarification",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(discardFile, discard, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"draft-discard", "--file", discardFile}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowCmd([]string{"draft-discard", "--file", discardFile}); err != nil {
+		t.Fatal("discard replay failed", err)
+	}
+	current, err = db.LoadWorkspace()
+	if err != nil || len(current.Graph.ReviewFlows[0].InstructionDrafts) != 1 ||
+		current.Graph.ReviewFlows[0].InstructionDrafts[0].Version != 1 ||
+		current.Graph.ReviewFlows[0].InstructionDrafts[0].Discard == nil ||
+		len(current.Graph.Dispatches) != 1 {
+		t.Fatal("CLI proposal/discard changed issued instructions or lost version", err)
+	}
 	if err := workflowCmd([]string{"handoff", "--file", handoffFile}); err != nil {
 		t.Fatal(err)
 	}
@@ -190,6 +252,8 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 		{"feedback"}, {"feedback", "--file", file}, {"feedback-target"},
 		{"feedback-target", "--id", "missing"},
 		{"feedback-resolve"}, {"feedback-resolve", "--file", file},
+		{"draft"}, {"draft", "--file", file}, {"draft", "--file", file, "--id", request.ID},
+		{"draft-discard"}, {"draft-discard", "--file", draftFile},
 	} {
 		if err := workflowCmd(args); err == nil {
 			t.Fatalf("invalid workflow invocation accepted: %v", args)

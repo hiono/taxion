@@ -87,72 +87,57 @@ func (g TaskGraph) validateFlowFeedback(flow ReviewFlow) error {
 	ids := map[string]bool{}
 	resolutionIDs := map[string]bool{}
 	for _, feedback := range flow.Feedback {
-		if !validFeedbackInput(feedback) || ids[feedback.ID] || feedback.At.IsZero() ||
-			feedback.Target.UpdatedAt.IsZero() || feedback.Target.UpdatedAt.After(feedback.At) ||
-			!validDispatchStatus(feedback.Target.Status) || !slices.Contains(flow.DispatchIDs, feedback.Target.DispatchID) {
+		if !validFeedbackInput(feedback) || ids[feedback.ID] {
 			return graphError("invalid feedback record in flow %s", flow.ID)
 		}
-		dispatch, ok := g.dispatch(feedback.Target.DispatchID)
-		if !ok || feedback.Target.TaskID != dispatch.TaskID || feedback.Target.Repository != dispatch.Repository ||
-			feedback.Target.Recipient != dispatch.Recipient || feedback.Target.InstructionHash != dispatch.InstructionHash ||
-			feedback.Target.TargetSHA != dispatch.Instruction.TargetSHA {
-			return graphError("feedback lost its instruction target in flow %s", flow.ID)
-		}
-		if feedback.Target.OutputSHA != "" && !validSHA(feedback.Target.OutputSHA) {
-			return graphError("invalid feedback output SHA in flow %s", flow.ID)
-		}
-		if feedback.Target.ResultHash != "" {
-			hash := strings.TrimPrefix(feedback.Target.ResultHash, "sha256:")
-			if !strings.HasPrefix(feedback.Target.ResultHash, "sha256:") || len(hash) != 64 || !validSHA(hash) {
-				return graphError("invalid feedback result hash in flow %s", flow.ID)
-			}
-		}
-		if !dispatchActive(feedback.Target.Status) {
-			target, err := ObserveFeedbackTarget(dispatch)
-			if err != nil || target != feedback.Target {
-				return graphError("feedback terminal result target changed in flow %s", flow.ID)
-			}
-		}
-		if !slices.ContainsFunc(flow.HandoffChanges, func(change HandoffChange) bool {
-			return change.ID == feedback.HoldChangeID && change.Action == "HOLD" && !change.At.After(feedback.At)
-		}) {
-			return graphError("feedback has no corresponding hold in flow %s", flow.ID)
+		if err := g.validateSavedHandoffObservation(flow, feedback.Target, feedback.HoldChangeID, feedback.At); err != nil {
+			return err
 		}
 		ids[feedback.ID] = true
 		if resolution := feedback.Resolution; resolution != nil {
-			dispatch, ok := g.dispatch(resolution.Target.DispatchID)
 			if !validFeedbackResolution(*resolution) || resolution.At.Before(feedback.At) ||
-				resolution.At.IsZero() || resolutionIDs[resolution.ID] || !ok ||
-				!slices.Contains(flow.DispatchIDs, dispatch.ID) ||
-				resolution.Target.TaskID != dispatch.TaskID ||
-				resolution.Target.Repository != dispatch.Repository ||
-				resolution.Target.Recipient != dispatch.Recipient ||
-				resolution.Target.InstructionHash != dispatch.InstructionHash ||
-				resolution.Target.TargetSHA != dispatch.Instruction.TargetSHA ||
-				resolution.Target.UpdatedAt.IsZero() || resolution.Target.UpdatedAt.After(resolution.At) ||
-				!validDispatchStatus(resolution.Target.Status) {
+				resolutionIDs[resolution.ID] {
 				return graphError("invalid feedback resolution in flow %s", flow.ID)
 			}
-			if !slices.ContainsFunc(flow.HandoffChanges, func(change HandoffChange) bool {
-				return change.ID == resolution.ExpectedChangeID && change.Action == "HOLD" && !change.At.After(resolution.At)
-			}) {
-				return graphError("feedback resolution lost its hold")
-			}
-			if resolution.Target.OutputSHA != "" && !validSHA(resolution.Target.OutputSHA) {
-				return graphError("feedback resolution output SHA is invalid")
-			}
-			if hash := resolution.Target.ResultHash; hash != "" &&
-				(!strings.HasPrefix(hash, "sha256:") || len(hash) != 71 || !validSHA(strings.TrimPrefix(hash, "sha256:"))) {
-				return graphError("feedback resolution result hash is invalid")
-			}
-			if !dispatchActive(resolution.Target.Status) {
-				target, err := ObserveFeedbackTarget(dispatch)
-				if err != nil || target != resolution.Target {
-					return graphError("feedback resolution terminal target changed")
-				}
+			if err := g.validateSavedHandoffObservation(flow, resolution.Target, resolution.ExpectedChangeID, resolution.At); err != nil {
+				return err
 			}
 			resolutionIDs[resolution.ID] = true
 		}
+	}
+	return nil
+}
+
+func (g TaskGraph) validateSavedHandoffObservation(flow ReviewFlow, target FeedbackTarget, holdID string, at time.Time) error {
+	if at.IsZero() || target.UpdatedAt.IsZero() || target.UpdatedAt.After(at) ||
+		!validDispatchStatus(target.Status) || !slices.Contains(flow.DispatchIDs, target.DispatchID) {
+		return graphError("invalid saved handoff observation in flow %s", flow.ID)
+	}
+	dispatch, ok := g.dispatch(target.DispatchID)
+	if !ok || target.TaskID != dispatch.TaskID || target.Repository != dispatch.Repository ||
+		target.Recipient != dispatch.Recipient || target.InstructionHash != dispatch.InstructionHash ||
+		target.TargetSHA != dispatch.Instruction.TargetSHA {
+		return graphError("handoff observation lost its instruction target in flow %s", flow.ID)
+	}
+	if target.OutputSHA != "" && !validSHA(target.OutputSHA) {
+		return graphError("invalid handoff observation output SHA in flow %s", flow.ID)
+	}
+	if target.ResultHash != "" {
+		hash := strings.TrimPrefix(target.ResultHash, "sha256:")
+		if !strings.HasPrefix(target.ResultHash, "sha256:") || len(hash) != 64 || !validSHA(hash) {
+			return graphError("invalid handoff observation result hash in flow %s", flow.ID)
+		}
+	}
+	if !dispatchActive(target.Status) {
+		current, err := ObserveFeedbackTarget(dispatch)
+		if err != nil || current != target {
+			return graphError("handoff observation terminal result target changed in flow %s", flow.ID)
+		}
+	}
+	if !slices.ContainsFunc(flow.HandoffChanges, func(change HandoffChange) bool {
+		return change.ID == holdID && change.Action == "HOLD" && !change.At.After(at)
+	}) {
+		return graphError("handoff observation has no corresponding hold in flow %s", flow.ID)
 	}
 	return nil
 }
