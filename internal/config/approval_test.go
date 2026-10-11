@@ -51,3 +51,53 @@ func TestApprovalChecksCompleteTuples(t *testing.T) {
 		t.Fatal("matched tuple hid an invalid allowed tuple")
 	}
 }
+
+func TestApprovalNamesAdditionalTasksWithoutWideningTuples(t *testing.T) {
+	candidate, err := Load([]byte(validConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval := Approval{
+		Kind: ApprovalKind, TaskID: "implementation", Reason: "authorize named reviews",
+		AdditionalTaskIDs: []string{"flow-review-0", "flow-review-1"}, Allowed: []Config{candidate},
+	}
+	check := func(taskID string, selected Config) error {
+		t.Helper()
+		input, err := json.Marshal(approval)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return CheckApproval(string(input), taskID, candidate.Execution.ApprovalRef, selected)
+	}
+	for _, id := range []string{"implementation", "flow-review-0", "flow-review-1"} {
+		if err := check(id, candidate); err != nil {
+			t.Fatal("explicitly named Task rejected", err)
+		}
+	}
+	for _, id := range []string{"", "flow-review-2", "other-flow-review-0", "flow-review-01", "flow-review-0-extra"} {
+		if err := check(id, candidate); err == nil {
+			t.Fatal("unnamed Task accepted")
+		}
+	}
+	changed := candidate
+	changed.Runtime.ContractRef = "different-contract"
+	if err := check("flow-review-0", changed); err == nil {
+		t.Fatal("additional Task widened the tuple")
+	}
+	for _, ids := range [][]string{
+		{""}, {" "}, {"flow-review-*"}, {"flow-review-?"}, {"flow-review-[01]"},
+		{"implementation"}, {"flow-review-0", "flow-review-0"}, {"flow-review-0", "invalid task"},
+	} {
+		approval.AdditionalTaskIDs = ids
+		if err := check("implementation", candidate); err == nil {
+			t.Fatal("invalid additional IDs hidden by a matching primary Task")
+		}
+	}
+	approval.AdditionalTaskIDs = nil
+	if err := check("implementation", candidate); err != nil {
+		t.Fatal("legacy single-Task approval rejected", err)
+	}
+	if err := check("flow-review-0", candidate); err == nil {
+		t.Fatal("parent approval implicitly inherited")
+	}
+}

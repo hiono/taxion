@@ -545,7 +545,32 @@ preserved for safe stop. Unconfigured local/proc controller usage is unchanged.
 worker. Each generated Task needs an approval naming that Task in its issued
 instruction. A parent Task's approval is not silently rewritten for a generated
 Reviewer Task; missing Task-specific authorization stops the flow. Authorizing
-derived review Tasks without fabricating Human decisions remains in #69/#53.
+named review Tasks uses the original approval's optional `additionalTaskIds`.
+For a flow with ID `application-flow` and `maxRepairs: 1`, the Human approval
+can name both possible review Tasks before Dispatch issuance by adding this
+field to the complete approval object shown above (with `taskId` set to the
+implementation Task ID):
+
+```json
+{
+  "additionalTaskIds": ["application-flow-review-0", "application-flow-review-1"]
+}
+```
+
+Keep `allowed` as complete configuration objects. The exact review IDs are `<flow-id>-review-0` through
+`<flow-id>-review-<maxRepairs>`; a repair Coder retains the implementation Task
+ID. List only the review Tasks intended to be authorized. The list rejects
+empty IDs, whitespace, patterns, duplicates and the primary Task ID. An omitted
+list keeps the previous single-Task scope. Another flow, an unlisted re-review,
+or a similarly prefixed ID is not authorized.
+
+The controller copies the sourced decision unchanged into generated review
+Tasks and Dispatch instructions. The core and configuration layer verify exact
+Task membership and the same complete allowed tuples. This authorizes
+configuration selection only: workflow ceilings, review scope, role isolation
+and per-operation authentication still apply. Adding names after issuance
+does not expand an existing Dispatch; record the Human authorization before
+starting a new flow.
 
 Runtime commands require an active Task Graph Dispatch and a role-specific
 system prompt file. The Task's worktree and Dispatch recipient select the

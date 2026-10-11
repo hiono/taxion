@@ -101,10 +101,22 @@ tuple and approval inside its own publication transaction.
 The runtime CLI resolves fixed configuration for start/resume/send/events/commit.
 Fresh Dispatches save their selection automatically; legacy sessions without a
 selection require a new authorized Dispatch. Shared runtime/workflow factories
-construct the adapter from the saved selection. Every workflow Task must have
-its own issued configuration approval; parent approvals are not rewritten to
-authorize generated Reviewers. Derived-Task configuration authorization
-remains in #69/#53.
+construct the adapter from the saved selection. Every workflow Task must be
+explicitly named in its issued configuration approval. The optional
+`additionalTaskIds` on `taxion.execution-config.v1` lists exact additional
+Task IDs; it is not a pattern or implicit delegation to all children.
+For flow ID `flow` and `maxRepairs: 1`, reviews are `flow-review-0` and
+`flow-review-1`; repair Coders retain the original Task ID. An omitted list
+preserves single-Task approval. Empty, whitespace-bearing, pattern, duplicate
+and primary IDs are rejected.
+
+Generated review Tasks inherit the sourced approval record unchanged.
+Configuration/core checks accept only the primary or explicitly listed Task
+with a complete allowed tuple. Unlisted reviews fail closed; the flow's
+independent authorization and ceilings remain required. The list must be
+recorded before issuance and cannot widen an existing Dispatch. Local checks
+exercise selected Coder→review→repair→re-review through controller and actual
+Git, not a signed-in SDK model.
 
 Safe stop reconstructs the saved session hash without current settings or an
 authentication probe. It still verifies role, worktree and session identity,

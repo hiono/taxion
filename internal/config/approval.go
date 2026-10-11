@@ -14,10 +14,11 @@ const ApprovalKind = "taxion.execution-config.v1"
 // Approval is stored as structured JSON in a sourced Task decision. Allowed
 // entries are complete tuples so independent lists cannot widen authorization.
 type Approval struct {
-	Kind    string   `json:"kind"`
-	TaskID  string   `json:"taskId"`
-	Reason  string   `json:"reason"`
-	Allowed []Config `json:"allowed"`
+	Kind              string   `json:"kind"`
+	TaskID            string   `json:"taskId"`
+	AdditionalTaskIDs []string `json:"additionalTaskIds,omitempty"`
+	Reason            string   `json:"reason"`
+	Allowed           []Config `json:"allowed"`
 }
 
 func CheckApproval(input string, taskID, decisionID string, candidate Config) error {
@@ -41,7 +42,16 @@ func CheckApproval(input string, taskID, decisionID string, candidate Config) er
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return fmt.Errorf("execution approval requires exactly one JSON object")
 	}
-	if approval.Kind != ApprovalKind || taskID == "" || approval.TaskID != taskID ||
+	taskAllowed := approval.TaskID == taskID
+	seen := map[string]bool{approval.TaskID: true}
+	for _, id := range approval.AdditionalTaskIDs {
+		if id == "" || strings.ContainsAny(id, " \t\r\n*?[]") || seen[id] {
+			return fmt.Errorf("execution approval requires unique exact additional Task IDs without whitespace or patterns")
+		}
+		seen[id] = true
+		taskAllowed = taskAllowed || id == taskID
+	}
+	if approval.Kind != ApprovalKind || taskID == "" || approval.TaskID == "" || !taskAllowed ||
 		strings.TrimSpace(approval.Reason) == "" || len(approval.Allowed) == 0 {
 		return fmt.Errorf("execution approval requires matching kind, Task ID, reason and allowed configurations")
 	}

@@ -192,7 +192,16 @@ controller は設定保存済み Dispatch の開始・再開・送信前に
 
 安全な停止では現在の設定や認証検査を要求せず、保存済みの設定で接続を試みる。
 SDK 接続自体の失敗は明示し、停止できたと扱わない。
-workflow run も同じ設定照合を要求するが、生成 Task の承認を親 Task の承認から
-自動で書き換えることはしない。派生 Reviewer Task の設定承認の出典を保つ接続は
-#69／#53 の後続作業とする。credential 参照の解決、repository 操作主体の選択、
+workflow run も同じ設定照合を要求し、生成 Task の承認を親 Task の承認から
+自動で書き換えることはしない。credential 参照の解決、repository 操作主体の選択、
 契約確認、signed-in SDK の受入れは引き続き未完了とする。
+
+設定承認の任意項目 `additionalTaskIds` には、同じ完全な設定候補を使える
+追加 Task の ID を正確に列挙する。省略時は従来の単一 Task の承認範囲を維持する。
+空 ID、空白、pattern、重複、主 Task 自身の列挙は拒否する。
+flow ID が `flow`、最大修正回数が 1 の場合、Reviewer の ID は
+`flow-review-0` と `flow-review-1` になる。修正 Coder は元の Task ID を維持する。
+Human は必要な Reviewer ID を発行前に承認し、controller は出典を持つ承認を
+そのまま生成 Task と Dispatch にコピーする。設定検査は ID の完全一致と
+承認済み候補の完全一致を要求する。別 flow や未列挙の再レビューへは拡張しない。
+workflow 自体の承認・上限・レビュー範囲・役割分離・実効認証は別途検査する。

@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
@@ -35,16 +37,48 @@ func (s *scriptedRuntime) Stop(context.Context, string) error {
 	return s.stopErr
 }
 
+type configuredScriptedRuntime struct {
+	*scriptedRuntime
+	selection json.RawMessage
+	accounts  []string
+}
+
+func (s *configuredScriptedRuntime) ExecutionConfiguration() json.RawMessage { return s.selection }
+func (s *configuredScriptedRuntime) CheckAuthentication(_ context.Context, account string) error {
+	s.accounts = append(s.accounts, account)
+	return nil
+}
+
 func TestContinuousFlowRunsRepairAndNewSHAReview(t *testing.T) {
-	db, ledger, request := reviewFlowFixture(t)
+	resolved, err := config.Resolve([]config.Layer{{Source: "user", Input: []byte(`version: 1
+project: {id: demo}
+repository: {provider: github, host: github.com, path: owner/repo, account: scm-user, credentialRef: scm}
+runtime: {provider: copilot, account: ai-user, credentialRef: ai, contractRef: contract}
+execution: {requester: requester, worker: local, approvalRef: configuration-approval}
+`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision := core.TaskDecision{
+		ID: resolved.Config.Execution.ApprovalRef, Source: "human:named-review-configuration",
+		Text: string(mustFlowJSON(t, config.Approval{
+			Kind: config.ApprovalKind, TaskID: "implementation", Reason: "authorize both exact reviews",
+			AdditionalTaskIDs: []string{"flow-review-0", "flow-review-1"}, Allowed: []config.Config{resolved.Config},
+		})),
+	}
+	db, ledger, request := reviewFlowFixture(t, decision)
 	flow, err := StartReviewFlow(db, ledger, request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var workers []*scriptedRuntime
+	var configuredWorkers []*configuredScriptedRuntime
 	factory := func(dispatch core.GraphDispatch) (runtime.Identity, error) {
 		if _, err := AdvanceReviewFlow(db, ledger, flow.ID); !errors.Is(err, ErrFlowClaimed) {
 			t.Fatal("manual advance bypassed runner ownership", err)
+		}
+		if err := BindConfiguration(db, dispatch.ID, resolved); err != nil {
+			return nil, err
 		}
 		worker := &scriptedRuntime{
 			fakeRuntime: fakeRuntime{
@@ -98,7 +132,9 @@ func TestContinuousFlowRunsRepairAndNewSHAReview(t *testing.T) {
 			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
 			return nil
 		}
-		return worker, nil
+		configured := &configuredScriptedRuntime{scriptedRuntime: worker, selection: mustFlowJSON(t, resolved.Config)}
+		configuredWorkers = append(configuredWorkers, configured)
+		return configured, nil
 	}
 	var out bytes.Buffer
 	flow, err = RunReviewFlow(t.Context(), db, ledger, flow.ID, factory, &out)
@@ -116,6 +152,21 @@ func TestContinuousFlowRunsRepairAndNewSHAReview(t *testing.T) {
 		saved, _ := state.Graph.GraphDispatch(worker.dispatch.ID)
 		if saved.Status != core.DispatchSucceeded || len(saved.RuntimeUsage) != 1 {
 			t.Fatal("final results or usage not persisted")
+		}
+		if saved.Configuration == nil {
+			t.Fatal("continuous flow failed to persist configuration")
+		}
+		found := false
+		for _, recorded := range saved.Instruction.Decisions {
+			found = found || recorded == decision
+		}
+		if !found {
+			t.Fatal("continuous flow modified the original Human configuration approval")
+		}
+	}
+	for _, worker := range configuredWorkers {
+		if len(worker.accounts) != 2 || worker.accounts[0] != "ai-user" || worker.accounts[1] != "ai-user" {
+			t.Fatal("continuous flow bypassed start/send authentication", worker.accounts)
 		}
 	}
 	original, _ := state.Graph.GraphDispatch(flow.DispatchIDs[0])

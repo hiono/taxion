@@ -12,12 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
 	"github.com/hiono/taxion/internal/store"
 )
 
-func reviewFlowFixture(t *testing.T) (*store.Store, string, ReviewFlowRequest) {
+func reviewFlowFixture(t *testing.T, decisions ...core.TaskDecision) (*store.Store, string, ReviewFlowRequest) {
 	t.Helper()
 	dir := t.TempDir()
 	root := filepath.Join(dir, "repo")
@@ -59,6 +60,7 @@ func reviewFlowFixture(t *testing.T) (*store.Store, string, ReviewFlowRequest) {
 		Decisions:  []core.TaskDecision{{ID: "implementation-authorization", Source: "human:1", Text: "authorize implementation"}},
 		MemoryRefs: []string{"decision:" + strconv.FormatInt(id, 10)},
 	}
+	task.Decisions = append(task.Decisions, decisions...)
 	if err := graph.Track(task, "human", "authorize Task"); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +95,7 @@ func mustFlowJSON(t *testing.T, value any) []byte {
 	return data
 }
 
-func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, verdict string, usage bool) core.GraphDispatch {
+func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, verdict string, usage bool, selected ...config.Resolution) core.GraphDispatch {
 	t.Helper()
 	state, err := db.LoadWorkspace()
 	if err != nil {
@@ -105,10 +107,21 @@ func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, ve
 			t.Fatal(err)
 		}
 	}
-	control, err := New(db, &fakeRuntime{
+	base := &fakeRuntime{
 		role: dispatch.Recipient, worktree: dispatch.Instruction.Worktree,
 		hash: "config:" + dispatch.ID, sessionID: "session:" + dispatch.ID,
-	})
+	}
+	var control *Controller
+	if len(selected) != 0 {
+		if err := BindConfiguration(db, dispatch.ID, selected[0]); err != nil {
+			t.Fatal(err)
+		}
+		control, err = New(db, &configuredRuntime{
+			fakeRuntime: base, selection: mustFlowJSON(t, selected[0].Config),
+		})
+	} else {
+		control, err = New(db, base)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

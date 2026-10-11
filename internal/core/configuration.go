@@ -66,14 +66,27 @@ func (binding DispatchConfiguration) validate(dispatch GraphDispatch) error {
 			continue
 		}
 		var approval struct {
-			Kind    string           `json:"kind"`
-			TaskID  string           `json:"taskId"`
-			Reason  string           `json:"reason"`
-			Allowed []map[string]any `json:"allowed"`
+			Kind              string           `json:"kind"`
+			TaskID            string           `json:"taskId"`
+			AdditionalTaskIDs []string         `json:"additionalTaskIds,omitempty"`
+			Reason            string           `json:"reason"`
+			Allowed           []map[string]any `json:"allowed"`
 		}
 		if err := DecodeGraphInput(strings.NewReader(decision.Text), &approval); err != nil ||
-			approval.Kind != "taxion.execution-config.v1" || approval.TaskID != dispatch.TaskID || !nonempty(approval.Reason) {
+			approval.Kind != "taxion.execution-config.v1" || !nonempty(approval.TaskID) || !nonempty(approval.Reason) {
 			return graphError("configuration binding requires a saved configuration approval")
+		}
+		taskAllowed := approval.TaskID == dispatch.TaskID
+		seen := map[string]bool{approval.TaskID: true}
+		for _, id := range approval.AdditionalTaskIDs {
+			if id == "" || strings.ContainsAny(id, " \t\r\n*?[]") || seen[id] {
+				return graphError("configuration approval requires unique exact additional Task IDs")
+			}
+			seen[id] = true
+			taskAllowed = taskAllowed || id == dispatch.TaskID
+		}
+		if !taskAllowed {
+			return graphError("configuration approval does not name this Dispatch Task")
 		}
 		for _, allowed := range approval.Allowed {
 			if reflect.DeepEqual(selection, allowed) {
