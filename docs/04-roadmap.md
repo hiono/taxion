@@ -68,6 +68,9 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 
 ## project・開発基盤・AI 契約の独立した管理
 
+[ADR-0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md)
+をこの分離と設定契約の採択判断とする。
+
 Taxion の core は Task・Dispatch・判断・証拠・承認を管理し、
 外部クライアント、開発基盤、AI runtime はそれぞれの adapter を通じて接続する。
 この境界により、同じ実行契約を異なる基盤と利用者の組合せに適用する。

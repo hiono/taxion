@@ -29,6 +29,10 @@ Taxion は、ユーザーとの会話から独立した担当へ作業を渡す�
 | ORC-012 | project 利用者、開発基盤の操作主体、AI 認証主体、利用契約・費用帰属、worker を独立して管理し、承認された組合せを Dispatch・Session に結びつける。開始・再開・担当交代時に照合する | #69・#55・#71 |
 | ORC-013 | repository と作業管理の接続先を provider・host・path・オブジェクト ID で識別する。GitHub・GitLab・Bitbucket の能力差を adapter で扱い、承認・証拠・外部更新の共通契約を保持する | #56・#70・#63 |
 
+ORC-012・ORC-013 と形式に依存しない設定契約の採択判断は
+[ADR-0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md)
+に記録する。Issue はその実装・検証を追跡する。
+
 project/global は Memory の階層とは別の適用範囲である。
 Task Graph は現在の作業と関係、Memory は判断と経験の根拠、
 Dispatch は特定の実行指示を管理する。参照 ID と版で関連づけ、
