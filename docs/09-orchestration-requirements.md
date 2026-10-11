@@ -137,43 +137,79 @@ SDK の確認結果は次節の検証範囲に限る。cache の命中保証、
 
 ## M12 の実 SDK 受入れ結果
 
+### 結果
+
 2026-10-12 に、許可された私有 Git worktree と実 Copilot SDK で M12 の受入れを完了した。
 最終成果 SHA は `9db733f809b043d3869266c4e12c9b9873e214bd`。
-読み取り専用の独立 Reviewer が全 acceptance を PASS、verdict を APPROVE とし、
-controller が固定テストと Git を照合した後に flow と Task を COMPLETED にした。
+読み取り専用の独立 Reviewer が全 acceptance を `PASS`、verdict を `APPROVE` とした。
+controller が固定テストと Git を照合した後、flow と Task を `COMPLETED` にした。
 検証用 branch と生の receipt は私有領域に保持し、push はしていない。
+
+### 確認した動作
 
 | 確認対象 | 実行証拠 |
 | --- | --- |
-| 修正と再レビュー | 既存の４独立 SDK Session で、無変更 baseline、実際の REQUEST_CHANGES、修正、新 SHA の APPROVE を確認。古い指摘の再送は現在の Task と Graph を変更しなかった |
-| 受付と契約変更 | 元の依頼を DRAFT として保存し、表示した hash・設定・Reviewer の Task ID を明示承認。変更後は停止可能な保留境界を照合し、元の契約・結果・上限を保持して別 Task と flow を承認 |
-| Planner と Memory | 実 Planner が保存済み acceptance、結果、Memory、修正上限を参照し、契約変更には HUMAN_REQUIRED を返した。助言の採択だけでは実行せず、未処理判断を保存した |
-| 質問と追加調査 | 質問と固定 SHA の scoped 調査は Graph を変更しなかった。Human が選んだソース確認事項を未承認案に保存し、別の明示承認後に対象 Reviewer の instruction hash と発行記録へ接続した |
-| 中断と停止確認 | owned SDK Session の RUNNING を観測して中断を要求し、実停止後の `runtime-stop:` 証拠、Dispatch CANCELLED、flow STOPPED を確認。Task 取消や Git 巻き戻しは行わなかった |
+| 修正と再レビュー | 既存の４独立 SDK Session で、無変更 baseline → 実際の `REQUEST_CHANGES` → 修正 → 新 SHA の `APPROVE` を確認。古い指摘の再送は現在の Task と Graph を変更しなかった |
+| Planner と Memory | 保存済み acceptance、結果、Memory、修正上限を実 Planner が参照。契約変更には `HUMAN_REQUIRED` を返した。助言の採択だけでは実行せず、未処理判断として保存した |
+| 質問と追加調査 | 質問と固定 SHA の範囲限定調査は Graph を変更しなかった |
+| 中断と停止確認 | 管理対象 SDK Session の `RUNNING` を観測して中断を要求。実停止後の `runtime-stop:` 証拠、Dispatch `CANCELLED`、flow `STOPPED` を確認した。Task の取消や Git の巻き戻しは行わなかった |
 
-最終検証の推論量は 157,870 tokens で、承認した合計 200,000 tokens 以内だった。
-11 推論 Session の実測課金は 9.4005324 SDK credits、
-既存実験を含む 51 推論 Session の累計は 18.21538485 SDK credits。
-これらの推論 receipt はすべて complete である。親 Copilot CLI の課金はこの集計に含まない。
-推論前に中断した別の１ SDK Session は、provider の記録で要求数・モデル turn・課金量が０、
-課金状態が unavailable だったため、complete の推論 receipt と分けて保存した。
-不明な課金を complete や無料保証に置き換えてはいない。
+受付では、元の依頼を `DRAFT` として保存し、表示した hash・設定・Reviewer の Task ID を明示承認した。
+契約変更後は停止可能な保留境界を照合し、元の契約・結果・上限を保持して別 Task と flow を承認した。
 
-再現には、Copilot CLI のログイン、repository 用の `gh` 等の別認証、
-ignore・未追跡の固定設定、許可した worktree・scope・baseline SHA、
-Task と設定の明示承認、ローカル Betterleaks を用意する。
-`conversation intake → proposal → confirm` の後に、別の上限付き `workflow start` を行う。
-`conversation watch` で `/plan → /adopt` または `/investigate → /apply` を選び、
-補足を `/approve` して `/step` で独立 ROLE を進める。
-`--strict-result-identities`、`--compact-context`、
-`--controller-validation-submission`、管理 Git tool と同じ scanner は Session 再接続時にも揃える。
+追加調査から Human が選んだソース確認事項は、未承認案に保存した。
+別の明示承認後、対象 Reviewer の instruction hash と発行記録へ反映した。
+
+### 利用量
+
+| 集計 | 実測 |
+| --- | --- |
+| 最終検証 | 11 推論 Session、157,870 tokens、9.4005324 SDK credits |
+| 既存実験を含む累計 | 51 推論 Session、18.21538485 SDK credits |
+| 最終検証で承認した token 上限 | 合計 200,000 tokens |
+
+最終検証の推論量は承認した上限内だった。
+上記の推論 receipt の課金状態はすべて `complete`。親 Copilot CLI の課金は含まない。
+
+推論前に中断した別の１ SDK Session は、provider が要求数・モデル turn・課金量を０、
+課金状態を `unavailable` と記録した。`complete` の推論 receipt とは分けて保存した。
+課金状態が不明であることを、`complete` や無料保証に置き換えてはいない。
+
+### 再現手順
+
+再現には次の準備が必要である。
+
+- Copilot CLI のログインと、repository 用の `gh` 等による別認証。
+- ignore 対象かつ未追跡の固定設定、許可した worktree・scope・baseline SHA。
+- Task と設定の明示承認、ローカル Betterleaks。
+
+1. `conversation intake → proposal → confirm` で依頼を受け付け、明示承認する。
+2. 別の上限付き `workflow start` で実行を開始する。
+3. `conversation watch` で `/plan → /adopt` または `/investigate → /apply` を選ぶ。
+4. 補足を `/approve` し、`/step` で独立 ROLE を進める。
+
 本流の回答を ROLE 間で手動コピーせず、controller の保存記録から次の指示を生成する。
 
+Session 再接続時にも、次の指定を揃える。
+
+- `--strict-result-identities`
+- `--compact-context`
+- `--controller-validation-submission`
+- 管理 Git tool と同じ scanner。
+
+### 停止履歴と提出指示
+
 検証中に停止した Session や拒否した回答は履歴として保持し、成功に書き換えなかった。
-SUSPENDED の Reviewer 応答も完了とせず、実停止を確認して別契約で同じ SHA を再レビューした。
-controller の検証待ちとモデルの提出を分ける指示は opt-in とし、
+`SUSPENDED` の Reviewer 応答も完了とせず、実停止を確認して別契約で同じ SHA を再レビューした。
+
+controller の検証待ちとモデルの提出を分ける指示は、明示指定した場合だけ有効にする。
 既存 Session の既定 prompt・configuration hash は維持する。
 受入れ時は同じ提出指示を常時適用した移行用 binary を使った。
-公開版での再現には上記 opt-in を指定する。過去の Session の prompt や hash は変更していない。
-契約案は明示された構造化入力を使い、自然言語からの全自動契約生成、
-承認者の本人認証、GitLab など別基盤の実環境受入れ、M13 の復旧を達成したとは扱わない。
+公開版で再現する際は `--controller-validation-submission` を指定する。
+過去の Session の prompt や hash は変更していない。
+
+### 今回の対象外
+
+契約案には明示された構造化入力を使う。
+自然言語からの全自動契約生成、承認者の本人認証、
+GitLab など別基盤の実環境受入れ、M13 の復旧は、今回達成した範囲に含めない。
