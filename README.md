@@ -527,7 +527,11 @@ For selected configurations, `runtime.credentialRef: copilot:logged-in` selects
 the SDK's stored-user authentication with ambient Copilot/GitHub token variables
 removed from the child environment. `env:UPPERCASE_NAME` selects exactly that
 environment credential, disables stored-user fallback and rejects missing,
-empty or malformed values. Its value is never stored in the configuration or
+empty or malformed values before launching the SDK client. Offline adapter
+construction still succeeds so safe stop can save cancellation intent even
+after credential loss. If attaching to the saved session fails, the Dispatch
+remains `CANCEL_REQUESTED`; this is not confirmation that the runtime stopped.
+Its value is never stored in the configuration or
 session hash. Change the value under the same reference by constructing a new
 adapter; the effective account and existing approvals are still checked.
 Legacy arbitrary references retain the previous ambient SDK selection for

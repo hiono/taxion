@@ -613,7 +613,7 @@ func runtimeCmd(args []string) error {
 	case "auth":
 		operationErr = worker.CheckAuthentication(ctx, expectedAccount)
 		if operationErr == nil {
-			fmt.Println("taxion: effective Copilot account matches the approved Dispatch configuration on github.com. Credential reference selection, contract eligibility, and durable runtime configuration binding remain unverified; no session was created or resumed.")
+			fmt.Println("taxion: effective Copilot account matches the approved Dispatch configuration on github.com. Explicit credential policies apply; legacy reference resolution, repository actor and contract eligibility remain unverified. No session was created or resumed.")
 		}
 	case "start":
 		if dispatch.RuntimeSessionID != "" {

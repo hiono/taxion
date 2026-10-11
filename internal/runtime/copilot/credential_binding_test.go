@@ -1,6 +1,7 @@
 package copilot
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -40,8 +41,20 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 		t.Fatal("secret rotation changed durable identity or stored token values")
 	}
 	t.Setenv("TAXION_TEST_BINDING_TOKEN", "")
-	if _, err := New(cfg); err == nil {
-		t.Fatal("missing selected credential fell back to another account")
+	missing, err := New(cfg)
+	if err != nil {
+		t.Fatal("offline construction blocked safe-stop identity", err)
+	}
+	defer missing.Close()
+	if missing.ConfigHash() != first.ConfigHash() {
+		t.Fatal("credential loss changed safe-stop identity")
+	}
+	if err := missing.Resume(context.Background(), "saved-session"); err == nil ||
+		!strings.Contains(err.Error(), "selected runtime credential") || missing.started {
+		t.Fatal("missing credential launched a client or permitted saved-session attachment", err)
+	}
+	if err := missing.CheckAuthentication(context.Background(), "ai-user"); err == nil || missing.started {
+		t.Fatal("missing selected credential fell back to another account", err)
 	}
 	selected.Runtime.CredentialRef = "copilot:logged-in"
 	cfg.Configuration, err = json.Marshal(selected)

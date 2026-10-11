@@ -46,8 +46,9 @@ type Config struct {
 }
 
 type Adapter struct {
-	config Config
-	client *sdk.Client
+	config        Config
+	client        *sdk.Client
+	credentialErr error
 
 	opMu     sync.Mutex
 	mu       sync.Mutex
@@ -172,19 +173,21 @@ func New(config Config) (*Adapter, error) {
 		WorkingDirectory: config.WorkingDirectory, BaseDirectory: config.BaseDirectory,
 		LogLevel: "error", Mode: sdk.ModeEmpty,
 	}
+	var credentialErr error
 	if len(config.Configuration) != 0 {
 		var selected executionconfig.Config
 		if err := json.Unmarshal(config.Configuration, &selected); err != nil {
 			return nil, fmt.Errorf("taxion: selected runtime configuration is invalid")
 		}
-		if err := configureCredential(options, selected.Runtime.CredentialRef); err != nil {
-			return nil, err
-		}
+		// Construct offline so safe stop can record cancellation before attempting
+		// attachment, even when the saved credential is no longer available.
+		credentialErr = configureCredential(options, selected.Runtime.CredentialRef)
 	}
 	return &Adapter{
-		config:   config,
-		client:   sdk.NewClient(options),
-		sessions: map[string]*managedSession{},
+		config:        config,
+		client:        sdk.NewClient(options),
+		credentialErr: credentialErr,
+		sessions:      map[string]*managedSession{},
 	}, nil
 }
 
@@ -514,6 +517,9 @@ func (a *Adapter) ensureStarted(ctx context.Context) error {
 	}
 	if a.started {
 		return nil
+	}
+	if a.credentialErr != nil {
+		return a.credentialErr
 	}
 	if err := a.client.Start(ctx); err != nil {
 		return fmt.Errorf("taxion: start Copilot client: %w", err)

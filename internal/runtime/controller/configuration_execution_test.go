@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/runtime/copilot"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -48,6 +50,10 @@ func (f *configuredRuntime) Resume(ctx context.Context, id string) error {
 }
 
 func executionConfigurationFixture(t *testing.T) (*store.Store, string, *configuredRuntime, config.Resolution) {
+	return executionConfigurationCredentialFixture(t, "ai")
+}
+
+func executionConfigurationCredentialFixture(t *testing.T, credentialRef string) (*store.Store, string, *configuredRuntime, config.Resolution) {
 	t.Helper()
 	root := t.TempDir()
 	gitTest(t, root, "init", "-b", "work/task")
@@ -59,12 +65,12 @@ func executionConfigurationFixture(t *testing.T) (*store.Store, string, *configu
 	}
 	gitTest(t, root, "add", "README.md")
 	gitTest(t, root, "commit", "-m", "baseline")
-	resolved, err := config.Resolve([]config.Layer{{Source: "user", Input: []byte(`version: 1
+	resolved, err := config.Resolve([]config.Layer{{Source: "user", Input: []byte(strings.ReplaceAll(`version: 1
 project: {id: demo}
 repository: {provider: github, host: github.com, path: owner/repo, account: scm-user, credentialRef: scm}
 runtime: {provider: copilot, account: ai-user, credentialRef: ai, contractRef: contract}
 execution: {requester: requester, worker: local, approvalRef: approval}
-`)}})
+`, "credentialRef: ai", "credentialRef: "+credentialRef))}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,6 +124,56 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 	return db, dispatch.ID, &configuredRuntime{
 		fakeRuntime: &fakeRuntime{role: "CODER", hash: "selected-config", worktree: root}, selection: selection,
 	}, resolved
+}
+
+func TestMissingExplicitCredentialPreservesCancellationIntent(t *testing.T) {
+	db, id, worker, _ := executionConfigurationCredentialFixture(t, "env:TAXION_TEST_STOP_TOKEN")
+	t.Setenv("TAXION_TEST_STOP_TOKEN", "private-stop-fixture")
+	cfg := copilot.Config{
+		Role: worker.Role(), SystemPrompt: "saved stop configuration",
+		WorkingDirectory: worker.Worktree(), CLIPath: "/bin/false",
+		BaseDirectory: t.TempDir(), Configuration: worker.selection,
+	}
+	bound, err := copilot.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bound.Close()
+	worker.hash = bound.ConfigHash()
+	control, err := New(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Start(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.Send(context.Background(), id, "authorized execution"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TAXION_TEST_STOP_TOKEN", "")
+	missing, err := copilot.New(cfg)
+	if err != nil {
+		t.Fatal("credential loss prevented offline safe-stop construction", err)
+	}
+	defer missing.Close()
+	control, err = New(db, missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := control.Stop(context.Background(), id); err == nil ||
+			!strings.Contains(err.Error(), "selected runtime credential") {
+			t.Fatal("missing credential attached or reported successful runtime stop", err)
+		}
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			t.Fatal(err)
+		}
+		dispatch, _ := state.Graph.GraphDispatch(id)
+		if dispatch.Status != core.DispatchCancelRequested || dispatch.Result != nil {
+			t.Fatal("failed attachment lost cancellation intent or fabricated a stopped result", dispatch)
+		}
+	}
 }
 
 func TestConfiguredExecutionAuthenticatesAndPreservesSafeStop(t *testing.T) {
