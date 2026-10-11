@@ -45,8 +45,15 @@ func checkAuthenticationStatus(status *sdk.GetAuthStatusResponse, expectedAccoun
 	if status.Login == nil || !strings.EqualFold(*status.Login, expectedAccount) {
 		return fmt.Errorf("taxion: effective runtime account does not match the expected account")
 	}
-	if status.Host == nil || !strings.EqualFold(*status.Host, "github.com") {
+	if status.Host == nil || !githubAuthenticationHost(*status.Host) {
 		return fmt.Errorf("taxion: effective runtime authentication host is not confirmed as github.com")
 	}
+
 	return nil
+}
+
+func githubAuthenticationHost(host string) bool {
+	return strings.EqualFold(host, "github.com") ||
+		strings.EqualFold(host, "https://github.com") ||
+		strings.EqualFold(host, "https://github.com/")
 }

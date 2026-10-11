@@ -23,6 +23,7 @@ func TestAuthenticationStatusRequiresAccountAndHost(t *testing.T) {
 			status := &sdk.GetAuthStatusResponse{
 				IsAuthenticated: true, Login: &login, Host: &host, StatusMessage: &privateDetail, AuthType: &privateDetail,
 			}
+
 			switch name {
 			case "case":
 				upperHost := "GITHUB.COM"
@@ -48,6 +49,23 @@ func TestAuthenticationStatusRequiresAccountAndHost(t *testing.T) {
 				t.Fatal("provider detail leaked")
 			}
 		})
+	}
+}
+
+func TestAuthenticationHostAcceptsSDKOriginWithoutRelaxingAuthority(t *testing.T) {
+	login := "hiono"
+	for _, host := range []string{
+		"github.com", "GITHUB.COM", "https://github.com", "https://github.com/", "https://GITHUB.COM",
+		"http://github.com", "https://github.com:443", "https://github.com/other",
+		"https://github.com?x=1", "https://github.com?", "https://github.com#other", "https://github.com#",
+		"https://user@github.com", "https://github.com.evil.test", " github.com", "",
+	} {
+		status := &sdk.GetAuthStatusResponse{IsAuthenticated: true, Login: &login, Host: &host}
+		want := host == "github.com" || host == "GITHUB.COM" || host == "https://github.com" ||
+			host == "https://github.com/" || host == "https://GITHUB.COM"
+		if err := checkAuthenticationStatus(status, login); (err == nil) != want {
+			t.Fatalf("SDK host %q acceptance mismatch: %v", host, err)
+		}
 	}
 }
 

@@ -167,15 +167,23 @@ func New(config Config) (*Adapter, error) {
 			config.AvailableTools = append(config.AvailableTools, ManagedStageToolName)
 		}
 	}
+	options := &sdk.ClientOptions{
+		Connection:       sdk.StdioConnection{Path: config.CLIPath},
+		WorkingDirectory: config.WorkingDirectory, BaseDirectory: config.BaseDirectory,
+		LogLevel: "error", Mode: sdk.ModeEmpty,
+	}
+	if len(config.Configuration) != 0 {
+		var selected executionconfig.Config
+		if err := json.Unmarshal(config.Configuration, &selected); err != nil {
+			return nil, fmt.Errorf("taxion: selected runtime configuration is invalid")
+		}
+		if err := configureCredential(options, selected.Runtime.CredentialRef); err != nil {
+			return nil, err
+		}
+	}
 	return &Adapter{
-		config: config,
-		client: sdk.NewClient(&sdk.ClientOptions{
-			Connection:       sdk.StdioConnection{Path: config.CLIPath},
-			WorkingDirectory: config.WorkingDirectory,
-			BaseDirectory:    config.BaseDirectory,
-			LogLevel:         "error",
-			Mode:             sdk.ModeEmpty,
-		}),
+		config:   config,
+		client:   sdk.NewClient(options),
 		sessions: map[string]*managedSession{},
 	}, nil
 }

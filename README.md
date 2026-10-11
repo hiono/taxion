@@ -418,7 +418,7 @@ repository:
 runtime:
   provider: copilot
   account: developer-b
-  credentialRef: ai-credential
+  credentialRef: copilot:logged-in
   contractRef: company-contract
 execution:
   requester: developer-a
@@ -438,10 +438,10 @@ The schema accepts `github`, `gitlab`, or `bitbucket` repository identities,
 including nested namespace paths, and `copilot` runtime identities. This
 describes configuration, not implemented adapter coverage. Checking a file
 performs no network calls or credential resolution and does not validate
-approval authority, account access, or contract eligibility. Existing runtime
-and workflow commands do not yet consume this configuration. Automatic
-durable execution bindings and authentication
-preflight remain tracked in [#69](https://github.com/hiono/taxion/issues/69).
+approval authority, account access, or contract eligibility. Runtime and workflow
+commands bind the selected tuple and check its recorded approval and effective
+Copilot account. Repository actor selection and contract eligibility remain
+tracked in [#69](https://github.com/hiono/taxion/issues/69).
 TOML and JSON configuration inputs are future extensions; existing JSON APIs
 and machine artifacts keep their current formats.
 
@@ -464,7 +464,7 @@ holds a structured execution-configuration approval:
       },
       "runtime": {
         "provider": "copilot", "account": "developer-b",
-        "credentialRef": "ai-credential", "contractRef": "company-contract"
+        "credentialRef": "copilot:logged-in", "contractRef": "company-contract"
       },
       "execution": {
         "requester": "developer-a", "worker": "local-worker",
@@ -518,12 +518,22 @@ before contacting Copilot. It uses the runtime's `--cli`, `--base-directory`,
 and assigned worktree, but only calls the SDK authentication-status RPC:
 no session is created or resumed and no model request is sent. The reported
 account must match `runtime.account` (case-insensitively for GitHub accounts),
-and the authentication host must be explicitly `github.com`. Missing fields,
+and the authentication host must be explicitly `github.com` or the SDK's HTTPS
+github.com origin (with an optional trailing slash). Other schemes, ports,
+paths, user information, query strings and fragments are rejected. Missing fields,
 unauthenticated status, a mismatch, and unavailable status are errors.
 
-The probe retains the SDK's existing environment/saved-login selection; it
-does not resolve `runtime.credentialRef`, select the GitHub repository actor,
-or verify contract eligibility or billing. Provider status messages and error
+For selected configurations, `runtime.credentialRef: copilot:logged-in` selects
+the SDK's stored-user authentication with ambient Copilot/GitHub token variables
+removed from the child environment. `env:UPPERCASE_NAME` selects exactly that
+environment credential, disables stored-user fallback and rejects missing,
+empty or malformed values. Its value is never stored in the configuration or
+session hash. Change the value under the same reference by constructing a new
+adapter; the effective account and existing approvals are still checked.
+Legacy arbitrary references retain the previous ambient SDK selection for
+compatibility; their credential-store resolution is not implemented. These
+policies do not select the GitHub repository actor or verify contract eligibility
+or billing. Provider status messages and error
 details are not included in returned authentication errors. Results are
 point-in-time checks, are not persisted as execution authorization, and do
 not change existing session hashes. Start/resume/send and safe stop remain
