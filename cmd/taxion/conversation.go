@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bufio"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
+	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/runtime/copilot"
 )
@@ -32,6 +36,9 @@ Assumptions and unconfirmed are arrays of strings. Empty lists are explicit.
 Do not invent citations, evidence, legal eligibility or a payer.`
 
 func conversationCmd(args []string, output io.Writer) error {
+	if len(args) != 0 && args[0] == "watch" {
+		return conversationWatch(args[1:], os.Stdin, output)
+	}
 	if len(args) == 0 || args[0] != "ask" {
 		return fmt.Errorf("usage: taxion conversation ask --task ID --question TEXT --max-tokens N --timeout D --max-ai-credits N")
 	}
@@ -89,6 +96,167 @@ func conversationCmd(args []string, output io.Writer) error {
 	// A failed paid attempt retains its session ID and usage for reconciliation.
 	printErr := json.NewEncoder(output).Encode(result)
 	return errors.Join(questionErr, closeErr, printErr)
+}
+
+func conversationWatch(args []string, input io.Reader, output io.Writer) error {
+	fs := flag.NewFlagSet("conversation watch", flag.ContinueOnError)
+	id := fs.String("flow", "", "existing review flow ID")
+	actor := fs.String("actor", "", "Human actor recorded as supplied metadata")
+	source := fs.String("source", "", "actual Human input source")
+	tokens := fs.Int64("question-max-tokens", 0, "explicit per-question token ceiling")
+	timeout := fs.Duration("question-timeout", 0, "explicit per-question deadline")
+	credits := fs.Float64("question-max-ai-credits", 0, "explicit per-question soft credit ceiling")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*id) == "" || strings.TrimSpace(*actor) == "" || strings.TrimSpace(*source) == "" {
+		return fmt.Errorf("conversation watch requires --flow, --actor and --source; runner options follow --")
+	}
+	db, _, err := loadWorkspace()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	change := func(observation controller.FeedbackObservation, action, reason string) error {
+		_, err := controller.ChangeObservedHandoff(db, observation, core.HandoffChange{
+			ID: "console-" + rand.Text(), ExpectedChangeID: observation.ExpectedChangeID,
+			Action: action, Actor: *actor, Source: *source, Reason: reason,
+		})
+		return err
+	}
+	hold := func(reason string) error {
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			return err
+		}
+		flow, ok := state.Graph.ReviewFlow(*id)
+		if !ok {
+			return fmt.Errorf("conversation watch requires an existing flow")
+		}
+		if flow.HandoffHeld() || flow.Status != "RUNNING" {
+			return nil
+		}
+		observation, err := controller.ObserveFeedback(db, *id)
+		if err != nil {
+			return err
+		}
+		return change(observation, "HOLD", reason)
+	}
+	// Establish the boundary before reading or interpreting any Human input.
+	if err := hold("Human opened a watched conversation; retain current execution but hold the next handoff"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(output, "Watched conversation: running flows hold the next handoff before input; existing execution is not cancelled. /step (or 続行) runs one role; /auto explicitly selects the flow's existing bounded automatic mode. /draft TEXT, /approve, /discard, /hold, /quit. Other text is a separate saved-record question. EOF leaves the hold unchanged."); err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(input)
+	scanner.Buffer(make([]byte, 4096), 64*1024)
+	for {
+		observation, err := controller.ObserveFeedback(db, *id)
+		if err != nil {
+			return err
+		}
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			return err
+		}
+		flow, _ := state.Graph.ReviewFlow(*id)
+		if err := json.NewEncoder(output).Encode(struct {
+			Flow        core.ReviewFlow                `json:"flow"`
+			Observation controller.FeedbackObservation `json:"observation"`
+		}{flow, observation}); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprint(output, "Human> "); err != nil {
+			return err
+		}
+		if !scanner.Scan() {
+			return scanner.Err()
+		}
+		text := strings.TrimSpace(scanner.Text())
+		if text == "" {
+			continue
+		}
+		if text == "/quit" || text == "終了" {
+			return nil
+		}
+		command, body, _ := strings.Cut(text, " ")
+		var operationErr error
+		switch command {
+		case "/hold", "保留":
+			operationErr = hold("Human explicitly retained the handoff hold: " + text)
+		case "/draft":
+			nextRole := "REVIEWER"
+			if observation.Target.Recipient == "REVIEWER" {
+				nextRole = "CODER"
+			}
+			_, operationErr = controller.RecordInstructionDraft(db, controller.InstructionDraftRequest{
+				FlowID: *id, InstructionDraft: core.InstructionDraft{
+					ID: "console-" + rand.Text(), ExpectedDraftID: observation.ExpectedDraftID,
+					ExpectedChangeID: observation.ExpectedChangeID, Target: observation.Target,
+					NextRole: nextRole, Operation: "SUPPLEMENT", Text: body, Actor: *actor, Source: *source,
+					Reason:   "Human proposed a supplementary instruction; no contract change or execution approval inferred",
+					Evidence: []string{}, Unconfirmed: []string{}, FeedbackIDs: []string{},
+				},
+			})
+		case "/approve":
+			if body != "" {
+				operationErr = fmt.Errorf("/approve takes no text; it approves the exact displayed pending draft within the unchanged contract")
+				break
+			}
+			_, operationErr = controller.ApproveInstructionDraft(db, controller.DraftApprovalRequest{
+				FlowID: *id, DraftApproval: core.DraftApproval{
+					ID: "console-" + rand.Text(), DraftID: observation.PendingDraftID,
+					ExpectedChangeID: observation.ExpectedChangeID, Target: observation.Target,
+					Action: "APPROVE_SUPPLEMENT", Actor: *actor, Source: *source,
+					Reason:       "Human explicitly approved this displayed supplement without changing scope, acceptance, identity, contract or ceilings",
+					ContractHash: observation.DraftContractHash,
+				},
+			})
+		case "/discard":
+			if body != "" {
+				operationErr = fmt.Errorf("/discard takes no text; it discards the exact displayed pending draft")
+				break
+			}
+			_, operationErr = controller.DiscardInstructionDraft(db, controller.DraftDiscardRequest{
+				FlowID: *id, DraftDiscard: core.DraftDiscard{
+					ID: "console-" + rand.Text(), DraftID: observation.PendingDraftID,
+					ExpectedChangeID: observation.ExpectedChangeID, Target: observation.Target,
+					Actor: *actor, Source: *source, Reason: "Human explicitly discarded the displayed pending draft",
+				},
+			})
+		case "/step", "/continue", "続行", "/auto":
+			if body != "" {
+				operationErr = fmt.Errorf("continuation takes no text; record a proposed supplement separately")
+				break
+			}
+			mode := "step"
+			if command == "/auto" {
+				mode = "run"
+			}
+			operationErr = change(observation, "RELEASE", "Human explicitly selected "+mode+" within the displayed flow's existing ceilings")
+			if operationErr == nil {
+				operationErr = workflowCmd(append([]string{mode, "--id", *id}, fs.Args()...))
+				operationErr = errors.Join(operationErr, hold("Return to watched conversation after the explicitly selected execution"))
+			}
+		default:
+			if strings.HasPrefix(command, "/") && command != "/ask" {
+				operationErr = fmt.Errorf("unknown conversation command; no action performed")
+				break
+			}
+			question := text
+			if command == "/ask" {
+				question = body
+			}
+			operationErr = conversationCmd([]string{"ask", "--task", flow.TaskID, "--question", question,
+				"--max-tokens", fmt.Sprint(*tokens), "--timeout", timeout.String(), "--max-ai-credits", fmt.Sprint(*credits)}, output)
+		}
+		if operationErr != nil {
+			if _, err := fmt.Fprintln(output, "Operation rejected:", operationErr); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func questionResponseSchema() map[string]any {

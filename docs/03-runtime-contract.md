@@ -56,6 +56,13 @@ type Runtime interface {
   session/usage information belongs to this question, not the main flow.
   Unknown usage and invalid citations stop the query. Safe cleanup uses its own
   bounded context after cancellation; errors are not suppressed.
+- `StepReviewFlow` uses the same runtime and durable runner claim as automatic
+  execution, but executes at most one role and does not issue its successor after
+  completing the turn. Further progression requires another explicit request.
+  Watched conversations hold the boundary before reading input; EOF never grants
+  continuation. Observed continuation compares the displayed target, draft,
+  contract and hold version transactionally. Supplement approval and publication
+  remain separate; existing automatic runner behavior is unchanged.
 ## Adapters
 
 - `internal/runtime/local`: in-process reference adapter for state transitions.
@@ -93,6 +100,20 @@ against the saved Dispatch contract. An operator submits the result through
 the Dispatch transition, which validates its required fields before changing
 state. The ACP server uses `internal/runtime/local`; Copilot sessions start
 through the explicit runtime commands.
+
+`runtime` and `workflow run|step` optionally accept
+`--strict-result-identities`: the native response schema pins the issued
+Dispatch ID, Task ID, role, repository and expected execution-start SHA.
+Repair uses its immutable target SHA rather than the initial baseline.
+Output SHA and verdict remain reported facts subject to independent controller
+verification. The option changes the configuration hash and must be repeated
+on session attachment and safe stop. The default schema remains unchanged for
+older sessions; rejected responses are not repaired into successful results.
+Agents without shell permission can submit `validations: []`; the controller
+runs the authorized commands after a successful implementation submission and
+stores actual exit codes, timestamps and Git provenance. They must not fabricate
+an earlier command execution or treat pending controller validation as evidence
+that tests passed.
 
 `runtime auth` is an explicit preflight, not an execution action. Fixed
 configuration and current/saved Dispatch approvals are checked before the

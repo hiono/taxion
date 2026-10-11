@@ -19,7 +19,7 @@ import (
 
 func workflowCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|recover|handoff|feedback-target|feedback|feedback-resolve|draft|draft-discard|draft-approve|show}")
+		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|feedback-target|feedback|feedback-resolve|draft|draft-discard|draft-approve|show}")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
@@ -27,6 +27,7 @@ func workflowCmd(args []string) error {
 	var coderPrompt, reviewerPrompt, cli, base, coderTools, reviewerTools string
 	var managedCommit bool
 	var managedStage bool
+	var strictResult bool
 	var scanner string
 	var maxAICredits float64
 	switch action {
@@ -34,7 +35,7 @@ func workflowCmd(args []string) error {
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
 	case "advance", "show", "feedback-target":
 		fs.StringVar(&id, "id", "", "review flow ID")
-	case "run":
+	case "run", "step":
 		fs.StringVar(&id, "id", "", "review flow ID")
 		fs.StringVar(&coderPrompt, "coder-prompt-file", "", "Coder system prompt")
 		fs.StringVar(&reviewerPrompt, "reviewer-prompt-file", "", "Reviewer system prompt")
@@ -45,6 +46,7 @@ func workflowCmd(args []string) error {
 		fs.StringVar(&reviewerTools, "reviewer-tools", "", "comma-separated Reviewer SDK tool allowlist")
 		fs.BoolVar(&managedCommit, "managed-commit", false, "enable the Coder's bound taxion_commit SDK tool")
 		fs.BoolVar(&managedStage, "managed-stage", false, "enable taxion_stage alongside --managed-commit")
+		fs.BoolVar(&strictResult, "strict-result-identities", false, "constrain final identities and start SHA to the saved Dispatch")
 		fs.StringVar(&scanner, "scanner", "betterleaks", "trusted Betterleaks executable (--managed-commit only)")
 	default:
 		return fmt.Errorf("unknown workflow action %q", action)
@@ -67,7 +69,7 @@ func workflowCmd(args []string) error {
 	}
 	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve"
 	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" {
-		return fmt.Errorf("workflow start, recover, handoff, feedback, feedback-resolve, draft, draft-discard and draft-approve require --file; advance, run, show and feedback-target require --id")
+		return fmt.Errorf("workflow start, recover, handoff, feedback, feedback-resolve, draft, draft-discard and draft-approve require --file; advance, run, step, show and feedback-target require --id")
 	}
 	db, state, err := loadWorkspace()
 	if err != nil {
@@ -186,9 +188,9 @@ func workflowCmd(args []string) error {
 			return err
 		}
 		return printJSON(flow)
-	case "run":
+	case "run", "step":
 		if coderPrompt == "" || reviewerPrompt == "" {
-			return fmt.Errorf("workflow run requires --coder-prompt-file and --reviewer-prompt-file")
+			return fmt.Errorf("workflow run/step requires --coder-prompt-file and --reviewer-prompt-file")
 		}
 		prompts := map[string]string{}
 		for role, path := range map[string]string{"CODER": coderPrompt, "REVIEWER": reviewerPrompt} {
@@ -211,7 +213,11 @@ func workflowCmd(args []string) error {
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
-		flow, err := controller.RunReviewFlow(ctx, db, storePath, id, func(dispatch core.GraphDispatch) (runtime.Identity, error) {
+		run := controller.RunReviewFlow
+		if action == "step" {
+			run = controller.StepReviewFlow
+		}
+		flow, err := run(ctx, db, storePath, id, func(dispatch core.GraphDispatch) (runtime.Identity, error) {
 			dispatch, err := selectDispatchConfiguration(db, dispatch)
 			if err != nil {
 				return nil, err
@@ -220,11 +226,15 @@ func workflowCmd(args []string) error {
 			if err != nil {
 				return nil, err
 			}
+			responseSchema := dispatchResultSchema(dispatch)
+			if strictResult {
+				responseSchema = strictDispatchResultSchema(dispatch)
+			}
 			return newDispatchWorker(ctx, db, dispatch, copilot.Config{
 				Role: dispatch.Recipient, SystemPrompt: runtimeSystemPrompt(prompts[dispatch.Recipient], contract),
 				WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: cli, BaseDirectory: base,
 				MaxAICredits:   maxAICredits,
-				AvailableTools: tools[dispatch.Recipient], ResponseSchema: dispatchResultSchema(dispatch),
+				AvailableTools: tools[dispatch.Recipient], ResponseSchema: responseSchema,
 			}, managedCommit && dispatch.Recipient == "CODER", managedStage && dispatch.Recipient == "CODER", scanner)
 		}, os.Stdout)
 		if flow.ID == "" {

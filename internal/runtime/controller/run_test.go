@@ -52,6 +52,14 @@ func (s *configuredScriptedRuntime) CheckAuthentication(_ context.Context, accou
 }
 
 func TestContinuousFlowRunsRepairAndNewSHAReview(t *testing.T) {
+	testFlowRunsRepairAndNewSHAReview(t, false)
+}
+
+func TestSteppedFlowWaitsForHumanBetweenRoles(t *testing.T) {
+	testFlowRunsRepairAndNewSHAReview(t, true)
+}
+
+func testFlowRunsRepairAndNewSHAReview(t *testing.T, stepped bool) {
 	resolved, err := config.Resolve([]config.Layer{{Source: "user", Input: []byte(`version: 1
 project: {id: demo}
 repository: {provider: github, host: github.com, path: owner/repo, account: scm-user, credentialRef: scm}
@@ -139,7 +147,27 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 		return configured, nil
 	}
 	var out bytes.Buffer
-	flow, err = RunReviewFlow(t.Context(), db, ledger, flow.ID, factory, &out)
+	if stepped {
+		for turn := range 5 {
+			priorWorkers := len(workers)
+			flow, err = StepReviewFlow(t.Context(), db, ledger, flow.ID, factory, &out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if flow.Status == "COMPLETED" {
+				break
+			}
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(workers) != priorWorkers+1 || len(state.Graph.Dispatches) != len(workers) || flow.RunnerID != "" {
+				t.Fatal("step issued a subsequent role or retained its runner claim", turn)
+			}
+		}
+	} else {
+		flow, err = RunReviewFlow(t.Context(), db, ledger, flow.ID, factory, &out)
+	}
 	if err != nil || flow.Status != "COMPLETED" || len(workers) != 4 || flow.RunnerID != "" {
 		t.Fatalf("continuous flow did not complete: %+v %v", flow, err)
 	}

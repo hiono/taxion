@@ -50,6 +50,7 @@ Commands:
   dispatch list       List dispatches ([--repo] filter, [--json])
   config bind         Save an approved fixed-file configuration selection for an unbound Dispatch
   conversation ask    Answer a bounded side question from saved Task records without changing the main workflow
+  conversation watch Hold handoffs before reading Human input; choose one role step or explicit bounded automatic execution
   runtime auth        Check the effective Copilot account against approved Dispatch configuration without creating a session
   runtime start       Start the Copilot session bound to an active Dispatch and send its authorized instruction
   runtime send        Send a follow-up prompt to the Dispatch session (--prompt-file required)
@@ -501,6 +502,7 @@ func runtimeCmd(args []string) error {
 	scanner := fs.String("scanner", "betterleaks", "trusted Betterleaks 1.9.0 executable (commit or --managed-commit)")
 	managedCommit := fs.Bool("managed-commit", false, "enable the bound Coder's taxion_commit SDK tool")
 	managedStage := fs.Bool("managed-stage", false, "enable taxion_stage alongside --managed-commit")
+	strictResult := fs.Bool("strict-result-identities", false, "constrain final-result identities and start SHA to the saved Dispatch; repeat on session attachment")
 	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for a turn or event stream")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -600,12 +602,16 @@ func runtimeCmd(args []string) error {
 	}
 	ctx, cancel := signalContext(*timeout)
 	defer cancel()
+	responseSchema := dispatchResultSchema(dispatch)
+	if *strictResult {
+		responseSchema = strictDispatchResultSchema(dispatch)
+	}
 	worker, err := newDispatchWorker(ctx, db, dispatch, copilot.Config{
 		Role: dispatch.Recipient, SystemPrompt: runtimeSystemPrompt(string(systemPrompt), dispatchContract),
 		WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: *cliPath,
 		BaseDirectory: *baseDirectory, AvailableTools: availableTools,
 		MaxAICredits:   *maxAICredits,
-		ResponseSchema: dispatchResultSchema(dispatch),
+		ResponseSchema: responseSchema,
 	}, *managedCommit, *managedStage, *scanner)
 	if err != nil {
 		return err
@@ -752,6 +758,18 @@ func dispatchResultSchema(dispatch core.GraphDispatch) map[string]any {
 		"type": "object", "additionalProperties": false,
 		"properties": properties, "required": required,
 	}
+}
+
+func strictDispatchResultSchema(dispatch core.GraphDispatch) map[string]any {
+	schema := dispatchResultSchema(dispatch)
+	properties := schema["properties"].(map[string]any)
+	for field, value := range map[string]string{
+		"dispatchId": dispatch.ID, "taskId": dispatch.TaskID, "recipient": dispatch.Recipient,
+		"repository": dispatch.Repository, "startedSha": dispatch.ExpectedStartSHA(),
+	} {
+		properties[field] = map[string]any{"type": "string", "enum": []string{value}}
+	}
+	return schema
 }
 
 func streamEvents(ctx context.Context, control *controller.Controller, dispatch core.GraphDispatch, cursor uint64, out io.Writer) error {

@@ -598,8 +598,69 @@ cleanup failures remain visible. Inputs over 128 KiB and final answers over
 This command reads saved records only. It does not perform additional live
 investigation, hold/release a handoff, or apply an answer to an instruction.
 Use the explicit `workflow handoff`, feedback and versioned draft operations
-for those changes. The request-to-plan conversation and conversational
-investigation/application remain part of M12's unfinished acceptance.
+for those changes, or the watched console below. Request-to-plan conversation
+and additional investigation remain part of M12's unfinished acceptance.
+
+### Watching and explicitly continuing a saved flow
+
+```bash
+taxion conversation watch --flow <flow-id> --actor <human-id> \
+  --source <actual-input-source> \
+  --question-max-tokens 20000 --question-timeout 2m \
+  --question-max-ai-credits 30 -- \
+  --coder-prompt-file <path> --reviewer-prompt-file <path> \
+  --coder-tools view,create,edit,apply_patch --reviewer-tools view \
+  --max-ai-credits 30 --managed-commit --managed-stage \
+  --strict-result-identities \
+  --scanner /absolute/path/to/betterleaks
+```
+
+Opening the console persists a handoff hold **before reading input**. It blocks
+the next role, not an already executing role. EOF, input errors and `/quit`
+leave the hold unchanged. A timeout is never approval. Actor/source are supplied
+decision metadata, not proof of an authenticated Human identity.
+
+`/step`, `/continue` or `続行` explicitly release the displayed boundary and
+execute at most one role turn. `workflow step` exposes the same shared runner
+without the console. Unlike `workflow run`, a successful step saves the role's
+result and releases the runner claim without issuing the next role. The next
+explicit step consumes that result, dispatches the authorized role, or records
+completion if review and acceptance already suffice. The console restores the
+hold after a step while the flow remains running.
+
+`/auto` explicitly selects the existing flow's bounded automatic mode. It does
+not extend the saved deadline, token budget or repair limit. Existing
+non-interactive `workflow run` behavior is unchanged. During a selected run,
+event output is streamed; a second console/process can persist a hold while
+the existing role continues. A hold is not cancellation; use `runtime stop`
+to request and confirm interruption of the exact saved session.
+
+`/draft TEXT` records or revises a versioned supplemental proposal. `/approve`
+approves only the displayed pending proposal within the unchanged contract,
+and `/discard` explicitly abandons it. Approval does not release the hold or
+issue a Dispatch; later explicit continuation publishes the supplement under
+the existing transaction checks. Changed scope, acceptance, identity, contract
+or limits are not reauthorized by supplementary approval. A proposal before a
+successful saved result cannot yet be approved.
+
+Other text (or `/ask TEXT`) goes to the independent saved-record question
+session, requiring the separate per-question ceilings. It does not become a
+draft or approval. `/hold` or `保留` retains the handoff hold. Continuation checks
+the displayed Dispatch target, role, result, latest draft, contract hash and
+hold version transactionally; a changed target is rejected, not attached to
+the new role. Command failures are printed explicitly and never interpreted as
+consent. The console does not yet implement changed-contract reapproval,
+natural-language cancellation or request-to-plan intake.
+
+`--strict-result-identities` is available on `runtime` and `workflow run|step`.
+It pins the final response schema's Dispatch ID, Task ID, role, repository and
+execution-start SHA to the immutable instruction (including the repair start
+SHA). It never guesses an output SHA, approval or verdict, and the controller
+still independently verifies all reported facts. This option changes the SDK
+configuration hash; repeat it when attaching or safely stopping such a session.
+The default schema is unchanged so earlier sessions remain attachable with their
+original options. A rejected response is not silently repaired or treated as
+successful work.
 
 `config bind --dispatch <dispatch-id>` saves one approved complete tuple, its
 decision reference, field origins and recording time with the Dispatch in
