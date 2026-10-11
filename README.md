@@ -350,11 +350,50 @@ the controller verifies that invoking session against the saved Dispatch.
 Host cancellation and saved review-flow time/known-usage ceilings apply.
 Scanner and authorization failures remain failed tool calls.
 
-The tool commits **already-staged content only**. Managed staging and signed-in
-SDK acceptance remain in #53/#54/#72; arbitrary shell commands, sub-agent commit
-calls, and automatic staging are not enabled. The registered SDK handler,
-controller, and actual Git tree were checked together locally without a
-signed-in Copilot request.
+The commit tool uses **already-staged content only**. To let a new Coder session
+stage explicitly selected files, also pass `--managed-stage`:
+
+```bash
+taxion runtime start --dispatch <id> --system-prompt-file <path> \
+  --managed-commit --managed-stage --scanner /absolute/path/to/betterleaks
+```
+
+`workflow run` accepts the same pair of options. `--managed-stage` requires
+`--managed-commit`; repeat both when attaching to that session. Staging changes
+the operation version and tool surface in the configuration hash, so an
+existing commit-only session cannot acquire staging on resume.
+
+`taxion_stage` accepts only `{"paths":["src/file.go","src/deleted.go"]}`:
+unique, canonical repository-relative file paths or tracked deletions.
+It does not expand wildcards or pathspec syntax, recurse through directories,
+force-add ignored files, or select Git metadata. Existing prohibited local
+files cannot be added; their tracked deletions can be staged when authorized.
+Parent symlinks outside the
+worktree and special files are rejected. Symlink files are staged as link text,
+not the target's contents. Deleted files are supported even when their parent
+directories no longer exist.
+
+The controller uses the same bound session, active Task and flow limits as
+commit. It copies and locks the index, stages only those files in the private
+copy, and checks the resulting full tree's scope, prohibited paths and contents.
+This preserves unselected staged files. Successful staging flushes and
+atomically replaces the real index with the checked copy; it creates no commit
+and leaves working files and HEAD unchanged. Failed checks leave the real index
+unchanged. Branch/HEAD or direct index changes detected before publication stop
+the operation. Commit rechecks the snapshot rather than trusting a prior stage.
+
+Git attributes and configured clean filters apply normally; filtered blobs,
+not merely working contents, are scanned. Git repository configuration and
+filter executables remain trusted host inputs, not a sandboxed tool surface.
+Staging can write blobs to Git's local object database before a rejected scan;
+it does not erase those unreachable objects or claim to prevent all local
+storage of secret values. Git-file races by hostile host processes and the
+scanner's documented detection/filter limits remain outside the guarantees.
+
+Registered SDK handlers were checked through controller and actual Git for
+stage→commit locally. Arbitrary shell commands and sub-agent staging/commit
+calls are not enabled. Signed-in SDK stage→commit→independent-review acceptance
+remains in #53/#54/#72.
 
 ```yaml
 version: 1

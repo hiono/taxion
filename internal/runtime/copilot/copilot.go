@@ -136,7 +136,7 @@ func New(config Config) (*Adapter, error) {
 			return nil, fmt.Errorf("taxion: copy response schema: %w", err)
 		}
 	}
-	if slices.Contains(config.AvailableTools, ManagedCommitToolName) {
+	if slices.Contains(config.AvailableTools, ManagedCommitToolName) || slices.Contains(config.AvailableTools, ManagedStageToolName) {
 		return nil, fmt.Errorf("taxion: managed commit tool is reserved; enable it through the host binding")
 	}
 	if config.ManagedCommit != nil {
@@ -147,6 +147,9 @@ func New(config Config) (*Adapter, error) {
 		}
 		config.ManagedCommit = &binding
 		config.AvailableTools = append(config.AvailableTools, ManagedCommitToolName)
+		if binding.Stage != nil {
+			config.AvailableTools = append(config.AvailableTools, ManagedStageToolName)
+		}
 	}
 	return &Adapter{
 		config: config,
@@ -167,6 +170,9 @@ func (a *Adapter) ConfigHash() string {
 	managedCommitPolicy := ""
 	if a.config.ManagedCommit != nil {
 		managedCommitPolicy = "managed-commit-v1"
+		if a.config.ManagedCommit.Stage != nil {
+			managedCommitPolicy = "managed-stage-commit-v1"
+		}
 	}
 	permissionPolicy := "cli-managed-v1"
 	if a.config.Role == "CODER" {

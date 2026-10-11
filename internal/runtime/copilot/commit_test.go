@@ -160,7 +160,7 @@ func TestManagedCommitToolInvocationBoundary(t *testing.T) {
 	}
 }
 
-func TestSDKManagedCommitInvokesControllerGitGate(t *testing.T) {
+func TestSDKManagedStageAndCommitInvokeControllerGitGate(t *testing.T) {
 	root := t.TempDir()
 	git := func(args ...string) string {
 		t.Helper()
@@ -223,6 +223,13 @@ func TestSDKManagedCommitInvokesControllerGitGate(t *testing.T) {
 		}
 		return control.CommitForSession(ctx, dispatch.ID, sessionID, message, scanner)
 	}
+	config.ManagedCommit.Stage = func(ctx context.Context, sessionID string, paths []string) (string, error) {
+		control, err := controller.New(db, adapter)
+		if err != nil {
+			return "", err
+		}
+		return control.StageForSession(ctx, dispatch.ID, sessionID, paths, scanner)
+	}
 	adapter, err = New(config)
 	if err != nil {
 		t.Fatal(err)
@@ -253,13 +260,30 @@ func TestSDKManagedCommitInvokesControllerGitGate(t *testing.T) {
 	if err := os.WriteFile(source, []byte("approved content"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	git("add", "src/source.txt")
+	stage := sdk.ToolInvocation{ToolName: ManagedStageToolName, SessionID: "session",
+		TraceContext: context.Background(), Arguments: map[string]any{"paths": []string{"src/source.txt"}}}
+	stageHandler := adapter.sessionConfig(nil).Tools[1].Handler
+	if err := os.WriteFile(source, []byte("fake-private-payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := stageHandler(stage)
+	if err == nil || result.ResultType == "success" || strings.Contains(err.Error(), "fake-private-payload") ||
+		strings.Contains(git("ls-files"), "src/source.txt") {
+		t.Fatal("SDK stage content scan failed to stop safely", err)
+	}
+	if err := os.WriteFile(source, []byte("approved content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err = stageHandler(stage)
+	if err != nil || result.ResultType != "success" || git("rev-parse", "HEAD") != baseline {
+		t.Fatal("SDK managed stage failed or created a commit", result, err)
+	}
 	message := "feat(src): implement approved change\n\nintent(src): satisfy the authorized criterion\n"
 	invocation := sdk.ToolInvocation{ToolName: ManagedCommitToolName, SessionID: "session",
 		TraceContext: context.Background(), Arguments: map[string]any{"message": message}}
 	bad := invocation
 	bad.Arguments = map[string]any{"message": message + "constraint(src): fake-private-payload\n"}
-	result, err := adapter.sessionConfig(nil).Tools[0].Handler(bad)
+	result, err = adapter.sessionConfig(nil).Tools[0].Handler(bad)
 	if err == nil || result.ResultType == "success" || git("rev-parse", "HEAD") != baseline ||
 		strings.Contains(err.Error(), "fake-private-payload") {
 		t.Fatal("SDK message scan failed to stop safely", err)

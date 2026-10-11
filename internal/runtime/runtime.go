@@ -63,5 +63,6 @@ type EventCursor interface {
 type ManagedCommit struct {
 	DispatchID string
 	Scanner    string
-	Commit     func(ctx context.Context, sessionID, message string) (string, error) `json:"-"`
+	Commit     func(ctx context.Context, sessionID, message string) (string, error)        `json:"-"`
+	Stage      func(ctx context.Context, sessionID string, paths []string) (string, error) `json:"-"`
 }

@@ -3,6 +3,7 @@ package gitguard
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,13 +19,17 @@ import (
 // It holds the real index lock, ignores ambient Git redirection, and never stages
 // working files or invokes project hooks. The caller owns Dispatch authorization.
 func Commit(ctx context.Context, dispatch core.GraphDispatch, message, scanner string) (string, error) {
+	return managedIndex(ctx, dispatch, message, scanner, nil)
+}
+
+func managedIndex(ctx context.Context, dispatch core.GraphDispatch, message, scanner string, stagePaths []string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	if dispatch.Recipient != "CODER" || dispatch.Instruction.CommitMessagePolicy != core.CommitMessagePolicy ||
 		dispatch.ExecutionStartSHA == "" {
 		return "", fmt.Errorf("managed commit requires a Coder execution start and supported commit policy")
 	}
-	if core.ValidateCommitMessage(message) != nil {
+	if stagePaths == nil && core.ValidateCommitMessage(message) != nil {
 		return "", fmt.Errorf("managed commit message violates the Conventional/Contextual policy")
 	}
 	var environment []string
@@ -154,6 +159,18 @@ func Commit(ctx context.Context, dispatch core.GraphDispatch, message, scanner s
 	if _, err := git("", "update-index", "--no-split-index"); err != nil {
 		return "", err
 	}
+	if stagePaths != nil {
+		if _, err := readIndexEnvironment(ctx, directory, environment); err != nil {
+			return "", err
+		}
+		if err := validateStagePaths(directory, dispatch, stagePaths); err != nil {
+			return "", err
+		}
+		arguments := []string{"--literal-pathspecs", "add", "--"}
+		if _, err := git("", append(arguments, stagePaths...)...); err != nil {
+			return "", err
+		}
+	}
 	if err := checkSecrets(ctx, directory, scanner, environment, message); err != nil {
 		return "", err
 	}
@@ -165,7 +182,7 @@ func Commit(ctx context.Context, dispatch core.GraphDispatch, message, scanner s
 	if err != nil {
 		return "", err
 	}
-	if tree == currentTree {
+	if stagePaths == nil && tree == currentTree {
 		return "", fmt.Errorf("managed commit requires staged changes")
 	}
 	for _, from := range []string{head, dispatch.Instruction.BaselineSHA} {
@@ -177,6 +194,44 @@ func Commit(ctx context.Context, dispatch core.GraphDispatch, message, scanner s
 			if err := gitproof.CheckChangedPaths(dispatch, strings.Split(strings.TrimSuffix(files, "\x00"), "\x00")); err != nil {
 				return "", fmt.Errorf("managed commit contains a path outside the authorized scope")
 			}
+		}
+		if stagePaths != nil {
+			currentBranch, err := git("", "symbolic-ref", "--quiet", "HEAD")
+			if err != nil || currentBranch != branch {
+				return "", fmt.Errorf("managed stage branch changed before index publication")
+			}
+			currentHead, err := git("", "rev-parse", "--verify", "HEAD")
+			if err != nil || currentHead != head {
+				return "", fmt.Errorf("managed stage HEAD changed before index publication")
+			}
+			currentIndex, err := os.ReadFile(indexPath)
+			if err != nil || string(currentIndex) != string(index) {
+				return "", fmt.Errorf("managed stage real index changed during inspection")
+			}
+			content, err := os.ReadFile(snapshot)
+			if err != nil {
+				return "", fmt.Errorf("read verified staged index: %w", err)
+			}
+			staged, err := os.OpenFile(indexPath+".lock", os.O_WRONLY|os.O_TRUNC, 0600)
+			if err != nil {
+				return "", fmt.Errorf("write verified staged index: %w", err)
+			}
+			if _, err := staged.Write(content); err != nil {
+				return "", errors.Join(fmt.Errorf("write verified staged index: %w", err), staged.Close())
+			}
+			if err := staged.Sync(); err != nil {
+				return "", errors.Join(fmt.Errorf("sync verified staged index: %w", err), staged.Close())
+			}
+			if err := staged.Close(); err != nil {
+				return "", fmt.Errorf("close verified staged index: %w", err)
+			}
+			if err := ctx.Err(); err != nil {
+				return "", fmt.Errorf("managed stage interrupted before index publication: %w", err)
+			}
+			if err := os.Rename(indexPath+".lock", indexPath); err != nil {
+				return "", fmt.Errorf("publish verified staged index: %w", err)
+			}
+			return tree, nil
 		}
 	}
 	sign, err := git("", "config", "--type=bool", "--default=false", "--get", "commit.gpgsign")

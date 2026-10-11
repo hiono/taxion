@@ -55,6 +55,7 @@ Commands:
   runtime stop        Stop the Dispatch session
   runtime commit      Publish scanned staged changes for the bound running Coder (--message-file, --scanner)
   runtime <action> --managed-commit  Opt into the bound Coder SDK commit tool; use the same option and scanner on resume
+  runtime <action> --managed-stage   Also enable scoped file staging; requires --managed-commit
   workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON)
   workflow advance    Issue review/repair from the latest verified result (--id required)
   workflow run        Execute review/repair continuously with saved ceilings (--id and role prompt files required)
@@ -486,6 +487,7 @@ func runtimeCmd(args []string) error {
 	messageFile := fs.String("message-file", "", "Conventional/Contextual commit message file (commit only)")
 	scanner := fs.String("scanner", "betterleaks", "trusted Betterleaks 1.9.0 executable (commit or --managed-commit)")
 	managedCommit := fs.Bool("managed-commit", false, "enable the bound Coder's taxion_commit SDK tool")
+	managedStage := fs.Bool("managed-stage", false, "enable taxion_stage alongside --managed-commit")
 	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for a turn or event stream")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -513,6 +515,9 @@ func runtimeCmd(args []string) error {
 	})
 	if action != "commit" && !*managedCommit && scannerSpecified {
 		return fmt.Errorf("runtime: --scanner applies only to commit or --managed-commit")
+	}
+	if *managedStage && !*managedCommit {
+		return fmt.Errorf("runtime: --managed-stage requires --managed-commit")
 	}
 
 	db, err := openWorkspace()
@@ -567,7 +572,7 @@ func runtimeCmd(args []string) error {
 		WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: *cliPath,
 		BaseDirectory: *baseDirectory, AvailableTools: availableTools,
 		ResponseSchema: dispatchResultSchema(dispatch),
-	}, *managedCommit, *scanner)
+	}, *managedCommit, *managedStage, *scanner)
 	if err != nil {
 		return err
 	}

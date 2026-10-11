@@ -13,7 +13,10 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
-func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch core.GraphDispatch, config copilot.Config, managedCommit bool, scanner string) (*copilot.Adapter, error) {
+func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch core.GraphDispatch, config copilot.Config, managedCommit, managedStage bool, scanner string) (*copilot.Adapter, error) {
+	if managedStage && !managedCommit {
+		return nil, fmt.Errorf("runtime: --managed-stage requires --managed-commit")
+	}
 	var worker *copilot.Adapter
 	if managedCommit {
 		if dispatch.Recipient != "CODER" || dispatch.Instruction.CommitMessagePolicy != core.CommitMessagePolicy {
@@ -47,6 +50,22 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 				}
 				return control.CommitForSession(ctx, dispatch.ID, sessionID, message, path)
 			},
+		}
+		if managedStage {
+			config.ManagedCommit.Stage = func(ctx context.Context, sessionID string, paths []string) (string, error) {
+				ctx, cancel := context.WithCancel(ctx)
+				stop := context.AfterFunc(hostContext, cancel)
+				defer stop()
+				defer cancel()
+				if err := hostContext.Err(); err != nil {
+					return "", fmt.Errorf("runtime: managed stage host interrupted: %w", err)
+				}
+				control, err := controller.New(db, worker)
+				if err != nil {
+					return "", err
+				}
+				return control.StageForSession(ctx, dispatch.ID, sessionID, paths, path)
+			}
 		}
 	}
 	var err error

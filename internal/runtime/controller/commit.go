@@ -26,6 +26,22 @@ func (c *Controller) CommitForSession(ctx context.Context, dispatchID, sessionID
 }
 
 func (c *Controller) commit(ctx context.Context, dispatchID, sessionID, message, scanner string) (string, error) {
+	return c.managedGit(ctx, dispatchID, sessionID, "Git commit", func(ctx context.Context, dispatch core.GraphDispatch) (string, error) {
+		return gitguard.Commit(ctx, dispatch, message, scanner)
+	})
+}
+
+// StageForSession shares the same authorization transaction as managed commit.
+func (c *Controller) StageForSession(ctx context.Context, dispatchID, sessionID string, paths []string, scanner string) (string, error) {
+	if sessionID == "" {
+		return "", fmt.Errorf("managed stage tool requires an invoking session")
+	}
+	return c.managedGit(ctx, dispatchID, sessionID, "Git index tree", func(ctx context.Context, dispatch core.GraphDispatch) (string, error) {
+		return gitguard.Stage(ctx, dispatch, paths, scanner)
+	})
+}
+
+func (c *Controller) managedGit(ctx context.Context, dispatchID, sessionID, publication string, operation func(context.Context, core.GraphDispatch) (string, error)) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var sha string
@@ -63,12 +79,12 @@ func (c *Controller) commit(ctx context.Context, dispatchID, sessionID, message,
 			defer cancel()
 		}
 		var err error
-		sha, err = gitguard.Commit(ctx, dispatch, message, scanner)
+		sha, err = operation(ctx, dispatch)
 		return err
 	})
 	if err != nil {
 		if sha != "" {
-			return sha, fmt.Errorf("Git commit %s was published but workspace transaction failed: %w", sha, err)
+			return sha, fmt.Errorf("%s %s was published but workspace transaction failed: %w", publication, sha, err)
 		}
 		return "", err
 	}

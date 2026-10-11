@@ -47,7 +47,7 @@ type Runtime interface {
   active status, and configuration hash before creating, resuming, sending,
   stopping, or recording usage for its bound session. Session IDs, hashes,
   model and token/cache usage are stored with the Dispatch in SQLite.
-  Managed commits additionally require an active Task, the invoking session
+  Managed staging and commits additionally require an active Task, the invoking session
   for tool calls, and a running review flow within its saved deadline and
   observed known-usage ceiling when the Dispatch belongs to a flow.
 
@@ -83,10 +83,26 @@ preserved. Existing sessions cannot gain or lose the tool on resume without a
 binding mismatch. Shared runtime/workflow construction uses the same callback
 and does not register commit tools for Reviewers.
 
-This tool uses already-staged content; managed staging is not implemented.
-Local checks invoke the actual registered SDK handler through controller and
-real Git, but do not demonstrate a signed-in model's tool invocation. Live
-acceptance remains separately tracked in #54/#72.
+Commit uses already-staged content. The additional `--managed-stage` option
+requires `--managed-commit` and registers `taxion_stage` on creation and resume.
+Its separate operation version preserves commit-only session identities.
+The neutral binding's staging callback receives session ID and an explicit
+paths array; repository, scope and scanner still belong to the host.
+
+Staging shares the controller's authorization transaction, invocation checks
+and flow ceilings. It selects canonical relative files or tracked deletions,
+not recursive directories, force adds, Git metadata or parent symlinks outside
+the worktree. Literal path selection prevents wildcard/pathspec expansion.
+Only a private index is changed before full-tree scope, path and content checks.
+The checked copy is flushed and atomically published as the real index, while
+HEAD and working files remain unchanged. Failed checks do not publish it.
+Commit scans again. Git clean filters apply and local unreachable blobs can
+remain after rejected staging; trusted repository configuration and hostile
+host-process races are not sandboxed by these operations.
+
+Local checks invoke registered SDK stage and commit handlers through controller
+and real Git, but do not demonstrate a signed-in model's tool invocation. Live
+stage→commit→independent-review acceptance remains separately tracked in #54/#72.
 
 ## Event subscription lifetime
 

@@ -156,5 +156,12 @@ Dispatch・scanner 配置・操作版を session の設定 hash に含め、
 作成・再開の両方で invoking session と実行状態を照合する。
 stage 済み index を対象とし、commit 成功による Task 完了や
 Reviewer への commit 権限付与は行わない。
+`--managed-stage` は明示した相対ファイル・追跡済み削除を private index に stage し、
+scope・禁止パス・内容を検査してから実 index に反映する。
+commit-only session との操作版を区別し、作成・再開の設定 hash に反映する。
+directory の再帰追加、force add、任意 shell は許可しない。
+Git の clean filter は適用され、検査対象は変換後の blob とする。
+検査失敗時にも local object database に未参照 blob が残る場合があり、
+この gate は秘密値の local 保存全体を防ぐ sandbox ではない。
 共有 Memory の配置、runtime 開始・再開への設定接続、
-管理 stage、signed-in SDK の tool 受入れ、公開前の全コミット・外部記録検査は後続実装として追跡する。
+signed-in SDK の tool 受入れ、公開前の全コミット・外部記録検査は後続実装として追跡する。

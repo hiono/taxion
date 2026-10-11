@@ -65,6 +65,10 @@ func TestManagedCommitRespectsReviewFlowCeilings(t *testing.T) {
 				t.Fatal(err)
 			}
 			head := gitTest(t, root, "rev-parse", "HEAD")
+			_, stageErr := control.StageForSession(t.Context(), id, "session", []string{"internal/app.go"}, scanner)
+			if (stageErr == nil) != (failure == "") {
+				t.Fatal("stage did not share commit flow ceiling authorization", failure, stageErr)
+			}
 			sha, err := control.CommitForSession(t.Context(), id, "session",
 				"feat(app): implement approved change\n\nintent(app): satisfy the authorized criterion\n", scanner)
 			if failure == "" {

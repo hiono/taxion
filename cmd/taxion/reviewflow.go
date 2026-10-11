@@ -26,6 +26,7 @@ func workflowCmd(args []string) error {
 	var file, id string
 	var coderPrompt, reviewerPrompt, cli, base, coderTools, reviewerTools string
 	var managedCommit bool
+	var managedStage bool
 	var scanner string
 	switch action {
 	case "start", "recover":
@@ -41,6 +42,7 @@ func workflowCmd(args []string) error {
 		fs.StringVar(&coderTools, "coder-tools", "", "comma-separated Coder SDK tool allowlist")
 		fs.StringVar(&reviewerTools, "reviewer-tools", "", "comma-separated Reviewer SDK tool allowlist")
 		fs.BoolVar(&managedCommit, "managed-commit", false, "enable the Coder's bound taxion_commit SDK tool")
+		fs.BoolVar(&managedStage, "managed-stage", false, "enable taxion_stage alongside --managed-commit")
 		fs.StringVar(&scanner, "scanner", "betterleaks", "trusted Betterleaks executable (--managed-commit only)")
 	default:
 		return fmt.Errorf("unknown workflow action %q", action)
@@ -54,6 +56,9 @@ func workflowCmd(args []string) error {
 	})
 	if scannerSpecified && !managedCommit {
 		return fmt.Errorf("workflow: --scanner requires --managed-commit")
+	}
+	if managedStage && !managedCommit {
+		return fmt.Errorf("workflow: --managed-stage requires --managed-commit")
 	}
 	fileAction := action == "start" || action == "recover"
 	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" {
@@ -114,7 +119,7 @@ func workflowCmd(args []string) error {
 				Role: dispatch.Recipient, SystemPrompt: runtimeSystemPrompt(prompts[dispatch.Recipient], contract),
 				WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: cli, BaseDirectory: base,
 				AvailableTools: tools[dispatch.Recipient], ResponseSchema: dispatchResultSchema(dispatch),
-			}, managedCommit && dispatch.Recipient == "CODER", scanner)
+			}, managedCommit && dispatch.Recipient == "CODER", managedStage && dispatch.Recipient == "CODER", scanner)
 		}, os.Stdout)
 		if flow.ID == "" {
 			return err
