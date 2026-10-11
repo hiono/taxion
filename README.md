@@ -77,6 +77,7 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
 ```bash
 taxion config check --sources
 taxion git check-index
+taxion git hook status
 taxion init
 taxion task create --title "…" --repo <repo>
 taxion task plan --repo <repo>
@@ -207,9 +208,39 @@ file names or values; an unreadable or unmerged index fails the check.
 Run it immediately before a manual commit, or invoke it from a pre-commit
 hook. It does not install a hook or run automatically in the controller.
 Only paths are checked: secrets copied into source files, a shared example,
-or `mise.toml` require content scanning. Scanner integration, controller
-commit enforcement, and the hook installer remain in
+or `mise.toml` require content scanning. Scanner integration and controller
+commit enforcement remain in
 [#72](https://github.com/hiono/taxion/issues/72).
+
+Install the path-only pre-commit hook explicitly from a persistent Taxion
+binary:
+
+```bash
+taxion git hook install --paths-only
+taxion git hook status
+taxion git hook uninstall
+```
+
+The installer uses Git's effective hooks directory, including `core.hooksPath`
+and linked worktrees; a shared hooks location affects every repository or
+worktree using it. It creates a hook only when none exists and leaves custom,
+edited, nonexecutable, and symlink hooks unchanged with an explicit error.
+For an existing hook, integrate `taxion git check-index` manually while
+preserving its existing checks. Reinstallation of the identical hook is
+idempotent; uninstall removes only the exact hook for the running binary.
+
+The hook records that binary's absolute path, including shell quoting.
+Use the same installation path for status and uninstall. A moved or edited
+installation requires manual review rather than automatic replacement.
+Do not install using `go run`: its temporary executable will disappear.
+Status checks that the hook and binary are executable; a missing binary
+causes hook execution to fail and stops the commit. Installation currently
+requires Unix executable permissions.
+
+`--paths-only` explicitly accepts limited coverage: no content scanner is
+configured. Local hooks can be skipped with `--no-verify`, replaced, or
+disabled and are not carried into new clones. The controller must enforce
+its own commit check independently; that connection remains in #72.
 
 ```yaml
 version: 1

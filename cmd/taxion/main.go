@@ -37,6 +37,7 @@ Usage:
 Commands:
   config check        Validate fixed Global/Project YAML and environment references ([--sources], [--task])
   git check-index     Reject local Taxion and dotenv paths in the actual commit index
+  git hook            Install (--paths-only), inspect, or remove the Taxion pre-commit hook
   init                Initialize a local workspace ledger
   task create         Create a task (--title and --repo required)
   task list           List tasks ([--repo] filter, [--json])
