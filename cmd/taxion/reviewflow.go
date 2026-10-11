@@ -30,7 +30,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return encoder.Encode(value)
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|interrupt|feedback-target|planning-context|planner-draft|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show}")
+		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|interrupt|feedback-target|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show}")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
@@ -43,7 +43,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	var scanner string
 	var maxAICredits float64
 	switch action {
-	case "start", "recover", "handoff", "interrupt", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve", "planner-draft", "question-draft":
+	case "start", "recover", "handoff", "interrupt", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve", "planner-draft", "planner-action", "question-draft":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
 	case "advance", "show", "feedback-target", "planning-context":
 		fs.StringVar(&id, "id", "", "review flow ID")
@@ -80,16 +80,16 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	if managedStage && !managedCommit {
 		return fmt.Errorf("workflow: --managed-stage requires --managed-commit")
 	}
-	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "interrupt" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve" || action == "planner-draft" || action == "question-draft"
+	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "interrupt" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve" || action == "planner-draft" || action == "planner-action" || action == "question-draft"
 	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" {
-		return fmt.Errorf("workflow start, recover, handoff, interrupt, feedback, feedback-resolve, draft, draft-discard, draft-approve, planner-draft and question-draft require --file; advance, run, step, show, planning-context and feedback-target require --id")
+		return fmt.Errorf("workflow start, recover, handoff, interrupt, feedback, feedback-resolve, draft, draft-discard, draft-approve, planner-draft, planner-action and question-draft require --file; advance, run, step, show, planning-context and feedback-target require --id")
 	}
 	db, state, err := loadWorkspace()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	if action == "planner-draft" || action == "question-draft" {
+	if action == "planner-draft" || action == "planner-action" || action == "question-draft" {
 		input, err := os.Open(file)
 		if err != nil {
 			return err
@@ -107,7 +107,11 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 			if err := core.DecodeGraphInput(input, &request); err != nil {
 				return err
 			}
-			flow, err = controller.RecordPlannerDraft(db, storePath, request)
+			adopt := controller.RecordPlannerDraft
+			if action == "planner-action" {
+				adopt = controller.RecordPlannerAction
+			}
+			flow, err = adopt(db, storePath, request)
 		}
 		if err != nil {
 			return err

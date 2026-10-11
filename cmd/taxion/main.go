@@ -51,6 +51,10 @@ Commands:
   config bind         Save an approved fixed-file configuration selection for an unbound Dispatch
   conversation ask    Answer a bounded side question from saved Task records without changing the main workflow
   conversation plan   Recommend a next action from compact Memory and results; no execution or inferred approval
+  conversation intake Record an original request and unapproved scope/acceptance contract (--file JSON)
+  conversation proposal Read a saved proposed contract and its exact hash (--task ID)
+  conversation confirm Explicitly approve that exact contract/configuration without issuing work (--file JSON)
+  conversation investigate Read bounded scoped committed files for an isolated question with explicit ceilings
   conversation watch Hold handoffs before reading Human input; choose one role step or explicit bounded automatic execution
   runtime auth        Check the effective Copilot account against approved Dispatch configuration without creating a session
   runtime start       Start the Copilot session bound to an active Dispatch and send its authorized instruction

@@ -83,6 +83,9 @@ taxion git check-index
 taxion git check-index --secrets --scanner /absolute/path/to/betterleaks
 taxion git hook status
 taxion init
+taxion conversation intake --file <request-and-contract-proposal.json>
+taxion conversation proposal --task <id>
+taxion conversation confirm --file <exact-human-confirmation.json>
 taxion task create --title "…" --repo <repo>
 taxion task plan --repo <repo>
 taxion workflow start --file <authorized-flow.json>
@@ -91,6 +94,7 @@ taxion workflow run --id <flow-id> --coder-prompt-file <path> --reviewer-prompt-
 taxion workflow show --id <flow-id>
 taxion workflow planning-context --id <flow-id>
 taxion workflow planner-draft --file <selected-planning-proposal.json>
+taxion workflow planner-action --file <selected-non-execution-advice.json>
 taxion workflow question-draft --file <selected-question-findings.json>
 taxion conversation plan --task <id> --question "Repair or revisit the plan?" --max-tokens 8000 --timeout 2m --max-ai-credits 30
 taxion conversation investigate --task <id> --path src/app.go --question "What did the saved implementation miss?" --max-bytes 8192 --max-tokens 8000 --timeout 2m --max-ai-credits 30
@@ -156,7 +160,51 @@ actor/source fields are supplied provenance, not authenticated provider/Human
 identity. Semantic validity and contract preservation still require the explicit
 Human supplement approval. Scope, acceptance, identities or budget revisions,
 unattended Orchestrator-selected execution and new-request intake remain
-incomplete.
+separate from these supplementary approvals.
+
+`conversation intake --file PATH` records `request` (the original user text),
+an explicit `task` with `status: DRAFT`, `actor` and `source`. The proposed Task
+has independent `CODER`/`REVIEWER`, no `authorizationId` and no supplied decisions.
+It may retain unresolved scope/acceptance gaps; incomplete contracts cannot
+be confirmed as executable. The result and `conversation proposal --task ID`
+show the exact contract plus its content `hash`. No model or worker is called.
+Optional `planningSelection` and `planningReason` authorize only a separately
+bounded `conversation ask|plan` about that draft; they never make it READY.
+Record revised proposals with a fresh Task ID, preserving previous versions.
+
+`conversation confirm --file PATH` takes `taskId`, `expectedHash`, `actor`,
+`source`, `reason`, the full configuration `selection` and explicit
+`additionalTaskIds` (such as the bounded flow's exact Reviewer Task IDs).
+Human confirms scope, acceptance, validation commands, repository, identities
+and configuration against that exact hash. Confirmation transactionally records
+authorization and prepares READY, but never issues a Dispatch. A separate
+`workflow start` authorizes the actual repair/time/token ceilings. Repeated
+identical confirmations are harmless; changed confirmation contents or stale
+hashes are rejected. Newly expanded configuration approval needs a fresh
+globally unique `selection.execution.approvalRef`.
+
+Changed issued contracts use a successor intake Task with `supersedes` naming
+the previous Task and `createdFrom: flow:FLOW_ID`. Confirmation additionally
+requires `replacesFlow` and its exact displayed `target`. The predecessor
+must be held, unclaimed and have no active Dispatch; incomplete stop evidence
+cannot be bypassed. The same worktree retains its latest recorded output SHA.
+Explicit confirmation stops the predecessor flow and supersedes its Task,
+while preserving its issued instruction, results, approvals and original
+ceilings. The successor gets fresh authorization and a separately bounded flow;
+it never reinterprets earlier approval as permission to widen the old contract.
+The supplied actor/source remain provenance, not authenticated Human identity.
+
+Watched `/adopt` selects other Planner recommendations as sourced, unresolved
+feedback through `workflow planner-action`, not a repair supplement. `HOLD` and
+`HUMAN_REQUIRED` retain the boundary and recorded reasons; `INVESTIGATE` leads to
+the separate bounded investigation path, and `REPLAN` to explicit successor
+intake/reapproval. `REPORT` records the selected report without approving work.
+Their unresolved decisions prevent continuation until Human explicitly
+disposes of them through `feedback-resolve`, applies approved findings, or
+confirms a successor. Selecting advice never itself runs an investigation or
+approves a replacement contract. Full automatic natural-language contract
+synthesis and unattended Orchestrator execution are not provided by these
+explicit Human confirmation operations.
 
 Side-question observations also project prior result decisions in Task history,
 Dispatch instructions and flow contracts: exact results and their source hashes

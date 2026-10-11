@@ -68,6 +68,61 @@ No live investigation has happened here; identify any needed investigation
 as unconfirmed. Keep the response concise and in the user's language.`
 
 func conversationCmd(args []string, output io.Writer) error {
+	if len(args) != 0 && (args[0] == "intake" || args[0] == "confirm" || args[0] == "proposal") {
+		fs := flag.NewFlagSet("conversation "+args[0], flag.ContinueOnError)
+		file := fs.String("file", "", "JSON original request and explicit contract, or exact Human confirmation")
+		id := fs.String("task", "", "saved proposal Task ID")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 || args[0] == "proposal" && (*id == "" || *file != "") ||
+			args[0] != "proposal" && (*file == "" || *id != "") {
+			return fmt.Errorf("conversation intake/confirm require --file; proposal requires --task")
+		}
+		db, state, err := loadWorkspace()
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		var task core.GraphTask
+		if args[0] == "proposal" {
+			var ok bool
+			task, ok = state.Graph.GraphTask(*id)
+			if !ok {
+				return fmt.Errorf("conversation proposal requires a saved Task")
+			}
+		} else {
+			input, err := os.Open(*file)
+			if err != nil {
+				return err
+			}
+			defer input.Close()
+			if args[0] == "intake" {
+				var request controller.IntakeRequest
+				if err := core.DecodeGraphInput(input, &request); err != nil {
+					return err
+				}
+				task, err = controller.ProposeIntake(db, request)
+			} else {
+				var request controller.IntakeConfirmation
+				if err := core.DecodeGraphInput(input, &request); err != nil {
+					return err
+				}
+				task, err = controller.ConfirmIntake(db, request)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		hash, err := controller.IntakeHash(task)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(output).Encode(struct {
+			Task core.GraphTask `json:"task"`
+			Hash string         `json:"hash"`
+		}{task, hash})
+	}
 	if len(args) != 0 && args[0] == "watch" {
 		return conversationWatch(args[1:], os.Stdin, output)
 	}
@@ -320,10 +375,14 @@ func watchedConversation(args []string, input io.Reader, output io.Writer, runne
 				operationErr = fmt.Errorf("/adopt requires the last successful /plan result and takes no text")
 				break
 			}
-			_, operationErr = controller.RecordPlannerDraft(db, storePath, controller.PlannerDraftRequest{
+			adopt := controller.RecordPlannerDraft
+			if lastPlan.Answer != nil && lastPlan.Answer.Recommendation != "REVIEW" && lastPlan.Answer.Recommendation != "REPAIR" {
+				adopt = controller.RecordPlannerAction
+			}
+			_, operationErr = adopt(db, storePath, controller.PlannerDraftRequest{
 				FlowID: *id, ID: "console-" + rand.Text(), ExpectedDraftID: observation.ExpectedDraftID,
 				ExpectedChangeID: observation.ExpectedChangeID, Target: observation.Target,
-				Actor: *actor, Source: *source, Reason: "Human explicitly selected the displayed Planner advice as an unapproved contract-preserving supplement",
+				Actor: *actor, Source: *source, Reason: "Human explicitly selected the displayed Planner advice without approving execution",
 				Proposal: *lastPlan,
 			})
 			if operationErr == nil {

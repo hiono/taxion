@@ -85,6 +85,19 @@ type Runtime interface {
   authorize continuation. Issued execution is held, not fictitiously stopped.
   Exact replay is checked before applying a new request to current state.
   Partial work and issued instructions are preserved.
+- Intake persists original request text in a sourced, unapproved DRAFT Task.
+  Optional planning configuration approval permits isolated bounded questions
+  only. Exact-hash Human confirmation records separate execution authorization
+  and configuration approval before READY; incomplete scope/acceptance or
+  validation commands cannot pass. Confirmation does not issue work or choose
+  flow ceilings. A revised issued contract is a successor Task, requiring the
+  held predecessor target, no runner and no active Dispatch. Old flow limits,
+  approvals, instructions and results remain unchanged; explicit reapproval
+  stops/supersedes the predecessor and prepares separately bounded work.
+- Selected non-execution Planner actions are sourced unresolved feedback, not
+  repairs. They retain the held boundary until explicit disposition, separate
+  investigation or successor reapproval. Exact replay cannot apply old advice
+  to another role. No extra model call is inserted in automatic progression.
 - `StepReviewFlow` uses the same runtime and durable runner claim as automatic
   execution, but executes at most one role and does not issue its successor after
   completing the turn. Further progression requires another explicit request.
