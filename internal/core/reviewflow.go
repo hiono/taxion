@@ -22,6 +22,7 @@ type ReviewFlow struct {
 	Status        string       `json:"status"`
 	Reason        string       `json:"reason"`
 	Authorization TaskDecision `json:"authorization"`
+	RunnerID      string       `json:"runnerId,omitempty"`
 }
 
 func (g TaskGraph) ReviewFlow(id string) (ReviewFlow, bool) {

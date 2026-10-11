@@ -17,6 +17,7 @@ import (
 )
 
 var ErrFlowStopped = errors.New("taxion: review flow stopped")
+var ErrFlowClaimed = errors.New("taxion: review flow claimed by another runner")
 
 type ReviewFlowRequest struct {
 	ID             string            `json:"id"`
@@ -77,6 +78,10 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 // AdvanceReviewFlow consumes only the latest stored result. A repeated call
 // returns the already-issued Dispatch, so retries never duplicate a run.
 func AdvanceReviewFlow(db *store.Store, ledgerPath, id string) (core.ReviewFlow, error) {
+	return advanceReviewFlow(db, ledgerPath, id, "")
+}
+
+func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.ReviewFlow, error) {
 	if db == nil {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: review flow requires a store")
 	}
@@ -87,6 +92,9 @@ func AdvanceReviewFlow(db *store.Store, ledgerPath, id string) (core.ReviewFlow,
 		flow, ok = state.Graph.ReviewFlow(id)
 		if !state.HasGraph || !ok {
 			return fmt.Errorf("taxion: review flow %q not found", id)
+		}
+		if flow.RunnerID != runnerID {
+			return fmt.Errorf("%w: %s", ErrFlowClaimed, flow.RunnerID)
 		}
 		if flow.Status != "RUNNING" {
 			if flow.Status == "STOPPED" {
@@ -124,7 +132,17 @@ func AdvanceReviewFlow(db *store.Store, ledgerPath, id string) (core.ReviewFlow,
 		if last.Status == core.DispatchSuspended || last.Status == core.DispatchCancelRequested {
 			return stop("Dispatch " + last.ID + " requires safe stop or renewed authorization before continuation")
 		}
+		context, contextErr := memory.ResolveDispatchContext(ledgerPath, last.Instruction.MemoryRefs)
+		if contextErr != nil {
+			return fmt.Errorf("taxion: required flow Memory: %w", contextErr)
+		}
+		if !reflect.DeepEqual(context, last.Instruction.MemoryContext) {
+			return stop("required Memory differs from the issued snapshot; confirm the updated decision with Human")
+		}
 		if active(last.Status) {
+			if !known && len(last.RuntimeUsage) != 0 {
+				return stop("runtime reported incomplete input/output usage; safely stop and obtain usage evidence")
+			}
 			return nil
 		}
 		if last.Status != core.DispatchSucceeded || last.Result == nil {
@@ -234,7 +252,7 @@ func AdvanceReviewFlow(db *store.Store, ledgerPath, id string) (core.ReviewFlow,
 		storeFlow(state, flow)
 		return nil
 	})
-	if err != nil && flow.ID != "" {
+	if err != nil && flow.ID != "" && !errors.Is(err, ErrFlowClaimed) {
 		saveErr := db.UpdateWorkspace(func(state *store.Workspace) error {
 			stored, ok := state.Graph.ReviewFlow(id)
 			if !ok || stored.Status != "RUNNING" {

@@ -159,8 +159,30 @@ Graph の `reviewFlows` は開始時の契約、出典付き許可、開始時�
 Reviewer の `BLOCKED`、必須 Memory の失効では、理由を持つ `STOPPED` を保存する。
 input/output token を取得できない実行は利用量不明として停止し、必要な証拠の確認を要求する。
 実行中 Dispatch の安全停止は `runtime stop` で確認し、保留した worktree と証拠を調査する。
-現在の進行処理は Dispatch の発行境界で上限を照合する。
-各役割は `runtime` コマンドで実行し、連続 SDK 実行と実行中の上限監視は #53 の次の接続で扱う。
+`workflow advance` は Dispatch の発行境界で上限を照合する。
+`workflow run --id application-flow --coder-prompt-file CODER.txt --reviewer-prompt-file REVIEWER.txt`
+は役割別の SDK adapter を作成し、保存済み指示の実行、イベント購読、最終応答の照合、
+次の Dispatch 発行を連続して行う。各実行の終了時に SDK 接続を閉じる。
+途中の説明はイベントとして表示し、turn の最終応答を結果の採用に使う。
+
+run は保存済み期限を context の deadline に設定し、usage イベントの保存後に token 上限を照合する。
+実行中は1秒ごとにも進行状態・Task 契約・必須 Memory を確認し、
+上限到達や契約変更・停止要求で `runtime stop` と同じ停止処理を行う。
+token 上限は SDK の観測済み input/output token に基づくため、
+提供側の利用量イベントが届くまでの消費量は未測定である。
+利用量の欠落を含むイベントは明示的な停止として扱う。
+失敗した安全停止は `CANCEL_REQUESTED` とエラーを保持し、
+停止を確認できた実行は `CANCELLED` と停止証拠を保存する。
+
+runner は Graph の `runnerId` を取得して単独で進行する。
+別 runner の run と手動 advance はこの所有者を照合する。
+正常終了とエラー処理の完了後に所有者を解放し、
+プロセスが強制終了した場合は保存済み所有者を残して二重実行を防ぐ。
+再開時は以前の SDK 実行と worktree・停止証拠を調査し、所有者の回復を明示的に行う。
+role prompt と `--coder-tools`・`--reviewer-tools`、任意の `--cli`・`--base-directory` は
+既存 SDK adapter の設定・権限検査を使用する。
+Coder の Git 操作を controller 管理ツールへ接続する作業は #53、
+実 SDK で一連の動作を確認する作業は #54 で扱う。
 
 ## 状態遷移と完了
 

@@ -80,6 +80,7 @@ taxion task create --title "…" --repo <repo>
 taxion task plan --repo <repo>
 taxion workflow start --file <authorized-flow.json>
 taxion workflow advance --id <flow-id>
+taxion workflow run --id <flow-id> --coder-prompt-file <path> --reviewer-prompt-file <path>
 taxion workflow show --id <flow-id>
 taxion dispatch --task <id> --repo <repo>
 taxion runtime start --dispatch <id> --system-prompt-file <path>
@@ -116,10 +117,16 @@ elapsed-time and token ceilings, then issues its initial Dispatch.
 `workflow advance` uses the latest verified result to issue an independent
 Reviewer Dispatch or a repair with the same acceptance and sourced findings.
 Approval of the current output SHA records the implementation Task as
-COMPLETED. Each role execution uses the `runtime` commands; the next Dispatch
-is generated from SQLite records. See [Task Graph](docs/10-task-graph.md) for
-the authorization format and stop conditions. Continuous SDK execution and
-in-flight ceiling enforcement are the next integration step in #53.
+COMPLETED. `workflow run` creates isolated Coder/Reviewer SDK adapters and
+executes successive Dispatches from SQLite without copying instructions or
+results. It checks recorded usage after usage events, monitors contract and
+Memory changes, and stops runtime execution at the saved deadline or observed
+token ceiling. Role-specific `--coder-tools` and `--reviewer-tools` remain
+explicit allowlists. A durable runner claim prevents overlapping runs; an
+interrupted process's claim requires explicit reconciliation before reuse.
+See [Task Graph](docs/10-task-graph.md) for authorization and stop conditions.
+Controller-managed Coder Git operations and live SDK acceptance remain tracked
+in #53 and #54.
 
 For a Reviewer Dispatch, the Task's worktree must be a new absolute path.
 Start it with `--review-source-worktree <existing-repository-worktree>` to

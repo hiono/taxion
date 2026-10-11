@@ -78,9 +78,27 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 	for _, args := range [][]string{
 		{}, {"start"}, {"advance"}, {"show", "--id", "missing"}, {"start", "--file", file},
 		{"show", "--id", request.ID, "--file", file},
+		{"run", "--id", request.ID},
+		{"run", "--id", request.ID, "--coder-prompt-file", filepath.Join(dir, "missing"), "--reviewer-prompt-file", file},
 	} {
 		if err := workflowCmd(args); err == nil {
 			t.Fatalf("invalid workflow invocation accepted: %v", args)
 		}
+	}
+
+}
+
+func TestRuntimeToolAllowlist(t *testing.T) {
+	for _, invalid := range []string{"read,", ",write", "read, read", "read, ,write"} {
+		if _, err := runtimeTools(invalid); err == nil {
+			t.Fatalf("invalid allowlist accepted: %q", invalid)
+		}
+	}
+	tools, err := runtimeTools(" read, write ")
+	if err != nil || len(tools) != 2 || tools[0] != "read" || tools[1] != "write" {
+		t.Fatalf("allowlist: %v %v", tools, err)
+	}
+	if tools, err := runtimeTools(""); err != nil || len(tools) != 0 {
+		t.Fatal("empty allowlist enabled tools")
 	}
 }
