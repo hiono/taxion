@@ -219,7 +219,11 @@ func (c *Controller) Stop(ctx context.Context, dispatchID string) error {
 			return err
 		}
 	}
-	if err := c.runtime.Resume(ctx, dispatch.RuntimeSessionID); err != nil {
+	attach := c.runtime.Resume
+	if worker, ok := c.runtime.(runtime.StopAttachment); ok {
+		attach = worker.ResumeForStop
+	}
+	if err := attach(ctx, dispatch.RuntimeSessionID); err != nil {
 		return fmt.Errorf("taxion: attach saved session for safe stop: %w", err)
 	}
 	if err := c.runtime.Stop(ctx, dispatch.RuntimeSessionID); err != nil {

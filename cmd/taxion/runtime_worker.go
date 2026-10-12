@@ -11,6 +11,7 @@ import (
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/runtime/copilot"
 	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch core.GraphDispatch, config copilot.Config, managedCommit, managedStage bool, scanner string) (*copilot.Adapter, error) {
@@ -22,6 +23,35 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 		config.Configuration = dispatch.Configuration.Selection
 	}
 	var worker *copilot.Adapter
+	var err error
+	var graph core.TaskGraph
+	if db != nil {
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			return nil, err
+		}
+		graph = state.Graph
+	}
+	config.ToolPolicy, err = tools.ResolveForTask(graph, dispatch.Instruction.Decisions, dispatch.TaskID, dispatch.Recipient)
+	if err != nil {
+		return nil, err
+	}
+	if config.ToolPolicy != nil && db == nil {
+		return nil, fmt.Errorf("taxion: approved tools require a saved workspace")
+	}
+	if config.ToolPolicy != nil {
+		config.AuthorizeTools = func(ctx context.Context, sessionID string) error {
+			ctx, cancel := context.WithCancel(ctx)
+			stop := context.AfterFunc(hostContext, cancel)
+			defer stop()
+			defer cancel()
+			control, err := controller.New(db, worker)
+			if err != nil {
+				return err
+			}
+			return control.AuthorizeTools(ctx, dispatch.ID, sessionID)
+		}
+	}
 	if managedCommit {
 		if dispatch.Recipient != "CODER" || dispatch.Instruction.CommitMessagePolicy != core.CommitMessagePolicy {
 			return nil, fmt.Errorf("runtime: managed commit requires a Coder Dispatch with the current commit policy")
@@ -72,7 +102,6 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 			}
 		}
 	}
-	var err error
 	worker, err = copilot.New(config)
 	return worker, err
 }

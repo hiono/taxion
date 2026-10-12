@@ -78,6 +78,9 @@ No live investigation has happened here; identify any needed investigation
 as unconfirmed. Keep the response concise and in the user's language.`
 
 func conversationCmd(args []string, output io.Writer) error {
+	if len(args) != 0 && args[0] == "search" {
+		return searchCmd(args[1:], output, true)
+	}
 	if len(args) != 0 && (args[0] == "intake" || args[0] == "confirm" || args[0] == "proposal") {
 		fs := flag.NewFlagSet("conversation "+args[0], flag.ContinueOnError)
 		file := fs.String("file", "", "JSON original request and explicit contract, or exact Human confirmation")

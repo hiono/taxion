@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 // CheckConfiguration resolves a recorded approval, not the identity of the
@@ -150,6 +152,9 @@ func (c *Controller) checkExecutionConfiguration(graph core.TaskGraph, dispatchI
 	if !ok {
 		return config.Config{}, fmt.Errorf("taxion: configuration Dispatch not found")
 	}
+	if err := c.checkToolPolicy(graph, dispatch); err != nil {
+		return config.Config{}, err
+	}
 	worker, configured := c.runtime.(runtime.ConfigurationIdentity)
 	var selection json.RawMessage
 	if configured {
@@ -169,6 +174,71 @@ func (c *Controller) checkExecutionConfiguration(graph core.TaskGraph, dispatchI
 		return config.Config{}, err
 	}
 	return candidate, nil
+}
+
+func (c *Controller) checkToolPolicy(graph core.TaskGraph, dispatch core.GraphDispatch) error {
+	approved, err := tools.ResolveForTask(graph, dispatch.Instruction.Decisions, dispatch.TaskID, dispatch.Recipient)
+	if err != nil {
+		return err
+	}
+	var actual *tools.Policy
+	if worker, ok := c.runtime.(runtime.ToolPolicyIdentity); ok {
+		actual = worker.ToolPolicy()
+	}
+	if !tools.Equal(actual, approved) {
+		return fmt.Errorf("taxion: runtime tools differ from the immutable Dispatch approval")
+	}
+	if approved == nil {
+		return nil
+	}
+	task, ok := graph.GraphTask(dispatch.TaskID)
+	if !ok || task.Status != core.Active {
+		return fmt.Errorf("taxion: tools require an active Task")
+	}
+	current, err := tools.ResolveForTask(graph, task.Decisions, task.ID, dispatch.Recipient)
+	if err != nil {
+		return err
+	}
+	if !tools.Equal(approved, current) {
+		return fmt.Errorf("taxion: current tools approval differs from the issued Dispatch")
+	}
+	return approved.Check()
+}
+
+func (c *Controller) AuthorizeTools(ctx context.Context, dispatchID, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+	if !state.HasGraph || !ok || dispatch.Status != core.DispatchRunning ||
+		dispatch.RuntimeSessionID == "" || dispatch.RuntimeSessionID != sessionID ||
+		dispatch.RuntimeConfigHash != c.runtime.ConfigHash() || dispatch.Recipient != c.runtime.Role() ||
+		!sameWorktree(dispatch.Instruction.Worktree, c.runtime.Worktree()) {
+		return fmt.Errorf("taxion: tools require the running role's bound session")
+	}
+	if err := state.Graph.CheckHandoffStart(dispatchID); err != nil {
+		return err
+	}
+	if err := state.Graph.CheckTaskSpecificationUse(dispatch.TaskID, "copilot"); err != nil {
+		return err
+	}
+	if _, err := c.checkExecutionConfiguration(state.Graph, dispatchID); err != nil {
+		return err
+	}
+	for _, flow := range state.Graph.ReviewFlows {
+		if !slices.Contains(flow.DispatchIDs, dispatchID) {
+			continue
+		}
+		tokens, known := flowTokens(state.Graph, flow)
+		if flow.Status != "RUNNING" || !time.Now().Before(flow.Deadline) || !known || tokens >= flow.MaxTokens {
+			return fmt.Errorf("taxion: tools require an active flow within its known usage and time limits")
+		}
+	}
+	return nil
 }
 
 func (c *Controller) authorizeExecution(ctx context.Context, dispatchID, operation string) error {

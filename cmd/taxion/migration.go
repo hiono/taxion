@@ -12,6 +12,9 @@ import (
 )
 
 func specificationCmd(args []string) error {
+	if len(args) != 0 && args[0] != "hash" {
+		return searchCmd(args, os.Stdout, false)
+	}
 	if len(args) == 0 || args[0] != "hash" {
 		return fmt.Errorf("usage: taxion specification hash --file FILE")
 	}

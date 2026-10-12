@@ -15,6 +15,7 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitguard"
 	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 type PublicationRequest struct {
@@ -117,6 +118,9 @@ func checkPublicationTask(state *store.Workspace, update store.ExternalUpdate) e
 		return fmt.Errorf("taxion: publication Task or repository differs")
 	}
 	if err := state.Graph.CheckTaskSpecificationUse(task.ID, "publication"); err != nil {
+		return err
+	}
+	if err := tools.CheckPublication(state.Graph, task.ID); err != nil {
 		return err
 	}
 	if update.Kind == "ISSUE" && update.Action != "CREATE" && task.Issue != fmt.Sprintf("Issue #%d", update.Number) {

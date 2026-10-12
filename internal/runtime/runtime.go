@@ -7,6 +7,8 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/hiono/taxion/internal/tools"
 )
 
 // Event is a plain, SDK-neutral runtime event.
@@ -73,10 +75,27 @@ type EventCursor interface {
 	EventsAfter(ctx context.Context, sessionID string, cursor uint64) (<-chan Event, error)
 }
 
+type ToolPolicyIdentity interface {
+	Identity
+	ToolPolicy() *tools.Policy
+}
+
+// StopAttachment lets providers attach without loading executable extensions.
+type StopAttachment interface {
+	ResumeForStop(context.Context, string) error
+}
+
 // ManagedCommit binds the host operation, not an agent-selected repository or scanner.
 type ManagedCommit struct {
 	DispatchID string
 	Scanner    string
 	Commit     func(ctx context.Context, sessionID, message string) (string, error)        `json:"-"`
 	Stage      func(ctx context.Context, sessionID string, paths []string) (string, error) `json:"-"`
+}
+
+type ManagedSearch struct {
+	TaskID    string                                                 `json:"taskId"`
+	ScopeHash string                                                 `json:"scopeHash"`
+	Query     string                                                 `json:"query"`
+	Search    func(context.Context, string) (json.RawMessage, error) `json:"-"`
 }

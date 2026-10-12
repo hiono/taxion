@@ -16,6 +16,7 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
 	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 func reviewFlowFixture(t *testing.T, decisions ...core.TaskDecision) (*store.Store, string, ReviewFlowRequest) {
@@ -110,6 +111,10 @@ func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, ve
 	base := &fakeRuntime{
 		role: dispatch.Recipient, worktree: dispatch.Instruction.Worktree,
 		hash: "config:" + dispatch.ID, sessionID: "session:" + dispatch.ID,
+	}
+	base.toolPolicy, err = tools.ResolveForTask(state.Graph, dispatch.Instruction.Decisions, dispatch.TaskID, dispatch.Recipient)
+	if err != nil {
+		t.Fatal(err)
 	}
 	var control *Controller
 	if len(selected) != 0 {

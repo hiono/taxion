@@ -193,17 +193,47 @@ SDK の `Hooks` callback と file hooks は別の設定である。
 明示した `PluginDirectories` は `EnableConfigDiscovery: false` の場合にも読み込まれる。
 MCP の resident resume では、既に実行中の server を `DisabledMCPServers` だけで停止する機能は提供されない。
 
-Taxion は現在、発行済みの権限に合わせた SDK tool allowlist と管理 stage・commit を接続する。
-create/resume ともに config discovery・skills・file hooks を無効にし、
-plugin directories・MCP servers・SDK hooks の追加は承認済み設定の実装待ちとする。
-設定に追加する際は、実行ファイル・引数・データ利用範囲・公開 tool と内容の版を
-session の設定 hash と役割権限に含め、同じ条件を resume に適用する必要がある。
+Taxion は、Task の出典付き decision に保存した `taxion.tools.v1` の承認から、
+役割別の skills・skill-only plugins・固定 MCP リクエスト・RTK を接続する。
+実行ファイル、入力、directory の内容 hash、引数、tool 名、承認済み JSON、
+private evidence directory を session の設定 hash に含め、create/resume で同じ条件を使う。
+config discovery・file hooks の自動読込みは無効のまま、明示した directory と SDK hooks を接続する。
+
+skills と plugins は canonical な絶対パスを指定する。
+plugin は root の `plugin.json` と `skills/` からなる skill-only 形式を使う。
+`taxion tools hash --path /absolute/path` の hash は、相対名・mode・size・内容を含む
+asset の識別値であり、仕様入力の `documentHash` は原本 bytes の SHA-256 である。
+承認済み asset の変更は再承認を必要とする。
+
+MCP は host が exact arguments を照合してから、承認された stdio server を一回起動する。
+server の実行ファイルは信頼された host code として承認し、ambient credential を子プロセスへ渡さない。
+SDK の role permission は引き続き通常の read/write と管理 commit を判断する。
+独立 Reviewer は、controller が発行した元 Coder との対応と同じ decision を照合して、
+元 Task の Reviewer 向け tools 承認を引き継ぐ。停止用の resume は extensions を追加せず接続する。
+
+SDK hooks は原本の tool result と failure を先に private JSON へ保存し、
+opaque filename と hash の receipt を返す。directory は `0700`、原本ファイルは `0600` とする。
+保存失敗と圧縮失敗は runtime の失敗イベントにも通知し、controller が停止処理へ進めるようにする。
+RTK は isolated HOME で `pipe --filter` を実行し、成功した 4096 bytes 以上の plain text を圧縮する。
+JSON/XML と failure は原形を保持し、圧縮結果には warning/error/fail 行を保持する。
+SDK built-in result の `textResultForLlm` と custom result の `textResultForLLM` を扱い、
+status・exit code・telemetry をそのまま残す。
+RTK 自身の stdout・stderr・exit status も原本として保存する。
+
+承認形式は `kind`、`taskId`、`actor`、役割名を key にした `roles` を持つ JSON である。
+各 role policy は `skills`、`plugins`、`mcp`、`rtk`、`compressionFilter`、
+`evidenceDirectory`、`allowPublication` を保持する。
+MCP binding は `name`、`command`、`args`、`inputs`、`tool`、`arguments` を固定する。
+この JSON を Task decision の `text` に保存し、decision の `source` に Human の判断の出典を記録する。
+通常の Task 承認・発行手順は [Task Graph reference](10-task-graph.md) に従う。
+tools を使った Task の公開には `allowPublication: true` の明示承認を必要とする。
 
 `--compact-context` は保存済みの結果・exit code・証拠を保持して重複した指示を省く。
 元の完全な instruction は SQLite に保持する。
-RTK による tool 出力の圧縮と、skills・plugins・MCP・hooks の明示接続は #61 の残作業である。
-その実装では原本の出力・exit status・hash を保存し、圧縮表示から原本を確認できる形式を必要とする。
-SDK の型の存在は対応範囲の確認として記録し、実接続と有料 SDK 推論の受入れは別に記録する。
+native plugin discovery、実 stdio MCP、実 RTK の圧縮率と原本保持、
+SDK の create/resume 設定と権限を無料回帰で確認する。
+実 SDK による仕様検索から独立レビューまでの受入れ状況は
+[仕様入力](13-specification-input.md) と #60 に記録する。
 
 ## Dispatch の実行と context
 

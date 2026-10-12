@@ -17,25 +17,28 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 type fakeRuntime struct {
-	role      string
-	hash      string
-	worktree  string
-	starts    int
-	resumes   int
-	sends     []string
-	stops     int
-	sessionID string
-	sendErr   error
-	closes    int
-	closeErr  error
+	role       string
+	hash       string
+	worktree   string
+	starts     int
+	resumes    int
+	sends      []string
+	stops      int
+	sessionID  string
+	sendErr    error
+	closes     int
+	closeErr   error
+	toolPolicy *tools.Policy
 }
 
-func (f *fakeRuntime) Role() string       { return f.role }
-func (f *fakeRuntime) ConfigHash() string { return f.hash }
-func (f *fakeRuntime) Worktree() string   { return f.worktree }
+func (f *fakeRuntime) Role() string              { return f.role }
+func (f *fakeRuntime) ConfigHash() string        { return f.hash }
+func (f *fakeRuntime) Worktree() string          { return f.worktree }
+func (f *fakeRuntime) ToolPolicy() *tools.Policy { return f.toolPolicy }
 func (f *fakeRuntime) Start(_ context.Context, _ string) (string, error) {
 	f.starts++
 	if f.sessionID == "" {

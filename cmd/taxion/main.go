@@ -108,6 +108,11 @@ Commands:
   memory inspect-snapshot  Review row counts and sanitizer findings (--file)
   memory restore      Install an exact approved snapshot into a fresh local destination
   specification hash  Hash a sourced specification for separate use approvals (--file)
+  specification scope-hash Hash an exact public/synthetic local corpus (--scope)
+  specification search Search approved PDF/DOCX/PPTX sources; print metadata only (--scope, --query)
+  specification serve Serve the approved local search corpus over read-only MCP stdio (--scope)
+  conversation search Search and attach sourced excerpts to an editable Task (--scope, --task, --question)
+  tools hash          Pin exact local extension files or directory contents (--path)
 
 Identity gate (REP-001): task create, dispatch and review require an explicit --repo.
 The target is never inferred from the working directory.
@@ -161,6 +166,8 @@ func main() {
 		err = memoryCmd(args[1:])
 	case "specification":
 		err = specificationCmd(args[1:])
+	case "tools":
+		err = toolsCmd(args[1:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:

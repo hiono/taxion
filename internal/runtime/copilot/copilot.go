@@ -21,6 +21,7 @@ import (
 	executionconfig "github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 var (
@@ -43,8 +44,11 @@ type Config struct {
 	AvailableTools   []string
 	ResponseSchema   map[string]any
 	ManagedCommit    *runtime.ManagedCommit
+	ManagedSearch    *runtime.ManagedSearch
 	Configuration    json.RawMessage
 	MaxAICredits     float64
+	ToolPolicy       *tools.Policy
+	AuthorizeTools   func(context.Context, string) error
 }
 
 type Adapter struct {
@@ -158,7 +162,8 @@ func New(config Config) (*Adapter, error) {
 			return nil, fmt.Errorf("taxion: copy response schema: %w", err)
 		}
 	}
-	if slices.Contains(config.AvailableTools, ManagedCommitToolName) || slices.Contains(config.AvailableTools, ManagedStageToolName) {
+	if slices.Contains(config.AvailableTools, ManagedCommitToolName) || slices.Contains(config.AvailableTools, ManagedStageToolName) ||
+		slices.Contains(config.AvailableTools, ManagedSearchToolName) {
 		return nil, fmt.Errorf("taxion: managed commit tool is reserved; enable it through the host binding")
 	}
 	if config.ManagedCommit != nil {
@@ -172,6 +177,27 @@ func New(config Config) (*Adapter, error) {
 		if binding.Stage != nil {
 			config.AvailableTools = append(config.AvailableTools, ManagedStageToolName)
 		}
+	}
+	if config.ToolPolicy != nil {
+		if err := config.ToolPolicy.CheckShape(); err != nil {
+			return nil, err
+		}
+		config.ToolPolicy = config.ToolPolicy.Clone()
+		for _, tool := range config.ToolPolicy.MCP {
+			if slices.Contains(config.AvailableTools, tool.Name) {
+				return nil, fmt.Errorf("taxion: approved MCP name conflicts with an existing tool")
+			}
+			config.AvailableTools = append(config.AvailableTools, tool.Name)
+		}
+	}
+	if config.ManagedSearch != nil {
+		binding := *config.ManagedSearch
+		if config.Role != "ORCHESTRATOR" || binding.TaskID == "" || binding.ScopeHash == "" ||
+			strings.TrimSpace(binding.Query) == "" || binding.Search == nil {
+			return nil, fmt.Errorf("taxion: managed search requires an Orchestrator and exact Task, scope, query and host handler")
+		}
+		config.ManagedSearch = &binding
+		config.AvailableTools = append(config.AvailableTools, ManagedSearchToolName)
 	}
 	options := &sdk.ClientOptions{
 		Connection:       sdk.StdioConnection{Path: config.CLIPath},
@@ -222,9 +248,11 @@ func (a *Adapter) ConfigHash() string {
 		ResponseSchema      map[string]any
 		PermissionPolicy    string
 		ManagedCommit       *runtime.ManagedCommit `json:",omitempty"`
+		ManagedSearch       *runtime.ManagedSearch `json:",omitempty"`
 		ManagedCommitPolicy string                 `json:",omitempty"`
 		Configuration       json.RawMessage        `json:",omitempty"`
 		MaxAICredits        float64                `json:",omitempty"`
+		ToolPolicy          *tools.Policy          `json:",omitempty"`
 	}{
 		Role:                a.config.Role,
 		SystemPrompt:        a.config.SystemPrompt,
@@ -235,9 +263,11 @@ func (a *Adapter) ConfigHash() string {
 		ResponseSchema:      a.config.ResponseSchema,
 		PermissionPolicy:    permissionPolicy,
 		ManagedCommit:       a.config.ManagedCommit,
+		ManagedSearch:       a.config.ManagedSearch,
 		ManagedCommitPolicy: managedCommitPolicy,
 		Configuration:       a.config.Configuration,
 		MaxAICredits:        a.config.MaxAICredits,
+		ToolPolicy:          a.config.ToolPolicy,
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -251,9 +281,21 @@ func (a *Adapter) ExecutionConfiguration() json.RawMessage {
 	return slices.Clone(a.config.Configuration)
 }
 
+func (a *Adapter) ToolPolicy() *tools.Policy {
+	if a.config.ToolPolicy == nil {
+		return nil
+	}
+	return a.config.ToolPolicy.Clone()
+}
+
 func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 	if strings.TrimSpace(taskID) == "" {
 		return "", fmt.Errorf("taxion: task id must not be empty")
+	}
+	if a.config.ToolPolicy != nil {
+		if err := a.config.ToolPolicy.Check(); err != nil {
+			return "", err
+		}
 	}
 	a.opMu.Lock()
 	defer a.opMu.Unlock()
@@ -280,6 +322,11 @@ func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
 	if strings.TrimSpace(prompt) == "" {
 		return fmt.Errorf("taxion: prompt must not be empty")
+	}
+	if a.config.ToolPolicy != nil {
+		if err := a.checkToolPolicy(ctx, sessionID); err != nil {
+			return err
+		}
 	}
 	handle, err := a.lookup(sessionID)
 	if err != nil {
@@ -311,6 +358,19 @@ func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
 }
 
 func (a *Adapter) Resume(ctx context.Context, sessionID string) error {
+	if a.config.ToolPolicy != nil {
+		if err := a.config.ToolPolicy.Check(); err != nil {
+			return err
+		}
+	}
+	return a.resume(ctx, sessionID, false)
+}
+
+func (a *Adapter) ResumeForStop(ctx context.Context, sessionID string) error {
+	return a.resume(ctx, sessionID, true)
+}
+
+func (a *Adapter) resume(ctx context.Context, sessionID string, stopOnly bool) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return fmt.Errorf("taxion: session id must not be empty")
 	}
@@ -339,7 +399,18 @@ func (a *Adapter) Resume(ctx context.Context, sessionID string) error {
 	}
 	handle.stopped = false
 	handle.mu.Unlock()
-	session, err := a.client.ResumeSession(ctx, sessionID, a.resumeConfig(handle.onEvent))
+	config := a.resumeConfig(handle.onEvent)
+	if stopOnly {
+		disabled := false
+		config.EnableSkills = &disabled
+		config.SkillDirectories, config.PluginDirectories = nil, nil
+		config.Tools, config.AvailableTools, config.Hooks = nil, []string{}, nil
+		config.OnPermissionRequest = func(sdk.PermissionRequest, sdk.PermissionInvocation) (rpc.PermissionDecision, error) {
+			reason := "Stop-only attachment permits cancellation operations"
+			return &rpc.PermissionDecisionReject{Feedback: &reason}, nil
+		}
+	}
+	session, err := a.client.ResumeSession(ctx, sessionID, config)
 	if err != nil {
 		handle.mu.Lock()
 		handle.stopped = true
@@ -547,7 +618,7 @@ func (a *Adapter) lookup(sessionID string) (*managedSession, error) {
 
 func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionConfig {
 	streaming, disabled := true, false
-	return &sdk.SessionConfig{
+	config := &sdk.SessionConfig{
 		Model:                              "auto",
 		SystemMessage:                      &sdk.SystemMessageConfig{Mode: "append", Content: a.config.SystemPrompt},
 		WorkingDirectory:                   a.config.WorkingDirectory,
@@ -563,11 +634,19 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 		OnPermissionRequest:                a.permissionHandler(),
 		OnEvent:                            onEvent,
 	}
+	if a.config.ToolPolicy != nil {
+		enabled := true
+		config.EnableSkills = &enabled
+		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
+		config.Tools = append(config.Tools, a.mcpTools()...)
+		config.Hooks = a.toolHooks()
+	}
+	return config
 }
 
 func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessionConfig {
 	streaming, disabled := true, false
-	return &sdk.ResumeSessionConfig{
+	config := &sdk.ResumeSessionConfig{
 		Model:                              "auto",
 		SystemMessage:                      &sdk.SystemMessageConfig{Mode: "append", Content: a.config.SystemPrompt},
 		WorkingDirectory:                   a.config.WorkingDirectory,
@@ -583,6 +662,14 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		OnPermissionRequest:                a.permissionHandler(),
 		OnEvent:                            onEvent,
 	}
+	if a.config.ToolPolicy != nil {
+		enabled := true
+		config.EnableSkills = &enabled
+		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
+		config.Tools = append(config.Tools, a.mcpTools()...)
+		config.Hooks = a.toolHooks()
+	}
+	return config
 }
 
 // ValidateAICreditLimit follows the CLI's soft-cap minimum; zero leaves limits unset.
@@ -607,13 +694,26 @@ func infiniteSessions() *sdk.InfiniteSessionConfig {
 }
 
 func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
-	if a.config.Role != "REVIEWER" && a.config.Role != "CODER" {
+	if a.config.Role != "REVIEWER" && a.config.Role != "CODER" && a.config.ToolPolicy == nil && a.config.ManagedSearch == nil {
 		return nil
 	}
 	return func(request sdk.PermissionRequest, invocation sdk.PermissionInvocation) (rpc.PermissionDecision, error) {
 		decision := reviewerPermissionDecision(a.config.WorkingDirectory, request)
 		if a.config.Role == "CODER" {
 			decision = coderPermissionDecision(a.config.WorkingDirectory, a.config.AvailableTools, request)
+		}
+		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
+			a.config.ManagedSearch != nil && permission.ToolName == ManagedSearchToolName &&
+			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
+			decision = &rpc.PermissionDecisionApproveOnce{}
+		}
+		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok && a.config.ToolPolicy != nil &&
+			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
+			for _, tool := range a.config.ToolPolicy.MCP {
+				if permission.ToolName == tool.Name {
+					decision = &rpc.PermissionDecisionApproveOnce{}
+				}
+			}
 		}
 		if handle, err := a.lookup(invocation.SessionID); err == nil {
 			payload, _ := json.Marshal(struct {

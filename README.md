@@ -90,6 +90,11 @@ taxion git check-index --secrets --scanner /absolute/path/to/betterleaks
 taxion git hook status
 taxion init
 taxion conversation intake --file <request-and-contract-proposal.json>
+taxion tools hash --path /absolute/path/service.docx
+taxion specification scope-hash --scope <approved-local-scope.json>
+taxion specification search --scope <approved-local-scope.json> --query "202"
+taxion conversation search --task <id> --scope <approved-local-scope.json> --question "202"
+taxion specification serve --scope <approved-local-scope.json>
 taxion conversation proposal --task <id>
 taxion conversation confirm --file <exact-human-confirmation.json>
 taxion task create --title "…" --repo <repo>
@@ -122,6 +127,15 @@ taxion runtime stop --dispatch <id> --system-prompt-file <path>
 taxion runtime commit --dispatch <id> --system-prompt-file <path> --message-file <path> --scanner <path>
 taxion review --task <id> --sha <coder-sha> --repo <repo>
 ```
+
+`conversation search` automatically attaches approved public/synthetic PDF,
+DOCX and PPTX excerpts to an editable Task. Console output contains metadata;
+local private state retains exact quoted sources and per-use approvals.
+`--sdk` explicitly enables one paid Orchestrator turn and requires positive
+token, time and credit limits. Ordinary CI uses free regressions.
+The real-SDK independent Reviewer acceptance remains incomplete after a
+token-limited cancellation. See [specification input](docs/13-specification-input.md)
+for scope approval, parser limits and the current acceptance record.
 
 `workflow planning-context` reconstructs bounded Planner input from saved Task,
 Memory, concerns, unmet dependencies, flow limits and related Coder/Reviewer

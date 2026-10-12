@@ -1,0 +1,54 @@
+# 25. 承認したローカル仕様検索と役割別 tools
+
+Date: 2026-10-12
+
+## Status
+
+Accepted
+
+## Context
+
+M14 は、仕様書の取得から出典確認・Coder・Reviewer への受け渡しまでを自動化する。
+Human は、公開・合成資料をローカルで検索し、承認した合成本文を役割へ送信する方式を採択した。
+M365 接続は、組織の認証・license・資料利用許可を確認する
+[#77](https://github.com/hiono/taxion/issues/77) として保持する。
+
+M365 Copilot の検索、SharePoint の検索 API、組織の connector は、
+それぞれ license・権限継承・出典取得・データ転送先を確認して採否を決める。
+OfficeCLI の [公式 README](https://github.com/iOfficeAI/OfficeCLI) は構造付き Office 読取りと MCP を提供する。
+今回の環境では Go 標準ライブラリと既存の `pdfminer` による exact corpus の読取りを採用する。
+これにより、承認した原本と parser を固定して、ローカルで自動検索できる。
+
+## Decision
+
+検索方式は、承認済み PDF・DOCX・PPTX の literal AND 検索とする。
+scope は exact asset、版、閲覧範囲、用途別利用許可と private evidence directory を保持する。
+host が取得した引用を共通の仕様入力として Task に添付し、
+Orchestrator の `taxion_search` と read-only な stdio MCP から同じ reader を利用する。
+承認は信頼されたローカル管理者の出典付き判断記録として扱う。
+
+roles の tools は、Task decision に保存した `taxion.tools.v1` の承認で選ぶ。
+skills・skill-only plugins・固定 MCP request・RTK を内容 hash に結び付け、
+SDK create/resume の設定と通常の role permission を照合する。
+MCP executable は信頼された host code として承認する。
+原本と failure は private evidence に保存し、RTK は成功 plain text の表示を圧縮する。
+
+## Consequences
+
+公開・合成資料の検索から仕様入力への自動受け渡しを、ローカル環境で検証できる。
+権限不足・取得失敗・原本変更は error、検索結果なしは空配列として扱う。
+引用・tool 原本の外部公開は、用途別の明示承認に従う。
+
+通常 CI は無料回帰を実行し、有料 SDK 受入れは session 数と上限を Human が承認する。
+SDK credit は soft cap、tokens は usage event による事後観測の停止条件である。
+実 SDK 独立 Reviewer の成功は #60 の残作業として保持する。
+実装手順と受入れ結果は [仕様入力](../13-specification-input.md)、
+tools の権限と証拠保持は [Runtime contract](../03-runtime-contract.md) に記録する。
+
+## References
+
+- [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)
+- [pdfminer.six](https://pdfminersix.readthedocs.io/)
+- [Agent Plugins](https://docs.github.com/en/copilot/concepts/agents/about-plugins)
+- [MCP tools](https://modelcontextprotocol.io/specification/2024-11-05/server/tools)
+- [RTK](https://github.com/rtk-ai/rtk)
