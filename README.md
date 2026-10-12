@@ -77,6 +77,8 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
   実行・完了 checkpoint の復旧、承認済み GitHub 公開、失敗分析と全未公開 commit の秘密検査。
 - [docs/12-forge-capabilities.md](docs/12-forge-capabilities.md) —
   開発基盤の公式仕様、credential・API の責務、採択した GitLab Self-Managed の後続実装。
+- [docs/13-specification-input.md](docs/13-specification-input.md) —
+  取得済み仕様の出典・版・用途別承認、役割への受け渡しと検索接続の再開条件。
 - `docs/adr/` — design decisions and rationale; Issues record implementation results.
 
 ## CLI

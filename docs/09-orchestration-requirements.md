@@ -121,11 +121,11 @@ credential、非公開の資料や会話を公開 Issue・PR・ログへ転記�
 | Task・Dispatch | 版付き Task Graph、依存・concern ID 検査、scope out の保持、元の依頼の保存、契約 hash と設定の明示承認、停止確認後の後続契約の再承認、発行済み指示と変更関係・結果の保持 | 自然言語からの契約の全自動生成、参加者の本人認証 |
 | Runtime | local・proc と Go Copilot SDK、役割別 Session と system prompt、明示的な上限付き自動 dispatch・結果回収、実効認証・停止証拠、再起動時の設定・所有権照合と実行指示の再送拒否 | M15 の利用者別所有権 |
 | Review | controller の Git・検証結果照合、読み取り専用の独立 Reviewer、指摘からの修正と新 SHA の再レビュー、解放済み worktree・完了 checkpoint の再検証 | M15 の組合せ別受入れ |
-| Memory | SQLite、階層・出典・版と Task の連携、Coder・Reviewer 指示の保存時の参照、計画の再構成、更新・失効時の検査、検索・export | M14 の共有保存・移行・仕様検索連携 |
+| Memory | SQLite、階層・出典・版と Task の連携、Coder・Reviewer 指示の保存時の参照、計画の再構成、更新・失効時の検査、検索・export、履歴と承認を保持する完全なローカル移行 | M14 の共有保存・仕様検索連携・承認済み tools 接続 |
 | 復旧・外部記録 | 同一 transaction の Graph・receipt・承認済み公開・失敗分析、停止確認付き所有権解除、GitHub Issue 作成・Issue/PR コメント・証拠付き close、送信不明状態の照合、全未公開 commit の秘密検査 | 採択した GitLab Self-Managed adapter、Bitbucket の環境選定と追加実装、M15 の実環境組合せ受入れ |
 | CLI・ACP・Web | CLI 操作、ACP の Ledger 操作、Web forms・API proxy | 共通の会話 controller、Human の選択、実行の進行・再開と利用者別の所有権 |
 | Human の途中介入・質問 | 観測時刻・hash と対象付き補足、保留・解除と中断要求・停止証拠の分離、版付き指示案の改訂・承認・発行、変更契約の再承認、本流を変えない質問、固定 SHA の読み取り専用調査、選択した発見事項の明示反映、Memory に基づく Planner 助言と非実行判断の保存、再起動・発行競合の照合、CLI と実 SDK の受入れ | M15 の ACP・Web 共通操作と本人認証 |
-| 仕様書 | connector なし | 許可された検索・取得、出典付きの受け渡し |
+| 仕様書 | 手動取得した本文の出典・版・用途別承認、役割間で同じ引用スナップショット、ローカル原本の変更検出と公開許可検査 | #59・#60 の採択済み検索環境と自動検索・取得。Human の選択により現在 BLOCKED |
 | 設定・認証主体 | 固定 Global・Project・環境参照と出典、設定の追跡・ignore 検査、repository と Copilot の主体・credential 参照・契約参照の分離、許可組合せと Dispatch・Session の照合、実効認証・権限の観測、SDK の管理 stage・commit と直接の index・秘密検査、signed-in SDK から独立レビューまでの受入れ、開発基盤の公式仕様評価と Human の追加 adapter 採択 | 共有 Memory の配置、承認者の本人認証、法的な契約適格性の保証、追加 adapter の実環境受入れ |
 
 現在の挙動は [Ledger schema](05-ledger-schema.md)、

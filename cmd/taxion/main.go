@@ -104,6 +104,10 @@ Commands:
   memory checks       List approved structured dispatch checks
   memory search       Search memory entries (--query required, [--kind, --scope])
   memory export       Print memory entries ([--scope], [--sanitize], no transmission)
+  memory snapshot     Create a complete private SQLite snapshot (--output)
+  memory inspect-snapshot  Review row counts and sanitizer findings (--file)
+  memory restore      Install an exact approved snapshot into a fresh local destination
+  specification hash  Hash a sourced specification for separate use approvals (--file)
 
 Identity gate (REP-001): task create, dispatch and review require an explicit --repo.
 The target is never inferred from the working directory.
@@ -155,6 +159,8 @@ func main() {
 		err = auditCmd(args[1:])
 	case "memory":
 		err = memoryCmd(args[1:])
+	case "specification":
+		err = specificationCmd(args[1:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -952,9 +958,11 @@ func (f *stringListFlag) Set(value string) error {
 
 func memoryCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: taxion memory put|get|list|revise|revoke|history|conflict|source|warn|configure|approve|checks|search|export …")
+		return fmt.Errorf("usage: taxion memory put|get|list|revise|revoke|history|conflict|source|warn|configure|approve|checks|search|export|snapshot|inspect-snapshot|restore …")
 	}
 	switch args[0] {
+	case "snapshot", "inspect-snapshot", "restore":
+		return memoryMigrationCmd(args[0], args[1:])
 	case "configure":
 		fs := flag.NewFlagSet("memory configure", flag.ContinueOnError)
 		n := fs.Int("promote-after", 0, "positive warning threshold (required)")
@@ -1240,7 +1248,7 @@ func memoryCmd(args []string) error {
 	case "export":
 		return memoryExportCmd(args[1:])
 	default:
-		return fmt.Errorf("usage: taxion memory put|get|list|revise|revoke|history|conflict|source|warn|configure|approve|checks|search|export …")
+		return fmt.Errorf("usage: taxion memory put|get|list|revise|revoke|history|conflict|source|warn|configure|approve|checks|search|export|snapshot|inspect-snapshot|restore …")
 	}
 }
 

@@ -191,3 +191,38 @@ all sensitive data is removed. Check the preview before sharing it.
 `--sanitize=false` displays the original text with an UNSANITIZED header.
 Export contains entry text, not the structured predicates or threshold;
 use `memory checks` to inspect active policy.
+
+## 完全なローカル移行
+
+`memory snapshot` は SQLite の一貫した複製を作り、
+project/global 両方の本文・出典・版・適用範囲に加えて、
+承認・失効・改訂・矛盾・警告履歴・構造化 guardrail・設定・検索索引を保持する。
+`memory export` は共有前の本文プレビュー、snapshot は完全な移行用ファイルである。
+
+```bash
+taxion memory snapshot --output /private/migration/snapshot.db
+taxion memory inspect-snapshot --file /private/migration/snapshot.db
+taxion memory restore --file /private/migration/snapshot.db \
+  --output /private/new-workspace/memory.db \
+  --expected-hash sha256:<確認したhash> \
+  --actor human --source human:approved-local-migration
+```
+
+snapshot と移行先は新しい絶対パスを指定する。
+親ディレクトリは管理者が事前に用意する。
+移行先には元の ID と参照関係をそのまま保持し、ローカル承認の receipt を追記する。
+既存の移行先は保持されるため、利用中の Memory との切替は管理者が明示して行う。
+別の workspace と統合する場合の ID 再割当ては、別途移行設計を必要とする。
+
+レビュー出力は元の snapshot の hash、サイズ、各 table の件数、
+sanitizer が検出した table・column・規則名・件数を表示する。
+全 table の文字列・blob を既存規則で調べ、該当本文をレポートから省く。
+検出がある場合は内容をローカルで確認し、
+同じ hash と移行先に対して `--approve-sensitive` を明示して再実行する。
+移行は原文を保持するため、sanitizer の検出結果はレビューの補助として使う。
+検出範囲は前節のパターンに限り、社内情報や未知の秘密の判断は管理者が行う。
+
+ファイルは権限 `0600`、作業ディレクトリは `0700` で保存する。
+CLI はファイルをローカルへ作成し、Copilot や外部サービスへの送信を行う機能を持たない。
+snapshot は 256 MiB までを扱い、live SQLite sidecar を伴う入力は一貫した snapshot の再作成を要求する。
+本文・イベント・承認などが snapshot に含まれるため、送信先の利用許可は別途確認する。

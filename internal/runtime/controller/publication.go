@@ -116,6 +116,9 @@ func checkPublicationTask(state *store.Workspace, update store.ExternalUpdate) e
 	if !state.HasGraph || !ok || task.Repo != taskRepository {
 		return fmt.Errorf("taxion: publication Task or repository differs")
 	}
+	if err := state.Graph.CheckTaskSpecificationUse(task.ID, "publication"); err != nil {
+		return err
+	}
 	if update.Kind == "ISSUE" && update.Action != "CREATE" && task.Issue != fmt.Sprintf("Issue #%d", update.Number) {
 		return fmt.Errorf("taxion: publication Issue differs from registered Task")
 	}

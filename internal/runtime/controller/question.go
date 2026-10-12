@@ -232,6 +232,13 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 		if current != approval {
 			return fmt.Errorf("taxion: side question approval changed; obtain renewed authorization")
 		}
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			return err
+		}
+		if err := state.Graph.CheckTaskSpecificationUse(taskID, "copilot"); err != nil {
+			return err
+		}
 		return ctx.Err()
 	}
 	if err := recheck(); err != nil {

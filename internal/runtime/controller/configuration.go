@@ -183,6 +183,13 @@ func (c *Controller) authorizeExecution(ctx context.Context, dispatchID, operati
 	if err := state.Graph.CheckHandoffStart(dispatchID); err != nil {
 		return err
 	}
+	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+	if !ok {
+		return fmt.Errorf("taxion: specification gate requires a saved Dispatch")
+	}
+	if err := state.Graph.CheckTaskSpecificationUse(dispatch.TaskID, "copilot"); err != nil {
+		return err
+	}
 	candidate, err := c.checkExecutionConfiguration(state.Graph, dispatchID)
 	if err != nil || candidate.Version == 0 {
 		return err
@@ -236,6 +243,13 @@ func (c *Controller) checkServiceAccess(ctx context.Context, dispatchID, session
 		return err
 	}
 	if err := state.Graph.CheckHandoffStart(dispatchID); err != nil {
+		return err
+	}
+	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+	if !ok {
+		return fmt.Errorf("taxion: specification gate requires a saved Dispatch")
+	}
+	if err := state.Graph.CheckTaskSpecificationUse(dispatch.TaskID, "copilot"); err != nil {
 		return err
 	}
 	_, err = c.checkExecutionConfiguration(state.Graph, dispatchID)

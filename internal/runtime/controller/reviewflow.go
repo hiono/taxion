@@ -127,6 +127,9 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 		if !flowContractMatches(state.Graph, flow, task) {
 			return stop("Task scope, acceptance, authorization or execution contract changed; Human approval of a new flow is required")
 		}
+		if err := state.Graph.CheckTaskSpecificationUse(task.ID, "copilot"); err != nil {
+			return stop("specification source or permission requires renewed Human approval: " + err.Error())
+		}
 		if slices.Contains([]core.TaskStatus{core.Cancelled, core.Rejected, core.Superseded}, task.Status) {
 			return stop("Task ended with " + string(task.Status) + "; reconcile any active Dispatch")
 		}

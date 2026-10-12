@@ -184,6 +184,29 @@ selected follow-up work are in [forge capabilities](12-forge-capabilities.md).
   for tool calls, and a running review flow within its saved deadline and
   observed known-usage ceiling when the Dispatch belongs to a flow.
 
+## Skills・plugins・MCP・hooks と出力圧縮
+
+固定した Go SDK `v1.0.19` の `SessionConfig` と `ResumeSessionConfig` は、
+`SkillDirectories`、`PluginDirectories`、`MCPServers`、`Hooks` を持つ。
+`EnableSkills` は skills の読込み、`EnableFileHooks` は `.github/hooks/` の読込みを制御する。
+SDK の `Hooks` callback と file hooks は別の設定である。
+明示した `PluginDirectories` は `EnableConfigDiscovery: false` の場合にも読み込まれる。
+MCP の resident resume では、既に実行中の server を `DisabledMCPServers` だけで停止する機能は提供されない。
+
+Taxion は現在、発行済みの権限に合わせた SDK tool allowlist と管理 stage・commit を接続する。
+create/resume ともに config discovery・skills・file hooks を無効にし、
+plugin directories・MCP servers・SDK hooks の追加は承認済み設定の実装待ちとする。
+設定に追加する際は、実行ファイル・引数・データ利用範囲・公開 tool と内容の版を
+session の設定 hash と役割権限に含め、同じ条件を resume に適用する必要がある。
+
+`--compact-context` は保存済みの結果・exit code・証拠を保持して重複した指示を省く。
+元の完全な instruction は SQLite に保持する。
+RTK による tool 出力の圧縮と、skills・plugins・MCP・hooks の明示接続は #61 の残作業である。
+その実装では原本の出力・exit status・hash を保存し、圧縮表示から原本を確認できる形式を必要とする。
+SDK の型の存在は対応範囲の確認として記録し、実接続と有料 SDK 推論の受入れは別に記録する。
+
+## Dispatch の実行と context
+
 `taxion runtime start|send|resume|events|stop` is the explicit Copilot CLI
 execution path. `start` creates a session with the saved Dispatch snapshot in
 system context and sends a short execution request; follow-up instructions

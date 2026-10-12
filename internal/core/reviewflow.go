@@ -2,6 +2,7 @@ package core
 
 import (
 	"path/filepath"
+	"reflect"
 	"slices"
 	"time"
 )
@@ -68,6 +69,9 @@ func (g TaskGraph) validateReviewFlows() error {
 			return graphError("invalid bounded review flow %q", flow.ID)
 		}
 		ids[flow.ID] = true
+		if err := validateSpecifications(flow.Contract.Specifications); err != nil {
+			return err
+		}
 		if err := validateHandoffChanges(flow); err != nil {
 			return err
 		}
@@ -109,7 +113,8 @@ func (g TaskGraph) validateReviewFlows() error {
 				!slices.Equal(instruction.ForbiddenActions, flow.Contract.OutOfScope) ||
 				!slices.Equal(instruction.RequiredEvidence, flow.Contract.RequiredEvidence) ||
 				!slices.Equal(instruction.ValidationCommands, flow.Contract.ValidationCommands) ||
-				!slices.Equal(instruction.MemoryRefs, flow.Contract.MemoryRefs) {
+				!slices.Equal(instruction.MemoryRefs, flow.Contract.MemoryRefs) ||
+				!reflect.DeepEqual(instruction.Specifications, flow.Contract.Specifications) {
 				return graphError("review flow Dispatch changed the approved scope, acceptance or evidence")
 			}
 			if role == "CODER" && (instruction.Worktree != flow.Contract.Worktree ||

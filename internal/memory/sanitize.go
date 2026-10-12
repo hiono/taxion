@@ -1,6 +1,9 @@
 package memory
 
-import "regexp"
+import (
+	"regexp"
+	"slices"
+)
 
 // Rule is one named redaction pattern.
 type Rule struct {
@@ -39,6 +42,7 @@ func Redact(rules []Rule, text string) string {
 func RedactEntry(e Entry) Entry {
 	e.Title = Redact(DefaultRules, e.Title)
 	e.Body = Redact(DefaultRules, e.Body)
+	e.SourceRefs = slices.Clone(e.SourceRefs)
 	for i := range e.SourceRefs {
 		e.SourceRefs[i] = Redact(DefaultRules, e.SourceRefs[i])
 	}

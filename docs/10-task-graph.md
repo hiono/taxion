@@ -155,6 +155,11 @@ PENDING は登録 Task の COMPLETED を依存に持ち、実行前に実際の�
 契約は DRAFT・BLOCKED・HUMAN_DECISION_REQUIRED の状態で編集する。
 active と terminal の Task は履歴を維持し、変更は後続 Task として登録する。
 
+`specifications` は、出典・該当箇所・版・本文・用途と、
+取り込み・Copilot 送信・公開の個別承認を保持する。
+Task と Dispatch の契約に含め、役割間で同じ引用スナップショットを使用する。
+入力と利用許可は [仕様入力の参照文書](13-specification-input.md) に従う。
+
 ## 上限付きレビュー進行
 
 `workflow start --file REQUEST.json` は、READY の Coder Task に対する
