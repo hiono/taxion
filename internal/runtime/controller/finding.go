@@ -33,7 +33,30 @@ func RecordFailureAnalysis(db *store.Store, record store.FailureRecord) (store.F
 			return fmt.Errorf("taxion: finding result hash changed")
 		}
 		for _, evidence := range record.ValidationEvidence {
-			if evidence != "dispatch:"+dispatch.ID+":result" && !slices.Contains(dispatch.Result.Evidence, evidence) {
+			matched := evidence == "dispatch:"+dispatch.ID+":result" || slices.Contains(dispatch.Result.Evidence, evidence)
+			for _, validation := range state.Graph.Dispatches {
+				if validation.Result == nil || active(validation.Status) {
+					continue
+				}
+				result, err := json.Marshal(validation.Result)
+				if err != nil || evidence != "dispatch:"+validation.ID+":result:"+receiptHash(string(result)) {
+					continue
+				}
+				related := validation.TaskID == record.TaskID
+				for _, flow := range state.Graph.ReviewFlows {
+					if slices.Contains(flow.DispatchIDs, dispatch.ID) && slices.Contains(flow.DispatchIDs, validation.ID) {
+						related = true
+					}
+				}
+				if !related {
+					return fmt.Errorf("taxion: finding validation belongs to another Task or flow")
+				}
+				if err := validateResultReceipt(state, validation); err != nil {
+					return err
+				}
+				matched = true
+			}
+			if !matched {
 				return fmt.Errorf("taxion: finding validation reference requires evidence in its saved result")
 			}
 		}

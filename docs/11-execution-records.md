@@ -101,6 +101,9 @@ marker が見つからない場合は Human が provider 側の処理・遅延�
 `records finding --file finding.json` は、失敗・レビュー指摘の結果 hash、
 原因、是正措置、lesson 候補、検証の参照、Human の決定と出典を保存する。
 検証の参照には、その結果に保存された evidence、または `dispatch:<ID>:result` を使う。
+是正後の検証は、同じ Task／ReviewFlow の終了済み結果を
+`dispatch:<ID>:result:<結果JSONのSHA256>` で指定し、保存済み receipt と照合する。
+新しい分析 ID で是正の確認結果を追加し、最初の失敗判断も保持する。
 記録が指す結果の成否は元の結果から読む。是正措置の記載と、是正後の成功証拠は別々に確認する。
 同じ ID・同じ内容の判断は再利用し、異なる内容の上書きはエラーになる。
 lesson の強制ルール化は Memory の明示的な承認手順で行う。

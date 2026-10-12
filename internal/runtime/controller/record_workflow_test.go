@@ -41,10 +41,17 @@ func TestRecoveryFindingUncertainReportAndVerifiedClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executeFlowDispatch(t, db, flow, "APPROVE", true)
+	verified := executeFlowDispatch(t, db, flow, "APPROVE", true)
 	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
 	if err != nil || flow.Status != "COMPLETED" {
 		t.Fatal(flow, err)
+	}
+	validationBody, _ := json.Marshal(verified.Result)
+	correction := finding
+	correction.ID = "verified-review-correction"
+	correction.ValidationEvidence = []string{"dispatch:" + verified.ID + ":result:" + receiptHash(string(validationBody))}
+	if _, err := RecordFailureAnalysis(db, correction); err != nil {
+		t.Fatal("corrected review evidence was not linked to the original objection", err)
 	}
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		state.Graph.ReviewFlows[0].RunnerID = "lost-after-completion"
@@ -99,7 +106,7 @@ func TestRecoveryFindingUncertainReportAndVerifiedClose(t *testing.T) {
 		t.Fatal(closed, err)
 	}
 	state, err := db.LoadWorkspace()
-	if err != nil || len(state.Records.Findings) != 1 || len(state.Records.Updates) != 2 {
+	if err != nil || len(state.Records.Findings) != 2 || len(state.Records.Updates) != 2 {
 		t.Fatal("persistent execution record", err)
 	}
 	task, _ := state.Graph.GraphTask(request.TaskID)
