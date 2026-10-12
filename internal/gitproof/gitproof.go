@@ -50,7 +50,7 @@ func Verify(dispatch core.GraphDispatch, result *core.DispatchResult) error {
 	if err != nil {
 		return fmt.Errorf("read origin remote: %w", err)
 	}
-	if !strings.EqualFold(repositoryIdentity(remote), dispatch.Repository) {
+	if err := VerifyRepositoryRemote(dispatch, remote); err != nil {
 		return fmt.Errorf("Git origin %q does not match repository %q", repositoryIdentity(remote), dispatch.Repository)
 	}
 

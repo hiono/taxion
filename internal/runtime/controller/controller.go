@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -469,7 +470,7 @@ func (c *Controller) markRunning(dispatchID string) error {
 			return state.Graph.TransitionDispatch(dispatchID, core.DispatchRunning,
 				"runtime", "session started execution", true, true, nil)
 		case core.DispatchRunning:
-			return nil
+			return fmt.Errorf("taxion: execution was already authorized; observe the saved session or confirm its stop before issuing new work")
 		default:
 			return fmt.Errorf("taxion: Dispatch status %s does not authorize execution", dispatch.Status)
 		}
@@ -484,6 +485,20 @@ func (c *Controller) transition(dispatchID string, status core.DispatchStatus, r
 		}
 		if err := state.Graph.TransitionDispatch(dispatchID, status, "runtime", reason, acknowledged, started, result); err != nil {
 			return err
+		}
+		if result != nil {
+			saved, _ := state.Graph.GraphDispatch(dispatchID)
+			body, err := json.Marshal(struct {
+				Result *core.DispatchResult
+				Usage  []core.DispatchUsage
+			}{saved.Result, saved.RuntimeUsage})
+			if err != nil {
+				return err
+			}
+			state.Records.Events = append(state.Records.Events, store.RuntimeReceipt{
+				DispatchID: dispatchID, SessionID: saved.RuntimeSessionID, Type: "verified-result",
+				Payload: string(body), Hash: receiptHash(string(body)), At: time.Now().UTC(),
+			})
 		}
 		active := status == core.DispatchIssued || status == core.DispatchAcknowledged ||
 			status == core.DispatchRunning || status == core.DispatchCancelRequested ||

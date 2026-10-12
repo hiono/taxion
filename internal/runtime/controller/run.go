@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
@@ -156,6 +155,7 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	encoder := json.NewEncoder(out)
+	streamID := time.Now().UTC().Format(time.RFC3339Nano)
 	var finalOutput string
 	checkLimits := func() error {
 		if err := ctx.Err(); err != nil {
@@ -182,17 +182,15 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 				return fmt.Errorf("taxion: write runtime event: %w", err)
 			}
 			switch event.Type {
+			case runtime.EventOutput, runtime.EventUsage, runtime.EventTurnFinished, runtime.EventFailed, runtime.EventCancelled:
+				if err := c.recordEvent(dispatch.ID, streamID, event); err != nil {
+					return err
+				}
+			}
+			switch event.Type {
 			case runtime.EventOutput:
 				finalOutput = event.Payload
 			case runtime.EventUsage:
-				var usage core.DispatchUsage
-				if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &usage); err != nil {
-					return fmt.Errorf("taxion: decode usage event: %w", err)
-				}
-				usage.ObservedAt = time.Now().UTC()
-				if err := c.RecordUsage(dispatch.ID, usage); err != nil {
-					return err
-				}
 				if err := checkLimits(); err != nil {
 					return err
 				}

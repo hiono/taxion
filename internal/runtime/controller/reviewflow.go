@@ -96,7 +96,18 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 		if flow.RunnerID != runnerID {
 			return fmt.Errorf("%w: %s", ErrFlowClaimed, flow.RunnerID)
 		}
+		for _, id := range flow.DispatchIDs {
+			dispatch, _ := state.Graph.GraphDispatch(id)
+			if err := validateResultReceipt(state, dispatch); err != nil {
+				return err
+			}
+		}
 		if flow.Status != "RUNNING" {
+			if flow.Status == "COMPLETED" {
+				if err := revalidateFlowResult(state.Graph, flow); err != nil {
+					return fmt.Errorf("taxion: completed checkpoint revalidation: %w", err)
+				}
+			}
 			if flow.Status == "STOPPED" {
 				stopped = fmt.Errorf("%w: %s", ErrFlowStopped, flow.Reason)
 			}
@@ -161,10 +172,8 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 		if err := last.ValidateResult(last.Status, last.Result); err != nil {
 			return stop("latest result failed contract validation: " + err.Error())
 		}
-		if last.Recipient == "CODER" {
-			if err := revalidateCoderResult(last); err != nil {
-				return stop("Coder result Git revalidation failed: " + err.Error())
-			}
+		if err := revalidateFlowResult(state.Graph, flow); err != nil {
+			return stop("result Git revalidation failed: " + err.Error())
 		}
 		if flow.HandoffHeld() {
 			stopped = fmt.Errorf("%w: %s", core.ErrHandoffHeld, flow.ID)

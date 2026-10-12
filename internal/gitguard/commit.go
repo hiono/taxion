@@ -71,8 +71,7 @@ func managedIndex(ctx context.Context, dispatch core.GraphDispatch, message, sca
 	if err != nil {
 		return "", err
 	}
-	// Use the same legacy repository identity contract as Git evidence.
-	if !strings.EqualFold(gitproof.RepositoryIdentity(remote), dispatch.Repository) {
+	if err := gitproof.VerifyRepositoryRemote(dispatch, remote); err != nil {
 		return "", fmt.Errorf("managed commit origin does not match Dispatch repository")
 	}
 	branch, err := git("", "symbolic-ref", "--quiet", "HEAD")

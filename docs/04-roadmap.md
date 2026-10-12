@@ -79,6 +79,15 @@ M12 の実 SDK 受入れを 2026-10-12 に完了した。
 質問・追加調査で選択した事項の反映、独立承認、SDK の中断も確認した。
 利用量と残る制約は [M12 の実 SDK 受入れ結果](09-orchestration-requirements.md#m12-の実-sdk-受入れ結果) を参照する。
 
+M13 は実行・完了 checkpoint の再検証、同一 transaction の receipt・外部公開、
+出典付き失敗分析、全未公開 commit の秘密検査を実装した。
+SQLite と Git の障害回帰に加え、Human が承認した本文を新しい CLI で実 GitHub に公開し、
+再送時に保存済み結果を再利用することを確認した。
+手順と証拠は [実行記録](11-execution-records.md)、
+公式仕様と能力差は [開発基盤の対応評価](12-forge-capabilities.md) を参照する。
+Human が採択した GitLab Self-Managed＋glab の先行実装は #75、
+Bitbucket の環境選定・追加実装は #76 とし、M15 #63 の実環境受入れへ渡す。
+
 ## project・開発基盤・AI 契約の独立した管理
 
 [ADR-0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md)

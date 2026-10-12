@@ -37,6 +37,7 @@ Usage:
 Commands:
   config check        Validate fixed Global/Project YAML and environment references ([--sources], [--task])
   git check-index     Reject local Taxion and dotenv paths in the actual commit index
+  git check-range     Scan every unpublished commit tree and message (--base SHA, --head SHA, --scanner PATH)
   git hook            Install (--scanner PATH, or --paths-only), inspect, or remove the Taxion pre-commit hook
   init                Initialize a local workspace ledger
   task create         Create a task (--title and --repo required)
@@ -70,6 +71,12 @@ Commands:
   workflow run        Execute review/repair continuously with saved ceilings (--id and role prompt files required)
   workflow show       Read the saved review flow and ceilings (--id required)
   workflow recover    Release interrupted runner ownership after recorded execution stop (--file JSON)
+  records proposal    Display exact external publication content and its approval hash (--file JSON)
+  records approve     Save an explicitly approved Issue/PR publication after local secret checks (--file JSON)
+  records send        Deliver one approved publication with a durable sender claim (--id, --scanner)
+  records reconcile   Reconcile an uncertain stopped sender against remote records (--id, --claim, --sender-stopped)
+  records show        Show saved runtime receipts and external publication status
+  records finding     Record cause, correction, lesson candidate and Human decision for an exact result (--file JSON)
   workflow handoff    Hold or release the next handoff with a sourced compare-and-swap request (--file JSON)
   workflow feedback-target Read the latest saved instruction/result target without changing execution (--id required)
   workflow feedback   Record target-bound Human feedback and hold the next handoff (--file JSON)
@@ -130,6 +137,8 @@ func main() {
 		err = runtimeCmd(args[1:])
 	case "workflow":
 		err = workflowCmd(args[1:])
+	case "records":
+		err = recordsCmd(args[1:])
 	case "conversation":
 		err = conversationCmd(args[1:], os.Stdout)
 	case "review":

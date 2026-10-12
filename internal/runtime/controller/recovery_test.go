@@ -176,7 +176,7 @@ func TestRecoveryRevalidatesCoderGitAfterRestart(t *testing.T) {
 				t.Fatalf("failed recovery changed graph: %v", err)
 			}
 			stopped, err := advanceReviewFlow(db, ledger, flow.ID, "interrupted-after-result")
-			if !errors.Is(err, ErrFlowStopped) || len(stopped.DispatchIDs) != 1 {
+			if err == nil || stopped.Status != "STOPPED" || len(stopped.DispatchIDs) != 1 {
 				t.Fatalf("handoff accepted changed Git evidence: %+v %v", stopped, err)
 			}
 		})

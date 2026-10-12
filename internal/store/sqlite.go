@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS workspace_state (
   ledger_json TEXT NOT NULL,
   graph_json TEXT NOT NULL,
   graph_present INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS workspace_records (
+  id INTEGER PRIMARY KEY CHECK (id = 1), records_json TEXT NOT NULL);
 `
 
 // Store is a sqlite-backed ledger.
@@ -49,6 +51,7 @@ type Workspace struct {
 	Ledger   core.Ledger
 	Graph    core.TaskGraph
 	HasGraph bool
+	Records  Records
 }
 
 // Open opens (creating if needed) the sqlite file at path and migrates the schema.
@@ -86,6 +89,9 @@ func (s *Store) WorkspaceInitialized() (bool, error) {
 func (s *Store) InitializeWorkspace(state Workspace) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := state.Records.validate(); err != nil {
+		return false, err
+	}
 	if state.HasGraph {
 		if err := state.Graph.Validate(); err != nil {
 			return false, err
@@ -102,14 +108,31 @@ func (s *Store) InitializeWorkspace(state Workspace) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	result, err := s.db.Exec(`INSERT INTO workspace_state(id,revision,ledger_json,graph_json,graph_present)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`INSERT INTO workspace_state(id,revision,ledger_json,graph_json,graph_present)
 		VALUES(1,1,?,?,?) ON CONFLICT(id) DO NOTHING`,
 		string(ledger), string(graph), boolInt(state.HasGraph))
 	if err != nil {
 		return false, err
 	}
 	inserted, err := result.RowsAffected()
-	return inserted == 1, err
+	if err != nil {
+		return false, err
+	}
+	if inserted == 1 {
+		records, err := json.Marshal(state.Records)
+		if err != nil {
+			return false, err
+		}
+		if _, err := tx.Exec(`INSERT INTO workspace_records(id,records_json) VALUES(1,?)`, string(records)); err != nil {
+			return false, err
+		}
+	}
+	return inserted == 1, tx.Commit()
 }
 
 func (s *Store) loadWorkspace(q interface {
@@ -141,6 +164,17 @@ func (s *Store) loadWorkspace(q interface {
 			return Workspace{}, err
 		}
 	}
+	var recordsJSON string
+	err = q.QueryRow(`SELECT records_json FROM workspace_records WHERE id=1`).Scan(&recordsJSON)
+	if err != nil && err != sql.ErrNoRows {
+		return Workspace{}, err
+	}
+	if err == nil {
+		state.Records, err = decodeRecords(recordsJSON)
+		if err != nil {
+			return Workspace{}, err
+		}
+	}
 	return state, nil
 }
 
@@ -159,6 +193,9 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 		return err
 	}
 	if err := update(&state); err != nil {
+		return err
+	}
+	if err := state.Records.validate(); err != nil {
 		return err
 	}
 	if state.HasGraph {
@@ -183,6 +220,14 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 		ledger_json=excluded.ledger_json,graph_json=excluded.graph_json,graph_present=excluded.graph_present`,
 		string(ledger), string(graph), boolInt(state.HasGraph))
 	if err != nil {
+		return err
+	}
+	records, err := json.Marshal(state.Records)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO workspace_records(id,records_json) VALUES(1,?)
+		ON CONFLICT(id) DO UPDATE SET records_json=excluded.records_json`, string(records)); err != nil {
 		return err
 	}
 	return tx.Commit()

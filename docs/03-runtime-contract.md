@@ -121,7 +121,7 @@ type Runtime interface {
   runner, serializes concurrent output, rejects a second owned execution and
   reports failures. EOF/quit cancels and awaits only that console's owned runner;
   without the opt-in flag, synchronous watched behavior is retained.
-## Saved Coder result recovery
+## Saved result and checkpoint recovery
 
 `workflow recover` releases the exact saved runner claim after process-stop
 confirmation and reconciliation of terminal Dispatches. When the latest result
@@ -136,8 +136,24 @@ recovery claim intact and returns an explicit error; a handoff mismatch records
 a STOPPED flow with its reason. A matching result proceeds to independent review
 of the exact saved output SHA. These checks read Git and saved validation records;
 validation command execution belongs to the original controller submission.
-Issue #55 tracks subsequent recovery work for released Reviewer evidence,
-runtime events and completed checkpoints.
+Released Reviewer results also require the managed worktree's absence and
+registry removal, the source repository's origin and immutable commit parents,
+and the same output SHA as the preceding Coder. Completed checkpoints apply
+these checks again. Successful results require a controller receipt matching
+the saved result and usage; legacy checkpoints without one are explicit
+evidence-reconciliation blockers.
+
+Execution authorization is persisted before sending instructions. A RUNNING
+Dispatch is available for observation and stop; new instructions require a new
+authorized Dispatch. Runtime output, usage and terminal events are persisted
+with a stream ID and sequence. Identical sequence replay within one stream is
+idempotent; conflicting replay and post-cancel results are errors. Adoption
+across reconnect streams requires explicit reconciliation because normalized
+SDK sequence numbers belong to the current adapter instance.
+
+The full recovery, approved publication and failure-record procedures are in
+[execution records](11-execution-records.md). Provider capabilities and
+selected follow-up work are in [forge capabilities](12-forge-capabilities.md).
 
 ## Adapters
 

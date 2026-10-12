@@ -140,3 +140,38 @@ func verifyScanner(ctx context.Context, executable, directory string, environmen
 	}
 	return nil
 }
+
+// CheckPublication scans approved text locally using the same pinned rules as commits.
+func CheckPublication(ctx context.Context, scanner, content string) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	executable, err := exec.LookPath(scanner)
+	if err != nil {
+		return fmt.Errorf("required Betterleaks scanner is unavailable")
+	}
+	executable, err = filepath.Abs(executable)
+	if err != nil {
+		return err
+	}
+	directory, err := os.MkdirTemp("", "taxion-publication-scan-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(directory)
+	configPath := filepath.Join(directory, "config.toml")
+	if err := os.WriteFile(configPath, []byte("[extend]\nuseDefault = true\n"), 0600); err != nil {
+		return err
+	}
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + directory}
+	if err := verifyScanner(ctx, executable, directory, env); err != nil {
+		return err
+	}
+	count, err := scanContent(ctx, executable, directory, configPath, env, strings.NewReader(content), "publication.txt")
+	if err != nil {
+		return err
+	}
+	if count != 0 {
+		return fmt.Errorf("approved publication contains potential secrets; values withheld")
+	}
+	return nil
+}

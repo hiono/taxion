@@ -49,12 +49,16 @@ func RecoverReviewFlow(db *store.Store, request RecoveryRequest) (core.ReviewFlo
 			if !ok || active(dispatch.Status) {
 				return fmt.Errorf("taxion: reconcile active Dispatch %s through runtime stop or recorded result before recovering ownership", id)
 			}
+			if err := validateResultReceipt(state, dispatch); err != nil {
+				return err
+			}
 		}
 		last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
-		if last.Status == core.DispatchSucceeded && last.Recipient == "CODER" {
-			if err := revalidateCoderResult(last); err != nil {
+		if last.Status == core.DispatchSucceeded {
+			if err := revalidateFlowResult(state.Graph, flow); err != nil {
 				return fmt.Errorf("taxion: recovery result revalidation: %w", err)
 			}
+
 		}
 		flow.Recoveries = append(flow.Recoveries, core.FlowRecovery{
 			RunnerID: flow.RunnerID, Actor: request.Actor, Reason: request.Reason,
@@ -65,6 +69,28 @@ func RecoverReviewFlow(db *store.Store, request RecoveryRequest) (core.ReviewFlo
 		return nil
 	})
 	return flow, err
+}
+
+func revalidateFlowResult(graph core.TaskGraph, flow core.ReviewFlow) error {
+	last, ok := graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+	if !ok || last.Status != core.DispatchSucceeded || last.Result == nil {
+		return fmt.Errorf("flow checkpoint requires a successful saved result")
+	}
+	if last.Recipient == "CODER" {
+		return revalidateCoderResult(last)
+	}
+	if err := gitproof.ReverifyReleasedReview(last, last.Result); err != nil {
+		return err
+	}
+	if len(flow.DispatchIDs) < 2 {
+		return fmt.Errorf("review requires its Coder source")
+	}
+	coder, ok := graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-2])
+	if !ok || coder.Recipient != "CODER" || coder.Result == nil ||
+		coder.Result.OutputSHA != last.Result.OutputSHA {
+		return fmt.Errorf("review and Coder output SHA differ")
+	}
+	return revalidateCoderResult(coder)
 }
 
 func revalidateCoderResult(dispatch core.GraphDispatch) error {

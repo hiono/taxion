@@ -73,6 +73,10 @@ TAXION_TOKEN=<tok> go run ./cmd/taxion serve --addr 127.0.0.1:3938
   製品要件、段階別の完了条件、現在の実装との差分。
 - [docs/10-task-graph.md](docs/10-task-graph.md) —
   版付き Task Graph の登録・遷移、scope out の保持、dispatch 検査と制約。
+- [docs/11-execution-records.md](docs/11-execution-records.md) —
+  実行・完了 checkpoint の復旧、承認済み GitHub 公開、失敗分析と全未公開 commit の秘密検査。
+- [docs/12-forge-capabilities.md](docs/12-forge-capabilities.md) —
+  開発基盤の公式仕様、credential・API の責務、採択した GitLab Self-Managed の後続実装。
 - `docs/adr/` — design decisions and rationale; Issues record implementation results.
 
 ## CLI
@@ -1125,6 +1129,13 @@ Validation commands run as `sh -c` with the controller's host permissions;
 approve their effects when authorizing the Task. The explicit
 `dispatch transition --result-file` path performs the same verification and
 validation, with a ten-minute default `--validation-timeout`.
+
+`taxion records proposal|approve|send|reconcile|show|finding` manages approved
+GitHub publication and sourced failure analyses. Approval binds the exact
+target, account and content hash. Uncertain delivery remains visible until
+the stopped sender's claim is reconciled. `taxion git check-range --base <SHA>
+--head <SHA> --scanner <PATH>` scans every unpublished commit tree and message
+before publication. See [execution records](docs/11-execution-records.md).
 
 The CLI is local-first. `taxion serve` provides the HTTP API, `taxion acp`
 provides ACP over stdio, and `web/` provides the browser console.

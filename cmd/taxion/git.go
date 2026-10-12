@@ -16,8 +16,29 @@ func checkGitIndex(args []string, output io.Writer) error {
 	if len(args) > 0 && args[0] == "hook" {
 		return gitHook(args[1:], output)
 	}
+	if len(args) > 0 && args[0] == "check-range" {
+		fs := flag.NewFlagSet("git check-range", flag.ContinueOnError)
+		base := fs.String("base", "", "full acknowledged remote base SHA")
+		head := fs.String("head", "", "full unpublished head SHA")
+		scanner := fs.String("scanner", "betterleaks", "trusted Betterleaks 1.9.0 executable")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 {
+			return fmt.Errorf("git check-range accepts no positional arguments")
+		}
+		directory, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if err := gitguard.CheckRange(context.Background(), directory, *base, *head, *scanner); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(output, "All commit trees and messages in %s..%s passed local publication checks. Publish this exact range.\n", *base, *head)
+		return err
+	}
 	if len(args) == 0 || args[0] != "check-index" {
-		return fmt.Errorf("git requires check-index or hook")
+		return fmt.Errorf("git requires check-index, check-range or hook")
 	}
 	fs := flag.NewFlagSet("git check-index", flag.ContinueOnError)
 	secrets := fs.Bool("secrets", false, "scan indexed contents locally with Betterleaks 1.9.0")

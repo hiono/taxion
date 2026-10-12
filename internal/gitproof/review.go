@@ -5,10 +5,54 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/hiono/taxion/internal/core"
 )
+
+// ReverifyReleasedReview checks the immutable target through its source repository
+// and confirms that the controller's released worktree remains absent.
+func ReverifyReleasedReview(dispatch core.GraphDispatch, result *core.DispatchResult) error {
+	if result == nil || result.GitEvidence == nil || !result.GitEvidence.WorktreeReleased ||
+		dispatch.ReviewWorktreeSource == "" {
+		return fmt.Errorf("released review requires saved evidence and source worktree")
+	}
+	if err := dispatch.ValidateResult(dispatch.Status, result); err != nil {
+		return err
+	}
+	source := dispatch.ReviewWorktreeSource
+	if _, err := os.Lstat(dispatch.Instruction.Worktree); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("released review path must remain absent: %v", err)
+	}
+	registry, err := git(source, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return err
+	}
+	for _, entry := range strings.Split(registry, "\x00") {
+		if entry == "worktree "+dispatch.Instruction.Worktree {
+			return fmt.Errorf("released review remains registered")
+		}
+	}
+	remote, err := git(source, "remote", "get-url", "origin")
+	if err != nil {
+		return fmt.Errorf("review source repository is unavailable")
+	}
+	if err := VerifyRepositoryRemote(dispatch, remote); err != nil {
+		return fmt.Errorf("review source repository identity changed")
+	}
+	head, err := git(source, "rev-parse", result.OutputSHA+"^{commit}")
+	if err != nil || head != result.OutputSHA || head != dispatch.Instruction.TargetSHA {
+		return fmt.Errorf("review target commit is unavailable or changed")
+	}
+	parents, err := git(source, "rev-list", "--parents", "-n", "1", head)
+	fields := strings.Fields(parents)
+	if err != nil || len(fields) == 0 || fields[0] != head ||
+		!slices.Equal(fields[1:], result.GitEvidence.ParentSHAs) {
+		return fmt.Errorf("review target parents differ from saved evidence")
+	}
+	return nil
+}
 
 func CreateReviewWorktree(source string, dispatch core.GraphDispatch) error {
 	if dispatch.Recipient != "REVIEWER" || !fullSHA(dispatch.Instruction.BaselineSHA) ||
@@ -24,7 +68,7 @@ func CreateReviewWorktree(source string, dispatch core.GraphDispatch) error {
 	if err != nil {
 		return err
 	}
-	if !strings.EqualFold(repositoryIdentity(remote), dispatch.Repository) {
+	if err := VerifyRepositoryRemote(dispatch, remote); err != nil {
 		return fmt.Errorf("review source repository does not match the dispatch")
 	}
 	_, err = git(source, "worktree", "add", "--detach", dispatch.Instruction.Worktree, dispatch.Instruction.BaselineSHA)
