@@ -137,6 +137,32 @@ func TestControllerBindsAndReusesDurableSession(t *testing.T) {
 	}
 }
 
+func TestCancelledSendSafelyStopsTheBoundDispatch(t *testing.T) {
+	db, _, dispatch := dispatchStore(t)
+	defer db.Close()
+	worker := &fakeRuntime{role: "CODER", hash: "config-v1", worktree: "/tmp/task", sendErr: context.Canceled}
+	control, err := New(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Start(context.Background(), dispatch); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := control.Send(ctx, dispatch, "cancel this turn"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled Send() error = %v", err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, ok := state.Graph.GraphDispatch(dispatch)
+	if !ok || saved.Status != core.DispatchCancelled || worker.stops != 1 {
+		t.Fatalf("cancelled Send did not record a safe stop: dispatch=%+v stops=%d", saved, worker.stops)
+	}
+}
+
 func TestControllerRejectsChangedRoleAndConfiguration(t *testing.T) {
 	db, _, dispatch := dispatchStore(t)
 	defer db.Close()

@@ -1,71 +1,113 @@
 package acp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
-	"github.com/hiono/taxion/internal/memory"
+	"github.com/hiono/taxion/internal/runtime"
+	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/store"
 )
 
 type msg = map[string]any
 
+type fakeRuntime struct {
+	role     string
+	worktree string
+	events   chan runtime.Event
+	sent     chan struct{}
+	stops    int
+	resumes  int
+	closed   bool
+	wait     bool
+	prompts  []string
+}
+
+func (f *fakeRuntime) Role() string       { return f.role }
+func (f *fakeRuntime) ConfigHash() string { return "config-hash" }
+func (f *fakeRuntime) Worktree() string   { return f.worktree }
+func (f *fakeRuntime) Start(context.Context, string) (string, error) {
+	return "sdk-session", nil
+}
+func (f *fakeRuntime) Send(ctx context.Context, _, prompt string) error {
+	f.prompts = append(f.prompts, prompt)
+	if f.sent != nil {
+		f.sent <- struct{}{}
+	}
+	if f.wait {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return nil
+}
+func (f *fakeRuntime) Resume(context.Context, string) error { f.resumes++; return nil }
+func (f *fakeRuntime) Stop(context.Context, string) error   { f.stops++; return nil }
+func (f *fakeRuntime) Events(context.Context, string) (<-chan runtime.Event, error) {
+	return f.events, nil
+}
+func (f *fakeRuntime) EventCursor(string) (uint64, error) { return 0, nil }
+func (f *fakeRuntime) EventsAfter(context.Context, string, uint64) (<-chan runtime.Event, error) {
+	return f.events, nil
+}
+func (f *fakeRuntime) Close() error { f.closed = true; return nil }
+
 func run(t *testing.T, srv *Server, lines ...string) []msg {
 	t.Helper()
-	in := strings.Join(lines, "\n") + "\n"
 	var out bytes.Buffer
-	if err := srv.Serve(context.Background(), strings.NewReader(in), &out); err != nil {
+	if err := srv.Serve(context.Background(), strings.NewReader(strings.Join(lines, "\n")+"\n"), &out); err != nil {
 		t.Fatalf("serve: %v", err)
 	}
-
-	var msgs []msg
 	trimmed := strings.TrimSpace(out.String())
 	if trimmed == "" {
 		return nil
 	}
+	var messages []msg
 	for _, line := range strings.Split(trimmed, "\n") {
-		var m msg
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
+		var message msg
+		if err := json.Unmarshal([]byte(line), &message); err != nil {
 			t.Fatalf("bad output line %q: %v", line, err)
 		}
-		msgs = append(msgs, m)
+		messages = append(messages, message)
 	}
-	return msgs
+	return messages
 }
 
 func req(id int, method string, params msg) string {
-	p, _ := json.Marshal(params)
+	encoded, _ := json.Marshal(params)
 	return string(mustJSON(map[string]any{
-		"jsonrpc": "2.0", "id": id, "method": method, "params": json.RawMessage(p),
+		"jsonrpc": "2.0", "id": id, "method": method, "params": json.RawMessage(encoded),
 	}))
 }
 
 func notif(method string, params msg) string {
-	p, _ := json.Marshal(params)
+	encoded, _ := json.Marshal(params)
 	return string(mustJSON(map[string]any{
-		"jsonrpc": "2.0", "method": method, "params": json.RawMessage(p),
+		"jsonrpc": "2.0", "method": method, "params": json.RawMessage(encoded),
 	}))
 }
 
 func mustJSON(v any) []byte {
-	b, err := json.Marshal(v)
+	data, err := json.Marshal(v)
 	if err != nil {
 		panic(err)
 	}
-	return b
+	return data
 }
 
-func result(t *testing.T, m msg) msg {
+func result(t *testing.T, message msg) msg {
 	t.Helper()
-	r, ok := m["result"].(map[string]any)
+	r, ok := message["result"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected result, got %v", m)
+		t.Fatalf("expected result, got %v", message)
 	}
 	return r
 }
@@ -114,205 +156,318 @@ func TestPlanRestoresWorkWithoutSessionHistory(t *testing.T) {
 		t.Fatalf("planning observation incomplete: %+v", observation)
 	}
 	repeated := result(t, run(t, server, req(3, "taxion/plan", msg{"repository": task.Repo}))[0])
-	repeatedObservation := repeated["observation"].(map[string]any)
-	if repeatedObservation["contentHash"] != hash {
-		t.Fatalf("ACP observation changed unchanged records: %+v", repeatedObservation)
-	}
-	for _, params := range []msg{{}, {"repository": ""}, {"repository": task.Repo, "sessionId": "old"}} {
-		messages := run(t, server, req(2, "taxion/plan", params))
-		if messages[0]["error"] == nil {
-			t.Fatalf("invalid planning input accepted: %+v", messages)
-		}
+	if repeated["observation"].(map[string]any)["contentHash"] != hash {
+		t.Fatalf("ACP observation changed unchanged records: %+v", repeated)
 	}
 }
 
-func TestDispatchRejectsUntrackedGraphTask(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ledger.json")
-	srv := New(path)
-	msgs := run(t, srv, req(0, "initialize", msg{"protocolVersion": 1}), req(1, "session/new", msg{"cwd": "owner/repo"}))
-	sid := result(t, msgs[1])["sessionId"].(string)
-	if err := (core.TaskGraph{Version: 1}).Save(core.GraphPath(path)); err != nil {
+func TestSessionRequiresFreshApprovedDispatch(t *testing.T) {
+	db, dispatchID, worktree := dispatchWorkspace(t, false)
+	defer db.Close()
+	factoryCalls := 0
+	srv := NewRuntime(filepath.Join(t.TempDir(), "ledger.json"), db, time.Minute, func(core.GraphDispatch) (runtime.Identity, error) {
+		factoryCalls++
+		return &fakeRuntime{role: "CODER", worktree: worktree}, nil
+	})
+
+	messages := run(t, srv, req(1, "session/new", msg{"cwd": worktree, "dispatchId": dispatchID}))
+	if messages[0]["error"] == nil || factoryCalls != 0 {
+		t.Fatalf("unissued Dispatch reached runtime factory: %#v", messages)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
 		t.Fatal(err)
 	}
-	msgs = run(t, srv, req(2, "taxion/dispatch", msg{"sessionId": sid}))
-	if len(msgs) != 1 || msgs[0]["error"] == nil {
-		t.Fatalf("untracked task dispatched: %v", msgs)
-	}
-	l, err := core.LoadLedger(path)
-	if err != nil || len(l.Dispatches) != 0 {
-		t.Fatal("graph rejection mutated ledger", err)
+	if len(state.Graph.Dispatches) != 0 || len(state.Ledger.Dispatches) != 0 {
+		t.Fatalf("ACP created a Dispatch without CLI authorization: %+v", state.Graph.Dispatches)
 	}
 }
 
-func TestFullFlow(t *testing.T) {
-	srv := New(filepath.Join(t.TempDir(), "ledger.json"))
-	msgs := run(t, srv,
-		req(0, "initialize", msg{"protocolVersion": 1}),
-		req(1, "session/new", msg{"cwd": "/repo/demo"}),
-	)
-	if v := result(t, msgs[0])["protocolVersion"]; v != float64(1) {
-		t.Fatalf("expected protocolVersion 1, got %v", v)
+func TestSessionBindsOnlyTheApprovedDispatch(t *testing.T) {
+	db, dispatchID, worktree := dispatchWorkspace(t, true)
+	defer db.Close()
+	var received string
+	worker := &fakeRuntime{role: "CODER", worktree: worktree}
+	srv := NewRuntime(filepath.Join(t.TempDir(), "ledger.json"), db, time.Minute, func(dispatch core.GraphDispatch) (runtime.Identity, error) {
+		received = dispatch.ID
+		return worker, nil
+	})
+	if messages := run(t, srv, notif("session/new", msg{"cwd": worktree, "dispatchId": dispatchID})); len(messages) != 0 || received != "" {
+		t.Fatalf("notification started an unobservable runtime session: messages=%v dispatch=%q", messages, received)
 	}
-
-	sid := result(t, msgs[1])["sessionId"].(string)
-
-	msgs = run(t, srv,
-		req(2, "session/prompt", msg{"sessionId": sid, "prompt": []any{
-			map[string]any{"type": "text", "text": "implement feature X"},
-		}}),
-	)
-	if len(msgs) != 3 {
-		t.Fatalf("expected 2 notifications + response, got %d: %v", len(msgs), msgs)
+	messages := run(t, srv, req(1, "session/new", msg{"cwd": worktree, "dispatchId": dispatchID}))
+	if messages[0]["error"] != nil || result(t, messages[0])["sessionId"] == "" {
+		t.Fatalf("approved Dispatch was not attached: %#v", messages)
 	}
-	if msgs[2]["result"].(map[string]any)["stopReason"] != "end_turn" {
-		t.Fatalf("expected end_turn, got %v", msgs[2])
-	}
-
-	msgs = run(t, srv,
-		req(3, "session/prompt", msg{"sessionId": sid, "prompt": []any{
-			map[string]any{"type": "text", "text": "another task"},
-		}}),
-	)
-	if _, ok := msgs[0]["error"]; !ok {
-		t.Fatalf("expected DSP-001 error, got %v", msgs[0])
-	}
-
-	msgs = run(t, srv,
-		req(4, "session/prompt", msg{"sessionId": sid, "prompt": []any{
-			map[string]any{"type": "text", "text": "review deadbeef"},
-		}}),
-	)
-	if len(msgs) != 2 || msgs[1]["result"].(map[string]any)["stopReason"] != "end_turn" {
-		t.Fatalf("expected evidence receipt + end_turn, got %v", msgs)
-	}
-	msgs = run(t, srv,
-		req(5, "session/prompt", msg{"sessionId": sid, "prompt": []any{
-			map[string]any{"type": "text", "text": "review "},
-		}}),
-	)
-	if _, ok := msgs[0]["error"]; !ok {
-		t.Fatalf("expected SHA-001 error, got %v", msgs[0])
+	if received != dispatchID || !worker.closed {
+		t.Fatalf("session used a different Dispatch or leaked its worker: dispatch=%q closed=%v", received, worker.closed)
 	}
 }
 
-func TestExplicitMethods(t *testing.T) {
-	srv := New(filepath.Join(t.TempDir(), "ledger.json"))
-	msgs := run(t, srv, req(1, "session/new", msg{"cwd": "/repo/demo"}))
-	sid := result(t, msgs[0])["sessionId"].(string)
-
-	msgs = run(t, srv, req(2, "taxion/dispatch", msg{"sessionId": sid}))
-	if len(msgs) != 3 {
-		t.Fatalf("expected 2 notifications + response, got %d: %v", len(msgs), msgs)
+func TestPromptUsesControllerAndPersistsRuntimeFailure(t *testing.T) {
+	db, dispatchID, worktree := dispatchWorkspace(t, true)
+	defer db.Close()
+	worker := &fakeRuntime{
+		role: "CODER", worktree: worktree, events: make(chan runtime.Event, 1),
+		sent: make(chan struct{}, 1),
 	}
-	r := result(t, msgs[2])
-	if r["stopReason"] != "end_turn" || r["dispatchId"] == "" {
-		t.Fatalf("expected end_turn + dispatchId, got %v", r)
+	worker.events <- runtime.Event{Type: runtime.EventFailed, Payload: "simulated runtime failure"}
+	server := NewRuntime(filepath.Join(t.TempDir(), "ledger.json"), db, time.Minute, func(core.GraphDispatch) (runtime.Identity, error) {
+		return worker, nil
+	})
+	var output bytes.Buffer
+	out := bufio.NewWriter(&output)
+	server.handle(context.Background(), decodeRequest(t, req(1, "session/new", msg{
+		"cwd": worktree, "dispatchId": dispatchID,
+	})), out)
+	messages := decodeMessages(t, output.String())
+	sid := result(t, messages[0])["sessionId"].(string)
+	server.handle(context.Background(), decodeRequest(t, req(2, "session/prompt", msg{
+		"sessionId": sid, "prompt": []any{msg{"type": "text", "text": "implement the approved task"}},
+	})), out)
+	server.wg.Wait()
+	messages = decodeMessages(t, output.String())
+	last := messages[len(messages)-1]
+	if last["error"] == nil || !strings.Contains(last["error"].(map[string]any)["message"].(string), "simulated runtime failure") {
+		t.Fatalf("runtime failure was not returned to ACP: %+v", last)
 	}
-
-	msgs = run(t, srv, req(3, "taxion/dispatch", msg{"sessionId": sid}))
-	if _, ok := msgs[0]["error"]; !ok {
-		t.Fatalf("expected DSP-001 error, got %v", msgs[0])
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	msgs = run(t, srv, req(4, "taxion/review", msg{"sessionId": sid, "sha": "cafef00d"}))
-	if len(msgs) != 2 || result(t, msgs[1])["stopReason"] != "end_turn" {
-		t.Fatalf("expected evidence receipt + end_turn, got %v", msgs)
+	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+	if !ok || dispatch.Status != core.DispatchFailed || dispatch.RuntimeSessionID == "" ||
+		len(state.Records.Events) < 2 || len(state.Ledger.Dispatches) != 1 || state.Ledger.Dispatches[0].Active || !worker.closed {
+		t.Fatalf("runtime failure was not persisted through the controller: %+v", dispatch)
 	}
-	msgs = run(t, srv, req(5, "taxion/review", msg{"sessionId": sid, "sha": ""}))
-	if _, ok := msgs[0]["error"]; !ok {
-		t.Fatalf("expected SHA-001 error, got %v", msgs[0])
-	}
-
-	msgs = run(t, srv, req(6, "taxion/dispatch", msg{"sessionId": "nope"}))
-	if _, ok := msgs[0]["error"]; !ok {
-		t.Fatalf("expected unknown-session error, got %v", msgs[0])
-	}
-	msgs = run(t, srv, req(7, "taxion/review", msg{"sessionId": "nope", "sha": "x"}))
-	if _, ok := msgs[0]["error"]; !ok {
-		t.Fatalf("expected unknown-session error, got %v", msgs[0])
-	}
-	msgs = run(t, srv, req(8, "taxion/dispatch", msg{}))
-	if e, ok := msgs[0]["error"].(map[string]any); !ok || int(e["code"].(float64)) != ErrInvalidParams {
-		t.Fatalf("expected invalid-params, got %v", msgs[0])
+	if len(worker.prompts) != 1 || !strings.Contains(worker.prompts[0], "additional task context only") ||
+		!strings.Contains(worker.prompts[0], "implement the approved task") {
+		t.Fatalf("ACP prompt was not constrained to the approved Dispatch: %+v", worker.prompts)
 	}
 }
 
-func TestGates(t *testing.T) {
-	srv := New(filepath.Join(t.TempDir(), "ledger.json"))
-	msgs := run(t, srv,
-		`{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":99}}`,
-		`{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":""}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"frobnicate","params":{}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"nope","prompt":[]}}`,
-	)
-	if v := result(t, msgs[0])["protocolVersion"]; v != float64(1) {
-		t.Fatalf("version negotiation must fall back to 1, got %v", v)
+func TestPromptCancellationRecordsControllerSafeStop(t *testing.T) {
+	db, dispatchID, worktree := dispatchWorkspace(t, true)
+	defer db.Close()
+	worker := &fakeRuntime{
+		role: "CODER", worktree: worktree, events: make(chan runtime.Event),
+		sent: make(chan struct{}, 1), wait: true,
 	}
-	for i, want := range []int{ErrInvalidParams, ErrMethodNotFound, ErrServer} {
-		e, ok := msgs[i+1]["error"].(map[string]any)
-		if !ok || int(e["code"].(float64)) != want {
-			t.Fatalf("msg %d: expected code %d, got %v", i+1, want, msgs[i+1])
+	server := NewRuntime(filepath.Join(t.TempDir(), "ledger.json"), db, time.Minute, func(core.GraphDispatch) (runtime.Identity, error) {
+		return worker, nil
+	})
+	var output bytes.Buffer
+	out := bufio.NewWriter(&output)
+	server.handle(context.Background(), decodeRequest(t, req(1, "session/new", msg{
+		"cwd": worktree, "dispatchId": dispatchID,
+	})), out)
+	sid := result(t, decodeMessages(t, output.String())[0])["sessionId"].(string)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server.handle(ctx, decodeRequest(t, req(2, "session/prompt", msg{
+		"sessionId": sid, "prompt": []any{msg{"type": "text", "text": "run the approved task"}},
+	})), out)
+	<-worker.sent
+	server.handle(ctx, decodeRequest(t, notif("session/cancel", msg{"sessionId": sid})), out)
+	server.wg.Wait()
+	messages := decodeMessages(t, output.String())
+	if result(t, messages[len(messages)-1])["stopReason"] != "cancelled" {
+		t.Fatalf("cancelled prompt did not return a cancelled stop reason: %+v", messages[len(messages)-1])
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+	if !ok || dispatch.Status != core.DispatchCancelled || worker.stops != 1 || !worker.closed {
+		t.Fatalf("ACP cancellation did not record a controller safe stop: dispatch=%+v stops=%d", dispatch, worker.stops)
+	}
+}
+
+func TestReconnectObservesBoundRuntimeWithoutResendingPrompt(t *testing.T) {
+	db, dispatchID, worktree := dispatchWorkspace(t, true)
+	defer db.Close()
+	original := &fakeRuntime{
+		role: "CODER", worktree: worktree, events: make(chan runtime.Event, 1),
+		sent: make(chan struct{}, 1),
+	}
+	control, err := controller.New(db, original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Start(context.Background(), dispatchID); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.Send(context.Background(), dispatchID, "original approved turn"); err != nil {
+		t.Fatal(err)
+	}
+	resumed := &fakeRuntime{
+		role: "CODER", worktree: worktree, events: make(chan runtime.Event, 1),
+		sent: make(chan struct{}, 1),
+	}
+	resumed.events <- runtime.Event{Type: runtime.EventFailed, Payload: "recovered failure"}
+	server := NewRuntime(filepath.Join(t.TempDir(), "ledger.json"), db, time.Minute, func(core.GraphDispatch) (runtime.Identity, error) {
+		return resumed, nil
+	})
+	var output bytes.Buffer
+	out := bufio.NewWriter(&output)
+	server.handle(context.Background(), decodeRequest(t, req(1, "session/new", msg{
+		"cwd": worktree, "dispatchId": dispatchID,
+	})), out)
+	sid := result(t, decodeMessages(t, output.String())[0])["sessionId"].(string)
+	server.handle(context.Background(), decodeRequest(t, req(2, "session/prompt", msg{
+		"sessionId": sid, "prompt": []any{msg{"type": "text", "text": "do not submit this prompt again"}},
+	})), out)
+	server.wg.Wait()
+	messages := decodeMessages(t, output.String())
+	if messages[len(messages)-1]["error"] == nil || resumed.resumes != 1 || len(resumed.prompts) != 0 {
+		t.Fatalf("reconnect resent work instead of observing the saved session: responses=%+v resumes=%d prompts=%v",
+			messages, resumed.resumes, resumed.prompts)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+	if !ok || dispatch.Status != core.DispatchFailed || dispatch.RuntimeSessionID != "sdk-session" {
+		t.Fatalf("reconnected runtime state was not reconciled: %+v", dispatch)
+	}
+}
+
+func TestACPDoesNotIssueOrReviewDispatches(t *testing.T) {
+	server := New(filepath.Join(t.TempDir(), "ledger.json"))
+	for _, method := range []string{"taxion/dispatch", "taxion/review"} {
+		messages := run(t, server, req(1, method, msg{}))
+		if messages[0]["error"] == nil {
+			t.Fatalf("removed implicit authorization method %q was accepted", method)
 		}
 	}
+}
 
-	msgs = run(t, srv, req(1, "session/new", msg{"cwd": "/repo/demo"}))
-	sid := result(t, msgs[0])["sessionId"].(string)
-	msgs = run(t, srv, notif("session/cancel", msg{"sessionId": sid}))
-	if len(msgs) != 0 {
-		t.Fatalf("cancel notification must produce no output, got %v", msgs)
+func TestSessionCancelCancelsActivePrompt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	worker := &fakeRuntime{role: "CODER", worktree: t.TempDir()}
+	server := New(filepath.Join(t.TempDir(), "ledger.json"))
+	server.sessions["active"] = &acpSession{worker: worker, cancel: cancel, active: true}
+	messages := run(t, server, notif("session/cancel", msg{"sessionId": "active"}))
+	if len(messages) != 0 || ctx.Err() != context.Canceled {
+		t.Fatalf("cancel notification did not cancel the active prompt: messages=%v context=%v", messages, ctx.Err())
 	}
-	msgs = run(t, srv, req(2, "session/prompt", msg{"sessionId": sid, "prompt": []any{
-		map[string]any{"type": "text", "text": "hello"},
-	}}))
-	if _, ok := msgs[0]["error"]; !ok {
-		t.Fatalf("expected cancelled-session error, got %v", msgs[0])
+	if !worker.closed {
+		t.Fatal("server did not close the cancelled session worker")
 	}
 }
 
-func TestDispatchMemoryPolicyOnExplicitAndPromptMethods(t *testing.T) {
-	for _, method := range []string{"taxion/dispatch", "session/prompt"} {
-		t.Run(method, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "ledger.json")
-			srv := New(path)
-			msgs := run(t, srv, req(1, "session/new", msg{"cwd": "/target"}))
-			sid := result(t, msgs[0])["sessionId"].(string)
-			s, err := memory.Open(memory.PathForLedger(path))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := s.SetPromoteAfter(1); err != nil {
-				t.Fatal(err)
-			}
-			_, candidate, err := s.Warn("check target", memory.ScopeGlobal)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := s.Approve(candidate, memory.CheckRepoEquals, "/other"); err != nil {
-				t.Fatal(err)
-			}
-			if err := s.Close(); err != nil {
-				t.Fatal(err)
-			}
-			params := msg{"sessionId": sid}
-			if method == "session/prompt" {
-				params["prompt"] = []any{msg{"type": "text", "text": "dispatch"}}
-			}
-			msgs = run(t, srv, req(2, method, params))
-			if len(msgs) != 1 || !strings.Contains(string(mustJSON(msgs[0])), "MEM-001") {
-				t.Fatalf("ACP policy denial: %+v", msgs)
-			}
-			l, err := core.LoadLedger(path)
-			if err != nil || len(l.Dispatches) != 0 {
-				t.Fatalf("ACP denial changed ledger: %+v %v", l, err)
-			}
-			// A corrupt policy must not turn into an empty/no-policy fallback.
-			if err := os.WriteFile(memory.PathForLedger(path), []byte("corrupt"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			msgs = run(t, srv, req(3, method, params))
-			if len(msgs) != 1 || msgs[0]["error"] == nil {
-				t.Fatalf("corrupt ACP policy must fail: %+v", msgs)
-			}
-		})
+func TestRuntimeOutputDeltasBecomeACPProgressUpdates(t *testing.T) {
+	server := New(filepath.Join(t.TempDir(), "ledger.json"))
+	var output bytes.Buffer
+	writer := &eventWriter{server: server, out: bufio.NewWriter(&output), sessionID: "session"}
+	for _, event := range []runtime.Event{
+		{Type: runtime.EventOutputDelta, Payload: "first "},
+		{Type: runtime.EventOutputDelta, Payload: "second"},
+		{Type: runtime.EventOutput, Payload: "first second"},
+	} {
+		line := append(mustJSON(event), '\n')
+		if _, err := writer.Write(line); err != nil {
+			t.Fatal(err)
+		}
 	}
+	messages := decodeMessages(t, output.String())
+	if len(messages) != 2 ||
+		messages[0]["params"].(map[string]any)["update"].(map[string]any)["content"].(map[string]any)["text"] != "first " ||
+		messages[1]["params"].(map[string]any)["update"].(map[string]any)["content"].(map[string]any)["text"] != "second" {
+		t.Fatalf("ACP did not stream output deltas without duplicating the final message: %+v", messages)
+	}
+}
+
+func dispatchWorkspace(t *testing.T, issue bool) (*store.Store, string, string) {
+	t.Helper()
+	worktree := t.TempDir()
+	db, err := store.Open(filepath.Join(t.TempDir(), "workspace.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := core.GraphTask{
+		ID: "task-1", Title: "Approved task", Repo: "owner/repo", Type: "IMPLEMENTATION", Issue: "Issue #50",
+		Owner: "CODER", Reviewer: "reviewer", Status: core.Draft, Objective: "test ACP authorization",
+		Scope: []string{"internal/acp"}, Acceptance: []string{"ACP uses the approved Dispatch"},
+		ValidationCommands: []string{"go test ./internal/acp"}, RequiredEvidence: []string{"test evidence"},
+		ExitCondition: "tests pass", Branch: "work/task", Worktree: worktree,
+		Decisions: []core.TaskDecision{{ID: "decision:1", Source: "human:1", Text: "approved"}},
+	}
+	git(t, worktree, "init", "-b", task.Branch)
+	git(t, worktree, "config", "user.name", "Taxion Test")
+	git(t, worktree, "config", "user.email", "taxion-test@example.com")
+	git(t, worktree, "remote", "add", "origin", "https://github.com/owner/repo.git")
+	if err := os.WriteFile(filepath.Join(worktree, "README.md"), []byte("baseline\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, worktree, "add", "README.md")
+	git(t, worktree, "commit", "-m", "baseline")
+	task.BaselineSHA = git(t, worktree, "rev-parse", "HEAD")
+	task.CreatedFrom, task.AuthorizationID = "request:1", "decision:1"
+	graph := core.TaskGraph{Version: 1}
+	if err := graph.Track(task, "human", "register task"); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.Transition(task.ID, core.Ready, "human", "approve task", core.TransitionProof{}); err != nil {
+		t.Fatal(err)
+	}
+	var dispatch core.GraphDispatch
+	if issue {
+		dispatch, err = core.NewGraphDispatch(graph, "dispatch-1", task.ID, task.Repo, core.RelationshipNone, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := graph.IssueDispatch(dispatch, "cli", "human-approved dispatch"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ledger := core.Ledger{Tasks: []core.Task{{ID: task.ID, Title: task.Title, Repo: task.Repo}}}
+	if issue {
+		ledger.Dispatches = []core.Dispatch{{ID: dispatch.ID, TaskID: task.ID, Repo: task.Repo, Active: true, CreatedAt: dispatch.CreatedAt}}
+	}
+	if _, err := db.InitializeWorkspace(store.Workspace{HasGraph: true, Graph: graph, Ledger: ledger}); err != nil {
+		t.Fatal(err)
+	}
+	if !issue {
+		dispatch.ID = "dispatch-1"
+	}
+	return db, dispatch.ID, worktree
+}
+
+func git(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func decodeRequest(t *testing.T, line string) Request {
+	t.Helper()
+	var request Request
+	if err := json.Unmarshal([]byte(line), &request); err != nil {
+		t.Fatal(err)
+	}
+	return request
+}
+
+func decodeMessages(t *testing.T, output string) []msg {
+	t.Helper()
+	var messages []msg
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line == "" {
+			continue
+		}
+		var message msg
+		if err := json.Unmarshal([]byte(line), &message); err != nil {
+			t.Fatalf("bad output line %q: %v", line, err)
+		}
+		messages = append(messages, message)
+	}
+	return messages
 }

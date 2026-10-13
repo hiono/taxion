@@ -23,6 +23,7 @@ import (
 	"github.com/hiono/taxion/internal/acp"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
+	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/runtime/copilot"
 	"github.com/hiono/taxion/internal/server"
@@ -66,6 +67,7 @@ Commands:
   runtime commit      Publish scanned staged changes for the bound running Coder (--message-file, --scanner)
   runtime <action> --managed-commit  Opt into the bound Coder SDK commit tool; use the same option and scanner on resume
   runtime <action> --managed-stage   Also enable scoped file staging; requires --managed-commit
+  acp                 Serve approved Dispatches over ACP (--coder-system-prompt-file, --max-ai-credits)
   workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON)
   workflow advance    Issue review/repair from the latest verified result (--id required)
   workflow run        Execute review/repair continuously with saved ceilings (--id and role prompt files required)
@@ -155,7 +157,7 @@ func main() {
 	case "resume":
 		err = resumeCmd(args[1:])
 	case "acp":
-		err = runACP()
+		err = runACP(args[1:])
 	case "serve":
 		err = serveCmd(args[1:])
 	case "gen-token":
@@ -758,13 +760,88 @@ func runtimeSubmissionPrompt(prompt, contract string, submission bool) string {
 		"\nWhen reporting completion, return one JSON object following RETURN FORMAT exactly. Use the saved Dispatch, Task, role, and repository identifiers. For validations you actually ran, report their worktree and exact Git SHA; never invent execution. If the authored output and role evidence are ready for controller verification, submit status SUCCEEDED and validations [] for checks the controller has not yet run. Pending controller validation alone is not a reason to report SUSPENDED or BLOCKED. The controller executes the authorized VALIDATION COMMANDS and verifies Git after this submission, before persisting a successful result. A real missing output, failed check, missing role evidence or required Human decision remains a blocker; report it rather than guessing success. A Reviewer must still independently determine its verdict and acceptance from actual evidence."
 }
 
-func runACP() error {
+func runACP(args []string) error {
+	fs := flag.NewFlagSet("acp", flag.ContinueOnError)
+	coderPromptFile := fs.String("coder-system-prompt-file", "", "Coder system prompt file")
+	reviewerPromptFile := fs.String("reviewer-system-prompt-file", "", "Reviewer system prompt file (optional)")
+	cliPath := fs.String("cli", "", "Copilot CLI path (default: PATH)")
+	baseDirectory := fs.String("base-directory", "", "Copilot state directory (default: ~/.copilot)")
+	tools := fs.String("tools", "", "comma-separated SDK tool allowlist (default: none)")
+	maxAICredits := fs.Float64("max-ai-credits", 0, "required per-session soft AI-credit ceiling (minimum: 30)")
+	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for a turn")
+	compactContext := fs.Bool("compact-context", false, "include exact prior results without nested instructions")
+	validationSubmission := fs.Bool("controller-validation-submission", false, "separate model submission from controller-run checks")
+	scanner := fs.String("scanner", "betterleaks", "trusted Betterleaks 1.9.0 executable for managed commit")
+	managedCommit := fs.Bool("managed-commit", false, "enable the bound Coder's taxion_commit SDK tool")
+	managedStage := fs.Bool("managed-stage", false, "enable taxion_stage alongside --managed-commit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *coderPromptFile == "" {
+		return fmt.Errorf("acp: --coder-system-prompt-file is required")
+	}
+	if err := copilot.ValidateAICreditLimit(*maxAICredits); err != nil || *maxAICredits == 0 {
+		return fmt.Errorf("acp: --max-ai-credits must be at least 30")
+	}
+	if *timeout <= 0 {
+		return fmt.Errorf("acp: --timeout must be positive")
+	}
+	var scannerSpecified bool
+	fs.Visit(func(option *flag.Flag) {
+		if option.Name == "scanner" {
+			scannerSpecified = true
+		}
+	})
+	if scannerSpecified && !*managedCommit {
+		return fmt.Errorf("acp: --scanner applies only with --managed-commit")
+	}
+	if *managedStage && !*managedCommit {
+		return fmt.Errorf("acp: --managed-stage requires --managed-commit")
+	}
+	prompts := make(map[string]string, 2)
+	for role, path := range map[string]string{"CODER": *coderPromptFile, "REVIEWER": *reviewerPromptFile} {
+		if path == "" {
+			continue
+		}
+		prompt, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("acp: read %s system prompt: %w", role, err)
+		}
+		prompts[role] = string(prompt)
+	}
+	availableTools, err := runtimeTools(*tools)
+	if err != nil {
+		return err
+	}
 	db, err := openWorkspace()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	return acp.NewWithWorkspace(storePath, workspaceDBPath()).Serve(context.Background(), os.Stdin, os.Stdout)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	factory := func(dispatch core.GraphDispatch) (runtime.Identity, error) {
+		dispatch, err := selectDispatchConfiguration(db, dispatch)
+		if err != nil {
+			return nil, err
+		}
+		prompt, ok := prompts[dispatch.Recipient]
+		if !ok {
+			return nil, fmt.Errorf("acp: no system prompt configured for role %s", dispatch.Recipient)
+		}
+		contract, err := controller.RenderDispatchContext(db, dispatch, *compactContext)
+		if err != nil {
+			return nil, err
+		}
+		return newDispatchWorker(ctx, db, dispatch, copilot.Config{
+			Role:             dispatch.Recipient,
+			SystemPrompt:     runtimeSubmissionPrompt(prompt, contract, *validationSubmission),
+			WorkingDirectory: dispatch.Instruction.Worktree,
+			CLIPath:          *cliPath, BaseDirectory: *baseDirectory, AvailableTools: availableTools,
+			MaxAICredits: *maxAICredits, ResponseSchema: strictDispatchResultSchema(dispatch),
+		}, *managedCommit, *managedStage, *scanner)
+	}
+	return acp.NewRuntime(storePath, db, *timeout, factory).Serve(ctx, os.Stdin, os.Stdout)
 }
 
 func serveCmd(args []string) error {

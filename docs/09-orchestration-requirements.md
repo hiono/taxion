@@ -125,7 +125,7 @@ credential、非公開の資料や会話を公開 Issue・PR・ログへ転記�
 | Review | controller の Git・検証結果照合、読み取り専用の独立 Reviewer、指摘からの修正と新 SHA の再レビュー、解放済み worktree・完了 checkpoint の再検証 | M15 の組合せ別受入れ |
 | Memory | SQLite、階層・出典・版と Task の連携、Coder・Reviewer 指示の保存時の参照、計画の再構成、更新・失効時の検査、検索・export、履歴と承認を保持する完全なローカル移行、承認済み skills・plugins・MCP・hooks・RTK 接続 | 共有保存の配置と M15 の共通操作 |
 | 復旧・外部記録 | 同一 transaction の Graph・receipt・承認済み公開・失敗分析、停止確認付き所有権解除、GitHub Issue 作成・Issue/PR コメント・証拠付き close、送信不明状態の照合、全未公開 commit の秘密検査 | M15 の CLI・ACP サーバー間の一連の受入れ。GitLab Self-Managed は追加実験 (#75)、Bitbucket adapter は後続候補 (#76) |
-| CLI・ACP サーバー・Web | CLI 操作、ACP の Ledger 操作 | ACP の会話 controller 接続と CLI 同等の作業操作を M15 で確認する。Web UI は後続候補 |
+| CLI・ACP サーバー・Web | CLI と ACP が同じ Controller を使い、CLI 発行済み Dispatch を ACP から一度だけ実行 | M15 で CLI・ACP 間の一連の受入れを確認する。ACP からの Task・Dispatch 発行と Web UI は対象外 |
 | Human の途中介入・質問 | 観測時刻・hash と対象付き補足、保留・解除と中断要求・停止証拠の分離、版付き指示案の改訂・承認・発行、変更契約の再承認、本流を変えない質問、固定 SHA の読み取り専用調査、選択した発見事項の明示反映、Memory に基づく Planner 助言と非実行判断の保存、再起動・発行競合の照合、CLI と実 SDK の受入れ | M15 で ACP サーバーから同じ controller 操作を利用する |
 | 仕様書 | 出典・版・用途別承認、役割間で同じ引用スナップショット、ローカル原本の変更検出と公開許可検査、公開・合成資料の PDF・DOCX・PPTX 自動検索と Task 添付、Orchestrator の検索 tool | M14 のローカル検索と実 SDK 独立 Reviewer 受入れを完了。M365 接続は組織の利用許可後に評価する条件付き拡張 (#77) |
 | 設定・認証主体 | 固定 Global・Project・環境参照と出典、設定の追跡・ignore 検査、repository と Copilot の主体・credential 参照・契約参照の分離、許可組合せと Dispatch・Session の照合、実効認証・権限の観測、SDK の管理 stage・commit と直接の index・秘密検査、signed-in SDK から独立レビューまでの受入れ、開発基盤の公式仕様評価と Human の追加 adapter 採択 | 共有 Memory の配置、承認者の本人認証、法的な契約適格性の保証、追加 adapter の実環境受入れ |

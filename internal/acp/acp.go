@@ -1,25 +1,22 @@
-// Package acp is a minimal ACP (Agent Client Protocol v1) agent spike.
-//
-// The client-provided cwd is the explicit repository identity so an editor
-// session cannot silently target the server's working directory (REP-001).
+// Package acp exposes approved Task Graph Dispatches through ACP.
 package acp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
-	"github.com/hiono/taxion/internal/memory"
+	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/runtime/controller"
-	"github.com/hiono/taxion/internal/runtime/local"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -31,7 +28,6 @@ const (
 	ErrServer         = -32000
 )
 
-// Request is one newline-delimited JSON-RPC message.
 type Request struct {
 	JSONRPC string           `json:"jsonrpc"`
 	ID      *json.RawMessage `json:"id,omitempty"`
@@ -39,13 +35,11 @@ type Request struct {
 	Params  json.RawMessage  `json:"params,omitempty"`
 }
 
-// RPCError is a JSON-RPC error object.
 type RPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
 
-// Response is a JSON-RPC response (never sent for notifications).
 type Response struct {
 	JSONRPC string           `json:"jsonrpc"`
 	ID      *json.RawMessage `json:"id"`
@@ -54,25 +48,31 @@ type Response struct {
 }
 
 type acpSession struct {
-	taskID     string
-	cwd        string
-	adapter    *local.Adapter
-	adapterSID string
-	cancelled  bool
+	dispatch core.GraphDispatch
+	worker   runtime.Identity
+	control  *controller.Controller
+	mu       sync.Mutex
+	cancel   context.CancelFunc
+	active   bool
+	finished bool
+	closed   bool
+	resume   bool
 }
 
-// Server is a single-connection ACP agent over stdio. Dispatch records
-// ledger operations; it does not execute a worker.
 type Server struct {
 	storePath     string
 	workspacePath string
+	db            *store.Store
+	timeout       time.Duration
+	factory       controller.WorkerFactory
 
 	mu       sync.Mutex
+	writeMu  sync.Mutex
 	sessions map[string]*acpSession
 	seq      int
+	wg       sync.WaitGroup
 }
 
-// New returns a Server persisting its ledger to storePath.
 func New(storePath string) *Server {
 	return &Server{storePath: storePath, sessions: map[string]*acpSession{}}
 }
@@ -81,16 +81,17 @@ func NewWithWorkspace(storePath, workspacePath string) *Server {
 	return &Server{storePath: storePath, workspacePath: workspacePath, sessions: map[string]*acpSession{}}
 }
 
-// Serve reads newline-delimited JSON-RPC from r and writes responses and
-// session/update notifications to w until EOF.
+func NewRuntime(storePath string, db *store.Store, timeout time.Duration, factory controller.WorkerFactory) *Server {
+	return &Server{storePath: storePath, db: db, timeout: timeout, factory: factory, sessions: map[string]*acpSession{}}
+}
+
 func (s *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 	out := bufio.NewWriter(w)
-	defer out.Flush()
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
 	for sc.Scan() {
 		line := sc.Bytes()
-		if len(strings.TrimSpace(string(line))) == 0 {
+		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
 		var req Request
@@ -100,31 +101,34 @@ func (s *Server) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 		}
 		s.handle(ctx, req, out)
 	}
-	return sc.Err()
+	s.cancelSessions()
+	s.wg.Wait()
+	return errors.Join(sc.Err(), s.closeSessions())
 }
 
 func (s *Server) write(out *bufio.Writer, v any) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	data, _ := json.Marshal(v)
-	out.Write(data)
-	out.WriteByte('\n')
-	out.Flush()
+	data, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, _ = out.Write(data)
+	_ = out.WriteByte('\n')
+	_ = out.Flush()
 }
 
 func (s *Server) notify(out *bufio.Writer, sessionID string, update any) {
 	s.write(out, map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "session/update",
-		"params":  map[string]any{"sessionId": sessionID, "update": update},
+		"jsonrpc": "2.0", "method": "session/update",
+		"params": map[string]any{"sessionId": sessionID, "update": update},
 	})
 }
 
 func (s *Server) respond(out *bufio.Writer, id *json.RawMessage, result any, rpcErr *RPCError) {
-	if id == nil {
-		return // JSON-RPC notifications have no response ID.
+	if id != nil {
+		s.write(out, Response{JSONRPC: "2.0", ID: id, Result: result, Error: rpcErr})
 	}
-	s.write(out, Response{JSONRPC: "2.0", ID: id, Result: result, Error: rpcErr})
 }
 
 func (s *Server) fail(out *bufio.Writer, id *json.RawMessage, code int, err error) {
@@ -134,16 +138,8 @@ func (s *Server) fail(out *bufio.Writer, id *json.RawMessage, code int, err erro
 func (s *Server) handle(ctx context.Context, req Request, out *bufio.Writer) {
 	switch req.Method {
 	case "initialize":
-		var p struct {
-			ProtocolVersion int `json:"protocolVersion"`
-		}
-		_ = json.Unmarshal(req.Params, &p)
-		version := 1
-		if p.ProtocolVersion < 1 {
-			version = 1
-		}
 		s.respond(out, req.ID, map[string]any{
-			"protocolVersion": version,
+			"protocolVersion": 1,
 			"agentCapabilities": map[string]any{
 				"loadSession": false,
 				"promptCapabilities": map[string]any{
@@ -154,20 +150,28 @@ func (s *Server) handle(ctx context.Context, req Request, out *bufio.Writer) {
 			"authMethods": []any{},
 		}, nil)
 	case "session/new":
-		var p struct {
-			Cwd string `json:"cwd"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil || p.Cwd == "" {
-			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("session/new: non-empty cwd is required (REP-001)"))
+		if req.ID == nil {
 			return
 		}
-		sid, err := s.newSession(p.Cwd)
+		var p struct {
+			Cwd        string `json:"cwd"`
+			DispatchID string `json:"dispatchId"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil ||
+			strings.TrimSpace(p.Cwd) == "" || strings.TrimSpace(p.DispatchID) == "" {
+			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("session/new requires cwd and an approved dispatchId"))
+			return
+		}
+		sid, err := s.newSession(p.Cwd, p.DispatchID)
 		if err != nil {
 			s.fail(out, req.ID, ErrServer, err)
 			return
 		}
 		s.respond(out, req.ID, map[string]any{"sessionId": sid}, nil)
 	case "session/prompt":
+		if req.ID == nil {
+			return
+		}
 		var p struct {
 			SessionID string `json:"sessionId"`
 			Prompt    []struct {
@@ -176,53 +180,32 @@ func (s *Server) handle(ctx context.Context, req Request, out *bufio.Writer) {
 			} `json:"prompt"`
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil || p.SessionID == "" {
-			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("session/prompt: sessionId and prompt are required"))
+			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("session/prompt requires sessionId and prompt"))
 			return
 		}
-		var text string
-		for _, b := range p.Prompt {
-			if b.Type == "text" {
-				text = b.Text
-				break
+		var text strings.Builder
+		for _, block := range p.Prompt {
+			if block.Type == "text" {
+				text.WriteString(block.Text)
 			}
 		}
-		reason, err := s.prompt(ctx, p.SessionID, text, out)
-		if err != nil {
-			s.fail(out, req.ID, ErrServer, err)
+		if strings.TrimSpace(text.String()) == "" {
+			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("session/prompt requires non-empty text"))
 			return
 		}
-		s.respond(out, req.ID, map[string]any{"stopReason": reason}, nil)
+		s.startPrompt(ctx, out, req.ID, p.SessionID, text.String())
 	case "session/cancel":
 		var p struct {
 			SessionID string `json:"sessionId"`
 		}
-		_ = json.Unmarshal(req.Params, &p)
-		s.cancel(ctx, p.SessionID)
-		// session/cancel is an ACP notification, not a request.
-	case "taxion/dispatch":
-		var p struct {
-			SessionID string `json:"sessionId"`
+		if json.Unmarshal(req.Params, &p) == nil {
+			s.cancelSession(p.SessionID)
 		}
-		if err := json.Unmarshal(req.Params, &p); err != nil || p.SessionID == "" {
-			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("taxion/dispatch: sessionId is required"))
-			return
-		}
-		sess, err := s.lookup(p.SessionID)
-		if err != nil {
-			s.fail(out, req.ID, ErrServer, err)
-			return
-		}
-		did, err := s.dispatch(p.SessionID, sess, out)
-		if err != nil {
-			s.fail(out, req.ID, ErrServer, err)
-			return
-		}
-		s.respond(out, req.ID, map[string]any{"stopReason": "end_turn", "dispatchId": did}, nil)
 	case "taxion/plan":
 		var p struct {
 			Repository string `json:"repository"`
 		}
-		if err := core.DecodeGraphInput(strings.NewReader(string(req.Params)), &p); err != nil {
+		if err := core.DecodeGraphInput(bytes.NewReader(req.Params), &p); err != nil {
 			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("taxion/plan: %w", err))
 			return
 		}
@@ -230,264 +213,314 @@ func (s *Server) handle(ctx context.Context, req Request, out *bufio.Writer) {
 			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("taxion/plan: explicit repository is required"))
 			return
 		}
-		if s.workspacePath == "" {
-			s.fail(out, req.ID, ErrServer, fmt.Errorf("taxion/plan requires a SQLite workspace and Task Graph"))
-			return
+		db := s.db
+		if db == nil {
+			if s.workspacePath == "" {
+				s.fail(out, req.ID, ErrServer, fmt.Errorf("taxion/plan requires a SQLite workspace and Task Graph"))
+				return
+			}
+			var err error
+			db, err = store.Open(s.workspacePath)
+			if err != nil {
+				s.fail(out, req.ID, ErrServer, err)
+				return
+			}
+			defer db.Close()
 		}
-		db, err := store.Open(s.workspacePath)
-		if err != nil {
-			s.fail(out, req.ID, ErrServer, err)
-			return
-		}
-		defer db.Close()
 		plan, err := controller.Plan(db, s.storePath, p.Repository)
 		if err != nil {
 			s.fail(out, req.ID, ErrServer, err)
 			return
 		}
 		s.respond(out, req.ID, plan, nil)
-	case "taxion/review":
-		var p struct {
-			SessionID string `json:"sessionId"`
-			SHA       string `json:"sha"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil || p.SessionID == "" {
-			s.fail(out, req.ID, ErrInvalidParams, fmt.Errorf("taxion/review: sessionId and sha are required"))
-			return
-		}
-		sess, err := s.lookup(p.SessionID)
-		if err != nil {
-			s.fail(out, req.ID, ErrServer, err)
-			return
-		}
-		if err := s.review(p.SessionID, sess, p.SHA, out); err != nil {
-			s.fail(out, req.ID, ErrServer, err)
-			return
-		}
-		s.respond(out, req.ID, map[string]any{"stopReason": "end_turn", "sha": strings.TrimSpace(p.SHA)}, nil)
 	default:
 		s.fail(out, req.ID, ErrMethodNotFound, fmt.Errorf("method not found: %s", req.Method))
 	}
 }
 
-func (s *Server) load() (core.Ledger, error) {
-	if s.workspacePath != "" {
-		db, err := store.Open(s.workspacePath)
-		if err != nil {
-			return core.Ledger{}, err
-		}
-		defer db.Close()
-		state, err := db.LoadWorkspace()
-		return state.Ledger, err
+func (s *Server) newSession(cwd, dispatchID string) (string, error) {
+	if s.db == nil || s.factory == nil || s.timeout <= 0 {
+		return "", fmt.Errorf("ACP execution requires a runtime-enabled server")
 	}
-	l, err := core.LoadLedger(s.storePath)
-	if errors.Is(err, os.ErrNotExist) {
-		return core.Ledger{Tasks: []core.Task{}, Dispatches: []core.Dispatch{}, Evidence: []core.Evidence{}, Checkpoints: []core.Checkpoint{}}, nil
-	}
-	return l, err
-}
-
-func (s *Server) update(update func(*store.Workspace) error, legacy func(*core.Ledger) error) error {
-	if s.workspacePath != "" {
-		db, err := store.Open(s.workspacePath)
-		if err != nil {
-			return err
-		}
-		defer db.Close()
-		return db.UpdateWorkspace(update)
-	}
-	l, err := s.load()
+	state, err := s.db.LoadWorkspace()
 	if err != nil {
-		return err
+		return "", err
 	}
-	if err := legacy(&l); err != nil {
-		return err
+	if !state.HasGraph {
+		return "", fmt.Errorf("Task Graph is not initialized")
 	}
-	return l.Save(s.storePath)
-}
-
-func (s *Server) newSession(cwd string) (string, error) {
+	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+	if !ok || dispatch.Instruction.Version < core.DispatchInstructionVersion {
+		return "", fmt.Errorf("Dispatch %q is not a fresh, currently approved Dispatch", dispatchID)
+	}
+	fresh := dispatch.Status == core.DispatchIssued && !dispatch.ExecutionStarted
+	resume := dispatch.Status == core.DispatchRunning && dispatch.RuntimeSessionID != "" && dispatch.ExecutionStarted
+	if !fresh && !resume {
+		return "", fmt.Errorf("Dispatch %q is neither fresh nor an already-running bound session", dispatchID)
+	}
+	if dispatch.Recipient != "CODER" && dispatch.Recipient != "REVIEWER" {
+		return "", fmt.Errorf("Dispatch %q has unsupported role %q", dispatchID, dispatch.Recipient)
+	}
+	s.mu.Lock()
+	for _, existing := range s.sessions {
+		if existing.dispatch.ID == dispatchID && !existing.finished {
+			s.mu.Unlock()
+			return "", fmt.Errorf("Dispatch %q is already attached to an ACP session", dispatchID)
+		}
+	}
+	s.mu.Unlock()
+	source := dispatch.Instruction.Worktree
+	if dispatch.Recipient == "REVIEWER" {
+		if dispatch.ReviewWorktreeSource != "" {
+			source = dispatch.ReviewWorktreeSource
+		} else {
+			related, found := state.Graph.GraphDispatch(dispatch.RelatedID)
+			if !found || related.Recipient != "CODER" || related.Status != core.DispatchSucceeded ||
+				related.Result == nil || related.Result.GitEvidence == nil {
+				return "", fmt.Errorf("Reviewer Dispatch requires a successful related Coder Dispatch")
+			}
+			source = related.Instruction.Worktree
+			dispatch, err = controller.PrepareReview(s.db, dispatch.ID, source)
+			if err != nil {
+				return "", err
+			}
+		}
+	}
+	if !samePath(cwd, source) {
+		return "", fmt.Errorf("ACP cwd does not match the Dispatch repository worktree")
+	}
+	worker, err := s.factory(dispatch)
+	if err != nil {
+		return "", err
+	}
+	if worker == nil || worker.Role() != dispatch.Recipient || !samePath(worker.Worktree(), dispatch.Instruction.Worktree) {
+		if worker != nil {
+			_ = closeWorker(worker)
+		}
+		return "", fmt.Errorf("runtime factory returned an identity outside the approved Dispatch")
+	}
+	control, err := controller.New(s.db, worker)
+	if err != nil {
+		_ = closeWorker(worker)
+		return "", err
+	}
 	s.mu.Lock()
 	s.seq++
 	sid := fmt.Sprintf("sess-%d-%d", time.Now().UnixNano(), s.seq)
-	tid := fmt.Sprintf("t-%d-%d", time.Now().UnixNano(), s.seq)
-	s.mu.Unlock()
-
-	adapter := local.New("coder", "plan", "execute", "verify")
-	adapterSID, err := adapter.Start(context.Background(), tid)
-	if err != nil {
-		return "", err
-	}
-	task := core.Task{ID: tid, Title: "acp session " + sid, Repo: cwd, CreatedAt: time.Now().UTC()}
-	if err := s.update(func(state *store.Workspace) error {
-		state.Ledger.Tasks = append(state.Ledger.Tasks, task)
-		return nil
-	}, func(l *core.Ledger) error {
-		l.Tasks = append(l.Tasks, task)
-		return nil
-	}); err != nil {
-		return "", err
-	}
-	s.mu.Lock()
-	s.sessions[sid] = &acpSession{taskID: tid, cwd: cwd, adapter: adapter, adapterSID: adapterSID}
+	s.sessions[sid] = &acpSession{dispatch: dispatch, worker: worker, control: control, resume: resume}
 	s.mu.Unlock()
 	return sid, nil
 }
 
-func (s *Server) lookup(sid string) (*acpSession, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sess, ok := s.sessions[sid]
-	if !ok {
-		return nil, fmt.Errorf("unknown session: %s", sid)
+func samePath(a, b string) bool {
+	resolve := func(path string) (string, error) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return "", err
+		}
+		return filepath.EvalSymlinks(abs)
 	}
-	if sess.cancelled {
-		return nil, fmt.Errorf("session cancelled: %s", sid)
+	left, err := resolve(a)
+	if err != nil {
+		return false
 	}
-	return sess, nil
+	right, err := resolve(b)
+	return err == nil && filepath.Clean(left) == filepath.Clean(right)
 }
 
-// Keep the deprecated prompt form for older clients, sharing dispatch/review
-// helpers so its constraints do not diverge from the explicit methods.
-func (s *Server) prompt(ctx context.Context, sid, text string, out *bufio.Writer) (string, error) {
-	sess, err := s.lookup(sid)
-	if err != nil {
+func (s *Server) startPrompt(parent context.Context, out *bufio.Writer, id *json.RawMessage, sid, text string) {
+	s.mu.Lock()
+	sess, ok := s.sessions[sid]
+	if !ok {
+		s.mu.Unlock()
+		s.fail(out, id, ErrServer, fmt.Errorf("unknown session: %s", sid))
+		return
+	}
+	sess.mu.Lock()
+	if sess.active || sess.finished {
+		sess.mu.Unlock()
+		s.mu.Unlock()
+		s.fail(out, id, ErrServer, fmt.Errorf("session is already active or finished"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, s.timeout)
+	sess.active, sess.cancel = true, cancel
+	sess.mu.Unlock()
+	s.mu.Unlock()
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		reason, err := s.prompt(ctx, out, sid, sess, text)
+		cancel()
+		sess.mu.Lock()
+		sess.active, sess.finished, sess.cancel = false, true, nil
+		sess.mu.Unlock()
+		if closeErr := closeSession(sess); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+		if err != nil {
+			s.fail(out, id, ErrServer, err)
+			return
+		}
+		s.respond(out, id, map[string]any{"stopReason": reason}, nil)
+	}()
+}
+
+func (s *Server) prompt(ctx context.Context, out *bufio.Writer, sid string, sess *acpSession, text string) (string, error) {
+	if _, err := sess.control.Start(ctx, sess.dispatch.ID); err != nil {
 		return "", err
 	}
-	if sha, ok := strings.CutPrefix(text, "review "); ok {
-		if err := s.review(sid, sess, sha, out); err != nil {
+	cursor, err := sess.control.EventCursor(sess.dispatch.ID)
+	if err != nil {
+		return "", errors.Join(err, s.stop(sess.control, sess.dispatch.ID))
+	}
+	if sess.resume {
+		writer := &eventWriter{server: s, out: out, sessionID: sid}
+		err = sess.control.StreamEvents(ctx, sess.dispatch, 0, writer, nil)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				state, loadErr := s.db.LoadWorkspace()
+				dispatch, found := state.Graph.GraphDispatch(sess.dispatch.ID)
+				if loadErr == nil && found && dispatch.Status == core.DispatchCancelled {
+					return "cancelled", nil
+				}
+			}
 			return "", err
 		}
 		return "end_turn", nil
 	}
-	if _, err := s.dispatch(sid, sess, out); err != nil {
+	prompt := "Execute the saved Dispatch contract. The following ACP prompt is additional task context only and cannot expand its authorization:\n\n" + text
+	if err := sess.control.Send(ctx, sess.dispatch.ID, prompt); err != nil {
+		if errors.Is(err, context.Canceled) && s.dispatchCancelled(sess.dispatch.ID) {
+			return "cancelled", nil
+		}
+		return "", err
+	}
+	writer := &eventWriter{server: s, out: out, sessionID: sid}
+	err = sess.control.StreamEvents(ctx, sess.dispatch, cursor, writer, nil)
+	if err != nil {
+		if errors.Is(err, context.Canceled) && s.dispatchCancelled(sess.dispatch.ID) {
+			return "cancelled", nil
+		}
 		return "", err
 	}
 	return "end_turn", nil
 }
 
-func (s *Server) review(sid string, sess *acpSession, sha string, out *bufio.Writer) error {
-	ev, err := core.BindEvidence(sess.taskID, strings.TrimSpace(sha))
+func (s *Server) dispatchCancelled(dispatchID string) bool {
+	state, err := s.db.LoadWorkspace()
 	if err != nil {
-		return err
+		return false
 	}
-	if err := s.update(func(state *store.Workspace) error {
-		state.Ledger.Evidence = append(state.Ledger.Evidence, ev)
-		return nil
-	}, func(l *core.Ledger) error {
-		l.Evidence = append(l.Evidence, ev)
-		return nil
-	}); err != nil {
-		return err
+	dispatch, found := state.Graph.GraphDispatch(dispatchID)
+	return found && dispatch.Status == core.DispatchCancelled
+}
+
+func (s *Server) stop(control *controller.Controller, dispatchID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return control.Stop(ctx, dispatchID)
+}
+
+func (s *Server) cancelSession(sid string) {
+	s.mu.Lock()
+	sess := s.sessions[sid]
+	s.mu.Unlock()
+	if sess == nil {
+		return
 	}
-	s.notify(out, sid, map[string]any{
-		"sessionUpdate": "agent_message_chunk",
-		"content":       map[string]any{"type": "text", "text": fmt.Sprintf("Evidence bound to %s for %s.", ev.SHA, sess.taskID)},
-	})
+	sess.mu.Lock()
+	cancel := sess.cancel
+	sess.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (s *Server) cancelSessions() {
+	s.mu.Lock()
+	sessions := make([]*acpSession, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		sessions = append(sessions, sess)
+	}
+	s.mu.Unlock()
+	for _, sess := range sessions {
+		sess.mu.Lock()
+		cancel := sess.cancel
+		sess.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+	}
+}
+
+func (s *Server) closeSessions() error {
+	s.mu.Lock()
+	sessions := s.sessions
+	s.sessions = map[string]*acpSession{}
+	s.mu.Unlock()
+	var closeErr error
+	for _, sess := range sessions {
+		closeErr = errors.Join(closeErr, closeSession(sess))
+	}
+	return closeErr
+}
+
+func closeSession(sess *acpSession) error {
+	sess.mu.Lock()
+	if sess.closed {
+		sess.mu.Unlock()
+		return nil
+	}
+	sess.closed = true
+	sess.mu.Unlock()
+	return closeWorker(sess.worker)
+}
+
+func closeWorker(worker runtime.Identity) error {
+	if closer, ok := worker.(io.Closer); ok {
+		return closer.Close()
+	}
 	return nil
 }
 
-func (s *Server) dispatch(sid string, sess *acpSession, out *bufio.Writer) (string, error) {
-	d := core.Dispatch{ID: fmt.Sprintf("d-%d", time.Now().UnixNano()),
-		TaskID: sess.taskID, Repo: sess.cwd, Active: true, CreatedAt: time.Now().UTC()}
-	var instruction *core.GraphDispatch
-	var rendered string
-	if err := s.update(func(state *store.Workspace) error {
-		if err := core.GuardActiveDispatch(state.Ledger.Dispatches); err != nil {
-			return err
+type eventWriter struct {
+	server    *Server
+	out       *bufio.Writer
+	sessionID string
+	pending   []byte
+	deltaSeen bool
+}
+
+func (w *eventWriter) Write(p []byte) (int, error) {
+	w.pending = append(w.pending, p...)
+	for {
+		index := bytes.IndexByte(w.pending, '\n')
+		if index < 0 {
+			break
 		}
-		task, found := findTask(state.Ledger, sess.taskID)
-		if !found {
-			return fmt.Errorf("unknown task: %s", sess.taskID)
+		line := bytes.TrimSpace(w.pending[:index])
+		w.pending = w.pending[index+1:]
+		var event runtime.Event
+		if err := json.Unmarshal(line, &event); err != nil {
+			return 0, fmt.Errorf("decode runtime event: %w", err)
 		}
-		var refs []string
-		if state.HasGraph {
-			refs, _ = state.Graph.TaskMemoryRefs(sess.taskID)
-		}
-		if err := memory.CheckDispatch(s.storePath, task, sess.cwd, refs...); err != nil {
-			return err
-		}
-		if state.HasGraph {
-			if err := state.Graph.CheckExecutable(task.ID, sess.cwd); err != nil {
-				return err
+		if event.Type == runtime.EventOutputDelta {
+			w.deltaSeen = true
+			if event.Payload != "" {
+				w.sendText(event.Payload)
 			}
-			memoryContext, err := memory.ResolveDispatchContext(s.storePath, refs)
-			if err != nil {
-				return err
-			}
-			graphDispatch, err := core.NewGraphDispatch(state.Graph, d.ID, task.ID, sess.cwd,
-				core.RelationshipNone, "", "", memoryContext)
-			if err != nil {
-				return err
-			}
-			if err := state.Graph.IssueDispatch(graphDispatch, "acp", "dispatch issued"); err != nil {
-				return err
-			}
-			rendered, err = core.RenderDispatchInstruction(graphDispatch)
-			if err != nil {
-				return err
-			}
-			instruction = &graphDispatch
+		} else if event.Type == runtime.EventOutput && !w.deltaSeen && event.Payload != "" {
+			w.sendText(event.Payload)
 		}
-		state.Ledger.Dispatches = append(state.Ledger.Dispatches, d)
-		return nil
-	}, func(l *core.Ledger) error {
-		if err := core.GuardActiveDispatch(l.Dispatches); err != nil {
-			return err
-		}
-		task, found := findTask(*l, sess.taskID)
-		if !found {
-			return fmt.Errorf("unknown task: %s", sess.taskID)
-		}
-		if err := core.CheckGraphDispatch(s.storePath, task, sess.cwd); err != nil {
-			return err
-		}
-		if err := memory.CheckDispatch(s.storePath, task, sess.cwd); err != nil {
-			return err
-		}
-		l.Dispatches = append(l.Dispatches, d)
-		return nil
-	}); err != nil {
-		return "", err
 	}
-	entries := []map[string]any{}
-	for _, step := range []string{"plan", "execute", "verify"} {
-		entries = append(entries, map[string]any{
-			"content": step, "priority": "medium", "status": "pending",
-		})
-	}
-	s.notify(out, sid, map[string]any{"sessionUpdate": "plan", "entries": entries})
-	s.notify(out, sid, map[string]any{
+	return len(p), nil
+}
+
+func (w *eventWriter) sendText(text string) {
+	w.server.notify(w.out, w.sessionID, map[string]any{
 		"sessionUpdate": "agent_message_chunk",
-		"content":       map[string]any{"type": "text", "text": dispatchNotice(d, instruction, rendered, sess)},
+		"content":       map[string]any{"type": "text", "text": text},
 	})
-	return d.ID, nil
-}
-
-func dispatchNotice(d core.Dispatch, instruction *core.GraphDispatch, rendered string, sess *acpSession) string {
-	if instruction == nil {
-		return fmt.Sprintf("Dispatched %s for %s in %s.", d.ID, sess.taskID, sess.cwd)
-	}
-	return rendered
-}
-
-func findTask(ledger core.Ledger, id string) (core.Task, bool) {
-	for _, task := range ledger.Tasks {
-		if task.ID == id {
-			return task, true
-		}
-	}
-	return core.Task{}, false
-}
-
-func (s *Server) cancel(ctx context.Context, sid string) {
-	s.mu.Lock()
-	sess, ok := s.sessions[sid]
-	if ok {
-		sess.cancelled = true
-	}
-	s.mu.Unlock()
-	if ok {
-		sess.adapter.Stop(ctx, sess.adapterSID)
-	}
 }

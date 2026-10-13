@@ -237,14 +237,19 @@ SDK の create/resume 設定と権限を無料回帰で確認する。
 
 ## Dispatch の実行と context
 
-`taxion runtime start|send|resume|events|stop` is the explicit Copilot CLI
-execution path. `start` creates a session with the saved Dispatch snapshot in
-system context and sends a short execution request; follow-up instructions
-come from a prompt file. The CLI validates the final structured response
-against the saved Dispatch contract. An operator submits the result through
-the Dispatch transition, which validates its required fields before changing
-state. The ACP server uses `internal/runtime/local`; Copilot sessions start
-through the explicit runtime commands.
+`taxion runtime start|send|resume|events|stop` is the Copilot CLI execution
+path. The ACP server accepts only a fresh, CLI-issued Dispatch ID in
+`session/new`; it does not create Tasks or Dispatches. ACP and CLI use the same
+controller for session binding, tool authorization, event recording, result
+verification and safe stop. A fresh ACP session sends one prompt as additional
+context to the saved Dispatch contract; reconnecting to a running Dispatch
+observes the existing turn without sending another prompt. Runtime output
+deltas are streamed as ACP session updates. `taxion acp` requires a per-session
+AI-credit ceiling and timeout, plus a Coder system prompt; a Reviewer prompt is
+required for Reviewer Dispatches. The SDK commit and staging tools remain
+explicit opt-ins through `--managed-commit` and `--managed-stage`. ACP sessions
+can reconnect to a running Dispatch by ID; use the CLI runtime commands to
+inspect or reconcile a saved session when ACP cannot resume it.
 
 `--compact-context` on `runtime` and `workflow run|step` renders exact prior
 results once per sourced decision instead of embedding their full prior

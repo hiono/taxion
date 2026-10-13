@@ -28,3 +28,15 @@ stdlib only; no LLM wired — replies are governance receipts plus plan updates.
 - Prompt-convention routing (`review <sha>`) is spike-grade; a real turn
   engine or explicit methods replace it before any release.
 - v2 is draft — stay on v1 until v2 stabilizes, then re-evaluate.
+
+## M15 implementation update
+
+The ledger-only spike behavior above is superseded for runtime execution.
+`session/new` now requires a fresh Dispatch ID issued by the CLI; ACP cannot
+create Tasks or Dispatches. `session/prompt` runs one turn through the shared
+runtime controller, and `session/cancel` requests the controller's safe stop.
+The saved Dispatch contract, role-specific system prompt, tool policy,
+configuration, credit ceiling and timeout constrain execution. ACP session
+IDs remain process-local. A reconnect names the saved running Dispatch and
+observes its existing turn without sending another prompt; other recovery uses
+the CLI runtime commands.

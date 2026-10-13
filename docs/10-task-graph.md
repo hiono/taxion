@@ -734,7 +734,7 @@ Git の事実、承認済みコマンドの実行結果を照合し、Dispatch �
 途中の出力は event として表示し、状態の確定には turn の終了を必要とする。
 operator が結果ファイルを投入する経路も同じ Git 検証とコマンド実行を通す。
 `dispatch transition --validation-timeout` は検証全体の期限を指定し、既定値は 10 分である。
-ACP と HTTP API は `internal/runtime/local` を利用し、Copilot session は明示的な runtime command から起動する。
+HTTP API は `internal/runtime/local` を利用する。ACP は CLI が発行した新規 Dispatch ID を受け取り、CLI と同じ controller 経由で一度だけ Copilot session を実行する。ACP から Task・Dispatch は発行しない。
 
 ## 保存・互換性と制約
 

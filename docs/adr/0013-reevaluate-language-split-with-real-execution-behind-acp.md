@@ -46,8 +46,15 @@ for M4, remains open). Revisit triggers from here:
 
 ## Implementation clarification
 
-The evaluation above treated proc-backed execution as an ACP integration.
-The current code provides `internal/runtime/proc` separately, while ACP
-constructs a `local.Adapter`. ACP dispatch records the ledger operation
-and emits notifications; it does not start the configured worker process.
-The decision to defer a language split remains unchanged.
+At the time of this evaluation, proc-backed execution was treated as an ACP
+integration. The code then provided `internal/runtime/proc` separately, while
+ACP constructed a `local.Adapter`, recorded ledger operations and emitted
+notifications without starting the configured worker process. The decision to
+defer a language split remains unchanged.
+
+## M15 implementation update
+
+ACP accepts a fresh CLI-issued Dispatch and executes one turn through the
+shared runtime controller. It can reconnect to an already-running Dispatch to
+observe the saved turn without resending work. It does not create Tasks or
+Dispatches. The Go-only language decision remains unchanged.

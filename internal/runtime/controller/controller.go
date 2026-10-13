@@ -184,6 +184,11 @@ func (c *Controller) Send(ctx context.Context, dispatchID, prompt string) error 
 		return err
 	}
 	if err := c.runtime.Send(ctx, dispatch.RuntimeSessionID, prompt); err != nil {
+		if ctx.Err() != nil {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			return errors.Join(err, c.Stop(stopCtx, dispatchID))
+		}
 		if failErr := c.Fail(dispatchID, err.Error()); failErr != nil {
 			return errors.Join(err, fmt.Errorf("taxion: record runtime failure: %w", failErr))
 		}
