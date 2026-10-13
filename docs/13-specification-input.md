@@ -93,7 +93,8 @@ Task の authorization・scope・acceptance を別のフィールドに保持す
 Human は、公開・合成資料をローカルで自動検索し、承認した合成本文を
 Coder・Reviewer に渡す方式を採択した。判断は [ADR-0025](adr/0025-approved-local-specification-search-and-tools.md) に記録する。
 M365 の接続は、組織の認証・license・資料利用許可を確認する
-[#77](https://github.com/hiono/taxion/issues/77) として BLOCKED を保持する。
+[#77](https://github.com/hiono/taxion/issues/77) の条件付き後続拡張として扱う。
+組織が利用可能な環境と許可範囲を提示した場合に接続方式を評価する。
 
 検索 scope は、PDF・DOCX・PPTX の exact asset、題名、出典、版、`public` または `synthetic` の
 閲覧範囲、private evidence directory を持つ。検索は大文字小文字を区別しない literal AND 方式で、

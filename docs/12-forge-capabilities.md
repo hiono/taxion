@@ -12,7 +12,7 @@ GitHub adapter を共通の承認・送信状態・証拠照合の実装例と�
 | --- | --- | --- | --- |
 | GitHub.com | host、owner/repo、Issue/PR と番号 | Issue 作成・編集・comment・close、SHA を指定した PR review | Issue 作成・Issue/PR comment・Issue close を実装。Git・SQLite・gh 脚本で回帰確認し、承認済みコメントを実 GitHub へ一件公開して再送を照合 |
 | GitHub Enterprise Server | instance host、owner/repo、種別・番号、server 版 | server 版の REST API と権限に従う | 対象 host・版・credential を選定して追加受入れする |
-| GitLab.com・Self-Managed・Dedicated | instance host、project ID／URL encoded path、Issue/MR と project 内 iid | Issue 作成・note・状態更新、MR note・approval・close／merge | Self-Managed を先行実装する計画。対象 instance と版・tier は受入れ時に固定する |
+| GitLab.com・Self-Managed・Dedicated | instance host、project ID／URL encoded path、Issue/MR と project 内 iid | Issue 作成・note・状態更新、MR note・approval・close／merge | Self-Managed は Conductor の repository 参照を使って追加実験する (#75)。実効主体・権限・対象 instance の確認結果を受入れ記録に残す |
 | Bitbucket Cloud | workspace、repository UUID／slug、PR ID、別作業管理の host・project・key | Cloud REST API の repository・PR・comment・approval。Issue tracker の利用可否は対象 tenant の提供状況で確認する | Cloud／Data Center と作業管理を Human が選定してから実装する |
 | Bitbucket Data Center | instance host・context path、project key、repository slug／ID、PR ID、server 版 | Data Center REST API の PR・comment・参加者 approval／decline・merge | Data Center API 用 adapter と実環境受入れを後続にする |
 | Jira | 作業管理 host、project、Issue ID／key、transition ID | Issue 作成・comment、許可された workflow transition | repository adapter と独立した作業管理 adapter として選定する |
@@ -79,18 +79,16 @@ clone、fork、cache、ログ、添付の残存先を列挙し、管理者と保
 
 ## 採択した後続作業と受入れ環境
 
-[#75](https://github.com/hiono/taxion/issues/75) で GitLab Self-Managed 用 adapter を先行する。
-受入れ環境は Human が許可した実 instance の隔離 project とし、
-host、server 版・tier、Git と API の account・credential 参照、AI 契約、
-権限の異なる参加者を開始前に固定する。
+[#75](https://github.com/hiono/taxion/issues/75) では Conductor の repository 参照を使い、
+GitLab Self-Managed 用 adapter の追加実験を行う。
+実行前に host、server 版・tier、Git と API の account・credential 参照を確認する。
 glab の host 指定、同名 project の host 取り違え、権限失効、
 Issue・MR note の送信障害、SHA 変更、approval、close、再起動を検証する。
-環境値・資格情報の提供は後続 Issue の着手条件として記録する。
+有料 AI 呼出しは別途 Human 承認を得る。
 
 [#76](https://github.com/hiono/taxion/issues/76) で Bitbucket の Cloud／Data Center、
 Jira 等の作業管理、利用する認証主体・権限を先に採択する。
-その結果に応じて追加 adapter と受入れ環境を決める。
-M15 の #63 に両方の実装・環境依存を渡し、実測結果と計画を別々に報告する。
+現時点で Bitbucket の契約・検証環境がないため、adapter の実装・実環境受入れは後続候補とする。
 
 ## 公式参照
 

@@ -63,14 +63,17 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 | [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映する自動実装・独立レビュー、実行主体・接続先・AI 契約の分離、commit 前の混入防止、Human の途中介入と状況・根拠の質問 | #52〜#54・#67・#69・#72〜#74 |
 | [M13](https://github.com/hiono/taxion/milestone/19) | 再起動からの復旧、永続的な作業記録、外部基盤 adapter の分離・対応評価 | #55〜#57・#70 |
 | [M14](https://github.com/hiono/taxion/milestone/20) | 仕様検索、Memory の移行、skills・tools 連携 | #58〜#61 |
-| [M15](https://github.com/hiono/taxion/milestone/21) | ACP・Web、project 参加者の権限・契約・session 所有権、組合せ別の到達条件 | #62〜#63・#71 |
+| [M15](https://github.com/hiono/taxion/milestone/21) | CLI と ACP サーバーの一連の作業を受け入れ、GitLab Self-Managed を追加検証する | #62〜#63・#75 |
 | [M16](https://github.com/hiono/taxion/milestone/22) | Planner 採用と Rust 導入の評価 | #64〜#65 |
 
 [ADR-0024](adr/0024-human-handoff-control-and-side-questions.md) に基づき、
 M12 の #73 は受け渡し保留・途中中断・指示案の改訂、#74 は本流を変更しない質問と
 出典付き反映を実装する。#53 の自動進行と #67 の計画・Memory を再利用し、
 #54 の実 SDK 受入れに両方を含める。M13 の #55 は再起動と競合の復旧、
-M15 の #62・#63 は ACP・Web の共通操作と組合せ別の受入れを担当する。
+M15 の基本受入れは #62・#63 で CLI と ACP サーバーの共通操作を確認する。
+#75 は Conductor の repository 参照を使う GitLab Self-Managed の追加実験として同じ milestone で追跡する。
+Web UI、複数利用者の project 権限・session 所有権は必要性が具体化した時点で再評価する。
+Bitbucket は利用契約と検証環境がないため、M15 の対象に含めない。
 質問の観測は保留機能から独立して着手し、本流への反映は #73 と接続する。
 
 M12 の実 SDK 受入れを 2026-10-12 に完了した。
@@ -85,8 +88,8 @@ SQLite と Git の障害回帰に加え、Human が承認した本文を新し�
 再送時に保存済み結果を再利用することを確認した。
 手順と証拠は [実行記録](11-execution-records.md)、
 公式仕様と能力差は [開発基盤の対応評価](12-forge-capabilities.md) を参照する。
-Human が採択した GitLab Self-Managed＋glab の先行実装は #75、
-Bitbucket の環境選定・追加実装は #76 とし、M15 #63 の実環境受入れへ渡す。
+Bitbucket の adapter は #76 で後続候補として追跡する。
+現在の CLI・ACP サーバーの基本利用は追加 forge adapter に依存しない。
 
 ## project・開発基盤・AI 契約の独立した管理
 
@@ -111,27 +114,27 @@ Taxion の core は Task・Dispatch・判断・証拠・承認を管理し、
 
 | 管理対象 | 独立して選択・確認する情報 |
 | --- | --- |
-| project と利用者 | 参加者、依頼者、承認者、実行・レビュー・停止の権限 |
+| project と利用者 | 複数利用者で運用する場合の参加者、依頼者、承認者、実行・レビュー・停止の権限 |
 | repository | provider、host、path、Git 操作主体とアクセス権 |
 | 作業・レビュー記録 | 接続先、Issue・PR・MR 等の種別と ID、公開・更新の権限 |
 | AI runtime | 認証主体、利用権、契約参照、費用帰属、取得可能な利用量と上限 |
 | 実行環境 | 端末・共有サーバー・CI・worker、credential 保管先、実行の分離 |
-| 再開と担当交代 | session 所有権、権限・契約の再検査、停止・引継ぎの承認 |
+| 再開と担当交代 | 複数利用者で運用する場合の session 所有権、権限・契約の再検査、停止・引継ぎの承認 |
 
 M12 #69 で共通契約と既存 GitHub＋Copilot の明示的な主体選択を実装し、
 #54 の実 SDK 受入れで確認する。M13 #70 は GitHub・GitLab・Bitbucket の
 対応能力と外部記録 adapter の境界を評価し、追加実装を承認された後続 Issue に分ける。
-M15 #71 は複数開発者の project 参加と契約選択を管理し、
-#63 で採択した基盤・利用者・契約・worker の組合せを検証する。
+複数利用者の project 参加と契約選択は #71 に後続候補として保持する。
+M15 の #75 は Conductor の repository 参照を使って GitLab Self-Managed を追加検証する。
 
-組合せには「GitLab repository＋外部協力者＋組織が許可した Copilot 契約＋専用 worker」
-や「Bitbucket repository＋別サービスの作業管理＋個人の Copilot 契約」を含める。
-実装済み能力、未確認の能力、後続計画を対応表に保持する。
+GitLab・Bitbucket を含む基盤・利用者・契約・worker の組合せは、
+具体的な利用計画が決まった時点で後続の受入れ範囲を定める。
+Bitbucket は利用契約と検証環境がないため #76 に後続候補として保持する。
 契約上の費用負担者と実測できる利用量は別々に記録し、
 提供側から取得できない課金情報は取得不能として明示する。
 
 実装の順序は #69 → #54、#69・#56 → #70、
-#69・#55・#62 → #71、#70・#71 → #63 とする。
+#55・#57・#60・#61・#62 → #63、#70 → #75 とする。
 再開時の主体・接続先・契約の照合は #55、
 最初の GitHub 外部記録 adapter は #56、
-入口ごとの利用者認証は #62 が担当する。
+CLI と ACP サーバーの共通 controller 接続は #62 が担当する。
