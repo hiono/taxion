@@ -12,7 +12,7 @@ GitHub adapter を共通の承認・送信状態・証拠照合の実装例と�
 | --- | --- | --- | --- |
 | GitHub.com | host、owner/repo、Issue/PR と番号 | Issue 作成・編集・comment・close、SHA を指定した PR review | Issue 作成・Issue/PR comment・Issue close を実装。Git・SQLite・gh 脚本で回帰確認し、承認済みコメントを実 GitHub へ一件公開して再送を照合 |
 | GitHub Enterprise Server | instance host、owner/repo、種別・番号、server 版 | server 版の REST API と権限に従う | 対象 host・版・credential を選定して追加受入れする |
-| GitLab.com・Self-Managed・Dedicated | instance host、project ID／URL encoded path、Issue/MR と project 内 iid | Issue 作成・note・状態更新、MR note・approval・close／merge | Self-Managed は Conductor の repository 参照を使って追加実験する (#75)。実効主体・権限・対象 instance の確認結果を受入れ記録に残す |
+| GitLab.com・Self-Managed・Dedicated | instance host、project ID／URL encoded path、Issue/MR と project 内 iid | Issue 作成・note・close、MR note | Self-Managed adapter は実装済み。Self-Managed の Issue 経路を glab-test で追加検証した (#75)。MR の作成・approval・close／merge は未実装 |
 | Bitbucket Cloud | workspace、repository UUID／slug、PR ID、別作業管理の host・project・key | Cloud REST API の repository・PR・comment・approval。Issue tracker の利用可否は対象 tenant の提供状況で確認する | Cloud／Data Center と作業管理を Human が選定してから実装する |
 | Bitbucket Data Center | instance host・context path、project key、repository slug／ID、PR ID、server 版 | Data Center REST API の PR・comment・参加者 approval／decline・merge | Data Center API 用 adapter と実環境受入れを後続にする |
 | Jira | 作業管理 host、project、Issue ID／key、transition ID | Issue 作成・comment、許可された workflow transition | repository adapter と独立した作業管理 adapter として選定する |
@@ -79,25 +79,16 @@ clone、fork、cache、ログ、添付の残存先を列挙し、管理者と保
 
 ## 採択した後続作業と受入れ環境
 
-[#75](https://github.com/hiono/taxion/issues/75) では Conductor の repository 参照を使い、
-GitLab Self-Managed 用 adapter の追加実験を行う。
-実行前に host、server 版・tier、Git と API の account・credential 参照を確認する。
-glab の host 指定、同名 project の host 取り違え、権限失効、
-Issue・MR note の送信障害、SHA 変更、approval、close、再起動を検証する。
-有料 AI 呼出しは別途 Human 承認を得る。
-
-実環境は `cpusys.mu.renesas.com` の GitLab 19.3.2 で、API account `a0201089` は
-`a0201089/conductor` と `a0201089/glab-test` の読み取りに成功した。
-`glab-test` の project ID は `181`、access level は `50` である。ここを実験先に選び、
-Taxion adapter 経由で一時 Issue `#1`・`#2` の作成・コメント・close を実行した。
-Issue `#1` では close 応答の `closed_at` がローカル承認時刻よりわずかに前になり、
-厳密な時刻比較が再照合を拒否した。5 分以内の時計差を許容する修正後、`#1` を read-only API で
-再照合し、同じ修正版で一連の書き込みを Issue `#2` に対して再実行して成功した。
-
-`/api/v4/license` と MR `approval_state` は 404 を返した。原因を判別できず、instance tier と
-approval API の利用可否は未確認である。Issue-only の実験範囲に従い、MR の書き込みは行っていない。
+[#75](https://github.com/hiono/taxion/issues/75) の Issue-only 実験では、GitLab 19.3.2 の
+`cpusys.mu.renesas.com` 上で `glab` の host 指定、API account と project access を確認した。
+`a0201089/glab-test`（project ID `181`）に Taxion adapter から一時 Issue を作成し、
+comment・close・送信結果の再照合まで実行した。close 時刻に最大 5 分の時計差を許容する。
 Conductor に作成した一時 Issue `#26` も comment 後に close した。
-これらの接続・Issue 操作では有料 AI 呼出しを行っていない。
+
+`glab mr list` で実験用 project に merge request がないことを確認したため、MR 操作は試していない。
+MR の実験は M15 の条件ではなく、実際の MR と必要な承認フローがある場合に再開する。
+instance tier と approval API の提供状況は未確認だが、これらは現在の GitHub 対応を受け入れる条件ではない。
+接続と Issue 操作では有料 AI 呼出しを行っていない。
 
 [#76](https://github.com/hiono/taxion/issues/76) で Bitbucket の Cloud／Data Center、
 Jira 等の作業管理、利用する認証主体・権限を先に採択する。

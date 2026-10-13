@@ -168,7 +168,8 @@ M12 #69 は共通契約と既存 GitHub＋Copilot による主体の明示選択
 #54 の実 SDK 受入れで確認する。M13 #70 は GitHub・GitLab・Bitbucket の
 能力差と外部 adapter の境界を評価し、追加実装を承認された後続 Issue に分ける。
 CLI と ACP サーバーによる単一 project の利用を先に受け入れる。
-GitLab Self-Managed と glab の追加実験 (#75) は M15 で追跡する。
+GitLab Self-Managed と glab の追加実験 (#75) は M15 の完了条件に含めず、
+MR を使う実験環境が用意された場合の後続作業とする。
 Bitbucket の利用契約・検証環境は現時点で用意されていないため、adapter (#76) は後続候補とする。
 複数開発者の参加・離脱・契約選択・session 所有権 (#71) は、必要性が具体化した場合に着手する。
 
@@ -231,13 +232,18 @@ workflow run も同じ設定照合を要求し、生成 Task の承認を親 Tas
 自動で書き換えることはしない。provider の利用可否と Human の利用承認の接続、
 会話 CLI を含む実 SDK の受入れは引き続き未完了とする。
 
-repository access は GitHub.com の `gh api` に接続した。
+repository access は GitHub.com の `gh api` と GitLab Self-Managed の `glab api` に接続した。
 `gh:active` は保存済み `gh` 認証を選び、環境の token と host の上書きを除く。
 `env:NAME` は指定した値だけを `GH_TOKEN` に渡す。
 `user` の account と対象 repository の `full_name`、明示的な read 権限を確認し、
 Coder には write 権限も要求する。開始・再開・送信のたびに確認し、
 未確認・不一致・権限不足・問い合わせ失敗は理由付きで停止する。
-GitLab・Bitbucket・GitHub Enterprise はこの実行 gate の未対応対象とする。
+GitLab は選択した host の `user` と project path、GitLab access level を確認する。
+`glab:active` は保存済み glab 認証を選び、環境 token と host の上書きを除く。
+GitLab Issue の作成・note・close と merge request の note を承認済み公開として実装し、
+Self-Managed の Issue 操作を #75 の Issue-only 実験で確認した。
+merge request の作成・approval・close は未実装で、#75 は実験可能な MR が得られるまで保留する。
+Bitbucket と GitHub Enterprise はこの実行 gate の未対応対象とする。
 `config check --capabilities` は repository access と runtime の実装状況、
 契約・課金確認の未実装状態を表示する。表示は静的な能力の説明とし、
 credential や選択した個人の識別子を出さず、外部アクセスも行わない。

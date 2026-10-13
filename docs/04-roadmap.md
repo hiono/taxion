@@ -63,15 +63,16 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 | [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映する自動実装・独立レビュー、実行主体・接続先・AI 契約の分離、commit 前の混入防止、Human の途中介入と状況・根拠の質問 | #52〜#54・#67・#69・#72〜#74 |
 | [M13](https://github.com/hiono/taxion/milestone/19) | 再起動からの復旧、永続的な作業記録、外部基盤 adapter の分離・対応評価 | #55〜#57・#70 |
 | [M14](https://github.com/hiono/taxion/milestone/20) | 仕様検索、Memory の移行、skills・tools 連携 | #58〜#61 |
-| [M15](https://github.com/hiono/taxion/milestone/21) | CLI と ACP サーバーの一連の作業を受け入れ、GitLab Self-Managed を追加検証する | #62〜#63・#75 |
+| [M15](https://github.com/hiono/taxion/milestone/21) | CLI と ACP サーバーの一連の作業を受け入れる | #62〜#63 |
 | [M16](https://github.com/hiono/taxion/milestone/22) | Planner 採用と Rust 導入の評価 | #64〜#65 |
 
 [ADR-0024](adr/0024-human-handoff-control-and-side-questions.md) に基づき、
 M12 の #73 は受け渡し保留・途中中断・指示案の改訂、#74 は本流を変更しない質問と
 出典付き反映を実装する。#53 の自動進行と #67 の計画・Memory を再利用し、
 #54 の実 SDK 受入れに両方を含める。M13 の #55 は再起動と競合の復旧、
-M15 の基本受入れは #62・#63 で CLI と ACP サーバーの共通操作を確認する。
-#75 は Conductor の repository 参照を使う GitLab Self-Managed の追加実験として同じ milestone で追跡する。
+M15 の受入れは #62・#63 で CLI と ACP サーバーの共通操作を確認する。
+追加 forge は M15 の完了条件に含めない。#75 は GitLab Issue API の実験結果を記録し、
+MR を使う実環境が用意された場合に残りを検証する任意の後続 issue とする。
 Web UI、複数利用者の project 権限・session 所有権は必要性が具体化した時点で再評価する。
 Bitbucket は利用契約と検証環境がないため、M15 の対象に含めない。
 質問の観測は保留機能から独立して着手し、本流への反映は #73 と接続する。
@@ -125,7 +126,7 @@ M12 #69 で共通契約と既存 GitHub＋Copilot の明示的な主体選択を
 #54 の実 SDK 受入れで確認する。M13 #70 は GitHub・GitLab・Bitbucket の
 対応能力と外部記録 adapter の境界を評価し、追加実装を承認された後続 Issue に分ける。
 複数利用者の project 参加と契約選択は #71 に後続候補として保持する。
-M15 の #75 は Conductor の repository 参照を使って GitLab Self-Managed を追加検証する。
+GitLab Self-Managed の追加検証は #75 で追跡する。M15 の受入れに GitLab は要求しない。
 
 GitLab・Bitbucket を含む基盤・利用者・契約・worker の組合せは、
 具体的な利用計画が決まった時点で後続の受入れ範囲を定める。
@@ -134,7 +135,7 @@ Bitbucket は利用契約と検証環境がないため #76 に後続候補と�
 提供側から取得できない課金情報は取得不能として明示する。
 
 実装の順序は #69 → #54、#69・#56 → #70、
-#55・#57・#60・#61・#62 → #63、#70 → #75 とする。
+#55・#57・#60・#61・#62 → #63 とする。#75 は M15 の完了をブロックしない。
 再開時の主体・接続先・契約の照合は #55、
 最初の GitHub 外部記録 adapter は #56、
 CLI と ACP サーバーの共通 controller 接続は #62 が担当する。
