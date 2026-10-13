@@ -173,7 +173,5 @@ token 上限は usage event を受けた時点の停止条件、credit 上限は
 有料受入れは env opt-in に分離し、通常 CI は無料回帰を実行する。
 
 実 SDK では、Orchestrator が検索を呼び、別 session の Coder が同じ引用を使って成功結果を保存した。
-独立 Reviewer は承認した追加 session で起動したが、観測 token 上限に達して CANCELLED となった。
-使用した session は 3 件、観測 input/output tokens の合計は 34,471 である。
-Reviewer の成功と APPROVE の受理は未達であり、#60 と M14 を open に保持する。
-追加の有料実行は Human の再承認を必要とする。
+その後の再承認済み Reviewer は、保存済みの Coder SHA・同じ引用・解放済み worktree を照合して
+`APPROVE` を返し、#60 の独立 Reviewer 受入れを完了した。追加の有料実行は新しい Human 承認を必要とする。

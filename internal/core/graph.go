@@ -952,6 +952,7 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 		fmt.Fprintf(&output, "\nCOMMIT MESSAGE REQUIREMENT: %s", CommitMessageInstruction)
 	}
 	if d.Recipient == "REVIEWER" {
+		output.WriteString("\nEVIDENCE REFERENCES: result.evidence contains identifiers. Each acceptance.evidence and findings.evidence entry must exactly match an entry in result.evidence. Put explanations in finding title/file/lines; cite the identifiers unchanged.")
 		output.WriteString("\nCOMMIT REASONING REVIEW: When the reviewed Coder instruction declares a commit message policy, check that contextual action lines in its authored commits match the changed code, acceptance, and sourced decisions. Report unsupported reasoning as a review finding.")
 	}
 	return output.String(), nil

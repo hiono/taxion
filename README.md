@@ -133,9 +133,10 @@ DOCX and PPTX excerpts to an editable Task. Console output contains metadata;
 local private state retains exact quoted sources and per-use approvals.
 `--sdk` explicitly enables one paid Orchestrator turn and requires positive
 token, time and credit limits. Ordinary CI uses free regressions.
-The real-SDK independent Reviewer acceptance remains incomplete after a
-token-limited cancellation. See [specification input](docs/13-specification-input.md)
-for scope approval, parser limits and the current acceptance record.
+The real-SDK independent Reviewer acceptance is complete after a reauthorized
+run that approved the retained Coder SHA and released the worktree. See
+[specification input](docs/13-specification-input.md) for scope approval,
+parser limits and the acceptance record.
 
 `workflow planning-context` reconstructs bounded Planner input from saved Task,
 Memory, concerns, unmet dependencies, flow limits and related Coder/Reviewer
