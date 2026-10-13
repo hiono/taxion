@@ -86,6 +86,19 @@ glab の host 指定、同名 project の host 取り違え、権限失効、
 Issue・MR note の送信障害、SHA 変更、approval、close、再起動を検証する。
 有料 AI 呼出しは別途 Human 承認を得る。
 
+実環境は `cpusys.mu.renesas.com` の GitLab 19.3.2 で、API account `a0201089` は
+`a0201089/conductor` と `a0201089/glab-test` の読み取りに成功した。
+`glab-test` の project ID は `181`、access level は `50` である。ここを実験先に選び、
+Taxion adapter 経由で一時 Issue `#1`・`#2` の作成・コメント・close を実行した。
+Issue `#1` では close 応答の `closed_at` がローカル承認時刻よりわずかに前になり、
+厳密な時刻比較が再照合を拒否した。5 分以内の時計差を許容する修正後、`#1` を read-only API で
+再照合し、同じ修正版で一連の書き込みを Issue `#2` に対して再実行して成功した。
+
+`/api/v4/license` と MR `approval_state` は 404 を返した。原因を判別できず、instance tier と
+approval API の利用可否は未確認である。Issue-only の実験範囲に従い、MR の書き込みは行っていない。
+Conductor に作成した一時 Issue `#26` も comment 後に close した。
+これらの接続・Issue 操作では有料 AI 呼出しを行っていない。
+
 [#76](https://github.com/hiono/taxion/issues/76) で Bitbucket の Cloud／Data Center、
 Jira 等の作業管理、利用する認証主体・権限を先に採択する。
 現時点で Bitbucket の契約・検証環境がないため、adapter の実装・実環境受入れは後続候補とする。

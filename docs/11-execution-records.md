@@ -43,13 +43,15 @@ provider の永続 event ID として扱える範囲が限られるため、保�
 hash は保存内容の取り違え・個別改変の検出に使う。保存先全体の書換えに対する
 真正性は、管理者のアクセス制御と保管運用で確保する。
 
-## GitHub 公開の手順
+## 外部記録の公開手順
 
-実装済みの操作は github.com の Issue 作成、Issue・PR のコメント、Issue の完了 close である。
+実装済みの操作は、GitHub の Issue 作成、Issue・PR のコメント、Issue の完了 close と、
+GitLab の Issue 作成・コメント・完了 close、merge request のコメントである。
+GitLab merge request の作成・承認・close は未対応である。
 追加の操作・host・添付形式は、能力エラーとして返し、対応する adapter の実装後に利用する。
 
 公開要求には、Task ID、provider・host・repository、外部種別・番号、操作、本文、
-作成時の件名、GitHub account、credential 参照、判断者、承認の出典を指定する。
+作成時の件名、API account、credential 参照、判断者、承認の出典を指定する。
 repository と作業記録先が異なる場合は `taskRepository` にコード側の repository を指定する。
 これら全体の hash を Human が確認し、`expectedHash` として承認要求に戻す。
 
@@ -63,8 +65,8 @@ taxion records show
 
 入力は `{"update": {...}, "expectedHash": "..."}` という JSON object である。
 proposal の段階では `expectedHash` を省略できる。`status`・送信 claim・時刻などは controller が設定する。
-credential 参照は `gh:active` または `env:NAME` を使う。
-GitHub API には選択した GitHub credential だけを渡し、Copilot の credential は runtime が扱う。
+GitHub は `gh:active`、GitLab は `glab:active`、またはいずれも `env:NAME` を使う。
+各 API process には選択した provider credential だけを渡し、Copilot credential は runtime が扱う。
 
 Issue 作成は、`PENDING:<登録Task ID>` と登録 Task の完了依存を持つ DRAFT Task に対して行う。
 送信を確認すると、新しい Issue 番号を Task に保存する。

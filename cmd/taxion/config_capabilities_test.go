@@ -38,7 +38,7 @@ execution: {requester: private-requester, worker: private-worker, approvalRef: p
 		{"github", "github.com", "GITHUB_COM_GH_API"},
 		{"github", "GITHUB.COM", "GITHUB_COM_GH_API"},
 		{"github", "github.example", "UNIMPLEMENTED"},
-		{"gitlab", "gitlab.com", "UNIMPLEMENTED"},
+		{"gitlab", "gitlab.com", "GITLAB_API_GLAB"},
 		{"bitbucket", "bitbucket.org", "UNIMPLEMENTED"},
 	} {
 		t.Run(test.provider+":"+test.host, func(t *testing.T) {

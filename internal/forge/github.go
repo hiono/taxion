@@ -21,6 +21,9 @@ func RepositoryAccessAdapter(selected config.Config) string {
 	if selected.Repository.Provider == "github" && strings.EqualFold(selected.Repository.Host, "github.com") {
 		return "GITHUB_COM_GH_API"
 	}
+	if selected.Repository.Provider == "gitlab" && selected.Repository.Host != "" {
+		return "GITLAB_API_GLAB"
+	}
 	return "UNIMPLEMENTED"
 }
 
@@ -30,28 +33,39 @@ func CheckRepositoryAccess(ctx context.Context, selected config.Config, write bo
 	if err := selected.Validate(); err != nil {
 		return err
 	}
-	if RepositoryAccessAdapter(selected) == "UNIMPLEMENTED" {
-		return fmt.Errorf("taxion: repository access adapter supports github.com only")
-	}
-	env, err := githubEnvironment(selected.Repository.CredentialRef)
-	if err != nil {
-		return err
-	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	query := func(endpoint string) ([]byte, error) {
-		command := exec.CommandContext(ctx, "gh", "api", "--hostname", "github.com", endpoint)
-		command.Env = env
-		output, err := command.Output()
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
+	switch RepositoryAccessAdapter(selected) {
+	case "GITHUB_COM_GH_API":
+		env, err := githubEnvironment(selected.Repository.CredentialRef)
 		if err != nil {
-			return nil, fmt.Errorf("taxion: repository authentication or access query failed; provider details withheld")
+			return err
 		}
-		return output, nil
+		query := func(endpoint string) ([]byte, error) {
+			command := exec.CommandContext(ctx, "gh", "api", "--hostname", "github.com", endpoint)
+			command.Env = env
+			output, err := command.Output()
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if err != nil {
+				return nil, fmt.Errorf("taxion: repository authentication or access query failed; provider details withheld")
+			}
+			return output, nil
+		}
+		return checkGitHubAccess(selected, write, query)
+	case "GITLAB_API_GLAB":
+		env, err := gitlabEnvironment(selected.Repository.CredentialRef)
+		if err != nil {
+			return err
+		}
+		query := func(endpoint string) ([]byte, error) {
+			return gitlabAPI(ctx, selected.Repository.Host, env, "GET", endpoint, nil)
+		}
+		return checkGitLabAccess(selected, write, query)
+	default:
+		return fmt.Errorf("taxion: repository access adapter is unavailable for the selected provider and host")
 	}
-	return checkGitHubAccess(selected, write, query)
 }
 
 func githubEnvironment(ref string) ([]string, error) {

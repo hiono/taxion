@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
 	"regexp"
 	"strings"
@@ -30,12 +31,12 @@ type ExternalPublisher interface {
 }
 
 var externalID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,100}$`)
-var repositoryPath = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+var repositoryPath = regexp.MustCompile(`^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$`)
 var publicationCredential = regexp.MustCompile(`^env:[A-Z_][A-Z0-9_]*$`)
 
 func PublicationHash(update store.ExternalUpdate) (string, error) {
 	if !externalID.MatchString(update.ID) || !repositoryPath.MatchString(update.Repository) ||
-		update.Provider != "github" || update.Host != "github.com" ||
+		!validPublicationTarget(update) ||
 		update.TaskID == "" || update.Account == "" || update.Actor == "" || update.ApprovalSource == "" ||
 		update.Kind != "ISSUE" && update.Kind != "PR" {
 		return "", fmt.Errorf("taxion: publication requires exact identity, target, account and sourced Human approval")
@@ -43,8 +44,15 @@ func PublicationHash(update store.ExternalUpdate) (string, error) {
 	if update.Status != "" || update.Hash != "" || update.Claim != "" || update.RemoteID != "" || update.Error != "" || !update.At.IsZero() {
 		return "", fmt.Errorf("taxion: proposal must contain only requested publication fields")
 	}
-	if update.CredentialRef != "gh:active" && !publicationCredential.MatchString(update.CredentialRef) {
-		return "", fmt.Errorf("taxion: publication requires gh:active or env:NAME")
+	switch update.Provider {
+	case "github":
+		if update.CredentialRef != "gh:active" && !publicationCredential.MatchString(update.CredentialRef) {
+			return "", fmt.Errorf("taxion: GitHub publication requires gh:active or env:NAME")
+		}
+	case "gitlab":
+		if update.CredentialRef != "glab:active" && !publicationCredential.MatchString(update.CredentialRef) {
+			return "", fmt.Errorf("taxion: GitLab publication requires glab:active or env:NAME")
+		}
 	}
 	switch update.Action {
 	case "CREATE":
@@ -67,6 +75,20 @@ func PublicationHash(update store.ExternalUpdate) (string, error) {
 	}
 	body, err := json.Marshal(update)
 	return receiptHash(string(body)), err
+}
+
+func validPublicationTarget(update store.ExternalUpdate) bool {
+	switch update.Provider {
+	case "github":
+		return update.Host == "github.com" && strings.Count(update.Repository, "/") == 1
+	case "gitlab":
+		host, err := url.Parse("https://" + update.Host)
+		return err == nil && host.Hostname() != "" && host.Host == update.Host &&
+			host.User == nil && host.Path == "" && host.RawQuery == "" && host.Fragment == "" &&
+			!strings.ContainsAny(update.Host, "\\?#")
+	default:
+		return false
+	}
 }
 
 func ApprovePublication(ctx context.Context, db *store.Store, request PublicationRequest, scanner string) (store.ExternalUpdate, error) {

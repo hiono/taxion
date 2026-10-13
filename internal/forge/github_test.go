@@ -168,7 +168,7 @@ esac
 	if err := CheckRepositoryAccess(ctx, selected, false); !errors.Is(err, context.Canceled) {
 		t.Fatal("cancellation ignored", err)
 	}
-	for _, provider := range []string{"gitlab", "bitbucket"} {
+	for _, provider := range []string{"bitbucket"} {
 		selected.Repository.Provider = provider
 		if err := CheckRepositoryAccess(context.Background(), selected, false); err == nil {
 			t.Fatal("unsupported provider accepted")

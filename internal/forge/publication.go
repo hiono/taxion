@@ -16,8 +16,11 @@ import (
 type Publisher struct{}
 
 func (Publisher) Check(ctx context.Context, update store.ExternalUpdate) error {
+	if update.Provider == "gitlab" {
+		return checkGitLabPublication(ctx, update)
+	}
 	if update.Provider != "github" || update.Host != "github.com" {
-		return fmt.Errorf("taxion: publication adapter requires github.com")
+		return fmt.Errorf("taxion: publication adapter is unavailable for the selected provider and host")
 	}
 	// Publication uses the repository credential independently from runtime settings.
 	env, err := githubEnvironment(update.CredentialRef)
@@ -69,6 +72,9 @@ func PublicationMarker(update store.ExternalUpdate) string {
 }
 
 func (Publisher) Reconcile(ctx context.Context, update store.ExternalUpdate) (string, bool, error) {
+	if update.Provider == "gitlab" {
+		return reconcileGitLabPublication(ctx, update)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	env, err := githubEnvironment(update.CredentialRef)
@@ -163,6 +169,9 @@ func (Publisher) Reconcile(ctx context.Context, update store.ExternalUpdate) (st
 }
 
 func (Publisher) Send(ctx context.Context, update store.ExternalUpdate) (string, error) {
+	if update.Provider == "gitlab" {
+		return sendGitLabPublication(ctx, update)
+	}
 	env, err := githubEnvironment(update.CredentialRef)
 	if err != nil {
 		return "", err

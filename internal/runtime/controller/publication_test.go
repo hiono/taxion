@@ -60,6 +60,32 @@ func publicationProposal() store.ExternalUpdate {
 		Actor: "human", ApprovalSource: "human:exact-report", Account: "owner", CredentialRef: "gh:active"}
 }
 
+func TestPublicationHashGitLabTargetAndCredential(t *testing.T) {
+	proposal := publicationProposal()
+	proposal.Provider, proposal.Host = "gitlab", "gitlab.example:8443"
+	proposal.Repository, proposal.Account, proposal.CredentialRef = "group/subgroup/repo", "scm-user", "glab:active"
+	if _, err := PublicationHash(proposal); err != nil {
+		t.Fatal("valid GitLab publication rejected", err)
+	}
+	proposal.CredentialRef = "gh:active"
+	if _, err := PublicationHash(proposal); err == nil {
+		t.Fatal("GitHub credential accepted for GitLab")
+	}
+	proposal.CredentialRef, proposal.Host = "glab:active", "https://gitlab.example"
+	if _, err := PublicationHash(proposal); err == nil {
+		t.Fatal("URL accepted instead of exact GitLab host")
+	}
+	proposal.Host, proposal.Provider = "gitlab.example", "github"
+	proposal.CredentialRef = "glab:active"
+	if _, err := PublicationHash(proposal); err == nil {
+		t.Fatal("GitLab credential accepted for GitHub")
+	}
+	proposal.CredentialRef, proposal.Repository = "gh:active", "owner/group/repo"
+	if _, err := PublicationHash(proposal); err == nil {
+		t.Fatal("nested project path accepted for GitHub")
+	}
+}
+
 func TestApprovedPublicationClaimRestartAndUncertainDelivery(t *testing.T) {
 	db, ledger, _ := reviewFlowFixture(t)
 	scanner := publicationScanner(t)
