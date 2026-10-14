@@ -1,6 +1,6 @@
 // Package server exposes the HTTP API over the CLI-owned ledger.
 // Shared core guards keep HTTP and CLI operations subject to the same
-// constraints; endpoint contracts belong in docs/05-ledger-schema.md.
+// constraints; endpoint contracts belong in docs/develop/05-ledger-schema.md.
 package server
 
 import (

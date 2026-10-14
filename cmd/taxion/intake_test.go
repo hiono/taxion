@@ -19,7 +19,7 @@ import (
 )
 
 func TestUserGuideSkillApprovalExampleWithoutSDK(t *testing.T) {
-	guide, err := os.ReadFile("../../docs/user-guide.md")
+	guide, err := os.ReadFile("../../docs/userguide/user-guide.md")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestUserGuideSkillApprovalExampleWithoutSDK(t *testing.T) {
 }
 
 func TestUserGuideColdStartExamplesWithoutSDK(t *testing.T) {
-	guide, err := os.ReadFile("../../docs/user-guide.md")
+	guide, err := os.ReadFile("../../docs/userguide/user-guide.md")
 	if err != nil {
 		t.Fatal(err)
 	}

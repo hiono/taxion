@@ -344,7 +344,7 @@ func TestRequestRepeatedPlanningDoesNotRequireConfigurationEdits(t *testing.T) {
 }
 
 func TestUserGuideRequestExampleWithoutSDK(t *testing.T) {
-	guide, err := os.ReadFile("../../docs/user-guide.md")
+	guide, err := os.ReadFile("../../docs/userguide/user-guide.md")
 	if err != nil {
 		t.Fatal(err)
 	}

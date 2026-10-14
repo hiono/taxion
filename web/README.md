@@ -1,26 +1,14 @@
-# @taxion/web — localhost console
+# @taxion/web ローカル console
 
-Separate directory, zero dependencies, no build step (Node ≥22.18 strips
-types natively). One HTML page with task operation forms (create task, dispatch,
-review) plus a JSON API proxied to `taxion serve` (M4).
+独立した directory で、依存 package と build 手順はない。Node ≥22.18 が native に型を除去する。Task 作成・Dispatch・review の form を持つ一つの HTML page と、`taxion serve` へ転送する JSON API からなる（M4）。
 
-Request handling: the page GETs; forms POST to `/api/*`, which this
-slice passes through to the upstream API untouched — guard semantics
-(400/404/409) live in exactly one place (the Go server). Upstream failure
-surfaces as 502, never as a silent success. This slice never reads ledger
-files and never mutates on its own. All writes land in the CLI-owned ledger
-via the API.
+page は GET を使い、form は `/api/*` に POST する。POST は接続先 API に変更せず渡す。400・404・409 の検査条件は Go server 一か所で定義する。接続先の失敗は 502 として報告し、通知のない成功にはしない。この console は Ledger file を直接読まず、独自の変更処理も行わない。全書込みは API を通して CLI 管理の Ledger に保存する。
 
-Approved [Memory checks](../docs/08-memory-model.md#approval-and-dispatch-checks)
-are evaluated by Go before dispatch. The console preserves policy denials
-(409, MEM-001) and storage/configuration failures (500); it does not interpret
-guidelines or add conditions to the dispatch request.
+承認済み [Memory 検査](../docs/userguide/08-memory-model.md#承認と-dispatch-前の検査)は、Dispatch 前に Go が評価する。console は policy 拒否（409、MEM-001）と保存・設定の失敗（500）をそのまま返し、指針の解釈や Dispatch request への条件追加は行わない。
 
-Localhost scope with M5 auth: when the upstream API requires a Bearer token,
-pass `--token` or `TAXION_TOKEN` — it is attached server-side to upstream
-fetches and never sent to the browser. Listens on 127.0.0.1 by default;
-`--host` or `TAXION_HOST` overrides. Remote access goes over SSH tunnels,
-see `../docs/06-remote-access.md`.
+M5 の認証付き localhost 構成では、接続先 API が token を要求する場合に `--token` または `TAXION_TOKEN` を指定する。token は server 側の API 呼出しだけに付け、browser には送らない。既定は `127.0.0.1` で待ち受け、`--host`・`TAXION_HOST` で変更する。
+
+リモート接続には SSH tunnel を使う。[リモート接続](../docs/userguide/06-remote-access.md)に、token の保管・読込みと接続手順を記載している。
 
 ```sh
 npm test

@@ -1,0 +1,263 @@
+# 03 Runtime 契約
+
+## SDK 共通インターフェース
+
+```go
+type Runtime interface {
+    Start(ctx context.Context, taskID string) (sessionID string, err error)
+    Send(ctx context.Context, sessionID, prompt string) error
+    Resume(ctx context.Context, sessionID string) error
+    Stop(ctx context.Context, sessionID string) error
+    Events(ctx context.Context, sessionID string) (<-chan Event, error)
+}
+```
+
+## 実行・承認・質問の条件
+
+core（`internal/core`）は標準ライブラリの型だけを使い、SDK の struct を使わない。adapter は core の外で Runtime interface を実装する。各 `Runtime` は Coder と Reviewer の session を隔離する必要がある（ROLE-001）。event は共通の `{Type, Payload}` とし、SDK event 型を core に含めない。
+
+adapter は、未知・停止済み session、順序違いの step、空の Task ID に error を返す。有効な request の場合だけ状態を進め、準備完了を報告する。`runtime.Identity` は、session を一つの承認済み Dispatch に対応付けるための role、worktree、configuration hash を返す。
+
+### 設定と利用許可の照合
+
+設定を選択した Dispatch には `runtime.ConfigurationIdentity` が必要。保存した設定の組合せ、実効 Runtime 認証、repository API access を確認する。controller は start・resume・send 前に認証と API access を確認し、その後に承認を再確認する。
+
+GitHub.com adapter は `gh:active` または `env:NAME` を選び、予定した repository account と対象の完全一致を確認する。読取り権限が必要で、Coder には書込み権限も必要。access 不明や非対応 provider は実行を止める。成功した確認は、操作、Runtime hash、観測期間、role の権限、未検証の契約とともに `configuration.accessChecks` に追記する。記録時には transaction 内で承認を再確認し、session が作成されたとは扱わない。
+
+最初の観測は session 作成前でも、確認した Runtime identity を固定する。再起動後に過去の確認を再利用しない。旧記録に観測がなければ未確認とする。この確認は AI 契約の検証や Git push の認証ではない。
+
+session の作成・接続後と各モデル送信前に、設定を選択した Dispatch は、adapter の SDK 共通 `CheckServiceAccess` も呼ぶ。Copilot adapter は `session.quota.get` を照会し、明示的な service access と容量を持つ account snapshot の取得成功を要求する。snapshot の欠落、拒否、枯渇、不明は、数値の残量を見ずに拒否する。前の turn の利用許可の観測は account snapshot ではない。
+
+照会後に承認を再確認する。新規 session が拒否された場合は、Dispatch に対応付けず停止する。この観測は前段の access receipt には追加せず、課金主体を識別したり、将来の利用許可を保証したりしない。safe stop は三つの外部確認を省略する。設定のない旧 controller の動作は変えない。
+
+現在の Task と発行済み指示で、選択 account と contract reference を同じ出典付き Human 承認が対象にしている必要がある。reason は承認した用途を記録する。その記録の照合で、記載内容の法的な正しさを検証したことにはならない。
+
+### 保存記録への質問
+
+保存記録についての質問には、別の tool-free Orchestrator Runtime を使う。出典付き Task 設定承認、今回の認証確認、repository の読取り権限、provider の service 確認、明示的な時間・token 上限が必要。回答は、渡した観測に存在する field を引用し、記録された事実、仮定、不明な点を分ける。観測は現在の実行状態の証明にはならない。
+
+Dispatch を対応付けず、workspace の履歴や承認を変更しない。返された session・usage は質問に属し、主 Flow には属さない。利用量不明と不正な引用は質問を止める。cancel 後の safe cleanup は独自の上限付き context を使い、error を隠さない。
+
+過去の結果判断は実際の保存済み Dispatch と照合し、Task・履歴、指示、Flow 契約に繰り返される内容を整理する。結果全文、Memory、出典 hash は残す。`projection` は、元の instruction hash が整理後の指示の hash ではないことを説明する。保存履歴は変更しない。4 role の質問入力テストは、追加モデル呼出しなしで JSON 入力を元の半分未満にすることを要求する。
+
+### commit 済みファイルの調査
+
+`AskInvestigation` は質問と同じ確認・上限を使い、明示選択した commit 済み UTF-8 ファイルを、モデルだけへの送信前に追加する。`ReadCommittedFiles` が許可するのは、固定 SHA の Git object 読取り、標準形で scope 内の path、1〜16ファイル、最大64 KiB の総出典量だけ。欠落、binary、上限超過は拒否し、部分的な証拠を返さない。環境の Git routing 変数も使わない。
+
+作業ファイル、shell command、hook、textconv、agent tool は使わない。別に取得した Git 観測は今回の調査を識別するもので、過去の推論や検証成功の証拠にはならない。
+
+### 質問結果の採用
+
+`RecordQuestionDraft` は、Planner 採用の transaction と既存の補足承認・公開処理を使う。選択した confirmed index と明示的な Human 指示だけを適用し、通常の会話を通知なくコピーしない。保存 context、Memory、role、修正回数上限、現在の結果対象を確認する。調査 SHA、file bytes、hash は採用前に再構成する。
+
+上限内の出典 snapshot、選択した主張、不確実性、proposal hash を保存する。native session ID は提供された出典情報として扱う。proposal は認証済み provider 出力の証拠ではなく、内容の正しさも証明しない。
+
+### 中断
+
+`RequestFlowInterrupt` は、対象付き feedback・hold と、実行中なら `CANCEL_REQUESTED` を atomic に記録する。停止確認や Task cancellation は記録しない。所有する runner が既存の監視・cleanup で safe stop を実行する。失敗した request は未確認のままで、継続を許可しない。
+
+発行済み実行は hold とし、停止したと創作しない。現在の状態に新しい request を適用する前に、同一入力の再送を照合する。部分成果と発行済み指示は保持する。
+
+### 依頼の登録と再承認
+
+intake は、元の依頼本文を出典付きの未承認 `DRAFT` Task に保存する。任意の planning 設定承認が許可するのは、隔離した上限付き質問だけ。完全な hash に対する Human 確認は、`READY` 前に実行承認と設定承認を別々に記録する。scope・acceptance・検証 command が不足した契約は確認を通せない。確認だけでは作業を発行せず、Flow 上限も選ばない。
+
+発行済み契約を改訂する場合は successor Task を作る。前 Task の hold 済み対象が必要で、runner と active Dispatch がないことを要求する。旧 Flow の上限、承認、指示、結果は変更しない。明示的な再承認で前 Task を停止・置換し、別の上限を持つ作業を準備する。
+
+実行を伴わない Planner の採用 action は、出典付きの未解決 feedback として扱い、修正指示にはしない。明示的な処置、別の調査、successor の再承認まで hold を保つ。同一入力の再送で、旧助言を別の role に適用しない。自動進行に追加のモデル呼出しは入れない。
+
+隔離した CLI 質問は、native response schema の引用先を、実際に渡した記録 path に限定する。複合記録も有効な出典であり、入れ子の履歴を引用一覧へコピーする必要はない。採用時には現在の context 全体、hash、出典本文を独立して検証する。JSON 設定の整形だけでは、変更のない証拠を期限切れにしない。値を変えて旧観測 hash を残した場合は拒否する。
+
+### controller による検証
+
+Runtime・workflow 実行の `--controller-validation-submission` は、モデルの提出と controller の検証を分ける。担当は架空の検査を足さずに実際の結果を返し、controller が成功を保存する前に検証する。出力欠落、検査失敗、根拠のない Reviewer 承認は引き続き進行を拒否する。session 接続時にも同じ flag を指定する。既定 prompt は変更せず、既存 session の configuration hash を保つ。
+
+### 一担当ずつの実行と対話中の入力
+
+`StepReviewFlow` は自動実行と同じ Runtime・保存 runner claim を使うが、最大一つの role だけを実行し、turn 完了後に後続担当を発行しない。次へ進むには別の明示 request が必要。
+
+監視中の会話は入力を読む前に hold とし、EOF で継続を許可しない。観測済み継続は、表示した target、draft、契約、hold version を transaction 内で比較する。補足の承認と公開は別々に行い、既存の自動 runner の動作は変えない。
+
+`--interactive-execution` は、選択 runner の実行中も入力を受け付ける。同時出力を直列化し、二つ目の所有実行を拒否して、失敗を報告する。EOF・quit はその console が所有する runner だけを cancel し、終了を待つ。flag の明示選択がなければ、同期的な監視動作を保つ。
+## 保存結果と checkpoint の復旧
+
+`workflow recover` は、process の停止確認と終了 Dispatch の照合後に、保存した runner claim の完全一致を確認して解放する。最新結果が成功した Coder 提出なら、保存結果の契約と現在の Git の事実も確認する。対象は repository origin、branch、HEAD、baseline の祖先関係、変更 path、clean worktree、検証の出典、commit parent。今回の観測は、観測時刻を除き保存済み Git 証拠と一致する必要がある。元の結果と timestamp は変更しない。
+
+通常の Coder から Reviewer への引継ぎでも同じ検査を行う。復旧時の不一致は claim を残して明示 error を返す。引継ぎの不一致は、理由付きの `STOPPED` Flow を記録する。一致した結果は、保存した出力 SHA と完全一致する対象の独立レビューへ進める。この検査は Git と保存済み検証記録を読み、検証 command を再実行しない。command 実行は元の controller 提出時に行う。
+
+解放済み Reviewer の結果には、管理 worktree が存在しないことと registry からの削除、元 repository の origin、変更していない commit parent、直前の Coder と同じ出力 SHA も要求する。完了 checkpoint にも同じ検査を再適用する。成功結果には、保存結果と利用量に一致する controller receipt が必要。receipt のない旧 checkpoint は、証拠の照合が未完了として明示的に復旧を拒否する。
+
+実行承認は指示送信前に保存する。`RUNNING` Dispatch では観測と停止が可能で、新しい指示には新しい承認済み Dispatch が必要。Runtime の出力、利用量、終了 event は stream ID と sequence を付けて保存する。同一 stream の同一 sequence の再送は冪等に扱い、内容の矛盾や cancel 後の結果は error とする。正規化した SDK sequence は現在の adapter instance に属するため、再接続の別 stream からの採用には明示的な照合が必要。
+
+復旧、承認済み公開、失敗記録の手順は[実行記録](../userguide/11-execution-records.md)、provider の対応範囲と採択した後続作業は[開発基盤の対応評価](12-forge-capabilities.md)に記載している。
+
+## adapter の動作
+
+- `internal/runtime/local` は、process 内で状態遷移を確認する参照 adapter。session ごとに `core.Sequence` を使い、`CompleteStep` で CHK-002 の順序を強制する。受け付けた指示を共通の `input` event として記録し、`checkpoint`・`done` event を出す。
+- `internal/runtime/proc` は、設定した外部 command を起動する。標準出力・標準errorを `output` event として送り、指示を標準入力に書き込む。process 終了時に `done`・`failed` を報告する。`Resume` は既存 session の検証だけを行い、process 起動は `Start` が担当する。checkpoint の順序管理は別に行う。
+- `internal/runtime/copilot` は公式 Go Copilot SDK を使う。role・worktree ごとに adapter を設定し、session は Auto と明示 tool allowlist を使う。infinite-session compaction は有効。CLI は保存済み Dispatch snapshot を role 別 system prompt に追加し、turn と compaction をまたいで承認済み契約を system context に保つ。resume 時も同じ system prompt、worktree、tool を渡す。SDK permission handler は、Coder に worktree 内の file 書込みと allowlist 内の SDK tool の一回使用を許可し、Reviewer に割当 worktree 内の読取りを許可する。shell request と worktree 外の path は拒否する。この handler の対象は SDK permission request であり、host・外部 tool は独自の保護を使う。
+- `internal/runtime/controller` は、対応付けた session の作成、再開、送信、停止、利用量記録前に、Dispatch の role、割当 worktree、active status、configuration hash を確認する。session ID、hash、model、token・cache 利用量を Dispatch とともに SQLite に保存する。管理下の staging・commit には、active Task と、tool 呼出し時の呼出し元 session も必要。Dispatch が Flow に属する場合は、review flow が実行中であり、保存期限と観測済みの既知利用量上限内であることも要求する。
+
+## Skills・plugins・MCP・hooks と出力圧縮
+
+固定した Go SDK `v1.0.19` の `SessionConfig` と `ResumeSessionConfig` は、
+`SkillDirectories`、`PluginDirectories`、`MCPServers`、`Hooks` を持つ。
+`EnableSkills` は skills の読込み、`EnableFileHooks` は `.github/hooks/` の読込みを制御する。
+SDK の `Hooks` callback と file hooks は別の設定である。
+明示した `PluginDirectories` は `EnableConfigDiscovery: false` の場合にも読み込まれる。
+MCP の resident resume では、既に実行中の server を `DisabledMCPServers` だけで停止する機能は提供されない。
+
+Taxion は、Task の出典付き decision に保存した `taxion.tools.v1` の承認から、
+役割別の skills・skill-only plugins・固定 MCP リクエスト・RTK を接続する。
+実行ファイル、入力、directory の内容 hash、引数、tool 名、承認済み JSON、
+private evidence directory を session の設定 hash に含め、create/resume で同じ条件を使う。
+config discovery・file hooks の自動読込みは無効のまま、明示した directory と SDK hooks を接続する。
+
+skills と plugins は canonical な絶対パスを指定する。
+plugin は root の `plugin.json` と `skills/` からなる skill-only 形式を使う。
+`taxion tools hash --path /absolute/path` の hash は、相対名・mode・size・内容を含む
+asset の識別値であり、仕様入力の `documentHash` は原本 bytes の SHA-256 である。
+承認済み asset の変更は再承認を必要とする。
+
+承認済み role policy に `skills` または `plugins` があれば、Taxion は
+SDK の許可 tool に `skill` を追加する。名前を prompt に書くだけでは接続しない。
+asset のない policy や未承認の session で `skill` を明示指定すると、実行前に拒否する。
+skills のない MCP / RTK のみの policy では `EnableSkills` を有効にしない。
+Coder と Reviewer は、承認済み skill の通常の custom-tool permission を扱えるが、
+managed approval を要求する操作の拒否、Reviewer read-only、worktree 外の拒否は維持する。
+skill に書かれた追加ファイルの読み取りやスクリプト実行も、この境界を越える許可にはならない。
+
+`workflow run|step` は、Coder と将来の Reviewer の role policy を発行済み
+decision と現在の Task で照合し、asset の存在と hash、明示した `skill` tool の承認を
+session 作成前に検査する。実行直前と各 tool hook でも照合を続けるため、
+事前検査後の asset 改変を許可したことにはならない。
+
+MCP は host が exact arguments を照合してから、承認された stdio server を一回起動する。
+server の実行ファイルは信頼された host code として承認し、ambient credential を子プロセスへ渡さない。
+SDK の role permission は引き続き通常の read/write と管理 commit を判断する。
+独立 Reviewer は、controller が発行した元 Coder との対応と同じ decision を照合して、
+元 Task の Reviewer 向け tools 承認を引き継ぐ。停止用の resume は extensions を追加せず接続する。
+
+SDK hooks は原本の tool result と failure を先に private JSON へ保存し、
+opaque filename と hash の receipt を返す。directory は `0700`、原本ファイルは `0600` とする。
+保存失敗と圧縮失敗は runtime の失敗イベントにも通知し、controller が停止処理へ進めるようにする。
+RTK は isolated HOME で `pipe --filter` を実行し、成功した 4096 bytes 以上の plain text を圧縮する。
+JSON/XML と failure は原形を保持し、圧縮結果には warning/error/fail 行を保持する。
+SDK built-in result の `textResultForLlm` と custom result の `textResultForLLM` を扱い、
+status・exit code・telemetry をそのまま残す。
+RTK 自身の stdout・stderr・exit status も原本として保存する。
+
+承認形式は `kind`、`taskId`、`actor`、役割名を key にした `roles` を持つ JSON である。
+各 role policy は `skills`、`plugins`、`mcp`、`rtk`、`compressionFilter`、
+`evidenceDirectory`、`allowPublication` を保持する。
+MCP binding は `name`、`command`、`args`、`inputs`、`tool`、`arguments` を固定する。
+この JSON を Task decision の `text` に保存し、decision の `source` に Human の判断の出典を記録する。
+通常の Task 承認・発行手順は [Task Graph reference](10-task-graph.md) に従う。
+tools を使った Task の公開には `allowPublication: true` の明示承認を必要とする。
+
+`--compact-context` は保存済みの結果・exit code・証拠を保持して重複した指示を省く。
+元の完全な instruction は SQLite に保持する。
+native plugin discovery、実 stdio MCP、実 RTK の圧縮率と原本保持、
+SDK の create/resume 設定と権限を無料回帰で確認する。
+実 SDK による仕様検索から独立レビューまでの受入れ状況は
+[仕様入力](13-specification-input.md) と #60 に記録する。
+通常テストは独自の合成 skill と一時 directory を使い、特定の外部 skill、
+個人の home、インストール済み Copilot、認証、ネットワーク、有料モデルを要求しない。
+native plugin discovery は `TAXION_TEST_LOCAL_PLUGIN_DISCOVERY=1` による
+無料の明示 opt-in とし、指定時に CLI がなければ失敗する。
+
+SDK 設定・permission・hook の合成回帰は、実モデルが skill を選び、正常に
+ロードし、文書の品質工程を完了した証拠とは区別する。実利用は Taxion 配下の
+session の tool request と完了結果、private tool evidence、成果物の SHA、
+検査結果と独立レビューを対応付けて確認する。
+親の開発支援 session の skill 起動や discovery の成功を代替証拠にしない。
+Release 0.1.0 の文書 dogfood における実 skill 利用は Issue #78 の未確認条件である。
+そこで選択する外部 skill は製品の固定依存ではなく、操作者が利用許可と内容を承認する。
+
+## Dispatch の実行と context
+
+`taxion request` は元の依頼を DRAFT として保存し、既存の tool-free Planner
+観測を使って確認質問と実装計画を提案する。Planner の提案は実行承認ではない。
+Human の `/approve` を受けて CLI が intake confirmation と review flow を作り、
+既存の Controller で Coder、検証、独立 Reviewer を実行する。
+Planner の全 turn の観測 token を共有上限から差し引き、期限を延長せずに引き継ぐ。
+相談記録・usage・失敗を private receipt に保存し、失敗時の自動再送は行わない。
+`workflow run|step --builtin-prompts` は snapshot mode の明示 opt-in で、
+同梱 role prompt、file tool、厳密な結果照合、context 圧縮、
+Controller への検証提出を選ぶ。従来の prompt 指定・空 allowlist の既定は変えない。
+依頼ごとの設定 decision は `REF@task:PRIMARY_TASK_ID` で識別し、
+設定 tuple と追加 Reviewer Task の exact approval を維持する。
+判断根拠は [ADR-0030](adr/0030-refine-natural-language-requests-with-planner.md)、
+操作は[利用者ガイド](../userguide/user-guide.md)が所有する。
+
+残予算を指示へ付加する設計は [ADR-0029](adr/0029-separate-budget-guidance-from-provider-quota.md)
+に採択し、Controller の送信補足と Copilot adapter の quota 読取りを実装した。
+Controller は保存済み Flow usage と adapter の非推論 read-only 観測を分離し、
+`off` / `flow` / `account` の解決結果に応じて既存の `Send` に補足する。
+動的観測は送信ごとの receipt に保存し、system prompt の変更や別の有料 turn を必要としない。
+単位・account・resource・対象期間・取得元・観測時刻と
+`available` / `unsupported` / `unavailable` / `stale` を保持する。
+quota の未知を成功やゼロに変えず、Copilot の実験的 API 型を core に漏らさない。
+stop-only 接続は quota 照会や新しい指示を発行しない。
+
+`taxion runtime start|send|resume|events|stop` は Copilot の CLI 実行経路とする。ACP server の `session/new` は CLI 発行の新 Dispatch ID だけを受け付け、Task・Dispatch は作らない。ACP・CLI は共通 Controller で session binding、tool 認可、event 保存、結果検証、safe stop を行う。新 ACP session は保存 Dispatch 契約への追加 context として prompt を一回送る。実行中 Dispatch への再接続は prompt を再送せず、既存 turn を観測する。Runtime 出力の差分は ACP session update として stream する。`taxion acp` は session 別 credit 上限、timeout、Coder system prompt を要求し、Reviewer Dispatch には Reviewer prompt も要求する。SDK の commit・stage tool は `--managed-commit`・`--managed-stage` の明示選択を保つ。ACP で再開できない保存 session は CLI runtime command で調査・照合する。
+
+Task の `outputMode` は `commit`（省略時の既定）または `worktree-tree-snapshot` を選ぶ。
+snapshot mode では Coder の `outputSha` は開始時の commit SHA のままにし、
+Controller が算出した `outputTreeSha` と変更 path で成果物を識別する。
+Controller は tree object をローカルの `refs/taxion/snapshots/` に保持する。
+これは branch、commit、実 index、remote を変更しないが、Git ref を追加する。
+Reviewer は baseline commit から同じ tree を別 worktree に再現し、開始時と終了時に照合する。
+Git tree に含まれない ignored file はレビュー対象に含まれない。
+
+`runtime`・`workflow run|step` の `--compact-context` は、過去 instruction 全体を再帰的に埋め込まず、出典付き decision ごとに正確な過去結果を一回表示する。各 `result:` decision を実際の保存 Dispatch 結果と比較し、欠落・改変した出典は拒否する。現在の契約、Human decision、Memory は保ち、完全な不変 instruction は Graph に残す。省略した記録は result・instruction hash で識別する。既定表示は変えない。context 圧縮は system prompt・config hash を変えるため、実行接続時も同じ flag を指定するが、取消専用 `runtime stop` には不要。既存の実行 binding を新しい表示へ切り替えない。
+
+`workflow planning-context` は、入れ子履歴全体なしで保存 Memory、acceptance、blocker、依存、懸念、関連 result・SHA 対象、既存 Flow 上限を表示する。観測時刻と content hash を持つ read-only projection であり、atomic な実状態 snapshot、model 判断、実行認可ではない。workspace と Memory は別に読み、実行時は既存 Controller 検査を繰り返す。provider は呼ばない。
+
+`conversation plan`・`AskPlanner` は、隔離質問の通信、出典付き設定承認、認証、repository・service 検査、入出力・token 上限、承認再検査、独立 cleanup を再利用する。圧縮 Planner context を独立した tool-free Orchestrator session に送る。native schema は助言 recommendation を加え、確認済み・仮定・未確認の証拠を明示する。実 JSON pointer の出典を必須とし、`APPROVE`・実行 verdict は recommendation に許さない。推論中に記録が変わっても元観測を結果に付けて保つ。助言を自動適用せず、通常の Flow 進行にも model call を増やさない。
+
+`RecordPlannerDraft`・`workflow planner-draft`・監視中の `/adopt` は、変更していない計画助言を未承認 `SUPPLEMENT` draft に採用する。発行前に再構成 context、結果対象、Memory、Graph、Flow 契約、保留した引継ぎを照合する。context field の欠落・偽造で有効な観測 hash を流用させない。transaction で Graph・Memory を再確認するが、独立 Memory 保存は database 間の atomic snapshot を提供しない。既存の契約維持 draft には結果に適合する `REVIEW`・`REPAIR` だけを入れる。draft に観測・出典 metadata と不確実性を残す。session ID は報告された出典で、検証済み provider receipt ではない。core の完全一致 ID による replay 検査で過去版を保つ。Human draft 承認と明示 handoff release は別操作で、Dispatch・実行には Controller 検査が引き続き適用される。`REPLAN`・`INVESTIGATE`・`HOLD`・`HUMAN_REQUIRED`・`REPORT` を通知なしに修正 instruction にしない。契約変更の承認と、decision に基づく無人進行は未完了。
+
+`runtime`・`workflow run|step` は任意の `--strict-result-identities` を受け付ける。native response schema は発行 Dispatch ID、Task ID、role、repository、期待実行開始 SHA を固定する。修正時は初期 baseline でなく不変の対象 SHA を使う。output SHA・verdict は報告事実のままで、Controller が独立検証する。`nextTransition` は既存 Task status の語彙に限定するが、遷移の選択や保存状態の変更はしない。config hash が変わるため実行接続にも同じ flag を指定し、取消専用 `runtime stop` には指定しない。旧 session 用の既定 schema は保ち、拒否応答を成功結果へ修復しない。shell 権限のない agent は `validations: []` を提出できる。Controller は成功した実装提出後に認可 command を実行し、実 exit code、時刻、Git 出典を保存する。実施前の command 実行を創作せず、検証待ちを test 成功の証拠としない。
+
+Controller の実行完了と Git 検証後に、未記載なら `controller-validation` の evidence marker を追加する。agent は実施前にその段階を主張しなくてよい。Controller validation の error、取消、未実行では生成せず、無関係な出典参照・verdict も作らない。marker は command の観測を示し、全 test 成功を意味しない。有効な REQUEST_CHANGES review は実際の非ゼロ test exit code を保持できる。
+
+Reviewer の `acceptance[].evidence`・`findings[].evidence` は、最上位の `evidence` array に完全一致で含まれる文字列を参照する必要がある。verdict・finding が妥当そうでも未接続の参照は拒否する。source 分析を実施済み test として表示しない。
+
+`runtime auth` は明示的な事前照会で、実行操作ではない。Copilot adapter の `auth.getStatus` 前に固定設定と現在・保存 Dispatch 承認を照合する。`CheckAuthentication` は認証済み account が要求 account と一致し、host が明示 `github.com` であることを確認する。SDK session を作らず、結果を cache せず、adapter config hash も変えない。返す error に provider 状態 message と生 RPC error は含めないが、取消は識別できる。
+
+この照会は credential 参照の解決、repository actor 選択、契約資格の証明を行わない。実行時は同じ認証 method を別に使って確認する。local protocol fixture の成功は login 済み受入れの証拠ではない。
+
+`config bind --dispatch` は完全な承認済み設定選択、decision 参照、field 出典、記録時刻を Dispatch に保存する。Controller は一つの workspace transaction で現在 Task と発行 instruction の承認を確認して保存する。core は SDK 非依存 JSON を保存し、identity、出典、保存承認への membership を検査する。設定層は完全 tuple の schema を検査する。
+
+選択後の Dispatch 設定検査と明示認証照会は、その tuple を要求する。同一値の再指定は初回出典と時刻を保つ。別値の binding や、既存 session に初めて選択を付けるには、新たに認可した Dispatch が必要。選択のない旧記録は読める。選択記録だけでは実認証・契約資格の証拠にならない。
+
+Copilot adapter は任意の選択 tuple を検証・正規化して所有し、config hash に含める。`runtime.ConfigurationIdentity` が公開するのは中立 JSON と account 認証機能だけ。未選択の旧 hash は保つ。Controller は選択済み Dispatch に Runtime tuple がない場合と不一致を拒否する。選択済み start・resume・send は SDK 操作前に現在 Task・保存 instruction の承認と実 account を検査する。認証後、新 session binding の transaction 内、instruction 送信前にも承認を再検査する。管理下の Git も更新 transaction 内で tuple・承認を確認する。
+
+runtime CLI は start・resume・send・events・commit の固定設定を解決する。新 Dispatch は選択を自動保存し、選択なしの旧 session は新たに認可した Dispatch を要求する。共通 runtime・workflow factory は保存選択で adapter を構築する。全 workflow Task は発行設定承認に明示 ID が必要。`taxion.execution-config.v1` の任意 `additionalTaskIds` は追加 Task ID の完全一致 list で、pattern や全子 Task への暗黙委譲ではない。`flow`、`maxRepairs: 1` なら review は `flow-review-0`・`flow-review-1` で、修正 Coder は元 Task ID を保つ。省略時は単一 Task 承認を保つ。空・空白付き・pattern・重複・主 Task ID は拒否する。
+
+生成 review Task は出典付き承認を変更せず継承する。設定・core は完全 allowed tuple を持つ主 Task または明示追加 Task だけを認める。未列挙 review は許可せず、Flow 独自の認可と上限も必要とする。list は発行前に記録し、既存 Dispatch を拡張しない。local 検査は Controller・実 Git で選択済み Coder→review→修正→再レビューを実行し、login 済み SDK model は使わない。
+
+CLI safe stop は、変更した prompt・tool・schema を再生成せず、保存 session ID、role、worktree、config hash に対応付けた取消専用 adapter を使う。現在の固定設定でなく保存選択の credential 参照を使い、認証照会は要求しない。Start・Send・通常 Resume は拒否する。停止接続は pending work の続行、resume event、transcript 修復、discovery を無効にし、tool を公開せず全 permission 要求を拒否する。local busy 状態を観測していなくても切断前に abort を送る。旧実行契約も、新契約での実行権限を得ずに停止できる。接続・取消・保存の失敗は明示し、この経路で model instruction は送らない。設定なしの local・proc は従来動作を保つ。credential 解決、repository actor 選択、契約資格、login 済み受入れは別の要件とする。
+
+`runtime commit` は lock 済み index snapshot と message を scan してから正確な tree を更新する host 操作で、stage・Task 完了は行わない。`runtime start --managed-commit`・`workflow run --managed-commit` が Coder 用 `taxion_commit` を明示的に有効にする。SDK 非依存の `runtime.ManagedCommit` binding は Dispatch ID、scanner 参照、host callback を持ち、SDK tool 型は Copilot adapter 内に残す。
+
+callback は呼出し取消、session ID、message だけを受ける。登録 tool は repository・scope・scanner を選べない。未知 field、message 欠落、未知・idle・停止済み session、sub-agent に帰属する呼出しは拒否する。host 中断と Flow deadline は Git 操作も取り消す。permission 検査は有効のまま保つ。scanner 失敗や部分更新の明示 error を含め、Controller error は SDK tool call の失敗とする。成功出力には SHA と、レビュー・受入れがまだ必要であることを含める。
+
+作成・resume は同じ tool を登録する。有効時は Dispatch、scanner 絶対 path、操作版を config hash に含める。option なしでは従来の tool 構成と hash を保つ。既存 session は binding 不一致なしに resume で tool を追加・削除できない。共通 runtime・workflow 構築は同じ callback を使い、Reviewer に commit tool を登録しない。
+
+commit は stage 済み内容だけを使う。追加の `--managed-stage` は `--managed-commit` を要求し、作成・resume で `taxion_stage` を登録する。別の操作版で commit-only session の identity を保つ。SDK 非依存 binding の stage callback は session ID と明示 path array を受け、repository・scope・scanner は host が管理する。
+
+stage は Controller の認可 transaction、呼出し検査、Flow 上限を共用する。正規化した相対 file または追跡済み削除だけを選び、directory 再帰、強制追加、Git metadata、worktree 外の親 symlink は選べない。literal path 指定で wildcard・pathspec 展開を防ぐ。全 tree の scope・path・内容検査までは非公開 index だけを変更する。検査済み copy を flush して実 index に atomic に反映し、HEAD・作業ファイルは保つ。失敗検査は反映せず、commit は再 scan する。Git clean filter は適用し、拒否後も到達不能 local blob が残る場合がある。信頼する repository 設定と悪意ある host process との競合は sandbox の対象外とする。
+
+local 検査は登録 SDK stage・commit handler を Controller・実 Git で呼ぶが、login 済み model の tool 呼出しは証明しない。実接続の stage→commit→独立レビュー受入れは #54/#72 で別に追跡する。
+
+## event 購読の期間
+
+adapter は、現在の instance が記録した event を再送してから、新しい event を購読する。Copilot は message、turn、failure、cancellation、usage、context-window、compaction、permission-decision の正規化 event を出す。usage は対応する Dispatch とともに保存する。context・compaction event は、取得できた場合に SDK の token 上限と圧縮結果を報告する。
+
+turn が終わっても、同じ role の次の指示に使う session stream は残る。stop は stream を閉じる。購読 context の cancel は、その購読だけを閉じる。利用側は session の終了だけを待たず、自身の context も監視する必要がある。
+
+process 再起動後、SDK は session ID で Copilot の会話を再開する。正規化 event stream は、現在の adapter instance が観測した event から始まる。
+
+SDK 固有型を core から分離する理由は [ADR-0003](adr/0003-keep-governance-core-sdk-neutral-behind-runtime-interface.md)、adapter 評価の計画は[ロードマップ](04-roadmap.md)に記録している。
