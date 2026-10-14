@@ -24,6 +24,31 @@ context window の `currentTokens` / `tokenLimit` は課金残量ではない。
 すべての契約で同じ単位の絶対 credit 残量を取得できるとは確認していない。
 Taxion はこれらを account 残量として取得・永続化していない。
 
+`rpc.AccountQuotaSnapshot` は `EntitlementRequests`、`UsedRequests`、
+`RemainingPercentage`、`ResetDate` と超過利用の条件を返す。
+`premium_interactions` などの resource 名と返却された単位を保持し、
+この requests / percentage を絶対 AI Credit 残量へ暗黙に換算しない。
+`session.RPC.Usage.GetMetrics` には session 累積の `TotalNanoAiu` と
+`AiCreditsStatus` があるが、account の残量ではない。累積値を
+call ごとの usage receipt に再加算せず、数値の completeness を別に記録する。
+両 API は固定 SDK の実験的 surface である。
+
+公式 Billing REST API の `/organizations/{org}/settings/billing/ai_credit/usage` と
+`/users/{username}/settings/billing/ai_credit/usage` は期間別の使用量を返す。
+個人 endpoint は個人に直接課金されるプラン向けであり、組織・enterprise が
+管理・課金するライセンスの利用量は個人 report に含まれない。
+`grossQuantity` / `netQuantity` は残量 field ではない。同じ課金主体・期間・
+単位・付与量・割引や超過の扱いを確認せず「付与量 − netQuantity」を
+残量として採用しない。管理者用 report の権限を runtime に暗黙要求しない。
+Copilot usage metrics の日次 report も、処理済み期間の利用統計であり、
+送信直前の account 残量の代替にはしない。
+
+非公開の `copilot_internal/user` を使う外部ツールの存在は、
+Taxion の安定 API 契約の根拠とはしない。SDK quota の取得不能を理由に
+internal endpoint、別 token、editor を装う header へ自動 fallback しない。
+2026-10-15 の照合では公開資料とローカル SDK 型だけを読み、実 account の quota、
+Billing API、internal endpoint への接続は行っていない。
+
 OpenCode は利用する model provider と credential によって課金主体が変わる。
 公式 SDK ガイドから、全 provider 共通の account 残量取得契約は確認できない。
 Taxion の現在の runtime 設定は Copilot のみを受け付け、OpenCode adapter はない。
@@ -130,7 +155,10 @@ quota 観測のための model turn が0回であることと、stop-only 接続
 
 - 固定した `github.com/github/copilot-sdk/go` v1.0.19 の
   `rpc.ServerAccountAPI.GetQuota`、`rpc.AccountGetQuotaResult`、
-  `rpc.AssistantUsageData`、`rpc.SessionUsageInfoData`。
+  `rpc.AccountQuotaSnapshot`、`rpc.UsageAPI.GetMetrics`、
+  `rpc.UsageGetMetricsResult`、`rpc.AssistantUsageData`、`rpc.SessionUsageInfoData`。
+- [GitHub Billing usage REST API](https://docs.github.com/en/rest/billing/usage?apiVersion=2026-03-10)。
+- [GitHub Copilot usage metrics REST API](https://docs.github.com/en/rest/copilot/copilot-usage-metrics?apiVersion=2026-03-10)。
 - [OpenCode SDK の公開 API](https://opencode.ai/docs/sdk/)。
 - [ADR-0003: SDK-neutral runtime](0003-keep-governance-core-sdk-neutral-behind-runtime-interface.md)。
 - [ADR-0023: 独立した設定と実行主体](0023-independent-project-forge-runtime-and-configuration-contracts.md)。

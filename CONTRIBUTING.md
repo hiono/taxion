@@ -132,6 +132,14 @@ synthetic fixtures before adding a signed-in acceptance. Dynamic observations
 belong in send receipts, not mutations of the bound system prompt. Do not add
 OpenCode to supported configuration before its adapter contract is implemented.
 
+The pinned Copilot SDK exposes experimental `Account.GetQuota` and session
+`Usage.GetMetrics`. Quota requests/percentages, cumulative session cost and
+periodic Billing REST reports are different observations. Do not sum cumulative
+metrics into per-call receipts, convert request entitlements into credits
+without a supported unit contract, or interpret unavailable billing as zero.
+Organization-funded usage is not included in personal billing reports. Do not
+fall back to internal endpoints or administrator credentials after quota errors.
+
 ## Code comments
 
 Comments explain why a constraint, order, boundary, or tradeoff is needed.

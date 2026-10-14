@@ -244,6 +244,11 @@ Copilot の `--max-ai-credits` は session 単位の soft ceiling であり、
 アカウント全体の残 credit を表示する option ではありません。
 Taxion は現在、account 残量を自動取得して Coder へ伝えてはいません。
 
+Copilot SDK の account quota、session の累積 cost、公式 Billing API の期間別使用量は
+別の情報です。requests の残り割合を AI Credit の絶対残量と読み替えたり、
+個人向け report に組織負担の利用量がないことを「使用量ゼロ」と判断したりしないでください。
+非公開 API や管理者の token は、通常の実行準備の必須条件にはしません。
+
 今後の選択は [ADR-0029](adr/0029-separate-budget-guidance-from-provider-quota.md)で定義しています。
 既定は、外部照会せず承認済み Flow の残りを指示に含める `flow`。
 実行ごとに明示しなければ config の既定値を継承し、`off` でも停止条件は変わりません。

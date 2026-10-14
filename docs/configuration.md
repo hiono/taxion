@@ -140,3 +140,10 @@ Copilot session の `max-ai-credits`、Flow の `maxTokens`、
 context window、provider account 全体の quota は別の値です。
 quota 照会には runtime 用の選択済み credential を使う設計であり、
 Git repository 用の token を流用しません。
+
+Copilot SDK の account quota は resource ごとの requests・残り割合等を扱い、
+session の累積 cost とは別です。公式 Billing API も期間別使用量の report で、
+`netQuantity` を account 残量としてそのまま使えません。
+組織・enterprise が課金するライセンスの使用量は個人 Billing endpoint に含まれません。
+SDK 照会が失敗しても、管理者用 token や非公開 endpoint に自動で切り替えない設計です。
+一次資料との対応は [ADR-0029](adr/0029-separate-budget-guidance-from-provider-quota.md)を参照してください。
