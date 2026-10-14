@@ -29,9 +29,10 @@ type Config struct {
 		ContractRef   string `yaml:"contractRef" json:"contractRef"`
 	} `yaml:"runtime" json:"runtime"`
 	Execution struct {
-		Requester   string `yaml:"requester" json:"requester"`
-		Worker      string `yaml:"worker" json:"worker"`
-		ApprovalRef string `yaml:"approvalRef" json:"approvalRef"`
+		Requester      string `yaml:"requester" json:"requester"`
+		Worker         string `yaml:"worker" json:"worker"`
+		ApprovalRef    string `yaml:"approvalRef" json:"approvalRef"`
+		BudgetGuidance string `yaml:"budgetGuidance,omitempty" json:"budgetGuidance,omitempty"`
 	} `yaml:"execution" json:"execution"`
 }
 
@@ -124,7 +125,8 @@ func (c *Config) fields() map[string]*string {
 		"runtime.provider":         &c.Runtime.Provider, "runtime.account": &c.Runtime.Account,
 		"runtime.credentialRef": &c.Runtime.CredentialRef, "runtime.contractRef": &c.Runtime.ContractRef,
 		"execution.requester": &c.Execution.Requester, "execution.worker": &c.Execution.Worker,
-		"execution.approvalRef": &c.Execution.ApprovalRef,
+		"execution.approvalRef":    &c.Execution.ApprovalRef,
+		"execution.budgetGuidance": &c.Execution.BudgetGuidance,
 	}
 }
 
@@ -133,8 +135,12 @@ func (c Config) validate(required bool) error {
 		return fmt.Errorf("configuration requires version 1")
 	}
 	for name, value := range c.fields() {
-		if required && *value == "" || strings.ContainsAny(*value, " \t\r\n") {
+		if required && *value == "" && name != "execution.budgetGuidance" || strings.ContainsAny(*value, " \t\r\n") {
 			return fmt.Errorf("%s requires a nonempty identifier without whitespace", name)
+		}
+		if c.Execution.BudgetGuidance != "" && c.Execution.BudgetGuidance != "off" &&
+			c.Execution.BudgetGuidance != "flow" && c.Execution.BudgetGuidance != "account" {
+			return fmt.Errorf("execution.budgetGuidance requires off, flow, or account")
 		}
 	}
 	switch c.Repository.Provider {

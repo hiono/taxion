@@ -70,11 +70,11 @@ func (f *configuredRuntime) Resume(ctx context.Context, id string) error {
 	return err
 }
 
-func executionConfigurationFixture(t *testing.T) (*store.Store, string, *configuredRuntime, config.Resolution) {
-	return executionConfigurationCredentialFixture(t, "ai")
+func executionConfigurationFixture(t *testing.T, guidance ...*core.BudgetGuidancePolicy) (*store.Store, string, *configuredRuntime, config.Resolution) {
+	return executionConfigurationCredentialFixture(t, "ai", guidance...)
 }
 
-func executionConfigurationCredentialFixture(t *testing.T, credentialRef string) (*store.Store, string, *configuredRuntime, config.Resolution) {
+func executionConfigurationCredentialFixture(t *testing.T, credentialRef string, guidance ...*core.BudgetGuidancePolicy) (*store.Store, string, *configuredRuntime, config.Resolution) {
 	t.Helper()
 	root := t.TempDir()
 	gitTest(t, root, "init", "-b", "work/task")
@@ -108,6 +108,9 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 		ValidationCommands: []string{"test -s README.md"}, RequiredEvidence: []string{"report"}, ExitCondition: "tests pass",
 		Worktree: root, Branch: "work/task", BaselineSHA: gitTest(t, root, "rev-parse", "HEAD"),
 		AuthorizationID: "approval", Decisions: []core.TaskDecision{{ID: "approval", Source: "human:selection", Text: string(approval)}},
+	}
+	if len(guidance) != 0 {
+		task.BudgetGuidance = core.CloneBudgetGuidance(guidance[0])
 	}
 	graph := core.TaskGraph{Version: 1}
 	if err := graph.Track(task, "human", "register"); err != nil {

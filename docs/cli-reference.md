@@ -1222,3 +1222,17 @@ index is the manual cross-reference for the implemented subcommands and their
 options. `ready` and `doctor` are not implemented
 commands; `config check`, `runtime auth`, and the other preflight operations
 must not be described as proving execution readiness or contract eligibility.
+
+`request --budget-guidance off|flow|account` overrides the resolved configuration
+for the displayed proposal. `runtime start|send --budget-guidance MODE` selects
+one send within the saved Task's `budgetGuidance.allowedModes`; omitting it uses
+the saved mode, not a newly edited configuration. A legacy Dispatch without a
+guidance policy rejects an override and requires renewed authorization.
+New `task track` and `conversation intake` proposals resolve omitted guidance
+from fixed configuration layers, then default to `flow`. Explicit Task JSON
+can declare the mode, source, allowed modes and account-read approval as shown
+in [configuration](configuration.md#残予算を考慮する指示の設定).
+Policy changes on authorized Tasks require a new authorization decision.
+`records show` retains exact supplemental text, observations and send phases;
+the provider event output also reports the observation. `off` never disables
+existing usage/deadline gates. No mode adds a separate model turn.

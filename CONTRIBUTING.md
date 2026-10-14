@@ -130,11 +130,11 @@ success. Private databases, raw logs and credential values stay outside commits.
 Publish the generalized finding and chosen boundary in the ADR, current
 behavior in its owning reference, and operator actions in the user guide.
 
-## Budget-aware instructions (design)
+## Budget-aware instructions
 
 Budget-aware instruction design is accepted in
-[ADR-0029](docs/adr/0029-separate-budget-guidance-from-provider-quota.md), not yet
-implemented. Keep flow-token accounting, session soft credit ceilings, context
+[ADR-0029](docs/adr/0029-separate-budget-guidance-from-provider-quota.md) and implemented
+in the controller and Copilot adapter. Keep flow-token accounting, session soft credit ceilings, context
 capacity and account quotas separate. Provider-specific quota APIs and billing
 types belong in adapters; unknown or stale observations must remain explicit.
 Test defaults and per-request precedence, units, partial accounting, quota
@@ -142,6 +142,22 @@ failures, account binding, bounded non-model reads and unchanged stop gates with
 synthetic fixtures before adding a signed-in acceptance. Dynamic observations
 belong in send receipts, not mutations of the bound system prompt. Do not add
 OpenCode to supported configuration before its adapter contract is implemented.
+
+New CLI proposals bind `budgetGuidance` to the exact Task/Dispatch contract;
+omitted legacy policies retain the old instruction shape. Account reads are
+optional adapter capabilities and require the selected account and approved
+policy. `account.getQuota` is called once under a maximum five-second timeout;
+there are no model turns, retries, internal endpoints or billing fallbacks.
+`budget-guidance` receipts have a separate stream ID and preserve the exact
+supplement plus prepared/returned/denied phase. Isolated Planner, question and
+SDK-search results retain their own observation and supplement.
+
+Model-free coverage includes layered defaults/overrides, stale and unavailable
+observations, account mismatches, stop/usage gates and protocol frames. The
+read-only signed-in acceptance is opt-in via `TAXION_COPILOT_QUOTA_ACCEPTANCE=1`,
+with explicit `TAXION_QUOTA_ACCOUNT`, `TAXION_QUOTA_CLI` and
+`TAXION_QUOTA_BASE_DIRECTORY`. It creates no session and sends no model instruction.
+Success of this check does not establish model quality or the coding/review release gate.
 
 The pinned Copilot SDK exposes experimental `Account.GetQuota` and session
 `Usage.GetMetrics`. Quota requests/percentages, cumulative session cost and

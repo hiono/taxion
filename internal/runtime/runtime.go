@@ -7,6 +7,8 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"github.com/hiono/taxion/internal/core"
+	"time"
 
 	"github.com/hiono/taxion/internal/tools"
 )
@@ -98,4 +100,33 @@ type ManagedSearch struct {
 	ScopeHash string                                                 `json:"scopeHash"`
 	Query     string                                                 `json:"query"`
 	Search    func(context.Context, string) (json.RawMessage, error) `json:"-"`
+}
+
+type QuotaSnapshot struct {
+	Provider            string     `json:"provider"`
+	Account             string     `json:"account"`
+	Resource            string     `json:"resource"`
+	Scope               string     `json:"scope"`
+	Unit                string     `json:"unit"`
+	Source              string     `json:"source"`
+	State               string     `json:"state"`
+	Reason              string     `json:"reason,omitempty"`
+	ObservedAt          time.Time  `json:"observedAt"`
+	ExpiresAt           *time.Time `json:"expiresAt,omitempty"`
+	ResetAt             *time.Time `json:"resetAt,omitempty"`
+	Entitlement         *int64     `json:"entitlement,omitempty"`
+	Used                *int64     `json:"used,omitempty"`
+	Remaining           *int64     `json:"remaining,omitempty"`
+	RemainingPercentage *float64   `json:"remainingPercentage,omitempty"`
+	Unlimited           bool       `json:"unlimited,omitempty"`
+	ExecutionDenied     bool       `json:"executionDenied,omitempty"`
+}
+
+// AccountQuota reads only the selected account, without a model turn.
+type AccountQuota interface {
+	ReadAccountQuota(context.Context, string) (QuotaSnapshot, error)
+}
+
+type BudgetGuidanceIdentity interface {
+	BudgetGuidancePolicy() *core.BudgetGuidancePolicy
 }

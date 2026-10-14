@@ -265,19 +265,26 @@ taxion workflow show --id task-example-flow
 現在は `workflow show --id FLOW-ID` で承認済み上限・利用量・未完了 role を確認します。
 Copilot の `--max-ai-credits` は session 単位の soft ceiling であり、
 アカウント全体の残 credit を表示する option ではありません。
-Taxion は現在、account 残量を自動取得して Coder へ伝えてはいません。
+新しい依頼では、既定の `flow` が承認済み Flow の上限・観測済み tokens・
+残り・期限・未完了 role を同じ指示へ補足します。追加のモデル呼出しはありません。
 
 Copilot SDK の account quota、session の累積 cost、公式 Billing API の期間別使用量は
 別の情報です。requests の残り割合を AI Credit の絶対残量と読み替えたり、
 個人向け report に組織負担の利用量がないことを「使用量ゼロ」と判断したりしないでください。
 非公開 API や管理者の token は、通常の実行準備の必須条件にはしません。
 
-今後の選択は [ADR-0029](adr/0029-separate-budget-guidance-from-provider-quota.md)で定義しています。
+選択は [ADR-0029](adr/0029-separate-budget-guidance-from-provider-quota.md)で定義しています。
 既定は、外部照会せず承認済み Flow の残りを指示に含める `flow`。
 実行ごとに明示しなければ config の既定値を継承し、`off` でも停止条件は変わりません。
 `account` は操作者が承認した provider の残量読取りを追加する方式で、
-未対応・取得失敗・古い観測を理由付きで表示します。現在はこれらを指定する
-config / CLI は未実装なので、既存の実行手順へ架空の option を追加しないでください。
+未対応・取得失敗・古い観測を理由付きで表示します。たとえば通常の `request`
+コマンドに `--budget-guidance account` を加えると、表示される読取り範囲を
+`/plan` で Planner に、`/approve` で実装・レビューに承認します。
+未指定時は環境変数 `TAXION_EXECUTION_BUDGET_GUIDANCE`、設定ファイルの
+`execution.budgetGuidance`、最後に `flow` の順で値を決めます
+（設定ファイル内の優先順位は [設定ガイド](configuration.md)を参照）。
+観測と実際の補足は `records show`、相談分は private planning JSON に残ります。
+設定がない旧 Task / Dispatch へ補足を遡及適用しません。
 
 残量が少なくても acceptance や独立レビューは省略しません。
 途中の成果を保存して停止し、続行には新しい予算を承認する、という境界を維持します。

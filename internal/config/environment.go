@@ -21,6 +21,7 @@ var environmentFields = map[string]string{
 	"TAXION_EXECUTION_REQUESTER":       "execution.requester",
 	"TAXION_EXECUTION_WORKER":          "execution.worker",
 	"TAXION_EXECUTION_APPROVAL_REF":    "execution.approvalRef",
+	"TAXION_EXECUTION_BUDGET_GUIDANCE": "execution.budgetGuidance",
 }
 
 // EnvironmentLayer uses only supported setting variables. Credential values

@@ -6,8 +6,11 @@ Date: 2026-10-15
 
 Accepted
 
-設計判断の採択であり、以下の新しい設定・指示への付加・quota 取得は未実装である。
-現在の config / CLI に新しい field や option が存在するとは扱わない。
+設定、依頼ごとの選択、送信補足、送信記録と Copilot SDK quota 読取りを実装した。
+合成 runtime と SDK protocol fixture に加え、選択済み実アカウントから
+製品 adapter の読取りが成功することを確認した。session 作成・model 指示は0回。
+実モデルが補足を使って作業配分を改善するか、新しい入口で coding・review を
+完了できるかは未確認であり、読取り成功と区別する。
 
 ## Context
 
@@ -58,7 +61,7 @@ Taxion の現在の runtime 設定は Copilot のみを受け付け、OpenCode a
 
 ### 既定値と指示ごとの選択
 
-実装時は `execution.budgetGuidance` に `off` / `flow` / `account` の既定値を
+`execution.budgetGuidance` に `off` / `flow` / `account` の既定値を
 設ける。既存の Global → Project → 環境変数の優先順位を維持し、最後に
 その実行依頼で明示された選択を適用する。指示ごとの未指定は解決済み既定値を
 継承し、すべて未指定なら `flow` とする。不正な値は実行前に error にする。
@@ -84,6 +87,14 @@ Task / Dispatch の承認と runtime の設定 identity に結び付ける。
 新たな account 読取り権限や予算を要求する変更は再承認する。
 毎回、同じ選択を確認させる UI は要求しない。
 
+`request --budget-guidance` は今回の Planner と実装 Task の選択を表示し、
+`/plan` と `/approve` に結び付ける。`task track` と `conversation intake` も
+新規 proposal の未指定値を固定設定から解決する。Task の `budgetGuidance` は
+`mode`、`source`、`allowedModes`、`accountReadApproved` を持ち、Dispatch に
+複製する。生成時の許可範囲は `off` / `flow`、選択が `account` のときだけ
+`account` を加える。`runtime start|send --budget-guidance` はこの範囲内で
+一回の送信を変更でき、許可範囲の追加は新しい Task 承認を必要とする。
+
 ### 観測値と停止判定
 
 残量は Controller が保存済み receipt と provider の読取り結果から作る。
@@ -91,6 +102,13 @@ Task / Dispatch の承認と runtime の設定 identity に結び付ける。
 `Send` の直前に別の補足として付け、追加の model turn は発行しない。
 role の system prompt を毎回書き換えて session identity を変える方式は採らない。
 動的な観測は送信ごとの receipt に保存し、固定設定の hash と区別する。
+
+Controller の `budget-guidance` receipt は provider の event stream と区別した
+stream ID に、観測値、実際の補足文、送信準備・送信終了・拒否を保存する。
+`records show` と runtime の event 出力で確認する。Planner・質問・SDK検索の
+隔離 turn も同じ観測処理を使い、結果 JSON と既存の private planning / search
+記録に補足と観測を残す。Flow 外の隔離 turn は session の token 上限と期限を
+別項目にする。旧 Task の省略値は読取り・補足を追加しない。
 
 Flow の残りは、同じ単位で既知の利用量を重複なく合算できる場合だけ算出する。
 未知の call があれば「未確認」、上限超過なら超過量と停止理由を残す。

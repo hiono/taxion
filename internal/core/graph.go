@@ -170,6 +170,7 @@ type GraphTask struct {
 	TargetTreeSHA      string                `json:"targetTreeSha,omitempty"`
 	TargetChangedFiles []string              `json:"targetChangedFiles,omitempty"`
 	FileAccess         *FileAccessPolicy     `json:"fileAccess,omitempty"`
+	BudgetGuidance     *BudgetGuidancePolicy `json:"budgetGuidance,omitempty"`
 	Risk               string                `json:"risk"`
 	ExceptionIDs       []string              `json:"exceptionIds"`
 	CreatedFrom        string                `json:"createdFrom"`
@@ -378,6 +379,7 @@ type DispatchInstruction struct {
 	TargetTreeSHA       string                `json:"targetTreeSha,omitempty"`
 	TargetChangedFiles  []string              `json:"targetChangedFiles,omitempty"`
 	FileAccess          *FileAccessPolicy     `json:"fileAccess,omitempty"`
+	BudgetGuidance      *BudgetGuidancePolicy `json:"budgetGuidance,omitempty"`
 	AuthorizationID     string                `json:"authorizationId"`
 	Decisions           []TaskDecision        `json:"decisions"`
 	HumanDecision       *HumanDecisionRequest `json:"humanDecision,omitempty"`
@@ -630,7 +632,8 @@ func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship Di
 		OutputMode: task.OutputMode, TargetTreeSHA: task.TargetTreeSHA,
 		TargetChangedFiles: slices.Clone(task.TargetChangedFiles),
 		FileAccess:         CloneFileAccessPolicy(task.FileAccess), AuthorizationID: task.AuthorizationID,
-		Decisions: slices.Clone(task.Decisions), HumanDecision: cloneHumanDecision(task.HumanDecision),
+		BudgetGuidance: CloneBudgetGuidance(task.BudgetGuidance),
+		Decisions:      slices.Clone(task.Decisions), HumanDecision: cloneHumanDecision(task.HumanDecision),
 		MemoryRefs: slices.Clone(task.MemoryRefs), MemoryContext: cloneDispatchMemoryContext(memoryContext),
 		Specifications: cloneSpecifications(task.Specifications),
 		ReturnFormat:   slices.Clone(dispatchReturnFormat),
@@ -698,6 +701,7 @@ func dispatchInstructionMatchesTask(d GraphDispatch, task GraphTask) bool {
 		slices.Equal(i.Acceptance, task.Acceptance) &&
 		slices.Equal(i.RequiredEvidence, task.RequiredEvidence) && i.ExitCondition == task.ExitCondition &&
 		slices.Equal(i.ValidationCommands, task.ValidationCommands) &&
+		reflect.DeepEqual(i.BudgetGuidance, task.BudgetGuidance) &&
 		i.Worktree == task.Worktree && i.Branch == task.Branch && i.BaselineSHA == task.BaselineSHA &&
 		i.TargetSHA == task.TargetSHA && i.OutputMode == task.OutputMode &&
 		i.TargetTreeSHA == task.TargetTreeSHA &&
@@ -719,6 +723,8 @@ func dispatchInstructionIdentityMatchesTask(d GraphDispatch, task GraphTask) boo
 	policyMatches := i.CommitMessagePolicy == "" || i.CommitMessagePolicy == CommitMessagePolicy && d.Recipient == "CODER"
 	fileAccessMatches := reflect.DeepEqual(i.FileAccess, task.FileAccess) &&
 		(i.FileAccess == nil || i.FileAccess.Validate() == nil)
+	guidanceMatches := reflect.DeepEqual(i.BudgetGuidance, task.BudgetGuidance) &&
+		i.BudgetGuidance.Validate() == nil
 	outputModeMatches := validOutputMode(i.OutputMode) && i.OutputMode == task.OutputMode &&
 		validList(i.TargetChangedFiles) &&
 		(i.OutputMode != OutputModeWorktreeTreeSnapshot ||
@@ -726,7 +732,7 @@ func dispatchInstructionIdentityMatchesTask(d GraphDispatch, task GraphTask) boo
 			d.Recipient == "REVIEWER" && validSHA(i.TargetTreeSHA) &&
 				i.TargetTreeSHA == task.TargetTreeSHA &&
 				slices.Equal(i.TargetChangedFiles, task.TargetChangedFiles))
-	return versionMatches && acceptanceMatches && memoryMatches && policyMatches && fileAccessMatches &&
+	return versionMatches && acceptanceMatches && memoryMatches && policyMatches && fileAccessMatches && guidanceMatches &&
 		outputModeMatches &&
 		validateSpecifications(i.Specifications) == nil && i.DispatchID == d.ID &&
 		i.TaskID == d.TaskID && i.Repository == d.Repository &&
@@ -1033,6 +1039,13 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 			return "", err
 		}
 		fmt.Fprintf(&output, "%s: %s\n", line.label, value)
+	}
+	if i.BudgetGuidance != nil {
+		value, err := json.Marshal(i.BudgetGuidance)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&output, "BUDGET GUIDANCE POLICY: %s\n", value)
 	}
 	for _, line := range []struct{ label, value string }{
 		{"EXIT CONDITION", i.ExitCondition},
@@ -1529,6 +1542,9 @@ func (g TaskGraph) Validate() error {
 				return graphError("invalid file access policy for %s: %v", t.ID, err)
 			}
 		}
+		if err := t.BudgetGuidance.Validate(); err != nil {
+			return graphError("invalid budget guidance for %s: %v", t.ID, err)
+		}
 		if !validOutputMode(t.OutputMode) ||
 			(t.OutputMode != OutputModeWorktreeTreeSnapshot &&
 				(t.TargetTreeSHA != "" || len(t.TargetChangedFiles) != 0)) ||
@@ -1816,6 +1832,7 @@ func cloneDispatch(d GraphDispatch) GraphDispatch {
 	d.Instruction.ValidationCommands = slices.Clone(d.Instruction.ValidationCommands)
 	d.Instruction.TargetChangedFiles = slices.Clone(d.Instruction.TargetChangedFiles)
 	d.Instruction.FileAccess = CloneFileAccessPolicy(d.Instruction.FileAccess)
+	d.Instruction.BudgetGuidance = CloneBudgetGuidance(d.Instruction.BudgetGuidance)
 	d.Instruction.Decisions = slices.Clone(d.Instruction.Decisions)
 	d.Instruction.HumanDecision = cloneHumanDecision(d.Instruction.HumanDecision)
 	d.Instruction.MemoryRefs = slices.Clone(d.Instruction.MemoryRefs)
@@ -1933,6 +1950,7 @@ func cloneTask(t GraphTask) GraphTask {
 	t.MemoryRefs = slices.Clone(t.MemoryRefs)
 	t.Specifications = cloneSpecifications(t.Specifications)
 	t.FileAccess = CloneFileAccessPolicy(t.FileAccess)
+	t.BudgetGuidance = CloneBudgetGuidance(t.BudgetGuidance)
 	t.TargetChangedFiles = slices.Clone(t.TargetChangedFiles)
 	return t
 }
@@ -1957,12 +1975,16 @@ func (g *TaskGraph) Track(t GraphTask, actor, reason string) error {
 		if old.FileAccess != nil && t.FileAccess == nil {
 			t.FileAccess = CloneFileAccessPolicy(old.FileAccess)
 		}
+		if old.BudgetGuidance != nil && t.BudgetGuidance == nil {
+			t.BudgetGuidance = CloneBudgetGuidance(old.BudgetGuidance)
+		}
 		if old.TargetTreeSHA != t.TargetTreeSHA ||
 			!slices.Equal(old.TargetChangedFiles, t.TargetChangedFiles) {
 			return graphError("verified target tree evidence cannot be edited through task tracking")
 		}
 		if old.AuthorizationID != "" &&
-			(!reflect.DeepEqual(old.FileAccess, t.FileAccess) || old.OutputMode != t.OutputMode) {
+			(!reflect.DeepEqual(old.FileAccess, t.FileAccess) || old.OutputMode != t.OutputMode ||
+				!reflect.DeepEqual(old.BudgetGuidance, t.BudgetGuidance)) {
 			newAuthorization := false
 			for _, decision := range t.Decisions {
 				if decision.ID == t.AuthorizationID && decision.ID != old.AuthorizationID &&

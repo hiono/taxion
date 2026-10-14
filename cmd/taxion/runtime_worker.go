@@ -22,6 +22,7 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 	var err error
 	config.Configuration = nil
 	config.FileAccess = core.CloneFileAccessPolicy(dispatch.Instruction.FileAccess)
+	config.BudgetGuidance = core.CloneBudgetGuidance(dispatch.Instruction.BudgetGuidance)
 	config.TrackedFiles = nil
 	if config.FileAccess != nil && config.FileAccess.Level == core.FileAccessCommitted {
 		config.TrackedFiles, err = gitproof.TrackedPathsAt(dispatch.Instruction.Worktree, dispatch.ExpectedStartSHA())

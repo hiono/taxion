@@ -27,8 +27,11 @@ func TestResolvePriorityAndFieldOrigins(t *testing.T) {
 			t.Fatalf("%s has wrong source", field)
 		}
 	}
-	if len(resolved.Sources) != len(resolved.Config.fields())+1 {
+	if len(resolved.Sources) != len(resolved.Config.fields()) {
 		t.Fatal("required field provenance is incomplete")
+	}
+	if resolved.Config.Execution.BudgetGuidance != "" || resolved.Sources["execution.budgetGuidance"] != "" {
+		t.Fatal("optional guidance must preserve legacy configuration identity")
 	}
 }
 

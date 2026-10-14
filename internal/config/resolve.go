@@ -15,6 +15,20 @@ type Resolution struct {
 // Resolve applies layers from lowest to highest priority. It resolves candidate
 // configuration only; approval and credential verification remain separate gates.
 func Resolve(layers []Layer) (Resolution, error) {
+	return resolve(layers, true)
+}
+
+// ResolveBudgetGuidance can prepare a local proposal before all execution
+// identity fields exist. Every supplied layer is still schema-validated.
+func ResolveBudgetGuidance(layers []Layer) (string, error) {
+	if len(layers) == 0 {
+		return "", nil
+	}
+	resolved, err := resolve(layers, false)
+	return resolved.Config.Execution.BudgetGuidance, err
+}
+
+func resolve(layers []Layer, required bool) (Resolution, error) {
 	result := Resolution{Sources: map[string]string{}}
 	target := result.Config.fields()
 	seen := map[string]bool{}
@@ -36,7 +50,7 @@ func Resolve(layers []Layer) (Resolution, error) {
 			}
 		}
 	}
-	if err := result.Config.Validate(); err != nil {
+	if err := result.Config.validate(required); err != nil {
 		return Resolution{}, err
 	}
 	return result, nil

@@ -43,6 +43,7 @@ type Config struct {
 	BaseDirectory    string
 	AvailableTools   []string
 	FileAccess       *core.FileAccessPolicy
+	BudgetGuidance   *core.BudgetGuidancePolicy
 	TrackedFiles     []string
 	ResponseSchema   map[string]any
 	ManagedCommit    *runtime.ManagedCommit
@@ -132,6 +133,10 @@ func New(config Config) (*Adapter, error) {
 		}
 	}
 	config.FileAccess = core.CloneFileAccessPolicy(config.FileAccess)
+	if err := config.BudgetGuidance.Validate(); err != nil {
+		return nil, err
+	}
+	config.BudgetGuidance = core.CloneBudgetGuidance(config.BudgetGuidance)
 	config.TrackedFiles = slices.Clone(config.TrackedFiles)
 	if config.CLIPath == "" {
 		config.CLIPath, err = exec.LookPath("copilot")
@@ -276,8 +281,9 @@ func (a *Adapter) ConfigHash() string {
 		CLIPath             string
 		BaseDirectory       string
 		AvailableTools      []string
-		FileAccess          *core.FileAccessPolicy `json:",omitempty"`
-		TrackedFiles        []string               `json:",omitempty"`
+		FileAccess          *core.FileAccessPolicy     `json:",omitempty"`
+		BudgetGuidance      *core.BudgetGuidancePolicy `json:",omitempty"`
+		TrackedFiles        []string                   `json:",omitempty"`
 		ResponseSchema      map[string]any
 		PermissionPolicy    string
 		ManagedCommit       *runtime.ManagedCommit `json:",omitempty"`
@@ -294,6 +300,7 @@ func (a *Adapter) ConfigHash() string {
 		BaseDirectory:       a.config.BaseDirectory,
 		AvailableTools:      a.config.AvailableTools,
 		FileAccess:          a.config.FileAccess,
+		BudgetGuidance:      a.config.BudgetGuidance,
 		TrackedFiles:        a.config.TrackedFiles,
 		ResponseSchema:      a.config.ResponseSchema,
 		PermissionPolicy:    permissionPolicy,
@@ -311,6 +318,10 @@ func (a *Adapter) ConfigHash() string {
 func (a *Adapter) Role() string { return a.config.Role }
 
 func (a *Adapter) Worktree() string { return a.config.WorkingDirectory }
+
+func (a *Adapter) BudgetGuidancePolicy() *core.BudgetGuidancePolicy {
+	return core.CloneBudgetGuidance(a.config.BudgetGuidance)
+}
 
 func (a *Adapter) ExecutionConfiguration() json.RawMessage {
 	return slices.Clone(a.config.Configuration)

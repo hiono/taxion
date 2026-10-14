@@ -10,8 +10,21 @@ import (
 // ReadFiles searches only the supplied project directory. Missing default
 // files are optional; all other read failures are errors.
 func ReadFiles(userConfigDir, projectDir string) ([]Layer, error) {
-	if err := checkProjectGitPolicy(projectDir); err != nil {
-		return nil, err
+	return readFiles(userConfigDir, projectDir, true)
+}
+
+// ReadProposalFiles permits local proposals before configuration exists.
+// Present files still use the normal schema and Git-policy checks.
+func ReadProposalFiles(userConfigDir, projectDir string) ([]Layer, error) {
+	return readFiles(userConfigDir, projectDir, false)
+}
+
+func readFiles(userConfigDir, projectDir string, required bool) ([]Layer, error) {
+	_, projectErr := os.Lstat(filepath.Join(projectDir, ".taxion", "config.yaml"))
+	if required || projectErr == nil || !errors.Is(projectErr, os.ErrNotExist) {
+		if err := checkProjectGitPolicy(projectDir); err != nil {
+			return nil, err
+		}
 	}
 	var layers []Layer
 	for _, entry := range []struct {
@@ -37,7 +50,7 @@ func ReadFiles(userConfigDir, projectDir string) ([]Layer, error) {
 		}
 		layers = append(layers, Layer{Source: entry.source, Input: input})
 	}
-	if len(layers) == 0 {
+	if required && len(layers) == 0 {
 		return nil, fmt.Errorf("no configuration files found; create Global taxion/config.yaml or Project .taxion/config.yaml")
 	}
 	return layers, nil

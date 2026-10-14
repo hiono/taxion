@@ -160,6 +160,19 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	encoder := json.NewEncoder(out)
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	for index := len(state.Records.Events) - 1; index >= 0; index-- {
+		receipt := state.Records.Events[index]
+		if receipt.DispatchID == dispatch.ID && receipt.Type == "budget-guidance" {
+			if err := encoder.Encode(runtime.Event{Type: "budget-guidance", Payload: receipt.Payload}); err != nil {
+				return fmt.Errorf("taxion: write budget guidance: %w", err)
+			}
+			break
+		}
+	}
 	streamID := time.Now().UTC().Format(time.RFC3339Nano)
 	var finalOutput string
 	checkLimits := func() error {

@@ -66,6 +66,16 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 	if task.FileAccess == nil {
 		task.FileAccess = core.DefaultFileAccessPolicy()
 	}
+	if task.BudgetGuidance == nil {
+		mode := ""
+		if request.PlanningSelection != nil {
+			mode = request.PlanningSelection.Execution.BudgetGuidance
+		}
+		task.BudgetGuidance, err = core.NewBudgetGuidance(mode, "")
+		if err != nil {
+			return core.GraphTask{}, err
+		}
+	}
 	task.Decisions = []core.TaskDecision{{ID: "intake:" + task.ID, Source: request.Source, Text: string(text)}}
 	if request.PlanningSelection != nil {
 		if strings.TrimSpace(request.PlanningReason) == "" || request.PlanningSelection.Repository.Path != task.Repo {

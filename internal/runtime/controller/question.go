@@ -70,11 +70,14 @@ func (answer QuestionAnswer) MarshalJSON() ([]byte, error) {
 }
 
 type QuestionResult struct {
-	SessionID string               `json:"sessionId"`
-	Context   QuestionContext      `json:"context"`
-	Answer    *QuestionAnswer      `json:"answer,omitempty"`
-	Usage     []core.DispatchUsage `json:"usage"`
-	Changed   bool                 `json:"recordsChangedDuringAnswer"`
+	SessionID        string               `json:"sessionId"`
+	Context          QuestionContext      `json:"context"`
+	Answer           *QuestionAnswer      `json:"answer,omitempty"`
+	Usage            []core.DispatchUsage `json:"usage"`
+	Changed          bool                 `json:"recordsChangedDuringAnswer"`
+	BudgetGuidance   *budgetObservation   `json:"budgetGuidance,omitempty"`
+	BudgetSupplement string               `json:"budgetSupplement,omitempty"`
+	InstructionSent  bool                 `json:"instructionSent,omitempty"`
 }
 
 func questionContextsEqual(current, supplied QuestionContext) (bool, error) {
@@ -290,13 +293,29 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 	if err := recheck(); err != nil {
 		return result, err
 	}
+	policy := result.Context.Task.Task.BudgetGuidance
+	if policy != nil {
+		result.BudgetGuidance, result.BudgetSupplement, err = isolatedBudgetGuidance(ctx, worker, policy, selected, maxTokens)
+		if err != nil {
+			return result, err
+		}
+		if err := recheck(); err != nil {
+			return result, err
+		}
+		refreshQuotaState(result.BudgetGuidance, time.Now().UTC())
+		result.BudgetSupplement, err = budgetSupplement(result.BudgetGuidance)
+		if err != nil {
+			return result, err
+		}
+	}
 	events, err := worker.Events(ctx, result.SessionID)
 	if err != nil {
 		return result, questionProviderError(ctx, "event subscription", err)
 	}
-	if err := worker.Send(ctx, result.SessionID, string(input)); err != nil {
+	if err := worker.Send(ctx, result.SessionID, string(input)+result.BudgetSupplement); err != nil {
 		return result, questionProviderError(ctx, "instruction send", err)
 	}
+	result.InstructionSent = result.BudgetGuidance != nil
 	var output string
 	var tokens int64
 	ticker := time.NewTicker(time.Second)

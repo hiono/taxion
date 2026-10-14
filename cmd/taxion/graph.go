@@ -76,6 +76,13 @@ func taskGraphCmd(command string, args []string) error {
 				current.Graph = core.TaskGraph{Version: 1}
 				current.HasGraph = true
 			}
+			if _, exists := current.Graph.GraphTask(request.Task.ID); !exists && request.Task.BudgetGuidance == nil {
+				var err error
+				request.Task.BudgetGuidance, err = newTaskBudgetGuidance()
+				if err != nil {
+					return err
+				}
+			}
 			if err := current.Graph.Track(request.Task, request.Actor, request.Reason); err != nil {
 				return err
 			}

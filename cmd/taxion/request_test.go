@@ -252,6 +252,10 @@ func TestSearch(t *testing.T) {
 	}
 	defer db.Close()
 	coder, reviewer := state.Graph.Dispatches[0], state.Graph.Dispatches[1]
+	if coder.Instruction.BudgetGuidance == nil || coder.Instruction.BudgetGuidance.Mode != "flow" ||
+		reviewer.Instruction.BudgetGuidance == nil || reviewer.Instruction.BudgetGuidance.Mode != "flow" {
+		t.Fatal("request did not retain default guidance through independent review")
+	}
 	if coder.Result.OutputTreeSHA == "" || coder.Result.OutputTreeSHA != reviewer.Result.OutputTreeSHA ||
 		gitTest(t, root, "rev-parse", "HEAD") != coder.Instruction.BaselineSHA {
 		t.Fatal("request changed commit identity or reviewed another tree")

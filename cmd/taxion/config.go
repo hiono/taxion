@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/hiono/taxion/internal/config"
+	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/forge"
 	"github.com/hiono/taxion/internal/runtime/controller"
 )
@@ -101,24 +102,49 @@ func checkConfig(args []string, output io.Writer) error {
 }
 
 func resolveConfiguration() (config.Resolution, error) {
+	layers, err := configurationLayers(true)
+	if err != nil {
+		return config.Resolution{}, err
+	}
+	return config.Resolve(layers)
+}
+
+func newTaskBudgetGuidance() (*core.BudgetGuidancePolicy, error) {
+	layers, err := configurationLayers(false)
+	if err != nil {
+		return nil, err
+	}
+	mode, err := config.ResolveBudgetGuidance(layers)
+	if err != nil {
+		return nil, err
+	}
+	return core.NewBudgetGuidance(mode, "")
+}
+
+func configurationLayers(required bool) ([]config.Layer, error) {
 	userDir, err := os.UserConfigDir()
 	if err != nil {
-		return config.Resolution{}, fmt.Errorf("locate user configuration directory: %w", err)
+		return nil, fmt.Errorf("locate user configuration directory: %w", err)
 	}
 	projectDir, err := os.Getwd()
 	if err != nil {
-		return config.Resolution{}, fmt.Errorf("locate project configuration directory: %w", err)
+		return nil, fmt.Errorf("locate project configuration directory: %w", err)
 	}
-	layers, err := config.ReadFiles(userDir, projectDir)
+	var layers []config.Layer
+	if required {
+		layers, err = config.ReadFiles(userDir, projectDir)
+	} else {
+		layers, err = config.ReadProposalFiles(userDir, projectDir)
+	}
 	if err != nil {
-		return config.Resolution{}, err
+		return nil, err
 	}
 	environment, present, err := config.EnvironmentLayer(os.LookupEnv)
 	if err != nil {
-		return config.Resolution{}, err
+		return nil, err
 	}
 	if present {
 		layers = append(layers, environment)
 	}
-	return config.Resolve(layers)
+	return layers, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -214,6 +215,10 @@ func (c *Controller) checkExecutionConfiguration(graph core.TaskGraph, dispatchI
 	}
 	if err := c.checkToolPolicy(graph, dispatch); err != nil {
 		return config.Config{}, err
+	}
+	if identity, ok := c.runtime.(runtime.BudgetGuidanceIdentity); ok &&
+		!reflect.DeepEqual(identity.BudgetGuidancePolicy(), dispatch.Instruction.BudgetGuidance) {
+		return config.Config{}, fmt.Errorf("taxion: runtime budget guidance differs from the immutable Dispatch approval")
 	}
 	worker, configured := c.runtime.(runtime.ConfigurationIdentity)
 	var selection json.RawMessage

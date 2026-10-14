@@ -77,6 +77,7 @@ execution:
 | `TAXION_EXECUTION_REQUESTER` | `execution.requester` |
 | `TAXION_EXECUTION_WORKER` | `execution.worker` |
 | `TAXION_EXECUTION_APPROVAL_REF` | `execution.approvalRef` |
+| `TAXION_EXECUTION_BUDGET_GUIDANCE` | `execution.budgetGuidance` |
 
 設定値はすべて文字列です。未設定の変数は下位 layer の値を使い、明示的な空文字や不正値はエラーになります。`TAXION_TOKEN`、`GH_TOKEN`、`GITHUB_TOKEN`、`COPILOT_GITHUB_TOKEN` は設定 override ではなく、それぞれ別の認証用途で扱います。Taxion は `.env` を読みません。
 
@@ -121,14 +122,15 @@ taxion runtime auth --dispatch DISPATCH-ID --system-prompt-file prompts/coder.md
 
 **確認結果は認証や実行準備完了の証明ではありません。** `ready` / `doctor` コマンドは実装されていません。CLI 全体の option と制約は[CLI リファレンス](cli-reference.md)を参照してください。
 
-## 残予算を考慮する指示の設計（未実装）
+## 残予算を考慮する指示の設定
 
 [ADR-0029](adr/0029-separate-budget-guidance-from-provider-quota.md) は、
-残量をモデルへ伝える方式を採択しています。現在の schema に
-`execution.budgetGuidance` や対応する環境変数・CLI option はありません。
-これらを現在の設定ファイルに書くと未知の field として拒否されます。
+残量をモデルへ伝える方式を定義しています。`execution.budgetGuidance` に
+`off` / `flow` / `account` を指定できます。環境変数は
+`TAXION_EXECUTION_BUDGET_GUIDANCE`、依頼ごとの選択は
+`request --budget-guidance MODE` です。不正値は実行前に拒否します。
 
-実装時は Global / Project / 環境変数で既定値を選び、実行依頼の明示選択を
+Global / Project / 環境変数で既定値を選び、実行依頼の明示選択を
 最後に適用します。指示ごとの未指定は既定値を継承し、すべて未指定なら
 外部照会のない `flow` とします。`off` は補足指示なし、
 `account` は明示承認した provider account の quota 読取りを追加する方式です。
@@ -147,5 +149,29 @@ Copilot SDK の account quota は resource ごとの requests・残り割合等�
 session の累積 cost とは別です。公式 Billing API も期間別使用量の report で、
 `netQuantity` を account 残量としてそのまま使えません。
 組織・enterprise が課金するライセンスの使用量は個人 Billing endpoint に含まれません。
-SDK 照会が失敗しても、管理者用 token や非公開 endpoint に自動で切り替えない設計です。
+SDK 照会が失敗しても、管理者用 token や非公開 endpoint に自動で切り替えません。
 一次資料との対応は [ADR-0029](adr/0029-separate-budget-guidance-from-provider-quota.md)を参照してください。
+
+通常は `flow` のままで外部照会を避けられます。`account` を選ぶと、選択した
+account の読取りが Task 承認に含まれます。新規の `task track` /
+`conversation intake` も未指定値を設定から解決し、既存 Task 更新の省略値は
+保存済み policy を維持します。明示した Task JSON の例は次のとおりです。
+
+```json
+{
+  "budgetGuidance": {
+    "mode": "account",
+    "source": "request",
+    "allowedModes": ["off", "flow", "account"],
+    "accountReadApproved": true
+  }
+}
+```
+
+これは Task の部分例です。`runtime start|send --budget-guidance off` などで
+一回の指示を変更できるのは、承認済み `allowedModes` の範囲内だけです。
+`account` を含まない旧契約へ、この option で読取り権限を追加できません。
+観測値と送信した補足は `records show` の `budget-guidance` receipt に残ります。
+quota 照会は送信ごとに一回、5秒と実行残時間の短い方で打ち切り、retry しません。
+取得不能・未対応・古い観測は理由付きで示し、account 不一致や既知の枠消尽は
+新しいモデル指示を拒否します。追加課金枠は暗黙に使いません。

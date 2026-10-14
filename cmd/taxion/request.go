@@ -101,7 +101,8 @@ func planNewRequest(ctx context.Context, db *store.Store, selected config.Config
 	worker, err := copilot.New(copilot.Config{
 		Role: "ORCHESTRATOR", SystemPrompt: requestPlannerPrompt, WorkingDirectory: task.Worktree,
 		Configuration: selection, AvailableTools: []string{}, ResponseSchema: schema,
-		MaxAICredits: credits, CLIPath: cli, BaseDirectory: base,
+		BudgetGuidance: task.BudgetGuidance,
+		MaxAICredits:   credits, CLIPath: cli, BaseDirectory: base,
 	})
 	if err != nil {
 		return result, err
@@ -125,6 +126,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	repairs := fs.Int("max-repairs", 1, "maximum repair turns after independent review")
 	cli := fs.String("cli", "", "Copilot CLI executable")
 	base := fs.String("base-directory", "", "Copilot state directory")
+	budgetGuidance := fs.String("budget-guidance", "", "guidance for this request: off, flow or account (default: configuration, then flow)")
 	var paths stringListFlag
 	fs.Var(&paths, "context-path", "committed text file to send to Planner (repeatable; total up to 64 KiB)")
 	if err := fs.Parse(args); err != nil {
@@ -141,6 +143,10 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		return err
 	}
 	selected := resolved.Config
+	guidance, err := core.NewBudgetGuidance(selected.Execution.BudgetGuidance, *budgetGuidance)
+	if err != nil {
+		return err
+	}
 	if selected.Repository.Path != *repo {
 		return fmt.Errorf("request repository differs from the configured repository")
 	}
@@ -198,9 +204,11 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		"Repository: %s\nWorktree: %s\nBranch: %s\nBaseline: %s\nRuntime account: %s\n"+
 			"Token ceiling (Planner + Coder + Reviewer): %d; deadline: %s; repairs: %d\n"+
 			"Per-session soft credit ceiling: %g (not a total or hard cap)\n"+
+			"Budget guidance: %s (%s); account quota read: %t\n"+
 			"Planner receives the request, committed path list and selected context files; no tools.\n"+
 			"有料のPlanner対話を開始するには /plan、取り消すには /quit。まだコードは変更しません。\n",
-		*repo, root, branch, baseline, selected.Runtime.Account, *tokens, *timeout, *repairs, *credits); err != nil {
+		*repo, root, branch, baseline, selected.Runtime.Account, *tokens, *timeout, *repairs, *credits,
+		guidance.Mode, guidance.Source, guidance.AccountReadApproved); err != nil {
 		return err
 	}
 	line, err := read()
@@ -223,7 +231,8 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			ID: id + "-planning", Title: request, Repo: *repo, Type: "DESIGN", Status: core.Draft,
 			Issue: "NOT_REQUIRED: local request planning", CreatedFrom: source,
 			Owner: "CODER", Reviewer: "REVIEWER", Objective: request,
-			Worktree: root, Branch: branch, BaselineSHA: baseline,
+			BudgetGuidance: core.CloneBudgetGuidance(guidance),
+			Worktree:       root, Branch: branch, BaselineSHA: baseline,
 		},
 		PlanningSelection: &selected, PlanningReason: "Human selected /plan for bounded request clarification",
 		ConfigurationDecisionID: core.ConfigurationApprovalID(selected.Execution.ApprovalRef, id+"-planning"),
@@ -324,7 +333,8 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 					Acceptance: proposal.Acceptance, ValidationCommands: proposal.ValidationCommands,
 					RequiredEvidence: []string{"work-report"}, ExitCondition: "Independent review approves all acceptance criteria",
 					OutputMode: core.OutputModeWorktreeTreeSnapshot, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessAll},
-					Worktree: root, Branch: branch, BaselineSHA: baseline,
+					BudgetGuidance: core.CloneBudgetGuidance(guidance),
+					Worktree:       root, Branch: branch, BaselineSHA: baseline,
 				},
 			})
 			if err != nil {

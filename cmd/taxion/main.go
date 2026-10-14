@@ -535,6 +535,7 @@ func runtimeCmd(args []string) error {
 	reviewSource := fs.String("review-source-worktree", "", "repository worktree used to create the independent Reviewer worktree")
 	tools := fs.String("tools", "", "comma-separated SDK tool allowlist (default: none)")
 	promptFile := fs.String("prompt-file", "", "follow-up instruction file (send only)")
+	budgetGuidance := fs.String("budget-guidance", "", "approved per-send guidance mode: off, flow or account (start/send only)")
 	messageFile := fs.String("message-file", "", "Conventional/Contextual commit message file (commit only)")
 	scanner := fs.String("scanner", "betterleaks", "trusted Betterleaks 1.9.0 executable (commit or --managed-commit)")
 	managedCommit := fs.Bool("managed-commit", false, "enable the bound Coder's taxion_commit SDK tool")
@@ -557,6 +558,12 @@ func runtimeCmd(args []string) error {
 	}
 	if *timeout <= 0 {
 		return fmt.Errorf("runtime %s: --timeout must be positive", action)
+	}
+	if *budgetGuidance != "" && action != "start" && action != "send" {
+		return fmt.Errorf("runtime: --budget-guidance applies only to start/send")
+	}
+	if *budgetGuidance != "" && *budgetGuidance != "off" && *budgetGuidance != "flow" && *budgetGuidance != "account" {
+		return fmt.Errorf("runtime: --budget-guidance requires off, flow or account")
 	}
 	if action == "send" && *promptFile == "" {
 		return fmt.Errorf("runtime send: --prompt-file is required")
@@ -595,6 +602,10 @@ func runtimeCmd(args []string) error {
 	dispatch, ok := state.Graph.GraphDispatch(*dispatchID)
 	if !ok {
 		return fmt.Errorf("runtime: Dispatch %q not found", *dispatchID)
+	}
+	if *budgetGuidance != "" && (dispatch.Instruction.BudgetGuidance == nil ||
+		!slices.Contains(dispatch.Instruction.BudgetGuidance.AllowedModes, *budgetGuidance)) {
+		return fmt.Errorf("runtime: --budget-guidance is outside the saved Dispatch approval")
 	}
 	if action == "stop" {
 		var invalidOption string
@@ -706,8 +717,8 @@ func runtimeCmd(args []string) error {
 			var cursor uint64
 			cursor, operationErr = control.EventCursor(dispatch.ID)
 			if operationErr == nil {
-				operationErr = control.Send(ctx, dispatch.ID,
-					"Begin executing the active Dispatch under the durable Task Graph contract in your system instructions.")
+				operationErr = control.SendWithBudgetGuidance(ctx, dispatch.ID,
+					"Begin executing the active Dispatch under the durable Task Graph contract in your system instructions.", *budgetGuidance)
 			}
 			if operationErr == nil {
 				fmt.Fprintf(os.Stderr, "taxion: started runtime session %s for Dispatch %s\n", sessionID, dispatch.ID)
@@ -721,7 +732,7 @@ func runtimeCmd(args []string) error {
 			var cursor uint64
 			cursor, operationErr = control.EventCursor(dispatch.ID)
 			if operationErr == nil {
-				operationErr = control.Send(ctx, dispatch.ID, string(prompt))
+				operationErr = control.SendWithBudgetGuidance(ctx, dispatch.ID, string(prompt), *budgetGuidance)
 			}
 			if operationErr == nil {
 				operationErr = streamEvents(ctx, control, dispatch, cursor, os.Stdout)

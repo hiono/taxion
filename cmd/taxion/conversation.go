@@ -115,6 +115,12 @@ func conversationCmd(args []string, output io.Writer) error {
 				if err := core.DecodeGraphInput(input, &request); err != nil {
 					return err
 				}
+				if request.Task.BudgetGuidance == nil {
+					request.Task.BudgetGuidance, err = newTaskBudgetGuidance()
+					if err != nil {
+						return err
+					}
+				}
 				task, err = controller.ProposeIntake(db, request)
 			} else {
 				var request controller.IntakeConfirmation
@@ -226,7 +232,8 @@ func conversationCmd(args []string, output io.Writer) error {
 	worker, err := copilot.New(copilot.Config{
 		Role: "ORCHESTRATOR", SystemPrompt: prompt,
 		WorkingDirectory: tracked.Worktree, Configuration: selection,
-		CLIPath: *cli, BaseDirectory: *base, MaxAICredits: *credits,
+		BudgetGuidance: tracked.BudgetGuidance,
+		CLIPath:        *cli, BaseDirectory: *base, MaxAICredits: *credits,
 		AvailableTools: []string{}, ResponseSchema: schema,
 	})
 	if err != nil {

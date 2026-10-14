@@ -164,12 +164,20 @@ func (c *Controller) Start(ctx context.Context, dispatchID string) (string, erro
 }
 
 func (c *Controller) Send(ctx context.Context, dispatchID, prompt string) error {
+	return c.SendWithBudgetGuidance(ctx, dispatchID, prompt, "")
+}
+
+func (c *Controller) SendWithBudgetGuidance(ctx context.Context, dispatchID, prompt, mode string) error {
 	dispatch, err := c.boundDispatch(dispatchID)
 	if err != nil {
 		return err
 	}
 	if dispatch.Status == core.DispatchCancelRequested || dispatch.Status == core.DispatchSuspended {
 		return fmt.Errorf("taxion: Dispatch status %s does not authorize sending instructions", dispatch.Status)
+	}
+	if policy := dispatch.Instruction.BudgetGuidance; mode != "" &&
+		(policy == nil || !slices.Contains(policy.AllowedModes, mode)) {
+		return fmt.Errorf("taxion: budget guidance override requires approval")
 	}
 	if err := c.authorizeExecution(ctx, dispatchID, "SEND"); err != nil {
 		return err
@@ -180,10 +188,37 @@ func (c *Controller) Send(ctx context.Context, dispatchID, prompt string) error 
 	if err := c.checkServiceAccess(ctx, dispatchID, dispatch.RuntimeSessionID); err != nil {
 		return err
 	}
+	if dispatch.Status == core.DispatchRunning {
+		return c.markRunning(dispatchID)
+	}
+	observation, err := c.prepareBudgetGuidance(ctx, dispatch, mode)
+	if err != nil {
+		return errors.Join(err, c.recordBudgetGuidance(dispatch, observation, "denied", err))
+	}
 	if err := c.markRunning(dispatchID); err != nil {
 		return err
 	}
-	if err := c.runtime.Send(ctx, dispatch.RuntimeSessionID, prompt); err != nil {
+	if observation != nil {
+		if err := c.AuthorizeTools(ctx, dispatchID, dispatch.RuntimeSessionID); err != nil {
+			return err
+		}
+	}
+	refreshQuotaState(observation, time.Now().UTC())
+	supplement, err := budgetSupplement(observation)
+	if err != nil {
+		return err
+	}
+	if observation != nil && observation.Account != nil && observation.Account.State == "available" &&
+		observation.Account.ExecutionDenied {
+		return errors.Join(fmt.Errorf("taxion: account entitlement exhausted; paid overage is not authorized"),
+			c.recordBudgetGuidance(dispatch, observation, "denied", nil))
+	}
+	if err := c.recordBudgetGuidance(dispatch, observation, "prepared", nil); err != nil {
+		return err
+	}
+	sendErr := c.runtime.Send(ctx, dispatch.RuntimeSessionID, prompt+supplement)
+	recordErr := c.recordBudgetGuidance(dispatch, observation, "send-returned", sendErr)
+	if err := errors.Join(sendErr, recordErr); err != nil {
 		if ctx.Err() != nil {
 			stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()

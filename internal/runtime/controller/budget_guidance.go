@@ -1,0 +1,249 @@
+package controller
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"math"
+	"reflect"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/hiono/taxion/internal/config"
+	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/runtime"
+	"github.com/hiono/taxion/internal/store"
+)
+
+type budgetObservation struct {
+	Mode                 string                 `json:"mode"`
+	Source               string                 `json:"source"`
+	ObservedAt           time.Time              `json:"observedAt"`
+	FlowID               string                 `json:"flowId,omitempty"`
+	FlowState            string                 `json:"flowState"`
+	TokenCeiling         *int64                 `json:"tokenCeiling,omitempty"`
+	SessionTokenCeiling  *int64                 `json:"sessionTokenCeiling,omitempty"`
+	UsedTokens           *int64                 `json:"usedTokens,omitempty"`
+	RemainingTokens      *int64                 `json:"remainingTokens,omitempty"`
+	Deadline             *time.Time             `json:"deadline,omitempty"`
+	UnfinishedRoles      []string               `json:"unfinishedRoles,omitempty"`
+	SessionCreditCeiling *float64               `json:"sessionCreditCeiling,omitempty"`
+	Account              *runtime.QuotaSnapshot `json:"account,omitempty"`
+}
+
+func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.GraphDispatch, override string) (*budgetObservation, error) {
+	policy := dispatch.Instruction.BudgetGuidance
+	if policy == nil {
+		if override != "" {
+			return nil, fmt.Errorf("taxion: legacy Dispatch has no approved budget guidance; reapproval is required")
+		}
+		return nil, nil
+	}
+	if err := policy.Validate(); err != nil {
+		return nil, err
+	}
+	mode, source := policy.Mode, policy.Source
+	if override != "" {
+		if !slices.Contains(policy.AllowedModes, override) {
+			return nil, fmt.Errorf("taxion: budget guidance override is outside the approved modes")
+		}
+		mode, source = override, "request"
+	}
+	observation := &budgetObservation{Mode: mode, Source: source, ObservedAt: time.Now().UTC(), FlowState: "not-applicable"}
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return nil, err
+	}
+	for _, flow := range state.Graph.ReviewFlows {
+		if !slices.Contains(flow.DispatchIDs, dispatch.ID) {
+			continue
+		}
+		if flow.Status != "RUNNING" || !time.Now().Before(flow.Deadline) {
+			return nil, fmt.Errorf("taxion: budget guidance cannot send after flow stop or deadline")
+		}
+		used, known := flowTokens(state.Graph, flow)
+		if !known || used >= flow.MaxTokens {
+			return nil, fmt.Errorf("taxion: Flow usage is unknown or exhausted; no new instruction sent")
+		}
+		if mode != "off" {
+			observation.FlowID, observation.FlowState = flow.ID, "available"
+			observation.TokenCeiling, observation.Deadline = &flow.MaxTokens, &flow.Deadline
+			remaining := flow.MaxTokens - used
+			observation.UsedTokens, observation.RemainingTokens = &used, &remaining
+			observation.UnfinishedRoles = []string{dispatch.Recipient}
+			if dispatch.Recipient == "CODER" {
+				observation.UnfinishedRoles = append(observation.UnfinishedRoles, "REVIEWER")
+			}
+		}
+		break
+	}
+	if provider, ok := c.runtime.(interface{ SessionCreditCeiling() float64 }); ok && mode != "off" {
+		if value := provider.SessionCreditCeiling(); value > 0 {
+			observation.SessionCreditCeiling = &value
+		}
+	}
+	if mode != "account" {
+		return observation, nil
+	}
+	if !policy.AccountReadApproved || dispatch.Configuration == nil {
+		return nil, fmt.Errorf("taxion: account quota read requires approved account guidance and bound configuration")
+	}
+	var selected config.Config
+	if err := core.DecodeGraphInput(strings.NewReader(string(dispatch.Configuration.Selection)), &selected); err != nil {
+		return nil, err
+	}
+	return readBudgetQuota(ctx, c.runtime, selected, observation)
+}
+
+func readBudgetQuota(ctx context.Context, worker runtime.Identity, selected config.Config,
+	observation *budgetObservation) (*budgetObservation, error) {
+	quota := runtime.QuotaSnapshot{Provider: selected.Runtime.Provider, Account: selected.Runtime.Account,
+		State: "unsupported", Source: "runtime-capability", Scope: "selected account", Unit: "unknown",
+		ObservedAt: time.Now().UTC(), Reason: "runtime does not expose account quota"}
+	if reader, ok := worker.(runtime.AccountQuota); ok {
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		if observation.Deadline != nil {
+			var end context.CancelFunc
+			readCtx, end = context.WithDeadline(readCtx, *observation.Deadline)
+			defer end()
+		}
+		var err error
+		quota, err = reader.ReadAccountQuota(readCtx, selected.Runtime.Account)
+		cancel()
+		if err != nil {
+			quota.State, quota.Reason = "unavailable", "runtime rejected the selected-account quota read; send denied"
+			observation.Account = &quota
+			return observation, err
+		}
+	}
+	if quota.Account != selected.Runtime.Account || quota.Provider != selected.Runtime.Provider {
+		quota.State, quota.Reason = "unavailable", "quota account/provider mismatch; send denied"
+		observation.Account = &quota
+		return observation, fmt.Errorf("taxion: quota observation account/provider mismatch")
+	}
+	switch quota.State {
+	case "available":
+		if quota.ObservedAt.IsZero() || quota.Resource == "" || quota.Scope == "" || quota.Unit == "" || quota.Source == "" ||
+			quota.Used != nil && *quota.Used < 0 ||
+			quota.Entitlement != nil && *quota.Entitlement < -1 ||
+			quota.RemainingPercentage != nil && (math.IsNaN(*quota.RemainingPercentage) ||
+				math.IsInf(*quota.RemainingPercentage, 0) || *quota.RemainingPercentage < 0 || *quota.RemainingPercentage > 100) {
+			quota.State, quota.Reason = "unavailable", "runtime returned incomplete or invalid quota values"
+			quota.Used, quota.Entitlement, quota.Remaining, quota.RemainingPercentage = nil, nil, nil, nil
+			quota.Unlimited, quota.ExecutionDenied = false, false
+		}
+	case "unsupported", "unavailable", "stale":
+		if quota.Reason == "" {
+			return nil, fmt.Errorf("taxion: nonavailable quota requires an explicit reason")
+		}
+	default:
+		return nil, fmt.Errorf("taxion: runtime returned an invalid quota observation state")
+	}
+	observation.Account = &quota
+	return observation, nil
+}
+
+func refreshQuotaState(observation *budgetObservation, now time.Time) {
+	if observation == nil || observation.Account == nil || observation.Account.State != "available" {
+		return
+	}
+	quota := observation.Account
+	if now.Sub(quota.ObservedAt) > time.Minute || quota.ObservedAt.After(now.Add(time.Second)) ||
+		quota.ExpiresAt != nil && !now.Before(*quota.ExpiresAt) {
+		quota.State, quota.Reason = "stale", "quota observation is outside its freshness interval"
+	}
+}
+
+func (c *Controller) recordBudgetGuidance(dispatch core.GraphDispatch, observation *budgetObservation, phase string, sendErr error) error {
+	if observation == nil {
+		return nil
+	}
+	supplement, err := budgetSupplement(observation)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(struct {
+		Observation *budgetObservation `json:"observation"`
+		Phase       string             `json:"phase"`
+		SendError   bool               `json:"sendError,omitempty"`
+		Supplement  string             `json:"supplement"`
+	}{observation, phase, sendErr != nil, supplement})
+	if err != nil {
+		return err
+	}
+	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		current, ok := state.Graph.GraphDispatch(dispatch.ID)
+		if !ok || current.RuntimeSessionID != dispatch.RuntimeSessionID ||
+			current.RuntimeConfigHash != c.runtime.ConfigHash() ||
+			!reflect.DeepEqual(current.Instruction.BudgetGuidance, dispatch.Instruction.BudgetGuidance) {
+			return fmt.Errorf("taxion: budget observation binding changed")
+		}
+		var sequence uint64 = 1
+		for _, receipt := range state.Records.Events {
+			if receipt.DispatchID == dispatch.ID && receipt.Type == "budget-guidance" {
+				sequence++
+			}
+		}
+		state.Records.Events = append(state.Records.Events, store.RuntimeReceipt{
+			DispatchID: dispatch.ID, SessionID: dispatch.RuntimeSessionID, Type: "budget-guidance", StreamID: "budget-guidance",
+			Sequence: sequence, At: time.Now().UTC(), Payload: string(body), Hash: receiptHash(string(body)),
+		})
+		return nil
+	})
+}
+
+func budgetSupplement(observation *budgetObservation) (string, error) {
+	if observation == nil || observation.Mode == "off" {
+		return "", nil
+	}
+	body, err := json.Marshal(observation)
+	if err != nil {
+		return "", err
+	}
+	return "\n\nTaxion budget observation (advisory, not new authorization or a hard per-turn cap):\n" +
+		string(body) + "\nPrioritize the approved acceptance and remaining roles. Avoid optional work and repeating saved investigation. " +
+		"Preserve partial work and evidence for recovery. Do not skip validation or independent review to claim completion. " +
+		"Unknown/stale quota is not zero, free or unlimited; account entitlement does not increase the approved Flow budget.", nil
+}
+
+func isolatedBudgetGuidance(ctx context.Context, worker runtime.Identity, policy *core.BudgetGuidancePolicy,
+	selected config.Config, maxTokens int64) (*budgetObservation, string, error) {
+	if policy == nil {
+		return nil, "", nil
+	}
+	if err := policy.Validate(); err != nil {
+		return nil, "", err
+	}
+	observation := &budgetObservation{Mode: policy.Mode, Source: policy.Source,
+		ObservedAt: time.Now().UTC(), FlowState: "not-applicable"}
+	if policy.Mode != "off" {
+		observation.SessionTokenCeiling = &maxTokens
+		observation.UnfinishedRoles = []string{"ORCHESTRATOR"}
+		if deadline, ok := ctx.Deadline(); ok {
+			observation.Deadline = &deadline
+		}
+		if ceiling, ok := worker.(interface{ SessionCreditCeiling() float64 }); ok {
+			if value := ceiling.SessionCreditCeiling(); value > 0 {
+				observation.SessionCreditCeiling = &value
+			}
+		}
+	}
+	if identity, ok := worker.(runtime.BudgetGuidanceIdentity); ok &&
+		!reflect.DeepEqual(identity.BudgetGuidancePolicy(), policy) {
+		return observation, "", fmt.Errorf("taxion: isolated runtime guidance differs from approved Task")
+	}
+	if policy.Mode == "account" {
+		var err error
+		observation, err = readBudgetQuota(ctx, worker, selected, observation)
+		if err != nil {
+			return observation, "", err
+		}
+	}
+	refreshQuotaState(observation, time.Now().UTC())
+	text, err := budgetSupplement(observation)
+	if quota := observation.Account; quota != nil && quota.State == "available" && quota.ExecutionDenied {
+		return observation, text, fmt.Errorf("taxion: account entitlement exhausted; paid overage is not authorized")
+	}
+	return observation, text, err
+}

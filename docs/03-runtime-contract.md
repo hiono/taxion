@@ -277,8 +277,8 @@ controller validation submission を選ぶ。従来の prompt 指定・空 allow
 操作は[利用者ガイド](user-guide.md)が所有する。
 
 残予算を指示へ付加する設計は [ADR-0029](adr/0029-separate-budget-guidance-from-provider-quota.md)
-に採択したが、現在の adapter はこの補足指示や account quota の取得を実装していない。
-実装時は Controller が保存済み Flow usage と adapter の非推論 read-only 観測を分離し、
+に採択し、Controller の送信補足と Copilot adapter の quota 読取りを実装した。
+Controller は保存済み Flow usage と adapter の非推論 read-only 観測を分離し、
 `off` / `flow` / `account` の解決結果に応じて既存の `Send` に補足する。
 動的観測は送信ごとの receipt に保存し、system prompt の変更や別の有料 turn を必要としない。
 単位・account・resource・対象期間・取得元・観測時刻と

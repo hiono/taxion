@@ -25,6 +25,11 @@ func reviewFlowFixture(t *testing.T, decisions ...core.TaskDecision) (*store.Sto
 
 func reviewFlowFixtureWithOutputMode(t *testing.T, outputMode string,
 	decisions ...core.TaskDecision) (*store.Store, string, ReviewFlowRequest) {
+	return reviewFlowFixtureWithPolicy(t, outputMode, nil, decisions...)
+}
+
+func reviewFlowFixtureWithPolicy(t *testing.T, outputMode string, guidance *core.BudgetGuidancePolicy,
+	decisions ...core.TaskDecision) (*store.Store, string, ReviewFlowRequest) {
 	t.Helper()
 	dir := t.TempDir()
 	root := filepath.Join(dir, "repo")
@@ -63,10 +68,11 @@ func reviewFlowFixtureWithOutputMode(t *testing.T, outputMode string,
 		ValidationCommands: []string{"test -s internal/app.go"}, ExitCondition: "verified application",
 		Branch: "work/task", Worktree: root, BaselineSHA: gitTest(t, root, "rev-parse", "HEAD"),
 		CreatedFrom: "human:1", AuthorizationID: "implementation-authorization",
-		OutputMode: outputMode,
-		Decisions:  []core.TaskDecision{{ID: "implementation-authorization", Source: "human:1", Text: "authorize implementation"}},
-		MemoryRefs: []string{"decision:" + strconv.FormatInt(id, 10)},
-		FileAccess: &core.FileAccessPolicy{Level: core.FileAccessAll},
+		OutputMode:     outputMode,
+		Decisions:      []core.TaskDecision{{ID: "implementation-authorization", Source: "human:1", Text: "authorize implementation"}},
+		MemoryRefs:     []string{"decision:" + strconv.FormatInt(id, 10)},
+		FileAccess:     &core.FileAccessPolicy{Level: core.FileAccessAll},
+		BudgetGuidance: core.CloneBudgetGuidance(guidance),
 	}
 	task.Decisions = append(task.Decisions, decisions...)
 	if err := graph.Track(task, "human", "authorize Task"); err != nil {
