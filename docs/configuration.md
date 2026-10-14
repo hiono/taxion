@@ -113,6 +113,8 @@ taxion runtime auth --dispatch DISPATCH-ID --system-prompt-file prompts/coder.md
 
 `--task` は現在の設定が Task の記録済み承認に一致するか、`--dispatch` は Task 承認と発行済み Dispatch 指示の両方に一致するかを検査します。いずれも Human の身元や認証を証明しません。
 
+`request` は設定の `execution.approvalRef` を変えず、`REF@task:PRIMARY_TASK_ID` という依頼ごとの設定承認 ID を生成します。同じ設定で次の依頼を始めるたびに設定ファイルを書き換える必要はありません。承認内容はその Task と明示した Reviewer Task だけを対象にし、他の依頼には使えません。従来の `approvalRef` と同名の decision も引き続き使えます。
+
 `runtime auth` は Dispatch の承認済み設定に対して、実効 Copilot account が一致するかを確認し、session を作成しません。CLI は `--system-prompt-file` も要求します。成功しても repository 操作主体、契約適格性、legacy credential reference の解決は未確認です。設定確認や runtime auth の成功を実行許可の代わりにしないでください。
 
 固定 file を選べた Task 承認に Dispatch の設定をひも付けるときは `taxion config bind --dispatch DISPATCH-ID` を使います。これは認証、contract 適格性、runtime session binding を確認しません。

@@ -41,6 +41,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	var strictResult bool
 	var compactContext bool
 	var validationSubmission bool
+	var builtinPrompts bool
 	var scanner string
 	var maxAICredits float64
 	switch action {
@@ -52,6 +53,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		fs.StringVar(&id, "id", "", "review flow ID")
 		fs.StringVar(&coderPrompt, "coder-prompt-file", "", "Coder system prompt")
 		fs.StringVar(&reviewerPrompt, "reviewer-prompt-file", "", "Reviewer system prompt")
+		fs.BoolVar(&builtinPrompts, "builtin-prompts", false, "use bundled snapshot-mode role prompts and file-tool defaults instead of prompt files")
 		fs.StringVar(&cli, "cli", "", "Copilot CLI path")
 		fs.StringVar(&base, "base-directory", "", "Copilot state directory")
 		fs.Float64Var(&maxAICredits, "max-ai-credits", 0, "per-session soft AI-credit ceiling, not a flow-wide budget (zero: unset; minimum: 30)")
@@ -259,19 +261,39 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		}
 		return printJSON(flow)
 	case "run", "step":
-		if coderPrompt == "" || reviewerPrompt == "" {
+		if builtinPrompts && (coderPrompt != "" || reviewerPrompt != "" || managedCommit || managedStage) {
+			return fmt.Errorf("workflow: --builtin-prompts cannot be combined with prompt files or managed commit/stage")
+		}
+		if !builtinPrompts && (coderPrompt == "" || reviewerPrompt == "") {
 			return fmt.Errorf("workflow run/step requires --coder-prompt-file and --reviewer-prompt-file")
 		}
 		prompts := map[string]string{}
-		for role, path := range map[string]string{"CODER": coderPrompt, "REVIEWER": reviewerPrompt} {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return fmt.Errorf("workflow run: read %s prompt: %w", role, err)
+		if builtinPrompts {
+			flow, ok := state.Graph.ReviewFlow(id)
+			if !ok || flow.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot {
+				return fmt.Errorf("workflow: --builtin-prompts requires a saved snapshot-mode flow")
 			}
-			if strings.TrimSpace(string(data)) == "" {
-				return fmt.Errorf("workflow run: %s prompt is empty", role)
+			prompts = map[string]string{"CODER": requestCoderPrompt, "REVIEWER": requestReviewerPrompt}
+			validationSubmission, strictResult, compactContext = true, true, true
+			set := map[string]bool{}
+			fs.Visit(func(option *flag.Flag) { set[option.Name] = true })
+			if !set["coder-tools"] {
+				coderTools = "view,create,edit,apply_patch"
 			}
-			prompts[role] = string(data)
+			if !set["reviewer-tools"] {
+				reviewerTools = "view"
+			}
+		} else {
+			for role, path := range map[string]string{"CODER": coderPrompt, "REVIEWER": reviewerPrompt} {
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return fmt.Errorf("workflow run: read %s prompt: %w", role, err)
+				}
+				if strings.TrimSpace(string(data)) == "" {
+					return fmt.Errorf("workflow run: %s prompt is empty", role)
+				}
+				prompts[role] = string(data)
+			}
 		}
 		tools := map[string][]string{}
 		for role, list := range map[string]string{"CODER": coderTools, "REVIEWER": reviewerTools} {

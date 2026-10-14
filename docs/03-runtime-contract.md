@@ -262,6 +262,20 @@ Release 0.1.0 の文書 dogfood における実 skill 利用は Issue #78 の未
 
 ## Dispatch の実行と context
 
+`taxion request` は元の依頼を DRAFT として保存し、既存の tool-free Planner
+観測を使って確認質問と実装計画を提案する。Planner の提案は実行承認ではない。
+Human の `/approve` を受けて CLI が intake confirmation と review flow を作り、
+既存の Controller で Coder、検証、独立 Reviewer を実行する。
+Planner の全 turn の観測 token を共有上限から差し引き、期限を延長せずに引き継ぐ。
+相談記録・usage・失敗を private receipt に保存し、失敗時の自動再送は行わない。
+`workflow run|step --builtin-prompts` は snapshot mode の明示 opt-in で、
+bundled role prompt、file tool、strict result、compact context、
+controller validation submission を選ぶ。従来の prompt 指定・空 allowlist の既定は変えない。
+依頼ごとの設定 decision は `REF@task:PRIMARY_TASK_ID` で識別し、
+設定 tuple と追加 Reviewer Task の exact approval を維持する。
+判断根拠は [ADR-0030](adr/0030-refine-natural-language-requests-with-planner.md)、
+操作は[利用者ガイド](user-guide.md)が所有する。
+
 残予算を指示へ付加する設計は [ADR-0029](adr/0029-separate-budget-guidance-from-provider-quota.md)
 に採択したが、現在の adapter はこの補足指示や account quota の取得を実装していない。
 実装時は Controller が保存済み Flow usage と adapter の非推論 read-only 観測を分離し、

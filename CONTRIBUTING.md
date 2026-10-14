@@ -73,6 +73,17 @@ without identifying which describes the current implementation.
 
 ## Model-free regression and recovery evidence
 
+The first-use goal is a natural-language request refined by Planner and handed
+to Coder/validation/independent Reviewer without copying JSON or role prompts.
+`request` reuses intake, sourced configuration checks and the existing flow
+runner; it does not create another execution engine. Bundled prompts are an
+explicit snapshot-mode opt-in, leaving the legacy empty-tool defaults intact.
+See [ADR-0030](docs/adr/0030-refine-natural-language-requests-with-planner.md).
+Run `go test ./cmd/taxion -run TestRequest` for offline clarification, refinement,
+approval and same-tree review, plus refusal and receipt cases. The fixture
+uses independently authored responses, real local Git and no model/login/network.
+This is not proof that a real model produces an appropriate plan or loads skills.
+
 File-access approval, retained-tree review and cancellation-only attachment
 are separate decisions in ADRs 0026–0028. Changes in these areas must preserve
 FILE-001, SHA-001, STOP-001, LED-002 and BUD-001 in `docs/01-guardrails.md`.

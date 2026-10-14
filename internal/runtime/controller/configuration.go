@@ -109,7 +109,8 @@ func checkTaskConfiguration(graph core.TaskGraph, taskID string, candidate confi
 		return core.TaskDecision{}, fmt.Errorf("taxion: pending Human decision requires resolution")
 	}
 	for _, decision := range task.Decisions {
-		if decision.ID != candidate.Execution.ApprovalRef {
+		if decision.ID != candidate.Execution.ApprovalRef &&
+			!strings.HasPrefix(decision.ID, candidate.Execution.ApprovalRef+"@task:") {
 			continue
 		}
 		if strings.TrimSpace(decision.Source) == "" {
@@ -159,7 +160,7 @@ func checkDispatchConfiguration(graph core.TaskGraph, dispatchID string, candida
 		return core.TaskDecision{}, fmt.Errorf("taxion: configuration requires an active Dispatch Task")
 	}
 	for _, recorded := range dispatch.Instruction.Decisions {
-		if recorded.ID != candidate.Execution.ApprovalRef {
+		if recorded.ID != decision.ID {
 			continue
 		}
 		if recorded != decision {

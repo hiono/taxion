@@ -6,6 +6,8 @@ Taxion は coding agent や Git の認証主体を提供しません。token 上
 
 ## 使う
 
+人のことばで依頼を相談する入口は `taxion request` です。Planner と計画を修正し、承認後に Coder・検証・独立レビューへ進めます。JSON や role prompt のコピペは不要です。設定・上限・現在の制約は[利用者ガイド](docs/user-guide.md)に記載しています。実モデルでの通し受入れは未確認です。
+
 - [利用者ガイド](docs/user-guide.md) — 導入、設定、依頼の承認から独立レビューまで
 - [設定ガイド](docs/configuration.md) — Global／Project 設定、環境変数、確認コマンド
 - [CLI リファレンス](docs/cli-reference.md) — コマンド、入力条件、運用上の制約

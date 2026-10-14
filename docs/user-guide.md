@@ -89,7 +89,30 @@ skill が参照する補助ファイルは、通常の worktree / fileAccess の
 文書を合格にせず、親の開発支援 session の起動ログも代用しません。
 原本は private に保持し、公開記録には秘密値・私用パスを含めません。
 
+## 人のことばで依頼して計画を相談する
+
+設定と `taxion init` が済んでいれば、`request` で Planner に変更を相談できます。JSON や Coder / Reviewer の prompt ファイルを作る必要はありません。作業用の clean な Git worktree で実行します。repository は設定と一致する名前を明示します。
+
+```sh
+taxion request --repo owner/repository --max-tokens 40000 \
+  --timeout 20m --max-ai-credits 30 --context-path README.md
+```
+
+最初に「この画面に検索機能を追加して」のように依頼を書きます。表示された repository・worktree・実行 account・上限を確認し、`/plan` で有料の Planner 対話を開始します。Planner の質問には人のことばで答え、提案が意図と違えば修正を伝えます。Planner は目的、変更範囲、完了条件、検証コマンドを提案します。質問が残っている間は実行できません。
+
+計画と検証コマンドの副作用を確認し、`/approve` でコード作成、ホストでの検証、別 worktree での独立レビューを開始します。Task、承認 hash、Flow、Reviewer Task ID、role prompt、指示の受渡しは Taxion が準備します。終了時に結果、変更が残る worktree、Flow ID、記録の場所を表示します。commit、push、外部 Issue の作成は行いません。
+
+この入口は snapshot mode と `fileAccess: all` を明示して使います。worktree 内の新規ファイルを許可し、Coder には `view,create,edit,apply_patch`、Reviewer には `view` を渡します。変更結果の scope 検査、worktree 外と保護された path の拒否、Reviewer の読み取り専用制約は維持します。細かい file access や外部 skill の承認が必要な場合は、次節の個別手順を使います。
+
+token 上限は Planner の全対話と Coder / Reviewer で共有し、期限は `/plan` から数えます。`--max-ai-credits` は session ごとの soft ceiling で、依頼全体の金額上限や一 turn の hard cap ではありません。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の各回答には費用が発生するため、同じ内容を繰り返し送らないようにします。Planner の失敗を自動 retry しません。
+
+Planner は tool-free で、依頼、これまでの対話、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストだけを読みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。対話中の `/quit` または入力終了ではコードを実行せず、相談記録を残します。保存した相談の自動再開は未対応です。
+
+相談記録は workspace 内の `requests/` に private な JSON、実行イベントは同じ場所の `execution.log` に保存します。停止後の成果物と利用量は従来の Task / Flow / receipt に残ります。無料の合成 runtime と実 Git で依頼、確認質問、計画修正、承認、コード作成、同一 tree の独立レビューまで検証しています。実 Copilot モデルでこの入口を通した受入れは未確認です。
+
 ## 依頼から独立レビューまで
+
+以下は Task 契約や role 設定を個別に指定する手順です。通常の依頼では、前節の `request` を入口にします。
 
 Coder が作業する repository で、承認する baseline から専用 worktree を作ります。Taxion は通常の Coder Dispatch 用 worktree を自動作成しません。`branch`、`worktree`、`baselineSha` はこの worktree と同じ値を Task に記録します。
 

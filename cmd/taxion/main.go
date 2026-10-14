@@ -36,6 +36,7 @@ Usage:
   taxion [--store PATH] <command> [options]
 
 Commands:
+  request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --max-tokens, --timeout, --max-ai-credits)
   config check        Validate fixed Global/Project YAML and environment references ([--sources], [--capabilities], [--task], [--dispatch])
   git check-index     Reject local Taxion and dotenv paths in the actual commit index
   git check-range     Scan every unpublished commit tree and message (--base SHA, --head SHA, --scanner PATH)
@@ -71,8 +72,8 @@ Commands:
   acp                 Serve approved Dispatches over ACP (--coder-system-prompt-file, --max-ai-credits)
   workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON)
   workflow advance    Issue review/repair from the latest verified result (--id required)
-  workflow run        Execute review/repair continuously with saved ceilings (--id and role prompt files required)
-  workflow step       Execute one role turn from a saved review flow (--id and role prompt files required)
+  workflow run        Execute review/repair continuously with saved ceilings (--id; role prompt files or --builtin-prompts)
+  workflow step       Execute one role turn from a saved review flow (--id; role prompt files or --builtin-prompts)
   workflow show       Read the saved review flow and ceilings (--id required)
   workflow recover    Release interrupted runner ownership after recorded execution stop (--file JSON)
   workflow interrupt Request a targeted stop for the active flow (--file JSON)
@@ -139,6 +140,8 @@ func main() {
 	}
 	var err error
 	switch args[0] {
+	case "request":
+		err = requestCmd(args[1:], os.Stdin, os.Stdout)
 	case "config":
 		err = configCmd(args[1:])
 	case "git":

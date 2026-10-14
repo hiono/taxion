@@ -55,6 +55,24 @@ taxion review --task <id> --sha <coder-sha> --repo <repo>
 
 ### Request intake and flow execution
 
+`taxion request --repo REPO --max-tokens N --timeout D --max-ai-credits N`
+starts the new-request console. Human enters the request, explicitly selects
+`/plan` for paid tool-free Planner clarification, replies in natural language,
+and selects `/approve` only after inspecting the proposed scope, acceptance and
+host shell validation commands. Taxion constructs intake, exact-hash approval,
+reviewer configuration approvals, flow and bundled role prompts; no user-authored
+JSON or prompt files are required. `/quit` or EOF during planning leaves records
+but starts no code execution. Planner errors are not retried automatically.
+Planning usage is subtracted from the total observed token ceiling before the
+flow starts; the deadline runs from `/plan`, including time spent at input.
+Execution uses snapshot mode and explicitly approved worktree-wide file access.
+Planner receives the conversation, committed path list and optional selected
+committed context; it has no tools. Private planning receipts and `execution.log`
+are stored under the workspace's `requests/` directory. This command does not
+resume a saved planning console, commit, publish or create external issues.
+Ordinary CI verifies the entire path with a synthetic runtime and actual Git;
+live-model acceptance of this entry remains pending.
+
 `conversation search` automatically attaches approved public/synthetic PDF,
 DOCX and PPTX excerpts to an editable Task. Console output contains metadata;
 local private state retains exact quoted sources and per-use approvals.
@@ -131,7 +149,13 @@ authorization and prepares READY, but never issues a Dispatch. A separate
 `workflow start` authorizes the actual repair/time/token ceilings. Repeated
 identical confirmations are harmless; changed confirmation contents or stale
 hashes are rejected. Newly expanded configuration approval needs a fresh
-globally unique `selection.execution.approvalRef`.
+globally unique decision identity. Legacy decisions use
+`selection.execution.approvalRef` directly. Optional `configurationDecisionId`
+on intake planning and confirmation may instead be
+`REF@task:PRIMARY_TASK_ID`, where REF is the unchanged configured approvalRef.
+The approval still names every permitted Task exactly; a Reviewer uses the
+primary Task's saved decision, not a newly generated reviewer-scoped ID.
+`request` uses this form so repeated requests need no configuration edits.
 
 Changed issued contracts use a successor intake Task with `supersedes` naming
 the previous Task and `createdFrom: flow:FLOW_ID`. Confirmation additionally
@@ -1138,6 +1162,7 @@ named options shown for each operation.
 
 | Command | Options and meaning |
 | --- | --- |
+| `request` | Required `--repo REPO`, positive `--max-tokens N`, `--timeout D` (at least 1 second), and `--max-ai-credits N` (at least 30). Optional `--worktree PATH` defaults to the current repository root; it must be clean with an attached branch. `--max-repairs N` defaults to 1 and accepts 0–100. Repeat `--context-path FILE` for up to 16 committed UTF-8 text files totaling 64 KiB. `--cli PATH` and `--base-directory PATH` select Copilot. Positional words supply the original request; otherwise the console asks for it. `/plan` authorizes bounded paid planning, `/approve` authorizes the displayed plan and remaining bounded coding/review, and `/quit` exits before execution. The credit ceiling is per session, not a total budget. |
 | `config check` | `--sources` prints configuration field origins without values. `--capabilities` prints static adapter coverage, not live access or contract eligibility. `--task ID` compares the resolved configuration with that Task's saved approval; `--dispatch ID` also checks the saved Dispatch instruction. Choose at most one of `--task` and `--dispatch`. |
 | `config bind` | `--dispatch ID` saves the currently selected fixed-file configuration for an unbound Dispatch. Optional `--sources` and `--capabilities` have the same reporting effects as in `config check`. It does not authenticate credentials or prove contract eligibility; `--task` is not accepted. |
 | `git check-index` | `--secrets` adds local Betterleaks scanning of indexed contents. `--scanner PATH` selects the scanner and requires `--secrets`; without it only prohibited Taxion and dotenv paths are checked. |
@@ -1157,7 +1182,7 @@ named options shown for each operation.
 | `conversation search` | `--scope JSON`, `--task ID`, and `--question TEXT` are required. Searches the approved local corpus and attaches sourced results to the Task. `--sdk` explicitly requests one paid Orchestrator turn and then also requires positive `--max-tokens N`, `--timeout DURATION`, and `--max-ai-credits N`; `--cli PATH` and `--base-directory PATH` select the executable and state directory. Without `--sdk`, search is local and does not call a model. |
 | `workflow start`, `workflow recover`, `workflow handoff`, `workflow interrupt`, `workflow feedback`, `workflow feedback-resolve`, `workflow draft`, `workflow draft-discard`, `workflow draft-approve`, `workflow planner-draft`, `workflow planner-action`, `workflow question-draft` | Each accepts `--file JSON` with its action-specific request. `workflow start` authorizes a bounded flow and issues the initial Coder Dispatch. `continueFromDispatchId` is for a saved successful Coder result after a budget stop; the successor Task must target the same output SHA and, in snapshot mode, the same tree SHA and paths. `recover`, handoff, feedback, draft, and planning operations perform only their named action; they do not silently approve a changed scope or budget. Request shapes are documented in [Task Graph](10-task-graph.md). |
 | `workflow advance`, `workflow show`, `workflow feedback-target`, `workflow planning-context` | `--id FLOW_ID` selects the saved review flow. These are read/transition operations as described in the workflow sections above. |
-| `workflow run`, `workflow step` | `--id FLOW_ID`, `--coder-prompt-file PATH`, and `--reviewer-prompt-file PATH` select the flow and role prompts. Optional `--cli PATH`, `--base-directory PATH`, `--max-ai-credits N`, `--coder-tools LIST`, and `--reviewer-tools LIST` select runtime settings and tool allowlists. `--managed-commit` opts into the bound Coder commit tool; `--managed-stage` additionally enables scoped staging and requires `--managed-commit`. `--scanner PATH` is valid only with managed commit. `--strict-result-identities`, `--compact-context`, and `--controller-validation-submission` change their respective result/context validation modes. The AI-credit limit is per session, not flow-wide. |
+| `workflow run`, `workflow step` | `--id FLOW_ID`, `--coder-prompt-file PATH`, and `--reviewer-prompt-file PATH` select the flow and role prompts. Instead of prompt files, `--builtin-prompts` selects bundled snapshot-mode prompts, strict result identities, compact context and controller validation submission; it requires a snapshot flow and rejects managed commit/stage. Only in this mode, omitted tool lists default to Coder `view,create,edit,apply_patch` and Reviewer `view`; an explicitly empty list remains empty. Optional `--cli PATH`, `--base-directory PATH`, `--max-ai-credits N`, `--coder-tools LIST`, and `--reviewer-tools LIST` select runtime settings and tool allowlists. `--managed-commit` opts into the bound Coder commit tool; `--managed-stage` additionally enables scoped staging and requires `--managed-commit`. `--scanner PATH` is valid only with managed commit. `--strict-result-identities`, `--compact-context`, and `--controller-validation-submission` change their respective result/context validation modes. The AI-credit limit is per session, not flow-wide. |
 | `runtime auth`, `start`, `send`, `resume`, `events`, `commit` | `--dispatch ID` and `--system-prompt-file PATH` are required. `--cli PATH`, `--base-directory PATH`, and optional `--max-ai-credits N` select runtime settings; a nonzero credit limit must be at least 30. `--tools LIST` sets the SDK tool allowlist. `--prompt-file PATH` is required by `send`; `--message-file PATH` is required by `commit`, where `--scanner PATH` selects the local secret scanner. `--review-source-worktree PATH` applies only to `start` for an independent Reviewer. `--managed-commit` enables the bound Coder commit tool and `--managed-stage` adds scoped staging. `--strict-result-identities`, `--compact-context`, and `--controller-validation-submission` must be repeated when attaching to execute a session if they were used at start. `--timeout DURATION` defaults to 10 minutes and bounds waiting for a turn or event stream. |
 | `runtime stop` | `--dispatch ID` is required. Only optional `--cli PATH`, `--base-directory PATH`, and positive `--timeout DURATION` are accepted; timeout defaults to 10 minutes. The saved session binding is used exclusively for cancellation, including older execution contracts. Prompt, tools, scanner and execution-mode options are neither required nor accepted. |
 | `acp` | `--coder-system-prompt-file PATH` and `--max-ai-credits N` are required; the credit limit must be at least 30. `--reviewer-system-prompt-file PATH` is optional. `--cli PATH`, `--base-directory PATH`, `--tools LIST`, and positive `--timeout DURATION` select runtime settings and limits (timeout defaults to 10 minutes). `--compact-context`, `--controller-validation-submission`, `--managed-commit`, `--managed-stage`, and `--scanner PATH` have the same meanings and dependencies as in `workflow run`; `--scanner` requires `--managed-commit`. ACP executes approved Dispatches but does not issue or approve them. |

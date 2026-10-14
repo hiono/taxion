@@ -48,10 +48,25 @@ type QuestionClaim struct {
 }
 
 type QuestionAnswer struct {
-	Confirmed      []QuestionClaim `json:"confirmed"`
-	Assumptions    []string        `json:"assumptions"`
-	Unconfirmed    []string        `json:"unconfirmed"`
-	Recommendation string          `json:"recommendation,omitempty"`
+	Confirmed      []QuestionClaim  `json:"confirmed"`
+	Assumptions    []string         `json:"assumptions"`
+	Unconfirmed    []string         `json:"unconfirmed"`
+	Recommendation string           `json:"recommendation,omitempty"`
+	Proposal       *RequestProposal `json:"proposal,omitempty"`
+	Questions      []string         `json:"questions,omitempty"`
+}
+
+func (answer QuestionAnswer) MarshalJSON() ([]byte, error) {
+	type wire QuestionAnswer
+	if answer.Questions == nil {
+		return json.Marshal(wire(answer))
+	}
+	// Keep legacy answers unchanged but preserve an explicit empty questions
+	// list when the request Planner has no outstanding clarification.
+	return json.Marshal(struct {
+		wire
+		Questions []string `json:"questions"`
+	}{wire(answer), answer.Questions})
 }
 
 type QuestionResult struct {
@@ -368,6 +383,14 @@ func questionProviderError(ctx context.Context, operation string, err error) err
 }
 
 func validateQuestionAnswer(answer QuestionAnswer, context QuestionContext) error {
+	if answer.Proposal != nil || answer.Questions != nil {
+		if context.Planner == nil {
+			return fmt.Errorf("taxion: request proposals require a Planner context")
+		}
+		if err := ValidateRequestPlan(answer); err != nil {
+			return err
+		}
+	}
 	if context.Planner != nil {
 		if !slices.Contains([]string{"REVIEW", "REPAIR", "REPLAN", "INVESTIGATE", "HOLD", "HUMAN_REQUIRED", "REPORT"}, answer.Recommendation) ||
 			len(answer.Confirmed) == 0 {

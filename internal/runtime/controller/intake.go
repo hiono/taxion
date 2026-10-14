@@ -15,24 +15,26 @@ import (
 )
 
 type IntakeRequest struct {
-	Request           string         `json:"request"`
-	Task              core.GraphTask `json:"task"`
-	Actor             string         `json:"actor"`
-	Source            string         `json:"source"`
-	PlanningSelection *config.Config `json:"planningSelection,omitempty"`
-	PlanningReason    string         `json:"planningReason,omitempty"`
+	Request                 string         `json:"request"`
+	Task                    core.GraphTask `json:"task"`
+	Actor                   string         `json:"actor"`
+	Source                  string         `json:"source"`
+	PlanningSelection       *config.Config `json:"planningSelection,omitempty"`
+	PlanningReason          string         `json:"planningReason,omitempty"`
+	ConfigurationDecisionID string         `json:"configurationDecisionId,omitempty"`
 }
 
 type IntakeConfirmation struct {
-	TaskID            string               `json:"taskId"`
-	ExpectedHash      string               `json:"expectedHash"`
-	Actor             string               `json:"actor"`
-	Source            string               `json:"source"`
-	Reason            string               `json:"reason"`
-	Selection         config.Config        `json:"selection"`
-	AdditionalTaskIDs []string             `json:"additionalTaskIds"`
-	ReplacesFlow      string               `json:"replacesFlow,omitempty"`
-	Target            *core.FeedbackTarget `json:"target,omitempty"`
+	TaskID                  string               `json:"taskId"`
+	ExpectedHash            string               `json:"expectedHash"`
+	Actor                   string               `json:"actor"`
+	Source                  string               `json:"source"`
+	Reason                  string               `json:"reason"`
+	Selection               config.Config        `json:"selection"`
+	AdditionalTaskIDs       []string             `json:"additionalTaskIds"`
+	ConfigurationDecisionID string               `json:"configurationDecisionId,omitempty"`
+	ReplacesFlow            string               `json:"replacesFlow,omitempty"`
+	Target                  *core.FeedbackTarget `json:"target,omitempty"`
 }
 
 func IntakeHash(task core.GraphTask) (string, error) {
@@ -70,17 +72,21 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 			return core.GraphTask{}, fmt.Errorf("taxion: isolated intake planning requires explicit configuration reason and matching repository")
 		}
 		selection := *request.PlanningSelection
+		decisionID := request.ConfigurationDecisionID
+		if decisionID == "" {
+			decisionID = selection.Execution.ApprovalRef
+		}
 		approval, err := json.Marshal(config.Approval{
 			Kind: config.ApprovalKind, TaskID: task.ID, Reason: request.PlanningReason, Allowed: []config.Config{selection},
 		})
 		if err != nil {
 			return core.GraphTask{}, err
 		}
-		if err := config.CheckApproval(string(approval), task.ID, selection.Execution.ApprovalRef, selection); err != nil {
+		if err := config.CheckApproval(string(approval), task.ID, decisionID, selection); err != nil {
 			return core.GraphTask{}, err
 		}
-		task.Decisions = append(task.Decisions, core.TaskDecision{ID: selection.Execution.ApprovalRef, Source: request.Source, Text: string(approval)})
-	} else if request.PlanningReason != "" {
+		task.Decisions = append(task.Decisions, core.TaskDecision{ID: decisionID, Source: request.Source, Text: string(approval)})
+	} else if request.PlanningReason != "" || request.ConfigurationDecisionID != "" {
 		return core.GraphTask{}, fmt.Errorf("taxion: planning reason requires an explicit selected configuration")
 	}
 	var result core.GraphTask
@@ -196,12 +202,16 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		if err != nil {
 			return err
 		}
-		if err := config.CheckApproval(string(approvalText), task.ID, request.Selection.Execution.ApprovalRef, request.Selection); err != nil {
+		decisionID := request.ConfigurationDecisionID
+		if decisionID == "" {
+			decisionID = request.Selection.Execution.ApprovalRef
+		}
+		if err := config.CheckApproval(string(approvalText), task.ID, decisionID, request.Selection); err != nil {
 			return err
 		}
 		existingApproval := false
 		for _, decision := range task.Decisions {
-			if decision.ID == request.Selection.Execution.ApprovalRef {
+			if decision.ID == decisionID {
 				if err := config.CheckApproval(decision.Text, task.ID, decision.ID, request.Selection); err != nil {
 					return err
 				}
@@ -215,7 +225,7 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		task.Decisions = append(task.Decisions, confirmation)
 		if !existingApproval {
 			task.Decisions = append(task.Decisions, core.TaskDecision{
-				ID: request.Selection.Execution.ApprovalRef, Source: request.Source, Text: string(approvalText),
+				ID: decisionID, Source: request.Source, Text: string(approvalText),
 			})
 		}
 		if err := state.Graph.Track(task, request.Actor, request.Reason); err != nil {

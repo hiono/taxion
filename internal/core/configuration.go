@@ -19,6 +19,10 @@ type DispatchConfiguration struct {
 	AccessChecks []ExecutionAccessCheck `json:"accessChecks,omitempty"`
 }
 
+func ConfigurationApprovalID(reference, taskID string) string {
+	return reference + "@task:" + taskID
+}
+
 // ExecutionAccessCheck records a successful runtime-account and repository-role
 // access check for the selected tuple, not session creation or contract eligibility.
 type ExecutionAccessCheck struct {
@@ -58,8 +62,9 @@ func (binding DispatchConfiguration) validate(dispatch GraphDispatch) error {
 	}
 	repository, repoOK := selection["repository"].(map[string]any)
 	execution, executionOK := selection["execution"].(map[string]any)
+	reference, referenceOK := execution["approvalRef"].(string)
 	if !repoOK || !executionOK || repository["path"] != dispatch.Repository ||
-		execution["approvalRef"] != binding.DecisionID {
+		!referenceOK || !nonempty(reference) {
 		return graphError("configuration binding identity differs from the Dispatch")
 	}
 	paths := map[string]bool{}
@@ -105,6 +110,9 @@ func (binding DispatchConfiguration) validate(dispatch GraphDispatch) error {
 		if err := DecodeGraphInput(strings.NewReader(decision.Text), &approval); err != nil ||
 			approval.Kind != "taxion.execution-config.v1" || !nonempty(approval.TaskID) || !nonempty(approval.Reason) {
 			return graphError("configuration binding requires a saved configuration approval")
+		}
+		if binding.DecisionID != reference && binding.DecisionID != ConfigurationApprovalID(reference, approval.TaskID) {
+			return graphError("configuration binding identity differs from the Dispatch")
 		}
 		taskAllowed := approval.TaskID == dispatch.TaskID
 		seen := map[string]bool{approval.TaskID: true}

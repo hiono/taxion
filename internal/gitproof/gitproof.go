@@ -174,6 +174,7 @@ func ObserveStart(dispatch core.GraphDispatch) (string, error) {
 	if !fullSHA(start) {
 		return "", fmt.Errorf("execution start requires a full SHA")
 	}
+
 	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
 		return ObserveSnapshotStart(dispatch)
 	}
@@ -190,6 +191,38 @@ func ObserveStart(dispatch core.GraphDispatch) (string, error) {
 		return "", fmt.Errorf("execution start Git verification: %w", err)
 	}
 	return check.GitEvidence.HeadSHA, nil
+}
+
+// ObserveRequestBaseline reads a clean, attached worktree using the same
+// repository and Git checks as execution, without creating a Dispatch.
+func ObserveRequestBaseline(worktree, repository string, selection []byte) (root, branch, sha string, err error) {
+	root, err = git(worktree, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return
+	}
+	root, err = canonical(root)
+	if err != nil {
+		return
+	}
+	sha, err = git(root, "rev-parse", "HEAD")
+	if err != nil {
+		return
+	}
+	branch, err = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		err = fmt.Errorf("request requires an attached worktree branch: %w", err)
+		return
+	}
+	dispatch := core.GraphDispatch{
+		Repository: repository, Recipient: "CODER",
+		Configuration: &core.DispatchConfiguration{Selection: selection},
+		Instruction:   core.DispatchInstruction{Worktree: root, Branch: branch, BaselineSHA: sha},
+	}
+	err = Verify(dispatch, &core.DispatchResult{
+		Repository: repository, Recipient: "CODER", Status: core.DispatchSucceeded,
+		StartedSHA: sha, OutputSHA: sha,
+	})
+	return
 }
 
 // ExecuteValidations runs only the commands authorized by the immutable

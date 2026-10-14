@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/hiono/taxion/internal/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,9 +25,6 @@ type Approval struct {
 func CheckApproval(input string, taskID, decisionID string, candidate Config) error {
 	if err := candidate.Validate(); err != nil {
 		return err
-	}
-	if candidate.Execution.ApprovalRef != decisionID {
-		return fmt.Errorf("configuration approval reference differs from the selected decision")
 	}
 	var approval Approval
 	decoder := json.NewDecoder(strings.NewReader(input))
@@ -55,12 +53,16 @@ func CheckApproval(input string, taskID, decisionID string, candidate Config) er
 		strings.TrimSpace(approval.Reason) == "" || len(approval.Allowed) == 0 {
 		return fmt.Errorf("execution approval requires matching kind, Task ID, reason and allowed configurations")
 	}
+	if decisionID != candidate.Execution.ApprovalRef &&
+		decisionID != core.ConfigurationApprovalID(candidate.Execution.ApprovalRef, approval.TaskID) {
+		return fmt.Errorf("configuration approval reference differs from the selected decision")
+	}
 	matched := false
 	for _, allowed := range approval.Allowed {
 		if err := allowed.Validate(); err != nil {
 			return fmt.Errorf("execution approval contains an invalid configuration: %w", err)
 		}
-		if allowed.Execution.ApprovalRef != decisionID {
+		if allowed.Execution.ApprovalRef != candidate.Execution.ApprovalRef {
 			return fmt.Errorf("execution approval contains a different decision reference")
 		}
 		matched = matched || allowed == candidate

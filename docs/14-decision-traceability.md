@@ -69,7 +69,7 @@ prove completion. These GitHub values can change after the observation time.
 
 ## ADR status and current owner
 
-All ADRs 0001–0029 record **Accepted** decisions. Acceptance means the choice
+All ADRs 0001–0030 record **Accepted** decisions. Acceptance means the choice
 was made, not that every consequence has been implemented. Later amendments
 and implementation clarifications are listed separately so the original
 decision is not mistaken for current behavior.
@@ -105,6 +105,7 @@ decision is not mistaken for current behavior.
 | [0027](adr/0027-review-retained-worktree-trees-without-commits.md) | Review a retained worktree tree without creating a commit | `03-runtime-contract.md`, `10-task-graph.md`, `11-execution-records.md` |
 | [0028](adr/0028-cancel-saved-sessions-without-execution-reconfiguration.md) | Separate saved-session cancellation from execution settings; preserve result history and preflight future review approvals | `03-runtime-contract.md`, `11-execution-records.md`, `cli-reference.md`, `user-guide.md` |
 | [0029](adr/0029-separate-budget-guidance-from-provider-quota.md) | Separate budget guidance defaults and per-instruction selection from provider-specific account quota observations | `configuration.md`, `03-runtime-contract.md`, `user-guide.md`; design accepted, implementation and live quota acceptance pending |
+| [0030](adr/0030-refine-natural-language-requests-with-planner.md) | Refine a natural-language request with Planner, then construct existing intake and review flow without copied JSON or role prompts | `user-guide.md`, `cli-reference.md`, `03-runtime-contract.md`, `configuration.md`; implemented with offline end-to-end evidence, live-model entry acceptance pending |
 
 ADRs 0026–0028 were added after the first-use and recovery investigation.
 Local real-Git/fake-runtime tests establish permission boundaries, same-tree

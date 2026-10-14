@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/hiono/taxion/internal/core"
 )
 
 func TestApprovalChecksCompleteTuples(t *testing.T) {
@@ -11,6 +13,7 @@ func TestApprovalChecksCompleteTuples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	second := candidate
 	second.Runtime.Account = "second-account"
 	second.Runtime.ContractRef = "second-contract"
@@ -49,6 +52,34 @@ func TestApprovalChecksCompleteTuples(t *testing.T) {
 	approval.Allowed = append(approval.Allowed, Config{})
 	if err := CheckApproval(encode(approval), "task", candidate.Execution.ApprovalRef, candidate); err == nil {
 		t.Fatal("matched tuple hid an invalid allowed tuple")
+	}
+}
+
+func TestScopedApprovalRetainsExactTaskAndConfigurationBoundaries(t *testing.T) {
+	candidate, err := Load([]byte(validConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval := Approval{Kind: ApprovalKind, TaskID: "request", AdditionalTaskIDs: []string{"review"},
+		Reason: "approve this request only", Allowed: []Config{candidate}}
+	data, err := json.Marshal(approval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := core.ConfigurationApprovalID(candidate.Execution.ApprovalRef, approval.TaskID)
+	for _, taskID := range []string{"request", "review"} {
+		if err := CheckApproval(string(data), taskID, id, candidate); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct{ task, decision string }{
+		{"other", id}, {"request", id + "-extra"},
+		{"review", core.ConfigurationApprovalID(candidate.Execution.ApprovalRef, "review")},
+		{"request", core.ConfigurationApprovalID("different-ref", "request")},
+	} {
+		if err := CheckApproval(string(data), test.task, test.decision, candidate); err == nil {
+			t.Fatal("scoped approval widened its exact owner, reference or named Task", test)
+		}
 	}
 }
 
