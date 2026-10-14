@@ -45,6 +45,21 @@ SDK credit は soft cap、tokens は usage event による事後観測の停止�
 実装手順と受入れ結果は [仕様入力](../13-specification-input.md)、
 tools の権限と証拠保持は [Runtime contract](../03-runtime-contract.md) に記録する。
 
+### 2026-10-15 の実装補足
+
+文書 dogfood では、skill directory の接続だけでは実呼出しの証拠にならなかった。
+承認済み skills / skill-only plugins がある role に限り `skill` tool を接続し、
+Reviewer の通常の custom-tool permission も扱う。外部ファイルの読み取り、
+shell、managed approval の境界は維持する。将来の Reviewer asset も
+Coder の有料 turn 前に照合する。
+
+OSS の通常テストは独自の合成 skill と一時 directory を使う。
+特定の外部 skill・個人の home・認証・有料モデルを要求せず、
+native plugin discovery は無料の明示 opt-in とする。
+実 skill ロードと品質工程は別の受入れであり、Taxion 配下のログ、
+検査結果と同一成果物の独立レビューを要求する。
+指定の日本語文書用 skill は dogfood 入力であり、製品の固定依存にはしない。
+
 ## References
 
 - [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)

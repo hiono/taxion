@@ -44,7 +44,7 @@ The M1-to-GitHub-milestone correspondence is therefore unverified.
 | [#20 M14 仕様書検索・Memory 移行・tools 連携](https://github.com/hiono/taxion/milestone/20) | M14 | ADR-0020, 0025 | #58–#61 | [08-memory-model.md](08-memory-model.md), [13-specification-input.md](13-specification-input.md) | closed |
 | [#21 M15 CLI・ACP 利用受入れ](https://github.com/hiono/taxion/milestone/21) | M15 | ADR-0010, 0020–0025 | [#62](https://github.com/hiono/taxion/issues/62) closed; [#79](https://github.com/hiono/taxion/issues/79) tracks the remaining end-to-end acceptance | [03-runtime-contract.md](03-runtime-contract.md), [09-orchestration-requirements.md](09-orchestration-requirements.md), [10-task-graph.md](10-task-graph.md), [13-specification-input.md](13-specification-input.md) | open |
 | [#22 M16 Planner と Rust の後続検討](https://github.com/hiono/taxion/milestone/22) | M16 | ADR-0020 | #64, #65 | [09-orchestration-requirements.md](09-orchestration-requirements.md) | open |
-| [#23 Release 0.1.0 — CLI first-use and documentation](https://github.com/hiono/taxion/milestone/23) | Release | ADR-0026–0028 record decisions needed after first-use and low-budget recovery findings | #78 | [README.md](../README.md), [user-guide.md](user-guide.md), [configuration.md](configuration.md), [cli-reference.md](cli-reference.md), [CONTRIBUTING.md](../CONTRIBUTING.md) | open |
+| [#23 Release 0.1.0 — CLI first-use and documentation](https://github.com/hiono/taxion/milestone/23) | Release | ADR-0026–0028 record first-use and recovery decisions; ADR-0029 records budget-guidance design pending implementation | #78 | [README.md](../README.md), [user-guide.md](user-guide.md), [configuration.md](configuration.md), [cli-reference.md](cli-reference.md), [CONTRIBUTING.md](../CONTRIBUTING.md) | open |
 
 Milestone state is not a substitute for checking issue evidence. In
 particular, [#62](https://github.com/hiono/taxion/issues/62) records the
@@ -69,7 +69,7 @@ prove completion. These GitHub values can change after the observation time.
 
 ## ADR status and current owner
 
-All ADRs 0001–0028 record **Accepted** decisions. Acceptance means the choice
+All ADRs 0001–0029 record **Accepted** decisions. Acceptance means the choice
 was made, not that every consequence has been implemented. Later amendments
 and implementation clarifications are listed separately so the original
 decision is not mistaken for current behavior.
@@ -104,6 +104,7 @@ decision is not mistaken for current behavior.
 | [0026](adr/0026-bind-file-access-levels-to-task-approval.md) | Bind exact, committed and worktree-wide file access to Task approval | `03-runtime-contract.md`, `10-task-graph.md`, `user-guide.md` |
 | [0027](adr/0027-review-retained-worktree-trees-without-commits.md) | Review a retained worktree tree without creating a commit | `03-runtime-contract.md`, `10-task-graph.md`, `11-execution-records.md` |
 | [0028](adr/0028-cancel-saved-sessions-without-execution-reconfiguration.md) | Separate saved-session cancellation from execution settings; preserve result history and preflight future review approvals | `03-runtime-contract.md`, `11-execution-records.md`, `cli-reference.md`, `user-guide.md` |
+| [0029](adr/0029-separate-budget-guidance-from-provider-quota.md) | Separate budget guidance defaults and per-instruction selection from provider-specific account quota observations | `configuration.md`, `03-runtime-contract.md`, `user-guide.md`; design accepted, implementation and live quota acceptance pending |
 
 ADRs 0026–0028 were added after the first-use and recovery investigation.
 Local real-Git/fake-runtime tests establish permission boundaries, same-tree

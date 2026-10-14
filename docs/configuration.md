@@ -118,3 +118,25 @@ taxion runtime auth --dispatch DISPATCH-ID --system-prompt-file prompts/coder.md
 固定 file を選べた Task 承認に Dispatch の設定をひも付けるときは `taxion config bind --dispatch DISPATCH-ID` を使います。これは認証、contract 適格性、runtime session binding を確認しません。
 
 **確認結果は認証や実行準備完了の証明ではありません。** `ready` / `doctor` コマンドは実装されていません。CLI 全体の option と制約は[CLI リファレンス](cli-reference.md)を参照してください。
+
+## 残予算を考慮する指示の設計（未実装）
+
+[ADR-0029](adr/0029-separate-budget-guidance-from-provider-quota.md) は、
+残量をモデルへ伝える方式を採択しています。現在の schema に
+`execution.budgetGuidance` や対応する環境変数・CLI option はありません。
+これらを現在の設定ファイルに書くと未知の field として拒否されます。
+
+実装時は Global / Project / 環境変数で既定値を選び、実行依頼の明示選択を
+最後に適用します。指示ごとの未指定は既定値を継承し、すべて未指定なら
+外部照会のない `flow` とします。`off` は補足指示なし、
+`account` は明示承認した provider account の quota 読取りを追加する方式です。
+方式・採用元・指示ごとの変更許可は承認と session identity に保持し、
+既存 session に config 編集を遡及適用しません。
+設定がない旧 Task / Dispatch は従来の無補足を維持し、新方式への継続には再承認を要求します。
+
+方式の選択で予算や権限は増えません。`off` でも既存の停止判定は維持し、
+account 残量が取得できなくてもゼロや無制限と扱いません。
+Copilot session の `max-ai-credits`、Flow の `maxTokens`、
+context window、provider account 全体の quota は別の値です。
+quota 照会には runtime 用の選択済み credential を使う設計であり、
+Git repository 用の token を流用しません。

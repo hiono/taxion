@@ -15,17 +15,91 @@ import (
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/tools"
 )
+
+func TestUserGuideSkillApprovalExampleWithoutSDK(t *testing.T) {
+	guide, err := os.ReadFile("../../docs/user-guide.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, example := range regexp.MustCompile("(?s)```json\\n(.*?)\\n```").FindAllSubmatch(guide, -1) {
+		var header struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.Unmarshal(example[1], &header); err != nil {
+			t.Fatal(err)
+		}
+		if header.Kind != tools.ApprovalKind {
+			continue
+		}
+		found++
+		var approval tools.Approval
+		if err := core.DecodeGraphInput(bytes.NewReader(example[1]), &approval); err != nil {
+			t.Fatal("guide tools approval does not match schema", err)
+		}
+		directory := t.TempDir()
+		path := filepath.Join(directory, "SKILL.md")
+		if err := os.WriteFile(path, []byte("---\nname: fixture-guide\ndescription: Synthetic guide instructions.\n---\nCheck the document.\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		hash, err := tools.Hash(directory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for role, policy := range approval.Roles {
+			if len(policy.Skills) != 1 {
+				t.Fatal("guide must identify its skill asset")
+			}
+			policy.Skills[0] = tools.Asset{Path: directory, Hash: hash}
+			policy.EvidenceDirectory = filepath.Join(t.TempDir(), "private")
+			approval.Roles[role] = policy
+		}
+		body, err := json.Marshal(approval)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decisions := []core.TaskDecision{{ID: "tools", Source: "human:fixture", Text: string(body)}}
+		for _, role := range []string{"CODER", "REVIEWER"} {
+			policy, err := tools.Resolve(decisions, approval.TaskID, role)
+			if err != nil || policy == nil {
+				t.Fatal("guide role policy did not resolve", role, err)
+			}
+			if err := policy.Check(); err != nil {
+				t.Fatal("guide role asset did not pass free preflight", role, err)
+			}
+		}
+		if _, err := tools.Resolve(decisions, "unrelated-task", "CODER"); err == nil {
+			t.Fatal("guide approval transferred to unrelated Task")
+		}
+	}
+	if found != 1 {
+		t.Fatalf("expected one skill approval example, got %d", found)
+	}
+}
 
 func TestUserGuideColdStartExamplesWithoutSDK(t *testing.T) {
 	guide, err := os.ReadFile("../../docs/user-guide.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	examples := regexp.MustCompile("(?s)```json\\n(.*?)\\n```").FindAllSubmatch(guide, -1)
+	var examples [][][]byte
+	for _, example := range regexp.MustCompile("(?s)```json\\n(.*?)\\n```").FindAllSubmatch(guide, -1) {
+		var header struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.Unmarshal(example[1], &header); err != nil {
+			t.Fatal("guide JSON is invalid", err)
+		}
+		if header.Kind != tools.ApprovalKind {
+			examples = append(examples, example)
+		}
+	}
 	if len(examples) != 3 {
 		t.Fatalf("expected intake, confirmation and flow examples; got %d", len(examples))
 	}
+
 	var intake controller.IntakeRequest
 	var confirmation controller.IntakeConfirmation
 	var flowRequest controller.ReviewFlowRequest

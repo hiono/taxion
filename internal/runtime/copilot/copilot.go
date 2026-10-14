@@ -205,6 +205,13 @@ func New(config Config) (*Adapter, error) {
 			config.AvailableTools = append(config.AvailableTools, tool.Name)
 		}
 	}
+	if err := tools.CheckSkillAccess(config.ToolPolicy, config.AvailableTools); err != nil {
+		return nil, err
+	}
+	if config.ToolPolicy != nil && len(config.ToolPolicy.Skills)+len(config.ToolPolicy.Plugins) != 0 &&
+		!slices.Contains(config.AvailableTools, "skill") {
+		config.AvailableTools = append(config.AvailableTools, "skill")
+	}
 	if config.ManagedSearch != nil {
 		binding := *config.ManagedSearch
 		if config.Role != "ORCHESTRATOR" || binding.TaskID == "" || binding.ScopeHash == "" ||
@@ -693,7 +700,7 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 		OnEvent:                            onEvent,
 	}
 	if a.config.ToolPolicy != nil {
-		enabled := true
+		enabled := len(a.config.ToolPolicy.Skills)+len(a.config.ToolPolicy.Plugins) != 0
 		config.EnableSkills = &enabled
 		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
 		config.Tools = append(config.Tools, a.mcpTools()...)
@@ -721,7 +728,7 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		OnEvent:                            onEvent,
 	}
 	if a.config.ToolPolicy != nil {
-		enabled := true
+		enabled := len(a.config.ToolPolicy.Skills)+len(a.config.ToolPolicy.Plugins) != 0
 		config.EnableSkills = &enabled
 		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
 		config.Tools = append(config.Tools, a.mcpTools()...)
@@ -768,6 +775,9 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 		}
 		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok && a.config.ToolPolicy != nil &&
 			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
+			if permission.ToolName == "skill" && len(a.config.ToolPolicy.Skills)+len(a.config.ToolPolicy.Plugins) != 0 {
+				decision = &rpc.PermissionDecisionApproveOnce{}
+			}
 			for _, tool := range a.config.ToolPolicy.MCP {
 				if permission.ToolName == tool.Name {
 					decision = &rpc.PermissionDecisionApproveOnce{}

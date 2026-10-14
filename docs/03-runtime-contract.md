@@ -205,6 +205,19 @@ plugin は root の `plugin.json` と `skills/` からなる skill-only 形式�
 asset の識別値であり、仕様入力の `documentHash` は原本 bytes の SHA-256 である。
 承認済み asset の変更は再承認を必要とする。
 
+承認済み role policy に `skills` または `plugins` があれば、Taxion は
+SDK の許可 tool に `skill` を追加する。名前を prompt に書くだけでは接続しない。
+asset のない policy や未承認の session で `skill` を明示指定すると、実行前に拒否する。
+skills のない MCP / RTK のみの policy では `EnableSkills` を有効にしない。
+Coder と Reviewer は、承認済み skill の通常の custom-tool permission を扱えるが、
+managed approval を要求する操作の拒否、Reviewer read-only、worktree 外の拒否は維持する。
+skill に書かれた追加ファイルの読み取りやスクリプト実行も、この境界を越える許可にはならない。
+
+`workflow run|step` は、Coder と将来の Reviewer の role policy を発行済み
+decision と現在の Task で照合し、asset の存在と hash、明示した `skill` tool の承認を
+session 作成前に検査する。実行直前と各 tool hook でも照合を続けるため、
+事前検査後の asset 改変を許可したことにはならない。
+
 MCP は host が exact arguments を照合してから、承認された stdio server を一回起動する。
 server の実行ファイルは信頼された host code として承認し、ambient credential を子プロセスへ渡さない。
 SDK の role permission は引き続き通常の read/write と管理 commit を判断する。
@@ -234,8 +247,30 @@ native plugin discovery、実 stdio MCP、実 RTK の圧縮率と原本保持、
 SDK の create/resume 設定と権限を無料回帰で確認する。
 実 SDK による仕様検索から独立レビューまでの受入れ状況は
 [仕様入力](13-specification-input.md) と #60 に記録する。
+通常テストは独自の合成 skill と一時 directory を使い、特定の外部 skill、
+個人の home、インストール済み Copilot、認証、ネットワーク、有料モデルを要求しない。
+native plugin discovery は `TAXION_TEST_LOCAL_PLUGIN_DISCOVERY=1` による
+無料の明示 opt-in とし、指定時に CLI がなければ失敗する。
+
+SDK 設定・permission・hook の合成回帰は、実モデルが skill を選び、正常に
+ロードし、文書の品質工程を完了した証拠とは区別する。実利用は Taxion 配下の
+session の tool request と完了結果、private tool evidence、成果物の SHA、
+検査結果と独立レビューを対応付けて確認する。
+親の開発支援 session の skill 起動や discovery の成功を代替証拠にしない。
+Release 0.1.0 の文書 dogfood における実 skill 利用は Issue #78 の未確認条件である。
+そこで選択する外部 skill は製品の固定依存ではなく、操作者が利用許可と内容を承認する。
 
 ## Dispatch の実行と context
+
+残予算を指示へ付加する設計は [ADR-0029](adr/0029-separate-budget-guidance-from-provider-quota.md)
+に採択したが、現在の adapter はこの補足指示や account quota の取得を実装していない。
+実装時は Controller が保存済み Flow usage と adapter の非推論 read-only 観測を分離し、
+`off` / `flow` / `account` の解決結果に応じて既存の `Send` に補足する。
+動的観測は送信ごとの receipt に保存し、system prompt の変更や別の有料 turn を必要としない。
+単位・account・resource・対象期間・取得元・観測時刻と
+`available` / `unsupported` / `unavailable` / `stale` を保持する。
+quota の未知を成功やゼロに変えず、Copilot の実験的 API 型を core に漏らさない。
+stop-only 接続は quota 照会や新しい指示を発行しない。
 
 `taxion runtime start|send|resume|events|stop` is the Copilot CLI execution
 path. The ACP server accepts only a fresh, CLI-issued Dispatch ID in

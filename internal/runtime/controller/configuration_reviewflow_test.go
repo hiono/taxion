@@ -2,12 +2,87 @@ package controller
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/tools"
 )
+
+func TestReviewFlowPreflightsFutureSkillAssetsWithoutModelUse(t *testing.T) {
+	for _, failure := range []string{"none", "changed", "missing", "unapproved"} {
+		t.Run(failure, func(t *testing.T) {
+			resolved, err := config.Resolve([]config.Layer{{Source: "user", Input: []byte(`version: 1
+project: {id: demo}
+repository: {provider: github, host: github.com, path: owner/repo, account: scm-user, credentialRef: scm}
+runtime: {provider: copilot, account: ai-user, credentialRef: ai, contractRef: contract}
+execution: {requester: requester, worker: local, approvalRef: configuration-approval}
+`)}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			directory := t.TempDir()
+			path := filepath.Join(directory, "SKILL.md")
+			if err := os.WriteFile(path, []byte("---\nname: fixture-review\ndescription: Synthetic review instructions.\n---\nCheck the document.\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			hash, err := tools.Hash(directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			approval := tools.Approval{
+				Kind: tools.ApprovalKind, TaskID: "implementation", Actor: "human",
+				Roles: map[string]tools.Policy{
+					"REVIEWER": {Skills: []tools.Asset{{Path: directory, Hash: hash}}, EvidenceDirectory: filepath.Join(t.TempDir(), "evidence")},
+				},
+			}
+			if failure == "unapproved" {
+				policy := approval.Roles["REVIEWER"]
+				policy.Skills = nil
+				approval.Roles["REVIEWER"] = policy
+			}
+			configuration := config.Approval{
+				Kind: config.ApprovalKind, TaskID: "implementation", Reason: "Authorize fixture reviews",
+				AdditionalTaskIDs: []string{"flow-review-0", "flow-review-1"}, Allowed: []config.Config{resolved.Config},
+			}
+			db, ledger, request := reviewFlowFixture(t,
+				core.TaskDecision{ID: resolved.Config.Execution.ApprovalRef, Source: "human:fixture", Text: string(mustFlowJSON(t, configuration))},
+				core.TaskDecision{ID: "tools", Source: "human:fixture", Text: string(mustFlowJSON(t, approval))},
+			)
+			flow, err := StartReviewFlow(db, ledger, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch failure {
+			case "changed":
+				if err := os.WriteFile(path, []byte("modified skill"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "missing":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkErr := CheckReviewFlowConfiguration(db, flow.ID, resolved.Config, map[string][]string{"REVIEWER": {"skill"}})
+			if (checkErr == nil) != (failure == "none") ||
+				checkErr != nil && !strings.Contains(checkErr.Error(), "REVIEWER tools") {
+				t.Fatal("future Reviewer asset failure was not detected before Coder", checkErr)
+			}
+			after, err := db.LoadWorkspace()
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatal("skill preflight changed workspace or started execution", err)
+			}
+		})
+	}
+}
 
 func TestReviewFlowUsesUnchangedExplicitMultiTaskConfigurationApproval(t *testing.T) {
 	for _, scope := range []string{"none", "first", "both"} {
@@ -44,7 +119,7 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 			if err != nil {
 				t.Fatal(err)
 			}
-			preflightErr := CheckReviewFlowConfiguration(db, flow.ID, resolved.Config)
+			preflightErr := CheckReviewFlowConfiguration(db, flow.ID, resolved.Config, nil)
 			if (preflightErr == nil) != (scope == "both") {
 				t.Fatalf("free preflight accepted missing review approval: scope=%s error=%v", scope, preflightErr)
 			}

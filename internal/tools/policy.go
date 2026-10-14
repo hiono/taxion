@@ -50,6 +50,14 @@ type Approval struct {
 	Roles  map[string]Policy `json:"roles"`
 }
 
+func CheckSkillAccess(policy *Policy, availableTools []string) error {
+	if slices.Contains(availableTools, "skill") &&
+		(policy == nil || len(policy.Skills)+len(policy.Plugins) == 0) {
+		return fmt.Errorf("taxion: skill tool requires approved skill or skill-only plugin assets")
+	}
+	return nil
+}
+
 func Resolve(decisions []core.TaskDecision, taskID, role string) (*Policy, error) {
 	var selected *Policy
 	seen := false

@@ -89,6 +89,27 @@ protocol peer; they do not send model instructions. Signed-in SDK integration
 tests remain opt-in. Local regression success does not establish account
 eligibility, provider billing limits, or full coding/review acceptance.
 
+Skill regressions use independently written synthetic instructions in temporary
+directories and the repository-owned skill-only plugin fixture. Do not require
+named external writing skills, personal home paths, global installations, login,
+network access or a paid model in ordinary tests. Test role-bound approval,
+multiple assets, create/resume bindings, the `skill` tool surface, success/failure
+evidence and rejection of missing, changed or unapproved assets:
+
+```bash
+go test ./internal/tools ./internal/runtime/copilot ./internal/runtime/controller \
+  -run 'TestAssetsApprovalsAndPluginSurface|TestApprovedSkillsWithoutModelUse|TestSkillToolRequiresApprovedAssets|TestSDKToolsCreateResumeRoleAndImmutableHash|TestReviewFlowPreflightsFutureSkillAssetsWithoutModelUse'
+```
+
+For local native plugin discovery only, explicitly opt in with
+`TAXION_TEST_LOCAL_PLUGIN_DISCOVERY=1 go test ./internal/runtime/copilot -run TestLocalPluginDiscoveryWithoutModelUse`.
+It sends no model instructions; a missing CLI fails this requested check.
+Neither synthetic hook results nor native discovery prove real skill loading
+or document quality. Issue #78 separately requires an authorized real document
+session, selected skill identities, loading results, inspection evidence and
+independent review of the same artifact. External skills are operator-supplied
+dogfood inputs, not Taxion dependencies; do not copy their bodies into fixtures.
+
 For a persisted incident, preserve a consistent SQLite backup and original
 worktree before applying recovery. Check SDK cancellation and the subsequent
 workspace transaction separately: cancellation can succeed while result
@@ -97,6 +118,19 @@ and observed usage; do not rewrite the old contract or budget to manufacture
 success. Private databases, raw logs and credential values stay outside commits.
 Publish the generalized finding and chosen boundary in the ADR, current
 behavior in its owning reference, and operator actions in the user guide.
+
+## Budget-aware instructions (design)
+
+Budget-aware instruction design is accepted in
+[ADR-0029](docs/adr/0029-separate-budget-guidance-from-provider-quota.md), not yet
+implemented. Keep flow-token accounting, session soft credit ceilings, context
+capacity and account quotas separate. Provider-specific quota APIs and billing
+types belong in adapters; unknown or stale observations must remain explicit.
+Test defaults and per-request precedence, units, partial accounting, quota
+failures, account binding, bounded non-model reads and unchanged stop gates with
+synthetic fixtures before adding a signed-in acceptance. Dynamic observations
+belong in send receipts, not mutations of the bound system prompt. Do not add
+OpenCode to supported configuration before its adapter contract is implemented.
 
 ## Code comments
 

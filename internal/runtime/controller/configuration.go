@@ -36,7 +36,7 @@ func CheckConfiguration(db *store.Store, taskID string, candidate config.Config)
 
 // CheckReviewFlowConfiguration rejects missing future review approvals before a
 // runner spends a Coder turn. It neither binds settings nor authorizes execution.
-func CheckReviewFlowConfiguration(db *store.Store, flowID string, candidate config.Config) error {
+func CheckReviewFlowConfiguration(db *store.Store, flowID string, candidate config.Config, availableTools map[string][]string) error {
 	if db == nil {
 		return fmt.Errorf("taxion: flow configuration check requires a workspace")
 	}
@@ -61,6 +61,28 @@ func CheckReviewFlowConfiguration(db *store.Store, flowID string, candidate conf
 	last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
 	if !slices.Contains(last.Instruction.Decisions, decision) {
 		return fmt.Errorf("taxion: configuration approval changed after Dispatch issuance; issue a newly authorized Dispatch")
+	}
+	task, _ := state.Graph.GraphTask(flow.TaskID)
+	for _, role := range []string{"CODER", "REVIEWER"} {
+		approved, err := tools.Resolve(last.Instruction.Decisions, flow.TaskID, role)
+		if err != nil {
+			return fmt.Errorf("taxion: preflight %s tools: %w", role, err)
+		}
+		current, err := tools.Resolve(task.Decisions, flow.TaskID, role)
+		if err != nil {
+			return fmt.Errorf("taxion: preflight %s current tools: %w", role, err)
+		}
+		if !tools.Equal(approved, current) {
+			return fmt.Errorf("taxion: %s tools approval changed after Dispatch issuance", role)
+		}
+		if err := tools.CheckSkillAccess(approved, availableTools[role]); err != nil {
+			return fmt.Errorf("taxion: preflight %s tools: %w", role, err)
+		}
+		if approved != nil {
+			if err := approved.Check(); err != nil {
+				return fmt.Errorf("taxion: preflight %s tools: %w", role, err)
+			}
+		}
 	}
 	for index := flow.Repairs; index <= flow.MaxRepairs; index++ {
 		taskID := fmt.Sprintf("%s-review-%d", flow.ID, index)

@@ -1185,6 +1185,13 @@ named options shown for each operation.
 | `specification scope-hash`, `specification search`, `specification serve` | Required `--scope JSON` selects the exact approved local corpus. `search` also requires `--query TERMS`; `serve` exposes the read-only search corpus over MCP stdio. |
 | `tools hash` | Required `--path PATH` hashes an exact local executable, input file, skills directory, or skill-only plugin directory. |
 
+承認済み role policy の `skills` / `plugins` は `skill` tool の追加を伴う。
+未承認 asset のまま `--tools skill`、`--coder-tools skill`、
+`--reviewer-tools skill` を指定しても利用可能にならない。
+`workflow run|step` は両 role の skill / tool asset を session 作成前に照合する。
+設定とログ確認の手順は [利用者ガイド](user-guide.md#文書用-skill-を使う場合)、
+権限と証拠の境界は [runtime 契約](03-runtime-contract.md#skillspluginsmcphooks-と出力圧縮)を参照する。
+
 The root usage string is maintained separately from the flag definitions; this
 index is the manual cross-reference for the implemented subcommands and their
 options. `ready` and `doctor` are not implemented

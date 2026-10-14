@@ -26,7 +26,8 @@ func toolsConfig(t *testing.T) Config {
 	if err := os.Mkdir(skills, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(skills, "SKILL.md"), []byte("Synthetic reading skill"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(skills, "SKILL.md"),
+		[]byte("---\nname: fixture-reading\ndescription: Synthetic reading instructions.\n---\nRead the supplied document.\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	hash, err := tools.Hash(skills)
@@ -88,9 +89,12 @@ func TestSDKToolsCreateResumeRoleAndImmutableHash(t *testing.T) {
 }
 
 func TestLocalPluginDiscoveryWithoutModelUse(t *testing.T) {
+	if os.Getenv("TAXION_TEST_LOCAL_PLUGIN_DISCOVERY") != "1" {
+		t.Skip("set TAXION_TEST_LOCAL_PLUGIN_DISCOVERY=1 for local model-free plugin discovery")
+	}
 	command, err := exec.LookPath("copilot")
 	if err != nil {
-		t.Skip("Native plugin acceptance requires the locally installed Copilot CLI")
+		t.Fatal("requested local plugin discovery requires Copilot CLI", err)
 	}
 	plugin, err := filepath.Abs("testdata/skill-plugin")
 	if err != nil {
@@ -99,6 +103,132 @@ func TestLocalPluginDiscoveryWithoutModelUse(t *testing.T) {
 	body, err := exec.Command(command, "--plugin-dir", plugin, "plugin", "list", "--json").Output()
 	if err != nil || !strings.Contains(string(body), "taxion-source-review") {
 		t.Fatal("native Copilot plugin discovery failed", err)
+	}
+}
+
+func TestApprovedSkillsWithoutModelUse(t *testing.T) {
+	for _, role := range []string{"CODER", "REVIEWER"} {
+		t.Run(role, func(t *testing.T) {
+			config := toolsConfig(t)
+			config.Role = role
+			config.ToolPolicy.MCP = nil
+			config.ToolPolicy.Plugins = nil
+			second := t.TempDir()
+			if err := os.WriteFile(filepath.Join(second, "SKILL.md"),
+				[]byte("---\nname: fixture-second\ndescription: Synthetic test instructions.\n---\nCheck the supplied document.\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			hash, err := tools.Hash(second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.ToolPolicy.Skills = append(config.ToolPolicy.Skills, tools.Asset{Path: second, Hash: hash})
+			config.AvailableTools = []string{"view"}
+			adapter, err := New(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer adapter.Close()
+			create, resume := adapter.sessionConfig(nil), adapter.resumeConfig(nil)
+			expected := []string{config.ToolPolicy.Skills[0].Path, second}
+			if !*create.EnableSkills || !*resume.EnableSkills ||
+				!reflect.DeepEqual(create.SkillDirectories, expected) ||
+				!reflect.DeepEqual(resume.SkillDirectories, expected) ||
+				!slices.Contains(create.AvailableTools, "skill") ||
+				!reflect.DeepEqual(create.AvailableTools, resume.AvailableTools) {
+				t.Fatal("approved skills are not callable with identical create/resume bindings")
+			}
+			adapter.sessions["fixture-session"] = &managedSession{
+				sdk: &sdk.Session{}, busy: true, watchers: map[*subscription]struct{}{},
+			}
+			defer delete(adapter.sessions, "fixture-session")
+			invocation := sdk.HookInvocation{SessionID: "fixture-session"}
+			pre := sdk.PreToolUseHookInput{SessionID: "fixture-session", ToolName: "skill"}
+			if output, err := create.Hooks.OnPreToolUse(pre, invocation); err != nil || output != nil {
+				t.Fatal("approved skill hook denied", output, err)
+			}
+			required := true
+			for _, request := range []sdk.PermissionRequest{
+				&sdk.PermissionRequestCustomTool{ToolName: "skill"},
+				&sdk.PermissionRequestCustomTool{ToolName: "skill", ManagedApprovalRequired: &required},
+				&sdk.PermissionRequestCustomTool{ToolName: "bash"},
+				&sdk.PermissionRequestRead{Path: filepath.Join(second, "SKILL.md")},
+			} {
+				permission, err := create.OnPermissionRequest(request, sdk.PermissionInvocation{})
+				want := false
+				if custom, ok := request.(*sdk.PermissionRequestCustomTool); ok {
+					want = custom.ToolName == "skill" && custom.ManagedApprovalRequired == nil
+				}
+				if err != nil || (string(permission.Kind()) == "approve-once") != want {
+					t.Fatal("skill widened ordinary permissions or failed its approved request", request, permission, err)
+				}
+			}
+			for _, phase := range []string{"result", "failure"} {
+				if phase == "result" {
+					_, err = create.Hooks.OnPostToolUse(sdk.PostToolUseHookInput{
+						SessionID: "fixture-session", ToolName: "skill",
+						ToolResult: map[string]any{"resultType": "success", "textResultForLLM": "synthetic fixture loaded"},
+					}, invocation)
+				} else {
+					_, err = create.Hooks.OnPostToolUseFailure(sdk.PostToolUseFailureHookInput{
+						SessionID: "fixture-session", ToolName: "skill", Error: "synthetic fixture failure",
+					}, invocation)
+				}
+				if err != nil {
+					t.Fatal("skill evidence missing", phase, err)
+				}
+			}
+			files, err := os.ReadDir(config.ToolPolicy.EvidenceDirectory)
+			if err != nil || len(files) != 2 {
+				t.Fatal("skill success/failure originals not retained", files, err)
+			}
+			for _, file := range files {
+				body, err := os.ReadFile(filepath.Join(config.ToolPolicy.EvidenceDirectory, file.Name()))
+				if err != nil || !strings.Contains(string(body), `"tool":"skill"`) {
+					t.Fatal("skill identity missing from evidence", string(body), err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(second, "SKILL.md"), []byte("changed"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if output, err := create.Hooks.OnPreToolUse(pre, invocation); err != nil ||
+				output == nil || output.PermissionDecision != "deny" {
+				t.Fatal("changed skill remained callable", output, err)
+			}
+			if _, err := adapter.Start(t.Context(), "fixture-task"); err == nil || adapter.started {
+				t.Fatal("changed skill started a provider connection", err)
+			}
+		})
+	}
+}
+
+func TestSkillToolRequiresApprovedAssets(t *testing.T) {
+	config := testConfig(t)
+	config.AvailableTools = []string{"skill"}
+	if _, err := New(config); err == nil {
+		t.Fatal("unapproved skill tool accepted")
+	}
+	config.ToolPolicy = &tools.Policy{EvidenceDirectory: t.TempDir()}
+	if _, err := New(config); err == nil {
+		t.Fatal("empty policy authorized skills")
+	}
+	config.AvailableTools = []string{}
+	adapter, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	if *adapter.sessionConfig(nil).EnableSkills || slices.Contains(adapter.config.AvailableTools, "skill") {
+		t.Fatal("policy without skill assets enabled skills")
+	}
+	config.ToolPolicy = nil
+	plain, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plain.Close()
+	if *plain.sessionConfig(nil).EnableSkills || *plain.resumeConfig(nil).EnableSkills {
+		t.Fatal("unconfigured runtime discovered ambient skills")
 	}
 }
 
