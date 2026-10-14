@@ -37,9 +37,9 @@ func TestRoleReadsResolveRelativeAndMissingLeavesWithoutSymlinkEscapes(t *testin
 		for _, role := range []string{"CODER", "REVIEWER"} {
 			t.Run(role+"/"+tc.path, func(t *testing.T) {
 				read := &sdk.PermissionRequestRead{Path: tc.path}
-				decision := reviewerPermissionDecision(root, read)
+				decision := reviewerPermissionDecision(root, nil, nil, read)
 				if role == "CODER" {
-					decision = coderPermissionDecision(root, nil, read)
+					decision = coderPermissionDecision(root, nil, nil, nil, read)
 				}
 				_, allowed := decision.(*rpc.PermissionDecisionApproveOnce)
 				if allowed != tc.allow {

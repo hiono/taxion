@@ -18,7 +18,8 @@ func graphTask(id string) GraphTask {
 		RequiredEvidence: []string{"test-report"}, ExitCondition: "report", Worktree: "/work/task",
 		ValidationCommands: []string{"go test ./..."},
 		Branch:             "work/task", BaselineSHA: strings.Repeat("a", 40),
-		AuthorizationID: "decision:1", Decisions: []TaskDecision{{ID: "decision:1", Source: "human:1", Text: "allow scope"}}}
+		AuthorizationID: "decision:1", Decisions: []TaskDecision{{ID: "decision:1", Source: "human:1", Text: "allow scope"}},
+		FileAccess: DefaultFileAccessPolicy()}
 }
 
 func trackedGraph(t *testing.T, tasks ...GraphTask) TaskGraph {
@@ -90,6 +91,46 @@ func TestGraphLifecycleAndProof(t *testing.T) {
 	loaded.History[len(loaded.History)-1].Proof = nil
 	if err := loaded.Validate(); err == nil {
 		t.Fatal("missing proof accepted")
+	}
+}
+
+func TestSnapshotTaskCompletionRequiresExactTreeReview(t *testing.T) {
+	task := graphTask("snapshot-task")
+	task.OutputMode = OutputModeWorktreeTreeSnapshot
+	g := trackedGraph(t, task)
+	move(t, &g, task.ID, Ready, TransitionProof{})
+	dispatch, err := NewGraphDispatch(g, "snapshot-dispatch", task.ID, task.Repo,
+		RelationshipNone, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dispatch.Instruction.OutputMode != OutputModeWorktreeTreeSnapshot {
+		t.Fatalf("snapshot mode missing from approved Dispatch: %+v", dispatch.Instruction)
+	}
+	move(t, &g, task.ID, Active, TransitionProof{})
+	tree := strings.Repeat("b", 40)
+	move(t, &g, task.ID, WaitingForReview, TransitionProof{
+		OutputSHA: task.BaselineSHA, OutputTreeSHA: tree,
+		OutputChangedFiles: []string{"src/file.go"},
+	})
+	saved, _ := g.GraphTask(task.ID)
+	if saved.TargetSHA != task.BaselineSHA || saved.TargetTreeSHA != tree ||
+		!slices.Equal(saved.TargetChangedFiles, []string{"src/file.go"}) {
+		t.Fatalf("snapshot handoff was not retained: %+v", saved)
+	}
+	proof := TransitionProof{
+		ActionPerformed: true, Evidence: []string{"test-report"}, Acceptance: task.Acceptance,
+		ReviewedSHA: task.BaselineSHA, ReviewedTreeSHA: tree, Reviewer: task.Reviewer,
+	}
+	bad := proof
+	bad.ReviewedTreeSHA = strings.Repeat("c", 40)
+	if err := g.Transition(task.ID, Approved, "controller", "wrong tree", bad); err == nil {
+		t.Fatal("accepted review of a different worktree tree")
+	}
+	move(t, &g, task.ID, Approved, proof)
+	move(t, &g, task.ID, Completed, proof)
+	if err := g.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -32,7 +32,11 @@ func TestFlowRunnerObservesInterruptAndPreservesUnconfirmedStopOnFailure(t *test
 					worker.stopErr = errors.New("stop unavailable")
 				}
 				worker.script = func() error {
-					if err := os.WriteFile(filepath.Join(dispatch.Instruction.Worktree, "partial.txt"), []byte("retained"), 0600); err != nil {
+					partialFile := filepath.Join(dispatch.Instruction.Worktree, "internal", "partial.txt")
+					if err := os.MkdirAll(filepath.Dir(partialFile), 0755); err != nil {
+						return err
+					}
+					if err := os.WriteFile(partialFile, []byte("retained"), 0600); err != nil {
 						return err
 					}
 					observation, err := ObserveFeedback(db, flow.ID)
@@ -60,8 +64,16 @@ func TestFlowRunnerObservesInterruptAndPreservesUnconfirmedStopOnFailure(t *test
 				!stopFails && (dispatch.Status != core.DispatchCancelled || dispatch.Result == nil) {
 				t.Fatal("runner confused stop request and actual stop confirmation")
 			}
-			if data, err := os.ReadFile(filepath.Join(flow.Contract.Worktree, "partial.txt")); err != nil || string(data) != "retained" {
+			if data, err := os.ReadFile(filepath.Join(flow.Contract.Worktree, "internal", "partial.txt")); err != nil || string(data) != "retained" {
 				t.Fatal("interruption rolled back partial work", err)
+			}
+			if !flow.HandoffHeld() {
+				t.Fatal("stopped flow was not held for explicit successor approval")
+			}
+			if !stopFails && (dispatch.Result == nil || dispatch.Result.PartialGitEvidence == nil ||
+				len(dispatch.Result.PartialGitEvidence.ChangedFiles) != 1 ||
+				dispatch.Result.PartialGitEvidence.ChangedFiles[0] != "internal/partial.txt") {
+				t.Fatal("stopped dispatch did not retain partial Git evidence")
 			}
 		})
 	}

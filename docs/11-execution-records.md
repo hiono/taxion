@@ -11,10 +11,12 @@ CLI はローカルの信頼された管理者が操作する。`actor` と承�
 | --- | --- |
 | 発行済み、実行開始前 | 現在の設定承認・主体・権限・worktree を確認して開始する。保存済み Session があれば同じ Session を使う |
 | Coder・Reviewer の実行中 | 同じ役割・設定の Session に接続して観測する。欠落・失効・不明な実行はエラーとして保持し、停止確認と後続契約の承認で処理する |
-| Coder の結果取得後 | 結果と利用量の receipt、現在の origin・branch・HEAD・親 SHA・変更範囲・検証記録を照合して独立レビューへ進む |
-| Reviewer の結果取得後 | 解放済み worktree の不存在と Git registry、元 repository の対象 commit・親 SHA・origin、直前 Coder と同じ出力 SHA を照合する |
+| Coder の結果取得後 | 結果と利用量の receipt、現在の origin・branch・HEAD・親 SHA・変更範囲・検証記録を照合して独立レビューへ進む。snapshot mode は baseline commit SHA、保持 ref、output tree SHA と path を照合する |
+| Reviewer の結果取得後 | 解放済み worktree の不存在と Git registry、元 repository の対象 commit・親 SHA・origin、直前 Coder と同じ出力 SHA を照合する。snapshot mode は Coder と同じ output tree SHA も照合する |
 | Human 判断待ち・保留中 | 対象、保留、補足、指示案の版、質問・調査の出典、明示反映を復元する。続行は保存済みの保留解除・承認条件に従う |
 | 完了 checkpoint | receipt と最新の Coder・Reviewer の Git 証拠を再確認する。改変は明示的なエラーになる |
+
+snapshot mode では `outputSha` は baseline commit SHA のまま、`outputTreeSha` は Controller が Git tree から算出する成果物識別子である。両者は別の値として Task・Dispatch・Reviewer の証拠に保存する。Controller は tree object を `refs/taxion/snapshots/` に保持し、再起動後も ref と実 worktree の tree・変更 path を照合する。ref の保持はローカル Git metadata の変更であり、branch、commit、index、remote は変更しない。
 
 `workflow recover` は、観測した runner ID と旧 process の停止確認、判断者、理由、証拠を要求する。
 全 Dispatch の終了と証拠照合が済むと、旧 runner の所有権を解除して復旧記録を保存する。
@@ -38,6 +40,10 @@ provider の永続 event ID として扱える範囲が限られるため、保�
 接続後の観測と、結果・利用量の確定は分けて扱う。
 
 結果の receipt は、保存した結果とその時点の利用量をまとめて照合する。
+`SUSPENDED` の後に安全停止して `CANCELLED` を保存する場合は、同じ Dispatch の
+結果 receipt に連続した sequence を付けて追記し、元の suspension receipt を保持する。
+照合時は最新結果との一致に加え、履歴の順序、過去の suspension の Dispatch・Session
+識別子、内容 hash、保存済み利用量との一致を検査する。
 旧版の成功結果も読み出せるが、receipt を持たない checkpoint の自動採用は
 証拠不足として停止する。履歴を確認し、停止・後続契約の明示承認で作業を進める。
 hash は保存内容の取り違え・個別改変の検出に使う。保存先全体の書換えに対する

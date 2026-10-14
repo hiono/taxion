@@ -94,7 +94,8 @@ func TestNormalizeEventUsesSDKNeutralTypes(t *testing.T) {
 		{"usage", sdk.SessionEvent{Data: &sdk.AssistantUsageData{
 			Model: model, IsAuto: &auto, InputTokens: &inputTokens, OutputTokens: &outputTokens,
 			CacheReadTokens: &cacheRead, CacheWriteTokens: &cacheWrite,
-		}}, runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"gpt-6-luna","isAuto":true,"inputTokens":120,"outputTokens":30,"cacheReadTokens":100,"cacheWriteTokens":20}`}, true},
+			Accounting: &sdk.UsageAccountingIdentity{SourceSessionID: "session", Sequence: 7, UsageID: "call-7"},
+		}}, runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"gpt-6-luna","accounting":{"sequence":7,"sourceSessionId":"session","usageId":"call-7"},"isAuto":true,"inputTokens":120,"outputTokens":30,"cacheReadTokens":100,"cacheWriteTokens":20}`}, true},
 		{"context usage", sdk.SessionEvent{Data: &sdk.SessionUsageInfoData{CurrentTokens: 1200, TokenLimit: 8000}}, runtime.Event{Type: runtime.EventContextUsage, Payload: `{"currentTokens":1200,"tokenLimit":8000,"messagesLength":0}`}, true},
 		{"compaction", sdk.SessionEvent{Data: &sdk.SessionCompactionStartData{Model: &model, CurrentTokens: &inputTokens}}, runtime.Event{Type: runtime.EventCompaction, Payload: `{"phase":"started","model":"gpt-6-luna","currentTokens":120}`}, true},
 		{"permission completion", sdk.SessionEvent{Data: &sdk.PermissionCompletedData{Result: rpc.PermissionDeniedByPermissionRequestHook{}}}, runtime.Event{Type: runtime.EventPermission, Payload: `{"result":"denied-by-permission-request-hook"}`}, true},
@@ -156,7 +157,7 @@ func TestCoderPermissionDecisionLimitsAccessToWorktreeAndAllowlist(t *testing.T)
 	inside := filepath.Join(worktree, "new.go")
 	outside := filepath.Join(t.TempDir(), "outside.go")
 	allowedTool := "taxion_test_write"
-	allowed := coderPermissionDecision(worktree, []string{allowedTool}, &sdk.PermissionRequestWrite{FileName: inside})
+	allowed := coderPermissionDecision(worktree, []string{allowedTool}, nil, nil, &sdk.PermissionRequestWrite{FileName: inside})
 	if _, ok := allowed.(*rpc.PermissionDecisionApproveOnce); !ok {
 		t.Fatalf("worktree write decision = %T, want one-time approval", allowed)
 	}
@@ -169,13 +170,13 @@ func TestCoderPermissionDecisionLimitsAccessToWorktreeAndAllowlist(t *testing.T)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			decision := coderPermissionDecision(worktree, []string{allowedTool}, request)
+			decision := coderPermissionDecision(worktree, []string{allowedTool}, nil, nil, request)
 			if _, ok := decision.(*rpc.PermissionDecisionReject); !ok {
 				t.Fatalf("permission decision = %T, want rejection", decision)
 			}
 		})
 	}
-	decision := coderPermissionDecision(worktree, []string{allowedTool},
+	decision := coderPermissionDecision(worktree, []string{allowedTool}, nil, nil,
 		&sdk.PermissionRequestCustomTool{ToolName: allowedTool})
 	if _, ok := decision.(*rpc.PermissionDecisionApproveOnce); !ok {
 		t.Fatalf("allowlisted tool decision = %T, want one-time approval", decision)

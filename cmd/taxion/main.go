@@ -36,7 +36,7 @@ Usage:
   taxion [--store PATH] <command> [options]
 
 Commands:
-  config check        Validate fixed Global/Project YAML and environment references ([--sources], [--task])
+  config check        Validate fixed Global/Project YAML and environment references ([--sources], [--capabilities], [--task], [--dispatch])
   git check-index     Reject local Taxion and dotenv paths in the actual commit index
   git check-range     Scan every unpublished commit tree and message (--base SHA, --head SHA, --scanner PATH)
   git hook            Install (--scanner PATH, or --paths-only), inspect, or remove the Taxion pre-commit hook
@@ -51,19 +51,20 @@ Commands:
   dispatch transition Record a Dispatch lifecycle transition (--id, --status, --reason)
   dispatch list       List dispatches ([--repo] filter, [--json])
   config bind         Save an approved fixed-file configuration selection for an unbound Dispatch
+  conversation watch  Hold handoffs before reading Human input; select one role step or bounded run (--flow, --actor, --source)
   conversation ask    Answer a bounded side question from saved Task records without changing the main workflow
   conversation plan   Recommend a next action from compact Memory and results; no execution or inferred approval
   conversation intake Record an original request and unapproved scope/acceptance contract (--file JSON)
   conversation proposal Read a saved proposed contract and its exact hash (--task ID)
   conversation confirm Explicitly approve that exact contract/configuration without issuing work (--file JSON)
   conversation investigate Read bounded scoped committed files for an isolated question with explicit ceilings
-  conversation watch Hold handoffs before reading Human input; choose one role step or explicit bounded automatic execution
+  conversation search Search and attach sourced excerpts to an editable Task (--scope, --task, --question)
   runtime auth        Check the effective Copilot account against approved Dispatch configuration without creating a session
   runtime start       Start the Copilot session bound to an active Dispatch and send its authorized instruction
   runtime send        Send a follow-up prompt to the Dispatch session (--prompt-file required)
   runtime resume      Resume the Dispatch session
   runtime events      Stream events from the Dispatch session
-  runtime stop        Stop the Dispatch session
+  runtime stop        Cancel the saved Dispatch session without execution prompts or tools
   runtime commit      Publish scanned staged changes for the bound running Coder (--message-file, --scanner)
   runtime <action> --managed-commit  Opt into the bound Coder SDK commit tool; use the same option and scanner on resume
   runtime <action> --managed-stage   Also enable scoped file staging; requires --managed-commit
@@ -71,8 +72,10 @@ Commands:
   workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON)
   workflow advance    Issue review/repair from the latest verified result (--id required)
   workflow run        Execute review/repair continuously with saved ceilings (--id and role prompt files required)
+  workflow step       Execute one role turn from a saved review flow (--id and role prompt files required)
   workflow show       Read the saved review flow and ceilings (--id required)
   workflow recover    Release interrupted runner ownership after recorded execution stop (--file JSON)
+  workflow interrupt Request a targeted stop for the active flow (--file JSON)
   records proposal    Display exact external publication content and its approval hash (--file JSON)
   records approve     Save an explicitly approved Issue/PR publication after local secret checks (--file JSON)
   records send        Deliver one approved publication with a durable sender claim (--id, --scanner)
@@ -86,9 +89,12 @@ Commands:
   workflow draft      Save or revise a versioned, unissued instruction proposal while held (--file JSON)
   workflow draft-discard Explicitly discard the latest proposal without applying it (--file JSON)
   workflow draft-approve Approve the latest supplement within the unchanged flow contract (--file JSON)
+  workflow planning-context Read bounded Planner input from saved Task records (--id required)
+  workflow planner-draft Record a selected planning proposal (--file JSON)
+  workflow planner-action Record selected non-execution advice (--file JSON)
+  workflow question-draft Record selected findings from a bounded side question (--file JSON)
   review              Bind coder-output evidence (--task, --sha and --repo required)
   resume              Print a resume acknowledgement (local stub; --session required)
-  acp                 Serve ACP v1 over stdio (spike)
   serve               Serve HTTP API over the ledger ([--addr], [--mode], [--token]/TAXION_TOKEN, [--audit])
   gen-token           Print a random Bearer token for serve (M5 auth)
   audit verify        Verify the audit log hash chain ([--audit])
@@ -113,7 +119,6 @@ Commands:
   specification scope-hash Hash an exact public/synthetic local corpus (--scope)
   specification search Search approved PDF/DOCX/PPTX sources; print metadata only (--scope, --query)
   specification serve Serve the approved local search corpus over read-only MCP stdio (--scope)
-  conversation search Search and attach sourced excerpts to an editable Task (--scope, --task, --question)
   tools hash          Pin exact local extension files or directory contents (--path)
 
 Identity gate (REP-001): task create, dispatch and review require an explicit --repo.
@@ -510,7 +515,7 @@ func resumeCmd(args []string) error {
 
 func runtimeCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion runtime {auth|start|send|resume|events|stop|commit} --dispatch ID --system-prompt-file PATH")
+		return fmt.Errorf("usage: taxion runtime {auth|start|send|resume|events|stop|commit} --dispatch ID [--system-prompt-file PATH; not used for stop]")
 	}
 	action := args[0]
 	switch action {
@@ -541,7 +546,10 @@ func runtimeCmd(args []string) error {
 	if err := copilot.ValidateAICreditLimit(*maxAICredits); err != nil {
 		return err
 	}
-	if *dispatchID == "" || *systemPromptFile == "" {
+	if *dispatchID == "" {
+		return fmt.Errorf("runtime %s: --dispatch is required", action)
+	}
+	if action != "stop" && *systemPromptFile == "" {
 		return fmt.Errorf("runtime %s: --dispatch and --system-prompt-file are required", action)
 	}
 	if *timeout <= 0 {
@@ -585,6 +593,30 @@ func runtimeCmd(args []string) error {
 	if !ok {
 		return fmt.Errorf("runtime: Dispatch %q not found", *dispatchID)
 	}
+	if action == "stop" {
+		var invalidOption string
+		fs.Visit(func(option *flag.Flag) {
+			switch option.Name {
+			case "dispatch", "cli", "base-directory", "timeout":
+			default:
+				invalidOption = option.Name
+			}
+		})
+		if invalidOption != "" {
+			return fmt.Errorf("runtime stop: --%s is an execution option; stop uses only the saved session binding, --cli, --base-directory and --timeout", invalidOption)
+		}
+		ctx, cancel := signalContext(*timeout)
+		defer cancel()
+		worker, err := copilot.NewForStop(dispatch, *cliPath, *baseDirectory)
+		if err != nil {
+			return err
+		}
+		control, err := controller.New(db, worker)
+		if err != nil {
+			return errors.Join(err, worker.Close())
+		}
+		return errors.Join(control.Stop(ctx, dispatch.ID), worker.Close())
+	}
 	if dispatch.Instruction.Version < core.DispatchInstructionVersion {
 		return fmt.Errorf("runtime: Dispatch %q predates the current execution contract; issue a new Dispatch", *dispatchID)
 	}
@@ -599,7 +631,7 @@ func runtimeCmd(args []string) error {
 		}
 		expectedAccount = resolved.Config.Runtime.Account
 	}
-	if action != "stop" && action != "auth" {
+	if action != "auth" {
 		dispatch, err = selectDispatchConfiguration(db, dispatch)
 		if err != nil {
 			return err
@@ -702,8 +734,6 @@ func runtimeCmd(args []string) error {
 		if operationErr == nil {
 			operationErr = streamEvents(ctx, control, dispatch, 0, os.Stdout)
 		}
-	case "stop":
-		operationErr = control.Stop(ctx, dispatch.ID)
 	case "commit":
 		var message []byte
 		message, operationErr = os.ReadFile(*messageFile)

@@ -22,6 +22,9 @@ func Verify(dispatch core.GraphDispatch, result *core.DispatchResult) error {
 		return fmt.Errorf("Git proof requires a dispatch result")
 	}
 	result.GitEvidence = nil
+	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+		return verifySnapshot(dispatch, result)
+	}
 	if result.DispatchID != dispatch.ID || result.TaskID != dispatch.TaskID ||
 		result.Recipient != dispatch.Recipient || result.Repository != dispatch.Repository ||
 		result.Status != core.DispatchSucceeded || result.StartedSHA != dispatch.ExpectedStartSHA() {
@@ -171,6 +174,9 @@ func ObserveStart(dispatch core.GraphDispatch) (string, error) {
 	if !fullSHA(start) {
 		return "", fmt.Errorf("execution start requires a full SHA")
 	}
+	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+		return ObserveSnapshotStart(dispatch)
+	}
 	files, err := changedFiles(dispatch.Instruction.Worktree, dispatch.Instruction.BaselineSHA, start)
 	if err != nil {
 		return "", err
@@ -200,6 +206,12 @@ func ExecuteValidations(ctx context.Context, dispatch core.GraphDispatch, result
 	if len(dispatch.Instruction.ValidationCommands) == 0 {
 		return fmt.Errorf("controller validation requires authorized commands")
 	}
+	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot &&
+		dispatch.Recipient == "CODER" {
+		if err := CaptureSnapshot(dispatch, result); err != nil {
+			return err
+		}
+	}
 	if err := Verify(dispatch, result); err != nil {
 		return err
 	}
@@ -217,7 +229,7 @@ func ExecuteValidations(ctx context.Context, dispatch core.GraphDispatch, result
 		command.WaitDelay = 5 * time.Second
 		output, err := command.CombinedOutput()
 		validation := core.DispatchValidation{
-			Command: authorized, Worktree: root, SHA: result.OutputSHA,
+			Command: authorized, Worktree: root, SHA: validationSHA(dispatch, result),
 			Output: string(output), StartedAt: started, FinishedAt: time.Now().UTC(),
 		}
 		if err != nil {
@@ -237,6 +249,13 @@ func ExecuteValidations(ctx context.Context, dispatch core.GraphDispatch, result
 		}
 	}
 	return Verify(dispatch, result)
+}
+
+func validationSHA(dispatch core.GraphDispatch, result *core.DispatchResult) string {
+	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+		return result.OutputTreeSHA
+	}
+	return result.OutputSHA
 }
 
 func fullSHA(value string) bool {
@@ -326,10 +345,36 @@ func withinAny(path string, scopes []string) bool {
 // CheckChangedPaths applies the same Dispatch scope to pre-commit trees and
 // final Git evidence. Callers obtain the paths from Git, not agent reports.
 func CheckChangedPaths(dispatch core.GraphDispatch, files []string) error {
+	var committed map[string]struct{}
+	if policy := dispatch.Instruction.FileAccess; policy != nil && policy.Level == core.FileAccessCommitted && len(files) > 0 {
+		paths, err := TrackedPathsAt(dispatch.Instruction.Worktree, dispatch.ExpectedStartSHA())
+		if err != nil {
+			return fmt.Errorf("check committed-file access: %w", err)
+		}
+		committed = make(map[string]struct{}, len(paths))
+		for _, path := range paths {
+			committed[path] = struct{}{}
+		}
+	}
 	for _, file := range files {
 		if dispatch.Recipient == "REVIEWER" || !withinAny(file, dispatch.Instruction.AuthorizedActions) ||
 			withinAny(file, dispatch.Instruction.ForbiddenActions) {
 			return fmt.Errorf("Git change %q is outside the authorized scope", file)
+		}
+		if policy := dispatch.Instruction.FileAccess; policy != nil {
+			switch policy.Level {
+			case core.FileAccessExact:
+				if !slices.Contains(policy.Paths, filepath.ToSlash(file)) {
+					return fmt.Errorf("Git change %q is outside the exact file-access paths", file)
+				}
+			case core.FileAccessCommitted:
+				if _, ok := committed[filepath.ToSlash(file)]; !ok {
+					return fmt.Errorf("Git change %q was not tracked at the Dispatch start SHA", file)
+				}
+			case core.FileAccessAll:
+			default:
+				return fmt.Errorf("unknown file access level %q", policy.Level)
+			}
 		}
 	}
 	return nil

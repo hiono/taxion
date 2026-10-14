@@ -127,7 +127,12 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 			return fmt.Errorf("taxion: flow runner claim changed during execution")
 		}
 		if err != nil && stored.Status == "RUNNING" && !handoffHeldOnly(err) {
-			stored.Status, stored.Reason = "STOPPED", "runner failed: "+err.Error()
+			reason := "runner failed: " + err.Error()
+			if holdErr := holdReviewFlowForStop(&state.Graph, &stored, reason); holdErr != nil {
+				return holdErr
+			}
+			stored.StopCode = "SAFETY_STOP"
+			stored.Status, stored.Reason = "STOPPED", reason
 		}
 		stored.RunnerID = ""
 		storeFlow(state, stored)

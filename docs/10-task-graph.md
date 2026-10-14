@@ -105,6 +105,28 @@ Dispatch の発行には一つ以上のコマンドを要求し、controller は
 `sh -c` で実行する。コマンドの権限は controller の実行環境に従うため、
 Task の承認時にコマンドの副作用も確認する。
 
+`fileAccess` は SDK の file read/write permission を定め、Task と Dispatch の契約 hash に含める。
+新しい Task の省略時は `{"level":"committed"}` となり、Dispatch 開始 SHA で追跡済みの
+repository-relative path を許可する。`{"level":"exact","paths":["src/file.go"]}` は列挙した
+normalized path だけを許可し、明示した新規 path も作成できる。
+`{"level":"all"}` は割当 worktree 内の全 path を許可する。どの level でも worktree 外と
+`.git` は拒否し、Reviewer は読み取り専用のままとする。
+この設定は `scope` による変更範囲や SDK tool allowlist とは別の制御である。
+SDK permission callback と Git の成果物検証は同じ Dispatch snapshot を使う。
+fileAccess のない保存済み Task／Dispatch は移行せず、以前のアクセス挙動を維持する。
+既存 Task の fileAccess を変えるには新しい authorization decision が必要で、更新時に field を
+省略した場合は保存済みの policy を維持する。
+
+`outputMode` は成果物の識別方式を選ぶ。省略時と `commit` は従来どおり commit SHA を使う。
+`worktree-tree-snapshot` を指定すると、Coder は commit を作らずに実行し、
+Controller が開始時の commit SHA を `outputSha`、Git tree SHA を `outputTreeSha` として保存する。
+変更 path と tree SHA は Task・Dispatch・Reviewer handoff で照合する。
+Controller は tree object を `refs/taxion/snapshots/` のローカル ref で保持する。
+snapshot ref は branch や commit ではないが、Git repository 内に残る。
+ignored file は Git tree に含まれず Reviewer に渡らないため、成果物や検証結果に使わない。
+後続 Task で snapshot を引き継ぐときは、承認する `targetSha`（baseline commit）、
+`targetTreeSha`、`targetChangedFiles` を一致させる。
+
 新しい Coder Dispatch は `commitMessagePolicy: "conventional-contextual-v1"` を
 不変の instruction snapshot に保存する。Taxion が作成・受理するコミットは
 Conventional Commits の subject と Contextual Commits の body を使用する。
@@ -580,6 +602,82 @@ worker の開始や本文に書かれた検証の完了を、この表示だけ�
 
 scope・acceptance・実行主体・設定・上限を変える契約改訂、
 自然言語の質問・追加調査、実認証での SDK 受入れは引き続き未実装である。
+
+### 予算上限後の作業継続
+
+flow は Dispatch ごとの SDK usage を重複排除して合算し、保存済み token 上限に達すると次の有料 Dispatch を発行せず `BUDGET_LIMIT` で停止する。stop reason には上限、観測した token 数、超過数を記録し、SDK usage event も保存する。実行中の一 turn が上限を超えた場合、その turn は中断されず実測値が上限を超えることがある。停止時は handoff も保留される。`workflow show --id FLOW-ID` で stop code、usage、最後の Dispatch result と Git evidence を確認する。停止済み flow は上限を変更しても再開しないため、続行には新しい Task の承認と新しい予算の承認が必要になる。
+
+`workflow recover` は、プロセス停止後に残った runner の所有権を解放する操作である。停止したプロセス、runner ID、全 Dispatch の終端状態を確認してから、次の内容を `taxion workflow recover --file REQUEST.json` に渡す。
+
+```json
+{
+  "flowId": "application-flow",
+  "expectedRunnerId": "runner-id-from-workflow-show",
+  "previousProcessStopped": true,
+  "actor": "human",
+  "reason": "停止済みプロセスと全 Dispatch の結果を確認した",
+  "evidence": ["operator-log:recovery-check"]
+}
+```
+
+この操作は token 上限や handoff hold を解除せず、Task や Dispatch を作らない。`BUDGET_LIMIT` で停止した flow は通常 runner の所有権も解放済みであり、`workflow recover` は続行に不要である。
+
+最後の Coder が `CANCELLED` になった場合、result の `partialGitEvidence` に停止時点の baseline、HEAD、Git tree、変更ファイルが記録される。作業を続けるには、停止した worktree で `git add -A -- .` と `git write-tree` を実行し、得られた tree SHA が保存済み `treeSha` と一致することを確認してから commit する。一致しなければ commit や後続 Task の承認に進まず、保存された変更を復元する。次に、その commit を target とする別の clean worktree を作る。
+
+この手順は commit mode の場合に使う。snapshot mode では commit を作らず、別 worktree を元の baseline から作り、保存 tree の差分を適用する。
+後続 Task は `outputMode: "worktree-tree-snapshot"`、`targetSha` に baseline、`targetTreeSha` に保存済み tree、`targetChangedFiles` に保存済み path を指定する。
+`conversation confirm` は、後続 worktree の tree と path が停止時の証拠に一致する場合だけ承認する。次の Flow は Coder から始まり、開始前にも保存 ref と tree SHA を照合する。
+
+```sh
+git -C /path/to/repository worktree add -b work/successor /absolute/path/to/successor BASELINE-SHA
+git -C /path/to/repository diff --binary BASELINE-SHA TREE-SHA |
+  git -C /absolute/path/to/successor apply --binary
+```
+
+`git apply` は作業ファイルを更新するが、実 index や commit は変更しない。ignored file は Git tree に含まれないため、この経路の成果物として扱わない。
+
+```sh
+git -C /path/to/stopped-worktree add -A -- .
+git -C /path/to/stopped-worktree write-tree
+# write-tree の SHA が partialGitEvidence.treeSha と一致することを確認する
+git -C /path/to/stopped-worktree commit -m "feat: preserve stopped work"
+git -C /path/to/repository worktree add -b work/successor /absolute/path/to/successor TARGET-SHA
+git -C /absolute/path/to/successor status --porcelain
+```
+
+後続 Task の baseline は元の承認済み baseline のままにし、target SHA はその commit にする。最後のコマンドが空の出力を返すことも確認する。controller は承認時に tree、差分、scope と repository を照合する。部分証拠を確認できない場合や tree が一致しない場合は続行を拒否する。
+
+最後の Coder が `SUCCEEDED` になった後に上限へ達した場合は、保存済み output SHA と同じ commit を target とする別の clean worktree を用意する。
+この手順は commit mode の場合に使う。snapshot mode では baseline commit から別 worktree を作り、保存済み tree の差分を適用して、後続 Task の `targetTreeSha` と `targetChangedFiles` を一致させる。
+
+```sh
+git -C /path/to/repository worktree add -b work/review-successor /absolute/path/to/successor OUTPUT-SHA
+git -C /absolute/path/to/successor status --porcelain
+```
+
+後続 Task を人が承認したうえで、`workflow start` の request に元の Coder Dispatch ID を `continueFromDispatchId` として指定すると、新しい flow は Coder を再実行せず Reviewer から始まる。snapshot mode でもこの指定方法は同じで、Reviewer は同じ baseline commit と tree SHA を使う。
+
+どちらの経路でも、後続 Task の承認では置き換える停止済み flow とその保存済み結果を指定する。新しい flow には別の `id`、`taskId`、明示的な `maxTokens`・`timeoutSeconds` と予算承認を渡す。部分成果から続ける場合は通常の初回開始と同じく Coder から開始し、完了済み Coder 結果を引き継ぐ場合だけ `continueFromDispatchId` を指定する。
+
+```json
+{
+  "id": "application-review-successor",
+  "taskId": "approved-successor-task",
+  "continueFromDispatchId": "saved-coder-dispatch",
+  "repository": "owner/repository",
+  "reviewRoot": "/absolute/path/to/reviews",
+  "maxRepairs": 0,
+  "maxTokens": 30000,
+  "timeoutSeconds": 1800,
+  "authorization": {
+    "id": "new-budget-approval",
+    "source": "human:budget-approval",
+    "text": "保存済み Coder 結果の独立レビューに上記の上限で予算を承認する"
+  }
+}
+```
+
+部分成果を引き継ぐ場合、この例から `continueFromDispatchId` を除く。commit mode では承認済み Task の target SHA と clean worktree が部分 tree を再現した commit を指す。snapshot mode では baseline SHA を維持し、target tree SHA と変更 path を明示する。いずれの場合も、新しい Task の承認や予算承認は `workflow recover`、旧 flow の handoff 解除、自然言語の依頼だけでは代替できない。
 
 ## 状態遷移と完了
 

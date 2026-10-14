@@ -42,6 +42,8 @@ type Config struct {
 	CLIPath          string
 	BaseDirectory    string
 	AvailableTools   []string
+	FileAccess       *core.FileAccessPolicy
+	TrackedFiles     []string
 	ResponseSchema   map[string]any
 	ManagedCommit    *runtime.ManagedCommit
 	ManagedSearch    *runtime.ManagedSearch
@@ -52,9 +54,11 @@ type Config struct {
 }
 
 type Adapter struct {
-	config        Config
-	client        *sdk.Client
-	credentialErr error
+	config         Config
+	client         *sdk.Client
+	credentialErr  error
+	stopSessionID  string
+	stopConfigHash string
 
 	opMu     sync.Mutex
 	mu       sync.Mutex
@@ -71,6 +75,7 @@ type managedSession struct {
 	mu       sync.Mutex
 	stopped  bool
 	busy     bool
+	stopOnly bool
 	sequence uint64
 	history  []runtime.Event
 	watchers map[*subscription]struct{}
@@ -118,6 +123,16 @@ func New(config Config) (*Adapter, error) {
 		return nil, fmt.Errorf("taxion: resolve working directory symlinks: %w", err)
 	}
 	config.WorkingDirectory = workingDirectory
+	if config.FileAccess != nil {
+		if err := config.FileAccess.Validate(); err != nil {
+			return nil, fmt.Errorf("taxion: invalid file access policy: %w", err)
+		}
+		if config.FileAccess.Level == core.FileAccessCommitted && config.TrackedFiles == nil {
+			return nil, fmt.Errorf("taxion: committed file access requires a tracked-path snapshot")
+		}
+	}
+	config.FileAccess = core.CloneFileAccessPolicy(config.FileAccess)
+	config.TrackedFiles = slices.Clone(config.TrackedFiles)
 	if config.CLIPath == "" {
 		config.CLIPath, err = exec.LookPath("copilot")
 		if err != nil {
@@ -225,6 +240,9 @@ func New(config Config) (*Adapter, error) {
 // ConfigHash identifies the role prompt, worktree, and tool surface that must
 // be supplied again when resuming a durable SDK session.
 func (a *Adapter) ConfigHash() string {
+	if a.stopSessionID != "" {
+		return a.stopConfigHash
+	}
 	managedCommitPolicy := ""
 	if a.config.ManagedCommit != nil {
 		managedCommitPolicy = "managed-commit-v1"
@@ -235,8 +253,14 @@ func (a *Adapter) ConfigHash() string {
 	permissionPolicy := "cli-managed-v1"
 	if a.config.Role == "CODER" {
 		permissionPolicy = "coder-worktree-write-v1"
+		if a.config.FileAccess != nil {
+			permissionPolicy = "coder-file-access-v1"
+		}
 	} else if a.config.Role == "REVIEWER" {
-		permissionPolicy = "reviewer-read-only-v1"
+		permissionPolicy = "reviewer-file-access-read-only-v1"
+		if a.config.FileAccess != nil {
+			permissionPolicy = "reviewer-file-access-scoped-read-only-v1"
+		}
 	}
 	data, _ := json.Marshal(struct {
 		Role                string
@@ -245,6 +269,8 @@ func (a *Adapter) ConfigHash() string {
 		CLIPath             string
 		BaseDirectory       string
 		AvailableTools      []string
+		FileAccess          *core.FileAccessPolicy `json:",omitempty"`
+		TrackedFiles        []string               `json:",omitempty"`
 		ResponseSchema      map[string]any
 		PermissionPolicy    string
 		ManagedCommit       *runtime.ManagedCommit `json:",omitempty"`
@@ -260,6 +286,8 @@ func (a *Adapter) ConfigHash() string {
 		CLIPath:             a.config.CLIPath,
 		BaseDirectory:       a.config.BaseDirectory,
 		AvailableTools:      a.config.AvailableTools,
+		FileAccess:          a.config.FileAccess,
+		TrackedFiles:        a.config.TrackedFiles,
 		ResponseSchema:      a.config.ResponseSchema,
 		PermissionPolicy:    permissionPolicy,
 		ManagedCommit:       a.config.ManagedCommit,
@@ -289,6 +317,9 @@ func (a *Adapter) ToolPolicy() *tools.Policy {
 }
 
 func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
+	if a.stopSessionID != "" {
+		return "", fmt.Errorf("taxion: stop-only adapter cannot create sessions")
+	}
 	if strings.TrimSpace(taskID) == "" {
 		return "", fmt.Errorf("taxion: task id must not be empty")
 	}
@@ -320,6 +351,9 @@ func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 }
 
 func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
+	if a.stopSessionID != "" {
+		return fmt.Errorf("taxion: stop-only adapter cannot send instructions")
+	}
 	if strings.TrimSpace(prompt) == "" {
 		return fmt.Errorf("taxion: prompt must not be empty")
 	}
@@ -358,6 +392,9 @@ func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
 }
 
 func (a *Adapter) Resume(ctx context.Context, sessionID string) error {
+	if a.stopSessionID != "" {
+		return fmt.Errorf("taxion: stop-only adapter cannot resume execution")
+	}
 	if a.config.ToolPolicy != nil {
 		if err := a.config.ToolPolicy.Check(); err != nil {
 			return err
@@ -367,6 +404,9 @@ func (a *Adapter) Resume(ctx context.Context, sessionID string) error {
 }
 
 func (a *Adapter) ResumeForStop(ctx context.Context, sessionID string) error {
+	if a.stopSessionID != "" && sessionID != a.stopSessionID {
+		return fmt.Errorf("taxion: stop-only attachment requires its saved session")
+	}
 	return a.resume(ctx, sessionID, true)
 }
 
@@ -401,14 +441,7 @@ func (a *Adapter) resume(ctx context.Context, sessionID string, stopOnly bool) e
 	handle.mu.Unlock()
 	config := a.resumeConfig(handle.onEvent)
 	if stopOnly {
-		disabled := false
-		config.EnableSkills = &disabled
-		config.SkillDirectories, config.PluginDirectories = nil, nil
-		config.Tools, config.AvailableTools, config.Hooks = nil, []string{}, nil
-		config.OnPermissionRequest = func(sdk.PermissionRequest, sdk.PermissionInvocation) (rpc.PermissionDecision, error) {
-			reason := "Stop-only attachment permits cancellation operations"
-			return &rpc.PermissionDecisionReject{Feedback: &reason}, nil
-		}
+		config = a.stopResumeConfig(handle.onEvent)
 	}
 	session, err := a.client.ResumeSession(ctx, sessionID, config)
 	if err != nil {
@@ -419,6 +452,7 @@ func (a *Adapter) resume(ctx context.Context, sessionID string, stopOnly bool) e
 	}
 	handle.mu.Lock()
 	handle.sdk = session
+	handle.stopOnly = stopOnly
 	handle.mu.Unlock()
 	a.mu.Lock()
 	a.sessions[sessionID] = handle
@@ -426,7 +460,31 @@ func (a *Adapter) resume(ctx context.Context, sessionID string, stopOnly bool) e
 	return nil
 }
 
+func (a *Adapter) stopResumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessionConfig {
+	disabled := false
+	return &sdk.ResumeSessionConfig{
+		WorkingDirectory:                   a.config.WorkingDirectory,
+		AvailableTools:                     []string{},
+		EnableSkills:                       &disabled,
+		EnableConfigDiscovery:              &disabled,
+		EnableFileHooks:                    &disabled,
+		EnableHostGitOperations:            &disabled,
+		EnableOnDemandInstructionDiscovery: &disabled,
+		ContinuePendingWork:                &disabled,
+		AllowTranscriptRecovery:            &disabled,
+		SuppressResumeEvent:                true,
+		OnEvent:                            onEvent,
+		OnPermissionRequest: func(sdk.PermissionRequest, sdk.PermissionInvocation) (rpc.PermissionDecision, error) {
+			reason := "Stop-only attachment permits cancellation operations"
+			return &rpc.PermissionDecisionReject{Feedback: &reason}, nil
+		},
+	}
+}
+
 func (a *Adapter) Stop(ctx context.Context, sessionID string) error {
+	if a.stopSessionID != "" && sessionID != a.stopSessionID {
+		return fmt.Errorf("taxion: stop-only cancellation requires its saved session")
+	}
 	handle, err := a.lookup(sessionID)
 	if err != nil {
 		return err
@@ -440,9 +498,9 @@ func (a *Adapter) Stop(ctx context.Context, sessionID string) error {
 		return nil
 	}
 	handle.mu.Lock()
-	busy := handle.busy
+	busy, stopOnly := handle.busy, handle.stopOnly
 	handle.mu.Unlock()
-	if busy {
+	if busy || stopOnly {
 		if err := session.Abort(ctx); err != nil {
 			return fmt.Errorf("taxion: abort Copilot session: %w", err)
 		}
@@ -698,9 +756,10 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 		return nil
 	}
 	return func(request sdk.PermissionRequest, invocation sdk.PermissionInvocation) (rpc.PermissionDecision, error) {
-		decision := reviewerPermissionDecision(a.config.WorkingDirectory, request)
+		decision := reviewerPermissionDecision(a.config.WorkingDirectory, a.config.FileAccess, a.config.TrackedFiles, request)
 		if a.config.Role == "CODER" {
-			decision = coderPermissionDecision(a.config.WorkingDirectory, a.config.AvailableTools, request)
+			decision = coderPermissionDecision(a.config.WorkingDirectory, a.config.AvailableTools,
+				a.config.FileAccess, a.config.TrackedFiles, request)
 		}
 		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
 			a.config.ManagedSearch != nil && permission.ToolName == ManagedSearchToolName &&
@@ -726,14 +785,14 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 	}
 }
 
-func coderPermissionDecision(worktree string, availableTools []string, request sdk.PermissionRequest) rpc.PermissionDecision {
+func coderPermissionDecision(worktree string, availableTools []string, fileAccess *core.FileAccessPolicy, trackedFiles []string, request sdk.PermissionRequest) rpc.PermissionDecision {
 	reject := func() rpc.PermissionDecision {
-		reason := "Coder permissions are limited to the assigned worktree and explicitly allowlisted tools"
+		reason := "Coder permissions are limited to the assigned worktree, file-access policy, and explicitly allowlisted tools"
 		return &rpc.PermissionDecisionReject{Feedback: &reason}
 	}
 	switch permission := request.(type) {
 	case *sdk.PermissionRequestRead:
-		return reviewerPermissionDecision(worktree, permission)
+		return readPermissionDecision(worktree, fileAccess, trackedFiles, "Coder", permission)
 	case *sdk.PermissionRequestWrite:
 		if permission.RequestSandboxBypass != nil && *permission.RequestSandboxBypass ||
 			permission.ManagedApprovalRequired != nil && *permission.ManagedApprovalRequired {
@@ -744,7 +803,8 @@ func coderPermissionDecision(worktree string, availableTools []string, request s
 			target = *permission.ResolvedPath
 		}
 		target, err := canonicalWriteTarget(worktree, target)
-		if err != nil || !within(worktree, target) {
+		if err != nil || !within(worktree, target) ||
+			!fileAccessAllows(worktree, target, fileAccess, trackedFiles, pathIsDirectory(target)) {
 			return reject()
 		}
 		return &rpc.PermissionDecisionApproveOnce{}
@@ -777,10 +837,14 @@ func canonicalWriteTarget(worktree, target string) (string, error) {
 	return filepath.Join(parent, filepath.Base(target)), nil
 }
 
-func reviewerPermissionDecision(worktree string, request sdk.PermissionRequest) rpc.PermissionDecision {
+func reviewerPermissionDecision(worktree string, fileAccess *core.FileAccessPolicy, trackedFiles []string, request sdk.PermissionRequest) rpc.PermissionDecision {
+	return readPermissionDecision(worktree, fileAccess, trackedFiles, "Reviewer", request)
+}
+
+func readPermissionDecision(worktree string, fileAccess *core.FileAccessPolicy, trackedFiles []string, role string, request sdk.PermissionRequest) rpc.PermissionDecision {
 	read, ok := request.(*sdk.PermissionRequestRead)
 	if !ok || read.RequestSandboxBypass != nil && *read.RequestSandboxBypass {
-		reason := "Reviewer role permits reads only within its assigned worktree"
+		reason := role + " role permits reads only within its assigned worktree and file-access policy"
 		return &rpc.PermissionDecisionReject{Feedback: &reason}
 	}
 	target := read.Path
@@ -805,13 +869,64 @@ func reviewerPermissionDecision(worktree string, request sdk.PermissionRequest) 
 			}
 		}
 	}
-	if err != nil || !within(worktree, resolved) {
-		reason := "Role may read only within its assigned worktree; the requested path is outside it or cannot be safely resolved"
+	if err != nil || !within(worktree, resolved) ||
+		!fileAccessAllows(worktree, resolved, fileAccess, trackedFiles, pathIsDirectory(resolved)) {
+		reason := "Role may read only within its assigned worktree and approved file-access policy; the requested path is outside it or cannot be safely resolved"
 		return &rpc.PermissionDecisionReject{Feedback: &reason}
 	}
 	// The installed runtime rejects the session-wide read-only variant.
 	// Approve only this validated read, preserving per-request path checks.
 	return &rpc.PermissionDecisionApproveOnce{}
+}
+
+func fileAccessAllows(worktree, target string, policy *core.FileAccessPolicy, trackedFiles []string, directory bool) bool {
+	if policy == nil {
+		return true
+	}
+	relative, err := filepath.Rel(worktree, target)
+	if err != nil || !within(worktree, target) {
+		return false
+	}
+	relative = filepath.ToSlash(relative)
+	if relative == "." || hasGitMetadataComponent(relative) {
+		return policy.Level == core.FileAccessAll && !hasGitMetadataComponent(relative)
+	}
+	switch policy.Level {
+	case core.FileAccessExact:
+		return !directory && slices.Contains(policy.Paths, relative)
+	case core.FileAccessCommitted:
+		if slices.Contains(trackedFiles, relative) {
+			return true
+		}
+		if !directory {
+			return false
+		}
+		prefix := relative + "/"
+		for _, path := range trackedFiles {
+			if strings.HasPrefix(path, prefix) {
+				return true
+			}
+		}
+		return false
+	case core.FileAccessAll:
+		return true
+	default:
+		return false
+	}
+}
+
+func pathIsDirectory(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func hasGitMetadataComponent(path string) bool {
+	for _, component := range strings.Split(path, "/") {
+		if component == ".git" {
+			return true
+		}
+	}
+	return false
 }
 
 func within(root, target string) bool {
@@ -851,17 +966,19 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 		}
 		return runtime.Event{Type: runtime.EventFailed, Payload: message}, true
 	case *sdk.AssistantUsageData:
+		// Usage is reported per model API call; preserve its stable identity for deduplication.
 		payload, err := json.Marshal(struct {
-			Model            string `json:"model"`
-			IsAuto           *bool  `json:"isAuto,omitempty"`
-			InputTokens      *int64 `json:"inputTokens,omitempty"`
-			OutputTokens     *int64 `json:"outputTokens,omitempty"`
-			CacheReadTokens  *int64 `json:"cacheReadTokens,omitempty"`
-			CacheWriteTokens *int64 `json:"cacheWriteTokens,omitempty"`
+			Model            string                       `json:"model"`
+			Accounting       *sdk.UsageAccountingIdentity `json:"accounting,omitempty"`
+			IsAuto           *bool                        `json:"isAuto,omitempty"`
+			InputTokens      *int64                       `json:"inputTokens,omitempty"`
+			OutputTokens     *int64                       `json:"outputTokens,omitempty"`
+			CacheReadTokens  *int64                       `json:"cacheReadTokens,omitempty"`
+			CacheWriteTokens *int64                       `json:"cacheWriteTokens,omitempty"`
 		}{
 			Model: data.Model, IsAuto: data.IsAuto, InputTokens: data.InputTokens,
 			OutputTokens: data.OutputTokens, CacheReadTokens: data.CacheReadTokens,
-			CacheWriteTokens: data.CacheWriteTokens,
+			CacheWriteTokens: data.CacheWriteTokens, Accounting: data.Accounting,
 		})
 		if err != nil {
 			return runtime.Event{}, false

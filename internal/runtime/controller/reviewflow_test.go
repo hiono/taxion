@@ -20,6 +20,11 @@ import (
 )
 
 func reviewFlowFixture(t *testing.T, decisions ...core.TaskDecision) (*store.Store, string, ReviewFlowRequest) {
+	return reviewFlowFixtureWithOutputMode(t, "", decisions...)
+}
+
+func reviewFlowFixtureWithOutputMode(t *testing.T, outputMode string,
+	decisions ...core.TaskDecision) (*store.Store, string, ReviewFlowRequest) {
 	t.Helper()
 	dir := t.TempDir()
 	root := filepath.Join(dir, "repo")
@@ -58,8 +63,10 @@ func reviewFlowFixture(t *testing.T, decisions ...core.TaskDecision) (*store.Sto
 		ValidationCommands: []string{"test -s internal/app.go"}, ExitCondition: "verified application",
 		Branch: "work/task", Worktree: root, BaselineSHA: gitTest(t, root, "rev-parse", "HEAD"),
 		CreatedFrom: "human:1", AuthorizationID: "implementation-authorization",
+		OutputMode: outputMode,
 		Decisions:  []core.TaskDecision{{ID: "implementation-authorization", Source: "human:1", Text: "authorize implementation"}},
 		MemoryRefs: []string{"decision:" + strconv.FormatInt(id, 10)},
+		FileAccess: &core.FileAccessPolicy{Level: core.FileAccessAll},
 	}
 	task.Decisions = append(task.Decisions, decisions...)
 	if err := graph.Track(task, "human", "authorize Task"); err != nil {
@@ -168,10 +175,20 @@ func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, ve
 			if err := os.WriteFile(filepath.Join(dispatch.Instruction.Worktree, "internal/app.go"), []byte(dispatch.ID), 0600); err != nil {
 				t.Fatal(err)
 			}
-			gitTest(t, dispatch.Instruction.Worktree, "add", "internal/app.go")
-			gitTest(t, dispatch.Instruction.Worktree, "commit", "-m", "feat(app): "+dispatch.ID, "-m", "intent(app): satisfy the approved acceptance criterion")
-			result.OutputSHA = gitTest(t, dispatch.Instruction.Worktree, "rev-parse", "HEAD")
 			result.ChangedFiles = []string{"internal/app.go"}
+			if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+				for _, path := range dispatch.Instruction.TargetChangedFiles {
+					if !slices.Contains(result.ChangedFiles, path) {
+						result.ChangedFiles = append(result.ChangedFiles, path)
+					}
+				}
+				slices.Sort(result.ChangedFiles)
+			}
+			if dispatch.Instruction.OutputMode != core.OutputModeWorktreeTreeSnapshot {
+				gitTest(t, dispatch.Instruction.Worktree, "add", "internal/app.go")
+				gitTest(t, dispatch.Instruction.Worktree, "commit", "-m", "feat(app): "+dispatch.ID, "-m", "intent(app): satisfy the approved acceptance criterion")
+				result.OutputSHA = gitTest(t, dispatch.Instruction.Worktree, "rev-parse", "HEAD")
+			}
 		} else {
 			changed := false
 			result.ReviewVerdict, result.WorktreeChanged, result.Findings = verdict, &changed, []core.DispatchFinding{}
@@ -192,6 +209,75 @@ func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, ve
 	}
 	dispatch, _ = state.Graph.GraphDispatch(dispatch.ID)
 	return dispatch
+}
+
+func TestReviewFlowCompletesForUncommittedTreeSnapshot(t *testing.T) {
+	db, ledger, request := reviewFlowFixtureWithOutputMode(
+		t, core.OutputModeWorktreeTreeSnapshot)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coder := executeFlowDispatch(t, db, flow, "", true)
+	if coder.Result.OutputSHA != coder.ExpectedStartSHA() ||
+		coder.Result.OutputTreeSHA == "" ||
+		coder.Result.GitEvidence.SnapshotRef == "" {
+		t.Fatalf("Coder snapshot result is incomplete: %+v", coder.Result)
+	}
+	if head := gitTest(t, coder.Instruction.Worktree, "rev-parse", "HEAD"); head != coder.Result.OutputSHA {
+		t.Fatalf("snapshot flow created a commit: %s", head)
+	}
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+	if err != nil || len(flow.DispatchIDs) != 2 {
+		t.Fatalf("snapshot Reviewer was not issued: %+v %v", flow, err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewer, _ := state.Graph.GraphDispatch(flow.DispatchIDs[1])
+	if reviewer.Instruction.OutputMode != core.OutputModeWorktreeTreeSnapshot ||
+		reviewer.Instruction.TargetTreeSHA != coder.Result.OutputTreeSHA ||
+		!slices.Equal(reviewer.Instruction.TargetChangedFiles, coder.Result.ChangedFiles) {
+		t.Fatalf("Reviewer did not receive the exact Coder tree: %+v", reviewer.Instruction)
+	}
+	executeFlowDispatch(t, db, flow, "REQUEST_CHANGES", true)
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+	if err != nil || len(flow.DispatchIDs) != 3 {
+		t.Fatalf("snapshot repair was not issued: %+v %v", flow, err)
+	}
+	repaired := executeFlowDispatch(t, db, flow, "", true)
+	if repaired.Result.OutputTreeSHA == coder.Result.OutputTreeSHA ||
+		repaired.Result.OutputSHA != coder.Result.OutputSHA {
+		t.Fatalf("repair did not create a new uncommitted tree on the same baseline: %+v", repaired.Result)
+	}
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+	if err != nil || len(flow.DispatchIDs) != 4 {
+		t.Fatalf("snapshot re-review was not issued: %+v %v", flow, err)
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewAgain, _ := state.Graph.GraphDispatch(flow.DispatchIDs[3])
+	if reviewAgain.Instruction.TargetTreeSHA != repaired.Result.OutputTreeSHA ||
+		reviewAgain.Instruction.TargetTreeSHA == reviewer.Instruction.TargetTreeSHA {
+		t.Fatalf("re-review did not target the repaired tree: %+v", reviewAgain.Instruction)
+	}
+	executeFlowDispatch(t, db, flow, "APPROVE", true)
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+	if err != nil || flow.Status != "COMPLETED" {
+		t.Fatalf("tree review did not complete: %+v %v", flow, err)
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ := state.Graph.GraphTask(flow.TaskID)
+	if task.Status != core.Completed || task.TargetSHA != repaired.Result.OutputSHA ||
+		task.TargetTreeSHA != repaired.Result.OutputTreeSHA {
+		t.Fatalf("Task completed without exact tree approval: %+v", task)
+	}
 }
 
 func TestReviewFlowRepairsAndReviewsNewSHAAfterRestart(t *testing.T) {
@@ -286,7 +372,7 @@ func TestReviewFlowStopsAtCeilingsAndFailedRuns(t *testing.T) {
 			}
 
 			if failure == "tokens" {
-				request.MaxTokens = 15
+				request.MaxTokens = 14
 			}
 			flow, err := StartReviewFlow(db, ledger, request)
 			if err != nil {
@@ -347,6 +433,9 @@ func TestReviewFlowStopsAtCeilingsAndFailedRuns(t *testing.T) {
 			flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
 			if err == nil || failure != "memory" && !errors.Is(err, ErrFlowStopped) || flow.Status != "STOPPED" || flow.Reason == "" {
 				t.Fatalf("flow continued: %+v %v", flow, err)
+			}
+			if failure == "tokens" && flow.Reason != "recorded token usage 15 against ceiling 14 (over by 1); Human approval of a new budget is required" {
+				t.Fatalf("token ceiling stop did not report observed usage and overage: %q", flow.Reason)
 			}
 			after, err := db.LoadWorkspace()
 			if err != nil {

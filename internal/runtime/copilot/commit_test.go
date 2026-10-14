@@ -187,7 +187,8 @@ func TestSDKManagedStageAndCommitInvokeControllerGitGate(t *testing.T) {
 		Acceptance: []string{"safe tree"}, RequiredEvidence: []string{"report"},
 		ValidationCommands: []string{"test -f src/source.txt"}, ExitCondition: "safe tree",
 		Worktree: root, Branch: "work/task", BaselineSHA: baseline, AuthorizationID: "decision:1",
-		Decisions: []core.TaskDecision{{ID: "decision:1", Source: "human:1", Text: "approve"}},
+		Decisions:  []core.TaskDecision{{ID: "decision:1", Source: "human:1", Text: "approve"}},
+		FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"src/source.txt"}},
 	}
 	graph := core.TaskGraph{Version: 1}
 	if err := graph.Track(task, "human", "register"); err != nil {
@@ -210,6 +211,7 @@ func TestSDKManagedStageAndCommitInvokeControllerGitGate(t *testing.T) {
 	defer db.Close()
 	config := commitToolConfig(t)
 	config.WorkingDirectory = root
+	config.FileAccess = core.CloneFileAccessPolicy(task.FileAccess)
 	scanner := config.ManagedCommit.Scanner
 	if err := os.WriteFile(scanner, []byte("#!/bin/sh\nif [ \"$1\" = version ]; then printf '1.9.0\\n'; exit 0; fi\ncontent=$(cat)\ncase \"$content\" in *fake-private-payload*) printf '[{}]'; exit 10;; esac\nprintf '[]'\n"), 0700); err != nil {
 		t.Fatal(err)

@@ -281,6 +281,13 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 				return err
 			}
 		}
+		resolved, err := resolveConfiguration()
+		if err != nil {
+			return err
+		}
+		if err := controller.CheckReviewFlowConfiguration(db, id, resolved.Config); err != nil {
+			return fmt.Errorf("workflow %s: %w", action, err)
+		}
 		ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 		run := controller.RunReviewFlow

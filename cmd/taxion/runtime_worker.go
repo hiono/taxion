@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/runtime/copilot"
@@ -18,12 +19,20 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 	if managedStage && !managedCommit {
 		return nil, fmt.Errorf("runtime: --managed-stage requires --managed-commit")
 	}
+	var err error
 	config.Configuration = nil
+	config.FileAccess = core.CloneFileAccessPolicy(dispatch.Instruction.FileAccess)
+	config.TrackedFiles = nil
+	if config.FileAccess != nil && config.FileAccess.Level == core.FileAccessCommitted {
+		config.TrackedFiles, err = gitproof.TrackedPathsAt(dispatch.Instruction.Worktree, dispatch.ExpectedStartSHA())
+		if err != nil {
+			return nil, fmt.Errorf("runtime: build committed file-access snapshot: %w", err)
+		}
+	}
 	if dispatch.Configuration != nil {
 		config.Configuration = dispatch.Configuration.Selection
 	}
 	var worker *copilot.Adapter
-	var err error
 	var graph core.TaskGraph
 	if db != nil {
 		state, err := db.LoadWorkspace()

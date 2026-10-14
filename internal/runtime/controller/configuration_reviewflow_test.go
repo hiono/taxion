@@ -40,6 +40,18 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 			if err != nil {
 				t.Fatal(err)
 			}
+			beforePreflight, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			preflightErr := CheckReviewFlowConfiguration(db, flow.ID, resolved.Config)
+			if (preflightErr == nil) != (scope == "both") {
+				t.Fatalf("free preflight accepted missing review approval: scope=%s error=%v", scope, preflightErr)
+			}
+			afterPreflight, err := db.LoadWorkspace()
+			if err != nil || !reflect.DeepEqual(beforePreflight, afterPreflight) {
+				t.Fatal("configuration preflight mutated workspace", err)
+			}
 			executeFlowDispatch(t, db, flow, "", true, resolved)
 			flow, err = AdvanceReviewFlow(db, ledgerPath, flow.ID)
 			if err != nil {

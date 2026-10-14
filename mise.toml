@@ -1,6 +1,6 @@
 [tools]
 "cargo:adrs" = "0.12.1"
-go = "latest"
+go = "1.26.0"
 
 [env]
 _.file = ".env"

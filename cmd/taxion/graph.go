@@ -17,8 +17,10 @@ func taskGraphCmd(command string, args []string) error {
 	var file, repo string
 	if command == "plan" {
 		fs.StringVar(&repo, "repo", "", "explicit repository for follow-up planning")
-	} else {
+	} else if command == "track" || command == "transition" {
 		fs.StringVar(&file, "file", "", "JSON request file")
+	} else if command != "graph" {
+		return fmt.Errorf("unknown task graph command %s", command)
 	}
 	if err := fs.Parse(args); err != nil {
 		return err

@@ -12,6 +12,7 @@ import (
 type ReviewFlow struct {
 	ID                string             `json:"id"`
 	TaskID            string             `json:"taskId"`
+	SourceDispatchID  string             `json:"sourceDispatchId,omitempty"`
 	Contract          GraphTask          `json:"contract"`
 	ReviewRoot        string             `json:"reviewRoot"`
 	MaxRepairs        int                `json:"maxRepairs"`
@@ -21,6 +22,7 @@ type ReviewFlow struct {
 	Repairs           int                `json:"repairs"`
 	DispatchIDs       []string           `json:"dispatchIds"`
 	Status            string             `json:"status"`
+	StopCode          string             `json:"stopCode,omitempty"`
 	Reason            string             `json:"reason"`
 	Authorization     TaskDecision       `json:"authorization"`
 	RunnerID          string             `json:"runnerId,omitempty"`
@@ -64,6 +66,8 @@ func (g TaskGraph) validateReviewFlows() error {
 			flow.MaxRepairs < 0 || flow.Repairs < 0 || flow.Repairs > flow.MaxRepairs ||
 			flow.MaxTokens <= 0 || flow.StartedAt.IsZero() || !flow.Deadline.After(flow.StartedAt) ||
 			!slices.Contains([]string{"RUNNING", "STOPPED", "COMPLETED"}, flow.Status) ||
+			!slices.Contains([]string{"", "SAFETY_STOP", "BUDGET_LIMIT"}, flow.StopCode) ||
+			flow.Status != "STOPPED" && flow.StopCode != "" ||
 			!nonempty(flow.Authorization.ID) || !nonempty(flow.Authorization.Source) || !nonempty(flow.Authorization.Text) ||
 			len(flow.DispatchIDs) == 0 || flow.Status != "RUNNING" && !nonempty(flow.Reason) {
 			return graphError("invalid bounded review flow %q", flow.ID)
@@ -97,11 +101,46 @@ func (g TaskGraph) validateReviewFlows() error {
 			}
 			running[task.ID] = true
 		}
+		var sourceDispatch GraphDispatch
+		if flow.SourceDispatchID != "" {
+			var sourceFlow ReviewFlow
+			sourceDispatch, ok = g.dispatch(flow.SourceDispatchID)
+			foundSourceFlow := false
+			for _, candidate := range g.ReviewFlows {
+				if slices.Contains(candidate.DispatchIDs, flow.SourceDispatchID) {
+					sourceFlow, foundSourceFlow = candidate, true
+					break
+				}
+			}
+			if !ok || !foundSourceFlow || sourceFlow.ID == flow.ID || sourceFlow.Status != "STOPPED" ||
+				sourceFlow.StopCode != "BUDGET_LIMIT" || sourceFlow.RunnerID != "" || !sourceFlow.HandoffHeld() ||
+				len(sourceFlow.DispatchIDs) == 0 ||
+				sourceFlow.DispatchIDs[len(sourceFlow.DispatchIDs)-1] != sourceDispatch.ID ||
+				sourceDispatch.Recipient != "CODER" || sourceDispatch.Status != DispatchSucceeded ||
+				sourceDispatch.Result == nil || sourceDispatch.Result.GitEvidence == nil ||
+				flow.Contract.CreatedFrom != "flow:"+sourceFlow.ID || flow.Contract.Supersedes != sourceFlow.TaskID ||
+				flow.Contract.Repo != sourceDispatch.Repository ||
+				flow.Contract.BaselineSHA != sourceDispatch.Instruction.BaselineSHA ||
+				flow.Contract.TargetSHA != sourceDispatch.Result.OutputSHA ||
+				outputModeName(flow.Contract.OutputMode) != outputModeName(sourceDispatch.Instruction.OutputMode) ||
+				flow.Contract.OutputMode == OutputModeWorktreeTreeSnapshot &&
+					(flow.Contract.TargetTreeSHA != sourceDispatch.Result.OutputTreeSHA ||
+						!slices.Equal(flow.Contract.TargetChangedFiles, sourceDispatch.Result.ChangedFiles)) {
+				return graphError("review flow source must be a held budget-stopped Coder result for its successor Task")
+			}
+		}
 		for index, id := range flow.DispatchIDs {
 			dispatch, ok := g.dispatch(id)
 			role := "CODER"
 			if index%2 == 1 {
 				role = "REVIEWER"
+			}
+			if flow.SourceDispatchID != "" {
+				if index%2 == 0 {
+					role = "REVIEWER"
+				} else {
+					role = "CODER"
+				}
 			}
 			if !ok || dispatches[id] || dispatch.Repository != task.Repo || dispatch.Recipient != role ||
 				role == "CODER" && dispatch.TaskID != task.ID {
@@ -118,13 +157,31 @@ func (g TaskGraph) validateReviewFlows() error {
 				return graphError("review flow Dispatch changed the approved scope, acceptance or evidence")
 			}
 			if role == "CODER" && (instruction.Worktree != flow.Contract.Worktree ||
-				instruction.Branch != flow.Contract.Branch || instruction.BaselineSHA != flow.Contract.BaselineSHA) {
+				instruction.Branch != flow.Contract.Branch || instruction.BaselineSHA != flow.Contract.BaselineSHA ||
+				instruction.OutputMode != flow.Contract.OutputMode) {
 				return graphError("review flow Coder Dispatch changed its execution environment")
 			}
+			prior, hasPrior := GraphDispatch{}, false
 			if index > 0 {
-				prior, _ := g.dispatch(flow.DispatchIDs[index-1])
-				if prior.Status != DispatchSucceeded || prior.Result == nil ||
-					instruction.TargetSHA != prior.Result.OutputSHA {
+				prior, _ = g.dispatch(flow.DispatchIDs[index-1])
+				hasPrior = true
+			} else if flow.SourceDispatchID != "" {
+				prior, hasPrior = sourceDispatch, true
+			}
+			if hasPrior {
+				if prior.Status != DispatchSucceeded || prior.Result == nil {
+					return graphError("review flow continuation requires the previous verified output SHA")
+				}
+				previousTreeFiles := prior.Result.ChangedFiles
+				if prior.Recipient == "REVIEWER" &&
+					prior.Instruction.OutputMode == OutputModeWorktreeTreeSnapshot {
+					previousTreeFiles = prior.Instruction.TargetChangedFiles
+				}
+				if instruction.TargetSHA != prior.Result.OutputSHA ||
+					instruction.OutputMode != prior.Instruction.OutputMode ||
+					instruction.OutputMode == OutputModeWorktreeTreeSnapshot &&
+						(instruction.TargetTreeSHA != prior.Result.OutputTreeSHA ||
+							!slices.Equal(instruction.TargetChangedFiles, previousTreeFiles)) {
 					return graphError("review flow continuation requires the previous verified output SHA")
 				}
 				if role == "REVIEWER" && (dispatch.RelatedID != prior.ID ||
@@ -142,7 +199,9 @@ func (g TaskGraph) validateReviewFlows() error {
 			last, _ := g.dispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
 			if task.Status != Completed || last.Recipient != "REVIEWER" || last.Status != DispatchSucceeded ||
 				last.Result == nil || last.Result.ReviewVerdict != "APPROVE" ||
-				last.Result.OutputSHA != task.TargetSHA {
+				last.Result.OutputSHA != task.TargetSHA ||
+				task.OutputMode == OutputModeWorktreeTreeSnapshot &&
+					last.Result.OutputTreeSHA != task.TargetTreeSHA {
 				return graphError("review flow completion requires exact-SHA independent approval")
 			}
 		}

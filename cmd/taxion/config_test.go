@@ -82,7 +82,8 @@ execution:
 			Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"report"}, ExitCondition: "tests pass",
 			ValidationCommands: []string{"go test ./..."}, Worktree: t.TempDir(), Branch: "work/task",
 			BaselineSHA: strings.Repeat("a", 40), AuthorizationID: "decision-1",
-			Decisions: []core.TaskDecision{{ID: "decision-1", Source: "human:selection", Text: string(approved)}},
+			Decisions:  []core.TaskDecision{{ID: "decision-1", Source: "human:selection", Text: string(approved)}},
+			FileAccess: &core.FileAccessPolicy{Level: core.FileAccessAll},
 		}
 		state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{ID: task.ID, Title: task.Title, Repo: task.Repo})
 		return state.Graph.Track(task, "human", "record selection")
@@ -218,8 +219,8 @@ execution:
 			t.Fatal("execution action bypassed fixed configuration gate", action, err)
 		}
 	}
-	if err := runtimeCmd([]string{"stop", "--dispatch", "dispatch", "--system-prompt-file", "missing-prompt"}); err == nil ||
-		!strings.Contains(err.Error(), "read system prompt") {
+	if err := runtimeCmd([]string{"stop", "--dispatch", "dispatch"}); err == nil ||
+		!strings.Contains(err.Error(), "saved execution session") {
 		t.Fatal("safe-stop attachment was blocked by current settings", err)
 	}
 	stopWorker, err := newDispatchWorker(context.Background(), db, selectedDispatch, workerConfig, false, false, "")

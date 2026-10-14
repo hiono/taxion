@@ -34,6 +34,43 @@ func CheckConfiguration(db *store.Store, taskID string, candidate config.Config)
 	return checkTaskConfiguration(state.Graph, taskID, candidate)
 }
 
+// CheckReviewFlowConfiguration rejects missing future review approvals before a
+// runner spends a Coder turn. It neither binds settings nor authorizes execution.
+func CheckReviewFlowConfiguration(db *store.Store, flowID string, candidate config.Config) error {
+	if db == nil {
+		return fmt.Errorf("taxion: flow configuration check requires a workspace")
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	if !state.HasGraph {
+		return fmt.Errorf("taxion: flow configuration check requires a Task Graph")
+	}
+	if err := state.Graph.Validate(); err != nil {
+		return err
+	}
+	flow, ok := state.Graph.ReviewFlow(flowID)
+	if !ok || flow.Status != "RUNNING" {
+		return fmt.Errorf("taxion: flow configuration check requires a running review flow")
+	}
+	decision, err := checkTaskConfiguration(state.Graph, flow.TaskID, candidate)
+	if err != nil {
+		return err
+	}
+	last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+	if !slices.Contains(last.Instruction.Decisions, decision) {
+		return fmt.Errorf("taxion: configuration approval changed after Dispatch issuance; issue a newly authorized Dispatch")
+	}
+	for index := flow.Repairs; index <= flow.MaxRepairs; index++ {
+		taskID := fmt.Sprintf("%s-review-%d", flow.ID, index)
+		if err := config.CheckApproval(decision.Text, taskID, decision.ID, candidate); err != nil {
+			return fmt.Errorf("taxion: preflight configuration for %s: %w", taskID, err)
+		}
+	}
+	return nil
+}
+
 func checkTaskConfiguration(graph core.TaskGraph, taskID string, candidate config.Config) (core.TaskDecision, error) {
 	task, ok := graph.GraphTask(taskID)
 	if !ok {

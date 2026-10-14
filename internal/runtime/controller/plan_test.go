@@ -39,6 +39,7 @@ func TestPlanRestoresDeferredWorkAndDecisionsAfterOtherWork(t *testing.T) {
 		Decisions:  []core.TaskDecision{{ID: "scope-decision", Source: "human:scope-out", Text: "Retain investigation for the next plan"}},
 		MemoryRefs: []string{fmt.Sprintf("decision:%d", id)},
 		DependsOn:  []core.TaskDependency{{TaskID: "other-repo", State: core.Completed}},
+		FileAccess: core.DefaultFileAccessPolicy(),
 	}
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		for _, task := range []core.GraphTask{{

@@ -6,7 +6,9 @@ Checked items record completed work at that phase; they are not a current
 feature inventory. In particular, the original read-only Web and
 localhost-only API scopes were extended later. Issues hold detailed
 implementation results; the reference documents linked from
-[README](../README.md) describe current behavior.
+[README](../README.md) describe current behavior. The
+[decision traceability table](14-decision-traceability.md) maps milestone
+labels, ADRs, issues, and those current references.
 
 - [x] Foundation / `bootstrap` — repo, CI, charter, guardrails.
 - [x] Core / `core-conformance` — ordered Sequence (CHK-002), JSON Ledger (LED-001).
@@ -40,7 +42,7 @@ implementation results; the reference documents linked from
   model recorded in ADR-0018. Implementation remains deferred; use SSH/editor
   access in docs/06 Pattern D. A terminal implementation needs its own Issue
   and browser-user authentication, not only the upstream M5 token.
-- [ ] Adapter / `copilot-sdk-eval` — Go SDK の対応確認と adapter 実装は
+- [x] Adapter / `copilot-sdk-eval` — Go SDK の対応確認と adapter 実装は
   下記 M11 の #49〜#51 で追跡する。SDK 採用と役割別 Session の目的は
   ADR-0020 に記録した。非対応は blocker として扱う。
 
@@ -63,14 +65,19 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 | [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映する自動実装・独立レビュー、実行主体・接続先・AI 契約の分離、commit 前の混入防止、Human の途中介入と状況・根拠の質問 | #52〜#54・#67・#69・#72〜#74 |
 | [M13](https://github.com/hiono/taxion/milestone/19) | 再起動からの復旧、永続的な作業記録、外部基盤 adapter の分離・対応評価 | #55〜#57・#70 |
 | [M14](https://github.com/hiono/taxion/milestone/20) | 仕様検索、Memory の移行、skills・tools 連携 | #58〜#61 |
-| [M15](https://github.com/hiono/taxion/milestone/21) | CLI と ACP サーバーの一連の作業を受け入れる | #62〜#63 |
+| [M15](https://github.com/hiono/taxion/milestone/21) | CLI と ACP サーバーを共通 controller に接続し、仕様検索から復旧・外部記録まで受け入れる | #62・#79 |
 | [M16](https://github.com/hiono/taxion/milestone/22) | Planner 採用と Rust 導入の評価 | #64〜#65 |
+
+M14 は 2026-10-13 に完了した。#60 の最終 Reviewer は保存済み Coder SHA を独立に承認し、公開 worktree と実 SDK 受入れも確認した。#58〜#61 はすべて closed である。
 
 [ADR-0024](adr/0024-human-handoff-control-and-side-questions.md) に基づき、
 M12 の #73 は受け渡し保留・途中中断・指示案の改訂、#74 は本流を変更しない質問と
 出典付き反映を実装する。#53 の自動進行と #67 の計画・Memory を再利用し、
 #54 の実 SDK 受入れに両方を含める。M13 の #55 は再起動と競合の復旧、
-M15 の受入れは #62・#63 で CLI と ACP サーバーの共通操作を確認する。
+M15 の #62 は CLI 発行済み Dispatch の ACP 実行・観測を受け入れた。
+docs/09 の段階別判定条件にある仕様検索・予算停止後の復旧・最終報告・外部記録までの
+end-to-end 受入れは #79 で追跡し、完了まで M15 を open とする。#63 は M15 の完了条件ではなく、
+実作業が発生した場合に追加で確認する後続 Issue である。
 追加 forge は M15 の完了条件に含めない。#75 は GitLab Issue API の実験結果を記録し、
 MR を使う実環境が用意された場合に残りを検証する任意の後続 issue とする。
 Web UI、複数利用者の project 権限・session 所有権は必要性が具体化した時点で再評価する。
@@ -135,7 +142,8 @@ Bitbucket は利用契約と検証環境がないため #76 に後続候補と�
 提供側から取得できない課金情報は取得不能として明示する。
 
 実装の順序は #69 → #54、#69・#56 → #70、
-#55・#57・#60・#61・#62 → #63 とする。#75 は M15 の完了をブロックしない。
+#55・#57・#60・#61 → #62 → #79 とする。#63 は承認済みの実作業が発生した場合に行う
+後続確認であり、M15 の完了条件ではない。#75 は M15 の完了をブロックしない。
 再開時の主体・接続先・契約の照合は #55、
 最初の GitHub 外部記録 adapter は #56、
 CLI と ACP サーバーの共通 controller 接続は #62 が担当する。

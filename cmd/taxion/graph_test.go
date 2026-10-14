@@ -42,7 +42,8 @@ func TestTaskGraphCommandsAndDispatchGate(t *testing.T) {
 		Owner: "CODER", Objective: "investigate", Scope: []string{"docs"}, Acceptance: []string{"report"}, RequiredEvidence: []string{"report"}, ExitCondition: "report",
 		ValidationCommands: []string{"test -f docs/guide.md"},
 		Worktree:           worktree, Branch: "work/task", BaselineSHA: baseline,
-		MemoryRefs: []string{fmt.Sprintf("decision:%d", memoryID)}}
+		MemoryRefs: []string{fmt.Sprintf("decision:%d", memoryID)},
+		FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"docs/guide.md"}}}
 	file := filepath.Join(t.TempDir(), "request.json")
 	write := func(value any) {
 		t.Helper()

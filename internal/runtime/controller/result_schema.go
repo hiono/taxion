@@ -73,6 +73,9 @@ func DispatchResultSchema(dispatch core.GraphDispatch, strict bool) map[string]a
 		} {
 			properties[field] = map[string]any{"type": "string", "enum": []string{value}}
 		}
+		if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+			properties["outputSha"] = map[string]any{"type": "string", "enum": []string{dispatch.ExpectedStartSHA()}}
+		}
 	}
 	return map[string]any{
 		"type": "object", "additionalProperties": false,

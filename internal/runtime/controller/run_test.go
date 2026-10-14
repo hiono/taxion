@@ -300,6 +300,53 @@ type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("output unavailable") }
 
+func TestBudgetStopCapturesPartialWorkAndHoldsForSuccessorApproval(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	request.MaxTokens = 1
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var worker *scriptedRuntime
+	factory := func(dispatch core.GraphDispatch) (runtime.Identity, error) {
+		worker = &scriptedRuntime{
+			fakeRuntime: fakeRuntime{
+				role: dispatch.Recipient, hash: "budget-runtime", worktree: dispatch.Instruction.Worktree,
+			},
+			events: make(chan runtime.Event, 1),
+		}
+		worker.script = func() error {
+			partialFile := filepath.Join(dispatch.Instruction.Worktree, "internal", "partial.go")
+			if err := os.MkdirAll(filepath.Dir(partialFile), 0755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(partialFile, []byte("partial implementation\n"), 0600); err != nil {
+				return err
+			}
+			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":1,"outputTokens":0,"accounting":{"sourceSessionId":"sdk-session","sequence":1,"usageId":"call-1"}}`}
+			return nil
+		}
+		return worker, nil
+	}
+	flow, err = RunReviewFlow(context.Background(), db, ledger, flow.ID, factory, io.Discard)
+	if !errors.Is(err, ErrFlowStopped) || flow.Status != "STOPPED" || flow.RunnerID != "" || !flow.HandoffHeld() {
+		t.Fatalf("budget stop did not leave a held stopped flow: %+v %v", flow, err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, _ := state.Graph.GraphDispatch(flow.DispatchIDs[0])
+	tokens, known := flowTokens(state.Graph, flow)
+	if dispatch.Status != core.DispatchCancelled || dispatch.Result == nil ||
+		dispatch.Result.PartialGitEvidence == nil ||
+		len(dispatch.Result.PartialGitEvidence.ChangedFiles) != 1 ||
+		dispatch.Result.PartialGitEvidence.ChangedFiles[0] != "internal/partial.go" ||
+		!known || tokens != request.MaxTokens || len(state.Graph.Dispatches) != 1 {
+		t.Fatalf("budget stop lost accounting or partial Git evidence: dispatch=%+v tokens=%d known=%v", dispatch, tokens, known)
+	}
+}
+
 func TestRunnerRefusesInterruptedOwnershipAndPersistsSetupFailure(t *testing.T) {
 	for _, failure := range []string{"claim", "factory"} {
 		t.Run(failure, func(t *testing.T) {

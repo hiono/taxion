@@ -10,6 +10,7 @@ import (
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -60,6 +61,9 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 		return core.GraphTask{}, err
 	}
 	task := request.Task
+	if task.FileAccess == nil {
+		task.FileAccess = core.DefaultFileAccessPolicy()
+	}
 	task.Decisions = []core.TaskDecision{{ID: "intake:" + task.ID, Source: request.Source, Text: string(text)}}
 	if request.PlanningSelection != nil {
 		if strings.TrimSpace(request.PlanningReason) == "" || request.PlanningSelection.Repository.Path != task.Repo {
@@ -161,6 +165,19 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 			target, err := core.ObserveFeedbackTarget(last)
 			if err != nil || target != *request.Target {
 				return core.ErrFeedbackStale
+			}
+			if last.Recipient == "CODER" && last.Status == core.DispatchCancelled {
+				if last.Result == nil || last.Result.PartialGitEvidence == nil {
+					return fmt.Errorf("taxion: cancelled Coder work requires verified partial Git evidence before successor approval")
+				}
+				if err := gitproof.VerifyPartialSuccessor(last, task); err != nil {
+					return fmt.Errorf("taxion: successor does not preserve the verified partial work: %w", err)
+				}
+			} else if flow.StopCode == "BUDGET_LIMIT" &&
+				last.Recipient == "CODER" && last.Status == core.DispatchSucceeded {
+				if err := gitproof.VerifyCompletedSuccessor(last, task); err != nil {
+					return fmt.Errorf("taxion: successor does not preserve the completed Coder result: %w", err)
+				}
 			}
 			if last.Result != nil && last.Result.OutputSHA != "" && task.Worktree == flow.Contract.Worktree &&
 				task.BaselineSHA != last.Result.OutputSHA {

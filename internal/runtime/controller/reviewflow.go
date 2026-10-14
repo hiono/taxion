@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/memory"
 	"github.com/hiono/taxion/internal/store"
 )
@@ -20,14 +21,15 @@ var ErrFlowStopped = errors.New("taxion: review flow stopped")
 var ErrFlowClaimed = errors.New("taxion: review flow claimed by another runner")
 
 type ReviewFlowRequest struct {
-	ID             string            `json:"id"`
-	TaskID         string            `json:"taskId"`
-	Repository     string            `json:"repository"`
-	ReviewRoot     string            `json:"reviewRoot"`
-	MaxRepairs     *int              `json:"maxRepairs"`
-	MaxTokens      int64             `json:"maxTokens"`
-	TimeoutSeconds int64             `json:"timeoutSeconds"`
-	Authorization  core.TaskDecision `json:"authorization"`
+	ID                     string            `json:"id"`
+	TaskID                 string            `json:"taskId"`
+	ContinueFromDispatchID string            `json:"continueFromDispatchId,omitempty"`
+	Repository             string            `json:"repository"`
+	ReviewRoot             string            `json:"reviewRoot"`
+	MaxRepairs             *int              `json:"maxRepairs"`
+	MaxTokens              int64             `json:"maxTokens"`
+	TimeoutSeconds         int64             `json:"timeoutSeconds"`
+	Authorization          core.TaskDecision `json:"authorization"`
 }
 
 func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowRequest) (core.ReviewFlow, error) {
@@ -61,18 +63,74 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 		}
 		now := time.Now().UTC()
 		flow = core.ReviewFlow{
-			ID: request.ID, TaskID: task.ID, Contract: task, ReviewRoot: filepath.Clean(request.ReviewRoot),
+			ID: request.ID, TaskID: task.ID, SourceDispatchID: request.ContinueFromDispatchID,
+			Contract: task, ReviewRoot: filepath.Clean(request.ReviewRoot),
 			MaxRepairs: *request.MaxRepairs, MaxTokens: request.MaxTokens,
 			StartedAt: now, Deadline: now.Add(time.Duration(request.TimeoutSeconds) * time.Second), Status: "RUNNING",
 			Authorization: request.Authorization, DispatchIDs: []string{},
 		}
-		if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipNone, "", ""); err != nil {
-			return err
+		if request.ContinueFromDispatchID == "" {
+			if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipNone, "", ""); err != nil {
+				return err
+			}
+		} else {
+			source, err := budgetContinuationSource(state.Graph, task, request.ContinueFromDispatchID)
+			if err != nil {
+				return err
+			}
+			for _, status := range []core.TaskStatus{core.Active, core.WaitingForReview} {
+				proof := core.TransitionProof{}
+				if status == core.WaitingForReview {
+					proof.OutputSHA = source.Result.OutputSHA
+					if task.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+						proof.OutputTreeSHA = source.Result.OutputTreeSHA
+						proof.OutputChangedFiles = source.Result.ChangedFiles
+					}
+					proof.Evidence = source.Result.Evidence
+					proof.ActionPerformed = true
+				}
+				if err := state.Graph.Transition(task.ID, status, "controller", "continue the saved Coder result at independent review", proof); err != nil {
+					return err
+				}
+			}
+			decision, err := flowResultDecision(source)
+			if err != nil {
+				return err
+			}
+			if err := issueFlowReviewer(state, ledgerPath, &flow, source, decision, nil); err != nil {
+				return err
+			}
 		}
 		state.Graph.ReviewFlows = append(state.Graph.ReviewFlows, flow)
 		return nil
 	})
 	return flow, err
+}
+
+func budgetContinuationSource(graph core.TaskGraph, task core.GraphTask, sourceID string) (core.GraphDispatch, error) {
+	source, ok := graph.GraphDispatch(sourceID)
+	if !ok {
+		return core.GraphDispatch{}, fmt.Errorf("taxion: budget continuation requires a saved Coder result")
+	}
+	var predecessor core.ReviewFlow
+	found := false
+	for _, flow := range graph.ReviewFlows {
+		if !slices.Contains(flow.DispatchIDs, sourceID) {
+			continue
+		}
+		predecessor, found = flow, true
+		break
+	}
+	if !found || predecessor.Status != "STOPPED" || predecessor.StopCode != "BUDGET_LIMIT" ||
+		predecessor.RunnerID != "" || !predecessor.HandoffHeld() ||
+		len(predecessor.DispatchIDs) == 0 || predecessor.DispatchIDs[len(predecessor.DispatchIDs)-1] != source.ID ||
+		task.CreatedFrom != "flow:"+predecessor.ID || task.Supersedes != predecessor.TaskID {
+		return core.GraphDispatch{}, fmt.Errorf("taxion: budget continuation requires the exact held predecessor flow and successor Task")
+	}
+	if err := gitproof.VerifyCompletedSuccessor(source, task); err != nil {
+		return core.GraphDispatch{}, fmt.Errorf("taxion: completed Coder result cannot be continued safely: %w", err)
+	}
+	return source, nil
 }
 
 // AdvanceReviewFlow consumes only the latest stored result. A repeated call
@@ -113,11 +171,27 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 			}
 			return nil
 		}
-		stop := func(reason string) error {
+		stopWithCode := func(reason, code string) error {
+			if err := holdReviewFlowForStop(&state.Graph, &flow, reason); err != nil {
+				return err
+			}
+			flow.StopCode = code
 			flow.Status, flow.Reason = "STOPPED", reason
 			storeFlow(state, flow)
 			stopped = fmt.Errorf("%w: %s", ErrFlowStopped, reason)
 			return nil
+		}
+		stop := func(reason string) error { return stopWithCode(reason, "SAFETY_STOP") }
+		stopForBudget := func(tokens int64) error {
+			overage := tokens - flow.MaxTokens
+			if overage < 0 {
+				overage = 0
+			}
+			reason := fmt.Sprintf(
+				"recorded token usage %d against ceiling %d (over by %d); Human approval of a new budget is required",
+				tokens, flow.MaxTokens, overage,
+			)
+			return stopWithCode(reason, "BUDGET_LIMIT")
 		}
 		task, _ := state.Graph.GraphTask(flow.TaskID)
 		last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
@@ -140,8 +214,10 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 			return stop("Human decision required; present the Task's saved question and options")
 		}
 		tokens, known := flowTokens(state.Graph, flow)
-		if tokens >= flow.MaxTokens {
-			return stop("recorded token ceiling reached; Human approval of a new budget is required")
+		completedApproval := last.Status == core.DispatchSucceeded && last.Recipient == "REVIEWER" &&
+			last.Result != nil && last.Result.ReviewVerdict == "APPROVE"
+		if tokens >= flow.MaxTokens && !completedApproval {
+			return stopForBudget(tokens)
 		}
 		if last.Status == core.DispatchSuspended || last.Status == core.DispatchCancelRequested {
 			return stop("Dispatch " + last.ID + " requires safe stop or renewed authorization before continuation")
@@ -209,6 +285,10 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 				proof := core.TransitionProof{}
 				if status == core.WaitingForReview {
 					proof.OutputSHA = last.Result.OutputSHA
+					if task.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+						proof.OutputTreeSHA = last.Result.OutputTreeSHA
+						proof.OutputChangedFiles = last.Result.ChangedFiles
+					}
 					proof.Evidence = last.Result.Evidence
 					proof.ActionPerformed = true
 				}
@@ -216,31 +296,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 					return err
 				}
 			}
-			review := flow.Contract
-			review.ID = fmt.Sprintf("%s-review-%d", flow.ID, flow.Repairs)
-			review.Title = "Review: " + flow.Contract.Title
-			review.Type, review.Owner, review.Reviewer, review.Status = "REVIEW", "REVIEWER", "", core.Draft
-			review.ParentID, review.Supersedes, review.DependsOn = "", "", nil
-			review.CreatedFrom = "dispatch:" + last.ID
-			review.BaselineSHA, review.TargetSHA = last.Result.OutputSHA, last.Result.OutputSHA
-			review.Worktree = filepath.Join(flow.ReviewRoot, review.ID)
-			review.AuthorizationID = review.ID + "-authorization"
-			review.Decisions = append(slices.Clone(last.Instruction.Decisions), core.TaskDecision{
-				ID: review.AuthorizationID, Source: flow.Authorization.Source,
-				Text: flow.Authorization.Text + "; independently review the recorded Coder result",
-			}, sourceDecision)
-			review.HumanDecision = nil
-			if supplement != nil {
-				review.Decisions = append(review.Decisions, *supplement)
-			}
-			if err := state.Graph.Track(review, "controller", "independent review authorized by flow"); err != nil {
-				return err
-			}
-			state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{ID: review.ID, Title: review.Title, Repo: review.Repo, CreatedAt: time.Now().UTC()})
-			if err := state.Graph.Transition(review.ID, core.Ready, "controller", "review verified output SHA", core.TransitionProof{}); err != nil {
-				return err
-			}
-			if err := issueFlowDispatch(state, ledgerPath, &flow, review, core.RelationshipIndependent, last.ID, "review the verified Coder output"); err != nil {
+			if err := issueFlowReviewer(state, ledgerPath, &flow, last, sourceDecision, supplement); err != nil {
 				return err
 			}
 		} else {
@@ -254,6 +310,9 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 					ActionPerformed: true, Evidence: last.Result.Evidence,
 					Acceptance: flow.Contract.Acceptance, ReviewedSHA: last.Result.OutputSHA,
 					Reviewer: "REVIEWER",
+				}
+				if task.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+					proof.ReviewedTreeSHA = last.Result.OutputTreeSHA
 				}
 				for _, status := range []core.TaskStatus{core.Approved, core.Completed} {
 					if err := state.Graph.Transition(task.ID, status, "controller", "independent exact-SHA review approved", proof); err != nil {
@@ -283,7 +342,10 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 					return err
 				}
 				flow.Repairs++
-				previousCoder := flow.DispatchIDs[len(flow.DispatchIDs)-2]
+				previousCoder := flow.SourceDispatchID
+				if len(flow.DispatchIDs) > 1 {
+					previousCoder = flow.DispatchIDs[len(flow.DispatchIDs)-2]
+				}
 				if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipAmends, previousCoder, "repair the saved independent-review findings with the same acceptance"); err != nil {
 					return err
 				}
@@ -300,7 +362,14 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 			if !ok || stored.Status != "RUNNING" {
 				return nil
 			}
-			stored.Status, stored.Reason = "STOPPED", "advance failed: "+err.Error()
+			reason := "advance failed: " + err.Error()
+			if holdErr := holdReviewFlowForStop(&state.Graph, &stored, reason); holdErr != nil {
+				return holdErr
+			}
+			if stored.StopCode == "" {
+				stored.StopCode = "SAFETY_STOP"
+			}
+			stored.Status, stored.Reason = "STOPPED", reason
 			storeFlow(state, stored)
 			flow = stored
 			return nil
@@ -356,9 +425,74 @@ func flowResultDecision(dispatch core.GraphDispatch) (core.TaskDecision, error) 
 	return core.TaskDecision{ID: "result:" + dispatch.ID, Source: "dispatch:" + dispatch.ID, Text: string(value)}, nil
 }
 
+func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.ReviewFlow,
+	coder core.GraphDispatch, sourceDecision core.TaskDecision, supplement *core.TaskDecision) error {
+	review := flow.Contract
+	review.ID = fmt.Sprintf("%s-review-%d", flow.ID, flow.Repairs)
+	review.Title = "Review: " + flow.Contract.Title
+	review.Type, review.Owner, review.Reviewer, review.Status = "REVIEW", "REVIEWER", "", core.Draft
+	review.ParentID, review.Supersedes, review.DependsOn = "", "", nil
+	review.CreatedFrom = "dispatch:" + coder.ID
+	if flow.SourceDispatchID == coder.ID {
+		review.CreatedFrom = "flow:" + flow.ID
+	}
+	review.BaselineSHA, review.TargetSHA = coder.Result.OutputSHA, coder.Result.OutputSHA
+	review.OutputMode = flow.Contract.OutputMode
+	if review.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+		review.TargetTreeSHA = coder.Result.OutputTreeSHA
+		review.TargetChangedFiles = slices.Clone(coder.Result.ChangedFiles)
+	}
+	review.Worktree = filepath.Join(flow.ReviewRoot, review.ID)
+	review.AuthorizationID = review.ID + "-authorization"
+	review.Decisions = append(slices.Clone(coder.Instruction.Decisions), core.TaskDecision{
+		ID: review.AuthorizationID, Source: flow.Authorization.Source,
+		Text: flow.Authorization.Text + "; independently review the recorded Coder result",
+	}, sourceDecision)
+	review.HumanDecision = nil
+	if supplement != nil {
+		review.Decisions = append(review.Decisions, *supplement)
+	}
+	if err := state.Graph.Track(review, "controller", "independent review authorized by flow"); err != nil {
+		return err
+	}
+	state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{
+		ID: review.ID, Title: review.Title, Repo: review.Repo, CreatedAt: time.Now().UTC(),
+	})
+	if err := state.Graph.Transition(review.ID, core.Ready, "controller", "review verified output SHA", core.TransitionProof{}); err != nil {
+		return err
+	}
+	return issueFlowDispatch(state, ledgerPath, flow, review, core.RelationshipIndependent,
+		coder.ID, "review the verified Coder output")
+}
+
+func holdReviewFlowForStop(graph *core.TaskGraph, flow *core.ReviewFlow, reason string) error {
+	if flow.HandoffHeld() {
+		return nil
+	}
+	if len(flow.DispatchIDs) == 0 {
+		return fmt.Errorf("taxion: cannot hold a stopped flow without a Dispatch")
+	}
+	expected := ""
+	if len(flow.HandoffChanges) != 0 {
+		expected = flow.HandoffChanges[len(flow.HandoffChanges)-1].ID
+	}
+	held, err := graph.ChangeHandoff(flow.ID, core.HandoffChange{
+		ID:               "flow-stop:" + flow.ID + ":" + flow.DispatchIDs[len(flow.DispatchIDs)-1],
+		ExpectedChangeID: expected, Action: "HOLD", Actor: "controller",
+		Source: "controller:flow-stop", Reason: reason,
+	})
+	if err != nil {
+		return err
+	}
+	*flow = held
+	return nil
+}
+
 func flowContractMatches(graph core.TaskGraph, flow core.ReviewFlow, current core.GraphTask) bool {
 	approved := flow.Contract
 	current.Status, current.TargetSHA = approved.Status, approved.TargetSHA
+	current.TargetTreeSHA = approved.TargetTreeSHA
+	current.TargetChangedFiles = slices.Clone(approved.TargetChangedFiles)
 	current.DeferredReason, current.ResumeCondition, current.NextAction = approved.DeferredReason, approved.ResumeCondition, approved.NextAction
 	for _, decision := range approved.Decisions {
 		if !slices.Contains(current.Decisions, decision) {

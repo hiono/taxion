@@ -251,6 +251,14 @@ explicit opt-ins through `--managed-commit` and `--managed-stage`. ACP sessions
 can reconnect to a running Dispatch by ID; use the CLI runtime commands to
 inspect or reconcile a saved session when ACP cannot resume it.
 
+Task の `outputMode` は `commit`（省略時の既定）または `worktree-tree-snapshot` を選ぶ。
+snapshot mode では Coder の `outputSha` は開始時の commit SHA のままにし、
+Controller が算出した `outputTreeSha` と変更 path で成果物を識別する。
+Controller は tree object をローカルの `refs/taxion/snapshots/` に保持する。
+これは branch、commit、実 index、remote を変更しないが、Git ref を追加する。
+Reviewer は baseline commit から同じ tree を別 worktree に再現し、開始時と終了時に照合する。
+Git tree に含まれない ignored file はレビュー対象に含まれない。
+
 `--compact-context` on `runtime` and `workflow run|step` renders exact prior
 results once per sourced decision instead of embedding their full prior
 instructions recursively. It compares each `result:` decision with the actual
@@ -258,8 +266,9 @@ saved Dispatch result and rejects missing or altered sources. Current contract,
 Human decisions and Memory stay intact; full immutable instructions remain in
 the Graph. Result and instruction hashes identify omitted source records.
 The default rendering is unchanged. Compact rendering changes the system
-prompt/configuration hash and must be repeated for session attachment and safe
-stop; do not switch an existing binding to the new rendering.
+prompt/configuration hash and must be repeated for execution attachment,
+not cancellation-only `runtime stop`; do not switch an existing execution
+binding to the new rendering.
 
 `workflow planning-context` exposes saved Memory, acceptance, blockers,
 dependencies, concerns, related result/SHA targets and existing flow limits
@@ -303,7 +312,7 @@ Output SHA and verdict remain reported facts subject to independent controller
 verification. The strict schema also limits `nextTransition` to the existing
 Task status vocabulary, without selecting a transition or changing saved state.
 The option changes the configuration hash and must be repeated
-on session attachment and safe stop. The default schema remains unchanged for
+on execution attachment, not cancellation-only `runtime stop`. The default schema remains unchanged for
 older sessions; rejected responses are not repaired into successful results.
 Agents without shell permission can submit `validations: []`; the controller
 runs the authorized commands after a successful implementation submission and
@@ -382,10 +391,17 @@ recorded before issuance and cannot widen an existing Dispatch. Local checks
 exercise selected Coder→review→repair→re-review through controller and actual
 Git, not a signed-in SDK model.
 
-Safe stop reconstructs the saved session hash without current settings or an
-authentication probe. It still verifies role, worktree and session identity,
-then attempts SDK attachment and cancellation. Provider attachment can fail,
-and those errors are returned. Unconfigured local/proc usage retains existing
+CLI safe stop uses a cancellation-only adapter bound to the saved session ID,
+role, worktree and configuration hash, without reconstructing changed prompts,
+tools or schemas. It uses the saved selected credential reference rather than
+current fixed settings, and does not require an authentication probe. Start,
+Send and ordinary Resume are rejected. Stop attachment disables pending-work
+continuation, resume events, transcript repair and discovery, exposes no tools,
+and denies every permission request. It sends abort before detaching even
+without local busy-state observations. Older execution contracts may stop
+without gaining permission to execute under a new contract. Attachment,
+cancellation and persistence failures remain explicit; a model instruction is
+never sent by this path. Unconfigured local/proc usage retains existing
 behavior. Credential resolution, repository actor selection, contract
 eligibility and signed-in acceptance remain separate requirements.
 

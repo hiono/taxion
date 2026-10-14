@@ -15,14 +15,37 @@ func TestUsageDescribesCurrentCommands(t *testing.T) {
 	for _, text := range []string{
 		"memory search", "--query required", "memory export", "no transmission",
 		"Bind coder-output evidence", "local stub",
+		"conversation watch", "--capabilities", "--dispatch",
 		"task create, dispatch and review require an explicit --repo",
 		"memory configure", "memory approve", "memory checks",
 		"memory conflict",
+		"conversation search", "workflow step", "workflow interrupt",
+		"workflow planning-context", "workflow planner-draft",
+		"workflow planner-action", "workflow question-draft",
 	} {
 		if !strings.Contains(usage, text) {
 			t.Errorf("usage missing %q", text)
 		}
 
+	}
+	if got := strings.Count(usage, "conversation watch"); got != 1 {
+		t.Errorf("conversation watch appears %d times in usage, want 1", got)
+	}
+	if got := strings.Count(usage, "conversation search"); got != 1 {
+		t.Errorf("conversation search appears %d times in usage, want 1", got)
+	}
+}
+
+func TestTaskGraphRejectsIgnoredFileOption(t *testing.T) {
+	if err := taskGraphCmd("graph", []string{"--file", "ignored.json"}); err == nil {
+		t.Fatal("task graph accepted an unused --file option")
+	}
+}
+
+func TestRecordsRejectOptionsNotSupportedByAction(t *testing.T) {
+	err := recordsCmd([]string{"show", "--file", "ignored.json"})
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -file") {
+		t.Fatalf("records show error = %v, want unsupported --file error", err)
 	}
 }
 

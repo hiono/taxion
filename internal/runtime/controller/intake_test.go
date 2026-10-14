@@ -1,10 +1,15 @@
 package controller
 
 import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -19,7 +24,8 @@ func TestIntakeSeparatesOriginalRequestExactConfirmationAndExecution(t *testing.
 	task.ID, task.Status, task.AuthorizationID, task.Decisions = "intake", core.Draft, "", nil
 	proposal := IntakeRequest{Request: "Implement the requested behavior without changing unrelated files.", Task: task, Actor: "human", Source: "human:request"}
 	saved, err := ProposeIntake(db, proposal)
-	if err != nil || saved.Status != core.Draft || saved.AuthorizationID != "" {
+	if err != nil || saved.Status != core.Draft || saved.AuthorizationID != "" ||
+		saved.FileAccess == nil || saved.FileAccess.Level != core.FileAccessCommitted {
 		t.Fatal("intake invented execution permission", err)
 	}
 	if _, err := ProposeIntake(db, proposal); err != nil {
@@ -114,6 +120,284 @@ func TestReapprovalCreatesSuccessorWithoutRewritingIssuedContract(t *testing.T) 
 		Authorization: core.TaskDecision{ID: "new-flow-approval", Source: "human:new-budget", Text: "Authorize a separately bounded successor"},
 	}); err != nil {
 		t.Fatal("old held flow blocked explicitly approved successor execution", err)
+	}
+}
+
+func TestBudgetStoppedFlowContinuesFromVerifiedPartialTreeWithNewApproval(t *testing.T) {
+	for _, mode := range []string{core.OutputModeCommit, core.OutputModeWorktreeTreeSnapshot} {
+		t.Run(mode, func(t *testing.T) {
+			testStoppedFlowContinuesFromVerifiedPartialTree(t, mode)
+		})
+	}
+}
+
+func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) {
+	t.Helper()
+	db, ledger, request := reviewFlowFixtureWithOutputMode(t, mode)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatchID := flow.DispatchIDs[0]
+	worker := &fakeRuntime{role: "CODER", hash: "budget-runtime", worktree: flow.Contract.Worktree}
+	control, err := New(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Start(context.Background(), dispatchID); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.Send(context.Background(), dispatchID, "execute approved work"); err != nil {
+		t.Fatal(err)
+	}
+	partialFile := filepath.Join(flow.Contract.Worktree, "internal", "partial.go")
+	if err := os.MkdirAll(filepath.Dir(partialFile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(partialFile, []byte("partial implementation\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.Stop(context.Background(), dispatchID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AdvanceReviewFlow(db, ledger, flow.ID); !errors.Is(err, ErrFlowStopped) {
+		t.Fatalf("cancelled flow did not stop: %v", err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	last, _ := state.Graph.GraphDispatch(dispatchID)
+	flow, _ = state.Graph.ReviewFlow(flow.ID)
+	if !flow.HandoffHeld() || last.Result == nil || last.Result.PartialGitEvidence == nil {
+		t.Fatal("stopped flow did not retain a held partial-work checkpoint")
+	}
+
+	sourceWorktree := flow.Contract.Worktree
+	if mode == core.OutputModeCommit {
+		gitTest(t, sourceWorktree, "add", "-A")
+		gitTest(t, sourceWorktree, "commit", "-m", "chore: checkpoint partial work")
+	}
+	targetSHA := gitTest(t, sourceWorktree, "rev-parse", "HEAD")
+	successorWorktree := filepath.Join(t.TempDir(), "successor")
+	gitTest(t, sourceWorktree, "worktree", "add", "-b", "work/successor", successorWorktree, targetSHA)
+	task := flow.Contract
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "budget-successor", core.Draft, "", nil
+	task.Supersedes, task.CreatedFrom = flow.TaskID, "flow:"+flow.ID
+	task.Worktree, task.Branch, task.TargetSHA = successorWorktree, "work/successor", targetSHA
+	if mode == core.OutputModeWorktreeTreeSnapshot {
+		if err := os.MkdirAll(filepath.Join(successorWorktree, "internal"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(successorWorktree, "internal/partial.go"),
+			[]byte("partial implementation\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		task.TargetTreeSHA = last.Result.PartialGitEvidence.TreeSHA
+		task.TargetChangedFiles = last.Result.PartialGitEvidence.ChangedFiles
+	}
+	_, _, _, selection := executionConfigurationFixture(t)
+	proposal, err := ProposeIntake(db, IntakeRequest{
+		Request: "Continue the stopped work from its recorded partial tree with a new budget.",
+		Task:    task, Actor: "human", Source: "human:budget-successor",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := IntakeHash(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := core.ObserveFeedbackTarget(last)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := ConfirmIntake(db, IntakeConfirmation{
+		TaskID: proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:budget-successor",
+		Reason:    "Approve the exact partial tree and successor contract under a new execution budget.",
+		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
+	})
+	if err != nil || approved.Status != core.Ready {
+		t.Fatal("verified partial tree was not explicitly reapproved", err)
+	}
+	repairs := 0
+	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
+		ID: "budget-successor-flow", TaskID: approved.ID, Repository: approved.Repo, ReviewRoot: flow.ReviewRoot,
+		MaxRepairs: &repairs, MaxTokens: 5, TimeoutSeconds: 60,
+		Authorization: core.TaskDecision{ID: "new-budget", Source: "human:new-budget", Text: "Approve a separate five-token budget"},
+	})
+	if err != nil {
+		t.Fatal("successor flow did not accept its separate budget", err)
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	successorDispatch, _ := state.Graph.GraphDispatch(successor.DispatchIDs[0])
+	if successorDispatch.Instruction.BaselineSHA != flow.Contract.BaselineSHA ||
+		successorDispatch.Instruction.TargetSHA != targetSHA {
+		t.Fatal("successor dispatch did not retain original baseline and partial target")
+	}
+	if _, err := gitproof.ObserveStart(successorDispatch); err != nil {
+		t.Fatal("successor worktree failed execution-start verification", err)
+	}
+	if mode == core.OutputModeWorktreeTreeSnapshot {
+		executeFlowDispatch(t, db, successor, "", true)
+		if head := gitTest(t, successorWorktree, "rev-parse", "HEAD"); head != flow.Contract.BaselineSHA {
+			t.Fatal("snapshot continuation created a commit")
+		}
+	}
+}
+
+func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	request.MaxTokens = 15
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coder := executeFlowDispatch(t, db, flow, "", true)
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+	if !errors.Is(err, ErrFlowStopped) || flow.StopCode != "BUDGET_LIMIT" ||
+		flow.Status != "STOPPED" || !flow.HandoffHeld() || len(flow.DispatchIDs) != 1 {
+		t.Fatalf("completed Coder result did not stop before a paid Reviewer turn: %+v %v", flow, err)
+	}
+	successorWorktree := filepath.Join(t.TempDir(), "successor")
+	gitTest(t, flow.Contract.Worktree, "worktree", "add", "-b", "work/successor", successorWorktree, coder.Result.OutputSHA)
+	task := flow.Contract
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "review-successor", core.Draft, "", nil
+	task.Supersedes, task.CreatedFrom = flow.TaskID, "flow:"+flow.ID
+	task.Worktree, task.Branch, task.TargetSHA = successorWorktree, "work/successor", coder.Result.OutputSHA
+	_, _, _, selection := executionConfigurationFixture(t)
+	proposal, err := ProposeIntake(db, IntakeRequest{
+		Request: "Continue the saved Coder result directly at independent review with a new budget.",
+		Task:    task, Actor: "human", Source: "human:review-successor",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := IntakeHash(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := core.ObserveFeedbackTarget(coder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := ConfirmIntake(db, IntakeConfirmation{
+		TaskID: proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:review-successor",
+		Reason:    "Approve the exact saved Coder output and a new independent-review budget.",
+		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
+	})
+	if err != nil || approved.Status != core.Ready {
+		t.Fatal("completed Coder result was not explicitly approved for continuation", err)
+	}
+	repairs := 0
+	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
+		ID: "review-successor-flow", TaskID: approved.ID, Repository: approved.Repo, ReviewRoot: flow.ReviewRoot,
+		ContinueFromDispatchID: coder.ID, MaxRepairs: &repairs, MaxTokens: 100, TimeoutSeconds: 60,
+		Authorization: core.TaskDecision{ID: "new-review-budget", Source: "human:new-review-budget", Text: "Approve a separate review budget"},
+	})
+	if err != nil {
+		t.Fatal("new flow did not continue at the saved Coder result", err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := state.Graph.GraphDispatch(successor.DispatchIDs[0])
+	if first.Recipient != "REVIEWER" || first.Instruction.TargetSHA != coder.Result.OutputSHA ||
+		successor.SourceDispatchID != coder.ID || len(state.Graph.Dispatches) != 2 {
+		t.Fatalf("completed Coder turn was repeated instead of resuming at review: flow=%+v dispatch=%+v", successor, first)
+	}
+}
+
+func TestBudgetStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.T) {
+	db, ledger, request := reviewFlowFixtureWithOutputMode(t, core.OutputModeWorktreeTreeSnapshot)
+	request.MaxTokens = 15
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coder := executeFlowDispatch(t, db, flow, "", true)
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+	if !errors.Is(err, ErrFlowStopped) || flow.StopCode != "BUDGET_LIMIT" ||
+		flow.Status != "STOPPED" || !flow.HandoffHeld() || len(flow.DispatchIDs) != 1 {
+		t.Fatalf("completed snapshot Coder did not stop before a paid Reviewer turn: %+v %v", flow, err)
+	}
+	successorWorktree := filepath.Join(t.TempDir(), "successor")
+	gitTest(t, flow.Contract.Worktree, "worktree", "add", "-b", "work/successor",
+		successorWorktree, coder.Result.OutputSHA)
+	source, err := os.ReadFile(filepath.Join(flow.Contract.Worktree, "internal/app.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(successorWorktree, "internal"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(successorWorktree, "internal/app.go"), source, 0600); err != nil {
+		t.Fatal(err)
+	}
+	task := flow.Contract
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "snapshot-review-successor", core.Draft, "", nil
+	task.Supersedes, task.CreatedFrom = flow.TaskID, "flow:"+flow.ID
+	task.Worktree, task.Branch = successorWorktree, "work/successor"
+	task.TargetSHA = coder.Result.OutputSHA
+	task.TargetTreeSHA = coder.Result.OutputTreeSHA
+	task.TargetChangedFiles = coder.Result.ChangedFiles
+	_, _, _, selection := executionConfigurationFixture(t)
+	proposal, err := ProposeIntake(db, IntakeRequest{
+		Request: "Continue the saved uncommitted Coder tree directly at independent review.",
+		Task:    task, Actor: "human", Source: "human:snapshot-review-successor",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := IntakeHash(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := core.ObserveFeedbackTarget(coder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := ConfirmIntake(db, IntakeConfirmation{
+		TaskID: proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:snapshot-review-successor",
+		Reason:    "Approve the exact saved tree and a separate independent-review budget.",
+		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
+	})
+	if err != nil || approved.Status != core.Ready {
+		t.Fatal("snapshot result was not explicitly approved for continuation", err)
+	}
+	repairs := 0
+	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
+		ID: "snapshot-review-successor-flow", TaskID: approved.ID, Repository: approved.Repo,
+		ReviewRoot: flow.ReviewRoot, ContinueFromDispatchID: coder.ID,
+		MaxRepairs: &repairs, MaxTokens: 100, TimeoutSeconds: 60,
+		Authorization: core.TaskDecision{
+			ID: "new-snapshot-review-budget", Source: "human:new-snapshot-review-budget",
+			Text: "Approve a separate review budget",
+		},
+	})
+	if err != nil {
+		t.Fatal("new flow did not continue at the saved snapshot", err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewer, _ := state.Graph.GraphDispatch(successor.DispatchIDs[0])
+	if reviewer.Recipient != "REVIEWER" || reviewer.Instruction.TargetSHA != coder.Result.OutputSHA ||
+		reviewer.Instruction.TargetTreeSHA != coder.Result.OutputTreeSHA ||
+		successor.SourceDispatchID != coder.ID || len(state.Graph.Dispatches) != 2 {
+		t.Fatalf("continuation repeated the Coder turn or changed its tree: flow=%+v dispatch=%+v", successor, reviewer)
+	}
+	reviewer, err = PrepareReview(db, reviewer.ID, approved.Worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start, err := gitproof.ObserveStart(reviewer); err != nil || start != coder.Result.OutputSHA {
+		t.Fatalf("Reviewer worktree did not reproduce the saved snapshot: %s %v", start, err)
 	}
 }
 

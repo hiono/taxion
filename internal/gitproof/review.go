@@ -41,6 +41,13 @@ func ReverifyReleasedReview(dispatch core.GraphDispatch, result *core.DispatchRe
 	if err := VerifyRepositoryRemote(dispatch, remote); err != nil {
 		return fmt.Errorf("review source repository identity changed")
 	}
+	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+		if result.GitEvidence.SnapshotRef != snapshotRef(dispatch.RelatedID) ||
+			result.GitEvidence.TreeSHA != dispatch.Instruction.TargetTreeSHA {
+			return fmt.Errorf("released review snapshot evidence differs from its target")
+		}
+		return verifySnapshotRef(source, dispatch.RelatedID, dispatch.Instruction.TargetTreeSHA)
+	}
 	head, err := git(source, "rev-parse", result.OutputSHA+"^{commit}")
 	if err != nil || head != result.OutputSHA || head != dispatch.Instruction.TargetSHA {
 		return fmt.Errorf("review target commit is unavailable or changed")
@@ -72,7 +79,15 @@ func CreateReviewWorktree(source string, dispatch core.GraphDispatch) error {
 		return fmt.Errorf("review source repository does not match the dispatch")
 	}
 	_, err = git(source, "worktree", "add", "--detach", dispatch.Instruction.Worktree, dispatch.Instruction.BaselineSHA)
-	return err
+	if err != nil {
+		return err
+	}
+	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+		if err := applyTreeSnapshot(source, dispatch); err != nil {
+			return errors.Join(err, removeCreatedWorktree(source, dispatch.Instruction.Worktree))
+		}
+	}
+	return nil
 }
 
 // ReleaseReviewWorktree removes a controller-created worktree without --force.
@@ -95,7 +110,12 @@ func ReleaseReviewWorktree(source string, dispatch core.GraphDispatch, result *c
 	if sourceGit != reviewGit {
 		return fmt.Errorf("review worktree belongs to another Git repository")
 	}
-	if _, err := git(source, "worktree", "remove", dispatch.Instruction.Worktree); err != nil {
+	removeArgs := []string{"worktree", "remove"}
+	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+		removeArgs = append(removeArgs, "--force")
+	}
+	removeArgs = append(removeArgs, dispatch.Instruction.Worktree)
+	if _, err := git(source, removeArgs...); err != nil {
 		result.GitEvidence = nil
 		return fmt.Errorf("release review worktree: %w", err)
 	}

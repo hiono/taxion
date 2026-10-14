@@ -114,7 +114,10 @@ func validateReviewerResult(d GraphDispatch, result *DispatchResult) error {
 	return nil
 }
 
-const DispatchInstructionVersion = 4
+const DispatchInstructionVersion = 5
+
+const OutputModeCommit = "commit"
+const OutputModeWorktreeTreeSnapshot = "worktree-tree-snapshot"
 
 type TaskDecision struct {
 	ID     string `json:"id"`
@@ -163,6 +166,10 @@ type GraphTask struct {
 	Worktree           string                `json:"worktree"`
 	BaselineSHA        string                `json:"baselineSha"`
 	TargetSHA          string                `json:"targetSha"`
+	OutputMode         string                `json:"outputMode,omitempty"`
+	TargetTreeSHA      string                `json:"targetTreeSha,omitempty"`
+	TargetChangedFiles []string              `json:"targetChangedFiles,omitempty"`
+	FileAccess         *FileAccessPolicy     `json:"fileAccess,omitempty"`
 	Risk               string                `json:"risk"`
 	ExceptionIDs       []string              `json:"exceptionIds"`
 	CreatedFrom        string                `json:"createdFrom"`
@@ -246,14 +253,21 @@ type GraphDispatch struct {
 	UpdatedAt            time.Time              `json:"updatedAt"`
 }
 
+type UsageAccountingIdentity struct {
+	SourceSessionID string `json:"sourceSessionId"`
+	Sequence        int64  `json:"sequence"`
+	UsageID         string `json:"usageId"`
+}
+
 type DispatchUsage struct {
-	Model            string    `json:"model"`
-	IsAuto           *bool     `json:"isAuto,omitempty"`
-	InputTokens      *int64    `json:"inputTokens,omitempty"`
-	OutputTokens     *int64    `json:"outputTokens,omitempty"`
-	CacheReadTokens  *int64    `json:"cacheReadTokens,omitempty"`
-	CacheWriteTokens *int64    `json:"cacheWriteTokens,omitempty"`
-	ObservedAt       time.Time `json:"observedAt"`
+	Model            string                   `json:"model"`
+	IsAuto           *bool                    `json:"isAuto,omitempty"`
+	InputTokens      *int64                   `json:"inputTokens,omitempty"`
+	OutputTokens     *int64                   `json:"outputTokens,omitempty"`
+	CacheReadTokens  *int64                   `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens *int64                   `json:"cacheWriteTokens,omitempty"`
+	Accounting       *UsageAccountingIdentity `json:"accounting,omitempty"`
+	ObservedAt       time.Time                `json:"observedAt"`
 }
 
 type DispatchValidation struct {
@@ -274,30 +288,47 @@ type DispatchGitEvidence struct {
 	HeadSHA          string    `json:"headSha"`
 	ParentSHAs       []string  `json:"parentShas"`
 	ChangedFiles     []string  `json:"changedFiles"`
+	TreeSHA          string    `json:"treeSha,omitempty"`
+	SnapshotRef      string    `json:"snapshotRef,omitempty"`
+	SnapshotMatches  bool      `json:"snapshotMatches,omitempty"`
 	WorktreeClean    bool      `json:"worktreeClean"`
 	WorktreeReleased bool      `json:"worktreeReleased,omitempty"`
 	VerifiedAt       time.Time `json:"verifiedAt"`
 }
 
 type DispatchResult struct {
-	DispatchID      string               `json:"dispatchId"`
-	TaskID          string               `json:"taskId"`
-	Recipient       string               `json:"recipient"`
-	Repository      string               `json:"repository"`
-	Status          DispatchStatus       `json:"status"`
-	StartedSHA      string               `json:"startedSha"`
-	OutputSHA       string               `json:"outputSha"`
-	ChangedFiles    []string             `json:"changedFiles"`
-	Validations     []DispatchValidation `json:"validations"`
-	GitEvidence     *DispatchGitEvidence `json:"gitEvidence,omitempty"`
-	Evidence        []string             `json:"evidence"`
-	Blockers        []string             `json:"blockers"`
-	ReviewVerdict   string               `json:"reviewVerdict,omitempty"`
-	Acceptance      []DispatchAcceptance `json:"acceptance,omitempty"`
-	Findings        []DispatchFinding    `json:"findings"`
-	WorktreeChanged *bool                `json:"worktreeChanged,omitempty"`
-	NextTransition  TaskStatus           `json:"nextTransition"`
-	ResumeCondition string               `json:"resumeCondition,omitempty"`
+	DispatchID         string                      `json:"dispatchId"`
+	TaskID             string                      `json:"taskId"`
+	Recipient          string                      `json:"recipient"`
+	Repository         string                      `json:"repository"`
+	Status             DispatchStatus              `json:"status"`
+	StartedSHA         string                      `json:"startedSha"`
+	OutputSHA          string                      `json:"outputSha"`
+	OutputTreeSHA      string                      `json:"outputTreeSha,omitempty"`
+	ChangedFiles       []string                    `json:"changedFiles"`
+	Validations        []DispatchValidation        `json:"validations"`
+	GitEvidence        *DispatchGitEvidence        `json:"gitEvidence,omitempty"`
+	PartialGitEvidence *DispatchPartialGitEvidence `json:"partialGitEvidence,omitempty"`
+	Evidence           []string                    `json:"evidence"`
+	Blockers           []string                    `json:"blockers"`
+	ReviewVerdict      string                      `json:"reviewVerdict,omitempty"`
+	Acceptance         []DispatchAcceptance        `json:"acceptance,omitempty"`
+	Findings           []DispatchFinding           `json:"findings"`
+	WorktreeChanged    *bool                       `json:"worktreeChanged,omitempty"`
+	NextTransition     TaskStatus                  `json:"nextTransition"`
+	ResumeCondition    string                      `json:"resumeCondition,omitempty"`
+}
+
+type DispatchPartialGitEvidence struct {
+	Worktree           string    `json:"worktree"`
+	Repository         string    `json:"repository"`
+	Branch             string    `json:"branch"`
+	BaselineSHA        string    `json:"baselineSha"`
+	HeadSHA            string    `json:"headSha"`
+	TreeSHA            string    `json:"treeSha"`
+	ChangedFiles       []string  `json:"changedFiles"`
+	UncommittedChanges bool      `json:"uncommittedChanges"`
+	CapturedAt         time.Time `json:"capturedAt"`
 }
 
 type DispatchAcceptance struct {
@@ -343,6 +374,10 @@ type DispatchInstruction struct {
 	Branch              string                `json:"branch"`
 	BaselineSHA         string                `json:"baselineSha"`
 	TargetSHA           string                `json:"targetSha"`
+	OutputMode          string                `json:"outputMode,omitempty"`
+	TargetTreeSHA       string                `json:"targetTreeSha,omitempty"`
+	TargetChangedFiles  []string              `json:"targetChangedFiles,omitempty"`
+	FileAccess          *FileAccessPolicy     `json:"fileAccess,omitempty"`
 	AuthorizationID     string                `json:"authorizationId"`
 	Decisions           []TaskDecision        `json:"decisions"`
 	HumanDecision       *HumanDecisionRequest `json:"humanDecision,omitempty"`
@@ -380,13 +415,16 @@ type DispatchEvent struct {
 }
 
 type TransitionProof struct {
-	ActionPerformed bool         `json:"actionPerformed"`
-	Evidence        []string     `json:"evidence"`
-	Acceptance      []string     `json:"acceptance"`
-	ReviewedSHA     string       `json:"reviewedSha"`
-	Reviewer        string       `json:"reviewer"`
-	OutputSHA       string       `json:"outputSha"`
-	Waivers         []TaskWaiver `json:"waivers"`
+	ActionPerformed    bool         `json:"actionPerformed"`
+	Evidence           []string     `json:"evidence"`
+	Acceptance         []string     `json:"acceptance"`
+	ReviewedSHA        string       `json:"reviewedSha"`
+	Reviewer           string       `json:"reviewer"`
+	OutputSHA          string       `json:"outputSha"`
+	OutputTreeSHA      string       `json:"outputTreeSha,omitempty"`
+	OutputChangedFiles []string     `json:"outputChangedFiles,omitempty"`
+	ReviewedTreeSHA    string       `json:"reviewedTreeSha,omitempty"`
+	Waivers            []TaskWaiver `json:"waivers"`
 }
 
 type TaskWaiver struct {
@@ -588,13 +626,17 @@ func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship Di
 		RequiredEvidence:   slices.Clone(task.RequiredEvidence),
 		ValidationCommands: slices.Clone(task.ValidationCommands),
 		ExitCondition:      task.ExitCondition, Worktree: task.Worktree, Branch: task.Branch,
-		BaselineSHA: task.BaselineSHA, TargetSHA: task.TargetSHA, AuthorizationID: task.AuthorizationID,
+		BaselineSHA: task.BaselineSHA, TargetSHA: task.TargetSHA,
+		OutputMode: task.OutputMode, TargetTreeSHA: task.TargetTreeSHA,
+		TargetChangedFiles: slices.Clone(task.TargetChangedFiles),
+		FileAccess:         CloneFileAccessPolicy(task.FileAccess), AuthorizationID: task.AuthorizationID,
 		Decisions: slices.Clone(task.Decisions), HumanDecision: cloneHumanDecision(task.HumanDecision),
 		MemoryRefs: slices.Clone(task.MemoryRefs), MemoryContext: cloneDispatchMemoryContext(memoryContext),
 		Specifications: cloneSpecifications(task.Specifications),
 		ReturnFormat:   slices.Clone(dispatchReturnFormat),
 	}
-	if task.Owner == "CODER" {
+	if task.Owner == "CODER" &&
+		(task.OutputMode == "" || task.OutputMode == OutputModeCommit) {
 		instruction.CommitMessagePolicy = CommitMessagePolicy
 	}
 	if relationship != RelationshipNone && relationship != RelationshipIndependent {
@@ -657,7 +699,11 @@ func dispatchInstructionMatchesTask(d GraphDispatch, task GraphTask) bool {
 		slices.Equal(i.RequiredEvidence, task.RequiredEvidence) && i.ExitCondition == task.ExitCondition &&
 		slices.Equal(i.ValidationCommands, task.ValidationCommands) &&
 		i.Worktree == task.Worktree && i.Branch == task.Branch && i.BaselineSHA == task.BaselineSHA &&
-		i.TargetSHA == task.TargetSHA && i.AuthorizationID == task.AuthorizationID &&
+		i.TargetSHA == task.TargetSHA && i.OutputMode == task.OutputMode &&
+		i.TargetTreeSHA == task.TargetTreeSHA &&
+		slices.Equal(i.TargetChangedFiles, task.TargetChangedFiles) &&
+		i.AuthorizationID == task.AuthorizationID &&
+		reflect.DeepEqual(i.FileAccess, task.FileAccess) &&
 		reflect.DeepEqual(i.Decisions, task.Decisions) &&
 		reflect.DeepEqual(i.HumanDecision, task.HumanDecision) && slices.Equal(i.MemoryRefs, task.MemoryRefs) &&
 		reflect.DeepEqual(i.Specifications, task.Specifications) &&
@@ -671,7 +717,17 @@ func dispatchInstructionIdentityMatchesTask(d GraphDispatch, task GraphTask) boo
 	acceptanceMatches := i.Version == 1 || slices.Equal(i.Acceptance, task.Acceptance)
 	memoryMatches := i.Version < 3 || validateDispatchMemoryContext(i.MemoryRefs, i.MemoryContext) == nil
 	policyMatches := i.CommitMessagePolicy == "" || i.CommitMessagePolicy == CommitMessagePolicy && d.Recipient == "CODER"
-	return versionMatches && acceptanceMatches && memoryMatches && policyMatches &&
+	fileAccessMatches := reflect.DeepEqual(i.FileAccess, task.FileAccess) &&
+		(i.FileAccess == nil || i.FileAccess.Validate() == nil)
+	outputModeMatches := validOutputMode(i.OutputMode) && i.OutputMode == task.OutputMode &&
+		validList(i.TargetChangedFiles) &&
+		(i.OutputMode != OutputModeWorktreeTreeSnapshot ||
+			d.Recipient != "REVIEWER" && (i.TargetTreeSHA == "" || validSHA(i.TargetTreeSHA)) ||
+			d.Recipient == "REVIEWER" && validSHA(i.TargetTreeSHA) &&
+				i.TargetTreeSHA == task.TargetTreeSHA &&
+				slices.Equal(i.TargetChangedFiles, task.TargetChangedFiles))
+	return versionMatches && acceptanceMatches && memoryMatches && policyMatches && fileAccessMatches &&
+		outputModeMatches &&
 		validateSpecifications(i.Specifications) == nil && i.DispatchID == d.ID &&
 		i.TaskID == d.TaskID && i.Repository == d.Repository &&
 		i.Title == task.Title && task.Repo == d.Repository &&
@@ -684,6 +740,9 @@ func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *Disp
 		result.Recipient != d.Recipient || result.Repository != d.Repository || result.Status != status ||
 		result.StartedSHA != d.ExpectedStartSHA() || !validStatus(result.NextTransition) {
 		return graphError("dispatch result does not match the active instruction")
+	}
+	if status != DispatchSucceeded && result.OutputTreeSHA != "" {
+		return graphError("non-successful dispatch cannot report an output tree SHA")
 	}
 	if d.ExecutionStartSHA != "" && result.StartedSHA != d.ExecutionStartSHA {
 		return graphError("dispatch result does not match the observed execution start SHA")
@@ -709,9 +768,28 @@ func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *Disp
 	if status == DispatchSuspended && (len(result.Evidence) == 0 || !nonempty(result.ResumeCondition)) {
 		return graphError("suspension requires stop evidence and a resume condition")
 	}
+	if partial := result.PartialGitEvidence; partial != nil &&
+		(status != DispatchCancelled || d.Recipient != "CODER" ||
+			!filepath.IsAbs(partial.Worktree) || !nonempty(partial.Repository) ||
+			!nonempty(partial.Branch) || partial.BaselineSHA != d.Instruction.BaselineSHA ||
+			!validSHA(partial.BaselineSHA) || !validSHA(partial.HeadSHA) || !validSHA(partial.TreeSHA) ||
+			!validList(partial.ChangedFiles) || partial.CapturedAt.IsZero()) {
+		return graphError("partial Git evidence requires a cancelled Coder dispatch and complete tree identity")
+	}
 	if status == DispatchSucceeded {
 		if !nonempty(result.OutputSHA) || len(result.Validations) == 0 || len(result.Evidence) == 0 || len(result.Blockers) != 0 {
 			return graphError("successful dispatch requires output SHA, validation and evidence")
+		}
+		if d.Instruction.OutputMode == OutputModeWorktreeTreeSnapshot {
+			if !validSHA(result.OutputTreeSHA) ||
+				d.Recipient == "CODER" && result.OutputSHA != d.ExpectedStartSHA() ||
+				d.Recipient == "REVIEWER" &&
+					(result.OutputSHA != d.ExpectedStartSHA() ||
+						result.OutputTreeSHA != d.Instruction.TargetTreeSHA) {
+				return graphError("successful snapshot dispatch requires the approved tree and unchanged baseline commit")
+			}
+		} else if result.OutputTreeSHA != "" {
+			return graphError("commit-mode dispatch cannot report a worktree tree SHA")
 		}
 		if d.Instruction.Version >= 4 {
 			if len(result.Validations) != len(d.Instruction.ValidationCommands) {
@@ -748,6 +826,7 @@ func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *Disp
 
 func validateDispatchGitEvidence(d GraphDispatch, result *DispatchResult) error {
 	evidence := result.GitEvidence
+	snapshotMode := d.Instruction.OutputMode == OutputModeWorktreeTreeSnapshot
 	branchMatches := evidence != nil && evidence.Branch == d.Instruction.Branch
 	if d.Recipient == "REVIEWER" && evidence != nil && evidence.Branch == "(detached)" {
 		branchMatches = true
@@ -755,16 +834,29 @@ func validateDispatchGitEvidence(d GraphDispatch, result *DispatchResult) error 
 	if evidence == nil || evidence.Repository != d.Repository ||
 		!branchMatches ||
 		evidence.BaselineSHA != d.Instruction.BaselineSHA ||
-		evidence.HeadSHA != result.OutputSHA || !evidence.WorktreeClean ||
+		evidence.HeadSHA != result.OutputSHA ||
 		!nonempty(evidence.Worktree) || evidence.VerifiedAt.IsZero() ||
 		!validSHAList(evidence.ParentSHAs) || !validList(evidence.ChangedFiles) {
 		return graphError("successful dispatch requires matching verified Git evidence")
+	}
+	if snapshotMode {
+		if evidence.TreeSHA != result.OutputTreeSHA || !evidence.SnapshotMatches ||
+			evidence.SnapshotRef == "" {
+			return graphError("snapshot dispatch requires matching controller-observed tree evidence")
+		}
+	} else if !evidence.WorktreeClean || evidence.TreeSHA != "" ||
+		evidence.SnapshotRef != "" || evidence.SnapshotMatches {
+		return graphError("commit-mode dispatch requires a clean commit worktree without snapshot evidence")
 	}
 	if !sameStringSet(evidence.ChangedFiles, result.ChangedFiles) {
 		return graphError("Git evidence changed files do not match the dispatch result")
 	}
 	for _, validation := range result.Validations {
-		if validation.Worktree != evidence.Worktree || validation.SHA != result.OutputSHA {
+		expectedSHA := result.OutputSHA
+		if snapshotMode {
+			expectedSHA = result.OutputTreeSHA
+		}
+		if validation.Worktree != evidence.Worktree || validation.SHA != expectedSHA {
 			return graphError("validation provenance does not match verified Git evidence")
 		}
 	}
@@ -807,6 +899,17 @@ func validSHA(value string) bool {
 	}
 	_, err := hex.DecodeString(value)
 	return err == nil
+}
+
+func validOutputMode(value string) bool {
+	return value == "" || value == OutputModeCommit || value == OutputModeWorktreeTreeSnapshot
+}
+
+func outputModeName(value string) string {
+	if value == "" || value == OutputModeCommit {
+		return "commit"
+	}
+	return value
 }
 
 func sameStringSet(left, right []string) bool {
@@ -916,8 +1019,10 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 		label string
 		value any
 	}{
+		{"TARGET CHANGED FILES", i.TargetChangedFiles},
 		{"AUTHORIZED ACTIONS", i.AuthorizedActions},
 		{"FORBIDDEN ACTIONS", i.ForbiddenActions},
+		{"FILE ACCESS POLICY", i.FileAccess},
 		{"ACCEPTANCE", i.Acceptance},
 		{"REQUIRED EVIDENCE", i.RequiredEvidence},
 		{"VALIDATION COMMANDS", i.ValidationCommands},
@@ -936,6 +1041,8 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 		{"BASELINE SHA", i.BaselineSHA},
 		{"START SHA", d.ExpectedStartSHA()},
 		{"TARGET SHA", i.TargetSHA},
+		{"OUTPUT MODE", outputModeName(i.OutputMode)},
+		{"TARGET TREE SHA", i.TargetTreeSHA},
 	} {
 		value, err := json.Marshal(line.value)
 		if err != nil {
@@ -954,6 +1061,12 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 	if d.Recipient == "REVIEWER" {
 		output.WriteString("\nEVIDENCE REFERENCES: result.evidence contains identifiers. Each acceptance.evidence and findings.evidence entry must exactly match an entry in result.evidence. Put explanations in finding title/file/lines; cite the identifiers unchanged.")
 		output.WriteString("\nCOMMIT REASONING REVIEW: When the reviewed Coder instruction declares a commit message policy, check that contextual action lines in its authored commits match the changed code, acceptance, and sourced decisions. Report unsupported reasoning as a review finding.")
+	}
+	if i.OutputMode == OutputModeWorktreeTreeSnapshot {
+		output.WriteString("\nSNAPSHOT CONTRACT: Do not create commits or change Git refs. The controller records the worktree as OUTPUT TREE SHA and retains it with a private local snapshot ref. OUTPUT SHA remains the unchanged baseline commit.")
+		if d.Recipient == "REVIEWER" {
+			output.WriteString("\nSNAPSHOT REVIEW: inspect the controller-created worktree representing TARGET TREE SHA. Do not modify files.")
+		}
 	}
 	return output.String(), nil
 }
@@ -1252,11 +1365,20 @@ func (g TaskGraph) Validate() error {
 			return graphError("runtime usage has no session binding for Dispatch %s", d.ID)
 		}
 		if d.RuntimeSessionID != "" {
+			usageIDs := map[UsageAccountingIdentity]bool{}
 			for _, usage := range d.RuntimeUsage {
 				if !nonempty(usage.Model) || usage.ObservedAt.IsZero() ||
 					!validOptionalCount(usage.InputTokens) || !validOptionalCount(usage.OutputTokens) ||
 					!validOptionalCount(usage.CacheReadTokens) || !validOptionalCount(usage.CacheWriteTokens) {
 					return graphError("invalid runtime usage record for Dispatch %s", d.ID)
+				}
+				if usage.Accounting != nil {
+					identity := *usage.Accounting
+					if !nonempty(identity.SourceSessionID) || identity.Sequence <= 0 || !nonempty(identity.UsageID) ||
+						usageIDs[identity] {
+						return graphError("invalid or duplicate runtime usage accounting identity for Dispatch %s", d.ID)
+					}
+					usageIDs[identity] = true
 				}
 			}
 			if previous, exists := runtimeSessionRoles[d.RuntimeSessionID]; exists &&
@@ -1402,6 +1524,20 @@ func (g TaskGraph) Validate() error {
 			}
 			decisionIDs[d.ID] = d
 		}
+		if t.FileAccess != nil {
+			if err := t.FileAccess.Validate(); err != nil {
+				return graphError("invalid file access policy for %s: %v", t.ID, err)
+			}
+		}
+		if !validOutputMode(t.OutputMode) ||
+			(t.OutputMode != OutputModeWorktreeTreeSnapshot &&
+				(t.TargetTreeSHA != "" || len(t.TargetChangedFiles) != 0)) ||
+			(t.TargetTreeSHA != "" && !validSHA(t.TargetTreeSHA)) ||
+			(t.OutputMode == OutputModeWorktreeTreeSnapshot && t.Owner == "REVIEWER" &&
+				!validSHA(t.TargetTreeSHA)) ||
+			!validList(t.TargetChangedFiles) {
+			return graphError("invalid output mode or target tree for %s", t.ID)
+		}
 		if err := validateHumanDecision(t); err != nil {
 			return err
 		}
@@ -1533,6 +1669,16 @@ func (g TaskGraph) Validate() error {
 				return err
 			}
 		}
+		if e.Proof != nil && e.Proof.OutputSHA != "" {
+			if e.Task.TargetSHA != e.Proof.OutputSHA ||
+				e.Task.OutputMode == OutputModeWorktreeTreeSnapshot &&
+					(e.Task.TargetTreeSHA != e.Proof.OutputTreeSHA ||
+						!slices.Equal(e.Task.TargetChangedFiles, e.Proof.OutputChangedFiles)) ||
+				e.Task.OutputMode != OutputModeWorktreeTreeSnapshot &&
+					(e.Proof.OutputTreeSHA != "" || len(e.Proof.OutputChangedFiles) != 0) {
+				return graphError("task %s handoff proof differs from its recorded target", e.TaskID)
+			}
+		}
 	}
 	for _, t := range g.Tasks {
 		snapshot, ok := latest[t.ID]
@@ -1633,6 +1779,7 @@ func cloneGraph(g TaskGraph) TaskGraph {
 			proof := *copy.History[i].Proof
 			proof.Evidence = slices.Clone(proof.Evidence)
 			proof.Acceptance = slices.Clone(proof.Acceptance)
+			proof.OutputChangedFiles = slices.Clone(proof.OutputChangedFiles)
 			proof.Waivers = cloneWaivers(proof.Waivers)
 			copy.History[i].Proof = &proof
 		}
@@ -1654,6 +1801,10 @@ func cloneDispatch(d GraphDispatch) GraphDispatch {
 		usage.OutputTokens = cloneCount(usage.OutputTokens)
 		usage.CacheReadTokens = cloneCount(usage.CacheReadTokens)
 		usage.CacheWriteTokens = cloneCount(usage.CacheWriteTokens)
+		if usage.Accounting != nil {
+			identity := *usage.Accounting
+			usage.Accounting = &identity
+		}
 	}
 	d.Instruction.SiblingTaskIDs = slices.Clone(d.Instruction.SiblingTaskIDs)
 	d.Instruction.DependsOn = slices.Clone(d.Instruction.DependsOn)
@@ -1663,6 +1814,8 @@ func cloneDispatch(d GraphDispatch) GraphDispatch {
 	d.Instruction.Acceptance = slices.Clone(d.Instruction.Acceptance)
 	d.Instruction.RequiredEvidence = slices.Clone(d.Instruction.RequiredEvidence)
 	d.Instruction.ValidationCommands = slices.Clone(d.Instruction.ValidationCommands)
+	d.Instruction.TargetChangedFiles = slices.Clone(d.Instruction.TargetChangedFiles)
+	d.Instruction.FileAccess = CloneFileAccessPolicy(d.Instruction.FileAccess)
 	d.Instruction.Decisions = slices.Clone(d.Instruction.Decisions)
 	d.Instruction.HumanDecision = cloneHumanDecision(d.Instruction.HumanDecision)
 	d.Instruction.MemoryRefs = slices.Clone(d.Instruction.MemoryRefs)
@@ -1779,6 +1932,8 @@ func cloneTask(t GraphTask) GraphTask {
 	t.HumanDecision = cloneHumanDecision(t.HumanDecision)
 	t.MemoryRefs = slices.Clone(t.MemoryRefs)
 	t.Specifications = cloneSpecifications(t.Specifications)
+	t.FileAccess = CloneFileAccessPolicy(t.FileAccess)
+	t.TargetChangedFiles = slices.Clone(t.TargetChangedFiles)
 	return t
 }
 
@@ -1799,6 +1954,27 @@ func (g *TaskGraph) Track(t GraphTask, actor, reason string) error {
 			!slices.Contains([]TaskStatus{Draft, Blocked, HumanDecisionRequired}, old.Status) {
 			return graphError("task identity/status or running/terminal contract cannot be edited")
 		}
+		if old.FileAccess != nil && t.FileAccess == nil {
+			t.FileAccess = CloneFileAccessPolicy(old.FileAccess)
+		}
+		if old.TargetTreeSHA != t.TargetTreeSHA ||
+			!slices.Equal(old.TargetChangedFiles, t.TargetChangedFiles) {
+			return graphError("verified target tree evidence cannot be edited through task tracking")
+		}
+		if old.AuthorizationID != "" &&
+			(!reflect.DeepEqual(old.FileAccess, t.FileAccess) || old.OutputMode != t.OutputMode) {
+			newAuthorization := false
+			for _, decision := range t.Decisions {
+				if decision.ID == t.AuthorizationID && decision.ID != old.AuthorizationID &&
+					!slices.Contains(old.Decisions, decision) {
+					newAuthorization = true
+					break
+				}
+			}
+			if !newAuthorization {
+				return graphError("changing file access or output mode requires a new authorization decision")
+			}
+		}
 		for _, d := range old.Decisions {
 			if !slices.Contains(t.Decisions, d) {
 				return graphError("decision %s cannot be removed or rewritten", d.ID)
@@ -1812,6 +1988,9 @@ func (g *TaskGraph) Track(t GraphTask, actor, reason string) error {
 	} else {
 		if t.Status != Draft && t.Status != Blocked {
 			return graphError("new task must be DRAFT or BLOCKED")
+		}
+		if t.FileAccess == nil {
+			t.FileAccess = DefaultFileAccessPolicy()
 		}
 		next.Tasks = append(next.Tasks, t)
 	}
@@ -1877,7 +2056,19 @@ func (g *TaskGraph) Transition(id string, status TaskStatus, actor, reason strin
 		if status != WaitingForEvidence && status != WaitingForReview {
 			return graphError("output SHA is only accepted at evidence handoff")
 		}
+		if t.OutputMode == OutputModeWorktreeTreeSnapshot {
+			if proof.OutputSHA != t.BaselineSHA || !validSHA(proof.OutputTreeSHA) ||
+				!validList(proof.OutputChangedFiles) {
+				return graphError("snapshot handoff requires controller-observed tree SHA and changed paths")
+			}
+			t.TargetTreeSHA = proof.OutputTreeSHA
+			t.TargetChangedFiles = slices.Clone(proof.OutputChangedFiles)
+		} else if proof.OutputTreeSHA != "" || len(proof.OutputChangedFiles) != 0 {
+			return graphError("commit-mode handoff cannot contain snapshot proof")
+		}
 		t.TargetSHA = proof.OutputSHA
+	} else if proof.OutputTreeSHA != "" || len(proof.OutputChangedFiles) != 0 {
+		return graphError("tree proof requires a matching output SHA")
 	}
 	if status == Approved || status == Completed {
 		if err := completionProof(t, proof); err != nil {
@@ -1955,6 +2146,13 @@ func completionProof(t GraphTask, proof TransitionProof) error {
 	if t.Reviewer == "" || proof.Reviewer != t.Reviewer || t.Reviewer == t.Owner ||
 		t.TargetSHA == "" || proof.ReviewedSHA != t.TargetSHA {
 		return graphError("independent review of the exact target SHA required")
+	}
+	if t.OutputMode == OutputModeWorktreeTreeSnapshot {
+		if !validSHA(t.TargetTreeSHA) || proof.ReviewedTreeSHA != t.TargetTreeSHA {
+			return graphError("independent review of the exact target tree SHA required")
+		}
+	} else if proof.ReviewedTreeSHA != "" {
+		return graphError("commit-mode completion cannot contain a reviewed tree SHA")
 	}
 	return nil
 }

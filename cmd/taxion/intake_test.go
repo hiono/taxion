@@ -3,16 +3,125 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/store"
 )
+
+func TestUserGuideColdStartExamplesWithoutSDK(t *testing.T) {
+	guide, err := os.ReadFile("../../docs/user-guide.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	examples := regexp.MustCompile("(?s)```json\\n(.*?)\\n```").FindAllSubmatch(guide, -1)
+	if len(examples) != 3 {
+		t.Fatalf("expected intake, confirmation and flow examples; got %d", len(examples))
+	}
+	var intake controller.IntakeRequest
+	var confirmation controller.IntakeConfirmation
+	var flowRequest controller.ReviewFlowRequest
+	for index, target := range []any{&intake, &confirmation, &flowRequest} {
+		if err := core.DecodeGraphInput(bytes.NewReader(examples[index][1]), target); err != nil {
+			t.Fatalf("decode guide example %d: %v", index+1, err)
+		}
+	}
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	old := storePath
+	storePath = filepath.Join(dir, "ledger.json")
+	t.Cleanup(func() { storePath = old })
+	root, baseline := createGitWorktree(t, intake.Task.Branch,
+		"https://github.com/"+intake.Task.Repo+".git")
+	intake.Task.Worktree, intake.Task.BaselineSHA = root, baseline
+	if err := initCmd(); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name string, value any) string {
+		t.Helper()
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	var out bytes.Buffer
+	if err := conversationCmd([]string{"intake", "--file", write("request.json", intake)}, &out); err != nil {
+		t.Fatalf("guide intake is not executable: %v", err)
+	}
+	var proposal struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &proposal); err != nil {
+		t.Fatal(err)
+	}
+	confirmation.ExpectedHash = proposal.Hash
+	if err := os.MkdirAll(filepath.Join(dir, ".taxion"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	configuration, err := json.Marshal(confirmation.Selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".taxion/config.yaml"), configuration, 0600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := conversationCmd([]string{"confirm", "--file", write("confirmation.json", confirmation)}, &out); err != nil {
+		t.Fatalf("guide confirmation is not executable: %v", err)
+	}
+	if err := checkConfig([]string{"check", "--task", intake.Task.ID}, &out); err != nil {
+		t.Fatal(err)
+	}
+	flowRequest.ReviewRoot = filepath.Join(dir, "reviews")
+	if err := workflowCmd([]string{"start", "--file", write("flow.json", flowRequest)}); err != nil {
+		t.Fatalf("guide flow is not executable: %v", err)
+	}
+	db, state, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	dispatch := state.Graph.Dispatches[0]
+	if _, err := selectDispatchConfiguration(db, dispatch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitproof.ObserveStart(dispatch); err != nil {
+		t.Fatalf("guide Coder cannot start: %v", err)
+	}
+	task, _ := state.Graph.GraphTask(intake.Task.ID)
+	for index := 0; index <= *flowRequest.MaxRepairs; index++ {
+		reviewID := fmt.Sprintf("%s-review-%d", flowRequest.ID, index)
+		approved := false
+		for _, decision := range task.Decisions {
+			if decision.ID == confirmation.Selection.Execution.ApprovalRef {
+				approved = config.CheckApproval(decision.Text, reviewID, decision.ID, confirmation.Selection) == nil
+			}
+		}
+		if !approved {
+			t.Fatalf("guide configuration approval does not cover Reviewer Task %s", reviewID)
+		}
+	}
+	if task.OutputMode != core.OutputModeWorktreeTreeSnapshot || dispatch.Instruction.CommitMessagePolicy != "" {
+		t.Fatal("guide file-only tool allowlist requires snapshot mode, not managed commit")
+	}
+	if len(state.Graph.Dispatches) != 1 || dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "" {
+		t.Fatal("cold-start verification executed an SDK turn")
+	}
+}
 
 func TestConversationIntakeRequiresExactHumanConfirmationBeforeDispatch(t *testing.T) {
 	old := storePath

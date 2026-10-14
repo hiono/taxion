@@ -16,12 +16,28 @@ func recordsCmd(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: taxion records {proposal|approve|send|reconcile|show|finding}")
 	}
-	fs := flag.NewFlagSet("records "+args[0], flag.ContinueOnError)
-	file := fs.String("file", "", "exact publication request JSON")
-	id := fs.String("id", "", "approved publication ID")
-	scanner := fs.String("scanner", "betterleaks", "trusted local Betterleaks executable")
-	claim := fs.String("claim", "", "exact previous sender claim")
-	stopped := fs.Bool("sender-stopped", false, "confirm previous sender process has ended")
+	action := args[0]
+	fs := flag.NewFlagSet("records "+action, flag.ContinueOnError)
+	var file, id, claim string
+	scanner := "betterleaks"
+	var senderStopped bool
+	switch action {
+	case "proposal", "approve", "finding":
+		fs.StringVar(&file, "file", "", "exact request JSON")
+		if action == "approve" {
+			fs.StringVar(&scanner, "scanner", "betterleaks", "trusted local Betterleaks executable")
+		}
+	case "send":
+		fs.StringVar(&id, "id", "", "approved publication ID")
+		fs.StringVar(&scanner, "scanner", "betterleaks", "trusted local Betterleaks executable")
+	case "reconcile":
+		fs.StringVar(&id, "id", "", "approved publication ID")
+		fs.StringVar(&claim, "claim", "", "exact previous sender claim")
+		fs.BoolVar(&senderStopped, "sender-stopped", false, "confirm previous sender process has ended")
+	case "show":
+	default:
+		return fmt.Errorf("unknown records action %q", action)
+	}
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -33,12 +49,12 @@ func recordsCmd(args []string) error {
 		return err
 	}
 	defer db.Close()
-	switch args[0] {
+	switch action {
 	case "finding":
-		if *file == "" {
+		if file == "" {
 			return fmt.Errorf("finding requires --file")
 		}
-		input, err := os.Open(*file)
+		input, err := os.Open(file)
 		if err != nil {
 			return err
 		}
@@ -53,10 +69,10 @@ func recordsCmd(args []string) error {
 		}
 		return printJSON(saved)
 	case "proposal", "approve":
-		if *file == "" {
+		if file == "" {
 			return fmt.Errorf("publication requires --file")
 		}
-		input, err := os.Open(*file)
+		input, err := os.Open(file)
 		if err != nil {
 			return err
 		}
@@ -65,26 +81,26 @@ func recordsCmd(args []string) error {
 		if err := core.DecodeGraphInput(input, &request); err != nil {
 			return err
 		}
-		if args[0] == "proposal" {
+		if action == "proposal" {
 			hash, err := controller.PublicationHash(request.Update)
 			if err != nil {
 				return err
 			}
 			return printJSON(controller.PublicationRequest{Update: request.Update, ExpectedHash: hash})
 		}
-		update, err := controller.ApprovePublication(context.Background(), db, request, *scanner)
+		update, err := controller.ApprovePublication(context.Background(), db, request, scanner)
 		if err != nil {
 			return err
 		}
 		return printJSON(update)
 	case "send":
-		update, err := controller.DeliverPublication(context.Background(), db, *id, *scanner, forge.Publisher{})
+		update, err := controller.DeliverPublication(context.Background(), db, id, scanner, forge.Publisher{})
 		if err != nil {
 			return err
 		}
 		return printJSON(update)
 	case "reconcile":
-		update, err := controller.ReconcilePublication(context.Background(), db, *id, *claim, *stopped, forge.Publisher{})
+		update, err := controller.ReconcilePublication(context.Background(), db, id, claim, senderStopped, forge.Publisher{})
 		if err != nil {
 			return err
 		}
@@ -96,6 +112,6 @@ func recordsCmd(args []string) error {
 		}
 		return printJSON(state.Records)
 	default:
-		return fmt.Errorf("unknown records action %q", args[0])
+		return fmt.Errorf("unknown records action %q", action)
 	}
 }

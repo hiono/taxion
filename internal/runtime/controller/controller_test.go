@@ -209,7 +209,8 @@ func dispatchStoreWithEvidence(t *testing.T, evidence string, worktree ...string
 		RequiredEvidence:   []string{evidence}, ExitCondition: "tests pass",
 		Branch: "work/task", Worktree: "/tmp/task",
 		BaselineSHA: strings.Repeat("a", 40), CreatedFrom: "request:1", AuthorizationID: "decision:1",
-		Decisions: []core.TaskDecision{{ID: "decision:1", Source: "human:1", Text: "authorize test"}},
+		Decisions:  []core.TaskDecision{{ID: "decision:1", Source: "human:1", Text: "authorize test"}},
+		FileAccess: &core.FileAccessPolicy{Level: core.FileAccessAll},
 	}
 	if len(worktree) != 0 {
 		graphTask.Worktree = worktree[0]

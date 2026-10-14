@@ -1,0 +1,120 @@
+# 設定ガイド
+
+Taxion の設定は project、Git repository、Copilot runtime、実行記録の識別子を選びます。設定ファイルに token や password を書かず、各 credential の保管と認証は Git／Copilot の実行環境で行います。
+
+## 設定ファイル
+
+Taxion は次の固定位置だけを読みます。
+
+| 優先順位 | 場所 | 用途 |
+| --- | --- | --- |
+| 低 | `os.UserConfigDir()/taxion/config.yaml` | 利用者共通の値 |
+| 中 | 作業ディレクトリの `.taxion/config.yaml` | project 固有の値 |
+| 高 | 対応する `TAXION_*` 環境変数 | CI や実行環境ごとの値 |
+
+Linux では Global 設定は通常 `$XDG_CONFIG_HOME/taxion/config.yaml`、未設定なら `~/.config/taxion/config.yaml` です。macOS と Windows は Go の `os.UserConfigDir()` が返す標準設定ディレクトリを使います。Project 設定は現在の作業ディレクトリ直下だけを読み、親ディレクトリは検索しません。少なくとも一つの YAML ファイルが必要です。
+
+各 layer は `version: 1` を持ちます。上位 layer は空でない値だけを上書きし、省略した項目は下位 layer から引き継ぎます。各ファイルは merge 前に個別検証されるため、後の layer で上書きしても不正な値は隠せません。明示的な空文字、null、未知の field、重複 key、alias、sequence、複数 YAML document は拒否されます。
+
+| Field | 意味・制約 |
+| --- | --- |
+| `version` | 必須の整数。現在は `1` のみ。 |
+| `project.id` | project の識別子。 |
+| `repository.provider` | `github`、`gitlab`、`bitbucket` のいずれか。provider ごとの実装範囲は異なります。 |
+| `repository.host` | 接続先 hostname と任意の port。例: `github.com`。 |
+| `repository.path` | owner または namespace と repository 名。例: `owner/repository`。 |
+| `repository.account` | Git repository 操作に使う予定の account 識別子。認証済み account の証明ではありません。 |
+| `repository.credentialRef` | repository credential の参照名。secret 本体ではなく、この値だけで認証は行いません。 |
+| `runtime.provider` | `copilot` のみ。 |
+| `runtime.account` | Copilot runtime に使う予定の account 識別子。 |
+| `runtime.credentialRef` | runtime credential の参照名。secret 本体ではありません。 |
+| `runtime.contractRef` | AI runtime の契約・利用権を指す記録上の参照名。実際の契約適格性は確認しません。 |
+| `execution.requester` | Task を依頼した人または process の識別子。 |
+| `execution.worker` | 実行環境・worker の識別子。 |
+| `execution.approvalRef` | Task に結び付ける設定承認の識別子。 |
+
+```yaml
+version: 1
+project:
+  id: example-project
+repository:
+  provider: github
+  host: github.com
+  path: owner/repository
+  account: scm-account
+  credentialRef: scm-login
+runtime:
+  provider: copilot
+  account: copilot-account
+  credentialRef: copilot-login
+  contractRef: approved-contract
+execution:
+  requester: human
+  worker: local
+  approvalRef: task-approval
+```
+
+識別子は空白を含まない文字列です。`version` だけが整数です。repository provider は `github`、`gitlab`、`bitbucket`、runtime provider は `copilot` を指定します。`repository.host` は hostname と任意の port、`repository.path` は owner または namespace と repository 名の slash 区切りです。
+
+`account`、`credentialRef`、`contractRef`、`requester`、`worker`、`approvalRef` は承認・記録上の参照値であり、secret や認証そのものではありません。Git 操作の主体と Copilot runtime の主体は別々に指定できます。設定だけで契約適格性や費用負担者を証明することはできません。
+
+## 環境変数
+
+設定値の優先順位は環境変数、Project、Global の順です。Taxion は次の変数だけを設定 override として読みます。
+
+| 環境変数 | 設定 field |
+| --- | --- |
+| `TAXION_PROJECT_ID` | `project.id` |
+| `TAXION_REPOSITORY_PROVIDER` | `repository.provider` |
+| `TAXION_REPOSITORY_HOST` | `repository.host` |
+| `TAXION_REPOSITORY_PATH` | `repository.path` |
+| `TAXION_REPOSITORY_ACCOUNT` | `repository.account` |
+| `TAXION_REPOSITORY_CREDENTIAL_REF` | `repository.credentialRef` |
+| `TAXION_RUNTIME_PROVIDER` | `runtime.provider` |
+| `TAXION_RUNTIME_ACCOUNT` | `runtime.account` |
+| `TAXION_RUNTIME_CREDENTIAL_REF` | `runtime.credentialRef` |
+| `TAXION_RUNTIME_CONTRACT_REF` | `runtime.contractRef` |
+| `TAXION_EXECUTION_REQUESTER` | `execution.requester` |
+| `TAXION_EXECUTION_WORKER` | `execution.worker` |
+| `TAXION_EXECUTION_APPROVAL_REF` | `execution.approvalRef` |
+
+設定値はすべて文字列です。未設定の変数は下位 layer の値を使い、明示的な空文字や不正値はエラーになります。`TAXION_TOKEN`、`GH_TOKEN`、`GITHUB_TOKEN`、`COPILOT_GITHUB_TOKEN` は設定 override ではなく、それぞれ別の認証用途で扱います。Taxion は `.env` を読みません。
+
+## 設定を置くときの Git 制約
+
+Git worktree 内の設定ファイルは未追跡で、かつ Git ignore 対象でなければなりません。作業ディレクトリの `.taxion/` 全体と、存在する `.env` も同じ条件で検査されます。通常は `.gitignore` に次を追加します。
+
+```gitignore
+/.taxion/
+/.env
+```
+
+Git 管理下の共有設定例には secret を含めず、`.taxion/` の外に置きます。Ignore rule を追加しても、既に index にあるファイルは追跡対象のままです。設定を読み込む前に不正があれば、Taxion は値を読まずエラーを返します。
+
+mise からローカル `.env` を読み込む場合は、共有 `mise.toml` に読み込み設定だけを書きます。`.env` 本体は未追跡・ignore 対象にしてください。
+
+```toml
+[env]
+_.file = ".env"
+```
+
+## どの確認で何が分かるか
+
+```sh
+taxion config check
+taxion config check --sources
+taxion config check --capabilities
+taxion config check --task TASK-ID
+taxion config check --dispatch DISPATCH-ID
+taxion runtime auth --dispatch DISPATCH-ID --system-prompt-file prompts/coder.md
+```
+
+`config check` は設定 schema と必須 field を検査します。`--sources` は値を表示せず各 field の採用元を示します。`--capabilities` は adapter の実装範囲を表示するだけで、credential、live access、契約適格性を確認しません。
+
+`--task` は現在の設定が Task の記録済み承認に一致するか、`--dispatch` は Task 承認と発行済み Dispatch 指示の両方に一致するかを検査します。いずれも Human の身元や認証を証明しません。
+
+`runtime auth` は Dispatch の承認済み設定に対して、実効 Copilot account が一致するかを確認し、session を作成しません。CLI は `--system-prompt-file` も要求します。成功しても repository 操作主体、契約適格性、legacy credential reference の解決は未確認です。設定確認や runtime auth の成功を実行許可の代わりにしないでください。
+
+固定 file を選べた Task 承認に Dispatch の設定をひも付けるときは `taxion config bind --dispatch DISPATCH-ID` を使います。これは認証、contract 適格性、runtime session binding を確認しません。
+
+**確認結果は認証や実行準備完了の証明ではありません。** `ready` / `doctor` コマンドは実装されていません。CLI 全体の option と制約は[CLI リファレンス](cli-reference.md)を参照してください。

@@ -82,13 +82,19 @@ func revalidateFlowResult(graph core.TaskGraph, flow core.ReviewFlow) error {
 	if err := gitproof.ReverifyReleasedReview(last, last.Result); err != nil {
 		return err
 	}
-	if len(flow.DispatchIDs) < 2 {
+	coderID := flow.SourceDispatchID
+	if len(flow.DispatchIDs) > 1 {
+		coderID = flow.DispatchIDs[len(flow.DispatchIDs)-2]
+	}
+	if coderID == "" {
 		return fmt.Errorf("review requires its Coder source")
 	}
-	coder, ok := graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-2])
+	coder, ok := graph.GraphDispatch(coderID)
 	if !ok || coder.Recipient != "CODER" || coder.Result == nil ||
-		coder.Result.OutputSHA != last.Result.OutputSHA {
-		return fmt.Errorf("review and Coder output SHA differ")
+		coder.Result.OutputSHA != last.Result.OutputSHA ||
+		coder.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot &&
+			coder.Result.OutputTreeSHA != last.Result.OutputTreeSHA {
+		return fmt.Errorf("review and Coder output identity differs")
 	}
 	return revalidateCoderResult(coder)
 }
