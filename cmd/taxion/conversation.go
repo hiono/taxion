@@ -36,6 +36,9 @@ are omitted. Original instruction hashes identify saved originals, not the proje
 The task key is
 a PlanningTask wrapper: its Task fields are under /task/task, and Memory under
 /task/memoryContext. Observation is at /observation, NOT /task/observation.
+Results from related role Tasks can appear once under /results/N/result with
+their Dispatch target under /results/N/target; result-reference decisions are IDs,
+not missing findings. Match the Dispatch ID before citing related results.
 Use only exact existing pointers; omit a confirmed claim if its source is absent.
 Confirmed means the record says this, NOT that a claimed test actually ran or
 that runtime/Git/authentication is live. Cite exact Memory versions and SHAs.

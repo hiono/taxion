@@ -329,6 +329,9 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 			if strictResult {
 				responseSchema = strictDispatchResultSchema(dispatch)
 			}
+			if builtinPrompts {
+				responseSchema = controller.BoundDispatchResultSchema(dispatch)
+			}
 			return newDispatchWorker(ctx, db, dispatch, copilot.Config{
 				Role: dispatch.Recipient, SystemPrompt: runtimeSubmissionPrompt(prompts[dispatch.Recipient], contract, validationSubmission),
 				WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: cli, BaseDirectory: base,

@@ -343,6 +343,10 @@ func (a *Adapter) ConfigHash() string {
 
 func (a *Adapter) Role() string { return a.config.Role }
 
+func (a *Adapter) UsesBoundResultIdentity() bool {
+	return a.config.ResponseSchema["$id"] == "urn:taxion:dispatch-result:bound:v1"
+}
+
 func (a *Adapter) Worktree() string { return a.config.WorkingDirectory }
 
 func (a *Adapter) BudgetGuidancePolicy() *core.BudgetGuidancePolicy {

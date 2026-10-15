@@ -243,6 +243,25 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	}
 	ctx, cancel := signalContext(*timeout)
 	defer cancel()
+	if err := os.Chmod(workspaceDBPath(), 0600); err != nil {
+		return fmt.Errorf("request requires a private workspace database: %w", err)
+	}
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		path := workspaceDBPath() + suffix
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("request requires regular SQLite sidecars")
+		}
+		if err := os.Chmod(path, 0600); err != nil {
+			return err
+		}
+	}
 	id := "request-" + rand.Text()
 	source := "human:console:" + id
 	task, err := controller.ProposeIntake(db, controller.IntakeRequest{
@@ -260,16 +279,12 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	if err != nil {
 		return err
 	}
-	directory := filepath.Join(filepath.Dir(storePath), "requests", id)
-	if err := os.MkdirAll(directory, 0700); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(output, "相談記録: %s\n", directory); err != nil {
+	if _, err := fmt.Fprintf(output, "相談記録: %s (SQLite; taxion records show)\n", id); err != nil {
 		return err
 	}
 	conversation := []requestMessage{{Role: "human", Text: request}}
 	var used int64
-	for turn := 1; ; turn++ {
+	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -290,7 +305,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		if err != nil {
 			return errors.Join(planErr, err)
 		}
-		if err := os.WriteFile(filepath.Join(directory, fmt.Sprintf("planning-%03d.json", turn)), receipt, 0600); err != nil {
+		if err := db.AppendRequestRecord(id, "planning", string(receipt)); err != nil {
 			return errors.Join(planErr, err)
 		}
 		if planErr != nil {
@@ -298,17 +313,17 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		}
 		for _, usage := range result.Usage {
 			if usage.InputTokens == nil || usage.OutputTokens == nil {
-				return fmt.Errorf("request Planner usage is unknown; receipt retained at %s", directory)
+				return fmt.Errorf("request Planner usage is unknown; receipt retained in SQLite for %s", id)
 			}
 			for _, count := range []int64{*usage.InputTokens, *usage.OutputTokens} {
 				if count < 0 || count >= *tokens-used {
-					return fmt.Errorf("request token ceiling reached; receipt retained at %s", directory)
+					return fmt.Errorf("request token ceiling reached; receipt retained in SQLite for %s", id)
 				}
 				used += count
 			}
 		}
 		if len(result.Usage) == 0 || result.Answer == nil || result.Changed {
-			return fmt.Errorf("request Planner lacks usage, a valid answer or stable context; receipt retained at %s", directory)
+			return fmt.Errorf("request Planner lacks usage, a valid answer or stable context; receipt retained in SQLite for %s", id)
 		}
 		answer := *result.Answer
 		if err := controller.ValidateRequestPlan(answer); err != nil {
@@ -397,13 +412,18 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if _, err := fmt.Fprintf(output, "実行開始: Task %s / Flow %s\n", id, flowID); err != nil {
 				return err
 			}
-			log, err := os.OpenFile(filepath.Join(directory, "execution.log"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-			if err != nil {
-				return err
-			}
 			runErr := runner(ctx, []string{"run", "--id", flowID, "--builtin-prompts",
-				"--max-ai-credits", fmt.Sprint(*credits), "--cli", *cli, "--base-directory", *base}, log)
-			runErr = errors.Join(runErr, log.Close())
+				"--max-ai-credits", fmt.Sprint(*credits), "--cli", *cli, "--base-directory", *base}, io.Discard)
+			summary, summaryErr := json.Marshal(struct {
+				FlowID string `json:"flowId"`
+				Error  string `json:"error,omitempty"`
+			}{flowID, requestError(runErr)})
+			if summaryErr != nil {
+				return errors.Join(runErr, summaryErr)
+			}
+			if err := db.AppendRequestRecord(id, "execution", string(summary)); err != nil {
+				return errors.Join(runErr, err)
+			}
 			state, loadErr := db.LoadWorkspace()
 			if loadErr != nil {
 				return errors.Join(runErr, loadErr)
@@ -413,7 +433,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				return errors.Join(runErr, fmt.Errorf("request flow disappeared"))
 			}
 			_, printErr := fmt.Fprintf(output, "結果: %s\nWorktree: %s\nFlow: %s\n記録: %s\n%s\n",
-				flow.Status, root, flow.ID, directory, flow.Reason)
+				flow.Status, root, flow.ID, id+" (SQLite; taxion records show)", flow.Reason)
 			return errors.Join(runErr, printErr)
 		}
 		if line == "" || strings.HasPrefix(line, "/") {

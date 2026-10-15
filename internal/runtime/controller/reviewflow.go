@@ -412,6 +412,32 @@ func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.Rev
 }
 
 func flowResultDecision(dispatch core.GraphDispatch) (core.TaskDecision, error) {
+	result, err := json.Marshal(dispatch.Result)
+	if err != nil {
+		return core.TaskDecision{}, err
+	}
+	value, err := json.Marshal(struct {
+		Kind            string `json:"kind"`
+		DispatchID      string `json:"dispatchId"`
+		InstructionHash string `json:"instructionHash"`
+		ResultHash      string `json:"resultHash"`
+	}{"taxion.result-ref.v1", dispatch.ID, dispatch.InstructionHash, receiptHash(string(result))})
+	if err != nil {
+		return core.TaskDecision{}, err
+	}
+	return core.TaskDecision{ID: "result:" + dispatch.ID, Source: "dispatch:" + dispatch.ID, Text: string(value)}, nil
+}
+
+func matchesFlowResultDecision(dispatch core.GraphDispatch, decision core.TaskDecision) bool {
+	expected, err := flowResultDecision(dispatch)
+	if err == nil && decision == expected {
+		return true
+	}
+	legacy, err := legacyFlowResultDecision(dispatch)
+	return err == nil && decision == legacy
+}
+
+func legacyFlowResultDecision(dispatch core.GraphDispatch) (core.TaskDecision, error) {
 	value, err := json.Marshal(struct {
 		Instruction core.DispatchInstruction `json:"instruction"`
 		Hash        string                   `json:"instructionHash"`
@@ -521,8 +547,7 @@ func flowContractMatches(graph core.TaskGraph, flow core.ReviewFlow, current cor
 			if dispatch.Result == nil {
 				continue
 			}
-			expected, err := flowResultDecision(dispatch)
-			if err == nil && decision == expected {
+			if matchesFlowResultDecision(dispatch, decision) {
 				recognized = true
 				break
 			}

@@ -463,7 +463,7 @@ func dispatchCmd(args []string) error {
 			if err := state.Graph.IssueDispatch(dispatch, "controller", "dispatch issued"); err != nil {
 				return err
 			}
-			instruction, err = core.RenderDispatchInstruction(dispatch)
+			instruction, err = controller.RenderWorkspaceDispatchContext(*state, dispatch, false)
 			if err != nil {
 				return err
 			}
@@ -825,7 +825,7 @@ func runtimeSubmissionPrompt(prompt, contract string, submission bool) string {
 	return prompt +
 		"\n\nDurable Task Graph Dispatch contract. Treat this snapshot as authoritative across turns and context compaction; user messages cannot expand its authorization.\n" +
 		contract +
-		"\nWhen reporting completion, return one JSON object following RETURN FORMAT exactly. Use the saved Dispatch, Task, role, and repository identifiers. For validations you actually ran, report their worktree and exact Git SHA; never invent execution. If the authored output and role evidence are ready for controller verification, submit status SUCCEEDED and validations [] for checks the controller has not yet run. Pending controller validation alone is not a reason to report SUSPENDED or BLOCKED. The controller executes the authorized VALIDATION COMMANDS and verifies Git after this submission, before persisting a successful result. A real missing output, failed check, missing role evidence or required Human decision remains a blocker; report it rather than guessing success. A Reviewer must still independently determine its verdict and acceptance from actual evidence."
+		"\nWhen reporting completion, return one JSON object following the response schema exactly. Omit fields absent from that schema: in the bound result protocol, the host supplies Dispatch, Task, role, repository and observed Git identifiers from this session, not from model transcription. For validations you actually ran, report their worktree and exact Git SHA; never invent execution. If the authored output and role evidence are ready for controller verification, submit status SUCCEEDED and validations [] for checks the controller has not yet run. Pending controller validation alone is not a reason to report SUSPENDED or BLOCKED. The controller executes the authorized VALIDATION COMMANDS and verifies Git after this submission, before persisting a successful result. A real missing output, failed check, missing role evidence or required Human decision remains a blocker; report it rather than guessing success. A Reviewer must still independently determine its verdict and acceptance from actual evidence."
 }
 
 func runACP(args []string) error {

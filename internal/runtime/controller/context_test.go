@@ -16,13 +16,18 @@ func testCompactPlanningContext(t *testing.T, db *store.Store, ledger string, be
 	if err != nil {
 		t.Fatal(err)
 	}
-	original, err := core.RenderDispatchInstruction(review)
+	raw := review
+	raw.Instruction.Decisions, err = compactResultDecisions(before.Graph, review.Instruction.Decisions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := core.RenderDispatchInstruction(raw)
 	if err != nil || legacy != original {
 		t.Fatal("default rendering changed saved session configuration", err)
 	}
 	compacted, err := RenderDispatchContext(db, review, true)
-	if err != nil || len(compacted)*2 >= len(original) {
-		t.Fatalf("nested instruction cost not reduced by at least half: %d versus %d, %v", len(compacted), len(original), err)
+	if err != nil || len(compacted) >= len(original) {
+		t.Fatalf("role projection not smaller than the prior compact path: %d versus %d, %v", len(compacted), len(original), err)
 	}
 	if !strings.Contains(compacted, "Correct acceptance coverage") ||
 		!strings.Contains(compacted, review.Instruction.BaselineSHA) ||
@@ -96,8 +101,15 @@ func testCompactPlanningContext(t *testing.T, db *store.Store, ledger string, be
 		Question string          `json:"question"`
 		Context  QuestionContext `json:"context"`
 	}{"status?", compactQuestion})
-	if err != nil || len(compactInput)*2 >= len(rawInput) || len(compactInput) > 128*1024 || compactQuestion.Projection == "" {
-		t.Fatalf("question input did not remove recursive history: %d versus %d, %v", len(compactInput), len(rawInput), err)
+	if err != nil || len(compactInput) > 128*1024 || len(compactQuestion.Results) != 2 ||
+		compactQuestion.Results[0].Result.ReviewVerdict != "REQUEST_CHANGES" ||
+		compactQuestion.Results[1].Result.ReviewVerdict != "APPROVE" {
+		t.Fatalf("question projection lost independent results: %d versus %d, %v", len(compactInput), len(rawInput), err)
+	}
+	if err := validateQuestionAnswer(QuestionAnswer{Confirmed: []QuestionClaim{{
+		Text: "The independent reviewer requested changes.", Sources: []string{"/results/0/result/reviewVerdict"},
+	}}, Assumptions: []string{}, Unconfirmed: []string{}}, compactQuestion); err != nil {
+		t.Fatal("related result citation is not usable", err)
 	}
 	for _, dispatch := range compactQuestion.Task.Dispatches {
 		source, _ := before.Graph.GraphDispatch(dispatch.ID)
@@ -116,6 +128,19 @@ func testCompactPlanningContext(t *testing.T, db *store.Store, ledger string, be
 	} {
 		if _, err := compactResultDecisions(before.Graph, []core.TaskDecision{bad}); err == nil {
 			t.Fatal("compact context accepted a missing or forged result source")
+		}
+		for _, source := range before.Graph.Dispatches {
+			if source.Result == nil {
+				continue
+			}
+			old, err := legacyFlowResultDecision(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			refs, err := projectResultDecisions(before.Graph, []core.TaskDecision{old}, false)
+			if err != nil || len(refs[0].Text) >= len(old.Text) || !matchesFlowResultDecision(source, refs[0]) {
+				t.Fatal("legacy result cannot be projected as a smaller immutable reference", err)
+			}
 		}
 	}
 }

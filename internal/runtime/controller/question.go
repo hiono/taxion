@@ -29,6 +29,7 @@ type QuestionContext struct {
 	Planner       *PlannerContext    `json:"planner,omitempty"`
 	Investigation *FileInvestigation `json:"investigation,omitempty"`
 	Projection    string             `json:"projection,omitempty"`
+	Results       []PlannerResult    `json:"results,omitempty"`
 }
 
 type InvestigationRequest struct {
@@ -114,7 +115,16 @@ func ObserveQuestion(db *store.Store, ledgerPath, repository, taskID string) (Qu
 		if !state.HasGraph || !ok || !reflect.DeepEqual(current, task.Task) {
 			return QuestionContext{}, core.ErrFeedbackStale
 		}
-		context.Task.Task.Decisions, err = compactResultDecisions(state.Graph, task.Task.Decisions)
+		sources := map[string]bool{}
+		project := func(decisions []core.TaskDecision) ([]core.TaskDecision, error) {
+			for _, decision := range decisions {
+				if strings.HasPrefix(decision.ID, "result:") {
+					sources[strings.TrimPrefix(decision.ID, "result:")] = true
+				}
+			}
+			return projectResultDecisions(state.Graph, decisions, false)
+		}
+		context.Task.Task.Decisions, err = project(task.Task.Decisions)
 		if err != nil {
 			return QuestionContext{}, err
 		}
@@ -129,7 +139,7 @@ func ObserveQuestion(db *store.Store, ledgerPath, repository, taskID string) (Qu
 			return QuestionContext{}, core.ErrFeedbackStale
 		}
 		for i, event := range context.Task.History {
-			decisions, err := compactResultDecisions(state.Graph, event.Task.Decisions)
+			decisions, err := project(event.Task.Decisions)
 			if err != nil {
 				return QuestionContext{}, err
 			}
@@ -141,7 +151,7 @@ func ObserveQuestion(db *store.Store, ledgerPath, repository, taskID string) (Qu
 			if !ok || !reflect.DeepEqual(saved, dispatch) {
 				return QuestionContext{}, core.ErrFeedbackStale
 			}
-			decisions, err := compactResultDecisions(state.Graph, dispatch.Instruction.Decisions)
+			decisions, err := project(dispatch.Instruction.Decisions)
 			if err != nil {
 				return QuestionContext{}, err
 			}
@@ -156,17 +166,36 @@ func ObserveQuestion(db *store.Store, ledgerPath, repository, taskID string) (Qu
 				if !ok || !reflect.DeepEqual(saved, flow) {
 					return QuestionContext{}, core.ErrFeedbackStale
 				}
-				decisions, err := compactResultDecisions(state.Graph, flow.Contract.Decisions)
+				decisions, err := project(flow.Contract.Decisions)
 				if err != nil {
 					return QuestionContext{}, err
 				}
 				projected = projected || !reflect.DeepEqual(decisions, flow.Contract.Decisions)
 				flow.Contract.Decisions = decisions
 				context.Flows = append(context.Flows, flow)
+				for _, id := range flow.DispatchIDs {
+					sources[id] = true
+				}
 			}
 		}
+		for _, dispatch := range context.Task.Dispatches {
+			if dispatch.Result != nil {
+				delete(sources, dispatch.ID)
+			}
+		}
+		for _, dispatch := range state.Graph.Dispatches {
+			if !sources[dispatch.ID] || dispatch.Result == nil {
+				continue
+			}
+			target, err := core.ObserveFeedbackTarget(dispatch)
+			if err != nil {
+				return QuestionContext{}, err
+			}
+			context.Results = append(context.Results, PlannerResult{Target: target, Result: dispatch.Result})
+		}
+		projected = projected || len(context.Results) != 0
 		if projected {
-			context.Projection = "Prior result decisions retain exact saved results and source hashes, but omit recursively repeated instructions. Instruction hashes identify the original saved instruction, not this projection; task graph retains the full source."
+			context.Projection = "Prior result decisions refer to saved Dispatch IDs and source hashes. Exact results appear once in task.dispatches or results, without recursively repeated instructions. Instruction hashes identify the original saved instruction, not this projection; task graph retains the full source."
 		}
 		context.Observation = nil
 		content, err := json.Marshal(context)
@@ -437,6 +466,7 @@ func validateQuestionAnswer(answer QuestionAnswer, context QuestionContext) erro
 		for _, source := range claim.Sources {
 			// JSON pointers name the exact fields within the supplied context.
 			if !strings.HasPrefix(source, "/task/") && !strings.HasPrefix(source, "/flows/") && !strings.HasPrefix(source, "/observation/") &&
+				!strings.HasPrefix(source, "/results/") &&
 				!(context.Planner != nil && strings.HasPrefix(source, "/planner/")) &&
 				!(context.Investigation != nil && strings.HasPrefix(source, "/investigation/")) {
 				return fmt.Errorf("taxion: question source must identify a supplied saved record")

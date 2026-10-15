@@ -7,6 +7,15 @@ Task Graph と Ledger は SQLite の `workspace.db` に同時に保存する。
 設計の理由と移行の決定は
 [ADR-0022](adr/0022-sqlite-atomic-workspace-state.md) を参照する。
 
+現在の SQLite 保存は、集合 JSON からレコード単位へ移行している。
+変更のない Task・Dispatch・履歴を保存し直さず、event の追記ではその event と
+workspace revision を更新する。長い文字列は内容 hash で共有し、レコードとともに圧縮する。
+展開後の原文を照合するため、既存 instruction・承認の hash は変えない。
+書込み接続は旧 DB を transaction で移行し、read-only 接続は移行しない。
+移行後は新形式に対応する binary を使う。DB の空き page を自動で切り詰める処理はない。
+詳細と DB 単体復元の未実装範囲は
+[ADR-0033](adr/0033-reference-results-and-persist-workspace-records-incrementally.md) を参照する。
+
 ## 登録と読み出し
 
 既存の `task create` で Task を作成し、その ID・title・repo と一致する

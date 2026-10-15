@@ -160,6 +160,7 @@ func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, ve
 	base := &fakeRuntime{
 		role: dispatch.Recipient, worktree: dispatch.Instruction.Worktree,
 		hash: "config:" + dispatch.ID, sessionID: "session:" + dispatch.ID,
+		bound: dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot,
 	}
 	base.toolPolicy, err = tools.ResolveForTask(state.Graph, dispatch.Instruction.Decisions, dispatch.TaskID, dispatch.Recipient)
 	if err != nil {
@@ -241,7 +242,18 @@ func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, ve
 			}
 			result.Acceptance = []core.DispatchAcceptance{{Criterion: flow.Contract.Acceptance[0], Status: status, Evidence: []string{"test-report"}}}
 		}
-		if _, err := control.Finish(t.Context(), dispatch.ID, string(mustFlowJSON(t, result))); err != nil {
+		payload := mustFlowJSON(t, result)
+		if base.bound {
+			var model map[string]json.RawMessage
+			if err := json.Unmarshal(payload, &model); err != nil {
+				t.Fatal(err)
+			}
+			for _, field := range []string{"dispatchId", "taskId", "recipient", "repository", "startedSha", "outputSha"} {
+				delete(model, field)
+			}
+			payload = mustFlowJSON(t, model)
+		}
+		if _, err := control.Finish(t.Context(), dispatch.ID, string(payload)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -355,7 +367,7 @@ func TestReviewFlowRepairsAndReviewsNewSHAAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	repair, _ := state.Graph.GraphDispatch(flow.DispatchIDs[2])
-	contract, err := core.RenderDispatchInstruction(repair)
+	contract, err := RenderDispatchContext(db, repair, false)
 	if err != nil || !strings.Contains(contract, "Add missing acceptance test") ||
 		!strings.Contains(contract, review.ID) || !strings.Contains(contract, review.Result.OutputSHA) ||
 		repair.ExpectedStartSHA() != coder.Result.OutputSHA ||
@@ -381,7 +393,7 @@ func TestReviewFlowRepairsAndReviewsNewSHAAfterRestart(t *testing.T) {
 		reviewAgain.Instruction.Worktree == review.Instruction.Worktree {
 		t.Fatal("re-review reused previous SHA or worktree")
 	}
-	contract, err = core.RenderDispatchInstruction(reviewAgain)
+	contract, err = RenderDispatchContext(db, reviewAgain, false)
 	if err != nil || !strings.Contains(contract, review.ID) || !strings.Contains(contract, "Add missing acceptance test") {
 		t.Fatal("re-review lost the original findings", err)
 	}

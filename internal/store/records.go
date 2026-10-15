@@ -1,6 +1,7 @@
 package store
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,16 @@ type Records struct {
 	Events   []RuntimeReceipt `json:"events,omitempty"`
 	Updates  []ExternalUpdate `json:"updates,omitempty"`
 	Findings []FailureRecord  `json:"findings,omitempty"`
+	Requests []RequestRecord  `json:"requests,omitempty"`
+}
+
+type RequestRecord struct {
+	RequestID string    `json:"requestId"`
+	Kind      string    `json:"kind"`
+	Sequence  uint64    `json:"sequence"`
+	Payload   string    `json:"payload"`
+	Hash      string    `json:"hash"`
+	At        time.Time `json:"at"`
 }
 
 type FailureRecord struct {
@@ -67,6 +78,17 @@ type ExternalUpdate struct {
 }
 
 func (r Records) validate() error {
+	requestSequences := map[string]uint64{}
+	for _, record := range r.Requests {
+		key := record.RequestID + ":" + record.Kind
+		requestSequences[key]++
+		payload := []byte(record.Payload)
+		if strings.TrimSpace(record.RequestID) == "" || record.Kind != "planning" && record.Kind != "execution" ||
+			record.Sequence != requestSequences[key] || record.At.IsZero() || !json.Valid(payload) ||
+			record.Hash != fmt.Sprintf("%x", sha256.Sum256(payload)) {
+			return fmt.Errorf("invalid request record or incomplete sequence")
+		}
+	}
 	seen := map[string]bool{}
 	for _, update := range r.Updates {
 		if update.ID == "" || seen[update.ID] || update.TaskID == "" || !recordHash(update.Hash) ||

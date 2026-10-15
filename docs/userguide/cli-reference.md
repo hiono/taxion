@@ -65,7 +65,7 @@ Taxion が intake、完全な hash の承認、Reviewer の設定承認、Flow�
 
 Flow 開始前に、計画の利用量を全体の観測 token 上限から差し引く。期限は `/plan` から数え、入力を待つ時間も含む。実行には snapshot mode と明示承認した worktree 全体の file access を使う。Planner には会話、commit 済み path 一覧、任意選択した commit 済み context を渡し、tool は渡さない。
 
-非公開の計画 receipt と `execution.log` は workspace の `requests/` directory に保存する。このコマンドは、保存済み計画 console の再開、commit、公開、外部 Issue 作成を行わない。通常 CI は合成 Runtime と実 Git で全体を確認する。この入口の実モデル受入れは未完了。
+非公開の計画 receipt と実行先・失敗の記録は、request ID・種類・連番・hash とともに SQLite の `records.requests` に保存する。実行イベントは Flow ID から正式な Dispatch・event receipt を参照し、二重保存しない。`taxion records show` で確認・明示 export できる。新しい `requests/` の JSON と `execution.log` は作らず、過去のファイルは削除しない。相談保存前に DB の file mode を所有者だけが読み書きする設定にする。このコマンドは、保存済み計画 console の再開、commit、公開、外部 Issue 作成を行わない。通常 CI は合成 Runtime と実 Git で全体を確認する。この入口の実モデル受入れは未完了。
 
 `conversation search` は、承認済みの公開・合成 PDF、DOCX、PPTX の抜粋を、編集可能な Task に自動で添付する。console は metadata を表示し、ローカルの非公開状態には引用した出典全文と用途別の承認を保持する。
 

@@ -33,12 +33,14 @@ type fakeRuntime struct {
 	closes     int
 	closeErr   error
 	toolPolicy *tools.Policy
+	bound      bool
 }
 
-func (f *fakeRuntime) Role() string              { return f.role }
-func (f *fakeRuntime) ConfigHash() string        { return f.hash }
-func (f *fakeRuntime) Worktree() string          { return f.worktree }
-func (f *fakeRuntime) ToolPolicy() *tools.Policy { return f.toolPolicy }
+func (f *fakeRuntime) Role() string                  { return f.role }
+func (f *fakeRuntime) UsesBoundResultIdentity() bool { return f.bound }
+func (f *fakeRuntime) ConfigHash() string            { return f.hash }
+func (f *fakeRuntime) Worktree() string              { return f.worktree }
+func (f *fakeRuntime) ToolPolicy() *tools.Policy     { return f.toolPolicy }
 func (f *fakeRuntime) Start(_ context.Context, _ string) (string, error) {
 	f.starts++
 	if f.sessionID == "" {

@@ -234,7 +234,10 @@ Human の明示承認後に既存 intake・confirm・review flow を操作する
 Human の `/approve` を受けて CLI が intake confirmation と review flow を作り、
 既存の Controller で Coder、検証、独立 Reviewer を実行する。
 Planner の全 turn の観測 token を共有上限から差し引き、期限を延長せずに引き継ぐ。
-相談記録・usage・失敗を private receipt に保存し、失敗時の自動再送は行わない。
+相談記録・usage・失敗と実行先は request ID・連番・hash を持つ SQLite の
+`records.requests` に保存し、失敗時の自動再送は行わない。
+実行イベントを二重保存せず、Flow ID から正式な Dispatch・event receipt を参照する。
+`records show` で明示 export できる。外部 JSON・log の新規保存は行わない。
 `workflow run|step --builtin-prompts` は snapshot mode の明示 opt-in で、
 同梱 role prompt、file tool、厳密な結果照合、context 圧縮、
 Controller への検証提出を選ぶ。従来の prompt 指定・空 allowlist の既定は変えない。
@@ -263,7 +266,11 @@ Controller は tree object をローカルの `refs/taxion/snapshots/` に保持
 Reviewer は baseline commit から同じ tree を別 worktree に再現し、開始時と終了時に照合する。
 Git tree に含まれない ignored file はレビュー対象に含まれない。
 
-`runtime`・`workflow run|step` の `--compact-context` は、過去 instruction 全体を再帰的に埋め込まず、出典付き decision ごとに正確な過去結果を一回表示する。各 `result:` decision を実際の保存 Dispatch 結果と比較し、欠落・改変した出典は拒否する。現在の契約、Human decision、Memory は保ち、完全な不変 instruction は Graph に残す。省略した記録は result・instruction hash で識別する。既定表示は変えない。context 圧縮は system prompt・config hash を変えるため、実行接続時も同じ flag を指定するが、取消専用 `runtime stop` には不要。既存の実行 binding を新しい表示へ切り替えない。
+`runtime`・`workflow run|step`・ACP の `--compact-context` は、担当に必要な目的・範囲・受入れ・検証・証拠・レビュー対象・Human decision・Memory・仕様引用・予算方針を JSON で渡す。設定と intake 承認は ID・出典・理由を保持し、設定全体の転記を省く。各 `result:` decision を保存済みの出典と照合し、必要な結果を渡す。欠落・改変した参照は拒否する。完全な不変 instruction と承認は DB に保持する。表示変更は system prompt・config hash を変えるため、旧 session に新 hash で再接続しない。取消専用 `runtime stop` は表示変更に依存しない。既存の非 compact session の原稿は維持する。
+
+新しい Flow の結果 decision は `taxion.result-ref.v1` の Dispatch ID・instruction hash・result hash を保存し、過去 instruction を再帰的に埋め込まない。旧形式も読み取り、必要な結果は Controller が同じ workspace 内から解決する。Planner・質問 context では結果を別に含む箇所の decision を参照にする。個別質問では同じ Task の結果を `task.dispatches` に保持し、別 Task の関連 Reviewer 等の結果を `results` に一度だけ含める。`/results/N/result` 以下も引用先として検証する。
+
+`--builtin-prompts` は束縛済み結果 schema `urn:taxion:dispatch-result:bound:v1` を使う。モデルは Dispatch・Task・role・repository・開始 SHA と snapshot mode の出力 commit SHA を転記せず、host が保存 session と観測済み開始 SHA から付与する。モデルがこれらの値を返して矛盾した場合は拒否する。verdict・finding・role の証拠と Git の独立検証は維持する。独自 prompt と CLI/ACP の既存結果 schema は変えない。保存形式と互換性の判断は [ADR-0033](adr/0033-reference-results-and-persist-workspace-records-incrementally.md) に記録する。
 
 `workflow planning-context` は、入れ子履歴全体なしで保存 Memory、acceptance、blocker、依存、懸念、関連 result・SHA 対象、既存 Flow 上限を表示する。観測時刻と content hash を持つ read-only projection であり、atomic な実状態 snapshot、model 判断、実行認可ではない。workspace と Memory は別に読み、実行時は既存 Controller 検査を繰り返す。provider は呼ばない。
 

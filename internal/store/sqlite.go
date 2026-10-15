@@ -2,7 +2,7 @@
 //
 // The schema preserves core.Ledger so changing persistence does not change
 // governance types. The pure-Go driver avoids a cgo build requirement
-// (ADR-0009). Workspace state keeps the existing Ledger JSON shape.
+// (ADR-0009). Record storage preserves the existing Ledger JSON wire shape.
 package store
 
 import (
@@ -62,11 +62,16 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema + documentSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	result := &Store{db: db}
+	if err := result.migrateDocuments(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return result, nil
 }
 
 // OpenReadOnly observes existing state without creating or migrating a workspace.
@@ -120,22 +125,13 @@ func (s *Store) InitializeWorkspace(state Workspace) (bool, error) {
 			return false, err
 		}
 	}
-	ledger, err := json.Marshal(state.Ledger)
-	if err != nil {
-		return false, err
-	}
-	graph, err := json.Marshal(state.Graph)
-	if err != nil {
-		return false, err
-	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback()
 	result, err := tx.Exec(`INSERT INTO workspace_state(id,revision,ledger_json,graph_json,graph_present)
-		VALUES(1,1,?,?,?) ON CONFLICT(id) DO NOTHING`,
-		string(ledger), string(graph), boolInt(state.HasGraph))
+		VALUES(1,1,'{}','{}',?) ON CONFLICT(id) DO NOTHING`, boolInt(state.HasGraph))
 	if err != nil {
 		return false, err
 	}
@@ -144,20 +140,17 @@ func (s *Store) InitializeWorkspace(state Workspace) (bool, error) {
 		return false, err
 	}
 	if inserted == 1 {
-		records, err := json.Marshal(state.Records)
-		if err != nil {
+		if _, err := tx.Exec(`INSERT INTO workspace_records(id,records_json) VALUES(1,'{}')`); err != nil {
 			return false, err
 		}
-		if _, err := tx.Exec(`INSERT INTO workspace_records(id,records_json) VALUES(1,?)`, string(records)); err != nil {
+		if err := saveWorkspaceDocuments(tx, state); err != nil {
 			return false, err
 		}
 	}
 	return inserted == 1, tx.Commit()
 }
 
-func (s *Store) loadWorkspace(q interface {
-	QueryRow(string, ...any) *sql.Row
-}) (Workspace, error) {
+func (s *Store) loadWorkspace(q workspaceReader) (Workspace, error) {
 	var state Workspace
 	var ledgerJSON, graphJSON string
 	var present int
@@ -168,6 +161,32 @@ func (s *Store) loadWorkspace(q interface {
 	}
 	if err != nil {
 		return Workspace{}, err
+	}
+	normalized, err := documentFormat(q)
+	if err != nil {
+		return Workspace{}, err
+	}
+	if normalized {
+		var legacyRecords string
+		if err := q.QueryRow(`SELECT records_json FROM workspace_records WHERE id=1`).Scan(&legacyRecords); err != nil {
+			return Workspace{}, err
+		}
+		if ledgerJSON != "{}" || graphJSON != "{}" || legacyRecords != "{}" {
+			return Workspace{}, fmt.Errorf("normalized workspace has conflicting legacy state")
+		}
+		if err := loadWorkspaceDocuments(q, &state); err != nil {
+			return Workspace{}, err
+		}
+		state.HasGraph = present != 0
+		if state.HasGraph {
+			if err := state.Graph.Validate(); err != nil {
+				return Workspace{}, err
+			}
+			if err := state.Graph.CheckLedger(state.Ledger); err != nil {
+				return Workspace{}, err
+			}
+		}
+		return state, nil
 	}
 	if err := json.Unmarshal([]byte(ledgerJSON), &state.Ledger); err != nil {
 		return Workspace{}, fmt.Errorf("decode workspace ledger: %w", err)
@@ -226,28 +245,15 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 			return err
 		}
 	}
-	ledger, err := json.Marshal(state.Ledger)
-	if err != nil {
+	if err := saveWorkspaceDocuments(tx, state); err != nil {
 		return err
 	}
-	graph, err := json.Marshal(state.Graph)
-	if err != nil {
+	if _, err := tx.Exec(`INSERT INTO workspace_state(id,revision,ledger_json,graph_json,graph_present)
+		VALUES(1,1,'{}','{}',?) ON CONFLICT(id)
+		DO UPDATE SET revision=workspace_state.revision+1,graph_present=excluded.graph_present`, boolInt(state.HasGraph)); err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT INTO workspace_state(id,revision,ledger_json,graph_json,graph_present)
-		VALUES(1,1,?,?,?)
-		ON CONFLICT(id) DO UPDATE SET revision=workspace_state.revision+1,
-		ledger_json=excluded.ledger_json,graph_json=excluded.graph_json,graph_present=excluded.graph_present`,
-		string(ledger), string(graph), boolInt(state.HasGraph))
-	if err != nil {
-		return err
-	}
-	records, err := json.Marshal(state.Records)
-	if err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`INSERT INTO workspace_records(id,records_json) VALUES(1,?)
-		ON CONFLICT(id) DO UPDATE SET records_json=excluded.records_json`, string(records)); err != nil {
+	if _, err := tx.Exec(`INSERT INTO workspace_records VALUES(1,'{}') ON CONFLICT(id) DO NOTHING`); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -280,15 +280,35 @@ func TestSearch(t *testing.T) {
 		gitTest(t, root, "rev-parse", "HEAD") != coder.Instruction.BaselineSHA {
 		t.Fatal("request changed commit identity or reviewed another tree")
 	}
-	receipts, err := filepath.Glob(filepath.Join(filepath.Dir(storePath), "requests", "*", "planning-*.json"))
-	if err != nil || len(receipts) != 2 {
-		t.Fatal("Planner conversation or usage receipts missing", receipts, err)
-	}
-	for _, path := range receipts {
-		info, err := os.Stat(path)
-		if err != nil || info.Mode().Perm() != 0600 {
-			t.Fatal("request receipt is not private", err)
+	var planning int
+	for _, record := range state.Records.Requests {
+		if record.Kind == "planning" {
+			planning++
+			if record.Sequence != uint64(planning) || !json.Valid([]byte(record.Payload)) {
+				t.Fatal("invalid saved Planner receipt", record)
+			}
 		}
+	}
+	if planning != 2 {
+		t.Fatal("Planner conversation or usage receipts missing", planning)
+	}
+	if len(state.Records.Requests) != 3 {
+		t.Fatal("execution events were duplicated instead of referencing the Flow")
+	}
+	var execution struct {
+		FlowID string `json:"flowId"`
+		Error  string `json:"error"`
+	}
+	if err := core.DecodeGraphInput(strings.NewReader(state.Records.Requests[2].Payload), &execution); err != nil ||
+		execution.FlowID != state.Graph.ReviewFlows[0].ID || execution.Error != "" {
+		t.Fatal("execution record does not reference its authoritative Flow", execution, err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(storePath), "requests")); !os.IsNotExist(err) {
+		t.Fatal("request created redundant JSON/log directory", err)
+	}
+	info, err := os.Stat(workspaceDBPath())
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("request database is not private", err)
 	}
 }
 

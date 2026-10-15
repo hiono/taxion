@@ -130,7 +130,7 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 						Severity: "HIGH", Title: "Correct acceptance coverage", Evidence: []string{"test-report"},
 					}}
 				} else {
-					prompt, err := core.RenderDispatchInstruction(dispatch)
+					prompt, err := RenderDispatchContext(db, dispatch, false)
 					if err != nil || !strings.Contains(prompt, "Correct acceptance coverage") {
 						t.Fatal("re-review lost original findings", err)
 					}

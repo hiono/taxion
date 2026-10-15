@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/hiono/taxion/internal/core"
 )
@@ -9,6 +10,16 @@ import (
 // DispatchResultSchema describes model output; the controller independently
 // verifies Git, validation commands, and references between evidence fields.
 func DispatchResultSchema(dispatch core.GraphDispatch, strict bool) map[string]any {
+	return dispatchResultSchema(dispatch, strict, false)
+}
+
+const BoundResultSchemaID = "urn:taxion:dispatch-result:bound:v1"
+
+func BoundDispatchResultSchema(dispatch core.GraphDispatch) map[string]any {
+	return dispatchResultSchema(dispatch, true, true)
+}
+
+func dispatchResultSchema(dispatch core.GraphDispatch, strict, bound bool) map[string]any {
 	properties := map[string]any{
 		"dispatchId":   map[string]any{"type": "string"},
 		"taskId":       map[string]any{"type": "string"},
@@ -85,8 +96,53 @@ func DispatchResultSchema(dispatch core.GraphDispatch, strict bool) map[string]a
 			properties["outputSha"] = map[string]any{"type": "string", "enum": []string{dispatch.ExpectedStartSHA()}}
 		}
 	}
-	return map[string]any{
+	schema := map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": properties, "required": required,
 	}
+	if bound {
+		fields := []string{"dispatchId", "taskId", "recipient", "repository", "startedSha"}
+		if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+			fields = append(fields, "outputSha")
+		}
+		for _, field := range fields {
+			delete(properties, field)
+		}
+		schema["required"] = slices.DeleteFunc(required, func(field string) bool { return slices.Contains(fields, field) })
+		schema["$id"] = BoundResultSchemaID
+	}
+	return schema
+}
+
+func bindResultIdentity(dispatch core.GraphDispatch, result *core.DispatchResult) error {
+	if dispatch.RuntimeSessionID == "" || dispatch.ExecutionStartSHA == "" {
+		return fmt.Errorf("taxion: bound result requires a saved session and observed start SHA")
+	}
+	fields := []struct {
+		name  string
+		field *string
+		value string
+	}{
+		{"dispatchId", &result.DispatchID, dispatch.ID},
+		{"taskId", &result.TaskID, dispatch.TaskID},
+		{"recipient", &result.Recipient, dispatch.Recipient},
+		{"repository", &result.Repository, dispatch.Repository},
+		{"startedSha", &result.StartedSHA, dispatch.ExecutionStartSHA},
+	}
+	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+		fields = append(fields, struct {
+			name  string
+			field *string
+			value string
+		}{"outputSha", &result.OutputSHA, dispatch.ExecutionStartSHA})
+	}
+	for _, binding := range fields {
+		if *binding.field != "" && *binding.field != binding.value {
+			return fmt.Errorf("taxion: model result %s conflicts with the bound Dispatch", binding.name)
+		}
+	}
+	for _, binding := range fields {
+		*binding.field = binding.value
+	}
+	return nil
 }

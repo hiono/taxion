@@ -9,6 +9,24 @@ import (
 	executionconfig "github.com/hiono/taxion/internal/config"
 )
 
+func TestBoundResultProtocolIsPartOfSessionIdentity(t *testing.T) {
+	config := testConfig(t)
+	legacy, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacy.Close()
+	config.ResponseSchema = map[string]any{"$id": "urn:taxion:dispatch-result:bound:v1", "type": "object"}
+	bound, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bound.Close()
+	if legacy.UsesBoundResultIdentity() || !bound.UsesBoundResultIdentity() || legacy.ConfigHash() == bound.ConfigHash() {
+		t.Fatal("bound output protocol is not isolated from legacy sessions")
+	}
+}
+
 func TestConfigurationSelectionHashIsCompleteOwnedAndCanonical(t *testing.T) {
 	cfg := testConfig(t)
 	legacy, err := New(cfg)
