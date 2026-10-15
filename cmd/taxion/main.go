@@ -798,6 +798,7 @@ func runtimeSystemPrompt(prompt, contract string) string {
 }
 
 func runtimeSubmissionPrompt(prompt, contract string, submission bool) string {
+	prompt += "\n" + roleVerificationPrompt
 	prompt += "\nResult evidence contains identifiers. Include each required evidence identifier exactly as a separate array item, without a description suffix (for example, \"work-report\", not \"work-report: changes made\"). Additional work descriptions may be separate evidence items. Do not invent evidence merely to satisfy an identifier."
 	prompt += "\nFor Reviewer, changedFiles must be []. The reproduced Coder changes are review input, not Reviewer edits. worktreeChanged describes changes since this Reviewer started, not differences from the baseline commit. Report an actual Reviewer mutation as a blocker; do not hide it."
 	if !submission {

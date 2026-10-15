@@ -28,6 +28,26 @@ type requestFixtureRuntime struct {
 	send      func(string) error
 }
 
+func TestRuntimeRoleVerificationDoesNotDependOnModelDiversity(t *testing.T) {
+	for _, prompt := range []string{requestCoderPrompt, requestReviewerPrompt, "Custom role prompt"} {
+		for _, submission := range []bool{false, true} {
+			rendered := runtimeSubmissionPrompt(prompt, "saved-contract", submission)
+			for _, required := range []string{
+				"same model", "independently derive expected behavior",
+				"unverified claims", "Coder conversation history",
+				"boundary cases", "failure paths and regressions",
+				"real file, line range, failure mechanism",
+				"Do not manufacture", "report BLOCKED",
+				"do not grant extra tools", "saved-contract",
+			} {
+				if !strings.Contains(rendered, required) {
+					t.Errorf("submission=%v: role contract omits %q", submission, required)
+				}
+			}
+		}
+	}
+}
+
 func (r *requestFixtureRuntime) Role() string                                      { return r.role }
 func (r *requestFixtureRuntime) Worktree() string                                  { return r.worktree }
 func (r *requestFixtureRuntime) ConfigHash() string                                { return "fixture:" + r.id }
