@@ -123,6 +123,20 @@ skill が参照する補助ファイルは、通常の worktree / fileAccess の
 文書を合格にせず、親の開発支援 session の起動ログも代用しません。
 原本は private に保持し、公開記録には秘密値・私用パスを含めません。
 
+## 今の coding agent に操作を任せる
+
+対話している coding agent に、次のコマンドを実行し、出力を読んで依頼を進めるよう伝えます。設定や workspace の準備前でも実行できます。
+
+```sh
+taxion ready
+```
+
+`ready` は、その会話中の agent が Taxion を操作するためのメタプロンプトを stdout に出します。依頼の整理、設定・探索・保存状態の確認、Task の登録と承認、予算承認、Coder・検証・独立 Reviewer、停止後の成果再利用を案内します。必要な JSON は agent が作り、proposal の hash や結果を次の入力へ渡します。利用者が JSON や role prompt を転記する手順ではありません。
+
+agent は目的、変更範囲、検証コマンド、設定選択、修正回数、token 上限と期限を利用者に示し、明示承認後に実行します。外側で済んだ相談を内部 Planner に繰り返させる必要はありません。承認済みの安全な次の操作がある限り続け、判断待ちや予算終了では理由を説明します。既存 Task や保存成果がある場合は、最初からやり直す前に照合します。
+
+`ready` 自体はモデル、認証・課金照会、設定の読込み、workspace の作成を行いません。準備完了の診断ではなく、診断には `doctor` を使います。外側の agent の費用と、後続の `workflow run` などのモデル費用は別です。出力だけで agent の従属や継続を保証するものでもありません。無料の合成操作回帰と、実 agent が指示を理解して進める受入れは区別します。
+
 ## 人のことばで依頼して計画を相談する
 
 設定と `taxion init` が済んでいれば、`request` で Planner に変更を相談できます。JSON や Coder / Reviewer の prompt ファイルを作る必要はありません。作業用の clean な Git worktree で実行します。repository は設定と一致する名前を明示します。
@@ -146,7 +160,7 @@ Planner はファイル・shell tool を持たず、依頼、これまでの対�
 
 ## 依頼から独立レビューまで
 
-以下は Task 契約や role 設定を個別に指定する手順です。通常の依頼では、前節の `request` を入口にします。
+以下は Task 契約や role 設定を個別に指定する手順です。通常の依頼では `ready` の出力を読んだ外側の agent に操作を任せるか、内部 Planner と相談する `request` を使います。
 
 Coder が作業する repository で、承認する baseline から専用 worktree を作ります。Taxion は通常の Coder Dispatch 用 worktree を自動作成しません。`branch`、`worktree`、`baselineSha` はこの worktree と同じ値を Task に記録します。
 

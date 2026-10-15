@@ -477,6 +477,7 @@ CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は s
 
 | コマンド | option と意味 |
 | --- | --- |
+| `ready` | 引数・専用 option はなく、今の coding agent が Taxion を操作するメタプロンプトを stdout に出す。`--help` は入力形式だけを表示する。設定・workspace・認証を要求せず、モデル・外部 process・環境探索・状態変更を行わない。予算・scope・設定の Human 承認や独立 Reviewer を代替せず、準備完了の診断でもない。外側の agent が JSON を生成し、既存の intake・confirm・workflow と復旧操作を使う。 |
 | `request` | 必須は `--repo REPO`、正の `--max-tokens N`、1秒以上の `--timeout D`、30以上の `--max-ai-credits N`。任意の `--worktree PATH` は現在の repository root が既定で、clean かつ branch に接続している必要がある。`--max-repairs N` は既定1、範囲0–100。`--context-path FILE` は追跡済み UTF-8 text を最大16 file、合計64 KiB まで繰り返し指定できる。`--cli PATH`・`--base-directory PATH` は Copilot を選ぶ。位置引数の文章を元依頼とし、省略時は console で入力する。`/plan` は上限付き有料計画、`/approve` は表示計画と残る上限付き coding・review を認可し、`/quit` は実行前に終了する。credit 上限は session 別で、合計予算ではない。 |
 | `config check` | `--sources` は値を含めず設定 field の出典を表示する。`--capabilities` は静的 adapter 対応を示し、実 access・契約資格ではない。`--task ID` は保存 Task 承認、`--dispatch ID` はさらに保存 Dispatch instruction と解決済み設定を照合する。両者は最大一つだけ選ぶ。 |
 | `config bind` | `--dispatch ID` は未 binding Dispatch に現在選択中の固定 file 設定を保存する。任意の `--sources`・`--capabilities` は `config check` と同じ表示。credential 認証や契約資格の証明はせず、`--task` は受け付けない。 |
@@ -534,6 +535,6 @@ Copilot の標準配置や追加登録した skill を、Taxion 用にコピー�
 設定とログ確認の手順は [利用者ガイド](user-guide.md#文書用-skill-を使う場合)、
 権限と証拠の境界は [runtime 契約](../develop/runtime-contract.md#skillspluginsmcphooks-と出力圧縮)を参照する。
 
-root usage 文字列は flag 定義とは別に管理する。この索引で実装済み subcommand と option を照合する。`ready` は未実装で、`doctor`・`config check`・`runtime auth` などの事前確認を、実行準備や契約上の利用資格の証明として説明しない。
+root usage 文字列は flag 定義とは別に管理する。この索引で実装済み subcommand と option を照合する。`ready` は外側の agent 向け手順、`request` は内部 Planner 対話であり、同じ相談を両方で繰り返す前提にはしない。`doctor`・`config check`・`runtime auth` などの事前確認を、実行準備や契約上の利用資格の証明として説明しない。
 
 `request --budget-guidance off|flow|account` は表示 proposal の解決済み設定を上書きする。`runtime start|send --budget-guidance MODE` は保存 Task の `budgetGuidance.allowedModes` 内で一回の送信を選ぶ。省略時は編集後の設定でなく保存 mode を使う。guidance policy がない旧 Dispatch は override を拒否し、再認可を要求する。新しい `task track`・`conversation intake` proposal は省略 guidance を固定設定層から解決し、最終的に `flow` を既定とする。Task JSON で mode、source、allowed mode、account read 承認を指定できる。[設定](configuration.md#残予算を考慮する指示の設定)に例を示す。認可済み Task の policy 変更は新しい認可 decision を要求する。`records show` は正確な補足文章、観測、送信段階を保存し、provider event 出力にも観測を報告する。`off` は既存の使用量・deadline 検査を無効にせず、どの mode も別 model turn を追加しない。

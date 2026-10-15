@@ -36,6 +36,7 @@ Usage:
   taxion [--store PATH] <command> [options]
 
 Commands:
+  ready               Print the meta-prompt for this coding agent to orchestrate Taxion; no model or state changes
   request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --max-tokens, --timeout, --max-ai-credits)
   config check        Validate fixed Global/Project YAML and environment references ([--sources], [--capabilities], [--task], [--dispatch])
   git check-index     Reject local Taxion and dotenv paths in the actual commit index
@@ -141,6 +142,8 @@ func main() {
 	}
 	var err error
 	switch args[0] {
+	case "ready":
+		err = readyCmd(args[1:], os.Stdout)
 	case "request":
 		err = requestCmd(args[1:], os.Stdin, os.Stdout)
 	case "config":

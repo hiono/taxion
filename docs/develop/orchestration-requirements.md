@@ -5,6 +5,13 @@ Taxion は、ユーザーとの会話から独立した担当へ作業を渡す�
 目的は、指示・結果の手動コピーをなくすことに加え、
 ユーザーが同じ目的、制約、保留作業を説明し直さずに作業を進められるようにすることである。
 
+初回の入口には、今の coding agent が `taxion ready` を読み、Taxion の操作者になる経路を含める。
+agent が依頼を改善し、保存状態から次の操作を選び、利用者に JSON・指示・成果物を転記させず、
+承認済みの Coder・検証・独立 Reviewer・停止復旧へ進めることがゴールである。
+`ready` は静的な手順出力、`doctor` は設定・探索診断、`request` は内部 Planner 対話として区別する。
+無料回帰で入力型と既存 controller の遷移を確認したが、実 agent の理解・継続品質は #78 の未完了条件に残す。
+[ADR-0031](adr/0031-bootstrap-the-current-coding-agent-with-ready.md) に判断と限界を記録する。
+
 この文書は採択した要件と検証条件を定義する。設計の理由は
 [ADR-0020](adr/0020-layered-memory-and-role-sessions-for-orchestration.md) と
 [ADR-0021](adr/0021-durable-task-graph-and-dispatch-change-control.md)、

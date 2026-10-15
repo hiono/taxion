@@ -74,7 +74,11 @@ Issue 本文、Milestone の説明、README、利用者・開発者向け文書�
 
 ## モデルを呼ばないテストと復旧の証拠
 
-初回利用のゴールは、人のことばによる依頼を Planner と改善し、JSON や担当ごとの指示をコピーせずに Coder・検証・独立 Reviewer へ進めることです。`request` は intake、出典付き設定承認の照合、既存の Flow 実行処理を使います。別の実行処理は設けません。同梱指示は snapshot mode の明示選択であり、旧方式の空の tool 既定値は維持します。[ADR-0030](docs/develop/adr/0030-refine-natural-language-requests-with-planner.md)を参照してください。
+初回利用のゴールは、今の coding agent が `taxion ready` を読み、依頼の改善から承認済みの Coder・検証・独立 Reviewer・復旧までを操作することです。利用者による JSON や担当ごとの指示の転記は前提にしません。`ready` は静的な手順出力だけを行い、モデルや workspace を開きません。[ADR-0031](docs/develop/adr/0031-bootstrap-the-current-coding-agent-with-ready.md)を参照してください。
+
+`go test ./cmd/taxion -run TestReady` は、実出力の JSON、未承認・異なる hash の拒否、設定承認、Flow、host 検証、同一 tree の独立レビューを合成 Runtime と実 Git で確認します。操作は決定済みであり、実 agent が指示を理解し判断する品質の受入れとは区別します。既存の停止・successor 回帰も維持します。
+
+外側の agent を使わず、内部 Planner と計画を相談する入口も残します。`request` は intake、出典付き設定承認の照合、既存の Flow 実行処理を使います。別の実行処理は設けません。同梱指示は snapshot mode の明示選択であり、旧方式の空の tool 既定値は維持します。[ADR-0030](docs/develop/adr/0030-refine-natural-language-requests-with-planner.md)を参照してください。
 
 `go test ./cmd/taxion -run TestRequest` で、確認質問、計画改善、承認、同一 tree のレビュー、拒否と receipt を確認します。独自に作成した応答と実 Git を使い、モデル・login・ネットワークは不要です。実モデルが適切な計画を作ることや、skill を読み込むことの証明にはなりません。
 

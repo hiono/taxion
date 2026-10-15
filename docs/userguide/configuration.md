@@ -135,7 +135,7 @@ role tool list です。省略時は file / custom-agent 呼出し tool の利�
 
 **確認結果は認証や実行準備完了の証明ではありません。** `doctor` はモデル session、
 hooks・MCP の起動、認証・課金照会を行いません。native inventory の表示と、
-実行時のロード・server 接続の成功は別です。`ready` は未実装です。
+実行時のロード・server 接続の成功は別です。`ready` は設定を読まず、今の coding agent に操作手順を出力します。設定・探索の診断には `doctor` を使います。
 CLI 全体の option と制約は[CLI リファレンス](cli-reference.md)を参照してください。
 
 ## 残予算を考慮する指示の設定

@@ -197,6 +197,13 @@ Release 0.1.0 の文書 dogfood における実 skill 利用は Issue #78 の未
 
 ## Dispatch の実行と context
 
+`taxion ready` は、今の coding agent に既存 CLI の操作手順を渡す。静的な出力だけを行い、
+設定・workspace・Runtime を開かない。外側の agent が会話を改善して契約 JSON を生成し、
+Human の明示承認後に既存 intake・confirm・review flow を操作する。
+内部 Planner を使う次の `request` とは別の入口であり、外側の相談を再実行する前提にしない。
+出力だけで agent の判断品質を保証せず、合成操作回帰と実 agent の受入れを分ける。
+判断は [ADR-0031](adr/0031-bootstrap-the-current-coding-agent-with-ready.md) に記録する。
+
 `taxion request` は元の依頼を DRAFT として保存し、file・shell tool を持たない Planner
 観測を使って確認質問と実装計画を提案する。Planner の提案は実行承認ではない。
 Human の `/approve` を受けて CLI が intake confirmation と review flow を作り、

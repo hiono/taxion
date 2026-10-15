@@ -26,6 +26,7 @@ func TestDocumentNavigationRoutesWithoutSDK(t *testing.T) {
 		},
 		"docs/userguide/README.md": {
 			"user-guide.md#現在の導入方法", "user-guide.md#設定と実行前確認",
+			"user-guide.md#今の-coding-agent-に操作を任せる",
 			"user-guide.md#人のことばで依頼して計画を相談する",
 			"user-guide.md#結果の確認と停止後の継続",
 			"user-guide.md#保存結果と停止後の継続", "execution-records.md#復旧時の照合",
