@@ -10,7 +10,8 @@ Accepted
 合成 runtime と SDK protocol fixture に加え、選択済み実アカウントから
 製品 adapter の読取りが成功することを確認した。session 作成・model 指示は0回。
 実モデルが補足を使って作業配分を改善するか、新しい入口で coding・review を
-完了できるかは未確認であり、読取り成功と区別する。
+完了できるかは未確認であり、読取り成功と区別する。新規実行の token 閾値停止は
+後続の ADR-0036 で廃止した。
 
 ## Context
 
@@ -107,8 +108,8 @@ Controller の `budget-guidance` receipt は provider の event stream と区別
 stream ID に、観測値、実際の補足文、送信準備・送信終了・拒否を保存する。
 `records show` と runtime の event 出力で確認する。Planner・質問・SDK検索の
 隔離 turn も同じ観測処理を使い、結果 JSON と既存の private planning / search
-記録に補足と観測を残す。Flow 外の隔離 turn は session の token 上限と期限を
-別項目にする。旧 Task の省略値は読取り・補足を追加しない。
+記録に補足と観測を残す。Flow 外の隔離 turn は session soft credit ceiling と
+期限を別項目にする。旧 Task の省略値は読取り・補足を追加しない。
 
 Flow の残りは、同じ単位で既知の利用量を重複なく合算できる場合だけ算出する。
 未知の call があれば「未確認」、上限超過なら超過量と停止理由を残す。

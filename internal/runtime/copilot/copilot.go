@@ -1049,6 +1049,10 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 		return runtime.Event{Type: runtime.EventFailed, Payload: message}, true
 	case *sdk.AssistantUsageData:
 		// Usage is reported per model API call; preserve its stable identity for deduplication.
+		var totalNanoAIU *float64
+		if data.CopilotUsage != nil {
+			totalNanoAIU = &data.CopilotUsage.TotalNanoAiu
+		}
 		payload, err := json.Marshal(struct {
 			Model            string                       `json:"model"`
 			Accounting       *sdk.UsageAccountingIdentity `json:"accounting,omitempty"`
@@ -1057,10 +1061,13 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			OutputTokens     *int64                       `json:"outputTokens,omitempty"`
 			CacheReadTokens  *int64                       `json:"cacheReadTokens,omitempty"`
 			CacheWriteTokens *int64                       `json:"cacheWriteTokens,omitempty"`
+			TotalNanoAIU     *float64                     `json:"totalNanoAIU,omitempty"`
+			AICreditsStatus  *rpc.AiCreditsStatus         `json:"aiCreditsStatus,omitempty"`
 		}{
 			Model: data.Model, IsAuto: data.IsAuto, InputTokens: data.InputTokens,
 			OutputTokens: data.OutputTokens, CacheReadTokens: data.CacheReadTokens,
 			CacheWriteTokens: data.CacheWriteTokens, Accounting: data.Accounting,
+			TotalNanoAIU: totalNanoAIU, AICreditsStatus: data.AiCreditsStatus,
 		})
 		if err != nil {
 			return runtime.Event{}, false

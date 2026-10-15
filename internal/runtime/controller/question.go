@@ -226,29 +226,29 @@ func ObserveQuestion(db *store.Store, ledgerPath, repository, taskID string) (Qu
 // AskQuestion is model-only: no tools, Dispatch binding, graph update or inferred
 // Human approval. The caller supplies a separately bounded, isolated runtime.
 func AskQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text string, selected config.Config,
-	maxTokens int64, worker runtime.ConfigurationIdentity) (result QuestionResult, err error) {
-	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, maxTokens, worker, false, nil)
+	worker runtime.ConfigurationIdentity) (result QuestionResult, err error) {
+	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, worker, false, nil)
 }
 
 // AskPlanner recommends an action from saved Memory and results in an isolated
 // session. It cannot release a handoff, approve work or issue a Dispatch.
 func AskPlanner(ctx context.Context, db *store.Store, ledgerPath, taskID, text string, selected config.Config,
-	maxTokens int64, worker runtime.ConfigurationIdentity) (QuestionResult, error) {
-	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, maxTokens, worker, true, nil)
+	worker runtime.ConfigurationIdentity) (QuestionResult, error) {
+	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, worker, true, nil)
 }
 
 // AskInvestigation supplies bounded committed files to a tool-free isolated
 // question. Its new Git observation is not evidence of prior consideration.
 func AskInvestigation(ctx context.Context, db *store.Store, ledgerPath, taskID, text string, selected config.Config,
-	maxTokens int64, worker runtime.ConfigurationIdentity, request InvestigationRequest) (QuestionResult, error) {
-	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, maxTokens, worker, false, &request)
+	worker runtime.ConfigurationIdentity, request InvestigationRequest) (QuestionResult, error) {
+	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, worker, false, &request)
 }
 
 func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text string, selected config.Config,
-	maxTokens int64, worker runtime.ConfigurationIdentity, planner bool, investigation *InvestigationRequest) (result QuestionResult, err error) {
+	worker runtime.ConfigurationIdentity, planner bool, investigation *InvestigationRequest) (result QuestionResult, err error) {
 	result.Usage = []core.DispatchUsage{}
-	if worker == nil || worker.Role() != "ORCHESTRATOR" || strings.TrimSpace(text) == "" || maxTokens <= 0 {
-		return result, fmt.Errorf("taxion: side question requires an isolated Orchestrator, text and explicit token ceiling")
+	if worker == nil || worker.Role() != "ORCHESTRATOR" || strings.TrimSpace(text) == "" {
+		return result, fmt.Errorf("taxion: side question requires an isolated Orchestrator and text")
 	}
 	var actual config.Config
 	if err := core.DecodeGraphInput(strings.NewReader(string(worker.ExecutionConfiguration())), &actual); err != nil || actual != selected {
@@ -336,7 +336,7 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 	}
 	policy := result.Context.Task.Task.BudgetGuidance
 	if policy != nil {
-		result.BudgetGuidance, result.BudgetSupplement, err = isolatedBudgetGuidance(ctx, worker, policy, selected, maxTokens)
+		result.BudgetGuidance, result.BudgetSupplement, err = isolatedBudgetGuidance(ctx, worker, policy, selected)
 		if err != nil {
 			return result, err
 		}
@@ -358,7 +358,6 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 	}
 	result.InstructionSent = result.BudgetGuidance != nil
 	var output string
-	var tokens int64
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -386,26 +385,25 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				}
 				usage.ObservedAt = time.Now().UTC()
 				result.Usage = append(result.Usage, usage)
-				if usage.InputTokens == nil || usage.OutputTokens == nil || *usage.InputTokens < 0 || *usage.OutputTokens < 0 {
-					return result, fmt.Errorf("taxion: question token usage is unconfirmed")
+				if result.BudgetGuidance != nil && result.BudgetGuidance.Mode == "account" {
+					updated, quotaErr := readBudgetQuota(ctx, worker, selected, result.BudgetGuidance)
+					if updated != nil {
+						result.BudgetGuidance = updated
+					}
+					if quotaErr != nil && (updated == nil || updated.Account == nil) {
+						result.BudgetGuidance.Account = &runtime.QuotaSnapshot{
+							Provider: selected.Runtime.Provider, Account: selected.Runtime.Account,
+							Resource: "premium_interactions", Scope: "selected account", Unit: "requests",
+							Source: "sdk.account.getQuota", State: "unavailable", ObservedAt: time.Now().UTC(),
+							Reason: "quota read failed; provider details withheld",
+						}
+					}
 				}
-				// Subtract before adding so provider counters cannot overflow.
-				if *usage.InputTokens >= maxTokens-tokens {
-					return result, fmt.Errorf("taxion: question token ceiling reached")
-				}
-				tokens += *usage.InputTokens
-				if *usage.OutputTokens >= maxTokens-tokens {
-					return result, fmt.Errorf("taxion: question token ceiling reached")
-				}
-				tokens += *usage.OutputTokens
 			case runtime.EventFailed, runtime.EventCancelled:
 				return result, fmt.Errorf("taxion: question runtime failed or was cancelled; provider details withheld")
 			case runtime.EventTurnFinished:
 				if err := recheck(); err != nil {
 					return result, err
-				}
-				if len(result.Usage) == 0 {
-					return result, fmt.Errorf("taxion: question ended without token usage evidence")
 				}
 				var answer QuestionAnswer
 				if err := core.DecodeGraphInput(strings.NewReader(output), &answer); err != nil {

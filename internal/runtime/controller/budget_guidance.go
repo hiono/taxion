@@ -22,10 +22,9 @@ type budgetObservation struct {
 	ObservedAt           time.Time              `json:"observedAt"`
 	FlowID               string                 `json:"flowId,omitempty"`
 	FlowState            string                 `json:"flowState"`
-	TokenCeiling         *int64                 `json:"tokenCeiling,omitempty"`
-	SessionTokenCeiling  *int64                 `json:"sessionTokenCeiling,omitempty"`
 	UsedTokens           *int64                 `json:"usedTokens,omitempty"`
-	RemainingTokens      *int64                 `json:"remainingTokens,omitempty"`
+	ReportedNanoAIU      *float64               `json:"reportedNanoAIU,omitempty"`
+	AICreditsStatus      string                 `json:"aiCreditsStatus"`
 	Deadline             *time.Time             `json:"deadline,omitempty"`
 	UnfinishedRoles      []string               `json:"unfinishedRoles,omitempty"`
 	SessionCreditCeiling *float64               `json:"sessionCreditCeiling,omitempty"`
@@ -63,14 +62,15 @@ func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.Gr
 			return nil, fmt.Errorf("taxion: budget guidance cannot send after flow stop or deadline")
 		}
 		used, known := flowTokens(state.Graph, flow)
-		if !known || used >= flow.MaxTokens {
-			return nil, fmt.Errorf("taxion: Flow usage is unknown or exhausted; no new instruction sent")
-		}
 		if mode != "off" {
-			observation.FlowID, observation.FlowState = flow.ID, "available"
-			observation.TokenCeiling, observation.Deadline = &flow.MaxTokens, &flow.Deadline
-			remaining := flow.MaxTokens - used
-			observation.UsedTokens, observation.RemainingTokens = &used, &remaining
+			observation.FlowID, observation.FlowState = flow.ID, "usage-unavailable"
+			observation.Deadline = &flow.Deadline
+			if known {
+				observation.FlowState = "available"
+				observation.UsedTokens = &used
+			}
+			nanoAIU, status := flowNanoAIU(state.Graph, flow)
+			observation.ReportedNanoAIU, observation.AICreditsStatus = nanoAIU, status
 			observation.UnfinishedRoles = []string{dispatch.Recipient}
 			if dispatch.Recipient == "CODER" {
 				observation.UnfinishedRoles = append(observation.UnfinishedRoles, "REVIEWER")
@@ -112,13 +112,13 @@ func readBudgetQuota(ctx context.Context, worker runtime.Identity, selected conf
 		quota, err = reader.ReadAccountQuota(readCtx, selected.Runtime.Account)
 		cancel()
 		if err != nil {
-			quota.State, quota.Reason = "unavailable", "runtime rejected the selected-account quota read; send denied"
+			quota.State, quota.Reason = "unavailable", "runtime rejected the selected-account quota read; details withheld"
 			observation.Account = &quota
 			return observation, err
 		}
 	}
 	if quota.Account != selected.Runtime.Account || quota.Provider != selected.Runtime.Provider {
-		quota.State, quota.Reason = "unavailable", "quota account/provider mismatch; send denied"
+		quota.State, quota.Reason = "unavailable", "quota account/provider mismatch; details withheld"
 		observation.Account = &quota
 		return observation, fmt.Errorf("taxion: quota observation account/provider mismatch")
 	}
@@ -201,14 +201,14 @@ func budgetSupplement(observation *budgetObservation) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "\n\nTaxion budget observation (advisory, not new authorization or a hard per-turn cap):\n" +
-		string(body) + "\nPrioritize the approved acceptance and remaining roles. Avoid optional work and repeating saved investigation. " +
-		"Preserve partial work and evidence for recovery. Do not skip validation or independent review to claim completion. " +
-		"Unknown/stale quota is not zero, free or unlimited; account entitlement does not increase the approved Flow budget.", nil
+	return "\n\nTaxion resource observation (advisory, not new authorization or a token-count spending cap):\n" +
+		string(body) + "\nThe approved goal and all mandatory acceptance criteria are the priority. Complete them while using as few AI credits as practical: reuse saved results and investigation, avoid optional work and repeated exploration, and preserve resources for remaining essential roles. " +
+		"Never trade away required validation or independent review. Treat reported per-call nano-AIU, account quota requests, and session credit ceilings as separate native units; do not estimate one from token counts or convert between them. " +
+		"Unknown/stale quota or unavailable credit reporting is not zero, free, unlimited or proof that work is unaffordable.", nil
 }
 
 func isolatedBudgetGuidance(ctx context.Context, worker runtime.Identity, policy *core.BudgetGuidancePolicy,
-	selected config.Config, maxTokens int64) (*budgetObservation, string, error) {
+	selected config.Config) (*budgetObservation, string, error) {
 	if policy == nil {
 		return nil, "", nil
 	}
@@ -218,7 +218,7 @@ func isolatedBudgetGuidance(ctx context.Context, worker runtime.Identity, policy
 	observation := &budgetObservation{Mode: policy.Mode, Source: policy.Source,
 		ObservedAt: time.Now().UTC(), FlowState: "not-applicable"}
 	if policy.Mode != "off" {
-		observation.SessionTokenCeiling = &maxTokens
+		observation.AICreditsStatus = "unavailable"
 		observation.UnfinishedRoles = []string{"ORCHESTRATOR"}
 		if deadline, ok := ctx.Deadline(); ok {
 			observation.Deadline = &deadline

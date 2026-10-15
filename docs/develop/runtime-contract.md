@@ -34,7 +34,7 @@ session の作成・接続後と各モデル送信前に、設定を選択した
 
 ### 保存記録への質問
 
-保存記録についての質問には、別の file・shell tool を持たない Orchestrator Runtime を使う。通常は native skills と指示を利用する。出典付き Task 設定承認、今回の認証確認、repository の読取り権限、provider の service 確認、明示的な時間・token 上限が必要。回答は、渡した観測に存在する field を引用し、記録された事実、仮定、不明な点を分ける。観測は現在の実行状態の証明にはならない。
+保存記録についての質問には、別の file・shell tool を持たない Orchestrator Runtime を使う。通常は native skills と指示を利用する。出典付き Task 設定承認、今回の認証確認、repository の読取り権限、provider の service 確認、明示的な期限と session soft ceiling が必要。回答は、渡した観測に存在する field を引用し、記録された事実、仮定、不明な点を分ける。観測は現在の実行状態の証明にはならない。
 
 Dispatch を対応付けず、workspace の履歴や承認を変更しない。返された session・usage は質問に属し、主 Flow には属さない。利用量不明と不正な引用は質問を止める。cancel 後の safe cleanup は独自の上限付き context を使い、error を隠さない。
 
@@ -104,7 +104,7 @@ Runtime・workflow 実行の `--controller-validation-submission` は、モデ�
 - `internal/runtime/local` は、process 内で状態遷移を確認する参照 adapter。session ごとに `core.Sequence` を使い、`CompleteStep` で CHK-002 の順序を強制する。受け付けた指示を共通の `input` event として記録し、`checkpoint`・`done` event を出す。
 - `internal/runtime/proc` は、設定した外部 command を起動する。標準出力・標準errorを `output` event として送り、指示を標準入力に書き込む。process 終了時に `done`・`failed` を報告する。`Resume` は既存 session の検証だけを行い、process 起動は `Start` が担当する。checkpoint の順序管理は別に行う。
 - `internal/runtime/copilot` は公式 Go Copilot SDK を使う。role・worktree ごとに adapter を設定し、session は Auto と明示 tool allowlist を使う。infinite-session compaction は有効。CLI は保存済み Dispatch snapshot を role 別 system prompt に追加し、turn と compaction をまたいで承認済み契約を system context に保つ。resume 時も同じ system prompt、worktree、tool を渡す。SDK permission handler は、Coder に worktree 内の file 書込みと allowlist 内の SDK tool の一回使用を許可し、Reviewer に割当 worktree 内の読取りを許可する。shell request と worktree 外の path は拒否する。この handler の対象は SDK permission request であり、host・外部 tool は独自の保護を使う。
-- `internal/runtime/controller` は、対応付けた session の作成、再開、送信、停止、利用量記録前に、Dispatch の role、割当 worktree、active status、configuration hash を確認する。session ID、hash、model、token・cache 利用量を Dispatch とともに SQLite に保存する。管理下の staging・commit には、active Task と、tool 呼出し時の呼出し元 session も必要。Dispatch が Flow に属する場合は、review flow が実行中であり、保存期限と観測済みの既知利用量上限内であることも要求する。
+- `internal/runtime/controller` は、対応付けた session の作成、再開、送信、停止、利用量記録前に、Dispatch の role、割当 worktree、active status、configuration hash を確認する。session ID、hash、model、token・cache 利用量を Dispatch とともに SQLite に保存する。管理下の staging・commit には、active Task と、tool 呼出し時の呼出し元 session も必要。Dispatch が Flow に属する場合は、review flow が実行中であり、保存期限と契約内であることも要求する。token 数は新しい Flow の停止条件ではない。
 
 ## Skills・plugins・MCP・hooks と出力圧縮
 
@@ -253,7 +253,7 @@ Human の明示承認後に既存 intake・confirm・review flow を操作する
 観測を使って確認質問と実装計画を提案する。Planner の提案は実行承認ではない。
 Human の `/approve` を受けて CLI が intake confirmation と review flow を作り、
 既存の Controller で Coder、検証、独立 Reviewer を実行する。
-Planner の全 turn の観測 token を共有上限から差し引き、期限を延長せずに引き継ぐ。
+Planner の各 call の観測利用量を記録する。token 閾値は後続作業を停止しない。
 相談記録・usage・失敗と実行先は request ID・連番・hash を持つ SQLite の
 `records.requests` に保存し、失敗時の自動再送は行わない。
 実行イベントを二重保存せず、Flow ID から正式な Dispatch・event receipt を参照する。
@@ -294,7 +294,7 @@ Git tree に含まれない ignored file はレビュー対象に含まれない
 
 `workflow planning-context` は、入れ子履歴全体なしで保存 Memory、acceptance、blocker、依存、懸念、関連 result・SHA 対象、既存 Flow 上限を表示する。観測時刻と content hash を持つ read-only projection であり、atomic な実状態 snapshot、model 判断、実行認可ではない。workspace と Memory は別に読み、実行時は既存 Controller 検査を繰り返す。provider は呼ばない。
 
-`conversation plan`・`AskPlanner` は、隔離質問の通信、出典付き設定承認、認証、repository・service 検査、入出力・token 上限、承認再検査、独立 cleanup を再利用する。圧縮 Planner context を、file・shell tool を持たない独立した Orchestrator session に送る。通常は native skills と指示を利用する。native schema は助言 recommendation を加え、確認済み・仮定・未確認の証拠を明示する。実 JSON pointer の出典を必須とし、`APPROVE`・実行 verdict は recommendation に許さない。推論中に記録が変わっても元観測を結果に付けて保つ。助言を自動適用せず、通常の Flow 進行にも model call を増やさない。
+`conversation plan`・`AskPlanner` は、隔離質問の通信、出典付き設定承認、認証、repository・service 検査、入出力利用量の記録、期限・session soft ceiling、承認再検査、独立 cleanup を再利用する。圧縮 Planner context を、file・shell tool を持たない独立した Orchestrator session に送る。通常は native skills と指示を利用する。native schema は助言 recommendation を加え、確認済み・仮定・未確認の証拠を明示する。実 JSON pointer の出典を必須とし、`APPROVE`・実行 verdict は recommendation に許さない。推論中に記録が変わっても元観測を結果に付けて保つ。助言を自動適用せず、通常の Flow 進行にも model call を増やさない。
 
 モデルへ渡す Planner context は `planner` と `observation` だけとし、同じ Task の legacy `task.task` wrapper は送らない。schema の引用候補と回答の出典検証もこの送信表現に合わせ、保存側にしかない `/task/task/...` は拒否する。保存した完全 context・観測 hash と、採用時の改変・鮮度検査は維持する。新規 `request` の計画 Task は計画の目的を持ち、元依頼を title・objective に複写しない。元依頼の全文は intake decision に保持し、対話の先頭は `/planner/task/decisions/0/text` を参照する。実行 Task を作る際にはその参照を元依頼へ戻し、計画 Task ID と全対話を保存する。計画専用の全 path 一覧と参照本文は実行 Task に複写しない。通常の個別質問の `/task/task/...` は変更しない。
 
@@ -336,7 +336,7 @@ local 検査は登録 SDK stage・commit handler を Controller・実 Git で呼
 
 ## event 購読の期間
 
-adapter は、現在の instance が記録した event を再送してから、新しい event を購読する。Copilot は message、turn、failure、cancellation、usage、context-window、compaction、permission-decision の正規化 event を出す。usage は対応する Dispatch とともに保存する。context・compaction event は、取得できた場合に SDK の token 上限と圧縮結果を報告する。
+adapter は、現在の instance が記録した event を再送してから、新しい event を購読する。Copilot は message、turn、failure、cancellation、usage、context-window、compaction、permission-decision の正規化 event を出す。usage は対応する Dispatch とともに保存する。Controller は各 usage の直後に `credit_status` を合成し、取得できた call 別 nano-AIU と完全性状態、session ceiling を報告する。Dispatch が account quota 読取りを承認している場合は、SDK から取得した `premium_interactions` の request 枠も別項目で報告する。これは AI Credit とは異なる単位であり、残高へ換算しない。AI Credit の account 残高・使用率・残り率は同単位の allowance が確認できない場合 `unavailable` とする。合成 event は保存済み provider usage を変更しない。context・compaction event は、取得できた場合に SDK の token 上限と圧縮結果を報告する。
 
 turn が終わっても、同じ role の次の指示に使う session stream は残る。stop は stream を閉じる。購読 context の cancel は、その購読だけを閉じる。利用側は session の終了だけを待たず、自身の context も監視する必要がある。
 

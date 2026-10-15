@@ -41,7 +41,7 @@ provider の永続 event ID として扱える範囲が限られるため、保�
 別 stream へ再接続したイベントの採用は明示的な照合エラーにする。
 接続後の観測と、結果・利用量の確定は分けて扱う。
 
-### 利用量の単位と予算停止
+### 利用量の単位と停止条件
 
 固定 SDK v1.0.19 の `assistant.usage` はモデル呼出しごとの利用量であり、
 session の累積カウンターではない。Taxion は各呼出しの `inputTokens` と
@@ -57,11 +57,14 @@ identity がないイベントは保存した stream・sequence で再送を照�
 input/output の欠落はゼロと区別し、利用量不明として先へ進めない。
 合計が整数の上限を超える場合は最大値で飽和させ、負数へ巻き戻さない。
 
-token 上限は観測後の停止条件であり、一回のモデル応答を上限ぴったりで止める保証ではない。
-超過時は実測値を保存し、新しい turn・Dispatch を開始しない。
-停止した Flow の上限や結果は書き換えず、新しい Task と予算の承認で続ける。
-部分成果・完了済み Coder の引継ぎは
-[利用者ガイド](user-guide.md#保存結果と停止後の継続)を参照する。
+新しい Flow は token 数を閾値として停止しない。各 usage event で取得できた
+nano-AIU と `AICreditsStatus` を event 出力へ報告する。account quota の読取りが
+承認済みなら、`premium_interactions` の request 残数と使用率も別項目で表示する。
+これは AI Credit と異なる単位である。AI Credit の account 残高・使用率・残り率は
+同じ課金単位の allowance が確認できない限り unavailable とする。
+既存 workspace の `maxTokens` と `BUDGET_LIMIT` は履歴互換のため読み取るが、
+新規実行の入力・停止条件には使わない。停止済み Flow の結果は書き換えず、
+継続には新しい Task の承認が必要となる。
 
 ### 結果と履歴の照合
 

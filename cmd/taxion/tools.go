@@ -54,7 +54,6 @@ func searchCmd(args []string, output io.Writer, attach bool) error {
 	var query, task string
 	var useSDK bool
 	var credits float64
-	var tokens int64
 	var timeout time.Duration
 	var cli, base string
 	if action == "search" {
@@ -64,7 +63,6 @@ func searchCmd(args []string, output io.Writer, attach bool) error {
 			fs.StringVar(&task, "task", "", "Task receiving exact sourced results")
 			fs.BoolVar(&useSDK, "sdk", false, "explicitly opt into one paid Orchestrator acquisition turn")
 			fs.Float64Var(&credits, "max-ai-credits", 0, "explicit per-session soft credit ceiling")
-			fs.Int64Var(&tokens, "max-tokens", 0, "explicit observed input/output token ceiling")
 			fs.DurationVar(&timeout, "timeout", 0, "explicit acquisition deadline")
 			fs.StringVar(&cli, "cli", "", "Copilot executable")
 			fs.StringVar(&base, "base-directory", "", "Copilot state directory")
@@ -107,8 +105,8 @@ func searchCmd(args []string, output io.Writer, attach bool) error {
 		}
 		defer db.Close()
 		if useSDK {
-			if tokens <= 0 || timeout <= 0 || credits <= 0 || copilot.ValidateAICreditLimit(credits) != nil {
-				return fmt.Errorf("conversation search --sdk requires explicit token, time and credit ceilings")
+			if timeout <= 0 || credits <= 0 || copilot.ValidateAICreditLimit(credits) != nil {
+				return fmt.Errorf("conversation search --sdk requires a time limit and session credit ceiling")
 			}
 			state, err := db.LoadWorkspace()
 			if err != nil {
@@ -170,7 +168,7 @@ func searchCmd(args []string, output io.Writer, attach bool) error {
 			if err := worker.CheckRepositoryAccess(ctx); err != nil {
 				return errors.Join(err, worker.Close())
 			}
-			completed, runErr := controller.RunSearchTurn(ctx, worker, task, query, tokens)
+			completed, runErr := controller.RunSearchTurn(ctx, worker, task, query)
 			turn = &completed
 			closeErr := worker.Close()
 			_, saveErr := (tools.Policy{EvidenceDirectory: scope.EvidenceDirectory}).Save(tools.Evidence{

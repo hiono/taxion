@@ -298,9 +298,8 @@ func (c *Controller) AuthorizeTools(ctx context.Context, dispatchID, sessionID s
 		if !slices.Contains(flow.DispatchIDs, dispatchID) {
 			continue
 		}
-		tokens, known := flowTokens(state.Graph, flow)
-		if flow.Status != "RUNNING" || !time.Now().Before(flow.Deadline) || !known || tokens >= flow.MaxTokens {
-			return fmt.Errorf("taxion: tools require an active flow within its known usage and time limits")
+		if flow.Status != "RUNNING" || !time.Now().Before(flow.Deadline) {
+			return fmt.Errorf("taxion: tools require an active flow before its deadline")
 		}
 	}
 	return nil

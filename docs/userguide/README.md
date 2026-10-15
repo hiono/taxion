@@ -15,7 +15,7 @@ Task 契約や skill 内容の固定・監査を個別に指定する場合だ�
 
 最初からやり直す前に、[保存結果と停止後の継続](user-guide.md#保存結果と停止後の継続)で停止理由、保存成果、session の停止証拠を確認します。続行には後続 Task と新しい予算の承認が必要です。成功した Coder の成果が残っていれば、同じ成果物の Reviewer から続けます。
 
-保存状態と receipt の意味は[実行の復旧](execution-records.md#復旧時の照合)、承認する後続 Task と Git 操作の詳細は[予算上限後の作業継続](../develop/task-graph.md#予算上限後の作業継続)で確認します。`workflow recover` は残った runner 所有権を解放する操作であり、予算を追加して再実行する操作ではありません。
+保存状態と receipt の意味は[実行の復旧](execution-records.md#復旧時の照合)、承認する後続 Task と Git 操作の詳細は[停止した作業の継続](../develop/task-graph.md#停止した作業の継続)で確認します。`workflow recover` は残った runner 所有権を解放する操作であり、停止条件を解除して再実行する操作ではありません。
 
 ## 必要なときに参照する
 

@@ -22,9 +22,9 @@ import (
 )
 
 // Normal CI leaves this paid acceptance disabled. The caller supplies a fresh
-// private output directory and separately approves these exact ceilings.
+// private output directory and separately approves these session ceilings.
 func TestM14LiveSDKAcquisitionAndIndependentReview(t *testing.T) {
-	if os.Getenv("TAXION_M14_SDK_APPROVAL") != "3-sessions-30-credits-20000-tokens-20m" {
+	if os.Getenv("TAXION_M14_SDK_APPROVAL") != "3-sessions-30-credits-20m" {
 		t.Skip("requires separate Human approval; never enable in normal CI")
 	}
 	root := os.Getenv("TAXION_M14_SDK_OUTPUT")
@@ -78,7 +78,7 @@ func TestM14LiveSDKAcquisitionAndIndependentReview(t *testing.T) {
 		Worktree:      worktree, Branch: "work/task", BaselineSHA: head,
 		CreatedFrom: "human:m14-local-search", AuthorizationID: "synthetic-execution",
 		Decisions: []core.TaskDecision{
-			{ID: "synthetic-execution", Source: "human:m14-sdk-approved", Text: "Authorize one acquisition, Coder and Reviewer; synthetic sources only; 30 credits each; 20000 observed tokens and 20 minutes total."},
+			{ID: "synthetic-execution", Source: "human:m14-sdk-approved", Text: "Authorize one acquisition, Coder and Reviewer; synthetic sources only; 30 credits each; 20 minutes total."},
 			{ID: "tools", Source: "human:m14-sdk-approved", Text: string(approvedTools)},
 		},
 	}
@@ -165,15 +165,11 @@ func TestM14LiveSDKAcquisitionAndIndependentReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, turnErr := RunSearchTurn(ctx, orchestrator, task.ID, "202", 20000)
+	turn, turnErr := RunSearchTurn(ctx, orchestrator, task.ID, "202")
 	closeErr := orchestrator.Close()
 	save("orchestrator-turn.json", turn)
 	if turnErr != nil || closeErr != nil || len(acquired.Specifications) != 2 {
 		t.Fatal("actual acquisition failed", turnErr, closeErr, len(acquired.Specifications))
-	}
-	var acquisitionTokens int64
-	for _, usage := range turn.Usage {
-		acquisitionTokens += *usage.InputTokens + *usage.OutputTokens
 	}
 	save("acquired.json", acquired)
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
@@ -181,14 +177,10 @@ func TestM14LiveSDKAcquisitionAndIndependentReview(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	remaining := int64(20000) - acquisitionTokens
-	if remaining <= 0 {
-		t.Fatal("no approved token budget remains for role acceptance")
-	}
 	repairs := 0
 	flow, err := StartReviewFlow(db, filepath.Join(root, "ledger.json"), ReviewFlowRequest{
 		ID: "live-source-flow", TaskID: task.ID, Repository: task.Repo, ReviewRoot: filepath.Join(root, "reviews"),
-		MaxRepairs: &repairs, MaxTokens: remaining, TimeoutSeconds: 600,
+		MaxRepairs: &repairs, TimeoutSeconds: 600,
 		Authorization: core.TaskDecision{ID: "live-flow", Source: "human:m14-sdk-approved", Text: "Authorize one Coder and one independent Reviewer; preserve the existing accepted synthetic baseline"},
 	})
 	if err != nil {
@@ -254,7 +246,7 @@ func TestM14LiveSDKAcquisitionAndIndependentReview(t *testing.T) {
 	state, loadErr := db.LoadWorkspace()
 	save("workspace.json", state)
 	save("flow.json", flow)
-	save("accounting.json", map[string]any{"orchestratorTokens": acquisitionTokens, "roleTokenCeiling": remaining, "roleSessions": created})
+	save("accounting.json", map[string]any{"roleSessions": created})
 	if runErr != nil || loadErr != nil || flow.Status != "COMPLETED" || created != 2 {
 		t.Fatal("real independent role flow did not complete", flow.Status, runErr, loadErr, created)
 	}
@@ -264,5 +256,5 @@ func TestM14LiveSDKAcquisitionAndIndependentReview(t *testing.T) {
 		!reflect.DeepEqual(coder.Instruction.Specifications, reviewer.Instruction.Specifications) {
 		t.Fatal("actual SDK handoff lost snapshot identity or role isolation")
 	}
-	t.Logf("completed: 3 distinct SDK sessions; %d acquisition tokens; exact scope %s", acquisitionTokens, scopeHash)
+	t.Logf("completed: %d distinct SDK role sessions; exact scope %s", created, scopeHash)
 }

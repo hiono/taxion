@@ -73,9 +73,8 @@ func (c *Controller) managedGit(ctx context.Context, dispatchID, sessionID, publ
 			if !slices.Contains(flow.DispatchIDs, dispatchID) {
 				continue
 			}
-			tokens, known := flowTokens(state.Graph, flow)
-			if flow.Status != "RUNNING" || !time.Now().Before(flow.Deadline) || !known || tokens >= flow.MaxTokens {
-				return fmt.Errorf("managed commit requires an active review flow within its time and known usage limits")
+			if flow.Status != "RUNNING" || !time.Now().Before(flow.Deadline) {
+				return fmt.Errorf("managed commit requires an active review flow before its deadline")
 			}
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithDeadline(ctx, flow.Deadline)

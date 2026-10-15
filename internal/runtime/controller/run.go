@@ -10,6 +10,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
@@ -142,6 +143,91 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 	return flow, errors.Join(err, saveErr)
 }
 
+func writeCreditStatus(ctx context.Context, encoder *json.Encoder, dispatch core.GraphDispatch, event runtime.Event, worker runtime.Identity) error {
+	var usage core.DispatchUsage
+	if err := json.Unmarshal([]byte(event.Payload), &usage); err != nil {
+		return fmt.Errorf("taxion: decode per-call usage for credit status: %w", err)
+	}
+	accountQuota, accountUsedPercentage := readAccountQuotaForCreditStatus(ctx, dispatch, worker)
+	status := "unavailable"
+	if usage.AICreditsStatus != nil && *usage.AICreditsStatus != "" {
+		status = *usage.AICreditsStatus
+	}
+	reason := "no validated same-unit account allowance is available"
+	if usage.TotalNanoAIU == nil {
+		reason = "per-call nano-AIU is unavailable; " + reason
+	} else {
+		reason = "per-call usage is reported in nano-AIU; " + reason
+	}
+	var sessionCeiling *float64
+	if provider, ok := worker.(interface{ SessionCreditCeiling() float64 }); ok {
+		if value := provider.SessionCreditCeiling(); value > 0 {
+			sessionCeiling = &value
+		}
+	}
+	payload, err := json.Marshal(struct {
+		DispatchID             string                 `json:"dispatchId"`
+		Role                   string                 `json:"role"`
+		TurnNanoAIU            *float64               `json:"turnNanoAIU,omitempty"`
+		AICreditsStatus        string                 `json:"aiCreditsStatus"`
+		SessionCreditCeiling   *float64               `json:"sessionCreditCeiling,omitempty"`
+		RemainingCreditBalance string                 `json:"remainingCreditBalance"`
+		UsedPercentage         string                 `json:"usedPercentage"`
+		RemainingPercentage    string                 `json:"remainingPercentage"`
+		AccountQuota           *runtime.QuotaSnapshot `json:"accountQuota"`
+		AccountUsedPercentage  *float64               `json:"accountUsedPercentage,omitempty"`
+		Reason                 string                 `json:"reason"`
+	}{
+		DispatchID: dispatch.ID, Role: dispatch.Recipient, TurnNanoAIU: usage.TotalNanoAIU,
+		AICreditsStatus: status, SessionCreditCeiling: sessionCeiling,
+		RemainingCreditBalance: "unavailable", UsedPercentage: "unavailable", RemainingPercentage: "unavailable",
+		AccountQuota: accountQuota, AccountUsedPercentage: accountUsedPercentage, Reason: reason,
+	})
+	if err != nil {
+		return fmt.Errorf("taxion: encode per-call credit status: %w", err)
+	}
+	if err := encoder.Encode(runtime.Event{Type: "credit_status", Payload: string(payload)}); err != nil {
+		return fmt.Errorf("taxion: write per-call credit status: %w", err)
+	}
+	return nil
+}
+
+func readAccountQuotaForCreditStatus(ctx context.Context, dispatch core.GraphDispatch,
+	worker runtime.Identity) (*runtime.QuotaSnapshot, *float64) {
+	quota := &runtime.QuotaSnapshot{
+		Resource: "premium_interactions", Scope: "selected account", Unit: "requests",
+		Source: "approval-gate", State: "unavailable", ObservedAt: time.Now().UTC(),
+		Reason: "per-turn account quota read is not approved",
+	}
+	policy := dispatch.Instruction.BudgetGuidance
+	if policy == nil || policy.Mode != "account" || !policy.AccountReadApproved {
+		return quota, nil
+	}
+	if dispatch.Configuration == nil {
+		quota.Reason = "selected runtime configuration is unavailable"
+		return quota, nil
+	}
+	var selected config.Config
+	if err := json.Unmarshal(dispatch.Configuration.Selection, &selected); err != nil {
+		quota.Reason = "selected runtime configuration is invalid"
+		return quota, nil
+	}
+	observation, err := readBudgetQuota(ctx, worker, selected, &budgetObservation{})
+	if observation == nil || observation.Account == nil {
+		quota.Reason = "account quota observation unavailable"
+		if err != nil {
+			quota.Reason = "account quota read failed; provider details withheld"
+		}
+		return quota, nil
+	}
+	quota = observation.Account
+	if quota.State != "available" || quota.RemainingPercentage == nil {
+		return quota, nil
+	}
+	usedPercentage := 100 - *quota.RemainingPercentage
+	return quota, &usedPercentage
+}
+
 // StreamEvents finalizes only a terminal turn. Monitoring applies while waiting
 // and after usage events, including before a final result can be adopted.
 func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispatch, cursor uint64, out io.Writer, check func() error) (err error) {
@@ -209,6 +295,9 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 			case runtime.EventOutput:
 				finalOutput = event.Payload
 			case runtime.EventUsage:
+				if err := writeCreditStatus(ctx, encoder, dispatch, event, c.runtime); err != nil {
+					return err
+				}
 				if err := checkLimits(); err != nil {
 					return err
 				}

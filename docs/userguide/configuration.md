@@ -174,10 +174,10 @@ Global / Project / 環境変数で既定値を選び、実行依頼の明示選�
 既存 session に config 編集を遡及適用しません。
 設定がない旧 Task / Dispatch は従来の無補足を維持し、新方式への継続には再承認を要求します。
 
-方式の選択で予算や権限は増えません。`off` でも既存の停止判定は維持し、
-account 残量が取得できなくてもゼロや無制限と扱いません。
-Copilot session の `max-ai-credits`、Flow の `maxTokens`、
-context window、provider account 全体の quota は別の値です。
+方式の選択で予算や権限は増えません。`off` でも期限、repair 回数、契約・権限の
+検査と安全停止は維持し、account 残量が取得できなくてもゼロや無制限と扱いません。
+Copilot session の `max-ai-credits`、call ごとの利用量、context window、
+provider account 全体の quota は別の値です。token 利用量は新しい Flow を停止しません。
 quota 照会には runtime 用の選択済み credential を使う設計であり、
 Git repository 用の token を流用しません。
 

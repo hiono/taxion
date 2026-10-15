@@ -40,7 +40,7 @@ Workspace: defaults to .taxion/ under the Git worktree root (cwd outside Git).
 
 Commands:
   ready               Print the orchestration prompt; optional --install-skill / --update-skill / --check-skill
-  request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --max-tokens, --timeout, --max-ai-credits)
+  request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --timeout, --max-ai-credits)
   config check        Validate fixed Global/Project YAML and environment references ([--sources], [--capabilities], [--task], [--dispatch])
   git check-index     Reject local Taxion and dotenv paths in the actual commit index
   git check-range     Scan every unpublished commit tree and message (--base SHA, --head SHA, --scanner PATH)

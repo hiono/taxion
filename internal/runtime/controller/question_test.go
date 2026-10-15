@@ -69,8 +69,14 @@ func (q *questionRuntime) Stop(context.Context, string) error {
 }
 
 func questionEvents(answer string) chan runtime.Event {
+	return questionEventsWithUsage(answer, `{"model":"test","inputTokens":10,"outputTokens":5}`)
+}
+
+func questionEventsWithUsage(answer, usage string) chan runtime.Event {
 	events := make(chan runtime.Event, 3)
-	events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":10,"outputTokens":5}`}
+	if usage != "" {
+		events <- runtime.Event{Type: runtime.EventUsage, Payload: usage}
+	}
 	events <- runtime.Event{Type: runtime.EventOutput, Payload: answer}
 	events <- runtime.Event{Type: runtime.EventTurnFinished}
 	return events
@@ -106,7 +112,7 @@ func TestQuestionAnswersSavedRecordsWithoutChangingWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(filepath.Dir(databasePath), "ledger.json")
-	result, err := AskQuestion(context.Background(), db, path, "task", "今は何を確認できていますか？", resolved.Config, 1000, q)
+	result, err := AskQuestion(context.Background(), db, path, "task", "今は何を確認できていますか？", resolved.Config, q)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +167,7 @@ func TestQuestionRejectsUnapprovedProviderDeniedAndChangedApproval(t *testing.T)
 				}
 			}
 			result, err := AskQuestion(context.Background(), db, filepath.Join(filepath.Dir(databasePath), "ledger.json"),
-				"task", "status?", resolved.Config, 1000, q)
+				"task", "status?", resolved.Config, q)
 			if err == nil || result.Answer != nil || len(q.sends) != 0 {
 				t.Fatal("question ignored approval or provider gate")
 			}
@@ -172,27 +178,39 @@ func TestQuestionRejectsUnapprovedProviderDeniedAndChangedApproval(t *testing.T)
 	}
 }
 
-func TestQuestionRejectsMissingUsageInvalidSourcesAndCeilings(t *testing.T) {
-	for _, mode := range []string{"missing-usage", "missing-count", "overflow", "exact-limit", "bad-source", "missing-source", "null-lists", "empty-answer", "runtime-failure", "stream-ended", "cancelled", "stop-failure", "oversize-input"} {
+func TestQuestionAcceptsMissingOrOverLimitTokenUsage(t *testing.T) {
+	for _, mode := range []string{"missing-usage", "missing-count", "over-former-limit"} {
+		t.Run(mode, func(t *testing.T) {
+			db, databasePath, worker, resolved := questionFixture(t)
+			worker.role = "ORCHESTRATOR"
+			q := &questionRuntime{configuredRuntime: worker, events: questionEvents(savedQuestionAnswer)}
+			switch mode {
+			case "missing-usage":
+				q.events = questionEventsWithUsage(savedQuestionAnswer, "")
+			case "missing-count":
+				q.events = questionEventsWithUsage(savedQuestionAnswer, `{"inputTokens":10}`)
+			case "over-former-limit":
+				q.events = questionEventsWithUsage(savedQuestionAnswer, `{"inputTokens":1001,"outputTokens":2000}`)
+			}
+			result, err := AskQuestion(context.Background(), db, filepath.Join(filepath.Dir(databasePath), "ledger.json"),
+				"task", "What is saved?", resolved.Config, q)
+			if err != nil || result.Answer == nil || q.starts != 1 || q.stops != 1 {
+				t.Fatalf("token accounting prevented a completed question: result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestQuestionRejectsInvalidSourcesAndFailures(t *testing.T) {
+	for _, mode := range []string{"bad-source", "missing-source", "null-lists", "empty-answer", "runtime-failure", "stream-ended", "cancelled", "stop-failure", "oversize-input"} {
 		t.Run(mode, func(t *testing.T) {
 			db, databasePath, worker, resolved := questionFixture(t)
 			worker.role = "ORCHESTRATOR"
 			q := &questionRuntime{configuredRuntime: worker, events: questionEvents(savedQuestionAnswer)}
 			text := "What is saved?"
-			limit := int64(1000)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			switch mode {
-			case "missing-usage":
-				<-q.events
-			case "missing-count":
-				q.events = make(chan runtime.Event, 1)
-				q.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"inputTokens":10}`}
-			case "overflow":
-				q.events = make(chan runtime.Event, 1)
-				q.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"inputTokens":9223372036854775807,"outputTokens":1}`}
-			case "exact-limit":
-				limit = 15
 			case "bad-source":
 				q.events = questionEvents(strings.ReplaceAll(savedQuestionAnswer, "/task/task/status", "/task/task/fabricated"))
 			case "missing-source":
@@ -215,7 +233,7 @@ func TestQuestionRejectsMissingUsageInvalidSourcesAndCeilings(t *testing.T) {
 				text = strings.Repeat("x", 128*1024)
 			}
 			result, err := AskQuestion(ctx, db, filepath.Join(filepath.Dir(databasePath), "ledger.json"),
-				"task", text, resolved.Config, limit, q)
+				"task", text, resolved.Config, q)
 			if err == nil || strings.Contains(err.Error(), "private-provider-detail") {
 				t.Fatal("invalid question returned success or leaked details", mode, result, err)
 			}
@@ -238,7 +256,7 @@ func TestQuestionReportsTargetChangeWithoutRetargetingAnswer(t *testing.T) {
 		}
 	}
 	result, err := AskQuestion(context.Background(), db, filepath.Join(filepath.Dir(databasePath), "ledger.json"), "task",
-		"status?", resolved.Config, 1000, q)
+		"status?", resolved.Config, q)
 	if err != nil || !result.Changed || len(result.Context.Task.Concerns) != 0 {
 		t.Fatal("question silently replaced its observed target", err)
 	}

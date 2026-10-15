@@ -137,7 +137,7 @@ taxion ready
 
 `ready` は、その会話中の agent が Taxion を操作するためのメタプロンプトを stdout に出します。依頼の整理、設定・探索・保存状態の確認、Task の登録と承認、予算承認、Coder・検証・独立 Reviewer、停止後の成果再利用を案内します。必要な JSON は agent が作り、proposal の hash や結果を次の入力へ渡します。利用者が JSON や role prompt を転記する手順ではありません。
 
-agent は目的、変更範囲、検証コマンド、設定選択、修正回数、token 上限と期限を利用者に示し、明示承認後に実行します。外側で済んだ相談を内部 Planner に繰り返させる必要はありません。承認済みの安全な次の操作がある限り続け、判断待ちや予算終了では理由を説明します。既存 Task や保存成果がある場合は、最初からやり直す前に照合します。
+agent は目的、変更範囲、検証コマンド、設定選択、修正回数、期限、session soft ceiling を利用者に示し、明示承認後に実行します。各 model call の観測利用量も報告しますが、予測不能な token 数で承認済み目標を止めません。承認済みの安全な次の操作がある限り続け、判断待ちや期限到達では理由を説明します。既存 Task や保存成果がある場合は、最初からやり直す前に照合します。
 
 引数なしの `ready` はモデル、認証・課金照会、設定の読込み、workspace の作成を行いません。準備完了の診断ではなく、診断には `doctor` を使います。外側の agent の費用と、後続の `workflow run` などのモデル費用は別です。出力だけで agent の従属や継続を保証するものでもありません。無料の合成操作回帰と、実 agent が指示を理解して進める受入れは区別します。
 
@@ -163,7 +163,7 @@ taxion ready --update-skill
 設定と `taxion init` が済んでいれば、`request` で Planner に変更を相談できます。JSON や Coder / Reviewer の prompt ファイルを作る必要はありません。作業用の clean な Git worktree で実行します。repository は設定と一致する名前を明示します。
 
 ```sh
-taxion request --repo owner/repository --max-tokens 40000 \
+taxion request --repo owner/repository \
   --timeout 20m --max-ai-credits 30 --context-path README.md
 ```
 
@@ -173,7 +173,7 @@ taxion request --repo owner/repository --max-tokens 40000 \
 
 この入口は snapshot mode と `fileAccess: all` を明示して使います。worktree 内の新規ファイルを許可し、Coder には `view,create,edit,apply_patch`、Reviewer には `view` を渡します。変更結果の scope 検査、worktree 外と保護された path の拒否、Reviewer の読み取り専用制約は維持します。細かい file access や外部 skill の承認が必要な場合は、次節の個別手順を使います。
 
-token 上限は Planner の全対話と Coder / Reviewer で共有し、期限は `/plan` から数えます。`--max-ai-credits` は session ごとの soft ceiling で、依頼全体の金額上限や一 turn の hard cap ではありません。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の各回答には費用が発生するため、同じ内容を繰り返し送らないようにします。Planner の失敗を自動 retry しません。
+期限は `/plan` から数えます。`--max-ai-credits` は session ごとの soft ceiling で、依頼全体の金額上限や一 turn の hard cap ではありません。Planner と Coder / Reviewer の利用量は各 model call ごとに記録します。account 残高・利用率は、同じ単位の allowance を取得できない限り unavailable と表示します。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の各回答には費用が発生するため、同じ内容を繰り返し送らないようにします。Planner の失敗を自動 retry しません。
 
 Planner はファイル・shell tool を持たず、依頼、これまでの対話、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストを受け取ります。元依頼の全文は保存した decision に一度だけ含め、対話の先頭はその出典を参照します。同じ Task を別の wrapper に重ねて送りません。path は directory ごとにまとめ、全件を保持したまま共通部分の繰り返しを減らします。通常は native な skill と指示も読み込みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。対話中の `/quit` または入力終了ではコードを実行せず、相談記録を残します。保存した相談の自動再開は未対応です。
 
@@ -290,7 +290,7 @@ confirmation は Task を `READY` にしますが、Dispatch は発行しませ�
 
 ### Flow の上限を決めて開始する
 
-`workflow start` は READY Task に対して Coder Dispatch を発行します。この時点で repair 回数、token ceiling、期限を明示し、別の Human 判断として Flow の予算を承認します。
+`workflow start` は READY Task に対して Coder Dispatch を発行します。この時点で repair 回数と期限を明示し、別の Human 判断として Flow を承認します。token 閾値で Flow は停止しません。
 
 ```json
 {
@@ -299,12 +299,11 @@ confirmation は Task を `READY` にしますが、Dispatch は発行しませ�
   "repository": "owner/repository",
   "reviewRoot": "/absolute/path/to/reviews",
   "maxRepairs": 1,
-  "maxTokens": 30000,
   "timeoutSeconds": 1800,
   "authorization": {
     "id": "task-example-flow-budget",
     "source": "human:budget-1",
-    "text": "最大1回の修正を含む実行と独立レビューに、記載した上限で予算を承認する"
+    "text": "最大1回の修正を含む実行と独立レビューを、記載した期限内で許可する"
   }
 }
 ```
@@ -333,11 +332,12 @@ taxion workflow show --id task-example-flow
 
 ### 残予算の案内と現在の確認方法
 
-現在は `workflow show --id FLOW-ID` で承認済み上限・利用量・未完了 role を確認します。
+現在は `workflow show --id FLOW-ID` で承認済み期限・利用量・未完了 role を確認します。
 Copilot の `--max-ai-credits` は session 単位の soft ceiling であり、
 アカウント全体の残 credit を表示する option ではありません。
-新しい依頼では、既定の `flow` が承認済み Flow の上限・観測済み tokens・
-残り・期限・未完了 role を同じ指示へ補足します。追加のモデル呼出しはありません。
+各 model call で取得できた nano-AIU と AI-credit status を表示します。
+account 残高、使用率、残り率は、同じ単位の allowance を確認できない場合は unavailable です。
+既定の `flow` は承認済み期限と未完了 role 等を指示へ補足し、追加のモデル呼出しはしません。
 
 Copilot SDK の account quota、session の累積 cost、公式 Billing API の期間別使用量は
 別の情報です。requests の残り割合を AI Credit の絶対残量と読み替えたり、
@@ -368,7 +368,7 @@ Flow が停止しても Dispatch に保存 session が残る場合は、別の r
 
 停止後は `workflow show --id FLOW-ID` と `task graph` で `CANCELLED`、`runtime-stop:` 証拠、部分 Git 証拠を確認します。`records show` では元の suspension と cancellation の結果 receipt を確認できます。取消要求だけが成功し、保存が失敗する場合もあるため、コマンドを呼んだだけで停止確認を済ませず、確認前に同じ成果物を使った実行を重ねないでください。
 
-token 上限停止では、停止済み Flow の上限を変更して再開することはできません。部分成果や完了済み Coder 結果から続ける場合は、同じ成果物を持つ別 worktree、後続 Task の再承認、新しい予算承認が必要です。commit mode は clean worktree、snapshot mode は保存 tree と同じ作業ファイルを要求します。`workflow recover` は残った runner 所有権だけを解放します。具体的な Git 手順と `continueFromDispatchId` の使い分けは[予算上限後の作業継続](../develop/task-graph.md#予算上限後の作業継続)を参照してください。
+新しい Flow は token 閾値で停止しません。既存 workspace に残る旧 `BUDGET_LIMIT` の停止記録は変更せず、部分成果や完了済み Coder 結果から続ける場合は、同じ成果物を持つ別 worktree と後続 Task の再承認が必要です。期限切れ・cancel 等で停止した作業も保存結果を確認してから続けます。commit mode は clean worktree、snapshot mode は保存 tree と同じ作業ファイルを要求します。`workflow recover` は残った runner 所有権だけを解放します。具体的な Git 手順と `continueFromDispatchId` の使い分けは[停止した作業の継続](../develop/task-graph.md#停止した作業の継続)を参照してください。
 
 snapshot mode で完了済み Coder 結果を引き継ぐ場合は、保存済み `outputSha`（baseline commit）、`outputTreeSha`、変更 path を承認した別 worktreeを用意します。後続 Task の target tree が一致することを `conversation confirm` が検査し、`workflow start` には元の Coder Dispatch ID を `continueFromDispatchId` として指定します。新しい Flow は Coder を再実行せず Reviewer から始まります。停止時点が `CANCELLED` の部分成果なら、同じ baseline と保存 tree を持つ別 worktreeを用意し、後続 Task を承認したうえで Coder から続けます。
 

@@ -19,6 +19,7 @@ import (
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
+	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/runtime/copilot"
 	"github.com/hiono/taxion/internal/store"
@@ -86,7 +87,7 @@ Do not invent tests: the controller executes the approved commands. Inspect the
 exact target tree from the contract, but do not include outputTreeSha: the controller
 sets it. Approve only supported conclusions.`
 
-type requestPlanner func(context.Context, *store.Store, config.Config, core.GraphTask, string, int64, float64, string, string) (controller.QuestionResult, error)
+type requestPlanner func(context.Context, *store.Store, config.Config, core.GraphTask, string, float64, string, string) (controller.QuestionResult, error)
 
 type requestMessage struct {
 	Role   string `json:"role"`
@@ -104,7 +105,7 @@ func requestPathInventory(paths []string) map[string][]string {
 }
 
 func planNewRequest(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask, text string,
-	tokens int64, credits float64, cli, base string) (result controller.QuestionResult, err error) {
+	credits float64, cli, base string) (result controller.QuestionResult, err error) {
 	selection, err := json.Marshal(selected)
 	if err != nil {
 		return result, err
@@ -146,7 +147,7 @@ func planNewRequest(ctx context.Context, db *store.Store, selected config.Config
 		return result, err
 	}
 	defer func() { err = errors.Join(err, worker.Close()) }()
-	return controller.AskPlanner(ctx, db, storePath, task.ID, text, selected, tokens, worker)
+	return controller.AskPlanner(ctx, db, storePath, task.ID, text, selected, worker)
 }
 
 func requestCmd(args []string, input io.Reader, output io.Writer) error {
@@ -158,7 +159,6 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	fs := flag.NewFlagSet("request", flag.ContinueOnError)
 	repo := fs.String("repo", "", "explicit namespace/repository")
 	worktree := fs.String("worktree", ".", "clean attached worktree to modify")
-	tokens := fs.Int64("max-tokens", 0, "total observed token ceiling across planning and execution")
 	timeout := fs.Duration("timeout", 0, "total planning and execution deadline after /plan")
 	credits := fs.Float64("max-ai-credits", 0, "per-session soft credit ceiling, not a total budget (minimum: 30)")
 	repairs := fs.Int("max-repairs", 1, "maximum repair turns after independent review")
@@ -170,8 +170,8 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *repo == "" || *tokens <= 0 || *timeout < time.Second || *credits <= 0 || *repairs < 0 || *repairs > 100 || len(paths) > 16 {
-		return fmt.Errorf("request requires --repo and positive --max-tokens, --timeout (at least 1s), --max-ai-credits; --max-repairs must be 0-100")
+	if *repo == "" || *timeout < time.Second || *credits <= 0 || *repairs < 0 || *repairs > 100 || len(paths) > 16 {
+		return fmt.Errorf("request requires --repo, --timeout (at least 1s) and --max-ai-credits; --max-repairs must be 0-100")
 	}
 	if err := copilot.ValidateAICreditLimit(*credits); err != nil {
 		return err
@@ -241,13 +241,12 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	}
 	if _, err := fmt.Fprintf(output,
 		"Repository: %s\nWorktree: %s\nBranch: %s\nBaseline: %s\nRuntime account: %s\n"+
-			"Token ceiling (Planner + Coder + Reviewer): %d; deadline: %s; repairs: %d\n"+
-			"Per-session soft credit ceiling: %g (not a total or hard cap)\n"+
+			"Deadline: %s; repairs: %d\nPer-session soft credit ceiling: %g (not a total or hard cap)\n"+
 			"Budget guidance: %s (%s); account quota read: %t\n"+
 			"Planner receives the request, all committed paths grouped by directory and selected context files; native customization discovery is enabled, with skill but no file/shell tools.\n"+
 			"Native file hooks and configured servers may run host commands or connect externally.\n"+
 			"有料のPlanner対話を開始するには /plan、取り消すには /quit。まだコードは変更しません。\n",
-		*repo, root, branch, baseline, selected.Runtime.Account, *tokens, *timeout, *repairs, *credits,
+		*repo, root, branch, baseline, selected.Runtime.Account, *timeout, *repairs, *credits,
 		guidance.Mode, guidance.Source, guidance.AccountReadApproved); err != nil {
 		return err
 	}
@@ -303,7 +302,6 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		return err
 	}
 	conversation := []requestMessage{{Role: "human", Source: "/planner/task/decisions/0/text"}}
-	var used int64
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -316,7 +314,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		if err != nil {
 			return err
 		}
-		result, planErr := planner(ctx, db, selected, task, string(text), *tokens-used, *credits, *cli, *base)
+		result, planErr := planner(ctx, db, selected, task, string(text), *credits, *cli, *base)
 		receipt, err := json.MarshalIndent(struct {
 			Input  json.RawMessage           `json:"input"`
 			Result controller.QuestionResult `json:"result"`
@@ -328,28 +326,24 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		if err := db.AppendRequestRecord(id, "planning", string(receipt)); err != nil {
 			return errors.Join(planErr, err)
 		}
+		var accountQuota *runtime.QuotaSnapshot
+		if result.BudgetGuidance != nil {
+			accountQuota = result.BudgetGuidance.Account
+		}
+		if err := displayRequestUsage(output, result.Usage, *credits, accountQuota); err != nil {
+			return errors.Join(planErr, err)
+		}
 		if planErr != nil {
 			return planErr
 		}
-		for _, usage := range result.Usage {
-			if usage.InputTokens == nil || usage.OutputTokens == nil {
-				return fmt.Errorf("request Planner usage is unknown; receipt retained in SQLite for %s", id)
-			}
-			for _, count := range []int64{*usage.InputTokens, *usage.OutputTokens} {
-				if count < 0 || count >= *tokens-used {
-					return fmt.Errorf("request token ceiling reached; receipt retained in SQLite for %s", id)
-				}
-				used += count
-			}
-		}
-		if len(result.Usage) == 0 || result.Answer == nil || result.Changed {
-			return fmt.Errorf("request Planner lacks usage, a valid answer or stable context; receipt retained in SQLite for %s", id)
+		if result.Answer == nil || result.Changed {
+			return fmt.Errorf("request Planner lacks a valid answer or stable context; receipt retained in SQLite for %s", id)
 		}
 		answer := *result.Answer
 		if err := controller.ValidateRequestPlan(answer); err != nil {
 			return err
 		}
-		if err := displayRequestPlan(output, answer, *tokens-used); err != nil {
+		if err := displayRequestPlan(output, answer); err != nil {
 			return err
 		}
 		line, err = read()
@@ -415,7 +409,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			}
 			if _, err := controller.ConfirmIntake(db, controller.IntakeConfirmation{
 				TaskID: id, ExpectedHash: hash, Actor: selected.Execution.Requester, Source: source,
-				Reason:    "Human selected /approve for the displayed plan, host validation commands, runtime and remaining ceilings",
+				Reason:    "Human selected /approve for the displayed plan, host validation commands, runtime, deadline and repair count",
 				Selection: selected, AdditionalTaskIDs: reviewers,
 				ConfigurationDecisionID: core.ConfigurationApprovalID(selected.Execution.ApprovalRef, id),
 			}); err != nil {
@@ -432,9 +426,9 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			}
 			if _, err := controller.StartReviewFlow(db, storePath, controller.ReviewFlowRequest{
 				ID: flowID, TaskID: id, Repository: *repo, ReviewRoot: reviewRoot,
-				MaxRepairs: repairs, MaxTokens: *tokens - used, TimeoutSeconds: seconds,
+				MaxRepairs: repairs, TimeoutSeconds: seconds,
 				Authorization: core.TaskDecision{ID: flowID + "-budget", Source: source,
-					Text: "Human selected /approve for the displayed remaining token ceiling, deadline and repair limit"},
+					Text: "Human selected /approve for the approved goal, deadline and repair limit; prioritize acceptance while preserving AI credits"},
 			}); err != nil {
 				return err
 			}
@@ -484,7 +478,7 @@ func requestError(err error) string {
 	return err.Error()
 }
 
-func displayRequestPlan(output io.Writer, answer controller.QuestionAnswer, remaining int64) error {
+func displayRequestPlan(output io.Writer, answer controller.QuestionAnswer) error {
 	var text bytes.Buffer
 	for _, claim := range answer.Confirmed {
 		fmt.Fprintln(&text, claim.Text)
@@ -506,9 +500,71 @@ func displayRequestPlan(output io.Writer, answer controller.QuestionAnswer, rema
 	for _, question := range answer.Questions {
 		fmt.Fprintln(&text, question)
 	}
-	fmt.Fprintf(&text, "\n残りtoken上限: %d\n", remaining)
 	fmt.Fprintln(&text, "実行時はworktree内の新規ファイルを許可し、commitは作りません。Reviewerは読み取り専用です。")
 	fmt.Fprintln(&text, "修正・回答は人のことばで入力してください。質問が解消した計画を実行するには /approve、終了は /quit。")
 	_, err := output.Write(text.Bytes())
 	return err
+}
+
+func displayRequestUsage(output io.Writer, usage []core.DispatchUsage, sessionCeiling float64,
+	accountQuota *runtime.QuotaSnapshot) error {
+	quotaStatus := requestQuotaStatus(accountQuota)
+	if len(usage) == 0 {
+		_, err := fmt.Fprintf(output,
+			"Planner turn usage: unavailable; session soft ceiling: %g AI credits; AI-credit account balance and percentages: unavailable; %s\n",
+			sessionCeiling, quotaStatus)
+		return err
+	}
+	for index, call := range usage {
+		status := "unavailable"
+		if call.AICreditsStatus != nil && *call.AICreditsStatus != "" {
+			status = *call.AICreditsStatus
+		}
+		amount := "unavailable"
+		if call.TotalNanoAIU != nil {
+			amount = fmt.Sprintf("%g nano-AIU", *call.TotalNanoAIU)
+		}
+		if _, err := fmt.Fprintf(output,
+			"Planner call %d usage: %s (AI-credit status: %s); session soft ceiling: %g AI credits; AI-credit account balance and percentages: unavailable; %s\n",
+			index+1, amount, status, sessionCeiling, quotaStatus); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func requestQuotaStatus(quota *runtime.QuotaSnapshot) string {
+	if quota == nil || quota.State != "available" {
+		reason := "no approved account quota snapshot"
+		if quota != nil && quota.Reason != "" {
+			reason = quota.Reason
+		}
+		return "premium-interactions request quota: unavailable (" + reason + ")"
+	}
+	counts := "request counts unavailable"
+	if quota.Used != nil && quota.Entitlement != nil {
+		counts = fmt.Sprintf("%d/%d used", *quota.Used, *quota.Entitlement)
+	}
+	remaining := "remaining count unavailable"
+	if quota.Remaining != nil {
+		remaining = fmt.Sprintf("%d remaining", *quota.Remaining)
+	}
+	if quota.Unlimited {
+		remaining = "unlimited"
+	}
+	percentage := "percentages unavailable"
+	if quota.RemainingPercentage != nil {
+		usedPercentage := 100 - *quota.RemainingPercentage
+		percentage = fmt.Sprintf("%.1f%% used, %.1f%% remaining", usedPercentage, *quota.RemainingPercentage)
+	}
+	reset := ""
+	if quota.ResetAt != nil {
+		reset = "; resets " + quota.ResetAt.Format(time.RFC3339)
+	}
+	observed := ""
+	if !quota.ObservedAt.IsZero() {
+		observed = "; observed " + quota.ObservedAt.Format(time.RFC3339)
+	}
+	return fmt.Sprintf("premium-interactions request quota: %s (%s; %s%s%s)",
+		counts, percentage, remaining, reset, observed)
 }

@@ -17,22 +17,21 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
-func TestConversationQuestionRequiresExplicitLimitsBeforeOpeningWorkspace(t *testing.T) {
+func TestConversationQuestionRequiresTimeAndCreditLimitsBeforeOpeningWorkspace(t *testing.T) {
 	for _, args := range [][]string{
 		nil,
 		{"run"},
 		{"ask"},
 		{"ask", "--task", "task", "--question", "今どうなっていますか？"},
-		{"ask", "--task", "task", "--question", "status?", "--max-tokens", "1000", "--timeout", "1m"},
-		{"ask", "--task", "task", "--question", "status?", "--max-tokens", "1000", "--timeout", "1m", "--max-ai-credits", "1"},
-		{"ask", "--task", "task", "--question", "status?", "--max-tokens", "-1", "--timeout", "1m", "--max-ai-credits", "30"},
-		{"ask", "--task", "task", "--question", "status?", "--max-tokens", "1000", "--timeout", "0s", "--max-ai-credits", "30"},
-		{"ask", "--task", "task", "--question", "status?", "--max-tokens", "1000", "--timeout", "1m", "--max-ai-credits", "30", "extra"},
+		{"ask", "--task", "task", "--question", "status?", "--timeout", "1m"},
+		{"ask", "--task", "task", "--question", "status?", "--timeout", "1m", "--max-ai-credits", "1"},
+		{"ask", "--task", "task", "--question", "status?", "--timeout", "0s", "--max-ai-credits", "30"},
+		{"ask", "--task", "task", "--question", "status?", "--timeout", "1m", "--max-ai-credits", "30", "extra"},
 		{"plan", "--task", "task", "--question", "Repair or replan?"},
-		{"plan", "--task", "task", "--question", "Repair or replan?", "--max-tokens", "1000", "--timeout", "1m", "--max-ai-credits", "1"},
+		{"plan", "--task", "task", "--question", "Repair or replan?", "--timeout", "1m", "--max-ai-credits", "1"},
 		{"investigate", "--task", "task", "--question", "Read a file"},
-		{"investigate", "--task", "task", "--question", "Read a file", "--max-tokens", "1000", "--timeout", "1m", "--max-ai-credits", "30"},
-		{"investigate", "--task", "task", "--question", "Read a file", "--max-tokens", "1000", "--timeout", "1m", "--max-ai-credits", "30", "--path", "src/a.go", "--max-bytes", "65537"},
+		{"investigate", "--task", "task", "--question", "Read a file", "--timeout", "1m", "--max-ai-credits", "30"},
+		{"investigate", "--task", "task", "--question", "Read a file", "--timeout", "1m", "--max-ai-credits", "30", "--path", "src/a.go", "--max-bytes", "65537"},
 	} {
 		var output bytes.Buffer
 		if err := conversationCmd(args, &output); err == nil || output.Len() != 0 {
@@ -197,7 +196,7 @@ func TestWatchedConversationHoldsBeforeInputAndNeverApprovesOnEOF(t *testing.T) 
 			repairs := 1
 			flow, err := controller.StartReviewFlow(db, storePath, controller.ReviewFlowRequest{
 				ID: "watch", TaskID: task.ID, Repository: task.Repo, ReviewRoot: filepath.Join(dir, "reviews"),
-				MaxRepairs: &repairs, MaxTokens: 5000, TimeoutSeconds: 60,
+				MaxRepairs: &repairs, TimeoutSeconds: 60,
 				Authorization: core.TaskDecision{ID: "flow-approval", Source: "human:1", Text: "explicit bounded approval"},
 			})
 			if err != nil {

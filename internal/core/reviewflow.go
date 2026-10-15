@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// ReviewFlow retains the approved execution contract and ceilings across
-// controller restarts. Dispatches carry each observed execution separately.
+// ReviewFlow retains the approved execution contract across controller
+// restarts. Dispatches carry each observed execution separately.
 type ReviewFlow struct {
 	ID                string             `json:"id"`
 	TaskID            string             `json:"taskId"`
@@ -16,7 +16,7 @@ type ReviewFlow struct {
 	Contract          GraphTask          `json:"contract"`
 	ReviewRoot        string             `json:"reviewRoot"`
 	MaxRepairs        int                `json:"maxRepairs"`
-	MaxTokens         int64              `json:"maxTokens"`
+	MaxTokens         int64              `json:"maxTokens,omitempty"` // legacy telemetry threshold; no longer gates execution
 	StartedAt         time.Time          `json:"startedAt"`
 	Deadline          time.Time          `json:"deadline"`
 	Repairs           int                `json:"repairs"`
@@ -86,7 +86,7 @@ func (g TaskGraph) validateReviewFlows() error {
 			flow.Contract.Owner != "CODER" || flow.Contract.Reviewer != "REVIEWER" ||
 			flow.Contract.Status != Ready || !filepath.IsAbs(flow.ReviewRoot) ||
 			flow.MaxRepairs < 0 || flow.Repairs < 0 || flow.Repairs > flow.MaxRepairs ||
-			flow.MaxTokens <= 0 || flow.StartedAt.IsZero() || !flow.Deadline.After(flow.StartedAt) ||
+			flow.MaxTokens < 0 || flow.StartedAt.IsZero() || !flow.Deadline.After(flow.StartedAt) ||
 			!slices.Contains([]string{"RUNNING", "STOPPED", "COMPLETED"}, flow.Status) ||
 			!slices.Contains([]string{"", "SAFETY_STOP", "BUDGET_LIMIT"}, flow.StopCode) ||
 			flow.Status != "STOPPED" && flow.StopCode != "" ||

@@ -15,7 +15,6 @@ import (
 
 func TestPortableStoppedCoderContinuesWithoutOriginalStoresOrGit(t *testing.T) {
 	db, ledger, request := reviewFlowFixtureWithOutputMode(t, core.OutputModeWorktreeTreeSnapshot)
-	request.MaxTokens = 15
 	flow, err := StartReviewFlow(db, ledger, request)
 	if err != nil {
 		t.Fatal(err)
@@ -130,10 +129,7 @@ func TestPortableStoppedCoderContinuesWithoutOriginalStoresOrGit(t *testing.T) {
 		t.Fatal("failed collection left an output")
 	}
 	coder := executeFlowDispatch(t, db, flow, "", true)
-	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
-	if !errors.Is(err, ErrFlowStopped) {
-		t.Fatal(err)
-	}
+	flow = persistLegacyBudgetStoppedFlow(t, db, flow.ID)
 	before, err := db.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)
@@ -266,7 +262,7 @@ func TestPortableStoppedCoderContinuesWithoutOriginalStoresOrGit(t *testing.T) {
 	successor, err := StartReviewFlow(restored, filepath.Join(destination, ".taxion", "ledger.json"), ReviewFlowRequest{
 		ID: "restored-review", TaskID: approved.ID, Repository: approved.Repo,
 		ReviewRoot: filepath.Join(destination, "reviews"), ContinueFromDispatchID: coder.ID,
-		MaxRepairs: &repairs, MaxTokens: 100, TimeoutSeconds: 60,
+		MaxRepairs: &repairs, TimeoutSeconds: 60,
 		Authorization: core.TaskDecision{ID: "new-budget", Source: "human:move", Text: "Approve review of saved result"},
 	})
 	if err != nil {

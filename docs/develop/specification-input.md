@@ -189,12 +189,13 @@ Console に表示するのは ID・hash・該当箇所・版であり、本文�
 `serve` は read-only な stdio MCP の `taxion_search` を公開する。
 
 `conversation search --sdk` は、Orchestrator が host-owned `taxion_search` を呼ぶ明示的な有料操作である。
-Task の configuration・認証・repository access と、positive な `--max-tokens`、
-`--timeout`、`--max-ai-credits` を必要とする。
+Task の configuration・認証・repository access と、`--timeout`、
+`--max-ai-credits` を必要とする。
 host は exact query・root session・資料の Copilot 送信許可を確認し、取得した引用を保存する。
 session ID と観測 usage は private evidence に残す。
-token 上限は usage event を受けた時点の停止条件、credit 上限は SDK の soft cap として扱う。
-請求額の hard cap として使う場合は、provider 側の制御を別に確認する。
+token 利用量は各 call で報告するが、停止条件にはしない。
+account 残高・割合は同じ単位の allowance を確認できない限り unavailable とする。
+credit ceiling は SDK の session soft ceiling であり、請求額の hard cap ではない。
 
 ## 実 SDK の受入れ状況
 

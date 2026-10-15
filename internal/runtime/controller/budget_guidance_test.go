@@ -209,7 +209,7 @@ func TestQuotaTimeoutIsBoundedByApprovedTimeAndResetIsNotExpiry(t *testing.T) {
 	}
 }
 
-func TestFlowGuidanceUsesObservedTokensAndPreservesOffGate(t *testing.T) {
+func TestFlowGuidanceUsesObservedCreditsWithoutTokenCeilings(t *testing.T) {
 	for _, mode := range []string{"flow", "off"} {
 		t.Run(mode, func(t *testing.T) {
 			db, path, request := reviewFlowFixtureWithPolicy(t, "", budgetPolicy(t, mode))
@@ -224,10 +224,14 @@ func TestFlowGuidanceUsesObservedTokensAndPreservesOffGate(t *testing.T) {
 				t.Fatal(err)
 			}
 			input, output := int64(20), int64(10)
+			nanoAIU, creditStatus := 12.5, "complete"
 			if err := control.Send(t.Context(), id, "execute"); err != nil {
 				t.Fatal(err)
 			}
-			if err := control.RecordUsage(id, core.DispatchUsage{Model: "fixture", InputTokens: &input, OutputTokens: &output}); err != nil {
+			if err := control.RecordUsage(id, core.DispatchUsage{
+				Model: "fixture", InputTokens: &input, OutputTokens: &output,
+				TotalNanoAIU: &nanoAIU, AICreditsStatus: &creditStatus,
+			}); err != nil {
 				t.Fatal(err)
 			}
 			state, err := db.LoadWorkspace()
@@ -244,16 +248,17 @@ func TestFlowGuidanceUsesObservedTokensAndPreservesOffGate(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode == "flow" && (!strings.Contains(text, `"usedTokens":30`) ||
-				!strings.Contains(text, `"remainingTokens":9970`) ||
+				!strings.Contains(text, `"reportedNanoAIU":12.5`) ||
+				!strings.Contains(text, `"aiCreditsStatus":"complete"`) ||
 				!strings.Contains(text, `"unfinishedRoles":["CODER","REVIEWER"]`)) {
 				t.Fatal("flow observation did not use durable per-call usage", worker.sends)
 			}
-			input = request.MaxTokens
+			input = 100000
 			if err := control.RecordUsage(id, core.DispatchUsage{Model: "fixture", InputTokens: &input, OutputTokens: &output}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := control.prepareBudgetGuidance(t.Context(), dispatch, ""); err == nil || len(worker.sends) != 1 {
-				t.Fatal("off or advisory mode bypassed the approved budget gate")
+			if _, err := control.prepareBudgetGuidance(t.Context(), dispatch, ""); err != nil || len(worker.sends) != 1 {
+				t.Fatal("observed token count alone denied the approved goal", err)
 			}
 		})
 	}

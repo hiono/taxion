@@ -209,7 +209,6 @@ type PlannerFlow struct {
 	ID         string    `json:"id"`
 	Status     string    `json:"status"`
 	Reason     string    `json:"reason"`
-	MaxTokens  int64     `json:"maxTokens"`
 	Repairs    int       `json:"repairs"`
 	MaxRepairs int       `json:"maxRepairs"`
 	Deadline   time.Time `json:"deadline"`
@@ -249,7 +248,7 @@ func ObservePlannerContext(db *store.Store, ledgerPath, repository, taskID strin
 			if flow.TaskID == taskID {
 				result.Flows = append(result.Flows, PlannerFlow{
 					ID: flow.ID, Status: flow.Status, Reason: flow.Reason,
-					MaxTokens: flow.MaxTokens, Repairs: flow.Repairs, MaxRepairs: flow.MaxRepairs,
+					Repairs: flow.Repairs, MaxRepairs: flow.MaxRepairs,
 					Deadline: flow.Deadline, Held: flow.HandoffHeld(),
 				})
 				for _, id := range flow.DispatchIDs {

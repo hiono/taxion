@@ -46,7 +46,7 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 	repairs := 2
 	request := controller.ReviewFlowRequest{
 		ID: "flow", TaskID: task.ID, Repository: task.Repo, ReviewRoot: filepath.Join(dir, "reviews"),
-		MaxRepairs: &repairs, MaxTokens: 5000, TimeoutSeconds: 60,
+		MaxRepairs: &repairs, TimeoutSeconds: 60,
 		Authorization: core.TaskDecision{ID: "flow-authorized", Source: "human:1", Text: "authorize bounded independent reviews and repairs"},
 	}
 	file := filepath.Join(dir, "flow.json")
@@ -78,7 +78,7 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 	}
 	defer db.Close()
 	flow, ok := state.Graph.ReviewFlow(request.ID)
-	if !ok || flow.MaxRepairs != *request.MaxRepairs || flow.MaxTokens != request.MaxTokens ||
+	if !ok || flow.MaxRepairs != *request.MaxRepairs || flow.MaxTokens != 0 ||
 		flow.Authorization != request.Authorization || len(flow.DispatchIDs) != 1 || len(state.Graph.Dispatches) != 1 {
 		t.Fatalf("workflow contract lost or active execution duplicated: %+v", flow)
 	}

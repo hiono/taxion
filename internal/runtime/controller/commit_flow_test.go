@@ -11,7 +11,7 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
-func TestManagedCommitRespectsReviewFlowCeilings(t *testing.T) {
+func TestManagedCommitRespectsReviewFlowSafetyGatesNotTokenThreshold(t *testing.T) {
 	for _, failure := range []string{"", "deadline", "stopped", "tokens", "unknown-usage"} {
 		t.Run(failure, func(t *testing.T) {
 			db, ledger, request := reviewFlowFixture(t)
@@ -66,18 +66,18 @@ func TestManagedCommitRespectsReviewFlowCeilings(t *testing.T) {
 			}
 			head := gitTest(t, root, "rev-parse", "HEAD")
 			_, stageErr := control.StageForSession(t.Context(), id, "session", []string{"internal/app.go"}, scanner)
-			if (stageErr == nil) != (failure == "") {
-				t.Fatal("stage did not share commit flow ceiling authorization", failure, stageErr)
+			if (stageErr == nil) != (failure == "" || failure == "tokens" || failure == "unknown-usage") {
+				t.Fatal("stage did not share commit flow safety authorization", failure, stageErr)
 			}
 			sha, err := control.CommitForSession(t.Context(), id, "session",
 				"feat(app): implement approved change\n\nintent(app): satisfy the authorized criterion\n", scanner)
-			if failure == "" {
+			if failure == "" || failure == "tokens" || failure == "unknown-usage" {
 				if err != nil || sha == "" {
 					t.Fatal("active flow could not commit", err)
 				}
 			} else if err == nil || sha != "" || !strings.Contains(err.Error(), "review flow") ||
 				gitTest(t, root, "rev-parse", "HEAD") != head {
-				t.Fatal("flow ceiling failed to stop managed commit", failure, err)
+				t.Fatal("flow safety condition failed to stop managed commit", failure, err)
 			}
 		})
 	}

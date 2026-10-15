@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -663,6 +664,13 @@ func nonnegativeUsage(usage core.DispatchUsage) bool {
 		if value != nil && *value < 0 {
 			return false
 		}
+	}
+	if usage.TotalNanoAIU != nil && (math.IsNaN(*usage.TotalNanoAIU) ||
+		math.IsInf(*usage.TotalNanoAIU, 0) || *usage.TotalNanoAIU < 0) {
+		return false
+	}
+	if usage.AICreditsStatus != nil && !slices.Contains([]string{"complete", "partial", "unavailable"}, *usage.AICreditsStatus) {
+		return false
 	}
 	return strings.TrimSpace(usage.Model) != ""
 }

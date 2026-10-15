@@ -151,12 +151,11 @@ func conversationCmd(args []string, output io.Writer) error {
 		return conversationWatch(args[1:], os.Stdin, output)
 	}
 	if len(args) == 0 || args[0] != "ask" && args[0] != "plan" && args[0] != "investigate" {
-		return fmt.Errorf("usage: taxion conversation {ask|plan|investigate} --task ID --question TEXT --max-tokens N --timeout D --max-ai-credits N; investigate also requires --path and --max-bytes")
+		return fmt.Errorf("usage: taxion conversation {ask|plan|investigate} --task ID --question TEXT --timeout D --max-ai-credits N; investigate also requires --path and --max-bytes")
 	}
 	fs := flag.NewFlagSet("conversation "+args[0], flag.ContinueOnError)
 	task := fs.String("task", "", "Task whose sourced approval and saved records authorize this question")
 	question := fs.String("question", "", "natural-language side question; not added to main history")
-	limit := fs.Int64("max-tokens", 0, "explicit input/output token ceiling; observed after model use")
 	timeout := fs.Duration("timeout", 0, "explicit question deadline")
 	credits := fs.Float64("max-ai-credits", 0, "explicit per-session soft AI-credit ceiling (minimum: 30)")
 	cli := fs.String("cli", "", "Copilot CLI executable")
@@ -171,8 +170,8 @@ func conversationCmd(args []string, output io.Writer) error {
 		return err
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(*task) == "" || strings.TrimSpace(*question) == "" ||
-		*limit <= 0 || *timeout <= 0 || *credits <= 0 {
-		return fmt.Errorf("conversation ask requires a Task, question and explicit positive token, time and credit ceilings")
+		*timeout <= 0 || *credits <= 0 {
+		return fmt.Errorf("conversation ask requires a Task, question, positive time limit and session credit ceiling")
 	}
 	if err := copilot.ValidateAICreditLimit(*credits); err != nil {
 		return err
@@ -247,10 +246,10 @@ func conversationCmd(args []string, output io.Writer) error {
 	var result controller.QuestionResult
 	var questionErr error
 	if args[0] == "investigate" {
-		result, questionErr = controller.AskInvestigation(ctx, db, storePath, *task, *question, resolved.Config, *limit, worker,
+		result, questionErr = controller.AskInvestigation(ctx, db, storePath, *task, *question, resolved.Config, worker,
 			controller.InvestigationRequest{Paths: paths, MaxBytes: maxBytes})
 	} else {
-		result, questionErr = ask(ctx, db, storePath, *task, *question, resolved.Config, *limit, worker)
+		result, questionErr = ask(ctx, db, storePath, *task, *question, resolved.Config, worker)
 	}
 	closeErr := worker.Close()
 	// A failed paid attempt retains its session ID and usage for reconciliation.
@@ -278,7 +277,6 @@ func watchedConversation(args []string, input io.Reader, output io.Writer, runne
 	id := fs.String("flow", "", "existing review flow ID")
 	actor := fs.String("actor", "", "Human actor recorded as supplied metadata")
 	source := fs.String("source", "", "actual Human input source")
-	tokens := fs.Int64("question-max-tokens", 0, "explicit per-question token ceiling")
 	timeout := fs.Duration("question-timeout", 0, "explicit per-question deadline")
 	credits := fs.Float64("question-max-ai-credits", 0, "explicit per-question soft credit ceiling")
 	bytesLimit := fs.Int("investigation-max-bytes", 0, "explicit committed-file source ceiling for /investigate, at most 65536")
@@ -541,7 +539,7 @@ func watchedConversation(args []string, input io.Reader, output io.Writer, runne
 				path, question, mode = parts[0], parts[1], "investigate"
 			}
 			args := []string{mode, "--task", flow.TaskID, "--question", question,
-				"--max-tokens", fmt.Sprint(*tokens), "--timeout", timeout.String(), "--max-ai-credits", fmt.Sprint(*credits)}
+				"--timeout", timeout.String(), "--max-ai-credits", fmt.Sprint(*credits)}
 			if mode == "investigate" {
 				args = append(args, "--path", path, "--max-bytes", fmt.Sprint(*bytesLimit))
 			}

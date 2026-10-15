@@ -117,7 +117,7 @@ func TestReapprovalCreatesSuccessorWithoutRewritingIssuedContract(t *testing.T) 
 	repairs := 0
 	if _, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
 		ID: "successor-flow", TaskID: saved.ID, Repository: saved.Repo, ReviewRoot: old.ReviewRoot,
-		MaxRepairs: &repairs, MaxTokens: 2000, TimeoutSeconds: 30,
+		MaxRepairs: &repairs, TimeoutSeconds: 30,
 		Authorization: core.TaskDecision{ID: "new-flow-approval", Source: "human:new-budget", Text: "Authorize a separately bounded successor"},
 	}); err != nil {
 		t.Fatal("old held flow blocked explicitly approved successor execution", err)
@@ -224,8 +224,8 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 	repairs := 0
 	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
 		ID: "budget-successor-flow", TaskID: approved.ID, Repository: approved.Repo, ReviewRoot: flow.ReviewRoot,
-		MaxRepairs: &repairs, MaxTokens: 5, TimeoutSeconds: 60,
-		Authorization: core.TaskDecision{ID: "new-budget", Source: "human:new-budget", Text: "Approve a separate five-token budget"},
+		MaxRepairs: &repairs, TimeoutSeconds: 60,
+		Authorization: core.TaskDecision{ID: "new-budget", Source: "human:new-budget", Text: "Approve a separate execution budget"},
 	})
 	if err != nil {
 		t.Fatal("successor flow did not accept its separate budget", err)
@@ -252,16 +252,30 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 
 func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T) {
 	db, ledger, request := reviewFlowFixture(t)
-	request.MaxTokens = 15
 	flow, err := StartReviewFlow(db, ledger, request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	coder := executeFlowDispatch(t, db, flow, "", true)
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		legacy, ok := state.Graph.ReviewFlow(flow.ID)
+		if !ok {
+			return errors.New("flow missing")
+		}
+		if err := holdReviewFlowForStop(&state.Graph, &legacy, "legacy token threshold"); err != nil {
+			return err
+		}
+		legacy.Reason = "legacy token threshold"
+		legacy.Status, legacy.StopCode = "STOPPED", "BUDGET_LIMIT"
+		storeFlow(state, legacy)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
 	if !errors.Is(err, ErrFlowStopped) || flow.StopCode != "BUDGET_LIMIT" ||
 		flow.Status != "STOPPED" || !flow.HandoffHeld() || len(flow.DispatchIDs) != 1 {
-		t.Fatalf("completed Coder result did not stop before a paid Reviewer turn: %+v %v", flow, err)
+		t.Fatalf("legacy stopped Coder result was not preserved: %+v %v", flow, err)
 	}
 	successorWorktree := filepath.Join(t.TempDir(), "successor")
 	gitTest(t, flow.Contract.Worktree, "worktree", "add", "-b", "work/successor", successorWorktree, coder.Result.OutputSHA)
@@ -296,7 +310,7 @@ func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T
 	repairs := 0
 	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
 		ID: "review-successor-flow", TaskID: approved.ID, Repository: approved.Repo, ReviewRoot: flow.ReviewRoot,
-		ContinueFromDispatchID: coder.ID, MaxRepairs: &repairs, MaxTokens: 100, TimeoutSeconds: 60,
+		ContinueFromDispatchID: coder.ID, MaxRepairs: &repairs, TimeoutSeconds: 60,
 		Authorization: core.TaskDecision{ID: "new-review-budget", Source: "human:new-review-budget", Text: "Approve a separate review budget"},
 	})
 	if err != nil {
@@ -391,18 +405,45 @@ func TestBudgetContinuationReusesCoderAfterReviewerSafeStop(t *testing.T) {
 	}
 }
 
-func TestBudgetStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.T) {
+func persistLegacyBudgetStoppedFlow(t *testing.T, db *store.Store, flowID string) core.ReviewFlow {
+	t.Helper()
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		flow, ok := state.Graph.ReviewFlow(flowID)
+		if !ok {
+			return errors.New("flow not found")
+		}
+		if err := holdReviewFlowForStop(&state.Graph, &flow, "legacy token ceiling"); err != nil {
+			return err
+		}
+		flow.Reason = "legacy token ceiling"
+		flow.Status, flow.StopCode, flow.MaxTokens = "STOPPED", "BUDGET_LIMIT", 15
+		storeFlow(state, flow)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow, ok := state.Graph.ReviewFlow(flowID)
+	if !ok {
+		t.Fatal("legacy stopped flow was not saved")
+	}
+	return flow
+}
+
+func TestLegacyBudgetStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.T) {
 	db, ledger, request := reviewFlowFixtureWithOutputMode(t, core.OutputModeWorktreeTreeSnapshot)
-	request.MaxTokens = 15
 	flow, err := StartReviewFlow(db, ledger, request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	coder := executeFlowDispatch(t, db, flow, "", true)
-	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
-	if !errors.Is(err, ErrFlowStopped) || flow.StopCode != "BUDGET_LIMIT" ||
+	flow = persistLegacyBudgetStoppedFlow(t, db, flow.ID)
+	if flow.StopCode != "BUDGET_LIMIT" ||
 		flow.Status != "STOPPED" || !flow.HandoffHeld() || len(flow.DispatchIDs) != 1 {
-		t.Fatalf("completed snapshot Coder did not stop before a paid Reviewer turn: %+v %v", flow, err)
+		t.Fatalf("legacy stopped snapshot flow was not represented: %+v", flow)
 	}
 	successorWorktree := filepath.Join(t.TempDir(), "successor")
 	gitTest(t, flow.Contract.Worktree, "worktree", "add", "-b", "work/successor",
@@ -454,7 +495,7 @@ func TestBudgetStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *te
 	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
 		ID: "snapshot-review-successor-flow", TaskID: approved.ID, Repository: approved.Repo,
 		ReviewRoot: flow.ReviewRoot, ContinueFromDispatchID: coder.ID,
-		MaxRepairs: &repairs, MaxTokens: 100, TimeoutSeconds: 60,
+		MaxRepairs: &repairs, TimeoutSeconds: 60,
 		Authorization: core.TaskDecision{
 			ID: "new-snapshot-review-budget", Source: "human:new-snapshot-review-budget",
 			Text: "Approve a separate review budget",

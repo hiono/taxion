@@ -27,14 +27,13 @@ type ReviewFlowRequest struct {
 	Repository             string            `json:"repository"`
 	ReviewRoot             string            `json:"reviewRoot"`
 	MaxRepairs             *int              `json:"maxRepairs"`
-	MaxTokens              int64             `json:"maxTokens"`
 	TimeoutSeconds         int64             `json:"timeoutSeconds"`
 	Authorization          core.TaskDecision `json:"authorization"`
 }
 
 func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowRequest) (core.ReviewFlow, error) {
 	if db == nil || strings.TrimSpace(request.ID) == "" || strings.ContainsAny(request.ID, `/\`) ||
-		request.MaxRepairs == nil || *request.MaxRepairs < 0 || request.MaxTokens <= 0 || request.TimeoutSeconds <= 0 ||
+		request.MaxRepairs == nil || *request.MaxRepairs < 0 || request.TimeoutSeconds <= 0 ||
 		request.TimeoutSeconds > math.MaxInt64/int64(time.Second) ||
 		!filepath.IsAbs(request.ReviewRoot) ||
 		strings.TrimSpace(request.Authorization.ID) == "" || strings.TrimSpace(request.Authorization.Source) == "" ||
@@ -65,8 +64,8 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 		flow = core.ReviewFlow{
 			ID: request.ID, TaskID: task.ID, SourceDispatchID: request.ContinueFromDispatchID,
 			Contract: task, ReviewRoot: filepath.Clean(request.ReviewRoot),
-			MaxRepairs: *request.MaxRepairs, MaxTokens: request.MaxTokens,
-			StartedAt: now, Deadline: now.Add(time.Duration(request.TimeoutSeconds) * time.Second), Status: "RUNNING",
+			MaxRepairs: *request.MaxRepairs,
+			StartedAt:  now, Deadline: now.Add(time.Duration(request.TimeoutSeconds) * time.Second), Status: "RUNNING",
 			Authorization: request.Authorization, DispatchIDs: []string{},
 		}
 		if request.ContinueFromDispatchID == "" {
@@ -184,17 +183,6 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 			return nil
 		}
 		stop := func(reason string) error { return stopWithCode(reason, "SAFETY_STOP") }
-		stopForBudget := func(tokens int64) error {
-			overage := tokens - flow.MaxTokens
-			if overage < 0 {
-				overage = 0
-			}
-			reason := fmt.Sprintf(
-				"recorded token usage %d against ceiling %d (over by %d); Human approval of a new budget is required",
-				tokens, flow.MaxTokens, overage,
-			)
-			return stopWithCode(reason, "BUDGET_LIMIT")
-		}
 		task, _ := state.Graph.GraphTask(flow.TaskID)
 		last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
 		if !time.Now().UTC().Before(flow.Deadline) {
@@ -215,12 +203,6 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 		if task.Status == core.HumanDecisionRequired || task.HumanDecision != nil && task.HumanDecision.SelectedOptionID == "" {
 			return stop("Human decision required; present the Task's saved question and options")
 		}
-		tokens, known := flowTokens(state.Graph, flow)
-		completedApproval := last.Status == core.DispatchSucceeded && last.Recipient == "REVIEWER" &&
-			last.Result != nil && last.Result.ReviewVerdict == "APPROVE"
-		if tokens >= flow.MaxTokens && !completedApproval {
-			return stopForBudget(tokens)
-		}
 		if last.Status == core.DispatchSuspended || last.Status == core.DispatchCancelRequested {
 			return stop("Dispatch " + last.ID + " requires safe stop or renewed authorization before continuation")
 		}
@@ -236,16 +218,10 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 			return nil
 		}
 		if active(last.Status) {
-			if !known && len(last.RuntimeUsage) != 0 {
-				return stop("runtime reported incomplete input/output usage; safely stop and obtain usage evidence")
-			}
 			return nil
 		}
 		if last.Status != core.DispatchSucceeded || last.Result == nil {
 			return stop("Dispatch " + last.ID + " ended with " + string(last.Status) + "; inspect its saved blockers and stop evidence")
-		}
-		if !known {
-			return stop("runtime input/output usage is unknown; obtain usage evidence before authorizing further execution")
 		}
 		if last.Instruction.Version < core.DispatchInstructionVersion || last.Result.GitEvidence == nil {
 			return stop("latest result lacks current controller-observed Git evidence")
@@ -587,6 +563,33 @@ func flowTokens(graph core.TaskGraph, flow core.ReviewFlow) (int64, bool) {
 		}
 	}
 	return total, known
+}
+
+func flowNanoAIU(graph core.TaskGraph, flow core.ReviewFlow) (*float64, string) {
+	var total float64
+	seen, complete := false, true
+	for _, id := range flow.DispatchIDs {
+		dispatch, _ := graph.GraphDispatch(id)
+		for _, usage := range dispatch.RuntimeUsage {
+			if usage.TotalNanoAIU == nil || math.IsNaN(*usage.TotalNanoAIU) ||
+				math.IsInf(*usage.TotalNanoAIU, 0) || *usage.TotalNanoAIU < 0 {
+				complete = false
+				continue
+			}
+			total += *usage.TotalNanoAIU
+			seen = true
+			if usage.AICreditsStatus == nil || *usage.AICreditsStatus != "complete" {
+				complete = false
+			}
+		}
+	}
+	if !seen {
+		return nil, "unavailable"
+	}
+	if !complete {
+		return &total, "partial"
+	}
+	return &total, "complete"
 }
 
 func storeFlow(state *store.Workspace, flow core.ReviewFlow) {

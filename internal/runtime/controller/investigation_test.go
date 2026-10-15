@@ -27,7 +27,7 @@ func TestInvestigationUsesApprovedReadOnlySourcesWithSeparateObservation(t *test
 		t.Fatal(err)
 	}
 	path := filepath.Join(filepath.Dir(databasePath), "ledger.json")
-	result, err := AskInvestigation(context.Background(), db, path, "task", "What does the file say?", resolved.Config, 1000, q,
+	result, err := AskInvestigation(context.Background(), db, path, "task", "What does the file say?", resolved.Config, q,
 		InvestigationRequest{Paths: []string{"README.md"}, MaxBytes: 100})
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestInvestigationRefusesSourcesBeforeAnyModelCall(t *testing.T) {
 				cancel()
 			}
 			result, err := AskInvestigation(ctx, db, filepath.Join(filepath.Dir(databasePath), "ledger.json"), "task",
-				"Read this file", resolved.Config, 1000, q, request)
+				"Read this file", resolved.Config, q, request)
 			if err == nil || q.starts != 0 || len(q.sends) != 0 || result.Answer != nil {
 				t.Fatal("invalid investigation consumed model work", mode, err)
 			}

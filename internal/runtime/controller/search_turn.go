@@ -22,9 +22,9 @@ type SearchTurn struct {
 
 // RunSearchTurn observes one bounded acquisition turn. Model prose is not the
 // evidence of acquisition; the host's saved sourced snapshots are.
-func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query string, maxTokens int64) (turn SearchTurn, returnErr error) {
-	if worker.Role() != "ORCHESTRATOR" || maxTokens <= 0 {
-		return turn, fmt.Errorf("taxion: search turn requires an Orchestrator and an explicit token ceiling")
+func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query string) (turn SearchTurn, returnErr error) {
+	if worker.Role() != "ORCHESTRATOR" {
+		return turn, fmt.Errorf("taxion: search turn requires an Orchestrator")
 	}
 	if _, ok := ctx.Deadline(); !ok {
 		return turn, fmt.Errorf("taxion: search turn requires an explicit deadline")
@@ -58,7 +58,7 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 		if err := configured.CheckServiceAccess(ctx, session); err != nil {
 			return turn, err
 		}
-		turn.BudgetGuidance, turn.BudgetSupplement, err = isolatedBudgetGuidance(ctx, worker, identity.BudgetGuidancePolicy(), selected, maxTokens)
+		turn.BudgetGuidance, turn.BudgetSupplement, err = isolatedBudgetGuidance(ctx, worker, identity.BudgetGuidancePolicy(), selected)
 		if err != nil {
 			return turn, err
 		}
@@ -66,7 +66,6 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 	if err := worker.Send(ctx, session, string(prompt)+turn.BudgetSupplement); err != nil {
 		return turn, err
 	}
-	var tokens int64
 	for {
 		select {
 		case <-ctx.Done():
@@ -78,23 +77,13 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 			switch event.Type {
 			case runtime.EventUsage:
 				var usage core.DispatchUsage
-				if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &usage); err != nil ||
-					usage.InputTokens == nil || usage.OutputTokens == nil || *usage.InputTokens < 0 || *usage.OutputTokens < 0 {
-					return turn, fmt.Errorf("taxion: search token usage is unconfirmed")
+				if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &usage); err != nil {
+					return turn, fmt.Errorf("taxion: search usage is invalid")
 				}
 				turn.Usage = append(turn.Usage, usage)
-				for _, count := range []*int64{usage.InputTokens, usage.OutputTokens} {
-					if *count >= maxTokens-tokens {
-						return turn, fmt.Errorf("taxion: search token ceiling reached")
-					}
-					tokens += *count
-				}
 			case runtime.EventFailed, runtime.EventCancelled:
 				return turn, fmt.Errorf("taxion: search runtime failed or was cancelled; provider details withheld")
 			case runtime.EventTurnFinished:
-				if len(turn.Usage) == 0 {
-					return turn, fmt.Errorf("taxion: search completed without confirmed usage")
-				}
 				return turn, nil
 			}
 		}

@@ -30,7 +30,7 @@ func TestDocumentNavigationRoutesWithoutSDK(t *testing.T) {
 			"user-guide.md#人のことばで依頼して計画を相談する",
 			"user-guide.md#結果の確認と停止後の継続",
 			"user-guide.md#保存結果と停止後の継続", "execution-records.md#復旧時の照合",
-			"../develop/task-graph.md#予算上限後の作業継続",
+			"../develop/task-graph.md#停止した作業の継続",
 		},
 		"docs/develop/README.md": {
 			"../../CONTRIBUTING.md#開発環境", "task-graph.md", "runtime-contract.md",

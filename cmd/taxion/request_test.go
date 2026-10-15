@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
@@ -48,6 +49,66 @@ func TestRuntimeRoleVerificationDoesNotDependOnModelDiversity(t *testing.T) {
 					t.Errorf("submission=%v: role contract omits %q", submission, required)
 				}
 			}
+		}
+	}
+}
+
+func TestDisplayRequestUsageSeparatesCallUsageFromAccountBalance(t *testing.T) {
+	amount, status := 123.5, "complete"
+	var output bytes.Buffer
+	if err := displayRequestUsage(&output, []core.DispatchUsage{{
+		TotalNanoAIU: &amount, AICreditsStatus: &status,
+	}}, 30, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"123.5 nano-AIU", "AI-credit status: complete", "session soft ceiling: 30 AI credits",
+		"AI-credit account balance and percentages: unavailable",
+		"premium-interactions request quota: unavailable",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("usage output lacks %q: %s", expected, output.String())
+		}
+	}
+
+	output.Reset()
+	if err := displayRequestUsage(&output, nil, 30, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Planner turn usage: unavailable") ||
+		!strings.Contains(output.String(), "AI-credit account balance and percentages: unavailable") ||
+		!strings.Contains(output.String(), "premium-interactions request quota: unavailable") {
+		t.Fatalf("missing usage was not reported explicitly: %s", output.String())
+	}
+
+	output.Reset()
+	tokens := int64(10)
+	if err := displayRequestUsage(&output, []core.DispatchUsage{{InputTokens: &tokens}}, 30, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "usage: unavailable (AI-credit status: unavailable)") ||
+		!strings.Contains(output.String(), "AI-credit account balance and percentages: unavailable") {
+		t.Fatalf("partial usage was not reported explicitly: %s", output.String())
+	}
+
+	output.Reset()
+	used, entitlement, remaining, percent := int64(12300), int64(50000), int64(37700), 75.4
+	reset := time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)
+	quota := &runtime.QuotaSnapshot{
+		State: "available", Resource: "premium_interactions", Unit: "requests",
+		Used: &used, Entitlement: &entitlement, Remaining: &remaining,
+		RemainingPercentage: &percent, ResetAt: &reset,
+	}
+	if err := displayRequestUsage(&output, []core.DispatchUsage{{InputTokens: &tokens}}, 30, quota); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"premium-interactions request quota: 12300/50000 used",
+		"24.6% used, 75.4% remaining", "37700 remaining", "resets 2026-10-31T00:00:00Z",
+		"AI-credit account balance and percentages: unavailable",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("request quota output lacks %q: %s", expected, output.String())
 		}
 	}
 }
@@ -95,7 +156,7 @@ execution: {requester: human, worker: local, approvalRef: configured-approval}
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return root, []string{"--repo", "owner/repo", "--worktree", root, "--max-tokens", "1000",
+	return root, []string{"--repo", "owner/repo", "--worktree", root,
 		"--timeout", "1m", "--max-ai-credits", "30", "--max-repairs", "0", "--context-path", "README.md"}
 }
 
@@ -154,7 +215,7 @@ func TestRequestPathInventoryRetainsEveryPathAndReducesRepeatedDirectories(t *te
 func fixturePlan(t *testing.T, answer controller.QuestionAnswer) requestPlanner {
 	t.Helper()
 	return func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
-		text string, tokens int64, _ float64, _, _ string) (controller.QuestionResult, error) {
+		text string, _ float64, _, _ string) (controller.QuestionResult, error) {
 		body, err := json.Marshal(answer)
 		if err != nil {
 			return controller.QuestionResult{}, err
@@ -202,7 +263,7 @@ func fixturePlan(t *testing.T, answer controller.QuestionAnswer) requestPlanner 
 			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
 			return nil
 		}
-		return controller.AskPlanner(ctx, db, storePath, task.ID, text, selected, tokens, worker)
+		return controller.AskPlanner(ctx, db, storePath, task.ID, text, selected, worker)
 	}
 }
 
@@ -210,7 +271,7 @@ func TestRequestRefinesHumanIntentAndRunsSameTreeReviewWithoutCopyPaste(t *testi
 	root, args := requestFixture(t)
 	var calls, roles int
 	planner := func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
-		text string, tokens int64, credits float64, cli, base string) (controller.QuestionResult, error) {
+		text string, credits float64, cli, base string) (controller.QuestionResult, error) {
 		calls++
 		var input struct {
 			Files   map[string][]string `json:"committedFilesByDirectory"`
@@ -234,12 +295,12 @@ func TestRequestRefinesHumanIntentAndRunsSameTreeReviewWithoutCopyPaste(t *testi
 		}
 		answer := requestFixtureAnswer([]string{"検索の一致条件を教えてください。"})
 		if calls == 2 {
-			if !strings.Contains(text, "部分一致") || !strings.Contains(text, "planner") || tokens != 985 {
-				t.Fatal("Planner lost the user's refinement, earlier question or shared token ceiling", text, tokens)
+			if !strings.Contains(text, "部分一致") || !strings.Contains(text, "planner") {
+				t.Fatal("Planner lost the user's refinement or earlier question", text)
 			}
 			answer = requestFixtureAnswer([]string{})
 		}
-		return fixturePlan(t, answer)(ctx, db, selected, task, text, tokens, credits, cli, base)
+		return fixturePlan(t, answer)(ctx, db, selected, task, text, credits, cli, base)
 	}
 	runner := func(ctx context.Context, runArgs []string, output io.Writer) error {
 		if !strings.Contains(strings.Join(runArgs, " "), "--builtin-prompts") {
@@ -261,8 +322,8 @@ func TestRequestRefinesHumanIntentAndRunsSameTreeReviewWithoutCopyPaste(t *testi
 		}
 		state, _ := db.LoadWorkspace()
 		flow, _ := state.Graph.ReviewFlow(flowID)
-		if flow.MaxTokens != 970 || flow.MaxRepairs != 0 {
-			t.Fatal("flow did not subtract all Planner usage", flow)
+		if flow.MaxTokens != 0 || flow.MaxRepairs != 0 {
+			t.Fatal("new flow retained an observed-token spending ceiling", flow)
 		}
 		_, err = controller.RunReviewFlow(ctx, db, storePath, flowID, func(dispatch core.GraphDispatch) (runtime.Identity, error) {
 			dispatch, err = selectDispatchConfiguration(db, dispatch)
@@ -441,13 +502,13 @@ func TestSearch(t *testing.T) {
 }
 
 func TestRequestDoesNotInferApprovalOrRepeatAfterFailure(t *testing.T) {
-	for _, mode := range []string{"no-plan", "quit", "eof", "unanswered", "provider-failure", "missing-usage", "ceiling", "dirty", "wrong-repo"} {
+	for _, mode := range []string{"no-plan", "quit", "eof", "unanswered", "provider-failure", "missing-usage", "over-limit", "dirty", "wrong-repo"} {
 		t.Run(mode, func(t *testing.T) {
 			root, args := requestFixture(t)
 			input := "/plan\n/quit\n"
 			var calls int
 			planner := func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
-				text string, tokens int64, credits float64, cli, base string) (controller.QuestionResult, error) {
+				text string, credits float64, cli, base string) (controller.QuestionResult, error) {
 				calls++
 				if mode == "provider-failure" {
 					return controller.QuestionResult{SessionID: "failed-session"}, errors.New("fixture failure")
@@ -456,12 +517,12 @@ func TestRequestDoesNotInferApprovalOrRepeatAfterFailure(t *testing.T) {
 				if mode == "unanswered" {
 					answer = requestFixtureAnswer([]string{"どの動作ですか？"})
 				}
-				result, err := fixturePlan(t, answer)(ctx, db, selected, task, text, tokens, credits, cli, base)
+				result, err := fixturePlan(t, answer)(ctx, db, selected, task, text, credits, cli, base)
 				if mode == "missing-usage" {
 					result.Usage = nil
 				}
-				if mode == "ceiling" {
-					count := tokens
+				if mode == "over-limit" {
+					count := int64(1000000)
 					result.Usage[0].InputTokens = &count
 				}
 				return result, err
@@ -485,7 +546,8 @@ func TestRequestDoesNotInferApprovalOrRepeatAfterFailure(t *testing.T) {
 			var out bytes.Buffer
 			err := requestCommand(append(args, "コードを作って"), strings.NewReader(input), &out, planner,
 				func(context.Context, []string, io.Writer) error { t.Fatal("unapproved runner started"); return nil })
-			if (mode == "quit" || mode == "eof") != (err == nil) {
+			shouldSucceed := slices.Contains([]string{"quit", "eof", "missing-usage", "over-limit"}, mode)
+			if shouldSucceed != (err == nil) {
 				t.Fatal("unexpected request outcome", mode, err)
 			}
 			db, state, loadErr := loadWorkspace()
@@ -515,7 +577,7 @@ func TestRequestWholeModelInputIncludesLongOriginalRequestOnce(t *testing.T) {
 	_, args := requestFixture(t)
 	original := strings.Repeat("日本語と \"引用\"、改行\nを含む依頼。", 80)
 	planner := func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
-		text string, tokens int64, credits float64, cli, base string) (controller.QuestionResult, error) {
+		text string, credits float64, cli, base string) (controller.QuestionResult, error) {
 		body, err := json.Marshal(requestFixtureAnswer([]string{}))
 		if err != nil {
 			t.Fatal(err)
@@ -581,7 +643,7 @@ func TestRequestWholeModelInputIncludesLongOriginalRequestOnce(t *testing.T) {
 			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
 			return nil
 		}
-		return controller.AskPlanner(ctx, db, storePath, task.ID, text, selected, tokens, worker)
+		return controller.AskPlanner(ctx, db, storePath, task.ID, text, selected, worker)
 	}
 	var out bytes.Buffer
 	if err := requestCommand(append(args, original), strings.NewReader("/plan\n/quit\n"), &out, planner, nil); err != nil {

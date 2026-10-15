@@ -44,6 +44,7 @@ SDK credit は soft cap、tokens は usage event による事後観測の停止�
 実 SDK 独立 Reviewer は #60 で受入れを完了した。
 実装手順と受入れ結果は [仕様入力](../specification-input.md)、
 tools の権限と証拠保持は [Runtime contract](../runtime-contract.md) に記録する。
+この token 閾値による停止判断は、新しい実行について ADR-0036 で改訂した。
 
 ### 2026-10-15 の実装補足
 

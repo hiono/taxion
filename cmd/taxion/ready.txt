@@ -145,8 +145,9 @@ taxion config check --task TASK-ID
 
 confirm は Task を READY にするが、Dispatch やモデルは開始しない。
 確認後に契約を変えるなら新 Task と承認を使い、旧 hash の承認を流用しない。
-Flow の修正回数・合計 token 上限・期限を説明し、Human の予算承認を記録する。
+Flow の修正回数・期限・session soft ceiling を説明し、Human の承認を記録する。
 各 runtime session の --max-ai-credits は30以上の soft ceiling で、Flow 合計ではない。
+各 model call の取得利用量を報告し、同じ課金単位の allowance がない残高・率は unavailable とする。
 下の数字は例であり、ユーザーの予算として採用しない。token/credits を換算しない。
 
 ```json
@@ -156,12 +157,11 @@ Flow の修正回数・合計 token 上限・期限を説明し、Human の予�
   "repository": "owner/repository",
   "reviewRoot": "/absolute/path/to/reviews",
   "maxRepairs": 0,
-  "maxTokens": 30000,
   "timeoutSeconds": 1800,
   "authorization": {
     "id": "ready-example-budget",
     "source": "human:budget-1",
-    "text": "Human が提示された上限で実行と独立レビューを明示承認した記録"
+    "text": "Human が提示された期限と修正回数で実行と独立レビューを明示承認した記録"
   }
 }
 ```

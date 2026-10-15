@@ -199,9 +199,9 @@ Task と Dispatch の契約に含め、役割間で同じ引用スナップシ�
 独立レビューと修正の許可を保存し、最初の Dispatch を発行する。
 Task の `owner` は `CODER`、`reviewer` は `REVIEWER` とする。
 初回実行用の Task を使用し、以前の実行からの後続作業は出典を持つ新しい Task として登録する。
-`maxRepairs` は追加の Coder 実行回数、`maxTokens` は観測した input/output token の合計、
-`timeoutSeconds` は開始からの経過時間の上限を表す。
-Human は Task の実行契約とともに、この進行の上限と権限を承認する。
+`maxRepairs` は追加の Coder 実行回数、`timeoutSeconds` は開始からの経過時間の上限を表す。
+新しい Flow は観測 token 数の閾値を停止条件にせず、期限・repair 回数・契約と権限の検査を行う。
+Human は Task の実行契約とともに、この進行と権限を承認する。
 
 ```json
 {
@@ -210,7 +210,6 @@ Human は Task の実行契約とともに、この進行の上限と権限を�
   "repository": "owner/repository",
   "reviewRoot": "/absolute/path/reviews",
   "maxRepairs": 2,
-  "maxTokens": 50000,
   "timeoutSeconds": 1800,
   "authorization": {
     "id": "human-flow-authorization",
@@ -231,14 +230,16 @@ Coder の修正 Dispatch を発行する。指摘は元の Dispatch ID・instruc
 Reviewer Task と Dispatch はレビューの実行契約・証拠として別に保持する。
 
 Graph の `reviewFlows` は開始時の契約、出典付き許可、開始時刻と期限、
-修正・token の上限、修正回数、実行順の Dispatch ID、進行状態と理由を SQLite に保持する。
+修正回数、実行順の Dispatch ID、進行状態と理由を SQLite に保持する。
+既存記録の `maxTokens` は履歴互換のため読み取るが、新しい Flow の入力・停止条件には使わない。
 `workflow show --id application-flow` と後続計画からこの記録を復元できる。
 進行中の Dispatch に対する advance の再実行は、保存済みの同じ Dispatch を返す。
 停止状態は再起動後も保持し、追加の実行は新たな許可を持つ後続 Task で扱う。
 
-上限到達、scope・acceptance・権限の変更、新たな判断、実行の失敗・cancel・停止要求、
+期限到達、scope・acceptance・権限の変更、新たな判断、実行の失敗・cancel・停止要求、
 Reviewer の `BLOCKED`、必須 Memory の失効では、理由を持つ `STOPPED` を保存する。
-input/output token を取得できない実行は利用量不明として停止し、必要な証拠の確認を要求する。
+利用量が欠落・不完全な場合はその状態を明示し、token 数を推測しない。
+利用量の不完全だけを理由に承認済み Flow を停止しない。
 実行中 Dispatch の安全停止は `runtime stop` で確認し、保留した worktree と証拠を調査する。
 `workflow advance` は Dispatch の発行境界で上限を照合する。
 `workflow run --id application-flow --coder-prompt-file CODER.txt --reviewer-prompt-file REVIEWER.txt`
@@ -246,12 +247,12 @@ input/output token を取得できない実行は利用量不明として停止�
 次の Dispatch 発行を連続して行う。各実行の終了時に SDK 接続を閉じる。
 途中の説明はイベントとして表示し、turn の最終応答を結果の採用に使う。
 
-run は保存済み期限を context の deadline に設定し、usage イベントの保存後に token 上限を照合する。
+run は保存済み期限を context の deadline に設定し、各 usage event を保存・報告する。
 実行中は1秒ごとにも進行状態・Task 契約・必須 Memory を確認し、
-上限到達や契約変更・停止要求で `runtime stop` と同じ停止処理を行う。
-token 上限は SDK の観測済み input/output token に基づくため、
-提供側の利用量イベントが届くまでの消費量は未測定である。
-利用量の欠落を含むイベントは明示的な停止として扱う。
+期限到達や契約変更・停止要求で `runtime stop` と同じ停止処理を行う。
+観測した token 数は実行を止める上限ではない。
+usage event を decode できない場合は event 処理を error として停止する。
+数値の欠落・不完全は unavailable として報告し、それ自体では停止しない。
 失敗した安全停止は `CANCEL_REQUESTED` とエラーを保持し、
 停止を確認できた実行は `CANCELLED` と停止証拠を保存する。
 
@@ -280,7 +281,7 @@ SUSPENDED や CANCEL_REQUESTED は active な実行として照合し、停止�
 回復は保存済み runnerId との一致と、flow に属するすべての Dispatch の終了を検査する。
 確認済み所有者、actor、理由、証拠、時刻を `recoveries` に追記し、
 runnerId を解放する。古い確認入力の再送は新しい所有者を解放できない。
-保存済み期限・token 上限・修正回数・flow 状態を維持するため、
+保存済み期限・修正回数・flow 状態を維持するため、
 停止済み flow の回復はその実行を再承認する操作と分けて扱う。
 成功結果が保存済みなら通常の advance でその SHA の独立レビューへ進み、
 取消・失敗の結果は通常の停止判定で Human への確認に戻る。
@@ -349,7 +350,7 @@ runner は現在の許可済み作業を継続し、usage と最終結果を通�
 configuration hash を検査して再接続し、勝手に新しい session へ置き換えない。
 解除は続行を可能にする記録であり、実行そのものは別の run または advance で行う。
 
-保留中も期限、token 上限、契約・Memory 変更、判断待ち、失敗・取消の停止判定を維持する。
+保留中も期限、契約・Memory 変更、判断待ち、失敗・取消の停止判定を維持する。
 保留時間も既存期限に含める。安全停止した flow の解除は保留だけを取り除き、
 `STOPPED` を `RUNNING` に戻さず、新たな実行許可の代用にしない。
 現在の実行を止める場合は別途 `runtime stop` を使い、停止証拠を確認する。
@@ -583,7 +584,7 @@ taxion workflow draft-approve --file approval.json
 承認 transaction は案 ID、案の観測対象、現在の対象、保留 ID、
 現在の Task と保持した契約を照合する。
 `draftContractHash` は保持した Task 契約、flow の承認、review root、
-修正回数上限、token 上限、期限の JSON 内容 hash である。
+修正回数上限、期限の JSON 内容 hash である。
 認証やライブの状態確認を代替する値ではない。
 承認が付いた未発行案を改訂する場合は、保留中に先にその承認付き案を破棄する。
 
@@ -614,9 +615,9 @@ worker の開始や本文に書かれた検証の完了を、この表示だけ�
 scope・acceptance・実行主体・設定・上限を変える契約改訂、
 自然言語の質問・追加調査、実認証での SDK 受入れは引き続き未実装である。
 
-### 予算上限後の作業継続
+### 停止した作業の継続
 
-flow は Dispatch ごとの SDK usage を重複排除して合算し、保存済み token 上限に達すると次の有料 Dispatch を発行せず `BUDGET_LIMIT` で停止する。stop reason には上限、観測した token 数、超過数を記録し、SDK usage event も保存する。実行中の一 turn が上限を超えた場合、その turn は中断されず実測値が上限を超えることがある。停止時は handoff も保留される。`workflow show --id FLOW-ID` で stop code、usage、最後の Dispatch result と Git evidence を確認する。停止済み flow は上限を変更しても再開しないため、続行には新しい Task の承認と新しい予算の承認が必要になる。
+旧 workspace に保存された `BUDGET_LIMIT` の停止と結果は履歴互換のため保持する。新しい Flow は token 閾値で停止しない。どの停止記録でも `workflow show --id FLOW-ID` で stop code、usage、最後の Dispatch result と Git evidence を確認する。停止済み Flow 自体は書き換えず、続行には新しい Task の承認が必要となる。
 
 `workflow recover` は、プロセス停止後に残った runner の所有権を解放する操作である。停止したプロセス、runner ID、全 Dispatch の終端状態を確認してから、次の内容を `taxion workflow recover --file REQUEST.json` に渡す。
 
@@ -631,7 +632,7 @@ flow は Dispatch ごとの SDK usage を重複排除して合算し、保存済
 }
 ```
 
-この操作は token 上限や handoff hold を解除せず、Task や Dispatch を作らない。`BUDGET_LIMIT` で停止した flow は通常 runner の所有権も解放済みであり、`workflow recover` は続行に不要である。
+この操作は停止理由や handoff hold を解除せず、Task や Dispatch を作らない。旧 `BUDGET_LIMIT` で停止した Flow は通常 runner の所有権も解放済みであり、`workflow recover` は続行に不要である。
 
 最後の Coder が `CANCELLED` になった場合、result の `partialGitEvidence` に停止時点の baseline、HEAD、Git tree、変更ファイルが記録される。作業を続けるには、停止した worktree で `git add -A -- .` と `git write-tree` を実行し、得られた tree SHA が保存済み `treeSha` と一致することを確認してから commit する。一致しなければ commit や後続 Task の承認に進まず、保存された変更を復元する。次に、その commit を target とする別の clean worktree を作る。
 
@@ -658,7 +659,7 @@ git -C /absolute/path/to/successor status --porcelain
 
 後続 Task の baseline は元の承認済み baseline のままにし、target SHA はその commit にする。最後のコマンドが空の出力を返すことも確認する。controller は承認時に tree、差分、scope と repository を照合する。部分証拠を確認できない場合や tree が一致しない場合は続行を拒否する。
 
-最後の Coder が `SUCCEEDED` になった後に上限へ達した場合は、保存済み output SHA と同じ commit を target とする別の clean worktree を用意する。
+最後の Coder が `SUCCEEDED` になった後、旧 `BUDGET_LIMIT` で Flow が停止した場合は、保存済み output SHA と同じ commit を target とする別の clean worktree を用意する。
 この手順は commit mode の場合に使う。snapshot mode では baseline commit から別 worktree を作り、保存済み tree の差分を適用して、後続 Task の `targetTreeSha` と `targetChangedFiles` を一致させる。
 
 ```sh
@@ -668,11 +669,11 @@ git -C /absolute/path/to/successor status --porcelain
 
 後続 Task を人が承認したうえで、`workflow start` の request に元の Coder Dispatch ID を `continueFromDispatchId` として指定すると、新しい flow は Coder を再実行せず Reviewer から始まる。snapshot mode でもこの指定方法は同じで、Reviewer は同じ baseline commit と tree SHA を使う。
 
-Reviewer の実行中に上限へ達した場合も、直前の成功 Coder 結果を引き継げる。元の flow は `STOPPED` / `BUDGET_LIMIT`、runner 所有権なし、handoff 保留を要求する。最後の Dispatch は、その Coder に独立レビューとして結び付いた `CANCELLED` の Reviewer であり、保存 session に対応する `runtime-stop:` 証拠が必要になる。実行中・停止未確認・別の Coder へのレビューは継続元にできない。
+旧 `BUDGET_LIMIT` で Reviewer 実行が停止した場合も、直前の成功 Coder 結果を引き継げる。元の flow は `STOPPED` / `BUDGET_LIMIT`、runner 所有権なし、handoff 保留を要求する。最後の Dispatch は、その Coder に独立レビューとして結び付いた `CANCELLED` の Reviewer であり、保存 session に対応する `runtime-stop:` 証拠が必要になる。実行中・停止未確認・別の Coder へのレビューは継続元にできない。
 
 この場合、後続承認の `target` は最後の取消済み Reviewer を指し、`continueFromDispatchId` はその直前の成功 Coder を指す。後続 worktree と保存済み成果物を照合し、新しい Reviewer には後続 Task の設定承認を引き継ぐ。前の Reviewer ID だけを許可した設定承認を、新しい Reviewer の許可として流用しない。
 
-どちらの経路でも、後続 Task の承認では置き換える停止済み flow とその保存済み結果を指定する。新しい flow には別の `id`、`taskId`、明示的な `maxTokens`・`timeoutSeconds` と予算承認を渡す。部分成果から続ける場合は通常の初回開始と同じく Coder から開始し、完了済み Coder 結果を引き継ぐ場合だけ `continueFromDispatchId` を指定する。
+どちらの経路でも、後続 Task の承認では置き換える停止済み flow とその保存済み結果を指定する。新しい Flow には別の `id`、`taskId`、`timeoutSeconds` と必要な session ceiling の承認を渡す。部分成果から続ける場合は通常の初回開始と同じく Coder から開始し、完了済み Coder 結果を引き継ぐ場合だけ `continueFromDispatchId` を指定する。
 
 ```json
 {
@@ -682,12 +683,11 @@ Reviewer の実行中に上限へ達した場合も、直前の成功 Coder 結�
   "repository": "owner/repository",
   "reviewRoot": "/absolute/path/to/reviews",
   "maxRepairs": 0,
-  "maxTokens": 30000,
   "timeoutSeconds": 1800,
   "authorization": {
     "id": "new-budget-approval",
     "source": "human:budget-approval",
-    "text": "保存済み Coder 結果の独立レビューに上記の上限で予算を承認する"
+    "text": "保存済み Coder 結果の独立レビューを上記の期限内で許可する"
   }
 }
 ```

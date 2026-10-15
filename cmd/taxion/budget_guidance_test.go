@@ -60,15 +60,15 @@ func TestRequestGuidanceOverrideReachesPlannerWithoutExtraTurn(t *testing.T) {
 			_, args := requestFixture(t)
 			calls := 0
 			planner := func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
-				text string, tokens int64, credits float64, cli, base string) (controller.QuestionResult, error) {
+				text string, credits float64, cli, base string) (controller.QuestionResult, error) {
 				calls++
 				if task.BudgetGuidance == nil || task.BudgetGuidance.Mode != mode || task.BudgetGuidance.Source != "request" {
 					t.Fatal("explicit request guidance did not reach the approved planning Task")
 				}
-				result, err := fixturePlan(t, requestFixtureAnswer([]string{}))(ctx, db, selected, task, text, tokens, credits, cli, base)
+				result, err := fixturePlan(t, requestFixtureAnswer([]string{}))(ctx, db, selected, task, text, credits, cli, base)
 				if err == nil {
 					if mode == "off" && result.BudgetSupplement != "" ||
-						mode != "off" && !strings.Contains(result.BudgetSupplement, "Taxion budget observation") ||
+						mode != "off" && !strings.Contains(result.BudgetSupplement, "Taxion resource observation") ||
 						mode == "account" && !strings.Contains(result.BudgetSupplement, `"state":"unsupported"`) {
 						t.Fatal("Planner received wrong or hidden guidance", result.BudgetSupplement)
 					}

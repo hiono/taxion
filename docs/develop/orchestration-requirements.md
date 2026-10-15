@@ -183,7 +183,7 @@ controller が固定テストと Git を照合した後、flow と Task を `COM
 | --- | --- |
 | 最終検証 | 11 推論 Session、157,870 tokens、9.4005324 SDK credits |
 | 既存実験を含む累計 | 51 推論 Session、18.21538485 SDK credits |
-| 最終検証で承認した token 上限 | 合計 200,000 tokens |
+| 旧最終検証で承認した token 上限 | 合計 200,000 tokens（当時の受入れ記録。新しい実行の制御ではない） |
 
 最終検証の推論量は承認した上限内だった。
 上記の推論 receipt の課金状態はすべて `complete`。親 Copilot CLI の課金は含まない。

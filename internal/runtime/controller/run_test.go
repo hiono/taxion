@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -57,6 +56,90 @@ func TestContinuousFlowRunsRepairAndNewSHAReview(t *testing.T) {
 
 func TestSteppedFlowWaitsForHumanBetweenRoles(t *testing.T) {
 	testFlowRunsRepairAndNewSHAReview(t, true)
+}
+
+func TestCreditStatusDoesNotInferUnavailableNanoAIUOrAccountBalance(t *testing.T) {
+	var output bytes.Buffer
+	dispatch := core.GraphDispatch{ID: "dispatch-1", Recipient: "PLANNER"}
+	if err := writeCreditStatus(t.Context(), json.NewEncoder(&output), dispatch, runtime.Event{
+		Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":10}`,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var event runtime.Event
+	if err := json.NewDecoder(&output).Decode(&event); err != nil {
+		t.Fatal(err)
+	}
+	var status struct {
+		DispatchID             string                `json:"dispatchId"`
+		Role                   string                `json:"role"`
+		TurnNanoAIU            *float64              `json:"turnNanoAIU"`
+		AICreditsStatus        string                `json:"aiCreditsStatus"`
+		RemainingCreditBalance string                `json:"remainingCreditBalance"`
+		UsedPercentage         string                `json:"usedPercentage"`
+		RemainingPercentage    string                `json:"remainingPercentage"`
+		AccountQuota           runtime.QuotaSnapshot `json:"accountQuota"`
+		Reason                 string                `json:"reason"`
+	}
+	if event.Type != "credit_status" {
+		t.Fatalf("unexpected event: %+v", event)
+	}
+	if err := json.Unmarshal([]byte(event.Payload), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.DispatchID != dispatch.ID || status.Role != dispatch.Recipient ||
+		status.TurnNanoAIU != nil || status.AICreditsStatus != "unavailable" ||
+		status.RemainingCreditBalance != "unavailable" || status.UsedPercentage != "unavailable" ||
+		status.RemainingPercentage != "unavailable" || status.AccountQuota.State != "unavailable" ||
+		status.AccountQuota.Unit != "requests" || !strings.Contains(status.Reason, "nano-AIU is unavailable") {
+		t.Fatalf("incomplete usage was inferred: %+v", status)
+	}
+}
+
+func TestCreditStatusReportsApprovedRequestQuotaSeparatelyFromCredits(t *testing.T) {
+	var output bytes.Buffer
+	quota := observedQuota()
+	remaining := int64(38000)
+	quota.Remaining = &remaining
+	worker := &quotaRuntime{
+		configuredRuntime: &configuredRuntime{fakeRuntime: &fakeRuntime{}},
+		quota:             quota,
+	}
+	dispatch := core.GraphDispatch{
+		ID: "dispatch-1", Recipient: "CODER",
+		Instruction: core.DispatchInstruction{BudgetGuidance: budgetPolicy(t, "account")},
+		Configuration: &core.DispatchConfiguration{
+			Selection: json.RawMessage(`{"runtime":{"provider":"copilot","account":"ai-user"}}`),
+		},
+	}
+	if err := writeCreditStatus(t.Context(), json.NewEncoder(&output), dispatch, runtime.Event{
+		Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":10}`,
+	}, worker); err != nil {
+		t.Fatal(err)
+	}
+	var event runtime.Event
+	if err := json.NewDecoder(&output).Decode(&event); err != nil {
+		t.Fatal(err)
+	}
+	var status struct {
+		RemainingCreditBalance string                `json:"remainingCreditBalance"`
+		AccountQuota           runtime.QuotaSnapshot `json:"accountQuota"`
+		AccountUsedPercentage  *float64              `json:"accountUsedPercentage"`
+	}
+	if event.Type != "credit_status" {
+		t.Fatalf("unexpected event: %+v", event)
+	}
+	if err := json.Unmarshal([]byte(event.Payload), &status); err != nil {
+		t.Fatal(err)
+	}
+	if worker.reads != 1 || status.RemainingCreditBalance != "unavailable" ||
+		status.AccountQuota.State != "available" || status.AccountQuota.Resource != "premium_interactions" ||
+		status.AccountQuota.Unit != "requests" || status.AccountQuota.Remaining == nil ||
+		*status.AccountQuota.Remaining != remaining || status.AccountQuota.RemainingPercentage == nil ||
+		*status.AccountQuota.RemainingPercentage != 76 || status.AccountUsedPercentage == nil ||
+		*status.AccountUsedPercentage != 24 {
+		t.Fatalf("request quota was not reported separately from AI Credits: %+v reads=%d", status, worker.reads)
+	}
 }
 
 func testFlowRunsRepairAndNewSHAReview(t *testing.T, stepped bool) {
@@ -137,7 +220,11 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 				}
 			}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: "intermediate explanation"}
-			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":10,"outputTokens":5}`}
+			usage := `{"model":"test","inputTokens":10,"outputTokens":5,"totalNanoAIU":123.5,"aiCreditsStatus":"complete"}`
+			if len(workers) == 1 {
+				usage = `{"model":"test","inputTokens":10}`
+			}
+			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: usage}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(mustFlowJSON(t, result))}
 			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
 			return nil
@@ -206,11 +293,50 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 		!review.Result.GitEvidence.WorktreeReleased || !strings.Contains(out.String(), "intermediate explanation") {
 		t.Fatal("new-SHA review or intermediate event separation failed")
 	}
+	decoder := json.NewDecoder(bytes.NewReader(out.Bytes()))
+	var creditStatuses, incompleteStatuses int
+	for {
+		var event runtime.Event
+		if err := decoder.Decode(&event); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			t.Fatal("decode streamed runtime event:", err)
+		}
+		if event.Type != "credit_status" {
+			continue
+		}
+		var status struct {
+			TurnNanoAIU            *float64 `json:"turnNanoAIU"`
+			AICreditsStatus        string   `json:"aiCreditsStatus"`
+			RemainingCreditBalance string   `json:"remainingCreditBalance"`
+			UsedPercentage         string   `json:"usedPercentage"`
+			RemainingPercentage    string   `json:"remainingPercentage"`
+		}
+		if err := json.Unmarshal([]byte(event.Payload), &status); err != nil {
+			t.Fatal("decode per-turn credit status:", err)
+		}
+		if status.RemainingCreditBalance != "unavailable" || status.UsedPercentage != "unavailable" ||
+			status.RemainingPercentage != "unavailable" {
+			t.Fatalf("incorrect per-turn credit status: %+v", status)
+		}
+		if status.TurnNanoAIU == nil {
+			if status.AICreditsStatus != "unavailable" {
+				t.Fatalf("incomplete usage has a credit status: %+v", status)
+			}
+			incompleteStatuses++
+		} else if *status.TurnNanoAIU != 123.5 || status.AICreditsStatus != "complete" {
+			t.Fatalf("incorrect measured usage: %+v", status)
+		}
+		creditStatuses++
+	}
+	if creditStatuses != len(workers) || incompleteStatuses != 1 {
+		t.Fatalf("got %d statuses, %d incomplete, for %d calls", creditStatuses, incompleteStatuses, len(workers))
+	}
 	testCompactPlanningContext(t, db, ledger, state, review, decision)
 }
 
-func TestRunnerStopsExecutionForLimitsAndStreamFailures(t *testing.T) {
-	for _, failure := range []string{"tokens", "deadline", "stream", "usage", "unknown-usage", "output", "cancel", "stop-failure", "claim", "contract"} {
+func TestRunnerStopsExecutionForDeadlinesAndStreamFailures(t *testing.T) {
+	for _, failure := range []string{"deadline", "stream", "usage", "unknown-usage", "output", "cancel", "stop-failure", "claim", "contract"} {
 		t.Run(failure, func(t *testing.T) {
 			db, ledger, request := reviewFlowFixture(t)
 			flow, err := StartReviewFlow(db, ledger, request)
@@ -237,8 +363,6 @@ func TestRunnerStopsExecutionForLimitsAndStreamFailures(t *testing.T) {
 				}
 				worker.script = func() error {
 					switch failure {
-					case "tokens":
-						worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: fmt.Sprintf(`{"model":"test","inputTokens":%d,"outputTokens":0}`, request.MaxTokens)}
 					case "deadline":
 					case "stream":
 						close(worker.events)
@@ -246,6 +370,7 @@ func TestRunnerStopsExecutionForLimitsAndStreamFailures(t *testing.T) {
 						worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: "malformed"}
 					case "unknown-usage":
 						worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":10}`}
+						close(worker.events)
 					case "output":
 						worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: "unwritable"}
 					case "claim", "contract":
@@ -300,9 +425,8 @@ type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("output unavailable") }
 
-func TestBudgetStopCapturesPartialWorkAndHoldsForSuccessorApproval(t *testing.T) {
+func TestFailedStreamCapturesPartialWorkAndHoldsForRecovery(t *testing.T) {
 	db, ledger, request := reviewFlowFixture(t)
-	request.MaxTokens = 1
 	flow, err := StartReviewFlow(db, ledger, request)
 	if err != nil {
 		t.Fatal(err)
@@ -324,13 +448,14 @@ func TestBudgetStopCapturesPartialWorkAndHoldsForSuccessorApproval(t *testing.T)
 				return err
 			}
 			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":1,"outputTokens":0,"accounting":{"sourceSessionId":"sdk-session","sequence":1,"usageId":"call-1"}}`}
+			close(worker.events)
 			return nil
 		}
 		return worker, nil
 	}
 	flow, err = RunReviewFlow(context.Background(), db, ledger, flow.ID, factory, io.Discard)
-	if !errors.Is(err, ErrFlowStopped) || flow.Status != "STOPPED" || flow.RunnerID != "" || !flow.HandoffHeld() {
-		t.Fatalf("budget stop did not leave a held stopped flow: %+v %v", flow, err)
+	if err == nil || flow.Status != "STOPPED" || flow.RunnerID != "" || !flow.HandoffHeld() {
+		t.Fatalf("failed stream did not leave a held stopped flow: %+v %v", flow, err)
 	}
 	state, err := db.LoadWorkspace()
 	if err != nil {
@@ -342,8 +467,8 @@ func TestBudgetStopCapturesPartialWorkAndHoldsForSuccessorApproval(t *testing.T)
 		dispatch.Result.PartialGitEvidence == nil ||
 		len(dispatch.Result.PartialGitEvidence.ChangedFiles) != 1 ||
 		dispatch.Result.PartialGitEvidence.ChangedFiles[0] != "internal/partial.go" ||
-		!known || tokens != request.MaxTokens || len(state.Graph.Dispatches) != 1 {
-		t.Fatalf("budget stop lost accounting or partial Git evidence: dispatch=%+v tokens=%d known=%v", dispatch, tokens, known)
+		!known || tokens != 1 || len(state.Graph.Dispatches) != 1 {
+		t.Fatalf("failed stream lost accounting or partial Git evidence: dispatch=%+v tokens=%d known=%v", dispatch, tokens, known)
 	}
 }
 

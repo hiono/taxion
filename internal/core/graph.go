@@ -267,6 +267,8 @@ type DispatchUsage struct {
 	OutputTokens     *int64                   `json:"outputTokens,omitempty"`
 	CacheReadTokens  *int64                   `json:"cacheReadTokens,omitempty"`
 	CacheWriteTokens *int64                   `json:"cacheWriteTokens,omitempty"`
+	TotalNanoAIU     *float64                 `json:"totalNanoAIU,omitempty"`
+	AICreditsStatus  *string                  `json:"aiCreditsStatus,omitempty"`
 	Accounting       *UsageAccountingIdentity `json:"accounting,omitempty"`
 	ObservedAt       time.Time                `json:"observedAt"`
 }

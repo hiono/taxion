@@ -23,7 +23,7 @@ workspace の既定保存先は Git 作業ツリールートの `.taxion/` で�
 実 skill のローカル事前検査と、SDK 内での実ロード・文書品質の確認は別です。
 
 - `doctor` は選択中バックエンドの標準探索を診断します。通常の skill 利用に専用 directory や個別 hash 承認は不要です。検出と実ロード・品質確認は区別します。`ready` の出力だけで agent の判断・継続を保証せず、無料の操作回帰を実 agent の受入れの代わりにはしません。設定と Runtime 認証の確認範囲は、それぞれの文書に記載した範囲に限ります。
-- AI Credit 上限は soft ceiling です。Taxion が利用量を観測して後続作業を止める前に、実行中のモデル turn が設定値を超える場合があります。
+- 観測できない token 上限で新しい Flow を停止しません。各 model call の利用量を報告し、同単位の account allowance がない残高・使用率・残り率は unavailable とします。SDK の session AI Credit ceiling は soft ceiling であり、総請求額を保証しません。
 - 会話 export の検索回帰は合成 fixture で確認しています。実会話を使った Task 添付、Copilot 送信、ACP・外部記録までの通し受入れは未確認です。
 - 初回導入のガイド例と snapshot の継続は、実 Git を使うローカル CLI・controller テストで確認しています。有料モデルは呼びません。この成功は login 済み SDK の通し受入れを証明せず、旧 Dispatch に欠けている証拠も補いません。
 - `runtime stop` は、保存済み session の対応情報と transport option だけを使い、元の prompt や tool を要求しません。実行操作を拒否し、pending work の継続を無効にします。suspension と cancellation の receipt は別々に保持します。`workflow run|step` は session 作成前に、今後使う可能性のある全 Reviewer の設定承認を確認します。

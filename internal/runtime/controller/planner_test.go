@@ -18,7 +18,7 @@ func TestPlannerUsesIsolatedBoundedQuestionWithoutApplyingRecommendation(t *test
 		t.Fatal(err)
 	}
 	result, err := AskPlanner(context.Background(), db, filepath.Join(filepath.Dir(databasePath), "ledger.json"),
-		"task", "Evaluate whether to repair or revisit the plan using saved decisions.", resolved.Config, 1000, q)
+		"task", "Evaluate whether to repair or revisit the plan using saved decisions.", resolved.Config, q)
 	if err != nil {
 		t.Fatal(err)
 	}

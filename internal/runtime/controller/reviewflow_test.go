@@ -55,6 +55,33 @@ func TestFlowTokenAccountingUsesPerCallInputAndOutputOnly(t *testing.T) {
 	}
 }
 
+func TestFlowNanoAIUAccountingPreservesMissingAndPartialSignals(t *testing.T) {
+	zero, first, second := 0.0, 1.25, 2.5
+	complete, partial := "complete", "partial"
+	graph := core.TaskGraph{Dispatches: []core.GraphDispatch{
+		{ID: "priced", RuntimeUsage: []core.DispatchUsage{
+			{TotalNanoAIU: &first, AICreditsStatus: &complete},
+			{TotalNanoAIU: &second, AICreditsStatus: &complete},
+		}},
+		{ID: "unknown", RuntimeUsage: []core.DispatchUsage{
+			{TotalNanoAIU: &zero, AICreditsStatus: &partial},
+			{Model: "unpriced"},
+		}},
+	}}
+	value, status := flowNanoAIU(graph, core.ReviewFlow{DispatchIDs: []string{"priced"}})
+	if value == nil || *value != 3.75 || status != "complete" {
+		t.Fatalf("complete usage = %v %s", value, status)
+	}
+	value, status = flowNanoAIU(graph, core.ReviewFlow{DispatchIDs: []string{"unknown"}})
+	if value == nil || *value != 0 || status != "partial" {
+		t.Fatalf("partial zero subtotal = %v %s", value, status)
+	}
+	value, status = flowNanoAIU(graph, core.ReviewFlow{DispatchIDs: []string{"missing"}})
+	if value != nil || status != "unavailable" {
+		t.Fatalf("missing usage = %v %s", value, status)
+	}
+}
+
 func reviewFlowFixture(t *testing.T, decisions ...core.TaskDecision) (*store.Store, string, ReviewFlowRequest) {
 	return reviewFlowFixtureWithOutputMode(t, "", decisions...)
 }
@@ -131,7 +158,7 @@ func reviewFlowFixtureWithPolicy(t *testing.T, outputMode string, guidance *core
 	repairs := 1
 	return db, filepath.Join(dir, "ledger.json"), ReviewFlowRequest{
 		ID: "flow", TaskID: task.ID, Repository: task.Repo, ReviewRoot: filepath.Join(dir, "reviews"),
-		MaxRepairs: &repairs, MaxTokens: 10000, TimeoutSeconds: 600,
+		MaxRepairs: &repairs, TimeoutSeconds: 600,
 		Authorization: core.TaskDecision{ID: "flow-authorization", Source: "human:1", Text: "authorize one repair and independent re-review within saved ceilings"},
 	}
 }
@@ -416,8 +443,8 @@ func TestReviewFlowRepairsAndReviewsNewSHAAfterRestart(t *testing.T) {
 	}
 }
 
-func TestReviewFlowStopsAtCeilingsAndFailedRuns(t *testing.T) {
-	for _, failure := range []string{"repairs", "tokens", "unknown-usage", "deadline", "FAILED", "CANCELLED", "BLOCKED", "scope", "memory", "new-decision"} {
+func TestReviewFlowStopsAtSafetyGates(t *testing.T) {
+	for _, failure := range []string{"repairs", "deadline", "FAILED", "CANCELLED", "BLOCKED", "scope", "memory", "new-decision"} {
 		t.Run(failure, func(t *testing.T) {
 			db, ledger, request := reviewFlowFixture(t)
 			if failure == "repairs" {
@@ -425,9 +452,6 @@ func TestReviewFlowStopsAtCeilingsAndFailedRuns(t *testing.T) {
 				request.MaxRepairs = &zero
 			}
 
-			if failure == "tokens" {
-				request.MaxTokens = 14
-			}
 			flow, err := StartReviewFlow(db, ledger, request)
 			if err != nil {
 				t.Fatal(err)
@@ -436,7 +460,7 @@ func TestReviewFlowStopsAtCeilingsAndFailedRuns(t *testing.T) {
 			if failure == "FAILED" || failure == "CANCELLED" {
 				verdict = failure
 			}
-			executeFlowDispatch(t, db, flow, verdict, failure != "unknown-usage")
+			executeFlowDispatch(t, db, flow, verdict, true)
 			if failure == "repairs" || failure == "BLOCKED" {
 				flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
 				if err != nil {
@@ -488,9 +512,6 @@ func TestReviewFlowStopsAtCeilingsAndFailedRuns(t *testing.T) {
 			if err == nil || failure != "memory" && !errors.Is(err, ErrFlowStopped) || flow.Status != "STOPPED" || flow.Reason == "" {
 				t.Fatalf("flow continued: %+v %v", flow, err)
 			}
-			if failure == "tokens" && flow.Reason != "recorded token usage 15 against ceiling 14 (over by 1); Human approval of a new budget is required" {
-				t.Fatalf("token ceiling stop did not report observed usage and overage: %q", flow.Reason)
-			}
 			after, err := db.LoadWorkspace()
 			if err != nil {
 				t.Fatal(err)
@@ -505,12 +526,51 @@ func TestReviewFlowStopsAtCeilingsAndFailedRuns(t *testing.T) {
 	}
 }
 
+func TestReviewFlowDoesNotStopAtLegacyTokenThresholdOrUnknownUsage(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		maxTokens   int64
+		recordUsage bool
+	}{
+		{name: "token-threshold", maxTokens: 1, recordUsage: true},
+		{name: "unknown-usage"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, ledger, request := reviewFlowFixture(t)
+			flow, err := StartReviewFlow(db, ledger, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.maxTokens > 0 {
+				if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+					legacy, ok := state.Graph.ReviewFlow(flow.ID)
+					if !ok {
+						return errors.New("flow missing")
+					}
+					legacy.MaxTokens = test.maxTokens
+					storeFlow(state, legacy)
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if flow.MaxTokens != 0 {
+				t.Fatalf("new flow retained a token ceiling: %+v", flow)
+			}
+			executeFlowDispatch(t, db, flow, "", test.recordUsage)
+			flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+			if err != nil || flow.Status != "RUNNING" || len(flow.DispatchIDs) != 2 {
+				t.Fatalf("missing or exceeded usage stopped the approved goal: %+v, %v", flow, err)
+			}
+		})
+	}
+}
+
 func TestReviewFlowRejectsInvalidConfigurationAndStoredState(t *testing.T) {
 	db, ledger, request := reviewFlowFixture(t)
 	for _, change := range []func(*ReviewFlowRequest){
 		func(r *ReviewFlowRequest) { negative := -1; r.MaxRepairs = &negative },
 		func(r *ReviewFlowRequest) { r.MaxRepairs = nil },
-		func(r *ReviewFlowRequest) { r.MaxTokens = 0 },
 		func(r *ReviewFlowRequest) { r.TimeoutSeconds = 0 },
 		func(r *ReviewFlowRequest) { r.ReviewRoot = "relative" },
 		func(r *ReviewFlowRequest) { r.Repository = "other/repo" },
@@ -530,7 +590,7 @@ func TestReviewFlowRejectsInvalidConfigurationAndStoredState(t *testing.T) {
 		t.Fatal("duplicate flow created")
 	}
 	for _, change := range []func(*core.ReviewFlow){
-		func(f *core.ReviewFlow) { f.MaxTokens = 0 },
+		func(f *core.ReviewFlow) { f.MaxTokens = -1 },
 		func(f *core.ReviewFlow) { f.Repairs = 1 },
 		func(f *core.ReviewFlow) { f.Status = "COMPLETED"; f.Reason = "forged completion" },
 		func(f *core.ReviewFlow) { f.Contract.Acceptance = []string{"weakened acceptance"} },
