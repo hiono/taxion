@@ -42,6 +42,8 @@ directory ("." for the root); join each directory and filename to recover a path
 File names alone are not evidence of file content or behavior. Do not claim live
 investigation or tests. Cite the original request from /planner/task/decisions, and clearly
 label suggestions and assumptions. A proposal never authorizes execution.
+The first human conversation entry refers to its saved decision using source;
+read that original request from the supplied context rather than expecting text twice.
 Use HUMAN_REQUIRED while clarification is needed and HOLD for a ready proposal.
 Write explanations, questions and the proposal in the user's language.`
 
@@ -83,8 +85,9 @@ sets it. Approve only supported conclusions.`
 type requestPlanner func(context.Context, *store.Store, config.Config, core.GraphTask, string, int64, float64, string, string) (controller.QuestionResult, error)
 
 type requestMessage struct {
-	Role string `json:"role"`
-	Text string `json:"text"`
+	Role   string `json:"role"`
+	Text   string `json:"text,omitempty"`
+	Source string `json:"source,omitempty"`
 }
 
 func requestPathInventory(paths []string) map[string][]string {
@@ -108,7 +111,7 @@ func planNewRequest(ctx context.Context, db *store.Store, selected config.Config
 	if err != nil {
 		return result, err
 	}
-	sources, err := questionCitationPaths(map[string]any{"planner": planning})
+	sources, err := questionCitationPaths((controller.QuestionContext{Planner: &planning}).ModelContext())
 	if err != nil {
 		return result, err
 	}
@@ -280,9 +283,9 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	task, err := controller.ProposeIntake(db, controller.IntakeRequest{
 		Request: request, Actor: selected.Execution.Requester, Source: source,
 		Task: core.GraphTask{
-			ID: id + "-planning", Title: request, Repo: *repo, Type: "DESIGN", Status: core.Draft,
+			ID: id + "-planning", Title: "依頼の実装計画", Repo: *repo, Type: "DESIGN", Status: core.Draft,
 			Issue: "NOT_REQUIRED: local request planning", CreatedFrom: source,
-			Owner: "CODER", Reviewer: "REVIEWER", Objective: request,
+			Owner: "CODER", Reviewer: "REVIEWER", Objective: "保存した元依頼を確認し、変更範囲・完了条件・検証方法を提案する",
 			BudgetGuidance: core.CloneBudgetGuidance(guidance),
 			Worktree:       root, Branch: branch, BaselineSHA: baseline,
 		},
@@ -295,7 +298,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	if _, err := fmt.Fprintf(output, "相談記録: %s (SQLite; taxion records show)\n", id); err != nil {
 		return err
 	}
-	conversation := []requestMessage{{Role: "human", Text: request}}
+	conversation := []requestMessage{{Role: "human", Source: "/planner/task/decisions/0/text"}}
 	var used int64
 	for {
 		if err := ctx.Err(); err != nil {

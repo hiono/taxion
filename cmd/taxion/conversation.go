@@ -59,7 +59,7 @@ from earlier attempts, assumptions and missing information.
 The input is {"question": ..., "context": ...}; sources are relative to context,
 not the outer input. /planner/task is the GraphTask itself, NOT a PlanningTask
 wrapper: cite /planner/task/acceptance/0 or /planner/task/status, NEVER
-/planner/task/task/acceptance/0. /task/task is a different, legacy wrapper.
+/planner/task/task/acceptance/0. The legacy /task/task wrapper is not supplied.
 Results are /planner/results/N/result, Memory is /planner/memory/N, and
 flow boundaries are /planner/flows/N/held and /planner/flows/N/maxRepairs.
 Use only properties actually present in the supplied JSON; omit a claim rather
@@ -212,7 +212,7 @@ func conversationCmd(args []string, output io.Writer) error {
 		if err != nil {
 			return err
 		}
-		citationContext = map[string]any{"planner": planning}
+		citationContext = (controller.QuestionContext{Planner: &planning}).ModelContext()
 	} else {
 		citationContext, err = controller.ObserveQuestion(db, storePath, resolved.Config.Repository.Path, *task)
 		if err != nil {

@@ -32,6 +32,18 @@ type QuestionContext struct {
 	Results       []PlannerResult    `json:"results,omitempty"`
 }
 
+// ModelContext omits the legacy Task copy only on the model boundary; saved
+// observations and their hashes still retain the complete original context.
+func (c QuestionContext) ModelContext() any {
+	if c.Planner == nil {
+		return c
+	}
+	return struct {
+		Planner     *PlannerContext  `json:"planner"`
+		Observation *PlanObservation `json:"observation"`
+	}{c.Planner, c.Observation}
+}
+
 type InvestigationRequest struct {
 	Paths    []string `json:"paths"`
 	MaxBytes int      `json:"maxBytes"`
@@ -298,9 +310,9 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 		}
 	}
 	input, err := json.Marshal(struct {
-		Question string          `json:"question"`
-		Context  QuestionContext `json:"context"`
-	}{text, result.Context})
+		Question string `json:"question"`
+		Context  any    `json:"context"`
+	}{text, result.Context.ModelContext()})
 	if err != nil {
 		return result, err
 	}
@@ -451,7 +463,7 @@ func validateQuestionAnswer(answer QuestionAnswer, context QuestionContext) erro
 		len(answer.Confirmed)+len(answer.Assumptions)+len(answer.Unconfirmed) == 0 {
 		return fmt.Errorf("taxion: question answer requires explicit confirmed, assumed and unconfirmed lists")
 	}
-	content, err := json.Marshal(context)
+	content, err := json.Marshal(context.ModelContext())
 	if err != nil {
 		return err
 	}

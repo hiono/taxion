@@ -162,7 +162,41 @@ func fixturePlan(t *testing.T, answer controller.QuestionAnswer) requestPlanner 
 		selection, _ := json.Marshal(selected)
 		worker := &requestFixtureRuntime{role: "ORCHESTRATOR", worktree: task.Worktree,
 			id: "planner:" + task.ID, selection: selection, events: make(chan runtime.Event, 3)}
-		worker.send = func(string) error {
+		worker.send = func(sent string) error {
+			var wire struct {
+				Question string                     `json:"question"`
+				Context  map[string]json.RawMessage `json:"context"`
+			}
+			if err := json.NewDecoder(strings.NewReader(sent)).Decode(&wire); err != nil {
+				t.Fatal(err)
+			}
+			if _, duplicate := wire.Context["task"]; duplicate {
+				t.Fatal("complete model input still contains the duplicate Task wrapper")
+			}
+			var context struct {
+				Task core.GraphTask `json:"task"`
+			}
+			if err := json.Unmarshal(wire.Context["planner"], &context); err != nil {
+				t.Fatal(err)
+			}
+			var request struct {
+				Request string `json:"request"`
+			}
+			if err := json.Unmarshal([]byte(context.Task.Decisions[0].Text), &request); err != nil {
+				t.Fatal(err)
+			}
+			var conversation struct {
+				Messages []requestMessage `json:"conversation"`
+			}
+			if err := json.Unmarshal([]byte(wire.Question), &conversation); err != nil {
+				t.Fatal(err)
+			}
+			first := conversation.Messages[0]
+			if context.Task.ID != task.ID || request.Request == "" ||
+				context.Task.Title == request.Request || context.Task.Objective == request.Request ||
+				first.Text != "" || first.Source != "/planner/task/decisions/0/text" {
+				t.Fatal("original request was lost or repeated outside its exact saved decision")
+			}
 			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5}`}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
 			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
@@ -434,6 +468,84 @@ func TestRequestRepeatedPlanningDoesNotRequireConfigurationEdits(t *testing.T) {
 			fixturePlan(t, requestFixtureAnswer([]string{})), nil); err != nil {
 			t.Fatal("a second request collided with the fixed configuration approval reference", err)
 		}
+	}
+}
+
+func TestRequestWholeModelInputIncludesLongOriginalRequestOnce(t *testing.T) {
+	_, args := requestFixture(t)
+	original := strings.Repeat("日本語と \"引用\"、改行\nを含む依頼。", 80)
+	planner := func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
+		text string, tokens int64, credits float64, cli, base string) (controller.QuestionResult, error) {
+		body, err := json.Marshal(requestFixtureAnswer([]string{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		selection, _ := json.Marshal(selected)
+		worker := &requestFixtureRuntime{role: "ORCHESTRATOR", worktree: task.Worktree,
+			id: "planner:" + task.ID, selection: selection, events: make(chan runtime.Event, 3)}
+		worker.send = func(sent string) error {
+			var input struct {
+				Question string         `json:"question"`
+				Context  map[string]any `json:"context"`
+			}
+			if err := json.NewDecoder(strings.NewReader(sent)).Decode(&input); err != nil {
+				t.Fatal(err)
+			}
+			var count func(any) int
+			count = func(value any) int {
+				switch v := value.(type) {
+				case string:
+					if v == original {
+						return 1
+					}
+					var nested any
+					if json.Unmarshal([]byte(v), &nested) == nil {
+						return count(nested)
+					}
+				case []any:
+					total := 0
+					for _, item := range v {
+						total += count(item)
+					}
+					return total
+				case map[string]any:
+					total := 0
+					for _, item := range v {
+						total += count(item)
+					}
+					return total
+				}
+				return 0
+			}
+			if got := count(input.Question) + count(input.Context); got != 1 {
+				t.Fatalf("entire sent input contains original request %d times, want once", got)
+			}
+			context := controller.QuestionContext{
+				Task:    controller.PlanningTask{Task: task},
+				Planner: &controller.PlannerContext{Task: task},
+			}
+			context.Task.Task.Title, context.Task.Task.Objective = original, original
+			context.Planner.Task.Title, context.Planner.Task.Objective = original, original
+			legacy, err := json.Marshal(struct {
+				Question string                     `json:"question"`
+				Context  controller.QuestionContext `json:"context"`
+			}{original, context})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(sent)*100 > len(legacy)*50 {
+				t.Fatalf("whole model input saved less than 50%%: %d versus %d bytes", len(sent), len(legacy))
+			}
+			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5}`}
+			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
+			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
+			return nil
+		}
+		return controller.AskPlanner(ctx, db, storePath, task.ID, text, selected, tokens, worker)
+	}
+	var out bytes.Buffer
+	if err := requestCommand(append(args, original), strings.NewReader("/plan\n/quit\n"), &out, planner, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 
