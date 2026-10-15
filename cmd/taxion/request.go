@@ -374,8 +374,17 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				return fmt.Errorf("request configuration changed; start a new request")
 			}
 			proposal := answer.Proposal
+			executionConversation := append([]requestMessage(nil), conversation...)
+			executionConversation[0] = requestMessage{Role: "human", Text: request}
+			executionRequest, err := json.Marshal(struct {
+				PlanningTaskID string           `json:"planningTaskId"`
+				Conversation   []requestMessage `json:"conversation"`
+			}{task.ID, executionConversation})
+			if err != nil {
+				return err
+			}
 			executionTask, err := controller.ProposeIntake(db, controller.IntakeRequest{
-				Request: string(text), Actor: selected.Execution.Requester, Source: "planner:" + task.ID,
+				Request: string(executionRequest), Actor: selected.Execution.Requester, Source: "planner:" + task.ID,
 				Task: core.GraphTask{
 					ID: id, Title: proposal.Title, Objective: proposal.Objective, Repo: *repo,
 					Type: "IMPLEMENTATION", Status: core.Draft, CreatedFrom: source,

@@ -360,6 +360,27 @@ func TestSearch(t *testing.T) {
 	}
 	defer db.Close()
 	coder, reviewer := state.Graph.Dispatches[0], state.Graph.Dispatches[1]
+	var intake struct {
+		Request string `json:"request"`
+	}
+	if err := json.Unmarshal([]byte(coder.Instruction.Decisions[0].Text), &intake); err != nil {
+		t.Fatal(err)
+	}
+	var executionRequest struct {
+		PlanningTaskID string           `json:"planningTaskId"`
+		Conversation   []requestMessage `json:"conversation"`
+	}
+	if err := json.Unmarshal([]byte(intake.Request), &executionRequest); err != nil {
+		t.Fatal(err)
+	}
+	if executionRequest.PlanningTaskID != coder.TaskID+"-planning" ||
+		len(executionRequest.Conversation) != 3 || executionRequest.Conversation[0].Text != "検索機能をつけて" ||
+		executionRequest.Conversation[0].Source != "" ||
+		executionRequest.Conversation[2].Text != "部分一致です。" ||
+		strings.Contains(intake.Request, `"committedFilesByDirectory"`) ||
+		strings.Contains(intake.Request, `"committedContext"`) {
+		t.Fatal("execution lost original intent or feedback, retained a dangling Planner reference, or copied planning-only files")
+	}
 	if coder.Instruction.BudgetGuidance == nil || coder.Instruction.BudgetGuidance.Mode != "flow" ||
 		reviewer.Instruction.BudgetGuidance == nil || reviewer.Instruction.BudgetGuidance.Mode != "flow" {
 		t.Fatal("request did not retain default guidance through independent review")
