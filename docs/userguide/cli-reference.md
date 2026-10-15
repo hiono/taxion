@@ -8,6 +8,10 @@
 
 インストール済みのコマンド一覧は `taxion --help`、各コマンドの flag は `taxion COMMAND -h` で確認する。以下は代表的な操作例で、契約の詳細は Task Graph、設定、実行記録の各文書に記載する。
 
+通常は保存先を指定せず、Git 作業ツリールートの `.taxion/` を使う。サブディレクトリの起動も同じ保存先となり、linked worktree は各ルートに分離する。Git のルート解決に失敗した場合はエラーとし、別の状態へ切り替えない。Git repository 外では従来のカレントディレクトリ配下を使う。設定ファイルの探索規則は変更しない。判断理由は [ADR-0032](../develop/adr/0032-resolve-default-workspace-from-git-worktree-root.md)に記録する。
+
+例外用途の global option `--store PATH` は command の前に置き、旧 ledger のパスを選ぶ。明示した相対パスはカレントディレクトリ基準となる。旧 ledger の既定名は `ledger.json`、SQLite の保存先はその directory の `workspace.db`。DB 自体を `--store` に渡す指定、既存 DB と同一ファイルを指す symlink・hard link、未解決の symlink は、DB を開く前に拒否する。`init` はこの拒否時に directory や DB を作成せず、`serve` も audit directory を作成しない。別名の legacy ledger の読込み・移行は維持し、以前の別配置の自動移動・統合は行わない。
+
 ```bash
 taxion config check --sources
 taxion git check-index

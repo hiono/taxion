@@ -180,8 +180,33 @@ esac
 		t.Fatal("unsupported host accepted")
 	}
 	t.Setenv("PATH", t.TempDir())
-	if err := CheckRepositoryAccess(context.Background(), before, false); err == nil {
-		t.Fatal("missing gh accepted")
+	if err := CheckRepositoryAccess(context.Background(), before, false); err == nil ||
+		!strings.Contains(err.Error(), "gh was not found") || strings.Contains(err.Error(), "authentication") {
+		t.Fatal("missing gh was not distinguished from authentication failure", err)
+	}
+}
+
+func TestGitHubDistinguishesLaunchAndProviderFailure(t *testing.T) {
+	selected := repositoryConfig(t)
+	for _, test := range []struct {
+		name, script, expected string
+	}{
+		{"missing-interpreter", "#!/nonexistent-taxion-test-interpreter\n", "gh could not start"},
+		{"provider-failure", "#!/bin/sh\necho private-provider-detail >&2\nexit 1\n", "authentication or access query failed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(test.script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir)
+			err := CheckRepositoryAccess(context.Background(), selected, false)
+			if err == nil || !strings.Contains(err.Error(), test.expected) ||
+				strings.Contains(err.Error(), "private-provider-detail") ||
+				strings.Contains(err.Error(), dir) {
+				t.Fatal("incorrect or unredacted executable error", err)
+			}
+		})
 	}
 }
 

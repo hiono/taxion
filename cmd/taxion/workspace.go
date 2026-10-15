@@ -1,20 +1,93 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/store"
 )
 
+func defaultWorkspaceStorePath() (string, error) {
+	directory, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for ancestor := directory; ; ancestor = filepath.Dir(ancestor) {
+		_, err := os.Lstat(filepath.Join(ancestor, ".git"))
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			output, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output()
+			if err != nil {
+				return "", fmt.Errorf("resolve default workspace from Git: %w; use --store only for an intentional override", err)
+			}
+			root := strings.TrimSuffix(string(output), "\n")
+			if !filepath.IsAbs(root) {
+				return "", fmt.Errorf("Git did not return an absolute worktree root")
+			}
+			return filepath.Join(root, ".taxion", "ledger.json"), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		if filepath.Dir(ancestor) == ancestor {
+			// Preserve standalone workspaces outside Git repositories.
+			return filepath.Join(directory, ".taxion", "ledger.json"), nil
+		}
+	}
+}
+
 func workspaceDBPath() string {
 	return filepath.Join(filepath.Dir(storePath), "workspace.db")
 }
 
+func validateWorkspaceStorePath() error {
+	ledgerPath, err := filepath.Abs(storePath)
+	if err != nil {
+		return err
+	}
+	dbPath, err := filepath.Abs(workspaceDBPath())
+	if err != nil {
+		return err
+	}
+	collision := ledgerPath == dbPath ||
+		(runtime.GOOS == "windows" && strings.EqualFold(ledgerPath, dbPath))
+	var files [2]os.FileInfo
+	for index, path := range []string{ledgerPath, dbPath} {
+		files[index], err = os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			// A dangling link may become a collision when SQLite creates its target.
+			info, linkErr := os.Lstat(path)
+			if linkErr == nil && info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("--store or workspace database has an unresolved symlink; select a separate ledger.json path")
+			}
+			if linkErr != nil && !errors.Is(linkErr, os.ErrNotExist) {
+				return linkErr
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if collision || (files[0] != nil && files[1] != nil && os.SameFile(files[0], files[1])) {
+		return fmt.Errorf("--store selects the legacy ledger path, not the SQLite database; use a separate ledger.json path in the workspace directory, not workspace.db")
+	}
+	return nil
+}
+
 func openWorkspace() (*store.Store, error) {
+	if err := validateWorkspaceStorePath(); err != nil {
+		return nil, err
+	}
 	db, err := store.Open(workspaceDBPath())
 	if err != nil {
 		return nil, err

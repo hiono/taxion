@@ -35,6 +35,10 @@ taxion init
 taxion --help
 ```
 
+通常は保存先を指定しません。Git 作業ツリールートの `.taxion/` を使うため、サブディレクトリから実行しても同じ状態を参照します。linked worktree はそれぞれのルートに別の `.taxion/` を持ちます。Git repository 外では、従来どおりカレントディレクトリの `.taxion/` を使います。設定ファイルの探索規則は[設定ガイド](configuration.md#設定ファイル)を参照してください。
+
+隔離テストや以前の別配置を参照する場合だけ、command の前に `--store /path/to/workspace/ledger.json` を指定します。実際の SQLite は同じ directory の `workspace.db` に保存されますが、その DB 自体や同一ファイルの別名は指定できません。以前サブディレクトリへ作った状態は自動で移動・統合しないため、必要なら旧配置を明示します。
+
 設定確認は schema と採用 layer を示すだけです。Task の承認と一致するかは `config check --task TASK-ID`、Dispatch の保存済み条件も含むかは `config check --dispatch DISPATCH-ID` で確認します。実際の Copilot account は Dispatch 発行後に `runtime auth` で確認します。これらの確認は scope や予算の Human 承認に代わりません。
 
 ### 文書用 skill を使う場合

@@ -57,6 +57,21 @@ esac
 			t.Fatal("repository check ignored role or reached SDK", role, err)
 		}
 	}
+	t.Setenv("PATH", t.TempDir())
+	cfg := testConfig(t)
+	cfg.Configuration, err = json.Marshal(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingCLI, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer missingCLI.Close()
+	if err := missingCLI.CheckRepositoryAccess(context.Background()); err == nil ||
+		!strings.Contains(err.Error(), "gh was not found") || missingCLI.started || len(missingCLI.sessions) != 0 {
+		t.Fatal("missing GitHub CLI did not stop before SDK startup", err)
+	}
 	adapter, err := New(testConfig(t))
 	if err != nil {
 		t.Fatal(err)

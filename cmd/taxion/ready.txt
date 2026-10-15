@@ -8,6 +8,11 @@ Reviewer の作業を進める。ユーザーに JSON、hash、担当ごとの p
 
 ## 最初に確認する
 
+通常は保存先を指定せず、Git 作業ツリールートの .taxion/ を使う。
+サブディレクトリからも同じ状態を参照し、linked worktree は各ルートに分離する。
+別 worktree から親の制御状態を操作する必要がある場合だけ、親で解決した保存先を明示する。
+--store は隔離・旧配置などの例外用途であり、workspace.db 自体を指定しない。
+
 操作知識を標準探索先へ保存する場合は、利用者の明示許可で taxion ready --install-skill を使う。
 配置先は OS の home の .agents/skills/taxion/SKILL.md。Windows では通常 USERPROFILE 配下となる。
 配置済みなら taxion ready --check-skill の JSON と終了コードで、許容 skill 版・CLI 契約・

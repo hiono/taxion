@@ -35,6 +35,9 @@ const usage = `taxion — Evidence-governed control plane for coding agents
 Usage:
   taxion [--store PATH] <command> [options]
 
+Workspace: defaults to .taxion/ under the Git worktree root (cwd outside Git).
+--store selects a legacy ledger path for explicit overrides, not workspace.db.
+
 Commands:
   ready               Print the orchestration prompt; optional --install-skill / --update-skill / --check-skill
   request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --max-tokens, --timeout, --max-ai-credits)
@@ -132,8 +135,10 @@ var storePath = ".taxion/ledger.json"
 
 func main() {
 	args := os.Args[1:]
+	explicitStore := false
 	if len(args) >= 2 && args[0] == "--store" {
 		storePath = args[1]
+		explicitStore = true
 		args = args[2:]
 	}
 	if len(args) < 1 {
@@ -141,6 +146,13 @@ func main() {
 		os.Exit(2)
 	}
 	var err error
+	if !explicitStore && !slices.Contains([]string{"ready", "-h", "--help", "help", "gen-token", "git"}, args[0]) {
+		storePath, err = defaultWorkspaceStorePath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "taxion: %v\n", err)
+			os.Exit(1)
+		}
+	}
 	switch args[0] {
 	case "ready":
 		err = readyCmd(args[1:], os.Stdout)
@@ -213,6 +225,9 @@ func saveLedger(l core.Ledger) error {
 }
 
 func initCmd() error {
+	if err := validateWorkspaceStorePath(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
 		return err
 	}
@@ -910,6 +925,9 @@ func serveCmd(args []string) error {
 	if err := checkServeMode(*mode, *addr, *token); err != nil {
 		return err
 	}
+	if err := validateWorkspaceStorePath(); err != nil {
+		return err
+	}
 	if *audit != "" {
 		if err := os.MkdirAll(filepath.Dir(*audit), 0o755); err != nil {
 			return err
@@ -1010,6 +1028,9 @@ func memStorePath() string {
 }
 
 func openMemory() (*memory.Store, error) {
+	if err := validateWorkspaceStorePath(); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
 		return nil, err
 	}

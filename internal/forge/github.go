@@ -4,6 +4,7 @@ package forge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -49,6 +50,13 @@ func CheckRepositoryAccess(ctx context.Context, selected config.Config, write bo
 				return nil, ctx.Err()
 			}
 			if err != nil {
+				if errors.Is(err, exec.ErrNotFound) {
+					return nil, fmt.Errorf("taxion: required GitHub CLI gh was not found as an executable in Taxion's PATH; check installation, permissions and the executable environment used for diagnosis and execution")
+				}
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) {
+					return nil, fmt.Errorf("taxion: GitHub CLI gh could not start; check its executable permissions and launch environment; launch details withheld")
+				}
 				return nil, fmt.Errorf("taxion: repository authentication or access query failed; provider details withheld")
 			}
 			return output, nil

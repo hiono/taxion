@@ -121,6 +121,8 @@ taxion runtime auth --dispatch DISPATCH-ID --system-prompt-file prompts/coder.md
 
 `runtime auth` は Dispatch の承認済み設定に対して、実効 Copilot account が一致するかを確認し、session を作成しません。CLI は `--system-prompt-file` も要求します。成功しても repository 操作主体、契約適格性、legacy credential reference の解決は未確認です。設定確認や runtime auth の成功を実行許可の代わりにしないでください。
 
+GitHub repository の実行前検査は、Taxion を起動した環境の PATH から `gh` を起動します。実行可能な `gh` が見つからない場合、見つかった CLI が起動できない場合、CLI 起動後の認証・access 問合せが失敗した場合は、それぞれ異なるエラーになります。起動失敗を認証失敗とみなしてログインを繰り返さず、まず同じ環境で `gh --version` を確認してください。API 問合せの失敗は認証・権限だけでなく通信等の障害も含み、秘密を含み得る provider の詳細は表示しません。これらの失敗ではモデル session を開始しません。`doctor` の native inventory 成功だけでは `gh` の起動や repository access を確認したことにはなりません。
+
 固定 file を選べた Task 承認に Dispatch の設定をひも付けるときは `taxion config bind --dispatch DISPATCH-ID` を使います。これは認証、contract 適格性、runtime session binding を確認しません。
 
 `doctor` は選択中バックエンドの検索先と skills・plugins・指示等の検出結果を、
