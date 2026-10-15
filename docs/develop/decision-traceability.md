@@ -34,13 +34,17 @@ Foundation や初期の別の Milestone を M1 とした出典記録は確認で
 | [#20 M14 仕様書検索・Memory 移行・tools 連携](https://github.com/hiono/taxion/milestone/20) | M14 | ADR-0020, 0025 | #58–#61 | [memory-model.md](../userguide/memory-model.md), [specification-input.md](specification-input.md) | closed |
 | [#21 M15 CLI・ACP 利用受入れ](https://github.com/hiono/taxion/milestone/21) | M15 | ADR-0010, 0020–0025 | [#62](https://github.com/hiono/taxion/issues/62) は closed。[#79](https://github.com/hiono/taxion/issues/79) で残る通し受入れを追跡 | [runtime-contract.md](runtime-contract.md), [orchestration-requirements.md](orchestration-requirements.md), [task-graph.md](task-graph.md), [specification-input.md](specification-input.md) | open |
 | [#22 M16 Planner と Rust の後続検討](https://github.com/hiono/taxion/milestone/22) | M16 | ADR-0020 | #64, #65 | [orchestration-requirements.md](orchestration-requirements.md) | open |
-| [#23 Release 0.1.0 — CLI first-use and documentation](https://github.com/hiono/taxion/milestone/23) | Release | ADR-0026〜0028 に初回利用と復旧の判断を記録。ADR-0029 の残予算指示は実装済みで、モデルを呼ばないテストと login 済み account の読取り専用の証拠を保持。実モデルでの効果は未確認 | #78 | [README.md](../../README.md), [user-guide.md](../userguide/user-guide.md), [configuration.md](../userguide/configuration.md), [cli-reference.md](../userguide/cli-reference.md), [CONTRIBUTING.md](../../CONTRIBUTING.md) | open |
+| [#23 Release 0.1.0 — CLI first-use and documentation](https://github.com/hiono/taxion/milestone/23) | Release | ADR-0026〜0028 に初回利用と復旧、ADR-0029 に残予算指示、ADR-0030 に Planner と自然言語で計画を改善する入口を記録。実装と無料回帰、account の読取り専用証拠を保持。実モデルの正式な通し受入れは未完了 | #78, #81 | [README.md](../../README.md), [user-guide.md](../userguide/user-guide.md), [configuration.md](../userguide/configuration.md), [cli-reference.md](../userguide/cli-reference.md), [CONTRIBUTING.md](../../CONTRIBUTING.md) | open |
 
 Milestone の状態だけでは、Issue の証拠確認の代わりにならない。[#62](https://github.com/hiono/taxion/issues/62) は M15 の狭い範囲の ACP 実行受入れを記録するが、[要件と到達条件](orchestration-requirements.md)は、より広い通し受入れを定義する。その残件を [#79](https://github.com/hiono/taxion/issues/79) で追跡する。[#63](https://github.com/hiono/taxion/issues/63) は運用上の後続作業であり、代替にはならない。
 
 M15 の説明では、開発基盤の追加対応（[#75](https://github.com/hiono/taxion/issues/75)、[#76](https://github.com/hiono/taxion/issues/76)）を完了条件から除いている。[ロードマップ](roadmap.md)の範囲とも一致する。
 
 表の Milestone 名と状態は、2026-10-14 02:28:28 UTC に [GitHub milestones API](https://api.github.com/repos/hiono/taxion/milestones?state=all&per_page=100) から取得した。同時刻の [GitHub issues API](https://api.github.com/repos/hiono/taxion/issues?state=all&per_page=100) で割当てと状態を照合し、PR と Milestone なしの Issue は除いた。
+
+2026-10-15 の再照合でも23 Milestone の名前・状態は一致した。
+Milestone に割り当てられた75 Issue すべてについて、表の該当行に参照があることを検査した。
+これは判断・実施結果・所有仕様の対応確認であり、未完了 Issue の受入れを証明するものではない。
 
 この snapshot では、closed の Milestone #7、#12〜#14 の集計 `open_issues` が順に1、1、2、3だった一方、割当 Issue 一覧は closed の Issue だけだった。API の集計と Issue 一覧は別々に記録し、集計値や Milestone 状態だけで完了を証明しない。観測後に GitHub の値は変わる場合がある。
 

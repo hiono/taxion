@@ -10,10 +10,12 @@ v0.1.0 tag と GitHub Release はまだ公開されていません。そのた�
 git clone https://github.com/hiono/taxion.git
 cd taxion
 mise install
-go build -o ./bin/taxion ./cmd/taxion
+mise exec -- go build -o ./bin/taxion ./cmd/taxion
 export PATH="$PWD/bin:$PATH"
 ./bin/taxion --help
 ```
+
+`mise exec --` を使うため、shell への mise 有効化設定はビルドの前提ではありません。
 
 `go:` backend は Go の実行可能 package を `go install` で導入します。Taxion の `v0.1.0` tag が公開された後、[mise の Go backend](https://mise.jdx.dev/dev-tools/backends/go.html) に Go 1.26.0 と tag を指定します。
 

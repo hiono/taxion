@@ -32,6 +32,7 @@ Linux では Global 設定は通常 `$XDG_CONFIG_HOME/taxion/config.yaml`、未�
 | `execution.requester` | Task を依頼した人または process の識別子。 |
 | `execution.worker` | 実行環境・worker の識別子。 |
 | `execution.approvalRef` | Task に結び付ける設定承認の識別子。 |
+| `execution.budgetGuidance` | 残予算の送信補足。`off`・`flow`・`account`。省略時は `flow`。依頼ごとの明示指定を優先する。 |
 
 ```yaml
 version: 1

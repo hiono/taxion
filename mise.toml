@@ -1,6 +1,18 @@
 [tools]
 "cargo:adrs" = "0.12.1"
 go = "1.26.0"
+node = "22.18.0"
 
 [env]
 _.file = ".env"
+
+[tasks.check]
+description = "Check Go, documentation and Web without live integrations"
+env = { TAXION_COPILOT_INTEGRATION = "0", TAXION_COPILOT_ACCESS_INTEGRATION = "0", TAXION_GITHUB_INTEGRATION = "0", TAXION_GITLAB_INTEGRATION = "0", TAXION_GITLAB_WRITE_INTEGRATION = "0", TAXION_TEST_LOCAL_PLUGIN_DISCOVERY = "0" }
+run = [
+  'test -z "$(gofmt -l cmd internal)"',
+  "go vet ./...",
+  "go test ./...",
+  "go build ./...",
+  "npm --prefix web test",
+]

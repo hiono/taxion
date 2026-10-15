@@ -39,6 +39,30 @@ provider の永続 event ID として扱える範囲が限られるため、保�
 別 stream へ再接続したイベントの採用は明示的な照合エラーにする。
 接続後の観測と、結果・利用量の確定は分けて扱う。
 
+### 利用量の単位と予算停止
+
+固定 SDK v1.0.19 の `assistant.usage` はモデル呼出しごとの利用量であり、
+session の累積カウンターではない。Taxion は各呼出しの `inputTokens` と
+`outputTokens` を Dispatch に保存し、Flow に属する Dispatch 分を合計する。
+cache read/write の内訳は保存するが、この token 合計へ別途加算しない。
+`session.usage_info` の context window 使用量や、`session.usage.getMetrics` の
+session 累積コスト、account quota もこの合計に足さない。token から AI credits へは換算しない。
+
+SDK の accounting identity（`sourceSessionId`・`sequence`・`usageId`）が同じ利用量は
+一度だけ採用する。同じ identity で数値が異なる場合はエラーとする。
+identity がないイベントは保存した stream・sequence で再送を照合するため、
+別接続の観測を同一呼出しと推測して集計しない。
+input/output の欠落はゼロと区別し、利用量不明として先へ進めない。
+合計が整数の上限を超える場合は最大値で飽和させ、負数へ巻き戻さない。
+
+token 上限は観測後の停止条件であり、一回のモデル応答を上限ぴったりで止める保証ではない。
+超過時は実測値を保存し、新しい turn・Dispatch を開始しない。
+停止した Flow の上限や結果は書き換えず、新しい Task と予算の承認で続ける。
+部分成果・完了済み Coder の引継ぎは
+[利用者ガイド](user-guide.md#保存結果と停止後の継続)を参照する。
+
+### 結果と履歴の照合
+
 結果の receipt は、保存した結果とその時点の利用量をまとめて照合する。
 `SUSPENDED` の後に安全停止して `CANCELLED` を保存する場合は、同じ Dispatch の
 結果 receipt に連続した sequence を付けて追記し、元の suspension receipt を保持する。

@@ -6,11 +6,13 @@
 
 ```bash
 mise install
-go version
-go test ./...
+mise exec -- go version
+mise exec -- go test ./...
 ```
 
-全体のテストは `go test ./...` で実行します。PR を作成する前に、format・vet・test・build を確認してください。動作の変更には、対応するガードレールと回帰テストが必要です。
+Go 全体のテストは `mise exec -- go test ./...` で実行します。
+PR を作成する前は `mise run check` で format・vet・Go test/build・Web test をまとめて確認します。
+動作の変更には、対応するガードレールと回帰テストが必要です。
 
 1. [ロードマップ](docs/develop/roadmap.md)から小さな作業を選びます。
 2. `internal/core` の依存は標準ライブラリだけにします（SDK-001）。外部との接続は `internal/runtime/<name>/` に置きます。
@@ -19,8 +21,16 @@ go test ./...
 5. ローカルで次の確認を実行します。
 
 ```bash
-test -z "$(gofmt -l cmd internal)" && go vet ./... && go test ./... && go build ./...
+mise run check
 ```
+
+Web の確認には Node 22.18 以上を使います。mise と CI は最低対応版の 22.18.0 に揃えています。
+依存 package のインストールは不要です。
+CI でも Go と Web の両方を検査します。これらの通常検査ではモデルを呼びません。
+README・利用者/開発者文書・ADR のローカルリンクと見出し参照も Go テストで検査します。
+`mise run check` は live integration の環境変数を無効にするため、
+shell に以前の opt-in が残っていても有料モデルや実サービスへの受入れを開始しません。
+実サービスの受入れは、対象テストと範囲・予算を別途指定して実行します。
 
 ## 説明文の書き方
 

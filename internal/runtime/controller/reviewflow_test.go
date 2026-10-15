@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,6 +19,41 @@ import (
 	"github.com/hiono/taxion/internal/store"
 	"github.com/hiono/taxion/internal/tools"
 )
+
+func TestFlowTokenAccountingUsesPerCallInputAndOutputOnly(t *testing.T) {
+	zero, two, three, seven, maximum := int64(0), int64(2), int64(3), int64(7), int64(math.MaxInt64)
+	for _, test := range []struct {
+		name   string
+		status core.DispatchStatus
+		usage  []core.DispatchUsage
+		tokens int64
+		known  bool
+	}{
+		{"active before usage", core.DispatchRunning, nil, 0, true},
+		{"terminal without usage", core.DispatchSucceeded, nil, 0, false},
+		{"reported zero", core.DispatchSucceeded, []core.DispatchUsage{{InputTokens: &zero, OutputTokens: &zero}}, 0, true},
+		{"missing output", core.DispatchRunning, []core.DispatchUsage{{InputTokens: &two}}, 2, false},
+		{"multiple calls", core.DispatchSucceeded, []core.DispatchUsage{
+			{InputTokens: &two, OutputTokens: &three},
+			{InputTokens: &three, OutputTokens: &seven},
+		}, 15, true},
+		{"cache details not added twice", core.DispatchSucceeded, []core.DispatchUsage{
+			{InputTokens: &three, OutputTokens: &two, CacheReadTokens: &three, CacheWriteTokens: &seven},
+		}, 5, true},
+		{"overflow saturates", core.DispatchRunning, []core.DispatchUsage{{InputTokens: &maximum, OutputTokens: &two}}, math.MaxInt64, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			graph := core.TaskGraph{Dispatches: []core.GraphDispatch{
+				{ID: "included", Status: test.status, RuntimeUsage: test.usage},
+				{ID: "unrelated", Status: core.DispatchSucceeded, RuntimeUsage: []core.DispatchUsage{{InputTokens: &maximum}}},
+			}}
+			tokens, known := flowTokens(graph, core.ReviewFlow{DispatchIDs: []string{"included"}})
+			if tokens != test.tokens || known != test.known {
+				t.Fatalf("tokens=%d known=%v; want %d, %v", tokens, known, test.tokens, test.known)
+			}
+		})
+	}
+}
 
 func reviewFlowFixture(t *testing.T, decisions ...core.TaskDecision) (*store.Store, string, ReviewFlowRequest) {
 	return reviewFlowFixtureWithOutputMode(t, "", decisions...)

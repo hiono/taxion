@@ -34,6 +34,15 @@ jobs:
               echo "SDK-001 violation: external dep in internal/core"; exit 1
             fi
           fi
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - run: npm test
+        working-directory: web
   hygiene:
     runs-on: ubuntu-latest
     steps:
