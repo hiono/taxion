@@ -74,7 +74,7 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 				return err
 			}
 		} else {
-			source, err := budgetContinuationSource(state.Graph, task, request.ContinueFromDispatchID)
+			source, err := budgetContinuationSource(state.Graph, task, request.ContinueFromDispatchID, state.Records)
 			if err != nil {
 				return err
 			}
@@ -107,7 +107,7 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 	return flow, err
 }
 
-func budgetContinuationSource(graph core.TaskGraph, task core.GraphTask, sourceID string) (core.GraphDispatch, error) {
+func budgetContinuationSource(graph core.TaskGraph, task core.GraphTask, sourceID string, records ...store.Records) (core.GraphDispatch, error) {
 	source, ok := graph.GraphDispatch(sourceID)
 	if !ok {
 		return core.GraphDispatch{}, fmt.Errorf("taxion: budget continuation requires a saved Coder result")
@@ -125,7 +125,11 @@ func budgetContinuationSource(graph core.TaskGraph, task core.GraphTask, sourceI
 		task.CreatedFrom != "flow:"+predecessor.ID || task.Supersedes != predecessor.TaskID {
 		return core.GraphDispatch{}, fmt.Errorf("taxion: budget continuation requires the exact held predecessor flow and successor Task")
 	}
-	if err := gitproof.VerifyCompletedSuccessor(source, task); err != nil {
+	located := source
+	if len(records) != 0 {
+		located = records[0].RestoredDispatch(source)
+	}
+	if err := gitproof.VerifyCompletedSuccessor(located, task); err != nil {
 		return core.GraphDispatch{}, fmt.Errorf("taxion: completed Coder result cannot be continued safely: %w", err)
 	}
 	return source, nil
@@ -160,7 +164,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 		}
 		if flow.Status != "RUNNING" {
 			if flow.Status == "COMPLETED" {
-				if err := revalidateFlowResult(state.Graph, flow); err != nil {
+				if err := revalidateFlowResult(state.Graph, flow, state.Records); err != nil {
 					return fmt.Errorf("taxion: completed checkpoint revalidation: %w", err)
 				}
 			}
@@ -249,7 +253,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 		if err := last.ValidateResult(last.Status, last.Result); err != nil {
 			return stop("latest result failed contract validation: " + err.Error())
 		}
-		if err := revalidateFlowResult(state.Graph, flow); err != nil {
+		if err := revalidateFlowResult(state.Graph, flow, state.Records); err != nil {
 			return stop("result Git revalidation failed: " + err.Error())
 		}
 		if flow.HandoffHeld() {

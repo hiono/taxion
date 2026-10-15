@@ -91,6 +91,14 @@ Runtime・workflow 実行の `--controller-validation-submission` は、モデ�
 
 復旧、承認済み公開、失敗記録の手順は[実行記録](../userguide/execution-records.md)、provider の対応範囲と採択した後続作業は[開発基盤の対応評価](forge-capabilities.md)に記載している。
 
+### 別マシンへの移送
+
+`workspace snapshot` は停止・照合済みの状態を対象に、workspace と存在する Memory に書込み予約を保持し、`VACUUM INTO` の整合コピーと必要な Git object の到達閉包を一つの SQLite へ保存する。内容 hash が同じ payload は共有する。実行中 Flow・runner claim・未終了 Dispatch・未照合の外部送信、不足 object、観測した未記録変更、submodule・Git LFS は明示拒否する。
+
+`workspace inspect-snapshot` は隔離配置で checksum・形式版・DB と Git の対応を照合する。`workspace restore` はファイル全体の SHA-256 と actor・source を要求し、新規 directory に限定する。元契約・結果・usage・hash は維持し、配置対応を `Records.Restore`、過去の配置 receipt を `Records.Restores` に記録する。元 Task への新規 Dispatch と旧 SDK session の再開は拒否する。Git 再検証と successor の照合では、保存原本を変更せず新配置を使う。継続には新しい配置・設定・予算の明示承認が必要となる。
+
+通常の DB ファイルコピーと異なり、元 DB・JSON・Git の場所を参照せず復元できる。SDK home・credential・Git config・hook は収集しない。既知の token・秘密鍵パターンを検出した移送は拒否するが、未知の秘密の不存在を保証しない。処理は入力全体を読み、使用メモリは payload に依存する。詳細と制約は [ADR-0034](adr/0034-portable-sqlite-workspace-snapshots.md) と[移送手順](../userguide/user-guide.md#別マシンへの一ファイル移送)に記録する。
+
 ## adapter の動作
 
 - `internal/runtime/local` は、process 内で状態遷移を確認する参照 adapter。session ごとに `core.Sequence` を使い、`CompleteStep` で CHK-002 の順序を強制する。受け付けた指示を共通の `input` event として記録し、`checkpoint`・`done` event を出す。

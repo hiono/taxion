@@ -7,6 +7,8 @@ CLI はローカルの信頼された管理者が操作する。`actor` と承�
 
 ## 復旧時の照合
 
+別マシンへ正式状態と Git 成果を移す場合は、[利用者ガイドの一ファイル移送](user-guide.md#別マシンへの一ファイル移送)を使う。`workspace snapshot`・`inspect-snapshot`・`restore` は停止済みの状態を扱い、旧 session を自動再開しない。通常の workspace DB の単純コピーを、Memory・Git を含む復元の代用にしない。
+
 | 保存された状態 | 再起動後の処理 |
 | --- | --- |
 | 発行済み、実行開始前 | 現在の設定承認・主体・権限・worktree を確認して開始する。保存済み Session があれば同じ Session を使う |

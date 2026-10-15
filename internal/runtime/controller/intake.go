@@ -186,19 +186,19 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 				if last.Result == nil || last.Result.PartialGitEvidence == nil {
 					return fmt.Errorf("taxion: cancelled Coder work requires verified partial Git evidence before successor approval")
 				}
-				if err := gitproof.VerifyPartialSuccessor(last, task); err != nil {
+				if err := gitproof.VerifyPartialSuccessor(state.Records.RestoredDispatch(last), task); err != nil {
 					return fmt.Errorf("taxion: successor does not preserve the verified partial work: %w", err)
 				}
 			} else if flow.StopCode == "BUDGET_LIMIT" &&
 				last.Recipient == "CODER" && last.Status == core.DispatchSucceeded {
-				if err := gitproof.VerifyCompletedSuccessor(last, task); err != nil {
+				if err := gitproof.VerifyCompletedSuccessor(state.Records.RestoredDispatch(last), task); err != nil {
 					return fmt.Errorf("taxion: successor does not preserve the completed Coder result: %w", err)
 				}
 			} else if flow.StopCode == "BUDGET_LIMIT" && last.Recipient == "REVIEWER" {
 				if len(flow.DispatchIDs) < 2 {
 					return fmt.Errorf("taxion: stopped Reviewer requires a saved Coder predecessor")
 				}
-				if _, err := budgetContinuationSource(state.Graph, task, flow.DispatchIDs[len(flow.DispatchIDs)-2]); err != nil {
+				if _, err := budgetContinuationSource(state.Graph, task, flow.DispatchIDs[len(flow.DispatchIDs)-2], state.Records); err != nil {
 					return err
 				}
 			}

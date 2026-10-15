@@ -252,6 +252,49 @@ func captureWorktreeTree(root, baseline, head string) (tree string, files []stri
 	return tree, files, status == "", nil
 }
 
+// CheckPortableWorktree refuses unrecorded edits instead of silently losing
+// them during migration. Ignored files are not part of recorded Git artifacts.
+func CheckPortableWorktree(root, head, tree string) error {
+	actualHead, err := git(root, "rev-parse", "HEAD")
+	if err != nil || actualHead != head {
+		return fmt.Errorf("portable worktree HEAD differs from recorded evidence")
+	}
+	if tree == "" {
+		tree, err = git(root, "rev-parse", head+"^{tree}")
+		if err != nil {
+			return err
+		}
+	}
+	index, err := os.CreateTemp("", "taxion-portable-index-*")
+	if err != nil {
+		return err
+	}
+	path := index.Name()
+	if err := index.Close(); err != nil {
+		os.Remove(path)
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	defer os.Remove(path)
+	options := []string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.untrackedCache=false"}
+	if _, err := gitWithIndex(root, path, append(options, "read-tree", tree)...); err != nil {
+		return err
+	}
+	if _, err := gitWithIndex(root, path, append(options, "diff", "--quiet", "--no-ext-diff", "--no-textconv")...); err != nil {
+		return fmt.Errorf("portable worktree contains unrecorded changes; reconcile before snapshot")
+	}
+	extra, err := gitWithIndex(root, path, append(options, "ls-files", "--others", "--exclude-standard")...)
+	if err != nil {
+		return err
+	}
+	if extra != "" {
+		return fmt.Errorf("portable worktree contains unrecorded files; reconcile before snapshot")
+	}
+	return nil
+}
+
 func ObserveSnapshotStart(dispatch core.GraphDispatch) (string, error) {
 	if dispatch.Recipient == "REVIEWER" {
 		changed := false

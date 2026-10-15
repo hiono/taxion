@@ -50,7 +50,7 @@ Milestone に割り当てられた75 Issue すべてについて、表の該当�
 
 ## ADR の状態と現在の参照先
 
-ADR-0001〜0033 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。
+ADR-0001〜0034 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。
 
 | ADR | 判断 | 現在の参照先・適用範囲 |
 | --- | --- | --- |
@@ -86,7 +86,8 @@ ADR-0001〜0033 はすべて `Accepted` の判断を記録する。採択は選�
 | [0030](adr/0030-refine-natural-language-requests-with-planner.md) | Planner と自然言語の依頼を改善し、JSON・role prompt をコピーせず既存 intake・review flow を構成する | `user-guide.md`、`cli-reference.md`、`runtime-contract.md`、`configuration.md`。オフライン通しテストの証拠を保持。実モデルの入口受入れは未完了 |
 | [0031](adr/0031-bootstrap-the-current-coding-agent-with-ready.md) | ready で今の coding agent に既存 CLI の操作手順を渡し、内部 Planner の重複実行を避ける | `user-guide.md`、`cli-reference.md`、`runtime-contract.md`。無料の合成操作回帰を実装。実 agent の依頼改善・停止復旧・独立レビュー受入れは未完了 |
 | [0032](adr/0032-resolve-default-workspace-from-git-worktree-root.md) | 通常の保存先を Git 作業ツリールートの `.taxion/` から解決し、保存ファイルの個別指定を例外用途にする | `user-guide.md`、`cli-reference.md`。linked worktree は分離し、旧状態の自動移動・統合は行わない |
-| [0033](adr/0033-reference-results-and-persist-workspace-records-incrementally.md) | 不変の結果を ID 参照し、役割別入力・host の結果補完・SQLite の差分保存を使う | `runtime-contract.md`、`user-guide.md`、`cli-reference.md`。DB 単体の別マシン復元は未実装 |
+| [0033](adr/0033-reference-results-and-persist-workspace-records-incrementally.md) | 不変の結果を ID 参照し、役割別入力・host の結果補完・SQLite の差分保存を使う | `runtime-contract.md`、`user-guide.md`、`cli-reference.md`。別マシン移送は後続の0034で実装 |
+| [0034](adr/0034-portable-sqlite-workspace-snapshots.md) | 停止済み workspace・Memory・必要な Git object を一つの SQLite で移送し、新配置の継続は再承認する | `runtime-contract.md`、`user-guide.md`、`cli-reference.md`。元の契約・hash・usage は維持し、旧 SDK session は再開しない |
 
 ADR-0026〜0028 は、初回利用と復旧の調査後に追加した。ローカルの実 Git・fake Runtime テストで、許可範囲、同一 tree の引継ぎ、successor の照合を確認した。停止専用操作では、旧 suspended Dispatch を終了し、追加モデル指示・利用量なしで部分 Git 証拠と両方の結果 receipt を保持した。
 

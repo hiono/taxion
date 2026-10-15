@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/hiono/taxion/internal/core"
 )
 
 // Records shares the workspace transaction for recovery and approved publication.
@@ -16,6 +20,58 @@ type Records struct {
 	Updates  []ExternalUpdate `json:"updates,omitempty"`
 	Findings []FailureRecord  `json:"findings,omitempty"`
 	Requests []RequestRecord  `json:"requests,omitempty"`
+	Restore  *RestoreRecord   `json:"restore,omitempty"`
+	Restores []RestoreRecord  `json:"restores,omitempty"`
+}
+
+type RestoredPath struct {
+	Original string `json:"original"`
+	Local    string `json:"local"`
+}
+
+type RestoreRecord struct {
+	SnapshotHash string         `json:"snapshotHash"`
+	Actor        string         `json:"actor"`
+	Source       string         `json:"source"`
+	TaskIDs      []string       `json:"taskIds"`
+	Paths        []RestoredPath `json:"paths"`
+	At           time.Time      `json:"at"`
+}
+
+// RestoredDispatch locates Git evidence without changing the saved contract.
+func (r Records) RestoredDispatch(d core.GraphDispatch) core.GraphDispatch {
+	if r.Restore == nil {
+		return d
+	}
+	resolve := func(path string) string {
+		for _, mapping := range r.Restore.Paths {
+			if mapping.Original == path {
+				return mapping.Local
+			}
+		}
+		return path
+	}
+	d.Instruction.Worktree = resolve(d.Instruction.Worktree)
+	d.ReviewWorktreeSource = resolve(d.ReviewWorktreeSource)
+	if d.Result != nil {
+		result := *d.Result
+		d.Result = &result
+		result.Validations = slices.Clone(result.Validations)
+		for i := range result.Validations {
+			result.Validations[i].Worktree = resolve(result.Validations[i].Worktree)
+		}
+		if result.GitEvidence != nil {
+			evidence := *result.GitEvidence
+			evidence.Worktree = resolve(evidence.Worktree)
+			result.GitEvidence = &evidence
+		}
+		if result.PartialGitEvidence != nil {
+			evidence := *result.PartialGitEvidence
+			evidence.Worktree = resolve(evidence.Worktree)
+			result.PartialGitEvidence = &evidence
+		}
+	}
+	return d
 }
 
 type RequestRecord struct {
@@ -78,6 +134,22 @@ type ExternalUpdate struct {
 }
 
 func (r Records) validate() error {
+	restores := r.Restores
+	if r.Restore != nil {
+		restores = append(slices.Clone(restores), *r.Restore)
+	}
+	for _, restore := range restores {
+		if !recordHash(restore.SnapshotHash) || restore.Actor == "" || restore.Source == "" || restore.At.IsZero() {
+			return fmt.Errorf("invalid workspace restore receipt")
+		}
+		seen := map[string]bool{}
+		for _, mapping := range restore.Paths {
+			if !filepath.IsAbs(mapping.Original) || !filepath.IsAbs(mapping.Local) || seen[mapping.Original] {
+				return fmt.Errorf("invalid or duplicate restored path")
+			}
+			seen[mapping.Original] = true
+		}
+	}
 	requestSequences := map[string]uint64{}
 	for _, record := range r.Requests {
 		key := record.RequestID + ":" + record.Kind

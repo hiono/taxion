@@ -160,7 +160,7 @@ func checkPublicationTask(state *store.Workspace, update store.ExternalUpdate) e
 				return err
 			}
 		}
-		if err := revalidateFlowResult(state.Graph, flow); err != nil {
+		if err := revalidateFlowResult(state.Graph, flow, state.Records); err != nil {
 			return err
 		}
 		for _, dependency := range task.DependsOn {

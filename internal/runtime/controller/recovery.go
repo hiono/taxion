@@ -55,7 +55,7 @@ func RecoverReviewFlow(db *store.Store, request RecoveryRequest) (core.ReviewFlo
 		}
 		last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
 		if last.Status == core.DispatchSucceeded {
-			if err := revalidateFlowResult(state.Graph, flow); err != nil {
+			if err := revalidateFlowResult(state.Graph, flow, state.Records); err != nil {
 				return fmt.Errorf("taxion: recovery result revalidation: %w", err)
 			}
 
@@ -71,10 +71,13 @@ func RecoverReviewFlow(db *store.Store, request RecoveryRequest) (core.ReviewFlo
 	return flow, err
 }
 
-func revalidateFlowResult(graph core.TaskGraph, flow core.ReviewFlow) error {
+func revalidateFlowResult(graph core.TaskGraph, flow core.ReviewFlow, records ...store.Records) error {
 	last, ok := graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
 	if !ok || last.Status != core.DispatchSucceeded || last.Result == nil {
 		return fmt.Errorf("flow checkpoint requires a successful saved result")
+	}
+	if len(records) != 0 {
+		last = records[0].RestoredDispatch(last)
 	}
 	if last.Recipient == "CODER" {
 		return revalidateCoderResult(last)
@@ -95,6 +98,9 @@ func revalidateFlowResult(graph core.TaskGraph, flow core.ReviewFlow) error {
 		coder.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot &&
 			coder.Result.OutputTreeSHA != last.Result.OutputTreeSHA {
 		return fmt.Errorf("review and Coder output identity differs")
+	}
+	if len(records) != 0 {
+		coder = records[0].RestoredDispatch(coder)
 	}
 	return revalidateCoderResult(coder)
 }

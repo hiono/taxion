@@ -46,6 +46,9 @@ Commands:
   git check-range     Scan every unpublished commit tree and message (--base SHA, --head SHA, --scanner PATH)
   git hook            Install (--scanner PATH, or --paths-only), inspect, or remove the Taxion pre-commit hook
   init                Initialize a local workspace ledger
+  workspace snapshot  Collect stopped workspace, Memory and required Git objects into one private SQLite file (--output)
+  workspace inspect-snapshot  Verify portable contents without contacting a provider (--file)
+  workspace restore   Restore an exact approved snapshot into a fresh directory (--file, --output, --expected-hash, --actor, --source)
   task create         Create a task (--title and --repo required)
   task list           List tasks ([--repo] filter, [--json])
   task track          Register/update a durable Task Graph contract (--file JSON)
@@ -166,6 +169,8 @@ func main() {
 		err = checkGitIndex(args[1:], os.Stdout)
 	case "init":
 		err = initCmd()
+	case "workspace":
+		err = workspaceMigrationCmd(args[1:])
 	case "task":
 		err = taskCmd(args[1:])
 	case "dispatch":

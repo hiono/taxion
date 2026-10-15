@@ -73,8 +73,9 @@ DB に保存する。`records show` を明示 export として使い、
 更新 callback は引き続き全状態を読み、比較用に符号化するため、
 部分読取りや CPU・memory 使用量まで定数時間になったとは主張しない。
 
-今回の変更だけでは、別マシンへの DB 単体復元は成立しない。
-Memory、必要な成果・部分成果、Git object、配置対応の一貫した収集と復元は未実装である。
+この判断の第1段階だけでは、別マシンへの DB 単体復元は成立しない。
+Memory、必要な成果・部分成果、Git object、配置対応の収集と復元は、
+後続の [ADR-0034](0034-portable-sqlite-workspace-snapshots.md) で実装する。
 DB 内の hash は外部の実体を代替しないため、この条件を完了扱いにしない。
 認証情報や実行中 process の移送、同一 SDK session の再接続も保証しない。
 

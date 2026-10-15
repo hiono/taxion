@@ -322,6 +322,9 @@ func (c *Controller) authorizeExecution(ctx context.Context, dispatchID, operati
 	if !ok {
 		return fmt.Errorf("taxion: specification gate requires a saved Dispatch")
 	}
+	if state.Records.Restore != nil && slices.Contains(state.Records.Restore.TaskIDs, dispatch.TaskID) {
+		return fmt.Errorf("taxion: restored execution requires a newly approved successor; old SDK sessions cannot resume")
+	}
 	if err := state.Graph.CheckTaskSpecificationUse(dispatch.TaskID, "copilot"); err != nil {
 		return err
 	}

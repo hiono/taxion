@@ -179,7 +179,7 @@ Planner はファイル・shell tool を持たず、依頼、これまでの対�
 
 相談記録と実行先・失敗の記録は request ID・連番・hash とともに workspace の SQLite DB に保存します。実行イベントは Flow から正式な Dispatch・receipt を参照し、二重保存しません。新しい `requests/` の JSON や `execution.log` は作りません。確認・明示 export は `taxion records show` を使います。この出力には相談本文が含まれるため、公開先への転記には注意してください。相談保存前に DB の file mode を所有者だけが読み書きできる設定にします。過去の外部ファイルは削除しません。
 
-停止後の成果物と利用量は従来の Task / Flow / receipt に残ります。無料の合成 runtime と実 Git で依頼、確認質問、計画修正、承認、コード作成、同一 tree の独立レビューまで検証しています。実 Copilot モデルでこの入口を通した受入れは未確認です。DB だけで別マシンへ成果を復元する機能も未実装で、Git と Memory の実体は別途必要です。
+停止後の成果物と利用量は従来の Task / Flow / receipt に残ります。無料の合成 runtime と実 Git で依頼、確認質問、計画修正、承認、コード作成、同一 tree の独立レビューまで検証しています。実 Copilot モデルでこの入口を通した受入れは未確認です。別マシンへの移送には、通常の DB 単純コピーではなく、[一ファイルでの移送](#別マシンへの一ファイル移送)を使います。
 
 ## 依頼から独立レビューまで
 
@@ -373,3 +373,27 @@ token 上限停止では、停止済み Flow の上限を変更して再開す�
 snapshot mode で完了済み Coder 結果を引き継ぐ場合は、保存済み `outputSha`（baseline commit）、`outputTreeSha`、変更 path を承認した別 worktreeを用意します。後続 Task の target tree が一致することを `conversation confirm` が検査し、`workflow start` には元の Coder Dispatch ID を `continueFromDispatchId` として指定します。新しい Flow は Coder を再実行せず Reviewer から始まります。停止時点が `CANCELLED` の部分成果なら、同じ baseline と保存 tree を持つ別 worktreeを用意し、後続 Task を承認したうえで Coder から続けます。
 
 成功した Coder の後、Reviewer の実行中に予算上限へ達した場合も、Coder をやり直す必要はありません。元の Reviewer が `CANCELLED` で、対応する `runtime-stop:` 証拠が保存されていることを確認し、同じ Coder 成果物に対して後続 Task と新しいレビュー予算を承認します。新しい Reviewer の設定承認には、その後続 Flow の正確な Reviewer Task ID を含めます。元の Flow や取消結果は変更しません。
+
+## 別マシンへの一ファイル移送
+
+`workspace snapshot` は、停止済み workspace、存在する Memory、保存成果・部分成果に必要な Git object を、一つの非公開 SQLite ファイルへ収めます。通常の `workspace.db` をそのままコピーしても、Memory と Git は移りません。実行中の Flow・runner・未終了 Dispatch・未照合の外部送信がある場合は、先に上記の停止と照合を済ませてください。
+
+```sh
+taxion workspace snapshot --output /srv/backups/taxion-transfer.db
+taxion workspace inspect-snapshot --file /srv/backups/taxion-transfer.db
+```
+
+出力の `hash` はファイル全体の SHA-256 です。移送先でも同じファイルを inspect し、確認した hash と承認元を指定します。`--output` は存在しない絶対 directory にします。例のパスは各マシンの保存場所に置き換えてください。
+
+```sh
+taxion workspace restore --file /srv/backups/taxion-transfer.db \
+  --output /srv/taxion-restored --expected-hash CONFIRMED-SHA256 \
+  --actor human --source human:approved-machine-transfer
+taxion --store /srv/taxion-restored/.taxion/ledger.json records show
+```
+
+成功後は `.taxion/` に正式状態と Memory、`repositories/` に Git object、`worktrees/` に再生成した作業ファイルがあります。`records show` の `restore.paths` は旧絶対パスと新しい配置の対応です。元の Task・Dispatch・承認・hash・利用量を変更せず、この対応を成果の再検証に使います。解放済み Reviewer の worktree は再作成しません。
+
+旧 SDK session は再開しません。移送先で認証と設定を用意し、対応表で見つけた source worktree と同じ Git repository 内に別 worktree を作り、保存済み commit/tree を再現します。その新しい配置、設定、予算を successor Task として承認し、上記の停止後の継続手順を使ってください。成功済み Coder の作り直しは不要です。移送後の操作には、上例の `--store` を付けて復元した正式状態を選びます。
+
+snapshot は不足 object、観測した未記録変更、submodule、Git LFS、禁止されたローカル状態の path、既知の token・秘密鍵パターンを拒否します。ignored file、外部 skill/MCP の実体、SDK home、環境変数、Git config・hook は移送しません。未知の秘密を完全に検出する保証はないため、移送ファイルを公開しないでください。Memory には既存の256 MiB上限があります。復元中の directory はコマンド成功前に使わず、失敗・取消時は今回作成した先だけが除去されます。既存先は保持します。

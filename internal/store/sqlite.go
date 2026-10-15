@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -231,8 +233,36 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	if err != nil {
 		return err
 	}
+	var restore *RestoreRecord
+	if state.Records.Restore != nil {
+		copy := *state.Records.Restore
+		copy.Paths = slices.Clone(copy.Paths)
+		copy.TaskIDs = slices.Clone(copy.TaskIDs)
+		restore = &copy
+	}
+	history := slices.Clone(state.Records.Restores)
+	for i := range history {
+		history[i].Paths = slices.Clone(history[i].Paths)
+		history[i].TaskIDs = slices.Clone(history[i].TaskIDs)
+	}
+	existing := map[string]bool{}
+	if restore != nil {
+		for _, dispatch := range state.Graph.Dispatches {
+			existing[dispatch.ID] = true
+		}
+	}
 	if err := update(&state); err != nil {
 		return err
+	}
+	if !reflect.DeepEqual(restore, state.Records.Restore) || !reflect.DeepEqual(history, state.Records.Restores) {
+		return fmt.Errorf("workspace restore receipts are immutable")
+	}
+	if restore != nil {
+		for _, dispatch := range state.Graph.Dispatches {
+			if !existing[dispatch.ID] && slices.Contains(restore.TaskIDs, dispatch.TaskID) {
+				return fmt.Errorf("restored Task requires a newly approved successor before execution")
+			}
+		}
 	}
 	if err := state.Records.validate(); err != nil {
 		return err

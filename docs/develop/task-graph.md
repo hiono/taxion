@@ -13,8 +13,10 @@ workspace revision を更新する。長い文字列は内容 hash で共有し�
 展開後の原文を照合するため、既存 instruction・承認の hash は変えない。
 書込み接続は旧 DB を transaction で移行し、read-only 接続は移行しない。
 移行後は新形式に対応する binary を使う。DB の空き page を自動で切り詰める処理はない。
-詳細と DB 単体復元の未実装範囲は
+保存形式の詳細は
 [ADR-0033](adr/0033-reference-results-and-persist-workspace-records-incrementally.md) を参照する。
+停止済み workspace・Memory・必要な Git object の一ファイル移送と復元は
+[ADR-0034](adr/0034-portable-sqlite-workspace-snapshots.md) を参照する。
 
 ## 登録と読み出し
 
