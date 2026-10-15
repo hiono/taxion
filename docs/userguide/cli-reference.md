@@ -2,7 +2,7 @@
 
 この文書は、現在の CLI コマンドと実行上の制約をまとめる。初めて使う手順は[利用者ガイド](user-guide.md)、設定ファイルは[設定ガイド](configuration.md)を参照する。
 
-コマンド一覧は `taxion --help`、各コマンドの入力条件はこの文書と所有仕様書に従う。採択した設計や未実装の要件は[要件と到達条件](../develop/09-orchestration-requirements.md)に分けて記録する。
+コマンド一覧は `taxion --help`、各コマンドの入力条件はこの文書と所有仕様書に従う。採択した設計や未実装の要件は[要件と到達条件](../develop/orchestration-requirements.md)に分けて記録する。
 
 ## CLI
 
@@ -67,7 +67,7 @@ Flow 開始前に、計画の利用量を全体の観測 token 上限から差�
 
 `conversation ask`・`conversation plan`・`conversation investigate` は別々の有料操作。それぞれ token、時間、session 別 credit 上限の明示が必要。token 上限はモデル使用後に観測する上限であり、provider 側の hard cap ではない。通常 CI はローカル回帰テストを使う。
 
-実 SDK の独立 Reviewer 受入れは、再承認した実行で、保持した Coder SHA の承認と worktree の解放を確認して完了した。scope 承認、parser の制約、受入れ記録は[仕様入力](../develop/13-specification-input.md)を参照する。
+実 SDK の独立 Reviewer 受入れは、再承認した実行で、保持した Coder SHA の承認と worktree の解放を確認して完了した。scope 承認、parser の制約、受入れ記録は[仕様入力](../develop/specification-input.md)を参照する。
 
 `workflow planning-context` は、保存済み Task、Memory、concern、未充足の依存、Flow 上限、関連する Coder・Reviewer の結果から、上限付き Planner 入力を再構成する。target は各指示・結果・SHA、observation hash は返した内容を識別する。`recordedNextCheck` は既存 controller の確認であり、AI 判断や実行承認ではない。モデルを呼ばず記録も変更せず、別の計画操作に使う証拠を返す。
 
@@ -442,7 +442,7 @@ SDK は応答後に credit を測るため、追加 model call を止める前�
 
 ### 上限付き review flow
 
-`workflow start` は、明示的な修正回数・経過時間・token 上限を持つ認可済み Coder 契約を保存し、初回 Dispatch を発行する。`workflow advance` は最新の検証済み結果から独立 Reviewer または同じ受入れ条件と出典付き finding を持つ修正 Dispatch を発行する。現在の output SHA の承認で実装 Task を COMPLETED にする。`workflow run` は隔離した Coder・Reviewer SDK adapter を作り、指示・結果のコピーなしに SQLite の Dispatch を順に実行する。usage event 後に使用量を確認し、契約・Memory の変更を監視して、保存 deadline または観測 token 上限で runtime を止める。`--coder-tools`・`--reviewer-tools` は明示 allowlist のまま保つ。永続 runner claim は同時 run を防ぎ、中断 process の claim は明示的な照合なしに再利用しない。旧 process の終了と、その Dispatch の完了・取消を確認した後、`workflow recover --file <path>` で観測 runner ID を比較し、actor、理由、証拠を記録して所有を解放する。保存上限と結果は後続操作にも適用する。認可・停止条件は [Task Graph](../develop/10-task-graph.md) を参照する。
+`workflow start` は、明示的な修正回数・経過時間・token 上限を持つ認可済み Coder 契約を保存し、初回 Dispatch を発行する。`workflow advance` は最新の検証済み結果から独立 Reviewer または同じ受入れ条件と出典付き finding を持つ修正 Dispatch を発行する。現在の output SHA の承認で実装 Task を COMPLETED にする。`workflow run` は隔離した Coder・Reviewer SDK adapter を作り、指示・結果のコピーなしに SQLite の Dispatch を順に実行する。usage event 後に使用量を確認し、契約・Memory の変更を監視して、保存 deadline または観測 token 上限で runtime を止める。`--coder-tools`・`--reviewer-tools` は明示 allowlist のまま保つ。永続 runner claim は同時 run を防ぎ、中断 process の claim は明示的な照合なしに再利用しない。旧 process の終了と、その Dispatch の完了・取消を確認した後、`workflow recover --file <path>` で観測 runner ID を比較し、actor、理由、証拠を記録して所有を解放する。保存上限と結果は後続操作にも適用する。認可・停止条件は [Task Graph](../develop/task-graph.md) を参照する。
 
 `workflow handoff --file <path>` は既存 Flow に出典付き `HOLD`・`RELEASE` を保存し、`expectedChangeId` を最新 handoff change と比較する。hold は次 Dispatch の発行と未開始実行を止め、実行中 role の認可済み作業と最終結果は保つ。runner は引継ぎ時点で handoff-held error を返し、現在の結果を取り消さず claim を解放する。明示 release は不変の契約と上限で後の `workflow run`・`advance` を許すが、作業を直接開始せず、safety stop の Flow も復帰させない。request 形式と競合の制約は Task Graph に記載する。
 
@@ -456,7 +456,7 @@ SDK は応答後に credit を測るため、追加 model call を止める前�
 
 Reviewer Dispatch の Task worktree は新しい絶対 path にする。`--review-source-worktree <existing-repository-worktree>` で開始し、保存対象 SHA の独立した detached worktree を作る。commit mode の完了処理は SDK 接続を閉じ、clean な worktree を削除してから review 成功を保存する。dirty・locked・未解放 worktree は明示 error として review を未完了にする。
 
-snapshot mode は baseline commit の worktree に対象 tree を再現するため、baseline に対する差分がある。終了時は対象 tree との一致を検証してから、その Controller 管理の worktree を削除する。commit mode の clean 条件と混同しない。tree の保持・照合は [Runtime 契約](../develop/03-runtime-contract.md#dispatch-の実行と-context)を参照する。
+snapshot mode は baseline commit の worktree に対象 tree を再現するため、baseline に対する差分がある。終了時は対象 tree との一致を検証してから、その Controller 管理の worktree を削除する。commit mode の clean 条件と混同しない。tree の保持・照合は [Runtime 契約](../develop/runtime-contract.md#dispatch-の実行と-context)を参照する。
 
 usage event は選択 model と取得できた token・cache 件数を SQLite に保存し、SDK 測定の欠落は不明のまま保つ。infinite session の compaction を有効にし、context と結果の event を報告する。
 
@@ -467,7 +467,7 @@ Task の `fileAccess` は別の Human 承認済み SDK file permission 範囲で
 Task の `validationCommands` は Controller の検査操作を認可する。新 Coder Dispatch は Conventional Commits の subject と contextual body を要求する。body は `intent(scope):`・`decision(scope):`・`rejected(scope):`・`constraint(scope):`・`learned(scope):` の action line で実際の理由を記録し、任意の Git trailer を続ける。Controller は結果受入れ前に保存実行開始 SHA 以降の全 commit を確認し、独立 Reviewer は理由と作業の一致を確認する。turn 終了時に構造化応答を検査し、repository・worktree・SHA・scope を実 Git で照合して、割当 worktree で認可 command を実行し、観測出力と完了を SQLite に保存する。検証 command は Controller の host 権限で `sh -c` として実行するため、Task 認可時にその作用も承認する。明示的な `dispatch transition --result-file` も同じ検証を行い、`--validation-timeout` は既定10分となる。
 
 `taxion records proposal|approve|send|reconcile|show|finding` は承認済み GitHub 公開と出典付き失敗分析を管理する。承認は正確な対象・account・content hash を対応付ける。送信不明は停止済み sender の claim 照合まで明示して保つ。`taxion git check-range --base <SHA>
---head <SHA> --scanner <PATH>` は公開前に未公開の全 commit tree と message を scan する。[実行記録](11-execution-records.md)を参照する。
+--head <SHA> --scanner <PATH>` は公開前に未公開の全 commit tree と message を scan する。[実行記録](execution-records.md)を参照する。
 
 CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は stdio の ACP、`web/` は browser console を提供する。
 
@@ -495,7 +495,7 @@ CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は s
 | `conversation investigate` | ask・plan の option に加え、繰返し可能な `--path REPO_PATH` と必須 `--max-bytes N`（1–65,536）を受け付ける。保存 SHA の明示 file だけを読む。 |
 | `conversation watch` | `--flow ID`・`--actor ID`・`--source TEXT` で Flow と Human 入力を識別する。任意の `--question-max-tokens N`・`--question-timeout DURATION`・`--question-max-ai-credits N`・`--investigation-max-bytes N` で質問・調査の上限を選ぶ。`--interactive-execution` はこの console の選択 run 中に Human 入力を受け、EOF・quit はこの console が所有する実行を安全に中断する。選択する `workflow run`・`workflow step` の option は `--` の後に指定する。 |
 | `conversation search` | `--scope JSON`・`--task ID`・`--question TEXT` が必須。承認済み local corpus を検索し、出典付き結果を Task に付ける。`--sdk` は有料 Orchestrator turn を一回だけ明示的に要求し、正の `--max-tokens N`・`--timeout DURATION`・`--max-ai-credits N` も必須となる。`--cli PATH`・`--base-directory PATH` で executable と state directory を選ぶ。`--sdk` なしでは local 検索だけで model を呼ばない。 |
-| `workflow start`, `workflow recover`, `workflow handoff`, `workflow interrupt`, `workflow feedback`, `workflow feedback-resolve`, `workflow draft`, `workflow draft-discard`, `workflow draft-approve`, `workflow planner-draft`, `workflow planner-action`, `workflow question-draft` | 各操作の request を `--file JSON` で渡す。`workflow start` は上限付き Flow を認可し、初回 Coder Dispatch を発行する。`continueFromDispatchId` は予算停止後の保存済み Coder 成功結果を引き継ぐ。後続 Task は同じ output SHA、snapshot mode では同じ tree SHA・path も対象にする。recover、handoff、feedback、draft、planning は指定操作だけを行い、変更 scope・予算を通知なしに承認しない。形式は [Task Graph](../develop/10-task-graph.md) を参照する。 |
+| `workflow start`, `workflow recover`, `workflow handoff`, `workflow interrupt`, `workflow feedback`, `workflow feedback-resolve`, `workflow draft`, `workflow draft-discard`, `workflow draft-approve`, `workflow planner-draft`, `workflow planner-action`, `workflow question-draft` | 各操作の request を `--file JSON` で渡す。`workflow start` は上限付き Flow を認可し、初回 Coder Dispatch を発行する。`continueFromDispatchId` は予算停止後の保存済み Coder 成功結果を引き継ぐ。後続 Task は同じ output SHA、snapshot mode では同じ tree SHA・path も対象にする。recover、handoff、feedback、draft、planning は指定操作だけを行い、変更 scope・予算を通知なしに承認しない。形式は [Task Graph](../develop/task-graph.md) を参照する。 |
 | `workflow advance`, `workflow show`, `workflow feedback-target`, `workflow planning-context` | `--id FLOW_ID` で保存 review flow を選ぶ。前述の各節に従う読取り・遷移操作。 |
 | `workflow run`, `workflow step` | `--id FLOW_ID`・`--coder-prompt-file PATH`・`--reviewer-prompt-file PATH` で Flow と role prompt を選ぶ。file の代わりに `--builtin-prompts` を使うと、同梱 snapshot prompt、厳密な結果 identity、compact context、Controller validation submission を選ぶ。snapshot Flow を要求し、managed commit・stage は拒否する。この mode だけは tool 未指定時に Coder `view,create,edit,apply_patch`、Reviewer `view` を既定とし、明示空 list は空のまま保つ。任意の `--cli PATH`・`--base-directory PATH`・`--max-ai-credits N`・`--coder-tools LIST`・`--reviewer-tools LIST` で runtime と allowlist を選ぶ。`--managed-commit` は binding 済み Coder commit tool、`--managed-stage` は追加の scope 内 stage を有効にし、後者は前者を要求する。`--scanner PATH` は managed commit だけで有効。`--strict-result-identities`・`--compact-context`・`--controller-validation-submission` は各結果・context 検証 mode を変える。credit 上限は session 別で、Flow 全体ではない。 |
 | `runtime auth`, `start`, `send`, `resume`, `events`, `commit` | `--dispatch ID`・`--system-prompt-file PATH` が必須。`--cli PATH`・`--base-directory PATH`・任意の `--max-ai-credits N` で runtime を選び、非ゼロ credit 上限は30以上を要求する。`--tools LIST` は SDK allowlist。send は `--prompt-file PATH`、commit は `--message-file PATH` が必須で、commit の `--scanner PATH` は local 秘密検査を選ぶ。`--review-source-worktree PATH` は独立 Reviewer の start だけで使う。`--managed-commit` は binding 済み Coder commit tool、`--managed-stage` は scope 内 stage を追加する。開始時に使った `--strict-result-identities`・`--compact-context`・`--controller-validation-submission` は実行接続時にも指定する。`--timeout DURATION` は既定10分で、turn・event stream の待機を制限する。 |
@@ -530,7 +530,7 @@ CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は s
 `--reviewer-tools skill` を指定しても利用可能にならない。
 `workflow run|step` は両 role の skill / tool asset を session 作成前に照合する。
 設定とログ確認の手順は [利用者ガイド](user-guide.md#文書用-skill-を使う場合)、
-権限と証拠の境界は [runtime 契約](../develop/03-runtime-contract.md#skillspluginsmcphooks-と出力圧縮)を参照する。
+権限と証拠の境界は [runtime 契約](../develop/runtime-contract.md#skillspluginsmcphooks-と出力圧縮)を参照する。
 
 root usage 文字列は flag 定義とは別に管理する。この索引で実装済み subcommand と option を照合する。`ready`・`doctor` は未実装で、`config check`・`runtime auth` などの事前確認を、実行準備や契約上の利用資格の証明として説明しない。
 

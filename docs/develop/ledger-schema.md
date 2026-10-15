@@ -1,8 +1,8 @@
-# 05 Ledger のデータ形式
+# Ledger のデータ形式
 
 この文書は既存 Ledger の wire を定義する。
 版付き Task Graph は別ファイルとして導入し、ここにあるキーを変更しない。
-現在の操作は [Task Graph](10-task-graph.md)、
+現在の操作は [Task Graph](task-graph.md)、
 分離と移行の決定は
 [ADR-0022](adr/0022-sqlite-atomic-workspace-state.md) を参照する。
 
@@ -82,10 +82,10 @@
 - `GET /api/evidence[?task=]` は Evidence 配列を返す。
 - `/api/ledger` と `/api/evidence` は GET のみで、他の method は 405。`/api/tasks` と `/api/dispatches` は、後述の POST も受け付ける。未知の path は 404、読めない Ledger は 500 とし、処理を許可しない。
 
-書込み（v1）は M4 で追加した。当初の範囲は認証なしの localhost のみだった。現在の公開 mode と token の条件は[リモート接続](../userguide/06-remote-access.md)に記載している。
+書込み（v1）は M4 で追加した。当初の範囲は認証なしの localhost のみだった。現在の公開 mode と token の条件は[リモート接続](../userguide/remote-access.md)に記載している。
 
 - `POST /api/tasks` の `{title, repo}` は 201 と Task を返す。title・repo の欠落は 400（REP-001）。
-- `POST /api/dispatches` の `{task, repo}` は 201 と Dispatch を返す。Task Graph がある場合、任意の `{relationship, relatedDispatchId, relationshipReason}` で後続 Dispatch を識別する。初回 Dispatch は relationship を使わない。未知の task は 404、他の Dispatch が active なら 409（DSP-001）、承認済み Memory 述語の不一致は 409（MEM-001）、Memory policy の読取り不能・形式不正は 500。task・repo の欠落は 400。述語の意味は [Memory](../userguide/08-memory-model.md)を参照する。Ledger のキーは変更しない。
+- `POST /api/dispatches` の `{task, repo}` は 201 と Dispatch を返す。Task Graph がある場合、任意の `{relationship, relatedDispatchId, relationshipReason}` で後続 Dispatch を識別する。初回 Dispatch は relationship を使わない。未知の task は 404、他の Dispatch が active なら 409（DSP-001）、承認済み Memory 述語の不一致は 409（MEM-001）、Memory policy の読取り不能・形式不正は 500。task・repo の欠落は 400。述語の意味は [Memory](../userguide/memory-model.md)を参照する。Ledger のキーは変更しない。
 - `POST /api/reviews` の `{task, repo, sha}` は 201 と Evidence を返す。空の sha は 400（SHA-001）、task・repo の欠落も 400。
 - request body は CLI と同じ検査を使い、Web は POST request を変更せずに渡す。書込みのための Ledger キー追加はなく、固定した形式を保つ。
 

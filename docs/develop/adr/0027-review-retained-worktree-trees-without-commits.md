@@ -44,6 +44,6 @@ commit mode の部分成果を、承認なしで snapshot mode の継続とし�
 同一 tree、改変拒否、GC 後の保持、修正と再レビュー、停止後の successor は、
 実 Git と fake runtime の回帰で確認する。この結果だけで実 SDK の coding・review を
 end-to-end 受け入れたことにはしない。
-現在の契約は [Runtime contract](../03-runtime-contract.md)、
-継続手順は [Task Graph](../10-task-graph.md)、
-保存証拠は [実行記録](../../userguide/11-execution-records.md) が所有する。
+現在の契約は [Runtime contract](../runtime-contract.md)、
+継続手順は [Task Graph](../task-graph.md)、
+保存証拠は [実行記録](../../userguide/execution-records.md) が所有する。

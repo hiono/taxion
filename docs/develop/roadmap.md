@@ -1,8 +1,8 @@
-# 04 ロードマップ
+# ロードマップ
 
 段階は Foundation、Core、Local、Adapter、Server、Platform、Future の順とする。
 
-checked の項目は各段階で完了した作業を記録し、現在の機能一覧を表すものではない。当初の read-only Web と localhost 限定 API は、その後に範囲を拡張した。詳細な実装結果は Issue、現在の動作は [README](../../README.md) から参照する仕様文書に記載する。[判断・Milestone 対応表](14-decision-traceability.md)で、段階名、ADR、Issue、現在の仕様を対応付ける。
+checked の項目は各段階で完了した作業を記録し、現在の機能一覧を表すものではない。当初の read-only Web と localhost 限定 API は、その後に範囲を拡張した。詳細な実装結果は Issue、現在の動作は [README](../../README.md) から参照する仕様文書に記載する。[判断・Milestone 対応表](decision-traceability.md)で、段階名、ADR、Issue、現在の仕様を対応付ける。
 
 - [x] Foundation / `bootstrap`：リポジトリ、CI、設立方針、ガードレール。
 - [x] Core / `core-conformance`：順序付き Sequence（CHK-002）、JSON Ledger（LED-001）。
@@ -25,11 +25,11 @@ checked の項目は各段階で完了した作業を記録し、現在の機能
 - [x] M5 / `audit-trail` (#23)：変更・拒否の追記専用 JSONL。操作者がローテーションする。
 - [x] M5 / `public-prep` (#24)：ADR-0015 の保護設計、履歴 scan の合格、外部公開。
 - [x] M5 / `mode-switch` (#25)：F-lite の `--mode loopback|remote`、ADR-0016、IdP の延期。
-- [x] M6 / `memory-model` (#27)：ADR-0017 の層・範囲・昇格。[Memory](../userguide/08-memory-model.md)に記載。
+- [x] M6 / `memory-model` (#27)：ADR-0017 の層・範囲・昇格。[Memory](../userguide/memory-model.md)に記載。
 - [x] M6 / `guideline-promotion` (#29)：設定可能な警告閾値、明示的な構造化承認、共通 Dispatch 検査（MEM-001、ADR-0019）。
-- [x] M7 / `memory-export-and-scope` (#39–#40)：sanitizer を使う標準出力だけの export と、明示的な global 書込み。現在の操作は [Memory](../userguide/08-memory-model.md)に記載。
+- [x] M7 / `memory-export-and-scope` (#39–#40)：sanitizer を使う標準出力だけの export と、明示的な global 書込み。現在の操作は [Memory](../userguide/memory-model.md)に記載。
 - [x] M8 / `server-hardening` (#41–#43)：操作者の自己申告ラベル、既定5回失敗の lockout、制約を明記した audit chain 照合。
-- [x] Future / `browser-terminal-eval` (#21)：手法と shell access の脅威モデルを ADR-0018 に記録。実装は延期中で、[SSH・editor 接続](../userguide/06-remote-access.md#自宅から開発用-docker-を使う場合)を使う。terminal 実装には別 Issue と browser 利用者の認証が必要で、接続先の M5 token だけでは足りない。
+- [x] Future / `browser-terminal-eval` (#21)：手法と shell access の脅威モデルを ADR-0018 に記録。実装は延期中で、[SSH・editor 接続](../userguide/remote-access.md#自宅から開発用-docker-を使う場合)を使う。terminal 実装には別 Issue と browser 利用者の認証が必要で、接続先の M5 token だけでは足りない。
 - [x] Adapter / `copilot-sdk-eval`：Go SDK の対応確認と adapter 実装は
   下記 M11 の #49〜#51 で追跡する。SDK 採用と役割別 Session の目的は
   ADR-0020 に記録した。非対応は blocker として扱う。
@@ -41,7 +41,7 @@ checked の項目は各段階で完了した作業を記録し、現在の機能
 [ADR-0020](adr/0020-layered-memory-and-role-sessions-for-orchestration.md)
 を採択した実装方針とする。既存の完了記録は個別の成果であり、
 この到達条件の達成を意味しない。
-要件と検証条件は [Taxion の要件と到達条件](09-orchestration-requirements.md) に定義する。
+要件と検証条件は [Taxion の要件と到達条件](orchestration-requirements.md) に定義する。
 Memory の保存・参照・指示への反映は M10〜M12 に含め、
 M14 まで延期しない。各 Issue の前提と完了条件は
 [#46](https://github.com/hiono/taxion/issues/46) から参照できる。
@@ -63,7 +63,7 @@ M12 の #73 は受け渡し保留・途中中断・指示案の改訂、#74 は�
 出典付き反映を実装する。#53 の自動進行と #67 の計画・Memory を再利用し、
 #54 の実 SDK 受入れに両方を含める。M13 の #55 は再起動と競合の復旧、
 M15 の #62 は CLI 発行済み Dispatch の ACP 実行・観測を受け入れた。
-[要件と到達条件](09-orchestration-requirements.md)の段階別判定条件にある仕様検索・予算停止後の復旧・最終報告・外部記録までの
+[要件と到達条件](orchestration-requirements.md)の段階別判定条件にある仕様検索・予算停止後の復旧・最終報告・外部記録までの
 end-to-end 受入れは #79 で追跡し、完了まで M15 を open とする。#63 は M15 の完了条件ではなく、
 実作業が発生した場合に追加で確認する後続 Issue である。
 追加 forge は M15 の完了条件に含めない。#75 は GitLab Issue API の実験結果を記録し、
@@ -76,14 +76,14 @@ M12 の実 SDK 受入れを 2026-10-12 に完了した。
 修正と新 SHA の独立再レビューについては、既存の実行証拠を保持した。
 最終検証では、依頼受付、変更契約の再承認、Memory に基づく Planner 判断を確認した。
 質問・追加調査で選択した事項の反映、独立承認、SDK の中断も確認した。
-利用量と残る制約は [M12 の実 SDK 受入れ結果](09-orchestration-requirements.md#m12-の実-sdk-受入れ結果) を参照する。
+利用量と残る制約は [M12 の実 SDK 受入れ結果](orchestration-requirements.md#m12-の実-sdk-受入れ結果) を参照する。
 
 M13 は実行・完了 checkpoint の再検証、同一 transaction の receipt・外部公開、
 出典付き失敗分析、全未公開 commit の秘密検査を実装した。
 SQLite と Git の障害回帰に加え、Human が承認した本文を新しい CLI で実 GitHub に公開し、
 再送時に保存済み結果を再利用することを確認した。
-手順と証拠は [実行記録](../userguide/11-execution-records.md)、
-公式仕様と能力差は [開発基盤の対応評価](12-forge-capabilities.md) を参照する。
+手順と証拠は [実行記録](../userguide/execution-records.md)、
+公式仕様と能力差は [開発基盤の対応評価](forge-capabilities.md) を参照する。
 Bitbucket の adapter は #76 で後続候補として追跡する。
 現在の CLI・ACP サーバーの基本利用は追加 forge adapter に依存しない。
 

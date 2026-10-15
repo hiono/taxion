@@ -114,8 +114,8 @@ Session、永続記録、Git、外部の作業記録を照合する処理が必�
 この二つを role と履歴の分離に組み合わせ、権限、独立レビュー、情報保持を管理する。
 
 JSON Ledger、Runtime、Memory store を拡張し、決定に定めた保存・実行・照合を実装する。
-現在のコマンドと制約は [Memory reference](../../userguide/08-memory-model.md)、
-現在の adapter は [Runtime contract](../03-runtime-contract.md) に記載する。
+現在のコマンドと制約は [Memory reference](../../userguide/memory-model.md)、
+現在の adapter は [Runtime contract](../runtime-contract.md) に記載する。
 wire と保存形式を拡張する場合は、移行方法と互換性を定義する。
 到達条件は実 SDK と Git repository を用いた検証結果で判定する。
 

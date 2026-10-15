@@ -165,7 +165,7 @@ quota 観測のための model turn が0回であることと、stop-only 接続
 外部 account 残量の全面取得や OpenCode 対応まで実装済みとは主張しない。
 
 現行動作と将来契約を [設定ガイド](../../userguide/configuration.md)、
-[runtime 契約](../03-runtime-contract.md)、[利用者ガイド](../../userguide/user-guide.md)、
+[runtime 契約](../runtime-contract.md)、[利用者ガイド](../../userguide/user-guide.md)、
 [開発者ガイド](../../../CONTRIBUTING.md) で分けて示す。
 未実装分は Release の受入れ記録から消さず、実装・検証済みになるまで未確認とする。
 

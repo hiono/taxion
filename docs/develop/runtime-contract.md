@@ -1,4 +1,4 @@
-# 03 Runtime 契約
+# Runtime 契約
 
 ## SDK 共通インターフェース
 
@@ -89,7 +89,7 @@ Runtime・workflow 実行の `--controller-validation-submission` は、モデ�
 
 実行承認は指示送信前に保存する。`RUNNING` Dispatch では観測と停止が可能で、新しい指示には新しい承認済み Dispatch が必要。Runtime の出力、利用量、終了 event は stream ID と sequence を付けて保存する。同一 stream の同一 sequence の再送は冪等に扱い、内容の矛盾や cancel 後の結果は error とする。正規化した SDK sequence は現在の adapter instance に属するため、再接続の別 stream からの採用には明示的な照合が必要。
 
-復旧、承認済み公開、失敗記録の手順は[実行記録](../userguide/11-execution-records.md)、provider の対応範囲と採択した後続作業は[開発基盤の対応評価](12-forge-capabilities.md)に記載している。
+復旧、承認済み公開、失敗記録の手順は[実行記録](../userguide/execution-records.md)、provider の対応範囲と採択した後続作業は[開発基盤の対応評価](forge-capabilities.md)に記載している。
 
 ## adapter の動作
 
@@ -152,7 +152,7 @@ RTK 自身の stdout・stderr・exit status も原本として保存する。
 `evidenceDirectory`、`allowPublication` を保持する。
 MCP binding は `name`、`command`、`args`、`inputs`、`tool`、`arguments` を固定する。
 この JSON を Task decision の `text` に保存し、decision の `source` に Human の判断の出典を記録する。
-通常の Task 承認・発行手順は [Task Graph reference](10-task-graph.md) に従う。
+通常の Task 承認・発行手順は [Task Graph reference](task-graph.md) に従う。
 tools を使った Task の公開には `allowPublication: true` の明示承認を必要とする。
 
 `--compact-context` は保存済みの結果・exit code・証拠を保持して重複した指示を省く。
@@ -160,7 +160,7 @@ tools を使った Task の公開には `allowPublication: true` の明示承認
 native plugin discovery、実 stdio MCP、実 RTK の圧縮率と原本保持、
 SDK の create/resume 設定と権限を無料回帰で確認する。
 実 SDK による仕様検索から独立レビューまでの受入れ状況は
-[仕様入力](13-specification-input.md) と #60 に記録する。
+[仕様入力](specification-input.md) と #60 に記録する。
 通常テストは独自の合成 skill と一時 directory を使い、特定の外部 skill、
 個人の home、インストール済み Copilot、認証、ネットワーク、有料モデルを要求しない。
 native plugin discovery は `TAXION_TEST_LOCAL_PLUGIN_DISCOVERY=1` による
@@ -260,4 +260,4 @@ turn が終わっても、同じ role の次の指示に使う session stream �
 
 process 再起動後、SDK は session ID で Copilot の会話を再開する。正規化 event stream は、現在の adapter instance が観測した event から始まる。
 
-SDK 固有型を core から分離する理由は [ADR-0003](adr/0003-keep-governance-core-sdk-neutral-behind-runtime-interface.md)、adapter 評価の計画は[ロードマップ](04-roadmap.md)に記録している。
+SDK 固有型を core から分離する理由は [ADR-0003](adr/0003-keep-governance-core-sdk-neutral-behind-runtime-interface.md)、adapter 評価の計画は[ロードマップ](roadmap.md)に記録している。

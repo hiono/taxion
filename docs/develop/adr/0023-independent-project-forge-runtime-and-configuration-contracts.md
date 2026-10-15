@@ -96,7 +96,7 @@ Project は現在のディレクトリの `.taxion/config.yaml` とする。
 既存の `memory.db` は選択した ledger の隣に保持する。
 `project` と `global` は現在の同一 database 内の scope であり、
 設定ファイルの Global／Project 配置とは別の区分である。
-具体的な配置と既存記録の移行は `docs/userguide/08-memory-model.md` に記載する。
+具体的な配置と既存記録の移行は `docs/userguide/memory-model.md` に記載する。
 読み込む実設定はローカルの管理対象とする。
 Git worktree 内の実設定は、`git ls-files` に含まれない未追跡状態と
 Git ignore の適用を両方満たす場合に読み込む。
@@ -206,7 +206,7 @@ session 作成・再開や model 呼出しは行わず、照合結果を実行�
 SDK の `copilot:logged-in` は保存済み認証を、`env:NAME` は指定した環境変数だけを選ぶ。
 任意の credential 保管庫の独自実装は行わない。
 provider が公開する利用可否の確認と Human の利用承認の接続は後続作業とする。
-共有 Memory の配置は Decision と `docs/userguide/08-memory-model.md`、
+共有 Memory の配置は Decision と `docs/userguide/memory-model.md`、
 実 SDK の管理 stage・commit と独立レビューの受入れは #72・#54 に記録する。
 
 `config bind --dispatch` は、現在の Task と発行時 instruction の承認に一致する

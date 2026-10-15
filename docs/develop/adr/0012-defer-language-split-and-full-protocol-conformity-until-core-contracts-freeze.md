@@ -29,4 +29,4 @@ DEFER。Go の core・runtime・ACP・store と read-only TS 表示を維持す�
 
 ## 固定時の補足（2026-10-10、M2）
 
-M2 完了時（Issue #9–#11）に Ledger wire format を固定した。`docs/develop/05-ledger-schema.md` に schema を記録し、CI の `internal/core/wire_test.go` で key 集合を強制する。`web/` は `taxion serve` HTTP API だけで読む。今後は条件1を満たしたものとし、wire 変更には schema 文書を改訂する ADR を必須とする。条件2（M3）と3（M4）は未解決のまま残す。
+M2 完了時（Issue #9–#11）に Ledger wire format を固定した。`docs/develop/ledger-schema.md` に schema を記録し、CI の `internal/core/wire_test.go` で key 集合を強制する。`web/` は `taxion serve` HTTP API だけで読む。今後は条件1を満たしたものとし、wire 変更には schema 文書を改訂する ADR を必須とする。条件2（M3）と3（M4）は未解決のまま残す。

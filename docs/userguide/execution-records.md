@@ -139,7 +139,7 @@ taxion git check-range --base <full-remote-base-SHA> --head <full-head-SHA> --sc
 公開者は検査した head を指定して push する。新規 branch では、公開先が既に持つ基点を確認する。
 scanner の検出範囲、submodule 内部、外部から取得する内容はそれぞれ確認が必要である。
 provider 側の受信時保護と CI の検出・merge gate は
-[開発基盤の対応評価](../develop/12-forge-capabilities.md) に整理する。
+[開発基盤の対応評価](../develop/forge-capabilities.md) に整理する。
 
 ## 再現できる障害ケース
 

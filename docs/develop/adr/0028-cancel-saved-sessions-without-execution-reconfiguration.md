@@ -57,4 +57,4 @@ credential の欠落や破損した transcript は依然として error とな�
 `TestReviewFlowUsesUnchangedExplicitMultiTaskConfigurationApproval` に置く。
 現行の操作は [CLI リファレンス](../../userguide/cli-reference.md) と
 [利用者ガイド](../../userguide/user-guide.md)、保存・照合条件は
-[実行記録](../../userguide/11-execution-records.md) が所有する。
+[実行記録](../../userguide/execution-records.md) が所有する。

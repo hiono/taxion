@@ -214,6 +214,6 @@ Git object と検証結果の実物は repository と test record で確認し�
 関連する Memory の保存は [#66](https://github.com/hiono/taxion/issues/66)、
 保留 Task と判断を次の指示で再利用する検証は
 [#67](https://github.com/hiono/taxion/issues/67) で追跡する。
-既存の [Ledger schema](../05-ledger-schema.md) は現在の wire の参照として維持し、
+既存の [Ledger schema](../ledger-schema.md) は現在の wire の参照として維持し、
 拡張時には migration と互換性を定義する。
 現在の Task・Dispatch 型は実装時にこの設計へ拡張し、更新した wire と migration を参照する。

@@ -1,6 +1,6 @@
 # 利用者ガイド
 
-このガイドは、Taxion で依頼を Task 契約にし、Human が範囲・設定・予算を承認してから Coder と独立 Reviewer を実行する流れを説明します。Task の field、状態遷移、budget stop 後の継続条件は[Task Graph リファレンス](../develop/10-task-graph.md)が所有します。
+このガイドは、Taxion で依頼を Task 契約にし、Human が範囲・設定・予算を承認してから Coder と独立 Reviewer を実行する流れを説明します。Task の field、状態遷移、budget stop 後の継続条件は[Task Graph リファレンス](../develop/task-graph.md)が所有します。
 
 ## 現在の導入方法
 
@@ -70,7 +70,7 @@ taxion tools hash --path /absolute/approved/skills
 役割ごとに必要な skill だけを指定できます。Reviewer に Coder 用 skill を渡す必要は
 ありません。plugin を使う場合は `skills` の代わりに `plugins` へ、root に
 `plugin.json` と `skills/` を持つ directory の `path` / `hash` を設定します。
-詳細な許可・公開条件は [runtime 契約](../develop/03-runtime-contract.md#skillspluginsmcphooks-と出力圧縮)を参照してください。
+詳細な許可・公開条件は [runtime 契約](../develop/runtime-contract.md#skillspluginsmcphooks-と出力圧縮)を参照してください。
 
 承認済み asset があれば、Taxion が `skill` tool を追加します。通常の
 `--coder-tools` / `--reviewer-tools` は引き続き必要なファイル操作を指定します。
@@ -297,7 +297,7 @@ Flow が停止しても Dispatch に保存 session が残る場合は、別の r
 
 停止後は `workflow show --id FLOW-ID` と `task graph` で `CANCELLED`、`runtime-stop:` 証拠、部分 Git 証拠を確認します。`records show` では元の suspension と cancellation の結果 receipt を確認できます。取消要求だけが成功し、保存が失敗する場合もあるため、コマンドを呼んだだけで停止確認を済ませず、確認前に同じ成果物を使った実行を重ねないでください。
 
-token 上限停止では、停止済み Flow の上限を変更して再開することはできません。部分成果や完了済み Coder 結果から続ける場合は、同じ成果物を持つ別 worktree、後続 Task の再承認、新しい予算承認が必要です。commit mode は clean worktree、snapshot mode は保存 tree と同じ作業ファイルを要求します。`workflow recover` は残った runner 所有権だけを解放します。具体的な Git 手順と `continueFromDispatchId` の使い分けは[予算上限後の作業継続](../develop/10-task-graph.md#予算上限後の作業継続)を参照してください。
+token 上限停止では、停止済み Flow の上限を変更して再開することはできません。部分成果や完了済み Coder 結果から続ける場合は、同じ成果物を持つ別 worktree、後続 Task の再承認、新しい予算承認が必要です。commit mode は clean worktree、snapshot mode は保存 tree と同じ作業ファイルを要求します。`workflow recover` は残った runner 所有権だけを解放します。具体的な Git 手順と `continueFromDispatchId` の使い分けは[予算上限後の作業継続](../develop/task-graph.md#予算上限後の作業継続)を参照してください。
 
 snapshot mode で完了済み Coder 結果を引き継ぐ場合は、保存済み `outputSha`（baseline commit）、`outputTreeSha`、変更 path を承認した別 worktreeを用意します。後続 Task の target tree が一致することを `conversation confirm` が検査し、`workflow start` には元の Coder Dispatch ID を `continueFromDispatchId` として指定します。新しい Flow は Coder を再実行せず Reviewer から始まります。停止時点が `CANCELLED` の部分成果なら、同じ baseline と保存 tree を持つ別 worktreeを用意し、後続 Task を承認したうえで Coder から続けます。
 

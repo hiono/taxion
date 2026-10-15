@@ -79,4 +79,4 @@ reviewer と対象 SHA の対応を検査する。
 Memory は参照 ID を保持する段階であり、保存先との照合は #66、
 指示への反映は #67 で実装する。
 この ADR は従来の「Ledger と別ファイルに Graph を保存する」方式を supersede する。
-現在の操作と制約は [Task Graph reference](../10-task-graph.md) に記載する。
+現在の操作と制約は [Task Graph reference](../task-graph.md) に記載する。

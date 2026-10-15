@@ -1,4 +1,4 @@
-# 09 Taxion の要件と到達条件
+# Taxion の要件と到達条件
 
 Taxion は、ユーザーとの会話から独立した担当へ作業を渡すオーケストレータである。
 階層化した Memory に判断と経験を保存し、Task Graph と実行契約に関連づける。
@@ -8,7 +8,7 @@ Taxion は、ユーザーとの会話から独立した担当へ作業を渡す�
 この文書は採択した要件と検証条件を定義する。設計の理由は
 [ADR-0020](adr/0020-layered-memory-and-role-sessions-for-orchestration.md) と
 [ADR-0021](adr/0021-durable-task-graph-and-dispatch-change-control.md)、
-段階と作業の一覧は [roadmap](04-roadmap.md) を参照する。
+段階と作業の一覧は [roadmap](roadmap.md) を参照する。
 以下の条件を定義したことは、その実装や検証が完了したことを意味しない。
 
 ## 情報の保持と実行の要件
@@ -135,10 +135,10 @@ credential、非公開の資料や会話を公開 Issue・PR・ログへ転記�
 | 仕様書 | 出典・版・用途別承認、役割間で同じ引用スナップショット、ローカル原本の変更検出と公開許可検査、公開・合成資料の PDF・DOCX・PPTX 自動検索と Task 添付、Orchestrator の検索 tool | M14 のローカル検索と実 SDK 独立 Reviewer 受入れを完了。M365 接続は組織の利用許可後に評価する条件付き拡張 (#77) |
 | 設定・認証主体 | 固定 Global・Project・環境参照と出典、設定の追跡・ignore 検査、repository と Copilot の主体・credential 参照・契約参照の分離、許可組合せと Dispatch・Session の照合、実効認証・権限の観測、SDK の管理 stage・commit と直接の index・秘密検査、signed-in SDK から独立レビューまでの受入れ、開発基盤の公式仕様評価と Human の追加 adapter 採択 | 共有 Memory の配置、承認者の本人認証、法的な契約適格性の保証、追加 adapter の実環境受入れ |
 
-現在の挙動は [Ledger schema](05-ledger-schema.md)、
-[Runtime contract](03-runtime-contract.md)、
-[Memory reference](../userguide/08-memory-model.md)、
-[Task Graph reference](10-task-graph.md) を参照する。
+現在の挙動は [Ledger schema](ledger-schema.md)、
+[Runtime contract](runtime-contract.md)、
+[Memory reference](../userguide/memory-model.md)、
+[Task Graph reference](task-graph.md) を参照する。
 SDK の確認結果は次節の検証範囲に限る。cache の命中保証、
 法的な契約適格性、仕様書検索の接続可否は個別の検証・判断を必要とする。
 

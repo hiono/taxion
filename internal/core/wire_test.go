@@ -9,7 +9,7 @@ import (
 )
 
 // TestWireKeysFrozen pins the exact JSON key sets of the frozen ledger wire
-// format (docs/develop/05-ledger-schema.md). Any key addition/removal/rename fails
+// format (docs/develop/ledger-schema.md). Any key addition/removal/rename fails
 // here by design: change the schema doc + ADR first, then this test.
 func TestWireKeysFrozen(t *testing.T) {
 	now := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
@@ -49,7 +49,7 @@ func TestWireKeysFrozen(t *testing.T) {
 		}
 		gotKeys := slices.Sorted(maps.Keys(got))
 		if !slices.Equal(gotKeys, tc.want) {
-			t.Errorf("%s: keys = %v, want %v (see docs/develop/05-ledger-schema.md)", name, gotKeys, tc.want)
+			t.Errorf("%s: keys = %v, want %v (see docs/develop/ledger-schema.md)", name, gotKeys, tc.want)
 		}
 	}
 }

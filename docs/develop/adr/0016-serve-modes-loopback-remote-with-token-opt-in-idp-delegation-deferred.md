@@ -25,10 +25,10 @@ H の IdP・OS 委譲は、**外部利用者から複数人での利用を求め
 
 ## Consequences
 
-- 既定の loopback 限定と token 必須の明示 remote を提供する。[リモート接続](../../userguide/06-remote-access.md)は remote mode より先に SSH 転送を案内する。
+- 既定の loopback 限定と token 必須の明示 remote を提供する。[リモート接続](../../userguide/remote-access.md)は remote mode より先に SSH 転送を案内する。
 - 専門家が確認する単一 token、TLS なし、rate limit なしの risk は変えず、flag の組合せでなく明示選択にする。mode 切替は設定を明確にし、認証方式は変えない。
 - D・E・G は独立した後続作業に残し、前提条件にはしない。
 
 ## M8 の実装補足
 
-上記は初期 F-lite の影響を記録している。後続 D・E・G は実装済みで、自己申告 `who`、IP 別失敗件数・lockout、audit hash chain の照合を提供する。M8 受入れは Issue #41–#43、現在の field、固定閾値、照合の制約は[監査ログ](../../userguide/07-audit-log.md)に記録する。元の「rate limit なし」は現在の動作ではない。共有 token による identity、組込み TLS なし、IdP 委譲の延期は変えない。
+上記は初期 F-lite の影響を記録している。後続 D・E・G は実装済みで、自己申告 `who`、IP 別失敗件数・lockout、audit hash chain の照合を提供する。M8 受入れは Issue #41–#43、現在の field、固定閾値、照合の制約は[監査ログ](../../userguide/audit-log.md)に記録する。元の「rate limit なし」は現在の動作ではない。共有 token による identity、組込み TLS なし、IdP 委譲の延期は変えない。

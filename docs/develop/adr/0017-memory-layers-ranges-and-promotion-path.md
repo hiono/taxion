@@ -47,7 +47,7 @@ log (raw: what happened)
 
 ## 実装状況
 
-上記は予定した設計を記録する。初期 M6-3 は固定3回の警告集計と guideline 候補作成だけで、閾値設定と強制 guardrail への昇格は未実装だった。CLI は project・global 別 directory でなく、同じ `memory.db` に両 scope を保存する。現在の動作は [Memory](../../userguide/08-memory-model.md)、実装結果は Issue #28–#34 に記録する。
+上記は予定した設計を記録する。初期 M6-3 は固定3回の警告集計と guideline 候補作成だけで、閾値設定と強制 guardrail への昇格は未実装だった。CLI は project・global 別 directory でなく、同じ `memory.db` に両 scope を保存する。現在の動作は [Memory](../../userguide/memory-model.md)、実装結果は Issue #28–#34 に記録する。
 
 閾値設定、明示承認、Dispatch 検査を完成させるため M6-3 を再開した。採択した述語の範囲は [ADR-0019](0019-structured-memory-approval-and-dispatch-checks.md)、現在の操作と制約は Memory 文書に記載する。上記の初期3回実装は過去の記録である。
 

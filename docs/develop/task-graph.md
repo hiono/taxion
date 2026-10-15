@@ -1,4 +1,4 @@
-# 10 Task Graph の登録・遷移・保持
+# Task Graph の登録・遷移・保持
 
 Task Graph と Ledger は SQLite の `workspace.db` に同時に保存する。
 既存の `.taxion/ledger.json` と `.graph.json` は初回移行に限り読み込み、
@@ -180,7 +180,7 @@ active と terminal の Task は履歴を維持し、変更は後続 Task とし
 `specifications` は、出典・該当箇所・版・本文・用途と、
 取り込み・Copilot 送信・公開の個別承認を保持する。
 Task と Dispatch の契約に含め、役割間で同じ引用スナップショットを使用する。
-入力と利用許可は [仕様入力の参照文書](13-specification-input.md) に従う。
+入力と利用許可は [仕様入力の参照文書](specification-input.md) に従う。
 
 ## 上限付きレビュー進行
 

@@ -12,7 +12,7 @@ go test ./...
 
 全体のテストは `go test ./...` で実行します。PR を作成する前に、format・vet・test・build を確認してください。動作の変更には、対応するガードレールと回帰テストが必要です。
 
-1. [ロードマップ](docs/develop/04-roadmap.md)から小さな作業を選びます。
+1. [ロードマップ](docs/develop/roadmap.md)から小さな作業を選びます。
 2. `internal/core` の依存は標準ライブラリだけにします（SDK-001）。外部との接続は `internal/runtime/<name>/` に置きます。
 3. 動作を変更するときは、ガードレール ID とテストを対応付けます。
 4. 個人情報・内部情報・秘密情報を commit に含めません（PRIV-001）。push 前に `git diff` を確認します。
@@ -30,28 +30,30 @@ Issue 本文、Milestone の説明、README、利用者・開発者向け文書�
 
 ## 文書の配置と責務
 
+文書名は内容を表す小文字の英語名をハイフンで区切ります。一般のガイド・仕様書に通読順ではない連番を付けず、[利用者向け索引](docs/userguide/README.md)と[開発者向け索引](docs/develop/README.md)で読者の作業順を示します。ADR の識別番号とリリースノートの版は保持します。移動時は相互リンクだけでなく、文書を読むテストとコード内参照も更新します。[旧パスの対応表](docs/develop/README.md#文書名と旧パス)は過去の記録から現在の文書を探すために使います。
+
 | 配置 | 記載する内容 | 記載しない内容 |
 | --- | --- | --- |
 | `README.md` | プロジェクトの概要、導入への案内、参照文書 | 詳細仕様、作業報告 |
 | `docs/userguide/user-guide.md` | 導入と最初の承認済み Coder・Reviewer 実行 | option の完全な一覧 |
 | `docs/userguide/configuration.md` | 設定場所、優先順位、環境変数、実行前確認の範囲 | credential の保管、契約上の利用資格の証明 |
 | `docs/userguide/cli-reference.md` | CLI 操作と許可・制約 | 製品要件、設計の理由 |
-| `docs/userguide/06-remote-access.md` | 公開接続の設定と手順 | 認証設計の判断 |
-| `docs/userguide/07-audit-log.md` | 監査項目、照合の限界、保存手順 | 監査機能の実装履歴 |
-| `docs/userguide/08-memory-model.md` | 現在の Memory の保存、scope、昇格、検索、export | 最初の提案モデル |
-| `docs/userguide/11-execution-records.md` | 実行の復旧、receipt、承認済み外部記録の公開 | 作業別の経過報告 |
+| `docs/userguide/remote-access.md` | 公開接続の設定と手順 | 認証設計の判断 |
+| `docs/userguide/audit-log.md` | 監査項目、照合の限界、保存手順 | 監査機能の実装履歴 |
+| `docs/userguide/memory-model.md` | 現在の Memory の保存、scope、昇格、検索、export | 最初の提案モデル |
+| `docs/userguide/execution-records.md` | 実行の復旧、receipt、承認済み外部記録の公開 | 作業別の経過報告 |
 | `docs/userguide/release-notes-0.1.0.md` | 公開対象、確認済み機能、既知の制約、導入方法 | 未確認の機能を公開済みとする説明 |
-| `docs/develop/00-charter.md` | 設立時の対象範囲と制約 | 現在の機能一覧 |
-| `docs/develop/01-guardrails.md` | 必要な不変条件と実装での確認箇所 | 未実装の要件が強制されるという主張 |
-| `docs/develop/02-privacy-provenance.md` | 公開情報とレビューの規則 | 個別の情報削除報告 |
-| `docs/develop/03-runtime-contract.md` | Runtime 契約と現在の adapter の制約 | Runtime の評価履歴 |
-| `docs/develop/04-roadmap.md` | 計画と完了済み作業への参照 | 詳細な実装結果 |
-| `docs/develop/05-ledger-schema.md` | データ形式、API の入出力、検証条件 | API 設計の理由 |
-| `docs/develop/09-orchestration-requirements.md` | 採択済み要件、段階別受入れ、実装との差分 | 現在のコマンド一覧、完了の証拠 |
-| `docs/develop/10-task-graph.md` | 現在の Task Graph 操作、保存、状態遷移の検査と制約 | Runtime 実行の主張、Memory 設計の理由 |
-| `docs/develop/12-forge-capabilities.md` | 開発基盤ごとの仕様・実装・受入れと後続作業 | 未確認の基盤操作を対応済みとする説明 |
-| `docs/develop/13-specification-input.md` | 仕様の取得・用途別承認・照合 | 出典不明の資料、個別の調査ログ |
-| `docs/develop/14-decision-traceability.md` | ADR・Milestone と実装 Issue・現在の仕様の対応 | Issue 別の証拠、現在の仕様本文の代替 |
+| `docs/develop/charter.md` | 設立時の対象範囲と制約 | 現在の機能一覧 |
+| `docs/develop/guardrails.md` | 必要な不変条件と実装での確認箇所 | 未実装の要件が強制されるという主張 |
+| `docs/develop/privacy-provenance.md` | 公開情報とレビューの規則 | 個別の情報削除報告 |
+| `docs/develop/runtime-contract.md` | Runtime 契約と現在の adapter の制約 | Runtime の評価履歴 |
+| `docs/develop/roadmap.md` | 計画と完了済み作業への参照 | 詳細な実装結果 |
+| `docs/develop/ledger-schema.md` | データ形式、API の入出力、検証条件 | API 設計の理由 |
+| `docs/develop/orchestration-requirements.md` | 採択済み要件、段階別受入れ、実装との差分 | 現在のコマンド一覧、完了の証拠 |
+| `docs/develop/task-graph.md` | 現在の Task Graph 操作、保存、状態遷移の検査と制約 | Runtime 実行の主張、Memory 設計の理由 |
+| `docs/develop/forge-capabilities.md` | 開発基盤ごとの仕様・実装・受入れと後続作業 | 未確認の基盤操作を対応済みとする説明 |
+| `docs/develop/specification-input.md` | 仕様の取得・用途別承認・照合 | 出典不明の資料、個別の調査ログ |
+| `docs/develop/decision-traceability.md` | ADR・Milestone と実装 Issue・現在の仕様の対応 | Issue 別の証拠、現在の仕様本文の代替 |
 | `docs/develop/adr/` | 判断、選択肢、理由、後続の補足 | 現在のコマンド説明の複製 |
 | `web/README.md` | Web console の準備と proxy の動作 | API 仕様の複製 |
 | `SECURITY.md` | 非公開の報告方法、保護対策、既知の限界 | 完全な保護の保証 |
@@ -66,7 +68,7 @@ Issue 本文、Milestone の説明、README、利用者・開発者向け文書�
 
 `go test ./cmd/taxion -run TestRequest` で、確認質問、計画改善、承認、同一 tree のレビュー、拒否と receipt を確認します。独自に作成した応答と実 Git を使い、モデル・login・ネットワークは不要です。実モデルが適切な計画を作ることや、skill を読み込むことの証明にはなりません。
 
-file access の承認、保持した tree のレビュー、停止専用接続は ADR-0026〜0028 に分けて記録しています。変更時は[ガードレール](docs/develop/01-guardrails.md)の FILE-001、SHA-001、STOP-001、LED-002、BUD-001 を維持します。login 済みアカウントによるコード作成・レビューの受入れ前に、次のテストを実行してください。
+file access の承認、保持した tree のレビュー、停止専用接続は ADR-0026〜0028 に分けて記録しています。変更時は[ガードレール](docs/develop/guardrails.md)の FILE-001、SHA-001、STOP-001、LED-002、BUD-001 を維持します。login 済みアカウントによるコード作成・レビューの受入れ前に、次のテストを実行してください。
 
 ```bash
 go test ./cmd/taxion ./internal/runtime/copilot ./internal/runtime/controller \

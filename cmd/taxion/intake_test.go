@@ -18,6 +18,65 @@ import (
 	"github.com/hiono/taxion/internal/tools"
 )
 
+func TestDocumentNavigationRoutesWithoutSDK(t *testing.T) {
+	for path, targets := range map[string][]string{
+		"README.md": {
+			"docs/userguide/README.md#最初の依頼を進める",
+			"docs/userguide/README.md#止まった作業を続ける", "CONTRIBUTING.md",
+		},
+		"docs/userguide/README.md": {
+			"user-guide.md#現在の導入方法", "user-guide.md#設定と実行前確認",
+			"user-guide.md#人のことばで依頼して計画を相談する",
+			"user-guide.md#結果の確認と停止後の継続",
+			"user-guide.md#保存結果と停止後の継続", "execution-records.md#復旧時の照合",
+			"../develop/task-graph.md#予算上限後の作業継続",
+		},
+		"docs/develop/README.md": {
+			"../../CONTRIBUTING.md#開発環境", "task-graph.md", "runtime-contract.md",
+			"guardrails.md", "../../CONTRIBUTING.md#文書の配置と責務",
+			"../../CONTRIBUTING.md#リリース", "adr/", "decision-traceability.md",
+		},
+	} {
+		path = filepath.Join("../..", path)
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, target := range targets {
+			if !strings.Contains(string(body), "]("+target+")") {
+				t.Errorf("%s omits route %s", path, target)
+			}
+			location, fragment, _ := strings.Cut(target, "#")
+			destination := filepath.Join(filepath.Dir(path), location)
+			if _, err := os.Stat(destination); err != nil {
+				t.Errorf("%s route %s: %v", path, target, err)
+				continue
+			}
+			if fragment != "" {
+				content, err := os.ReadFile(destination)
+				if err != nil {
+					t.Fatal(err)
+				}
+				heading := regexp.MustCompile(`(?m)^#{1,6} ` + regexp.QuoteMeta(strings.ReplaceAll(fragment, "-", " ")) + `$`)
+				if !heading.Match(content) {
+					t.Errorf("%s route %s lacks its heading", path, target)
+				}
+			}
+		}
+	}
+	for _, directory := range []string{"../../docs/userguide", "../../docs/develop"} {
+		paths, err := filepath.Glob(filepath.Join(directory, "*.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range paths {
+			if regexp.MustCompile(`^\d+-`).MatchString(filepath.Base(path)) {
+				t.Errorf("general document implies a reading sequence: %s", path)
+			}
+		}
+	}
+}
+
 func TestUserGuideSkillApprovalExampleWithoutSDK(t *testing.T) {
 	guide, err := os.ReadFile("../../docs/userguide/user-guide.md")
 	if err != nil {

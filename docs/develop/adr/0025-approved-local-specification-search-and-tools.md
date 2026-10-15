@@ -42,8 +42,8 @@ MCP executable は信頼された host code として承認する。
 通常 CI は無料回帰を実行し、有料 SDK 受入れは session 数と上限を Human が承認する。
 SDK credit は soft cap、tokens は usage event による事後観測の停止条件である。
 実 SDK 独立 Reviewer は #60 で受入れを完了した。
-実装手順と受入れ結果は [仕様入力](../13-specification-input.md)、
-tools の権限と証拠保持は [Runtime contract](../03-runtime-contract.md) に記録する。
+実装手順と受入れ結果は [仕様入力](../specification-input.md)、
+tools の権限と証拠保持は [Runtime contract](../runtime-contract.md) に記録する。
 
 ### 2026-10-15 の実装補足
 

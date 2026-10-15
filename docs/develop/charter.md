@@ -1,6 +1,6 @@
-# 00 プロジェクトの設立時の方針
+# プロジェクトの設立時の方針
 
-この文書は、設立時の Foundation から Local までの対象範囲を記録したものです。現在の機能一覧ではありません。利用と開発の入口は [README](../../README.md)、追跡中の作業は[ロードマップ](04-roadmap.md)、現在の動作は README から参照する各仕様文書で確認してください。
+この文書は、設立時の Foundation から Local までの対象範囲を記録したものです。現在の機能一覧ではありません。利用と開発の入口は [README](../../README.md)、追跡中の作業は[ロードマップ](roadmap.md)、現在の動作は README から参照する各仕様文書で確認してください。
 
 ## 設立の方針
 
@@ -34,4 +34,4 @@ Taxion は、非公開の先行プロジェクトから実装を移植せずに�
 
 ## 要件の追跡
 
-公開する要件には、PRIV-xxx、ROLE-xxx、SHA-xxx、CHK-xxx、DSP-xxx、SDK-xxx の ID を付けます。[ガードレール](01-guardrails.md)を参照してください。
+公開する要件には、PRIV-xxx、ROLE-xxx、SHA-xxx、CHK-xxx、DSP-xxx、SDK-xxx の ID を付けます。[ガードレール](guardrails.md)を参照してください。

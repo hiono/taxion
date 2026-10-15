@@ -26,4 +26,4 @@ CLI・HTTP・ACP が同じ workspace の承認済み条件を検査する。Web 
 
 core は標準ライブラリだけのまま維持する。Memory の条件と設定は SQLite に置き、凍結済み Ledger のキーや dispatch リクエストを変更しない。project/global は同じ DB 内の scope なので、承認済み条件はその DB を使う全 dispatch に適用する。
 
-検査対象は repo と task title に限られる。自由文の guideline 全体への遵守、worker の動作、shell 操作を保証するものではない。条件の変更・失効 API は初期実装に含めない。Memory の検査と JSON Ledger の保存も単一 transaction ではなく、同時変更まで排他的に扱う仕組みではない。現在のコマンドと拒否条件は [Memory reference](../../userguide/08-memory-model.md) に記載する。
+検査対象は repo と task title に限られる。自由文の guideline 全体への遵守、worker の動作、shell 操作を保証するものではない。条件の変更・失効 API は初期実装に含めない。Memory の検査と JSON Ledger の保存も単一 transaction ではなく、同時変更まで排他的に扱う仕組みではない。現在のコマンドと拒否条件は [Memory reference](../../userguide/memory-model.md) に記載する。

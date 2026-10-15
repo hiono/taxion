@@ -12,7 +12,7 @@ prototype は非公開である。README、文書、ADR、Issue、commit にそ�
 
 ## Decision
 
-公開 artifact に非公開の先行 project・repository・host・人名を含めない。`private predecessor`・`implementation-repo`・`validation-target` の一般的な役割だけを使う。`docs/develop/02-privacy-provenance.md` に記録し、hygiene CI で秘密の形式を検査する。
+公開 artifact に非公開の先行 project・repository・host・人名を含めない。`private predecessor`・`implementation-repo`・`validation-target` の一般的な役割だけを使う。`docs/develop/privacy-provenance.md` に記録し、hygiene CI で秘密の形式を検査する。
 
 ## Consequences
 

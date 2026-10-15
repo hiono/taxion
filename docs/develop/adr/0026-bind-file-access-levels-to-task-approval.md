@@ -37,8 +37,8 @@ Task scope、禁止範囲、SDK tool allowlist は別の条件として維持す
 開始後に新たに追跡されたファイルが、`committed` の許可へ自動追加されることはない。
 設定を簡単にするために全 tool を既定許可する方式は採らない。
 
-現在の permission 契約は [Runtime contract](../03-runtime-contract.md)、
-Task の field と更新条件は [Task Graph](../10-task-graph.md)、
+現在の permission 契約は [Runtime contract](../runtime-contract.md)、
+Task の field と更新条件は [Task Graph](../task-graph.md)、
 手動設定例は [利用者ガイド](../../userguide/user-guide.md) が所有する。
 回帰は `internal/core/fileaccess_test.go`、`internal/gitproof/fileaccess_test.go`、
 `internal/runtime/copilot/fileaccess_test.go` に置く。
