@@ -9,6 +9,7 @@ import (
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
+	"github.com/hiono/taxion/internal/runtime/controller"
 )
 
 func TestUsageDescribesCurrentCommands(t *testing.T) {
@@ -197,6 +198,33 @@ func TestRuntimeDispatchResultSchema(t *testing.T) {
 	for _, field := range []string{"worktree", "sha"} {
 		if _, ok := validationProperties[field]; !ok {
 			t.Fatalf("validation schema omits Git provenance field %s", field)
+		}
+	}
+}
+
+func TestRuntimeResultSchemaNamesExactRequiredEvidence(t *testing.T) {
+	for _, recipient := range []string{"CODER", "REVIEWER"} {
+		dispatch := core.GraphDispatch{
+			Recipient: recipient,
+			Instruction: core.DispatchInstruction{
+				RequiredEvidence: []string{"work-report", "skill-check"},
+			},
+		}
+		for _, strict := range []bool{false, true} {
+			schema := controller.DispatchResultSchema(dispatch, strict)
+			properties := schema["properties"].(map[string]any)
+			description := properties["evidence"].(map[string]any)["description"].(string)
+			for _, identifier := range dispatch.Instruction.RequiredEvidence {
+				if !strings.Contains(description, `"`+identifier+`"`) {
+					t.Fatalf("%s strict=%t schema omits exact identifier %q: %s", recipient, strict, identifier, description)
+				}
+			}
+		}
+	}
+	for _, submission := range []bool{false, true} {
+		prompt := runtimeSubmissionPrompt("role", "contract", submission)
+		if !strings.Contains(prompt, "separate array item") || !strings.Contains(prompt, `not "work-report: changes made"`) {
+			t.Fatalf("submission=%t does not distinguish an evidence identifier from its description", submission)
 		}
 	}
 }

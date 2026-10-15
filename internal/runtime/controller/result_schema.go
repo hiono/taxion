@@ -1,6 +1,10 @@
 package controller
 
-import "github.com/hiono/taxion/internal/core"
+import (
+	"fmt"
+
+	"github.com/hiono/taxion/internal/core"
+)
 
 // DispatchResultSchema describes model output; the controller independently
 // verifies Git, validation commands, and references between evidence fields.
@@ -25,7 +29,7 @@ func DispatchResultSchema(dispatch core.GraphDispatch, strict bool) map[string]a
 			"required": []string{"command", "exitCode", "worktree", "sha"},
 		}},
 		"evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
-			"description": "Evidence identifiers. Acceptance and finding evidence must reference these exact strings."},
+			"description": fmt.Sprintf("Evidence identifiers, not narrative reports. For SUCCEEDED, include every required identifier as a separate exact array item: %q. Do not append descriptions to these identifiers; additional evidence may be separate items. Acceptance and finding evidence must reference exact strings present in this array.", dispatch.Instruction.RequiredEvidence)},
 		"blockers":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 		"nextTransition":  map[string]any{"type": "string"},
 		"resumeCondition": map[string]any{"type": "string"},

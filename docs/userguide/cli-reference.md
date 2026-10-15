@@ -131,6 +131,8 @@ EOF・`/quit` はこの console が所有する実行だけを安全に中断し
 
 `runtime`・`workflow run|step` の `--controller-validation-submission` は、モデルの提出と controller の検証を明示的に分ける。role は検証結果を創作せずに実際の出力と証拠を提出し、controller が成功の保存前に承認済み command の実行と Git の検証を行う。
 
+結果の `evidence` は識別子の配列です。契約の `requiredEvidence` にある値を、そのまま独立した要素として含めます。たとえば `work-report` を要求された場合、`"work-report"` は一致しますが、説明を付けた `"work-report: 変更内容"` は一致しません。実際の作業説明は別の要素に記録し、未実施の証拠を識別子だけで補ったことにはしません。
+
 controller の検証待ちだけでは suspension を要求しない。ただし、実際の失敗、出力欠落、根拠のない Reviewer 承認、必要な Human 判断は引き続き進行を拒否する。新規 session に使い、実行接続時も繰り返す。`runtime stop` には指定しない。既存 session の既定 prompt は変更しない。
 
 ### 設定
