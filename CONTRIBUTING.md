@@ -103,6 +103,17 @@ go test ./internal/tools ./internal/runtime/copilot ./internal/runtime/controlle
 
 #78 では、別途承認した実文書の作業で、選択した skill、読み込み結果、点検の証拠、同じ成果物の独立レビューを確認します。外部 skill は操作者が試用時に用意する入力であり、Taxion の依存ではありません。その本文を fixture にコピーしません。
 
+実文書の前に、操作者が用意した3つの執筆 skill と `natural-japanese` の付随 lint を無課金で確認できます。次の絶対パスには `natural-japanese/`、`japanese-tech-writing/`、`cognitive-rhythm-writing/` が必要です。実行には既存の `uv` と、その script の依存・Python がローカルに揃っている必要があり、テストは `uv run --offline` でダウンロードを禁止します。
+
+```bash
+TAXION_DOCUMENT_SKILL_ROOT=/absolute/path/to/skills \
+  go test ./internal/gitproof -run '^TestDocumentSkillValidationPreflightWithoutModel$' -count=1 -v
+```
+
+この明示 opt-in は各 skill の内容 hash と原本不変を照合し、一時 Git repository の小さな文書へ、承認した host validation として実 lint を実行します。結果の JSON、検証時刻、対象 SHA を確認します。指定後に skill・実行ファイル・依存が不足していれば失敗し、成功に見せる skip はしません。未指定の通常テストでは実行せず、`mise run check` はこの入力を空にして外部 skill を使いません。
+
+この検査は SDK session を作らず、skill の実ロード、モデルによる規範の適用、実文書の品質、独立レビューは確認しません。SDK 内の任意 shell や worktree 外 read も許可しません。実作業では Task の `validationCommands` に入力と出力先を固定した検査を明示承認し、role が使える tool と file access は別に照合してください。lint は指摘があっても exit 0 を返すため、成功終了だけで合格とせず、指摘への対応または残す理由を記録します。
+
 保存済み障害の復旧前には、一貫した SQLite backup と元の worktree を保持してください。SDK の取消と、その後の workspace transaction は別々に確認します。取消が成功しても結果の保存に失敗する場合があります。suspension・cancellation の receipt、成果物 hash、観測済み利用量を残し、成功扱いにするために旧契約や予算を書き換えません。
 
 private database、生ログ、credential 値は commit に含めません。一般化した知見と採択した制約は ADR、現在の動作は担当する仕様文書、操作者の手順は利用者ガイドに記載します。
