@@ -58,6 +58,7 @@ type Adapter struct {
 	config         Config
 	client         *sdk.Client
 	credentialErr  error
+	environment    []string
 	stopSessionID  string
 	stopConfigHash string
 
@@ -149,12 +150,23 @@ func New(config Config) (*Adapter, error) {
 			return nil, fmt.Errorf("taxion: locate Copilot CLI: %w", err)
 		}
 	}
+	config.CLIPath, err = filepath.Abs(config.CLIPath)
+	if err != nil {
+		return nil, fmt.Errorf("taxion: resolve Copilot CLI: %w", err)
+	}
 	if config.BaseDirectory == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("taxion: locate Copilot home: %w", err)
+		config.BaseDirectory = os.Getenv("COPILOT_HOME")
+		if config.BaseDirectory == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, fmt.Errorf("taxion: locate Copilot home: %w", err)
+			}
+			config.BaseDirectory = filepath.Join(home, ".copilot")
 		}
-		config.BaseDirectory = filepath.Join(home, ".copilot")
+	}
+	config.BaseDirectory, err = filepath.Abs(config.BaseDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("taxion: resolve Copilot home: %w", err)
 	}
 	config.AvailableTools = slices.Clone(config.AvailableTools)
 	if len(config.Configuration) != 0 {
@@ -213,7 +225,7 @@ func New(config Config) (*Adapter, error) {
 	if err := tools.CheckSkillAccess(config.ToolPolicy, config.AvailableTools); err != nil {
 		return nil, err
 	}
-	if config.ToolPolicy != nil && len(config.ToolPolicy.Skills)+len(config.ToolPolicy.Plugins) != 0 &&
+	if (config.ToolPolicy == nil || len(config.ToolPolicy.Skills)+len(config.ToolPolicy.Plugins) != 0) &&
 		!slices.Contains(config.AvailableTools, "skill") {
 		config.AvailableTools = append(config.AvailableTools, "skill")
 	}
@@ -226,10 +238,14 @@ func New(config Config) (*Adapter, error) {
 		config.ManagedSearch = &binding
 		config.AvailableTools = append(config.AvailableTools, ManagedSearchToolName)
 	}
+	mode := sdk.ModeCopilotCli
+	if config.ToolPolicy != nil {
+		mode = sdk.ModeEmpty
+	}
 	options := &sdk.ClientOptions{
 		Connection:       sdk.StdioConnection{Path: config.CLIPath},
 		WorkingDirectory: config.WorkingDirectory, BaseDirectory: config.BaseDirectory,
-		LogLevel: "error", Mode: sdk.ModeEmpty,
+		LogLevel: "error", Mode: mode,
 	}
 	var credentialErr error
 	if len(config.Configuration) != 0 {
@@ -241,10 +257,14 @@ func New(config Config) (*Adapter, error) {
 		// attachment, even when the saved credential is no longer available.
 		credentialErr = configureCredential(options, selected.Runtime.CredentialRef)
 	}
+	if options.Env == nil {
+		options.Env = os.Environ()
+	}
 	return &Adapter{
 		config:        config,
 		client:        sdk.NewClient(options),
 		credentialErr: credentialErr,
+		environment:   slices.Clone(options.Env),
 		sessions:      map[string]*managedSession{},
 	}, nil
 }
@@ -263,6 +283,10 @@ func (a *Adapter) ConfigHash() string {
 		}
 	}
 	permissionPolicy := "cli-managed-v1"
+	discoveryPolicy := ""
+	if a.config.ToolPolicy == nil {
+		discoveryPolicy = "native-cli-defaults-v1"
+	}
 	if a.config.Role == "CODER" {
 		permissionPolicy = "coder-worktree-write-v1"
 		if a.config.FileAccess != nil {
@@ -292,6 +316,7 @@ func (a *Adapter) ConfigHash() string {
 		Configuration       json.RawMessage        `json:",omitempty"`
 		MaxAICredits        float64                `json:",omitempty"`
 		ToolPolicy          *tools.Policy          `json:",omitempty"`
+		DiscoveryPolicy     string                 `json:",omitempty"`
 	}{
 		Role:                a.config.Role,
 		SystemPrompt:        a.config.SystemPrompt,
@@ -310,6 +335,7 @@ func (a *Adapter) ConfigHash() string {
 		Configuration:       a.config.Configuration,
 		MaxAICredits:        a.config.MaxAICredits,
 		ToolPolicy:          a.config.ToolPolicy,
+		DiscoveryPolicy:     discoveryPolicy,
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -693,7 +719,12 @@ func (a *Adapter) lookup(sessionID string) (*managedSession, error) {
 }
 
 func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionConfig {
-	streaming, disabled := true, false
+	streaming := true
+	var discovery *bool
+	if a.config.ToolPolicy != nil {
+		disabled := false
+		discovery = &disabled
+	}
 	config := &sdk.SessionConfig{
 		Model:                              "auto",
 		SystemMessage:                      &sdk.SystemMessageConfig{Mode: "append", Content: a.config.SystemPrompt},
@@ -701,10 +732,10 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 		AvailableTools:                     slices.Clone(a.config.AvailableTools),
 		Tools:                              a.managedTools(),
 		Streaming:                          &streaming,
-		EnableConfigDiscovery:              &disabled,
-		EnableSkills:                       &disabled,
-		EnableFileHooks:                    &disabled,
-		EnableOnDemandInstructionDiscovery: &disabled,
+		EnableConfigDiscovery:              discovery,
+		EnableSkills:                       discovery,
+		EnableFileHooks:                    discovery,
+		EnableOnDemandInstructionDiscovery: discovery,
 		InfiniteSessions:                   infiniteSessions(),
 		SessionLimits:                      a.sessionLimits(),
 		OnPermissionRequest:                a.permissionHandler(),
@@ -721,7 +752,12 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 }
 
 func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessionConfig {
-	streaming, disabled := true, false
+	streaming := true
+	var discovery *bool
+	if a.config.ToolPolicy != nil {
+		disabled := false
+		discovery = &disabled
+	}
 	config := &sdk.ResumeSessionConfig{
 		Model:                              "auto",
 		SystemMessage:                      &sdk.SystemMessageConfig{Mode: "append", Content: a.config.SystemPrompt},
@@ -729,10 +765,10 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		AvailableTools:                     slices.Clone(a.config.AvailableTools),
 		Tools:                              a.managedTools(),
 		Streaming:                          &streaming,
-		EnableConfigDiscovery:              &disabled,
-		EnableSkills:                       &disabled,
-		EnableFileHooks:                    &disabled,
-		EnableOnDemandInstructionDiscovery: &disabled,
+		EnableConfigDiscovery:              discovery,
+		EnableSkills:                       discovery,
+		EnableFileHooks:                    discovery,
+		EnableOnDemandInstructionDiscovery: discovery,
 		InfiniteSessions:                   infiniteSessions(),
 		SessionLimits:                      a.sessionLimits(),
 		OnPermissionRequest:                a.permissionHandler(),
@@ -770,7 +806,8 @@ func infiniteSessions() *sdk.InfiniteSessionConfig {
 }
 
 func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
-	if a.config.Role != "REVIEWER" && a.config.Role != "CODER" && a.config.ToolPolicy == nil && a.config.ManagedSearch == nil {
+	if a.config.Role != "REVIEWER" && a.config.Role != "CODER" && a.config.ToolPolicy == nil &&
+		a.config.ManagedSearch == nil && !slices.Contains(a.config.AvailableTools, "skill") {
 		return nil
 	}
 	return func(request sdk.PermissionRequest, invocation sdk.PermissionInvocation) (rpc.PermissionDecision, error) {
@@ -780,15 +817,17 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 				a.config.FileAccess, a.config.TrackedFiles, request)
 		}
 		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
+			permission.ToolName == "skill" && slices.Contains(a.config.AvailableTools, "skill") &&
+			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
+			decision = &rpc.PermissionDecisionApproveOnce{}
+		}
+		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
 			a.config.ManagedSearch != nil && permission.ToolName == ManagedSearchToolName &&
 			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
 			decision = &rpc.PermissionDecisionApproveOnce{}
 		}
 		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok && a.config.ToolPolicy != nil &&
 			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
-			if permission.ToolName == "skill" && len(a.config.ToolPolicy.Skills)+len(a.config.ToolPolicy.Plugins) != 0 {
-				decision = &rpc.PermissionDecisionApproveOnce{}
-			}
 			for _, tool := range a.config.ToolPolicy.MCP {
 				if permission.ToolName == tool.Name {
 					decision = &rpc.PermissionDecisionApproveOnce{}

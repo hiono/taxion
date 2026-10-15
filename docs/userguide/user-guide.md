@@ -28,6 +28,7 @@ mise exec -- taxion --help
 
 ```sh
 taxion config check --sources
+taxion doctor --worktree .
 taxion init
 taxion --help
 ```
@@ -36,9 +37,40 @@ taxion --help
 
 ### 文書用 skill を使う場合
 
-Taxion は特定の skill を同梱したり、利用者の home から自動で選んだりしません。
-使う skill の利用許可と内容を確認し、SDK 用の skill directory または skill-only
-plugin directory を準備します。directory の内容は実行中に変更しません。
+通常は、設定したバックエンドが標準配置から skill・plugin・指示・custom agent を
+探索します。Copilot 単体で使う skill を Taxion 用 directory へコピーしたり、
+skill ごとの hash 承認 JSON を作ったりする必要はありません。
+
+Copilot の skill 検索先は project の `.agents/skills`・`.github/skills`・
+`.claude/skills` と、個人用の `~/.agents/skills`・`~/.copilot/skills` です。
+追加登録した skill directory とインストール済み plugin も native な設定に従います。
+`AGENTS.md` 等の指示や `.github/agents`・`~/.copilot/agents` も、
+Copilot の探索規則に従います。選択していない Pi 等の固有 directory は探しません。
+Taxion が特定の外部執筆 skill を固定で同梱するわけではありません。
+
+```sh
+taxion doctor
+taxion doctor --json
+```
+
+`doctor` は実行と同じ CLI・worktree・Copilot home で native な一覧を取得し、
+検索先、見つかった設定、無効化、同名 agent の優先順位、利用できない理由を表示します。
+通常実行で `--cli`・`--base-directory` を指定する場合は doctor にも同じ値を渡します。
+空の検索先と取得不能は区別されます。診断のためのモデル session 作成、
+hook・MCP の起動、設定の書換えはしません。認証・実ロード・品質の成功は別途確認します。
+
+通常実行はローカルの設定を信頼して読みます。file hooks は host のコマンドを実行し、
+MCP や plugin はプロセス起動・外部接続を伴い得ます。初めて使う repository の設定は
+実行前に内容を確認してください。これらの host 処理は SDK のファイル権限 callback の
+sandbox ではありません。Coder / Reviewer に提供する通常 tool と成果物検証は維持します。
+custom agent の検出と、その担当で呼出し tool が許可されていることも別です。
+
+#### 内容を固定して監査する場合
+
+ここからは任意の固定方式です。役割別の skill 内容、固定 MCP request、RTK と
+原本 evidence を Task 契約へ固定するときだけ、既存の `taxion.tools.v1` を指定します。
+この方式では通常の自動探索を無効にし、明示した asset だけを使います。
+directory の内容は実行中に変更しません。
 
 ```sh
 taxion tools hash --path /absolute/approved/skills
@@ -72,9 +104,9 @@ taxion tools hash --path /absolute/approved/skills
 `plugin.json` と `skills/` を持つ directory の `path` / `hash` を設定します。
 詳細な許可・公開条件は [runtime 契約](../develop/runtime-contract.md#skillspluginsmcphooks-と出力圧縮)を参照してください。
 
-承認済み asset があれば、Taxion が `skill` tool を追加します。通常の
+固定方式では承認済み asset があれば、Taxion が `skill` tool を追加します。通常の
 `--coder-tools` / `--reviewer-tools` は引き続き必要なファイル操作を指定します。
-skill の名前を role prompt に書くだけでは、未承認 skill は利用可能になりません。
+固定方式で skill の名前を role prompt に書くだけでは、未承認 asset は利用可能になりません。
 `workflow run|step` は両 role の asset 欠落・改変をモデル実行前に検査します。
 
 skill が参照する補助ファイルは、通常の worktree / fileAccess の許可内で読める必要が
@@ -84,7 +116,7 @@ skill が参照する補助ファイルは、通常の worktree / fileAccess の
 準備し、検査不能を品質合格に置き換えないでください。
 
 実行後は、Taxion が保存した session ID に対応する SDK ログの skill 呼出しと
-成功・失敗の完了結果を確認し、`evidenceDirectory` の原本と成果物の commit SHA
+成功・失敗の完了結果を確認し、固定方式では `evidenceDirectory` の原本と成果物の commit SHA
 または tree SHA、付随検査、独立レビューを対応付けます。skill のロード成功だけで
 文書を合格にせず、親の開発支援 session の起動ログも代用しません。
 原本は private に保持し、公開記録には秘密値・私用パスを含めません。
@@ -106,7 +138,7 @@ taxion request --repo owner/repository --max-tokens 40000 \
 
 token 上限は Planner の全対話と Coder / Reviewer で共有し、期限は `/plan` から数えます。`--max-ai-credits` は session ごとの soft ceiling で、依頼全体の金額上限や一 turn の hard cap ではありません。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の各回答には費用が発生するため、同じ内容を繰り返し送らないようにします。Planner の失敗を自動 retry しません。
 
-Planner は tool-free で、依頼、これまでの対話、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストだけを読みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。対話中の `/quit` または入力終了ではコードを実行せず、相談記録を残します。保存した相談の自動再開は未対応です。
+Planner はファイル・shell tool を持たず、依頼、これまでの対話、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストを受け取ります。通常は native な skill と指示も読み込みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。対話中の `/quit` または入力終了ではコードを実行せず、相談記録を残します。保存した相談の自動再開は未対応です。
 
 相談記録は workspace 内の `requests/` に private な JSON、実行イベントは同じ場所の `execution.log` に保存します。停止後の成果物と利用量は従来の Task / Flow / receipt に残ります。無料の合成 runtime と実 Git で依頼、確認質問、計画修正、承認、コード作成、同一 tree の独立レビューまで検証しています。実 Copilot モデルでこの入口を通した受入れは未確認です。
 

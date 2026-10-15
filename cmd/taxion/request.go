@@ -205,7 +205,8 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			"Token ceiling (Planner + Coder + Reviewer): %d; deadline: %s; repairs: %d\n"+
 			"Per-session soft credit ceiling: %g (not a total or hard cap)\n"+
 			"Budget guidance: %s (%s); account quota read: %t\n"+
-			"Planner receives the request, committed path list and selected context files; no tools.\n"+
+			"Planner receives the request, committed path list and selected context files; native customization discovery is enabled, with skill but no file/shell tools.\n"+
+			"Native file hooks and configured servers may run host commands or connect externally.\n"+
 			"有料のPlanner対話を開始するには /plan、取り消すには /quit。まだコードは変更しません。\n",
 		*repo, root, branch, baseline, selected.Runtime.Account, *tokens, *timeout, *repairs, *credits,
 		guidance.Mode, guidance.Source, guidance.AccountReadApproved); err != nil {

@@ -21,17 +21,18 @@ func TestConfigurationSelectionHashIsCompleteOwnedAndCanonical(t *testing.T) {
 		AvailableTools                                               []string
 		ResponseSchema                                               map[string]any
 		PermissionPolicy                                             string
+		DiscoveryPolicy                                              string
 	}{
 		legacy.config.Role, legacy.config.SystemPrompt, legacy.config.WorkingDirectory,
 		legacy.config.CLIPath, legacy.config.BaseDirectory, legacy.config.AvailableTools,
-		legacy.config.ResponseSchema, "coder-worktree-write-v1",
+		legacy.config.ResponseSchema, "coder-worktree-write-v1", "native-cli-defaults-v1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(data)
 	if legacy.ConfigHash() != hex.EncodeToString(sum[:]) {
-		t.Fatal("unconfigured legacy session hash changed")
+		t.Fatal("native discovery is not bound to the session hash")
 	}
 	selected, err := executionconfig.Load([]byte(`version: 1
 project: {id: demo}

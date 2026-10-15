@@ -24,6 +24,14 @@ Planner は tool-free とし、対話、commit 内の path 一覧、利用者が
 
 ## Consequences
 
+### 標準カスタマイズを使う後続補足
+
+通常実行の Planner / Orchestrator でも、バックエンドの標準 skill・指示を探索する。
+元判断の tool-free は現在の通常実行では file・shell tool を与えないという条件に改める。
+通常の skill 利用には個別承認 JSON や専用 directory を要求せず、
+`taxion doctor` から実行と同じ探索先と利用不能の理由を確認する。
+内容固定が必要な場合の手動承認方式と、未確認の実 skill 品質工程は別に維持する。
+
 利用者は依頼と Planner への回答、実行の確認に集中できる。相談の全 token を実行と共有し、期限を延長せず、usage と対話を private receipt に残す。
 
 既存の個別 CLI 操作は高度な設定に使える。外部 skill の承認、相談の自動再開、実行中のこの console への入力は今回追加しない。OpenCode ACP 接続は後続 Issue #80 とし、初回体験の実装に混ぜない。無料の合成 runtime 検証と、実モデルによる計画の妥当性・実行の受入れを区別する。

@@ -155,6 +155,21 @@ execution:
 	if len(selectedWorker.ExecutionConfiguration()) == 0 {
 		t.Fatal("saved selection not supplied to the SDK identity")
 	}
+	t.Setenv("HOME", t.TempDir())
+	output.Reset()
+	if err := doctorCmd([]string{"--dispatch", "dispatch", "--cli", doctorFixtureCLI(t),
+		"--base-directory", t.TempDir(), "--json"}, &output); err != nil {
+		t.Fatal("saved Dispatch diagnosis failed", err)
+	}
+	var diagnostic copilot.DiscoveryReport
+	if err := json.Unmarshal(output.Bytes(), &diagnostic); err != nil ||
+		diagnostic.Worktree != selectedDispatch.Instruction.Worktree {
+		t.Fatal("doctor did not use the saved execution worktree", err)
+	}
+	afterDoctor, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(beforeAuth, afterDoctor) {
+		t.Fatal("doctor changed saved Dispatch state", err)
+	}
 	authArgs := []string{"auth", "--dispatch", "dispatch", "--system-prompt-file", "missing-prompt", "--cli", "missing-copilot"}
 	if err := runtimeCmd(authArgs); err == nil || !strings.Contains(err.Error(), "read system prompt") {
 		t.Fatal("approved auth probe did not reach local adapter inputs", err)

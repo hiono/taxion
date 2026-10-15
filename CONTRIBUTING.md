@@ -78,7 +78,7 @@ go test ./internal/gitproof ./internal/core
 
 一時 workspace、実 Git、合成 SDK protocol peer を使うため、モデル指示は送信しません。login 済み SDK の結合テストは明示選択時だけ実行します。ローカルテストの成功で、アカウントの利用資格、provider の課金上限、コード作成・レビューの通し受入れを確認したことにはなりません。
 
-skill のテストでは、一時 directory に独自の合成指示を置き、リポジトリ所有の skill 専用 plugin fixture を使います。通常のテストに、特定の外部執筆 skill、個人の home path、global install、login、ネットワーク、有料モデルを要求しません。担当別の承認、複数 asset、create・resume 時の照合、`skill` tool、成功・失敗の証拠、欠落・変更・未承認 asset の拒否を確認します。
+skill のテストでは、一時 directory に独自の合成指示を置き、リポジトリ所有の skill 専用 plugin fixture を使います。通常のテストに、特定の外部執筆 skill、個人の home path、global install、login、ネットワーク、有料モデルを要求しません。内容固定方式では担当別の承認、複数 asset、create・resume 時の照合、`skill` tool、成功・失敗の証拠、欠落・変更・未承認 asset の拒否を確認します。
 
 ```bash
 go test ./internal/tools ./internal/runtime/copilot ./internal/runtime/controller \
@@ -92,6 +92,14 @@ go test ./internal/tools ./internal/runtime/copilot ./internal/runtime/controlle
 保存済み障害の復旧前には、一貫した SQLite backup と元の worktree を保持してください。SDK の取消と、その後の workspace transaction は別々に確認します。取消が成功しても結果の保存に失敗する場合があります。suspension・cancellation の receipt、成果物 hash、観測済み利用量を残し、成功扱いにするために旧契約や予算を書き換えません。
 
 private database、生ログ、credential 値は commit に含めません。一般化した知見と採択した制約は ADR、現在の動作は担当する仕様文書、操作者の手順は利用者ガイドに記載します。
+
+### バックエンドと同じ探索を検証する
+
+通常のカスタマイズ探索は設定中のバックエンドに任せ、未選択バックエンドの配置を
+追加検索しません。`taxion doctor` は同じ adapter の worktree・CLI・環境・home を使い、
+native inventory と補足のファイル観測を表示します。回帰では一時 HOME と合成 CLI から
+渡された条件を確認し、無効化・不正形式・取得不能と、file hooks・MCP・モデルを
+起動しないことを検査します。doctor の成功を認証・実ロード・品質確認の代替にはしません。
 
 ## 残予算の案内
 

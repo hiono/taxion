@@ -60,8 +60,26 @@ native plugin discovery は無料の明示 opt-in とする。
 検査結果と同一成果物の独立レビューを要求する。
 指定の日本語文書用 skill は dogfood 入力であり、製品の固定依存にはしない。
 
+## 標準探索と doctor に関する後続判断
+
+上記の内容固定は通常利用の前提にしない。ユーザーは、Copilot 単体で使う skill が
+Taxion では探索されず、専用 directory や hash 承認を要求される挙動を不親切と判断した。
+通常は設定したバックエンドの標準探索を使い、未使用バックエンドの配置は混ぜない。
+明示した `taxion.tools.v1` は内容固定・監査の opt-in として残す。
+
+`taxion doctor` は実行と同じ worktree・CLI・ユーザー設定で検索先と検出結果、
+無効化・上書き・利用不能の理由を示す。Copilot の native な一覧を優先し、
+doctor だけの別の優先順位を作らない。診断でモデル・hooks・MCP を起動せず、
+検出成功を実 skill 品質工程の成功とはしない。host 設定の信頼と、
+担当の file permission・成果物検証を分けて説明する。
+
+以前の「承認済み asset がある role に限る」は固定方式の条件として維持し、
+通常の native skill 利用には適用しない。現行動作は [Runtime 契約](../runtime-contract.md)を参照する。
+
 ## References
 
+- [Copilot の標準 skill 配置](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills)
+- [Copilot の標準指示探索](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions)
 - [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI)
 - [pdfminer.six](https://pdfminersix.readthedocs.io/)
 - [Agent Plugins](https://docs.github.com/en/copilot/concepts/agents/about-plugins)

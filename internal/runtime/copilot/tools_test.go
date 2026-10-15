@@ -202,12 +202,9 @@ func TestApprovedSkillsWithoutModelUse(t *testing.T) {
 	}
 }
 
-func TestSkillToolRequiresApprovedAssets(t *testing.T) {
+func TestPinnedSkillToolRequiresApprovedAssets(t *testing.T) {
 	config := testConfig(t)
 	config.AvailableTools = []string{"skill"}
-	if _, err := New(config); err == nil {
-		t.Fatal("unapproved skill tool accepted")
-	}
 	config.ToolPolicy = &tools.Policy{EvidenceDirectory: t.TempDir()}
 	if _, err := New(config); err == nil {
 		t.Fatal("empty policy authorized skills")
@@ -221,14 +218,54 @@ func TestSkillToolRequiresApprovedAssets(t *testing.T) {
 	if *adapter.sessionConfig(nil).EnableSkills || slices.Contains(adapter.config.AvailableTools, "skill") {
 		t.Fatal("policy without skill assets enabled skills")
 	}
-	config.ToolPolicy = nil
-	plain, err := New(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer plain.Close()
-	if *plain.sessionConfig(nil).EnableSkills || *plain.resumeConfig(nil).EnableSkills {
-		t.Fatal("unconfigured runtime discovered ambient skills")
+}
+
+func TestNativeCustomizationDefaultsWithoutModelUse(t *testing.T) {
+	for _, role := range []string{"PLANNER", "ORCHESTRATOR", "CODER", "REVIEWER"} {
+		t.Run(role, func(t *testing.T) {
+			config := testConfig(t)
+			config.Role = role
+			config.AvailableTools = []string{"view"}
+			adapter, err := New(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer adapter.Close()
+			create, resume := adapter.sessionConfig(nil), adapter.resumeConfig(nil)
+			if create.EnableConfigDiscovery != nil || resume.EnableConfigDiscovery != nil ||
+				create.EnableSkills != nil || resume.EnableSkills != nil ||
+				create.EnableFileHooks != nil || resume.EnableFileHooks != nil ||
+				create.EnableOnDemandInstructionDiscovery != nil || resume.EnableOnDemandInstructionDiscovery != nil ||
+				create.SkillDirectories != nil || resume.SkillDirectories != nil ||
+				create.PluginDirectories != nil || resume.PluginDirectories != nil ||
+				create.Hooks != nil || resume.Hooks != nil ||
+				!reflect.DeepEqual(create.AvailableTools, []string{"view", "skill"}) ||
+				!reflect.DeepEqual(create.AvailableTools, resume.AvailableTools) {
+				t.Fatal("normal sessions override native discovery or widen the explicit tool surface")
+			}
+			required := true
+			for _, permission := range []sdk.PermissionRequest{
+				&sdk.PermissionRequestCustomTool{ToolName: "skill"},
+				&sdk.PermissionRequestCustomTool{ToolName: "skill", ManagedApprovalRequired: &required},
+				&sdk.PermissionRequestCustomTool{ToolName: "bash"},
+				&sdk.PermissionRequestCustomTool{ToolName: "task"},
+				&sdk.PermissionRequestRead{Path: filepath.Join(t.TempDir(), "outside.md")},
+			} {
+				want := false
+				if custom, ok := permission.(*sdk.PermissionRequestCustomTool); ok {
+					want = custom.ToolName == "skill" && custom.ManagedApprovalRequired == nil
+				}
+				for _, decide := range []sdk.PermissionHandlerFunc{create.OnPermissionRequest, resume.OnPermissionRequest} {
+					decision, err := decide(permission, sdk.PermissionInvocation{})
+					if err != nil || (string(decision.Kind()) == "approve-once") != want {
+						t.Fatal("native discovery changed ordinary tool permissions", permission, decision, err)
+					}
+				}
+			}
+			if adapter.ToolPolicy() != nil {
+				t.Fatal("normal skill use requires an asset approval")
+			}
+		})
 	}
 }
 

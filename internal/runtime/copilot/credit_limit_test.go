@@ -34,17 +34,18 @@ func TestCreditLimitValidationBindingAndSDKConfiguration(t *testing.T) {
 		AvailableTools   []string
 		ResponseSchema   map[string]any
 		PermissionPolicy string
+		DiscoveryPolicy  string
 	}{
 		unlimited.config.Role, unlimited.config.SystemPrompt, unlimited.config.WorkingDirectory,
 		unlimited.config.CLIPath, unlimited.config.BaseDirectory, unlimited.config.AvailableTools,
-		unlimited.config.ResponseSchema, "coder-worktree-write-v1",
+		unlimited.config.ResponseSchema, "coder-worktree-write-v1", "native-cli-defaults-v1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256(legacy)
 	if unlimited.ConfigHash() != hex.EncodeToString(hash[:]) {
-		t.Fatal("zero limit changed the legacy saved-session hash")
+		t.Fatal("zero limit changed the native-default session hash")
 	}
 	for _, limit := range []float64{30, 30.5, 60} {
 		cfg.MaxAICredits = limit

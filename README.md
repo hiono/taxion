@@ -12,6 +12,8 @@ Taxion は、人のことばでコードの変更を依頼し、Planner と計�
 
 初回利用は[導入から結果確認までの順序](docs/userguide/README.md#最初の依頼を進める)、作業が停止した場合は[保存成果からの継続](docs/userguide/README.md#止まった作業を続ける)をたどってください。参照資料をすべて読む必要はありません。
 
+`taxion doctor` で、設定したバックエンドと同じ検索先から見つかる skills・plugins・指示等を確認できます。通常はバックエンドの標準配置を使い、Taxion 用 directory へのコピーや skill ごとの hash 承認は不要です。
+
 Taxion は coding agent や Git の認証を提供しません。token 上限は観測した利用量から後続作業を止めるための上限であり、実行中の一 turn の費用を必ず抑える provider 側の制限ではありません。
 
 ## 開発する

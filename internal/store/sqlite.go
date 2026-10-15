@@ -9,6 +9,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -61,6 +63,24 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{db: db}, nil
+}
+
+// OpenReadOnly observes existing state without creating or migrating a workspace.
+func OpenReadOnly(path string) (*Store, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	location := url.URL{Scheme: "file", Path: absolute, RawQuery: "mode=ro"}
+	db, err := sql.Open("sqlite", location.String())
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, err
 	}

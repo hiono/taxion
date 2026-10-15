@@ -34,7 +34,7 @@ session の作成・接続後と各モデル送信前に、設定を選択した
 
 ### 保存記録への質問
 
-保存記録についての質問には、別の tool-free Orchestrator Runtime を使う。出典付き Task 設定承認、今回の認証確認、repository の読取り権限、provider の service 確認、明示的な時間・token 上限が必要。回答は、渡した観測に存在する field を引用し、記録された事実、仮定、不明な点を分ける。観測は現在の実行状態の証明にはならない。
+保存記録についての質問には、別の file・shell tool を持たない Orchestrator Runtime を使う。通常は native skills と指示を利用する。出典付き Task 設定承認、今回の認証確認、repository の読取り権限、provider の service 確認、明示的な時間・token 上限が必要。回答は、渡した観測に存在する field を引用し、記録された事実、仮定、不明な点を分ける。観測は現在の実行状態の証明にはならない。
 
 Dispatch を対応付けず、workspace の履歴や承認を変更しない。返された session・usage は質問に属し、主 Flow には属さない。利用量不明と不正な引用は質問を止める。cancel 後の safe cleanup は独自の上限付き context を使い、error を隠さない。
 
@@ -111,7 +111,28 @@ Taxion は、Task の出典付き decision に保存した `taxion.tools.v1` の
 役割別の skills・skill-only plugins・固定 MCP リクエスト・RTK を接続する。
 実行ファイル、入力、directory の内容 hash、引数、tool 名、承認済み JSON、
 private evidence directory を session の設定 hash に含め、create/resume で同じ条件を使う。
-config discovery・file hooks の自動読込みは無効のまま、明示した directory と SDK hooks を接続する。
+この内容固定方式では config discovery・file hooks の自動読込みを無効にし、
+明示した directory と SDK hooks だけを接続する。通常利用にはこの承認を要求しない。
+
+通常の session は SDK の `ModeCopilotCli` を使い、config discovery・skills・file hooks・
+on-demand instruction discovery の既定値を上書きしない。project の
+`.agents/skills`・`.github/skills`・`.claude/skills`、個人の `.agents/skills` と
+Copilot home、追加登録済みの配置、plugin・agent・指示は Copilot 本来の規則で探索する。
+Copilot home は明示 `BaseDirectory`、`COPILOT_HOME`、`~/.copilot` の順に解決する。
+使用しないバックエンドの directory は探索しない。通常は `skill` tool を追加し、
+Planner / Orchestrator も利用できる。file・shell・subagent tool の許可は追加しない。
+file hooks と native server は信頼する host 設定であり、role permission callback による
+sandbox の対象ではない。設定の内容は利用者が実行前に確認する。
+
+`taxion doctor` は同じ adapter の CLI・worktree・環境・Copilot home から native な
+`skill`・`plugin`・`instruction`・`mcp`・`lsp` の `list --json` を取得する。
+agent / hook のファイルと未作成の標準探索先を補足し、呼出し tool の不足、
+無効化、形式不正、個人用 agent の優先を示す。取得できない項目を空一覧へ置き換えない。
+native な一覧はモデルによる選択・実ロード・動的接続の証拠ではない。
+診断では session 作成、指示送信、hooks・MCP の起動、認証照会を行わず、
+固定 policy がある場合は通常探索をせず同じ asset を検査する。
+新しい通常探索方式を session config hash に含め、旧方式の保存 hash で実行再接続しない。
+旧 session の停止専用経路は引き続き使え、receipt は書き換えない。
 
 skills と plugins は canonical な絶対パスを指定する。
 plugin は root の `plugin.json` と `skills/` からなる skill-only 形式を使う。
@@ -121,7 +142,7 @@ asset の識別値であり、仕様入力の `documentHash` は原本 bytes の
 
 承認済み role policy に `skills` または `plugins` があれば、Taxion は
 SDK の許可 tool に `skill` を追加する。名前を prompt に書くだけでは接続しない。
-asset のない policy や未承認の session で `skill` を明示指定すると、実行前に拒否する。
+固定方式で asset のない policy に `skill` を明示指定すると、実行前に拒否する。
 skills のない MCP / RTK のみの policy では `EnableSkills` を有効にしない。
 Coder と Reviewer は、承認済み skill の通常の custom-tool permission を扱えるが、
 managed approval を要求する操作の拒否、Reviewer read-only、worktree 外の拒否は維持する。
@@ -176,7 +197,7 @@ Release 0.1.0 の文書 dogfood における実 skill 利用は Issue #78 の未
 
 ## Dispatch の実行と context
 
-`taxion request` は元の依頼を DRAFT として保存し、既存の tool-free Planner
+`taxion request` は元の依頼を DRAFT として保存し、file・shell tool を持たない Planner
 観測を使って確認質問と実装計画を提案する。Planner の提案は実行承認ではない。
 Human の `/approve` を受けて CLI が intake confirmation と review flow を作り、
 既存の Controller で Coder、検証、独立 Reviewer を実行する。
@@ -214,7 +235,7 @@ Git tree に含まれない ignored file はレビュー対象に含まれない
 
 `workflow planning-context` は、入れ子履歴全体なしで保存 Memory、acceptance、blocker、依存、懸念、関連 result・SHA 対象、既存 Flow 上限を表示する。観測時刻と content hash を持つ read-only projection であり、atomic な実状態 snapshot、model 判断、実行認可ではない。workspace と Memory は別に読み、実行時は既存 Controller 検査を繰り返す。provider は呼ばない。
 
-`conversation plan`・`AskPlanner` は、隔離質問の通信、出典付き設定承認、認証、repository・service 検査、入出力・token 上限、承認再検査、独立 cleanup を再利用する。圧縮 Planner context を独立した tool-free Orchestrator session に送る。native schema は助言 recommendation を加え、確認済み・仮定・未確認の証拠を明示する。実 JSON pointer の出典を必須とし、`APPROVE`・実行 verdict は recommendation に許さない。推論中に記録が変わっても元観測を結果に付けて保つ。助言を自動適用せず、通常の Flow 進行にも model call を増やさない。
+`conversation plan`・`AskPlanner` は、隔離質問の通信、出典付き設定承認、認証、repository・service 検査、入出力・token 上限、承認再検査、独立 cleanup を再利用する。圧縮 Planner context を、file・shell tool を持たない独立した Orchestrator session に送る。通常は native skills と指示を利用する。native schema は助言 recommendation を加え、確認済み・仮定・未確認の証拠を明示する。実 JSON pointer の出典を必須とし、`APPROVE`・実行 verdict は recommendation に許さない。推論中に記録が変わっても元観測を結果に付けて保つ。助言を自動適用せず、通常の Flow 進行にも model call を増やさない。
 
 `RecordPlannerDraft`・`workflow planner-draft`・監視中の `/adopt` は、変更していない計画助言を未承認 `SUPPLEMENT` draft に採用する。発行前に再構成 context、結果対象、Memory、Graph、Flow 契約、保留した引継ぎを照合する。context field の欠落・偽造で有効な観測 hash を流用させない。transaction で Graph・Memory を再確認するが、独立 Memory 保存は database 間の atomic snapshot を提供しない。既存の契約維持 draft には結果に適合する `REVIEW`・`REPAIR` だけを入れる。draft に観測・出典 metadata と不確実性を残す。session ID は報告された出典で、検証済み provider receipt ではない。core の完全一致 ID による replay 検査で過去版を保つ。Human draft 承認と明示 handoff release は別操作で、Dispatch・実行には Controller 検査が引き続き適用される。`REPLAN`・`INVESTIGATE`・`HOLD`・`HUMAN_REQUIRED`・`REPORT` を通知なしに修正 instruction にしない。契約変更の承認と、decision に基づく無人進行は未完了。
 

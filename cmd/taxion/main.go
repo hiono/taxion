@@ -121,6 +121,7 @@ Commands:
   specification search Search approved PDF/DOCX/PPTX sources; print metadata only (--scope, --query)
   specification serve Serve the approved local search corpus over read-only MCP stdio (--scope)
   tools hash          Pin exact local extension files or directory contents (--path)
+  doctor              Inspect the selected backend's native search paths and discovered customizations ([--json])
 
 Identity gate (REP-001): task create, dispatch and review require an explicit --repo.
 The target is never inferred from the working directory.
@@ -144,6 +145,8 @@ func main() {
 		err = requestCmd(args[1:], os.Stdin, os.Stdout)
 	case "config":
 		err = configCmd(args[1:])
+	case "doctor":
+		err = doctorCmd(args[1:], os.Stdout)
 	case "git":
 		err = checkGitIndex(args[1:], os.Stdout)
 	case "init":

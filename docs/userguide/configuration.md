@@ -107,6 +107,8 @@ taxion config check --sources
 taxion config check --capabilities
 taxion config check --task TASK-ID
 taxion config check --dispatch DISPATCH-ID
+taxion doctor --worktree .
+taxion doctor --dispatch DISPATCH-ID --json
 taxion runtime auth --dispatch DISPATCH-ID --system-prompt-file prompts/coder.md
 ```
 
@@ -120,7 +122,20 @@ taxion runtime auth --dispatch DISPATCH-ID --system-prompt-file prompts/coder.md
 
 固定 file を選べた Task 承認に Dispatch の設定をひも付けるときは `taxion config bind --dispatch DISPATCH-ID` を使います。これは認証、contract 適格性、runtime session binding を確認しません。
 
-**確認結果は認証や実行準備完了の証明ではありません。** `ready` / `doctor` コマンドは実装されていません。CLI 全体の option と制約は[CLI リファレンス](cli-reference.md)を参照してください。
+`doctor` は選択中バックエンドの検索先と skills・plugins・指示等の検出結果を、
+実行時と同じ worktree・CLI・ユーザー環境で表示します。Copilot の home は
+`--base-directory`、`COPILOT_HOME`、`~/.copilot` の順に決まります。
+個人用 `.agents/skills` は実行環境の HOME から探します。
+`--dispatch` は保存済み worktree・設定・固定 tools policy を読取り専用で調べ、
+Task や database を作成・移行しません。明示した `--tools` は runtime と同じ
+role tool list です。省略時は file / custom-agent 呼出し tool の利用を推測しません。
+無効化・形式不正・呼出し tool 不足を区別し、native inventory を取得できない場合は
+確認不能を表示して失敗します。秘密値や MCP の引数・環境変数は一覧に転載しません。
+
+**確認結果は認証や実行準備完了の証明ではありません。** `doctor` はモデル session、
+hooks・MCP の起動、認証・課金照会を行いません。native inventory の表示と、
+実行時のロード・server 接続の成功は別です。`ready` は未実装です。
+CLI 全体の option と制約は[CLI リファレンス](cli-reference.md)を参照してください。
 
 ## 残予算を考慮する指示の設定
 
