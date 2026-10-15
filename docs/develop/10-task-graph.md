@@ -657,6 +657,10 @@ git -C /absolute/path/to/successor status --porcelain
 
 後続 Task を人が承認したうえで、`workflow start` の request に元の Coder Dispatch ID を `continueFromDispatchId` として指定すると、新しい flow は Coder を再実行せず Reviewer から始まる。snapshot mode でもこの指定方法は同じで、Reviewer は同じ baseline commit と tree SHA を使う。
 
+Reviewer の実行中に上限へ達した場合も、直前の成功 Coder 結果を引き継げる。元の flow は `STOPPED` / `BUDGET_LIMIT`、runner 所有権なし、handoff 保留を要求する。最後の Dispatch は、その Coder に独立レビューとして結び付いた `CANCELLED` の Reviewer であり、保存 session に対応する `runtime-stop:` 証拠が必要になる。実行中・停止未確認・別の Coder へのレビューは継続元にできない。
+
+この場合、後続承認の `target` は最後の取消済み Reviewer を指し、`continueFromDispatchId` はその直前の成功 Coder を指す。後続 worktree と保存済み成果物を照合し、新しい Reviewer には後続 Task の設定承認を引き継ぐ。前の Reviewer ID だけを許可した設定承認を、新しい Reviewer の許可として流用しない。
+
 どちらの経路でも、後続 Task の承認では置き換える停止済み flow とその保存済み結果を指定する。新しい flow には別の `id`、`taskId`、明示的な `maxTokens`・`timeoutSeconds` と予算承認を渡す。部分成果から続ける場合は通常の初回開始と同じく Coder から開始し、完了済み Coder 結果を引き継ぐ場合だけ `continueFromDispatchId` を指定する。
 
 ```json

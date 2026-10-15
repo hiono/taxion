@@ -40,6 +40,28 @@ type FlowRecovery struct {
 	At       time.Time `json:"at"`
 }
 
+func (g TaskGraph) HasBudgetContinuationSource(flow ReviewFlow, sourceID string) bool {
+	if flow.Status != "STOPPED" || flow.StopCode != "BUDGET_LIMIT" ||
+		flow.RunnerID != "" || !flow.HandoffHeld() || len(flow.DispatchIDs) == 0 {
+		return false
+	}
+	source, exists := g.dispatch(sourceID)
+	if !exists || source.Recipient != "CODER" || source.Status != DispatchSucceeded || source.Result == nil {
+		return false
+	}
+	lastID := flow.DispatchIDs[len(flow.DispatchIDs)-1]
+	if lastID == sourceID {
+		return true
+	}
+	last, exists := g.dispatch(lastID)
+	return exists && len(flow.DispatchIDs) >= 2 &&
+		flow.DispatchIDs[len(flow.DispatchIDs)-2] == sourceID &&
+		last.Recipient == "REVIEWER" && last.Status == DispatchCancelled &&
+		last.Relationship == RelationshipIndependent && last.RelatedID == sourceID &&
+		last.RuntimeSessionID != "" && last.Result != nil &&
+		slices.Contains(last.Result.Evidence, "runtime-stop:"+last.RuntimeSessionID)
+}
+
 func (g TaskGraph) ReviewFlow(id string) (ReviewFlow, bool) {
 	for _, flow := range g.ReviewFlows {
 		if flow.ID == id {
@@ -113,9 +135,7 @@ func (g TaskGraph) validateReviewFlows() error {
 				}
 			}
 			if !ok || !foundSourceFlow || sourceFlow.ID == flow.ID || sourceFlow.Status != "STOPPED" ||
-				sourceFlow.StopCode != "BUDGET_LIMIT" || sourceFlow.RunnerID != "" || !sourceFlow.HandoffHeld() ||
-				len(sourceFlow.DispatchIDs) == 0 ||
-				sourceFlow.DispatchIDs[len(sourceFlow.DispatchIDs)-1] != sourceDispatch.ID ||
+				!g.HasBudgetContinuationSource(sourceFlow, sourceDispatch.ID) ||
 				sourceDispatch.Recipient != "CODER" || sourceDispatch.Status != DispatchSucceeded ||
 				sourceDispatch.Result == nil || sourceDispatch.Result.GitEvidence == nil ||
 				flow.Contract.CreatedFrom != "flow:"+sourceFlow.ID || flow.Contract.Supersedes != sourceFlow.TaskID ||
@@ -128,6 +148,7 @@ func (g TaskGraph) validateReviewFlows() error {
 						!slices.Equal(flow.Contract.TargetChangedFiles, sourceDispatch.Result.ChangedFiles)) {
 				return graphError("review flow source must be a held budget-stopped Coder result for its successor Task")
 			}
+
 		}
 		for index, id := range flow.DispatchIDs {
 			dispatch, ok := g.dispatch(id)

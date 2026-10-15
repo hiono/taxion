@@ -121,9 +121,7 @@ func budgetContinuationSource(graph core.TaskGraph, task core.GraphTask, sourceI
 		predecessor, found = flow, true
 		break
 	}
-	if !found || predecessor.Status != "STOPPED" || predecessor.StopCode != "BUDGET_LIMIT" ||
-		predecessor.RunnerID != "" || !predecessor.HandoffHeld() ||
-		len(predecessor.DispatchIDs) == 0 || predecessor.DispatchIDs[len(predecessor.DispatchIDs)-1] != source.ID ||
+	if !found || !graph.HasBudgetContinuationSource(predecessor, source.ID) ||
 		task.CreatedFrom != "flow:"+predecessor.ID || task.Supersedes != predecessor.TaskID {
 		return core.GraphDispatch{}, fmt.Errorf("taxion: budget continuation requires the exact held predecessor flow and successor Task")
 	}
@@ -444,7 +442,11 @@ func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.Rev
 	}
 	review.Worktree = filepath.Join(flow.ReviewRoot, review.ID)
 	review.AuthorizationID = review.ID + "-authorization"
-	review.Decisions = append(slices.Clone(coder.Instruction.Decisions), core.TaskDecision{
+	decisions := coder.Instruction.Decisions
+	if flow.SourceDispatchID == coder.ID {
+		decisions = flow.Contract.Decisions
+	}
+	review.Decisions = append(slices.Clone(decisions), core.TaskDecision{
 		ID: review.AuthorizationID, Source: flow.Authorization.Source,
 		Text: flow.Authorization.Text + "; independently review the recorded Coder result",
 	}, sourceDecision)

@@ -194,6 +194,13 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 				if err := gitproof.VerifyCompletedSuccessor(last, task); err != nil {
 					return fmt.Errorf("taxion: successor does not preserve the completed Coder result: %w", err)
 				}
+			} else if flow.StopCode == "BUDGET_LIMIT" && last.Recipient == "REVIEWER" {
+				if len(flow.DispatchIDs) < 2 {
+					return fmt.Errorf("taxion: stopped Reviewer requires a saved Coder predecessor")
+				}
+				if _, err := budgetContinuationSource(state.Graph, task, flow.DispatchIDs[len(flow.DispatchIDs)-2]); err != nil {
+					return err
+				}
 			}
 			if last.Result != nil && last.Result.OutputSHA != "" && task.Worktree == flow.Contract.Worktree &&
 				task.BaselineSHA != last.Result.OutputSHA {

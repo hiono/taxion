@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/hiono/taxion/internal/core"
@@ -312,6 +313,84 @@ func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T
 	}
 }
 
+func TestBudgetContinuationReusesCoderAfterReviewerSafeStop(t *testing.T) {
+	db, ledger, request := reviewFlowFixtureWithOutputMode(t, core.OutputModeWorktreeTreeSnapshot)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coder := executeFlowDispatch(t, db, flow, "", true)
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewerID := flow.DispatchIDs[len(flow.DispatchIDs)-1]
+	if err := holdReviewFlowForStop(&state.Graph, &flow, "Reviewer exceeded observed token ceiling"); err != nil {
+		t.Fatal(err)
+	}
+	flow.Status, flow.StopCode = "STOPPED", "BUDGET_LIMIT"
+	storeFlow(&state, flow)
+	for index := range state.Graph.Dispatches {
+		reviewer := &state.Graph.Dispatches[index]
+		if reviewer.ID == reviewerID {
+			reviewer.Status, reviewer.RuntimeSessionID = core.DispatchCancelled, "stopped-review"
+			reviewer.RuntimeConfigHash = "fixture-config"
+			reviewer.Result = &core.DispatchResult{
+				Status: core.DispatchCancelled, Evidence: []string{"runtime-stop:stopped-review"},
+			}
+		}
+	}
+	task := flow.Contract
+	task.ID, task.Supersedes, task.CreatedFrom = "review-recovery", flow.TaskID, "flow:"+flow.ID
+	task.Worktree, task.Branch = filepath.Join(t.TempDir(), "successor"), "work/review-recovery"
+	gitTest(t, flow.Contract.Worktree, "worktree", "add", "-b", task.Branch, task.Worktree, coder.Result.OutputSHA)
+	source, err := os.ReadFile(filepath.Join(flow.Contract.Worktree, "internal/app.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(task.Worktree, "internal"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(task.Worktree, "internal/app.go"), source, 0600); err != nil {
+		t.Fatal(err)
+	}
+	task.TargetSHA, task.TargetTreeSHA = coder.Result.OutputSHA, coder.Result.OutputTreeSHA
+	task.TargetChangedFiles = coder.Result.ChangedFiles
+	if _, err := budgetContinuationSource(state.Graph, task, coder.ID); err != nil {
+		t.Fatal("saved Coder could not be reused after safe Reviewer stop", err)
+	}
+	for _, change := range []string{"running", "missing-stop-proof", "different-coder", "wrong-tree"} {
+		t.Run(change, func(t *testing.T) {
+			graph := state.Graph
+			graph.Dispatches = append([]core.GraphDispatch(nil), graph.Dispatches...)
+			candidate := task
+			for index := range graph.Dispatches {
+				reviewer := &graph.Dispatches[index]
+				if reviewer.ID != reviewerID {
+					continue
+				}
+				switch change {
+				case "running":
+					reviewer.Status = core.DispatchRunning
+				case "missing-stop-proof":
+					reviewer.Result = &core.DispatchResult{Status: core.DispatchCancelled}
+				case "different-coder":
+					reviewer.RelatedID = "other-coder"
+				case "wrong-tree":
+					candidate.TargetTreeSHA = strings.Repeat("f", 40)
+				}
+			}
+			if _, err := budgetContinuationSource(graph, candidate, coder.ID); err == nil {
+				t.Fatal("unsafe review continuation was accepted")
+			}
+		})
+	}
+}
+
 func TestBudgetStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.T) {
 	db, ledger, request := reviewFlowFixtureWithOutputMode(t, core.OutputModeWorktreeTreeSnapshot)
 	request.MaxTokens = 15
@@ -365,6 +444,8 @@ func TestBudgetStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *te
 		TaskID: proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:snapshot-review-successor",
 		Reason:    "Approve the exact saved tree and a separate independent-review budget.",
 		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
+		AdditionalTaskIDs:       []string{"snapshot-review-successor-flow-review-0"},
+		ConfigurationDecisionID: core.ConfigurationApprovalID(selection.Config.Execution.ApprovalRef, proposal.ID),
 	})
 	if err != nil || approved.Status != core.Ready {
 		t.Fatal("snapshot result was not explicitly approved for continuation", err)
@@ -381,6 +462,10 @@ func TestBudgetStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *te
 	})
 	if err != nil {
 		t.Fatal("new flow did not continue at the saved snapshot", err)
+	}
+	if err := CheckReviewFlowConfiguration(db, successor.ID, selection.Config,
+		map[string][]string{"CODER": {"view", "edit"}, "REVIEWER": {"view"}}); err != nil {
+		t.Fatal("review continuation lost its newly approved configuration", err)
 	}
 	state, err := db.LoadWorkspace()
 	if err != nil {
