@@ -12,6 +12,7 @@ import (
 
 	sdk "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 )
 
@@ -68,6 +69,31 @@ func TestConfigHashIncludesRoleEnvironmentAndPrompt(t *testing.T) {
 	}
 	if first.ConfigHash() == withSchema.ConfigHash() {
 		t.Fatal("different response schema produced the same configuration hash")
+	}
+}
+
+func TestExecutionObservationsExcludeToolContentAndCommands(t *testing.T) {
+	for _, input := range []sdk.SessionEvent{
+		{Data: &sdk.SkillInvokedData{Name: "fixture-skill", Path: "/work/.agents/skills/fixture/SKILL.md", Content: "private-skill-body"}},
+		{Data: &sdk.ToolExecutionStartData{ToolCallID: "call-1", ToolName: "view", Arguments: map[string]any{"path": "docs/guide.md", "secret": "private-argument"}}},
+		{Data: &sdk.ToolExecutionStartData{ToolCallID: "call-2", ToolName: "bash", Arguments: map[string]any{"command": "private-command"}}},
+		{Data: &sdk.ToolExecutionCompleteData{ToolCallID: "call-1", Success: true, Result: &rpc.ToolExecutionCompleteResult{Content: "private-tool-output"}}},
+	} {
+		got, ok := normalizeEvent(input)
+		if !ok || got.Type != runtime.EventExecution {
+			t.Fatal("execution observation discarded", got)
+		}
+		if strings.Contains(got.Payload, "private-") {
+			t.Fatal("execution evidence copied raw content or command", got)
+		}
+		var observation core.ExecutionObservation
+		if err := json.Unmarshal([]byte(got.Payload), &observation); err != nil {
+			t.Fatal(err)
+		}
+		if skill, ok := input.Data.(*sdk.SkillInvokedData); ok &&
+			(observation.Skill != skill.Name || !strings.HasPrefix(observation.ContentHash, "sha256:")) {
+			t.Fatal("skill identity/content hash missing", observation)
+		}
 	}
 }
 

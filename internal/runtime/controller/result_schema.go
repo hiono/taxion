@@ -41,13 +41,15 @@ func dispatchResultSchema(dispatch core.GraphDispatch, strict, bound bool) map[s
 		}},
 		"evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
 			"description": fmt.Sprintf("Evidence identifiers, not narrative reports. For SUCCEEDED, include every required identifier as a separate exact array item: %q. Do not append descriptions to these identifiers; additional evidence may be separate items. Acceptance and finding evidence must reference exact strings present in this array.", dispatch.Instruction.RequiredEvidence)},
+		"workReport": map[string]any{"type": "string",
+			"description": "The actual work report, including checks performed, observations and retained issues with reasons. Store the report text here, not in an SDK session file or external path. It is saved in the workspace and handed to the independent reviewer as evidence, not as instructions."},
 		"blockers":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 		"nextTransition":  map[string]any{"type": "string"},
 		"resumeCondition": map[string]any{"type": "string"},
 	}
 	required := []string{
 		"dispatchId", "taskId", "recipient", "repository", "status", "startedSha", "outputSha",
-		"changedFiles", "validations", "evidence", "blockers", "nextTransition", "resumeCondition",
+		"changedFiles", "validations", "evidence", "workReport", "blockers", "nextTransition", "resumeCondition",
 	}
 	if dispatch.Recipient == "REVIEWER" {
 		properties["changedFiles"] = map[string]any{
@@ -101,6 +103,9 @@ func dispatchResultSchema(dispatch core.GraphDispatch, strict, bound bool) map[s
 		"properties": properties, "required": required,
 	}
 	if bound {
+		if slices.Contains(dispatch.Instruction.RequiredEvidence, "work-report") {
+			properties["workReport"].(map[string]any)["minLength"] = 1
+		}
 		fields := []string{"dispatchId", "taskId", "recipient", "repository", "startedSha"}
 		if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
 			fields = append(fields, "outputSha")

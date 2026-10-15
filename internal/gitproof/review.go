@@ -11,6 +11,15 @@ import (
 	"github.com/hiono/taxion/internal/core"
 )
 
+// ReviewDiff reads immutable Git objects, never the mutable worktree or external diff helpers.
+func ReviewDiff(source, baseline, target string) (string, error) {
+	if !fullSHA(baseline) || !fullSHA(target) {
+		return "", fmt.Errorf("review diff requires full baseline and target SHA")
+	}
+	return git(source, "-c", "core.quotePath=true", "diff", "--no-ext-diff", "--no-textconv",
+		"--no-renames", "--no-color", baseline, target, "--")
+}
+
 // ReverifyReleasedReview checks the immutable target through its source repository
 // and confirms that the controller's released worktree remains absent.
 func ReverifyReleasedReview(dispatch core.GraphDispatch, result *core.DispatchResult) error {

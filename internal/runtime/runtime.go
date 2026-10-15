@@ -33,6 +33,7 @@ const (
 	EventContextUsage = "context_usage"
 	EventCompaction   = "compaction"
 	EventPermission   = "permission"
+	EventExecution    = "execution_observation"
 )
 
 // Runtime is the minimal control-plane contract:

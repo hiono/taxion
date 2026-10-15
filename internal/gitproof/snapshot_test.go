@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hiono/taxion/internal/core"
@@ -66,6 +67,13 @@ func TestWorktreeTreeSnapshotIsReviewedWithoutCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	coder.Status, coder.Result = core.DispatchSucceeded, coderResult
+	diff, err := ReviewDiff(root, baseline, coderResult.OutputTreeSHA)
+	if err != nil || !strings.Contains(diff, "+review this snapshot") || !strings.Contains(diff, "-baseline") {
+		t.Fatalf("immutable review diff missing actual change: %q %v", diff, err)
+	}
+	if _, err := ReviewDiff(root, "--output=unexpected", coderResult.OutputTreeSHA); err == nil {
+		t.Fatal("review diff accepted an option instead of a full object SHA")
+	}
 	successorPath := filepath.Join(t.TempDir(), "successor")
 	gitCommand(t, root, "worktree", "add", "-b", "work/successor", successorPath, baseline)
 	if err := os.WriteFile(filepath.Join(successorPath, "docs/guide.md"), []byte("review this snapshot\n"), 0600); err != nil {

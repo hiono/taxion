@@ -223,6 +223,16 @@ Release 0.1.0 の文書 dogfood における実 skill 利用は Issue #78 の未
 
 ## Dispatch の実行と context
 
+Planner→Coder、Planner→Reviewer、Coder→Reviewer は、Taxion に保存した契約・結果を参照して引き継ぐ。モデルに ID・承認・hash の転記や、送り手の SDK session ファイルの再読取りを要求しない。結果 ID の解決では、保存元 Dispatch と instruction hash を照合し、存在しない参照や保存結果との不一致をエラーにする。権限内で本文まで解決できることを引継ぎの条件とする。
+
+新しい bound session が `work-report` を提出するときは、役割を問わず識別子を `evidence` に、報告本文を `workReport` に保存する。本文が空の成功結果は拒否する。SDK session のファイルパスだけでは報告を引き継げない。旧結果は書き換えず、必要な証拠を出典付きで明示的に補足する。報告本文は送り手の主張であり、実施済みの証明とは区別する。
+
+CLI・ACP・workflow の `--controller-validation-submission` は、いずれも bound result schema を使う。組込み prompt の workflow もこの方式に含む。旧形式の結果読取りは維持するが、旧 session の構成 hash を新方式に合わせて書き換えない。
+
+SDK の tool 開始・終了と skill invocation は、名前・呼出し ID・必要な path・成否・skill 本文の hash だけを中立 event として DB に保存する。tool の引数全体・出力全文・shell command・skill 本文はこの証拠へ複写しない。controller が同じ session の receipt と hash を照合し、`executionEvidence` として正式結果に付与する。モデルからこの欄を提出することは認めない。skill の invocation、tool の成功、報告された規範適用は別の証拠であり、品質合格を自動判定しない。
+
+Reviewer の context には、保存済み Coder の基準 commit と固定対象 commit／tree の Git object から生成した差分を含める。compact 形式では `reviewDiff`、通常形式では本文末尾へ付ける。外部 diff helper・textconv は使わない。Reviewer に shell や worktree 外 read を許可して差分を取得させない。`workReport` と `executionEvidence` は共通の結果参照解決を通し、受け手の role によらず一度だけ渡す。
+
 Coder と Reviewer に同じモデルが割り当てられても、役割の分離が成立する設計とする。
 CLI・ACP の共通 system prompt 組立てで、Coder には承認要件の実装と未確認・失敗の開示、
 Reviewer には要件から期待動作を組み立て、固定成果物と独立に照合する責務を追加する。

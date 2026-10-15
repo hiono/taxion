@@ -288,6 +288,12 @@ func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
 	if err := control.RecordUsage(id, core.DispatchUsage{Model: "auto"}); err != nil {
 		t.Fatal(err)
 	}
+	observation := core.ExecutionObservation{Phase: "skill-invoked", Skill: "fixture-skill", ContentHash: "sha256:fixture"}
+	if err := control.recordEvent(id, "fixture-stream", runtime.Event{
+		Type: runtime.EventExecution, Sequence: 1, Payload: string(mustFlowJSON(t, observation)),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Mkdir(filepath.Join(root, "internal"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -301,6 +307,7 @@ func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
 		DispatchID: id, TaskID: "task-1", Recipient: "CODER", Repository: "owner/repo",
 		Status: core.DispatchSucceeded, StartedSHA: baseline, OutputSHA: head,
 		ChangedFiles: []string{"internal/app.go"}, Evidence: []string{"test-report"},
+		WorkReport:     "Implemented app; retained existing API because it is part of the approved contract.",
 		Validations:    []core.DispatchValidation{{Command: "not executed", Worktree: root, SHA: head}},
 		NextTransition: core.WaitingForEvidence,
 	}
@@ -317,6 +324,11 @@ func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
 	if _, err := control.Finish(context.Background(), id, payload(wrong)); err == nil {
 		t.Fatal("accepted another Dispatch's response")
 	}
+	forged := *result
+	forged.ExecutionEvidence = []core.ExecutionObservation{observation}
+	if _, err := control.Finish(context.Background(), id, payload(forged)); err == nil {
+		t.Fatal("model-supplied execution observations accepted")
+	}
 	if _, err := control.Finish(context.Background(), id, payload(result)+" {}"); err == nil {
 		t.Fatal("accepted multiple JSON responses")
 	}
@@ -328,6 +340,8 @@ func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	if accepted.GitEvidence == nil || accepted.GitEvidence.HeadSHA != head ||
+		accepted.WorkReport != result.WorkReport || len(accepted.ExecutionEvidence) != 1 ||
+		accepted.ExecutionEvidence[0] != observation ||
 		accepted.Validations[0].Output != "controller validated" ||
 		accepted.Validations[0].StartedAt.IsZero() ||
 		len(accepted.Evidence) != 1 || accepted.Evidence[0] != "controller-validation" {
@@ -350,6 +364,7 @@ func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
 	}
 	saved, ok := state.Graph.GraphDispatch(id)
 	if !ok || saved.Status != core.DispatchSucceeded || saved.Result.GitEvidence.HeadSHA != head ||
+		saved.Result.WorkReport != result.WorkReport || len(saved.Result.ExecutionEvidence) != 1 ||
 		saved.ExecutionStartSHA != baseline ||
 		saved.Result.Validations[0].Output != "controller validated" ||
 		len(saved.Result.Evidence) != 1 || saved.Result.Evidence[0] != "controller-validation" ||

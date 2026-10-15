@@ -329,7 +329,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 			if strictResult {
 				responseSchema = strictDispatchResultSchema(dispatch)
 			}
-			if builtinPrompts {
+			if validationSubmission {
 				responseSchema = controller.BoundDispatchResultSchema(dispatch)
 			}
 			return newDispatchWorker(ctx, db, dispatch, copilot.Config{

@@ -311,6 +311,8 @@ type DispatchResult struct {
 	GitEvidence        *DispatchGitEvidence        `json:"gitEvidence,omitempty"`
 	PartialGitEvidence *DispatchPartialGitEvidence `json:"partialGitEvidence,omitempty"`
 	Evidence           []string                    `json:"evidence"`
+	WorkReport         string                      `json:"workReport,omitempty"`
+	ExecutionEvidence  []ExecutionObservation      `json:"executionEvidence,omitempty"`
 	Blockers           []string                    `json:"blockers"`
 	ReviewVerdict      string                      `json:"reviewVerdict,omitempty"`
 	Acceptance         []DispatchAcceptance        `json:"acceptance,omitempty"`
@@ -318,6 +320,16 @@ type DispatchResult struct {
 	WorktreeChanged    *bool                       `json:"worktreeChanged,omitempty"`
 	NextTransition     TaskStatus                  `json:"nextTransition"`
 	ResumeCondition    string                      `json:"resumeCondition,omitempty"`
+}
+
+type ExecutionObservation struct {
+	Phase       string `json:"phase"`
+	CallID      string `json:"callId,omitempty"`
+	Tool        string `json:"tool,omitempty"`
+	Skill       string `json:"skill,omitempty"`
+	Path        string `json:"path,omitempty"`
+	ContentHash string `json:"contentHash,omitempty"`
+	Success     *bool  `json:"success,omitempty"`
 }
 
 type DispatchPartialGitEvidence struct {
@@ -1908,6 +1920,10 @@ func cloneDispatchResult(result *DispatchResult) *DispatchResult {
 	copy.ChangedFiles = slices.Clone(result.ChangedFiles)
 	copy.Validations = slices.Clone(result.Validations)
 	copy.Evidence = slices.Clone(result.Evidence)
+	copy.ExecutionEvidence = slices.Clone(result.ExecutionEvidence)
+	for i := range copy.ExecutionEvidence {
+		copy.ExecutionEvidence[i].Success = cloneBool(result.ExecutionEvidence[i].Success)
+	}
 	copy.Blockers = slices.Clone(result.Blockers)
 	copy.Acceptance = slices.Clone(result.Acceptance)
 	for i := range copy.Acceptance {

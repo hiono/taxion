@@ -684,10 +684,6 @@ func runtimeCmd(args []string) error {
 	if err != nil {
 		return fmt.Errorf("runtime: read system prompt: %w", err)
 	}
-	dispatchContract, err := controller.RenderDispatchContext(db, dispatch, *compactContext)
-	if err != nil {
-		return fmt.Errorf("runtime: render Dispatch contract: %w", err)
-	}
 	availableTools, err := runtimeTools(*tools)
 	if err != nil {
 		return err
@@ -703,11 +699,18 @@ func runtimeCmd(args []string) error {
 			}
 		}
 	}
+	dispatchContract, err := controller.RenderDispatchContext(db, dispatch, *compactContext)
+	if err != nil {
+		return fmt.Errorf("runtime: render Dispatch contract: %w", err)
+	}
 	ctx, cancel := signalContext(*timeout)
 	defer cancel()
 	responseSchema := dispatchResultSchema(dispatch)
 	if *strictResult {
 		responseSchema = strictDispatchResultSchema(dispatch)
+	}
+	if *validationSubmission {
+		responseSchema = controller.BoundDispatchResultSchema(dispatch)
 	}
 	worker, err := newDispatchWorker(ctx, db, dispatch, copilot.Config{
 		Role: dispatch.Recipient, SystemPrompt: runtimeSubmissionPrompt(string(systemPrompt), dispatchContract, *validationSubmission),
@@ -906,12 +909,16 @@ func runACP(args []string) error {
 		if err != nil {
 			return nil, err
 		}
+		responseSchema := strictDispatchResultSchema(dispatch)
+		if *validationSubmission {
+			responseSchema = controller.BoundDispatchResultSchema(dispatch)
+		}
 		return newDispatchWorker(ctx, db, dispatch, copilot.Config{
 			Role:             dispatch.Recipient,
 			SystemPrompt:     runtimeSubmissionPrompt(prompt, contract, *validationSubmission),
 			WorkingDirectory: dispatch.Instruction.Worktree,
 			CLIPath:          *cliPath, BaseDirectory: *baseDirectory, AvailableTools: availableTools,
-			MaxAICredits: *maxAICredits, ResponseSchema: strictDispatchResultSchema(dispatch),
+			MaxAICredits: *maxAICredits, ResponseSchema: responseSchema,
 		}, *managedCommit, *managedStage, *scanner)
 	}
 	return acp.NewRuntime(storePath, db, *timeout, factory).Serve(ctx, os.Stdin, os.Stdout)

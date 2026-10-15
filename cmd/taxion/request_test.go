@@ -269,6 +269,24 @@ func TestRequestRefinesHumanIntentAndRunsSameTreeReviewWithoutCopyPaste(t *testi
 			if err != nil {
 				return nil, err
 			}
+			received, err := controller.RenderDispatchContext(db, dispatch, true)
+			if err != nil {
+				return nil, err
+			}
+			if !strings.Contains(received, "検索機能をつけて") || !strings.Contains(received, "部分一致です。") {
+				t.Fatal("Planner intent or feedback did not reach the receiving role", dispatch.Recipient)
+			}
+			if dispatch.Recipient == "REVIEWER" &&
+				(!strings.Contains(received, "Implemented case-insensitive search; checked missing and Japanese queries.") ||
+					!strings.Contains(received, `"reviewDiff"`) || !strings.Contains(received, "+func Search")) {
+				t.Fatal("independent Reviewer did not receive saved report and immutable source diff")
+			}
+			if dispatch.Recipient == "REVIEWER" {
+				legacy, err := controller.RenderDispatchContext(db, dispatch, false)
+				if err != nil || !strings.Contains(legacy, "+func Search") {
+					t.Fatal("non-compact Reviewer lost the immutable source diff", err)
+				}
+			}
 			roles++
 			worker := &requestFixtureRuntime{role: dispatch.Recipient, id: dispatch.ID,
 				worktree: dispatch.Instruction.Worktree, selection: dispatch.Configuration.Selection,
@@ -280,6 +298,7 @@ func TestRequestRefinesHumanIntentAndRunsSameTreeReviewWithoutCopyPaste(t *testi
 					StartedSHA: dispatch.ExpectedStartSHA(), OutputSHA: dispatch.ExpectedStartSHA(),
 					ChangedFiles: []string{}, Evidence: []string{"work-report"}, Validations: []core.DispatchValidation{},
 					NextTransition: core.WaitingForReview,
+					WorkReport:     "Implemented case-insensitive search; checked missing and Japanese queries.",
 				}
 				if dispatch.Recipient == "CODER" {
 					if err := os.MkdirAll(filepath.Join(root, "src"), 0700); err != nil {

@@ -200,7 +200,7 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 				return fmt.Errorf("taxion: write runtime event: %w", err)
 			}
 			switch event.Type {
-			case runtime.EventOutput, runtime.EventUsage, runtime.EventTurnFinished, runtime.EventFailed, runtime.EventCancelled:
+			case runtime.EventOutput, runtime.EventUsage, runtime.EventTurnFinished, runtime.EventFailed, runtime.EventCancelled, runtime.EventExecution:
 				if err := c.recordEvent(dispatch.ID, streamID, event); err != nil {
 					return err
 				}

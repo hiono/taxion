@@ -1003,6 +1003,29 @@ func (h *managedSession) onEvent(event sdk.SessionEvent) {
 
 func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 	switch data := event.Data.(type) {
+	case *sdk.SkillInvokedData:
+		payload, _ := json.Marshal(core.ExecutionObservation{
+			Phase: "skill-invoked", Skill: data.Name, Path: data.Path,
+			ContentHash: fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(data.Content))),
+		})
+		return runtime.Event{Type: runtime.EventExecution, Payload: string(payload)}, true
+	case *sdk.ToolExecutionStartData:
+		observation := core.ExecutionObservation{Phase: "tool-start", CallID: data.ToolCallID, Tool: data.ToolName}
+		if args, ok := data.Arguments.(map[string]any); ok {
+			if data.ToolName == "skill" {
+				observation.Skill, _ = args["skill"].(string)
+			}
+			if data.ToolName == "view" {
+				observation.Path, _ = args["path"].(string)
+			}
+		}
+		payload, _ := json.Marshal(observation)
+		return runtime.Event{Type: runtime.EventExecution, Payload: string(payload)}, true
+	case *sdk.ToolExecutionCompleteData:
+		payload, _ := json.Marshal(core.ExecutionObservation{
+			Phase: "tool-complete", CallID: data.ToolCallID, Success: &data.Success,
+		})
+		return runtime.Event{Type: runtime.EventExecution, Payload: string(payload)}, true
 	case *sdk.AssistantMessageData:
 		return runtime.Event{Type: runtime.EventOutput, Payload: data.Content}, true
 	case *sdk.AssistantMessageDeltaData:

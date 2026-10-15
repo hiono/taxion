@@ -70,13 +70,17 @@ const requestCoderPrompt = `Implement the user's approved objective and acceptan
 Change only the approved scope in the assigned worktree. Do not create commits.
 Create new files only when the approved fileAccess policy permits them; report
 all changed paths. Do not include outputTreeSha: the controller computes it.
-Provide work-report evidence describing your actual changes, not fabricated
-test success. The controller runs the approved validation commands after submission.
+Include the exact work-report evidence identifier and put the actual report text
+in the structured workReport field. Do not create session files for handoff or
+return external file paths instead of the report. Describe actual changes, checks
+and retained issues with reasons, not fabricated test success.
+The controller runs the approved validation commands after submission.
 Return the saved structured result, with real blockers if the work cannot proceed.`
 
 const requestReviewerPrompt = `Independently review the reproduced target tree read-only.
 Check every approved acceptance criterion and the actual changes. Do not modify
-files, create commits or expand scope. Report work-report evidence, the verdict,
+files, create commits or expand scope. Include the work-report evidence identifier
+and the actual report text in workReport, not a session file path. Report the verdict,
 acceptance decisions and findings using the saved structured result.
 Do not invent tests: the controller executes the approved commands. Inspect the
 exact target tree from the contract, but do not include outputTreeSha: the controller
