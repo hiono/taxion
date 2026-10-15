@@ -378,6 +378,8 @@ snapshot mode で完了済み Coder 結果を引き継ぐ場合は、保存済�
 
 `workspace snapshot` は、停止済み workspace、存在する Memory、保存成果・部分成果に必要な Git object を、一つの非公開 SQLite ファイルへ収めます。通常の `workspace.db` をそのままコピーしても、Memory と Git は移りません。実行中の Flow・runner・未終了 Dispatch・未照合の外部送信がある場合は、先に上記の停止と照合を済ませてください。
 
+移送元の Git 作業ツリー内で実行すると、そのルートの `.taxion/` が選ばれます。別の保存先を使っている場合だけ、command の前に `--store /path/to/.taxion/ledger.json` を指定します。DB ファイル自体を `--store` に渡さないでください。出力先の親 directory は事前に用意し、出力ファイルは存在しないパスを選びます。取得中は workspace と存在する Memory の書込みを予約するため、他の更新操作は並行して行いません。
+
 ```sh
 taxion workspace snapshot --output /srv/backups/taxion-transfer.db
 taxion workspace inspect-snapshot --file /srv/backups/taxion-transfer.db
@@ -386,14 +388,21 @@ taxion workspace inspect-snapshot --file /srv/backups/taxion-transfer.db
 出力の `hash` はファイル全体の SHA-256 です。移送先でも同じファイルを inspect し、確認した hash と承認元を指定します。`--output` は存在しない絶対 directory にします。例のパスは各マシンの保存場所に置き換えてください。
 
 ```sh
+taxion workspace inspect-snapshot --file /srv/backups/taxion-transfer.db
 taxion workspace restore --file /srv/backups/taxion-transfer.db \
   --output /srv/taxion-restored --expected-hash CONFIRMED-SHA256 \
   --actor human --source human:approved-machine-transfer
 taxion --store /srv/taxion-restored/.taxion/ledger.json records show
 ```
 
-成功後は `.taxion/` に正式状態と Memory、`repositories/` に Git object、`worktrees/` に再生成した作業ファイルがあります。`records show` の `restore.paths` は旧絶対パスと新しい配置の対応です。元の Task・Dispatch・承認・hash・利用量を変更せず、この対応を成果の再検証に使います。解放済み Reviewer の worktree は再作成しません。
+inspect と restore は現在の workspace を移行先に使わず、`--file` と `--output` で指定した場所を扱います。復元先の親 directory も事前に用意してください。どちらもローカル Git と一時保存領域を使いますが、provider・ネットワーク・モデルには接続せず、保存された検証 command も実行しません。
+
+成功後は `.taxion/` に正式状態と、移送元に存在した場合は Memory が入ります。Git 成果がある場合は `repositories/` に Git object、`worktrees/` に再生成した作業ファイルを配置します。`records show` の `restore.paths` は旧絶対パスと新しい配置の対応です。元の Task・Dispatch・承認・hash・利用量を変更せず、この対応を成果の再検証に使います。解放済み Reviewer の worktree は再作成しません。出力 JSON の `worktrees` は解放済みを含む保存配置数で、作成された directory 数とは限りません。
 
 旧 SDK session は再開しません。移送先で認証と設定を用意し、対応表で見つけた source worktree と同じ Git repository 内に別 worktree を作り、保存済み commit/tree を再現します。その新しい配置、設定、予算を successor Task として承認し、上記の停止後の継続手順を使ってください。成功済み Coder の作り直しは不要です。移送後の操作には、上例の `--store` を付けて復元した正式状態を選びます。
 
-snapshot は不足 object、観測した未記録変更、submodule、Git LFS、禁止されたローカル状態の path、既知の token・秘密鍵パターンを拒否します。ignored file、外部 skill/MCP の実体、SDK home、環境変数、Git config・hook は移送しません。未知の秘密を完全に検出する保証はないため、移送ファイルを公開しないでください。Memory には既存の256 MiB上限があります。復元中の directory はコマンド成功前に使わず、失敗・取消時は今回作成した先だけが除去されます。既存先は保持します。
+snapshot は不足 object、観測した未記録変更、submodule、Git LFS、禁止されたローカル状態の path、既知の token・秘密鍵パターンを拒否します。親 commit の履歴も含めるため、現在の tree から削除済みの dotenv ファイルが履歴にある場合も拒否します。Memory の参照先も履歴分まで照合します。ignored file、外部 skill/MCP の実体、SDK home、環境変数、Git config・hook は移送しません。未知の秘密を完全に検出する保証はないため、移送ファイルを公開しないでください。
+
+Memory には既存の256 MiB上限があります。archive 全体と Git object をメモリに読み込むため、必要なメモリと一時保存領域は移送データ量に応じて増えます。大規模 repository を一定量のメモリで順次処理する機能は未実装です。
+
+復元中の directory はコマンド成功前に使わず、処理がエラーを返した場合は今回作成した先だけが除去されます。既存先は保持します。強制終了や電源断では途中の directory が残る場合があります。その配置を成功済みとして使わず、承認した archive を使って別の新規 directory へやり直してください。

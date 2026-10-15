@@ -477,7 +477,7 @@ CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は s
 
 ## 全コマンドと option の索引
 
-`taxion --help` は command 名と主用途を表示する。次の索引は実装済み subcommand と option を示す。`--store PATH` は command より前に指定し、local workspace database を選ぶ。各操作には表の名前付き option を使う。
+`taxion --help` は command 名と主用途を表示する。次の索引は実装済み subcommand と option を示す。`--store PATH` は command より前に指定し、旧 ledger のパスで workspace を選ぶ。同じ directory の `workspace.db` が正本となり、DB ファイル自体を `--store` に指定することはできない。各操作には表の名前付き option を使う。
 
 | コマンド | option と意味 |
 | --- | --- |
@@ -489,9 +489,9 @@ CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は s
 | `git check-range` | `--base SHA` は確認済み remote base、`--head SHA` は未公開 head、`--scanner PATH` は Betterleaks の選択。範囲内の全 commit tree と message を scan する。 |
 | `git hook install` | `--scanner PATH` は Betterleaks 1.9.0 を選ぶ。`--paths-only` は内容 scan なしの path 検査を明示的に設置し、`--scanner` と併用できない。`git hook status`・`git hook uninstall` に option はない。hook は迂回できる。 |
 | `init` | 固有 option はない。local workspace Ledger を初期化する。 |
-| `workspace snapshot` | `--output FILE` は新規の絶対パス。停止・照合済み workspace、存在する Memory、必要な Git object を private SQLite 一ファイルへ保存する。実行中 Flow・runner claim・未終了 Dispatch・未照合送信・不足 object・観測した未記録変更を拒否する。元の workspace と Memory は変更しない。 |
-| `workspace inspect-snapshot` | `--file FILE` は移送 SQLite。隔離配置で checksum・形式版・DB と Git の必要 object を検証し、hash・bytes・repository/worktree 数・Memory 有無を返す。provider・network・モデル・検証 command は呼ばない。 |
-| `workspace restore` | `--file FILE`、新規の絶対 directory `--output DIR`、確認済み `--expected-hash SHA256`、`--actor NAME`、`--source REF` が必須。既存先を上書きせず、失敗時は今回作成した先だけを除去する。`.taxion/workspace.db`、任意の `.taxion/memory.db`、`repositories/`、`worktrees/` を配置する。成功前に復元先を使用しない。旧契約・結果・usage は保持し、配置対応は `records show` の `restore` に記録する。旧 session を自動再開せず、継続は新しい承認済み successor Task を使う。 |
+| `workspace snapshot` | `--output FILE` は新規の絶対パスで、親 directory は事前に用意する。既定または `--store` で選んだ初期化済み workspace、存在する Memory、必要な Git object と親履歴を private SQLite 一ファイルへ保存する。取得中は両 DB の書込みを予約する。実行中 Flow・runner claim・未終了 Dispatch・未照合送信・不足 object・観測した未記録変更を拒否する。元の正式状態と Memory は変更しない。 |
+| `workspace inspect-snapshot` | `--file FILE` は既存の移送 SQLite で、相対パスも使える。現在の workspace は読み書きせず、隔離配置で checksum・形式版・DB と Git の必要 object を検証する。JSON の `hash` はファイル全体の SHA-256、`bytes` はファイルのバイト数、`repositories` は repository 数、`worktrees` は解放済みを含む保存配置数、`memory` は Memory の有無。provider・network・モデル・検証 command は呼ばないが、ローカル Git と一時保存領域を使う。 |
+| `workspace restore` | `--file FILE`、新規の絶対 directory `--output DIR`、確認済み `--expected-hash SHA256`、`--actor NAME`、`--source REF` が必須。入力は相対パスも使え、出力の親 directory は事前に用意する。現在の workspace や `--store` の選択先には書き込まず、指定した出力先へ復元する。既存先を上書きせず、処理がエラーを返した場合は今回作成した先だけを除去する。`.taxion/workspace.db`、任意の `.taxion/memory.db` と必要な `repositories/`・`worktrees/` を配置する。成功前に復元先を使用しない。旧契約・結果・usage は保持し、配置対応は復元先を選んだ `records show` の `restore` に記録する。旧 session を再開せず、継続は新しい承認済み successor Task を使う。具体例と制約は[一ファイル移送](user-guide.md#別マシンへの一ファイル移送)を参照する。 |
 | `task create` | `--title TEXT`・`--repo REPO` が必須。repository identity は明示し、cwd から推測しない。 |
 | `task list`, `dispatch list` | 任意の `--repo REPO` で repository を絞り、`--json` で JSON 出力にする。 |
 | `task track`, `task transition` | `--file JSON` で Task Graph request を渡す。新 Task の `fileAccess` は `{"level":"committed"}` が既定で、Task JSON の `{"level":"exact","paths":["repo/relative/file"]}`・`{"level":"all"}` で範囲を選ぶ。`outputMode` は `commit` が既定。`worktree-tree-snapshot` は commit なしで Controller 取得の Git tree をレビューする。snapshot mode、tree SHA、変更 path は承認契約の一部で、認可済み Task の policy 変更には新しい認可 decision が必要。更新時の `fileAccess` 省略は保存 policy を保つ。snapshot Task の更新では保存 `outputMode` を明示する。`task graph` は保存 Graph を表示し、`task plan --repo REPO` は認可を変えず後続計画を再構成する。 |
