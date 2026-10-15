@@ -139,14 +139,23 @@ login 済みアカウントの受入れを追加する前に、合成 fixture �
 
 M15 #79 と Release #78 の受入れ条件を満たすまで `v0.1.0` を公開しません。[リリースノート](docs/userguide/release-notes-0.1.0.md)は、clean workspace での試用と有料 runtime の確認が承認され、完了するまで草案のままです。
 
-tag 作成前に開発環境の全確認コマンドを実行し、`git diff` と `git diff --cached` に非公開情報がないか確認します。リリースノートを確認済み動作と既知の制約に合わせた後、tag を作成して push し、その tag を GitHub Release として公開します。
+tag 作成前に開発環境の全確認コマンドを実行し、`git diff` と `git diff --cached` に非公開情報がないか確認します。リリースノートを確認済み動作と既知の制約に合わせ、候補 commit の SHA を固定します。次の操作は受入れ条件を満たした後だけ実行します。tag と同名の Release が既にある場合は、対象 SHA と状態を確認し、自動で削除・移動しません。
 
 ```bash
 git tag -a v0.1.0 -m "Taxion 0.1.0"
 git push origin v0.1.0
-gh release create v0.1.0 --title "Taxion 0.1.0" \
-  --notes-file docs/userguide/release-notes-0.1.0.md
-gh release view v0.1.0
+git rev-parse 'v0.1.0^{commit}'
+git ls-remote origin 'refs/tags/v0.1.0*'
 ```
 
-公開後の導入は、リリースノートに記載した Go バージョンと `go:` backend コマンドで別途確認します。公開 tag に対する導入コマンドが成功するまで、導入確認済みとは報告しません。
+公開した tag の対象 commit が固定した候補と一致することを確認します。その後、既存の設定・インストールに影響しない隔離環境で、[リリースノートの導入・更新・削除](docs/userguide/release-notes-0.1.0.md#公開後の導入)を実行します。更新と削除の手順はそれぞれ同文書の見出しを参照してください。pseudo-version の過去成功を公開 tag の導入成功として扱いません。失敗した場合は Release object を公開せず、tag を保持して失敗箇所を記録します。
+
+導入確認の成功後に、リリースノートの草案表記を公開用へ変更し、確認結果を Issue に記録します。公開用ノートを保存した commit が候補版の後になった場合も、tag をその commit へ移動しません。次の操作は tag が存在することを要求し、GitHub CLI による暗黙の tag 作成を避けます。
+
+```bash
+gh release create v0.1.0 --verify-tag --title "Taxion 0.1.0" \
+  --notes-file docs/userguide/release-notes-0.1.0.md
+gh release view v0.1.0 --json tagName,targetCommitish,isDraft,isPrerelease,url,body
+```
+
+Release の tag・本文・公開状態と URL を再取得し、送信したノートと対象 tag を照合します。Release 作成後の記録だけで、未実施の導入確認や実 SDK 受入れを補ったことにはしません。
