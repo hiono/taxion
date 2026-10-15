@@ -219,6 +219,15 @@ func TestRuntimeResultSchemaNamesExactRequiredEvidence(t *testing.T) {
 					t.Fatalf("%s strict=%t schema omits exact identifier %q: %s", recipient, strict, identifier, description)
 				}
 			}
+			files := properties["changedFiles"].(map[string]any)
+			if recipient == "REVIEWER" && files["maxItems"] != 0 {
+				t.Fatal("Reviewer schema permits reporting source Coder paths as its own edits")
+			}
+			if recipient == "CODER" {
+				if _, restricted := files["maxItems"]; restricted {
+					t.Fatal("Coder changed paths were constrained by Reviewer policy")
+				}
+			}
 		}
 	}
 	for _, submission := range []bool{false, true} {

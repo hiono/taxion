@@ -39,6 +39,10 @@ func DispatchResultSchema(dispatch core.GraphDispatch, strict bool) map[string]a
 		"changedFiles", "validations", "evidence", "blockers", "nextTransition", "resumeCondition",
 	}
 	if dispatch.Recipient == "REVIEWER" {
+		properties["changedFiles"] = map[string]any{
+			"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 0,
+			"description": "Reviewer is read-only: return []. The reproduced Coder diff is the review input, not a change made by Reviewer. Report any actual Reviewer mutation using worktreeChanged and blockers; the controller independently verifies the tree.",
+		}
 		references := map[string]any{"type": "array", "items": map[string]any{"type": "string"},
 			"description": "Exact identifiers already present in result.evidence, including identical spelling and punctuation."}
 		properties["reviewVerdict"] = map[string]any{"type": "string", "enum": []string{"APPROVE", "REQUEST_CHANGES", "BLOCKED"}}

@@ -133,6 +133,8 @@ EOF・`/quit` はこの console が所有する実行だけを安全に中断し
 
 結果の `evidence` は識別子の配列です。契約の `requiredEvidence` にある値を、そのまま独立した要素として含めます。たとえば `work-report` を要求された場合、`"work-report"` は一致しますが、説明を付けた `"work-report: 変更内容"` は一致しません。実際の作業説明は別の要素に記録し、未実施の証拠を識別子だけで補ったことにはしません。
 
+Reviewer の `changedFiles` は空の配列です。再現された Coder の差分はレビュー対象であり、Reviewer 自身の変更ではありません。`worktreeChanged` は Reviewer 開始後の変更を表します。実際に変更した場合は blocker として報告し、controller による tree の照合も成功扱いにしません。
+
 controller の検証待ちだけでは suspension を要求しない。ただし、実際の失敗、出力欠落、根拠のない Reviewer 承認、必要な Human 判断は引き続き進行を拒否する。新規 session に使い、実行接続時も繰り返す。`runtime stop` には指定しない。既存 session の既定 prompt は変更しない。
 
 ### 設定
