@@ -16,12 +16,15 @@ workspace の既定保存先は Git 作業ツリールートの `.taxion/` で�
 
 `workspace snapshot` は停止・照合済み workspace、存在する Memory、必要な Git object と親履歴を非公開の SQLite 一ファイルへ収めます。`workspace inspect-snapshot` は隔離配置で DB と Git を再構築して照合します。`workspace restore` はファイル全体の SHA-256 と承認元を指定し、新規 directory へ復元します。旧契約・承認・結果・hash は保持し、新配置を別 receipt に記録します。旧 SDK session を再開せず、新しい配置・設定・予算を承認した後続 Task で継続します。具体的な操作は[一ファイル移送](user-guide.md#別マシンへの一ファイル移送)を参照してください。
 
+ローカル仕様検索は PDF・DOCX・PPTX に加え、明示選択した user 発言を M365 Copilot 会話 export `.json.md` から検索できます。assistant の返答や未選択メッセージ、export metadata は引用に含めず、原本の出典・版・message ID・全文 hash を保持します。取込み、Copilot への送信、外部公開にはそれぞれ別の承認が必要です。M365 への接続や会話全体の取込みは行いません。
+
 ## 既知の制約
 
 実 skill のローカル事前検査と、SDK 内での実ロード・文書品質の確認は別です。
 
 - `doctor` は選択中バックエンドの標準探索を診断します。通常の skill 利用に専用 directory や個別 hash 承認は不要です。検出と実ロード・品質確認は区別します。`ready` の出力だけで agent の判断・継続を保証せず、無料の操作回帰を実 agent の受入れの代わりにはしません。設定と Runtime 認証の確認範囲は、それぞれの文書に記載した範囲に限ります。
 - AI Credit 上限は soft ceiling です。Taxion が利用量を観測して後続作業を止める前に、実行中のモデル turn が設定値を超える場合があります。
+- 会話 export の検索回帰は合成 fixture で確認しています。実会話を使った Task 添付、Copilot 送信、ACP・外部記録までの通し受入れは未確認です。
 - 初回導入のガイド例と snapshot の継続は、実 Git を使うローカル CLI・controller テストで確認しています。有料モデルは呼びません。この成功は login 済み SDK の通し受入れを証明せず、旧 Dispatch に欠けている証拠も補いません。
 - `runtime stop` は、保存済み session の対応情報と transport option だけを使い、元の prompt や tool を要求しません。実行操作を拒否し、pending work の継続を無効にします。suspension と cancellation の receipt は別々に保持します。`workflow run|step` は session 作成前に、今後使う可能性のある全 Reviewer の設定承認を確認します。
 - この Release は、GitLab merge request、Bitbucket 接続、Web UI、複数利用者の管理、無人運用を約束しません。
