@@ -5,15 +5,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/store"
@@ -113,6 +117,40 @@ func requestFixtureAnswer(questions []string) controller.QuestionAnswer {
 	return answer
 }
 
+func TestRequestPathInventoryRetainsEveryPathAndReducesRepeatedDirectories(t *testing.T) {
+	paths := []string{"README.md", "same.md", "docs/same.md", "docs/deep/same.md",
+		"docs/日本語.md", "docs/space and \"quote\".md"}
+	for i := range 400 {
+		paths = append(paths, fmt.Sprintf("internal/runtime/controller/planning/input-%03d.go", i))
+	}
+	original, err := json.Marshal(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact, err := json.Marshal(requestPathInventory(paths))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compact)*100 > len(original)*70 {
+		t.Fatalf("directory grouping saved less than 30%%: %d versus %d bytes", len(compact), len(original))
+	}
+	var directories map[string][]string
+	if err := json.Unmarshal(compact, &directories); err != nil {
+		t.Fatal(err)
+	}
+	var restored []string
+	for directory, names := range directories {
+		for _, name := range names {
+			restored = append(restored, path.Join(directory, name))
+		}
+	}
+	slices.Sort(paths)
+	slices.Sort(restored)
+	if !slices.Equal(paths, restored) || !slices.Contains(directories["."], "README.md") {
+		t.Fatal("directory grouping changed or omitted committed paths")
+	}
+}
+
 func fixturePlan(t *testing.T, answer controller.QuestionAnswer) requestPlanner {
 	t.Helper()
 	return func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
@@ -140,6 +178,22 @@ func TestRequestRefinesHumanIntentAndRunsSameTreeReviewWithoutCopyPaste(t *testi
 	planner := func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
 		text string, tokens int64, credits float64, cli, base string) (controller.QuestionResult, error) {
 		calls++
+		var input struct {
+			Files   map[string][]string `json:"committedFilesByDirectory"`
+			Context []json.RawMessage   `json:"committedContext"`
+		}
+		if err := json.Unmarshal([]byte(text), &input); err != nil {
+			t.Fatal(err)
+		}
+		wantPaths, err := gitproof.TrackedPathsAt(root, task.BaselineSHA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, _ := json.Marshal(requestPathInventory(wantPaths))
+		got, _ := json.Marshal(input.Files)
+		if !bytes.Equal(got, want) || len(input.Context) != 1 || strings.Contains(text, `"committedPaths":`) {
+			t.Fatal("Planner did not receive the complete grouped inventory and selected context")
+		}
 		state, _ := db.LoadWorkspace()
 		if len(state.Graph.Dispatches) != 0 {
 			t.Fatal("planning issued code before Human approval")

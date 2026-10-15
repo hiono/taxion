@@ -175,7 +175,7 @@ taxion request --repo owner/repository --max-tokens 40000 \
 
 token 上限は Planner の全対話と Coder / Reviewer で共有し、期限は `/plan` から数えます。`--max-ai-credits` は session ごとの soft ceiling で、依頼全体の金額上限や一 turn の hard cap ではありません。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の各回答には費用が発生するため、同じ内容を繰り返し送らないようにします。Planner の失敗を自動 retry しません。
 
-Planner はファイル・shell tool を持たず、依頼、これまでの対話、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストを受け取ります。通常は native な skill と指示も読み込みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。対話中の `/quit` または入力終了ではコードを実行せず、相談記録を残します。保存した相談の自動再開は未対応です。
+Planner はファイル・shell tool を持たず、依頼、これまでの対話、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストを受け取ります。path は directory ごとにまとめ、全件を保持したまま共通部分の繰り返しを減らします。通常は native な skill と指示も読み込みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。対話中の `/quit` または入力終了ではコードを実行せず、相談記録を残します。保存した相談の自動再開は未対応です。
 
 相談記録と実行先・失敗の記録は request ID・連番・hash とともに workspace の SQLite DB に保存します。実行イベントは Flow から正式な Dispatch・receipt を参照し、二重保存しません。新しい `requests/` の JSON や `execution.log` は作りません。確認・明示 export は `taxion records show` を使います。この出力には相談本文が含まれるため、公開先への転記には注意してください。相談保存前に DB の file mode を所有者だけが読み書きできる設定にします。過去の外部ファイルは削除しません。
 
