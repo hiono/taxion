@@ -36,7 +36,7 @@ Usage:
   taxion [--store PATH] <command> [options]
 
 Commands:
-  ready               Print the meta-prompt for this coding agent to orchestrate Taxion; no model or state changes
+  ready               Print the orchestration prompt; optional --install-skill / --update-skill / --check-skill
   request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --max-tokens, --timeout, --max-ai-credits)
   config check        Validate fixed Global/Project YAML and environment references ([--sources], [--capabilities], [--task], [--dispatch])
   git check-index     Reject local Taxion and dotenv paths in the actual commit index

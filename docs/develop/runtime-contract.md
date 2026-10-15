@@ -100,6 +100,22 @@ Runtime・workflow 実行の `--controller-validation-submission` は、モデ�
 
 ## Skills・plugins・MCP・hooks と出力圧縮
 
+外側の coding agent 向けの操作 skill は `ready --install-skill` で明示配置する。
+同梱版は `1.0.0`、metadata の形式は `"1"`、CLI 操作契約は `taxion.cli.v1` とする。
+skill の本文・指示を変更するときは skill 版を更新し、CLI の破壊的変更では操作契約も更新する。
+本体の許容 skill 版は明示リストで管理し、未知の版は minor 変更でも自動許可しない。
+ready 原稿の hash は同じ版でも手順の陳腐化を検出する。本体の build 情報は生成元の記録であり、
+製品 SemVer の対応範囲や署名ではない。変更時は互換・不一致・改変保護の回帰も更新する。
+配置・更新・検査の契約は[利用者ガイド](../userguide/user-guide.md#今の-coding-agent-に操作を任せる)に記載する。
+通常の CLI と内部 role の実行を、この skill の配置や検査成功には依存させない。
+
+doctor 結果の永続キャッシュと tool shim は未実装である。追加する場合は、操作知識、
+日時・環境付きの診断結果、正式な作業状態を分け、前回の探索成功を現在の認証・実行成功と扱わない。
+tool の確認済み実体パスを子 process の起動へ接続し、shim の配置だけで PATH の解決を保証しない。
+Windows では symlink を必須にせず、`.exe` と `.cmd` / `.bat` の起動方式を区別する。
+既存の検証コマンドには Unix 専用の process group 停止処理と `sh` の前提が残っており、
+Windows 向けビルド・実行の対応は別途必要である。
+
 固定した Go SDK `v1.0.19` の `SessionConfig` と `ResumeSessionConfig` は、
 `SkillDirectories`、`PluginDirectories`、`MCPServers`、`Hooks` を持つ。
 `EnableSkills` は skills の読込み、`EnableFileHooks` は `.github/hooks/` の読込みを制御する。

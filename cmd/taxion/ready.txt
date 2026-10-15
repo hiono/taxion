@@ -8,7 +8,15 @@ Reviewer の作業を進める。ユーザーに JSON、hash、担当ごとの p
 
 ## 最初に確認する
 
-この ready は静的な手順だけを出力した。設定・ファイル・保存状態の診断はまだ行っていない。
+操作知識を標準探索先へ保存する場合は、利用者の明示許可で taxion ready --install-skill を使う。
+配置先は OS の home の .agents/skills/taxion/SKILL.md。Windows では通常 USERPROFILE 配下となる。
+配置済みなら taxion ready --check-skill の JSON と終了コードで、許容 skill 版・CLI 契約・
+内容の整合性を確認する。不一致を無視して古い操作手順を使わない。利用者の明示許可がある場合だけ
+taxion ready --update-skill で更新する。改変済み・管理対象外のファイルは更新せず利用者へ報告する。
+引数なしの ready は配置・検査を行わない。skill の発見・実ロードは外側 agent の機能であり、
+配置や互換性検査の成功を実ロード・承認・認証の証拠にしない。
+
+以下は静的な操作手順であり、実行環境・保存状態の診断結果ではない。
 ready 自体はモデル、外部接続、workspace 作成、設定変更を行わない。
 外側のあなたの思考・tool 使用や後続の runtime 実行まで無料になるという意味ではない。
 ユーザーの言語で話し、既存の会話・保存成果を再利用する。内部 Planner の request、

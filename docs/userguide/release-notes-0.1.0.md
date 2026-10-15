@@ -6,7 +6,7 @@
 
 Taxion 0.1.0 は、利用者が承認した coding agent の作業を進める CLI ツールです。Task・Dispatch の実行条件、Runtime の結果、検証の証拠、独立レビューをローカル workspace に記録します。
 
-`taxion ready` は、今の coding agent が Taxion を操作するメタプロンプトを出力します。内部 Planner を使う `request` は別の入口です。外側の agent による契約生成・明示承認・実行・復旧を案内し、利用者による JSON・role prompt の転記を前提にしません。ready 自体はモデルを呼ばず、環境や状態を変更しません。
+`taxion ready` は、今の coding agent が Taxion を操作するメタプロンプトを出力します。内部 Planner を使う `request` は別の入口です。外側の agent による契約生成・明示承認・実行・復旧を案内し、利用者による JSON・role prompt の転記を前提にしません。引数なしではモデルを呼ばず、環境や状態を変更しません。`--install-skill` と `--update-skill` は home の標準探索先へ版付き操作 skill を明示配置・更新し、`--check-skill` は許容版・CLI 契約・ハッシュを確認します。改変済みファイルは上書きせず、配置や互換性を実ロード成功と取り違えません。
 
 Task で出力方式 `worktree-tree-snapshot` を選ぶと、commit 前の作業をレビューできます。controller が tree SHA を記録し、ローカルの `refs/taxion/snapshots/` に保持して、独立した review worktree に同じ tree を再現します。既定は commit 方式のままです。
 

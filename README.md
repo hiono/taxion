@@ -14,7 +14,7 @@ Taxion は、coding agent と相談した依頼を、承認済みの Coder・検
 
 `taxion doctor` で、設定したバックエンドと同じ検索先から見つかる skills・plugins・指示等を確認できます。通常はバックエンドの標準配置を使い、Taxion 用 directory へのコピーや skill ごとの hash 承認は不要です。
 
-`ready` 自体はモデルを呼ばず、設定や workspace も変更しません。ただし、出力を読んだ agent の判断・操作品質を保証するコマンドではありません。外側の agent の費用と、その後の Taxion によるモデル実行の費用は別です。
+引数なしの `ready` はモデルを呼ばず、設定や workspace も変更しません。明示的な `ready --install-skill` は標準の home 配下に版付き操作 skill を配置し、`ready --check-skill` はその互換性と内容を JSON で確認します。更新は `ready --update-skill` で明示し、利用者の編集は上書きしません。ただし、配置や出力だけで agent の実ロード・判断・操作品質を保証するコマンドではありません。外側の agent の費用と、その後の Taxion によるモデル実行の費用は別です。
 
 Taxion は coding agent や Git の認証を提供しません。token 上限は観測した利用量から後続作業を止めるための上限であり、実行中の一 turn の費用を必ず抑える provider 側の制限ではありません。
 

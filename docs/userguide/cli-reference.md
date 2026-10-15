@@ -477,7 +477,7 @@ CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は s
 
 | コマンド | option と意味 |
 | --- | --- |
-| `ready` | 引数・専用 option はなく、今の coding agent が Taxion を操作するメタプロンプトを stdout に出す。`--help` は入力形式だけを表示する。設定・workspace・認証を要求せず、モデル・外部 process・環境探索・状態変更を行わない。予算・scope・設定の Human 承認や独立 Reviewer を代替せず、準備完了の診断でもない。外側の agent が JSON を生成し、既存の intake・confirm・workflow と復旧操作を使う。 |
+| `ready` | 引数なしは、今の coding agent が Taxion を操作する静的メタプロンプトを stdout に出し、状態を変更しない。`--install-skill` は home の `.agents/skills/taxion/SKILL.md` に同梱版を明示配置して同じ prompt を出す。`--update-skill` は内容が未改変の Taxion 管理ファイルだけを同梱版へ更新し、同じ prompt を出す。`--check-skill` は本体の許容版・CLI 契約・内容を JSON で確認し、欠落・不一致・改変は非zero終了する。3つの option は併用不可。`--help` は入力形式を表示する。どの経路も設定・workspace・認証を要求せず、モデル・外部 process を起動しない。予算・scope・設定の Human 承認や独立 Reviewer を代替せず、実行準備やskill実ロードの診断でもない。 |
 | `request` | 必須は `--repo REPO`、正の `--max-tokens N`、1秒以上の `--timeout D`、30以上の `--max-ai-credits N`。任意の `--worktree PATH` は現在の repository root が既定で、clean かつ branch に接続している必要がある。`--max-repairs N` は既定1、範囲0–100。`--context-path FILE` は追跡済み UTF-8 text を最大16 file、合計64 KiB まで繰り返し指定できる。`--cli PATH`・`--base-directory PATH` は Copilot を選ぶ。位置引数の文章を元依頼とし、省略時は console で入力する。`/plan` は上限付き有料計画、`/approve` は表示計画と残る上限付き coding・review を認可し、`/quit` は実行前に終了する。credit 上限は session 別で、合計予算ではない。 |
 | `config check` | `--sources` は値を含めず設定 field の出典を表示する。`--capabilities` は静的 adapter 対応を示し、実 access・契約資格ではない。`--task ID` は保存 Task 承認、`--dispatch ID` はさらに保存 Dispatch instruction と解決済み設定を照合する。両者は最大一つだけ選ぶ。 |
 | `config bind` | `--dispatch ID` は未 binding Dispatch に現在選択中の固定 file 設定を保存する。任意の `--sources`・`--capabilities` は `config check` と同じ表示。credential 認証や契約資格の証明はせず、`--task` は受け付けない。 |
