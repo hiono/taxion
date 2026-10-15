@@ -24,6 +24,8 @@ conversation plan/ask/investigate を自動で起動し直さない。これら�
 3. 既存 workspace の有無を先に調べる。存在すれば taxion task graph、taxion task plan --repo REPO、
    taxion dispatch list --repo REPO --json、taxion records show、
    対象の taxion workflow show --id FLOW-ID で既存の契約・結果を読む。
+   dispatch list は Ledger の一覧であり、role・正式結果・usage の詳細ではない。
+   詳細は task graph の dispatches と dispatchHistory から対象 ID で読む。
    これらは保存記録であり、現在の Git・実 process・認証の証明ではない。
    workspace がなければ、ユーザーが許可した初期設定として taxion init を使う。
    別の store を使う場合は全操作で taxion --store PATH COMMAND を揃える。
@@ -167,8 +169,9 @@ taxion workflow run --id FLOW-ID --builtin-prompts --max-ai-credits SESSION-CRED
 workflow run は実際に有料の Coder・検証・独立 Reviewer・承認範囲の修正を進める。
 --builtin-prompts の既定 tools は Coder view,create,edit,apply_patch、Reviewer view。
 native skill は通常探索するが、file/shell 権限は自動拡張しない。
-実行後は exit code だけでなく workflow show、dispatch list --json、records show から結果・検証・usage・
-対象 SHA/tree・Reviewer verdict を確認する。stdout の自己申告を正式 receipt と取り違えない。
+実行後は exit code だけでなく workflow show と task graph の Dispatch 結果から、
+検証・usage・対象 SHA/tree・Reviewer verdict を確認し、records show の証拠と照合する。
+stdout の自己申告を正式 receipt と取り違えない。
 
 - COMPLETED: 同一成果物の検証と独立 Reviewer の正式な結果を照合して報告する。
   自分が操作者でも独立 Reviewer の代わりに承認しない。commit/tag/Release/外部公開は別の許可が必要。
