@@ -1,7 +1,5 @@
 # Taxion 0.1.0 リリースノート
 
-この Release は既存の検証済み証拠に基づいて公開します。Release #78 の実 Planner による計画品質確認と M15 #79 の仕様検索から ACP・許可済み外部記録までの統合確認は未完了で、各 Issue を OPEN のまま残します。以下の説明は、これらの受入れが完了したことを意味しません。
-
 ## 対象機能
 
 Taxion 0.1.0 は、利用者が承認した coding agent の作業を進める CLI ツールです。Task・Dispatch の実行条件、Runtime の結果、検証の証拠、独立レビューをローカル workspace に記録します。
@@ -22,11 +20,9 @@ workspace の既定保存先は Git 作業ツリールートの `.taxion/` で�
 
 実 skill のローカル事前検査と、SDK 内での実ロード・文書品質の確認は別です。
 
-- Release #78 の既存実作業では、実 Coder と独立 Reviewer の受入れが成功しましたが、内部 Planner の計画品質を含む一連の新入口受入れは未完了です。M15 #79 の仕様検索・出典付き利用許可・ACP・許可済み外部記録の統合も未確認です。残条件と証拠はそれぞれの Issue に記録し、完了扱いにはしていません。
 - `doctor` は選択中バックエンドの標準探索を診断します。通常の skill 利用に専用 directory や個別 hash 承認は不要です。検出と実ロード・品質確認は区別します。`ready` の出力だけで agent の判断・継続を保証せず、無料の操作回帰を実 agent の受入れの代わりにはしません。設定と Runtime 認証の確認範囲は、それぞれの文書に記載した範囲に限ります。
 - 観測できない token 上限で新しい Flow を停止しません。各 model call の利用量を報告し、同単位の account allowance がない残高・使用率・残り率は unavailable とします。SDK の session AI Credit ceiling は soft ceiling であり、総請求額を保証しません。
-- 会話 export の検索回帰は合成 fixture で確認しています。実会話を使った Task 添付、Copilot 送信、ACP・外部記録までの通し受入れは未確認です。
-- 初回導入のガイド例と snapshot の継続は、実 Git を使うローカル CLI・controller テストで確認しています。有料モデルは呼びません。この成功は login 済み SDK の通し受入れを証明せず、旧 Dispatch に欠けている証拠も補いません。
+- 会話 export から検索できるのは明示選択した user 発言だけです。M365 connector や会話全体の取込みは含みません。Task への添付・Copilot への送信・外部公開には、それぞれ個別の承認が必要です。
 - `runtime stop` は、保存済み session の対応情報と transport option だけを使い、元の prompt や tool を要求しません。実行操作を拒否し、pending work の継続を無効にします。suspension と cancellation の receipt は別々に保持します。`workflow run|step` は session 作成前に、今後使う可能性のある全 Reviewer の設定承認を確認します。
 - この Release は、GitLab merge request、Bitbucket 接続、Web UI、複数利用者の管理、無人運用を約束しません。
 
@@ -38,7 +34,7 @@ workspace の既定保存先は Git 作業ツリールートの `.taxion/` で�
 
 Memory は既存の256 MiB上限を維持します。archive と Git object をメモリに読み込むため、必要なメモリと一時保存領域は移送量に応じて増えます。Windows は既存の Unix process-group 処理のため未対応です。
 
-入力 context のバイト数減少と無料回帰は確認していますが、実推論 token・料金の削減率は未測定です。新しい結果 schema の実 SDK 推論受入れも未確認であり、無料 fixture の成功と区別します。
+入力 context のバイト数は fixture で減少しましたが、実推論 token・料金の削減率は未測定です。
 
 ## 公開後の導入
 
