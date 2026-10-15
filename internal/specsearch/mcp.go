@@ -51,7 +51,7 @@ func Serve(ctx context.Context, scope Scope, input io.Reader, output io.Writer) 
 				"serverInfo":   map[string]any{"name": "taxion-local-specifications", "version": "1"}}
 		case "tools/list":
 			result = map[string]any{"tools": []any{map[string]any{
-				"name": "specification_search", "description": "Search exact Human-approved public/synthetic PDF, DOCX and PPTX sources",
+				"name": "specification_search", "description": "Search exact Human-approved PDF, DOCX, PPTX and explicitly selected user messages from private conversation exports",
 				"inputSchema": map[string]any{"type": "object", "additionalProperties": false,
 					"properties": map[string]any{"query": map[string]any{"type": "string", "minLength": 1, "maxLength": 512}},
 					"required":   []string{"query"}},

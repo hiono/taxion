@@ -42,6 +42,9 @@ agent が依頼を改善し、保存状態から次の操作を選び、利用�
 ORC-015・ORC-016 は [ADR-0024](adr/0024-human-handoff-control-and-side-questions.md)
 で採択する。質問だけでは作業や承認を変更せず、既存の安全停止条件は維持する。
 
+ORC-010 の会話 export source は [ADR-0035](adr/0035-use-selected-user-chat-messages-as-requirement-sources.md)
+で補足する。検索対象は明示選択した user 発言に限り、取込み・Copilot 送信・公開の承認を分ける。
+
 ORC-012〜ORC-014 と形式に依存しない設定契約の採択判断は
 [ADR-0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md)
 に記録する。Issue はその実装・検証を追跡する。

@@ -31,10 +31,10 @@ Foundation や初期の別の Milestone を M1 とした出典記録は確認で
 | [#17 M11 Copilot SDK と役割別セッション](https://github.com/hiono/taxion/milestone/17) | M11 | ADR-0020 | #49–#51 | [runtime-contract.md](runtime-contract.md), [orchestration-requirements.md](orchestration-requirements.md) | closed |
 | [#18 M12 Memory を用いた自動実装・独立レビュー](https://github.com/hiono/taxion/milestone/18) | M12 | ADR-0020, 0023, 0024 | #52–#54, #67, #69, #72–#74 | [privacy-provenance.md](privacy-provenance.md), [orchestration-requirements.md](orchestration-requirements.md), [task-graph.md](task-graph.md), [configuration.md](../userguide/configuration.md) | closed |
 | [#19 M13 実行の復旧と永続的な作業記録](https://github.com/hiono/taxion/milestone/19) | M13 | ADR-0021–0024 | #55–#57, #70 | [execution-records.md](../userguide/execution-records.md), [forge-capabilities.md](forge-capabilities.md) | closed |
-| [#20 M14 仕様書検索・Memory 移行・tools 連携](https://github.com/hiono/taxion/milestone/20) | M14 | ADR-0020, 0025 | #58–#61 | [memory-model.md](../userguide/memory-model.md), [specification-input.md](specification-input.md) | closed |
+| [#20 M14 仕様書検索・Memory 移行・tools 連携](https://github.com/hiono/taxion/milestone/20) | M14 | ADR-0020, 0025。会話 source の追加判断 ADR-0035 は Release の補足であり、M14 の完了範囲には遡及しない | #58–#61 | [memory-model.md](../userguide/memory-model.md), [specification-input.md](specification-input.md) | closed |
 | [#21 M15 CLI・ACP 利用受入れ](https://github.com/hiono/taxion/milestone/21) | M15 | ADR-0010, 0020–0025 | [#62](https://github.com/hiono/taxion/issues/62) は closed。[#79](https://github.com/hiono/taxion/issues/79) で残る通し受入れを追跡 | [runtime-contract.md](runtime-contract.md), [orchestration-requirements.md](orchestration-requirements.md), [task-graph.md](task-graph.md), [specification-input.md](specification-input.md) | open |
 | [#22 M16 Planner と Rust の後続検討](https://github.com/hiono/taxion/milestone/22) | M16 | ADR-0020 | #64, #65 | [orchestration-requirements.md](orchestration-requirements.md) | open |
-| [#23 Release 0.1.0 — CLI first-use and documentation](https://github.com/hiono/taxion/milestone/23) | Release | ADR-0026〜0028 に初回利用と復旧、ADR-0029 に残予算指示、ADR-0030 に内部 Planner との相談、ADR-0031 に ready で今の coding agent に操作を任せる入口を記録。実装と無料回帰、account の読取り専用証拠を保持。実モデルの正式な通し受入れは未完了 | #78, #81 | [README.md](../../README.md), [user-guide.md](../userguide/user-guide.md), [configuration.md](../userguide/configuration.md), [cli-reference.md](../userguide/cli-reference.md), [CONTRIBUTING.md](../../CONTRIBUTING.md) | open |
+| [#23 Release 0.1.0 — CLI first-use and documentation](https://github.com/hiono/taxion/milestone/23) | Release | ADR-0026〜0028 に初回利用と復旧、ADR-0029 に残予算指示、ADR-0030 に内部 Planner との相談、ADR-0031 に ready で今の coding agent に操作を任せる入口、ADR-0035 に選択した会話 user 発言の仕様 source 化を記録。実装と無料回帰、account の読取り専用証拠を保持。実モデルの正式な通し受入れは未完了 | #78, #81 | [README.md](../../README.md), [user-guide.md](../userguide/user-guide.md), [configuration.md](../userguide/configuration.md), [cli-reference.md](../userguide/cli-reference.md), [CONTRIBUTING.md](../../CONTRIBUTING.md) | open |
 
 Milestone の状態だけでは、Issue の証拠確認の代わりにならない。[#62](https://github.com/hiono/taxion/issues/62) は M15 の狭い範囲の ACP 実行受入れを記録するが、[要件と到達条件](orchestration-requirements.md)は、より広い通し受入れを定義する。その残件を [#79](https://github.com/hiono/taxion/issues/79) で追跡する。[#63](https://github.com/hiono/taxion/issues/63) は運用上の後続作業であり、代替にはならない。
 
@@ -50,7 +50,7 @@ Milestone に割り当てられた75 Issue すべてについて、表の該当�
 
 ## ADR の状態と現在の参照先
 
-ADR-0001〜0034 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。
+ADR-0001〜0035 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。
 
 | ADR | 判断 | 現在の参照先・適用範囲 |
 | --- | --- | --- |
@@ -88,6 +88,7 @@ ADR-0001〜0034 はすべて `Accepted` の判断を記録する。採択は選�
 | [0032](adr/0032-resolve-default-workspace-from-git-worktree-root.md) | 通常の保存先を Git 作業ツリールートの `.taxion/` から解決し、保存ファイルの個別指定を例外用途にする | `user-guide.md`、`cli-reference.md`。linked worktree は分離し、旧状態の自動移動・統合は行わない |
 | [0033](adr/0033-reference-results-and-persist-workspace-records-incrementally.md) | 不変の結果を ID 参照し、役割別入力・host の結果補完・SQLite の差分保存を使う | `runtime-contract.md`、`user-guide.md`、`cli-reference.md`。別マシン移送は後続の0034で実装 |
 | [0034](adr/0034-portable-sqlite-workspace-snapshots.md) | 停止済み workspace・Memory・必要な Git object を一つの SQLite で移送し、新配置の継続は再承認する | `runtime-contract.md`、`user-guide.md`、`cli-reference.md`。元の契約・hash・usage は維持し、旧 SDK session は再開しない |
+| [0035](adr/0035-use-selected-user-chat-messages-as-requirement-sources.md) | 会話 export は選択した user 発言だけを private な仕様 source として扱い、取込み・Copilot 送信・公開を個別承認する | `specification-input.md`、`orchestration-requirements.md`。synthetic 回帰は追加済み。実会話の Task 添付・Copilot 送信は未受入れ |
 
 ADR-0026〜0028 は、初回利用と復旧の調査後に追加した。ローカルの実 Git・fake Runtime テストで、許可範囲、同一 tree の引継ぎ、successor の照合を確認した。停止専用操作では、旧 suspended Dispatch を終了し、追加モデル指示・利用量なしで部分 Git 証拠と両方の結果 receipt を保持した。
 

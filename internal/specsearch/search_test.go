@@ -3,6 +3,7 @@ package specsearch
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -141,6 +142,89 @@ func TestApprovedOfficeSearchSnapshotsPermissionsAndFailures(t *testing.T) {
 				t.Fatal("invalid acquisition appeared successful", change)
 			}
 		})
+	}
+}
+
+func TestApprovedConversationSearchReturnsOnlySelectedUserMessages(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "conversation.json.md")
+	export := map[string]any{
+		"messages": []map[string]string{
+			{"author": "user", "messageId": "user-request", "timestamp": "2026-10-09T12:51:56+09:00", "text": "Automate the manual copy/paste between orchestrator, coder and reviewer."},
+			{"author": "bot", "messageId": "assistant-response", "timestamp": "2026-10-09T12:52:00+09:00", "text": "The user requests no copy/paste; SECRET-ASSISTANT-CONTENT."},
+			{"author": "user", "messageId": "unselected-user", "timestamp": "2026-10-09T12:53:00+09:00", "text": "SECRET-UNSELECTED-CONTENT."},
+		},
+	}
+	encoded, err := json.Marshal(export)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("# Conversation export\n\n````json\n" + string(encoded) + "\n````\n")
+	if err := os.WriteFile(path, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	scope := approved(t, Scope{
+		EvidenceDirectory: filepath.Join(root, "private-evidence"),
+		Documents: []Document{{
+			Asset: pin(t, path), Title: "User-authored Day 1 requirement",
+			Source:  "private:conversation/7d1fd06c/message/user-request",
+			Version: "export:2026-10-09T11:54:58.153Z; message:2026-10-09T12:51:56+09:00",
+			Access:  "private", MessageIDs: []string{"user-request"},
+		}},
+	})
+	result, err := Search(t.Context(), scope, "copy/paste reviewer")
+	if err != nil || len(result.Specifications) != 1 {
+		t.Fatal("selected conversation message was not found", result, err)
+	}
+	spec := result.Specifications[0]
+	if spec.Body != export["messages"].([]map[string]string)[0]["text"] ||
+		spec.Source != scope.Documents[0].Source || spec.Version != scope.Documents[0].Version ||
+		spec.Location != "message:user-request" || spec.DocumentHash != fmt.Sprintf("sha256:%x", sha256.Sum256(content)) ||
+		strings.Contains(spec.Body, "SECRET-") {
+		t.Fatal("search did not preserve exact selected-message provenance", spec)
+	}
+	if err := core.CheckSpecificationUse(result.Specifications, "copilot"); err != nil {
+		t.Fatal("explicit Copilot scope approval was not preserved", err)
+	}
+	if core.CheckSpecificationUse(result.Specifications, "publication") == nil {
+		t.Fatal("Copilot approval implied publication")
+	}
+	zero, err := Search(t.Context(), scope, "secret-assistant-content")
+	if err != nil {
+		t.Fatal("unselected assistant text changed a zero-result search", err)
+	}
+	if len(zero.Specifications) != 0 {
+		t.Fatal("search returned unselected assistant content", zero)
+	}
+}
+
+func TestConversationSearchRejectsUnselectedFormatsAndNonUserMessages(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "conversation.json.md")
+	content := "# Conversation\n\n````json\n{\"messages\":[{\"author\":\"bot\",\"messageId\":\"assistant\",\"timestamp\":\"2026-10-09T12:00:00Z\",\"text\":\"do not return\"}]}\n````\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	base := Scope{
+		EvidenceDirectory: filepath.Join(root, "private-evidence"),
+		Documents: []Document{{
+			Asset: pin(t, path), Title: "Private conversation", Source: "private:conversation/test",
+			Version: "v1", Access: "private", MessageIDs: []string{"assistant"},
+		}},
+	}
+	if _, err := base.Hash(); err != nil {
+		t.Fatal("private conversation scope was rejected", err)
+	}
+	if _, err := Search(t.Context(), approved(t, base), "return"); err == nil {
+		t.Fatal("assistant-authored content was accepted as a requirement")
+	}
+	base.Documents[0].MessageIDs = []string{"missing"}
+	if _, err := Search(t.Context(), approved(t, base), "return"); err == nil {
+		t.Fatal("missing user message became a successful empty search")
+	}
+	base.Documents[0].Asset.Path = filepath.Join(root, "conversation.md")
+	if _, err := base.Hash(); err == nil {
+		t.Fatal("generic Markdown was accepted as a chat-export envelope")
 	}
 }
 

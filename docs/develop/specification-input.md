@@ -90,16 +90,25 @@ Task の authorization・scope・acceptance を別のフィールドに保持す
 
 ## ローカル自動検索
 
-Human は、公開・合成資料をローカルで自動検索し、承認した合成本文を
-Coder・Reviewer に渡す方式を採択した。判断は [ADR-0025](adr/0025-approved-local-specification-search-and-tools.md) に記録する。
+Human は、承認したローカル資料から本文を検索し、出典付き引用を
+Coder・Reviewer に渡す方式を採択した。公開・合成資料の判断は
+[ADR-0025](adr/0025-approved-local-specification-search-and-tools.md)、
+利用者が明示した会話要求の扱いは
+[ADR-0035](adr/0035-use-selected-user-chat-messages-as-requirement-sources.md) に記録する。
 M365 の接続は、組織の認証・license・資料利用許可を確認する
 [#77](https://github.com/hiono/taxion/issues/77) の条件付き後続拡張として扱う。
 組織が利用可能な環境と許可範囲を提示した場合に接続方式を評価する。
 
-検索 scope は、PDF・DOCX・PPTX の exact asset、題名、出典、版、`public` または `synthetic` の
-閲覧範囲、private evidence directory を持つ。検索は大文字小文字を区別しない literal AND 方式で、
-該当 paragraph・slide・page を引用スナップショットに変換する。
+検索 scope は、PDF・DOCX・PPTX、または M365 Copilot 会話 export `.json.md` の exact asset、
+題名、出典、版、閲覧範囲、private evidence directory を持つ。会話 export は `private` に分類し、
+scope に含めた `messageIds` のうち、時刻付きで user が書いた本文だけを検索する。
+assistant の返答、未選択メッセージ、export header は結果に含めない。
+対象 message ID は scope hash に含み、原本は hash で固定する。
+検索は大文字小文字を区別しない literal AND 方式で、
+該当 paragraph・slide・page・選択済み user message を引用スナップショットに変換する。
 ローカル管理者の承認記録が検索権限を定義し、`copilot` と `publication` が用途別の送信許可を定義する。
+会話の取り込み、Copilot への送信、外部公開は別々の用途であり、
+前の承認から後の用途を推定しない。
 
 DOCX/PPTX は Go の ZIP/XML reader、PDF は承認した Python と `pdfminer` を使う。
 scope には 1–128 原本、原本は各 32 MiB、query は 512 bytes、結果は 64 引用までを指定できる。
@@ -123,6 +132,26 @@ PDF を含む scope は、同じ asset 形式の `pdfPython` と `pdfLibrary` �
     "source": "synthetic:service",
     "version": "v1",
     "access": "synthetic"
+  }],
+  "evidenceDirectory": "/absolute/private/search-evidence"
+}
+```
+
+M365 Copilot の会話 export を使う場合は、原本を `private` として扱い、
+検索対象の user-authored message ID だけを `messageIds` に指定する。
+`source` は会話の識別情報を含まない参照名で足りる。
+`.json.md` 原本の hash は全文を固定するが、検索結果には選択した user 本文だけが入る。
+message ID を変えた場合は別の scope hash になる。
+
+```json
+{
+  "documents": [{
+    "asset": {"path": "/absolute/private/conversation.json.md", "hash": "sha256:<asset hash>"},
+    "title": "Day 1 の利用者要求",
+    "source": "private:conversation/day-1",
+    "version": "export:2026-10-09T11:54:58.153Z",
+    "access": "private",
+    "messageIds": ["<selected-user-message-id>"]
   }],
   "evidenceDirectory": "/absolute/private/search-evidence"
 }

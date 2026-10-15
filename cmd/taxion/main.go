@@ -125,7 +125,7 @@ Commands:
   memory restore      Install an exact approved snapshot into a fresh local destination
   specification hash  Hash a sourced specification for separate use approvals (--file)
   specification scope-hash Hash an exact public/synthetic local corpus (--scope)
-  specification search Search approved PDF/DOCX/PPTX sources; print metadata only (--scope, --query)
+  specification search Search approved Office documents or selected private chat messages; print metadata only (--scope, --query)
   specification serve Serve the approved local search corpus over read-only MCP stdio (--scope)
   tools hash          Pin exact local extension files or directory contents (--path)
   doctor              Inspect the selected backend's native search paths and discovered customizations ([--json])

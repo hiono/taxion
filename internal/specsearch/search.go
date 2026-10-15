@@ -24,11 +24,12 @@ import (
 )
 
 type Document struct {
-	Asset   tools.Asset `json:"asset"`
-	Title   string      `json:"title"`
-	Source  string      `json:"source"`
-	Version string      `json:"version"`
-	Access  string      `json:"access"`
+	Asset      tools.Asset `json:"asset"`
+	Title      string      `json:"title"`
+	Source     string      `json:"source"`
+	Version    string      `json:"version"`
+	Access     string      `json:"access"`
+	MessageIDs []string    `json:"messageIds,omitempty"`
 }
 
 type Approval struct {
@@ -65,20 +66,40 @@ func (scope Scope) Hash() (string, error) {
 	for _, document := range scope.Documents {
 		if strings.TrimSpace(document.Title) == "" || strings.TrimSpace(document.Source) == "" ||
 			strings.TrimSpace(document.Version) == "" ||
-			document.Access != "public" && document.Access != "synthetic" ||
+			document.Access != "public" && document.Access != "synthetic" && document.Access != "private" ||
 			!filepath.IsAbs(document.Asset.Path) || paths[document.Asset.Path] ||
 			len(document.Asset.Hash) != 71 {
-			return "", fmt.Errorf("taxion: search documents require exact assets, source, version and public/synthetic access")
+			return "", fmt.Errorf("taxion: search documents require exact assets, source, version and an explicit access classification")
 		}
 		paths[document.Asset.Path] = true
-		switch strings.ToLower(filepath.Ext(document.Asset.Path)) {
-		case ".pdf":
+		isConversation := strings.HasSuffix(strings.ToLower(document.Asset.Path), ".json.md")
+		if isConversation {
+			if len(document.MessageIDs) == 0 || len(document.MessageIDs) > 128 {
+				return "", fmt.Errorf("taxion: conversation exports require 1-128 explicitly selected message IDs")
+			}
+			selected := map[string]bool{}
+			for _, id := range document.MessageIDs {
+				if strings.TrimSpace(id) == "" || len(id) > 128 || selected[id] {
+					return "", fmt.Errorf("taxion: conversation message IDs must be nonempty and unique")
+				}
+				selected[id] = true
+			}
+			if document.Access != "private" {
+				return "", fmt.Errorf("taxion: conversation exports must be classified as private")
+			}
+		} else if len(document.MessageIDs) != 0 {
+			return "", fmt.Errorf("taxion: message IDs are valid only for conversation exports")
+		}
+		switch {
+		case isConversation:
+		case strings.EqualFold(filepath.Ext(document.Asset.Path), ".pdf"):
 			if scope.PDFPython == nil {
 				return "", fmt.Errorf("taxion: PDF search requires an approved Python interpreter and pdfminer library")
 			}
-		case ".docx", ".pptx":
+		case strings.EqualFold(filepath.Ext(document.Asset.Path), ".docx"),
+			strings.EqualFold(filepath.Ext(document.Asset.Path), ".pptx"):
 		default:
-			return "", fmt.Errorf("taxion: local search supports PDF, DOCX and PPTX documents")
+			return "", fmt.Errorf("taxion: local search supports PDF, DOCX, PPTX and selected private conversation exports")
 		}
 	}
 	scope.Approval = nil
@@ -125,10 +146,16 @@ func Search(ctx context.Context, scope Scope, query string) (Result, error) {
 			return Result{}, fmt.Errorf("taxion: search document must be readable within 32 MiB")
 		}
 		var sections []section
-		if strings.EqualFold(filepath.Ext(document.Asset.Path), ".pdf") {
+		switch {
+		case strings.HasSuffix(strings.ToLower(document.Asset.Path), ".json.md"):
+			sections, err = readConversation(data, document.MessageIDs)
+		case strings.EqualFold(filepath.Ext(document.Asset.Path), ".pdf"):
 			sections, err = readPDF(ctx, scope, data)
-		} else {
+		case strings.EqualFold(filepath.Ext(document.Asset.Path), ".docx"),
+			strings.EqualFold(filepath.Ext(document.Asset.Path), ".pptx"):
 			sections, err = readOffice(data, strings.ToLower(filepath.Ext(document.Asset.Path)))
+		default:
+			err = fmt.Errorf("taxion: local search source type is unsupported")
 		}
 		if err != nil {
 			return Result{}, err
@@ -174,6 +201,60 @@ func Search(ctx context.Context, scope Scope, query string) (Result, error) {
 			}
 			result.Specifications = append(result.Specifications, spec)
 		}
+	}
+	return result, nil
+}
+
+func readConversation(data []byte, selectedIDs []string) ([]section, error) {
+	lines := strings.Split(string(data), "\n")
+	start, end := -1, -1
+	for index, line := range lines {
+		line = strings.TrimSuffix(line, "\r")
+		if line == "````json" {
+			if start != -1 {
+				return nil, fmt.Errorf("taxion: conversation export has multiple JSON payloads")
+			}
+			start = index + 1
+		} else if line == "````" && start != -1 {
+			end = index
+			break
+		}
+	}
+	if start < 0 || end <= start {
+		return nil, fmt.Errorf("taxion: conversation export JSON payload is missing")
+	}
+	var export struct {
+		Messages []struct {
+			Text      string `json:"text"`
+			Author    string `json:"author"`
+			MessageID string `json:"messageId"`
+			Timestamp string `json:"timestamp"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(strings.Join(lines[start:end], "\n")), &export); err != nil ||
+		len(export.Messages) == 0 {
+		return nil, fmt.Errorf("taxion: conversation export messages are malformed")
+	}
+	wanted := make(map[string]bool, len(selectedIDs))
+	for _, id := range selectedIDs {
+		wanted[id] = true
+	}
+	found := make(map[string]bool, len(selectedIDs))
+	result := make([]section, 0, len(selectedIDs))
+	for _, message := range export.Messages {
+		if !wanted[message.MessageID] {
+			continue
+		}
+		if found[message.MessageID] || !strings.EqualFold(message.Author, "user") ||
+			strings.TrimSpace(message.Timestamp) == "" || strings.TrimSpace(message.Text) == "" ||
+			len(message.Text) > 1<<20 {
+			return nil, fmt.Errorf("taxion: selected conversation messages must be unique, user-authored, timestamped and bounded")
+		}
+		found[message.MessageID] = true
+		result = append(result, section{Location: "message:" + message.MessageID, Text: message.Text})
+	}
+	if len(found) != len(wanted) {
+		return nil, fmt.Errorf("taxion: one or more selected user messages are missing")
 	}
 	return result, nil
 }
