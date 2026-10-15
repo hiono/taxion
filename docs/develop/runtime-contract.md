@@ -108,6 +108,8 @@ Runtime・workflow 実行の `--controller-validation-submission` は、モデ�
 
 ## Skills・plugins・MCP・hooks と出力圧縮
 
+通常の Copilot SDK session は create・resume ともに探索を明示的に有効にする。SDK に `nil` を渡すだけでは project・personal skill が読み込まれず、CLI の一覧と一致しない場合がある。探索方式は config hash の `native-cli-discovery-v2` に含め、旧方式の session を新しい実行契約で再開しない。明示 ToolPolicy と取消専用 adapter の探索抑止、role 別 file・shell permission は維持する。
+
 外側の coding agent 向けの操作 skill は `ready --install-skill` で明示配置する。
 同梱版は `1.0.0`、metadata の形式は `"1"`、CLI 操作契約は `taxion.cli.v1` とする。
 skill の本文・指示を変更するときは skill 版を更新し、CLI の破壊的変更では操作契約も更新する。

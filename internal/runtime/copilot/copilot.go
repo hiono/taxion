@@ -285,7 +285,7 @@ func (a *Adapter) ConfigHash() string {
 	permissionPolicy := "cli-managed-v1"
 	discoveryPolicy := ""
 	if a.config.ToolPolicy == nil {
-		discoveryPolicy = "native-cli-defaults-v1"
+		discoveryPolicy = "native-cli-discovery-v2"
 	}
 	if a.config.Role == "CODER" {
 		permissionPolicy = "coder-worktree-write-v1"
@@ -724,11 +724,9 @@ func (a *Adapter) lookup(sessionID string) (*managedSession, error) {
 
 func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionConfig {
 	streaming := true
-	var discovery *bool
-	if a.config.ToolPolicy != nil {
-		disabled := false
-		discovery = &disabled
-	}
+	// SDK nil does not inherit the CLI's project/personal skill discovery.
+	native := a.config.ToolPolicy == nil
+	discovery := &native
 	config := &sdk.SessionConfig{
 		Model:                              "auto",
 		SystemMessage:                      &sdk.SystemMessageConfig{Mode: "append", Content: a.config.SystemPrompt},
@@ -757,11 +755,8 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 
 func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessionConfig {
 	streaming := true
-	var discovery *bool
-	if a.config.ToolPolicy != nil {
-		disabled := false
-		discovery = &disabled
-	}
+	native := a.config.ToolPolicy == nil
+	discovery := &native
 	config := &sdk.ResumeSessionConfig{
 		Model:                              "auto",
 		SystemMessage:                      &sdk.SystemMessageConfig{Mode: "append", Content: a.config.SystemPrompt},

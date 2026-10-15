@@ -43,7 +43,7 @@ func TestConfigurationSelectionHashIsCompleteOwnedAndCanonical(t *testing.T) {
 	}{
 		legacy.config.Role, legacy.config.SystemPrompt, legacy.config.WorkingDirectory,
 		legacy.config.CLIPath, legacy.config.BaseDirectory, legacy.config.AvailableTools,
-		legacy.config.ResponseSchema, "coder-worktree-write-v1", "native-cli-defaults-v1",
+		legacy.config.ResponseSchema, "coder-worktree-write-v1", "native-cli-discovery-v2",
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -232,16 +232,20 @@ func TestNativeCustomizationDefaultsWithoutModelUse(t *testing.T) {
 			}
 			defer adapter.Close()
 			create, resume := adapter.sessionConfig(nil), adapter.resumeConfig(nil)
-			if create.EnableConfigDiscovery != nil || resume.EnableConfigDiscovery != nil ||
-				create.EnableSkills != nil || resume.EnableSkills != nil ||
-				create.EnableFileHooks != nil || resume.EnableFileHooks != nil ||
-				create.EnableOnDemandInstructionDiscovery != nil || resume.EnableOnDemandInstructionDiscovery != nil ||
+			if create.EnableConfigDiscovery == nil || !*create.EnableConfigDiscovery ||
+				resume.EnableConfigDiscovery == nil || !*resume.EnableConfigDiscovery ||
+				create.EnableSkills == nil || !*create.EnableSkills ||
+				resume.EnableSkills == nil || !*resume.EnableSkills ||
+				create.EnableFileHooks == nil || !*create.EnableFileHooks ||
+				resume.EnableFileHooks == nil || !*resume.EnableFileHooks ||
+				create.EnableOnDemandInstructionDiscovery == nil || !*create.EnableOnDemandInstructionDiscovery ||
+				resume.EnableOnDemandInstructionDiscovery == nil || !*resume.EnableOnDemandInstructionDiscovery ||
 				create.SkillDirectories != nil || resume.SkillDirectories != nil ||
 				create.PluginDirectories != nil || resume.PluginDirectories != nil ||
 				create.Hooks != nil || resume.Hooks != nil ||
 				!reflect.DeepEqual(create.AvailableTools, []string{"view", "skill"}) ||
 				!reflect.DeepEqual(create.AvailableTools, resume.AvailableTools) {
-				t.Fatal("normal sessions override native discovery or widen the explicit tool surface")
+				t.Fatal("normal sessions disable native discovery or widen the explicit tool surface")
 			}
 			required := true
 			for _, permission := range []sdk.PermissionRequest{
