@@ -24,10 +24,10 @@ Linux では Global 設定は通常 `$XDG_CONFIG_HOME/taxion/config.yaml`、未�
 | `repository.host` | 接続先 hostname と任意の port。例: `github.com`。 |
 | `repository.path` | owner または namespace と repository 名。例: `owner/repository`。 |
 | `repository.account` | Git repository 操作に使う予定の account 識別子。認証済み account の証明ではありません。 |
-| `repository.credentialRef` | repository credential の参照名。secret 本体ではなく、この値だけで認証は行いません。 |
+| `repository.credentialRef` | GitHub の保存済みログインは `gh:active`、環境変数で指定する場合は `env:NAME`。secret 本体を書きません。 |
 | `runtime.provider` | `copilot` のみ。 |
 | `runtime.account` | Copilot runtime に使う予定の account 識別子。 |
-| `runtime.credentialRef` | runtime credential の参照名。secret 本体ではありません。 |
+| `runtime.credentialRef` | Copilot CLI の保存済みログインは `copilot:logged-in`、環境変数で指定する場合は `env:NAME`。secret 本体を書きません。 |
 | `runtime.contractRef` | AI runtime の契約・利用権を指す記録上の参照名。実際の契約適格性は確認しません。 |
 | `execution.requester` | Task を依頼した人または process の識別子。 |
 | `execution.worker` | 実行環境・worker の識別子。 |
@@ -43,11 +43,11 @@ repository:
   host: github.com
   path: owner/repository
   account: scm-account
-  credentialRef: scm-login
+  credentialRef: gh:active
 runtime:
   provider: copilot
   account: copilot-account
-  credentialRef: copilot-login
+  credentialRef: copilot:logged-in
   contractRef: approved-contract
 execution:
   requester: human
@@ -57,7 +57,25 @@ execution:
 
 識別子は空白を含まない文字列です。`version` だけが整数です。repository provider は `github`、`gitlab`、`bitbucket`、runtime provider は `copilot` を指定します。`repository.host` は hostname と任意の port、`repository.path` は owner または namespace と repository 名の slash 区切りです。
 
-`account`、`credentialRef`、`contractRef`、`requester`、`worker`、`approvalRef` は承認・記録上の参照値であり、secret や認証そのものではありません。Git 操作の主体と Copilot runtime の主体は別々に指定できます。設定だけで契約適格性や費用負担者を証明することはできません。
+`account`、`contractRef`、`requester`、`worker`、`approvalRef` は承認・記録上の参照値です。`credentialRef` は使用する credential の選択方法であり、secret 本体やログイン操作ではありません。Git 操作の主体と Copilot runtime の主体は別々に指定できます。設定だけでは契約適格性や費用負担者を証明できません。
+
+### 認証の準備
+
+Taxion を起動する環境に [GitHub CLI](https://cli.github.com/) と [Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli) を導入し、それぞれのログインを用意します。次の操作は provider へ接続して認証情報を保存しますが、モデルへ依頼は送りません。保存先は各 CLI の案内で確認し、secret を設定ファイルや作業ログへ転記しないでください。
+
+```sh
+gh --version
+copilot --version
+gh auth login --hostname github.com
+gh auth status --active --hostname github.com
+copilot login
+```
+
+設定例の `repository.account` は GitHub CLI の active account、`runtime.account` は Copilot CLI にログインした account の login 名に置き換えます。両者は異なる account でも構いません。`repository.path` も実際の `owner/repository` に置き換えてください。`gh:active` は保存済み GitHub CLI ログイン、`copilot:logged-in` は保存済み Copilot CLI ログインを選び、Taxion の該当処理では ambient token の優先順位に任せません。
+
+環境変数で credential を渡す運用では `env:NAME` を使い、`NAME` は大文字・数字・underscore の環境変数名にします。先頭は大文字か underscore が必要です。値は実行環境の secret 管理で用意し、表示・commit しません。旧設定の任意の参照名が自動的に解決されるとは限らないため、新規設定では上の明示方式を使います。
+
+この準備後に `taxion config check --sources` と `taxion doctor --worktree .` へ進みます。ログインできても repository access、Task の設定承認、Copilot の契約適格性や費用負担者を保証するものではありません。Dispatch 発行後の `runtime auth` と各検査の範囲は、後述の「どの確認で何が分かるか」で確認してください。
 
 ## 環境変数
 

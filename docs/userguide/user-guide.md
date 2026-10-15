@@ -26,7 +26,7 @@ mise exec -- taxion --help
 
 ## 設定と実行前確認
 
-作業 repository の `.gitignore` に `/.taxion/` と `/.env` を加え、[設定ガイド](configuration.md)の Global または Project 設定を用意します。設定には secret を書かず、Git と Copilot の認証は各実行環境で設定します。
+作業 repository の `.gitignore` に `/.taxion/` と `/.env` を加え、[設定ガイド](configuration.md)の Global または Project 設定を用意します。先に同じ実行環境で GitHub CLI と Copilot CLI の導入・ログインを済ませ、設定例の account を実際に使う login 名へ置き換えます。[認証の準備](configuration.md#認証の準備)に手順と credential の選び方を示します。設定には secret を書きません。
 
 ```sh
 taxion config check --sources

@@ -99,7 +99,9 @@ draft には観測時刻・hash、出典の結果・SHA 対象、Memory version�
 
 旧 decision は `selection.execution.approvalRef` をそのまま使う。intake 計画・確認の任意の `configurationDecisionId` は、代わりに `REF@task:PRIMARY_TASK_ID` を使える。REF は変更していない設定の approvalRef。承認は引き続き許可する全 Task を正確に指定する。Reviewer は主 Task の保存済み decision を使い、Reviewer 別に生成した新 ID は使わない。`request` はこの形式を使い、依頼のたびの設定変更を不要にする。
 
-発行済み契約を変更する場合は、前 Task を `supersedes` に指定し、`createdFrom: flow:FLOW_ID` を持つ successor intake Task を使う。確認には `replacesFlow` と表示した `target` の完全一致も必要。前 Task は hold 済み・runner claim なし・active Dispatch なしを要求し、不完全な停止の証拠で通過することはできない。同じ worktree に、最後に記録した出力 SHA を保持する。
+発行済み契約を変更する場合は、前 Task を `supersedes` に指定し、`createdFrom: flow:FLOW_ID` を持つ successor intake Task を使う。確認には `replacesFlow` と表示した `target` の完全一致も必要。前 Flow は hold 済み・runner claim なし・active Dispatch なしを要求し、停止の証拠が不完全な場合は拒否する。
+
+予算停止から部分成果または成功済み Coder の成果を引き継ぐ場合は、[作業継続手順](../develop/task-graph.md#予算上限後の作業継続)に従って別 worktree を用意する。元の baseline と保存済み commit／tree・変更 path を保持し、後続 Task の承認前に照合する。これは commit mode・snapshot mode のどちらにも必要で、成功済み Coder を再実行しない場合だけ `continueFromDispatchId` を指定する。一般の契約変更で同じ worktree を使う場合には、最後に記録した出力 SHA を後続 baseline に保持する追加条件があるが、予算停止の継続に必要な別 worktree の代わりにはならない。
 
 明示確認は前 Flow を停止し、Task を `superseded` にする。発行済み指示、結果、承認、元の上限は残す。successor は新しい承認と別の上限付き Flow を取得し、過去の承認を旧契約の拡大許可に読み替えない。actor・source は提供された出典情報であり、認証済み Human identity ではない。
 

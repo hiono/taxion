@@ -153,6 +153,29 @@ func TestConfigurationGuideCoversEveryFieldAndOverride(t *testing.T) {
 	}
 }
 
+func TestConfigurationGuideProvidesResolvableLoginDefaults(t *testing.T) {
+	body, err := os.ReadFile("../../docs/userguide/configuration.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	example := regexp.MustCompile("(?s)```yaml\\n(.*?)\\n```").FindSubmatch(body)
+	if len(example) != 2 {
+		t.Fatal("configuration guide has no complete YAML example")
+	}
+	selected, err := config.Load(example[1])
+	if err != nil {
+		t.Fatal("configuration example is invalid", err)
+	}
+	if selected.Repository.CredentialRef != "gh:active" || selected.Runtime.CredentialRef != "copilot:logged-in" {
+		t.Fatal("initial login example uses unresolved credential labels")
+	}
+	for _, command := range []string{"gh auth login", "gh auth status", "copilot login"} {
+		if !strings.Contains(string(body), command) {
+			t.Errorf("configuration guide omits login preparation %q", command)
+		}
+	}
+}
+
 func TestCLIReferenceCoversLiteralOptionNames(t *testing.T) {
 	reference, err := os.ReadFile("../../docs/userguide/cli-reference.md")
 	if err != nil {
