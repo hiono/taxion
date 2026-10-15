@@ -169,6 +169,8 @@ func TestServiceAccessUsesSDKSessionQuotaRPCWithoutModelSend(t *testing.T) {
 				{"session.quota.get", "result", `{"providerQuotas":[{"provider":{"kind":"copilot"},"acquisitionStatus":"succeeded","observationKind":"account_snapshot","accessState":"denied","capacityState":"available","reason":"private-provider-detail"}]}`},
 				{"session.quota.get", "error", `{"code":-32603,"message":"private-provider-detail"}`},
 				{"session.quota.get", "result", `null`},
+				{"session.detach", "result", `{"success":true}`},
+				{"session.detach", "result", `{"success":true}`},
 			} {
 				header, err := reader.ReadString('\n')
 				if err != nil {
@@ -195,7 +197,8 @@ func TestServiceAccessUsesSDKSessionQuotaRPCWithoutModelSend(t *testing.T) {
 				if err := json.Unmarshal(body, &request); err != nil {
 					return err
 				}
-				if request.Method != step.method || step.method == "session.quota.get" && request.Params.SessionID != sessionID {
+				if request.Method != step.method ||
+					(step.method == "session.quota.get" || step.method == "session.detach") && request.Params.SessionID != sessionID {
 					return fmt.Errorf("unexpected RPC method or session: %s", request.Method)
 				}
 				if step.method == "session.create" {
@@ -210,6 +213,9 @@ func TestServiceAccessUsesSDKSessionQuotaRPCWithoutModelSend(t *testing.T) {
 				if _, err := fmt.Fprintf(conn, "Content-Length: %d\r\n\r\n%s", len(reply), reply); err != nil {
 					return err
 				}
+			}
+			if _, err := reader.Peek(1); !errors.Is(err, io.EOF) {
+				return fmt.Errorf("expected client disconnect after service quota responses: %v", err)
 			}
 			return nil
 		}()
@@ -249,6 +255,9 @@ func TestServiceAccessUsesSDKSessionQuotaRPCWithoutModelSend(t *testing.T) {
 		if busy != (i == 0) {
 			t.Fatal("quota query changed the session's busy state")
 		}
+	}
+	if err := adapter.Close(); err != nil {
+		t.Fatal("service quota client cleanup failed", err)
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)

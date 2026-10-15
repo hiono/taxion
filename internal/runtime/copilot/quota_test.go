@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -86,6 +87,9 @@ func TestAccountQuotaUsesOnlyAuthAndReadRPC(t *testing.T) {
 					return err
 				}
 			}
+			if _, err := reader.R.Peek(1); !errors.Is(err, io.EOF) {
+				return fmt.Errorf("expected client disconnect after account quota response: %v", err)
+			}
 			return nil
 		}()
 	}()
@@ -110,6 +114,9 @@ func TestAccountQuotaUsesOnlyAuthAndReadRPC(t *testing.T) {
 		*result.RemainingPercentage != 75.4 || result.ResetAt == nil || result.ExpiresAt != nil ||
 		result.Unit != "requests" || len(adapter.sessions) != 0 || adapter.ConfigHash() != hash {
 		t.Fatal("read quota changed identity, created a session, or returned the wrong units", result, err)
+	}
+	if err := adapter.Close(); err != nil {
+		t.Fatal("quota client cleanup failed", err)
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)

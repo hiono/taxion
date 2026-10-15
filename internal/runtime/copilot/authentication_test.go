@@ -215,6 +215,9 @@ func TestAuthenticationProbeUsesSDKRPCWithoutCreatingSessions(t *testing.T) {
 					return err
 				}
 			}
+			if _, err := reader.Peek(1); !errors.Is(err, io.EOF) {
+				return fmt.Errorf("expected client disconnect after authentication responses: %v", err)
+			}
 			return nil
 		}()
 	}()
@@ -238,14 +241,14 @@ func TestAuthenticationProbeUsesSDKRPCWithoutCreatingSessions(t *testing.T) {
 			t.Fatal("RPC error or provider response leaked")
 		}
 	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
 	if len(adapter.sessions) != 0 || adapter.ConfigHash() != hash {
 		t.Fatal("authentication probe created a session or changed its binding")
 	}
 	if err := adapter.Close(); err != nil {
 		t.Fatal("authentication client cleanup failed", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 
