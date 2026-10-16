@@ -204,6 +204,15 @@ func TestCLIReferenceCoversLiteralOptionNames(t *testing.T) {
 					t.Errorf("%s: CLI reference omits --%s", source, option)
 				}
 			}
+			for _, line := range strings.Split(string(reference), "\n") {
+				if strings.HasPrefix(line, "| `conversation search` |") {
+					if !strings.Contains(line, "`--question TEXT`") || !strings.Contains(line, "`--query TEXT`") {
+						t.Fatal("CLI reference must document both conversation search query flags")
+					}
+					return
+				}
+			}
+			t.Fatal("CLI reference omits the conversation search command")
 		}
 	}
 }
