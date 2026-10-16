@@ -445,14 +445,22 @@ func persistLegacyBudgetStoppedFlow(t *testing.T, db *store.Store, flowID string
 }
 
 func TestLegacyBudgetStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.T) {
-	testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t, "BUDGET_LIMIT")
+	testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t, "BUDGET_LIMIT", false)
 }
 
 func TestSafetyStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.T) {
-	testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t, "SAFETY_STOP")
+	testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t, "SAFETY_STOP", false)
 }
 
-func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.T, stopCode string) {
+func TestAlreadySupersededStoppedSnapshotCoderContinuesAtReviewerWithoutRerun(t *testing.T) {
+	for _, stopCode := range []string{"BUDGET_LIMIT", "SAFETY_STOP"} {
+		t.Run(stopCode, func(t *testing.T) {
+			testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t, stopCode, true)
+		})
+	}
+}
+
+func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.T, stopCode string, superseded bool) {
 	t.Helper()
 	db, ledger, request := reviewFlowFixtureWithOutputMode(t, core.OutputModeWorktreeTreeSnapshot)
 	flow, err := StartReviewFlow(db, ledger, request)
@@ -501,6 +509,18 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	var previousTask core.GraphTask
+	if superseded {
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			if err := state.Graph.Transition(flow.TaskID, core.Superseded, "human", "Previously confirmed successor", core.TransitionProof{}); err != nil {
+				return err
+			}
+			previousTask, _ = state.Graph.GraphTask(flow.TaskID)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	skills := t.TempDir()
 	if err := os.WriteFile(filepath.Join(skills, "SKILL.md"), []byte("synthetic read-only review skill\n"), 0600); err != nil {
@@ -566,6 +586,12 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	state, err := db.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if superseded {
+		preserved, _ := state.Graph.GraphTask(flow.TaskID)
+		if !reflect.DeepEqual(previousTask, preserved) {
+			t.Fatal("new exact approval rewrote the already superseded source Task")
+		}
 	}
 	reviewer, _ := state.Graph.GraphDispatch(successor.DispatchIDs[0])
 	if reviewer.Recipient != "REVIEWER" || reviewer.Instruction.TargetSHA != coder.Result.OutputSHA ||

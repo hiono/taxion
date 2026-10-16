@@ -254,8 +254,11 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		}
 		if request.ReplacesFlow != "" {
 			flow, _ := state.Graph.ReviewFlow(request.ReplacesFlow)
-			if err := state.Graph.Transition(flow.TaskID, core.Superseded, request.Actor, request.Reason, core.TransitionProof{}); err != nil {
-				return err
+			previous, _ := state.Graph.GraphTask(flow.TaskID)
+			if previous.Status != core.Superseded {
+				if err := state.Graph.Transition(flow.TaskID, core.Superseded, request.Actor, request.Reason, core.TransitionProof{}); err != nil {
+					return err
+				}
 			}
 		}
 		result, _ = state.Graph.GraphTask(task.ID)
