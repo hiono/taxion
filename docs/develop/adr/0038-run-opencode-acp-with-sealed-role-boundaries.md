@@ -82,6 +82,11 @@ JSON 内の必須項目、識別子、Git と実行証拠の検証は共通 cont
 停止専用照合から正式な取消記録を完了する。実行用 resume は終了後も拒否する。
 別 process や別 runtime の session ID への再接続は未対応とする。
 旧 Dispatch、予算、usage、receipt、Git 証拠は保持し、後続 Task の設定と成果を再承認する。
+共通の Coder 結果再利用では、旧 `BUDGET_LIMIT` だけでなく `SAFETY_STOP` も扱う。
+実期限切れは後者で記録されるため、分類の違いだけを理由に成功済み Coder を再実行しない。
+所有 runner の解放・handoff 保留・正式な成功結果・同一成果物を要求し、
+Reviewer の停止後なら、その Coder に結び付いた正式 `CANCELLED` と session の停止証拠も照合する。
+旧停止記録を書き換えず、後続 Task・設定・期限の新しい承認から独立 Reviewer だけを開始する。
 Copilot 用の仕様送信許可を OpenCode に流用せず、`opencode` 用の exact hash 承認を要求する。
 
 ## Consequences

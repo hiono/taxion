@@ -328,6 +328,15 @@ func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T
 }
 
 func TestBudgetContinuationReusesCoderAfterReviewerSafeStop(t *testing.T) {
+	testContinuationReusesCoderAfterReviewerSafeStop(t, "BUDGET_LIMIT")
+}
+
+func TestSafetyStopContinuationReusesCoderAfterReviewerSafeStop(t *testing.T) {
+	testContinuationReusesCoderAfterReviewerSafeStop(t, "SAFETY_STOP")
+}
+
+func testContinuationReusesCoderAfterReviewerSafeStop(t *testing.T, stopCode string) {
+	t.Helper()
 	db, ledger, request := reviewFlowFixtureWithOutputMode(t, core.OutputModeWorktreeTreeSnapshot)
 	flow, err := StartReviewFlow(db, ledger, request)
 	if err != nil {
@@ -346,7 +355,7 @@ func TestBudgetContinuationReusesCoderAfterReviewerSafeStop(t *testing.T) {
 	if err := holdReviewFlowForStop(&state.Graph, &flow, "Reviewer exceeded observed token ceiling"); err != nil {
 		t.Fatal(err)
 	}
-	flow.Status, flow.StopCode = "STOPPED", "BUDGET_LIMIT"
+	flow.Status, flow.StopCode = "STOPPED", stopCode
 	storeFlow(&state, flow)
 	for index := range state.Graph.Dispatches {
 		reviewer := &state.Graph.Dispatches[index]
@@ -434,6 +443,15 @@ func persistLegacyBudgetStoppedFlow(t *testing.T, db *store.Store, flowID string
 }
 
 func TestLegacyBudgetStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.T) {
+	testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t, "BUDGET_LIMIT")
+}
+
+func TestSafetyStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.T) {
+	testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t, "SAFETY_STOP")
+}
+
+func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.T, stopCode string) {
+	t.Helper()
 	db, ledger, request := reviewFlowFixtureWithOutputMode(t, core.OutputModeWorktreeTreeSnapshot)
 	flow, err := StartReviewFlow(db, ledger, request)
 	if err != nil {
@@ -441,7 +459,16 @@ func TestLegacyBudgetStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun
 	}
 	coder := executeFlowDispatch(t, db, flow, "", true)
 	flow = persistLegacyBudgetStoppedFlow(t, db, flow.ID)
-	if flow.StopCode != "BUDGET_LIMIT" ||
+	if stopCode == "SAFETY_STOP" {
+		flow.StopCode, flow.MaxTokens, flow.Reason = stopCode, 0, "deadline reached"
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			storeFlow(state, flow)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if flow.StopCode != stopCode ||
 		flow.Status != "STOPPED" || !flow.HandoffHeld() || len(flow.DispatchIDs) != 1 {
 		t.Fatalf("legacy stopped snapshot flow was not represented: %+v", flow)
 	}

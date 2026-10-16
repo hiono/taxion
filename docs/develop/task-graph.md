@@ -664,7 +664,7 @@ git -C /absolute/path/to/successor status --porcelain
 
 後続 Task の baseline は元の承認済み baseline のままにし、target SHA はその commit にする。最後のコマンドが空の出力を返すことも確認する。controller は承認時に tree、差分、scope と repository を照合する。部分証拠を確認できない場合や tree が一致しない場合は続行を拒否する。
 
-最後の Coder が `SUCCEEDED` になった後、旧 `BUDGET_LIMIT` で Flow が停止した場合は、保存済み output SHA と同じ commit を target とする別の clean worktree を用意する。
+最後の Coder が `SUCCEEDED` になった後、旧 `BUDGET_LIMIT` または期限切れなどの `SAFETY_STOP` で Flow が停止した場合は、保存済み output SHA と同じ commit を target とする別の clean worktree を用意する。
 この手順は commit mode の場合に使う。snapshot mode では baseline commit から別 worktree を作り、保存済み tree の差分を適用して、後続 Task の `targetTreeSha` と `targetChangedFiles` を一致させる。
 
 ```sh
@@ -674,7 +674,7 @@ git -C /absolute/path/to/successor status --porcelain
 
 後続 Task を人が承認したうえで、`workflow start` の request に元の Coder Dispatch ID を `continueFromDispatchId` として指定すると、新しい flow は Coder を再実行せず Reviewer から始まる。snapshot mode でもこの指定方法は同じで、Reviewer は同じ baseline commit と tree SHA を使う。
 
-旧 `BUDGET_LIMIT` で Reviewer 実行が停止した場合も、直前の成功 Coder 結果を引き継げる。元の flow は `STOPPED` / `BUDGET_LIMIT`、runner 所有権なし、handoff 保留を要求する。最後の Dispatch は、その Coder に独立レビューとして結び付いた `CANCELLED` の Reviewer であり、保存 session に対応する `runtime-stop:` 証拠が必要になる。実行中・停止未確認・別の Coder へのレビューは継続元にできない。
+旧 `BUDGET_LIMIT` または `SAFETY_STOP` で Reviewer 実行が停止した場合も、直前の成功 Coder 結果を引き継げる。元の flow は `STOPPED`、上記いずれかの stop code、runner 所有権なし、handoff 保留を要求する。最後の Dispatch は、その Coder に独立レビューとして結び付いた `CANCELLED` の Reviewer であり、保存 session に対応する `runtime-stop:` 証拠が必要になる。実行中・停止未確認・別の Coder へのレビューは継続元にできない。停止理由の分類だけで続行を許可せず、成功結果、同一成果物、新しい Task と設定・期限の承認も照合する。旧 Flow の stop code や結果は変更しない。
 
 この場合、後続承認の `target` は最後の取消済み Reviewer を指し、`continueFromDispatchId` はその直前の成功 Coder を指す。後続 worktree と保存済み成果物を照合し、新しい Reviewer には後続 Task の設定承認を引き継ぐ。前の Reviewer ID だけを許可した設定承認を、新しい Reviewer の許可として流用しない。
 

@@ -122,7 +122,7 @@ func budgetContinuationSource(graph core.TaskGraph, task core.GraphTask, sourceI
 	}
 	if !found || !graph.HasBudgetContinuationSource(predecessor, source.ID) ||
 		task.CreatedFrom != "flow:"+predecessor.ID || task.Supersedes != predecessor.TaskID {
-		return core.GraphDispatch{}, fmt.Errorf("taxion: budget continuation requires the exact held predecessor flow and successor Task")
+		return core.GraphDispatch{}, fmt.Errorf("taxion: completed-Coder continuation requires the exact held stopped predecessor flow and successor Task")
 	}
 	located := source
 	if len(records) != 0 {

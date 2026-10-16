@@ -41,7 +41,8 @@ type FlowRecovery struct {
 }
 
 func (g TaskGraph) HasBudgetContinuationSource(flow ReviewFlow, sourceID string) bool {
-	if flow.Status != "STOPPED" || flow.StopCode != "BUDGET_LIMIT" ||
+	// Legacy budget stops and reconciled safety stops share the same source checks.
+	if flow.Status != "STOPPED" || (flow.StopCode != "BUDGET_LIMIT" && flow.StopCode != "SAFETY_STOP") ||
 		flow.RunnerID != "" || !flow.HandoffHeld() || len(flow.DispatchIDs) == 0 {
 		return false
 	}
@@ -146,7 +147,7 @@ func (g TaskGraph) validateReviewFlows() error {
 				flow.Contract.OutputMode == OutputModeWorktreeTreeSnapshot &&
 					(flow.Contract.TargetTreeSHA != sourceDispatch.Result.OutputTreeSHA ||
 						!slices.Equal(flow.Contract.TargetChangedFiles, sourceDispatch.Result.ChangedFiles)) {
-				return graphError("review flow source must be a held budget-stopped Coder result for its successor Task")
+				return graphError("review flow source must be a held stopped Coder result for its successor Task")
 			}
 
 		}
