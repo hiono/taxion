@@ -210,6 +210,19 @@ func TestCLIReferenceCoversLiteralOptionNames(t *testing.T) {
 			t.Errorf("%s: CLI reference omits --%s", source, option)
 		}
 	}
+	for _, detail := range []string{
+		"Task Graph の初期化が必要",
+		"`INDEPENDENT` の関連先は別 Task の Dispatch",
+		"`--scanner PATH` は `runtime commit` または `--managed-commit`",
+		"`--base SHA`・`--head SHA` は40桁または64桁の完全な16進 SHA を指定する必須 option",
+		"Dispatch を終了する遷移では `--result-file JSON` が必須",
+		"実行する `/ask`・`/plan` には正の `--question-timeout DURATION`",
+		"非空で512 byte以内の検索語",
+	} {
+		if !strings.Contains(string(reference), detail) {
+			t.Errorf("CLI reference omits option constraint %q", detail)
+		}
+	}
 	for _, line := range strings.Split(string(reference), "\n") {
 		if strings.HasPrefix(line, "| `conversation search` |") {
 			if !strings.Contains(line, "`--question TEXT`") || !strings.Contains(line, "`--query TEXT`") {
