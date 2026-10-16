@@ -113,12 +113,18 @@ func ResolveForTask(graph core.TaskGraph, decisions []core.TaskDecision, taskID,
 				!slices.Contains(original.Decisions, decision) {
 				continue
 			}
-			for i := 1; i < len(flow.DispatchIDs); i++ {
+			for i := range flow.DispatchIDs {
 				review, reviewExists := graph.GraphDispatch(flow.DispatchIDs[i])
-				coder, coderExists := graph.GraphDispatch(flow.DispatchIDs[i-1])
+				coderID, coderTaskID, createdFrom := flow.SourceDispatchID, flow.Contract.Supersedes, "flow:"+flow.ID
+				if i > 0 {
+					coderID, coderTaskID = flow.DispatchIDs[i-1], approval.TaskID
+					createdFrom = "dispatch:" + coderID
+				}
+				coder, coderExists := graph.GraphDispatch(coderID)
 				if reviewExists && coderExists && review.TaskID == taskID && review.Recipient == "REVIEWER" &&
-					coder.Recipient == "CODER" && coder.TaskID == approval.TaskID &&
-					task.CreatedFrom == "dispatch:"+coder.ID && slices.Contains(review.Instruction.Decisions, decision) {
+					review.Relationship == core.RelationshipIndependent && review.RelatedID == coder.ID &&
+					coder.Recipient == "CODER" && coder.Status == core.DispatchSucceeded && coder.TaskID == coderTaskID &&
+					task.CreatedFrom == createdFrom && slices.Contains(review.Instruction.Decisions, decision) {
 					authorized = true
 				}
 			}

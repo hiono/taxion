@@ -87,6 +87,9 @@ JSON 内の必須項目、識別子、Git と実行証拠の検証は共通 cont
 所有 runner の解放・handoff 保留・正式な成功結果・同一成果物を要求し、
 Reviewer の停止後なら、その Coder に結び付いた正式 `CANCELLED` と session の停止証拠も照合する。
 旧停止記録を書き換えず、後続 Task・設定・期限の新しい承認から独立 Reviewer だけを開始する。
+この Reviewer の tools/skills は、旧 Coder の承認を転用せず、後続 Task の新しい承認から解決する。
+通常の Coder→Reviewer だけでなく、保存済み Coder を参照する Flow の最初の Reviewer も、
+Flow、元の成功 Coder、独立レビュー関係、Task の出典と保存済み decision が一致する場合だけ許可する。
 Copilot 用の仕様送信許可を OpenCode に流用せず、`opencode` 用の exact hash 承認を要求する。
 
 ## Consequences

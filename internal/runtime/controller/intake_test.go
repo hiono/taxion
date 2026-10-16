@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 func TestIntakeSeparatesOriginalRequestExactConfirmationAndExecution(t *testing.T) {
@@ -500,6 +502,32 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	skills := t.TempDir()
+	if err := os.WriteFile(filepath.Join(skills, "SKILL.md"), []byte("synthetic read-only review skill\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	skillHash, err := tools.Hash(skills)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := tools.Policy{
+		Skills: []tools.Asset{{Path: skills, Hash: skillHash}}, EvidenceDirectory: filepath.Join(t.TempDir(), "review-evidence"),
+	}
+	approval, err := json.Marshal(tools.Approval{
+		Kind: tools.ApprovalKind, TaskID: proposal.ID, Actor: "human",
+		Roles: map[string]tools.Policy{"REVIEWER": policy},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal.Decisions = append(proposal.Decisions, core.TaskDecision{
+		ID: "successor-review-tools", Source: "human:snapshot-review-successor", Text: string(approval),
+	})
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.Track(proposal, "human", "approve fresh tools only for the successor Reviewer")
+	}); err != nil {
+		t.Fatal(err)
+	}
 	hash, err := IntakeHash(proposal)
 	if err != nil {
 		t.Fatal(err)
@@ -544,6 +572,39 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 		reviewer.Instruction.TargetTreeSHA != coder.Result.OutputTreeSHA ||
 		successor.SourceDispatchID != coder.ID || len(state.Graph.Dispatches) != 2 {
 		t.Fatalf("continuation repeated the Coder turn or changed its tree: flow=%+v dispatch=%+v", successor, reviewer)
+	}
+	resolved, err := tools.ResolveForTask(state.Graph, reviewer.Instruction.Decisions, reviewer.TaskID, "REVIEWER")
+	if err != nil || !tools.Equal(resolved, &policy) {
+		t.Fatal("Reviewer-only continuation lost its freshly approved skill policy", err)
+	}
+	for _, change := range []string{"wrong-role", "copied-task", "wrong-source", "wrong-binding", "missing-approval"} {
+		t.Run(change, func(t *testing.T) {
+			graph := state.Graph
+			graph.Tasks = append([]core.GraphTask(nil), graph.Tasks...)
+			graph.Dispatches = append([]core.GraphDispatch(nil), graph.Dispatches...)
+			graph.ReviewFlows = append([]core.ReviewFlow(nil), graph.ReviewFlows...)
+			role := "REVIEWER"
+			switch change {
+			case "wrong-role":
+				role = "CODER"
+			case "copied-task", "missing-approval":
+				for i := range graph.Tasks {
+					if change == "copied-task" && graph.Tasks[i].ID == reviewer.TaskID {
+						graph.Tasks[i].CreatedFrom = "flow:unrelated"
+					}
+					if change == "missing-approval" && graph.Tasks[i].ID == approved.ID {
+						graph.Tasks[i].Decisions = nil
+					}
+				}
+			case "wrong-source":
+				graph.ReviewFlows[len(graph.ReviewFlows)-1].SourceDispatchID = "unrelated-coder"
+			case "wrong-binding":
+				graph.Dispatches[len(graph.Dispatches)-1].RelatedID = "unrelated-coder"
+			}
+			if _, err := tools.ResolveForTask(graph, reviewer.Instruction.Decisions, reviewer.TaskID, role); err == nil {
+				t.Fatal("fresh tools approval escaped its independent successor Reviewer")
+			}
+		})
 	}
 	reviewer, err = PrepareReview(db, reviewer.ID, approved.Worktree)
 	if err != nil {
