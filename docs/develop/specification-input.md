@@ -99,18 +99,21 @@ M365 の接続は、組織の認証・license・資料利用許可を確認す�
 [#77](https://github.com/hiono/taxion/issues/77) の条件付き後続拡張として扱う。
 組織が利用可能な環境と許可範囲を提示した場合に接続方式を評価する。
 
-検索 scope は、PDF・DOCX・PPTX、または M365 Copilot 会話 export `.json.md` の exact asset、
+検索 scope は、Markdown・PDF・DOCX・PPTX、または M365 Copilot 会話 export `.json.md` の exact asset、
 題名、出典、版、閲覧範囲、private evidence directory を持つ。会話 export は `private` に分類し、
 scope に含めた `messageIds` のうち、時刻付きで user が書いた本文だけを検索する。
 assistant の返答、未選択メッセージ、export header は結果に含めない。
 対象 message ID は scope hash に含み、原本は hash で固定する。
 検索は大文字小文字を区別しない literal AND 方式で、
 該当 paragraph・slide・page・選択済み user message を引用スナップショットに変換する。
-ローカル管理者の承認記録が検索権限を定義し、`copilot` と `publication` が用途別の送信許可を定義する。
-会話の取り込み、Copilot への送信、外部公開は別々の用途であり、
+ローカル管理者の承認記録が検索権限を定義し、`copilot`、`opencode`、`publication` が用途別の送信許可を定義する。
+会話の取り込み、各 runtime への送信、外部公開は別々の用途であり、
 前の承認から後の用途を推定しない。
 
 DOCX/PPTX は Go の ZIP/XML reader、PDF は承認した Python と `pdfminer` を使う。
+通常の `.md` は UTF-8 の段落単位で検索し、原本の行番号を保持する。段落は最大 1 MiB とし、
+外部の Markdown parser や shell は起動しない。`.json.md` を通常 Markdown として読むことはなく、
+選択した user message だけを検索する既存の制約を維持する。
 scope には 1–128 原本、原本は各 32 MiB、query は 512 bytes、結果は 64 引用までを指定できる。
 Office XML は part ごとに 1 MiB、合計 8 MiB を上限とし、PDF は最大 4096 pages・1 MiB 本文、
 512 MiB memory・10 秒 CPU・15 秒実行時間で読む。
@@ -171,6 +174,9 @@ message ID を変えた場合は別の scope hash になる。
 ```
 
 この承認から、各引用の exact hash に結び付いた用途別承認を作成する。
+OpenCode に送信する場合は `opencode: true` を指定する。`copilot: true` だけでは
+OpenCode に送信できず、逆も同様とする。設定未確定の Dispatch 発行時には少なくとも一つの
+runtime 用許可を要求し、実際の送信直前には選択した provider の許可を再照合する。
 公開許可は、資料を使った Task の外部記録を許可するときに選択する。
 検索前後に原本を照合し、版変更・参照不能・権限不足は error、
 一致する結果がない場合は空配列を返す。取得失敗時は部分的な結果を Task に保存しない。

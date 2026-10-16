@@ -33,6 +33,9 @@ func TestFlowTokenAccountingUsesPerCallInputAndOutputOnly(t *testing.T) {
 		{"terminal without usage", core.DispatchSucceeded, nil, 0, false},
 		{"reported zero", core.DispatchSucceeded, []core.DispatchUsage{{InputTokens: &zero, OutputTokens: &zero}}, 0, true},
 		{"missing output", core.DispatchRunning, []core.DispatchUsage{{InputTokens: &two}}, 2, false},
+		{"latest message is not the complete turn", core.DispatchSucceeded, []core.DispatchUsage{
+			{InputTokens: &two, OutputTokens: &three, Scope: "latest-assistant-message"},
+		}, 5, false},
 		{"multiple calls", core.DispatchSucceeded, []core.DispatchUsage{
 			{InputTokens: &two, OutputTokens: &three},
 			{InputTokens: &three, OutputTokens: &seven},

@@ -191,7 +191,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 		if !flowContractMatches(state.Graph, flow, task) {
 			return stop("Task scope, acceptance, authorization or execution contract changed; Human approval of a new flow is required")
 		}
-		if err := state.Graph.CheckTaskSpecificationUse(task.ID, "copilot"); err != nil {
+		if err := state.Graph.CheckTaskSpecificationUse(task.ID, "runtime"); err != nil {
 			return stop("specification source or permission requires renewed Human approval: " + err.Error())
 		}
 		if slices.Contains([]core.TaskStatus{core.Cancelled, core.Rejected, core.Superseded}, task.Status) {
@@ -549,7 +549,7 @@ func flowTokens(graph core.TaskGraph, flow core.ReviewFlow) (int64, bool) {
 			known = false
 		}
 		for _, usage := range dispatch.RuntimeUsage {
-			if usage.InputTokens == nil || usage.OutputTokens == nil {
+			if usage.InputTokens == nil || usage.OutputTokens == nil || usage.Scope == "latest-assistant-message" {
 				known = false
 			}
 			for _, value := range []*int64{usage.InputTokens, usage.OutputTokens} {

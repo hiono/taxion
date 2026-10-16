@@ -74,6 +74,47 @@ func doctorCmd(args []string, output io.Writer) (err error) {
 			return err
 		}
 	}
+	if resolved.Config.Runtime.Provider == "opencode" {
+		worker, err := newRoleWorker(config)
+		if err != nil {
+			return err
+		}
+		defer func() { err = errors.Join(err, worker.Close()) }()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		checkErr := worker.CheckAuthentication(ctx, resolved.Config.Runtime.Account)
+		report := struct {
+			Backend        string   `json:"backend"`
+			CLI            string   `json:"cli"`
+			Version        string   `json:"version"`
+			Worktree       string   `json:"worktree"`
+			Isolation      string   `json:"isolation"`
+			AssetsVerified bool     `json:"assetsVerified"`
+			Limitations    []string `json:"limitations"`
+		}{
+			Backend: "opencode", CLI: resolved.Config.Runtime.ACPCommand, Version: "1.19.0 required; not connected",
+			Worktree: config.WorkingDirectory, Isolation: "Linux user/mount/PID namespaces; role-scoped copied inputs",
+			AssetsVerified: checkErr == nil,
+			Limitations: []string{
+				"No process, session, model prompt, credential or provider quota read was performed.",
+				"Only approved skill directories enter the isolated configuration; executable plugins, MCP, RTK and shell are unsupported.",
+				"Provider authentication, remote repository permission, entitlement and quota remain unverified.",
+				"Credential injection is unsupported; the isolated process does not inherit OpenCode logins or provider API keys.",
+				"Connection verifies version and agent before any prompt; unavailable Linux isolation fails closed.",
+				"ACP token usage covers only the latest assistant message, not the complete task or turn.",
+			},
+		}
+		if *asJSON {
+			return errors.Join(checkErr, json.NewEncoder(output).Encode(report))
+		}
+		_, printErr := fmt.Fprintf(output, "Backend: %s\nCLI: %s\nVersion: %s\nWorktree: %s\nIsolation: %s\nAssets verified: %t\n",
+			report.Backend, report.CLI, report.Version, report.Worktree, report.Isolation, report.AssetsVerified)
+		for _, limitation := range report.Limitations {
+			_, err := fmt.Fprintln(output, limitation)
+			printErr = errors.Join(printErr, err)
+		}
+		return errors.Join(checkErr, printErr)
+	}
 	adapter, err := copilot.New(config)
 	if err != nil {
 		return err

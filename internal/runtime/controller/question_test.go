@@ -244,6 +244,37 @@ func TestQuestionRejectsInvalidSourcesAndFailures(t *testing.T) {
 	}
 }
 
+func TestQuestionKeepsInvalidAnswerOnlyInPrivateResult(t *testing.T) {
+	for _, answer := range []string{
+		savedQuestionAnswer,
+		"private malformed model output",
+		strings.ReplaceAll(savedQuestionAnswer, "/task/task/status", "/task/task/fabricated"),
+	} {
+		t.Run(answer, func(t *testing.T) {
+			db, databasePath, worker, resolved := questionFixture(t)
+			worker.role = "ORCHESTRATOR"
+			q := &questionRuntime{configuredRuntime: worker, events: questionEvents(answer)}
+			result, err := AskQuestion(context.Background(), db,
+				filepath.Join(filepath.Dir(databasePath), "ledger.json"), "task", "status?", resolved.Config, q)
+			data, encodeErr := json.Marshal(result)
+			if encodeErr != nil {
+				t.Fatal(encodeErr)
+			}
+			if answer == savedQuestionAnswer {
+				if err != nil || result.InvalidAnswer != "" || strings.Contains(string(data), `"invalidAnswer"`) {
+					t.Fatal("valid answer changed its wire shape", err)
+				}
+			} else if err == nil || result.Answer != nil || result.InvalidAnswer != answer ||
+				strings.Contains(err.Error(), answer) || !strings.Contains(string(data), `"invalidAnswer"`) {
+				t.Fatal("malformed answer lost its private evidence or leaked into the error", err)
+			}
+			if q.stops != 1 {
+				t.Fatal("question session was not stopped")
+			}
+		})
+	}
+}
+
 func TestQuestionReportsTargetChangeWithoutRetargetingAnswer(t *testing.T) {
 	db, databasePath, worker, resolved := questionFixture(t)
 	worker.role = "ORCHESTRATOR"

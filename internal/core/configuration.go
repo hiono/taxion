@@ -26,12 +26,13 @@ func ConfigurationApprovalID(reference, taskID string) string {
 // ExecutionAccessCheck records a successful runtime-account and repository-role
 // access check for the selected tuple, not session creation or contract eligibility.
 type ExecutionAccessCheck struct {
-	Operation            string    `json:"operation"`
-	RuntimeConfigHash    string    `json:"runtimeConfigHash"`
-	StartedAt            time.Time `json:"startedAt"`
-	CompletedAt          time.Time `json:"completedAt"`
-	RepositoryPermission string    `json:"repositoryPermission"`
-	ContractEligibility  string    `json:"contractEligibility"`
+	Operation             string    `json:"operation"`
+	RuntimeConfigHash     string    `json:"runtimeConfigHash"`
+	StartedAt             time.Time `json:"startedAt"`
+	CompletedAt           time.Time `json:"completedAt"`
+	RepositoryPermission  string    `json:"repositoryPermission"`
+	ContractEligibility   string    `json:"contractEligibility"`
+	RuntimeAuthentication string    `json:"runtimeAuthentication,omitempty"`
 }
 
 func (binding DispatchConfiguration) validate(dispatch GraphDispatch) error {
@@ -39,6 +40,14 @@ func (binding DispatchConfiguration) validate(dispatch GraphDispatch) error {
 		return graphError("configuration binding requires a decision and recording time")
 	}
 	observedHash := dispatch.RuntimeConfigHash
+	var selectedRuntime struct {
+		Runtime struct {
+			Provider string `json:"provider"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal(binding.Selection, &selectedRuntime); err != nil {
+		return graphError("configuration binding requires a selected JSON object")
+	}
 	for _, check := range binding.AccessChecks {
 		if !slices.Contains([]string{"START", "RESUME", "SEND"}, check.Operation) ||
 			!nonempty(check.RuntimeConfigHash) || check.StartedAt.IsZero() || check.CompletedAt.IsZero() ||
@@ -48,6 +57,14 @@ func (binding DispatchConfiguration) validate(dispatch GraphDispatch) error {
 		permission := "READ"
 		if dispatch.Recipient == "CODER" {
 			permission = "READ_WRITE"
+		}
+		if selectedRuntime.Runtime.Provider == "opencode" {
+			permission = "UNVERIFIED"
+			if check.RuntimeAuthentication != "OPENCODE_MANAGED_UNVERIFIED" {
+				return graphError("OpenCode access observation cannot assert provider authentication")
+			}
+		} else if check.RuntimeAuthentication != "" {
+			return graphError("legacy access observation has an unexpected authentication mode")
 		}
 		if observedHash == "" {
 			observedHash = check.RuntimeConfigHash
@@ -213,6 +230,18 @@ func (g *TaskGraph) RecordDispatchAccessCheck(dispatchID, operation, runtimeHash
 		Operation: operation, RuntimeConfigHash: runtimeHash,
 		StartedAt: startedAt, CompletedAt: completedAt,
 		RepositoryPermission: permission, ContractEligibility: "UNVERIFIED",
+	}
+	var selected struct {
+		Runtime struct {
+			Provider string `json:"provider"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal(dispatch.Configuration.Selection, &selected); err != nil {
+		return graphError("execution access observation has an invalid selection")
+	}
+	if selected.Runtime.Provider == "opencode" {
+		check.RepositoryPermission = "UNVERIFIED"
+		check.RuntimeAuthentication = "OPENCODE_MANAGED_UNVERIFIED"
 	}
 	next := cloneGraph(*g)
 	for i := range next.Dispatches {

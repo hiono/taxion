@@ -262,6 +262,7 @@ type UsageAccountingIdentity struct {
 
 type DispatchUsage struct {
 	Model            string                   `json:"model"`
+	Scope            string                   `json:"scope,omitempty"`
 	IsAuto           *bool                    `json:"isAuto,omitempty"`
 	InputTokens      *int64                   `json:"inputTokens,omitempty"`
 	OutputTokens     *int64                   `json:"outputTokens,omitempty"`
@@ -579,7 +580,7 @@ func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship Di
 	if err := validateDispatchMemoryContext(task.MemoryRefs, memoryContext); err != nil {
 		return DispatchInstruction{}, err
 	}
-	if err := CheckSpecificationUse(task.Specifications, "copilot"); err != nil {
+	if err := CheckSpecificationUse(task.Specifications, "runtime"); err != nil {
 		return DispatchInstruction{}, err
 	}
 	if len(task.ValidationCommands) == 0 || !validList(task.ValidationCommands) {
@@ -950,7 +951,7 @@ func sameStringSet(left, right []string) bool {
 
 func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 	i := d.Instruction
-	if err := CheckSpecificationUse(i.Specifications, "copilot"); err != nil {
+	if err := CheckSpecificationUse(i.Specifications, "runtime"); err != nil {
 		return "", err
 	}
 	lines := []struct{ label, value string }{
@@ -1395,6 +1396,7 @@ func (g TaskGraph) Validate() error {
 			usageIDs := map[UsageAccountingIdentity]bool{}
 			for _, usage := range d.RuntimeUsage {
 				if !nonempty(usage.Model) || usage.ObservedAt.IsZero() ||
+					usage.Scope != "" && usage.Scope != "latest-assistant-message" ||
 					!validOptionalCount(usage.InputTokens) || !validOptionalCount(usage.OutputTokens) ||
 					!validOptionalCount(usage.CacheReadTokens) || !validOptionalCount(usage.CacheWriteTokens) {
 					return graphError("invalid runtime usage record for Dispatch %s", d.ID)

@@ -2,20 +2,75 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
 
+	executionconfig "github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/runtime/copilot"
+	"github.com/hiono/taxion/internal/runtime/openacp"
 	"github.com/hiono/taxion/internal/store"
 	"github.com/hiono/taxion/internal/tools"
 )
 
-func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch core.GraphDispatch, config copilot.Config, managedCommit, managedStage bool, scanner string) (*copilot.Adapter, error) {
+type configuredWorker interface {
+	runtime.ConfigurationIdentity
+	io.Closer
+}
+
+func requiredRuntimeCeiling(provider string, credits float64) error {
+	if provider == "opencode" {
+		if credits != 0 {
+			return fmt.Errorf("runtime: OpenCode does not enforce Copilot AI-credit limits; omit --max-ai-credits and approve an explicit deadline")
+		}
+		return nil
+	}
+	if err := copilot.ValidateAICreditLimit(credits); err != nil {
+		return err
+	}
+	if credits == 0 {
+		return fmt.Errorf("runtime: Copilot requires --max-ai-credits of at least 30")
+	}
+	return nil
+}
+func newRoleWorker(config copilot.Config) (configuredWorker, error) {
+	if len(config.Configuration) == 0 {
+		return copilot.New(config)
+	}
+	var selected executionconfig.Config
+	if err := json.Unmarshal(config.Configuration, &selected); err != nil {
+		return nil, fmt.Errorf("runtime: invalid configuration selection")
+	}
+	if err := selected.Validate(); err != nil {
+		return nil, err
+	}
+	if selected.Runtime.Provider != "opencode" {
+		return copilot.New(config)
+	}
+	if config.MaxAICredits != 0 || config.ManagedCommit != nil || config.ManagedSearch != nil ||
+		config.CLIPath != "" || config.BaseDirectory != "" {
+		return nil, fmt.Errorf("runtime: OpenCode uses approved acpCommand/acpConfig; Copilot credit caps, CLI overrides, managed commit and managed SDK search are unsupported")
+	}
+	if config.FileAccess == nil {
+		config.FileAccess = core.DefaultFileAccessPolicy()
+	}
+	return openacp.New(openacp.Config{
+		Role: config.Role, SystemPrompt: config.SystemPrompt, WorkingDirectory: config.WorkingDirectory,
+		CLIPath: selected.Runtime.ACPCommand, CLIHash: selected.Runtime.ACPCommandHash,
+		ServerConfig: selected.Runtime.ACPConfig, ServerConfigHash: selected.Runtime.ACPConfigHash,
+		Configuration: config.Configuration, FileAccess: config.FileAccess, TrackedFiles: config.TrackedFiles,
+		ResponseSchema: config.ResponseSchema, BudgetGuidance: config.BudgetGuidance,
+		ToolPolicy: config.ToolPolicy, AvailableTools: config.AvailableTools,
+	})
+}
+
+func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch core.GraphDispatch, config copilot.Config, managedCommit, managedStage bool, scanner string) (configuredWorker, error) {
 	if managedStage && !managedCommit {
 		return nil, fmt.Errorf("runtime: --managed-stage requires --managed-commit")
 	}
@@ -33,7 +88,7 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 	if dispatch.Configuration != nil {
 		config.Configuration = dispatch.Configuration.Selection
 	}
-	var worker *copilot.Adapter
+	var worker configuredWorker
 	var graph core.TaskGraph
 	if db != nil {
 		state, err := db.LoadWorkspace()
@@ -112,7 +167,7 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 			}
 		}
 	}
-	worker, err = copilot.New(config)
+	worker, err = newRoleWorker(config)
 	return worker, err
 }
 

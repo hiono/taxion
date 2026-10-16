@@ -117,6 +117,37 @@ TAXION_DOCUMENT_SKILL_ROOT=/absolute/path/to/skills \
 
 private database、生ログ、credential 値は commit に含めません。一般化した知見と採択した制約は ADR、現在の動作は担当する仕様文書、操作者の手順は利用者ガイドに記載します。
 
+### OpenCode ACP の回帰と実受入れ
+
+`go test ./internal/runtime/openacp` は独自の fake ACP peer で接続・権限拒否・切断・期限・
+取消・usage 欠落を確認します。外部 OpenCode、login、モデル、network は不要です。
+Linux の namespace 境界は `TAXION_NAMESPACE_TEST=1 go test -race ./internal/runtime/openacp`
+で opt-in にできます。この検査も外部モデルは使いません。
+
+実 OpenCode 1.19.0 の確認は、操作者が用意した executable と `model` だけの JSON 設定を
+絶対パスで指定し、両方の生 SHA-256 をそれぞれ `TAXION_OPENCODE_HASH` と
+`TAXION_OPENCODE_CONFIG_HASH` に `sha256:` 付きで設定します。
+`TAXION_OPENCODE_PATH` と `TAXION_OPENCODE_CONFIG` は各ファイルのパスです。
+`TAXION_OPENCODE_ACP_HANDSHAKE=1 go test ./internal/runtime/openacp -run '^TestLiveOpenCodeHandshake$'`
+は接続だけを確認し、prompt を送りません。`TAXION_OPENCODE_ACP_PROMPT=free-model-diagnostic`
+を明示した `TestLiveOpenCodePrompt` は最小 prompt を送る別検査です。stderr や model 応答を
+含む出力は非公開で扱い、接続成功を無料・認証・quota の保証にはしません。
+
+`TestOpenCodeLiveDocumentFlow` は実 Planner、限定した公開文書の Coder、host lint、
+独立 Reviewer を接続する別の受入れです。モデル送信と scope の承認後にだけ実行します。
+設定の model は `opencode/big-pickle` に固定し、他モデルへ切り替えません。
+公開 HEAD から独立 worktree を作り、選択した公開 ADR を検索・用途別承認付きで添付します。
+このテストは絶対 `TAXION_DOCUMENT_SKILL_ROOT` と、未作成の絶対保存先
+`TAXION_OPENCODE_LIVE_OUTPUT`、`TAXION_OPENCODE_LIVE_APPROVAL=free-big-pickle-document` を要求します。
+実行は `go test ./cmd/taxion -run '^TestOpenCodeLiveDocumentFlow$' -count=1 -v -timeout 17m` で、
+15 分の共通期限・修正 0 回です。private な DB、応答、event、worktree を保存し、
+失敗時も証拠を消しません。通常の `mise run check` はこれらの opt-in を無効にします。
+成功した Coder を検査名目で繰り返さず、失敗原文と正式 receipt から次の修正を判断します。
+追加質問に答えて計画を修正する場合は、同じ公開 baseline の有効な保存済み Planner 応答を
+`TAXION_OPENCODE_LIVE_PLANNER_PREVIOUS` に絶対パスで指定できます。保存ファイルの hash と
+引継ぎ元を別に記録し、以前の質問を再実行せず、新しい返答を実 Planner に渡します。
+過去の計画を自動承認する機能や、成功済み Coder の再実行機能ではありません。
+
 ### バックエンドと同じ探索を検証する
 
 通常のカスタマイズ探索は設定中のバックエンドに任せ、未選択バックエンドの配置を

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/hiono/taxion/internal/acp"
+	executionconfig "github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
 	"github.com/hiono/taxion/internal/runtime"
@@ -634,6 +635,15 @@ func runtimeCmd(args []string) error {
 		return fmt.Errorf("runtime: --budget-guidance is outside the saved Dispatch approval")
 	}
 	if action == "stop" {
+		if dispatch.Configuration != nil {
+			var selected executionconfig.Config
+			if err := json.Unmarshal(dispatch.Configuration.Selection, &selected); err != nil {
+				return fmt.Errorf("runtime stop: invalid saved configuration")
+			}
+			if selected.Runtime.Provider == "opencode" {
+				return fmt.Errorf("runtime stop: an isolated OpenCode session cannot attach across processes; stop through its owning runner, then verify exit and authorize a successor Task; do not reuse the session ID")
+			}
+		}
 		var invalidOption string
 		fs.Visit(func(option *flag.Flag) {
 			switch option.Name {
@@ -733,7 +743,11 @@ func runtimeCmd(args []string) error {
 	case "auth":
 		operationErr = worker.CheckAuthentication(ctx, expectedAccount)
 		if operationErr == nil {
-			fmt.Println("taxion: effective Copilot account matches the approved Dispatch configuration on github.com. Explicit credential policies apply; legacy reference resolution, repository actor and contract eligibility remain unverified. No session was created or resumed.")
+			if runtime.ProviderName(worker) == "opencode" {
+				fmt.Println("taxion: approved OpenCode executable and server configuration hashes match. Provider authentication, repository access, entitlement and quota remain unverified and OpenCode-managed. No session was created.")
+			} else {
+				fmt.Println("taxion: effective Copilot account matches the approved Dispatch configuration on github.com. Explicit credential policies apply; legacy reference resolution, repository actor and contract eligibility remain unverified. No session was created or resumed.")
+			}
 		}
 	case "start":
 		if dispatch.RuntimeSessionID != "" {
@@ -856,8 +870,8 @@ func runACP(args []string) error {
 	if *coderPromptFile == "" {
 		return fmt.Errorf("acp: --coder-system-prompt-file is required")
 	}
-	if err := copilot.ValidateAICreditLimit(*maxAICredits); err != nil || *maxAICredits == 0 {
-		return fmt.Errorf("acp: --max-ai-credits must be at least 30")
+	if err := copilot.ValidateAICreditLimit(*maxAICredits); err != nil {
+		return err
 	}
 	if *timeout <= 0 {
 		return fmt.Errorf("acp: --timeout must be positive")
@@ -873,6 +887,13 @@ func runACP(args []string) error {
 	}
 	if *managedStage && !*managedCommit {
 		return fmt.Errorf("acp: --managed-stage requires --managed-commit")
+	}
+	resolved, err := resolveConfiguration()
+	if err != nil {
+		return err
+	}
+	if err := requiredRuntimeCeiling(resolved.Config.Runtime.Provider, *maxAICredits); err != nil {
+		return err
 	}
 	prompts := make(map[string]string, 2)
 	for role, path := range map[string]string{"CODER": *coderPromptFile, "REVIEWER": *reviewerPromptFile} {

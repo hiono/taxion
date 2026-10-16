@@ -288,7 +288,7 @@ func (c *Controller) AuthorizeTools(ctx context.Context, dispatchID, sessionID s
 	if err := state.Graph.CheckHandoffStart(dispatchID); err != nil {
 		return err
 	}
-	if err := state.Graph.CheckTaskSpecificationUse(dispatch.TaskID, "copilot"); err != nil {
+	if err := state.Graph.CheckTaskSpecificationUse(dispatch.TaskID, runtime.ProviderName(c.runtime)); err != nil {
 		return err
 	}
 	if _, err := c.checkExecutionConfiguration(state.Graph, dispatchID); err != nil {
@@ -324,7 +324,7 @@ func (c *Controller) authorizeExecution(ctx context.Context, dispatchID, operati
 	if state.Records.Restore != nil && slices.Contains(state.Records.Restore.TaskIDs, dispatch.TaskID) {
 		return fmt.Errorf("taxion: restored execution requires a newly approved successor; old SDK sessions cannot resume")
 	}
-	if err := state.Graph.CheckTaskSpecificationUse(dispatch.TaskID, "copilot"); err != nil {
+	if err := state.Graph.CheckTaskSpecificationUse(dispatch.TaskID, runtime.ProviderName(c.runtime)); err != nil {
 		return err
 	}
 	candidate, err := c.checkExecutionConfiguration(state.Graph, dispatchID)
@@ -386,7 +386,7 @@ func (c *Controller) checkServiceAccess(ctx context.Context, dispatchID, session
 	if !ok {
 		return fmt.Errorf("taxion: specification gate requires a saved Dispatch")
 	}
-	if err := state.Graph.CheckTaskSpecificationUse(dispatch.TaskID, "copilot"); err != nil {
+	if err := state.Graph.CheckTaskSpecificationUse(dispatch.TaskID, runtime.ProviderName(c.runtime)); err != nil {
 		return err
 	}
 	_, err = c.checkExecutionConfiguration(state.Graph, dispatchID)

@@ -135,7 +135,7 @@ func searchCmd(args []string, output io.Writer, attach bool) error {
 			defer cancel()
 			var once sync.Once
 			var acquisitionErr error
-			worker, err := copilot.New(copilot.Config{
+			worker, err := newRoleWorker(copilot.Config{
 				Role: "ORCHESTRATOR", WorkingDirectory: tracked.Worktree, Configuration: selection,
 				BudgetGuidance: tracked.BudgetGuidance,
 				CLIPath:        cli, BaseDirectory: base, MaxAICredits: credits,

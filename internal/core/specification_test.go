@@ -122,6 +122,7 @@ func approvedSpecification(t *testing.T) Specification {
 	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
+
 	spec := Specification{
 		ID: "service-v1", Title: "Service contract", Source: "https://example.org/service",
 		Location: "section 2", Version: "1", RetrievedAt: time.Now().UTC(), Body: body,
@@ -135,6 +136,38 @@ func approvedSpecification(t *testing.T) Specification {
 	spec.Ingestion = &SpecificationApproval{"human", "human:local-ingestion", hash}
 	spec.Copilot = &SpecificationApproval{"human", "human:copilot-send", hash}
 	return spec
+}
+
+func TestSpecificationSendApprovalIsProviderSpecific(t *testing.T) {
+	spec := approvedSpecification(t)
+	if err := CheckSpecificationUse([]Specification{spec}, "opencode"); err == nil {
+		t.Fatal("Copilot approval authorized OpenCode transmission")
+	}
+	hash, err := SpecificationHash(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Copilot = nil
+	spec.OpenCode = &SpecificationApproval{"human", "human:opencode-send", hash}
+	for _, purpose := range []string{"runtime", "opencode"} {
+		if err := CheckSpecificationUse([]Specification{spec}, purpose); err != nil {
+			t.Fatalf("%s: %v", purpose, err)
+		}
+	}
+	for _, purpose := range []string{"copilot", "publication"} {
+		if err := CheckSpecificationUse([]Specification{spec}, purpose); err == nil {
+			t.Fatalf("OpenCode approval authorized %s", purpose)
+		}
+	}
+	copied := cloneSpecifications([]Specification{spec})
+	copied[0].OpenCode.Actor = "changed"
+	if spec.OpenCode.Actor != "human" {
+		t.Fatal("cloned provider approval aliases the original")
+	}
+	spec.OpenCode.Hash = "sha256:" + strings.Repeat("0", 64)
+	if err := CheckSpecificationUse([]Specification{spec}, "opencode"); err == nil {
+		t.Fatal("stale OpenCode snapshot approval accepted")
+	}
 }
 
 func TestSpecificationSnapshotPermissionsAndQuotedInstruction(t *testing.T) {

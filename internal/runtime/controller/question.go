@@ -91,6 +91,7 @@ type QuestionResult struct {
 	BudgetGuidance   *budgetObservation   `json:"budgetGuidance,omitempty"`
 	BudgetSupplement string               `json:"budgetSupplement,omitempty"`
 	InstructionSent  bool                 `json:"instructionSent,omitempty"`
+	InvalidAnswer    string               `json:"invalidAnswer,omitempty"`
 }
 
 func questionContextsEqual(current, supplied QuestionContext) (bool, error) {
@@ -295,7 +296,7 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 		if err != nil {
 			return err
 		}
-		if err := state.Graph.CheckTaskSpecificationUse(taskID, "copilot"); err != nil {
+		if err := state.Graph.CheckTaskSpecificationUse(taskID, runtime.ProviderName(worker)); err != nil {
 			return err
 		}
 		return ctx.Err()
@@ -407,9 +408,11 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				}
 				var answer QuestionAnswer
 				if err := core.DecodeGraphInput(strings.NewReader(output), &answer); err != nil {
+					result.InvalidAnswer = output
 					return result, fmt.Errorf("taxion: question answer has an invalid shape")
 				}
 				if err := validateQuestionAnswer(answer, result.Context); err != nil {
+					result.InvalidAnswer = output
 					return result, err
 				}
 				observe := ObserveQuestion

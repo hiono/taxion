@@ -73,6 +73,15 @@ type ConfigurationIdentity interface {
 	CheckServiceAccess(ctx context.Context, sessionID string) error
 }
 
+// ProviderName defaults legacy adapters to their existing Copilot data gate.
+// Alternative runtimes must identify their own outgoing-data permission.
+func ProviderName(worker Identity) string {
+	if provider, ok := worker.(interface{ Provider() string }); ok {
+		return provider.Provider()
+	}
+	return "copilot"
+}
+
 type EventCursor interface {
 	EventCursor(sessionID string) (uint64, error)
 	EventsAfter(ctx context.Context, sessionID string, cursor uint64) (<-chan Event, error)

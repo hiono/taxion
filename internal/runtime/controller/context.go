@@ -91,7 +91,7 @@ func RenderWorkspaceDispatchContext(state store.Workspace, dispatch core.GraphDi
 		return "", err
 	}
 	dispatch.Instruction.Decisions = decisions
-	if err := core.CheckSpecificationUse(dispatch.Instruction.Specifications, "copilot"); err != nil {
+	if err := core.CheckSpecificationUse(dispatch.Instruction.Specifications, "runtime"); err != nil {
 		return "", err
 	}
 	var reviewDiff string

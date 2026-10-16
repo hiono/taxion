@@ -137,7 +137,7 @@ func planNewRequest(ctx context.Context, db *store.Store, selected config.Config
 			"required": []string{"title", "objective", "scope", "outOfScope", "acceptance", "validationCommands"}},
 	}}
 	schema["required"] = []string{"recommendation", "confirmed", "assumptions", "unconfirmed", "questions", "proposal"}
-	worker, err := copilot.New(copilot.Config{
+	worker, err := newRoleWorker(copilot.Config{
 		Role: "ORCHESTRATOR", SystemPrompt: requestPlannerPrompt, WorkingDirectory: task.Worktree,
 		Configuration: selection, AvailableTools: []string{}, ResponseSchema: schema,
 		BudgetGuidance: task.BudgetGuidance,
@@ -170,7 +170,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *repo == "" || *timeout < time.Second || *credits <= 0 || *repairs < 0 || *repairs > 100 || len(paths) > 16 {
+	if *repo == "" || *timeout < time.Second || *credits < 0 || *repairs < 0 || *repairs > 100 || len(paths) > 16 {
 		return fmt.Errorf("request requires --repo, --timeout (at least 1s) and --max-ai-credits; --max-repairs must be 0-100")
 	}
 	if err := copilot.ValidateAICreditLimit(*credits); err != nil {
@@ -181,6 +181,9 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		return err
 	}
 	selected := resolved.Config
+	if err := requiredRuntimeCeiling(selected.Runtime.Provider, *credits); err != nil {
+		return err
+	}
 	guidance, err := core.NewBudgetGuidance(selected.Execution.BudgetGuidance, *budgetGuidance)
 	if err != nil {
 		return err
@@ -239,15 +242,22 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	if request == "" {
 		return fmt.Errorf("request text must not be empty")
 	}
+	discovery := "Planner receives the request, all committed paths grouped by directory and selected context files; native customization discovery is enabled, with skill but no file/shell tools.\n" +
+		"Native file hooks and configured servers may run host commands or connect externally."
+	ceiling := fmt.Sprintf("Per-session soft credit ceiling: %g (not a total or hard cap)", *credits)
+	if selected.Runtime.Provider == "opencode" {
+		discovery = "Planner receives the request, committed path inventory and selected context files; host HOME/configuration, shell, hooks, MCP and plugins are not exposed.\n" +
+			"Only explicitly approved skills are copied into the isolated role; unapproved native permission requests are cancelled."
+		ceiling = "Copilot AI-credit ceilings and account quota are unsupported; the explicit deadline and approved repair limit apply."
+	}
 	if _, err := fmt.Fprintf(output,
 		"Repository: %s\nWorktree: %s\nBranch: %s\nBaseline: %s\nRuntime account: %s\n"+
-			"Deadline: %s; repairs: %d\nPer-session soft credit ceiling: %g (not a total or hard cap)\n"+
+			"Deadline: %s; repairs: %d\n%s\n"+
 			"Budget guidance: %s (%s); account quota read: %t\n"+
-			"Planner receives the request, all committed paths grouped by directory and selected context files; native customization discovery is enabled, with skill but no file/shell tools.\n"+
-			"Native file hooks and configured servers may run host commands or connect externally.\n"+
+			"%s\n"+
 			"有料のPlanner対話を開始するには /plan、取り消すには /quit。まだコードは変更しません。\n",
-		*repo, root, branch, baseline, selected.Runtime.Account, *timeout, *repairs, *credits,
-		guidance.Mode, guidance.Source, guidance.AccountReadApproved); err != nil {
+		*repo, root, branch, baseline, selected.Runtime.Account, *timeout, *repairs, ceiling,
+		guidance.Mode, guidance.Source, guidance.AccountReadApproved, discovery); err != nil {
 		return err
 	}
 	line, err := read()
@@ -509,10 +519,14 @@ func displayRequestPlan(output io.Writer, answer controller.QuestionAnswer) erro
 func displayRequestUsage(output io.Writer, usage []core.DispatchUsage, sessionCeiling float64,
 	accountQuota *runtime.QuotaSnapshot) error {
 	quotaStatus := requestQuotaStatus(accountQuota)
+	ceiling := "unsupported"
+	if sessionCeiling > 0 {
+		ceiling = fmt.Sprintf("%g AI credits", sessionCeiling)
+	}
 	if len(usage) == 0 {
 		_, err := fmt.Fprintf(output,
-			"Planner turn usage: unavailable; session soft ceiling: %g AI credits; AI-credit account balance and percentages: unavailable; %s\n",
-			sessionCeiling, quotaStatus)
+			"Planner turn usage: unavailable; session soft ceiling: %s; AI-credit account balance and percentages: unavailable; %s\n",
+			ceiling, quotaStatus)
 		return err
 	}
 	for index, call := range usage {
@@ -525,9 +539,14 @@ func displayRequestUsage(output io.Writer, usage []core.DispatchUsage, sessionCe
 			amount = fmt.Sprintf("%g nano-AIU", *call.TotalNanoAIU)
 		}
 		if _, err := fmt.Fprintf(output,
-			"Planner call %d usage: %s (AI-credit status: %s); session soft ceiling: %g AI credits; AI-credit account balance and percentages: unavailable; %s\n",
-			index+1, amount, status, sessionCeiling, quotaStatus); err != nil {
+			"Planner call %d usage: %s (AI-credit status: %s); session soft ceiling: %s; AI-credit account balance and percentages: unavailable; %s\n",
+			index+1, amount, status, ceiling, quotaStatus); err != nil {
 			return err
+		}
+		if call.Scope != "" {
+			if _, err := fmt.Fprintf(output, "Reported token scope: %s; complete turn/Flow token totals: unavailable.\n", call.Scope); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/tools"
@@ -37,6 +38,7 @@ type Approval struct {
 	Source      string `json:"source"`
 	Hash        string `json:"hash"`
 	Copilot     bool   `json:"copilot"`
+	OpenCode    bool   `json:"opencode,omitempty"`
 	Publication bool   `json:"publication"`
 }
 
@@ -97,9 +99,10 @@ func (scope Scope) Hash() (string, error) {
 				return "", fmt.Errorf("taxion: PDF search requires an approved Python interpreter and pdfminer library")
 			}
 		case strings.EqualFold(filepath.Ext(document.Asset.Path), ".docx"),
-			strings.EqualFold(filepath.Ext(document.Asset.Path), ".pptx"):
+			strings.EqualFold(filepath.Ext(document.Asset.Path), ".pptx"),
+			strings.EqualFold(filepath.Ext(document.Asset.Path), ".md"):
 		default:
-			return "", fmt.Errorf("taxion: local search supports PDF, DOCX, PPTX and selected private conversation exports")
+			return "", fmt.Errorf("taxion: local search supports Markdown, PDF, DOCX, PPTX and selected private conversation exports")
 		}
 	}
 	scope.Approval = nil
@@ -149,6 +152,21 @@ func Search(ctx context.Context, scope Scope, query string) (Result, error) {
 		switch {
 		case strings.HasSuffix(strings.ToLower(document.Asset.Path), ".json.md"):
 			sections, err = readConversation(data, document.MessageIDs)
+		case strings.EqualFold(filepath.Ext(document.Asset.Path), ".md"):
+			if !utf8.Valid(data) || bytes.ContainsRune(data, '\x00') {
+				return Result{}, fmt.Errorf("taxion: Markdown source must be UTF-8 text without NUL")
+			}
+			line := 1
+			for _, paragraph := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n\n") {
+				end := line + strings.Count(paragraph, "\n")
+				if text := strings.TrimSpace(paragraph); text != "" {
+					if len(text) > 1<<20 {
+						return Result{}, fmt.Errorf("taxion: Markdown paragraph exceeds 1 MiB; narrow the source")
+					}
+					sections = append(sections, section{Location: fmt.Sprintf("lines:%d-%d", line, end), Text: text})
+				}
+				line = end + 2
+			}
 		case strings.EqualFold(filepath.Ext(document.Asset.Path), ".pdf"):
 			sections, err = readPDF(ctx, scope, data)
 		case strings.EqualFold(filepath.Ext(document.Asset.Path), ".docx"),
@@ -194,6 +212,10 @@ func Search(ctx context.Context, scope Scope, query string) (Result, error) {
 			if scope.Approval.Copilot {
 				copy := approval
 				spec.Copilot = &copy
+			}
+			if scope.Approval.OpenCode {
+				copy := approval
+				spec.OpenCode = &copy
 			}
 			if scope.Approval.Publication {
 				copy := approval

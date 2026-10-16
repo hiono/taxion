@@ -106,6 +106,37 @@ Runtime・workflow 実行の `--controller-validation-submission` は、モデ�
 - `internal/runtime/copilot` は公式 Go Copilot SDK を使う。role・worktree ごとに adapter を設定し、session は Auto と明示 tool allowlist を使う。infinite-session compaction は有効。CLI は保存済み Dispatch snapshot を role 別 system prompt に追加し、turn と compaction をまたいで承認済み契約を system context に保つ。resume 時も同じ system prompt、worktree、tool を渡す。SDK permission handler は、Coder に worktree 内の file 書込みと allowlist 内の SDK tool の一回使用を許可し、Reviewer に割当 worktree 内の読取りを許可する。shell request と worktree 外の path は拒否する。この handler の対象は SDK permission request であり、host・外部 tool は独自の保護を使う。
 - `internal/runtime/controller` は、対応付けた session の作成、再開、送信、停止、利用量記録前に、Dispatch の role、割当 worktree、active status、configuration hash を確認する。session ID、hash、model、token・cache 利用量を Dispatch とともに SQLite に保存する。管理下の staging・commit には、active Task と、tool 呼出し時の呼出し元 session も必要。Dispatch が Flow に属する場合は、review flow が実行中であり、保存期限と契約内であることも要求する。token 数は新しい Flow の停止条件ではない。
 
+### OpenCode ACP adapter
+
+`internal/runtime/openacp` は ACP v1 の stdio client として、承認した OpenCode 1.19.0 を
+role ごとの Linux namespace で起動する。Taxion が server になる `taxion acp` と
+接続の向きを区別する。Controller の共通契約を使い、OpenCode SDK・provider API は追加しない。
+実行ファイルと server 設定の絶対パス・内容 hash は Dispatch の設定承認に含む。
+接続後の protocol、agent mode、操作者設定と同じ model を確認してから prompt を送る。
+
+承認 path の複製を workspace とし、Git metadata・host HOME・credential・shell を渡さない。
+Reviewer workspace と agent 設定は read-only mount とし、process の capability を落とす。
+Coder の export は承認 path、regular file、初期 host 内容との一致を照合する。
+I/O 失敗で export が途中まで進んだ場合は明示エラーとし、隔離側の成果を保持する。
+host network はモデル通信に使用し、通信先や provider 内部の処理を隔離したとは扱わない。
+
+native permission の `ask` は client が一律 `cancelled` にする。client filesystem・terminal は
+提供しない。承認 skills だけを複製し、MCP・実行型 plugin・RTK・shell は未対応とする。
+tool call と完了更新は execution event として保存する。これは tool の完了観測であり、
+skill が出力品質を改善したことは別に検証する。
+
+prompt response の usage は `scope: latest-assistant-message` を付け、tool iteration 全体や
+Flow 全体の既知 token 合計として使わない。`usage_update` の context 使用量と累積 USD cost は
+`context_usage`、usage 欠落は `acp_usage_unavailable` として別に保存する。
+`acp_capabilities` は送信時に記録して Start 後の cursor からも取得できるようにする。
+account quota・Copilot AI-credit ceiling は未対応で、指定された上限を黙って無効にしない。
+
+停止では取消通知の後に process の終了・reap と export を確認する。異常切断を正常完了にせず、
+prompt を自動再送しない。別 process/provider の session への再接続は拒否し、
+新しい設定と予算を承認した successor Task で継続する。provider 認証と repository permission は
+`UNVERIFIED` として記録する。[設定と復旧手順](../userguide/configuration.md#opencode-acp-の設定と制約)と
+[ADR-0038](adr/0038-run-opencode-acp-with-sealed-role-boundaries.md)を参照する。
+
 ## Skills・plugins・MCP・hooks と出力圧縮
 
 通常の Copilot SDK session は create・resume ともに探索を明示的に有効にする。SDK に `nil` を渡すだけでは project・personal skill が読み込まれず、CLI の一覧と一致しない場合がある。探索方式は config hash の `native-cli-discovery-v2` に含め、旧方式の session を新しい実行契約で再開しない。明示 ToolPolicy と取消専用 adapter の探索抑止、role 別 file・shell permission は維持する。

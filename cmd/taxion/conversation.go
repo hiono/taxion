@@ -170,7 +170,7 @@ func conversationCmd(args []string, output io.Writer) error {
 		return err
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(*task) == "" || strings.TrimSpace(*question) == "" ||
-		*timeout <= 0 || *credits <= 0 {
+		*timeout <= 0 || *credits < 0 {
 		return fmt.Errorf("conversation ask requires a Task, question, positive time limit and session credit ceiling")
 	}
 	if err := copilot.ValidateAICreditLimit(*credits); err != nil {
@@ -190,6 +190,9 @@ func conversationCmd(args []string, output io.Writer) error {
 	}
 	resolved, err := resolveConfiguration()
 	if err != nil {
+		return err
+	}
+	if err := requiredRuntimeCeiling(resolved.Config.Runtime.Provider, *credits); err != nil {
 		return err
 	}
 	if _, err := controller.CheckConfiguration(db, *task, resolved.Config); err != nil {
@@ -233,7 +236,7 @@ func conversationCmd(args []string, output io.Writer) error {
 		"type": "array", "minItems": 1, "items": map[string]any{"type": "string", "enum": sources},
 	}
 	prompt += "\nChoose sources only from the response schema's allowed paths. A composite record is a valid source; do not add guessed child paths."
-	worker, err := copilot.New(copilot.Config{
+	worker, err := newRoleWorker(copilot.Config{
 		Role: "ORCHESTRATOR", SystemPrompt: prompt,
 		WorkingDirectory: tracked.Worktree, Configuration: selection,
 		BudgetGuidance: tracked.BudgetGuidance,

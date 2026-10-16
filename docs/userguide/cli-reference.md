@@ -314,6 +314,7 @@ Taxion は出典付き作業承認、期待 account と対象の検査、実行�
 | GitHub Enterprise + Copilot | `UNIMPLEMENTED` | `COPILOT_SDK` | `UNIMPLEMENTED` |
 | GitLab + Copilot | `UNIMPLEMENTED` | `COPILOT_SDK` | `UNIMPLEMENTED` |
 | Bitbucket + Copilot | `UNIMPLEMENTED` | `COPILOT_SDK` | `UNIMPLEMENTED` |
+| OpenCode を選択した local worktree | remote permission は `UNVERIFIED` | `OPENCODE_ACP_LINUX_ISOLATED` | `UNIMPLEMENTED` |
 
 実装済み adapter でも、対応 credential 参照、導入済み provider CLI、実 access、現在の承認が必要となる。静的な対応だけでは実行を許可せず、未対応の repository 組合せは runtime 検査で停止する。
 
@@ -445,6 +446,27 @@ Runtime command は active な Task Graph Dispatch と role 専用 system prompt
 SDK の session credit ceiling は応答後に判定される soft ceiling で、総費用を抑える保証ではない。credit と token は別の単位。`workflow run` の ceiling は各 Coder・Reviewer session に独立して適用し、**Flow 全体の合計予算ではない**。個人の課金 receipt を repository 文書・実行証拠に公開しない。
 
 `task plan --repo <repo>` は SQLite Task Graph と参照 Memory から後続操作を再構成する。延期 Task、その出典と再開条件、既存 decision、各 Dispatch の発行契約と結果を保つ。未決 Human decision、延期作業の再評価、証拠収集、review の照合、実行候補を分ける。計画生成は保存 Task 状態と認可を変えない。同じ出力は session 再生成後も `GET /api/tasks/plan?repo=<repo>` と ACP `taxion/plan` の `{"repository":"<repo>"}` から取得できる。
+
+### OpenCode ACP の実行
+
+`runtime.provider: opencode` は承認した executable と server 設定を使う Linux 専用の
+ACP client adapter である。モデル・認証・quota を Taxion から操作しない。
+`config check --capabilities` は静的範囲、`doctor` と `runtime auth` は local asset の照合を
+表示する。これらの成功は provider 認証・remote repository 権限・課金資格の証明ではない。
+
+`request`・`workflow run/step`・`acp` の worker 選択は共通である。Copilot 専用の
+非ゼロ `--max-ai-credits`、`--cli`、`--base-directory`、managed commit・stage、
+`conversation search --sdk` は拒否する。明示 deadline と修正回数を承認し、
+host の仕様検索・validation と同一 tree の独立レビューを使う。
+`runtime start` は起動した所有 process 内の turn を実行するが、別 process の
+`resume`・`send`・`events`・`stop` で session を attach することはできない。
+停止は所有 runner で行い、終了と部分成果を照合して新 Task で継続する。
+
+承認した file の複製と skills だけを agent に渡し、Reviewer は OS で read-only にする。
+shell・MCP・実行型 plugin・RTK は未対応。native `ask` は client が `cancelled` にし、
+tool 定義の存在から実行許可を推定しない。最新 assistant message の usage は
+`latest-assistant-message` として保存し、turn/Flow 全体や account quota と合算しない。
+準備・切替・export 失敗時の確認は[OpenCode 設定](configuration.md#opencode-acp-の設定と制約)を参照する。
 
 ### 上限付き review flow
 

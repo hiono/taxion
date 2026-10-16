@@ -654,6 +654,9 @@ func sameWorktree(expected, actual string) bool {
 }
 
 func nonnegativeUsage(usage core.DispatchUsage) bool {
+	if usage.Scope != "" && usage.Scope != "latest-assistant-message" {
+		return false
+	}
 	if usage.Accounting != nil && (strings.TrimSpace(usage.Accounting.SourceSessionID) == "" ||
 		usage.Accounting.Sequence <= 0 || strings.TrimSpace(usage.Accounting.UsageID) == "") {
 		return false

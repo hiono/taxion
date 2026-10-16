@@ -50,7 +50,7 @@ Milestone に割り当てられた75 Issue すべてについて、表の該当�
 
 ## ADR の状態と現在の参照先
 
-ADR-0001〜0037 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。
+ADR-0001〜0038 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。
 
 | ADR | 判断 | 現在の参照先・適用範囲 |
 | --- | --- | --- |
@@ -91,6 +91,7 @@ ADR-0001〜0037 はすべて `Accepted` の判断を記録する。採択は選�
 | [0035](adr/0035-use-selected-user-chat-messages-as-requirement-sources.md) | 会話 export は選択した user 発言だけを private な仕様 source として扱い、取込み・Copilot 送信・公開を個別承認する | `specification-input.md`、`orchestration-requirements.md`。synthetic 回帰は追加済み。実会話の Task 添付・Copilot 送信は未受入れ |
 | [0036](adr/0036-prioritize-approved-goals-over-token-thresholds.md) | 予測不能な token 閾値で新しい承認済み実行を停止せず、call 別利用量を報告する。既存 `maxTokens` / `BUDGET_LIMIT` は履歴互換だけに残す | `task-graph.md`、`runtime-contract.md`、`execution-records.md`、`user-guide.md`。同単位の account allowance がない残高・割合は unavailable |
 | [0037](adr/0037-publish-release-notes-on-github-only.md) | リリースノート本文は GitHub Release に保存し、未達条件は Issue、導入手順は利用者ガイドに分ける | `CONTRIBUTING.md`、`user-guide.md`、GitHub Releases。repository に release-note ファイルを置かない |
+| [0038](adr/0038-run-opencode-acp-with-sealed-role-boundaries.md) | OpenCode ACP を role 別の Linux namespace で実行し、承認 path・read-only review・用途別送信許可を維持する | `runtime-contract.md`、`configuration.md`、`specification-input.md`。最小実 prompt の成功と実文書の通し受入れは区別する |
 
 ADR-0026〜0028 は、初回利用と復旧の調査後に追加した。ローカルの実 Git・fake Runtime テストで、許可範囲、同一 tree の引継ぎ、successor の照合を確認した。停止専用操作では、旧 suspended Dispatch を終了し、追加モデル指示・利用量なしで部分 Git 証拠と両方の結果 receipt を保持した。
 

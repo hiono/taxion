@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -23,10 +24,14 @@ type Config struct {
 		CredentialRef string `yaml:"credentialRef" json:"credentialRef"`
 	} `yaml:"repository" json:"repository"`
 	Runtime struct {
-		Provider      string `yaml:"provider" json:"provider"`
-		Account       string `yaml:"account" json:"account"`
-		CredentialRef string `yaml:"credentialRef" json:"credentialRef"`
-		ContractRef   string `yaml:"contractRef" json:"contractRef"`
+		Provider       string `yaml:"provider" json:"provider"`
+		Account        string `yaml:"account" json:"account"`
+		CredentialRef  string `yaml:"credentialRef" json:"credentialRef"`
+		ContractRef    string `yaml:"contractRef" json:"contractRef"`
+		ACPCommand     string `yaml:"acpCommand,omitempty" json:"acpCommand,omitempty"`
+		ACPCommandHash string `yaml:"acpCommandHash,omitempty" json:"acpCommandHash,omitempty"`
+		ACPConfig      string `yaml:"acpConfig,omitempty" json:"acpConfig,omitempty"`
+		ACPConfigHash  string `yaml:"acpConfigHash,omitempty" json:"acpConfigHash,omitempty"`
 	} `yaml:"runtime" json:"runtime"`
 	Execution struct {
 		Requester      string `yaml:"requester" json:"requester"`
@@ -124,6 +129,8 @@ func (c *Config) fields() map[string]*string {
 		"repository.credentialRef": &c.Repository.CredentialRef,
 		"runtime.provider":         &c.Runtime.Provider, "runtime.account": &c.Runtime.Account,
 		"runtime.credentialRef": &c.Runtime.CredentialRef, "runtime.contractRef": &c.Runtime.ContractRef,
+		"runtime.acpCommand": &c.Runtime.ACPCommand, "runtime.acpCommandHash": &c.Runtime.ACPCommandHash,
+		"runtime.acpConfig": &c.Runtime.ACPConfig, "runtime.acpConfigHash": &c.Runtime.ACPConfigHash,
 		"execution.requester": &c.Execution.Requester, "execution.worker": &c.Execution.Worker,
 		"execution.approvalRef":    &c.Execution.ApprovalRef,
 		"execution.budgetGuidance": &c.Execution.BudgetGuidance,
@@ -135,7 +142,8 @@ func (c Config) validate(required bool) error {
 		return fmt.Errorf("configuration requires version 1")
 	}
 	for name, value := range c.fields() {
-		if required && *value == "" && name != "execution.budgetGuidance" || strings.ContainsAny(*value, " \t\r\n") {
+		optional := name == "execution.budgetGuidance" || strings.HasPrefix(name, "runtime.acp")
+		if required && *value == "" && !optional || strings.ContainsAny(*value, " \t\r\n") {
 			return fmt.Errorf("%s requires a nonempty identifier without whitespace", name)
 		}
 		if c.Execution.BudgetGuidance != "" && c.Execution.BudgetGuidance != "off" &&
@@ -148,8 +156,21 @@ func (c Config) validate(required bool) error {
 	default:
 		return fmt.Errorf("repository.provider requires github, gitlab, or bitbucket")
 	}
-	if c.Runtime.Provider != "" && c.Runtime.Provider != "copilot" {
-		return fmt.Errorf("runtime.provider requires copilot")
+	if c.Runtime.Provider != "" && c.Runtime.Provider != "copilot" && c.Runtime.Provider != "opencode" {
+		return fmt.Errorf("runtime.provider requires copilot or opencode")
+	}
+	if c.Runtime.Provider == "copilot" && (c.Runtime.ACPCommand != "" || c.Runtime.ACPCommandHash != "" ||
+		c.Runtime.ACPConfig != "" || c.Runtime.ACPConfigHash != "") {
+		return fmt.Errorf("runtime ACP settings require the opencode provider")
+	}
+	if c.Runtime.Provider == "opencode" && required {
+		if c.Runtime.Account != "opencode-managed" || c.Runtime.CredentialRef != "opencode-managed" {
+			return fmt.Errorf("OpenCode manages its own authentication; runtime account and credentialRef require opencode-managed")
+		}
+		if !filepath.IsAbs(c.Runtime.ACPCommand) || !filepath.IsAbs(c.Runtime.ACPConfig) ||
+			!validAssetHash(c.Runtime.ACPCommandHash) || !validAssetHash(c.Runtime.ACPConfigHash) {
+			return fmt.Errorf("OpenCode requires approved absolute acpCommand/acpConfig paths and SHA256 hashes")
+		}
 	}
 	host, err := url.Parse("https://" + c.Repository.Host)
 	if c.Repository.Host != "" && (err != nil || host.Hostname() == "" || host.Host != c.Repository.Host ||
@@ -157,10 +178,12 @@ func (c Config) validate(required bool) error {
 		strings.ContainsAny(c.Repository.Host, "\\?#")) {
 		return fmt.Errorf("repository.host requires a hostname with an optional port")
 	}
+
 	parts := strings.Split(c.Repository.Path, "/")
 	if c.Repository.Path == "" {
 		return nil
 	}
+
 	if len(parts) < 2 || strings.ContainsAny(c.Repository.Path, "\\:?#%") {
 		return fmt.Errorf("repository.path requires an owner or namespace and repository name")
 	}
@@ -170,4 +193,16 @@ func (c Config) validate(required bool) error {
 		}
 	}
 	return nil
+}
+
+func validAssetHash(hash string) bool {
+	if len(hash) != 71 || !strings.HasPrefix(hash, "sha256:") {
+		return false
+	}
+	for _, char := range strings.TrimPrefix(hash, "sha256:") {
+		if !(char >= '0' && char <= '9' || char >= 'a' && char <= 'f') {
+			return false
+		}
+	}
+	return true
 }

@@ -28,6 +28,7 @@ type Specification struct {
 	Usage        string                 `json:"usage"`
 	Ingestion    *SpecificationApproval `json:"ingestion,omitempty"`
 	Copilot      *SpecificationApproval `json:"copilot,omitempty"`
+	OpenCode     *SpecificationApproval `json:"opencode,omitempty"`
 	Publication  *SpecificationApproval `json:"publication,omitempty"`
 }
 
@@ -40,7 +41,7 @@ type SpecificationApproval struct {
 // SpecificationHash binds each independently granted use to the exact source,
 // excerpt, version and declared usage. Permission fields do not grant each other.
 func SpecificationHash(spec Specification) (string, error) {
-	spec.Ingestion, spec.Copilot, spec.Publication = nil, nil, nil
+	spec.Ingestion, spec.Copilot, spec.OpenCode, spec.Publication = nil, nil, nil, nil
 	if !nonempty(spec.ID) || !nonempty(spec.Title) || !nonempty(spec.Source) ||
 		!nonempty(spec.Location) || !nonempty(spec.Version) || spec.RetrievedAt.IsZero() ||
 		!nonempty(spec.Body) || len(spec.Body) > 1<<20 || !nonempty(spec.Usage) ||
@@ -75,7 +76,7 @@ func validateSpecifications(specs []Specification) error {
 		if spec.Ingestion == nil {
 			return graphError("specification %s requires explicit ingestion approval", spec.ID)
 		}
-		for _, approval := range []*SpecificationApproval{spec.Ingestion, spec.Copilot, spec.Publication} {
+		for _, approval := range []*SpecificationApproval{spec.Ingestion, spec.Copilot, spec.OpenCode, spec.Publication} {
 			if approval != nil && (!nonempty(approval.Actor) || !nonempty(approval.Source) || approval.Hash != hash) {
 				return graphError("specification %s approval differs from the exact snapshot", spec.ID)
 			}
@@ -87,7 +88,7 @@ func validateSpecifications(specs []Specification) error {
 // CheckSpecificationUse is the outgoing-data gate. Local source observations
 // are repeated at use time; saved snapshots remain readable for recovery.
 func CheckSpecificationUse(specs []Specification, purpose string) error {
-	if purpose != "copilot" && purpose != "publication" {
+	if purpose != "copilot" && purpose != "opencode" && purpose != "publication" && purpose != "runtime" {
 		return graphError("unknown specification use %s", purpose)
 	}
 	if err := validateSpecifications(specs); err != nil {
@@ -95,6 +96,9 @@ func CheckSpecificationUse(specs []Specification, purpose string) error {
 	}
 	for _, spec := range specs {
 		approval := spec.Copilot
+		if purpose == "opencode" || purpose == "runtime" && approval == nil {
+			approval = spec.OpenCode
+		}
 		if purpose == "publication" {
 			approval = spec.Publication
 		}
@@ -135,7 +139,7 @@ func CheckSpecificationUse(specs []Specification, purpose string) error {
 func cloneSpecifications(specs []Specification) []Specification {
 	out := slices.Clone(specs)
 	for i := range out {
-		for _, approval := range []**SpecificationApproval{&out[i].Ingestion, &out[i].Copilot, &out[i].Publication} {
+		for _, approval := range []**SpecificationApproval{&out[i].Ingestion, &out[i].Copilot, &out[i].OpenCode, &out[i].Publication} {
 			if *approval != nil {
 				copy := **approval
 				*approval = &copy
