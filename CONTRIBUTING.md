@@ -40,7 +40,7 @@ Issue 本文、Milestone の説明、README、利用者・開発者向け文書�
 
 ## 文書の配置と責務
 
-文書名は内容を表す小文字の英語名をハイフンで区切ります。一般のガイド・仕様書に通読順ではない連番を付けず、[利用者向け索引](docs/userguide/README.md)と[開発者向け索引](docs/develop/README.md)で読者の作業順を示します。ADR の識別番号とリリースノートの版は保持します。移動時は相互リンクだけでなく、文書を読むテストとコード内参照も更新します。[旧パスの対応表](docs/develop/README.md#文書名と旧パス)は過去の記録から現在の文書を探すために使います。
+文書名は内容を表す小文字の英語名をハイフンで区切ります。一般のガイド・仕様書に通読順ではない連番を付けず、[利用者向け索引](docs/userguide/README.md)と[開発者向け索引](docs/develop/README.md)で読者の作業順を示します。ADR の識別番号は判断の参照として保持します。リリースノートは GitHub Release の本文として管理し、repository には保存しません。移動時は相互リンクだけでなく、文書を読むテストとコード内参照も更新します。[旧パスの対応表](docs/develop/README.md#文書名と旧パス)は過去の記録から現在の文書を探すために使います。
 
 | 配置 | 記載する内容 | 記載しない内容 |
 | --- | --- | --- |
@@ -52,7 +52,6 @@ Issue 本文、Milestone の説明、README、利用者・開発者向け文書�
 | `docs/userguide/audit-log.md` | 監査項目、照合の限界、保存手順 | 監査機能の実装履歴 |
 | `docs/userguide/memory-model.md` | 現在の Memory の保存、scope、昇格、検索、export | 最初の提案モデル |
 | `docs/userguide/execution-records.md` | 実行の復旧、receipt、承認済み外部記録の公開 | 作業別の経過報告 |
-| `docs/userguide/release-notes-0.1.0.md` | 公開対象、確認済み機能、既知の制約、導入方法 | 未確認の機能を公開済みとする説明 |
 | `docs/develop/charter.md` | 設立時の対象範囲と制約 | 現在の機能一覧 |
 | `docs/develop/guardrails.md` | 必要な不変条件と実装での確認箇所 | 未実装の要件が強制されるという主張 |
 | `docs/develop/privacy-provenance.md` | 公開情報とレビューの規則 | 個別の情報削除報告 |
@@ -148,9 +147,9 @@ login 済みアカウントの受入れを追加する前に、合成 fixture �
 
 ## リリース
 
-通常は M15 #79 と Release #78 の受入れ条件を満たすまで公開しません。Release owner が明示的に例外を承認する場合は、未達条件と判断根拠を対応する Issue に記録し、checkbox は完了扱いにせず残します。Release note は公開する version の機能と利用上の制約を記述し、将来作業や受入れ進捗を記載しません。未確認を成功として報告してはいけません。
+通常は M15 #79 と Release #78 の受入れ条件を満たすまで公開しません。Release owner が明示的に例外を承認する場合は、未達条件と判断根拠を対応する Issue に記録し、checkbox は完了扱いにせず残します。GitHub Release の本文には公開する version の機能と利用上の制約だけを記載します。未確認を成功として報告してはいけません。
 
-tag 作成前に開発環境の全確認コマンドを実行し、`git diff` と `git diff --cached` に非公開情報がないか確認します。リリースノートを確認済み動作と既知の制約に合わせ、候補 commit の SHA を固定します。次の操作は受入れ条件を満たした後だけ実行します。tag と同名の Release が既にある場合は、対象 SHA と状態を確認し、自動で削除・移動しません。
+tag 作成前に開発環境の全確認コマンドを実行し、`git diff` と `git diff --cached` に非公開情報がないか確認します。GitHub Release に載せる本文を確認済み動作と利用上の制約に合わせ、候補 commit の SHA を固定します。通常は受入れ条件を満たしてから公開します。例外を承認した場合は Issue に未達条件と理由を記録します。tag と同名の Release が既にある場合は、対象 SHA と状態を確認し、自動で削除・移動しません。
 
 ```bash
 git tag -a v0.1.0 -m "Taxion 0.1.0"
@@ -159,13 +158,13 @@ git rev-parse 'v0.1.0^{commit}'
 git ls-remote origin 'refs/tags/v0.1.0*'
 ```
 
-公開した tag の対象 commit が固定した候補と一致することを確認します。その後、既存の設定・インストールに影響しない隔離環境で、[リリースノートの導入・更新・削除](docs/userguide/release-notes-0.1.0.md#公開後の導入)を実行します。更新と削除の手順はそれぞれ同文書の見出しを参照してください。pseudo-version の過去成功を公開 tag の導入成功として扱いません。失敗した場合は Release object を公開せず、tag を保持して失敗箇所を記録します。
+公開した tag の対象 commit が固定した候補と一致することを確認します。その後、既存の設定・インストールに影響しない隔離環境で、[利用者ガイドの導入・更新・削除手順](docs/userguide/user-guide.md#現在の導入方法)を実行します。pseudo-version の過去成功を公開 tag の導入成功として扱いません。失敗した場合は Release object を公開せず、tag を保持して失敗箇所を記録します。
 
-導入確認の成功後に、リリースノートの草案表記を公開用へ変更し、確認結果を Issue に記録します。例外承認がある場合は、Issue に受入れ未達と判断を記録してから公開します。Release note は version の機能と利用上の制約だけを記述します。公開用ノートを保存した commit が候補版の後になった場合も、tag をその commit へ移動しません。次の操作は tag が存在することを要求し、GitHub CLI による暗黙の tag 作成を避けます。
+導入確認の成功後に、GitHub Release 用の Markdown 本文を repository 外で確定し、確認結果を Issue に記録します。例外承認がある場合は、Issue に受入れ未達と判断を記録してから公開します。次の操作は tag が存在することを要求し、GitHub CLI による暗黙の tag 作成を避けます。
 
 ```bash
 gh release create v0.1.0 --verify-tag --title "Taxion 0.1.0" \
-  --notes-file docs/userguide/release-notes-0.1.0.md
+  --notes-file /tmp/taxion-v0.1.0-release-notes.md
 gh release view v0.1.0 --json tagName,targetCommitish,isDraft,isPrerelease,url,body
 ```
 

@@ -30,6 +30,6 @@ Task 契約や skill 内容の固定・監査を個別に指定する場合だ�
 | [Memory](memory-model.md) | 保存範囲、承認、検索、export、ローカル移行 |
 | [リモート接続](remote-access.md) | SSH 転送、token、公開接続時の設定 |
 | [監査ログ](audit-log.md) | 記録内容、照合の限界、保存とローテーション |
-| [v0.1.0 リリースノート案](release-notes-0.1.0.md) | 公開前の受入れ条件、対象機能、制約、公開後の導入方法 |
+| [GitHub Releases](https://github.com/hiono/taxion/releases) | 公開 version と各版の変更内容 |
 
 実装の仕様と設計判断は[開発者向け文書](../develop/README.md)に分けています。Task の状態と承認の詳細は[Task Graph](../develop/task-graph.md)、仕様資料の利用許可は[仕様入力](../develop/specification-input.md)を参照してください。

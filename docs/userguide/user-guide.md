@@ -4,7 +4,32 @@
 
 ## 現在の導入方法
 
-v0.1.0 tag と GitHub Release はまだ公開されていません。そのため、現時点では source checkout から実行します。Go 1.26.0 が必要です。
+公開済みの v0.1.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
+
+```sh
+mise use -g go@1.26.0 go:github.com/hiono/taxion/cmd/taxion@v0.1.0
+mise exec -- taxion --help
+```
+
+最新版へ更新するには、`v0.1.0` を導入したい公開 version に置き換えます。
+
+```sh
+mise use -g go@1.26.0 'go:github.com/hiono/taxion/cmd/taxion@<VERSION>'
+```
+
+削除するには、global mise 設定から Taxion を外します。
+
+```sh
+mise unuse -g go:github.com/hiono/taxion/cmd/taxion
+```
+
+Go backend の導入済み version が残り、他の設定でも使っていなければ、mise から個別に削除できます。
+
+```sh
+mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.1.0
+```
+
+ソースから実行する場合は Go 1.26.0 が必要です。
 
 ```sh
 git clone https://github.com/hiono/taxion.git
@@ -17,12 +42,7 @@ export PATH="$PWD/bin:$PATH"
 
 `mise exec --` を使うため、shell への mise 有効化設定はビルドの前提ではありません。
 
-`go:` backend は Go の実行可能 package を `go install` で導入します。Taxion の `v0.1.0` tag が公開された後、[mise の Go backend](https://mise.jdx.dev/dev-tools/backends/go.html) に Go 1.26.0 と tag を指定します。
-
-```sh
-mise use -g go@1.26.0 go:github.com/hiono/taxion/cmd/taxion@v0.1.0
-mise exec -- taxion --help
-```
+`go:` backend は Go の実行可能 package を `go install` で導入します。[mise の Go backend](https://mise.jdx.dev/dev-tools/backends/go.html) で Go と Taxion の version を選択できます。
 
 ## 設定と実行前確認
 
