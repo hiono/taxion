@@ -67,6 +67,13 @@ nano-AIU と `AICreditsStatus` を event 出力へ報告する。account quota �
 新規実行の入力・停止条件には使わない。停止済み Flow の結果は書き換えず、
 継続には新しい Task の承認が必要となる。
 
+OpenCode ACP の利用量は、取得元ごとに単位が異なる。ACP prompt response が返すのは最後の
+assistant message の usage であり、その turn の全 tool iteration の合計ではない。
+`usage_update` の `used` は context の使用量、`size` は context の上限を指し、
+`cost` は assistant message の cost を合算した session 累積の USD であって
+account quota ではない。これらはどれも Taxion の Flow 合計や課金保証へ読み替えない。
+未取得・未確認の利用量は、ゼロ・無料・無制限として扱わない。
+
 ### 結果と履歴の照合
 
 結果の receipt は、保存した結果とその時点の利用量をまとめて照合する。
