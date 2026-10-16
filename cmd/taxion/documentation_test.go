@@ -191,6 +191,11 @@ func TestUserGuideDistinguishesACPBuildAndSkillPaths(t *testing.T) {
 		"file read が許可された role に限り",
 		"`/config/opencode/skills/<skill-name>/`",
 		"未承認の外部 directory は拒否",
+		"`Rate limit exceeded`",
+		"同時実行や無条件の再送を重ねず",
+		"成功 Coder を含む元 Flow を `replacesFlow` に指定",
+		"元 Task が既に `SUPERSEDED` でも",
+		"tools/skills も後続 Task の新しい承認から解決",
 	} {
 		if !strings.Contains(body, detail) {
 			t.Errorf("user guide omits ACP preparation constraint %q", detail)

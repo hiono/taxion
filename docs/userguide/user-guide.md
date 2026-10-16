@@ -411,13 +411,17 @@ Copilot で Flow が停止しても Dispatch に保存 session が残る場合�
 
 OpenCode は別 process の `runtime stop` で保存 session へ接続できません。所有 runner で停止し、process の終了と部分成果の保存を確認します。`CANCEL_REQUESTED` のままなら取消完了とは扱わず、後続 Task の承認・実行を重ねません。詳しくは[OpenCode の設定と制約](configuration.md#opencode-acp-の設定と制約)を参照してください。
 
+無料価格のモデルでも、rate limit により待機・失敗する場合があります。ACP 接続後に tool・assistant の出力がないことだけでは、原因や利用量を確定できません。操作者が OpenCode 側の診断で `Rate limit exceeded` を確認した場合は、同時実行や無条件の再送を重ねず、提供側の再試行案内に従います。承認済み期限で停止した場合も正式な取消と runner 解放を確認し、未完了のレビューを成功にはしません。別モデル・認証情報・接続方式への変更を、無料という理由だけで承認済みとは扱いません。
+
 停止後は `workflow show --id FLOW-ID` と `task graph` で `CANCELLED`、`runtime-stop:` 証拠、部分 Git 証拠を確認します。`records show` では元の suspension と cancellation の結果 receipt を確認できます。取消要求だけが成功し、保存が失敗する場合もあるため、コマンドを呼んだだけで停止確認を済ませず、確認前に同じ成果物を使った実行を重ねないでください。
 
 新しい Flow は token 閾値で停止しません。既存 workspace に残る旧 `BUDGET_LIMIT` の停止記録は変更せず、部分成果や完了済み Coder 結果から続ける場合は、同じ成果物を持つ別 worktree と後続 Task の再承認が必要です。期限切れ・cancel 等で停止した作業も保存結果を確認してから続けます。commit mode は clean worktree、snapshot mode は保存 tree と同じ作業ファイルを要求します。`workflow recover` は残った runner 所有権だけを解放します。具体的な Git 手順と `continueFromDispatchId` の使い分けは[停止した作業の継続](../develop/task-graph.md#停止した作業の継続)を参照してください。
 
 snapshot mode で完了済み Coder 結果を引き継ぐ場合は、保存済み `outputSha`（baseline commit）、`outputTreeSha`、変更 path を承認した別 worktreeを用意します。後続 Task の target tree が一致することを `conversation confirm` が検査し、`workflow start` には元の Coder Dispatch ID を `continueFromDispatchId` として指定します。新しい Flow は Coder を再実行せず Reviewer から始まります。停止時点が `CANCELLED` の部分成果なら、同じ baseline と保存 tree を持つ別 worktreeを用意し、後続 Task を承認したうえで Coder から続けます。
 
-成功した Coder の後、Reviewer の実行中に予算上限へ達した場合も、Coder をやり直す必要はありません。元の Reviewer が `CANCELLED` で、対応する `runtime-stop:` 証拠が保存されていることを確認し、同じ Coder 成果物に対して後続 Task と新しいレビュー予算を承認します。新しい Reviewer の設定承認には、その後続 Flow の正確な Reviewer Task ID を含めます。元の Flow や取消結果は変更しません。
+成功した Coder の後、Reviewer の実行中に期限または旧予算上限へ達した場合も、Coder をやり直す必要はありません。元の Reviewer が `CANCELLED` で、対応する `runtime-stop:` 証拠が保存されていることを確認し、同じ Coder 成果物に対して後続 Task と新しいレビュー予算を承認します。新しい Reviewer の設定承認には、その後続 Flow の正確な Reviewer Task ID を含めます。元の Flow や取消結果は変更しません。
+
+Reviewer-only の後続実行も停止した場合は、成功 Coder を含む元 Flow を `replacesFlow` に指定し、別の後続 Task を承認します。元 Task が既に `SUPERSEDED` でも、exact hash・保存成果・出典の照合は必要です。tools/skills も後続 Task の新しい承認から解決し、以前の承認を転用しません。
 
 ## 別マシンへの一ファイル移送
 
