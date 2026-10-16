@@ -198,7 +198,7 @@ func TestNativeToolDefinitionsNeverGrantUnapprovedOperations(t *testing.T) {
 				for _, name := range []string{"read", "glob", "grep"} {
 					want := "allow"
 					if role == "ORCHESTRATOR" {
-						want = "deny"
+						want = "ask"
 					}
 					if permission[name] != want {
 						t.Fatal("read permission differs from role tools", permission)
@@ -429,6 +429,19 @@ func TestBlockedACPInputCannotPreventDeadlineOrStop(t *testing.T) {
 			case <-a.done:
 			case <-ctx.Done():
 				t.Fatal("blocked ACP stdin prevented process termination")
+			}
+			if err := a.Resume(ctx, id); err == nil {
+				t.Fatal("terminated session resumed for execution")
+			}
+			var attachment runtime.StopAttachment = a
+			if err := attachment.ResumeForStop(ctx, "previous-runtime-session"); err == nil {
+				t.Fatal("safe stop attached another runtime session")
+			}
+			if err := attachment.ResumeForStop(ctx, id); err != nil {
+				t.Fatal("owned terminated session cannot finish safe-stop bookkeeping", err)
+			}
+			if err := a.Stop(ctx, id); err != nil {
+				t.Fatal("owned deadline stop cannot complete", err)
 			}
 		})
 	}

@@ -22,6 +22,7 @@ OpenCode の設定には agent 別 permission があるが、ACP は解決済み
 必要な native tool 定義を ask として残し、ACP client が未承認要求を cancelled に
 する設定では、同じ実行ファイルとモデルによる最小 prompt が成功した。
 この観測を「Zen は OpenCode からしか使えない」という一般仕様にはしない。
+設定以外のサーバー側条件もあり得るため、この比較だけで原因は確定しない。
 
 ## Decision
 
@@ -37,8 +38,9 @@ Linux の user・mount・PID namespace と chroot を使い、capability を落�
 Coder の変更は path・file 種別・host 側の変更競合を照合してから export する。
 export 失敗時は成功にせず、隔離側の成果を保持してその場所をエラーに含める。
 
-native tool の未承認操作は ACP permission request を必ず cancelled にし、
-client-side filesystem・terminal を実装しない。tool 定義を残す ask は実行許可ではない。
+shell は native 設定でも `deny` とする。file tool のない助言 session では read 系の
+定義を `ask` として残すが、ACP permission request は必ず cancelled にする。
+`ask` は実行許可ではなく、client-side filesystem・terminal も実装しない。
 skills は承認した hash の directory だけを複製する。コピー中に読んだ元の metadata と
 内容を既存の asset hash で照合し、元の file・directory の権限を保持する。
 directory の割当サイズは新規作成時に異なり得るため、コピー先に同じ asset hash は要求しない。
@@ -58,11 +60,11 @@ tool 結果の `content` 配列は assistant 本文と別に保存し、空の�
 最終メッセージは JSON 全体、または末尾の単一 `json` fence だけを受け付ける。
 後者の前にある説明は delta に残し、複数の block・末尾の説明・不正 JSON は拒否する。
 JSON 内の必須項目、識別子、Git と実行証拠の検証は共通 controller で維持する。
-未許可 tool は native 設定でも `deny` とし、拒否するだけの確認要求を発生させない。
-予期しない ACP permission 要求の取消と OS 隔離は引き続き維持する。
 
 停止は session/cancel の通知だけで完了にせず、所有 process の終了・reap と部分成果の
-保存を確認する。別 process や別 runtime の session ID への再接続は未対応とする。
+保存を確認する。期限切れで所有 process が先に終了した場合も、同じ adapter の
+停止専用照合から正式な取消記録を完了する。実行用 resume は終了後も拒否する。
+別 process や別 runtime の session ID への再接続は未対応とする。
 旧 Dispatch、予算、usage、receipt、Git 証拠は保持し、後続 Task の設定と成果を再承認する。
 Copilot 用の仕様送信許可を OpenCode に流用せず、`opencode` 用の exact hash 承認を要求する。
 

@@ -163,7 +163,7 @@ func (a *Adapter) ConfigHash() string {
 	data, _ := json.Marshal(struct {
 		Adapter string `json:"adapter"`
 		Config
-	}{"openacp-isolated-v7", a.config})
+	}{"openacp-isolated-v9", a.config})
 	return hashBytes(data)
 }
 func (a *Adapter) ExecutionConfiguration() json.RawMessage {
@@ -259,9 +259,11 @@ func (a *Adapter) prepare() error {
 	if err != nil {
 		return err
 	}
-	permission := map[string]string{"*": "deny"}
-	for _, name := range []string{"bash", "read", "glob", "grep"} {
-		permission[name] = "deny"
+	permission := map[string]string{"*": "deny", "bash": "deny"}
+	// Retain read-only definitions for tool-free advisory sessions; every
+	// unapproved request is still cancelled by the ACP client.
+	for _, name := range []string{"read", "glob", "grep"} {
+		permission[name] = "ask"
 	}
 	if slices.Contains(a.config.AvailableTools, "view") || slices.Contains(a.config.AvailableTools, "read") {
 		permission["read"], permission["glob"], permission["grep"] = "allow", "allow", "allow"
@@ -753,6 +755,18 @@ func (a *Adapter) Resume(ctx context.Context, session string) error {
 	defer a.mu.Unlock()
 	if a.closed || a.stopped || a.session == "" || a.session != session || a.failure != nil {
 		return fmt.Errorf("openacp: session unavailable; cross-process/provider resume is unsupported; use an approved successor Task")
+	}
+	return nil
+}
+
+func (a *Adapter) ResumeForStop(ctx context.Context, session string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed || a.session == "" || a.session != session {
+		return fmt.Errorf("openacp: safe stop requires the current adapter's owned session")
 	}
 	return nil
 }
