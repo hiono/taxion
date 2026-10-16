@@ -192,13 +192,13 @@ func TestNativeToolDefinitionsNeverGrantUnapprovedOperations(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, permission := range []map[string]string{settings.Permission, settings.Agent["taxion"].Permission} {
-				if permission["*"] != "deny" || permission["bash"] != "ask" || permission["skill"] == "allow" {
+				if permission["*"] != "deny" || permission["bash"] != "deny" || permission["skill"] == "allow" {
 					t.Fatal("unapproved operation was enabled", permission)
 				}
 				for _, name := range []string{"read", "glob", "grep"} {
 					want := "allow"
 					if role == "ORCHESTRATOR" {
-						want = "ask"
+						want = "deny"
 					}
 					if permission[name] != want {
 						t.Fatal("read permission differs from role tools", permission)
@@ -285,6 +285,32 @@ func TestACPSubmissionUsesLatestAssistantMessage(t *testing.T) {
 	if strings.Join(boundaries, ",") != "commentary,final" ||
 		strings.Join(deltas, "") != `I will edit the file.{"ok":true}` {
 		t.Fatal("message boundaries or original commentary were lost", boundaries, deltas)
+	}
+}
+
+func TestAssistantSubmissionFraming(t *testing.T) {
+	for _, output := range []string{
+		`{"ok":true}`,
+		"```json\n{\"ok\":true}\n```",
+		"Verified actual edits.\n\n```json\n{\"ok\":true}\n```",
+	} {
+		submission, err := assistantSubmission(output)
+		if err != nil || submission != `{"ok":true}` {
+			t.Fatal("unambiguous JSON framing rejected", submission, err)
+		}
+	}
+	for _, output := range []string{
+		"",
+		"Verified actual edits.",
+		"Verified actual edits. {\"ok\":true}",
+		"inline ```json\n{\"ok\":true}\n```",
+		"```json\n{\"ok\":true}\n```\nTrailing commentary.",
+		"```json\n{\"ok\":false}\n```\n```json\n{\"ok\":true}\n```",
+		"Verified.\n```json\n{invalid}\n```",
+	} {
+		if _, err := assistantSubmission(output); err == nil {
+			t.Fatal("ambiguous or invalid submission accepted", output)
+		}
 	}
 }
 

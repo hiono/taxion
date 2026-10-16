@@ -94,6 +94,7 @@ func TestOpenCodeLiveDocumentFlow(t *testing.T) {
 	}
 	worktree := filepath.Join(root, "worktree")
 	branch := "work/opencode-" + strings.ToLower(rand.Text())
+	flowID := "opencode-document-" + strings.TrimPrefix(branch, "work/opencode-")
 	gitTest(t, repository, "worktree", "add", "-b", branch, worktree, baselineRef)
 	baseline := gitTest(t, worktree, "rev-parse", "HEAD")
 	previousStore := storePath
@@ -274,15 +275,24 @@ execution: {requester: delegated-operator, worker: local, approvalRef: opencode-
 		if err := json.Unmarshal(data, &previousState); err != nil {
 			t.Fatal(err)
 		}
-		source, found := previousState.Graph.GraphDispatch("opencode-document-flow-dispatch-0")
-		stopped, flowFound := previousState.Graph.ReviewFlow("opencode-document-flow")
-		if !found || !flowFound || stopped.Status != "STOPPED" || stopped.RunnerID != "" ||
+		if len(previousState.Graph.ReviewFlows) != 1 {
+			t.Fatal("previous candidate requires exactly one recorded document Flow")
+		}
+		stopped := previousState.Graph.ReviewFlows[0]
+		if len(stopped.DispatchIDs) == 0 {
+			t.Fatal("previous candidate has no Coder Dispatch")
+		}
+		source, found := previousState.Graph.GraphDispatch(stopped.DispatchIDs[0])
+		if !found || source.TaskID != "opencode-document" || stopped.Status != "STOPPED" || stopped.RunnerID != "" ||
 			source.Status != core.DispatchFailed || source.Result == nil ||
 			source.Instruction.OutputMode != core.OutputModeWorktreeTreeSnapshot ||
 			source.Instruction.BaselineSHA != baseline || source.Repository != selected.Repository.Path {
 			t.Fatal("previous candidate requires a stopped, failed snapshot Coder at the same public baseline")
 		}
-		candidate, err = gitproof.CapturePartial(source)
+		// This is a new operator observation, not a receipt for the failed Dispatch.
+		observation := core.GraphDispatch{ID: flowID + "-candidate-observation",
+			Repository: source.Repository, Recipient: source.Recipient, Instruction: source.Instruction}
+		candidate, err = gitproof.CapturePartial(observation)
 		if err != nil || candidate.HeadSHA != baseline || !slices.Equal(candidate.ChangedFiles, []string{target}) {
 			t.Fatal("previous candidate is not the exact single-file retained work", err)
 		}
@@ -298,6 +308,7 @@ execution: {requester: delegated-operator, worker: local, approvalRef: opencode-
 		}
 		save("candidate-history-source.json", map[string]any{
 			"path": previousCandidate, "hash": fmt.Sprintf("sha256:%x", sha256.Sum256(data)), "observedPartial": candidate,
+			"sourceDispatchId": source.ID, "observationId": observation.ID,
 			"reason": "Retain the failed submission and authored paragraph; do not relabel the old Dispatch as successful",
 		})
 	}
@@ -361,7 +372,6 @@ execution: {requester: delegated-operator, worker: local, approvalRef: opencode-
 	if err != nil {
 		t.Fatal(err)
 	}
-	flowID := "opencode-document-flow"
 	if _, err := controller.ConfirmIntake(db, controller.IntakeConfirmation{
 		TaskID: task.ID, ExpectedHash: hash, Actor: selected.Execution.Requester,
 		Source: "user:complete-78-79-80-with-opencode", Selection: selected,

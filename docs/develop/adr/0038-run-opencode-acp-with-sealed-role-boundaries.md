@@ -55,6 +55,11 @@ context 使用量も別 event として保存し、未取得値からゼロ・�
 OpenCode 1.19.0 が送る assistant の `messageId` ごとに本文を区別し、最終メッセージだけを
 正式な結果として検証する。途中の説明も delta と message 開始 event に残す。
 tool 結果の `content` 配列は assistant 本文と別に保存し、空の最終応答は明示的に拒否する。
+最終メッセージは JSON 全体、または末尾の単一 `json` fence だけを受け付ける。
+後者の前にある説明は delta に残し、複数の block・末尾の説明・不正 JSON は拒否する。
+JSON 内の必須項目、識別子、Git と実行証拠の検証は共通 controller で維持する。
+未許可 tool は native 設定でも `deny` とし、拒否するだけの確認要求を発生させない。
+予期しない ACP permission 要求の取消と OS 隔離は引き続き維持する。
 
 停止は session/cancel の通知だけで完了にせず、所有 process の終了・reap と部分成果の
 保存を確認する。別 process や別 runtime の session ID への再接続は未対応とする。

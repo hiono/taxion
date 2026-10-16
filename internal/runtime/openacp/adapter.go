@@ -163,7 +163,7 @@ func (a *Adapter) ConfigHash() string {
 	data, _ := json.Marshal(struct {
 		Adapter string `json:"adapter"`
 		Config
-	}{"openacp-isolated-v5", a.config})
+	}{"openacp-isolated-v7", a.config})
 	return hashBytes(data)
 }
 func (a *Adapter) ExecutionConfiguration() json.RawMessage {
@@ -260,10 +260,8 @@ func (a *Adapter) prepare() error {
 		return err
 	}
 	permission := map[string]string{"*": "deny"}
-	// Keep native definitions available without granting access: every ask is
-	// cancelled by the ACP client, and the namespace contains no shell.
 	for _, name := range []string{"bash", "read", "glob", "grep"} {
-		permission[name] = "ask"
+		permission[name] = "deny"
 	}
 	if slices.Contains(a.config.AvailableTools, "view") || slices.Contains(a.config.AvailableTools, "read") {
 		permission["read"], permission["glob"], permission["grep"] = "allow", "allow", "allow"
@@ -714,19 +712,37 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 		case result.StopReason != "end_turn":
 			a.emit(runtime.Event{Type: runtime.EventFailed, Payload: "ACP prompt did not finish normally: " + result.StopReason})
 		default:
-			output = strings.TrimSpace(output)
-			if output == "" {
-				a.protocolFailure("ACP turn ended without an assistant submission")
+			output, err = assistantSubmission(output)
+			if err != nil {
+				a.protocolFailure(err.Error())
 				return
-			}
-			if strings.HasPrefix(output, "```json\n") && strings.HasSuffix(output, "\n```") {
-				output = strings.TrimSuffix(strings.TrimPrefix(output, "```json\n"), "\n```")
 			}
 			a.emit(runtime.Event{Type: runtime.EventOutput, Payload: output})
 			a.emit(runtime.Event{Type: runtime.EventTurnFinished})
 		}
 	}()
 	return nil
+}
+
+func assistantSubmission(output string) (string, error) {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return "", fmt.Errorf("ACP turn ended without an assistant submission")
+	}
+	if json.Valid([]byte(output)) {
+		return output, nil
+	}
+	const opening = "```json\n"
+	at := strings.Index(output, opening)
+	if at < 0 || at > 0 && output[at-1] != '\n' ||
+		strings.Contains(output[:at], "```") || !strings.HasSuffix(output, "\n```") {
+		return "", fmt.Errorf("ACP assistant submission requires JSON or one final fenced JSON block")
+	}
+	body := strings.TrimSpace(strings.TrimSuffix(output[at+len(opening):], "\n```"))
+	if strings.Contains(body, "\n```") || !json.Valid([]byte(body)) {
+		return "", fmt.Errorf("ACP assistant submission has an invalid or ambiguous JSON block")
+	}
+	return body, nil
 }
 
 func (a *Adapter) Resume(ctx context.Context, session string) error {
