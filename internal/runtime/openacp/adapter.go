@@ -60,6 +60,7 @@ type Adapter struct {
 	mu              sync.Mutex
 	nextID          uint64
 	pending         map[string]chan response
+	toolCalls       map[string]core.ExecutionObservation
 	session         string
 	model           string
 	history         []runtime.Event
@@ -154,11 +155,14 @@ func New(config Config) (*Adapter, error) {
 func (a *Adapter) Role() string     { return a.config.Role }
 func (a *Adapter) Provider() string { return "opencode" }
 func (a *Adapter) Worktree() string { return a.config.WorkingDirectory }
+func (a *Adapter) UsesBoundResultIdentity() bool {
+	return a.config.ResponseSchema["$id"] == "urn:taxion:dispatch-result:bound:v1"
+}
 func (a *Adapter) ConfigHash() string {
 	data, _ := json.Marshal(struct {
 		Adapter string `json:"adapter"`
 		Config
-	}{"openacp-isolated-v2", a.config})
+	}{"openacp-isolated-v3", a.config})
 	return hashBytes(data)
 }
 func (a *Adapter) ExecutionConfiguration() json.RawMessage {
@@ -514,7 +518,14 @@ func (a *Adapter) update(params json.RawMessage) {
 	var event struct {
 		Session string `json:"sessionId"`
 		Update  struct {
-			Type    string `json:"sessionUpdate"`
+			Type   string `json:"sessionUpdate"`
+			CallID string `json:"toolCallId"`
+			Title  string `json:"title"`
+			Status string `json:"status"`
+			Input  struct {
+				Name string `json:"name"`
+				Path string `json:"filePath"`
+			} `json:"rawInput"`
 			Content struct {
 				Type string `json:"type"`
 				Text string `json:"text"`
@@ -527,6 +538,39 @@ func (a *Adapter) update(params json.RawMessage) {
 	}
 	a.mu.Lock()
 	matches := event.Session == a.session && a.busy
+	var observation *core.ExecutionObservation
+	isTool := event.Update.Type == "tool_call" || event.Update.Type == "tool_call_update"
+	if matches && isTool && event.Update.CallID != "" {
+		if a.toolCalls == nil {
+			a.toolCalls = map[string]core.ExecutionObservation{}
+		}
+		current, known := a.toolCalls[event.Update.CallID]
+		current.CallID, current.Phase = event.Update.CallID, "tool-start"
+		if current.Tool == "" {
+			current.Tool = event.Update.Title
+		}
+		if event.Update.Input.Path != "" {
+			current.Path = event.Update.Input.Path
+		}
+		if a.config.ToolPolicy != nil {
+			for _, asset := range a.config.ToolPolicy.Skills {
+				if filepath.Base(asset.Path) == event.Update.Input.Name {
+					current.Tool, current.Skill = "skill", event.Update.Input.Name
+				}
+			}
+		}
+		if known || current.Tool != "" {
+			switch event.Update.Status {
+			case "completed", "failed":
+				success := event.Update.Status == "completed"
+				current.Phase, current.Success = "tool-complete", &success
+			default:
+				current.Success = nil
+			}
+			a.toolCalls[current.CallID] = current
+			observation = &current
+		}
+	}
 	if matches && event.Update.Type == "agent_message_chunk" && event.Update.Content.Type == "text" {
 		if a.output.Len()+len(event.Update.Content.Text) > 256*1024 {
 			a.mu.Unlock()
@@ -544,8 +588,16 @@ func (a *Adapter) update(params json.RawMessage) {
 		a.emit(runtime.Event{Type: runtime.EventContextUsage, Payload: string(params)})
 	} else if event.Update.Type == "agent_message_chunk" {
 		a.emit(runtime.Event{Type: runtime.EventOutputDelta, Payload: event.Update.Content.Text})
-	} else if event.Update.Type == "tool_call" || event.Update.Type == "tool_call_update" {
-		a.emit(runtime.Event{Type: runtime.EventExecution, Payload: string(params)})
+	} else if isTool {
+		a.emit(runtime.Event{Type: "acp_tool_update", Payload: string(params)})
+		if observation != nil {
+			payload, err := json.Marshal(observation)
+			if err != nil {
+				a.protocolFailure("cannot encode ACP execution observation")
+				return
+			}
+			a.emit(runtime.Event{Type: runtime.EventExecution, Payload: string(payload)})
+		}
 	}
 }
 
@@ -569,6 +621,7 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 	}
 	a.busy = true
 	a.output.Reset()
+	a.toolCalls = map[string]core.ExecutionObservation{}
 	a.turn++
 	turn := a.turn
 	a.turnDone = make(chan struct{})

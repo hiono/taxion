@@ -65,9 +65,31 @@ func TestOpenCodeLiveDocumentFlow(t *testing.T) {
 		t.Fatal("requires the operator-prepared free Big Pickle configuration, without additional settings")
 	}
 	repository := gitTest(t, ".", "rev-parse", "--show-toplevel")
+	previous := os.Getenv("TAXION_OPENCODE_LIVE_PLANNER_PREVIOUS")
+	var first controller.QuestionResult
+	baselineRef := "HEAD"
+	if previous != "" {
+		if !filepath.IsAbs(previous) {
+			t.Fatal("previous Planner evidence must be an absolute private file")
+		}
+		data, err := os.ReadFile(previous)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(data, &first); err != nil || first.Answer == nil || first.Changed ||
+			first.InvalidAnswer != "" || first.Context.Task.Task.ID != "opencode-document-planning" ||
+			first.Context.Task.Task.Repo != "hiono/taxion" {
+			t.Fatal("previous Planner evidence is not a valid public-document question", err)
+		}
+		baselineRef = first.Context.Task.Task.BaselineSHA
+		if len(baselineRef) != 40 || strings.Trim(baselineRef, "0123456789abcdef") != "" {
+			t.Fatal("previous Planner evidence has an invalid baseline")
+		}
+		gitTest(t, repository, "merge-base", "--is-ancestor", baselineRef, "HEAD")
+	}
 	worktree := filepath.Join(root, "worktree")
 	branch := "work/opencode-" + strings.ToLower(rand.Text())
-	gitTest(t, repository, "worktree", "add", "-b", branch, worktree, "HEAD")
+	gitTest(t, repository, "worktree", "add", "-b", branch, worktree, baselineRef)
 	baseline := gitTest(t, worktree, "rev-parse", "HEAD")
 	previousStore := storePath
 	storePath = filepath.Join(root, "ledger.json")
@@ -175,20 +197,7 @@ execution: {requester: delegated-operator, worker: local, approvalRef: opencode-
 	}
 	save("scope.json", scope)
 	save("acquired.json", acquired)
-	var first controller.QuestionResult
-	if previous := os.Getenv("TAXION_OPENCODE_LIVE_PLANNER_PREVIOUS"); previous != "" {
-		if !filepath.IsAbs(previous) {
-			t.Fatal("previous Planner evidence must be an absolute private file")
-		}
-		data, err := os.ReadFile(previous)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal(data, &first); err != nil || first.Answer == nil || first.Changed ||
-			first.InvalidAnswer != "" || first.Context.Task.Task.ID != planning.ID ||
-			first.Context.Task.Task.BaselineSHA != baseline {
-			t.Fatal("previous Planner evidence is not a valid matching public-baseline question", err)
-		}
+	if previous != "" {
 		save("planner-history-source.json", struct {
 			Path string `json:"path"`
 			Hash string `json:"hash"`
@@ -353,6 +362,14 @@ execution: {requester: delegated-operator, worker: local, approvalRef: opencode-
 		!reflect.DeepEqual(coder.Instruction.Specifications, reviewer.Instruction.Specifications) ||
 		coder.Result == nil || reviewer.Result == nil || coder.Result.OutputTreeSHA != reviewer.Result.OutputTreeSHA {
 		t.Fatal("independent same-artifact sourced review evidence differs")
+	}
+	for _, skill := range []string{"natural-japanese", "japanese-tech-writing", "cognitive-rhythm-writing"} {
+		if !slices.ContainsFunc(coder.Result.ExecutionEvidence, func(event core.ExecutionObservation) bool {
+			return event.Phase == "tool-complete" && event.Tool == "skill" && event.Skill == skill &&
+				event.Success != nil && *event.Success
+		}) {
+			t.Fatalf("actual native skill completion is missing: %s", skill)
+		}
 	}
 	t.Logf("retained evidence: %s; final tree: %s", root, coder.Result.OutputTreeSHA)
 }

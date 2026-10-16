@@ -122,7 +122,8 @@ host network はモデル通信に使用し、通信先や provider 内部の処
 
 native permission の `ask` は client が一律 `cancelled` にする。client filesystem・terminal は
 提供しない。承認 skills だけを複製し、MCP・実行型 plugin・RTK・shell は未対応とする。
-tool call と完了更新は execution event として保存する。これは tool の完了観測であり、
+tool call と完了更新の原文は `acp_tool_update` に保存し、call ID で対応付けた
+共通形式の execution event を別に保存する。これは tool の完了観測であり、
 skill が出力品質を改善したことは別に検証する。
 
 prompt response の usage は `scope: latest-assistant-message` を付け、tool iteration 全体や

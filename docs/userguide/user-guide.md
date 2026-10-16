@@ -46,7 +46,7 @@ export PATH="$PWD/bin:$PATH"
 
 ## 設定と実行前確認
 
-作業 repository の `.gitignore` に `/.taxion/` と `/.env` を加え、[設定ガイド](configuration.md)の Global または Project 設定を用意します。先に同じ実行環境で GitHub CLI と Copilot CLI の導入・ログインを済ませ、設定例の account を実際に使う login 名へ置き換えます。[認証の準備](configuration.md#認証の準備)に手順と credential の選び方を示します。設定には secret を書きません。
+作業 repository の `.gitignore` に `/.taxion/` と `/.env` を加え、[設定ガイド](configuration.md)の Global または Project 設定を用意します。既定の Copilot 構成では、先に同じ実行環境で GitHub CLI と Copilot CLI の導入・ログインを済ませ、設定例の account を実際に使う login 名へ置き換えます。[認証の準備](configuration.md#認証の準備)に手順と credential の選び方を示します。設定には secret を書きません。
 
 ```sh
 taxion config check --sources
@@ -61,9 +61,22 @@ taxion --help
 
 設定確認は schema と採用 layer を示すだけです。Task の承認と一致するかは `config check --task TASK-ID`、Dispatch の保存済み条件も含むかは `config check --dispatch DISPATCH-ID` で確認します。実際の Copilot account は Dispatch 発行後に `runtime auth` で確認します。これらの確認は scope や予算の Human 承認に代わりません。
 
+### OpenCode ACP を選ぶ場合
+
+Linux では `runtime.provider: opencode` を選び、承認した OpenCode 1.19.0 の executable と
+server 設定を使えます。[OpenCode の設定と制約](configuration.md#opencode-acp-の設定と制約)で
+必要な隔離環境、内容 hash、未対応操作を確認してください。現在は認証情報を注入せず、
+実受入れは匿名の Big Pickle に限定しています。`doctor` と `runtime auth` は local asset の
+照合だけで、認証・quota・無料利用の保証ではありません。
+
+以降の Copilot 向け例にある非ゼロ `--max-ai-credits` や CLI/home override は OpenCode に
+流用しません。明示 deadline と repair 上限を承認し、skills は内容固定方式で指定します。
+取消は所有 runner で process 終了と部分成果の保存まで確認し、別 process の session attach は
+行いません。停止後は旧記録を保持し、新しい Task・設定・期限を承認して成果を引き継ぎます。
+
 ### 文書用 skill を使う場合
 
-通常は、設定したバックエンドが標準配置から skill・plugin・指示・custom agent を
+Copilot の通常構成では、バックエンドが標準配置から skill・plugin・指示・custom agent を
 探索します。Copilot 単体で使う skill を Taxion 用 directory へコピーしたり、
 skill ごとの hash 承認 JSON を作ったりする必要はありません。
 
@@ -141,11 +154,13 @@ skill が参照する補助ファイルは、通常の worktree / fileAccess の
 操作者が明示した検査環境で実施して証拠を残します。必要な依存や入力を事前に
 準備し、検査不能を品質合格に置き換えないでください。
 
-実行後は、Taxion が保存した session ID に対応する SDK ログの skill 呼出しと
-成功・失敗の完了結果を確認し、固定方式では `evidenceDirectory` の原本と成果物の commit SHA
+実行後は、Taxion が保存した session ID に対応する SDK ログまたは ACP execution event の skill 呼出しと
+成功・失敗の完了結果を確認し、Copilot の固定方式では `evidenceDirectory` の原本と成果物の commit SHA
 または tree SHA、付随検査、独立レビューを対応付けます。skill のロード成功だけで
 文書を合格にせず、親の開発支援 session の起動ログも代用しません。
 原本は private に保持し、公開記録には秘密値・私用パスを含めません。
+OpenCode の tool 原文は workspace の receipt に `acp_tool_update` として保存し、
+共通形式の実行証拠と同じ call ID で照合します。Copilot 用の原本 directory に記録したとは扱いません。
 
 ## 今の coding agent に操作を任せる
 

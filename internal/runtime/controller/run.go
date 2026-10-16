@@ -287,7 +287,7 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 			}
 			switch event.Type {
 			case runtime.EventOutput, runtime.EventUsage, runtime.EventTurnFinished, runtime.EventFailed, runtime.EventCancelled, runtime.EventExecution,
-				runtime.EventContextUsage, "acp_capabilities", "acp_usage_unavailable":
+				runtime.EventContextUsage, "acp_capabilities", "acp_usage_unavailable", "acp_tool_update":
 				if err := c.recordEvent(dispatch.ID, streamID, event); err != nil {
 					return err
 				}

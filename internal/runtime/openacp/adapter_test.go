@@ -14,6 +14,7 @@ import (
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 func TestMain(m *testing.M) {
@@ -206,6 +207,64 @@ func TestNativeToolDefinitionsNeverGrantUnapprovedOperations(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestACPToolUpdatesRetainRawAndNormalizeExecutionEvidence(t *testing.T) {
+	a, err := New(testConfig(t, "CODER"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.session, a.busy = "session", true
+	a.config.ToolPolicy = &tools.Policy{Skills: []tools.Asset{{Path: "/approved/writing"}}}
+	for _, payload := range []string{
+		`{"sessionId":"other","update":{"sessionUpdate":"tool_call","toolCallId":"ignored","title":"skill","rawInput":{"name":"writing"}}}`,
+		`{"sessionId":"session","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"skill","status":"pending","rawInput":{"name":"writing"}}}`,
+		`{"sessionId":"session","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed","rawOutput":"loaded"}}`,
+		`{"sessionId":"session","update":{"sessionUpdate":"tool_call","toolCallId":"call-2","title":"read","status":"pending","rawInput":{"filePath":"/workspace/file.md"}}}`,
+		`{"sessionId":"session","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-2","status":"failed"}}`,
+	} {
+		a.update(json.RawMessage(payload))
+	}
+	raw := 0
+	var observations []core.ExecutionObservation
+	for _, event := range a.history {
+		switch event.Type {
+		case "acp_tool_update":
+			raw++
+		case runtime.EventExecution:
+			var observation core.ExecutionObservation
+			if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &observation); err != nil {
+				t.Fatal("ACP execution evidence is not decodable by Controller.Finish", err)
+			}
+			observations = append(observations, observation)
+		default:
+			t.Fatal("unexpected execution event", event.Type)
+		}
+	}
+	if raw != 4 || len(observations) != 4 {
+		t.Fatal("raw or normalized evidence lost, or another session was included", raw, observations)
+	}
+	complete, failed := observations[1], observations[3]
+	if complete.CallID != "call-1" || complete.Tool != "skill" || complete.Skill != "writing" ||
+		complete.Phase != "tool-complete" || complete.Success == nil || !*complete.Success ||
+		failed.CallID != "call-2" || failed.Path != "/workspace/file.md" ||
+		failed.Phase != "tool-complete" || failed.Success == nil || *failed.Success {
+		t.Fatal("tool completion lost its invocation identity or failure", observations)
+	}
+}
+
+func TestBoundSubmissionUsesHostResultIdentity(t *testing.T) {
+	config := testConfig(t, "CODER")
+	for _, id := range []string{"", "urn:taxion:dispatch-result:bound:v1"} {
+		config.ResponseSchema = map[string]any{"$id": id}
+		a, err := New(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a.UsesBoundResultIdentity() != (id != "") {
+			t.Fatal("bound result identity differs from the approved response schema")
+		}
 	}
 }
 
