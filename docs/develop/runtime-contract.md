@@ -218,7 +218,7 @@ SDK 設定・permission・hook の合成回帰は、実モデルが skill を選
 session の tool request と完了結果、private tool evidence、成果物の SHA、
 検査結果と独立レビューを対応付けて確認する。
 親の開発支援 session の skill 起動や discovery の成功を代替証拠にしない。
-Release 0.1.0 の文書 dogfood における実 skill 利用は Issue #78 の未確認条件である。
+Release 0.1.0 の文書 dogfood における実 skill 利用は、Issue #78 の文書成果物について Coder の実 invocation と同一 tree の独立レビュー受入れまで確認済みである。
 そこで選択する外部 skill は製品の固定依存ではなく、操作者が利用許可と内容を承認する。
 
 ## Dispatch の実行と context
@@ -332,7 +332,7 @@ commit は stage 済み内容だけを使う。追加の `--managed-stage` は `
 
 stage は Controller の認可 transaction、呼出し検査、Flow 上限を共用する。正規化した相対 file または追跡済み削除だけを選び、directory 再帰、強制追加、Git metadata、worktree 外の親 symlink は選べない。literal path 指定で wildcard・pathspec 展開を防ぐ。全 tree の scope・path・内容検査までは非公開 index だけを変更する。検査済み copy を flush して実 index に atomic に反映し、HEAD・作業ファイルは保つ。失敗検査は反映せず、commit は再 scan する。Git clean filter は適用し、拒否後も到達不能 local blob が残る場合がある。信頼する repository 設定と悪意ある host process との競合は sandbox の対象外とする。
 
-local 検査は登録 SDK stage・commit handler を Controller・実 Git で呼ぶが、login 済み model の tool 呼出しは証明しない。実接続の stage→commit→独立レビュー受入れは #54/#72 で別に追跡する。
+local 検査は登録 SDK stage・commit handler を Controller・実 Git で呼ぶが、login 済み model の tool 呼出しは証明しない。実接続の stage→commit→独立レビュー受入れは #72 で別に追跡する。
 
 ## event 購読の期間
 

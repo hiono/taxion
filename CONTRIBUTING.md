@@ -100,7 +100,7 @@ go test ./internal/tools ./internal/runtime/copilot ./internal/runtime/controlle
 
 ローカルの native plugin discovery だけを確認する場合は、`TAXION_TEST_LOCAL_PLUGIN_DISCOVERY=1 go test ./internal/runtime/copilot -run TestLocalPluginDiscoveryWithoutModelUse` を明示して実行します。モデル指示は送信しません。要求した確認に必要な CLI がなければ失敗します。合成 hook の結果や native discovery は、実際の skill 読み込みや文書品質の証拠にはなりません。
 
-#78 では、別途承認した実文書の作業で、選択した skill、読み込み結果、点検の証拠、同じ成果物の独立レビューを確認します。外部 skill は操作者が試用時に用意する入力であり、Taxion の依存ではありません。その本文を fixture にコピーしません。
+#78 では、別途承認した実文書の作業で、選択した3 skill の Coder による実 invocation、読み込み結果、点検の証拠、同じ tree の成果物に対する独立レビューの `SUCCEEDED / APPROVE` 受入れを確認しました。これは文書成果物に対する skill 利用の受入れであり、#78 の Release 全体の残る受入れ条件は未完了です。外部 skill は操作者が試用時に用意する入力であり、Taxion の依存ではありません。その本文を fixture にコピーしません。
 
 実文書の前に、操作者が用意した3つの執筆 skill と `natural-japanese` の付随 lint を無課金で確認できます。次の絶対パスには `natural-japanese/`、`japanese-tech-writing/`、`cognitive-rhythm-writing/` が必要です。実行には既存の `uv` と、その script の依存・Python がローカルに揃っている必要があり、テストは `uv run --offline` でダウンロードを禁止します。
 
