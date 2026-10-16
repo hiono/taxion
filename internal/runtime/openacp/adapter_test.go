@@ -97,10 +97,12 @@ func servePeer() {
 			if os.Getenv("TAXION_FAKE_HANG") == "1" {
 				continue
 			}
-			_ = encoder.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{
-				"sessionId": "fake-session", "update": map[string]any{"sessionUpdate": "agent_message_chunk",
-					"content": map[string]string{"type": "text", "text": `{"ok":true}`}},
-			}})
+			if mode != "empty-output" {
+				_ = encoder.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{
+					"sessionId": "fake-session", "update": map[string]any{"sessionUpdate": "agent_message_chunk",
+						"content": map[string]string{"type": "text", "text": `{"ok":true}`}},
+				}})
+			}
 			result = map[string]any{"stopReason": "end_turn", "usage": map[string]int{"inputTokens": 4, "outputTokens": 2}}
 			if mode == "usage-missing" {
 				result = map[string]any{"stopReason": "end_turn"}
@@ -220,9 +222,9 @@ func TestACPToolUpdatesRetainRawAndNormalizeExecutionEvidence(t *testing.T) {
 	for _, payload := range []string{
 		`{"sessionId":"other","update":{"sessionUpdate":"tool_call","toolCallId":"ignored","title":"skill","rawInput":{"name":"writing"}}}`,
 		`{"sessionId":"session","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"skill","status":"pending","rawInput":{"name":"writing"}}}`,
-		`{"sessionId":"session","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed","rawOutput":"loaded"}}`,
-		`{"sessionId":"session","update":{"sessionUpdate":"tool_call","toolCallId":"call-2","title":"read","status":"pending","rawInput":{"filePath":"/workspace/file.md"}}}`,
-		`{"sessionId":"session","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-2","status":"failed"}}`,
+		`{"sessionId":"session","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"loaded"}}],"rawOutput":"loaded"}}`,
+		`{"sessionId":"session","update":{"sessionUpdate":"tool_call","toolCallId":"call-2","title":"read","status":"pending","rawInput":{"filePath":"/workspace/file.md","name":"writing"}}}`,
+		`{"sessionId":"session","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-2","status":"failed","content":[{"type":"content","content":{"type":"text","text":"denied"}}]}}`,
 	} {
 		a.update(json.RawMessage(payload))
 	}
@@ -248,9 +250,41 @@ func TestACPToolUpdatesRetainRawAndNormalizeExecutionEvidence(t *testing.T) {
 	complete, failed := observations[1], observations[3]
 	if complete.CallID != "call-1" || complete.Tool != "skill" || complete.Skill != "writing" ||
 		complete.Phase != "tool-complete" || complete.Success == nil || !*complete.Success ||
-		failed.CallID != "call-2" || failed.Path != "/workspace/file.md" ||
+		failed.CallID != "call-2" || failed.Path != "/workspace/file.md" || failed.Skill != "" || failed.Tool != "read" ||
 		failed.Phase != "tool-complete" || failed.Success == nil || *failed.Success {
 		t.Fatal("tool completion lost its invocation identity or failure", observations)
+	}
+}
+
+func TestACPSubmissionUsesLatestAssistantMessage(t *testing.T) {
+	a, err := New(testConfig(t, "CODER"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.session, a.busy = "session", true
+	for _, payload := range []string{
+		`{"sessionId":"session","update":{"sessionUpdate":"agent_message_chunk","messageId":"commentary","content":{"type":"text","text":"I will edit the file."}}}`,
+		`{"sessionId":"session","update":{"sessionUpdate":"agent_message_chunk","messageId":"final","content":{"type":"text","text":"{\"ok\":"}}}`,
+		`{"sessionId":"other","update":{"sessionUpdate":"agent_message_chunk","messageId":"foreign","content":{"type":"text","text":"ignored"}}}`,
+		`{"sessionId":"session","update":{"sessionUpdate":"agent_message_chunk","messageId":"final","content":{"type":"text","text":"true}"}}}`,
+	} {
+		a.update(json.RawMessage(payload))
+	}
+	if a.output.String() != `{"ok":true}` || a.outputMessageID != "final" {
+		t.Fatal("commentary or another session contaminated the final submission", a.output.String())
+	}
+	var boundaries, deltas []string
+	for _, event := range a.history {
+		if event.Type == "acp_message_start" {
+			boundaries = append(boundaries, event.Payload)
+		}
+		if event.Type == runtime.EventOutputDelta {
+			deltas = append(deltas, event.Payload)
+		}
+	}
+	if strings.Join(boundaries, ",") != "commentary,final" ||
+		strings.Join(deltas, "") != `I will edit the file.{"ok":true}` {
+		t.Fatal("message boundaries or original commentary were lost", boundaries, deltas)
 	}
 }
 
@@ -402,7 +436,7 @@ func TestAssetChangesAndExecutableConfigRejectedBeforeLaunch(t *testing.T) {
 }
 
 func TestFakePeerFailuresDeniedClientOperationsAndUnknownUsage(t *testing.T) {
-	for _, mode := range []string{"version", "model", "permission", "client-filesystem", "disconnect", "malformed", "rpc-error", "usage-missing"} {
+	for _, mode := range []string{"version", "model", "permission", "client-filesystem", "disconnect", "malformed", "rpc-error", "usage-missing", "empty-output"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("TAXION_FAKE_MODE", mode)
 			a := fakeAdapter(t, false)
@@ -599,6 +633,15 @@ func checkNamespaceBoundary() error {
 	}
 	if _, err := os.Stat("/bin/sh"); !os.IsNotExist(err) {
 		return fmt.Errorf("unapproved shell is visible")
+	}
+	cmd := exec.Command("/bin/rg", "--no-config", "--files", ".")
+	cmd.Dir = "/workspace"
+	listing, err := cmd.Output()
+	if err != nil || !strings.Contains(string(listing), "boundary.json") {
+		return fmt.Errorf("native ripgrep cannot read the isolated workspace: %v", err)
+	}
+	if err := os.WriteFile("/bin/rg", []byte("changed"), 0700); err == nil {
+		return fmt.Errorf("native ripgrep is writable")
 	}
 	if _, err := os.Stat("/etc/opencode"); !os.IsNotExist(err) {
 		return fmt.Errorf("managed configuration is visible")

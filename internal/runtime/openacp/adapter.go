@@ -66,6 +66,7 @@ type Adapter struct {
 	history         []runtime.Event
 	wake            chan struct{}
 	output          strings.Builder
+	outputMessageID string
 	busy            bool
 	stopped         bool
 	closed          bool
@@ -162,7 +163,7 @@ func (a *Adapter) ConfigHash() string {
 	data, _ := json.Marshal(struct {
 		Adapter string `json:"adapter"`
 		Config
-	}{"openacp-isolated-v3", a.config})
+	}{"openacp-isolated-v5", a.config})
 	return hashBytes(data)
 }
 func (a *Adapter) ExecutionConfiguration() json.RawMessage {
@@ -275,7 +276,7 @@ func (a *Adapter) prepare() error {
 		permission["skill"] = "allow"
 		for _, asset := range a.config.ToolPolicy.Skills {
 			name := filepath.Base(asset.Path)
-			if err := copySkill(asset, filepath.Join(a.root, "config/opencode/skills", name)); err != nil {
+			if err := tools.CopyDirectory(asset, filepath.Join(a.root, "config/opencode/skills", name)); err != nil {
 				return err
 			}
 		}
@@ -518,26 +519,33 @@ func (a *Adapter) update(params json.RawMessage) {
 	var event struct {
 		Session string `json:"sessionId"`
 		Update  struct {
-			Type   string `json:"sessionUpdate"`
-			CallID string `json:"toolCallId"`
-			Title  string `json:"title"`
-			Status string `json:"status"`
-			Input  struct {
+			Type      string `json:"sessionUpdate"`
+			MessageID string `json:"messageId"`
+			CallID    string `json:"toolCallId"`
+			Title     string `json:"title"`
+			Status    string `json:"status"`
+			Input     struct {
 				Name string `json:"name"`
 				Path string `json:"filePath"`
 			} `json:"rawInput"`
-			Content struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
+			Content json.RawMessage `json:"content"`
 		} `json:"update"`
 	}
 	if json.Unmarshal(params, &event) != nil {
 		a.protocolFailure("malformed session update")
 		return
 	}
+	var content struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if event.Update.Type == "agent_message_chunk" && json.Unmarshal(event.Update.Content, &content) != nil {
+		a.protocolFailure("malformed agent message content")
+		return
+	}
 	a.mu.Lock()
 	matches := event.Session == a.session && a.busy
+	newMessage := false
 	var observation *core.ExecutionObservation
 	isTool := event.Update.Type == "tool_call" || event.Update.Type == "tool_call_update"
 	if matches && isTool && event.Update.CallID != "" {
@@ -552,7 +560,7 @@ func (a *Adapter) update(params json.RawMessage) {
 		if event.Update.Input.Path != "" {
 			current.Path = event.Update.Input.Path
 		}
-		if a.config.ToolPolicy != nil {
+		if current.Tool == "skill" && a.config.ToolPolicy != nil {
 			for _, asset := range a.config.ToolPolicy.Skills {
 				if filepath.Base(asset.Path) == event.Update.Input.Name {
 					current.Tool, current.Skill = "skill", event.Update.Input.Name
@@ -571,13 +579,18 @@ func (a *Adapter) update(params json.RawMessage) {
 			observation = &current
 		}
 	}
-	if matches && event.Update.Type == "agent_message_chunk" && event.Update.Content.Type == "text" {
-		if a.output.Len()+len(event.Update.Content.Text) > 256*1024 {
+	if matches && event.Update.Type == "agent_message_chunk" && content.Type == "text" {
+		if event.Update.MessageID != "" && event.Update.MessageID != a.outputMessageID {
+			a.output.Reset()
+			a.outputMessageID = event.Update.MessageID
+			newMessage = true
+		}
+		if a.output.Len()+len(content.Text) > 256*1024 {
 			a.mu.Unlock()
 			a.protocolFailure("agent output exceeds 256 KiB")
 			return
 		}
-		a.output.WriteString(event.Update.Content.Text)
+		a.output.WriteString(content.Text)
 	}
 	a.mu.Unlock()
 	if !matches {
@@ -587,7 +600,10 @@ func (a *Adapter) update(params json.RawMessage) {
 		// This is cumulative cost/context size, not per-call token usage.
 		a.emit(runtime.Event{Type: runtime.EventContextUsage, Payload: string(params)})
 	} else if event.Update.Type == "agent_message_chunk" {
-		a.emit(runtime.Event{Type: runtime.EventOutputDelta, Payload: event.Update.Content.Text})
+		if newMessage {
+			a.emit(runtime.Event{Type: "acp_message_start", Payload: event.Update.MessageID})
+		}
+		a.emit(runtime.Event{Type: runtime.EventOutputDelta, Payload: content.Text})
 	} else if isTool {
 		a.emit(runtime.Event{Type: "acp_tool_update", Payload: string(params)})
 		if observation != nil {
@@ -621,13 +637,14 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 	}
 	a.busy = true
 	a.output.Reset()
+	a.outputMessageID = ""
 	a.toolCalls = map[string]core.ExecutionObservation{}
 	a.turn++
 	turn := a.turn
 	a.turnDone = make(chan struct{})
 	turnDone := a.turnDone
 	a.mu.Unlock()
-	prompt = a.config.SystemPrompt + "\n\nWorkspace paths in the saved contract identify the HOST worktree. Its authorized snapshot is at /workspace. Work only there; no Git metadata or shell is provided. The host executes approved validation commands after submission. Return only one JSON object conforming to this schema:\n" +
+	prompt = a.config.SystemPrompt + "\n\nWorkspace paths in the saved contract identify the HOST worktree. Its authorized snapshot is at /workspace. Work only there; no Git metadata or shell is provided. Quoted specification bodies are supplied in context; their localPath records provenance, not an available workspace file. Read those quoted bodies instead of searching for the original source files. Use native tools for every claimed file edit or skill load. The final JSON reports actual operations; it does not instruct the host to edit files. Never claim operations that were not executed. The host executes approved validation commands after submission. Return only one JSON object conforming to this schema:\n" +
 		string(schema) + "\n\n" + prompt
 	a.emit(runtime.Event{Type: "acp_capabilities", Payload: `{"transport":"stdio","isolation":"linux-namespaces-copy","providerAuthentication":"unverified","quota":"unsupported","crossProcessResume":"unsupported","shell":"unsupported","usage":"latest-assistant-message-not-total","modelOperation":"unsupported"}`})
 	a.emit(runtime.Event{Type: runtime.EventTurnStarted})
@@ -698,6 +715,10 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 			a.emit(runtime.Event{Type: runtime.EventFailed, Payload: "ACP prompt did not finish normally: " + result.StopReason})
 		default:
 			output = strings.TrimSpace(output)
+			if output == "" {
+				a.protocolFailure("ACP turn ended without an assistant submission")
+				return
+			}
 			if strings.HasPrefix(output, "```json\n") && strings.HasSuffix(output, "\n```") {
 				output = strings.TrimSuffix(strings.TrimPrefix(output, "```json\n"), "\n```")
 			}

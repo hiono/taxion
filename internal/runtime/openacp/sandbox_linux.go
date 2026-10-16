@@ -23,6 +23,8 @@ mount --bind "$binary" "$root/bin/opencode"
 mount -o remount,bind,ro "$root/bin/opencode"
 mount --bind /usr/bin/setpriv "$root/bin/setpriv"
 mount -o remount,bind,ro "$root/bin/setpriv"
+mount --bind "$root/bin/rg" "$root/bin/rg"
+mount -o remount,bind,ro "$root/bin/rg"
 for dir in lib lib64; do
   if [ -d "/$dir" ]; then
     mount --rbind "/$dir" "$root/$dir"
@@ -43,6 +45,7 @@ if [ "$readonly" = true ]; then
 fi
 mount --bind "$root/config" "$root/config"
 mount -o remount,bind,ro "$root/config"
+chroot "$root" /bin/rg --version >/dev/null
 exec chroot "$root" /bin/setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs /bin/opencode acp
 `
 
@@ -51,6 +54,14 @@ func sandboxCommand(ctx context.Context, root, binary string, readOnly bool) (*e
 		if _, err := exec.LookPath(name); err != nil {
 			return nil, fmt.Errorf("openacp: Linux isolation requires %s: %w", name, err)
 		}
+	}
+	ripgrep, err := exec.LookPath("rg")
+	if err != nil {
+		return nil, fmt.Errorf("openacp: Linux isolation requires native ripgrep: %w", err)
+	}
+	search, err := os.ReadFile(ripgrep)
+	if err != nil {
+		return nil, fmt.Errorf("openacp: read native ripgrep: %w", err)
 	}
 	for _, dir := range []string{"bin", "lib", "lib64", "etc/ssl/certs", "dev", "proc", "tmp", "home", "config", "data", "cache", "state", "workspace"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0700); err != nil {
@@ -61,6 +72,9 @@ func sandboxCommand(ctx context.Context, root, binary string, readOnly bool) (*e
 		if err := os.WriteFile(filepath.Join(root, name), nil, 0600); err != nil {
 			return nil, err
 		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin/rg"), search, 0700); err != nil {
+		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, "unshare", "--user", "--map-root-user", "--mount", "--pid", "--fork",
 		"--kill-child=KILL", "--", "sh", "-c", namespaceScript, "taxion-openacp", root, binary, fmt.Sprint(readOnly))

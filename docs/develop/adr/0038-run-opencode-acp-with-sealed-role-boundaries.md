@@ -39,13 +39,22 @@ export 失敗時は成功にせず、隔離側の成果を保持してその場�
 
 native tool の未承認操作は ACP permission request を必ず cancelled にし、
 client-side filesystem・terminal を実装しない。tool 定義を残す ask は実行許可ではない。
-skills は承認した hash の directory だけを複製する。shell、実行型 plugin、MCP、
+skills は承認した hash の directory だけを複製する。コピー中に読んだ元の metadata と
+内容を既存の asset hash で照合し、元の file・directory の権限を保持する。
+directory の割当サイズは新規作成時に異なり得るため、コピー先に同じ asset hash は要求しない。
+OpenCode の内部検索に必要な native `rg` は Linux 環境の前提とし、隔離内へ複製して
+read-only mount にする。モデル接続前に起動を確認し、自動取得に依存しない。
+shell、実行型 plugin、MCP、
 RTK extension は未対応とし、付随検査は別途承認した host validation で行う。
 
 明示 deadline と repair 上限を使う。Copilot の AI-credit ceiling と account guidance を
 無視せず、OpenCode に指定した場合は拒否する。ACP の prompt usage は最新 assistant
 message の値であり、全 tool iteration や Flow の合計とは扱わない。累積 cost と
 context 使用量も別 event として保存し、未取得値からゼロ・無料・無制限を推測しない。
+
+OpenCode 1.19.0 が送る assistant の `messageId` ごとに本文を区別し、最終メッセージだけを
+正式な結果として検証する。途中の説明も delta と message 開始 event に残す。
+tool 結果の `content` 配列は assistant 本文と別に保存し、空の最終応答は明示的に拒否する。
 
 停止は session/cancel の通知だけで完了にせず、所有 process の終了・reap と部分成果の
 保存を確認する。別 process や別 runtime の session ID への再接続は未対応とする。

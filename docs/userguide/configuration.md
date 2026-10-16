@@ -168,8 +168,12 @@ CLI 全体の option と制約は[CLI リファレンス](cli-reference.md)を�
 
 ## OpenCode ACP の設定と制約
 
-OpenCode を使う場合は Linux の `unshare`、`mount`、`chroot`、`setpriv` と
-user namespace が必要です。Taxion は承認した OpenCode 1.19.0 の実行ファイルを
+OpenCode を使う場合は Linux の `unshare`、`mount`、`chroot`、`setpriv`、
+PATH 上の native `rg` と user namespace が必要です。
+`rg` は OpenCode 内部のファイル検索と skill ロードに使います。Taxion はその実行ファイルを
+隔離内へ複製して read-only mount にし、起動できなければモデル接続前に拒否します。
+shim や shell script ではなく、隔離内でも動く native executable を PATH に置いてください。
+Taxion は承認した OpenCode 1.19.0 の実行ファイルを
 複製して隔離内で `opencode acp` を起動します。準備不足で Copilot に切り替えることはありません。
 判断の背景は [ADR-0038](../develop/adr/0038-run-opencode-acp-with-sealed-role-boundaries.md)に記録しています。
 

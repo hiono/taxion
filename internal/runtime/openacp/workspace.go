@@ -10,53 +10,11 @@ import (
 	"strings"
 
 	"github.com/hiono/taxion/internal/core"
-	"github.com/hiono/taxion/internal/tools"
 )
 
 type fileSnapshot struct {
 	content []byte
 	mode    fs.FileMode
-}
-
-func copySkill(asset tools.Asset, destination string) error {
-	if err := tools.CheckAsset(asset, true); err != nil {
-		return err
-	}
-	err := filepath.WalkDir(asset.Path, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(asset.Path, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(destination, rel)
-		if entry.IsDir() {
-			if err := os.MkdirAll(target, info.Mode().Perm()); err != nil {
-				return err
-			}
-			return os.Chmod(target, info.Mode().Perm())
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("openacp: skill contains a non-regular file")
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(target, content, info.Mode().Perm()); err != nil {
-			return err
-		}
-		return os.Chmod(target, info.Mode().Perm())
-	})
-	if err != nil {
-		return err
-	}
-	return tools.CheckAsset(tools.Asset{Path: destination, Hash: asset.Hash}, true)
 }
 
 func approvedPaths(config Config) ([]string, error) {

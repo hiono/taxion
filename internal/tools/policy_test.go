@@ -24,6 +24,70 @@ func pinned(t *testing.T, path string) Asset {
 	return Asset{path, hash}
 }
 
+func TestCopyApprovedDirectory(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	destination := filepath.Join(root, "copy")
+	if err := os.Mkdir(source, 0750); err != nil {
+		t.Fatal(err)
+	}
+	// Deleted entries can leave a larger directory allocation than a fresh copy.
+	for i := range 100 {
+		path := filepath.Join(source, fmt.Sprintf("%03d-%s", i, strings.Repeat("x", 120)))
+		if err := os.WriteFile(path, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 100 {
+		if err := os.Remove(filepath.Join(source, fmt.Sprintf("%03d-%s", i, strings.Repeat("x", 120)))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	subdirectory := filepath.Join(source, "read-only")
+	if err := os.Mkdir(subdirectory, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(subdirectory, "SKILL.md")
+	if err := os.WriteFile(path, []byte("approved skill\n"), 0440); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(subdirectory, 0555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		os.Chmod(subdirectory, 0755)
+		os.Chmod(filepath.Join(destination, "read-only"), 0755)
+	})
+	asset := pinned(t, source)
+	if err := CopyDirectory(asset, destination); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckAsset(asset, true); err != nil {
+		t.Fatal("copy changed the approved source", err)
+	}
+	copied := filepath.Join(destination, "read-only", "SKILL.md")
+	if pinned(t, path).Hash != pinned(t, copied).Hash {
+		t.Fatal("copied file bytes or mode differ")
+	}
+	for relative, expected := range map[string]os.FileMode{".": 0750, "read-only": 0555} {
+		info, err := os.Stat(filepath.Join(destination, relative))
+		if err != nil || info.Mode().Perm() != expected {
+			t.Fatal("copied directory mode differs", relative, err)
+		}
+	}
+	if err := CopyDirectory(asset, destination); err == nil {
+		t.Fatal("copy overwrote an existing destination")
+	}
+	asset.Hash = "sha256:" + strings.Repeat("0", 64)
+	rejected := filepath.Join(root, "rejected")
+	if err := CopyDirectory(asset, rejected); err == nil {
+		t.Fatal("copy accepted an unapproved source")
+	}
+	if _, err := os.Stat(rejected); !os.IsNotExist(err) {
+		t.Fatal("rejected copy created a destination", err)
+	}
+}
+
 func fixturePolicy(t *testing.T) Policy {
 	t.Helper()
 	executable, err := os.Executable()

@@ -122,7 +122,8 @@ private database、生ログ、credential 値は commit に含めません。一
 `go test ./internal/runtime/openacp` は独自の fake ACP peer で接続・権限拒否・切断・期限・
 取消・usage 欠落を確認します。外部 OpenCode、login、モデル、network は不要です。
 Linux の namespace 境界は `TAXION_NAMESPACE_TEST=1 go test -race ./internal/runtime/openacp`
-で opt-in にできます。この検査も外部モデルは使いません。
+で opt-in にできます。この検査も外部モデルは使いません。隔離に必要な Linux command と
+PATH 上の native `rg` が必要であり、隔離内の検索成功と実行ファイルの read-only も照合します。
 
 実 OpenCode 1.19.0 の確認は、操作者が用意した executable と `model` だけの JSON 設定を
 絶対パスで指定し、両方の生 SHA-256 をそれぞれ `TAXION_OPENCODE_HASH` と
@@ -146,7 +147,16 @@ Linux の namespace 境界は `TAXION_NAMESPACE_TEST=1 go test -race ./internal/
 追加質問に答えて計画を修正する場合は、同じ公開 baseline の有効な保存済み Planner 応答を
 `TAXION_OPENCODE_LIVE_PLANNER_PREVIOUS` に絶対パスで指定できます。保存ファイルの hash と
 引継ぎ元を別に記録し、以前の質問を再実行せず、新しい返答を実 Planner に渡します。
+質問が解消した有効な提案を指定した場合は、公開 ancestor baseline から worktree を作り、
+範囲・検証・skill 条件を再照合して、その計画を新しい Task の承認に使います。
 過去の計画を自動承認する機能や、成功済み Coder の再実行機能ではありません。
+成功判定では native event にある3 skill 各々の完了と、対象節末尾への1段落の挿入を確認します。
+元の本文や他の節を書き換えた場合、モデルの作業報告だけで成功とは扱いません。
+結果の解析に失敗した実 Coder の追記を引き継ぐ場合は、その保存済み `workspace.json` を
+`TAXION_OPENCODE_LIVE_CANDIDATE_PREVIOUS` に絶対パスで指定できます。
+旧 Flow の停止、Coder の失敗状態、同じ公開 baseline、対象1件・1段落を照合し、
+観測した tree と原本 hash を保存して新 Task の承認へ含めます。旧結果は変更しません。
+今回の skill 呼出し・本文確認と必要な誤りの修正を実施し、書き直しは避けます。
 
 ### バックエンドと同じ探索を検証する
 

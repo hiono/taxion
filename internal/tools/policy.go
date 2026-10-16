@@ -243,6 +243,35 @@ func validName(name string) bool {
 // Hash includes relative paths, modes and bytes, and rejects symlinks and
 // special files. Reading is bounded for both individual files and whole trees.
 func Hash(path string) (string, error) {
+	return hashAsset(path, "")
+}
+
+// CopyDirectory verifies the bytes being copied against the approved source
+// hash. Fresh directories need not have the source's allocation size.
+func CopyDirectory(asset Asset, destination string) error {
+	if err := CheckAsset(asset, true); err != nil {
+		return err
+	}
+	if !filepath.IsAbs(destination) || filepath.Clean(destination) != destination {
+		return fmt.Errorf("taxion: asset copy requires a canonical absolute destination")
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
+		return err
+	}
+	if err := os.Mkdir(destination, 0700); err != nil {
+		return err
+	}
+	hash, err := hashAsset(asset.Path, destination)
+	if err != nil {
+		return err
+	}
+	if hash != asset.Hash {
+		return fmt.Errorf("taxion: extension asset changed while copying")
+	}
+	return CheckAsset(asset, true)
+}
+
+func hashAsset(path, destination string) (string, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return "", fmt.Errorf("taxion: asset hash requires a canonical absolute path")
 	}
@@ -252,6 +281,11 @@ func Hash(path string) (string, error) {
 	}
 	hash := sha256.New()
 	var total int64
+	type directory struct {
+		path string
+		mode fs.FileMode
+	}
+	var directories []directory
 	err = filepath.WalkDir(path, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return fmt.Errorf("taxion: extension asset is inaccessible")
@@ -265,7 +299,20 @@ func Hash(path string) (string, error) {
 			return err
 		}
 		fmt.Fprintf(hash, "%q:%o:%d\n", filepath.ToSlash(relative), info.Mode(), info.Size())
+		var target string
+		if destination != "" {
+			if info.Mode()&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky) != 0 {
+				return fmt.Errorf("taxion: asset copy does not support special permission bits")
+			}
+			target = filepath.Join(destination, relative)
+		}
 		if entry.IsDir() {
+			if target != "" {
+				if err := os.MkdirAll(target, 0700); err != nil {
+					return err
+				}
+				directories = append(directories, directory{target, info.Mode().Perm()})
+			}
 			return nil
 		}
 		if info.Size() > 256<<20 || total+info.Size() > 256<<20 {
@@ -275,8 +322,25 @@ func Hash(path string) (string, error) {
 		if err != nil {
 			return fmt.Errorf("taxion: extension asset is unreadable")
 		}
-		count, readErr := io.Copy(hash, io.LimitReader(file, (256<<20)-total+1))
+		var output io.Writer = hash
+		var copy *os.File
+		if target != "" {
+			copy, err = os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+			if err != nil {
+				file.Close()
+				return err
+			}
+			output = io.MultiWriter(hash, copy)
+		}
+		count, readErr := io.Copy(output, io.LimitReader(file, (256<<20)-total+1))
 		closeErr := file.Close()
+		if copy != nil {
+			modeErr := copy.Chmod(info.Mode().Perm())
+			copyErr := copy.Close()
+			if modeErr != nil || copyErr != nil {
+				return fmt.Errorf("taxion: asset copy failed")
+			}
+		}
 		total += count
 		if readErr != nil || closeErr != nil || total > 256<<20 || count != info.Size() {
 			return fmt.Errorf("taxion: extension asset observation failed")
@@ -285,6 +349,11 @@ func Hash(path string) (string, error) {
 	})
 	if err != nil {
 		return "", err
+	}
+	for _, directory := range slices.Backward(directories) {
+		if err := os.Chmod(directory.path, directory.mode); err != nil {
+			return "", err
+		}
 	}
 	return fmt.Sprintf("sha256:%x", hash.Sum(nil)), nil
 }
