@@ -183,6 +183,21 @@ func TestConfigurationGuideProvidesResolvableLoginDefaults(t *testing.T) {
 	}
 }
 
+func TestUserGuideDistinguishesACPBuildAndSkillPaths(t *testing.T) {
+	body := documentationText(t, "../../docs/userguide/user-guide.md")
+	for _, detail := range []string{
+		"OpenCode ACP は v0.1.0 に含まれません",
+		"main のソースからビルド",
+		"file read が許可された role に限り",
+		"`/config/opencode/skills/<skill-name>/`",
+		"未承認の外部 directory は拒否",
+	} {
+		if !strings.Contains(body, detail) {
+			t.Errorf("user guide omits ACP preparation constraint %q", detail)
+		}
+	}
+}
+
 func TestCLIReferenceCoversLiteralOptionNames(t *testing.T) {
 	reference, err := os.ReadFile("../../docs/userguide/cli-reference.md")
 	if err != nil {

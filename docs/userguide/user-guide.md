@@ -6,6 +6,10 @@
 
 公開済みの v0.1.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
+このガイドは main の実装を説明しています。OpenCode ACP は v0.1.0 に含まれません。
+OpenCode を使う場合は、以下の手順で main のソースからビルドしてください。
+公開 tag を導入しただけでは、後から追加された機能は使えません。
+
 ```sh
 mise use -g go@1.26.0 go:github.com/hiono/taxion/cmd/taxion@v0.1.0
 mise exec -- taxion --help
@@ -148,8 +152,12 @@ taxion tools hash --path /absolute/approved/skills
 固定方式で skill の名前を role prompt に書くだけでは、未承認 asset は利用可能になりません。
 `workflow run|step` は両 role の asset 欠落・改変をモデル実行前に検査します。
 
-skill が参照する補助ファイルは、通常の worktree / fileAccess の許可内で読める必要が
-あります。skill の承認だけでは、外部ファイルの `view` や shell 実行は許可されません。
+Copilot の固定方式では、skill が参照する補助ファイルも、通常の worktree / fileAccess の
+許可内で読める必要があります。skill の承認だけでは外部ファイルの `view` は許可されません。
+OpenCode では、file read が許可された role に限り、承認済み skill の補助資料を
+`/config/opencode/skills/<skill-name>/` から読めます。host の元の path ではありません。
+この directory は OS の read-only mount で保護し、未承認の外部 directory は拒否します。
+どちらの方式でも、skill の承認だけでは shell 実行は許可されません。
 付随検査は、承認した `validationCommands` で Controller に実行させるか、
 操作者が明示した検査環境で実施して証拠を残します。必要な依存や入力を事前に
 準備し、検査不能を品質合格に置き換えないでください。
