@@ -298,12 +298,12 @@ proposal の内容と hash を読み、目的・scope・file access・禁止範�
       "host": "github.com",
       "path": "owner/repository",
       "account": "scm-account",
-      "credentialRef": "scm-login"
+      "credentialRef": "gh:active"
     },
     "runtime": {
       "provider": "copilot",
       "account": "copilot-account",
-      "credentialRef": "copilot-login",
+      "credentialRef": "copilot:logged-in",
       "contractRef": "approved-contract"
     },
     "execution": {
@@ -389,7 +389,7 @@ Copilot SDK の account quota、session の累積 cost、公式 Billing API の�
 未指定時は環境変数 `TAXION_EXECUTION_BUDGET_GUIDANCE`、設定ファイルの
 `execution.budgetGuidance`、最後に `flow` の順で値を決めます
 （設定ファイル内の優先順位は [設定ガイド](configuration.md)を参照）。
-観測と実際の補足は `records show`、相談分は private planning JSON に残ります。
+観測と実際の補足は、相談分を含めて workspace の SQLite に保存し、`records show` で確認します。
 設定がない旧 Task / Dispatch へ補足を遡及適用しません。
 
 残量が少なくても acceptance や独立レビューは省略しません。
@@ -399,7 +399,9 @@ Copilot SDK の account quota、session の累積 cost、公式 Billing API の�
 
 `workflow show` の status、stop code、利用量、保存結果、Git evidence、Reviewer verdict を確認します。`COMPLETED` や `APPROVE` だけで作業成果を判断せず、対象 SHA と acceptance evidence が依頼を満たすかを確認してください。
 
-Flow が停止しても Dispatch に保存 session が残る場合は、別の runner が操作中でないことを確認してから `taxion runtime stop --dispatch DISPATCH-ID` で終了します。この操作に元の prompt や tool 設定は不要です。保存 session への停止専用接続は、新しい session やモデルへの指示を作らず、保留中の作業再開とすべての tool permission を拒否します。古い契約版でも停止できますが、接続・取消・結果保存に失敗した場合は停止済みとは記録しません。
+Copilot で Flow が停止しても Dispatch に保存 session が残る場合は、別の runner が操作中でないことを確認してから `taxion runtime stop --dispatch DISPATCH-ID` で終了します。この操作に元の prompt や tool 設定は不要です。保存 session への停止専用接続は、新しい session やモデルへの指示を作らず、保留中の作業再開とすべての tool permission を拒否します。古い契約版でも停止できますが、接続・取消・結果保存に失敗した場合は停止済みとは記録しません。
+
+OpenCode は別 process の `runtime stop` で保存 session へ接続できません。所有 runner で停止し、process の終了と部分成果の保存を確認します。`CANCEL_REQUESTED` のままなら取消完了とは扱わず、後続 Task の承認・実行を重ねません。詳しくは[OpenCode の設定と制約](configuration.md#opencode-acp-の設定と制約)を参照してください。
 
 停止後は `workflow show --id FLOW-ID` と `task graph` で `CANCELLED`、`runtime-stop:` 証拠、部分 Git 証拠を確認します。`records show` では元の suspension と cancellation の結果 receipt を確認できます。取消要求だけが成功し、保存が失敗する場合もあるため、コマンドを呼んだだけで停止確認を済ませず、確認前に同じ成果物を使った実行を重ねないでください。
 

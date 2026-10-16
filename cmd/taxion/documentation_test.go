@@ -127,6 +127,10 @@ func TestConfigurationGuideCoversEveryFieldAndOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reference, err := os.ReadFile("../../docs/userguide/cli-reference.md")
+	if err != nil {
+		t.Fatal(err)
+	}
 	requireRow := func(name string) {
 		t.Helper()
 		if !strings.Contains(string(body), "| `"+name+"` |") {
@@ -147,6 +151,9 @@ func TestConfigurationGuideCoversEveryFieldAndOverride(t *testing.T) {
 	}
 	if _, found, err := config.EnvironmentLayer(func(variable string) (string, bool) {
 		requireRow(variable)
+		if !strings.Contains(string(reference), "| `"+variable+"` |") {
+			t.Errorf("CLI reference has no configuration override table row for %q", variable)
+		}
 		return "", false
 	}); err != nil || found {
 		t.Fatal("documentation lookup unexpectedly resolved an environment layer", err)

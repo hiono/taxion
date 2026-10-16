@@ -168,6 +168,10 @@ func TestUserGuideColdStartExamplesWithoutSDK(t *testing.T) {
 			t.Fatalf("decode guide example %d: %v", index+1, err)
 		}
 	}
+	if confirmation.Selection.Repository.CredentialRef != "gh:active" ||
+		confirmation.Selection.Runtime.CredentialRef != "copilot:logged-in" {
+		t.Fatal("guide confirmation must use the same resolvable login defaults as the configuration example")
+	}
 	dir := t.TempDir()
 	t.Chdir(dir)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

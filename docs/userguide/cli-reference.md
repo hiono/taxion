@@ -125,7 +125,7 @@ draft には観測時刻・hash、出典の結果・SHA 対象、Memory version�
 
 所有 runner がその状態を観測して Runtime safe stop を実行する。停止成功時だけ `runtime-stop:` の証拠と cancel 済み Dispatch を記録する。停止失敗は未確認のままとし、継続を拒否する。発行済み・未開始の実行は、架空の停止証拠を作らず hold にする。同一入力の再送で別の role を中断できず、終了・古い target は拒否する。部分ファイルと Git 履歴は巻き戻さない。
 
-active session を所有する runner がない場合は、`runtime stop` で保存 session の完全一致を確認して接続する。新たな承認済み実行の前に所有権を照合する。
+Copilot で active session を所有する runner がない場合は、`runtime stop` で保存 session の完全一致を確認して接続する。OpenCode は別 process からの停止専用接続に対応せず、所有 runner で終了と部分成果の保存を確認する。新たな承認済み実行の前に所有権を照合する。
 
 監視中の `/interrupt`・`いま止める` は、`/hold` や Task cancellation と別の操作。`conversation watch --interactive-execution` は、選択した `/step`・`/auto` の実行中も Human 入力を受け付けることを明示選択する。二つ目の所有実行を拒否し、進捗と実行失敗を報告する。対象付き hold・中断も引き続き使える。
 
@@ -145,7 +145,7 @@ controller の検証待ちだけでは suspension を要求しない。ただし
 
 ### 設定
 
-`config check` は、固定の Global・Project YAML 設定と対応する環境変数 override を、バージョン付き設定 schema と照合する。解決後の設定では、任意の `execution.budgetGuidance` を除く以下の field が必須。`version` は整数、他の値は whitespace を含まない空でない文字列。未知の field、重複キー、暗黙の非文字列値、alias、複数 document は拒否する。
+`config check` は、固定の Global・Project YAML 設定と対応する環境変数 override を、バージョン付き設定 schema と照合する。解決後の Copilot 設定では、任意の `execution.budgetGuidance` と OpenCode 専用の4項目を除く field が必須。OpenCode 設定では `runtime.acpCommand`・`runtime.acpCommandHash`・`runtime.acpConfig`・`runtime.acpConfigHash` も必須となり、Copilot 設定には混在させない。`version` は整数、他の値は whitespace を含まない空でない文字列。未知の field、重複キー、暗黙の非文字列値、alias、複数 document は拒否する。
 
 Global file は Go の `os.UserConfigDir()` 配下の `taxion/config.yaml`。Linux は `$XDG_CONFIG_HOME` または `~/.config`、macOS は `~/Library/Application Support`、Windows は `%AppData%`。Project file は cwd の `.taxion/config.yaml`。親 directory は検索しない。存在しない既定 file は省略し、読取り不能・不正な file は error にする。file が一つもなければ error を報告する。
 
@@ -179,6 +179,10 @@ cwd に `.env` があれば、その file も untracked かつ ignore 対象で�
 | `TAXION_RUNTIME_ACCOUNT` | `runtime.account` |
 | `TAXION_RUNTIME_CREDENTIAL_REF` | `runtime.credentialRef` |
 | `TAXION_RUNTIME_CONTRACT_REF` | `runtime.contractRef` |
+| `TAXION_RUNTIME_ACP_COMMAND` | `runtime.acpCommand`（OpenCode 専用） |
+| `TAXION_RUNTIME_ACP_COMMAND_HASH` | `runtime.acpCommandHash`（OpenCode 専用） |
+| `TAXION_RUNTIME_ACP_CONFIG` | `runtime.acpConfig`（OpenCode 専用） |
+| `TAXION_RUNTIME_ACP_CONFIG_HASH` | `runtime.acpConfigHash`（OpenCode 専用） |
 | `TAXION_EXECUTION_REQUESTER` | `execution.requester` |
 | `TAXION_EXECUTION_WORKER` | `execution.worker` |
 | `TAXION_EXECUTION_APPROVAL_REF` | `execution.approvalRef` |
