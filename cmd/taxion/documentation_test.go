@@ -189,6 +189,7 @@ func TestCLIReferenceCoversLiteralOptionNames(t *testing.T) {
 		regexp.MustCompile(`\.(?:String|Bool|Int|Int64|Float64|Duration)\("([^"]+)"`),
 		regexp.MustCompile(`\.(?:StringVar|BoolVar|IntVar|Int64Var|Float64Var|DurationVar|Var)\([^,]+,\s*"([^"]+)"`),
 	}
+	options := map[string]string{}
 	for _, source := range sources {
 		if strings.HasSuffix(source, "_test.go") {
 			continue
@@ -200,19 +201,22 @@ func TestCLIReferenceCoversLiteralOptionNames(t *testing.T) {
 		for _, declaration := range declarations {
 			for _, match := range declaration.FindAllSubmatch(body, -1) {
 				option := string(match[1])
-				if !regexp.MustCompile(`--` + regexp.QuoteMeta(option) + `(?:[^a-zA-Z0-9-]|$)`).Match(reference) {
-					t.Errorf("%s: CLI reference omits --%s", source, option)
-				}
+				options[option] = source
 			}
-			for _, line := range strings.Split(string(reference), "\n") {
-				if strings.HasPrefix(line, "| `conversation search` |") {
-					if !strings.Contains(line, "`--question TEXT`") || !strings.Contains(line, "`--query TEXT`") {
-						t.Fatal("CLI reference must document both conversation search query flags")
-					}
-					return
-				}
-			}
-			t.Fatal("CLI reference omits the conversation search command")
 		}
 	}
+	for option, source := range options {
+		if !regexp.MustCompile(`--` + regexp.QuoteMeta(option) + `(?:[^a-zA-Z0-9-]|$)`).Match(reference) {
+			t.Errorf("%s: CLI reference omits --%s", source, option)
+		}
+	}
+	for _, line := range strings.Split(string(reference), "\n") {
+		if strings.HasPrefix(line, "| `conversation search` |") {
+			if !strings.Contains(line, "`--question TEXT`") || !strings.Contains(line, "`--query TEXT`") {
+				t.Fatal("CLI reference must document both conversation search query flags")
+			}
+			return
+		}
+	}
+	t.Fatal("CLI reference omits the conversation search command")
 }
