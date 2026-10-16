@@ -25,9 +25,11 @@ checked の項目は各段階で完了した作業を記録し、現在の機能
 - [x] M5 / `audit-trail` (#23)：変更・拒否の追記専用 JSONL。操作者がローテーションする。
 - [x] M5 / `public-prep` (#24)：ADR-0015 の保護設計、履歴 scan の合格、外部公開。
 - [x] M5 / `mode-switch` (#25)：F-lite の `--mode loopback|remote`、ADR-0016、IdP の延期。
-- [x] M6 / `memory-model` (#27)：ADR-0017 の層・範囲・昇格。[Memory](../userguide/memory-model.md)に記載。
+- [x] M6 / `memory-model` (#27–#28)：ADR-0017 の層・範囲・昇格と SQLite store。[Memory](../userguide/memory-model.md)に記載。
 - [x] M6 / `guideline-promotion` (#29)：設定可能な警告閾値、明示的な構造化承認、共通 Dispatch 検査（MEM-001、ADR-0019）。
-- [x] M7 / `memory-export-and-scope` (#39–#40)：sanitizer を使う標準出力だけの export と、明示的な global 書込み。現在の操作は [Memory](../userguide/memory-model.md)に記載。
+- [x] M6 / `retrieval-spike` (#30)：Memory 検索層を評価。
+- [x] M6 / `memory-search` (#31)：FTS5 trigram による検索。[Memory](../userguide/memory-model.md)に記載。
+- [x] M7 / `memory-export-and-scope` (#32–#34, #38–#40)：sanitizer、標準出力だけの export、明示的な global 書込み。現在の操作は [Memory](../userguide/memory-model.md)に記載。
 - [x] M8 / `server-hardening` (#41–#43)：操作者の自己申告ラベル、既定5回失敗の lockout、制約を明記した audit chain 照合。
 - [x] Future / `browser-terminal-eval` (#21)：手法と shell access の脅威モデルを ADR-0018 に記録。実装は延期中で、[SSH・editor 接続](../userguide/remote-access.md#自宅から開発用-docker-を使う場合)を使う。terminal 実装には別 Issue と browser 利用者の認証が必要で、接続先の M5 token だけでは足りない。
 - [x] Adapter / `copilot-sdk-eval`：Go SDK の対応確認と adapter 実装は

@@ -1,6 +1,6 @@
 # Memory
 
-この文書は、現在の CLI と保存処理を説明する。log・lesson・decision・guardrail の提案モデル、予定した保存場所、昇格の理由は [ADR-0017](../develop/adr/0017-memory-layers-ranges-and-promotion-path.md) に記録している。実装結果は #28〜#34、#38、#66 に記録している。
+この文書は、現在の CLI と保存処理を説明する。log・lesson・decision・guardrail の提案モデル、予定した保存場所、昇格の理由は [ADR-0017](../develop/adr/0017-memory-layers-ranges-and-promotion-path.md) に記録している。実装結果は #28〜#34、#38〜#40、#66 に記録している。
 
 ## 保存と scope
 

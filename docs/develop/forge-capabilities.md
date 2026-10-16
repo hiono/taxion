@@ -4,7 +4,7 @@ Taxion は、Task の判断・証拠・承認を共通 controller で管理し�
 repository 操作と外部の作業記録を接続先ごとの adapter に委ねる。
 M13 の Human 選択は「GitLab Self-Managed＋glab を先行。Bitbucket は環境選定後に実装」である。
 GitHub adapter を共通の承認・送信状態・証拠照合の実装例とし、
-追加 adapter と実環境受入れは M15 の後続 Issue で追跡する。
+追加 adapter と実環境受入れは M15 の完了条件と分けて後続 Issue で追跡する。
 
 ## 公式仕様と実装・受入れの区別
 
@@ -12,7 +12,7 @@ GitHub adapter を共通の承認・送信状態・証拠照合の実装例と�
 | --- | --- | --- | --- |
 | GitHub.com | host、owner/repo、Issue/PR と番号 | Issue 作成・編集・comment・close、SHA を指定した PR review | Issue 作成・Issue/PR comment・Issue close を実装。Git・SQLite・gh 脚本で回帰確認し、承認済みコメントを実 GitHub へ一件公開して再送を照合 |
 | GitHub Enterprise Server | instance host、owner/repo、種別・番号、server 版 | server 版の REST API と権限に従う | 対象 host・版・credential を選定して追加受入れする |
-| GitLab.com・Self-Managed・Dedicated | instance host、project ID／URL encoded path、Issue/MR と project 内 iid | Issue 作成・note・close、MR note | Self-Managed adapter は実装済み。Self-Managed の Issue 経路を glab-test で追加検証した (#75)。MR の作成・approval・close／merge は未実装 |
+| GitLab.com・Self-Managed・Dedicated | instance host、project ID／URL encoded path、Issue/MR と project 内 iid | Issue 作成・note・close、MR note | Self-Managed adapter は実装済み。非公開の検証環境で Issue 経路を glab から追加検証した (#75)。MR の作成・approval・close／merge は未実装 |
 | Bitbucket Cloud | workspace、repository UUID／slug、PR ID、別作業管理の host・project・key | Cloud REST API の repository・PR・comment・approval。Issue tracker の利用可否は対象 tenant の提供状況で確認する | Cloud／Data Center と作業管理を Human が選定してから実装する |
 | Bitbucket Data Center | instance host・context path、project key、repository slug／ID、PR ID、server 版 | Data Center REST API の PR・comment・参加者 approval／decline・merge | Data Center API 用 adapter と実環境受入れを後続にする |
 | Jira | 作業管理 host、project、Issue ID／key、transition ID | Issue 作成・comment、許可された workflow transition | repository adapter と独立した作業管理 adapter として選定する |
@@ -79,13 +79,12 @@ clone、fork、cache、ログ、添付の残存先を列挙し、管理者と保
 
 ## 採択した後続作業と受入れ環境
 
-[#75](https://github.com/hiono/taxion/issues/75) の Issue-only 実験では、GitLab 19.3.2 の
-`cpusys.mu.renesas.com` 上で `glab` の host 指定、API account と project access を確認した。
-`a0201089/glab-test`（project ID `181`）に Taxion adapter から一時 Issue を作成し、
-comment・close・送信結果の再照合まで実行した。close 時刻に最大 5 分の時計差を許容する。
-Conductor に作成した一時 Issue `#26` も comment 後に close した。
+[#75](https://github.com/hiono/taxion/issues/75) の Issue-only 実験では、非公開の
+GitLab Self-Managed 環境で `glab` の host 指定、API account と project access を確認した。
+Taxion adapter から一時 Issue を作成し、comment・close・送信結果の再照合まで実行した。
+非公開の instance・利用者・project・Issue の識別情報は公開しない。
 
-`glab mr list` で実験用 project に merge request がないことを確認したため、MR 操作は試していない。
+実験環境に merge request がなかったため、MR 操作は試していない。
 MR の実験は M15 の条件ではなく、実際の MR と必要な承認フローがある場合に再開する。
 instance tier と approval API の提供状況は未確認だが、これらは現在の GitHub 対応を受け入れる条件ではない。
 接続と Issue 操作では有料 AI 呼出しを行っていない。
