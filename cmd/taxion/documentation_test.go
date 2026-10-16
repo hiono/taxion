@@ -225,6 +225,10 @@ func TestCLIReferenceCoversLiteralOptionNames(t *testing.T) {
 		"Dispatch を終了する遷移では `--result-file JSON` が必須",
 		"実行する `/ask`・`/plan` には正の `--question-timeout DURATION`",
 		"非空で512 byte以内の検索語",
+		"`copilot`・`opencode` の runtime identity",
+		"`/interrupt`・`いま止める` は表示中の実行に停止を要求する",
+		"`--interactive-execution` では入力を受け付けたまま実行する",
+		"SDK 認証・provider 照会・session 接続・SDK tool・credit ceiling は Copilot 用",
 	} {
 		if !strings.Contains(string(reference), detail) {
 			t.Errorf("CLI reference omits option constraint %q", detail)
