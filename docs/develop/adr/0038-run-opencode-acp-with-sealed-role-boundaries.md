@@ -44,6 +44,12 @@ shell は native 設定でも `deny` とする。file tool のない助言 sessi
 skills は承認した hash の directory だけを複製する。コピー中に読んだ元の metadata と
 内容を既存の asset hash で照合し、元の file・directory の権限を保持する。
 directory の割当サイズは新規作成時に異なり得るため、コピー先に同じ asset hash は要求しない。
+承認した skill の補助資料は `/config/opencode/skills/<skill-name>` にある。
+file 読取り tool を許可した role に限り、その skill の subtree を native の
+`external_directory` 規則で許可する。既定の外部 directory 拒否を残し、
+未承認の skill、host path、tool のない role に読取りを広げない。
+skill の実ロードだけで補助資料の読取り成功を推測せず、実 tool 結果で確認する。
+skill を含む設定 directory は OS の read-only mount のままにする。
 OpenCode の内部検索に必要な native `rg` は Linux 環境の前提とし、隔離内へ複製して
 read-only mount にする。モデル接続前に起動を確認し、自動取得に依存しない。
 shell、実行型 plugin、MCP、

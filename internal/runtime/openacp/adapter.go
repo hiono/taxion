@@ -163,7 +163,7 @@ func (a *Adapter) ConfigHash() string {
 	data, _ := json.Marshal(struct {
 		Adapter string `json:"adapter"`
 		Config
-	}{"openacp-isolated-v10", a.config})
+	}{"openacp-isolated-v11", a.config})
 	return hashBytes(data)
 }
 func (a *Adapter) ExecutionConfiguration() json.RawMessage {
@@ -259,7 +259,7 @@ func (a *Adapter) prepare() error {
 	if err != nil {
 		return err
 	}
-	permission := map[string]string{"*": "deny", "bash": "deny"}
+	permission := map[string]any{"*": "deny", "bash": "deny"}
 	// Retain read-only definitions for tool-free advisory sessions; every
 	// unapproved request is still cancelled by the ACP client.
 	for _, name := range []string{"read", "glob", "grep"} {
@@ -274,18 +274,23 @@ func (a *Adapter) prepare() error {
 	}
 	if a.config.ToolPolicy != nil && len(a.config.ToolPolicy.Skills) != 0 {
 		permission["skill"] = "allow"
+		external := map[string]string{"*": "deny"}
 		for _, asset := range a.config.ToolPolicy.Skills {
 			name := filepath.Base(asset.Path)
 			if err := tools.CopyDirectory(asset, filepath.Join(a.root, "config/opencode/skills", name)); err != nil {
 				return err
 			}
+			if permission["read"] == "allow" {
+				external["/config/opencode/skills/"+name+"/*"] = "allow"
+			}
 		}
+		permission["external_directory"] = external
 	}
 	schema, err := json.Marshal(a.config.ResponseSchema)
 	if err != nil {
 		return err
 	}
-	systemPrompt := a.config.SystemPrompt + "\n\nWorkspace paths in the saved contract identify the HOST worktree. Its authorized snapshot is at /workspace. Work only there; no Git metadata or shell is provided. Quoted specification bodies are supplied in context; their localPath records provenance, not an available workspace file. Read those quoted bodies instead of searching for the original source files. Use native tools for every claimed file edit or skill load. The final JSON reports actual operations; it does not instruct the host to edit files. Never claim operations that were not executed. The host executes approved validation commands after submission. Return only one JSON object conforming to this schema:\n" + string(schema)
+	systemPrompt := a.config.SystemPrompt + "\n\nWorkspace paths in the saved contract identify the HOST worktree. Its authorized snapshot is at /workspace. Work only there; no Git metadata or shell is provided. Approved skills and their reference files are copied under /config/opencode/skills/<skill-name>; use those native paths, not host or .agents/skills paths from the saved contract. Quoted specification bodies are supplied in context; their localPath records provenance, not an available workspace file. Read those quoted bodies instead of searching for the original source files. Use native tools for every claimed file edit or skill load. The final JSON reports actual operations; it does not instruct the host to edit files. Never claim operations that were not executed. The host executes approved validation commands after submission. Your final assistant message must begin with { and end with }. Do not introduce it with narration or put text outside the JSON object. Return only one JSON object conforming to this schema:\n" + string(schema)
 	agent, err := json.Marshal(map[string]any{
 		"mode": "primary", "permission": permission, "steps": 12, "prompt": systemPrompt,
 	})

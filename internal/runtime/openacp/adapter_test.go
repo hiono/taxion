@@ -237,6 +237,72 @@ func TestNativeToolDefinitionsNeverGrantUnapprovedOperations(t *testing.T) {
 	}
 }
 
+func TestApprovedSkillReferencesHaveScopedNativeReadPermission(t *testing.T) {
+	for _, role := range []string{"CODER", "REVIEWER", "ORCHESTRATOR"} {
+		t.Run(role, func(t *testing.T) {
+			config := testConfig(t, role)
+			if role != "ORCHESTRATOR" {
+				config.AvailableTools = []string{"view"}
+			}
+			skill := filepath.Join(t.TempDir(), "writing")
+			if err := os.MkdirAll(filepath.Join(skill, "references"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			for name, body := range map[string]string{"SKILL.md": "# Writing", "references/guide.txt": "Approved reference"} {
+				if err := os.WriteFile(filepath.Join(skill, name), []byte(body), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			hash, err := tools.Hash(skill)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.ToolPolicy = &tools.Policy{Skills: []tools.Asset{{Path: skill, Hash: hash}}, EvidenceDirectory: t.TempDir()}
+			a, err := New(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer a.Close()
+			if err := a.prepare(); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(a.root, "config/opencode/opencode.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var settings struct {
+				Permission map[string]json.RawMessage `json:"permission"`
+				Agent      map[string]struct {
+					Permission map[string]json.RawMessage `json:"permission"`
+				} `json:"agent"`
+			}
+			if err := json.Unmarshal(data, &settings); err != nil {
+				t.Fatal(err)
+			}
+			for _, permission := range []map[string]json.RawMessage{settings.Permission, settings.Agent["taxion"].Permission} {
+				var external map[string]string
+				if err := json.Unmarshal(permission["external_directory"], &external); err != nil {
+					t.Fatal("approved references have no explicit native boundary", err)
+				}
+				if external["*"] != "deny" || string(permission["bash"]) != `"deny"` {
+					t.Fatal("external or shell boundary was widened")
+				}
+				if role == "ORCHESTRATOR" {
+					if len(external) != 1 {
+						t.Fatal("tool-free role gained reference read permission")
+					}
+				} else if len(external) != 2 || external["/config/opencode/skills/writing/*"] != "allow" {
+					t.Fatal("only the approved skill subtree may be read", external)
+				}
+			}
+			reference, err := os.ReadFile(filepath.Join(a.root, "config/opencode/skills/writing/references/guide.txt"))
+			if err != nil || string(reference) != "Approved reference" {
+				t.Fatal("approved reference was not copied exactly", err)
+			}
+		})
+	}
+}
+
 func TestACPToolUpdatesRetainRawAndNormalizeExecutionEvidence(t *testing.T) {
 	a, err := New(testConfig(t, "CODER"))
 	if err != nil {
