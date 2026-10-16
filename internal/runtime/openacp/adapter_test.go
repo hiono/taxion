@@ -43,6 +43,7 @@ func servePeer() {
 			Method string          `json:"method"`
 			Result json.RawMessage `json:"result"`
 			Error  json.RawMessage `json:"error"`
+			Params json.RawMessage `json:"params"`
 		}
 		if json.Unmarshal(scanner.Bytes(), &request) != nil {
 			os.Exit(2)
@@ -72,6 +73,18 @@ func servePeer() {
 				map[string]string{"id": "mode", "category": "mode", "currentValue": "taxion"},
 			}}
 		case "session/prompt":
+			if mode == "system-prompt" {
+				var params struct {
+					Prompt []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"prompt"`
+				}
+				if json.Unmarshal(request.Params, &params) != nil || len(params.Prompt) != 1 ||
+					params.Prompt[0].Type != "text" || params.Prompt[0].Text != "execute" {
+					os.Exit(4)
+				}
+			}
 			if (mode == "permission" || mode == "client-filesystem") && pending == nil {
 				pending = request.ID
 				method := "session/request_permission"
@@ -164,6 +177,7 @@ func TestNativeToolDefinitionsNeverGrantUnapprovedOperations(t *testing.T) {
 	for _, role := range []string{"ORCHESTRATOR", "CODER", "REVIEWER"} {
 		t.Run(role, func(t *testing.T) {
 			config := testConfig(t, role)
+			config.ResponseSchema = map[string]any{"type": "object", "required": []string{"confirmed"}}
 			if role != "ORCHESTRATOR" {
 				config.AvailableTools = []string{"view"}
 			}
@@ -186,10 +200,21 @@ func TestNativeToolDefinitionsNeverGrantUnapprovedOperations(t *testing.T) {
 				Permission map[string]string `json:"permission"`
 				Agent      map[string]struct {
 					Permission map[string]string `json:"permission"`
+					Prompt     string            `json:"prompt"`
 				} `json:"agent"`
 			}
 			if err := json.Unmarshal(data, &settings); err != nil {
 				t.Fatal(err)
+			}
+			schema, err := json.Marshal(config.ResponseSchema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompt := settings.Agent["taxion"].Prompt
+			if !strings.HasPrefix(prompt, config.SystemPrompt+"\n\n") ||
+				!strings.Contains(prompt, "/workspace") ||
+				!strings.HasSuffix(prompt, string(schema)) {
+				t.Fatal("role contract, isolated paths and response schema must be native agent system instructions")
 			}
 			for _, permission := range []map[string]string{settings.Permission, settings.Agent["taxion"].Permission} {
 				if permission["*"] != "deny" || permission["bash"] != "deny" || permission["skill"] == "allow" {
@@ -329,6 +354,7 @@ func TestBoundSubmissionUsesHostResultIdentity(t *testing.T) {
 }
 
 func TestFakePeerLifecycleOutputUsageAndIsolation(t *testing.T) {
+	t.Setenv("TAXION_FAKE_MODE", "system-prompt")
 	a := fakeAdapter(t, false)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

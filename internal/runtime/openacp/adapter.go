@@ -163,7 +163,7 @@ func (a *Adapter) ConfigHash() string {
 	data, _ := json.Marshal(struct {
 		Adapter string `json:"adapter"`
 		Config
-	}{"openacp-isolated-v9", a.config})
+	}{"openacp-isolated-v10", a.config})
 	return hashBytes(data)
 }
 func (a *Adapter) ExecutionConfiguration() json.RawMessage {
@@ -281,8 +281,13 @@ func (a *Adapter) prepare() error {
 			}
 		}
 	}
+	schema, err := json.Marshal(a.config.ResponseSchema)
+	if err != nil {
+		return err
+	}
+	systemPrompt := a.config.SystemPrompt + "\n\nWorkspace paths in the saved contract identify the HOST worktree. Its authorized snapshot is at /workspace. Work only there; no Git metadata or shell is provided. Quoted specification bodies are supplied in context; their localPath records provenance, not an available workspace file. Read those quoted bodies instead of searching for the original source files. Use native tools for every claimed file edit or skill load. The final JSON reports actual operations; it does not instruct the host to edit files. Never claim operations that were not executed. The host executes approved validation commands after submission. Return only one JSON object conforming to this schema:\n" + string(schema)
 	agent, err := json.Marshal(map[string]any{
-		"mode": "primary", "permission": permission, "steps": 12,
+		"mode": "primary", "permission": permission, "steps": 12, "prompt": systemPrompt,
 	})
 	if err != nil {
 		return err
@@ -626,10 +631,6 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 	if err := a.Resume(ctx, session); err != nil {
 		return err
 	}
-	schema, err := json.Marshal(a.config.ResponseSchema)
-	if err != nil {
-		return err
-	}
 	a.mu.Lock()
 	if a.busy {
 		a.mu.Unlock()
@@ -644,8 +645,6 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 	a.turnDone = make(chan struct{})
 	turnDone := a.turnDone
 	a.mu.Unlock()
-	prompt = a.config.SystemPrompt + "\n\nWorkspace paths in the saved contract identify the HOST worktree. Its authorized snapshot is at /workspace. Work only there; no Git metadata or shell is provided. Quoted specification bodies are supplied in context; their localPath records provenance, not an available workspace file. Read those quoted bodies instead of searching for the original source files. Use native tools for every claimed file edit or skill load. The final JSON reports actual operations; it does not instruct the host to edit files. Never claim operations that were not executed. The host executes approved validation commands after submission. Return only one JSON object conforming to this schema:\n" +
-		string(schema) + "\n\n" + prompt
 	a.emit(runtime.Event{Type: "acp_capabilities", Payload: `{"transport":"stdio","isolation":"linux-namespaces-copy","providerAuthentication":"unverified","quota":"unsupported","crossProcessResume":"unsupported","shell":"unsupported","usage":"latest-assistant-message-not-total","modelOperation":"unsupported"}`})
 	a.emit(runtime.Event{Type: runtime.EventTurnStarted})
 	go func() {

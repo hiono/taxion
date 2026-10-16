@@ -54,6 +54,16 @@ RTK extension は未対応とし、付随検査は別途承認した host valida
 message の値であり、全 tool iteration や Flow の合計とは扱わない。累積 cost と
 context 使用量も別 event として保存し、未取得値からゼロ・無料・無制限を推測しない。
 
+role prompt、保存 Dispatch の契約、隔離内の path 案内、最終結果の schema は、
+生成する native agent の `prompt` に設定する。OpenCode 1.19.0 の
+[ACP prompt 処理](https://github.com/anomalyco/opencode/blob/v1.19.0/packages/opencode/src/acp/service.ts)は
+本文を user message の parts として渡し、
+[モデル入力の生成](https://github.com/anomalyco/opencode/blob/v1.19.0/packages/opencode/src/session/llm/request.ts)は
+agent の `prompt` を system message に配置する。従来の user message への前置だけで
+system 指示を設定したとは扱わない。`session/prompt` には今回の実行指示と予算補足だけを送り、
+role 指示を二重送信しない。この設定も runtime hash に含め、旧 session へ遡及適用しない。
+system 指示への配置は、モデルが実操作や正しい JSON 提出を必ず行う保証にはしない。
+
 OpenCode 1.19.0 が送る assistant の `messageId` ごとに本文を区別し、最終メッセージだけを
 正式な結果として検証する。途中の説明も delta と message 開始 event に残す。
 tool 結果の `content` 配列は assistant 本文と別に保存し、空の最終応答は明示的に拒否する。
