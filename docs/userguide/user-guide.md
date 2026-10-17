@@ -17,6 +17,8 @@ mise exec -- taxion --help
 
 最新版へ更新するには、`v0.3.0` を導入したい公開 version に置き換えます。
 
+開発版では `taxion --help` の先頭に `Version:` を表示し、`taxion --version` でも同じビルド情報を確認できます。Go の module version を使うため、commit 固定の導入では `v0.3.1-0.…` のような完全な pseudo-version を表示します。Git 情報を持つソースビルドでは revision と、未コミット変更がある場合の `modified=true` も表示します。情報のないビルドを公開版と推測せず、取得できない旨を表示します。設定・DB・外部 CLI は読みません。公開済み v0.3.0 と初回設定補正版 `dd352cf` には、この版表示は含まれません。
+
 ```sh
 mise use -g go@1.26.0 'go:github.com/hiono/taxion/cmd/taxion@<VERSION>'
 ```

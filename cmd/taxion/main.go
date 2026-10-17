@@ -38,6 +38,7 @@ Usage:
 
 Workspace: defaults to .taxion/ under the Git worktree root (cwd outside Git).
 --store selects a legacy ledger path for explicit overrides, not workspace.db.
+--version prints the installed build identity without reading configuration.
 
 Commands:
 Setup and discovery:
@@ -174,11 +175,11 @@ func main() {
 		args = args[2:]
 	}
 	if len(args) < 1 {
-		fmt.Fprint(os.Stderr, usage)
+		_ = printHelp(os.Stderr)
 		os.Exit(2)
 	}
 	var err error
-	if !explicitStore && !slices.Contains([]string{"ready", "completion", "-h", "--help", "help", "gen-token", "git"}, args[0]) {
+	if !explicitStore && !slices.Contains([]string{"ready", "completion", "-h", "--help", "help", "--version", "gen-token", "git"}, args[0]) {
 		storePath, err = defaultWorkspaceStorePath()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "taxion: %v\n", err)
@@ -233,9 +234,16 @@ func main() {
 	case "tools":
 		err = toolsCmd(args[1:])
 	case "-h", "--help", "help":
-		fmt.Print(usage)
+		err = printHelp(os.Stdout)
+	case "--version":
+		if len(args) != 1 {
+			err = fmt.Errorf("--version accepts no additional arguments")
+		} else {
+			_, err = fmt.Fprintf(os.Stdout, "taxion %s\n", currentBuildVersion())
+		}
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n%s", args[0], usage)
+		fmt.Fprintf(os.Stderr, "unknown command %q\n", args[0])
+		_ = printHelp(os.Stderr)
 		os.Exit(2)
 	}
 	if err != nil {

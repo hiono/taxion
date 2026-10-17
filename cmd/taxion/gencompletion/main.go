@@ -22,7 +22,7 @@ func generate() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	commands := map[string]map[string]bool{"": {"--store": true, "--help": true}, "completion": {"bash": true}}
+	commands := map[string]map[string]bool{"": {"--store": true, "--help": true, "--version": true}, "completion": {"bash": true}}
 	ast.Inspect(file, func(node ast.Node) bool {
 		value, ok := node.(*ast.ValueSpec)
 		if !ok || len(value.Names) != 1 || value.Names[0].Name != "usage" {

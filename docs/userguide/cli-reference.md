@@ -8,6 +8,8 @@
 
 インストール済みの目的別コマンド一覧は `taxion --help`、各コマンドの flag は `taxion COMMAND -h` で確認する。分類は表示上の案内であり、コマンド名や option の構文は変えない。`ready` は状況ごとの操作と承認境界を先に示す。以下は代表的な操作例で、契約の詳細は Task Graph、設定、実行記録の各文書に記載する。
 
+開発版の `--help`・`-h`・`help` は先頭に `Version:` を表示する。`taxion --version` は `taxion VERSION` を出力し、追加引数を拒否する。Go のビルド情報にある module version（pseudo-version を含む）と、利用可能な VCS revision・`modified=true` を表示する。module version がなければ `(devel)`、module version と revision が両方なければ revision の取得不能も示す。情報自体がなければ `unknown` とする。版確認では設定・Git コマンド・DB・ネットワークを使わない。公開済み v0.3.0 と初回設定補正版 `dd352cf` は未対応。
+
 通常は保存先を指定せず、Git 作業ツリールートの `.taxion/` を使う。サブディレクトリの起動も同じ保存先となり、linked worktree は各ルートに分離する。Git のルート解決に失敗した場合はエラーとし、別の状態へ切り替えない。Git repository 外では従来のカレントディレクトリ配下を使う。保存先の判断は [ADR-0032](../develop/adr/0032-resolve-default-workspace-from-git-worktree-root.md)、v0.3.0 で設定の基点も揃える変更は [ADR-0039](../develop/adr/0039-prepare-project-configuration-with-explicit-repair.md)に記録する。以下の新しい init・doctor fix・completion は v0.2.0 には含まれない。
 
 例外用途の global option `--store PATH` は command の前に置き、旧 ledger のパスを選ぶ。明示した相対パスはカレントディレクトリ基準となる。旧 ledger の既定名は `ledger.json`、SQLite の保存先はその directory の `workspace.db`。DB 自体を `--store` に渡す指定、既存 DB と同一ファイルを指す symlink・hard link、未解決の symlink は、DB を開く前に拒否する。`init` はこの拒否時に directory や DB を作成せず、`serve` も audit directory を作成しない。別名の legacy ledger の読込み・移行は維持し、以前の別配置の自動移動・統合は行わない。

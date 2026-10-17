@@ -12,7 +12,7 @@ _taxion_complete() {
     done
     local candidates=''
     case "$path" in
-        '') candidates='--help --store acp audit completion config conversation dispatch doctor gen-token git help init memory ready records request resume review runtime serve specification task tools workflow workspace' ;;
+        '') candidates='--help --store --version acp audit completion config conversation dispatch doctor gen-token git help init memory ready records request resume review runtime serve specification task tools workflow workspace' ;;
         'acp') candidates='--base-directory --cli --coder-system-prompt-file --compact-context --controller-validation-submission --help --managed-commit --managed-stage --max-ai-credits --reviewer-system-prompt-file --scanner --timeout --tools' ;;
         'audit') candidates='verify' ;;
         'audit verify') candidates='--audit --help' ;;
