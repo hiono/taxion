@@ -17,6 +17,7 @@ import (
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/runtime/copilot"
+	"github.com/hiono/taxion/internal/store"
 )
 
 func workflowCmd(args []string) error {
@@ -30,7 +31,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return encoder.Encode(value)
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|interrupt|feedback-target|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show}")
+		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|interrupt|feedback-target|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|evaluate}")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
@@ -42,13 +43,17 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	var compactContext bool
 	var validationSubmission bool
 	var builtinPrompts bool
+	var requireQuality bool
 	var scanner string
 	var maxAICredits float64
 	switch action {
 	case "start", "recover", "handoff", "interrupt", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve", "planner-draft", "planner-action", "question-draft":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
-	case "advance", "show", "feedback-target", "planning-context":
+	case "advance", "show", "evaluate", "feedback-target", "planning-context":
 		fs.StringVar(&id, "id", "", "review flow ID")
+		if action == "evaluate" {
+			fs.BoolVar(&requireQuality, "require-quality", false, "fail unless saved same-target acceptance includes documentation consistency; not publication approval")
+		}
 	case "run", "step":
 		fs.StringVar(&id, "id", "", "review flow ID")
 		fs.StringVar(&coderPrompt, "coder-prompt-file", "", "Coder system prompt")
@@ -86,7 +91,29 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	}
 	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "interrupt" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve" || action == "planner-draft" || action == "planner-action" || action == "question-draft"
 	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" {
-		return fmt.Errorf("workflow start, recover, handoff, interrupt, feedback, feedback-resolve, draft, draft-discard, draft-approve, planner-draft, planner-action and question-draft require --file; advance, run, step, show, planning-context and feedback-target require --id")
+		return fmt.Errorf("workflow start, recover, handoff, interrupt, feedback, feedback-resolve, draft, draft-discard, draft-approve, planner-draft, planner-action and question-draft require --file; advance, run, step, show, evaluate, planning-context and feedback-target require --id")
+	}
+	if action == "evaluate" {
+		db, err := store.OpenReadOnly(workspaceDBPath())
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			return err
+		}
+		report, err := controller.EvaluateReviewFlow(state.Graph, id)
+		if err != nil {
+			return err
+		}
+		if err := printJSON(report); err != nil {
+			return err
+		}
+		if requireQuality && !report.CostComparisonEligible {
+			return fmt.Errorf("workflow evaluate: saved quality gate is unmet; completion/publication must wait for the reported evidence")
+		}
+		return nil
 	}
 	db, state, err := loadWorkspace()
 	if err != nil {

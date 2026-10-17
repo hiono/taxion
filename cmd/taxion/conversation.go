@@ -21,7 +21,8 @@ import (
 	"github.com/hiono/taxion/internal/runtime/copilot"
 )
 
-const questionSystemPrompt = `Answer the user's side question in their language using only the supplied saved context.
+const questionSystemPrompt = goalExecutionPolicy + "\n" + goalRolePolicy + `
+Answer the user's side question in their language using only the supplied saved context.
 This is NOT the main role session. Native skills and instructions are available,
 but you have no file or shell tools and cannot approve, execute,
 investigate live state, change instructions, or change a reviewer verdict.
@@ -52,7 +53,8 @@ or that tests ran, mutable worktree state was checked, or authentication remains
 Assumptions and unconfirmed are arrays of strings. Empty lists are explicit.
 Do not invent citations, evidence, legal eligibility or a payer.`
 
-const plannerSystemPrompt = `Evaluate the user's planning question from the supplied compact saved context.
+const plannerSystemPrompt = goalExecutionPolicy + "\n" + goalRolePolicy + `
+Evaluate the user's planning question from the supplied compact saved context.
 Use /planner/task, /planner/memory, /planner/results, /planner/concerns,
 /planner/unmetDependencies and /planner/flows. Distinguish current evidence
 from earlier attempts, assumptions and missing information.
