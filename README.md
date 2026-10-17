@@ -4,7 +4,7 @@ Taxion は、coding agent と相談した依頼を、承認済みの Coder・検
 
 利用者が作業範囲と予算を承認すると、Taxion が担当への指示、実行結果、Git の証拠、レビュー結果をローカルに記録します。独立レビューでは、Coder が作成したものと同じ内容を確認します。
 
-v0.3.0 は、初期設定・診断修復・bash 補完と操作案内を改善した版です。v0.2.0 の OpenCode ACP runtime と停止後の復旧を引き継ぎます。実モデルによる文書作業、同一成果物の独立レビュー、部分成果からの復旧の記録は [Issue #78](https://github.com/hiono/taxion/issues/78)・[Issue #79](https://github.com/hiono/taxion/issues/79)・[Issue #80](https://github.com/hiono/taxion/issues/80)、版ごとの機能と制約は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
+v0.3.1 は、CLI の固定文言を英語に統一し、初回診断・版表示と未確定項目の選択式入力を改善した修正版です。doctor で確認した既存設定は再選択しません。v0.3.0 の設定準備・bash 補完、v0.2.0 の OpenCode ACP runtime と停止後の復旧を引き継ぎます。実モデルによる文書作業、同一成果物の独立レビュー、部分成果からの復旧の記録は [Issue #78](https://github.com/hiono/taxion/issues/78)・[Issue #79](https://github.com/hiono/taxion/issues/79)・[Issue #80](https://github.com/hiono/taxion/issues/80)、版ごとの機能と制約は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
 ## 使い始める
 
