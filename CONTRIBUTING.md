@@ -208,7 +208,7 @@ git rev-parse 'v0.3.1^{commit}'
 git ls-remote origin 'refs/tags/v0.3.1*'
 ```
 
-公開した tag の対象 commit が固定した候補と一致することを確認します。その後、既存の設定・インストールに影響しない隔離環境で、[利用者ガイドの導入・更新・削除手順](docs/userguide/user-guide.md#現在の導入方法)を実行します。pseudo-version の過去成功を公開 tag の導入成功として扱いません。失敗した場合は Release object を公開せず、tag を保持して失敗箇所を記録します。
+公開した tag の対象 commit が固定した候補と一致することを確認します。その後、既存の設定・インストールに影響しない隔離環境で、[利用者ガイドの導入・更新・削除手順](docs/userguide/user-guide.md#現在の導入方法)を実行します。旧正式版からの更新だけでなく、旧開発版の pseudo-version が導入済みの状態でも、`mise install` → `mise use --pin` → `taxion --version` で対象の正式版になることを確認します。pseudo-version の過去成功を公開 tag の導入成功として扱いません。失敗した場合は Release object を公開せず、tag を保持して失敗箇所を記録します。
 
 導入確認の成功後に、GitHub Release 用の Markdown 本文を repository 外で確定し、確認結果を Issue に記録します。例外承認がある場合は、Issue に受入れ未達と判断を記録してから公開します。次の操作は tag が存在することを要求し、GitHub CLI による暗黙の tag 作成を避けます。
 
