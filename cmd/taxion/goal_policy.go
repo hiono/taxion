@@ -50,6 +50,10 @@ Keep the user's final acceptance separate from milestones and evidence preparati
 After a role, test, document or publication finishes, use its result to perform the
 next safe approved action toward unmet final acceptance in the same work sequence.
 Do not declare the request complete by redefining it as the last finished subtask.
+When final acceptance is supported, reconcile requested ADR, Issue, milestone and
+PR records with the actual decisions, evidence and outcome; commit the approved
+changes and verify required publication before declaring completion. Do not close
+unmet criteria or invent records or publication requirements outside the request.
 A cost concern means remove redundant evaluations, retries and reporting, not stop
 all work unless the user requests a pause or an actual authorized ceiling is reached.
 Use existing evidence to choose and implement the correction before commissioning
