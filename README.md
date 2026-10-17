@@ -24,4 +24,6 @@ Taxion は coding agent や Git の認証を提供しません。新しい実行
 
 ## 開発する
 
+開発版では、共通・担当別のゴール指向方針、文書整合の acceptance、保存証拠を評価する `workflow evaluate` を追加しています。公開済み v0.3.1 には含まれません。評価は総合得点や学習時の報酬関数ではなく、品質未達を低コストで相殺しないための確認です。実モデルの改善効果は未測定です。
+
 [開発への参加方法](CONTRIBUTING.md)に、開発環境と変更時の確認事項を記載しています。[開発者向け文書の一覧](docs/develop/README.md)から、要件、現在の仕様、[ロードマップ](docs/develop/roadmap.md)、[設計判断の記録（ADR）](docs/develop/adr/)を参照できます。[脆弱性の報告](SECURITY.md)は公開 Issue ではなく、案内に従って非公開で行ってください。

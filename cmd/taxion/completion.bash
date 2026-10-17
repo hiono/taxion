@@ -100,11 +100,12 @@ _taxion_complete() {
         'task transition') candidates='--file --help' ;;
         'tools') candidates='hash' ;;
         'tools hash') candidates='--help --path' ;;
-        'workflow') candidates='advance draft draft-approve draft-discard feedback feedback-resolve feedback-target handoff interrupt planner-action planner-draft planning-context question-draft recover run show start step' ;;
+        'workflow') candidates='advance draft draft-approve draft-discard evaluate feedback feedback-resolve feedback-target handoff interrupt planner-action planner-draft planning-context question-draft recover run show start step' ;;
         'workflow advance') candidates='--help --id' ;;
         'workflow draft') candidates='--file --help' ;;
         'workflow draft-approve') candidates='--file --help' ;;
         'workflow draft-discard') candidates='--file --help' ;;
+        'workflow evaluate') candidates='--help --id --require-quality' ;;
         'workflow feedback') candidates='--file --help' ;;
         'workflow feedback-resolve') candidates='--file --help' ;;
         'workflow feedback-target') candidates='--help --id' ;;
