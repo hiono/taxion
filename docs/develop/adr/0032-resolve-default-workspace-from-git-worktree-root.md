@@ -34,6 +34,8 @@ Git によるルート解決が失敗した場合は、別の場所へ黙って�
 Git repository 外の standalone workspace は、互換性のため従来どおり
 カレントディレクトリの `.taxion/` を使う。
 設定ファイルの探索規則はこの判断では変更しない。
+2026-10-17 の [ADR-0039](0039-prepare-project-configuration-with-explicit-repair.md) で
+Project 設定も作業ツリールート基点へ変更した。旧サブディレクトリ設定は自動で移動しない。
 静的な `ready`・help 等は workspace の探索や Git 起動を要求しない。
 
 `--store` は隔離テスト・既存状態の指定などの例外用途に残す。

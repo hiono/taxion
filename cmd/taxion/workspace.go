@@ -25,7 +25,14 @@ func defaultWorkspaceStorePath() (string, error) {
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			output, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output()
+			command := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
+			command.Dir = directory
+			for _, variable := range os.Environ() {
+				if !strings.HasPrefix(variable, "GIT_") {
+					command.Env = append(command.Env, variable)
+				}
+			}
+			output, err := command.Output()
 			if err != nil {
 				return "", fmt.Errorf("resolve default workspace from Git: %w; use --store only for an intentional override", err)
 			}

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/hiono/taxion/internal/runtime/controller"
@@ -16,6 +17,9 @@ import (
 )
 
 func doctorCmd(args []string, output io.Writer) (err error) {
+	if len(args) > 0 && args[0] == "fix" {
+		return setupCmd(args[1:], os.Stdin, output, terminalInput(os.Stdin), false)
+	}
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	asJSON := flags.Bool("json", false, "print the same diagnostic inventory as JSON")
 	worktree := flags.String("worktree", ".", "execution worktree whose native configuration is inspected")
@@ -31,7 +35,7 @@ func doctorCmd(args []string, output io.Writer) (err error) {
 	}
 	resolved, err := resolveConfiguration()
 	if err != nil {
-		return err
+		return fmt.Errorf("configuration diagnosis: %w; next: taxion doctor fix (or taxion doctor fix --dry-run with --set FIELD=VALUE for missing references); no files changed", err)
 	}
 	selection, err := json.Marshal(resolved.Config)
 	if err != nil {

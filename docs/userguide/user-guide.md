@@ -50,20 +50,58 @@ export PATH="$PWD/bin:$PATH"
 
 ## 設定と実行前確認
 
-作業 repository の `.gitignore` に `/.taxion/` と `/.env` を加え、[設定ガイド](configuration.md)の Global または Project 設定を用意します。既定の Copilot 構成では、先に同じ実行環境で GitHub CLI と Copilot CLI の導入・ログインを済ませ、設定例の account を実際に使う login 名へ置き換えます。[認証の準備](configuration.md#認証の準備)に手順と credential の選び方を示します。設定には secret を書きません。
+以下の `init`・`doctor fix`・bash 補完は 0.3.0 向け開発版の操作です。公開済み v0.2.0 の `init` は DB だけを作るため、その版では[設定ガイド](configuration.md)の YAML と Git 除外設定を手動で用意します。
+
+開発版では対象の Git repository で `taxion init` を実行します。既存の Global・Project 設定を読み、単一の Git remote から host と namespace/path を取得します。複数 remote は選択が必要です。GitLab Self-Managed など、host だけで provider を確定できない場合は provider も確認します。Git account と Copilot account は別々に指定します。
 
 ```sh
+taxion init
 taxion config check --sources
 taxion doctor --worktree .
-taxion init
 taxion --help
 ```
 
-通常は保存先を指定しません。Git 作業ツリールートの `.taxion/` を使うため、サブディレクトリから実行しても同じ状態を参照します。linked worktree はそれぞれのルートに別の `.taxion/` を持ちます。Git repository 外では、従来どおりカレントディレクトリの `.taxion/` を使います。設定ファイルの探索規則は[設定ガイド](configuration.md#設定ファイル)を参照してください。
+`init` は不足項目を尋ね、設定への追加と Git 除外規則を表示します。`yes` で確認すると、Project 設定と DB を準備します。有効な `.git/info/exclude` の規則があれば再利用し、不足時だけ `.gitignore` へ追記します。既存設定の値は変更せず、省略項目だけを補います。DB が作成済みでも、設定の準備は続行できます。設定ファイルの権限は新規作成・更新時に `0600` とします。
 
-隔離テストや以前の別配置を参照する場合だけ、command の前に `--store /path/to/workspace/ledger.json` を指定します。実際の SQLite は同じ directory の `workspace.db` に保存されますが、その DB 自体や同一ファイルの別名は指定できません。以前サブディレクトリへ作った状態は自動で移動・統合しないため、必要なら旧配置を明示します。
+既存設定の不足を直す場合は `taxion doctor fix` を使います。`doctor` 単体は読取り専用です。任意配置の `[missing]` は空ディレクトリを作る指示ではありません。設定の妥当性・探索結果と、実際のログイン・接続・skill ロード成功を分けて確認してください。
+
+非対話環境では、不足する参照値を `--set FIELD=VALUE` で渡します。次は GitLab と Copilot を別 account で使う例です。識別子を実環境の値に置き換え、`--dry-run` で確認後、同じ指定の末尾を `--yes` に替えて適用します。remote が複数あれば `--remote NAME` も指定します。秘密値は渡しません。
+
+```sh
+taxion init --dry-run \
+  --set repository.provider=gitlab \
+  --set repository.account=scm-user \
+  --set runtime.provider=copilot \
+  --set runtime.account=ai-user \
+  --set runtime.contractRef=operator-contract \
+  --set execution.approvalRef=operator-reference
+```
+
+不足が残る場合は必要な `--set` をまとめて表示し、ファイルを作成せず終了します。`project.id` は directory 名、`execution.requester` は `human`、`execution.worker` は `local` を候補として補います。必要なら `--set` で指定します。`contractRef` と `approvalRef` は記録用の参照名であり、その入力だけで契約資格や Task の承認は成立しません。初期設定ではモデルを呼ばず、ログイン、社内資料の送信許可、予算の承認も行いません。[認証の準備](configuration.md#認証の準備)は別に実施します。
+
+通常は保存先を指定しません。開発版では設定も DB も Git 作業ツリールートの `.taxion/` を基準にするため、サブディレクトリから同じ設定と状態を参照します。linked worktree はそれぞれのルートに別の `.taxion/` を持ちます。Git repository 外ではカレントディレクトリを使います。旧版でサブディレクトリに作った設定を検出した場合は、黙って無視せず手動移行を求めます。上位の開発環境に置いた設定や DB は、自動で移動・統合しません。
+
+修復中の失敗は、既に保存した設定・除外規則と、未実施の DB 初期化を区別して報告します。内容を確認して再実行してください。`.taxion/setup.lock` が残った場合は、他の設定処理が動いていないことを確認してから、その lock だけを手動で除去します。DB や `.taxion/` 全体を削除する手順ではありません。
+
+隔離テストや以前の別配置を参照する場合だけ、command の前に `--store /path/to/workspace/ledger.json` を指定します。実際の SQLite は同じ directory の `workspace.db` に保存されますが、その DB 自体や同一ファイルの別名は指定できません。以前サブディレクトリへ作った状態は自動で移動・統合しないため、必要なら旧配置を明示します。`--store` で Project 設定の基点は変わりません。
 
 設定確認は schema と採用 layer を示すだけです。Task の承認と一致するかは `config check --task TASK-ID`、Dispatch の保存済み条件も含むかは `config check --dispatch DISPATCH-ID` で確認します。実際の Copilot account は Dispatch 発行後に `runtime auth` で確認します。これらの確認は scope や予算の Human 承認に代わりません。
+
+### bash の補完
+
+現在の bash で補完を有効にするには、次を実行します。
+
+```bash
+source <(taxion completion bash)
+```
+
+永続化する場合は、bash-completion と mise の初期化より後の `~/.bashrc` に次を加えます。Taxion は `.bashrc` を自動編集しません。新しい shell を開くか、この行を現在の shell でも実行してください。
+
+```bash
+command -v taxion >/dev/null 2>&1 && source <(taxion completion bash)
+```
+
+コマンド・サブコマンド・option を Tab で補完します。設定・DB・ログインは不要で、候補の取得でもモデルや外部 API を呼びません。値や Task ID の動的補完、zsh・fish は未対応です。
 
 ### OpenCode ACP を選ぶ場合
 

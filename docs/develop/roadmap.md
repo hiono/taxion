@@ -57,6 +57,11 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 | [M14](https://github.com/hiono/taxion/milestone/20) | 仕様検索、Memory の移行、skills・tools 連携 | #58〜#61 |
 | [M15](https://github.com/hiono/taxion/milestone/21) | CLI と ACP サーバーを共通 controller に接続し、仕様検索から復旧・外部記録まで受け入れる | #62・#79 |
 | [M16](https://github.com/hiono/taxion/milestone/22) | Planner 採用と Rust 導入の評価 | #64〜#65 |
+| [0.3.0 UX](https://github.com/hiono/taxion/milestone/24) | init の設定準備、doctor fix、bash 補完。M16 とは独立した実利用の改善 | #82〜#84 |
+
+0.3.0 向けの初期設定は [ADR-0039](adr/0039-prepare-project-configuration-with-explicit-repair.md) に基づく。
+モデルを呼ばずに、既存設定・Git 情報の読取りと明示確認後の準備を行う。
+初期設定の成功と、認証・契約・モデル実行の成功は区別する。
 
 M14 は 2026-10-13 に完了した。#60 の最終 Reviewer は保存済み Coder SHA を独立に承認し、公開 worktree と実 SDK 受入れも確認した。#58〜#61 はすべて closed である。
 

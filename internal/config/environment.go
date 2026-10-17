@@ -1,11 +1,6 @@
 package config
 
-import (
-	"fmt"
-	"strings"
-
-	"gopkg.in/yaml.v3"
-)
+import "fmt"
 
 var environmentFields = map[string]string{
 	"TAXION_PROJECT_ID":                "project.id",
@@ -31,11 +26,7 @@ var environmentFields = map[string]string{
 // EnvironmentLayer uses only supported setting variables. Credential values
 // and unrelated environment variables are not read.
 func EnvironmentLayer(lookup func(string) (string, bool)) (Layer, bool, error) {
-	var value Config
-	value.Version = 1
-	fields := value.fields()
-	document := map[string]any{"version": 1}
-	found := false
+	values := map[string]string{}
 	for variable, field := range environmentFields {
 		text, present := lookup(variable)
 		if !present {
@@ -44,25 +35,14 @@ func EnvironmentLayer(lookup func(string) (string, bool)) (Layer, bool, error) {
 		if text == "" {
 			return Layer{}, false, fmt.Errorf("%s requires a nonempty value", variable)
 		}
-		*fields[field] = text
-		section, key, _ := strings.Cut(field, ".")
-		nested, ok := document[section].(map[string]string)
-		if !ok {
-			nested = map[string]string{}
-			document[section] = nested
-		}
-		nested[key] = text
-		found = true
+		values[field] = text
 	}
-	if !found {
+	if len(values) == 0 {
 		return Layer{}, false, nil
 	}
-	if err := value.validate(false); err != nil {
+	layer, err := ValuesLayer("environment", values)
+	if err != nil {
 		return Layer{}, false, fmt.Errorf("environment configuration: %w", err)
 	}
-	input, err := yaml.Marshal(document)
-	if err != nil {
-		return Layer{}, false, fmt.Errorf("encode environment configuration: %w", err)
-	}
-	return Layer{Source: "environment", Input: input}, true, nil
+	return layer, true, nil
 }

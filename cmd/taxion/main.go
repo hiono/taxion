@@ -46,7 +46,8 @@ Commands:
   git check-index     Reject local Taxion and dotenv paths in the actual commit index
   git check-range     Scan every unpublished commit tree and message (--base SHA, --head SHA, --scanner PATH)
   git hook            Install (--scanner PATH, or --paths-only), inspect, or remove the Taxion pre-commit hook
-  init                Initialize a local workspace ledger
+  init                Prepare Project configuration, Git protection and workspace ([--set FIELD=VALUE], [--remote NAME], [--dry-run], [--yes])
+  completion bash     Print offline bash command and option completion
   workspace snapshot  Collect stopped workspace, Memory and required Git objects into one private SQLite file (--output)
   workspace inspect-snapshot  Verify portable contents without contacting a provider (--file)
   workspace restore   Restore an exact approved snapshot into a fresh directory (--file, --output, --expected-hash, --actor, --source)
@@ -130,9 +131,13 @@ Commands:
   specification serve Serve the approved local search corpus over read-only MCP stdio (--scope)
   tools hash          Pin exact local extension files or directory contents (--path)
   doctor              Inspect the selected backend's native search paths and discovered customizations ([--json])
+  doctor fix          Preview and explicitly repair missing Project settings and Git protection ([--set FIELD=VALUE], [--remote NAME], [--dry-run], [--yes])
 
 Identity gate (REP-001): task create, dispatch and review require an explicit --repo.
 The target is never inferred from the working directory.
+
+Bash completion: source <(taxion completion bash)
+Add that line to ~/.bashrc for persistence, then open a new shell or run source ~/.bashrc.
 `
 
 var storePath = ".taxion/ledger.json"
@@ -150,7 +155,7 @@ func main() {
 		os.Exit(2)
 	}
 	var err error
-	if !explicitStore && !slices.Contains([]string{"ready", "-h", "--help", "help", "gen-token", "git"}, args[0]) {
+	if !explicitStore && !slices.Contains([]string{"ready", "completion", "-h", "--help", "help", "gen-token", "git"}, args[0]) {
 		storePath, err = defaultWorkspaceStorePath()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "taxion: %v\n", err)
@@ -169,7 +174,9 @@ func main() {
 	case "git":
 		err = checkGitIndex(args[1:], os.Stdout)
 	case "init":
-		err = initCmd()
+		err = setupCmd(args[1:], os.Stdin, os.Stdout, terminalInput(os.Stdin), true)
+	case "completion":
+		err = completionCmd(args[1:], os.Stdout)
 	case "workspace":
 		err = workspaceMigrationCmd(args[1:])
 	case "task":

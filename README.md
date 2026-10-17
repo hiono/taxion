@@ -14,6 +14,8 @@ v0.2.0 は、v0.1.0 に OpenCode ACP runtime と停止後の復旧修正を追�
 
 `taxion doctor` で、設定したバックエンドと同じ検索先から見つかる skills・plugins・指示等を確認できます。通常はバックエンドの標準配置を使い、Taxion 用 directory へのコピーや skill ごとの hash 承認は不要です。
 
+0.3.0 向け開発版では `taxion init` が不足設定を尋ね、Git 除外・Project 設定・DB を準備します。`taxion doctor fix` は明示的な設定修復、`taxion completion bash` は設定不要の補完です。公開済み v0.2.0 の init は DB の初期化だけなので、[設定と実行前確認](docs/userguide/user-guide.md#設定と実行前確認)で版の違いを確認してください。
+
 引数なしの `ready` はモデルを呼ばず、設定や workspace も変更しません。明示的な `ready --install-skill` は標準の home 配下に版付き操作 skill を配置し、`ready --check-skill` はその互換性と内容を JSON で確認します。更新は `ready --update-skill` で明示し、利用者の編集は上書きしません。ただし、配置や出力だけで agent の実ロード・判断・操作品質を保証するコマンドではありません。外側の agent の費用と、その後の Taxion によるモデル実行の費用は別です。
 
 Taxion は coding agent や Git の認証を提供しません。新しい実行は予測不能な token 閾値で停止せず、各 model call で取得した利用量を報告します。account 残高・利用率は同じ課金単位の allowance を確認できない場合に unavailable と表示します。SDK session ceiling は別の soft ceiling で、総請求額を保証しません。

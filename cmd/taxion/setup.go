@@ -1,0 +1,529 @@
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/hiono/taxion/internal/config"
+	"github.com/hiono/taxion/internal/memory"
+	"github.com/mattn/go-isatty"
+	"gopkg.in/yaml.v3"
+)
+
+type setupValues map[string]string
+
+func (v setupValues) String() string { return "" }
+func (v setupValues) Set(text string) error {
+	name, value, ok := strings.Cut(text, "=")
+	if !ok {
+		return fmt.Errorf("--set requires FIELD=VALUE (identifiers only; never tokens)")
+	}
+	if _, duplicate := v[name]; duplicate {
+		return fmt.Errorf("--set repeats a field")
+	}
+	if _, err := config.ValuesLayer("input", map[string]string{name: value}); err != nil {
+		return err
+	}
+	v[name] = value
+	return nil
+}
+
+func terminalInput(input *os.File) bool {
+	return isatty.IsTerminal(input.Fd())
+}
+
+func setupContainsCredential(text string) bool {
+	for _, rule := range memory.DefaultRules {
+		if (rule.Name == "token" || rule.Name == "key") && rule.Re.MatchString(text) {
+			return true
+		}
+	}
+	return false
+}
+
+func setupCmd(args []string, input io.Reader, output io.Writer, interactive, initialize bool) error {
+	for _, arg := range args {
+		if setupContainsCredential(arg) {
+			return fmt.Errorf("setup rejects credential-like input; use identifiers or env:NAME references (values withheld)")
+		}
+	}
+	flags := flag.NewFlagSet("init", flag.ContinueOnError)
+	flags.SetOutput(output)
+	yes := flags.Bool("yes", false, "apply the displayed setup without a confirmation prompt; all missing references must be supplied")
+	dryRun := flags.Bool("dry-run", false, "display the setup without changing files or initializing the database")
+	remote := flags.String("remote", "", "select a Git remote when several exist")
+	values := setupValues{}
+	flags.Var(values, "set", "supply a missing configuration FIELD=VALUE; repeat for each field (never secrets)")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("setup accepts options only")
+	}
+	if err := validateWorkspaceStorePath(); err != nil {
+		return err
+	}
+	root, err := projectConfigurationDirectory()
+	if err != nil {
+		return err
+	}
+	userDir, err := os.UserConfigDir()
+	if err != nil {
+		return err
+	}
+	layers, err := config.ReadSetupFiles(userDir, root)
+	if err != nil {
+		return err
+	}
+	environment, present, err := config.EnvironmentLayer(os.LookupEnv)
+	if err != nil {
+		return err
+	}
+	if present {
+		layers = append(layers, environment)
+	}
+	selected, err := config.ResolvePartial(layers)
+	if err != nil {
+		return err
+	}
+	existing := selected.Config.Values()
+	for name, value := range values {
+		if previous := existing[name]; previous != "" && previous != value {
+			return fmt.Errorf("%s already has a value; setup never replaces existing selections, edit the owning layer explicitly", name)
+		}
+	}
+	reader := bufio.NewReader(input)
+	ask := func(name, suggestion string) (string, error) {
+		if !interactive || *yes || *dryRun {
+			return "", fmt.Errorf("missing %s; rerun taxion init or taxion doctor fix with --set %s=VALUE (or use an interactive terminal)", name, name)
+		}
+		if _, err := fmt.Fprintf(output, "%s [%s]: ", name, suggestion); err != nil {
+			return "", err
+		}
+		text, err := reader.ReadString('\n')
+		if err != nil {
+			return "", fmt.Errorf("setup input ended before %s was supplied: %w", name, err)
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			text = suggestion
+		}
+		if setupContainsCredential(text) {
+			return "", fmt.Errorf("setup rejects credential-like input; use references, never tokens (values withheld)")
+		}
+		return text, nil
+	}
+	defaults := map[string]string{"project.id": filepath.Base(root), "execution.requester": "human", "execution.worker": "local"}
+	if strings.ContainsAny(defaults["project.id"], " \t\r\n") {
+		delete(defaults, "project.id")
+	}
+	gitRoot := false
+	if _, err := os.Lstat(filepath.Join(root, ".git")); err == nil {
+		gitRoot = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if gitRoot && (existing["repository.host"] == "" && values["repository.host"] == "" ||
+		existing["repository.path"] == "" && values["repository.path"] == "" || *remote != "") {
+		names, err := setupGit(root, "remote")
+		if err != nil {
+			return err
+		}
+		remotes := strings.Fields(string(names))
+		for _, name := range remotes {
+			if setupContainsCredential(name) {
+				return fmt.Errorf("credential-like Git remote name rejected; repair Git configuration manually (values withheld)")
+			}
+		}
+		chosen := *remote
+		if chosen == "" && len(remotes) == 1 {
+			chosen = remotes[0]
+		} else if chosen == "" && len(remotes) > 1 {
+			if _, err := fmt.Fprintf(output, "Git remotes: %s\n", strings.Join(remotes, ", ")); err != nil {
+				return err
+			}
+			chosen, err = ask("remote (or pass --remote NAME)", "")
+			if err != nil {
+				return err
+			}
+		}
+		if chosen != "" {
+			found := false
+			for _, name := range remotes {
+				found = found || chosen == name
+			}
+			if !found {
+				return fmt.Errorf("--remote must select an existing Git remote")
+			}
+			raw, err := setupGit(root, "remote", "get-url", "--", chosen)
+			if err != nil {
+				return err
+			}
+			host, path, err := setupRemote(strings.TrimSpace(string(raw)))
+			if err != nil {
+				return err
+			}
+			for name, inferred := range map[string]string{"repository.host": host, "repository.path": path} {
+				for _, selected := range []string{existing[name], values[name]} {
+					if selected != "" && selected != inferred && (name != "repository.host" || !strings.EqualFold(selected, inferred)) {
+						return fmt.Errorf("%s conflicts with the selected Git remote; select --remote NAME or edit the owning configuration; no files changed", name)
+					}
+				}
+			}
+			defaults["repository.host"], defaults["repository.path"] = host, path
+			switch host {
+			case "github.com":
+				defaults["repository.provider"] = "github"
+			case "gitlab.com":
+				defaults["repository.provider"] = "gitlab"
+			case "bitbucket.org":
+				defaults["repository.provider"] = "bitbucket"
+			}
+		}
+	}
+	// Unrecognised enterprise hosts require a provider choice, not a guess.
+	var missing []string
+	for _, name := range []string{"project.id", "repository.provider", "repository.host", "repository.path",
+		"repository.account", "repository.credentialRef", "runtime.provider", "runtime.account",
+		"runtime.credentialRef", "runtime.contractRef", "execution.requester", "execution.worker", "execution.approvalRef",
+		"runtime.acpCommand", "runtime.acpCommandHash", "runtime.acpConfig", "runtime.acpConfigHash"} {
+		if existing[name] != "" || values[name] != "" {
+			continue
+		}
+		current := func(key string) string {
+			if values[key] != "" {
+				return values[key]
+			}
+			return existing[key]
+		}
+		if strings.HasPrefix(name, "runtime.acp") && current("runtime.provider") != "opencode" {
+			continue
+		}
+		suggestion := defaults[name]
+		switch name {
+		case "repository.credentialRef":
+			suggestion = map[string]string{"github": "gh:active", "gitlab": "glab:active"}[current("repository.provider")]
+		case "runtime.provider":
+			copilot, copilotErr := exec.LookPath("copilot")
+			openCode, openCodeErr := exec.LookPath("opencode")
+			if copilotErr == nil && openCodeErr != nil && copilot != "" && openCode == "" {
+				suggestion = "copilot"
+			}
+		case "runtime.account", "runtime.credentialRef":
+			if current("runtime.provider") == "opencode" {
+				suggestion = "opencode-managed"
+			} else if name == "runtime.credentialRef" && current("runtime.provider") == "copilot" {
+				suggestion = "copilot:logged-in"
+			}
+		}
+		// Only factual Git paths and local labels are filled without a choice.
+		if suggestion != "" && (defaults[name] != "" || name == "repository.credentialRef" || name == "runtime.credentialRef" ||
+			current("runtime.provider") == "opencode" && name == "runtime.account") {
+			values[name] = suggestion
+		} else {
+			if !interactive || *yes || *dryRun {
+				missing = append(missing, "--set "+name+"=VALUE")
+				continue
+			}
+			value, err := ask(name, suggestion)
+			if err != nil {
+				return err
+			}
+			values[name] = value
+		}
+	}
+	if len(missing) != 0 {
+		if _, err := fmt.Fprintf(output, "Project root: %s\nMissing references:\n  %s\n", root, strings.Join(missing, "\n  ")); err != nil {
+			return err
+		}
+		return fmt.Errorf("setup incomplete; supply the listed --set FIELD=VALUE options or run interactively; no files changed")
+	}
+	layer, err := config.ValuesLayer("setup", values)
+	if err != nil {
+		return err
+	}
+	final, err := config.Resolve(append(layers, layer))
+	if err != nil {
+		return err
+	}
+	for _, value := range final.Config.Values() {
+		if setupContainsCredential(value) {
+			return fmt.Errorf("setup rejects credential-like values; use credential references, never tokens (values withheld)")
+		}
+	}
+	configPath := filepath.Join(root, ".taxion", "config.yaml")
+	original, err := optionalSetupFile(configPath)
+	if err != nil {
+		return err
+	}
+	// Environment values remain environment-only. Persist only additions.
+	candidate, err := mergeSetupYAML(original, layer.Input)
+	if err != nil {
+		return err
+	}
+	if len(original) == 0 && len(values) == 0 {
+		candidate = []byte("version: 1\n")
+	}
+	ignorePath := filepath.Join(root, ".gitignore")
+	var ignoreBefore, ignoreAfter []byte
+	if gitRoot {
+		ignoreBefore, err = optionalSetupFile(ignorePath)
+		if err != nil {
+			return err
+		}
+		ignoreAfter = append([]byte(nil), ignoreBefore...)
+		for _, path := range []string{".taxion/", ".env"} {
+			_, err := setupGit(root, "check-ignore", "-q", "--", path)
+			var exit *exec.ExitError
+			if err != nil && (!errors.As(err, &exit) || exit.ExitCode() != 1) {
+				return err
+			}
+			if err != nil {
+				if len(ignoreAfter) != 0 && ignoreAfter[len(ignoreAfter)-1] != '\n' {
+					ignoreAfter = append(ignoreAfter, '\n')
+				}
+				ignoreAfter = append(ignoreAfter, []byte("/"+path+"\n")...)
+			}
+		}
+	}
+	if _, err := fmt.Fprintf(output, "Project root: %s\nConfiguration: %s\nWorkspace: %s\n", root, configPath, workspaceDBPath()); err != nil {
+		return err
+	}
+	var names []string
+	for name := range final.Sources {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, err := fmt.Fprintf(output, "%s: %s\n", name, final.Sources[name]); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(output, "Configuration additions (identifiers only):\n%s", layer.Input); err != nil {
+		return err
+	}
+	if !bytes.Equal(ignoreBefore, ignoreAfter) {
+		if _, err := fmt.Fprintf(output, "Append to %s:\n%s", ignorePath, ignoreAfter[len(ignoreBefore):]); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintln(output, "No login, model call, contract eligibility, data transmission or Task/budget approval is performed."); err != nil {
+		return err
+	}
+	if *dryRun {
+		return nil
+	}
+	if bytes.Equal(original, candidate) && bytes.Equal(ignoreBefore, ignoreAfter) {
+		if _, err := resolveConfiguration(); err != nil {
+			return fmt.Errorf("configuration still requires manual repair; no files changed: %w", err)
+		}
+		if initialize {
+			return initCmd()
+		}
+		_, err := fmt.Fprintln(output, "No repairs needed. Authentication, contract eligibility and execution approval remain separate checks.")
+		return err
+	}
+	if !*yes {
+		if !interactive {
+			return fmt.Errorf("setup not applied; review with --dry-run, then supply --yes to apply")
+		}
+		answer, err := ask("Apply displayed setup? type yes", "no")
+		if err != nil {
+			return err
+		}
+		if answer != "yes" {
+			return fmt.Errorf("setup not applied; existing files and database were preserved")
+		}
+	}
+	directory := filepath.Dir(configPath)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return err
+	}
+	lockPath := filepath.Join(directory, "setup.lock")
+	lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("setup lock unavailable; another setup may be running; inspect .taxion/setup.lock before manual recovery: %w", err)
+	}
+	defer os.Remove(lockPath)
+	if err := lock.Close(); err != nil {
+		return err
+	}
+	// Recheck trust boundaries after confirmation and before any replacement.
+	if _, err := config.ReadSetupFiles(userDir, root); err != nil {
+		return err
+	}
+	if !bytes.Equal(ignoreBefore, ignoreAfter) {
+		if err := replaceSetupFile(ignorePath, ignoreBefore, ignoreAfter, 0o644); err != nil {
+			return err
+		}
+	}
+	if err := config.CheckGitPolicy(directory); err != nil {
+		return fmt.Errorf("Git protection still fails; no configuration was written (review displayed ignore changes): %w", err)
+	}
+	if !bytes.Equal(original, candidate) {
+		if err := replaceSetupFile(configPath, original, candidate, 0o600); err != nil {
+			return fmt.Errorf("configuration was not written; Git protection may already have been saved, review the displayed changes: %w", err)
+		}
+	}
+	if _, err := resolveConfiguration(); err != nil {
+		return fmt.Errorf("setup files saved but final configuration check failed; database was not initialized: %w", err)
+	}
+	if initialize {
+		if err := initCmd(); err != nil {
+			return fmt.Errorf("configuration saved; workspace initialization failed: %w", err)
+		}
+	}
+	_, err = fmt.Fprintln(output, "Setup complete. Next: taxion config check --sources && taxion doctor. Model execution still requires authentication and explicit Task/budget approval.")
+	return err
+}
+
+func setupGit(root string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	for _, variable := range os.Environ() {
+		if !strings.HasPrefix(variable, "GIT_") {
+			command.Env = append(command.Env, variable)
+		}
+	}
+	output, err := command.Output()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("setup Git inspection timed out")
+	}
+	return output, err
+}
+
+func setupRemote(raw string) (string, string, error) {
+	var host, path string
+	if strings.Contains(raw, "://") {
+		u, err := url.Parse(raw)
+		if err != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" ||
+			(u.Scheme != "https" && u.Scheme != "ssh") || u.User != nil && u.Scheme != "ssh" {
+			return "", "", fmt.Errorf("unsupported or credential-bearing Git remote; supply repository fields explicitly without copying credentials")
+		}
+		if u.User != nil {
+			if _, password := u.User.Password(); password {
+				return "", "", fmt.Errorf("credential-bearing Git remote rejected; values withheld")
+			}
+		}
+		host, path = u.Host, strings.TrimPrefix(u.Path, "/")
+	} else if at := strings.IndexByte(raw, '@'); at > 0 {
+		host, path, _ = strings.Cut(raw[at+1:], ":")
+	}
+	path = strings.TrimSuffix(path, ".git")
+	if host == "" || path == "" {
+		return "", "", fmt.Errorf("remote is not an HTTPS, SSH or SCP repository; supply repository fields explicitly")
+	}
+	_, err := config.ValuesLayer("remote", map[string]string{"repository.host": host, "repository.path": path})
+	if err != nil {
+		return "", "", fmt.Errorf("Git remote does not identify a canonical repository; values withheld")
+	}
+	return host, path, nil
+}
+
+func optionalSetupFile(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("setup refuses a symlink or non-regular file; repair manually")
+	}
+	return os.ReadFile(path)
+}
+
+func mergeSetupYAML(original, additions []byte) ([]byte, error) {
+	if len(original) == 0 {
+		return additions, nil
+	}
+	var base, extra yaml.Node
+	if err := yaml.Unmarshal(original, &base); err != nil {
+		return nil, err
+	}
+	if err := yaml.Unmarshal(additions, &extra); err != nil {
+		return nil, err
+	}
+	var merge func(*yaml.Node, *yaml.Node) error
+	changed := false
+	merge = func(target, source *yaml.Node) error {
+		for i := 0; i < len(source.Content); i += 2 {
+			key, value := source.Content[i], source.Content[i+1]
+			var found *yaml.Node
+			for j := 0; j < len(target.Content); j += 2 {
+				if target.Content[j].Value == key.Value {
+					found = target.Content[j+1]
+					break
+				}
+			}
+			if found == nil {
+				target.Content = append(target.Content, key, value)
+				changed = true
+			} else if found.Kind == yaml.MappingNode && value.Kind == yaml.MappingNode {
+				if err := merge(found, value); err != nil {
+					return err
+				}
+			} else if found.Value != value.Value {
+				return fmt.Errorf("setup cannot overwrite an existing Project field")
+			}
+		}
+		return nil
+	}
+	if err := merge(base.Content[0], extra.Content[0]); err != nil {
+		return nil, err
+	}
+	if !changed {
+		return original, nil
+	}
+	return yaml.Marshal(&base)
+}
+
+func replaceSetupFile(path string, before, after []byte, mode os.FileMode) error {
+	current, err := optionalSetupFile(path)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(current, before) {
+		return fmt.Errorf("setup target changed during preparation; nothing overwritten")
+	}
+	if before != nil && mode != 0o600 {
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		mode = info.Mode().Perm()
+	}
+	file, err := os.CreateTemp(filepath.Dir(path), ".taxion-setup-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	if err := file.Chmod(mode); err != nil {
+		file.Close()
+		return err
+	}
+	_, writeErr := file.Write(after)
+	err = errors.Join(writeErr, file.Sync(), file.Close())
+	if err != nil {
+		return err
+	}
+	if before == nil {
+		// Link refuses an existing destination rather than overwriting a new file.
+		return os.Link(file.Name(), path)
+	}
+	return os.Rename(file.Name(), path)
+}

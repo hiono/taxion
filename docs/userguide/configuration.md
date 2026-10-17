@@ -9,10 +9,12 @@ Taxion は次の固定位置だけを読みます。
 | 優先順位 | 場所 | 用途 |
 | --- | --- | --- |
 | 低 | `os.UserConfigDir()/taxion/config.yaml` | 利用者共通の値 |
-| 中 | 作業ディレクトリの `.taxion/config.yaml` | project 固有の値 |
+| 中 | Git 作業ツリールートの `.taxion/config.yaml`（Git 外は cwd） | project 固有の値 |
 | 高 | 対応する `TAXION_*` 環境変数 | CI や実行環境ごとの値 |
 
-Linux では Global 設定は通常 `$XDG_CONFIG_HOME/taxion/config.yaml`、未設定なら `~/.config/taxion/config.yaml` です。macOS と Windows は Go の `os.UserConfigDir()` が返す標準設定ディレクトリを使います。Project 設定は現在の作業ディレクトリ直下だけを読み、親ディレクトリは検索しません。少なくとも一つの YAML ファイルが必要です。
+Linux では Global 設定は通常 `$XDG_CONFIG_HOME/taxion/config.yaml`、未設定なら `~/.config/taxion/config.yaml` です。macOS と Windows は Go の `os.UserConfigDir()` が返す標準設定ディレクトリを使います。0.3.0 向け開発版では Project 設定を Git 作業ツリールートから解決し、Git 外では cwd を使います。任意の親 directory を設定候補として検索する動作ではありません。サブディレクトリ直下に旧設定がある場合は手動移行を求め、勝手に統合しません。v0.2.0 の Project 設定は cwd 直下です。少なくとも一つの YAML ファイルが必要です。
+
+開発版の `taxion init` は既存設定と Git 情報から不足を補い、確認後に Project 設定と DB を準備します。`taxion doctor fix` は同じ処理で不足設定と除外規則を修復しますが、DB は初期化しません。`--dry-run`・`--set FIELD=VALUE`・`--remote NAME`・`--yes` と対話例は[利用者ガイド](user-guide.md#設定と実行前確認)を参照してください。既存値を変更する場合は、採用元の設定を明示的に編集します。Global 設定と環境変数を Project 設定へ丸ごと複写しません。
 
 各 layer は `version: 1` を持ちます。上位 layer は空でない値だけを上書きし、省略した項目は下位 layer から引き継ぎます。各ファイルは merge 前に個別検証されるため、後の layer で上書きしても不正な値は隠せません。明示的な空文字、null、未知の field、重複 key、alias、sequence、複数 YAML document は拒否されます。
 
@@ -24,7 +26,7 @@ Linux では Global 設定は通常 `$XDG_CONFIG_HOME/taxion/config.yaml`、未�
 | `repository.host` | 接続先 hostname と任意の port。例: `github.com`。 |
 | `repository.path` | owner または namespace と repository 名。例: `owner/repository`。 |
 | `repository.account` | Git repository 操作に使う予定の account 識別子。認証済み account の証明ではありません。 |
-| `repository.credentialRef` | GitHub の保存済みログインは `gh:active`、環境変数で指定する場合は `env:NAME`。secret 本体を書きません。 |
+| `repository.credentialRef` | GitHub の保存済みログインは `gh:active`、GitLab は `glab:active`、環境変数で指定する場合は `env:NAME`。secret 本体を書きません。 |
 | `runtime.provider` | `copilot` または `opencode`。OpenCode は Linux の隔離実行に限定します。 |
 | `runtime.account` | Copilot runtime に使う予定の account 識別子。OpenCode は `opencode-managed` とし、account 認証は未確認として記録します。 |
 | `runtime.credentialRef` | Copilot CLI の保存済みログインは `copilot:logged-in`、環境変数で指定する場合は `env:NAME`。OpenCode は `opencode-managed` とし、他の credential を転用しません。secret 本体を書きません。 |
@@ -110,7 +112,7 @@ copilot login
 
 ## 設定を置くときの Git 制約
 
-Git worktree 内の設定ファイルは未追跡で、かつ Git ignore 対象でなければなりません。作業ディレクトリの `.taxion/` 全体と、存在する `.env` も同じ条件で検査されます。通常は `.gitignore` に次を追加します。
+Git worktree 内の設定ファイルは未追跡で、かつ Git ignore 対象でなければなりません。Project 設定の基点にある `.taxion/` 全体と、存在する `.env` も同じ条件で検査されます。通常は `.gitignore` に次を追加します。
 
 ```gitignore
 /.taxion/

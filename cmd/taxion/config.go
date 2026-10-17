@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/hiono/taxion/internal/config"
@@ -130,10 +131,11 @@ func configurationLayers(required bool) ([]config.Layer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("locate user configuration directory: %w", err)
 	}
-	projectDir, err := os.Getwd()
+	projectDir, err := projectConfigurationDirectory()
 	if err != nil {
 		return nil, fmt.Errorf("locate project configuration directory: %w", err)
 	}
+
 	var layers []config.Layer
 	if required {
 		layers, err = config.ReadFiles(userDir, projectDir)
@@ -151,4 +153,24 @@ func configurationLayers(required bool) ([]config.Layer, error) {
 		layers = append(layers, environment)
 	}
 	return layers, nil
+}
+
+func projectConfigurationDirectory() (string, error) {
+	path, err := defaultWorkspaceStorePath()
+	if err != nil {
+		return "", err
+	}
+	root := filepath.Dir(filepath.Dir(path))
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	if cwd != root {
+		if _, err := os.Lstat(filepath.Join(cwd, ".taxion", "config.yaml")); err == nil {
+			return "", fmt.Errorf("subdirectory Project configuration is not loaded; explicitly migrate its configuration to the Git worktree root")
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+	}
+	return root, nil
 }

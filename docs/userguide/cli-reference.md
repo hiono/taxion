@@ -8,7 +8,7 @@
 
 インストール済みのコマンド一覧は `taxion --help`、各コマンドの flag は `taxion COMMAND -h` で確認する。以下は代表的な操作例で、契約の詳細は Task Graph、設定、実行記録の各文書に記載する。
 
-通常は保存先を指定せず、Git 作業ツリールートの `.taxion/` を使う。サブディレクトリの起動も同じ保存先となり、linked worktree は各ルートに分離する。Git のルート解決に失敗した場合はエラーとし、別の状態へ切り替えない。Git repository 外では従来のカレントディレクトリ配下を使う。設定ファイルの探索規則は変更しない。判断理由は [ADR-0032](../develop/adr/0032-resolve-default-workspace-from-git-worktree-root.md)に記録する。
+通常は保存先を指定せず、Git 作業ツリールートの `.taxion/` を使う。サブディレクトリの起動も同じ保存先となり、linked worktree は各ルートに分離する。Git のルート解決に失敗した場合はエラーとし、別の状態へ切り替えない。Git repository 外では従来のカレントディレクトリ配下を使う。保存先の判断は [ADR-0032](../develop/adr/0032-resolve-default-workspace-from-git-worktree-root.md)、0.3.0 向け開発版で設定の基点も揃える変更は [ADR-0039](../develop/adr/0039-prepare-project-configuration-with-explicit-repair.md)に記録する。以下の新しい init・doctor fix・completion は v0.2.0 には含まれない。
 
 例外用途の global option `--store PATH` は command の前に置き、旧 ledger のパスを選ぶ。明示した相対パスはカレントディレクトリ基準となる。旧 ledger の既定名は `ledger.json`、SQLite の保存先はその directory の `workspace.db`。DB 自体を `--store` に渡す指定、既存 DB と同一ファイルを指す symlink・hard link、未解決の symlink は、DB を開く前に拒否する。`init` はこの拒否時に directory や DB を作成せず、`serve` も audit directory を作成しない。別名の legacy ledger の読込み・移行は維持し、以前の別配置の自動移動・統合は行わない。
 
@@ -147,17 +147,17 @@ controller の検証待ちだけでは suspension を要求しない。ただし
 
 `config check` は、固定の Global・Project YAML 設定と対応する環境変数 override を、バージョン付き設定 schema と照合する。解決後の Copilot 設定では、任意の `execution.budgetGuidance` と OpenCode 専用の4項目を除く field が必須。OpenCode 設定では `runtime.acpCommand`・`runtime.acpCommandHash`・`runtime.acpConfig`・`runtime.acpConfigHash` も必須となり、Copilot 設定には混在させない。`version` は整数、他の値は whitespace を含まない空でない文字列。未知の field、重複キー、暗黙の非文字列値、alias、複数 document は拒否する。
 
-Global file は Go の `os.UserConfigDir()` 配下の `taxion/config.yaml`。Linux は `$XDG_CONFIG_HOME` または `~/.config`、macOS は `~/Library/Application Support`、Windows は `%AppData%`。Project file は cwd の `.taxion/config.yaml`。親 directory は検索しない。存在しない既定 file は省略し、読取り不能・不正な file は error にする。file が一つもなければ error を報告する。
+Global file は Go の `os.UserConfigDir()` 配下の `taxion/config.yaml`。Linux は `$XDG_CONFIG_HOME` または `~/.config`、macOS は `~/Library/Application Support`、Windows は `%AppData%`。Project file は Git 作業ツリールートの `.taxion/config.yaml`、Git 外は cwd。v0.2.0 の cwd 基点から変更した。cwd に旧サブディレクトリ設定があれば移行を求める。任意の親 directory は設定候補として検索しない。存在しない既定 file は省略し、読取り不能・不正な file は error にする。file が一つもなければ error を報告する。
 
 `--file`・`--user-file`・`--project-file` は削除済み。実設定は固定 Global・Project path に移し、環境別 override には対応する `TAXION_*` 変数を使う。削除した option は移行案内付き error を返し、指定 path を読まない。
 
 Git worktree 内で読み込む全設定 file は、untracked（`git ls-files` に entry がない）かつ Git ignore 対象である必要がある。後の層で上書きする場合も、追跡済み・ignore されていない設定は本文の読取り前に拒否する。symlink の指定 path と解決先の両方を確認する。worktree 外の file には Git ignore を要求しない。共有する例は実設定 file と分ける。
 
-Git worktree では、Global 設定だけを使う場合や directory が存在しない場合も、cwd の `.taxion/` 全体に ignore 規則が必要。`.gitignore` に `/.taxion/` を追加するか、ローカル専用規則を `.git/info/exclude` に置く。file だけの `/.taxion/config.yaml` 規則では不十分。追跡済みの子 path と有効な ignore 例外は、設定読込み前に拒否する。
+Git worktree では、Global 設定だけを使う場合や directory が存在しない場合も、Project 設定の基点にある `.taxion/` 全体に ignore 規則が必要。`.gitignore` に `/.taxion/` を追加するか、ローカル専用規則を `.git/info/exclude` に置く。file だけの `/.taxion/config.yaml` 規則では不十分。追跡済みの子 path と有効な ignore 例外は、設定読込み前に拒否する。
 
 directory と設定 symlink は、指定 path と解決先の両方を確認する。directory symlink には `/.taxion` など、link 自体に一致する ignore 規則が必要。
 
-cwd に `.env` があれば、その file も untracked かつ ignore 対象である必要がある。symlink の解決先も確認する。index 内の `.env` は作業 file がなくても拒否する。環境変数 override の有無にかかわらず検査する。Taxion は dotenv を読まず、環境変数値の元の取得先も推測しない。
+Project 設定の基点に `.env` があれば、その file も untracked かつ ignore 対象である必要がある。symlink の解決先も確認する。index 内の `.env` は作業 file がなくても拒否する。環境変数 override の有無にかかわらず検査する。Taxion は dotenv を読まず、環境変数値の元の取得先も推測しない。
 
 `.taxion/` はローカル設定、workspace 状態、cache を保持する。共有仕様、判断、レビュー済み Memory export は、その directory の外に置く。既存ローカル Memory は workspace の保存先に残す。共有 Memory の保存と移行は #69 で追跡している。
 
@@ -524,7 +524,9 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | `git check-index` | `--secrets` は index 内容の local Betterleaks scan を追加する。`--scanner PATH` は scanner を選び、`--secrets` を要求する。指定なしでは禁止 Taxion・dotenv path だけを検査する。 |
 | `git check-range` | `--base SHA`・`--head SHA` は40桁または64桁の完全な16進 SHA を指定する必須 option。base は head の祖先でなければならず、範囲には未公開 commit が1件以上必要。`--scanner PATH` は信頼する Betterleaks 1.9.0 executable（既定 `betterleaks`）を選び、範囲内の全 commit tree と message を scan する。 |
 | `git hook install` | `--scanner PATH` は Betterleaks 1.9.0 を選ぶ。`--paths-only` は内容 scan なしの path 検査を明示的に設置し、`--scanner` と併用できない。`git hook status`・`git hook uninstall` に option はない。hook は迂回できる。 |
-| `init` | 固有 option はない。local workspace Ledger を初期化する。 |
+| `init` | 既存 Global・Project・environment と Git remote から不足設定を補い、確認後に Project 設定・Git 除外・workspace を準備する。`--set FIELD=VALUE` は不足 field の明示指定で繰返し可。`--remote NAME` は複数 remote の選択。`--dry-run` は無変更の確認、`--yes` は表示した変更の非対話適用。参照不足は一覧と非zero終了。未知・重複 field、不正値、既存値の置換、追跡済み設定、symlink、競合する書込みを拒否する。設定・除外の保存後に DB 初期化が失敗した場合はその境界を報告する。 |
+| `doctor fix` | init と同じ設定準備を使い、DB を初期化せず不足設定と Git 除外だけを修復する。`--set`・`--remote`・`--dry-run`・`--yes` の意味は init と同じ。変更不要なら再確認なしで終了する。既存設定の値・DB・認証は変更しない。通常の doctor は読取り専用を維持し、設定不足時に fix を案内する。 |
+| `completion bash` | bash の補完定義を標準出力へ出す。`source <(taxion completion bash)` で有効にする。設定・Git・DB・外部 CLI・モデルは不要。実 CLI help から生成したコマンドと flag を補完する。flag の値、動的 ID、他の shell は未対応。 |
 | `workspace snapshot` | `--output FILE` は新規の絶対パスで、親 directory は事前に用意する。既定または `--store` で選んだ初期化済み workspace、存在する Memory、必要な Git object と親履歴を private SQLite 一ファイルへ保存する。取得中は両 DB の書込みを予約する。実行中 Flow・runner claim・未終了 Dispatch・未照合送信・不足 object・観測した未記録変更を拒否する。元の正式状態と Memory は変更しない。 |
 | `workspace inspect-snapshot` | `--file FILE` は既存の移送 SQLite で、相対パスも使える。現在の workspace は読み書きせず、隔離配置で checksum・形式版・DB と Git の必要 object を検証する。JSON の `hash` はファイル全体の SHA-256、`bytes` はファイルのバイト数、`repositories` は repository 数、`worktrees` は解放済みを含む保存配置数、`memory` は Memory の有無。provider・network・モデル・検証 command は呼ばないが、ローカル Git と一時保存領域を使う。 |
 | `workspace restore` | `--file FILE`、新規の絶対 directory `--output DIR`、確認済み `--expected-hash SHA256`、`--actor NAME`、`--source REF` が必須。入力は相対パスも使え、出力の親 directory は事前に用意する。現在の workspace や `--store` の選択先には書き込まず、指定した出力先へ復元する。既存先を上書きせず、処理がエラーを返した場合は今回作成した先だけを除去する。`.taxion/workspace.db`、任意の `.taxion/memory.db` と必要な `repositories/`・`worktrees/` を配置する。成功前に復元先を使用しない。旧契約・結果・usage は保持し、配置対応は復元先を選んだ `records show` の `restore` に記録する。旧 session を再開せず、継続は新しい承認済み successor Task を使う。具体例と制約は[一ファイル移送](user-guide.md#別マシンへの一ファイル移送)を参照する。 |

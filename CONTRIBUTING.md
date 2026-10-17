@@ -14,6 +14,10 @@ Go 全体のテストは `mise exec -- go test ./...` で実行します。
 PR を作成する前は `mise run check` で format・vet・Go test/build・Web test をまとめて確認します。
 動作の変更には、対応するガードレールと回帰テストが必要です。
 
+CLI のコマンド・flag を変えた場合は `mise exec -- go generate ./cmd/taxion` で
+bash 補完定義を更新します。生成処理は隔離した CLI の help を使い、
+通常テストの `TestCompletionMatchesActualCLIHelp` が生成済み定義との一致を確認します。
+
 1. [ロードマップ](docs/develop/roadmap.md)から小さな作業を選びます。
 2. `internal/core` の依存は標準ライブラリだけにします（SDK-001）。外部との接続は `internal/runtime/<name>/` に置きます。
 3. 動作を変更するときは、ガードレール ID とテストを対応付けます。

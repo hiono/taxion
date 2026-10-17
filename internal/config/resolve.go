@@ -18,6 +18,11 @@ func Resolve(layers []Layer) (Resolution, error) {
 	return resolve(layers, true)
 }
 
+// ResolvePartial validates supplied fields without inventing missing references.
+func ResolvePartial(layers []Layer) (Resolution, error) {
+	return resolve(layers, false)
+}
+
 // ResolveBudgetGuidance can prepare a local proposal before all execution
 // identity fields exist. Every supplied layer is still schema-validated.
 func ResolveBudgetGuidance(layers []Layer) (string, error) {
@@ -30,6 +35,9 @@ func ResolveBudgetGuidance(layers []Layer) (string, error) {
 
 func resolve(layers []Layer, required bool) (Resolution, error) {
 	result := Resolution{Sources: map[string]string{}}
+	if !required {
+		result.Config.Version = 1
+	}
 	target := result.Config.fields()
 	seen := map[string]bool{}
 	for index, layer := range layers {
