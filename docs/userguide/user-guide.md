@@ -8,31 +8,31 @@ Task は一件の作業記録で、目的・変更範囲・完了条件・検証
 
 ## 導入方法
 
-v0.3.1 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
+v0.4.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
-このガイドは v0.3.1 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。
-初期設定・診断修復・補完と選択式入力を使う場合は v0.3.1 を導入してください。開発中の変更を試す場合は main のソースからビルドします。
+このガイドは v0.4.0 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。
+ゴール指向方針・保存品質評価・ACP の互換性確認を使う場合は v0.4.0 を導入してください。開発中の変更を試す場合は main のソースからビルドします。
 公開 tag を導入しただけでは、後から追加された機能は使えません。
 
 ```sh
 mise use -g go@1.26.0
-mise install go:github.com/hiono/taxion/cmd/taxion@v0.3.1
-mise use -g --pin go:github.com/hiono/taxion/cmd/taxion@v0.3.1
+mise install go:github.com/hiono/taxion/cmd/taxion@v0.4.0
+mise use -g --pin go:github.com/hiono/taxion/cmd/taxion@v0.4.0
 mise exec -- taxion --version
 mise exec -- taxion --help
 ```
 
-更新時も、先に `mise install` で対象版を導入し、次に `mise use --pin` で選択してから版を確認します。`v0.3.1` は導入したい公開 version に置き換えます。次は、対象プロジェクトの directory で実行する例です。
+更新時も、先に `mise install` で対象版を導入し、次に `mise use --pin` で選択してから版を確認します。`v0.4.0` は導入したい公開 version に置き換えます。次は、対象プロジェクトの directory で実行する例です。
 
 ```sh
-mise install go:github.com/hiono/taxion/cmd/taxion@v0.3.1
-mise use --pin go:github.com/hiono/taxion/cmd/taxion@v0.3.1
+mise install go:github.com/hiono/taxion/cmd/taxion@v0.4.0
+mise use --pin go:github.com/hiono/taxion/cmd/taxion@v0.4.0
 mise exec -- taxion --version
 ```
 
-v0.3.1 の期待する表示は `taxion v0.3.1` です。global 設定を更新する場合は `mise use` に `-g` を付けます。プロジェクトの mise 設定に Taxion の指定がある場合は、global 設定よりそちらが優先されるため、プロジェクト側も更新してください。
+v0.4.0 の期待する表示は `taxion v0.4.0` です。global 設定を更新する場合は `mise use` に `-g` を付けます。プロジェクトの mise 設定に Taxion の指定がある場合は、global 設定よりそちらが優先されるため、プロジェクト側も更新してください。
 
-旧開発版が導入済みの場合、`mise use ...@v0.3.1` だけでは、`0.3.1-0.…` の pseudo-version が再選択されることがあります。`--pin` は解決した版を保存する指定で、この再選択を防ぐものではありません。先に `mise install ...@v0.3.1` を実行する手順で正式版への更新を確認しています。古い版の個別削除や cache 消去、`.taxion` の設定・DB の削除や初期化し直しは不要です。
+旧開発版が導入済みの場合、`mise use` だけでは、古い pseudo-version が再選択されることがあります。`--pin` は解決した版を保存する指定で、この再選択を防ぐものではありません。先に `mise install ...@v0.4.0` を実行して正式版を導入してください。古い版の個別削除や cache 消去、`.taxion` の設定・DB の削除や初期化し直しは不要です。
 
 v0.3.1 では `taxion --help` の先頭に `Version:` を表示し、`taxion --version` でも同じビルド情報を確認できます。Go の module version を使うため、公開 tag の導入では `v0.3.1`、commit 固定の導入では完全な pseudo-version を表示します。Git 情報を持つソースビルドでは revision と、未コミット変更がある場合の `modified=true` も表示します。情報のないビルドを公開版と推測せず、取得できない旨を表示します。設定・DB・外部 CLI は読みません。公開済み v0.3.0 と初回設定補正版 `dd352cf` には、この版表示は含まれません。
 
@@ -51,7 +51,7 @@ mise unuse -g go:github.com/hiono/taxion/cmd/taxion
 Go backend の導入済み version が残り、他の設定でも使っていなければ、mise から個別に削除できます。
 
 ```sh
-mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.3.1
+mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.4.0
 ```
 
 ソースから実行する場合は Go 1.26.0 が必要です。
@@ -147,7 +147,7 @@ command -v taxion >/dev/null 2>&1 && source <(taxion completion bash)
 Linux では `runtime.provider: opencode` を選び、承認した OpenCode の executable と
 server 設定を使えます。[OpenCode の設定と制約](configuration.md#opencode-acp-の設定と制約)で
 必要な隔離環境、設定の内容 hash、未対応操作を確認してください。
-開発版では CLI の版固定や更新ごとの手動照合は不要です。Taxion が接続時の互換性を確認し、
+v0.4.0 では CLI の版固定や更新ごとの手動照合は不要です。Taxion が接続時の互換性を確認し、
 起動する実行ファイルの複製と内容 hash の記録を行います。
 厳密な再現性が必要な場合だけ実行ファイルの hash も固定できます。現在は認証情報を注入せず、
 実受入れは匿名の Big Pickle に限定しています。`doctor` と `runtime auth` は local asset の
@@ -279,7 +279,7 @@ taxion ready --update-skill
 
 配置に symlink は使わないため、その作成用の権限は不要です。既存パスの symlink は追跡せず拒否し、管理対象外・改変済みファイルは上書きしません。初回配置は既存ファイルを置換せず、更新時も一時ファイルから完成した一ファイルを入れ替えます。filesystem の書込み許可・hard link・rename の対応は必要です。
 
-公開済み v0.3.1 の同梱 skill は `1.2.0`、開発版はゴール指向方針を含む `1.3.2` です。CLI 操作契約は `taxion.cli.v1` を維持します。開発版では旧 `1.2.0`・`1.3.0`・`1.3.1` も明示的な `--update-skill` が必要です。本体は許容 skill 版を明示リストで保持し、未知の minor・major 版を推測で許可しません。skill の metadata にも必要な CLI 契約、ready 原稿と内容のハッシュ、生成した本体の build 情報を保存します。確認は、本体の許容版と skill の要求契約の一致、現在の ready 原稿との一致、配置内容の整合性を判定します。公開前の本体について、未確認の製品 SemVer 範囲を互換と宣言する代わりに、版を付けた CLI 操作契約を照合します。
+v0.3.1 の同梱 skill は `1.2.0`、v0.4.0 はゴール指向方針を含む `1.3.2` です。CLI 操作契約は `taxion.cli.v1` を維持します。v0.4.0 では旧 `1.2.0`・`1.3.0`・`1.3.1` も明示的な `--update-skill` が必要です。本体は許容 skill 版を明示リストで保持し、未知の minor・major 版を推測で許可しません。skill の metadata にも必要な CLI 契約、ready 原稿と内容のハッシュ、生成した本体の build 情報を保存します。確認は、本体の許容版と skill の要求契約の一致、現在の ready 原稿との一致、配置内容の整合性を判定します。製品 SemVer の推測ではなく、版を付けた CLI 操作契約を照合します。
 
 完了時は最終受入条件を判定し、依頼に含まれる ADR・Issue・milestone・PR に判断・根拠・結果を反映します。承認済みの変更をコミットし、必要な公開を確認してから完成を報告します。未達条件を閉じたり、依頼にない公開作業を追加したりはしません。
 
@@ -461,9 +461,9 @@ taxion workflow show --id task-example-flow
 
 ## 結果の確認と停止後の継続
 
-### 開発版のゴール指向方針と保存証拠の評価
+### v0.4.0 のゴール指向方針と保存証拠の評価
 
-以下は公開済み v0.3.1 には含まれません。開発版は、最終成果・正確性と安全性・費用の順で判断し、質問数やレビュー回数を品質の代理にしません。軽微な仮定は明示して進め、重大な確認は維持します。各担当は既存の成果と証拠を再利用し、追加調査や再レビューを未達条件・新証拠・具体的リスクに結び付けます。
+以下は v0.3.1 には含まれません。v0.4.0 は、最終成果・正確性と安全性・費用の順で判断し、質問数やレビュー回数を品質の代理にしません。軽微な仮定は明示して進め、重大な確認は維持します。各担当は既存の成果と証拠を再利用し、追加調査や再レビューを未達条件・新証拠・具体的リスクに結び付けます。
 
 細かな設定を一件ずつ尋ねたり、ロール間で結論を変えない確認を往復したりしないよう、担当別の指示も加えています。Planner は安全で修正可能な既定案を使い、Coder は承認範囲内の実装判断を進めます。Reviewer は任意の好みだけで修正・再レビューを要求せず、必要な助言は `workReport` に分けます。ただし、実際の欠陥や acceptance 未達は任意扱いにせず、全条件の証拠が揃ってから承認します。外側の操作者は引継ぎをまとめ、通常の判断に再承認を求めません。
 
