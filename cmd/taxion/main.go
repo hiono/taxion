@@ -42,7 +42,7 @@ Workspace: defaults to .taxion/ under the Git worktree root (cwd outside Git).
 Commands:
 Setup and discovery:
   init                Prepare Project configuration, Git protection and workspace ([--set FIELD=VALUE], [--remote NAME], [--dry-run], [--yes])
-  doctor              Inspect the selected backend's native search paths and discovered customizations ([--json])
+  doctor              Diagnose setup; with valid settings, inspect the selected backend's native paths and customizations ([--json])
   doctor fix          Preview and explicitly repair missing Project settings and Git protection ([--set FIELD=VALUE], [--remote NAME], [--dry-run], [--yes])
   completion bash     Print offline bash command and option completion
   ready               Print the orchestration prompt; optional --install-skill / --update-skill / --check-skill

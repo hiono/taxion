@@ -53,6 +53,26 @@ func setupContainsCredential(text string) bool {
 	return false
 }
 
+var setupFieldHelp = map[string]string{
+	"project.id":               "Local project identifier (no whitespace).",
+	"repository.provider":      "Choose github, gitlab, or bitbucket. For a self-managed GitLab host, enter gitlab.",
+	"repository.host":          "Git server hostname, with an optional port; no URL scheme.",
+	"repository.path":          "Repository namespace/path from the Git remote.",
+	"repository.account":       "Account used for this Git repository; not necessarily your AI runtime account.",
+	"repository.credentialRef": "Authentication reference, not a token: gh:active, glab:active, or env:VARIABLE_NAME.",
+	"runtime.provider":         "Choose copilot or opencode; select the backend you intend to use.",
+	"runtime.account":          "Account used by the selected AI runtime; do not enter a password or token.",
+	"runtime.credentialRef":    "Authentication reference, not a token: copilot:logged-in or opencode-managed.",
+	"runtime.contractRef":      "Reference to the runtime usage contract or entitlement you have confirmed. Setup does not verify eligibility.",
+	"execution.requester":      "Identifier for the person requesting work.",
+	"execution.worker":         "Identifier for the worker executing work.",
+	"execution.approvalRef":    "Reference to your execution approval policy or record. This does not approve a Task or budget.",
+	"runtime.acpCommand":       "Absolute path to the approved OpenCode executable.",
+	"runtime.acpCommandHash":   "Approved executable hash in sha256:HEX format.",
+	"runtime.acpConfig":        "Absolute path to the approved OpenCode server configuration.",
+	"runtime.acpConfigHash":    "Approved server configuration hash in sha256:HEX format.",
+}
+
 func setupCmd(args []string, input io.Reader, output io.Writer, interactive, initialize bool) error {
 	for _, arg := range args {
 		if setupContainsCredential(arg) {
@@ -75,29 +95,11 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 	if err := validateWorkspaceStorePath(); err != nil {
 		return err
 	}
-	root, err := projectConfigurationDirectory()
+	observation, err := observeSetup(*remote)
 	if err != nil {
 		return err
 	}
-	userDir, err := os.UserConfigDir()
-	if err != nil {
-		return err
-	}
-	layers, err := config.ReadSetupFiles(userDir, root)
-	if err != nil {
-		return err
-	}
-	environment, present, err := config.EnvironmentLayer(os.LookupEnv)
-	if err != nil {
-		return err
-	}
-	if present {
-		layers = append(layers, environment)
-	}
-	selected, err := config.ResolvePartial(layers)
-	if err != nil {
-		return err
-	}
+	root, layers, selected := observation.Root, observation.Layers, observation.Selection
 	existing := selected.Config.Values()
 	for name, value := range values {
 		if previous := existing[name]; previous != "" && previous != value {
@@ -109,87 +111,71 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 		if !interactive || *yes || *dryRun {
 			return "", fmt.Errorf("missing %s; rerun taxion init or taxion doctor fix with --set %s=VALUE (or use an interactive terminal)", name, name)
 		}
-		if _, err := fmt.Fprintf(output, "%s [%s]: ", name, suggestion); err != nil {
-			return "", err
+		help, field := setupFieldHelp[name]
+		if field {
+			if _, err := fmt.Fprintln(output, help); err != nil {
+				return "", err
+			}
 		}
-		text, err := reader.ReadString('\n')
-		if err != nil {
-			return "", fmt.Errorf("setup input ended before %s was supplied: %w", name, err)
+		for {
+			prompt := name + " (required): "
+			if suggestion != "" {
+				prompt = fmt.Sprintf("%s [%s]: ", name, suggestion)
+			}
+			if _, err := fmt.Fprint(output, prompt); err != nil {
+				return "", err
+			}
+			text, err := reader.ReadString('\n')
+			if err != nil {
+				return "", fmt.Errorf("setup input ended before %s was supplied; no files changed: %w", name, err)
+			}
+			text = strings.TrimSpace(text)
+			if text == "" {
+				text = suggestion
+			}
+			if setupContainsCredential(text) {
+				return "", fmt.Errorf("setup rejects credential-like input; use references, never tokens (values withheld)")
+			}
+			if text == "" {
+				if _, err := fmt.Fprintf(output, "%s is required; enter a value or press Ctrl-C to cancel. No files changed.\n", name); err != nil {
+					return "", err
+				}
+				continue
+			}
+			if field {
+				if _, err := config.ValuesLayer("input", map[string]string{name: text}); err != nil {
+					if _, writeErr := fmt.Fprintf(output, "%s: %v; try again. No files changed.\n", name, err); writeErr != nil {
+						return "", writeErr
+					}
+					continue
+				}
+			}
+			return text, nil
 		}
-		text = strings.TrimSpace(text)
-		if text == "" {
-			text = suggestion
-		}
-		if setupContainsCredential(text) {
-			return "", fmt.Errorf("setup rejects credential-like input; use references, never tokens (values withheld)")
-		}
-		return text, nil
 	}
-	defaults := map[string]string{"project.id": filepath.Base(root), "execution.requester": "human", "execution.worker": "local"}
-	if strings.ContainsAny(defaults["project.id"], " \t\r\n") {
-		delete(defaults, "project.id")
-	}
-	gitRoot := false
-	if _, err := os.Lstat(filepath.Join(root, ".git")); err == nil {
-		gitRoot = true
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if err := printSetupObservation(output, observation); err != nil {
 		return err
 	}
-	if gitRoot && (existing["repository.host"] == "" && values["repository.host"] == "" ||
-		existing["repository.path"] == "" && values["repository.path"] == "" || *remote != "") {
-		names, err := setupGit(root, "remote")
+	if observation.SelectedRemote == "" && len(observation.Remotes) > 1 {
+		chosen, err := ask("remote (or pass --remote NAME)", "")
 		if err != nil {
 			return err
 		}
-		remotes := strings.Fields(string(names))
-		for _, name := range remotes {
-			if setupContainsCredential(name) {
-				return fmt.Errorf("credential-like Git remote name rejected; repair Git configuration manually (values withheld)")
-			}
+		observation, err = observeSetup(chosen)
+		if err != nil {
+			return err
 		}
-		chosen := *remote
-		if chosen == "" && len(remotes) == 1 {
-			chosen = remotes[0]
-		} else if chosen == "" && len(remotes) > 1 {
-			if _, err := fmt.Fprintf(output, "Git remotes: %s\n", strings.Join(remotes, ", ")); err != nil {
-				return err
-			}
-			chosen, err = ask("remote (or pass --remote NAME)", "")
-			if err != nil {
-				return err
-			}
+		if err := printSetupObservation(output, observation); err != nil {
+			return err
 		}
-		if chosen != "" {
-			found := false
-			for _, name := range remotes {
-				found = found || chosen == name
-			}
-			if !found {
-				return fmt.Errorf("--remote must select an existing Git remote")
-			}
-			raw, err := setupGit(root, "remote", "get-url", "--", chosen)
-			if err != nil {
-				return err
-			}
-			host, path, err := setupRemote(strings.TrimSpace(string(raw)))
-			if err != nil {
-				return err
-			}
-			for name, inferred := range map[string]string{"repository.host": host, "repository.path": path} {
-				for _, selected := range []string{existing[name], values[name]} {
-					if selected != "" && selected != inferred && (name != "repository.host" || !strings.EqualFold(selected, inferred)) {
-						return fmt.Errorf("%s conflicts with the selected Git remote; select --remote NAME or edit the owning configuration; no files changed", name)
-					}
-				}
-			}
-			defaults["repository.host"], defaults["repository.path"] = host, path
-			switch host {
-			case "github.com":
-				defaults["repository.provider"] = "github"
-			case "gitlab.com":
-				defaults["repository.provider"] = "gitlab"
-			case "bitbucket.org":
-				defaults["repository.provider"] = "bitbucket"
+	}
+	defaults, gitRoot := observation.Detected, observation.Git
+	for _, name := range []string{"repository.host", "repository.path"} {
+		inferred := defaults[name]
+		for _, value := range []string{existing[name], values[name]} {
+			if inferred != "" && value != "" && value != inferred &&
+				(name != "repository.host" || !strings.EqualFold(value, inferred)) {
+				return fmt.Errorf("%s conflicts with the selected Git remote; select --remote NAME or edit the owning configuration; no files changed", name)
 			}
 		}
 	}
@@ -216,10 +202,8 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 		case "repository.credentialRef":
 			suggestion = map[string]string{"github": "gh:active", "gitlab": "glab:active"}[current("repository.provider")]
 		case "runtime.provider":
-			copilot, copilotErr := exec.LookPath("copilot")
-			openCode, openCodeErr := exec.LookPath("opencode")
-			if copilotErr == nil && openCodeErr != nil && copilot != "" && openCode == "" {
-				suggestion = "copilot"
+			if len(observation.RuntimeAvailable) == 1 {
+				suggestion = observation.RuntimeAvailable[0]
 			}
 		case "runtime.account", "runtime.credentialRef":
 			if current("runtime.provider") == "opencode" {
@@ -319,7 +303,7 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 			return err
 		}
 	}
-	if _, err := fmt.Fprintln(output, "No login, model call, contract eligibility, data transmission or Task/budget approval is performed."); err != nil {
+	if _, err := fmt.Fprintln(output, "Only missing settings for the selected backend are saved; inherited fields and optional settings are not a complete configuration catalogue.\nNo login, model call, contract eligibility, data transmission or Task/budget approval is performed.\nAfter applying: taxion config check --sources, then taxion doctor. Native inventory is not execution approval."); err != nil {
 		return err
 	}
 	if *dryRun {
@@ -361,6 +345,10 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 		return err
 	}
 	// Recheck trust boundaries after confirmation and before any replacement.
+	userDir, err := os.UserConfigDir()
+	if err != nil {
+		return err
+	}
 	if _, err := config.ReadSetupFiles(userDir, root); err != nil {
 		return err
 	}

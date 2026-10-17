@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"net/url"
 	"os"
 	"os/exec"
@@ -85,6 +87,213 @@ func TestSetupGitLabColdStartAndRepeatWithoutModel(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(child, ".taxion")); !os.IsNotExist(err) {
 		t.Fatal("setup created subdirectory state", err)
+	}
+}
+
+func TestSetupInteractiveExplainsAndRetriesRequiredFields(t *testing.T) {
+	for _, initialize := range []bool{true, false} {
+		t.Run(map[bool]string{true: "init", false: "doctor-fix"}[initialize], func(t *testing.T) {
+			root := setupFixture(t, true)
+			if err := initCmd(); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(workspaceDBPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			backup := filepath.Join(root, ".taxion", "config.yaml.bak")
+			original := []byte("private backup must not be loaded or overwritten\n")
+			if err := os.WriteFile(backup, original, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			input := "\nunsupported\ngitlab\n\nscm-user\nai-user\nconfirmed-contract\napproval-record\nyes\n"
+			if err := setupCmd([]string{"--set", "runtime.provider=copilot"}, strings.NewReader(input), &output, true, initialize); err != nil {
+				t.Fatal(output.String(), err)
+			}
+			for _, detail := range []string{
+				"Choose github, gitlab, or bitbucket", "repository.provider (required)",
+				"repository.provider is required", "repository.provider requires github, gitlab, or bitbucket",
+				"repository.account is required", "not necessarily your AI runtime account",
+				"Setup does not verify eligibility", "This does not approve a Task or budget",
+			} {
+				if !strings.Contains(output.String(), detail) {
+					t.Errorf("missing input guidance: %s", detail)
+				}
+			}
+			selected, err := resolveConfiguration()
+			if err != nil || selected.Config.Repository.Provider != "gitlab" ||
+				selected.Config.Repository.CredentialRef != "glab:active" ||
+				selected.Config.Runtime.ContractRef != "confirmed-contract" {
+				t.Fatal(selected, err)
+			}
+			after, err := os.ReadFile(workspaceDBPath())
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("setup changed existing database", err)
+			}
+			after, err = os.ReadFile(backup)
+			if err != nil || !bytes.Equal(original, after) {
+				t.Fatal("setup changed backup configuration", err)
+			}
+		})
+	}
+}
+
+func TestSetupBlankRequiredInputDoesNotAdvanceOrWrite(t *testing.T) {
+	root := setupFixture(t, true)
+	var output bytes.Buffer
+	err := setupCmd(nil, strings.NewReader("\n\n"), &output, true, true)
+	if err == nil || !strings.Contains(err.Error(), "repository.provider") ||
+		!strings.Contains(err.Error(), "no files changed") {
+		t.Fatal(output.String(), err)
+	}
+	if strings.Count(output.String(), "repository.provider (required):") != 3 ||
+		strings.Contains(output.String(), "repository.account (required):") {
+		t.Fatal("blank input advanced to another field", output.String())
+	}
+	for _, path := range []string{".taxion", ".gitignore"} {
+		if _, err := os.Stat(filepath.Join(root, path)); !os.IsNotExist(err) {
+			t.Fatal("incomplete interactive setup wrote files", path, err)
+		}
+	}
+}
+
+func TestSetupDoctorFirstAndDirectInitUseCurrentObservation(t *testing.T) {
+	var previous map[string]string
+	for _, doctorFirst := range []bool{true, false} {
+		t.Run(map[bool]string{true: "doctor-first", false: "direct-init"}[doctorFirst], func(t *testing.T) {
+			root := setupFixture(t, true)
+			bin := t.TempDir()
+			marker := filepath.Join(root, "runtime-started")
+			if err := os.WriteFile(filepath.Join(bin, "copilot"), []byte("#!/bin/sh\ntouch "+marker+"\nexit 1\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			var output bytes.Buffer
+			if doctorFirst {
+				err := doctorCmd([]string{"--json"}, &output)
+				if err == nil || !strings.Contains(err.Error(), "no files changed") {
+					t.Fatal("unconfigured doctor reported success", output.String(), err)
+				}
+				var report struct {
+					Setup   setupObservation `json:"setup"`
+					Problem string           `json:"problem"`
+				}
+				if err := json.Unmarshal(output.Bytes(), &report); err != nil {
+					t.Fatal(output.String(), err)
+				}
+				if report.Setup.Root != root || report.Problem == "" ||
+					report.Setup.Detected["repository.host"] != "gitlab.example.test" ||
+					report.Setup.Selection.Config.Runtime.Provider != "" {
+					t.Fatal("unconfigured diagnosis lost observations or selected a runtime", report)
+				}
+				for _, path := range []string{".taxion", ".gitignore", "runtime-started"} {
+					if _, err := os.Stat(filepath.Join(root, path)); !os.IsNotExist(err) {
+						t.Fatal("doctor changed files or started a backend", path, err)
+					}
+				}
+				// A previous diagnosis is not a cache or an approval.
+				if _, err := setupGit(root, "remote", "set-url", "origin", "https://gitlab.example.test/changed/project.git"); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, err := setupGit(root, "remote", "set-url", "origin", "https://gitlab.example.test/changed/project.git"); err != nil {
+				t.Fatal(err)
+			}
+			output.Reset()
+			args := append(setupArguments(), "--set", "project.id=fixture", "--yes")
+			if err := setupCmd(args, strings.NewReader(""), &output, false, true); err != nil {
+				t.Fatal(output.String(), err)
+			}
+			selected, err := resolveConfiguration()
+			if err != nil || selected.Config.Repository.Path != "changed/project" {
+				t.Fatal("init used stale doctor data", selected, err)
+			}
+			values := selected.Config.Values()
+			if previous != nil {
+				for name, value := range previous {
+					if values[name] != value {
+						t.Errorf("%s differs between direct and doctor-first init", name)
+					}
+				}
+			}
+			previous = values
+			for _, text := range []string{"not saved", "no prior doctor run", "Optional/conditional", "not a complete configuration catalogue", "Unverified:"} {
+				if !strings.Contains(output.String(), text) {
+					t.Errorf("missing setup status: %s", text)
+				}
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatal("setup ran a runtime executable", err)
+			}
+		})
+	}
+}
+
+func TestSetupObservationDoesNotHideInvalidConfiguration(t *testing.T) {
+	root := setupFixture(t, true)
+	if err := os.MkdirAll(filepath.Join(root, ".taxion"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".taxion", "config.yaml")
+	before := []byte("version: 1\nunknown: value\n")
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := doctorCmd([]string{"--json"}, &output); err == nil || output.Len() != 0 {
+		t.Fatal("invalid configuration became a success-shaped observation", output.String(), err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("doctor altered invalid configuration", err)
+	}
+}
+
+func TestSetupObservationListsAvailableChoicesWithoutSelectingOrStartingThem(t *testing.T) {
+	for _, available := range [][]string{nil, {"copilot"}, {"opencode"}, {"copilot", "opencode"}} {
+		t.Run(strings.Join(available, "+"), func(t *testing.T) {
+			setupFixture(t, false)
+			bin := t.TempDir()
+			for _, name := range available {
+				if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 99\n"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("PATH", bin)
+			report, err := observeSetup("")
+			if err != nil || strings.Join(report.RuntimeAvailable, ",") != strings.Join(available, ",") {
+				t.Fatal("available choices differ from PATH", report.RuntimeAvailable, err)
+			}
+			if report.Selection.Config.Runtime.Provider != "" || report.Detected["runtime.provider"] != "" {
+				t.Fatal("availability became a selected backend")
+			}
+		})
+	}
+}
+
+func TestSetupObservationOutputFailuresDoNotWriteFiles(t *testing.T) {
+	for _, action := range []string{"init", "doctor", "doctor-json"} {
+		t.Run(action, func(t *testing.T) {
+			root := setupFixture(t, true)
+			var err error
+			if action == "init" {
+				err = setupCmd(append(setupArguments(), "--yes"), strings.NewReader(""), rejectingConfigWriter{}, false, true)
+			} else {
+				var args []string
+				if action == "doctor-json" {
+					args = []string{"--json"}
+				}
+				err = doctorCmd(args, rejectingConfigWriter{})
+			}
+			if err == nil || !strings.Contains(err.Error(), "output unavailable") {
+				t.Fatal("output failure was suppressed", err)
+			}
+			for _, path := range []string{".taxion", ".gitignore"} {
+				if _, err := os.Stat(filepath.Join(root, path)); !os.IsNotExist(err) {
+					t.Fatal("failed observation wrote files", path, err)
+				}
+			}
+		})
 	}
 }
 
@@ -386,6 +595,19 @@ func TestSetupCLIColdStartAndOfflineCompletion(t *testing.T) {
 	root := setupFixture(t, true)
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(),
 		"XDG_CONFIG_HOME=" + os.Getenv("XDG_CONFIG_HOME")}
+	diagnosis := exec.Command(binary, "doctor", "--json")
+	diagnosis.Dir, diagnosis.Env = root, env
+	report, err := diagnosis.Output()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 || !json.Valid(report) ||
+		!bytes.Contains(report, []byte(`"setup":`)) || !bytes.Contains(report, []byte(`"problem":`)) {
+		t.Fatal("unconfigured CLI doctor lost JSON or nonzero exit", string(report), err)
+	}
+	for _, path := range []string{".taxion", ".gitignore"} {
+		if _, err := os.Stat(filepath.Join(root, path)); !os.IsNotExist(err) {
+			t.Fatal("CLI diagnosis changed files", path, err)
+		}
+	}
 	run := func(args ...string) []byte {
 		t.Helper()
 		command := exec.Command(binary, args...)

@@ -38,6 +38,10 @@ checked の項目は各段階で完了した作業を記録し、現在の機能
 
 各作業は小さな PR とし、`gofmt + vet + test`、公開可能な文書、SHA を固定したレビューを確認する。
 
+## 初回設定の診断と選択
+
+[milestone #25](https://github.com/hiono/taxion/milestone/25)・[#86](https://github.com/hiono/taxion/issues/86) は、v0.3.0 公開後に判明した初回設定の不足を扱う。未設定 doctor と init/fix の検出を共有し、操作順に依存させない。項目の説明・必須入力の再質問、候補・保存元・未確認の区別、生成設定と全項目の違いを示す。[ADR-0039](adr/0039-prepare-project-configuration-with-explicit-repair.md) に判断を記録する。実装・文書・回帰・公開 CI が完了条件であり、新 Release の作成は含めない。
+
 ## 階層化した Memory と自動実行の計画
 
 [ADR-0020](adr/0020-layered-memory-and-role-sessions-for-orchestration.md)

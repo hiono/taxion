@@ -21,7 +21,7 @@ func doctorCmd(args []string, output io.Writer) (err error) {
 		return setupCmd(args[1:], os.Stdin, output, terminalInput(os.Stdin), false)
 	}
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	asJSON := flags.Bool("json", false, "print the same diagnostic inventory as JSON")
+	asJSON := flags.Bool("json", false, "print setup diagnosis or the selected backend's inventory as JSON")
 	worktree := flags.String("worktree", ".", "execution worktree whose native configuration is inspected")
 	cli := flags.String("cli", "", "same Copilot executable as runtime execution")
 	base := flags.String("base-directory", "", "same Copilot state/config directory as runtime execution")
@@ -35,6 +35,20 @@ func doctorCmd(args []string, output io.Writer) (err error) {
 	}
 	resolved, err := resolveConfiguration()
 	if err != nil {
+		observation, observeErr := observeSetup("")
+		if observeErr != nil {
+			return fmt.Errorf("configuration diagnosis: %w; no files changed", observeErr)
+		}
+		if *asJSON {
+			if writeErr := json.NewEncoder(output).Encode(struct {
+				Setup   setupObservation `json:"setup"`
+				Problem string           `json:"problem"`
+			}{observation, err.Error()}); writeErr != nil {
+				return errors.Join(err, writeErr)
+			}
+		} else if writeErr := printSetupObservation(output, observation); writeErr != nil {
+			return errors.Join(err, writeErr)
+		}
 		return fmt.Errorf("configuration diagnosis: %w; next: taxion doctor fix (or taxion doctor fix --dry-run with --set FIELD=VALUE for missing references); no files changed", err)
 	}
 	selection, err := json.Marshal(resolved.Config)

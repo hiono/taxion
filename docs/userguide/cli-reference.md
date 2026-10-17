@@ -167,6 +167,10 @@ Project 設定の基点に `.env` があれば、その file も untracked か�
 
 `--sources` は、値を表示せずに各 field を採用した層を表示する。環境変数 override は `environment` と報告する。固定 YAML file は最低一つ必要で、環境変数は file 設定を補う。
 
+開発版の `doctor` は、設定不足でも `init`・`doctor fix` と同じ処理で現在の環境を検出する。設定・DB・Git は変更せず、診断履歴を保存・引継ぎしない。設定不足時の `--json` は `{"setup":{...},"problem":"..."}` を出し、終了値は非zero。`setup` は Project 設定位置、workspace の存在、設定元、remote・runtime 候補、不足・任意・未確認項目、次操作を持ち、設定済みの値や credential は含めない。backend の native inventory と保存 Dispatch は検査しない。壊れた設定や Git policy 違反は、一覧を出す前に error とする。Git ignore の不足だけは修復候補の表示を許す。完全な設定での既存 backend 別 JSON 形式は変更しない。公開済み v0.3.0 には、この設定不足時の表示は含まれない。
+
+開発版の対話入力は、各項目の説明と候補値を表示する。候補のない必須空欄と不正値は同じ質問で再入力を求め、EOF は対象項目と無変更を報告する。秘密らしい値は表示せず拒否する。生成 YAML は不足分であり全項目のひな型ではない。継承元・任意／backend 固有の項目・全項目の参照先を別に示す。
+
 | 環境変数 | 設定 field |
 | --- | --- |
 | `TAXION_PROJECT_ID` | `project.id` |
