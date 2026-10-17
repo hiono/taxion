@@ -4,20 +4,21 @@
 
 ## 現在の導入方法
 
-v0.3.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
+v0.3.1 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
-このガイドは v0.3.0 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。
-初期設定・診断修復・補完を使う場合は v0.3.0 を導入してください。開発中の変更を試す場合は main のソースからビルドします。
+このガイドは v0.3.1 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。
+初期設定・診断修復・補完と選択式入力を使う場合は v0.3.1 を導入してください。開発中の変更を試す場合は main のソースからビルドします。
 公開 tag を導入しただけでは、後から追加された機能は使えません。
 
 ```sh
-mise use -g go@1.26.0 go:github.com/hiono/taxion/cmd/taxion@v0.3.0
+mise use -g go@1.26.0 go:github.com/hiono/taxion/cmd/taxion@v0.3.1
+mise exec -- taxion --version
 mise exec -- taxion --help
 ```
 
-最新版へ更新するには、`v0.3.0` を導入したい公開 version に置き換えます。
+最新版へ更新するには、`v0.3.1` を導入したい公開 version に置き換えます。設定・DB の削除や初期化し直しは不要です。
 
-開発版では `taxion --help` の先頭に `Version:` を表示し、`taxion --version` でも同じビルド情報を確認できます。Go の module version を使うため、commit 固定の導入では `v0.3.1-0.…` のような完全な pseudo-version を表示します。Git 情報を持つソースビルドでは revision と、未コミット変更がある場合の `modified=true` も表示します。情報のないビルドを公開版と推測せず、取得できない旨を表示します。設定・DB・外部 CLI は読みません。公開済み v0.3.0 と初回設定補正版 `dd352cf` には、この版表示は含まれません。
+v0.3.1 では `taxion --help` の先頭に `Version:` を表示し、`taxion --version` でも同じビルド情報を確認できます。Go の module version を使うため、公開 tag の導入では `v0.3.1`、commit 固定の導入では完全な pseudo-version を表示します。Git 情報を持つソースビルドでは revision と、未コミット変更がある場合の `modified=true` も表示します。情報のないビルドを公開版と推測せず、取得できない旨を表示します。設定・DB・外部 CLI は読みません。公開済み v0.3.0 と初回設定補正版 `dd352cf` には、この版表示は含まれません。
 
 ```sh
 mise use -g go@1.26.0 'go:github.com/hiono/taxion/cmd/taxion@<VERSION>'
@@ -32,7 +33,7 @@ mise unuse -g go:github.com/hiono/taxion/cmd/taxion
 Go backend の導入済み version が残り、他の設定でも使っていなければ、mise から個別に削除できます。
 
 ```sh
-mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.3.0
+mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.3.1
 ```
 
 ソースから実行する場合は Go 1.26.0 が必要です。
@@ -65,17 +66,17 @@ taxion --help
 
 `init` は不足項目を尋ね、設定への追加と Git 除外規則を表示します。適用を確認すると、Project 設定と DB を準備します。有効な `.git/info/exclude` の規則があれば再利用し、不足時だけ `.gitignore` へ追記します。既存設定の値は変更せず、省略項目だけを補います。DB が作成済みでも、設定の準備は続行できます。設定ファイルの権限は新規作成・更新時に `0600` とします。
 
-v0.3.1 向けの開発版では、端末上の未確定 provider・複数 remote・適用確認を上下キーと Enter で選択します。適用確認の初期値は `Cancel` で、`Apply` を選んだ場合だけ保存します。`yes` の文字入力は不要です。Ctrl-C・入力の終了では適用せず終了します。account・契約・承認参照などの自由入力は従来どおりです。非対話環境では、不足項目をすべて `--set` で渡し、`--dry-run` で変更案を確認後、同じ指定を `--yes` に替えて明示適用できます。`--yes` は表示する設定・Git 除外変更を保存する指定で、Task や予算の実行承認ではありません。公開済み v0.3.0 の適用確認は文字入力です。
+v0.3.1 では、端末上の未確定 provider・複数 remote・適用確認を上下キーと Enter で選択します。適用確認の初期値は `Cancel` で、`Apply` を選んだ場合だけ保存します。`yes` の文字入力は不要です。Ctrl-C・入力の終了では適用せず終了します。account・契約・承認参照などの自由入力は従来どおりです。非対話環境では、不足項目をすべて `--set` で渡し、`--dry-run` で変更案を確認後、同じ指定を `--yes` に替えて明示適用できます。`--yes` は表示する設定・Git 除外変更を保存する指定で、Task や予算の実行承認ではありません。公開済み v0.3.0 の適用確認は文字入力です。
 
 設定済みの provider や repository は再選択しません。`doctor` で確認した設定もそのまま使い、別の backend が PATH にあっても尋ね直しません。Git remote から一意に確定する値も入力不要です。未設定で複数候補がある場合や、private host から provider を特定できない場合だけ選択します。実行ファイルが見つかっただけでは利用する backend は確定しません。変更がなければ適用確認も省略します。
 
-この開発版では、Taxion が用意する案内・質問・エラー・`doctor` の見出し・`ready` の操作手順を英語に統一しています。言語切替はありません。利用者の依頼・ファイル名・保存済み本文と、外部 CLI・モデルが返す内容は翻訳しません。日本語の依頼や既存の会話入力 alias も引き続き使えます。文書と GitHub Issue の日本語表記は変更しません。
+v0.3.1 では、Taxion が用意する案内・質問・エラー・`doctor` の見出し・`ready` の操作手順を英語に統一しています。言語切替はありません。利用者の依頼・ファイル名・保存済み本文と、外部 CLI・モデルが返す内容は翻訳しません。日本語の依頼や既存の会話入力 alias も引き続き使えます。文書と GitHub Issue の日本語表記は変更しません。
 
-v0.3.0 の対話入力では、候補のない質問に空入力すると、最後に一般的な入力エラーで終了します。開発版では各項目の意味と選択肢を表示し、必須項目の空入力・不正値はその場で再入力を求めます。候補が表示された項目は Enter で候補を選べます。Ctrl-C または入力の終了で中止した場合は、適用前なので設定・Git 除外・DB を変更しません。
+v0.3.0 の対話入力では、候補のない質問に空入力すると、最後に一般的な入力エラーで終了します。v0.3.1 では各項目の意味と選択肢を表示し、必須項目の空入力・不正値はその場で再入力を求めます。候補が表示された項目は Enter で候補を選べます。Ctrl-C または入力の終了で中止した場合は、適用前なので設定・Git 除外・DB を変更しません。
 
-開発版では、設定がなくても `taxion doctor` が設定元、Git remote の候補、対応する runtime と PATH 上の実行ファイル、未設定・未確認の項目を表示します。設定不足は非zero終了となり、backend の詳細な一覧取得や Dispatch 検査には進みません。`doctor --json` では `setup` と `problem` を返します。壊れた設定や追跡済みの設定は、その問題を先に報告します。公開済み v0.3.0 の `doctor` は設定不足時にこの一覧を出しません。
+v0.3.1 では、設定がなくても `taxion doctor` が設定元、Git remote の候補、対応する runtime と PATH 上の実行ファイル、未設定・未確認の項目を表示します。設定不足は非zero終了となり、backend の詳細な一覧取得や Dispatch 検査には進みません。`doctor --json` では `setup` と `problem` を返します。壊れた設定や追跡済みの設定は、その問題を先に報告します。公開済み v0.3.0 の `doctor` は設定不足時にこの一覧を出しません。
 
-`doctor` を先に実行する必要はありません。開発版の `init` と `doctor fix` は同じ検出処理を実行し、その時点の環境を表示してから不足項目を尋ねます。前回の診断を保存・再利用せず、Git remote や PATH が変われば取り直します。検出した候補、既存設定の採用元、入力待ち、適用する追加設定を分けて表示するため、実行ファイルが見つかっただけで backend の選択・認証・承認が済んだことにはなりません。
+`doctor` を先に実行する必要はありません。v0.3.1 の `init` と `doctor fix` は同じ検出処理を実行し、その時点の環境を表示してから不足項目を尋ねます。前回の診断を保存・再利用せず、Git remote や PATH が変われば取り直します。検出した候補、既存設定の採用元、入力待ち、適用する追加設定を分けて表示するため、実行ファイルが見つかっただけで backend の選択・認証・承認が済んだことにはなりません。
 
 生成する YAML は今回不足した設定であり、全項目のひな型ではありません。Global・環境変数から継承した値は複写せず、任意の `execution.budgetGuidance` と OpenCode 専用項目の要否は別に案内します。全 field と候補値は[設定ガイド](configuration.md#設定ファイル)、保存後の採用元は `taxion config check --sources` で確認します。
 
@@ -257,7 +258,7 @@ taxion ready --update-skill
 
 配置に symlink は使わないため、その作成用の権限は不要です。既存パスの symlink は追跡せず拒否し、管理対象外・改変済みファイルは上書きしません。初回配置は既存ファイルを置換せず、更新時も一時ファイルから完成した一ファイルを入れ替えます。filesystem の書込み許可・hard link・rename の対応は必要です。
 
-同梱 skill の版は開発版で `1.2.0`、CLI 操作契約は `taxion.cli.v1` です。英語の ready 原稿へ変更したため、旧 `1.1.0` の管理ファイルは明示的な `--update-skill` が必要です。本体は許容 skill 版を明示リストで保持し、未知の minor・major 版を推測で許可しません。skill の metadata にも必要な CLI 契約、ready 原稿と内容のハッシュ、生成した本体の build 情報を保存します。確認は、本体の許容版と skill の要求契約の一致、現在の ready 原稿との一致、配置内容の整合性を判定します。公開前の本体について、未確認の製品 SemVer 範囲を互換と宣言する代わりに、版を付けた CLI 操作契約を照合します。
+同梱 skill の版は `1.2.0`、CLI 操作契約は `taxion.cli.v1` です。英語の ready 原稿へ変更したため、旧 `1.1.0` の管理ファイルは明示的な `--update-skill` が必要です。本体は許容 skill 版を明示リストで保持し、未知の minor・major 版を推測で許可しません。skill の metadata にも必要な CLI 契約、ready 原稿と内容のハッシュ、生成した本体の build 情報を保存します。確認は、本体の許容版と skill の要求契約の一致、現在の ready 原稿との一致、配置内容の整合性を判定します。公開前の本体について、未確認の製品 SemVer 範囲を互換と宣言する代わりに、版を付けた CLI 操作契約を照合します。
 
 v0.2.0 から更新した場合、配置済み skill `1.0.0` はそのまま使いません。`taxion ready --check-skill` で不一致を確認し、利用者の許可後に `taxion ready --update-skill` を実行します。既存 skill の自動更新は行わず、改変済みファイルは明示更新でも保全します。skill を配置していない場合は、引数なしの `taxion ready` を直接使えます。
 
