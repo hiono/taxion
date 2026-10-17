@@ -22,6 +22,9 @@ func TestGoalPolicyCoversEveryRoleAndRuntimePrompt(t *testing.T) {
 			"not rewards", "reversible stated assumption", "Never omit safety",
 			"new evidence", "material mismatch blocks completion", "Missing measurements are unknown",
 			"PLANNER:", "CODER:", "REVIEWER:", "ORCHESTRATOR:",
+			"safe reversible defaults", "without\nmicro-confirmations",
+			"non-blocking advice in workReport", "Never\nrelabel an actual defect",
+			"not repeated check-ins", "cannot change the outcome",
 		} {
 			if !strings.Contains(prompt, constraint) {
 				t.Errorf("prompt %d lacks %q", index, constraint)
