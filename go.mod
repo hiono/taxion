@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/github/copilot-sdk/go v1.0.19
+	golang.org/x/term v0.40.0
 	modernc.org/sqlite v1.60.1
 )
 

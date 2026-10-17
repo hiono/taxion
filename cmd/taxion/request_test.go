@@ -431,7 +431,7 @@ func TestSearch(t *testing.T) {
 	if err := requestCommand(append(args, "検索機能をつけて"), strings.NewReader("/plan\n部分一致です。\n/approve\n"), &out, planner, runner); err != nil {
 		t.Fatal(err, out.String())
 	}
-	if calls != 2 || roles != 2 || !strings.Contains(out.String(), "結果: COMPLETED") {
+	if calls != 2 || roles != 2 || !strings.Contains(out.String(), "Result: COMPLETED") {
 		t.Fatal("copy-free request did not complete", calls, roles, out.String())
 	}
 	db, state, err := loadWorkspace()

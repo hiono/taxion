@@ -231,7 +231,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	}
 	request := strings.TrimSpace(strings.Join(fs.Args(), " "))
 	if request == "" {
-		if _, err := fmt.Fprintln(output, "何を作成・変更したいですか？"); err != nil {
+		if _, err := fmt.Fprintln(output, "What would you like to create or change?"); err != nil {
 			return err
 		}
 		request, err = read()
@@ -255,7 +255,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			"Deadline: %s; repairs: %d\n%s\n"+
 			"Budget guidance: %s (%s); account quota read: %t\n"+
 			"%s\n"+
-			"有料のPlanner対話を開始するには /plan、取り消すには /quit。まだコードは変更しません。\n",
+			"Enter /plan to start a paid Planner conversation, or /quit to cancel. No code will be changed yet.\n",
 		*repo, root, branch, baseline, selected.Runtime.Account, *timeout, *repairs, ceiling,
 		guidance.Mode, guidance.Source, guidance.AccountReadApproved, discovery); err != nil {
 		return err
@@ -296,9 +296,9 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	task, err := controller.ProposeIntake(db, controller.IntakeRequest{
 		Request: request, Actor: selected.Execution.Requester, Source: source,
 		Task: core.GraphTask{
-			ID: id + "-planning", Title: "依頼の実装計画", Repo: *repo, Type: "DESIGN", Status: core.Draft,
+			ID: id + "-planning", Title: "Request implementation plan", Repo: *repo, Type: "DESIGN", Status: core.Draft,
 			Issue: "NOT_REQUIRED: local request planning", CreatedFrom: source,
-			Owner: "CODER", Reviewer: "REVIEWER", Objective: "保存した元依頼を確認し、変更範囲・完了条件・検証方法を提案する",
+			Owner: "CODER", Reviewer: "REVIEWER", Objective: "Review the saved original request and propose scope, acceptance criteria and validation",
 			BudgetGuidance: core.CloneBudgetGuidance(guidance),
 			Worktree:       root, Branch: branch, BaselineSHA: baseline,
 		},
@@ -308,7 +308,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(output, "相談記録: %s (SQLite; taxion records show)\n", id); err != nil {
+	if _, err := fmt.Fprintf(output, "Planning record: %s (SQLite; taxion records show)\n", id); err != nil {
 		return err
 	}
 	conversation := []requestMessage{{Role: "human", Source: "/planner/task/decisions/0/text"}}
@@ -442,7 +442,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			}); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(output, "実行開始: Task %s / Flow %s\n", id, flowID); err != nil {
+			if _, err := fmt.Fprintf(output, "Starting execution: Task %s / Flow %s\n", id, flowID); err != nil {
 				return err
 			}
 			runErr := runner(ctx, []string{"run", "--id", flowID, "--builtin-prompts",
@@ -465,7 +465,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if !ok {
 				return errors.Join(runErr, fmt.Errorf("request flow disappeared"))
 			}
-			_, printErr := fmt.Fprintf(output, "結果: %s\nWorktree: %s\nFlow: %s\n記録: %s\n%s\n",
+			_, printErr := fmt.Fprintf(output, "Result: %s\nWorktree: %s\nFlow: %s\nRecord: %s\n%s\n",
 				flow.Status, root, flow.ID, id+" (SQLite; taxion records show)", flow.Reason)
 			return errors.Join(runErr, printErr)
 		}
@@ -494,15 +494,15 @@ func displayRequestPlan(output io.Writer, answer controller.QuestionAnswer) erro
 		fmt.Fprintln(&text, claim.Text)
 	}
 	for _, assumption := range answer.Assumptions {
-		fmt.Fprintf(&text, "仮定: %s\n", assumption)
+		fmt.Fprintf(&text, "Assumption: %s\n", assumption)
 	}
 	for _, gap := range answer.Unconfirmed {
-		fmt.Fprintf(&text, "未確認: %s\n", gap)
+		fmt.Fprintf(&text, "Unverified: %s\n", gap)
 	}
 	if proposal := answer.Proposal; proposal != nil {
-		fmt.Fprintf(&text, "\n計画: %s\n目的: %s\n変更範囲: %q\n対象外: %q\n完了条件: %q\n",
+		fmt.Fprintf(&text, "\nPlan: %s\nObjective: %s\nScope: %q\nOut of scope: %q\nAcceptance: %q\n",
 			proposal.Title, proposal.Objective, proposal.Scope, proposal.OutOfScope, proposal.Acceptance)
-		fmt.Fprintln(&text, "ホストで実行する検証コマンド（shellの副作用を含めて確認してください）:")
+		fmt.Fprintln(&text, "Host validation commands (review shell side effects before approving):")
 		for _, command := range proposal.ValidationCommands {
 			fmt.Fprintf(&text, "  %q\n", command)
 		}
@@ -510,8 +510,8 @@ func displayRequestPlan(output io.Writer, answer controller.QuestionAnswer) erro
 	for _, question := range answer.Questions {
 		fmt.Fprintln(&text, question)
 	}
-	fmt.Fprintln(&text, "実行時はworktree内の新規ファイルを許可し、commitは作りません。Reviewerは読み取り専用です。")
-	fmt.Fprintln(&text, "修正・回答は人のことばで入力してください。質問が解消した計画を実行するには /approve、終了は /quit。")
+	fmt.Fprintln(&text, "Execution permits new files within the worktree and creates no commit. The Reviewer is read-only.")
+	fmt.Fprintln(&text, "Enter revisions or answers in natural language. Use /approve to execute a plan with all questions resolved, or /quit to exit.")
 	_, err := output.Write(text.Bytes())
 	return err
 }

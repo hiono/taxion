@@ -55,10 +55,10 @@ func TestReadyIsStaticWithoutConfigurationWorkspaceOrModel(t *testing.T) {
 
 func TestReadyNavigationSeparatesSetupApprovalAndExecution(t *testing.T) {
 	for _, text := range []string{
-		"## 目的から操作を選ぶ", "### 依頼と未承認の契約", "### exact hash と設定を承認する",
-		"## 承認済み Flow を実行する", "## 結果に応じて続ける",
-		"taxion doctor fix", "--dry-run", "全コマンドを順番に実行しない",
-		"confirm は Task を READY にするが、Dispatch やモデルは開始しない",
+		"## Choose operations by purpose", "### Request and unapproved contract", "### Approve the exact hash and configuration",
+		"## Execute an approved Flow", "## Continue according to results",
+		"taxion doctor fix", "--dry-run", "do not run every command in order",
+		"confirm makes the Task READY but starts no Dispatch or model",
 	} {
 		if !strings.Contains(readyPrompt, text) {
 			t.Errorf("missing operation boundary: %s", text)

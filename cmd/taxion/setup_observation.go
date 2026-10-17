@@ -180,8 +180,25 @@ func printSetupObservation(output io.Writer, report setupObservation) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(output, "Git remotes: %v; selected: %s\nRepository choices: github, gitlab, bitbucket; a private hostname does not identify its provider.\nRuntime choices: copilot, opencode; executables found: %v (not an authentication check).\nMissing configured fields (some have candidates above): %v\nOptional/conditional settings: %v\nUnverified: %s\nNext: %s\nAll configuration fields: docs/userguide/configuration.md; taxion config check --sources shows applied origins.\n",
-		report.Remotes, report.SelectedRemote, report.RuntimeAvailable, report.Missing, report.Optional,
+	if _, err := fmt.Fprintf(output, "Git remotes: %v; selected: %s\n", report.Remotes, report.SelectedRemote); err != nil {
+		return err
+	}
+	if provider := report.Selection.Config.Repository.Provider; provider != "" {
+		if _, err := fmt.Fprintf(output, "Repository provider: %s (configured; no selection needed).\n", provider); err != nil {
+			return err
+		}
+	} else if _, err := fmt.Fprintln(output, "Repository choices: github, gitlab, bitbucket; a private hostname does not identify its provider."); err != nil {
+		return err
+	}
+	if provider := report.Selection.Config.Runtime.Provider; provider != "" {
+		if _, err := fmt.Fprintf(output, "Runtime provider: %s (configured; no selection needed).\n", provider); err != nil {
+			return err
+		}
+	} else if _, err := fmt.Fprintln(output, "Runtime choices: copilot, opencode."); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(output, "Runtime executables found: %v (not an authentication check).\nMissing configured fields (some have candidates above): %v\nOptional/conditional settings: %v\nUnverified: %s\nNext: %s\nAll configuration fields: docs/userguide/configuration.md; taxion config check --sources shows applied origins.\n",
+		report.RuntimeAvailable, report.Missing, report.Optional,
 		strings.Join(report.Unverified, ", "), report.Next); err != nil {
 		return err
 	}

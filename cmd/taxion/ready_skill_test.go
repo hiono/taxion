@@ -86,7 +86,7 @@ func writeReadySkillFixture(t *testing.T, path string, document readySkillDocume
 }
 
 func TestReadySkillRejectsUnknownVersionsContractsAndStaleReady(t *testing.T) {
-	for _, kind := range []string{"future-minor", "future-major", "old-version", "cli-contract", "ready-contract"} {
+	for _, kind := range []string{"future-minor", "future-major", "old-version", "previous-version", "cli-contract", "ready-contract"} {
 		t.Run(kind, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
@@ -106,11 +106,14 @@ func TestReadySkillRejectsUnknownVersionsContractsAndStaleReady(t *testing.T) {
 			}
 			switch kind {
 			case "future-minor":
-				document.Metadata.Version = "1.2.0"
+				document.Metadata.Version = "1.3.0"
 			case "future-major":
 				document.Metadata.Version = "2.0.0"
 			case "old-version":
 				document.Metadata.Version = "1.0.0"
+			case "previous-version":
+				document.Metadata.Version = "1.1.0"
+				document.Metadata.ReadyHash = readyDigest([]byte("previous Japanese ready contract"))
 			case "cli-contract":
 				document.Metadata.CLIContract = "taxion.cli.v2"
 			case "ready-contract":

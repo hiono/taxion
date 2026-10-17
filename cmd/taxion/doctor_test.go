@@ -65,7 +65,7 @@ execution: {requester: human, worker: local, approvalRef: fixture}
 	}
 	output.Reset()
 	if err := doctorCmd([]string{"--cli", cli}, &output); err != nil ||
-		!bytes.Contains(output.Bytes(), []byte("検索先:")) || !bytes.Contains(output.Bytes(), []byte("missing")) {
+		!bytes.Contains(output.Bytes(), []byte("Search paths:")) || !bytes.Contains(output.Bytes(), []byte("missing")) {
 		t.Fatal("human output hides empty search locations", output.String(), err)
 	}
 	oldStore := storePath

@@ -55,7 +55,7 @@ func setupContainsCredential(text string) bool {
 
 var setupFieldHelp = map[string]string{
 	"project.id":               "Local project identifier (no whitespace).",
-	"repository.provider":      "Choose github, gitlab, or bitbucket. For a self-managed GitLab host, enter gitlab.",
+	"repository.provider":      "Choose github, gitlab, or bitbucket. For a self-managed GitLab host, choose gitlab.",
 	"repository.host":          "Git server hostname, with an optional port; no URL scheme.",
 	"repository.path":          "Repository namespace/path from the Git remote.",
 	"repository.account":       "Account used for this Git repository; not necessarily your AI runtime account.",
@@ -107,6 +107,17 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 		}
 	}
 	reader := bufio.NewReader(input)
+	terminal, isFile := input.(*os.File)
+	selectable := interactive && isFile && terminalInput(terminal)
+	choose := func(name string, choices []string, suggestion string) (string, error) {
+		selected := 0
+		for i, value := range choices {
+			if value == suggestion {
+				selected = i
+			}
+		}
+		return selectSetup(terminal, reader, output, name, choices, selected)
+	}
 	ask := func(name, suggestion string) (string, error) {
 		if !interactive || *yes || *dryRun {
 			return "", fmt.Errorf("missing %s; rerun taxion init or taxion doctor fix with --set %s=VALUE (or use an interactive terminal)", name, name)
@@ -157,7 +168,15 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 		return err
 	}
 	if observation.SelectedRemote == "" && len(observation.Remotes) > 1 {
-		chosen, err := ask("remote (or pass --remote NAME)", "")
+		if !interactive || *yes || *dryRun {
+			return fmt.Errorf("multiple Git remotes; supply --remote NAME; no files changed")
+		}
+		var chosen string
+		if selectable {
+			chosen, err = choose("remote", observation.Remotes, "")
+		} else {
+			chosen, err = ask("remote (or pass --remote NAME)", "")
+		}
 		if err != nil {
 			return err
 		}
@@ -221,7 +240,20 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 				missing = append(missing, "--set "+name+"=VALUE")
 				continue
 			}
-			value, err := ask(name, suggestion)
+			var value string
+			var err error
+			if selectable && (name == "repository.provider" || name == "runtime.provider") {
+				if _, err = fmt.Fprintln(output, setupFieldHelp[name]); err != nil {
+					return err
+				}
+				choices := []string{"github", "gitlab", "bitbucket"}
+				if name == "runtime.provider" {
+					choices = []string{"copilot", "opencode"}
+				}
+				value, err = choose(name, choices, suggestion)
+			} else {
+				value, err = ask(name, suggestion)
+			}
 			if err != nil {
 				return err
 			}
@@ -323,19 +355,29 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 		if !interactive {
 			return fmt.Errorf("setup not applied; review with --dry-run, then supply --yes to apply")
 		}
-		for {
-			answer, err := ask("Apply displayed setup? type yes", "no")
+		if selectable {
+			answer, err := choose("Apply displayed setup?", []string{"Cancel", "Apply"}, "Cancel")
 			if err != nil {
 				return err
 			}
-			if strings.EqualFold(answer, "yes") {
-				break
-			}
-			if strings.EqualFold(answer, "no") {
+			if answer != "Apply" {
 				return fmt.Errorf("setup declined; no files changed; existing files and database were preserved")
 			}
-			if _, err := fmt.Fprintln(output, "Confirmation not recognized. Type yes to apply, or no (Enter) to cancel. No files changed."); err != nil {
-				return err
+		} else {
+			for {
+				answer, err := ask("Apply displayed setup? type yes", "no")
+				if err != nil {
+					return err
+				}
+				if strings.EqualFold(answer, "yes") {
+					break
+				}
+				if strings.EqualFold(answer, "no") {
+					return fmt.Errorf("setup declined; no files changed; existing files and database were preserved")
+				}
+				if _, err := fmt.Fprintln(output, "Confirmation not recognized. Type yes to apply, or no (Enter) to cancel. No files changed."); err != nil {
+					return err
+				}
 			}
 		}
 	}

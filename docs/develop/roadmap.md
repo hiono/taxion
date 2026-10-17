@@ -42,6 +42,8 @@ checked の項目は各段階で完了した作業を記録し、現在の機能
 
 [milestone #25](https://github.com/hiono/taxion/milestone/25)・[#86](https://github.com/hiono/taxion/issues/86) は、v0.3.0 公開後に判明した初回設定の不足を扱う。未設定 doctor と init/fix の検出を共有し、操作順に依存させない。項目の説明・必須入力の再質問、候補・保存元・未確認の区別、生成設定と全項目の違いを示す。[ADR-0039](adr/0039-prepare-project-configuration-with-explicit-repair.md) に判断を記録する。実装・文書・回帰・公開 CI が完了条件であり、新 Release の作成は含めない。
 
+[milestone #26](https://github.com/hiono/taxion/milestone/26)・[#89](https://github.com/hiono/taxion/issues/89) は v0.3.1 向けの英語表示と選択式入力を扱う。doctor で確認した既存設定は再選択せず、未確定 provider・複数 remote と適用確認だけを選択式にする。適用確認は `Cancel` を初期値にする。Taxion の固定文言と ready 原稿は英語へ統一し、ユーザー本文・外部出力・日本語文書は保持する。正式 tag・Release と、実装の公開は区別する。
+
 ## 階層化した Memory と自動実行の計画
 
 [ADR-0020](adr/0020-layered-memory-and-role-sessions-for-orchestration.md)

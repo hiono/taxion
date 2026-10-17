@@ -16,6 +16,8 @@ Linux では Global 設定は通常 `$XDG_CONFIG_HOME/taxion/config.yaml`、未�
 
 `taxion init` は既存設定と Git 情報から不足を補い、確認後に Project 設定と DB を準備します。`taxion doctor fix` は同じ処理で不足設定と除外規則を修復しますが、DB は初期化しません。`--dry-run`・`--set FIELD=VALUE`・`--remote NAME`・`--yes` と対話例は[利用者ガイド](user-guide.md#設定と実行前確認)を参照してください。既存値を変更する場合は、採用元の設定を明示的に編集します。Global 設定と環境変数を Project 設定へ丸ごと複写しません。
 
+v0.3.1 向けの開発版では、端末上の未確定 provider・remote と適用確認を選択式にし、設定済みの値は尋ね直しません。`doctor` で確認した既存設定もそのまま使います。適用確認の初期値は `Cancel` です。CLI の固定文言は英語とし、入力本文や外部出力は翻訳しません。
+
 各 layer は `version: 1` を持ちます。上位 layer は空でない値だけを上書きし、省略した項目は下位 layer から引き継ぎます。各ファイルは merge 前に個別検証されるため、後の layer で上書きしても不正な値は隠せません。明示的な空文字、null、未知の field、重複 key、alias、sequence、複数 YAML document は拒否されます。
 
 次の表が全設定項目の一覧です。`init` の生成 YAML は不足分だけを保存し、継承した値と未選択の任意項目をすべて列挙するものではありません。OpenCode 専用項目は OpenCode 選択時だけ必要です。開発版の `init`・`doctor fix` は、この違いと参照先を変更案に表示します。

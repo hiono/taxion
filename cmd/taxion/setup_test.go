@@ -140,6 +140,52 @@ func TestSetupInteractiveExplainsAndRetriesRequiredFields(t *testing.T) {
 	}
 }
 
+func TestSetupDoesNotAskAgainForDoctorConfirmedConfiguration(t *testing.T) {
+	root := setupFixture(t, true)
+	var output bytes.Buffer
+	if err := setupCmd(append(setupArguments(), "--yes"), strings.NewReader(""), &output, false, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setupGit(root, "remote", "add", "other", "https://github.com/other/repo.git"); err != nil {
+		t.Fatal(err)
+	}
+	if err := doctorCmd([]string{"--cli", doctorFixtureCLI(t), "--json", "--worktree", root}, &output); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".taxion", "config.yaml")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := os.ReadFile(workspaceDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, initialize := range []bool{true, false} {
+		output.Reset()
+		if err := setupCmd(nil, strings.NewReader(""), &output, true, initialize); err != nil {
+			t.Fatal("setup required input for confirmed configuration", output.String(), err)
+		}
+		for _, prompt := range []string{"(required):", "Up/Down", "Apply displayed setup?", "remote (or pass"} {
+			if strings.Contains(output.String(), prompt) {
+				t.Fatal("setup asked to reselect a configured value", prompt)
+			}
+			if !strings.Contains(output.String(), "Runtime provider: copilot (configured; no selection needed)") ||
+				strings.Contains(output.String(), "Runtime choices:") || strings.Contains(output.String(), "Repository choices:") {
+				t.Fatal("confirmed providers were presented as undecided", output.String())
+			}
+		}
+		after, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(before, after) {
+			t.Fatal("setup rewrote confirmed configuration", err)
+		}
+		after, err = os.ReadFile(workspaceDBPath())
+		if err != nil || !bytes.Equal(database, after) {
+			t.Fatal("setup changed existing workspace", err)
+		}
+	}
+}
+
 func TestSetupBlankRequiredInputDoesNotAdvanceOrWrite(t *testing.T) {
 	root := setupFixture(t, true)
 	var output bytes.Buffer

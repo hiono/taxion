@@ -144,7 +144,7 @@ func doctorCmd(args []string, output io.Writer) (err error) {
 	if *asJSON {
 		return errors.Join(inspectErr, json.NewEncoder(output).Encode(report))
 	}
-	if _, err := fmt.Fprintf(output, "Backend: %s\nCLI: %s\nVersion: %s\nWorktree: %s\nCopilot home: %s\nDiscovery: %s\n\n検索先:\n",
+	if _, err := fmt.Fprintf(output, "Backend: %s\nCLI: %s\nVersion: %s\nWorktree: %s\nCopilot home: %s\n	Discovery: %s\n\nSearch paths:\n",
 		report.Backend, report.CLI, report.Version, report.Worktree, report.BaseDirectory, report.Mode); err != nil {
 		return errors.Join(inspectErr, err)
 	}
@@ -153,7 +153,7 @@ func doctorCmd(args []string, output io.Writer) (err error) {
 			return errors.Join(inspectErr, err)
 		}
 	}
-	if _, err := fmt.Fprintln(output, "\n検出された設定:"); err != nil {
+	if _, err := fmt.Fprintln(output, "\nDiscovered customizations:"); err != nil {
 		return errors.Join(inspectErr, err)
 	}
 	for _, asset := range report.Assets {
@@ -172,7 +172,7 @@ func doctorCmd(args []string, output io.Writer) (err error) {
 		}
 	}
 	for _, limitation := range report.Limitations {
-		if _, err := fmt.Fprintf(output, "確認範囲: %s\n", limitation); err != nil {
+		if _, err := fmt.Fprintf(output, "Limitation: %s\n", limitation); err != nil {
 			return errors.Join(inspectErr, err)
 		}
 	}
