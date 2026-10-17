@@ -267,7 +267,7 @@ commit と同じ binding session、active Task、Flow 上限を使う。index �
 
 Git attribute と設定済み clean filter は通常どおり適用し、作業内容だけでなく filter 後の blob を scan する。Git repository 設定と filter executable は信頼する host 入力で、sandbox 化した tool ではない。stage は不合格の scan より先に local object database へ blob を書く場合がある。到達不能 object を消さず、秘密の全 local 保存を防ぐとは主張しない。悪意ある host process との Git file の競合、scanner の検出・filter 制約は保証対象外とする。
 
-登録 SDK handler の stage→commit は Controller と実 Git で local 検証済み。任意 shell command と sub-agent の stage・commit 呼出しは有効にしない。実 SDK の stage→commit→独立レビューと、不許可 stage の拒否は #72 に記録する。対話・修正・再レビューの受入れは、2026-10-12 に完了した M12 の実 SDK 受入れで #53/#54 として確認した。初回利用にわたる実モデルの end-to-end 受入れは Release 0.1.0 の #78 で引き続き追跡する。
+登録 SDK handler の stage→commit は Controller と実 Git で local 検証済み。任意 shell command と sub-agent の stage・commit 呼出しは有効にしない。実 SDK の stage→commit→独立レビューと、不許可 stage の拒否は #72 に記録する。対話・修正・再レビューの受入れは、2026-10-12 に完了した M12 の実 SDK 受入れで #53/#54 として確認した。文書作業の実モデル受入れと停止後の復旧は、完了済みの #78・#79・#80 に記録した。すべての CLI 入口の実モデル実行を確認したという意味ではない。
 
 ```yaml
 version: 1
@@ -374,7 +374,7 @@ taxion conversation ask --task <task-id> \
 
 質問は Dispatch の binding、Graph 更新、feedback 解決、instruction 編集、Human 承認取得、Coder・Reviewer 履歴への追加を行わない。失敗時も別 session ID と報告 token 使用量を結果に含め、次の有料試行前に取得可能な SDK credit status を確認できるようにする。usage 欠落、不正な引用、provider 失敗は error とする。取消後も質問 session を停止し、cleanup 失敗は明示する。128 KiB を超える入力と64 KiB を超える最終回答は拒否し、通知なしに切り詰めない。
 
-保存記録だけを読み、追加の実調査、handoff の hold・release、回答の instruction 適用は行わない。変更には明示的な `workflow handoff`、feedback、version 付き draft、または後述の監視 console を使う。依頼から計画までの対話と追加調査の受入れは、2026-10-12 に完了した M12 の実 SDK 受入れ（#53/#54・#73/#74）で確認した。初回利用にわたる実モデルの end-to-end 受入れは Release 0.1.0 の #78 で引き続き追跡する。
+保存記録だけを読み、追加の実調査、handoff の hold・release、回答の instruction 適用は行わない。変更には明示的な `workflow handoff`、feedback、version 付き draft、または後述の監視 console を使う。依頼から計画までの対話と追加調査の受入れは、2026-10-12 に完了した M12 の実 SDK 受入れ（#53/#54・#73/#74）で確認した。文書作業の実モデル受入れと停止後の復旧は、完了済みの #78・#79・#80 に記録した。すべての CLI 入口の実モデル実行を確認したという意味ではない。
 
 ### 保存 Flow の監視と明示的な続行
 
@@ -490,7 +490,7 @@ tool 定義の存在から実行許可を推定しない。最新 assistant mess
 
 `workflow draft` は新 ID、期待する前 draft ID、観測対象、現在 hold ID を持つ未発行 proposal を保存する。各版の文章、次 role と操作、証拠、未確認項目、feedback 参照を保ち、最新の未破棄 draft も release を止める。`workflow draft-discard` は正確な draft に出典付き破棄 decision を記録するが、feedback 解決・hold 解除はしない。これらの操作だけでは proposal の承認・適用・Dispatch 発行はしない。
 
-`workflow draft-approve` は成功した Coder→review・review→修正の引継ぎで、最新 draft に `APPROVE_SUPPLEMENT` を記録する。正確な draft、結果、hold、不変の Flow 契約を対応付ける。明示 release 後の `advance`・`run` は次 Dispatch の `DECISIONS` に補足を含め、instruction hash を atomic に保存する。参照 feedback は発行前に `APPROVED_FOR_HANDOFF`、発行後に `INSTRUCTION_PUBLISHED` となり、どちらも worker の確認実施を証明しない。scope、acceptance、role、実行設定、予算変更は補足承認の対象外。自然言語での介入、契約変更の再承認、個別質問は #73/#74、Controller 管理の Coder Git 操作と実 SDK 受入れは #53/#54 として、2026-10-12 に完了した M12 の実 SDK 受入れで確認した。初回利用にわたる実モデルの end-to-end 受入れは Release 0.1.0 の #78 で引き続き追跡する。
+`workflow draft-approve` は成功した Coder→review・review→修正の引継ぎで、最新 draft に `APPROVE_SUPPLEMENT` を記録する。正確な draft、結果、hold、不変の Flow 契約を対応付ける。明示 release 後の `advance`・`run` は次 Dispatch の `DECISIONS` に補足を含め、instruction hash を atomic に保存する。参照 feedback は発行前に `APPROVED_FOR_HANDOFF`、発行後に `INSTRUCTION_PUBLISHED` となり、どちらも worker の確認実施を証明しない。scope、acceptance、role、実行設定、予算変更は補足承認の対象外。自然言語での介入、契約変更の再承認、個別質問は #73/#74、Controller 管理の Coder Git 操作と実 SDK 受入れは #53/#54 として、2026-10-12 に完了した M12 の実 SDK 受入れで確認した。文書作業の実モデル受入れと停止後の復旧は、完了済みの #78・#79・#80 に記録した。すべての CLI 入口の実モデル実行を確認したという意味ではない。
 
 Reviewer Dispatch の Task worktree は新しい絶対 path にする。`--review-source-worktree <existing-repository-worktree>` で開始し、保存対象 SHA の独立した detached worktree を作る。commit mode の完了処理は SDK 接続を閉じ、clean な worktree を削除してから review 成功を保存する。dirty・locked・未解放 worktree は明示 error として review を未完了にする。
 

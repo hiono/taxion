@@ -4,7 +4,7 @@ Taxion は、coding agent と相談した依頼を、承認済みの Coder・検
 
 利用者が作業範囲と予算を承認すると、Taxion が担当への指示、実行結果、Git の証拠、レビュー結果をローカルに記録します。独立レビューでは、Coder が作成したものと同じ内容を確認します。
 
-v0.1.0 は公開済みです。ただし、実モデルによる一連の受入れは未完了で、残る条件は [Issue #78](https://github.com/hiono/taxion/issues/78) と [Issue #79](https://github.com/hiono/taxion/issues/79) で追跡しています。
+v0.2.0 は、v0.1.0 に OpenCode ACP runtime と停止後の復旧修正を追加した版です。実モデルによる文書作業、同一成果物の独立レビュー、部分成果からの復旧を [Issue #78](https://github.com/hiono/taxion/issues/78)・[Issue #79](https://github.com/hiono/taxion/issues/79)・[Issue #80](https://github.com/hiono/taxion/issues/80)で確認しました。版ごとの機能と制約は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
 ## 使い始める
 

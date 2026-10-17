@@ -4,18 +4,18 @@
 
 ## 現在の導入方法
 
-公開済みの v0.1.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
+v0.2.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
-このガイドは main の実装を説明しています。OpenCode ACP は v0.1.0 に含まれません。
-OpenCode を使う場合は、以下の手順で main のソースからビルドしてください。
+このガイドは v0.2.0 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。
+OpenCode を使う場合は v0.2.0 を導入してください。開発中の変更を試す場合は main のソースからビルドします。
 公開 tag を導入しただけでは、後から追加された機能は使えません。
 
 ```sh
-mise use -g go@1.26.0 go:github.com/hiono/taxion/cmd/taxion@v0.1.0
+mise use -g go@1.26.0 go:github.com/hiono/taxion/cmd/taxion@v0.2.0
 mise exec -- taxion --help
 ```
 
-最新版へ更新するには、`v0.1.0` を導入したい公開 version に置き換えます。
+最新版へ更新するには、`v0.2.0` を導入したい公開 version に置き換えます。
 
 ```sh
 mise use -g go@1.26.0 'go:github.com/hiono/taxion/cmd/taxion@<VERSION>'
@@ -30,7 +30,7 @@ mise unuse -g go:github.com/hiono/taxion/cmd/taxion
 Go backend の導入済み version が残り、他の設定でも使っていなければ、mise から個別に削除できます。
 
 ```sh
-mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.1.0
+mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.2.0
 ```
 
 ソースから実行する場合は Go 1.26.0 が必要です。

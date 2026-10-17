@@ -100,7 +100,7 @@ go test ./internal/tools ./internal/runtime/copilot ./internal/runtime/controlle
 
 ローカルの native plugin discovery だけを確認する場合は、`TAXION_TEST_LOCAL_PLUGIN_DISCOVERY=1 go test ./internal/runtime/copilot -run TestLocalPluginDiscoveryWithoutModelUse` を明示して実行します。モデル指示は送信しません。要求した確認に必要な CLI がなければ失敗します。合成 hook の結果や native discovery は、実際の skill 読み込みや文書品質の証拠にはなりません。
 
-#78 では、別途承認した実文書の作業で、選択した3 skill の Coder による実 invocation、読み込み結果、点検の証拠、同じ tree の成果物に対する独立レビューの `SUCCEEDED / APPROVE` 受入れを確認しました。これは文書成果物に対する skill 利用の受入れであり、#78 の Release 全体の残る受入れ条件は未完了です。外部 skill は操作者が試用時に用意する入力であり、Taxion の依存ではありません。その本文を fixture にコピーしません。
+#78 では、別途承認した実文書の作業で、選択した3 skill の Coder による実 invocation、読み込み結果、点検の証拠、同じ tree の成果物に対する独立レビューの `SUCCEEDED / APPROVE` 受入れを確認しました。#78・#79・#80 の受入れは、停止後の部分成果復旧と Copilot 取消後の OpenCode 継続を含めて完了しています。外部 skill は操作者が試用時に用意する入力であり、Taxion の依存ではありません。その本文を fixture にコピーしません。
 
 実文書の前に、操作者が用意した3つの執筆 skill と `natural-japanese` の付随 lint を無課金で確認できます。次の絶対パスには `natural-japanese/`、`japanese-tech-writing/`、`cognitive-rhythm-writing/` が必要です。実行には既存の `uv` と、その script の依存・Python がローカルに揃っている必要があり、テストは `uv run --offline` でダウンロードを禁止します。
 
@@ -196,10 +196,10 @@ login 済みアカウントの受入れを追加する前に、合成 fixture �
 tag 作成前に開発環境の全確認コマンドを実行し、`git diff` と `git diff --cached` に非公開情報がないか確認します。GitHub Release に載せる本文を確認済み動作と利用上の制約に合わせ、候補 commit の SHA を固定します。通常は受入れ条件を満たしてから公開します。例外を承認した場合は Issue に未達条件と理由を記録します。tag と同名の Release が既にある場合は、対象 SHA と状態を確認し、自動で削除・移動しません。
 
 ```bash
-git tag -a v0.1.0 -m "Taxion 0.1.0"
-git push origin v0.1.0
-git rev-parse 'v0.1.0^{commit}'
-git ls-remote origin 'refs/tags/v0.1.0*'
+git tag -a v0.2.0 -m "Taxion 0.2.0"
+git push origin v0.2.0
+git rev-parse 'v0.2.0^{commit}'
+git ls-remote origin 'refs/tags/v0.2.0*'
 ```
 
 公開した tag の対象 commit が固定した候補と一致することを確認します。その後、既存の設定・インストールに影響しない隔離環境で、[利用者ガイドの導入・更新・削除手順](docs/userguide/user-guide.md#現在の導入方法)を実行します。pseudo-version の過去成功を公開 tag の導入成功として扱いません。失敗した場合は Release object を公開せず、tag を保持して失敗箇所を記録します。
@@ -207,9 +207,9 @@ git ls-remote origin 'refs/tags/v0.1.0*'
 導入確認の成功後に、GitHub Release 用の Markdown 本文を repository 外で確定し、確認結果を Issue に記録します。例外承認がある場合は、Issue に受入れ未達と判断を記録してから公開します。次の操作は tag が存在することを要求し、GitHub CLI による暗黙の tag 作成を避けます。
 
 ```bash
-gh release create v0.1.0 --verify-tag --title "Taxion 0.1.0" \
-  --notes-file /tmp/taxion-v0.1.0-release-notes.md
-gh release view v0.1.0 --json tagName,targetCommitish,isDraft,isPrerelease,url,body
+gh release create v0.2.0 --verify-tag --title "Taxion 0.2.0" \
+  --notes-file /tmp/taxion-v0.2.0-release-notes.md
+gh release view v0.2.0 --json tagName,targetCommitish,isDraft,isPrerelease,url,body
 ```
 
 Release の tag・本文・公開状態と URL を再取得し、送信したノートと対象 tag を照合します。Release 作成後の記録だけで、未実施の導入確認や実 SDK 受入れを補ったことにはしません。

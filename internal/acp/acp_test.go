@@ -20,6 +20,18 @@ import (
 
 type msg = map[string]any
 
+func TestInitializeReportsReleaseVersion(t *testing.T) {
+	messages := run(t, New(filepath.Join(t.TempDir(), "ledger.json")), req(1, "initialize", msg{}))
+	if len(messages) != 1 {
+		t.Fatalf("initialize returned %d messages", len(messages))
+	}
+	result := messages[0]["result"].(map[string]any)
+	info := result["agentInfo"].(map[string]any)
+	if info["name"] != "taxion" || info["version"] != "0.2.0" {
+		t.Fatalf("incorrect release identity: %v", info)
+	}
+}
+
 type fakeRuntime struct {
 	role     string
 	worktree string
