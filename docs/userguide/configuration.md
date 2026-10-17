@@ -204,7 +204,7 @@ Taxion は承認した OpenCode の実行ファイルを
 複製して隔離内で `opencode acp` を起動します。準備不足で Copilot に切り替えることはありません。
 判断の背景は [ADR-0038](../develop/adr/0038-run-opencode-acp-with-sealed-role-boundaries.md)に記録しています。
 
-開発版は OpenCode の版番号の完全一致ではなく、接続時の ACP v1 と、
+v0.4.0 は OpenCode の版番号の完全一致ではなく、接続時の ACP v1 と、
 承認済み model・隔離した `taxion` agent の一致を確認します。agent の名前・版は
 `acp_connection` event に残します。将来の OpenCode v2 も同じ契約を満たす場合は
 版番号だけを理由に拒否しませんが、v2 全体の動作確認済みという意味ではありません。

@@ -150,7 +150,7 @@ controller の検証待ちだけでは suspension を要求しない。ただし
 
 ### 設定
 
-`config check` は、固定の Global・Project YAML 設定と対応する環境変数 override を、バージョン付き設定 schema と照合する。解決後の Copilot 設定では、任意の `execution.budgetGuidance` と OpenCode 専用の4項目を除く field が必須。OpenCode 設定では `runtime.acpCommand`・`runtime.acpConfig`・`runtime.acpConfigHash` も必須となり、Copilot 設定には混在させない。開発版では `runtime.acpCommandHash` は再現性のための任意の実行ファイル固定とし、通常利用では省略できる。`version` は整数、他の値は whitespace を含まない空でない文字列。未知の field、重複キー、暗黙の非文字列値、alias、複数 document は拒否する。
+`config check` は、固定の Global・Project YAML 設定と対応する環境変数 override を、バージョン付き設定 schema と照合する。解決後の Copilot 設定では、任意の `execution.budgetGuidance` と OpenCode 専用の4項目を除く field が必須。OpenCode 設定では `runtime.acpCommand`・`runtime.acpConfig`・`runtime.acpConfigHash` も必須となり、Copilot 設定には混在させない。v0.4.0 では `runtime.acpCommandHash` は再現性のための任意の実行ファイル固定とし、通常利用では省略できる。`version` は整数、他の値は whitespace を含まない空でない文字列。未知の field、重複キー、暗黙の非文字列値、alias、複数 document は拒否する。
 
 Global file は Go の `os.UserConfigDir()` 配下の `taxion/config.yaml`。Linux は `$XDG_CONFIG_HOME` または `~/.config`、macOS は `~/Library/Application Support`、Windows は `%AppData%`。Project file は Git 作業ツリールートの `.taxion/config.yaml`、Git 外は cwd。v0.2.0 の cwd 基点から変更した。cwd に旧サブディレクトリ設定があれば移行を求める。任意の親 directory は設定候補として検索しない。存在しない既定 file は省略し、読取り不能・不正な file は error にする。file が一つもなければ error を報告する。
 
@@ -472,7 +472,7 @@ SDK の session credit ceiling は応答後に判定される soft ceiling で�
 
 `runtime.provider: opencode` は承認した executable と server 設定を使う Linux 専用の
 ACP client adapter である。モデル・認証・quota を Taxion から操作しない。
-開発版では CLI 製品版の完全一致を求めず、ACP v1 と必要な session 応答を接続時に確認する。
+v0.4.0 では CLI 製品版の完全一致を求めず、ACP v1 と必要な session 応答を接続時に確認する。
 実行ファイルの内容 hash 固定を省略すれば、同じパスでの CLI 更新だけでは再承認を求めない。
 Taxion は起動するファイルを複製し、実際の hash と pin の有無を記録する。
 `config check --capabilities` は静的範囲、`doctor` と `runtime auth` は local asset の照合を
