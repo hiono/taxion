@@ -40,6 +40,16 @@ func TestDocumentationAcceptanceCannotBeCompensatedByOtherPasses(t *testing.T) {
 	if err := validateReviewerResult(dispatch, passing()); err != nil {
 		t.Fatal("rejected supported completion", err)
 	}
+	advice := passing()
+	advice.WorkReport = "Optional preference outside acceptance: consider renaming this helper in a future cleanup."
+	if err := validateReviewerResult(dispatch, advice); err != nil {
+		t.Fatal("non-blocking advice forced another repair/review cycle", err)
+	}
+	defect := passing()
+	defect.Findings = []DispatchFinding{{Severity: "LOW", Title: "Observed incorrect output", Evidence: []string{"behavior-check"}}}
+	if err := validateReviewerResult(dispatch, defect); err == nil {
+		t.Fatal("cost policy waived an actual defect by severity")
+	}
 	result := passing()
 	result.ReviewVerdict, result.Acceptance[1].Status = "REQUEST_CHANGES", "FAIL"
 	if err := validateReviewerResult(dispatch, result); err != nil {
