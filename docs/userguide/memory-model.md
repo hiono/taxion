@@ -12,7 +12,7 @@ CLI は、選択した Ledger と同じ directory の `memory.db` に `project` 
 
 ### ローカル状態と共有する知識
 
-既定の Ledger は `.taxion/ledger.json` で、`memory.db` と `workspace.db` は同じ directory にある。`.taxion/` 全体はローカル専用で、Git の ignore 対象とする。独自の `--store` は別のローカル directory を選ぶものであり、共有知識の取得元を選ぶものではない。権限と backup は所有者が管理する。Runtime session のファイルや、非公開の認証・利用量の観測もローカルに保持する。
+既定の保存先は `.taxion/workspace.db` と `.taxion/memory.db` である。通常は保存先を指定しない。独自の `--store` を使う場合の指定方法は [CLI リファレンス](cli-reference.md)を参照する。`.taxion/` 全体はローカル専用で、Git の ignore 対象とする。保存先の変更は、共有知識の取得元を選ぶ操作ではない。権限と backup は所有者が管理する。Runtime session のファイルや、非公開の認証・利用量の観測もローカルに保持する。
 
 共有する仕様は `docs/`、採択した設計判断は `docs/develop/adr/`、明示レビューした再利用可能な Memory 記録は `docs/develop/memory/` に置く。これらの Markdown は文書であり、Runtime entry として自動で読み込んだり承認したりしない。各記録には安定した識別子、revision、適用 scope、出典、保持する判断や知見を記載する。credential 値、ローカル設定、非公開の利用量、未レビューの database dump は含めない。
 
@@ -54,7 +54,7 @@ taxion memory conflict resolve --id 1 --actor human \
   --reason "Decision 4 supersedes the lesson for this workspace"
 ```
 
-矛盾の登録と解決は、両 entry の履歴に残す。解決には、記録した Human の説明が必要。
+矛盾の登録と解決は、両 entry の履歴に残す。解決には、記録した利用者の説明が必要。
 
 ## 警告からの昇格
 
@@ -80,7 +80,7 @@ CLI・HTTP API・ACP は、非推奨の prompt 形式を含め、Dispatch 作成
 
 `memory.db` がない既存 workspace は従来の動作を保つ。存在する database が読めない場合に、検査を通知なく無効にすることはない。project・global は、選択した workspace database 内の entry を区別し、別々の repo database を指さない。承認済み検査は、その database を使うすべての Dispatch に適用する。
 
-guardrail または承認済みの元 lesson を失効させると、検査は無効になる。元 lesson の改訂時も、新バージョンを Human が承認するまで旧検査を失効させる。Memory の読取りは SQLite workspace transaction と別に行うため、二つの database をまたぐ変更は atomic ではない。shell command、worker の出力、将来の Task 編集を制限する検査ではない。
+guardrail または承認済みの元 lesson を失効させると、検査は無効になる。元 lesson の改訂時も、新バージョンを利用者が承認するまで旧検査を失効させる。Memory の読取りは SQLite workspace transaction と別に行うため、二つの database をまたぐ変更は atomic ではない。shell command、worker の出力、将来の Task 編集を制限する検査ではない。
 
 ## 検索
 

@@ -1,9 +1,6 @@
 # Task Graph の登録・遷移・保持
 
 Task Graph と Ledger は SQLite の `workspace.db` に同時に保存する。
-既存の `.taxion/ledger.json` と `.graph.json` は初回移行に限り読み込み、
-移行確認のため一時的に残す。これらの JSON は移行後に更新せず、正本やバックアップとして
-利用しない。取り込みを確認した後に削除する。以後の更新元は SQLite workspace となる。
 設計の理由と移行の決定は
 [ADR-0022](adr/0022-sqlite-atomic-workspace-state.md) を参照する。
 
@@ -194,6 +191,12 @@ Task と Dispatch の契約に含め、役割間で同じ引用スナップシ�
 入力と利用許可は [仕様入力の参照文書](specification-input.md) に従う。
 
 ## 上限付きレビュー進行
+
+以下はオーケストレータ・自動化の実装者向けの CLI 入力仕様である。
+`REQUEST.json` は入力ファイルの仮名であり、利用者に手書きを求めるものではない。
+利用者は `ready` を読んだ agent または `request` の Planner に自然言語で依頼し、
+提案された作業条件と実行上限を承認する。JSON の生成とコマンド実行は
+オーケストレータまたは `request` が担当する。
 
 `workflow start --file REQUEST.json` は、READY の Coder Task に対する
 独立レビューと修正の許可を保存し、最初の Dispatch を発行する。
@@ -863,12 +866,14 @@ Graph を導入した workspace は dispatch 対象をすべて登録し、CLI�
 Web は HTTP の検査結果を表示する。Graph の read/edit API は今後の HTTP・ACP 拡張に含める。
 既存 Ledger の wire format は維持する。
 
-Graph の登録・遷移は検証後に rename で保存し、検証が完了するまで現在のファイルを維持する。
 CLI・HTTP・ACP の更新は SQLite transaction で Ledger と Graph を一緒に変更する。
 SQLite が同時 writer の更新を受け入れられない場合は明示的なエラーとなり、
 呼び出し元は成功として扱わず再試行できる。
-移行元 JSON は初期データとして読み込み、以後の workspace 更新を SQLite に保存する。
-移行後の正本は SQLite workspace state であり、移行元 JSON は初期 snapshot として保持する。
+開発途中の JSON 保存形式を持つ workspace の読取り互換を実装に残している。
+対象は `.taxion/ledger.json` と `.graph.json` で、SQLite への初回取込みに限り読み、
+以後は更新しない。これは旧開発環境の記録を保持するための処理であり、
+新規利用者がこれらの JSON を作成・管理する必要はない。
+移行後の正本とバックアップ元は SQLite であり、残った JSON を現状態として扱わない。
 Graph 読み込み時は version、キー、履歴、現状態の整合性を検査する。
 履歴検査は transition と proof を照合し、不整合があればエラーを返す。
 

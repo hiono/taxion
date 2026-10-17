@@ -16,7 +16,7 @@ M15 の完了条件ではなく、未実装の後続候補 #71 として追跡�
 | Coder・Reviewer の実行中 | 同じ役割・設定の Session に接続して観測する。欠落・失効・不明な実行はエラーとして保持し、停止確認と後続契約の承認で処理する |
 | Coder の結果取得後 | 結果と利用量の receipt、現在の origin・branch・HEAD・親 SHA・変更範囲・検証記録を照合して独立レビューへ進む。snapshot mode は baseline commit SHA、保持 ref、output tree SHA と path を照合する |
 | Reviewer の結果取得後 | 解放済み worktree の不存在と Git registry、元 repository の対象 commit・親 SHA・origin、直前 Coder と同じ出力 SHA を照合する。snapshot mode は Coder と同じ output tree SHA も照合する |
-| Human 判断待ち・保留中 | 対象、保留、補足、指示案の版、質問・調査の出典、明示反映を復元する。続行は保存済みの保留解除・承認条件に従う |
+| 利用者の判断待ち・保留中 | 対象、保留、補足、指示案の版、質問・調査の出典、明示反映を復元する。続行は保存済みの保留解除・承認条件に従う |
 | 完了 checkpoint | receipt と最新の Coder・Reviewer の Git 証拠を再確認する。改変は明示的なエラーになる |
 
 snapshot mode では `outputSha` は baseline commit SHA のまま、`outputTreeSha` は Controller が Git tree から算出する成果物識別子である。両者は別の値として Task・Dispatch・Reviewer の証拠に保存する。Controller は tree object を `refs/taxion/snapshots/` に保持し、再起動後も ref と実 worktree の tree・変更 path を照合する。ref の保持はローカル Git metadata の変更であり、branch、commit、index、remote は変更しない。
@@ -96,11 +96,11 @@ GitLab merge request の作成・承認・close は未対応である。
 公開要求には、Task ID、provider・host・repository、外部種別・番号、操作、本文、
 作成時の件名、API account、credential 参照、判断者、承認の出典を指定する。
 repository と作業記録先が異なる場合は `taskRepository` にコード側の repository を指定する。
-これら全体の hash を Human が確認し、`expectedHash` として承認要求に戻す。
+利用者がこれらの接続先・主体・内容を承認した後、オーケストレータが対応する hash を `expectedHash` として承認要求に戻す。
 
 ```sh
 taxion records proposal --file requested-publication.json > reviewed-publication.json
-# Human が reviewed-publication.json の接続先・主体・内容・hash を確認する
+# 利用者が公開内容を承認し、オーケストレータが対応する hash を照合する
 taxion records approve --file reviewed-publication.json --scanner /trusted/betterleaks
 taxion records send --id accepted-report --scanner /trusted/betterleaks
 taxion records show
@@ -136,7 +136,7 @@ taxion records reconcile --id accepted-report --claim <保存されたclaim> --s
 ```
 
 照合できると `SENT` を保存し、Issue 作成なら Task への関連づけも復元する。
-marker が見つからない場合は Human が provider 側の処理・遅延・操作履歴を確認する。
+marker が見つからない場合は利用者が provider 側の処理・遅延・操作履歴を確認する。
 新しい承認は、その確認結果を出典にして別 ID で行う。
 外部 API の書込みと SQLite の保存には時間差があるため、
 不明な結果を保存して照合する方式で重複送信を防ぐ。
@@ -144,7 +144,7 @@ marker が見つからない場合は Human が provider 側の処理・遅延�
 ## 失敗分析と close
 
 `records finding --file finding.json` は、失敗・レビュー指摘の結果 hash、
-原因、是正措置、lesson 候補、検証の参照、Human の決定と出典を保存する。
+原因、是正措置、lesson 候補、検証の参照、利用者の決定と出典を保存する。
 検証の参照には、その結果に保存された evidence、または `dispatch:<ID>:result` を使う。
 是正後の検証は、同じ Task／ReviewFlow の終了済み結果を
 `dispatch:<ID>:result:<結果JSONのSHA256>` で指定し、保存済み receipt と照合する。
@@ -180,14 +180,14 @@ provider 側の受信時保護と CI の検出・merge gate は
 
 ## 再現できる障害ケース
 
-無料の回帰テストでは、SQLite の閉鎖・再接続、実 Git repository・worktree の照合、
+モデルや外部サービスを呼ばない回帰テストでは、SQLite 接続のクローズ・再接続、実 Git repository・worktree の照合、
 重複 process、結果・利用量の改変、イベント再送、cancel 後の結果、
 Issue 作成後の応答喪失と再関連づけを確認する。
 復旧→レビュー指摘の保存→修正 SHA のレビュー→公開応答喪失→照合→close も検証する。
 GitHub の応答障害は fixture、CLI 引数・credential 分離・pagination は gh 脚本で再現する。
-有料 SDK 受入れは、通常 CI と分離した明示承認・予算上限付きの検証として行う。
+実モデルを使う SDK 受入れは、通常 CI と分離した明示承認・予算上限付きの検証として行う。
 
-GitHub 実受入れでは、Human が接続先・主体・本文 hash を承認し、
+GitHub 実受入れでは、利用者が接続先・主体・本文 hash を承認し、
 新しい CLI から [#56 のコメント](https://github.com/hiono/taxion/issues/56#issuecomment-6115563384) を公開した。
 `SENT` と外部 ID を保存した後、別 process から同じ ID を再送して同じ記録を取得し、
 GitHub 側の marker・作者・コメント件数が一件であることを照合した。

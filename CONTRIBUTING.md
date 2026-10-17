@@ -40,17 +40,21 @@ shell に以前の opt-in が残っていても有料モデルや実サービス
 
 Issue 本文、Milestone の説明、README、利用者・開発者向け文書は日本語で記載します。Memory、sanitizer、rate limiting、lockout、audit hash-chain などの定着した技術用語や機能名、識別子は元の表記を保ちます。コード、コマンド、API 名、引用原文も変更しません。操作は実際のコマンド名と flag を使い、その操作で何をするかを説明します。比喩や意味の近い別の語で置き換えません。
 
+利用者向けの入口では、Taxion、各担当、実行ハーネス（Copilot・OpenCode）、開発基盤（GitHub・GitLab）の関係を機能説明より先に示します。必要な CLI・認証は選択ごとに分け、通常の利用者には自然言語による依頼と承認を案内します。JSON の生成・ID の転記・低レベルコマンドは、オーケストレータ向けの操作例と明記します。本文の Human は文脈に応じて「利用者」「ユーザー」とし、Task 契約は「承認後に勝手に変更できない作業条件」と説明します。`human` などの入力値・識別子は変更しません。
+
+利用者向けの手順に、内部の Milestone 番号、旧パスの一覧、開発途中のデータ移行を前提知識として持ち込みません。履歴が必要なら開発者向け文書へリンクし、Milestone 自体を参照する場合は URL を使います。テストの区分は価格ではなく、モデル・外部サービスを呼ぶか、合成データか実データかで説明します。
+
 提案、記録した判断、現在の実装を区別してください。過去の要件や結果は残し、現在の動作と誤解される場合は補足します。文章の整理を完了とする前に、関連する Issue、文書、コードコメント、表示文も確認します。
 
 ## 文書の配置と責務
 
-文書名は内容を表す小文字の英語名をハイフンで区切ります。一般のガイド・仕様書に通読順ではない連番を付けず、[利用者向け索引](docs/userguide/README.md)と[開発者向け索引](docs/develop/README.md)で読者の作業順を示します。ADR の識別番号は判断の参照として保持します。リリースノートは GitHub Release の本文として管理し、repository には保存しません。移動時は相互リンクだけでなく、文書を読むテストとコード内参照も更新します。[旧パスの対応表](docs/develop/README.md#文書名と旧パス)は過去の記録から現在の文書を探すために使います。
+文書名は内容を表す小文字の英語名をハイフンで区切ります。一般のガイド・仕様書に通読順ではない連番を付けず、[利用者向け索引](docs/userguide/README.md)と[開発者向け索引](docs/develop/README.md)で読者の作業順を示します。ADR の識別番号は判断の参照として保持します。リリースノートは GitHub Release の本文として管理し、repository には保存しません。移動時は相互リンクだけでなく、文書を読むテストとコード内参照も更新します。
 
 | 配置 | 記載する内容 | 記載しない内容 |
 | --- | --- | --- |
 | `README.md` | プロジェクトの概要、導入への案内、参照文書 | 詳細仕様、作業報告 |
 | `docs/userguide/user-guide.md` | 導入と最初の承認済み Coder・Reviewer 実行 | option の完全な一覧 |
-| `docs/userguide/configuration.md` | 設定場所、優先順位、環境変数、実行前確認の範囲 | credential の保管、契約上の利用資格の証明 |
+| `docs/userguide/configuration.md` | 設定場所、優先順位、環境変数、実行前の確認の範囲 | credential の保管、契約上の利用資格の証明 |
 | `docs/userguide/cli-reference.md` | CLI 操作と許可・制約 | 製品要件、設計の理由 |
 | `docs/userguide/remote-access.md` | 公開接続の設定と手順 | 認証設計の判断 |
 | `docs/userguide/audit-log.md` | 監査項目、照合の限界、保存手順 | 監査機能の実装履歴 |
@@ -214,7 +218,7 @@ git rev-parse 'v0.3.1^{commit}'
 git ls-remote origin 'refs/tags/v0.3.1*'
 ```
 
-公開した tag の対象 commit が固定した候補と一致することを確認します。その後、既存の設定・インストールに影響しない隔離環境で、[利用者ガイドの導入・更新・削除手順](docs/userguide/user-guide.md#現在の導入方法)を実行します。旧正式版からの更新だけでなく、旧開発版の pseudo-version が導入済みの状態でも、`mise install` → `mise use --pin` → `taxion --version` で対象の正式版になることを確認します。pseudo-version の過去成功を公開 tag の導入成功として扱いません。失敗した場合は Release object を公開せず、tag を保持して失敗箇所を記録します。
+公開した tag の対象 commit が固定した候補と一致することを確認します。その後、既存の設定・インストールに影響しない隔離環境で、[利用者ガイドの導入・更新・削除手順](docs/userguide/user-guide.md#導入方法)を実行します。旧正式版からの更新だけでなく、旧開発版の pseudo-version が導入済みの状態でも、`mise install` → `mise use --pin` → `taxion --version` で対象の正式版になることを確認します。pseudo-version の過去成功を公開 tag の導入成功として扱いません。失敗した場合は Release object を公開せず、tag を保持して失敗箇所を記録します。
 
 導入確認の成功後に、GitHub Release 用の Markdown 本文を repository 外で確定し、確認結果を Issue に記録します。例外承認がある場合は、Issue に受入れ未達と判断を記録してから公開します。次の操作は tag が存在することを要求し、GitHub CLI による暗黙の tag 作成を避けます。
 
