@@ -272,7 +272,7 @@ taxion ready --update-skill
 
 配置に symlink は使わないため、その作成用の権限は不要です。既存パスの symlink は追跡せず拒否し、管理対象外・改変済みファイルは上書きしません。初回配置は既存ファイルを置換せず、更新時も一時ファイルから完成した一ファイルを入れ替えます。filesystem の書込み許可・hard link・rename の対応は必要です。
 
-同梱 skill の版は `1.2.0`、CLI 操作契約は `taxion.cli.v1` です。英語の ready 原稿へ変更したため、旧 `1.1.0` の管理ファイルは明示的な `--update-skill` が必要です。本体は許容 skill 版を明示リストで保持し、未知の minor・major 版を推測で許可しません。skill の metadata にも必要な CLI 契約、ready 原稿と内容のハッシュ、生成した本体の build 情報を保存します。確認は、本体の許容版と skill の要求契約の一致、現在の ready 原稿との一致、配置内容の整合性を判定します。公開前の本体について、未確認の製品 SemVer 範囲を互換と宣言する代わりに、版を付けた CLI 操作契約を照合します。
+公開済み v0.3.1 の同梱 skill は `1.2.0`、開発版はゴール指向方針を含む `1.3.0` です。CLI 操作契約は `taxion.cli.v1` を維持します。開発版では旧 `1.2.0` も明示的な `--update-skill` が必要です。本体は許容 skill 版を明示リストで保持し、未知の minor・major 版を推測で許可しません。skill の metadata にも必要な CLI 契約、ready 原稿と内容のハッシュ、生成した本体の build 情報を保存します。確認は、本体の許容版と skill の要求契約の一致、現在の ready 原稿との一致、配置内容の整合性を判定します。公開前の本体について、未確認の製品 SemVer 範囲を互換と宣言する代わりに、版を付けた CLI 操作契約を照合します。
 
 v0.2.0 から更新した場合、配置済み skill `1.0.0` はそのまま使いません。`taxion ready --check-skill` で不一致を確認し、利用者の許可後に `taxion ready --update-skill` を実行します。既存 skill の自動更新は行わず、改変済みファイルは明示更新でも保全します。skill を配置していない場合は、引数なしの `taxion ready` を直接使えます。
 
@@ -449,6 +449,23 @@ taxion workflow show --id task-example-flow
 この実行例は `worktree-tree-snapshot` 用です。commit mode を選ぶ場合、file tool だけでは commit を作れません。必要な secret scanner を用意し、[CLI リファレンス](cli-reference.md)の `--managed-commit` と `--managed-stage` を使うか、承認されたホスト操作で commit を作る手順を別に定めます。
 
 ## 結果の確認と停止後の継続
+
+### 開発版のゴール指向方針と保存証拠の評価
+
+以下は公開済み v0.3.1 には含まれません。開発版は、最終成果・正確性と安全性・費用の順で判断し、質問数やレビュー回数を品質の代理にしません。軽微な仮定は明示して進め、重大な確認は維持します。各担当は既存の成果と証拠を再利用し、追加調査や再レビューを未達条件・新証拠・具体的リスクに結び付けます。
+
+新しい `request` は、実装と関連文書の整合を acceptance に追加して承認前に表示します。影響する文書も scope に含め、同じ target の独立 Reviewer に確認させます。文書が影響を受けない場合も根拠が必要です。手動の intake では、`taxion ready` に示す同じ criterion を承認前に含めてください。承認済みの旧契約は自動変更しません。
+
+```sh
+taxion workflow evaluate --id FLOW-ID
+taxion workflow evaluate --id FLOW-ID --require-quality
+```
+
+`qualityGate` が `RECORDED_PASS` となるのは、保存 graph 上で Flow が完了し、文書整合 criterion と独立した同一 target の承認がある場合です。`--require-quality` は未達なら JSON を表示して非zero終了するため、公開前の確認に使えます。外部の Release 操作を遮断したり、現在の Git・公開権限・文書内容の真偽を自動証明したりするものではありません。公開直前には候補がレビュー対象と一致することも確認してください。
+
+`costComparisonEligible` は保存品質条件上の候補資格を示し、利用量の完備や比較条件の同等性までは保証しません。token 合計は当該 Flow の全 Dispatch に保存された call 単位の input/output 内訳が揃う場合だけ表示し、欠損・部分計測・重複識別子・overflow は null にします。cache 内訳は加算しません。これは保存値の集計であり、provider の課金記録との照合ではありません。
+
+Planner・前の Flow・外側の agent の費用は含まず、実行観測数も全 tool 呼出し数とは限りません。質問の情報価値、不要通信、重大欠陥の見逃し、実モデルの改善効果と金額は未測定として表示します。これは学習時の報酬関数や総合得点ではありません。
 
 ### 残予算の案内と現在の確認方法
 

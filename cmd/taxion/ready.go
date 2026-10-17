@@ -8,7 +8,10 @@ import (
 )
 
 //go:embed ready.txt
-var readyPrompt string
+var readyInstructions string
+
+var readyPrompt = readyInstructions + "\n## Goal-oriented execution policy\n\n" +
+	goalExecutionPolicy + "\n" + goalRolePolicy + "\n"
 
 func readyCmd(args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("ready", flag.ContinueOnError)
