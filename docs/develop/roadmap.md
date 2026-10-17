@@ -44,6 +44,14 @@ checked の項目は各段階で完了した作業を記録し、現在の機能
 
 [milestone #26](https://github.com/hiono/taxion/milestone/26)・[#89](https://github.com/hiono/taxion/issues/89) は v0.3.1 向けの英語表示と選択式入力を扱う。doctor で確認した既存設定は再選択せず、未確定 provider・複数 remote と適用確認だけを選択式にする。適用確認は `Cancel` を初期値にする。Taxion の固定文言と ready 原稿は英語へ統一し、ユーザー本文・外部出力・日本語文書は保持する。正式 tag・Release と、実装の公開は区別する。
 
+v0.3.1 の tag 導入・Release 公開は [#91](https://github.com/hiono/taxion/issues/91) で扱う。ゴール指向の質問・連携・停止規則と評価設計は [milestone #27](https://github.com/hiono/taxion/milestone/27)・[#90](https://github.com/hiono/taxion/issues/90) に分離し、v0.3.1 に追加しない。
+
+## 次版のゴール指向実行と評価
+
+既存の ready・Planner・Coder・Reviewer の方針との差分として、情報不足の影響と修正可能性、既存情報、質問の情報価値に基づく判断を追加する。軽微な仮定は明示して進め、重大な未確定事項はまとめて質問する。保存成果を再利用し、追加調査・再レビューは未達条件や結論を変える根拠に結び付ける。新しい Researcher・Coordinator の常設は前提にしない。
+
+品質・安全性・承認・予算・独立レビュー・同一成果物照合を制約とし、それを満たす実行同士で費用・時間・重複作業を比較する。質問数や token 数の直接減点は採用しない。固定回帰と実モデルの判断品質評価を区別し、比較実行には別の予算・期限の明示承認を必要とする。実装と評価は未着手であり、次版の番号・公開日は未確定とする。
+
 ## 階層化した Memory と自動実行の計画
 
 [ADR-0020](adr/0020-layered-memory-and-role-sessions-for-orchestration.md)

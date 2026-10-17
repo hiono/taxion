@@ -16,11 +16,11 @@ Linux では Global 設定は通常 `$XDG_CONFIG_HOME/taxion/config.yaml`、未�
 
 `taxion init` は既存設定と Git 情報から不足を補い、確認後に Project 設定と DB を準備します。`taxion doctor fix` は同じ処理で不足設定と除外規則を修復しますが、DB は初期化しません。`--dry-run`・`--set FIELD=VALUE`・`--remote NAME`・`--yes` と対話例は[利用者ガイド](user-guide.md#設定と実行前確認)を参照してください。既存値を変更する場合は、採用元の設定を明示的に編集します。Global 設定と環境変数を Project 設定へ丸ごと複写しません。
 
-v0.3.1 向けの開発版では、端末上の未確定 provider・remote と適用確認を選択式にし、設定済みの値は尋ね直しません。`doctor` で確認した既存設定もそのまま使います。適用確認の初期値は `Cancel` です。CLI の固定文言は英語とし、入力本文や外部出力は翻訳しません。
+v0.3.1 では、端末上の未確定 provider・remote と適用確認を選択式にし、設定済みの値は尋ね直しません。`doctor` で確認した既存設定もそのまま使います。適用確認の初期値は `Cancel` です。CLI の固定文言は英語とし、入力本文や外部出力は翻訳しません。
 
 各 layer は `version: 1` を持ちます。上位 layer は空でない値だけを上書きし、省略した項目は下位 layer から引き継ぎます。各ファイルは merge 前に個別検証されるため、後の layer で上書きしても不正な値は隠せません。明示的な空文字、null、未知の field、重複 key、alias、sequence、複数 YAML document は拒否されます。
 
-次の表が全設定項目の一覧です。`init` の生成 YAML は不足分だけを保存し、継承した値と未選択の任意項目をすべて列挙するものではありません。OpenCode 専用項目は OpenCode 選択時だけ必要です。開発版の `init`・`doctor fix` は、この違いと参照先を変更案に表示します。
+次の表が全設定項目の一覧です。`init` の生成 YAML は不足分だけを保存し、継承した値と未選択の任意項目をすべて列挙するものではありません。OpenCode 専用項目は OpenCode 選択時だけ必要です。v0.3.1 の `init`・`doctor fix` は、この違いと参照先を変更案に表示します。
 
 | Field | 意味・制約 |
 | --- | --- |
@@ -147,7 +147,7 @@ taxion runtime auth --dispatch DISPATCH-ID --system-prompt-file prompts/coder.md
 
 `config check` は設定 schema と必須 field を検査します。`--sources` は値を表示せず各 field の採用元を示します。`--capabilities` は adapter の実装範囲を表示するだけで、credential、live access、契約適格性を確認しません。
 
-開発版の `doctor` は、設定不足でも `init`・`doctor fix` と共有する読取り専用の検出処理で、現在の設定元・Git 候補・PATH 上の runtime 候補・不足項目を表示します。事前の doctor 実行や cache は不要です。設定不足は非zero終了とし、native inventory と保存 Dispatch の検査は未実施と報告します。`--worktree`・`--cli`・`--dispatch` の対象を検査済みとは扱いません。設定 file の不正・追跡・symlink は先に拒否します。公開済み v0.3.0 は設定不足時に一覧を出さず終了します。
+v0.3.1 の `doctor` は、設定不足でも `init`・`doctor fix` と共有する読取り専用の検出処理で、現在の設定元・Git 候補・PATH 上の runtime 候補・不足項目を表示します。事前の doctor 実行や cache は不要です。設定不足は非zero終了とし、native inventory と保存 Dispatch の検査は未実施と報告します。`--worktree`・`--cli`・`--dispatch` の対象を検査済みとは扱いません。設定 file の不正・追跡・symlink は先に拒否します。公開済み v0.3.0 は設定不足時に一覧を出さず終了します。
 
 `--task` は現在の設定が Task の記録済み承認に一致するか、`--dispatch` は Task 承認と発行済み Dispatch 指示の両方に一致するかを検査します。いずれも Human の身元や認証を証明しません。
 
