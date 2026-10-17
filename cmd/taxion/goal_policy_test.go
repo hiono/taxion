@@ -25,6 +25,12 @@ func TestGoalPolicyCoversEveryRoleAndRuntimePrompt(t *testing.T) {
 			"safe reversible defaults", "without\nmicro-confirmations",
 			"non-blocking advice in workReport", "Never\nrelabel an actual defect",
 			"not repeated check-ins", "cannot change the outcome",
+			"this does not complete the\nuser's larger request",
+			"Do not declare the request complete by redefining it",
+			"not stop\nall work unless the user requests a pause",
+			"implement the correction before commissioning",
+			"If one path is blocked, continue independent approved work",
+			"only when no safe approved action remains",
 		} {
 			if !strings.Contains(prompt, constraint) {
 				t.Errorf("prompt %d lacks %q", index, constraint)
