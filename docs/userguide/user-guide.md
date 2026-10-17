@@ -413,6 +413,10 @@ OpenCode は別 process の `runtime stop` で保存 session へ接続できま�
 
 無料価格のモデルでも、rate limit により待機・失敗する場合があります。ACP 接続後に tool・assistant の出力がないことだけでは、原因や利用量を確定できません。操作者が OpenCode 側の診断で `Rate limit exceeded` を確認した場合は、同時実行や無条件の再送を重ねず、提供側の再試行案内に従います。承認済み期限で停止した場合も正式な取消と runner 解放を確認し、未完了のレビューを成功にはしません。別モデル・認証情報・接続方式への変更を、無料という理由だけで承認済みとは扱いません。
 
+OpenCode 1.19.0 の実受入れでは、モデルが `read` に `path` を渡して失敗し、`filePath` へ直すと読取りに成功しました。`edit` の `oldString` に read 出力の行番号を含めた場合も、実ファイルの本文と一致せず編集に失敗しました。後続 Task の指示では、その版の native tool schema に合わせた引数名を使い、行番号を本文へ含めないよう明示します。tool の失敗は編集済み・検証済みの根拠にはしません。
+
+現在の隔離 agent には、Flow の期限とは別に12ステップの上限があります。実受入れでは、tool の失敗を重ねてこの上限に達し、モデルが JSON ではない作業要約を返したため Dispatch は `FAILED` になりました。要約を操作者が成功 JSON に書き換えず、元の結果を保持します。続行する場合は、保存成果と未完了作業を照合して後続 Task を新たに承認します。成功済み Coder の成果をレビューするときは、Reviewer に編集のやり直しを指示せず、その成果物の検査に範囲を限定します。
+
 停止後は `workflow show --id FLOW-ID` と `task graph` で `CANCELLED`、`runtime-stop:` 証拠、部分 Git 証拠を確認します。`records show` では元の suspension と cancellation の結果 receipt を確認できます。取消要求だけが成功し、保存が失敗する場合もあるため、コマンドを呼んだだけで停止確認を済ませず、確認前に同じ成果物を使った実行を重ねないでください。
 
 新しい Flow は token 閾値で停止しません。既存 workspace に残る旧 `BUDGET_LIMIT` の停止記録は変更せず、部分成果や完了済み Coder 結果から続ける場合は、同じ成果物を持つ別 worktree と後続 Task の再承認が必要です。期限切れ・cancel 等で停止した作業も保存結果を確認してから続けます。commit mode は clean worktree、snapshot mode は保存 tree と同じ作業ファイルを要求します。`workflow recover` は残った runner 所有権だけを解放します。具体的な Git 手順と `continueFromDispatchId` の使い分けは[停止した作業の継続](../develop/task-graph.md#停止した作業の継続)を参照してください。
