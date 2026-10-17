@@ -354,9 +354,10 @@ func TestSetupFailureAfterSettingsSaveIsRecoverable(t *testing.T) {
 
 func TestSetupRejectsSecretsAndInvalidOptionsWithoutFiles(t *testing.T) {
 	root := setupFixture(t, true)
+	token := "github_pat_" + strings.Repeat("synthetic", 3)
 	for _, extra := range [][]string{
-		{"--set", "runtime.contractRef=github_pat_synthetic_for_rejection"},
-		{"--set", "unknown.field=github_pat_synthetic_for_rejection"},
+		{"--set", "runtime.contractRef=" + token},
+		{"--set", "unknown.field=" + token},
 		{"--set", "unknown.field=value"}, {"--unknown"}, {"--set", "project.id=one", "--set", "project.id=two"},
 		{"unexpected-position"}, {"--set", "project.id="},
 	} {
@@ -423,7 +424,8 @@ func TestSetupRejectsRemoteConflictAndIncompleteInteractiveInput(t *testing.T) {
 	if err := setupCmd(nil, strings.NewReader("gitlab\n"), &output, true, true); err == nil || !strings.Contains(err.Error(), "input ended") {
 		t.Fatal("EOF was treated as approval", err)
 	}
-	if err := setupCmd(nil, strings.NewReader("github_pat_synthetic_for_rejection\n"), &output, true, true); err == nil ||
+	token := "github_pat_" + strings.Repeat("synthetic", 3)
+	if err := setupCmd(nil, strings.NewReader(token+"\n"), &output, true, true); err == nil ||
 		strings.Contains(err.Error(), "github_pat_") || strings.Contains(output.String(), "github_pat_") {
 		t.Fatal("interactive credential-like input was accepted or displayed", err)
 	}

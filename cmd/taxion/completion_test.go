@@ -14,7 +14,9 @@ func TestBashCompletionOfflineCandidatesAndSyntax(t *testing.T) {
 		want  string
 		omit  string
 	}{
+		{"taxion in", "1", "init", "doctor"},
 		{"taxion do", "1", "doctor", "runtime"},
+		{"taxion rea", "1", "ready", "runtime"},
 		{"taxion doctor ''", "2", "fix", "--set"},
 		{"taxion doctor fix --", "3", "--set", "--dispatch"},
 		{"taxion doctor --json ''", "3", "--worktree", "fix"},
