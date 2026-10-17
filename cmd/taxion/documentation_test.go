@@ -235,7 +235,7 @@ func TestUserGuideDistinguishesACPBuildAndSkillPaths(t *testing.T) {
 	body := documentationText(t, "../../docs/userguide/user-guide.md")
 	for _, detail := range []string{
 		"OpenCode ACP は v0.1.0 に含まれません",
-		"v0.3.1 を導入してください",
+		"v0.4.0 を導入してください",
 		"file read が許可された role に限り",
 		"`/config/opencode/skills/<skill-name>/`",
 		"未承認の外部 directory は拒否",
