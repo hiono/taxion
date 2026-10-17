@@ -63,6 +63,8 @@ type Adapter struct {
 	toolCalls       map[string]core.ExecutionObservation
 	session         string
 	model           string
+	executableHash  string
+	connection      string
 	history         []runtime.Event
 	wake            chan struct{}
 	output          strings.Builder
@@ -99,6 +101,16 @@ func checkedAsset(path, expected string) ([]byte, error) {
 		return nil, fmt.Errorf("openacp: approved asset hash changed")
 	}
 	return data, nil
+}
+
+func executableAsset(path, expected string) ([]byte, error) {
+	if expected != "" {
+		return checkedAsset(path, expected)
+	}
+	if !filepath.IsAbs(path) {
+		return nil, fmt.Errorf("openacp: executable requires an absolute path")
+	}
+	return os.ReadFile(path)
 }
 
 func New(config Config) (*Adapter, error) {
@@ -163,7 +175,7 @@ func (a *Adapter) ConfigHash() string {
 	data, _ := json.Marshal(struct {
 		Adapter string `json:"adapter"`
 		Config
-	}{"openacp-isolated-v11", a.config})
+	}{"openacp-isolated-v13", a.config})
 	return hashBytes(data)
 }
 func (a *Adapter) ExecutionConfiguration() json.RawMessage {
@@ -188,7 +200,7 @@ func (a *Adapter) CheckAuthentication(ctx context.Context, expectedAccount strin
 	if expectedAccount != "opencode-managed" {
 		return fmt.Errorf("openacp: account authentication is unverified; use the explicit opencode-managed reference")
 	}
-	if _, err := checkedAsset(a.config.CLIPath, a.config.CLIHash); err != nil {
+	if _, err := executableAsset(a.config.CLIPath, a.config.CLIHash); err != nil {
 		return err
 	}
 	_, _, err := a.serverSettings()
@@ -232,10 +244,11 @@ func (a *Adapter) serverSettings() (map[string]json.RawMessage, string, error) {
 }
 
 func (a *Adapter) prepare() error {
-	binary, err := checkedAsset(a.config.CLIPath, a.config.CLIHash)
+	binary, err := executableAsset(a.config.CLIPath, a.config.CLIHash)
 	if err != nil {
 		return err
 	}
+	a.executableHash = hashBytes(binary)
 	settings, model, err := a.serverSettings()
 	if err != nil {
 		return err
@@ -250,8 +263,7 @@ func (a *Adapter) prepare() error {
 			return err
 		}
 	}
-	// Copy, rather than bind, the executable so a concurrent replacement of the
-	// approved host binary cannot change the process after its hash is checked.
+	// Copy the bytes just read so host updates cannot replace a running session's executable.
 	if err := os.WriteFile(filepath.Join(a.root, "agent/opencode"), binary, 0700); err != nil {
 		return err
 	}
@@ -373,6 +385,7 @@ func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 	var initialized struct {
 		ProtocolVersion int `json:"protocolVersion"`
 		AgentInfo       struct {
+			Name    string `json:"name"`
 			Version string `json:"version"`
 		} `json:"agentInfo"`
 	}
@@ -382,8 +395,8 @@ func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 	}, &initialized); err != nil {
 		return "", errors.Join(err, a.terminate())
 	}
-	if initialized.ProtocolVersion != 1 || initialized.AgentInfo.Version != "1.19.0" {
-		return "", errors.Join(fmt.Errorf("openacp: requires ACP v1 and verified OpenCode 1.19.0"), a.terminate())
+	if initialized.ProtocolVersion != 1 {
+		return "", errors.Join(fmt.Errorf("openacp: requires ACP v1; peer negotiated protocol %d", initialized.ProtocolVersion), a.terminate())
 	}
 	var session struct {
 		ID      string `json:"sessionId"`
@@ -408,9 +421,23 @@ func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 	if session.ID == "" || observedModel != a.model || mode != "taxion" {
 		return "", errors.Join(fmt.Errorf("openacp: session did not confirm its model and isolated taxion agent"), a.terminate())
 	}
+	connection, err := json.Marshal(struct {
+		ProtocolVersion  int    `json:"protocolVersion"`
+		AgentName        string `json:"agentName"`
+		AgentVersion     string `json:"agentVersion"`
+		Model            string `json:"model"`
+		ExecutableHash   string `json:"executableHash"`
+		ExecutablePinned bool   `json:"executablePinned"`
+	}{initialized.ProtocolVersion, initialized.AgentInfo.Name, initialized.AgentInfo.Version, observedModel,
+		a.executableHash, a.config.CLIHash != ""})
+	if err != nil {
+		return "", errors.Join(err, a.terminate())
+	}
 	a.mu.Lock()
 	a.session = session.ID
+	a.connection = string(connection)
 	a.mu.Unlock()
+	a.emit(runtime.Event{Type: "acp_connection", Payload: string(connection)})
 	return session.ID, nil
 }
 
@@ -649,7 +676,11 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 	turn := a.turn
 	a.turnDone = make(chan struct{})
 	turnDone := a.turnDone
+	connection := a.connection
 	a.mu.Unlock()
+	if connection != "" {
+		a.emit(runtime.Event{Type: "acp_connection", Payload: connection})
+	}
 	a.emit(runtime.Event{Type: "acp_capabilities", Payload: `{"transport":"stdio","isolation":"linux-namespaces-copy","providerAuthentication":"unverified","quota":"unsupported","crossProcessResume":"unsupported","shell":"unsupported","usage":"latest-assistant-message-not-total","modelOperation":"unsupported"}`})
 	a.emit(runtime.Event{Type: runtime.EventTurnStarted})
 	go func() {

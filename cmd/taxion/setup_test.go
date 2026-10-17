@@ -40,6 +40,33 @@ func setupArguments() []string {
 		"--set", "runtime.contractRef=operator-contract", "--set", "execution.approvalRef=operator-reference"}
 }
 
+func TestSetupOpenCodeDoesNotRequireExecutablePin(t *testing.T) {
+	setupFixture(t, true)
+	args := []string{"--yes"}
+	for _, value := range []string{
+		"repository.provider=gitlab", "repository.account=scm-user",
+		"runtime.provider=opencode", "runtime.contractRef=operator-contract",
+		"execution.approvalRef=operator-reference", "runtime.acpCommand=/opt/opencode",
+		"runtime.acpConfig=/opt/opencode-server.json",
+		"runtime.acpConfigHash=sha256:" + strings.Repeat("a", 64),
+	} {
+		args = append(args, "--set", value)
+	}
+	var output bytes.Buffer
+	if err := setupCmd(args, strings.NewReader(""), &output, false, true); err != nil {
+		t.Fatal(output.String(), err)
+	}
+	resolved, err := resolveConfiguration()
+	if err != nil || resolved.Config.Runtime.Provider != "opencode" ||
+		resolved.Config.Runtime.ACPCommandHash != "" {
+		t.Fatal("setup required or invented an executable pin", resolved, err)
+	}
+	report, err := observeSetup("")
+	if err != nil || len(report.Missing) != 0 {
+		t.Fatal("complete unpinned setup was reported as incomplete", report.Missing, err)
+	}
+}
+
 func TestSetupGitLabColdStartAndRepeatWithoutModel(t *testing.T) {
 	root := setupFixture(t, true)
 	child := filepath.Join(root, "src", "nested")

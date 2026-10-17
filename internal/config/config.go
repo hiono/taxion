@@ -168,8 +168,9 @@ func (c Config) validate(required bool) error {
 			return fmt.Errorf("OpenCode manages its own authentication; runtime account and credentialRef require opencode-managed")
 		}
 		if !filepath.IsAbs(c.Runtime.ACPCommand) || !filepath.IsAbs(c.Runtime.ACPConfig) ||
-			!validAssetHash(c.Runtime.ACPCommandHash) || !validAssetHash(c.Runtime.ACPConfigHash) {
-			return fmt.Errorf("OpenCode requires approved absolute acpCommand/acpConfig paths and SHA256 hashes")
+			c.Runtime.ACPCommandHash != "" && !validAssetHash(c.Runtime.ACPCommandHash) ||
+			!validAssetHash(c.Runtime.ACPConfigHash) {
+			return fmt.Errorf("OpenCode requires absolute acpCommand/acpConfig paths, an approved acpConfig SHA256 hash, and a valid acpCommandHash when pinning the executable")
 		}
 	}
 	host, err := url.Parse("https://" + c.Repository.Host)

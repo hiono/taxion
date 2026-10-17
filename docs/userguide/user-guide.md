@@ -144,9 +144,12 @@ command -v taxion >/dev/null 2>&1 && source <(taxion completion bash)
 
 ### OpenCode ACP を選ぶ場合
 
-Linux では `runtime.provider: opencode` を選び、承認した OpenCode 1.19.0 の executable と
+Linux では `runtime.provider: opencode` を選び、承認した OpenCode の executable と
 server 設定を使えます。[OpenCode の設定と制約](configuration.md#opencode-acp-の設定と制約)で
-必要な隔離環境、内容 hash、未対応操作を確認してください。現在は認証情報を注入せず、
+必要な隔離環境、設定の内容 hash、未対応操作を確認してください。
+開発版では CLI の版固定や更新ごとの手動照合は不要です。Taxion が接続時の互換性を確認し、
+起動する実行ファイルの複製と内容 hash の記録を行います。
+厳密な再現性が必要な場合だけ実行ファイルの hash も固定できます。現在は認証情報を注入せず、
 実受入れは匿名の Big Pickle に限定しています。`doctor` と `runtime auth` は local asset の
 照合だけで、認証・quota・無料利用の保証ではありません。
 

@@ -123,19 +123,42 @@ execution: {requester: human, worker: local, approvalRef: fixture}
 		var output bytes.Buffer
 		err := doctorCmd([]string{"--json"}, &output)
 		var report struct {
-			Backend        string `json:"backend"`
-			AssetsVerified bool   `json:"assetsVerified"`
+			Backend          string `json:"backend"`
+			Version          string `json:"version"`
+			AssetsVerified   bool   `json:"assetsVerified"`
+			ExecutablePinned bool   `json:"executablePinned"`
 		}
 		if decodeErr := json.Unmarshal(output.Bytes(), &report); decodeErr != nil {
 			t.Fatal(decodeErr)
 		}
-		if (err != nil) != changed || report.Backend != "opencode" || report.AssetsVerified == changed {
+		if (err != nil) != changed || report.Backend != "opencode" || report.AssetsVerified == changed || !report.ExecutablePinned {
 			t.Fatal("doctor hid an asset mismatch or used the wrong provider", report, err)
+		}
+		if report.Version != "not observed; ACP v1 required on connection" {
+			t.Fatal("offline diagnosis claimed a CLI version requirement or observation", report.Version)
 		}
 		for _, path := range []string{marker, filepath.Join(root, ".taxion")} {
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
 				t.Fatal("doctor launched a provider or created workspace state", path, err)
 			}
 		}
+	}
+	unpinned := bytes.ReplaceAll([]byte(data), []byte(fmt.Sprintf("  acpCommandHash: sha256:%x\n", sha256.Sum256(executableData))), nil)
+	if err := os.WriteFile(configPath, unpinned, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := doctorCmd([]string{"--json"}, &output); err != nil {
+		t.Fatal("unpinned updated CLI must not fail the offline diagnostic", output.String(), err)
+	}
+	var report struct {
+		ExecutablePinned bool `json:"executablePinned"`
+		AssetsVerified   bool `json:"assetsVerified"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &report); err != nil || report.ExecutablePinned || !report.AssetsVerified {
+		t.Fatal("doctor misreported pin state", report, err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("unpinned diagnostic launched the CLI", err)
 	}
 }

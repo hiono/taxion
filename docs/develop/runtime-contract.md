@@ -108,11 +108,18 @@ Runtime・workflow 実行の `--controller-validation-submission` は、モデ�
 
 ### OpenCode ACP adapter
 
-`internal/runtime/openacp` は ACP v1 の stdio client として、承認した OpenCode 1.19.0 を
+`internal/runtime/openacp` は ACP v1 の stdio client として、承認した OpenCode を
 role ごとの Linux namespace で起動する。Taxion が server になる `taxion acp` と
 接続の向きを区別する。Controller の共通契約を使い、OpenCode SDK・provider API は追加しない。
-実行ファイルと server 設定の絶対パス・内容 hash は Dispatch の設定承認に含む。
+実行ファイルの絶対パスと server 設定の絶対パス・内容 hash は Dispatch の設定承認に含む。
+実行ファイルの hash 固定は任意とし、指定時だけ内容一致を要求する。
 接続後の protocol、agent mode、操作者設定と同じ model を確認してから prompt を送る。
+OpenCode の製品版の完全一致は要求せず、ACP v1 と必要な session 応答で判定する。
+`acp_connection` に protocol、報告された agent の名前・版、model、実行したファイルの
+内容 hash と pin の有無を記録し、送信時にも再掲して Start 後の event cursor から取得できる
+ようにする。仕様上任意の agent 情報の欠落だけでは拒否しない。pin のない同じパスでの
+CLI 更新には再承認を求めず、起動した process は読取り済みの複製を使い続ける。
+設定・権限や明示 pin の変更には再承認を要求し、旧契約・session は書き換えない。
 
 承認 path の複製を workspace とし、Git metadata・host HOME・credential・shell を渡さない。
 Reviewer workspace と agent 設定は read-only mount とし、process の capability を落とす。
