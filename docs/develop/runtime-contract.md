@@ -143,7 +143,7 @@ prompt を自動再送しない。別 process/provider の session への再接�
 通常の Copilot SDK session は create・resume ともに探索を明示的に有効にする。SDK に `nil` を渡すだけでは project・personal skill が読み込まれず、CLI の一覧と一致しない場合がある。探索方式は config hash の `native-cli-discovery-v2` に含め、旧方式の session を新しい実行契約で再開しない。明示 ToolPolicy と取消専用 adapter の探索抑止、role 別 file・shell permission は維持する。
 
 外側の coding agent 向けの操作 skill は `ready --install-skill` で明示配置する。
-同梱版は `1.2.0`、metadata の形式は `"1"`、CLI 操作契約は `taxion.cli.v1` とする。英語の ready 原稿へ変更したため、旧 `1.1.0` は互換とせず、未改変の管理ファイルだけを明示更新する。
+開発版の同梱 skill は `1.3.0`、metadata の形式は `"1"`、CLI 操作契約は `taxion.cli.v1` とする。ゴール指向方針と文書整合の原稿を追加したため、公開済み v0.3.1 の `1.2.0` を含む旧管理ファイルは互換とせず、未改変の管理ファイルだけを明示更新する。
 v0.3.0 の ready は状況別案内と初期設定の導線を更新した。旧 skill `1.0.0` は互換とせず、整合性を検査できる未改変の管理ファイルだけを利用者の明示許可で更新する。コマンド構文と JSON schema は変えず、CLI 操作契約は維持する。
 skill の本文・指示を変更するときは skill 版を更新し、CLI の破壊的変更では操作契約も更新する。
 本体の許容 skill 版は明示リストで管理し、未知の版は minor 変更でも自動許可しない。
@@ -255,6 +255,10 @@ Release 0.1.0 の文書 dogfood における実 skill 利用は、Issue #78 の�
 そこで選択する外部 skill は製品の固定依存ではなく、操作者が利用許可と内容を承認する。
 
 ## Dispatch の実行と context
+
+開発版は共通のゴール指向方針と担当別の責務を ready・Planner・質問回答・runtime・workflow・ACP の原稿へ接続する。追加作業には成果への具体的な寄与を求め、質問数やレビュー回数そのものを評価しない。承認・予算・独立性を維持し、関連文書も実装と同じ target で確認する。新しい request は文書整合 criterion を承認前の表示計画へ追加する。host の全件 acceptance 検査で FAIL・欠落・証拠なしを拒否するが、意味上の真偽や外部 Release 操作まで自動強制するものではない。
+
+`workflow evaluate --id FLOW_ID --require-quality` は保存 graph の妥当性と、完了・独立同一 target 承認・文書 criterion を確認し、未達なら非zero終了する。`RECORDED_PASS` は保存証拠上の条件充足であって、実モデルの判断品質や安全性を独立実測した値ではない。集計範囲・欠損・未測定を JSON に明示し、品質未達と費用を加算して順位付けしない。[ADR-0040](adr/0040-constrain-goal-oriented-efficiency-by-quality-evidence.md) に対象経路と限界を記録する。
 
 Planner→Coder、Planner→Reviewer、Coder→Reviewer は、Taxion に保存した契約・結果を参照して引き継ぐ。モデルに ID・承認・hash の転記や、送り手の SDK session ファイルの再読取りを要求しない。結果 ID の解決では、保存元 Dispatch と instruction hash を照合し、存在しない参照や保存結果との不一致をエラーにする。権限内で本文まで解決できることを引継ぎの条件とする。
 

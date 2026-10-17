@@ -92,6 +92,7 @@ Review flows and recovery:
   workflow run        Execute review/repair continuously with saved ceilings (--id; role prompt files or --builtin-prompts)
   workflow step       Execute one role turn from a saved review flow (--id; role prompt files or --builtin-prompts)
   workflow show       Read the saved review flow and ceilings (--id required)
+  workflow evaluate   Report saved quality gates and measured/unknown costs; no reward score (--id required)
   workflow recover    Release interrupted runner ownership after recorded execution stop (--file JSON)
   workflow interrupt Request a targeted stop for the active flow (--file JSON)
   workflow handoff    Hold or release the next handoff with a sourced compare-and-swap request (--file JSON)
@@ -873,7 +874,7 @@ func runtimeSystemPrompt(prompt, contract string) string {
 }
 
 func runtimeSubmissionPrompt(prompt, contract string, submission bool) string {
-	prompt += "\n" + roleVerificationPrompt
+	prompt += "\n" + goalExecutionPolicy + "\n" + goalRolePolicy + "\n" + roleVerificationPrompt
 	prompt += "\nResult evidence contains identifiers. Include each required evidence identifier exactly as a separate array item, without a description suffix (for example, \"work-report\", not \"work-report: changes made\"). Additional work descriptions may be separate evidence items. Do not invent evidence merely to satisfy an identifier."
 	prompt += "\nFor Reviewer, changedFiles must be []. The reproduced Coder changes are review input, not Reviewer edits. worktreeChanged describes changes since this Reviewer started, not differences from the baseline commit. Report an actual Reviewer mutation as a blocker; do not hide it."
 	if !submission {

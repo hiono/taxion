@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -12,6 +13,19 @@ import (
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/store"
 )
+
+func TestWorkflowEvaluationDoesNotCreateWorkspace(t *testing.T) {
+	previous := storePath
+	storePath = filepath.Join(t.TempDir(), "absent", "ledger.json")
+	t.Cleanup(func() { storePath = previous })
+	var output bytes.Buffer
+	if err := workflowCommand(t.Context(), []string{"evaluate", "--id", "missing"}, &output); err == nil {
+		t.Fatal("evaluation accepted an absent workspace")
+	}
+	if _, err := os.Stat(filepath.Dir(storePath)); !os.IsNotExist(err) {
+		t.Fatal("evaluation created state", err)
+	}
+}
 
 func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 	old := storePath
@@ -27,6 +41,7 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 		Worktree: filepath.Join(dir, "repo"), Branch: "work", BaselineSHA: strings.Repeat("a", 40),
 		AuthorizationID: "authorize", Decisions: []core.TaskDecision{{ID: "authorize", Source: "human:1", Text: "approve"}},
 	}
+
 	if err := (core.Ledger{Tasks: []core.Task{{ID: task.ID, Title: task.Title, Repo: task.Repo}}}).Save(storePath); err != nil {
 		t.Fatal(err)
 	}
@@ -62,6 +77,18 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 	}
 	if err := workflowCmd([]string{"show", "--id", request.ID}); err != nil {
 		t.Fatal(err)
+	}
+	var evaluation bytes.Buffer
+	if err := workflowCommand(t.Context(), []string{"evaluate", "--id", request.ID}, &evaluation); err != nil {
+		t.Fatal(err)
+	}
+	var report controller.FlowEvaluation
+	if err := json.Unmarshal(evaluation.Bytes(), &report); err != nil || report.QualityGate != "UNMET" ||
+		report.CostComparisonEligible || report.InputOutputTokens != nil {
+		t.Fatal("pending Flow acquired a quality score", report, err)
+	}
+	if err := workflowCommand(t.Context(), []string{"evaluate", "--id", request.ID, "--require-quality"}, &evaluation); err == nil {
+		t.Fatal("quality gate allowed a pending Flow")
 	}
 	if err := workflowCmd([]string{"planning-context", "--id", request.ID}); err != nil {
 		t.Fatal(err)

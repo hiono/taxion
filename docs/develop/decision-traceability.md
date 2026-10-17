@@ -38,7 +38,7 @@ Foundation や初期の別の Milestone を M1 とした出典記録は確認で
 | [#24 Release 0.3.0 — 初期設定・診断修復・CLI 操作の UX 改善](https://github.com/hiono/taxion/milestone/24) | UX | ADR-0039。設定準備、明示的な修復、bash 補完、help と ready の分類 | #82〜#85 | [user-guide.md](../userguide/user-guide.md), [configuration.md](../userguide/configuration.md), [cli-reference.md](../userguide/cli-reference.md) | closed。公開証拠は #85 |
 | [#25 初回設定 UX — 操作順に依存しない診断と設定](https://github.com/hiono/taxion/milestone/25) | UX 補正 | ADR-0039 の公開後補正。毎回の共有観測、対話再入力、候補・設定元・未確認の区別 | [#86](https://github.com/hiono/taxion/issues/86) | [user-guide.md](../userguide/user-guide.md), [configuration.md](../userguide/configuration.md), [cli-reference.md](../userguide/cli-reference.md) | 実装・公開証拠は #86。新 Release は含めない |
 | [#26 Release 0.3.1 — 英語表示と未確定項目の選択式入力](https://github.com/hiono/taxion/milestone/26) | UX 補正 | ADR-0039 の追補。設定済み項目の再選択を避け、未確定項目・適用確認を選択式にし、固定 CLI 文言を英語に統一する | [#89](https://github.com/hiono/taxion/issues/89)、関連 [#88](https://github.com/hiono/taxion/issues/88) | [user-guide.md](../userguide/user-guide.md), [configuration.md](../userguide/configuration.md), [cli-reference.md](../userguide/cli-reference.md) | 実装と正式 tag・Release の公開を区別する |
-| [#27 次版 — ゴール指向の実行方針と品質制約付き効率評価](https://github.com/hiono/taxion/milestone/27) | 実行方針・評価 | 既存ロールへの差分として質問・連携・停止規則を接続する。品質と安全性を制約にした評価を行い、質問数を直接減点しない | [#90](https://github.com/hiono/taxion/issues/90) | [roadmap.md](roadmap.md) | 未実装・未評価。v0.3.1 の公開 #91 と分離し、追加モデル予算を推測しない |
+| [#27 次版 — ゴール指向の実行方針と品質制約付き効率評価](https://github.com/hiono/taxion/milestone/27) | 実行方針・評価 | [ADR-0040](adr/0040-constrain-goal-oriented-efficiency-by-quality-evidence.md)。共通・担当別方針、文書整合 acceptance と保存品質証拠を接続し、質問数を直接減点しない | [#90](https://github.com/hiono/taxion/issues/90) | [roadmap.md](roadmap.md)、[Runtime 契約](runtime-contract.md) | 開発版に実装、実モデル比較は未実施。v0.3.1 の公開 #91 と分離し、追加モデル予算を推測しない |
 
 #24 は最初の #82〜#84 の実装と検証を完了して一度 closed とした。この時点では v0.3.0 tag・Release の公開を含まない。
 その後、目的別案内の評価・文書補正・公開 tag 導入と Release を [#85](https://github.com/hiono/taxion/issues/85) に追加し、milestone を再開した。追加範囲の受入れと公開結果は #85 で追跡する。
@@ -59,7 +59,7 @@ Milestone に割り当てられた75 Issue すべてについて、表の該当�
 
 ## ADR の状態と現在の参照先
 
-ADR-0001〜0039 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。
+ADR-0001〜0040 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。
 
 | ADR | 判断 | 現在の参照先・適用範囲 |
 | --- | --- | --- |
@@ -102,6 +102,7 @@ ADR-0001〜0039 はすべて `Accepted` の判断を記録する。採択は選�
 | [0037](adr/0037-publish-release-notes-on-github-only.md) | リリースノート本文は GitHub Release に保存し、未達条件は Issue、導入手順は利用者ガイドに分ける | `CONTRIBUTING.md`、`user-guide.md`、GitHub Releases。repository に release-note ファイルを置かない |
 | [0038](adr/0038-run-opencode-acp-with-sealed-role-boundaries.md) | OpenCode ACP を role 別の Linux namespace で実行し、承認 path・read-only review・用途別送信許可を維持する | `runtime-contract.md`、`configuration.md`、`specification-input.md`。最小実 prompt の成功と実文書の通し受入れは区別する |
 | [0039](adr/0039-prepare-project-configuration-with-explicit-repair.md) | 設定と DB の基点を揃え、init と doctor fix で不足を補い、実 CLI から bash 補完を生成する | `user-guide.md`、`configuration.md`、`cli-reference.md`。初期設定はモデル実行・契約・送信・Task・予算の承認を行わない |
+| [0040](adr/0040-constrain-goal-oriented-efficiency-by-quality-evidence.md) | 最終成果を共通・担当別方針へ接続し、文書整合と同一 target の品質証拠を費用評価の前提にする | `runtime-contract.md`、`cli-reference.md`、`user-guide.md`。保存証拠と実モデルの効果測定を区別する |
 
 ADR-0026〜0028 は、初回利用と復旧の調査後に追加した。ローカルの実 Git・fake Runtime テストで、許可範囲、同一 tree の引継ぎ、successor の照合を確認した。停止専用操作では、旧 suspended Dispatch を終了し、追加モデル指示・利用量なしで部分 Git 証拠と両方の結果 receipt を保持した。
 

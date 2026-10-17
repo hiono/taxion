@@ -95,6 +95,19 @@ Use relative paths/patterns for scope, minimum necessary fileAccess and explicit
 permission for new files. Host validation commands require approval.
 Do not invent successful tests or run unknown commands speculatively.
 
+Include affected documentation paths in the approved scope and the following exact
+acceptance criterion for implementation/release work (explain non-applicability
+with evidence when no user-facing documentation is affected):
+User-facing behavior, configuration, constraints and affected documentation agree at the reviewed target; affected operational steps are verified, or non-applicability is justified with evidence.
+The host validates the independent Reviewer's PASS evidence for this criterion
+at the same target; it cannot automatically prove semantic truth from file names.
+Do not publish while a material mismatch remains. If a later candidate changes,
+recheck affected evidence rather than reusing approval for a different artifact.
+For a Taxion Flow, run taxion workflow evaluate --id FLOW-ID --require-quality
+before publication. A nonzero result blocks the release handoff. A successful
+check covers saved evidence only: separately compare the actual release candidate
+with the reviewed artifact and verify current publication permission.
+
 The JSON below is a schema example, not permission for its paths or budget.
 Use unique IDs and replace repository, worktree, baseline, contract, configuration and limits
 with actual values. Place private ignored input files outside the role's artifact worktree.

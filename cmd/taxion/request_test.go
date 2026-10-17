@@ -411,8 +411,10 @@ func TestSearch(t *testing.T) {
 					result.WorktreeChanged = &changed
 					result.ReviewVerdict, result.NextTransition = "APPROVE", core.Approved
 					result.Findings = []core.DispatchFinding{}
-					result.Acceptance = []core.DispatchAcceptance{{Criterion: dispatch.Instruction.Acceptance[0],
-						Status: "PASS", Evidence: []string{"work-report"}}}
+					for _, criterion := range dispatch.Instruction.Acceptance {
+						result.Acceptance = append(result.Acceptance, core.DispatchAcceptance{Criterion: criterion,
+							Status: "PASS", Evidence: []string{"work-report"}})
+					}
 				}
 				body, err := json.Marshal(result)
 				if err != nil {
@@ -440,6 +442,15 @@ func TestSearch(t *testing.T) {
 	}
 	defer db.Close()
 	coder, reviewer := state.Graph.Dispatches[0], state.Graph.Dispatches[1]
+	if strings.Count(out.String(), core.DocumentationAcceptance) != 1 ||
+		!slices.Contains(coder.Instruction.Acceptance, core.DocumentationAcceptance) ||
+		!slices.Equal(coder.Instruction.Acceptance, reviewer.Instruction.Acceptance) {
+		t.Fatal("displayed documentation acceptance did not reach the approved Coder and Reviewer contracts")
+	}
+	evaluation, err := controller.EvaluateReviewFlow(state.Graph, coder.TaskID+"-flow")
+	if err != nil || !evaluation.CostComparisonEligible {
+		t.Fatal("request completion lacks documented same-target quality evidence", evaluation, err)
+	}
 	var intake struct {
 		Request string `json:"request"`
 	}
