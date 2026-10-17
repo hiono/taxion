@@ -183,6 +183,36 @@ func TestConfigurationGuideProvidesResolvableLoginDefaults(t *testing.T) {
 	}
 }
 
+func TestUserGuideInstallsReleaseBeforeSelectingIt(t *testing.T) {
+	body, err := os.ReadFile("../../docs/userguide/user-guide.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := regexp.MustCompile("(?s)```sh\\n(.*?)\\n```").FindAllStringSubmatch(string(body), -1)
+	checked := 0
+	for _, block := range blocks {
+		var installed string
+		for _, line := range strings.Split(block[1], "\n") {
+			if strings.HasPrefix(line, "mise install ") {
+				installed = strings.TrimPrefix(line, "mise install ")
+			}
+			if !strings.HasPrefix(line, "mise use ") || !strings.Contains(line, "go:github.com/hiono/taxion/cmd/taxion@") {
+				continue
+			}
+			if !strings.Contains(line, "--pin ") || installed == "" || !strings.HasSuffix(line, installed) {
+				t.Errorf("release selection must follow installation of the same version with --pin: %s", line)
+			}
+			if !strings.Contains(block[1], "\nmise exec -- taxion --version") {
+				t.Errorf("release selection must include version verification: %s", line)
+			}
+			checked++
+		}
+	}
+	if checked != 3 {
+		t.Errorf("expected initial, project update and global version examples, got %d", checked)
+	}
+}
+
 func TestUserGuideDistinguishesACPBuildAndSkillPaths(t *testing.T) {
 	body := documentationText(t, "../../docs/userguide/user-guide.md")
 	for _, detail := range []string{

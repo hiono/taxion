@@ -8,7 +8,9 @@ v0.3.1 は、CLI の固定文言を英語に統一し、初回診断・版表示
 
 ## 使い始める
 
-[利用者ガイド](docs/userguide/user-guide.md)に、現在のソースからの導入、今の agent への `taxion ready` による操作手順の出力、設定・承認から結果確認までを記載しています。外側の coding agent を使わず、Taxion 内部の Planner と計画を相談する `taxion request` も別の入口として使えます。必要な option は[CLI リファレンス](docs/userguide/cli-reference.md)、設定ファイルと環境変数は[設定ガイド](docs/userguide/configuration.md)で確認できます。復旧・Memory・リモート接続などの文書は[利用者向け文書の一覧](docs/userguide/README.md)から参照できます。
+[利用者ガイド](docs/userguide/user-guide.md)に、公開版・ソースからの導入、今の agent への `taxion ready` による操作手順の出力、設定・承認から結果確認までを記載しています。mise での導入・更新は、`mise install` → `mise use --pin` → `taxion --version` の順です。[導入・更新手順](docs/userguide/user-guide.md#現在の導入方法)には、旧開発版が再選択される場合の注意も記載しています。
+
+外側の coding agent を使わず、Taxion 内部の Planner と計画を相談する `taxion request` も別の入口として使えます。必要な option は[CLI リファレンス](docs/userguide/cli-reference.md)、設定ファイルと環境変数は[設定ガイド](docs/userguide/configuration.md)で確認できます。復旧・Memory・リモート接続などの文書は[利用者向け文書の一覧](docs/userguide/README.md)から参照できます。
 
 初回利用は[導入から結果確認までの順序](docs/userguide/README.md#最初の依頼を進める)、作業が停止した場合は[保存成果からの継続](docs/userguide/README.md#止まった作業を続ける)をたどってください。参照資料をすべて読む必要はありません。
 
