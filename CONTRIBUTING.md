@@ -135,9 +135,11 @@ Linux の namespace 境界は `TAXION_NAMESPACE_TEST=1 go test -race ./internal/
 で opt-in にできます。この検査も外部モデルは使いません。隔離に必要な Linux command と
 PATH 上の native `rg` が必要であり、隔離内の検索成功と実行ファイルの read-only も照合します。
 
-実 OpenCode 1.19.0 の確認は、操作者が用意した executable と `model` だけの JSON 設定を
-絶対パスで指定し、両方の生 SHA-256 をそれぞれ `TAXION_OPENCODE_HASH` と
-`TAXION_OPENCODE_CONFIG_HASH` に `sha256:` 付きで設定します。
+実 OpenCode の確認は、操作者が用意した executable と `model` だけの JSON 設定を
+絶対パスで指定し、設定の生 SHA-256 を `TAXION_OPENCODE_CONFIG_HASH` に
+`sha256:` 付きで設定します。実行ファイルも固定する検査では、
+`TAXION_OPENCODE_HASH` にその生 SHA-256 を指定します。
+通常利用と同じ更新許容の確認では、この変数を未設定にします。
 `TAXION_OPENCODE_PATH` と `TAXION_OPENCODE_CONFIG` は各ファイルのパスです。
 `TAXION_OPENCODE_ACP_HANDSHAKE=1 go test ./internal/runtime/openacp -run '^TestLiveOpenCodeHandshake$'`
 は接続だけを確認し、prompt を送りません。`TAXION_OPENCODE_ACP_PROMPT=free-model-diagnostic`
@@ -178,6 +180,49 @@ PATH 上の native `rg` が必要であり、隔離内の検索成功と実行�
 native inventory と補足のファイル観測を表示します。回帰では一時 HOME と合成 CLI から
 渡された条件を確認し、無効化・不正形式・取得不能と、file hooks・MCP・モデルを
 起動しないことを検査します。doctor の成功を認証・実ロード・品質確認の代替にはしません。
+
+## 実行ハーネスと SDK の更新
+
+OpenCode の製品版と ACP の protocol version は別に扱います。
+接続は ACP v1、承認した model、隔離した `taxion` agent の一致で判定し、
+agent の名前・版は報告があれば記録します。製品版の固定や、任意の製品情報の欠落を
+理由に拒否せず、OpenCode の版番号だけを更新許可リストへ追加しません。
+根拠と未検証範囲は [ADR-0038 の追補](docs/develop/adr/0038-run-opencode-acp-with-sealed-role-boundaries.md#2026-10-17-追補実行ファイルの更新と接続互換性)に記録しています。
+
+利用者の CLI 更新と、開発側の再現実験を分けます。通常利用の `acpCommandHash` は省略可能で、
+同じパスの CLI 更新は新しい作業承認の理由にしません。Taxion が実行ファイルを複製し、
+実際に使った内容 hash を接続記録に残します。評価環境では版・hash を明示固定し、
+同じ条件で再現します。既存の明示 pin を自動解除したり、設定内容の承認や保存済み契約を
+書き換えたりはしません。開発側は合成 peer の互換・非互換ケースと namespace の回帰後に、
+更新した executable を指定して
+実 handshake、承認済み予算・期限で最小応答、変更の影響を受ける tool・skill・停止を確認します。
+最小応答だけで実作業の通し受入れや全モデルへの対応を完了扱いにしません。
+
+Copilot Go SDK は `go.mod` / `go.sum` に採用版を固定し、上流差分を確認して更新します。
+これは Taxion 開発者の依存管理であり、利用者に SDK の組合せ管理や CLI の固定を要求しません。
+SDK の版、CLI の製品版、SDK と CLI の通信プロトコルの版は別です。この通信は ACP では
+ありません。v1.0.22 の SDK は起動時に `connect`（旧 server では `ping`）で互換性を確認し、
+対応範囲外ならエラーにします。Taxion はこの確認を利用し、CLI の製品版の完全一致を
+独自に要求しません。根拠は上流の
+[`verifyProtocolVersion`](https://github.com/github/copilot-sdk/blob/go/v1.0.22/go/client.go)です。
+更新候補は `go list -m -u github.com/github/copilot-sdk/go` で調べ、
+採用する具体的な版を `go get github.com/github/copilot-sdk/go@vX.Y.Z` で指定します。
+create/resume、認証・権限、tool、停止、usage・credit、生成 event 型と CLI protocol の
+変更を調べ、`go mod tidy` と以下の回帰を行います。
+
+```bash
+mise exec -- go test -race ./internal/runtime/copilot ./internal/runtime/openacp
+mise exec -- go test ./internal/runtime/controller ./cmd/taxion
+mise run check
+```
+
+実 CLI の確認は通常テストと分けます。Copilot は利用者が確認した account を
+`TAXION_TEST_COPILOT_ACCOUNT` に指定し、
+`TAXION_COPILOT_ACCESS_INTEGRATION=1 go test ./internal/runtime/copilot -run '^TestLiveCopilotServiceAccessWithoutModelCall$'`
+でモデルを呼ばずに session・利用可否を確認できます。実モデルの操作確認は別途予算・期限を
+承認して行い、未実施の組合せは未検証と記録します。モデルの追加だけで SDK 更新が
+必要とも不要とも決めず、必要な API・event・モデル選択が利用できるかで判断します。
+実行契約や保存形式にも影響する更新では、移行条件と ADR・利用者文書を実装と同時に更新します。
 
 ## 残予算の案内
 

@@ -68,7 +68,7 @@ var setupFieldHelp = map[string]string{
 	"execution.worker":         "Identifier for the worker executing work.",
 	"execution.approvalRef":    "Reference to your execution approval policy or record. This does not approve a Task or budget.",
 	"runtime.acpCommand":       "Absolute path to the approved OpenCode executable.",
-	"runtime.acpCommandHash":   "Approved executable hash in sha256:HEX format.",
+	"runtime.acpCommandHash":   "Optional executable pin in sha256:HEX format; omit to allow CLI updates at the configured path.",
 	"runtime.acpConfig":        "Absolute path to the approved OpenCode server configuration.",
 	"runtime.acpConfigHash":    "Approved server configuration hash in sha256:HEX format.",
 }
@@ -203,7 +203,7 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 	for _, name := range []string{"project.id", "repository.provider", "repository.host", "repository.path",
 		"repository.account", "repository.credentialRef", "runtime.provider", "runtime.account",
 		"runtime.credentialRef", "runtime.contractRef", "execution.requester", "execution.worker", "execution.approvalRef",
-		"runtime.acpCommand", "runtime.acpCommandHash", "runtime.acpConfig", "runtime.acpConfigHash"} {
+		"runtime.acpCommand", "runtime.acpConfig", "runtime.acpConfigHash"} {
 		if existing[name] != "" || values[name] != "" {
 			continue
 		}

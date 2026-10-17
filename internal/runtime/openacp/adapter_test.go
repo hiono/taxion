@@ -60,6 +60,16 @@ func servePeer() {
 		switch request.Method {
 		case "initialize":
 			result = map[string]any{"protocolVersion": 1, "agentInfo": map[string]string{"name": "opencode", "version": "1.19.0"}}
+			switch mode {
+			case "newer-patch":
+				result = map[string]any{"protocolVersion": 1, "agentInfo": map[string]string{"name": "opencode", "version": "1.19.3"}}
+			case "new-major":
+				result = map[string]any{"protocolVersion": 1, "agentInfo": map[string]string{"name": "opencode", "version": "2.0.0"}}
+			case "protocol":
+				result = map[string]any{"protocolVersion": 2, "agentInfo": map[string]string{"name": "opencode", "version": "2.0.0"}}
+			case "missing-version":
+				result = map[string]any{"protocolVersion": 1, "agentInfo": map[string]string{"name": "opencode"}}
+			}
 			if mode == "version" {
 				result = map[string]any{"protocolVersion": 1, "agentInfo": map[string]string{"version": "unknown"}}
 			}
@@ -72,6 +82,12 @@ func servePeer() {
 				map[string]string{"id": "model", "category": "model", "currentValue": model},
 				map[string]string{"id": "mode", "category": "mode", "currentValue": "taxion"},
 			}}
+			if mode == "agent" {
+				result = map[string]any{"sessionId": "fake-session", "configOptions": []any{
+					map[string]string{"id": "model", "category": "model", "currentValue": model},
+					map[string]string{"id": "mode", "category": "mode", "currentValue": "build"},
+				}}
+			}
 		case "session/prompt":
 			if mode == "system-prompt" {
 				var params struct {
@@ -171,6 +187,132 @@ func fakeAdapter(t *testing.T, hang bool) *Adapter {
 		}
 	})
 	return a
+}
+
+func TestCompatibleAgentUpdatesUseProtocolAndSessionChecks(t *testing.T) {
+	for _, test := range []struct {
+		mode    string
+		version string
+	}{
+		{"", "1.19.0"},
+		{"newer-patch", "1.19.3"},
+		{"new-major", "2.0.0"},
+		{"version", "unknown"},
+		{"missing-version", ""},
+	} {
+		t.Run(test.version, func(t *testing.T) {
+			t.Setenv("TAXION_FAKE_MODE", test.mode)
+			a := fakeAdapter(t, false)
+			pinned := test.mode != "newer-patch"
+			if !pinned {
+				a.config.CLIHash = ""
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			id, err := a.Start(ctx, "task")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(a.history) != 1 || a.history[0].Type != "acp_connection" {
+				t.Fatal("missing connection evidence", a.history)
+			}
+			var connection struct {
+				ProtocolVersion  int    `json:"protocolVersion"`
+				AgentVersion     string `json:"agentVersion"`
+				Model            string `json:"model"`
+				ExecutableHash   string `json:"executableHash"`
+				ExecutablePinned bool   `json:"executablePinned"`
+			}
+			if err := json.Unmarshal([]byte(a.history[0].Payload), &connection); err != nil ||
+				connection.ProtocolVersion != 1 || connection.AgentVersion != test.version || connection.Model != "test/fake" ||
+				connection.ExecutableHash != a.executableHash || connection.ExecutableHash == "" || connection.ExecutablePinned != pinned {
+				t.Fatal("connection evidence lost negotiated identity", connection, err)
+			}
+			cursor, err := a.EventCursor(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := a.Send(ctx, id, "execute"); err != nil {
+				t.Fatal(err)
+			}
+			events, err := a.EventsAfter(ctx, id, cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			output := ""
+			connectionObserved := false
+			for event := range events {
+				switch event.Type {
+				case "acp_connection":
+					connectionObserved = event.Payload == a.connection
+				case runtime.EventOutput:
+					output = event.Payload
+				case runtime.EventFailed, runtime.EventCancelled:
+					t.Fatal(event.Payload)
+				case runtime.EventTurnFinished:
+					if output != `{"ok":true}` || !connectionObserved {
+						t.Fatal("compatible update lost structured result or post-start connection evidence", output, connectionObserved)
+					}
+					return
+				}
+			}
+			t.Fatal("compatible peer did not complete its turn")
+		})
+	}
+}
+
+func TestExecutableUpdatesAreUnpinnedByDefaultAndSnapshotsStayFixed(t *testing.T) {
+	config := testConfig(t, "CODER")
+	config.CLIPath = filepath.Join(t.TempDir(), "opencode")
+	config.CLIHash = ""
+	var first *Adapter
+	for _, body := range []string{"first executable", "updated executable"} {
+		if err := os.WriteFile(config.CLIPath, []byte(body), 0700); err != nil {
+			t.Fatal(err)
+		}
+		a, err := New(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := a.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		if err := a.CheckAuthentication(t.Context(), "opencode-managed"); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.prepare(); err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := os.ReadFile(filepath.Join(a.root, "agent/opencode"))
+		if err != nil || string(snapshot) != body || a.executableHash != hashBytes(snapshot) {
+			t.Fatal("snapshot differs from observed executable", err)
+		}
+		if first == nil {
+			first = a
+		} else {
+			if first.ConfigHash() != a.ConfigHash() {
+				t.Fatal("an ordinary CLI update changed approved execution settings")
+			}
+			previous, err := os.ReadFile(filepath.Join(first.root, "agent/opencode"))
+			if err != nil || string(previous) != "first executable" {
+				t.Fatal("host update replaced an existing process snapshot", err)
+			}
+		}
+	}
+	config.CLIHash = hashBytes([]byte("first executable"))
+	pinned, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pinned.Close()
+	if err := pinned.prepare(); err == nil {
+		t.Fatal("an explicit executable pin was ignored after an update")
+	}
+	if _, err := executableAsset("opencode", ""); err == nil {
+		t.Fatal("unpinned execution accepted an unapproved command path")
+	}
 }
 
 func TestNativeToolDefinitionsNeverGrantUnapprovedOperations(t *testing.T) {
@@ -567,14 +709,14 @@ func TestAssetChangesAndExecutableConfigRejectedBeforeLaunch(t *testing.T) {
 }
 
 func TestFakePeerFailuresDeniedClientOperationsAndUnknownUsage(t *testing.T) {
-	for _, mode := range []string{"version", "model", "permission", "client-filesystem", "disconnect", "malformed", "rpc-error", "usage-missing", "empty-output"} {
+	for _, mode := range []string{"protocol", "model", "agent", "permission", "client-filesystem", "disconnect", "malformed", "rpc-error", "usage-missing", "empty-output"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("TAXION_FAKE_MODE", mode)
 			a := fakeAdapter(t, false)
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			id, err := a.Start(ctx, "task")
-			if mode == "version" || mode == "model" {
+			if mode == "protocol" || mode == "model" || mode == "agent" {
 				if err == nil || a.cmd == nil || a.cmd.ProcessState == nil {
 					t.Fatalf("unverified session not rejected and reaped: %v", err)
 				}
@@ -821,19 +963,31 @@ func TestLiveOpenCodePrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Send(ctx, id, `Return {"ok":true}. No tools.`); err != nil {
+	if err := a.Send(ctx, id, "No tools. End your answer with exactly this final fenced JSON block:\n```json\n{\"ok\":true}\n```\nDo not put anything after the closing fence."); err != nil {
 		t.Fatal(err)
 	}
 	events, err := a.Events(ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
+	validated := false
 	for event := range events {
 		t.Logf("%s: %s", event.Type, event.Payload)
+		if event.Type == runtime.EventOutput {
+			var result map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(event.Payload), &result); err != nil ||
+				len(result) != 1 || string(result["ok"]) != "true" {
+				t.Fatalf("unexpected diagnostic result: %s (%v)", event.Payload, err)
+			}
+			validated = true
+		}
 		if event.Type == runtime.EventFailed || event.Type == runtime.EventCancelled {
 			t.Fatal("real prompt failed")
 		}
 		if event.Type == runtime.EventTurnFinished {
+			if !validated {
+				t.Fatal("turn ended without the expected JSON result")
+			}
 			return
 		}
 	}
@@ -869,5 +1023,9 @@ func TestLiveOpenCodeHandshake(t *testing.T) {
 	if !strings.HasPrefix(a.model, "opencode/") {
 		t.Fatalf("unexpected operator-prepared model: %s", a.model)
 	}
-	t.Logf("OpenCode 1.19.0 isolated handshake selected %s; no model prompt sent", a.model)
+	for _, event := range a.history {
+		if event.Type == "acp_connection" {
+			t.Log("isolated handshake:", event.Payload, "; no model prompt sent")
+		}
+	}
 }
