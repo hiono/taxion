@@ -12,9 +12,9 @@ Taxion は次の固定位置だけを読みます。
 | 中 | Git 作業ツリールートの `.taxion/config.yaml`（Git 外は cwd） | project 固有の値 |
 | 高 | 対応する `TAXION_*` 環境変数 | CI や実行環境ごとの値 |
 
-Linux では Global 設定は通常 `$XDG_CONFIG_HOME/taxion/config.yaml`、未設定なら `~/.config/taxion/config.yaml` です。macOS と Windows は Go の `os.UserConfigDir()` が返す標準設定ディレクトリを使います。0.3.0 向け開発版では Project 設定を Git 作業ツリールートから解決し、Git 外では cwd を使います。任意の親 directory を設定候補として検索する動作ではありません。サブディレクトリ直下に旧設定がある場合は手動移行を求め、勝手に統合しません。v0.2.0 の Project 設定は cwd 直下です。少なくとも一つの YAML ファイルが必要です。
+Linux では Global 設定は通常 `$XDG_CONFIG_HOME/taxion/config.yaml`、未設定なら `~/.config/taxion/config.yaml` です。macOS と Windows は Go の `os.UserConfigDir()` が返す標準設定ディレクトリを使います。v0.3.0 では Project 設定を Git 作業ツリールートから解決し、Git 外では cwd を使います。任意の親 directory を設定候補として検索する動作ではありません。サブディレクトリ直下に旧設定がある場合は手動移行を求め、勝手に統合しません。v0.2.0 の Project 設定は cwd 直下です。少なくとも一つの YAML ファイルが必要です。
 
-開発版の `taxion init` は既存設定と Git 情報から不足を補い、確認後に Project 設定と DB を準備します。`taxion doctor fix` は同じ処理で不足設定と除外規則を修復しますが、DB は初期化しません。`--dry-run`・`--set FIELD=VALUE`・`--remote NAME`・`--yes` と対話例は[利用者ガイド](user-guide.md#設定と実行前確認)を参照してください。既存値を変更する場合は、採用元の設定を明示的に編集します。Global 設定と環境変数を Project 設定へ丸ごと複写しません。
+`taxion init` は既存設定と Git 情報から不足を補い、確認後に Project 設定と DB を準備します。`taxion doctor fix` は同じ処理で不足設定と除外規則を修復しますが、DB は初期化しません。`--dry-run`・`--set FIELD=VALUE`・`--remote NAME`・`--yes` と対話例は[利用者ガイド](user-guide.md#設定と実行前確認)を参照してください。既存値を変更する場合は、採用元の設定を明示的に編集します。Global 設定と環境変数を Project 設定へ丸ごと複写しません。
 
 各 layer は `version: 1` を持ちます。上位 layer は空でない値だけを上書きし、省略した項目は下位 layer から引き継ぎます。各ファイルは merge 前に個別検証されるため、後の layer で上書きしても不正な値は隠せません。明示的な空文字、null、未知の field、重複 key、alias、sequence、複数 YAML document は拒否されます。
 

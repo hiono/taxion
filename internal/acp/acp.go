@@ -146,7 +146,7 @@ func (s *Server) handle(ctx context.Context, req Request, out *bufio.Writer) {
 					"image": false, "audio": false, "embeddedContext": false,
 				},
 			},
-			"agentInfo":   map[string]any{"name": "taxion", "title": "Taxion", "version": "0.2.0"},
+			"agentInfo":   map[string]any{"name": "taxion", "title": "Taxion", "version": "0.3.0"},
 			"authMethods": []any{},
 		}, nil)
 	case "session/new":

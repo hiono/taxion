@@ -57,13 +57,13 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 | [M14](https://github.com/hiono/taxion/milestone/20) | 仕様検索、Memory の移行、skills・tools 連携 | #58〜#61 |
 | [M15](https://github.com/hiono/taxion/milestone/21) | CLI と ACP サーバーを共通 controller に接続し、仕様検索から復旧・外部記録まで受け入れる | #62・#79 |
 | [M16](https://github.com/hiono/taxion/milestone/22) | Planner 採用と Rust 導入の評価 | #64〜#65 |
-| [0.3.0 UX](https://github.com/hiono/taxion/milestone/24) | init の設定準備、doctor fix、bash 補完。M16 とは独立した実利用の改善 | #82〜#84 |
+| [0.3.0 UX](https://github.com/hiono/taxion/milestone/24) | init の設定準備、doctor fix、bash 補完、help と ready の目的別案内。M16 とは独立した実利用の改善 | #82〜#85 |
 
 0.3.0 向けの初期設定は [ADR-0039](adr/0039-prepare-project-configuration-with-explicit-repair.md) に基づく。
 モデルを呼ばずに、既存設定・Git 情報の読取りと明示確認後の準備を行う。
 初期設定の成功と、認証・契約・モデル実行の成功は区別する。
-#82〜#84 の実装・検証を完了し、この UX Milestone は closed とした。
-main に反映済みだが、v0.3.0 tag・Release は未公開である。
+#82〜#84 の実装・検証後に一度 closed とし、目的別案内と公開作業を #85 に追加して再開した。
+v0.3.0 では目的別 help と ready の状況別案内も追加する。版ごとの公開状態と本文は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照する。
 
 M14 は 2026-10-13 に完了した。#60 の最終 Reviewer は保存済み Coder SHA を独立に承認し、公開 worktree と実 SDK 受入れも確認した。#58〜#61 はすべて closed である。
 

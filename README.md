@@ -4,7 +4,7 @@ Taxion は、coding agent と相談した依頼を、承認済みの Coder・検
 
 利用者が作業範囲と予算を承認すると、Taxion が担当への指示、実行結果、Git の証拠、レビュー結果をローカルに記録します。独立レビューでは、Coder が作成したものと同じ内容を確認します。
 
-v0.2.0 は、v0.1.0 に OpenCode ACP runtime と停止後の復旧修正を追加した版です。実モデルによる文書作業、同一成果物の独立レビュー、部分成果からの復旧を [Issue #78](https://github.com/hiono/taxion/issues/78)・[Issue #79](https://github.com/hiono/taxion/issues/79)・[Issue #80](https://github.com/hiono/taxion/issues/80)で確認しました。版ごとの機能と制約は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
+v0.3.0 は、初期設定・診断修復・bash 補完と操作案内を改善した版です。v0.2.0 の OpenCode ACP runtime と停止後の復旧を引き継ぎます。実モデルによる文書作業、同一成果物の独立レビュー、部分成果からの復旧の記録は [Issue #78](https://github.com/hiono/taxion/issues/78)・[Issue #79](https://github.com/hiono/taxion/issues/79)・[Issue #80](https://github.com/hiono/taxion/issues/80)、版ごとの機能と制約は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
 ## 使い始める
 
@@ -14,7 +14,7 @@ v0.2.0 は、v0.1.0 に OpenCode ACP runtime と停止後の復旧修正を追�
 
 `taxion doctor` で、設定したバックエンドと同じ検索先から見つかる skills・plugins・指示等を確認できます。通常はバックエンドの標準配置を使い、Taxion 用 directory へのコピーや skill ごとの hash 承認は不要です。
 
-0.3.0 向け開発版では `taxion init` が不足設定を尋ね、Git 除外・Project 設定・DB を準備します。`taxion doctor fix` は明示的な設定修復、`taxion completion bash` は設定不要の補完です。公開済み v0.2.0 の init は DB の初期化だけなので、[設定と実行前確認](docs/userguide/user-guide.md#設定と実行前確認)で版の違いを確認してください。
+`taxion init` が不足設定を尋ね、Git 除外・Project 設定・DB を準備します。`taxion doctor fix` は明示的な設定修復、`taxion completion bash` は設定不要の補完です。`taxion --help` の目的別一覧と `taxion ready` の状況別案内から、必要な操作を選べます。[設定と実行前確認](docs/userguide/user-guide.md#設定と実行前確認)で初回手順と旧版との違いを確認してください。
 
 引数なしの `ready` はモデルを呼ばず、設定や workspace も変更しません。明示的な `ready --install-skill` は標準の home 配下に版付き操作 skill を配置し、`ready --check-skill` はその互換性と内容を JSON で確認します。更新は `ready --update-skill` で明示し、利用者の編集は上書きしません。ただし、配置や出力だけで agent の実ロード・判断・操作品質を保証するコマンドではありません。外側の agent の費用と、その後の Taxion によるモデル実行の費用は別です。
 

@@ -143,7 +143,8 @@ prompt を自動再送しない。別 process/provider の session への再接�
 通常の Copilot SDK session は create・resume ともに探索を明示的に有効にする。SDK に `nil` を渡すだけでは project・personal skill が読み込まれず、CLI の一覧と一致しない場合がある。探索方式は config hash の `native-cli-discovery-v2` に含め、旧方式の session を新しい実行契約で再開しない。明示 ToolPolicy と取消専用 adapter の探索抑止、role 別 file・shell permission は維持する。
 
 外側の coding agent 向けの操作 skill は `ready --install-skill` で明示配置する。
-同梱版は `1.0.0`、metadata の形式は `"1"`、CLI 操作契約は `taxion.cli.v1` とする。
+同梱版は `1.1.0`、metadata の形式は `"1"`、CLI 操作契約は `taxion.cli.v1` とする。
+v0.3.0 の ready は状況別案内と初期設定の導線を更新した。旧 skill `1.0.0` は互換とせず、整合性を検査できる未改変の管理ファイルだけを利用者の明示許可で更新する。コマンド構文と JSON schema は変えず、CLI 操作契約は維持する。
 skill の本文・指示を変更するときは skill 版を更新し、CLI の破壊的変更では操作契約も更新する。
 本体の許容 skill 版は明示リストで管理し、未知の版は minor 変更でも自動許可しない。
 ready 原稿の hash は同じ版でも手順の陳腐化を検出する。本体の build 情報は生成元の記録であり、

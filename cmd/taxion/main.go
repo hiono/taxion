@@ -40,27 +40,30 @@ Workspace: defaults to .taxion/ under the Git worktree root (cwd outside Git).
 --store selects a legacy ledger path for explicit overrides, not workspace.db.
 
 Commands:
-  ready               Print the orchestration prompt; optional --install-skill / --update-skill / --check-skill
-  request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --timeout, --max-ai-credits)
-  config check        Validate fixed Global/Project YAML and environment references ([--sources], [--capabilities], [--task], [--dispatch])
-  git check-index     Reject local Taxion and dotenv paths in the actual commit index
-  git check-range     Scan every unpublished commit tree and message (--base SHA, --head SHA, --scanner PATH)
-  git hook            Install (--scanner PATH, or --paths-only), inspect, or remove the Taxion pre-commit hook
+Setup and discovery:
   init                Prepare Project configuration, Git protection and workspace ([--set FIELD=VALUE], [--remote NAME], [--dry-run], [--yes])
+  doctor              Inspect the selected backend's native search paths and discovered customizations ([--json])
+  doctor fix          Preview and explicitly repair missing Project settings and Git protection ([--set FIELD=VALUE], [--remote NAME], [--dry-run], [--yes])
   completion bash     Print offline bash command and option completion
-  workspace snapshot  Collect stopped workspace, Memory and required Git objects into one private SQLite file (--output)
-  workspace inspect-snapshot  Verify portable contents without contacting a provider (--file)
-  workspace restore   Restore an exact approved snapshot into a fresh directory (--file, --output, --expected-hash, --actor, --source)
+  ready               Print the orchestration prompt; optional --install-skill / --update-skill / --check-skill
+  config check        Validate fixed Global/Project YAML and environment references ([--sources], [--capabilities], [--task], [--dispatch])
+
+Requests, planning and Task contracts:
+  request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --timeout, --max-ai-credits)
   task create         Create a task (--title and --repo required)
   task list           List tasks ([--repo] filter, [--json])
   task track          Register/update a durable Task Graph contract (--file JSON)
   task transition     Validate and record a Task Graph transition (--file JSON)
   task graph          Print the versioned Task Graph and history
   task plan           Rebuild a follow-up plan from durable contracts and evidence (--repo required)
+
+Dispatch and configuration binding:
   dispatch            Dispatch a task (--task and --repo required; revised Dispatches need an explicit relationship)
   dispatch transition Record a Dispatch lifecycle transition (--id, --status, --reason)
   dispatch list       List dispatches ([--repo] filter, [--json])
   config bind         Save an approved fixed-file configuration selection for an unbound Dispatch
+
+Conversation, investigation and source attachment:
   conversation watch  Hold handoffs before reading Human input; select one role step or bounded run (--flow, --actor, --source)
   conversation ask    Answer a bounded side question from saved Task records without changing the main workflow
   conversation plan   Recommend a next action from compact Memory and results; no execution or inferred approval
@@ -69,6 +72,8 @@ Commands:
   conversation confirm Explicitly approve that exact contract/configuration without issuing work (--file JSON)
   conversation investigate Read bounded scoped committed files for an isolated question with explicit ceilings
   conversation search Search and attach sourced excerpts to an editable Task (--scope, --task, --question)
+
+Runtime sessions and ACP:
   runtime auth        Check the effective Copilot account against approved Dispatch configuration without creating a session
   runtime start       Start the Copilot session bound to an active Dispatch and send its authorized instruction
   runtime send        Send a follow-up prompt to the Dispatch session (--prompt-file required)
@@ -79,6 +84,8 @@ Commands:
   runtime <action> --managed-commit  Opt into the bound Coder SDK commit tool; use the same option and scanner on resume
   runtime <action> --managed-stage   Also enable scoped file staging; requires --managed-commit
   acp                 Serve approved Dispatches over ACP (--coder-system-prompt-file, --max-ai-credits)
+
+Review flows and recovery:
   workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON)
   workflow advance    Issue review/repair from the latest verified result (--id required)
   workflow run        Execute review/repair continuously with saved ceilings (--id; role prompt files or --builtin-prompts)
@@ -86,12 +93,6 @@ Commands:
   workflow show       Read the saved review flow and ceilings (--id required)
   workflow recover    Release interrupted runner ownership after recorded execution stop (--file JSON)
   workflow interrupt Request a targeted stop for the active flow (--file JSON)
-  records proposal    Display exact external publication content and its approval hash (--file JSON)
-  records approve     Save an explicitly approved Issue/PR publication after local secret checks (--file JSON)
-  records send        Deliver one approved publication with a durable sender claim (--id, --scanner)
-  records reconcile   Reconcile an uncertain stopped sender against remote records (--id, --claim, --sender-stopped)
-  records show        Show saved runtime receipts and external publication status
-  records finding     Record cause, correction, lesson candidate and Human decision for an exact result (--file JSON)
   workflow handoff    Hold or release the next handoff with a sourced compare-and-swap request (--file JSON)
   workflow feedback-target Read the latest saved instruction/result target without changing execution (--id required)
   workflow feedback   Record target-bound Human feedback and hold the next handoff (--file JSON)
@@ -105,9 +106,31 @@ Commands:
   workflow question-draft Record selected findings from a bounded side question (--file JSON)
   review              Bind coder-output evidence (--task, --sha and --repo required)
   resume              Print a resume acknowledgement (local stub; --session required)
+
+Evidence and external records:
+  records proposal    Display exact external publication content and its approval hash (--file JSON)
+  records approve     Save an explicitly approved Issue/PR publication after local secret checks (--file JSON)
+  records send        Deliver one approved publication with a durable sender claim (--id, --scanner)
+  records reconcile   Reconcile an uncertain stopped sender against remote records (--id, --claim, --sender-stopped)
+  records show        Show saved runtime receipts and external publication status
+  records finding     Record cause, correction, lesson candidate and Human decision for an exact result (--file JSON)
+
+Git publication protection:
+  git check-index     Reject local Taxion and dotenv paths in the actual commit index
+  git check-range     Scan every unpublished commit tree and message (--base SHA, --head SHA, --scanner PATH)
+  git hook            Install (--scanner PATH, or --paths-only), inspect, or remove the Taxion pre-commit hook
+
+Workspace portability:
+  workspace snapshot  Collect stopped workspace, Memory and required Git objects into one private SQLite file (--output)
+  workspace inspect-snapshot  Verify portable contents without contacting a provider (--file)
+  workspace restore   Restore an exact approved snapshot into a fresh directory (--file, --output, --expected-hash, --actor, --source)
+
+HTTP service and audit:
   serve               Serve HTTP API over the ledger ([--addr], [--mode], [--token]/TAXION_TOKEN, [--audit])
   gen-token           Print a random Bearer token for serve (M5 auth)
   audit verify        Verify the audit log hash chain ([--audit])
+
+Memory and reusable decisions:
   memory put          Store a memory entry (--kind, --title, [--body, --scope, --source])
   memory get          Fetch one memory entry (--kind and --id required)
   memory list         List memory entries (--kind required, [--scope] filter)
@@ -125,13 +148,13 @@ Commands:
   memory snapshot     Create a complete private SQLite snapshot (--output)
   memory inspect-snapshot  Review row counts and sanitizer findings (--file)
   memory restore      Install an exact approved snapshot into a fresh local destination
+
+Specification sources and tools:
   specification hash  Hash a sourced specification for separate use approvals (--file)
   specification scope-hash Hash an exact public/synthetic local corpus (--scope)
   specification search Search approved Office documents or selected private chat messages; print metadata only (--scope, --query)
   specification serve Serve the approved local search corpus over read-only MCP stdio (--scope)
   tools hash          Pin exact local extension files or directory contents (--path)
-  doctor              Inspect the selected backend's native search paths and discovered customizations ([--json])
-  doctor fix          Preview and explicitly repair missing Project settings and Git protection ([--set FIELD=VALUE], [--remote NAME], [--dry-run], [--yes])
 
 Identity gate (REP-001): task create, dispatch and review require an explicit --repo.
 The target is never inferred from the working directory.

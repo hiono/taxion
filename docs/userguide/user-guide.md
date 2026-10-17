@@ -4,18 +4,18 @@
 
 ## 現在の導入方法
 
-v0.2.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
+v0.3.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
-このガイドは v0.2.0 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。
-OpenCode を使う場合は v0.2.0 を導入してください。開発中の変更を試す場合は main のソースからビルドします。
+このガイドは v0.3.0 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。
+初期設定・診断修復・補完を使う場合は v0.3.0 を導入してください。開発中の変更を試す場合は main のソースからビルドします。
 公開 tag を導入しただけでは、後から追加された機能は使えません。
 
 ```sh
-mise use -g go@1.26.0 go:github.com/hiono/taxion/cmd/taxion@v0.2.0
+mise use -g go@1.26.0 go:github.com/hiono/taxion/cmd/taxion@v0.3.0
 mise exec -- taxion --help
 ```
 
-最新版へ更新するには、`v0.2.0` を導入したい公開 version に置き換えます。
+最新版へ更新するには、`v0.3.0` を導入したい公開 version に置き換えます。
 
 ```sh
 mise use -g go@1.26.0 'go:github.com/hiono/taxion/cmd/taxion@<VERSION>'
@@ -30,7 +30,7 @@ mise unuse -g go:github.com/hiono/taxion/cmd/taxion
 Go backend の導入済み version が残り、他の設定でも使っていなければ、mise から個別に削除できます。
 
 ```sh
-mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.2.0
+mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.3.0
 ```
 
 ソースから実行する場合は Go 1.26.0 が必要です。
@@ -50,9 +50,9 @@ export PATH="$PWD/bin:$PATH"
 
 ## 設定と実行前確認
 
-以下の `init`・`doctor fix`・bash 補完は 0.3.0 向け開発版の操作です。公開済み v0.2.0 の `init` は DB だけを作るため、その版では[設定ガイド](configuration.md)の YAML と Git 除外設定を手動で用意します。
+以下の `init`・`doctor fix`・bash 補完は v0.3.0 の操作です。v0.2.0 の `init` は DB だけを作るため、その版では[設定ガイド](configuration.md)の YAML と Git 除外設定を手動で用意します。
 
-開発版では対象の Git repository で `taxion init` を実行します。既存の Global・Project 設定を読み、単一の Git remote から host と namespace/path を取得します。複数 remote は選択が必要です。GitLab Self-Managed など、host だけで provider を確定できない場合は provider も確認します。Git account と Copilot account は別々に指定します。
+対象の Git repository で `taxion init` を実行します。既存の Global・Project 設定を読み、単一の Git remote から host と namespace/path を取得します。複数 remote は選択が必要です。GitLab Self-Managed など、host だけで provider を確定できない場合は provider も確認します。Git account と Copilot account は別々に指定します。
 
 ```sh
 taxion init
@@ -79,7 +79,9 @@ taxion init --dry-run \
 
 不足が残る場合は必要な `--set` をまとめて表示し、ファイルを作成せず終了します。`project.id` は directory 名、`execution.requester` は `human`、`execution.worker` は `local` を候補として補います。必要なら `--set` で指定します。`contractRef` と `approvalRef` は記録用の参照名であり、その入力だけで契約資格や Task の承認は成立しません。初期設定ではモデルを呼ばず、ログイン、社内資料の送信許可、予算の承認も行いません。[認証の準備](configuration.md#認証の準備)は別に実施します。
 
-通常は保存先を指定しません。開発版では設定も DB も Git 作業ツリールートの `.taxion/` を基準にするため、サブディレクトリから同じ設定と状態を参照します。linked worktree はそれぞれのルートに別の `.taxion/` を持ちます。Git repository 外ではカレントディレクトリを使います。旧版でサブディレクトリに作った設定を検出した場合は、黙って無視せず手動移行を求めます。上位の開発環境に置いた設定や DB は、自動で移動・統合しません。
+通常は保存先を指定しません。設定も DB も Git 作業ツリールートの `.taxion/` を基準にするため、サブディレクトリから同じ設定と状態を参照します。linked worktree はそれぞれのルートに別の `.taxion/` を持ちます。Git repository 外ではカレントディレクトリを使います。旧版でサブディレクトリに作った設定を検出した場合は、黙って無視せず手動移行を求めます。上位の開発環境に置いた設定や DB は、自動で移動・統合しません。
+
+旧サブディレクトリ設定の移行では、最初に原本と Git 除外状態を確認し、private な場所へ保全します。ルートの `.taxion/config.yaml` へ必要な設定を移します。既存設定があれば値を照合し、丸ごと上書きせず必要な項目だけを明示編集します。旧位置の設定を残すと、そのサブディレクトリからの起動は引き続き拒否されるため、保全先と内容を確認してから旧設定を退避します。ルートと元のサブディレクトリで `taxion config check --sources` を実行し、同じ採用元になることを確認してください。設定の移行と DB の移送は別の操作です。DB を削除して初期化し直す手順ではありません。
 
 修復中の失敗は、既に保存した設定・除外規則と、未実施の DB 初期化を区別して報告します。内容を確認して再実行してください。`.taxion/setup.lock` が残った場合は、他の設定処理が動いていないことを確認してから、その lock だけを手動で除去します。DB や `.taxion/` 全体を削除する手順ではありません。
 
@@ -218,6 +220,8 @@ taxion ready
 
 `ready` は、その会話中の agent が Taxion を操作するためのメタプロンプトを stdout に出します。依頼の整理、設定・探索・保存状態の確認、Task の登録と承認、予算承認、Coder・検証・独立 Reviewer、停止後の成果再利用を案内します。必要な JSON は agent が作り、proposal の hash や結果を次の入力へ渡します。利用者が JSON や role prompt を転記する手順ではありません。
 
+操作を探すときは、`taxion --help` の初期設定、計画、実行、記録、復旧などの分類を選び、`taxion COMMAND --help` で option を確認します。分類名はサブコマンドではありません。`ready` は最初に状況と操作・承認境界の対応を示し、その後に具体的な手順と JSON 例を置きます。全コマンドを順番に実行する必要はありません。
+
 agent は目的、変更範囲、検証コマンド、設定選択、修正回数、期限、session soft ceiling を利用者に示し、明示承認後に実行します。各 model call の観測利用量も報告しますが、予測不能な token 数で承認済み目標を止めません。承認済みの安全な次の操作がある限り続け、判断待ちや期限到達では理由を説明します。既存 Task や保存成果がある場合は、最初からやり直す前に照合します。
 
 引数なしの `ready` はモデル、認証・課金照会、設定の読込み、workspace の作成を行いません。準備完了の診断ではなく、診断には `doctor` を使います。外側の agent の費用と、後続の `workflow run` などのモデル費用は別です。出力だけで agent の従属や継続を保証するものでもありません。無料の合成操作回帰と、実 agent が指示を理解して進める受入れは区別します。
@@ -235,7 +239,9 @@ taxion ready --update-skill
 
 配置に symlink は使わないため、その作成用の権限は不要です。既存パスの symlink は追跡せず拒否し、管理対象外・改変済みファイルは上書きしません。初回配置は既存ファイルを置換せず、更新時も一時ファイルから完成した一ファイルを入れ替えます。filesystem の書込み許可・hard link・rename の対応は必要です。
 
-同梱 skill の版は `1.0.0`、CLI 操作契約は `taxion.cli.v1` です。本体は許容 skill 版を明示リストで保持し、未知の minor・major 版を推測で許可しません。skill の metadata にも必要な CLI 契約、ready 原稿と内容のハッシュ、生成した本体の build 情報を保存します。確認は、本体の許容版と skill の要求契約の一致、現在の ready 原稿との一致、配置内容の整合性を判定します。公開前の本体について、未確認の製品 SemVer 範囲を互換と宣言する代わりに、版を付けた CLI 操作契約を照合します。
+同梱 skill の版は `1.1.0`、CLI 操作契約は `taxion.cli.v1` です。本体は許容 skill 版を明示リストで保持し、未知の minor・major 版を推測で許可しません。skill の metadata にも必要な CLI 契約、ready 原稿と内容のハッシュ、生成した本体の build 情報を保存します。確認は、本体の許容版と skill の要求契約の一致、現在の ready 原稿との一致、配置内容の整合性を判定します。公開前の本体について、未確認の製品 SemVer 範囲を互換と宣言する代わりに、版を付けた CLI 操作契約を照合します。
+
+v0.2.0 から更新した場合、配置済み skill `1.0.0` はそのまま使いません。`taxion ready --check-skill` で不一致を確認し、利用者の許可後に `taxion ready --update-skill` を実行します。既存 skill の自動更新は行わず、改変済みファイルは明示更新でも保全します。skill を配置していない場合は、引数なしの `taxion ready` を直接使えます。
 
 `--check-skill` は JSON の `compatible`・`problem` と終了コードで判断します。不一致なら古い手順を使わず、明示的な更新の許可を得てください。改変を検出した場合は、利用者が内容を確認し退避・移動してから新規配置します。強制上書き option はありません。ハッシュは内容の整合性であり署名や承認ではありません。skill がロードされたことの証明にもならず、通常の CLI 操作を配置済み skill に依存させません。project の同名 skill などの優先順位は外側 agent の探索規則に従います。
 

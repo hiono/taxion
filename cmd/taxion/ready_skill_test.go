@@ -31,7 +31,7 @@ func TestReadySkillInstallCheckAndPreserveEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 	document, err := parseReadySkill(original)
-	if err != nil || document.Metadata.Version != "1.0.0" || readySkillCompatibility(document) != nil {
+	if err != nil || document.Metadata.Version != readySkillVersion || readySkillCompatibility(document) != nil {
 		t.Fatal("bundled compatibility", document, err)
 	}
 	for _, action := range []string{"--check-skill", "--install-skill", "--update-skill"} {
@@ -106,11 +106,11 @@ func TestReadySkillRejectsUnknownVersionsContractsAndStaleReady(t *testing.T) {
 			}
 			switch kind {
 			case "future-minor":
-				document.Metadata.Version = "1.1.0"
+				document.Metadata.Version = "1.2.0"
 			case "future-major":
 				document.Metadata.Version = "2.0.0"
 			case "old-version":
-				document.Metadata.Version = "0.9.0"
+				document.Metadata.Version = "1.0.0"
 			case "cli-contract":
 				document.Metadata.CLIContract = "taxion.cli.v2"
 			case "ready-contract":

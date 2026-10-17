@@ -77,6 +77,8 @@ Issue 本文、Milestone の説明、README、利用者・開発者向け文書�
 
 ## モデルを呼ばないテストと復旧の証拠
 
+help を分類し直す場合はコマンド行の脱落・重複と分類内の件数を確認します。見出しはインデントせず、コマンド行と区別してください。`go generate ./cmd/taxion` の再生成前後で、表示だけの変更なら `completion.bash` に差分がないことも確認します。`ready` の原稿を変える場合は配置済み skill の互換性・明示更新と JSON 例の通し回帰を検証します。見出し追加だけで実 LLM の誤操作率や token 消費が改善したとは報告しません。
+
 初回利用のゴールは、今の coding agent が `taxion ready` を読み、依頼の改善から承認済みの Coder・検証・独立 Reviewer・復旧までを操作することです。利用者による JSON や担当ごとの指示の転記は前提にしません。`ready` は静的な手順出力だけを行い、モデルや workspace を開きません。[ADR-0031](docs/develop/adr/0031-bootstrap-the-current-coding-agent-with-ready.md)を参照してください。
 
 `go test ./cmd/taxion -run TestReady` は、実出力の JSON、未承認・異なる hash の拒否、設定承認、Flow、host 検証、同一 tree の独立レビューを合成 Runtime と実 Git で確認します。操作は決定済みであり、実 agent が指示を理解し判断する品質の受入れとは区別します。既存の停止・successor 回帰も維持します。
@@ -200,10 +202,10 @@ login 済みアカウントの受入れを追加する前に、合成 fixture �
 tag 作成前に開発環境の全確認コマンドを実行し、`git diff` と `git diff --cached` に非公開情報がないか確認します。GitHub Release に載せる本文を確認済み動作と利用上の制約に合わせ、候補 commit の SHA を固定します。通常は受入れ条件を満たしてから公開します。例外を承認した場合は Issue に未達条件と理由を記録します。tag と同名の Release が既にある場合は、対象 SHA と状態を確認し、自動で削除・移動しません。
 
 ```bash
-git tag -a v0.2.0 -m "Taxion 0.2.0"
-git push origin v0.2.0
-git rev-parse 'v0.2.0^{commit}'
-git ls-remote origin 'refs/tags/v0.2.0*'
+git tag -a v0.3.0 -m "Taxion 0.3.0"
+git push origin v0.3.0
+git rev-parse 'v0.3.0^{commit}'
+git ls-remote origin 'refs/tags/v0.3.0*'
 ```
 
 公開した tag の対象 commit が固定した候補と一致することを確認します。その後、既存の設定・インストールに影響しない隔離環境で、[利用者ガイドの導入・更新・削除手順](docs/userguide/user-guide.md#現在の導入方法)を実行します。pseudo-version の過去成功を公開 tag の導入成功として扱いません。失敗した場合は Release object を公開せず、tag を保持して失敗箇所を記録します。
@@ -211,9 +213,9 @@ git ls-remote origin 'refs/tags/v0.2.0*'
 導入確認の成功後に、GitHub Release 用の Markdown 本文を repository 外で確定し、確認結果を Issue に記録します。例外承認がある場合は、Issue に受入れ未達と判断を記録してから公開します。次の操作は tag が存在することを要求し、GitHub CLI による暗黙の tag 作成を避けます。
 
 ```bash
-gh release create v0.2.0 --verify-tag --title "Taxion 0.2.0" \
-  --notes-file /tmp/taxion-v0.2.0-release-notes.md
-gh release view v0.2.0 --json tagName,targetCommitish,isDraft,isPrerelease,url,body
+gh release create v0.3.0 --verify-tag --title "Taxion 0.3.0" \
+  --notes-file /tmp/taxion-v0.3.0-release-notes.md
+gh release view v0.3.0 --json tagName,targetCommitish,isDraft,isPrerelease,url,body
 ```
 
 Release の tag・本文・公開状態と URL を再取得し、送信したノートと対象 tag を照合します。Release 作成後の記録だけで、未実施の導入確認や実 SDK 受入れを補ったことにはしません。

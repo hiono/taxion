@@ -37,6 +37,44 @@ func TestUsageDescribesCurrentCommands(t *testing.T) {
 	}
 }
 
+func TestUsageGroupsCommandsWithoutChangingSyntax(t *testing.T) {
+	_, commands, ok := strings.Cut(usage, "Commands:\n")
+	if !ok {
+		t.Fatal("missing command index")
+	}
+	commands, _, _ = strings.Cut(commands, "\nIdentity gate")
+	groups := map[string]int{}
+	group := ""
+	seen := map[string]bool{}
+	for _, line := range strings.Split(commands, "\n") {
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "  ") {
+			if _, exists := groups[line]; !strings.HasSuffix(line, ":") || exists {
+				t.Fatalf("invalid or repeated category: %s", line)
+			}
+			group = line
+			groups[group] = 0
+			continue
+		}
+		if group == "" || seen[line] {
+			t.Fatalf("uncategorized or repeated command: %s", line)
+		}
+		seen[line] = true
+		groups[group]++
+	}
+	if len(groups) != 12 || len(seen) != 92 {
+		t.Fatalf("%d commands in categories: %v", len(seen), groups)
+	}
+	for name, count := range groups {
+		if count < 2 || count > 24 {
+			t.Errorf("category %s contains %d commands; keep discovery bounded", name, count)
+		}
+	}
+	t.Logf("%d command entries in %d categories: %v", len(seen), len(groups), groups)
+}
+
 func TestTaskGraphRejectsIgnoredFileOption(t *testing.T) {
 	if err := taskGraphCmd("graph", []string{"--file", "ignored.json"}); err == nil {
 		t.Fatal("task graph accepted an unused --file option")

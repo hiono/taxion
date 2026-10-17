@@ -6,6 +6,23 @@ Reviewer の作業を進める。ユーザーに JSON、hash、担当ごとの p
 必要なローカル入力ファイルはあなたが作り、コマンドの出力を読み取って次の入力へ渡す。
 この文書は操作手順であり、Human の承認、認証成功、実行準備完了の証明ではない。
 
+## 目的から操作を選ぶ
+
+`taxion --help` は目的別の一覧、`taxion COMMAND --help` は選んだ操作の option を示す。
+分類は表示上の案内であり、新しいサブコマンドではない。以下の順に必要な操作を選び、
+全コマンドを順番に実行しない。
+
+| 状況 | 操作 | 変更・承認の境界 |
+| --- | --- | --- |
+| 初回準備・設定不足 | init、config check、doctor、doctor fix | check と doctor は読取り専用。init と fix は変更案を示して明示適用する |
+| 依頼と契約を整理する | task、conversation intake/proposal/confirm | proposal の exact hash を確認し、Human の承認後だけ confirm する |
+| 承認済み作業を実行する | workflow start/run/step、runtime、acp | モデル実行には設定・権限・予算の承認が必要。既存の計画を request でやり直さない |
+| 結果確認・停止後の継続 | task graph、records show、workflow show/recover | 保存状態と実 process・Git を区別し、成功済み成果を再利用する |
+| 出典・記録・移送を扱う | specification、memory、records、workspace、git | 取込み・送信・公開・復元の許可を互いに流用しない |
+
+以下は初回確認、依頼と承認、実行、結果と復旧の手順である。
+JSON は入力の具体例であり、利用者の承認や実際の値ではない。
+
 ## 最初に確認する
 
 通常は保存先を指定せず、Git 作業ツリールートの .taxion/ を使う。
@@ -29,7 +46,8 @@ conversation plan/ask/investigate を自動で起動し直さない。これら�
 
 1. taxion --help と taxion config check --sources を使って実在する操作と設定の採用元を確認する。
    repository と runtime の account/credentialRef は独立した選択であり、推測で同一にしない。
-   設定がなければ公開ガイドの schema を使い、ユーザーから必要な非秘密の選択を得る。
+   設定がなければ taxion init、既存 DB の設定不足には taxion doctor fix を使う。
+   --dry-run と --set FIELD=VALUE で不足と変更案を確認し、ユーザーから必要な非秘密の選択を得る。
    token を表示・会話・追跡ファイルへ転載しない。設定は ignored/untracked の .taxion/config.yaml
    または Global 設定に置く。認証のために秘密値を質問文へ貼らせない。
 2. Git root、明示 repository、worktree、branch、baseline commit、差分を確認する。
@@ -66,6 +84,8 @@ scope は相対 path/pattern とする。fileAccess は必要最小限にし、�
 ID は今回の作業に固有とし、repository、worktree、baseline、契約・設定・上限を実値へ置換する。
 入力ファイルは担当の成果物 worktree 外の private な ignored directory に置く。
 利用者には生成 JSON の編集を要求せず、目的・変更範囲・検証・設定選択・費用上限を説明する。
+
+### 依頼と未承認の契約
 
 ```json
 {
@@ -107,6 +127,9 @@ taxion conversation intake --file request.json
 taxion conversation proposal --task TASK-ID
 
 proposal の task と完全な hash を読む。まだ DRAFT であり実行は許可されていない。
+
+### exact hash と設定を承認する
+
 Human がその契約と設定選択を明示承認した後だけ、次の confirmation を作る。
 expectedHash は実際の proposal の値、selection は実際の採用設定と完全一致させる。
 configurationDecisionId は selection.execution.approvalRef に @task:TASK-ID を続けた値とする。
@@ -145,6 +168,9 @@ taxion config check --task TASK-ID
 
 confirm は Task を READY にするが、Dispatch やモデルは開始しない。
 確認後に契約を変えるなら新 Task と承認を使い、旧 hash の承認を流用しない。
+
+## 承認済み Flow を実行する
+
 Flow の修正回数・期限・session soft ceiling を説明し、Human の承認を記録する。
 各 runtime session の --max-ai-credits は30以上の soft ceiling で、Flow 合計ではない。
 各 model call の取得利用量を報告し、同じ課金単位の allowance がない残高・率は unavailable とする。

@@ -6,9 +6,9 @@
 
 ## CLI
 
-インストール済みのコマンド一覧は `taxion --help`、各コマンドの flag は `taxion COMMAND -h` で確認する。以下は代表的な操作例で、契約の詳細は Task Graph、設定、実行記録の各文書に記載する。
+インストール済みの目的別コマンド一覧は `taxion --help`、各コマンドの flag は `taxion COMMAND -h` で確認する。分類は表示上の案内であり、コマンド名や option の構文は変えない。`ready` は状況ごとの操作と承認境界を先に示す。以下は代表的な操作例で、契約の詳細は Task Graph、設定、実行記録の各文書に記載する。
 
-通常は保存先を指定せず、Git 作業ツリールートの `.taxion/` を使う。サブディレクトリの起動も同じ保存先となり、linked worktree は各ルートに分離する。Git のルート解決に失敗した場合はエラーとし、別の状態へ切り替えない。Git repository 外では従来のカレントディレクトリ配下を使う。保存先の判断は [ADR-0032](../develop/adr/0032-resolve-default-workspace-from-git-worktree-root.md)、0.3.0 向け開発版で設定の基点も揃える変更は [ADR-0039](../develop/adr/0039-prepare-project-configuration-with-explicit-repair.md)に記録する。以下の新しい init・doctor fix・completion は v0.2.0 には含まれない。
+通常は保存先を指定せず、Git 作業ツリールートの `.taxion/` を使う。サブディレクトリの起動も同じ保存先となり、linked worktree は各ルートに分離する。Git のルート解決に失敗した場合はエラーとし、別の状態へ切り替えない。Git repository 外では従来のカレントディレクトリ配下を使う。保存先の判断は [ADR-0032](../develop/adr/0032-resolve-default-workspace-from-git-worktree-root.md)、v0.3.0 で設定の基点も揃える変更は [ADR-0039](../develop/adr/0039-prepare-project-configuration-with-explicit-repair.md)に記録する。以下の新しい init・doctor fix・completion は v0.2.0 には含まれない。
 
 例外用途の global option `--store PATH` は command の前に置き、旧 ledger のパスを選ぶ。明示した相対パスはカレントディレクトリ基準となる。旧 ledger の既定名は `ledger.json`、SQLite の保存先はその directory の `workspace.db`。DB 自体を `--store` に渡す指定、既存 DB と同一ファイルを指す symlink・hard link、未解決の symlink は、DB を開く前に拒否する。`init` はこの拒否時に directory や DB を作成せず、`serve` も audit directory を作成しない。別名の legacy ledger の読込み・移行は維持し、以前の別配置の自動移動・統合は行わない。
 
@@ -161,7 +161,7 @@ Project 設定の基点に `.env` があれば、その file も untracked か�
 
 `.taxion/` はローカル設定、workspace 状態、cache を保持する。共有仕様、判断、レビュー済み Memory export は、その directory の外に置く。既存ローカル Memory は workspace の保存先に残す。共有 Memory の保存と移行は #69 で追跡している。
 
-追跡済みのローカル file は、index の path を確認してから追跡を外し、ignore 規則を追加する。ignore だけでは追跡や既存履歴を削除しない。公開してしまった credential を確認し、必要に応じてローテーションする。Taxion は失敗を報告し、Git の状態は変更しない。
+追跡済みのローカル file は、index の path を確認してから追跡を外し、ignore 規則を追加する。ignore だけでは追跡や既存履歴を削除しない。公開してしまった credential を確認し、必要に応じてローテーションする。`config check` は失敗を報告し、Git の状態は変更しない。`init` と `doctor fix` も追跡済み file の自動修復は行わない。
 
 優先順位は、対応する環境変数値、Project、Global の順。各 file は `version: 1` が必要。他の field は層内で省略でき、下位層から継承する。明示的な空値・null は error。merge 前に各層を検証するため、優先する値で下位の不正値を隠せない。
 

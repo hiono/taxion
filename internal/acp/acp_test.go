@@ -27,7 +27,7 @@ func TestInitializeReportsReleaseVersion(t *testing.T) {
 	}
 	result := messages[0]["result"].(map[string]any)
 	info := result["agentInfo"].(map[string]any)
-	if info["name"] != "taxion" || info["version"] != "0.2.0" {
+	if info["name"] != "taxion" || info["version"] != "0.3.0" {
 		t.Fatalf("incorrect release identity: %v", info)
 	}
 }

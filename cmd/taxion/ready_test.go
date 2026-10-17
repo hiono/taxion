@@ -53,6 +53,19 @@ func TestReadyIsStaticWithoutConfigurationWorkspaceOrModel(t *testing.T) {
 	}
 }
 
+func TestReadyNavigationSeparatesSetupApprovalAndExecution(t *testing.T) {
+	for _, text := range []string{
+		"## 目的から操作を選ぶ", "### 依頼と未承認の契約", "### exact hash と設定を承認する",
+		"## 承認済み Flow を実行する", "## 結果に応じて続ける",
+		"taxion doctor fix", "--dry-run", "全コマンドを順番に実行しない",
+		"confirm は Task を READY にするが、Dispatch やモデルは開始しない",
+	} {
+		if !strings.Contains(readyPrompt, text) {
+			t.Errorf("missing operation boundary: %s", text)
+		}
+	}
+}
+
 func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 	root, _ := requestFixture(t)
 	resolved, err := resolveConfiguration()
