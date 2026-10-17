@@ -62,6 +62,8 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 0.3.0 向けの初期設定は [ADR-0039](adr/0039-prepare-project-configuration-with-explicit-repair.md) に基づく。
 モデルを呼ばずに、既存設定・Git 情報の読取りと明示確認後の準備を行う。
 初期設定の成功と、認証・契約・モデル実行の成功は区別する。
+#82〜#84 の実装・検証を完了し、この UX Milestone は closed とした。
+main に反映済みだが、v0.3.0 tag・Release は未公開である。
 
 M14 は 2026-10-13 に完了した。#60 の最終 Reviewer は保存済み Coder SHA を独立に承認し、公開 worktree と実 SDK 受入れも確認した。#58〜#61 はすべて closed である。
 
