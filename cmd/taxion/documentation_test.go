@@ -114,8 +114,8 @@ func TestDocumentationLocalLinksWithoutNetwork(t *testing.T) {
 }
 
 func TestDocumentationAnchorsPreserveJapaneseAndDuplicateHeadings(t *testing.T) {
-	anchors := documentationAnchors("# 設定と実行前確認\n## CLI `--json`\n## CLI `--json`\n<a id=\"custom\"></a>")
-	for _, id := range []string{"設定と実行前確認", "cli---json", "cli---json-1", "custom"} {
+	anchors := documentationAnchors("# 設定と実行前の確認\n## CLI `--json`\n## CLI `--json`\n<a id=\"custom\"></a>")
+	for _, id := range []string{"設定と実行前の確認", "cli---json", "cli---json-1", "custom"} {
 		if !anchors[id] {
 			t.Errorf("missing heading anchor %q", id)
 		}
@@ -176,9 +176,27 @@ func TestConfigurationGuideProvidesResolvableLoginDefaults(t *testing.T) {
 	if selected.Repository.CredentialRef != "gh:active" || selected.Runtime.CredentialRef != "copilot:logged-in" {
 		t.Fatal("initial login example uses unresolved credential labels")
 	}
-	for _, command := range []string{"gh auth login", "gh auth status", "copilot login"} {
+	for _, command := range []string{"gh auth login", "gh auth status", "glab auth login --hostname", "glab auth status --hostname", "copilot login", "glab:active"} {
 		if !strings.Contains(string(body), command) {
 			t.Errorf("configuration guide omits login preparation %q", command)
+		}
+	}
+}
+
+func TestUserGuideIntroducesHarnessesAndOperatorResponsibilities(t *testing.T) {
+	body := documentationText(t, "../../docs/userguide/user-guide.md")
+	introduction, _, found := strings.Cut(body, "## 導入方法")
+	if !found {
+		t.Fatal("guide has no installation section")
+	}
+	for _, term := range []string{"Copilot CLI", "Copilot SDK", "OpenCode", "ACP", "実行ハーネス", "オーケストレータ", "GitHub", "GitLab", "作業条件"} {
+		if !strings.Contains(introduction, term) {
+			t.Errorf("guide introduces installation before explaining %q", term)
+		}
+	}
+	for _, explanation := range []string{"通常の利用者が JSON や prompt ファイルを書く手順ではありません", "JSON の作成者が agent でも、承認者は利用者です"} {
+		if !strings.Contains(body, explanation) {
+			t.Errorf("guide omits operator/approval boundary: %s", explanation)
 		}
 	}
 }

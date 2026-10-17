@@ -4,11 +4,15 @@ Taxion は、coding agent と相談した依頼を、承認済みの Coder・検
 
 利用者が作業範囲と予算を承認すると、Taxion が担当への指示、実行結果、Git の証拠、レビュー結果をローカルに記録します。独立レビューでは、Coder が作成したものと同じ内容を確認します。
 
+Planner（計画）、Coder（実装）、Reviewer（独立レビュー）はエージェントの役割です。これらのサブエージェントを動かす実行ハーネスとして、Copilot CLI（Copilot SDK 経由）または OpenCode（ACP 経由）を選びます。会話中に Taxion を操作する agent はオーケストレータで、実装・レビューを担当するサブエージェントとは区別します。
+
+GitHub・GitLab はコードや Issue を管理する開発基盤で、実行ハーネスとは別の設定です。たとえば GitLab のリポジトリで Copilot を利用できます。必要な CLI と認証は[設定ガイド](docs/userguide/configuration.md#認証の準備)で選択ごとに確認してください。
+
 v0.3.1 は、CLI の固定文言を英語に統一し、初回診断・版表示と未確定項目の選択式入力を改善した修正版です。doctor で確認した既存設定は再選択しません。v0.3.0 の設定準備・bash 補完、v0.2.0 の OpenCode ACP runtime と停止後の復旧を引き継ぎます。実モデルによる文書作業、同一成果物の独立レビュー、部分成果からの復旧の記録は [Issue #78](https://github.com/hiono/taxion/issues/78)・[Issue #79](https://github.com/hiono/taxion/issues/79)・[Issue #80](https://github.com/hiono/taxion/issues/80)、版ごとの機能と制約は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
 ## 使い始める
 
-[利用者ガイド](docs/userguide/user-guide.md)に、公開版・ソースからの導入、今の agent への `taxion ready` による操作手順の出力、設定・承認から結果確認までを記載しています。mise での導入・更新は、`mise install` → `mise use --pin` → `taxion --version` の順です。[導入・更新手順](docs/userguide/user-guide.md#現在の導入方法)には、旧開発版が再選択される場合の注意も記載しています。
+[利用者ガイド](docs/userguide/user-guide.md)に、公開版・ソースからの導入、今の agent への `taxion ready` による操作手順の出力、設定・承認から結果確認までを記載しています。mise での導入・更新は、`mise install` → `mise use --pin` → `taxion --version` の順です。[導入・更新手順](docs/userguide/user-guide.md#導入方法)には、旧開発版が再選択される場合の注意も記載しています。
 
 外側の coding agent を使わず、Taxion 内部の Planner と計画を相談する `taxion request` も別の入口として使えます。必要な option は[CLI リファレンス](docs/userguide/cli-reference.md)、設定ファイルと環境変数は[設定ガイド](docs/userguide/configuration.md)で確認できます。復旧・Memory・リモート接続などの文書は[利用者向け文書の一覧](docs/userguide/README.md)から参照できます。
 
@@ -16,7 +20,7 @@ v0.3.1 は、CLI の固定文言を英語に統一し、初回診断・版表示
 
 `taxion doctor` で、設定したバックエンドと同じ検索先から見つかる skills・plugins・指示等を確認できます。通常はバックエンドの標準配置を使い、Taxion 用 directory へのコピーや skill ごとの hash 承認は不要です。
 
-`taxion init` が不足設定を尋ね、Git 除外・Project 設定・DB を準備します。`taxion doctor fix` は明示的な設定修復、`taxion completion bash` は設定不要の補完です。`taxion --help` の目的別一覧と `taxion ready` の状況別案内から、必要な操作を選べます。[設定と実行前確認](docs/userguide/user-guide.md#設定と実行前確認)で初回手順と旧版との違いを確認してください。
+`taxion init` が不足設定を尋ね、Git 除外・Project 設定・DB を準備します。`taxion doctor fix` は明示的な設定修復、`taxion completion bash` は設定不要の補完です。`taxion --help` の目的別一覧と `taxion ready` の状況別案内から、必要な操作を選べます。[設定と実行前の確認](docs/userguide/user-guide.md#設定と実行前の確認)で初回手順と旧版との違いを確認してください。
 
 引数なしの `ready` はモデルを呼ばず、設定や workspace も変更しません。明示的な `ready --install-skill` は標準の home 配下に版付き操作 skill を配置し、`ready --check-skill` はその互換性と内容を JSON で確認します。更新は `ready --update-skill` で明示し、利用者の編集は上書きしません。ただし、配置や出力だけで agent の実ロード・判断・操作品質を保証するコマンドではありません。外側の agent の費用と、その後の Taxion によるモデル実行の費用は別です。
 

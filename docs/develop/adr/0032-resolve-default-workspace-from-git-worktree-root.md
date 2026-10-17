@@ -57,5 +57,5 @@ SQLite の保存先や旧 ledger の形式は変えず、既存のプロジェ�
 linked worktree の分離、サブディレクトリからの同一保存先、明示指定の維持、
 Git 解決失敗時の非作成、旧 ledger の移行と誤指定時の既存 DB 保持を回帰で確認する。
 ADR の採択だけではこれらの実装・検証完了や Release の受入れ達成を意味しない。
-現在の操作契約は[利用者ガイド](../../userguide/user-guide.md#設定と実行前確認)と
+現在の操作契約は[利用者ガイド](../../userguide/user-guide.md#設定と実行前の確認)と
 [CLI リファレンス](../../userguide/cli-reference.md#cli)に記載する。

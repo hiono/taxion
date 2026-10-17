@@ -2,6 +2,8 @@
 
 この文書は、現在の CLI コマンドと実行上の制約をまとめる。初めて使う手順は[利用者ガイド](user-guide.md)、設定ファイルは[設定ガイド](configuration.md)を参照する。
 
+`--file JSON` を使う操作例は、オーケストレータや自動化の実装者向けの入力仕様である。通常の利用者は `ready` を読んだ agent または `request` の Planner に自然言語で依頼し、作業条件・設定・実行上限を承認する。JSON の生成、ID・hash の転記、コマンド実行は agent または `request` が担当する。この文書の Human は承認・判断を行う利用者、「Task 契約」は承認後に勝手に変更できない作業条件を指す。
+
 コマンド一覧は `taxion --help`、各コマンドの入力条件はこの文書と所有仕様書に従う。採択した設計や未実装の要件は[要件と到達条件](../develop/orchestration-requirements.md)に分けて記録する。
 
 ## CLI
@@ -208,7 +210,7 @@ _.file = ".env"
 
 実際の `.env` は untracked とし、`/.env` などで ignore する。共有 mise file には読込み先と安全な既定値を記載し、credential 値は含めない。mise、shell、CI が環境変数を読み込んで渡し、Taxion は出典として `environment` だけを記録する。
 
-任意の dotenv path と、他の file にコピーした秘密は、この path policy の対象外。この設定確認は commit・公開の保護ではない。
+任意の dotenv path と、他の file にコピーした秘密は、この path policy の対象外。この設定の確認は commit・公開の保護ではない。
 
 ### Git index の検査と管理下の commit
 
@@ -299,7 +301,9 @@ execution:
 
 `project.id` は Taxion project を識別する。Repository の `provider`・`host`・`path` は source code の配置、`account` は期待する操作 identity を示す。上の Copilot 設定例では Runtime の `account` は期待する Copilot identity、`contractRef` は利用予定の契約を示す。`credentialRef` は別に保管する credential への参照で、token を含めない。OpenCode の account・credential 参照は `opencode-managed` に固定し、provider 認証の確認済み identity として扱わない。Execution は依頼者、worker、出典付き承認への参照を示す。
 
-認証は provider tool に任せ、Copilot 実行には Copilot CLI、GitHub には `gh`、将来の GitLab adapter には `glab` を使う。OpenCode のモデル・認証は操作者が OpenCode 側で準備し、Taxion は他の provider の credential を流用しない。Taxion は OAuth、credential vault、token 更新、認証 file の直接解析を実装しない。利用者は provider tool で login し、CI・worker は provider が対応する credential を渡す。明示的な `env:NAME` は対応する provider に credential を渡すだけで、Taxion に保存しない。GitLab の委譲は採択した設計で、adapter は未実装。将来の `glab` adapter は self-hosted GitLab も含み、明示 API host、account、namespace・repository、permission を照合して別 host へ切り替えない。API endpoint と Git clone endpoint は別で、独自の clone SSH port は API port ではない。内部配置の識別情報を公開記録に含めない。
+認証は選んだ CLI に任せる。開発基盤の API 操作には、GitHub.com は `gh`、GitLab.com と Self-Managed GitLab は `glab` を使う。Copilot 実行にはこれと別に Copilot CLI を使う。OpenCode のモデル・設定は操作者が OpenCode 側で準備し、Taxion は他の provider の credential を流用しない。現在の OpenCode 隔離実行には host の login や API key を渡さない。[認証の準備](configuration.md#認証の準備)で選択ごとの必要条件を確認する。
+
+Taxion は OAuth、credential vault、token 更新、認証 file の直接解析を実装しない。利用者は provider tool で login し、CI・worker は provider が対応する credential を渡す。明示的な `env:NAME` は対応する provider に credential を渡すだけで、Taxion に保存しない。実装済みの GitLab adapter は、明示 API host、account、namespace・repository、permission を照合して別 host へ切り替えない。API endpoint と Git clone endpoint は別で、独自の clone SSH port は API port ではない。内部配置の識別情報を公開記録に含めない。
 
 Taxion は出典付き作業承認、期待 account と対象の検査、実行上限、観測を担当する。provider login は Taxion Task の作業承認ではない。service 利用資格と課金の判断は provider に任せ、公式 API の観測と Human が承認した利用根拠を区別する。独自の契約認証・課金システムは実装しない。
 

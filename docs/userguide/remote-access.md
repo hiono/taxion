@@ -1,6 +1,6 @@
 # リモート接続
 
-安全性と個人情報の保護を最優先にする。M5（ADR-0015）以降は、既定で loopback のみに公開し、loopback 外では token を必須とする。
+既定では loopback のみに公開し、loopback 外では token を必須とする。認証方式の判断は [ADR-0015](../develop/adr/0015-token-auth-and-audit-complete-the-pre-public-security-model.md) を参照する。
 
 `taxion serve` の既定 address は `127.0.0.1:3938`。`--token` または環境変数 `TAXION_TOKEN` を指定すると、全 route で token 認証を有効にする。未指定・不一致の request は同じ 401 を返す。既定の `--mode loopback` は、token の有無を問わず loopback 外への bind を拒否する。LAN・Docker で使う場合は、`--mode remote` を明示選択し、token を指定する（ADR-0016）。token なしの loopback 外 bind は起動時に拒否する。
 

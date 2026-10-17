@@ -1,8 +1,12 @@
 # 利用者ガイド
 
-このガイドは、Taxion で依頼を Task 契約にし、Human が範囲・設定・予算を承認してから Coder と独立 Reviewer を実行する流れを説明します。Task の field、状態遷移、budget stop 後の継続条件は[Task Graph リファレンス](../develop/task-graph.md)が所有します。
+Taxion では、利用者が話し言葉で依頼し、Planner が目的・作業範囲・完了条件を整理します。利用者が範囲・設定・予算を承認してから、Coder による実装と独立した Reviewer によるレビューを進めます。対話中の coding agent に `taxion ready` を読ませて操作を任せる方法と、`taxion request` で内部 Planner に直接相談する方法があります。
 
-## 現在の導入方法
+Planner・Coder・Reviewer は役割の名前です。サブエージェントを動かす実行ハーネスには、Copilot CLI を Copilot SDK 経由で使う `copilot` と、OpenCode を ACP 経由で使う `opencode` があります。Taxion を操作して担当へ指示を渡す agent は、オーケストレータと呼びます。GitHub・GitLab などの開発基盤と実行ハーネスは別々に選びます。
+
+Task は一件の作業記録で、目的・変更範囲・完了条件・検証方法・権限を保持します。仕様書でいう「Task 契約」は、このうち実行前に合意し、承認後は勝手に変更できない条件を指します。法的な契約や AI サービスの利用契約ではありません。このガイドでは「作業条件」と表記し、CLI・JSON の `Task` や field 名はそのまま使います。データの詳細と状態遷移は[Task Graph リファレンス](../develop/task-graph.md)を参照してください。
+
+## 導入方法
 
 v0.3.1 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
@@ -65,11 +69,11 @@ export PATH="$PWD/bin:$PATH"
 
 `go:` backend は Go の実行可能 package を `go install` で導入します。[mise の Go backend](https://mise.jdx.dev/dev-tools/backends/go.html) で Go と Taxion の version を選択できます。
 
-## 設定と実行前確認
+## 設定と実行前の確認
 
 以下の `init`・`doctor fix`・bash 補完は v0.3.0 の操作です。v0.2.0 の `init` は DB だけを作るため、その版では[設定ガイド](configuration.md)の YAML と Git 除外設定を手動で用意します。
 
-対象の Git repository で `taxion init` を実行します。既存の Global・Project 設定を読み、単一の Git remote から host と namespace/path を取得します。複数 remote は選択が必要です。GitLab Self-Managed など、host だけで provider を確定できない場合は provider も確認します。Git account と Copilot account は別々に指定します。
+対象の Git repository で `taxion init` を実行します。既存の Global・Project 設定を読み、単一の Git remote から host と namespace/path を取得します。複数 remote は選択が必要です。GitLab Self-Managed など、host だけで provider を確定できない場合は provider も確認します。開発基盤と実行ハーネスの account は別々に指定します。
 
 ```sh
 taxion init
@@ -120,7 +124,7 @@ taxion init --dry-run \
 
 隔離テストや以前の別配置を参照する場合だけ、command の前に `--store /path/to/workspace/ledger.json` を指定します。実際の SQLite は同じ directory の `workspace.db` に保存されますが、その DB 自体や同一ファイルの別名は指定できません。以前サブディレクトリへ作った状態は自動で移動・統合しないため、必要なら旧配置を明示します。`--store` で Project 設定の基点は変わりません。
 
-設定確認は schema と採用 layer を示すだけです。Task の承認と一致するかは `config check --task TASK-ID`、Dispatch の保存済み条件も含むかは `config check --dispatch DISPATCH-ID` で確認します。実際の Copilot account は Dispatch 発行後に `runtime auth` で確認します。これらの確認は scope や予算の Human 承認に代わりません。
+設定の確認は schema と採用 layer を示すだけです。Task の承認と一致するかは `config check --task TASK-ID`、Dispatch の保存済み条件も含むかは `config check --dispatch DISPATCH-ID` で確認します。実際の Copilot account は Dispatch 発行後に `runtime auth` で確認します。これらの確認は scope や予算の利用者による承認に代わりません。
 
 ### bash の補完
 
@@ -184,7 +188,7 @@ custom agent の検出と、その担当で呼出し tool が許可されてい�
 #### 内容を固定して監査する場合
 
 ここからは任意の固定方式です。役割別の skill 内容、固定 MCP request、RTK と
-原本 evidence を Task 契約へ固定するときだけ、既存の `taxion.tools.v1` を指定します。
+原本 evidence を作業条件に固定するときだけ、既存の `taxion.tools.v1` を指定します。
 この方式では通常の自動探索を無効にし、明示した asset だけを使います。
 directory の内容は実行中に変更しません。
 
@@ -195,7 +199,7 @@ taxion tools hash --path /absolute/approved/skills
 表示された `path` と `hash` を、対象 Task の出典付き decision に保存する
 `taxion.tools.v1` 承認へ設定します。次は承認 JSON の形です。placeholder は実際の
 値に置き換え、この JSON を decision の `text` に文字列として保存し、
-`source` に Human の判断の出典を記録します。Task 契約の承認前に組み込んでください。
+`source` に利用者の判断の出典を記録します。作業条件の承認前に組み込んでください。
 
 ```json
 {
@@ -257,7 +261,7 @@ taxion ready
 
 agent は目的、変更範囲、検証コマンド、設定選択、修正回数、期限、session soft ceiling を利用者に示し、明示承認後に実行します。各 model call の観測利用量も報告しますが、予測不能な token 数で承認済み目標を止めません。承認済みの安全な次の操作がある限り続け、判断待ちや期限到達では理由を説明します。既存 Task や保存成果がある場合は、最初からやり直す前に照合します。
 
-引数なしの `ready` はモデル、認証・課金照会、設定の読込み、workspace の作成を行いません。準備完了の診断ではなく、診断には `doctor` を使います。外側の agent の費用と、後続の `workflow run` などのモデル費用は別です。出力だけで agent の従属や継続を保証するものでもありません。無料の合成操作回帰と、実 agent が指示を理解して進める受入れは区別します。
+引数なしの `ready` はモデル、認証・課金照会、設定の読込み、workspace の作成を行いません。準備完了の診断ではなく、診断には `doctor` を使います。外側の agent の費用と、後続の `workflow run` などのモデル費用は別です。出力だけで agent が指示を理解し、操作を続けることを保証するものでもありません。
 
 別の会話でも操作知識を発見できるようにする場合は、次の明示的な配置を選べます。
 
@@ -287,23 +291,25 @@ taxion request --repo owner/repository \
   --timeout 20m --max-ai-credits 30 --context-path README.md
 ```
 
-最初に「この画面に検索機能を追加して」のように依頼を書きます。表示された repository・worktree・実行 account・上限を確認し、`/plan` で有料の Planner 対話を開始します。Planner の質問には人のことばで答え、提案が意図と違えば修正を伝えます。Planner は目的、変更範囲、完了条件、検証コマンドを提案します。質問が残っている間は実行できません。
+最初に「この画面に検索機能を追加して」のように依頼を書きます。表示された repository・worktree・実行 account・上限を確認し、`/plan` でモデルを使う Planner 対話を開始します。費用は選んだモデルの利用条件に従います。Planner の質問には人のことばで答え、提案が意図と違えば修正を伝えます。Planner は目的、変更範囲、完了条件、検証コマンドを提案します。質問が残っている間は実行できません。
 
 計画と検証コマンドの副作用を確認し、`/approve` でコード作成、ホストでの検証、別 worktree での独立レビューを開始します。Task、承認 hash、Flow、Reviewer Task ID、role prompt、指示の受渡しは Taxion が準備します。終了時に結果、変更が残る worktree、Flow ID、記録の場所を表示します。commit、push、外部 Issue の作成は行いません。
 
-この入口は snapshot mode と `fileAccess: all` を明示して使います。worktree 内の新規ファイルを許可し、Coder には `view,create,edit,apply_patch`、Reviewer には `view` を渡します。変更結果の scope 検査、worktree 外と保護された path の拒否、Reviewer の読み取り専用制約は維持します。細かい file access や外部 skill の承認が必要な場合は、次節の個別手順を使います。
+この入口は snapshot mode と `fileAccess: all` を明示して使います。worktree 内の新規ファイルを許可し、Coder には `view,create,edit,apply_patch`、Reviewer には `view` を渡します。変更結果の scope 検査、worktree 外と保護された path の拒否、Reviewer の読み取り専用制約は維持します。細かい file access や外部 skill の承認が必要な場合は、`ready` を読んだオーケストレータに次節の個別手順を任せます。
 
-期限は `/plan` から数えます。`--max-ai-credits` は session ごとの soft ceiling で、依頼全体の金額上限や一 turn の hard cap ではありません。Planner と Coder / Reviewer の利用量は各 model call ごとに記録します。account 残高・利用率は、同じ単位の allowance を取得できない限り unavailable と表示します。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の各回答には費用が発生するため、同じ内容を繰り返し送らないようにします。Planner の失敗を自動 retry しません。
+期限は `/plan` から数えます。`--max-ai-credits` は session ごとの soft ceiling で、依頼全体の金額上限や一 turn の hard cap ではありません。Planner と Coder / Reviewer の利用量は各 model call ごとに記録します。account 残高・利用率は、同じ単位の allowance を取得できない限り unavailable と表示します。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の各回答でモデルを実行するため、同じ内容を繰り返し送らないようにします。Planner の失敗を自動 retry しません。
 
 Planner はファイル・shell tool を持たず、依頼、これまでの対話、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストを受け取ります。元依頼の全文は保存した decision に一度だけ含め、対話の先頭はその出典を参照します。同じ Task を別の wrapper に重ねて送りません。path は directory ごとにまとめ、全件を保持したまま共通部分の繰り返しを減らします。通常は native な skill と指示も読み込みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。対話中の `/quit` または入力終了ではコードを実行せず、相談記録を残します。保存した相談の自動再開は未対応です。
 
 相談記録と実行先・失敗の記録は request ID・連番・hash とともに workspace の SQLite DB に保存します。実行イベントは Flow から正式な Dispatch・receipt を参照し、二重保存しません。新しい `requests/` の JSON や `execution.log` は作りません。確認・明示 export は `taxion records show` を使います。この出力には相談本文が含まれるため、公開先への転記には注意してください。相談保存前に DB の file mode を所有者だけが読み書きできる設定にします。過去の外部ファイルは削除しません。
 
-停止後の成果物と利用量は従来の Task / Flow / receipt に残ります。無料の合成 runtime と実 Git で依頼、確認質問、計画修正、承認、コード作成、同一 tree の独立レビューまで検証しています。実 Copilot モデルでこの入口を通した受入れは未確認です。別マシンへの移送には、通常の DB 単純コピーではなく、[一ファイルでの移送](#別マシンへの一ファイル移送)を使います。
+停止後の成果物と利用量は Task / Flow / receipt に残ります。合成 runtime と実 Git を使った回帰テストと、実モデルでの受入れは別に扱います。実 Copilot モデルでこの入口の全工程を通した受入れは未確認です。別マシンへの移送には、通常の DB 単純コピーではなく、[一ファイルでの移送](#別マシンへの一ファイル移送)を使います。
 
 ## 依頼から独立レビューまで
 
-以下は Task 契約や role 設定を個別に指定する手順です。通常の依頼では `ready` の出力を読んだ外側の agent に操作を任せるか、内部 Planner と相談する `request` を使います。
+以下は、作業条件や role 設定を個別に指定するオーケストレータ・自動化の実装者向けの操作例です。通常の利用者が JSON や prompt ファイルを書く手順ではありません。利用者は `ready` を読んだ agent または `request` の Planner に依頼し、提案された条件を確認して承認します。
+
+ここからのコマンド実行、worktree の準備、JSON ファイルの作成、ID・hash の転記はオーケストレータが担当します。承認内容の説明と利用者の明示承認は省略できません。手動で内部動作を確認する開発者も、この例を参照できます。
 
 Coder が作業する repository で、承認する baseline から専用 worktree を作ります。Taxion は通常の Coder Dispatch 用 worktree を自動作成しません。`branch`、`worktree`、`baselineSha` はこの worktree と同じ値を Task に記録します。
 
@@ -314,7 +320,7 @@ git worktree add -b work/task-example /absolute/path/to/task-worktree "$BASE_SHA
 
 ### 依頼を未承認 Task として記録する
 
-依頼内容、scope、禁止範囲、acceptance、証拠、検証 command を `request.json` にまとめて `conversation intake` を実行します。Task の `status` は `DRAFT`、`owner` は `CODER`、`reviewer` は独立した `REVIEWER` とし、authorization は入力しません。
+オーケストレータは、依頼内容、scope、禁止範囲、acceptance、証拠、検証 command を `request.json` にまとめて `conversation intake` を実行します。Task の `status` は `DRAFT`、`owner` は `CODER`、`reviewer` は独立した `REVIEWER` とし、authorization は入力しません。
 
 ```json
 {
@@ -361,11 +367,11 @@ taxion conversation proposal --task task-example
 
 `outputMode` は省略時に `commit` となり、従来どおり commit SHA で成果物を識別します。commit を作らずにレビューする場合は `worktree-tree-snapshot` を選びます。この場合、Controller が `outputTreeSha` と変更 path を算出し、baseline commit から Reviewer 用の別 worktree に同じ tree を再現します。Controller は tree object をローカルの `refs/taxion/snapshots/` に保持します。branch、commit、実 index、remote は変更しませんが、Git ref は追加されます。Git tree に含まれない ignored file は Reviewer に渡らないため、成果物や検証結果に使わないでください。
 
-proposal の内容と hash を読み、目的・scope・file access・禁止範囲・acceptance・検証方法・repository・worktree が依頼に一致するか確認します。Taxion は依頼文から実行承認を推定しません。契約を直す場合は新しい Task ID で再提案します。
+proposal の内容と hash を読み、目的・scope・file access・禁止範囲・acceptance・検証方法・repository・worktree が依頼に一致するか確認します。Taxion は依頼文から実行承認を推定しません。作業条件を直す場合は新しい Task ID で再提案します。
 
-### 契約と設定を明示承認する
+### 作業条件と設定を明示承認する
 
-`conversation confirm` は proposal の完全な hash と、その Task に選ぶ設定を必要とします。Human は proposal の JSON と hash を確認してから `confirmation.json` を作ります。
+`conversation confirm` は proposal の完全な hash と、その Task に選ぶ設定を必要とします。オーケストレータは proposal の作業条件と設定を利用者に示します。利用者がその内容を承認した後で、オーケストレータが対応する hash と承認の出典を `confirmation.json` に記録します。JSON の作成者が agent でも、承認者は利用者です。
 
 ```json
 {
@@ -404,13 +410,13 @@ proposal の内容と hash を読み、目的・scope・file access・禁止範�
 taxion conversation confirm --file confirmation.json
 ```
 
-confirmation は Task を `READY` にしますが、Dispatch は発行しません。actor/source の文字列は保存されますが、CLI が Human の身元を認証するわけではありません。
+confirmation は Task を `READY` にしますが、Dispatch は発行しません。actor/source の文字列は保存されますが、CLI が利用者の身元を認証するわけではありません。
 
 `additionalTaskIds` は後述する Flow が作る Reviewer Task の設定承認です。この例の Flow ID は `task-example-flow`、修正上限は1回なので、初回レビューと再レビューの2件を列挙します。Flow ID または修正上限を変える場合は、この一覧も承認前に合わせてください。空の一覧では Coder だけが承認対象になり、独立 Reviewer の実行が拒否されます。`selection` は採用する設定ファイルの値と一致させます。
 
 ### Flow の上限を決めて開始する
 
-`workflow start` は READY Task に対して Coder Dispatch を発行します。この時点で repair 回数と期限を明示し、別の Human 判断として Flow を承認します。token 閾値で Flow は停止しません。
+`workflow start` は READY Task に対して Coder Dispatch を発行します。オーケストレータは repair 回数と期限を利用者に示し、作業条件の承認とは別に実行上限への承認を得てから `flow.json` を作成します。token 閾値で Flow は停止しません。
 
 ```json
 {
@@ -444,7 +450,7 @@ taxion workflow show --id task-example-flow
 
 `DISPATCH-ID` は start 結果の `dispatchIds[0]` で置き換えます。prompt file は各 role の system prompt です。`workflow run` に tool allowlist を渡さないと、Coder と Reviewer に SDK tool は渡りません。Coder には `view,create,edit,apply_patch`、読み取り専用の Reviewer には `view` を許可します。`workflow run` は Copilot runtime を実際に呼び出し、承認済み条件に従って Coder、独立 Reviewer、許可された修正を進めます。`--max-ai-credits` は per-session の soft ceiling です。
 
-実行前に `prompts/coder.md` と `prompts/reviewer.md` をローカルファイルとして用意します。Coder には「保存済み Dispatch の scope と fileAccess の範囲だけを変更し、commit は作らない。変更 path と構造化結果を返す。検証コマンドは Controller が実行するため、未実行の検証を成功と報告しない」、Reviewer には「Controller が再現した target tree を読み取り専用で確認し、acceptance ごとの判断と根拠、必要な指摘を構造化結果で返す」と記します。Taxion が Dispatch の契約を各 prompt に追加します。結果の `outputTreeSha` はモデルではなく Controller が算出します。
+オーケストレータは実行前に `prompts/coder.md` と `prompts/reviewer.md` をローカルファイルとして用意します。Coder には「保存済み Dispatch の scope と fileAccess の範囲だけを変更し、commit は作らない。変更 path と構造化結果を返す。検証コマンドは Controller が実行するため、未実行の検証を成功と報告しない」、Reviewer には「Controller が再現した target tree を読み取り専用で確認し、acceptance ごとの判断と根拠、必要な指摘を構造化結果で返す」と記します。Taxion が Dispatch に保存した作業条件を各 prompt に追加します。結果の `outputTreeSha` はモデルではなく Controller が算出します。
 
 この実行例は `worktree-tree-snapshot` 用です。commit mode を選ぶ場合、file tool だけでは commit を作れません。必要な secret scanner を用意し、[CLI リファレンス](cli-reference.md)の `--managed-commit` と `--managed-stage` を使うか、承認されたホスト操作で commit を作る手順を別に定めます。
 
@@ -456,7 +462,7 @@ taxion workflow show --id task-example-flow
 
 細かな設定を一件ずつ尋ねたり、ロール間で結論を変えない確認を往復したりしないよう、担当別の指示も加えています。Planner は安全で修正可能な既定案を使い、Coder は承認範囲内の実装判断を進めます。Reviewer は任意の好みだけで修正・再レビューを要求せず、必要な助言は `workReport` に分けます。ただし、実際の欠陥や acceptance 未達は任意扱いにせず、全条件の証拠が揃ってから承認します。外側の操作者は引継ぎをまとめ、通常の判断に再承認を求めません。
 
-新しい `request` は、実装と関連文書の整合を acceptance に追加して承認前に表示します。影響する文書も scope に含め、同じ target の独立 Reviewer に確認させます。文書が影響を受けない場合も根拠が必要です。手動の intake では、`taxion ready` に示す同じ criterion を承認前に含めてください。承認済みの旧契約は自動変更しません。
+新しい `request` は、実装と関連文書の整合を acceptance に追加して承認前に表示します。影響する文書も scope に含め、同じ target の独立 Reviewer に確認させます。文書が影響を受けない場合も根拠が必要です。個別の intake では、オーケストレータが `taxion ready` に示す同じ criterion を承認前に含めます。承認済みの旧作業条件は自動変更しません。
 
 ```sh
 taxion workflow evaluate --id FLOW-ID
@@ -503,7 +509,7 @@ Copilot SDK の account quota、session の累積 cost、公式 Billing API の�
 
 `workflow show` の status、stop code、利用量、保存結果、Git evidence、Reviewer verdict を確認します。`COMPLETED` や `APPROVE` だけで作業成果を判断せず、対象 SHA と acceptance evidence が依頼を満たすかを確認してください。
 
-Copilot で Flow が停止しても Dispatch に保存 session が残る場合は、別の runner が操作中でないことを確認してから `taxion runtime stop --dispatch DISPATCH-ID` で終了します。この操作に元の prompt や tool 設定は不要です。保存 session への停止専用接続は、新しい session やモデルへの指示を作らず、保留中の作業再開とすべての tool permission を拒否します。古い契約版でも停止できますが、接続・取消・結果保存に失敗した場合は停止済みとは記録しません。
+Copilot で Flow が停止しても Dispatch に保存 session が残る場合は、別の runner が操作中でないことを確認してから `taxion runtime stop --dispatch DISPATCH-ID` で終了します。この操作に元の prompt や tool 設定は不要です。保存 session への停止専用接続は、新しい session やモデルへの指示を作らず、保留中の作業再開とすべての tool permission を拒否します。古い版で保存した作業条件でも停止できますが、接続・取消・結果保存に失敗した場合は停止済みとは記録しません。
 
 OpenCode は別 process の `runtime stop` で保存 session へ接続できません。所有 runner で停止し、process の終了と部分成果の保存を確認します。`CANCEL_REQUESTED` のままなら取消完了とは扱わず、後続 Task の承認・実行を重ねません。詳しくは[OpenCode の設定と制約](configuration.md#opencode-acp-の設定と制約)を参照してください。
 

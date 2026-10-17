@@ -1,6 +1,6 @@
 # 監査ログ
 
-`serve` API は、変更を試みた操作と access 拒否を追記専用の監査ログに記録する。M5-2 で導入し、M8-D で `who`、M8-E で `reason` と 429、M8-G で `prev` の hash chain を追加した。既定の保存先は Ledger と同じ directory の `.taxion/audit.jsonl`。`serve --audit PATH` で変更し、`serve --audit ""` で無効にする。
+`serve` API は、変更を試みた操作と access 拒否を追記専用の監査ログに記録する。操作者のラベル（`who`）、拒否理由（`reason`）、rate limit の応答（429）、直前の entry の hash（`prev`）を含める。既定の保存先は `.taxion/audit.jsonl`。`serve --audit PATH` で変更し、`serve --audit ""` で無効にする。
 
 ## 記録する内容
 

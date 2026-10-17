@@ -1,6 +1,6 @@
 # 設定ガイド
 
-Taxion の設定は project、Git repository、Copilot runtime、実行記録の識別子を選びます。設定ファイルに token や password を書かず、各 credential の保管と認証は Git／Copilot の実行環境で行います。
+Taxion の設定は project、Git repository、実行ハーネス（Copilot または OpenCode）、実行記録の識別子を選びます。開発基盤と実行ハーネスは別の設定です。設定ファイルに token や password を書かず、各 credential の保管と認証は選んだ CLI の実行環境で行います。
 
 ## 設定ファイル
 
@@ -14,7 +14,7 @@ Taxion は次の固定位置だけを読みます。
 
 Linux では Global 設定は通常 `$XDG_CONFIG_HOME/taxion/config.yaml`、未設定なら `~/.config/taxion/config.yaml` です。macOS と Windows は Go の `os.UserConfigDir()` が返す標準設定ディレクトリを使います。v0.3.0 では Project 設定を Git 作業ツリールートから解決し、Git 外では cwd を使います。任意の親 directory を設定候補として検索する動作ではありません。サブディレクトリ直下に旧設定がある場合は手動移行を求め、勝手に統合しません。v0.2.0 の Project 設定は cwd 直下です。少なくとも一つの YAML ファイルが必要です。
 
-`taxion init` は既存設定と Git 情報から不足を補い、確認後に Project 設定と DB を準備します。`taxion doctor fix` は同じ処理で不足設定と除外規則を修復しますが、DB は初期化しません。`--dry-run`・`--set FIELD=VALUE`・`--remote NAME`・`--yes` と対話例は[利用者ガイド](user-guide.md#設定と実行前確認)を参照してください。既存値を変更する場合は、採用元の設定を明示的に編集します。Global 設定と環境変数を Project 設定へ丸ごと複写しません。
+`taxion init` は既存設定と Git 情報から不足を補い、確認後に Project 設定と DB を準備します。`taxion doctor fix` は同じ処理で不足設定と除外規則を修復しますが、DB は初期化しません。`--dry-run`・`--set FIELD=VALUE`・`--remote NAME`・`--yes` と対話例は[利用者ガイド](user-guide.md#設定と実行前の確認)を参照してください。既存値を変更する場合は、採用元の設定を明示的に編集します。Global 設定と環境変数を Project 設定へ丸ごと複写しません。
 
 v0.3.1 では、端末上の未確定 provider・remote と適用確認を選択式にし、設定済みの値は尋ね直しません。`doctor` で確認した既存設定もそのまま使います。適用確認の初期値は `Cancel` です。CLI の固定文言は英語とし、入力本文や外部出力は翻訳しません。
 
@@ -71,7 +71,16 @@ execution:
 
 ### 認証の準備
 
-Taxion を起動する環境に [GitHub CLI](https://cli.github.com/) と [Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli) を導入し、それぞれのログインを用意します。次の操作は provider へ接続して認証情報を保存しますが、モデルへ依頼は送りません。保存先は各 CLI の案内で確認し、secret を設定ファイルや作業ログへ転記しないでください。
+開発基盤（`repository.provider`）とサブエージェントの実行ハーネス（`runtime.provider`）は別々に選びます。Taxion を起動する環境には、それぞれの選択に必要な CLI を導入します。GitLab のリポジトリで Copilot を使う場合、開発基盤には `glab`、実行ハーネスには Copilot CLI が必要で、`gh` は不要です。
+
+| 設定の選択 | 必要な CLI・準備 |
+| --- | --- |
+| `repository.provider: github` | [GitHub CLI（gh）](https://cli.github.com/)。実装済みの API 接続先は `github.com` |
+| `repository.provider: gitlab` | [GitLab CLI（glab）](https://docs.gitlab.com/cli/)。GitLab.com または明示した Self-Managed の host |
+| `runtime.provider: copilot` | [Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli) と、その実行に使う account のログイン |
+| `runtime.provider: opencode` | 承認する OpenCode の実行ファイルと server 設定。[OpenCode の設定と制約](#opencode-acp-の設定と制約)に従う |
+
+次は、この文書の YAML 例と同じ GitHub＋Copilot の準備です。ログイン操作は provider へ接続して認証情報を保存しますが、モデルへ依頼は送りません。保存先は各 CLI の案内で確認し、secret を設定ファイルや作業ログへ転記しないでください。
 
 ```sh
 gh --version
@@ -82,6 +91,16 @@ copilot login
 ```
 
 設定例の `repository.account` は GitHub CLI の active account、`runtime.account` は Copilot CLI にログインした account の login 名に置き換えます。両者は異なる account でも構いません。`repository.path` も実際の `owner/repository` に置き換えてください。`gh:active` は保存済み GitHub CLI ログイン、`copilot:logged-in` は保存済み Copilot CLI ログインを選び、Taxion の該当処理では ambient token の優先順位に任せません。
+
+GitLab を選ぶ場合は、上の `gh` の準備を次に置き換えます。`gitlab.example.com` は利用する GitLab の host（GitLab.com なら `gitlab.com`）に置き換えてください。
+
+```sh
+glab --version
+glab auth login --hostname gitlab.example.com
+glab auth status --hostname gitlab.example.com
+```
+
+設定の `repository.provider` は `gitlab`、`host` は同じ host、`path` は実際の namespace/project、`account` はログインした GitLab のユーザー名、`credentialRef` は `glab:active` にします。実行ハーネスの設定は別で、Copilot を選ぶなら `copilot login` も行います。Git の SSH/HTTPS 認証と、Issue・権限確認に使う各 CLI の API 認証は別に用意します。
 
 環境変数で credential を渡す運用では `env:NAME` を使い、`NAME` は大文字・数字・underscore の環境変数名にします。先頭は大文字か underscore が必要です。値は実行環境の secret 管理で用意し、表示・commit しません。旧設定の任意の参照名が自動的に解決されるとは限らないため、新規設定では上の明示方式を使います。
 
@@ -149,11 +168,11 @@ taxion runtime auth --dispatch DISPATCH-ID --system-prompt-file prompts/coder.md
 
 v0.3.1 の `doctor` は、設定不足でも `init`・`doctor fix` と共有する読取り専用の検出処理で、現在の設定元・Git 候補・PATH 上の runtime 候補・不足項目を表示します。事前の doctor 実行や cache は不要です。設定不足は非zero終了とし、native inventory と保存 Dispatch の検査は未実施と報告します。`--worktree`・`--cli`・`--dispatch` の対象を検査済みとは扱いません。設定 file の不正・追跡・symlink は先に拒否します。公開済み v0.3.0 は設定不足時に一覧を出さず終了します。
 
-`--task` は現在の設定が Task の記録済み承認に一致するか、`--dispatch` は Task 承認と発行済み Dispatch 指示の両方に一致するかを検査します。いずれも Human の身元や認証を証明しません。
+`--task` は現在の設定が Task の記録済み承認に一致するか、`--dispatch` は Task 承認と発行済み Dispatch 指示の両方に一致するかを検査します。いずれも利用者の身元や認証を証明しません。
 
 `request` は設定の `execution.approvalRef` を変えず、`REF@task:PRIMARY_TASK_ID` という依頼ごとの設定承認 ID を生成します。同じ設定で次の依頼を始めるたびに設定ファイルを書き換える必要はありません。承認内容はその Task と明示した Reviewer Task だけを対象にし、他の依頼には使えません。従来の `approvalRef` と同名の decision も引き続き使えます。
 
-Copilot の `runtime auth` は Dispatch の承認済み設定に対して、実効 account が一致するかを確認し、session を作成しません。CLI は `--system-prompt-file` も要求します。成功しても repository 操作主体、契約適格性、legacy credential reference の解決は未確認です。OpenCode の同じ操作は承認した実行ファイルと server 設定の内容を検査するだけで、provider 認証や quota を確認しません。設定確認や runtime auth の成功を実行許可の代わりにしないでください。
+Copilot の `runtime auth` は Dispatch の承認済み設定に対して、実効 account が一致するかを確認し、session を作成しません。CLI は `--system-prompt-file` も要求します。成功しても repository 操作主体、契約適格性、legacy credential reference の解決は未確認です。OpenCode の同じ操作は承認した実行ファイルと server 設定の内容を検査するだけで、provider 認証や quota を確認しません。設定の確認や runtime auth の成功を実行許可の代わりにしないでください。
 
 GitHub repository の実行前検査は、Taxion を起動した環境の PATH から `gh` を起動します。実行可能な `gh` が見つからない場合、見つかった CLI が起動できない場合、CLI 起動後の認証・access 問合せが失敗した場合は、それぞれ異なるエラーになります。起動失敗を認証失敗とみなしてログインを繰り返さず、まず同じ環境で `gh --version` を確認してください。API 問合せの失敗は認証・権限だけでなく通信等の障害も含み、秘密を含み得る provider の詳細は表示しません。これらの失敗ではモデル session を開始しません。`doctor` の native inventory 成功だけでは `gh` の起動や repository access を確認したことにはなりません。
 
