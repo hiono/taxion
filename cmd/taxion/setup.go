@@ -323,12 +323,20 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 		if !interactive {
 			return fmt.Errorf("setup not applied; review with --dry-run, then supply --yes to apply")
 		}
-		answer, err := ask("Apply displayed setup? type yes", "no")
-		if err != nil {
-			return err
-		}
-		if answer != "yes" {
-			return fmt.Errorf("setup not applied; existing files and database were preserved")
+		for {
+			answer, err := ask("Apply displayed setup? type yes", "no")
+			if err != nil {
+				return err
+			}
+			if strings.EqualFold(answer, "yes") {
+				break
+			}
+			if strings.EqualFold(answer, "no") {
+				return fmt.Errorf("setup declined; no files changed; existing files and database were preserved")
+			}
+			if _, err := fmt.Fprintln(output, "Confirmation not recognized. Type yes to apply, or no (Enter) to cancel. No files changed."); err != nil {
+				return err
+			}
 		}
 	}
 	directory := filepath.Dir(configPath)

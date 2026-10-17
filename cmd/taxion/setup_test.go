@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
@@ -476,6 +477,52 @@ func TestSetupStandaloneAndInteractiveReferences(t *testing.T) {
 	}
 	if _, err := config.ResolvePartial(nil); err != nil {
 		t.Fatal("empty setup should report missing fields, not fail version parsing", err)
+	}
+}
+
+func TestSetupConfirmationRecognizesExplicitAnswersWithoutLosingSelections(t *testing.T) {
+	for _, action := range []bool{true, false} {
+		for _, test := range []struct {
+			name, answer string
+			applied      bool
+			retry        bool
+		}{
+			{"yes", "yes\n", true, false},
+			{"crlf", " yes \r\n", true, false},
+			{"uppercase", "YES\n", true, false},
+			{"retry", "y\nye\u200bs\nyes\n", true, true},
+			{"no", "no\n", false, false},
+			{"empty", "\n", false, false},
+			{"eof", "", false, false},
+			{"unrecognized-then-eof", "y\n", false, true},
+		} {
+			t.Run(fmt.Sprintf("init=%t/%s", action, test.name), func(t *testing.T) {
+				root := setupFixture(t, true)
+				var output bytes.Buffer
+				err := setupCmd(setupArguments(), strings.NewReader(test.answer), &output, true, action)
+				if (err == nil) != test.applied {
+					t.Fatal("incorrect confirmation outcome", output.String(), err)
+				}
+				if strings.Contains(output.String(), "Confirmation not recognized") != test.retry {
+					t.Fatal("unrecognized confirmation was not explained", output.String())
+				}
+				if !test.applied {
+					for _, name := range []string{".taxion", ".gitignore"} {
+						if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
+							t.Fatal("unapproved confirmation changed files", name, err)
+						}
+					}
+					return
+				}
+				if _, err := resolveConfiguration(); err != nil {
+					t.Fatal("confirmation did not persist valid configuration", err)
+				}
+				_, err = os.Stat(workspaceDBPath())
+				if action && err != nil || !action && !os.IsNotExist(err) {
+					t.Fatal("init/fix workspace behavior changed", err)
+				}
+			})
+		}
 	}
 }
 
