@@ -8,7 +8,7 @@ Planner（計画）、Coder（実装）、Reviewer（独立レビュー）はエ
 
 GitHub・GitLab はコードや Issue を管理する開発基盤で、実行ハーネスとは別の設定です。たとえば GitLab のリポジトリで Copilot を利用できます。必要な CLI と認証は[設定ガイド](docs/userguide/configuration.md#認証の準備)で選択ごとに確認してください。
 
-v0.3.1 は、CLI の固定文言を英語に統一し、初回診断・版表示と未確定項目の選択式入力を改善した修正版です。doctor で確認した既存設定は再選択しません。v0.3.0 の設定準備・bash 補完、v0.2.0 の OpenCode ACP runtime と停止後の復旧を引き継ぎます。実モデルによる文書作業、同一成果物の独立レビュー、部分成果からの復旧の記録は [Issue #78](https://github.com/hiono/taxion/issues/78)・[Issue #79](https://github.com/hiono/taxion/issues/79)・[Issue #80](https://github.com/hiono/taxion/issues/80)、版ごとの機能と制約は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
+v0.4.0 は、ゴール指向の実行方針と保存品質証拠の評価を追加し、OpenCode の製品版固定を ACP の互換性確認へ変更した版です。v0.3.1 の英語表示・初回診断・版表示・選択式入力、v0.3.0 の設定準備・bash 補完、v0.2.0 の OpenCode ACP runtime と停止後の復旧を引き継ぎます。実モデルによる文書作業、同一成果物の独立レビュー、部分成果からの復旧の記録は [Issue #78](https://github.com/hiono/taxion/issues/78)・[Issue #79](https://github.com/hiono/taxion/issues/79)・[Issue #80](https://github.com/hiono/taxion/issues/80)、版ごとの機能と制約は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
 ## 使い始める
 
@@ -28,6 +28,6 @@ Taxion は coding agent や Git の認証を提供しません。新しい実行
 
 ## 開発する
 
-開発版では、共通・担当別のゴール指向方針、文書整合の acceptance、保存証拠を評価する `workflow evaluate` を追加しています。公開済み v0.3.1 には含まれません。評価は総合得点や学習時の報酬関数ではなく、品質未達を低コストで相殺しないための確認です。実モデルの改善効果は未測定です。
+v0.4.0 では、共通・担当別のゴール指向方針、文書整合の acceptance、保存証拠を評価する `workflow evaluate` を追加しています。v0.3.1 には含まれません。評価は総合得点や学習時の報酬関数ではなく、品質未達を低コストで相殺しないための確認です。実モデルの行動品質・費用改善は実証しておらず、[Issue #90](https://github.com/hiono/taxion/issues/90) で公開機能とは分けて追跡します。
 
 [開発への参加方法](CONTRIBUTING.md)に、開発環境と変更時の確認事項を記載しています。[開発者向け文書の一覧](docs/develop/README.md)から、要件、現在の仕様、[ロードマップ](docs/develop/roadmap.md)、[設計判断の記録（ADR）](docs/develop/adr/)を参照できます。[脆弱性の報告](SECURITY.md)は公開 Issue ではなく、案内に従って非公開で行ってください。
