@@ -25,6 +25,7 @@ func TestOpenCodeSettingsAreExactApprovedTupleNotCredentialReuse(t *testing.T) {
 		func(c *Config) { c.Runtime.Account = "github-account" },
 		func(c *Config) { c.Runtime.CredentialRef = "github-token" },
 		func(c *Config) { c.Runtime.ACPCommand = "opencode" },
+		func(c *Config) { c.Runtime.ACPCommandHash = "invalid" },
 		func(c *Config) { c.Runtime.ACPConfigHash = "sha256:invalid" },
 		func(c *Config) { c.Runtime.Provider = "copilot" },
 	} {
@@ -46,5 +47,21 @@ func TestOpenCodeSettingsAreExactApprovedTupleNotCredentialReuse(t *testing.T) {
 	changed.Runtime.ACPConfigHash = "sha256:" + strings.Repeat("c", 64)
 	if err := CheckApproval(string(approval), "task", "approved", changed); err == nil {
 		t.Fatal("server configuration widened without new authorization")
+	}
+	unpinned := candidate
+	unpinned.Runtime.ACPCommandHash = ""
+	if err := unpinned.Validate(); err != nil {
+		t.Fatal("normal CLI updates must not require an executable pin", err)
+	}
+	if err := CheckApproval(string(approval), "task", "approved", unpinned); err == nil {
+		t.Fatal("removing an existing executable pin reused the old approval")
+	}
+	unpinnedApproval, err := json.Marshal(Approval{Kind: ApprovalKind, TaskID: "task",
+		Reason: "use the user-managed CLI at the configured path", Allowed: []Config{unpinned}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckApproval(string(unpinnedApproval), "task", "approved", unpinned); err != nil {
+		t.Fatal(err)
 	}
 }

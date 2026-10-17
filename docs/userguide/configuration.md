@@ -35,8 +35,8 @@ v0.3.1 では、端末上の未確定 provider・remote と適用確認を選択
 | `runtime.account` | Copilot runtime に使う予定の account 識別子。OpenCode は `opencode-managed` とし、account 認証は未確認として記録します。 |
 | `runtime.credentialRef` | Copilot CLI の保存済みログインは `copilot:logged-in`、環境変数で指定する場合は `env:NAME`。OpenCode は `opencode-managed` とし、他の credential を転用しません。secret 本体を書きません。 |
 | `runtime.contractRef` | AI runtime の契約・利用権を指す記録上の参照名。実際の契約適格性は確認しません。 |
-| `runtime.acpCommand` | OpenCode 専用。承認した OpenCode 1.19.0 実行ファイルの絶対パス。PATH や依頼ごとの `--cli` からは選びません。 |
-| `runtime.acpCommandHash` | 実行ファイルの内容の `sha256:` hash。起動前に照合し、検査した内容の複製を起動します。更新時は新しい Task / Dispatch の設定承認が必要です。 |
+| `runtime.acpCommand` | OpenCode 専用。承認した OpenCode 実行ファイルの絶対パス。接続には ACP v1 と必要な session 応答を要求します。PATH や依頼ごとの `--cli` からは選びません。 |
+| `runtime.acpCommandHash` | 任意。再現性が必要な環境で実行ファイルを `sha256:` hash に固定します。通常利用では省略し、同じパスの CLI 更新を許容します。指定時の不一致は拒否します。 |
 | `runtime.acpConfig` | OpenCode 専用。操作者が準備した server 設定 JSON の絶対パス。初期対応では `model` field だけを受け付け、個人設定、認証情報、plugins を読み込みません。 |
 | `runtime.acpConfigHash` | server 設定の内容の `sha256:` hash。設定を変更した場合は新しい設定承認が必要です。 |
 | `execution.requester` | Task を依頼した人または process の識別子。 |
@@ -200,9 +200,17 @@ PATH 上の native `rg` と user namespace が必要です。
 `rg` は OpenCode 内部のファイル検索と skill ロードに使います。Taxion はその実行ファイルを
 隔離内へ複製して read-only mount にし、起動できなければモデル接続前に拒否します。
 shim や shell script ではなく、隔離内でも動く native executable を PATH に置いてください。
-Taxion は承認した OpenCode 1.19.0 の実行ファイルを
+Taxion は承認した OpenCode の実行ファイルを
 複製して隔離内で `opencode acp` を起動します。準備不足で Copilot に切り替えることはありません。
 判断の背景は [ADR-0038](../develop/adr/0038-run-opencode-acp-with-sealed-role-boundaries.md)に記録しています。
+
+開発版は OpenCode の版番号の完全一致ではなく、接続時の ACP v1 と、
+承認済み model・隔離した `taxion` agent の一致を確認します。agent の名前・版は
+`acp_connection` event に残します。将来の OpenCode v2 も同じ契約を満たす場合は
+版番号だけを理由に拒否しませんが、v2 全体の動作確認済みという意味ではありません。
+ACP の非互換な版、異なる model・agent は引き続き拒否します。
+agent の名前・製品版は ACP 仕様上の任意情報であり、欠落だけで接続を拒否しません。
+通常利用では CLI の版番号確認や固定は不要です。互換性の確認は Taxion が接続時に行います。
 
 操作者が OpenCode 側で用意した設定を使います。初期対応の server 設定は、たとえば
 `{"model":"opencode/big-pickle"}` のように `model` だけを持つ JSON です。
@@ -215,7 +223,10 @@ Taxion は接続後の model を照合しますが、ACP のモデル選択操�
 
 既存 YAML の `runtime` を次の形にします。他の project・repository・execution 設定も必要です。
 hash は `sha256sum` による生の内容 hash で、`tools hash` の asset hash とは区別します。
-実行ファイルや設定の更新後は、古い Dispatch を再利用せず、新しい設定を承認します。
+通常は `acpCommandHash` を省略します。同じ `acpCommand` の CLI を更新しても、
+作業条件・設定が変わらなければ CLI 更新だけを理由に再承認を求めません。
+Taxion が起動時に実行ファイルを複製し、その内容 hash と観測した版を記録します。
+起動済みの process は複製を使い続けるため、後の CLI 更新では差し替わりません。
 
 ```yaml
 runtime:
@@ -224,13 +235,20 @@ runtime:
   credentialRef: opencode-managed
   contractRef: operator-reviewed-model-terms
   acpCommand: /absolute/path/opencode
-  acpCommandHash: sha256:<executable content hash>
   acpConfig: /absolute/private/opencode-server.json
   acpConfigHash: sha256:<configuration content hash>
 ```
 
+厳密な再現性が必要な評価環境では `acpCommandHash: sha256:<executable content hash>` を
+追加できます。その場合は従来どおり、更新で hash が変わると拒否します。
+既存設定にある pin は自動で外しません。通常利用へ切り替える場合はこの項目を省略し、
+変更後の設定を新しい Task / Dispatch で承認してください。過去の承認は書き換えません。
+`acpConfigHash` は model 等の設定変更を検出するため引き続き必須です。
+設定を変える場合は hash を再取得し、新しい設定を承認します。
+
 この構成の `doctor --json` は実行ファイルと設定の照合、隔離方式と未対応操作を表示し、
-process・session・モデルを起動しません。個人用 OpenCode の skills や plugins を
+実行ファイルの pin の有無も示します。process・session・モデルを起動せず、
+接続互換性まで確認済みとは表示しません。個人用 OpenCode の skills や plugins を
 一覧・自動読込みする構成ではありません。skills は Task の tools 承認で指定した
 directory と内容 hash だけを隔離内へ複製します。native skill の実ロードは別途確認します。
 
