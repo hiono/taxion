@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
@@ -15,8 +16,10 @@ import (
 func taskGraphCmd(command string, args []string) error {
 	fs := flag.NewFlagSet("task "+command, flag.ContinueOnError)
 	var file, repo string
+	var includeArchived bool
 	if command == "plan" {
 		fs.StringVar(&repo, "repo", "", "explicit repository for follow-up planning")
+		fs.BoolVar(&includeArchived, "include-archived", false, "include archived history without permitting execution")
 	} else if command == "track" || command == "transition" {
 		fs.StringVar(&file, "file", "", "JSON request file")
 	} else if command != "graph" {
@@ -34,7 +37,7 @@ func taskGraphCmd(command string, args []string) error {
 	}
 	defer db.Close()
 	if command == "plan" {
-		plan, err := controller.Plan(db, storePath, repo)
+		plan, err := controller.PlanWithArchived(db, storePath, repo, includeArchived)
 		if err != nil {
 			return err
 		}
@@ -113,6 +116,38 @@ func taskGraphCmd(command string, args []string) error {
 	default:
 		return fmt.Errorf("unknown task graph command %s", command)
 	}
+}
+
+func taskArchiveCmd(args []string) error {
+	fs := flag.NewFlagSet("task archive", flag.ContinueOnError)
+	tasks := fs.String("tasks", "", "comma-separated Task IDs; issued flow role Tasks are included")
+	actor := fs.String("actor", "", "actor approving retirement")
+	source := fs.String("source", "", "source of retirement approval")
+	reason := fs.String("reason", "", "reason for retiring this work")
+	dryRun := fs.Bool("dry-run", false, "preview exact scope and approval hash without writing")
+	hash := fs.String("expected-hash", "", "exact hash from the reviewed preview")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || *tasks == "" {
+		return fmt.Errorf("task archive requires --tasks ID[,ID] and no positional arguments")
+	}
+	db, _, err := loadWorkspace()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	preview, err := controller.ArchiveTasks(db, controller.ArchiveRequest{
+		TaskIDs: strings.Split(*tasks, ","), Actor: *actor, Source: *source,
+		Reason: *reason, ExpectedHash: *hash,
+	}, *dryRun)
+	if err != nil {
+		return err
+	}
+	return printJSON(struct {
+		controller.ArchivePreview
+		Archived bool `json:"archived"`
+	}{preview, !*dryRun})
 }
 
 func dispatchTransitionCmd(args []string) error {

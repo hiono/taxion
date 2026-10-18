@@ -8,7 +8,7 @@ Planner（計画）、Coder（実装）、Reviewer（独立レビュー）はエ
 
 GitHub・GitLab はコードや Issue を管理する開発基盤で、実行ハーネスとは別の設定です。たとえば GitLab のリポジトリで Copilot を利用できます。必要な CLI と認証は[設定ガイド](docs/userguide/configuration.md#認証の準備)で選択ごとに確認してください。
 
-v0.4.1 は、GitLab のサブグループを含む repository path が intake で拒否される不具合と、Git remote 照合時に親 namespace が失われる不具合を修正した版です。v0.4.0 のゴール指向方針・保存品質評価・ACP の互換性確認を引き継ぎます。実モデルによる文書作業、同一成果物の独立レビュー、部分成果からの復旧の記録は [Issue #78](https://github.com/hiono/taxion/issues/78)・[Issue #79](https://github.com/hiono/taxion/issues/79)・[Issue #80](https://github.com/hiono/taxion/issues/80)、版ごとの機能と制約は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
+v0.5.0 は、不要になった停止済み試行を履歴を保って通常一覧・計画から外す `task archive` を追加した版です。v0.4.1 の GitLab 多階層 repository 対応、v0.4.0 のゴール指向方針・保存品質評価・ACP の互換性確認を引き継ぎます。実モデルによる文書作業、同一成果物の独立レビュー、部分成果からの復旧の記録は [Issue #78](https://github.com/hiono/taxion/issues/78)・[Issue #79](https://github.com/hiono/taxion/issues/79)・[Issue #80](https://github.com/hiono/taxion/issues/80)、版ごとの機能と制約は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
 ## 使い始める
 

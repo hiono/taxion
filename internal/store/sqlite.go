@@ -233,6 +233,18 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	if err != nil {
 		return err
 	}
+	archives := slices.Clone(state.Graph.Archives)
+	archivedIDs := map[string]bool{}
+	for i := range archives {
+		archives[i].TaskIDs = slices.Clone(archives[i].TaskIDs)
+		for _, id := range archives[i].TaskIDs {
+			archivedIDs[id] = true
+		}
+	}
+	archivedBefore, err := archivedGraphContent(state.Graph, archivedIDs)
+	if err != nil {
+		return err
+	}
 	var restore *RestoreRecord
 	if state.Records.Restore != nil {
 		copy := *state.Records.Restore
@@ -253,6 +265,20 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	}
 	if err := update(&state); err != nil {
 		return err
+	}
+	if len(state.Graph.Archives) < len(archives) ||
+		len(archives) != 0 && !reflect.DeepEqual(archives, state.Graph.Archives[:len(archives)]) {
+		return fmt.Errorf("Task archive receipts are immutable")
+	}
+	if len(archives) != 0 && !state.HasGraph {
+		return fmt.Errorf("archived Task Graph cannot be removed")
+	}
+	archivedAfter, err := archivedGraphContent(state.Graph, archivedIDs)
+	if err != nil {
+		return err
+	}
+	if archivedBefore != archivedAfter {
+		return fmt.Errorf("archived contracts and execution history are immutable; use a newly approved successor")
 	}
 	if !reflect.DeepEqual(restore, state.Records.Restore) || !reflect.DeepEqual(history, state.Records.Restores) {
 		return fmt.Errorf("workspace restore receipts are immutable")
