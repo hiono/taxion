@@ -31,7 +31,7 @@ _taxion_complete() {
         'conversation search') candidates='--base-directory --cli --help --max-ai-credits --query --question --scope --sdk --task --timeout' ;;
         'conversation watch') candidates='--actor --flow --help --interactive-execution --investigation-max-bytes --question-max-ai-credits --question-timeout --source' ;;
         'dispatch') candidates='--help --related-dispatch --relationship --relationship-reason --repo --task list transition' ;;
-        'dispatch list') candidates='--help --json --repo' ;;
+        'dispatch list') candidates='--help --include-archived --json --repo' ;;
         'dispatch transition') candidates='--actor --help --id --reason --result-file --status --validation-timeout' ;;
         'doctor') candidates='--base-directory --cli --dispatch --help --json --tools --worktree fix' ;;
         'doctor fix') candidates='--dry-run --help --remote --set --yes' ;;
@@ -91,11 +91,12 @@ _taxion_complete() {
         'specification scope-hash') candidates='--help --scope' ;;
         'specification search') candidates='--help --query --scope' ;;
         'specification serve') candidates='--help --scope' ;;
-        'task') candidates='create graph list plan track transition' ;;
+        'task') candidates='archive create graph list plan track transition' ;;
+        'task archive') candidates='--actor --dry-run --expected-hash --help --reason --source --tasks' ;;
         'task create') candidates='--help --repo --title' ;;
         'task graph') candidates='' ;;
-        'task list') candidates='--help --json --repo' ;;
-        'task plan') candidates='--help --repo' ;;
+        'task list') candidates='--help --include-archived --json --repo' ;;
+        'task plan') candidates='--help --include-archived --repo' ;;
         'task track') candidates='--file --help' ;;
         'task transition') candidates='--file --help' ;;
         'tools') candidates='hash' ;;

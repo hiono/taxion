@@ -8,31 +8,31 @@ Task は一件の作業記録で、目的・変更範囲・完了条件・検証
 
 ## 導入方法
 
-v0.4.1 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
+v0.5.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
-このガイドは v0.4.1 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。
-GitLab のサブグループ付き repository path を使う場合は v0.4.1 を導入してください。ゴール指向方針・保存品質評価・ACP の互換性確認は v0.4.0 から利用できます。開発中の変更を試す場合は main のソースからビルドします。
+このガイドは v0.5.0 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。
+停止済み試行の archive を使う場合は v0.5.0 を導入してください。GitLab のサブグループ付き repository path は v0.4.1、ゴール指向方針・保存品質評価・ACP の互換性確認は v0.4.0 から利用できます。開発中の変更を試す場合は main のソースからビルドします。
 公開 tag を導入しただけでは、後から追加された機能は使えません。
 
 ```sh
 mise use -g go@1.26.0
-mise install go:github.com/hiono/taxion/cmd/taxion@v0.4.1
-mise use -g --pin go:github.com/hiono/taxion/cmd/taxion@v0.4.1
+mise install go:github.com/hiono/taxion/cmd/taxion@v0.5.0
+mise use -g --pin go:github.com/hiono/taxion/cmd/taxion@v0.5.0
 mise exec -- taxion --version
 mise exec -- taxion --help
 ```
 
-更新時も、先に `mise install` で対象版を導入し、次に `mise use --pin` で選択してから版を確認します。`v0.4.1` は導入したい公開 version に置き換えます。次は、対象プロジェクトの directory で実行する例です。
+更新時も、先に `mise install` で対象版を導入し、次に `mise use --pin` で選択してから版を確認します。`v0.5.0` は導入したい公開 version に置き換えます。次は、対象プロジェクトの directory で実行する例です。
 
 ```sh
-mise install go:github.com/hiono/taxion/cmd/taxion@v0.4.1
-mise use --pin go:github.com/hiono/taxion/cmd/taxion@v0.4.1
+mise install go:github.com/hiono/taxion/cmd/taxion@v0.5.0
+mise use --pin go:github.com/hiono/taxion/cmd/taxion@v0.5.0
 mise exec -- taxion --version
 ```
 
-v0.4.1 の期待する表示は `taxion v0.4.1` です。global 設定を更新する場合は `mise use` に `-g` を付けます。プロジェクトの mise 設定に Taxion の指定がある場合は、global 設定よりそちらが優先されるため、プロジェクト側も更新してください。
+v0.5.0 の期待する表示は `taxion v0.5.0` です。global 設定を更新する場合は `mise use` に `-g` を付けます。プロジェクトの mise 設定に Taxion の指定がある場合は、global 設定よりそちらが優先されるため、プロジェクト側も更新してください。
 
-旧開発版が導入済みの場合、`mise use` だけでは、古い pseudo-version が再選択されることがあります。`--pin` は解決した版を保存する指定で、この再選択を防ぐものではありません。先に `mise install ...@v0.4.1` を実行して正式版を導入してください。古い版の個別削除や cache 消去、`.taxion` の設定・DB の削除や初期化し直しは不要です。
+旧開発版が導入済みの場合、`mise use` だけでは、古い pseudo-version が再選択されることがあります。`--pin` は解決した版を保存する指定で、この再選択を防ぐものではありません。先に `mise install ...@v0.5.0` を実行して正式版を導入してください。古い版の個別削除や cache 消去、`.taxion` の設定・DB の削除や初期化し直しは不要です。
 
 v0.3.1 では `taxion --help` の先頭に `Version:` を表示し、`taxion --version` でも同じビルド情報を確認できます。Go の module version を使うため、公開 tag の導入では `v0.3.1`、commit 固定の導入では完全な pseudo-version を表示します。Git 情報を持つソースビルドでは revision と、未コミット変更がある場合の `modified=true` も表示します。情報のないビルドを公開版と推測せず、取得できない旨を表示します。設定・DB・外部 CLI は読みません。公開済み v0.3.0 と初回設定補正版 `dd352cf` には、この版表示は含まれません。
 
@@ -51,7 +51,7 @@ mise unuse -g go:github.com/hiono/taxion/cmd/taxion
 Go backend の導入済み version が残り、他の設定でも使っていなければ、mise から個別に削除できます。
 
 ```sh
-mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.4.1
+mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.5.0
 ```
 
 ソースから実行する場合は Go 1.26.0 が必要です。
@@ -460,6 +460,41 @@ taxion workflow show --id task-example-flow
 この実行例は `worktree-tree-snapshot` 用です。commit mode を選ぶ場合、file tool だけでは commit を作れません。必要な secret scanner を用意し、[CLI リファレンス](cli-reference.md)の `--managed-commit` と `--managed-stage` を使うか、承認されたホスト操作で commit を作る手順を別に定めます。
 
 ## 結果の確認と停止後の継続
+
+### 不要になった試行を一覧と計画から外す
+
+v0.5.0 の archive は、不要と判断した試行を通常の一覧と次の作業計画から外します。
+保存履歴は消さず、元の Task を完了扱いにもしません。Git の変更・branch・worktree・
+一時ファイル・設定・DB・Memory の削除や初期化は行いません。
+
+まず実行を停止し、残る Dispatch と runner を確認・必要に応じて復旧してください。
+稼働中・suspended Dispatch、稼働中 Flow、未解放 runner、未解決の外部公開がある間は
+archive を拒否します。保存状態の検査なので、別端末の未記録 process の停止まで
+保証するものではありません。
+
+```sh
+taxion task archive --tasks TASK-ID --actor human --source human:discard \
+  --reason "この試行は不要になった" --dry-run
+taxion task archive --tasks TASK-ID --actor human --source human:discard \
+  --reason "この試行は不要になった" --expected-hash 'sha256:DRY-RUNのhash'
+```
+
+dry-run は対象の `taskIds`・`flowIds`・`dispatchIds` と `hash` を表示し、記録を変更しません。
+同じ Flow の発行済み role Task も対象に含まれるため、一覧を確認してから適用します。
+別の非終了 Task から参照される場合は拒否します。その作業も不要と判断した場合だけ、
+`--tasks TASK-A,TASK-B` で明示的に対象へ含め、dry-run をやり直してください。
+出典・理由または workspace が変わった場合も、確認 hash を取り直す必要があります。
+
+通常の `task list`・`dispatch list`・`task plan` は退役済みの記録を除外します。
+HTTP の ledger／Task／Dispatch 一覧は従来どおり保存記録を返します。archive は CLI から行い、
+HTTP の後続計画も退役済み Task を除外します。
+履歴は各コマンドの `--include-archived`、`task graph`、`workflow show --id FLOW-ID`
+などで確認できます。元 Task の編集・再開は拒否し、新しい実行には別途承認した
+後続 Task を使います。取り消し・物理削除は今回の機能には含まれません。
+archive 記録を持つ DB は v0.4.1 以前に戻して使わないでください。
+
+古い branch や実装を入力源として選んだ問題は、archive では解決しません。
+次の依頼を始める前に、対象 branch・commit と受理済み成果を別に確認してください。
 
 ### v0.4.0 のゴール指向方針と保存証拠の評価
 

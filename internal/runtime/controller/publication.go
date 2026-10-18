@@ -124,6 +124,9 @@ func ApprovePublication(ctx context.Context, db *store.Store, request Publicatio
 }
 
 func checkPublicationTask(state *store.Workspace, update store.ExternalUpdate) error {
+	if state.Graph.IsArchived(update.TaskID) {
+		return fmt.Errorf("taxion: archived Task cannot authorize external publication")
+	}
 	proposal := update
 	proposal.Hash, proposal.Status, proposal.Claim, proposal.RemoteID, proposal.Error = "", "", "", "", ""
 	proposal.At = time.Time{}

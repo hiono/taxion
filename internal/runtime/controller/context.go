@@ -218,7 +218,7 @@ type PlannerFlow struct {
 // ObservePlannerContext is input for judgment, not a judgment or permission to
 // execute. Related review results are included without nested instructions.
 func ObservePlannerContext(db *store.Store, ledgerPath, repository, taskID string) (PlannerContext, error) {
-	plan, err := Plan(db, ledgerPath, repository)
+	plan, err := PlanWithArchived(db, ledgerPath, repository, true)
 	if err != nil {
 		return PlannerContext{}, err
 	}
