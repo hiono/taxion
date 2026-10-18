@@ -13,6 +13,15 @@ import (
 )
 
 func TestVerifyBindsChangesToRepositoryWorktreeAndSHA(t *testing.T) {
+	for _, repo := range []string{"owner/repo", "group/subgroup/project"} {
+		t.Run(repo, func(t *testing.T) {
+			testVerifyRepositoryWorktreeAndSHA(t, repo)
+		})
+	}
+}
+
+func testVerifyRepositoryWorktreeAndSHA(t *testing.T, repo string) {
+	t.Helper()
 	root := filepath.Join(t.TempDir(), "repo")
 	if err := os.MkdirAll(root, 0755); err != nil {
 		t.Fatal(err)
@@ -20,18 +29,18 @@ func TestVerifyBindsChangesToRepositoryWorktreeAndSHA(t *testing.T) {
 	gitCommand(t, root, "init", "-b", "work/task")
 	gitCommand(t, root, "config", "user.name", "Taxion Test")
 	gitCommand(t, root, "config", "user.email", "taxion-test@example.com")
-	gitCommand(t, root, "remote", "add", "origin", "git@github.com:owner/repo.git")
+	gitCommand(t, root, "remote", "add", "origin", "git@gitlab.example.com:"+repo+".git")
 	baseline := commitFile(t, root, "README.md", "baseline")
 	outputSHA := commitFile(t, root, "docs/guide.md", "update")
 	dispatch := core.GraphDispatch{
-		ID: "dispatch", TaskID: "task", Recipient: "CODER", Repository: "owner/repo",
+		ID: "dispatch", TaskID: "task", Recipient: "CODER", Repository: repo,
 		Instruction: core.DispatchInstruction{
 			Branch: "work/task", Worktree: root, BaselineSHA: baseline,
 			AuthorizedActions: []string{"docs"},
 		},
 	}
 	result := &core.DispatchResult{
-		DispatchID: "dispatch", TaskID: "task", Recipient: "CODER", Repository: "owner/repo",
+		DispatchID: "dispatch", TaskID: "task", Recipient: "CODER", Repository: repo,
 		Status: core.DispatchSucceeded, StartedSHA: baseline, OutputSHA: outputSHA,
 		ChangedFiles: []string{"docs/guide.md"},
 		Validations: []core.DispatchValidation{{

@@ -257,10 +257,10 @@ login 済みアカウントの受入れを追加する前に、合成 fixture �
 tag 作成前に開発環境の全確認コマンドを実行し、`git diff` と `git diff --cached` に非公開情報がないか確認します。GitHub Release に載せる本文を確認済み動作と利用上の制約に合わせ、候補 commit の SHA を固定します。通常は受入れ条件を満たしてから公開します。例外を承認した場合は Issue に未達条件と理由を記録します。tag と同名の Release が既にある場合は、対象 SHA と状態を確認し、自動で削除・移動しません。
 
 ```bash
-git tag -a v0.4.0 -m "Taxion 0.4.0"
-git push origin v0.4.0
-git rev-parse 'v0.4.0^{commit}'
-git ls-remote origin 'refs/tags/v0.4.0*'
+git tag -a v0.4.1 -m "Taxion 0.4.1"
+git push origin v0.4.1
+git rev-parse 'v0.4.1^{commit}'
+git ls-remote origin 'refs/tags/v0.4.1*'
 ```
 
 公開した tag の対象 commit が固定した候補と一致することを確認します。その後、既存の設定・インストールに影響しない隔離環境で、[利用者ガイドの導入・更新・削除手順](docs/userguide/user-guide.md#導入方法)を実行します。旧正式版からの更新だけでなく、旧開発版の pseudo-version が導入済みの状態でも、`mise install` → `mise use --pin` → `taxion --version` で対象の正式版になることを確認します。pseudo-version の過去成功を公開 tag の導入成功として扱いません。失敗した場合は Release object を公開せず、tag を保持して失敗箇所を記録します。
@@ -268,9 +268,9 @@ git ls-remote origin 'refs/tags/v0.4.0*'
 導入確認の成功後に、GitHub Release 用の Markdown 本文を repository 外で確定し、確認結果を Issue に記録します。例外承認がある場合は、Issue に受入れ未達と判断を記録してから公開します。次の操作は tag が存在することを要求し、GitHub CLI による暗黙の tag 作成を避けます。
 
 ```bash
-gh release create v0.4.0 --verify-tag --title "Taxion 0.4.0" \
-  --notes-file /tmp/taxion-v0.4.0-release-notes.md
-gh release view v0.4.0 --json tagName,targetCommitish,isDraft,isPrerelease,url,body
+gh release create v0.4.1 --verify-tag --title "Taxion 0.4.1" \
+  --notes-file /tmp/taxion-v0.4.1-release-notes.md
+gh release view v0.4.1 --json tagName,targetCommitish,isDraft,isPrerelease,url,body
 ```
 
 Release の tag・本文・公開状態と URL を再取得し、送信したノートと対象 tag を照合します。Release 作成後の記録だけで、未実施の導入確認や実 SDK 受入れを補ったことにはしません。

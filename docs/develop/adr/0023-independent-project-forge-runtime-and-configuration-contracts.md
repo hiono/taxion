@@ -162,6 +162,25 @@ credential API による有効性検証は無効とする。
 規則による検出と credential の実効認証は別の確認であり、
 検出漏れ・誤検知の範囲を仕様と #72 の検証記録に残す。
 
+### 2026-10-18 追補：repository の完全な namespace を保持する
+
+v0.4.0 の Task Graph は repository を2セグメントに限定し、Git origin の
+識別処理も末尾2セグメントへ短縮していた。設定と GitLab API が扱える
+サブグループ付きパスを intake が拒否するため、共通契約へ GitHub の
+owner/repository 構造を持ち込んだ不具合として修正する。
+
+共通契約は namespace と repository を含む2セグメント以上の正規パスを保持する。
+空セグメント、`.`・`..`、空白や URL の構成文字を拒否し、深さを2段に制限しない。
+GitLab の [公式文書](https://docs.gitlab.com/user/group/subgroups/)は subgroup の
+最大20段の入れ子を説明する。共通 core に provider 固有の上限を追加せず、
+API 上の作成・存在・権限の判定は選択した provider に委ねる。
+
+HTTPS・SSH URL・SCP 形式の Git remote からも完全な namespace を保持し、
+同じ末尾を持つ別の親 namespace を同一対象として受理しない。
+Task と設定の一致、host の照合、exact-hash 承認は維持する。
+既存の承認・保存契約を自動修正せず、短縮した別名で回避した Task は
+正しい対象への承認を得るまで再利用しない。
+
 ## Consequences
 
 M12 #69 は共通契約と既存 GitHub＋Copilot による主体の明示選択を実装し、
