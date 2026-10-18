@@ -17,13 +17,29 @@ import (
 )
 
 func TestIntakeSeparatesOriginalRequestExactConfirmationAndExecution(t *testing.T) {
+	for _, repo := range []string{"owner/repo", "group/subgroup/project", strings.Repeat("group/", 21) + "project"} {
+		t.Run(repo, func(t *testing.T) {
+			testIntakeRepositoryConfirmation(t, repo)
+		})
+	}
+}
+
+func testIntakeRepositoryConfirmation(t *testing.T, repo string) {
+	t.Helper()
 	db, _, _, resolved := executionConfigurationFixture(t)
 	resolved.Config.Execution.ApprovalRef = "intake-configuration-approval"
+	resolved.Config.Repository.Path = repo
+	if strings.Count(repo, "/") > 1 {
+		resolved.Config.Repository.Provider = "gitlab"
+		resolved.Config.Repository.Host = "gitlab.example.com"
+		resolved.Config.Repository.CredentialRef = "glab:active"
+	}
 	state, err := db.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)
 	}
 	task, _ := state.Graph.GraphTask("task")
+	task.Repo = repo
 	task.ID, task.Status, task.AuthorizationID, task.Decisions = "intake", core.Draft, "", nil
 	proposal := IntakeRequest{Request: "Implement the requested behavior without changing unrelated files.", Task: task, Actor: "human", Source: "human:request"}
 	saved, err := ProposeIntake(db, proposal)
@@ -42,6 +58,11 @@ func TestIntakeSeparatesOriginalRequestExactConfirmationAndExecution(t *testing.
 		Reason: "Confirm this scope, acceptance, validation, actors and contract.", Selection: resolved.Config,
 		AdditionalTaskIDs: []string{"intake-flow-review-0", "intake-flow-review-1"}}
 	before, _ := db.LoadWorkspace()
+	wrongRepository := confirmation
+	wrongRepository.Selection.Repository.Path = "other/" + repo
+	if _, err := ConfirmIntake(db, wrongRepository); err == nil {
+		t.Fatal("confirmation accepted a different parent namespace")
+	}
 	stale := confirmation
 	stale.ExpectedHash = "different"
 	if _, err := ConfirmIntake(db, stale); err == nil {

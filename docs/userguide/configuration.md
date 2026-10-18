@@ -28,7 +28,7 @@ v0.3.1 では、端末上の未確定 provider・remote と適用確認を選択
 | `project.id` | project の識別子。 |
 | `repository.provider` | `github`、`gitlab`、`bitbucket` のいずれか。provider ごとの実装範囲は異なります。 |
 | `repository.host` | 接続先 hostname と任意の port。例: `github.com`。 |
-| `repository.path` | owner または namespace と repository 名。例: `owner/repository`。 |
+| `repository.path` | 完全な owner／namespace と repository 名。例: `owner/repository`、GitLab の `group/subgroup/project`。Task・承認・Git remote には同じ完全なパスを使い、2段へ短縮しません。 |
 | `repository.account` | Git repository 操作に使う予定の account 識別子。認証済み account の証明ではありません。 |
 | `repository.credentialRef` | GitHub の保存済みログインは `gh:active`、GitLab は `glab:active`、環境変数で指定する場合は `env:NAME`。secret 本体を書きません。 |
 | `runtime.provider` | `copilot` または `opencode`。OpenCode は Linux の隔離実行に限定します。 |

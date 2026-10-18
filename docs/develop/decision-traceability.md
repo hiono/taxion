@@ -85,7 +85,7 @@ ADR-0001〜0040 はすべて `Accepted` の判断を記録する。採択は選�
 | [0020](adr/0020-layered-memory-and-role-sessions-for-orchestration.md) | orchestration に階層化した Memory と role 別 session を採用する | `runtime-contract.md`、`memory-model.md`、`orchestration-requirements.md` |
 | [0021](adr/0021-durable-task-graph-and-dispatch-change-control.md) | Task Graph を保存し、Dispatch の変更を管理する | `task-graph.md` |
 | [0022](adr/0022-sqlite-atomic-workspace-state.md) | Ledger、Task Graph、Dispatch 状態を SQLite に atomic に保存する | `ledger-schema.md`、`task-graph.md`、`execution-records.md` |
-| [0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md) | project、開発基盤、Runtime、設定の契約を分ける | `configuration.md`、`forge-capabilities.md` |
+| [0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md) | project、開発基盤、Runtime、設定の契約を分け、repository の完全な namespace を保持する | `configuration.md`、`forge-capabilities.md`。v0.4.1 で共通処理の2段制限・Git origin の短縮を修正 |
 | [0024](adr/0024-human-handoff-control-and-side-questions.md) | 引継ぎ制御と、active 作業を変えない質問を分ける | `orchestration-requirements.md`、`task-graph.md`、`execution-records.md` |
 | [0025](adr/0025-approved-local-specification-search-and-tools.md) | 承認済みローカル仕様検索と role 別 tool を使う | `orchestration-requirements.md`、`specification-input.md` |
 | [0026](adr/0026-bind-file-access-levels-to-task-approval.md) | exact・committed・worktree 全体の file access を Task 承認に結び付ける | `runtime-contract.md`、`task-graph.md`、`user-guide.md` |
