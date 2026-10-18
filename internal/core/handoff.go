@@ -104,6 +104,9 @@ func (g *TaskGraph) ChangeHandoff(flowID string, change HandoffChange) (ReviewFl
 }
 
 func (g TaskGraph) CheckHandoff(taskID string) error {
+	if g.IsArchived(taskID) {
+		return graphError("Task %s is archived; use a newly approved successor", taskID)
+	}
 	task, ok := g.task(taskID)
 	if !ok {
 		return graphError("handoff check requires a tracked Task")
@@ -131,6 +134,9 @@ func (g TaskGraph) CheckHandoffStart(dispatchID string) error {
 	dispatch, ok := g.dispatch(dispatchID)
 	if !ok {
 		return graphError("handoff start check requires a saved Dispatch")
+	}
+	if g.IsArchived(dispatch.TaskID) {
+		return graphError("Task %s is archived; execution is not permitted", dispatch.TaskID)
 	}
 	if dispatch.ExecutionStarted {
 		return nil

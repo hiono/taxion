@@ -459,6 +459,7 @@ type TaskGraph struct {
 	Dispatches      []GraphDispatch `json:"dispatches"`
 	DispatchHistory []DispatchEvent `json:"dispatchHistory"`
 	ReviewFlows     []ReviewFlow    `json:"reviewFlows,omitempty"`
+	Archives        []TaskArchive   `json:"archives,omitempty"`
 }
 
 func graphError(format string, args ...any) error {
@@ -1736,7 +1737,10 @@ func (g TaskGraph) Validate() error {
 			}
 		}
 	}
-	return g.validateReviewFlows()
+	if err := g.validateReviewFlows(); err != nil {
+		return err
+	}
+	return g.validateArchives()
 }
 
 func equalJSON(a, b any) bool {
@@ -1787,6 +1791,10 @@ func (g TaskGraph) CheckExecutable(id, repo string) error {
 
 func cloneGraph(g TaskGraph) TaskGraph {
 	copy := g
+	copy.Archives = slices.Clone(g.Archives)
+	for i := range copy.Archives {
+		copy.Archives[i].TaskIDs = slices.Clone(copy.Archives[i].TaskIDs)
+	}
 	copy.ReviewFlows = slices.Clone(g.ReviewFlows)
 	for i := range copy.ReviewFlows {
 		copy.ReviewFlows[i].Contract = cloneTask(copy.ReviewFlows[i].Contract)
@@ -1990,6 +1998,9 @@ func cloneHumanDecision(request *HumanDecisionRequest) *HumanDecisionRequest {
 }
 
 func (g *TaskGraph) Track(t GraphTask, actor, reason string) error {
+	if g.IsArchived(t.ID) {
+		return graphError("Task %s is archived; use a newly approved successor", t.ID)
+	}
 	next := cloneGraph(*g)
 	t = cloneTask(t)
 	if old, ok := next.task(t.ID); ok {
@@ -2088,6 +2099,9 @@ func allowedTransition(from, to TaskStatus) bool {
 }
 
 func (g *TaskGraph) Transition(id string, status TaskStatus, actor, reason string, proof TransitionProof) error {
+	if g.IsArchived(id) {
+		return graphError("Task %s is archived; use a newly approved successor", id)
+	}
 	next := cloneGraph(*g)
 	proof.Evidence = slices.Clone(proof.Evidence)
 	proof.Acceptance = slices.Clone(proof.Acceptance)
