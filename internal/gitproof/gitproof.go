@@ -330,10 +330,10 @@ func repositoryIdentity(remote string) string {
 	if len(parts) < 2 {
 		return ""
 	}
-	return strings.Join(parts[len(parts)-2:], "/")
+	return value
 }
 
-// RepositoryIdentity preserves the existing origin identity used by Git proof.
+// RepositoryIdentity preserves the complete namespace used by Git proof.
 func RepositoryIdentity(remote string) string {
 	return repositoryIdentity(remote)
 }

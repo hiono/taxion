@@ -96,6 +96,11 @@ func reviewFlowFixtureWithOutputMode(t *testing.T, outputMode string,
 
 func reviewFlowFixtureWithPolicy(t *testing.T, outputMode string, guidance *core.BudgetGuidancePolicy,
 	decisions ...core.TaskDecision) (*store.Store, string, ReviewFlowRequest) {
+	return reviewFlowFixtureWithRepository(t, "owner/repo", outputMode, guidance, decisions...)
+}
+
+func reviewFlowFixtureWithRepository(t *testing.T, repo, outputMode string, guidance *core.BudgetGuidancePolicy,
+	decisions ...core.TaskDecision) (*store.Store, string, ReviewFlowRequest) {
 	t.Helper()
 	dir := t.TempDir()
 	root := filepath.Join(dir, "repo")
@@ -105,7 +110,11 @@ func reviewFlowFixtureWithPolicy(t *testing.T, outputMode string, guidance *core
 	gitTest(t, root, "init", "-b", "work/task")
 	gitTest(t, root, "config", "user.name", "Taxion Test")
 	gitTest(t, root, "config", "user.email", "taxion-test@example.com")
-	gitTest(t, root, "remote", "add", "origin", "https://github.com/owner/repo.git")
+	remote := "https://github.com/" + repo + ".git"
+	if strings.Count(repo, "/") > 1 {
+		remote = "https://gitlab.example.com/" + repo + ".git"
+	}
+	gitTest(t, root, "remote", "add", "origin", remote)
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("baseline"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +136,7 @@ func reviewFlowFixtureWithPolicy(t *testing.T, outputMode string, guidance *core
 	}
 	graph := core.TaskGraph{Version: 1}
 	task := core.GraphTask{
-		ID: "implementation", Title: "Implement application", Repo: "owner/repo", Type: "IMPLEMENTATION",
+		ID: "implementation", Title: "Implement application", Repo: repo, Type: "IMPLEMENTATION",
 		Issue: "Issue #53", Owner: "CODER", Reviewer: "REVIEWER", Status: core.Draft,
 		Objective: "Implement application", Scope: []string{"internal"}, OutOfScope: []string{"README.md"},
 		Acceptance: []string{"application tested"}, RequiredEvidence: []string{"test-report"},
@@ -296,8 +305,17 @@ func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, ve
 }
 
 func TestReviewFlowCompletesForUncommittedTreeSnapshot(t *testing.T) {
-	db, ledger, request := reviewFlowFixtureWithOutputMode(
-		t, core.OutputModeWorktreeTreeSnapshot)
+	for _, repo := range []string{"owner/repo", "group/subgroup/project", strings.Repeat("group/", 21) + "project"} {
+		t.Run(repo, func(t *testing.T) {
+			testReviewFlowCompletesForRepository(t, repo)
+		})
+	}
+}
+
+func testReviewFlowCompletesForRepository(t *testing.T, repo string) {
+	t.Helper()
+	db, ledger, request := reviewFlowFixtureWithRepository(
+		t, repo, core.OutputModeWorktreeTreeSnapshot, nil)
 	flow, err := StartReviewFlow(db, ledger, request)
 	if err != nil {
 		t.Fatal(err)
@@ -358,6 +376,11 @@ func TestReviewFlowCompletesForUncommittedTreeSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	task, _ := state.Graph.GraphTask(flow.TaskID)
+	for _, dispatch := range state.Graph.Dispatches {
+		if dispatch.Repository != repo || dispatch.Result == nil || dispatch.Result.Repository != repo {
+			t.Fatal("repository identity changed during Coder/Reviewer flow", dispatch)
+		}
+	}
 	if task.Status != core.Completed || task.TargetSHA != repaired.Result.OutputSHA ||
 		task.TargetTreeSHA != repaired.Result.OutputTreeSHA {
 		t.Fatalf("Task completed without exact tree approval: %+v", task)

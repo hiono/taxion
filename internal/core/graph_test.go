@@ -22,6 +22,27 @@ func graphTask(id string) GraphTask {
 		FileAccess: DefaultFileAccessPolicy()}
 }
 
+func TestGraphRepositoryPreservesNestedNamespaces(t *testing.T) {
+	for _, repo := range []string{"owner/repo", "group/subgroup/project", strings.Repeat("group/", 21) + "project"} {
+		task := graphTask("nested")
+		task.Repo = repo
+		graph := trackedGraph(t, task)
+		if graph.Tasks[0].Repo != repo {
+			t.Fatal("repository namespace changed", graph.Tasks[0].Repo)
+		}
+	}
+	for _, repo := range []string{"repo", "/owner/repo", "owner/repo/", "group//repo", "group/./repo",
+		"group/../repo", "group/sub group/repo", "group/sub\r/repo", `group\sub/repo`,
+		"group/sub%2Frepo", "group/sub?query/repo", "https://host/group/repo"} {
+		graph := TaskGraph{Version: 1}
+		task := graphTask("invalid")
+		task.Repo = repo
+		if err := graph.Track(task, "human", "register"); err == nil {
+			t.Fatal("accepted noncanonical repository", repo)
+		}
+	}
+}
+
 func trackedGraph(t *testing.T, tasks ...GraphTask) TaskGraph {
 	t.Helper()
 	g := TaskGraph{Version: 1}

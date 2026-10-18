@@ -8,31 +8,31 @@ Task は一件の作業記録で、目的・変更範囲・完了条件・検証
 
 ## 導入方法
 
-v0.4.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
+v0.4.1 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
-このガイドは v0.4.0 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。
-ゴール指向方針・保存品質評価・ACP の互換性確認を使う場合は v0.4.0 を導入してください。開発中の変更を試す場合は main のソースからビルドします。
+このガイドは v0.4.1 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。
+GitLab のサブグループ付き repository path を使う場合は v0.4.1 を導入してください。ゴール指向方針・保存品質評価・ACP の互換性確認は v0.4.0 から利用できます。開発中の変更を試す場合は main のソースからビルドします。
 公開 tag を導入しただけでは、後から追加された機能は使えません。
 
 ```sh
 mise use -g go@1.26.0
-mise install go:github.com/hiono/taxion/cmd/taxion@v0.4.0
-mise use -g --pin go:github.com/hiono/taxion/cmd/taxion@v0.4.0
+mise install go:github.com/hiono/taxion/cmd/taxion@v0.4.1
+mise use -g --pin go:github.com/hiono/taxion/cmd/taxion@v0.4.1
 mise exec -- taxion --version
 mise exec -- taxion --help
 ```
 
-更新時も、先に `mise install` で対象版を導入し、次に `mise use --pin` で選択してから版を確認します。`v0.4.0` は導入したい公開 version に置き換えます。次は、対象プロジェクトの directory で実行する例です。
+更新時も、先に `mise install` で対象版を導入し、次に `mise use --pin` で選択してから版を確認します。`v0.4.1` は導入したい公開 version に置き換えます。次は、対象プロジェクトの directory で実行する例です。
 
 ```sh
-mise install go:github.com/hiono/taxion/cmd/taxion@v0.4.0
-mise use --pin go:github.com/hiono/taxion/cmd/taxion@v0.4.0
+mise install go:github.com/hiono/taxion/cmd/taxion@v0.4.1
+mise use --pin go:github.com/hiono/taxion/cmd/taxion@v0.4.1
 mise exec -- taxion --version
 ```
 
-v0.4.0 の期待する表示は `taxion v0.4.0` です。global 設定を更新する場合は `mise use` に `-g` を付けます。プロジェクトの mise 設定に Taxion の指定がある場合は、global 設定よりそちらが優先されるため、プロジェクト側も更新してください。
+v0.4.1 の期待する表示は `taxion v0.4.1` です。global 設定を更新する場合は `mise use` に `-g` を付けます。プロジェクトの mise 設定に Taxion の指定がある場合は、global 設定よりそちらが優先されるため、プロジェクト側も更新してください。
 
-旧開発版が導入済みの場合、`mise use` だけでは、古い pseudo-version が再選択されることがあります。`--pin` は解決した版を保存する指定で、この再選択を防ぐものではありません。先に `mise install ...@v0.4.0` を実行して正式版を導入してください。古い版の個別削除や cache 消去、`.taxion` の設定・DB の削除や初期化し直しは不要です。
+旧開発版が導入済みの場合、`mise use` だけでは、古い pseudo-version が再選択されることがあります。`--pin` は解決した版を保存する指定で、この再選択を防ぐものではありません。先に `mise install ...@v0.4.1` を実行して正式版を導入してください。古い版の個別削除や cache 消去、`.taxion` の設定・DB の削除や初期化し直しは不要です。
 
 v0.3.1 では `taxion --help` の先頭に `Version:` を表示し、`taxion --version` でも同じビルド情報を確認できます。Go の module version を使うため、公開 tag の導入では `v0.3.1`、commit 固定の導入では完全な pseudo-version を表示します。Git 情報を持つソースビルドでは revision と、未コミット変更がある場合の `modified=true` も表示します。情報のないビルドを公開版と推測せず、取得できない旨を表示します。設定・DB・外部 CLI は読みません。公開済み v0.3.0 と初回設定補正版 `dd352cf` には、この版表示は含まれません。
 
@@ -51,7 +51,7 @@ mise unuse -g go:github.com/hiono/taxion/cmd/taxion
 Go backend の導入済み version が残り、他の設定でも使っていなければ、mise から個別に削除できます。
 
 ```sh
-mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.4.0
+mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.4.1
 ```
 
 ソースから実行する場合は Go 1.26.0 が必要です。
