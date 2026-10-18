@@ -51,6 +51,10 @@ type PlanningDependency struct {
 }
 
 func Plan(db *store.Store, ledgerPath, repo string) (FollowUpPlan, error) {
+	return PlanWithArchived(db, ledgerPath, repo, false)
+}
+
+func PlanWithArchived(db *store.Store, ledgerPath, repo string, includeArchived bool) (FollowUpPlan, error) {
 	if db == nil || strings.TrimSpace(repo) == "" {
 		return FollowUpPlan{}, fmt.Errorf("taxion: planning requires a store and explicit repository")
 	}
@@ -64,13 +68,13 @@ func Plan(db *store.Store, ledgerPath, repo string) (FollowUpPlan, error) {
 	}
 	plan := FollowUpPlan{Repository: repo, Tasks: []PlanningTask{}}
 	for _, stored := range state.Graph.ReviewFlows {
-		if stored.Contract.Repo == repo {
+		if stored.Contract.Repo == repo && (includeArchived || !state.Graph.IsArchived(stored.TaskID)) {
 			flow, _ := state.Graph.ReviewFlow(stored.ID)
 			plan.ReviewFlows = append(plan.ReviewFlows, flow)
 		}
 	}
 	for _, task := range state.Graph.Tasks {
-		if task.Repo != repo {
+		if task.Repo != repo || !includeArchived && state.Graph.IsArchived(task.ID) {
 			continue
 		}
 		step := PlanningTask{
@@ -117,10 +121,13 @@ func Plan(db *store.Store, ledgerPath, repo string) (FollowUpPlan, error) {
 			}
 		}
 		handoffErr := state.Graph.CheckHandoff(task.ID)
-		if handoffErr != nil && !errors.Is(handoffErr, core.ErrHandoffHeld) {
+		if handoffErr != nil && !errors.Is(handoffErr, core.ErrHandoffHeld) && !state.Graph.IsArchived(task.ID) {
 			return FollowUpPlan{}, handoffErr
 		}
 		switch {
+		case state.Graph.IsArchived(task.ID):
+			step.Action = "ARCHIVED"
+			step.Instruction = "History only. Do not resume or modify this Task; use a newly approved successor for new execution."
 		case slices.Contains([]core.TaskStatus{core.Completed, core.Rejected, core.Cancelled, core.Superseded}, task.Status):
 			step.Action = "RETAIN"
 			step.Instruction = "Reuse this Task ID, decisions and outcome when comparing later work with existing work."
@@ -173,7 +180,7 @@ func Plan(db *store.Store, ledgerPath, repo string) (FollowUpPlan, error) {
 		}
 		plan.Tasks = append(plan.Tasks, step)
 	}
-	if len(plan.Tasks) == 0 {
+	if len(plan.Tasks) == 0 && !slices.ContainsFunc(state.Graph.Tasks, func(task core.GraphTask) bool { return task.Repo == repo }) {
 		return FollowUpPlan{}, fmt.Errorf("%w: no tracked Tasks for repository %q", core.ErrGraphRejected, repo)
 	}
 	content, err := json.Marshal(plan)

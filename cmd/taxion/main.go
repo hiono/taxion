@@ -52,16 +52,17 @@ Setup and discovery:
 Requests, planning and Task contracts:
   request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --timeout, --max-ai-credits)
   task create         Create a task (--title and --repo required)
-  task list           List tasks ([--repo] filter, [--json])
+  task list           List unarchived tasks ([--repo] filter, [--json], [--include-archived])
+  task archive        Preview/retire stopped Tasks and flow roles without deleting history (--tasks, --actor, --source, --reason; --dry-run then --expected-hash)
   task track          Register/update a durable Task Graph contract (--file JSON)
   task transition     Validate and record a Task Graph transition (--file JSON)
   task graph          Print the versioned Task Graph and history
-  task plan           Rebuild a follow-up plan from durable contracts and evidence (--repo required)
+  task plan           Rebuild a follow-up plan from durable contracts and evidence (--repo required; --include-archived for history)
 
 Dispatch and configuration binding:
   dispatch            Dispatch a task (--task and --repo required; revised Dispatches need an explicit relationship)
   dispatch transition Record a Dispatch lifecycle transition (--id, --status, --reason)
-  dispatch list       List dispatches ([--repo] filter, [--json])
+  dispatch list       List unarchived tasks' dispatches ([--repo] filter, [--json], [--include-archived])
   config bind         Save an approved fixed-file configuration selection for an unbound Dispatch
 
 Conversation, investigation and source attachment:
@@ -319,9 +320,11 @@ func newID(prefix string) string {
 
 func taskCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: taxion task create|list …")
+		return fmt.Errorf("usage: taxion task create|list|archive|track|transition|graph|plan …")
 	}
 	switch args[0] {
+	case "archive":
+		return taskArchiveCmd(args[1:])
 	case "track", "transition", "graph", "plan":
 		return taskGraphCmd(args[0], args[1:])
 	case "create":
@@ -350,6 +353,7 @@ func taskCmd(args []string) error {
 		fs := flag.NewFlagSet("task list", flag.ContinueOnError)
 		repo := fs.String("repo", "", "filter by repository identity")
 		asJSON := fs.Bool("json", false, "JSON output")
+		includeArchived := fs.Bool("include-archived", false, "include archived Tasks")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -361,7 +365,7 @@ func taskCmd(args []string) error {
 		l := state.Ledger
 		var tasks []core.Task
 		for _, t := range l.Tasks {
-			if *repo == "" || t.Repo == *repo {
+			if (*repo == "" || t.Repo == *repo) && (*includeArchived || !state.Graph.IsArchived(t.ID)) {
 				tasks = append(tasks, t)
 			}
 		}
@@ -377,7 +381,7 @@ func taskCmd(args []string) error {
 		}
 		return nil
 	default:
-		return fmt.Errorf("usage: taxion task create|list …")
+		return fmt.Errorf("usage: taxion task create|list|archive|track|transition|graph|plan …")
 	}
 }
 
@@ -392,16 +396,19 @@ func dispatchCmd(args []string) error {
 		fs := flag.NewFlagSet("dispatch list", flag.ContinueOnError)
 		repo := fs.String("repo", "", "filter by repository identity")
 		asJSON := fs.Bool("json", false, "JSON output")
+		includeArchived := fs.Bool("include-archived", false, "include Dispatches for archived Tasks")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		l, err := loadStore()
+		db, state, err := loadWorkspace()
 		if err != nil {
 			return err
 		}
+		defer db.Close()
+		l := state.Ledger
 		var ds []core.Dispatch
 		for _, d := range l.Dispatches {
-			if *repo == "" || d.Repo == *repo {
+			if (*repo == "" || d.Repo == *repo) && (*includeArchived || !state.Graph.IsArchived(d.TaskID)) {
 				ds = append(ds, d)
 			}
 		}
