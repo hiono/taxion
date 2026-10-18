@@ -1524,9 +1524,14 @@ func (g TaskGraph) Validate() error {
 		}
 	}
 	for _, t := range g.Tasks {
-		if !nonempty(t.Title) || !nonempty(t.CreatedFrom) || len(strings.Split(t.Repo, "/")) != 2 ||
-			strings.ContainsAny(t.Repo, " \t\n") || strings.HasPrefix(t.Repo, "/") || strings.HasSuffix(t.Repo, "/") {
+		if !nonempty(t.Title) || !nonempty(t.CreatedFrom) || len(strings.Split(t.Repo, "/")) < 2 ||
+			strings.ContainsAny(t.Repo, " \t\r\n\\:?#%") {
 			return graphError("task %s requires title, source and namespace/repository", t.ID)
+		}
+		for _, segment := range strings.Split(t.Repo, "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return graphError("task %s requires nonempty canonical repository path segments", t.ID)
+			}
 		}
 		if !slices.Contains([]string{"INVESTIGATION", "DESIGN", "IMPLEMENTATION", "REVIEW", "EVIDENCE_COLLECTION"}, t.Type) || !validStatus(t.Status) {
 			return graphError("invalid type or status for %s", t.ID)

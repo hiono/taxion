@@ -14,6 +14,22 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+func TestPortableOriginPreservesNestedNamespace(t *testing.T) {
+	repo := "group/subgroup/project"
+	for _, remote := range []string{"https://gitlab.example.com/" + repo + ".git",
+		"git@gitlab.example.com:" + repo + ".git", "ssh://git@gitlab.example.com/" + repo + ".git"} {
+		origin, err := safeOrigin(remote, repo)
+		if err != nil || origin != "https://gitlab.example.com/"+repo+".git" {
+			t.Fatal("portable origin lost its namespace", origin, err)
+		}
+		for _, other := range []string{"subgroup/project", "another/" + repo} {
+			if _, err := safeOrigin(remote, other); err == nil {
+				t.Fatal("portable snapshot accepted a different namespace", other)
+			}
+		}
+	}
+}
+
 func TestPortableObjectDependenciesIncludeParentHistory(t *testing.T) {
 	root := t.TempDir()
 	run := func(args ...string) []byte {
