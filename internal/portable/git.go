@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/memory"
@@ -22,12 +23,13 @@ import (
 )
 
 type repository struct {
-	ID     string            `json:"id"`
-	Origin string            `json:"origin"`
-	Pack   string            `json:"pack"`
-	Roots  []string          `json:"roots"`
-	Refs   map[string]string `json:"refs"`
-	Paths  []location        `json:"paths"`
+	ID        string            `json:"id"`
+	Origin    string            `json:"origin"`
+	Pack      string            `json:"pack"`
+	Roots     []string          `json:"roots"`
+	Refs      map[string]string `json:"refs"`
+	Paths     []location        `json:"paths"`
+	Endpoints *config.Endpoints `json:"endpoints,omitempty"`
 }
 
 type location struct {
@@ -205,18 +207,22 @@ func collectRepositories(ctx context.Context, state store.Workspace, add func([]
 			if err != nil {
 				return nil, err
 			}
+			var endpoints *config.Endpoints
 			for _, d := range state.Graph.Dispatches {
 				if d.Repository == id {
 					if err := gitproof.VerifyRepositoryRemote(d, strings.TrimSpace(string(remote))); err != nil {
 						return nil, err
 					}
+					if declared := gitproof.EndpointsFromSelection(d.Configuration); declared != nil {
+						endpoints = declared
+					}
 				}
 			}
-			origin, err := safeOrigin(strings.TrimSpace(string(remote)), id)
+			origin, err := bindOrigin(strings.TrimSpace(string(remote)), id, endpoints)
 			if err != nil {
 				return nil, err
 			}
-			r.Origin, source = origin, candidate
+			r.Origin, r.Endpoints, source = origin, endpoints, candidate
 			break
 		}
 		if source == "" {
@@ -350,4 +356,26 @@ func safeOrigin(remote, repository string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("portable snapshot requires a network repository identity, not a local origin")
+}
+
+// bindOrigin records the canonical HTTPS clone URL. Without explicit endpoints
+// it keeps the legacy form; with them it keeps the configured clone prefix so
+// the saved origin matches the remote the operator actually cloned.
+func bindOrigin(remote, repository string, endpoints *config.Endpoints) (string, error) {
+	if endpoints == nil {
+		return safeOrigin(remote, repository)
+	}
+	host, port, segments, err := endpoints.CloneBinding()
+	if err != nil {
+		return "", fmt.Errorf("REP-002 endpoints.httpsCloneBase %w", err)
+	}
+	authority := host
+	if port != "" {
+		authority = host + ":" + port
+	}
+	prefix := ""
+	if len(segments) > 0 {
+		prefix = strings.Join(segments, "/") + "/"
+	}
+	return "https://" + authority + "/" + prefix + repository + ".git", nil
 }
