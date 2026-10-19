@@ -182,3 +182,87 @@ func TestLiveGitLabRepositoryAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGitLabEndpointIdentityUsesOneResponse(t *testing.T) {
+	selected := gitLabConfig(t)
+	selected.Endpoints = config.Endpoints{
+		APIBase: "https://gitlab.example/git/api/v4", WebBase: "https://gitlab.example/git",
+		HTTPSCloneBase: "https://gitlab.example/git", SSHHost: "gitlab.example",
+		SSHPort: "2222", ProjectID: "191",
+	}
+	project := `{"id":191,"path_with_namespace":"group/subgroup/repo",` +
+		`"ssh_url_to_repo":"ssh://git@gitlab.example:2222/group/subgroup/repo.git",` +
+		`"http_url_to_repo":"https://gitlab.example/git/group/subgroup/repo.git",` +
+		`"web_url":"https://gitlab.example/git/group/subgroup/repo",` +
+		`"permissions":{"project_access":{"access_level":20}}}`
+	query := func(endpoint string) ([]byte, error) {
+		if endpoint == "user" {
+			return []byte(`{"username":"scm-user"}`), nil
+		}
+		return []byte(project), nil
+	}
+	if err := checkGitLabAccess(selected, true, query); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string][2]string{
+		"other numeric identity": {`"id":191`, `"id":192`},
+		"other clone prefix":     {`https://gitlab.example/git/group/subgroup/repo.git`, `https://gitlab.example/github/group/subgroup/repo.git`},
+		"other SSH port":         {`ssh://git@gitlab.example:2222/`, `ssh://git@gitlab.example:2223/`},
+		"other web address":      {`"web_url":"https://gitlab.example/git/group/subgroup/repo"`, `"web_url":"https://gitlab.example/git/group/subgroup/other"`},
+		"missing clone address":  {`"http_url_to_repo":"https://gitlab.example/git/group/subgroup/repo.git"`, `"http_url_to_repo":""`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			broken := strings.Replace(project, change[0], change[1], 1)
+			err := checkGitLabAccess(selected, true, func(endpoint string) ([]byte, error) {
+				if endpoint == "user" {
+					return []byte(`{"username":"scm-user"}`), nil
+				}
+				return []byte(broken), nil
+			})
+			if err == nil || !strings.Contains(err.Error(), "REP-006") {
+				t.Fatal("API identity mismatch was not reported as REP-006", err)
+			}
+		})
+	}
+	t.Run("other authenticated account", func(t *testing.T) {
+		err := checkGitLabAccess(selected, false, func(endpoint string) ([]byte, error) {
+			if endpoint == "user" {
+				return []byte(`{"username":"other-user"}`), nil
+			}
+			return []byte(project), nil
+		})
+		if err == nil || !strings.Contains(err.Error(), "REP-006") {
+			t.Fatal("account mismatch was not reported as REP-006", err)
+		}
+	})
+	t.Run("unparsable API response", func(t *testing.T) {
+		err := checkGitLabAccess(selected, false, func(endpoint string) ([]byte, error) {
+			if endpoint == "user" {
+				return []byte(`{"username":"scm-user"}`), nil
+			}
+			return []byte(`{"id":`), nil
+		})
+		if err == nil || !strings.Contains(err.Error(), "REP-006") {
+			t.Fatal("unparsable API response was not reported as REP-006", err)
+		}
+	})
+	unavailable := errors.New("query unavailable")
+	err := checkGitLabAccess(selected, false, func(endpoint string) ([]byte, error) {
+		if endpoint == "user" {
+			return []byte(`{"username":"scm-user"}`), nil
+		}
+		return nil, unavailable
+	})
+	if err == nil || !strings.Contains(err.Error(), "REP-006") || !errors.Is(err, unavailable) {
+		t.Fatal("unreachable API was not reported as a fail-closed REP-006", err)
+	}
+	legacy := gitLabConfig(t)
+	if err := checkGitLabAccess(legacy, false, func(endpoint string) ([]byte, error) {
+		if endpoint == "user" {
+			return []byte(`{"username":"scm-user"}`), nil
+		}
+		return nil, unavailable
+	}); !errors.Is(err, unavailable) || strings.Contains(err.Error(), "REP-006") {
+		t.Fatal("legacy access checks changed", err)
+	}
+}

@@ -2,10 +2,12 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -39,7 +41,39 @@ type Config struct {
 		ApprovalRef    string `yaml:"approvalRef" json:"approvalRef"`
 		BudgetGuidance string `yaml:"budgetGuidance,omitempty" json:"budgetGuidance,omitempty"`
 	} `yaml:"execution" json:"execution"`
+	Endpoints Endpoints `yaml:"endpoints,omitempty" json:"endpoints,omitempty"`
 }
+
+// Endpoints separates the addresses a GitLab instance serves from the project
+// path. The API base, the web base, the HTTPS clone prefix, the SSH host and
+// port, and the numeric project ID are distinct identities that legacy
+// repository.host and repository.path cannot express.
+type Endpoints struct {
+	APIBase        string `yaml:"apiBase" json:"apiBase"`
+	WebBase        string `yaml:"webBase" json:"webBase"`
+	HTTPSCloneBase string `yaml:"httpsCloneBase" json:"httpsCloneBase"`
+	SSHHost        string `yaml:"sshHost" json:"sshHost"`
+	SSHPort        string `yaml:"sshPort" json:"sshPort"`
+	ProjectID      string `yaml:"projectId" json:"projectId"`
+}
+
+// Empty reports whether no endpoint field was declared.
+func (e Endpoints) Empty() bool { return e == Endpoints{} }
+
+// CloneBinding returns the HTTPS clone prefix host, port, and path segments.
+func (e Endpoints) CloneBinding() (string, string, []string, error) {
+	host, port, path, err := parseEndpointURL(e.HTTPSCloneBase, false)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if path == "" {
+		return host, port, nil, nil
+	}
+	return host, port, strings.Split(strings.TrimPrefix(path, "/"), "/"), nil
+}
+
+// HasEndpoints reports whether an explicit endpoints group is declared.
+func (c Config) HasEndpoints() bool { return !c.Endpoints.Empty() }
 
 // Load checks configuration shape and references, not external authentication
 // or the authority of an approval reference.
@@ -122,6 +156,7 @@ func (c Config) Validate() error {
 }
 
 func (c *Config) fields() map[string]*string {
+	endpoints := &c.Endpoints
 	return map[string]*string{
 		"project.id":          &c.Project.ID,
 		"repository.provider": &c.Repository.Provider, "repository.host": &c.Repository.Host,
@@ -134,6 +169,34 @@ func (c *Config) fields() map[string]*string {
 		"execution.requester": &c.Execution.Requester, "execution.worker": &c.Execution.Worker,
 		"execution.approvalRef":    &c.Execution.ApprovalRef,
 		"execution.budgetGuidance": &c.Execution.BudgetGuidance,
+		"endpoints.apiBase":        &endpoints.APIBase, "endpoints.webBase": &endpoints.WebBase,
+		"endpoints.httpsCloneBase": &endpoints.HTTPSCloneBase, "endpoints.sshHost": &endpoints.SSHHost,
+		"endpoints.sshPort": &endpoints.SSHPort, "endpoints.projectId": &endpoints.ProjectID,
+	}
+}
+
+// MarshalJSON omits an all-empty endpoints block so legacy selections and
+// snapshots keep their existing shape.
+func (c Config) MarshalJSON() ([]byte, error) {
+	type configJSON Config
+	if c.Endpoints.Empty() {
+		shadow := struct {
+			configJSON
+			Endpoints *Endpoints `json:"endpoints,omitempty"`
+		}{configJSON: configJSON(c)}
+		return json.Marshal(shadow)
+	}
+	return json.Marshal(configJSON(c))
+}
+
+func endpointFields(c Config) map[string]string {
+	if c.Endpoints.Empty() {
+		return map[string]string{}
+	}
+	return map[string]string{
+		"endpoints.apiBase": c.Endpoints.APIBase, "endpoints.webBase": c.Endpoints.WebBase,
+		"endpoints.httpsCloneBase": c.Endpoints.HTTPSCloneBase, "endpoints.sshHost": c.Endpoints.SSHHost,
+		"endpoints.sshPort": c.Endpoints.SSHPort, "endpoints.projectId": c.Endpoints.ProjectID,
 	}
 }
 
@@ -142,7 +205,8 @@ func (c Config) validate(required bool) error {
 		return fmt.Errorf("configuration requires version 1")
 	}
 	for name, value := range c.fields() {
-		optional := name == "execution.budgetGuidance" || strings.HasPrefix(name, "runtime.acp")
+		optional := name == "execution.budgetGuidance" || strings.HasPrefix(name, "runtime.acp") ||
+			strings.HasPrefix(name, "endpoints.")
 		if required && *value == "" && !optional || strings.ContainsAny(*value, " \t\r\n") {
 			return fmt.Errorf("%s requires a nonempty identifier without whitespace", name)
 		}
@@ -150,6 +214,9 @@ func (c Config) validate(required bool) error {
 			c.Execution.BudgetGuidance != "flow" && c.Execution.BudgetGuidance != "account" {
 			return fmt.Errorf("execution.budgetGuidance requires off, flow, or account")
 		}
+	}
+	if err := c.validateEndpoints(required); err != nil {
+		return err
 	}
 	switch c.Repository.Provider {
 	case "", "github", "gitlab", "bitbucket":
@@ -206,4 +273,104 @@ func validAssetHash(hash string) bool {
 		}
 	}
 	return true
+}
+
+// validateEndpoints enforces the endpoint contract. A layer may declare part of
+// the group because layers merge field by field, but a fully declared group,
+// and every required group, must satisfy every rule.
+func (c Config) validateEndpoints(required bool) error {
+	values := endpointFields(c)
+	if len(values) == 0 {
+		return nil
+	}
+	declared := 0
+	for _, value := range values {
+		if value != "" {
+			declared++
+		}
+	}
+	if declared == 0 {
+		return nil
+	}
+	if declared < len(values) {
+		if !required {
+			return nil
+		}
+		return fmt.Errorf("REP-002 endpoints require apiBase, webBase, httpsCloneBase, sshHost, sshPort, and projectId together")
+	}
+	apiHost, apiPort, apiPath, err := parseEndpointURL(values["endpoints.apiBase"], true)
+	if err != nil {
+		return fmt.Errorf("REP-002 endpoints.apiBase %w", err)
+	}
+	webHost, webPort, _, err := parseEndpointURL(values["endpoints.webBase"], false)
+	if err != nil {
+		return fmt.Errorf("REP-002 endpoints.webBase %w", err)
+	}
+	cloneHost, clonePort, _, err := parseEndpointURL(values["endpoints.httpsCloneBase"], false)
+	if err != nil {
+		return fmt.Errorf("REP-002 endpoints.httpsCloneBase %w", err)
+	}
+	sshHost := values["endpoints.sshHost"]
+	if parsed, err := url.Parse("https://" + sshHost); err != nil || parsed.Hostname() == "" ||
+		parsed.Host != sshHost || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" ||
+		parsed.Fragment != "" || strings.ContainsAny(sshHost, "\\?#") {
+		return fmt.Errorf("REP-002 endpoints.sshHost requires a hostname without a port, scheme, or path")
+	}
+	if !strings.EqualFold(apiHost, webHost) || !strings.EqualFold(apiHost, cloneHost) || !strings.EqualFold(apiHost, sshHost) {
+		return fmt.Errorf("REP-002 endpoints require one hostname across apiBase, webBase, httpsCloneBase, and sshHost")
+	}
+	if apiPort != webPort || apiPort != clonePort {
+		return fmt.Errorf("REP-002 endpoints require one port across apiBase, webBase, and httpsCloneBase")
+	}
+	if !decimal(values["endpoints.sshPort"], 1, 65535) {
+		return fmt.Errorf("REP-002 endpoints.sshPort requires a decimal TCP port between 1 and 65535")
+	}
+	if !decimal(values["endpoints.projectId"], 1, 0) {
+		return fmt.Errorf("REP-002 endpoints.projectId requires a positive decimal project ID")
+	}
+	if !strings.HasSuffix(apiPath, "/api/v4") {
+		return fmt.Errorf("REP-002 endpoints.apiBase requires an API path ending in /api/v4")
+	}
+	return nil
+}
+
+// parseEndpointURL accepts an https URL with canonical path segments and no
+// credentials, query, or fragment, and returns its host, port, and path.
+func parseEndpointURL(value string, requireAPIPath bool) (string, string, string, error) {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil ||
+		parsed.RawQuery != "" || parsed.Fragment != "" || strings.ContainsAny(value, "\\?#%") {
+		return "", "", "", fmt.Errorf("requires an https URL without credentials, query, fragment, or percent-encoding")
+	}
+	path := strings.TrimSuffix(parsed.Path, "/")
+	if strings.Contains(path, "//") {
+		return "", "", "", fmt.Errorf("requires canonical path segments")
+	}
+	if path != "" {
+		for _, segment := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return "", "", "", fmt.Errorf("requires canonical path segments")
+			}
+		}
+	}
+	if requireAPIPath && path == "" {
+		return "", "", "", fmt.Errorf("requires an API path ending in /api/v4")
+	}
+	return parsed.Hostname(), parsed.Port(), path, nil
+}
+
+func decimal(value string, minimum, maximum int) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	number, err := strconv.Atoi(value)
+	if err != nil || number < minimum {
+		return false
+	}
+	return maximum == 0 || number <= maximum
 }
