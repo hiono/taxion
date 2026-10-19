@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,40 +58,49 @@ func validGitLabHost(host string) bool {
 }
 
 func checkGitLabAccess(selected config.Config, write bool, query func(string) ([]byte, error)) error {
-	return checkGitLabTarget(selected.Repository.Path, selected.Repository.Account, write, query)
+	var endpoints *config.Endpoints
+	if selected.HasEndpoints() {
+		declared := selected.Endpoints
+		endpoints = &declared
+	}
+	return checkGitLabTargetEndpoints(endpoints, selected.Repository.Path, selected.Repository.Account, write, query)
 }
 
+// checkGitLabTarget verifies the API target for a repository selected without
+// an endpoints group.
 func checkGitLabTarget(path, account string, write bool, query func(string) ([]byte, error)) error {
+	return checkGitLabTargetEndpoints(nil, path, account, write, query)
+}
+
+// checkGitLabTargetEndpoints verifies the API target. An explicit endpoints
+// group adds the same-response identity cross-check; without one the legacy
+// checks stay.
+func checkGitLabTargetEndpoints(endpoints *config.Endpoints, path, account string, write bool, query func(string) ([]byte, error)) error {
 	user, err := query("user")
 	if err != nil {
-		return err
+		return gitlabQueryError(endpoints, err)
 	}
 	var identity struct {
 		Username string `json:"username"`
 	}
 	if json.Unmarshal(user, &identity) != nil || identity.Username == "" {
-		return fmt.Errorf("taxion: repository authentication identity is unconfirmed; provider details withheld")
+		return s5Error(endpoints, fmt.Errorf("taxion: repository authentication identity is unconfirmed; provider details withheld"))
 	}
 	if !strings.EqualFold(identity.Username, account) {
-		return fmt.Errorf("taxion: effective repository account does not match the expected account")
+		return s5Error(endpoints, fmt.Errorf("taxion: effective repository account does not match the expected account"))
 	}
 	body, err := query("projects/" + url.PathEscape(path))
 	if err != nil {
-		return err
+		return gitlabQueryError(endpoints, err)
 	}
-	var project struct {
-		PathWithNamespace string `json:"path_with_namespace"`
-		Permissions       struct {
-			ProjectAccess *struct {
-				AccessLevel int `json:"access_level"`
-			} `json:"project_access"`
-			GroupAccess *struct {
-				AccessLevel int `json:"access_level"`
-			} `json:"group_access"`
-		} `json:"permissions"`
-	}
+	var project gitlabProject
 	if json.Unmarshal(body, &project) != nil || !strings.EqualFold(project.PathWithNamespace, path) {
-		return fmt.Errorf("taxion: repository access target is unconfirmed; provider details withheld")
+		return s5Error(endpoints, fmt.Errorf("taxion: repository access target is unconfirmed; provider details withheld"))
+	}
+	if endpoints != nil {
+		if err := verifyProjectEndpoints(*endpoints, path, project); err != nil {
+			return err
+		}
 	}
 	level := 0
 	if project.Permissions.ProjectAccess != nil {
@@ -100,10 +110,82 @@ func checkGitLabTarget(path, account string, write bool, query func(string) ([]b
 		level = project.Permissions.GroupAccess.AccessLevel
 	}
 	if level < 10 {
-		return fmt.Errorf("taxion: selected repository credential has no confirmed read permission")
+		return s5Error(endpoints, fmt.Errorf("taxion: selected repository credential has no confirmed read permission"))
 	}
 	if write && level < 20 {
-		return fmt.Errorf("taxion: selected repository credential has no confirmed external-record write permission")
+		return s5Error(endpoints, fmt.Errorf("taxion: selected repository credential has no confirmed external-record write permission"))
+	}
+	return nil
+}
+
+// gitlabProject is one project record. Every endpoint identity is checked
+// against fields of the same API response, never against a name or an object
+// hash alone.
+type gitlabProject struct {
+	ID                int    `json:"id"`
+	PathWithNamespace string `json:"path_with_namespace"`
+	SSHURLToRepo      string `json:"ssh_url_to_repo"`
+	HTTPURLToRepo     string `json:"http_url_to_repo"`
+	WebURL            string `json:"web_url"`
+	Permissions       struct {
+		ProjectAccess *struct {
+			AccessLevel int `json:"access_level"`
+		} `json:"project_access"`
+		GroupAccess *struct {
+			AccessLevel int `json:"access_level"`
+		} `json:"group_access"`
+	} `json:"permissions"`
+}
+
+func gitlabQueryError(endpoints *config.Endpoints, err error) error {
+	return s5Error(endpoints, err)
+}
+
+// s5Error labels API-stage failures with REP-006 when the repository selected an
+// endpoints group, so S5 stays distinguishable from the remote binding stages.
+func s5Error(endpoints *config.Endpoints, err error) error {
+	if endpoints != nil {
+		return fmt.Errorf("REP-006 GitLab API identity cannot be verified: %w", err)
+	}
+	return err
+}
+
+// verifyProjectEndpoints checks the numeric project ID and the SSH clone, HTTPS
+// clone, and web addresses from one API response against the approved
+// endpoints, so a matching project name in another namespace cannot pass.
+func verifyProjectEndpoints(endpoints config.Endpoints, repository string, project gitlabProject) error {
+	host, port, segments, err := endpoints.CloneBinding()
+	if err != nil {
+		return fmt.Errorf("REP-006 GitLab API identity cannot be verified: REP-002 endpoints.httpsCloneBase %w", err)
+	}
+	authority := host
+	if port != "" {
+		authority = host + ":" + port
+	}
+	prefix := ""
+	if len(segments) > 0 {
+		prefix = strings.Join(segments, "/") + "/"
+	}
+	expected := map[string]string{
+		"id":               strings.TrimSpace(strconv.Itoa(project.ID)),
+		"http_url_to_repo": "https://" + authority + "/" + prefix + repository + ".git",
+		"ssh_url_to_repo":  "ssh://git@" + endpoints.SSHHost + ":" + endpoints.SSHPort + "/" + repository + ".git",
+		"web_url":          strings.TrimSuffix(endpoints.WebBase, "/") + "/" + repository,
+	}
+	if endpoints.ProjectID != expected["id"] {
+		return fmt.Errorf("REP-006 GitLab API project ID %s differs from the approved project ID %s", expected["id"], endpoints.ProjectID)
+	}
+	for _, key := range []string{"http_url_to_repo", "ssh_url_to_repo", "web_url"} {
+		actual := project.HTTPURLToRepo
+		switch key {
+		case "ssh_url_to_repo":
+			actual = project.SSHURLToRepo
+		case "web_url":
+			actual = project.WebURL
+		}
+		if !strings.EqualFold(actual, expected[key]) {
+			return fmt.Errorf("REP-006 GitLab API %s %q differs from the approved address %q for repository %q", key, actual, expected[key], repository)
+		}
 	}
 	return nil
 }
