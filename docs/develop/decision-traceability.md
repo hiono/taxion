@@ -59,7 +59,7 @@ Milestone に割り当てられた75 Issue すべてについて、表の該当�
 
 ## ADR の状態と現在の参照先
 
-ADR-0001〜0041 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。
+ADR-0001〜0042 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。
 
 | ADR | 判断 | 現在の参照先・適用範囲 |
 | --- | --- | --- |
@@ -104,6 +104,7 @@ ADR-0001〜0041 はすべて `Accepted` の判断を記録する。採択は選�
 | [0039](adr/0039-prepare-project-configuration-with-explicit-repair.md) | 設定と DB の基点を揃え、init と doctor fix で不足を補い、実 CLI から bash 補完を生成する | `user-guide.md`、`configuration.md`、`cli-reference.md`。初期設定はモデル実行・契約・送信・Task・予算の承認を行わない |
 | [0040](adr/0040-constrain-goal-oriented-efficiency-by-quality-evidence.md) | 最終成果を共通・担当別方針へ接続し、文書整合と同一 target の品質証拠を費用評価の前提にする | `runtime-contract.md`、`cli-reference.md`、`user-guide.md`。v0.4.0 の実装公開と #90 の行動・費用改善の実証を分ける |
 | [0041](adr/0041-archive-retired-tasks-without-erasing-history.md) | 停止済みの不要な試行を通常一覧・計画から外し、承認・実行履歴と参照を残す | #103、`task-graph.md`、`cli-reference.md`、`user-guide.md`。v0.5.0 の archive は物理削除や Git cleanup を行わない |
+| [0042](adr/0042-gitlab-endpoint-binding-separates-api-clone-and-ssh-identities.md) | GitLab の subpath と標準外の SSH port を独立した endpoint として照合し、legacy 設定と version 1 snapshot の動作を変えない | #105、`configuration.md`、`guardrails.md`。v0.6.0 で公開する |
 
 ADR-0026〜0028 は、初回利用と復旧の調査後に追加した。ローカルの実 Git・fake Runtime テストで、許可範囲、同一 tree の引継ぎ、successor の照合を確認した。停止専用操作では、旧 suspended Dispatch を終了し、追加モデル指示・利用量なしで部分 Git 証拠と両方の結果 receipt を保持した。
 

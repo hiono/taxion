@@ -6,10 +6,30 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 )
 
 func VerifyRepositoryRemote(dispatch core.GraphDispatch, remote string) error {
+	if dispatch.Configuration != nil {
+		var selected struct {
+			Repository struct {
+				Host string `json:"host"`
+				Path string `json:"path"`
+			} `json:"repository"`
+			Endpoints *config.Endpoints `json:"endpoints"`
+		}
+		if json.Unmarshal(dispatch.Configuration.Selection, &selected) == nil &&
+			selected.Endpoints != nil && !selected.Endpoints.Empty() {
+			if selected.Repository.Path != "" && selected.Repository.Path != dispatch.Repository {
+				return fmt.Errorf("REP-004 Git repository configuration differs from the approved path")
+			}
+			if err := VerifyEndpointsRemote(*selected.Endpoints, dispatch.Repository, remote); err != nil {
+				return err
+			}
+			return nil
+		}
+	}
 	if !strings.EqualFold(repositoryIdentity(remote), dispatch.Repository) {
 		return fmt.Errorf("Git repository path differs")
 	}

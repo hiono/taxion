@@ -155,7 +155,7 @@ func TestPortableArchiveRejectsCorruptionAndIncompleteManifest(t *testing.T) {
 					if err := json.Unmarshal([]byte(content), &m); err != nil {
 						t.Fatal(err)
 					}
-					m.Version = 2
+					m.Version = 3
 					if change == "repository" {
 						m.Version = 1
 						m.Repositories = []repository{{ID: "owner/repo", Origin: "file:///private"}}

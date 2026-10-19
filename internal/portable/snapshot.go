@@ -217,6 +217,12 @@ func Create(ctx context.Context, workspace, memoryPath, output string) (Report, 
 	if err != nil {
 		return Report{}, err
 	}
+	for _, repository := range m.Repositories {
+		if repository.Endpoints != nil {
+			m.Version = 2
+			break
+		}
+	}
 	content, err := json.Marshal(m)
 	if err != nil {
 		return Report{}, err
@@ -289,7 +295,7 @@ func readArchive(input, directory string) (manifest, map[string][]byte, Report, 
 	if err := core.DecodeGraphInput(strings.NewReader(content), &m); err != nil {
 		return m, nil, Report{}, err
 	}
-	if m.Version != 1 {
+	if m.Version != 1 && m.Version != 2 {
 		return m, nil, Report{}, fmt.Errorf("unsupported portable snapshot version")
 	}
 	blobs := map[string][]byte{}
@@ -323,8 +329,8 @@ func readArchive(input, directory string) (manifest, map[string][]byte, Report, 
 			return m, nil, Report{}, fmt.Errorf("invalid portable repository identity")
 		}
 		seen[repo.ID] = true
-		if origin, err := safeOrigin(repo.Origin, repo.ID); err != nil || origin != repo.Origin {
-			return m, nil, Report{}, fmt.Errorf("invalid portable repository origin")
+		if err := checkSnapshotOrigin(m.Version, repo); err != nil {
+			return m, nil, Report{}, err
 		}
 		required = append(required, repo.Pack)
 		report.Worktrees += len(repo.Paths)

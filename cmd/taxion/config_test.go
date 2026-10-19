@@ -271,3 +271,66 @@ execution:
 		t.Fatal("invalid input succeeded or leaked its value")
 	}
 }
+
+func TestConfigCheckReportsExplicitEndpointIdentity(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	input := `version: 1
+project: {id: project-a}
+repository:
+  provider: gitlab
+  host: gitlab.example.com
+  path: group/subgroup/application
+  account: developer-a
+  credentialRef: scm-credential
+runtime:
+  provider: copilot
+  account: developer-b
+  credentialRef: ai-credential
+  contractRef: company-contract
+execution:
+  requester: developer-a
+  worker: local-worker
+  approvalRef: decision-1
+endpoints:
+  apiBase: https://gitlab.example.com/git/api/v4
+  webBase: https://gitlab.example.com/git
+  httpsCloneBase: https://gitlab.example.com/git
+  sshHost: gitlab.example.com
+  sshPort: "2222"
+  projectId: "191"
+`
+	userDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(userDir, "taxion", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(input), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := checkConfig([]string{"check", "--sources"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"repository.identityMode: explicit endpoints",
+		"endpoints.apiBase: user", "endpoints.sshPort: user", "endpoints.projectId: user"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatal("field origin or identity mode missing", want, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "git/api/v4") {
+		t.Fatal("sources output exposed endpoint values")
+	}
+	broken := strings.Replace(input, "https://gitlab.example.com/git", "https://other.example.com/git", 1)
+	if err := os.WriteFile(path, []byte(broken), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	err = checkConfig([]string{"check", "--sources"}, &output)
+	if err == nil || !strings.Contains(err.Error(), "REP-002") || output.Len() != 0 {
+		t.Fatal("inconsistent endpoint hosts were not refused as REP-002", err)
+	}
+}
