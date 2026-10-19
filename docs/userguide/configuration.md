@@ -31,6 +31,12 @@ v0.3.1 では、端末上の未確定 provider・remote と適用確認を選択
 | `repository.path` | 完全な owner／namespace と repository 名。例: `owner/repository`、GitLab の `group/subgroup/project`。Task・承認・Git remote には同じ完全なパスを使い、2段へ短縮しません。 |
 | `repository.account` | Git repository 操作に使う予定の account 識別子。認証済み account の証明ではありません。 |
 | `repository.credentialRef` | GitHub の保存済みログインは `gh:active`、GitLab は `glab:active`、環境変数で指定する場合は `env:NAME`。secret 本体を書きません。 |
+| `endpoints.apiBase` | 任意。GitLab API の URL。`/api/v4` で終わる https URL。`endpoints` を書く場合は6項目すべてが必要です。 |
+| `endpoints.webBase` | 任意。GitLab の Web UI の URL。https URL。 |
+| `endpoints.httpsCloneBase` | 任意。HTTPS clone の URL prefix。https URL。`apiBase`・`webBase`・`sshHost` と同じ hostname を、大文字小文字を区別せず共有します。3つの URL の port は同じ値にします。 |
+| `endpoints.sshHost` | 任意。SSH clone の hostname。port を含めません。 |
+| `endpoints.sshPort` | 任意。SSH clone の port。10進数の 1〜65535。標準外の port は `ssh://` URL だけが表現できます。 |
+| `endpoints.projectId` | 任意。GitLab の数値 project ID。同じ API 応答の `path_with_namespace` と clone URL を同時に照合します。 |
 | `runtime.provider` | `copilot` または `opencode`。OpenCode は Linux の隔離実行に限定します。 |
 | `runtime.account` | Copilot runtime に使う予定の account 識別子。OpenCode は `opencode-managed` とし、account 認証は未確認として記録します。 |
 | `runtime.credentialRef` | Copilot CLI の保存済みログインは `copilot:logged-in`、環境変数で指定する場合は `env:NAME`。OpenCode は `opencode-managed` とし、他の credential を転用しません。secret 本体を書きません。 |
@@ -43,6 +49,8 @@ v0.3.1 では、端末上の未確定 provider・remote と適用確認を選択
 | `execution.worker` | 実行環境・worker の識別子。 |
 | `execution.approvalRef` | Task に結び付ける設定承認の識別子。 |
 | `execution.budgetGuidance` | 残予算の送信補足。`off`・`flow`・`account`。省略時は `flow`。依頼ごとの明示指定を優先する。 |
+
+GitLab を subpath で公開し、SSH に標準外の port を使う場合は `endpoints` を書きます。判断の背景と照合の段階は [ADR-0042](../develop/adr/0042-gitlab-endpoint-binding-separates-api-clone-and-ssh-identities.md) に記録しています。
 
 ```yaml
 version: 1
