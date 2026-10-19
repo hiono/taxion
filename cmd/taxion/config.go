@@ -69,6 +69,13 @@ func checkConfig(args []string, output io.Writer) error {
 		}
 	}
 	if *sources {
+		mode := "repository.host/path"
+		if resolved.Config.HasEndpoints() {
+			mode = "explicit endpoints"
+		}
+		if _, err := fmt.Fprintf(output, "repository.identityMode: %s\n", mode); err != nil {
+			return err
+		}
 		var names []string
 		for name := range resolved.Sources {
 			names = append(names, name)
