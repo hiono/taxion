@@ -55,13 +55,42 @@ func authorizeManifest(t *testing.T, task core.GraphTask) string {
 	return path
 }
 
+func authorizeProposalHash(t *testing.T, task core.GraphTask) string {
+	t.Helper()
+	guidance, err := newTaskBudgetGuidance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.BudgetGuidance = guidance
+	ledger, err := core.LoadLedger(storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := (core.TaskGraph{Version: 1}).ValidateTracking(task, "human", "approve once", nil, ledger, false)
+	if !report.Valid {
+		t.Fatalf("proposal is invalid: %v", report.ValidatorErrors)
+	}
+	return report.CanonicalSHA256
+}
+
 func TestTaskAuthorizeStoresOneAppendOnlyBundle(t *testing.T) {
 	_, task := authorizeWorkspace(t)
 	file := authorizeManifest(t, task)
 	if err := taskCmd([]string{"authorize", "--manifest", file}); err != nil {
-		t.Fatalf("authorize failed: %v", err)
+		t.Fatalf("basis review failed: %v", err)
 	}
 	graph, _, _, err := loadGraphReadOnly()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Approvals) != 0 {
+		t.Fatal("authorize wrote before the human confirmed the proposal hash")
+	}
+	confirm := authorizeProposalHash(t, task)
+	if err := taskCmd([]string{"authorize", "--manifest", file, "--confirm", confirm}); err != nil {
+		t.Fatalf("authorize failed: %v", err)
+	}
+	graph, _, _, err = loadGraphReadOnly()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,15 +117,15 @@ func TestTaskAuthorizeStoresOneAppendOnlyBundle(t *testing.T) {
 	}
 
 	proposal := bundle.ProposalHash
-	if err := taskCmd([]string{"authorize", "--manifest", file}); err != nil {
+	if err := taskCmd([]string{"authorize", "--manifest", file, "--confirm", confirm}); err != nil {
 		t.Fatalf("second authorize failed: %v", err)
 	}
 	graph, _, _, err = loadGraphReadOnly()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(graph.Approvals) != 2 {
-		t.Fatalf("approvals = %d, want 2", len(graph.Approvals))
+	if len(graph.Approvals) != 1 {
+		t.Fatalf("identical content asked for a second approval: %d", len(graph.Approvals))
 	}
 	if graph.Approvals[0].ProposalHash != proposal {
 		t.Fatal("append-only approval overwrote an earlier record")
@@ -105,15 +134,15 @@ func TestTaskAuthorizeStoresOneAppendOnlyBundle(t *testing.T) {
 	updated := task
 	updated.Scope = append(append([]string{}, task.Scope...), "cmd/taxion/extra.go")
 	changed := authorizeManifest(t, updated)
-	if err := taskCmd([]string{"authorize", "--manifest", changed}); err != nil {
+	if err := taskCmd([]string{"authorize", "--manifest", changed, "--confirm", authorizeProposalHash(t, updated)}); err != nil {
 		t.Fatalf("authorize after scope change failed: %v", err)
 	}
 	graph, _, _, err = loadGraphReadOnly()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(graph.Approvals) != 3 {
-		t.Fatalf("approvals = %d, want 3", len(graph.Approvals))
+	if len(graph.Approvals) != 2 {
+		t.Fatalf("approvals = %d, want 2", len(graph.Approvals))
 	}
 	stored, _ = graph.GraphTask(task.ID)
 	if err := graph.Approvals[0].Verify(stored, graph.Approvals[0].Configuration); err == nil {

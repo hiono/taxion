@@ -246,11 +246,27 @@ func (g *TaskGraph) RecordDispatchAccessCheck(dispatchID, operation, runtimeHash
 // compares and that approval bundles digest; callers must not build a second
 // variant of the selection.
 func SelectionFields(selection json.RawMessage) ([]string, error) {
+	leaves, err := SelectionLeaves(selection)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(leaves))
+	for path := range leaves {
+		paths = append(paths, path)
+	}
+	slices.Sort(paths)
+	return paths, nil
+}
+
+// SelectionLeaves returns the leaf path to scalar value of a configuration
+// selection. The binding check and approval drift detection share this single
+// implementation so that both describe the same selection.
+func SelectionLeaves(selection json.RawMessage) (map[string]string, error) {
 	var values map[string]any
 	if err := json.Unmarshal(selection, &values); err != nil || len(values) == 0 {
 		return nil, graphError("configuration binding requires a selected JSON object")
 	}
-	var paths []string
+	leaves := map[string]string{}
 	var collect func(map[string]any, string) error
 	collect = func(fields map[string]any, prefix string) error {
 		for key, value := range fields {
@@ -264,13 +280,20 @@ func SelectionFields(selection json.RawMessage) ([]string, error) {
 				}
 				continue
 			}
-			paths = append(paths, path)
+			if text, ok := value.(string); ok {
+				leaves[path] = text
+				continue
+			}
+			data, err := json.Marshal(value)
+			if err != nil {
+				return err
+			}
+			leaves[path] = string(data)
 		}
 		return nil
 	}
 	if err := collect(values, ""); err != nil {
 		return nil, err
 	}
-	slices.Sort(paths)
-	return paths, nil
+	return leaves, nil
 }

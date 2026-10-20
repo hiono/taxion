@@ -93,7 +93,7 @@ _taxion_complete() {
         'specification serve') candidates='--help --scope' ;;
         'task') candidates='archive authorize create graph list plan track transition validate' ;;
         'task archive') candidates='--actor --dry-run --expected-hash --help --reason --source --tasks' ;;
-        'task authorize') candidates='--file --help --manifest' ;;
+        'task authorize') candidates='--confirm --file --help --manifest' ;;
         'task create') candidates='--help --repo --title' ;;
         'task graph') candidates='' ;;
         'task list') candidates='--help --include-archived --json --repo' ;;
