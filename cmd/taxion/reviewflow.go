@@ -334,6 +334,10 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		if err != nil {
 			return err
 		}
+		configuration, err := approvalConfigurationFor(resolved.Config, resolved.Sources)
+		if err != nil {
+			return err
+		}
 		if err := controller.CheckReviewFlowConfiguration(db, id, resolved.Config, tools); err != nil {
 			return fmt.Errorf("workflow %s: %w", action, err)
 		}
@@ -365,7 +369,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 				MaxAICredits:   maxAICredits,
 				AvailableTools: tools[dispatch.Recipient], ResponseSchema: responseSchema,
 			}, managedCommit && dispatch.Recipient == "CODER", managedStage && dispatch.Recipient == "CODER", scanner)
-		}, output)
+		}, output, configuration)
 		if flow.ID == "" {
 			return err
 		}
@@ -395,7 +399,15 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		}
 		return printJSON(flow)
 	case "advance":
-		flow, err := controller.AdvanceReviewFlow(db, storePath, id)
+		resolved, err := resolveConfiguration()
+		if err != nil {
+			return err
+		}
+		configuration, err := approvalConfigurationFor(resolved.Config, resolved.Sources)
+		if err != nil {
+			return err
+		}
+		flow, err := controller.AdvanceReviewFlow(db, storePath, id, configuration)
 		if err != nil && !errors.Is(err, controller.ErrFlowStopped) && !errors.Is(err, core.ErrHandoffHeld) {
 			return err
 		}

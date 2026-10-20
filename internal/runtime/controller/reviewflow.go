@@ -73,7 +73,7 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 			Authorization: request.Authorization, DispatchIDs: []string{},
 		}
 		if request.ContinueFromDispatchID == "" {
-			if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipNone, "", ""); err != nil {
+			if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipNone, "", "", request.Configuration); err != nil {
 				return err
 			}
 		} else {
@@ -100,7 +100,7 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 			if err != nil {
 				return err
 			}
-			if err := issueFlowReviewer(state, ledgerPath, &flow, source, decision, nil); err != nil {
+			if err := issueFlowReviewer(state, ledgerPath, &flow, source, decision, nil, request.Configuration); err != nil {
 				return err
 			}
 		}
@@ -140,11 +140,15 @@ func budgetContinuationSource(graph core.TaskGraph, task core.GraphTask, sourceI
 
 // AdvanceReviewFlow consumes only the latest stored result. A repeated call
 // returns the already-issued Dispatch, so retries never duplicate a run.
-func AdvanceReviewFlow(db *store.Store, ledgerPath, id string) (core.ReviewFlow, error) {
-	return advanceReviewFlow(db, ledgerPath, id, "")
+func AdvanceReviewFlow(db *store.Store, ledgerPath, id string, configuration ...core.ApprovalConfiguration) (core.ReviewFlow, error) {
+	var selected core.ApprovalConfiguration
+	if len(configuration) != 0 {
+		selected = configuration[0]
+	}
+	return advanceReviewFlow(db, ledgerPath, id, "", selected)
 }
 
-func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.ReviewFlow, error) {
+func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configuration core.ApprovalConfiguration) (core.ReviewFlow, error) {
 	if db == nil {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: review flow requires a store")
 	}
@@ -278,7 +282,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 					return err
 				}
 			}
-			if err := issueFlowReviewer(state, ledgerPath, &flow, last, sourceDecision, supplement); err != nil {
+			if err := issueFlowReviewer(state, ledgerPath, &flow, last, sourceDecision, supplement, configuration); err != nil {
 				return err
 			}
 		} else {
@@ -328,7 +332,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 				if len(flow.DispatchIDs) > 1 {
 					previousCoder = flow.DispatchIDs[len(flow.DispatchIDs)-2]
 				}
-				if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipAmends, previousCoder, "repair the saved independent-review findings with the same acceptance"); err != nil {
+				if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipAmends, previousCoder, "repair the saved independent-review findings with the same acceptance", configuration); err != nil {
 					return err
 				}
 			default:
@@ -362,7 +366,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string) (core.R
 }
 
 func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.ReviewFlow, task core.GraphTask,
-	relationship core.DispatchRelationship, relatedID, reason string) error {
+	relationship core.DispatchRelationship, relatedID, reason string, configuration core.ApprovalConfiguration) error {
 	if err := memory.CheckDispatch(ledgerPath, core.Task{ID: task.ID, Title: task.Title, Repo: task.Repo}, task.Repo, task.MemoryRefs...); err != nil {
 		return err
 	}
@@ -371,6 +375,30 @@ func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.Rev
 		return err
 	}
 	dispatchID := fmt.Sprintf("%s-dispatch-%d", flow.ID, len(flow.DispatchIDs))
+	var stage core.ApprovalEntryStage
+	switch relationship {
+	case core.RelationshipAmends:
+		stage = core.EntryRepairDispatch
+	case core.RelationshipIndependent:
+		stage = core.EntryReviewerDispatch
+		if flow.Repairs > 0 {
+			stage = core.EntryReReviewDispatch
+		}
+	case core.RelationshipNone:
+		switch task.Owner {
+		case "CODER":
+			stage = core.EntryCoderDispatch
+		case "REVIEWER":
+			stage = core.EntryReviewerDispatch
+		default:
+			return fmt.Errorf("taxion: cannot classify dispatch entry for Task owner %q", task.Owner)
+		}
+	default:
+		return fmt.Errorf("taxion: cannot classify dispatch entry for relationship %q", relationship)
+	}
+	if err := checkEntryApproval(state.Graph, task, stage, configuration); err != nil {
+		return err
+	}
 	dispatch, err := core.NewGraphDispatch(state.Graph, dispatchID, task.ID, task.Repo, relationship, relatedID, reason, context)
 	if err != nil {
 		return err
@@ -434,7 +462,8 @@ func legacyFlowResultDecision(dispatch core.GraphDispatch) (core.TaskDecision, e
 }
 
 func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.ReviewFlow,
-	coder core.GraphDispatch, sourceDecision core.TaskDecision, supplement *core.TaskDecision) error {
+	coder core.GraphDispatch, sourceDecision core.TaskDecision, supplement *core.TaskDecision,
+	configuration core.ApprovalConfiguration) error {
 	review := flow.Contract
 	review.ID = fmt.Sprintf("%s-review-%d", flow.ID, flow.Repairs)
 	review.Title = "Review: " + flow.Contract.Title
@@ -474,7 +503,7 @@ func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.Rev
 		return err
 	}
 	return issueFlowDispatch(state, ledgerPath, flow, review, core.RelationshipIndependent,
-		coder.ID, "review the verified Coder output")
+		coder.ID, "review the verified Coder output", configuration)
 }
 
 func holdReviewFlowForStop(graph *core.TaskGraph, flow *core.ReviewFlow, reason string) error {
@@ -604,15 +633,23 @@ func storeFlow(state *store.Workspace, flow core.ReviewFlow) {
 	}
 }
 
-// checkFlowApproval enforces the contract gate before any flow side effect.
-func checkFlowApproval(graph core.TaskGraph, task core.GraphTask, configuration core.ApprovalConfiguration) error {
+// checkEntryApproval enforces the contract gate at every execution entry point.
+func checkEntryApproval(graph core.TaskGraph, task core.GraphTask, stage core.ApprovalEntryStage, configuration core.ApprovalConfiguration) error {
 	switch graph.ApprovalRequirement() {
 	case core.ApprovalBundleRequired:
-		_, err := graph.CheckBundleAtEntry(task.ID, core.EntryStartReviewFlow, configuration)
+		if len(configuration.Selection) == 0 {
+			return fmt.Errorf("taxion: approval configuration is required for %s; re-approval is required", stage)
+		}
+		_, err := graph.CheckBundleAtEntry(task.ID, stage, configuration)
 		return err
 	case core.ApprovalVerifiedLegacy:
 		return nil
 	default:
-		return fmt.Errorf("taxion: approval schema is ambiguous; re-approval is required before starting a review flow")
+		return fmt.Errorf("taxion: approval schema is ambiguous; re-approval is required before %s", stage)
 	}
+}
+
+// checkFlowApproval enforces the contract gate before any flow side effect.
+func checkFlowApproval(graph core.TaskGraph, task core.GraphTask, configuration core.ApprovalConfiguration) error {
+	return checkEntryApproval(graph, task, core.EntryStartReviewFlow, configuration)
 }
