@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hiono/taxion/internal/config"
+
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime/controller"
@@ -263,11 +265,17 @@ func approvalConfiguration() (core.ApprovalConfiguration, error) {
 	if err != nil {
 		return core.ApprovalConfiguration{}, err
 	}
-	selection, err := json.Marshal(resolution.Config)
+	return approvalConfigurationFor(resolution.Config, resolution.Sources)
+}
+
+// approvalConfigurationFor digests the configuration a caller actually uses so
+// that approval bundles and execution compare the same selection.
+func approvalConfigurationFor(selected config.Config, sources map[string]string) (core.ApprovalConfiguration, error) {
+	selection, err := json.Marshal(selected)
 	if err != nil {
 		return core.ApprovalConfiguration{}, err
 	}
-	return core.SelectApprovalConfiguration(selection, resolution.Sources)
+	return core.SelectApprovalConfiguration(selection, sources)
 }
 
 func approvalFieldPaths(selection json.RawMessage) []string {
