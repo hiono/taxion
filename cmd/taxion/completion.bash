@@ -91,7 +91,7 @@ _taxion_complete() {
         'specification scope-hash') candidates='--help --scope' ;;
         'specification search') candidates='--help --query --scope' ;;
         'specification serve') candidates='--help --scope' ;;
-        'task') candidates='archive create graph list plan track transition' ;;
+        'task') candidates='archive create graph list plan track transition validate' ;;
         'task archive') candidates='--actor --dry-run --expected-hash --help --reason --source --tasks' ;;
         'task create') candidates='--help --repo --title' ;;
         'task graph') candidates='' ;;
@@ -99,6 +99,7 @@ _taxion_complete() {
         'task plan') candidates='--help --include-archived --repo' ;;
         'task track') candidates='--file --help' ;;
         'task transition') candidates='--file --help' ;;
+        'task validate') candidates='--file --help --manifest' ;;
         'tools') candidates='hash' ;;
         'tools hash') candidates='--help --path' ;;
         'workflow') candidates='advance draft draft-approve draft-discard evaluate feedback feedback-resolve feedback-target handoff interrupt planner-action planner-draft planning-context question-draft recover run show start step' ;;

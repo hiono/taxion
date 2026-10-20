@@ -1998,6 +1998,15 @@ func cloneHumanDecision(request *HumanDecisionRequest) *HumanDecisionRequest {
 }
 
 func (g *TaskGraph) Track(t GraphTask, actor, reason string) error {
+	next := cloneGraph(*g)
+	if err := next.trackInto(t, actor, reason); err != nil {
+		return err
+	}
+	*g = next
+	return nil
+}
+
+func (g *TaskGraph) trackInto(t GraphTask, actor, reason string) error {
 	if g.IsArchived(t.ID) {
 		return graphError("Task %s is archived; use a newly approved successor", t.ID)
 	}
