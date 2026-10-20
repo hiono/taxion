@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,15 +14,175 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+func taskValidateCmd(file string) error {
+	if file == "" {
+		return fmt.Errorf("task validate: --manifest is required")
+	}
+	input, err := os.Open(file)
+	if err != nil {
+		return validateError(err)
+	}
+	defer input.Close()
+	var request struct {
+		Task    core.GraphTask `json:"task"`
+		Actor   string         `json:"actor"`
+		Reason  string         `json:"reason"`
+		Concern *core.Concern  `json:"concern,omitempty"`
+	}
+	if err := core.DecodeGraphInput(input, &request); err != nil {
+		return validateError(err)
+	}
+	graph, ledger, initialized, err := loadGraphReadOnly()
+	if err != nil {
+		return validateError(err)
+	}
+	if _, exists := graph.GraphTask(request.Task.ID); !exists && request.Task.BudgetGuidance == nil {
+		request.Task.BudgetGuidance, err = newTaskBudgetGuidance()
+		if err != nil {
+			return err
+		}
+	}
+	report := graph.ValidateTracking(request.Task, request.Actor, request.Reason, request.Concern, ledger, initialized)
+	if err := printJSON(report); err != nil {
+		return err
+	}
+	if !report.Valid {
+		return validateError(fmt.Errorf("%d validator error(s); no Task was stored", len(report.ValidatorErrors)))
+	}
+	return nil
+}
+
+// validateError sanitizes a diagnostic so that no credential-like value from a
+// manifest, a workspace identifier or a decoder message is echoed.
+func validateError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("task validate: %s", core.Redact(err.Error()))
+}
+
+// loadGraphReadOnly observes the stored Task Graph and ledger without creating
+// or migrating a workspace.
+func loadGraphReadOnly() (core.TaskGraph, core.Ledger, bool, error) {
+	empty := core.TaskGraph{}
+	if err := validateWorkspaceStorePath(); err != nil {
+		return empty, core.Ledger{}, false, err
+	}
+	path := workspaceDBPath()
+	if _, err := os.Stat(path); err == nil {
+		db, done, err := openWorkspaceSnapshot(path)
+		if err != nil {
+			return empty, core.Ledger{}, false, err
+		}
+		defer done()
+		initialized, err := db.WorkspaceInitialized()
+		if err != nil {
+			if missingSchema(err) {
+				return loadLegacyState()
+			}
+			return empty, core.Ledger{}, false, err
+		}
+		if initialized {
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				return empty, core.Ledger{}, false, err
+			}
+			if !state.HasGraph {
+				return core.TaskGraph{Version: 1}, state.Ledger, false, nil
+			}
+			if err := state.Graph.CheckLedger(state.Ledger); err != nil {
+				return empty, core.Ledger{}, false, err
+			}
+			return state.Graph, state.Ledger, true, nil
+		}
+	} else if !os.IsNotExist(err) {
+		return empty, core.Ledger{}, false, err
+	}
+	return loadLegacyState()
+}
+
+// openWorkspaceSnapshot copies the workspace database with its WAL and
+// shared-memory files into a temporary directory and opens the copy read-only.
+// Validation therefore cannot create or modify any workspace file, even when
+// SQLite has to recover a write-ahead log to read the snapshot.
+func openWorkspaceSnapshot(path string) (*store.Store, func(), error) {
+	dir, err := os.MkdirTemp("", "taxion-validate-")
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() { os.RemoveAll(dir) }
+	copied := filepath.Join(dir, filepath.Base(path))
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		data, err := os.ReadFile(path + suffix)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		if err := os.WriteFile(copied+suffix, data, 0o600); err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+	}
+	db, err := store.OpenReadOnly(copied)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	return db, func() {
+		db.Close()
+		cleanup()
+	}, nil
+}
+
+func missingSchema(err error) bool {
+	return strings.Contains(err.Error(), "no such table")
+}
+
+// loadLegacyState reads the JSON ledger and graph that a workspace migration
+// would import, without writing either of them.
+func loadLegacyState() (core.TaskGraph, core.Ledger, bool, error) {
+	empty := core.TaskGraph{}
+	ledger := core.Ledger{}
+	if _, err := os.Stat(storePath); err == nil {
+		loaded, err := core.LoadLedger(storePath)
+		if err != nil {
+			return empty, core.Ledger{}, false, err
+		}
+		ledger = loaded
+	} else if !os.IsNotExist(err) {
+		return empty, core.Ledger{}, false, err
+	}
+	graph, initialized := core.TaskGraph{Version: 1}, false
+	if _, err := os.Stat(core.GraphPath(storePath)); err == nil {
+		loaded, err := core.LoadTaskGraph(core.GraphPath(storePath))
+		if err != nil {
+			return empty, core.Ledger{}, false, err
+		}
+		graph, initialized = loaded, true
+		if err := graph.CheckLedger(ledger); err != nil {
+			return empty, core.Ledger{}, false, err
+		}
+	} else if !os.IsNotExist(err) {
+		return empty, core.Ledger{}, false, err
+	}
+	return graph, ledger, initialized, nil
+}
+
 func taskGraphCmd(command string, args []string) error {
 	fs := flag.NewFlagSet("task "+command, flag.ContinueOnError)
-	var file, repo string
+	var file, repo, manifest string
 	var includeArchived bool
 	if command == "plan" {
 		fs.StringVar(&repo, "repo", "", "explicit repository for follow-up planning")
 		fs.BoolVar(&includeArchived, "include-archived", false, "include archived history without permitting execution")
 	} else if command == "track" || command == "transition" {
 		fs.StringVar(&file, "file", "", "JSON request file")
+	} else if command == "validate" {
+		fs.StringVar(&manifest, "manifest", "", "JSON request file to validate without storing")
+		fs.StringVar(&file, "file", "", "JSON request file to validate without storing")
 	} else if command != "graph" {
 		return fmt.Errorf("unknown task graph command %s", command)
 	}
@@ -30,6 +191,15 @@ func taskGraphCmd(command string, args []string) error {
 	}
 	if len(fs.Args()) != 0 {
 		return fmt.Errorf("unexpected task graph arguments")
+	}
+	if command == "validate" {
+		if manifest != "" && file != "" {
+			return fmt.Errorf("task validate: use either --manifest or --file, not both")
+		}
+		if manifest != "" {
+			file = manifest
+		}
+		return taskValidateCmd(file)
 	}
 	db, state, err := loadWorkspace()
 	if err != nil {
