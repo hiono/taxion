@@ -154,6 +154,47 @@ func TestValidateTrackingWithholdsCredentialLikeValues(t *testing.T) {
 	}
 }
 
+func TestValidateTrackingReportsDuplicateDecisions(t *testing.T) {
+	graph := TaskGraph{Version: 1}
+	task := validDraftTask("contract")
+	task.Title = ""
+	task.Decisions = []TaskDecision{
+		{ID: "d1", Source: "human:1", Text: "first"},
+		{ID: "d1", Source: "human:1", Text: "second"},
+	}
+	report := graph.ValidateTracking(task, "human", "draft", nil, ledgerFor(task), false)
+	if report.Valid {
+		t.Fatal("contract with conflicting decisions was accepted")
+	}
+	foundConflict, foundTitle := false, false
+	for _, message := range report.ValidatorErrors {
+		if strings.Contains(message, "conflicting decision d1") {
+			foundConflict = true
+		}
+		if strings.Contains(message, "title") {
+			foundTitle = true
+		}
+	}
+	if !foundConflict || !foundTitle {
+		t.Fatalf("violations were not aggregated: %v", report.ValidatorErrors)
+	}
+}
+
+func TestValidateTrackingRedactsPrivateKeyBodies(t *testing.T) {
+	graph := TaskGraph{Version: 1}
+	task := validDraftTask("contract")
+	task.MemoryRefs = []string{"-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAsupersecretbody\n-----END RSA PRIVATE KEY-----"}
+	report := graph.ValidateTracking(task, "human", "draft", nil, ledgerFor(task), false)
+	if report.Valid {
+		t.Fatal("invalid contract was accepted")
+	}
+	for _, message := range report.ValidatorErrors {
+		if strings.Contains(message, "supersecretbody") {
+			t.Fatalf("private key body leaked: %q", message)
+		}
+	}
+}
+
 func TestValidateTrackingKeepsProseWithoutCredentials(t *testing.T) {
 	graph := TaskGraph{Version: 1}
 	task := validDraftTask("contract")

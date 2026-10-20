@@ -19,6 +19,7 @@ var credentialPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),
 	regexp.MustCompile(`xox[baprs]-[A-Za-z0-9\-]{10,}`),
 	regexp.MustCompile(`\bsk-[A-Za-z0-9]{20,}`),
+	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----`),
 	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`),
 	regexp.MustCompile(`\bAIza[0-9A-Za-z_\-]{35}`),
 	regexp.MustCompile(`\bBearer [A-Za-z0-9._\-]{20,}`),
@@ -171,6 +172,7 @@ func taskContractErrors(g TaskGraph, t GraphTask) []string {
 		if previous, ok := decisionIDs[decision.ID]; ok && previous != decision {
 			add("conflicting decision %s", decision.ID)
 		}
+		decisionIDs[decision.ID] = decision
 	}
 	if t.FileAccess != nil {
 		if err := t.FileAccess.Validate(); err != nil {
