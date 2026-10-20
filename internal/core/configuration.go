@@ -84,31 +84,16 @@ func (binding DispatchConfiguration) validate(dispatch GraphDispatch) error {
 		!referenceOK || !nonempty(reference) {
 		return graphError("configuration binding identity differs from the Dispatch")
 	}
-	paths := map[string]bool{}
-	var collect func(map[string]any, string) error
-	collect = func(fields map[string]any, prefix string) error {
-		for key, value := range fields {
-			path := prefix + key
-			if children, ok := value.(map[string]any); ok {
-				if len(children) == 0 {
-					return graphError("configuration binding has an empty section")
-				}
-				if err := collect(children, path+"."); err != nil {
-					return err
-				}
-				continue
-			}
-			paths[path] = true
-			switch binding.Sources[path] {
-			case "user", "project", "environment":
-			default:
-				return graphError("configuration binding requires field origins")
-			}
-		}
-		return nil
-	}
-	if err := collect(selection, ""); err != nil {
+	paths, err := SelectionFields(binding.Selection)
+	if err != nil {
 		return err
+	}
+	for _, path := range paths {
+		switch binding.Sources[path] {
+		case "user", "project", "environment":
+		default:
+			return graphError("configuration binding requires field origins")
+		}
 	}
 	if len(paths) != len(binding.Sources) {
 		return graphError("configuration binding contains unrelated field origins")
@@ -254,4 +239,38 @@ func (g *TaskGraph) RecordDispatchAccessCheck(dispatchID, operation, runtimeHash
 	}
 	*g = next
 	return nil
+}
+
+// SelectionFields returns the leaf paths of a configuration selection in
+// lexical order. It is the canonicalization the configuration binding check
+// compares and that approval bundles digest; callers must not build a second
+// variant of the selection.
+func SelectionFields(selection json.RawMessage) ([]string, error) {
+	var values map[string]any
+	if err := json.Unmarshal(selection, &values); err != nil || len(values) == 0 {
+		return nil, graphError("configuration binding requires a selected JSON object")
+	}
+	var paths []string
+	var collect func(map[string]any, string) error
+	collect = func(fields map[string]any, prefix string) error {
+		for key, value := range fields {
+			path := prefix + key
+			if children, ok := value.(map[string]any); ok {
+				if len(children) == 0 {
+					return graphError("configuration binding has an empty section")
+				}
+				if err := collect(children, path+"."); err != nil {
+					return err
+				}
+				continue
+			}
+			paths = append(paths, path)
+		}
+		return nil
+	}
+	if err := collect(values, ""); err != nil {
+		return nil, err
+	}
+	slices.Sort(paths)
+	return paths, nil
 }
