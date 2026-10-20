@@ -464,6 +464,7 @@ func (g *TaskGraph) AppendApproval(bundle ApprovalBundle) error {
 	if err := bundle.hashValid(); err != nil {
 		return graphError("approval %s %v", bundle.ID, err)
 	}
+	next.ApprovalSchemaVersion = CurrentApprovalSchemaVersion
 	next.Approvals = append(next.Approvals, bundle)
 	if err := next.Validate(); err != nil {
 		return err
@@ -486,4 +487,31 @@ func (g TaskGraph) MatchingApproval(taskID string, stored GraphTask, current App
 		return bundle, true
 	}
 	return ApprovalBundle{}, false
+}
+
+// CurrentApprovalSchemaVersion marks a graph whose approvals are enforced as
+// bundles. Graphs persisted before this marker are verified legacy records.
+const CurrentApprovalSchemaVersion = 1
+
+type ApprovalRequirement string
+
+const (
+	ApprovalBundleRequired     ApprovalRequirement = "bundle-required"
+	ApprovalVerifiedLegacy     ApprovalRequirement = "verified-legacy"
+	ApprovalInvalidOrAmbiguous ApprovalRequirement = "invalid-or-ambiguous"
+)
+
+// ApprovalRequirement classifies the graph from persisted schema information
+// only: a missing marker is never an allow condition for a bundle-aware graph.
+func (g TaskGraph) ApprovalRequirement() ApprovalRequirement {
+	switch {
+	case g.ApprovalSchemaVersion > CurrentApprovalSchemaVersion:
+		return ApprovalInvalidOrAmbiguous
+	case g.ApprovalSchemaVersion == CurrentApprovalSchemaVersion:
+		return ApprovalBundleRequired
+	case len(g.Approvals) > 0:
+		return ApprovalInvalidOrAmbiguous
+	default:
+		return ApprovalVerifiedLegacy
+	}
 }

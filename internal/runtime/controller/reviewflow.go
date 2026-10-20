@@ -21,14 +21,15 @@ var ErrFlowStopped = errors.New("taxion: review flow stopped")
 var ErrFlowClaimed = errors.New("taxion: review flow claimed by another runner")
 
 type ReviewFlowRequest struct {
-	ID                     string            `json:"id"`
-	TaskID                 string            `json:"taskId"`
-	ContinueFromDispatchID string            `json:"continueFromDispatchId,omitempty"`
-	Repository             string            `json:"repository"`
-	ReviewRoot             string            `json:"reviewRoot"`
-	MaxRepairs             *int              `json:"maxRepairs"`
-	TimeoutSeconds         int64             `json:"timeoutSeconds"`
-	Authorization          core.TaskDecision `json:"authorization"`
+	ID                     string                     `json:"id"`
+	TaskID                 string                     `json:"taskId"`
+	ContinueFromDispatchID string                     `json:"continueFromDispatchId,omitempty"`
+	Repository             string                     `json:"repository"`
+	ReviewRoot             string                     `json:"reviewRoot"`
+	MaxRepairs             *int                       `json:"maxRepairs"`
+	TimeoutSeconds         int64                      `json:"timeoutSeconds"`
+	Authorization          core.TaskDecision          `json:"authorization"`
+	Configuration          core.ApprovalConfiguration `json:"configuration"`
 }
 
 func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowRequest) (core.ReviewFlow, error) {
@@ -46,6 +47,9 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 		if !state.HasGraph || !ok || task.Repo != request.Repository ||
 			task.Status != core.Ready || task.Owner != "CODER" || task.Reviewer != "REVIEWER" {
 			return fmt.Errorf("taxion: review flow requires an authorized READY Coder Task with independent REVIEWER")
+		}
+		if err := checkFlowApproval(state.Graph, task, request.Configuration); err != nil {
+			return err
 		}
 		if _, exists := state.Graph.ReviewFlow(request.ID); exists {
 			return fmt.Errorf("taxion: review flow ID already exists")
@@ -597,5 +601,18 @@ func storeFlow(state *store.Workspace, flow core.ReviewFlow) {
 		if state.Graph.ReviewFlows[index].ID == flow.ID {
 			state.Graph.ReviewFlows[index] = flow
 		}
+	}
+}
+
+// checkFlowApproval enforces the contract gate before any flow side effect.
+func checkFlowApproval(graph core.TaskGraph, task core.GraphTask, configuration core.ApprovalConfiguration) error {
+	switch graph.ApprovalRequirement() {
+	case core.ApprovalBundleRequired:
+		_, err := graph.CheckBundleAtEntry(task.ID, core.EntryStartReviewFlow, configuration)
+		return err
+	case core.ApprovalVerifiedLegacy:
+		return nil
+	default:
+		return fmt.Errorf("taxion: approval schema is ambiguous; re-approval is required before starting a review flow")
 	}
 }
