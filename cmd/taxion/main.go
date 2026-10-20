@@ -57,6 +57,7 @@ Requests, planning and Task contracts:
   task track          Register/update a durable Task Graph contract (--file JSON)
   task transition     Validate and record a Task Graph transition (--file JSON)
   task graph          Print the versioned Task Graph and history
+  task validate       Check a Task Graph request without storing it (--manifest JSON; all violations, canonical hash)
   task plan           Rebuild a follow-up plan from durable contracts and evidence (--repo required; --include-archived for history)
 
 Dispatch and configuration binding:
@@ -320,12 +321,12 @@ func newID(prefix string) string {
 
 func taskCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: taxion task create|list|archive|track|transition|graph|plan …")
+		return fmt.Errorf("usage: taxion task create|list|archive|track|transition|graph|plan|validate …")
 	}
 	switch args[0] {
 	case "archive":
 		return taskArchiveCmd(args[1:])
-	case "track", "transition", "graph", "plan":
+	case "track", "transition", "graph", "plan", "validate":
 		return taskGraphCmd(args[0], args[1:])
 	case "create":
 		fs := flag.NewFlagSet("task create", flag.ContinueOnError)
