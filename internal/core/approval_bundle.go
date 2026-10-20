@@ -24,6 +24,45 @@ const (
 )
 
 // ApprovalStage is an internal transition that reuses one approval bundle.
+
+// ConfirmationBasis is the full approval basis a human confirms. The token
+// binds the proposal to every dimension and to the versions that define how
+// the digests were computed.
+type ConfirmationBasis struct {
+	BundleVersion           int    `json:"bundleVersion"`
+	CanonicalizationVersion int    `json:"canonicalizationVersion"`
+	ProposalHash            string `json:"proposalHash"`
+	BaselineDigest          string `json:"baselineDigest"`
+	ScopeDigest             string `json:"scopeDigest"`
+	AcceptanceDigest        string `json:"acceptanceDigest"`
+	BudgetDigest            string `json:"budgetDigest"`
+	PermissionsDigest       string `json:"permissionsDigest"`
+	SecurityDigest          string `json:"securityDigest"`
+	ConfigurationDigest     string `json:"configurationDigest"`
+}
+
+// ConfirmationTokenFor returns the token a caller must pass back to authorize
+// exactly the presented basis.
+func ConfirmationTokenFor(proposalHash string, dimensions ApprovalDimensions) (string, error) {
+	return CanonicalSHA256(ConfirmationBasis{
+		BundleVersion:           ApprovalBundleVersion,
+		CanonicalizationVersion: ApprovalCanonicalizationVersion,
+		ProposalHash:            proposalHash,
+		BaselineDigest:          dimensions.Baseline,
+		ScopeDigest:             dimensions.Scope,
+		AcceptanceDigest:        dimensions.Acceptance,
+		BudgetDigest:            dimensions.Budget,
+		PermissionsDigest:       dimensions.Permission,
+		SecurityDigest:          dimensions.Security,
+		ConfigurationDigest:     dimensions.Configuration,
+	})
+}
+
+// ConfirmationToken returns the token for the bundle basis.
+func (b ApprovalBundle) ConfirmationToken() (string, error) {
+	return ConfirmationTokenFor(b.ProposalHash, b.Dimensions)
+}
+
 type ApprovalStage string
 
 const (

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,13 +56,19 @@ func authorizeManifest(t *testing.T, task core.GraphTask) string {
 	return path
 }
 
-func authorizeProposalHash(t *testing.T, task core.GraphTask) string {
+func authorizeToken(t *testing.T, task core.GraphTask) string {
 	t.Helper()
-	guidance, err := newTaskBudgetGuidance()
+	graph, _, _, err := loadGraphReadOnly()
 	if err != nil {
 		t.Fatal(err)
 	}
-	task.BudgetGuidance = guidance
+	if _, exists := graph.GraphTask(task.ID); !exists {
+		guidance, err := newTaskBudgetGuidance()
+		if err != nil {
+			t.Fatal(err)
+		}
+		task.BudgetGuidance = guidance
+	}
 	ledger, err := core.LoadLedger(storePath)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +77,19 @@ func authorizeProposalHash(t *testing.T, task core.GraphTask) string {
 	if !report.Valid {
 		t.Fatalf("proposal is invalid: %v", report.ValidatorErrors)
 	}
-	return report.CanonicalSHA256
+	configuration, err := approvalConfiguration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dimensions, err := core.BundleDimensions(task, configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := core.ConfirmationTokenFor(report.CanonicalSHA256, dimensions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
 }
 
 func TestTaskAuthorizeStoresOneAppendOnlyBundle(t *testing.T) {
@@ -86,7 +105,13 @@ func TestTaskAuthorizeStoresOneAppendOnlyBundle(t *testing.T) {
 	if len(graph.Approvals) != 0 {
 		t.Fatal("authorize wrote before the human confirmed the proposal hash")
 	}
-	confirm := authorizeProposalHash(t, task)
+	confirm := authorizeToken(t, task)
+	if err := taskCmd([]string{"authorize", "--manifest", file, "--confirm", "bogus-token"}); err == nil {
+		t.Fatal("authorize accepted a confirmation token that does not match the basis")
+	}
+	if graph, _, _, err := loadGraphReadOnly(); err != nil || len(graph.Approvals) != 0 {
+		t.Fatalf("token mismatch wrote an approval: %v", err)
+	}
 	if err := taskCmd([]string{"authorize", "--manifest", file, "--confirm", confirm}); err != nil {
 		t.Fatalf("authorize failed: %v", err)
 	}
@@ -117,7 +142,11 @@ func TestTaskAuthorizeStoresOneAppendOnlyBundle(t *testing.T) {
 	}
 
 	proposal := bundle.ProposalHash
-	if err := taskCmd([]string{"authorize", "--manifest", file, "--confirm", confirm}); err != nil {
+	reconfirm := presentedToken(t, file)
+	if reconfirm == confirm {
+		t.Fatal("stored basis did not change after defaults were applied")
+	}
+	if err := taskCmd([]string{"authorize", "--manifest", file, "--confirm", reconfirm}); err != nil {
 		t.Fatalf("second authorize failed: %v", err)
 	}
 	graph, _, _, err = loadGraphReadOnly()
@@ -134,7 +163,7 @@ func TestTaskAuthorizeStoresOneAppendOnlyBundle(t *testing.T) {
 	updated := task
 	updated.Scope = append(append([]string{}, task.Scope...), "cmd/taxion/extra.go")
 	changed := authorizeManifest(t, updated)
-	if err := taskCmd([]string{"authorize", "--manifest", changed, "--confirm", authorizeProposalHash(t, updated)}); err != nil {
+	if err := taskCmd([]string{"authorize", "--manifest", changed, "--confirm", presentedToken(t, changed)}); err != nil {
 		t.Fatalf("authorize after scope change failed: %v", err)
 	}
 	graph, _, _, err = loadGraphReadOnly()
@@ -185,4 +214,34 @@ func TestTaskAuthorizeFailsClosed(t *testing.T) {
 	if len(graph.Approvals) != 0 || len(graph.Dispatches) != 0 || len(graph.ReviewFlows) != 0 {
 		t.Fatal("failed authorization advanced state")
 	}
+}
+
+func presentedToken(t *testing.T, file string) string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := os.Stdout
+	os.Stdout = writer
+	runErr := taskCmd([]string{"authorize", "--manifest", file})
+	os.Stdout = stdout
+	writer.Close()
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runErr != nil {
+		t.Fatalf("basis review failed: %v", runErr)
+	}
+	var content struct {
+		ConfirmationToken string `json:"confirmationToken"`
+	}
+	if err := json.Unmarshal(output, &content); err != nil {
+		t.Fatalf("basis review is not JSON: %v (%s)", err, output)
+	}
+	if content.ConfirmationToken == "" {
+		t.Fatal("basis review did not present a confirmation token")
+	}
+	return content.ConfirmationToken
 }
