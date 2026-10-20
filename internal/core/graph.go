@@ -453,15 +453,16 @@ type TaskWaiver struct {
 }
 
 type TaskGraph struct {
-	Version         int              `json:"version"`
-	Tasks           []GraphTask      `json:"tasks"`
-	Concerns        []Concern        `json:"concerns"`
-	History         []GraphEvent     `json:"history"`
-	Dispatches      []GraphDispatch  `json:"dispatches"`
-	DispatchHistory []DispatchEvent  `json:"dispatchHistory"`
-	ReviewFlows     []ReviewFlow     `json:"reviewFlows,omitempty"`
-	Archives        []TaskArchive    `json:"archives,omitempty"`
-	Approvals       []ApprovalBundle `json:"approvals,omitempty"`
+	Version               int              `json:"version"`
+	Tasks                 []GraphTask      `json:"tasks"`
+	Concerns              []Concern        `json:"concerns"`
+	History               []GraphEvent     `json:"history"`
+	Dispatches            []GraphDispatch  `json:"dispatches"`
+	DispatchHistory       []DispatchEvent  `json:"dispatchHistory"`
+	ReviewFlows           []ReviewFlow     `json:"reviewFlows,omitempty"`
+	Archives              []TaskArchive    `json:"archives,omitempty"`
+	ApprovalSchemaVersion int              `json:"approvalSchemaVersion,omitempty"`
+	Approvals             []ApprovalBundle `json:"approvals,omitempty"`
 }
 
 func graphError(format string, args ...any) error {
