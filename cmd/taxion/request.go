@@ -442,8 +442,13 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if err != nil {
 				return err
 			}
+			configuration, err := approvalConfigurationFor(current.Config, current.Sources)
+			if err != nil {
+				return err
+			}
 			if _, err := controller.StartReviewFlow(db, storePath, controller.ReviewFlowRequest{
-				ID: flowID, TaskID: id, Repository: *repo, ReviewRoot: reviewRoot,
+				Configuration: configuration,
+				ID:            flowID, TaskID: id, Repository: *repo, ReviewRoot: reviewRoot,
 				MaxRepairs: repairs, TimeoutSeconds: seconds,
 				Authorization: core.TaskDecision{ID: flowID + "-budget", Source: source,
 					Text: "Human selected /approve for the approved goal, deadline and repair limit; prioritize acceptance while preserving AI credits"},

@@ -33,6 +33,7 @@ taxion conversation confirm --file <exact-human-confirmation.json>
 taxion task create --title "…" --repo <repo>
 taxion task plan --repo <repo>
 taxion task validate --manifest <task-graph-request.json>
+taxion task authorize --manifest <task-graph-request.json> --confirm <proposalHash>
 taxion workflow start --file <authorized-flow.json>
 taxion workflow advance --id <flow-id>
 taxion workflow run --id <flow-id> --coder-prompt-file <path> --reviewer-prompt-file <path>
@@ -549,6 +550,7 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | `task list`, `dispatch list` | 任意の `--repo REPO` で repository を絞り、`--json` で JSON 出力にする。archive 済み Task とその Dispatch は既定で除外し、`--include-archived` で含める。 |
 | `task archive` | `--tasks ID[,ID] --actor ACTOR --source SOURCE --reason REASON --dry-run` で対象 Task／Flow／Dispatch と `hash` を確認する。同じ引数と `--expected-hash HASH` で適用する。稼働中・suspended Dispatch、稼働中 Flow、未解放 runner、未解決の外部公開、別の非終了 Task からの参照を拒否する。履歴と Git のファイルは削除しない。 |
 | `task plan` | `--repo REPO` の通常計画は archive を除外する。`--include-archived` で履歴を含める場合の action は `ARCHIVED` で、実行許可にはならない。すべて退役済みなら通常計画は空を返す。 |
+| `task authorize` | `--manifest`, `--confirm` 提案 hash を提示した後、同じ hash でのみ 1 回だけ承認を記録する。承認 bundle は append-only で、configuration 次元を含む |
 | `task validate` | `--manifest FILE`（`--file` も可）が必須で、保存せずに `task track` と同じ規則で Graph request を検査する。`stateChanges` は常に `none` で、workspace が無い場合は空の Graph として検査し database を作らない。違反は全件を一度に返し、合格時は保存される契約の canonical JSON と SHA-256 を返す。Task ID、Memory、依存、supersedes の存在は読み取りだけで確認する。credential らしい値は値も digest も返さず `digestWithheld` を立てるが、判定は変えない。WAL の `-shm` が無い database は side file を作らないため拒否する。判定は `task track` と一致する。 |
 | `task track`, `task transition` | `--file JSON` で Task Graph request を渡す。新 Task の `fileAccess` は `{"level":"committed"}` が既定で、Task JSON の `{"level":"exact","paths":["repo/relative/file"]}`・`{"level":"all"}` で範囲を選ぶ。`outputMode` は `commit` が既定。`worktree-tree-snapshot` は commit なしで Controller 取得の Git tree をレビューする。snapshot mode、tree SHA、変更 path は承認契約の一部で、認可済み Task の policy 変更には新しい認可 decision が必要。更新時の `fileAccess` 省略は保存 policy を保つ。snapshot Task の更新では保存 `outputMode` を明示する。`task graph` は保存 Graph を表示し、`task plan --repo REPO` は認可を変えず後続計画を再構成する。 |
 | `dispatch` | `--task ID`・`--repo REPO` が必須。`--relationship TYPE` は `NONE`・`CONTINUES`・`AMENDS`・`SUPERSEDES`・`CANCELS`・`SUSPENDS`・`RESUMES`・`INDEPENDENT` を受け付ける。`NONE` は既定値で、`NONE` 以外または関連先を指定する場合は Task Graph の初期化が必要。`NONE` に `--related-dispatch`・`--relationship-reason` は指定できず、他の関係には両方必要。`INDEPENDENT` の関連先は別 Task の Dispatch でなければならない。 |

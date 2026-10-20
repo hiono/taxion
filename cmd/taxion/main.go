@@ -58,6 +58,7 @@ Requests, planning and Task contracts:
   task transition     Validate and record a Task Graph transition (--file JSON)
   task graph          Print the versioned Task Graph and history
   task validate       Check a Task Graph request without storing it (--manifest JSON; all violations, canonical hash)
+  task authorize      Validate, store and bundle one Task approval (--manifest JSON; append-only audit record)
   task plan           Rebuild a follow-up plan from durable contracts and evidence (--repo required; --include-archived for history)
 
 Dispatch and configuration binding:
@@ -326,7 +327,7 @@ func taskCmd(args []string) error {
 	switch args[0] {
 	case "archive":
 		return taskArchiveCmd(args[1:])
-	case "track", "transition", "graph", "plan", "validate":
+	case "track", "transition", "graph", "plan", "validate", "authorize":
 		return taskGraphCmd(args[0], args[1:])
 	case "create":
 		fs := flag.NewFlagSet("task create", flag.ContinueOnError)
