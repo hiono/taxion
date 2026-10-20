@@ -371,3 +371,36 @@ func TestAppendApprovalKeepsRecordsImmutable(t *testing.T) {
 		t.Fatal("approval matched a different task")
 	}
 }
+
+func TestConfirmationTokenBindsEveryDimension(t *testing.T) {
+	task, stored := validDraftTask("contract"), GraphTask{}
+	stored = task
+	stored.FileAccess = DefaultFileAccessPolicy()
+	configuration := approvalConfiguration(t, legacySelection)
+	dimensions, err := BundleDimensions(stored, configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := ConfirmationTokenFor("proposal", dimensions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := dimensions
+	other.Configuration = "sha256:changed"
+	if changed, err := ConfirmationTokenFor("proposal", other); err != nil || changed == token {
+		t.Fatal("configuration digest did not change the confirmation token")
+	}
+	other = dimensions
+	other.Permission = "sha256:changed"
+	if changed, err := ConfirmationTokenFor("proposal", other); err != nil || changed == token {
+		t.Fatal("permissions digest did not change the confirmation token")
+	}
+	other = dimensions
+	other.Security = "sha256:changed"
+	if changed, err := ConfirmationTokenFor("proposal", other); err != nil || changed == token {
+		t.Fatal("security digest did not change the confirmation token")
+	}
+	if repeated, err := ConfirmationTokenFor("proposal", dimensions); err != nil || repeated != token {
+		t.Fatal("confirmation token is not deterministic")
+	}
+}

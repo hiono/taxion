@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -71,6 +72,7 @@ type approvalStageReport struct {
 
 type approvalGateReport struct {
 	Reused                  bool                  `json:"reused,omitempty"`
+	PriorBundleID           string                `json:"priorBundleId,omitempty"`
 	PriorBundleHash         string                `json:"priorBundleHash,omitempty"`
 	TaskID                  string                `json:"taskId"`
 	ApprovalID              string                `json:"approvalId"`
@@ -128,6 +130,7 @@ func taskAuthorizeCmd(file, confirm string) error {
 		ConfigurationDigest string                  `json:"configurationDigest"`
 		Configuration       []string                `json:"configurationFields"`
 		Dimensions          core.ApprovalDimensions `json:"dimensions"`
+		ConfirmationToken   string                  `json:"confirmationToken"`
 		NextAction          string                  `json:"nextAction,omitempty"`
 	}{
 		Status: "awaiting-approval",
@@ -135,26 +138,25 @@ func taskAuthorizeCmd(file, confirm string) error {
 		ProposalHash: validation.CanonicalSHA256, ConfigurationDigest: configuration.Digest,
 		Configuration: approvalFieldPaths(configuration.Selection), Dimensions: dimensions,
 	}
+	token, err := core.ConfirmationTokenFor(validation.CanonicalSHA256, dimensions)
+	if err != nil {
+		return authorizeError(err)
+	}
+	content.ConfirmationToken = token
+	if confirm == "" {
+		content.NextAction = "rerun with --confirm <confirmationToken> to approve"
+		return printJSON(content)
+	}
+	if subtle.ConstantTimeCompare([]byte(confirm), []byte(token)) != 1 {
+		return authorizeError(fmt.Errorf("--confirm does not match the approval basis; rerun without --confirm to review it"))
+	}
+	content.Status = "approved"
 	if stored, exists := graph.GraphTask(proposal.ID); exists {
 		if recordHash, err := core.CanonicalSHA256(stored); err == nil && recordHash == validation.CanonicalSHA256 {
 			if bundle, ok := graph.MatchingApproval(proposal.ID, stored, configuration); ok {
 				return printJSON(approvalReuseReport(bundle))
 			}
 		}
-	}
-	if confirm != "" && confirm != validation.CanonicalSHA256 {
-		return authorizeError(fmt.Errorf("--confirm does not match the validated proposal hash"))
-	}
-	if confirm != "" {
-		content.Status = "approved"
-	} else {
-		content.NextAction = "rerun with --confirm <proposalHash> to approve"
-	}
-	if err := printJSON(content); err != nil {
-		return err
-	}
-	if confirm == "" {
-		return nil
 	}
 	if err := updateWorkspace(func(current *store.Workspace) error {
 		if !current.HasGraph {
@@ -221,7 +223,8 @@ func taskAuthorizeCmd(file, confirm string) error {
 		BundleHash: bundle.BundleHash, Drifts: drifts,
 	}
 	if hasNewest {
-		report.PriorBundleHash = newest.ID
+		report.PriorBundleID = newest.ID
+		report.PriorBundleHash = newest.BundleHash
 	}
 	for _, stage := range core.ApprovalStages() {
 		stageReport := approvalStageReport{Stage: stage, Approval: "approved"}
