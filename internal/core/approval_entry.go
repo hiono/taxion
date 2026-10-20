@@ -39,7 +39,7 @@ func (e *EntryCheckError) Error() string {
 	if len(e.Drifts) == 0 {
 		return fmt.Sprintf("taxion: approval bundle missing for %s (%s)", e.Stage, e.Code)
 	}
-	return fmt.Sprintf("taxion: approval bundle %s does not authorize %s (%s); re-approval required", e.BundleID, e.Stage, e.Code)
+	return fmt.Sprintf("taxion: approval bundle %s does not authorize %s (%s); re-approval required", Redact(e.BundleID), e.Stage, e.Code)
 }
 
 // CheckBundleAtEntry verifies that a persisted approval bundle authorizes the
