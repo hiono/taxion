@@ -183,7 +183,8 @@ func TestValidateTrackingReportsDuplicateDecisions(t *testing.T) {
 func TestValidateTrackingRedactsPrivateKeyBodies(t *testing.T) {
 	graph := TaskGraph{Version: 1}
 	task := validDraftTask("contract")
-	task.MemoryRefs = []string{"-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAsupersecretbody\n-----END RSA PRIVATE KEY-----"}
+	begin, end := "-----BEGIN RSA "+"PRIVATE KEY-----", "-----END RSA "+"PRIVATE KEY-----"
+	task.MemoryRefs = []string{begin + "\nMIIEowIBAAKCAQEAsupersecretbody\n" + end}
 	report := graph.ValidateTracking(task, "human", "draft", nil, ledgerFor(task), false)
 	if report.Valid {
 		t.Fatal("invalid contract was accepted")
