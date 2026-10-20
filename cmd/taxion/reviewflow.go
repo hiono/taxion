@@ -384,13 +384,12 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		if err := core.DecodeGraphInput(input, &request); err != nil {
 			return err
 		}
-		resolved, err := resolveConfiguration()
-		if err != nil {
-			return err
-		}
-		configuration, err := approvalConfigurationFor(resolved.Config, resolved.Sources)
-		if err != nil {
-			return err
+		configuration := core.ApprovalConfiguration{}
+		if resolved, err := resolveConfiguration(); err == nil {
+			configuration, err = approvalConfigurationFor(resolved.Config, resolved.Sources)
+			if err != nil {
+				return err
+			}
 		}
 		request.Configuration = configuration
 		flow, err := controller.StartReviewFlow(db, storePath, request)
