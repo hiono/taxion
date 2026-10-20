@@ -399,13 +399,12 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		}
 		return printJSON(flow)
 	case "advance":
-		resolved, err := resolveConfiguration()
-		if err != nil {
-			return err
-		}
-		configuration, err := approvalConfigurationFor(resolved.Config, resolved.Sources)
-		if err != nil {
-			return err
+		configuration := core.ApprovalConfiguration{}
+		if resolved, err := resolveConfiguration(); err == nil {
+			configuration, err = approvalConfigurationFor(resolved.Config, resolved.Sources)
+			if err != nil {
+				return err
+			}
 		}
 		flow, err := controller.AdvanceReviewFlow(db, storePath, id, configuration)
 		if err != nil && !errors.Is(err, controller.ErrFlowStopped) && !errors.Is(err, core.ErrHandoffHeld) {
