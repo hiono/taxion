@@ -51,8 +51,12 @@ func TestTaskValidateIsSaveFreeAndMatchesTrack(t *testing.T) {
 	if err := (core.Ledger{Tasks: []core.Task{{ID: "contract", Title: valid.Title, Repo: valid.Repo}}}).Save(storePath); err != nil {
 		t.Fatal(err)
 	}
+	ledgerBefore := readFile(t, storePath)
 	if err := taskCmd([]string{"validate", "--manifest", file}); err != nil {
 		t.Fatalf("valid manifest rejected: %v", err)
+	}
+	if got := readFile(t, storePath); !bytes.Equal(got, ledgerBefore) {
+		t.Fatal("task validate modified the legacy ledger")
 	}
 	if _, err := os.Stat(workspaceDBPath()); !os.IsNotExist(err) {
 		t.Fatal("task validate created the workspace store")
@@ -249,4 +253,13 @@ func TestTaskValidateFallsBackFromSchemaLessDatabase(t *testing.T) {
 	if data, err := os.ReadFile(workspaceDBPath()); err != nil || len(data) != 0 {
 		t.Fatalf("schema-less workspace file was modified: %d bytes, %v", len(data), err)
 	}
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
