@@ -342,7 +342,8 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 		storeFlow(state, flow)
 		return nil
 	})
-	if err != nil && flow.ID != "" && !errors.Is(err, ErrFlowClaimed) && !errors.Is(err, core.ErrHandoffHeld) {
+	var entryErr *core.EntryCheckError
+	if err != nil && flow.ID != "" && !errors.Is(err, ErrFlowClaimed) && !errors.Is(err, core.ErrHandoffHeld) && !errors.As(err, &entryErr) {
 		saveErr := db.UpdateWorkspace(func(state *store.Workspace) error {
 			stored, ok := state.Graph.ReviewFlow(id)
 			if !ok || stored.Status != "RUNNING" {
@@ -378,8 +379,14 @@ func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.Rev
 	var stage core.ApprovalEntryStage
 	switch relationship {
 	case core.RelationshipAmends:
+		if task.Owner != "CODER" || flow.Repairs == 0 {
+			return fmt.Errorf("taxion: inconsistent repair entry for Task owner %q with %d repairs", task.Owner, flow.Repairs)
+		}
 		stage = core.EntryRepairDispatch
 	case core.RelationshipIndependent:
+		if task.Owner != "REVIEWER" {
+			return fmt.Errorf("taxion: inconsistent review entry for Task owner %q", task.Owner)
+		}
 		stage = core.EntryReviewerDispatch
 		if flow.Repairs > 0 {
 			stage = core.EntryReReviewDispatch
