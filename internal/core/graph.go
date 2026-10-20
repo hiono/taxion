@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -452,14 +453,16 @@ type TaskWaiver struct {
 }
 
 type TaskGraph struct {
-	Version         int             `json:"version"`
-	Tasks           []GraphTask     `json:"tasks"`
-	Concerns        []Concern       `json:"concerns"`
-	History         []GraphEvent    `json:"history"`
-	Dispatches      []GraphDispatch `json:"dispatches"`
-	DispatchHistory []DispatchEvent `json:"dispatchHistory"`
-	ReviewFlows     []ReviewFlow    `json:"reviewFlows,omitempty"`
-	Archives        []TaskArchive   `json:"archives,omitempty"`
+	Version               int              `json:"version"`
+	Tasks                 []GraphTask      `json:"tasks"`
+	Concerns              []Concern        `json:"concerns"`
+	History               []GraphEvent     `json:"history"`
+	Dispatches            []GraphDispatch  `json:"dispatches"`
+	DispatchHistory       []DispatchEvent  `json:"dispatchHistory"`
+	ReviewFlows           []ReviewFlow     `json:"reviewFlows,omitempty"`
+	Archives              []TaskArchive    `json:"archives,omitempty"`
+	ApprovalSchemaVersion int              `json:"approvalSchemaVersion,omitempty"`
+	Approvals             []ApprovalBundle `json:"approvals,omitempty"`
 }
 
 func graphError(format string, args ...any) error {
@@ -1340,6 +1343,9 @@ func validOptionalCount(value *int64) bool {
 }
 
 func (g TaskGraph) Validate() error {
+	if err := g.validateApprovals(); err != nil {
+		return err
+	}
 	if g.Version != 1 {
 		return graphError("unsupported version %d", g.Version)
 	}
@@ -1796,6 +1802,11 @@ func cloneGraph(g TaskGraph) TaskGraph {
 		copy.Archives[i].TaskIDs = slices.Clone(copy.Archives[i].TaskIDs)
 	}
 	copy.ReviewFlows = slices.Clone(g.ReviewFlows)
+	copy.Approvals = slices.Clone(g.Approvals)
+	for i := range copy.Approvals {
+		copy.Approvals[i].Configuration.Sources = maps.Clone(g.Approvals[i].Configuration.Sources)
+		copy.Approvals[i].Configuration.Selection = slices.Clone(g.Approvals[i].Configuration.Selection)
+	}
 	for i := range copy.ReviewFlows {
 		copy.ReviewFlows[i].Contract = cloneTask(copy.ReviewFlows[i].Contract)
 		copy.ReviewFlows[i].DispatchIDs = slices.Clone(copy.ReviewFlows[i].DispatchIDs)

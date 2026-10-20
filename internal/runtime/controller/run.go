@@ -20,19 +20,23 @@ type WorkerFactory func(core.GraphDispatch) (runtime.Identity, error)
 
 // RunReviewFlow holds a durable single-runner claim. An interrupted process's
 // claim remains visible so another process cannot silently resume uncertain work.
-func RunReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer) (core.ReviewFlow, error) {
-	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, false)
+func RunReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, configuration ...core.ApprovalConfiguration) (core.ReviewFlow, error) {
+	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, false, configuration...)
 }
 
 // StepReviewFlow executes at most one role turn. It does not issue the next
 // handoff after the turn completes; continuation remains an explicit decision.
-func StepReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer) (core.ReviewFlow, error) {
-	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, true)
+func StepReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, configuration ...core.ApprovalConfiguration) (core.ReviewFlow, error) {
+	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, true, configuration...)
 }
 
-func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, singleTurn bool) (core.ReviewFlow, error) {
+func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, singleTurn bool, configuration ...core.ApprovalConfiguration) (core.ReviewFlow, error) {
 	if db == nil || factory == nil || out == nil {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: flow runner requires a store, worker factory and event output")
+	}
+	var selected core.ApprovalConfiguration
+	if len(configuration) != 0 {
+		selected = configuration[0]
 	}
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {
@@ -59,7 +63,7 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 	runCtx, cancel := context.WithDeadline(ctx, flow.Deadline)
 	defer cancel()
 	for {
-		flow, err = advanceReviewFlow(db, ledgerPath, id, runnerID)
+		flow, err = advanceReviewFlow(db, ledgerPath, id, runnerID, selected)
 		if err != nil || flow.Status != "RUNNING" {
 			break
 		}
@@ -107,7 +111,7 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 		}
 		if setupErr == nil {
 			setupErr = control.StreamEvents(runCtx, dispatch, cursor, out, func() error {
-				_, checkErr := advanceReviewFlow(db, ledgerPath, id, runnerID)
+				_, checkErr := advanceReviewFlow(db, ledgerPath, id, runnerID, selected)
 				return checkErr
 			})
 		}

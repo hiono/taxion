@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/subtle"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -8,28 +10,40 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hiono/taxion/internal/config"
+
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/store"
 )
 
-func taskValidateCmd(file string) error {
+type graphRequest struct {
+	Task    core.GraphTask `json:"task"`
+	Actor   string         `json:"actor"`
+	Reason  string         `json:"reason"`
+	Concern *core.Concern  `json:"concern,omitempty"`
+}
+
+func loadGraphRequest(file string) (graphRequest, error) {
+	var request graphRequest
 	if file == "" {
-		return fmt.Errorf("task validate: --manifest is required")
+		return request, fmt.Errorf("--manifest is required")
 	}
 	input, err := os.Open(file)
 	if err != nil {
-		return validateError(err)
+		return request, err
 	}
 	defer input.Close()
-	var request struct {
-		Task    core.GraphTask `json:"task"`
-		Actor   string         `json:"actor"`
-		Reason  string         `json:"reason"`
-		Concern *core.Concern  `json:"concern,omitempty"`
-	}
 	if err := core.DecodeGraphInput(input, &request); err != nil {
+		return request, err
+	}
+	return request, nil
+}
+
+func taskValidateCmd(file string) error {
+	request, err := loadGraphRequest(file)
+	if err != nil {
 		return validateError(err)
 	}
 	graph, ledger, initialized, err := loadGraphReadOnly()
@@ -50,6 +64,240 @@ func taskValidateCmd(file string) error {
 		return validateError(fmt.Errorf("%d validator error(s); no Task was stored", len(report.ValidatorErrors)))
 	}
 	return nil
+}
+
+type approvalStageReport struct {
+	Stage              core.ApprovalStage `json:"stage"`
+	Approval           string             `json:"approval"`
+	ReapprovalRequired bool               `json:"reapprovalRequired"`
+}
+
+type approvalGateReport struct {
+	Reused                  bool                  `json:"reused,omitempty"`
+	PriorBundleID           string                `json:"priorBundleId,omitempty"`
+	PriorBundleHash         string                `json:"priorBundleHash,omitempty"`
+	TaskID                  string                `json:"taskId"`
+	ApprovalID              string                `json:"approvalId"`
+	BundleVersion           int                   `json:"bundleVersion"`
+	CanonicalizationVersion int                   `json:"canonicalizationVersion"`
+	ProposalHash            string                `json:"proposalHash"`
+	RecordHash              string                `json:"recordHash"`
+	ConfigurationDigest     string                `json:"configurationDigest"`
+	BundleHash              string                `json:"bundleHash"`
+	Stages                  []approvalStageReport `json:"stages"`
+	ReapprovalRequired      bool                  `json:"reapprovalRequired"`
+	Drifts                  []core.ApprovalDrift  `json:"drifts"`
+}
+
+func taskAuthorizeCmd(file, confirm string) error {
+	request, err := loadGraphRequest(file)
+	if err != nil {
+		return authorizeError(err)
+	}
+	graph, ledger, initialized, err := loadGraphReadOnly()
+	if err != nil {
+		return authorizeError(err)
+	}
+	configuration, err := approvalConfiguration()
+	if err != nil {
+		return authorizeError(err)
+	}
+	proposal := request.Task
+	if _, exists := graph.GraphTask(proposal.ID); !exists && proposal.BudgetGuidance == nil {
+		proposal.BudgetGuidance, err = newTaskBudgetGuidance()
+		if err != nil {
+			return authorizeError(err)
+		}
+	}
+	validation := graph.ValidateTracking(proposal, request.Actor, request.Reason, request.Concern, ledger, initialized)
+	if !validation.Valid {
+		if err := printJSON(validation); err != nil {
+			return err
+		}
+		return authorizeError(fmt.Errorf("%d validator error(s); no Task was stored", len(validation.ValidatorErrors)))
+	}
+	if validation.DigestWithheld {
+		return authorizeError(fmt.Errorf("contract digest is withheld; remove the credential-like value and authorize again"))
+	}
+	dimensions, err := core.BundleDimensions(proposal, configuration)
+	if err != nil {
+		return authorizeError(err)
+	}
+	content := struct {
+		Status              string                  `json:"status"`
+		TaskID              string                  `json:"taskId"`
+		Title               string                  `json:"title"`
+		Objective           string                  `json:"objective"`
+		ProposalHash        string                  `json:"proposalHash"`
+		ConfigurationDigest string                  `json:"configurationDigest"`
+		Configuration       []string                `json:"configurationFields"`
+		Dimensions          core.ApprovalDimensions `json:"dimensions"`
+		ConfirmationToken   string                  `json:"confirmationToken"`
+		NextAction          string                  `json:"nextAction,omitempty"`
+	}{
+		Status: "awaiting-approval",
+		TaskID: request.Task.ID, Title: request.Task.Title, Objective: request.Task.Objective,
+		ProposalHash: validation.CanonicalSHA256, ConfigurationDigest: configuration.Digest,
+		Configuration: approvalFieldPaths(configuration.Selection), Dimensions: dimensions,
+	}
+	token, err := core.ConfirmationTokenFor(validation.CanonicalSHA256, dimensions)
+	if err != nil {
+		return authorizeError(err)
+	}
+	content.ConfirmationToken = token
+	if confirm == "" {
+		content.NextAction = "rerun with --confirm <confirmationToken> to approve"
+		return printJSON(content)
+	}
+	if subtle.ConstantTimeCompare([]byte(confirm), []byte(token)) != 1 {
+		return authorizeError(fmt.Errorf("--confirm does not match the approval basis; rerun without --confirm to review it"))
+	}
+	content.Status = "approved"
+	if stored, exists := graph.GraphTask(proposal.ID); exists {
+		if recordHash, err := core.CanonicalSHA256(stored); err == nil && recordHash == validation.CanonicalSHA256 {
+			if bundle, ok := graph.MatchingApproval(proposal.ID, stored, configuration); ok {
+				return printJSON(approvalReuseReport(bundle))
+			}
+		}
+	}
+	if err := updateWorkspace(func(current *store.Workspace) error {
+		if !current.HasGraph {
+			if err := core.GuardActiveDispatch(current.Ledger.Dispatches); err != nil {
+				return err
+			}
+			current.Graph = core.TaskGraph{Version: 1}
+			current.HasGraph = true
+		}
+		if err := current.Graph.Track(proposal, request.Actor, request.Reason); err != nil {
+			return err
+		}
+		if request.Concern != nil {
+			if err := current.Graph.AddConcern(*request.Concern); err != nil {
+				return err
+			}
+		}
+		return current.Graph.CheckLedger(current.Ledger)
+	}); err != nil {
+		return authorizeError(err)
+	}
+	readbackGraph, _, _, err := loadGraphReadOnly()
+	if err != nil {
+		return authorizeError(err)
+	}
+	stored, exists := readbackGraph.GraphTask(proposal.ID)
+	if !exists {
+		return authorizeError(fmt.Errorf("post-save readback lost Task %s; approval aborted", proposal.ID))
+	}
+	recordHash, err := core.CanonicalSHA256(stored)
+	if err != nil {
+		return authorizeError(err)
+	}
+	if recordHash != validation.CanonicalSHA256 {
+		return authorizeError(fmt.Errorf("post-save readback does not match the validated contract; approval aborted"))
+	}
+	at := time.Now()
+	bundle, err := core.ComposeApprovalBundle(approvalID(proposal.ID, recordHash, configuration.Digest, at), request.Task, stored, configuration, request.Actor, "human:"+request.Actor, request.Reason, at)
+	if err != nil {
+		return authorizeError(err)
+	}
+	if err := bundle.Verify(stored, configuration); err != nil {
+		return authorizeError(err)
+	}
+	if err := updateWorkspace(func(current *store.Workspace) error {
+		return current.Graph.AppendApproval(bundle)
+	}); err != nil {
+		return authorizeError(err)
+	}
+	_, priorMatches := readbackGraph.MatchingApproval(stored.ID, stored, configuration)
+	newest, hasNewest := readbackGraph.NewestApproval(stored.ID)
+	drifts := []core.ApprovalDrift{}
+	if hasNewest {
+		computed, err := newest.Drifts(stored, configuration)
+		if err != nil {
+			return authorizeError(err)
+		}
+		drifts = computed
+	}
+	report := approvalGateReport{
+		TaskID: bundle.TaskID, ApprovalID: bundle.ID, BundleVersion: bundle.BundleVersion,
+		CanonicalizationVersion: bundle.CanonicalizationVersion, ProposalHash: bundle.ProposalHash,
+		RecordHash: bundle.RecordHash, ConfigurationDigest: bundle.Configuration.Digest,
+		BundleHash: bundle.BundleHash, Drifts: drifts,
+	}
+	if hasNewest {
+		report.PriorBundleID = newest.ID
+		report.PriorBundleHash = newest.BundleHash
+	}
+	for _, stage := range core.ApprovalStages() {
+		stageReport := approvalStageReport{Stage: stage, Approval: "approved"}
+		if priorMatches {
+			stageReport.Approval = "reused"
+		}
+		if err := bundle.CheckApprovalFor(stored, configuration, stage); err != nil {
+			stageReport.Approval = "reapproval-required"
+			report.ReapprovalRequired = true
+		}
+		report.Stages = append(report.Stages, stageReport)
+	}
+	return printJSON(report)
+}
+
+// approvalReuseReport reports an already matching approval without asking for a
+// second approval of the same content.
+func approvalReuseReport(bundle core.ApprovalBundle) approvalGateReport {
+	report := approvalGateReport{
+		Reused: true, TaskID: bundle.TaskID, ApprovalID: bundle.ID,
+		BundleVersion: bundle.BundleVersion, CanonicalizationVersion: bundle.CanonicalizationVersion,
+		ProposalHash: bundle.ProposalHash, RecordHash: bundle.RecordHash,
+		ConfigurationDigest: bundle.Configuration.Digest, BundleHash: bundle.BundleHash,
+		Drifts: []core.ApprovalDrift{},
+	}
+	for _, stage := range core.ApprovalStages() {
+		report.Stages = append(report.Stages, approvalStageReport{Stage: stage, Approval: "reused"})
+	}
+	return report
+}
+
+// approvalConfiguration reuses the binding check's field canonicalization and
+// keeps only references: resolved credential values never enter the digest.
+func approvalConfiguration() (core.ApprovalConfiguration, error) {
+	resolution, err := resolveConfiguration()
+	if err != nil {
+		return core.ApprovalConfiguration{}, err
+	}
+	return approvalConfigurationFor(resolution.Config, resolution.Sources)
+}
+
+// approvalConfigurationFor digests the configuration a caller actually uses so
+// that approval bundles and execution compare the same selection.
+func approvalConfigurationFor(selected config.Config, sources map[string]string) (core.ApprovalConfiguration, error) {
+	selection, err := json.Marshal(selected)
+	if err != nil {
+		return core.ApprovalConfiguration{}, err
+	}
+	return core.SelectApprovalConfiguration(selection, sources)
+}
+
+func approvalFieldPaths(selection json.RawMessage) []string {
+	fields, err := core.SelectionFields(selection)
+	if err != nil {
+		return nil
+	}
+	return fields
+}
+
+func approvalID(taskID, recordHash, configurationDigest string, at time.Time) string {
+	seed := taskID + "|" + recordHash + "|" + configurationDigest + "|" + at.UTC().Format(time.RFC3339Nano)
+	return "approval-" + core.SHA256Hex([]byte(seed))[:16]
+}
+
+// authorizeError sanitizes a diagnostic so that no credential-like value is
+// echoed by the single-approval flow.
+func authorizeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("task authorize: %s", core.Redact(err.Error()))
 }
 
 // validateError sanitizes a diagnostic so that no credential-like value from a
@@ -173,16 +421,19 @@ func loadLegacyState() (core.TaskGraph, core.Ledger, bool, error) {
 
 func taskGraphCmd(command string, args []string) error {
 	fs := flag.NewFlagSet("task "+command, flag.ContinueOnError)
-	var file, repo, manifest string
+	var file, repo, manifest, confirm string
 	var includeArchived bool
 	if command == "plan" {
 		fs.StringVar(&repo, "repo", "", "explicit repository for follow-up planning")
 		fs.BoolVar(&includeArchived, "include-archived", false, "include archived history without permitting execution")
 	} else if command == "track" || command == "transition" {
 		fs.StringVar(&file, "file", "", "JSON request file")
-	} else if command == "validate" {
+	} else if command == "validate" || command == "authorize" {
 		fs.StringVar(&manifest, "manifest", "", "JSON request file to validate without storing")
 		fs.StringVar(&file, "file", "", "JSON request file to validate without storing")
+		if command == "authorize" {
+			fs.StringVar(&confirm, "confirm", "", "proposal hash printed by the previous invocation")
+		}
 	} else if command != "graph" {
 		return fmt.Errorf("unknown task graph command %s", command)
 	}
@@ -192,12 +443,15 @@ func taskGraphCmd(command string, args []string) error {
 	if len(fs.Args()) != 0 {
 		return fmt.Errorf("unexpected task graph arguments")
 	}
-	if command == "validate" {
+	if command == "validate" || command == "authorize" {
 		if manifest != "" && file != "" {
-			return fmt.Errorf("task validate: use either --manifest or --file, not both")
+			return fmt.Errorf("task %s: use either --manifest or --file, not both", command)
 		}
 		if manifest != "" {
 			file = manifest
+		}
+		if command == "authorize" {
+			return taskAuthorizeCmd(file, confirm)
 		}
 		return taskValidateCmd(file)
 	}
