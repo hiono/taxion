@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -14,22 +15,32 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
-func taskValidateCmd(file string) error {
+type graphRequest struct {
+	Task    core.GraphTask `json:"task"`
+	Actor   string         `json:"actor"`
+	Reason  string         `json:"reason"`
+	Concern *core.Concern  `json:"concern,omitempty"`
+}
+
+func loadGraphRequest(file string) (graphRequest, error) {
+	var request graphRequest
 	if file == "" {
-		return fmt.Errorf("task validate: --manifest is required")
+		return request, fmt.Errorf("--manifest is required")
 	}
 	input, err := os.Open(file)
 	if err != nil {
-		return validateError(err)
+		return request, err
 	}
 	defer input.Close()
-	var request struct {
-		Task    core.GraphTask `json:"task"`
-		Actor   string         `json:"actor"`
-		Reason  string         `json:"reason"`
-		Concern *core.Concern  `json:"concern,omitempty"`
-	}
 	if err := core.DecodeGraphInput(input, &request); err != nil {
+		return request, err
+	}
+	return request, nil
+}
+
+func taskValidateCmd(file string) error {
+	request, err := loadGraphRequest(file)
+	if err != nil {
 		return validateError(err)
 	}
 	graph, ledger, initialized, err := loadGraphReadOnly()
@@ -50,6 +61,177 @@ func taskValidateCmd(file string) error {
 		return validateError(fmt.Errorf("%d validator error(s); no Task was stored", len(report.ValidatorErrors)))
 	}
 	return nil
+}
+
+type approvalStageReport struct {
+	Stage              core.ApprovalStage `json:"stage"`
+	Approval           string             `json:"approval"`
+	ReapprovalRequired bool               `json:"reapprovalRequired"`
+}
+
+type approvalGateReport struct {
+	TaskID                  string                `json:"taskId"`
+	ApprovalID              string                `json:"approvalId"`
+	BundleVersion           int                   `json:"bundleVersion"`
+	CanonicalizationVersion int                   `json:"canonicalizationVersion"`
+	ProposalHash            string                `json:"proposalHash"`
+	RecordHash              string                `json:"recordHash"`
+	ConfigurationDigest     string                `json:"configurationDigest"`
+	BundleHash              string                `json:"bundleHash"`
+	Stages                  []approvalStageReport `json:"stages"`
+	ReapprovalRequired      bool                  `json:"reapprovalRequired"`
+	Drifts                  []core.ApprovalDrift  `json:"drifts"`
+}
+
+func taskAuthorizeCmd(file string) error {
+	request, err := loadGraphRequest(file)
+	if err != nil {
+		return authorizeError(err)
+	}
+	graph, ledger, initialized, err := loadGraphReadOnly()
+	if err != nil {
+		return authorizeError(err)
+	}
+	configuration, err := approvalConfiguration()
+	if err != nil {
+		return authorizeError(err)
+	}
+	proposal := request.Task
+	if _, exists := graph.GraphTask(proposal.ID); !exists && proposal.BudgetGuidance == nil {
+		proposal.BudgetGuidance, err = newTaskBudgetGuidance()
+		if err != nil {
+			return authorizeError(err)
+		}
+	}
+	validation := graph.ValidateTracking(proposal, request.Actor, request.Reason, request.Concern, ledger, initialized)
+	if !validation.Valid {
+		if err := printJSON(validation); err != nil {
+			return err
+		}
+		return authorizeError(fmt.Errorf("%d validator error(s); no Task was stored", len(validation.ValidatorErrors)))
+	}
+	if validation.DigestWithheld {
+		return authorizeError(fmt.Errorf("contract digest is withheld; remove the credential-like value and authorize again"))
+	}
+	dimensions, err := core.BundleDimensions(proposal, configuration)
+	if err != nil {
+		return authorizeError(err)
+	}
+	content := struct {
+		TaskID              string                  `json:"taskId"`
+		Title               string                  `json:"title"`
+		Objective           string                  `json:"objective"`
+		ProposalHash        string                  `json:"proposalHash"`
+		ConfigurationDigest string                  `json:"configurationDigest"`
+		Configuration       []string                `json:"configurationFields"`
+		Dimensions          core.ApprovalDimensions `json:"dimensions"`
+	}{
+		TaskID: request.Task.ID, Title: request.Task.Title, Objective: request.Task.Objective,
+		ProposalHash: validation.CanonicalSHA256, ConfigurationDigest: configuration.Digest,
+		Configuration: approvalFieldPaths(configuration.Selection), Dimensions: dimensions,
+	}
+	if err := printJSON(content); err != nil {
+		return err
+	}
+	if err := updateWorkspace(func(current *store.Workspace) error {
+		if !current.HasGraph {
+			if err := core.GuardActiveDispatch(current.Ledger.Dispatches); err != nil {
+				return err
+			}
+			current.Graph = core.TaskGraph{Version: 1}
+			current.HasGraph = true
+		}
+		if err := current.Graph.Track(proposal, request.Actor, request.Reason); err != nil {
+			return err
+		}
+		if request.Concern != nil {
+			if err := current.Graph.AddConcern(*request.Concern); err != nil {
+				return err
+			}
+		}
+		return current.Graph.CheckLedger(current.Ledger)
+	}); err != nil {
+		return authorizeError(err)
+	}
+	readbackGraph, _, _, err := loadGraphReadOnly()
+	if err != nil {
+		return authorizeError(err)
+	}
+	stored, exists := readbackGraph.GraphTask(proposal.ID)
+	if !exists {
+		return authorizeError(fmt.Errorf("post-save readback lost Task %s; approval aborted", proposal.ID))
+	}
+	recordHash, err := core.CanonicalSHA256(stored)
+	if err != nil {
+		return authorizeError(err)
+	}
+	if recordHash != validation.CanonicalSHA256 {
+		return authorizeError(fmt.Errorf("post-save readback does not match the validated contract; approval aborted"))
+	}
+	at := time.Now()
+	bundle, err := core.ComposeApprovalBundle(approvalID(proposal.ID, recordHash, configuration.Digest, at), request.Task, stored, configuration, request.Actor, "human:"+request.Actor, request.Reason, at)
+	if err != nil {
+		return authorizeError(err)
+	}
+	if err := bundle.Verify(stored, configuration); err != nil {
+		return authorizeError(err)
+	}
+	if err := updateWorkspace(func(current *store.Workspace) error {
+		return current.Graph.AppendApproval(bundle)
+	}); err != nil {
+		return authorizeError(err)
+	}
+	report := approvalGateReport{
+		TaskID: bundle.TaskID, ApprovalID: bundle.ID, BundleVersion: bundle.BundleVersion,
+		CanonicalizationVersion: bundle.CanonicalizationVersion, ProposalHash: bundle.ProposalHash,
+		RecordHash: bundle.RecordHash, ConfigurationDigest: bundle.Configuration.Digest,
+		BundleHash: bundle.BundleHash, Drifts: []core.ApprovalDrift{},
+	}
+	for _, stage := range core.ApprovalStages() {
+		stageReport := approvalStageReport{Stage: stage, Approval: "reused"}
+		if err := bundle.CheckApprovalFor(stored, configuration, stage); err != nil {
+			stageReport.Approval = "reapproval-required"
+			report.ReapprovalRequired = true
+		}
+		report.Stages = append(report.Stages, stageReport)
+	}
+	return printJSON(report)
+}
+
+// approvalConfiguration reuses the binding check's field canonicalization and
+// keeps only references: resolved credential values never enter the digest.
+func approvalConfiguration() (core.ApprovalConfiguration, error) {
+	resolution, err := resolveConfiguration()
+	if err != nil {
+		return core.ApprovalConfiguration{}, err
+	}
+	selection, err := json.Marshal(resolution.Config)
+	if err != nil {
+		return core.ApprovalConfiguration{}, err
+	}
+	return core.SelectApprovalConfiguration(selection, resolution.Sources)
+}
+
+func approvalFieldPaths(selection json.RawMessage) []string {
+	fields, err := core.SelectionFields(selection)
+	if err != nil {
+		return nil
+	}
+	return fields
+}
+
+func approvalID(taskID, recordHash, configurationDigest string, at time.Time) string {
+	seed := taskID + "|" + recordHash + "|" + configurationDigest + "|" + at.UTC().Format(time.RFC3339Nano)
+	return "approval-" + core.SHA256Hex([]byte(seed))[:16]
+}
+
+// authorizeError sanitizes a diagnostic so that no credential-like value is
+// echoed by the single-approval flow.
+func authorizeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("task authorize: %s", core.Redact(err.Error()))
 }
 
 // validateError sanitizes a diagnostic so that no credential-like value from a
@@ -180,7 +362,7 @@ func taskGraphCmd(command string, args []string) error {
 		fs.BoolVar(&includeArchived, "include-archived", false, "include archived history without permitting execution")
 	} else if command == "track" || command == "transition" {
 		fs.StringVar(&file, "file", "", "JSON request file")
-	} else if command == "validate" {
+	} else if command == "validate" || command == "authorize" {
 		fs.StringVar(&manifest, "manifest", "", "JSON request file to validate without storing")
 		fs.StringVar(&file, "file", "", "JSON request file to validate without storing")
 	} else if command != "graph" {
@@ -192,12 +374,15 @@ func taskGraphCmd(command string, args []string) error {
 	if len(fs.Args()) != 0 {
 		return fmt.Errorf("unexpected task graph arguments")
 	}
-	if command == "validate" {
+	if command == "validate" || command == "authorize" {
 		if manifest != "" && file != "" {
-			return fmt.Errorf("task validate: use either --manifest or --file, not both")
+			return fmt.Errorf("task %s: use either --manifest or --file, not both", command)
 		}
 		if manifest != "" {
 			file = manifest
+		}
+		if command == "authorize" {
+			return taskAuthorizeCmd(file)
 		}
 		return taskValidateCmd(file)
 	}

@@ -365,3 +365,85 @@ func selectionValues(selection json.RawMessage) (map[string]any, error) {
 	}
 	return flat, nil
 }
+
+// Approval returns the approval record with the given ID.
+func (g TaskGraph) Approval(id string) (ApprovalBundle, bool) {
+	for _, bundle := range g.Approvals {
+		if bundle.ID == id {
+			return bundle, true
+		}
+	}
+	return ApprovalBundle{}, false
+}
+
+func (g TaskGraph) validateApprovals() error {
+	seen := map[string]bool{}
+	for _, bundle := range g.Approvals {
+		if !nonempty(bundle.ID) {
+			return graphError("approval requires an ID")
+		}
+		if seen[bundle.ID] {
+			return graphError("duplicate approval ID %s", bundle.ID)
+		}
+		seen[bundle.ID] = true
+		if _, exists := g.task(bundle.TaskID); !exists {
+			return graphError("approval %s references unknown task %s", bundle.ID, bundle.TaskID)
+		}
+		if err := bundle.hashValid(); err != nil {
+			return graphError("approval %s %v", bundle.ID, err)
+		}
+	}
+	return nil
+}
+
+// hashValid re-derives the bundle hash so a stored record cannot be edited
+// without being detected.
+func (b ApprovalBundle) hashValid() error {
+	if b.BundleHash == "" {
+		return fmt.Errorf("requires a bundle hash")
+	}
+	expected, err := b.computeHash()
+	if err != nil {
+		return err
+	}
+	if b.BundleHash != expected {
+		return fmt.Errorf("bundle hash mismatch")
+	}
+	return nil
+}
+
+// AppendApproval stores an approval record without touching earlier records.
+func (g *TaskGraph) AppendApproval(bundle ApprovalBundle) error {
+	next := cloneGraph(*g)
+	if _, exists := next.Approval(bundle.ID); exists {
+		return graphError("duplicate approval ID %s", bundle.ID)
+	}
+	if _, exists := next.task(bundle.TaskID); !exists {
+		return graphError("approval %s references unknown task %s", bundle.ID, bundle.TaskID)
+	}
+	if err := bundle.hashValid(); err != nil {
+		return graphError("approval %s %v", bundle.ID, err)
+	}
+	next.Approvals = append(next.Approvals, bundle)
+	if err := next.Validate(); err != nil {
+		return err
+	}
+	*g = next
+	return nil
+}
+
+// MatchingApproval returns the newest record that still covers every current
+// dimension. A partial match is never reported as approved.
+func (g TaskGraph) MatchingApproval(taskID string, stored GraphTask, current ApprovalConfiguration) (ApprovalBundle, bool) {
+	for i := len(g.Approvals) - 1; i >= 0; i-- {
+		bundle := g.Approvals[i]
+		if bundle.TaskID != taskID {
+			continue
+		}
+		if err := bundle.Verify(stored, current); err != nil {
+			continue
+		}
+		return bundle, true
+	}
+	return ApprovalBundle{}, false
+}

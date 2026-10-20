@@ -329,3 +329,45 @@ func slicesContains(values []string, want string) bool {
 	}
 	return false
 }
+
+func TestAppendApprovalKeepsRecordsImmutable(t *testing.T) {
+	graph := TaskGraph{Version: 1}
+	task := validDraftTask("contract")
+	if err := graph.Track(task, "human", "draft"); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := graph.GraphTask(task.ID)
+	bundle, configuration := approvedBundle(t, stored)
+	bundle.ID = "approval-one"
+	hash, err := bundle.computeHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle.BundleHash = hash
+	if err := graph.AppendApproval(bundle); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendApproval(bundle); err == nil {
+		t.Fatal("duplicate approval ID was accepted")
+	}
+	other := bundle
+	other.ID = "approval-two"
+	other.TaskID = "missing"
+	hash, err = other.computeHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.BundleHash = hash
+	if err := graph.AppendApproval(other); err == nil {
+		t.Fatal("approval for an unknown task was accepted")
+	}
+	if len(graph.Approvals) != 1 || graph.Approvals[0].ProposalHash != bundle.ProposalHash {
+		t.Fatal("append changed an existing approval record")
+	}
+	if _, ok := graph.MatchingApproval(task.ID, stored, configuration); !ok {
+		t.Fatal("stored approval does not match the current dimensions")
+	}
+	if _, ok := graph.MatchingApproval("other", stored, configuration); ok {
+		t.Fatal("approval matched a different task")
+	}
+}
