@@ -70,6 +70,8 @@ type approvalStageReport struct {
 }
 
 type approvalGateReport struct {
+	Reused                  bool                  `json:"reused,omitempty"`
+	PriorBundleHash         string                `json:"priorBundleHash,omitempty"`
 	TaskID                  string                `json:"taskId"`
 	ApprovalID              string                `json:"approvalId"`
 	BundleVersion           int                   `json:"bundleVersion"`
@@ -83,7 +85,7 @@ type approvalGateReport struct {
 	Drifts                  []core.ApprovalDrift  `json:"drifts"`
 }
 
-func taskAuthorizeCmd(file string) error {
+func taskAuthorizeCmd(file, confirm string) error {
 	request, err := loadGraphRequest(file)
 	if err != nil {
 		return authorizeError(err)
@@ -118,6 +120,7 @@ func taskAuthorizeCmd(file string) error {
 		return authorizeError(err)
 	}
 	content := struct {
+		Status              string                  `json:"status"`
 		TaskID              string                  `json:"taskId"`
 		Title               string                  `json:"title"`
 		Objective           string                  `json:"objective"`
@@ -125,13 +128,33 @@ func taskAuthorizeCmd(file string) error {
 		ConfigurationDigest string                  `json:"configurationDigest"`
 		Configuration       []string                `json:"configurationFields"`
 		Dimensions          core.ApprovalDimensions `json:"dimensions"`
+		NextAction          string                  `json:"nextAction,omitempty"`
 	}{
+		Status: "awaiting-approval",
 		TaskID: request.Task.ID, Title: request.Task.Title, Objective: request.Task.Objective,
 		ProposalHash: validation.CanonicalSHA256, ConfigurationDigest: configuration.Digest,
 		Configuration: approvalFieldPaths(configuration.Selection), Dimensions: dimensions,
 	}
+	if stored, exists := graph.GraphTask(proposal.ID); exists {
+		if recordHash, err := core.CanonicalSHA256(stored); err == nil && recordHash == validation.CanonicalSHA256 {
+			if bundle, ok := graph.MatchingApproval(proposal.ID, stored, configuration); ok {
+				return printJSON(approvalReuseReport(bundle))
+			}
+		}
+	}
+	if confirm != "" && confirm != validation.CanonicalSHA256 {
+		return authorizeError(fmt.Errorf("--confirm does not match the validated proposal hash"))
+	}
+	if confirm != "" {
+		content.Status = "approved"
+	} else {
+		content.NextAction = "rerun with --confirm <proposalHash> to approve"
+	}
 	if err := printJSON(content); err != nil {
 		return err
+	}
+	if confirm == "" {
+		return nil
 	}
 	if err := updateWorkspace(func(current *store.Workspace) error {
 		if !current.HasGraph {
@@ -181,14 +204,30 @@ func taskAuthorizeCmd(file string) error {
 	}); err != nil {
 		return authorizeError(err)
 	}
+	_, priorMatches := readbackGraph.MatchingApproval(stored.ID, stored, configuration)
+	newest, hasNewest := readbackGraph.NewestApproval(stored.ID)
+	drifts := []core.ApprovalDrift{}
+	if hasNewest {
+		computed, err := newest.Drifts(stored, configuration)
+		if err != nil {
+			return authorizeError(err)
+		}
+		drifts = computed
+	}
 	report := approvalGateReport{
 		TaskID: bundle.TaskID, ApprovalID: bundle.ID, BundleVersion: bundle.BundleVersion,
 		CanonicalizationVersion: bundle.CanonicalizationVersion, ProposalHash: bundle.ProposalHash,
 		RecordHash: bundle.RecordHash, ConfigurationDigest: bundle.Configuration.Digest,
-		BundleHash: bundle.BundleHash, Drifts: []core.ApprovalDrift{},
+		BundleHash: bundle.BundleHash, Drifts: drifts,
+	}
+	if hasNewest {
+		report.PriorBundleHash = newest.ID
 	}
 	for _, stage := range core.ApprovalStages() {
-		stageReport := approvalStageReport{Stage: stage, Approval: "reused"}
+		stageReport := approvalStageReport{Stage: stage, Approval: "approved"}
+		if priorMatches {
+			stageReport.Approval = "reused"
+		}
 		if err := bundle.CheckApprovalFor(stored, configuration, stage); err != nil {
 			stageReport.Approval = "reapproval-required"
 			report.ReapprovalRequired = true
@@ -196,6 +235,22 @@ func taskAuthorizeCmd(file string) error {
 		report.Stages = append(report.Stages, stageReport)
 	}
 	return printJSON(report)
+}
+
+// approvalReuseReport reports an already matching approval without asking for a
+// second approval of the same content.
+func approvalReuseReport(bundle core.ApprovalBundle) approvalGateReport {
+	report := approvalGateReport{
+		Reused: true, TaskID: bundle.TaskID, ApprovalID: bundle.ID,
+		BundleVersion: bundle.BundleVersion, CanonicalizationVersion: bundle.CanonicalizationVersion,
+		ProposalHash: bundle.ProposalHash, RecordHash: bundle.RecordHash,
+		ConfigurationDigest: bundle.Configuration.Digest, BundleHash: bundle.BundleHash,
+		Drifts: []core.ApprovalDrift{},
+	}
+	for _, stage := range core.ApprovalStages() {
+		report.Stages = append(report.Stages, approvalStageReport{Stage: stage, Approval: "reused"})
+	}
+	return report
 }
 
 // approvalConfiguration reuses the binding check's field canonicalization and
@@ -355,7 +410,7 @@ func loadLegacyState() (core.TaskGraph, core.Ledger, bool, error) {
 
 func taskGraphCmd(command string, args []string) error {
 	fs := flag.NewFlagSet("task "+command, flag.ContinueOnError)
-	var file, repo, manifest string
+	var file, repo, manifest, confirm string
 	var includeArchived bool
 	if command == "plan" {
 		fs.StringVar(&repo, "repo", "", "explicit repository for follow-up planning")
@@ -365,6 +420,9 @@ func taskGraphCmd(command string, args []string) error {
 	} else if command == "validate" || command == "authorize" {
 		fs.StringVar(&manifest, "manifest", "", "JSON request file to validate without storing")
 		fs.StringVar(&file, "file", "", "JSON request file to validate without storing")
+		if command == "authorize" {
+			fs.StringVar(&confirm, "confirm", "", "proposal hash printed by the previous invocation")
+		}
 	} else if command != "graph" {
 		return fmt.Errorf("unknown task graph command %s", command)
 	}
@@ -382,7 +440,7 @@ func taskGraphCmd(command string, args []string) error {
 			file = manifest
 		}
 		if command == "authorize" {
-			return taskAuthorizeCmd(file)
+			return taskAuthorizeCmd(file, confirm)
 		}
 		return taskValidateCmd(file)
 	}

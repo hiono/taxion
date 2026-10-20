@@ -149,13 +149,16 @@ func BundleDimensions(task GraphTask, configuration ApprovalConfiguration) (Appr
 		return ApprovalDimensions{}, err
 	}
 	if dimensions.Permission, err = dimension(struct {
-		Owner         string
-		Reviewer      string
-		Authorization string
-		Decisions     []TaskDecision
-		Worktree      string
-		Branch        string
-	}{task.Owner, task.Reviewer, task.AuthorizationID, task.Decisions, task.Worktree, task.Branch}); err != nil {
+		Owner              string
+		Reviewer           string
+		Authorization      string
+		Decisions          []TaskDecision
+		Worktree           string
+		Branch             string
+		OutputMode         string
+		TargetTreeSHA      string
+		TargetChangedFiles []string
+	}{task.Owner, task.Reviewer, task.AuthorizationID, task.Decisions, task.Worktree, task.Branch, task.OutputMode, task.TargetTreeSHA, task.TargetChangedFiles}); err != nil {
 		return ApprovalDimensions{}, err
 	}
 	if dimensions.Security, err = dimension(struct {
@@ -236,7 +239,7 @@ func (b ApprovalBundle) Drifts(stored GraphTask, current ApprovalConfiguration) 
 	appendDrift("scope", b.Dimensions.Scope, dimensions.Scope, ImpactReapproval, []string{"scope", "outOfScope", "fileAccess"})
 	appendDrift("acceptance", b.Dimensions.Acceptance, dimensions.Acceptance, ImpactReapproval, []string{"acceptance", "requiredEvidence", "validationCommands", "exitCondition"})
 	appendDrift("budget", b.Dimensions.Budget, dimensions.Budget, ImpactReapproval, []string{"budgetGuidance"})
-	appendDrift("permissions", b.Dimensions.Permission, dimensions.Permission, ImpactReapproval, []string{"owner", "reviewer", "authorizationId", "decisions", "worktree", "branch"})
+	appendDrift("permissions", b.Dimensions.Permission, dimensions.Permission, ImpactReapproval, []string{"owner", "reviewer", "authorizationId", "decisions", "worktree", "branch", "outputMode", "targetTreeSha", "targetChangedFiles"})
 	appendDrift("security", b.Dimensions.Security, dimensions.Security, ImpactReapproval, []string{"risk", "exceptionIds", "specifications", "memoryRefs"})
 	fields, err := configurationDriftFields(b.Configuration.Selection, current.Selection)
 	if err != nil {
@@ -336,34 +339,32 @@ func (b ApprovalBundle) CheckApprovalAdvance(stored GraphTask, current ApprovalC
 	return nil
 }
 
-func selectionValues(selection json.RawMessage) (map[string]any, error) {
-	var values map[string]any
-	if err := json.Unmarshal(selection, &values); err != nil {
+func selectionValues(selection json.RawMessage) (map[string]string, error) {
+	leaves, err := SelectionLeaves(selection)
+	if err != nil {
 		return nil, graphError("approval configuration requires a selected JSON object")
 	}
-	flat := map[string]any{}
-	var collect func(map[string]any, string) error
-	collect = func(fields map[string]any, prefix string) error {
-		for key, value := range fields {
-			path := prefix + key
-			if children, ok := value.(map[string]any); ok {
-				if len(children) == 0 {
-					flat[path] = "<empty>"
-					continue
-				}
-				if err := collect(children, path+"."); err != nil {
-					return err
-				}
-				continue
-			}
-			flat[path] = value
+	return leaves, nil
+}
+
+// ApprovalsForTask returns every approval of a Task in append order.
+func (g TaskGraph) ApprovalsForTask(taskID string) []ApprovalBundle {
+	var bundles []ApprovalBundle
+	for _, bundle := range g.Approvals {
+		if bundle.TaskID == taskID {
+			bundles = append(bundles, bundle)
 		}
-		return nil
 	}
-	if err := collect(values, ""); err != nil {
-		return nil, err
+	return bundles
+}
+
+// NewestApproval returns the most recently appended approval of a Task.
+func (g TaskGraph) NewestApproval(taskID string) (ApprovalBundle, bool) {
+	bundles := g.ApprovalsForTask(taskID)
+	if len(bundles) == 0 {
+		return ApprovalBundle{}, false
 	}
-	return flat, nil
+	return bundles[len(bundles)-1], true
 }
 
 // Approval returns the approval record with the given ID.
