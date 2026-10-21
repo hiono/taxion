@@ -18,8 +18,6 @@ v0.6.x は、Task の承認、実行開始、独立レビュー、公開をそ�
 
 第三に、実行を始める前に読むだけで済む確認と、モデル session を必要とする確認が分かれていない。repository identity、baseline、worktree、契約の整合、handoff の準備は、モデルを呼ばずに並行して確認できる。
 
-Issue #109 で bundle と実行入口の検査を実装し、Issue #110 で read-only lane、Issue #112 で機械可読な gate report、Issue #114 でこの文書を追加する。v0.7.0 の範囲はここまでとし、Task 単位の集計と再契約は v0.7.1 に分ける。
-
 ## Decision
 
 ### 3つの gate
@@ -164,19 +162,6 @@ budget audit は Dispatch 発行、session 開始、usage 観測、budget stop�
 - v0.6.x の Task は移行なしで読める。workspace は graph 単位で bundle-required か verified-legacy のどちらかに分類されるため、運用者は workspace の分類を確認する。
 - gate report は判定の観測であり、承認・公開・完了の証拠にはならない。
 
-## Implementation trace
-
-Epic #107 implementation is 7/7 merged. This records implementation status, not release completion.
-
-| Issue | PR | Merge commit |
-| --- | --- | --- |
-| #108 | [#115](https://github.com/hiono/taxion/pull/115) | `6529b6d64cd35cd5b8c7cc0379fa5708f38940a8` |
-| #109 | [#116](https://github.com/hiono/taxion/pull/116) | `5a66460008ba1cd4f4034022548d591fcc9d8407` |
-| #110 | [#117](https://github.com/hiono/taxion/pull/117) | `7a334be1b856f79bbc9397809b363dbe5db9ddcb` |
-| #112 | [#118](https://github.com/hiono/taxion/pull/118) | `8e3194a095c131e328cf2b3bcb230d60976e83d1` |
-| #114 | [#119](https://github.com/hiono/taxion/pull/119) | `9452a94cf279d9f90f9be289b2556b20d62026bc` |
-| #111 | [#120](https://github.com/hiono/taxion/pull/120) | `cceee3c48fc0a6ea9fcb043399ee471c3708d578` |
-| #113 | [#121](https://github.com/hiono/taxion/pull/121) | `17b33d054ed95c8be44adc22579ce42f08d48e72` |
 
 ## Alternatives
 
