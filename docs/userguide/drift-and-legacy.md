@@ -26,7 +26,7 @@ taxion gate contract --task <task-id> --json
 
 | 値 | 意味 | 次の操作 |
 | --- | --- | --- |
-| `none` | 承認 basis に影響しない差分 | 操作を続行できる |
+| `none`（予約） | 現行実装は返さない。表示だけの差分に使う予定 | — |
 | `reapproval-required` | 現在の bundle が覆わない差分 | 新しい manifest で再承認する |
 | `invalid` | 保存記録の矛盾、未知の版、Task の不一致 | 実行しない。記録を調査して修復する |
 
@@ -48,7 +48,7 @@ Task は保存済みの schema 情報だけで次の3つに分類される。
 
 ## legacy Task の再承認
 
-`verified-legacy` の Task を bundle-required の運用に移す場合、現在の契約で `task authorize` を実行する。
+workspace を bundle-required の運用に移す場合、現在の契約で `task authorize` を実行する。
 
 1. `taxion task validate --manifest task.json` で契約を確認する。
 2. `taxion task authorize --manifest task.json` で `confirmationToken` を確認する。

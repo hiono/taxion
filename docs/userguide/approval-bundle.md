@@ -17,7 +17,7 @@
 | `bundleHash` | bundle 全体の SHA-256 |
 | `actor`・`source`・`reason`・`at` | 承認者、出典、理由、時刻 |
 
-`proposalHash` と `recordHash` が一致しない場合、保存の readback が提案と異なるため承認は成立しない。
+`proposalHash` と `recordHash` が異なる場合は、保存時に既定値が補われたなどの差分がある。bundle は両方を記録し、差分を後から確認できるようにする。差分の存在だけでは承認を無効にしない。
 
 ## 7次元
 
@@ -72,4 +72,4 @@ bundle は承認時点の basis を覆う。次のいずれかが変わると、
 
 ## 保存しないもの
 
-bundle は設定値そのもの、credential、環境変数の値を保存しない。設定は選択の digest と field の出典だけを残す。gate report と診断は credential らしい値を伏せる。credential を Task や manifest に書かない。
+bundle は解決済みの credential 値と環境変数の値を保存しない。選択した設定 tuple と field の出典、その digest を残す。gate report と診断は credential らしい値を伏せる。credential を Task や manifest に書かない。

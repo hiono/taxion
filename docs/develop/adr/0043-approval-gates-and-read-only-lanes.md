@@ -34,9 +34,9 @@ Issue #109 で bundle と実行入口の検査を実装し、Issue #110 で read
 
 ### proposalHash と recordHash
 
-Task の契約提案を正規化 JSON にし、SHA-256 を取った値を `proposalHash` とする。保存後の Task record から同じ手順で取った値を `recordHash` とする。両者が一致しない場合、保存の readback が提案と異なるため承認は成立しない。
+Task の契約提案を正規化 JSON にし、SHA-256 を取った値を `proposalHash` とする。保存後の Task record から同じ手順で取った値を `recordHash` とする。保存時に既定値が補われると両者は異なりうる。bundle は両方を記録し、提案から保存 record への差分を後から確認できるようにする。差分の存在だけでは承認を無効にしない。
 
-`proposalHash` は人間が確認する契約の同一性を表し、`recordHash` は保存記録の同一性を表す。片方だけでは承認の根拠にならない。
+`proposalHash` は人間が確認する契約の同一性を表し、`recordHash` は保存記録の同一性を表す。bundle は両方を残す。
 
 ### ApprovalBundle の7次元
 
@@ -52,7 +52,7 @@ Task の契約提案を正規化 JSON にし、SHA-256 を取った値を `propo
 | securityDigest | risk、exceptionIds、specifications、memoryRefs |
 | configurationDigest | 承認時に選択した設定 tuple の digest |
 
-`configurationDigest` は選択した設定値そのものではなく、選択の digest である。credential は保存しない。
+`configurationDigest` は選択の digest である。bundle は選択した設定 tuple と出典を `configuration.selection` に保存するが、解決済みの credential 値は保存しない。
 
 ### 版と正規化
 
@@ -60,7 +60,7 @@ bundle は `bundleVersion` と `canonicalizationVersion` を持つ。v0.7.0 で�
 
 ### confirmation token
 
-confirmation token は `proposalHash` と7次元の digest から導出する確認用の digest である。人間が表示された契約と承認 basis を照合するために使う。認証 token ではなく、秘密でもない。token を知っていることは承認権限を意味しない。`taxion task authorize` は token を表示し、`--confirm` に同じ値を要求する。
+confirmation token は `proposalHash`、`bundleVersion`、`canonicalizationVersion` と7次元の digest から導出する確認用の digest である。人間が表示された契約と承認 basis を照合するために使う。認証 token ではなく、秘密でもない。token を知っていることは承認権限を意味しない。`taxion task authorize` は token を表示し、`--confirm` に同じ値を要求する。
 
 ### 再承認が不要な内部遷移
 
@@ -84,7 +84,7 @@ confirmation token は `proposalHash` と7次元の digest から導出する確
 - 承認時の設定選択
 - bundle または正規化の版
 
-drift の authorization impact は `none`・`reapproval-required`・`invalid` の3値である。`none` は表示だけの差分、`reapproval-required` は新しい bundle が必要な差分、`invalid` は保存記録の矛盾または未知の版を表す。`reapproval-required` を自動承認しない。
+drift の authorization impact は `reapproval-required` と `invalid` の2値を使う。`none` は予約値で、現行実装は返さない。`reapproval-required` は新しい bundle が必要な差分、`invalid` は保存記録の矛盾または未知の版を表す。`reapproval-required` を自動承認しない。
 
 ### Task の分類
 
@@ -96,11 +96,11 @@ Task は保存済み schema 情報だけで次の3つに分類する。
 | `verified-legacy` | approval schema version がなく、bundle もない | 従来の契約検査で続行 |
 | `invalid-or-ambiguous` | 未知の schema version、または schema version なしで bundle がある | 拒否 |
 
-`verified-legacy` は v0.6.x の保存記録を読むための分類であり、新しい承認を省略する一般則ではない。分類は Task ごとに行い、一括変換しない。
+`verified-legacy` は v0.6.x の保存記録を読むための分類であり、新しい承認を省略する一般則ではない。分類は workspace の graph 全体に対して行い、bundle-required と verified-legacy を同じ graph に混在させない。
 
 ### 実行入口での fail-closed
 
-bundle-required の Task は、実行入口の各 stage（start-review-flow、coder-dispatch、reviewer-dispatch、repair-dispatch、re-review-dispatch）で、現在の設定選択に対する一致 bundle を要求する。bundle がない、または一致しない場合は Dispatch を発行しない。入口の拒否 code は `unknown-stage`・`unknown-task`・`task-not-ready`・`no-matching-bundle`・`invalid-bundle` である。
+bundle-required の graph では、各 Task は実行入口の各 stage（start-review-flow、coder-dispatch、reviewer-dispatch、repair-dispatch、re-review-dispatch）で、現在の設定選択に対する一致 bundle を要求する。bundle がない、または一致しない場合は Dispatch を発行しない。入口の拒否 code は `unknown-stage`・`unknown-task`・`task-not-ready`・`no-matching-bundle`・`invalid-bundle` である。
 
 `verified-legacy` の Task は従来の検査を通る。`invalid-or-ambiguous` の Task は、修復されるまで実行入口で拒否する。
 
@@ -110,11 +110,11 @@ bundle-required の Task は、実行入口の各 stage（start-review-flow、co
 
 ### credential の伏せ字
 
-gate report、lane report、入口拒否の診断、drift の field path は、credential らしい値を伏せる。bundle ID も診断では伏せる。設定値そのものを report に含めない。
+gate report、lane report、入口拒否の診断、drift の field path は、credential らしい値を伏せる。bundle ID も診断では伏せる。解決済みの credential 値を report に含めない。
 
 ### controller の read-only lane
 
-実行入口の前に、controller は次の4つの lane を並行実行する。
+controller は次の4つの read-only lane を並行実行する API を提供する。v0.7.0 では `taxion workflow lanes` から明示的に呼ぶ実行前確認であり、gate と実行入口は lane report を自動では消費しない。
 
 | lane | 確認内容 |
 | --- | --- |
@@ -123,7 +123,7 @@ gate report、lane report、入口拒否の診断、drift の field path は、c
 | contract-consistency | Task と最新 Dispatch instruction の objective、scope、acceptance、requiredEvidence が一致する |
 | handoff-preparation | 有効な Dispatch があり、return format と instruction hash が揃い、running flow が handoff を保持していない |
 
-lane は最大4本を並行実行し、固定順で集約する。各 lane には個別の timeout を設ける。一つでも失敗、取消、timeout になれば execution gate を閉じる。lane は Task Graph、Dispatch、Flow、worktree、runtime を変更せず、モデル session も開始しない。結果は version 付きの機械可読 report とし、credential を伏せる。
+lane は最大4本を並行実行し、固定順で集約する。各 lane には個別の timeout を設ける。一つでも失敗、取消、timeout になれば report の `executionGateOpen` を `false` にする。v0.7.0 ではこの値は運用者向けの advisory で、実行 gate の自動条件ではない。lane は Task Graph、Dispatch、Flow、worktree、runtime を変更せず、モデル session も開始しない。結果は version 付きの機械可読 report とし、credential を伏せる。
 
 ### immutable な role handoff packet
 
@@ -137,7 +137,7 @@ Dispatch、credits、時間の Task 単位の集計と、未起動 Dispatch の�
 
 - v0.6.x の ledger はそのまま読み込める。必須の移行 command はない。
 - approval schema version を持たない既存 Task は `verified-legacy` として扱う。
-- 既存 Task に矛盾した bundle がある場合だけ `invalid-or-ambiguous` になる。
+- approval schema version を持たない graph に bundle が1つでもある場合は `invalid-or-ambiguous` になる。
 - 新しい bundle は追記であり、既存の Task、Dispatch、Flow の意味を変えない。
 - 旧 binary は未知の approval field を無視して読めるが、新しい gate の判定は行わない。
 
@@ -160,14 +160,14 @@ Dispatch、credits、時間の Task 単位の集計と、未起動 Dispatch の�
 - 人間は一つの confirmation token と7次元の表示で承認 basis を確認できる。
 - 実行入口の検査が role と stage によらず同じ bundle を参照する。
 - 保存記録の変更は drift として現れ、自動承認されない。
-- read-only lane はモデルを呼ばずに実行前の不整合を見つける。lane の追加は実行 gate の条件を増やすが、Task の状態を変えない。
-- v0.6.x の Task は移行なしで読めるが、bundle-required の Task と verified-legacy の Task が混在する。運用者は Task ごとの分類を確認する必要がある。
+- read-only lane はモデルを呼ばずに実行前の不整合を見つける。v0.7.0 では運用者が明示的に実行し、結果は gate の自動条件ではない。
+- v0.6.x の Task は移行なしで読める。workspace は graph 単位で bundle-required か verified-legacy のどちらかに分類されるため、運用者は workspace の分類を確認する。
 - gate report は判定の観測であり、承認・公開・完了の証拠にはならない。
 
 ## Alternatives
 
 - 単一の承認 hash だけを保存する: どの dimension が変わったかを説明できず、再承認の範囲を決められない。
-- 承認時に全設定値を保存する: credential と環境依存値を ledger に残すため採用しない。
+- 承認時に解決済み credential 値も保存する: secret を ledger に残すため採用しない。
 - legacy Task を一括で bundle-required に変換する: 未承認の変更を承認済みと誤認する危険がある。
 - lane をモデル session 内で実行する: 実行前の確認に課金と非決定性を持ち込むため採用しない。
 - gate report を既定の人間出力に混ぜる: 既存 CLI の出力契約を変えるため、機械可読 mode を明示 opt-in とする。

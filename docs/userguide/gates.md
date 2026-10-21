@@ -34,7 +34,7 @@ taxion gate contract --task <task-id> --json
 | `hashes` | task、proposal、record、bundle、evidence の hash |
 | `blockingConditions` | 通過を妨げる条件の code と説明 |
 | `drifts` | 承認 basis との差分。値は含まず field path だけを持つ |
-| `authorizationImpact` | `none`・`reapproval-required`・`invalid` |
+| `authorizationImpact` | `reapproval-required`・`invalid`（`none` は予約値） |
 | `nextRequiredApproval` | 次に必要な承認 |
 | `nextAuthorizedTransition` | 次に認可された遷移 |
 | `stateChanged` | 常に `false` |
@@ -54,7 +54,7 @@ report は観測であり、承認、公開、完了の証拠ではない。repo
 
 ## 実行前の read-only lane
 
-contract gate の前段として、controller は次の4つの lane をモデル session なしで並行実行できる。
+運用者は実行前の確認として、次の4つの read-only lane をモデル session なしで並行実行できる。
 
 ```bash
 taxion workflow lanes --task <task-id> --timeout 2s --root <repository-root>
@@ -67,7 +67,7 @@ taxion workflow lanes --task <task-id> --timeout 2s --root <repository-root>
 | `contract-consistency` | Task と最新 Dispatch instruction の objective、scope、acceptance、requiredEvidence が一致する |
 | `handoff-preparation` | 有効な Dispatch があり、return format と instruction hash が揃い、running flow が handoff を保持していない |
 
-lane は Task Graph、Dispatch、Flow、worktree、runtime を変更しない。一つでも失敗、取消、timeout になれば `executionGateOpen` は `false` になり、JSON を出したうえで非zero終了する。診断は credential を伏せる。
+lane は Task Graph、Dispatch、Flow、worktree、runtime を変更しない。一つでも失敗、取消、timeout になれば `executionGateOpen` は `false` になり、JSON を出したうえで非zero終了する。診断は credential を伏せる。v0.7.0 ではこの値は運用者向けの advisory で、gate や実行入口が lane report を自動で読むことはない。
 
 lane report は gate report とは別の report である。v0.7.0 では両者を別々に読む。
 
