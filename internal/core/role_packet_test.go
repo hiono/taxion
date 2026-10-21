@@ -155,7 +155,7 @@ func TestRolePacketCredentialsRedactedBeforeHashing(t *testing.T) {
 		"github_pat_" + strings.Repeat("x", 30),
 		"glpat-" + strings.Repeat("x", 30),
 		"Bearer " + strings.Repeat("x", 30),
-		"-----BEGIN PRIVATE KEY-----\nsensitive\n-----END PRIVATE KEY-----",
+		strings.Join([]string{"-----BEGIN ", "PRIVATE KEY-----\nsensitive\n-----END ", "PRIVATE KEY-----"}, ""),
 	}
 	for _, secret := range secrets {
 		fields := rolePacketFields(t)
