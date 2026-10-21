@@ -91,6 +91,7 @@ Runtime sessions and ACP:
 
 Review flows and recovery:
   workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON)
+  workflow terminate  Cancel an untouched Dispatch and hold it for a new approved contract (--file JSON)
   workflow advance    Issue review/repair from the latest verified result (--id required)
   workflow run        Execute review/repair continuously with saved ceilings (--id; role prompt files or --builtin-prompts)
   workflow step       Execute one role turn from a saved review flow (--id; role prompt files or --builtin-prompts)
@@ -187,7 +188,9 @@ func main() {
 		os.Exit(2)
 	}
 	var err error
-	if !explicitStore && !slices.Contains([]string{"ready", "completion", "-h", "--help", "help", "--version", "gen-token", "git", "role-packet"}, args[0]) {
+	helpRequested := slices.Contains(args, "--help") || slices.Contains(args, "-h")
+	if !explicitStore && !helpRequested &&
+		!slices.Contains([]string{"ready", "completion", "-h", "--help", "help", "--version", "gen-token", "git", "role-packet"}, args[0]) {
 		storePath, err = defaultWorkspaceStorePath()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "taxion: %v\n", err)

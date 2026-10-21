@@ -157,7 +157,8 @@ execution: {requester: human, worker: local, approvalRef: configured-approval}
 		t.Fatal(err)
 	}
 	return root, []string{"--repo", "owner/repo", "--worktree", root,
-		"--timeout", "1m", "--max-ai-credits", "30", "--max-repairs", "0", "--context-path", "README.md"}
+		"--timeout", "1m", "--max-ai-credits", "30", "--max-task-nano-aiu", "1000000000",
+		"--max-repairs", "0", "--context-path", "README.md"}
 }
 
 func requestFixtureAnswer(questions []string) controller.QuestionAnswer {
@@ -258,7 +259,7 @@ func fixturePlan(t *testing.T, answer controller.QuestionAnswer) requestPlanner 
 				first.Text != "" || first.Source != "/planner/task/decisions/0/text" {
 				t.Fatal("original request was lost or repeated outside its exact saved decision")
 			}
-			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5}`}
+			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
 			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
 			return nil
@@ -420,7 +421,7 @@ func TestSearch(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5}`}
+				worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`}
 				worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
 				worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
 				return nil

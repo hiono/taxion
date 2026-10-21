@@ -32,7 +32,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return encoder.Encode(value)
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|interrupt|feedback-target|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|evaluate|lanes}")
+		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|interrupt|terminate|feedback-target|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|evaluate|lanes}")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
@@ -50,7 +50,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	var laneTimeout time.Duration
 	var maxAICredits float64
 	switch action {
-	case "start", "recover", "handoff", "interrupt", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve", "planner-draft", "planner-action", "question-draft":
+	case "start", "recover", "handoff", "interrupt", "terminate", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve", "planner-draft", "planner-action", "question-draft":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
 	case "advance", "show", "evaluate", "feedback-target", "planning-context":
 		fs.StringVar(&id, "id", "", "review flow ID")
@@ -96,9 +96,9 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	if managedStage && !managedCommit {
 		return fmt.Errorf("workflow: --managed-stage requires --managed-commit")
 	}
-	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "interrupt" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve" || action == "planner-draft" || action == "planner-action" || action == "question-draft"
+	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "interrupt" || action == "terminate" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve" || action == "planner-draft" || action == "planner-action" || action == "question-draft"
 	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" && action != "lanes" {
-		return fmt.Errorf("workflow start, recover, handoff, interrupt, feedback, feedback-resolve, draft, draft-discard, draft-approve, planner-draft, planner-action and question-draft require --file; advance, run, step, show, evaluate, planning-context and feedback-target require --id")
+		return fmt.Errorf("workflow start, recover, handoff, interrupt, terminate, feedback, feedback-resolve, draft, draft-discard, draft-approve, planner-draft, planner-action and question-draft require --file; advance, run, step, show, evaluate, planning-context and feedback-target require --id")
 	}
 	if action == "lanes" && taskID == "" {
 		return fmt.Errorf("workflow lanes requires --task")
@@ -437,6 +437,35 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		flow, err := controller.StartReviewFlow(db, storePath, request)
 		if err != nil {
 			return err
+		}
+		return printJSON(flow)
+	case "terminate":
+		input, err := os.Open(file)
+		if err != nil {
+			return err
+		}
+		defer input.Close()
+		var request struct {
+			FlowID     string `json:"flowId"`
+			DispatchID string `json:"dispatchId"`
+			Actor      string `json:"actor"`
+			Source     string `json:"source"`
+			Reason     string `json:"reason"`
+		}
+		if err := core.DecodeGraphInput(input, &request); err != nil {
+			return err
+		}
+		if err := controller.TerminateUnstartedDispatch(db, request.FlowID, request.DispatchID,
+			request.Actor, request.Source, request.Reason); err != nil {
+			return err
+		}
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			return err
+		}
+		flow, ok := state.Graph.ReviewFlow(request.FlowID)
+		if !ok {
+			return fmt.Errorf("terminated review flow disappeared")
 		}
 		return printJSON(flow)
 	case "advance":

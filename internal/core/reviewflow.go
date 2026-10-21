@@ -1,6 +1,7 @@
 package core
 
 import (
+	"math"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -16,6 +17,7 @@ type ReviewFlow struct {
 	Contract          GraphTask          `json:"contract"`
 	ReviewRoot        string             `json:"reviewRoot"`
 	MaxRepairs        int                `json:"maxRepairs"`
+	Budget            FlowBudget         `json:"budget,omitempty"`
 	MaxTokens         int64              `json:"maxTokens,omitempty"` // legacy telemetry threshold; no longer gates execution
 	StartedAt         time.Time          `json:"startedAt"`
 	Deadline          time.Time          `json:"deadline"`
@@ -32,6 +34,13 @@ type ReviewFlow struct {
 	InstructionDrafts []InstructionDraft `json:"instructionDrafts,omitempty"`
 }
 
+type FlowBudget struct {
+	MaxDispatches       int     `json:"maxDispatches"`
+	MaxCoderSessions    int     `json:"maxCoderSessions"`
+	MaxReviewerSessions int     `json:"maxReviewerSessions"`
+	MaxNanoAIU          float64 `json:"maxNanoAiu"`
+}
+
 type FlowRecovery struct {
 	RunnerID string    `json:"runnerId"`
 	Actor    string    `json:"actor"`
@@ -42,7 +51,8 @@ type FlowRecovery struct {
 
 func (g TaskGraph) HasBudgetContinuationSource(flow ReviewFlow, sourceID string) bool {
 	// Legacy budget stops and reconciled safety stops share the same source checks.
-	if flow.Status != "STOPPED" || (flow.StopCode != "BUDGET_LIMIT" && flow.StopCode != "SAFETY_STOP") ||
+	if flow.Status != "STOPPED" || (flow.StopCode != "BUDGET_LIMIT" && flow.StopCode != "BUDGET_STOP" &&
+		flow.StopCode != "RECONTRACT" && flow.StopCode != "SAFETY_STOP") ||
 		flow.RunnerID != "" || !flow.HandoffHeld() || len(flow.DispatchIDs) == 0 {
 		return false
 	}
@@ -89,11 +99,20 @@ func (g TaskGraph) validateReviewFlows() error {
 			flow.MaxRepairs < 0 || flow.Repairs < 0 || flow.Repairs > flow.MaxRepairs ||
 			flow.MaxTokens < 0 || flow.StartedAt.IsZero() || !flow.Deadline.After(flow.StartedAt) ||
 			!slices.Contains([]string{"RUNNING", "STOPPED", "COMPLETED"}, flow.Status) ||
-			!slices.Contains([]string{"", "SAFETY_STOP", "BUDGET_LIMIT"}, flow.StopCode) ||
+			!slices.Contains([]string{"", "SAFETY_STOP", "BUDGET_LIMIT", "BUDGET_STOP", "RECONTRACT"}, flow.StopCode) ||
 			flow.Status != "STOPPED" && flow.StopCode != "" ||
 			!nonempty(flow.Authorization.ID) || !nonempty(flow.Authorization.Source) || !nonempty(flow.Authorization.Text) ||
 			len(flow.DispatchIDs) == 0 || flow.Status != "RUNNING" && !nonempty(flow.Reason) {
 			return graphError("invalid bounded review flow %q", flow.ID)
+		}
+		budget := flow.Budget
+		if budget.MaxDispatches != 0 || budget.MaxCoderSessions != 0 ||
+			budget.MaxReviewerSessions != 0 || budget.MaxNanoAIU != 0 {
+			if budget.MaxDispatches < 1 || budget.MaxCoderSessions < 1 ||
+				budget.MaxReviewerSessions < 1 || math.IsNaN(budget.MaxNanoAIU) ||
+				math.IsInf(budget.MaxNanoAIU, 0) || budget.MaxNanoAIU <= 0 {
+				return graphError("invalid approved budget for review flow %q", flow.ID)
+			}
 		}
 		ids[flow.ID] = true
 		if err := validateSpecifications(flow.Contract.Specifications); err != nil {
