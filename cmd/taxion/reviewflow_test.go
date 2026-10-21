@@ -372,3 +372,14 @@ func TestRuntimeToolAllowlist(t *testing.T) {
 		t.Fatal("empty allowlist enabled tools")
 	}
 }
+
+func TestWorkflowLanesRequireTask(t *testing.T) {
+	var output bytes.Buffer
+	if err := workflowCommand(t.Context(), []string{"lanes"}, &output); err == nil ||
+		!strings.Contains(err.Error(), "--task") {
+		t.Fatalf("workflow lanes accepted a missing --task: %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatal("workflow lanes wrote output before validating --task")
+	}
+}

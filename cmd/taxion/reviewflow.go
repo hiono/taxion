@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
@@ -31,7 +32,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return encoder.Encode(value)
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|interrupt|feedback-target|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|evaluate}")
+		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|interrupt|feedback-target|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|evaluate|lanes}")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
@@ -45,6 +46,8 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	var builtinPrompts bool
 	var requireQuality bool
 	var scanner string
+	var taskID, laneRoot string
+	var laneTimeout time.Duration
 	var maxAICredits float64
 	switch action {
 	case "start", "recover", "handoff", "interrupt", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve", "planner-draft", "planner-action", "question-draft":
@@ -54,6 +57,10 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		if action == "evaluate" {
 			fs.BoolVar(&requireQuality, "require-quality", false, "fail unless saved same-target acceptance includes documentation consistency; not publication approval")
 		}
+	case "lanes":
+		fs.StringVar(&taskID, "task", "", "Task ID to inspect with read-only controller lanes")
+		fs.DurationVar(&laneTimeout, "timeout", controller.DefaultLaneTimeout, "per-lane timeout")
+		fs.StringVar(&laneRoot, "root", "", "repository root that must contain the Task worktree (default: current directory)")
 	case "run", "step":
 		fs.StringVar(&id, "id", "", "review flow ID")
 		fs.StringVar(&coderPrompt, "coder-prompt-file", "", "Coder system prompt")
@@ -90,8 +97,43 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return fmt.Errorf("workflow: --managed-stage requires --managed-commit")
 	}
 	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "interrupt" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve" || action == "planner-draft" || action == "planner-action" || action == "question-draft"
-	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" {
+	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" && action != "lanes" {
 		return fmt.Errorf("workflow start, recover, handoff, interrupt, feedback, feedback-resolve, draft, draft-discard, draft-approve, planner-draft, planner-action and question-draft require --file; advance, run, step, show, evaluate, planning-context and feedback-target require --id")
+	}
+	if action == "lanes" && taskID == "" {
+		return fmt.Errorf("workflow lanes requires --task")
+	}
+	if action == "lanes" {
+		root := laneRoot
+		if root == "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			root = cwd
+		}
+		db, err := store.OpenReadOnly(workspaceDBPath())
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			return err
+		}
+		report, err := controller.RunReadOnlyLanes(parent, controller.LaneRequest{
+			Graph: &state.Graph, TaskID: taskID, RepositoryRoot: root, Timeout: laneTimeout,
+		})
+		if err != nil {
+			return err
+		}
+		if err := printJSON(report); err != nil {
+			return err
+		}
+		if !report.ExecutionGateOpen {
+			return fmt.Errorf("workflow lanes: read-only lane failed; execution gate closed")
+		}
+		return nil
 	}
 	if action == "evaluate" {
 		db, err := store.OpenReadOnly(workspaceDBPath())
