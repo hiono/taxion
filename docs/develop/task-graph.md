@@ -899,6 +899,13 @@ Graph 読み込み時は version、キー、履歴、現状態の整合性を検
 archive を記録した DB は `archives` を理解しない v0.4.1 以前へ戻して使わない。
 履歴検査は transition と proof を照合し、不整合があればエラーを返す。
 
+approval schema version を持つ graph は、Task ごとに対応する ApprovalBundle を要求する。
+version がない graph は bundle を含まない場合だけ `verified-legacy` として従来の検査を使い、
+未知 version や schema version なしの bundle は `invalid-or-ambiguous` として拒否する。
+bundle-required の graph は、review flow 開始と各 role の Dispatch 発行時に、現在の Task と設定に
+一致する bundle を確認する。一致しない場合は入口を拒否し、承認履歴や Task Graph を変更しない。
+各 gate report は保存済み状態を読むだけで、承認、状態遷移、Dispatch 発行を行わない。
+
 Memory の参照先の検証と指示生成、役割別 Session の実行・再開は保存済み契約に従う。
 instruction v1〜v3 の履歴は読み込み、現在の実行には v4 の新しい Dispatch を発行する。
 Human の実際の認証・承認確認は後続 Issue で実装する。
