@@ -420,6 +420,18 @@ confirmation は Task を `READY` にしますが、Dispatch は発行しませ�
 
 `additionalTaskIds` は後述する Flow が作る Reviewer Task の設定承認です。この例の Flow ID は `task-example-flow`、修正上限は1回なので、初回レビューと再レビューの2件を列挙します。Flow ID または修正上限を変える場合は、この一覧も承認前に合わせてください。空の一覧では Coder だけが承認対象になり、独立 Reviewer の実行が拒否されます。`selection` は採用する設定ファイルの値と一致させます。
 
+### READY Task の設定承認を追加する
+
+既存の READY Task で保存済み設定承認と現在の effective configuration が異なる場合、v0.7.1 では Task ID を指定して設定承認を追記できます。この操作は Task 契約、state、proposal hash、既存 decision を変更せず、`task authorize --manifest` の新規登録経路も通りません。
+
+```sh
+taxion task reauthorize --task logical-register-unification-u16-independent-20261020
+taxion task reauthorize --task logical-register-unification-u16-independent-20261020 \
+  --confirm <confirmationToken>
+```
+
+最初の command は保存せずに Task の state、proposal hash、現在の record hash、7次元の digest、redacted drift path、confirmation token を表示します。表示内容と effective configuration を確認してから、同じ token を渡します。確認前に Task または設定が変わると操作を拒否します。成功時は unique な設定承認 decision と ApprovalBundle だけを追記し、Task を READY のまま保ちます。同じ内容を再送しても記録は重複しません。詳細は[Task の検証と承認](task-validate-and-authorize.md#ready-task-の設定を再承認する)を参照してください。
+
 ### Flow の上限を決めて開始する
 
 `workflow start` は READY Task に対して Coder Dispatch を発行します。オーケストレータは repair 回数と期限を利用者に示し、作業条件の承認とは別に実行上限への承認を得てから `flow.json` を作成します。token 閾値で Flow は停止しません。

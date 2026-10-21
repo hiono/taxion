@@ -13,6 +13,7 @@ v0.7.0 は v0.6.x の ledger をそのまま読む。必須の移行 command は
 - usage が不明・不完全な場合や上限到達時は `BUDGET_STOP` とし、新しい session・Dispatch を開始しない。
 - 未確認・未開始の Coder Dispatch に限り、Flow を hold して新しい Task 契約で再承認する最低限の再契約を行える。
 - approval、usage、budget stop、再契約の監査記録は追記のみで保存される。
+- v0.7.1 では READY Task の設定承認を `taxion task reauthorize --task TASK_ID` で追加できる。Task 契約、state、proposal hash、既存 decision は変更せず、確認済みの ApprovalBundle と設定承認 decision を追記する。
 
 ## 変えないこと
 
@@ -42,9 +43,9 @@ v0.7.0 は v0.6.x の ledger をそのまま読む。必須の移行 command は
 
 ## rollback
 
-binary を v0.6.x に戻す。ledger は書き換えない。v0.7.0 が追記した bundle は残るが、旧 binary は従来の検査だけを行う。再度 v0.7.0 に戻しても bundle はそのまま読める。
+binary を v0.6.x に戻しても ledger は書き換えない。旧 binary は v0.7.0/0.7.1 が追記した ApprovalBundle を認識せず、従来の検査だけを行う。v0.7.1 の READY Task 再承認が追加した canonicalization version 2 の bundle を保持したまま v0.7.0 へ戻すと、その bundle は未知の版として拒否されるため、再承認後の運用では v0.7.1 以降を使う。v0.6.x へ戻した環境で実行を続ける判断は、利用者が保存状態を確認して行う。
 
-rollback 後に v0.7.0 の gate report を再実行した場合、report の `observedAt` は新しくなるが、保存状態は変わらない。
+rollback 後に gate report を再実行すると `observedAt` は新しくなるが、保存状態は変わらない。
 
 ## 既知の制限
 

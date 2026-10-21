@@ -46,7 +46,7 @@ Task の契約提案を正規化 JSON にし、SHA-256 を取った値を `propo
 | scopeDigest | scope、outOfScope、fileAccess |
 | acceptanceDigest | acceptance、requiredEvidence、validationCommands、exitCondition |
 | budgetDigest | budgetGuidance |
-| permissionsDigest | owner、reviewer、authorizationId、decisions、worktree、branch、outputMode、target tree |
+| permissionsDigest | owner、reviewer、authorizationId、通常の decisions、worktree、branch、outputMode、target tree |
 | securityDigest | risk、exceptionIds、specifications、memoryRefs |
 | configurationDigest | 承認時に選択した設定 tuple の digest |
 
@@ -54,11 +54,11 @@ Task の契約提案を正規化 JSON にし、SHA-256 を取った値を `propo
 
 ### 版と正規化
 
-bundle は `bundleVersion` と `canonicalizationVersion` を持つ。v0.7.0 ではどちらも1である。hash は key 順を固定した正規化 JSON に対して取り、同じ値からは常に同じ hash を得る。未知の版を持つ bundle は `invalid` として扱い、互換扱いにしない。
+bundle は `bundleVersion` と `canonicalizationVersion` を持つ。v0.7.0 の bundle はどちらも1である。v0.7.1 の READY Task 再承認 bundle は canonicalization version 2 を使う。version 2 では設定承認 decision を permissions digest から除く。設定選択そのものは configuration digest で検証するため、追記した設定承認が Task の permission contract を変えない。その他の decision は引き続き permissions digest に含める。hash は key 順を固定した正規化 JSON に対して取り、同じ値からは常に同じ hash を得る。未知の版を持つ bundle は `invalid` として扱い、互換扱いにしない。
 
 ### confirmation token
 
-confirmation token は `proposalHash`、`bundleVersion`、`canonicalizationVersion` と7次元の digest から導出する確認用の digest である。人間が表示された契約と承認 basis を照合するために使う。認証 token ではなく、秘密でもない。token を知っていることは承認権限を意味しない。`taxion task authorize` は token を表示し、`--confirm` に同じ値を要求する。
+confirmation token は `proposalHash`、`bundleVersion`、`canonicalizationVersion` と7次元の digest から導出する確認用の digest である。人間が表示された契約と承認 basis を照合するために使う。認証 token ではなく、秘密でもない。token を知っていることは承認権限を意味しない。`taxion task authorize` と `taxion task reauthorize` は token を表示し、`--confirm` に同じ値を要求する。
 
 ### 再承認が不要な内部遷移
 
@@ -106,6 +106,8 @@ bundle-required の graph では、各 Task は実行入口の各 stage（start-
 
 承認は append-only で保存する。以前の bundle を書き換えたり削除したりしない。同じ basis に対する複数の承認がある場合、最新の一致 bundle を現在の根拠として扱う。同じ内容の再承認は既存 bundle を再利用し、監査記録を増やさない。
 
+v0.7.1 の `taxion task reauthorize --task TASK_ID` は既存 READY Task 専用である。preview は書込みを行わず、Task state、proposalHash、現在の recordHash、7次元、redacted drift path、確認 token を示す。確認時に Task と effective configuration を再読込し、preview 後の drift を拒否する。確認が成立した場合だけ、一意な設定承認 decision と canonicalization version 2 の bundle を追記する。Task 契約、proposalHash、state、既存 decision は維持し、保存後に readback、bundle Verify、Task-bound configuration check を行う。同一 bundle の再送は既存 record を再利用する。
+
 ### credential の伏せ字
 
 gate report、lane report、入口拒否の診断、drift の field path は、credential らしい値を伏せる。bundle ID も診断では伏せる。解決済みの credential 値を report に含めない。
@@ -143,7 +145,7 @@ budget audit は Dispatch 発行、session 開始、usage 観測、budget stop�
 
 ### 移行と rollback
 
-移行は additive である。`task authorize` が bundle を追記し、それ以外の command は保存形式を変換しない。rollback は binary を v0.6.x に戻すことで行い、ledger を書き換えない。bundle を残したまま旧 binary で実行すると、旧 binary は従来の検査だけを行う。rollback 後に再度 v0.7.0 を使う場合も、bundle はそのまま読める。
+移行は additive である。`task authorize` と `task reauthorize` が bundle を追記し、それ以外の command は保存形式を変換しない。rollback は binary の差し替えで行い、ledger を書き換えない。v0.6.x は従来の検査だけを行い、v0.7.0 は canonicalization version 2 の reauthorization bundle を拒否する。したがって、READY Task を再承認した workspace では v0.7.1 以降を使う。bundle を削除・置換して rollback する経路はない。
 
 ### v0.7.1 に送る項目
 

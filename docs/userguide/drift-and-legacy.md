@@ -48,7 +48,7 @@ Task は保存済みの schema 情報だけで次の3つに分類される。
 
 ## legacy Task の再承認
 
-workspace を bundle-required の運用に移す場合、現在の契約で `task authorize` を実行する。
+編集可能な legacy Task を bundle-required の運用に移す場合、現在の契約で `task authorize` を実行する。
 
 1. `taxion task validate --manifest task.json` で契約を確認する。
 2. `taxion task authorize --manifest task.json` で `confirmationToken` を確認する。
@@ -56,6 +56,8 @@ workspace を bundle-required の運用に移す場合、現在の契約で `tas
 4. `taxion gate contract --task <task-id>` で `pass` を確認する。
 
 再承認は追記であり、以前の記録を書き換えない。
+
+既存の READY Task で保存済み設定承認と effective configuration だけが異なる場合は、manifest tracking を使わず `taxion task reauthorize --task TASK_ID` を使う。Task 契約と state を保ったまま、設定承認 decision と bundle を追記する。対象は既存の設定承認があり、Task-bound configuration check が不一致になる Task に限る。手順は[Task の検証と承認](task-validate-and-authorize.md#ready-task-の設定を再承認する)を参照する。
 
 ## 変わると再承認が必要な項目
 

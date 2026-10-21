@@ -83,6 +83,41 @@ func TestScopedApprovalRetainsExactTaskAndConfigurationBoundaries(t *testing.T) 
 	}
 }
 
+func TestReauthorizationDecisionBindsExactConfigurationAndReference(t *testing.T) {
+	candidate, err := Load([]byte(validConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := "ready-task"
+	authRef := "authorization-unique"
+	decisionID := core.ConfigurationReauthorizationID(candidate.Execution.ApprovalRef, taskID, authRef)
+	approval := Approval{
+		Kind: ApprovalKind, TaskID: taskID, Reason: "confirm exact effective configuration",
+		DecisionID: decisionID, AuthorizationRef: authRef, ApprovalRef: candidate.Execution.ApprovalRef,
+		Allowed: []Config{candidate},
+	}
+	input, err := json.Marshal(approval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckApproval(string(input), taskID, decisionID, candidate); err != nil {
+		t.Fatalf("valid append-only approval rejected: %v", err)
+	}
+	changed := candidate
+	changed.Execution.Worker = "different-worker"
+	if err := CheckApproval(string(input), taskID, decisionID, changed); err == nil {
+		t.Fatal("reauthorization widened its approved configuration")
+	}
+	approval.ApprovalRef = "different-reference"
+	input, err = json.Marshal(approval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckApproval(string(input), taskID, decisionID, candidate); err == nil {
+		t.Fatal("reauthorization accepted a different approval reference")
+	}
+}
+
 func TestApprovalNamesAdditionalTasksWithoutWideningTuples(t *testing.T) {
 	candidate, err := Load([]byte(validConfig))
 	if err != nil {
