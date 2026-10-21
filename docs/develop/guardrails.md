@@ -24,8 +24,9 @@
 | STOP-001 | 保存 session の停止専用接続は新規 session・指示送信・通常再開を拒否し、pending work と全 permission を無効にする。取消・保存の失敗を停止成功として扱わない。 | `copilot.NewForStop`、`ResumeForStop`、Controller.Stop、停止専用 SDK protocol 回帰 |
 | LED-002 | 同じ Dispatch の suspension と cancellation の結果 receipt を追記保持し、最新結果・履歴の順序・内容 hash・利用量を照合する。 | `Controller.transition`、`validateResultReceipt`、suspension→cancellation 回帰 |
 | BUD-001 | 停止済み Flow の上限変更で再開せず、別 worktree・新しい Task と予算の承認で継続する。既知の Reviewer 設定承認漏れは CLI の有料 turn 前に検出する。 | successor Git proof、intake confirmation、`CheckReviewFlowConfiguration` と継続・設定回帰 |
+| APP-001 | bundle-required の Task は実行入口ごとに現在の契約と設定に一致する ApprovalBundle を要求し、verified-legacy 以外の未確認・不整合を fail closed にする。 | `TaskGraph.CheckBundleAtEntry`、`ApprovalRequirement`、gate と execution-entry 回帰 |
 
-この表は必要な制約を定義しています。現在の `review` 操作は証拠の対応付けだけです。空でない SHA を要求しますが、その形式、Git 内の存在、Reviewer の実行は検証しません。Controller の Runtime review flow は、別途独立した Reviewer worktree を作成し、commit・tree の一致を確認します。metadata だけを扱う `review` コマンドは、その実行の証拠にはなりません。FILE-001、SHA-001、STOP-001、LED-002、BUD-001 の判断と制約は ADR-0026〜0028 に記録しています。REP-002〜REP-007 の判断と制約は ADR-0042 に記録しています。
+この表は必要な制約を定義しています。現在の `review` 操作は証拠の対応付けだけです。空でない SHA を要求しますが、その形式、Git 内の存在、Reviewer の実行は検証しません。Controller の Runtime review flow は、別途独立した Reviewer worktree を作成し、commit・tree の一致を確認します。metadata だけを扱う `review` コマンドは、その実行の証拠にはなりません。FILE-001、SHA-001、STOP-001、LED-002、BUD-001 の判断と制約は ADR-0026〜0028 に記録しています。REP-002〜REP-007 の判断と制約は ADR-0042、APP-001 は ADR-0043 に記録しています。
 
 ## 一般化した失敗の知見
 
