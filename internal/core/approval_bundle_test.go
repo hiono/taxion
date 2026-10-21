@@ -300,6 +300,15 @@ func TestReauthorizationVerifiesImmutableProposalIdentity(t *testing.T) {
 			if err := bundle.Verify(invalid, configuration); err == nil {
 				t.Fatal("bundle verification accepted invalid immutable proposal reference")
 			}
+			v1, err := ComposeApprovalBundleWithProposalHash(
+				"legacy-bundle", proposal, invalid, configuration, "human", "human:1", "gate", time.Now(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name != "missing" && v1.Verify(invalid, configuration) == nil {
+				t.Fatal("version 1 READY verification bypassed the immutable proposal reference")
+			}
 		})
 	}
 }

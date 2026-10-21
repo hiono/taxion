@@ -372,6 +372,8 @@ func (b ApprovalBundle) Drifts(stored GraphTask, current ApprovalConfiguration) 
 	hasConfirmation := slices.ContainsFunc(stored.Decisions, func(decision TaskDecision) bool {
 		return strings.HasPrefix(decision.ID, "intake-confirmation:")
 	})
+	// Version 1 manifest authorization can legitimately lack an intake receipt.
+	// Reauthorization always requires it, regardless of the current Task state.
 	if b.CanonicalizationVersion == ReauthorizationCanonicalizationVersion || hasConfirmation {
 		proposalHash, err := ImmutableProposalHash(stored)
 		if err != nil {
