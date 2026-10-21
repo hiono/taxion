@@ -194,7 +194,7 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5}`}
+				worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`}
 				worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
 				worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
 				return nil

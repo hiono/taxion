@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -166,6 +167,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	worktree := fs.String("worktree", ".", "clean attached worktree to modify")
 	timeout := fs.Duration("timeout", 0, "total planning and execution deadline after /plan")
 	credits := fs.Float64("max-ai-credits", 0, "per-session soft credit ceiling, not a total budget (minimum: 30)")
+	taskNanoAIU := fs.Float64("max-task-nano-aiu", 0, "approved hard Task-wide nano-AIU ceiling")
 	repairs := fs.Int("max-repairs", 1, "maximum repair turns after independent review")
 	cli := fs.String("cli", "", "Copilot CLI executable")
 	base := fs.String("base-directory", "", "Copilot state directory")
@@ -175,8 +177,10 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *repo == "" || *timeout < time.Second || *credits < 0 || *repairs < 0 || *repairs > 100 || len(paths) > 16 {
-		return fmt.Errorf("request requires --repo, --timeout (at least 1s) and --max-ai-credits; --max-repairs must be 0-100")
+	if *repo == "" || *timeout < time.Second || *credits < 0 || *taskNanoAIU <= 0 ||
+		math.IsNaN(*taskNanoAIU) || math.IsInf(*taskNanoAIU, 0) ||
+		*repairs < 0 || *repairs > 100 || len(paths) > 16 {
+		return fmt.Errorf("request requires --repo, --timeout (at least 1s), --max-ai-credits and --max-task-nano-aiu; --max-repairs must be 0-100")
 	}
 	if err := copilot.ValidateAICreditLimit(*credits); err != nil {
 		return err
@@ -450,8 +454,9 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				Configuration: configuration,
 				ID:            flowID, TaskID: id, Repository: *repo, ReviewRoot: reviewRoot,
 				MaxRepairs: repairs, TimeoutSeconds: seconds,
+				MaxNanoAIU: *taskNanoAIU,
 				Authorization: core.TaskDecision{ID: flowID + "-budget", Source: source,
-					Text: "Human selected /approve for the approved goal, deadline and repair limit; prioritize acceptance while preserving AI credits"},
+					Text: fmt.Sprintf("Human selected /approve for the approved goal, deadline, repair limit and Task-wide %.9g nano-AIU ceiling; prioritize acceptance within these limits", *taskNanoAIU)},
 			}); err != nil {
 				return err
 			}

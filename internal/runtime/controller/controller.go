@@ -115,6 +115,23 @@ func (c *Controller) Start(ctx context.Context, dispatchID string) (string, erro
 	if dispatch.RuntimeSessionID != "" && dispatch.RuntimeConfigHash != c.runtime.ConfigHash() {
 		return "", fmt.Errorf("taxion: runtime config does not match Dispatch session binding")
 	}
+	if state, loadErr := c.store.LoadWorkspace(); loadErr != nil {
+		return "", loadErr
+	} else if flow, found := flowForDispatch(state.Graph, dispatchID); found {
+		if dispatch.RuntimeSessionID == "" {
+			if budgetErr := requireSessionBudget(state.Graph, flow, dispatch.Recipient); budgetErr != nil {
+				stopErr := stopUnstartedDispatch(c.store, flow.ID, dispatch.ID, "controller", "budget", budgetErr.Error(), "BUDGET_STOP")
+				return "", errors.Join(budgetErr, stopErr)
+			}
+		} else if reason := activeBudgetStop(taskBudgetReport(state.Graph, flow, time.Now().UTC())); reason != "" {
+			budgetErr := &budgetStopError{reason: reason}
+			stopErr := stopFlowForBudget(c.store, flow.ID, reason)
+			if stopErr == nil {
+				stopErr = c.stopIfExecuting(dispatchID)
+			}
+			return "", errors.Join(budgetErr, stopErr)
+		}
+	}
 	if err := c.authorizeExecution(ctx, dispatchID, "START"); err != nil {
 		return "", err
 	}
@@ -152,6 +169,12 @@ func (c *Controller) Start(ctx context.Context, dispatchID string) (string, erro
 		}
 		if err := state.Graph.BindRuntimeSession(dispatchID, sessionID, c.runtime.ConfigHash()); err != nil {
 			return err
+		}
+		if flow, found := flowForDispatch(state.Graph, dispatchID); found {
+			report := taskBudgetReport(state.Graph, flow, time.Now().UTC())
+			if err := appendBudgetAudit(state, flow, "SESSION_STARTED", report); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -490,7 +513,13 @@ func (c *Controller) RecordUsage(dispatchID string, usage core.DispatchUsage) er
 		}
 		for i := range state.Graph.Dispatches {
 			if state.Graph.Dispatches[i].ID == dispatchID {
-				return appendRuntimeUsage(&state.Graph.Dispatches[i], usage)
+				if err := appendRuntimeUsage(&state.Graph.Dispatches[i], usage); err != nil {
+					return err
+				}
+				if flow, found := flowForDispatch(state.Graph, dispatchID); found {
+					return appendBudgetAudit(state, flow, "USAGE_OBSERVED", taskBudgetReport(state.Graph, flow, time.Now().UTC()))
+				}
+				return nil
 			}
 		}
 		return fmt.Errorf("taxion: Dispatch %q not found", dispatchID)

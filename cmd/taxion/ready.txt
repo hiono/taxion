@@ -214,6 +214,7 @@ Numbers below are examples, not the user's budget. Do not convert tokens to cred
   "repository": "owner/repository",
   "reviewRoot": "/absolute/path/to/reviews",
   "maxRepairs": 0,
+  "maxNanoAiu": 1000000000,
   "timeoutSeconds": 1800,
   "authorization": {
     "id": "ready-example-budget",

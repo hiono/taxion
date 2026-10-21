@@ -140,7 +140,7 @@ func TestReapprovalCreatesSuccessorWithoutRewritingIssuedContract(t *testing.T) 
 	repairs := 0
 	if _, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
 		ID: "successor-flow", TaskID: saved.ID, Repository: saved.Repo, ReviewRoot: old.ReviewRoot,
-		MaxRepairs: &repairs, TimeoutSeconds: 30,
+		MaxRepairs: &repairs, TimeoutSeconds: 30, MaxNanoAIU: 1e12,
 		Authorization: core.TaskDecision{ID: "new-flow-approval", Source: "human:new-budget", Text: "Authorize a separately bounded successor"},
 	}); err != nil {
 		t.Fatal("old held flow blocked explicitly approved successor execution", err)
@@ -247,7 +247,7 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 	repairs := 0
 	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
 		ID: "budget-successor-flow", TaskID: approved.ID, Repository: approved.Repo, ReviewRoot: flow.ReviewRoot,
-		MaxRepairs: &repairs, TimeoutSeconds: 60,
+		MaxRepairs: &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
 		Authorization: core.TaskDecision{ID: "new-budget", Source: "human:new-budget", Text: "Approve a separate execution budget"},
 	})
 	if err != nil {
@@ -333,7 +333,7 @@ func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T
 	repairs := 0
 	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
 		ID: "review-successor-flow", TaskID: approved.ID, Repository: approved.Repo, ReviewRoot: flow.ReviewRoot,
-		ContinueFromDispatchID: coder.ID, MaxRepairs: &repairs, TimeoutSeconds: 60,
+		ContinueFromDispatchID: coder.ID, MaxRepairs: &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
 		Authorization: core.TaskDecision{ID: "new-review-budget", Source: "human:new-review-budget", Text: "Approve a separate review budget"},
 	})
 	if err != nil {
@@ -591,7 +591,7 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
 		ID: "snapshot-review-successor-flow", TaskID: approved.ID, Repository: approved.Repo,
 		ReviewRoot: flow.ReviewRoot, ContinueFromDispatchID: coder.ID,
-		MaxRepairs: &repairs, TimeoutSeconds: 60,
+		MaxRepairs: &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
 		Authorization: core.TaskDecision{
 			ID: "new-snapshot-review-budget", Source: "human:new-snapshot-review-budget",
 			Text: "Approve a separate review budget",

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
 )
@@ -22,6 +23,7 @@ type FlowEvaluation struct {
 	ElapsedMilliseconds    *int64              `json:"elapsedMilliseconds"`
 	ExecutionObservations  int                 `json:"executionObservations"`
 	Unmeasured             []string            `json:"unmeasured"`
+	Budget                 *TaskBudgetReport   `json:"taskBudget,omitempty"`
 }
 
 type EvaluatedDispatch struct {
@@ -54,6 +56,11 @@ func EvaluateReviewFlow(graph core.TaskGraph, id string) (FlowEvaluation, error)
 			"Saved approval is not proof of current Git, authentication, publication permission or semantic documentation truth.",
 		},
 	}
+	budget, err := EvaluateTaskBudget(graph, id, time.Now().UTC())
+	if err != nil {
+		return FlowEvaluation{}, err
+	}
+	report.Budget = &budget
 	if flow.Status != "COMPLETED" {
 		report.Unmet = append(report.Unmet, "Flow has not completed with independent same-target acceptance.")
 	}

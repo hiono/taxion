@@ -50,12 +50,16 @@ func generate() ([]byte, error) {
 		"memory conflict add", "memory conflict list", "memory conflict resolve", "help"} {
 		commands[name] = map[string]bool{}
 	}
+	for _, name := range []string{"workflow start", "workflow terminate"} {
+		commands[name]["--file"] = true
+		commands[name]["--help"] = true
+	}
 	// Build once, then query help with no HOME, config, Git environment or tools.
 	// No-flag actions are excluded because they may perform work instead of help.
 	noFlags := map[string]bool{"completion": true, "completion bash": true, "gen-token": true, "help": true,
 		"memory checks": true, "records show": true, "task graph": true,
 		"git hook": true, "git hook status": true, "git hook remove": true,
-		"memory conflict": true}
+		"memory conflict": true, "workflow start": true, "workflow terminate": true}
 	directory, err := os.MkdirTemp("", "taxion-completion-*")
 	if err != nil {
 		return nil, err

@@ -27,6 +27,7 @@ type ReviewFlowRequest struct {
 	Repository             string                     `json:"repository"`
 	ReviewRoot             string                     `json:"reviewRoot"`
 	MaxRepairs             *int                       `json:"maxRepairs"`
+	MaxNanoAIU             float64                    `json:"maxNanoAiu"`
 	TimeoutSeconds         int64                      `json:"timeoutSeconds"`
 	Authorization          core.TaskDecision          `json:"authorization"`
 	Configuration          core.ApprovalConfiguration `json:"configuration"`
@@ -35,6 +36,7 @@ type ReviewFlowRequest struct {
 func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowRequest) (core.ReviewFlow, error) {
 	if db == nil || strings.TrimSpace(request.ID) == "" || strings.ContainsAny(request.ID, `/\`) ||
 		request.MaxRepairs == nil || *request.MaxRepairs < 0 || request.TimeoutSeconds <= 0 ||
+		math.IsNaN(request.MaxNanoAIU) || math.IsInf(request.MaxNanoAIU, 0) || request.MaxNanoAIU <= 0 ||
 		request.TimeoutSeconds > math.MaxInt64/int64(time.Second) ||
 		!filepath.IsAbs(request.ReviewRoot) ||
 		strings.TrimSpace(request.Authorization.ID) == "" || strings.TrimSpace(request.Authorization.Source) == "" ||
@@ -69,7 +71,13 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 			ID: request.ID, TaskID: task.ID, SourceDispatchID: request.ContinueFromDispatchID,
 			Contract: task, ReviewRoot: filepath.Clean(request.ReviewRoot),
 			MaxRepairs: *request.MaxRepairs,
-			StartedAt:  now, Deadline: now.Add(time.Duration(request.TimeoutSeconds) * time.Second), Status: "RUNNING",
+			Budget: core.FlowBudget{
+				MaxDispatches:       2 + 2*(*request.MaxRepairs),
+				MaxCoderSessions:    1 + *request.MaxRepairs,
+				MaxReviewerSessions: 1 + *request.MaxRepairs,
+				MaxNanoAIU:          request.MaxNanoAIU,
+			},
+			StartedAt: now, Deadline: now.Add(time.Duration(request.TimeoutSeconds) * time.Second), Status: "RUNNING",
 			Authorization: request.Authorization, DispatchIDs: []string{},
 		}
 		if request.ContinueFromDispatchID == "" {
@@ -108,6 +116,53 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 		return nil
 	})
 	return flow, err
+}
+
+// TerminateUnstartedDispatch is the safe first half of re-contracting: it
+// permanently cancels an issued, untouched Coder Dispatch and holds its flow.
+// A successor Task must be explicitly approved and issued with a new hash.
+func TerminateUnstartedDispatch(db *store.Store, flowID, dispatchID, actor, source, reason string) error {
+	if db == nil || strings.TrimSpace(actor) == "" || strings.TrimSpace(source) == "" ||
+		strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("taxion: terminate-and-recontract requires a store, actor, source and reason")
+	}
+	return stopUnstartedDispatch(db, flowID, dispatchID, actor, source, reason, "RECONTRACT")
+}
+
+func stopUnstartedDispatch(db *store.Store, flowID, dispatchID, actor, source, reason, stopCode string) error {
+	reason = source + ": " + reason
+	return db.UpdateWorkspace(func(state *store.Workspace) error {
+		flow, ok := state.Graph.ReviewFlow(flowID)
+		if !state.HasGraph || !ok || flow.Status != "RUNNING" || flow.RunnerID != "" ||
+			len(flow.DispatchIDs) == 0 || flow.DispatchIDs[len(flow.DispatchIDs)-1] != dispatchID {
+			return fmt.Errorf("taxion: re-contract requires the latest Dispatch of an unclaimed running flow")
+		}
+		dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+		if !ok || dispatch.Recipient != "CODER" || dispatch.Status != core.DispatchIssued ||
+			dispatch.Acknowledged || dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "" {
+			return fmt.Errorf("taxion: re-contract may terminate only an untouched issued Coder Dispatch")
+		}
+		result := &core.DispatchResult{
+			DispatchID: dispatch.ID, TaskID: dispatch.TaskID, Recipient: dispatch.Recipient,
+			Repository: dispatch.Repository, Status: core.DispatchCancelled,
+			StartedSHA: dispatch.ExpectedStartSHA(), ChangedFiles: []string{},
+			Evidence: []string{"not-started:" + dispatch.ID}, Blockers: []string{reason},
+			NextTransition: core.Blocked,
+		}
+		if err := state.Graph.TransitionDispatch(dispatchID, core.DispatchCancelled, actor, reason, false, false, result); err != nil {
+			return err
+		}
+		if err := holdReviewFlowForStop(&state.Graph, &flow, reason); err != nil {
+			return err
+		}
+		flow.StopCode, flow.Status, flow.Reason = stopCode, "STOPPED", reason
+		storeFlow(state, flow)
+		kind := stopCode
+		if kind != "RECONTRACT" {
+			kind = "BUDGET_STOP"
+		}
+		return appendBudgetAudit(state, flow, kind, taskBudgetReport(state.Graph, flow, time.Now().UTC()))
+	})
 }
 
 func budgetContinuationSource(graph core.TaskGraph, task core.GraphTask, sourceID string, records ...store.Records) (core.GraphDispatch, error) {
@@ -187,6 +242,12 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 			flow.StopCode = code
 			flow.Status, flow.Reason = "STOPPED", reason
 			storeFlow(state, flow)
+			if code == "BUDGET_STOP" {
+				report := taskBudgetReport(state.Graph, flow, time.Now().UTC())
+				if err := appendBudgetAudit(state, flow, code, report); err != nil {
+					return err
+				}
+			}
 			stopped = fmt.Errorf("%w: %s", ErrFlowStopped, reason)
 			return nil
 		}
@@ -194,7 +255,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 		task, _ := state.Graph.GraphTask(flow.TaskID)
 		last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
 		if !time.Now().UTC().Before(flow.Deadline) {
-			return stop("deadline reached; reconcile and safely stop any active Dispatch before further authorization")
+			return stopWithCode("deadline reached; reconcile and safely stop any active Dispatch before further authorization", "BUDGET_STOP")
 		}
 		if !flowContractMatches(state.Graph, flow, task) {
 			return stop("Task scope, acceptance, authorization or execution contract changed; Human approval of a new flow is required")
@@ -226,6 +287,9 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 			return nil
 		}
 		if active(last.Status) {
+			if reason := activeBudgetStop(taskBudgetReport(state.Graph, flow, time.Now().UTC())); reason != "" {
+				return stopWithCode(reason, "BUDGET_STOP")
+			}
 			return nil
 		}
 		if last.Status != core.DispatchSucceeded || last.Result == nil {
@@ -308,7 +372,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 				flow.Status, flow.Reason = "COMPLETED", "independent review and acceptance verified for "+task.TargetSHA
 			case "REQUEST_CHANGES":
 				if flow.Repairs >= flow.MaxRepairs {
-					return stop("repair ceiling reached; present saved findings and acceptance decisions to Human")
+					return stopWithCode("repair ceiling reached; present saved findings and acceptance decisions to Human", "BUDGET_STOP")
 				}
 				for _, status := range []core.TaskStatus{core.RequestChanges, core.Blocked} {
 					if err := state.Graph.Transition(task.ID, status, "controller", "review requested changes", core.TransitionProof{}); err != nil {
@@ -354,10 +418,21 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 				return holdErr
 			}
 			if stored.StopCode == "" {
-				stored.StopCode = "SAFETY_STOP"
+				var budgetErr *budgetStopError
+				if errors.As(err, &budgetErr) {
+					stored.StopCode = "BUDGET_STOP"
+				} else {
+					stored.StopCode = "SAFETY_STOP"
+				}
 			}
 			stored.Status, stored.Reason = "STOPPED", reason
 			storeFlow(state, stored)
+			if stored.StopCode == "BUDGET_STOP" {
+				report := taskBudgetReport(state.Graph, stored, time.Now().UTC())
+				if auditErr := appendBudgetAudit(state, stored, "BUDGET_STOP", report); auditErr != nil {
+					return auditErr
+				}
+			}
 			flow = stored
 			return nil
 		})
@@ -410,6 +485,9 @@ func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.Rev
 	if err != nil {
 		return err
 	}
+	if err := requireBudgetRoom(state.Graph, *flow, dispatch.Recipient); err != nil {
+		return err
+	}
 	if err := state.Graph.IssueDispatch(dispatch, "controller", "bounded review flow issued instruction"); err != nil {
 		return err
 	}
@@ -417,6 +495,9 @@ func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.Rev
 		ID: dispatch.ID, TaskID: task.ID, Repo: task.Repo, Active: true, CreatedAt: time.Now().UTC(),
 	})
 	flow.DispatchIDs = append(flow.DispatchIDs, dispatch.ID)
+	if err := appendBudgetAudit(state, *flow, "DISPATCH_ISSUED", taskBudgetReport(state.Graph, *flow, time.Now().UTC())); err != nil {
+		return err
+	}
 	if flow.PendingDraftID() != "" {
 		index := len(flow.InstructionDrafts) - 1
 		draft := &flow.InstructionDrafts[index]

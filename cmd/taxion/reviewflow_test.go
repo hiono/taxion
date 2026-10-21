@@ -61,7 +61,7 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 	repairs := 2
 	request := controller.ReviewFlowRequest{
 		ID: "flow", TaskID: task.ID, Repository: task.Repo, ReviewRoot: filepath.Join(dir, "reviews"),
-		MaxRepairs: &repairs, TimeoutSeconds: 60,
+		MaxRepairs: &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
 		Authorization: core.TaskDecision{ID: "flow-authorized", Source: "human:1", Text: "authorize bounded independent reviews and repairs"},
 	}
 	file := filepath.Join(dir, "flow.json")

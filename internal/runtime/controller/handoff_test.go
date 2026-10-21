@@ -237,7 +237,7 @@ func TestHandoffKeepsActiveResultAndRunnerResumable(t *testing.T) {
 				StartedSHA: dispatch.ExpectedStartSHA(), OutputSHA: gitTest(t, dispatch.Instruction.Worktree, "rev-parse", "HEAD"),
 				ChangedFiles: []string{"internal/app.go"}, Evidence: []string{"test-report"}, NextTransition: core.WaitingForReview,
 			}
-			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":10,"outputTokens":5}`}
+			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(mustFlowJSON(t, result))}
 			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
 			return nil

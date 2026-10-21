@@ -293,7 +293,8 @@ v0.2.0 から更新した場合、配置済み skill `1.0.0` はそのまま使�
 
 ```sh
 taxion request --repo owner/repository \
-  --timeout 20m --max-ai-credits 30 --context-path README.md
+  --timeout 20m --max-ai-credits 30 --max-task-nano-aiu 1000000000 \
+  --context-path README.md
 ```
 
 最初に「この画面に検索機能を追加して」のように依頼を書きます。表示された repository・worktree・実行 account・上限を確認し、`/plan` でモデルを使う Planner 対話を開始します。費用は選んだモデルの利用条件に従います。Planner の質問には人のことばで答え、提案が意図と違えば修正を伝えます。Planner は目的、変更範囲、完了条件、検証コマンドを提案します。質問が残っている間は実行できません。
@@ -302,7 +303,7 @@ taxion request --repo owner/repository \
 
 この入口は snapshot mode と `fileAccess: all` を明示して使います。worktree 内の新規ファイルを許可し、Coder には `view,create,edit,apply_patch`、Reviewer には `view` を渡します。変更結果の scope 検査、worktree 外と保護された path の拒否、Reviewer の読み取り専用制約は維持します。細かい file access や外部 skill の承認が必要な場合は、`ready` を読んだオーケストレータに次節の個別手順を任せます。
 
-期限は `/plan` から数えます。`--max-ai-credits` は session ごとの soft ceiling で、依頼全体の金額上限や一 turn の hard cap ではありません。Planner と Coder / Reviewer の利用量は各 model call ごとに記録します。account 残高・利用率は、同じ単位の allowance を取得できない限り unavailable と表示します。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の各回答でモデルを実行するため、同じ内容を繰り返し送らないようにします。Planner の失敗を自動 retry しません。
+期限は `/plan` から数えます。必須の `--max-task-nano-aiu` は、Task 全体で承認する nano-AIU の hard ceiling です。利用量が未知・不完全なら残量を0として次の Dispatch/session を発行せず、`BUDGET_STOP` を記録します。`--max-ai-credits` は session ごとの soft ceiling で、Task-wide 上限とは別です。Dispatch 数と role session 数の上限は承認済み repair 上限から導出し、実行済み数・credits・時間・修正/re-review 数と残量は `workflow evaluate --id FLOW_ID` で確認できます。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の各回答でモデルを実行するため、同じ内容を繰り返し送らないようにします。Planner の失敗を自動 retry しません。
 
 Planner はファイル・shell tool を持たず、依頼、これまでの対話、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストを受け取ります。元依頼の全文は保存した decision に一度だけ含め、対話の先頭はその出典を参照します。同じ Task を別の wrapper に重ねて送りません。path は directory ごとにまとめ、全件を保持したまま共通部分の繰り返しを減らします。通常は native な skill と指示も読み込みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。対話中の `/quit` または入力終了ではコードを実行せず、相談記録を残します。保存した相談の自動再開は未対応です。
 
@@ -430,11 +431,12 @@ confirmation は Task を `READY` にしますが、Dispatch は発行しませ�
   "repository": "owner/repository",
   "reviewRoot": "/absolute/path/to/reviews",
   "maxRepairs": 1,
+  "maxNanoAiu": 1000000000,
   "timeoutSeconds": 1800,
   "authorization": {
     "id": "task-example-flow-budget",
     "source": "human:budget-1",
-    "text": "最大1回の修正を含む実行と独立レビューを、記載した期限内で許可する"
+    "text": "最大1回の修正を含む実行と独立レビューを、期限内かつ合計1000000000 nano-AIUまで許可する"
   }
 }
 ```
@@ -442,6 +444,7 @@ confirmation は Task を `READY` にしますが、Dispatch は発行しませ�
 ```sh
 taxion workflow start --file flow.json
 taxion workflow show --id task-example-flow
+taxion workflow evaluate --id task-example-flow
 taxion config check --dispatch DISPATCH-ID
 taxion runtime auth --dispatch DISPATCH-ID --system-prompt-file prompts/coder.md
 taxion workflow run --id task-example-flow \
@@ -454,6 +457,8 @@ taxion workflow show --id task-example-flow
 ```
 
 `DISPATCH-ID` は start 結果の `dispatchIds[0]` で置き換えます。prompt file は各 role の system prompt です。`workflow run` に tool allowlist を渡さないと、Coder と Reviewer に SDK tool は渡りません。Coder には `view,create,edit,apply_patch`、読み取り専用の Reviewer には `view` を許可します。`workflow run` は Copilot runtime を実際に呼び出し、承認済み条件に従って Coder、独立 Reviewer、許可された修正を進めます。`--max-ai-credits` は per-session の soft ceiling です。
+
+未起動の Coder Dispatch を取り消して契約を作り直す場合は、`workflow terminate --file terminate.json` に `{ "flowId": "...", "dispatchId": "...", "actor": "human", "source": "human:recontract", "reason": "..." }` を渡します。これは未開始・未確認の Dispatch のみを取消し、Flow を hold します。次に新しい Task ID と作業条件を明示承認し、`workflow start` で再契約します。新しい Dispatch hash が生成され、以前の指示と audit history は保持されます。
 
 オーケストレータは実行前に `prompts/coder.md` と `prompts/reviewer.md` をローカルファイルとして用意します。Coder には「保存済み Dispatch の scope と fileAccess の範囲だけを変更し、commit は作らない。変更 path と構造化結果を返す。検証コマンドは Controller が実行するため、未実行の検証を成功と報告しない」、Reviewer には「Controller が再現した target tree を読み取り専用で確認し、acceptance ごとの判断と根拠、必要な指摘を構造化結果で返す」と記します。Taxion が Dispatch に保存した作業条件を各 prompt に追加します。結果の `outputTreeSha` はモデルではなく Controller が算出します。
 

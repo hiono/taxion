@@ -257,6 +257,7 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 		history[i].Paths = slices.Clone(history[i].Paths)
 		history[i].TaskIDs = slices.Clone(history[i].TaskIDs)
 	}
+	budgets := slices.Clone(state.Records.Budgets)
 	existing := map[string]bool{}
 	if restore != nil {
 		for _, dispatch := range state.Graph.Dispatches {
@@ -282,6 +283,10 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	}
 	if !reflect.DeepEqual(restore, state.Records.Restore) || !reflect.DeepEqual(history, state.Records.Restores) {
 		return fmt.Errorf("workspace restore receipts are immutable")
+	}
+	if len(state.Records.Budgets) < len(budgets) ||
+		!slices.Equal(budgets, state.Records.Budgets[:len(budgets)]) {
+		return fmt.Errorf("task budget audit records are append-only")
 	}
 	if restore != nil {
 		for _, dispatch := range state.Graph.Dispatches {

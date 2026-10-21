@@ -180,7 +180,7 @@ func TestM14LiveSDKAcquisitionAndIndependentReview(t *testing.T) {
 	repairs := 0
 	flow, err := StartReviewFlow(db, filepath.Join(root, "ledger.json"), ReviewFlowRequest{
 		ID: "live-source-flow", TaskID: task.ID, Repository: task.Repo, ReviewRoot: filepath.Join(root, "reviews"),
-		MaxRepairs: &repairs, TimeoutSeconds: 600,
+		MaxRepairs: &repairs, TimeoutSeconds: 600, MaxNanoAIU: 1e12,
 		Authorization: core.TaskDecision{ID: "live-flow", Source: "human:m14-sdk-approved", Text: "Authorize one Coder and one independent Reviewer; preserve the existing accepted synthetic baseline"},
 	})
 	if err != nil {
