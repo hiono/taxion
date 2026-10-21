@@ -57,6 +57,8 @@ taxion task reauthorize --task TASK_ID
 
 preview は Task ID、state、proposal hash、現在の record hash、bundle と canonicalization の版、7次元の digest、credential を含まない drift path、confirmation token を表示する。設定値や credential は出力しない。確認前に workspace へ書き込まない。
 
+`proposalHash` は既存の intake confirmation decision に保存された `expectedHash` をそのまま表示する。`recordHash` は現在の canonical Task record から別途計算する。両者が異なっていても、現在の record hash で immutable な提案参照を置き換えない。提案参照が欠落・曖昧・競合している場合や、既存 bundle の proposal hash がその参照と異なる場合は拒否する。自動 migration は行わず、Task や過去の承認を変更しない。
+
 表示された basis を確認した後、token をそのまま渡す。
 
 ```bash
