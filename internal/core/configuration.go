@@ -23,6 +23,10 @@ func ConfigurationApprovalID(reference, taskID string) string {
 	return reference + "@task:" + taskID
 }
 
+func ConfigurationReauthorizationID(reference, taskID, authorizationReference string) string {
+	return ConfigurationApprovalID(reference, taskID) + "@reauth:" + authorizationReference
+}
+
 // ExecutionAccessCheck records a successful runtime-account and repository-role
 // access check for the selected tuple, not session creation or contract eligibility.
 type ExecutionAccessCheck struct {
@@ -107,13 +111,22 @@ func (binding DispatchConfiguration) validate(dispatch GraphDispatch) error {
 			TaskID            string           `json:"taskId"`
 			AdditionalTaskIDs []string         `json:"additionalTaskIds,omitempty"`
 			Reason            string           `json:"reason"`
+			DecisionID        string           `json:"decisionId,omitempty"`
+			AuthorizationRef  string           `json:"authorizationReference,omitempty"`
+			ApprovalRef       string           `json:"approvalRef,omitempty"`
 			Allowed           []map[string]any `json:"allowed"`
 		}
 		if err := DecodeGraphInput(strings.NewReader(decision.Text), &approval); err != nil ||
 			approval.Kind != "taxion.execution-config.v1" || !nonempty(approval.TaskID) || !nonempty(approval.Reason) {
 			return graphError("configuration binding requires a saved configuration approval")
 		}
-		if binding.DecisionID != reference && binding.DecisionID != ConfigurationApprovalID(reference, approval.TaskID) {
+		if approval.DecisionID != "" || approval.AuthorizationRef != "" || approval.ApprovalRef != "" {
+			if approval.DecisionID != binding.DecisionID || !nonempty(approval.AuthorizationRef) ||
+				approval.ApprovalRef != reference ||
+				binding.DecisionID != ConfigurationReauthorizationID(reference, approval.TaskID, approval.AuthorizationRef) {
+				return graphError("configuration binding identity differs from the Dispatch")
+			}
+		} else if binding.DecisionID != reference && binding.DecisionID != ConfigurationApprovalID(reference, approval.TaskID) {
 			return graphError("configuration binding identity differs from the Dispatch")
 		}
 		taskAllowed := approval.TaskID == dispatch.TaskID
