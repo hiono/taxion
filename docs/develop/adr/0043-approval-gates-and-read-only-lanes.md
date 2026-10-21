@@ -127,11 +127,13 @@ lane は最大4本を並行実行し、固定順で集約する。各 lane に�
 
 ### immutable な role handoff packet
 
-role への instruction は hash を持ち、発行後に黙って書き換えない。変更が必要な場合は新しい Dispatch または version 付き draft を作り、契約の外に出る変更は再承認を要求する。handoff の hold は次の role を止めるが、実行中の role を取り消さない。
+role handoff packet v1 は CODER・VALIDATOR・REVIEWER 向けに、packet version、Task ID/hash、baseline SHA、target tree hash、scope/acceptance digest、prohibited actions、前段 evidence hash、required output schema を含む。canonical serialization から packet hash を算出し、readback で hash と参照値を検証する。変更・欠落・余分な field は tamper として拒否する。credential を伏せ、会話全文と private reasoning は含めない。packet は参照情報であり実行許可ではない。role instruction は発行後に黙って書き換えず、契約外の変更は再承認を要求する。handoff の hold は次の role を止めるが、実行中の role を取り消さない。
 
 ### Task 単位の集計と再契約
 
-Dispatch、credits、時間の Task 単位の集計と、未起動 Dispatch の再契約は v0.7.1 の範囲とする。v0.7.0 はこれらの記録形式を先取りしない。既存の Dispatch usage と review flow の評価は変更しない。
+`workflow evaluate` は Flow の Dispatch 数、Coder/Reviewer session 数、nano-AIU usage、elapsed time、repair/re-review 数について、approved limit・consumed・remaining を報告する。未実行の session/Dispatch を始める前と、usage event 後に ceiling を検査する。Task-wide usage が不明・不完全なら remaining を0として `BUDGET_STOP` にし、新しい session/Dispatch を許可しない。観測した usage が ceiling に達した実行中 session は安全に停止し、Flow を hold して checkpoint と report を保存する。
+
+budget audit は Dispatch 発行、session 開始、usage 観測、budget stop、recontract を追記のみで保存する。既存 record の削除・変更を workspace transaction が拒否する。`workflow terminate` は最新の未確認・未開始 Coder Dispatch だけを取り消し、Flow を hold する。新しい Task と契約の再承認で続行し、過去の authorization/evidence history は保持する。Task-wide nano-AIU ceiling は provider の請求残高を予測せず、session ごとの SDK credit ceiling とは別の単位である。
 
 ### v0.6.x との互換性
 
@@ -147,13 +149,11 @@ Dispatch、credits、時間の Task 単位の集計と、未起動 Dispatch の�
 
 ### v0.7.1 に送る項目
 
-- Task 単位の Dispatch・credits・時間の集計
-- 未起動 Dispatch の再契約
 - 一般的な DAG executor
 - 動的な lane plugin、retry scheduler、高度な cache、UI
 - lane 結果の gate report への埋め込み
 
-最後の項目は #110 と #112 の merge 後に接続する。それまでは両 report を別々に読む。
+最後の項目は v0.7.0 では未接続のまま、それぞれの report を別々に読む。
 
 ## Consequences
 
@@ -163,6 +163,20 @@ Dispatch、credits、時間の Task 単位の集計と、未起動 Dispatch の�
 - read-only lane はモデルを呼ばずに実行前の不整合を見つける。v0.7.0 では運用者が明示的に実行し、結果は gate の自動条件ではない。
 - v0.6.x の Task は移行なしで読める。workspace は graph 単位で bundle-required か verified-legacy のどちらかに分類されるため、運用者は workspace の分類を確認する。
 - gate report は判定の観測であり、承認・公開・完了の証拠にはならない。
+
+## Implementation trace
+
+Epic #107 implementation is 7/7 merged. This records implementation status, not release completion.
+
+| Issue | PR | Merge commit |
+| --- | --- | --- |
+| #108 | [#115](https://github.com/hiono/taxion/pull/115) | `6529b6d64cd35cd5b8c7cc0379fa5708f38940a8` |
+| #109 | [#116](https://github.com/hiono/taxion/pull/116) | `5a66460008ba1cd4f4034022548d591fcc9d8407` |
+| #110 | [#117](https://github.com/hiono/taxion/pull/117) | `7a334be1b856f79bbc9397809b363dbe5db9ddcb` |
+| #112 | [#118](https://github.com/hiono/taxion/pull/118) | `8e3194a095c131e328cf2b3bcb230d60976e83d1` |
+| #114 | [#119](https://github.com/hiono/taxion/pull/119) | `9452a94cf279d9f90f9be289b2556b20d62026bc` |
+| #111 | [#120](https://github.com/hiono/taxion/pull/120) | `cceee3c48fc0a6ea9fcb043399ee471c3708d578` |
+| #113 | [#121](https://github.com/hiono/taxion/pull/121) | `17b33d054ed95c8be44adc22579ce42f08d48e72` |
 
 ## Alternatives
 

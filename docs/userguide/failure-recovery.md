@@ -38,7 +38,9 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 
 ## Flow が停止している
 
-停止した Flow は `workflow show --id <flow-id>` で状態、停止 code、理由、Dispatch を確認する。`workflow recover` は runner の所有権を解放する操作であり、停止条件を解除して同じ作業を再実行する操作ではない。続行には新しい Dispatch と、必要なら新しい予算の承認が要る。
+停止した Flow は `workflow show --id <flow-id>` で状態、停止 code、理由、Dispatch を確認し、`workflow evaluate --id <flow-id>` で approved/consumed/remaining と usage の完全性を確認する。`BUDGET_STOP` は ceiling 到達または usage 不明を意味する。不明な nano-AIU remaining は0として扱い、既存 bundle で新しい session/Dispatch を再開しない。部分実行の checkpoint と audit は保持し、新しい Task 契約・予算が承認されてから続行する。`workflow terminate` は未確認・未開始の Coder Dispatch に限る。
+
+`workflow recover` は runner の所有権を解放する操作であり、停止条件を解除して同じ作業を再実行する操作ではない。続行には新しい Dispatch と、必要なら新しい予算の承認が要る。
 
 handoff が hold されている場合、hold は次の role を止めるだけで、実行中の role を止めない。release する前に、表示された instruction、draft、結果の対象を確認する。
 
