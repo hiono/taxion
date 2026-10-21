@@ -26,6 +26,13 @@
 | [利用者ガイド](user-guide.md) | 導入、計画の相談、承認、Coder・検証・独立レビュー、停止後の確認 |
 | [設定ガイド](configuration.md) | 設定ファイル、優先順位、環境変数、認証と承認の確認範囲 |
 | [CLI リファレンス](cli-reference.md) | コマンドと option、入力条件、実行上の制約 |
+| [承認 bundle](approval-bundle.md) | 7 dimension、proposalHash・recordHash、確認 token、保存順序 |
+| [三つの gate](gates.md) | contract・execution・publication の判定、JSON report、終了 code |
+| [Task の validate と authorize](task-validate-and-authorize.md) | manifest の検査、承認の記録、再利用と再承認 |
+| [drift と legacy の分類](drift-and-legacy.md) | 差分の dimension、authorization impact、verified-legacy の扱い |
+| [失敗からの復旧](failure-recovery.md) | entry code、blocked・fail、停止後の確認、rollback |
+| [v0.6 からの更新](upgrading-from-v0.6.md) | 保存形式、legacy 承認、移行と戻し方 |
+| [v0.7.0 の既知の制限](v0.7.0-known-limitations.md) | 対象外の機能、未確認事項、v0.7.1 候補 |
 | [実行の復旧と外部記録](execution-records.md) | 保存結果の照合、復旧、承認済み記録の公開、失敗の記録 |
 | [Memory](memory-model.md) | 保存範囲、承認、検索、export、ローカル移行 |
 | [リモート接続](remote-access.md) | SSH 転送、token、公開接続時の設定 |

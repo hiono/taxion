@@ -39,6 +39,7 @@ Foundation や初期の別の Milestone を M1 とした出典記録は確認で
 | [#25 初回設定 UX — 操作順に依存しない診断と設定](https://github.com/hiono/taxion/milestone/25) | UX 補正 | ADR-0039 の公開後補正。毎回の共有観測、対話再入力、候補・設定元・未確認の区別 | [#86](https://github.com/hiono/taxion/issues/86) | [user-guide.md](../userguide/user-guide.md), [configuration.md](../userguide/configuration.md), [cli-reference.md](../userguide/cli-reference.md) | 実装・公開証拠は #86。新 Release は含めない |
 | [#26 Release 0.3.1 — 英語表示と未確定項目の選択式入力](https://github.com/hiono/taxion/milestone/26) | UX 補正 | ADR-0039 の追補。設定済み項目の再選択を避け、未確定項目・適用確認を選択式にし、固定 CLI 文言を英語に統一する | [#89](https://github.com/hiono/taxion/issues/89)、関連 [#88](https://github.com/hiono/taxion/issues/88) | [user-guide.md](../userguide/user-guide.md), [configuration.md](../userguide/configuration.md), [cli-reference.md](../userguide/cli-reference.md) | 実装と正式 tag・Release の公開を区別する |
 | [#27 次版 — ゴール指向の実行方針と品質制約付き効率評価](https://github.com/hiono/taxion/milestone/27) | 実行方針・評価 | [ADR-0040](adr/0040-constrain-goal-oriented-efficiency-by-quality-evidence.md)。共通・担当別方針、文書整合 acceptance と保存品質証拠を接続し、質問数を直接減点しない | [#90](https://github.com/hiono/taxion/issues/90) | [roadmap.md](roadmap.md)、[Runtime 契約](runtime-contract.md) | 開発版に実装、実モデル比較は未実施。v0.3.1 の公開 #91 と分離し、追加モデル予算を推測しない |
+| [#32 0.7.0 承認フローとオーケストレーションの改善](https://github.com/hiono/taxion/milestone/32) | 承認・orchestration | [ADR-0043](adr/0043-approval-gates-and-read-only-lanes.md)。三つの gate、7 dimension の承認 bundle、drift 分類、実行入口での fail-closed、controller の読取り専用 lane を記録 | #107, #110, #112, #114 | [gates.md](../userguide/gates.md), [approval-bundle.md](../userguide/approval-bundle.md), [drift-and-legacy.md](../userguide/drift-and-legacy.md) | 開発版に実装。v0.7.0 の公開証拠と実モデル受入れは分けて記録する |
 
 #24 は最初の #82〜#84 の実装と検証を完了して一度 closed とした。この時点では v0.3.0 tag・Release の公開を含まない。
 その後、目的別案内の評価・文書補正・公開 tag 導入と Release を [#85](https://github.com/hiono/taxion/issues/85) に追加し、milestone を再開した。追加範囲の受入れと公開結果は #85 で追跡する。
@@ -105,6 +106,7 @@ ADR-0001〜0042 はすべて `Accepted` の判断を記録する。採択は選�
 | [0040](adr/0040-constrain-goal-oriented-efficiency-by-quality-evidence.md) | 最終成果を共通・担当別方針へ接続し、文書整合と同一 target の品質証拠を費用評価の前提にする | `runtime-contract.md`、`cli-reference.md`、`user-guide.md`。v0.4.0 の実装公開と #90 の行動・費用改善の実証を分ける |
 | [0041](adr/0041-archive-retired-tasks-without-erasing-history.md) | 停止済みの不要な試行を通常一覧・計画から外し、承認・実行履歴と参照を残す | #103、`task-graph.md`、`cli-reference.md`、`user-guide.md`。v0.5.0 の archive は物理削除や Git cleanup を行わない |
 | [0042](adr/0042-gitlab-endpoint-binding-separates-api-clone-and-ssh-identities.md) | GitLab の subpath と標準外の SSH port を独立した endpoint として照合し、legacy 設定と version 1 snapshot の動作を変えない | #105、`configuration.md`、`guardrails.md`。v0.6.0 で公開する |
+| [0043](adr/0043-approval-gates-and-read-only-lanes.md) | contract・execution・publication の三つの gate を、7 dimension の承認 bundle と実行入口の fail-closed で判定し、controller の読取り専用 lane をモデル session なしで実行する | #107、#110、#112、#114、`gates.md`、`approval-bundle.md`、`drift-and-legacy.md`。accounting・recontract と lane 結果の report 統合は v0.7.1 候補 |
 
 ADR-0026〜0028 は、初回利用と復旧の調査後に追加した。ローカルの実 Git・fake Runtime テストで、許可範囲、同一 tree の引継ぎ、successor の照合を確認した。停止専用操作では、旧 suspended Dispatch を終了し、追加モデル指示・利用量なしで部分 Git 証拠と両方の結果 receipt を保持した。
 
