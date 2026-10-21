@@ -911,3 +911,11 @@ instruction v1〜v3 の履歴は読み込み、現在の実行には v4 の新�
 Human の実際の認証・承認確認は後続 Issue で実装する。
 actor・decision・proof は caller が供給する作業記録である。
 実行環境の権限確認と repository・test record の証拠は、それぞれの管理元で確認する。
+
+## Task budget accounting
+
+Review Flow は承認時に Dispatch 数、Coder/Reviewer session 数、Task-wide nano-AIU、elapsed time、repair 数の ceiling を保存する。`workflow evaluate --id FLOW_ID` は各上限の approved・consumed・remaining と使用量の完全性を報告する。re-review 数も修正上限から導出する。
+
+Controller は新しい Dispatch/session の開始前と usage event の記録後に ceiling を検査する。usage が不明または不完全な場合は nano-AIU remaining を0として fail-closed にし、`BUDGET_STOP`、安全停止、held Flow、checkpoint を保存する。現在実装は provider account 残高を読み取ったり nano-AIU を金額へ換算したりしない。SDK の `--max-ai-credits` は session 別 soft ceiling であり Task-wide nano-AIU ceiling の代わりにはならない。
+
+Budget audit は Dispatch 発行、session 開始、usage 観測、stop、recontract を workspace record に追記する。既存 record の変更・削除は拒否する。`workflow terminate` が扱えるのは最新の未確認・未開始 Coder Dispatch だけである。既に実行された work を続ける場合は、保存された evidence を確認し、新しい Task 契約と予算を承認する。
