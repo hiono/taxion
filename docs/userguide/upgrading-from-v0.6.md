@@ -9,6 +9,10 @@ v0.7.0 は v0.6.x の ledger をそのまま読む。必須の移行 command は
 - contract・execution・publication の gate report を CLI から読める。
 - 実行前の read-only lane をモデル session なしで実行できる。
 - gate と lane の report は credential を伏せる。
+- Task 単位で Dispatch、session、usage、経過時間、repair/re-review を集計し、承認済み上限を表示する。
+- usage が不明・不完全な場合や上限到達時は `BUDGET_STOP` とし、新しい session・Dispatch を開始しない。
+- 未確認・未開始の Coder Dispatch に限り、Flow を hold して新しい Task 契約で再承認する最低限の再契約を行える。
+- approval、usage、budget stop、再契約の監査記録は追記のみで保存される。
 
 ## 変えないこと
 
@@ -44,4 +48,4 @@ rollback 後に v0.7.0 の gate report を再実行した場合、report の `ob
 
 ## 既知の制限
 
-v0.7.0 の範囲と制限は[v0.7.0 の既知の制限](v0.7.0-known-limitations.md)を参照する。Task 単位の集計と再契約は v0.7.1 で追加する。
+v0.7.0 の範囲と制限は[v0.7.0 の既知の制限](v0.7.0-known-limitations.md)を参照する。Task 単位の集計、hard budget stop、最低限の再契約は v0.7.0 に含まれる。高度な集計分析、provider 横断の billing 集計、利用量予測、一般化した再契約 policy、dashboard と履歴分析は対象外である。
