@@ -112,7 +112,8 @@ func RunReadOnlyLanes(ctx context.Context, request LaneRequest) (LaneReport, err
 			// The lane runs in its own goroutine so that a lane which ignores
 			// cancellation still cannot hold the execution gate open past its
 			// deadline. Lanes are bounded, read-only computations, so an
-			// abandoned lane finishes without side effects.
+			// abandoned lane finishes without side effects; at most the four
+			// fixed lanes of one run can be abandoned.
 			done := make(chan LaneResult, 1)
 			go func() {
 				if hook != nil {
@@ -196,11 +197,21 @@ func laneLatestDispatch(graph *core.TaskGraph, taskID string) (core.GraphDispatc
 // recognise as token-shaped.
 func laneDisplayRepository(repository string) string {
 	parsed, err := url.Parse(repository)
-	if err != nil || parsed.User == nil {
-		return repository
+	if err == nil {
+		if parsed.User == nil {
+			return repository
+		}
+		parsed.User = url.User("[REDACTED]")
+		return parsed.String()
 	}
-	parsed.User = url.User("[REDACTED]")
-	return parsed.String()
+	// A malformed URL still must not echo possible userinfo.
+	if at := strings.Index(repository, "@"); at > 0 {
+		if scheme := strings.Index(repository, "://"); scheme >= 0 && scheme+3 < at {
+			return repository[:scheme+3] + "[REDACTED]@" + repository[at+1:]
+		}
+		return "[REDACTED]@" + repository[at+1:]
+	}
+	return repository
 }
 
 func laneRepositoryContainsCredentials(repository string) bool {

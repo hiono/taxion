@@ -285,6 +285,19 @@ func TestReadOnlyLanesRedactCredentials(t *testing.T) {
 		t.Fatalf("lane report leaked URL userinfo: %s", encoded)
 	}
 
+	graph.Dispatches[0].Repository = "https://user:plain-password@example.com/%zz/repo.git"
+	report, err = RunReadOnlyLanes(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err = core.CanonicalJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "plain-password") {
+		t.Fatalf("lane report leaked userinfo from a malformed URL: %s", encoded)
+	}
+
 	token := "ghp_" + strings.Repeat("b", 24)
 	sanitized := sanitizeLaneResult(LaneResult{
 		Lane: LaneContractConsistency, Verdict: LaneVerdictFail,
