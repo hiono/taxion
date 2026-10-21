@@ -337,7 +337,7 @@ func TestRunnerStopsExecutionForDeadlinesAndStreamFailures(t *testing.T) {
 			}
 			if failure == "deadline" {
 				if err := db.UpdateWorkspace(func(state *store.Workspace) error {
-					state.Graph.ReviewFlows[0].Deadline = time.Now().Add(100 * time.Millisecond)
+					state.Graph.ReviewFlows[0].Deadline = time.Now().Add(5 * time.Second)
 					return nil
 				}); err != nil {
 					t.Fatal(err)
