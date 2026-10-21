@@ -146,23 +146,107 @@ func deepCopyGraph(t *testing.T, graph core.TaskGraph) core.TaskGraph {
 func TestReadOnlyLanesRespectPerLaneTimeout(t *testing.T) {
 	_, request := laneTestGraph(t)
 	request.Timeout = 20 * time.Millisecond
+	release := make(chan struct{})
+	defer close(release)
 	laneStartHook = func(ctx context.Context, name LaneName) {
-		if name == LaneHandoffPreparation {
-			<-ctx.Done()
+		if name != LaneHandoffPreparation {
+			return
+		}
+		select {
+		case <-release:
+		case <-time.After(2 * time.Second):
 		}
 	}
 	defer func() { laneStartHook = nil }()
+	started := time.Now()
 	report, err := RunReadOnlyLanes(context.Background(), request)
+	elapsed := time.Since(started)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("a lane that ignores cancellation held the run for %s", elapsed)
 	}
 	if report.ExecutionGateOpen {
 		t.Fatal("a timed-out lane must close the execution gate")
 	}
 	for _, lane := range report.Lanes {
-		if lane.Lane == LaneHandoffPreparation && lane.Verdict != LaneVerdictFail {
+		if lane.Lane == LaneHandoffPreparation &&
+			(lane.Verdict != LaneVerdictFail || !strings.Contains(lane.Summary, "timeout")) {
 			t.Fatalf("timed-out lane reported %+v", lane)
 		}
+	}
+}
+
+func TestReadOnlyLanesReportPerLaneFailures(t *testing.T) {
+	cases := []struct {
+		name string
+		edit func(t *testing.T, graph *core.TaskGraph, request *LaneRequest)
+		lane LaneName
+	}{
+		{
+			name: "repository mismatch",
+			edit: func(t *testing.T, graph *core.TaskGraph, request *LaneRequest) {
+				graph.Dispatches[0].Repository = "https://example.com/org/other.git"
+			},
+			lane: LaneRepositoryIdentity,
+		},
+		{
+			name: "worktree outside repository root",
+			edit: func(t *testing.T, graph *core.TaskGraph, request *LaneRequest) {
+				outside := filepath.Join(t.TempDir(), "worktree")
+				if err := os.MkdirAll(outside, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				graph.Tasks[0].Worktree = outside
+				graph.Dispatches[0].Instruction.Worktree = outside
+			},
+			lane: LaneBaselineWorktree,
+		},
+		{
+			name: "contract drift",
+			edit: func(t *testing.T, graph *core.TaskGraph, request *LaneRequest) {
+				graph.Dispatches[0].Instruction.Acceptance = []string{"different acceptance"}
+			},
+			lane: LaneContractConsistency,
+		},
+		{
+			name: "inactive latest dispatch",
+			edit: func(t *testing.T, graph *core.TaskGraph, request *LaneRequest) {
+				graph.Dispatches[0].Status = core.DispatchSucceeded
+			},
+			lane: LaneHandoffPreparation,
+		},
+		{
+			name: "unknown flow dispatch",
+			edit: func(t *testing.T, graph *core.TaskGraph, request *LaneRequest) {
+				graph.ReviewFlows[0].DispatchIDs = []string{"missing-dispatch"}
+			},
+			lane: LaneHandoffPreparation,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			graph, request := laneTestGraph(t)
+			testCase.edit(t, graph, &request)
+			report, err := RunReadOnlyLanes(context.Background(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.ExecutionGateOpen || report.Verdict != LaneVerdictFail {
+				t.Fatalf("failing lane left the gate open: %+v", report)
+			}
+			for _, lane := range report.Lanes {
+				if lane.Lane != testCase.lane {
+					continue
+				}
+				if lane.Verdict != LaneVerdictFail || len(lane.Diagnostics) == 0 {
+					t.Fatalf("%s did not report the failure: %+v", testCase.lane, lane)
+				}
+				return
+			}
+			t.Fatalf("report does not contain lane %s", testCase.lane)
+		})
 	}
 }
 
@@ -185,6 +269,20 @@ func TestReadOnlyLanesRedactCredentials(t *testing.T) {
 		if strings.Contains(string(encoded), leaked) {
 			t.Fatalf("lane report leaked a credential: %s", encoded)
 		}
+	}
+
+	graph.Tasks[0].Repo = "https://example.com/org/repo.git"
+	graph.Dispatches[0].Repository = "https://user:plain-password@example.com/org/other.git"
+	report, err = RunReadOnlyLanes(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err = core.CanonicalJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "plain-password") {
+		t.Fatalf("lane report leaked URL userinfo: %s", encoded)
 	}
 
 	token := "ghp_" + strings.Repeat("b", 24)

@@ -89,6 +89,7 @@ func RunReadOnlyLanes(ctx context.Context, request LaneRequest) (LaneReport, err
 	if timeout <= 0 {
 		timeout = DefaultLaneTimeout
 	}
+	hook := laneStartHook
 	results := make([]LaneResult, len(ReadOnlyLaneNames))
 	slots := make(chan struct{}, MaxLaneConcurrency)
 	var wait sync.WaitGroup
@@ -108,16 +109,25 @@ func RunReadOnlyLanes(ctx context.Context, request LaneRequest) (LaneReport, err
 			defer func() { <-slots }()
 			laneCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			if laneStartHook != nil {
-				laneStartHook(laneCtx, name)
-			}
-			result := runReadOnlyLane(laneCtx, request, name)
-			if laneCtx.Err() != nil && result.Verdict == LaneVerdictPass {
-				result = LaneResult{
-					Lane: name, Verdict: LaneVerdictFail,
-					Summary:     "lane did not finish within the per-lane timeout",
-					Diagnostics: []string{laneCtx.Err().Error()},
+			// The lane runs in its own goroutine so that a lane which ignores
+			// cancellation still cannot hold the execution gate open past its
+			// deadline. Lanes are bounded, read-only computations, so an
+			// abandoned lane finishes without side effects.
+			done := make(chan LaneResult, 1)
+			go func() {
+				if hook != nil {
+					hook(laneCtx, name)
 				}
+				done <- runReadOnlyLane(laneCtx, request, name)
+			}()
+			var result LaneResult
+			select {
+			case result = <-done:
+				if laneCtx.Err() != nil && result.Verdict == LaneVerdictPass {
+					result = laneFailure(name, laneCtx)
+				}
+			case <-laneCtx.Done():
+				result = laneFailure(name, laneCtx)
 			}
 			results[index] = sanitizeLaneResult(result)
 		}(index, name)
@@ -134,6 +144,17 @@ func RunReadOnlyLanes(ctx context.Context, request LaneRequest) (LaneReport, err
 		}
 	}
 	return report, nil
+}
+
+func laneFailure(name LaneName, laneCtx context.Context) LaneResult {
+	summary := "lane did not finish within the per-lane timeout"
+	if !errors.Is(laneCtx.Err(), context.DeadlineExceeded) {
+		summary = "lane was cancelled before it finished"
+	}
+	return LaneResult{
+		Lane: name, Verdict: LaneVerdictFail, Summary: summary,
+		Diagnostics: []string{laneCtx.Err().Error()},
+	}
 }
 
 func runReadOnlyLane(ctx context.Context, request LaneRequest, name LaneName) LaneResult {
@@ -170,6 +191,18 @@ func laneLatestDispatch(graph *core.TaskGraph, taskID string) (core.GraphDispatc
 	return dispatches[len(dispatches)-1], true
 }
 
+// laneDisplayRepository keeps repository diagnostics useful without echoing
+// URL userinfo, which may contain a password that core.Redact does not
+// recognise as token-shaped.
+func laneDisplayRepository(repository string) string {
+	parsed, err := url.Parse(repository)
+	if err != nil || parsed.User == nil {
+		return repository
+	}
+	parsed.User = url.User("[REDACTED]")
+	return parsed.String()
+}
+
 func laneRepositoryContainsCredentials(repository string) bool {
 	parsed, err := url.Parse(repository)
 	if err != nil {
@@ -196,11 +229,11 @@ func laneRepositoryIdentity(task core.GraphTask, request LaneRequest) LaneResult
 	for _, dispatch := range laneTaskDispatches(request.Graph, task.ID) {
 		if dispatch.Repository != task.Repo {
 			diagnostics = append(diagnostics,
-				fmt.Sprintf("Dispatch %s repository %q differs from Task repository %q", dispatch.ID, dispatch.Repository, task.Repo))
+				fmt.Sprintf("Dispatch %s repository %q differs from Task repository %q", dispatch.ID, laneDisplayRepository(dispatch.Repository), laneDisplayRepository(task.Repo)))
 		}
 		if dispatch.Instruction.Repository != task.Repo {
 			diagnostics = append(diagnostics,
-				fmt.Sprintf("Dispatch %s instruction repository %q differs from Task repository %q", dispatch.ID, dispatch.Instruction.Repository, task.Repo))
+				fmt.Sprintf("Dispatch %s instruction repository %q differs from Task repository %q", dispatch.ID, laneDisplayRepository(dispatch.Instruction.Repository), laneDisplayRepository(task.Repo)))
 		}
 	}
 	if len(diagnostics) != 0 {
