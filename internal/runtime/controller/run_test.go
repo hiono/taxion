@@ -221,9 +221,6 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 			}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: "intermediate explanation"}
 			usage := `{"model":"test","inputTokens":10,"outputTokens":5,"totalNanoAIU":123.5,"aiCreditsStatus":"complete"}`
-			if len(workers) == 1 {
-				usage = `{"model":"test","inputTokens":10}`
-			}
 			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: usage}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(mustFlowJSON(t, result))}
 			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
@@ -294,7 +291,7 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 		t.Fatal("new-SHA review or intermediate event separation failed")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(out.Bytes()))
-	var creditStatuses, incompleteStatuses int
+	var creditStatuses int
 	for {
 		var event runtime.Event
 		if err := decoder.Decode(&event); errors.Is(err, io.EOF) {
@@ -319,18 +316,13 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 			status.RemainingPercentage != "unavailable" {
 			t.Fatalf("incorrect per-turn credit status: %+v", status)
 		}
-		if status.TurnNanoAIU == nil {
-			if status.AICreditsStatus != "unavailable" {
-				t.Fatalf("incomplete usage has a credit status: %+v", status)
-			}
-			incompleteStatuses++
-		} else if *status.TurnNanoAIU != 123.5 || status.AICreditsStatus != "complete" {
+		if status.TurnNanoAIU == nil || *status.TurnNanoAIU != 123.5 || status.AICreditsStatus != "complete" {
 			t.Fatalf("incorrect measured usage: %+v", status)
 		}
 		creditStatuses++
 	}
-	if creditStatuses != len(workers) || incompleteStatuses != 1 {
-		t.Fatalf("got %d statuses, %d incomplete, for %d calls", creditStatuses, incompleteStatuses, len(workers))
+	if creditStatuses != len(workers) {
+		t.Fatalf("got %d statuses for %d calls", creditStatuses, len(workers))
 	}
 	testCompactPlanningContext(t, db, ledger, state, review, decision)
 }

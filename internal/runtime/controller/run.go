@@ -144,6 +144,23 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 		flow = stored
 		return nil
 	})
+	if flow.StopCode == "BUDGET_STOP" {
+		if state, loadErr := db.LoadWorkspace(); loadErr == nil {
+			if report, reportErr := EvaluateTaskBudget(state.Graph, flow.ID, time.Now().UTC()); reportErr == nil {
+				if payload, marshalErr := json.Marshal(report); marshalErr == nil {
+					saveErr = errors.Join(saveErr, json.NewEncoder(out).Encode(runtime.Event{
+						Type: "BUDGET_STOP", Payload: string(payload),
+					}))
+				} else {
+					saveErr = errors.Join(saveErr, marshalErr)
+				}
+			} else {
+				saveErr = errors.Join(saveErr, reportErr)
+			}
+		} else {
+			saveErr = errors.Join(saveErr, loadErr)
+		}
+	}
 	return flow, errors.Join(err, saveErr)
 }
 

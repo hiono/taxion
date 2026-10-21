@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"math"
@@ -16,6 +17,7 @@ import (
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
+	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
 	"github.com/hiono/taxion/internal/tools"
 )
@@ -171,6 +173,7 @@ func reviewFlowFixtureWithRepository(t *testing.T, repo, outputMode string, guid
 	return db, filepath.Join(dir, "ledger.json"), ReviewFlowRequest{
 		ID: "flow", TaskID: task.ID, Repository: task.Repo, ReviewRoot: filepath.Join(dir, "reviews"),
 		MaxRepairs: &repairs, TimeoutSeconds: 600,
+		MaxNanoAIU:    1e12,
 		Authorization: core.TaskDecision{ID: "flow-authorization", Source: "human:1", Text: "authorize one repair and independent re-review within saved ceilings"},
 	}
 }
@@ -231,7 +234,11 @@ func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, ve
 	}
 	if usage {
 		input, output := int64(10), int64(5)
-		if err := control.RecordUsage(dispatch.ID, core.DispatchUsage{Model: "test-model", InputTokens: &input, OutputTokens: &output}); err != nil {
+		nanoAIU, status := 1.0, "complete"
+		if err := control.RecordUsage(dispatch.ID, core.DispatchUsage{
+			Model: "test-model", InputTokens: &input, OutputTokens: &output,
+			TotalNanoAIU: &nanoAIU, AICreditsStatus: &status,
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -585,10 +592,43 @@ func TestReviewFlowDoesNotStopAtLegacyTokenThresholdOrUnknownUsage(t *testing.T)
 			}
 			executeFlowDispatch(t, db, flow, "", test.recordUsage)
 			flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
-			if err != nil || flow.Status != "RUNNING" || len(flow.DispatchIDs) != 2 {
-				t.Fatalf("missing or exceeded usage stopped the approved goal: %+v, %v", flow, err)
+			if test.name == "unknown-usage" {
+				var budgetErr *budgetStopError
+				if !errors.As(err, &budgetErr) || flow.Status != "STOPPED" ||
+					flow.StopCode != "BUDGET_STOP" || len(flow.DispatchIDs) != 1 {
+					t.Fatalf("unknown nano-AIU did not fail closed: %+v, %v", flow, err)
+				}
+			} else if err != nil || flow.Status != "RUNNING" || len(flow.DispatchIDs) != 2 {
+				t.Fatalf("legacy token threshold stopped the approved goal: %+v, %v", flow, err)
 			}
 		})
+	}
+}
+
+func TestReviewFlowStopsActiveSessionWhenUsageReachesCeiling(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, _ := state.Graph.GraphDispatch(flow.DispatchIDs[0])
+	events := make(chan runtime.Event, 1)
+	events <- runtime.Event{
+		Type: runtime.EventUsage,
+		Payload: `{"model":"test","inputTokens":10,"outputTokens":5,` +
+			`"totalNanoAIU":1000000000000,"aiCreditsStatus":"complete"}`,
+	}
+	worker := &fakeRuntime{
+		role: dispatch.Recipient, hash: "budget-runtime", worktree: dispatch.Instruction.Worktree, events: events,
+	}
+	result, err := RunReviewFlow(t.Context(), db, ledger, flow.ID,
+		func(core.GraphDispatch) (runtime.Identity, error) { return worker, nil }, &bytes.Buffer{})
+	if err == nil || result.Status != "STOPPED" || result.StopCode != "BUDGET_STOP" || worker.stops != 1 {
+		t.Fatalf("active session exceeded approved budget: flow=%+v stops=%d err=%v", result, worker.stops, err)
 	}
 }
 

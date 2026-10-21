@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -167,7 +168,7 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		}
 		if request.ReplacesFlow != "" {
 			flow, ok := state.Graph.ReviewFlow(request.ReplacesFlow)
-			if !ok || request.Target == nil || flow.RunnerID != "" || flow.Status == "COMPLETED" ||
+			if !ok || flow.RunnerID != "" || flow.Status == "COMPLETED" ||
 				!flow.HandoffHeld() || task.Supersedes != flow.TaskID || task.CreatedFrom != "flow:"+flow.ID {
 				return fmt.Errorf("taxion: revised contract requires a held predecessor, no runner, exact target and explicit supersedes/source relation")
 			}
@@ -178,16 +179,32 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 				}
 			}
 			last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
-			target, err := core.ObserveFeedbackTarget(last)
-			if err != nil || target != *request.Target {
-				return core.ErrFeedbackStale
+			unstarted := last.Recipient == "CODER" && last.Status == core.DispatchCancelled &&
+				!last.ExecutionStarted && last.RuntimeSessionID == "" && last.Result != nil &&
+				flow.StopCode == "RECONTRACT" &&
+				slices.Contains(last.Result.Evidence, "not-started:"+last.ID)
+			if unstarted {
+				if request.Target != nil || task.BaselineSHA != last.Instruction.BaselineSHA {
+					return fmt.Errorf("taxion: unstarted Dispatch re-contract must retain its baseline and omit a feedback target")
+				}
+			} else {
+				if request.Target == nil {
+					return fmt.Errorf("taxion: executed predecessor re-contract requires an observed target")
+				}
+				target, err := core.ObserveFeedbackTarget(last)
+				if err != nil || target != *request.Target {
+					return core.ErrFeedbackStale
+				}
 			}
 			if last.Recipient == "CODER" && last.Status == core.DispatchCancelled {
-				if last.Result == nil || last.Result.PartialGitEvidence == nil {
+				if unstarted {
+					// An unstarted Dispatch has no worktree changes to transfer.
+				} else if last.Result == nil || last.Result.PartialGitEvidence == nil {
 					return fmt.Errorf("taxion: cancelled Coder work requires verified partial Git evidence before successor approval")
-				}
-				if err := gitproof.VerifyPartialSuccessor(state.Records.RestoredDispatch(last), task); err != nil {
-					return fmt.Errorf("taxion: successor does not preserve the verified partial work: %w", err)
+				} else {
+					if err := gitproof.VerifyPartialSuccessor(state.Records.RestoredDispatch(last), task); err != nil {
+						return fmt.Errorf("taxion: successor does not preserve the verified partial work: %w", err)
+					}
 				}
 			} else if flow.Status == "STOPPED" &&
 				last.Recipient == "CODER" && last.Status == core.DispatchSucceeded {

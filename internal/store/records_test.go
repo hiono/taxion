@@ -1,6 +1,8 @@
 package store
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +34,7 @@ func TestRecordsShareInitializationAndUpdateTransaction(t *testing.T) {
 	if _, err := db.db.Exec(`CREATE TRIGGER reject_records BEFORE INSERT ON workspace_records BEGIN SELECT RAISE(ABORT,'fixture'); END`); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := db.InitializeWorkspace(Workspace{}); err == nil {
 		t.Fatal("records save failure ignored")
 	}
@@ -61,5 +64,39 @@ func TestRecordsShareInitializationAndUpdateTransaction(t *testing.T) {
 	state, err := db.LoadWorkspace()
 	if err != nil || state.Records.Updates[0].Status != "PENDING" {
 		t.Fatal("invalid update persisted", err)
+	}
+}
+
+func TestBudgetAuditRecordsAreAppendOnly(t *testing.T) {
+	db := openTest(t)
+	if _, err := db.InitializeWorkspace(Workspace{}); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"remaining":10}`
+	record := BudgetAudit{
+		FlowID: "flow", TaskID: "task", Sequence: 1, Kind: "USAGE_OBSERVED",
+		Payload: payload, Hash: fmt.Sprintf("%x", sha256.Sum256([]byte(payload))), At: time.Now().UTC(),
+	}
+	if err := db.UpdateWorkspace(func(state *Workspace) error {
+		state.Records.Budgets = append(state.Records.Budgets, record)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(*Workspace){
+		func(state *Workspace) { state.Records.Budgets = nil },
+		func(state *Workspace) { state.Records.Budgets[0].Payload = `{"remaining":0}` },
+		func(state *Workspace) { state.Records.Budgets[0].Hash = strings.Repeat("a", 64) },
+	} {
+		if err := db.UpdateWorkspace(func(state *Workspace) error {
+			mutate(state)
+			return nil
+		}); err == nil {
+			t.Fatal("budget audit mutation accepted")
+		}
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil || len(state.Records.Budgets) != 1 || state.Records.Budgets[0] != record {
+		t.Fatalf("budget audit history changed: %+v, %v", state.Records.Budgets, err)
 	}
 }

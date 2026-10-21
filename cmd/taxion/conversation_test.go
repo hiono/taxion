@@ -196,7 +196,7 @@ func TestWatchedConversationHoldsBeforeInputAndNeverApprovesOnEOF(t *testing.T) 
 			repairs := 1
 			flow, err := controller.StartReviewFlow(db, storePath, controller.ReviewFlowRequest{
 				ID: "watch", TaskID: task.ID, Repository: task.Repo, ReviewRoot: filepath.Join(dir, "reviews"),
-				MaxRepairs: &repairs, TimeoutSeconds: 60,
+				MaxRepairs: &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
 				Authorization: core.TaskDecision{ID: "flow-approval", Source: "human:1", Text: "explicit bounded approval"},
 			})
 			if err != nil {

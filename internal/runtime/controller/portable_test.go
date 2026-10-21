@@ -262,7 +262,7 @@ func TestPortableStoppedCoderContinuesWithoutOriginalStoresOrGit(t *testing.T) {
 	successor, err := StartReviewFlow(restored, filepath.Join(destination, ".taxion", "ledger.json"), ReviewFlowRequest{
 		ID: "restored-review", TaskID: approved.ID, Repository: approved.Repo,
 		ReviewRoot: filepath.Join(destination, "reviews"), ContinueFromDispatchID: coder.ID,
-		MaxRepairs: &repairs, TimeoutSeconds: 60,
+		MaxRepairs: &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
 		Authorization: core.TaskDecision{ID: "new-budget", Source: "human:move", Text: "Approve review of saved result"},
 	})
 	if err != nil {
