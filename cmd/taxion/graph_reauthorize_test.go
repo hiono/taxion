@@ -93,6 +93,7 @@ func testReadyTaskReauthorization(t *testing.T, withBundle bool, reference strin
 		task.Decisions[0].Text = `{"taskId":"legacy-ready"}`
 	case "absent":
 		task.Decisions = task.Decisions[1:]
+		task.AuthorizationID = decisionID
 	case "conflicting":
 		task.Decisions = append(task.Decisions, core.TaskDecision{
 			ID: "intake-confirmation:other-task", Source: "human:legacy",
