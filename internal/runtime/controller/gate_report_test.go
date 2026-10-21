@@ -61,7 +61,7 @@ func TestContractGateClassifiesApprovalBasis(t *testing.T) {
 		t.Fatal(err)
 	}
 	graph.Approvals = []core.ApprovalBundle{bundle}
-	report, err = ContractGateReport(graph, task.ID)
+	report, err = ContractGateReport(graph, task.ID, configuration)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestContractGateClassifiesApprovalBasis(t *testing.T) {
 	drifted := graph
 	drifted.Tasks = []core.GraphTask{task}
 	drifted.Tasks[0].BaselineSHA = strings.Repeat("b", 40)
-	report, err = ContractGateReport(drifted, task.ID)
+	report, err = ContractGateReport(drifted, task.ID, configuration)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,12 +85,85 @@ func TestContractGateClassifiesApprovalBasis(t *testing.T) {
 	invalid := graph
 	invalid.Approvals = []core.ApprovalBundle{bundle}
 	invalid.Approvals[0].BundleVersion = core.ApprovalBundleVersion + 1
-	report, err = ContractGateReport(invalid, task.ID)
+	report, err = ContractGateReport(invalid, task.ID, configuration)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if report.Verdict != GateVerdictFail || GateExitCode(report.Verdict) != 1 {
 		t.Fatalf("incompatible bundle version did not fail closed: %+v", report)
+	}
+}
+
+func TestContractGateFailsClosedWithoutCurrentConfiguration(t *testing.T) {
+	task := gateTestTask()
+	configuration := gateTestConfiguration(t)
+	bundle, err := core.ComposeApprovalBundle("approval-1", task, task, configuration,
+		"human:1", "issue:#112", "approve", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := core.TaskGraph{
+		Version: 1, Tasks: []core.GraphTask{task},
+		ApprovalSchemaVersion: core.CurrentApprovalSchemaVersion,
+		Approvals:             []core.ApprovalBundle{bundle},
+	}
+	report, err := ContractGateReport(graph, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Verdict != GateVerdictBlocked {
+		t.Fatalf("bundle without current configuration must not pass: %+v", report)
+	}
+}
+
+func TestContractGateStatusAllowlist(t *testing.T) {
+	for _, test := range []struct {
+		status core.TaskStatus
+		want   string
+	}{
+		{status: core.Ready, want: GateVerdictPass},
+		{status: core.Active, want: GateVerdictBlocked},
+		{status: core.Approved, want: GateVerdictBlocked},
+		{status: core.Superseded, want: GateVerdictFail},
+		{status: core.Cancelled, want: GateVerdictFail},
+	} {
+		task := gateTestTask()
+		task.Status = test.status
+		report, err := ContractGateReport(core.TaskGraph{Version: 1, Tasks: []core.GraphTask{task}}, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report.Verdict != test.want {
+			t.Fatalf("status %s: verdict %s, want %s", test.status, report.Verdict, test.want)
+		}
+	}
+}
+
+func TestGateReportJSONAndRedaction(t *testing.T) {
+	task := gateTestTask()
+	task.Status = core.Blocked
+	report, err := ContractGateReport(core.TaskGraph{Version: 1, Tasks: []core.GraphTask{task}}, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	for _, key := range []string{`"version":1`, `"gate":"contract"`, `"verdict":"blocked"`, `"stateChanged":false`, `"blockingConditions":[{`} {
+		if !strings.Contains(text, key) {
+			t.Fatalf("gate report JSON lacks %s: %s", key, text)
+		}
+	}
+	redacted := newGateReport(GateContract, task.ID)
+	redacted.block("test", "token "+"ghp_"+strings.Repeat("c", 24))
+	encoded, err = json.Marshal(redacted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "ghp_"+strings.Repeat("c", 24)) {
+		t.Fatalf("gate report leaked a credential: %s", encoded)
 	}
 }
 
