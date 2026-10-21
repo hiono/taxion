@@ -47,6 +47,24 @@ taxion task authorize --manifest task.json --confirm <confirmationToken>
 
 token が一致しない場合、Task は保存されない。`--confirm` は token の一致だけを確認する。人間の認証を行った証拠ではない。
 
+## READY Task の設定を再承認する
+
+`taxion task reauthorize` は既存の READY Task に限り、effective configuration の変更を別の経路で承認する。Task 契約、state、proposal hash、既存 decision は変更しない。`task authorize --manifest` の tracking 経路とは分離されている。
+
+```bash
+taxion task reauthorize --task TASK_ID
+```
+
+preview は Task ID、state、proposal hash、現在の record hash、bundle と canonicalization の版、7次元の digest、credential を含まない drift path、confirmation token を表示する。設定値や credential は出力しない。確認前に workspace へ書き込まない。
+
+表示された basis を確認した後、token をそのまま渡す。
+
+```bash
+taxion task reauthorize --task TASK_ID --confirm <confirmationToken>
+```
+
+確認時には Task と effective configuration を再読込する。preview 後にどちらかが変わっていれば拒否し、再 preview を求める。確認が通ると、既存 decision を保持したまま一意の設定承認 decision と ApprovalBundle を追記する。proposal hash は保持され、Task は READY のまま残る。保存後に readback、bundle 検証、Task-bound configuration check を行う。同じ bundle の再送では重複記録しない。
+
 ## 成功時の出力
 
 承認が成立すると、次の値が出力される。

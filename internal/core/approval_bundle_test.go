@@ -200,6 +200,37 @@ func TestApprovalBundleRejectsTamperedBundle(t *testing.T) {
 	}
 }
 
+func TestReauthorizationCanonicalizationKeepsConfigurationDecisionsOutsidePermissions(t *testing.T) {
+	task := validDraftTask("contract")
+	configuration := approvalConfiguration(t, explicitSelection)
+	prior, err := BundleDimensionsForVersion(task, configuration, ReauthorizationCanonicalizationVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.Decisions = []TaskDecision{{
+		ID:     "approval@task:contract@reauth:abc",
+		Source: "human:task-reauthorization",
+		Text:   `{"kind":"taxion.execution-config.v1","taskId":"contract","decisionId":"approval@task:contract@reauth:abc","authorizationReference":"abc","approvalRef":"approval","reason":"confirmed","allowed":[{}]}`,
+	}}
+	reauthorized, err := BundleDimensionsForVersion(task, configuration, ReauthorizationCanonicalizationVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prior.Permission != reauthorized.Permission {
+		t.Fatal("append-only configuration authorization changed the Task permission digest")
+	}
+	legacy, err := BundleDimensionsForVersion(task, configuration, ApprovalCanonicalizationVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.Permission == prior.Permission {
+		t.Fatal("version 1 canonicalization no longer includes decision records")
+	}
+	if _, err := BundleDimensionsForVersion(task, configuration, 99); err == nil {
+		t.Fatal("unknown canonicalization version was accepted")
+	}
+}
+
 func TestApprovalBundleRejectsUnknownVersions(t *testing.T) {
 	task := validDraftTask("contract")
 	configuration := approvalConfiguration(t, explicitSelection)
@@ -209,7 +240,7 @@ func TestApprovalBundleRejectsUnknownVersions(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*ApprovalBundle){
 		"bundle":           func(b *ApprovalBundle) { b.BundleVersion = 2 },
-		"canonicalization": func(b *ApprovalBundle) { b.CanonicalizationVersion = 2 },
+		"canonicalization": func(b *ApprovalBundle) { b.CanonicalizationVersion = 99 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := bundle

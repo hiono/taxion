@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -240,6 +242,373 @@ func taskAuthorizeCmd(file, confirm string) error {
 		report.Stages = append(report.Stages, stageReport)
 	}
 	return printJSON(report)
+}
+
+type taskReauthorizationPreview struct {
+	Status                  string                  `json:"status"`
+	TaskID                  string                  `json:"taskId"`
+	State                   core.TaskStatus         `json:"state"`
+	ProposalHash            string                  `json:"proposalHash"`
+	RecordHash              string                  `json:"recordHash"`
+	AuthorizedRecordHash    string                  `json:"authorizedRecordHash,omitempty"`
+	BundleVersion           int                     `json:"bundleVersion"`
+	CanonicalizationVersion int                     `json:"canonicalizationVersion"`
+	Dimensions              core.ApprovalDimensions `json:"dimensions"`
+	RedactedDriftPaths      []string                `json:"redactedDriftPaths"`
+	ConfirmationToken       string                  `json:"confirmationToken"`
+
+	configuration     core.ApprovalConfiguration `json:"-"`
+	decision          core.TaskDecision          `json:"-"`
+	approvalID        string                     `json:"-"`
+	approvalCount     int                        `json:"-"`
+	priorApprovalID   string                     `json:"-"`
+	priorApprovalHash string                     `json:"-"`
+	priorDecisions    []core.TaskDecision        `json:"-"`
+	priorTask         core.GraphTask             `json:"-"`
+}
+
+func taskReauthorizeCmd(args []string) error {
+	fs := flag.NewFlagSet("task reauthorize", flag.ContinueOnError)
+	taskID := fs.String("task", "", "existing READY Task ID")
+	confirm := fs.String("confirm", "", "full-basis confirmation token from the preview")
+	if err := fs.Parse(args); err != nil {
+		return authorizeError(err)
+	}
+	if fs.NArg() != 0 || *taskID == "" {
+		return authorizeError(fmt.Errorf("usage: taxion task reauthorize --task TASK_ID [--confirm TOKEN]"))
+	}
+	graph, _, initialized, err := loadGraphReadOnly()
+	if err != nil {
+		return authorizeError(err)
+	}
+	if !initialized {
+		return authorizeError(fmt.Errorf("Task Graph is not initialized"))
+	}
+	if err := graph.Validate(); err != nil {
+		return authorizeError(err)
+	}
+	task, exists := graph.GraphTask(*taskID)
+	if !exists {
+		return authorizeError(fmt.Errorf("Task %s was not found", *taskID))
+	}
+	if task.Status != core.Ready {
+		return authorizeError(fmt.Errorf("requires READY Task; found %s", task.Status))
+	}
+	configuration, err := approvalConfiguration()
+	if err != nil {
+		return authorizeError(err)
+	}
+	if bundle, ok := graph.MatchingApproval(task.ID, task, configuration); ok && taskHasConfigurationApproval(task, configuration) {
+		return printJSON(taskReauthorizationReuseReport(task, bundle))
+	}
+	preview, err := buildTaskReauthorizationPreview(graph, task, configuration)
+	if err != nil {
+		return authorizeError(err)
+	}
+	if *confirm == "" {
+		return printJSON(preview)
+	}
+	if subtle.ConstantTimeCompare([]byte(*confirm), []byte(preview.ConfirmationToken)) != 1 {
+		return authorizeError(fmt.Errorf("--confirm does not match the approval basis; rerun without --confirm to review it"))
+	}
+
+	if err := updateWorkspace(func(current *store.Workspace) error {
+		if !current.HasGraph || current.Graph.ApprovalSchemaVersion < 0 ||
+			current.Graph.ApprovalSchemaVersion > core.CurrentApprovalSchemaVersion {
+			return fmt.Errorf("Task Graph approval schema is unknown")
+		}
+		currentTask, ok := current.Graph.GraphTask(preview.TaskID)
+		if !ok || currentTask.Status != core.Ready {
+			return fmt.Errorf("Task state changed after reauthorization preview")
+		}
+		currentHash, err := core.CanonicalSHA256(currentTask)
+		if err != nil {
+			return err
+		}
+		if currentHash != preview.RecordHash {
+			return fmt.Errorf("Task changed after reauthorization preview")
+		}
+		if len(current.Graph.Approvals) != preview.approvalCount {
+			return fmt.Errorf("approval history changed after reauthorization preview")
+		}
+		if preview.approvalCount > 0 {
+			last := current.Graph.Approvals[preview.approvalCount-1]
+			if last.ID != preview.priorApprovalID || last.BundleHash != preview.priorApprovalHash {
+				return fmt.Errorf("approval history changed after reauthorization preview")
+			}
+		}
+		resolved, err := resolveConfiguration()
+		if err != nil {
+			return err
+		}
+		freshConfiguration, err := approvalConfigurationFor(resolved.Config, resolved.Sources)
+		if err != nil {
+			return err
+		}
+		if freshConfiguration.Digest != preview.configuration.Digest ||
+			!reflect.DeepEqual(freshConfiguration.Sources, preview.configuration.Sources) {
+			return fmt.Errorf("effective configuration changed after reauthorization preview")
+		}
+		if err := config.CheckApproval(preview.decision.Text, preview.TaskID, preview.decision.ID, resolved.Config); err != nil {
+			return fmt.Errorf("reauthorization decision does not match the effective configuration: %w", err)
+		}
+		beforeFlows := current.Graph.ReviewFlows
+		beforeDispatches := current.Graph.Dispatches
+		beforeDecisions := slices.Clone(currentTask.Decisions)
+		if err := current.Graph.AppendReauthorizationDecision(preview.TaskID, preview.RecordHash, preview.decision); err != nil {
+			return err
+		}
+		updatedTask, ok := current.Graph.GraphTask(preview.TaskID)
+		if !ok || updatedTask.Status != core.Ready || len(updatedTask.Decisions) != len(beforeDecisions)+1 ||
+			!slices.Equal(updatedTask.Decisions[:len(beforeDecisions)], beforeDecisions) {
+			return fmt.Errorf("Task changed while appending configuration authorization")
+		}
+		contractOnly := updatedTask
+		contractOnly.Decisions = currentTask.Decisions
+		if !reflect.DeepEqual(contractOnly, currentTask) ||
+			!reflect.DeepEqual(beforeFlows, current.Graph.ReviewFlows) ||
+			!reflect.DeepEqual(beforeDispatches, current.Graph.Dispatches) {
+			return fmt.Errorf("reauthorization changed Task contract, Flow or Dispatch state")
+		}
+		bundle, err := core.ComposeReauthorizationApprovalBundleWithProposalHash(
+			preview.approvalID, preview.ProposalHash, updatedTask, freshConfiguration,
+			"human", "human:task-reauthorization", "approve exact effective configuration for READY Task", time.Now().UTC(),
+		)
+		if err != nil {
+			return err
+		}
+		if err := bundle.Verify(updatedTask, freshConfiguration); err != nil {
+			return err
+		}
+		if err := current.Graph.AppendApproval(bundle); err != nil {
+			return err
+		}
+		return current.Graph.CheckLedger(current.Ledger)
+	}); err != nil {
+		return authorizeError(err)
+	}
+
+	readbackGraph, _, _, err := loadGraphReadOnly()
+	if err != nil {
+		return authorizeError(err)
+	}
+	readbackTask, ok := readbackGraph.GraphTask(preview.TaskID)
+	if !ok || readbackTask.Status != core.Ready ||
+		len(readbackTask.Decisions) != len(preview.priorDecisions)+1 ||
+		!slices.Equal(readbackTask.Decisions[:len(preview.priorDecisions)], preview.priorDecisions) {
+		return authorizeError(fmt.Errorf("post-save readback did not preserve READY Task decisions"))
+	}
+	contractOnly := readbackTask
+	contractOnly.Decisions = preview.priorTask.Decisions
+	if !reflect.DeepEqual(contractOnly, preview.priorTask) {
+		return authorizeError(fmt.Errorf("post-save readback changed the Task contract"))
+	}
+	bundle, ok := readbackGraph.Approval(preview.approvalID)
+	if !ok {
+		return authorizeError(fmt.Errorf("post-save readback lost the appended approval"))
+	}
+	if err := bundle.Verify(readbackTask, preview.configuration); err != nil {
+		return authorizeError(fmt.Errorf("post-save approval verification failed: %w", err))
+	}
+	db, err := openWorkspace()
+	if err != nil {
+		return authorizeError(err)
+	}
+	defer db.Close()
+	resolved, err := resolveConfiguration()
+	if err != nil {
+		return authorizeError(err)
+	}
+	if _, err := controller.CheckConfiguration(db, preview.TaskID, resolved.Config); err != nil {
+		return authorizeError(fmt.Errorf("task-bound configuration check failed after reauthorization: %w", err))
+	}
+	preview.Status = "approved"
+	preview.AuthorizedRecordHash = bundle.RecordHash
+	return printJSON(preview)
+}
+
+func buildTaskReauthorizationPreview(graph core.TaskGraph, task core.GraphTask, configuration core.ApprovalConfiguration) (taskReauthorizationPreview, error) {
+	prior, found, err := priorTaskConfigurationApproval(task, configuration)
+	if err != nil {
+		return taskReauthorizationPreview{}, err
+	}
+	if !found {
+		return taskReauthorizationPreview{}, fmt.Errorf("no prior configuration approval exists for this Task and approval reference")
+	}
+	driftPaths, err := core.ConfigurationDriftFields(prior, configuration.Selection)
+	if err != nil {
+		return taskReauthorizationPreview{}, err
+	}
+	if len(driftPaths) == 0 {
+		return taskReauthorizationPreview{}, fmt.Errorf("the existing configuration approval already matches the effective configuration")
+	}
+	for _, existing := range graph.ApprovalsForTask(task.ID) {
+		if existing.BundleVersion != core.ApprovalBundleVersion ||
+			existing.CanonicalizationVersion != core.ApprovalCanonicalizationVersion &&
+				existing.CanonicalizationVersion != core.ReauthorizationCanonicalizationVersion {
+			return taskReauthorizationPreview{}, fmt.Errorf("existing approval uses an unknown bundle or canonicalization version")
+		}
+	}
+	proposalHash, err := core.CanonicalSHA256(task)
+	if err != nil {
+		return taskReauthorizationPreview{}, err
+	}
+	if previous, ok := graph.NewestApproval(task.ID); ok {
+		proposalHash = previous.ProposalHash
+	}
+	recordHash, err := core.CanonicalSHA256(task)
+	if err != nil {
+		return taskReauthorizationPreview{}, err
+	}
+	reference, err := configurationApprovalRef(configuration.Selection)
+	if err != nil {
+		return taskReauthorizationPreview{}, err
+	}
+	authorizationRef, err := core.CanonicalSHA256(struct {
+		TaskID        string
+		ProposalHash  string
+		RecordHash    string
+		Configuration string
+	}{task.ID, proposalHash, recordHash, configuration.Digest})
+	if err != nil {
+		return taskReauthorizationPreview{}, err
+	}
+	authorizationRef = strings.TrimPrefix(authorizationRef, "sha256:")
+	decisionID := core.ConfigurationReauthorizationID(reference, task.ID, authorizationRef)
+	selected, err := configurationValue(configuration.Selection)
+	if err != nil {
+		return taskReauthorizationPreview{}, err
+	}
+	approvalText, err := json.Marshal(config.Approval{
+		Kind: config.ApprovalKind, TaskID: task.ID,
+		Reason:     "append-only approval of the exact effective configuration for this READY Task",
+		DecisionID: decisionID, AuthorizationRef: authorizationRef, ApprovalRef: reference,
+		Allowed: []config.Config{selected},
+	})
+	if err != nil {
+		return taskReauthorizationPreview{}, err
+	}
+	decision := core.TaskDecision{ID: decisionID, Source: "human:task-reauthorization", Text: string(approvalText)}
+	candidate := task
+	candidate.Decisions = append(slices.Clone(task.Decisions), decision)
+	dimensions, err := core.BundleDimensionsForVersion(candidate, configuration, core.ReauthorizationCanonicalizationVersion)
+	if err != nil {
+		return taskReauthorizationPreview{}, err
+	}
+	token, err := core.ConfirmationTokenForVersion(core.ReauthorizationCanonicalizationVersion, proposalHash, dimensions)
+	if err != nil {
+		return taskReauthorizationPreview{}, err
+	}
+	bundleID := "reauthorization-" + authorizationRef[:16]
+	preview := taskReauthorizationPreview{
+		Status: "awaiting-confirmation", TaskID: task.ID, State: task.Status,
+		ProposalHash: proposalHash, RecordHash: recordHash,
+		BundleVersion: core.ApprovalBundleVersion, CanonicalizationVersion: core.ReauthorizationCanonicalizationVersion,
+		Dimensions: dimensions, RedactedDriftPaths: driftPaths, ConfirmationToken: token,
+		configuration: configuration, decision: decision, approvalID: bundleID,
+		approvalCount: len(graph.Approvals), priorDecisions: slices.Clone(task.Decisions), priorTask: task,
+	}
+	if len(graph.Approvals) > 0 {
+		last := graph.Approvals[len(graph.Approvals)-1]
+		preview.priorApprovalID, preview.priorApprovalHash = last.ID, last.BundleHash
+	}
+	return preview, nil
+}
+
+func priorTaskConfigurationApproval(task core.GraphTask, current core.ApprovalConfiguration) (json.RawMessage, bool, error) {
+	ref, err := configurationApprovalRef(current.Selection)
+	if err != nil {
+		return nil, false, err
+	}
+	prefix := core.ConfigurationApprovalID(ref, task.ID)
+	for index := len(task.Decisions) - 1; index >= 0; index-- {
+		decision := task.Decisions[index]
+		if decision.ID != ref && !strings.HasPrefix(decision.ID, prefix) {
+			continue
+		}
+		var approval config.Approval
+		if err := json.Unmarshal([]byte(decision.Text), &approval); err != nil {
+			return nil, false, fmt.Errorf("existing configuration approval is ambiguous")
+		}
+		if approval.Kind != config.ApprovalKind || approval.Reason == "" {
+			return nil, false, fmt.Errorf("existing configuration approval is ambiguous")
+		}
+		taskAllowed := approval.TaskID == task.ID || slices.Contains(approval.AdditionalTaskIDs, task.ID)
+		if !taskAllowed {
+			continue
+		}
+		for _, allowed := range approval.Allowed {
+			if allowed.Execution.ApprovalRef != ref {
+				continue
+			}
+			if err := config.CheckApproval(decision.Text, task.ID, decision.ID, allowed); err != nil {
+				return nil, false, fmt.Errorf("existing configuration approval is ambiguous")
+			}
+			selection, err := json.Marshal(allowed)
+			if err != nil {
+				return nil, false, err
+			}
+			if _, err := core.SelectApprovalConfiguration(selection, nil); err != nil {
+				return nil, false, fmt.Errorf("existing configuration approval is invalid")
+			}
+			return selection, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+func configurationApprovalRef(selection json.RawMessage) (string, error) {
+	var selected struct {
+		Execution struct {
+			ApprovalRef string `json:"approvalRef"`
+		} `json:"execution"`
+	}
+	if err := json.Unmarshal(selection, &selected); err != nil || selected.Execution.ApprovalRef == "" {
+		return "", fmt.Errorf("effective configuration has no approval reference")
+	}
+	return selected.Execution.ApprovalRef, nil
+}
+
+func configurationValue(selection json.RawMessage) (config.Config, error) {
+	var selected config.Config
+	if err := json.Unmarshal(selection, &selected); err != nil {
+		return config.Config{}, err
+	}
+	if err := selected.Validate(); err != nil {
+		return config.Config{}, err
+	}
+	return selected, nil
+}
+
+func taskHasConfigurationApproval(task core.GraphTask, selected core.ApprovalConfiguration) bool {
+	value, err := configurationValue(selected.Selection)
+	if err != nil {
+		return false
+	}
+	ref, err := configurationApprovalRef(selected.Selection)
+	if err != nil {
+		return false
+	}
+	prefix := core.ConfigurationApprovalID(ref, task.ID)
+	for _, decision := range task.Decisions {
+		if decision.ID != ref && !strings.HasPrefix(decision.ID, prefix) {
+			continue
+		}
+		if config.CheckApproval(decision.Text, task.ID, decision.ID, value) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func taskReauthorizationReuseReport(task core.GraphTask, bundle core.ApprovalBundle) taskReauthorizationPreview {
+	return taskReauthorizationPreview{
+		Status: "already-authorized", TaskID: task.ID, State: task.Status,
+		ProposalHash: bundle.ProposalHash, RecordHash: bundle.RecordHash,
+		AuthorizedRecordHash: bundle.RecordHash,
+		BundleVersion:        bundle.BundleVersion, CanonicalizationVersion: bundle.CanonicalizationVersion,
+		Dimensions: bundle.Dimensions,
+	}
 }
 
 // approvalReuseReport reports an already matching approval without asking for a

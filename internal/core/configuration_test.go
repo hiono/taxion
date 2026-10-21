@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,6 +44,41 @@ func TestConfigurationBindingRequiresExactNamedTaskScope(t *testing.T) {
 				t.Fatal("core configuration binding widened exact Task scope", err)
 			}
 		}
+	}
+}
+
+func TestConfigurationBindingAcceptsExplicitReauthorizationDecision(t *testing.T) {
+	selection := json.RawMessage(`{"version":1,"repository":{"path":"owner/repo"},"execution":{"approvalRef":"approval"}}`)
+	decisionID := ConfigurationReauthorizationID("approval", "task", "unique-auth")
+	approval, err := json.Marshal(struct {
+		Kind                   string            `json:"kind"`
+		TaskID                 string            `json:"taskId"`
+		Reason                 string            `json:"reason"`
+		DecisionID             string            `json:"decisionId"`
+		AuthorizationReference string            `json:"authorizationReference"`
+		ApprovalRef            string            `json:"approvalRef"`
+		Allowed                []json.RawMessage `json:"allowed"`
+	}{
+		"taxion.execution-config.v1", "task", "confirm exact configuration",
+		decisionID, "unique-auth", "approval", []json.RawMessage{selection},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := DispatchConfiguration{
+		DecisionID: decisionID, Selection: selection, RecordedAt: time.Now().UTC(),
+		Sources: map[string]string{"version": "user", "repository.path": "user", "execution.approvalRef": "user"},
+	}
+	dispatch := GraphDispatch{
+		TaskID: "task", Repository: "owner/repo",
+		Instruction: DispatchInstruction{Decisions: []TaskDecision{{ID: decisionID, Source: "human:reauthorization", Text: string(approval)}}},
+	}
+	if err := binding.validate(dispatch); err != nil {
+		t.Fatalf("explicit reauthorization decision rejected: %v", err)
+	}
+	dispatch.Instruction.Decisions[0].Text = strings.Replace(string(approval), `"approvalRef":"approval"`, `"approvalRef":"other"`, 1)
+	if err := binding.validate(dispatch); err == nil {
+		t.Fatal("configuration binding accepted a different approval reference")
 	}
 }
 

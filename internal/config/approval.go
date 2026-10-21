@@ -19,6 +19,9 @@ type Approval struct {
 	TaskID            string   `json:"taskId"`
 	AdditionalTaskIDs []string `json:"additionalTaskIds,omitempty"`
 	Reason            string   `json:"reason"`
+	DecisionID        string   `json:"decisionId,omitempty"`
+	AuthorizationRef  string   `json:"authorizationReference,omitempty"`
+	ApprovalRef       string   `json:"approvalRef,omitempty"`
 	Allowed           []Config `json:"allowed"`
 }
 
@@ -53,7 +56,13 @@ func CheckApproval(input string, taskID, decisionID string, candidate Config) er
 		strings.TrimSpace(approval.Reason) == "" || len(approval.Allowed) == 0 {
 		return fmt.Errorf("execution approval requires matching kind, Task ID, reason and allowed configurations")
 	}
-	if decisionID != candidate.Execution.ApprovalRef &&
+	if approval.DecisionID != "" || approval.AuthorizationRef != "" || approval.ApprovalRef != "" {
+		if approval.DecisionID != decisionID || strings.TrimSpace(approval.AuthorizationRef) == "" ||
+			approval.ApprovalRef != candidate.Execution.ApprovalRef ||
+			decisionID != core.ConfigurationReauthorizationID(approval.ApprovalRef, approval.TaskID, approval.AuthorizationRef) {
+			return fmt.Errorf("configuration approval reference differs from the selected decision")
+		}
+	} else if decisionID != candidate.Execution.ApprovalRef &&
 		decisionID != core.ConfigurationApprovalID(candidate.Execution.ApprovalRef, approval.TaskID) {
 		return fmt.Errorf("configuration approval reference differs from the selected decision")
 	}

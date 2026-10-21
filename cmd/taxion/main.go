@@ -337,11 +337,13 @@ func newID(prefix string) string {
 
 func taskCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: taxion task create|list|archive|track|transition|graph|plan|validate …")
+		return fmt.Errorf("usage: taxion task create|list|archive|track|transition|graph|plan|validate|authorize|reauthorize …")
 	}
 	switch args[0] {
 	case "archive":
 		return taskArchiveCmd(args[1:])
+	case "reauthorize":
+		return taskReauthorizeCmd(args[1:])
 	case "track", "transition", "graph", "plan", "validate", "authorize":
 		return taskGraphCmd(args[0], args[1:])
 	case "create":
