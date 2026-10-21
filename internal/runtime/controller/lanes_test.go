@@ -168,7 +168,8 @@ func TestReadOnlyLanesRespectPerLaneTimeout(t *testing.T) {
 
 func TestReadOnlyLanesRedactCredentials(t *testing.T) {
 	graph, request := laneTestGraph(t)
-	graph.Tasks[0].Repo = "https://user:glpat-abcdefghijklmnopqrst@example.com/org/repo.git"
+	secret := "glpat-" + strings.Repeat("a", 20)
+	graph.Tasks[0].Repo = "https://user:" + secret + "@example.com/org/repo.git"
 	report, err := RunReadOnlyLanes(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -180,18 +181,19 @@ func TestReadOnlyLanesRedactCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{"glpat-abcdefghijklmnopqrst", "user:glpat"} {
-		if strings.Contains(string(encoded), secret) {
+	for _, leaked := range []string{secret, "user:" + secret[:6]} {
+		if strings.Contains(string(encoded), leaked) {
 			t.Fatalf("lane report leaked a credential: %s", encoded)
 		}
 	}
 
+	token := "ghp_" + strings.Repeat("b", 24)
 	sanitized := sanitizeLaneResult(LaneResult{
 		Lane: LaneContractConsistency, Verdict: LaneVerdictFail,
-		Summary:     "failed with ghp_abcdefghijklmnopqrstuvwxyz",
-		Diagnostics: []string{"token ghp_abcdefghijklmnopqrstuvwxyz"},
+		Summary:     "failed with " + token,
+		Diagnostics: []string{"token " + token},
 	})
-	if strings.Contains(sanitized.Summary+sanitized.Diagnostics[0], "ghp_abcdefghijklmnopqrstuvwxyz") {
+	if strings.Contains(sanitized.Summary+sanitized.Diagnostics[0], token) {
 		t.Fatal("diagnostic sanitizer did not redact a credential")
 	}
 }
