@@ -96,6 +96,8 @@ Review flows and recovery:
   workflow step       Execute one role turn from a saved review flow (--id; role prompt files or --builtin-prompts)
   workflow show       Read the saved review flow and ceilings (--id required)
   workflow evaluate   Report saved quality gates and measured/unknown costs; no reward score (--id required)
+  gate <name>         Report the contract, execution or publication gate without changing state (--task/--flow, --json)
+  workflow lanes      Run read-only controller lanes for one Task and report a machine-readable gate
   workflow recover    Release interrupted runner ownership after recorded execution stop (--file JSON)
   workflow interrupt Request a targeted stop for the active flow (--file JSON)
   workflow handoff    Hold or release the next handoff with a sourced compare-and-swap request (--file JSON)
@@ -215,6 +217,8 @@ func main() {
 		err = runtimeCmd(args[1:])
 	case "workflow":
 		err = workflowCmd(args[1:])
+	case "gate":
+		err = gateCmd(args[1:])
 	case "records":
 		err = recordsCmd(args[1:])
 	case "conversation":
@@ -252,6 +256,10 @@ func main() {
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "taxion: %v\n", err)
+		var exit interface{ ExitCode() int }
+		if errors.As(err, &exit) {
+			os.Exit(exit.ExitCode())
+		}
 		os.Exit(1)
 	}
 }

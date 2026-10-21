@@ -103,7 +103,7 @@ _taxion_complete() {
         'task validate') candidates='--file --help --manifest' ;;
         'tools') candidates='hash' ;;
         'tools hash') candidates='--help --path' ;;
-        'workflow') candidates='advance draft draft-approve draft-discard evaluate feedback feedback-resolve feedback-target handoff interrupt planner-action planner-draft planning-context question-draft recover run show start step' ;;
+        'workflow') candidates='advance draft draft-approve draft-discard evaluate feedback feedback-resolve feedback-target handoff interrupt lanes planner-action planner-draft planning-context question-draft recover run show start step' ;;
         'workflow advance') candidates='--help --id' ;;
         'workflow draft') candidates='--file --help' ;;
         'workflow draft-approve') candidates='--file --help' ;;
@@ -114,6 +114,7 @@ _taxion_complete() {
         'workflow feedback-target') candidates='--help --id' ;;
         'workflow handoff') candidates='--file --help' ;;
         'workflow interrupt') candidates='--file --help' ;;
+        'workflow lanes') candidates='--help --root --task --timeout' ;;
         'workflow planner-action') candidates='--file --help' ;;
         'workflow planner-draft') candidates='--file --help' ;;
         'workflow planning-context') candidates='--help --id' ;;
