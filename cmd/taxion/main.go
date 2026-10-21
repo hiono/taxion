@@ -116,6 +116,8 @@ Review flows and recovery:
   resume              Print a resume acknowledgement (local stub; --session required)
 
 Evidence and external records:
+  role-packet create  Emit an immutable reference-only role packet (explicit task, tree and contract digests)
+  role-packet verify  Verify and read back a role packet (--file, --expected-hash); no execution
   records proposal    Display exact external publication content and its approval hash (--file JSON)
   records approve     Save an explicitly approved Issue/PR publication after local secret checks (--file JSON)
   records send        Deliver one approved publication with a durable sender claim (--id, --scanner)
@@ -188,7 +190,7 @@ func main() {
 	var err error
 	helpRequested := slices.Contains(args, "--help") || slices.Contains(args, "-h")
 	if !explicitStore && !helpRequested &&
-		!slices.Contains([]string{"ready", "completion", "-h", "--help", "help", "--version", "gen-token", "git"}, args[0]) {
+		!slices.Contains([]string{"ready", "completion", "-h", "--help", "help", "--version", "gen-token", "git", "role-packet"}, args[0]) {
 		storePath, err = defaultWorkspaceStorePath()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "taxion: %v\n", err)
@@ -222,6 +224,8 @@ func main() {
 		err = workflowCmd(args[1:])
 	case "gate":
 		err = gateCmd(args[1:])
+	case "role-packet":
+		err = rolePacketCommand(args[1:], os.Stdout)
 	case "records":
 		err = recordsCmd(args[1:])
 	case "conversation":
