@@ -23,8 +23,7 @@ prefix を heuristic に取り除く方法は採れない。`/git` は namespace
 あり得るため、`https://host/git/git/<project>.git` のような URL で prefix の
 個数を決められない。どの表記が prefix かを設定に書かせる必要がある。
 
-この挙動は [Issue #105](https://github.com/hiono/taxion/issues/105) に記録し、
-v0.6.0 で修正する。
+この制約を解消するため、endpoint を個別に設定し、remote と API 応答の両方で照合する。
 
 ## Decision
 
@@ -113,24 +112,6 @@ version 1 の snapshot は書き換えず、backfill も migration もしない�
 
 設定 layer の解決順序と採用元の記録は既存の仕組みをそのまま使う。`endpoints` の値は
 この版では環境変数で上書きしない。
-
-## Validation
-
-local では `gofmt`、`go vet ./...`、`go test ./...`（1286 passed / 20 packages）、
-`go test -race`（205 passed）を実行した。CI は build、core-purity、web、hygiene の
-4 job の成功を要求する。
-
-- unit: `endpoints` の6項目契約、hostname と port の契約、layer 解決、legacy 設定の
-  JSON 形式。
-- regression: `endpoints` のない設定、`scp` 形式の remote、version 1 snapshot の
-  byte 不変。
-- snapshot: version 1 と version 2 の検証器の分離、stage A と stage B、drift の検出、
-  検出の前後で archive の byte が変わらないこと、version 3 以上の拒否。
-- S1〜S5: REP-002〜REP-007 の期待結果。
-- security: 診断に credential が現れないこと。
-
-v0.5.0 の binary が `endpoints` 設定を未知の field として拒否し、設定ファイルを
-変更しないことは、実測で確認した。
 
 ## Out of scope
 
