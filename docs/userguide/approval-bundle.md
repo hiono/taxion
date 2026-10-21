@@ -7,7 +7,7 @@
 | field | 意味 |
 | --- | --- |
 | `bundleVersion` | bundle 形式の版。v0.7.0 は1 |
-| `canonicalizationVersion` | hash の正規化方式の版。v0.7.0 は1 |
+| `canonicalizationVersion` | hash の正規化方式の版。v0.7.0 の bundle と通常の authorize は1。v0.7.1 の READY Task reauthorization bundle は2 |
 | `id` | 追記ごとの識別子 |
 | `taskId` | 対象 Task |
 | `proposalHash` | 承認時に提示した契約提案の SHA-256 |

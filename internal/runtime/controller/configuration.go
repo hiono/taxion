@@ -109,7 +109,8 @@ func checkTaskConfiguration(graph core.TaskGraph, taskID string, candidate confi
 	if task.HumanDecision != nil && task.HumanDecision.SelectedOptionID == "" {
 		return core.TaskDecision{}, fmt.Errorf("taxion: pending Human decision requires resolution")
 	}
-	for _, decision := range task.Decisions {
+	for index := len(task.Decisions) - 1; index >= 0; index-- {
+		decision := task.Decisions[index]
 		if decision.ID != candidate.Execution.ApprovalRef &&
 			!strings.HasPrefix(decision.ID, candidate.Execution.ApprovalRef+"@task:") {
 			continue

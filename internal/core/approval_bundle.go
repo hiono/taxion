@@ -13,7 +13,8 @@ const (
 	// ApprovalBundleVersion identifies the bundle record layout.
 	ApprovalBundleVersion = 1
 	// ApprovalCanonicalizationVersion identifies the digest rules.
-	ApprovalCanonicalizationVersion = 1
+	ApprovalCanonicalizationVersion        = 1
+	ReauthorizationCanonicalizationVersion = 2
 )
 
 // Authorization impact classes reported by an approval bundle drift.
@@ -44,9 +45,16 @@ type ConfirmationBasis struct {
 // ConfirmationTokenFor returns the token a caller must pass back to authorize
 // exactly the presented basis.
 func ConfirmationTokenFor(proposalHash string, dimensions ApprovalDimensions) (string, error) {
+	return ConfirmationTokenForVersion(ApprovalCanonicalizationVersion, proposalHash, dimensions)
+}
+
+func ConfirmationTokenForVersion(version int, proposalHash string, dimensions ApprovalDimensions) (string, error) {
+	if version != ApprovalCanonicalizationVersion && version != ReauthorizationCanonicalizationVersion {
+		return "", graphError("unknown approval canonicalization version")
+	}
 	return CanonicalSHA256(ConfirmationBasis{
 		BundleVersion:           ApprovalBundleVersion,
-		CanonicalizationVersion: ApprovalCanonicalizationVersion,
+		CanonicalizationVersion: version,
 		ProposalHash:            proposalHash,
 		BaselineDigest:          dimensions.Baseline,
 		ScopeDigest:             dimensions.Scope,
@@ -160,6 +168,17 @@ type ApprovalDrift struct {
 
 // BundleDimensions digests the contract and configuration dimensions.
 func BundleDimensions(task GraphTask, configuration ApprovalConfiguration) (ApprovalDimensions, error) {
+	return bundleDimensions(task, configuration, ApprovalCanonicalizationVersion)
+}
+
+func BundleDimensionsForVersion(task GraphTask, configuration ApprovalConfiguration, version int) (ApprovalDimensions, error) {
+	if version != ApprovalCanonicalizationVersion && version != ReauthorizationCanonicalizationVersion {
+		return ApprovalDimensions{}, graphError("unknown approval canonicalization version")
+	}
+	return bundleDimensions(task, configuration, version)
+}
+
+func bundleDimensions(task GraphTask, configuration ApprovalConfiguration, version int) (ApprovalDimensions, error) {
 	if !nonempty(configuration.Digest) {
 		return ApprovalDimensions{}, graphError("approval bundle requires a configuration digest")
 	}
@@ -187,6 +206,10 @@ func BundleDimensions(task GraphTask, configuration ApprovalConfiguration) (Appr
 	if dimensions.Budget, err = dimension(task.BudgetGuidance); err != nil {
 		return ApprovalDimensions{}, err
 	}
+	decisions := task.Decisions
+	if version == ReauthorizationCanonicalizationVersion {
+		decisions = permissionDecisions(decisions)
+	}
 	if dimensions.Permission, err = dimension(struct {
 		Owner              string
 		Reviewer           string
@@ -197,7 +220,7 @@ func BundleDimensions(task GraphTask, configuration ApprovalConfiguration) (Appr
 		OutputMode         string
 		TargetTreeSHA      string
 		TargetChangedFiles []string
-	}{task.Owner, task.Reviewer, task.AuthorizationID, task.Decisions, task.Worktree, task.Branch, task.OutputMode, task.TargetTreeSHA, task.TargetChangedFiles}); err != nil {
+	}{task.Owner, task.Reviewer, task.AuthorizationID, decisions, task.Worktree, task.Branch, task.OutputMode, task.TargetTreeSHA, task.TargetChangedFiles}); err != nil {
 		return ApprovalDimensions{}, err
 	}
 	if dimensions.Security, err = dimension(struct {
@@ -211,17 +234,48 @@ func BundleDimensions(task GraphTask, configuration ApprovalConfiguration) (Appr
 	return dimensions, nil
 }
 
+func permissionDecisions(decisions []TaskDecision) []TaskDecision {
+	filtered := make([]TaskDecision, 0, len(decisions))
+	for _, decision := range decisions {
+		var metadata struct {
+			Kind string `json:"kind"`
+		}
+		if json.Unmarshal([]byte(decision.Text), &metadata) == nil && metadata.Kind == "taxion.execution-config.v1" {
+			continue
+		}
+		filtered = append(filtered, decision)
+	}
+	return filtered
+}
+
 // ComposeApprovalBundle binds a proposed contract, the stored record and the
 // effective configuration selection under one hash.
 func ComposeApprovalBundle(id string, proposal, stored GraphTask, configuration ApprovalConfiguration, actor, source, reason string, at time.Time) (ApprovalBundle, error) {
-	if !nonempty(id) || !nonempty(stored.ID) || !nonempty(actor) || !nonempty(source) {
-		return ApprovalBundle{}, graphError("approval bundle requires an ID, Task, actor and source")
-	}
-	dimensions, err := BundleDimensions(stored, configuration)
+	proposalHash, err := CanonicalSHA256(proposal)
 	if err != nil {
 		return ApprovalBundle{}, err
 	}
-	proposalHash, err := CanonicalSHA256(proposal)
+	return ComposeApprovalBundleWithProposalHash(id, proposalHash, stored, configuration, actor, source, reason, at)
+}
+
+// ComposeApprovalBundleWithProposalHash preserves the hash of an already
+// approved proposal when an append-only authorization extends its record.
+func ComposeApprovalBundleWithProposalHash(id, proposalHash string, stored GraphTask, configuration ApprovalConfiguration, actor, source, reason string, at time.Time) (ApprovalBundle, error) {
+	return composeApprovalBundleWithVersion(id, proposalHash, stored, configuration, actor, source, reason, at, ApprovalCanonicalizationVersion)
+}
+
+func ComposeReauthorizationApprovalBundleWithProposalHash(id, proposalHash string, stored GraphTask, configuration ApprovalConfiguration, actor, source, reason string, at time.Time) (ApprovalBundle, error) {
+	return composeApprovalBundleWithVersion(id, proposalHash, stored, configuration, actor, source, reason, at, ReauthorizationCanonicalizationVersion)
+}
+
+func composeApprovalBundleWithVersion(id, proposalHash string, stored GraphTask, configuration ApprovalConfiguration, actor, source, reason string, at time.Time, canonicalizationVersion int) (ApprovalBundle, error) {
+	if !nonempty(id) || !nonempty(stored.ID) || !nonempty(actor) || !nonempty(source) {
+		return ApprovalBundle{}, graphError("approval bundle requires an ID, Task, actor and source")
+	}
+	if !nonempty(proposalHash) {
+		return ApprovalBundle{}, graphError("approval bundle requires a proposal hash")
+	}
+	dimensions, err := BundleDimensionsForVersion(stored, configuration, canonicalizationVersion)
 	if err != nil {
 		return ApprovalBundle{}, err
 	}
@@ -230,7 +284,7 @@ func ComposeApprovalBundle(id string, proposal, stored GraphTask, configuration 
 		return ApprovalBundle{}, err
 	}
 	bundle := ApprovalBundle{
-		BundleVersion: ApprovalBundleVersion, CanonicalizationVersion: ApprovalCanonicalizationVersion,
+		BundleVersion: ApprovalBundleVersion, CanonicalizationVersion: canonicalizationVersion,
 		ID: id, TaskID: stored.ID, ProposalHash: proposalHash, RecordHash: recordHash,
 		Dimensions: dimensions, Configuration: configuration,
 		Actor: actor, Source: source, Reason: reason, At: at.UTC(),
@@ -255,7 +309,7 @@ func (b ApprovalBundle) Drifts(stored GraphTask, current ApprovalConfiguration) 
 		drifts = append(drifts, ApprovalDrift{Dimension: "bundleVersion", PreviousDigest: fmt.Sprint(b.BundleVersion), CurrentDigest: fmt.Sprint(ApprovalBundleVersion), AuthorizationImpact: ImpactInvalid, Fields: []string{"bundleVersion"}})
 		return drifts, nil
 	}
-	if b.CanonicalizationVersion != ApprovalCanonicalizationVersion {
+	if b.CanonicalizationVersion != ApprovalCanonicalizationVersion && b.CanonicalizationVersion != ReauthorizationCanonicalizationVersion {
 		drifts = append(drifts, ApprovalDrift{Dimension: "canonicalizationVersion", PreviousDigest: fmt.Sprint(b.CanonicalizationVersion), CurrentDigest: fmt.Sprint(ApprovalCanonicalizationVersion), AuthorizationImpact: ImpactInvalid, Fields: []string{"canonicalizationVersion"}})
 		return drifts, nil
 	}
@@ -270,7 +324,7 @@ func (b ApprovalBundle) Drifts(stored GraphTask, current ApprovalConfiguration) 
 		return nil, err
 	}
 	appendDrift("recordHash", b.RecordHash, recordHash, ImpactReapproval, []string{"contract"})
-	dimensions, err := BundleDimensions(stored, current)
+	dimensions, err := bundleDimensions(stored, current, b.CanonicalizationVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +334,7 @@ func (b ApprovalBundle) Drifts(stored GraphTask, current ApprovalConfiguration) 
 	appendDrift("budget", b.Dimensions.Budget, dimensions.Budget, ImpactReapproval, []string{"budgetGuidance"})
 	appendDrift("permissions", b.Dimensions.Permission, dimensions.Permission, ImpactReapproval, []string{"owner", "reviewer", "authorizationId", "decisions", "worktree", "branch", "outputMode", "targetTreeSha", "targetChangedFiles"})
 	appendDrift("security", b.Dimensions.Security, dimensions.Security, ImpactReapproval, []string{"risk", "exceptionIds", "specifications", "memoryRefs"})
-	fields, err := configurationDriftFields(b.Configuration.Selection, current.Selection)
+	fields, err := ConfigurationDriftFields(b.Configuration.Selection, current.Selection)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +342,7 @@ func (b ApprovalBundle) Drifts(stored GraphTask, current ApprovalConfiguration) 
 	return drifts, nil
 }
 
-func configurationDriftFields(previous, current json.RawMessage) ([]string, error) {
+func ConfigurationDriftFields(previous, current json.RawMessage) ([]string, error) {
 	if len(previous) == 0 || len(current) == 0 {
 		return []string{"endpoints"}, nil
 	}

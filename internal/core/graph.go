@@ -2017,6 +2017,59 @@ func (g *TaskGraph) Track(t GraphTask, actor, reason string) error {
 	return nil
 }
 
+func (g *TaskGraph) AppendReauthorizationDecision(taskID, expectedRecordHash string, decision TaskDecision) error {
+	next := cloneGraph(*g)
+	task, ok := next.task(taskID)
+	if !ok || task.Status != Ready {
+		return graphError("configuration reauthorization requires an existing READY Task")
+	}
+	recordHash, err := CanonicalSHA256(task)
+	if err != nil {
+		return err
+	}
+	if expectedRecordHash == "" || recordHash != expectedRecordHash {
+		return graphError("Task changed after configuration reauthorization preview")
+	}
+	var approval struct {
+		Kind             string            `json:"kind"`
+		TaskID           string            `json:"taskId"`
+		Reason           string            `json:"reason"`
+		DecisionID       string            `json:"decisionId"`
+		AuthorizationRef string            `json:"authorizationReference"`
+		ApprovalRef      string            `json:"approvalRef"`
+		Allowed          []json.RawMessage `json:"allowed"`
+	}
+	if err := json.Unmarshal([]byte(decision.Text), &approval); err != nil ||
+		approval.Kind != "taxion.execution-config.v1" || approval.TaskID != taskID ||
+		approval.DecisionID != decision.ID || approval.AuthorizationRef == "" ||
+		approval.ApprovalRef == "" || len(approval.Allowed) != 1 ||
+		decision.ID != ConfigurationReauthorizationID(approval.ApprovalRef, taskID, approval.AuthorizationRef) ||
+		decision.Source == "" || approval.Reason == "" {
+		return graphError("invalid append-only configuration reauthorization decision")
+	}
+	for _, prior := range task.Decisions {
+		if prior.ID == decision.ID {
+			return graphError("configuration reauthorization decision already exists")
+		}
+	}
+	task.Decisions = append(task.Decisions, decision)
+	for index := range next.Tasks {
+		if next.Tasks[index].ID == taskID {
+			next.Tasks[index] = task
+			break
+		}
+	}
+	next.History = append(next.History, GraphEvent{
+		TaskID: taskID, Actor: "human", Reason: "append configuration reauthorization",
+		At: time.Now().UTC(), Task: task,
+	})
+	if err := next.Validate(); err != nil {
+		return err
+	}
+	*g = next
+	return nil
+}
+
 func (g *TaskGraph) trackInto(t GraphTask, actor, reason string) error {
 	if g.IsArchived(t.ID) {
 		return graphError("Task %s is archived; use a newly approved successor", t.ID)
