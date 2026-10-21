@@ -17,11 +17,22 @@ import (
 // Records shares the workspace transaction for recovery and approved publication.
 type Records struct {
 	Events   []RuntimeReceipt `json:"events,omitempty"`
+	Budgets  []BudgetAudit    `json:"budgets,omitempty"`
 	Updates  []ExternalUpdate `json:"updates,omitempty"`
 	Findings []FailureRecord  `json:"findings,omitempty"`
 	Requests []RequestRecord  `json:"requests,omitempty"`
 	Restore  *RestoreRecord   `json:"restore,omitempty"`
 	Restores []RestoreRecord  `json:"restores,omitempty"`
+}
+
+type BudgetAudit struct {
+	FlowID   string    `json:"flowId"`
+	TaskID   string    `json:"taskId"`
+	Sequence uint64    `json:"sequence"`
+	Kind     string    `json:"kind"`
+	Payload  string    `json:"payload"`
+	Hash     string    `json:"hash"`
+	At       time.Time `json:"at"`
 }
 
 type RestoredPath struct {
@@ -184,6 +195,18 @@ func (r Records) validate() error {
 			return fmt.Errorf("unknown external update state")
 		}
 		seen[update.ID] = true
+	}
+	seen = map[string]bool{}
+	budgetSequences := map[string]uint64{}
+	for _, record := range r.Budgets {
+		budgetSequences[record.FlowID]++
+		if record.FlowID == "" || record.TaskID == "" ||
+			record.Sequence != budgetSequences[record.FlowID] || record.At.IsZero() ||
+			!slices.Contains([]string{"DISPATCH_ISSUED", "SESSION_STARTED", "USAGE_OBSERVED", "BUDGET_STOP", "RECONTRACT"}, record.Kind) ||
+			!json.Valid([]byte(record.Payload)) ||
+			record.Hash != fmt.Sprintf("%x", sha256.Sum256([]byte(record.Payload))) {
+			return fmt.Errorf("invalid task budget audit record or sequence")
+		}
 	}
 	seen = map[string]bool{}
 	for _, event := range r.Events {

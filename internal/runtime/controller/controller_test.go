@@ -34,6 +34,7 @@ type fakeRuntime struct {
 	closeErr   error
 	toolPolicy *tools.Policy
 	bound      bool
+	events     <-chan runtime.Event
 }
 
 func (f *fakeRuntime) Role() string                  { return f.role }
@@ -65,7 +66,14 @@ func (f *fakeRuntime) Close() error {
 	return f.closeErr
 }
 func (f *fakeRuntime) Events(context.Context, string) (<-chan runtime.Event, error) {
+	if f.events != nil {
+		return f.events, nil
+	}
 	return make(chan runtime.Event), nil
+}
+func (f *fakeRuntime) EventCursor(string) (uint64, error) { return 0, nil }
+func (f *fakeRuntime) EventsAfter(ctx context.Context, sessionID string, cursor uint64) (<-chan runtime.Event, error) {
+	return f.Events(ctx, sessionID)
 }
 
 func TestControllerBindsAndReusesDurableSession(t *testing.T) {
@@ -162,6 +170,51 @@ func TestCancelledSendSafelyStopsTheBoundDispatch(t *testing.T) {
 	saved, ok := state.Graph.GraphDispatch(dispatch)
 	if !ok || saved.Status != core.DispatchCancelled || worker.stops != 1 {
 		t.Fatalf("cancelled Send did not record a safe stop: dispatch=%+v stops=%d", saved, worker.stops)
+	}
+}
+
+func TestControllerStopsExhaustedFlowBeforeResumingBoundSession(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, _ := state.Graph.GraphDispatch(flow.DispatchIDs[0])
+	worker := &fakeRuntime{
+		role: dispatch.Recipient, hash: "budget-runtime", worktree: dispatch.Instruction.Worktree,
+	}
+	controller, err := New(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Start(t.Context(), dispatch.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Send(t.Context(), dispatch.ID, "execute"); err != nil {
+		t.Fatal(err)
+	}
+	nanoAIU, status := request.MaxNanoAIU, "complete"
+	if err := controller.RecordUsage(dispatch.ID, core.DispatchUsage{
+		Model: "test-model", TotalNanoAIU: &nanoAIU, AICreditsStatus: &status,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = controller.Start(t.Context(), dispatch.ID)
+	var budgetErr *budgetStopError
+	if !errors.As(err, &budgetErr) || worker.stops != 1 {
+		t.Fatalf("exhausted session resumed: stops=%d err=%v", worker.stops, err)
+	}
+	saved, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped, _ := saved.Graph.ReviewFlow(flow.ID)
+	if stopped.Status != "STOPPED" || stopped.StopCode != "BUDGET_STOP" {
+		t.Fatalf("flow was not durably budget-stopped: %+v", stopped)
 	}
 }
 

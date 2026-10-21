@@ -385,7 +385,7 @@ execution: {requester: delegated-operator, worker: local, approvalRef: opencode-
 	deadline, _ := ctx.Deadline()
 	flow, err := controller.StartReviewFlow(db, storePath, controller.ReviewFlowRequest{
 		ID: flowID, TaskID: task.ID, Repository: task.Repo, ReviewRoot: filepath.Join(root, "reviews"),
-		MaxRepairs: &repairs, TimeoutSeconds: int64(time.Until(deadline).Seconds()),
+		MaxRepairs: &repairs, TimeoutSeconds: int64(time.Until(deadline).Seconds()), MaxNanoAIU: 1e12,
 		Authorization: core.TaskDecision{ID: "document-deadline", Source: "user:complete-78-79-80-with-opencode",
 			Text: "Free operator-prepared Big Pickle only; shared 15-minute deadline, Coder and independent Reviewer, zero repairs; quota unverified, not unlimited"},
 	})

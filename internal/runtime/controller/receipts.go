@@ -56,6 +56,11 @@ func (c *Controller) recordEvent(dispatchID, streamID string, event runtime.Even
 					break
 				}
 			}
+			if flow, found := flowForDispatch(state.Graph, dispatchID); found {
+				if err := appendBudgetAudit(state, flow, "USAGE_OBSERVED", taskBudgetReport(state.Graph, flow, now)); err != nil {
+					return err
+				}
+			}
 		}
 		state.Records.Events = append(state.Records.Events, store.RuntimeReceipt{
 			DispatchID: dispatchID, SessionID: dispatch.RuntimeSessionID, StreamID: streamID,

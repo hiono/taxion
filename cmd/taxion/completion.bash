@@ -74,7 +74,7 @@ _taxion_complete() {
         'records reconcile') candidates='--claim --help --id --sender-stopped' ;;
         'records send') candidates='--help --id --scanner' ;;
         'records show') candidates='' ;;
-        'request') candidates='--base-directory --budget-guidance --cli --context-path --help --max-ai-credits --max-repairs --repo --timeout --worktree' ;;
+        'request') candidates='--base-directory --budget-guidance --cli --context-path --help --max-ai-credits --max-repairs --max-task-nano-aiu --repo --timeout --worktree' ;;
         'resume') candidates='--help --session' ;;
         'review') candidates='--help --repo --sha --task' ;;
         'role-packet') candidates='create verify' ;;
@@ -106,7 +106,7 @@ _taxion_complete() {
         'task validate') candidates='--file --help --manifest' ;;
         'tools') candidates='hash' ;;
         'tools hash') candidates='--help --path' ;;
-        'workflow') candidates='advance draft draft-approve draft-discard evaluate feedback feedback-resolve feedback-target handoff interrupt lanes planner-action planner-draft planning-context question-draft recover run show start step' ;;
+        'workflow') candidates='advance draft draft-approve draft-discard evaluate feedback feedback-resolve feedback-target handoff interrupt lanes planner-action planner-draft planning-context question-draft recover run show start step terminate' ;;
         'workflow advance') candidates='--help --id' ;;
         'workflow draft') candidates='--file --help' ;;
         'workflow draft-approve') candidates='--file --help' ;;
@@ -127,6 +127,7 @@ _taxion_complete() {
         'workflow show') candidates='--help --id' ;;
         'workflow start') candidates='--file --help' ;;
         'workflow step') candidates='--base-directory --builtin-prompts --cli --coder-prompt-file --coder-tools --compact-context --controller-validation-submission --help --id --managed-commit --managed-stage --max-ai-credits --reviewer-prompt-file --reviewer-tools --scanner --strict-result-identities' ;;
+        'workflow terminate') candidates='--file --help' ;;
         'workspace') candidates='inspect-snapshot restore snapshot' ;;
         'workspace inspect-snapshot') candidates='--file --help' ;;
         'workspace restore') candidates='--actor --expected-hash --file --help --output --source' ;;
