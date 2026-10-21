@@ -28,6 +28,7 @@
 | [CLI リファレンス](cli-reference.md) | コマンドと option、入力条件、実行上の制約 |
 | [承認 bundle](approval-bundle.md) | 7 dimension、proposalHash・recordHash、確認 token、保存順序 |
 | [三つの gate](gates.md) | contract・execution・publication の判定、JSON report、終了 code |
+| [ロール間の handoff packet](role-handoff-packets.md) | 参照だけの immutable packet、canonical hash、受信時の照合と制限 |
 | [Task の validate と authorize](task-validate-and-authorize.md) | manifest の検査、承認の記録、再利用と再承認 |
 | [drift と legacy の分類](drift-and-legacy.md) | 差分の dimension、authorization impact、verified-legacy の扱い |
 | [失敗からの復旧](failure-recovery.md) | entry code、blocked・fail、停止後の確認、rollback |

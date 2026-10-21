@@ -43,6 +43,7 @@ taxion workflow lanes --task <task-id> --root <repository-root> --timeout 5s
 taxion gate contract --task <task-id> --json
 taxion gate execution --flow <flow-id> --json
 taxion gate publication --flow <flow-id> --json
+taxion role-packet verify --file <packet.json> --expected-hash <recorded-packet-hash>
 taxion workflow planning-context --id <flow-id>
 taxion workflow planner-draft --file <selected-planning-proposal.json>
 taxion workflow planner-action --file <selected-non-execution-advice.json>
@@ -537,6 +538,7 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 
 | コマンド | option と意味 |
 | --- | --- |
+| `role-packet create`, `role-packet verify` | `create` は `--task ID`・`--task-hash SHA256`・`--baseline-sha SHA`・`--target-tree-hash SHA`・`--scope-digest SHA256`・`--acceptance-digest SHA256`・`--role CODER\|VALIDATOR\|REVIEWER` を要求する。`--prohibit TEXT` は繰返し可能。`--previous-evidence-hash SHA256` は Validator・Reviewer で必須。`verify` は `--file JSON`・`--expected-hash SHA256` を要求する。両方とも canonical JSON を標準出力へ返し、状態変更や実行許可を行わない。[field と検査の制限](role-handoff-packets.md)を参照。 |
 | `ready` | 引数なしは、今の coding agent が Taxion を操作する静的メタプロンプトを stdout に出し、状態を変更しない。`--install-skill` は home の `.agents/skills/taxion/SKILL.md` に同梱版を明示配置して同じ prompt を出す。`--update-skill` は内容が未改変の Taxion 管理ファイルだけを同梱版へ更新し、同じ prompt を出す。`--check-skill` は本体の許容版・CLI 契約・内容を JSON で確認し、欠落・不一致・改変は非zero終了する。3つの option は併用不可。`--help` は入力形式を表示する。どの経路も設定・workspace・認証を要求せず、モデル・外部 process を起動しない。予算・scope・設定の Human 承認や独立 Reviewer を代替せず、実行準備やskill実ロードの診断でもない。 |
 | `request` | 必須は `--repo REPO` と1秒以上の `--timeout D`。Copilot は30以上の `--max-ai-credits N` も要求し、OpenCode では省略する。任意の `--worktree PATH` は現在の repository root が既定で、clean かつ branch に接続している必要がある。`--max-repairs N` は既定1、範囲0–100。`--context-path FILE` は追跡済み UTF-8 text を最大16 file、合計64 KiB まで繰り返し指定できる。`--cli PATH`・`--base-directory PATH` は Copilot の executable と state directory を指定する。位置引数の文章を元依頼とし、省略時は console で入力する。`/plan` はモデルによる計画、`/approve` は表示計画と期限・repair 回数を持つ coding・review を認可し、`/quit` は実行前に終了する。Copilot の credit ceiling は session 別で、合計予算ではない。 |
 | `config check` | `--sources` は値を含めず設定 field の出典を表示する。`--capabilities` は静的 adapter 対応を示し、実 access・契約資格ではない。`--task ID` は保存 Task 承認、`--dispatch ID` はさらに保存 Dispatch instruction と解決済み設定を照合する。両者は最大一つだけ選ぶ。 |
