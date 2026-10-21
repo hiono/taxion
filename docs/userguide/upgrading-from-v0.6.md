@@ -1,6 +1,6 @@
 # v0.6.x からの更新
 
-v0.7.0 は v0.6.x の ledger をそのまま読む。必須の移行 command はない。更新後に必要な操作は、Task ごとの承認状態の確認だけである。
+v0.7.0 は v0.6.x の ledger をそのまま読む。必須の移行 command はない。更新後に必要な操作は、workspace の承認分類の確認だけである。
 
 ## 変わること
 
@@ -32,9 +32,9 @@ v0.7.0 は v0.6.x の ledger をそのまま読む。必須の移行 command は
 
 `verified-legacy` の Task を bundle-required の運用に移す場合は、現在の契約で再承認する。手順は[drift と legacy Task](drift-and-legacy.md)を参照する。
 
-## 混在する分類
+## 分類の確認
 
-更新直後は、`bundle-required` の Task と `verified-legacy` の Task が混在する。分類は Task ごとに保存済み schema 情報から決まり、一括変換されない。実行予定の Task だけ、gate で分類と verdict を確認する。
+更新直後の workspace は、保存済み schema 情報から `bundle-required` か `verified-legacy` のどちらかに分類される。分類は graph 全体で決まり、Task ごとに混在させない。実行予定の Task について、gate で分類と verdict を確認する。
 
 ## rollback
 
