@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
+	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/store"
 )
@@ -51,6 +53,12 @@ func gateCommand(args []string, output io.Writer) error {
 	if gate != controller.GateContract && flowID == "" {
 		return fmt.Errorf("gate %s requires --flow", gate)
 	}
+	if gate == controller.GateContract && flowID != "" {
+		return fmt.Errorf("gate contract accepts --task, not --flow")
+	}
+	if gate != controller.GateContract && taskID != "" {
+		return fmt.Errorf("gate %s accepts --flow, not --task", gate)
+	}
 	db, err := store.OpenReadOnly(workspaceDBPath())
 	if err != nil {
 		return err
@@ -63,7 +71,14 @@ func gateCommand(args []string, output io.Writer) error {
 	var report controller.GateReport
 	switch gate {
 	case controller.GateContract:
-		report, err = controller.ContractGateReport(state.Graph, taskID)
+		configuration := core.ApprovalConfiguration{}
+		if resolved, resolveErr := resolveConfiguration(); resolveErr == nil {
+			configuration, err = approvalConfigurationFor(resolved.Config, resolved.Sources)
+			if err != nil {
+				return err
+			}
+		}
+		report, err = controller.ContractGateReport(state.Graph, taskID, configuration)
 	case controller.GateExecution:
 		report, err = controller.ExecutionGateReport(state.Graph, flowID)
 	case controller.GatePublication:
@@ -116,6 +131,11 @@ func printGateReport(output io.Writer, report controller.GateReport) error {
 			return err
 		}
 	}
+	if report.AuthorizationImpact != "" {
+		if _, err := fmt.Fprintf(output, "authorization impact: %s\n", report.AuthorizationImpact); err != nil {
+			return err
+		}
+	}
 	for _, drift := range report.Drifts {
 		if _, err := fmt.Fprintf(output, "drift: %s (%s)\n", drift.Dimension, drift.AuthorizationImpact); err != nil {
 			return err
@@ -130,6 +150,9 @@ func printGateReport(output io.Writer, report controller.GateReport) error {
 		if _, err := fmt.Fprintf(output, "next authorized transition: %s\n", report.NextAuthorizedTransition); err != nil {
 			return err
 		}
+	}
+	if _, err := fmt.Fprintf(output, "observed at: %s\n", report.ObservedAt.Format(time.RFC3339)); err != nil {
+		return err
 	}
 	_, err := fmt.Fprintln(output, "state changed: false")
 	return err

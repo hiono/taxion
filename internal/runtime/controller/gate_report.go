@@ -82,8 +82,10 @@ func (r *GateReport) blocked(code, message string) {
 }
 
 // ContractGateReport observes whether the saved Task may enter execution under
-// the current approval classification. It never approves anything.
-func ContractGateReport(graph core.TaskGraph, taskID string) (GateReport, error) {
+// the current approval classification. It never approves anything. The optional
+// configuration is the current effective configuration; without it a
+// bundle-required Task fails closed.
+func ContractGateReport(graph core.TaskGraph, taskID string, configuration ...core.ApprovalConfiguration) (GateReport, error) {
 	task, ok := graph.GraphTask(taskID)
 	if !ok {
 		return GateReport{}, fmt.Errorf("taxion: contract gate requires an existing Task %q", taskID)
@@ -95,62 +97,78 @@ func ContractGateReport(graph core.TaskGraph, taskID string) (GateReport, error)
 	}
 	report.Hashes.Task = hash
 	switch task.Status {
-	case core.Completed, core.Rejected, core.Cancelled:
+	case core.Ready:
+	case core.Completed, core.Rejected, core.Cancelled, core.Superseded:
 		report.fail("task-not-executable", "Task is already closed and cannot enter execution")
 		return report, nil
-	case core.Draft, core.Blocked, core.HumanDecisionRequired:
-		report.blocked("task-not-ready", "Task must be READY or ACTIVE before execution entry")
+	default:
+		report.blocked("task-not-ready", "Task must be READY before execution entry")
+		return report, nil
 	}
 	switch graph.ApprovalRequirement() {
 	case core.ApprovalVerifiedLegacy:
-		if report.Verdict == GateVerdictPass {
-			report.NextAuthorizedTransition = "execute within the verified legacy contract"
-		}
+		report.NextAuthorizedTransition = "execute within the verified legacy contract"
 		return report, nil
 	case core.ApprovalInvalidOrAmbiguous:
+		report.AuthorizationImpact = core.ImpactInvalid
 		report.fail("invalid-authorization-schema", "saved approval schema is inconsistent or newer than this binary")
 		return report, nil
 	}
-	bundle, ok := graph.NewestApproval(taskID)
-	if !ok {
-		report.blocked("missing-approval-bundle", "Task requires an approval bundle")
-		report.NextRequiredApproval = "record a matching approval bundle for this Task"
+	if newest, ok := graph.NewestApproval(taskID); ok &&
+		(newest.BundleVersion != core.ApprovalBundleVersion ||
+			newest.CanonicalizationVersion != core.ApprovalCanonicalizationVersion) {
+		report.Hashes.Bundle = newest.BundleHash
+		report.AuthorizationImpact = core.ImpactInvalid
+		report.fail("invalid-authorization-schema", "saved approval bundle version is not supported")
 		return report, nil
 	}
-	report.Hashes.Proposal = bundle.ProposalHash
-	report.Hashes.Record = bundle.RecordHash
-	report.Hashes.Bundle = bundle.BundleHash
-	drifts, err := bundle.Drifts(task, bundle.Configuration)
-	if err != nil {
+	current := core.ApprovalConfiguration{}
+	if len(configuration) != 0 {
+		current = configuration[0]
+	}
+	bundle, err := graph.CheckBundleAtEntry(taskID, core.EntryStartReviewFlow, current)
+	if err == nil {
+		report.Hashes.Proposal = bundle.ProposalHash
+		report.Hashes.Record = bundle.RecordHash
+		report.Hashes.Bundle = bundle.BundleHash
+		report.NextAuthorizedTransition = "start or advance the review flow"
+		return report, nil
+	}
+	var entry *core.EntryCheckError
+	if !errors.As(err, &entry) {
 		return GateReport{}, err
 	}
-	if len(drifts) != 0 {
-		report.Drifts = drifts
+	report.Hashes.Bundle = entry.BundleHash
+	report.Drifts = entry.Drifts
+	switch entry.Code {
+	case "task-not-ready":
+		report.blocked("task-not-ready", "Task must be READY before execution entry")
+	case "invalid-bundle":
+		report.AuthorizationImpact = core.ImpactInvalid
+		report.fail("approval-invalid", "saved approval no longer matches the Task")
+	case "no-matching-bundle":
 		invalid := false
-		for _, drift := range drifts {
+		for _, drift := range entry.Drifts {
 			if drift.AuthorizationImpact == core.ImpactInvalid {
 				invalid = true
+				break
 			}
 		}
-		impact := core.ImpactReapproval
-		if invalid {
-			impact = core.ImpactInvalid
-		}
-		report.AuthorizationImpact = impact
-		if invalid {
+		switch {
+		case invalid:
+			report.AuthorizationImpact = core.ImpactInvalid
 			report.fail("approval-invalid", "saved approval no longer matches the Task")
-		} else {
+		case len(entry.Drifts) != 0:
+			report.AuthorizationImpact = core.ImpactReapproval
 			report.blocked("reapproval-required", "saved approval does not cover the current Task basis")
 			report.NextRequiredApproval = "record a new approval bundle for the current proposal hash"
+		default:
+			report.blocked("missing-approval-bundle", "Task requires an approval bundle")
+			report.NextRequiredApproval = "record a matching approval bundle for this Task"
 		}
-		return report, nil
-	}
-	if err := bundle.Verify(task, bundle.Configuration); err != nil {
-		report.fail("approval-invalid", "saved approval bundle does not verify")
-		return report, nil
-	}
-	if report.Verdict == GateVerdictPass {
-		report.NextAuthorizedTransition = "start or advance the review flow"
+	default:
+		report.blocked("approval-unavailable", "saved approval cannot authorize execution entry")
+		report.NextRequiredApproval = "record a matching approval bundle for this Task"
 	}
 	return report, nil
 }
@@ -242,6 +260,3 @@ func GateExitCode(verdict string) int {
 		return 1
 	}
 }
-
-// ErrGateNotPassed marks a report whose verdict is not pass.
-var ErrGateNotPassed = errors.New("taxion: gate did not pass")
