@@ -12,7 +12,7 @@ _taxion_complete() {
     done
     local candidates=''
     case "$path" in
-        '') candidates='--help --store --version acp audit completion config conversation dispatch doctor gen-token git help init memory ready records request resume review runtime serve specification task tools workflow workspace' ;;
+        '') candidates='--help --store --version acp audit completion config conversation dispatch doctor gen-token git help init memory ready records request resume review role-packet runtime serve specification task tools workflow workspace' ;;
         'acp') candidates='--base-directory --cli --coder-system-prompt-file --compact-context --controller-validation-submission --help --managed-commit --managed-stage --max-ai-credits --reviewer-system-prompt-file --scanner --timeout --tools' ;;
         'audit') candidates='verify' ;;
         'audit verify') candidates='--audit --help' ;;
@@ -77,6 +77,9 @@ _taxion_complete() {
         'request') candidates='--base-directory --budget-guidance --cli --context-path --help --max-ai-credits --max-repairs --max-task-nano-aiu --repo --timeout --worktree' ;;
         'resume') candidates='--help --session' ;;
         'review') candidates='--help --repo --sha --task' ;;
+        'role-packet') candidates='create verify' ;;
+        'role-packet create') candidates='--acceptance-digest --baseline-sha --help --previous-evidence-hash --prohibit --role --scope-digest --target-tree-hash --task --task-hash' ;;
+        'role-packet verify') candidates='--expected-hash --file --help' ;;
         'runtime') candidates='auth commit events resume send start stop' ;;
         'runtime auth') candidates='--base-directory --budget-guidance --cli --compact-context --controller-validation-submission --dispatch --help --managed-commit --managed-stage --max-ai-credits --message-file --prompt-file --review-source-worktree --scanner --strict-result-identities --system-prompt-file --timeout --tools' ;;
         'runtime commit') candidates='--base-directory --budget-guidance --cli --compact-context --controller-validation-submission --dispatch --help --managed-commit --managed-stage --max-ai-credits --message-file --prompt-file --review-source-worktree --scanner --strict-result-identities --system-prompt-file --timeout --tools' ;;
