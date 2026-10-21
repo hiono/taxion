@@ -36,6 +36,8 @@ Task の契約提案を正規化 JSON にし、SHA-256 を取った値を `propo
 
 `proposalHash` は人間が確認する契約の同一性を表し、`recordHash` は保存記録の同一性を表す。bundle は両方を残す。
 
+既存 READY Task の再承認では、`intake-confirmation:TASK_ID` decision の `expectedHash` を immutable な `proposalHash` とする。現在の Task record の hash や過去の bundle から提案の同一性を推定しない。preview、confirmation basis、保存 bundle、Verify はこの参照との一致を確認する。参照の欠落・曖昧さ・競合、既存 bundle との不一致は書込み前に拒否する。正規化の版は digest の計算規則であり、proposal identity を置換する根拠にはしない。旧 hash の暗黙変換や既存承認の修正も行わない。
+
 ### ApprovalBundle の7次元
 
 承認 bundle は次の7つの dimension の digest を持つ。
