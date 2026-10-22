@@ -58,7 +58,7 @@ Requests, planning and Task contracts:
   task transition     Validate and record a Task Graph transition (--file JSON)
   task graph          Print the versioned Task Graph and history
   task validate       Check a Task Graph request without storing it (--manifest JSON; all violations, canonical hash)
-  task authorize      Validate, store and bundle one Task approval (--manifest JSON; append-only audit record)
+  task authorize      Validate and bundle a Task; fill a fresh READY bundle without changing its contract (--manifest JSON)
   task authorize-packets  Preview/confirm a READY Task sequential packet lifecycle (--request JSON)
   task plan           Rebuild a follow-up plan from durable contracts and evidence (--repo required; --include-archived for history)
   gate <name>         Report the contract, resume, execution or publication gate without changing state (--task/--flow, --json)
