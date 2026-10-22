@@ -10,6 +10,8 @@
 
 ## 正式公開
 
+docs / links の明示stepは、既存の `TestDocumentation*`、`TestConfigurationGuide*`、`TestUserGuide*` を実行する。Markdownのlocal pathとheading anchor、設定項目と利用手順の整合性が対象で、外部URLの可用性検査は含まない。これらはfull Go testsにも含まれるが、release log上でも検証範囲を確認できるよう別stepに固定する。
+
 独立 model review の対象 HEAD と PR HEAD、CI、clean worktree を確認して merge する。その merged source の VERSION と一致する未使用 tag を push すると `release.yml` が起動する。既存 release がある tag は拒否し、asset の clobber は使用しない。
 
 workflow は full Go tests / full race / vet / build / web / docs / links / hygiene を実行し、GoReleaser check と archive 生成を行う。最初は draft Release に保存し、6 native runner で archive、mise の明示URLによるfixture導入、product provenance Gate、別pathの同一binaryの拒否・store bytes不変を検証してから公開する。公開後にも全 assets を再取得して bytes/hash を照合し、各 native runner で実際の GitHub asset 自動選択を含む同じ検査を繰り返す。
