@@ -1,5 +1,7 @@
 # Binary release の作成と検証
 
+候補の実測結果と受入れ条件は [検証記録](binary-provenance-validation.md) に保存する。正式release完了とは区別する。
+
 ## 固定した入力
 
 `VERSION` が次の正式 version を指定する。tag は `v` とその内容を結合した値に一致させる。GoReleaser は configuration schema 2 / v2.18.3、Go は1.27.2。CGO_ENABLED=0 で Linux / Darwin / Windows、amd64 / arm64 の6 binary を build する。SQLite は pure-Go driver を使用する。release job で `go mod tidy` を実行しない。
