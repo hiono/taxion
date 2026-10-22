@@ -738,6 +738,24 @@ func TestSetupCLIColdStartAndOfflineCompletion(t *testing.T) {
 		}
 		return output
 	}
+	// Store mode is explicit before setup can initialize persistence.
+	directory := filepath.Join(root, ".taxion")
+	if err := os.Mkdir(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	realDirectory, err := filepath.EvalSymlinks(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := json.Marshal(map[string]any{"schemaVersion": 1, "mode": "development", "storeDirectory": realDirectory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policyFile := filepath.Join(t.TempDir(), "development.json")
+	if err := os.WriteFile(policyFile, policy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	run("provenance", "configure", "--file", policyFile)
 	run(append([]string{"init", "--yes"}, setupArguments()...)...)
 	run("config", "check", "--sources")
 	output := run("doctor", "--cli", doctorFixtureCLI(t), "--json")
