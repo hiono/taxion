@@ -82,6 +82,9 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 			err = fmt.Errorf("taxion: continuous runner requires a fresh issued Dispatch; reconcile existing session %s", dispatch.RuntimeSessionID)
 			break
 		}
+		if err = checkLifecyclePacket(&state, dispatch.ID); err != nil {
+			break
+		}
 		if dispatch.Recipient == "REVIEWER" {
 			dispatch, err = PrepareReview(db, dispatch.ID, flow.Contract.Worktree)
 			if err != nil {

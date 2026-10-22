@@ -131,6 +131,14 @@ lane は最大4本を並行実行し、固定順で集約する。各 lane に�
 
 role handoff packet v1 は CODER・VALIDATOR・REVIEWER 向けに、packet version、Task ID/hash、baseline SHA、target tree hash、scope/acceptance digest、prohibited actions、前段 evidence hash、required output schema を含む。canonical serialization から packet hash を算出し、readback で hash と参照値を検証する。変更・欠落・余分な field は tamper として拒否する。credential を伏せ、会話全文と private reasoning は含めない。packet は参照情報であり実行許可ではない。role instruction は発行後に黙って書き換えず、契約外の変更は再承認を要求する。handoff の hold は次の role を止めるが、実行中の role を取り消さない。
 
+保存 packet が欠落した READY Task には、既存の matching ApprovalBundle を変えずに `task authorize-packets` で lifecycle 承認を追記する。Task 本文や decisions には書き込まない。確認 token は Task record、immutable proposal reference、bundle、baseline / tree、scope / acceptance、欠落参照の申告、同一契約 Reviewer の承認方針に束縛する。既存 Dispatch の採用や、hash からの本文復元は認めない。
+
+packet の canonical bytes と hash、lifecycle 承認、audit は既存 workspace の Records として append-only 保存する。初回 Coder は空の predecessor を許す。Coder の保存済み実 evidence から Validator packet を先に保存し、非モデル Controller が既存の結果 receipt と Git 再検証を行う。実検証に合格した GateReport の hash から Reviewer packet を作る。未来の evidence や packet hash を先取りしない。
+
+明示確認した `same-contract-reviewer/v1` 方針に限り、Controller は同じ objective・scope・acceptance と完全一致の configuration を持つ派生 Reviewer Task の専用 bundle を追加する。`sha256:` 形式の元参照では、派生 Task の confirmation をその Task ID と元 proposal reference に束縛する。intake receipt を持たない manifest 承認 v1 では receipt を創作せず、元の prefix なし proposal reference を bundle に保持する。元 Task の confirmation・decisions・ApprovalBundle は変更しない。既存の execution-entry checker を緩和せず、追加した専用 bundle も通常どおり検査する。repair の契約変更や configuration / tool の許可拡張は委譲しない。
+
+起動前に packet、Dispatch instruction、predecessor evidence を照合する。未知版、欠落、改変、不一致は拒否し、未承認の legacy 参照は検証済み packet と扱わない。非対応 binary への rollback のためにこれらの記録を消すことも認めない。詳細な利用条件は [role handoff packet](../../userguide/role-handoff-packets.md) を参照する。
+
 ### Task 単位の集計と再契約
 
 `workflow evaluate` は Flow の Dispatch 数、Coder/Reviewer session 数、nano-AIU usage、elapsed time、repair/re-review 数について、approved limit・consumed・remaining を報告する。未実行の session/Dispatch を始める前と、usage event 後に ceiling を検査する。Task-wide usage が不明・不完全なら remaining を0として `BUDGET_STOP` にし、新しい session/Dispatch を許可しない。観測した usage が ceiling に達した実行中 session は安全に停止し、Flow を hold して checkpoint と report を保存する。

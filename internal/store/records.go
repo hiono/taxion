@@ -16,13 +16,16 @@ import (
 
 // Records shares the workspace transaction for recovery and approved publication.
 type Records struct {
-	Events   []RuntimeReceipt `json:"events,omitempty"`
-	Budgets  []BudgetAudit    `json:"budgets,omitempty"`
-	Updates  []ExternalUpdate `json:"updates,omitempty"`
-	Findings []FailureRecord  `json:"findings,omitempty"`
-	Requests []RequestRecord  `json:"requests,omitempty"`
-	Restore  *RestoreRecord   `json:"restore,omitempty"`
-	Restores []RestoreRecord  `json:"restores,omitempty"`
+	Packets              []PacketArtifact      `json:"packets,omitempty"`
+	PacketAuthorizations []PacketAuthorization `json:"packetAuthorizations,omitempty"`
+	PacketAudits         []PacketAudit         `json:"packetAudits,omitempty"`
+	Events               []RuntimeReceipt      `json:"events,omitempty"`
+	Budgets              []BudgetAudit         `json:"budgets,omitempty"`
+	Updates              []ExternalUpdate      `json:"updates,omitempty"`
+	Findings             []FailureRecord       `json:"findings,omitempty"`
+	Requests             []RequestRecord       `json:"requests,omitempty"`
+	Restore              *RestoreRecord        `json:"restore,omitempty"`
+	Restores             []RestoreRecord       `json:"restores,omitempty"`
 }
 
 type BudgetAudit struct {
@@ -145,6 +148,9 @@ type ExternalUpdate struct {
 }
 
 func (r Records) validate() error {
+	if err := r.validatePackets(); err != nil {
+		return err
+	}
 	restores := r.Restores
 	if r.Restore != nil {
 		restores = append(slices.Clone(restores), *r.Restore)

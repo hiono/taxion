@@ -36,6 +36,8 @@ taxion task validate --manifest <task-graph-request.json>
 taxion task authorize --manifest <task-graph-request.json> --confirm <confirmationToken>
 taxion task reauthorize --task <task-id>
 taxion task reauthorize --task <task-id> --confirm <confirmationToken>
+taxion task authorize-packets --request <packet-lifecycle.json>
+taxion task authorize-packets --request <packet-lifecycle.json> --confirm <confirmationToken>
 taxion workflow start --file <authorized-flow.json>
 taxion workflow advance --id <flow-id>
 taxion workflow run --id <flow-id> --coder-prompt-file <path> --reviewer-prompt-file <path>
@@ -46,6 +48,8 @@ taxion gate contract --task <task-id> --json
 taxion gate execution --flow <flow-id> --json
 taxion gate publication --flow <flow-id> --json
 taxion role-packet verify --file <packet.json> --expected-hash <recorded-packet-hash>
+taxion role-packet list --task <task-id>
+taxion role-packet read --expected-hash <recorded-packet-hash>
 taxion workflow planning-context --id <flow-id>
 taxion workflow planner-draft --file <selected-planning-proposal.json>
 taxion workflow planner-action --file <selected-non-execution-advice.json>
@@ -560,6 +564,8 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | `task plan` | `--repo REPO` の通常計画は archive を除外する。`--include-archived` で履歴を含める場合の action は `ARCHIVED` で、実行許可にはならない。すべて退役済みなら通常計画は空を返す。 |
 | `task authorize` | `--manifest`, `--confirm` confirmation token を提示した後、同じ token でのみ 1 回だけ承認を記録する。承認 bundle は append-only で、configuration 次元を含む |
 | `task reauthorize` | `--task READY_TASK_ID` の保存済み Task を読み戻し、既存の設定承認と異なる effective configuration を二段階で確認する。`--confirm` 前は保存せず、確認後は既存 decision と proposal hash を保ったまま設定承認と bundle を追記する。同一 bundle の再送は重複記録しない |
+| `task authorize-packets` | `--request JSON` で READY CODER Task の逐次 packet lifecycle と同一契約の派生 Reviewer bundle 追加を preview する。`--confirm TOKEN` でだけ別記録の lifecycle 承認を追記し、Task と既存 ApprovalBundle は変えない。Dispatch 発行前かつ matching bundle が必要。[request 形式・委譲範囲・逐次検証](role-handoff-packets.md)を参照。 |
+| `role-packet list`, `role-packet read` | `list --task ID` は lifecycle 承認・欠落参照・packet audit を読み戻す。`read --expected-hash SHA256` は workspace に保存した canonical packet bytes を照合して返す。両方 read-only。未保存 hash からの再構成はしない。 |
 | `task validate` | `--manifest FILE`（`--file` も可）が必須で、保存せずに `task track` と同じ規則で Graph request を検査する。`stateChanges` は常に `none` で、workspace が無い場合は空の Graph として検査し database を作らない。違反は全件を一度に返し、合格時は保存される契約の canonical JSON と SHA-256 を返す。Task ID、Memory、依存、supersedes の存在は読み取りだけで確認する。credential らしい値は値も digest も返さず `digestWithheld` を立てるが、判定は変えない。WAL の `-shm` が無い database は side file を作らないため拒否する。判定は `task track` と一致する。 |
 | `task track`, `task transition` | `--file JSON` で Task Graph request を渡す。新 Task の `fileAccess` は `{"level":"committed"}` が既定で、Task JSON の `{"level":"exact","paths":["repo/relative/file"]}`・`{"level":"all"}` で範囲を選ぶ。`outputMode` は `commit` が既定。`worktree-tree-snapshot` は commit なしで Controller 取得の Git tree をレビューする。snapshot mode、tree SHA、変更 path は承認契約の一部で、認可済み Task の policy 変更には新しい認可 decision が必要。更新時の `fileAccess` 省略は保存 policy を保つ。snapshot Task の更新では保存 `outputMode` を明示する。`task graph` は保存 Graph を表示し、`task plan --repo REPO` は認可を変えず後続計画を再構成する。 |
 | `dispatch` | `--task ID`・`--repo REPO` が必須。`--relationship TYPE` は `NONE`・`CONTINUES`・`AMENDS`・`SUPERSEDES`・`CANCELS`・`SUSPENDS`・`RESUMES`・`INDEPENDENT` を受け付ける。`NONE` は既定値で、`NONE` 以外または関連先を指定する場合は Task Graph の初期化が必要。`NONE` に `--related-dispatch`・`--relationship-reason` は指定できず、他の関係には両方必要。`INDEPENDENT` の関連先は別 Task の Dispatch でなければならない。 |
