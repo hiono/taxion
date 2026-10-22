@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+func SupportsApprovalBundleVersion(version int) bool {
+	return version == ApprovalBundleVersion
+}
+
+func SupportsApprovalCanonicalizationVersion(version int) bool {
+	return version == ApprovalCanonicalizationVersion || version == ReauthorizationCanonicalizationVersion
+}
+
 const (
 	// ApprovalBundleVersion identifies the bundle record layout.
 	ApprovalBundleVersion = 1
@@ -50,7 +58,7 @@ func ConfirmationTokenFor(proposalHash string, dimensions ApprovalDimensions) (s
 }
 
 func ConfirmationTokenForVersion(version int, proposalHash string, dimensions ApprovalDimensions) (string, error) {
-	if version != ApprovalCanonicalizationVersion && version != ReauthorizationCanonicalizationVersion {
+	if !SupportsApprovalCanonicalizationVersion(version) {
 		return "", graphError("unknown approval canonicalization version")
 	}
 	return CanonicalSHA256(ConfirmationBasis{
@@ -222,7 +230,7 @@ func BundleDimensions(task GraphTask, configuration ApprovalConfiguration) (Appr
 }
 
 func BundleDimensionsForVersion(task GraphTask, configuration ApprovalConfiguration, version int) (ApprovalDimensions, error) {
-	if version != ApprovalCanonicalizationVersion && version != ReauthorizationCanonicalizationVersion {
+	if !SupportsApprovalCanonicalizationVersion(version) {
 		return ApprovalDimensions{}, graphError("unknown approval canonicalization version")
 	}
 	return bundleDimensions(task, configuration, version)
@@ -355,11 +363,11 @@ func (b ApprovalBundle) computeHash() (string, error) {
 // Drifts reports every changed dimension with its authorization impact.
 func (b ApprovalBundle) Drifts(stored GraphTask, current ApprovalConfiguration) ([]ApprovalDrift, error) {
 	var drifts []ApprovalDrift
-	if b.BundleVersion != ApprovalBundleVersion {
+	if !SupportsApprovalBundleVersion(b.BundleVersion) {
 		drifts = append(drifts, ApprovalDrift{Dimension: "bundleVersion", PreviousDigest: fmt.Sprint(b.BundleVersion), CurrentDigest: fmt.Sprint(ApprovalBundleVersion), AuthorizationImpact: ImpactInvalid, Fields: []string{"bundleVersion"}})
 		return drifts, nil
 	}
-	if b.CanonicalizationVersion != ApprovalCanonicalizationVersion && b.CanonicalizationVersion != ReauthorizationCanonicalizationVersion {
+	if !SupportsApprovalCanonicalizationVersion(b.CanonicalizationVersion) {
 		drifts = append(drifts, ApprovalDrift{Dimension: "canonicalizationVersion", PreviousDigest: fmt.Sprint(b.CanonicalizationVersion), CurrentDigest: fmt.Sprint(ApprovalCanonicalizationVersion), AuthorizationImpact: ImpactInvalid, Fields: []string{"canonicalizationVersion"}})
 		return drifts, nil
 	}
