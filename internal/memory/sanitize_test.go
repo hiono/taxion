@@ -11,11 +11,11 @@ func TestRedactSecrets(t *testing.T) {
 	key := "-----BEGIN " + "RSA PRIVATE KEY-----\nABC\n-----END RSA PRIVATE KEY-----"
 	gitlab := "glpat-" + strings.Repeat("a", 20)
 	in := "key " + key + " token gho_abc123 and " + gitlab + " and AKIAIOSFODNN7EXAMPLE " +
-		"mail hiono@example.com ip 192.168.1.10 path /home/onohr/work id 7"
+		"mail user@example.com ip 192.168.1.10 path /home/example/work id 7"
 	out := Redact(DefaultRules, in)
 	for _, secret := range []string{
 		"ABC", "gho_abc123", gitlab, "AKIAIOSFODNN7EXAMPLE",
-		"hiono@example.com", "192.168.1.10", "/home/onohr/work",
+		"user@example.com", "192.168.1.10", "/home/example/work",
 	} {
 		if strings.Contains(out, secret) {
 			t.Fatalf("secret leaked: %q in %q", secret, out)
@@ -55,10 +55,10 @@ func TestRedactCleanPassthrough(t *testing.T) {
 
 func TestRedactEntry(t *testing.T) {
 	e := RedactEntry(Entry{
-		ID: 3, Title: "contact hiono@example.com", Body: "key at /home/onohr/.ssh/id",
+		ID: 3, Title: "contact user@example.com", Body: "key at /home/example/.ssh/id",
 		Scope: ScopeGlobal, Status: "proposed", SourceRefs: []string{"owner hiono@example.com"},
 	})
-	if strings.Contains(e.Title, "hiono@example.com") || strings.Contains(e.Body, "/home/onohr/.ssh/id") ||
+	if strings.Contains(e.Title, "user@example.com") || strings.Contains(e.Body, "/home/example/.ssh/id") ||
 		strings.Contains(e.SourceRefs[0], "hiono@example.com") {
 		t.Fatalf("entry secrets leaked: %+v", e)
 	}

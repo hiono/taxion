@@ -91,7 +91,7 @@ func TestSpecificationsSurviveReviewHandoffAndSourceChangeStopsFlow(t *testing.T
 func TestPrivateSpecificationBlocksPublicationAndRechecksPendingApproval(t *testing.T) {
 	db, _, request := reviewFlowFixture(t)
 	spec := attachSpecification(t, db, request.TaskID)
-	proposal := publicationProposal()
+	proposal := publicationProposal(t)
 	hash, err := PublicationHash(proposal)
 	if err != nil {
 		t.Fatal(err)
