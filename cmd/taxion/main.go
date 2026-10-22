@@ -98,7 +98,8 @@ Review flows and recovery:
   workflow step       Execute one role turn from a saved review flow (--id; role prompt files or --builtin-prompts)
   workflow show       Read the saved review flow and ceilings (--id required)
   workflow evaluate   Report saved quality gates and measured/unknown costs; no reward score (--id required)
-  gate <name>         Report the contract, execution or publication gate without changing state (--task/--flow, --json)
+  gate <name>         Report the contract, resume, execution or publication gate without changing state (--task/--flow, --json)
+  workflow resume     Verify the saved unstarted Coder boundary, then run within its original contract (--id required)
   workflow lanes      Run read-only controller lanes for one Task and report a machine-readable gate
   workflow recover    Release interrupted runner ownership after recorded execution stop (--file JSON)
   workflow interrupt Request a targeted stop for the active flow (--file JSON)
