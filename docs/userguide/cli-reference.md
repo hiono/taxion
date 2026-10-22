@@ -8,6 +8,8 @@
 
 ## CLI
 
+fresh な READY Task に設定承認だけが保存され、ApprovalBundle がまだない場合も、`task authorize --manifest FILE` を使う。manifest の `task` は保存済み record 全体と完全一致させ、`actor` と `reason` を指定する。Flow・Dispatch が存在せず、immutable proposal reference と既存の設定承認が現在の設定に一致する場合だけ、preview と `--confirm` で bundle を追記する。Task state・decisions・設定承認・deadline・budget は変更しない。同じ要求は保存済み bundle を再利用し、異なる bundle や処理中の source/configuration 変更は拒否する。詳細は [Task の検証と承認](task-validate-and-authorize.md#fresh-ready-task-の不足-bundle-を生成する)を参照する。
+
 インストール済みの目的別コマンド一覧は `taxion --help`、各コマンドの flag は `taxion COMMAND -h` で確認する。分類は表示上の案内であり、コマンド名や option の構文は変えない。`ready` は状況ごとの操作と承認境界を先に示す。以下は代表的な操作例で、契約の詳細は Task Graph、設定、実行記録の各文書に記載する。
 
 v0.3.1 の `--help`・`-h`・`help` は先頭に `Version:` を表示する。`taxion --version` は `taxion VERSION` を出力し、追加引数を拒否する。Go のビルド情報にある module version（pseudo-version を含む）と、利用可能な VCS revision・`modified=true` を表示する。module version がなければ `(devel)`、module version と revision が両方なければ revision の取得不能も示す。情報自体がなければ `unknown` とする。版確認では設定・Git コマンド・DB・ネットワークを使わない。公開済み v0.3.0 と初回設定補正版 `dd352cf` は未対応。

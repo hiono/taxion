@@ -34,6 +34,16 @@ jobs:
               echo "SDK-001 violation: external dep in internal/core"; exit 1
             fi
           fi
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # Full race can exceed Go's default 10m package timeout under instrumentation.
+      - run: go test -race -timeout 30m ./...
   web:
     runs-on: ubuntu-latest
     steps:
