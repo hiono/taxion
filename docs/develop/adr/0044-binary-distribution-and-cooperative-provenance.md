@@ -2,7 +2,7 @@
 
 ## 状態
 
-採用。Issue #143 の方針A。
+採用。Issue #143 の Binary Distribution + Cooperative Provenance Gate。
 
 ## 背景
 
@@ -16,7 +16,7 @@ product operation は、承認済み manifest hash pin、archive hash、executab
 
 development mode は隔離 fixture/store に限定する。product policy を上書きする便宜的な mode switch は作らない。利用者が管理する manifest pin と policy を trust root とし、付属 checksum だけを独立署名と見なさない。
 
-これは local administrator を防御しない方針Aである。検査を削除した source や旧 binary に対する物理的な SQLite 書込み遮断、別 writer service、daemon、OS identity 分離は実装しない。hash 検査の削除や policy 改変が可能な管理者を防御できるとは記載しない。
+これは協調的な CLI による誤使用防止であり、local administrator を防御しない。検査を削除した source や旧 binary に対する物理的な SQLite 書込み遮断、別 writer service、daemon、OS identity 分離は実装しない。hash 検査の削除や policy 改変が可能な管理者を防御できるとは記載しない。
 
 ## 結果と rollback
 

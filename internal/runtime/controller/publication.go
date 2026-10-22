@@ -15,6 +15,7 @@ import (
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitguard"
+	"github.com/hiono/taxion/internal/publictext"
 	"github.com/hiono/taxion/internal/store"
 	"github.com/hiono/taxion/internal/tools"
 )
@@ -72,6 +73,9 @@ func PublicationHash(update store.ExternalUpdate) (string, error) {
 	}
 	if len(update.Body) > 60000 || len(update.Title) > 256 {
 		return "", fmt.Errorf("taxion: publication exceeds the approved text limit")
+	}
+	if err := publictext.Check(update.Title+"\n"+update.Body, false); err != nil {
+		return "", fmt.Errorf("taxion: publication policy: %w", err)
 	}
 	body, err := json.Marshal(update)
 	return receiptHash(string(body)), err
