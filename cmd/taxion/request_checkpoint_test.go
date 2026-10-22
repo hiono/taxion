@@ -123,6 +123,57 @@ func TestRequestMinimalPlanRejectsCredentialBeforeTaskCreation(t *testing.T) {
 	}
 }
 
+func TestRequestResumeWithoutMinimalPlanNeverSubstitutesRequestDigest(t *testing.T) {
+	for _, stage := range []string{"before-first-planner", "after-answer"} {
+		t.Run(stage, func(t *testing.T) {
+			_, args := requestFixture(t)
+			calls := 0
+			planner := func(ctx context.Context, db *store.Store, selection config.Config, task core.GraphTask,
+				text string, credits float64, cli, base string) (controller.QuestionResult, error) {
+				calls++
+				return fixturePlan(t, requestFixtureAnswer([]string{"Which behavior?"}))(ctx, db, selection, task, text, credits, cli, base)
+			}
+			if err := requestCommand(append(args, "add search"), strings.NewReader("/plan\n"), io.Discard, planner, nil); err != nil {
+				t.Fatal(err)
+			}
+			db, state, err := loadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			operation := *state.Records.Operation
+			operation.Owner = "crash-fixture"
+			var checkpoint requestCheckpoint
+			if err := json.Unmarshal(operation.Checkpoint, &checkpoint); err != nil {
+				t.Fatal(err)
+			}
+			checkpoint.Answer, checkpoint.PlannerStarted = nil, false
+			operation.State = "RUNNING"
+			if stage == "before-first-planner" {
+				operation.PlanningNanoAIU = 0
+			}
+			data, err := json.Marshal(checkpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			operation.Checkpoint, operation.CheckpointHash = data, core.SHA256Hex(data)
+			if err := db.UpdateWorkspace(func(current *store.Workspace) error {
+				current.Records.Operation = &operation
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := db.LoadWorkspace()
+			err = requestCommand([]string{"--resume", operation.ID}, strings.NewReader(""), io.Discard, planner, nil)
+			after, loadErr := db.LoadWorkspace()
+			if err == nil || !strings.Contains(err.Error(), "transient input is unavailable") ||
+				loadErr != nil || calls != 1 || !reflect.DeepEqual(before, after) {
+				t.Fatal("resume fabricated intent from a digest or changed saved state", err, loadErr)
+			}
+		})
+	}
+}
+
 func TestRequestApprovalRejectsAuthoritativeRecordAndExecutionDrift(t *testing.T) {
 	_, args := requestFixture(t)
 	if err := requestCommand(append(args, "add search"), strings.NewReader("/plan\n/approve\n"), io.Discard,

@@ -488,6 +488,9 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		return fmt.Errorf("request has an uncertain paid Planner attempt; reconcile the saved session receipt before continuation; checkpoint retained")
 	}
 	conversation := []requestMessage{{Role: "human", Text: request}}
+	if resuming {
+		conversation = nil
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err

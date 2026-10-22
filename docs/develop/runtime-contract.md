@@ -92,7 +92,7 @@ checkpoint v2 は既存の正規化 document 保存を使い、operation ID、�
 
 再開は保存済み期限と上限を維持し、Planner の実測使用量を Flow 上限から差し引く。利用量不明なら追加モデル呼出しを止める。`request --status` では owner と checkpoint 本文を除き、state と予算を返す。`claimRecorded` は保存した claim の有無であり、process の生存証明ではない。承認後は既存4 lane を一括実行し、既存 bounded runner に Coder・非モデル validation・Reviewer を任せる。実行 event は保存するが console へ逐次報告しない。未終了 operation は portable snapshot の対象にできない。
 
-入力終了後の質問再表示はモデルを使わない。送信開始済みで結果が不明の Planner は checkpoint で検出し、再送しない。実行中に process が止まって runner claim が残った場合は、既存の停止確認・receipt/Git 照合を済ませてから再開する。復旧のために Task 契約、proposal hash、既存 decision、ApprovalBundle、budget hard-stop を書き換えない。旧 binary は未知の `operation` field を拒否するため、rollback は operation 保存前の snapshot を使用する。
+入力終了後の質問再表示はモデルを使わない。最小計画・未回答質問の保存前に停止し、入力本文が失われた checkpoint は、依頼 digest を本文の代わりに使わず再開を拒否する。送信開始済みで結果が不明の Planner は checkpoint で検出し、再送しない。実行中に process が止まって runner claim が残った場合は、既存の停止確認・receipt/Git 照合を済ませてから再開する。復旧のために Task 契約、proposal hash、既存 decision、ApprovalBundle、budget hard-stop を書き換えない。旧 binary は未知の `operation` field を拒否するため、rollback は operation 保存前の snapshot を使用する。
 ## 保存結果と checkpoint の復旧
 
 `workflow recover` は、process の停止確認と終了 Dispatch の照合後に、保存した runner claim の完全一致を確認して解放する。最新結果が成功した Coder 提出なら、保存結果の契約と現在の Git の事実も確認する。対象は repository origin、branch、HEAD、baseline の祖先関係、変更 path、clean worktree、検証の出典、commit parent。今回の観測は、観測時刻を除き保存済み Git 証拠と一致する必要がある。元の結果と timestamp は変更しない。
