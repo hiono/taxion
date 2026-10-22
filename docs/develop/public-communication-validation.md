@@ -18,6 +18,8 @@ Issue #143 は採用済みの正式 binary 配布と協調的な provenance 検�
 
 既存の versioned Release manifest も immutable な配布証拠として保持した。v0.7.8 の本文とレビュー要約を編集したため、manifest に記録された本文・レビュー結果の digest は公開当時の原文に対する履歴値であり、現在の公開文の hash ではない。この区別は Release 本文にも明記し、既存の manifest や binary を再発行していない。
 
+SDK 実験コメントからは内部の usage 集計と実行回数・上限を除き、修正要求、追加レビューの承認、停止した実行、検証範囲と未実装事項を保持した。取り下げた補助 metadata は Release の最終添付一覧から除かれ、旧 asset URL が取得不能であることも確認した。編集途中の添付一覧やリンクを、是正後の最終状態の証拠として扱わない。
+
 ## 再発防止の検証
 
 `internal/publictext` のテストは公開 review の生成結果、正常な技術説明、raw な実行結果、内部状態、非公開パス、secret-pattern、protected identifier、誤検出・見逃しの回帰を検査する。`scripts/publictext` は不正入力で公開用の本文を出力せず、未実施の検証を成功へ補完しない。
