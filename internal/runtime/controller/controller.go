@@ -56,6 +56,9 @@ func PrepareReview(db *store.Store, dispatchID, source string) (core.GraphDispat
 			return fmt.Errorf("taxion: prepare review requires an issued Reviewer Dispatch")
 		}
 		prepared = dispatch
+		if err := checkLifecyclePacket(state, dispatchID); err != nil {
+			return err
+		}
 		if err := state.Graph.CheckHandoffStart(dispatchID); err != nil {
 			return err
 		}
