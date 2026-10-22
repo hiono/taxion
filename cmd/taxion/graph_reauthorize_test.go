@@ -314,6 +314,19 @@ func testReadyTaskReauthorization(t *testing.T, withBundle bool, reference strin
 	if err := reauthorized.Verify(stored, currentConfiguration); err != nil {
 		t.Fatalf("appended bundle failed verification: %v", err)
 	}
+	if reauthorized.BundleVersion != 1 || reauthorized.CanonicalizationVersion != 2 {
+		t.Fatal("fixture did not persist the v0.7.2 reauthorization bundle versions")
+	}
+	gate, err := controller.ContractGateReport(after, task.ID, currentConfiguration)
+	if err != nil || gate.Verdict != controller.GateVerdictPass ||
+		gate.Hashes.Bundle != reauthorized.BundleHash || gate.NextRequiredApproval != "" ||
+		gate.StateChanged || len(gate.Drifts) != 0 {
+		t.Fatalf("read-only gate rejected its own reauthorization bundle: %+v, %v", gate, err)
+	}
+	entry, err := after.CheckBundleAtEntry(task.ID, core.EntryStartReviewFlow, currentConfiguration)
+	if err != nil || entry.BundleHash != reauthorized.BundleHash {
+		t.Fatalf("same bundle required reapproval: %v", err)
+	}
 	db, err = openWorkspace()
 	if err != nil {
 		t.Fatal(err)

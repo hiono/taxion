@@ -452,9 +452,8 @@ func buildTaskReauthorizationPreview(graph core.TaskGraph, task core.GraphTask, 
 		return taskReauthorizationPreview{}, fmt.Errorf("the existing configuration approval already matches the effective configuration")
 	}
 	for _, existing := range graph.ApprovalsForTask(task.ID) {
-		if existing.BundleVersion != core.ApprovalBundleVersion ||
-			existing.CanonicalizationVersion != core.ApprovalCanonicalizationVersion &&
-				existing.CanonicalizationVersion != core.ReauthorizationCanonicalizationVersion {
+		if !core.SupportsApprovalBundleVersion(existing.BundleVersion) ||
+			!core.SupportsApprovalCanonicalizationVersion(existing.CanonicalizationVersion) {
 			return taskReauthorizationPreview{}, fmt.Errorf("existing approval uses an unknown bundle or canonicalization version")
 		}
 	}
