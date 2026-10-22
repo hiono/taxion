@@ -1,0 +1,55 @@
+version: 2
+project_name: taxion
+builds:
+  - id: taxion
+    main: ./cmd/taxion
+    binary: taxion
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X main.releaseVersion=v{{ .Version }}
+      - -X main.releaseRevision={{ .FullCommit }}
+      - -X main.releaseBuiltAt={{ .Date }}
+      - -X main.releaseChannel={{ if .IsSnapshot }}development{{ else }}github-release{{ end }}
+snapshot:
+  version_template: '{{ .Env.TAXION_VERSION }}-snapshot'
+archives:
+  - id: binary
+    ids: [taxion]
+    name_template: 'taxion_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - src: .release/release-info.json
+        strip_parent: true
+      - src: .release/THIRD_PARTY_NOTICES.txt
+        strip_parent: true
+checksum:
+  name_template: SHA256SUMS
+source:
+  enabled: false
+release:
+  draft: true
+  prerelease: auto
+  mode: keep-existing
+  header: |
+    ## Binary distribution と product provenance
+
+    Linux、macOS、Windows の amd64 / arm64 向け archive を配布します。
+    mise GitHub backend で Go compiler や source checkout なしに導入できます。
+    product operation は明示 policy と正式 manifest / archive / executable hash、
+    embedded version / source revision、mise 管理下の実 path を検証してから開始します。
+    source build は隔離した development mode 用です。
+
+    この保護は誤使用防止であり、local administrator や旧 binary への OS アクセス隔離ではありません。
+    Windows の controller shell validation は Unix process-group cancellation を必要とするため未対応です。
+    rollbackVersion v0.7.8 の binary は linux-amd64 のみ利用可能で、
+    旧版への binary 切替は新しい provenance Gate を持つ product operation の継続を許可しません。
+changelog:
+  disable: true

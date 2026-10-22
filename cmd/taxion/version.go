@@ -7,7 +7,13 @@ import (
 	"strings"
 )
 
+// Set only by the pinned release workflow; version text alone is not provenance.
+var releaseVersion, releaseRevision, releaseBuiltAt, releaseChannel string
+
 func currentBuildVersion() string {
+	if releaseVersion != "" {
+		return releaseVersion
+	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return "unknown (build information unavailable)"
