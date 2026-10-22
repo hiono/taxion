@@ -114,13 +114,19 @@ func ContractGateReport(graph core.TaskGraph, taskID string, configuration ...co
 		report.fail("invalid-authorization-schema", "saved approval schema is inconsistent or newer than this binary")
 		return report, nil
 	}
-	if newest, ok := graph.NewestApproval(taskID); ok &&
-		(newest.BundleVersion != core.ApprovalBundleVersion ||
-			newest.CanonicalizationVersion != core.ApprovalCanonicalizationVersion) {
-		report.Hashes.Bundle = newest.BundleHash
-		report.AuthorizationImpact = core.ImpactInvalid
-		report.fail("invalid-authorization-schema", "saved approval bundle version is not supported")
-		return report, nil
+	if newest, ok := graph.NewestApproval(taskID); ok {
+		if !core.SupportsApprovalBundleVersion(newest.BundleVersion) {
+			report.Hashes.Bundle = newest.BundleHash
+			report.AuthorizationImpact = core.ImpactInvalid
+			report.fail("invalid-authorization-schema", "saved approval bundle version is not supported")
+			return report, nil
+		}
+		if !core.SupportsApprovalCanonicalizationVersion(newest.CanonicalizationVersion) {
+			report.Hashes.Bundle = newest.BundleHash
+			report.AuthorizationImpact = core.ImpactInvalid
+			report.fail("invalid-authorization-schema", "saved approval canonicalization version is not supported")
+			return report, nil
+		}
 	}
 	current := core.ApprovalConfiguration{}
 	if len(configuration) != 0 {

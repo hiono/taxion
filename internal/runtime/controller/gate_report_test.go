@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -113,6 +114,89 @@ func TestContractGateFailsClosedWithoutCurrentConfiguration(t *testing.T) {
 	}
 	if report.Verdict != GateVerdictBlocked {
 		t.Fatalf("bundle without current configuration must not pass: %+v", report)
+	}
+}
+
+func TestContractGateAcceptsReauthorizationVersions(t *testing.T) {
+	task := gateTestTask()
+	task.Decisions = []core.TaskDecision{{
+		ID: "intake-confirmation:" + task.ID, Source: "human",
+		Text: `{"taskId":"gate-task","expectedHash":"sha256:b02845111a47d4525e30b52aa2cb2ba38fc42923340da33994eebff206597b45"}`,
+	}}
+	proposal, err := core.ImmutableProposalHash(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration := gateTestConfiguration(t)
+	for _, version := range []int{core.ApprovalCanonicalizationVersion, core.ReauthorizationCanonicalizationVersion} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			compose := core.ComposeApprovalBundleWithProposalHash
+			if version == core.ReauthorizationCanonicalizationVersion {
+				compose = core.ComposeReauthorizationApprovalBundleWithProposalHash
+			}
+			bundle, err := compose("approval", proposal, task, configuration, "human", "human", "approve", time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, test := range []struct {
+				name   string
+				mutate func(*core.TaskGraph, *core.ApprovalConfiguration)
+				want   string
+				code   string
+			}{
+				{"matching", func(*core.TaskGraph, *core.ApprovalConfiguration) {}, GateVerdictPass, ""},
+				{"configuration-drift", func(_ *core.TaskGraph, c *core.ApprovalConfiguration) {
+					*c, err = core.SelectApprovalConfiguration(json.RawMessage(`{"model":"changed"}`), map[string]string{"model": "user"})
+					if err != nil {
+						t.Fatal(err)
+					}
+				}, GateVerdictBlocked, "reapproval-required"},
+				{"unknown-canonicalization", func(g *core.TaskGraph, _ *core.ApprovalConfiguration) {
+					g.Approvals[0].CanonicalizationVersion = 99
+				}, GateVerdictFail, "invalid-authorization-schema"},
+				{"unknown-bundle", func(g *core.TaskGraph, _ *core.ApprovalConfiguration) {
+					g.Approvals[0].BundleVersion = 99
+				}, GateVerdictFail, "invalid-authorization-schema"},
+				{"tampered", func(g *core.TaskGraph, _ *core.ApprovalConfiguration) {
+					g.Approvals[0].Reason = "ghp_" + strings.Repeat("c", 24)
+				}, GateVerdictBlocked, "missing-approval-bundle"},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					graph := core.TaskGraph{
+						Version: 1, Tasks: []core.GraphTask{task},
+						ApprovalSchemaVersion: core.CurrentApprovalSchemaVersion,
+						Approvals:             []core.ApprovalBundle{bundle},
+					}
+					current := configuration
+					test.mutate(&graph, &current)
+					before, err := core.CanonicalSHA256(graph)
+					if err != nil {
+						t.Fatal(err)
+					}
+					report, err := ContractGateReport(graph, task.ID, current)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if report.Verdict != test.want || report.StateChanged ||
+						test.code != "" && !hasGateCondition(report, test.code) {
+						t.Fatalf("unexpected gate report: %+v", report)
+					}
+					if test.name == "matching" && (report.NextRequiredApproval != "" ||
+						report.AuthorizationImpact == core.ImpactReapproval || len(report.Drifts) != 0 ||
+						report.Hashes.Bundle != bundle.BundleHash) {
+						t.Fatalf("matching bundle required reapproval: %+v", report)
+					}
+					after, err := core.CanonicalSHA256(graph)
+					if err != nil || before != after {
+						t.Fatal("read-only gate changed the graph")
+					}
+					data, err := json.Marshal(report)
+					if err != nil || strings.Contains(string(data), "ghp_"+strings.Repeat("c", 24)) {
+						t.Fatal("gate report exposed a credential")
+					}
+				})
+			}
+		})
 	}
 }
 
