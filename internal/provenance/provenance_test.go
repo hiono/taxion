@@ -2,9 +2,11 @@ package provenance
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -24,12 +26,82 @@ func writeJSON(t *testing.T, path string, value any) []byte {
 	return data
 }
 
+func TestWindowsZipArchiveContract(t *testing.T) {
+	policy, identity, manifest := fixture(t)
+	contents, err := os.ReadFile(policy.ArchivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gzipReader, err := gzip.NewReader(bytes.NewReader(contents))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gzipReader.Close()
+	tarReader := tar.NewReader(gzipReader)
+	var output bytes.Buffer
+	zipWriter := zip.NewWriter(&output)
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := header.Name
+		if name == "taxion" {
+			name = "taxion.exe"
+		}
+		entry, err := zipWriter.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.Copy(entry, tarReader); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	identity.OS = "windows"
+	artifact := manifest.Artifacts[4]
+	if artifact.OS != "windows" || artifact.Format != "zip" {
+		t.Fatal("fixture did not select Windows artifact")
+	}
+	if err := verifyArchive(output.Bytes(), artifact, identity); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestManifestRequiredIdentityFields(t *testing.T) {
+	for _, name := range []string{"dirty", "timestamp", "ci-run", "rollback-platforms"} {
+		t.Run(name, func(t *testing.T) {
+			policy, identity, manifest := fixture(t)
+			switch name {
+			case "dirty":
+				manifest.Dirty = nil
+			case "timestamp":
+				manifest.BuildTimestamp = "unknown"
+			case "ci-run":
+				manifest.CIRun = "https://github.com/hiono/taxion/actions/runs/"
+			case "rollback-platforms":
+				manifest.RollbackPlatforms = nil
+			}
+			policy.ManifestSHA256 = Hash(writeJSON(t, policy.ManifestPath, manifest))
+			if _, err := Verify(policy, policy.StoreDirectory, identity); err == nil {
+				t.Fatal("incomplete manifest accepted")
+			}
+		})
+	}
+}
+
 func fixture(t *testing.T) (Policy, Identity, Manifest) {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	binary := filepath.Join(root, "installs", "github-hiono-taxion", "0.7.9", "taxion")
 	if err := os.MkdirAll(filepath.Dir(binary), 0700); err != nil {
 		t.Fatal(err)
@@ -68,9 +140,10 @@ func fixture(t *testing.T) (Policy, Identity, Manifest) {
 	if err := os.WriteFile(policy.ArchivePath, packed.Bytes(), 0600); err != nil {
 		t.Fatal(err)
 	}
-	manifest := Manifest{SchemaVersion: 2, Version: id.Version, Tag: id.Version, SourceRevision: id.Revision,
+	dirty := false
+	manifest := Manifest{SchemaVersion: 2, Version: id.Version, Tag: id.Version, SourceRevision: id.Revision, Dirty: &dirty,
 		BuildTimestamp: "2026-10-23T00:00:00Z", GoVersion: "go1.27.2", GoreleaserVersion: "2.18.3",
-		MiseIdentifier: "github:hiono/taxion@0.7.9", RollbackVersion: "v0.7.8",
+		MiseIdentifier: "github:hiono/taxion@0.7.9", RollbackVersion: "v0.7.8", RollbackPlatforms: []string{"linux-amd64"},
 		ReleaseURL:  "https://github.com/hiono/taxion/releases/tag/v0.7.9",
 		GeneratedBy: "hiono/taxion/.github/workflows/release.yml",
 		CIRun:       "https://github.com/hiono/taxion/actions/runs/12345", Channel: "github-release"}

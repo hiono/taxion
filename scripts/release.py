@@ -72,31 +72,33 @@ def prepare(dist, tag, snapshot=False):
 
 def manifest(dist, tag):
     info = json.loads(pathlib.Path(".release/release-info.json").read_text())
-    assert info["version"] == tag
+    build = json.loads((dist / "metadata.json").read_text())
+    if info["version"] != tag or info["channel"] != "github-release" or build["commit"] != info["sourceRevision"] or build["tag"] != tag:
+        raise ValueError("formal manifest requires matching tagged release metadata")
     artifacts = []
     sums = (dist / "SHA256SUMS").read_text()
-    for os, arch in PLATFORMS:
-        ext = "zip" if os == "windows" else "tar.gz"
-        path = dist / f"taxion_{tag[1:]}_{os}_{arch}.{ext}"
+    for target_os, arch in PLATFORMS:
+        ext = "zip" if target_os == "windows" else "tar.gz"
+        path = dist / f"taxion_{tag[1:]}_{target_os}_{arch}.{ext}"
         data = path.read_bytes()
         digest = sha(data)
         if f"{digest}  {path.name}" not in sums:
             raise ValueError("GoReleaser archive checksum missing or incorrect")
-        executable = "taxion.exe" if os == "windows" else "taxion"
+        executable = "taxion.exe" if target_os == "windows" else "taxion"
         contents = archive_contents(path)
         if set(contents) != {executable, "LICENSE", "release-info.json", "THIRD_PARTY_NOTICES.txt"}:
             raise ValueError(f"unexpected archive contents: {path.name}: {list(contents)}")
         if json.loads(contents["release-info.json"]) != info:
             raise ValueError("archive metadata mismatch")
         artifacts.append({
-            "name": path.name, "os": os, "architecture": arch, "format": ext,
+            "name": path.name, "os": target_os, "architecture": arch, "format": ext,
             "executable": executable, "sha256": digest,
             "executableSha256": sha(contents[executable]),
         })
     result = {
         "schemaVersion": 2, "version": tag, "tag": tag,
         "sourceRevision": info["sourceRevision"],
-        "buildTimestamp": command("git", "show", "-s", "--format=%cI", "HEAD"),
+        "buildTimestamp": build["date"],
         "goVersion": command("go", "env", "GOVERSION"),
         "goreleaserVersion": GORELEASER, "artifacts": artifacts,
         "checksumsSha256": sha((dist / "SHA256SUMS").read_bytes()),
@@ -126,7 +128,8 @@ def smoke(dist):
         binary = pathlib.Path(temp) / executable
         binary.write_bytes(contents[executable])
         binary.chmod(0o755)
-        assert command(str(binary), "--version") == "taxion " + info["version"]
+        if command(str(binary), "--version") != "taxion " + info["version"]:
+            raise ValueError("native archive version mismatch")
         command(str(binary), "--help")
     print(json.dumps({"os": os, "arch": arch, "nativeArchiveSmoke": "PASS"}))
 

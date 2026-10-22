@@ -1,5 +1,6 @@
 """Exercise mise's binary backend with no Go toolchain on the child PATH."""
 
+import argparse
 import functools
 import hashlib
 import http.server
@@ -23,6 +24,9 @@ def run(arguments, env, directory):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--staged-release", action="store_true")
+    args = parser.parse_args()
     system = {"Linux": "linux", "Darwin": "darwin", "Windows": "windows"}[platform.system()]
     arch = {"x86_64": "amd64", "AMD64": "amd64", "aarch64": "arm64", "arm64": "arm64", "ARM64": "arm64"}[platform.machine()]
     dist = pathlib.Path("dist").resolve()
@@ -56,8 +60,8 @@ def main():
         tool = "github:hiono/taxion"
         snapshot = info["channel"] == "development"
         server = None
-        if snapshot:
-            # A snapshot has no public release or SLSA statement; its URL and checksum are pinned below.
+        if snapshot or args.staged_release:
+            # Unpublished fixtures have no public SLSA statement; pin their URL and checksum below.
             env["MISE_GITHUB_SLSA"] = "0"
             handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(dist))
             server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -136,7 +140,8 @@ def main():
                 "platform": system + "-" + arch, "backend": "github",
                 "nativeMiseSmoke": "PASS", "goToolchainOnPath": False,
                 "sourceBuildUsed": False, "version": version, "binaryPath": binary,
-                "selection": "snapshot-native-url" if snapshot else "published-release-autodetection",
+                "selection": "snapshot-native-url" if snapshot else
+                             ("staged-release-native-url" if args.staged_release else "published-release-autodetection"),
                 "productProvenance": "NOT_RUN" if snapshot else "PASS",
                 "copiedBinaryRefusedWithImmutableStore": "NOT_RUN" if snapshot else "PASS",
                 "rollbackTo078": rollback,
