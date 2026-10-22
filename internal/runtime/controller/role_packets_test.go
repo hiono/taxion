@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
@@ -17,17 +18,41 @@ import (
 
 const packetProposal = "sha256:b02845111a47d4525e30b52aa2cb2ba38fc42923340da33994eebff206597b45"
 
+func packetConfigurationFixture(t *testing.T) config.Resolution {
+	t.Helper()
+	resolved, err := config.Resolve([]config.Layer{{Source: "user", Input: []byte(`version: 1
+project: {id: demo}
+repository: {provider: github, host: github.com, path: owner/repo, account: scm-user, credentialRef: scm}
+runtime: {provider: copilot, account: ai-user, credentialRef: ai, contractRef: contract}
+execution: {requester: human, worker: local, approvalRef: configuration-approval}
+`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
+
 func packetFlowFixture(t *testing.T, outputMode ...string) (*store.Store, string, ReviewFlowRequest, store.PacketAuthorization) {
 	t.Helper()
 	mode := ""
 	if len(outputMode) != 0 {
 		mode = outputMode[0]
 	}
+	resolved := packetConfigurationFixture(t)
+	approval := config.Approval{Kind: config.ApprovalKind, TaskID: "implementation",
+		Reason: "Exact parent-only configuration", Allowed: []config.Config{resolved.Config}}
 	db, ledger, request := reviewFlowFixtureWithOutputMode(t, mode, core.TaskDecision{
 		ID: "intake-confirmation:implementation", Source: "human:legacy",
 		Text: `{"taskId":"implementation","expectedHash":"` + packetProposal + `"}`,
+	}, core.TaskDecision{
+		ID:     core.ConfigurationApprovalID(resolved.Config.Execution.ApprovalRef, "implementation"),
+		Source: "human:configuration", Text: string(mustFlowJSON(t, approval)),
 	})
-	request.Configuration = approvalTestConfiguration(t, "https://api.example.test")
+	var err error
+	request.Configuration, err = core.SelectApprovalConfiguration(mustFlowJSON(t, resolved.Config), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	state, err := db.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +118,15 @@ func testPacketLifecycleSequentialRecovery(t *testing.T, mode string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	resolved := packetConfigurationFixture(t)
+	preflightBefore, _ := db.LoadWorkspace()
+	if err := CheckReviewFlowConfiguration(db, flow.ID, resolved.Config, nil); err != nil {
+		t.Fatal("lifecycle approval was not accepted before Coder", err)
+	}
+	preflightAfter, _ := db.LoadWorkspace()
+	if !reflect.DeepEqual(preflightBefore, preflightAfter) {
+		t.Fatal("configuration preflight persisted future approvals, packets or resources")
+	}
 	issued, _ := db.LoadWorkspace()
 	if len(issued.Records.Packets) != 1 || len(issued.Records.PacketAudits) != 1 {
 		t.Fatal("future packets were required or fabricated before Coder")
@@ -101,7 +135,7 @@ func testPacketLifecycleSequentialRecovery(t *testing.T, mode string) {
 	if err != nil || coderPacket.Readback().PreviousEvidenceHash != "" {
 		t.Fatalf("initial Coder predecessor is not empty: %v", err)
 	}
-	coder := executeFlowDispatch(t, db, flow, "", true)
+	coder := executeFlowDispatch(t, db, flow, "", true, resolved)
 	completed, _ := db.LoadWorkspace()
 	if len(completed.Records.Packets) != 1 {
 		t.Fatal("Validator or Reviewer packet was fabricated before handoff")
@@ -141,7 +175,10 @@ func testPacketLifecycleSequentialRecovery(t *testing.T, mode string) {
 	if err := CheckRolePacket(db, flow.DispatchIDs[1]); err != nil {
 		t.Fatal(err)
 	}
-	executeFlowDispatch(t, db, flow, "APPROVE", true)
+	if err := CheckReviewFlowConfiguration(db, flow.ID, resolved.Config, nil); err != nil {
+		t.Fatal("derived Reviewer preflight rejected lifecycle configuration", err)
+	}
+	executeFlowDispatch(t, db, flow, "APPROVE", true, resolved)
 	flow, err = AdvanceReviewFlow(db, ledger, flow.ID, request.Configuration)
 	if err != nil {
 		t.Fatal(err)
@@ -157,6 +194,58 @@ func testPacketLifecycleSequentialRecovery(t *testing.T, mode string) {
 		if _, err := final.Records.ReadPacket(artifact.Hash); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestLifecycleReviewerConfigurationPreflightFailsClosed(t *testing.T) {
+	for _, mode := range []string{"missing", "configuration", "unknown-version", "tampered", "contract", "proposal", "bundle", "review-id"} {
+		t.Run(mode, func(t *testing.T) {
+			db, ledger, request, auth := packetFlowFixture(t)
+			if mode != "missing" {
+				authorizePacketFixture(t, db, request, auth)
+			}
+			flow, err := StartReviewFlow(db, ledger, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, _ := db.LoadWorkspace()
+			selected := packetConfigurationFixture(t).Config
+			if mode == "configuration" {
+				selected.Runtime.Account = "different-account"
+			}
+			if mode == "missing" || mode == "configuration" {
+				if err := CheckReviewFlowConfiguration(db, flow.ID, selected, nil); err == nil {
+					t.Fatal("missing lifecycle/configuration drift passed preflight")
+				}
+			} else {
+				// Invalid persisted records are exercised on a copy; store validation
+				// already prevents saving these malformed authorizations.
+				state, _ := db.LoadWorkspace()
+				switch mode {
+				case "unknown-version":
+					state.Records.PacketAuthorizations[0].Version = 99
+				case "tampered":
+					state.Records.PacketAuthorizations[0].Hash = strings.Repeat("a", 64)
+				case "contract":
+					state.Graph.Tasks[0].Objective += " changed"
+				case "proposal":
+					state.Records.PacketAuthorizations[0].ProposalHash = strings.Repeat("b", 64)
+				case "bundle":
+					state.Records.PacketAuthorizations[0].BundleHash = strings.Repeat("b", 64)
+				}
+				reviewID := flow.ID + "-review-0"
+				if mode == "review-id" {
+					reviewID = "another-flow-review-0"
+				}
+				if _, _, err := lifecycleReviewerConfiguration(&state, flow, reviewID, selected); err == nil {
+					t.Fatal("invalid lifecycle delegation passed preflight")
+				}
+			}
+			after, _ := db.LoadWorkspace()
+			if !reflect.DeepEqual(before, after) {
+				t.Fatal("rejected preflight changed Task, approvals, packets or execution")
+			}
+		})
 	}
 }
 
@@ -345,8 +434,14 @@ func TestPacketLifecycleMissingTamperedAndMismatchedArtifacts(t *testing.T) {
 }
 
 func TestPacketLifecycleManifestV1PreservesBareProposalReference(t *testing.T) {
-	db, ledger, request := reviewFlowFixture(t)
-	request.Configuration = approvalTestConfiguration(t, "https://api.example.test")
+	resolved := packetConfigurationFixture(t)
+	approval := config.Approval{Kind: config.ApprovalKind, TaskID: "implementation",
+		Reason: "Exact parent-only manifest configuration", Allowed: []config.Config{resolved.Config}}
+	db, ledger, request := reviewFlowFixture(t, core.TaskDecision{
+		ID:     core.ConfigurationApprovalID(resolved.Config.Execution.ApprovalRef, "implementation"),
+		Source: "human:configuration", Text: string(mustFlowJSON(t, approval)),
+	})
+	request.Configuration, _ = core.SelectApprovalConfiguration(mustFlowJSON(t, resolved.Config), nil)
 	state, err := db.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)
