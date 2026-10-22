@@ -117,6 +117,10 @@ func TestQuestionAnswersSavedRecordsWithoutChangingWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, err := db.LoadWorkspace()
+	if after.Records.Operation == nil || after.Records.Operation.State != "COMPLETED" || after.Records.Operation.Owner != "" {
+		t.Fatal("question did not finish its admission record")
+	}
+	after.Records.Operation = before.Records.Operation
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("question mutated state, authorization or main-role history", err)
 	}

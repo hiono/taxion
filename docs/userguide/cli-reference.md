@@ -81,9 +81,11 @@ taxion review --task <id> --sha <coder-sha> --repo <repo>
 
 Taxion が intake、完全な hash の承認、Reviewer の設定承認、Flow、同梱の role 別指示を構成する。利用者が JSON や prompt ファイルを作る必要はない。計画中の `/quit`・EOF は記録を残すが、コード実行を開始しない。Planner error は自動 retry しない。
 
-期限は `/plan` から数え、入力を待つ時間も含む。実行には snapshot mode と明示承認した worktree 全体の file access を使う。Planner には会話、commit 済み path 一覧、任意選択した commit 済み context を渡し、tool は渡さない。token 利用量は各呼出しで観測して報告するが、新しい Flow の停止閾値にはしない。
+期限は `/plan` から数え、入力を待つ時間も含む。実行には snapshot mode と明示承認した worktree 全体の file access を使う。Planner には会話、commit 済み path 一覧、任意選択した commit 済み context を渡し、tool は渡さない。token 利用量は各呼出しで観測して保存するが、中間報告や新しい Flow の停止閾値にはしない。
 
-非公開の計画 receipt と実行先・失敗の記録は、request ID・種類・連番・hash とともに SQLite の `records.requests` に保存する。実行イベントは Flow ID から正式な Dispatch・event receipt を参照し、二重保存しない。`taxion records show` で確認・明示 export できる。新しい `requests/` の JSON と `execution.log` は作らず、過去のファイルは削除しない。相談保存前に DB の file mode を所有者だけが読み書きする設定にする。このコマンドは、保存済み計画 console の再開、commit、公開、外部 Issue 作成を行わない。通常 CI は合成 Runtime と実 Git で全体を確認する。この入口の実モデル受入れは未完了。
+非公開の計画 receipt と実行先・失敗の記録は、request ID・種類・連番・hash とともに SQLite の `records.requests` に保存する。実行イベントは Flow ID から正式な Dispatch・event receipt を参照し、二重保存しない。`taxion records show` で確認・明示 export できる。新しい `requests/` の JSON と `execution.log` は作らず、過去のファイルは削除しない。相談保存前に DB の file mode を所有者だけが読み書きする設定にする。このコマンドは commit、公開、外部 Issue 作成を行わない。通常 CI は合成 Runtime と実 Git で全体を確認する。この入口の実モデル受入れは未完了。
+
+`request --status` は read-only の JSON で現在の operation と Flow 予算を返す。`request --resume ID` は保存済みの設定・上限・期限・質問・承認を再利用し、他の option を受け付けない。EOF では質問待ちを残し、`/quit` では終了する。`request --cancel ID` は実行停止と照合を済ませた idle request の operation だけを終了し、Task や既存判断を変更しない。稼働中 Flow・未終了 Dispatch・成否不明の Planner は取消しを拒否する。同じ workspace で別の active operation や workflow を開始できない。質問待ちには回答だけを適用し、承認後の4 lane preflight は一括実行する。同一契約内の Coder・非モデル validation・Reviewer の間では再承認せず、中間の進捗を表示しない。最終 JSON の `gate` は `COMPLETED`、`BLOCKED`、`USAGE_EXCEEDED`、明示取消しは `CANCELLED`。Planner の実測 nano-AIU を全体の上限から控除し、残量だけを Flow に割り当てる。取得量が未知の場合は次のモデル呼出しを止める。期限と予算は再開で増えず、未照合の実行・送信を自動 retry しない。詳細は[利用者ガイド](user-guide.md#人のことばで依頼して計画を相談する)を参照する。
 
 `conversation search` は、承認済みの Markdown、PDF、DOCX、PPTX の抜粋を、編集可能な Task に自動で添付する。会話 export は private に分類し、明示選択した user message だけを検索対象にする。console は metadata を表示し、ローカルの非公開状態には引用した出典全文と用途別の承認を保持する。取込み、選択した runtime への送信、外部公開は別々に承認する。
 
