@@ -207,6 +207,9 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 	if db == nil {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: review flow requires a store")
 	}
+	if err := preparePacketValidator(db, id, runnerID); err != nil {
+		return core.ReviewFlow{}, err
+	}
 	var flow core.ReviewFlow
 	var stopped error
 	err := db.UpdateWorkspace(func(state *store.Workspace) error {
@@ -303,6 +306,9 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 		}
 		if err := revalidateFlowResult(state.Graph, flow, state.Records); err != nil {
 			return stop("result Git revalidation failed: " + err.Error())
+		}
+		if err := recordPacketValidation(state, flow, last); err != nil {
+			return err
 		}
 		if flow.HandoffHeld() {
 			stopped = fmt.Errorf("%w: %s", core.ErrHandoffHeld, flow.ID)
@@ -488,6 +494,9 @@ func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.Rev
 	if err := requireBudgetRoom(state.Graph, *flow, dispatch.Recipient); err != nil {
 		return err
 	}
+	if err := issueLifecyclePacket(state, *flow, dispatch); err != nil {
+		return err
+	}
 	if err := state.Graph.IssueDispatch(dispatch, "controller", "bounded review flow issued instruction"); err != nil {
 		return err
 	}
@@ -581,6 +590,9 @@ func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.Rev
 	if supplement != nil {
 		review.Decisions = append(review.Decisions, *supplement)
 	}
+	if err := prepareLifecycleReviewer(state, *flow, coder, &review, configuration); err != nil {
+		return err
+	}
 	if err := state.Graph.Track(review, "controller", "independent review authorized by flow"); err != nil {
 		return err
 	}
@@ -588,6 +600,9 @@ func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.Rev
 		ID: review.ID, Title: review.Title, Repo: review.Repo, CreatedAt: time.Now().UTC(),
 	})
 	if err := state.Graph.Transition(review.ID, core.Ready, "controller", "review verified output SHA", core.TransitionProof{}); err != nil {
+		return err
+	}
+	if err := approveLifecycleReviewer(state, *flow, review.ID, configuration); err != nil {
 		return err
 	}
 	return issueFlowDispatch(state, ledgerPath, flow, review, core.RelationshipIndependent,

@@ -49,8 +49,67 @@ Validator には `--role VALIDATOR --previous-evidence-hash "$CODER_EVIDENCE_HAS
 
 ## 承認・credential・実行上の制限
 
-packet は実行許可ではありません。CLI は明示された参照値の形式と整合性だけを検査し、保存 Task・Git object・evidence の存在や内容までは照合しません。呼出し側は既存の ApprovalBundle 検査と `role-packet` stage の承認条件を維持し、同一 bundle の内部遷移のためだけに再承認を要求しません。packet の生成で既存の fail-closed gate を迂回できるわけではありません。
+packet 自体は実行許可ではありません。オフラインの `create` / `verify` は参照値の形式と自己整合性を検査し、保存 Task・Git object・evidence の存在までは照合しません。後述の Controller lifecycle は保存済みの Task、ApprovalBundle、Dispatch、実 evidence と packet を照合します。どちらも既存の実行入口の検査を迂回しません。
 
 生成時には既存の `core.Redact` で `prohibitedActions` 中の既知の credential パターンを置換してから hash を計算します。Task ID 内の既知の credential は拒否します。読取り時に credential を検出した場合は、本文を黙って書き換えず拒否します。packet の検査エラーには受信 field 名・値を含めません。既知のパターンに一致しない秘密情報まで検出する仕組みではないため、禁止操作の記述にも秘密情報や会話を入力しないでください。
 
-この MVP は参照 packet の生成・読取り・照合のみです。既存 runtime への自動注入、Validator の自動実行、packet 専用 DB・監査台帳、transport、message bus、dashboard、replay は追加しません。生成物と受信側 hash の保存先・引渡し方法は呼出し側が指定します。
+オフライン生成物の保存先と引渡し方法は呼出し側が指定します。Controller lifecycle を使う場合は、canonical bytes と hash を workspace の既存 SQLite document store に保存します。外部 transport、message bus、会話の保存、packet analytics はありません。
+
+## READY Task の packet lifecycle 承認
+
+`task authorize-packets` は、既存の matching ApprovalBundle を持つ READY の CODER Task（REVIEWER 指定あり）に対し、逐次 packet の使用を明示的に承認します。Task に Dispatch が発行済みの場合は拒否します。configuration が既存 bundle と一致しない場合は、先に [READY Task の設定再承認](approval-bundle.md)を行ってください。
+
+request は次の形式です。`unavailable` は、外部 manifest に参照だけが残り、artifact を保存できていなかったことを人間が申告する記録です。role ごとに1件まで指定できます。hash は prefix なしの小文字64桁、`evidence` は欠落を確認した根拠や参照です。秘密情報や会話全文を入力しないでください。
+
+```json
+{
+  "version": 1,
+  "taskId": "approved-task",
+  "actor": "human",
+  "source": "human:packet-recovery",
+  "reason": "Recover unavailable packet artifacts",
+  "unavailable": []
+}
+```
+
+欠落参照がある場合は、`unavailable` の各要素に `role`（`CODER` / `VALIDATOR` / `REVIEWER`）、`hash`、`evidence` を指定します。Taxion の store に現物がある hash を unavailable として記録することはできません。外部 manifest 自体を書き換えたり、その hash から packet 本文を復元したりはしません。
+
+```sh
+taxion task authorize-packets --request packet-lifecycle.json
+taxion task authorize-packets --request packet-lifecycle.json --confirm '<confirmationToken>'
+```
+
+preview は DB・WAL・SHM に書き込みません。token は Task の現在の record hash、immutable proposal reference、bundle hash、baseline / initial tree、scope / acceptance digest、欠落参照、申告者・出典・理由、`reviewerApprovalPolicy` の全体に束縛されます。`sha256:` に続く digest は認証用 bearer token ではありません。確認時に basis を再計算し、異なれば保存しません。同じ承認の再送は重複追加しません。
+
+確認後に追記する lifecycle 承認は Task とは別の記録です。元 Task の objective、scope、acceptance、baseline、state READY、proposal hash、decisions、既存 ApprovalBundle、Project config は変更しません。
+
+### 派生 Reviewer の承認範囲
+
+preview の `reviewerApprovalPolicy: same-contract-reviewer/v1` は、実 Coder evidence の検査後に作る派生 Reviewer Task の bundle 追加も承認します。Controller は同じ objective・scope・acceptance と、完全に一致する configuration を要求し、元 proposal reference と lifecycle 承認 hash を出典にして派生 Task 専用 bundle を追記します。元 Task の intake confirmation は変更せず、`sha256:` 形式の元参照がある場合は派生 Task ID に束縛した confirmation を作ります。intake receipt を持たない manifest 承認の v1 Task では receipt を創作せず、prefix なしの元 proposal reference をそのまま bundle に保持します。既存の bundle 検査はそのまま適用します。
+
+この承認は repair の契約変更や configuration の権限拡張を認めません。repair / re-review、tool、configuration の追加 Task ID などに既存の承認が必要なら、その条件を満たすまで停止します。
+
+## Controller による逐次保存と検証
+
+承認済み Task から既存の bounded review Flow を開始すると、次の順序で処理します。
+
+1. Coder packet を保存し、Dispatch 発行と同じ transaction で instruction hash に束縛する。初回の `previousEvidenceHash` は空文字列とする。
+2. Coder の成功結果と Controller の実行済み validation / Git evidence が保存された後、その結果の canonical hash を predecessor とする Validator packet を別 transaction で保存する。
+3. Controller が非モデルの Validator として、保存結果の receipt、Task の検証契約、現在の Git evidence を検査する。既存の `Finish` が実行した validation command の結果を使い、モデルの自己申告を成功 evidence として代用しない。
+4. 合格した検査結果を versioned GateReport として追記し、その canonical hash を predecessor とする Reviewer packet と派生 Reviewer bundle を保存してから Reviewer Dispatch を発行する。
+5. Reviewer の worktree 準備前、runner の runtime 生成前、runtime start / resume / send 時に保存 packet と Dispatch / predecessor を照合する。
+
+Validator は新しいモデル session や Dispatch ではありません。検査失敗時に成功 report や Reviewer packet を作りません。packet の欠落、改変、不一致、未知の version、実 evidence の欠落は fail-closed です。packet、lifecycle 承認、audit の削除・置換・上書きも transaction で拒否します。
+
+```sh
+taxion role-packet list --task approved-task
+taxion role-packet read --expected-hash '<packetHash>'
+```
+
+`list` は承認履歴、欠落申告、Dispatch / instruction / packet の hash と検査記録を返します。未承認の既存 Task は `legacy-unverified`、lifecycle 承認済みは `lifecycle-authorized` と表示します。後者は「未来の packet まで検証済み」を意味しません。`read` は保存された canonical bytes を hash と照合して返します。
+
+## 互換性と rollback
+
+既存の packet create / verify と、lifecycle を明示承認していない Flow の動作は変えません。旧参照を保存 packet とみなす自動移行もありません。発行済み Dispatch の採用や、未保存 evidence からの再構成は対象外です。
+
+lifecycle 記録のある workspace は新しい Records field を含みます。非対応版へ同じ DB を戻さず、必要なら承認前に取得した workspace snapshot を別配置で復元してください。現在の承認・artifact・audit を削除して rollback する操作は認めません。

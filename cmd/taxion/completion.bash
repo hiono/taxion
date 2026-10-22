@@ -77,8 +77,10 @@ _taxion_complete() {
         'request') candidates='--base-directory --budget-guidance --cli --context-path --help --max-ai-credits --max-repairs --max-task-nano-aiu --repo --timeout --worktree' ;;
         'resume') candidates='--help --session' ;;
         'review') candidates='--help --repo --sha --task' ;;
-        'role-packet') candidates='create verify' ;;
+        'role-packet') candidates='create list read verify' ;;
         'role-packet create') candidates='--acceptance-digest --baseline-sha --help --previous-evidence-hash --prohibit --role --scope-digest --target-tree-hash --task --task-hash' ;;
+        'role-packet list') candidates='--help --task' ;;
+        'role-packet read') candidates='--expected-hash --help' ;;
         'role-packet verify') candidates='--expected-hash --file --help' ;;
         'runtime') candidates='auth commit events resume send start stop' ;;
         'runtime auth') candidates='--base-directory --budget-guidance --cli --compact-context --controller-validation-submission --dispatch --help --managed-commit --managed-stage --max-ai-credits --message-file --prompt-file --review-source-worktree --scanner --strict-result-identities --system-prompt-file --timeout --tools' ;;
@@ -94,9 +96,10 @@ _taxion_complete() {
         'specification scope-hash') candidates='--help --scope' ;;
         'specification search') candidates='--help --query --scope' ;;
         'specification serve') candidates='--help --scope' ;;
-        'task') candidates='archive authorize create graph list plan track transition validate' ;;
+        'task') candidates='archive authorize authorize-packets create graph list plan track transition validate' ;;
         'task archive') candidates='--actor --dry-run --expected-hash --help --reason --source --tasks' ;;
         'task authorize') candidates='--confirm --file --help --manifest' ;;
+        'task authorize-packets') candidates='--confirm --help --request' ;;
         'task create') candidates='--help --repo --title' ;;
         'task graph') candidates='' ;;
         'task list') candidates='--help --include-archived --json --repo' ;;

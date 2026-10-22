@@ -91,6 +91,14 @@ Runtime・workflow 実行の `--controller-validation-submission` は、モデ�
 
 復旧、承認済み公開、失敗記録の手順は[実行記録](../userguide/execution-records.md)、provider の対応範囲と採択した後続作業は[開発基盤の対応評価](forge-capabilities.md)に記載している。
 
+### 逐次 role packet の復旧
+
+READY Task の packet lifecycle を明示承認した Flow では、`Records.Packets` に canonical bytes、`Records.PacketAuthorizations` に Task とは別の承認 basis、`Records.PacketAudits` に instruction / predecessor と実検査 report を保存する。`UpdateWorkspace` は既存 prefix の変更・短縮を拒否し、nested な欠落申告も変更できない。保存形式は既存の正規化 document store を使い、専用 transport や新しい SQL schema は追加しない。
+
+初回 Coder packet と Dispatch は同じ transaction で保存する。Coder の結果 receipt が存在してから Validator packet を別 transaction で保存し、その後の `advanceReviewFlow` が既存の結果契約と Git 再検証を行う。Validator はモデルを呼ばず、validation command も再実行しない。合格 report と Reviewer packet、同一契約の派生 Reviewer bundle を保存してから、変更していない実行入口の検査を通して Reviewer Dispatch を発行する。
+
+runner の factory 呼出し前、Reviewer worktree の作成前、Controller の実行承認時に packet を再検査する。未承認の旧 Flow は従来どおりで、未保存の参照を検証済みとする移行は行わない。request と互換性の制限は [利用手順](../userguide/role-handoff-packets.md)を参照する。
+
 ### 別マシンへの移送
 
 `workspace snapshot` は停止・照合済みの状態を対象に、workspace と存在する Memory に書込み予約を保持し、`VACUUM INTO` の整合コピーと必要な Git object の到達閉包を一つの SQLite へ保存する。内容 hash が同じ payload は共有する。実行中 Flow・runner claim・未終了 Dispatch・未照合の外部送信、不足 object、観測した未記録変更、submodule・Git LFS は明示拒否する。

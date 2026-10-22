@@ -315,6 +315,9 @@ func (c *Controller) authorizeExecution(ctx context.Context, dispatchID, operati
 	if !state.HasGraph {
 		return fmt.Errorf("taxion: execution configuration requires a Task Graph")
 	}
+	if err := checkLifecyclePacket(&state, dispatchID); err != nil {
+		return err
+	}
 	if err := state.Graph.CheckHandoffStart(dispatchID); err != nil {
 		return err
 	}

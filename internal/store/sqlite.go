@@ -258,6 +258,12 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 		history[i].TaskIDs = slices.Clone(history[i].TaskIDs)
 	}
 	budgets := slices.Clone(state.Records.Budgets)
+	packets := slices.Clone(state.Records.Packets)
+	packetAuthorizations := slices.Clone(state.Records.PacketAuthorizations)
+	for i := range packetAuthorizations {
+		packetAuthorizations[i].Unavailable = slices.Clone(packetAuthorizations[i].Unavailable)
+	}
+	packetAudits := slices.Clone(state.Records.PacketAudits)
 	existing := map[string]bool{}
 	if restore != nil {
 		for _, dispatch := range state.Graph.Dispatches {
@@ -266,6 +272,14 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	}
 	if err := update(&state); err != nil {
 		return err
+	}
+	if len(state.Records.Packets) < len(packets) ||
+		!slices.Equal(packets, state.Records.Packets[:len(packets)]) ||
+		len(state.Records.PacketAuthorizations) < len(packetAuthorizations) ||
+		len(packetAuthorizations) != 0 && !reflect.DeepEqual(packetAuthorizations, state.Records.PacketAuthorizations[:len(packetAuthorizations)]) ||
+		len(state.Records.PacketAudits) < len(packetAudits) ||
+		!slices.Equal(packetAudits, state.Records.PacketAudits[:len(packetAudits)]) {
+		return fmt.Errorf("packet artifacts, authorizations and audit records are append-only")
 	}
 	if len(state.Graph.Archives) < len(archives) ||
 		len(archives) != 0 && !reflect.DeepEqual(archives, state.Graph.Archives[:len(archives)]) {
