@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -18,6 +19,10 @@ type gateExitError struct {
 }
 
 func (e gateExitError) Error() string {
+	if len(e.report.BlockingConditions) != 0 {
+		condition := e.report.BlockingConditions[0]
+		return fmt.Sprintf("gate %s: %s (%s: %s)", e.report.Gate, e.report.Verdict, condition.Code, condition.Message)
+	}
 	return fmt.Sprintf("gate %s: %s", e.report.Gate, e.report.Verdict)
 }
 
@@ -27,13 +32,13 @@ func gateCmd(args []string) error { return gateCommand(args, os.Stdout) }
 
 func gateCommand(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion gate {contract|execution|publication} [--task ID|--flow ID] [--json]")
+		return fmt.Errorf("usage: taxion gate {contract|resume|execution|publication} [--task ID|--flow ID] [--json]")
 	}
 	gate := args[0]
 	switch gate {
-	case controller.GateContract, controller.GateExecution, controller.GatePublication:
+	case controller.GateContract, controller.GateResume, controller.GateExecution, controller.GatePublication:
 	default:
-		return fmt.Errorf("unknown gate %q; use contract, execution or publication", gate)
+		return fmt.Errorf("unknown gate %q; use contract, resume, execution or publication", gate)
 	}
 	fs := flag.NewFlagSet("gate "+gate, flag.ContinueOnError)
 	var taskID, flowID string
@@ -70,7 +75,7 @@ func gateCommand(args []string, output io.Writer) error {
 	}
 	var report controller.GateReport
 	switch gate {
-	case controller.GateContract:
+	case controller.GateContract, controller.GateResume:
 		configuration := core.ApprovalConfiguration{}
 		if resolved, resolveErr := resolveConfiguration(); resolveErr == nil {
 			configuration, err = approvalConfigurationFor(resolved.Config, resolved.Sources)
@@ -78,7 +83,11 @@ func gateCommand(args []string, output io.Writer) error {
 				return err
 			}
 		}
-		report, err = controller.ContractGateReport(state.Graph, taskID, configuration)
+		if gate == controller.GateResume {
+			report, err = controller.ResumeContractGateReport(context.Background(), state, flowID, configuration)
+		} else {
+			report, err = controller.ContractGateReport(state.Graph, taskID, configuration)
+		}
 	case controller.GateExecution:
 		report, err = controller.ExecutionGateReport(state.Graph, flowID)
 	case controller.GatePublication:

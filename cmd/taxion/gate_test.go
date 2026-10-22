@@ -19,6 +19,8 @@ func TestGateCommandValidatesInputs(t *testing.T) {
 		{args: nil, want: "usage:"},
 		{args: []string{"unknown"}, want: "unknown gate"},
 		{args: []string{"contract"}, want: "--task"},
+		{args: []string{"resume"}, want: "--flow"},
+		{args: []string{"resume", "--task", "t"}, want: "--flow"},
 		{args: []string{"execution"}, want: "--flow"},
 		{args: []string{"publication"}, want: "--flow"},
 		{args: []string{"contract", "--task", "t", "extra"}, want: "positional"},

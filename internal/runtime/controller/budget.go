@@ -13,6 +13,8 @@ import (
 )
 
 type TaskBudgetReport struct {
+	ResumeBasis *ResumeBasis `json:"resumeBasis,omitempty"`
+
 	TaskID                   string   `json:"taskId"`
 	FlowID                   string   `json:"flowId"`
 	DispatchLimit            int      `json:"dispatchLimit"`
@@ -36,6 +38,19 @@ type TaskBudgetReport struct {
 	ReviewDispatches         int      `json:"reviewDispatches"`
 	ReReviews                int      `json:"reReviews"`
 	Unknown                  []string `json:"unknown"`
+}
+
+// ResumeBasis binds the issuance audit to the approved flow without copying
+// authorization text or replacing any execution record on restart.
+type ResumeBasis struct {
+	Version           int             `json:"version"`
+	ContractHash      string          `json:"contractHash"`
+	AuthorizationHash string          `json:"authorizationHash"`
+	InstructionHash   string          `json:"instructionHash"`
+	DispatchID        string          `json:"dispatchId"`
+	StartedAt         time.Time       `json:"startedAt"`
+	Deadline          time.Time       `json:"deadline"`
+	Budget            core.FlowBudget `json:"budget"`
 }
 
 type budgetStopError struct{ reason string }
@@ -207,6 +222,23 @@ func stopFlowForBudget(db *store.Store, id, reason string) error {
 }
 
 func appendBudgetAudit(state *store.Workspace, flow core.ReviewFlow, kind string, report TaskBudgetReport) error {
+	contractHash, err := core.CanonicalSHA256(flow.Contract)
+	if err != nil {
+		return err
+	}
+	authorizationHash, err := core.CanonicalSHA256(flow.Authorization)
+	if err != nil {
+		return err
+	}
+	last, ok := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+	if !ok {
+		return fmt.Errorf("taxion: budget audit requires its saved Dispatch")
+	}
+	report.ResumeBasis = &ResumeBasis{
+		Version: 1, ContractHash: contractHash, AuthorizationHash: authorizationHash,
+		InstructionHash: last.InstructionHash, DispatchID: last.ID,
+		StartedAt: flow.StartedAt, Deadline: flow.Deadline, Budget: flow.Budget,
+	}
 	payload, err := json.Marshal(report)
 	if err != nil {
 		return err
