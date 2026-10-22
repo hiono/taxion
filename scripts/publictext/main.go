@@ -30,6 +30,12 @@ func run(args []string, output, warnings io.Writer) error {
 		return fmt.Errorf("document cannot override repository public-message contexts")
 	}
 	digests := strings.Fields(os.Getenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256"))
+	if len(digests) == 0 {
+		if *repository {
+			return fmt.Errorf("repository validation requires TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256; protected identifier coverage is unavailable")
+		}
+		fmt.Fprintln(warnings, "Protected identifier list unavailable; no private-name coverage asserted.")
+	}
 	check := func(text string, doc bool) error {
 		if err := publictext.Check(text, doc); err != nil {
 			return err
@@ -132,9 +138,6 @@ func run(args []string, output, warnings io.Writer) error {
 				return fmt.Errorf("%s: %w", path, err)
 			}
 		}
-	}
-	if len(digests) == 0 {
-		fmt.Fprintln(warnings, "Protected identifier list unavailable; no private-name coverage asserted.")
 	}
 	_, err := fmt.Fprintf(output, "Public communication policy, path and secret-pattern checks passed for %d files.\n", len(files))
 	return err

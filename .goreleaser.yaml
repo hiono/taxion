@@ -50,6 +50,7 @@ release:
     ## Changed
 
     開発用と product 用の store policy を明示的に区別します。
+    公開コミュニケーション方針を追加し、外部公開の承認前と送信前に本文と保護対象 identifier を検査します。
 
     ## Fixed
 
@@ -62,10 +63,12 @@ release:
     ## Compatibility
 
     Windows の shell validation は Unix process-group cancellation を必要とするため未対応です。
+    外部公開には TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256 の有効な保護対象一覧が必要です。未設定・空・不正値では公開しません。
 
     ## Upgrade
 
     mise GitHub backend で版を固定し、manifest と artifact hash、公開 workflow の成功を照合してください。
+    外部公開を利用する環境では、設定ガイドに従って保護対象 identifier の digest 一覧を設定してください。
 
     ## Rollback
 
@@ -75,5 +78,6 @@ release:
     ## Known limitations
 
     他の5 platform には v0.7.8 の rollback artifact がありません。未提供の rollback は利用可能として扱いません。
+    identifier 検査は設定した token に限定されます。旧版で承認した未送信本文が新方針に違反する場合は送信できず、取消操作もまだありません。
 changelog:
   disable: true
