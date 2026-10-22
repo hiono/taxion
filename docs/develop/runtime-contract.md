@@ -95,6 +95,10 @@ checkpoint v2 は既存の正規化 document 保存を使い、operation ID、�
 入力終了後の質問再表示はモデルを使わない。最小計画・未回答質問の保存前に停止し、入力本文が失われた checkpoint は、依頼 digest を本文の代わりに使わず再開を拒否する。送信開始済みで結果が不明の Planner は checkpoint で検出し、再送しない。実行中に process が止まって runner claim が残った場合は、既存の停止確認・receipt/Git 照合を済ませてから再開する。復旧のために Task 契約、proposal hash、既存 decision、ApprovalBundle、budget hard-stop を書き換えない。旧 binary は未知の `operation` field を拒否するため、rollback は operation 保存前の snapshot を使用する。
 ## 保存結果と checkpoint の復旧
 
+新規開始用 `ContractGateReport` は READY を要求する。保存済みの未実行 Coder 境界は `ResumeContractGateReport` で別に評価し、Task の ACTIVE、対応 Flow の RUNNING、最新 Dispatch の ISSUED と未 acknowledge / 未実行 / session 不在を要求する。Flow の contract と現在 Task、instruction hash、正式 bundle / configuration / lifecycle packet、endpoint / Git、operation の排他、既存 audit の利用量・counter・期限を照合する。保存 runner claim は process 終了を推測して解放せず、残っていれば拒否する。
+
+新しい Dispatch の `DISPATCH_ISSUED` budget audit に `resumeBasis.version=1` を追加し、contract / Flow authorization / instruction の digest、Dispatch ID、開始時刻、deadline、budget を束縛する。既存 audit prefix と schema は書き換えない。旧 record にこの binding がない場合、自己申告 checkpoint や二重 readback で補完せず拒否する。Gate は record と Git を読むだけで、index 更新・snapshot capture・validation command・runtime 作成を行わない。`ResumeReviewFlow` は既存の process reservation を保持し、runner claim の更新 transaction 内で Gate を再評価してから通常 runner に渡す。不合格なら transaction は保存せず、operation や Flow を BLOCKED / STOPPED に書き換えない。
+
 `workflow recover` は、process の停止確認と終了 Dispatch の照合後に、保存した runner claim の完全一致を確認して解放する。最新結果が成功した Coder 提出なら、保存結果の契約と現在の Git の事実も確認する。対象は repository origin、branch、HEAD、baseline の祖先関係、変更 path、clean worktree、検証の出典、commit parent。今回の観測は、観測時刻を除き保存済み Git 証拠と一致する必要がある。元の結果と timestamp は変更しない。
 
 通常の Coder から Reviewer への引継ぎでも同じ検査を行う。復旧時の不一致は claim を残して明示 error を返す。引継ぎの不一致は、理由付きの `STOPPED` Flow を記録する。一致した結果は、保存した出力 SHA と完全一致する対象の独立レビューへ進める。この検査は Git と保存済み検証記録を読み、検証 command を再実行しない。command 実行は元の controller 提出時に行う。

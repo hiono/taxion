@@ -577,6 +577,10 @@ Copilot SDK の account quota、session の累積 cost、公式 Billing API の�
 
 ### 保存結果と停止後の継続
 
+発行された Coder Dispatch がまだ一度も acknowledge・実行されていない場合は、`taxion gate resume --flow FLOW-ID --json` で保存状態を変更せず再開条件を確認できます。新規開始の `gate contract` は READY Task 用なので、ACTIVE Task の再開判定には使いません。PASS の場合、`workflow resume --id FLOW-ID` に元の承認済み role prompt・tool option を指定すると、同じ Gate を再確認して保存 Dispatch から通常の実行へ進みます。期限・予算・counter は引き継ぎ、Task を READY に戻したり Flow を作り直したりしません。
+
+resume Gate は正式な bundle、configuration、canonical packet、未所有の runner、Git の保存 start tree と未記録 file 不在を要求します。versioned resume binding がない旧 budget audit は `resume-budget-binding` で拒否し、自動 migration や checkpoint 上書きは行いません。実行中・acknowledged 済み session、STOPPED Flow、完了結果から次 role へ進む場合は、この新しい Gate ではなく、以下の既存の照合・停止・継続手順を使ってください。
+
 `workflow show` の status、stop code、利用量、保存結果、Git evidence、Reviewer verdict を確認します。`COMPLETED` や `APPROVE` だけで作業成果を判断せず、対象 SHA と acceptance evidence が依頼を満たすかを確認してください。
 
 Copilot で Flow が停止しても Dispatch に保存 session が残る場合は、別の runner が操作中でないことを確認してから `taxion runtime stop --dispatch DISPATCH-ID` で終了します。この操作に元の prompt や tool 設定は不要です。保存 session への停止専用接続は、新しい session やモデルへの指示を作らず、保留中の作業再開とすべての tool permission を拒否します。古い版で保存した作業条件でも停止できますが、接続・取消・結果保存に失敗した場合は停止済みとは記録しません。
