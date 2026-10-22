@@ -26,6 +26,7 @@ type Operation struct {
 	PlanningNanoAIU    float64         `json:"planningNanoAiu"`
 	PlanningUsageState string          `json:"planningUsageState"`
 	Checkpoint         json.RawMessage `json:"checkpoint,omitempty"`
+	CheckpointHash     string          `json:"checkpointHash,omitempty"`
 }
 
 func (o Operation) Active() bool {
