@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -77,6 +78,13 @@ func PublicationHash(update store.ExternalUpdate) (string, error) {
 	if err := publictext.Check(update.Title+"\n"+update.Body, false); err != nil {
 		return "", fmt.Errorf("taxion: publication policy: %w", err)
 	}
+	digests := strings.Fields(os.Getenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256"))
+	if len(digests) == 0 {
+		return "", fmt.Errorf("taxion: publication requires TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256; configure the protected identifier digest list")
+	}
+	if err := publictext.CheckIdentifiers(update.Title+"\n"+update.Body, digests); err != nil {
+		return "", fmt.Errorf("taxion: publication policy: %w", err)
+	}
 	body, err := json.Marshal(update)
 	return receiptHash(string(body)), err
 }
@@ -135,7 +143,10 @@ func checkPublicationTask(state *store.Workspace, update store.ExternalUpdate) e
 	proposal.Hash, proposal.Status, proposal.Claim, proposal.RemoteID, proposal.Error = "", "", "", "", ""
 	proposal.At = time.Time{}
 	hash, err := PublicationHash(proposal)
-	if err != nil || hash != update.Hash {
+	if err != nil {
+		return fmt.Errorf("taxion: approved publication validation failed: %w", err)
+	}
+	if hash != update.Hash {
 		return fmt.Errorf("taxion: approved publication content changed")
 	}
 	task, ok := state.Graph.GraphTask(update.TaskID)
