@@ -51,7 +51,7 @@ token が一致しない場合、Task は保存されない。`--confirm` は to
 
 設定承認が現在の設定と一致している READY Task には、同じ `task authorize --manifest FILE` で初期 ApprovalBundle だけを追加できる。manifest の `task` は `taxion task graph` で読み戻した Task record 全体と完全一致させる。`actor` と `reason` は必須で、新しい `concern` は指定しない。保存済み intake confirmation に有効な immutable proposal reference があり、対象 Task に Flow・Dispatch がまだ存在しないことも必要になる。
 
-preview は `status`、`taskId`、`proposalHash`、`confirmationToken`、`stateChanged: false` を返す。token は version 1 の workspace snapshot hash、manifest 全体、effective configuration と出典を束縛する確認用 digest で、認証 credential ではない。内容を確認して同じ `--confirm` を渡すと、transaction 内で source と configuration を再照合し、canonicalization version 2 の bundle だけを追記する。Task state、既存 decisions、configuration approval、Flow、Dispatch、deadline、budget は変更しない。
+preview は `status`、`taskId`、`proposalHash`、`confirmationToken`、`stateChanged: false` を返す。token は version 1 の workspace snapshot hash、manifest 全体、effective configuration と出典を束縛する確認用 digest で、認証 credential ではない。内容を確認して同じ `--confirm` を渡すと、transaction 内で source と configuration を再照合し、canonicalization version 2 の bundle だけを追記する。確認時だけ SQLite の immediate transaction を使い、書込み競合は最大5秒待つ。待機によって古い承認を更新せず、先行する変更があれば再照合で拒否する。Task state、既存 decisions、configuration approval、Flow、Dispatch、deadline、budget は変更しない。
 
 同じ manifest の再送は既存 bundle を再利用する。異なる契約・proposal・設定・actor・reason の bundle がある場合は拒否し、履歴を置換しない。fresh 経路の拒否は `ready-authorization-invalid` または `ready-authorization-stale` と `stateChanged: false` を返す。manifest の未知 field や不正 JSON は既存の strict decoder で拒否し、`authorization-invalid-manifest` を返す。source や設定の読込み失敗も `authorization-invalid-source` / `authorization-invalid-configuration` として区別する。
 
