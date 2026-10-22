@@ -109,7 +109,7 @@ _taxion_complete() {
         'task validate') candidates='--file --help --manifest' ;;
         'tools') candidates='hash' ;;
         'tools hash') candidates='--help --path' ;;
-        'workflow') candidates='advance draft draft-approve draft-discard evaluate feedback feedback-resolve feedback-target handoff interrupt lanes planner-action planner-draft planning-context question-draft recover run show start step terminate' ;;
+        'workflow') candidates='advance draft draft-approve draft-discard evaluate feedback feedback-resolve feedback-target handoff interrupt lanes planner-action planner-draft planning-context question-draft recover resume run show start step terminate' ;;
         'workflow advance') candidates='--help --id' ;;
         'workflow draft') candidates='--file --help' ;;
         'workflow draft-approve') candidates='--file --help' ;;
@@ -126,6 +126,7 @@ _taxion_complete() {
         'workflow planning-context') candidates='--help --id' ;;
         'workflow question-draft') candidates='--file --help' ;;
         'workflow recover') candidates='--file --help' ;;
+        'workflow resume') candidates='--base-directory --builtin-prompts --cli --coder-prompt-file --coder-tools --compact-context --controller-validation-submission --help --id --managed-commit --managed-stage --max-ai-credits --reviewer-prompt-file --reviewer-tools --scanner --strict-result-identities' ;;
         'workflow run') candidates='--base-directory --builtin-prompts --cli --coder-prompt-file --coder-tools --compact-context --controller-validation-submission --help --id --managed-commit --managed-stage --max-ai-credits --reviewer-prompt-file --reviewer-tools --scanner --strict-result-identities' ;;
         'workflow show') candidates='--help --id' ;;
         'workflow start') candidates='--file --help' ;;

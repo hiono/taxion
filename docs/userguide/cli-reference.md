@@ -45,6 +45,7 @@ taxion workflow show --id <flow-id>
 taxion workflow evaluate --id <flow-id> --require-quality
 taxion workflow lanes --task <task-id> --root <repository-root> --timeout 5s
 taxion gate contract --task <task-id> --json
+taxion gate resume --flow <flow-id> --json
 taxion gate execution --flow <flow-id> --json
 taxion gate publication --flow <flow-id> --json
 taxion role-packet verify --file <packet.json> --expected-hash <recorded-packet-hash>
@@ -511,6 +512,12 @@ tool 定義の存在から実行許可を推定しない。最新 assistant mess
 
 ### 上限付き review flow
 
+`gate contract --task ID` は新規開始専用で、READY 要件を維持する。`gate resume --flow ID --json` は保存済みの ACTIVE Task / RUNNING Flow と、発行済み未実行の Coder Dispatch を対象にした別の read-only Contract Gate である。runner claim、acknowledge、execution start、runtime session、hold、未発行 draft がある場合は拒否する。Task / Flow / Dispatch、contract / authorization hash、承認 bundle、task-bound configuration、endpoint、canonical packet、Git baseline / branch / start tree、他の active operation、保存済み予算・counter・期限を照合する。診断 code は `resume-` で始まり、評価で Task や実行状態、Git index、packet、budget を変更しない。
+
+`workflow resume --id ID` は `workflow run` と同じ role prompt / tool option を受け付ける。resume Gate の成功後、runner claim の transaction 内でも同じ条件を再確認し、既存 Dispatch を再作成せず通常の runner へ渡す。合格 report は所有権や新しい実行承認の代わりではない。別の operation に所属する Flow は、その operation の正式な所有経路なしでは実行できない。既存の `workflow run`、`workflow step`、`request --resume` の構文と継続動作は変更しない。
+
+resume 用 binding は新しい Dispatch の append-only budget audit に version 1 として保存する。contract / authorization / instruction hash、Dispatch ID、開始時刻・期限・上限と、同時点の利用量・counter を照合する。binding のない旧 audit は補完・上書きせず `resume-budget-binding` で拒否する。canonical packet artifact のない旧記録も検証済みとして扱わない。この Gate は acknowledged / 実行中 session、結果から次 role を発行する段階、STOPPED Flow の復帰には使わず、それぞれ既存の停止・結果照合・後続契約の手順を使う。snapshot mode では、承認済み start tree と index / tracked worktree が一致し、未記録 file がないことも必要になる。
+
 `workflow start` は、明示的な修正回数・経過時間を持つ認可済み Coder 契約を保存し、初回 Dispatch を発行する。`workflow advance` は最新の検証済み結果から独立 Reviewer または同じ受入れ条件と出典付き finding を持つ修正 Dispatch を発行する。現在の output SHA の承認で実装 Task を COMPLETED にする。`workflow run` は隔離した Coder・Reviewer SDK adapter を作り、指示・結果のコピーなしに SQLite の Dispatch を順に実行する。usage event 後に利用量を保存・報告し、契約・Memory の変更を監視して、保存 deadline で runtime を止める。token 閾値では停止しない。`--coder-tools`・`--reviewer-tools` は明示 allowlist のまま保つ。永続 runner claim は同時 run を防ぎ、中断 process の claim は明示的な照合なしに再利用しない。旧 process の終了と、その Dispatch の完了・取消を確認した後、`workflow recover --file <path>` で観測 runner ID を比較し、actor、理由、証拠を記録して所有を解放する。保存契約と結果は後続操作にも適用する。認可・停止条件は [Task Graph](../develop/task-graph.md) を参照する。
 
 `workflow handoff --file <path>` は既存 Flow に出典付き `HOLD`・`RELEASE` を保存し、`expectedChangeId` を最新 handoff change と比較する。hold は次 Dispatch の発行と未開始実行を止め、実行中 role の認可済み作業と最終結果は保つ。runner は引継ぎ時点で handoff-held error を返し、現在の結果を取り消さず claim を解放する。明示 release は不変の契約と上限で後の `workflow run`・`advance` を許すが、作業を直接開始せず、safety stop の Flow も復帰させない。request 形式と競合の制約は Task Graph に記載する。
@@ -541,6 +548,11 @@ Task の `validationCommands` は Controller の検査操作を認可する。�
 CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は stdio の ACP、`web/` は browser console を提供する。
 
 ## 全コマンドと option の索引
+
+| 追加コマンド | option と制約 |
+| --- | --- |
+| `gate resume` | `--flow ID`、任意の `--json`。保存済み未実行 Coder 境界を read-only で照合する。新規開始の READY 要件は変更しない。終了 code は 0 pass・1 fail・2 blocked。 |
+| `workflow resume` | `--id FLOW_ID` と `workflow run` と同じ runtime / role prompt / tool option。resume Gate と transaction 内の再照合後、保存済み runner 経路へ進む。拒否時は実行 record を変更しない。 |
 
 `taxion --help` は command 名と主用途を表示する。次の索引は実装済み subcommand と option を示す。`--store PATH` は command より前に指定し、旧 ledger のパスで workspace を選ぶ。同じ directory の `workspace.db` が正本となり、DB ファイル自体を `--store` に指定することはできない。各操作には表の名前付き option を使う。
 

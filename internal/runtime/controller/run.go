@@ -21,16 +21,22 @@ type WorkerFactory func(core.GraphDispatch) (runtime.Identity, error)
 // RunReviewFlow holds a durable single-runner claim. An interrupted process's
 // claim remains visible so another process cannot silently resume uncertain work.
 func RunReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, configuration ...core.ApprovalConfiguration) (core.ReviewFlow, error) {
-	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, false, configuration...)
+	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, false, false, configuration...)
+}
+
+// ResumeReviewFlow rechecks the read-only gate inside the runner claim
+// transaction, so a concurrent change cannot consume a stale passing report.
+func ResumeReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, configuration ...core.ApprovalConfiguration) (core.ReviewFlow, error) {
+	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, false, true, configuration...)
 }
 
 // StepReviewFlow executes at most one role turn. It does not issue the next
 // handoff after the turn completes; continuation remains an explicit decision.
 func StepReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, configuration ...core.ApprovalConfiguration) (core.ReviewFlow, error) {
-	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, true, configuration...)
+	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, true, false, configuration...)
 }
 
-func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, singleTurn bool, configuration ...core.ApprovalConfiguration) (result core.ReviewFlow, returnErr error) {
+func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, singleTurn, resume bool, configuration ...core.ApprovalConfiguration) (result core.ReviewFlow, returnErr error) {
 	if db == nil || factory == nil || out == nil {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: flow runner requires a store, worker factory and event output")
 	}
@@ -52,6 +58,15 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 	runnerID := hex.EncodeToString(nonce)
 	var flow core.ReviewFlow
 	err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		if resume {
+			report, err := ResumeContractGateReport(ctx, *state, id, selected)
+			if err != nil {
+				return err
+			}
+			if report.Verdict != GateVerdictPass {
+				return fmt.Errorf("taxion: resume gate %s: %s", report.BlockingConditions[0].Code, report.BlockingConditions[0].Message)
+			}
+		}
 		var ok bool
 		flow, ok = state.Graph.ReviewFlow(id)
 		if !ok || flow.Status != "RUNNING" {

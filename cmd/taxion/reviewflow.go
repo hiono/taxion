@@ -32,9 +32,10 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return encoder.Encode(value)
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|step|recover|handoff|interrupt|terminate|feedback-target|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|evaluate|lanes}")
+		return fmt.Errorf("usage: taxion workflow {start|advance|run|resume|step|recover|handoff|interrupt|terminate|feedback-target|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|evaluate|lanes}")
 	}
 	action := args[0]
+	resumeSaved := action == "resume"
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
 	var file, id string
 	var coderPrompt, reviewerPrompt, cli, base, coderTools, reviewerTools string
@@ -61,7 +62,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		fs.StringVar(&taskID, "task", "", "Task ID to inspect with read-only controller lanes")
 		fs.DurationVar(&laneTimeout, "timeout", controller.DefaultLaneTimeout, "per-lane timeout")
 		fs.StringVar(&laneRoot, "root", "", "repository root that must contain the Task worktree (default: current directory)")
-	case "run", "step":
+	case "run", "step", "resume":
 		fs.StringVar(&id, "id", "", "review flow ID")
 		fs.StringVar(&coderPrompt, "coder-prompt-file", "", "Coder system prompt")
 		fs.StringVar(&reviewerPrompt, "reviewer-prompt-file", "", "Reviewer system prompt")
@@ -156,6 +157,12 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 			return fmt.Errorf("workflow evaluate: saved quality gate is unmet; completion/publication must wait for the reported evidence")
 		}
 		return nil
+	}
+	if action == "resume" {
+		if err := gateCommand([]string{controller.GateResume, "--flow", id, "--json"}, io.Discard); err != nil {
+			return err
+		}
+		action = "run"
 	}
 	db, state, err := loadWorkspace()
 	if err != nil {
@@ -386,6 +393,9 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 		run := controller.RunReviewFlow
+		if resumeSaved {
+			run = controller.ResumeReviewFlow
+		}
 		if action == "step" {
 			run = controller.StepReviewFlow
 		}
