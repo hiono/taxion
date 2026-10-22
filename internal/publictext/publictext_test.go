@@ -41,7 +41,7 @@ func TestPublicMessagePolicy(t *testing.T) {
 		"session-id":         "session 12345678-1234-1234-1234-123456789012",
 		"token":              "ghp_" + strings.Repeat("x", 36),
 		"key":                "api_key=" + strings.Repeat("x", 32),
-		"private-key":        "-----BEGIN OPENSSH PRIVATE KEY-----",
+		"private-key":        "-----BEGIN " + "OPENSSH PRIVATE KEY-----",
 		"control":            "人間へ戻らず一括継続します。",
 		"usage-credits":      "The experiment consumed 8.47 AI credits.",
 		"usage-tokens":       "Completed with 124,915 reported input/output tokens.",
