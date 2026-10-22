@@ -36,6 +36,62 @@ type IntakeConfirmation struct {
 	ConfigurationDecisionID string               `json:"configurationDecisionId,omitempty"`
 	ReplacesFlow            string               `json:"replacesFlow,omitempty"`
 	Target                  *core.FeedbackTarget `json:"target,omitempty"`
+	RequestOperationID      string               `json:"requestOperationId,omitempty"`
+	RequestBasisHash        string               `json:"requestBasisHash,omitempty"`
+}
+
+// VerifyRequestConfirmation reads the formal intake decision and its original
+// contract. A checkpoint's approval flag is never an authorization source.
+func VerifyRequestConfirmation(graph core.TaskGraph, taskID, operationID, proposalHash, authorizationID, basisHash string, selected config.Config) error {
+	task, ok := graph.GraphTask(taskID)
+	if !ok || taskID != operationID || authorizationID != "intake-confirmation:"+taskID ||
+		task.AuthorizationID != authorizationID || basisHash == "" {
+		return fmt.Errorf("taxion: request approval identity mismatch")
+	}
+	var confirmation *IntakeConfirmation
+	for _, decision := range task.Decisions {
+		if decision.ID != authorizationID {
+			continue
+		}
+		var record IntakeConfirmation
+		if confirmation != nil || core.DecodeGraphInput(strings.NewReader(decision.Text), &record) != nil ||
+			decision.Source != "human:console:"+operationID {
+			return fmt.Errorf("taxion: request approval is invalid or ambiguous")
+		}
+		confirmation = &record
+	}
+	if confirmation == nil || confirmation.TaskID != taskID || confirmation.ExpectedHash != proposalHash ||
+		confirmation.RequestOperationID != operationID || confirmation.RequestBasisHash != basisHash ||
+		confirmation.Selection != selected || confirmation.Source != "human:console:"+operationID {
+		return fmt.Errorf("taxion: request checkpoint does not match formal approval")
+	}
+	var draftFound bool
+	var approved *core.GraphTask
+	for _, event := range graph.History {
+		if event.TaskID != taskID {
+			continue
+		}
+		if event.Task.Status == core.Draft {
+			hash, err := IntakeHash(event.Task)
+			draftFound = draftFound || err == nil && hash == proposalHash
+		}
+		if event.Task.Status == core.Ready && event.Task.AuthorizationID == authorizationID && approved == nil {
+			copy := event.Task
+			approved = &copy
+		}
+	}
+	if !draftFound || approved == nil {
+		return fmt.Errorf("taxion: request approval lacks its original contract")
+	}
+	flow, exists := graph.ReviewFlow(operationID + "-flow")
+	if exists {
+		if flow.TaskID != taskID || !reflect.DeepEqual(flow.Contract, *approved) || !flowContractMatches(graph, flow, task) {
+			return fmt.Errorf("taxion: approved request contract or execution identity drifted")
+		}
+	} else if !reflect.DeepEqual(task, *approved) {
+		return fmt.Errorf("taxion: approved request contract drifted")
+	}
+	return nil
 }
 
 func IntakeHash(task core.GraphTask) (string, error) {

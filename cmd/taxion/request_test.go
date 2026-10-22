@@ -253,11 +253,9 @@ func fixturePlan(t *testing.T, answer controller.QuestionAnswer) requestPlanner 
 			if err := json.Unmarshal([]byte(wire.Question), &conversation); err != nil {
 				t.Fatal(err)
 			}
-			first := conversation.Messages[0]
 			if context.Task.ID != task.ID || request.Request == "" ||
-				context.Task.Title == request.Request || context.Task.Objective == request.Request ||
-				first.Text != "" || first.Source != "/planner/task/decisions/0/text" {
-				t.Fatal("original request was lost or repeated outside its exact saved decision")
+				!strings.HasPrefix(request.Request, "request-digest:sha256:") || len(conversation.Messages) == 0 {
+				t.Fatal("Planner lacks its transient turn or the saved request digest")
 			}
 			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
@@ -349,8 +347,9 @@ func testApprovedRequest(t *testing.T, resume bool) {
 			if err != nil {
 				return nil, err
 			}
-			if !strings.Contains(received, "検索機能をつけて") || !strings.Contains(received, "部分一致です。") {
-				t.Fatal("Planner intent or feedback did not reach the receiving role", dispatch.Recipient)
+			if !strings.Contains(received, "部分一致の検索を追加する") ||
+				strings.Contains(received, "部分一致です。") || strings.Contains(received, "検索機能をつけて") {
+				t.Fatal("role context lost its approved plan or retained raw conversation", dispatch.Recipient)
 			}
 			if dispatch.Recipient == "REVIEWER" &&
 				(!strings.Contains(received, "Implemented case-insensitive search; checked missing and Japanese queries.") ||
@@ -509,19 +508,20 @@ func TestSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	var executionRequest struct {
-		PlanningTaskID string           `json:"planningTaskId"`
-		Conversation   []requestMessage `json:"conversation"`
+		PlanningTaskID string `json:"planningTaskId"`
+		RequestHash    string `json:"requestHash"`
+		PlanHash       string `json:"planHash"`
 	}
 	if err := json.Unmarshal([]byte(intake.Request), &executionRequest); err != nil {
 		t.Fatal(err)
 	}
 	if executionRequest.PlanningTaskID != coder.TaskID+"-planning" ||
-		len(executionRequest.Conversation) != 3 || executionRequest.Conversation[0].Text != "検索機能をつけて" ||
-		executionRequest.Conversation[0].Source != "" ||
-		executionRequest.Conversation[2].Text != "部分一致です。" ||
+		executionRequest.RequestHash != "sha256:"+core.SHA256Hex([]byte("検索機能をつけて")) ||
+		executionRequest.PlanHash == "" ||
+		strings.Contains(intake.Request, `"conversation"`) ||
 		strings.Contains(intake.Request, `"committedFilesByDirectory"`) ||
 		strings.Contains(intake.Request, `"committedContext"`) {
-		t.Fatal("execution lost original intent or feedback, retained a dangling Planner reference, or copied planning-only files")
+		t.Fatal("execution lost its plan identity or retained conversation/context")
 	}
 	if coder.Instruction.BudgetGuidance == nil || coder.Instruction.BudgetGuidance.Mode != "flow" ||
 		reviewer.Instruction.BudgetGuidance == nil || reviewer.Instruction.BudgetGuidance.Mode != "flow" {
@@ -543,7 +543,7 @@ func TestSearch(t *testing.T) {
 	if planning != 2 {
 		t.Fatal("Planner conversation or usage receipts missing", planning)
 	}
-	wantRecords := 3
+	wantRecords := 4
 	if resume {
 		wantRecords++
 	}
@@ -551,11 +551,11 @@ func TestSearch(t *testing.T) {
 		t.Fatal("execution events were duplicated instead of referencing the Flow")
 	}
 	var execution struct {
-		FlowID string `json:"flowId"`
-		Error  string `json:"error"`
+		FlowID    string `json:"flowId"`
+		ErrorHash string `json:"errorHash"`
 	}
 	if err := core.DecodeGraphInput(strings.NewReader(state.Records.Requests[len(state.Records.Requests)-1].Payload), &execution); err != nil ||
-		execution.FlowID != state.Graph.ReviewFlows[0].ID || execution.Error != "" {
+		execution.FlowID != state.Graph.ReviewFlows[0].ID || execution.ErrorHash != core.SHA256Hex(nil) {
 		t.Fatal("execution record does not reference its authoritative Flow", execution, err)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(storePath), "requests")); !os.IsNotExist(err) {

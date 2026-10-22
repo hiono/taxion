@@ -86,7 +86,11 @@ Runtime・workflow 実行の `--controller-validation-submission` は、モデ�
 
 request・独立質問・review runner は workspace DB と別の `.operation-lock` SQLite に排他 transaction を保持する。workspace 自体の保存 transaction は妨げず、process 終了で予約を解放する。同一 request 内の Planner と runner だけが現在の owner を context で引き継ぐ。別 request・別 Flow の開始、別 caller による advance、実行中の別質問、外部からの runtime start/send/resume は共通入口で拒否する。safe stop は妨げない。この予約は同じ workspace に対するもので、別 workspace の実行を排他制御するものではない。
 
-checkpoint は既存の正規化 document 保存を使い、相談・質問・承認・preflight と再開用 option を保持する。再開は保存済み期限と上限を維持し、Planner の実測使用量を Flow 上限から差し引く。利用量不明なら追加モデル呼出しを止める。`request --status` では owner と checkpoint 本文を除き、state と予算を返す。`claimRecorded` は保存した claim の有無であり、process の生存証明ではない。承認後は既存4 lane を一括実行し、既存 bounded runner に Coder・非モデル validation・Reviewer を任せる。実行 event は保存するが console へ逐次報告しない。未終了 operation は portable snapshot の対象にできない。
+checkpoint v2 は既存の正規化 document 保存を使い、operation ID、最小の提案・未回答質問、依頼 digest、承認参照、preflight と再開用 option を保持する。会話全文、prompt・response 全文、推論、調査ファイル本文は保存しない。planning receipt は入力・結果の digest と成否だけを持ち、Task の元依頼 decision も digest を参照する。credential pattern を含む最小計画は保存前に拒否する。
+
+`Approved` は状態表示であり、再開の承認根拠ではない。承認済み再開では、正式な intake confirmation の Task ID・operation ID・proposal hash・authorization reference・設定・basis digest を照合し、元の DRAFT 契約、承認後の契約と現在の Graph／Flow の整合を検証する。basis は最小計画・option・設定・期限・予算・消費量を含む。成功済み preflight は、この basis と report digest を持つ execution receipt と照合する。checkpoint checksum は保存内容の変化の検出に使い、承認の代用にはしない。旧 checkpoint の会話 field は読み取り時に捨て、再保存・暗黙移行しない。承認束縛のない旧版と未知版は再開・取消しを拒否し、保存済み記録を保持して明示的な照合を求める。
+
+再開は保存済み期限と上限を維持し、Planner の実測使用量を Flow 上限から差し引く。利用量不明なら追加モデル呼出しを止める。`request --status` では owner と checkpoint 本文を除き、state と予算を返す。`claimRecorded` は保存した claim の有無であり、process の生存証明ではない。承認後は既存4 lane を一括実行し、既存 bounded runner に Coder・非モデル validation・Reviewer を任せる。実行 event は保存するが console へ逐次報告しない。未終了 operation は portable snapshot の対象にできない。
 
 入力終了後の質問再表示はモデルを使わない。送信開始済みで結果が不明の Planner は checkpoint で検出し、再送しない。実行中に process が止まって runner claim が残った場合は、既存の停止確認・receipt/Git 照合を済ませてから再開する。復旧のために Task 契約、proposal hash、既存 decision、ApprovalBundle、budget hard-stop を書き換えない。旧 binary は未知の `operation` field を拒否するため、rollback は operation 保存前の snapshot を使用する。
 ## 保存結果と checkpoint の復旧
