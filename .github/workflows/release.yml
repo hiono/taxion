@@ -33,6 +33,8 @@ jobs:
           python3 -m unittest discover -s scripts
           npm --prefix web test
           ! git grep -nE 'gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' -- ':!.github/workflows/*'
+      - name: Documentation and local links (no network)
+        run: go test -count=1 ./cmd/taxion -run '^(TestDocumentation|TestConfigurationGuide|TestUserGuide)'
   package:
     needs: validate
     permissions:
