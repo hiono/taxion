@@ -194,16 +194,15 @@ func main() {
 		os.Exit(2)
 	}
 	var err error
-	helpRequested := slices.Contains(args, "--help") || slices.Contains(args, "-h")
-	if !explicitStore && !helpRequested &&
-		!slices.Contains([]string{"ready", "completion", "-h", "--help", "help", "--version", "gen-token", "git", "role-packet"}, args[0]) {
+	shortHelp := provenanceHelpOnly(args)
+	if !explicitStore && !shortHelp &&
+		!slices.Contains([]string{"ready", "completion", "-h", "--help", "help", "--version", "gen-token", "git"}, args[0]) {
 		storePath, err = defaultWorkspaceStorePath()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "taxion: %v\n", err)
 			os.Exit(1)
 		}
 	}
-	shortHelp := provenanceHelpOnly(args)
 	if !shortHelp && !slices.Contains([]string{"--version", "help", "-h", "--help", "provenance", "completion", "gen-token"}, args[0]) &&
 		args[0] != "git" && !(args[0] == "doctor" && (len(args) == 1 || args[1] != "fix")) &&
 		!(args[0] == "ready" && len(args) == 1) {

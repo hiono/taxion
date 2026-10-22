@@ -57,6 +57,8 @@ def main():
         snapshot = info["channel"] == "development"
         server = None
         if snapshot:
+            # A snapshot has no public release or SLSA statement; its URL and checksum are pinned below.
+            env["MISE_GITHUB_SLSA"] = "0"
             handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(dist))
             server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
             threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -83,6 +85,8 @@ def main():
                 raise ValueError("mise installed different executable bytes")
             if not snapshot and version not in (root / "mise.toml").read_text():
                 raise ValueError("version not pinned")
+            if run([mise, "exec", "--", executable, "--version"], env, root) != expected:
+                raise ValueError("mise PATH did not select the pinned binary")
             if not snapshot:
                 store = root / "product-fixture"
                 store.mkdir()
@@ -111,6 +115,23 @@ def main():
                     raise ValueError("PATH/copy hijack was not rejected")
                 if before != {p.name: p.read_bytes() for p in store.iterdir()}:
                     raise ValueError("provenance refusal changed synthetic store bytes")
+            rollback = "NOT_AVAILABLE"
+            if (system, arch) == ("linux", "amd64"):
+                config = root / "mise.toml"
+                current = config.read_text()
+                config.write_text(
+                    '[tools]\n"github:hiono/taxion" = { version = "0.7.8", '
+                    'asset_pattern = "taxion-v0.7.8-linux-amd64", format = "raw", bin = "taxion", '
+                    'checksum = "sha256:d0084c4da30ef42b016dfff0c3b1ce1db516f1934584495cbc5c63b66f492753" }\n'
+                )
+                run([mise, "install"], env, root)
+                if run([mise, "exec", "--", "taxion", "--version"], env, root) != "taxion v0.7.8":
+                    raise ValueError("immutable v0.7.8 rollback binary was not selected")
+                config.write_text(current)
+                run([mise, "install"], env, root)
+                if run([mise, "exec", "--", executable, "--version"], env, root) != expected:
+                    raise ValueError("upgrade back to pinned archive failed")
+                rollback = "PASS_BINARY_SWITCH_ONLY"
             print(json.dumps({
                 "platform": system + "-" + arch, "backend": "github",
                 "nativeMiseSmoke": "PASS", "goToolchainOnPath": False,
@@ -118,7 +139,7 @@ def main():
                 "selection": "snapshot-native-url" if snapshot else "published-release-autodetection",
                 "productProvenance": "NOT_RUN" if snapshot else "PASS",
                 "copiedBinaryRefusedWithImmutableStore": "NOT_RUN" if snapshot else "PASS",
-                "rollbackTo078": "NOT_RUN" if system == "linux" and arch == "amd64" else "NOT_AVAILABLE",
+                "rollbackTo078": rollback,
             }))
         finally:
             if server:
