@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -340,6 +341,9 @@ func TestFreshReadyAuthorizationConcurrentProcesses(t *testing.T) {
 	file := freshManifest(t, request)
 	token := freshPreview(t, file)
 	first, second := freshProcess(t, file, token), freshProcess(t, file, token)
+	var firstOutput, secondOutput bytes.Buffer
+	first.Stdout, first.Stderr = &firstOutput, &firstOutput
+	second.Stdout, second.Stderr = &secondOutput, &secondOutput
 	if err := first.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +353,7 @@ func TestFreshReadyAuthorizationConcurrentProcesses(t *testing.T) {
 	}
 	err1, err2 := first.Wait(), second.Wait()
 	if err1 != nil && err2 != nil {
-		t.Fatal("neither concurrent authorization completed", err1, err2)
+		t.Fatal("neither concurrent authorization completed", err1, err2, firstOutput.String(), secondOutput.String())
 	}
 	state, err := packetWorkspaceSnapshot()
 	if err != nil || len(state.Graph.Approvals) != 1 || len(state.Graph.ReviewFlows) != 0 || len(state.Graph.Dispatches) != 0 {

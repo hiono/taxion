@@ -3,6 +3,8 @@ package main
 import (
 	"crypto/subtle"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -133,8 +135,21 @@ func taskAuthorizeReady(request graphRequest, configuration core.ApprovalConfigu
 	if subtle.ConstantTimeCompare([]byte(confirm), []byte(token)) != 1 {
 		return readyAuthorizationError("ready-authorization-stale", fmt.Errorf("confirmation does not match the complete source and configuration basis"))
 	}
+	path, err := filepath.Abs(workspaceDBPath())
+	if err != nil {
+		return readyAuthorizationError("ready-authorization-stale", err)
+	}
+	// Reserve the writer before reading the source basis: two deferred readers
+	// can otherwise both lose their lock upgrade. The wait does not renew approval.
+	location := url.URL{Scheme: "file", Path: path,
+		RawQuery: "mode=rw&_txlock=immediate&_pragma=busy_timeout(5000)"}
+	db, err := store.Open(location.String())
+	if err != nil {
+		return readyAuthorizationError("ready-authorization-stale", err)
+	}
+	defer db.Close()
 	var saved core.ApprovalBundle
-	err = updateWorkspace(func(current *store.Workspace) error {
+	err = db.UpdateWorkspace(func(current *store.Workspace) error {
 		currentHash, err := core.CanonicalSHA256(*current)
 		if err != nil {
 			return err
