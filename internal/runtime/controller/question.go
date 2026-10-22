@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -320,6 +321,36 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 	if len(input) > 128*1024 {
 		return result, fmt.Errorf("taxion: question and context exceed the 128 KiB input ceiling")
 	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		return result, err
+	}
+	if err := checkOperation(&state, ctx, taskID, ""); err != nil {
+		return result, err
+	}
+	uncertainExecution := true
+	if _, inherited := ctx.Value(operationKey{}).(store.Operation); !inherited {
+		deadline, _ := ctx.Deadline()
+		lease, lockErr := db.LockOperation()
+		if lockErr != nil {
+			return result, lockErr
+		}
+		defer func() { err = errors.Join(err, lease.Close()) }()
+		operation, claimErr := lease.Claim(store.Operation{
+			Version: 1, ID: "question-" + rand.Text(), Kind: "question", TaskID: taskID,
+			State: "RUNNING", Phase: "QUESTION", Owner: rand.Text(), Deadline: deadline,
+		}, false)
+		if claimErr != nil {
+			return result, claimErr
+		}
+		defer func() {
+			operation.State = "COMPLETED"
+			if uncertainExecution {
+				operation.State = "BLOCKED"
+			}
+			err = errors.Join(err, db.SaveOperation(operation), db.ReleaseOperation(operation.ID, operation.Owner))
+		}()
+	}
 	result.SessionID, err = worker.Start(ctx, taskID)
 	if err != nil {
 		return result, questionProviderError(ctx, "session creation", err)
@@ -327,7 +358,9 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 	defer func() {
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		err = errors.Join(err, questionProviderError(stopCtx, "session cleanup", worker.Stop(stopCtx, result.SessionID)))
+		stopErr := worker.Stop(stopCtx, result.SessionID)
+		uncertainExecution = stopErr != nil
+		err = errors.Join(err, questionProviderError(stopCtx, "session cleanup", stopErr))
 	}()
 	if err := worker.CheckServiceAccess(ctx, result.SessionID); err != nil {
 		return result, err

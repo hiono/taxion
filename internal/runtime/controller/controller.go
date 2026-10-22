@@ -37,6 +37,10 @@ func New(db *store.Store, worker runtime.Identity) (*Controller, error) {
 }
 
 func PrepareReview(db *store.Store, dispatchID, source string) (core.GraphDispatch, error) {
+	return prepareReview(context.Background(), db, dispatchID, source)
+}
+
+func prepareReview(ctx context.Context, db *store.Store, dispatchID, source string) (core.GraphDispatch, error) {
 	if db == nil || strings.TrimSpace(source) == "" {
 		return core.GraphDispatch{}, fmt.Errorf("taxion: review preparation requires a store and source worktree")
 	}
@@ -56,6 +60,9 @@ func PrepareReview(db *store.Store, dispatchID, source string) (core.GraphDispat
 			return fmt.Errorf("taxion: prepare review requires an issued Reviewer Dispatch")
 		}
 		prepared = dispatch
+		if err := checkDispatchOperation(state, ctx, dispatch); err != nil {
+			return err
+		}
 		if err := checkLifecyclePacket(state, dispatchID); err != nil {
 			return err
 		}
@@ -167,6 +174,9 @@ func (c *Controller) Start(ctx context.Context, dispatchID string) (string, erro
 			current.TaskID != dispatch.TaskID || current.Recipient != dispatch.Recipient {
 			return fmt.Errorf("taxion: Dispatch changed while starting runtime session")
 		}
+		if err := checkDispatchOperation(state, ctx, current); err != nil {
+			return err
+		}
 		if _, err := c.checkExecutionConfiguration(state.Graph, dispatchID); err != nil {
 			return err
 		}
@@ -216,13 +226,13 @@ func (c *Controller) SendWithBudgetGuidance(ctx context.Context, dispatchID, pro
 		return err
 	}
 	if dispatch.Status == core.DispatchRunning {
-		return c.markRunning(dispatchID)
+		return c.markRunning(ctx, dispatchID)
 	}
 	observation, err := c.prepareBudgetGuidance(ctx, dispatch, mode)
 	if err != nil {
 		return errors.Join(err, c.recordBudgetGuidance(dispatch, observation, "denied", err))
 	}
-	if err := c.markRunning(dispatchID); err != nil {
+	if err := c.markRunning(ctx, dispatchID); err != nil {
 		return err
 	}
 	if observation != nil {
@@ -564,11 +574,14 @@ func (c *Controller) dispatch(id string) (core.GraphDispatch, error) {
 	return dispatch, nil
 }
 
-func (c *Controller) markRunning(dispatchID string) error {
+func (c *Controller) markRunning(ctx context.Context, dispatchID string) error {
 	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
 		dispatch, ok := state.Graph.GraphDispatch(dispatchID)
 		if !ok {
 			return fmt.Errorf("taxion: handoff execution Dispatch not found")
+		}
+		if err := checkDispatchOperation(state, ctx, dispatch); err != nil {
+			return err
 		}
 		if err := state.Graph.CheckHandoff(dispatch.TaskID); err != nil {
 			return err

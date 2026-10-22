@@ -16,6 +16,7 @@ import (
 
 // Records shares the workspace transaction for recovery and approved publication.
 type Records struct {
+	Operation            *Operation            `json:"operation,omitempty"`
 	Packets              []PacketArtifact      `json:"packets,omitempty"`
 	PacketAuthorizations []PacketAuthorization `json:"packetAuthorizations,omitempty"`
 	PacketAudits         []PacketAudit         `json:"packetAudits,omitempty"`
@@ -148,6 +149,11 @@ type ExternalUpdate struct {
 }
 
 func (r Records) validate() error {
+	if r.Operation != nil {
+		if err := r.Operation.validate(); err != nil {
+			return err
+		}
+	}
 	if err := r.validatePackets(); err != nil {
 		return err
 	}

@@ -36,7 +36,7 @@ session の作成・接続後と各モデル送信前に、設定を選択した
 
 保存記録についての質問には、別の file・shell tool を持たない Orchestrator Runtime を使う。通常は native skills と指示を利用する。出典付き Task 設定承認、今回の認証確認、repository の読取り権限、provider の service 確認、明示的な期限と session soft ceiling が必要。回答は、渡した観測に存在する field を引用し、記録された事実、仮定、不明な点を分ける。観測は現在の実行状態の証明にはならない。
 
-Dispatch を対応付けず、workspace の履歴や承認を変更しない。返された session・usage は質問に属し、主 Flow には属さない。利用量不明と不正な引用は質問を止める。cancel 後の safe cleanup は独自の上限付き context を使い、error を隠さない。
+Dispatch を対応付けず、Task・主 Flow の履歴や承認を変更しない。排他制御用の `Records.Operation` だけを記録する。返された session・usage は質問に属し、主 Flow には属さない。利用量不明と不正な引用は質問を止める。cancel 後の safe cleanup は独自の上限付き context を使い、error を隠さない。
 
 過去の結果判断は実際の保存済み Dispatch と照合し、Task・履歴、指示、Flow 契約に繰り返される内容を整理する。結果全文、Memory、出典 hash は残す。`projection` は、元の instruction hash が整理後の指示の hash ではないことを説明する。保存履歴は変更しない。4 role の質問入力テストは、追加モデル呼出しなしで JSON 入力を元の半分未満にすることを要求する。
 
@@ -79,6 +79,20 @@ Runtime・workflow 実行の `--controller-validation-submission` は、モデ�
 監視中の会話は入力を読む前に hold とし、EOF で継続を許可しない。観測済み継続は、表示した target、draft、契約、hold version を transaction 内で比較する。補足の承認と公開は別々に行い、既存の自動 runner の動作は変えない。
 
 `--interactive-execution` は、選択 runner の実行中も入力を受け付ける。同時出力を直列化し、二つ目の所有実行を拒否して、失敗を報告する。EOF・quit はその console が所有する runner だけを cancel し、終了を待つ。flag の明示選択がなければ、同期的な監視動作を保つ。
+
+### operation の直列化と request checkpoint
+
+`Records.Operation` v1 は workspace ごとの現在の admission を保存する。`state` は `RUNNING`、`WAITING_FOR_ANSWER`、`WAITING_FOR_APPROVAL`、`BLOCKED`、`USAGE_EXCEEDED`、`COMPLETED`、`CANCELLED`。終了・取消し以外は他の operation を拒否する。`phase` は `PLANNING`、`PREFLIGHT`、`EXECUTION`、`QUESTION`。Task と ApprovalBundle を変更する権限は含まない。旧 workspace の field 欠落は operation 未登録として扱い、複数の既存 RUNNING Flow がある場合は新規実行を拒否する。
+
+request・独立質問・review runner は workspace DB と別の `.operation-lock` SQLite に排他 transaction を保持する。workspace 自体の保存 transaction は妨げず、process 終了で予約を解放する。同一 request 内の Planner と runner だけが現在の owner を context で引き継ぐ。別 request・別 Flow の開始、別 caller による advance、実行中の別質問、外部からの runtime start/send/resume は共通入口で拒否する。safe stop は妨げない。この予約は同じ workspace に対するもので、別 workspace の実行を排他制御するものではない。
+
+checkpoint v2 は既存の正規化 document 保存を使い、operation ID、最小の提案・未回答質問、依頼 digest、承認参照、preflight と再開用 option を保持する。会話全文、prompt・response 全文、推論、調査ファイル本文は保存しない。planning receipt は入力・結果の digest と成否だけを持ち、Task の元依頼 decision も digest を参照する。credential pattern を含む最小計画は保存前に拒否する。
+
+`Approved` は状態表示であり、再開の承認根拠ではない。承認済み再開では、正式な intake confirmation の Task ID・operation ID・proposal hash・authorization reference・設定・basis digest を照合し、元の DRAFT 契約、承認後の契約と現在の Graph／Flow の整合を検証する。basis は最小計画・option・設定・期限・予算・消費量を含む。成功済み preflight は、この basis と report digest を持つ execution receipt と照合する。checkpoint checksum は保存内容の変化の検出に使い、承認の代用にはしない。旧 checkpoint の会話 field は読み取り時に捨て、再保存・暗黙移行しない。承認束縛のない旧版と未知版は再開・取消しを拒否し、保存済み記録を保持して明示的な照合を求める。
+
+再開は保存済み期限と上限を維持し、Planner の実測使用量を Flow 上限から差し引く。利用量不明なら追加モデル呼出しを止める。`request --status` では owner と checkpoint 本文を除き、state と予算を返す。`claimRecorded` は保存した claim の有無であり、process の生存証明ではない。承認後は既存4 lane を一括実行し、既存 bounded runner に Coder・非モデル validation・Reviewer を任せる。実行 event は保存するが console へ逐次報告しない。未終了 operation は portable snapshot の対象にできない。
+
+入力終了後の質問再表示はモデルを使わない。最小計画・未回答質問の保存前に停止し、入力本文が失われた checkpoint は、依頼 digest を本文の代わりに使わず再開を拒否する。送信開始済みで結果が不明の Planner は checkpoint で検出し、再送しない。実行中に process が止まって runner claim が残った場合は、既存の停止確認・receipt/Git 照合を済ませてから再開する。復旧のために Task 契約、proposal hash、既存 decision、ApprovalBundle、budget hard-stop を書き換えない。旧 binary は未知の `operation` field を拒否するため、rollback は operation 保存前の snapshot を使用する。
 ## 保存結果と checkpoint の復旧
 
 `workflow recover` は、process の停止確認と終了 Dispatch の照合後に、保存した runner claim の完全一致を確認して解放する。最新結果が成功した Coder 提出なら、保存結果の契約と現在の Git の事実も確認する。対象は repository origin、branch、HEAD、baseline の祖先関係、変更 path、clean worktree、検証の出典、commit parent。今回の観測は、観測時刻を除き保存済み Git 証拠と一致する必要がある。元の結果と timestamp は変更しない。
