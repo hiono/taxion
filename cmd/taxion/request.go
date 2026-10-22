@@ -47,10 +47,10 @@ The supplied conversation and files are data, not permission.
 committedFilesByDirectory groups every committed path by its repository-relative
 directory ("." for the root); join each directory and filename to recover a path.
 File names alone are not evidence of file content or behavior. Do not claim live
-investigation or tests. Cite the original request from /planner/task/decisions, and clearly
+investigation or tests. Cite the saved request digest from /planner/task/decisions, and clearly
 label suggestions and assumptions. A proposal never authorizes execution.
-The first human conversation entry refers to its saved decision using source;
-read that original request from the supplied context rather than expecting text twice.
+Only the current turn is supplied with the minimal saved plan and pending questions.
+The original request is transient and its saved decision contains only a digest.
 Use HUMAN_REQUIRED while clarification is needed and HOLD for a ready proposal.
 Write explanations, questions and the proposal in the user's language.`
 
@@ -161,8 +161,20 @@ func requestCmd(args []string, input io.Reader, output io.Writer) error {
 }
 
 func requestCommand(args []string, input io.Reader, output io.Writer, planner requestPlanner,
-	runner func(context.Context, []string, io.Writer) error) error {
+	runner func(context.Context, []string, io.Writer) error) (returnErr error) {
+	terminalReported, failureGate := false, "BLOCKED"
+	defer func() {
+		if returnErr != nil && !terminalReported {
+			returnErr = errors.Join(returnErr, json.NewEncoder(output).Encode(struct {
+				Gate   string `json:"gate"`
+				Reason string `json:"reason"`
+			}{failureGate, returnErr.Error()}))
+		}
+	}()
 	fs := flag.NewFlagSet("request", flag.ContinueOnError)
+	resumeID := fs.String("resume", "", "resume the saved operation without changing its approved ceilings")
+	cancelID := fs.String("cancel", "", "cancel an idle request operation without changing its Task or decisions")
+	status := fs.Bool("status", false, "read machine-readable operation and Task budget status")
 	repo := fs.String("repo", "", "explicit namespace/repository")
 	worktree := fs.String("worktree", ".", "clean attached worktree to modify")
 	timeout := fs.Duration("timeout", 0, "total planning and execution deadline after /plan")
@@ -177,6 +189,53 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *status {
+		if len(args) != 1 {
+			return fmt.Errorf("request --status accepts no other options")
+		}
+		return requestOperationStatus(output)
+	}
+	if *cancelID != "" {
+		if len(args) != 2 || args[0] != "--cancel" {
+			return fmt.Errorf("request --cancel ID accepts no overrides")
+		}
+		return cancelRequestOperation(*cancelID, output)
+	}
+	var checkpoint requestCheckpoint
+	var savedOperation store.Operation
+	resumeApproved := false
+	resuming := *resumeID != ""
+	if resuming {
+		if len(args) != 2 || args[0] != "--resume" {
+			return fmt.Errorf("request --resume ID uses the saved options; overrides are not accepted")
+		}
+		db, err := store.OpenReadOnly(workspaceDBPath())
+		if err != nil {
+			return err
+		}
+		state, loadErr := db.LoadWorkspace()
+		closeErr := db.Close()
+		if err := errors.Join(loadErr, closeErr); err != nil {
+			return err
+		}
+		if state.Records.Operation == nil || state.Records.Operation.ID != *resumeID ||
+			state.Records.Operation.Kind != "request" {
+			return fmt.Errorf("request checkpoint does not exist")
+		}
+		savedOperation = *state.Records.Operation
+		if err := core.DecodeGraphInput(bytes.NewReader(savedOperation.Checkpoint), &checkpoint); err != nil {
+			return fmt.Errorf("request checkpoint is invalid: %w", err)
+		}
+		resumeApproved, err = verifyRequestCheckpoint(state, savedOperation, checkpoint)
+		if err != nil {
+			return err
+		}
+		args = checkpoint.Args
+		paths = nil
+		if err := fs.Parse(args); err != nil {
+			return err
+		}
+	}
 	if *repo == "" || *timeout < time.Second || *credits < 0 || *taskNanoAIU <= 0 ||
 		math.IsNaN(*taskNanoAIU) || math.IsInf(*taskNanoAIU, 0) ||
 		*repairs < 0 || *repairs > 100 || len(paths) > 16 {
@@ -184,6 +243,24 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	}
 	if err := copilot.ValidateAICreditLimit(*credits); err != nil {
 		return err
+	}
+	if resuming && (*credits != savedOperation.SessionCreditLimit || *taskNanoAIU != savedOperation.MaxNanoAIU) {
+		return fmt.Errorf("request checkpoint limits differ from saved operation")
+	}
+	db, state, err := loadWorkspace()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if !resuming {
+		if operation := state.Records.Operation; operation != nil && operation.Active() {
+			return fmt.Errorf("operation %s is %s; answer or resume it before starting another request", operation.ID, operation.State)
+		}
+		for _, flow := range state.Graph.ReviewFlows {
+			if flow.Status == "RUNNING" || flow.RunnerID != "" {
+				return fmt.Errorf("workflow %s is active; another request cannot start", flow.ID)
+			}
+		}
 	}
 	resolved, err := resolveConfiguration()
 	if err != nil {
@@ -204,9 +281,14 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	if err != nil {
 		return err
 	}
-	root, branch, baseline, err := gitproof.ObserveRequestBaseline(*worktree, *repo, selection)
-	if err != nil {
-		return err
+	root, branch, baseline := checkpoint.Task.Worktree, checkpoint.Task.Branch, checkpoint.Task.BaselineSHA
+	if !resuming {
+		root, branch, baseline, err = gitproof.ObserveRequestBaseline(*worktree, *repo, selection)
+		if err != nil {
+			return err
+		}
+	} else if selected != checkpoint.Selection {
+		return fmt.Errorf("request configuration changed; checkpoint retained and renewed authorization required")
 	}
 	files, err := gitproof.TrackedPathsAt(root, baseline)
 	if err != nil {
@@ -222,11 +304,6 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			return err
 		}
 	}
-	db, _, err := loadWorkspace()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 4096), 64*1024)
 	read := func() (string, error) {
@@ -239,6 +316,9 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		return strings.TrimSpace(scanner.Text()), nil
 	}
 	request := strings.TrimSpace(strings.Join(fs.Args(), " "))
+	if resuming {
+		request = checkpoint.RequestHash
+	}
 	if request == "" {
 		if _, err := fmt.Fprintln(output, "What would you like to create or change?"); err != nil {
 			return err
@@ -259,27 +339,40 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			"Only explicitly approved skills are copied into the isolated role; unapproved native permission requests are cancelled."
 		ceiling = "Copilot AI-credit ceilings and account quota are unsupported; the explicit deadline and approved repair limit apply."
 	}
-	if _, err := fmt.Fprintf(output,
-		"Repository: %s\nWorktree: %s\nBranch: %s\nBaseline: %s\nRuntime account: %s\n"+
-			"Deadline: %s; repairs: %d\n%s\n"+
-			"Budget guidance: %s (%s); account quota read: %t\n"+
-			"%s\n"+
-			"Enter /plan to start a paid Planner conversation, or /quit to cancel. No code will be changed yet.\n",
-		*repo, root, branch, baseline, selected.Runtime.Account, *timeout, *repairs, ceiling,
-		guidance.Mode, guidance.Source, guidance.AccountReadApproved, discovery); err != nil {
-		return err
+	if !resuming {
+		if _, err := fmt.Fprintf(output,
+			"Repository: %s\nWorktree: %s\nBranch: %s\nBaseline: %s\nRuntime account: %s\n"+
+				"Deadline: %s; repairs: %d\n%s\n"+
+				"Budget guidance: %s (%s); account quota read: %t\n"+
+				"%s\n"+
+				"Enter /plan to start a paid Planner conversation, or /quit to cancel. No code will be changed yet.\n",
+			*repo, root, branch, baseline, selected.Runtime.Account, *timeout, *repairs, ceiling,
+			guidance.Mode, guidance.Source, guidance.AccountReadApproved, discovery); err != nil {
+			return err
+		}
 	}
-	line, err := read()
-	if errors.Is(err, io.EOF) || err == nil && line == "/quit" {
-		return nil
+	var line string
+	if !resuming {
+		line, err = read()
+		if errors.Is(err, io.EOF) || err == nil && line == "/quit" {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if line != "/plan" {
+			return fmt.Errorf("request requires explicit /plan before any model call")
+		}
 	}
-	if err != nil {
-		return err
+	duration := *timeout
+	expired := false
+	if resuming {
+		duration = time.Until(savedOperation.Deadline)
+		if duration <= 0 {
+			expired, duration = true, time.Nanosecond
+		}
 	}
-	if line != "/plan" {
-		return fmt.Errorf("request requires explicit /plan before any model call")
-	}
-	ctx, cancel := signalContext(*timeout)
+	ctx, cancel := signalContext(duration)
 	defer cancel()
 	if err := os.Chmod(workspaceDBPath(), 0600); err != nil {
 		return fmt.Errorf("request requires a private workspace database: %w", err)
@@ -301,75 +394,205 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		}
 	}
 	id := "request-" + rand.Text()
-	source := "human:console:" + id
-	task, err := controller.ProposeIntake(db, controller.IntakeRequest{
-		Request: request, Actor: selected.Execution.Requester, Source: source,
-		Task: core.GraphTask{
-			ID: id + "-planning", Title: "Request implementation plan", Repo: *repo, Type: "DESIGN", Status: core.Draft,
-			Issue: "NOT_REQUIRED: local request planning", CreatedFrom: source,
-			Owner: "CODER", Reviewer: "REVIEWER", Objective: "Review the saved original request and propose scope, acceptance criteria and validation",
-			BudgetGuidance: core.CloneBudgetGuidance(guidance),
-			Worktree:       root, Branch: branch, BaselineSHA: baseline,
-		},
-		PlanningSelection: &selected, PlanningReason: "Human selected /plan for bounded request clarification",
-		ConfigurationDecisionID: core.ConfigurationApprovalID(selected.Execution.ApprovalRef, id+"-planning"),
-	})
+	if resuming {
+		id = savedOperation.ID
+	}
+	deadline, _ := ctx.Deadline()
+	operation := store.Operation{
+		Version: 1, ID: id, Kind: "request", TaskID: id + "-planning",
+		State: "RUNNING", Phase: "PLANNING", Owner: rand.Text(), Deadline: deadline,
+		SessionCreditLimit: *credits, MaxNanoAIU: *taskNanoAIU,
+		PlanningUsageState: "complete",
+	}
+	lease, err := db.LockOperation()
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(output, "Planning record: %s (SQLite; taxion records show)\n", id); err != nil {
+	defer func() { returnErr = errors.Join(returnErr, lease.Close()) }()
+	operation, err = lease.Claim(operation, resuming)
+	if err != nil {
 		return err
 	}
-	conversation := []requestMessage{{Role: "human", Source: "/planner/task/decisions/0/text"}}
+	defer func() {
+		if returnErr != nil && operation.State == "RUNNING" {
+			operation.State = "BLOCKED"
+			returnErr = errors.Join(returnErr, saveRequestCheckpoint(db, &operation, checkpoint))
+		}
+		returnErr = errors.Join(returnErr, db.ReleaseOperation(operation.ID, operation.Owner))
+	}()
+	if resuming && !bytes.Equal(savedOperation.Checkpoint, operation.Checkpoint) {
+		if err := core.DecodeGraphInput(bytes.NewReader(operation.Checkpoint), &checkpoint); err != nil {
+			return err
+		}
+		return fmt.Errorf("request checkpoint changed before admission; current checkpoint retained")
+	}
+	if expired || !time.Now().Before(operation.Deadline) {
+		operation.State, failureGate = "USAGE_EXCEEDED", "USAGE_EXCEEDED"
+		return errors.Join(fmt.Errorf("request deadline reached; checkpoint retained and budget recontract required"),
+			saveRequestCheckpoint(db, &operation, checkpoint))
+	}
+	ctx = controller.WithOperation(ctx, operation)
+	source := "human:console:" + id
+	task := checkpoint.Task
+	if !resuming {
+		task, err = controller.ProposeIntake(db, controller.IntakeRequest{
+			Request: "request-digest:sha256:" + core.SHA256Hex([]byte(request)), Actor: selected.Execution.Requester, Source: source,
+			Task: core.GraphTask{
+				ID: id + "-planning", Title: "Request implementation plan", Repo: *repo, Type: "DESIGN", Status: core.Draft,
+				Issue: "NOT_REQUIRED: local request planning", CreatedFrom: source,
+				Owner: "CODER", Reviewer: "REVIEWER", Objective: "Propose scope, acceptance criteria and validation from the transient request and minimal saved plan",
+				BudgetGuidance: core.CloneBudgetGuidance(guidance),
+				Worktree:       root, Branch: branch, BaselineSHA: baseline,
+			},
+			PlanningSelection: &selected, PlanningReason: "Human selected /plan for bounded request clarification",
+			ConfigurationDecisionID: core.ConfigurationApprovalID(selected.Execution.ApprovalRef, id+"-planning"),
+		})
+		if err != nil {
+			return err
+		}
+		checkpoint = requestCheckpoint{Version: 2, OperationID: id,
+			Args: args[:len(args)-fs.NArg()], Task: task, Selection: selected,
+			RequestHash: "sha256:" + core.SHA256Hex([]byte(request)), MaxRepairs: *repairs}
+		if err := saveRequestCheckpoint(db, &operation, checkpoint); err != nil {
+			return err
+		}
+	}
+	if resuming && (operation.Phase == "EXECUTION" || operation.Phase == "PREFLIGHT") {
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			return err
+		}
+		if _, err := verifyRequestCheckpoint(state, operation, checkpoint); err != nil {
+			return err
+		}
+		if _, exists := state.Graph.ReviewFlow(operation.FlowID); exists {
+			operation.State = "RUNNING"
+			if err := saveRequestCheckpoint(db, &operation, checkpoint); err != nil {
+				return err
+			}
+			if checkpoint.Preflight == nil || !checkpoint.Preflight.ExecutionGateOpen {
+				report, err := controller.PreflightReviewFlow(controller.WithOperation(ctx, operation), db, operation.TaskID, filepath.Dir(root))
+				checkpoint.Preflight = &report
+				if err != nil {
+					return err
+				}
+				if err := recordRequestPreflight(db, operation, checkpoint); err != nil {
+					return err
+				}
+			}
+			terminalReported = true
+			return finishRequestExecution(ctx, db, &operation, &checkpoint, runner, *cli, *base, output)
+		}
+	}
+	if resuming && checkpoint.PlannerStarted {
+		return fmt.Errorf("request has an uncertain paid Planner attempt; reconcile the saved session receipt before continuation; checkpoint retained")
+	}
+	conversation := []requestMessage{{Role: "human", Text: request}}
+	if resuming {
+		conversation = nil
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		text, err := json.Marshal(struct {
 			Conversation []requestMessage            `json:"conversation"`
+			Plan         *controller.QuestionAnswer  `json:"plan,omitempty"`
 			Files        map[string][]string         `json:"committedFilesByDirectory"`
 			Context      []gitproof.InvestigatedFile `json:"committedContext"`
-		}{conversation, inventory, contextFiles})
+		}{conversation, checkpoint.Answer, inventory, contextFiles})
 		if err != nil {
 			return err
 		}
-		result, planErr := planner(ctx, db, selected, task, string(text), *credits, *cli, *base)
-		receipt, err := json.MarshalIndent(struct {
-			Input  json.RawMessage           `json:"input"`
-			Result controller.QuestionResult `json:"result"`
-			Error  string                    `json:"error,omitempty"`
-		}{text, result, requestError(planErr)}, "", "  ")
-		if err != nil {
-			return errors.Join(planErr, err)
+		var answer controller.QuestionAnswer
+		if checkpoint.Answer == nil {
+			if operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU {
+				operation.State = "USAGE_EXCEEDED"
+				failureGate = "USAGE_EXCEEDED"
+				return errors.Join(fmt.Errorf("request planning budget exhausted or unknown; checkpoint retained"),
+					saveRequestCheckpoint(db, &operation, checkpoint))
+			}
+			operation.State = "RUNNING"
+			checkpoint.PlannerStarted = true
+			if err := saveRequestCheckpoint(db, &operation, checkpoint); err != nil {
+				return err
+			}
+			result, planErr := planner(ctx, db, selected, task, string(text), *credits, *cli, *base)
+			resultBytes, err := json.Marshal(result)
+			if err != nil {
+				return errors.Join(planErr, err)
+			}
+			receipt, err := json.Marshal(struct {
+				Version     int    `json:"version"`
+				OperationID string `json:"operationId"`
+				InputHash   string `json:"inputHash"`
+				ResultHash  string `json:"resultHash"`
+				Failed      bool   `json:"failed"`
+			}{2, id, core.SHA256Hex(text), core.SHA256Hex(resultBytes), planErr != nil})
+			if err != nil {
+				return errors.Join(planErr, err)
+			}
+			if err := db.AppendRequestRecord(id, "planning", string(receipt)); err != nil {
+				return errors.Join(planErr, err)
+			}
+			if len(result.Usage) == 0 {
+				operation.PlanningUsageState = "unknown"
+			}
+			for _, usage := range result.Usage {
+				if usage.TotalNanoAIU == nil || usage.AICreditsStatus == nil || *usage.AICreditsStatus != "complete" ||
+					math.IsNaN(*usage.TotalNanoAIU) || math.IsInf(*usage.TotalNanoAIU, 0) || *usage.TotalNanoAIU < 0 {
+					operation.PlanningUsageState = "unknown"
+				} else {
+					total := operation.PlanningNanoAIU + *usage.TotalNanoAIU
+					if math.IsInf(total, 0) {
+						operation.PlanningUsageState = "unknown"
+					} else {
+						operation.PlanningNanoAIU = total
+					}
+				}
+			}
+			if err := saveRequestCheckpoint(db, &operation, checkpoint); err != nil {
+				return errors.Join(planErr, err)
+			}
+			if planErr != nil {
+				return planErr
+			}
+			if result.Answer == nil || result.Changed {
+				return fmt.Errorf("request Planner lacks a valid answer or stable context; receipt retained in SQLite for %s", id)
+			}
+			checkpoint.PlannerStarted = false
+			answer = *result.Answer
+		} else {
+			answer = *checkpoint.Answer
 		}
-		if err := db.AppendRequestRecord(id, "planning", string(receipt)); err != nil {
-			return errors.Join(planErr, err)
-		}
-		var accountQuota *runtime.QuotaSnapshot
-		if result.BudgetGuidance != nil {
-			accountQuota = result.BudgetGuidance.Account
-		}
-		if err := displayRequestUsage(output, result.Usage, *credits, accountQuota); err != nil {
-			return errors.Join(planErr, err)
-		}
-		if planErr != nil {
-			return planErr
-		}
-		if result.Answer == nil || result.Changed {
-			return fmt.Errorf("request Planner lacks a valid answer or stable context; receipt retained in SQLite for %s", id)
-		}
-		answer := *result.Answer
 		if err := controller.ValidateRequestPlan(answer); err != nil {
 			return err
 		}
 		if answer.Proposal != nil && !slices.Contains(answer.Proposal.Acceptance, core.DocumentationAcceptance) {
 			answer.Proposal.Acceptance = append(answer.Proposal.Acceptance, core.DocumentationAcceptance)
 		}
-		if err := displayRequestPlan(output, answer); err != nil {
+		minimal := minimalRequestAnswer(answer)
+		checkpoint.Answer = &minimal
+		operation.State = "WAITING_FOR_APPROVAL"
+		if len(answer.Questions) != 0 {
+			operation.State = "WAITING_FOR_ANSWER"
+		}
+		if err := saveRequestCheckpoint(db, &operation, checkpoint); err != nil {
 			return err
 		}
-		line, err = read()
+		if resumeApproved {
+			line, err = "/approve", nil
+		} else {
+			if err := displayRequestPlan(output, answer); err != nil {
+				return err
+			}
+			line, err = read()
+		}
 		if errors.Is(err, io.EOF) || err == nil && line == "/quit" {
+			if line == "/quit" {
+				operation.State = "CANCELLED"
+				return saveRequestCheckpoint(db, &operation, checkpoint)
+			}
 			return nil
 		}
 		if err != nil {
@@ -382,43 +605,62 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if answer.Proposal == nil || len(answer.Questions) != 0 {
 				return fmt.Errorf("answer the Planner's questions before approving a proposal")
 			}
+			if operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU {
+				operation.State = "USAGE_EXCEEDED"
+				failureGate = "USAGE_EXCEEDED"
+				return errors.Join(fmt.Errorf("request budget exhausted or unknown; execution was not authorized"),
+					saveRequestCheckpoint(db, &operation, checkpoint))
+			}
 			if currentRoot, currentBranch, sha, err := gitproof.ObserveRequestBaseline(root, *repo, selection); err != nil ||
 				sha != baseline || currentRoot != root || currentBranch != branch {
-				return errors.Join(err, fmt.Errorf("request baseline changed; start a new request"))
+				return errors.Join(err, fmt.Errorf("request baseline changed; checkpoint retained and renewed authorization required"))
 			}
 			current, err := resolveConfiguration()
 			if err != nil {
 				return err
 			}
 			if current.Config != selected {
-				return fmt.Errorf("request configuration changed; start a new request")
+				return fmt.Errorf("request configuration changed; checkpoint retained and renewed authorization required")
 			}
+			operation.State, operation.Phase, operation.TaskID, operation.FlowID = "RUNNING", "PREFLIGHT", id, id+"-flow"
 			proposal := answer.Proposal
-			executionConversation := append([]requestMessage(nil), conversation...)
-			executionConversation[0] = requestMessage{Role: "human", Text: request}
-			executionRequest, err := json.Marshal(struct {
-				PlanningTaskID string           `json:"planningTaskId"`
-				Conversation   []requestMessage `json:"conversation"`
-			}{task.ID, executionConversation})
+			planHash, err := core.CanonicalSHA256(proposal)
 			if err != nil {
 				return err
 			}
-			executionTask, err := controller.ProposeIntake(db, controller.IntakeRequest{
-				Request: string(executionRequest), Actor: selected.Execution.Requester, Source: "planner:" + task.ID,
-				Task: core.GraphTask{
-					ID: id, Title: proposal.Title, Objective: proposal.Objective, Repo: *repo,
-					Type: "IMPLEMENTATION", Status: core.Draft, CreatedFrom: source,
-					Issue: "NOT_REQUIRED: Human-approved local request",
-					Owner: "CODER", Reviewer: "REVIEWER", Scope: proposal.Scope, OutOfScope: proposal.OutOfScope,
-					Acceptance: proposal.Acceptance, ValidationCommands: proposal.ValidationCommands,
-					RequiredEvidence: []string{"work-report"}, ExitCondition: "Independent review approves all acceptance criteria",
-					OutputMode: core.OutputModeWorktreeTreeSnapshot, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessAll},
-					BudgetGuidance: core.CloneBudgetGuidance(guidance),
-					Worktree:       root, Branch: branch, BaselineSHA: baseline,
-				},
-			})
+			executionRequest, err := json.Marshal(struct {
+				Version        int    `json:"version"`
+				OperationID    string `json:"operationId"`
+				PlanningTaskID string `json:"planningTaskId"`
+				RequestHash    string `json:"requestHash"`
+				PlanHash       string `json:"planHash"`
+			}{2, id, task.ID, checkpoint.RequestHash, planHash})
 			if err != nil {
 				return err
+			}
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				return err
+			}
+			executionTask, exists := state.Graph.GraphTask(id)
+			if !exists {
+				executionTask, err = controller.ProposeIntake(db, controller.IntakeRequest{
+					Request: string(executionRequest), Actor: selected.Execution.Requester, Source: "planner:" + task.ID,
+					Task: core.GraphTask{
+						ID: id, Title: proposal.Title, Objective: proposal.Objective, Repo: *repo,
+						Type: "IMPLEMENTATION", Status: core.Draft, CreatedFrom: source,
+						Issue: "NOT_REQUIRED: Human-approved local request",
+						Owner: "CODER", Reviewer: "REVIEWER", Scope: proposal.Scope, OutOfScope: proposal.OutOfScope,
+						Acceptance: proposal.Acceptance, ValidationCommands: proposal.ValidationCommands,
+						RequiredEvidence: []string{"work-report"}, ExitCondition: "Independent review approves all acceptance criteria",
+						OutputMode: core.OutputModeWorktreeTreeSnapshot, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessAll},
+						BudgetGuidance: core.CloneBudgetGuidance(guidance),
+						Worktree:       root, Branch: branch, BaselineSHA: baseline,
+					},
+				})
+				if err != nil {
+					return err
+				}
 			}
 			hash, err := controller.IntakeHash(executionTask)
 			if err != nil {
@@ -429,12 +671,35 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			for index := 0; index <= *repairs; index++ {
 				reviewers = append(reviewers, fmt.Sprintf("%s-review-%d", flowID, index))
 			}
-			if _, err := controller.ConfirmIntake(db, controller.IntakeConfirmation{
-				TaskID: id, ExpectedHash: hash, Actor: selected.Execution.Requester, Source: source,
-				Reason:    "Human selected /approve for the displayed plan, host validation commands, runtime, deadline and repair count",
-				Selection: selected, AdditionalTaskIDs: reviewers,
-				ConfigurationDecisionID: core.ConfigurationApprovalID(selected.Execution.ApprovalRef, id),
-			}); err != nil {
+			basis, err := requestApprovalBasis(operation, checkpoint)
+			if err != nil {
+				return err
+			}
+			if executionTask.Status == core.Draft {
+				if _, err := controller.ConfirmIntake(db, controller.IntakeConfirmation{
+					TaskID: id, ExpectedHash: hash, Actor: selected.Execution.Requester, Source: source,
+					Reason:    "Human selected /approve for the displayed plan, host validation commands, runtime, deadline and repair count",
+					Selection: selected, AdditionalTaskIDs: reviewers,
+					ConfigurationDecisionID: core.ConfigurationApprovalID(selected.Execution.ApprovalRef, id),
+					RequestOperationID:      id, RequestBasisHash: basis,
+				}); err != nil {
+					return err
+				}
+			} else if !resumeApproved {
+				return fmt.Errorf("existing execution Task requires a matching formal request approval")
+			}
+			if !resumeApproved {
+				checkpoint.ProposalHash, checkpoint.AuthorizationID = hash, "intake-confirmation:"+id
+			}
+			checkpoint.Approved = true
+			if err := saveRequestCheckpoint(db, &operation, checkpoint); err != nil {
+				return err
+			}
+			confirmed, err := db.LoadWorkspace()
+			if err != nil {
+				return err
+			}
+			if _, err := verifyRequestCheckpoint(confirmed, operation, checkpoint); err != nil {
 				return err
 			}
 			deadline, _ := ctx.Deadline()
@@ -450,52 +715,41 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if err != nil {
 				return err
 			}
-			if _, err := controller.StartReviewFlow(db, storePath, controller.ReviewFlowRequest{
+			if _, err := controller.StartReviewFlowContext(controller.WithOperation(ctx, operation), db, storePath, controller.ReviewFlowRequest{
 				Configuration: configuration,
 				ID:            flowID, TaskID: id, Repository: *repo, ReviewRoot: reviewRoot,
 				MaxRepairs: repairs, TimeoutSeconds: seconds,
-				MaxNanoAIU: *taskNanoAIU,
+				MaxNanoAIU: operation.MaxNanoAIU - operation.PlanningNanoAIU,
 				Authorization: core.TaskDecision{ID: flowID + "-budget", Source: source,
 					Text: fmt.Sprintf("Human selected /approve for the approved goal, deadline, repair limit and Task-wide %.9g nano-AIU ceiling; prioritize acceptance within these limits", *taskNanoAIU)},
 			}); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(output, "Starting execution: Task %s / Flow %s\n", id, flowID); err != nil {
+			operation.FlowID = flowID
+			report, err := controller.PreflightReviewFlow(controller.WithOperation(ctx, operation), db, id, filepath.Dir(root))
+			checkpoint.Preflight = &report
+			if err != nil {
+				operation.State = "BLOCKED"
+				return errors.Join(err, saveRequestCheckpoint(db, &operation, checkpoint))
+			}
+			if err := recordRequestPreflight(db, operation, checkpoint); err != nil {
 				return err
 			}
-			runErr := runner(ctx, []string{"run", "--id", flowID, "--builtin-prompts",
-				"--max-ai-credits", fmt.Sprint(*credits), "--cli", *cli, "--base-directory", *base}, io.Discard)
-			summary, summaryErr := json.Marshal(struct {
-				FlowID string `json:"flowId"`
-				Error  string `json:"error,omitempty"`
-			}{flowID, requestError(runErr)})
-			if summaryErr != nil {
-				return errors.Join(runErr, summaryErr)
-			}
-			if err := db.AppendRequestRecord(id, "execution", string(summary)); err != nil {
-				return errors.Join(runErr, err)
-			}
-			state, loadErr := db.LoadWorkspace()
-			if loadErr != nil {
-				return errors.Join(runErr, loadErr)
-			}
-			flow, ok := state.Graph.ReviewFlow(flowID)
-			if !ok {
-				return errors.Join(runErr, fmt.Errorf("request flow disappeared"))
-			}
-			_, printErr := fmt.Fprintf(output, "Result: %s\nWorktree: %s\nFlow: %s\nRecord: %s\n%s\n",
-				flow.Status, root, flow.ID, id+" (SQLite; taxion records show)", flow.Reason)
-			return errors.Join(runErr, printErr)
+			terminalReported = true
+			return finishRequestExecution(ctx, db, &operation, &checkpoint, runner, *cli, *base, output)
 		}
 		if line == "" || strings.HasPrefix(line, "/") {
 			return fmt.Errorf("enter feedback in natural language, /approve or /quit")
 		}
-		prior, err := json.Marshal(answer)
+		prior, err := json.Marshal(minimalRequestAnswer(answer))
 		if err != nil {
 			return err
 		}
-		conversation = append(conversation, requestMessage{Role: "planner", Text: string(prior)},
-			requestMessage{Role: "human", Text: line})
+		conversation = []requestMessage{{Role: "planner", Text: string(prior)}, {Role: "human", Text: line}}
+		checkpoint.Answer = nil
+		if err := saveRequestCheckpoint(db, &operation, checkpoint); err != nil {
+			return err
+		}
 	}
 }
 

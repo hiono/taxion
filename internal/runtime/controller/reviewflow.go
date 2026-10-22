@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,10 @@ type ReviewFlowRequest struct {
 }
 
 func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowRequest) (core.ReviewFlow, error) {
+	return StartReviewFlowContext(context.Background(), db, ledgerPath, request)
+}
+
+func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath string, request ReviewFlowRequest) (core.ReviewFlow, error) {
 	if db == nil || strings.TrimSpace(request.ID) == "" || strings.ContainsAny(request.ID, `/\`) ||
 		request.MaxRepairs == nil || *request.MaxRepairs < 0 || request.TimeoutSeconds <= 0 ||
 		math.IsNaN(request.MaxNanoAIU) || math.IsInf(request.MaxNanoAIU, 0) || request.MaxNanoAIU <= 0 ||
@@ -45,6 +50,9 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 	}
 	var flow core.ReviewFlow
 	err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		if err := checkOperation(state, ctx, request.TaskID, ""); err != nil {
+			return err
+		}
 		task, ok := state.Graph.GraphTask(request.TaskID)
 		if !state.HasGraph || !ok || task.Repo != request.Repository ||
 			task.Status != core.Ready || task.Owner != "CODER" || task.Reviewer != "REVIEWER" {
@@ -206,6 +214,16 @@ func AdvanceReviewFlow(db *store.Store, ledgerPath, id string, configuration ...
 func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configuration core.ApprovalConfiguration) (core.ReviewFlow, error) {
 	if db == nil {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: review flow requires a store")
+	}
+	if runnerID == "" {
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			return core.ReviewFlow{}, err
+		}
+		flow, _ := state.Graph.ReviewFlow(id)
+		if err := checkOperation(&state, context.Background(), flow.TaskID, id); err != nil {
+			return core.ReviewFlow{}, err
+		}
 	}
 	if err := preparePacketValidator(db, id, runnerID); err != nil {
 		return core.ReviewFlow{}, err

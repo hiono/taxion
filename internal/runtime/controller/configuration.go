@@ -325,6 +325,9 @@ func (c *Controller) authorizeExecution(ctx context.Context, dispatchID, operati
 	if !ok {
 		return fmt.Errorf("taxion: specification gate requires a saved Dispatch")
 	}
+	if err := checkDispatchOperation(&state, ctx, dispatch); err != nil {
+		return err
+	}
 	if state.Records.Restore != nil && slices.Contains(state.Records.Restore.TaskIDs, dispatch.TaskID) {
 		return fmt.Errorf("taxion: restored execution requires a newly approved successor; old SDK sessions cannot resume")
 	}
@@ -353,6 +356,9 @@ func (c *Controller) authorizeExecution(ctx context.Context, dispatchID, operati
 	completedAt := time.Now().UTC()
 	// Recheck approval and save the observation together before SDK session work.
 	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		if err := checkDispatchOperation(state, ctx, dispatch); err != nil {
+			return err
+		}
 		if _, err := c.checkExecutionConfiguration(state.Graph, dispatchID); err != nil {
 			return err
 		}

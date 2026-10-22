@@ -30,9 +30,16 @@ func StepReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string,
 	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, true, configuration...)
 }
 
-func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, singleTurn bool, configuration ...core.ApprovalConfiguration) (core.ReviewFlow, error) {
+func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, singleTurn bool, configuration ...core.ApprovalConfiguration) (result core.ReviewFlow, returnErr error) {
 	if db == nil || factory == nil || out == nil {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: flow runner requires a store, worker factory and event output")
+	}
+	if _, inherited := ctx.Value(operationKey{}).(store.Operation); !inherited {
+		lease, err := db.LockOperation()
+		if err != nil {
+			return core.ReviewFlow{}, err
+		}
+		defer func() { returnErr = errors.Join(returnErr, lease.Close()) }()
 	}
 	var selected core.ApprovalConfiguration
 	if len(configuration) != 0 {
@@ -49,6 +56,9 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 		flow, ok = state.Graph.ReviewFlow(id)
 		if !ok || flow.Status != "RUNNING" {
 			return fmt.Errorf("taxion: runner requires a running review flow")
+		}
+		if err := checkOperation(state, ctx, flow.TaskID, flow.ID); err != nil {
+			return err
 		}
 		if flow.RunnerID != "" {
 			return fmt.Errorf("taxion: flow is claimed by runner %s; reconcile its execution and claim before retrying", flow.RunnerID)
@@ -86,7 +96,7 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 			break
 		}
 		if dispatch.Recipient == "REVIEWER" {
-			dispatch, err = PrepareReview(db, dispatch.ID, flow.Contract.Worktree)
+			dispatch, err = prepareReview(runCtx, db, dispatch.ID, flow.Contract.Worktree)
 			if err != nil {
 				break
 			}

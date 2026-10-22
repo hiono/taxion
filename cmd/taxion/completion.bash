@@ -74,7 +74,7 @@ _taxion_complete() {
         'records reconcile') candidates='--claim --help --id --sender-stopped' ;;
         'records send') candidates='--help --id --scanner' ;;
         'records show') candidates='' ;;
-        'request') candidates='--base-directory --budget-guidance --cli --context-path --help --max-ai-credits --max-repairs --max-task-nano-aiu --repo --timeout --worktree' ;;
+        'request') candidates='--base-directory --budget-guidance --cancel --cli --context-path --help --max-ai-credits --max-repairs --max-task-nano-aiu --repo --resume --status --timeout --worktree' ;;
         'resume') candidates='--help --session' ;;
         'review') candidates='--help --repo --sha --task' ;;
         'role-packet') candidates='create list read verify' ;;

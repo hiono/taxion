@@ -44,6 +44,8 @@ Foundation や初期の別の Milestone を M1 とした出典記録は確認で
 
 READY Task 再承認の判断は [ADR-0043](adr/0043-approval-gates-and-read-only-lanes.md)、immutable proposal identity の修正は [Issue #127](https://github.com/hiono/taxion/issues/127) / [PR #128](https://github.com/hiono/taxion/pull/128) に対応する。merge 状態は Issue / PR を参照する。
 
+workspace 内の operation 直列化、承認済み preflight の一括実行、request checkpoint の再開は [Issue #133](https://github.com/hiono/taxion/issues/133) に対応する。現在の排他・保存・復旧契約は [Runtime 契約](runtime-contract.md#operation-の直列化と-request-checkpoint)、操作は[利用者ガイド](../userguide/user-guide.md#人のことばで依頼して計画を相談する)を参照する。
+
 ## ADR の状態と現在の参照先
 
 ADR-0001〜0043 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。

@@ -253,11 +253,9 @@ func fixturePlan(t *testing.T, answer controller.QuestionAnswer) requestPlanner 
 			if err := json.Unmarshal([]byte(wire.Question), &conversation); err != nil {
 				t.Fatal(err)
 			}
-			first := conversation.Messages[0]
 			if context.Task.ID != task.ID || request.Request == "" ||
-				context.Task.Title == request.Request || context.Task.Objective == request.Request ||
-				first.Text != "" || first.Source != "/planner/task/decisions/0/text" {
-				t.Fatal("original request was lost or repeated outside its exact saved decision")
+				!strings.HasPrefix(request.Request, "request-digest:sha256:") || len(conversation.Messages) == 0 {
+				t.Fatal("Planner lacks its transient turn or the saved request digest")
 			}
 			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
@@ -269,8 +267,17 @@ func fixturePlan(t *testing.T, answer controller.QuestionAnswer) requestPlanner 
 }
 
 func TestRequestRefinesHumanIntentAndRunsSameTreeReviewWithoutCopyPaste(t *testing.T) {
+	testApprovedRequest(t, false)
+}
+
+func TestRequestResumesApprovedFlowWithoutRepeatingCoder(t *testing.T) {
+	testApprovedRequest(t, true)
+}
+
+func testApprovedRequest(t *testing.T, resume bool) {
+	t.Helper()
 	root, args := requestFixture(t)
-	var calls, roles int
+	var calls, roles, runs int
 	planner := func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
 		text string, credits float64, cli, base string) (controller.QuestionResult, error) {
 		calls++
@@ -304,6 +311,7 @@ func TestRequestRefinesHumanIntentAndRunsSameTreeReviewWithoutCopyPaste(t *testi
 		return fixturePlan(t, answer)(ctx, db, selected, task, text, credits, cli, base)
 	}
 	runner := func(ctx context.Context, runArgs []string, output io.Writer) error {
+		runs++
 		if !strings.Contains(strings.Join(runArgs, " "), "--builtin-prompts") {
 			t.Fatal("request required user-created role prompts")
 		}
@@ -326,7 +334,11 @@ func TestRequestRefinesHumanIntentAndRunsSameTreeReviewWithoutCopyPaste(t *testi
 		if flow.MaxTokens != 0 || flow.MaxRepairs != 0 {
 			t.Fatal("new flow retained an observed-token spending ceiling", flow)
 		}
-		_, err = controller.RunReviewFlow(ctx, db, storePath, flowID, func(dispatch core.GraphDispatch) (runtime.Identity, error) {
+		run := controller.RunReviewFlow
+		if resume && runs == 1 {
+			run = controller.StepReviewFlow
+		}
+		_, err = run(ctx, db, storePath, flowID, func(dispatch core.GraphDispatch) (runtime.Identity, error) {
 			dispatch, err = selectDispatchConfiguration(db, dispatch)
 			if err != nil {
 				return nil, err
@@ -335,8 +347,9 @@ func TestRequestRefinesHumanIntentAndRunsSameTreeReviewWithoutCopyPaste(t *testi
 			if err != nil {
 				return nil, err
 			}
-			if !strings.Contains(received, "検索機能をつけて") || !strings.Contains(received, "部分一致です。") {
-				t.Fatal("Planner intent or feedback did not reach the receiving role", dispatch.Recipient)
+			if !strings.Contains(received, "部分一致の検索を追加する") ||
+				strings.Contains(received, "部分一致です。") || strings.Contains(received, "検索機能をつけて") {
+				t.Fatal("role context lost its approved plan or retained raw conversation", dispatch.Recipient)
 			}
 			if dispatch.Recipient == "REVIEWER" &&
 				(!strings.Contains(received, "Implemented case-insensitive search; checked missing and Japanese queries.") ||
@@ -428,13 +441,31 @@ func TestSearch(t *testing.T) {
 			}
 			return worker, nil
 		}, output)
+		if resume && runs == 1 && err == nil {
+			return errors.New("fixture interruption after saved Coder evidence")
+		}
 		return err
 	}
 	var out bytes.Buffer
-	if err := requestCommand(append(args, "検索機能をつけて"), strings.NewReader("/plan\n部分一致です。\n/approve\n"), &out, planner, runner); err != nil {
+	err := requestCommand(append(args, "検索機能をつけて"), strings.NewReader("/plan\n部分一致です。\n/approve\n"), &out, planner, runner)
+	if resume {
+		if err == nil || roles != 1 {
+			t.Fatal("fixture did not stop after exactly one Coder", err, roles)
+		}
+		db, state, err := loadWorkspace()
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := state.Records.Operation.ID
+		db.Close()
+		err = requestCommand([]string{"--resume", id}, strings.NewReader(""), &out, planner, runner)
+		if err != nil {
+			t.Fatal("approved checkpoint did not resume directly at Reviewer", err, out.String())
+		}
+	} else if err != nil {
 		t.Fatal(err, out.String())
 	}
-	if calls != 2 || roles != 2 || !strings.Contains(out.String(), "Result: COMPLETED") {
+	if calls != 2 || roles != 2 || !strings.Contains(out.String(), `"gate":"COMPLETED"`) {
 		t.Fatal("copy-free request did not complete", calls, roles, out.String())
 	}
 	db, state, err := loadWorkspace()
@@ -442,6 +473,24 @@ func TestSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	if state.Records.Operation == nil || state.Records.Operation.State != "COMPLETED" ||
+		state.Records.Operation.Owner != "" {
+		t.Fatal("completed request retained an active operation")
+	}
+	var checkpoint requestCheckpoint
+	if err := json.Unmarshal(state.Records.Operation.Checkpoint, &checkpoint); err != nil ||
+		checkpoint.Preflight == nil || !checkpoint.Preflight.ExecutionGateOpen || len(checkpoint.Preflight.Lanes) != 4 {
+		t.Fatal("approved preflight was not completed as one recorded batch", err)
+	}
+	if state.Records.Operation.PlanningNanoAIU != 2 ||
+		state.Graph.ReviewFlows[0].Budget.MaxNanoAIU != 1e9-2 {
+		t.Fatal("planning spend was not deducted from the approved hard ceiling")
+	}
+	for _, intermediate := range []string{"Starting execution:", "Planning record:", "Planner call"} {
+		if strings.Contains(out.String(), intermediate) {
+			t.Fatal("request emitted intermediate progress", intermediate)
+		}
+	}
 	coder, reviewer := state.Graph.Dispatches[0], state.Graph.Dispatches[1]
 	if strings.Count(out.String(), core.DocumentationAcceptance) != 1 ||
 		!slices.Contains(coder.Instruction.Acceptance, core.DocumentationAcceptance) ||
@@ -459,19 +508,20 @@ func TestSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	var executionRequest struct {
-		PlanningTaskID string           `json:"planningTaskId"`
-		Conversation   []requestMessage `json:"conversation"`
+		PlanningTaskID string `json:"planningTaskId"`
+		RequestHash    string `json:"requestHash"`
+		PlanHash       string `json:"planHash"`
 	}
 	if err := json.Unmarshal([]byte(intake.Request), &executionRequest); err != nil {
 		t.Fatal(err)
 	}
 	if executionRequest.PlanningTaskID != coder.TaskID+"-planning" ||
-		len(executionRequest.Conversation) != 3 || executionRequest.Conversation[0].Text != "検索機能をつけて" ||
-		executionRequest.Conversation[0].Source != "" ||
-		executionRequest.Conversation[2].Text != "部分一致です。" ||
+		executionRequest.RequestHash != "sha256:"+core.SHA256Hex([]byte("検索機能をつけて")) ||
+		executionRequest.PlanHash == "" ||
+		strings.Contains(intake.Request, `"conversation"`) ||
 		strings.Contains(intake.Request, `"committedFilesByDirectory"`) ||
 		strings.Contains(intake.Request, `"committedContext"`) {
-		t.Fatal("execution lost original intent or feedback, retained a dangling Planner reference, or copied planning-only files")
+		t.Fatal("execution lost its plan identity or retained conversation/context")
 	}
 	if coder.Instruction.BudgetGuidance == nil || coder.Instruction.BudgetGuidance.Mode != "flow" ||
 		reviewer.Instruction.BudgetGuidance == nil || reviewer.Instruction.BudgetGuidance.Mode != "flow" {
@@ -493,15 +543,19 @@ func TestSearch(t *testing.T) {
 	if planning != 2 {
 		t.Fatal("Planner conversation or usage receipts missing", planning)
 	}
-	if len(state.Records.Requests) != 3 {
+	wantRecords := 4
+	if resume {
+		wantRecords++
+	}
+	if len(state.Records.Requests) != wantRecords {
 		t.Fatal("execution events were duplicated instead of referencing the Flow")
 	}
 	var execution struct {
-		FlowID string `json:"flowId"`
-		Error  string `json:"error"`
+		FlowID    string `json:"flowId"`
+		ErrorHash string `json:"errorHash"`
 	}
-	if err := core.DecodeGraphInput(strings.NewReader(state.Records.Requests[2].Payload), &execution); err != nil ||
-		execution.FlowID != state.Graph.ReviewFlows[0].ID || execution.Error != "" {
+	if err := core.DecodeGraphInput(strings.NewReader(state.Records.Requests[len(state.Records.Requests)-1].Payload), &execution); err != nil ||
+		execution.FlowID != state.Graph.ReviewFlows[0].ID || execution.ErrorHash != core.SHA256Hex(nil) {
 		t.Fatal("execution record does not reference its authoritative Flow", execution, err)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(storePath), "requests")); !os.IsNotExist(err) {
