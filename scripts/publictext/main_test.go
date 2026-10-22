@@ -46,6 +46,17 @@ func TestPublicTextCLI(t *testing.T) {
 	}
 }
 
+func TestRepositoryModeRequiresProtectedIdentifierConfiguration(t *testing.T) {
+	for _, configured := range []string{"", " \n\t"} {
+		t.Setenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256", configured)
+		var output, warnings bytes.Buffer
+		err := run([]string{"-repository"}, &output, &warnings)
+		if err == nil || !strings.Contains(err.Error(), "requires TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256") || output.Len() != 0 {
+			t.Fatal("repository CI mode accepted unavailable protected identifier coverage", err)
+		}
+	}
+}
+
 func TestDocumentModeCannotOverrideMessageChecks(t *testing.T) {
 	directory := t.TempDir()
 	t.Chdir(directory)
