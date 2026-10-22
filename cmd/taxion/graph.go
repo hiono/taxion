@@ -94,15 +94,15 @@ type approvalGateReport struct {
 func taskAuthorizeCmd(file, confirm string) error {
 	request, err := loadGraphRequest(file)
 	if err != nil {
-		return authorizeError(err)
+		return readyAuthorizationError("authorization-invalid-manifest", err)
 	}
 	graph, ledger, initialized, err := loadGraphReadOnly()
 	if err != nil {
-		return authorizeError(err)
+		return readyAuthorizationError("authorization-invalid-source", err)
 	}
 	configuration, err := approvalConfiguration()
 	if err != nil {
-		return authorizeError(err)
+		return readyAuthorizationError("authorization-invalid-configuration", err)
 	}
 	if stored, exists := graph.GraphTask(request.Task.ID); exists && stored.Status == core.Ready {
 		return taskAuthorizeReady(request, configuration, confirm)
