@@ -66,6 +66,15 @@ func CheckResumeStart(ctx context.Context, dispatch core.GraphDispatch) error {
 	if _, err := run("merge-base", "--is-ancestor", baseline, head); err != nil {
 		return fmt.Errorf("resume baseline is not an ancestor of execution start")
 	}
+	entries, err := run("ls-files", "-v", "-z")
+	if err != nil {
+		return err
+	}
+	for _, entry := range strings.Split(entries, "\x00") {
+		if entry != "" && !strings.HasPrefix(entry, "H ") {
+			return fmt.Errorf("resume index flags can hide worktree changes")
+		}
+	}
 	tree := head
 	if instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot && instruction.TargetTreeSHA != "" {
 		tree = instruction.TargetTreeSHA

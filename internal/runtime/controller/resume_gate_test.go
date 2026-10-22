@@ -364,7 +364,7 @@ func TestResumeContractGateExpiredAndAcknowledgedAreByteStable(t *testing.T) {
 }
 
 func TestResumeContractGateRejectsGitDriftWithoutWrites(t *testing.T) {
-	for _, kind := range []string{"branch", "head", "dirty", "untracked", "endpoint", "baseline"} {
+	for _, kind := range []string{"branch", "head", "dirty", "assume-unchanged", "skip-worktree", "untracked", "endpoint", "baseline"} {
 		t.Run(kind, func(t *testing.T) {
 			db, _, request, flow := resumeGateFixture(t)
 			root := flow.Contract.Worktree
@@ -374,6 +374,11 @@ func TestResumeContractGateRejectsGitDriftWithoutWrites(t *testing.T) {
 			case "head":
 				gitTest(t, root, "commit", "--allow-empty", "-m", "drift")
 			case "dirty":
+				if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("changed"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "assume-unchanged", "skip-worktree":
+				gitTest(t, root, "update-index", "--"+kind, "README.md")
 				if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("changed"), 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -388,6 +393,11 @@ func TestResumeContractGateRejectsGitDriftWithoutWrites(t *testing.T) {
 			}
 			state, _ := db.LoadWorkspace()
 			before := mustFlowJSON(t, state)
+			indexPath := filepath.Join(root, ".git", "index")
+			indexBefore, err := os.ReadFile(indexPath)
+			if err != nil {
+				t.Fatal(err)
+			}
 			report, err := ResumeContractGateReport(t.Context(), state, flow.ID, request.Configuration)
 			if kind == "baseline" {
 				// Replacement objects do not affect read-only identity checks.
@@ -400,6 +410,10 @@ func TestResumeContractGateRejectsGitDriftWithoutWrites(t *testing.T) {
 			after, _ := db.LoadWorkspace()
 			if !bytes.Equal(before, mustFlowJSON(t, after)) {
 				t.Fatal("Git rejection changed records")
+			}
+			indexAfter, err := os.ReadFile(indexPath)
+			if err != nil || !bytes.Equal(indexBefore, indexAfter) {
+				t.Fatal("Git observation changed index bytes", err)
 			}
 		})
 	}
