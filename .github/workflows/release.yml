@@ -30,6 +30,7 @@ jobs:
           go test -count=1 ./...
           go test -count=1 -race -timeout 30m ./...
           go build ./...
+          python3 -m unittest discover -s scripts
           npm --prefix web test
           ! git grep -nE 'gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' -- ':!.github/workflows/*'
   package:
@@ -99,6 +100,13 @@ jobs:
           name: release-archives
           path: dist
       - run: python scripts/release.py smoke
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+        with:
+          version: 2026.8.0
+          install: false
+      - run: python scripts/mise_smoke.py --staged-release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
   publish:
     needs: native-smoke
     permissions:

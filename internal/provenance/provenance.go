@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const MaxArchiveBytes = 128 << 20
@@ -45,7 +46,7 @@ type Manifest struct {
 	ReleaseURL        string     `json:"releaseUrl"`
 	GeneratedBy       string     `json:"generatedBy"`
 	CIRun             string     `json:"ciRun"`
-	Dirty             bool       `json:"dirty"`
+	Dirty             *bool      `json:"dirty"`
 	Channel           string     `json:"channel"`
 }
 
@@ -227,15 +228,17 @@ func Verify(policy Policy, storeDirectory string, identity Identity) (Report, er
 	if err := Decode(manifestData, &manifest); err != nil {
 		return report, err
 	}
-	if manifest.SchemaVersion != 2 || manifest.Dirty || manifest.Channel != "github-release" ||
+	_, timestampErr := time.Parse(time.RFC3339Nano, manifest.BuildTimestamp)
+	if manifest.SchemaVersion != 2 || manifest.Dirty == nil || *manifest.Dirty || manifest.Channel != "github-release" ||
 		manifest.Version != identity.Version || manifest.Tag != identity.Version ||
-		manifest.SourceRevision != identity.Revision || manifest.BuildTimestamp == "" ||
+		manifest.SourceRevision != identity.Revision || timestampErr != nil ||
 		manifest.GoVersion == "" || manifest.GoreleaserVersion != "2.18.3" ||
 		manifest.GeneratedBy != "hiono/taxion/.github/workflows/release.yml" ||
-		!strings.HasPrefix(manifest.CIRun, "https://github.com/hiono/taxion/actions/runs/") ||
+		!regexp.MustCompile(`^https://github.com/hiono/taxion/actions/runs/[0-9]+$`).MatchString(manifest.CIRun) ||
 		manifest.ReleaseURL != "https://github.com/hiono/taxion/releases/tag/"+identity.Version ||
 		manifest.MiseIdentifier != "github:hiono/taxion@"+strings.TrimPrefix(identity.Version, "v") ||
-		manifest.RollbackVersion == "" || len(manifest.Artifacts) != 6 {
+		manifest.RollbackVersion != "v0.7.8" || len(manifest.RollbackPlatforms) != 1 ||
+		manifest.RollbackPlatforms[0] != "linux-amd64" || len(manifest.Artifacts) != 6 {
 		return report, fmt.Errorf("unsupported manifest or release identity mismatch")
 	}
 	checksums, err := Read(policy.ChecksumsPath, 1<<20)
