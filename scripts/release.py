@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import platform
 import re
@@ -50,21 +51,20 @@ def prepare(dist, tag, snapshot=False):
     pathlib.Path(".release").mkdir(exist_ok=True)
     pathlib.Path(".release/release-info.json").write_text(json.dumps(metadata, indent=2) + "\n")
     notices = []
-    modules = subprocess.check_output(["go", "list", "-m", "-json", "all"], text=True)
-    decoder = json.JSONDecoder()
-    while modules.strip():
-        module, end = decoder.raw_decode(modules.lstrip())
-        modules = modules.lstrip()[end:]
-        if module.get("Main"):
-            continue
-        directory = module.get("Dir")
-        if not directory:
-            downloaded = json.loads(command("go", "mod", "download", "-json", module["Path"] + "@" + module["Version"]))
-            directory = downloaded["Dir"]
+    modules = set()
+    for target_os, target_arch in PLATFORMS:
+        env = dict(os.environ, GOOS=target_os, GOARCH=target_arch, CGO_ENABLED="0")
+        output = subprocess.check_output(
+            ["go", "list", "-deps", "-f", "{{with .Module}}{{.Path}}|{{.Version}}|{{.Dir}}{{end}}", "./cmd/taxion"],
+            env=env, text=True,
+        )
+        modules.update(line for line in output.splitlines() if line and not line.startswith("github.com/hiono/taxion|"))
+    for module in sorted(modules):
+        name, version, directory = module.split("|")
         files = sorted({p for pattern in ("LICENSE*", "COPYING*", "NOTICE*", "PATENTS") for p in pathlib.Path(directory).glob(pattern) if p.is_file()})
         if not files:
-            raise ValueError("license not found: " + module["Path"])
-        notices.append("\n" + module["Path"] + " " + module["Version"] + "\n")
+            raise ValueError("license not found: " + name)
+        notices.append("\n" + name + " " + version + "\n")
         notices.extend("\n" + p.name + "\n" + p.read_text() for p in files)
     notices.append("\nGo standard library\n" + (pathlib.Path(command("go", "env", "GOROOT")) / "LICENSE").read_text())
     pathlib.Path(".release/THIRD_PARTY_NOTICES.txt").write_text("\n".join(notices))
@@ -93,7 +93,6 @@ def manifest(dist, tag):
             "executable": executable, "sha256": digest,
             "executableSha256": sha(contents[executable]),
         })
-    import os
     result = {
         "schemaVersion": 2, "version": tag, "tag": tag,
         "sourceRevision": info["sourceRevision"],
