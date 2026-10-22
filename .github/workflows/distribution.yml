@@ -54,3 +54,5 @@ jobs:
           version: 2026.8.0
           install: false
       - run: python scripts/mise_smoke.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

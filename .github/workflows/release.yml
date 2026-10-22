@@ -140,3 +140,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release download "${{ github.ref_name }}" --dir dist
       - run: python scripts/mise_smoke.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
