@@ -16,7 +16,9 @@ func CheckResumeStart(ctx context.Context, dispatch core.GraphDispatch) error {
 	run := func(args ...string) (string, error) {
 		cmd := exec.CommandContext(ctx, "git", append([]string{
 			"--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
-			"-c", "core.untrackedCache=false", "-C", dispatch.Instruction.Worktree,
+			"-c", "core.untrackedCache=false", "-c", "core.filemode=true", "-c", "core.symlinks=true",
+			"-c", "core.ignoreStat=false", "-c", "core.trustctime=true", "-c", "core.checkStat=default",
+			"-C", dispatch.Instruction.Worktree,
 		}, args...)...)
 		for _, entry := range os.Environ() {
 			if !strings.HasPrefix(entry, "GIT_") {
@@ -70,9 +72,25 @@ func CheckResumeStart(ctx context.Context, dispatch core.GraphDispatch) error {
 	if err != nil {
 		return err
 	}
+	var paths []string
 	for _, entry := range strings.Split(entries, "\x00") {
 		if entry != "" && !strings.HasPrefix(entry, "H ") {
 			return fmt.Errorf("resume index flags can hide worktree changes")
+		}
+		if entry != "" {
+			paths = append(paths, entry[2:])
+		}
+	}
+	if len(paths) != 0 {
+		attributes, err := run(append([]string{"check-attr", "--all", "-z", "--"}, paths...)...)
+		if err != nil {
+			return err
+		}
+		fields := strings.Split(attributes, "\x00")
+		for index := 1; index+1 < len(fields); index += 3 {
+			if fields[index] == "filter" && fields[index+1] != "unset" && fields[index+1] != "unspecified" {
+				return fmt.Errorf("resume tracked Git filters may execute commands during observation")
+			}
 		}
 	}
 	tree := head

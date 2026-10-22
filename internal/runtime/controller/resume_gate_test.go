@@ -364,7 +364,7 @@ func TestResumeContractGateExpiredAndAcknowledgedAreByteStable(t *testing.T) {
 }
 
 func TestResumeContractGateRejectsGitDriftWithoutWrites(t *testing.T) {
-	for _, kind := range []string{"branch", "head", "dirty", "assume-unchanged", "skip-worktree", "untracked", "endpoint", "baseline"} {
+	for _, kind := range []string{"branch", "head", "dirty", "mode", "filter", "assume-unchanged", "skip-worktree", "untracked", "endpoint", "baseline"} {
 		t.Run(kind, func(t *testing.T) {
 			db, _, request, flow := resumeGateFixture(t)
 			root := flow.Contract.Worktree
@@ -380,6 +380,23 @@ func TestResumeContractGateRejectsGitDriftWithoutWrites(t *testing.T) {
 			case "assume-unchanged", "skip-worktree":
 				gitTest(t, root, "update-index", "--"+kind, "README.md")
 				if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("changed"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "mode":
+				gitTest(t, root, "config", "core.filemode", "false")
+				if err := os.Chmod(filepath.Join(root, "README.md"), 0755); err != nil {
+					t.Fatal(err)
+				}
+			case "filter":
+				gitTest(t, root, "config", "filter.synthetic.clean", "printf ran > .git/resume-filter-ran; cat")
+				if err := os.WriteFile(filepath.Join(root, ".git/info/attributes"), []byte("README.md filter=synthetic\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(filepath.Join(root, "README.md"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, "README.md"), data, 0600); err != nil {
 					t.Fatal(err)
 				}
 			case "untracked":
@@ -399,6 +416,9 @@ func TestResumeContractGateRejectsGitDriftWithoutWrites(t *testing.T) {
 				t.Fatal(err)
 			}
 			report, err := ResumeContractGateReport(t.Context(), state, flow.ID, request.Configuration)
+			if _, err := os.Stat(filepath.Join(root, ".git/resume-filter-ran")); !os.IsNotExist(err) {
+				t.Fatal("read-only observation invoked a Git clean filter", err)
+			}
 			if kind == "baseline" {
 				// Replacement objects do not affect read-only identity checks.
 				if err != nil || report.Verdict != GateVerdictPass {

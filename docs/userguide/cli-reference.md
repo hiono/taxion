@@ -516,7 +516,7 @@ tool 定義の存在から実行許可を推定しない。最新 assistant mess
 
 `workflow resume --id ID` は `workflow run` と同じ role prompt / tool option を受け付ける。resume Gate の成功後、runner claim の transaction 内でも同じ条件を再確認し、既存 Dispatch を再作成せず通常の runner へ渡す。合格 report は所有権や新しい実行承認の代わりではない。別の operation に所属する Flow は、その operation の正式な所有経路なしでは実行できない。既存の `workflow run`、`workflow step`、`request --resume` の構文と継続動作は変更しない。
 
-Git 観測では `assume-unchanged` / `skip-worktree` など、追跡 file の変更を隠す index flag がある場合も拒否する。flag や index を自動変更して通過させない。各 Git 観測の出力上限は 64 KiB で、超過時も拒否する。
+Git 観測では `assume-unchanged` / `skip-worktree` など、追跡 file の変更を隠す index flag がある場合も拒否する。flag や index を自動変更して通過させず、実行属性・symlink・stat の検査も省略しない。追跡 file に有効な `filter` 属性がある場合は、観測中に外部 clean / process command を起動する可能性があるため拒否し、属性や filter 設定を変更しない。各 Git 観測の出力上限は 64 KiB で、超過時も拒否する。
 
 resume 用 binding は新しい Dispatch の append-only budget audit に version 1 として保存する。contract / authorization / instruction hash、Dispatch ID、開始時刻・期限・上限と、同時点の利用量・counter を照合する。binding のない旧 audit は補完・上書きせず `resume-budget-binding` で拒否する。canonical packet artifact のない旧記録も検証済みとして扱わない。この Gate は acknowledged / 実行中 session、結果から次 role を発行する段階、STOPPED Flow の復帰には使わず、それぞれ既存の停止・結果照合・後続契約の手順を使う。snapshot mode では、承認済み start tree と index / tracked worktree が一致し、未記録 file がないことも必要になる。
 
