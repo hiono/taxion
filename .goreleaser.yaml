@@ -1,0 +1,42 @@
+version: 2
+project_name: taxion
+builds:
+  - id: taxion
+    main: ./cmd/taxion
+    binary: taxion
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X main.releaseVersion=v{{ .Version }}
+      - -X main.releaseRevision={{ .FullCommit }}
+      - -X main.releaseBuiltAt={{ .Date }}
+      - -X main.releaseChannel={{ if .IsSnapshot }}development{{ else }}github-release{{ end }}
+snapshot:
+  version_template: '{{ .Env.TAXION_VERSION }}-snapshot'
+archives:
+  - id: binary
+    ids: [taxion]
+    name_template: 'taxion_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - src: .release/release-info.json
+        strip_parent: true
+      - src: .release/THIRD_PARTY_NOTICES.txt
+        strip_parent: true
+checksum:
+  name_template: SHA256SUMS
+source:
+  enabled: false
+release:
+  draft: true
+  prerelease: auto
+  mode: keep-existing
+changelog:
+  disable: true

@@ -8,6 +8,8 @@ Task は一件の作業記録で、目的・変更範囲・完了条件・検証
 
 ## 導入方法
 
+新しい product operation の導入は [正式バイナリと operation mode](binary-provenance.md) に従います。以下の Go backend / source build 手順は旧版の説明と development mode 用であり、product mode の正式導入には使いません。新 CLI の `init` 等を実行する前に、同ガイドの明示 mode policy を登録してください。
+
 v0.5.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
 このガイドは v0.5.0 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。

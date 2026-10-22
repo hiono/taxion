@@ -1,0 +1,142 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.2'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.18.0'
+      - run: |
+          git merge-base --is-ancestor HEAD origin/main
+          test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+          test -z "$(git status --porcelain)"
+          test -z "$(gofmt -l cmd internal)"
+          go vet ./...
+          go test -count=1 ./...
+          go test -count=1 -race -timeout 30m ./...
+          go build ./...
+          npm --prefix web test
+          ! git grep -nE 'gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' -- ':!.github/workflows/*'
+  package:
+    needs: validate
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.2'
+      - name: Refuse existing release and prepare metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          result = subprocess.run(["gh", "api", "repos/hiono/taxion/releases/tags/" + os.environ["GITHUB_REF_NAME"]], capture_output=True, text=True)
+          if result.returncode == 0:
+              raise SystemExit("Existing release: no overwrite or rerun publication allowed")
+          if json.loads(result.stdout).get("status") != "404":
+              raise SystemExit(result.stderr)
+          PY
+          echo "TAXION_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+          python3 scripts/release.py prepare --tag "$GITHUB_REF_NAME"
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a
+        with:
+          version: v2.18.3
+          args: check
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          version: v2.18.3
+          args: release --clean
+      - name: Publish manifest to draft without replacing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/release.py manifest --tag "$GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" dist/release-manifest.json dist/release-manifest.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-archives
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
+            dist/release-manifest.*
+  native-smoke:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-archives
+          path: dist
+      - run: python scripts/release.py smoke
+  publish:
+    needs: native-smoke
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-archives
+          path: dist
+      - name: Finalize draft then verify every published asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: hiono/taxion
+        run: |
+          gh release edit "$GITHUB_REF_NAME" --draft=false
+          gh release download "$GITHUB_REF_NAME" --dir public
+          cd public
+          sha256sum -c SHA256SUMS
+          sha256sum -c release-manifest.sha256
+          for asset in ../dist/*; do cmp "$asset" "$(basename "$asset")"; done
+  mise-smoke:
+    needs: publish
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13'
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+        with:
+          version: 2026.8.0
+          install: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ github.ref_name }}" --dir dist
+      - run: python scripts/mise_smoke.py

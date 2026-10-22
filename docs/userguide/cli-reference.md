@@ -1,5 +1,7 @@
 # CLI と動作のリファレンス
 
+`provenance configure --file POLICY.json` は明示 mode と対象 store、product時は正式artifactのpinを初回登録し、既存policyを上書きしません。`provenance verify` は実binaryとmanifest/archiveをread-onlyで照合します。詳細は [正式バイナリと operation mode](binary-provenance.md) を参照してください。policy未登録または不一致のoperationは、store接続前に `provenance-rejected` / `stateChanged: false` で拒否します。
+
 この文書は、現在の CLI コマンドと実行上の制約をまとめる。初めて使う手順は[利用者ガイド](user-guide.md)、設定ファイルは[設定ガイド](configuration.md)を参照する。
 
 `--file JSON` を使う操作例は、オーケストレータや自動化の実装者向けの入力仕様である。通常の利用者は `ready` を読んだ agent または `request` の Planner に自然言語で依頼し、作業条件・設定・実行上限を承認する。JSON の生成、ID・hash の転記、コマンド実行は agent または `request` が担当する。この文書の Human は承認・判断を行う利用者、「Task 契約」は承認後に勝手に変更できない作業条件を指す。

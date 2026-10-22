@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
@@ -263,9 +262,8 @@ func ExecuteValidations(ctx context.Context, dispatch core.GraphDispatch, result
 		started := time.Now().UTC()
 		command := exec.CommandContext(ctx, "sh", "-c", authorized)
 		command.Dir = root
-		command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		command.Cancel = func() error {
-			return syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+		if err := configureValidationProcess(command); err != nil {
+			return err
 		}
 		command.WaitDelay = 5 * time.Second
 		output, err := command.CombinedOutput()
