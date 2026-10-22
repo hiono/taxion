@@ -11,6 +11,22 @@ const legacySelection = `{"project":{"id":"p1"},"repository":{"provider":"gitlab
 
 const explicitSelection = `{"project":{"id":"p1"},"repository":{"provider":"gitlab","host":"gitlab.example.com","path":"group/repo","account":"acct","credentialRef":"git:main"},"runtime":{"provider":"copilot","account":"rt","credentialRef":"runtime:main","contractRef":"contract:v1"},"execution":{"requester":"human","worker":"coder","approvalRef":"approval-1"},"endpoints":{"apiBase":"https://gitlab.example.com","webBase":"https://gitlab.example.com","httpsCloneBase":"https://gitlab.example.com","sshHost":"gitlab.example.com","sshPort":"22","projectId":"42"}}`
 
+func TestSupportedApprovalVersions(t *testing.T) {
+	for _, test := range []struct {
+		version          int
+		bundle           bool
+		canonicalization bool
+	}{
+		{-1, false, false}, {0, false, false}, {1, true, true},
+		{2, false, true}, {3, false, false}, {99, false, false},
+	} {
+		if SupportsApprovalBundleVersion(test.version) != test.bundle ||
+			SupportsApprovalCanonicalizationVersion(test.version) != test.canonicalization {
+			t.Fatalf("unexpected supported versions for %d", test.version)
+		}
+	}
+}
+
 func selectionSources(t *testing.T, selection string) map[string]string {
 	t.Helper()
 	paths, err := SelectionFields(json.RawMessage(selection))

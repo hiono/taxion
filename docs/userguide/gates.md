@@ -12,6 +12,8 @@ v0.7.0 は、作業の節目を3つの gate として観測する。gate は判�
 
 `pass` は確認済みの条件がすべて満たされた状態、`blocked` は入力または承認が不足して人間の判断を待つ状態、`fail` は保存記録が矛盾しているか前提を満たさない状態を表す。未検証の項目を `pass` として報告しない。
 
+Contract gate は `bundleVersion=1` と `canonicalizationVersion=1` または `2` の組合せを検証する。保存済みの READY Task 再承認 bundle が現在の basis と一致すれば、追加の再承認は要求しない。bundle layout と正規化の版は別々に検査し、未知の版は拒否する。gate は承認記録を書き換えず、drift、tamper、credential の伏せ字も通常の bundle 検証に従う。
+
 ## 実行方法
 
 ```bash
