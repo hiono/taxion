@@ -16,6 +16,8 @@ func TestPublicMessagePolicy(t *testing.T) {
 		"The `REQUEST_CHANGES` state rejects stale results.",
 		"Published artifact SHA-256: " + strings.Repeat("a", 64),
 		"See internal/runtime/controller/publication.go for exact-content approval.",
+		"Approved execution ceilings: 200,000 tokens per flow, 2,000 AI credits total, 30 credits per execution, at most one correction, 900 seconds timeout.",
+		"内部の利用量集計は非公開の検証証跡で管理する。",
 	} {
 		if err := Check(text, false); err != nil {
 			t.Errorf("legitimate public explanation rejected: %v", err)
@@ -43,8 +45,8 @@ func TestPublicMessagePolicy(t *testing.T) {
 		"control":            "人間へ戻らず一括継続します。",
 		"usage-credits":      "The experiment consumed 8.47 AI credits.",
 		"usage-tokens":       "Completed with 124,915 reported input/output tokens.",
-		"usage-session-cap":  "sessionごとの30 credits。",
 		"usage-sessions":     "成功・失敗を含む39sessionの利用量集計。",
+		"usage-total":        "実験累計は約8.47 AI credits。",
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := Check(text, false)

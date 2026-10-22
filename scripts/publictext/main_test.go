@@ -19,6 +19,7 @@ func TestPublicTextCLI(t *testing.T) {
 		if err := os.WriteFile(file, []byte(input), 0600); err != nil {
 			t.Fatal(err)
 		}
+
 		var output, warnings bytes.Buffer
 		err := run([]string{"-report", file}, &output, &warnings)
 		if input == valid {
@@ -43,4 +44,49 @@ func TestPublicTextCLI(t *testing.T) {
 	if err := run([]string{text}, &output, &warnings); err != nil || !strings.Contains(warnings.String(), "unavailable") {
 		t.Fatal("missing private identifier coverage not disclosed", err)
 	}
+}
+
+func TestDocumentModeCannotOverrideMessageChecks(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	if err := os.Mkdir("docs", 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"message.md", "docs/schema.md"} {
+		if err := os.WriteFile(name, []byte("`REQUEST_CHANGES` is a schema value."), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{
+		{"-document", "message.md"},
+		{"-document", "docs/../message.md"},
+		{"-document", filepath.Join(directory, "message.md")},
+		{"-document", "-repository"},
+		{"-document", "docs/schema.go"},
+	} {
+		var output, warnings bytes.Buffer
+		if run(args, &output, &warnings) == nil || output.Len() != 0 {
+			t.Fatalf("document context bypass accepted: %v", args)
+		}
+	}
+	var output, warnings bytes.Buffer
+	if err := run([]string{"-document", "docs/schema.md"}, &output, &warnings); err != nil {
+		t.Fatal("legitimate technical schema rejected", err)
+	}
+	if err := os.WriteFile("message.md", []byte("REQUEST_CHANGES"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if run([]string{"message.md"}, &output, &warnings) == nil || output.Len() != 0 {
+		t.Fatal("ordinary message bypassed policy")
+	}
+	t.Run("symlink", func(t *testing.T) {
+		if err := os.Symlink("../message.md", "docs/link.md"); err != nil {
+			t.Skip("symlinks unavailable")
+		}
+		output.Reset()
+		if run([]string{"-document", "docs/link.md"}, &output, &warnings) == nil || output.Len() != 0 {
+			t.Fatal("symlink bypassed document scope")
+		}
+	})
 }

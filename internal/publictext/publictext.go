@@ -19,7 +19,7 @@ var agentReport = regexp.MustCompile(`(?i)(?:repairしました|repairを実行|
 var rawEnum = regexp.MustCompile(`\b(?:APPROVE|REQUEST_CHANGES|CONTRACT_BLOCKED|USAGE_EXCEEDED|RELEASE_READY|TAXION_HOTFIX_RELEASED)\b`)
 var inlineCode = regexp.MustCompile("`[^`\\n]+`")
 var operationReturn = regexp.MustCompile(`(?m)(?:^\s*(?:gate|decision|reviewedCommit|packetSha256)\s*:|"(?:gate|decision|reviewedCommit|packetSha256)"\s*:)`)
-var usageReport = regexp.MustCompile(`(?i)(?:\b[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:AI credits|reported input/output tokens)\b|sessionごとの[0-9]+\s*credits|成功・失敗を含む[0-9]+\s*sessions?)`)
+var usageReport = regexp.MustCompile(`(?i)(?:\breported input/output tokens\b|\b(?:consumed|spent|used)\s+[0-9][0-9,]*(?:\.[0-9]+)?\s*(?:AI credits|tokens)\b|実験累計(?:は|[:：=])\s*約?[0-9]|利用量集計\s*[:：=]\s*[0-9]|成功・失敗を含む[0-9]+\s*sessions?)`)
 
 // Check never rewrites content or includes a matched value in an error.
 // Documents may explain public schemas and enums; messages may quote an inline
