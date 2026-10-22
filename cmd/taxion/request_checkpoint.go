@@ -113,6 +113,9 @@ func verifyRequestCheckpoint(state store.Workspace, operation store.Operation, c
 	if !exists || err != nil || hashErr != nil || current != expected {
 		return false, fmt.Errorf("request planning Task changed")
 	}
+	if checkpoint.Answer == nil && !checkpoint.PlannerStarted {
+		return false, fmt.Errorf("request checkpoint has no minimal plan or pending question; transient input is unavailable; reconcile before continuation")
+	}
 	approved := checkpoint.AuthorizationID != "" || checkpoint.Approved ||
 		operation.Phase == "EXECUTION" || operation.Phase == "PREFLIGHT"
 	if !approved {
