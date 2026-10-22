@@ -141,6 +141,8 @@ glab auth status --hostname gitlab.example.com
 
 設定値はすべて文字列です。未設定の変数は下位 layer の値を使い、明示的な空文字や不正値はエラーになります。`TAXION_TOKEN`、`GH_TOKEN`、`GITHUB_TOKEN`、`COPILOT_GITHUB_TOKEN` は設定 override ではなく、それぞれ別の認証用途で扱います。Taxion は `.env` を読みません。
 
+外部公開には別途 `TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256` が必須です。公開してはいけない identifier の正規化済み ASCII token を小文字にして SHA-256 を計算し、その64桁の小文字 hex digest を空白区切りで設定します。この値は Project / Global 設定の override ではなく、公開処理用の環境設定です。未設定・空・不正な digest・本文との一致があれば `records proposal` / `approve` / `send` は停止します。信頼する保護対象一覧を管理し、本番でダミー値を使って検査を迂回しないでください。検査は設定した token に限定され、未知の名前や複合語のすべてを検出するものではありません。
+
 ## 設定を置くときの Git 制約
 
 Git worktree 内の設定ファイルは未追跡で、かつ Git ignore 対象でなければなりません。Project 設定の基点にある `.taxion/` 全体と、存在する `.env` も同じ条件で検査されます。通常は `.gitignore` に次を追加します。

@@ -2,7 +2,7 @@
 
 ## 対象と境界
 
-Issue [#143](https://github.com/hiono/taxion/issues/143)、PR [#144](https://github.com/hiono/taxion/pull/144)。方針Aの協調的 Gate を対象とし、local administrator への防御や旧 binary に対する物理的な SQLite アクセス制御は受入れ条件に含めない。source build を product policy で拒否し、開発 fixture に明示 policy が必要となる変更を含む。
+Issue [#143](https://github.com/hiono/taxion/issues/143)、PR [#144](https://github.com/hiono/taxion/pull/144)。正式 binary 配布と協調的な provenance 検証を対象とし、local administrator への防御や旧 binary に対する物理的な SQLite アクセス制御は受入れ条件に含めない。source build を product policy で拒否し、開発 fixture に明示 policy が必要となる変更を含む。
 
 ## 記録済みの結果
 
@@ -22,7 +22,7 @@ Linux amd64 の native mise fixture では実 install path `installs/github-hion
 
 ## 正式 release の完了条件
 
-上記は候補検証の履歴であり、最新HEADのreviewや正式release完了を主張しない。最新HEADのfull tests / full race / vet / build / web / docs / links / hygiene、native matrix、別Copilot sessionのreviewはPRに紐付く結果を照合する。
+上記は候補検証の履歴であり、最新HEADのreviewや正式release完了を主張しない。最新HEADのfull tests / full race / vet / build / web / docs / links / hygiene、native matrix、独立したCopilot自動レビューはPRに紐付く結果を照合する。
 
 tag workflowでは、draft assetを6 native runnerへ渡してcompiler-free mise fixture、product provenanceの実binary受入れと別pathのcopy拒否、synthetic store不変を検証する。公開後にも公開bytes/hash、GitHub backendの実際のasset自動選択、同じproduct Gateを照合する。snapshotで公開Release自動選択や正式product Gateが成功したとは記録しない。
 

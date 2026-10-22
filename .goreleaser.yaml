@@ -39,7 +39,7 @@ release:
   prerelease: auto
   mode: keep-existing
   header: |
-    ## Binary distribution と product provenance
+    ## Added
 
     Linux、macOS、Windows の amd64 / arm64 向け archive を配布します。
     mise GitHub backend で Go compiler や source checkout なしに導入できます。
@@ -47,9 +47,37 @@ release:
     embedded version / source revision、mise 管理下の実 path を検証してから開始します。
     source build は隔離した development mode 用です。
 
-    この保護は誤使用防止であり、local administrator や旧 binary への OS アクセス隔離ではありません。
-    Windows の controller shell validation は Unix process-group cancellation を必要とするため未対応です。
+    ## Changed
+
+    開発用と product 用の store policy を明示的に区別します。
+    公開コミュニケーション方針を追加し、外部公開の承認前と送信前に本文と保護対象 identifier を検査します。
+
+    ## Fixed
+
+    正式配布の検証条件を満たさない実行ファイルの誤使用を拒否します。
+
+    ## Security
+
+    この保護は協調的な誤使用防止であり、local administrator や旧 binary への OS アクセス隔離ではありません。
+
+    ## Compatibility
+
+    Windows の shell validation は Unix process-group cancellation を必要とするため未対応です。
+    外部公開には TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256 の有効な保護対象一覧が必要です。未設定・空・不正値では公開しません。
+
+    ## Upgrade
+
+    mise GitHub backend で版を固定し、manifest と artifact hash、公開 workflow の成功を照合してください。
+    外部公開を利用する環境では、設定ガイドに従って保護対象 identifier の digest 一覧を設定してください。
+
+    ## Rollback
+
     rollbackVersion v0.7.8 の binary は linux-amd64 のみ利用可能で、
     旧版への binary 切替は新しい provenance Gate を持つ product operation の継続を許可しません。
+
+    ## Known limitations
+
+    他の5 platform には v0.7.8 の rollback artifact がありません。未提供の rollback は利用可能として扱いません。
+    identifier 検査は設定した token に限定されます。旧版で承認した未送信本文が新方針に違反する場合は送信できず、取消操作もまだありません。
 changelog:
   disable: true

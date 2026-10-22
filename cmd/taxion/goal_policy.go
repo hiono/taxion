@@ -24,7 +24,17 @@ polish item. Do not reread unrelated documents or repeat valid checks without ca
 An observed quality or safety failure excludes an execution from cost optimization;
 low token use cannot compensate for it. Compare cost only for equivalent tasks,
 quality evidence, permissions and conditions. Missing measurements are unknown.
-Preserve the approved scope, independent review, exact artifact and all ceilings.`
+Preserve the approved scope, independent review, exact artifact and all ceilings.
+Public GitHub records are for users, contributors and future maintainers, not
+agent-to-agent communication. Explain the problem, user impact, change,
+compatibility, exact-commit validation, failures and remaining limitations.
+Keep raw role returns, session identifiers, packet hashes, local paths, usage,
+checkpoints and controller progress in private audit evidence. Do not paste them
+into Issues, PRs, reviews, release notes or Actions summaries.
+Use ordinary review language such as Changes requested and Review feedback
+addressed; do not impersonate a team or report work to imaginary owners.
+Prepare the public text before exact-content approval; never rewrite it after
+approval or present an unperformed check or review request as completed.`
 
 const goalRolePolicy = `
 PLANNER: define sufficient acceptance and affected documentation before approval.

@@ -81,8 +81,8 @@ func testReadyTaskReauthorization(t *testing.T, withBundle bool, reference strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	const immutableProposal = "sha256:b02845111a47d4525e30b52aa2cb2ba38fc42923340da33994eebff206597b45"
-	const incorrectV071Basis = "a873ef1bf4e213a16710eb36eac2235aa0fe681d535c3f5e66de1ff74f0f8cd9"
+	const immutableProposal = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	const incorrectV071Basis = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	task.Decisions = []core.TaskDecision{
 		{ID: "intake-confirmation:" + task.ID, Source: "human:legacy",
 			Text: `{"taskId":"legacy-ready","expectedHash":"` + immutableProposal + `"}`},

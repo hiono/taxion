@@ -45,7 +45,7 @@ func packetCLIWorkspace(t *testing.T) (core.GraphTask, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const proposal = "sha256:b02845111a47d4525e30b52aa2cb2ba38fc42923340da33994eebff206597b45"
+	const proposal = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	task.Decisions = []core.TaskDecision{
 		{ID: task.AuthorizationID, Source: "human:legacy", Text: `{"taskId":"` + task.ID + `","expectedHash":"` + proposal + `"}`},
 		{ID: core.ConfigurationApprovalID(resolution.Config.Execution.ApprovalRef, task.ID), Source: "human:legacy", Text: string(approval)},
