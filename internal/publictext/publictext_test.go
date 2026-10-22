@@ -41,6 +41,10 @@ func TestPublicMessagePolicy(t *testing.T) {
 		"key":                "api_key=" + strings.Repeat("x", 32),
 		"private-key":        "-----BEGIN OPENSSH PRIVATE KEY-----",
 		"control":            "人間へ戻らず一括継続します。",
+		"usage-credits":      "The experiment consumed 8.47 AI credits.",
+		"usage-tokens":       "Completed with 124,915 reported input/output tokens.",
+		"usage-session-cap":  "sessionごとの30 credits。",
+		"usage-sessions":     "成功・失敗を含む39sessionの利用量集計。",
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := Check(text, false)
@@ -61,6 +65,7 @@ func TestTechnicalDocumentContext(t *testing.T) {
 		"```json\n{\"decision\":\"APPROVE\"}\n```",
 		"役割別 Session、自動実装・独立レビューを含める。",
 		"Home directory placeholders: `/home/<user>` and `C:\\Users\\…`.",
+		"The accounting example configures a ceiling of 2,000 AI credits.",
 	} {
 		if err := Check(text, true); err != nil {
 			t.Fatal(err)
