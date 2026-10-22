@@ -294,6 +294,9 @@ func taskReauthorizeCmd(args []string) error {
 	if task.Status != core.Ready {
 		return authorizeError(fmt.Errorf("requires READY Task; found %s", task.Status))
 	}
+	if err := checkReauthorizationProposal(graph, task); err != nil {
+		return authorizeError(err)
+	}
 	configuration, err := approvalConfiguration()
 	if err != nil {
 		return authorizeError(err)
@@ -327,6 +330,9 @@ func taskReauthorizeCmd(args []string) error {
 		}
 		if currentHash != preview.RecordHash {
 			return fmt.Errorf("Task changed after reauthorization preview")
+		}
+		if err := checkReauthorizationProposal(current.Graph, currentTask); err != nil {
+			return err
 		}
 		if len(current.Graph.Approvals) != preview.approvalCount {
 			return fmt.Errorf("approval history changed after reauthorization preview")
@@ -428,6 +434,9 @@ func taskReauthorizeCmd(args []string) error {
 }
 
 func buildTaskReauthorizationPreview(graph core.TaskGraph, task core.GraphTask, configuration core.ApprovalConfiguration) (taskReauthorizationPreview, error) {
+	if err := checkReauthorizationProposal(graph, task); err != nil {
+		return taskReauthorizationPreview{}, err
+	}
 	prior, found, err := priorTaskConfigurationApproval(task, configuration)
 	if err != nil {
 		return taskReauthorizationPreview{}, err
@@ -449,12 +458,9 @@ func buildTaskReauthorizationPreview(graph core.TaskGraph, task core.GraphTask, 
 			return taskReauthorizationPreview{}, fmt.Errorf("existing approval uses an unknown bundle or canonicalization version")
 		}
 	}
-	proposalHash, err := core.CanonicalSHA256(task)
+	proposalHash, err := core.ImmutableProposalHash(task)
 	if err != nil {
 		return taskReauthorizationPreview{}, err
-	}
-	if previous, ok := graph.NewestApproval(task.ID); ok {
-		proposalHash = previous.ProposalHash
 	}
 	recordHash, err := core.CanonicalSHA256(task)
 	if err != nil {
@@ -513,6 +519,19 @@ func buildTaskReauthorizationPreview(graph core.TaskGraph, task core.GraphTask, 
 		preview.priorApprovalID, preview.priorApprovalHash = last.ID, last.BundleHash
 	}
 	return preview, nil
+}
+
+func checkReauthorizationProposal(graph core.TaskGraph, task core.GraphTask) error {
+	proposalHash, err := core.ImmutableProposalHash(task)
+	if err != nil {
+		return err
+	}
+	for _, bundle := range graph.ApprovalsForTask(task.ID) {
+		if bundle.ProposalHash != proposalHash {
+			return fmt.Errorf("existing approval conflicts with the immutable proposal reference; no implicit migration is permitted")
+		}
+	}
+	return nil
 }
 
 func priorTaskConfigurationApproval(task core.GraphTask, current core.ApprovalConfiguration) (json.RawMessage, bool, error) {

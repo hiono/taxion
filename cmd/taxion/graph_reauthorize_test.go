@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,6 +20,26 @@ import (
 )
 
 func TestReadyTaskReauthorizationAppendsConfigurationApproval(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		withBundle bool
+		reference  string
+	}{
+		{"legacy-zero-bundles", false, "valid"},
+		{"existing-bundle", true, "valid"},
+		{"missing-reference", false, "missing"},
+		{"missing-confirmation", false, "absent"},
+		{"conflicting-reference", false, "conflicting"},
+		{"ambiguous-reference", false, "ambiguous"},
+		{"incorrect-v071-bundle", true, "incorrect-bundle"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testReadyTaskReauthorization(t, test.withBundle, test.reference)
+		})
+	}
+}
+
+func testReadyTaskReauthorization(t *testing.T, withBundle bool, reference string) {
 	dir := t.TempDir()
 	oldCwd, err := os.Getwd()
 	if err != nil {
@@ -51,7 +73,7 @@ func TestReadyTaskReauthorizationAppendsConfigurationApproval(t *testing.T) {
 		BaselineSHA: strings.Repeat("a", 40), FileAccess: core.DefaultFileAccessPolicy(),
 	}
 	decisionID := core.ConfigurationApprovalID(legacySelection.Execution.ApprovalRef, task.ID)
-	task.AuthorizationID = decisionID
+	task.AuthorizationID = "intake-confirmation:" + task.ID
 	legacyApproval, err := json.Marshal(config.Approval{
 		Kind: config.ApprovalKind, TaskID: task.ID, Reason: "existing v0.6.x approval",
 		Allowed: []config.Config{legacySelection},
@@ -59,11 +81,28 @@ func TestReadyTaskReauthorizationAppendsConfigurationApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	const immutableProposal = "sha256:b02845111a47d4525e30b52aa2cb2ba38fc42923340da33994eebff206597b45"
+	const incorrectV071Basis = "a873ef1bf4e213a16710eb36eac2235aa0fe681d535c3f5e66de1ff74f0f8cd9"
 	task.Decisions = []core.TaskDecision{
-		{ID: "confirmation:legacy", Source: "human:legacy", Text: "existing confirmation decision"},
+		{ID: "intake-confirmation:" + task.ID, Source: "human:legacy",
+			Text: `{"taskId":"legacy-ready","expectedHash":"` + immutableProposal + `"}`},
 		{ID: decisionID, Source: "human:legacy", Text: string(legacyApproval)},
 	}
-	proposal := task
+	switch reference {
+	case "missing":
+		task.Decisions[0].Text = `{"taskId":"legacy-ready"}`
+	case "absent":
+		task.Decisions = task.Decisions[1:]
+		task.AuthorizationID = decisionID
+	case "conflicting":
+		task.Decisions = append(task.Decisions, core.TaskDecision{
+			ID: "intake-confirmation:other-task", Source: "human:legacy",
+			Text: `{"taskId":"legacy-ready","expectedHash":"sha256:` + incorrectV071Basis + `"}`,
+		})
+	case "ambiguous":
+		task.Decisions[0].Text = `{"taskId":"legacy-ready","expectedHash":"` + immutableProposal +
+			`","expectedHash":"sha256:` + incorrectV071Basis + `"}`
+	}
 	legacyConfiguration, err := approvalConfigurationFor(legacySelection, legacyResolution.Sources)
 	if err != nil {
 		t.Fatal(err)
@@ -85,9 +124,16 @@ func TestReadyTaskReauthorizationAppendsConfigurationApproval(t *testing.T) {
 		if !ok {
 			t.Fatal("tracked Task disappeared")
 		}
+		if !withBundle {
+			return nil
+		}
+		proposalHash := immutableProposal
+		if reference == "incorrect-bundle" {
+			proposalHash = incorrectV071Basis
+		}
 		var err error
-		priorBundle, err = core.ComposeApprovalBundle(
-			"legacy-approval-bundle", proposal, stored, legacyConfiguration,
+		priorBundle, err = core.ComposeApprovalBundleWithProposalHash(
+			"legacy-approval-bundle", proposalHash, stored, legacyConfiguration,
 			"human", "human:legacy", "existing v0.6.x authorization", time.Now().UTC(),
 		)
 		if err != nil {
@@ -121,6 +167,24 @@ func TestReadyTaskReauthorizationAppendsConfigurationApproval(t *testing.T) {
 	if !ok {
 		t.Fatal("READY Task disappeared before preview")
 	}
+	if !withBundle && len(before.Approvals) != 0 {
+		t.Fatal("legacy fixture must start with zero approval bundles")
+	}
+	if reference != "valid" {
+		for _, args := range [][]string{
+			{"reauthorize", "--task", task.ID},
+			{"reauthorize", "--task", task.ID, "--confirm", incorrectV071Basis},
+		} {
+			if _, err := runReauthorizationCommand(t, args); err == nil {
+				t.Fatal("invalid immutable proposal reference was accepted")
+			}
+			after, _, _, err := loadGraphReadOnly()
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("invalid proposal reference wrote workspace state: %v", err)
+			}
+		}
+		return
+	}
 	previewOutput, err := runReauthorizationCommand(t, []string{"reauthorize", "--task", task.ID})
 	if err != nil {
 		t.Fatal(err)
@@ -130,9 +194,39 @@ func TestReadyTaskReauthorizationAppendsConfigurationApproval(t *testing.T) {
 		t.Fatalf("preview was not JSON: %v (%s)", err, previewOutput)
 	}
 	if preview.Status != "awaiting-confirmation" || preview.State != core.Ready ||
-		preview.ProposalHash != priorBundle.ProposalHash || preview.RecordHash == "" ||
+		preview.ProposalHash != immutableProposal || preview.RecordHash == "" ||
 		preview.ConfirmationToken == "" || !slices.Contains(preview.RedactedDriftPaths, "endpoints.apiBase") {
 		t.Fatalf("preview omitted the approval basis or endpoint drift: %+v", preview)
+	}
+	recordHash, err := core.CanonicalSHA256(beforeTask)
+	if err != nil || preview.RecordHash != recordHash || preview.ProposalHash == preview.RecordHash {
+		t.Fatal("preview conflated immutable proposal and canonical record hashes")
+	}
+	d := preview.Dimensions
+	basis := map[string]any{
+		"bundleVersion": preview.BundleVersion, "canonicalizationVersion": preview.CanonicalizationVersion,
+		"proposalHash": immutableProposal, "baselineDigest": d.Baseline, "scopeDigest": d.Scope,
+		"acceptanceDigest": d.Acceptance, "budgetDigest": d.Budget, "permissionsDigest": d.Permission,
+		"securityDigest": d.Security, "configurationDigest": d.Configuration,
+	}
+	basisJSON, err := json.Marshal(basis)
+	if err != nil || preview.ConfirmationToken != fmt.Sprintf("%x", sha256.Sum256(basisJSON)) {
+		t.Fatal("confirmation token does not independently match the immutable full basis")
+	}
+	for _, wrongProposal := range []string{incorrectV071Basis, recordHash} {
+		basis["proposalHash"] = wrongProposal
+		wrongJSON, err := json.Marshal(basis)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrongToken := fmt.Sprintf("%x", sha256.Sum256(wrongJSON))
+		if _, err := runReauthorizationCommand(t, []string{"reauthorize", "--task", task.ID, "--confirm", wrongToken}); err == nil {
+			t.Fatal("incorrect v0.7.1 proposal basis was accepted")
+		}
+		after, _, _, err := loadGraphReadOnly()
+		if err != nil || !reflect.DeepEqual(before, after) {
+			t.Fatalf("incorrect v0.7.1 basis wrote workspace state: %v", err)
+		}
 	}
 	if strings.Contains(previewOutput, "credentialRef") ||
 		strings.Contains(previewOutput, "gh:active") || strings.Contains(previewOutput, "copilot:logged-in") {
@@ -199,7 +293,8 @@ func TestReadyTaskReauthorizationAppendsConfigurationApproval(t *testing.T) {
 	if len(after.ReviewFlows) != 0 || len(after.Dispatches) != 0 {
 		t.Fatal("reauthorization created a Flow or Dispatch")
 	}
-	if len(after.Approvals) != 2 || !reflect.DeepEqual(after.Approvals[0], priorBundle) {
+	if len(after.Approvals) != len(before.Approvals)+1 ||
+		withBundle && !reflect.DeepEqual(after.Approvals[0], priorBundle) {
 		t.Fatal("reauthorization replaced or removed the prior approval")
 	}
 	var addedApproval config.Approval
@@ -208,8 +303,8 @@ func TestReadyTaskReauthorizationAppendsConfigurationApproval(t *testing.T) {
 		addedApproval.AuthorizationRef == "" || addedApproval.ApprovalRef != legacySelection.Execution.ApprovalRef {
 		t.Fatal("reauthorization did not append a unique configuration authorization reference")
 	}
-	reauthorized := after.Approvals[1]
-	if reauthorized.ProposalHash != priorBundle.ProposalHash || reauthorized.RecordHash == priorBundle.RecordHash {
+	reauthorized := after.Approvals[len(after.Approvals)-1]
+	if reauthorized.ProposalHash != immutableProposal || reauthorized.RecordHash == preview.RecordHash {
 		t.Fatal("proposal hash was not preserved or the authorized record was not extended")
 	}
 	currentConfiguration, err := approvalConfigurationFor(resolved.Config, resolved.Sources)

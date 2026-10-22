@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 	"slices"
 	"strings"
@@ -68,7 +69,56 @@ func ConfirmationTokenForVersion(version int, proposalHash string, dimensions Ap
 
 // ConfirmationToken returns the token for the bundle basis.
 func (b ApprovalBundle) ConfirmationToken() (string, error) {
-	return ConfirmationTokenFor(b.ProposalHash, b.Dimensions)
+	return ConfirmationTokenForVersion(b.CanonicalizationVersion, b.ProposalHash, b.Dimensions)
+}
+
+// ImmutableProposalHash reads the original intake confirmation, never a hash
+// recomputed from the subsequently authorized Task record.
+func ImmutableProposalHash(task GraphTask) (string, error) {
+	var hash string
+	for _, decision := range task.Decisions {
+		if !strings.HasPrefix(decision.ID, "intake-confirmation:") {
+			continue
+		}
+		if hash != "" || decision.ID != "intake-confirmation:"+task.ID {
+			return "", graphError("immutable proposal confirmation is ambiguous")
+		}
+		decoder := json.NewDecoder(strings.NewReader(decision.Text))
+		token, err := decoder.Token()
+		if err != nil || token != json.Delim('{') {
+			return "", graphError("invalid immutable proposal confirmation")
+		}
+		fields := map[string]json.RawMessage{}
+		seen := map[string]bool{}
+		for decoder.More() {
+			token, err := decoder.Token()
+			key, ok := token.(string)
+			if err != nil || !ok || seen[strings.ToLower(key)] {
+				return "", graphError("ambiguous immutable proposal confirmation fields")
+			}
+			seen[strings.ToLower(key)] = true
+			var value json.RawMessage
+			if err := decoder.Decode(&value); err != nil {
+				return "", graphError("invalid immutable proposal confirmation")
+			}
+			fields[key] = value
+		}
+		if _, err := decoder.Token(); err != nil {
+			return "", graphError("invalid immutable proposal confirmation")
+		}
+		if _, err := decoder.Token(); err != io.EOF {
+			return "", graphError("invalid immutable proposal confirmation")
+		}
+		var taskID string
+		if json.Unmarshal(fields["taskId"], &taskID) != nil || taskID != task.ID ||
+			json.Unmarshal(fields["expectedHash"], &hash) != nil || !validDocumentHash(hash) {
+			return "", graphError("invalid immutable proposal reference")
+		}
+	}
+	if hash == "" {
+		return "", graphError("immutable proposal confirmation is missing")
+	}
+	return hash, nil
 }
 
 type ApprovalStage string
@@ -319,6 +369,18 @@ func (b ApprovalBundle) Drifts(stored GraphTask, current ApprovalConfiguration) 
 		}
 	}
 	appendDrift("taskId", b.TaskID, stored.ID, ImpactInvalid, []string{"id"})
+	hasConfirmation := slices.ContainsFunc(stored.Decisions, func(decision TaskDecision) bool {
+		return strings.HasPrefix(decision.ID, "intake-confirmation:")
+	})
+	// Version 1 manifest authorization can legitimately lack an intake receipt.
+	// Reauthorization always requires it, regardless of the current Task state.
+	if b.CanonicalizationVersion == ReauthorizationCanonicalizationVersion || hasConfirmation {
+		proposalHash, err := ImmutableProposalHash(stored)
+		if err != nil {
+			return nil, err
+		}
+		appendDrift("proposalHash", b.ProposalHash, proposalHash, ImpactInvalid, []string{"decisions.expectedHash"})
+	}
 	recordHash, err := CanonicalSHA256(stored)
 	if err != nil {
 		return nil, err

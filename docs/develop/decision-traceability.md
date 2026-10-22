@@ -42,6 +42,8 @@ Foundation や初期の別の Milestone を M1 とした出典記録は確認で
 | [#32 0.7.0 承認フローとオーケストレーションの改善](https://github.com/hiono/taxion/milestone/32) | 承認・orchestration | [ADR-0043](adr/0043-approval-gates-and-read-only-lanes.md) | #107–#114; PR #115–#121; [#125](https://github.com/hiono/taxion/issues/125) / [PR #126](https://github.com/hiono/taxion/pull/126) | [gates.md](../userguide/gates.md), [approval-bundle.md](../userguide/approval-bundle.md), [drift-and-legacy.md](../userguide/drift-and-legacy.md), [role-handoff-packets.md](../userguide/role-handoff-packets.md), [task-graph.md](task-graph.md), [v0.7.0-known-limitations.md](../userguide/v0.7.0-known-limitations.md) | v0.7.0 implementation merged; READY Task configuration reauthorization hotfix PR open |
 
 
+READY Task 再承認の判断は [ADR-0043](adr/0043-approval-gates-and-read-only-lanes.md)、immutable proposal identity の修正は [Issue #127](https://github.com/hiono/taxion/issues/127) / [PR #128](https://github.com/hiono/taxion/pull/128) に対応する。merge 状態は Issue / PR を参照する。
+
 ## ADR の状態と現在の参照先
 
 ADR-0001〜0043 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。
