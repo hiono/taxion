@@ -12,6 +12,12 @@ import (
 )
 
 func rolePacketCommand(args []string, output io.Writer) error {
+	if len(args) > 0 && args[0] == "read" {
+		return rolePacketReadCommand(args[1:], output)
+	}
+	if len(args) > 0 && args[0] == "list" {
+		return rolePacketListCommand(args[1:], output)
+	}
 	if len(args) == 0 || args[0] != "create" && args[0] != "verify" {
 		return fmt.Errorf("usage: taxion role-packet {create|verify}")
 	}

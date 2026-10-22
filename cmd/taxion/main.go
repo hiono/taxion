@@ -59,6 +59,7 @@ Requests, planning and Task contracts:
   task graph          Print the versioned Task Graph and history
   task validate       Check a Task Graph request without storing it (--manifest JSON; all violations, canonical hash)
   task authorize      Validate, store and bundle one Task approval (--manifest JSON; append-only audit record)
+  task authorize-packets  Preview/confirm a READY Task sequential packet lifecycle (--request JSON)
   task plan           Rebuild a follow-up plan from durable contracts and evidence (--repo required; --include-archived for history)
 
 Dispatch and configuration binding:
@@ -118,6 +119,8 @@ Review flows and recovery:
 Evidence and external records:
   role-packet create  Emit an immutable reference-only role packet (explicit task, tree and contract digests)
   role-packet verify  Verify and read back a role packet (--file, --expected-hash); no execution
+  role-packet read    Read and verify a persisted canonical packet (--expected-hash)
+  role-packet list    Read lifecycle authorizations and packet audit references (--task)
   records proposal    Display exact external publication content and its approval hash (--file JSON)
   records approve     Save an explicitly approved Issue/PR publication after local secret checks (--file JSON)
   records send        Deliver one approved publication with a durable sender claim (--id, --scanner)
@@ -337,13 +340,15 @@ func newID(prefix string) string {
 
 func taskCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: taxion task create|list|archive|track|transition|graph|plan|validate|authorize|reauthorize …")
+		return fmt.Errorf("usage: taxion task create|list|archive|track|transition|graph|plan|validate|authorize|reauthorize|authorize-packets …")
 	}
 	switch args[0] {
 	case "archive":
 		return taskArchiveCmd(args[1:])
 	case "reauthorize":
 		return taskReauthorizeCmd(args[1:])
+	case "authorize-packets":
+		return taskAuthorizePacketsCmd(args[1:])
 	case "track", "transition", "graph", "plan", "validate", "authorize":
 		return taskGraphCmd(args[0], args[1:])
 	case "create":
@@ -761,6 +766,9 @@ func runtimeCmd(args []string) error {
 	}
 	availableTools, err := runtimeTools(*tools)
 	if err != nil {
+		return err
+	}
+	if err := controller.CheckRolePacket(db, dispatch.ID); err != nil {
 		return err
 	}
 	if action == "start" && dispatch.Recipient == "REVIEWER" {

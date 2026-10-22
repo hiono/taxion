@@ -17,6 +17,14 @@ import (
 	"github.com/hiono/taxion/internal/core"
 )
 
+// CommitTree resolves an independently pinned full commit, never a shell expression.
+func CommitTree(worktree, commit string) (string, error) {
+	if !fullSHA(commit) {
+		return "", fmt.Errorf("packet target requires a full commit SHA")
+	}
+	return git(worktree, "rev-parse", "--verify", commit+"^{tree}")
+}
+
 func Verify(dispatch core.GraphDispatch, result *core.DispatchResult) error {
 	if result == nil {
 		return fmt.Errorf("Git proof requires a dispatch result")
