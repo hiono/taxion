@@ -76,7 +76,7 @@ func TestRecoveryFindingUncertainReportAndVerifiedClose(t *testing.T) {
 	if _, err := RecordFailureAnalysis(db, finding); err != nil {
 		t.Fatal("sourced decision was not replayable after restart", err)
 	}
-	report := publicationProposal()
+	report := publicationProposal(t)
 	report.FlowID = flow.ID
 	hash, _ := PublicationHash(report)
 	scanner := publicationScanner(t)

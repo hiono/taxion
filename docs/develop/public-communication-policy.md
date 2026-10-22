@@ -60,4 +60,6 @@ Issue と PR は `.github` の templates、レビューへの対応は [response
 
 `go run ./scripts/publictext -repository` は docs、templates、workflow、Release header、公開用 golden output と入口文書を検査します。schema を説明する技術文書では識別子を許容しますが、secret や具体的な非公開パスは許容しません。外部の公開文を検査するときはファイルを引数に指定します。`-document` は技術文書に限って指定し、通常のコメントの検査を回避するためには使いません。
 
-protected identifier の照合には、非公開の識別子を小文字に正規化した ASCII token の SHA-256 一覧を `TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256` に渡します。CI は repository secret `PUBLIC_TEXT_PRIVATE_IDENTIFIER_SHA256` から digest だけを受け取り、識別子そのものは受け取りません。repository 検査では source と test fixture を含む Git 管理対象・未除外の text file も照合します。設定が利用できない実行では、その事実を表示し、private-name の網羅性を主張しません。未知の名前や識別子をすべて自動検出する仕組みではありません。
+protected identifier の照合には、非公開の識別子を小文字に正規化した ASCII token の SHA-256 一覧を `TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256` に渡します。実際の `records proposal` / `approve` / `send` はこの一覧を必須とし、未設定・空・不正な digest・保護対象との一致があれば公開を停止します。送信直前にも再検査するため、承認後に一覧を更新して保護対象となった保存済み本文も送信しません。一覧は信頼する運用設定として管理し、空設定を回避するためのダミー値を本番に設定しません。
+
+CI は repository secret `PUBLIC_TEXT_PRIVATE_IDENTIFIER_SHA256` から digest だけを受け取り、識別子そのものは受け取りません。repository 検査では source と test fixture を含む Git 管理対象・未除外の text file も照合します。投稿を行わない単体の lint / render では、設定が利用できない事実を表示し、private-name の網羅性を主張しません。この警告付きの実行を、実際の公開処理の許可として扱いません。未知の名前や識別子をすべて自動検出する仕組みではありません。

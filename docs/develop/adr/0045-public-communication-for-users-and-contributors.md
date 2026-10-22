@@ -33,3 +33,5 @@ Issue、PR、レビューコメント、Release Notes、ADR の第一読者を O
 ## Compatibility
 
 文体修正は CLI、公開 schema、Task、Flow、Dispatch の意味を変更しない。commit・tag・Release artifact を書き換えず、失敗や過去の review outcome も保持する。公開処理の検査を変更する場合も、承認した本文と送信本文の一致を維持する。
+
+公開処理には保護対象 identifier の digest 一覧を必須とする。未設定・空・不正な一覧では proposal / approval / delivery を停止するため、旧版からの更新時は信頼する一覧を環境変数で設定する必要がある。承認済み本文が新しい一覧に違反する場合も変換せず停止する。Task / store schema の migration は追加しない。

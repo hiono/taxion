@@ -2,11 +2,14 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -54,14 +57,17 @@ func (p *publicationFixture) Send(_ context.Context, _ store.ExternalUpdate) (st
 	return "99", nil
 }
 
-func publicationProposal() store.ExternalUpdate {
+func publicationProposal(t *testing.T) store.ExternalUpdate {
+	t.Helper()
+	protected := sha256.Sum256([]byte("reserved-private-test-identifier"))
+	t.Setenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256", hex.EncodeToString(protected[:]))
 	return store.ExternalUpdate{ID: "accepted-report", TaskID: "implementation", Provider: "github", Host: "github.com",
 		Repository: "owner/repo", Kind: "ISSUE", Number: 53, Action: "COMMENT", Body: "Approved execution evidence.",
 		Actor: "human", ApprovalSource: "human:exact-report", Account: "owner", CredentialRef: "gh:active"}
 }
 
 func TestPublicationHashGitLabTargetAndCredential(t *testing.T) {
-	proposal := publicationProposal()
+	proposal := publicationProposal(t)
 	proposal.Provider, proposal.Host = "gitlab", "gitlab.example:8443"
 	proposal.Repository, proposal.Account, proposal.CredentialRef = "group/subgroup/repo", "scm-user", "glab:active"
 	if _, err := PublicationHash(proposal); err != nil {
@@ -94,7 +100,7 @@ func TestPublicationPolicyRejectsBeforeApprovalOrDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, provider := range []string{"github", "gitlab"} {
-		proposal := publicationProposal()
+		proposal := publicationProposal(t)
 		proposal.Provider = provider
 		if provider == "gitlab" {
 			proposal.Host, proposal.CredentialRef = "gitlab.example", "glab:active"
@@ -111,17 +117,73 @@ func TestPublicationPolicyRejectsBeforeApprovalOrDelivery(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("rejected publication changed saved state", err)
 	}
-	proposal := publicationProposal()
+	proposal := publicationProposal(t)
 	original := proposal.Body
 	if _, err := PublicationHash(proposal); err != nil || proposal.Body != original {
 		t.Fatal("publication check rewrote approved content", err)
 	}
 }
 
+func TestPublicationIdentifierPolicyRejectsApprovalAndDelivery(t *testing.T) {
+	for _, provider := range []string{"github", "gitlab"} {
+		for _, configuration := range []string{"protected", "missing", "malformed"} {
+			t.Run(provider+"/"+configuration, func(t *testing.T) {
+				db, _, _ := reviewFlowFixture(t)
+				proposal := publicationProposal(t)
+				if provider == "gitlab" {
+					proposal.Provider, proposal.Host, proposal.CredentialRef = provider, "gitlab.example", "glab:active"
+				}
+				proposal.Body = "Private-Example-61"
+				scanner := publicationScanner(t)
+				hash, err := PublicationHash(proposal)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := ApprovePublication(t.Context(), db, PublicationRequest{proposal, hash}, scanner); err != nil {
+					t.Fatal(err)
+				}
+				before, err := db.LoadWorkspace()
+				if err != nil {
+					t.Fatal(err)
+				}
+				digest := sha256.Sum256([]byte("private-example-61"))
+				configured := hex.EncodeToString(digest[:])
+				if configuration == "missing" {
+					configured = ""
+				} else if configuration == "malformed" {
+					configured = "invalid"
+				}
+				t.Setenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256", configured)
+				if _, err := PublicationHash(proposal); err == nil {
+					t.Fatal("protected or unscanned proposal obtained an approval hash")
+				}
+				if _, err := ApprovePublication(t.Context(), db, PublicationRequest{proposal, hash}, scanner); err == nil {
+					t.Fatal("protected or unscanned proposal approved")
+				}
+				publisher := &publicationFixture{}
+				_, err = DeliverPublication(t.Context(), db, proposal.ID, scanner, publisher)
+				if err == nil || publisher.sends != 0 {
+					t.Fatal("protected or unscanned saved publication delivered", err)
+				}
+				if strings.Contains(err.Error(), proposal.Body) {
+					t.Fatal("privacy diagnostic echoed the protected value")
+				}
+				if configuration == "missing" && !strings.Contains(err.Error(), "TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256") {
+					t.Fatal("missing configuration was hidden behind a generic content error", err)
+				}
+				after, err := db.LoadWorkspace()
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatal("privacy rejection changed saved publication or Task state", err)
+				}
+			})
+		}
+	}
+}
+
 func TestApprovedPublicationClaimRestartAndUncertainDelivery(t *testing.T) {
 	db, ledger, _ := reviewFlowFixture(t)
 	scanner := publicationScanner(t)
-	proposal := publicationProposal()
+	proposal := publicationProposal(t)
 	hash, err := PublicationHash(proposal)
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +239,7 @@ func TestApprovedPublicationClaimRestartAndUncertainDelivery(t *testing.T) {
 
 func TestPublicationConcurrentConsumersAndCloseEvidence(t *testing.T) {
 	db, ledger, flow := completedFixture(t)
-	proposal := publicationProposal()
+	proposal := publicationProposal(t)
 	scanner := publicationScanner(t)
 	hash, _ := PublicationHash(proposal)
 	if _, err := ApprovePublication(t.Context(), db, PublicationRequest{proposal, hash}, scanner); err != nil {
@@ -270,7 +332,7 @@ func TestCreateIssueRecoveryLinksOnlyApprovedDraft(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	proposal := publicationProposal()
+	proposal := publicationProposal(t)
 	proposal.Action, proposal.Number, proposal.Title = "CREATE", 0, "Independent implementation"
 	hash, _ := PublicationHash(proposal)
 	scanner := publicationScanner(t)
