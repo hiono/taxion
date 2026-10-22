@@ -238,8 +238,17 @@ func TestFreshReadyAuthorizationRejectsChangedInputs(t *testing.T) {
 				}
 			}
 			before := snapshotFiles(t, filepath.Dir(storePath))
-			if _, err := runReauthorizationCommand(t, []string{"authorize", "--manifest", file, "--confirm", token}); err == nil {
+			output, err := runReauthorizationCommand(t, []string{"authorize", "--manifest", file, "--confirm", token})
+			if err == nil {
 				t.Fatal("invalid authorization was accepted")
+			}
+			var diagnostic struct {
+				Code         string `json:"code"`
+				StateChanged bool   `json:"stateChanged"`
+			}
+			if err := json.Unmarshal([]byte(output), &diagnostic); err != nil ||
+				diagnostic.Code == "" || diagnostic.StateChanged {
+				t.Fatal("refusal omitted structured unchanged-state diagnosis", output, err)
 			}
 			if !reflect.DeepEqual(before, snapshotFiles(t, filepath.Dir(storePath))) {
 				t.Fatal("refusal changed persistent bytes")

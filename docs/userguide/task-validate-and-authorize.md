@@ -53,7 +53,7 @@ token が一致しない場合、Task は保存されない。`--confirm` は to
 
 preview は `status`、`taskId`、`proposalHash`、`confirmationToken`、`stateChanged: false` を返す。token は version 1 の workspace snapshot hash、manifest 全体、effective configuration と出典を束縛する確認用 digest で、認証 credential ではない。内容を確認して同じ `--confirm` を渡すと、transaction 内で source と configuration を再照合し、canonicalization version 2 の bundle だけを追記する。Task state、既存 decisions、configuration approval、Flow、Dispatch、deadline、budget は変更しない。
 
-同じ manifest の再送は既存 bundle を再利用する。異なる契約・proposal・設定・actor・reason の bundle がある場合は拒否し、履歴を置換しない。fresh 経路の拒否は `ready-authorization-invalid` または `ready-authorization-stale` と `stateChanged: false` を返す。manifest の未知 field や不正 JSON は既存の strict decoder で拒否する。
+同じ manifest の再送は既存 bundle を再利用する。異なる契約・proposal・設定・actor・reason の bundle がある場合は拒否し、履歴を置換しない。fresh 経路の拒否は `ready-authorization-invalid` または `ready-authorization-stale` と `stateChanged: false` を返す。manifest の未知 field や不正 JSON は既存の strict decoder で拒否し、`authorization-invalid-manifest` を返す。source や設定の読込み失敗も `authorization-invalid-source` / `authorization-invalid-configuration` として区別する。
 
 生成後は通常の `task authorize-packets` と Contract Gate が bundle を利用する。bundle の生成だけでは packet、Flow、Dispatch、runtime は開始しない。設定 drift に対する `task reauthorize` や保存済み workflow の resume 条件も変えない。v0.7.7 へ rollback しても保存 bundle は削除せず保持するが、不足 bundle の生成にはこの修正を含む版を使う。
 
