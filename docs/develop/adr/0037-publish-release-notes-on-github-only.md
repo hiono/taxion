@@ -22,7 +22,7 @@ repository に置く方法も、GitHub Release の本文と内容が重複する
 リリースノートは GitHub Release の本文だけで管理し、repository に版付きまたは
 固定名のノートファイルを追加しない。Release 作成時はレビュー済み本文を
 repository 外の一時ファイルから `gh release create --verify-tag --notes-file` で
-送る。公開後の本文は Release object を正本として再取得・照合する。
+送る。tag-triggered binary release workflow では、レビュー対象の GoReleaser configuration の header から本文を生成してよい。版別のノートファイルは追加しない。公開後の本文は Release object を正本として再取得・照合する。
 
 本文は対象 version の機能と現行の利用制約に限る。将来の作業、受入れの進捗、
 未完了条件と例外判断は Issue に記録し、Release note に含めない。利用者向けの

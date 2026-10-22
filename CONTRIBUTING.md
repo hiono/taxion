@@ -246,6 +246,8 @@ login 済みアカウントの受入れを追加する前に、合成 fixture �
 
 ## リリース
 
+binary-only 配布を使う新 release の手順は [Binary release](docs/develop/binary-release.md) を正本とします。固定 GoReleaser / tag-triggered workflow / 全6 platform の native検証 / product provenance が対象です。以下の旧 Go backend 導入手順だけでは新しい product mode の受入れを満たしません。
+
 開発版で Taxion の Flow を使った実装・リリース作業では、文書整合 criterion を承認済み acceptance に含め、`taxion workflow evaluate --id FLOW-ID --require-quality` の成功も公開前に確認します。出力は保存証拠の条件充足であり、現在の候補・独立レビュー対象の一致、文書内容、公開権限は別に確認します。外部の Release コマンドを自動的に遮断するものではありません。既存の旧 Flow の criterion を後付けで書き換えて成功扱いにはしません。Taxion を使っていない作業では、同じ品質条件を通常の PR レビューと公開前確認で照合します。
 
 対象版の修正・補正・決定に伴う文書改善は、リリース前に完了させます。利用者の操作や制約は利用者ガイド・CLI リファレンス・設定ガイドへ、設計上の決定は必要な ADR と判断対応表へ反映し、Issue・PR・milestone の記述と整合させます。会話内の説明や公開後の追記を、リリース前の文書更新の代わりにはしません。

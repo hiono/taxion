@@ -57,7 +57,8 @@ func generate() ([]byte, error) {
 	// Build once, then query help with no HOME, config, Git environment or tools.
 	// No-flag actions are excluded because they may perform work instead of help.
 	noFlags := map[string]bool{"completion": true, "completion bash": true, "gen-token": true, "help": true,
-		"memory checks": true, "records show": true, "task graph": true,
+		"provenance verify": true,
+		"memory checks":     true, "records show": true, "task graph": true,
 		"git hook": true, "git hook status": true, "git hook remove": true,
 		"memory conflict": true, "workflow start": true, "workflow terminate": true}
 	directory, err := os.MkdirTemp("", "taxion-completion-*")

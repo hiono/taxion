@@ -48,6 +48,8 @@ Setup and discovery:
   completion bash     Print offline bash command and option completion
   ready               Print the orchestration prompt; optional --install-skill / --update-skill / --check-skill
   config check        Validate fixed Global/Project YAML and environment references ([--sources], [--capabilities], [--task], [--dispatch])
+  provenance configure  Bind an explicit development/product store policy (--file POLICY.json; never overwrites)
+  provenance verify   Verify the operation mode and pinned release artifact without changing state
 
 Requests, planning and Task contracts:
   request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --timeout, --max-ai-credits)
@@ -192,16 +194,27 @@ func main() {
 		os.Exit(2)
 	}
 	var err error
-	helpRequested := slices.Contains(args, "--help") || slices.Contains(args, "-h")
-	if !explicitStore && !helpRequested &&
-		!slices.Contains([]string{"ready", "completion", "-h", "--help", "help", "--version", "gen-token", "git", "role-packet"}, args[0]) {
+	shortHelp := provenanceHelpOnly(args)
+	if !explicitStore && !shortHelp &&
+		!slices.Contains([]string{"ready", "completion", "-h", "--help", "help", "--version", "gen-token", "git"}, args[0]) {
 		storePath, err = defaultWorkspaceStorePath()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "taxion: %v\n", err)
 			os.Exit(1)
 		}
 	}
+	if !shortHelp && !slices.Contains([]string{"--version", "help", "-h", "--help", "provenance", "completion", "gen-token"}, args[0]) &&
+		args[0] != "git" && !(args[0] == "doctor" && (len(args) == 1 || args[1] != "fix")) &&
+		!(args[0] == "ready" && len(args) == 1) {
+		if _, err := verifyOperationProvenance(); err != nil {
+			_ = provenanceDiagnostic(err)
+			fmt.Fprintln(os.Stderr, "taxion: operation blocked by provenance policy")
+			os.Exit(1)
+		}
+	}
 	switch args[0] {
+	case "provenance":
+		err = provenanceCmd(args[1:])
 	case "ready":
 		err = readyCmd(args[1:], os.Stdout)
 	case "request":

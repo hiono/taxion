@@ -2,6 +2,8 @@
 /taxion
 /bin/
 /dist/
+/.release/
+/scripts/__pycache__/
 
 # Go
 *.exe

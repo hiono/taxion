@@ -1,5 +1,7 @@
 # セキュリティ方針
 
+正式配布と operation provenance の制約は [binary provenance](docs/userguide/binary-provenance.md)、trust boundary は [ADR-0044](docs/develop/adr/0044-binary-distribution-and-cooperative-provenance.md) を参照。product mode は承認済み manifest pin と実 executable/archive bytes を検証する。local administrator や検査を削除した旧binaryに対するOSアクセス隔離ではない。
+
 ## 対応するバージョン
 
 修正は `main` に反映する。過去の公開版へのバックポートは保証しない。
