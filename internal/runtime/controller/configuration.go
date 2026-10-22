@@ -88,7 +88,16 @@ func CheckReviewFlowConfiguration(db *store.Store, flowID string, candidate conf
 	for index := flow.Repairs; index <= flow.MaxRepairs; index++ {
 		taskID := fmt.Sprintf("%s-review-%d", flow.ID, index)
 		if err := config.CheckApproval(decision.Text, taskID, decision.ID, candidate); err != nil {
-			return fmt.Errorf("taxion: preflight configuration for %s: %w", taskID, err)
+			delegated, enabled, delegationErr := lifecycleReviewerConfiguration(&state, flow, taskID, candidate)
+			if delegationErr != nil {
+				return fmt.Errorf("taxion: preflight configuration for %s: %w", taskID, delegationErr)
+			}
+			if !enabled {
+				return fmt.Errorf("taxion: preflight configuration for %s: %w", taskID, err)
+			}
+			if err := config.CheckApproval(delegated.Text, taskID, delegated.ID, candidate); err != nil {
+				return fmt.Errorf("taxion: preflight configuration for %s: %w", taskID, err)
+			}
 		}
 	}
 	return nil

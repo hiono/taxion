@@ -101,6 +101,8 @@ preview の `reviewerApprovalPolicy: same-contract-reviewer/v1` は、実 Coder 
 
 Validator は新しいモデル session や Dispatch ではありません。検査失敗時に成功 report や Reviewer packet を作りません。packet の欠落、改変、不一致、未知の version、実 evidence の欠落は fail-closed です。packet、lifecycle 承認、audit の削除・置換・上書きも transaction で拒否します。
 
+Reviewer configuration preflight は、従来の明示的な追加 Task 承認に加え、matching な lifecycle 承認による同一契約・完全一致設定の Reviewer 委譲も照合します。preflight は派生 decision や未来の packet を保存しません。実際の Reviewer を発行するときだけ、lifecycle hash に束縛した Reviewer 専用の configuration decision を追加し、通常の設定照合と実行入口の検査を通します。元 Task の契約、decision、ApprovalBundle、Project 設定は変更しません。この委譲は別 Flow の Reviewer、設定や tools の拡張、未承認の repair 契約を許可しません。
+
 ```sh
 taxion role-packet list --task approved-task
 taxion role-packet read --expected-hash '<packetHash>'

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/store"
@@ -70,6 +71,58 @@ func PreviewPacketAuthorization(state store.Workspace, taskID, actor, source, re
 		}
 	}
 	return authorization, nil
+}
+
+// lifecycleReviewerConfiguration resolves only the exact same-contract review
+// delegation; it does not expand the parent decision or grant repair entry.
+func lifecycleReviewerConfiguration(state *store.Workspace, flow core.ReviewFlow, reviewID string,
+	candidate config.Config) (core.TaskDecision, bool, error) {
+	auth, enabled, err := lifecycleAuthorization(state, flow)
+	if err != nil || !enabled {
+		return core.TaskDecision{}, enabled, err
+	}
+	task, ok := state.Graph.GraphTask(flow.TaskID)
+	if !ok || !flowContractMatches(state.Graph, flow, task) {
+		return core.TaskDecision{}, true, fmt.Errorf("packet lifecycle current contract changed")
+	}
+	permitted := false
+	for index := flow.Repairs; index <= flow.MaxRepairs; index++ {
+		permitted = permitted || reviewID == fmt.Sprintf("%s-review-%d", flow.ID, index)
+	}
+	if !permitted {
+		return core.TaskDecision{}, true, fmt.Errorf("Reviewer is outside the bounded lifecycle")
+	}
+	if _, err := checkTaskConfiguration(state.Graph, flow.TaskID, candidate); err != nil {
+		return core.TaskDecision{}, true, err
+	}
+	matching := false
+	for _, bundle := range state.Graph.ApprovalsForTask(flow.TaskID) {
+		if bundle.BundleHash != auth.BundleHash {
+			continue
+		}
+		var selected config.Config
+		if err := core.DecodeGraphInput(strings.NewReader(string(bundle.Configuration.Selection)), &selected); err != nil {
+			return core.TaskDecision{}, true, fmt.Errorf("lifecycle configuration is invalid")
+		}
+		matching = selected == candidate
+	}
+	if !matching {
+		return core.TaskDecision{}, true, fmt.Errorf("Reviewer configuration differs from lifecycle approval")
+	}
+	reference := "packet-lifecycle:" + auth.Hash
+	id := core.ConfigurationReauthorizationID(candidate.Execution.ApprovalRef, reviewID, reference)
+	text, err := json.Marshal(config.Approval{
+		Kind: config.ApprovalKind, TaskID: reviewID, Reason: "Same-contract Reviewer delegated by explicit packet lifecycle approval",
+		DecisionID: id, AuthorizationRef: reference, ApprovalRef: candidate.Execution.ApprovalRef,
+		Allowed: []config.Config{candidate},
+	})
+	if err != nil {
+		return core.TaskDecision{}, true, err
+	}
+	if err := config.CheckApproval(string(text), reviewID, id, candidate); err != nil {
+		return core.TaskDecision{}, true, err
+	}
+	return core.TaskDecision{ID: id, Source: reference, Text: string(text)}, true, nil
 }
 
 // AppendPacketAuthorization must run inside UpdateWorkspace with freshly resolved
@@ -218,6 +271,15 @@ func prepareLifecycleReviewer(state *store.Workspace, flow core.ReviewFlow, code
 		review.BaselineSHA != coder.Result.OutputSHA || review.TargetSHA != coder.Result.OutputSHA {
 		return fmt.Errorf("derived Reviewer exceeds packet lifecycle delegation")
 	}
+	var selected config.Config
+	if err := core.DecodeGraphInput(strings.NewReader(string(configuration.Selection)), &selected); err != nil {
+		return fmt.Errorf("derived Reviewer configuration is invalid")
+	}
+	decision, _, err := lifecycleReviewerConfiguration(state, flow, review.ID, selected)
+	if err != nil {
+		return err
+	}
+	review.Decisions = append(review.Decisions, decision)
 	review.Decisions = slices.DeleteFunc(review.Decisions, func(decision core.TaskDecision) bool {
 		return strings.HasPrefix(decision.ID, "intake-confirmation:")
 	})
