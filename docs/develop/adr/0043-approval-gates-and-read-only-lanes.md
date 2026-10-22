@@ -106,6 +106,8 @@ bundle-required の graph では、各 Task は実行入口の各 stage（start-
 
 ### 追記のみの承認履歴
 
+fresh な READY Task に matching configuration approval があり、Flow・Dispatch と ApprovalBundle がまだない場合、`task authorize --manifest` は保存 Task と完全一致する manifest から初期 bundle だけを追記する。既存の immutable proposal reference と設定承認を再検証し、canonicalization version 2 を使う。Task state や decisions を変更して tracking をやり直したり、設定を変えて reauthorization を発生させたりしない。確認 token は workspace snapshot、manifest、configuration と出典に束縛し、transaction 内で再検証する。既存 bundle の内容が異なる場合は拒否し、同一要求は再利用する。Flow・Dispatch・deadline・budget と resume 契約はこの処理では変更しない。
+
 承認は append-only で保存する。以前の bundle を書き換えたり削除したりしない。同じ basis に対する複数の承認がある場合、最新の一致 bundle を現在の根拠として扱う。同じ内容の再承認は既存 bundle を再利用し、監査記録を増やさない。
 
 v0.7.1 の `taxion task reauthorize --task TASK_ID` は既存 READY Task 専用である。preview は書込みを行わず、Task state、proposalHash、現在の recordHash、7次元、redacted drift path、確認 token を示す。確認時に Task と effective configuration を再読込し、preview 後の drift を拒否する。確認が成立した場合だけ、一意な設定承認 decision と canonicalization version 2 の bundle を追記する。Task 契約、proposalHash、state、既存 decision は維持し、保存後に readback、bundle Verify、Task-bound configuration check を行う。同一 bundle の再送は既存 record を再利用する。

@@ -104,6 +104,9 @@ func taskAuthorizeCmd(file, confirm string) error {
 	if err != nil {
 		return authorizeError(err)
 	}
+	if stored, exists := graph.GraphTask(request.Task.ID); exists && stored.Status == core.Ready {
+		return taskAuthorizeReady(request, configuration, confirm)
+	}
 	proposal := request.Task
 	if _, exists := graph.GraphTask(proposal.ID); !exists && proposal.BudgetGuidance == nil {
 		proposal.BudgetGuidance, err = newTaskBudgetGuidance()
@@ -819,7 +822,7 @@ func taskGraphCmd(command string, args []string) error {
 		fs.StringVar(&manifest, "manifest", "", "JSON request file to validate without storing")
 		fs.StringVar(&file, "file", "", "JSON request file to validate without storing")
 		if command == "authorize" {
-			fs.StringVar(&confirm, "confirm", "", "proposal hash printed by the previous invocation")
+			fs.StringVar(&confirm, "confirm", "", "complete-basis confirmation token printed by the previous invocation")
 		}
 	} else if command != "graph" {
 		return fmt.Errorf("unknown task graph command %s", command)

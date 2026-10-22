@@ -47,6 +47,16 @@ taxion task authorize --manifest task.json --confirm <confirmationToken>
 
 token が一致しない場合、Task は保存されない。`--confirm` は token の一致だけを確認する。人間の認証を行った証拠ではない。
 
+## fresh READY Task の不足 bundle を生成する
+
+設定承認が現在の設定と一致している READY Task には、同じ `task authorize --manifest FILE` で初期 ApprovalBundle だけを追加できる。manifest の `task` は `taxion task graph` で読み戻した Task record 全体と完全一致させる。`actor` と `reason` は必須で、新しい `concern` は指定しない。保存済み intake confirmation に有効な immutable proposal reference があり、対象 Task に Flow・Dispatch がまだ存在しないことも必要になる。
+
+preview は `status`、`taskId`、`proposalHash`、`confirmationToken`、`stateChanged: false` を返す。token は version 1 の workspace snapshot hash、manifest 全体、effective configuration と出典を束縛する確認用 digest で、認証 credential ではない。内容を確認して同じ `--confirm` を渡すと、transaction 内で source と configuration を再照合し、canonicalization version 2 の bundle だけを追記する。Task state、既存 decisions、configuration approval、Flow、Dispatch、deadline、budget は変更しない。
+
+同じ manifest の再送は既存 bundle を再利用する。異なる契約・proposal・設定・actor・reason の bundle がある場合は拒否し、履歴を置換しない。fresh 経路の拒否は `ready-authorization-invalid` または `ready-authorization-stale` と `stateChanged: false` を返す。manifest の未知 field や不正 JSON は既存の strict decoder で拒否する。
+
+生成後は通常の `task authorize-packets` と Contract Gate が bundle を利用する。bundle の生成だけでは packet、Flow、Dispatch、runtime は開始しない。設定 drift に対する `task reauthorize` や保存済み workflow の resume 条件も変えない。v0.7.7 へ rollback しても保存 bundle は削除せず保持するが、不足 bundle の生成にはこの修正を含む版を使う。
+
 ## READY Task の設定を再承認する
 
 `taxion task reauthorize` は既存の READY Task に限り、effective configuration の変更を別の経路で承認する。Task 契約、state、proposal hash、既存 decision は変更しない。`task authorize --manifest` の tracking 経路とは分離されている。
