@@ -6,6 +6,23 @@ on:
   pull_request:
 
 jobs:
+  public-communication:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.2'
+      - name: Public policy, generated comments and false-positive regressions
+        run: go test -count=1 ./internal/publictext ./scripts/publictext
+      - name: Public text, local paths, secrets and protected identifiers
+        env:
+          TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256: ${{ secrets.PUBLIC_TEXT_PRIVATE_IDENTIFIER_SHA256 }}
+        run: go run ./scripts/publictext -repository
+      - name: Documentation and local links (no network)
+        run: go test -count=1 ./cmd/taxion -run '^(TestDocumentation|TestConfigurationGuide|TestUserGuide)'
   build:
     runs-on: ubuntu-latest
     steps:

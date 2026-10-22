@@ -440,8 +440,8 @@ confirmation は Task を `READY` にしますが、Dispatch は発行しませ�
 既存の READY Task で保存済み設定承認と現在の effective configuration が異なる場合、v0.7.1 では Task ID を指定して設定承認を追記できます。この操作は Task 契約、state、proposal hash、既存 decision を変更せず、`task authorize --manifest` の新規登録経路も通りません。
 
 ```sh
-taxion task reauthorize --task example-project
-taxion task reauthorize --task example-project \
+taxion task reauthorize --task TASK-ID
+taxion task reauthorize --task TASK-ID \
   --confirm <confirmationToken>
 ```
 

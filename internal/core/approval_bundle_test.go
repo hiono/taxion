@@ -248,7 +248,7 @@ func TestReauthorizationCanonicalizationKeepsConfigurationDecisionsOutsidePermis
 }
 
 func TestReauthorizationVerifiesImmutableProposalIdentity(t *testing.T) {
-	const proposal = "sha256:b02845111a47d4525e30b52aa2cb2ba38fc42923340da33994eebff206597b45"
+	const proposal = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	task := validDraftTask("contract")
 	task.Status = Ready
 	task.Decisions = []TaskDecision{{
@@ -274,8 +274,8 @@ func TestReauthorizationVerifiesImmutableProposalIdentity(t *testing.T) {
 	}
 	for _, wrong := range []string{
 		bundle.RecordHash,
-		"a873ef1bf4e213a16710eb36eac2235aa0fe681d535c3f5e66de1ff74f0f8cd9",
-		"sha256:98c8f584cb3bcd0f2f46cc8ae595e3f28e863bee3b7083fecdba5d06d094adf3",
+		"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
 	} {
 		tampered := bundle
 		tampered.ProposalHash = wrong

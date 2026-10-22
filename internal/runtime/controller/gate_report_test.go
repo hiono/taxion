@@ -121,7 +121,7 @@ func TestContractGateAcceptsReauthorizationVersions(t *testing.T) {
 	task := gateTestTask()
 	task.Decisions = []core.TaskDecision{{
 		ID: "intake-confirmation:" + task.ID, Source: "human",
-		Text: `{"taskId":"gate-task","expectedHash":"sha256:b02845111a47d4525e30b52aa2cb2ba38fc42923340da33994eebff206597b45"}`,
+		Text: `{"taskId":"gate-task","expectedHash":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`,
 	}}
 	proposal, err := core.ImmutableProposalHash(task)
 	if err != nil {

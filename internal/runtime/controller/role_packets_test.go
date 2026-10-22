@@ -16,7 +16,7 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
-const packetProposal = "sha256:b02845111a47d4525e30b52aa2cb2ba38fc42923340da33994eebff206597b45"
+const packetProposal = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 func packetConfigurationFixture(t *testing.T) config.Resolution {
 	t.Helper()

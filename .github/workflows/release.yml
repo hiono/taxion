@@ -35,6 +35,12 @@ jobs:
           ! git grep -nE 'gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' -- ':!.github/workflows/*'
       - name: Documentation and local links (no network)
         run: go test -count=1 ./cmd/taxion -run '^(TestDocumentation|TestConfigurationGuide|TestUserGuide)'
+      - name: Public communication policy and generated comments
+        env:
+          TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256: ${{ secrets.PUBLIC_TEXT_PRIVATE_IDENTIFIER_SHA256 }}
+        run: |
+          go test -count=1 ./internal/publictext ./scripts/publictext
+          go run ./scripts/publictext -repository
   package:
     needs: validate
     permissions:

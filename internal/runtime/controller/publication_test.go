@@ -67,6 +67,7 @@ func TestPublicationHashGitLabTargetAndCredential(t *testing.T) {
 	if _, err := PublicationHash(proposal); err != nil {
 		t.Fatal("valid GitLab publication rejected", err)
 	}
+
 	proposal.CredentialRef = "gh:active"
 	if _, err := PublicationHash(proposal); err == nil {
 		t.Fatal("GitHub credential accepted for GitLab")
@@ -83,6 +84,37 @@ func TestPublicationHashGitLabTargetAndCredential(t *testing.T) {
 	proposal.CredentialRef, proposal.Repository = "gh:active", "owner/group/repo"
 	if _, err := PublicationHash(proposal); err == nil {
 		t.Fatal("nested project path accepted for GitHub")
+	}
+}
+
+func TestPublicationPolicyRejectsBeforeApprovalOrDelivery(t *testing.T) {
+	db, _, _ := reviewFlowFixture(t)
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []string{"github", "gitlab"} {
+		proposal := publicationProposal()
+		proposal.Provider = provider
+		if provider == "gitlab" {
+			proposal.Host, proposal.CredentialRef = "gitlab.example", "glab:active"
+		}
+		proposal.Body = "blockingItem: internal execution state"
+		if _, err := PublicationHash(proposal); err == nil {
+			t.Fatal("raw operation return obtained an approval hash")
+		}
+		if _, err := ApprovePublication(t.Context(), db, PublicationRequest{Update: proposal}, publicationScanner(t)); err == nil {
+			t.Fatal("raw operation return approved")
+		}
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("rejected publication changed saved state", err)
+	}
+	proposal := publicationProposal()
+	original := proposal.Body
+	if _, err := PublicationHash(proposal); err != nil || proposal.Body != original {
+		t.Fatal("publication check rewrote approved content", err)
 	}
 }
 

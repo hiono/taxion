@@ -34,6 +34,9 @@ func TestGoalPolicyCoversEveryRoleAndRuntimePrompt(t *testing.T) {
 			"implement the correction before commissioning",
 			"If one path is blocked, continue independent approved work",
 			"only when no safe approved action remains",
+			"Public GitHub records are for users",
+			"private audit evidence",
+			"never rewrite it after",
 		} {
 			if !strings.Contains(prompt, constraint) {
 				t.Errorf("prompt %d lacks %q", index, constraint)
