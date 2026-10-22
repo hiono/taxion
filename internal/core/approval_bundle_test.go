@@ -231,6 +231,88 @@ func TestReauthorizationCanonicalizationKeepsConfigurationDecisionsOutsidePermis
 	}
 }
 
+func TestReauthorizationVerifiesImmutableProposalIdentity(t *testing.T) {
+	const proposal = "sha256:b02845111a47d4525e30b52aa2cb2ba38fc42923340da33994eebff206597b45"
+	task := validDraftTask("contract")
+	task.Status = Ready
+	task.Decisions = []TaskDecision{{
+		ID: "intake-confirmation:contract", Source: "human:legacy",
+		Text: `{"taskId":"contract","expectedHash":"` + proposal + `"}`,
+	}}
+	configuration := approvalConfiguration(t, explicitSelection)
+	bundle, err := ComposeReauthorizationApprovalBundleWithProposalHash(
+		"reauthorization", proposal, task, configuration, "human", "human:1", "reauthorize", time.Now(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bundle.Verify(task, configuration); err != nil {
+		t.Fatal(err)
+	}
+	expectedToken, err := ConfirmationTokenForVersion(ReauthorizationCanonicalizationVersion, proposal, bundle.Dimensions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token, err := bundle.ConfirmationToken(); err != nil || token != expectedToken {
+		t.Fatal("bundle confirmation token did not preserve version and proposal identity")
+	}
+	for _, wrong := range []string{
+		bundle.RecordHash,
+		"a873ef1bf4e213a16710eb36eac2235aa0fe681d535c3f5e66de1ff74f0f8cd9",
+		"sha256:98c8f584cb3bcd0f2f46cc8ae595e3f28e863bee3b7083fecdba5d06d094adf3",
+	} {
+		tampered := bundle
+		tampered.ProposalHash = wrong
+		tampered.BundleHash, err = tampered.computeHash()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tampered.Verify(task, configuration); err == nil {
+			t.Fatal("self-consistent bundle replaced immutable proposal identity")
+		}
+	}
+	for name, decisions := range map[string][]TaskDecision{
+		"missing": nil,
+		"missing hash": {{
+			ID: "intake-confirmation:contract", Text: `{"taskId":"contract"}`,
+		}},
+		"wrong task": {{
+			ID: "intake-confirmation:contract", Text: `{"taskId":"other","expectedHash":"` + proposal + `"}`,
+		}},
+		"duplicate hash": {{
+			ID:   "intake-confirmation:contract",
+			Text: `{"taskId":"contract","expectedHash":"` + proposal + `","expectedHash":"` + proposal + `"}`,
+		}},
+		"conflicting": append(append([]TaskDecision{}, task.Decisions...), TaskDecision{
+			ID: "intake-confirmation:other", Text: `{"taskId":"other","expectedHash":"` + proposal + `"}`,
+		}),
+		"malformed": {{ID: "intake-confirmation:contract", Text: `{"taskId":`}},
+		"trailing": {{
+			ID: "intake-confirmation:contract", Text: task.Decisions[0].Text + `{}`,
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := task
+			invalid.Decisions = decisions
+			if _, err := ImmutableProposalHash(invalid); err == nil {
+				t.Fatal("invalid immutable proposal reference was accepted")
+			}
+			if err := bundle.Verify(invalid, configuration); err == nil {
+				t.Fatal("bundle verification accepted invalid immutable proposal reference")
+			}
+			v1, err := ComposeApprovalBundleWithProposalHash(
+				"legacy-bundle", proposal, invalid, configuration, "human", "human:1", "gate", time.Now(),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name != "missing" && v1.Verify(invalid, configuration) == nil {
+				t.Fatal("version 1 READY verification bypassed the immutable proposal reference")
+			}
+		})
+	}
+}
+
 func TestApprovalBundleRejectsUnknownVersions(t *testing.T) {
 	task := validDraftTask("contract")
 	configuration := approvalConfiguration(t, explicitSelection)
