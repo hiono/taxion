@@ -63,6 +63,9 @@ func openSQL(path string, readonly bool) (*sql.DB, error) {
 }
 
 func stopped(state store.Workspace) error {
+	if state.Records.Operation != nil && state.Records.Operation.Active() {
+		return fmt.Errorf("snapshot requires a completed or cancelled operation")
+	}
 	for _, flow := range state.Graph.ReviewFlows {
 		if flow.Status == "RUNNING" || flow.RunnerID != "" {
 			return fmt.Errorf("snapshot requires stopped flows and released runner claims")

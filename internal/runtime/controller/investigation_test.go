@@ -39,6 +39,7 @@ func TestInvestigationUsesApprovedReadOnlySourcesWithSeparateObservation(t *test
 		t.Fatal("investigation lost provenance, leaked mutable bytes or bypassed isolation", result)
 	}
 	after, err := db.LoadWorkspace()
+	before.Records.Operation = after.Records.Operation
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("investigation changed main history or approval", err)
 	}

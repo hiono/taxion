@@ -14,6 +14,15 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+func TestSnapshotRequiresTerminalOperation(t *testing.T) {
+	for _, state := range []string{"RUNNING", "WAITING_FOR_ANSWER", "WAITING_FOR_APPROVAL", "BLOCKED", "USAGE_EXCEEDED", "COMPLETED", "CANCELLED"} {
+		err := stopped(store.Workspace{Records: store.Records{Operation: &store.Operation{State: state}}})
+		if terminal := state == "COMPLETED" || state == "CANCELLED"; terminal != (err == nil) {
+			t.Fatalf("operation %s: %v", state, err)
+		}
+	}
+}
+
 func TestPortableOriginPreservesNestedNamespace(t *testing.T) {
 	repo := "group/subgroup/project"
 	for _, remote := range []string{"https://gitlab.example.com/" + repo + ".git",

@@ -299,13 +299,24 @@ taxion request --repo owner/repository \
 
 最初に「この画面に検索機能を追加して」のように依頼を書きます。表示された repository・worktree・実行 account・上限を確認し、`/plan` でモデルを使う Planner 対話を開始します。費用は選んだモデルの利用条件に従います。Planner の質問には人のことばで答え、提案が意図と違えば修正を伝えます。Planner は目的、変更範囲、完了条件、検証コマンドを提案します。質問が残っている間は実行できません。
 
-計画と検証コマンドの副作用を確認し、`/approve` でコード作成、ホストでの検証、別 worktree での独立レビューを開始します。Task、承認 hash、Flow、Reviewer Task ID、role prompt、指示の受渡しは Taxion が準備します。終了時に結果、変更が残る worktree、Flow ID、記録の場所を表示します。commit、push、外部 Issue の作成は行いません。
+計画と検証コマンドの副作用を確認し、`/approve` で read-only preflight の4 lane を一括確認してから、コード作成、ホストでの非モデル検証、別 worktree での独立レビューまで継続します。lane ごとや担当ごとの再承認は求めません。Task、承認 hash、Flow、Reviewer Task ID、role prompt、指示の受渡しは Taxion が準備します。途中の進捗・usage は表示せず、最後に `gate`、operation ID、Flow ID、status、予算の JSON を返します。正常終了は `COMPLETED`、安全上の停止は `BLOCKED`、予算停止は `USAGE_EXCEEDED` です。commit、push、merge、公開、外部 Issue の作成は行いません。
 
 この入口は snapshot mode と `fileAccess: all` を明示して使います。worktree 内の新規ファイルを許可し、Coder には `view,create,edit,apply_patch`、Reviewer には `view` を渡します。変更結果の scope 検査、worktree 外と保護された path の拒否、Reviewer の読み取り専用制約は維持します。細かい file access や外部 skill の承認が必要な場合は、`ready` を読んだオーケストレータに次節の個別手順を任せます。
 
-期限は `/plan` から数えます。必須の `--max-task-nano-aiu` は、Task 全体で承認する nano-AIU の hard ceiling です。利用量が未知・不完全なら残量を0として次の Dispatch/session を発行せず、`BUDGET_STOP` を記録します。`--max-ai-credits` は session ごとの soft ceiling で、Task-wide 上限とは別です。Dispatch 数と role session 数の上限は承認済み repair 上限から導出し、実行済み数・credits・時間・修正/re-review 数と残量は `workflow evaluate --id FLOW_ID` で確認できます。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の各回答でモデルを実行するため、同じ内容を繰り返し送らないようにします。Planner の失敗を自動 retry しません。
+期限は `/plan` から数え、入力待ちと中断中も経過します。必須の `--max-task-nano-aiu` は nano-AIU の hard ceiling で、Planner の実測使用量を差し引いた残量だけを実行 Flow に割り当てます。Planner 利用量が未知・不完全なら次のモデル呼出しと実行承認を止め、実行中は既存の Task budget 検査で `BUDGET_STOP` を記録します。`--max-ai-credits` は session ごとの soft ceiling で、hard ceiling とは別です。Dispatch 数と role session 数の上限は承認済み repair 上限から導出し、実行済み数・credits・時間・修正/re-review 数と残量は `workflow evaluate --id FLOW_ID` で確認できます。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の失敗を自動 retry しません。
 
-Planner はファイル・shell tool を持たず、依頼、これまでの対話、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストを受け取ります。元依頼の全文は保存した decision に一度だけ含め、対話の先頭はその出典を参照します。同じ Task を別の wrapper に重ねて送りません。path は directory ごとにまとめ、全件を保持したまま共通部分の繰り返しを減らします。通常は native な skill と指示も読み込みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。対話中の `/quit` または入力終了ではコードを実行せず、相談記録を残します。保存した相談の自動再開は未対応です。
+Planner はファイル・shell tool を持たず、依頼、これまでの対話、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストを受け取ります。元依頼の全文は保存した decision に一度だけ含め、対話の先頭はその出典を参照します。同じ Task を別の wrapper に重ねて送りません。path は directory ごとにまとめ、全件を保持したまま共通部分の繰り返しを減らします。通常は native な skill と指示も読み込みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。
+
+同じ workspace の active operation は1件です。質問待ちでは、その質問への自然言語の回答と明示的な `/quit` だけを受け付けます。未解決の質問への `/approve` や別 request、別 workflow は拒否します。EOF は checkpoint と質問待ちを保持し、`/quit` は operation を終了します。次の操作で状態を読み、同じ checkpoint から回答を続けられます。予算・期限・実行設定の override は受け付けません。
+
+```sh
+taxion request --status
+taxion request --resume REQUEST_ID
+```
+
+期限切れや予算停止の operation を終了する場合は `taxion request --cancel REQUEST_ID` を使います。先に Flow の停止と Dispatch の照合を済ませる必要があり、成否不明の Planner は取り消せません。Task 契約と既存の判断は保持します。
+
+`--status` はモデルを呼ばず、operation の version・state・phase・期限・session soft ceiling・nano-AIU 上限・Planner 使用量と、存在する Flow の予算を JSON で返します。所有 token と相談本文は表示しません。`--resume` は保存済みの質問を再表示し、回答があるまで Planner を再実行しません。承認済み実行では保存済み Flow と結果から継続し、完了済み Coder を再実行しません。process が終了すれば実行予約は解放されますが、送信の成否が不明な Planner、未照合の session、残った runner claim、安全停止済み Flow は自動再送・自動解除しません。既存の停止・照合・再契約手順を使い、依頼の最初からの作り直しは求めません。
 
 相談記録と実行先・失敗の記録は request ID・連番・hash とともに workspace の SQLite DB に保存します。実行イベントは Flow から正式な Dispatch・receipt を参照し、二重保存しません。新しい `requests/` の JSON や `execution.log` は作りません。確認・明示 export は `taxion records show` を使います。この出力には相談本文が含まれるため、公開先への転記には注意してください。相談保存前に DB の file mode を所有者だけが読み書きできる設定にします。過去の外部ファイルは削除しません。
 
