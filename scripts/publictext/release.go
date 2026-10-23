@@ -68,6 +68,10 @@ func releaseSource(tag string, requireReceipt bool) (publictext.Mutation, error)
 		if err := json.Unmarshal(data, &review); err != nil {
 			return publictext.Mutation{}, err
 		}
+		if review.Statement == nil || review.Statement.At.IsZero() || review.Statement.At.After(time.Now().UTC()) {
+			return publictext.Mutation{}, fmt.Errorf("release review requires the exact nonfuture statement context")
+		}
+		mutation.Statement = *review.Statement
 		mutation.Review = &review
 	}
 	return mutation, nil

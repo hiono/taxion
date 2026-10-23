@@ -20,6 +20,23 @@ type AuditResult struct {
 	Classifications []string `json:"classifications"`
 }
 
+type AuditBasis struct {
+	Record      AuditRecord `json:"record"`
+	ProfileHash string      `json:"profileHash"`
+	ContentHash string      `json:"contentHash"`
+}
+
+// PrepareAuditReview is the canonical exact-record basis, never an approval.
+func PrepareAuditReview(p Profile, record AuditRecord) AuditBasis {
+	record.Review = nil
+	basis := AuditBasis{Record: record, ProfileHash: ProfileHash(p)}
+	basis.ContentHash = digestJSON(struct {
+		ProfileHash string
+		Record      AuditRecord
+	}{basis.ProfileHash, record})
+	return basis
+}
+
 var auditArchitectureLeak = regexp.MustCompile(`(?i)(?:internal architecture|private topology|非公開構成)`)
 
 // Audit is read-only and never emits the source prose or proposes a correction.
@@ -28,7 +45,8 @@ func Audit(p Profile, records []AuditRecord, protected []string) []AuditResult {
 	for _, record := range records {
 		review := record.Review
 		record.Review = nil
-		result := AuditResult{ID: record.ID, Surface: record.Surface, ContentHash: digestJSON(record)}
+		basis := PrepareAuditReview(p, record)
+		result := AuditResult{ID: record.ID, Surface: record.Surface, ContentHash: basis.ContentHash}
 		text := record.Title + "\n" + record.Body
 		add := func(classification string) {
 			if !slices.Contains(result.Classifications, classification) {
