@@ -149,21 +149,7 @@ func (Publisher) Reconcile(ctx context.Context, update store.ExternalUpdate) (st
 		if err != nil {
 			return "", false, err
 		}
-		var issue struct {
-			Number      int    `json:"number"`
-			State       string `json:"state"`
-			StateReason string `json:"state_reason"`
-		}
-		if json.Unmarshal(data, &issue) != nil {
-			return "", false, fmt.Errorf("invalid issue state")
-		}
-		if issue.Number != update.Number || issue.State != "open" && issue.State != "closed" {
-			return "", false, fmt.Errorf("invalid issue identity or state")
-		}
-		if issue.State == "closed" && issue.StateReason != "completed" {
-			return "", false, fmt.Errorf("taxion: Issue closed with a different disposition")
-		}
-		return strconv.Itoa(update.Number), issue.State == "closed", nil
+		return reconcileGitHubClose(update, data)
 	}
 	return "", false, fmt.Errorf("unsupported publication action")
 }
@@ -199,6 +185,16 @@ func (Publisher) Send(ctx context.Context, update store.ExternalUpdate) (string,
 	if err != nil {
 		return "", err
 	}
+	if update.Action == "CLOSE" {
+		id, found, err := reconcileGitHubClose(update, data)
+		if err != nil {
+			return "", err
+		}
+		if !found {
+			return "", fmt.Errorf("taxion: GitHub Issue close is not confirmed")
+		}
+		return id, nil
+	}
 	var response struct {
 		ID          int64  `json:"id"`
 		Number      int    `json:"number"`
@@ -220,10 +216,33 @@ func (Publisher) Send(ctx context.Context, update store.ExternalUpdate) (string,
 	if update.Action == "COMMENT" && response.ID > 0 && matched {
 		return strconv.FormatInt(response.ID, 10), nil
 	}
-	if update.Action == "CLOSE" && response.Number == update.Number && response.State == "closed" && response.StateReason == "completed" {
-		return strconv.Itoa(response.Number), nil
-	}
 	return "", fmt.Errorf("publication response identity is unconfirmed")
+}
+
+func reconcileGitHubClose(update store.ExternalUpdate, data []byte) (string, bool, error) {
+	var issue struct {
+		Number      int       `json:"number"`
+		State       string    `json:"state"`
+		StateReason string    `json:"state_reason"`
+		ClosedAt    time.Time `json:"closed_at"`
+		ClosedBy    *struct {
+			Login string `json:"login"`
+		} `json:"closed_by"`
+	}
+	if json.Unmarshal(data, &issue) != nil || issue.Number != update.Number ||
+		issue.State != "open" && issue.State != "closed" {
+		return "", false, fmt.Errorf("taxion: GitHub Issue identity or state is unconfirmed")
+	}
+	if issue.State == "open" {
+		return strconv.Itoa(update.Number), false, nil
+	}
+	if issue.StateReason != "completed" || issue.ClosedBy == nil ||
+		!strings.EqualFold(issue.ClosedBy.Login, update.Account) || update.At.IsZero() ||
+		issue.ClosedAt.IsZero() || issue.ClosedAt.Before(update.At.Truncate(time.Second)) ||
+		issue.ClosedAt.After(time.Now().UTC()) {
+		return "", false, fmt.Errorf("taxion: GitHub Issue close evidence does not match the approved update")
+	}
+	return strconv.Itoa(update.Number), true, nil
 }
 
 func publicationAPI(ctx context.Context, env []string, method, endpoint string, payload any) ([]byte, error) {

@@ -135,6 +135,7 @@ func TestPublicationCLIConflictingMarkersAndUnknownReplies(t *testing.T) {
 			case "account":
 				user = `{"login":"other"}`
 			}
+
 			data, _ := json.Marshal(comments)
 			if failure == "malformed" {
 				data = []byte("private-provider-output")
@@ -156,6 +157,49 @@ func TestPublicationCLIConflictingMarkersAndUnknownReplies(t *testing.T) {
 			}
 			if _, err := (Publisher{}).Send(t.Context(), update); err == nil {
 				t.Fatal("missing delivery ID accepted")
+			}
+		})
+	}
+}
+
+func TestGitHubClosedIssueReconciliationEvidence(t *testing.T) {
+	update := forgePublication()
+	update.Action, update.Body, update.FlowID, update.At = "CLOSE", "", "completed-flow", time.Now().UTC().Add(-time.Minute)
+	for _, test := range []struct {
+		name, state, reason, actor string
+		closedAt                   time.Time
+		found, denied              bool
+	}{
+		{"open", "open", "", "", time.Time{}, false, false},
+		{"approved-actor", "closed", "completed", "OWNER", update.At.Add(time.Second), true, false},
+		{"different-actor", "closed", "completed", "other", update.At.Add(time.Second), false, true},
+		{"before-approval", "closed", "completed", "owner", update.At.Add(-time.Second), false, true},
+		{"missing-time", "closed", "completed", "owner", time.Time{}, false, true},
+		{"future-time", "closed", "completed", "owner", time.Now().Add(time.Hour), false, true},
+		{"different-disposition", "closed", "not_planned", "owner", update.At.Add(time.Second), false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{
+				"number": update.Number, "state": test.state, "state_reason": test.reason,
+				"closed_at": test.closedAt, "closed_by": map[string]string{"login": test.actor},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := publicationCLI(t, map[string]string{
+				"GET:repos/owner/repo/issues/53":   string(body),
+				"PATCH:repos/owner/repo/issues/53": string(body),
+			})
+			id, found, err := (Publisher{}).Reconcile(t.Context(), update)
+			if (err != nil) != test.denied || found != test.found || !test.denied && id != "53" {
+				t.Fatal(id, found, err)
+			}
+			if _, err := os.Stat(request); !os.IsNotExist(err) {
+				t.Fatal("reconciliation wrote to the remote", err)
+			}
+			id, err = (Publisher{}).Send(t.Context(), update)
+			if (err == nil) != test.found || test.found && id != "53" {
+				t.Fatal("unconfirmed close response", id, err)
 			}
 		})
 	}

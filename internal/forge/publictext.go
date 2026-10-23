@@ -97,7 +97,7 @@ func publicWriteContext(ctx context.Context, update store.ExternalUpdate, host, 
 		return resolveGitLabReference(ctx, update.Host, update.Repository, target, env)
 	}
 	if err := publictext.CheckMutation(ctx, update.PublicText(), resolve); err != nil {
-		return nil, fmt.Errorf("taxion: public-text gate: %w", err)
+		return nil, fmt.Errorf("taxion: public-text gate: %w: %w", publictext.ErrMutationRejected, err)
 	}
 	return context.WithValue(ctx, publicWriteKey{}, actual), nil
 }

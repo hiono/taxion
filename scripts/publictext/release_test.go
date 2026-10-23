@@ -39,6 +39,7 @@ func TestReleasePresentationUsesExactProfileAndStaticSource(t *testing.T) {
 		strings.Replace(header, "disable: true", "disable: false", 1),
 		strings.Replace(header, "設定内容を保持します。", "{{ .FutureResult }}", 1),
 		strings.Replace(header, "設定内容を保持します。", "完了した結果は後続コメントに記載している", 1),
+		strings.Replace(header, "設定内容を保持します。", "設定内容を保持します。 Setup choices are preserved.", 1),
 		header + "unknown: [",
 	} {
 		if err := os.WriteFile(".goreleaser.yaml", []byte(input), 0600); err != nil {

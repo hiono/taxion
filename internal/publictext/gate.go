@@ -2,6 +2,7 @@ package publictext
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -9,6 +10,9 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrMutationRejected identifies a policy refusal before any remote write.
+var ErrMutationRejected = errors.New("public-text policy rejected the mutation before sending")
 
 // Mutation describes human-visible content, not an arbitrary provider payload.
 type Mutation struct {

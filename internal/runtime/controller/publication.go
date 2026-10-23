@@ -232,6 +232,7 @@ func DeliverPublication(ctx context.Context, db *store.Store, id, scanner string
 	}
 	claim := hex.EncodeToString(token)
 	var update store.ExternalUpdate
+	var original store.ExternalUpdate
 	err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		for i := range state.Records.Updates {
 			saved := &state.Records.Updates[i]
@@ -239,6 +240,7 @@ func DeliverPublication(ctx context.Context, db *store.Store, id, scanner string
 				continue
 			}
 			update = *saved
+			original = *saved
 			if saved.Status == "SENT" {
 				return nil
 			}
@@ -291,13 +293,12 @@ func DeliverPublication(ctx context.Context, db *store.Store, id, scanner string
 				return fmt.Errorf("taxion: publication claim changed during delivery")
 			}
 			if sendErr != nil {
-				saved.Status = "PENDING"
-				if attempted {
+				if attempted && !errors.Is(sendErr, publictext.ErrMutationRejected) {
 					saved.Status = "UNKNOWN"
+					saved.Error = "publication failed; inspect permissions, scanner or remote delivery and reconcile"
 				} else {
-					saved.Claim = ""
+					*saved = original
 				}
-				saved.Error = "publication failed; inspect permissions, scanner or remote delivery and reconcile"
 				update = *saved
 				return nil
 			}
