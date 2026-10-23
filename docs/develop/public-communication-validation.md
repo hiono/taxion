@@ -29,3 +29,21 @@ SDK 実験コメントからは内部の実消費量集計と実行回数を除�
 CI の `public-communication` は policy / golden / false-positive tests、公開用文書・templates・Release header の lint、secret-pattern / protected identifier scan、既存の docs / local links tests を実行する。外部 URL の可用性を検証済みとはしない。その他の既存 Go、race、web、hygiene 検証は維持する。最終 commit の結果と独立レビューの判断は対応する PR の checks とレビュー要約を参照する。
 
 新しい binary Release は、この変更のレビューと merge が完了するまで公開しない。snapshot の native 検証を正式公開後の受入れ結果として扱わない。
+
+## 時制と参照の検証手順
+
+保全済みの Issue 113件、PR 31件、comment 294件（Issue 262件・PR 32件）、Release 16件、Actions run 298件の metadata を再利用し、入力 hash を確認した。公開文書・templates・automation も追加確認した。2件の既存コメントは、当初の予定と現在の追加レビュー結果を分け、更新時点を持つ注記から既存の結果へ直接リンクするよう修正した。結果の存在は GitHub API と作成時刻で確認し、編集後の再取得で本文の一致を検証した。
+
+この2件の曖昧な案内は、結果が存在した後の編集で導入された表現だった。元の作成日と編集日を同一視して、存在しない結果を当初から断言していたという履歴には変更していない。確定したレビュー結果、当初の修正要求、未実施の正式公開検証は区別したまま保持している。
+
+offline lint は、未確定の結果を確定済みとする表現や、参照先を特定できない位置依存の案内を検出する。単語だけで履歴を是正せず、予定を述べた文章と既存の結果を説明した文章を区別する。技術文書の inline / fenced code は説明用の引用として扱うが、公開コメントは code 記法で検査を回避できない。
+
+`go run ./scripts/publictext -progress STATE` は明示した状態から文章を生成する。状態は `PLANNED`、`IN_PROGRESS`、`COMPLETED`、`FAILED`、`NOT_RUN`、`PUBLISHED`、`NOT_PUBLISHED`。内部の値は公開文へ出力しない。未完了・未実施・失敗・未公開の文章は結果リンクを受け取らない。完了と公開の文章には `-reference URL` を指定し、GitHub API から存在・状態・時刻を確認する。URL を補完・予測せず、取得エラー時は本文を出力しない。`-at RFC3339` は記述時点を明示する場合に使い、未来時刻は認めない。
+
+既存の本文を検証する場合は、非公開の context JSON に記述時点の `at` と、参照ごとの `claims` を保存する。各 claim は本文内に実在する `url` と主張する `state` を持つ。`go run ./scripts/publictext -context FILE MESSAGE` で全対象リンクを検証する。作成時刻だけでなく、merge、CI 完了、review submission、Release 公開、artifact 作成などの状態確定時刻が記述時点を超えないことも検査する。未完了の CI や未 merge の PR を `COMPLETED` として検証することはできない。
+
+対応するのは github.com の Issue、PR、Issue / PR comment、PR review、Actions run、Release tag、Release artifact の直接 URL。comment は存在を示す `EXISTS` として扱い、本文の内容から作業完了を推測しない。PR / CI / closed Issue の成功は `COMPLETED`、公開済み Release / artifact は `PUBLISHED` とする。PR の close だけでは merge と扱わない。API の更新時刻を結果の時刻の保守的な上限として使うため、後日の更新がある記録は過去時点の確認に失敗する場合がある。
+
+この検査は参照先の metadata の確認であり、任意の自然言語の意味やリンク先の技術的正しさを保証しない。commit SHA、外部サイト、対応外の anchor はこの機能の検証対象として成功にせず、別に確認する。commit の author date だけで公開日時を推定しない。offline lint、API 参照検証、公開前の内容レビューを組み合わせる。metadata から当時の事実を確定できなければ未検証として保持し、推測で過去を書き換えない。
+
+回帰テストは全7状態の golden、未来の作成時刻、結果確定前の参照、未完了 CI、未公開 Release、欠落した参照、取得不能、曖昧な参照と明示した予定の区別を含む。実際の公開処理も共通の本文 lint を承認前と送信前に実行するが、offline の hash / lint が外部 metadata を取得した証拠になるわけではない。

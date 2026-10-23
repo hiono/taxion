@@ -25,6 +25,9 @@ var usageReport = regexp.MustCompile(`(?i)(?:\breported input/output tokens\b|\b
 // Documents may explain public schemas and enums; messages may quote an inline
 // identifier, but cannot use raw operation returns as their narrative.
 func Check(text string, document bool) error {
+	if err := checkTemporal(text, document); err != nil {
+		return err
+	}
 	for _, rule := range []struct {
 		name string
 		re   *regexp.Regexp
