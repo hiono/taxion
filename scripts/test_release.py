@@ -21,7 +21,9 @@ class ManifestTests(unittest.TestCase):
         dist = root / "dist"
         dist.mkdir()
         (dist / "metadata.json").write_text(json.dumps({
-            "tag": "v0.7.9", "commit": info["sourceRevision"], "date": "2026-10-23T00:00:00Z",
+            "project_name": "taxion", "tag": "v0.7.9", "previous_tag": "v0.7.8",
+            "version": "0.7.9", "commit": info["sourceRevision"], "date": "2026-10-23T00:00:00Z",
+            "runtime": {"goos": "linux", "goarch": "amd64"},
         }))
         sums = []
         for system, arch in release.PLATFORMS:
@@ -58,12 +60,46 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual({(a["os"], a["architecture"]) for a in document["artifacts"]}, set(release.PLATFORMS))
             self.assertEqual(release.sha((dist / "release-manifest.json").read_bytes()),
                              (dist / "release-manifest.sha256").read_text().split()[0])
+            public = root / "public"
+            public.mkdir()
+            for path in release.published_assets(dist, "v0.7.9"):
+                (public / path.name).write_bytes(path.read_bytes())
+            self.assertFalse((public / "metadata.json").exists())
+            release.verify_published(dist, public, "v0.7.9")
+            (public / "release-manifest.json").write_text("tampered")
+            with self.assertRaisesRegex(ValueError, "differs"):
+                release.verify_published(dist, public, "v0.7.9")
             with contextlib.chdir(root):
+                metadata = json.loads((dist / "metadata.json").read_text())
+                metadata["version"] = "0.7.9-snapshot"
+                (dist / "metadata.json").write_text(json.dumps(metadata))
+                with self.assertRaisesRegex(ValueError, "matching tagged"):
+                    release.manifest(dist, "v0.7.9")
+                metadata["version"] = "0.7.9"
+                (dist / "metadata.json").write_text(json.dumps(metadata))
                 (dist / "SHA256SUMS").write_text("tampered")
                 with self.assertRaisesRegex(ValueError, "checksum"):
                     release.manifest(dist, "v0.7.9")
                 with self.assertRaisesRegex(ValueError, "matching tagged"):
                     release.manifest(dist, "v0.7.10")
+
+    def test_release_absence_uses_http_status_not_json_body(self):
+        for response, returncode, allowed in (
+            ('HTTP/2.0 404 Not Found\n\n{"message":"Not Found"}', 1, True),
+            ('HTTP/2.0 200 OK\n\n{}', 0, False),
+            ('HTTP/2.0 403 Forbidden\n\n{"status":"404"}', 1, False),
+            ('HTTP/2.0 500 Internal Server Error\n\n{}', 1, False),
+            ('', 1, False),
+            ('HTTP/2.0 404 Not Found\n\n{}', 0, False),
+        ):
+            with self.subTest(response=response, returncode=returncode):
+                result = mock.Mock(stdout=response, returncode=returncode)
+                with mock.patch.object(release.subprocess, "run", return_value=result):
+                    if allowed:
+                        release.require_absent_release("v0.7.9")
+                    else:
+                        with self.assertRaisesRegex(ValueError, "HTTP 404"):
+                            release.require_absent_release("v0.7.9")
 
 
 if __name__ == "__main__":

@@ -33,8 +33,22 @@ checkpoints and controller progress in private audit evidence. Do not paste them
 into Issues, PRs, reviews, release notes or Actions summaries.
 Use ordinary review language such as Changes requested and Review feedback
 addressed; do not impersonate a team or report work to imaginary owners.
+Public titles and prose must explain user-visible behavior, impact, problems and
+limitations, not merely internal assignments or procedures. Keep the primary
+language consistent, preserving official command/API/schema identifiers.
+Load the exact project's Communication Profile before public text preparation.
+Never inherit Taxion's language or audience for another project, infer a missing
+profile, or mutate a forge without the shared public-text gate. Keep pre-existing
+consumer-project records read-only unless their separate correction is approved.
 Prepare the public text before exact-content approval; never rewrite it after
-approval or present an unperformed check or review request as completed.`
+approval or present an unperformed check or review request as completed.
+Public statements must distinguish plans, work in progress, completed work,
+failures, unperformed checks, published releases and unpublished releases.
+Verify each referenced record exists and reached the claimed state by the
+statement timestamp. Never predict record URLs or identifiers. Use stable direct
+links, and keep dated later updates separate from the original posting context.
+If existence, timing or state cannot be verified, state that limitation instead
+of inferring success. Review public prose against these same requirements.`
 
 const goalRolePolicy = `
 PLANNER: define sufficient acceptance and affected documentation before approval.

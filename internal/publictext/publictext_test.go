@@ -18,6 +18,8 @@ func TestPublicMessagePolicy(t *testing.T) {
 		"See internal/runtime/controller/publication.go for exact-content approval.",
 		"Approved execution ceilings: 200,000 tokens per flow, 2,000 AI credits total, 30 credits per execution, at most one correction, 900 seconds timeout.",
 		"内部の利用量集計は非公開の検証証跡で管理する。",
+		"The controller rejects a Dispatch with a mismatched source commit. Existing results remain unchanged.",
+		"Reviewer assignments preserve independent validation of the same artifact.",
 	} {
 		if err := Check(text, false); err != nil {
 			t.Errorf("legitimate public explanation rejected: %v", err)

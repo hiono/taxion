@@ -1,4 +1,4 @@
-# ADR-0044: Binary distribution と協調的 provenance Gate
+# ADR-0044: 正式バイナリ配布と協調的な出自検証
 
 ## 状態
 

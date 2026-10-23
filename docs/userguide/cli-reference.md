@@ -1,6 +1,6 @@
 # CLI と動作のリファレンス
 
-`provenance configure --file POLICY.json` は明示 mode と対象 store、product時は正式artifactのpinを初回登録し、既存policyを上書きしません。`provenance verify` は実binaryとmanifest/archiveをread-onlyで照合します。詳細は [正式バイナリと operation mode](binary-provenance.md) を参照してください。policy未登録または不一致のoperationは、store接続前に `provenance-rejected` / `stateChanged: false` で拒否します。
+`provenance configure --file POLICY.json` は明示 mode と対象 store、product時は正式artifactのpinを初回登録し、既存policyを上書きしません。`provenance verify` は実binaryとmanifest/archiveをread-onlyで照合します。詳細は [正式バイナリと運用モード](binary-provenance.md) を参照してください。policy未登録または不一致のoperationは、store接続前に `provenance-rejected` / `stateChanged: false` で拒否します。
 
 この文書は、現在の CLI コマンドと実行上の制約をまとめる。初めて使う手順は[利用者ガイド](user-guide.md)、設定ファイルは[設定ガイド](configuration.md)を参照する。
 
@@ -548,7 +548,7 @@ Task の `fileAccess` は別の Human 承認済み SDK file permission 範囲で
 
 Task の `validationCommands` は Controller の検査操作を認可する。新 Coder Dispatch は Conventional Commits の subject と contextual body を要求する。body は `intent(scope):`・`decision(scope):`・`rejected(scope):`・`constraint(scope):`・`learned(scope):` の action line で実際の理由を記録し、任意の Git trailer を続ける。Controller は結果受入れ前に保存実行開始 SHA 以降の全 commit を確認し、独立 Reviewer は理由と作業の一致を確認する。turn 終了時に構造化応答を検査し、repository・worktree・SHA・scope を実 Git で照合して、割当 worktree で認可 command を実行し、観測出力と完了を SQLite に保存する。検証 command は Controller の host 権限で `sh -c` として実行するため、Task 認可時にその作用も承認する。明示的な `dispatch transition --result-file` も同じ検証を行い、`--validation-timeout` は既定10分となる。
 
-`taxion records proposal|approve|send|reconcile|show|finding` は承認済み GitHub 公開と出典付き失敗分析を管理する。承認は正確な対象・account・content hash を対応付ける。送信不明は停止済み sender の claim 照合まで明示して保つ。`taxion git check-range --base <SHA>
+`taxion records proposal|approve|send|reconcile|show|finding` は承認済み GitHub / GitLab 公開と出典付き失敗分析を管理する。承認は正確な対象・account・content hash とプロジェクトの Communication Profile を対応付ける。`TAXION_COMMUNICATION_PROFILES` で対象プロジェクトの設定ファイルを明示し、`update.statement.at` に記述時点、`update.statement.claims` に参照 URL とその状態を指定する。未設定・対象不一致・未確認の参照は送信できない。形式と更新時の再承認は[公開文章の検証手順](../develop/public-communication-validation.md#プロジェクト設定と-forge-共通検査)を参照する。送信不明は停止済み sender の claim 照合まで明示して保つ。`taxion git check-range --base <SHA>
 --head <SHA> --scanner <PATH>` は公開前に未公開の全 commit tree と message を scan する。[実行記録](execution-records.md)を参照する。
 
 CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は stdio の ACP、`web/` は browser console を提供する。
@@ -583,7 +583,7 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | `task create` | `--title TEXT`・`--repo REPO` が必須。repository identity は明示し、cwd から推測しない。 |
 | `task list`, `dispatch list` | 任意の `--repo REPO` で repository を絞り、`--json` で JSON 出力にする。archive 済み Task とその Dispatch は既定で除外し、`--include-archived` で含める。 |
 | `task archive` | `--tasks ID[,ID] --actor ACTOR --source SOURCE --reason REASON --dry-run` で対象 Task／Flow／Dispatch と `hash` を確認する。同じ引数と `--expected-hash HASH` で適用する。稼働中・suspended Dispatch、稼働中 Flow、未解放 runner、未解決の外部公開、別の非終了 Task からの参照を拒否する。履歴と Git のファイルは削除しない。 |
-| `task plan` | `--repo REPO` の通常計画は archive を除外する。`--include-archived` で履歴を含める場合の action は `ARCHIVED` で、実行許可にはならない。すべて退役済みなら通常計画は空を返す。 |
+| `task plan` | `--repo REPO` の通常計画は archive を除外する。`--include-archived` で履歴を含める場合の action は `ARCHIVED` で、実行許可にはならない。すべて archive 済みなら通常計画は空を返す。 |
 | `task authorize` | `--manifest`, `--confirm` confirmation token を提示した後、同じ token でのみ 1 回だけ承認を記録する。承認 bundle は append-only で、configuration 次元を含む |
 | `task reauthorize` | `--task READY_TASK_ID` の保存済み Task を読み戻し、既存の設定承認と異なる effective configuration を二段階で確認する。`--confirm` 前は保存せず、確認後は既存 decision と proposal hash を保ったまま設定承認と bundle を追記する。同一 bundle の再送は重複記録しない |
 | `task authorize-packets` | `--request JSON` で READY CODER Task の逐次 packet lifecycle と同一契約の派生 Reviewer bundle 追加を preview する。`--confirm TOKEN` でだけ別記録の lifecycle 承認を追記し、Task と既存 ApprovalBundle は変えない。Dispatch 発行前かつ matching bundle が必要。[request 形式・委譲範囲・逐次検証](role-handoff-packets.md)を参照。 |

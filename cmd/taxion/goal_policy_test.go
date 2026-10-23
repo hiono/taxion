@@ -37,6 +37,15 @@ func TestGoalPolicyCoversEveryRoleAndRuntimePrompt(t *testing.T) {
 			"Public GitHub records are for users",
 			"private audit evidence",
 			"never rewrite it after",
+			"user-visible behavior, impact, problems and",
+			"not merely internal assignments or procedures",
+			"Keep the primary\nlanguage consistent",
+			"Communication Profile before public text preparation",
+			"Never inherit Taxion's language or audience",
+			"without the shared public-text gate",
+			"consumer-project records read-only",
+			"Verify each referenced record exists and reached the claimed state",
+			"keep dated later updates separate",
 		} {
 			if !strings.Contains(prompt, constraint) {
 				t.Errorf("prompt %d lacks %q", index, constraint)
