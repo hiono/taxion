@@ -22,6 +22,12 @@ Issue、PR、レビューコメント、Release Notes、ADR の第一読者を O
 
 投稿時点で確認できる情報だけを確定事実とし、予定は予定として示す。新しい結果への案内は、実在する直接リンクと更新時点を持つ別の注記にする。生成処理は状態ごとに文章を分け、完了・公開の出力には対象がその時点で該当状態に達した証拠を要求する。offline の表現検査と、GitHub metadata による存在・状態時刻の検査は役割を分ける。
 
+設定は version 1 の Communication Profile とし、Forge、host、repository の完全一致で選ぶ。主言語、副言語、タイトル・本文の言語、技術用語、用語集、公開範囲、想定読者を明示する。Taxion の設定は日本語の公開文章と英語の CLI を区別する。別プロジェクトの設定は独立して承認し、匿名の英語 GitLab fixture は試験専用とする。実運用の別プロジェクトへ自動適用しない。
+
+共通検査は両 Forge adapter の書込み直前で必須とする。下位 API は読取りのみを既定とし、検査対象の host・method・endpoint・payload に一致する非公開の許可情報がない書込みを拒否する。Issue 作成・コメント・close、PR / MR コメントが現行の送信対象であり、Release、milestone、tag、CI summary、wiki などの追加送信 API は提供しない。共通の文章検査はこれらの分類も扱うが、未実装の送信が利用可能という意味ではない。
+
+承認 hash はプロジェクト設定にも結び付ける。送信時に設定が変わった場合は再承認を必要とし、旧版の未送信記録へ暗黙の profile を補完しない。参照状態と時刻は送信直前に再取得する。GitLab の Issue は close を成功の証拠とせず、MR の merge と CI の成功を区別する。
+
 ## Alternatives considered
 
 今後の投稿だけを改善する方式は、利用者が参照する既存の記録に問題を残すため採用しない。単語の一括置換は正当な API・schema の説明も変えるため採用しない。内部証拠の全文公開は変更理由の説明を代替せず、機密情報を露出させるため採用しない。
@@ -40,4 +46,4 @@ Issue、PR、レビューコメント、Release Notes、ADR の第一読者を O
 
 文体修正は CLI、公開 schema、Task、Flow、Dispatch の意味を変更しない。commit・tag・Release artifact を書き換えず、失敗や過去の review outcome も保持する。公開処理の検査を変更する場合も、承認した本文と送信本文の一致を維持する。
 
-公開処理には保護対象 identifier の digest 一覧を必須とする。未設定・空・不正な一覧では proposal / approval / delivery を停止するため、旧版からの更新時は信頼する一覧を環境変数で設定する必要がある。承認済み本文が新しい一覧に違反する場合も変換せず停止する。Task / store schema の migration は追加しない。
+公開処理には保護対象 identifier の digest 一覧と、明示したプロジェクト設定を必須とする。未設定・空・不正な一覧では proposal / approval / delivery を停止するため、旧版からの更新時は信頼する一覧を環境変数で設定する必要がある。承認済み本文が新しい一覧に違反する場合も変換せず停止する。公開 request には記述時点と参照の state claim を追加し、旧版の未送信記録は新しい形式で再承認する。既存の履歴は読める状態を保ち、DB の一括書換えは行わない。

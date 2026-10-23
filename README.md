@@ -12,7 +12,7 @@ v0.5.0 は、不要になった停止済み試行を履歴を保って通常一�
 
 ## 使い始める
 
-製品運用向けの新しい配布・導入契約は [正式バイナリと operation mode](docs/userguide/binary-provenance.md) を参照してください。GitHub backend の binary archive と承認済み provenance policy を使い、`go:` backend や source build は隔離した development mode に限定します。公開・platform検証の完了前に候補を導入しません。
+製品運用向けの配布・導入手順は [正式バイナリと運用モード](docs/userguide/binary-provenance.md) を参照してください。GitHub backend の binary archive と承認済み provenance policy を使い、`go:` backend や source build は隔離した development mode に限定します。公開・platform 検証の完了前に候補を導入しません。
 
 [利用者ガイド](docs/userguide/user-guide.md)に、公開版・ソースからの導入、今の agent への `taxion ready` による操作手順の出力、設定・承認から結果確認までを記載しています。mise での導入・更新は、`mise install` → `mise use --pin` → `taxion --version` の順です。[導入・更新手順](docs/userguide/user-guide.md#導入方法)には、旧開発版が再選択される場合の注意も記載しています。
 

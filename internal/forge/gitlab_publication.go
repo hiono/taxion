@@ -163,6 +163,10 @@ func sendGitLabPublication(ctx context.Context, update store.ExternalUpdate) (st
 	default:
 		return "", fmt.Errorf("taxion: unsupported GitLab publication action")
 	}
+	ctx, err = publicWriteContext(ctx, update, update.Host, method, endpoint, payload, env)
+	if err != nil {
+		return "", err
+	}
 	data, err := gitlabAPI(ctx, update.Host, env, method, endpoint, payload)
 	if err != nil {
 		return "", err

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -75,17 +74,18 @@ func PublicationHash(update store.ExternalUpdate) (string, error) {
 	if len(update.Body) > 60000 || len(update.Title) > 256 {
 		return "", fmt.Errorf("taxion: publication exceeds the approved text limit")
 	}
-	if err := publictext.Check(update.Title+"\n"+update.Body, false); err != nil {
+	mutation := update.PublicText()
+	profile, err := publictext.CheckMutationText(mutation)
+	if err != nil {
 		return "", fmt.Errorf("taxion: publication policy: %w", err)
 	}
-	digests := strings.Fields(os.Getenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256"))
-	if len(digests) == 0 {
-		return "", fmt.Errorf("taxion: publication requires TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256; configure the protected identifier digest list")
+	if update.Statement.At.IsZero() || update.Statement.At.After(time.Now().UTC()) {
+		return "", fmt.Errorf("taxion: publication requires a nonfuture statement timestamp")
 	}
-	if err := publictext.CheckIdentifiers(update.Title+"\n"+update.Body, digests); err != nil {
-		return "", fmt.Errorf("taxion: publication policy: %w", err)
-	}
-	body, err := json.Marshal(update)
+	body, err := json.Marshal(struct {
+		Update  store.ExternalUpdate `json:"update"`
+		Profile publictext.Profile   `json:"profile"`
+	}{update, profile})
 	return receiptHash(string(body)), err
 }
 

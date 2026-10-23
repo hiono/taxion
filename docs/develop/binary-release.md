@@ -18,6 +18,8 @@ docs / links の明示stepは、既存の `TestDocumentation*`、`TestConfigurat
 
 workflow は full Go tests / full race / vet / build / web / docs / links / hygiene を実行し、GoReleaser check と archive 生成を行う。最初は draft Release に保存し、6 native runner で archive、mise の明示URLによるfixture導入、product provenance Gate、別pathの同一binaryの拒否・store bytes不変を検証してから公開する。公開後にも全 assets を再取得して bytes/hash を照合し、各 native runner で実際の GitHub asset 自動選択を含む同じ検査を繰り返す。
 
+GoReleaser は `--skip=publish` で実行する。Release 本文は `.goreleaser.yaml` の静的 header だけを使用し、自動 changelog や footer は認めない。`scripts/publictext -release TAG` が Taxion の Communication Profile と保護対象一覧で正確な title / body を検査してから、`gh release create --draft --verify-tag --notes-file` で保存する。正式公開の直前にも共通検査を行い、draft の tag・title・body が検査対象と完全一致することを再取得で確認する。設定の欠落や内容の変更を無視して公開しない。
+
 公開後の検証が失敗した場合も release asset を差し替えない。workflow の失敗を記録してその版の運用導入を停止し、新しい修正版を作成する。`release-manifest.json` の CI run は当該 workflow の参照であり、manifest 生成時点で将来の最終成功を主張しない。利用側は run 全体の完了と成功を別途確認する。
 
 manifest schema 2 は、全 archive と executable の hash、checksums hash、source revision、version/tag、GoReleaser の build timestamp、Go/GoReleaser version、workflow identity、CI URL、mise identifier、rollback を保持する。manifest 自体は `release-manifest.sha256` に記録する。archive 内 metadata から公開 manifest URL を参照できる。checksum と manifest は同一発行元なので、別途確認・承認した manifest pin が必要。

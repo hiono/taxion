@@ -1,17 +1,22 @@
 package forge
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/hiono/taxion/internal/publictext"
 	"github.com/hiono/taxion/internal/store"
 )
 
 func publicationCLI(t *testing.T, responses map[string]string) string {
 	t.Helper()
+	publicationProfiles(t)
 	directory := t.TempDir()
 	request := filepath.Join(directory, "request.json")
 	script := "#!/bin/sh\n[ \"$1\" = api ] && [ \"$2\" = --hostname ] && [ \"$3\" = github.com ] && [ \"$4\" = --method ] || exit 2\n" +
@@ -37,8 +42,34 @@ func publicationCLI(t *testing.T, responses map[string]string) string {
 
 func forgePublication() store.ExternalUpdate {
 	return store.ExternalUpdate{Provider: "github", Host: "github.com", Repository: "owner/repo",
-		Account: "owner", CredentialRef: "env:TAXION_PUBLICATION_TEST_TOKEN",
+		Statement: publictext.StatementContext{At: time.Now().UTC()},
+		Account:   "owner", CredentialRef: "env:TAXION_PUBLICATION_TEST_TOKEN",
 		Kind: "ISSUE", Number: 53, Action: "COMMENT", Body: "approved report", Hash: strings.Repeat("a", 64)}
+}
+
+func publicationProfiles(t *testing.T) {
+	t.Helper()
+	profiles := publictext.Profiles{Version: 1}
+	for _, binding := range []struct{ provider, host, repository string }{
+		{"github", "github.com", "owner/repo"},
+		{"gitlab", "gitlab.example", "group/subgroup/repo"},
+	} {
+		profiles.Projects = append(profiles.Projects, publictext.Profile{Version: 1, Provider: binding.provider,
+			Host: binding.host, Repository: binding.repository, PrimaryLanguage: "en", SecondaryLanguages: []string{},
+			TitleLanguage: "en", BodyLanguage: "en", TechnicalTerms: []string{}, Glossary: map[string]string{},
+			Visibility: "public", IntendedAudience: []string{"users", "contributors", "maintainers"}})
+	}
+	data, err := json.Marshal(profiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TAXION_COMMUNICATION_PROFILES", path)
+	sum := sha256.Sum256([]byte("private-example-47"))
+	t.Setenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256", hex.EncodeToString(sum[:]))
 }
 
 func TestPublicationCLIIdentityPaginationAndApprovedPayload(t *testing.T) {

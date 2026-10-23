@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/hiono/taxion/internal/publictext"
 )
 
 func TestPublicTextCLI(t *testing.T) {
@@ -43,6 +47,48 @@ func TestPublicTextCLI(t *testing.T) {
 	t.Setenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256", "")
 	if err := run([]string{text}, &output, &warnings); err != nil || !strings.Contains(warnings.String(), "unavailable") {
 		t.Fatal("missing private identifier coverage not disclosed", err)
+	}
+}
+
+func TestMutationCLIUsesProjectGateAndGolden(t *testing.T) {
+	profile, err := filepath.Abs("../../internal/publictext/testdata/consumer-profiles.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TAXION_COMMUNICATION_PROFILES", profile)
+	sum := sha256.Sum256([]byte("private-example-47"))
+	t.Setenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256", hex.EncodeToString(sum[:]))
+	m := publictext.Mutation{Provider: "gitlab", Host: "forge.example", Repository: "example/application",
+		Surface: "comment", Title: "Preserve setup choices", Body: "Invalid confirmation preserves existing choices.\n",
+		Statement: publictext.StatementContext{At: time.Now().UTC().Add(-time.Minute)}}
+	file := filepath.Join(t.TempDir(), "mutation.json")
+	data, _ := json.Marshal(m)
+	if err := os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output, warnings bytes.Buffer
+	if err := run([]string{"-mutation", file}, &output, &warnings); err != nil {
+		t.Fatal(err)
+	}
+	golden, err := os.ReadFile("../../internal/publictext/testdata/presentation-en.md")
+	if err != nil || output.String() != string(golden) {
+		t.Fatal("public presentation changed", err, output.String())
+	}
+	for _, args := range [][]string{
+		{"-mutation", file, "-repository"},
+		{"-mutation", file, "-document"},
+		{"-mutation", file, "-at", time.Now().Format(time.RFC3339)},
+		{"-credential", "gh:active", file},
+	} {
+		output.Reset()
+		if run(args, &output, &warnings) == nil || output.Len() != 0 {
+			t.Fatal("mutation mode bypass", args)
+		}
+	}
+	output.Reset()
+	t.Setenv("TAXION_COMMUNICATION_PROFILES", "")
+	if run([]string{"-mutation", file}, &output, &warnings) == nil || output.Len() != 0 {
+		t.Fatal("unconfigured mutation emitted public text")
 	}
 }
 

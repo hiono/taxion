@@ -75,6 +75,49 @@ type StatementContext struct {
 	Claims []ReferenceClaim `json:"claims"`
 }
 
+// CheckForgeReferences confines observations to the explicitly configured
+// project. Unknown URLs are rejected rather than silently claiming coverage.
+func CheckForgeReferences(ctx context.Context, text string, statement StatementContext, provider, host, repository string, resolve ResolveReference) error {
+	if statement.At.IsZero() || statement.At.After(time.Now().UTC()) {
+		return fmt.Errorf("public references require a nonfuture statement timestamp")
+	}
+	claims := map[string]string{}
+	for _, claim := range statement.Claims {
+		if claim.State == "" || claims[claim.URL] != "" {
+			return fmt.Errorf("public reference context contains an empty state or duplicate URL")
+		}
+		claims[claim.URL] = claim.State
+	}
+	seen := map[string]bool{}
+	for _, target := range webLink.FindAllString(text, -1) {
+		target = strings.TrimRight(target, ".,;。、")
+		parsed, err := url.Parse(target)
+		prefix := "/" + repository + "/"
+		if err != nil || parsed.Scheme != "https" || parsed.Host != host || parsed.User != nil ||
+			parsed.RawQuery != "" || !strings.HasPrefix(parsed.Path, prefix) ||
+			provider != "github" && provider != "gitlab" || claims[target] == "" || resolve == nil {
+			return fmt.Errorf("public link requires an explicit state and a supported reference in the configured project")
+		}
+		if seen[target] {
+			continue
+		}
+		observed, err := resolve(ctx, target)
+		if err != nil {
+			return fmt.Errorf("public reference metadata could not be verified")
+		}
+		if observed.URL != target || observed.CreatedAt.IsZero() || observed.CreatedAt.After(statement.At) ||
+			observed.StateAt.IsZero() || observed.StateAt.Before(observed.CreatedAt) ||
+			observed.StateAt.After(statement.At) || observed.State != claims[target] {
+			return fmt.Errorf("public reference did not exist in the claimed state at the statement timestamp")
+		}
+		seen[target] = true
+	}
+	if len(claims) != len(seen) {
+		return fmt.Errorf("public reference context contains an unrelated or unsupported link")
+	}
+	return nil
+}
+
 // CheckReferences verifies all supported GitHub object links, not arbitrary
 // websites. API failure or an unlisted link is not success.
 func CheckReferences(ctx context.Context, text string, statement StatementContext, resolve ResolveReference) error {

@@ -1,5 +1,9 @@
 ## Summary
 
+<!-- Lead with the user-visible change, problem or limitation, not internal
+assignments or procedure. Use the document's primary language consistently;
+keep official command and API identifiers unchanged. -->
+
 ## Motivation
 
 ## Changes

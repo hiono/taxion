@@ -191,6 +191,10 @@ func (Publisher) Send(ctx context.Context, update store.ExternalUpdate) (string,
 	default:
 		return "", fmt.Errorf("unsupported publication action")
 	}
+	ctx, err = publicWriteContext(ctx, update, "github.com", method, endpoint, payload, env)
+	if err != nil {
+		return "", err
+	}
 	data, err := publicationAPI(ctx, env, method, endpoint, payload)
 	if err != nil {
 		return "", err
@@ -223,6 +227,9 @@ func (Publisher) Send(ctx context.Context, update store.ExternalUpdate) (string,
 }
 
 func publicationAPI(ctx context.Context, env []string, method, endpoint string, payload any) ([]byte, error) {
+	if err := checkWritePermit(ctx, "github.com", method, endpoint, payload); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	args := []string{"api", "--hostname", "github.com", "--method", method, endpoint}

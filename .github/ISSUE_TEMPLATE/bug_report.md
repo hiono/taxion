@@ -5,6 +5,9 @@ about: Describe a reproducible problem and its user impact
 
 ## Summary
 
+<!-- Make the title and summary describe the user's observed problem rather
+than an internal report, assignment or escalation. -->
+
 ## User impact
 
 ## Current behavior

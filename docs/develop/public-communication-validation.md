@@ -20,6 +20,14 @@ Issue #143 は採用済みの正式 binary 配布と協調的な provenance 検�
 
 SDK 実験コメントからは内部の実消費量集計と実行回数を除き、事前に承認された上限は検証条件として保持した。修正要求、追加レビューの承認、停止した実行、検証範囲と未実装事項も保持した。取り下げた補助 metadata は Release の最終添付一覧から除かれ、旧 asset URL が取得不能であることも確認した。編集途中の添付一覧やリンクを、是正後の最終状態の証拠として扱わない。
 
+## 読者と言語を対象にした追加確認
+
+Issue title 114件、PR title 33件、Release title 16件、milestone name 32件、ADR title 45件を、保全済み一覧と現在の記録から確認した。240件のタイトルのうち、当初7件を読者と主題の不一致、80件を表記や言語の修正対象、153件を変更不要と分類した。公開記録85件のタイトルと、ADR 2件のタイトルを修正した。Release の版名は維持した。
+
+本文・コメント・Release Notes は対象語を含む227候補を文脈付きで分類し、6件の本文を修正した。機能としての役割間の受け渡し、controller の API、設定検証、実験方法やその制約を説明する文章は、用語の出現だけで書き換えていない。公開側の変更は87記録で、作成日時、識別子、技術的な判断と失敗の履歴を保持し、編集後の再取得で一致を確認した。タイトルと本文の両方を変更した記録があるため、変更数は単純に合算しない。
+
+日本語の利用者向け説明と、英語で統一する CLI help を区別した。Conventional Commits、正式な CLI / API / schema の名前と標準見出しは保持した。過去の独立した英語の技術説明は副言語の記録として保持し、一文内で意味なく作業用語を混在させる表現と区別した。今後の投稿は明示した profile のタイトル・本文言語で検査する。
+
 ## 再発防止の検証
 
 `internal/publictext` のテストは公開 review の生成結果、正常な技術説明、raw な実行結果、内部状態、非公開パス、secret-pattern、protected identifier、誤検出・見逃しの回帰を検査する。`scripts/publictext` は不正入力で公開用の本文を出力せず、未実施の検証を成功へ補完しない。
@@ -46,4 +54,18 @@ offline lint は、未確定の結果を確定済みとする表現や、参照�
 
 この検査は参照先の metadata の確認であり、任意の自然言語の意味やリンク先の技術的正しさを保証しない。commit SHA、外部サイト、対応外の anchor はこの機能の検証対象として成功にせず、別に確認する。commit の author date だけで公開日時を推定しない。offline lint、API 参照検証、公開前の内容レビューを組み合わせる。metadata から当時の事実を確定できなければ未検証として保持し、推測で過去を書き換えない。
 
-回帰テストは全7状態の golden、未来の作成時刻、結果確定前の参照、未完了 CI、未公開 Release、欠落した参照、取得不能、曖昧な参照と明示した予定の区別を含む。実際の公開処理も共通の本文 lint を承認前と送信前に実行するが、offline の hash / lint が外部 metadata を取得した証拠になるわけではない。
+回帰テストは全7状態の golden、未来の作成時刻、結果確定前の参照、未完了 CI、未公開 Release、欠落した参照、取得不能、曖昧な参照と明示した予定の区別を含む。offline の hash / lint が外部 metadata を取得した証拠になるわけではない。
+
+## プロジェクト設定と Forge 共通検査
+
+`TAXION_COMMUNICATION_PROFILES` に version 1 の設定ファイルを指定する。形式は [Taxion の設定](../../.github/communication-profiles.json) を参照する。設定内の `provider`、`host`、`repository` は公開対象と完全一致する必要がある。`primaryLanguage` と `secondaryLanguages` は許可する言語、`titleLanguage` と `bodyLanguage` は各文章の言語を指定する。現行実装は `ja` と `en` に対応する。`technicalTerms` は正式名称、`glossary` は自然言語として統一する用語の置換方針を定義する。識別子を説明する inline code は用語の誤検出を避けるが、機密情報や未確定結果の検査を免除しない。
+
+`visibility` は `public` または `private`、`intendedAudience` は `users`、`contributors`、`maintainers` の配列とする。private repository でも同じ品質要件を適用する。匿名の GitLab fixture は Taxion と異なる英語の設定で検証し、実運用の製品設定には使用しない。未設定のプロジェクトでは新規投稿を停止し、既存の他プロジェクトの記録は別途承認された是正作業がない限り変更しない。
+
+公開 request の `update.statement` に、記述時点の `at` と参照の `claims` を指定する。リンクがない文章でも `at` は必須。参照がある場合は、すべての URL に `url` と `state` を対応付ける。GitHub / GitLab の adapter は書込み直前に存在・状態・時刻を照合する。任意の外部サイトや相対リンクは成功扱いにせず、対応外として拒否する。GitLab の対応参照は同一 project の Issue、MR、note、job、pipeline、Release。Issue の close は `CLOSED`、MR の merge と CI 成功は `COMPLETED`、Release 公開は `PUBLISHED`、note は `EXISTS`。検査した対象と本文以外の API payload は送信できない。
+
+`go run ./scripts/publictext -mutation FILE` は、`provider`、`host`、`repository`、`surface`、`title`、`body`、`statement` を持つ JSON を同じ共通検査へ渡す。参照の読取りは `gh:active` / `glab:active` を既定とし、`-credential env:NAME` で明示した資格情報を選べる。本文は修正せず、検査に失敗した場合は標準出力へ出さない。このコマンド自体は投稿しない。
+
+設定は公開承認の hash に含まれるため、設定の変更後に旧 hash を送信することはできない。移行時は未送信の記録を自動変換せず、新しい設定・記述時点・本文を明示して別 ID で再承認する。既存の未送信記録の取消しが未対応である制約は維持する。
+
+下位 API の直接書込み、設定なし、別 project、対象変更、本文差替え、未完了 CI、未来の参照、秘密情報を拒否する回帰テストを両 Forge に置く。9種類の公開面の分類は共通検査で検証するが、現在の送信 API は Issue 作成・コメント・close と PR / MR コメントに限る。未実装の送信経路は下位 API でも拒否する。表現の検査は決定的なルールであり、任意の日本語・英語の意味を完全に判定する機構ではない。公開内容の文脈確認と独立レビューを併用する。
