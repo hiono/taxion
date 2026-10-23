@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -14,6 +15,18 @@ import (
 // The release workflow publishes only this checked, non-templated body. It
 // disables GoReleaser's publisher so generated text cannot bypass this gate.
 func releasePresentation(tag string) (publictext.Mutation, error) {
+	return releaseSource(tag, true)
+}
+
+func releaseSource(tag string, requireReceipt bool) (publictext.Mutation, error) {
+	profile, err := publictext.LoadProfile("github", "github.com", "hiono/taxion")
+	if err != nil {
+		return publictext.Mutation{}, err
+	}
+	_, guidance, err := publictext.SelectGuidance(profile, "release")
+	if err != nil {
+		return publictext.Mutation{}, err
+	}
 	if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(tag) {
 		return publictext.Mutation{}, fmt.Errorf("release presentation requires a stable version tag")
 	}
@@ -42,7 +55,20 @@ func releasePresentation(tag string) (publictext.Mutation, error) {
 		strings.TrimSpace(config.Release.Header) == "" || strings.Contains(config.Release.Header, "{{") {
 		return publictext.Mutation{}, fmt.Errorf("release presentation requires an explicit static body without generated changelog or footer")
 	}
-	return publictext.Mutation{Provider: "github", Host: "github.com", Repository: "hiono/taxion",
-		Surface: "release", Title: "Taxion " + strings.TrimPrefix(tag, "v"), Body: config.Release.Header,
-		Statement: publictext.StatementContext{At: time.Now().UTC()}}, nil
+	mutation := publictext.Mutation{Provider: "github", Host: "github.com", Repository: "hiono/taxion",
+		GuidanceDigest: guidance,
+		Surface:        "release", Title: "Taxion " + strings.TrimPrefix(tag, "v"), Body: config.Release.Header,
+		Statement: publictext.StatementContext{At: time.Now().UTC()}}
+	if profile.RequireSemanticReview && requireReceipt {
+		data, err := os.ReadFile(".github/release-semantic-review.json")
+		if err != nil {
+			return publictext.Mutation{}, fmt.Errorf("release requires independent exact-text semantic review")
+		}
+		var review publictext.SemanticReview
+		if err := json.Unmarshal(data, &review); err != nil {
+			return publictext.Mutation{}, err
+		}
+		mutation.Review = &review
+	}
+	return mutation, nil
 }

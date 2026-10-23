@@ -22,6 +22,11 @@ func configuredProfile(t *testing.T) Profile {
 	if err != nil {
 		t.Fatal(err)
 	}
+	profiles.Projects[0].Configuration = "production"
+	data, err = json.Marshal(profiles)
+	if err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
@@ -112,6 +117,7 @@ func TestGateAllSurfacesAndRemoteState(t *testing.T) {
 	m := Mutation{Provider: profile.Provider, Host: profile.Host, Repository: profile.Repository,
 		Title: "Preserve setup choices", Body: "Invalid confirmation preserves existing choices.",
 		Statement: StatementContext{At: at}}
+	_, m.GuidanceDigest, _ = SelectGuidance(profile, "comment")
 	for _, surface := range []string{"issue", "pull-request", "comment", "review", "release", "milestone", "tag", "ci-summary", "wiki"} {
 		m.Surface = surface
 		if err := CheckMutation(t.Context(), m, nil); err != nil {
@@ -164,6 +170,7 @@ func TestCompletionAssertionsRequireTerminalEvidence(t *testing.T) {
 	target := "https://forge.example/example/application/-/pipelines/42"
 	mutation := Mutation{Provider: profile.Provider, Host: profile.Host, Repository: profile.Repository,
 		Surface: "comment", Statement: StatementContext{At: at}}
+	_, mutation.GuidanceDigest, _ = SelectGuidance(profile, "comment")
 	for _, claim := range []string{"CI run completed successfully", "The pipeline has succeeded", "Validation finished successfully", "Tests have passed", "CI is green", "The tests are green", "Checks are passing", "The pipeline was successful", "Checks passed", "Checks have passed", "Jobs have succeeded"} {
 		t.Run(claim, func(t *testing.T) {
 			mutation.Body, mutation.Statement.Claims = claim, nil
@@ -206,6 +213,7 @@ func TestCompletionAssertionsRequireTerminalEvidence(t *testing.T) {
 		if err := os.WriteFile(os.Getenv("TAXION_COMMUNICATION_PROFILES"), data, 0600); err != nil {
 			t.Fatal(err)
 		}
+		_, m.GuidanceDigest, _ = SelectGuidance(selected, "comment")
 		path := "/-/merge_requests/42"
 		if provider == "github" {
 			path = "/pull/42"

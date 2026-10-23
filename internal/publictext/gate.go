@@ -17,13 +17,15 @@ var ErrMutationRejected = errors.New("public-text policy rejected the mutation b
 
 // Mutation describes human-visible content, not an arbitrary provider payload.
 type Mutation struct {
-	Provider   string           `json:"provider"`
-	Host       string           `json:"host"`
-	Repository string           `json:"repository"`
-	Surface    string           `json:"surface"`
-	Title      string           `json:"title"`
-	Body       string           `json:"body"`
-	Statement  StatementContext `json:"statement"`
+	GuidanceDigest string           `json:"guidanceDigest"`
+	Review         *SemanticReview  `json:"semanticReview,omitempty"`
+	Provider       string           `json:"provider"`
+	Host           string           `json:"host"`
+	Repository     string           `json:"repository"`
+	Surface        string           `json:"surface"`
+	Title          string           `json:"title"`
+	Body           string           `json:"body"`
+	Statement      StatementContext `json:"statement"`
 }
 
 var markdownLink = regexp.MustCompile(`!?\[[^\]]*\]\(([^)\s]+)(?:\s[^)]*)?\)`)
@@ -65,6 +67,9 @@ func assertionReference(m Mutation, target, kind string) bool {
 func CheckMutationText(m Mutation) (Profile, error) {
 	profile, err := LoadProfile(m.Provider, m.Host, m.Repository)
 	if err != nil {
+		return Profile{}, err
+	}
+	if err := checkWritingSource(profile, m); err != nil {
 		return Profile{}, err
 	}
 	if !slices.Contains([]string{"issue", "pull-request", "comment", "review", "release", "milestone", "tag", "ci-summary", "wiki"}, m.Surface) {

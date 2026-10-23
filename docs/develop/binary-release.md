@@ -16,6 +16,10 @@ docs / links の明示stepは、既存の `TestDocumentation*`、`TestConfigurat
 
 独立 model review の対象 HEAD と PR HEAD、CI、clean worktree を確認して merge する。その merged source の VERSION と一致する未使用 tag を push すると `release.yml` が起動する。既存 release がある tag は拒否し、asset の clobber は使用しない。
 
+正式公開の前に `python3 scripts/workspace_hygiene.py` で正本の作業場所を検査する。Git に登録された全作業場所の状態、branch、HEAD、merge 済みかどうか、切り離された HEAD、存在しない作業場所、所有者が不明な作業場所、既存の配布用生成物を列挙する。所有者の記録は、正確なパス、HEAD、所有者、判断の参照、用途、候補の稼働状態、保持または削除候補の区分を含む非公開の JSON として `--ownership` で指定できる。記録があるだけで削除や公開を許可しない。
+
+正本以外の場所からのビルド、未保存の変更、不明な所有者、未整理の merge 済み作業場所、一時的な切り離し HEAD、孤立した作業場所、稼働中の候補、残存する生成物は正式公開を拒否する。検査は読取り専用であり、変更や証拠を自動削除しない。削除候補を整理する場合も、merge、PR、レビュー、配布結果からの参照と未保存成果の保護を確認し、未参照と確認できた具体的な対象だけを削除する。CI の単独 checkout はその隔離環境の正本とし、追加の一時 worktree がないことと `origin/main` に含まれるリビジョンであることを検証する。
+
 版が未公開であることは API の HTTP 404 で確認する。権限不足や通信障害を未公開と見なさない。固定した GoReleaser が実際に生成した版番号・リビジョンを CI で照合し、正式配布では tag も照合する。公開後のバイト比較は、6個の配布ファイル、チェックサム、配布情報とその自己ハッシュの9ファイルに限定する。ビルド用の内部メタデータは公開物に含めない。
 
 workflow は full Go tests / full race / vet / build / web / docs / links / hygiene を実行し、GoReleaser check と archive 生成を行う。最初は draft Release に保存し、6 native runner で archive、mise の明示URLによるfixture導入、product provenance Gate、別pathの同一binaryの拒否・store bytes不変を検証してから公開する。公開後にも全 assets を再取得して bytes/hash を照合し、各 native runner で実際の GitHub asset 自動選択を含む同じ検査を繰り返す。
@@ -32,4 +36,8 @@ source build は [Development mode](../userguide/binary-provenance.md#明示-pol
 
 provenance は協調的なアプリケーション制御であり、local administrator や検査を削除した旧/改造 binary から SQLite を隔離するものではない。外部 daemon、writer identity、OS 強制境界は対象外。
 
-rollbackVersion は v0.7.8 だが、旧版の対応 binary がない5 platformは fail-closed の `NOT_AVAILABLE`。旧版には新 Gate がないため、binary-only rollback と保護された operation 継続の可否は分ける。runtime、store、approval、期限・予算の rollback は行わない。
+v0.7.9 の配布情報は、戻し先を v0.7.8、対応環境を `linux-amd64` に限定している。この環境の実行ファイル切替は v0.7.9 の検証対象である。`linux-arm64`、`darwin-amd64`、`darwin-arm64`、`windows-amd64`、`windows-arm64` には v0.7.8 の配布ファイルがなく、同版への切替は利用できない。ソースからのビルドや別環境の配布ファイルで代替しない。
+
+次の修正版の配布情報は v0.7.9 の6環境を戻し先とし、その正式 manifest の固定ハッシュと環境別ファイルを使用する。配布前の各環境の検証で、その環境の切替と元の固定版への復帰を確認する。検証前の結果を成功としない。戻し先がない場合は停止する。
+
+戻し先がない環境で確認済みの復旧手段は、v0.7.9 の検証済み固定版の再導入、選択設定からの削除による無効化、アンインストールである。版の固定だけを外して未知の版を自動選択する手順は推奨しない。binary-only の切替は保護された操作の継続を許可せず、runtime、store、approval、期限・予算の rollback は行わない。旧版が新しい保存形式を読めない場合も、保存データを改変して回避しない。

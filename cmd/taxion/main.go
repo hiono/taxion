@@ -127,6 +127,7 @@ Evidence and external records:
   records proposal    Display exact external publication content and its approval hash (--file JSON)
   records approve     Save an explicitly approved Issue/PR publication after local secret checks (--file JSON)
   records send        Deliver one approved publication with a durable sender claim (--id, --scanner)
+  records cancel      Invalidate one exact unsent publication intent with sourced authorization (--file JSON)
   records reconcile   Reconcile an uncertain stopped sender against remote records (--id, --claim, --sender-stopped)
   records show        Show saved runtime receipts and external publication status
   records finding     Record cause, correction, lesson candidate and Human decision for an exact result (--file JSON)
