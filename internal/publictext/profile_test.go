@@ -107,7 +107,39 @@ func TestAudienceTitleLanguageAndTerminology(t *testing.T) {
 			if (err != nil) != test.reject {
 				t.Fatal("presentation decision", err)
 			}
+
 		})
+	}
+}
+
+func TestPlainStatementTitleStyle(t *testing.T) {
+	profile := configuredProfile(t)
+	profile.TitleStyle = "plain-statement"
+	for _, title := range []string{
+		"fix: Preserve choices", "fix(core): Preserve choices",
+		"docs(v0.7.0): Explain setup", "feat!: Preserve choices",
+		"FIX(core)!: Preserve choices", "  `fix(core):` Preserve choices",
+		"M12: Preserve choices", "M9-3: Preserve choices", "M8-G: Preserve choices",
+		"M4追補-2： Preserve choices", "v0.7.0: Preserve choices",
+		"0.3.0 UX: Preserve choices", "後続候補: Preserve choices",
+		"次版: Preserve choices", "将来検討: Preserve choices",
+	} {
+		if err := CheckPresentation(profile, title, ""); err == nil {
+			t.Errorf("classified title accepted: %s", title)
+		}
+	}
+	for _, title := range []string{
+		"Preserve choices", "Fix setup confirmation", "Explain the controller API",
+		"v0.7.2 rejects its own approval data", "CLI: preserve setup choices",
+		"Validate `fix(core)` as a commit message", "",
+	} {
+		if err := CheckPresentation(profile, title, ""); err != nil {
+			t.Errorf("reader-facing title rejected: %s: %v", title, err)
+		}
+	}
+	profile.TitleStyle = "Describe the user-visible problem or change."
+	if err := CheckPresentation(profile, "fix(core): Preserve choices", ""); err != nil {
+		t.Fatal("Taxion title style leaked into a different project", err)
 	}
 }
 

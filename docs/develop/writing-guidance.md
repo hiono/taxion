@@ -8,6 +8,8 @@
 
 各プロジェクトは `projectType`、主言語と許可する副言語、タイトルと本文の言語、想定読者、公開範囲、技術用語と用語集を定義します。非公開の製品プロジェクトを本番で使用する場合は、`titleStyle`、`issueStructure`、`mergeRequestStructure`、`confidentialIdentifierPolicy`、`releaseNoteLanguage`、`correctionPolicy` も明示します。実プロジェクトの値は、そのプロジェクトの承認済み設定として別途保存します。試験用の例を本番へ転用しません。
 
+Taxion は `titleStyle: "plain-statement"` を指定します。この設定では、タイトルの先頭にあるコミット分類、工程番号、配布予定の版、将来の計画区分を共通の検査で拒否します。他プロジェクトへこの設定を自動継承しません。言語、内容、問題の理解に必要な識別子の妥当性は既存の検査と独立レビューで確認し、形式検査だけで意味の適合性を保証しません。設定変更後は以前の設定に対する承認を再利用せず、文章を再確認します。
+
 `guidance` は識別子、想定読者、対応する公開範囲とプロジェクト種別、主言語と副言語、文書種別、用語の分野、公開適性、機密性の前提、指針本文を保持します。必須メタデータの欠落や不一致がある場合は本文を返しません。社内マニュアル専用の指針は公開OSSへ使用しません。一般的な文章品質規則を利用する場合も、公開OSS向けに分離した指針として登録します。
 
 `go run ./scripts/publictext -guidance REQUEST.json` は、`provider`、`host`、`repository`、`documentType` を指定した要求から、互換性のある指針本文と `guidanceDigest`、`profileHash` を返します。先にこの選択を行ってから文章を作成し、正確な文章の要求へ `guidanceDigest` を含めます。指針を差し替えた場合、以前のダイジェストでは投稿できません。
