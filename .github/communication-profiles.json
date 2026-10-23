@@ -9,8 +9,9 @@
       "primaryLanguage": "ja",
       "secondaryLanguages": ["en"],
       "titleLanguage": "ja",
+      "titleStyle": "plain-statement",
       "bodyLanguage": "ja",
-      "technicalTerms": ["Taxion", "OSS", "Go", "GitHub", "GitLab", "CLI", "API", "PR", "CI", "Release", "Windows", "macOS", "Linux", "amd64", "arm64", "SHA-256", "GoReleaser", "mise", "Summary", "User impact", "Current behavior", "Expected behavior", "Reproduction", "Scope", "Non-goals", "Acceptance criteria", "Validation", "Remaining concerns", "Compatibility", "Migration", "Motivation", "Changes", "Security considerations", "Documentation", "Related issue", "Feedback addressed", "Changes made", "Added", "Changed", "Fixed", "Security", "Upgrade", "Rollback", "Known limitations", "Refs"],
+      "technicalTerms": ["Taxion", "OSS", "Go", "GitHub", "GitLab", "CLI", "API", "PR", "CI", "Release", "Windows", "macOS", "Linux", "amd64", "arm64", "SHA-256", "GoReleaser", "mise", "Summary", "User impact", "Current behavior", "Expected behavior", "Reproduction", "Scope", "Non-goals", "Acceptance criteria", "Validation", "Remaining concerns", "Compatibility", "Migration", "Motivation", "Changes", "Security considerations", "Documentation", "Related issue", "Feedback addressed", "Changes made", "Added", "Changed", "Fixed", "Security", "Upgrade", "Rollback", "Known limitations", "Refs", "Task Graph", "Task", "ApprovalBundle", "SDK", "JSON", "Git", "UX", "ADR-0043", "ADR-0012", "ACP", "OpenCode", "Bitbucket", "Self-Managed", "Rust", "RTK", "ID", "FTS5", "SQLite", "Web", "Docker", "SSH", "HTTP", "Bash", "Issue"],
       "glossary": {
         "repair": "修正",
         "re-review": "再レビュー",
