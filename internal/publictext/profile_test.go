@@ -191,4 +191,37 @@ func TestCompletionAssertionsRequireTerminalEvidence(t *testing.T) {
 	if err := CheckMutation(t.Context(), mutation, nil); err != nil {
 		t.Fatal("planned validation rejected", err)
 	}
+	for _, provider := range []string{"github", "gitlab"} {
+		m := mutation
+		m.Provider = provider
+		selected := profile
+		selected.Provider = provider
+		if provider == "github" {
+			m.Host, selected.Host = "github.com", "github.com"
+		}
+		data, err := json.Marshal(Profiles{Version: 1, Projects: []Profile{selected}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(os.Getenv("TAXION_COMMUNICATION_PROFILES"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		path := "/-/merge_requests/42"
+		if provider == "github" {
+			path = "/pull/42"
+		}
+		target := "https://" + m.Host + "/" + m.Repository + path
+		m.Body = "Checks have passed: " + target
+		m.Statement.Claims = []ReferenceClaim{{URL: target, State: "COMPLETED"}}
+		merged := func(context.Context, string) (Reference, error) {
+			return Reference{URL: target, CreatedAt: at.Add(-time.Hour), StateAt: at.Add(-time.Second), State: "COMPLETED"}, nil
+		}
+		if err := CheckMutation(t.Context(), m, merged); err == nil {
+			t.Fatal("merged request used as evidence of successful checks", provider)
+		}
+		m.Body = "PR merged: " + target
+		if err := CheckMutation(t.Context(), m, merged); err != nil {
+			t.Fatal("actual merged request evidence rejected", provider, err)
+		}
+	}
 }

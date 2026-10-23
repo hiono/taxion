@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"slices"
@@ -29,13 +30,36 @@ var markdownLink = regexp.MustCompile(`!?\[[^\]]*\]\(([^)\s]+)(?:\s[^)]*)?\)`)
 var resultAssertions = []struct {
 	pattern *regexp.Regexp
 	state   string
+	kind    string
 }{
-	{regexp.MustCompile(`(?i)(?:\bCI (?:has )?passed\b|\btests? (?:have )?passed\b|検証.{0,12}(?:PASS済み|成功済み)|CI.{0,12}(?:PASS|成功)(?:済み|しました))`), "COMPLETED"},
-	{regexp.MustCompile(`(?i)\b(?:CI|pipelines?|jobs?|tests?|checks?|validation)(?: runs?)?\s+(?:(?:has|have|is|are|was|were)\s+)?(?:completed|finished|succeeded|passed)(?:\s+successfully)?\b`), "COMPLETED"},
-	{regexp.MustCompile(`(?i)\b(?:CI|pipeline|job|tests?|checks?|validation)(?: run)?\s+(?:(?:is|are|was|were|has been|have been)\s+)?(?:green|passing|successful|success)\b`), "COMPLETED"},
-	{regexp.MustCompile(`(?i)(?:\b(?:PR|pull request|merge request) (?:has been |is )?merged\b|(?:mainへ|main に)反映済み|merge済み)`), "COMPLETED"},
-	{regexp.MustCompile(`(?i)(?:\brelease (?:is |has been )?(?:available|published)\b|(?:release|リリース|配布物).{0,12}(?:公開済み|利用可能))`), "PUBLISHED"},
-	{regexp.MustCompile(`(?i)(?:\breview (?:is |has been )?approved\b|review済み)`), "APPROVED"},
+	{regexp.MustCompile(`(?i)(?:\bCI (?:has )?passed\b|\btests? (?:have )?passed\b|検証.{0,12}(?:PASS済み|成功済み)|CI.{0,12}(?:PASS|成功)(?:済み|しました))`), "COMPLETED", "ci"},
+	{regexp.MustCompile(`(?i)\b(?:CI|pipelines?|jobs?|tests?|checks?|validation)(?: runs?)?\s+(?:(?:has|have|is|are|was|were)\s+)?(?:completed|finished|succeeded|passed)(?:\s+successfully)?\b`), "COMPLETED", "ci"},
+	{regexp.MustCompile(`(?i)\b(?:CI|pipeline|job|tests?|checks?|validation)(?: run)?\s+(?:(?:is|are|was|were|has been|have been)\s+)?(?:green|passing|successful|success)\b`), "COMPLETED", "ci"},
+	{regexp.MustCompile(`(?i)(?:\b(?:PR|pull request|merge request) (?:has been |is )?merged\b|(?:mainへ|main に)反映済み|merge済み)`), "COMPLETED", "merge"},
+	{regexp.MustCompile(`(?i)(?:\brelease (?:is |has been )?(?:available|published)\b|(?:release|リリース|配布物).{0,12}(?:公開済み|利用可能))`), "PUBLISHED", "release"},
+	{regexp.MustCompile(`(?i)(?:\breview (?:is |has been )?approved\b|review済み)`), "APPROVED", "review"},
+}
+
+func assertionReference(m Mutation, target, kind string) bool {
+	parsed, err := url.Parse(target)
+	if err != nil || parsed.Host != m.Host {
+		return false
+	}
+	path := strings.TrimPrefix(parsed.Path, "/"+m.Repository+"/")
+	if m.Provider == "gitlab" {
+		path = strings.TrimPrefix(path, "-/")
+	}
+	switch kind {
+	case "ci":
+		return parsed.Fragment == "" && regexp.MustCompile(`^(?:actions/runs|jobs|pipelines)/[0-9]+$`).MatchString(path)
+	case "merge":
+		return parsed.Fragment == "" && regexp.MustCompile(`^(?:pull|merge_requests)/[0-9]+$`).MatchString(path)
+	case "release":
+		return parsed.Fragment == "" && strings.HasPrefix(path, "releases/")
+	case "review":
+		return strings.HasPrefix(path, "pull/") && strings.HasPrefix(parsed.Fragment, "pullrequestreview-")
+	}
+	return false
 }
 
 func CheckMutationText(m Mutation) (Profile, error) {
@@ -81,7 +105,7 @@ func CheckMutation(ctx context.Context, m Mutation, resolve ResolveReference) er
 			}
 			backed := false
 			for _, claim := range m.Statement.Claims {
-				if claim.State == assertion.state && strings.Contains(line, claim.URL) {
+				if claim.State == assertion.state && strings.Contains(line, claim.URL) && assertionReference(m, claim.URL, assertion.kind) {
 					backed = true
 				}
 			}
