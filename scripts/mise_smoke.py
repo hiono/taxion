@@ -136,6 +136,23 @@ def main():
                 if run([mise, "exec", "--", executable, "--version"], env, root) != expected:
                     raise ValueError("upgrade back to pinned archive failed")
                 rollback = "PASS_BINARY_SWITCH_ONLY"
+            config = root / "mise.toml"
+            pinned = config.read_text()
+            config.write_text("[tools]\n")
+            unselected = subprocess.run([mise, "which", "taxion"], env=env, cwd=root,
+                                        capture_output=True, text=True)
+            if unselected.returncode == 0:
+                raise ValueError("removing the tool configuration did not disable selection")
+            config.write_text(pinned)
+            run([mise, "uninstall", tool + "@" + version], env, root)
+            if pathlib.Path(binary).exists():
+                raise ValueError("uninstall left the pinned executable installed")
+            run([mise, "install"], env, root)
+            binary = run([mise, "which", "taxion"], env, root)
+            if run([binary, "--version"], env, root) != expected:
+                raise ValueError("reinstallation did not restore the pinned version")
+            if pathlib.Path(binary).read_bytes() != archive_contents(archive)[executable]:
+                raise ValueError("reinstallation changed the pinned executable bytes")
             print(json.dumps({
                 "platform": system + "-" + arch, "backend": "github",
                 "nativeMiseSmoke": "PASS", "goToolchainOnPath": False,
@@ -145,6 +162,7 @@ def main():
                 "productProvenance": "NOT_RUN" if snapshot else "PASS",
                 "copiedBinaryRefusedWithImmutableStore": "NOT_RUN" if snapshot else "PASS",
                 "rollbackTo078": rollback,
+                "disableSelection": "PASS", "uninstall": "PASS", "reinstallPinnedBytes": "PASS",
             }))
         finally:
             if server:
