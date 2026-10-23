@@ -46,8 +46,9 @@ case "$5:$6" in
 
 func gitlabPublication() store.ExternalUpdate {
 	return store.ExternalUpdate{
-		Statement: publictext.StatementContext{At: time.Now().UTC()},
-		ID:        "accepted-gitlab-report", TaskID: "implementation", Provider: "gitlab",
+		GuidanceDigest: fixtureGuidanceDigest(),
+		Statement:      publictext.StatementContext{At: time.Now().UTC()},
+		ID:             "accepted-gitlab-report", TaskID: "implementation", Provider: "gitlab",
 		Host: "gitlab.example", Repository: "group/subgroup/repo", Account: "scm-user",
 		CredentialRef: "env:TAXION_PUBLICATION_TEST_GITLAB_TOKEN", Actor: "human",
 		ApprovalSource: "human:exact-report", Kind: "ISSUE", Number: 21,
@@ -250,11 +251,20 @@ func TestLiveGitLabIssuePublication(t *testing.T) {
 	}
 	publisher := Publisher{}
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+	profile, err := publictext.LoadProfile("gitlab", host, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, guidance, err := publictext.SelectGuidance(profile, "issue")
+	if err != nil {
+		t.Fatal(err)
+	}
 	makeUpdate := func(action, id, body string) store.ExternalUpdate {
 		hash := sha256.Sum256([]byte(id + "\n" + body))
 		return store.ExternalUpdate{
-			Statement: publictext.StatementContext{At: time.Now().UTC()},
-			ID:        id, TaskID: "gitlab-api-smoke-" + suffix, Provider: "gitlab",
+			GuidanceDigest: guidance,
+			Statement:      publictext.StatementContext{At: time.Now().UTC()},
+			ID:             id, TaskID: "gitlab-api-smoke-" + suffix, Provider: "gitlab",
 			Host: host, Repository: repository, Account: account, CredentialRef: credential,
 			Kind: "ISSUE", Action: action, Body: body, Hash: hex.EncodeToString(hash[:]),
 		}
@@ -323,6 +333,14 @@ func TestLiveGitLabClosedIssueReconciliation(t *testing.T) {
 	}
 	update := gitlabPublication()
 	update.Host, update.Repository, update.Account, update.CredentialRef = host, repository, account, credential
+	profile, err := publictext.LoadProfile("gitlab", host, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, update.GuidanceDigest, err = publictext.SelectGuidance(profile, "issue")
+	if err != nil {
+		t.Fatal(err)
+	}
 	update.Action, update.Body, update.Number = "CLOSE", "", iid
 	update.At = time.Now().Add(-30 * time.Minute)
 	publisher := Publisher{}

@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import urllib.request
 
 from release import archive_contents
 
@@ -120,6 +121,34 @@ def main():
                 if before != {p.name: p.read_bytes() for p in store.iterdir()}:
                     raise ValueError("provenance refusal changed synthetic store bytes")
             rollback = "NOT_AVAILABLE"
+            # Pin the immutable published manifest, then select only this platform.
+            with urllib.request.urlopen("https://github.com/hiono/taxion/releases/download/v0.7.9/release-manifest.json", timeout=60) as response:
+                old_bytes = response.read(1048577)
+            if hashlib.sha256(old_bytes).hexdigest() != "dc2460f824a84ca525a86be99921a593ee6fcad8e00bb0b4fbcc0b1417a04cf9":
+                raise ValueError("v0.7.9 rollback manifest differs from the approved pin")
+            old_manifest = json.loads(old_bytes)
+            candidates = [a for a in old_manifest["artifacts"] if a["os"] == system and a["architecture"] == arch]
+            if len(candidates) != 1:
+                raise ValueError("no exact-platform rollback artifact")
+            old = candidates[0]
+            config = root / "mise.toml"
+            current = config.read_text()
+            mise_os = {"darwin": "macos"}.get(system, system)
+            mise_arch = {"amd64": "x64"}.get(arch, arch)
+            config.write_text(
+                f'[tools."{tool}"]\nversion = "0.7.9"\n'
+                f'[tools."{tool}".platforms.{mise_os}-{mise_arch}]\n'
+                f'url = "https://github.com/hiono/taxion/releases/download/v0.7.9/{old["name"]}"\n'
+                f'checksum = "sha256:{old["sha256"]}"\n'
+            )
+            run([mise, "install"], env, root)
+            old_binary = run([mise, "which", "taxion"], env, root)
+            if run([old_binary, "--version"], env, root) != "taxion v0.7.9" or hashlib.sha256(pathlib.Path(old_binary).read_bytes()).hexdigest() != old["executableSha256"]:
+                raise ValueError("rollback did not select the verified v0.7.9 executable")
+            config.write_text(current)
+            run([mise, "install"], env, root)
+            if run([mise, "exec", "--", executable, "--version"], env, root) != expected:
+                raise ValueError("restore after v0.7.9 rollback failed")
             if (system, arch) == ("linux", "amd64"):
                 config = root / "mise.toml"
                 current = config.read_text()
@@ -162,6 +191,7 @@ def main():
                 "productProvenance": "NOT_RUN" if snapshot else "PASS",
                 "copiedBinaryRefusedWithImmutableStore": "NOT_RUN" if snapshot else "PASS",
                 "rollbackTo078": rollback,
+                "rollbackTo079": "PASS_BINARY_SWITCH_ONLY",
                 "disableSelection": "PASS", "uninstall": "PASS", "reinstallPinnedBytes": "PASS",
             }))
         finally:

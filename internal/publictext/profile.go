@@ -14,18 +14,28 @@ import (
 
 // Profile is an explicit project contract, never inferred from repository prose.
 type Profile struct {
-	Version            int               `json:"version"`
-	Provider           string            `json:"provider"`
-	Host               string            `json:"host"`
-	Repository         string            `json:"repository"`
-	PrimaryLanguage    string            `json:"primaryLanguage"`
-	SecondaryLanguages []string          `json:"secondaryLanguages"`
-	TitleLanguage      string            `json:"titleLanguage"`
-	BodyLanguage       string            `json:"bodyLanguage"`
-	TechnicalTerms     []string          `json:"technicalTerms"`
-	Glossary           map[string]string `json:"glossary"`
-	Visibility         string            `json:"visibility"`
-	IntendedAudience   []string          `json:"intendedAudience"`
+	ProjectType                  string            `json:"projectType"`
+	Configuration                string            `json:"configuration"`
+	Guidance                     *GuidanceProfile  `json:"guidance"`
+	RequireSemanticReview        bool              `json:"requireSemanticReview"`
+	TitleStyle                   string            `json:"titleStyle,omitempty"`
+	IssueStructure               []string          `json:"issueStructure,omitempty"`
+	MergeRequestStructure        []string          `json:"mergeRequestStructure,omitempty"`
+	ConfidentialIdentifierPolicy string            `json:"confidentialIdentifierPolicy,omitempty"`
+	ReleaseNoteLanguage          string            `json:"releaseNoteLanguage,omitempty"`
+	CorrectionPolicy             string            `json:"correctionPolicy,omitempty"`
+	Version                      int               `json:"version"`
+	Provider                     string            `json:"provider"`
+	Host                         string            `json:"host"`
+	Repository                   string            `json:"repository"`
+	PrimaryLanguage              string            `json:"primaryLanguage"`
+	SecondaryLanguages           []string          `json:"secondaryLanguages"`
+	TitleLanguage                string            `json:"titleLanguage"`
+	BodyLanguage                 string            `json:"bodyLanguage"`
+	TechnicalTerms               []string          `json:"technicalTerms"`
+	Glossary                     map[string]string `json:"glossary"`
+	Visibility                   string            `json:"visibility"`
+	IntendedAudience             []string          `json:"intendedAudience"`
 }
 
 type Profiles struct {
@@ -79,8 +89,18 @@ func (p Profile) Validate() error {
 	if !slices.Contains([]string{"public", "private"}, p.Visibility) || len(p.IntendedAudience) == 0 {
 		return fmt.Errorf("communication profile requires visibility and intended audience")
 	}
+	if !slices.Contains([]string{"public-oss", "internal-product", "enterprise-manual"}, p.ProjectType) ||
+		!slices.Contains([]string{"production", "fixture"}, p.Configuration) {
+		return fmt.Errorf("communication profile requires explicit project type and configuration purpose")
+	}
+	if p.Configuration == "production" && p.ProjectType == "internal-product" &&
+		(strings.TrimSpace(p.TitleStyle) == "" || len(p.IssueStructure) == 0 || len(p.MergeRequestStructure) == 0 ||
+			strings.TrimSpace(p.ConfidentialIdentifierPolicy) == "" || strings.TrimSpace(p.CorrectionPolicy) == "" ||
+			!slices.Contains(append([]string{p.PrimaryLanguage}, p.SecondaryLanguages...), p.ReleaseNoteLanguage)) {
+		return fmt.Errorf("production product profiles require explicit title style, Issue/MR structure, confidentiality, release language and correction policy")
+	}
 	for _, audience := range p.IntendedAudience {
-		if !slices.Contains([]string{"users", "contributors", "maintainers"}, audience) {
+		if !slices.Contains([]string{"users", "contributors", "maintainers", "security-researchers", "release-consumers"}, audience) {
 			return fmt.Errorf("communication profile audience must describe project readers")
 		}
 	}
@@ -91,7 +111,7 @@ func (p Profile) Validate() error {
 		}
 	}
 	if !slices.Contains(allowed, p.TitleLanguage) || !slices.Contains(allowed, p.BodyLanguage) ||
-		p.TechnicalTerms == nil || p.Glossary == nil {
+		p.TechnicalTerms == nil || p.Glossary == nil || p.SecondaryLanguages == nil {
 		return fmt.Errorf("communication profile requires title/body languages, terminology and glossary")
 	}
 	for term, replacement := range p.Glossary {
@@ -124,6 +144,9 @@ func LoadProfile(provider, host, repository string) (Profile, error) {
 	}
 	for _, profile := range profiles.Projects {
 		if profile.Provider == provider && profile.Host == host && profile.Repository == repository {
+			if profile.Configuration != "production" {
+				return Profile{}, fmt.Errorf("fixture communication profiles cannot authorize production mutations")
+			}
 			return profile, nil
 		}
 	}
@@ -151,6 +174,18 @@ func proseText(text string) string {
 
 func checkLanguage(text, language string, profile Profile) error {
 	text = proseText(text)
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		match := regexp.MustCompile(`^>\s+\[(ja|en)\]\s+(.+)$`).FindStringSubmatch(strings.TrimSpace(line))
+		if len(match) == 3 {
+			if !slices.Contains(profile.SecondaryLanguages, match[1]) ||
+				checkLanguage(match[2], match[1], profile) != nil {
+				return fmt.Errorf("quotation language differs from the explicit project language policy")
+			}
+			lines[i] = ""
+		}
+	}
+	text = strings.Join(lines, "\n")
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}

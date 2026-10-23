@@ -80,6 +80,10 @@ func publicationProposal(t *testing.T) store.ExternalUpdate {
 		{"gitlab", "gitlab.example:8443", "group/subgroup/repo"},
 	} {
 		profiles.Projects = append(profiles.Projects, publictext.Profile{Version: 1, Provider: binding.provider,
+			ProjectType: "public-oss", Configuration: "production", Guidance: &publictext.GuidanceProfile{
+				ID: "test-public-en", IntendedAudience: []string{"users", "contributors", "maintainers"}, Visibility: []string{"public"}, ProjectTypes: []string{"public-oss"},
+				PrimaryLanguage: "en", SecondaryLanguages: []string{}, DocumentTypes: []string{"issue", "comment", "pull-request"},
+				TerminologyDomain: "test documentation", PublicationSuitability: "suitable", ConfidentialityAssumptions: "Synthetic data only.", Content: "Describe user-visible behavior and verified facts."},
 			Host: binding.host, Repository: binding.repository, PrimaryLanguage: "en", SecondaryLanguages: []string{"ja"},
 			TitleLanguage: "en", BodyLanguage: "en", TechnicalTerms: []string{}, Glossary: map[string]string{},
 			Visibility: "public", IntendedAudience: []string{"users", "contributors", "maintainers"}})
@@ -93,9 +97,14 @@ func publicationProposal(t *testing.T) store.ExternalUpdate {
 		t.Fatal(err)
 	}
 	t.Setenv("TAXION_COMMUNICATION_PROFILES", path)
+	_, guidance, err := publictext.SelectGuidance(profiles.Projects[0], "comment")
+	if err != nil {
+		t.Fatal(err)
+	}
 	return store.ExternalUpdate{ID: "accepted-report", TaskID: "implementation", Provider: "github", Host: "github.com",
-		Statement:  publictext.StatementContext{At: time.Now().UTC()},
-		Repository: "owner/repo", Kind: "ISSUE", Number: 53, Action: "COMMENT", Body: "Approved execution evidence.",
+		GuidanceDigest: guidance,
+		Statement:      publictext.StatementContext{At: time.Now().UTC()},
+		Repository:     "owner/repo", Kind: "ISSUE", Number: 53, Action: "COMMENT", Body: "Approved execution evidence.",
 		Actor: "human", ApprovalSource: "human:exact-report", Account: "owner", CredentialRef: "gh:active"}
 }
 

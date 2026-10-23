@@ -119,6 +119,9 @@ func ApprovePublication(ctx context.Context, db *store.Store, request Publicatio
 	err = db.UpdateWorkspace(func(state *store.Workspace) error {
 		for _, saved := range state.Records.Updates {
 			if saved.ID == update.ID {
+				if saved.Status == "CANCELED" {
+					return fmt.Errorf("taxion: canceled publication ID cannot be reused")
+				}
 				if saved.Hash == hash {
 					update = saved
 					return nil
@@ -199,7 +202,7 @@ func checkPublicationTask(state *store.Workspace, update store.ExternalUpdate) e
 			}
 		}
 		for _, pending := range state.Records.Updates {
-			if pending.TaskID == task.ID && pending.ID != update.ID && pending.Status != "SENT" {
+			if pending.TaskID == task.ID && pending.ID != update.ID && pending.Status != "SENT" && pending.Status != "CANCELED" {
 				return fmt.Errorf("taxion: close requires synchronized preceding external records")
 			}
 		}
@@ -209,7 +212,7 @@ func checkPublicationTask(state *store.Workspace, update store.ExternalUpdate) e
 			return fmt.Errorf("taxion: create-and-link requires a DRAFT Task")
 		}
 		for _, pending := range state.Records.Updates {
-			if pending.TaskID == task.ID && pending.Action == "CREATE" && pending.ID != update.ID {
+			if pending.TaskID == task.ID && pending.Action == "CREATE" && pending.ID != update.ID && pending.Status != "CANCELED" {
 				return fmt.Errorf("taxion: Task already has an approved Issue registration")
 			}
 		}
@@ -243,6 +246,9 @@ func DeliverPublication(ctx context.Context, db *store.Store, id, scanner string
 			original = *saved
 			if saved.Status == "SENT" {
 				return nil
+			}
+			if saved.Status == "CANCELED" {
+				return fmt.Errorf("taxion: canceled publication cannot be sent")
 			}
 			if saved.Status != "PENDING" {
 				return fmt.Errorf("taxion: publication requires explicit reconciliation of claim %s", saved.Claim)

@@ -41,10 +41,29 @@ func publicationCLI(t *testing.T, responses map[string]string) string {
 }
 
 func forgePublication() store.ExternalUpdate {
-	return store.ExternalUpdate{Provider: "github", Host: "github.com", Repository: "owner/repo",
+	update := store.ExternalUpdate{Provider: "github", Host: "github.com", Repository: "owner/repo",
 		Statement: publictext.StatementContext{At: time.Now().UTC()},
 		Account:   "owner", CredentialRef: "env:TAXION_PUBLICATION_TEST_TOKEN",
 		Kind: "ISSUE", Number: 53, Action: "COMMENT", Body: "approved report", Hash: strings.Repeat("a", 64)}
+	_, update.GuidanceDigest, _ = publictext.SelectGuidance(fixtureProfile("github", "github.com", "owner/repo"), "comment")
+	return update
+}
+
+func fixtureGuidance() *publictext.GuidanceProfile {
+	return &publictext.GuidanceProfile{ID: "test-public-en", IntendedAudience: []string{"users", "contributors", "maintainers"},
+		Visibility: []string{"public"}, ProjectTypes: []string{"public-oss"}, PrimaryLanguage: "en", SecondaryLanguages: []string{},
+		DocumentTypes: []string{"issue", "pull-request", "comment"}, TerminologyDomain: "test documentation",
+		PublicationSuitability: "suitable", ConfidentialityAssumptions: "Synthetic data only.", Content: "Describe user-visible behavior and verified facts."}
+}
+func fixtureGuidanceDigest() string {
+	_, digest, _ := publictext.SelectGuidance(fixtureProfile("gitlab", "gitlab.example", "group/subgroup/repo"), "comment")
+	return digest
+}
+func fixtureProfile(provider, host, repository string) publictext.Profile {
+	return publictext.Profile{Version: 1, Provider: provider, Host: host, Repository: repository,
+		ProjectType: "public-oss", Configuration: "production", Guidance: fixtureGuidance(),
+		PrimaryLanguage: "en", SecondaryLanguages: []string{}, TitleLanguage: "en", BodyLanguage: "en",
+		TechnicalTerms: []string{}, Glossary: map[string]string{}, Visibility: "public", IntendedAudience: []string{"users", "contributors", "maintainers"}}
 }
 
 func publicationProfiles(t *testing.T) {
@@ -54,10 +73,7 @@ func publicationProfiles(t *testing.T) {
 		{"github", "github.com", "owner/repo"},
 		{"gitlab", "gitlab.example", "group/subgroup/repo"},
 	} {
-		profiles.Projects = append(profiles.Projects, publictext.Profile{Version: 1, Provider: binding.provider,
-			Host: binding.host, Repository: binding.repository, PrimaryLanguage: "en", SecondaryLanguages: []string{},
-			TitleLanguage: "en", BodyLanguage: "en", TechnicalTerms: []string{}, Glossary: map[string]string{},
-			Visibility: "public", IntendedAudience: []string{"users", "contributors", "maintainers"}})
+		profiles.Projects = append(profiles.Projects, fixtureProfile(binding.provider, binding.host, binding.repository))
 	}
 	data, err := json.Marshal(profiles)
 	if err != nil {
