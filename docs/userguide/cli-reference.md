@@ -548,7 +548,7 @@ Task の `fileAccess` は別の Human 承認済み SDK file permission 範囲で
 
 Task の `validationCommands` は Controller の検査操作を認可する。新 Coder Dispatch は Conventional Commits の subject と contextual body を要求する。body は `intent(scope):`・`decision(scope):`・`rejected(scope):`・`constraint(scope):`・`learned(scope):` の action line で実際の理由を記録し、任意の Git trailer を続ける。Controller は結果受入れ前に保存実行開始 SHA 以降の全 commit を確認し、独立 Reviewer は理由と作業の一致を確認する。turn 終了時に構造化応答を検査し、repository・worktree・SHA・scope を実 Git で照合して、割当 worktree で認可 command を実行し、観測出力と完了を SQLite に保存する。検証 command は Controller の host 権限で `sh -c` として実行するため、Task 認可時にその作用も承認する。明示的な `dispatch transition --result-file` も同じ検証を行い、`--validation-timeout` は既定10分となる。
 
-`taxion records proposal|approve|send|reconcile|show|finding` は承認済み GitHub / GitLab 公開と出典付き失敗分析を管理する。承認は正確な対象・account・content hash とプロジェクトの Communication Profile を対応付ける。`TAXION_COMMUNICATION_PROFILES` で対象プロジェクトの設定ファイルを明示し、`update.statement.at` に記述時点、`update.statement.claims` に参照 URL とその状態を指定する。未設定・対象不一致・未確認の参照は送信できない。形式と更新時の再承認は[公開文章の検証手順](../develop/public-communication-validation.md#プロジェクト設定と-forge-共通検査)を参照する。送信不明は停止済み sender の claim 照合まで明示して保つ。`taxion git check-range --base <SHA>
+`taxion records proposal|approve|send|cancel|reconcile|show|finding` は承認済み GitHub / GitLab 公開と出典付き失敗分析を管理する。承認は正確な対象・account・content hash とプロジェクトの Communication Profile を対応付ける。`TAXION_COMMUNICATION_PROFILES` で対象プロジェクトの設定ファイルを明示し、`update.statement.at` に記述時点、`update.statement.claims` に参照 URL とその状態を指定する。未設定・対象不一致・未確認の参照は送信できない。形式と更新時の再承認は[公開文章の検証手順](../develop/public-communication-validation.md#プロジェクト設定と-forge-共通検査)を参照する。送信不明は停止済み sender の claim 照合まで明示して保つ。`taxion git check-range --base <SHA>
 --head <SHA> --scanner <PATH>` は公開前に未公開の全 commit tree と message を scan する。[実行記録](execution-records.md)を参照する。
 
 CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は stdio の ACP、`web/` は browser console を提供する。
@@ -609,6 +609,7 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | `acp` | `--coder-system-prompt-file PATH` が必須。Copilot は30以上の `--max-ai-credits N` も要求し、OpenCode では省略する。`--reviewer-system-prompt-file PATH` は任意。`--cli PATH`・`--base-directory PATH` は Copilot 用、`--tools LIST` は role の allowlist。正の `--timeout DURATION` は既定10分。`--compact-context`・`--controller-validation-submission`・`--managed-commit`・`--managed-stage`・`--scanner PATH` は `workflow run` と同じ意味・依存で、`--scanner` は `--managed-commit` を要求する。ACP は承認済み Dispatch を実行し、発行・承認はしない。 |
 | `records proposal`, `records finding` | `--file JSON` で正確な公開 request または失敗分析を渡す。 |
 | `records approve` | `--file JSON` で公開 request、`--scanner PATH` で local 秘密検査を選ぶ。 |
+| `records cancel` | `--file JSON` で未送信の公開予定を失効させる。識別子、`previousState: "PENDING"`、元の承認、内容のハッシュ、理由、実行者、取消の承認を指定する。取消は冪等で、履歴は追記専用。送信済み・送信中・結果不明の予定と、異なる内容での再利用は拒否する。[文章指針と独立レビュー](../develop/writing-guidance.md)に要求形式と制約を示す。 |
 | `records send` | `--id ID` で承認済み公開、`--scanner PATH` で local 秘密 scanner を選ぶ。 |
 | `records reconcile` | `--id ID`・`--claim CLAIM`・`--sender-stopped` で送信不明を識別し、先行 sender の終了を確認する。 |
 | `records show` | 固有 option はない。保存 runtime receipt と公開状態を表示する。 |

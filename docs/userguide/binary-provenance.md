@@ -75,9 +75,11 @@ pin 変更、version upgrade、mode 変更は既存 policy を自動上書きし
 
 ## rollback と制約
 
-rollbackVersion は v0.7.8。既存 release を変更しないため、v0.7.8 の binary があるのは linux-amd64 だけ。他5 platform は `NOT_AVAILABLE` とし、source build で穴埋めしない。初回対応 platform に存在しない rollback artifact を指定したら停止する。
+v0.7.9 の配布情報の rollbackVersion は v0.7.8。既存 release を変更しないため、v0.7.8 の binary があるのは linux-amd64 だけ。他5 platform は `NOT_AVAILABLE` とし、source build で穴埋めしない。初回対応 platform に存在しない rollback artifact を指定したら停止する。
 
 v0.7.8 は新しい product provenance Gate を持たない。binary の切替を新 Gate の成功と扱わず、旧版への rollback 後は新 policy に基づく product operation を開始しない。deadline、budget、authorization、DB を巻き戻さない。
+
+次の修正版では、6環境の正式ファイルがある v0.7.9 を戻し先にする。manifest の固定ハッシュと環境別の配布ファイルを照合し、各環境の検証を満たしてから利用する。v0.7.8 の対応範囲が増えるわけではない。旧版で新しい取消状態を解釈できない場合は、同じ保存先の操作を再開せず停止する。
 
 | Platform | v0.7.8 への binary rollback | 同じ正式版の再導入・無効化・削除 |
 | --- | --- | --- |
