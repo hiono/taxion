@@ -164,7 +164,7 @@ func TestCompletionAssertionsRequireTerminalEvidence(t *testing.T) {
 	target := "https://forge.example/example/application/-/pipelines/42"
 	mutation := Mutation{Provider: profile.Provider, Host: profile.Host, Repository: profile.Repository,
 		Surface: "comment", Statement: StatementContext{At: at}}
-	for _, claim := range []string{"CI run completed successfully", "The pipeline has succeeded", "Validation finished successfully", "Tests have passed", "CI is green", "The tests are green", "Checks are passing", "The pipeline was successful"} {
+	for _, claim := range []string{"CI run completed successfully", "The pipeline has succeeded", "Validation finished successfully", "Tests have passed", "CI is green", "The tests are green", "Checks are passing", "The pipeline was successful", "Checks passed", "Checks have passed", "Jobs have succeeded"} {
 		t.Run(claim, func(t *testing.T) {
 			mutation.Body, mutation.Statement.Claims = claim, nil
 			if err := CheckMutation(t.Context(), mutation, nil); err == nil {
