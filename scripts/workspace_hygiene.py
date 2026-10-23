@@ -51,8 +51,10 @@ def inspect(root, ownership=None, evidence=None):
         if item["orphaned"]:
             item["status"] = None
             item["merged"] = False
+            item["ignoredFileCount"] = None
         else:
             item["status"] = git(path, "status", "--porcelain=v1", "--untracked-files=all")
+            item["ignoredFileCount"] = len(list(filter(None, git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "-z").split("\0"))))
             ancestry = subprocess.run(
                 ["git", "-C", str(root), "merge-base", "--is-ancestor", item["head"], "origin/main"],
                 capture_output=True,

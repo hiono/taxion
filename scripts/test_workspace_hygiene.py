@@ -175,6 +175,51 @@ class WorkspaceHygieneTests(unittest.TestCase):
         self.assertFalse(result["releaseSourceAmbiguity"])
         self.assertEqual(result["blockingWorktrees"], [])
 
+    def test_orphan_cannot_claim_active_ownership(self):
+        other = Path(self.temp.name) / "missing"
+        self.git("worktree", "add", "-b", "missing", str(other), "HEAD")
+        owners = {str(other): {"head": self.git("rev-parse", "HEAD"), "owner": "fixture", "activeReleaseCandidate": True}}
+        other.rename(Path(self.temp.name) / "retained")
+        result = workspace_hygiene.inspect(self.root, owners)
+        self.assertEqual(result["worktrees"][1]["classification"], "REQUIRES_OWNER_DECISION")
+
+    def test_ignored_files_prevent_safe_deletion_and_legacy_snapshot_match(self):
+        other = Path(self.temp.name) / "ignored"
+        self.git("worktree", "add", "-b", "ignored", str(other), "HEAD")
+        exclude = self.root / ".git" / "info" / "exclude"
+        exclude.write_text("private.local\n")
+        (other / "private.local").write_bytes(b"ignored evidence")
+        evidence = {"referenceInventoryComplete": True, **self.evidence(other)}
+        result = workspace_hygiene.inspect(self.root, evidence=evidence)
+        self.assertEqual(result["worktrees"][1]["ignoredFileCount"], 1)
+        self.assertEqual(result["worktrees"][1]["classification"], "REQUIRES_OWNER_DECISION")
+        folder = Path(self.temp.name) / "snapshot"
+        folder.mkdir()
+        metadata = {"path": str(other), "head": self.git("rev-parse", "HEAD"), "untrackedFiles": {}}
+        for name in ("status.txt", "staged.patch", "unstaged.patch"):
+            (folder / name).write_bytes(b"")
+        with tarfile.open(folder / "untracked.tar", "w"):
+            pass
+        metadata["savedFiles"] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in folder.iterdir()}
+        (folder / "metadata.json").write_text(json.dumps(metadata))
+        evidence["snapshots"] = {str(other): str(folder)}
+        result = workspace_hygiene.inspect(self.root, evidence=evidence)
+        self.assertFalse(result["worktrees"][1]["snapshotVerified"])
+        self.assertEqual(result["worktrees"][1]["classification"], "REQUIRES_OWNER_DECISION")
+        metadata["untrackedScope"] = "including-ignored"
+        metadata["untrackedFiles"] = {"private.local": {"sha256": hashlib.sha256((other / "private.local").read_bytes()).hexdigest()}}
+        with tarfile.open(folder / "untracked.tar", "w") as archive:
+            archive.add(other / "private.local", arcname="private.local")
+        metadata["savedFiles"]["untracked.tar"] = hashlib.sha256((folder / "untracked.tar").read_bytes()).hexdigest()
+        (folder / "metadata.json").write_text(json.dumps(metadata))
+        result = workspace_hygiene.inspect(self.root, evidence=evidence)
+        self.assertTrue(result["worktrees"][1]["snapshotVerified"])
+        self.assertEqual(result["worktrees"][1]["classification"], "PRESERVED_EVIDENCE")
+        (other / "private.local").write_bytes(b"changed ignored bytes")
+        result = workspace_hygiene.inspect(self.root, evidence=evidence)
+        self.assertFalse(result["worktrees"][1]["snapshotVerified"])
+        self.assertEqual(result["worktrees"][1]["classification"], "REQUIRES_OWNER_DECISION")
+
 
 if __name__ == "__main__":
     unittest.main()
