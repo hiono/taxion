@@ -42,16 +42,9 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 }
 
 func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath string, request ReviewFlowRequest) (core.ReviewFlow, error) {
-	if request.TimeoutSeconds == 0 {
-		timeout := DefaultFlowTimeout
-		if deadline, ok := ctx.Deadline(); ok {
-			timeout = min(timeout, time.Until(deadline))
-		}
-		// A context already past its deadline yields a negative value and is rejected below.
-		request.TimeoutSeconds = int64(timeout / time.Second)
-		if request.TimeoutSeconds == 0 {
-			request.TimeoutSeconds = -1
-		}
+	defaulted := request.TimeoutSeconds == 0
+	if defaulted {
+		request.TimeoutSeconds = int64(DefaultFlowTimeout / time.Second)
 	}
 	if db == nil || strings.TrimSpace(request.ID) == "" || strings.ContainsAny(request.ID, `/\`) ||
 		request.MaxRepairs == nil || *request.MaxRepairs < 0 || request.TimeoutSeconds <= 0 ||
@@ -89,6 +82,15 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 			}
 		}
 		now := time.Now().UTC()
+		deadline := now.Add(time.Duration(request.TimeoutSeconds) * time.Second)
+		if limit, ok := ctx.Deadline(); ok && defaulted {
+			if !now.Before(limit) {
+				return fmt.Errorf("taxion: caller deadline reached before the review flow started")
+			}
+			if limit.Before(deadline) {
+				deadline = limit.UTC()
+			}
+		}
 		flow = core.ReviewFlow{
 			ID: request.ID, TaskID: task.ID, SourceDispatchID: request.ContinueFromDispatchID,
 			Contract: task, ReviewRoot: filepath.Clean(request.ReviewRoot),
@@ -99,7 +101,7 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 				MaxReviewerSessions: 1 + *request.MaxRepairs,
 				MaxNanoAIU:          request.MaxNanoAIU,
 			},
-			StartedAt: now, Deadline: now.Add(time.Duration(request.TimeoutSeconds) * time.Second), Status: "RUNNING",
+			StartedAt: now, Deadline: deadline, Status: "RUNNING",
 			Authorization: request.Authorization, DispatchIDs: []string{},
 		}
 		if request.ContinueFromDispatchID == "" {
