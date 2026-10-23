@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGuidanceCompatibilityAndSourceBinding(t *testing.T) {
@@ -96,6 +97,22 @@ func TestSemanticReviewExactTextProfileAndSeparateSession(t *testing.T) {
 			t.Fatal("same-session semantic approval accepted")
 		}
 		m.Review.ReviewerSession = "independent-review"
+		m.Statement.At = time.Now().UTC()
+		if checkWritingSource(p, m) == nil {
+			t.Fatal("changed statement timestamp reused semantic review")
+		}
+		m.Statement = StatementContext{}
+		m.Statement.Claims = []ReferenceClaim{{URL: "https://forge.example/example/application/-/issues/1", State: "EXISTS"}}
+		if checkWritingSource(p, m) == nil {
+			t.Fatal("changed reference claims reused semantic review")
+		}
+		m.Review.ContentHash = SemanticHash(m)
+		m.Statement.Claims[0].State = "COMPLETED"
+		if checkWritingSource(p, m) == nil {
+			t.Fatal("changed reference state reused semantic review")
+		}
+		m.Statement = StatementContext{}
+		m.Review.ContentHash = SemanticHash(m)
 		changed := p
 		changed.TitleStyle = "different title contract"
 		if checkWritingSource(changed, m) == nil {

@@ -25,15 +25,17 @@ Taxion の公開OSS用指針は `.github/communication-profiles.json` にあり�
 
 副言語の明示的な引用には `> [en] ...` または `> [ja] ...` を使用できます。その言語がプロジェクトの副言語として許可されている場合に限ります。識別子の引用はインラインコードを使用し、未許可の自然言語を隠す用途には使いません。
 
-`-review-basis MUTATION.json` は正確な文章と設定のハッシュを出力します。Release Notes の確認には `-release-review-basis TAG` を使用します。どちらも承認や投稿は行いません。独立したレビューの結果を、正確な本文の `contentHash`、設定の `profileHash`、作成とレビューの異なる実行識別子、`APPROVE` の判断、結果の参照として `review` に付与します。本文、指針または設定が変わった場合は再確認が必要です。
+`-review-basis MUTATION.json` は正確な文章と設定のハッシュを出力します。Release Notes の確認には `-release-review-basis TAG` を使用します。どちらも承認や投稿は行いません。独立したレビューの結果を、本文、記述時点、参照先とその状態を含む `contentHash`、設定の `profileHash`、作成とレビューの異なる実行識別子、`APPROVE` の判断、結果の参照として `semanticReview` に付与します。本文、指針、設定、記述時点または参照の主張が変わった場合は再確認が必要です。
 
-Release Notes の独立レビュー記録は `.github/release-semantic-review.json` に保存します。記録の欠落、本文または設定との不一致では公開できません。これは協調的な証跡の照合であり、レビュー者の暗号学的認証ではありません。信頼する設定と証跡を管理し、決定的な検査の成功から独立レビューの承認を自動生成しません。
+Release Notes の独立レビュー記録は `.github/release-semantic-review.json` に保存します。確認した `statement` もそのまま記録し、公開時に記述時点を自動更新しません。記録の欠落、本文、設定または参照の主張との不一致では公開できません。これは協調的な証跡の照合であり、レビュー者の暗号学的認証ではありません。信頼する設定と証跡を管理し、決定的な検査の成功から独立レビューの承認を自動生成しません。
 
 ## GitLab の既存文章を変更せず検査する
 
 `-audit-gitlab REQUEST.json` は明示された本番設定、認証、保護対象一覧を使用して、Issue、MR、各コメントとレビュー記述、Release、milestone、label の文章を読取り専用で取得します。`-audit-file REQUEST.json` は、`recordsFile` で指定した JSON 配列から同じ分類を行います。後者は CI の説明や外部で生成された文章の明示的なエクスポートにも使用できます。
 
 両方の要求には `provider`、`host`、`repository` と `output` を指定し、直接取得では `credential` も指定します。出力先は公開リポジトリの外の新規ファイルに限定し、結果を標準出力へ流しません。報告には対象の識別子、内容のハッシュ、分類、未取得範囲を保存し、原文や修正命令は含めません。エクスポートの完全性や未取得の CI 説明を検査済みとは扱いません。
+
+独立確認の資料は `-audit-review-basis REQUEST.json` で準備します。`recordsFile` で非公開のエクスポートを指定するか、直接取得用の `credential` を指定します。資料には正確な対象の `record`、設定の `profileHash`、対象と設定を結び付けた `contentHash` を含めます。これは分類結果とは別の、原文を含む非公開の確認資料であり、同じく公開リポジトリ外の新規ファイルへ限定します。確認した各 `record` に独立レビューの結果を `review` として付けて非公開の配列へ保存し、そのファイルを `-audit-file` に渡します。資料から原文や設定を変更した場合、以前の承認では `COMPLIANT` になりません。結果は取得した時点の文章に対するもので、後の変更や未取得の範囲の適合性を主張しません。
 
 分類は `COMPLIANT`、`AUDIENCE_MISMATCH`、`LANGUAGE_MISMATCH`、`INTERNAL_ARCHITECTURE_LEAK`、`ORCHESTRATION_LEAK`、`TEMPORAL_INTEGRITY_FAILURE`、`CONFIDENTIALITY_RISK`、`REQUIRES_PROJECT_DECISION` です。機械的な不適合が見つからないだけでは `COMPLIANT` にしません。正確な文章と設定に結び付いた独立確認が必要です。検査結果を公開プロジェクトへ複製せず、既存記録の修正は対象プロジェクトで別途承認します。
 

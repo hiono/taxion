@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 )
 
 // GuidanceProfile describes the complete source before it is exposed to a writer.
@@ -25,12 +26,13 @@ type GuidanceProfile struct {
 }
 
 type SemanticReview struct {
-	ProfileHash     string `json:"profileHash"`
-	ContentHash     string `json:"contentHash"`
-	WriterSession   string `json:"writerSession"`
-	ReviewerSession string `json:"reviewerSession"`
-	Decision        string `json:"decision"`
-	Source          string `json:"source"`
+	ProfileHash     string            `json:"profileHash"`
+	ContentHash     string            `json:"contentHash"`
+	WriterSession   string            `json:"writerSession"`
+	ReviewerSession string            `json:"reviewerSession"`
+	Decision        string            `json:"decision"`
+	Source          string            `json:"source"`
+	Statement       *StatementContext `json:"statement,omitempty"`
 }
 
 func digestJSON(value any) string {
@@ -67,8 +69,12 @@ func SelectGuidance(p Profile, documentType string) (string, string, error) {
 
 // SemanticHash binds the exact project, selected source, surface and final prose.
 func SemanticHash(m Mutation) string {
-	return digestJSON(struct{ Provider, Host, Repository, Surface, Title, Body, Guidance string }{
+	return digestJSON(struct {
+		Provider, Host, Repository, Surface, Title, Body, Guidance, StatementAt string
+		Claims                                                                  []ReferenceClaim
+	}{
 		m.Provider, m.Host, m.Repository, m.Surface, m.Title, m.Body, m.GuidanceDigest,
+		m.Statement.At.UTC().Format(time.RFC3339Nano), m.Statement.Claims,
 	})
 }
 

@@ -17,7 +17,7 @@ import (
 
 func sourceOrAudit(args []string, output io.Writer) error {
 	if len(args) != 2 {
-		return fmt.Errorf("use -guidance, -audit-file or -audit-gitlab REQUEST.json")
+		return fmt.Errorf("use -guidance, -audit-file, -audit-gitlab or -audit-review-basis REQUEST.json")
 	}
 	data, err := os.Open(args[1])
 	if err != nil {
@@ -46,7 +46,8 @@ func sourceOrAudit(args []string, output io.Writer) error {
 		}
 		return json.NewEncoder(output).Encode(map[string]string{"guidanceDigest": digest, "profileHash": publictext.ProfileHash(p), "content": content})
 	}
-	if request.Provider != "gitlab" || request.Output == "" || args[0] == "-audit-gitlab" && request.Credential == "" {
+	readRemote := args[0] == "-audit-gitlab" || args[0] == "-audit-review-basis" && request.RecordsFile == ""
+	if request.Provider != "gitlab" || request.Output == "" || readRemote && request.Credential == "" {
 		return fmt.Errorf("read-only audit requires GitLab binding, explicit credential and private output path")
 	}
 	protected := strings.Fields(os.Getenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256"))
@@ -60,7 +61,7 @@ func sourceOrAudit(args []string, output io.Writer) error {
 	defer cancel()
 	var records []publictext.AuditRecord
 	var notCollected []string
-	if args[0] == "-audit-file" {
+	if !readRemote {
 		input, err := os.Open(request.RecordsFile)
 		if err != nil {
 			return err
@@ -87,10 +88,22 @@ func sourceOrAudit(args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	err = json.NewEncoder(file).Encode(struct {
-		Results      []publictext.AuditResult `json:"results"`
-		NotCollected []string                 `json:"notCollected"`
-	}{publictext.Audit(p, records, protected), notCollected})
+	if args[0] == "-audit-review-basis" {
+		bases := make([]publictext.AuditBasis, 0, len(records))
+		for _, record := range records {
+			bases = append(bases, publictext.PrepareAuditReview(p, record))
+		}
+		err = json.NewEncoder(file).Encode(struct {
+			Profile      publictext.Profile      `json:"profile"`
+			Bases        []publictext.AuditBasis `json:"bases"`
+			NotCollected []string                `json:"notCollected"`
+		}{p, bases, notCollected})
+	} else {
+		err = json.NewEncoder(file).Encode(struct {
+			Results      []publictext.AuditResult `json:"results"`
+			NotCollected []string                 `json:"notCollected"`
+		}{publictext.Audit(p, records, protected), notCollected})
+	}
 	closeErr := file.Close()
 	if err != nil {
 		return err
