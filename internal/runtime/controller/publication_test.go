@@ -402,7 +402,7 @@ func TestApprovedPublicationClaimRestartAndUncertainDelivery(t *testing.T) {
 		t.Fatal("wrong sender recovered")
 	}
 	update, err = ReconcilePublication(t.Context(), db, proposal.ID, update.Claim, true, publisher)
-	if err != nil || update.Status != "SENT" || update.RemoteID != "99" {
+	if err != nil || update.Status != "SENT" || update.RemoteID != "99" || update.Error != "" {
 		t.Fatalf("%+v %v", update, err)
 	}
 	if _, err := DeliverPublication(t.Context(), db, proposal.ID, scanner, publisher); err != nil || publisher.sends != 1 {
@@ -411,6 +411,33 @@ func TestApprovedPublicationClaimRestartAndUncertainDelivery(t *testing.T) {
 	state, err := db.LoadWorkspace()
 	if err != nil || len(state.Records.Updates) != 1 {
 		t.Fatal("replay duplicated local approval", err)
+	}
+}
+
+func TestConfirmedCloseReconciliationClearsDeliveryError(t *testing.T) {
+	db, _, flow := completedFixture(t)
+	proposal := publicationProposal(t)
+	proposal.Action, proposal.Body, proposal.FlowID = "CLOSE", "", flow.ID
+	scanner := publicationScanner(t)
+	hash, err := PublicationHash(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApprovePublication(t.Context(), db, PublicationRequest{proposal, hash}, scanner); err != nil {
+		t.Fatal(err)
+	}
+	publisher := &publicationFixture{failure: true}
+	update, err := DeliverPublication(t.Context(), db, proposal.ID, scanner, publisher)
+	if err == nil || update.Status != "UNKNOWN" || update.Error == "" {
+		t.Fatal("uncertain close did not retain its diagnostic", update, err)
+	}
+	update, err = ReconcilePublication(t.Context(), db, proposal.ID, update.Claim, true, publisher)
+	if err != nil || update.Status != "SENT" || update.Error != "" || publisher.sends != 1 {
+		t.Fatal("confirmed close retained stale error or repeated write", update, err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil || state.Records.Updates[0].Error != "" {
+		t.Fatal("confirmed close error not cleared durably", err)
 	}
 }
 

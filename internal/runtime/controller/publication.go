@@ -361,7 +361,7 @@ func ReconcilePublication(ctx context.Context, db *store.Store, id, expectedClai
 				if remoteID == "" {
 					return fmt.Errorf("taxion: reconciliation requires remote identity")
 				}
-				saved.Status, saved.RemoteID = "SENT", remoteID
+				saved.Status, saved.RemoteID, saved.Error = "SENT", remoteID, ""
 				if saved.Action == "CREATE" {
 					if err := checkPublicationTask(state, update); err != nil {
 						return err
@@ -371,7 +371,6 @@ func ReconcilePublication(ctx context.Context, db *store.Store, id, expectedClai
 					if err := state.Graph.Track(task, saved.Actor, "reconciled approved Issue registration"); err != nil {
 						return err
 					}
-					saved.Error = ""
 				}
 			} else {
 				// An absent marker cannot exclude an in-flight provider request.
