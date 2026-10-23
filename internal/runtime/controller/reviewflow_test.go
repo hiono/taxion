@@ -708,7 +708,7 @@ func TestReviewFlowDefaultTimeoutRespectsCallerDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := flow.Deadline.Sub(flow.StartedAt); got > 10*time.Minute || got < 9*time.Minute {
-		t.Fatalf("default Flow timeout = %s, want caller deadline bound", got)
+	if limit, _ := ctx.Deadline(); flow.Deadline.After(limit) || flow.Deadline.Sub(flow.StartedAt) < 9*time.Minute {
+		t.Fatalf("default Flow deadline = %s, want at most caller deadline %s", flow.Deadline, limit)
 	}
 }
