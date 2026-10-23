@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -690,5 +691,24 @@ func TestReviewFlowAppliesDefaultTimeoutWhenOmitted(t *testing.T) {
 	}
 	if got := flow.Deadline.Sub(flow.StartedAt); got != DefaultFlowTimeout {
 		t.Fatalf("default Flow timeout = %s, want %s", got, DefaultFlowTimeout)
+	}
+}
+
+func TestReviewFlowDefaultTimeoutRespectsCallerDeadline(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	request.TimeoutSeconds = 0
+	expired, stop := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer stop()
+	if _, err := StartReviewFlowContext(expired, db, ledger, request); err == nil {
+		t.Fatal("default timeout accepted after caller deadline")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
+	defer cancel()
+	flow, err := StartReviewFlowContext(ctx, db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := flow.Deadline.Sub(flow.StartedAt); got > 10*time.Minute || got < 9*time.Minute {
+		t.Fatalf("default Flow timeout = %s, want caller deadline bound", got)
 	}
 }
