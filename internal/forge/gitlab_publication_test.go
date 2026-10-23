@@ -211,6 +211,7 @@ func TestGitLabClosedIssueReconciliationEvidence(t *testing.T) {
 		{"recent-selected-actor", time.Now().UTC().Format(time.RFC3339Nano), "scm-user", true, false},
 		{"different-actor", time.Now().UTC().Format(time.RFC3339Nano), "another-user", false, true},
 		{"stale-close", time.Now().Add(-7 * time.Minute).UTC().Format(time.RFC3339Nano), "scm-user", false, true},
+		{"just-before-approval", update.At.Add(-time.Second).UTC().Format(time.RFC3339Nano), "scm-user", false, true},
 		{"future-close", time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano), "scm-user", false, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
