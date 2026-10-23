@@ -8,7 +8,7 @@ Task は一件の作業記録で、目的・変更範囲・完了条件・検証
 
 ## 導入方法
 
-新しい product operation の導入は [正式バイナリと operation mode](binary-provenance.md) に従います。以下の Go backend / source build 手順は旧版の説明と development mode 用であり、product mode の正式導入には使いません。新 CLI の `init` 等を実行する前に、同ガイドの明示 mode policy を登録してください。
+新しい製品運用環境への導入は [正式バイナリと運用モード](binary-provenance.md) に従います。以下の Go backend / source build 手順は旧版の説明と development mode 用であり、product mode の正式導入には使いません。新 CLI の `init` 等を実行する前に、同ガイドの明示 mode policy を登録してください。
 
 v0.5.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
 
@@ -517,9 +517,9 @@ dry-run は対象の `taskIds`・`flowIds`・`dispatchIds` と `hash` を表示�
 `--tasks TASK-A,TASK-B` で明示的に対象へ含め、dry-run をやり直してください。
 出典・理由または workspace が変わった場合も、確認 hash を取り直す必要があります。
 
-通常の `task list`・`dispatch list`・`task plan` は退役済みの記録を除外します。
+通常の `task list`・`dispatch list`・`task plan` は archive 済みの記録を除外します。
 HTTP の ledger／Task／Dispatch 一覧は従来どおり保存記録を返します。archive は CLI から行い、
-HTTP の後続計画も退役済み Task を除外します。
+HTTP の後続計画も archive 済み Task を除外します。
 履歴は各コマンドの `--include-archived`、`task graph`、`workflow show --id FLOW-ID`
 などで確認できます。元 Task の編集・再開は拒否し、新しい実行には別途承認した
 後続 Task を使います。取り消し・物理削除は今回の機能には含まれません。

@@ -31,7 +31,7 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
-const usage = `taxion — Evidence-governed control plane for coding agents
+const usage = `taxion — Run approved coding tasks with saved results and independent review
 
 Usage:
   taxion [--store PATH] <command> [options]
@@ -46,7 +46,7 @@ Setup and discovery:
   doctor              Diagnose setup; with valid settings, inspect the selected backend's native paths and customizations ([--json])
   doctor fix          Preview and explicitly repair missing Project settings and Git protection ([--set FIELD=VALUE], [--remote NAME], [--dry-run], [--yes])
   completion bash     Print offline bash command and option completion
-  ready               Print the orchestration prompt; optional --install-skill / --update-skill / --check-skill
+  ready               Print coding-agent usage instructions; optional --install-skill / --update-skill / --check-skill
   config check        Validate fixed Global/Project YAML and environment references ([--sources], [--capabilities], [--task], [--dispatch])
   provenance configure  Bind an explicit development/product store policy (--file POLICY.json; never overwrites)
   provenance verify   Verify the operation mode and pinned release artifact without changing state
@@ -55,7 +55,7 @@ Requests, planning and Task contracts:
   request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --timeout, --max-ai-credits)
   task create         Create a task (--title and --repo required)
   task list           List unarchived tasks ([--repo] filter, [--json], [--include-archived])
-  task archive        Preview/retire stopped Tasks and flow roles without deleting history (--tasks, --actor, --source, --reason; --dry-run then --expected-hash)
+  task archive        Remove stopped tasks and associated work from normal views, keeping history (--tasks, --actor, --source, --reason; --dry-run then --expected-hash)
   task track          Register/update a durable Task Graph contract (--file JSON)
   task transition     Validate and record a Task Graph transition (--file JSON)
   task graph          Print the versioned Task Graph and history

@@ -22,6 +22,28 @@ def sha(data):
 def command(*args):
     return subprocess.check_output(args, text=True).strip()
 
+def require_absent_release(tag):
+    result = subprocess.run(
+        ["gh", "api", "--include", "repos/hiono/taxion/releases/tags/" + tag],
+        capture_output=True, text=True,
+    )
+    status = re.findall(r"^HTTP/\S+\s+(\d{3})\b", result.stdout, re.MULTILINE)
+    if not status or status[-1] != "404" or result.returncode == 0:
+        raise ValueError("release absence requires an authenticated HTTP 404; existing releases and other errors are refused")
+
+
+def published_assets(dist, tag):
+    return [dist / f"taxion_{tag[1:]}_{system}_{arch}.{'zip' if system == 'windows' else 'tar.gz'}"
+            for system, arch in PLATFORMS] + [
+                dist / "SHA256SUMS", dist / "release-manifest.json", dist / "release-manifest.sha256",
+            ]
+
+
+def verify_published(dist, public, tag):
+    for original in published_assets(dist, tag):
+        if original.read_bytes() != (public / original.name).read_bytes():
+            raise ValueError("published asset differs from packaged bytes: " + original.name)
+
 
 def archive_contents(path):
     if path.suffix == ".zip":
@@ -70,11 +92,19 @@ def prepare(dist, tag, snapshot=False):
     pathlib.Path(".release/THIRD_PARTY_NOTICES.txt").write_text("\n".join(notices))
 
 
-def manifest(dist, tag):
+def build_metadata(dist, tag, snapshot=False):
     info = json.loads(pathlib.Path(".release/release-info.json").read_text())
     build = json.loads((dist / "metadata.json").read_text())
-    if info["version"] != tag or info["channel"] != "github-release" or build["commit"] != info["sourceRevision"] or build["tag"] != tag:
+    suffix = "-snapshot" if snapshot else ""
+    if (info["version"] != tag + suffix or info["channel"] != ("development" if snapshot else "github-release") or
+            build["commit"] != info["sourceRevision"] or build["version"] != tag[1:] + suffix or
+            not snapshot and build["tag"] != tag):
         raise ValueError("formal manifest requires matching tagged release metadata")
+    return info, build
+
+
+def manifest(dist, tag):
+    info, build = build_metadata(dist, tag)
     artifacts = []
     sums = (dist / "SHA256SUMS").read_text()
     for target_os, arch in PLATFORMS:
@@ -136,12 +166,19 @@ def smoke(dist):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("prepare", "manifest", "smoke"))
+    parser.add_argument("action", choices=("prepare", "manifest", "smoke", "require-absent", "verify-published", "verify-metadata"))
     parser.add_argument("--dist", type=pathlib.Path, default=pathlib.Path("dist"))
     parser.add_argument("--tag")
+    parser.add_argument("--public", type=pathlib.Path, default=pathlib.Path("public"))
     parser.add_argument("--snapshot", action="store_true")
     args = parser.parse_args()
-    if args.action == "smoke":
+    if args.action == "require-absent":
+        require_absent_release(args.tag)
+    elif args.action == "verify-published":
+        verify_published(args.dist, args.public, args.tag)
+    elif args.action == "verify-metadata":
+        build_metadata(args.dist, args.tag, args.snapshot)
+    elif args.action == "smoke":
         smoke(args.dist)
     elif args.action == "prepare":
         prepare(args.dist, args.tag, args.snapshot)

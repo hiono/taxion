@@ -16,7 +16,7 @@ jobs:
         with:
           go-version: '1.27.2'
       - name: Public policy, generated comments and false-positive regressions
-        run: go test -count=1 ./internal/publictext ./scripts/publictext
+        run: go test -count=1 ./internal/publictext ./internal/forge ./scripts/publictext
       - name: Public text, local paths, secrets and protected identifiers
         env:
           TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256: ${{ secrets.PUBLIC_TEXT_PRIVATE_IDENTIFIER_SHA256 }}

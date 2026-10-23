@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -75,17 +74,18 @@ func PublicationHash(update store.ExternalUpdate) (string, error) {
 	if len(update.Body) > 60000 || len(update.Title) > 256 {
 		return "", fmt.Errorf("taxion: publication exceeds the approved text limit")
 	}
-	if err := publictext.Check(update.Title+"\n"+update.Body, false); err != nil {
+	mutation := update.PublicText()
+	profile, err := publictext.CheckMutationText(mutation)
+	if err != nil {
 		return "", fmt.Errorf("taxion: publication policy: %w", err)
 	}
-	digests := strings.Fields(os.Getenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256"))
-	if len(digests) == 0 {
-		return "", fmt.Errorf("taxion: publication requires TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256; configure the protected identifier digest list")
+	if update.Statement.At.IsZero() || update.Statement.At.After(time.Now().UTC()) {
+		return "", fmt.Errorf("taxion: publication requires a nonfuture statement timestamp")
 	}
-	if err := publictext.CheckIdentifiers(update.Title+"\n"+update.Body, digests); err != nil {
-		return "", fmt.Errorf("taxion: publication policy: %w", err)
-	}
-	body, err := json.Marshal(update)
+	body, err := json.Marshal(struct {
+		Update  store.ExternalUpdate `json:"update"`
+		Profile publictext.Profile   `json:"profile"`
+	}{update, profile})
 	return receiptHash(string(body)), err
 }
 
@@ -232,6 +232,7 @@ func DeliverPublication(ctx context.Context, db *store.Store, id, scanner string
 	}
 	claim := hex.EncodeToString(token)
 	var update store.ExternalUpdate
+	var original store.ExternalUpdate
 	err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		for i := range state.Records.Updates {
 			saved := &state.Records.Updates[i]
@@ -239,6 +240,7 @@ func DeliverPublication(ctx context.Context, db *store.Store, id, scanner string
 				continue
 			}
 			update = *saved
+			original = *saved
 			if saved.Status == "SENT" {
 				return nil
 			}
@@ -291,13 +293,12 @@ func DeliverPublication(ctx context.Context, db *store.Store, id, scanner string
 				return fmt.Errorf("taxion: publication claim changed during delivery")
 			}
 			if sendErr != nil {
-				saved.Status = "PENDING"
-				if attempted {
+				if attempted && !errors.Is(sendErr, publictext.ErrMutationRejected) {
 					saved.Status = "UNKNOWN"
+					saved.Error = "publication failed; inspect permissions, scanner or remote delivery and reconcile"
 				} else {
-					saved.Claim = ""
+					*saved = original
 				}
-				saved.Error = "publication failed; inspect permissions, scanner or remote delivery and reconcile"
 				update = *saved
 				return nil
 			}
@@ -360,7 +361,7 @@ func ReconcilePublication(ctx context.Context, db *store.Store, id, expectedClai
 				if remoteID == "" {
 					return fmt.Errorf("taxion: reconciliation requires remote identity")
 				}
-				saved.Status, saved.RemoteID = "SENT", remoteID
+				saved.Status, saved.RemoteID, saved.Error = "SENT", remoteID, ""
 				if saved.Action == "CREATE" {
 					if err := checkPublicationTask(state, update); err != nil {
 						return err
@@ -370,7 +371,6 @@ func ReconcilePublication(ctx context.Context, db *store.Store, id, expectedClai
 					if err := state.Graph.Track(task, saved.Actor, "reconciled approved Issue registration"); err != nil {
 						return err
 					}
-					saved.Error = ""
 				}
 			} else {
 				// An absent marker cannot exclude an in-flight provider request.

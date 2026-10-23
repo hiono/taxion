@@ -15,6 +15,9 @@ jobs:
         with:
           go-version: '1.27.2'
       - run: |
+          go mod download
+          go mod verify
+          git diff --exit-code -- go.mod go.sum
           python3 -m unittest discover -s scripts
           echo "TAXION_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
           python3 scripts/release.py prepare --tag "v$(cat VERSION)" --snapshot
@@ -26,6 +29,8 @@ jobs:
         with:
           version: v2.18.3
           args: release --snapshot --clean --skip=publish
+      - name: Verify pinned GoReleaser metadata against prepared source
+        run: python3 scripts/release.py verify-metadata --tag "v$(cat VERSION)" --snapshot
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: binary-archives

@@ -12,8 +12,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/publictext"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -27,21 +29,31 @@ func publicationScanner(t *testing.T) string {
 }
 
 type publicationFixture struct {
-	mu      sync.Mutex
-	sends   int
-	found   bool
-	failure bool
-	entered chan struct{}
-	release chan struct{}
+	mu           sync.Mutex
+	sends        int
+	found        bool
+	failure      bool
+	entered      chan struct{}
+	release      chan struct{}
+	check        func() error
+	preSendError error
 }
 
-func (*publicationFixture) Check(context.Context, store.ExternalUpdate) error { return nil }
+func (p *publicationFixture) Check(context.Context, store.ExternalUpdate) error {
+	if p.check != nil {
+		return p.check()
+	}
+	return nil
+}
 func (p *publicationFixture) Reconcile(context.Context, store.ExternalUpdate) (string, bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return "99", p.found, nil
 }
 func (p *publicationFixture) Send(_ context.Context, _ store.ExternalUpdate) (string, error) {
+	if p.preSendError != nil {
+		return "", p.preSendError
+	}
 	p.mu.Lock()
 	p.sends++
 	p.found = true
@@ -61,7 +73,28 @@ func publicationProposal(t *testing.T) store.ExternalUpdate {
 	t.Helper()
 	protected := sha256.Sum256([]byte("reserved-private-test-identifier"))
 	t.Setenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256", hex.EncodeToString(protected[:]))
+	profiles := publictext.Profiles{Version: 1}
+	for _, binding := range []struct{ provider, host, repository string }{
+		{"github", "github.com", "owner/repo"},
+		{"gitlab", "gitlab.example", "owner/repo"},
+		{"gitlab", "gitlab.example:8443", "group/subgroup/repo"},
+	} {
+		profiles.Projects = append(profiles.Projects, publictext.Profile{Version: 1, Provider: binding.provider,
+			Host: binding.host, Repository: binding.repository, PrimaryLanguage: "en", SecondaryLanguages: []string{"ja"},
+			TitleLanguage: "en", BodyLanguage: "en", TechnicalTerms: []string{}, Glossary: map[string]string{},
+			Visibility: "public", IntendedAudience: []string{"users", "contributors", "maintainers"}})
+	}
+	data, err := json.Marshal(profiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TAXION_COMMUNICATION_PROFILES", path)
 	return store.ExternalUpdate{ID: "accepted-report", TaskID: "implementation", Provider: "github", Host: "github.com",
+		Statement:  publictext.StatementContext{At: time.Now().UTC()},
 		Repository: "owner/repo", Kind: "ISSUE", Number: 53, Action: "COMMENT", Body: "Approved execution evidence.",
 		Actor: "human", ApprovalSource: "human:exact-report", Account: "owner", CredentialRef: "gh:active"}
 }
@@ -93,6 +126,59 @@ func TestPublicationHashGitLabTargetAndCredential(t *testing.T) {
 	}
 }
 
+func TestPublicationProfileBindingAndMissingProfilePreserveStore(t *testing.T) {
+	db, _, _ := reviewFlowFixture(t)
+	proposal := publicationProposal(t)
+	scanner := publicationScanner(t)
+	hash, err := PublicationHash(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApprovePublication(t.Context(), db, PublicationRequest{proposal, hash}, scanner); err != nil {
+		t.Fatal(err)
+	}
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := os.Getenv("TAXION_COMMUNICATION_PROFILES")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profiles publictext.Profiles
+	if err := json.Unmarshal(data, &profiles); err != nil {
+		t.Fatal(err)
+	}
+	profiles.Projects[0].Glossary["unusedword"] = "preferredword"
+	data, err = json.Marshal(profiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := PublicationHash(proposal)
+	if err != nil || changed == hash {
+		t.Fatal("approval did not bind the explicit profile", err)
+	}
+	publisher := &publicationFixture{}
+	if _, err := DeliverPublication(t.Context(), db, proposal.ID, scanner, publisher); err == nil || publisher.sends != 0 {
+		t.Fatal("profile drift bypassed saved approval", err)
+	}
+	t.Setenv("TAXION_COMMUNICATION_PROFILES", "")
+	if _, err := PublicationHash(proposal); err == nil {
+		t.Fatal("missing profile obtained approval hash")
+	}
+	if _, err := DeliverPublication(t.Context(), db, proposal.ID, scanner, publisher); err == nil || publisher.sends != 0 {
+		t.Fatal("missing profile bypassed saved approval", err)
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("profile rejection changed store", err)
+	}
+}
+
 func TestPublicationPolicyRejectsBeforeApprovalOrDelivery(t *testing.T) {
 	db, _, _ := reviewFlowFixture(t)
 	before, err := db.LoadWorkspace()
@@ -105,14 +191,22 @@ func TestPublicationPolicyRejectsBeforeApprovalOrDelivery(t *testing.T) {
 		if provider == "gitlab" {
 			proposal.Host, proposal.CredentialRef = "gitlab.example", "glab:active"
 		}
-		proposal.Body = "blockingItem: internal execution state"
-		if _, err := PublicationHash(proposal); err == nil {
-			t.Fatal("raw operation return obtained an approval hash")
-		}
-		if _, err := ApprovePublication(t.Context(), db, PublicationRequest{Update: proposal}, publicationScanner(t)); err == nil {
-			t.Fatal("raw operation return approved")
+		for _, body := range []string{
+			"blockingItem: internal execution state",
+			"完了した結果は後続コメントに記載している",
+			"The unpublished release is available below",
+			"CI has passed when the run is still pending",
+		} {
+			proposal.Body = body
+			if _, err := PublicationHash(proposal); err == nil {
+				t.Fatal("unsafe publication obtained an approval hash")
+			}
+			if _, err := ApprovePublication(t.Context(), db, PublicationRequest{Update: proposal}, publicationScanner(t)); err == nil {
+				t.Fatal("unsafe publication approved")
+			}
 		}
 	}
+
 	after, err := db.LoadWorkspace()
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("rejected publication changed saved state", err)
@@ -121,6 +215,89 @@ func TestPublicationPolicyRejectsBeforeApprovalOrDelivery(t *testing.T) {
 	original := proposal.Body
 	if _, err := PublicationHash(proposal); err != nil || proposal.Body != original {
 		t.Fatal("publication check rewrote approved content", err)
+	}
+}
+
+func TestPublicationPolicyDriftAfterClaimRestoresPendingRecord(t *testing.T) {
+	for _, policy := range []string{"profile", "protected-identifier", "adapter-gate"} {
+		t.Run(policy, func(t *testing.T) {
+			db, _, _ := reviewFlowFixture(t)
+			proposal := publicationProposal(t)
+			scanner := publicationScanner(t)
+			hash, err := PublicationHash(proposal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ApprovePublication(t.Context(), db, PublicationRequest{proposal, hash}, scanner); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+				state.Records.Updates[0].Error = "previous diagnostic"
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			publisher := &publicationFixture{check: func() error {
+				if policy == "profile" {
+					t.Setenv("TAXION_COMMUNICATION_PROFILES", "")
+				} else if policy == "protected-identifier" {
+					t.Setenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256", "")
+				}
+				return nil
+			}}
+			if policy == "adapter-gate" {
+				publisher.preSendError = publictext.ErrMutationRejected
+			}
+			if _, err := DeliverPublication(t.Context(), db, proposal.ID, scanner, publisher); err == nil || publisher.sends != 0 {
+				t.Fatal("policy drift after claim allowed a remote write", err)
+			}
+			after, err := db.LoadWorkspace()
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatal("pre-send rejection did not restore the original pending record", err)
+			}
+		})
+	}
+}
+
+func TestLegacyTemporalViolationRejectedBeforeDelivery(t *testing.T) {
+	for _, provider := range []string{"github", "gitlab"} {
+		t.Run(provider, func(t *testing.T) {
+			db, _, _ := reviewFlowFixture(t)
+			proposal := publicationProposal(t)
+			if provider == "gitlab" {
+				proposal.Provider, proposal.Host, proposal.CredentialRef = provider, "gitlab.example", "glab:active"
+			}
+			proposal.Body = "The completed result is recorded in a later comment"
+			data, err := json.Marshal(proposal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			proposal.Hash, proposal.Status, proposal.At = receiptHash(string(data)), "PENDING", time.Now().UTC()
+			if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+				state.Records.Updates = append(state.Records.Updates, proposal)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			publisher := &publicationFixture{}
+			for range 2 {
+				if _, err := DeliverPublication(t.Context(), db, proposal.ID, publicationScanner(t), publisher); err == nil || publisher.sends != 0 {
+					t.Fatal("legacy temporal violation delivered")
+				}
+			}
+			after, err := db.LoadWorkspace()
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatal("temporal refusal changed store or publication state", err)
+			}
+		})
 	}
 }
 
@@ -225,7 +402,7 @@ func TestApprovedPublicationClaimRestartAndUncertainDelivery(t *testing.T) {
 		t.Fatal("wrong sender recovered")
 	}
 	update, err = ReconcilePublication(t.Context(), db, proposal.ID, update.Claim, true, publisher)
-	if err != nil || update.Status != "SENT" || update.RemoteID != "99" {
+	if err != nil || update.Status != "SENT" || update.RemoteID != "99" || update.Error != "" {
 		t.Fatalf("%+v %v", update, err)
 	}
 	if _, err := DeliverPublication(t.Context(), db, proposal.ID, scanner, publisher); err != nil || publisher.sends != 1 {
@@ -234,6 +411,33 @@ func TestApprovedPublicationClaimRestartAndUncertainDelivery(t *testing.T) {
 	state, err := db.LoadWorkspace()
 	if err != nil || len(state.Records.Updates) != 1 {
 		t.Fatal("replay duplicated local approval", err)
+	}
+}
+
+func TestConfirmedCloseReconciliationClearsDeliveryError(t *testing.T) {
+	db, _, flow := completedFixture(t)
+	proposal := publicationProposal(t)
+	proposal.Action, proposal.Body, proposal.FlowID = "CLOSE", "", flow.ID
+	scanner := publicationScanner(t)
+	hash, err := PublicationHash(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApprovePublication(t.Context(), db, PublicationRequest{proposal, hash}, scanner); err != nil {
+		t.Fatal(err)
+	}
+	publisher := &publicationFixture{failure: true}
+	update, err := DeliverPublication(t.Context(), db, proposal.ID, scanner, publisher)
+	if err == nil || update.Status != "UNKNOWN" || update.Error == "" {
+		t.Fatal("uncertain close did not retain its diagnostic", update, err)
+	}
+	update, err = ReconcilePublication(t.Context(), db, proposal.ID, update.Claim, true, publisher)
+	if err != nil || update.Status != "SENT" || update.Error != "" || publisher.sends != 1 {
+		t.Fatal("confirmed close retained stale error or repeated write", update, err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil || state.Records.Updates[0].Error != "" {
+		t.Fatal("confirmed close error not cleared durably", err)
 	}
 }
 

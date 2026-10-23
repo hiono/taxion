@@ -11,11 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hiono/taxion/internal/publictext"
 	"github.com/hiono/taxion/internal/store"
 )
 
 func gitlabPublicationCLI(t *testing.T, responses map[string]string) string {
 	t.Helper()
+	publicationProfiles(t)
 	directory := t.TempDir()
 	request := filepath.Join(directory, "request.json")
 	script := `#!/bin/sh
@@ -44,7 +46,8 @@ case "$5:$6" in
 
 func gitlabPublication() store.ExternalUpdate {
 	return store.ExternalUpdate{
-		ID: "accepted-gitlab-report", TaskID: "implementation", Provider: "gitlab",
+		Statement: publictext.StatementContext{At: time.Now().UTC()},
+		ID:        "accepted-gitlab-report", TaskID: "implementation", Provider: "gitlab",
 		Host: "gitlab.example", Repository: "group/subgroup/repo", Account: "scm-user",
 		CredentialRef: "env:TAXION_PUBLICATION_TEST_GITLAB_TOKEN", Actor: "human",
 		ApprovalSource: "human:exact-report", Kind: "ISSUE", Number: 21,
@@ -208,6 +211,8 @@ func TestGitLabClosedIssueReconciliationEvidence(t *testing.T) {
 		{"recent-selected-actor", time.Now().UTC().Format(time.RFC3339Nano), "scm-user", true, false},
 		{"different-actor", time.Now().UTC().Format(time.RFC3339Nano), "another-user", false, true},
 		{"stale-close", time.Now().Add(-7 * time.Minute).UTC().Format(time.RFC3339Nano), "scm-user", false, true},
+		{"just-before-approval", update.At.Add(-time.Second).UTC().Format(time.RFC3339Nano), "scm-user", false, true},
+		{"future-close", time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano), "scm-user", false, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			issue, _ := json.Marshal(map[string]any{"iid": update.Number, "state": "closed",
@@ -248,7 +253,8 @@ func TestLiveGitLabIssuePublication(t *testing.T) {
 	makeUpdate := func(action, id, body string) store.ExternalUpdate {
 		hash := sha256.Sum256([]byte(id + "\n" + body))
 		return store.ExternalUpdate{
-			ID: id, TaskID: "gitlab-api-smoke-" + suffix, Provider: "gitlab",
+			Statement: publictext.StatementContext{At: time.Now().UTC()},
+			ID:        id, TaskID: "gitlab-api-smoke-" + suffix, Provider: "gitlab",
 			Host: host, Repository: repository, Account: account, CredentialRef: credential,
 			Kind: "ISSUE", Action: action, Body: body, Hash: hex.EncodeToString(hash[:]),
 		}

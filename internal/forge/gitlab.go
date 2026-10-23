@@ -191,6 +191,13 @@ func verifyProjectEndpoints(endpoints config.Endpoints, repository string, proje
 }
 
 func gitlabAPI(ctx context.Context, host string, env []string, method, endpoint string, payload map[string]string) ([]byte, error) {
+	var requested any
+	if payload != nil {
+		requested = payload
+	}
+	if err := checkWritePermit(ctx, host, method, endpoint, requested); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	args := []string{"api", "--hostname", host, "--method", method, endpoint}

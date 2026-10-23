@@ -5,9 +5,15 @@ about: Describe a reproducible problem and its user impact
 
 ## Summary
 
+<!-- Make the title and summary describe the user's observed problem rather
+than an internal report, assignment or escalation. -->
+
 ## User impact
 
 ## Current behavior
+
+<!-- Describe confirmed behavior at the time of writing. Keep future plans
+conditional; cite existing records with stable links, not predicted identifiers. -->
 
 ## Expected behavior
 
