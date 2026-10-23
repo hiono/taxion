@@ -155,7 +155,8 @@ func LoadProfile(provider, host, repository string) (Profile, error) {
 
 var audienceMismatch = regexp.MustCompile(`(?i)(?:初回設定.{0,50}報告と.{0,30}再質問|停止済み.{0,30}試行.{0,30}退役|(?:blocking|required|operation) owner\s*[:=]|(?:handoff required|governance handoff|repair completed|re-review dispatched)|(?:orchestrator|controller)\s+(?:state|handoff|arbitration)\s*[:=]|(?:オーナー変更|エスカレーション|再依頼)(?:を実施|しました|が必要))`)
 var internalTitle = regexp.MustCompile(`(?i)(?:^(?:repair completed|re-review dispatched|finding report|role handoff required|governance handoff)\b|(?:報告と|確認入力の再質問|試行を.*退役))`)
-var classifiedTitle = regexp.MustCompile(`(?i)^(?:(?:feat|fix|docs|test|chore|refactor|perf|build|ci|style|revert)(?:\([^()\r\n]*\))?!?\s*[:：]|M[0-9]+(?:[-－][A-Za-z0-9]+|追補)*\s*[:：]|v?[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:\s+UX)?\s*[:：]|(?:次版|後続候補|将来検討)\s*[:：])`)
+var commitTitle = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_-]*)(\([^()\r\n]*\))?(!?)\s*[:：]`)
+var classifiedTitle = regexp.MustCompile(`(?i)^(?:M[0-9]+(?:[-－][A-Za-z0-9]+|追補)*\s*[:：]|v?[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:\s+UX)?\s*[:：]|(?:次版|後続候補|将来検討)\s*[:：])`)
 var webLink = regexp.MustCompile(`https?://[^\s<>()\x60]+`)
 var fencedCode = regexp.MustCompile("(?s)```.*?```")
 var latinWord = regexp.MustCompile(`[A-Za-z][A-Za-z0-9_.:/@+-]*`)
@@ -237,8 +238,13 @@ func CheckPresentation(profile Profile, title, body string) error {
 	if strings.ContainsAny(title, "\r\n") || len(title) > 256 || internalTitle.MatchString(proseText(title)) {
 		return fmt.Errorf("public title must be a single reader-facing description of a change or problem")
 	}
-	if profile.TitleStyle == "plain-statement" && classifiedTitle.MatchString(strings.TrimSpace(strings.ReplaceAll(title, "`", ""))) {
-		return fmt.Errorf("public title style requires a plain statement without commit types, planning identifiers or release prefixes")
+	if profile.TitleStyle == "plain-statement" {
+		plain := strings.TrimSpace(strings.ReplaceAll(title, "`", ""))
+		commit := commitTitle.FindStringSubmatch(plain)
+		if classifiedTitle.MatchString(plain) || len(commit) > 0 &&
+			(commit[2] != "" || commit[3] != "" || !slices.Contains(profile.TechnicalTerms, commit[1])) {
+			return fmt.Errorf("public title style requires a plain statement without commit types, planning identifiers or release prefixes")
+		}
 	}
 	if len(body) > 60000 {
 		return fmt.Errorf("public body exceeds the publication limit")
