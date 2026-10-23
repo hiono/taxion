@@ -43,7 +43,15 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 
 func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath string, request ReviewFlowRequest) (core.ReviewFlow, error) {
 	if request.TimeoutSeconds == 0 {
-		request.TimeoutSeconds = int64(DefaultFlowTimeout / time.Second)
+		timeout := DefaultFlowTimeout
+		if deadline, ok := ctx.Deadline(); ok {
+			timeout = min(timeout, time.Until(deadline))
+		}
+		// A context already past its deadline yields a negative value and is rejected below.
+		request.TimeoutSeconds = int64(timeout / time.Second)
+		if request.TimeoutSeconds == 0 {
+			request.TimeoutSeconds = -1
+		}
 	}
 	if db == nil || strings.TrimSpace(request.ID) == "" || strings.ContainsAny(request.ID, `/\`) ||
 		request.MaxRepairs == nil || *request.MaxRepairs < 0 || request.TimeoutSeconds <= 0 ||
