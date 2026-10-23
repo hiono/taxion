@@ -64,6 +64,53 @@ func TestPublicWritePermitBindsExactTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	t.Run("classified-titles", func(t *testing.T) {
+		for _, provider := range []string{"github", "gitlab"} {
+			t.Run(provider, func(t *testing.T) {
+				update := forgePublication()
+				var request string
+				if provider == "gitlab" {
+					update = gitlabPublication()
+					request = gitlabPublicationCLI(t, nil)
+				} else {
+					request = publicationCLI(t, nil)
+				}
+				path := os.Getenv("TAXION_COMMUNICATION_PROFILES")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var profiles publictext.Profiles
+				if err := json.Unmarshal(data, &profiles); err != nil {
+					t.Fatal(err)
+				}
+				for i := range profiles.Projects {
+					profiles.Projects[i].TitleStyle = "plain-statement"
+				}
+				data, err = json.Marshal(profiles)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				update.Action, update.Title = "CREATE", "fix(v0.7.0): Preserve choices"
+				update.Number = 0
+				update.Body = "Setup choices remain unchanged."
+				_, update.GuidanceDigest, err = publictext.SelectGuidance(profiles.Projects[0], "issue")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := (Publisher{}).Send(t.Context(), update); !errors.Is(err, publictext.ErrMutationRejected) {
+					t.Fatal("classified title was not rejected before sending", err)
+				}
+				if _, err := os.Stat(request); !os.IsNotExist(err) {
+					t.Fatal("title refusal launched a remote write", err)
+				}
+			})
+		}
+	})
 	if err := checkWritePermit(ctx, "github.com", "POST", "repos/owner/repo/issues/53/comments", payload); err != nil {
 		t.Fatal(err)
 	}
