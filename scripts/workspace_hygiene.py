@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from workspace_evidence import classify
 
 
 def git(root, *args):
@@ -15,7 +16,7 @@ def git(root, *args):
     ).strip()
 
 
-def inspect(root, ownership=None):
+def inspect(root, ownership=None, evidence=None):
     root = Path(root).resolve(strict=True)
     registered = git(root, "worktree", "list", "--porcelain", "-z")
     entries = []
@@ -31,6 +32,9 @@ def inspect(root, ownership=None):
     if canonical != root or Path(git(root, "rev-parse", "--show-toplevel")).resolve() != root:
         reasons.append("NON_CANONICAL_BUILD_SOURCE")
     head = git(root, "rev-parse", "HEAD")
+    if evidence is None:
+        evidence_path = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "release-workspace-evidence.json"
+        evidence = json.loads(evidence_path.read_text()) if evidence_path.exists() else {}
     merged = subprocess.run(
         ["git", "-C", str(root), "merge-base", "--is-ancestor", head, "origin/main"],
         capture_output=True,
@@ -45,7 +49,6 @@ def inspect(root, ownership=None):
         item = {"path": str(path), "head": fields.get("HEAD"), "branch": fields.get("branch"),
                 "detached": bool(fields.get("detached")), "orphaned": not path.is_dir() or "prunable" in fields}
         if item["orphaned"]:
-            reasons.append("ORPHANED_WORKTREE")
             item["status"] = None
             item["merged"] = False
         else:
@@ -57,29 +60,16 @@ def inspect(root, ownership=None):
             if ancestry.returncode not in (0, 1):
                 raise ValueError("cannot establish worktree ancestry")
             item["merged"] = ancestry.returncode == 0
-            if item["status"]:
+            if item["status"] and path.resolve() == canonical:
                 reasons.append("DIRTY_WORKTREE")
-        if path.resolve() != canonical:
-            owner = (ownership or {}).get(str(path.resolve()), {})
-            item["ownershipVerified"] = (
-                bool(owner.get("owner")) and owner.get("head") == item["head"]
-                and bool(owner.get("evidence")) and owner.get("disposition") in ("retained", "remove")
-                and owner.get("purpose") in ("durable", "review", "repair", "candidate")
-                and type(owner.get("activeReleaseCandidate")) is bool
-            )
-            if not item["ownershipVerified"]:
-                reasons.append("UNKNOWN_WORKTREE_OWNERSHIP")
-            if item["detached"]:
-                reasons.append("DETACHED_TEMPORARY_WORKTREE")
-            if owner.get("activeReleaseCandidate"):
-                reasons.append("ACTIVE_RELEASE_CANDIDATE")
-            if owner.get("purpose") in ("review", "repair", "candidate"):
-                reasons.append("TEMPORARY_WORKTREE_REQUIRES_DISPOSITION")
-            # Merged auxiliary worktrees must be resolved before publication,
-            # even when ownership is known. Evidence retention is not deletion authority.
-            if item["merged"]:
-                reasons.append("MERGED_WORKTREE_REQUIRES_DISPOSITION")
-            item["cleanupCandidate"] = item["orphaned"] or item["merged"] or item["detached"]
+        item["reachableRefs"] = git(root, "for-each-ref", "--contains=" + item["head"],
+                                   "--format=%(refname)", "refs/heads", "refs/remotes", "refs/tags").splitlines()
+        item["canonicalDiff"] = git(root, "diff", "--stat", head, item["head"], "--")
+        owner = (ownership or {}).get(str(path.resolve()), {})
+        item["classification"], item["classificationReason"] = classify(item, canonical, owner, evidence)
+        item["cleanupCandidate"] = item["classification"] == "SAFE_TO_DELETE"
+        if item["classification"] == "REQUIRES_OWNER_DECISION":
+            reasons.append("REQUIRES_OWNER_DECISION")
         worktrees.append(item)
     staging = [str(root / name) for name in ("dist", ".release", "taxion", "taxion.exe", "bin/taxion", "bin/taxion.exe")
                if (root / name).exists() or (root / name).is_symlink()]
@@ -89,7 +79,7 @@ def inspect(root, ownership=None):
         reasons.append("EXISTING_BUILD_ARTIFACT_OR_STAGING")
     branches = git(root, "for-each-ref", "--format=%(refname) %(objectname)", "--merged=origin/main", "refs/heads").splitlines()
     return {
-        "schemaVersion": 1, "sourceRevision": head, "canonicalWorktree": str(canonical),
+        "schemaVersion": 2, "sourceRevision": head, "canonicalWorktree": str(canonical),
         "canonicalWorktreeClean": not worktrees[0]["orphaned"] and not worktrees[0]["status"],
         "releaseBranchMerged": merged.returncode == 0, "worktrees": worktrees,
         "mergedBranches": branches, "stagingDirectoriesAndArtifacts": staging,
@@ -97,6 +87,10 @@ def inspect(root, ownership=None):
         "mergedWorktreesRemoved": 0, "orphanedWorktreesDetected": sum(w["orphaned"] for w in worktrees),
         "orphanedWorktreesRemoved": 0, "detachedWorktreesRemaining": sum(w["detached"] for w in worktrees[1:]),
         "buildArtifactsCleaned": False, "releaseSourceVerified": not reasons,
+        "classificationCounts": {name: sum(w["classification"] == name for w in worktrees)
+                                 for name in ("ACTIVE", "PRESERVED_EVIDENCE", "SAFE_TO_DELETE", "REQUIRES_OWNER_DECISION")},
+        "blockingWorktrees": [w["path"] for w in worktrees if w["classification"] == "REQUIRES_OWNER_DECISION"],
+        "releaseSourceAmbiguity": bool(set(reasons) - {"EXISTING_BUILD_ARTIFACT_OR_STAGING"}),
         "rejections": sorted(set(reasons)), "decision": "REJECT" if reasons else "PASS",
     }
 
@@ -105,9 +99,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--canonical", default=".")
     parser.add_argument("--ownership", help="private exact-path ownership and evidence inventory")
+    parser.add_argument("--evidence", help="private hashed review/release records and exact preservation snapshots")
     args = parser.parse_args()
     owners = json.loads(Path(args.ownership).read_text()) if args.ownership else None
-    result = inspect(args.canonical, owners)
+    evidence = json.loads(Path(args.evidence).read_text()) if args.evidence else None
+    result = inspect(args.canonical, owners, evidence)
     print(json.dumps(result, indent=2))
     return 0 if result["decision"] == "PASS" else 1
 
