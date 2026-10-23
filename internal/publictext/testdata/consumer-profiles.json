@@ -11,9 +11,32 @@
       "titleLanguage": "en",
       "bodyLanguage": "en",
       "technicalTerms": ["CLI", "API", "CI"],
-      "glossary": {"re-review": "follow-up review"},
+      "glossary": {
+        "re-review": "follow-up review"
+      },
       "visibility": "private",
-      "intendedAudience": ["users", "contributors", "maintainers"]
+      "intendedAudience": ["users", "contributors", "maintainers"],
+      "projectType": "internal-product",
+      "configuration": "fixture",
+      "titleStyle": "Describe the user-visible problem or change.",
+      "issueStructure": ["Problem", "Expected behavior", "Validation"],
+      "mergeRequestStructure": ["Changes", "Compatibility", "Validation"],
+      "confidentialIdentifierPolicy": "Synthetic fixture identifiers only; configure protected hashes explicitly.",
+      "releaseNoteLanguage": "en",
+      "correctionPolicy": "Read-only audit; corrections require separate authorization.",
+      "guidance": {
+        "id": "anonymous-internal-en-v1",
+        "intendedAudience": ["users", "contributors", "maintainers"],
+        "supportedVisibility": ["private"],
+        "supportedProjectTypes": ["internal-product"],
+        "primaryLanguage": "en",
+        "permittedSecondaryLanguages": [],
+        "documentTypes": ["issue", "pull-request", "comment", "review", "release", "milestone", "tag", "ci-summary", "wiki"],
+        "terminologyDomain": "application documentation",
+        "publicationSuitability": "suitable",
+        "confidentialityAssumptions": "Private fixture; no real project details.",
+        "content": "Describe user-visible changes and constraints. Separate confirmed facts from plans, use stable existing references, and follow the explicitly configured project language. Keep confidential evidence separate."
+      }
     }
   ]
 }

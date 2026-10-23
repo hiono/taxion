@@ -76,13 +76,15 @@ GitHub と GitLab の公開文章には同じ品質要件を適用します。�
 
 ## 公開用の文章を準備する手順
 
+文章を書く前に、[文章指針と独立レビュー](writing-guidance.md)の手順で対象の設定と指針を照合します。公開OSSには公開OSS専用の指針を使用します。読者、公開範囲、プロジェクト種別、言語、文書種別が一致しない指針や、メタデータがない指針の本文を文章生成へ渡しません。
+
 Issue と PR は `.github` の templates、レビューへの対応は [response template](../../.github/review-response-template.md)、新しい ADR は [ADR template](adr/template.md) を使用します。Release Notes の構成は `.goreleaser.yaml` の header を正本とします。raw なモデル返却を直接投稿する自動処理は設けません。
 
 既存の review 結果から文章を作る場合は、非公開の JSON に `outcome`、40桁の `commit`、文字列配列の `feedbackAddressed` / `changes` / `validation` / `remainingConcerns` を指定します。各配列には実際の結果を記載し、未実施や対象外も明記します。`go run ./scripts/publictext -report FILE` は公開向け Markdown を標準出力に生成するだけで、承認や投稿はしません。内容と識別情報を確認し、その本文を既存の `records proposal` / `approve` へ渡します。
 
 `records proposal` / `approve` は内部実行ログや非公開パスを含む文章を拒否します。送信時にも承認済み本文を再検査し、変換・自動修正は行いません。このため、旧版で承認された未送信の本文が新方針に違反する場合は送信できません。保存済み記録を編集せず、読み手向けの新しい本文を別 ID で明示承認してください。送信済みの記録は自動再送しません。
 
-新しい本文を承認しても、前の未送信記録が解決済みになるわけではありません。現行の `records` には承認済み公開の取消機構がなく、未解消の公開がある Task の自動 close / archive は引き続き停止します。DB の直接編集や、送信していない記録を送信済みとする操作で回避しません。この制約は公開本文を承認後に変更しないことを優先したものです。
+新しい本文を承認しても、前の未送信記録が解決済みになるわけではありません。不要になった未送信の予定は `records cancel --file JSON` で取り消します。対象の識別子、状態、承認の参照、内容のハッシュ、理由、取消の承認を指定し、履歴は追記で保持します。送信済み、送信中、送信結果が不明の予定は取り消せません。取消は公開記録の削除ではなく、未送信の予定の失効です。DB の直接編集や、未送信を送信済みとする操作で回避しません。
 
 `go run ./scripts/publictext -repository` は docs、templates、workflow、Release header、公開用 golden output と入口文書を検査します。schema を説明する技術文書では識別子を許容しますが、secret や具体的な非公開パスは許容しません。外部の公開文を検査するときはファイルを引数に指定します。`-document` は技術文書に限って指定し、通常のコメントの検査を回避するためには使いません。
 

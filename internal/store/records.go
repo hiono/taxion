@@ -17,17 +17,29 @@ import (
 
 // Records shares the workspace transaction for recovery and approved publication.
 type Records struct {
-	Operation            *Operation            `json:"operation,omitempty"`
-	Packets              []PacketArtifact      `json:"packets,omitempty"`
-	PacketAuthorizations []PacketAuthorization `json:"packetAuthorizations,omitempty"`
-	PacketAudits         []PacketAudit         `json:"packetAudits,omitempty"`
-	Events               []RuntimeReceipt      `json:"events,omitempty"`
-	Budgets              []BudgetAudit         `json:"budgets,omitempty"`
-	Updates              []ExternalUpdate      `json:"updates,omitempty"`
-	Findings             []FailureRecord       `json:"findings,omitempty"`
-	Requests             []RequestRecord       `json:"requests,omitempty"`
-	Restore              *RestoreRecord        `json:"restore,omitempty"`
-	Restores             []RestoreRecord       `json:"restores,omitempty"`
+	Operation            *Operation                `json:"operation,omitempty"`
+	Packets              []PacketArtifact          `json:"packets,omitempty"`
+	PacketAuthorizations []PacketAuthorization     `json:"packetAuthorizations,omitempty"`
+	PacketAudits         []PacketAudit             `json:"packetAudits,omitempty"`
+	Events               []RuntimeReceipt          `json:"events,omitempty"`
+	Budgets              []BudgetAudit             `json:"budgets,omitempty"`
+	Updates              []ExternalUpdate          `json:"updates,omitempty"`
+	Cancellations        []PublicationCancellation `json:"publicationCancellations,omitempty"`
+	Findings             []FailureRecord           `json:"findings,omitempty"`
+	Requests             []RequestRecord           `json:"requests,omitempty"`
+	Restore              *RestoreRecord            `json:"restore,omitempty"`
+	Restores             []RestoreRecord           `json:"restores,omitempty"`
+}
+
+type PublicationCancellation struct {
+	ID             string    `json:"id"`
+	PreviousState  string    `json:"previousState"`
+	ApprovalSource string    `json:"approvalSource"`
+	ContentHash    string    `json:"contentHash"`
+	Reason         string    `json:"reason"`
+	Actor          string    `json:"actor"`
+	Authorization  string    `json:"authorization"`
+	At             time.Time `json:"at"`
 }
 
 type BudgetAudit struct {
@@ -125,6 +137,8 @@ type RuntimeReceipt struct {
 }
 
 type ExternalUpdate struct {
+	GuidanceDigest string                      `json:"guidanceDigest"`
+	SemanticReview *publictext.SemanticReview  `json:"semanticReview,omitempty"`
 	Statement      publictext.StatementContext `json:"statement,omitempty"`
 	ID             string                      `json:"id"`
 	TaskID         string                      `json:"taskId"`
@@ -156,7 +170,8 @@ func (update ExternalUpdate) PublicText() publictext.Mutation {
 		surface = "issue"
 	}
 	return publictext.Mutation{Provider: update.Provider, Host: update.Host, Repository: update.Repository,
-		Surface: surface, Title: update.Title, Body: update.Body, Statement: update.Statement}
+		Surface: surface, Title: update.Title, Body: update.Body, Statement: update.Statement,
+		GuidanceDigest: update.GuidanceDigest, Review: update.SemanticReview}
 }
 
 func (r Records) validate() error {
@@ -206,6 +221,10 @@ func (r Records) validate() error {
 			if update.Claim != "" || update.RemoteID != "" {
 				return fmt.Errorf("pending external update has delivery evidence")
 			}
+		case "CANCELED":
+			if update.Claim != "" || update.RemoteID != "" {
+				return fmt.Errorf("canceled external update has delivery evidence")
+			}
 		case "CLAIMED", "UNKNOWN":
 			if update.Claim == "" || update.RemoteID != "" {
 				return fmt.Errorf("uncertain external update requires a sender claim")
@@ -218,6 +237,30 @@ func (r Records) validate() error {
 			return fmt.Errorf("unknown external update state")
 		}
 		seen[update.ID] = true
+	}
+	canceled := map[string]bool{}
+	for _, audit := range r.Cancellations {
+		if canceled[audit.ID] || audit.PreviousState != "PENDING" || !recordHash(audit.ContentHash) ||
+			strings.TrimSpace(audit.Reason) == "" || strings.TrimSpace(audit.Actor) == "" ||
+			strings.TrimSpace(audit.Authorization) == "" || audit.At.IsZero() {
+			return fmt.Errorf("invalid or duplicate publication cancellation audit")
+		}
+		matched := false
+		for _, update := range r.Updates {
+			if update.ID == audit.ID && update.Hash == audit.ContentHash && update.Status == "CANCELED" &&
+				update.ApprovalSource == audit.ApprovalSource {
+				matched = true
+			}
+		}
+		if !matched {
+			return fmt.Errorf("cancellation audit differs from approved intent")
+		}
+		canceled[audit.ID] = true
+	}
+	for _, update := range r.Updates {
+		if update.Status == "CANCELED" && !canceled[update.ID] {
+			return fmt.Errorf("canceled publication requires append-only authorization")
+		}
 	}
 	seen = map[string]bool{}
 	budgetSequences := map[string]uint64{}

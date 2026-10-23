@@ -60,13 +60,13 @@ offline lint は、未確定の結果を確定済みとする表現や、参照�
 
 `TAXION_COMMUNICATION_PROFILES` に version 1 の設定ファイルを指定する。形式は [Taxion の設定](../../.github/communication-profiles.json) を参照する。設定内の `provider`、`host`、`repository` は公開対象と完全一致する必要がある。`primaryLanguage` と `secondaryLanguages` は許可する言語、`titleLanguage` と `bodyLanguage` は各文章の言語を指定する。現行実装は `ja` と `en` に対応する。`technicalTerms` は正式名称、`glossary` は自然言語として統一する用語の置換方針を定義する。識別子を説明する inline code は用語の誤検出を避けるが、機密情報や未確定結果の検査を免除しない。
 
-`visibility` は `public` または `private`、`intendedAudience` は `users`、`contributors`、`maintainers` の配列とする。private repository でも同じ品質要件を適用する。匿名の GitLab fixture は Taxion と異なる英語の設定で検証し、実運用の製品設定には使用しない。未設定のプロジェクトでは新規投稿を停止し、既存の他プロジェクトの記録は別途承認された是正作業がない限り変更しない。
+`visibility` は `public` または `private`、`intendedAudience` は `users`、`contributors`、`maintainers`、`security-researchers`、`release-consumers` から選ぶ配列とする。private repository でも同じ品質要件を適用する。匿名の GitLab fixture は Taxion と異なる英語の設定で検証し、実運用の製品設定には使用しない。未設定のプロジェクトでは新規投稿を停止し、既存の他プロジェクトの記録は別途承認された是正作業がない限り変更しない。
 
 公開 request の `update.statement` に、記述時点の `at` と参照の `claims` を指定する。リンクがない文章でも `at` は必須。参照がある場合は、すべての URL に `url` と `state` を対応付ける。GitHub / GitLab の adapter は書込み直前に存在・状態・時刻を照合する。任意の外部サイトや相対リンクは成功扱いにせず、対応外として拒否する。GitLab の対応参照は同一 project の Issue、MR、note、job、pipeline、Release。Issue の close は `CLOSED`、MR の merge と CI 成功は `COMPLETED`、Release 公開は `PUBLISHED`、note は `EXISTS`。検査した対象と本文以外の API payload は送信できない。
 
 `go run ./scripts/publictext -mutation FILE` は、`provider`、`host`、`repository`、`surface`、`title`、`body`、`statement` を持つ JSON を同じ共通検査へ渡す。参照の読取りは `gh:active` / `glab:active` を既定とし、`-credential env:NAME` で明示した資格情報を選べる。本文は修正せず、検査に失敗した場合は標準出力へ出さない。このコマンド自体は投稿しない。
 
-設定は公開承認の hash に含まれるため、設定の変更後に旧 hash を送信することはできない。移行時は未送信の記録を自動変換せず、新しい設定・記述時点・本文を明示して別 ID で再承認する。既存の未送信記録の取消しが未対応である制約は維持する。
+設定は公開承認の hash に含まれるため、設定の変更後に旧 hash を送信することはできない。移行時は未送信の記録を自動変換せず、新しい設定・記述時点・本文を明示して別 ID で再承認する。不要になった未送信の記録は、内容と元の承認を指定する `records cancel` で取り消せる。取消の承認と理由は追記で保存し、送信済みの記録は変更しない。[文章指針と独立レビュー](writing-guidance.md)に、指針の照合、重要な文章の独立確認、本番設定、取消の制約を定める。
 
 日本語を指定した文章では、同じ行に日本語が含まれていても、未許可の英語本文を拒否する。正式名称は設定した技術用語、ソースの識別子はコード表記で区別する。送信準備中に設定が変わり、送信前の再検査で拒否された場合は、以前の診断を含めて元の未送信記録を保持する。GitHub の Issue を完了扱いにする際は、承認したアカウントによる終了と、承認以降の終了時刻も照合する。
 

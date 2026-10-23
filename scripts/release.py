@@ -10,6 +10,7 @@ import re
 import subprocess
 import tarfile
 import zipfile
+from workspace_hygiene import inspect as inspect_release_workspace
 
 PLATFORMS = [(os, arch) for os in ("linux", "darwin", "windows") for arch in ("amd64", "arm64")]
 GORELEASER = "2.18.3"
@@ -56,6 +57,10 @@ def archive_contents(path):
 
 
 def prepare(dist, tag, snapshot=False):
+    if not snapshot:
+        hygiene = inspect_release_workspace(pathlib.Path.cwd())
+        if hygiene["decision"] != "PASS":
+            raise ValueError("release workspace hygiene rejected: " + ", ".join(hygiene["rejections"]))
     if command("git", "status", "--porcelain", "--untracked-files=normal"):
         raise ValueError("release requires clean source")
     version = pathlib.Path("VERSION").read_text().strip()
@@ -133,7 +138,8 @@ def manifest(dist, tag):
         "goreleaserVersion": GORELEASER, "artifacts": artifacts,
         "checksumsSha256": sha((dist / "SHA256SUMS").read_bytes()),
         "miseIdentifier": "github:hiono/taxion@" + tag[1:],
-        "rollbackVersion": "v0.7.8", "rollbackPlatforms": ["linux-amd64"],
+        "rollbackVersion": "v0.7.8" if tag == "v0.7.9" else "v0.7.9",
+        "rollbackPlatforms": ["linux-amd64"] if tag == "v0.7.9" else [system + "-" + arch for system, arch in PLATFORMS],
         "releaseUrl": "https://github.com/hiono/taxion/releases/tag/" + tag,
         "generatedBy": "hiono/taxion/.github/workflows/release.yml",
         "ciRun": "https://github.com/hiono/taxion/actions/runs/" + os.environ["GITHUB_RUN_ID"],

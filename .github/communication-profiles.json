@@ -10,7 +10,7 @@
       "secondaryLanguages": ["en"],
       "titleLanguage": "ja",
       "bodyLanguage": "ja",
-      "technicalTerms": ["Taxion", "Go", "GitHub", "GitLab", "CLI", "API", "PR", "CI", "Release", "Windows", "macOS", "Linux", "amd64", "arm64", "SHA-256", "GoReleaser", "mise", "Summary", "User impact", "Current behavior", "Expected behavior", "Reproduction", "Scope", "Non-goals", "Acceptance criteria", "Validation", "Remaining concerns", "Compatibility", "Migration", "Motivation", "Changes", "Security considerations", "Documentation", "Related issue", "Feedback addressed", "Changes made", "Added", "Changed", "Fixed", "Security", "Upgrade", "Rollback", "Known limitations", "Refs"],
+      "technicalTerms": ["Taxion", "OSS", "Go", "GitHub", "GitLab", "CLI", "API", "PR", "CI", "Release", "Windows", "macOS", "Linux", "amd64", "arm64", "SHA-256", "GoReleaser", "mise", "Summary", "User impact", "Current behavior", "Expected behavior", "Reproduction", "Scope", "Non-goals", "Acceptance criteria", "Validation", "Remaining concerns", "Compatibility", "Migration", "Motivation", "Changes", "Security considerations", "Documentation", "Related issue", "Feedback addressed", "Changes made", "Added", "Changed", "Fixed", "Security", "Upgrade", "Rollback", "Known limitations", "Refs"],
       "glossary": {
         "repair": "修正",
         "re-review": "再レビュー",
@@ -18,7 +18,23 @@
         "retire": "一覧から除外"
       },
       "visibility": "public",
-      "intendedAudience": ["users", "contributors", "maintainers"]
+      "intendedAudience": ["users", "contributors", "maintainers"],
+      "projectType": "public-oss",
+      "configuration": "production",
+      "requireSemanticReview": true,
+      "guidance": {
+        "id": "public-oss-ja-v1",
+        "intendedAudience": ["users", "contributors", "maintainers", "security-researchers", "release-consumers"],
+        "supportedVisibility": ["public"],
+        "supportedProjectTypes": ["public-oss"],
+        "primaryLanguage": "ja",
+        "permittedSecondaryLanguages": ["en"],
+        "documentTypes": ["issue", "pull-request", "comment", "review", "release", "milestone", "tag", "ci-summary", "wiki", "readme", "user-guide", "contributor-guide", "adr", "cli-help"],
+        "terminologyDomain": "public OSS documentation",
+        "publicationSuitability": "suitable",
+        "confidentialityAssumptions": "Public sources only. Keep private evidence separate; never infer permission to disclose.",
+        "content": "公開OSSの利用者、貢献者、保守者、セキュリティ研究者、配布物の利用者に向けて書く。利用者に見える動作、問題、変更、制約を直接説明する。事実と予定を区別し、既存の根拠には安定した直接参照を使う。言語と用語は対象プロジェクトの設定に従う。内部の証拠と公開説明を分離し、非公開情報を含めない。架空の組織や担当者を前提としない。簡潔な見出し、明確な主述関係、アクセシブルな説明を使う。決定的lintは意味のレビューを代替しない。重要な公開文は独立した読者観点のレビューを受ける。"
+      }
     }
   ]
 }

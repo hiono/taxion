@@ -55,14 +55,32 @@ func TestMutationCLIUsesProjectGateAndGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	data, err := os.ReadFile(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profiles publictext.Profiles
+	if err := json.Unmarshal(data, &profiles); err != nil {
+		t.Fatal(err)
+	}
+	profiles.Projects[0].Configuration = "production"
+	data, err = json.Marshal(profiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile = filepath.Join(t.TempDir(), "profiles.json")
+	if err := os.WriteFile(profile, data, 0600); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("TAXION_COMMUNICATION_PROFILES", profile)
 	sum := sha256.Sum256([]byte("private-example-47"))
 	t.Setenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256", hex.EncodeToString(sum[:]))
 	m := publictext.Mutation{Provider: "gitlab", Host: "forge.example", Repository: "example/application",
 		Surface: "comment", Title: "Preserve setup choices", Body: "Invalid confirmation preserves existing choices.\n",
 		Statement: publictext.StatementContext{At: time.Now().UTC().Add(-time.Minute)}}
+	_, m.GuidanceDigest, _ = publictext.SelectGuidance(profiles.Projects[0], "comment")
 	file := filepath.Join(t.TempDir(), "mutation.json")
-	data, _ := json.Marshal(m)
+	data, _ = json.Marshal(m)
 	if err := os.WriteFile(file, data, 0600); err != nil {
 		t.Fatal(err)
 	}

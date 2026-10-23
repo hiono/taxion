@@ -259,6 +259,15 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 		history[i].TaskIDs = slices.Clone(history[i].TaskIDs)
 	}
 	budgets := slices.Clone(state.Records.Budgets)
+	cancellations := slices.Clone(state.Records.Cancellations)
+	approved := map[string]string{}
+	for _, update := range state.Records.Updates {
+		data, err := json.Marshal(update)
+		if err != nil {
+			return err
+		}
+		approved[update.ID] = string(data)
+	}
 	packets := slices.Clone(state.Records.Packets)
 	packetAuthorizations := slices.Clone(state.Records.PacketAuthorizations)
 	for i := range packetAuthorizations {
@@ -302,6 +311,30 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	if len(state.Records.Budgets) < len(budgets) ||
 		!slices.Equal(budgets, state.Records.Budgets[:len(budgets)]) {
 		return fmt.Errorf("task budget audit records are append-only")
+	}
+	if len(state.Records.Cancellations) < len(cancellations) ||
+		!slices.Equal(cancellations, state.Records.Cancellations[:len(cancellations)]) {
+		return fmt.Errorf("publication cancellation audits are append-only")
+	}
+	for _, audit := range state.Records.Cancellations {
+		var previous ExternalUpdate
+		if err := json.Unmarshal([]byte(approved[audit.ID]), &previous); err != nil {
+			return fmt.Errorf("cancellation requires an existing approved publication")
+		}
+		if previous.Status != "PENDING" && previous.Status != "CANCELED" {
+			return fmt.Errorf("only unsent publications can be canceled")
+		}
+		expected := previous
+		expected.Status = "CANCELED"
+		found := false
+		for _, update := range state.Records.Updates {
+			if update.ID == audit.ID {
+				found = reflect.DeepEqual(expected, update)
+			}
+		}
+		if !found {
+			return fmt.Errorf("canceled publication content and approval are immutable")
+		}
 	}
 	if restore != nil {
 		for _, dispatch := range state.Graph.Dispatches {

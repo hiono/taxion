@@ -14,7 +14,7 @@ import (
 
 func recordsCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion records {proposal|approve|send|reconcile|show|finding}")
+		return fmt.Errorf("usage: taxion records {proposal|approve|send|cancel|reconcile|show|finding}")
 	}
 	action := args[0]
 	fs := flag.NewFlagSet("records "+action, flag.ContinueOnError)
@@ -22,7 +22,7 @@ func recordsCmd(args []string) error {
 	scanner := "betterleaks"
 	var senderStopped bool
 	switch action {
-	case "proposal", "approve", "finding":
+	case "proposal", "approve", "finding", "cancel":
 		fs.StringVar(&file, "file", "", "exact request JSON")
 		if action == "approve" {
 			fs.StringVar(&scanner, "scanner", "betterleaks", "trusted local Betterleaks executable")
@@ -50,6 +50,24 @@ func recordsCmd(args []string) error {
 	}
 	defer db.Close()
 	switch action {
+	case "cancel":
+		if file == "" {
+			return fmt.Errorf("publication cancellation requires --file")
+		}
+		input, err := os.Open(file)
+		if err != nil {
+			return err
+		}
+		defer input.Close()
+		var request store.PublicationCancellation
+		if err := core.DecodeGraphInput(input, &request); err != nil {
+			return err
+		}
+		update, err := controller.CancelPublication(db, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(update)
 	case "finding":
 		if file == "" {
 			return fmt.Errorf("finding requires --file")

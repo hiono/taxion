@@ -58,7 +58,7 @@ func previewArchive(state store.Workspace, request ArchiveRequest) (ArchivePrevi
 		}
 	}
 	for _, update := range state.Records.Updates {
-		if slices.Contains(ids, update.TaskID) && update.Status != "SENT" {
+		if slices.Contains(ids, update.TaskID) && update.Status != "SENT" && update.Status != "CANCELED" {
 			return ArchivePreview{}, fmt.Errorf("taxion: archive requires settling external publication %s (%s)", update.ID, update.Status)
 		}
 	}

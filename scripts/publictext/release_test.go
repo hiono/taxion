@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"github.com/hiono/taxion/internal/publictext"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,15 @@ import (
 
 func TestReleasePresentationUsesExactProfileAndStaticSource(t *testing.T) {
 	profile, err := os.ReadFile("../../.github/communication-profiles.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profiles publictext.Profiles
+	if err := json.Unmarshal(profile, &profiles); err != nil {
+		t.Fatal(err)
+	}
+	profiles.Projects[0].RequireSemanticReview = false
+	profile, err = json.Marshal(profiles)
 	if err != nil {
 		t.Fatal(err)
 	}

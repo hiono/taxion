@@ -18,6 +18,12 @@ import (
 )
 
 func run(args []string, output, warnings io.Writer) error {
+	if len(args) > 0 && (args[0] == "-review-basis" || args[0] == "-release-review-basis") {
+		return reviewBasis(args, output)
+	}
+	if len(args) > 0 && (args[0] == "-guidance" || args[0] == "-audit-gitlab" || args[0] == "-audit-file") {
+		return sourceOrAudit(args, output)
+	}
 	flags := flag.NewFlagSet("publictext", flag.ContinueOnError)
 	flags.SetOutput(warnings)
 	report := flags.String("report", "", "JSON review report to render; does not publish or approve")

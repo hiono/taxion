@@ -70,8 +70,9 @@ _taxion_complete() {
         'provenance configure') candidates='--file --help' ;;
         'provenance verify') candidates='' ;;
         'ready') candidates='--check-skill --help --install-skill --update-skill' ;;
-        'records') candidates='approve finding proposal reconcile send show' ;;
+        'records') candidates='approve cancel finding proposal reconcile send show' ;;
         'records approve') candidates='--file --help --scanner' ;;
+        'records cancel') candidates='--file --help' ;;
         'records finding') candidates='--file --help' ;;
         'records proposal') candidates='--file --help' ;;
         'records reconcile') candidates='--claim --help --id --sender-stopped' ;;
