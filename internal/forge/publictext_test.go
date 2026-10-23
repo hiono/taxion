@@ -3,6 +3,7 @@ package forge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -31,8 +32,8 @@ func TestAdaptersCannotBypassPublicTextGate(t *testing.T) {
 				"password=" + strings.Repeat("x", 25),
 			} {
 				update.Body = body
-				if _, err := (Publisher{}).Send(t.Context(), update); err == nil {
-					t.Fatal("direct adapter send bypassed public-text gate")
+				if _, err := (Publisher{}).Send(t.Context(), update); !errors.Is(err, publictext.ErrMutationRejected) {
+					t.Fatal("direct adapter send did not identify its pre-write policy refusal", err)
 				}
 				if _, err := os.Stat(request); !os.IsNotExist(err) {
 					t.Fatal("rejected adapter invocation launched a write", err)

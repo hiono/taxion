@@ -166,29 +166,14 @@ func checkLanguage(text, language string, profile Profile) error {
 	if language == "en" && hasJapanese {
 		return fmt.Errorf("public text language differs from the configured English prose policy")
 	}
-	if language == "ja" && !hasJapanese {
-		remaining := text
-		for _, term := range profile.TechnicalTerms {
-			remaining = strings.ReplaceAll(remaining, term, "")
-		}
-		if latinWord.MatchString(remaining) {
-			return fmt.Errorf("public text requires Japanese prose; quote source identifiers explicitly")
-		}
-	}
 	if language == "ja" {
 		for _, line := range strings.Split(text, "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" {
 				continue
 			}
-			japaneseLine := strings.ContainsFunc(line, func(r rune) bool {
-				return unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Han)
-			})
-			if japaneseLine {
-				continue
-			}
 			for _, term := range profile.TechnicalTerms {
-				line = strings.ReplaceAll(line, term, "")
+				line = regexp.MustCompile(`\b`+regexp.QuoteMeta(term)+`\b`).ReplaceAllString(line, "")
 			}
 			if latinWord.MatchString(line) {
 				return fmt.Errorf("public text mixes English prose into the configured Japanese presentation")

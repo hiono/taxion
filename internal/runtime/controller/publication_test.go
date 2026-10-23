@@ -29,21 +29,31 @@ func publicationScanner(t *testing.T) string {
 }
 
 type publicationFixture struct {
-	mu      sync.Mutex
-	sends   int
-	found   bool
-	failure bool
-	entered chan struct{}
-	release chan struct{}
+	mu           sync.Mutex
+	sends        int
+	found        bool
+	failure      bool
+	entered      chan struct{}
+	release      chan struct{}
+	check        func() error
+	preSendError error
 }
 
-func (*publicationFixture) Check(context.Context, store.ExternalUpdate) error { return nil }
+func (p *publicationFixture) Check(context.Context, store.ExternalUpdate) error {
+	if p.check != nil {
+		return p.check()
+	}
+	return nil
+}
 func (p *publicationFixture) Reconcile(context.Context, store.ExternalUpdate) (string, bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return "99", p.found, nil
 }
 func (p *publicationFixture) Send(_ context.Context, _ store.ExternalUpdate) (string, error) {
+	if p.preSendError != nil {
+		return "", p.preSendError
+	}
 	p.mu.Lock()
 	p.sends++
 	p.found = true
@@ -205,6 +215,51 @@ func TestPublicationPolicyRejectsBeforeApprovalOrDelivery(t *testing.T) {
 	original := proposal.Body
 	if _, err := PublicationHash(proposal); err != nil || proposal.Body != original {
 		t.Fatal("publication check rewrote approved content", err)
+	}
+}
+
+func TestPublicationPolicyDriftAfterClaimRestoresPendingRecord(t *testing.T) {
+	for _, policy := range []string{"profile", "protected-identifier", "adapter-gate"} {
+		t.Run(policy, func(t *testing.T) {
+			db, _, _ := reviewFlowFixture(t)
+			proposal := publicationProposal(t)
+			scanner := publicationScanner(t)
+			hash, err := PublicationHash(proposal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ApprovePublication(t.Context(), db, PublicationRequest{proposal, hash}, scanner); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+				state.Records.Updates[0].Error = "previous diagnostic"
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			publisher := &publicationFixture{check: func() error {
+				if policy == "profile" {
+					t.Setenv("TAXION_COMMUNICATION_PROFILES", "")
+				} else if policy == "protected-identifier" {
+					t.Setenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256", "")
+				}
+				return nil
+			}}
+			if policy == "adapter-gate" {
+				publisher.preSendError = publictext.ErrMutationRejected
+			}
+			if _, err := DeliverPublication(t.Context(), db, proposal.ID, scanner, publisher); err == nil || publisher.sends != 0 {
+				t.Fatal("policy drift after claim allowed a remote write", err)
+			}
+			after, err := db.LoadWorkspace()
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatal("pre-send rejection did not restore the original pending record", err)
+			}
+		})
 	}
 }
 

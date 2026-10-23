@@ -65,7 +65,7 @@ func TestAudienceTitleLanguageAndTerminology(t *testing.T) {
 	ja := en
 	ja.PrimaryLanguage, ja.TitleLanguage, ja.BodyLanguage = "ja", "ja", "ja"
 	ja.SecondaryLanguages = []string{"en"}
-	ja.TechnicalTerms = []string{"Taxion", "CLI", "CI"}
+	ja.TechnicalTerms = []string{"Taxion", "CLI", "CI", "Go", "GoReleaser"}
 	ja.Glossary = map[string]string{"repair": "修正"}
 	for _, test := range []struct {
 		name, title, body string
@@ -86,6 +86,11 @@ func TestAudienceTitleLanguageAndTerminology(t *testing.T) {
 		{"wrong-title", "Fix setup confirmation", "確認入力を修正します。", ja, true},
 		{"wrong-body", "設定を修正する", "Setup choices are now preserved.", ja, true},
 		{"mixed-lines", "設定を修正する", "設定内容を保持します。\nSetup choices are now preserved.", ja, true},
+		{"mixed-sentence", "設定を修正する", "設定内容を保持します。 Setup choices are now preserved.", ja, true},
+		{"mixed-title", "設定を修正する Fix setup confirmation", "設定内容を保持します。", ja, true},
+		{"technical-ja", "CLI の設定を保持する", "Taxion は CI の入力を検証します。", ja, false},
+		{"overlapping-terms", "GoReleaser の設定を保持する", "Go の設定を検証します。", ja, false},
+		{"partial-term", "設定を修正する", "GoReleaserUnknown を検証します。", ja, true},
 		{"english-policy", "Fix confirmation", "設定内容を保持します。", en, true},
 		{"identifier", "設定を修正する", "`repair()` の呼び出し前に入力を検証します。", ja, false},
 		{"newlines", "Fix\nsettings", "Choices are preserved.", en, true},
