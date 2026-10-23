@@ -637,7 +637,7 @@ func TestReviewFlowRejectsInvalidConfigurationAndStoredState(t *testing.T) {
 	for _, change := range []func(*ReviewFlowRequest){
 		func(r *ReviewFlowRequest) { negative := -1; r.MaxRepairs = &negative },
 		func(r *ReviewFlowRequest) { r.MaxRepairs = nil },
-		func(r *ReviewFlowRequest) { r.TimeoutSeconds = 0 },
+		func(r *ReviewFlowRequest) { r.TimeoutSeconds = -1 },
 		func(r *ReviewFlowRequest) { r.ReviewRoot = "relative" },
 		func(r *ReviewFlowRequest) { r.Repository = "other/repo" },
 		func(r *ReviewFlowRequest) { r.Authorization.Source = "" },
@@ -678,5 +678,17 @@ func TestReviewFlowRejectsInvalidConfigurationAndStoredState(t *testing.T) {
 	saved, _ := state.Graph.ReviewFlow(flow.ID)
 	if !reflect.DeepEqual(flow, saved) {
 		t.Fatal("invalid update escaped rollback")
+	}
+}
+
+func TestReviewFlowAppliesDefaultTimeoutWhenOmitted(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	request.TimeoutSeconds = 0
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := flow.Deadline.Sub(flow.StartedAt); got != DefaultFlowTimeout {
+		t.Fatalf("default Flow timeout = %s, want %s", got, DefaultFlowTimeout)
 	}
 }
