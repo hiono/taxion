@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/store"
@@ -105,14 +106,22 @@ func TestPublicationPolicyRejectsBeforeApprovalOrDelivery(t *testing.T) {
 		if provider == "gitlab" {
 			proposal.Host, proposal.CredentialRef = "gitlab.example", "glab:active"
 		}
-		proposal.Body = "blockingItem: internal execution state"
-		if _, err := PublicationHash(proposal); err == nil {
-			t.Fatal("raw operation return obtained an approval hash")
-		}
-		if _, err := ApprovePublication(t.Context(), db, PublicationRequest{Update: proposal}, publicationScanner(t)); err == nil {
-			t.Fatal("raw operation return approved")
+		for _, body := range []string{
+			"blockingItem: internal execution state",
+			"完了した結果は後続コメントに記載している",
+			"The unpublished release is available below",
+			"CI has passed when the run is still pending",
+		} {
+			proposal.Body = body
+			if _, err := PublicationHash(proposal); err == nil {
+				t.Fatal("unsafe publication obtained an approval hash")
+			}
+			if _, err := ApprovePublication(t.Context(), db, PublicationRequest{Update: proposal}, publicationScanner(t)); err == nil {
+				t.Fatal("unsafe publication approved")
+			}
 		}
 	}
+
 	after, err := db.LoadWorkspace()
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("rejected publication changed saved state", err)
@@ -121,6 +130,44 @@ func TestPublicationPolicyRejectsBeforeApprovalOrDelivery(t *testing.T) {
 	original := proposal.Body
 	if _, err := PublicationHash(proposal); err != nil || proposal.Body != original {
 		t.Fatal("publication check rewrote approved content", err)
+	}
+}
+
+func TestLegacyTemporalViolationRejectedBeforeDelivery(t *testing.T) {
+	for _, provider := range []string{"github", "gitlab"} {
+		t.Run(provider, func(t *testing.T) {
+			db, _, _ := reviewFlowFixture(t)
+			proposal := publicationProposal(t)
+			if provider == "gitlab" {
+				proposal.Provider, proposal.Host, proposal.CredentialRef = provider, "gitlab.example", "glab:active"
+			}
+			proposal.Body = "The completed result is recorded in a later comment"
+			data, err := json.Marshal(proposal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			proposal.Hash, proposal.Status, proposal.At = receiptHash(string(data)), "PENDING", time.Now().UTC()
+			if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+				state.Records.Updates = append(state.Records.Updates, proposal)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			publisher := &publicationFixture{}
+			for range 2 {
+				if _, err := DeliverPublication(t.Context(), db, proposal.ID, publicationScanner(t), publisher); err == nil || publisher.sends != 0 {
+					t.Fatal("legacy temporal violation delivered")
+				}
+			}
+			after, err := db.LoadWorkspace()
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatal("temporal refusal changed store or publication state", err)
+			}
+		})
 	}
 }
 

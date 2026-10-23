@@ -38,6 +38,7 @@ release:
   draft: true
   prerelease: auto
   mode: keep-existing
+  # This describes included changes, not the outcome of later publication checks.
   header: |
     ## Added
 

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hiono/taxion/internal/publictext"
 )
@@ -20,6 +22,10 @@ func run(args []string, output, warnings io.Writer) error {
 	report := flags.String("report", "", "JSON review report to render; does not publish or approve")
 	document := flags.Bool("document", false, "check technical Markdown under repository docs/; no symlinks")
 	repository := flags.Bool("repository", false, "check repository docs, templates, release header and public golden output")
+	references := flags.String("context", "", "JSON statement timestamp and state claims; verifies supported GitHub references through gh")
+	progress := flags.String("progress", "", "explicit progress state to render; does not publish")
+	reference := flags.String("reference", "", "existing result URL for completed or published progress")
+	at := flags.String("at", "", "RFC3339 timestamp of the statement (default: now)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -29,6 +35,31 @@ func run(args []string, output, warnings io.Writer) error {
 	if *document && *repository {
 		return fmt.Errorf("document cannot override repository public-message contexts")
 	}
+	if *progress == "" && (*reference != "" || *at != "") ||
+		*progress != "" && (*report != "" || *references != "" || *repository || *document || flags.NArg() != 0) ||
+		*references != "" && (*repository || *document) {
+		return fmt.Errorf("temporal context and progress options cannot override document, repository or report modes")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var statement publictext.StatementContext
+	if *references != "" {
+		data, err := os.ReadFile(*references)
+		if err != nil {
+			return err
+		}
+		decoder := json.NewDecoder(strings.NewReader(string(data)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&statement); err != nil {
+			return err
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return fmt.Errorf("statement context must contain exactly one JSON object")
+		}
+		if statement.At.IsZero() || statement.At.After(time.Now().UTC()) {
+			return fmt.Errorf("statement context requires a nonfuture timestamp")
+		}
+	}
 	digests := strings.Fields(os.Getenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256"))
 	if len(digests) == 0 {
 		if *repository {
@@ -36,11 +67,38 @@ func run(args []string, output, warnings io.Writer) error {
 		}
 		fmt.Fprintln(warnings, "Protected identifier list unavailable; no private-name coverage asserted.")
 	}
+	if *references == "" && *progress == "" {
+		fmt.Fprintln(warnings, "Remote reference existence, chronology and state were not verified; use -context before publication.")
+	}
 	check := func(text string, doc bool) error {
 		if err := publictext.Check(text, doc); err != nil {
 			return err
 		}
+		if *references != "" {
+			if err := publictext.CheckReferences(ctx, text, statement, resolveGitHub); err != nil {
+				return err
+			}
+		}
 		return publictext.CheckIdentifiers(text, digests)
+	}
+	if *progress != "" {
+		when := time.Now().UTC()
+		if *at != "" {
+			var err error
+			when, err = time.Parse(time.RFC3339, *at)
+			if err != nil {
+				return err
+			}
+		}
+		body, err := publictext.RenderProgress(ctx, *progress, *reference, when, resolveGitHub)
+		if err != nil {
+			return err
+		}
+		if err := check(body, false); err != nil {
+			return err
+		}
+		_, err = fmt.Fprint(output, body)
+		return err
 	}
 	if *report != "" {
 		file, err := os.Open(*report)

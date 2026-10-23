@@ -9,6 +9,9 @@ about: Describe a reproducible problem and its user impact
 
 ## Current behavior
 
+<!-- Describe confirmed behavior at the time of writing. Keep future plans
+conditional; cite existing records with stable links, not predicted identifiers. -->
+
 ## Expected behavior
 
 ## Reproduction
