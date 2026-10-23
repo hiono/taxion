@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/publictext"
 )
 
 // Records shares the workspace transaction for recovery and approved publication.
@@ -124,28 +125,38 @@ type RuntimeReceipt struct {
 }
 
 type ExternalUpdate struct {
-	ID             string    `json:"id"`
-	TaskID         string    `json:"taskId"`
-	FlowID         string    `json:"flowId,omitempty"`
-	Provider       string    `json:"provider"`
-	Host           string    `json:"host"`
-	Repository     string    `json:"repository"`
-	TaskRepository string    `json:"taskRepository,omitempty"`
-	Kind           string    `json:"kind"`
-	Number         int       `json:"number"`
-	Action         string    `json:"action"`
-	Body           string    `json:"body"`
-	Title          string    `json:"title,omitempty"`
-	Hash           string    `json:"hash"`
-	Actor          string    `json:"actor"`
-	ApprovalSource string    `json:"approvalSource"`
-	Account        string    `json:"account"`
-	CredentialRef  string    `json:"credentialRef"`
-	Status         string    `json:"status"`
-	Claim          string    `json:"claim,omitempty"`
-	RemoteID       string    `json:"remoteId,omitempty"`
-	Error          string    `json:"error,omitempty"`
-	At             time.Time `json:"at"`
+	Statement      publictext.StatementContext `json:"statement,omitempty"`
+	ID             string                      `json:"id"`
+	TaskID         string                      `json:"taskId"`
+	FlowID         string                      `json:"flowId,omitempty"`
+	Provider       string                      `json:"provider"`
+	Host           string                      `json:"host"`
+	Repository     string                      `json:"repository"`
+	TaskRepository string                      `json:"taskRepository,omitempty"`
+	Kind           string                      `json:"kind"`
+	Number         int                         `json:"number"`
+	Action         string                      `json:"action"`
+	Body           string                      `json:"body"`
+	Title          string                      `json:"title,omitempty"`
+	Hash           string                      `json:"hash"`
+	Actor          string                      `json:"actor"`
+	ApprovalSource string                      `json:"approvalSource"`
+	Account        string                      `json:"account"`
+	CredentialRef  string                      `json:"credentialRef"`
+	Status         string                      `json:"status"`
+	Claim          string                      `json:"claim,omitempty"`
+	RemoteID       string                      `json:"remoteId,omitempty"`
+	Error          string                      `json:"error,omitempty"`
+	At             time.Time                   `json:"at"`
+}
+
+func (update ExternalUpdate) PublicText() publictext.Mutation {
+	surface := "comment"
+	if update.Action == "CREATE" || update.Action == "CLOSE" {
+		surface = "issue"
+	}
+	return publictext.Mutation{Provider: update.Provider, Host: update.Host, Repository: update.Repository,
+		Surface: surface, Title: update.Title, Body: update.Body, Statement: update.Statement}
 }
 
 func (r Records) validate() error {

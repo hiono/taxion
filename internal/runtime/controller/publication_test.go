@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/publictext"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -62,7 +63,28 @@ func publicationProposal(t *testing.T) store.ExternalUpdate {
 	t.Helper()
 	protected := sha256.Sum256([]byte("reserved-private-test-identifier"))
 	t.Setenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256", hex.EncodeToString(protected[:]))
+	profiles := publictext.Profiles{Version: 1}
+	for _, binding := range []struct{ provider, host, repository string }{
+		{"github", "github.com", "owner/repo"},
+		{"gitlab", "gitlab.example", "owner/repo"},
+		{"gitlab", "gitlab.example:8443", "group/subgroup/repo"},
+	} {
+		profiles.Projects = append(profiles.Projects, publictext.Profile{Version: 1, Provider: binding.provider,
+			Host: binding.host, Repository: binding.repository, PrimaryLanguage: "en", SecondaryLanguages: []string{"ja"},
+			TitleLanguage: "en", BodyLanguage: "en", TechnicalTerms: []string{}, Glossary: map[string]string{},
+			Visibility: "public", IntendedAudience: []string{"users", "contributors", "maintainers"}})
+	}
+	data, err := json.Marshal(profiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TAXION_COMMUNICATION_PROFILES", path)
 	return store.ExternalUpdate{ID: "accepted-report", TaskID: "implementation", Provider: "github", Host: "github.com",
+		Statement:  publictext.StatementContext{At: time.Now().UTC()},
 		Repository: "owner/repo", Kind: "ISSUE", Number: 53, Action: "COMMENT", Body: "Approved execution evidence.",
 		Actor: "human", ApprovalSource: "human:exact-report", Account: "owner", CredentialRef: "gh:active"}
 }
@@ -91,6 +113,59 @@ func TestPublicationHashGitLabTargetAndCredential(t *testing.T) {
 	proposal.CredentialRef, proposal.Repository = "gh:active", "owner/group/repo"
 	if _, err := PublicationHash(proposal); err == nil {
 		t.Fatal("nested project path accepted for GitHub")
+	}
+}
+
+func TestPublicationProfileBindingAndMissingProfilePreserveStore(t *testing.T) {
+	db, _, _ := reviewFlowFixture(t)
+	proposal := publicationProposal(t)
+	scanner := publicationScanner(t)
+	hash, err := PublicationHash(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApprovePublication(t.Context(), db, PublicationRequest{proposal, hash}, scanner); err != nil {
+		t.Fatal(err)
+	}
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := os.Getenv("TAXION_COMMUNICATION_PROFILES")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profiles publictext.Profiles
+	if err := json.Unmarshal(data, &profiles); err != nil {
+		t.Fatal(err)
+	}
+	profiles.Projects[0].Glossary["unusedword"] = "preferredword"
+	data, err = json.Marshal(profiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := PublicationHash(proposal)
+	if err != nil || changed == hash {
+		t.Fatal("approval did not bind the explicit profile", err)
+	}
+	publisher := &publicationFixture{}
+	if _, err := DeliverPublication(t.Context(), db, proposal.ID, scanner, publisher); err == nil || publisher.sends != 0 {
+		t.Fatal("profile drift bypassed saved approval", err)
+	}
+	t.Setenv("TAXION_COMMUNICATION_PROFILES", "")
+	if _, err := PublicationHash(proposal); err == nil {
+		t.Fatal("missing profile obtained approval hash")
+	}
+	if _, err := DeliverPublication(t.Context(), db, proposal.ID, scanner, publisher); err == nil || publisher.sends != 0 {
+		t.Fatal("missing profile bypassed saved approval", err)
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("profile rejection changed store", err)
 	}
 }
 

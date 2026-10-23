@@ -857,7 +857,7 @@ operator が結果ファイルを投入する経路も同じ Git 検証とコマ
 `dispatch transition --validation-timeout` は検証全体の期限を指定し、既定値は 10 分である。
 HTTP API は `internal/runtime/local` を利用する。ACP は CLI が発行した新規 Dispatch ID を受け取り、CLI と同じ controller 経由で一度だけ Copilot session を実行する。ACP から Task・Dispatch は発行しない。
 
-## 不要になった試行の退役
+## 不要な停止済み試行を一覧と計画から外す
 
 v0.5.0 の `task archive` は、停止済みの試行を通常の Task／Dispatch 一覧と
 `task plan` から外す。保存記録の削除や Git cleanup は行わない。
@@ -868,14 +868,14 @@ v0.5.0 の `task archive` は、停止済みの試行を通常の Task／Dispatc
 選択した Task と、その Flow の発行済み role Task は同じ対象となる。
 稼働中・suspended Dispatch、稼働中 Flow、未解放 runner と未解決の外部公開を拒否する。
 別の非終了 Task が依存・親子・継続元・Dispatch 関係で参照する場合も拒否し、
-その作業を継続するか一緒に退役させるかを明示的に決める。
+その作業を継続するか、一緒に通常の作業対象から外すかを明示的に決める。
 適用は出典・理由と保存 workspace の確認 hash を transaction 内で照合する。
 
 archive 済みの契約・実行履歴は改変できず、元 Task の再開も拒否する。
 別途承認した後続 Task から保存成果を参照することはできる。
 明示参照の `task graph`、`workflow show`、`records show` は維持し、
 `task plan --include-archived` では action を `ARCHIVED` として返す。
-すべて退役済みの repository の通常計画は空となり、追加の実行を提案しない。
+すべての Task が archive 済みの repository の通常計画は空となり、追加の実行を提案しない。
 これは未登録 repository を正常な空計画として扱う変更ではない。
 
 ## 保存・互換性と制約

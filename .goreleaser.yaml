@@ -43,7 +43,7 @@ release:
     ## Added
 
     Linux、macOS、Windows の amd64 / arm64 向け archive を配布します。
-    mise GitHub backend で Go compiler や source checkout なしに導入できます。
+    正式公開後は mise GitHub backend で Go compiler や source checkout なしに導入できます。
     product operation は明示 policy と正式 manifest / archive / executable hash、
     embedded version / source revision、mise 管理下の実 path を検証してから開始します。
     source build は隔離した development mode 用です。
@@ -51,7 +51,7 @@ release:
     ## Changed
 
     開発用と product 用の store policy を明示的に区別します。
-    公開コミュニケーション方針を追加し、外部公開の承認前と送信前に本文と保護対象 identifier を検査します。
+    プロジェクトごとに公開文章の言語と読者を設定し、GitHub / GitLab への送信直前に本文と参照先を検査します。
 
     ## Fixed
 
@@ -64,12 +64,12 @@ release:
     ## Compatibility
 
     Windows の shell validation は Unix process-group cancellation を必要とするため未対応です。
-    外部公開には TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256 の有効な保護対象一覧が必要です。未設定・空・不正値では公開しません。
+    外部公開には TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256 の有効な保護対象一覧と、TAXION_COMMUNICATION_PROFILES の明示設定が必要です。未設定・空・不正値では公開しません。
 
     ## Upgrade
 
     mise GitHub backend で版を固定し、manifest と artifact hash、公開 workflow の成功を照合してください。
-    外部公開を利用する環境では、設定ガイドに従って保護対象 identifier の digest 一覧を設定してください。
+    外部公開を利用する環境では、設定ガイドに従って保護対象 identifier の digest 一覧と対象プロジェクトの言語・読者を設定してください。未送信の旧承認は、新しい設定と記述時点を含む内容で再承認してください。
 
     ## Rollback
 

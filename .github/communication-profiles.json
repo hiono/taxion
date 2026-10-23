@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "version": 1,
+      "provider": "github",
+      "host": "github.com",
+      "repository": "hiono/taxion",
+      "primaryLanguage": "ja",
+      "secondaryLanguages": ["en"],
+      "titleLanguage": "ja",
+      "bodyLanguage": "ja",
+      "technicalTerms": ["Taxion", "Go", "GitHub", "GitLab", "CLI", "API", "PR", "CI", "Release", "Windows", "macOS", "Linux", "amd64", "arm64", "SHA-256", "GoReleaser", "mise", "Summary", "User impact", "Current behavior", "Expected behavior", "Reproduction", "Scope", "Non-goals", "Acceptance criteria", "Validation", "Remaining concerns", "Compatibility", "Migration", "Motivation", "Changes", "Security considerations", "Documentation", "Related issue", "Feedback addressed", "Changes made", "Added", "Changed", "Fixed", "Security", "Upgrade", "Rollback", "Known limitations", "Refs"],
+      "glossary": {
+        "repair": "修正",
+        "re-review": "再レビュー",
+        "finding": "指摘",
+        "retire": "一覧から除外"
+      },
+      "visibility": "public",
+      "intendedAudience": ["users", "contributors", "maintainers"]
+    }
+  ]
+}

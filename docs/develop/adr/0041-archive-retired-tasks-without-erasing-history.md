@@ -1,4 +1,4 @@
-# 41. 不要になった試行を履歴を消さずに退役させる
+# 41. 不要な停止済み試行を一覧から外し、履歴を保持する
 
 Date: 2026-10-18
 
@@ -34,7 +34,7 @@ HTTP の ledger／Task／Dispatch 一覧は保存記録の参照として従来�
 `--include-archived`、`task graph`、ID 指定の履歴参照では記録を保持し、
 archive 済みの計画上の action は `ARCHIVED` とする。
 元 Task の編集・状態遷移・実行再開を拒否し、新しい作業は別途承認した後続 Task とする。
-archive 済みの契約・実行履歴と退役記録は、通常の workspace 更新でも改変を拒否する。
+archive 済みの契約・実行履歴と archive 記録は、通常の workspace 更新でも改変を拒否する。
 
 Git の変更、branch、worktree、runtime の session ファイル、Memory、外部 Issue は
 削除しない。物理削除、保持期限、unarchive は今回の実装範囲に含めない。
@@ -44,7 +44,7 @@ Git の変更、branch、worktree、runtime の session ファイル、Memory、
 
 不要な試行を日常の一覧・計画から外しながら、同じ ID で判断と実行の証拠を参照できる。
 Task の終了状態と archive は別の情報なので、停止した Flow の Task を完了扱いにする
-必要はない。空の通常計画は「この repository に未退役の Task がない」ことを表し、
+必要はない。空の通常計画は「この repository に通常の作業対象となる Task がない」ことを表し、
 未登録 repository のエラーとは区別する。
 
 Graph の JSON に `archives` を追加する。archive のない既存 DB はそのまま読み込める。

@@ -935,8 +935,8 @@ func taskGraphCmd(command string, args []string) error {
 func taskArchiveCmd(args []string) error {
 	fs := flag.NewFlagSet("task archive", flag.ContinueOnError)
 	tasks := fs.String("tasks", "", "comma-separated Task IDs; issued flow role Tasks are included")
-	actor := fs.String("actor", "", "actor approving retirement")
-	source := fs.String("source", "", "source of retirement approval")
+	actor := fs.String("actor", "", "actor approving archival")
+	source := fs.String("source", "", "source of archival approval")
 	reason := fs.String("reason", "", "reason for retiring this work")
 	dryRun := fs.Bool("dry-run", false, "preview exact scope and approval hash without writing")
 	hash := fs.String("expected-hash", "", "exact hash from the reviewed preview")

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "version": 1,
+      "provider": "gitlab",
+      "host": "forge.example",
+      "repository": "example/application",
+      "primaryLanguage": "en",
+      "secondaryLanguages": [],
+      "titleLanguage": "en",
+      "bodyLanguage": "en",
+      "technicalTerms": ["CLI", "API", "CI"],
+      "glossary": {"re-review": "follow-up review"},
+      "visibility": "private",
+      "intendedAudience": ["users", "contributors", "maintainers"]
+    }
+  ]
+}
