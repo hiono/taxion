@@ -34,11 +34,17 @@ type ReviewFlowRequest struct {
 	Configuration          core.ApprovalConfiguration `json:"configuration"`
 }
 
+// DefaultFlowTimeout applies when a Flow request omits timeoutSeconds.
+const DefaultFlowTimeout = time.Hour
+
 func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowRequest) (core.ReviewFlow, error) {
 	return StartReviewFlowContext(context.Background(), db, ledgerPath, request)
 }
 
 func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath string, request ReviewFlowRequest) (core.ReviewFlow, error) {
+	if request.TimeoutSeconds == 0 {
+		request.TimeoutSeconds = int64(DefaultFlowTimeout / time.Second)
+	}
 	if db == nil || strings.TrimSpace(request.ID) == "" || strings.ContainsAny(request.ID, `/\`) ||
 		request.MaxRepairs == nil || *request.MaxRepairs < 0 || request.TimeoutSeconds <= 0 ||
 		math.IsNaN(request.MaxNanoAIU) || math.IsInf(request.MaxNanoAIU, 0) || request.MaxNanoAIU <= 0 ||
