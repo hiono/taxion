@@ -36,6 +36,8 @@ def snapshot_matches(item, directory):
     metadata = json.loads((directory / "metadata.json").read_text())
     if metadata["path"] != item["path"] or metadata["head"] != item["head"]:
         return False
+    if item["ignoredFileCount"] and metadata.get("untrackedScope") != "including-ignored":
+        return False
     for name in ("status.txt", "staged.patch", "unstaged.patch", "untracked.tar"):
         if hashlib.sha256((directory / name).read_bytes()).hexdigest() != metadata["savedFiles"][name]:
             return False
@@ -47,7 +49,8 @@ def snapshot_matches(item, directory):
     )
     if any((directory / name).read_bytes() != git_bytes(path, *args) for name, args in commands):
         return False
-    names = set(filter(None, git_bytes(path, "ls-files", "--others", "--exclude-standard", "-z").decode().split("\0")))
+    untracked_args = ("ls-files", "--others", "-z") if metadata.get("untrackedScope") == "including-ignored" else ("ls-files", "--others", "--exclude-standard", "-z")
+    names = set(filter(None, git_bytes(path, *untracked_args).decode().split("\0")))
     if names != set(metadata["untrackedFiles"]):
         return False
     with tarfile.open(directory / "untracked.tar") as archive:
@@ -65,7 +68,8 @@ def snapshot_matches(item, directory):
                   or hashlib.sha256(source.read_bytes()).hexdigest() != expected["sha256"]
                   or hashlib.sha256(archive.extractfile(member).read()).hexdigest() != expected["sha256"]):
                 return False
-    return (git_bytes(path, "rev-parse", "HEAD").decode().strip() == item["head"]
+    return (names == set(filter(None, git_bytes(path, *untracked_args).decode().split("\0")))
+            and git_bytes(path, "rev-parse", "HEAD").decode().strip() == item["head"]
             and all((directory / name).read_bytes() == git_bytes(path, *args) for name, args in commands))
 
 
@@ -79,11 +83,11 @@ def classify(item, canonical, owner, evidence):
     item["referenceInventoryComplete"] = evidence.get("referenceInventoryComplete") is True
     if item["path"] == str(canonical):
         return "ACTIVE", "canonical source"
-    if owner.get("head") == item["head"] and owner.get("owner") and owner.get("activeReleaseCandidate") is True:
-        return "ACTIVE", "explicit active operation; not a release source"
     if item["orphaned"]:
         return "REQUIRES_OWNER_DECISION", "registered worktree is missing"
-    if item["status"] and not item["snapshotVerified"]:
+    if owner.get("head") == item["head"] and owner.get("owner") and owner.get("activeReleaseCandidate") is True:
+        return "ACTIVE", "explicit active operation; not a release source"
+    if (item["status"] or item["ignoredFileCount"]) and not item["snapshotVerified"]:
         return "REQUIRES_OWNER_DECISION", "uncommitted content lacks an exact verified snapshot"
     if item["snapshotVerified"] or bound["review"] or bound["release"]:
         return "PRESERVED_EVIDENCE", "verified snapshot or bound review/release evidence; retain"

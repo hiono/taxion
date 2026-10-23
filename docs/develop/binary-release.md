@@ -22,7 +22,9 @@ docs / links の明示stepは、既存の `TestDocumentation*`、`TestConfigurat
 
 変更がなく、merge 済みで、コミットが名前付き参照から到達可能で、確認範囲を明示した完全な参照一覧に関連証拠がない作業場所だけを `SAFE_TO_DELETE` とし、自動削除候補に列挙する。候補の列挙は削除の実行ではない。参照範囲が不完全な場合は未参照と断定しない。残りは個別の理由を付けて `REQUIRES_OWNER_DECISION` とし、補助作業場所に関する公開停止対象はこの区分だけに限定する。
 
-`--evidence` は `records` と `snapshots` を含む非公開 JSON を指定する。`records` の各要素は `kind`（`review` または `release`）、証拠ファイルの `path`、`sha256` を持ち、その内容の正確な作業場所またはリビジョンへの参照を検査する。`snapshots` は作業場所の絶対パスから、保全用の `metadata.json`、`status.txt`、`staged.patch`、`unstaged.patch`、`untracked.tar` のあるディレクトリへの対応表とする。ハッシュと現在の変更内容、未追跡ファイルのバイト列またはシンボリックリンクを照合する。`referenceInventoryComplete: true` は列挙対象の全証拠を確認した明示的な宣言であり、検査結果から自動生成しない。省略時に未参照を主張しない。
+`--evidence` は `records` と `snapshots` を含む非公開 JSON を指定する。`records` の各要素は `kind`（`review` または `release`）、証拠ファイルの `path`、`sha256` を持ち、その内容の正確な作業場所またはリビジョンへの参照を検査する。`snapshots` は作業場所の絶対パスから、保全用の `metadata.json`、`status.txt`、`staged.patch`、`unstaged.patch`、`untracked.tar` のあるディレクトリへの対応表とする。ハッシュと現在の変更内容、未追跡ファイルのバイト列またはシンボリックリンクを照合する。Git の無視対象ファイルも保全対象とし、それが存在する場合は `metadata.json` の `untrackedScope: "including-ignored"` と全未追跡ファイルを含む一覧・アーカイブの一致を必要とする。無視対象を含まない古い保全結果だけで削除候補にはしない。存在しない作業場所は稼働中の申告があっても個別判断対象とする。
+
+`referenceInventoryComplete: true` は列挙対象の全証拠を確認した明示的な宣言であり、検査結果から自動生成しない。省略時に未参照を主張しない。
 
 明示指定がない場合、共通 Git ディレクトリの `release-workspace-evidence.json` があれば同じ照合を行い、直接検査と正式配布の準備処理に適用する。`--ownership` では正確なパスをキーに HEAD、所有者、`activeReleaseCandidate: true` を指定できる。非正本の作業場所を稼働中と分類しても、そこからの正式ビルドは許可しない。検査は読取り専用であり、変更や証拠を自動削除しない。
 
