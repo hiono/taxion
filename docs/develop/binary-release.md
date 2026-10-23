@@ -8,6 +8,8 @@
 
 `.github/workflows/distribution.yml` は PR の snapshot archive を各 native runner に渡す。Linux arm64 / Windows arm64 / macOS Intel を他 architecture の実行結果で代用しない。`scripts/mise_smoke.py` は Go compiler を子 process の PATH から除く。snapshot では loopback URL を明示し、正式 release 後は `github:hiono/taxion` の公開 asset 自動選択を検査する。
 
+snapshot と正式 release の build 前に `go mod download`、`go mod verify`、`git diff --exit-code -- go.mod go.sum` を実行する。依存 metadata の不足や変更を検出したら停止し、build job 内で source を修正しない。各 native smoke は pin の無効化、uninstall、同じ版の再導入と executable bytes の一致も検査する。
+
 ## 正式公開
 
 docs / links の明示stepは、既存の `TestDocumentation*`、`TestConfigurationGuide*`、`TestUserGuide*` を実行する。Markdownのlocal pathとheading anchor、設定項目と利用手順の整合性が対象で、外部URLの可用性検査は含まない。これらはfull Go testsにも含まれるが、release log上でも検証範囲を確認できるよう別stepに固定する。

@@ -79,4 +79,11 @@ rollbackVersion は v0.7.8。既存 release を変更しないため、v0.7.8 �
 
 v0.7.8 は新しい product provenance Gate を持たない。binary の切替を新 Gate の成功と扱わず、旧版への rollback 後は新 policy に基づく product operation を開始しない。deadline、budget、authorization、DB を巻き戻さない。
 
+| Platform | v0.7.8 への binary rollback | 同じ正式版の再導入・無効化・削除 |
+| --- | --- | --- |
+| linux-amd64 | 既存の単体 binary と公開 checksum の照合後に切替可能。新 Gate に基づく operation は停止する。 | 固定した archive から再導入できる。設定解除と uninstall は下記手順。 |
+| linux-arm64 / darwin-amd64 / darwin-arm64 / windows-amd64 / windows-arm64 | 対応 artifact がないため不可。別 platform や source build で代替しない。 | 各 platform の固定 archive から再導入できる。設定解除と uninstall は下記手順。 |
+
+無効化は、稼働中の runtime を停止したうえで、対象 project / global の mise 設定から Taxion の項目を外す。binary を削除する場合は `mise uninstall github:hiono/taxion@0.7.9` を使う。この操作は version pin の設定を削除しないため、再導入時は pin を確認して `mise install` を実行する。既存の store と承認を削除したり、別の版へ暗黙に切り替えたりしない。複数の設定 layer がある環境では `mise which taxion` で選択結果も確認する。
+
 Windows archive は導入・identity / provenance の検証対象だが、controller の shell validation は Unix process-group cancellation を要求するため未対応で明示拒否する。Unix と同じ安全な process-tree 停止を実装するまで Windows の workflow 実行をサポート済みと扱わない。native archive smoke は workflow 実行の証明ではない。

@@ -15,6 +15,9 @@ jobs:
         with:
           go-version: '1.27.2'
       - run: |
+          go mod download
+          go mod verify
+          git diff --exit-code -- go.mod go.sum
           python3 -m unittest discover -s scripts
           echo "TAXION_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
           python3 scripts/release.py prepare --tag "v$(cat VERSION)" --snapshot
