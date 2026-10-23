@@ -60,14 +60,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 - <<'PY'
-          import json, os, subprocess
-          result = subprocess.run(["gh", "api", "repos/hiono/taxion/releases/tags/" + os.environ["GITHUB_REF_NAME"]], capture_output=True, text=True)
-          if result.returncode == 0:
-              raise SystemExit("Existing release: no overwrite or rerun publication allowed")
-          if json.loads(result.stdout).get("status") != "404":
-              raise SystemExit(result.stderr)
-          PY
+          python3 scripts/release.py require-absent --tag "$GITHUB_REF_NAME"
           echo "TAXION_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
           go mod download
           go mod verify
@@ -160,10 +153,10 @@ jobs:
           PY
           gh release edit "$GITHUB_REF_NAME" --draft=false
           gh release download "$GITHUB_REF_NAME" --dir public
+          python3 scripts/release.py verify-published --tag "$GITHUB_REF_NAME"
           cd public
           sha256sum -c SHA256SUMS
           sha256sum -c release-manifest.sha256
-          for asset in ../dist/*; do cmp "$asset" "$(basename "$asset")"; done
   mise-smoke:
     needs: publish
     strategy:

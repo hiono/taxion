@@ -31,6 +31,7 @@ var resultAssertions = []struct {
 	state   string
 }{
 	{regexp.MustCompile(`(?i)(?:\bCI (?:has )?passed\b|\btests? (?:have )?passed\b|検証.{0,12}(?:PASS済み|成功済み)|CI.{0,12}(?:PASS|成功)(?:済み|しました))`), "COMPLETED"},
+	{regexp.MustCompile(`(?i)\b(?:CI|pipeline|job|tests?|validation)(?: run)?\s+(?:(?:has|have|is|was)\s+)?(?:completed|finished|succeeded|passed)(?:\s+successfully)?\b`), "COMPLETED"},
 	{regexp.MustCompile(`(?i)(?:\b(?:PR|pull request|merge request) (?:has been |is )?merged\b|(?:mainへ|main に)反映済み|merge済み)`), "COMPLETED"},
 	{regexp.MustCompile(`(?i)(?:\brelease (?:is |has been )?(?:available|published)\b|(?:release|リリース|配布物).{0,12}(?:公開済み|利用可能))`), "PUBLISHED"},
 	{regexp.MustCompile(`(?i)(?:\breview (?:is |has been )?approved\b|review済み)`), "APPROVED"},

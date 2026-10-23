@@ -117,6 +117,7 @@ func TestGateAllSurfacesAndRemoteState(t *testing.T) {
 		if err := CheckMutation(t.Context(), m, nil); err != nil {
 			t.Fatal(surface, err)
 		}
+
 	}
 	m.Surface = "unknown"
 	if err := CheckMutation(t.Context(), m, nil); err == nil {
@@ -154,5 +155,40 @@ func TestGateAllSurfacesAndRemoteState(t *testing.T) {
 	m.Statement.Claims = nil
 	if err := CheckMutation(t.Context(), m, resolve); err == nil {
 		t.Fatal("reference accepted without state claim")
+	}
+}
+
+func TestCompletionAssertionsRequireTerminalEvidence(t *testing.T) {
+	profile := configuredProfile(t)
+	at := time.Now().UTC().Add(-time.Minute)
+	target := "https://forge.example/example/application/-/pipelines/42"
+	mutation := Mutation{Provider: profile.Provider, Host: profile.Host, Repository: profile.Repository,
+		Surface: "comment", Statement: StatementContext{At: at}}
+	for _, claim := range []string{"CI run completed successfully", "The pipeline has succeeded", "Validation finished successfully", "Tests have passed"} {
+		t.Run(claim, func(t *testing.T) {
+			mutation.Body, mutation.Statement.Claims = claim, nil
+			if err := CheckMutation(t.Context(), mutation, nil); err == nil {
+				t.Fatal("unlinked completion accepted")
+			}
+			mutation.Body = claim + ": " + target
+			mutation.Statement.Claims = []ReferenceClaim{{URL: target, State: "IN_PROGRESS"}}
+			pending := func(context.Context, string) (Reference, error) {
+				return Reference{URL: target, CreatedAt: at.Add(-time.Hour), StateAt: at.Add(-time.Second), State: "IN_PROGRESS"}, nil
+			}
+			if err := CheckMutation(t.Context(), mutation, pending); err == nil {
+				t.Fatal("pending completion accepted")
+			}
+			mutation.Statement.Claims[0].State = "COMPLETED"
+			completed := func(context.Context, string) (Reference, error) {
+				return Reference{URL: target, CreatedAt: at.Add(-time.Hour), StateAt: at.Add(-time.Second), State: "COMPLETED"}, nil
+			}
+			if err := CheckMutation(t.Context(), mutation, completed); err != nil {
+				t.Fatal("verified completion rejected", err)
+			}
+		})
+	}
+	mutation.Body, mutation.Statement.Claims = "CI will complete after validation. This job is still pending.", nil
+	if err := CheckMutation(t.Context(), mutation, nil); err != nil {
+		t.Fatal("planned validation rejected", err)
 	}
 }

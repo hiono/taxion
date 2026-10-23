@@ -16,6 +16,8 @@ docs / links の明示stepは、既存の `TestDocumentation*`、`TestConfigurat
 
 独立 model review の対象 HEAD と PR HEAD、CI、clean worktree を確認して merge する。その merged source の VERSION と一致する未使用 tag を push すると `release.yml` が起動する。既存 release がある tag は拒否し、asset の clobber は使用しない。
 
+版が未公開であることは API の HTTP 404 で確認する。権限不足や通信障害を未公開と見なさない。固定した GoReleaser が実際に生成した版番号・リビジョンを CI で照合し、正式配布では tag も照合する。公開後のバイト比較は、6個の配布ファイル、チェックサム、配布情報とその自己ハッシュの9ファイルに限定する。ビルド用の内部メタデータは公開物に含めない。
+
 workflow は full Go tests / full race / vet / build / web / docs / links / hygiene を実行し、GoReleaser check と archive 生成を行う。最初は draft Release に保存し、6 native runner で archive、mise の明示URLによるfixture導入、product provenance Gate、別pathの同一binaryの拒否・store bytes不変を検証してから公開する。公開後にも全 assets を再取得して bytes/hash を照合し、各 native runner で実際の GitHub asset 自動選択を含む同じ検査を繰り返す。
 
 GoReleaser は `--skip=publish` で実行する。Release 本文は `.goreleaser.yaml` の静的 header だけを使用し、自動 changelog や footer は認めない。`scripts/publictext -release TAG` が Taxion の Communication Profile と保護対象一覧で正確な title / body を検査してから、`gh release create --draft --verify-tag --notes-file` で保存する。正式公開の直前にも共通検査を行い、draft の tag・title・body が検査対象と完全一致することを再取得で確認する。設定の欠落や内容の変更を無視して公開しない。
