@@ -203,6 +203,7 @@ Task と Dispatch の契約に含め、役割間で同じ引用スナップシ�
 Task の `owner` は `CODER`、`reviewer` は `REVIEWER` とする。
 初回実行用の Task を使用し、以前の実行からの後続作業は出典を持つ新しい Task として登録する。
 `maxRepairs` は追加の Coder 実行回数、`timeoutSeconds` は開始からの経過時間の上限を表す。
+`timeoutSeconds` を省略するか0を指定すると、既定の3600秒（1時間）を適用する。負の値は拒否する。
 新しい Flow は観測 token 数の閾値を停止条件にせず、期限・repair 回数・契約と権限の検査を行う。
 Human は Task の実行契約とともに、この進行と権限を承認する。
 

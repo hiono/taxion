@@ -177,7 +177,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	status := fs.Bool("status", false, "read machine-readable operation and Task budget status")
 	repo := fs.String("repo", "", "explicit namespace/repository")
 	worktree := fs.String("worktree", ".", "clean attached worktree to modify")
-	timeout := fs.Duration("timeout", 0, "total planning and execution deadline after /plan")
+	timeout := fs.Duration("timeout", controller.DefaultFlowTimeout, "total planning and execution deadline after /plan")
 	credits := fs.Float64("max-ai-credits", 0, "per-session soft credit ceiling, not a total budget (minimum: 30)")
 	taskNanoAIU := fs.Float64("max-task-nano-aiu", 0, "approved hard Task-wide nano-AIU ceiling")
 	repairs := fs.Int("max-repairs", 1, "maximum repair turns after independent review")
@@ -239,7 +239,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	if *repo == "" || *timeout < time.Second || *credits < 0 || *taskNanoAIU <= 0 ||
 		math.IsNaN(*taskNanoAIU) || math.IsInf(*taskNanoAIU, 0) ||
 		*repairs < 0 || *repairs > 100 || len(paths) > 16 {
-		return fmt.Errorf("request requires --repo, --timeout (at least 1s), --max-ai-credits and --max-task-nano-aiu; --max-repairs must be 0-100")
+		return fmt.Errorf("request requires --repo, --timeout of at least 1s (default 1h), --max-ai-credits and --max-task-nano-aiu; --max-repairs must be 0-100")
 	}
 	if err := copilot.ValidateAICreditLimit(*credits); err != nil {
 		return err
