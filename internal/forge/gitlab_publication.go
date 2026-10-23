@@ -230,7 +230,7 @@ func reconcileGitLabClose(update store.ExternalUpdate, data []byte) (string, boo
 	closedAt, err := time.Parse(time.RFC3339Nano, issue.ClosedAt)
 	if err != nil || issue.ClosedBy == nil ||
 		!strings.EqualFold(issue.ClosedBy.Username, update.Account) ||
-		update.At.IsZero() || closedAt.Before(update.At.Add(-5*time.Minute)) {
+		update.At.IsZero() || closedAt.Before(update.At.Add(-5*time.Minute)) || closedAt.After(time.Now().UTC()) {
 		return "", false, fmt.Errorf("taxion: GitLab Issue close evidence does not match the approved update")
 	}
 	return strconv.Itoa(update.Number), true, nil
