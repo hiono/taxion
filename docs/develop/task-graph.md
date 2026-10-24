@@ -377,13 +377,14 @@ Release 0.1.0 の #78 で引き続き追跡する。
 
 - `repair-authorized`: 承認済み basis と保存済み ceiling の内側にある。
   `workflow advance` または `run` で続行し、Human には尋ねない。
+  `advance` は Git の証拠、Memory、承認済み draft を改めて検証し、不一致なら停止する。
 - `reapproval-required`: 契約が保存済み Flow と一致しない、bundle-required で一致する bundle がない、
   仕様ソースの利用許可が無効になった、または停止コードが `RECONTRACT` である。`task reauthorize` が必要である。
 - `ceiling-exhausted`: repair 回数、期限、session 予算のいずれかが上限に達した。
   または停止コードが `BUDGET_STOP`・`BUDGET_LIMIT` である。
 - `human-decision-required`: `SAFETY_STOP` など、上記以外の理由で Flow が `STOPPED` になっている。
   Task が `CANCELLED`・`REJECTED`・`SUPERSEDED`・`BLOCKED`・`HUMAN_DECISION_REQUIRED` であるか、
-  Human の選択待ちである場合も含む。
+  Human の選択待ちである場合、handoff が hold されている場合も含む。
   `STOPPED` は終端状態であり、自動では再開しない。
 - `invalid`: Task Graph の検証または承認の分類に失敗した。
 - `not-applicable`: Flow が repair の境界にない。

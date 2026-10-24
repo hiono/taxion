@@ -108,6 +108,9 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 	if err := requireSessionBudget(state.Graph, flow, "CODER"); err != nil {
 		return set(RepairCeilingExhausted, err.Error(), humanNext)
 	}
+	if flow.HandoffHeld() {
+		return set(RepairHumanDecision, "handoff is held; release it before the repair continues", humanNext)
+	}
 	return set(RepairAuthorized, "repair is an internal transition within the saved ceiling and approval",
-		"run workflow advance or run for this Flow without asking Human")
+		"run workflow advance or run for this Flow without asking Human; advance still revalidates Git evidence, Memory and the approved draft")
 }

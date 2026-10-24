@@ -82,6 +82,13 @@ func TestObserveRepairStatusClassifiesStops(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, RepairHumanDecision},
+		{"held-handoff", func(s *store.Workspace, f *core.ReviewFlow) {
+			held, err := s.Graph.ChangeHandoff(f.ID, core.HandoffChange{ID: "hold-1", Action: "HOLD", Actor: "human", Source: "test", Reason: "hold"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			*f = held
+		}, RepairHumanDecision},
 		{"unknown-approval-schema", func(s *store.Workspace, _ *core.ReviewFlow) {
 			s.Graph.ApprovalSchemaVersion = core.CurrentApprovalSchemaVersion + 1
 		}, RepairInvalid},
