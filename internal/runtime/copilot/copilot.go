@@ -890,7 +890,7 @@ var coderShellTools = []string{"bash", "powershell"}
 // network, or publish changes. Git is handled separately by subcommand.
 var coderShellDenied = map[string]bool{
 	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true, "pwsh": true, "powershell": true,
-	"cmd": true, "env": true, "eval": true, "exec": true, "xargs": true, "nohup": true, "setsid": true, "timeout": true,
+	"cmd": true, "alias": true, "source": true, ".": true, "env": true, "eval": true, "exec": true, "xargs": true, "nohup": true, "setsid": true, "timeout": true,
 	"nice": true, "ionice": true, "stdbuf": true, "command": true, "builtin": true, "time": true, "taskset": true,
 	"chrt": true, "unshare": true, "nsenter": true, "flock": true, "script": true, "watch": true, "start": true,
 	"start-process": true, "invoke-expression": true, "iex": true, "invoke-command": true, "runas": true,
@@ -919,12 +919,14 @@ func coderShellIdentifier(identifier string) string {
 }
 
 // coderShellGitArgument rejects Git options that run programs or write files,
-// including abbreviated long options.
+// including bundled short options and abbreviated long options. Arguments are
+// literal because coderShellRejection refuses quoting and expansion in Git segments.
 func coderShellGitArgument(argument string) bool {
-	argument = strings.Trim(argument, `'"`)
 	if strings.HasPrefix(argument, "-") && !strings.HasPrefix(argument, "--") {
 		return strings.Contains(argument, "O")
 	}
+	// Git rejects ambiguous abbreviations, so these prefixes cover
+	// --open-files-in-pager, --output, and --ext-diff.
 	return strings.HasPrefix(argument, "--op") || strings.HasPrefix(argument, "--ou") || strings.HasPrefix(argument, "--ext")
 }
 
@@ -968,6 +970,9 @@ func coderShellRejection(worktree string, availableTools []string, request *sdk.
 			return prefix + "Git metadata is not available to the shell"
 		}
 	}
+	if text := strings.ToLower(request.FullCommandText); strings.Contains(text, "git_") || strings.Contains(text, "pager") {
+		return prefix + "Git environment and pager settings are not available to the shell"
+	}
 	if len(request.Commands) == 0 || len(request.CommandSegments) == 0 {
 		return prefix + "the command could not be parsed"
 	}
@@ -991,7 +996,8 @@ func coderShellRejection(worktree string, availableTools []string, request *sdk.
 		}
 		if identifier == "git" {
 			fields := strings.Fields(segment.FullCommandText)
-			if len(fields) < 2 || !coderShellGit[fields[1]] || slices.ContainsFunc(fields[2:], coderShellGitArgument) {
+			if strings.ContainsAny(segment.FullCommandText, "'\"\\$`(){}[]*?~!<>|;&#") || len(fields) < 2 ||
+				!coderShellGit[fields[1]] || slices.ContainsFunc(fields[2:], coderShellGitArgument) {
 				return prefix + "only read-only git subcommands are allowed; the Controller commits and publishes"
 			}
 		}

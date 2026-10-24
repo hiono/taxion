@@ -14,7 +14,7 @@ Coder の shell request は、次の条件をすべて満たす場合に限り�
 - 作業ディレクトリと `possiblePaths` が、すべて割当 worktree の内側に解決され、`.git` を含まない。
 - SDK がコマンドを解析でき、`commands` の各 identifier が `commandSegments` にも現れる。identifier は大文字小文字、`/`・`\` の区切り、`.exe` などの実行形式の拡張子を正規化して比較する。
 - 入れ子の shell、`env`・`xargs`・`nice`・`stdbuf`・`command` などの起動ラッパー、権限昇格、`gh`・`curl`・`ssh` などのネットワーク系コマンドを含まない。
-- `git` は `status`・`diff`・`log`・`show`・`ls-files`・`rev-parse`・`grep`・`blame` に限る。プログラムを起動する `-O`・`--open-files-in-pager`、ファイルを書く `--output`、`--ext-diff` は省略形や短いオプションの連結も含めて拒否する。commit・push・tag などの更新は Controller が行う。
+- `git` は `status`・`diff`・`log`・`show`・`ls-files`・`rev-parse`・`grep`・`blame` に限る。プログラムを起動する `-O`・`--open-files-in-pager`、ファイルを書く `--output`、`--ext-diff` は省略形や短いオプションの連結も含めて拒否する。git の segment では引用符、エスケープ、変数展開、glob を使えない。コマンド全体に `GIT_` で始まる環境変数や `pager` を含む request、`alias`・`source` も拒否する。commit・push・tag などの更新は Controller が行う。
 
 条件を満たさない request は、理由を書いた feedback を付けて拒否する。Reviewer の shell は従来どおり拒否する。shell tool を allowlist に含めない既定設定では、動作は変わらない。
 
