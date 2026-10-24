@@ -7,6 +7,16 @@ import (
 
 var formalVersion = regexp.MustCompile(`^v(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$`)
 
+func validManifestRollback(manifest Manifest) bool {
+	if manifest.SchemaVersion == 3 {
+		return manifest.RollbackUnavailableReason == "prior-distributions-withdrawn" &&
+			manifest.RollbackVersion == "" && manifest.RollbackPlatforms != nil &&
+			len(manifest.RollbackPlatforms) == 0 && manifest.Version == "v0.7.15"
+	}
+	return manifest.SchemaVersion == 2 && manifest.RollbackUnavailableReason == "" &&
+		validRollbackPolicy(manifest.RollbackVersion, manifest.Version, manifest.RollbackPlatforms)
+}
+
 // Historical releases retain their original policy. Only published platform
 // combinations are valid; no source-build or cross-platform fallback exists.
 // Publication itself is checked when the manifest is generated.

@@ -2,6 +2,56 @@ package provenance
 
 import "testing"
 
+func TestExplicitUnavailableRollbackProvenance(t *testing.T) {
+	policy, identity, manifest := releaseFixture(t, "v0.7.15")
+	manifest.SchemaVersion = 3
+	manifest.RollbackVersion = ""
+	manifest.RollbackPlatforms = []string{}
+	manifest.RollbackUnavailableReason = "prior-distributions-withdrawn"
+	policy.ManifestSHA256 = Hash(writeJSON(t, policy.ManifestPath, manifest))
+	report, err := Verify(policy, policy.StoreDirectory, identity)
+	if err != nil || report.RollbackUnavailableReason != manifest.RollbackUnavailableReason {
+		t.Fatal(report, err)
+	}
+	for _, name := range []string{"legacy-schema", "unknown-schema", "missing-reason", "unknown-reason",
+		"target-present", "platform-present", "platform-missing", "historical-version", "future-version", "tampered-pin"} {
+		t.Run(name, func(t *testing.T) {
+			candidate, pin := manifest, policy
+			switch name {
+			case "legacy-schema":
+				candidate.SchemaVersion = 2
+			case "unknown-schema":
+				candidate.SchemaVersion = 4
+			case "missing-reason":
+				candidate.RollbackUnavailableReason = ""
+			case "unknown-reason":
+				candidate.RollbackUnavailableReason = "network-error"
+			case "target-present":
+				candidate.RollbackVersion = "v0.7.14"
+			case "platform-present":
+				candidate.RollbackPlatforms = []string{"linux-amd64"}
+			case "platform-missing":
+				candidate.RollbackPlatforms = nil
+			case "historical-version", "future-version":
+				candidate.Version = "v0.7.14"
+				if name == "future-version" {
+					candidate.Version = "v0.7.16"
+				}
+				if validManifestRollback(candidate) {
+					t.Fatal("unavailable policy accepted for another release")
+				}
+			}
+			pin.ManifestSHA256 = Hash(writeJSON(t, pin.ManifestPath, candidate))
+			if name == "tampered-pin" {
+				pin.ManifestSHA256 = Hash([]byte("different approval"))
+			}
+			if _, err := Verify(pin, pin.StoreDirectory, identity); err == nil {
+				t.Fatal("invalid unavailable rollback accepted")
+			}
+		})
+	}
+}
+
 func TestPublishedRollbackPlatformPolicies(t *testing.T) {
 	all := []string{"linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64", "windows-arm64"}
 	if !validRollbackPolicy("v0.7.9", "v0.7.10", all) || !validRollbackPolicy("v0.7.8", "v0.7.9", []string{"linux-amd64"}) ||

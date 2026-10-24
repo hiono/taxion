@@ -144,9 +144,17 @@ def build_metadata(dist, tag, snapshot=False):
     return info, build
 
 
-def manifest(dist, tag):
+def manifest(dist, tag, rollback_unavailable=None):
     info, build = build_metadata(dist, tag)
-    rollback = rollback_target(tag)
+    if rollback_unavailable:
+        if rollback_unavailable != "prior-distributions-withdrawn" or tag != "v0.7.15":
+            raise ValueError("unsupported unavailable rollback policy")
+        if any(formal_version(t) and (0, 7, 8) <= formal_version(t) < formal_version(tag)
+               for t in published_formal_tags()):
+            raise ValueError("unavailable rollback policy cannot bypass a published binary release")
+        rollback = ""
+    else:
+        rollback = rollback_target(tag)
     artifacts = []
     sums = (dist / "SHA256SUMS").read_text()
     for target_os, arch in PLATFORMS:
@@ -168,7 +176,7 @@ def manifest(dist, tag):
             "executableSha256": sha(contents[executable]),
         })
     result = {
-        "schemaVersion": 2, "version": tag, "tag": tag,
+        "schemaVersion": 3 if rollback_unavailable else 2, "version": tag, "tag": tag,
         "sourceRevision": info["sourceRevision"],
         "buildTimestamp": build["date"],
         "goVersion": command("go", "env", "GOVERSION"),
@@ -176,12 +184,15 @@ def manifest(dist, tag):
         "checksumsSha256": sha((dist / "SHA256SUMS").read_bytes()),
         "miseIdentifier": "github:hiono/taxion@" + tag[1:],
         "rollbackVersion": rollback,
-        "rollbackPlatforms": ["linux-amd64"] if rollback == "v0.7.8" else [system + "-" + arch for system, arch in PLATFORMS],
+        "rollbackPlatforms": [] if rollback_unavailable else
+                             (["linux-amd64"] if rollback == "v0.7.8" else [system + "-" + arch for system, arch in PLATFORMS]),
         "releaseUrl": "https://github.com/hiono/taxion/releases/tag/" + tag,
         "generatedBy": "hiono/taxion/.github/workflows/release.yml",
         "ciRun": "https://github.com/hiono/taxion/actions/runs/" + os.environ["GITHUB_RUN_ID"],
         "dirty": False, "channel": "github-release",
     }
+    if rollback_unavailable:
+        result["rollbackUnavailableReason"] = rollback_unavailable
     path = dist / "release-manifest.json"
     path.write_text(json.dumps(result, indent=2) + "\n")
     (dist / "release-manifest.sha256").write_text(sha(path.read_bytes()) + "  " + path.name + "\n")
@@ -214,7 +225,10 @@ if __name__ == "__main__":
     parser.add_argument("--tag")
     parser.add_argument("--public", type=pathlib.Path, default=pathlib.Path("public"))
     parser.add_argument("--snapshot", action="store_true")
+    parser.add_argument("--rollback-unavailable", choices=("prior-distributions-withdrawn",))
     args = parser.parse_args()
+    if args.rollback_unavailable and args.action != "manifest":
+        parser.error("--rollback-unavailable requires manifest")
     if args.action == "require-absent":
         require_absent_release(args.tag)
     elif args.action == "verify-published":
@@ -226,4 +240,4 @@ if __name__ == "__main__":
     elif args.action == "prepare":
         prepare(args.dist, args.tag, args.snapshot)
     else:
-        manifest(args.dist, args.tag)
+        manifest(args.dist, args.tag, args.rollback_unavailable)

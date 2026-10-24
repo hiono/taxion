@@ -97,23 +97,28 @@ func TestManifestRequiredIdentityFields(t *testing.T) {
 
 func fixture(t *testing.T) (Policy, Identity, Manifest) {
 	t.Helper()
+	return releaseFixture(t, "v0.7.9")
+}
+
+func releaseFixture(t *testing.T, version string) (Policy, Identity, Manifest) {
+	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	binary := filepath.Join(root, "installs", "github-hiono-taxion", "0.7.9", "taxion")
+	binary := filepath.Join(root, "installs", "github-hiono-taxion", strings.TrimPrefix(version, "v"), "taxion")
 	if err := os.MkdirAll(filepath.Dir(binary), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(binary, []byte("synthetic-release-bytes"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	id := Identity{Version: "v0.7.9", Revision: strings.Repeat("a", 40),
+	id := Identity{Version: version, Revision: strings.Repeat("a", 40),
 		Channel: "github-release", OS: "linux", Architecture: "amd64", Executable: binary}
 	metadata, _ := json.Marshal(map[string]any{"schemaVersion": 1, "version": id.Version,
 		"sourceRevision": id.Revision, "channel": id.Channel,
-		"manifestUrl": "https://github.com/hiono/taxion/releases/download/v0.7.9/release-manifest.json"})
+		"manifestUrl": "https://github.com/hiono/taxion/releases/download/" + version + "/release-manifest.json"})
 	var packed bytes.Buffer
 	compressed := gzip.NewWriter(&packed)
 	archive := tar.NewWriter(compressed)
@@ -143,8 +148,8 @@ func fixture(t *testing.T) (Policy, Identity, Manifest) {
 	dirty := false
 	manifest := Manifest{SchemaVersion: 2, Version: id.Version, Tag: id.Version, SourceRevision: id.Revision, Dirty: &dirty,
 		BuildTimestamp: "2026-10-23T00:00:00Z", GoVersion: "go1.27.2", GoreleaserVersion: "2.18.3",
-		MiseIdentifier: "github:hiono/taxion@0.7.9", RollbackVersion: "v0.7.8", RollbackPlatforms: []string{"linux-amd64"},
-		ReleaseURL:  "https://github.com/hiono/taxion/releases/tag/v0.7.9",
+		MiseIdentifier: "github:hiono/taxion@" + strings.TrimPrefix(version, "v"), RollbackVersion: "v0.7.8", RollbackPlatforms: []string{"linux-amd64"},
+		ReleaseURL:  "https://github.com/hiono/taxion/releases/tag/" + version,
 		GeneratedBy: "hiono/taxion/.github/workflows/release.yml",
 		CIRun:       "https://github.com/hiono/taxion/actions/runs/12345", Channel: "github-release"}
 	var sums strings.Builder
@@ -154,7 +159,7 @@ func fixture(t *testing.T) (Policy, Identity, Manifest) {
 			if osName == "windows" {
 				format, executable = "zip", "taxion.exe"
 			}
-			a := Artifact{Name: "taxion_0.7.9_" + osName + "_" + arch + "." + format,
+			a := Artifact{Name: "taxion_" + strings.TrimPrefix(version, "v") + "_" + osName + "_" + arch + "." + format,
 				OS: osName, Architecture: arch, Format: format, Executable: executable,
 				SHA256: Hash(packed.Bytes()), ExecutableSHA256: Hash([]byte("synthetic-release-bytes"))}
 			manifest.Artifacts = append(manifest.Artifacts, a)
