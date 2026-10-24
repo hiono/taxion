@@ -184,7 +184,8 @@ class ManifestTests(unittest.TestCase):
                 release.manifest(dist, "v0.7.15", "prior-distributions-withdrawn")
 
     def test_withdrawal_refuses_unknown_reason_and_historical_versions(self):
-        for version, reason in (("0.7.14", "prior-distributions-withdrawn"), ("0.7.15", "network-error")):
+        for version, reason in (("0.7.14", "prior-distributions-withdrawn"), ("0.7.16", "prior-distributions-withdrawn"),
+                                ("0.7.15", "network-error")):
             with self.subTest(version=version, reason=reason), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
                 dist = self.fixture(root, version)
@@ -219,7 +220,7 @@ class RollbackSmokeTests(unittest.TestCase):
             for system, arch in release.PLATFORMS:
                 self.assertIsNone(mise_smoke.rollback_artifact(manifest, system, arch))
             download.assert_not_called()
-            for key, value in (("schemaVersion", 2), ("schemaVersion", 4), ("version", "v0.7.14"),
+            for key, value in (("schemaVersion", 2), ("schemaVersion", 4), ("version", "v0.7.14"), ("version", "v0.7.16"),
                                ("rollbackVersion", "v0.7.14"), ("rollbackPlatforms", ["linux-amd64"]),
                                ("rollbackPlatforms", None), ("rollbackUnavailableReason", "")):
                 with self.subTest(key=key, value=value), self.assertRaises(ValueError):

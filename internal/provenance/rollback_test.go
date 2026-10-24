@@ -14,7 +14,7 @@ func TestExplicitUnavailableRollbackProvenance(t *testing.T) {
 		t.Fatal(report, err)
 	}
 	for _, name := range []string{"legacy-schema", "unknown-schema", "missing-reason", "unknown-reason",
-		"target-present", "platform-present", "platform-missing", "historical-version", "tampered-pin"} {
+		"target-present", "platform-present", "platform-missing", "historical-version", "future-version", "tampered-pin"} {
 		t.Run(name, func(t *testing.T) {
 			candidate, pin := manifest, policy
 			switch name {
@@ -32,10 +32,13 @@ func TestExplicitUnavailableRollbackProvenance(t *testing.T) {
 				candidate.RollbackPlatforms = []string{"linux-amd64"}
 			case "platform-missing":
 				candidate.RollbackPlatforms = nil
-			case "historical-version":
+			case "historical-version", "future-version":
 				candidate.Version = "v0.7.14"
+				if name == "future-version" {
+					candidate.Version = "v0.7.16"
+				}
 				if validManifestRollback(candidate) {
-					t.Fatal("historical unavailable policy accepted")
+					t.Fatal("unavailable policy accepted for another release")
 				}
 			}
 			pin.ManifestSHA256 = Hash(writeJSON(t, pin.ManifestPath, candidate))

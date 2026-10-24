@@ -11,7 +11,7 @@ func validManifestRollback(manifest Manifest) bool {
 	if manifest.SchemaVersion == 3 {
 		return manifest.RollbackUnavailableReason == "prior-distributions-withdrawn" &&
 			manifest.RollbackVersion == "" && manifest.RollbackPlatforms != nil &&
-			len(manifest.RollbackPlatforms) == 0 && olderVersion("v0.7.14", manifest.Version)
+			len(manifest.RollbackPlatforms) == 0 && manifest.Version == "v0.7.15"
 	}
 	return manifest.SchemaVersion == 2 && manifest.RollbackUnavailableReason == "" &&
 		validRollbackPolicy(manifest.RollbackVersion, manifest.Version, manifest.RollbackPlatforms)

@@ -147,7 +147,7 @@ def build_metadata(dist, tag, snapshot=False):
 def manifest(dist, tag, rollback_unavailable=None):
     info, build = build_metadata(dist, tag)
     if rollback_unavailable:
-        if rollback_unavailable != "prior-distributions-withdrawn" or not formal_version(tag) or formal_version(tag) < (0, 7, 15):
+        if rollback_unavailable != "prior-distributions-withdrawn" or tag != "v0.7.15":
             raise ValueError("unsupported unavailable rollback policy")
         if any(formal_version(t) and (0, 7, 8) <= formal_version(t) < formal_version(tag)
                for t in published_formal_tags()):

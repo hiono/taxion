@@ -32,7 +32,7 @@ def rollback_artifact(manifest, system, arch):
     reason = manifest.get("rollbackUnavailableReason", "")
     if manifest["schemaVersion"] == 3:
         if (reason != "prior-distributions-withdrawn" or target or platforms != [] or
-                not formal_version(version) or formal_version(version) < (0, 7, 15)):
+                version != "v0.7.15"):
             raise ValueError("invalid unavailable rollback policy")
         return None
     if (manifest["schemaVersion"] != 2 or reason or not formal_version(target) or
