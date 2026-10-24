@@ -82,6 +82,11 @@ func TestObserveRepairStatusClassifiesStops(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, RepairHumanDecision},
+		{"task-left-review", func(s *store.Workspace, f *core.ReviewFlow) {
+			if err := s.Graph.Transition(f.TaskID, core.RequestChanges, "human", "manual", core.TransitionProof{}); err != nil {
+				t.Fatal(err)
+			}
+		}, RepairHumanDecision},
 		{"held-handoff", func(s *store.Workspace, f *core.ReviewFlow) {
 			held, err := s.Graph.ChangeHandoff(f.ID, core.HandoffChange{ID: "hold-1", Action: "HOLD", Actor: "human", Source: "test", Reason: "hold"})
 			if err != nil {

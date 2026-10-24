@@ -108,6 +108,13 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 	if err := requireSessionBudget(state.Graph, flow, "CODER"); err != nil {
 		return set(RepairCeilingExhausted, err.Error(), humanNext)
 	}
+	if err := requireBudgetRoom(state.Graph, flow, "CODER"); err != nil {
+		return set(RepairCeilingExhausted, err.Error(), humanNext)
+	}
+	if task.Status != core.WaitingForReview || last.Result.GitEvidence == nil || !last.Result.GitEvidence.WorktreeReleased ||
+		last.Result.OutputSHA != task.TargetSHA {
+		return set(RepairHumanDecision, "review result does not match the Task waiting for review with a released worktree and current target SHA", humanNext)
+	}
 	if flow.HandoffHeld() {
 		return set(RepairHumanDecision, "handoff is held; release it before the repair continues", humanNext)
 	}

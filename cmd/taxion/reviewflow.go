@@ -136,7 +136,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		}
 		return nil
 	}
-	if action == "evaluate" {
+	if action == "evaluate" || action == "repair-status" {
 		db, err := store.OpenReadOnly(workspaceDBPath())
 		if err != nil {
 			return err
@@ -145,6 +145,13 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		state, err := db.LoadWorkspace()
 		if err != nil {
 			return err
+		}
+		if action == "repair-status" {
+			status, err := controller.ObserveRepairStatus(state, id, currentApprovalConfiguration())
+			if err != nil {
+				return err
+			}
+			return printJSON(status)
 		}
 		report, err := controller.EvaluateReviewFlow(state.Graph, id)
 		if err != nil {
@@ -285,12 +292,6 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 			return err
 		}
 		return printJSON(flow)
-	case "repair-status":
-		status, err := controller.ObserveRepairStatus(state, id, currentApprovalConfiguration())
-		if err != nil {
-			return err
-		}
-		return printJSON(status)
 	case "feedback-target":
 		target, err := controller.ObserveFeedback(db, id)
 		if err != nil {

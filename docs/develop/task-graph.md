@@ -371,7 +371,7 @@ Release 0.1.0 の #78 で引き続き追跡する。
 
 ### repair を自動で続行できるかの確認
 
-`workflow repair-status --id application-flow` は、保存済みの Flow を変更せずに読み、
+`workflow repair-status --id application-flow` は、workspace を読み取り専用で開き、保存済みの Flow を変更せずに読み、
 次の repair を Human に尋ねずに進めてよいかを JSON（`version: 1`）で返す。
 `stateChanged` は常に `false` である。`status` は次のいずれかになる。
 
@@ -380,11 +380,12 @@ Release 0.1.0 の #78 で引き続き追跡する。
   `advance` は Git の証拠、Memory、承認済み draft を改めて検証し、不一致なら停止する。
 - `reapproval-required`: 契約が保存済み Flow と一致しない、bundle-required で一致する bundle がない、
   仕様ソースの利用許可が無効になった、または停止コードが `RECONTRACT` である。`task reauthorize` が必要である。
-- `ceiling-exhausted`: repair 回数、期限、session 予算のいずれかが上限に達した。
+- `ceiling-exhausted`: repair 回数、期限、session・Dispatch・credit の予算のいずれかが上限に達した。
   または停止コードが `BUDGET_STOP`・`BUDGET_LIMIT` である。
 - `human-decision-required`: `SAFETY_STOP` など、上記以外の理由で Flow が `STOPPED` になっている。
   Task が `CANCELLED`・`REJECTED`・`SUPERSEDED`・`BLOCKED`・`HUMAN_DECISION_REQUIRED` であるか、
-  Human の選択待ちである場合、handoff が hold されている場合も含む。
+  Human の選択待ちである場合、handoff が hold されている場合、
+  Task が `WAITING_FOR_REVIEW` でないか review 結果が現在の target SHA と一致しない場合も含む。
   `STOPPED` は終端状態であり、自動では再開しない。
 - `invalid`: Task Graph の検証または承認の分類に失敗した。
 - `not-applicable`: Flow が repair の境界にない。
