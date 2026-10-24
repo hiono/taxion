@@ -2,7 +2,7 @@
 
 ## Context
 
-Copilot adapter の permission handler は、Coder の shell request を常に拒否していた。一方、`--coder-tools` には `bash` を指定でき、モデルには shell tool が見える。そのため Coder は build や test を呼べても実行できず、Controller 検証の失敗に対して、手元で確かめずに修正を繰り返していた。TKB3 の Task では、この状態で repair が r7 まで続いた（#165）。
+Copilot adapter の permission handler は、Coder の shell request を常に拒否していた。一方、`--coder-tools` には `bash` を指定でき、モデルには shell tool が見える。そのため Coder は build や test を呼べても実行できず、Controller 検証の失敗に対して、手元で確かめずに修正を繰り返していた。利用先の Task では、この状態で repair が7回目まで続いた（#165）。
 
 ## Decision
 
