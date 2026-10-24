@@ -42,6 +42,92 @@ type configuredScriptedRuntime struct {
 	accounts  []string
 }
 
+type quotaScriptedRuntime struct {
+	*configuredScriptedRuntime
+	quota *quotaRuntime
+}
+
+func (s *quotaScriptedRuntime) ReadAccountQuota(ctx context.Context, account string) (runtime.QuotaSnapshot, error) {
+	return s.quota.ReadAccountQuota(ctx, account)
+}
+
+func TestRunnerAccountBudgetStopPreservesPartialWork(t *testing.T) {
+	resolved, err := config.Resolve([]config.Layer{{Source: "user", Input: []byte(`version: 1
+project: {id: demo}
+repository: {provider: github, host: github.com, path: owner/repo, account: scm-user, credentialRef: scm}
+runtime: {provider: copilot, account: ai-user, credentialRef: ai, contractRef: contract}
+execution: {requester: requester, worker: local, approvalRef: configuration-approval}
+`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision := core.TaskDecision{
+		ID: resolved.Config.Execution.ApprovalRef, Source: "human:quota-test",
+		Text: string(mustFlowJSON(t, config.Approval{
+			Kind: config.ApprovalKind, TaskID: "implementation", Reason: "authorize quota monitoring",
+			Allowed: []config.Config{resolved.Config},
+		})),
+	}
+	db, ledger, request := reviewFlowFixtureWithPolicy(t, "", budgetPolicy(t, "account"), decision)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var worker *quotaScriptedRuntime
+	partial := filepath.Join(flow.Contract.Worktree, "internal", "partial.go")
+	factory := func(dispatch core.GraphDispatch) (runtime.Identity, error) {
+		if err := BindConfiguration(db, dispatch.ID, resolved); err != nil {
+			return nil, err
+		}
+		base := &scriptedRuntime{
+			fakeRuntime: fakeRuntime{role: dispatch.Recipient, hash: "quota-test", worktree: dispatch.Instruction.Worktree},
+			events:      make(chan runtime.Event, 2),
+		}
+		base.script = func() error {
+			if err := os.MkdirAll(filepath.Dir(partial), 0755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(partial, []byte("partial implementation\n"), 0600); err != nil {
+				return err
+			}
+			base.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":1,"outputTokens":0,"totalNanoAIU":0,"aiCreditsStatus":"complete"}`}
+			base.events <- runtime.Event{Type: runtime.EventTurnFinished}
+			return nil
+		}
+		reader := &quotaRuntime{quota: observedQuota()}
+		reader.onRead = func() {
+			if reader.reads > 1 {
+				remaining := 5.0
+				reader.quota.RemainingPercentage = &remaining
+			}
+		}
+		worker = &quotaScriptedRuntime{
+			configuredScriptedRuntime: &configuredScriptedRuntime{scriptedRuntime: base, selection: mustFlowJSON(t, resolved.Config)},
+			quota:                     reader,
+		}
+		return worker, nil
+	}
+	flow, err = RunReviewFlow(t.Context(), db, ledger, flow.ID, factory, io.Discard)
+	var stopped *budgetStopError
+	if !errors.As(err, &stopped) || flow.StopCode != "BUDGET_STOP" || flow.Status != "STOPPED" ||
+		!flow.HandoffHeld() || flow.RunnerID != "" || worker == nil || worker.stops != 1 || worker.closes != 1 {
+		t.Fatalf("quota stop was not preserved: %+v err=%v", flow, err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, _ := state.Graph.GraphDispatch(flow.DispatchIDs[0])
+	if len(state.Graph.Dispatches) != 1 || saved.Status != core.DispatchCancelled ||
+		saved.Result == nil || saved.Result.PartialGitEvidence == nil || len(state.Records.Budgets) == 0 ||
+		state.Records.Budgets[len(state.Records.Budgets)-1].Kind != "BUDGET_STOP" {
+		t.Fatal("quota stop lost partial work or issued a following role")
+	}
+	if body, err := os.ReadFile(partial); err != nil || string(body) != "partial implementation\n" {
+		t.Fatal("partial work was modified or removed", err)
+	}
+}
+
 func (s *configuredScriptedRuntime) ExecutionConfiguration() json.RawMessage          { return s.selection }
 func (s *configuredScriptedRuntime) CheckServiceAccess(context.Context, string) error { return nil }
 func (s *configuredScriptedRuntime) CheckRepositoryAccess(context.Context) error      { return nil }

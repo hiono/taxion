@@ -80,6 +80,23 @@ account quota の読取りが承認済みの場合、Controller は新しい Dis
 残り率は単位に依存しないため、request 数、AI Credit、nano-AIU の間で換算しない。
 OpenCode のように account quota を読めない runtime では、この判定は行われず、
 時間の期限だけが適用される。
+
+開発版では、Copilot の `account` mode は、送信前の残り率が取得不能・期限切れ・
+未対応の場合も送信を拒否する。`off`・`flow` mode と、account quota 非対応の
+OpenCode を quota 検証済みとは扱わない。
+
+Coder・Reviewer の event 監視では、無通信でも約1分ごとと、最終結果の採用前に
+account quota を再取得する。予約率・日割り枠への到達、残量の取得失敗、
+開始時に保存したリセット日時または resource の変更で、観測を receipt に保存して
+session の安全停止を要求する。Flow は `BUDGET_STOP` と handoff 保留を保存し、
+未コミット成果と取得できた partial Git evidence を保持する。停止要求の失敗は
+停止成功として記録しない。送信時の account 観測がない旧実行は続行しない。
+新しい承認で開始する Dispatch の日割り枠には、別の reset cycle の観測を使わない。
+
+この監視は定期観測であり、提供元の更新遅延、観測間の消費、停止要求が完了するまでの
+消費を防ぐ課金保証ではない。独立した Planner・質問 session の継続監視、
+親 Controller だけの消費量の実測は、この変更の検証範囲に含めない。
+
 既存 workspace の `maxTokens` と `BUDGET_LIMIT` は履歴互換のため読み取るが、
 新規実行の入力・停止条件には使わない。停止済み Flow の結果は書き換えず、
 継続には新しい Task の承認が必要となる。

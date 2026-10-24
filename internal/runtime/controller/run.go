@@ -327,6 +327,33 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 	if err != nil {
 		return err
 	}
+	dispatch, err = c.boundDispatch(dispatch.ID)
+	if err != nil {
+		return err
+	}
+	var initialQuota *budgetObservation
+	var lastQuotaCheck time.Time
+	for _, receipt := range state.Records.Events {
+		if receipt.DispatchID != dispatch.ID || receipt.SessionID != dispatch.RuntimeSessionID || receipt.Type != "budget-guidance" {
+			continue
+		}
+		var body struct {
+			Observation *budgetObservation `json:"observation"`
+			Phase       string             `json:"phase"`
+		}
+		if err := json.Unmarshal([]byte(receipt.Payload), &body); err != nil {
+			return fmt.Errorf("taxion: invalid saved budget observation: %w", err)
+		}
+		if body.Phase == "prepared" || body.Phase == "send-returned" {
+			if initialQuota == nil {
+				initialQuota = body.Observation
+			}
+		}
+		lastQuotaCheck = receipt.At
+	}
+	if initialQuota == nil && dispatch.Instruction.BudgetGuidance != nil && dispatch.Instruction.BudgetGuidance.Mode == "account" {
+		return c.stopForAccountQuota(dispatch, "account quota monitoring requires the saved send observation")
+	}
 	for index := len(state.Records.Events) - 1; index >= 0; index-- {
 		receipt := state.Records.Events[index]
 		if receipt.DispatchID == dispatch.ID && receipt.Type == "budget-guidance" {
@@ -338,12 +365,22 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 	}
 	streamID := time.Now().UTC().Format(time.RFC3339Nano)
 	var finalOutput string
-	checkLimits := func() error {
+	checkLimits := func(final bool) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if check != nil {
-			return check()
+			if err := check(); err != nil {
+				return err
+			}
+		}
+		if initialQuota != nil && initialQuota.Mode == "account" &&
+			(final || time.Since(lastQuotaCheck) >= time.Minute ||
+				initialQuota.Account != nil && initialQuota.Account.ResetAt != nil && !time.Now().Before(*initialQuota.Account.ResetAt)) {
+			if err := c.monitorAccountQuota(ctx, dispatch, initialQuota); err != nil {
+				return err
+			}
+			lastQuotaCheck = time.Now().UTC()
 		}
 		return nil
 	}
@@ -352,7 +389,7 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 		case <-ctx.Done():
 			return fmt.Errorf("taxion: event wait: %w", ctx.Err())
 		case <-ticker.C:
-			if err := checkLimits(); err != nil {
+			if err := checkLimits(false); err != nil {
 				return err
 			}
 		case event, ok := <-events:
@@ -376,11 +413,11 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 				if err := writeCreditStatus(ctx, encoder, dispatch, event, c.runtime); err != nil {
 					return err
 				}
-				if err := checkLimits(); err != nil {
+				if err := checkLimits(false); err != nil {
 					return err
 				}
 			case runtime.EventTurnFinished:
-				if err := checkLimits(); err != nil {
+				if err := checkLimits(true); err != nil {
 					return err
 				}
 				observed, finishErr := c.Finish(ctx, dispatch.ID, finalOutput)
