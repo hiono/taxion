@@ -63,6 +63,23 @@ nano-AIU と `AICreditsStatus` を event 出力へ報告する。account quota �
 承認済みなら、`premium_interactions` の request 残数と使用率も別項目で表示する。
 これは AI Credit と異なる単位である。AI Credit の account 残高・使用率・残り率は
 同じ課金単位の allowance が確認できない限り unavailable とする。
+
+account quota の読取りが承認済みの場合、Controller は新しい Dispatch を送る前に、
+残り率で次の2つを判定する。どちらかに当たると、モデルへ送信せずに拒否し、
+`denialReason` を記録する。
+
+- `controller-reserve`：残り率が5%以下である。親の Controller の利用は Taxion の
+  記録に含まれないため、Controller が報告と引継ぎを続けられる量を残す。
+- `daily-allocation`：その UTC 日に記録した最初の残り率から、
+  （最初の残り率 − 5%）÷ リセットまでの UTC 日数（当日を含む）以上減っている。
+  次の UTC 日（日本時間9時）に判定し直す。
+
+リセット日時は Copilot の認証情報にある `quota_reset_date_utc` から取得する。
+取得できない場合は日割りの判定を行わず、5%の判定だけを行う。
+枠を使い切った場合は、提供元が超過利用を許可していても拒否する。
+残り率は単位に依存しないため、request 数、AI Credit、nano-AIU の間で換算しない。
+OpenCode のように account quota を読めない runtime では、この判定は行われず、
+時間の期限だけが適用される。
 既存 workspace の `maxTokens` と `BUDGET_LIMIT` は履歴互換のため読み取るが、
 新規実行の入力・停止条件には使わない。停止済み Flow の結果は書き換えず、
 継続には新しい Task の承認が必要となる。

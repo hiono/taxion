@@ -62,6 +62,7 @@ func TestAccountQuotaUsesOnlyAuthAndReadRPC(t *testing.T) {
 				{"connect", `{"protocolVersion":3}`},
 				{"auth.getStatus", `{"isAuthenticated":true,"login":"fixture","host":"github.com"}`},
 				{"account.getQuota", `{"quotaSnapshots":{"premium_interactions":{"entitlementRequests":50000,"usedRequests":12300,"remainingPercentage":75.4,"resetDate":"2026-10-15T09:00:00Z"}}}`},
+				{"account.getCurrentAuth", `{"authInfo":{"type":"user","host":"https://github.com","login":"fixture","copilotUser":{"quota_reset_date_utc":"2099-11-01T00:00:00.000Z"}}}`},
 			} {
 				header, err := reader.ReadMIMEHeader()
 				if err != nil {
@@ -111,7 +112,7 @@ func TestAccountQuotaUsesOnlyAuthAndReadRPC(t *testing.T) {
 	result, err := adapter.ReadAccountQuota(ctx, "fixture")
 	if err != nil || result.State != "available" || *result.Entitlement != 50000 || *result.Used != 12300 ||
 		result.Remaining == nil || *result.Remaining != 37700 ||
-		*result.RemainingPercentage != 75.4 || result.ResetAt == nil || result.ExpiresAt != nil ||
+		*result.RemainingPercentage != 75.4 || result.ResetAt == nil || !result.ResetAt.Equal(time.Date(2099, 11, 1, 0, 0, 0, 0, time.UTC)) || result.ExpiresAt != nil ||
 		result.Unit != "requests" || len(adapter.sessions) != 0 || adapter.ConfigHash() != hash {
 		t.Fatal("read quota changed identity, created a session, or returned the wrong units", result, err)
 	}
