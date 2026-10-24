@@ -868,7 +868,9 @@ relationship reason を明示する。最初の Dispatch だけが `NONE` を使
 取得できた値を usage event に記録し、未取得値は未知として保持する。各 event は計測時刻とともに Dispatch に保存する。
 resume 時は role prompt、Dispatch snapshot、worktree、tool allowlist、permission policy を再指定し、設定 hash の一致を照合する。
 Copilot adapter の permission handler は、Coder に worktree 内の file write と allowlist 済み SDK tool の一回限りの利用を認め、
-Reviewer に worktree 内の file read を認める。shell request と worktree 外の file access は reject decision を返す。
+Reviewer に worktree 内の file read を認める。Coder の shell request は、allowlist に shell tool があり、
+worktree 内に閉じ、ネットワーク・sandbox bypass・Git の更新を含まない場合だけ一回限り認める（ADR-0047）。
+Reviewer の shell request と worktree 外の file access は reject decision を返す。
 この handler は SDK permission request を処理し、OS・Git・外部 tool は各実行環境の権限で動作する。
 
 CLI `runtime start` は保存済み Dispatch 指示を role 固有 system prompt に加えて session を作り、
