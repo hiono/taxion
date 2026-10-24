@@ -13,7 +13,18 @@ import release
 
 
 class ManifestTests(unittest.TestCase):
-    def fixture(self, root, version="0.7.9"):
+    def setUp(self):
+        def published(tag):
+            if tag == "v0.7.8":
+                names = ["taxion-v0.7.8-linux-amd64", "SHA256SUMS"]
+            else:
+                names = [path.name for path in release.published_assets(pathlib.Path(), tag)]
+            return {"tag_name": tag, "draft": False, "prerelease": False, "assets": [{"name": n} for n in names]}
+        patcher = mock.patch.object(release, "published_release", side_effect=published)
+        self.published = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def fixture(self, root, version="0.7.9", previous="v0.7.8"):
         info = {"schemaVersion": 1, "version": "v" + version, "channel": "github-release",
                 "sourceRevision": "a" * 40, "manifestUrl": f"https://github.com/hiono/taxion/releases/download/v{version}/release-manifest.json"}
         (root / ".release").mkdir()
@@ -21,7 +32,7 @@ class ManifestTests(unittest.TestCase):
         dist = root / "dist"
         dist.mkdir()
         (dist / "metadata.json").write_text(json.dumps({
-            "project_name": "taxion", "tag": "v" + version, "previous_tag": "v0.7.8",
+            "project_name": "taxion", "tag": "v" + version, "previous_tag": previous,
             "version": version, "commit": info["sourceRevision"], "date": "2026-10-23T00:00:00Z",
             "runtime": {"goos": "linux", "goarch": "amd64"},
         }))
@@ -88,12 +99,46 @@ class ManifestTests(unittest.TestCase):
     def test_new_patch_rollback_policy_uses_all_published_079_platforms(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
-            dist = self.fixture(root, "0.7.10")
+            dist = self.fixture(root, "0.7.10", "v0.7.9")
             with contextlib.chdir(root), mock.patch.dict(os.environ, GITHUB_RUN_ID="12345"), mock.patch.object(release, "command", return_value="go1.27.2"):
                 release.manifest(dist, "v0.7.10")
             document = json.loads((dist / "release-manifest.json").read_text())
             self.assertEqual(document["rollbackVersion"], "v0.7.9")
             self.assertEqual(set(document["rollbackPlatforms"]), {os + "-" + arch for os, arch in release.PLATFORMS})
+
+    def test_rollback_follows_previous_release_tag(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            dist = self.fixture(root, "0.7.12", "v0.7.11")
+            with contextlib.chdir(root), mock.patch.dict(os.environ, GITHUB_RUN_ID="12345"), mock.patch.object(release, "command", return_value="go1.27.2"):
+                release.manifest(dist, "v0.7.12")
+            document = json.loads((dist / "release-manifest.json").read_text())
+            self.assertEqual(document["rollbackVersion"], "v0.7.11")
+
+    def test_rollback_rejects_missing_or_prerelease_previous_tag(self):
+        for previous in ("", "v0.7.12-rc.1", "v0.7.12"):
+            with self.subTest(previous=previous), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                dist = self.fixture(root, "0.7.12", previous)
+                with contextlib.chdir(root), mock.patch.dict(os.environ, GITHUB_RUN_ID="12345"), mock.patch.object(release, "command", return_value="go1.27.2"):
+                    with self.assertRaisesRegex(ValueError, "previous formal release"):
+                        release.manifest(dist, "v0.7.12")
+                self.assertFalse((dist / "release-manifest.json").exists())
+
+    def test_rollback_rejects_unpublished_or_incomplete_previous_release(self):
+        complete = [{"name": p.name} for p in release.published_assets(pathlib.Path(), "v0.7.11")]
+        for target in ({"tag_name": "v0.7.11", "draft": True, "prerelease": False, "assets": complete},
+                       {"tag_name": "v0.7.11", "draft": False, "prerelease": True, "assets": complete},
+                       {"tag_name": "v0.7.11", "draft": False, "prerelease": False, "assets": complete[1:]}):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                dist = self.fixture(root, "0.7.12", "v0.7.11")
+                self.published.side_effect = None
+                self.published.return_value = target
+                with contextlib.chdir(root), mock.patch.dict(os.environ, GITHUB_RUN_ID="12345"), mock.patch.object(release, "command", return_value="go1.27.2"):
+                    with self.assertRaisesRegex(ValueError, "published formal release"):
+                        release.manifest(dist, "v0.7.12")
+                self.assertFalse((dist / "release-manifest.json").exists())
 
     def test_workspace_rejection_precedes_all_release_writes(self):
         with tempfile.TemporaryDirectory() as temporary:
