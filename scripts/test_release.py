@@ -121,7 +121,7 @@ class ManifestTests(unittest.TestCase):
             self.published.assert_called_with("v0.7.11")
 
     def test_rollback_rejects_missing_older_formal_release(self):
-        for tags in ([], ["v0.7.12"], ["v0.7.12-rc.1", "v0.8.0", "local"]):
+        for tags in ([], ["v0.7.12"], ["v0.7.12-rc.1", "v0.8.0", "local", "v0.07.11", "v00.7.1"]):
             with self.subTest(tags=tags), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
                 dist = self.fixture(root, "0.7.12", "v0.7.11")
