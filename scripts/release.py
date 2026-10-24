@@ -44,6 +44,27 @@ def published_release(tag):
     return json.loads(command("gh", "api", "repos/hiono/taxion/releases/tags/" + tag))
 
 
+def published_formal_tags():
+    output = command("gh", "api", "--paginate", "repos/hiono/taxion/releases",
+                     "--jq", ".[] | select(.draft | not) | select(.prerelease | not) | .tag_name")
+    return output.split()
+
+
+def formal_version(tag):
+    match = re.fullmatch(r"v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})", tag)
+    return tuple(map(int, match.groups())) if match else None
+
+
+def rollback_target(tag):
+    current = formal_version(tag)
+    older = [t for t in published_formal_tags() if current and formal_version(t) and formal_version(t) < current]
+    if not older:
+        raise ValueError("rollback requires the previous formal release tag")
+    rollback = max(older, key=formal_version)
+    require_published_rollback(rollback)
+    return rollback
+
+
 def require_published_rollback(tag):
     release = published_release(tag)
     names = {asset["name"] for asset in release.get("assets", [])}
@@ -125,10 +146,7 @@ def build_metadata(dist, tag, snapshot=False):
 
 def manifest(dist, tag):
     info, build = build_metadata(dist, tag)
-    rollback = build.get("previous_tag", "")
-    if not re.fullmatch(r"v\d+\.\d+\.\d+", rollback) or rollback == tag:
-        raise ValueError("rollback requires the previous formal release tag")
-    require_published_rollback(rollback)
+    rollback = rollback_target(tag)
     artifacts = []
     sums = (dist / "SHA256SUMS").read_text()
     for target_os, arch in PLATFORMS:

@@ -23,6 +23,9 @@ class ManifestTests(unittest.TestCase):
         patcher = mock.patch.object(release, "published_release", side_effect=published)
         self.published = patcher.start()
         self.addCleanup(patcher.stop)
+        tags = mock.patch.object(release, "published_formal_tags", return_value=["v0.7.11", "v0.7.10", "v0.7.9", "v0.7.8"])
+        self.tags = tags.start()
+        self.addCleanup(tags.stop)
 
     def fixture(self, root, version="0.7.9", previous="v0.7.8"):
         info = {"schemaVersion": 1, "version": "v" + version, "channel": "github-release",
@@ -106,20 +109,23 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(document["rollbackVersion"], "v0.7.9")
             self.assertEqual(set(document["rollbackPlatforms"]), {os + "-" + arch for os, arch in release.PLATFORMS})
 
-    def test_rollback_follows_previous_release_tag(self):
+    def test_rollback_skips_unpublished_tags_and_uses_newest_older_release(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
-            dist = self.fixture(root, "0.7.12", "v0.7.11")
+            dist = self.fixture(root, "0.7.13", "v0.7.12")
+            self.tags.return_value = ["v0.7.9", "v0.7.11", "v0.7.14", "v0.7.10"]
             with contextlib.chdir(root), mock.patch.dict(os.environ, GITHUB_RUN_ID="12345"), mock.patch.object(release, "command", return_value="go1.27.2"):
-                release.manifest(dist, "v0.7.12")
+                release.manifest(dist, "v0.7.13")
             document = json.loads((dist / "release-manifest.json").read_text())
             self.assertEqual(document["rollbackVersion"], "v0.7.11")
+            self.published.assert_called_with("v0.7.11")
 
-    def test_rollback_rejects_missing_or_prerelease_previous_tag(self):
-        for previous in ("", "v0.7.12-rc.1", "v0.7.12"):
-            with self.subTest(previous=previous), tempfile.TemporaryDirectory() as temporary:
+    def test_rollback_rejects_missing_older_formal_release(self):
+        for tags in ([], ["v0.7.12"], ["v0.7.12-rc.1", "v0.8.0", "local", "v0.07.11", "v00.7.1", "v0.7.1\u0661"]):
+            with self.subTest(tags=tags), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
-                dist = self.fixture(root, "0.7.12", previous)
+                dist = self.fixture(root, "0.7.12", "v0.7.11")
+                self.tags.return_value = tags
                 with contextlib.chdir(root), mock.patch.dict(os.environ, GITHUB_RUN_ID="12345"), mock.patch.object(release, "command", return_value="go1.27.2"):
                     with self.assertRaisesRegex(ValueError, "previous formal release"):
                         release.manifest(dist, "v0.7.12")
