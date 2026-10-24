@@ -58,6 +58,74 @@ func TestSteppedFlowWaitsForHumanBetweenRoles(t *testing.T) {
 	testFlowRunsRepairAndNewSHAReview(t, true)
 }
 
+func TestReviewBudgetReportsEffectiveDeadlineWithoutChangingContract(t *testing.T) {
+	flow := core.ReviewFlow{ID: "flow", Deadline: time.Now().UTC().Add(time.Hour)}
+	dispatch := core.GraphDispatch{ID: "review", Recipient: "REVIEWER"}
+	for _, source := range []string{"flow", "caller", "expired"} {
+		t.Run(source, func(t *testing.T) {
+			ctx := t.Context()
+			deadline := flow.Deadline
+			wantSource := "flow"
+			if source != "flow" {
+				deadline, wantSource = time.Now().Add(time.Minute), "caller"
+				if source == "expired" {
+					deadline = time.Now().Add(-time.Second)
+				}
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithDeadline(ctx, deadline)
+				defer cancel()
+			}
+			var out bytes.Buffer
+			before := flow
+			if err := writeReviewBudget(ctx, &out, flow, dispatch); err != nil {
+				t.Fatal(err)
+			}
+			var event runtime.Event
+			if err := json.Unmarshal(out.Bytes(), &event); err != nil || event.Type != "review_budget" {
+				t.Fatal("missing versioned review-budget event", err)
+			}
+			var body struct {
+				Version               int       `json:"version"`
+				FlowID                string    `json:"flowId"`
+				DispatchID            string    `json:"dispatchId"`
+				ObservedAt            time.Time `json:"observedAt"`
+				FlowDeadline          time.Time `json:"flowDeadline"`
+				EffectiveDeadline     time.Time `json:"effectiveDeadline"`
+				DeadlineSource        string    `json:"deadlineSource"`
+				RemainingMilliseconds int64     `json:"remainingMilliseconds"`
+			}
+			if err := json.Unmarshal([]byte(event.Payload), &body); err != nil ||
+				body.Version != 1 || body.FlowID != flow.ID || body.DispatchID != dispatch.ID ||
+				!body.FlowDeadline.Equal(flow.Deadline) || !body.EffectiveDeadline.Equal(deadline) ||
+				body.DeadlineSource != wantSource ||
+				body.RemainingMilliseconds != max(deadline.Sub(body.ObservedAt).Milliseconds(), 0) ||
+				!flow.Deadline.Equal(before.Deadline) {
+				t.Fatalf("incorrect effective deadline: %+v err=%v", body, err)
+			}
+		})
+	}
+	if err := writeReviewBudget(t.Context(), failingWriter{}, flow, dispatch); err == nil {
+		t.Fatal("review budget output failure was ignored")
+	}
+}
+
+func TestReviewBudgetOutputFailureDoesNotStartReviewer(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executeFlowDispatch(t, db, flow, "", true)
+	calls := 0
+	flow, err = RunReviewFlow(t.Context(), db, ledger, flow.ID, func(core.GraphDispatch) (runtime.Identity, error) {
+		calls++
+		return nil, errors.New("unexpected runtime creation")
+	}, failingWriter{})
+	if err == nil || !strings.Contains(err.Error(), "write review budget") || calls != 0 || flow.Status != "STOPPED" || flow.RunnerID != "" {
+		t.Fatalf("output failure started a Reviewer or left its runner claimed: %+v calls=%d err=%v", flow, calls, err)
+	}
+}
+
 func TestCreditStatusDoesNotInferUnavailableNanoAIUOrAccountBalance(t *testing.T) {
 	var output bytes.Buffer
 	dispatch := core.GraphDispatch{ID: "dispatch-1", Recipient: "PLANNER"}

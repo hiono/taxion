@@ -26,17 +26,18 @@ const (
 // RepairStatus tells a controller whether the next repair is an internal
 // transition (ADR-0043) or needs Human action. It is an observation only.
 type RepairStatus struct {
-	Version      int      `json:"version"`
-	FlowID       string   `json:"flowId"`
-	TaskID       string   `json:"taskId"`
-	FlowStatus   string   `json:"flowStatus"`
-	StopCode     string   `json:"stopCode,omitempty"`
-	Status       string   `json:"status"`
-	Repairs      int      `json:"repairs"`
-	MaxRepairs   int      `json:"maxRepairs"`
-	Reasons      []string `json:"reasons"`
-	NextAction   string   `json:"nextAction"`
-	StateChanged bool     `json:"stateChanged"`
+	ReviewContinuationCandidate string   `json:"reviewContinuationCandidate,omitempty"`
+	Version                     int      `json:"version"`
+	FlowID                      string   `json:"flowId"`
+	TaskID                      string   `json:"taskId"`
+	FlowStatus                  string   `json:"flowStatus"`
+	StopCode                    string   `json:"stopCode,omitempty"`
+	Status                      string   `json:"status"`
+	Repairs                     int      `json:"repairs"`
+	MaxRepairs                  int      `json:"maxRepairs"`
+	Reasons                     []string `json:"reasons"`
+	NextAction                  string   `json:"nextAction"`
+	StateChanged                bool     `json:"stateChanged"`
 }
 
 // ObserveRepairStatus classifies the saved Flow without changing state.
@@ -76,6 +77,31 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 		if _, ok := state.Graph.MatchingApproval(task.ID, flow.Contract, configuration); !ok {
 			return set(RepairReapprovalRequired, "no saved ApprovalBundle covers the contract and effective configuration", "obtain Human approval of a new contract")
 		}
+	}
+	candidateID := last.ID
+	if last.Recipient == "REVIEWER" {
+		candidateID = last.RelatedID
+	}
+	if state.Graph.HasBudgetContinuationSource(flow, candidateID) {
+		coder, _ := state.Graph.GraphDispatch(candidateID)
+		if err := validateResultReceipt(&state, coder); err != nil {
+			return set(RepairInvalid, "completed Coder receipt requires reconciliation: "+err.Error(), humanNext)
+		}
+		if last.ID != coder.ID {
+			if err := validateResultReceipt(&state, last); err != nil {
+				return set(RepairInvalid, "stopped Reviewer receipt requires reconciliation: "+err.Error(), humanNext)
+			}
+		}
+		status.ReviewContinuationCandidate = coder.ID
+		value := RepairHumanDecision
+		if flow.StopCode == "BUDGET_STOP" || flow.StopCode == "BUDGET_LIMIT" {
+			value = RepairCeilingExhausted
+		} else if flow.StopCode == "RECONTRACT" {
+			value = RepairReapprovalRequired
+		}
+		return set(value, "saved completed Coder output is a candidate for review-only continuation; this observation grants no execution authority",
+			"obtain Human approval for a successor Task and a new review budget using continueFromDispatchId="+coder.ID+
+				"; revalidate receipts, Git target and configuration before review; do not rerun the completed Coder")
 	}
 	reviewRepair := last.Recipient == "REVIEWER" && last.Status == core.DispatchSucceeded &&
 		last.Result != nil && last.Result.ReviewVerdict == "REQUEST_CHANGES"

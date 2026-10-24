@@ -42,6 +42,19 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 
 `workflow recover` は runner の所有権を解放する操作であり、停止条件を解除して同じ作業を再実行する操作ではない。続行には新しい Dispatch と、必要なら新しい予算の承認が要る。
 
+開発版では、`workflow repair-status --id <flow-id>` の
+`reviewContinuationCandidate` に成功済み Coder の Dispatch ID が表示される場合がある。
+保存結果の receipt と停止・所有権・引継ぎ保留の条件を確認した、レビュー専用継続の候補であり、
+実行許可ではない。新しい Task・レビュー予算の承認と対象 Git 成果物・設定の再照合を経て、
+`continueFromDispatchId` に候補を指定する。成功済み実装を最初からやり直す必要はない。
+対象が変わった場合や停止を確認できない場合は、候補を無条件で流用しない。
+停止した `workflow run`・`step`・`resume` は、期限エラーでも stderr に状態と次の操作を表示する。
+
+過去の結果や検証証拠を保ったまま、指示の入れ子だけを省く既存の
+`--compact-context` も利用できる。ただし既存 session の option と設定 hash を
+通知なしに変えて再接続しない。これらの機能は途中レビューの確認済み範囲や
+未確認範囲を自動で復元するものではなく、トークン削減の実測結果も示さない。
+
 handoff が hold されている場合、hold は次の role を止めるだけで、実行中の role を止めない。release する前に、表示された instruction、draft、結果の対象を確認する。
 
 ## lane が失敗した

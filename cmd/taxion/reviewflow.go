@@ -432,8 +432,8 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		if flow.ID == "" {
 			return err
 		}
-		reportStoppedRepair(db, storePath, flow.ID, err)
-		return errors.Join(printJSON(flow), err)
+		reportErr := reportStoppedRepair(os.Stderr, db, storePath, flow.ID, err)
+		return errors.Join(printJSON(flow), err, reportErr)
 	case "start":
 		input, err := os.Open(file)
 		if err != nil {
@@ -498,8 +498,8 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		if err != nil && !errors.Is(err, controller.ErrFlowStopped) && !errors.Is(err, core.ErrHandoffHeld) {
 			return err
 		}
-		reportStoppedRepair(db, storePath, id, err)
-		return errors.Join(printJSON(flow), err)
+		reportErr := reportStoppedRepair(os.Stderr, db, storePath, id, err)
+		return errors.Join(printJSON(flow), err, reportErr)
 	default:
 		flow, ok := state.Graph.ReviewFlow(id)
 		if !state.HasGraph || !ok {
@@ -538,18 +538,26 @@ func currentApprovalConfiguration() core.ApprovalConfiguration {
 
 // reportStoppedRepair tells the operator on stderr whether a stopped Flow
 // needs Human action, so the stop is not re-interpreted from prose.
-func reportStoppedRepair(db *store.Store, storePath, flowID string, err error) {
-	if !errors.Is(err, controller.ErrFlowStopped) {
-		return
+func reportStoppedRepair(out io.Writer, db *store.Store, storePath, flowID string, err error) error {
+	if err == nil {
+		return nil
 	}
 	state, loadErr := db.LoadWorkspace()
 	if loadErr != nil {
-		return
+		return fmt.Errorf("taxion: load stopped Flow status: %w", loadErr)
+	}
+	flow, ok := state.Graph.ReviewFlow(flowID)
+	if !ok {
+		return fmt.Errorf("taxion: Flow disappeared while reporting stop status")
+	}
+	if flow.Status != "STOPPED" {
+		return nil
 	}
 	status, statusErr := controller.ObserveRepairStatus(state, flowID, currentApprovalConfiguration())
 	if statusErr != nil {
-		return
+		return statusErr
 	}
-	fmt.Fprintf(os.Stderr, "taxion: repair status: %s (%d/%d repairs); next: %s\n", status.Status, status.Repairs, status.MaxRepairs, status.NextAction)
-	fmt.Fprintf(os.Stderr, "taxion: details: taxion --store %q workflow repair-status --id %q\n", storePath, flowID)
+	_, statusErr = fmt.Fprintf(out, "taxion: repair status: %s (%d/%d repairs); next: %s\n", status.Status, status.Repairs, status.MaxRepairs, status.NextAction)
+	_, detailsErr := fmt.Fprintf(out, "taxion: details: taxion --store %q workflow repair-status --id %q\n", storePath, flowID)
+	return errors.Join(statusErr, detailsErr)
 }

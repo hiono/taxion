@@ -408,6 +408,26 @@ local 検査は登録 SDK stage・commit handler を Controller・実 Git で呼
 
 ## event 購読の期間
 
+開発版の共通 runner は、Reviewer の作業場所を準備した後、runtime factory を呼ぶ前に
+`review_budget` を合成する。version 1 の payload は保存 Flow の期限と、
+呼出し元 context を含む実効期限、出典、観測時刻、残り milliseconds を報告する。
+これは一回の観測であり、承認時間を再設定せず、十分なレビュー時間の予測もしない。
+既存の adapter event、結果 receipt、保存契約の schema は変更しない。
+出力失敗では runtime を開始せず、runner の既存停止処理で所有権を解放する。
+
+`workflow repair-status` の `reviewContinuationCandidate` は省略可能な観測項目である。
+既存の `HasBudgetContinuationSource` と結果 receipt の検証を再利用し、
+候補に対して新しい Task・予算の承認と実行前の Git・設定再照合を案内する。
+停止条件や独立レビューの権限を緩める新しい復旧経路は設けない。
+途中レビューの検査記録の抽出・引継ぎと、消費量削減の実測は別の未完了項目である。
+
+この変更は `TestReviewBudget*`、`TestObserveRepairStatus*`、
+`TestWorkflowCommandsPersistAuthorizedCeilings` と既存の成功済み Coder 継続テストで
+検証する。`go build ./...`、`go vet ./...`、`go test ./...` と、
+これらを対象とした Controller・CLI の `go test -race` をローカルで実行した。
+実 account のモデル実行、途中の思考状態の復元、課金削減率は検証していない。
+旧版への切替で表示は失われるが、保存した停止状態と結果を書き換える必要はない。
+
 adapter は、現在の instance が記録した event を再送してから、新しい event を購読する。Copilot は message、turn、failure、cancellation、usage、context-window、compaction、permission-decision の正規化 event を出す。usage は対応する Dispatch とともに保存する。Controller は各 usage の直後に `credit_status` を合成し、取得できた call 別 nano-AIU と完全性状態、session ceiling を報告する。Dispatch が account quota 読取りを承認している場合は、SDK から取得した `premium_interactions` の request 枠も別項目で報告する。これは AI Credit とは異なる単位であり、残高へ換算しない。AI Credit の account 残高・使用率・残り率は同単位の allowance が確認できない場合 `unavailable` とする。合成 event は保存済み provider usage を変更しない。context・compaction event は、取得できた場合に SDK の token 上限と圧縮結果を報告する。
 
 turn が終わっても、同じ role の次の指示に使う session stream は残る。stop は stream を閉じる。購読 context の cancel は、その購読だけを閉じる。利用側は session の終了だけを待たず、自身の context も監視する必要がある。

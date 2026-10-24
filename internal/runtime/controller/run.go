@@ -115,6 +115,9 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 			if err != nil {
 				break
 			}
+			if err = writeReviewBudget(runCtx, out, flow, dispatch); err != nil {
+				break
+			}
 		}
 		var worker runtime.Identity
 		worker, err = factory(dispatch)
@@ -190,6 +193,31 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 		}
 	}
 	return flow, errors.Join(err, saveErr)
+}
+
+func writeReviewBudget(ctx context.Context, out io.Writer, flow core.ReviewFlow, dispatch core.GraphDispatch) error {
+	now := time.Now().UTC()
+	deadline, source := flow.Deadline, "flow"
+	if caller, ok := ctx.Deadline(); ok && caller.Before(deadline) {
+		deadline, source = caller, "caller"
+	}
+	payload, err := json.Marshal(struct {
+		Version               int       `json:"version"`
+		FlowID                string    `json:"flowId"`
+		DispatchID            string    `json:"dispatchId"`
+		ObservedAt            time.Time `json:"observedAt"`
+		FlowDeadline          time.Time `json:"flowDeadline"`
+		EffectiveDeadline     time.Time `json:"effectiveDeadline"`
+		DeadlineSource        string    `json:"deadlineSource"`
+		RemainingMilliseconds int64     `json:"remainingMilliseconds"`
+	}{1, flow.ID, dispatch.ID, now, flow.Deadline, deadline, source, max(deadline.Sub(now).Milliseconds(), 0)})
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(out).Encode(runtime.Event{Type: "review_budget", Payload: string(payload)}); err != nil {
+		return fmt.Errorf("taxion: write review budget before runtime startup: %w", err)
+	}
+	return nil
 }
 
 func writeCreditStatus(ctx context.Context, encoder *json.Encoder, dispatch core.GraphDispatch, event runtime.Event, worker runtime.Identity) error {

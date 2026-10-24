@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,6 +124,7 @@ func TestObserveRepairStatusCeilingBeforeAndAfterStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	executeFlowDispatch(t, db, started, "", true)
 	flow, err := AdvanceReviewFlow(db, ledger, started.ID)
 	if err != nil {
@@ -143,5 +145,96 @@ func TestObserveRepairStatusCeilingBeforeAndAfterStop(t *testing.T) {
 		if err != nil || status.Status != RepairCeilingExhausted {
 			t.Fatalf("stopped=%v status = %+v, %v", stop, status, err)
 		}
+	}
+}
+
+func TestObserveRepairStatusSuggestsReviewOnlyAfterConfirmedStop(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coder := executeFlowDispatch(t, db, flow, "", true)
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := flow.DispatchIDs[len(flow.DispatchIDs)-1]
+	dispatch, err := prepareReview(t.Context(), db, id, flow.Contract.Worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := &fakeRuntime{role: "REVIEWER", hash: "review-config", worktree: dispatch.Instruction.Worktree}
+	control, err := New(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := stopFlowForBudget(db, flow.ID, "elapsed budget reached"); err != nil {
+		t.Fatal(err)
+	}
+	beforeStop, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := ObserveRepairStatus(beforeStop, flow.ID, core.ApprovalConfiguration{})
+	if err != nil || pending.ReviewContinuationCandidate != "" {
+		t.Fatal("unconfirmed Reviewer stop offered continuation", err)
+	}
+	if err := control.Stop(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := string(mustFlowJSON(t, state))
+	status, err := ObserveRepairStatus(state, flow.ID, core.ApprovalConfiguration{})
+	if err != nil || status.Status != RepairCeilingExhausted || status.ReviewContinuationCandidate != coder.ID ||
+		!strings.Contains(status.NextAction, "do not rerun the completed Coder") || status.StateChanged {
+		t.Fatalf("saved output was not offered as a reapproval-only candidate: %+v err=%v", status, err)
+	}
+	if string(mustFlowJSON(t, state)) != before {
+		t.Fatal("read-only continuation observation changed the workspace")
+	}
+	for _, failure := range []string{"claim", "missing-stop", "wrong-relation", "missing-coder-receipt"} {
+		t.Run(failure, func(t *testing.T) {
+			candidate, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch failure {
+			case "claim":
+				f, _ := candidate.Graph.ReviewFlow(flow.ID)
+				f.RunnerID = "unreconciled-runner"
+				storeFlow(&candidate, f)
+			case "missing-stop", "wrong-relation":
+				for index := range candidate.Graph.Dispatches {
+					d := &candidate.Graph.Dispatches[index]
+					if d.ID != id {
+						continue
+					}
+					if failure == "missing-stop" {
+						d.Result.Evidence = nil
+					} else {
+						d.RelatedID = "other-coder"
+					}
+				}
+			case "missing-coder-receipt":
+				events := candidate.Records.Events[:0]
+				for _, receipt := range candidate.Records.Events {
+					if receipt.DispatchID != coder.ID || receipt.Type != "verified-result" {
+						events = append(events, receipt)
+					}
+				}
+				candidate.Records.Events = events
+			}
+			status, err := ObserveRepairStatus(candidate, flow.ID, core.ApprovalConfiguration{})
+			if err != nil || status.ReviewContinuationCandidate != "" {
+				t.Fatal("unreconciled evidence offered review-only continuation", err)
+			}
+		})
 	}
 }
