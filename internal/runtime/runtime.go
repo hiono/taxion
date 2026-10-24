@@ -130,6 +130,7 @@ type QuotaSnapshot struct {
 	RemainingPercentage *float64   `json:"remainingPercentage,omitempty"`
 	Unlimited           bool       `json:"unlimited,omitempty"`
 	ExecutionDenied     bool       `json:"executionDenied,omitempty"`
+	DenialReason        string     `json:"denialReason,omitempty"`
 }
 
 // AccountQuota reads only the selected account, without a model turn.

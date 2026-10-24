@@ -232,6 +232,12 @@ func (c *Controller) SendWithBudgetGuidance(ctx context.Context, dispatchID, pro
 	if err != nil {
 		return errors.Join(err, c.recordBudgetGuidance(dispatch, observation, "denied", err))
 	}
+	refreshQuotaState(observation, time.Now().UTC())
+	if observation != nil && observation.Account != nil && observation.Account.State == "available" &&
+		observation.Account.ExecutionDenied {
+		return errors.Join(accountDenial(observation.Account),
+			c.recordBudgetGuidance(dispatch, observation, "denied", nil))
+	}
 	if err := c.markRunning(ctx, dispatchID); err != nil {
 		return err
 	}
@@ -244,11 +250,6 @@ func (c *Controller) SendWithBudgetGuidance(ctx context.Context, dispatchID, pro
 	supplement, err := budgetSupplement(observation)
 	if err != nil {
 		return err
-	}
-	if observation != nil && observation.Account != nil && observation.Account.State == "available" &&
-		observation.Account.ExecutionDenied {
-		return errors.Join(fmt.Errorf("taxion: account entitlement exhausted; paid overage is not authorized"),
-			c.recordBudgetGuidance(dispatch, observation, "denied", nil))
 	}
 	if err := c.recordBudgetGuidance(dispatch, observation, "prepared", nil); err != nil {
 		return err
