@@ -1,12 +1,23 @@
 package provenance
 
+import (
+	"regexp"
+	"strconv"
+)
+
+var formalVersion = regexp.MustCompile(`^v(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$`)
+
 // Historical releases retain their original policy. Only published platform
 // combinations are valid; no source-build or cross-platform fallback exists.
-func validRollbackPolicy(version string, platforms []string) bool {
+// Publication itself is checked when the manifest is generated.
+func validRollbackPolicy(version, current string, platforms []string) bool {
+	if !olderVersion(version, current) {
+		return false
+	}
 	if version == "v0.7.8" {
 		return len(platforms) == 1 && platforms[0] == "linux-amd64"
 	}
-	if version != "v0.7.9" || len(platforms) != 6 {
+	if !olderVersion("v0.7.8", version) || len(platforms) != 6 {
 		return false
 	}
 	seen := map[string]bool{}
@@ -22,4 +33,22 @@ func validRollbackPolicy(version string, platforms []string) bool {
 		seen[platform] = true
 	}
 	return true
+}
+
+func olderVersion(a, b string) bool {
+	x, y := formalVersion.FindStringSubmatch(a), formalVersion.FindStringSubmatch(b)
+	if x == nil || y == nil {
+		return false
+	}
+	for i := 1; i <= 3; i++ {
+		p, errP := strconv.Atoi(x[i])
+		q, errQ := strconv.Atoi(y[i])
+		if errP != nil || errQ != nil {
+			return false
+		}
+		if p != q {
+			return p < q
+		}
+	}
+	return false
 }
