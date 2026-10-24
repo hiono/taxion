@@ -18,6 +18,16 @@ import (
 )
 
 func run(args []string, output, warnings io.Writer) error {
+	if len(args) > 0 && args[0] == "-github-identifiers" {
+		if len(args) != 1 {
+			return fmt.Errorf("github identifier checks cannot be combined with other modes")
+		}
+		if err := checkGitHubIdentifiers(); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintln(output, "Protected identifier checks passed for the GitHub event.")
+		return err
+	}
 	if len(args) > 0 && (args[0] == "-review-basis" || args[0] == "-release-review-basis") {
 		return reviewBasis(args, output)
 	}
