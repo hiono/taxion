@@ -238,7 +238,7 @@ func Verify(policy Policy, storeDirectory string, identity Identity) (Report, er
 		manifest.ReleaseURL != "https://github.com/hiono/taxion/releases/tag/"+identity.Version ||
 		manifest.MiseIdentifier != "github:hiono/taxion@"+strings.TrimPrefix(identity.Version, "v") ||
 		manifest.RollbackVersion == manifest.Version ||
-		!validRollbackPolicy(manifest.RollbackVersion, manifest.RollbackPlatforms) || len(manifest.Artifacts) != 6 {
+		!validRollbackPolicy(manifest.RollbackVersion, manifest.Version, manifest.RollbackPlatforms) || len(manifest.Artifacts) != 6 {
 		return report, fmt.Errorf("unsupported manifest or release identity mismatch")
 	}
 	checksums, err := Read(policy.ChecksumsPath, 1<<20)
