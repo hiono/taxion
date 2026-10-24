@@ -51,7 +51,7 @@ def published_formal_tags():
 
 
 def formal_version(tag):
-    match = re.fullmatch(r"v(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})", tag)
+    match = re.fullmatch(r"v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})", tag)
     return tuple(map(int, match.groups())) if match else None
 
 
