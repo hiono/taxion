@@ -53,7 +53,41 @@ func (a *Adapter) ReadAccountQuota(ctx context.Context, expectedAccount string) 
 		result.State, result.Reason = "unsupported", "SDK did not return the selected quota resource"
 		return result, nil
 	}
-	return mapQuota(result, snapshot), nil
+	result = mapQuota(result, snapshot)
+	// account.getQuota reports the observation time as resetDate; the subscription reset
+	// is only exposed on the authenticated user's Copilot snapshot.
+	result.ResetAt = nil
+	if auth, err := a.client.RPC.Account.GetCurrentAuth(ctx); err == nil {
+		result.ResetAt = quotaResetAt(auth, result.ObservedAt)
+	}
+	return result, nil
+}
+
+func quotaResetAt(auth *rpc.AccountGetCurrentAuthResult, observedAt time.Time) *time.Time {
+	if auth == nil || auth.AuthInfo == nil {
+		return nil
+	}
+	body, err := json.Marshal(auth.AuthInfo)
+	if raw, ok := auth.AuthInfo.(rpc.RawAuthInfoData); ok {
+		body, err = raw.Raw, nil
+	}
+	if err != nil {
+		return nil
+	}
+	var info struct {
+		CopilotUser *struct {
+			QuotaResetDateUTC *string `json:"quota_reset_date_utc"`
+		} `json:"copilotUser"`
+	}
+	if json.Unmarshal(body, &info) != nil || info.CopilotUser == nil || info.CopilotUser.QuotaResetDateUTC == nil {
+		return nil
+	}
+	reset, err := time.Parse(time.RFC3339, *info.CopilotUser.QuotaResetDateUTC)
+	if err != nil || !reset.After(observedAt) {
+		return nil
+	}
+	reset = reset.UTC()
+	return &reset
 }
 
 func (a *Adapter) SessionCreditCeiling() float64 {
@@ -68,7 +102,6 @@ func mapQuota(result runtime.QuotaSnapshot, snapshot rpc.AccountQuotaSnapshot) r
 		return result
 	}
 	result.State = "available"
-	result.ResetAt = snapshot.ResetDate
 	result.Unlimited = snapshot.IsUnlimitedEntitlement || snapshot.EntitlementRequests == -1
 	result.Entitlement, result.Used = &snapshot.EntitlementRequests, &snapshot.UsedRequests
 	if !result.Unlimited {
