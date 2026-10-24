@@ -40,6 +40,21 @@ def published_assets(dist, tag):
             ]
 
 
+def published_release(tag):
+    return json.loads(command("gh", "api", "repos/hiono/taxion/releases/tags/" + tag))
+
+
+def require_published_rollback(tag):
+    release = published_release(tag)
+    names = {asset["name"] for asset in release.get("assets", [])}
+    if tag == "v0.7.8":
+        required = {"taxion-v0.7.8-linux-amd64", "SHA256SUMS"}
+    else:
+        required = {path.name for path in published_assets(pathlib.Path(), tag)}
+    if release.get("tag_name") != tag or release.get("draft") or release.get("prerelease") or not required <= names:
+        raise ValueError("rollback target is not a published formal release with all required assets: " + tag)
+
+
 def verify_published(dist, public, tag):
     for original in published_assets(dist, tag):
         if original.read_bytes() != (public / original.name).read_bytes():
@@ -110,6 +125,10 @@ def build_metadata(dist, tag, snapshot=False):
 
 def manifest(dist, tag):
     info, build = build_metadata(dist, tag)
+    rollback = build.get("previous_tag", "")
+    if not re.fullmatch(r"v\d+\.\d+\.\d+", rollback) or rollback == tag:
+        raise ValueError("rollback requires the previous formal release tag")
+    require_published_rollback(rollback)
     artifacts = []
     sums = (dist / "SHA256SUMS").read_text()
     for target_os, arch in PLATFORMS:
@@ -138,8 +157,8 @@ def manifest(dist, tag):
         "goreleaserVersion": GORELEASER, "artifacts": artifacts,
         "checksumsSha256": sha((dist / "SHA256SUMS").read_bytes()),
         "miseIdentifier": "github:hiono/taxion@" + tag[1:],
-        "rollbackVersion": "v0.7.8" if tag == "v0.7.9" else "v0.7.9",
-        "rollbackPlatforms": ["linux-amd64"] if tag == "v0.7.9" else [system + "-" + arch for system, arch in PLATFORMS],
+        "rollbackVersion": rollback,
+        "rollbackPlatforms": ["linux-amd64"] if rollback == "v0.7.8" else [system + "-" + arch for system, arch in PLATFORMS],
         "releaseUrl": "https://github.com/hiono/taxion/releases/tag/" + tag,
         "generatedBy": "hiono/taxion/.github/workflows/release.yml",
         "ciRun": "https://github.com/hiono/taxion/actions/runs/" + os.environ["GITHUB_RUN_ID"],
