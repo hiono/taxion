@@ -867,6 +867,11 @@ func coderPermissionDecision(worktree string, availableTools []string, fileAcces
 			return reject()
 		}
 		return &rpc.PermissionDecisionApproveOnce{}
+	case *sdk.PermissionRequestShell:
+		if reason := coderShellRejection(worktree, availableTools, permission); reason != "" {
+			return &rpc.PermissionDecisionReject{Feedback: &reason}
+		}
+		return &rpc.PermissionDecisionApproveOnce{}
 	case *sdk.PermissionRequestCustomTool:
 		if slices.Contains(availableTools, permission.ToolName) &&
 			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
@@ -876,6 +881,134 @@ func coderPermissionDecision(worktree string, availableTools []string, fileAcces
 	default:
 		return reject()
 	}
+}
+
+// Shell tool names that may carry PermissionRequestShell for a Coder.
+var coderShellTools = []string{"bash", "powershell"}
+
+// Commands that start nested interpreters, escalate privileges, reach the
+// network, or publish changes. Git is handled separately by subcommand.
+var coderShellDenied = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true, "pwsh": true, "powershell": true,
+	"cmd": true, "alias": true, "source": true, ".": true, "env": true, "eval": true, "exec": true, "xargs": true, "nohup": true, "setsid": true, "timeout": true,
+	"nice": true, "ionice": true, "stdbuf": true, "command": true, "builtin": true, "time": true, "taskset": true,
+	"chrt": true, "unshare": true, "nsenter": true, "flock": true, "script": true, "watch": true, "start": true,
+	"start-process": true, "invoke-expression": true, "iex": true, "invoke-command": true, "runas": true,
+	"sudo": true, "su": true, "doas": true, "chroot": true,
+	"invoke-webrequest": true, "invoke-restmethod": true, "iwr": true, "irm": true,
+	"gh": true, "curl": true, "wget": true, "ssh": true, "scp": true, "sftp": true, "rsync": true,
+	"nc": true, "ncat": true, "telnet": true, "ftp": true,
+}
+
+// Read-only git subcommands; commit, push, and other repository updates stay with the Controller.
+var coderShellGit = map[string]bool{
+	"status": true, "diff": true, "log": true, "show": true, "ls-files": true,
+	"rev-parse": true, "grep": true, "blame": true,
+}
+
+// coderShellIdentifier normalizes case, either path separator, and Windows executable suffixes.
+func coderShellIdentifier(identifier string) string {
+	identifier = strings.ToLower(identifier)
+	if index := strings.LastIndexAny(identifier, `/\`); index >= 0 {
+		identifier = identifier[index+1:]
+	}
+	for _, suffix := range []string{".exe", ".cmd", ".bat", ".com", ".ps1"} {
+		identifier = strings.TrimSuffix(identifier, suffix)
+	}
+	return identifier
+}
+
+// coderShellGitArgument rejects Git options that run programs or write files,
+// including bundled short options and abbreviated long options. Arguments are
+// literal because coderShellRejection refuses quoting and expansion in Git segments.
+func coderShellGitArgument(argument string) bool {
+	if strings.HasPrefix(argument, "-") && !strings.HasPrefix(argument, "--") {
+		return strings.Contains(argument, "O")
+	}
+	// Git rejects ambiguous abbreviations, so these prefixes cover --open-files-in-pager,
+	// --textconv, --output, and --ext-diff.
+	return strings.HasPrefix(argument, "--op") || strings.HasPrefix(argument, "--ou") || strings.HasPrefix(argument, "--ext") ||
+		strings.HasPrefix(argument, "--textc")
+}
+
+// coderShellRejection returns an empty string when a Coder shell request stays
+// inside the assigned worktree, has no network target, needs no sandbox bypass
+// or managed approval, and runs no denied command. Otherwise it returns the
+// feedback sent to the model.
+func coderShellRejection(worktree string, availableTools []string, request *sdk.PermissionRequestShell) string {
+	const prefix = "Coder shell is limited to local build, test, and inspection commands inside the assigned worktree: "
+	if !slices.ContainsFunc(coderShellTools, func(name string) bool { return slices.Contains(availableTools, name) }) {
+		return prefix + "shell is not in the approved Coder tool allowlist"
+	}
+	if request.RequestSandboxBypass != nil && *request.RequestSandboxBypass ||
+		request.ManagedApprovalRequired != nil && *request.ManagedApprovalRequired {
+		return prefix + "sandbox bypass and managed approval are not available"
+	}
+	if len(request.PossibleURLs) > 0 {
+		return prefix + "network access is not allowed"
+	}
+	base := worktree
+	if request.ResolvedWorkingDirectory != nil && *request.ResolvedWorkingDirectory != "" {
+		resolved, err := canonicalWriteTarget(worktree, *request.ResolvedWorkingDirectory)
+		if err != nil || !within(worktree, resolved) {
+			return prefix + "the working directory is outside the worktree"
+		}
+		base = resolved
+	}
+	for _, path := range request.PossiblePaths {
+		if resolved, ok := request.ResolvedPaths[path]; ok && resolved != "" {
+			path = resolved
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(base, path)
+		}
+		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if _, err := filepath.EvalSymlinks(path); err != nil {
+				return prefix + "a referenced path is a dangling symbolic link"
+			}
+		}
+		target, err := canonicalWriteTarget(worktree, path)
+		if err != nil || !within(worktree, target) {
+			return prefix + "a referenced path is outside the worktree"
+		}
+		if relative, err := filepath.Rel(worktree, target); err != nil ||
+			slices.Contains(strings.Split(filepath.ToSlash(relative), "/"), ".git") {
+			return prefix + "Git metadata is not available to the shell"
+		}
+	}
+	if text := strings.ToLower(request.FullCommandText); strings.Contains(text, "git_") || strings.Contains(text, "pager") {
+		return prefix + "Git environment and pager settings are not available to the shell"
+	}
+	if len(request.Commands) == 0 || len(request.CommandSegments) == 0 {
+		return prefix + "the command could not be parsed"
+	}
+	segments := map[string]bool{}
+	for _, segment := range request.CommandSegments {
+		segments[coderShellIdentifier(segment.Identifier)] = true
+	}
+	for _, command := range request.Commands {
+		identifier := coderShellIdentifier(command.Identifier)
+		if !segments[identifier] {
+			return prefix + "the command could not be parsed"
+		}
+		if coderShellDenied[identifier] {
+			return prefix + "the command is not allowed"
+		}
+	}
+	for _, segment := range request.CommandSegments {
+		identifier := coderShellIdentifier(segment.Identifier)
+		if coderShellDenied[identifier] {
+			return prefix + "the command is not allowed"
+		}
+		if identifier == "git" {
+			fields := strings.Fields(segment.FullCommandText)
+			if strings.ContainsAny(segment.FullCommandText, "'\"\\$`(){}[]*?~!<>|;&#") || len(fields) < 2 ||
+				!coderShellGit[fields[1]] || slices.ContainsFunc(fields[2:], coderShellGitArgument) {
+				return prefix + "only read-only git subcommands are allowed; the Controller commits and publishes"
+			}
+		}
+	}
+	return ""
 }
 
 func canonicalWriteTarget(worktree, target string) (string, error) {

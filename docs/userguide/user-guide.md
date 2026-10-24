@@ -386,6 +386,8 @@ taxion conversation proposal --task task-example
 
 `fileAccess` は Task の承認対象になる SDK file permission です。省略時も `committed` が適用され、Dispatch 開始時点で Git 追跡済みのパスだけを対象にします。新規ファイルなど特定の相対パスを許可する場合は `{"level":"exact","paths":["src/new-file.go"]}`、割当 worktree 全体を許可する場合は `{"level":"all"}` を指定します。`all` でも worktree 外と `.git` は許可されません。Reviewer はどの level でも読み取り専用です。これは `scope` による変更範囲、`--coder-tools` / `--reviewer-tools` による SDK tool allowlist とは別の制御です。
 
+`--coder-tools` に `bash`（Windows では `powershell`）を含めると、Coder は割当 worktree 内で build・test・差分確認のコマンドを実行できます。ネットワークを使うコマンド、`gh`、`git commit`・`git push` などの Git 更新、入れ子の shell、`.git` や worktree 外の path は拒否されます。この検査は SDK が解析したコマンドに対する拒否リストで、sandbox ではありません。`make`、インタープリタ、`find -exec` などが内部で起動するプロセスは対象外です。shell の結果は承認の根拠にならず、Controller の検証と独立レビューは引き続き必要です（ADR-0047）。Reviewer は shell を使えません。
+
 `outputMode` は省略時に `commit` となり、従来どおり commit SHA で成果物を識別します。commit を作らずにレビューする場合は `worktree-tree-snapshot` を選びます。この場合、Controller が `outputTreeSha` と変更 path を算出し、baseline commit から Reviewer 用の別 worktree に同じ tree を再現します。Controller は tree object をローカルの `refs/taxion/snapshots/` に保持します。branch、commit、実 index、remote は変更しませんが、Git ref は追加されます。Git tree に含まれない ignored file は Reviewer に渡らないため、成果物や検証結果に使わないでください。
 
 proposal の内容と hash を読み、目的・scope・file access・禁止範囲・acceptance・検証方法・repository・worktree が依頼に一致するか確認します。Taxion は依頼文から実行承認を推定しません。作業条件を直す場合は新しい Task ID で再提案します。
