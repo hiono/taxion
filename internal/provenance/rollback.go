@@ -5,7 +5,7 @@ import (
 	"strconv"
 )
 
-var formalVersion = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)
+var formalVersion = regexp.MustCompile(`^v(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$`)
 
 // Historical releases retain their original policy. Only published platform
 // combinations are valid; no source-build or cross-platform fallback exists.
