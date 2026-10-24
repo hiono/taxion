@@ -68,7 +68,11 @@ func TestCoderShellPermissionRejectsUnsafeRequests(t *testing.T) {
 	unparsed := &sdk.PermissionRequestShell{FullCommandText: "$(cat x)"}
 	mismatched := shellRequest("make test")
 	mismatched.Commands = append(mismatched.Commands, sdk.PermissionRequestShellCommand{Identifier: "git"})
+	if err := os.Symlink(filepath.Join(outside, "missing"), filepath.Join(worktree, "escape")); err != nil {
+		t.Fatal(err)
+	}
 	for name, request := range map[string]*sdk.PermissionRequestShell{
+		"dangling symlink":  shellRequest("touch escape", "escape"),
 		"outside path":      shellRequest("cat /etc/passwd", "/etc/passwd"),
 		"relative escape":   shellRequest("cat ../secret", "../secret"),
 		"git metadata":      shellRequest("rm -rf .git", ".git"),
@@ -98,6 +102,7 @@ func TestCoderShellPermissionRejectsUnsafeRequests(t *testing.T) {
 		"alias":             shellRequest("alias ll=ls"),
 		"git diff output":   shellRequest("git diff --output=/tmp/x"),
 		"git ext diff":      shellRequest("git diff --ext-diff"),
+		"git textconv":      shellRequest("git show --textconv HEAD"),
 		"git.exe push":      shellRequest("git.exe push origin HEAD"),
 		"windows gh":        shellRequest(`tools\GH.EXE auth token`),
 		"powershell.exe":    shellRequest("powershell.exe -Command Get-Date"),

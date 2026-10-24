@@ -925,9 +925,10 @@ func coderShellGitArgument(argument string) bool {
 	if strings.HasPrefix(argument, "-") && !strings.HasPrefix(argument, "--") {
 		return strings.Contains(argument, "O")
 	}
-	// Git rejects ambiguous abbreviations, so these prefixes cover
-	// --open-files-in-pager, --output, and --ext-diff.
-	return strings.HasPrefix(argument, "--op") || strings.HasPrefix(argument, "--ou") || strings.HasPrefix(argument, "--ext")
+	// Git rejects ambiguous abbreviations, so these prefixes cover --open-files-in-pager,
+	// --textconv, --output, and --ext-diff.
+	return strings.HasPrefix(argument, "--op") || strings.HasPrefix(argument, "--ou") || strings.HasPrefix(argument, "--ext") ||
+		strings.HasPrefix(argument, "--textc")
 }
 
 // coderShellRejection returns an empty string when a Coder shell request stays
@@ -960,6 +961,11 @@ func coderShellRejection(worktree string, availableTools []string, request *sdk.
 		}
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(base, path)
+		}
+		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if _, err := filepath.EvalSymlinks(path); err != nil {
+				return prefix + "a referenced path is a dangling symbolic link"
+			}
 		}
 		target, err := canonicalWriteTarget(worktree, path)
 		if err != nil || !within(worktree, target) {
