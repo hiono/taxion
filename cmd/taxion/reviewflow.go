@@ -32,7 +32,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return encoder.Encode(value)
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|resume|step|recover|handoff|interrupt|terminate|feedback-target|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|evaluate|lanes}")
+		return fmt.Errorf("usage: taxion workflow {start|advance|run|resume|step|recover|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|evaluate|lanes}")
 	}
 	action := args[0]
 	resumeSaved := action == "resume"
@@ -53,7 +53,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	switch action {
 	case "start", "recover", "handoff", "interrupt", "terminate", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve", "planner-draft", "planner-action", "question-draft":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
-	case "advance", "show", "evaluate", "feedback-target", "planning-context":
+	case "advance", "show", "evaluate", "feedback-target", "repair-status", "planning-context":
 		fs.StringVar(&id, "id", "", "review flow ID")
 		if action == "evaluate" {
 			fs.BoolVar(&requireQuality, "require-quality", false, "fail unless saved same-target acceptance includes documentation consistency; not publication approval")
@@ -99,7 +99,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	}
 	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "interrupt" || action == "terminate" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve" || action == "planner-draft" || action == "planner-action" || action == "question-draft"
 	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" && action != "lanes" {
-		return fmt.Errorf("workflow start, recover, handoff, interrupt, terminate, feedback, feedback-resolve, draft, draft-discard, draft-approve, planner-draft, planner-action and question-draft require --file; advance, run, step, show, evaluate, planning-context and feedback-target require --id")
+		return fmt.Errorf("workflow start, recover, handoff, interrupt, terminate, feedback, feedback-resolve, draft, draft-discard, draft-approve, planner-draft, planner-action and question-draft require --file; advance, run, step, show, evaluate, planning-context, feedback-target and repair-status require --id")
 	}
 	if action == "lanes" && taskID == "" {
 		return fmt.Errorf("workflow lanes requires --task")
@@ -136,7 +136,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		}
 		return nil
 	}
-	if action == "evaluate" {
+	if action == "evaluate" || action == "repair-status" {
 		db, err := store.OpenReadOnly(workspaceDBPath())
 		if err != nil {
 			return err
@@ -145,6 +145,13 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		state, err := db.LoadWorkspace()
 		if err != nil {
 			return err
+		}
+		if action == "repair-status" {
+			status, err := controller.ObserveRepairStatus(state, id, currentApprovalConfiguration())
+			if err != nil {
+				return err
+			}
+			return printJSON(status)
 		}
 		report, err := controller.EvaluateReviewFlow(state.Graph, id)
 		if err != nil {
@@ -425,6 +432,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		if flow.ID == "" {
 			return err
 		}
+		reportStoppedRepair(db, storePath, flow.ID, err)
 		return errors.Join(printJSON(flow), err)
 	case "start":
 		input, err := os.Open(file)
@@ -490,6 +498,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		if err != nil && !errors.Is(err, controller.ErrFlowStopped) && !errors.Is(err, core.ErrHandoffHeld) {
 			return err
 		}
+		reportStoppedRepair(db, storePath, id, err)
 		return errors.Join(printJSON(flow), err)
 	default:
 		flow, ok := state.Graph.ReviewFlow(id)
@@ -513,4 +522,34 @@ func runtimeTools(list string) ([]string, error) {
 		tools = append(tools, name)
 	}
 	return tools, nil
+}
+
+func currentApprovalConfiguration() core.ApprovalConfiguration {
+	resolved, err := resolveConfiguration()
+	if err != nil {
+		return core.ApprovalConfiguration{}
+	}
+	configuration, err := approvalConfigurationFor(resolved.Config, resolved.Sources)
+	if err != nil {
+		return core.ApprovalConfiguration{}
+	}
+	return configuration
+}
+
+// reportStoppedRepair tells the operator on stderr whether a stopped Flow
+// needs Human action, so the stop is not re-interpreted from prose.
+func reportStoppedRepair(db *store.Store, storePath, flowID string, err error) {
+	if !errors.Is(err, controller.ErrFlowStopped) {
+		return
+	}
+	state, loadErr := db.LoadWorkspace()
+	if loadErr != nil {
+		return
+	}
+	status, statusErr := controller.ObserveRepairStatus(state, flowID, currentApprovalConfiguration())
+	if statusErr != nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "taxion: repair status: %s (%d/%d repairs); next: %s\n", status.Status, status.Repairs, status.MaxRepairs, status.NextAction)
+	fmt.Fprintf(os.Stderr, "taxion: details: taxion --store %q workflow repair-status --id %q\n", storePath, flowID)
 }

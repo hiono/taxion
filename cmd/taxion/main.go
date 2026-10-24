@@ -64,6 +64,7 @@ Requests, planning and Task contracts:
   task authorize-packets  Preview/confirm a READY Task sequential packet lifecycle (--request JSON)
   task plan           Rebuild a follow-up plan from durable contracts and evidence (--repo required; --include-archived for history)
   gate <name>         Report the contract, resume, execution or publication gate without changing state (--task/--flow, --json)
+  workflow repair-status Report whether the next repair needs Human action, read-only (--id required)
 
 Dispatch and configuration binding:
   dispatch            Dispatch a task (--task and --repo required; revised Dispatches need an explicit relationship)
