@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -146,6 +147,18 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 	}
 	if err := workflowCmd([]string{"feedback-target", "--id", flow.ID}); err != nil {
 		t.Fatal(err)
+	}
+	var repairOutput bytes.Buffer
+	if err := workflowCommand(context.Background(), []string{"repair-status", "--id", flow.ID}, &repairOutput); err != nil {
+		t.Fatal(err)
+	}
+	var repair controller.RepairStatus
+	if err := json.Unmarshal(repairOutput.Bytes(), &repair); err != nil || repair.Status != controller.RepairNotApplicable ||
+		repair.FlowID != flow.ID || repair.StateChanged {
+		t.Fatalf("repair-status output = %s, %v", repairOutput.String(), err)
+	}
+	if err := workflowCmd([]string{"repair-status"}); err == nil {
+		t.Fatal("repair-status without --id accepted")
 	}
 	observed, err := controller.ObserveFeedback(db, flow.ID)
 	if err != nil {

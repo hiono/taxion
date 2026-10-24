@@ -369,6 +369,26 @@ SDK の実際の受付時刻や停止完了を保留の成功だけで保証し�
 質問・追加調査で選択した事項の反映と SDK 中断を確認した。初回利用にわたる実モデルの end-to-end 受入れは
 Release 0.1.0 の #78 で引き続き追跡する。
 
+### repair を自動で続行できるかの確認
+
+`workflow repair-status --id application-flow` は、保存済みの Flow を変更せずに読み、
+次の repair を Human に尋ねずに進めてよいかを JSON（`version: 1`）で返す。
+`stateChanged` は常に `false` である。`status` は次のいずれかになる。
+
+- `repair-authorized`: 承認済み basis と保存済み ceiling の内側にある。
+  `workflow advance` または `run` で続行し、Human には尋ねない。
+- `reapproval-required`: 契約が保存済み Flow と一致しない、bundle-required で一致する bundle がない、
+  または停止コードが `RECONTRACT` である。`task reauthorize` が必要である。
+- `ceiling-exhausted`: repair 回数、期限、session 予算のいずれかが上限に達した。
+  または停止コードが `BUDGET_STOP`・`BUDGET_LIMIT` である。
+- `human-decision-required`: `SAFETY_STOP` など、上記以外の理由で Flow が `STOPPED` になっている。
+  `STOPPED` は終端状態であり、自動では再開しない。
+- `invalid`: Task Graph の検証または承認の分類に失敗した。
+- `not-applicable`: Flow が repair の境界にない。
+
+`run`・`step`・`advance` が停止済み Flow に当たると、stdout の JSON は変えずに、
+stderr へこの分類と `repair-status` の再実行コマンドを2行で出す。
+
 ### 保存済みの出力を指定した Human の補足
 
 `workflow feedback-target --id application-flow` は、最新の保存済み Dispatch と
