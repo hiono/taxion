@@ -84,7 +84,12 @@ jobs:
           TAXION_COMMUNICATION_PROFILES: .github/communication-profiles.json
           TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256: ${{ secrets.PUBLIC_TEXT_PRIVATE_IDENTIFIER_SHA256 }}
         run: |
-          python3 scripts/release.py manifest --tag "$GITHUB_REF_NAME"
+          if [ "$GITHUB_REF_NAME" = "v0.7.15" ]; then
+            python3 scripts/release.py manifest --tag "$GITHUB_REF_NAME" \
+              --rollback-unavailable prior-distributions-withdrawn
+          else
+            python3 scripts/release.py manifest --tag "$GITHUB_REF_NAME"
+          fi
           go run ./scripts/publictext -release "$GITHUB_REF_NAME" > .release/public-notes.md
           gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
             --title "Taxion $(cat VERSION)" --notes-file .release/public-notes.md \

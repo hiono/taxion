@@ -10,12 +10,15 @@ import zipfile
 from unittest import mock
 
 import release
+import mise_smoke
 
 
 class ManifestTests(unittest.TestCase):
     def setUp(self):
         def published(tag):
-            if tag == "v0.7.8":
+            if release.formal_version(tag) < (0, 7, 8):
+                names = []
+            elif tag == "v0.7.8":
                 names = ["taxion-v0.7.8-linux-amd64", "SHA256SUMS"]
             else:
                 names = [path.name for path in release.published_assets(pathlib.Path(), tag)]
@@ -156,6 +159,39 @@ class ManifestTests(unittest.TestCase):
                     release.prepare(root / "dist", "v0.7.10")
             self.assertFalse((root / "dist").exists())
 
+    def test_withdrawal_requires_explicit_policy_and_no_published_binary_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            dist = self.fixture(root, "0.7.15")
+            self.tags.return_value = ["v0.3.0", "v0.2.0", "v0.1.0"]
+            with contextlib.chdir(root), mock.patch.dict(os.environ, GITHUB_RUN_ID="12345"), mock.patch.object(release, "command", return_value="go1.27.2"):
+                with self.assertRaisesRegex(ValueError, "published formal release"):
+                    release.manifest(dist, "v0.7.15")
+                self.assertFalse((dist / "release-manifest.json").exists())
+                release.manifest(dist, "v0.7.15", "prior-distributions-withdrawn")
+            document = json.loads((dist / "release-manifest.json").read_text())
+            self.assertEqual(document["schemaVersion"], 3)
+            self.assertEqual(document["rollbackVersion"], "")
+            self.assertEqual(document["rollbackPlatforms"], [])
+            self.assertEqual(document["rollbackUnavailableReason"], "prior-distributions-withdrawn")
+            self.assertEqual(len(document["artifacts"]), 6)
+            for tags in (["v0.7.14"], ["v0.7.8"]):
+                self.tags.return_value = tags
+                with contextlib.chdir(root), self.assertRaisesRegex(ValueError, "cannot bypass"):
+                    release.manifest(dist, "v0.7.15", "prior-distributions-withdrawn")
+            self.tags.side_effect = RuntimeError("API unavailable")
+            with contextlib.chdir(root), self.assertRaisesRegex(RuntimeError, "API unavailable"):
+                release.manifest(dist, "v0.7.15", "prior-distributions-withdrawn")
+
+    def test_withdrawal_refuses_unknown_reason_and_historical_versions(self):
+        for version, reason in (("0.7.14", "prior-distributions-withdrawn"), ("0.7.15", "network-error")):
+            with self.subTest(version=version, reason=reason), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                dist = self.fixture(root, version)
+                with contextlib.chdir(root), self.assertRaisesRegex(ValueError, "unsupported unavailable"):
+                    release.manifest(dist, "v" + version, reason)
+                self.assertFalse((dist / "release-manifest.json").exists())
+
     def test_release_absence_uses_http_status_not_json_body(self):
         for response, returncode, allowed in (
             ('HTTP/2.0 404 Not Found\n\n{"message":"Not Found"}', 1, True),
@@ -173,6 +209,39 @@ class ManifestTests(unittest.TestCase):
                     else:
                         with self.assertRaisesRegex(ValueError, "HTTP 404"):
                             release.require_absent_release("v0.7.9")
+
+
+class RollbackSmokeTests(unittest.TestCase):
+    def test_explicit_unavailability_never_downloads_withdrawn_distributions(self):
+        manifest = {"schemaVersion": 3, "version": "v0.7.15", "rollbackVersion": "",
+                    "rollbackPlatforms": [], "rollbackUnavailableReason": "prior-distributions-withdrawn"}
+        with mock.patch.object(mise_smoke.urllib.request, "urlopen") as download:
+            for system, arch in release.PLATFORMS:
+                self.assertIsNone(mise_smoke.rollback_artifact(manifest, system, arch))
+            download.assert_not_called()
+            for key, value in (("schemaVersion", 2), ("schemaVersion", 4), ("version", "v0.7.14"),
+                               ("rollbackVersion", "v0.7.14"), ("rollbackPlatforms", ["linux-amd64"]),
+                               ("rollbackPlatforms", None), ("rollbackUnavailableReason", "")):
+                with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                    mise_smoke.rollback_artifact(dict(manifest, **{key: value}), "linux", "amd64")
+            download.assert_not_called()
+
+    def test_available_rollback_selects_manifest_target_and_checks_bytes(self):
+        artifact = {"os": "linux", "architecture": "arm64", "name": "taxion_0.7.15_linux_arm64.tar.gz",
+                    "sha256": "a" * 64, "executableSha256": "b" * 64}
+        data = json.dumps({"version": "v0.7.15", "tag": "v0.7.15", "artifacts": [artifact]}).encode()
+        checksum = (release.sha(data) + "  release-manifest.json\n").encode()
+        manifest = {"schemaVersion": 2, "version": "v0.7.16", "rollbackVersion": "v0.7.15",
+                    "rollbackPlatforms": ["linux-arm64"]}
+        with mock.patch.object(mise_smoke.urllib.request, "urlopen", side_effect=[io.BytesIO(data), io.BytesIO(checksum)]) as download:
+            self.assertEqual(mise_smoke.rollback_artifact(manifest, "linux", "arm64"), ("v0.7.15", artifact))
+            self.assertIn("/v0.7.15/release-manifest.json", download.call_args_list[0].args[0])
+        with mock.patch.object(mise_smoke.urllib.request, "urlopen", side_effect=[io.BytesIO(data), io.BytesIO(b"bad")]):
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                mise_smoke.rollback_artifact(manifest, "linux", "arm64")
+        with mock.patch.object(mise_smoke.urllib.request, "urlopen", side_effect=OSError("download failed")):
+            with self.assertRaisesRegex(OSError, "download failed"):
+                mise_smoke.rollback_artifact(manifest, "linux", "arm64")
 
 
 if __name__ == "__main__":

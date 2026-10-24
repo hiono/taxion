@@ -8,13 +8,14 @@ import json
 import os
 import pathlib
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
 import threading
 import urllib.request
 
-from release import archive_contents
+from release import archive_contents, formal_version
 
 
 def run(arguments, env, directory):
@@ -22,6 +23,50 @@ def run(arguments, env, directory):
     if result.returncode:
         raise RuntimeError(f"{arguments}: {result.stdout}\n{result.stderr}")
     return result.stdout.strip()
+
+
+def rollback_artifact(manifest, system, arch):
+    version = manifest["version"]
+    target = manifest["rollbackVersion"]
+    platforms = manifest["rollbackPlatforms"]
+    reason = manifest.get("rollbackUnavailableReason", "")
+    if manifest["schemaVersion"] == 3:
+        if (reason != "prior-distributions-withdrawn" or target or platforms != [] or
+                not formal_version(version) or formal_version(version) < (0, 7, 15)):
+            raise ValueError("invalid unavailable rollback policy")
+        return None
+    if (manifest["schemaVersion"] != 2 or reason or not formal_version(target) or
+            not formal_version(version) or formal_version(target) >= formal_version(version) or
+            system + "-" + arch not in platforms):
+        raise ValueError("invalid exact-platform rollback policy")
+    if target == "v0.7.8":
+        if (system, arch) != ("linux", "amd64"):
+            raise ValueError("historical rollback has no exact-platform artifact")
+        return target, {
+            "name": "taxion-v0.7.8-linux-amd64",
+            "sha256": "d0084c4da30ef42b016dfff0c3b1ce1db516f1934584495cbc5c63b66f492753",
+            "executableSha256": "d0084c4da30ef42b016dfff0c3b1ce1db516f1934584495cbc5c63b66f492753",
+        }
+    base = "https://github.com/hiono/taxion/releases/download/" + target + "/"
+    with urllib.request.urlopen(base + "release-manifest.json", timeout=60) as response:
+        data = response.read(1048577)
+    with urllib.request.urlopen(base + "release-manifest.sha256", timeout=60) as response:
+        checksum = response.read(1025).decode().split()
+    if (len(data) > 1048576 or checksum != [hashlib.sha256(data).hexdigest(), "release-manifest.json"]):
+        raise ValueError("rollback manifest checksum mismatch")
+    old = json.loads(data)
+    if old["version"] != target or old["tag"] != target:
+        raise ValueError("rollback manifest version mismatch")
+    candidates = [a for a in old["artifacts"] if a["os"] == system and a["architecture"] == arch]
+    if len(candidates) != 1:
+        raise ValueError("no exact-platform rollback artifact")
+    artifact = candidates[0]
+    extension = "zip" if system == "windows" else "tar.gz"
+    if (artifact["name"] != f"taxion_{target[1:]}_{system}_{arch}.{extension}" or
+            not re.fullmatch("[a-f0-9]{64}", artifact["sha256"]) or
+            not re.fullmatch("[a-f0-9]{64}", artifact["executableSha256"])):
+        raise ValueError("invalid rollback artifact identity")
+    return target, artifact
 
 
 def main():
@@ -120,46 +165,30 @@ def main():
                     raise ValueError("PATH/copy hijack was not rejected")
                 if before != {p.name: p.read_bytes() for p in store.iterdir()}:
                     raise ValueError("provenance refusal changed synthetic store bytes")
-            rollback = "NOT_AVAILABLE"
-            # Pin the immutable published manifest, then select only this platform.
-            with urllib.request.urlopen("https://github.com/hiono/taxion/releases/download/v0.7.9/release-manifest.json", timeout=60) as response:
-                old_bytes = response.read(1048577)
-            if hashlib.sha256(old_bytes).hexdigest() != "dc2460f824a84ca525a86be99921a593ee6fcad8e00bb0b4fbcc0b1417a04cf9":
-                raise ValueError("v0.7.9 rollback manifest differs from the approved pin")
-            old_manifest = json.loads(old_bytes)
-            candidates = [a for a in old_manifest["artifacts"] if a["os"] == system and a["architecture"] == arch]
-            if len(candidates) != 1:
-                raise ValueError("no exact-platform rollback artifact")
-            old = candidates[0]
-            config = root / "mise.toml"
-            current = config.read_text()
-            mise_os = {"darwin": "macos"}.get(system, system)
-            mise_arch = {"amd64": "x64"}.get(arch, arch)
-            config.write_text(
-                f'[tools."{tool}"]\nversion = "0.7.9"\n'
-                f'[tools."{tool}".platforms.{mise_os}-{mise_arch}]\n'
-                f'url = "https://github.com/hiono/taxion/releases/download/v0.7.9/{old["name"]}"\n'
-                f'checksum = "sha256:{old["sha256"]}"\n'
-            )
-            run([mise, "install"], env, root)
-            old_binary = run([mise, "which", "taxion"], env, root)
-            if run([old_binary, "--version"], env, root) != "taxion v0.7.9" or hashlib.sha256(pathlib.Path(old_binary).read_bytes()).hexdigest() != old["executableSha256"]:
-                raise ValueError("rollback did not select the verified v0.7.9 executable")
-            config.write_text(current)
-            run([mise, "install"], env, root)
-            if run([mise, "exec", "--", executable, "--version"], env, root) != expected:
-                raise ValueError("restore after v0.7.9 rollback failed")
-            if (system, arch) == ("linux", "amd64"):
+            rollback = "NOT_RUN_SNAPSHOT"
+            rollback_version = ""
+            if not snapshot:
+                manifest = json.loads((dist / "release-manifest.json").read_bytes())
+                selected = rollback_artifact(manifest, system, arch)
+                rollback = "NOT_AVAILABLE_PRIOR_DISTRIBUTIONS_WITHDRAWN"
+            if not snapshot and selected is not None:
+                rollback_version, old = selected
                 config = root / "mise.toml"
                 current = config.read_text()
+                mise_os = {"darwin": "macos"}.get(system, system)
+                mise_arch = {"amd64": "x64"}.get(arch, arch)
+                raw = '\nformat = "raw"\nbin = "taxion"' if rollback_version == "v0.7.8" else ""
                 config.write_text(
-                    '[tools]\n"github:hiono/taxion" = { version = "0.7.8", '
-                    'asset_pattern = "taxion-v0.7.8-linux-amd64", format = "raw", bin = "taxion", '
-                    'checksum = "sha256:d0084c4da30ef42b016dfff0c3b1ce1db516f1934584495cbc5c63b66f492753" }\n'
+                    f'[tools."{tool}"]\nversion = "{rollback_version[1:]}"\n'
+                    f'[tools."{tool}".platforms.{mise_os}-{mise_arch}]\n'
+                    f'url = "https://github.com/hiono/taxion/releases/download/{rollback_version}/{old["name"]}"\n'
+                    f'checksum = "sha256:{old["sha256"]}"{raw}\n'
                 )
                 run([mise, "install"], env, root)
-                if run([mise, "exec", "--", "taxion", "--version"], env, root) != "taxion v0.7.8":
-                    raise ValueError("immutable v0.7.8 rollback binary was not selected")
+                old_binary = run([mise, "which", "taxion"], env, root)
+                if (run([old_binary, "--version"], env, root) != "taxion " + rollback_version or
+                        hashlib.sha256(pathlib.Path(old_binary).read_bytes()).hexdigest() != old["executableSha256"]):
+                    raise ValueError("rollback did not select the verified executable")
                 config.write_text(current)
                 run([mise, "install"], env, root)
                 if run([mise, "exec", "--", executable, "--version"], env, root) != expected:
@@ -190,8 +219,7 @@ def main():
                              ("staged-release-native-url" if args.staged_release else "published-release-autodetection"),
                 "productProvenance": "NOT_RUN" if snapshot else "PASS",
                 "copiedBinaryRefusedWithImmutableStore": "NOT_RUN" if snapshot else "PASS",
-                "rollbackTo078": rollback,
-                "rollbackTo079": "PASS_BINARY_SWITCH_ONLY",
+                "rollback": rollback, "rollbackVersion": rollback_version,
                 "disableSelection": "PASS", "uninstall": "PASS", "reinstallPinnedBytes": "PASS",
             }))
         finally:

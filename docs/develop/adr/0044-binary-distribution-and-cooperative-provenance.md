@@ -4,6 +4,8 @@
 
 採用。Issue #143 の Binary Distribution + Cooperative Provenance Gate。
 
+旧配布物の撤回後の戻し先なしの扱いは [ADR-0048](0048-explicit-unavailable-rollback-after-withdrawal.md) で変更した。以下の v0.7.8 への戻し先は当初の決定の記録であり、現在の利用手順ではない。
+
 ## 背景
 
 source checkout の分離だけでは、ローカルで修正した Tool が正式版として operation store に非正式な schema や記録を保存する誤使用を防げない。version 文字列は、dirty build や異なる source revision を区別する十分な根拠にならない。

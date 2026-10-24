@@ -13,8 +13,8 @@
 正式 release では [mise GitHub backend](https://mise.jdx.dev/dev-tools/backends/github.html) を使う。`go:` backend、`go install`、source checkout は product mode の導入に使わない。version の `v` prefix は mise が除く。archive 名は `taxion_VERSION_OS_ARCH.tar.gz`、Windows のみ `.zip` で、source archive は配布しない。
 
 ```sh
-mise install github:hiono/taxion@0.7.9
-mise use --pin github:hiono/taxion@0.7.9
+mise install github:hiono/taxion@0.7.15
+mise use --pin github:hiono/taxion@0.7.15
 mise exec -- taxion --version
 mise which taxion
 ```
@@ -46,11 +46,11 @@ Product mode は、確認した正式 manifest の pin、取得した archive �
   "schemaVersion": 1,
   "mode": "product",
   "storeDirectory": "/absolute/operation/.taxion",
-  "binaryPath": "/absolute/mise/installs/github-hiono-taxion/0.7.9/taxion",
+  "binaryPath": "/absolute/mise/installs/github-hiono-taxion/0.7.15/taxion",
   "miseDataDir": "/absolute/mise",
   "manifestPath": "/absolute/verified/release-manifest.json",
   "manifestSha256": "REPLACE_WITH_VERIFIED_MANIFEST_SHA256",
-  "archivePath": "/absolute/verified/taxion_0.7.9_linux_amd64.tar.gz",
+  "archivePath": "/absolute/verified/taxion_0.7.15_linux_amd64.tar.gz",
   "checksumsPath": "/absolute/verified/SHA256SUMS"
 }
 ```
@@ -75,21 +75,14 @@ pin 変更、version upgrade、mode 変更は既存 policy を自動上書きし
 
 ## rollback と制約
 
-v0.7.9 の配布情報の rollbackVersion は v0.7.8。既存 release を変更しないため、v0.7.8 の binary があるのは linux-amd64 だけ。他5 platform は `NOT_AVAILABLE` とし、source build で穴埋めしない。初回対応 platform に存在しない rollback artifact を指定したら停止する。
+旧配布物の撤回により、v0.7.15 には利用可能な戻し先がない。撤回済みの版を指定したり、手元の旧ファイルを再公開したりしない。全6環境で同じ制約となる。ソースからのビルドや別環境のファイルで代替しない。
 
-v0.7.8 は新しい product provenance Gate を持たない。binary の切替を新 Gate の成功と扱わず、旧版への rollback 後は新 policy に基づく product operation を開始しない。deadline、budget、authorization、DB を巻き戻さない。
+この状態は配布情報の schema 3 で、`rollbackVersion: ""`、`rollbackPlatforms: []`、`rollbackUnavailableReason: "prior-distributions-withdrawn"` として記録する。`taxion provenance verify` にも理由を返す。検証済みの現行バイナリを利用できることと、旧版へ戻せることは別であり、戻し先の切替検査は成功と記録しない。schema 3 の理由の欠落や未知の理由、戻し先との併記は拒否する。旧実行ファイルは schema 3 を受け入れないため、v0.7.15 以降を使う。
 
-次の修正版では、6環境の正式ファイルがある v0.7.9 を戻し先にする。manifest の固定ハッシュと環境別の配布ファイルを照合し、各環境の検証を満たしてから利用する。v0.7.8 の対応範囲が増えるわけではない。旧版で新しい取消状態を解釈できない場合は、同じ保存先の操作を再開せず停止する。
+通常の配布情報は schema 2 を維持し、公開済みの正式版のうち現行版より古い最新の版を戻し先に記録する。下書き・先行版を選ばず、必要な配布ファイルが不足する場合は停止する。撤回による例外は配布者の明示指定が必要で、公開済みの対応版があれば使えない。通信失敗や権限不足を「戻し先なし」に読み替えない。
 
-v0.7.13 以降の配布情報では、rollbackVersion に、公開済みの正式版のうち現行版より古い最新の版を記録する。下書き・先行版のまま残った版は選ばない。該当する版がない場合、またはその版の配布ファイルが不足する場合は、配布情報を作成しない。実行ファイルは、rollbackVersion が v0.7.9 以降の正式版で現行版より古く、6環境すべてを対象とする配布情報だけを受け入れる。v0.7.10 と v0.7.11 の配布情報には v0.7.9 が記録されているが、公開済みの配布物は変更しない。v0.7.11 から戻す場合は、配布説明文に記載した v0.7.10 を使用する。
+戻し先がない場合の復旧手段は、検証済みの同じ固定版の再導入、選択設定の解除、アンインストールである。無効化は稼働中の runtime を停止したうえで、対象 project / global の mise 設定から Taxion の項目を外す。binary を削除する場合は `mise uninstall github:hiono/taxion@0.7.15` を使う。この操作は version pin の設定を削除しないため、再導入時は pin を確認して `mise install` を実行する。既存の store と承認を削除したり、別の版へ暗黙に切り替えたりしない。複数の設定 layer がある環境では `mise which taxion` で選択結果も確認する。
 
-v0.7.12 は公開前の検証で停止し、下書きのまま残っている。実行ファイルの検証が戻し先 v0.7.11 を受け入れなかったためである。v0.7.12 は利用せず、v0.7.13 を使用する。
-
-| Platform | v0.7.8 への binary rollback | 同じ正式版の再導入・無効化・削除 |
-| --- | --- | --- |
-| linux-amd64 | 既存の単体 binary と公開 checksum の照合後に切替可能。新 Gate に基づく operation は停止する。 | 固定した archive から再導入できる。設定解除と uninstall は下記手順。 |
-| linux-arm64 / darwin-amd64 / darwin-arm64 / windows-amd64 / windows-arm64 | 対応 artifact がないため不可。別 platform や source build で代替しない。 | 各 platform の固定 archive から再導入できる。設定解除と uninstall は下記手順。 |
-
-無効化は、稼働中の runtime を停止したうえで、対象 project / global の mise 設定から Taxion の項目を外す。binary を削除する場合は `mise uninstall github:hiono/taxion@0.7.9` を使う。この操作は version pin の設定を削除しないため、再導入時は pin を確認して `mise install` を実行する。既存の store と承認を削除したり、別の版へ暗黙に切り替えたりしない。複数の設定 layer がある環境では `mise which taxion` で選択結果も確認する。
+版を変更しても runtime、store、approval、期限・予算を巻き戻さない。既存 policy の再承認は[拒否と復旧](#拒否と復旧)に従う。旧版が新しい保存形式や取消状態を解釈できない場合は、保存データを改変せず操作を停止する。
 
 Windows archive は導入・identity / provenance の検証対象だが、controller の shell validation は Unix process-group cancellation を要求するため未対応で明示拒否する。Unix と同じ安全な process-tree 停止を実装するまで Windows の workflow 実行をサポート済みと扱わない。native archive smoke は workflow 実行の証明ではない。

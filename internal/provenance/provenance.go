@@ -31,23 +31,24 @@ type Artifact struct {
 }
 
 type Manifest struct {
-	SchemaVersion     int        `json:"schemaVersion"`
-	Version           string     `json:"version"`
-	Tag               string     `json:"tag"`
-	SourceRevision    string     `json:"sourceRevision"`
-	BuildTimestamp    string     `json:"buildTimestamp"`
-	GoVersion         string     `json:"goVersion"`
-	GoreleaserVersion string     `json:"goreleaserVersion"`
-	Artifacts         []Artifact `json:"artifacts"`
-	ChecksumsSHA256   string     `json:"checksumsSha256"`
-	MiseIdentifier    string     `json:"miseIdentifier"`
-	RollbackVersion   string     `json:"rollbackVersion"`
-	RollbackPlatforms []string   `json:"rollbackPlatforms"`
-	ReleaseURL        string     `json:"releaseUrl"`
-	GeneratedBy       string     `json:"generatedBy"`
-	CIRun             string     `json:"ciRun"`
-	Dirty             *bool      `json:"dirty"`
-	Channel           string     `json:"channel"`
+	SchemaVersion             int        `json:"schemaVersion"`
+	Version                   string     `json:"version"`
+	Tag                       string     `json:"tag"`
+	SourceRevision            string     `json:"sourceRevision"`
+	BuildTimestamp            string     `json:"buildTimestamp"`
+	GoVersion                 string     `json:"goVersion"`
+	GoreleaserVersion         string     `json:"goreleaserVersion"`
+	Artifacts                 []Artifact `json:"artifacts"`
+	ChecksumsSHA256           string     `json:"checksumsSha256"`
+	MiseIdentifier            string     `json:"miseIdentifier"`
+	RollbackVersion           string     `json:"rollbackVersion"`
+	RollbackPlatforms         []string   `json:"rollbackPlatforms"`
+	RollbackUnavailableReason string     `json:"rollbackUnavailableReason,omitempty"`
+	ReleaseURL                string     `json:"releaseUrl"`
+	GeneratedBy               string     `json:"generatedBy"`
+	CIRun                     string     `json:"ciRun"`
+	Dirty                     *bool      `json:"dirty"`
+	Channel                   string     `json:"channel"`
 }
 
 type Policy struct {
@@ -68,13 +69,14 @@ type Identity struct {
 }
 
 type Report struct {
-	Mode           string `json:"mode"`
-	BinaryPath     string `json:"binaryPath,omitempty"`
-	BinarySHA256   string `json:"binarySha256,omitempty"`
-	ManifestSHA256 string `json:"manifestSha256,omitempty"`
-	ArtifactSHA256 string `json:"artifactSha256,omitempty"`
-	Version        string `json:"version,omitempty"`
-	SourceRevision string `json:"sourceRevision,omitempty"`
+	Mode                      string `json:"mode"`
+	BinaryPath                string `json:"binaryPath,omitempty"`
+	BinarySHA256              string `json:"binarySha256,omitempty"`
+	ManifestSHA256            string `json:"manifestSha256,omitempty"`
+	ArtifactSHA256            string `json:"artifactSha256,omitempty"`
+	Version                   string `json:"version,omitempty"`
+	SourceRevision            string `json:"sourceRevision,omitempty"`
+	RollbackUnavailableReason string `json:"rollbackUnavailableReason,omitempty"`
 }
 
 var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
@@ -229,7 +231,7 @@ func Verify(policy Policy, storeDirectory string, identity Identity) (Report, er
 		return report, err
 	}
 	_, timestampErr := time.Parse(time.RFC3339Nano, manifest.BuildTimestamp)
-	if manifest.SchemaVersion != 2 || manifest.Dirty == nil || *manifest.Dirty || manifest.Channel != "github-release" ||
+	if manifest.Dirty == nil || *manifest.Dirty || manifest.Channel != "github-release" ||
 		manifest.Version != identity.Version || manifest.Tag != identity.Version ||
 		manifest.SourceRevision != identity.Revision || timestampErr != nil ||
 		manifest.GoVersion == "" || manifest.GoreleaserVersion != "2.18.3" ||
@@ -238,7 +240,7 @@ func Verify(policy Policy, storeDirectory string, identity Identity) (Report, er
 		manifest.ReleaseURL != "https://github.com/hiono/taxion/releases/tag/"+identity.Version ||
 		manifest.MiseIdentifier != "github:hiono/taxion@"+strings.TrimPrefix(identity.Version, "v") ||
 		manifest.RollbackVersion == manifest.Version ||
-		!validRollbackPolicy(manifest.RollbackVersion, manifest.Version, manifest.RollbackPlatforms) || len(manifest.Artifacts) != 6 {
+		!validManifestRollback(manifest) || len(manifest.Artifacts) != 6 {
 		return report, fmt.Errorf("unsupported manifest or release identity mismatch")
 	}
 	checksums, err := Read(policy.ChecksumsPath, 1<<20)
@@ -290,6 +292,7 @@ func Verify(policy Policy, storeDirectory string, identity Identity) (Report, er
 		return report, fmt.Errorf("executable changed during provenance verification")
 	}
 	report.Version, report.SourceRevision = identity.Version, identity.Revision
+	report.RollbackUnavailableReason = manifest.RollbackUnavailableReason
 	return report, nil
 }
 
