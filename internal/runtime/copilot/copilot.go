@@ -890,8 +890,12 @@ var coderShellTools = []string{"bash", "powershell"}
 // network, or publish changes. Git is handled separately by subcommand.
 var coderShellDenied = map[string]bool{
 	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true, "pwsh": true, "powershell": true,
-	"env": true, "eval": true, "exec": true, "xargs": true, "nohup": true, "setsid": true, "timeout": true,
+	"cmd": true, "env": true, "eval": true, "exec": true, "xargs": true, "nohup": true, "setsid": true, "timeout": true,
+	"nice": true, "ionice": true, "stdbuf": true, "command": true, "builtin": true, "time": true, "taskset": true,
+	"chrt": true, "unshare": true, "nsenter": true, "flock": true, "script": true, "watch": true, "start": true,
+	"start-process": true, "invoke-expression": true, "iex": true, "invoke-command": true, "runas": true,
 	"sudo": true, "su": true, "doas": true, "chroot": true,
+	"invoke-webrequest": true, "invoke-restmethod": true, "iwr": true, "irm": true,
 	"gh": true, "curl": true, "wget": true, "ssh": true, "scp": true, "sftp": true, "rsync": true,
 	"nc": true, "ncat": true, "telnet": true, "ftp": true,
 }
@@ -900,6 +904,28 @@ var coderShellDenied = map[string]bool{
 var coderShellGit = map[string]bool{
 	"status": true, "diff": true, "log": true, "show": true, "ls-files": true,
 	"rev-parse": true, "grep": true, "blame": true,
+}
+
+// coderShellIdentifier normalizes case, either path separator, and Windows executable suffixes.
+func coderShellIdentifier(identifier string) string {
+	identifier = strings.ToLower(identifier)
+	if index := strings.LastIndexAny(identifier, `/\`); index >= 0 {
+		identifier = identifier[index+1:]
+	}
+	for _, suffix := range []string{".exe", ".cmd", ".bat", ".com", ".ps1"} {
+		identifier = strings.TrimSuffix(identifier, suffix)
+	}
+	return identifier
+}
+
+// coderShellGitArgument rejects Git options that run programs or write files,
+// including abbreviated long options.
+func coderShellGitArgument(argument string) bool {
+	argument = strings.Trim(argument, `'"`)
+	if strings.HasPrefix(argument, "-") && !strings.HasPrefix(argument, "--") {
+		return strings.Contains(argument, "O")
+	}
+	return strings.HasPrefix(argument, "--op") || strings.HasPrefix(argument, "--ou") || strings.HasPrefix(argument, "--ext")
 }
 
 // coderShellRejection returns an empty string when a Coder shell request stays
@@ -947,10 +973,10 @@ func coderShellRejection(worktree string, availableTools []string, request *sdk.
 	}
 	segments := map[string]bool{}
 	for _, segment := range request.CommandSegments {
-		segments[strings.ToLower(filepath.Base(segment.Identifier))] = true
+		segments[coderShellIdentifier(segment.Identifier)] = true
 	}
 	for _, command := range request.Commands {
-		identifier := strings.ToLower(filepath.Base(command.Identifier))
+		identifier := coderShellIdentifier(command.Identifier)
 		if !segments[identifier] {
 			return prefix + "the command could not be parsed"
 		}
@@ -959,12 +985,13 @@ func coderShellRejection(worktree string, availableTools []string, request *sdk.
 		}
 	}
 	for _, segment := range request.CommandSegments {
-		identifier := strings.ToLower(filepath.Base(segment.Identifier))
+		identifier := coderShellIdentifier(segment.Identifier)
 		if coderShellDenied[identifier] {
 			return prefix + "the command is not allowed"
 		}
 		if identifier == "git" {
-			if fields := strings.Fields(segment.FullCommandText); len(fields) < 2 || !coderShellGit[fields[1]] {
+			fields := strings.Fields(segment.FullCommandText)
+			if len(fields) < 2 || !coderShellGit[fields[1]] || slices.ContainsFunc(fields[2:], coderShellGitArgument) {
 				return prefix + "only read-only git subcommands are allowed; the Controller commits and publishes"
 			}
 		}

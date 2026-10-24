@@ -40,6 +40,8 @@ func TestCoderShellPermissionAllowsScopedLocalCommands(t *testing.T) {
 		"test":       shellRequest("ctest --test-dir build", "build"),
 		"go test":    shellRequest("go test ./..."),
 		"git status": shellRequest("git status --short"),
+		"git log":    shellRequest("git log --oneline -p"),
+		"git diff":   shellRequest("git diff --stat"),
 		"pipeline":   shellRequest("make test:grep FAIL"),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -84,6 +86,18 @@ func TestCoderShellPermissionRejectsUnsafeRequests(t *testing.T) {
 		"env wrapper":       shellRequest("env git push"),
 		"sudo":              shellRequest("sudo make install"),
 		"pipeline git push": shellRequest("make test:git push"),
+		"git grep pager":    shellRequest("git grep -O\"sh -c 'git push'\" x"),
+		"git grep bundled":  shellRequest("git grep -iOcat x"),
+		"git grep long":     shellRequest("git grep --open-files-in-pager=cat x"),
+		"git grep abbrev":   shellRequest("git grep --open=cat x"),
+		"git diff output":   shellRequest("git diff --output=/tmp/x"),
+		"git ext diff":      shellRequest("git diff --ext-diff"),
+		"git.exe push":      shellRequest("git.exe push origin HEAD"),
+		"windows gh":        shellRequest(`tools\GH.EXE auth token`),
+		"powershell.exe":    shellRequest("powershell.exe -Command Get-Date"),
+		"nice git commit":   shellRequest("nice git commit -m x"),
+		"stdbuf git push":   shellRequest("stdbuf -oL git push"),
+		"command bash":      shellRequest("command bash -c true"),
 		"unparsed":          unparsed,
 		"command mismatch":  mismatched,
 	} {
