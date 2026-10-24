@@ -93,7 +93,12 @@ func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.Gr
 	if err := core.DecodeGraphInput(strings.NewReader(string(dispatch.Configuration.Selection)), &selected); err != nil {
 		return nil, err
 	}
-	return readBudgetQuota(ctx, c.runtime, selected, observation)
+	observation, err = readBudgetQuota(ctx, c.runtime, selected, observation)
+	if err == nil && observation != nil && observation.Account != nil {
+		now := time.Now().UTC()
+		allocateAccountQuota(observation.Account, accountDayStart(state.Records.Events, observation.Account, now), now)
+	}
+	return observation, err
 }
 
 func readBudgetQuota(ctx context.Context, worker runtime.Identity, selected config.Config,
@@ -239,11 +244,12 @@ func isolatedBudgetGuidance(ctx context.Context, worker runtime.Identity, policy
 		if err != nil {
 			return observation, "", err
 		}
+		allocateAccountQuota(observation.Account, nil, time.Now().UTC())
 	}
 	refreshQuotaState(observation, time.Now().UTC())
 	text, err := budgetSupplement(observation)
 	if quota := observation.Account; quota != nil && quota.State == "available" && quota.ExecutionDenied {
-		return observation, text, fmt.Errorf("taxion: account entitlement exhausted; paid overage is not authorized")
+		return observation, text, accountDenial(quota)
 	}
 	return observation, text, err
 }
