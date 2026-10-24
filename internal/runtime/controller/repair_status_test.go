@@ -77,6 +77,11 @@ func TestObserveRepairStatusClassifiesStops(t *testing.T) {
 		{"bundle-required", func(s *store.Workspace, _ *core.ReviewFlow) {
 			s.Graph.ApprovalSchemaVersion = core.CurrentApprovalSchemaVersion
 		}, RepairReapprovalRequired},
+		{"cancelled-task", func(s *store.Workspace, f *core.ReviewFlow) {
+			if err := s.Graph.Transition(f.TaskID, core.Cancelled, "human", "cancel", core.TransitionProof{}); err != nil {
+				t.Fatal(err)
+			}
+		}, RepairHumanDecision},
 		{"unknown-approval-schema", func(s *store.Workspace, _ *core.ReviewFlow) {
 			s.Graph.ApprovalSchemaVersion = core.CurrentApprovalSchemaVersion + 1
 		}, RepairInvalid},

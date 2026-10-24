@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
@@ -42,7 +43,7 @@ type RepairStatus struct {
 func ObserveRepairStatus(state store.Workspace, flowID string, configuration core.ApprovalConfiguration) (RepairStatus, error) {
 	flow, ok := state.Graph.ReviewFlow(flowID)
 	if !state.HasGraph || !ok {
-		return RepairStatus{}, fmt.Errorf("taxion: repair status requires an existing review flow %q", flowID)
+		return RepairStatus{}, fmt.Errorf("taxion: repair status requires an existing review flow %q", core.Redact(flowID))
 	}
 	status := RepairStatus{
 		Version: RepairStatusVersion, FlowID: flow.ID, TaskID: flow.TaskID, FlowStatus: flow.Status,
@@ -95,6 +96,14 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 	}
 	if !time.Now().UTC().Before(flow.Deadline) {
 		return set(RepairCeilingExhausted, "saved deadline has passed", humanNext)
+	}
+	if err := state.Graph.CheckTaskSpecificationUse(task.ID, "runtime"); err != nil {
+		return set(RepairReapprovalRequired, "specification source or permission requires renewed approval: "+err.Error(),
+			"obtain Human approval of a new contract")
+	}
+	if slices.Contains([]core.TaskStatus{core.Cancelled, core.Rejected, core.Superseded, core.Blocked, core.HumanDecisionRequired}, task.Status) ||
+		task.HumanDecision != nil && task.HumanDecision.SelectedOptionID == "" {
+		return set(RepairHumanDecision, "Task status "+string(task.Status)+" or a pending Human decision stops the Flow", humanNext)
 	}
 	if err := requireSessionBudget(state.Graph, flow, "CODER"); err != nil {
 		return set(RepairCeilingExhausted, err.Error(), humanNext)
