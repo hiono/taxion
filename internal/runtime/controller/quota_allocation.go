@@ -17,6 +17,69 @@ import (
 // own usage is outside Taxion records and stops when the shared quota is gone.
 const ControllerReservePercent = 5.0
 
+type quotaAllocationBasis struct {
+	StartedAt time.Time `json:"startedAt"`
+	ResetAt   time.Time `json:"resetAt"`
+	Remaining float64   `json:"remainingPercentage"`
+}
+
+func allocateResetDaily(observation *budgetObservation, receipts []store.RuntimeReceipt, now time.Time) error {
+	observation.AccountAllocation = "reset-daily"
+	quota := observation.Account
+	if quota == nil || quota.State != "available" || quota.Unlimited {
+		return fmt.Errorf("taxion: reset-daily allocation requires an available finite account quota")
+	}
+	if quota.ResetAt == nil || !quota.ResetAt.After(now) || quota.RemainingPercentage == nil {
+		return fmt.Errorf("taxion: reset-daily allocation requires current remaining quota and a future reset")
+	}
+	basis := quotaAllocationBasis{StartedAt: now, ResetAt: *quota.ResetAt, Remaining: *quota.RemainingPercentage}
+	savedBasis := false
+	for _, receipt := range receipts {
+		if receipt.Type != "budget-guidance" {
+			continue
+		}
+		var saved struct {
+			Observation *budgetObservation `json:"observation"`
+		}
+		if receipt.Hash != receiptHash(receipt.Payload) || json.Unmarshal([]byte(receipt.Payload), &saved) != nil {
+			return fmt.Errorf("taxion: saved account allocation evidence is invalid")
+		}
+		if saved.Observation == nil || saved.Observation.AccountAllocation != "reset-daily" {
+			continue
+		}
+		previous := saved.Observation.Account
+		if previous == nil || previous.Provider != quota.Provider || previous.Account != quota.Account ||
+			previous.Resource != quota.Resource || previous.Unit != quota.Unit || previous.Scope != quota.Scope ||
+			previous.ResetAt == nil || !previous.ResetAt.Equal(*quota.ResetAt) {
+			continue
+		}
+		candidate := saved.Observation.AllocationBasis
+		if candidate == nil || !candidate.ResetAt.Equal(*quota.ResetAt) || candidate.StartedAt.IsZero() ||
+			candidate.StartedAt.After(now) || !candidate.ResetAt.After(candidate.StartedAt) ||
+			math.IsNaN(candidate.Remaining) || math.IsInf(candidate.Remaining, 0) ||
+			candidate.Remaining < 0 || candidate.Remaining > 100 {
+			return fmt.Errorf("taxion: saved account allocation basis is invalid")
+		}
+		if savedBasis && (!candidate.StartedAt.Equal(basis.StartedAt) || candidate.Remaining != basis.Remaining) {
+			return fmt.Errorf("taxion: saved account allocation bases conflict")
+		}
+		if !savedBasis {
+			basis = *candidate
+			savedBasis = true
+		}
+	}
+	days := math.Ceil(basis.ResetAt.Sub(basis.StartedAt).Hours() / 24)
+	daysLeft := math.Ceil(basis.ResetAt.Sub(now).Hours() / 24)
+	floor := basis.Remaining * (daysLeft - 1) / days
+	observation.AllocationBasis, observation.RemainingFloor = &basis, &floor
+	if quota.ExecutionDenied || *quota.RemainingPercentage <= 0 {
+		quota.ExecutionDenied, quota.DenialReason = true, "entitlement-exhausted"
+	} else if *quota.RemainingPercentage <= floor {
+		quota.ExecutionDenied, quota.DenialReason = true, "reset-daily-floor"
+	}
+	return nil
+}
+
 // allocateAccountQuota denies a new Dispatch when the shared account falls to the
 // controller reserve, or when today's decrease already used today's share of the
 // quota above the reserve. Percentages are compared directly, so no unit conversion
@@ -92,6 +155,8 @@ func accountDayStart(events []store.RuntimeReceipt, quota *runtime.QuotaSnapshot
 
 func accountDenial(quota *runtime.QuotaSnapshot) error {
 	switch quota.DenialReason {
+	case "reset-daily-floor":
+		return fmt.Errorf("taxion: approved account remaining floor reached; execution is not authorized in this allocation window")
 	case "controller-reserve":
 		return fmt.Errorf("taxion: account quota is at the %.0f%% controller reserve; execution is not authorized", ControllerReservePercent)
 	case "daily-allocation":
