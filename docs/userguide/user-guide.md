@@ -503,6 +503,10 @@ taxion workflow show --id task-example-flow
 
 ## 結果の確認と停止後の継続
 
+v0.7.18 は workspace の短時間のロック競合を最大5秒待ちます。更新は読取り前に writer を予約し、workspace の読取りは一つの transaction で行います。これにより短い照会や別接続の更新が重なる場合を扱いますが、長時間の DB transaction や schema 移行との並行動作は保証しません。表示コマンドの一部にも初期化・移行があるため、全コマンドが無書込みとは限りません。待機後も保存できなければ実行を安全停止し、モデルや tool を自動で再実行しません。v0.7.17 以前では実行中の DB・CLI 照会を避けてください。
+
+残量監視の認証・照会は全体で最大5秒です。`account`・`reset-daily` は一度でも必要な残量を確認できなくなると停止し、過去の残量だけで実行を続けません。`BUDGET_STOP`・`usage-limit` でも、reason が `account quota monitoring failed` の場合は残量枯渇の証明ではありません。認証や通信の一時的失敗も含みます。停止要求がタイムアウトして `CANCEL_REQUESTED` が残る場合、runner がなくても停止済みとは判断しません。同じ store・実行環境で `runtime stop --dispatch DISPATCH_ID` を使い、保存 session の停止確認後に `CANCELLED` と `runtime-stop:` 証跡が記録されたことを確認します。失敗した場合は取消状態を手修正せず、新しい実行を始めないでください。これらの監視・停止通信の挙動は v0.7.18 の DB 競合修正では変更しません。
+
 ### 不要になった試行を一覧と計画から外す
 
 v0.5.0 の archive は、不要と判断した試行を通常の一覧と次の作業計画から外します。
