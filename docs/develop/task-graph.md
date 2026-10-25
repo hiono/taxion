@@ -702,6 +702,10 @@ git -C /absolute/path/to/successor status --porcelain
 
 後続 Task を人が承認したうえで、`workflow start` の request に元の Coder Dispatch ID を `continueFromDispatchId` として指定すると、新しい flow は Coder を再実行せず Reviewer から始まる。snapshot mode でもこの指定方法は同じで、Reviewer は同じ baseline commit と tree SHA を使う。
 
+packet の検証証跡を再利用する場合、後続契約は元 Flow の `objective`、scope、acceptance、出力方式を維持する。`objective` は成果物の全体目的であり、後続で実行する役割を表す field ではない。レビューだけの実行は `continueFromDispatchId` で選ぶ。目的の文字列をレビュー専用の説明へ変更しても同じ意味かどうかを controller は推測しないため、元の検証結果を流用しない。security と実行設定の一致、元の承認による検証証跡の照合も必要になる。
+
+v0.7.16 は `objective` と出力方式の不一致も `packet continuation changed the verified scope or acceptance` と表示する。開発版では目的と出力方式を分けて診断する。承認済み後続 Task の目的を変えてしまった場合は、その承認を上書きせず、別IDの後続 Task に元の目的を保持して新たに承認する。旧 Task、成果、検証、取消履歴は維持し、Coder や検証を繰り返すために通常 Flow へ戻さない。
+
 旧 `BUDGET_LIMIT` または `SAFETY_STOP` で Reviewer 実行が停止した場合も、直前の成功 Coder 結果を引き継げる。元の flow は `STOPPED`、上記いずれかの stop code、runner 所有権なし、handoff 保留を要求する。最後の Dispatch は、その Coder に独立レビューとして結び付いた `CANCELLED` の Reviewer であり、保存 session に対応する `runtime-stop:` 証拠が必要になる。実行中・停止未確認・別の Coder へのレビューは継続元にできない。停止理由の分類だけで続行を許可せず、成功結果、同一成果物、新しい Task と設定・期限の承認も照合する。旧 Flow の stop code や結果は変更しない。
 
 この場合、後続承認の `target` は最後の取消済み Reviewer を指し、`continueFromDispatchId` はその直前の成功 Coder を指す。後続 worktree と保存済み成果物を照合し、新しい Reviewer には後続 Task の設定承認を引き継ぐ。前の Reviewer ID だけを許可した設定承認を、新しい Reviewer の許可として流用しない。

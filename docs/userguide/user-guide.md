@@ -613,6 +613,10 @@ snapshot mode で完了済み Coder 結果を引き継ぐ場合は、保存済�
 
 Reviewer-only の後続実行も停止した場合は、成功 Coder を含む元 Flow を `replacesFlow` に指定し、別の後続 Task を承認します。元 Task が既に `SUPERSEDED` でも、exact hash・保存成果・出典の照合は必要です。tools/skills も後続 Task の新しい承認から解決し、以前の承認を転用しません。
 
+packet を使うレビュー専用継続では、元 Flow の `objective`・scope・acceptance・出力方式を維持します。`objective` は残作業の説明ではなく、保存済み成果を評価する全体目的です。「レビューだけを行う」への書換えは目的変更として拒否します。実行する役割は `continueFromDispatchId` で指定するため、元の全体目的を維持しても Coder は再実行しません。
+
+v0.7.16 の `packet continuation changed the verified scope or acceptance` は、`objective` や出力方式の不一致でも表示されます。scope と acceptance が一致している場合は元 Flow の契約とこれらの項目を照合してください。変更済みの後続 Task が承認されている場合、その承認や元の Task は書き換えず、元の目的を維持した別IDの後続 Task を新たに承認します。元の成果・検証証跡・停止証跡を引き継ぎ、未達の他の照合条件を省略しません。
+
 ## 別マシンへの一ファイル移送
 
 `workspace snapshot` は、停止済み workspace、存在する Memory、保存成果・部分成果に必要な Git object を、一つの非公開 SQLite ファイルへ収めます。通常の `workspace.db` をそのままコピーしても、Memory と Git は移りません。実行中の Flow・runner・未終了 Dispatch・未照合の外部送信がある場合は、先に上記の停止と照合を済ませてください。

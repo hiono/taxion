@@ -172,6 +172,11 @@ func TestPacketLifecycleReviewOnlySuccessorRejectsDrift(t *testing.T) {
 			}
 			if _, err := StartReviewFlow(db, ledger, request); err == nil {
 				t.Fatal("new approval incorrectly reused validation for a changed contract")
+			} else if test.name == "objective" &&
+				(!strings.Contains(err.Error(), "changed the verified objective") ||
+					!strings.Contains(err.Error(), "continueFromDispatchId") ||
+					strings.Contains(err.Error(), "scope or acceptance")) {
+				t.Fatal("objective drift did not explain the actual mismatch and supported continuation", err)
 			}
 			after, err := db.LoadWorkspace()
 			if err != nil || !reflect.DeepEqual(before, after) {
