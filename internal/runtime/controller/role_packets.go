@@ -245,7 +245,7 @@ func prepareLifecycleReviewer(state *store.Workspace, flow core.ReviewFlow, code
 	if err != nil || !enabled {
 		return err
 	}
-	if _, err := validatedPacketEvidence(state, auth, coder); err != nil {
+	if _, err := reviewerPacketEvidence(state, flow, auth, coder); err != nil {
 		return err
 	}
 	matching := false
@@ -327,7 +327,18 @@ func issueLifecyclePacket(state *store.Workspace, flow core.ReviewFlow, dispatch
 	}
 	tree, previous := auth.InitialTree, ""
 	if len(flow.DispatchIDs) == 0 && flow.SourceDispatchID != "" {
-		return fmt.Errorf("packet lifecycle does not adopt a Dispatch issued without verified packets")
+		coder, err := budgetContinuationSource(state.Graph, flow.Contract, flow.SourceDispatchID, state.Records)
+		if err != nil {
+			return err
+		}
+		previous, err = reviewerPacketEvidence(state, flow, auth, coder)
+		if err != nil {
+			return err
+		}
+		_, tree, err = resultPacketEvidence(state, coder)
+		if err != nil {
+			return err
+		}
 	}
 	if len(flow.DispatchIDs) > 0 {
 		last, ok := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
@@ -477,6 +488,49 @@ func validatedPacketEvidence(state *store.Workspace, auth store.PacketAuthorizat
 	return "", fmt.Errorf("Reviewer requires actual Controller validation evidence")
 }
 
+func reviewerPacketEvidence(state *store.Workspace, flow core.ReviewFlow, auth store.PacketAuthorization, coder core.GraphDispatch) (string, error) {
+	if flow.SourceDispatchID != coder.ID {
+		return validatedPacketEvidence(state, auth, coder)
+	}
+	if _, err := budgetContinuationSource(state.Graph, flow.Contract, coder.ID, state.Records); err != nil {
+		return "", err
+	}
+	source, ok := flowForDispatch(state.Graph, coder.ID)
+	if !ok || flow.Contract.CreatedFrom != "flow:"+source.ID {
+		return "", fmt.Errorf("packet continuation requires its exact source Flow")
+	}
+	sourceAuth, enabled, err := lifecycleAuthorization(state, source)
+	if err != nil {
+		return "", err
+	}
+	if !enabled {
+		return "", fmt.Errorf("packet continuation requires source packet authorization")
+	}
+	if auth.ScopeDigest != sourceAuth.ScopeDigest || auth.Acceptance != sourceAuth.Acceptance ||
+		flow.Contract.Objective != source.Contract.Objective || flow.Contract.OutputMode != source.Contract.OutputMode {
+		return "", fmt.Errorf("packet continuation changed the verified scope or acceptance")
+	}
+	var currentBundle, sourceBundle core.ApprovalBundle
+	for _, bundle := range state.Graph.Approvals {
+		if bundle.BundleHash == auth.BundleHash {
+			currentBundle = bundle
+		}
+		if bundle.BundleHash == sourceAuth.BundleHash {
+			sourceBundle = bundle
+		}
+	}
+	if currentBundle.Dimensions.Security != sourceBundle.Dimensions.Security ||
+		currentBundle.Configuration.Digest != sourceBundle.Configuration.Digest {
+		return "", fmt.Errorf("packet continuation changed security or execution configuration")
+	}
+	if err := checkLifecyclePacket(state, coder.ID); err != nil {
+		return "", err
+	}
+	// The retained report belongs to the original approval; the new Reviewer
+	// packet binds its evidence hash to the separately approved successor.
+	return validatedPacketEvidence(state, sourceAuth, coder)
+}
+
 func checkLifecyclePacket(state *store.Workspace, dispatchID string) error {
 	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
 	if !ok {
@@ -513,6 +567,19 @@ func checkLifecyclePacket(state *store.Workspace, dispatchID string) error {
 			if err != nil {
 				return err
 			}
+		}
+	} else if flow.SourceDispatchID != "" {
+		coder, ok := state.Graph.GraphDispatch(flow.SourceDispatchID)
+		if !ok || dispatch.Recipient != "REVIEWER" || dispatch.RelatedID != coder.ID {
+			return fmt.Errorf("packet continuation requires its independent Reviewer")
+		}
+		previous, err = reviewerPacketEvidence(state, flow, auth, coder)
+		if err != nil {
+			return err
+		}
+		_, tree, err = resultPacketEvidence(state, coder)
+		if err != nil {
+			return err
 		}
 	}
 	for _, audit := range state.Records.PacketAudits {

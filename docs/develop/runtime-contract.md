@@ -117,6 +117,13 @@ READY Task の packet lifecycle を明示承認した Flow では、`Records.Pac
 
 Reviewer configuration preflight と Reviewer 発行は、同じ lifecycle configuration resolver を使う。resolver は lifecycle の version・hash、親契約と現在の Task、参照 ApprovalBundle、完全な設定 tuple、bounded Flow 内の Reviewer ID を照合する。preflight は read-only であり、Reviewer 発行時だけ派生 Task に lifecycle hash を参照する専用 configuration decision を追加する。親 Task の decision と bundle は書き換えず、通常の configuration binding・tools・packet・budget 検査を省略しない。lifecycle のない Flow は従来の追加 Task ID 承認を引き続き要求する。
 
+レビュー専用継続の `sourceDispatchId` は、元 Flow の停止・取消と同一 Git 成果物を照合する。
+元 Validator の報告は元の lifecycle 承認で検証し、新 Task の承認で再計算しない。
+目的、scope / acceptance、security、設定と出力方式の一致も要求する。
+新しい Reviewer packet の承認は後続 Task のものとし、前段には元の検証報告 hash を指定する。
+発行時、作業場所の準備前、実行入口の再検査で同じ参照規則を使う。
+元の packet・報告・結果 receipt は変更せず、検証コマンドも再実行しない。
+
 runner の factory 呼出し前、Reviewer worktree の作成前、Controller の実行承認時に packet を再検査する。未承認の旧 Flow は従来どおりで、未保存の参照を検証済みとする移行は行わない。request と互換性の制限は [利用手順](../userguide/role-handoff-packets.md)を参照する。
 
 ### 別マシンへの移送

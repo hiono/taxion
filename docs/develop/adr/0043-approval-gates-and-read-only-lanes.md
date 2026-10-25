@@ -143,6 +143,13 @@ packet の canonical bytes と hash、lifecycle 承認、audit は既存 workspa
 
 起動前に packet、Dispatch instruction、predecessor evidence を照合する。未知版、欠落、改変、不一致は拒否し、未承認の legacy 参照は検証済み packet と扱わない。非対応 binary への rollback のためにこれらの記録を消すことも認めない。詳細な利用条件は [role handoff packet](../../userguide/role-handoff-packets.md) を参照する。
 
+レビュー専用の後続 Task では、保存済みの検証証跡と新しい実行許可を分ける。
+元の検証報告は元承認の Task・proposal・bundle に対して照合し、新承認で作り直さない。
+同一成果物と目的・scope・acceptance・security・設定・出力方式の一致、元実行の停止を確認し、
+新しい承認の Reviewer packet から元報告の hash を参照する。
+成功済み作業の再実行や、旧報告の書換えによる見かけの承認一致は採用しない。
+この経路も新しい契約・予算・lifecycle 承認と通常の実行入口検査を要求する。
+
 ### Task 単位の集計と再契約
 
 `workflow evaluate` は Flow の Dispatch 数、Coder/Reviewer session 数、nano-AIU usage、elapsed time、repair/re-review 数について、approved limit・consumed・remaining を報告する。未実行の session/Dispatch を始める前と、usage event 後に ceiling を検査する。Task-wide usage が不明・不完全なら remaining を0として `BUDGET_STOP` にし、新しい session/Dispatch を許可しない。観測した usage が ceiling に達した実行中 session は安全に停止し、Flow を hold して checkpoint と report を保存する。
