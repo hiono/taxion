@@ -47,6 +47,11 @@ ADR-0029・ADR-0049 は当時の判断として残し、新規既定値はこの
 公開文書の repository 検査、`git diff --check` が成功した。
 独立した差分レビューの判定は APPROVE。次の回帰検証を追加・拡張した。
 
+`go test -race` は billing・config・core・store・CLI の各 package で成功した。
+controller package 全体は既定の10分でタイムアウトし、全体成功とは扱わない。
+関連する `Provider|Billing|GuidanceOverride` の検証と、中断位置から残る9件の検証を
+それぞれ race detector 付きで実行し、成功した。data race の報告はなかった。
+
 | 検証 | 確認した動作 |
 | --- | --- |
 | `TestSettingsResolveAndProviderStopConditions` | 既定値と従量課金・未確認・超過課金・自動チャージ・有料切替えの条件 |
