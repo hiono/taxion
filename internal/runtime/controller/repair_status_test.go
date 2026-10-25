@@ -145,6 +145,53 @@ func TestObserveRepairStatusCeilingBeforeAndAfterStop(t *testing.T) {
 		if err != nil || status.Status != RepairCeilingExhausted {
 			t.Fatalf("stopped=%v status = %+v, %v", stop, status, err)
 		}
+		if stop && status.StopCause != "review-findings" {
+			t.Fatalf("repair ceiling mistaken for usage limit: %+v", status)
+		}
+	}
+}
+
+func TestObserveRepairStatusRetainsSpecificStoppedCause(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		expired, _ := state.Graph.ReviewFlow(flow.ID)
+		expired.StartedAt, expired.Deadline = time.Now().UTC().Add(-time.Hour), time.Now().UTC().Add(-time.Second)
+		storeFlow(state, expired)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AdvanceReviewFlow(db, ledger, flow.ID); !errors.Is(err, ErrFlowStopped) {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped, _ := state.Graph.ReviewFlow(flow.ID)
+	status, err := ObserveRepairStatus(state, flow.ID, core.ApprovalConfiguration{})
+	if err != nil || stopped.StopCause != "time-limit" || status.StopCause != "time-limit" {
+		t.Fatal("deadline advance mistaken for usage limit", stopped.StopCause, status, err)
+	}
+	for _, test := range []struct {
+		reason, cause string
+	}{
+		{"elapsed budget reached", "time-limit"},
+		{"deadline reached; reconcile and safely stop any active Dispatch before further authorization", "time-limit"},
+		{"repair ceiling reached; present saved findings and acceptance decisions to Human", "review-findings"},
+		{"nano-AIU ceiling reached", "usage-limit"},
+		{"account quota observation is missing", "usage-limit"},
+	} {
+		stopped.StopCause, stopped.Reason = "", test.reason
+		storeFlow(&state, stopped)
+		got, err := ObserveRepairStatus(state, flow.ID, core.ApprovalConfiguration{})
+		if err != nil || got.StopCause != test.cause {
+			t.Fatal("legacy cause lost", test.reason, got.StopCause, err)
+		}
 	}
 }
 

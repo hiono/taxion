@@ -412,7 +412,10 @@ local 検査は登録 SDK stage・commit handler を Controller・実 Git で呼
 `review_budget` を合成する。version 1 の payload は保存 Flow の期限と、
 呼出し元 context を含む実効期限、出典、観測時刻、残り milliseconds を報告する。
 これは一回の観測であり、承認時間を再設定せず、十分なレビュー時間の予測もしない。
-既存の adapter event、結果 receipt、保存契約の schema は変更しない。
+期限表示は既存の adapter event と結果 receipt の schema を変更しない。
+停止原因は Flow の省略可能な `stopCause` に保存し、期限停止と修正回数の上限を、
+共通の `BUDGET_STOP` code だけで利用量不足へ分類しない。
+旧記録は保存理由から分類し、観測した現在時刻から原因を推測しない。
 出力失敗では runtime を開始せず、runner の既存停止処理で所有権を解放する。
 
 `workflow repair-status` の `reviewContinuationCandidate` は省略可能な観測項目である。

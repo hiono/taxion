@@ -169,6 +169,10 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 			}
 			stored.StopCode = "SAFETY_STOP"
 			stored.Status, stored.Reason = "STOPPED", reason
+			stored.StopCause = "other"
+			if errors.Is(err, context.DeadlineExceeded) {
+				stored.StopCause = "time-limit"
+			}
 		}
 		stored.RunnerID = ""
 		storeFlow(state, stored)

@@ -25,6 +25,7 @@ type ReviewFlow struct {
 	DispatchIDs       []string           `json:"dispatchIds"`
 	Status            string             `json:"status"`
 	StopCode          string             `json:"stopCode,omitempty"`
+	StopCause         string             `json:"stopCause,omitempty"`
 	Reason            string             `json:"reason"`
 	Authorization     TaskDecision       `json:"authorization"`
 	RunnerID          string             `json:"runnerId,omitempty"`
@@ -101,6 +102,8 @@ func (g TaskGraph) validateReviewFlows() error {
 			!slices.Contains([]string{"RUNNING", "STOPPED", "COMPLETED"}, flow.Status) ||
 			!slices.Contains([]string{"", "SAFETY_STOP", "BUDGET_LIMIT", "BUDGET_STOP", "RECONTRACT"}, flow.StopCode) ||
 			flow.Status != "STOPPED" && flow.StopCode != "" ||
+			!slices.Contains([]string{"", "time-limit", "usage-limit", "review-findings", "other"}, flow.StopCause) ||
+			flow.Status != "STOPPED" && flow.StopCause != "" ||
 			!nonempty(flow.Authorization.ID) || !nonempty(flow.Authorization.Source) || !nonempty(flow.Authorization.Text) ||
 			len(flow.DispatchIDs) == 0 || flow.Status != "RUNNING" && !nonempty(flow.Reason) {
 			return graphError("invalid bounded review flow %q", flow.ID)

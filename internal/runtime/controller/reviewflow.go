@@ -278,6 +278,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 			}
 			flow.StopCode = code
 			flow.Status, flow.Reason = "STOPPED", reason
+			flow.StopCause = flowStopCause(flow)
 			storeFlow(state, flow)
 			if code == "BUDGET_STOP" {
 				report := taskBudgetReport(state.Graph, flow, time.Now().UTC())

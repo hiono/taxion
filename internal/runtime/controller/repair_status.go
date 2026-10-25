@@ -43,6 +43,26 @@ type RepairStatus struct {
 	StateChanged                bool     `json:"stateChanged"`
 }
 
+func flowStopCause(flow core.ReviewFlow) string {
+	if flow.Status != "STOPPED" {
+		return ""
+	}
+	if flow.StopCause != "" {
+		return flow.StopCause
+	}
+	switch {
+	case flow.Reason == "elapsed budget reached", strings.HasPrefix(flow.Reason, "deadline reached"),
+		strings.Contains(flow.Reason, context.DeadlineExceeded.Error()):
+		return "time-limit"
+	case strings.HasPrefix(flow.Reason, "repair ceiling reached"):
+		return "review-findings"
+	case flow.StopCode == "BUDGET_STOP" || flow.StopCode == "BUDGET_LIMIT":
+		return "usage-limit"
+	default:
+		return "other"
+	}
+}
+
 // ObserveRepairStatus classifies the saved Flow without changing state.
 func ObserveRepairStatus(state store.Workspace, flowID string, configuration core.ApprovalConfiguration) (RepairStatus, error) {
 	flow, ok := state.Graph.ReviewFlow(flowID)
@@ -53,21 +73,13 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 		Version: RepairStatusVersion, FlowID: flow.ID, TaskID: flow.TaskID, FlowStatus: flow.Status,
 		StopCode: flow.StopCode, Repairs: flow.Repairs, MaxRepairs: flow.MaxRepairs, Reasons: []string{},
 	}
-	if flow.Status == "STOPPED" {
-		switch {
-		case flow.Reason == "elapsed budget reached" || strings.Contains(flow.Reason, context.DeadlineExceeded.Error()):
-			status.StopCause = "time-limit"
-		case flow.StopCode == "BUDGET_STOP" || flow.StopCode == "BUDGET_LIMIT":
-			status.StopCause = "usage-limit"
-		default:
-			status.StopCause = "other"
-		}
-	}
+	status.StopCause = flowStopCause(flow)
 	set := func(value, reason, next string) (RepairStatus, error) {
 		status.Status, status.NextAction = value, next
 		status.Reasons = append(status.Reasons, core.Redact(reason))
 		return status, nil
 	}
+
 	const humanNext = "present the saved stop reason, findings and acceptance to Human"
 	if err := state.Graph.Validate(); err != nil {
 		return set(RepairInvalid, "saved Task, Flow or Dispatch records are inconsistent: "+err.Error(), humanNext)
