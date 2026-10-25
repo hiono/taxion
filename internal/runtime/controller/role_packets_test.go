@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -97,6 +98,276 @@ func authorizePacketFixture(t *testing.T, db *store.Store, request ReviewFlowReq
 	if err != nil || len(state.Records.PacketAuthorizations) != 1 {
 		t.Fatalf("append is not idempotent: %v", err)
 	}
+}
+
+func TestPacketLifecycleReviewOnlySuccessor(t *testing.T) {
+	for _, mode := range []string{core.OutputModeCommit, core.OutputModeWorktreeTreeSnapshot} {
+		t.Run(mode, func(t *testing.T) {
+			db, ledger, nextRequest, coder := packetReviewSuccessorFixture(t, mode)
+			before, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			next, err := StartReviewFlow(db, ledger, nextRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			nextReviewer, _ := after.Graph.GraphDispatch(next.DispatchIDs[0])
+			if len(next.DispatchIDs) != 1 || nextReviewer.Recipient != "REVIEWER" || nextReviewer.RelatedID != coder.ID ||
+				len(after.Graph.Dispatches) != len(before.Graph.Dispatches)+1 {
+				t.Fatal("successor did not issue only the independent Reviewer")
+			}
+			if !reflect.DeepEqual(before.Records.PacketAudits, after.Records.PacketAudits[:len(before.Records.PacketAudits)]) ||
+				!reflect.DeepEqual(before.Graph.Approvals, after.Graph.Approvals[:len(before.Graph.Approvals)]) ||
+				!reflect.DeepEqual(before.Graph.Dispatches, after.Graph.Dispatches[:len(before.Graph.Dispatches)]) ||
+				!reflect.DeepEqual(before.Graph.ReviewFlows, after.Graph.ReviewFlows[:len(before.Graph.ReviewFlows)]) {
+				t.Fatal("successor rewrote predecessor evidence or approvals")
+			}
+			oldAuth, _ := before.Records.PacketAuthorization(coder.TaskID)
+			evidence, err := validatedPacketEvidence(&before, oldAuth, coder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			audit := after.Records.PacketAudits[len(after.Records.PacketAudits)-1]
+			packet, err := after.Records.ReadPacket(audit.PacketHash)
+			if err != nil || packet.Readback().PreviousEvidenceHash != evidence ||
+				audit.TaskID != next.TaskID || audit.AuthorizationHash == oldAuth.Hash {
+				t.Fatal("new packet did not bind original evidence to successor approval", err)
+			}
+			if err := CheckRolePacket(db, nextReviewer.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := CheckReviewFlowConfiguration(db, next.ID, packetConfigurationFixture(t).Config, nil); err != nil {
+				t.Fatal("successor configuration preflight rejected", err)
+			}
+			executeFlowDispatch(t, db, next, "APPROVE", true, packetConfigurationFixture(t))
+			next, err = AdvanceReviewFlow(db, ledger, next.ID, nextRequest.Configuration)
+			if err != nil || next.Status != "COMPLETED" {
+				t.Fatal("review-only successor did not complete", next.Status, err)
+			}
+		})
+	}
+}
+
+func TestPacketLifecycleReviewOnlySuccessorRejectsDrift(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		edit func(*core.GraphTask)
+	}{
+		{"scope", func(task *core.GraphTask) { task.Scope = append(task.Scope, "other") }},
+		{"acceptance", func(task *core.GraphTask) { task.Acceptance = append(task.Acceptance, "new requirement") }},
+		{"validation", func(task *core.GraphTask) { task.ValidationCommands = []string{"different-check"} }},
+		{"security", func(task *core.GraphTask) { task.Risk = "changed security basis" }},
+		{"objective", func(task *core.GraphTask) { task.Objective = "different objective" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, ledger, request, _ := packetReviewSuccessorFixture(t, core.OutputModeCommit, test.edit)
+			before, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := StartReviewFlow(db, ledger, request); err == nil {
+				t.Fatal("new approval incorrectly reused validation for a changed contract")
+			}
+			after, err := db.LoadWorkspace()
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatal("rejected successor changed saved state", err)
+			}
+		})
+	}
+}
+
+func TestPacketLifecycleReviewOnlySuccessorRejectsMissingOrChangedEvidence(t *testing.T) {
+	db, ledger, request, coder := packetReviewSuccessorFixture(t, core.OutputModeCommit)
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, failure := range []string{"report", "instruction", "authorization", "missing-validator", "missing-packet", "missing-stop", "configuration"} {
+		t.Run(failure, func(t *testing.T) {
+			var state store.Workspace
+			if err := json.Unmarshal(mustFlowJSON(t, before), &state); err != nil {
+				t.Fatal(err)
+			}
+			contract, _ := state.Graph.GraphTask(request.TaskID)
+			auth, _ := state.Records.PacketAuthorization(request.TaskID)
+			source, _ := flowForDispatch(state.Graph, coder.ID)
+			switch failure {
+			case "missing-stop":
+				for index := range state.Graph.Dispatches {
+					dispatch := &state.Graph.Dispatches[index]
+					if dispatch.ID == source.DispatchIDs[len(source.DispatchIDs)-1] {
+						dispatch.Result.Evidence = nil
+					}
+				}
+			case "configuration":
+				for index := range state.Graph.Approvals {
+					bundle := &state.Graph.Approvals[index]
+					if bundle.BundleHash == auth.BundleHash {
+						bundle.Configuration.Digest = strings.Repeat("f", 64)
+					}
+				}
+			default:
+				for index := range state.Records.PacketAudits {
+					audit := &state.Records.PacketAudits[index]
+					if audit.DispatchID != coder.ID || audit.Role != "VALIDATOR" || audit.Validation == "" {
+						continue
+					}
+					switch failure {
+					case "report":
+						audit.Validation = "{}"
+					case "instruction":
+						audit.InstructionHash = strings.Repeat("f", 64)
+					case "authorization":
+						audit.AuthorizationHash = auth.Hash
+					case "missing-validator":
+						audit.Validation = ""
+					case "missing-packet":
+						audit.PacketHash = strings.Repeat("f", 64)
+					}
+				}
+			}
+			snapshot := mustFlowJSON(t, state)
+			flow := core.ReviewFlow{Contract: contract, SourceDispatchID: coder.ID}
+			if _, err := reviewerPacketEvidence(&state, flow, auth, coder); err == nil {
+				t.Fatal("changed or absent evidence authorized a successor")
+			}
+			if !bytes.Equal(snapshot, mustFlowJSON(t, state)) {
+				t.Fatal("evidence check mutated state")
+			}
+		})
+	}
+	task, _ := before.Graph.GraphTask(request.TaskID)
+	if err := os.WriteFile(filepath.Join(task.Worktree, "unexpected"), []byte("changed target"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := StartReviewFlow(db, ledger, request); err == nil {
+		t.Fatal("changed target issued a Reviewer")
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("changed target refusal mutated state", err)
+	}
+}
+
+func packetReviewSuccessorFixture(t *testing.T, mode string, edit ...func(*core.GraphTask)) (*store.Store, string, ReviewFlowRequest, core.GraphDispatch) {
+	t.Helper()
+	db, ledger, request, auth := packetFlowFixture(t, mode)
+	authorizePacketFixture(t, db, request, auth)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := packetConfigurationFixture(t)
+	coder := executeFlowDispatch(t, db, flow, "", true, resolved)
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID, request.Configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewer, err := PrepareReview(db, flow.DispatchIDs[1], flow.Contract.Worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := BindConfiguration(db, reviewer.ID, resolved); err != nil {
+		t.Fatal(err)
+	}
+	worker := &configuredRuntime{fakeRuntime: &fakeRuntime{
+		role: "REVIEWER", hash: "review-stop", worktree: reviewer.Instruction.Worktree,
+	}, selection: mustFlowJSON(t, resolved.Config)}
+	control, err := New(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Start(t.Context(), reviewer.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.Send(t.Context(), reviewer.ID, "Review the retained target"); err != nil {
+		t.Fatal(err)
+	}
+	if err := stopFlowForBudget(db, flow.ID, "elapsed budget reached"); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.Stop(t.Context(), reviewer.ID); err != nil {
+		t.Fatal(err)
+	}
+	task := flow.Contract
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "packet-successor", core.Draft, "", nil
+	task.Supersedes, task.CreatedFrom = flow.TaskID, "flow:"+flow.ID
+	task.Worktree, task.Branch = filepath.Join(t.TempDir(), "successor"), "work/packet-successor"
+	task.TargetSHA = coder.Result.OutputSHA
+	gitTest(t, flow.Contract.Worktree, "worktree", "add", "-b", task.Branch, task.Worktree, coder.Result.OutputSHA)
+	if mode == core.OutputModeWorktreeTreeSnapshot {
+		data, err := os.ReadFile(filepath.Join(flow.Contract.Worktree, "internal/app.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(task.Worktree, "internal"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(task.Worktree, "internal/app.go"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		task.TargetTreeSHA, task.TargetChangedFiles = coder.Result.OutputTreeSHA, coder.Result.ChangedFiles
+	}
+	for _, change := range edit {
+		change(&task)
+	}
+	proposal, err := ProposeIntake(db, IntakeRequest{
+		Request: "Review retained output with a separately approved budget", Task: task,
+		Actor: "human", Source: "human:successor",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := IntakeHash(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := ObserveFeedback(db, flow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed, err := ConfirmIntake(db, IntakeConfirmation{
+		TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:successor",
+		Reason: "New review-only budget", Selection: resolved.Config, ReplacesFlow: flow.ID, Target: &target.Target,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := core.ComposeReauthorizationApprovalBundleWithProposalHash(
+		"successor-bundle", hash, confirmed, request.Configuration,
+		"human", "human:successor", "New review-only budget", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendApproval(bundle)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextAuth, err := PreviewPacketAuthorization(state, task.ID, "human", "human:successor",
+		"Delegate independent review of retained output", nil, request.Configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextRequest := request
+	nextRequest.ID, nextRequest.TaskID, nextRequest.ContinueFromDispatchID = "packet-successor-flow", task.ID, coder.ID
+	zero := 0
+	nextRequest.MaxRepairs, nextRequest.TimeoutSeconds = &zero, 60
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return AppendPacketAuthorization(state, nextAuth, request.Configuration)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return db, ledger, nextRequest, coder
 }
 
 func TestPacketLifecycleSequentialRecovery(t *testing.T) {

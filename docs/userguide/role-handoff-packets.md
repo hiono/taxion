@@ -112,6 +112,18 @@ taxion role-packet read --expected-hash '<packetHash>'
 
 ## 互換性と rollback
 
-既存の packet create / verify と、lifecycle を明示承認していない Flow の動作は変えません。旧参照を保存 packet とみなす自動移行もありません。発行済み Dispatch の採用や、未保存 evidence からの再構成は対象外です。
+既存の packet create / verify と、lifecycle を明示承認していない Flow の動作は変えません。旧参照を保存 packet とみなす自動移行もありません。検証済み packet のない発行済み Dispatch の採用や、未保存 evidence からの再構成は対象外です。
+
+開発版のレビュー専用継続では、停止を確認した元 Flow の成功済み Coder と、
+その元承認に結び付いた Validator の保存証跡を再利用できます。後続 Task の契約・予算、
+ApprovalBundle と packet lifecycle は別途承認してください。新しい Reviewer packet は
+新承認に結び付け、前段の evidence hash には元の検証報告を参照します。
+元の報告や承認を書き換えず、Coder と成功済みの検証コマンドを再実行しません。
+
+対象 Git 成果物に加え、目的、scope、acceptance、検証コマンド、security 条件、
+設定選択と出力方式の一致を要求します。これらの変更、取消未確認、元 packet・検証報告の
+欠落や改変では拒否します。新しい予算の承認を旧検証の成功証明として使うことはありません。
+保存 schema と packet の版は変更しません。旧版でこの継続を再試行しても、
+`Controller validation evidence mismatch` になる場合があり、旧証跡の破損を意味するとは限りません。
 
 lifecycle 記録のある workspace は新しい Records field を含みます。非対応版へ同じ DB を戻さず、必要なら承認前に取得した workspace snapshot を別配置で復元してください。現在の承認・artifact・audit を削除して rollback する操作は認めません。
