@@ -82,7 +82,7 @@ taxion review --task <id> --sha <coder-sha> --repo <repo>
 
 ### 依頼の登録と Flow 実行
 
-`taxion request --repo REPO --max-ai-credits 30` は、開発版の新規依頼の標準入口である。明示設定がなければ `account`・`reset-daily` の残量方式を選び、Task 上限の手入力は不要となる。`--timeout D` の既定は1時間。残量の照会範囲と下限方式を表示し、`/plan` と `/approve` の承認に含める。非対応・取得不能・古い残量・リセット不明では送信を拒否し、自動で旧方式へ戻らない。旧方式を明示する場合は `--budget-guidance flow --max-task-nano-aiu N` のように正の上限を指定する。保存済み契約と正の明示上限はそのまま引き継ぐ。Copilot は30以上の `--max-ai-credits N` を要求する。OpenCode ではこの指定は不要だが、残量非対応のため新しい標準方式を実行できない。承認済みの旧方式を明示して使う。Human は `/plan` でモデルによる計画相談を開始し、提案された範囲・完了条件・ホスト検証コマンドを確認した後に `/approve` を選ぶ。
+`taxion request --repo REPO --max-ai-credits 30` は、v0.7.16 以降の新規依頼の標準入口である。明示設定がなければ `account`・`reset-daily` の残量方式を選び、Task 上限の手入力は不要となる。`--timeout D` の既定は1時間。残量の照会範囲と下限方式を表示し、`/plan` と `/approve` の承認に含める。非対応・取得不能・古い残量・リセット不明では送信を拒否し、自動で旧方式へ戻らない。旧方式を明示する場合は `--budget-guidance flow --max-task-nano-aiu N` のように正の上限を指定する。保存済み契約と正の明示上限はそのまま引き継ぐ。Copilot は30以上の `--max-ai-credits N` を要求する。OpenCode ではこの指定は不要だが、残量非対応のため新しい標準方式を実行できない。承認済みの旧方式を明示して使う。Human は `/plan` でモデルによる計画相談を開始し、提案された範囲・完了条件・ホスト検証コマンドを確認した後に `/approve` を選ぶ。
 
 Taxion が intake、完全な hash の承認、Reviewer の設定承認、Flow、同梱の role 別指示を構成する。利用者が JSON や prompt ファイルを作る必要はない。計画中の `/quit`・EOF は記録を残すが、コード実行を開始しない。Planner error は自動 retry しない。
 
@@ -221,7 +221,7 @@ v0.3.1 の対話入力は、各項目の説明と候補値を表示する。候�
 
 設定した環境変数値は、数値に見える識別子も文字列として扱う。明示的な空値・不正値は error。未設定なら下位層の値を保つ。設定 override として読むのは表の変数だけ。`TAXION_TOKEN`、`GH_TOKEN`、`GITHUB_TOKEN`、`COPILOT_GITHUB_TOKEN` は別の credential 用途を維持し、この設定にはコピーしない。
 
-`execution.budgetGuidance` は `off`・`flow`・`account` を指定する。開発版の新規 CLI proposal は、設定も依頼別指定もなければ `account`・`reset-daily` を使い、読取り範囲と下限方式を実行前の承認対象に含める。新しく選ぶ `account` も `reset-daily` になる。旧保存 Task の policy 省略は、補足なし・account 読取りなしのまま維持する。旧 `flow`、固定5%の `account`、明示上限は引継ぎ用として保存値を維持する。詳細は[設定ガイド](configuration.md)を参照する。
+`execution.budgetGuidance` は `off`・`flow`・`account` を指定する。v0.7.16 以降の新規 CLI proposal は、設定も依頼別指定もなければ `account`・`reset-daily` を使い、読取り範囲と下限方式を実行前の承認対象に含める。新しく選ぶ `account` も `reset-daily` になる。旧保存 Task の policy 省略は、補足なし・account 読取りなしのまま維持する。旧 `flow`、固定5%の `account`、明示上限は引継ぎ用として保存値を維持する。詳細は[設定ガイド](configuration.md)を参照する。
 
 mise は環境変数を渡す任意の方法。共有 `mise.toml` から、ローカル `.env` を参照できる。
 
@@ -526,7 +526,7 @@ resume 用 binding は新しい Dispatch の append-only budget audit に versio
 
 `workflow start` は、明示的な修正回数と経過時間（`timeoutSeconds`、省略時は1時間）を持つ認可済み Coder 契約を保存し、初回 Dispatch を発行する。`workflow advance` は最新の検証済み結果から独立 Reviewer または同じ受入れ条件と出典付き finding を持つ修正 Dispatch を発行する。現在の output SHA の承認で実装 Task を COMPLETED にする。`workflow run` は隔離した Coder・Reviewer SDK adapter を作り、指示・結果のコピーなしに SQLite の Dispatch を順に実行する。usage event 後に利用量を保存・報告し、契約・Memory の変更を監視して、保存 deadline で runtime を止める。token 閾値では停止しない。`--coder-tools`・`--reviewer-tools` は明示 allowlist のまま保つ。永続 runner claim は同時 run を防ぎ、中断 process の claim は明示的な照合なしに再利用しない。旧 process の終了と、その Dispatch の完了・取消を確認した後、`workflow recover --file <path>` で観測 runner ID を比較し、actor、理由、証拠を記録して所有を解放する。保存契約と結果は後続操作にも適用する。認可・停止条件は [Task Graph](../develop/task-graph.md) を参照する。
 
-開発版の共通 runner は Reviewer の起動前に `review_budget` event を一度出力する。
+v0.7.16 の共通 runner は Reviewer の起動前に `review_budget` event を一度出力する。
 `payload` の version 1 は `flowId`、`dispatchId`、`observedAt`、`flowDeadline`、
 `effectiveDeadline`、`deadlineSource`、`remainingMilliseconds` を持つ。
 期限は保存 Flow と呼出し元 context の短い方で、出典は `flow` または `caller` となる。
@@ -563,7 +563,7 @@ CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は s
 
 ## 全コマンドと option の索引
 
-開発版の Copilot `workflow run|step|resume` と `runtime` は、`--review-progress` で
+v0.7.16 の Copilot `workflow run|step|resume` と `runtime` は、`--review-progress` で
 Reviewer の途中確認記録の保存を明示的に有効化できる。再接続では同じ option を指定する。
 記録は最大32件、1件64 KiBまでで、対象の指示・commit・tree に結び付ける。
 新たに承認したレビュー専用継続へ自己申告の確認範囲を渡し、レビュー承認とは区別する。

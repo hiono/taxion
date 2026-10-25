@@ -2,7 +2,7 @@
 
 Taxion の設定は project、Git repository、実行ハーネス（Copilot または OpenCode）、実行記録の識別子を選びます。開発基盤と実行ハーネスは別の設定です。設定ファイルに token や password を書かず、各 credential の保管と認証は選んだ CLI の実行環境で行います。
 
-開発版では、新規の残量方式を `account`・`reset-daily` に変更し、Task 上限の手入力を不要にしました。配布済み v0.7.15 の既定は `flow` で、`request` の正の Task 上限は必須です。以下の新しい標準方式は開発版の説明であり、既存の設定・保存済み契約には遡及適用しません。
+v0.7.16 では、新規の残量方式を `account`・`reset-daily` に変更し、Task 上限の手入力を不要にしました。v0.7.15 の既定は `flow` で、`request` の正の Task 上限は必須です。以下の新しい標準方式は v0.7.16 以降の説明であり、既存の設定・保存済み契約には遡及適用しません。
 
 ## 設定ファイル
 
@@ -50,7 +50,7 @@ v0.3.1 では、端末上の未確定 provider・remote と適用確認を選択
 | `execution.requester` | Task を依頼した人または process の識別子。 |
 | `execution.worker` | 実行環境・worker の識別子。 |
 | `execution.approvalRef` | Task に結び付ける設定承認の識別子。 |
-| `execution.budgetGuidance` | 新規 proposal の残量方式。`off`・`flow`・`account`。開発版の省略時は `account`・`reset-daily`。依頼ごとの明示指定を優先し、保存済み契約は変更しない。 |
+| `execution.budgetGuidance` | 新規 proposal の残量方式。`off`・`flow`・`account`。v0.7.16 以降の省略時は `account`・`reset-daily`。依頼ごとの明示指定を優先し、保存済み契約は変更しない。 |
 
 GitLab を subpath で公開し、SSH に標準外の port を使う場合は `endpoints` を書きます。判断の背景と照合の段階は [ADR-0042](../develop/adr/0042-gitlab-endpoint-binding-separates-api-clone-and-ssh-identities.md) に記録しています。
 

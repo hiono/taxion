@@ -78,8 +78,8 @@ account quota の読取りが承認済みの場合、Controller は新しい Dis
 取得できない場合は日割りの判定を行わず、5%の判定だけを行う。
 この固定5%方式は既存契約の動作として維持する。
 
-開発版では、Task の承認対象である `budgetGuidance` に
-開発版の新規の標準 `"accountAllocation":"reset-daily"` を承認すると、
+v0.7.16 では、Task の承認対象である `budgetGuidance` に
+v0.7.16 以降の新規の標準 `"accountAllocation":"reset-daily"` を承認すると、
 過去の固定5%方式の代わりに、
 リセットまで日割りで下がる残量下限を適用する。`accountReadApproved` と
 `account` の許可も必要である。既存 Task への追加は再承認を要する。
@@ -103,7 +103,7 @@ account quota の読取りが承認済みの場合、Controller は新しい Dis
 この方式は親の報告用残量や厳密な請求上限を保証しない。最終24時間には親の残量も
 使い切る可能性がある。既存の時間制限と明示の `maxNanoAiu` 上限は維持する。
 
-開発版で新たに承認する `reset-daily` の Task は、Flow 開始要求の
+v0.7.16 以降に新たに承認する `reset-daily` の Task は、Flow 開始要求の
 `maxNanoAiu` を省略・0にできる。保存する予算と評価結果の
 `accountQuotaOnly: true` が、nano-AIU 上限の代わりに残量下限で制御することを示す。
 `maxNanoAiu`・`nanoAiuRemaining` の0を残量枯渇や無制限と解釈しない。
@@ -121,7 +121,7 @@ account quota の読取りが承認済みの場合、Controller は新しい Dis
 OpenCode のように account quota を読めない runtime では、この判定は行われず、
 時間の期限だけが適用される。
 
-開発版では、Copilot の `account` mode は、送信前の残り率が取得不能・期限切れ・
+v0.7.16 では、Copilot の `account` mode は、送信前の残り率が取得不能・期限切れ・
 未対応の場合も送信を拒否する。`off`・`flow` mode と、account quota 非対応の
 OpenCode を quota 検証済みとは扱わない。
 
