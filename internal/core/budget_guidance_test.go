@@ -35,6 +35,33 @@ func TestBudgetGuidanceSelectionApprovalAndLegacyShape(t *testing.T) {
 	}
 }
 
+func TestResetDailyAllocationRequiresExplicitContract(t *testing.T) {
+	legacy, _ := NewBudgetGuidance("", "account")
+	if legacy.AccountAllocation != "" {
+		t.Fatal("existing account selection changed its approved allocation")
+	}
+	task := graphTask("allocation")
+	task.BudgetGuidance = legacy
+	graph := trackedGraph(t, task)
+	saved, _ := graph.GraphTask(task.ID)
+	saved.BudgetGuidance = CloneBudgetGuidance(saved.BudgetGuidance)
+	saved.BudgetGuidance.AccountAllocation = "reset-daily"
+	if err := saved.BudgetGuidance.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if graph.Track(saved, "human", "change allocation without approval") == nil {
+		t.Fatal("new allocation reused old authorization")
+	}
+	for _, policy := range []*BudgetGuidancePolicy{
+		{Mode: "flow", Source: "request", AllowedModes: []string{"flow"}, AccountAllocation: "reset-daily"},
+		{Mode: "account", Source: "request", AllowedModes: []string{"account"}, AccountReadApproved: true, AccountAllocation: "auto"},
+	} {
+		if policy.Validate() == nil {
+			t.Fatal("invalid allocation accepted")
+		}
+	}
+}
+
 func TestBudgetGuidanceRequiresReapprovalAndImmutableDispatch(t *testing.T) {
 	task := graphTask("guidance")
 	task.BudgetGuidance, _ = NewBudgetGuidance("", "")

@@ -29,6 +29,9 @@ type budgetObservation struct {
 	UnfinishedRoles      []string               `json:"unfinishedRoles,omitempty"`
 	SessionCreditCeiling *float64               `json:"sessionCreditCeiling,omitempty"`
 	Account              *runtime.QuotaSnapshot `json:"account,omitempty"`
+	AccountAllocation    string                 `json:"accountAllocation,omitempty"`
+	AllocationBasis      *quotaAllocationBasis  `json:"allocationBasis,omitempty"`
+	RemainingFloor       *float64               `json:"remainingFloor,omitempty"`
 }
 
 func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.GraphDispatch, override string) (*budgetObservation, error) {
@@ -96,7 +99,12 @@ func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.Gr
 	observation, err = readBudgetQuota(ctx, c.runtime, selected, observation)
 	if err == nil && observation != nil && observation.Account != nil {
 		now := time.Now().UTC()
-		allocateAccountQuota(observation.Account, accountDayStart(state.Records.Events, observation.Account, now), now)
+		if policy.AccountAllocation == "reset-daily" {
+			refreshQuotaState(observation, now)
+			err = allocateResetDaily(observation, state.Records.Events, now)
+		} else {
+			allocateAccountQuota(observation.Account, accountDayStart(state.Records.Events, observation.Account, now), now)
+		}
 	}
 	return observation, err
 }
@@ -244,7 +252,14 @@ func isolatedBudgetGuidance(ctx context.Context, worker runtime.Identity, policy
 		if err != nil {
 			return observation, "", err
 		}
-		allocateAccountQuota(observation.Account, nil, time.Now().UTC())
+		if policy.AccountAllocation == "reset-daily" {
+			refreshQuotaState(observation, time.Now().UTC())
+			if err := allocateResetDaily(observation, nil, time.Now().UTC()); err != nil {
+				return observation, "", err
+			}
+		} else {
+			allocateAccountQuota(observation.Account, nil, time.Now().UTC())
+		}
 	}
 	refreshQuotaState(observation, time.Now().UTC())
 	text, err := budgetSupplement(observation)

@@ -28,6 +28,18 @@ provider の `resetDate` は観測時刻として扱い、欠落・1分超の古
 subscription の reset 日時は認証済み account の別 field から取得する。
 ローカルの取得時刻で古い snapshot を新しいものに見せない。
 
+追加の承認方式 `budgetGuidance.accountAllocation = "reset-daily"` では、
+固定5%予約の代わりに、保存した開始残量をリセットまでの24時間区間で均等配分する。
+開始時の区間数を N、現在の残区間数を M とし、残量下限を
+開始残り率 × (M − 1) / N とする。最終24時間は下限0とし、残量ゼロの送信は拒否する。
+月初・月中の早期枯渇を抑えつつ、失効直前の利用を許す人間の採択に基づく。
+十分な controller 残量を実測で保証する方式とは区別する。
+既存契約の配分は変えず、新しい field は承認の budget digest に含める。
+同じ account・resource・unit・scope・reset の保存済み開始基準を使い、
+残量増加や新しい Dispatch によって配分を作り直さない。
+基準と下限は既存の receipt に保存する。改変された記録や reset 不明は拒否する。
+独立した計画・質問処理では単発送信前の判定だけであり、継続監視済みとは扱わない。
+
 Flow は既存の `BUDGET_STOP` と handoff 保留を使用し、session 停止と
 partial Git evidence の取得も既存の経路を使う。停止失敗を成功へ置き換えない。
 新しい Dispatch の当日開始率は同じ reset cycle の観測から選ぶ。
@@ -46,10 +58,20 @@ usage event だけの確認は無通信中に働かない。新たな監視 sche
 自動の Task-wide nano-AIU ceiling と実測による絶対量の controller 予約は未実装であり、
 既存の明示 ceiling と割合による予約を維持する。request 枠、AI credits、
 nano-AIU の単位を換算して不足した契約を補わない。
+`reset-daily` の最終24時間には controller 用の残量も保証しない。
+新方式でも明示 nano-AIU ceiling を省略可能にはしていない。
+旧版は新しい承認 field を理解しないため、その契約を旧版で再利用しない。
 旧版は今回の継続監視を行わないため、切替前に稼働 session の停止を確認する。
 保存観測や停止履歴は削除せず、停止済み Flow を書き換えて復帰させない。
 
 ## Validation
+
+`reset-daily` は `TestResetDaily*` で月初・月中の下限、区間境界、最終24時間の
+0%下限とゼロ残量の拒否、増加後も同じ開始基準を使うことを確認する。
+保存基準の欠落・改変・競合、reset 不明、残量非対応・取得不能・古い観測、
+無制限契約の拒否、送信と実行中監視、変更時の再承認も確認する。
+独立レビューで見つかった残量非対応時の時間制限のみへの切替を修正し、
+新方式では拒否する回帰を追加した。全 Go 検証と対象を絞った race 検証を行う。
 
 `go build ./...`、`go vet ./...`、`go test ./...` と、変更した
 Controller の quota・guidance・停止テストの `go test -race` を実行した。

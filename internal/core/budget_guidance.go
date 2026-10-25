@@ -10,6 +10,7 @@ type BudgetGuidancePolicy struct {
 	Source              string   `json:"source"`
 	AllowedModes        []string `json:"allowedModes"`
 	AccountReadApproved bool     `json:"accountReadApproved,omitempty"`
+	AccountAllocation   string   `json:"accountAllocation,omitempty"`
 }
 
 func (p *BudgetGuidancePolicy) Validate() error {
@@ -31,6 +32,9 @@ func (p *BudgetGuidancePolicy) Validate() error {
 	}
 	if slices.Contains(p.AllowedModes, "account") != p.AccountReadApproved {
 		return fmt.Errorf("account guidance requires explicit account read approval")
+	}
+	if p.AccountAllocation != "" && (p.AccountAllocation != "reset-daily" || !p.AccountReadApproved) {
+		return fmt.Errorf("account allocation requires reset-daily and approved account guidance")
 	}
 	return nil
 }
