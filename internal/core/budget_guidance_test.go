@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/hiono/taxion/internal/billing"
 )
 
 func TestBudgetGuidanceSelectionApprovalAndLegacyShape(t *testing.T) {
 	for _, test := range []struct{ config, override, mode, source string }{
-		{"", "", "account", "default"}, {"account", "", "account", "configuration"},
+		{"", "", "provider", "default"}, {"account", "", "account", "configuration"},
 		{"account", "off", "off", "request"}, {"off", "account", "account", "request"},
 	} {
 		policy, err := NewBudgetGuidance(test.config, test.override)
@@ -21,8 +23,12 @@ func TestBudgetGuidanceSelectionApprovalAndLegacyShape(t *testing.T) {
 		}
 		copy := CloneBudgetGuidance(policy)
 		copy.AllowedModes[0] = "invalid"
+		copy.Billing.Overage = "allowed"
 		if policy.Validate() != nil {
 			t.Fatal("mutable policy alias")
+		}
+		if policy.Billing.Overage != "denied" {
+			t.Fatal("billing declaration shares a mutable clone")
 		}
 		policy.AccountReadApproved = !policy.AccountReadApproved
 		if policy.Validate() == nil {
@@ -35,6 +41,43 @@ func TestBudgetGuidanceSelectionApprovalAndLegacyShape(t *testing.T) {
 	data, err := json.Marshal(GraphTask{})
 	if err != nil || strings.Contains(string(data), "budgetGuidance") {
 		t.Fatal("legacy contracts acquired a new field")
+	}
+}
+
+func TestProviderBillingSelectionRequiresCompatibleDeclaration(t *testing.T) {
+	for _, contract := range []string{"", "provider-limit", "metered", "unknown"} {
+		selected := billing.Settings{Contract: contract}
+		policy, err := NewBillingBudgetGuidance("", "", selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantProvider := contract == "" || contract == "provider-limit"
+		if ProviderBudget(policy) != wantProvider || policy.AccountReadApproved ||
+			!wantProvider && policy.Mode != "flow" {
+			t.Fatal("billing declaration selected unsafe guidance", policy)
+		}
+		_, err = NewBillingBudgetGuidance("", "provider", selected)
+		if (err == nil) != wantProvider {
+			t.Fatal("conflicting billing declaration accepted", selected, err)
+		}
+	}
+	for _, policy := range []*BudgetGuidancePolicy{
+		{Mode: "provider", Source: "request", AllowedModes: []string{"provider"}},
+		{Mode: "provider", Source: "request", AllowedModes: []string{"provider"}, Billing: &billing.Settings{Contract: "metered"}},
+		{Mode: "flow", Source: "request", AllowedModes: []string{"flow"}, Billing: &billing.Settings{Contract: "invalid"}},
+	} {
+		if policy.Validate() == nil {
+			t.Fatal("unbound billing declaration accepted")
+		}
+	}
+	legacy := &BudgetGuidancePolicy{Mode: "account", Source: "request", AllowedModes: []string{"account"}, AccountReadApproved: true}
+	before, _ := json.Marshal(legacy)
+	if legacy.Validate() != nil || ProviderBudget(legacy) || ExternalBudget(legacy) {
+		t.Fatal("legacy account policy acquired provider-only authority")
+	}
+	after, _ := json.Marshal(legacy)
+	if string(before) != string(after) || strings.Contains(string(after), "billing") {
+		t.Fatal("legacy policy encoding changed")
 	}
 }
 

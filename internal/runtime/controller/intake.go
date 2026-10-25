@@ -125,10 +125,12 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 	}
 	if task.BudgetGuidance == nil {
 		mode := ""
+		var selected config.Config
 		if request.PlanningSelection != nil {
 			mode = request.PlanningSelection.Execution.BudgetGuidance
+			selected = *request.PlanningSelection
 		}
-		task.BudgetGuidance, err = core.NewBudgetGuidance(mode, "")
+		task.BudgetGuidance, err = core.NewBillingBudgetGuidance(mode, "", selected.Billing)
 		if err != nil {
 			return core.GraphTask{}, err
 		}
@@ -203,6 +205,9 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		task, ok := state.Graph.GraphTask(request.TaskID)
 		if !state.HasGraph || !ok {
 			return fmt.Errorf("taxion: intake confirmation requires a saved proposal")
+		}
+		if err := task.BudgetGuidance.CheckBillingContract(request.Selection.Billing); err != nil {
+			return err
 		}
 		for _, decision := range task.Decisions {
 			if decision.ID == confirmation.ID {

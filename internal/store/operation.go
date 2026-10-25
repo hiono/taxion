@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/core"
 )
 
@@ -24,6 +25,7 @@ type Operation struct {
 	SessionCreditLimit float64         `json:"sessionSoftCreditLimit"`
 	MaxNanoAIU         float64         `json:"maxNanoAiu"`
 	AccountQuotaOnly   bool            `json:"accountQuotaOnly,omitempty"`
+	BudgetSource       string          `json:"budgetSource,omitempty"`
 	PlanningNanoAIU    float64         `json:"planningNanoAiu"`
 	PlanningUsageState string          `json:"planningUsageState"`
 	Checkpoint         json.RawMessage `json:"checkpoint,omitempty"`
@@ -34,12 +36,18 @@ func (o Operation) Active() bool {
 	return o.State != "COMPLETED" && o.State != "CANCELLED"
 }
 
+func (o Operation) ExternalBudgetOnly() bool {
+	return billing.ExternalBudget(o.BudgetSource, o.AccountQuotaOnly)
+}
+
 func (o Operation) validate() error {
 	if o.Version != 1 || strings.TrimSpace(o.ID) == "" || strings.TrimSpace(o.TaskID) == "" ||
 		o.Kind != "request" && o.Kind != "question" || o.Kind == "request" && o.Deadline.IsZero() ||
 		math.IsNaN(o.SessionCreditLimit) || math.IsInf(o.SessionCreditLimit, 0) || o.SessionCreditLimit < 0 ||
 		math.IsNaN(o.MaxNanoAIU) || math.IsInf(o.MaxNanoAIU, 0) || o.MaxNanoAIU < 0 ||
 		o.AccountQuotaOnly && (o.Kind != "request" || o.MaxNanoAIU != 0) ||
+		o.BudgetSource != "" && (o.Kind != "request" ||
+			billing.ValidateBudget(o.BudgetSource, o.AccountQuotaOnly, o.MaxNanoAIU, true, true) != nil) ||
 		math.IsNaN(o.PlanningNanoAIU) || math.IsInf(o.PlanningNanoAIU, 0) || o.PlanningNanoAIU < 0 ||
 		o.Kind == "request" && o.PlanningUsageState != "complete" && o.PlanningUsageState != "unknown" ||
 		len(o.Checkpoint) != 0 && !json.Valid(o.Checkpoint) {
@@ -119,6 +127,7 @@ func (s *Store) SaveOperation(operation Operation) error {
 		if current.Version != operation.Version || current.Kind != operation.Kind ||
 			!current.Deadline.Equal(operation.Deadline) || current.SessionCreditLimit != operation.SessionCreditLimit ||
 			current.MaxNanoAIU != operation.MaxNanoAIU || current.AccountQuotaOnly != operation.AccountQuotaOnly ||
+			current.BudgetSource != operation.BudgetSource ||
 			operation.PlanningNanoAIU < current.PlanningNanoAIU ||
 			current.PlanningUsageState == "unknown" && operation.PlanningUsageState != "unknown" {
 			return fmt.Errorf("operation identity and approved ceilings are immutable")

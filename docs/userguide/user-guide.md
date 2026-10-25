@@ -305,7 +305,7 @@ taxion request --repo owner/repository \
 
 この入口は snapshot mode と `fileAccess: all` を明示して使います。worktree 内の新規ファイルを許可し、Coder には `view,create,edit,apply_patch`、Reviewer には `view` を渡します。変更結果の scope 検査、worktree 外と保護された path の拒否、Reviewer の読み取り専用制約は維持します。細かい file access や外部 skill の承認が必要な場合は、`ready` を読んだオーケストレータに次節の個別手順を任せます。
 
-v0.7.16 以降の新規依頼は `account`・`reset-daily` を標準とし、Task ごとの上限入力を求めません。設定・依頼別指定がなければ上のコマンドでこの方式を選びます。表示されたアカウントの残量読取りと下限方式を確認し、`/plan`・`/approve` で承認します。残量非対応・取得不能・古い観測・リセット不明では停止し、旧方式へ自動で切り替えません。
+開発版の新規依頼は、提供元の上限停止と追加課金なしを申告する `provider` が既定です。表示した条件を `/plan`・`/approve` で承認した場合、Task ごとの利用額上限を省略できます。v0.7.16〜v0.7.18 の既定は `account`・`reset-daily` で、保存済み契約は変更しません。設定・監視・移行の条件は[課金ガイド](billing.md)を参照してください。
 
 v0.7.17 では、同じアカウントに Copilot の保存認証と `gh` の認証がある場合、現在の認証種別・GitHub のホスト・アカウントを照合して残量照会の認証情報を選びます。同じ種別に複数の候補が残る場合や、現在の認証・資格情報を確認できない場合は停止します。認証の削除や切替えは行いません。照会はモデル session を作らず、資格情報を表示しません。
 
@@ -568,25 +568,18 @@ Copilot の `--max-ai-credits` は session 単位の soft ceiling であり、
 アカウント全体の残 credit を表示する option ではありません。
 各 model call で取得できた nano-AIU と AI-credit status を表示します。
 account 残高、使用率、残り率は、同じ単位の allowance を確認できない場合は unavailable です。
-新規の標準 `account`・`reset-daily` は残量下限で制御し、追加のモデル呼出しはしません。保存済みの `flow` は過去の承認済み条件として引き継ぎます。
+開発版の既定 `provider` は自動の残量照会を行いません。明示した `account`・`reset-daily` は残量下限で制御します。どちらも追加のモデル呼出しはせず、保存済み契約は引き継ぎます。
 
 Copilot SDK の account quota、session の累積 cost、公式 Billing API の期間別使用量は
 別の情報です。requests の残り割合を AI Credit の絶対残量と読み替えたり、
 個人向け report に組織負担の利用量がないことを「使用量ゼロ」と判断したりしないでください。
 非公開 API や管理者の token は、通常の実行準備の必須条件にはしません。
 
-選択は [ADR-0029](../develop/adr/0029-separate-budget-guidance-from-provider-quota.md)で定義しています。
-新規 proposal の既定は、残量下限と継続監視を用いる `account`・`reset-daily` です。
-実行ごとに明示しなければ config の既定値を継承し、`off` でも停止条件は変わりません。
-`account` は操作者が承認した provider の残量読取りを追加する方式で、
-未対応・取得失敗・古い観測を理由付きで表示します。たとえば通常の `request`
-コマンドで新規の既定方式を使う場合も、表示される読取り範囲を
-`/plan` で Planner に、`/approve` で実装・レビューに承認します。
-未指定時は環境変数 `TAXION_EXECUTION_BUDGET_GUIDANCE`、設定ファイルの
-`execution.budgetGuidance`、最後に `account`・`reset-daily` の順で値を決めます
-（設定ファイル内の優先順位は [設定ガイド](configuration.md)を参照）。
-観測と実際の補足は、相談分を含めて workspace の SQLite に保存し、`records show` で確認します。
-設定がない旧 Task / Dispatch へ補足を遡及適用しません。
+課金条件と方式は[課金ガイド](billing.md)に集約しています。
+`taxion config check --billing` で、新規提案用の条件と方式、適用先、設定元を確認できます。
+これは提供元による契約確認や課金設定の変更ではありません。
+観測と補足は相談分も SQLite に保存し、`records show` で確認します。
+設定がない旧 Task / Dispatch へ新しい条件を遡及適用しません。
 
 残量が少なくても acceptance や独立レビューは省略しません。
 途中の成果を保存して停止し、続行には新しい予算を承認する、という境界を維持します。

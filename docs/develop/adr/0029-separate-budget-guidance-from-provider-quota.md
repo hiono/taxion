@@ -8,6 +8,8 @@ Accepted
 
 新規 proposal の既定方式と実行中の監視は
 [ADR-0049](0049-monitor-approved-account-quota-during-execution.md)で更新した。
+申告した課金条件と新規既定値は
+[ADR-0051](0051-centralize-declared-billing-conditions.md)で更新した。
 以下の `flow` 既定と固定5%方式は当時の決定であり、保存済み契約の引継ぎには維持する。
 
 設定、依頼ごとの選択、送信補足、送信記録と Copilot SDK quota 読取りを実装した。

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
@@ -292,7 +293,11 @@ func TestRequestResumesApprovedFlowWithoutRepeatingCoder(t *testing.T) {
 }
 
 func TestRequestAccountQuotaOmitsNativeCeilingAndResumes(t *testing.T) {
-	testApprovedRequest(t, true, true)
+	testApprovedRequest(t, true, "account")
+}
+
+func TestRequestProviderDefaultOmitsNativeCeilingAndResumes(t *testing.T) {
+	testApprovedRequest(t, true, "provider")
 }
 
 func TestRequestOldDefaultCheckpointRetainsFlowPolicy(t *testing.T) {
@@ -361,7 +366,7 @@ func TestRequestOmittedNativeCeilingRequiresAccountApproval(t *testing.T) {
 	}
 	var out bytes.Buffer
 	err := requestCommand(args, strings.NewReader("/plan\n"), &out, nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "requires --budget-guidance account") {
+	if err == nil || !strings.Contains(err.Error(), "requires approved provider billing or reset-daily account guidance") {
 		t.Fatal("omission without account approval was accepted", err)
 	}
 	db, state, err := loadWorkspace()
@@ -374,11 +379,12 @@ func TestRequestOmittedNativeCeilingRequiresAccountApproval(t *testing.T) {
 	}
 }
 
-func testApprovedRequest(t *testing.T, resume bool, quotaOnly ...bool) {
+func testApprovedRequest(t *testing.T, resume bool, externalMode ...string) {
 	t.Helper()
 	root, args := requestFixture(t)
-	accountOnly := len(quotaOnly) != 0 && quotaOnly[0]
-	if accountOnly {
+	accountOnly := len(externalMode) != 0 && externalMode[0] == "account"
+	providerOnly := len(externalMode) != 0 && externalMode[0] == "provider"
+	if accountOnly || providerOnly {
 		var defaults []string
 		for index := 0; index < len(args); index++ {
 			if args[index] == "--max-task-nano-aiu" || args[index] == "--budget-guidance" {
@@ -388,6 +394,9 @@ func testApprovedRequest(t *testing.T, resume bool, quotaOnly ...bool) {
 			defaults = append(defaults, args[index])
 		}
 		args = defaults
+		if accountOnly {
+			args = append(args, "--budget-guidance", "account")
+		}
 	}
 	var calls, roles, runs int
 	planner := func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
@@ -603,6 +612,12 @@ func TestSearch(t *testing.T) {
 			!strings.Contains(out.String(), "no nano-AIU ceiling or unit conversion") {
 			t.Fatal("quota-only request fabricated a native ceiling or lost its monitoring contract")
 		}
+	} else if providerOnly {
+		if state.Records.Operation.BudgetSource != billing.ProviderStop ||
+			state.Graph.ReviewFlows[0].Budget.BudgetSource != billing.ProviderStop ||
+			state.Graph.ReviewFlows[0].Budget.MaxNanoAIU != 0 {
+			t.Fatal("default provider request lost its approved external budget source")
+		}
 	} else if state.Records.Operation.PlanningNanoAIU != 2 ||
 		state.Graph.ReviewFlows[0].Budget.MaxNanoAIU != 1e9-2 {
 		t.Fatal("planning spend was not deducted from the approved hard ceiling")
@@ -647,6 +662,8 @@ func TestSearch(t *testing.T) {
 	wantMode := "flow"
 	if accountOnly {
 		wantMode = "account"
+	} else if providerOnly {
+		wantMode = "provider"
 	}
 	if coder.Instruction.BudgetGuidance == nil || coder.Instruction.BudgetGuidance.Mode != wantMode ||
 		reviewer.Instruction.BudgetGuidance == nil || reviewer.Instruction.BudgetGuidance.Mode != wantMode {

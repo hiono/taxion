@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
@@ -179,11 +180,11 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	worktree := fs.String("worktree", ".", "clean attached worktree to modify")
 	timeout := fs.Duration("timeout", controller.DefaultFlowTimeout, "total planning and execution deadline after /plan")
 	credits := fs.Float64("max-ai-credits", 0, "per-session soft credit ceiling, not a total budget (minimum: 30)")
-	taskNanoAIU := fs.Float64("max-task-nano-aiu", 0, "optional hard Task-wide nano-AIU ceiling; omission requires account guidance with reset-daily allocation")
+	taskNanoAIU := fs.Float64("max-task-nano-aiu", 0, "optional hard Task-wide nano-AIU ceiling; omission requires approved provider billing or reset-daily account guidance")
 	repairs := fs.Int("max-repairs", 1, "maximum repair turns after independent review")
 	cli := fs.String("cli", "", "Copilot CLI executable")
 	base := fs.String("base-directory", "", "Copilot state directory")
-	budgetGuidance := fs.String("budget-guidance", "", "budget policy for new requests: account (reset-daily default); off or flow for legacy explicit-cap use")
+	budgetGuidance := fs.String("budget-guidance", "", "new-request budget policy: provider (default declared no-overage contract), account (reset-daily), off or flow")
 	var paths stringListFlag
 	fs.Var(&paths, "context-path", "committed text file to send to Planner (repeatable; total up to 64 KiB)")
 	if err := fs.Parse(args); err != nil {
@@ -277,22 +278,19 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			return fmt.Errorf("request checkpoint has no saved budget policy; reconcile without applying new defaults")
 		}
 	} else {
-		guidance, err = core.NewBudgetGuidance(selected.Execution.BudgetGuidance, *budgetGuidance)
+		guidance, err = core.NewBillingBudgetGuidance(selected.Execution.BudgetGuidance, *budgetGuidance, selected.Billing)
 		if err != nil {
 			return err
 		}
 	}
 	if *taskNanoAIU == 0 {
-		if guidance == nil || guidance.Mode != "account" {
-			return fmt.Errorf("request without --max-task-nano-aiu requires --budget-guidance account or configured account guidance")
+		if !core.ExternalBudget(guidance) {
+			return fmt.Errorf("request without --max-task-nano-aiu requires approved provider billing or reset-daily account guidance")
 		}
-		if resuming && guidance.AccountAllocation != "reset-daily" {
-			return fmt.Errorf("request checkpoint omitted ceiling lacks saved reset-daily approval")
-		}
-		guidance.AccountAllocation = "reset-daily"
 	}
-	if resuming && savedOperation.AccountQuotaOnly != (*taskNanoAIU == 0) {
-		return fmt.Errorf("request checkpoint quota-budget mode differs from saved operation")
+	if resuming && (savedOperation.AccountQuotaOnly != (*taskNanoAIU == 0 && core.AccountQuotaBudget(guidance)) ||
+		(savedOperation.BudgetSource == billing.ProviderStop) != (*taskNanoAIU == 0 && core.ProviderBudget(guidance))) {
+		return fmt.Errorf("request checkpoint budget mode differs from saved operation")
 	}
 	if selected.Repository.Path != *repo {
 		return fmt.Errorf("request repository differs from the configured repository")
@@ -359,17 +357,24 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			"Only explicitly approved skills are copied into the isolated role; unapproved native permission requests are cancelled."
 		ceiling = "Copilot AI-credit ceilings and account quota are unsupported; the explicit deadline and approved repair limit apply."
 	}
-	if *taskNanoAIU == 0 {
+	if guidance.Billing != nil {
+		ceiling += fmt.Sprintf("\nBilling conditions (Human declaration, not provider-verified): contract=%s; overage=%s; autoRecharge=%s; paidFallback=%s.",
+			guidance.Billing.Contract, guidance.Billing.Overage, guidance.Billing.AutoRecharge, guidance.Billing.PaidFallback)
+	}
+	if core.ProviderBudget(guidance) {
+		ceiling += "\nProvider stops at its limit. No automatic quota reads or monthly reserve."
+	}
+	if *taskNanoAIU == 0 && core.AccountQuotaBudget(guidance) {
 		ceiling += "\nTask budget: approved account remaining floor (reset-daily); no nano-AIU ceiling or unit conversion. Unknown, stale or unsupported quota stops execution."
 	}
 	if !resuming {
 		if _, err := fmt.Fprintf(output,
-			"Repository: %s\nWorktree: %s\nBranch: %s\nBaseline: %s\nRuntime account: %s\n"+
+			"Repository: %s\nWorktree: %s\nBranch: %s\nBaseline: %s\nRuntime provider: %s; account: %s; contract reference: %s\n"+
 				"Deadline: %s; repairs: %d\n%s\n"+
 				"Budget guidance: %s (%s); account quota read: %t; allocation: %s\n"+
 				"%s\n"+
 				"Enter /plan to start a paid Planner conversation, or /quit to cancel. No code will be changed yet.\n",
-			*repo, root, branch, baseline, selected.Runtime.Account, *timeout, *repairs, ceiling,
+			*repo, root, branch, baseline, selected.Runtime.Provider, selected.Runtime.Account, selected.Runtime.ContractRef, *timeout, *repairs, ceiling,
 			guidance.Mode, guidance.Source, guidance.AccountReadApproved, guidance.AccountAllocation, discovery); err != nil {
 			return err
 		}
@@ -425,8 +430,11 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		Version: 1, ID: id, Kind: "request", TaskID: id + "-planning",
 		State: "RUNNING", Phase: "PLANNING", Owner: rand.Text(), Deadline: deadline,
 		SessionCreditLimit: *credits, MaxNanoAIU: *taskNanoAIU,
-		AccountQuotaOnly:   *taskNanoAIU == 0,
+		AccountQuotaOnly:   *taskNanoAIU == 0 && core.AccountQuotaBudget(guidance),
 		PlanningUsageState: "complete",
+	}
+	if *taskNanoAIU == 0 && core.ProviderBudget(guidance) {
+		operation.BudgetSource = billing.ProviderStop
 	}
 	lease, err := db.LockOperation()
 	if err != nil {
@@ -530,7 +538,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		}
 		var answer controller.QuestionAnswer
 		if checkpoint.Answer == nil {
-			if !operation.AccountQuotaOnly && (operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU) {
+			if !operation.ExternalBudgetOnly() && (operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU) {
 				operation.State = "USAGE_EXCEEDED"
 				failureGate = "USAGE_EXCEEDED"
 				return errors.Join(fmt.Errorf("request planning budget exhausted or unknown; checkpoint retained"),
@@ -629,7 +637,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if answer.Proposal == nil || len(answer.Questions) != 0 {
 				return fmt.Errorf("answer the Planner's questions before approving a proposal")
 			}
-			if !operation.AccountQuotaOnly && (operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU) {
+			if !operation.ExternalBudgetOnly() && (operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU) {
 				operation.State = "USAGE_EXCEEDED"
 				failureGate = "USAGE_EXCEEDED"
 				return errors.Join(fmt.Errorf("request budget exhausted or unknown; execution was not authorized"),
@@ -744,6 +752,10 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if operation.AccountQuotaOnly {
 				remainingNanoAIU = 0
 				budgetAuthorization = "Human selected /approve for the approved goal, deadline, repair limit and reset-daily account remaining floor without a nano-AIU ceiling"
+			}
+			if operation.BudgetSource == billing.ProviderStop {
+				remainingNanoAIU = 0
+				budgetAuthorization = "Human selected /approve for the declared provider-stop-no-overage billing contract, goal, deadline and repair limit without a nano-AIU ceiling or automatic quota monitoring"
 			}
 			if _, err := controller.StartReviewFlowContext(controller.WithOperation(ctx, operation), db, storePath, controller.ReviewFlowRequest{
 				Configuration: configuration,

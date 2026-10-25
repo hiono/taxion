@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/memory"
@@ -68,8 +69,8 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 		if err := checkFlowApproval(state.Graph, task, request.Configuration); err != nil {
 			return err
 		}
-		if request.MaxNanoAIU == 0 && !core.AccountQuotaBudget(task.BudgetGuidance) {
-			return fmt.Errorf("taxion: omitted maxNanoAiu requires approved account guidance with reset-daily allocation")
+		if request.MaxNanoAIU == 0 && !core.ExternalBudget(task.BudgetGuidance) {
+			return fmt.Errorf("taxion: omitted maxNanoAiu requires approved provider billing or account guidance with reset-daily allocation")
 		}
 		if _, exists := state.Graph.ReviewFlow(request.ID); exists {
 			return fmt.Errorf("taxion: review flow ID already exists")
@@ -103,10 +104,13 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 				MaxCoderSessions:    1 + *request.MaxRepairs,
 				MaxReviewerSessions: 1 + *request.MaxRepairs,
 				MaxNanoAIU:          request.MaxNanoAIU,
-				AccountQuotaOnly:    request.MaxNanoAIU == 0,
+				AccountQuotaOnly:    request.MaxNanoAIU == 0 && core.AccountQuotaBudget(task.BudgetGuidance),
 			},
 			StartedAt: now, Deadline: deadline, Status: "RUNNING",
 			Authorization: request.Authorization, DispatchIDs: []string{},
+		}
+		if request.MaxNanoAIU == 0 && core.ProviderBudget(task.BudgetGuidance) {
+			flow.Budget.BudgetSource = billing.ProviderStop
 		}
 		if request.ContinueFromDispatchID == "" {
 			if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipNone, "", "", request.Configuration); err != nil {

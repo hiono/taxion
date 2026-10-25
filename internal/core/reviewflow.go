@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"slices"
 	"time"
+
+	"github.com/hiono/taxion/internal/billing"
 )
 
 // ReviewFlow retains the approved execution contract across controller
@@ -41,6 +43,11 @@ type FlowBudget struct {
 	MaxReviewerSessions int     `json:"maxReviewerSessions"`
 	MaxNanoAIU          float64 `json:"maxNanoAiu"`
 	AccountQuotaOnly    bool    `json:"accountQuotaOnly,omitempty"`
+	BudgetSource        string  `json:"budgetSource,omitempty"`
+}
+
+func (b FlowBudget) ExternalBudgetOnly() bool {
+	return billing.ExternalBudget(b.BudgetSource, b.AccountQuotaOnly)
 }
 
 type FlowRecovery struct {
@@ -111,12 +118,12 @@ func (g TaskGraph) validateReviewFlows() error {
 		}
 		budget := flow.Budget
 		if budget.MaxDispatches != 0 || budget.MaxCoderSessions != 0 ||
-			budget.MaxReviewerSessions != 0 || budget.MaxNanoAIU != 0 || budget.AccountQuotaOnly {
+			budget.MaxReviewerSessions != 0 || budget.MaxNanoAIU != 0 || budget.ExternalBudgetOnly() || budget.BudgetSource != "" {
 			if budget.MaxDispatches < 1 || budget.MaxCoderSessions < 1 ||
 				budget.MaxReviewerSessions < 1 || math.IsNaN(budget.MaxNanoAIU) ||
 				math.IsInf(budget.MaxNanoAIU, 0) || budget.MaxNanoAIU < 0 ||
-				budget.AccountQuotaOnly && (budget.MaxNanoAIU != 0 || !AccountQuotaBudget(flow.Contract.BudgetGuidance)) ||
-				!budget.AccountQuotaOnly && budget.MaxNanoAIU == 0 {
+				billing.ValidateBudget(budget.BudgetSource, budget.AccountQuotaOnly, budget.MaxNanoAIU,
+					AccountQuotaBudget(flow.Contract.BudgetGuidance), ProviderBudget(flow.Contract.BudgetGuidance)) != nil {
 				return graphError("invalid approved budget for review flow %q", flow.ID)
 			}
 		}

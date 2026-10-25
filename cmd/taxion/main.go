@@ -648,7 +648,7 @@ func runtimeCmd(args []string) error {
 	reviewSource := fs.String("review-source-worktree", "", "repository worktree used to create the independent Reviewer worktree")
 	tools := fs.String("tools", "", "comma-separated SDK tool allowlist (default: none)")
 	promptFile := fs.String("prompt-file", "", "follow-up instruction file (send only)")
-	budgetGuidance := fs.String("budget-guidance", "", "approved per-send guidance mode: off, flow or account (start/send only)")
+	budgetGuidance := fs.String("budget-guidance", "", "approved per-send guidance mode: off, flow, account or provider (start/send only)")
 	messageFile := fs.String("message-file", "", "Conventional/Contextual commit message file (commit only)")
 	scanner := fs.String("scanner", "betterleaks", "trusted Betterleaks 1.9.0 executable (commit or --managed-commit)")
 	managedCommit := fs.Bool("managed-commit", false, "enable the bound Coder's taxion_commit SDK tool")
@@ -676,8 +676,8 @@ func runtimeCmd(args []string) error {
 	if *budgetGuidance != "" && action != "start" && action != "send" {
 		return fmt.Errorf("runtime: --budget-guidance applies only to start/send")
 	}
-	if *budgetGuidance != "" && *budgetGuidance != "off" && *budgetGuidance != "flow" && *budgetGuidance != "account" {
-		return fmt.Errorf("runtime: --budget-guidance requires off, flow or account")
+	if *budgetGuidance != "" && *budgetGuidance != "off" && *budgetGuidance != "flow" && *budgetGuidance != "account" && *budgetGuidance != "provider" {
+		return fmt.Errorf("runtime: --budget-guidance requires off, flow, account or provider")
 	}
 	if action == "send" && *promptFile == "" {
 		return fmt.Errorf("runtime send: --prompt-file is required")

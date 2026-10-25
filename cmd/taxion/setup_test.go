@@ -12,7 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/config"
+	"github.com/hiono/taxion/internal/core"
 )
 
 func setupFixture(t *testing.T, git bool) string {
@@ -38,6 +40,74 @@ func setupArguments() []string {
 	return []string{"--set", "repository.provider=gitlab", "--set", "repository.account=scm-user",
 		"--set", "runtime.provider=copilot", "--set", "runtime.account=ai-user",
 		"--set", "runtime.contractRef=operator-contract", "--set", "execution.approvalRef=operator-reference"}
+}
+
+func TestBillingSetupAndStandaloneConfigReport(t *testing.T) {
+	setupFixture(t, true)
+	args := append(setupArguments(), "--yes")
+	for _, value := range []string{
+		"billing.contract=provider-limit", "billing.overage=denied",
+		"billing.autoRecharge=disabled", "billing.paidFallback=disabled",
+	} {
+		args = append(args, "--set", value)
+	}
+	var output bytes.Buffer
+	if err := setupCmd(args, strings.NewReader(""), &output, false, true); err != nil {
+		t.Fatal(err, output.String())
+	}
+	resolved, err := resolveConfiguration()
+	if err != nil || !resolved.Config.Billing.ProviderStops() {
+		t.Fatal("setup did not persist billing conditions", resolved, err)
+	}
+	storePath = filepath.Join(t.TempDir(), "unused", "ledger.json")
+	output.Reset()
+	if err := checkConfig([]string{"check", "--billing"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	var report struct {
+		Provider, Account, ContractRef, Verification string
+		Policy                                       *core.BudgetGuidancePolicy
+		Sources                                      map[string]string
+	}
+	if err := json.Unmarshal(output.Bytes(), &report); err != nil {
+		t.Fatal("billing report is not standalone JSON", err, output.String())
+	}
+	want, _ := (billing.Settings{}).Resolve()
+	if report.Policy == nil || report.Policy.Mode != "provider" || report.Policy.Billing == nil ||
+		*report.Policy.Billing != want || report.Provider != "copilot" || report.Account != "ai-user" ||
+		report.ContractRef != "operator-contract" || report.Verification != "human-declaration-not-provider-verified" {
+		t.Fatal("report omitted effective conditions or confused declaration with verification", report)
+	}
+	for _, field := range []string{"billing.contract", "billing.overage", "billing.autoRecharge", "billing.paidFallback"} {
+		if report.Sources[field] != "project" {
+			t.Fatal("report omitted setting origin", field, report.Sources)
+		}
+	}
+	if strings.Contains(output.String(), "copilot:logged-in") || strings.Contains(output.String(), "glab:active") {
+		t.Fatal("billing report exposed credential references")
+	}
+	for _, args := range [][]string{
+		{"check", "--billing", "--sources"}, {"check", "--billing", "--capabilities"},
+		{"check", "--billing", "--task", "task"}, {"check", "--billing", "--dispatch", "dispatch"},
+		{"bind", "--billing", "--dispatch", "dispatch"},
+	} {
+		output.Reset()
+		if err := checkConfig(args, &output); err == nil || output.Len() != 0 {
+			t.Fatal("mixed billing report options accepted", args)
+		}
+	}
+	if _, err := os.Stat(filepath.Dir(storePath)); !os.IsNotExist(err) {
+		t.Fatal("billing report opened the workspace", err)
+	}
+	t.Setenv("TAXION_BILLING_OVERAGE", "allowed")
+	output.Reset()
+	if err := checkConfig([]string{"check", "--billing"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(output.Bytes(), &report); err != nil || report.Policy.Mode != "flow" ||
+		report.Policy.Billing.Overage != "allowed" || report.Sources["billing.overage"] != "environment" {
+		t.Fatal("report ignored changed billing conditions", report, err)
+	}
 }
 
 func TestSetupOpenCodeDoesNotRequireExecutablePin(t *testing.T) {
