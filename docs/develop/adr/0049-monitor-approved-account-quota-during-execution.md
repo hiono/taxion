@@ -48,6 +48,16 @@ subscription の reset 日時は認証済み account の別 field から取得�
 開始時に取得できた残量が途中で非対応になった場合も停止する。
 非対応の時間制限のみの例外は、最初から非対応だった旧方式に限る。
 
+新たに承認した `account`・`reset-daily` の Task で `maxNanoAiu` を省略した場合、
+FlowBudget に `accountQuotaOnly: true` を保存する。nano-AIU の既定上限や換算値は
+作らず、残量の取得・下限判定・継続監視を停止条件にする。正の明示上限は従来どおり守る。
+日割り配分のない旧方式では省略を拒否し、実行時の `off`・`flow` への切替も拒否する。
+native 使用量が不明でもこの方式では続行できるが、不明という記録は変更しない。
+`request` で省略すると、明示または設定の `account` モードを前提に
+`reset-daily` を計画 Task と実行 Task に設定して表示・承認する。
+保存 operation・承認 digest・再開照合にもこのモードを含める。
+Planner 使用量を0の上限から引く処理は行わず、正の明示上限がある場合にだけ差し引く。
+
 Flow は既存の `BUDGET_STOP` と handoff 保留を使用し、session 停止と
 partial Git evidence の取得も既存の経路を使う。停止失敗を成功へ置き換えない。
 新しい Dispatch の当日開始率は同じ reset cycle の観測から選ぶ。
@@ -62,17 +72,24 @@ usage event だけの確認は無通信中に働かない。新たな監視 sche
 
 定期観測と停止要求は提供元での厳密な請求上限ではない。実 account での継続検証、
 親 Controller の単独消費実測は行っていない。
-合成テストの成功で Issue #155 や実作業による検証を完了としない。
-自動の Task-wide nano-AIU ceiling と実測による絶対量の controller 予約は未実装であり、
-既存の明示 ceiling と割合による予約を維持する。request 枠、AI credits、
+合成テストの成功で実作業による検証を完了としない。
+実測による絶対量の controller 予約は導入せず、承認された日割り残量下限を使用する。
+request 枠、AI credits、
 nano-AIU の単位を換算して不足した契約を補わない。
 `reset-daily` の最終24時間には controller 用の残量も保証しない。
-新方式でも明示 nano-AIU ceiling を省略可能にはしていない。
+省略可能な契約は新たに承認した残量方式だけであり、既存上限の自動削除は行わない。
 旧版は新しい承認 field を理解しないため、その契約を旧版で再利用しない。
 旧版は今回の継続監視を行わないため、切替前に稼働 session の停止を確認する。
 保存観測や停止履歴は削除せず、停止済み Flow を書き換えて復帰させない。
 
 ## Validation
+
+`TestAccountQuotaOnly*`・`TestOmittedFlowCeiling*`・`TestExplicitFlowCeiling*` は、
+省略の承認条件、未知の native 使用量、期限・回数制限、明示上限の維持、
+監視を無効化する指定の拒否と残量停止を確認する。
+`TestRequestAccountQuotaOmitsNativeCeilingAndResumes` は実モデルを使わず、
+上限省略、未知の Planner 使用量、実装・独立レビュー・中断後の再開、
+同じ成果 tree の照合と保存を通して確認する。
 
 `TestIsolated*` は質問・Planner・検索の正常完了、最終結果直前の残量不足、
 古い値、読取り失敗、周期・資源の変更、無通信時の監視、停止失敗、

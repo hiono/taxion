@@ -305,7 +305,9 @@ taxion request --repo owner/repository \
 
 この入口は snapshot mode と `fileAccess: all` を明示して使います。worktree 内の新規ファイルを許可し、Coder には `view,create,edit,apply_patch`、Reviewer には `view` を渡します。変更結果の scope 検査、worktree 外と保護された path の拒否、Reviewer の読み取り専用制約は維持します。細かい file access や外部 skill の承認が必要な場合は、`ready` を読んだオーケストレータに次節の個別手順を任せます。
 
-期限は `/plan` から数え、入力待ちと中断中も経過します。必須の `--max-task-nano-aiu` は nano-AIU の hard ceiling で、Planner の実測使用量を差し引いた残量だけを実行 Flow に割り当てます。Planner 利用量が未知・不完全なら次のモデル呼出しと実行承認を止め、実行中は既存の Task budget 検査で `BUDGET_STOP` を記録します。`--max-ai-credits` は session ごとの soft ceiling で、hard ceiling とは別です。Dispatch 数と role session 数の上限は承認済み repair 上限から導出し、実行済み数・credits・時間・修正/re-review 数と残量は `workflow evaluate --id FLOW_ID` で確認できます。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の失敗を自動 retry しません。
+期限は `/plan` から数え、入力待ちと中断中も経過します。正の `--max-task-nano-aiu` は nano-AIU の hard ceiling で、Planner の実測使用量を差し引いた残量だけを実行 Flow に割り当てます。この方式では Planner 利用量が未知・不完全なら次のモデル呼出しと実行承認を止めます。実行中は既存の Task budget 検査で `BUDGET_STOP` を記録します。`--max-ai-credits` は session ごとの soft ceiling で、hard ceiling とは別です。Dispatch 数と role session 数の上限は承認済み repair 上限から導出し、実行済み数・credits・時間・修正/re-review 数と残量は `workflow evaluate --id FLOW_ID` で確認できます。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の失敗を自動 retry しません。
+
+開発版では、`taxion request --repo REPO --max-ai-credits 30 --budget-guidance account` のように Task 上限を省略できます。計画前に表示する残量方式を確認し、`/plan` と `/approve` で承認します。この場合は開始時の残量から計算する `reset-daily` 下限で制御し、nano-AIU の上限は作りません。Planner の nano-AIU 使用量が不明でも残量の照合を通過すれば続行できますが、不明な使用量を完全・無料とは記録しません。残量が非対応・取得不能・古い場合、またはリセット不明の場合は送信できません。期限、修正回数、役割別 session 数、送信前・実行中・回答採用前の監視は維持します。`off`・`flow` モードで省略することや、既存の承認済み上限を消すことはできません。
 
 Planner はファイル・shell tool を持たず、今回の依頼または回答、最小の提案・未回答質問、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストを受け取ります。会話履歴や元依頼の全文を永続保存せず、元依頼は digest だけを decision に残します。path は directory ごとにまとめ、全件を保持したまま共通部分の繰り返しを減らします。通常は native な skill と指示も読み込みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。
 

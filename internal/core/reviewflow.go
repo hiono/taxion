@@ -40,6 +40,7 @@ type FlowBudget struct {
 	MaxCoderSessions    int     `json:"maxCoderSessions"`
 	MaxReviewerSessions int     `json:"maxReviewerSessions"`
 	MaxNanoAIU          float64 `json:"maxNanoAiu"`
+	AccountQuotaOnly    bool    `json:"accountQuotaOnly,omitempty"`
 }
 
 type FlowRecovery struct {
@@ -110,10 +111,12 @@ func (g TaskGraph) validateReviewFlows() error {
 		}
 		budget := flow.Budget
 		if budget.MaxDispatches != 0 || budget.MaxCoderSessions != 0 ||
-			budget.MaxReviewerSessions != 0 || budget.MaxNanoAIU != 0 {
+			budget.MaxReviewerSessions != 0 || budget.MaxNanoAIU != 0 || budget.AccountQuotaOnly {
 			if budget.MaxDispatches < 1 || budget.MaxCoderSessions < 1 ||
 				budget.MaxReviewerSessions < 1 || math.IsNaN(budget.MaxNanoAIU) ||
-				math.IsInf(budget.MaxNanoAIU, 0) || budget.MaxNanoAIU <= 0 {
+				math.IsInf(budget.MaxNanoAIU, 0) || budget.MaxNanoAIU < 0 ||
+				budget.AccountQuotaOnly && (budget.MaxNanoAIU != 0 || !AccountQuotaBudget(flow.Contract.BudgetGuidance)) ||
+				!budget.AccountQuotaOnly && budget.MaxNanoAIU == 0 {
 				return graphError("invalid approved budget for review flow %q", flow.ID)
 			}
 		}

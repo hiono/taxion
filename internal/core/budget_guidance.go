@@ -48,6 +48,11 @@ func CloneBudgetGuidance(p *BudgetGuidancePolicy) *BudgetGuidancePolicy {
 	return &copy
 }
 
+func AccountQuotaBudget(p *BudgetGuidancePolicy) bool {
+	return p != nil && p.Validate() == nil && p.Mode == "account" &&
+		p.AccountReadApproved && p.AccountAllocation == "reset-daily"
+}
+
 func NewBudgetGuidance(configured, override string) (*BudgetGuidancePolicy, error) {
 	mode, source := configured, "configuration"
 	if mode == "" {

@@ -61,6 +61,9 @@ func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.Gr
 		if !slices.Contains(flow.DispatchIDs, dispatch.ID) {
 			continue
 		}
+		if flow.Budget.AccountQuotaOnly && (mode != "account" || !core.AccountQuotaBudget(policy)) {
+			return nil, fmt.Errorf("taxion: account-quota-only flow cannot disable its approved residual-quota control")
+		}
 		if flow.Status != "RUNNING" || !time.Now().Before(flow.Deadline) {
 			return nil, fmt.Errorf("taxion: budget guidance cannot send after flow stop or deadline")
 		}

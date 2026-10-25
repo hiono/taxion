@@ -33,6 +33,18 @@ type requestFixtureRuntime struct {
 	send      func(string) error
 }
 
+type requestQuotaFixtureRuntime struct{ *requestFixtureRuntime }
+
+func (r *requestQuotaFixtureRuntime) ReadAccountQuota(context.Context, string) (runtime.QuotaSnapshot, error) {
+	remaining := 75.0
+	reset := time.Now().UTC().Add(8 * 24 * time.Hour).Truncate(time.Hour)
+	return runtime.QuotaSnapshot{
+		Provider: "copilot", Account: "ai", Resource: "premium_interactions", Unit: "requests",
+		Scope: "account", Source: "fixture", State: "available", ObservedAt: time.Now().UTC(),
+		RemainingPercentage: &remaining, ResetAt: &reset,
+	}, nil
+}
+
 func TestRuntimeRoleVerificationDoesNotDependOnModelDiversity(t *testing.T) {
 	for _, prompt := range []string{requestCoderPrompt, requestReviewerPrompt, "Custom role prompt"} {
 		for _, submission := range []bool{false, true} {
@@ -213,7 +225,7 @@ func TestRequestPathInventoryRetainsEveryPathAndReducesRepeatedDirectories(t *te
 	}
 }
 
-func fixturePlan(t *testing.T, answer controller.QuestionAnswer) requestPlanner {
+func fixturePlan(t *testing.T, answer controller.QuestionAnswer, accountOnly ...bool) requestPlanner {
 	t.Helper()
 	return func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
 		text string, _ float64, _, _ string) (controller.QuestionResult, error) {
@@ -262,6 +274,11 @@ func fixturePlan(t *testing.T, answer controller.QuestionAnswer) requestPlanner 
 			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
 			return nil
 		}
+		if len(accountOnly) != 0 && accountOnly[0] {
+			result, err := controller.AskPlanner(ctx, db, storePath, task.ID, text, selected, &requestQuotaFixtureRuntime{worker})
+			result.Usage = nil
+			return result, err
+		}
 		return controller.AskPlanner(ctx, db, storePath, task.ID, text, selected, worker)
 	}
 }
@@ -274,9 +291,46 @@ func TestRequestResumesApprovedFlowWithoutRepeatingCoder(t *testing.T) {
 	testApprovedRequest(t, true)
 }
 
-func testApprovedRequest(t *testing.T, resume bool) {
+func TestRequestAccountQuotaOmitsNativeCeilingAndResumes(t *testing.T) {
+	testApprovedRequest(t, true, true)
+}
+
+func TestRequestOmittedNativeCeilingRequiresAccountApproval(t *testing.T) {
+	_, args := requestFixture(t)
+	for index, arg := range args {
+		if arg == "--max-task-nano-aiu" {
+			args = append(args[:index:index], args[index+2:]...)
+			break
+		}
+	}
+	var out bytes.Buffer
+	err := requestCommand(args, strings.NewReader("/plan\n"), &out, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "requires --budget-guidance account") {
+		t.Fatal("omission without account approval was accepted", err)
+	}
+	db, state, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if state.Records.Operation != nil || len(state.Graph.Tasks) != 0 {
+		t.Fatal("denied omission mutated the workspace")
+	}
+}
+
+func testApprovedRequest(t *testing.T, resume bool, quotaOnly ...bool) {
 	t.Helper()
 	root, args := requestFixture(t)
+	accountOnly := len(quotaOnly) != 0 && quotaOnly[0]
+	if accountOnly {
+		for index, arg := range args {
+			if arg == "--max-task-nano-aiu" {
+				args = append(args[:index:index], args[index+2:]...)
+				break
+			}
+		}
+		args = append(args, "--budget-guidance", "account")
+	}
 	var calls, roles, runs int
 	planner := func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
 		text string, credits float64, cli, base string) (controller.QuestionResult, error) {
@@ -308,7 +362,7 @@ func testApprovedRequest(t *testing.T, resume bool) {
 			}
 			answer = requestFixtureAnswer([]string{})
 		}
-		return fixturePlan(t, answer)(ctx, db, selected, task, text, credits, cli, base)
+		return fixturePlan(t, answer, accountOnly)(ctx, db, selected, task, text, credits, cli, base)
 	}
 	runner := func(ctx context.Context, runArgs []string, output io.Writer) error {
 		runs++
@@ -439,6 +493,9 @@ func TestSearch(t *testing.T) {
 				worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
 				return nil
 			}
+			if accountOnly {
+				return &requestQuotaFixtureRuntime{worker}, nil
+			}
 			return worker, nil
 		}, output)
 		if resume && runs == 1 && err == nil {
@@ -482,7 +539,13 @@ func TestSearch(t *testing.T) {
 		checkpoint.Preflight == nil || !checkpoint.Preflight.ExecutionGateOpen || len(checkpoint.Preflight.Lanes) != 4 {
 		t.Fatal("approved preflight was not completed as one recorded batch", err)
 	}
-	if state.Records.Operation.PlanningNanoAIU != 2 ||
+	if accountOnly {
+		if !state.Records.Operation.AccountQuotaOnly || state.Records.Operation.PlanningUsageState != "unknown" ||
+			!state.Graph.ReviewFlows[0].Budget.AccountQuotaOnly || state.Graph.ReviewFlows[0].Budget.MaxNanoAIU != 0 ||
+			!strings.Contains(out.String(), "no nano-AIU ceiling or unit conversion") {
+			t.Fatal("quota-only request fabricated a native ceiling or lost its monitoring contract")
+		}
+	} else if state.Records.Operation.PlanningNanoAIU != 2 ||
 		state.Graph.ReviewFlows[0].Budget.MaxNanoAIU != 1e9-2 {
 		t.Fatal("planning spend was not deducted from the approved hard ceiling")
 	}
@@ -523,16 +586,24 @@ func TestSearch(t *testing.T) {
 		strings.Contains(intake.Request, `"committedContext"`) {
 		t.Fatal("execution lost its plan identity or retained conversation/context")
 	}
-	if coder.Instruction.BudgetGuidance == nil || coder.Instruction.BudgetGuidance.Mode != "flow" ||
-		reviewer.Instruction.BudgetGuidance == nil || reviewer.Instruction.BudgetGuidance.Mode != "flow" {
-		t.Fatal("request did not retain default guidance through independent review")
+	wantMode := "flow"
+	if accountOnly {
+		wantMode = "account"
+	}
+	if coder.Instruction.BudgetGuidance == nil || coder.Instruction.BudgetGuidance.Mode != wantMode ||
+		reviewer.Instruction.BudgetGuidance == nil || reviewer.Instruction.BudgetGuidance.Mode != wantMode {
+		t.Fatal("request did not retain approved guidance through independent review")
 	}
 	if coder.Result.OutputTreeSHA == "" || coder.Result.OutputTreeSHA != reviewer.Result.OutputTreeSHA ||
 		gitTest(t, root, "rev-parse", "HEAD") != coder.Instruction.BaselineSHA {
 		t.Fatal("request changed commit identity or reviewed another tree")
 	}
-	var planning int
+	var planning, requestRecords int
 	for _, record := range state.Records.Requests {
+		if record.RequestID != state.Records.Operation.ID {
+			continue
+		}
+		requestRecords++
 		if record.Kind == "planning" {
 			planning++
 			if record.Sequence != uint64(planning) || !json.Valid([]byte(record.Payload)) {
@@ -547,7 +618,7 @@ func TestSearch(t *testing.T) {
 	if resume {
 		wantRecords++
 	}
-	if len(state.Records.Requests) != wantRecords {
+	if requestRecords != wantRecords {
 		t.Fatal("execution events were duplicated instead of referencing the Flow")
 	}
 	var execution struct {

@@ -27,6 +27,7 @@ type TaskBudgetReport struct {
 	ReviewerSessions         int      `json:"reviewerSessions"`
 	ReviewerSessionsRemain   int      `json:"reviewerSessionsRemaining"`
 	MaxNanoAIU               float64  `json:"maxNanoAiu"`
+	AccountQuotaOnly         bool     `json:"accountQuotaOnly,omitempty"`
 	ConsumedNanoAIU          float64  `json:"consumedNanoAiu"`
 	NanoAIURemaining         float64  `json:"nanoAiuRemaining"`
 	CreditsStatus            string   `json:"creditsStatus"`
@@ -84,7 +85,7 @@ func taskBudgetReport(graph core.TaskGraph, flow core.ReviewFlow, now time.Time)
 		TaskID: flow.TaskID, FlowID: flow.ID, DispatchLimit: flow.Budget.MaxDispatches,
 		CoderSessionLimit:    flow.Budget.MaxCoderSessions,
 		ReviewerSessionLimit: flow.Budget.MaxReviewerSessions,
-		MaxNanoAIU:           flow.Budget.MaxNanoAIU, CreditsStatus: "complete",
+		MaxNanoAIU:           flow.Budget.MaxNanoAIU, AccountQuotaOnly: flow.Budget.AccountQuotaOnly, CreditsStatus: "complete",
 		ElapsedLimitMilliseconds: flow.Deadline.Sub(flow.StartedAt).Milliseconds(),
 		RepairLimit:              flow.MaxRepairs, Repairs: flow.Repairs, Unknown: []string{},
 	}
@@ -127,7 +128,7 @@ func taskBudgetReport(graph core.TaskGraph, flow core.ReviewFlow, now time.Time)
 	report.ReviewerSessionsRemain = max(report.ReviewerSessionLimit-report.ReviewerSessions, 0)
 	if report.CreditsStatus == "unknown" {
 		report.NanoAIURemaining = 0
-		report.Unknown = append(report.Unknown, "nano-AIU usage is incomplete; remaining budget is zero")
+		report.Unknown = append(report.Unknown, "nano-AIU usage is incomplete; remaining native budget is unverified")
 	} else {
 		report.NanoAIURemaining = max(report.MaxNanoAIU-report.ConsumedNanoAIU, 0)
 	}
@@ -135,7 +136,8 @@ func taskBudgetReport(graph core.TaskGraph, flow core.ReviewFlow, now time.Time)
 	report.ElapsedMilliseconds = max(elapsed, 0)
 	report.ElapsedRemainingMillis = max(report.ElapsedLimitMilliseconds-report.ElapsedMilliseconds, 0)
 	if flow.Budget.MaxDispatches == 0 || flow.Budget.MaxCoderSessions == 0 ||
-		flow.Budget.MaxReviewerSessions == 0 || flow.Budget.MaxNanoAIU <= 0 {
+		flow.Budget.MaxReviewerSessions == 0 ||
+		!flow.Budget.AccountQuotaOnly && flow.Budget.MaxNanoAIU <= 0 {
 		report.Unknown = append(report.Unknown, "approved budget limits are unavailable")
 		report.DispatchesRemaining = 0
 		report.CoderSessionsRemaining = 0
@@ -155,9 +157,9 @@ func flowBudgetStop(report TaskBudgetReport, role string) string {
 		return "Coder session ceiling reached"
 	case role == "REVIEWER" && report.ReviewerSessionsRemain == 0:
 		return "Reviewer session ceiling reached"
-	case report.CreditsStatus != "complete":
+	case !report.AccountQuotaOnly && report.CreditsStatus != "complete":
 		return "nano-AIU usage is unknown; remaining budget is zero"
-	case report.NanoAIURemaining <= 0:
+	case !report.AccountQuotaOnly && report.NanoAIURemaining <= 0:
 		return "nano-AIU ceiling reached"
 	default:
 		return ""
@@ -184,9 +186,9 @@ func requireSessionBudget(graph core.TaskGraph, flow core.ReviewFlow, role strin
 		return &budgetStopError{reason: "Coder session ceiling reached"}
 	case role == "REVIEWER" && report.ReviewerSessionsRemain == 0:
 		return &budgetStopError{reason: "Reviewer session ceiling reached"}
-	case report.CreditsStatus != "complete":
+	case !report.AccountQuotaOnly && report.CreditsStatus != "complete":
 		return &budgetStopError{reason: "nano-AIU usage is unknown; remaining budget is zero"}
-	case report.NanoAIURemaining <= 0:
+	case !report.AccountQuotaOnly && report.NanoAIURemaining <= 0:
 		return &budgetStopError{reason: "nano-AIU ceiling reached"}
 	default:
 		return nil
@@ -197,9 +199,9 @@ func activeBudgetStop(report TaskBudgetReport) string {
 	switch {
 	case report.ElapsedRemainingMillis == 0:
 		return "elapsed budget reached"
-	case report.CreditsStatus != "complete":
+	case !report.AccountQuotaOnly && report.CreditsStatus != "complete":
 		return "nano-AIU usage is unknown; remaining budget is zero"
-	case report.NanoAIURemaining <= 0:
+	case !report.AccountQuotaOnly && report.NanoAIURemaining <= 0:
 		return "nano-AIU ceiling reached"
 	default:
 		return ""
