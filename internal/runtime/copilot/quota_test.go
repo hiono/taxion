@@ -78,9 +78,9 @@ func testAccountQuotaReadRPC(t *testing.T, timestamp, expectedState string) {
 			for _, step := range []struct{ method, result string }{
 				{"connect", `{"protocolVersion":3}`},
 				{"auth.getStatus", `{"isAuthenticated":true,"login":"fixture","host":"github.com"}`},
-				{"account.getAllUsers", `[{"authInfo":{"type":"user","login":"fixture"},"selectionId":"selected","token":"synthetic-quota-token"}]`},
-				{"account.getQuota", `{"quotaSnapshots":{"premium_interactions":{"entitlementRequests":50000,"usedRequests":12300,"remainingPercentage":75.4,"resetDate":"OBSERVATION"}}}`},
+				{"account.getAllUsers", `[{"authInfo":{"type":"gh-cli","host":"github.com","login":"fixture"},"token":"synthetic-other-token"},{"authInfo":{"type":"user","host":"github.com","login":"fixture"},"selectionId":"selected","token":"synthetic-quota-token"}]`},
 				{"account.getCurrentAuth", `{"authInfo":{"type":"user","host":"https://github.com","login":"fixture","copilotUser":{"quota_reset_date_utc":"2099-11-01T00:00:00.000Z"}}}`},
+				{"account.getQuota", `{"quotaSnapshots":{"premium_interactions":{"entitlementRequests":50000,"usedRequests":12300,"remainingPercentage":75.4,"resetDate":"OBSERVATION"}}}`},
 			} {
 				header, err := reader.ReadMIMEHeader()
 				if err != nil {
@@ -164,17 +164,22 @@ func TestSelectedQuotaRefreshRejectsMissingAndAmbiguousCredentials(t *testing.T)
 		users rpc.AccountGetAllUsersResult
 		ok    bool
 	}{
-		{"selected", rpc.AccountGetAllUsersResult{user(`{"login":"fixture"}`, &token)}, true},
-		{"nested", rpc.AccountGetAllUsersResult{user(`{"user":{"login":"fixture"}}`, &token)}, true},
-		{"other", rpc.AccountGetAllUsersResult{user(`{"login":"other"}`, &token)}, false},
-		{"missing-token", rpc.AccountGetAllUsersResult{user(`{"login":"fixture"}`, nil)}, false},
-		{"duplicate", rpc.AccountGetAllUsersResult{user(`{"login":"fixture"}`, &token), user(`{"login":"fixture"}`, &token)}, false},
-		{"conflicting", rpc.AccountGetAllUsersResult{user(`{"login":"fixture","user":{"login":"other"}}`, &token)}, false},
+		{"selected", rpc.AccountGetAllUsersResult{user(`{"type":"user","host":"github.com","login":"fixture"}`, &token)}, true},
+		{"nested", rpc.AccountGetAllUsersResult{user(`{"type":"user","host":"github.com","user":{"login":"fixture"}}`, &token)}, true},
+		{"case-insensitive", rpc.AccountGetAllUsersResult{user(`{"type":"user","host":"https://github.com/","login":"FIXTURE"}`, &token)}, true},
+		{"other", rpc.AccountGetAllUsersResult{user(`{"type":"user","host":"github.com","login":"other"}`, &token)}, false},
+		{"missing-token", rpc.AccountGetAllUsersResult{user(`{"type":"user","host":"github.com","login":"fixture"}`, nil)}, false},
+		{"duplicate", rpc.AccountGetAllUsersResult{user(`{"type":"user","host":"github.com","login":"fixture"}`, &token), user(`{"type":"user","host":"github.com","login":"fixture"}`, &token)}, false},
+		{"other-source", rpc.AccountGetAllUsersResult{user(`{"type":"gh-cli","host":"github.com","login":"fixture"}`, &token)}, false},
+		{"mixed-sources", rpc.AccountGetAllUsersResult{user(`{"type":"gh-cli","host":"github.com","login":"fixture"}`, nil), user(`{"type":"user","host":"github.com","login":"fixture"}`, &token)}, true},
+		{"conflicting", rpc.AccountGetAllUsersResult{user(`{"type":"user","host":"github.com","login":"fixture","user":{"login":"other"}}`, &token)}, false},
+		{"wrong-host", rpc.AccountGetAllUsersResult{user(`{"type":"user","host":"other.invalid","login":"fixture"}`, &token)}, false},
+		{"missing-type", rpc.AccountGetAllUsersResult{user(`{"host":"github.com","login":"fixture"}`, &token)}, false},
 		{"malformed", rpc.AccountGetAllUsersResult{user(`null`, &token)}, false},
 		{"empty", nil, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			request, err := selectedQuotaRequest(test.users, "fixture")
+			request, err := selectedQuotaRequest(test.users, "fixture", rpc.UserAuthInfo{Host: "github.com", Login: "fixture"})
 			if test.ok && (err != nil || request == nil || request.GitHubToken == nil || *request.GitHubToken != token || request.SelectionID != nil) ||
 				!test.ok && (err == nil || request != nil) {
 				t.Fatal("incorrect selected-account refresh result")
@@ -185,6 +190,36 @@ func TestSelectedQuotaRefreshRejectsMissingAndAmbiguousCredentials(t *testing.T)
 		})
 	}
 }
+
+func TestSelectedQuotaRefreshRequiresActiveIdentity(t *testing.T) {
+	token := "synthetic-only-token"
+	users := rpc.AccountGetAllUsersResult{{AuthInfo: rpc.UserAuthInfo{Host: "github.com", Login: "fixture"}, Token: &token}}
+	for _, active := range []rpc.AuthInfo{
+		nil,
+		rpc.UserAuthInfo{Host: "github.com", Login: "other"},
+		rpc.UserAuthInfo{Host: "other.invalid", Login: "fixture"},
+		rpc.RawAuthInfoData{Raw: json.RawMessage(`{"host":"github.com","login":"fixture"}`)},
+	} {
+		if request, err := selectedQuotaRequest(users, "fixture", active); err == nil || request != nil {
+			t.Fatal("unverified active identity selected a credential")
+		}
+	}
+}
+
+func TestSelectedQuotaRefreshBindsActiveCredentialSource(t *testing.T) {
+	userToken, ghToken := "synthetic-user-token", "synthetic-gh-token"
+	user := rpc.AccountAllUsers{AuthInfo: rpc.UserAuthInfo{Host: "github.com", Login: "fixture"}, Token: &userToken}
+	gh := rpc.AccountAllUsers{AuthInfo: rpc.GhCLIAuthInfo{Host: "github.com", Login: "fixture"}, Token: &ghToken}
+	for _, users := range []rpc.AccountGetAllUsersResult{{user, gh}, {gh, user}} {
+		for _, active := range []rpc.AccountAllUsers{user, gh} {
+			request, err := selectedQuotaRequest(users, "fixture", active.AuthInfo)
+			if err != nil || request == nil || request.GitHubToken == nil || *request.GitHubToken != *active.Token {
+				t.Fatal("quota refresh did not use the active credential source")
+			}
+		}
+	}
+}
+
 func TestAccountQuotaMappingAndUnapprovedReads(t *testing.T) {
 	for _, snapshot := range []rpc.AccountQuotaSnapshot{
 		{EntitlementRequests: 50000, UsedRequests: 100, RemainingPercentage: 99.8},
