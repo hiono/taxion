@@ -6,13 +6,16 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,7 +64,15 @@ type Workspace struct {
 
 // Open opens (creating if needed) the sqlite file at path and migrates the schema.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	location, err := workspaceLocation(path)
+	if err != nil {
+		return nil, err
+	}
+	query := location.Query()
+	query.Set("_txlock", "immediate")
+	query.Add("_pragma", "busy_timeout(5000)")
+	location.RawQuery = query.Encode()
+	db, err := sql.Open("sqlite", location.String())
 	if err != nil {
 		return nil, err
 	}
@@ -77,13 +88,40 @@ func Open(path string) (*Store, error) {
 	return result, nil
 }
 
-// OpenReadOnly observes existing state without creating or migrating a workspace.
-func OpenReadOnly(path string) (*Store, error) {
+func workspaceLocation(path string) (*url.URL, error) {
+	if strings.HasPrefix(path, "file:") {
+		return url.Parse(path)
+	}
+	if path == ":memory:" {
+		return &url.URL{Scheme: "file", Opaque: ":memory:"}, nil
+	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
-	location := url.URL{Scheme: "file", Path: absolute, RawQuery: "mode=ro"}
+	return absoluteWorkspaceLocation(absolute, runtime.GOOS == "windows"), nil
+}
+
+func absoluteWorkspaceLocation(absolute string, windows bool) *url.URL {
+	if windows {
+		absolute = strings.ReplaceAll(absolute, `\`, "/")
+		if !strings.HasPrefix(absolute, "/") {
+			absolute = "/" + absolute
+		}
+	}
+	return &url.URL{Scheme: "file", Path: absolute}
+}
+
+// OpenReadOnly observes existing state without creating or migrating a workspace.
+func OpenReadOnly(path string) (*Store, error) {
+	location, err := workspaceLocation(path)
+	if err != nil {
+		return nil, err
+	}
+	query := location.Query()
+	query.Set("mode", "ro")
+	query.Add("_pragma", "busy_timeout(5000)")
+	location.RawQuery = query.Encode()
 	db, err := sql.Open("sqlite", location.String())
 	if err != nil {
 		return nil, err
@@ -103,7 +141,16 @@ func (s *Store) Close() error {
 func (s *Store) LoadWorkspace() (Workspace, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.loadWorkspace(s.db)
+	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return Workspace{}, err
+	}
+	defer tx.Rollback()
+	state, err := s.loadWorkspace(tx)
+	if err != nil {
+		return Workspace{}, err
+	}
+	return state, tx.Commit()
 }
 
 func (s *Store) WorkspaceInitialized() (bool, error) {

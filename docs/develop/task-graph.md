@@ -919,8 +919,20 @@ Web は HTTP の検査結果を表示する。Graph の read/edit API は今後�
 既存 Ledger の wire format は維持する。
 
 CLI・HTTP・ACP の更新は SQLite transaction で Ledger と Graph を一緒に変更する。
-SQLite が同時 writer の更新を受け入れられない場合は明示的なエラーとなり、
-呼び出し元は成功として扱わず再試行できる。
+v0.7.18 では、workspace の各接続に `busy_timeout(5000)` を設定し、更新 transaction は
+`BEGIN IMMEDIATE` で読取り前に writer を予約する。短時間の別接続の読取りや更新競合は、
+SQLite 内で最大5秒待つ。workspace 全体の読取りは一つの read transaction で行い、
+Ledger・Graph・保存記録を異なる commit から組み合わせない。
+5秒を超えるロックや他の保存エラーは成功として扱わない。runner で回復できない保存エラーは、
+従来どおり runtime の停止・照合と `SAFETY_STOP`・`HOLD` の対象になる。
+モデル送信、tool 実行、transaction の callback は自動再実行しない。
+
+`OpenReadOnly` は `mode=ro` で開き、schema を初期化・移行しない。一方、
+`task graph` を含む一部の既存 CLI は通常の workspace 初期化経路を使うため、
+表示目的でも無書込みとは限らない。長時間の外部 DB transaction や同時 schema 移行との
+並行動作、無制限の待機は保証しない。journal mode は変更せず、WAL への自動移行は行わない。
+v0.7.17 以前は通常経路にこの待機と writer 予約がなく、実行中の CLI 照会でも
+`SQLITE_BUSY` による停止が起こり得る。旧版では実行中の DB・CLI 照会を避ける。
 開発途中の JSON 保存形式を持つ workspace の読取り互換を実装に残している。
 対象は `.taxion/ledger.json` と `.graph.json` で、SQLite への初回取込みに限り読み、
 以後は更新しない。これは旧開発環境の記録を保持するための処理であり、
