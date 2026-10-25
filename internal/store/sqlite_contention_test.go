@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,6 +12,24 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"modernc.org/sqlite"
 )
+
+func TestWorkspaceFileURIPaths(t *testing.T) {
+	for _, test := range []struct {
+		path, want string
+		windows    bool
+	}{
+		{`C:\Users\alice\workspace ?#.db`, "/C:/Users/alice/workspace ?#.db", true},
+		{`\\server\share\workspace.db`, "//server/share/workspace.db", true},
+		{"/tmp/workspace ?#.db", "/tmp/workspace ?#.db", false},
+		{`/tmp/with\backslash.db`, `/tmp/with\backslash.db`, false},
+	} {
+		location := absoluteWorkspaceLocation(test.path, test.windows)
+		parsed, err := url.Parse(location.String())
+		if err != nil || parsed.Host != "" || parsed.Path != test.want || parsed.RawQuery != "" || parsed.Fragment != "" {
+			t.Fatalf("invalid file URI for %q: %v %v", test.path, parsed, err)
+		}
+	}
+}
 
 func TestWorkspaceConcurrentWriterWaitsBeforeReading(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspace ?#.db")

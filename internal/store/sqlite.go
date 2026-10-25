@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -98,16 +99,29 @@ func workspaceLocation(path string) (*url.URL, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &url.URL{Scheme: "file", Path: absolute}, nil
+	return absoluteWorkspaceLocation(absolute, runtime.GOOS == "windows"), nil
+}
+
+func absoluteWorkspaceLocation(absolute string, windows bool) *url.URL {
+	if windows {
+		absolute = strings.ReplaceAll(absolute, `\`, "/")
+		if !strings.HasPrefix(absolute, "/") {
+			absolute = "/" + absolute
+		}
+	}
+	return &url.URL{Scheme: "file", Path: absolute}
 }
 
 // OpenReadOnly observes existing state without creating or migrating a workspace.
 func OpenReadOnly(path string) (*Store, error) {
-	absolute, err := filepath.Abs(path)
+	location, err := workspaceLocation(path)
 	if err != nil {
 		return nil, err
 	}
-	location := url.URL{Scheme: "file", Path: absolute, RawQuery: "mode=ro&_pragma=busy_timeout(5000)"}
+	query := location.Query()
+	query.Set("mode", "ro")
+	query.Add("_pragma", "busy_timeout(5000)")
+	location.RawQuery = query.Encode()
 	db, err := sql.Open("sqlite", location.String())
 	if err != nil {
 		return nil, err
