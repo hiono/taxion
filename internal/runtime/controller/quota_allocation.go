@@ -53,6 +53,9 @@ func allocateResetDaily(observation *budgetObservation, receipts []store.Runtime
 			previous.ResetAt == nil || !previous.ResetAt.Equal(*quota.ResetAt) {
 			continue
 		}
+		if previous.State != "available" || previous.Unlimited {
+			continue
+		}
 		candidate := saved.Observation.AllocationBasis
 		if candidate == nil || !candidate.ResetAt.Equal(*quota.ResetAt) || candidate.StartedAt.IsZero() ||
 			candidate.StartedAt.After(now) || !candidate.ResetAt.After(candidate.StartedAt) ||
@@ -197,6 +200,10 @@ func (c *Controller) monitorAccountQuota(ctx context.Context, dispatch core.Grap
 	}
 	if observation == nil {
 		observation = &budgetObservation{Mode: "account", Source: initial.Source, ObservedAt: time.Now().UTC()}
+	}
+	if reason == "" && initial.Account != nil && initial.Account.State == "available" &&
+		(observation.Account == nil || observation.Account.State != "available") {
+		reason = "account quota became unavailable during execution"
 	}
 	if reason == "" && initial.Account != nil && initial.Account.ResetAt != nil {
 		reset := initial.Account.ResetAt

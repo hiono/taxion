@@ -84,9 +84,9 @@ func questionEventsWithUsage(answer, usage string) chan runtime.Event {
 
 const savedQuestionAnswer = `{"confirmed":[{"text":"The saved Task is Active.","sources":["/task/task/status","/observation/contentHash"]}],"assumptions":[],"unconfirmed":["Live runtime state has not been queried."]}`
 
-func questionFixture(t *testing.T) (*store.Store, string, *configuredRuntime, config.Resolution) {
+func questionFixture(t *testing.T, guidance ...*core.BudgetGuidancePolicy) (*store.Store, string, *configuredRuntime, config.Resolution) {
 	t.Helper()
-	original, _, worker, resolved := executionConfigurationFixture(t)
+	original, _, worker, resolved := executionConfigurationFixture(t, guidance...)
 	state, err := original.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)

@@ -101,12 +101,24 @@ func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.Gr
 		now := time.Now().UTC()
 		if policy.AccountAllocation == "reset-daily" {
 			refreshQuotaState(observation, now)
-			err = allocateResetDaily(observation, state.Records.Events, now)
+			err = allocateResetDaily(observation, accountAllocationReceipts(state.Records), now)
 		} else {
 			allocateAccountQuota(observation.Account, accountDayStart(state.Records.Events, observation.Account, now), now)
 		}
 	}
 	return observation, err
+}
+
+func accountAllocationReceipts(records store.Records) []store.RuntimeReceipt {
+	receipts := slices.Clone(records.Events)
+	for _, record := range records.Requests {
+		if record.Kind == "planning" {
+			receipts = append(receipts, store.RuntimeReceipt{
+				Type: "budget-guidance", Payload: record.Payload, Hash: record.Hash,
+			})
+		}
+	}
+	return receipts
 }
 
 func readBudgetQuota(ctx context.Context, worker runtime.Identity, selected config.Config,
@@ -263,8 +275,56 @@ func isolatedBudgetGuidance(ctx context.Context, worker runtime.Identity, policy
 	}
 	refreshQuotaState(observation, time.Now().UTC())
 	text, err := budgetSupplement(observation)
-	if quota := observation.Account; quota != nil && quota.State == "available" && quota.ExecutionDenied {
-		return observation, text, accountDenial(quota)
+	if policy.Mode == "account" {
+		if reason := quotaExecutionStop(observation.Account); reason != "" {
+			return observation, text, &budgetStopError{reason: reason}
+		}
 	}
 	return observation, text, err
+}
+
+func monitorIsolatedQuota(ctx context.Context, worker runtime.Identity, selected config.Config,
+	initial *budgetObservation, now time.Time) (*budgetObservation, error) {
+	if initial == nil || initial.Mode != "account" {
+		return nil, nil
+	}
+	current := &budgetObservation{Mode: initial.Mode, Source: initial.Source,
+		ObservedAt: now, FlowState: initial.FlowState, Deadline: initial.Deadline,
+		AccountAllocation: initial.AccountAllocation}
+	current, err := readBudgetQuota(ctx, worker, selected, current)
+	if err != nil {
+		return current, &budgetStopError{reason: "isolated account quota read failed; remaining allowance is unverified"}
+	}
+	refreshQuotaState(current, now)
+	if reason := quotaExecutionStop(current.Account); reason != "" {
+		return current, &budgetStopError{reason: reason}
+	}
+	before, after := initial.Account, current.Account
+	if before == nil || after == nil || before.State == "available" && after.State != "available" ||
+		before.Resource != after.Resource || before.Unit != after.Unit ||
+		before.Scope != after.Scope || before.Unlimited != after.Unlimited ||
+		(before.ResetAt == nil) != (after.ResetAt == nil) ||
+		before.ResetAt != nil && (!before.ResetAt.Equal(*after.ResetAt) || !now.Before(*before.ResetAt)) {
+		return current, &budgetStopError{reason: "isolated account quota basis or cycle changed"}
+	}
+	if initial.AccountAllocation == "reset-daily" {
+		payload, err := json.Marshal(struct {
+			Observation *budgetObservation `json:"observation"`
+		}{initial})
+		if err != nil {
+			return current, err
+		}
+		err = allocateResetDaily(current, []store.RuntimeReceipt{{
+			Type: "budget-guidance", Payload: string(payload), Hash: receiptHash(string(payload)),
+		}}, now)
+		if err != nil {
+			return current, &budgetStopError{reason: "isolated account allocation basis is invalid"}
+		}
+	} else {
+		allocateAccountQuota(current.Account, before.RemainingPercentage, now)
+	}
+	if reason := quotaExecutionStop(current.Account); reason != "" {
+		return current, &budgetStopError{reason: reason}
+	}
+	return current, nil
 }

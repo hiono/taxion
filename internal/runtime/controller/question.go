@@ -84,15 +84,16 @@ func (answer QuestionAnswer) MarshalJSON() ([]byte, error) {
 }
 
 type QuestionResult struct {
-	SessionID        string               `json:"sessionId"`
-	Context          QuestionContext      `json:"context"`
-	Answer           *QuestionAnswer      `json:"answer,omitempty"`
-	Usage            []core.DispatchUsage `json:"usage"`
-	Changed          bool                 `json:"recordsChangedDuringAnswer"`
-	BudgetGuidance   *budgetObservation   `json:"budgetGuidance,omitempty"`
-	BudgetSupplement string               `json:"budgetSupplement,omitempty"`
-	InstructionSent  bool                 `json:"instructionSent,omitempty"`
-	InvalidAnswer    string               `json:"invalidAnswer,omitempty"`
+	SessionID         string               `json:"sessionId"`
+	Context           QuestionContext      `json:"context"`
+	Answer            *QuestionAnswer      `json:"answer,omitempty"`
+	Usage             []core.DispatchUsage `json:"usage"`
+	Changed           bool                 `json:"recordsChangedDuringAnswer"`
+	BudgetGuidance    *budgetObservation   `json:"budgetGuidance,omitempty"`
+	QuotaObservations []*budgetObservation `json:"quotaObservations,omitempty"`
+	BudgetSupplement  string               `json:"budgetSupplement,omitempty"`
+	InstructionSent   bool                 `json:"instructionSent,omitempty"`
+	InvalidAnswer     string               `json:"invalidAnswer,omitempty"`
 }
 
 func questionContextsEqual(current, supplied QuestionContext) (bool, error) {
@@ -369,17 +370,52 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 		return result, err
 	}
 	policy := result.Context.Task.Task.BudgetGuidance
+	saveQuota := func(observation *budgetObservation, failed bool) error {
+		if observation == nil || observation.Mode != "account" {
+			return nil
+		}
+		payload, saveErr := json.Marshal(struct {
+			TaskID      string             `json:"taskId"`
+			SessionID   string             `json:"sessionId"`
+			Observation *budgetObservation `json:"observation"`
+			Failed      bool               `json:"failed"`
+		}{taskID, result.SessionID, observation, failed})
+		if saveErr != nil {
+			return saveErr
+		}
+		return db.AppendRequestRecord(result.SessionID, "planning", string(payload))
+	}
 	if policy != nil {
 		result.BudgetGuidance, result.BudgetSupplement, err = isolatedBudgetGuidance(ctx, worker, policy, selected)
 		if err != nil {
-			return result, err
+			return result, errors.Join(err, saveQuota(result.BudgetGuidance, true))
+		}
+		if policy.Mode == "account" && policy.AccountAllocation == "reset-daily" {
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				return result, err
+			}
+			if err := allocateResetDaily(result.BudgetGuidance, accountAllocationReceipts(state.Records), time.Now().UTC()); err != nil {
+				return result, errors.Join(err, saveQuota(result.BudgetGuidance, true))
+			}
+			if reason := quotaExecutionStop(result.BudgetGuidance.Account); reason != "" {
+				return result, errors.Join(&budgetStopError{reason: reason}, saveQuota(result.BudgetGuidance, true))
+			}
 		}
 		if err := recheck(); err != nil {
 			return result, err
 		}
 		refreshQuotaState(result.BudgetGuidance, time.Now().UTC())
+		if result.BudgetGuidance.Mode == "account" {
+			if reason := quotaExecutionStop(result.BudgetGuidance.Account); reason != "" {
+				return result, errors.Join(&budgetStopError{reason: reason}, saveQuota(result.BudgetGuidance, true))
+			}
+		}
 		result.BudgetSupplement, err = budgetSupplement(result.BudgetGuidance)
 		if err != nil {
+			return result, err
+		}
+		if err := saveQuota(result.BudgetGuidance, false); err != nil {
 			return result, err
 		}
 	}
@@ -391,6 +427,18 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 		return result, questionProviderError(ctx, "instruction send", err)
 	}
 	result.InstructionSent = result.BudgetGuidance != nil
+	lastQuotaCheck := time.Now()
+	if result.BudgetGuidance != nil && result.BudgetGuidance.Account != nil {
+		lastQuotaCheck = result.BudgetGuidance.Account.ObservedAt
+	}
+	checkQuota := func() error {
+		observation, quotaErr := monitorIsolatedQuota(ctx, worker, selected, result.BudgetGuidance, time.Now().UTC())
+		lastQuotaCheck = time.Now()
+		if observation != nil {
+			result.QuotaObservations = append(result.QuotaObservations, observation)
+		}
+		return errors.Join(quotaErr, saveQuota(observation, quotaErr != nil))
+	}
 	var output string
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -401,6 +449,11 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 		case <-ticker.C:
 			if err := recheck(); err != nil {
 				return result, err
+			}
+			if time.Since(lastQuotaCheck) >= time.Minute {
+				if err := checkQuota(); err != nil {
+					return result, err
+				}
 			}
 		case event, ok := <-events:
 			if !ok {
@@ -419,24 +472,18 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				}
 				usage.ObservedAt = time.Now().UTC()
 				result.Usage = append(result.Usage, usage)
-				if result.BudgetGuidance != nil && result.BudgetGuidance.Mode == "account" {
-					updated, quotaErr := readBudgetQuota(ctx, worker, selected, result.BudgetGuidance)
-					if updated != nil {
-						result.BudgetGuidance = updated
-					}
-					if quotaErr != nil && (updated == nil || updated.Account == nil) {
-						result.BudgetGuidance.Account = &runtime.QuotaSnapshot{
-							Provider: selected.Runtime.Provider, Account: selected.Runtime.Account,
-							Resource: "premium_interactions", Scope: "selected account", Unit: "requests",
-							Source: "sdk.account.getQuota", State: "unavailable", ObservedAt: time.Now().UTC(),
-							Reason: "quota read failed; provider details withheld",
-						}
+				if time.Since(lastQuotaCheck) >= time.Minute {
+					if err := checkQuota(); err != nil {
+						return result, err
 					}
 				}
 			case runtime.EventFailed, runtime.EventCancelled:
 				return result, fmt.Errorf("taxion: question runtime failed or was cancelled; provider details withheld")
 			case runtime.EventTurnFinished:
 				if err := recheck(); err != nil {
+					return result, err
+				}
+				if err := checkQuota(); err != nil {
 					return result, err
 				}
 				var answer QuestionAnswer
