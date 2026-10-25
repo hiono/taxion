@@ -506,9 +506,14 @@ func reviewerPacketEvidence(state *store.Workspace, flow core.ReviewFlow, auth s
 	if !enabled {
 		return "", fmt.Errorf("packet continuation requires source packet authorization")
 	}
-	if auth.ScopeDigest != sourceAuth.ScopeDigest || auth.Acceptance != sourceAuth.Acceptance ||
-		flow.Contract.Objective != source.Contract.Objective || flow.Contract.OutputMode != source.Contract.OutputMode {
+	if auth.ScopeDigest != sourceAuth.ScopeDigest || auth.Acceptance != sourceAuth.Acceptance {
 		return "", fmt.Errorf("packet continuation changed the verified scope or acceptance")
+	}
+	if flow.Contract.Objective != source.Contract.Objective {
+		return "", fmt.Errorf("packet continuation changed the verified objective; authorize a new successor Task preserving the source objective and use continueFromDispatchId to select review-only execution")
+	}
+	if flow.Contract.OutputMode != source.Contract.OutputMode {
+		return "", fmt.Errorf("packet continuation changed the verified output mode")
 	}
 	var currentBundle, sourceBundle core.ApprovalBundle
 	for _, bundle := range state.Graph.Approvals {
