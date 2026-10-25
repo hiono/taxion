@@ -44,6 +44,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	var strictResult bool
 	var compactContext bool
 	var validationSubmission bool
+	var reviewProgress bool
 	var builtinPrompts bool
 	var requireQuality bool
 	var scanner string
@@ -77,6 +78,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		fs.BoolVar(&strictResult, "strict-result-identities", false, "constrain final identities and start SHA to the saved Dispatch")
 		fs.BoolVar(&compactContext, "compact-context", false, "include exact prior results without nested instructions")
 		fs.BoolVar(&validationSubmission, "controller-validation-submission", false, "separate submission from controller-run checks; repeat on session attachment")
+		fs.BoolVar(&reviewProgress, "review-progress", false, "enable bounded Reviewer progress receipts (Copilot only); repeat on session attachment")
 		fs.StringVar(&scanner, "scanner", "betterleaks", "trusted Betterleaks executable (--managed-commit only)")
 	default:
 		return fmt.Errorf("unknown workflow action %q", action)
@@ -425,8 +427,9 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 			return newDispatchWorker(ctx, db, dispatch, copilot.Config{
 				Role: dispatch.Recipient, SystemPrompt: runtimeSubmissionPrompt(prompts[dispatch.Recipient], contract, validationSubmission),
 				WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: cli, BaseDirectory: base,
-				MaxAICredits:   maxAICredits,
-				AvailableTools: tools[dispatch.Recipient], ResponseSchema: responseSchema,
+				MaxAICredits:         maxAICredits,
+				EnableReviewProgress: reviewProgress,
+				AvailableTools:       tools[dispatch.Recipient], ResponseSchema: responseSchema,
 			}, managedCommit && dispatch.Recipient == "CODER", managedStage && dispatch.Recipient == "CODER", scanner)
 		}, output, configuration)
 		if flow.ID == "" {

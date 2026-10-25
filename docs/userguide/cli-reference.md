@@ -563,6 +563,12 @@ CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は s
 
 ## 全コマンドと option の索引
 
+開発版の Copilot `workflow run|step|resume` と `runtime` は、`--review-progress` で
+Reviewer の途中確認記録の保存を明示的に有効化できる。再接続では同じ option を指定する。
+記録は最大32件、1件64 KiBまでで、対象の指示・commit・tree に結び付ける。
+新たに承認したレビュー専用継続へ自己申告の確認範囲を渡し、レビュー承認とは区別する。
+OpenCode は非対応。停止原因と記録欠落時の扱いは[失敗からの復旧](failure-recovery.md#flow-が停止している)を参照する。
+
 | 追加コマンド | option と制約 |
 | --- | --- |
 | `gate resume` | `--flow ID`、任意の `--json`。保存済み未実行 Coder 境界を read-only で照合する。新規開始の READY 要件は変更しない。終了 code は 0 pass・1 fail・2 blocked。 |

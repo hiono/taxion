@@ -656,6 +656,7 @@ func runtimeCmd(args []string) error {
 	strictResult := fs.Bool("strict-result-identities", false, "constrain final-result identities and start SHA to the saved Dispatch; repeat on session attachment")
 	compactContext := fs.Bool("compact-context", false, "include exact prior results without nested instructions; repeat on session attachment")
 	validationSubmission := fs.Bool("controller-validation-submission", false, "separate model submission from controller-run checks; repeat on session attachment")
+	reviewProgress := fs.Bool("review-progress", false, "enable bounded Reviewer progress receipts (Copilot only); repeat on session attachment")
 	timeout := fs.Duration("timeout", 10*time.Minute, "maximum time to wait for a turn or event stream")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -815,8 +816,9 @@ func runtimeCmd(args []string) error {
 		Role: dispatch.Recipient, SystemPrompt: runtimeSubmissionPrompt(string(systemPrompt), dispatchContract, *validationSubmission),
 		WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: *cliPath,
 		BaseDirectory: *baseDirectory, AvailableTools: availableTools,
-		MaxAICredits:   *maxAICredits,
-		ResponseSchema: responseSchema,
+		MaxAICredits:         *maxAICredits,
+		ResponseSchema:       responseSchema,
+		EnableReviewProgress: *reviewProgress,
 	}, *managedCommit, *managedStage, *scanner)
 	if err != nil {
 		return err

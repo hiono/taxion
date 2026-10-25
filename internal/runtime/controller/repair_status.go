@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
@@ -26,6 +28,7 @@ const (
 // RepairStatus tells a controller whether the next repair is an internal
 // transition (ADR-0043) or needs Human action. It is an observation only.
 type RepairStatus struct {
+	StopCause                   string   `json:"stopCause,omitempty"`
 	ReviewContinuationCandidate string   `json:"reviewContinuationCandidate,omitempty"`
 	Version                     int      `json:"version"`
 	FlowID                      string   `json:"flowId"`
@@ -49,6 +52,16 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 	status := RepairStatus{
 		Version: RepairStatusVersion, FlowID: flow.ID, TaskID: flow.TaskID, FlowStatus: flow.Status,
 		StopCode: flow.StopCode, Repairs: flow.Repairs, MaxRepairs: flow.MaxRepairs, Reasons: []string{},
+	}
+	if flow.Status == "STOPPED" {
+		switch {
+		case flow.Reason == "elapsed budget reached" || strings.Contains(flow.Reason, context.DeadlineExceeded.Error()):
+			status.StopCause = "time-limit"
+		case flow.StopCode == "BUDGET_STOP" || flow.StopCode == "BUDGET_LIMIT":
+			status.StopCause = "usage-limit"
+		default:
+			status.StopCause = "other"
+		}
 	}
 	set := func(value, reason, next string) (RepairStatus, error) {
 		status.Status, status.NextAction = value, next
@@ -105,6 +118,9 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 	}
 	reviewRepair := last.Recipient == "REVIEWER" && last.Status == core.DispatchSucceeded &&
 		last.Result != nil && last.Result.ReviewVerdict == "REQUEST_CHANGES"
+	if reviewRepair && status.StopCause == "other" {
+		status.StopCause = "review-findings"
+	}
 	if reviewRepair && flow.Repairs >= flow.MaxRepairs {
 		return set(RepairCeilingExhausted, "saved repair ceiling reached", humanNext)
 	}

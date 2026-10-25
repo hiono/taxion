@@ -419,12 +419,30 @@ local 検査は登録 SDK stage・commit handler を Controller・実 Git で呼
 既存の `HasBudgetContinuationSource` と結果 receipt の検証を再利用し、
 候補に対して新しい Task・予算の承認と実行前の Git・設定再照合を案内する。
 停止条件や独立レビューの権限を緩める新しい復旧経路は設けない。
-途中レビューの検査記録の抽出・引継ぎと、消費量削減の実測は別の未完了項目である。
+途中レビューの確認記録は、明示的な `--review-progress` を指定した Copilot Reviewer に限り、
+SDK 固有型を含まない host binding と専用 tool `taxion_review_progress` で保存する。
+host は指示 hash、成功済み Coder、commit・tree を固定し、model からの上書きを許さない。
+同じ option は runtime の単独起動・再接続にも指定する。未指定時の tool 集合と設定 hash は変わらない。
+
+version 1 の記録は `reviewedScope`、`unreviewedScope`、`findings`、`evidence` を
+明示的な配列として持つ。1件64 KiB、session あたり32件までとし、
+最新の累積記録を渡す。送信を無制限に続けたり、過去の記録を暗黙に結合したりしない。
+Controller は session・指示・対象・Coder の結果 receipt と現物を検査し、
+自由記述を redaction した後、独立した receipt stream へ追記する。
+通常の runtime event の順序検証と混同しない。
+
+停止確認済みの後続レビューに渡す `taxion.review-progress-transfer.v1` は、
+`reported` と `missing` を区別する。記録があれば Reviewer の停止 receipt も必須とする。
+これは自己申告の確認範囲であり、承認、実行許可、独立した検証証拠ではない。
+対象変更や破損した記録は拒否し、記録のない旧実行を検証済みへ昇格させない。
+model の内部状態や token は転送しない。
 
 この変更は `TestReviewBudget*`、`TestObserveRepairStatus*`、
 `TestWorkflowCommandsPersistAuthorizedCeilings` と既存の成功済み Coder 継続テストで
 検証する。`go build ./...`、`go vet ./...`、`go test ./...` と、
 これらを対象とした Controller・CLI の `go test -race` をローカルで実行した。
+`TestReviewProgress*` は専用 tool の権限・引数、追記記録、対象変更、取消失敗、
+記録欠落・破損、承認済み successor の Reviewer のみの発行も検証する。
 実 account のモデル実行、途中の思考状態の復元、課金削減率は検証していない。
 旧版への切替で表示は失われるが、保存した停止状態と結果を書き換える必要はない。
 
