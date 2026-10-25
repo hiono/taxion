@@ -79,7 +79,8 @@ account quota の読取りが承認済みの場合、Controller は新しい Dis
 この固定5%方式は既存契約の動作として維持する。
 
 開発版では、Task の承認対象である `budgetGuidance` に
-`"accountAllocation":"reset-daily"` を明示すると、固定5%方式の代わりに、
+開発版の新規の標準 `"accountAllocation":"reset-daily"` を承認すると、
+過去の固定5%方式の代わりに、
 リセットまで日割りで下がる残量下限を適用する。`accountReadApproved` と
 `account` の許可も必要である。既存 Task への追加は再承認を要する。
 通常の `--budget-guidance account` だけでは、この新方式へ切り替わらない。

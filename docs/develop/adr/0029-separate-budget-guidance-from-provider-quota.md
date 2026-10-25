@@ -6,6 +6,10 @@ Date: 2026-10-15
 
 Accepted
 
+新規 proposal の既定方式と実行中の監視は
+[ADR-0049](0049-monitor-approved-account-quota-during-execution.md)で更新した。
+以下の `flow` 既定と固定5%方式は当時の決定であり、保存済み契約の引継ぎには維持する。
+
 設定、依頼ごとの選択、送信補足、送信記録と Copilot SDK quota 読取りを実装した。
 合成 runtime と SDK protocol fixture に加え、選択済み実アカウントから
 製品 adapter の読取りが成功することを確認した。session 作成・model 指示は0回。

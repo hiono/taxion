@@ -56,7 +56,7 @@ func AccountQuotaBudget(p *BudgetGuidancePolicy) bool {
 func NewBudgetGuidance(configured, override string) (*BudgetGuidancePolicy, error) {
 	mode, source := configured, "configuration"
 	if mode == "" {
-		mode, source = "flow", "default"
+		mode, source = "account", "default"
 	}
 	if override != "" {
 		mode, source = override, "request"
@@ -65,6 +65,7 @@ func NewBudgetGuidance(configured, override string) (*BudgetGuidancePolicy, erro
 	if mode == "account" {
 		p.AllowedModes = append(p.AllowedModes, "account")
 		p.AccountReadApproved = true
+		p.AccountAllocation = "reset-daily"
 	}
 	return p, p.Validate()
 }

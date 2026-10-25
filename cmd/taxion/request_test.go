@@ -170,7 +170,7 @@ execution: {requester: human, worker: local, approvalRef: configured-approval}
 	}
 	return root, []string{"--repo", "owner/repo", "--worktree", root,
 		"--timeout", "1m", "--max-ai-credits", "30", "--max-task-nano-aiu", "1000000000",
-		"--max-repairs", "0", "--context-path", "README.md"}
+		"--max-repairs", "0", "--context-path", "README.md", "--budget-guidance", "flow"}
 }
 
 func requestFixtureAnswer(questions []string) controller.QuestionAnswer {
@@ -295,6 +295,62 @@ func TestRequestAccountQuotaOmitsNativeCeilingAndResumes(t *testing.T) {
 	testApprovedRequest(t, true, true)
 }
 
+func TestRequestOldDefaultCheckpointRetainsFlowPolicy(t *testing.T) {
+	_, args := requestFixture(t)
+	var out bytes.Buffer
+	if err := requestCommand(append(args, "retain the saved request"), strings.NewReader("/plan\n"), &out,
+		fixturePlan(t, requestFixtureAnswer([]string{})), nil); err != nil {
+		t.Fatal(err)
+	}
+	db, state, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := *state.Records.Operation
+	var checkpoint requestCheckpoint
+	if err := json.Unmarshal(operation.Checkpoint, &checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	for index, arg := range checkpoint.Args {
+		if arg == "--budget-guidance" {
+			checkpoint.Args = append(checkpoint.Args[:index:index], checkpoint.Args[index+2:]...)
+			break
+		}
+	}
+	operation.Checkpoint, err = json.Marshal(checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation.CheckpointHash = core.SHA256Hex(operation.Checkpoint)
+	if err := db.UpdateWorkspace(func(current *store.Workspace) error {
+		current.Records.Operation = &operation
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	called := false
+	stopped := errors.New("fixture stops before runtime")
+	err = requestCommand([]string{"--resume", operation.ID}, strings.NewReader("/approve\n"), &out, nil,
+		func(_ context.Context, _ []string, _ io.Writer) error {
+			called = true
+			db, state, err := loadWorkspace()
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+			flow := state.Graph.ReviewFlows[0]
+			if flow.Contract.BudgetGuidance.Mode != "flow" || flow.Budget.AccountQuotaOnly ||
+				flow.Budget.MaxNanoAIU != operation.MaxNanoAIU-operation.PlanningNanoAIU {
+				t.Fatal("resuming old implicit flow request applied new defaults")
+			}
+			return stopped
+		})
+	if !called || !errors.Is(err, stopped) {
+		t.Fatal("old default checkpoint could not reach its original execution boundary", err)
+	}
+}
+
 func TestRequestOmittedNativeCeilingRequiresAccountApproval(t *testing.T) {
 	_, args := requestFixture(t)
 	for index, arg := range args {
@@ -323,13 +379,15 @@ func testApprovedRequest(t *testing.T, resume bool, quotaOnly ...bool) {
 	root, args := requestFixture(t)
 	accountOnly := len(quotaOnly) != 0 && quotaOnly[0]
 	if accountOnly {
-		for index, arg := range args {
-			if arg == "--max-task-nano-aiu" {
-				args = append(args[:index:index], args[index+2:]...)
-				break
+		var defaults []string
+		for index := 0; index < len(args); index++ {
+			if args[index] == "--max-task-nano-aiu" || args[index] == "--budget-guidance" {
+				index++
+				continue
 			}
+			defaults = append(defaults, args[index])
 		}
-		args = append(args, "--budget-guidance", "account")
+		args = defaults
 	}
 	var calls, roles, runs int
 	planner := func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
@@ -811,7 +869,7 @@ func TestUserGuideRequestExampleWithoutSDK(t *testing.T) {
 	args = append(args, "--worktree", root)
 	var out bytes.Buffer
 	if err := requestCommand(args, strings.NewReader("検索機能を追加して\n/plan\n/quit\n"), &out,
-		fixturePlan(t, requestFixtureAnswer([]string{})), nil); err != nil {
+		fixturePlan(t, requestFixtureAnswer([]string{}), true), nil); err != nil {
 		t.Fatal("guide request entry is not executable offline", err)
 	}
 }

@@ -82,7 +82,7 @@ taxion review --task <id> --sha <coder-sha> --repo <repo>
 
 ### 依頼の登録と Flow 実行
 
-`taxion request --repo REPO --max-task-nano-aiu N` は、新規依頼の console を開始する。`--timeout D` を省略すると、期限は1時間になる。正の Task-wide nano-AIU 上限は hard ceiling として維持する。開発版では `--budget-guidance account` または設定の `account` モードで、この上限を省略できる。その場合は `reset-daily` の残量下限を計画と実行の承認条件に含め、nano-AIU へ換算しない。非対応・取得不能・古い残量では送信を拒否する。Copilot は30以上の `--max-ai-credits N` も要求し、OpenCode では省略する。Human が依頼を入力し、`/plan` でモデルによる Planner 相談を明示選択する。Planner は file・shell tool を持たず、Copilot の通常実行では native skills・指示を利用する。自然言語で質問に答え、提案された scope、acceptance、host shell の検証 command を確認した後に `/approve` を選ぶ。
+`taxion request --repo REPO --max-ai-credits 30` は、開発版の新規依頼の標準入口である。明示設定がなければ `account`・`reset-daily` の残量方式を選び、Task 上限の手入力は不要となる。`--timeout D` の既定は1時間。残量の照会範囲と下限方式を表示し、`/plan` と `/approve` の承認に含める。非対応・取得不能・古い残量・リセット不明では送信を拒否し、自動で旧方式へ戻らない。旧方式を明示する場合は `--budget-guidance flow --max-task-nano-aiu N` のように正の上限を指定する。保存済み契約と正の明示上限はそのまま引き継ぐ。Copilot は30以上の `--max-ai-credits N` を要求する。OpenCode ではこの指定は不要だが、残量非対応のため新しい標準方式を実行できない。承認済みの旧方式を明示して使う。Human は `/plan` でモデルによる計画相談を開始し、提案された範囲・完了条件・ホスト検証コマンドを確認した後に `/approve` を選ぶ。
 
 Taxion が intake、完全な hash の承認、Reviewer の設定承認、Flow、同梱の role 別指示を構成する。利用者が JSON や prompt ファイルを作る必要はない。計画中の `/quit`・EOF は記録を残すが、コード実行を開始しない。Planner error は自動 retry しない。
 
@@ -221,7 +221,7 @@ v0.3.1 の対話入力は、各項目の説明と候補値を表示する。候�
 
 設定した環境変数値は、数値に見える識別子も文字列として扱う。明示的な空値・不正値は error。未設定なら下位層の値を保つ。設定 override として読むのは表の変数だけ。`TAXION_TOKEN`、`GH_TOKEN`、`GITHUB_TOKEN`、`COPILOT_GITHUB_TOKEN` は別の credential 用途を維持し、この設定にはコピーしない。
 
-`execution.budgetGuidance` は `off`・`flow`・`account` を指定する。新規 CLI proposal は、設定も依頼別指定もなければ `flow` を使う。旧保存 Task の policy 省略は、補足なし・account 読取りなしのまま維持する。詳細は[設定ガイド](configuration.md)を参照する。
+`execution.budgetGuidance` は `off`・`flow`・`account` を指定する。開発版の新規 CLI proposal は、設定も依頼別指定もなければ `account`・`reset-daily` を使い、読取り範囲と下限方式を実行前の承認対象に含める。新しく選ぶ `account` も `reset-daily` になる。旧保存 Task の policy 省略は、補足なし・account 読取りなしのまま維持する。旧 `flow`、固定5%の `account`、明示上限は引継ぎ用として保存値を維持する。詳細は[設定ガイド](configuration.md)を参照する。
 
 mise は環境変数を渡す任意の方法。共有 `mise.toml` から、ローカル `.env` を参照できる。
 
@@ -658,4 +658,4 @@ OpenCode は承認した skills だけを隔離環境へ複製し、通常の pe
 
 root usage 文字列は flag 定義とは別に管理する。この索引で実装済み subcommand と option を照合する。`ready` は外側の agent 向け手順、`request` は内部 Planner 対話であり、同じ相談を両方で繰り返す前提にはしない。`doctor`・`config check`・`runtime auth` などの事前確認を、実行準備や契約上の利用資格の証明として説明しない。
 
-`request --budget-guidance off|flow|account` は表示 proposal の解決済み設定を上書きする。`runtime start|send --budget-guidance MODE` は保存 Task の `budgetGuidance.allowedModes` 内で一回の送信を選ぶ。省略時は編集後の設定でなく保存 mode を使う。guidance policy がない旧 Dispatch は override を拒否し、再認可を要求する。新しい `task track`・`conversation intake` proposal は省略 guidance を固定設定層から解決し、最終的に `flow` を既定とする。Task JSON で mode、source、allowed mode、account read 承認を指定できる。[設定](configuration.md#残予算を考慮する指示の設定)に例を示す。認可済み Task の policy 変更は新しい認可 decision を要求する。`records show` は正確な補足文章、観測、送信段階を保存し、provider event 出力にも観測を報告する。`off` は既存の使用量・deadline 検査を無効にせず、どの mode も別 model turn を追加しない。
+`request --budget-guidance off|flow|account` は新規 proposal の解決済み設定を上書きする。`runtime start|send --budget-guidance MODE` は保存 Task の `budgetGuidance.allowedModes` 内で一回の送信を選ぶが、上限省略方式の残量監視は無効化できない。省略時は編集後の設定でなく保存 mode を使う。guidance policy がない旧 Dispatch は override を拒否し、再認可を要求する。新しい `task track`・`conversation intake` proposal は省略 guidance を固定設定層から解決し、最終的に `account`・`reset-daily` を既定とする。保存済み Task の更新・request の再開では保存済み policy を引き継ぎ、新しい既定値を適用しない。Task JSON で mode、source、allowed mode、account read 承認を指定できる。[設定](configuration.md#残予算を考慮する指示の設定)に例を示す。認可済み Task の policy 変更は新しい認可 decision を要求する。`records show` は正確な補足文章、観測、送信段階を保存し、provider event 出力にも観測を報告する。`off` は既存の使用量・deadline 検査を無効にせず、どの mode も別 model turn を追加しない。

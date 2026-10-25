@@ -199,7 +199,7 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 				worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
 				return nil
 			}
-			return worker, nil
+			return &requestQuotaFixtureRuntime{worker}, nil
 		}, io.Discard)
 	if err != nil {
 		t.Fatal(err)

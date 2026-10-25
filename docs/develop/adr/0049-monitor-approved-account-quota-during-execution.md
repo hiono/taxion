@@ -28,7 +28,7 @@ provider の `resetDate` は観測時刻として扱い、欠落・1分超の古
 subscription の reset 日時は認証済み account の別 field から取得する。
 ローカルの取得時刻で古い snapshot を新しいものに見せない。
 
-追加の承認方式 `budgetGuidance.accountAllocation = "reset-daily"` では、
+新規利用の標準方式 `budgetGuidance.accountAllocation = "reset-daily"` では、
 固定5%予約の代わりに、保存した開始残量をリセットまでの24時間区間で均等配分する。
 開始時の区間数を N、現在の残区間数を M とし、残量下限を
 開始残り率 × (M − 1) / N とする。最終24時間は下限0とし、残量ゼロの送信は拒否する。
@@ -53,7 +53,7 @@ FlowBudget に `accountQuotaOnly: true` を保存する。nano-AIU の既定上�
 作らず、残量の取得・下限判定・継続監視を停止条件にする。正の明示上限は従来どおり守る。
 日割り配分のない旧方式では省略を拒否し、実行時の `off`・`flow` への切替も拒否する。
 native 使用量が不明でもこの方式では続行できるが、不明という記録は変更しない。
-`request` で省略すると、明示または設定の `account` モードを前提に
+`request` で省略すると、既定・明示・設定の `account` モードを前提に
 `reset-daily` を計画 Task と実行 Task に設定して表示・承認する。
 保存 operation・承認 digest・再開照合にもこのモードを含める。
 Planner 使用量を0の上限から引く処理は行わず、正の明示上限がある場合にだけ差し引く。
@@ -64,6 +64,15 @@ partial Git evidence の取得も既存の経路を使う。停止失敗を成�
 `off`・`flow` と quota 非対応 runtime に account 確認済みという意味を加えない。
 
 ## Alternatives
+
+新規 proposal の既定を旧 `flow` に残して新方式を追記するだけでは、
+利用者に上限の手入力と方式選択を引き続き要求する。そのため新規生成時は
+`account`・`reset-daily` を既定とし、設定・依頼別の明示選択を優先する。
+残量読取り権限は proposal に含め、既定値の選択だけで実行を認可しない。
+保存済み Task・Dispatch・request checkpoint は過去の資産としてそのまま引き継ぐ。
+旧 checkpoint の option に方式指定がなくても、保存した Task policy を使い、
+現在の既定値から再構成しない。新たな後続 Task では元の方式を明示して承認できる。
+残量非対応 runtime を理由に新規の標準方式から旧方式へ自動で切り替える案は採用しない。
 
 usage event だけの確認は無通信中に働かない。新たな監視 scheduler は設けず、
 既存の1秒 ticker を使う。reset 後の増加を既存実行の追加予算とは解釈しない。
@@ -83,6 +92,17 @@ nano-AIU の単位を換算して不足した契約を補わない。
 保存観測や停止履歴は削除せず、停止済み Flow を書き換えて復帰させない。
 
 ## Validation
+
+`TestBudgetGuidanceSelectionApprovalAndLegacyShape` は新規の既定と明示選択を、
+`TestRequestAccountQuotaOmitsNativeCeilingAndResumes` は方式・上限の指定なしでの
+計画・実装・独立レビュー・再開を確認する。
+`TestRequestOldDefaultCheckpointRetainsFlowPolicy` は旧既定値のまま保存した
+checkpoint に新規の既定値を遡及適用せず、元の明示上限で再開することを確認する。
+
+2026-10-25 の既定方式変更では、`go build ./...`、`go vet ./...`、
+`go test ./...`、変更範囲の `go test -race` と文書の実行例・リンク検査が成功した。
+合成 runtime による検証であり、実モデルや外部製品の作業は再実行していない。
+開発版の変更であり、配布済み v0.7.15 の動作は変更しない。
 
 `TestAccountQuotaOnly*`・`TestOmittedFlowCeiling*`・`TestExplicitFlowCeiling*` は、
 省略の承認条件、未知の native 使用量、期限・回数制限、明示上限の維持、

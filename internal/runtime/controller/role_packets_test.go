@@ -296,6 +296,7 @@ func packetReviewSuccessorFixture(t *testing.T, mode string, edit ...func(*core.
 	}
 	task := flow.Contract
 	task.ID, task.Status, task.AuthorizationID, task.Decisions = "packet-successor", core.Draft, "", nil
+	task.BudgetGuidance = budgetPolicy(t, "flow")
 	task.Supersedes, task.CreatedFrom = flow.TaskID, "flow:"+flow.ID
 	task.Worktree, task.Branch = filepath.Join(t.TempDir(), "successor"), "work/packet-successor"
 	task.TargetSHA = coder.Result.OutputSHA

@@ -29,8 +29,8 @@ func TestNewProposalBudgetGuidanceUsesConfigWithoutRequiringIdentity(t *testing.
 		}
 	}
 	policy, err := newTaskBudgetGuidance()
-	if err != nil || policy.Mode != "flow" || policy.Source != "default" {
-		t.Fatal("unconfigured local proposal did not default to flow", policy, err)
+	if err != nil || !core.AccountQuotaBudget(policy) || policy.Source != "default" {
+		t.Fatal("unconfigured local proposal did not default to residual quota", policy, err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, ".taxion"), 0700); err != nil {
 		t.Fatal(err)
@@ -83,7 +83,7 @@ func TestRequestGuidanceOverrideReachesPlannerWithoutExtraTurn(t *testing.T) {
 					return nil
 				})
 			if mode == "account" {
-				if err == nil || !strings.Contains(err.Error(), "BUDGET_STOP") {
+				if err == nil || (!strings.Contains(err.Error(), "BUDGET_STOP") && !strings.Contains(err.Error(), "requires an available finite account quota")) {
 					t.Fatal("quota-unsupported Copilot fixture did not fail closed", err)
 				}
 			} else if err != nil {
