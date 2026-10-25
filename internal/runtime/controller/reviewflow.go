@@ -48,7 +48,7 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 	}
 	if db == nil || strings.TrimSpace(request.ID) == "" || strings.ContainsAny(request.ID, `/\`) ||
 		request.MaxRepairs == nil || *request.MaxRepairs < 0 || request.TimeoutSeconds <= 0 ||
-		math.IsNaN(request.MaxNanoAIU) || math.IsInf(request.MaxNanoAIU, 0) || request.MaxNanoAIU <= 0 ||
+		math.IsNaN(request.MaxNanoAIU) || math.IsInf(request.MaxNanoAIU, 0) || request.MaxNanoAIU < 0 ||
 		request.TimeoutSeconds > math.MaxInt64/int64(time.Second) ||
 		!filepath.IsAbs(request.ReviewRoot) ||
 		strings.TrimSpace(request.Authorization.ID) == "" || strings.TrimSpace(request.Authorization.Source) == "" ||
@@ -67,6 +67,9 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 		}
 		if err := checkFlowApproval(state.Graph, task, request.Configuration); err != nil {
 			return err
+		}
+		if request.MaxNanoAIU == 0 && !core.AccountQuotaBudget(task.BudgetGuidance) {
+			return fmt.Errorf("taxion: omitted maxNanoAiu requires approved account guidance with reset-daily allocation")
 		}
 		if _, exists := state.Graph.ReviewFlow(request.ID); exists {
 			return fmt.Errorf("taxion: review flow ID already exists")
@@ -100,6 +103,7 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 				MaxCoderSessions:    1 + *request.MaxRepairs,
 				MaxReviewerSessions: 1 + *request.MaxRepairs,
 				MaxNanoAIU:          request.MaxNanoAIU,
+				AccountQuotaOnly:    request.MaxNanoAIU == 0,
 			},
 			StartedAt: now, Deadline: deadline, Status: "RUNNING",
 			Authorization: request.Authorization, DispatchIDs: []string{},

@@ -81,22 +81,23 @@ func (c *requestCheckpoint) UnmarshalJSON(data []byte) error {
 
 func requestApprovalBasis(operation store.Operation, checkpoint requestCheckpoint) (string, error) {
 	return core.CanonicalSHA256(struct {
-		Version     int                        `json:"version"`
-		OperationID string                     `json:"operationId"`
-		Task        core.GraphTask             `json:"planningTask"`
-		Args        []string                   `json:"options"`
-		Selection   config.Config              `json:"selection"`
-		RequestHash string                     `json:"requestHash"`
-		Plan        *controller.QuestionAnswer `json:"plan"`
-		Deadline    time.Time                  `json:"deadline"`
-		Credits     float64                    `json:"sessionSoftCreditLimit"`
-		Limit       float64                    `json:"maxNanoAiu"`
-		Consumed    float64                    `json:"planningNanoAiu"`
-		UsageState  string                     `json:"planningUsageState"`
-		MaxRepairs  int                        `json:"maxRepairs"`
+		Version          int                        `json:"version"`
+		OperationID      string                     `json:"operationId"`
+		Task             core.GraphTask             `json:"planningTask"`
+		Args             []string                   `json:"options"`
+		Selection        config.Config              `json:"selection"`
+		RequestHash      string                     `json:"requestHash"`
+		Plan             *controller.QuestionAnswer `json:"plan"`
+		Deadline         time.Time                  `json:"deadline"`
+		Credits          float64                    `json:"sessionSoftCreditLimit"`
+		Limit            float64                    `json:"maxNanoAiu"`
+		Consumed         float64                    `json:"planningNanoAiu"`
+		UsageState       string                     `json:"planningUsageState"`
+		MaxRepairs       int                        `json:"maxRepairs"`
+		AccountQuotaOnly bool                       `json:"accountQuotaOnly,omitempty"`
 	}{2, operation.ID, checkpoint.Task, checkpoint.Args, checkpoint.Selection, checkpoint.RequestHash,
 		checkpoint.Answer, operation.Deadline, operation.SessionCreditLimit, operation.MaxNanoAIU, operation.PlanningNanoAIU,
-		operation.PlanningUsageState, checkpoint.MaxRepairs})
+		operation.PlanningUsageState, checkpoint.MaxRepairs, operation.AccountQuotaOnly})
 }
 
 func verifyRequestCheckpoint(state store.Workspace, operation store.Operation, checkpoint requestCheckpoint) (bool, error) {
@@ -113,6 +114,9 @@ func verifyRequestCheckpoint(state store.Workspace, operation store.Operation, c
 	if !exists || err != nil || hashErr != nil || current != expected {
 		return false, fmt.Errorf("request planning Task changed")
 	}
+	if operation.AccountQuotaOnly && (operation.MaxNanoAIU != 0 || !core.AccountQuotaBudget(task.BudgetGuidance)) {
+		return false, fmt.Errorf("request account-only budget lacks its approved reset-daily policy")
+	}
 	if checkpoint.Answer == nil && !checkpoint.PlannerStarted {
 		return false, fmt.Errorf("request checkpoint has no minimal plan or pending question; transient input is unavailable; reconcile before continuation")
 	}
@@ -127,7 +131,7 @@ func verifyRequestCheckpoint(state store.Workspace, operation store.Operation, c
 	if operation.TaskID != operation.ID || operation.FlowID != operation.ID+"-flow" {
 		return false, fmt.Errorf("approved request operation Task or Flow mismatch")
 	}
-	if operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU ||
+	if !operation.AccountQuotaOnly && (operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU) ||
 		checkpoint.MaxRepairs < 0 || checkpoint.MaxRepairs > 100 {
 		return false, fmt.Errorf("approved request has unknown usage or invalid limits")
 	}
@@ -140,7 +144,9 @@ func verifyRequestCheckpoint(state store.Workspace, operation store.Operation, c
 		return false, err
 	}
 	if flow, exists := state.Graph.ReviewFlow(operation.FlowID); exists &&
-		(flow.Deadline.After(operation.Deadline) || flow.Budget.MaxNanoAIU > operation.MaxNanoAIU-operation.PlanningNanoAIU ||
+		(flow.Deadline.After(operation.Deadline) || flow.Budget.AccountQuotaOnly != operation.AccountQuotaOnly ||
+			!operation.AccountQuotaOnly && flow.Budget.MaxNanoAIU > operation.MaxNanoAIU-operation.PlanningNanoAIU ||
+			operation.AccountQuotaOnly && !core.AccountQuotaBudget(flow.Contract.BudgetGuidance) ||
 			flow.MaxRepairs != checkpoint.MaxRepairs || flow.Budget.MaxDispatches > 2+2*checkpoint.MaxRepairs ||
 			flow.Budget.MaxCoderSessions > 1+checkpoint.MaxRepairs || flow.Budget.MaxReviewerSessions > 1+checkpoint.MaxRepairs) {
 		return false, fmt.Errorf("request execution budget or deadline exceeds its approval")

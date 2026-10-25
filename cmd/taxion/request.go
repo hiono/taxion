@@ -179,7 +179,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	worktree := fs.String("worktree", ".", "clean attached worktree to modify")
 	timeout := fs.Duration("timeout", controller.DefaultFlowTimeout, "total planning and execution deadline after /plan")
 	credits := fs.Float64("max-ai-credits", 0, "per-session soft credit ceiling, not a total budget (minimum: 30)")
-	taskNanoAIU := fs.Float64("max-task-nano-aiu", 0, "approved hard Task-wide nano-AIU ceiling")
+	taskNanoAIU := fs.Float64("max-task-nano-aiu", 0, "optional hard Task-wide nano-AIU ceiling; omission requires account guidance with reset-daily allocation")
 	repairs := fs.Int("max-repairs", 1, "maximum repair turns after independent review")
 	cli := fs.String("cli", "", "Copilot CLI executable")
 	base := fs.String("base-directory", "", "Copilot state directory")
@@ -236,10 +236,10 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			return err
 		}
 	}
-	if *repo == "" || *timeout < time.Second || *credits < 0 || *taskNanoAIU <= 0 ||
+	if *repo == "" || *timeout < time.Second || *credits < 0 || *taskNanoAIU < 0 ||
 		math.IsNaN(*taskNanoAIU) || math.IsInf(*taskNanoAIU, 0) ||
 		*repairs < 0 || *repairs > 100 || len(paths) > 16 {
-		return fmt.Errorf("request requires --repo, --timeout of at least 1s (default 1h), --max-ai-credits and --max-task-nano-aiu; --max-repairs must be 0-100")
+		return fmt.Errorf("request requires --repo, --timeout of at least 1s (default 1h), valid credit ceilings; --max-repairs must be 0-100")
 	}
 	if err := copilot.ValidateAICreditLimit(*credits); err != nil {
 		return err
@@ -273,6 +273,15 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	guidance, err := core.NewBudgetGuidance(selected.Execution.BudgetGuidance, *budgetGuidance)
 	if err != nil {
 		return err
+	}
+	if *taskNanoAIU == 0 {
+		if guidance.Mode != "account" {
+			return fmt.Errorf("request without --max-task-nano-aiu requires --budget-guidance account or configured account guidance")
+		}
+		guidance.AccountAllocation = "reset-daily"
+	}
+	if resuming && savedOperation.AccountQuotaOnly != (*taskNanoAIU == 0) {
+		return fmt.Errorf("request checkpoint quota-budget mode differs from saved operation")
 	}
 	if selected.Repository.Path != *repo {
 		return fmt.Errorf("request repository differs from the configured repository")
@@ -339,6 +348,9 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			"Only explicitly approved skills are copied into the isolated role; unapproved native permission requests are cancelled."
 		ceiling = "Copilot AI-credit ceilings and account quota are unsupported; the explicit deadline and approved repair limit apply."
 	}
+	if *taskNanoAIU == 0 {
+		ceiling += "\nTask budget: approved account remaining floor (reset-daily); no nano-AIU ceiling or unit conversion. Unknown, stale or unsupported quota stops execution."
+	}
 	if !resuming {
 		if _, err := fmt.Fprintf(output,
 			"Repository: %s\nWorktree: %s\nBranch: %s\nBaseline: %s\nRuntime account: %s\n"+
@@ -402,6 +414,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		Version: 1, ID: id, Kind: "request", TaskID: id + "-planning",
 		State: "RUNNING", Phase: "PLANNING", Owner: rand.Text(), Deadline: deadline,
 		SessionCreditLimit: *credits, MaxNanoAIU: *taskNanoAIU,
+		AccountQuotaOnly:   *taskNanoAIU == 0,
 		PlanningUsageState: "complete",
 	}
 	lease, err := db.LockOperation()
@@ -506,7 +519,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		}
 		var answer controller.QuestionAnswer
 		if checkpoint.Answer == nil {
-			if operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU {
+			if !operation.AccountQuotaOnly && (operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU) {
 				operation.State = "USAGE_EXCEEDED"
 				failureGate = "USAGE_EXCEEDED"
 				return errors.Join(fmt.Errorf("request planning budget exhausted or unknown; checkpoint retained"),
@@ -605,7 +618,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if answer.Proposal == nil || len(answer.Questions) != 0 {
 				return fmt.Errorf("answer the Planner's questions before approving a proposal")
 			}
-			if operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU {
+			if !operation.AccountQuotaOnly && (operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU) {
 				operation.State = "USAGE_EXCEEDED"
 				failureGate = "USAGE_EXCEEDED"
 				return errors.Join(fmt.Errorf("request budget exhausted or unknown; execution was not authorized"),
@@ -715,13 +728,19 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if err != nil {
 				return err
 			}
+			remainingNanoAIU := operation.MaxNanoAIU - operation.PlanningNanoAIU
+			budgetAuthorization := fmt.Sprintf("Human selected /approve for the approved goal, deadline, repair limit and Task-wide %.9g nano-AIU ceiling; prioritize acceptance within these limits", *taskNanoAIU)
+			if operation.AccountQuotaOnly {
+				remainingNanoAIU = 0
+				budgetAuthorization = "Human selected /approve for the approved goal, deadline, repair limit and reset-daily account remaining floor without a nano-AIU ceiling"
+			}
 			if _, err := controller.StartReviewFlowContext(controller.WithOperation(ctx, operation), db, storePath, controller.ReviewFlowRequest{
 				Configuration: configuration,
 				ID:            flowID, TaskID: id, Repository: *repo, ReviewRoot: reviewRoot,
 				MaxRepairs: repairs, TimeoutSeconds: seconds,
-				MaxNanoAIU: operation.MaxNanoAIU - operation.PlanningNanoAIU,
+				MaxNanoAIU: remainingNanoAIU,
 				Authorization: core.TaskDecision{ID: flowID + "-budget", Source: source,
-					Text: fmt.Sprintf("Human selected /approve for the approved goal, deadline, repair limit and Task-wide %.9g nano-AIU ceiling; prioritize acceptance within these limits", *taskNanoAIU)},
+					Text: budgetAuthorization},
 			}); err != nil {
 				return err
 			}
