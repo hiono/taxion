@@ -15,6 +15,12 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+type failingReviewWriter struct{}
+
+func (failingReviewWriter) Write([]byte) (int, error) {
+	return 0, errors.New("unwritable review status output")
+}
+
 func TestWorkflowEvaluationDoesNotCreateWorkspace(t *testing.T) {
 	previous := storePath
 	storePath = filepath.Join(t.TempDir(), "absent", "ledger.json")
@@ -160,10 +166,40 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 	if err := workflowCmd([]string{"repair-status"}); err == nil {
 		t.Fatal("repair-status without --id accepted")
 	}
+	var stoppedOutput bytes.Buffer
+	if err := reportStoppedRepair(&stoppedOutput, db, storePath, "missing", context.DeadlineExceeded); err == nil {
+		t.Fatal("missing Flow was silently omitted from stop reporting")
+	}
+	if err := reportStoppedRepair(&stoppedOutput, db, storePath, flow.ID, context.DeadlineExceeded); err != nil || stoppedOutput.Len() != 0 {
+		t.Fatal("running Flow was reported as stopped", err)
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		current, _ := state.Graph.ReviewFlow(flow.ID)
+		current.Status, current.StopCode, current.Reason = "STOPPED", "SAFETY_STOP", "runner failed: context deadline exceeded"
+		state.Graph.ReviewFlows[0] = current
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reportStoppedRepair(&stoppedOutput, db, storePath, flow.ID, context.DeadlineExceeded); err != nil ||
+		!strings.Contains(stoppedOutput.String(), "human-decision-required") ||
+		!strings.Contains(stoppedOutput.String(), "workflow repair-status") {
+		t.Fatal("deadline error lost stopped-flow guidance", err, stoppedOutput.String())
+	}
+	if err := reportStoppedRepair(failingReviewWriter{}, db, storePath, flow.ID, context.DeadlineExceeded); err == nil {
+		t.Fatal("stopped-flow guidance output failure was ignored")
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		state.Graph.ReviewFlows[0] = flow
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	observed, err := controller.ObserveFeedback(db, flow.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	feedbackFile := filepath.Join(dir, "feedback.json")
 	feedback, err := json.Marshal(controller.FeedbackRequest{
 		FlowID: flow.ID, FlowFeedback: core.FlowFeedback{

@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,6 +124,7 @@ func TestObserveRepairStatusCeilingBeforeAndAfterStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	executeFlowDispatch(t, db, started, "", true)
 	flow, err := AdvanceReviewFlow(db, ledger, started.ID)
 	if err != nil {
@@ -143,5 +145,143 @@ func TestObserveRepairStatusCeilingBeforeAndAfterStop(t *testing.T) {
 		if err != nil || status.Status != RepairCeilingExhausted {
 			t.Fatalf("stopped=%v status = %+v, %v", stop, status, err)
 		}
+		if stop && status.StopCause != "review-findings" {
+			t.Fatalf("repair ceiling mistaken for usage limit: %+v", status)
+		}
+	}
+}
+
+func TestObserveRepairStatusRetainsSpecificStoppedCause(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		expired, _ := state.Graph.ReviewFlow(flow.ID)
+		expired.StartedAt, expired.Deadline = time.Now().UTC().Add(-time.Hour), time.Now().UTC().Add(-time.Second)
+		storeFlow(state, expired)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AdvanceReviewFlow(db, ledger, flow.ID); !errors.Is(err, ErrFlowStopped) {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped, _ := state.Graph.ReviewFlow(flow.ID)
+	status, err := ObserveRepairStatus(state, flow.ID, core.ApprovalConfiguration{})
+	if err != nil || stopped.StopCause != "time-limit" || status.StopCause != "time-limit" {
+		t.Fatal("deadline advance mistaken for usage limit", stopped.StopCause, status, err)
+	}
+	for _, test := range []struct {
+		reason, cause string
+	}{
+		{"elapsed budget reached", "time-limit"},
+		{"deadline reached; reconcile and safely stop any active Dispatch before further authorization", "time-limit"},
+		{"repair ceiling reached; present saved findings and acceptance decisions to Human", "review-findings"},
+		{"nano-AIU ceiling reached", "usage-limit"},
+		{"account quota observation is missing", "usage-limit"},
+	} {
+		stopped.StopCause, stopped.Reason = "", test.reason
+		storeFlow(&state, stopped)
+		got, err := ObserveRepairStatus(state, flow.ID, core.ApprovalConfiguration{})
+		if err != nil || got.StopCause != test.cause {
+			t.Fatal("legacy cause lost", test.reason, got.StopCause, err)
+		}
+	}
+}
+
+func TestObserveRepairStatusSuggestsReviewOnlyAfterConfirmedStop(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coder := executeFlowDispatch(t, db, flow, "", true)
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := flow.DispatchIDs[len(flow.DispatchIDs)-1]
+	dispatch, err := prepareReview(t.Context(), db, id, flow.Contract.Worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := &fakeRuntime{role: "REVIEWER", hash: "review-config", worktree: dispatch.Instruction.Worktree}
+	control, err := New(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := stopFlowForBudget(db, flow.ID, "elapsed budget reached"); err != nil {
+		t.Fatal(err)
+	}
+	beforeStop, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := ObserveRepairStatus(beforeStop, flow.ID, core.ApprovalConfiguration{})
+	if err != nil || pending.ReviewContinuationCandidate != "" {
+		t.Fatal("unconfirmed Reviewer stop offered continuation", err)
+	}
+	if err := control.Stop(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := string(mustFlowJSON(t, state))
+	status, err := ObserveRepairStatus(state, flow.ID, core.ApprovalConfiguration{})
+	if err != nil || status.Status != RepairCeilingExhausted || status.ReviewContinuationCandidate != coder.ID ||
+		!strings.Contains(status.NextAction, "do not rerun the completed Coder") || status.StateChanged {
+		t.Fatalf("saved output was not offered as a reapproval-only candidate: %+v err=%v", status, err)
+	}
+	if string(mustFlowJSON(t, state)) != before {
+		t.Fatal("read-only continuation observation changed the workspace")
+	}
+	for _, failure := range []string{"claim", "missing-stop", "wrong-relation", "missing-coder-receipt"} {
+		t.Run(failure, func(t *testing.T) {
+			candidate, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch failure {
+			case "claim":
+				f, _ := candidate.Graph.ReviewFlow(flow.ID)
+				f.RunnerID = "unreconciled-runner"
+				storeFlow(&candidate, f)
+			case "missing-stop", "wrong-relation":
+				for index := range candidate.Graph.Dispatches {
+					d := &candidate.Graph.Dispatches[index]
+					if d.ID != id {
+						continue
+					}
+					if failure == "missing-stop" {
+						d.Result.Evidence = nil
+					} else {
+						d.RelatedID = "other-coder"
+					}
+				}
+			case "missing-coder-receipt":
+				events := candidate.Records.Events[:0]
+				for _, receipt := range candidate.Records.Events {
+					if receipt.DispatchID != coder.ID || receipt.Type != "verified-result" {
+						events = append(events, receipt)
+					}
+				}
+				candidate.Records.Events = events
+			}
+			status, err := ObserveRepairStatus(candidate, flow.ID, core.ApprovalConfiguration{})
+			if err != nil || status.ReviewContinuationCandidate != "" {
+				t.Fatal("unreconciled evidence offered review-only continuation", err)
+			}
+		})
 	}
 }

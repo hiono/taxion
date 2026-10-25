@@ -230,13 +230,18 @@ func (c *Controller) SendWithBudgetGuidance(ctx context.Context, dispatchID, pro
 	}
 	observation, err := c.prepareBudgetGuidance(ctx, dispatch, mode)
 	if err != nil {
+		if observation != nil && observation.Mode == "account" {
+			return errors.Join(c.stopForAccountQuota(dispatch, "account quota read failed; remaining allowance is unverified"),
+				c.recordBudgetGuidance(dispatch, observation, "denied", err))
+		}
 		return errors.Join(err, c.recordBudgetGuidance(dispatch, observation, "denied", err))
 	}
 	refreshQuotaState(observation, time.Now().UTC())
-	if observation != nil && observation.Account != nil && observation.Account.State == "available" &&
-		observation.Account.ExecutionDenied {
-		return errors.Join(accountDenial(observation.Account),
-			c.recordBudgetGuidance(dispatch, observation, "denied", nil))
+	if observation != nil && observation.Mode == "account" {
+		if reason := quotaExecutionStop(observation.Account); reason != "" {
+			return errors.Join(c.stopForAccountQuota(dispatch, reason),
+				c.recordBudgetGuidance(dispatch, observation, "denied", nil))
+		}
 	}
 	if err := c.markRunning(ctx, dispatchID); err != nil {
 		return err
@@ -247,6 +252,12 @@ func (c *Controller) SendWithBudgetGuidance(ctx context.Context, dispatchID, pro
 		}
 	}
 	refreshQuotaState(observation, time.Now().UTC())
+	if observation != nil && observation.Mode == "account" {
+		if reason := quotaExecutionStop(observation.Account); reason != "" {
+			return errors.Join(c.stopForAccountQuota(dispatch, reason),
+				c.recordBudgetGuidance(dispatch, observation, "denied", nil), c.stopIfExecuting(dispatchID))
+		}
+	}
 	supplement, err := budgetSupplement(observation)
 	if err != nil {
 		return err

@@ -42,6 +42,92 @@ type configuredScriptedRuntime struct {
 	accounts  []string
 }
 
+type quotaScriptedRuntime struct {
+	*configuredScriptedRuntime
+	quota *quotaRuntime
+}
+
+func (s *quotaScriptedRuntime) ReadAccountQuota(ctx context.Context, account string) (runtime.QuotaSnapshot, error) {
+	return s.quota.ReadAccountQuota(ctx, account)
+}
+
+func TestRunnerAccountBudgetStopPreservesPartialWork(t *testing.T) {
+	resolved, err := config.Resolve([]config.Layer{{Source: "user", Input: []byte(`version: 1
+project: {id: demo}
+repository: {provider: github, host: github.com, path: owner/repo, account: scm-user, credentialRef: scm}
+runtime: {provider: copilot, account: ai-user, credentialRef: ai, contractRef: contract}
+execution: {requester: requester, worker: local, approvalRef: configuration-approval}
+`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision := core.TaskDecision{
+		ID: resolved.Config.Execution.ApprovalRef, Source: "human:quota-test",
+		Text: string(mustFlowJSON(t, config.Approval{
+			Kind: config.ApprovalKind, TaskID: "implementation", Reason: "authorize quota monitoring",
+			Allowed: []config.Config{resolved.Config},
+		})),
+	}
+	db, ledger, request := reviewFlowFixtureWithPolicy(t, "", budgetPolicy(t, "account"), decision)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var worker *quotaScriptedRuntime
+	partial := filepath.Join(flow.Contract.Worktree, "internal", "partial.go")
+	factory := func(dispatch core.GraphDispatch) (runtime.Identity, error) {
+		if err := BindConfiguration(db, dispatch.ID, resolved); err != nil {
+			return nil, err
+		}
+		base := &scriptedRuntime{
+			fakeRuntime: fakeRuntime{role: dispatch.Recipient, hash: "quota-test", worktree: dispatch.Instruction.Worktree},
+			events:      make(chan runtime.Event, 2),
+		}
+		base.script = func() error {
+			if err := os.MkdirAll(filepath.Dir(partial), 0755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(partial, []byte("partial implementation\n"), 0600); err != nil {
+				return err
+			}
+			base.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":1,"outputTokens":0,"totalNanoAIU":0,"aiCreditsStatus":"complete"}`}
+			base.events <- runtime.Event{Type: runtime.EventTurnFinished}
+			return nil
+		}
+		reader := &quotaRuntime{quota: observedQuota()}
+		reader.onRead = func() {
+			if reader.reads > 1 {
+				remaining := 5.0
+				reader.quota.RemainingPercentage = &remaining
+			}
+		}
+		worker = &quotaScriptedRuntime{
+			configuredScriptedRuntime: &configuredScriptedRuntime{scriptedRuntime: base, selection: mustFlowJSON(t, resolved.Config)},
+			quota:                     reader,
+		}
+		return worker, nil
+	}
+	flow, err = RunReviewFlow(t.Context(), db, ledger, flow.ID, factory, io.Discard)
+	var stopped *budgetStopError
+	if !errors.As(err, &stopped) || flow.StopCode != "BUDGET_STOP" || flow.Status != "STOPPED" ||
+		!flow.HandoffHeld() || flow.RunnerID != "" || worker == nil || worker.stops != 1 || worker.closes != 1 {
+		t.Fatalf("quota stop was not preserved: %+v err=%v", flow, err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, _ := state.Graph.GraphDispatch(flow.DispatchIDs[0])
+	if len(state.Graph.Dispatches) != 1 || saved.Status != core.DispatchCancelled ||
+		saved.Result == nil || saved.Result.PartialGitEvidence == nil || len(state.Records.Budgets) == 0 ||
+		state.Records.Budgets[len(state.Records.Budgets)-1].Kind != "BUDGET_STOP" {
+		t.Fatal("quota stop lost partial work or issued a following role")
+	}
+	if body, err := os.ReadFile(partial); err != nil || string(body) != "partial implementation\n" {
+		t.Fatal("partial work was modified or removed", err)
+	}
+}
+
 func (s *configuredScriptedRuntime) ExecutionConfiguration() json.RawMessage          { return s.selection }
 func (s *configuredScriptedRuntime) CheckServiceAccess(context.Context, string) error { return nil }
 func (s *configuredScriptedRuntime) CheckRepositoryAccess(context.Context) error      { return nil }
@@ -56,6 +142,74 @@ func TestContinuousFlowRunsRepairAndNewSHAReview(t *testing.T) {
 
 func TestSteppedFlowWaitsForHumanBetweenRoles(t *testing.T) {
 	testFlowRunsRepairAndNewSHAReview(t, true)
+}
+
+func TestReviewBudgetReportsEffectiveDeadlineWithoutChangingContract(t *testing.T) {
+	flow := core.ReviewFlow{ID: "flow", Deadline: time.Now().UTC().Add(time.Hour)}
+	dispatch := core.GraphDispatch{ID: "review", Recipient: "REVIEWER"}
+	for _, source := range []string{"flow", "caller", "expired"} {
+		t.Run(source, func(t *testing.T) {
+			ctx := t.Context()
+			deadline := flow.Deadline
+			wantSource := "flow"
+			if source != "flow" {
+				deadline, wantSource = time.Now().Add(time.Minute), "caller"
+				if source == "expired" {
+					deadline = time.Now().Add(-time.Second)
+				}
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithDeadline(ctx, deadline)
+				defer cancel()
+			}
+			var out bytes.Buffer
+			before := flow
+			if err := writeReviewBudget(ctx, &out, flow, dispatch); err != nil {
+				t.Fatal(err)
+			}
+			var event runtime.Event
+			if err := json.Unmarshal(out.Bytes(), &event); err != nil || event.Type != "review_budget" {
+				t.Fatal("missing versioned review-budget event", err)
+			}
+			var body struct {
+				Version               int       `json:"version"`
+				FlowID                string    `json:"flowId"`
+				DispatchID            string    `json:"dispatchId"`
+				ObservedAt            time.Time `json:"observedAt"`
+				FlowDeadline          time.Time `json:"flowDeadline"`
+				EffectiveDeadline     time.Time `json:"effectiveDeadline"`
+				DeadlineSource        string    `json:"deadlineSource"`
+				RemainingMilliseconds int64     `json:"remainingMilliseconds"`
+			}
+			if err := json.Unmarshal([]byte(event.Payload), &body); err != nil ||
+				body.Version != 1 || body.FlowID != flow.ID || body.DispatchID != dispatch.ID ||
+				!body.FlowDeadline.Equal(flow.Deadline) || !body.EffectiveDeadline.Equal(deadline) ||
+				body.DeadlineSource != wantSource ||
+				body.RemainingMilliseconds != max(deadline.Sub(body.ObservedAt).Milliseconds(), 0) ||
+				!flow.Deadline.Equal(before.Deadline) {
+				t.Fatalf("incorrect effective deadline: %+v err=%v", body, err)
+			}
+		})
+	}
+	if err := writeReviewBudget(t.Context(), failingWriter{}, flow, dispatch); err == nil {
+		t.Fatal("review budget output failure was ignored")
+	}
+}
+
+func TestReviewBudgetOutputFailureDoesNotStartReviewer(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executeFlowDispatch(t, db, flow, "", true)
+	calls := 0
+	flow, err = RunReviewFlow(t.Context(), db, ledger, flow.ID, func(core.GraphDispatch) (runtime.Identity, error) {
+		calls++
+		return nil, errors.New("unexpected runtime creation")
+	}, failingWriter{})
+	if err == nil || !strings.Contains(err.Error(), "write review budget") || calls != 0 || flow.Status != "STOPPED" || flow.RunnerID != "" {
+		t.Fatalf("output failure started a Reviewer or left its runner claimed: %+v calls=%d err=%v", flow, calls, err)
+	}
 }
 
 func TestCreditStatusDoesNotInferUnavailableNanoAIUOrAccountBalance(t *testing.T) {

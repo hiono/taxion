@@ -42,9 +42,19 @@ func (a *Adapter) ReadAccountQuota(ctx context.Context, expectedAccount string) 
 	if err := checkAuthenticationStatus(status, expectedAccount); err != nil {
 		return result, err
 	}
-	quota, err := a.client.RPC.Account.GetQuota(ctx, &rpc.AccountGetQuotaRequest{})
-	result.ObservedAt = time.Now().UTC()
+	users, err := a.client.RPC.Account.GetAllUsers(ctx)
+	if err != nil || users == nil {
+		result.Reason = "selected-account quota refresh credentials unavailable"
+		return result, nil
+	}
+	request, err := selectedQuotaRequest(*users, expectedAccount)
 	if err != nil {
+		result.Reason = err.Error()
+		return result, nil
+	}
+	quota, err := a.client.RPC.Account.GetQuota(ctx, request)
+	result.ObservedAt = time.Now().UTC()
+	if err != nil || quota == nil {
 		result.Reason = "quota read failed or timed out; provider details withheld"
 		return result, nil
 	}
@@ -54,6 +64,15 @@ func (a *Adapter) ReadAccountQuota(ctx context.Context, expectedAccount string) 
 		return result, nil
 	}
 	result = mapQuota(result, snapshot)
+	stamp := snapshot.ResetDate
+	if stamp == nil || stamp.IsZero() {
+		result.State, result.Reason = "unavailable", "provider quota observation timestamp unavailable"
+	} else {
+		result.ObservedAt = stamp.UTC()
+		if time.Since(*stamp) > time.Minute || stamp.After(time.Now().Add(time.Second)) {
+			result.State, result.Reason = "stale", "provider quota observation is outside its freshness interval"
+		}
+	}
 	// account.getQuota reports the observation time as resetDate; the subscription reset
 	// is only exposed on the authenticated user's Copilot snapshot.
 	result.ResetAt = nil
@@ -61,6 +80,48 @@ func (a *Adapter) ReadAccountQuota(ctx context.Context, expectedAccount string) 
 		result.ResetAt = quotaResetAt(auth, result.ObservedAt)
 	}
 	return result, nil
+}
+
+// Explicit token selection refreshes quota; the default and selection-ID routes
+// may return a cached snapshot. Tokens remain inside the local SDK request.
+func selectedQuotaRequest(users rpc.AccountGetAllUsersResult, expectedAccount string) (*rpc.AccountGetQuotaRequest, error) {
+	var request *rpc.AccountGetQuotaRequest
+	for _, user := range users {
+		body, err := json.Marshal(user.AuthInfo)
+		if raw, ok := user.AuthInfo.(rpc.RawAuthInfoData); ok {
+			body, err = raw.Raw, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("selected-account quota identity cannot be decoded")
+		}
+		var identity struct {
+			Login string `json:"login"`
+			User  *struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		}
+		if json.Unmarshal(body, &identity) != nil {
+			return nil, fmt.Errorf("selected-account quota identity cannot be decoded")
+		}
+		login := identity.Login
+		if identity.User != nil {
+			if login != "" && login != identity.User.Login {
+				return nil, fmt.Errorf("selected-account quota identity is ambiguous")
+			}
+			login = identity.User.Login
+		}
+		if login != expectedAccount {
+			continue
+		}
+		if request != nil || user.Token == nil || *user.Token == "" {
+			return nil, fmt.Errorf("selected-account quota refresh credentials missing or ambiguous")
+		}
+		request = &rpc.AccountGetQuotaRequest{GitHubToken: user.Token}
+	}
+	if request == nil {
+		return nil, fmt.Errorf("selected-account quota refresh identity not found")
+	}
+	return request, nil
 }
 
 func quotaResetAt(auth *rpc.AccountGetCurrentAuthResult, observedAt time.Time) *time.Time {

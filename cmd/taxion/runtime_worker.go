@@ -53,9 +53,9 @@ func newRoleWorker(config copilot.Config) (configuredWorker, error) {
 	if selected.Runtime.Provider != "opencode" {
 		return copilot.New(config)
 	}
-	if config.MaxAICredits != 0 || config.ManagedCommit != nil || config.ManagedSearch != nil ||
+	if config.MaxAICredits != 0 || config.ManagedCommit != nil || config.ManagedSearch != nil || config.EnableReviewProgress ||
 		config.CLIPath != "" || config.BaseDirectory != "" {
-		return nil, fmt.Errorf("runtime: OpenCode uses approved acpCommand/acpConfig; Copilot credit caps, CLI overrides, managed commit and managed SDK search are unsupported")
+		return nil, fmt.Errorf("runtime: OpenCode uses approved acpCommand/acpConfig; Copilot credit caps, CLI overrides, managed commit, managed SDK search and review progress are unsupported")
 	}
 	if config.FileAccess == nil {
 		config.FileAccess = core.DefaultFileAccessPolicy()
@@ -89,6 +89,32 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 		config.Configuration = dispatch.Configuration.Selection
 	}
 	var worker configuredWorker
+	if config.EnableReviewProgress && dispatch.Recipient == "REVIEWER" {
+		if db == nil {
+			return nil, fmt.Errorf("runtime: review progress requires a saved workspace")
+		}
+		config.ManagedReviewProgress = &runtime.ManagedReviewProgress{
+			Basis: core.ReviewProgress{
+				Version: core.ReviewProgressVersion, DispatchID: dispatch.ID,
+				InstructionHash: dispatch.InstructionHash, CoderDispatchID: dispatch.RelatedID,
+				TargetSHA: dispatch.Instruction.TargetSHA, TargetTreeSHA: dispatch.Instruction.TargetTreeSHA,
+			},
+			Save: func(ctx context.Context, sessionID string, progress core.ReviewProgress) (string, error) {
+				ctx, cancel := context.WithCancel(ctx)
+				stop := context.AfterFunc(hostContext, cancel)
+				defer stop()
+				defer cancel()
+				if err := hostContext.Err(); err != nil {
+					return "", err
+				}
+				control, err := controller.New(db, worker)
+				if err != nil {
+					return "", err
+				}
+				return control.SaveReviewProgressForSession(ctx, dispatch.ID, sessionID, progress)
+			},
+		}
+	}
 	var graph core.TaskGraph
 	if db != nil {
 		state, err := db.LoadWorkspace()

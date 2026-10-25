@@ -115,6 +115,9 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 			if err != nil {
 				break
 			}
+			if err = writeReviewBudget(runCtx, out, flow, dispatch); err != nil {
+				break
+			}
 		}
 		var worker runtime.Identity
 		worker, err = factory(dispatch)
@@ -166,6 +169,10 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 			}
 			stored.StopCode = "SAFETY_STOP"
 			stored.Status, stored.Reason = "STOPPED", reason
+			stored.StopCause = "other"
+			if errors.Is(err, context.DeadlineExceeded) {
+				stored.StopCause = "time-limit"
+			}
 		}
 		stored.RunnerID = ""
 		storeFlow(state, stored)
@@ -190,6 +197,31 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 		}
 	}
 	return flow, errors.Join(err, saveErr)
+}
+
+func writeReviewBudget(ctx context.Context, out io.Writer, flow core.ReviewFlow, dispatch core.GraphDispatch) error {
+	now := time.Now().UTC()
+	deadline, source := flow.Deadline, "flow"
+	if caller, ok := ctx.Deadline(); ok && caller.Before(deadline) {
+		deadline, source = caller, "caller"
+	}
+	payload, err := json.Marshal(struct {
+		Version               int       `json:"version"`
+		FlowID                string    `json:"flowId"`
+		DispatchID            string    `json:"dispatchId"`
+		ObservedAt            time.Time `json:"observedAt"`
+		FlowDeadline          time.Time `json:"flowDeadline"`
+		EffectiveDeadline     time.Time `json:"effectiveDeadline"`
+		DeadlineSource        string    `json:"deadlineSource"`
+		RemainingMilliseconds int64     `json:"remainingMilliseconds"`
+	}{1, flow.ID, dispatch.ID, now, flow.Deadline, deadline, source, max(deadline.Sub(now).Milliseconds(), 0)})
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(out).Encode(runtime.Event{Type: "review_budget", Payload: string(payload)}); err != nil {
+		return fmt.Errorf("taxion: write review budget before runtime startup: %w", err)
+	}
+	return nil
 }
 
 func writeCreditStatus(ctx context.Context, encoder *json.Encoder, dispatch core.GraphDispatch, event runtime.Event, worker runtime.Identity) error {
@@ -299,6 +331,33 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 	if err != nil {
 		return err
 	}
+	dispatch, err = c.boundDispatch(dispatch.ID)
+	if err != nil {
+		return err
+	}
+	var initialQuota *budgetObservation
+	var lastQuotaCheck time.Time
+	for _, receipt := range state.Records.Events {
+		if receipt.DispatchID != dispatch.ID || receipt.SessionID != dispatch.RuntimeSessionID || receipt.Type != "budget-guidance" {
+			continue
+		}
+		var body struct {
+			Observation *budgetObservation `json:"observation"`
+			Phase       string             `json:"phase"`
+		}
+		if err := json.Unmarshal([]byte(receipt.Payload), &body); err != nil {
+			return fmt.Errorf("taxion: invalid saved budget observation: %w", err)
+		}
+		if body.Phase == "prepared" || body.Phase == "send-returned" {
+			if initialQuota == nil {
+				initialQuota = body.Observation
+			}
+		}
+		lastQuotaCheck = receipt.At
+	}
+	if initialQuota == nil && dispatch.Instruction.BudgetGuidance != nil && dispatch.Instruction.BudgetGuidance.Mode == "account" {
+		return c.stopForAccountQuota(dispatch, "account quota monitoring requires the saved send observation")
+	}
 	for index := len(state.Records.Events) - 1; index >= 0; index-- {
 		receipt := state.Records.Events[index]
 		if receipt.DispatchID == dispatch.ID && receipt.Type == "budget-guidance" {
@@ -310,12 +369,22 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 	}
 	streamID := time.Now().UTC().Format(time.RFC3339Nano)
 	var finalOutput string
-	checkLimits := func() error {
+	checkLimits := func(final bool) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if check != nil {
-			return check()
+			if err := check(); err != nil {
+				return err
+			}
+		}
+		if initialQuota != nil && initialQuota.Mode == "account" &&
+			(final || time.Since(lastQuotaCheck) >= time.Minute ||
+				initialQuota.Account != nil && initialQuota.Account.ResetAt != nil && !time.Now().Before(*initialQuota.Account.ResetAt)) {
+			if err := c.monitorAccountQuota(ctx, dispatch, initialQuota); err != nil {
+				return err
+			}
+			lastQuotaCheck = time.Now().UTC()
 		}
 		return nil
 	}
@@ -324,7 +393,7 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 		case <-ctx.Done():
 			return fmt.Errorf("taxion: event wait: %w", ctx.Err())
 		case <-ticker.C:
-			if err := checkLimits(); err != nil {
+			if err := checkLimits(false); err != nil {
 				return err
 			}
 		case event, ok := <-events:
@@ -348,11 +417,11 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 				if err := writeCreditStatus(ctx, encoder, dispatch, event, c.runtime); err != nil {
 					return err
 				}
-				if err := checkLimits(); err != nil {
+				if err := checkLimits(false); err != nil {
 					return err
 				}
 			case runtime.EventTurnFinished:
-				if err := checkLimits(); err != nil {
+				if err := checkLimits(true); err != nil {
 					return err
 				}
 				observed, finishErr := c.Finish(ctx, dispatch.ID, finalOutput)

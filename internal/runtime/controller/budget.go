@@ -216,6 +216,7 @@ func stopFlowForBudget(db *store.Store, id, reason string) error {
 			return err
 		}
 		flow.StopCode, flow.Status, flow.Reason = "BUDGET_STOP", "STOPPED", reason
+		flow.StopCause = flowStopCause(flow)
 		storeFlow(state, flow)
 		return appendBudgetAudit(state, flow, "BUDGET_STOP", taskBudgetReport(state.Graph, flow, time.Now().UTC()))
 	})

@@ -278,6 +278,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 			}
 			flow.StopCode = code
 			flow.Status, flow.Reason = "STOPPED", reason
+			flow.StopCause = flowStopCause(flow)
 			storeFlow(state, flow)
 			if code == "BUDGET_STOP" {
 				report := taskBudgetReport(state.Graph, flow, time.Now().UTC())
@@ -620,6 +621,18 @@ func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.Rev
 		ID: review.AuthorizationID, Source: flow.Authorization.Source,
 		Text: flow.Authorization.Text + "; independently review the recorded Coder result",
 	}, sourceDecision)
+	if flow.SourceDispatchID == coder.ID {
+		for _, predecessor := range state.Graph.ReviewFlows {
+			if "flow:"+predecessor.ID != flow.Contract.CreatedFrom {
+				continue
+			}
+			progress, err := reviewProgressDecision(*state, predecessor, coder)
+			if err != nil {
+				return err
+			}
+			review.Decisions = append(review.Decisions, progress)
+		}
+	}
 	review.HumanDecision = nil
 	if supplement != nil {
 		review.Decisions = append(review.Decisions, *supplement)

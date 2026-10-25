@@ -44,6 +44,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	var strictResult bool
 	var compactContext bool
 	var validationSubmission bool
+	var reviewProgress bool
 	var builtinPrompts bool
 	var requireQuality bool
 	var scanner string
@@ -77,6 +78,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		fs.BoolVar(&strictResult, "strict-result-identities", false, "constrain final identities and start SHA to the saved Dispatch")
 		fs.BoolVar(&compactContext, "compact-context", false, "include exact prior results without nested instructions")
 		fs.BoolVar(&validationSubmission, "controller-validation-submission", false, "separate submission from controller-run checks; repeat on session attachment")
+		fs.BoolVar(&reviewProgress, "review-progress", false, "enable bounded Reviewer progress receipts (Copilot only); repeat on session attachment")
 		fs.StringVar(&scanner, "scanner", "betterleaks", "trusted Betterleaks executable (--managed-commit only)")
 	default:
 		return fmt.Errorf("unknown workflow action %q", action)
@@ -425,15 +427,16 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 			return newDispatchWorker(ctx, db, dispatch, copilot.Config{
 				Role: dispatch.Recipient, SystemPrompt: runtimeSubmissionPrompt(prompts[dispatch.Recipient], contract, validationSubmission),
 				WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: cli, BaseDirectory: base,
-				MaxAICredits:   maxAICredits,
-				AvailableTools: tools[dispatch.Recipient], ResponseSchema: responseSchema,
+				MaxAICredits:         maxAICredits,
+				EnableReviewProgress: reviewProgress,
+				AvailableTools:       tools[dispatch.Recipient], ResponseSchema: responseSchema,
 			}, managedCommit && dispatch.Recipient == "CODER", managedStage && dispatch.Recipient == "CODER", scanner)
 		}, output, configuration)
 		if flow.ID == "" {
 			return err
 		}
-		reportStoppedRepair(db, storePath, flow.ID, err)
-		return errors.Join(printJSON(flow), err)
+		reportErr := reportStoppedRepair(os.Stderr, db, storePath, flow.ID, err)
+		return errors.Join(printJSON(flow), err, reportErr)
 	case "start":
 		input, err := os.Open(file)
 		if err != nil {
@@ -498,8 +501,8 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		if err != nil && !errors.Is(err, controller.ErrFlowStopped) && !errors.Is(err, core.ErrHandoffHeld) {
 			return err
 		}
-		reportStoppedRepair(db, storePath, id, err)
-		return errors.Join(printJSON(flow), err)
+		reportErr := reportStoppedRepair(os.Stderr, db, storePath, id, err)
+		return errors.Join(printJSON(flow), err, reportErr)
 	default:
 		flow, ok := state.Graph.ReviewFlow(id)
 		if !state.HasGraph || !ok {
@@ -538,18 +541,26 @@ func currentApprovalConfiguration() core.ApprovalConfiguration {
 
 // reportStoppedRepair tells the operator on stderr whether a stopped Flow
 // needs Human action, so the stop is not re-interpreted from prose.
-func reportStoppedRepair(db *store.Store, storePath, flowID string, err error) {
-	if !errors.Is(err, controller.ErrFlowStopped) {
-		return
+func reportStoppedRepair(out io.Writer, db *store.Store, storePath, flowID string, err error) error {
+	if err == nil {
+		return nil
 	}
 	state, loadErr := db.LoadWorkspace()
 	if loadErr != nil {
-		return
+		return fmt.Errorf("taxion: load stopped Flow status: %w", loadErr)
+	}
+	flow, ok := state.Graph.ReviewFlow(flowID)
+	if !ok {
+		return fmt.Errorf("taxion: Flow disappeared while reporting stop status")
+	}
+	if flow.Status != "STOPPED" {
+		return nil
 	}
 	status, statusErr := controller.ObserveRepairStatus(state, flowID, currentApprovalConfiguration())
 	if statusErr != nil {
-		return
+		return statusErr
 	}
-	fmt.Fprintf(os.Stderr, "taxion: repair status: %s (%d/%d repairs); next: %s\n", status.Status, status.Repairs, status.MaxRepairs, status.NextAction)
-	fmt.Fprintf(os.Stderr, "taxion: details: taxion --store %q workflow repair-status --id %q\n", storePath, flowID)
+	_, statusErr = fmt.Fprintf(out, "taxion: repair status: %s (%d/%d repairs); next: %s\n", status.Status, status.Repairs, status.MaxRepairs, status.NextAction)
+	_, detailsErr := fmt.Fprintf(out, "taxion: details: taxion --store %q workflow repair-status --id %q\n", storePath, flowID)
+	return errors.Join(statusErr, detailsErr)
 }

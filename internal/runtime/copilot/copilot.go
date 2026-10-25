@@ -36,22 +36,24 @@ const watcherBuffer = 256
 var _ runtime.Runtime = (*Adapter)(nil)
 
 type Config struct {
-	Role             string
-	SystemPrompt     string
-	WorkingDirectory string
-	CLIPath          string
-	BaseDirectory    string
-	AvailableTools   []string
-	FileAccess       *core.FileAccessPolicy
-	BudgetGuidance   *core.BudgetGuidancePolicy
-	TrackedFiles     []string
-	ResponseSchema   map[string]any
-	ManagedCommit    *runtime.ManagedCommit
-	ManagedSearch    *runtime.ManagedSearch
-	Configuration    json.RawMessage
-	MaxAICredits     float64
-	ToolPolicy       *tools.Policy
-	AuthorizeTools   func(context.Context, string) error
+	Role                  string
+	SystemPrompt          string
+	WorkingDirectory      string
+	CLIPath               string
+	BaseDirectory         string
+	AvailableTools        []string
+	FileAccess            *core.FileAccessPolicy
+	BudgetGuidance        *core.BudgetGuidancePolicy
+	TrackedFiles          []string
+	ResponseSchema        map[string]any
+	ManagedCommit         *runtime.ManagedCommit
+	ManagedSearch         *runtime.ManagedSearch
+	ManagedReviewProgress *runtime.ManagedReviewProgress
+	EnableReviewProgress  bool
+	Configuration         json.RawMessage
+	MaxAICredits          float64
+	ToolPolicy            *tools.Policy
+	AuthorizeTools        func(context.Context, string) error
 }
 
 type Adapter struct {
@@ -195,7 +197,7 @@ func New(config Config) (*Adapter, error) {
 		}
 	}
 	if slices.Contains(config.AvailableTools, ManagedCommitToolName) || slices.Contains(config.AvailableTools, ManagedStageToolName) ||
-		slices.Contains(config.AvailableTools, ManagedSearchToolName) {
+		slices.Contains(config.AvailableTools, ManagedSearchToolName) || slices.Contains(config.AvailableTools, ReviewProgressToolName) {
 		return nil, fmt.Errorf("taxion: managed commit tool is reserved; enable it through the host binding")
 	}
 	if config.ManagedCommit != nil {
@@ -237,6 +239,15 @@ func New(config Config) (*Adapter, error) {
 		}
 		config.ManagedSearch = &binding
 		config.AvailableTools = append(config.AvailableTools, ManagedSearchToolName)
+	}
+	if config.ManagedReviewProgress != nil {
+		binding := *config.ManagedReviewProgress
+		if config.Role != "REVIEWER" || binding.Save == nil || binding.Basis.DispatchID == "" ||
+			binding.Basis.InstructionHash == "" || binding.Basis.CoderDispatchID == "" || binding.Basis.TargetSHA == "" {
+			return nil, fmt.Errorf("taxion: review progress requires a bound Reviewer target and host handler")
+		}
+		config.ManagedReviewProgress = &binding
+		config.AvailableTools = append(config.AvailableTools, ReviewProgressToolName)
 	}
 	mode := sdk.ModeCopilotCli
 	if config.ToolPolicy != nil {
@@ -299,43 +310,45 @@ func (a *Adapter) ConfigHash() string {
 		}
 	}
 	data, _ := json.Marshal(struct {
-		Role                string
-		SystemPrompt        string
-		WorkingDirectory    string
-		CLIPath             string
-		BaseDirectory       string
-		AvailableTools      []string
-		FileAccess          *core.FileAccessPolicy     `json:",omitempty"`
-		BudgetGuidance      *core.BudgetGuidancePolicy `json:",omitempty"`
-		TrackedFiles        []string                   `json:",omitempty"`
-		ResponseSchema      map[string]any
-		PermissionPolicy    string
-		ManagedCommit       *runtime.ManagedCommit `json:",omitempty"`
-		ManagedSearch       *runtime.ManagedSearch `json:",omitempty"`
-		ManagedCommitPolicy string                 `json:",omitempty"`
-		Configuration       json.RawMessage        `json:",omitempty"`
-		MaxAICredits        float64                `json:",omitempty"`
-		ToolPolicy          *tools.Policy          `json:",omitempty"`
-		DiscoveryPolicy     string                 `json:",omitempty"`
+		Role                  string
+		SystemPrompt          string
+		WorkingDirectory      string
+		CLIPath               string
+		BaseDirectory         string
+		AvailableTools        []string
+		FileAccess            *core.FileAccessPolicy     `json:",omitempty"`
+		BudgetGuidance        *core.BudgetGuidancePolicy `json:",omitempty"`
+		TrackedFiles          []string                   `json:",omitempty"`
+		ResponseSchema        map[string]any
+		PermissionPolicy      string
+		ManagedCommit         *runtime.ManagedCommit         `json:",omitempty"`
+		ManagedSearch         *runtime.ManagedSearch         `json:",omitempty"`
+		ManagedReviewProgress *runtime.ManagedReviewProgress `json:",omitempty"`
+		ManagedCommitPolicy   string                         `json:",omitempty"`
+		Configuration         json.RawMessage                `json:",omitempty"`
+		MaxAICredits          float64                        `json:",omitempty"`
+		ToolPolicy            *tools.Policy                  `json:",omitempty"`
+		DiscoveryPolicy       string                         `json:",omitempty"`
 	}{
-		Role:                a.config.Role,
-		SystemPrompt:        a.config.SystemPrompt,
-		WorkingDirectory:    a.config.WorkingDirectory,
-		CLIPath:             a.config.CLIPath,
-		BaseDirectory:       a.config.BaseDirectory,
-		AvailableTools:      a.config.AvailableTools,
-		FileAccess:          a.config.FileAccess,
-		BudgetGuidance:      a.config.BudgetGuidance,
-		TrackedFiles:        a.config.TrackedFiles,
-		ResponseSchema:      a.config.ResponseSchema,
-		PermissionPolicy:    permissionPolicy,
-		ManagedCommit:       a.config.ManagedCommit,
-		ManagedSearch:       a.config.ManagedSearch,
-		ManagedCommitPolicy: managedCommitPolicy,
-		Configuration:       a.config.Configuration,
-		MaxAICredits:        a.config.MaxAICredits,
-		ToolPolicy:          a.config.ToolPolicy,
-		DiscoveryPolicy:     discoveryPolicy,
+		Role:                  a.config.Role,
+		SystemPrompt:          a.config.SystemPrompt,
+		WorkingDirectory:      a.config.WorkingDirectory,
+		CLIPath:               a.config.CLIPath,
+		BaseDirectory:         a.config.BaseDirectory,
+		AvailableTools:        a.config.AvailableTools,
+		FileAccess:            a.config.FileAccess,
+		BudgetGuidance:        a.config.BudgetGuidance,
+		TrackedFiles:          a.config.TrackedFiles,
+		ResponseSchema:        a.config.ResponseSchema,
+		PermissionPolicy:      permissionPolicy,
+		ManagedCommit:         a.config.ManagedCommit,
+		ManagedSearch:         a.config.ManagedSearch,
+		ManagedReviewProgress: a.config.ManagedReviewProgress,
+		ManagedCommitPolicy:   managedCommitPolicy,
+		Configuration:         a.config.Configuration,
+		MaxAICredits:          a.config.MaxAICredits,
+		ToolPolicy:            a.config.ToolPolicy,
+		DiscoveryPolicy:       discoveryPolicy,
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -822,6 +835,11 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 		}
 		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
 			a.config.ManagedSearch != nil && permission.ToolName == ManagedSearchToolName &&
+			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
+			decision = &rpc.PermissionDecisionApproveOnce{}
+		}
+		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
+			a.config.ManagedReviewProgress != nil && permission.ToolName == ReviewProgressToolName &&
 			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
 			decision = &rpc.PermissionDecisionApproveOnce{}
 		}

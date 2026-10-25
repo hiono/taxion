@@ -112,6 +112,11 @@ type ManagedSearch struct {
 	Search    func(context.Context, string) (json.RawMessage, error) `json:"-"`
 }
 
+type ManagedReviewProgress struct {
+	Basis core.ReviewProgress                                                `json:"basis"`
+	Save  func(context.Context, string, core.ReviewProgress) (string, error) `json:"-"`
+}
+
 type QuotaSnapshot struct {
 	Provider            string     `json:"provider"`
 	Account             string     `json:"account"`

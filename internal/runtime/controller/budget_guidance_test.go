@@ -137,7 +137,7 @@ func TestAccountGuidanceFailuresAndApprovedOverrides(t *testing.T) {
 				t.Fatal(err)
 			}
 			err := control.SendWithBudgetGuidance(t.Context(), id, "execute", mode)
-			denied := name == "mismatch" || name == "provider-mismatch" || name == "exhausted" || name == "unapproved"
+			denied := name != "off" && name != "flow"
 			if (err != nil) != denied || denied && len(worker.sends) != 0 {
 				t.Fatalf("deny=%t, sends=%v, err=%v", denied, worker.sends, err)
 			}
@@ -151,13 +151,22 @@ func TestAccountGuidanceFailuresAndApprovedOverrides(t *testing.T) {
 			if name == "off" && worker.sends[0] != "execute" {
 				t.Fatal("off added a model instruction")
 			}
-			if name == "stale" || name == "expired" {
-				if !strings.Contains(worker.sends[0], `"state":"stale"`) {
-					t.Fatal("expired observation was treated as current")
-				}
+			if denied && worker.starts != 1 {
+				t.Fatal("quota denial retried session creation")
 			}
-			if name == "invalid" && !strings.Contains(worker.sends[0], `"state":"unavailable"`) {
-				t.Fatal("invalid quota became a successful or zero observation")
+			if name == "stale" || name == "expired" || name == "invalid" || name == "unavailable" {
+				state, err := db.LoadWorkspace()
+				if err != nil {
+					t.Fatal(err)
+				}
+				receipt := state.Records.Events[len(state.Records.Events)-1]
+				expected := `"state":"unavailable"`
+				if name == "stale" || name == "expired" {
+					expected = `"state":"stale"`
+				}
+				if !strings.Contains(receipt.Payload, `"phase":"denied"`) || !strings.Contains(receipt.Payload, expected) {
+					t.Fatal("quota denial lost the unavailable/stale observation", receipt.Type)
+				}
 			}
 		})
 	}
@@ -176,12 +185,13 @@ func TestQuotaUnsupportedAndLegacyRemainDistinct(t *testing.T) {
 			if _, err := control.Start(t.Context(), id); err != nil {
 				t.Fatal(err)
 			}
-			if err := control.Send(t.Context(), id, "execute"); err != nil {
-				t.Fatal(err)
-			}
-			if mode == "" && worker.sends[0] != "execute" ||
-				mode == "account" && !strings.Contains(worker.sends[0], `"state":"unsupported"`) {
-				t.Fatal("legacy or unsupported behavior changed")
+			err := control.Send(t.Context(), id, "execute")
+			if mode == "account" {
+				if err == nil || len(worker.sends) != 0 {
+					t.Fatal("missing Copilot quota capability authorized sending")
+				}
+			} else if err != nil || worker.sends[0] != "execute" {
+				t.Fatal("legacy behavior changed", err)
 			}
 			if mode == "" && control.SendWithBudgetGuidance(t.Context(), id, "execute", "flow") == nil {
 				t.Fatal("legacy Dispatch silently adopted new guidance")

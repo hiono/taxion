@@ -1,14 +1,182 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
 )
+
+func TestRunningAccountQuotaStopsBeforeAcceptingTurn(t *testing.T) {
+	for _, failure := range []string{"reserve", "daily-allocation", "unavailable", "stale", "identity", "cycle", "resource", "missing-basis", "quiet"} {
+		t.Run(failure, func(t *testing.T) {
+			db, id, base, _ := executionConfigurationFixture(t, budgetPolicy(t, "account"))
+			defer db.Close()
+			worker := &quotaRuntime{configuredRuntime: base, quota: observedQuota()}
+			reset := time.Now().UTC().Add(8 * 24 * time.Hour)
+			worker.quota.ResetAt = &reset
+			control, err := New(db, worker)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := control.Start(t.Context(), id); err != nil {
+				t.Fatal(err)
+			}
+			if err := control.Send(t.Context(), id, "execute"); err != nil {
+				t.Fatal(err)
+			}
+			events := make(chan runtime.Event, 1)
+			worker.events = events
+			if failure == "quiet" {
+				if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+					for index := range state.Records.Events {
+						state.Records.Events[index].At = time.Now().Add(-time.Minute)
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				events <- runtime.Event{Type: runtime.EventTurnFinished}
+			}
+			if failure == "missing-basis" {
+				if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+					events := state.Records.Events[:0]
+					for _, receipt := range state.Records.Events {
+						if receipt.Type != "budget-guidance" {
+							events = append(events, receipt)
+						}
+					}
+					state.Records.Events = events
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch failure {
+			case "reserve", "quiet":
+				remaining := 5.0
+				worker.quota.RemainingPercentage = &remaining
+			case "daily-allocation":
+				remaining := 6.0
+				worker.quota.RemainingPercentage = &remaining
+			case "unavailable":
+				worker.quota.State, worker.quota.Reason = "unavailable", "read failed"
+			case "stale":
+				worker.quota.ObservedAt = time.Now().Add(-2 * time.Minute)
+			case "identity":
+				worker.quota.Account = "other-account"
+			case "cycle":
+				next := reset.AddDate(0, 1, 0)
+				worker.quota.ResetAt = &next
+			case "resource":
+				worker.quota.Resource = "different-resource"
+			}
+			dispatch, err := control.boundDispatch(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			err = control.StreamEvents(ctx, dispatch, 0, io.Discard, nil)
+			var stopped *budgetStopError
+			expectedReads := 2
+			if failure == "missing-basis" {
+				expectedReads = 1
+			}
+			if !errors.As(err, &stopped) || worker.reads != expectedReads || worker.stops != 1 {
+				t.Fatalf("quota did not stop the running session: reads=%d stops=%d err=%v", worker.reads, worker.stops, err)
+			}
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved, _ := state.Graph.GraphDispatch(id)
+			if saved.Status != core.DispatchCancelled || saved.Result == nil {
+				t.Fatal("running session cancellation was not saved", saved.Status)
+			}
+			observed := false
+			for _, receipt := range state.Records.Events {
+				observed = observed || receipt.Type == "budget-guidance" && strings.Contains(receipt.Payload, `"phase":"monitoring"`)
+			}
+			if !observed && failure != "missing-basis" {
+				t.Fatal("quota observation was not durably recorded")
+			}
+		})
+	}
+}
+
+func TestQuotaExecutionStopKeepsUnsupportedTimeOnlyDistinct(t *testing.T) {
+	for _, provider := range []string{"copilot", "opencode"} {
+		quota := &runtime.QuotaSnapshot{Provider: provider, State: "unsupported"}
+		if (quotaExecutionStop(quota) != "") != (provider == "copilot") {
+			t.Fatal("unsupported account monitoring was misclassified", provider)
+		}
+	}
+}
+
+func TestRunningAccountQuotaAllowsCurrentObservationAndApprovedOverrides(t *testing.T) {
+	for _, mode := range []string{"account", "off", "flow"} {
+		t.Run(mode, func(t *testing.T) {
+			db, id, base, _ := executionConfigurationFixture(t, budgetPolicy(t, "account"))
+			defer db.Close()
+			worker := &quotaRuntime{configuredRuntime: base, quota: observedQuota()}
+			control, err := New(db, worker)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := control.Start(t.Context(), id); err != nil {
+				t.Fatal(err)
+			}
+			if err := control.SendWithBudgetGuidance(t.Context(), id, "execute", mode); err != nil {
+				t.Fatal(err)
+			}
+			dispatch, err := control.boundDispatch(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "account" {
+				initial := &budgetObservation{Mode: mode, Account: &worker.quota}
+				if err := control.monitorAccountQuota(t.Context(), dispatch, initial); err != nil || worker.reads != 2 || worker.stops != 0 {
+					t.Fatal("current available quota stopped the runtime", err)
+				}
+				return
+			}
+			events := make(chan runtime.Event, 1)
+			events <- runtime.Event{Type: runtime.EventTurnFinished}
+			worker.events = events
+			err = control.StreamEvents(t.Context(), dispatch, 0, io.Discard, nil)
+			var stopped *budgetStopError
+			if err == nil || errors.As(err, &stopped) || worker.reads != 0 {
+				t.Fatal("approved override read account quota or became a quota stop", err)
+			}
+		})
+	}
+}
+
+func TestAccountDayStartDoesNotReusePriorResetCycle(t *testing.T) {
+	now := time.Now().UTC()
+	previousReset := now.Add(-time.Hour)
+	currentReset := now.AddDate(0, 1, 0)
+	current := allocationQuota(45, &currentReset)
+	previous := allocationQuota(10, &previousReset)
+	previous.ObservedAt = now
+	payload, err := json.Marshal(map[string]any{"observation": map[string]any{"account": previous}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := accountDayStart([]store.RuntimeReceipt{{Type: "budget-guidance", Payload: string(payload)}}, current, now)
+	if start == nil || *start != 45 {
+		t.Fatal("new cycle reused a prior-cycle day-start observation", start)
+	}
+}
 
 func allocationQuota(remaining float64, reset *time.Time) *runtime.QuotaSnapshot {
 	quota := observedQuota()

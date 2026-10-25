@@ -27,10 +27,10 @@ func (c *Controller) recordEvent(dispatchID, streamID string, event runtime.Even
 			return fmt.Errorf("taxion: event requires a running owned session")
 		}
 		for _, previous := range state.Records.Events {
-			if previous.DispatchID == dispatchID && previous.Type != "verified-result" && previous.Type != "budget-guidance" && previous.StreamID != streamID {
+			if previous.DispatchID == dispatchID && previous.Type != "verified-result" && previous.Type != "budget-guidance" && previous.Type != reviewProgressReceipt && previous.StreamID != streamID {
 				return fmt.Errorf("taxion: reconnect event identity is uncertain; reconcile the saved stream before adopting new events")
 			}
-			if previous.DispatchID == dispatchID && previous.Type != "budget-guidance" && previous.Type != "verified-result" && previous.StreamID == streamID &&
+			if previous.DispatchID == dispatchID && previous.Type != "budget-guidance" && previous.Type != "verified-result" && previous.Type != reviewProgressReceipt && previous.StreamID == streamID &&
 				event.Sequence != 0 && previous.Sequence == event.Sequence {
 				if previous.Type == event.Type && previous.Hash == receiptHash(event.Payload) {
 					return nil
