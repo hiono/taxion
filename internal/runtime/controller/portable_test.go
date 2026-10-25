@@ -224,6 +224,7 @@ func TestPortableStoppedCoderContinuesWithoutOriginalStoresOrGit(t *testing.T) {
 	gitTest(t, successorRoot, "read-tree", "--reset", "-u", coder.Result.OutputTreeSHA)
 	task := flow.Contract
 	task.ID, task.Worktree, task.Branch = "restored-successor", successorRoot, "work/successor"
+	task.BudgetGuidance = budgetPolicy(t, "flow")
 	task.CreatedFrom, task.Supersedes = "flow:"+flow.ID, flow.TaskID
 	task.TargetSHA, task.TargetTreeSHA = coder.Result.OutputSHA, coder.Result.OutputTreeSHA
 	task.TargetChangedFiles = coder.Result.ChangedFiles

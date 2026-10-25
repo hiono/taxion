@@ -295,7 +295,7 @@ v0.2.0 から更新した場合、配置済み skill `1.0.0` はそのまま使�
 
 ```sh
 taxion request --repo owner/repository \
-  --timeout 20m --max-ai-credits 30 --max-task-nano-aiu 1000000000 \
+  --max-ai-credits 30 \
   --context-path README.md
 ```
 
@@ -305,9 +305,13 @@ taxion request --repo owner/repository \
 
 この入口は snapshot mode と `fileAccess: all` を明示して使います。worktree 内の新規ファイルを許可し、Coder には `view,create,edit,apply_patch`、Reviewer には `view` を渡します。変更結果の scope 検査、worktree 外と保護された path の拒否、Reviewer の読み取り専用制約は維持します。細かい file access や外部 skill の承認が必要な場合は、`ready` を読んだオーケストレータに次節の個別手順を任せます。
 
-期限は `/plan` から数え、入力待ちと中断中も経過します。正の `--max-task-nano-aiu` は nano-AIU の hard ceiling で、Planner の実測使用量を差し引いた残量だけを実行 Flow に割り当てます。この方式では Planner 利用量が未知・不完全なら次のモデル呼出しと実行承認を止めます。実行中は既存の Task budget 検査で `BUDGET_STOP` を記録します。`--max-ai-credits` は session ごとの soft ceiling で、hard ceiling とは別です。Dispatch 数と role session 数の上限は承認済み repair 上限から導出し、実行済み数・credits・時間・修正/re-review 数と残量は `workflow evaluate --id FLOW_ID` で確認できます。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。Planner の失敗を自動 retry しません。
+開発版の新規依頼は `account`・`reset-daily` を標準とし、Task ごとの上限入力を求めません。設定・依頼別指定がなければ上のコマンドでこの方式を選びます。表示されたアカウントの残量読取りと下限方式を確認し、`/plan`・`/approve` で承認します。残量非対応・取得不能・古い観測・リセット不明では停止し、旧方式へ自動で切り替えません。
 
-開発版では、`taxion request --repo REPO --max-ai-credits 30 --budget-guidance account` のように Task 上限を省略できます。計画前に表示する残量方式を確認し、`/plan` と `/approve` で承認します。この場合は開始時の残量から計算する `reset-daily` 下限で制御し、nano-AIU の上限は作りません。Planner の nano-AIU 使用量が不明でも残量の照合を通過すれば続行できますが、不明な使用量を完全・無料とは記録しません。残量が非対応・取得不能・古い場合、またはリセット不明の場合は送信できません。期限、修正回数、役割別 session 数、送信前・実行中・回答採用前の監視は維持します。`off`・`flow` モードで省略することや、既存の承認済み上限を消すことはできません。
+開始時の残量から計算した下限をリセットまで日割りで下げ、最後の24時間は下限0とします。nano-AIU へ換算した上限は作りません。Planner の使用量が不明でも残量を照合して続行できますが、不明な使用量を完全・無料とは記録しません。送信前・実行中・回答採用前に残量を確認します。提供元の反映遅延や停止までの消費があるため、厳密な請求上限と最終24時間の親の報告用残量は保証しません。
+
+期限は `/plan` から数え、既定は1時間です。入力待ちと中断中も経過します。`--max-ai-credits` はセッションごとの soft ceiling です。修正は既定で最大1回、`--max-repairs 0` なら再修正しません。送信数と役割別セッション数は承認した修正回数から決まり、`workflow evaluate --id FLOW_ID` で期限・予算・使用量を確認できます。Planner の失敗は自動再試行しません。
+
+過去の資産を引き継ぐ場合は、保存済み Task・Dispatch・中断 checkpoint の方式、期限、明示上限をそのまま使います。設定ファイルの `flow`・`off` 指定も維持します。旧方式を新たに明示する場合は、たとえば `--budget-guidance flow --max-task-nano-aiu 1000000000` のように上限を指定します。正の上限は Planner の使用量を差し引く hard ceiling で、使用量が不明なら停止します。新方式にも追加の正の上限を指定できますが、既存の承認済み上限を自動で削除・拡大することはありません。
 
 Planner はファイル・shell tool を持たず、今回の依頼または回答、最小の提案・未回答質問、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストを受け取ります。会話履歴や元依頼の全文を永続保存せず、元依頼は digest だけを decision に残します。path は directory ごとにまとめ、全件を保持したまま共通部分の繰り返しを減らします。通常は native な skill と指示も読み込みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。
 
@@ -558,7 +562,7 @@ Copilot の `--max-ai-credits` は session 単位の soft ceiling であり、
 アカウント全体の残 credit を表示する option ではありません。
 各 model call で取得できた nano-AIU と AI-credit status を表示します。
 account 残高、使用率、残り率は、同じ単位の allowance を確認できない場合は unavailable です。
-既定の `flow` は承認済み期限と未完了 role 等を指示へ補足し、追加のモデル呼出しはしません。
+新規の標準 `account`・`reset-daily` は残量下限で制御し、追加のモデル呼出しはしません。保存済みの `flow` は過去の承認済み条件として引き継ぎます。
 
 Copilot SDK の account quota、session の累積 cost、公式 Billing API の期間別使用量は
 別の情報です。requests の残り割合を AI Credit の絶対残量と読み替えたり、
@@ -566,14 +570,14 @@ Copilot SDK の account quota、session の累積 cost、公式 Billing API の�
 非公開 API や管理者の token は、通常の実行準備の必須条件にはしません。
 
 選択は [ADR-0029](../develop/adr/0029-separate-budget-guidance-from-provider-quota.md)で定義しています。
-既定は、外部照会せず承認済み Flow の残りを指示に含める `flow`。
+新規 proposal の既定は、残量下限と継続監視を用いる `account`・`reset-daily` です。
 実行ごとに明示しなければ config の既定値を継承し、`off` でも停止条件は変わりません。
 `account` は操作者が承認した provider の残量読取りを追加する方式で、
 未対応・取得失敗・古い観測を理由付きで表示します。たとえば通常の `request`
-コマンドに `--budget-guidance account` を加えると、表示される読取り範囲を
+コマンドで新規の既定方式を使う場合も、表示される読取り範囲を
 `/plan` で Planner に、`/approve` で実装・レビューに承認します。
 未指定時は環境変数 `TAXION_EXECUTION_BUDGET_GUIDANCE`、設定ファイルの
-`execution.budgetGuidance`、最後に `flow` の順で値を決めます
+`execution.budgetGuidance`、最後に `account`・`reset-daily` の順で値を決めます
 （設定ファイル内の優先順位は [設定ガイド](configuration.md)を参照）。
 観測と実際の補足は、相談分を含めて workspace の SQLite に保存し、`records show` で確認します。
 設定がない旧 Task / Dispatch へ補足を遡及適用しません。

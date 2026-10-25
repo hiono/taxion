@@ -39,6 +39,7 @@ func budgetPolicy(t *testing.T, mode string) *core.BudgetGuidancePolicy {
 	if err != nil {
 		t.Fatal(err)
 	}
+	policy.AccountAllocation = ""
 	return policy
 }
 

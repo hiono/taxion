@@ -8,13 +8,16 @@ import (
 
 func TestBudgetGuidanceSelectionApprovalAndLegacyShape(t *testing.T) {
 	for _, test := range []struct{ config, override, mode, source string }{
-		{"", "", "flow", "default"}, {"account", "", "account", "configuration"},
+		{"", "", "account", "default"}, {"account", "", "account", "configuration"},
 		{"account", "off", "off", "request"}, {"off", "account", "account", "request"},
 	} {
 		policy, err := NewBudgetGuidance(test.config, test.override)
 		if err != nil || policy.Mode != test.mode || policy.Source != test.source ||
 			policy.AccountReadApproved != (test.mode == "account") {
 			t.Fatal("wrong policy resolution", policy, err)
+		}
+		if (policy.AccountAllocation == "reset-daily") != (test.mode == "account") {
+			t.Fatal("new account proposals do not use the residual floor", policy)
 		}
 		copy := CloneBudgetGuidance(policy)
 		copy.AllowedModes[0] = "invalid"
@@ -36,7 +39,8 @@ func TestBudgetGuidanceSelectionApprovalAndLegacyShape(t *testing.T) {
 }
 
 func TestResetDailyAllocationRequiresExplicitContract(t *testing.T) {
-	legacy, _ := NewBudgetGuidance("", "account")
+	legacy := &BudgetGuidancePolicy{Mode: "account", Source: "request",
+		AllowedModes: []string{"off", "flow", "account"}, AccountReadApproved: true}
 	if legacy.AccountAllocation != "" {
 		t.Fatal("existing account selection changed its approved allocation")
 	}
@@ -64,7 +68,7 @@ func TestResetDailyAllocationRequiresExplicitContract(t *testing.T) {
 
 func TestBudgetGuidanceRequiresReapprovalAndImmutableDispatch(t *testing.T) {
 	task := graphTask("guidance")
-	task.BudgetGuidance, _ = NewBudgetGuidance("", "")
+	task.BudgetGuidance, _ = NewBudgetGuidance("", "flow")
 	graph := trackedGraph(t, task)
 	saved, _ := graph.GraphTask(task.ID)
 	saved.BudgetGuidance = nil

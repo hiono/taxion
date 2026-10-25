@@ -2,6 +2,8 @@
 
 Taxion の設定は project、Git repository、実行ハーネス（Copilot または OpenCode）、実行記録の識別子を選びます。開発基盤と実行ハーネスは別の設定です。設定ファイルに token や password を書かず、各 credential の保管と認証は選んだ CLI の実行環境で行います。
 
+開発版では、新規の残量方式を `account`・`reset-daily` に変更し、Task 上限の手入力を不要にしました。配布済み v0.7.15 の既定は `flow` で、`request` の正の Task 上限は必須です。以下の新しい標準方式は開発版の説明であり、既存の設定・保存済み契約には遡及適用しません。
+
 ## 設定ファイル
 
 Taxion は次の固定位置だけを読みます。
@@ -48,7 +50,7 @@ v0.3.1 では、端末上の未確定 provider・remote と適用確認を選択
 | `execution.requester` | Task を依頼した人または process の識別子。 |
 | `execution.worker` | 実行環境・worker の識別子。 |
 | `execution.approvalRef` | Task に結び付ける設定承認の識別子。 |
-| `execution.budgetGuidance` | 残予算の送信補足。`off`・`flow`・`account`。省略時は `flow`。依頼ごとの明示指定を優先する。 |
+| `execution.budgetGuidance` | 新規 proposal の残量方式。`off`・`flow`・`account`。開発版の省略時は `account`・`reset-daily`。依頼ごとの明示指定を優先し、保存済み契約は変更しない。 |
 
 GitLab を subpath で公開し、SSH に標準外の port を使う場合は `endpoints` を書きます。判断の背景と照合の段階は [ADR-0042](../develop/adr/0042-gitlab-endpoint-binding-separates-api-clone-and-ssh-identities.md) に記録しています。
 
@@ -294,8 +296,11 @@ token の欠落・最新 message の部分値は Flow 全体の利用量にせ�
 
 Global / Project / 環境変数で既定値を選び、実行依頼の明示選択を
 最後に適用します。指示ごとの未指定は既定値を継承し、すべて未指定なら
-外部照会のない `flow` とします。`off` は補足指示なし、
-`account` は明示承認した provider account の quota 読取りを追加する方式です。
+`account`・`reset-daily` とします。新規依頼は残量下限と継続監視を標準とし、
+Task ごとの上限入力を省略できます。アカウント照会と下限方式は proposal に示し、
+実行前に承認します。残量非対応・取得不能・古い観測・リセット不明なら停止し、
+`flow` へ自動で切り替えません。`off` は補足指示なし、
+`flow` は外部照会のない旧方式として、明示設定や過去の契約の引継ぎに使用します。
 方式・採用元・指示ごとの変更許可は承認と session identity に保持し、
 既存 session に config 編集を遡及適用しません。
 設定がない旧 Task / Dispatch は従来の無補足を維持し、新方式への継続には再承認を要求します。
@@ -314,8 +319,8 @@ session の累積 cost とは別です。公式 Billing API も期間別使用�
 SDK 照会が失敗しても、管理者用 token や非公開 endpoint に自動で切り替えません。
 一次資料との対応は [ADR-0029](../develop/adr/0029-separate-budget-guidance-from-provider-quota.md)を参照してください。
 
-通常は `flow` のままで外部照会を避けられます。`account` を選ぶと、選択した
-account の読取りが Task 承認に含まれます。新規の `task track` /
+通常は `account`・`reset-daily` を使い、選択した account の読取りと下限方式を
+Task 承認に含めます。新規の `task track` /
 `conversation intake` も未指定値を設定から解決し、既存 Task 更新の省略値は
 保存済み policy を維持します。明示した Task JSON の例は次のとおりです。
 
@@ -325,7 +330,8 @@ account の読取りが Task 承認に含まれます。新規の `task track` /
     "mode": "account",
     "source": "request",
     "allowedModes": ["off", "flow", "account"],
-    "accountReadApproved": true
+    "accountReadApproved": true,
+    "accountAllocation": "reset-daily"
   }
 }
 ```
@@ -335,5 +341,13 @@ account の読取りが Task 承認に含まれます。新規の `task track` /
 `account` を含まない旧契約へ、この option で読取り権限を追加できません。
 観測値と送信した補足は `records show` の `budget-guidance` receipt に残ります。
 quota 照会は送信ごとに一回、5秒と実行残時間の短い方で打ち切り、retry しません。
-取得不能・未対応・古い観測は理由付きで示し、account 不一致や既知の枠消尽は
-新しいモデル指示を拒否します。追加課金枠は暗黙に使いません。
+新方式の取得不能・未対応・古い観測、account 不一致、既知の枠消尽では
+新しいモデル指示を拒否します。実行中と最終回答の採用前にも照合します。
+上限省略方式では `off`・`flow` に切り替えて監視を無効化できません。
+追加課金枠は暗黙に使いません。
+
+保存済みの `budgetGuidance` がない旧 Task、旧 `flow`、固定5%の `account`、
+正の `maxNanoAiu` は過去の資産としてそのまま引き継ぎます。既定値の変更は
+既存の承認・観測・期限を書き換えません。新方式への変更は新たに承認し、
+稼働中の session を停止・照合してから切り替えます。新しい契約は旧版で再利用せず、
+停止履歴や残量の開始基準を削除して旧版へ戻すこともしません。

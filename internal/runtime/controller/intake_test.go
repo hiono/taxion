@@ -207,6 +207,7 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 	gitTest(t, sourceWorktree, "worktree", "add", "-b", "work/successor", successorWorktree, targetSHA)
 	task := flow.Contract
 	task.ID, task.Status, task.AuthorizationID, task.Decisions = "budget-successor", core.Draft, "", nil
+	task.BudgetGuidance = budgetPolicy(t, "flow")
 	task.Supersedes, task.CreatedFrom = flow.TaskID, "flow:"+flow.ID
 	task.Worktree, task.Branch, task.TargetSHA = successorWorktree, "work/successor", targetSHA
 	if mode == core.OutputModeWorktreeTreeSnapshot {
