@@ -14,10 +14,11 @@ import (
 )
 
 type SearchTurn struct {
-	SessionID        string               `json:"sessionId"`
-	Usage            []core.DispatchUsage `json:"usage"`
-	BudgetGuidance   *budgetObservation   `json:"budgetGuidance,omitempty"`
-	BudgetSupplement string               `json:"budgetSupplement,omitempty"`
+	SessionID         string               `json:"sessionId"`
+	Usage             []core.DispatchUsage `json:"usage"`
+	BudgetGuidance    *budgetObservation   `json:"budgetGuidance,omitempty"`
+	QuotaObservations []*budgetObservation `json:"quotaObservations,omitempty"`
+	BudgetSupplement  string               `json:"budgetSupplement,omitempty"`
 }
 
 // RunSearchTurn observes one bounded acquisition turn. Model prose is not the
@@ -49,8 +50,8 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 	if err != nil {
 		return turn, err
 	}
+	var selected config.Config
 	if identity, ok := worker.(runtime.BudgetGuidanceIdentity); ok && identity.BudgetGuidancePolicy() != nil {
-		var selected config.Config
 		configured, ok := worker.(runtime.ConfigurationIdentity)
 		if !ok || core.DecodeGraphInput(strings.NewReader(string(configured.ExecutionConfiguration())), &selected) != nil {
 			return turn, fmt.Errorf("taxion: guided search requires the approved runtime configuration")
@@ -66,10 +67,30 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 	if err := worker.Send(ctx, session, string(prompt)+turn.BudgetSupplement); err != nil {
 		return turn, err
 	}
+	lastQuotaCheck := time.Now()
+	if turn.BudgetGuidance != nil && turn.BudgetGuidance.Account != nil {
+		lastQuotaCheck = turn.BudgetGuidance.Account.ObservedAt
+	}
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	checkQuota := func() error {
+		observation, quotaErr := monitorIsolatedQuota(ctx, worker, selected, turn.BudgetGuidance, time.Now().UTC())
+		lastQuotaCheck = time.Now()
+		if observation != nil {
+			turn.QuotaObservations = append(turn.QuotaObservations, observation)
+		}
+		return quotaErr
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return turn, ctx.Err()
+		case <-ticker.C:
+			if time.Since(lastQuotaCheck) >= time.Minute {
+				if err := checkQuota(); err != nil {
+					return turn, err
+				}
+			}
 		case event, ok := <-events:
 			if !ok {
 				return turn, fmt.Errorf("taxion: search stream ended before completion")
@@ -84,7 +105,7 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 			case runtime.EventFailed, runtime.EventCancelled:
 				return turn, fmt.Errorf("taxion: search runtime failed or was cancelled; provider details withheld")
 			case runtime.EventTurnFinished:
-				return turn, nil
+				return turn, checkQuota()
 			}
 		}
 	}

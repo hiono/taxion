@@ -76,12 +76,17 @@ func TestRequestGuidanceOverrideReachesPlannerWithoutExtraTurn(t *testing.T) {
 				return result, err
 			}
 			var out bytes.Buffer
-			if err := requestCommand(append(args, "--budget-guidance", mode, "変更を相談したい"),
+			err := requestCommand(append(args, "--budget-guidance", mode, "変更を相談したい"),
 				strings.NewReader("/plan\n/quit\n"), &out, planner,
 				func(context.Context, []string, io.Writer) error {
 					t.Fatal("quit started implementation")
 					return nil
-				}); err != nil {
+				})
+			if mode == "account" {
+				if err == nil || !strings.Contains(err.Error(), "BUDGET_STOP") {
+					t.Fatal("quota-unsupported Copilot fixture did not fail closed", err)
+				}
+			} else if err != nil {
 				t.Fatal(err)
 			}
 			if calls != 1 {
