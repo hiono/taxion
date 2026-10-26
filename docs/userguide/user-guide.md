@@ -305,7 +305,7 @@ taxion request --repo owner/repository \
 
 この入口は snapshot mode と `fileAccess: all` を明示して使います。worktree 内の新規ファイルを許可し、Coder には `view,create,edit,apply_patch`、Reviewer には `view` を渡します。変更結果の scope 検査、worktree 外と保護された path の拒否、Reviewer の読み取り専用制約は維持します。細かい file access や外部 skill の承認が必要な場合は、`ready` を読んだオーケストレータに次節の個別手順を任せます。
 
-開発版の新規依頼は、提供元の上限停止と追加課金なしを申告する `provider` が既定です。表示した条件を `/plan`・`/approve` で承認した場合、Task ごとの利用額上限を省略できます。v0.7.16〜v0.7.18 の既定は `account`・`reset-daily` で、保存済み契約は変更しません。設定・監視・移行の条件は[課金ガイド](billing.md)を参照してください。
+v0.7.19 からの新規依頼は、提供元の上限停止と追加課金なしを申告する `provider` が既定です。表示した条件を `/plan`・`/approve` で承認した場合、Task ごとの利用額上限を省略できます。v0.7.16〜v0.7.18 の既定は `account`・`reset-daily` で、保存済み契約は変更しません。設定・監視・移行の条件は[課金ガイド](billing.md)を参照してください。
 
 v0.7.17 では、同じアカウントに Copilot の保存認証と `gh` の認証がある場合、現在の認証種別・GitHub のホスト・アカウントを照合して残量照会の認証情報を選びます。同じ種別に複数の候補が残る場合や、現在の認証・資格情報を確認できない場合は停止します。認証の削除や切替えは行いません。照会はモデル session を作らず、資格情報を表示しません。
 
@@ -568,7 +568,7 @@ Copilot の `--max-ai-credits` は session 単位の soft ceiling であり、
 アカウント全体の残 credit を表示する option ではありません。
 各 model call で取得できた nano-AIU と AI-credit status を表示します。
 account 残高、使用率、残り率は、同じ単位の allowance を確認できない場合は unavailable です。
-開発版の既定 `provider` は自動の残量照会を行いません。明示した `account`・`reset-daily` は残量下限で制御します。どちらも追加のモデル呼出しはせず、保存済み契約は引き継ぎます。
+v0.7.19 からの既定 `provider` は自動の残量照会を行いません。明示した `account`・`reset-daily` は残量下限で制御します。どちらも追加のモデル呼出しはせず、保存済み契約は引き継ぎます。
 
 Copilot SDK の account quota、session の累積 cost、公式 Billing API の期間別使用量は
 別の情報です。requests の残り割合を AI Credit の絶対残量と読み替えたり、

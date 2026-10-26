@@ -82,7 +82,7 @@ taxion review --task <id> --sha <coder-sha> --repo <repo>
 
 ### 依頼の登録と Flow 実行
 
-`taxion request --repo REPO --max-ai-credits 30` は新規依頼の入口である。開発版の既定は、申告した提供元の停止に任せる `provider`。課金条件に適合する提案を承認した場合、Task 上限を省略できる。条件・方式・移行は[課金ガイド](billing.md)にまとめる。`--timeout D` の既定は1時間。Copilot は30以上の session 別 soft ceiling を要求し、OpenCode はこの指定を省略する。Human は `/plan` で計画相談を開始し、範囲・完了条件・ホスト検証コマンドと課金条件を確認して `/approve` を選ぶ。保存済み契約と正の明示上限は変更しない。
+`taxion request --repo REPO --max-ai-credits 30` は新規依頼の入口である。v0.7.19 からの既定は、申告した提供元の停止に任せる `provider`。課金条件に適合する提案を承認した場合、Task 上限を省略できる。条件・方式・移行は[課金ガイド](billing.md)にまとめる。`--timeout D` の既定は1時間。Copilot は30以上の session 別 soft ceiling を要求し、OpenCode はこの指定を省略する。Human は `/plan` で計画相談を開始し、範囲・完了条件・ホスト検証コマンドと課金条件を確認して `/approve` を選ぶ。保存済み契約と正の明示上限は変更しない。
 
 Taxion が intake、完全な hash の承認、Reviewer の設定承認、Flow、同梱の role 別指示を構成する。利用者が JSON や prompt ファイルを作る必要はない。計画中の `/quit`・EOF は記録を残すが、コード実行を開始しない。Planner error は自動 retry しない。
 
@@ -174,7 +174,7 @@ controller の検証待ちだけでは suspension を要求しない。ただし
 
 `config check` は、固定の Global・Project YAML 設定と対応する環境変数 override を、バージョン付き設定 schema と照合する。解決後の Copilot 設定では、任意の `execution.budgetGuidance`・`billing` と OpenCode 専用の4項目を除く field が必須。OpenCode 設定では `runtime.acpCommand`・`runtime.acpConfig`・`runtime.acpConfigHash` も必須となり、Copilot 設定には混在させない。v0.4.0 では `runtime.acpCommandHash` は再現性のための任意の実行ファイル固定とし、通常利用では省略できる。`version` は整数、他の値は whitespace を含まない空でない文字列。未知の field、重複キー、暗黙の非文字列値、alias、複数 document は拒否する。
 
-開発版の `config check --billing` は、新規提案用の課金条件・方式・適用先・設定元を JSON で表示する。提供元の照会・課金設定変更・モデル起動はしない。他の表示・承認照合 option とは併用しない。[課金ガイド](billing.md)を参照。
+v0.7.19 からの `config check --billing` は、新規提案用の課金条件・方式・適用先・設定元を JSON で表示する。提供元の照会・課金設定変更・モデル起動はしない。他の表示・承認照合 option とは併用しない。[課金ガイド](billing.md)を参照。
 
 Global file は Go の `os.UserConfigDir()` 配下の `taxion/config.yaml`。Linux は `$XDG_CONFIG_HOME` または `~/.config`、macOS は `~/Library/Application Support`、Windows は `%AppData%`。Project file は Git 作業ツリールートの `.taxion/config.yaml`、Git 外は cwd。v0.2.0 の cwd 基点から変更した。cwd に旧サブディレクトリ設定があれば移行を求める。任意の親 directory は設定候補として検索しない。存在しない既定 file は省略し、読取り不能・不正な file は error にする。file が一つもなければ error を報告する。
 
