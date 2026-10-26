@@ -911,6 +911,8 @@ archive 済みの契約・実行履歴は改変できず、元 Task の再開も
 
 ## 保存・互換性と制約
 
+保存済み独立レビューの受理専用操作は [ADR-0052](adr/0052-accept-saved-review-without-restarting-execution.md) と [CLI リファレンス](../userguide/cli-reference.md#停止後の保存済みレビュー結果の受理)に従う。`Records.ReviewAcceptances` は追記専用で、元の停止 Flow 全体と exact preview hash、actor・source・reason、期限後受理の明示判断を保持する。読取り時も受理記録と現在の完了 Flow・結果を照合する。通常の停止解除や実行再開ではなく、既知の理由消失に限定した保存結果の受理である。Reviewer Task の `BLOCKED` はそのままで、元の HOLD も残す。検証では `gitproof.VerifySavedSnapshotAcceptance` が実行用ブランチ検査と保存 snapshot の照合を区別し、Git index・object・ref の更新や検証 command の実行を行わない。
+
 Graph を持たない workspace は Ledger の旧方式で動作する。
 Graph を導入した workspace は dispatch 対象をすべて登録し、CLI・HTTP・ACP が
 登録状態、READY、repository の一致を検査する。

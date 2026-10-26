@@ -167,6 +167,9 @@ func (s *Store) InitializeWorkspace(state Workspace) (bool, error) {
 	if err := state.Records.validate(); err != nil {
 		return false, err
 	}
+	if err := state.Records.VerifyReviewAcceptances(state.Graph); err != nil {
+		return false, err
+	}
 	if state.HasGraph {
 		if err := state.Graph.Validate(); err != nil {
 			return false, err
@@ -236,6 +239,9 @@ func (s *Store) loadWorkspace(q workspaceReader) (Workspace, error) {
 				return Workspace{}, err
 			}
 		}
+		if err := state.Records.VerifyReviewAcceptances(state.Graph); err != nil {
+			return Workspace{}, err
+		}
 		return state, nil
 	}
 	if err := json.Unmarshal([]byte(ledgerJSON), &state.Ledger); err != nil {
@@ -263,6 +269,9 @@ func (s *Store) loadWorkspace(q workspaceReader) (Workspace, error) {
 		if err != nil {
 			return Workspace{}, err
 		}
+	}
+	if err := state.Records.VerifyReviewAcceptances(state.Graph); err != nil {
+		return Workspace{}, err
 	}
 	return state, nil
 }
@@ -321,6 +330,14 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 		packetAuthorizations[i].Unavailable = slices.Clone(packetAuthorizations[i].Unavailable)
 	}
 	packetAudits := slices.Clone(state.Records.PacketAudits)
+	acceptances := make([]string, len(state.Records.ReviewAcceptances))
+	for i, acceptance := range state.Records.ReviewAcceptances {
+		content, err := core.CanonicalJSON(acceptance)
+		if err != nil {
+			return err
+		}
+		acceptances[i] = string(content)
+	}
 	existing := map[string]bool{}
 	if restore != nil {
 		for _, dispatch := range state.Graph.Dispatches {
@@ -329,6 +346,15 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	}
 	if err := update(&state); err != nil {
 		return err
+	}
+	if len(state.Records.ReviewAcceptances) < len(acceptances) {
+		return fmt.Errorf("saved review acceptance records are append-only")
+	}
+	for i, previous := range acceptances {
+		content, err := core.CanonicalJSON(state.Records.ReviewAcceptances[i])
+		if err != nil || string(content) != previous {
+			return fmt.Errorf("saved review acceptance records are immutable")
+		}
 	}
 	if len(state.Records.Packets) < len(packets) ||
 		!slices.Equal(packets, state.Records.Packets[:len(packets)]) ||
@@ -391,6 +417,9 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 		}
 	}
 	if err := state.Records.validate(); err != nil {
+		return err
+	}
+	if err := state.Records.VerifyReviewAcceptances(state.Graph); err != nil {
 		return err
 	}
 	if state.HasGraph {

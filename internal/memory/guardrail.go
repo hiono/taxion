@@ -233,6 +233,15 @@ func CheckDispatch(ledgerPath string, task core.Task, repo string, refs ...strin
 // ResolveDispatchContext captures the explicitly referenced Memory entries
 // with their provenance and approved guardrail predicates.
 func ResolveDispatchContext(ledgerPath string, refs []string) ([]core.DispatchMemoryEntry, error) {
+	return resolveDispatchContext(ledgerPath, refs, false)
+}
+
+// ResolveDispatchContextReadOnly observes referenced entries without migrations.
+func ResolveDispatchContextReadOnly(ledgerPath string, refs []string) ([]core.DispatchMemoryEntry, error) {
+	return resolveDispatchContext(ledgerPath, refs, true)
+}
+
+func resolveDispatchContext(ledgerPath string, refs []string, readOnly bool) ([]core.DispatchMemoryEntry, error) {
 	if len(refs) == 0 {
 		return nil, nil
 	}
@@ -244,7 +253,12 @@ func ResolveDispatchContext(ledgerPath string, refs []string) ([]core.DispatchMe
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("taxion: Memory context is not a regular database file")
 	}
-	s, err := Open(path)
+	var s *Store
+	if readOnly {
+		s, err = OpenReadOnly(path)
+	} else {
+		s, err = Open(path)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("taxion: open Memory context: %w", err)
 	}

@@ -2,11 +2,64 @@ package store
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestAcceptanceAuditCheckedAcrossStorageFormats(t *testing.T) {
+	invalid := Workspace{Records: Records{ReviewAcceptances: []ReviewAcceptance{{FlowID: "missing"}}}}
+	for _, format := range []string{"normalized", "legacy"} {
+		t.Run(format, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "workspace.db")
+			db, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if format == "normalized" {
+				if _, err := db.InitializeWorkspace(Workspace{}); err != nil {
+					t.Fatal(err)
+				}
+				tx, err := db.db.Begin()
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback()
+				// Write valid document hashes, but an invalid cross-document binding.
+				if err := saveWorkspaceDocuments(tx, invalid); err != nil {
+					t.Fatal(err)
+				}
+				if err := tx.Commit(); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				ledger, _ := json.Marshal(invalid.Ledger)
+				graph, _ := json.Marshal(invalid.Graph)
+				records, _ := json.Marshal(invalid.Records)
+				if _, err := db.db.Exec(`INSERT INTO workspace_state VALUES(1,1,?,?,0)`, string(ledger), string(graph)); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.db.Exec(`INSERT INTO workspace_records VALUES(1,?)`, string(records)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reopened, err := OpenReadOnly(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			if _, err := reopened.LoadWorkspace(); err == nil || !strings.Contains(err.Error(), "acceptance audit") {
+				t.Fatalf("invalid %s audit read: %v", format, err)
+			}
+		})
+	}
+	if _, err := openTest(t).InitializeWorkspace(invalid); err == nil {
+		t.Fatal("initialized a workspace with an invalid acceptance audit")
+	}
+}
 
 func TestWorkspaceDocumentsOnlyWriteChangedRecords(t *testing.T) {
 	db := openTest(t)

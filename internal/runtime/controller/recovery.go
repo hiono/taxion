@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"slices"
@@ -77,6 +78,33 @@ func revalidateFlowResult(graph core.TaskGraph, flow core.ReviewFlow, records ..
 		return fmt.Errorf("flow checkpoint requires a successful saved result")
 	}
 	if len(records) != 0 {
+		for _, audit := range records[0].ReviewAcceptances {
+			if audit.FlowID != flow.ID {
+				continue
+			}
+			if err := records[0].VerifyReviewAcceptances(graph); err != nil {
+				return err
+			}
+			coder, _ := graph.GraphDispatch(flow.SourceDispatchID)
+			for _, dispatch := range []core.GraphDispatch{coder, last} {
+				state := store.Workspace{Graph: graph, Records: records[0]}
+				if err := validateResultReceipt(&state, dispatch); err != nil {
+					return err
+				}
+			}
+			task, _ := graph.GraphTask(flow.TaskID)
+			if records[0].Restore != nil {
+				for _, path := range records[0].Restore.Paths {
+					if path.Original == task.Worktree {
+						task.Worktree = path.Local
+					}
+				}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), DefaultLaneTimeout)
+			defer cancel()
+			return gitproof.VerifySavedSnapshotAcceptance(ctx, records[0].RestoredDispatch(coder),
+				records[0].RestoredDispatch(last), task)
+		}
 		last = records[0].RestoredDispatch(last)
 	}
 	if last.Recipient == "CODER" {
