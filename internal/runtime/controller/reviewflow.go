@@ -676,10 +676,10 @@ func holdReviewFlowForStop(graph *core.TaskGraph, flow *core.ReviewFlow, reason 
 	held, err := graph.ChangeHandoff(flow.ID, core.HandoffChange{
 		ID:               "flow-stop:" + flow.ID + ":" + flow.DispatchIDs[len(flow.DispatchIDs)-1],
 		ExpectedChangeID: expected, Action: "HOLD", Actor: "controller",
-		Source: "controller:flow-stop", Reason: reason,
+		Source: "controller:flow-stop", Reason: strings.TrimSpace(reason),
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("taxion: hold flow for stop reason %q: %w", reason, err)
 	}
 	*flow = held
 	return nil

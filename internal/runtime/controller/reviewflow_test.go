@@ -560,6 +560,76 @@ func TestReviewFlowStopsAtSafetyGates(t *testing.T) {
 	}
 }
 
+func TestReviewFlowPreservesRevalidationStopReason(t *testing.T) {
+	for _, mode := range []string{"", core.OutputModeWorktreeTreeSnapshot} {
+		for _, failure := range []string{"git-unavailable", "detached-coder"} {
+			t.Run("output-mode="+mode+"/"+failure, func(t *testing.T) {
+				db, ledger, request := reviewFlowFixtureWithOutputMode(t, mode)
+				flow, err := StartReviewFlow(db, ledger, request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				executeFlowDispatch(t, db, flow, "", true)
+				flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				review := executeFlowDispatch(t, db, flow, "APPROVE", true)
+				before, err := db.LoadWorkspace()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if failure == "detached-coder" {
+					gitTest(t, flow.Contract.Worktree, "switch", "--detach")
+				} else {
+					// Empty Git stderr leaves trailing whitespace in its error.
+					t.Setenv("PATH", t.TempDir())
+				}
+				flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+				if !errors.Is(err, ErrFlowStopped) || flow.Status != "STOPPED" ||
+					flow.StopCode != "SAFETY_STOP" ||
+					!strings.HasPrefix(flow.Reason, "result Git revalidation failed: ") ||
+					strings.Contains(flow.Reason, "handoff change requires") {
+					t.Fatalf("original stop reason lost: %+v, %v", flow, err)
+				}
+				if failure == "detached-coder" &&
+					!strings.Contains(flow.Reason, "symbolic-ref --quiet --short HEAD: exit status 1: ") {
+					t.Fatalf("detached Coder failure differs: %q", flow.Reason)
+				}
+				if !flow.HandoffHeld() || len(flow.HandoffChanges) != 1 ||
+					flow.HandoffChanges[0].Reason != strings.TrimSpace(flow.Reason) {
+					t.Fatalf("invalid stop hold: %+v", flow.HandoffChanges)
+				}
+				after, err := db.LoadWorkspace()
+				if err != nil {
+					t.Fatal(err)
+				}
+				saved, _ := after.Graph.GraphDispatch(review.ID)
+				if !reflect.DeepEqual(before.Graph.Tasks, after.Graph.Tasks) ||
+					!reflect.DeepEqual(saved.Result, review.Result) ||
+					len(after.Graph.Dispatches) != len(before.Graph.Dispatches) {
+					t.Fatal("stop changed Tasks, review result or Dispatch count")
+				}
+				if again, err := AdvanceReviewFlow(db, ledger, flow.ID); !errors.Is(err, ErrFlowStopped) ||
+					!reflect.DeepEqual(again, flow) {
+					t.Fatalf("stopped flow changed: %+v, %v", again, err)
+				}
+			})
+		}
+	}
+}
+
+func TestHoldReviewFlowFailureIncludesOriginalReason(t *testing.T) {
+	graph := core.TaskGraph{}
+	flow := core.ReviewFlow{ID: "missing-flow", DispatchIDs: []string{"dispatch"}}
+	reason := "original diagnostic\n"
+	err := holdReviewFlowForStop(&graph, &flow, reason)
+	if err == nil || !strings.Contains(err.Error(), strconv.Quote(reason)) ||
+		!strings.Contains(err.Error(), "not found") {
+		t.Fatalf("hold failure lost the original reason: %v", err)
+	}
+}
+
 func TestReviewFlowDoesNotStopAtLegacyTokenThresholdOrUnknownUsage(t *testing.T) {
 	for _, test := range []struct {
 		name        string
