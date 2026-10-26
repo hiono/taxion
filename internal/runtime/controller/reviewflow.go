@@ -42,8 +42,7 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 }
 
 func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath string, request ReviewFlowRequest) (core.ReviewFlow, error) {
-	defaulted := request.TimeoutSeconds == 0
-	if defaulted {
+	if request.TimeoutSeconds == 0 {
 		request.TimeoutSeconds = int64(DefaultFlowTimeout / time.Second)
 	}
 	if db == nil || strings.TrimSpace(request.ID) == "" || strings.ContainsAny(request.ID, `/\`) ||
@@ -86,7 +85,7 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 		}
 		now := time.Now().UTC()
 		deadline := now.Add(time.Duration(request.TimeoutSeconds) * time.Second)
-		if limit, ok := ctx.Deadline(); ok && defaulted {
+		if limit, ok := ctx.Deadline(); ok {
 			if !now.Before(limit) {
 				return fmt.Errorf("taxion: caller deadline reached before the review flow started")
 			}
