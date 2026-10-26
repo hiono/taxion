@@ -167,8 +167,8 @@ func TestIsolatedQuotaUnavailableBeforeSend(t *testing.T) {
 	}
 }
 
-func TestIsolatedOffAndFlowDoNotReadQuota(t *testing.T) {
-	for _, mode := range []string{"off", "flow"} {
+func TestIsolatedNonAccountModesDoNotReadQuota(t *testing.T) {
+	for _, mode := range []string{"off", "flow", "provider"} {
 		t.Run(mode, func(t *testing.T) {
 			policy := budgetPolicy(t, mode)
 			db, path, base, selected := questionFixture(t, policy)

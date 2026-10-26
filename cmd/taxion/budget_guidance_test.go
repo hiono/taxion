@@ -21,7 +21,9 @@ func TestNewProposalBudgetGuidanceUsesConfigWithoutRequiringIdentity(t *testing.
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	for variable := range map[string]bool{
 		"TAXION_EXECUTION_BUDGET_GUIDANCE": true, "TAXION_PROJECT_ID": true,
-		"TAXION_RUNTIME_ACCOUNT": true,
+		"TAXION_RUNTIME_ACCOUNT":  true,
+		"TAXION_BILLING_CONTRACT": true, "TAXION_BILLING_OVERAGE": true,
+		"TAXION_BILLING_AUTO_RECHARGE": true, "TAXION_BILLING_PAID_FALLBACK": true,
 	} {
 		t.Setenv(variable, "")
 		if err := os.Unsetenv(variable); err != nil {
@@ -29,8 +31,8 @@ func TestNewProposalBudgetGuidanceUsesConfigWithoutRequiringIdentity(t *testing.
 		}
 	}
 	policy, err := newTaskBudgetGuidance()
-	if err != nil || !core.AccountQuotaBudget(policy) || policy.Source != "default" {
-		t.Fatal("unconfigured local proposal did not default to residual quota", policy, err)
+	if err != nil || !core.ProviderBudget(policy) || policy.Source != "default" {
+		t.Fatal("unconfigured local proposal did not default to the declared provider contract", policy, err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, ".taxion"), 0700); err != nil {
 		t.Fatal(err)
@@ -55,7 +57,7 @@ func TestNewProposalBudgetGuidanceUsesConfigWithoutRequiringIdentity(t *testing.
 }
 
 func TestRequestGuidanceOverrideReachesPlannerWithoutExtraTurn(t *testing.T) {
-	for _, mode := range []string{"off", "flow", "account"} {
+	for _, mode := range []string{"off", "flow", "account", "provider"} {
 		t.Run(mode, func(t *testing.T) {
 			_, args := requestFixture(t)
 			calls := 0

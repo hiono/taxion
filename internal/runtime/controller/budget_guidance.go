@@ -32,6 +32,8 @@ type budgetObservation struct {
 	AccountAllocation    string                 `json:"accountAllocation,omitempty"`
 	AllocationBasis      *quotaAllocationBasis  `json:"allocationBasis,omitempty"`
 	RemainingFloor       *float64               `json:"remainingFloor,omitempty"`
+	Billing              *core.BillingSettings  `json:"billing,omitempty"`
+	BillingVerification  string                 `json:"billingVerification,omitempty"`
 }
 
 func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.GraphDispatch, override string) (*budgetObservation, error) {
@@ -53,6 +55,10 @@ func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.Gr
 		mode, source = override, "request"
 	}
 	observation := &budgetObservation{Mode: mode, Source: source, ObservedAt: time.Now().UTC(), FlowState: "not-applicable"}
+	if policy.Billing != nil {
+		settings := *policy.Billing
+		observation.Billing, observation.BillingVerification = &settings, "human-declaration"
+	}
 	state, err := c.store.LoadWorkspace()
 	if err != nil {
 		return nil, err
@@ -63,6 +69,9 @@ func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.Gr
 		}
 		if flow.Budget.AccountQuotaOnly && (mode != "account" || !core.AccountQuotaBudget(policy)) {
 			return nil, fmt.Errorf("taxion: account-quota-only flow cannot disable its approved residual-quota control")
+		}
+		if flow.Budget.BudgetSource == core.ProviderStopBudgetSource && (mode != "provider" || !core.ProviderBudget(policy)) {
+			return nil, fmt.Errorf("taxion: provider-budget-only flow cannot change its approved billing policy")
 		}
 		if flow.Status != "RUNNING" || !time.Now().Before(flow.Deadline) {
 			return nil, fmt.Errorf("taxion: budget guidance cannot send after flow stop or deadline")
@@ -243,8 +252,15 @@ func isolatedBudgetGuidance(ctx context.Context, worker runtime.Identity, policy
 	if err := policy.Validate(); err != nil {
 		return nil, "", err
 	}
+	if err := policy.CheckBillingContract(selected.Billing); err != nil {
+		return nil, "", err
+	}
 	observation := &budgetObservation{Mode: policy.Mode, Source: policy.Source,
 		ObservedAt: time.Now().UTC(), FlowState: "not-applicable"}
+	if policy.Billing != nil {
+		settings := *policy.Billing
+		observation.Billing, observation.BillingVerification = &settings, "human-declaration"
+	}
 	if policy.Mode != "off" {
 		observation.AICreditsStatus = "unavailable"
 		observation.UnfinishedRoles = []string{"ORCHESTRATOR"}

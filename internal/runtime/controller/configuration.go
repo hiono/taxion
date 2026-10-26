@@ -115,6 +115,9 @@ func checkTaskConfiguration(graph core.TaskGraph, taskID string, candidate confi
 	if task.Repo != candidate.Repository.Path {
 		return core.TaskDecision{}, fmt.Errorf("taxion: configuration repository path differs from the Task")
 	}
+	if err := task.BudgetGuidance.CheckBillingContract(candidate.Billing); err != nil {
+		return core.TaskDecision{}, err
+	}
 	if task.HumanDecision != nil && task.HumanDecision.SelectedOptionID == "" {
 		return core.TaskDecision{}, fmt.Errorf("taxion: pending Human decision requires resolution")
 	}
@@ -161,6 +164,9 @@ func checkDispatchConfiguration(graph core.TaskGraph, dispatchID string, candida
 	}
 	if dispatch.Repository != candidate.Repository.Path {
 		return core.TaskDecision{}, fmt.Errorf("taxion: configuration repository differs from the Dispatch")
+	}
+	if err := dispatch.Instruction.BudgetGuidance.CheckBillingContract(candidate.Billing); err != nil {
+		return core.TaskDecision{}, err
 	}
 	decision, err := checkTaskConfiguration(graph, dispatch.TaskID, candidate)
 	if err != nil {

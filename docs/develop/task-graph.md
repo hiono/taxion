@@ -959,6 +959,6 @@ actor・decision・proof は caller が供給する作業記録である。
 
 Review Flow は承認時に Dispatch 数、Coder/Reviewer session 数、Task-wide nano-AIU、elapsed time、repair 数の ceiling を保存する。`workflow evaluate --id FLOW_ID` は各上限の approved・consumed・remaining と使用量の完全性を報告する。re-review 数も修正上限から導出する。
 
-Controller は新しい Dispatch/session の開始前と usage event の記録後に ceiling を検査する。usage が不明または不完全な場合は nano-AIU remaining を0として fail-closed にし、`BUDGET_STOP`、安全停止、held Flow、checkpoint を保存する。現在実装は provider account 残高を読み取ったり nano-AIU を金額へ換算したりしない。SDK の `--max-ai-credits` は session 別 soft ceiling であり Task-wide nano-AIU ceiling の代わりにはならない。
+Controller は新しい Dispatch/session の開始前と usage event の記録後に ceiling を検査する。正の利用額上限を持つ契約では、usage が不明または不完全なら nano-AIU remaining を0として fail-closed にし、`BUDGET_STOP`、安全停止、held Flow、checkpoint を保存する。利用額上限を省略できる課金条件・方式は[課金ガイド](../userguide/billing.md)で定義する。課金条件の解決・検証と予算方式の整合性は `internal/core/billing.go` を使い、外部予算方式でも期限・回数の上限を維持する。SDK の `--max-ai-credits` は session 別 soft ceiling であり Task-wide nano-AIU ceiling の代わりにはならない。
 
 Budget audit は Dispatch 発行、session 開始、usage 観測、stop、recontract を workspace record に追記する。既存 record の変更・削除は拒否する。`workflow terminate` が扱えるのは最新の未確認・未開始 Coder Dispatch だけである。既に実行された work を続ける場合は、保存された evidence を確認し、新しい Task 契約と予算を承認する。

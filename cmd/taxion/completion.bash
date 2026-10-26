@@ -19,8 +19,8 @@ _taxion_complete() {
         'completion') candidates='bash' ;;
         'completion bash') candidates='' ;;
         'config') candidates='bind check' ;;
-        'config bind') candidates='--capabilities --dispatch --help --sources --task' ;;
-        'config check') candidates='--capabilities --dispatch --help --sources --task' ;;
+        'config bind') candidates='--billing --capabilities --dispatch --help --sources --task' ;;
+        'config check') candidates='--billing --capabilities --dispatch --help --sources --task' ;;
         'conversation') candidates='ask confirm intake investigate plan proposal search watch' ;;
         'conversation ask') candidates='--base-directory --cli --help --max-ai-credits --question --task --timeout' ;;
         'conversation confirm') candidates='--file --help --task' ;;

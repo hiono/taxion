@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hiono/taxion/internal/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,7 +42,8 @@ type Config struct {
 		ApprovalRef    string `yaml:"approvalRef" json:"approvalRef"`
 		BudgetGuidance string `yaml:"budgetGuidance,omitempty" json:"budgetGuidance,omitempty"`
 	} `yaml:"execution" json:"execution"`
-	Endpoints Endpoints `yaml:"endpoints,omitempty" json:"endpoints,omitempty"`
+	Endpoints Endpoints            `yaml:"endpoints,omitempty" json:"endpoints,omitempty"`
+	Billing   core.BillingSettings `yaml:"billing,omitempty" json:"billing,omitempty"`
 }
 
 // Endpoints separates the addresses a GitLab instance serves from the project
@@ -164,6 +166,8 @@ func (c *Config) fields() map[string]*string {
 		"repository.credentialRef": &c.Repository.CredentialRef,
 		"runtime.provider":         &c.Runtime.Provider, "runtime.account": &c.Runtime.Account,
 		"runtime.credentialRef": &c.Runtime.CredentialRef, "runtime.contractRef": &c.Runtime.ContractRef,
+		"billing.contract": &c.Billing.Contract, "billing.overage": &c.Billing.Overage,
+		"billing.autoRecharge": &c.Billing.AutoRecharge, "billing.paidFallback": &c.Billing.PaidFallback,
 		"runtime.acpCommand": &c.Runtime.ACPCommand, "runtime.acpCommandHash": &c.Runtime.ACPCommandHash,
 		"runtime.acpConfig": &c.Runtime.ACPConfig, "runtime.acpConfigHash": &c.Runtime.ACPConfigHash,
 		"execution.requester": &c.Execution.Requester, "execution.worker": &c.Execution.Worker,
@@ -175,18 +179,22 @@ func (c *Config) fields() map[string]*string {
 	}
 }
 
-// MarshalJSON omits an all-empty endpoints block so legacy selections and
+// MarshalJSON omits empty optional blocks so legacy selections and
 // snapshots keep their existing shape.
 func (c Config) MarshalJSON() ([]byte, error) {
 	type configJSON Config
-	if c.Endpoints.Empty() {
-		shadow := struct {
-			configJSON
-			Endpoints *Endpoints `json:"endpoints,omitempty"`
-		}{configJSON: configJSON(c)}
-		return json.Marshal(shadow)
+	shadow := struct {
+		configJSON
+		Endpoints *Endpoints            `json:"endpoints,omitempty"`
+		Billing   *core.BillingSettings `json:"billing,omitempty"`
+	}{configJSON: configJSON(c)}
+	if !c.Endpoints.Empty() {
+		shadow.Endpoints = &c.Endpoints
 	}
-	return json.Marshal(configJSON(c))
+	if c.Billing != (core.BillingSettings{}) {
+		shadow.Billing = &c.Billing
+	}
+	return json.Marshal(shadow)
 }
 
 func endpointFields(c Config) map[string]string {
@@ -205,15 +213,23 @@ func (c Config) validate(required bool) error {
 		return fmt.Errorf("configuration requires version 1")
 	}
 	for name, value := range c.fields() {
-		optional := name == "execution.budgetGuidance" || strings.HasPrefix(name, "runtime.acp") ||
+		optional := name == "execution.budgetGuidance" || strings.HasPrefix(name, "billing.") || strings.HasPrefix(name, "runtime.acp") ||
 			strings.HasPrefix(name, "endpoints.")
 		if required && *value == "" && !optional || strings.ContainsAny(*value, " \t\r\n") {
 			return fmt.Errorf("%s requires a nonempty identifier without whitespace", name)
 		}
 		if c.Execution.BudgetGuidance != "" && c.Execution.BudgetGuidance != "off" &&
-			c.Execution.BudgetGuidance != "flow" && c.Execution.BudgetGuidance != "account" {
-			return fmt.Errorf("execution.budgetGuidance requires off, flow, or account")
+			c.Execution.BudgetGuidance != "flow" && c.Execution.BudgetGuidance != "account" &&
+			c.Execution.BudgetGuidance != "provider" {
+			return fmt.Errorf("execution.budgetGuidance requires off, flow, account, or provider")
 		}
+	}
+	settings, err := c.Billing.Resolve()
+	if err != nil {
+		return err
+	}
+	if c.Execution.BudgetGuidance == "provider" && !settings.ProviderStops() {
+		return fmt.Errorf("provider guidance requires declared billing conditions that exclude extra charges")
 	}
 	if err := c.validateEndpoints(required); err != nil {
 		return err

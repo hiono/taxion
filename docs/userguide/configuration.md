@@ -2,7 +2,7 @@
 
 Taxion の設定は project、Git repository、実行ハーネス（Copilot または OpenCode）、実行記録の識別子を選びます。開発基盤と実行ハーネスは別の設定です。設定ファイルに token や password を書かず、各 credential の保管と認証は選んだ CLI の実行環境で行います。
 
-v0.7.16 では、新規の残量方式を `account`・`reset-daily` に変更し、Task 上限の手入力を不要にしました。v0.7.15 の既定は `flow` で、`request` の正の Task 上限は必須です。以下の新しい標準方式は v0.7.16 以降の説明であり、既存の設定・保存済み契約には遡及適用しません。
+v0.7.19 からの新規既定は、申告した提供元の上限停止に任せる `provider` です。v0.7.16〜v0.7.18 の既定は `account`・`reset-daily`、v0.7.15 は `flow` でした。課金条件と移行は[課金ガイド](billing.md)を参照してください。保存済み契約へ新しい既定値を遡及適用しません。
 
 ## 設定ファイル
 
@@ -50,7 +50,11 @@ v0.3.1 では、端末上の未確定 provider・remote と適用確認を選択
 | `execution.requester` | Task を依頼した人または process の識別子。 |
 | `execution.worker` | 実行環境・worker の識別子。 |
 | `execution.approvalRef` | Task に結び付ける設定承認の識別子。 |
-| `execution.budgetGuidance` | 新規 proposal の残量方式。`off`・`flow`・`account`。v0.7.16 以降の省略時は `account`・`reset-daily`。依頼ごとの明示指定を優先し、保存済み契約は変更しない。 |
+| `execution.budgetGuidance` | 新規 proposal の方式。`provider`・`off`・`flow`・`account`。解決済み課金条件と依頼ごとの明示指定を使い、保存済み契約は変更しない。[課金ガイド](billing.md)を参照。 |
+| `billing.contract` | 課金契約の申告。`provider-limit`・`metered`・`unknown`。 |
+| `billing.overage` | 超過課金の申告。`denied`・`allowed`・`unknown`。 |
+| `billing.autoRecharge` | 自動チャージの申告。`disabled`・`enabled`・`unknown`。 |
+| `billing.paidFallback` | 有料の自動切替えの申告。`disabled`・`enabled`・`unknown`。 |
 
 GitLab を subpath で公開し、SSH に標準外の port を使う場合は `endpoints` を書きます。判断の背景と照合の段階は [ADR-0042](../develop/adr/0042-gitlab-endpoint-binding-separates-api-clone-and-ssh-identities.md) に記録しています。
 
@@ -132,6 +136,10 @@ glab auth status --hostname gitlab.example.com
 | `TAXION_RUNTIME_ACCOUNT` | `runtime.account` |
 | `TAXION_RUNTIME_CREDENTIAL_REF` | `runtime.credentialRef` |
 | `TAXION_RUNTIME_CONTRACT_REF` | `runtime.contractRef` |
+| `TAXION_BILLING_CONTRACT` | `billing.contract` |
+| `TAXION_BILLING_OVERAGE` | `billing.overage` |
+| `TAXION_BILLING_AUTO_RECHARGE` | `billing.autoRecharge` |
+| `TAXION_BILLING_PAID_FALLBACK` | `billing.paidFallback` |
 | `TAXION_RUNTIME_ACP_COMMAND` | `runtime.acpCommand` |
 | `TAXION_RUNTIME_ACP_COMMAND_HASH` | `runtime.acpCommandHash` |
 | `TAXION_RUNTIME_ACP_CONFIG` | `runtime.acpConfig` |
@@ -288,66 +296,9 @@ token の欠落・最新 message の部分値は Flow 全体の利用量にせ�
 
 ## 残予算を考慮する指示の設定
 
-[ADR-0029](../develop/adr/0029-separate-budget-guidance-from-provider-quota.md) は、
-残量をモデルへ伝える方式を定義しています。`execution.budgetGuidance` に
-`off` / `flow` / `account` を指定できます。環境変数は
-`TAXION_EXECUTION_BUDGET_GUIDANCE`、依頼ごとの選択は
-`request --budget-guidance MODE` です。不正値は実行前に拒否します。
-
-Global / Project / 環境変数で既定値を選び、実行依頼の明示選択を
-最後に適用します。指示ごとの未指定は既定値を継承し、すべて未指定なら
-`account`・`reset-daily` とします。新規依頼は残量下限と継続監視を標準とし、
-Task ごとの上限入力を省略できます。アカウント照会と下限方式は proposal に示し、
-実行前に承認します。残量非対応・取得不能・古い観測・リセット不明なら停止し、
-`flow` へ自動で切り替えません。`off` は補足指示なし、
-`flow` は外部照会のない旧方式として、明示設定や過去の契約の引継ぎに使用します。
-方式・採用元・指示ごとの変更許可は承認と session identity に保持し、
-既存 session に config 編集を遡及適用しません。
-設定がない旧 Task / Dispatch は従来の無補足を維持し、新方式への継続には再承認を要求します。
-
-方式の選択で予算や権限は増えません。`off` でも期限、repair 回数、契約・権限の
-検査と安全停止は維持し、account 残量が取得できなくてもゼロや無制限と扱いません。
-Copilot session の `max-ai-credits`、call ごとの利用量、context window、
-provider account 全体の quota は別の値です。token 利用量は新しい Flow を停止しません。
-quota 照会には runtime 用の選択済み credential を使う設計であり、
-Git repository 用の token を流用しません。
-
-Copilot SDK の account quota は resource ごとの requests・残り割合等を扱い、
-session の累積 cost とは別です。公式 Billing API も期間別使用量の report で、
-`netQuantity` を account 残量としてそのまま使えません。
-組織・enterprise が課金するライセンスの使用量は個人 Billing endpoint に含まれません。
-SDK 照会が失敗しても、管理者用 token や非公開 endpoint に自動で切り替えません。
-一次資料との対応は [ADR-0029](../develop/adr/0029-separate-budget-guidance-from-provider-quota.md)を参照してください。
-
-通常は `account`・`reset-daily` を使い、選択した account の読取りと下限方式を
-Task 承認に含めます。新規の `task track` /
-`conversation intake` も未指定値を設定から解決し、既存 Task 更新の省略値は
-保存済み policy を維持します。明示した Task JSON の例は次のとおりです。
-
-```json
-{
-  "budgetGuidance": {
-    "mode": "account",
-    "source": "request",
-    "allowedModes": ["off", "flow", "account"],
-    "accountReadApproved": true,
-    "accountAllocation": "reset-daily"
-  }
-}
-```
-
-これは Task の部分例です。`runtime start|send --budget-guidance off` などで
-一回の指示を変更できるのは、承認済み `allowedModes` の範囲内だけです。
-`account` を含まない旧契約へ、この option で読取り権限を追加できません。
-観測値と送信した補足は `records show` の `budget-guidance` receipt に残ります。
-quota 照会は送信ごとに一回、5秒と実行残時間の短い方で打ち切り、retry しません。
-新方式の取得不能・未対応・古い観測、account 不一致、既知の枠消尽では
-新しいモデル指示を拒否します。実行中と最終回答の採用前にも照合します。
-上限省略方式では `off`・`flow` に切り替えて監視を無効化できません。
-追加課金枠は暗黙に使いません。
-
-保存済みの `budgetGuidance` がない旧 Task、旧 `flow`、固定5%の `account`、
-正の `maxNanoAiu` は過去の資産としてそのまま引き継ぎます。既定値の変更は
-既存の承認・観測・期限を書き換えません。新方式への変更は新たに承認し、
-稼働中の session を停止・照合してから切り替えます。新しい契約は旧版で再利用せず、
-停止履歴や残量の開始基準を削除して旧版へ戻すこともしません。
+契約条件、方式の違い、既定値、設定例、承認、移行・復旧は[課金ガイド](billing.md)へ集約しています。
+`execution.budgetGuidance`、`TAXION_EXECUTION_BUDGET_GUIDANCE`、
+`request --budget-guidance MODE` で新規提案の方式を選びます。
+`runtime start|send --budget-guidance MODE` は保存済み `allowedModes` の範囲内だけに適用し、
+利用額上限省略方式を別方式へ切り替えて制御を外すことはできません。
+観測と実際の補足は `records show` の `budget-guidance` 記録で確認します。

@@ -82,7 +82,7 @@ taxion review --task <id> --sha <coder-sha> --repo <repo>
 
 ### 依頼の登録と Flow 実行
 
-`taxion request --repo REPO --max-ai-credits 30` は、v0.7.16 以降の新規依頼の標準入口である。明示設定がなければ `account`・`reset-daily` の残量方式を選び、Task 上限の手入力は不要となる。`--timeout D` の既定は1時間。残量の照会範囲と下限方式を表示し、`/plan` と `/approve` の承認に含める。非対応・取得不能・古い残量・リセット不明では送信を拒否し、自動で旧方式へ戻らない。旧方式を明示する場合は `--budget-guidance flow --max-task-nano-aiu N` のように正の上限を指定する。保存済み契約と正の明示上限はそのまま引き継ぐ。Copilot は30以上の `--max-ai-credits N` を要求する。OpenCode ではこの指定は不要だが、残量非対応のため新しい標準方式を実行できない。承認済みの旧方式を明示して使う。Human は `/plan` でモデルによる計画相談を開始し、提案された範囲・完了条件・ホスト検証コマンドを確認した後に `/approve` を選ぶ。
+`taxion request --repo REPO --max-ai-credits 30` は新規依頼の入口である。v0.7.19 からの既定は、申告した提供元の停止に任せる `provider`。課金条件に適合する提案を承認した場合、Task 上限を省略できる。条件・方式・移行は[課金ガイド](billing.md)にまとめる。`--timeout D` の既定は1時間。Copilot は30以上の session 別 soft ceiling を要求し、OpenCode はこの指定を省略する。Human は `/plan` で計画相談を開始し、範囲・完了条件・ホスト検証コマンドと課金条件を確認して `/approve` を選ぶ。保存済み契約と正の明示上限は変更しない。
 
 Taxion が intake、完全な hash の承認、Reviewer の設定承認、Flow、同梱の role 別指示を構成する。利用者が JSON や prompt ファイルを作る必要はない。計画中の `/quit`・EOF は記録を残すが、コード実行を開始しない。Planner error は自動 retry しない。
 
@@ -172,7 +172,9 @@ controller の検証待ちだけでは suspension を要求しない。ただし
 
 ### 設定
 
-`config check` は、固定の Global・Project YAML 設定と対応する環境変数 override を、バージョン付き設定 schema と照合する。解決後の Copilot 設定では、任意の `execution.budgetGuidance` と OpenCode 専用の4項目を除く field が必須。OpenCode 設定では `runtime.acpCommand`・`runtime.acpConfig`・`runtime.acpConfigHash` も必須となり、Copilot 設定には混在させない。v0.4.0 では `runtime.acpCommandHash` は再現性のための任意の実行ファイル固定とし、通常利用では省略できる。`version` は整数、他の値は whitespace を含まない空でない文字列。未知の field、重複キー、暗黙の非文字列値、alias、複数 document は拒否する。
+`config check` は、固定の Global・Project YAML 設定と対応する環境変数 override を、バージョン付き設定 schema と照合する。解決後の Copilot 設定では、任意の `execution.budgetGuidance`・`billing` と OpenCode 専用の4項目を除く field が必須。OpenCode 設定では `runtime.acpCommand`・`runtime.acpConfig`・`runtime.acpConfigHash` も必須となり、Copilot 設定には混在させない。v0.4.0 では `runtime.acpCommandHash` は再現性のための任意の実行ファイル固定とし、通常利用では省略できる。`version` は整数、他の値は whitespace を含まない空でない文字列。未知の field、重複キー、暗黙の非文字列値、alias、複数 document は拒否する。
+
+v0.7.19 からの `config check --billing` は、新規提案用の課金条件・方式・適用先・設定元を JSON で表示する。提供元の照会・課金設定変更・モデル起動はしない。他の表示・承認照合 option とは併用しない。[課金ガイド](billing.md)を参照。
 
 Global file は Go の `os.UserConfigDir()` 配下の `taxion/config.yaml`。Linux は `$XDG_CONFIG_HOME` または `~/.config`、macOS は `~/Library/Application Support`、Windows は `%AppData%`。Project file は Git 作業ツリールートの `.taxion/config.yaml`、Git 外は cwd。v0.2.0 の cwd 基点から変更した。cwd に旧サブディレクトリ設定があれば移行を求める。任意の親 directory は設定候補として検索しない。存在しない既定 file は省略し、読取り不能・不正な file は error にする。file が一つもなければ error を報告する。
 
@@ -210,6 +212,10 @@ v0.3.1 の対話入力は、各項目の説明と候補値を表示する。候�
 | `TAXION_RUNTIME_ACCOUNT` | `runtime.account` |
 | `TAXION_RUNTIME_CREDENTIAL_REF` | `runtime.credentialRef` |
 | `TAXION_RUNTIME_CONTRACT_REF` | `runtime.contractRef` |
+| `TAXION_BILLING_CONTRACT` | `billing.contract` |
+| `TAXION_BILLING_OVERAGE` | `billing.overage` |
+| `TAXION_BILLING_AUTO_RECHARGE` | `billing.autoRecharge` |
+| `TAXION_BILLING_PAID_FALLBACK` | `billing.paidFallback` |
 | `TAXION_RUNTIME_ACP_COMMAND` | `runtime.acpCommand`（OpenCode 専用） |
 | `TAXION_RUNTIME_ACP_COMMAND_HASH` | `runtime.acpCommandHash`（OpenCode 専用・任意の固定） |
 | `TAXION_RUNTIME_ACP_CONFIG` | `runtime.acpConfig`（OpenCode 専用） |
@@ -221,7 +227,7 @@ v0.3.1 の対話入力は、各項目の説明と候補値を表示する。候�
 
 設定した環境変数値は、数値に見える識別子も文字列として扱う。明示的な空値・不正値は error。未設定なら下位層の値を保つ。設定 override として読むのは表の変数だけ。`TAXION_TOKEN`、`GH_TOKEN`、`GITHUB_TOKEN`、`COPILOT_GITHUB_TOKEN` は別の credential 用途を維持し、この設定にはコピーしない。
 
-`execution.budgetGuidance` は `off`・`flow`・`account` を指定する。v0.7.16 以降の新規 CLI proposal は、設定も依頼別指定もなければ `account`・`reset-daily` を使い、読取り範囲と下限方式を実行前の承認対象に含める。新しく選ぶ `account` も `reset-daily` になる。旧保存 Task の policy 省略は、補足なし・account 読取りなしのまま維持する。旧 `flow`、固定5%の `account`、明示上限は引継ぎ用として保存値を維持する。詳細は[設定ガイド](configuration.md)を参照する。
+`execution.budgetGuidance` は `provider`・`off`・`flow`・`account` を指定する。課金条件との組合せ、解決順序、旧契約の扱いは[課金ガイド](billing.md)を参照する。
 
 mise は環境変数を渡す任意の方法。共有 `mise.toml` から、ローカル `.env` を参照できる。
 
@@ -582,8 +588,8 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | --- | --- |
 | `role-packet create`, `role-packet verify` | `create` は `--task ID`・`--task-hash SHA256`・`--baseline-sha SHA`・`--target-tree-hash SHA`・`--scope-digest SHA256`・`--acceptance-digest SHA256`・`--role CODER\|VALIDATOR\|REVIEWER` を要求する。`--prohibit TEXT` は繰返し可能。`--previous-evidence-hash SHA256` は Validator・Reviewer で必須。`verify` は `--file JSON`・`--expected-hash SHA256` を要求する。両方とも canonical JSON を標準出力へ返し、状態変更や実行許可を行わない。[field と検査の制限](role-handoff-packets.md)を参照。 |
 | `ready` | 引数なしは、今の coding agent が Taxion を操作する静的メタプロンプトを stdout に出し、状態を変更しない。`--install-skill` は home の `.agents/skills/taxion/SKILL.md` に同梱版を明示配置して同じ prompt を出す。`--update-skill` は内容が未改変の Taxion 管理ファイルだけを同梱版へ更新し、同じ prompt を出す。`--check-skill` は本体の許容版・CLI 契約・内容を JSON で確認し、欠落・不一致・改変は非zero終了する。3つの option は併用不可。`--help` は入力形式を表示する。どの経路も設定・workspace・認証を要求せず、モデル・外部 process を起動しない。予算・scope・設定の Human 承認や独立 Reviewer を代替せず、実行準備やskill実ロードの診断でもない。 |
-| `request` | 必須は `--repo REPO`。正の `--max-task-nano-aiu N` は hard ceiling で、使用量が不明なら追加 Dispatch/session を止める。省略・0は `account` モードでのみ許可し、計画・実行に `reset-daily` 下限と継続監視を適用する。`off`・`flow` での省略、負値・非有限値は拒否する。`--timeout D` は1秒以上で、既定は1時間。Copilot は30以上の `--max-ai-credits N` も要求し、OpenCode では省略する。任意の `--worktree PATH` は現在の repository root が既定で、clean かつ branch に接続している必要がある。`--max-repairs N` は既定1、範囲0–100。`--context-path FILE` は追跡済み UTF-8 text を最大16 file、合計64 KiB まで繰り返し指定できる。`--cli PATH`・`--base-directory PATH` は Copilot の executable と state directory を指定する。位置引数の文章を元依頼とし、省略時は console で入力する。`/plan` はモデルによる計画、`/approve` は表示計画と期限・repair 回数を持つ coding・review を認可し、`/quit` は実行前に終了する。Dispatch/session 数の上限は repair 上限から導出し、Copilot の credit ceiling は session 別で、合計予算ではない。 |
-| `config check` | `--sources` は値を含めず設定 field の出典を表示する。`--capabilities` は静的 adapter 対応を示し、実 access・契約資格ではない。`--task ID` は保存 Task 承認、`--dispatch ID` はさらに保存 Dispatch instruction と解決済み設定を照合する。両者は最大一つだけ選ぶ。 |
+| `request` | 必須は `--repo REPO`。正の `--max-task-nano-aiu N` は hard ceiling で、使用量が不明なら追加 Dispatch/session を止める。省略・0は承認済み `provider` または `account`・`reset-daily` のみ許可する。[課金ガイド](billing.md)に条件を示す。`off`・`flow` での省略、負値・非有限値は拒否する。`--timeout D` は1秒以上で、既定は1時間。Copilot は30以上の `--max-ai-credits N` も要求し、OpenCode では省略する。任意の `--worktree PATH` は現在の repository root が既定で、clean かつ branch に接続している必要がある。`--max-repairs N` は既定1、範囲0–100。`--context-path FILE` は追跡済み UTF-8 text を最大16 file、合計64 KiB まで繰り返し指定できる。`--cli PATH`・`--base-directory PATH` は Copilot の executable と state directory を指定する。位置引数の文章を元依頼とし、省略時は console で入力する。`/plan` はモデルによる計画、`/approve` は表示計画と期限・repair 回数を持つ coding・review を認可し、`/quit` は実行前に終了する。Dispatch/session 数の上限は repair 上限から導出し、Copilot の credit ceiling は session 別で、合計予算ではない。 |
+| `config check` | `--billing` は新規提案用の申告済み課金条件と方式を JSON で表示し、他の option と併用しない。`--sources` は値を含めず設定 field の出典を表示する。`--capabilities` は静的 adapter 対応を示し、実 access・契約資格ではない。`--task ID` は保存 Task 承認、`--dispatch ID` はさらに保存 Dispatch instruction と解決済み設定を照合する。両者は最大一つだけ選ぶ。 |
 | `config bind` | `--dispatch ID` は未 binding Dispatch に現在選択中の固定 file 設定を保存する。任意の `--sources`・`--capabilities` は `config check` と同じ表示。credential 認証や契約資格の証明はせず、`--task` は受け付けない。 |
 | `git check-index` | `--secrets` は index 内容の local Betterleaks scan を追加する。`--scanner PATH` は scanner を選び、`--secrets` を要求する。指定なしでは禁止 Taxion・dotenv path だけを検査する。 |
 | `git check-range` | `--base SHA`・`--head SHA` は40桁または64桁の完全な16進 SHA を指定する必須 option。base は head の祖先でなければならず、範囲には未公開 commit が1件以上必要。`--scanner PATH` は信頼する Betterleaks 1.9.0 executable（既定 `betterleaks`）を選び、範囲内の全 commit tree と message を scan する。 |
@@ -658,4 +664,4 @@ OpenCode は承認した skills だけを隔離環境へ複製し、通常の pe
 
 root usage 文字列は flag 定義とは別に管理する。この索引で実装済み subcommand と option を照合する。`ready` は外側の agent 向け手順、`request` は内部 Planner 対話であり、同じ相談を両方で繰り返す前提にはしない。`doctor`・`config check`・`runtime auth` などの事前確認を、実行準備や契約上の利用資格の証明として説明しない。
 
-`request --budget-guidance off|flow|account` は新規 proposal の解決済み設定を上書きする。`runtime start|send --budget-guidance MODE` は保存 Task の `budgetGuidance.allowedModes` 内で一回の送信を選ぶが、上限省略方式の残量監視は無効化できない。省略時は編集後の設定でなく保存 mode を使う。guidance policy がない旧 Dispatch は override を拒否し、再認可を要求する。新しい `task track`・`conversation intake` proposal は省略 guidance を固定設定層から解決し、最終的に `account`・`reset-daily` を既定とする。保存済み Task の更新・request の再開では保存済み policy を引き継ぎ、新しい既定値を適用しない。Task JSON で mode、source、allowed mode、account read 承認を指定できる。[設定](configuration.md#残予算を考慮する指示の設定)に例を示す。認可済み Task の policy 変更は新しい認可 decision を要求する。`records show` は正確な補足文章、観測、送信段階を保存し、provider event 出力にも観測を報告する。`off` は既存の使用量・deadline 検査を無効にせず、どの mode も別 model turn を追加しない。
+`request --budget-guidance provider|off|flow|account` は新規 proposal の方式を上書きする。契約条件の検査は迂回しない。`runtime start|send --budget-guidance MODE` は保存 Task の `budgetGuidance.allowedModes` 内だけで適用し、上限省略方式の制御は外せない。省略時は保存 mode を使う。guidance がない旧 Dispatch へ追加する場合は再承認する。新規 `task track`・`conversation intake` は固定設定から解決し、更新・再開は保存済み policy を引き継ぐ。`records show` に正確な補足文章、条件・観測、送信段階を保存する。どの方式も別の model turn を追加しない。詳細は[課金ガイド](billing.md)を参照する。

@@ -6,11 +6,12 @@ import (
 )
 
 type BudgetGuidancePolicy struct {
-	Mode                string   `json:"mode"`
-	Source              string   `json:"source"`
-	AllowedModes        []string `json:"allowedModes"`
-	AccountReadApproved bool     `json:"accountReadApproved,omitempty"`
-	AccountAllocation   string   `json:"accountAllocation,omitempty"`
+	Mode                string           `json:"mode"`
+	Source              string           `json:"source"`
+	AllowedModes        []string         `json:"allowedModes"`
+	AccountReadApproved bool             `json:"accountReadApproved,omitempty"`
+	AccountAllocation   string           `json:"accountAllocation,omitempty"`
+	Billing             *BillingSettings `json:"billing,omitempty"`
 }
 
 func (p *BudgetGuidancePolicy) Validate() error {
@@ -25,8 +26,8 @@ func (p *BudgetGuidancePolicy) Validate() error {
 	}
 	seen := map[string]bool{}
 	for _, mode := range p.AllowedModes {
-		if (mode != "off" && mode != "flow" && mode != "account") || seen[mode] {
-			return fmt.Errorf("budget guidance requires unique off, flow or account modes")
+		if (mode != "off" && mode != "flow" && mode != "account" && mode != "provider") || seen[mode] {
+			return fmt.Errorf("budget guidance requires unique off, flow, account or provider modes")
 		}
 		seen[mode] = true
 	}
@@ -35,6 +36,12 @@ func (p *BudgetGuidancePolicy) Validate() error {
 	}
 	if p.AccountAllocation != "" && (p.AccountAllocation != "reset-daily" || !p.AccountReadApproved) {
 		return fmt.Errorf("account allocation requires reset-daily and approved account guidance")
+	}
+	if p.Billing != nil && !p.Billing.Complete() {
+		return fmt.Errorf("budget guidance requires a complete billing declaration")
+	}
+	if slices.Contains(p.AllowedModes, "provider") && (p.Billing == nil || !p.Billing.ProviderStops()) {
+		return fmt.Errorf("provider guidance requires declared provider-limit, denied overage, disabled recharge and paid fallback")
 	}
 	return nil
 }
@@ -45,6 +52,10 @@ func CloneBudgetGuidance(p *BudgetGuidancePolicy) *BudgetGuidancePolicy {
 	}
 	copy := *p
 	copy.AllowedModes = slices.Clone(p.AllowedModes)
+	if p.Billing != nil {
+		settings := *p.Billing
+		copy.Billing = &settings
+	}
 	return &copy
 }
 
@@ -54,18 +65,53 @@ func AccountQuotaBudget(p *BudgetGuidancePolicy) bool {
 }
 
 func NewBudgetGuidance(configured, override string) (*BudgetGuidancePolicy, error) {
+	return NewBillingBudgetGuidance(configured, override, BillingSettings{})
+}
+
+func ProviderBudget(p *BudgetGuidancePolicy) bool {
+	return p != nil && p.Validate() == nil && p.Mode == "provider" && p.Billing != nil && p.Billing.ProviderStops()
+}
+
+func ExternalBudget(p *BudgetGuidancePolicy) bool {
+	return AccountQuotaBudget(p) || ProviderBudget(p)
+}
+
+func (p *BudgetGuidancePolicy) CheckBillingContract(selected BillingSettings) error {
+	if p == nil {
+		return nil
+	}
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if p.Billing != nil {
+		return p.Billing.CheckSelection(selected)
+	}
+	return nil
+}
+
+func NewBillingBudgetGuidance(configured, override string, selected BillingSettings) (*BudgetGuidancePolicy, error) {
+	settings, err := selected.Resolve()
+	if err != nil {
+		return nil, err
+	}
 	mode, source := configured, "configuration"
 	if mode == "" {
-		mode, source = "account", "default"
+		mode, source = "provider", "default"
+		if !settings.ProviderStops() {
+			mode, source = "flow", "configuration"
+		}
 	}
 	if override != "" {
 		mode, source = override, "request"
 	}
-	p := &BudgetGuidancePolicy{Mode: mode, Source: source, AllowedModes: []string{"off", "flow"}}
+	p := &BudgetGuidancePolicy{Mode: mode, Source: source, AllowedModes: []string{"off", "flow"}, Billing: &settings}
 	if mode == "account" {
 		p.AllowedModes = append(p.AllowedModes, "account")
 		p.AccountReadApproved = true
 		p.AccountAllocation = "reset-daily"
 	}
-	return p, p.Validate()
+	if mode == "provider" {
+		p.AllowedModes = append(p.AllowedModes, "provider")
+	}
+	return p, p.CheckBillingContract(selected)
 }

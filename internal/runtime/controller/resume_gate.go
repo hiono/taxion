@@ -138,7 +138,8 @@ func checkResumeAdmission(ctx context.Context, state store.Workspace, flow core.
 			return fmt.Errorf("another operation or process owns the execution boundary")
 		}
 		if operation.AccountQuotaOnly != flow.Budget.AccountQuotaOnly ||
-			!operation.AccountQuotaOnly && (operation.PlanningUsageState != "complete" ||
+			operation.BudgetSource != flow.Budget.BudgetSource ||
+			!operation.ExternalBudgetOnly() && (operation.PlanningUsageState != "complete" ||
 				operation.MaxNanoAIU-operation.PlanningNanoAIU != flow.Budget.MaxNanoAIU) ||
 			!operation.Deadline.Equal(flow.Deadline) {
 			return fmt.Errorf("operation and Flow approved limits or deadline differ")

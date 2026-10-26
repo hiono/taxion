@@ -694,21 +694,25 @@ func TestReviewFlowAppliesDefaultTimeoutWhenOmitted(t *testing.T) {
 	}
 }
 
-func TestReviewFlowDefaultTimeoutRespectsCallerDeadline(t *testing.T) {
-	db, ledger, request := reviewFlowFixture(t)
-	request.TimeoutSeconds = 0
-	expired, stop := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
-	defer stop()
-	if _, err := StartReviewFlowContext(expired, db, ledger, request); err == nil {
-		t.Fatal("default timeout accepted after caller deadline")
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
-	defer cancel()
-	flow, err := StartReviewFlowContext(ctx, db, ledger, request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if limit, _ := ctx.Deadline(); flow.Deadline.After(limit) || flow.Deadline.Sub(flow.StartedAt) < 9*time.Minute {
-		t.Fatalf("default Flow deadline = %s, want at most caller deadline %s", flow.Deadline, limit)
+func TestReviewFlowTimeoutRespectsCallerDeadline(t *testing.T) {
+	for _, seconds := range []int64{0, 1200} {
+		t.Run(strconv.FormatInt(seconds, 10), func(t *testing.T) {
+			db, ledger, request := reviewFlowFixture(t)
+			request.TimeoutSeconds = seconds
+			expired, stop := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+			defer stop()
+			if _, err := StartReviewFlowContext(expired, db, ledger, request); err == nil {
+				t.Fatal("timeout accepted after caller deadline")
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
+			defer cancel()
+			flow, err := StartReviewFlowContext(ctx, db, ledger, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if limit, _ := ctx.Deadline(); flow.Deadline.After(limit) || flow.Deadline.Sub(flow.StartedAt) < 9*time.Minute {
+				t.Fatalf("Flow deadline = %s, want at most caller deadline %s", flow.Deadline, limit)
+			}
+		})
 	}
 }

@@ -36,7 +36,7 @@ type setupObservation struct {
 func observeSetup(remote string) (setupObservation, error) {
 	report := setupObservation{
 		Detected: map[string]string{}, Remotes: []string{}, RuntimeAvailable: []string{}, Missing: []string{},
-		Optional:   []string{"execution.budgetGuidance (off/flow/account)", "runtime.acpCommandHash (optional OpenCode executable pin)", "runtime.acpCommand/acpConfig/acpConfigHash (required only for opencode)"},
+		Optional:   []string{"execution.budgetGuidance (provider/off/flow/account)", "billing.contract/overage/autoRecharge/paidFallback (declared billing conditions)", "runtime.acpCommandHash (optional OpenCode executable pin)", "runtime.acpCommand/acpConfig/acpConfigHash (required only for opencode)"},
 		Unverified: []string{"authentication", "contract eligibility", "data transmission permission", "Task and budget approval", "native skill loading", "backend inventory and Dispatch inspection (requires complete configuration and doctor)"},
 		Next:       "taxion init or taxion doctor fix; no prior doctor run is required",
 	}
@@ -134,7 +134,7 @@ func observeSetup(remote string) (setupObservation, error) {
 		}
 	}
 	for name := range setupFieldHelp {
-		if name != "runtime.acpCommandHash" && existing[name] == "" &&
+		if name != "runtime.acpCommandHash" && !strings.HasPrefix(name, "billing.") && existing[name] == "" &&
 			(!strings.HasPrefix(name, "runtime.acp") || existing["runtime.provider"] == "opencode") {
 			report.Missing = append(report.Missing, name)
 		}

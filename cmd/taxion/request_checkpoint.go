@@ -95,9 +95,10 @@ func requestApprovalBasis(operation store.Operation, checkpoint requestCheckpoin
 		UsageState       string                     `json:"planningUsageState"`
 		MaxRepairs       int                        `json:"maxRepairs"`
 		AccountQuotaOnly bool                       `json:"accountQuotaOnly,omitempty"`
+		BudgetSource     string                     `json:"budgetSource,omitempty"`
 	}{2, operation.ID, checkpoint.Task, checkpoint.Args, checkpoint.Selection, checkpoint.RequestHash,
 		checkpoint.Answer, operation.Deadline, operation.SessionCreditLimit, operation.MaxNanoAIU, operation.PlanningNanoAIU,
-		operation.PlanningUsageState, checkpoint.MaxRepairs, operation.AccountQuotaOnly})
+		operation.PlanningUsageState, checkpoint.MaxRepairs, operation.AccountQuotaOnly, operation.BudgetSource})
 }
 
 func verifyRequestCheckpoint(state store.Workspace, operation store.Operation, checkpoint requestCheckpoint) (bool, error) {
@@ -117,6 +118,10 @@ func verifyRequestCheckpoint(state store.Workspace, operation store.Operation, c
 	if operation.AccountQuotaOnly && (operation.MaxNanoAIU != 0 || !core.AccountQuotaBudget(task.BudgetGuidance)) {
 		return false, fmt.Errorf("request account-only budget lacks its approved reset-daily policy")
 	}
+	if operation.BudgetSource != "" && core.ValidateBillingBudget(operation.BudgetSource, operation.AccountQuotaOnly,
+		operation.MaxNanoAIU, core.AccountQuotaBudget(task.BudgetGuidance), core.ProviderBudget(task.BudgetGuidance)) != nil {
+		return false, fmt.Errorf("request provider-only budget lacks its declared billing contract")
+	}
 	if checkpoint.Answer == nil && !checkpoint.PlannerStarted {
 		return false, fmt.Errorf("request checkpoint has no minimal plan or pending question; transient input is unavailable; reconcile before continuation")
 	}
@@ -131,7 +136,7 @@ func verifyRequestCheckpoint(state store.Workspace, operation store.Operation, c
 	if operation.TaskID != operation.ID || operation.FlowID != operation.ID+"-flow" {
 		return false, fmt.Errorf("approved request operation Task or Flow mismatch")
 	}
-	if !operation.AccountQuotaOnly && (operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU) ||
+	if !operation.ExternalBudgetOnly() && (operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU) ||
 		checkpoint.MaxRepairs < 0 || checkpoint.MaxRepairs > 100 {
 		return false, fmt.Errorf("approved request has unknown usage or invalid limits")
 	}
@@ -145,8 +150,10 @@ func verifyRequestCheckpoint(state store.Workspace, operation store.Operation, c
 	}
 	if flow, exists := state.Graph.ReviewFlow(operation.FlowID); exists &&
 		(flow.Deadline.After(operation.Deadline) || flow.Budget.AccountQuotaOnly != operation.AccountQuotaOnly ||
-			!operation.AccountQuotaOnly && flow.Budget.MaxNanoAIU > operation.MaxNanoAIU-operation.PlanningNanoAIU ||
+			flow.Budget.BudgetSource != operation.BudgetSource ||
+			!operation.ExternalBudgetOnly() && flow.Budget.MaxNanoAIU > operation.MaxNanoAIU-operation.PlanningNanoAIU ||
 			operation.AccountQuotaOnly && !core.AccountQuotaBudget(flow.Contract.BudgetGuidance) ||
+			operation.BudgetSource == core.ProviderStopBudgetSource && !core.ProviderBudget(flow.Contract.BudgetGuidance) ||
 			flow.MaxRepairs != checkpoint.MaxRepairs || flow.Budget.MaxDispatches > 2+2*checkpoint.MaxRepairs ||
 			flow.Budget.MaxCoderSessions > 1+checkpoint.MaxRepairs || flow.Budget.MaxReviewerSessions > 1+checkpoint.MaxRepairs) {
 		return false, fmt.Errorf("request execution budget or deadline exceeds its approval")

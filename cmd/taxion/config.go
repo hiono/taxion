@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ func checkConfig(args []string, output io.Writer) error {
 	fs := flag.NewFlagSet("config "+args[0], flag.ContinueOnError)
 	sources := fs.Bool("sources", false, "show field origins without configuration values")
 	capabilities := fs.Bool("capabilities", false, "show adapter implementation coverage, not live access or eligibility")
+	showBilling := fs.Bool("billing", false, "show effective declared billing conditions and budget policy as JSON; does not read or change provider settings")
 	task := fs.String("task", "", "check the resolved configuration against this Task's recorded approval")
 	dispatch := fs.String("dispatch", "", "check both current Task approval and the saved Dispatch instruction")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -44,9 +46,27 @@ func checkConfig(args []string, output io.Writer) error {
 	if bind && (*dispatch == "" || *task != "") {
 		return fmt.Errorf("config bind requires --dispatch and does not accept --task")
 	}
+	if *showBilling && (bind || *sources || *capabilities || *task != "" || *dispatch != "") {
+		return fmt.Errorf("config check --billing shows new-proposal defaults; cannot combine with bind, --sources, --capabilities, --task or --dispatch")
+	}
 	resolved, err := resolveConfiguration()
 	if err != nil {
 		return err
+	}
+	if *showBilling {
+		policy, err := core.NewBillingBudgetGuidance(resolved.Config.Execution.BudgetGuidance, "", resolved.Config.Billing)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(output).Encode(struct {
+			Provider     string                     `json:"provider"`
+			Account      string                     `json:"account"`
+			ContractRef  string                     `json:"contractRef"`
+			Verification string                     `json:"verification"`
+			Policy       *core.BudgetGuidancePolicy `json:"policy"`
+			Sources      map[string]string          `json:"sources"`
+		}{resolved.Config.Runtime.Provider, resolved.Config.Runtime.Account, resolved.Config.Runtime.ContractRef,
+			"human-declaration-not-provider-verified", policy, resolved.Sources})
 	}
 	if *task != "" || *dispatch != "" {
 		db, err := openWorkspace()
@@ -126,11 +146,11 @@ func newTaskBudgetGuidance() (*core.BudgetGuidancePolicy, error) {
 	if err != nil {
 		return nil, err
 	}
-	mode, err := config.ResolveBudgetGuidance(layers)
+	resolved, err := config.ResolvePartial(layers)
 	if err != nil {
 		return nil, err
 	}
-	return core.NewBudgetGuidance(mode, "")
+	return core.NewBillingBudgetGuidance(resolved.Config.Execution.BudgetGuidance, "", resolved.Config.Billing)
 }
 
 func configurationLayers(required bool) ([]config.Layer, error) {

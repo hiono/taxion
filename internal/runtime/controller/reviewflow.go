@@ -42,8 +42,7 @@ func StartReviewFlow(db *store.Store, ledgerPath string, request ReviewFlowReque
 }
 
 func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath string, request ReviewFlowRequest) (core.ReviewFlow, error) {
-	defaulted := request.TimeoutSeconds == 0
-	if defaulted {
+	if request.TimeoutSeconds == 0 {
 		request.TimeoutSeconds = int64(DefaultFlowTimeout / time.Second)
 	}
 	if db == nil || strings.TrimSpace(request.ID) == "" || strings.ContainsAny(request.ID, `/\`) ||
@@ -68,8 +67,8 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 		if err := checkFlowApproval(state.Graph, task, request.Configuration); err != nil {
 			return err
 		}
-		if request.MaxNanoAIU == 0 && !core.AccountQuotaBudget(task.BudgetGuidance) {
-			return fmt.Errorf("taxion: omitted maxNanoAiu requires approved account guidance with reset-daily allocation")
+		if request.MaxNanoAIU == 0 && !core.ExternalBudget(task.BudgetGuidance) {
+			return fmt.Errorf("taxion: omitted maxNanoAiu requires approved provider billing or account guidance with reset-daily allocation")
 		}
 		if _, exists := state.Graph.ReviewFlow(request.ID); exists {
 			return fmt.Errorf("taxion: review flow ID already exists")
@@ -86,7 +85,7 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 		}
 		now := time.Now().UTC()
 		deadline := now.Add(time.Duration(request.TimeoutSeconds) * time.Second)
-		if limit, ok := ctx.Deadline(); ok && defaulted {
+		if limit, ok := ctx.Deadline(); ok {
 			if !now.Before(limit) {
 				return fmt.Errorf("taxion: caller deadline reached before the review flow started")
 			}
@@ -103,10 +102,13 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 				MaxCoderSessions:    1 + *request.MaxRepairs,
 				MaxReviewerSessions: 1 + *request.MaxRepairs,
 				MaxNanoAIU:          request.MaxNanoAIU,
-				AccountQuotaOnly:    request.MaxNanoAIU == 0,
+				AccountQuotaOnly:    request.MaxNanoAIU == 0 && core.AccountQuotaBudget(task.BudgetGuidance),
 			},
 			StartedAt: now, Deadline: deadline, Status: "RUNNING",
 			Authorization: request.Authorization, DispatchIDs: []string{},
+		}
+		if request.MaxNanoAIU == 0 && core.ProviderBudget(task.BudgetGuidance) {
+			flow.Budget.BudgetSource = core.ProviderStopBudgetSource
 		}
 		if request.ContinueFromDispatchID == "" {
 			if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipNone, "", "", request.Configuration); err != nil {
