@@ -22,7 +22,7 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 		t.Fatal(err)
 	}
 	data, err := json.Marshal(config.Approval{
-		Kind: config.ApprovalKind, TaskID: "task", Reason: "Human approved this execution", Allowed: []config.Config{candidate},
+		Kind: config.ApprovalKind, TaskID: "task", Reason: "the user approved this execution", Allowed: []config.Config{candidate},
 	})
 	if err != nil {
 		t.Fatal(err)

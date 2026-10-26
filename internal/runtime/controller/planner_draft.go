@@ -35,12 +35,12 @@ type QuestionDraftRequest struct {
 }
 
 // RecordQuestionDraft applies only explicitly selected confirmed findings,
-// retaining their evidence and Human instruction without copying ordinary chat.
+// retaining their evidence and user instruction without copying ordinary chat.
 func RecordQuestionDraft(db *store.Store, ledgerPath string, request QuestionDraftRequest) (core.ReviewFlow, error) {
 	if request.Proposal.Context.Planner != nil || request.Proposal.Answer == nil ||
 		!slices.Contains([]string{"CODER", "REVIEWER"}, request.NextRole) || len(request.Selected) == 0 ||
 		strings.TrimSpace(request.HumanInstruction) == "" {
-		return core.ReviewFlow{}, fmt.Errorf("taxion: question adoption requires selected confirmed findings, next role and Human instruction")
+		return core.ReviewFlow{}, fmt.Errorf("taxion: question adoption requires selected confirmed findings, next role and user instruction")
 	}
 	answer := *request.Proposal.Answer
 	answer.Confirmed = []QuestionClaim{}
@@ -68,7 +68,7 @@ func RecordPlannerDraft(db *store.Store, ledgerPath string, request PlannerDraft
 	case "REPAIR":
 		role = "CODER"
 	default:
-		return core.ReviewFlow{}, fmt.Errorf("taxion: this planner action requires separate investigation, replanning or Human decision; it cannot become an executable supplement")
+		return core.ReviewFlow{}, fmt.Errorf("taxion: this planner action requires separate investigation, replanning or user decision; it cannot become an executable supplement")
 	}
 	return recordAdviceDraft(db, ledgerPath, request, role, request.Proposal.Answer, nil, "")
 }

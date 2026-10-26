@@ -30,7 +30,7 @@ func ChangeHandoff(db *store.Store, request HandoffRequest) (core.ReviewFlow, er
 }
 
 // ChangeObservedHandoff does not silently apply a console choice to a role or
-// draft that changed while Human was reading the displayed observation.
+// draft that changed while the user was reading the displayed observation.
 func ChangeObservedHandoff(db *store.Store, observation FeedbackObservation, change core.HandoffChange) (core.ReviewFlow, error) {
 	if db == nil {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: observed handoff change requires a workspace")

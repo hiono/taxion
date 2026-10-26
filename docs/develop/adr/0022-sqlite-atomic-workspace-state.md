@@ -44,7 +44,7 @@ snapshot を表示する。HTTP は Dispatch ID から snapshot と hash を読�
 検証結果・証拠・blocker・要求する次の遷移を含み、対象の active Dispatch と照合する。
 終端 Dispatch は再遷移できず、以前の結果で新しい Dispatch を完了させない。
 これらの値は caller が申告した記録であり、Git・コマンド実行・証拠の実在を保証しない。
-Human decision は選択肢・推奨と理由を記録し、選択を decision として残すまで READY にできない。
+利用者の判断は選択肢・推奨と理由を記録し、選択を decision として残すまで READY にできない。
 既存 Graph の破損、非対応の版、未知のキー、読み取り失敗はエラーとする。
 初回アクセス時に旧 Ledger と任意の Graph を SQLite へ一度だけ取り込む。
 JSON は旧 workspace からの一時的な移行入力に限り、移行後の正本・バックアップ・

@@ -142,7 +142,7 @@ func (g TaskGraph) validateSavedHandoffObservation(flow ReviewFlow, target Feedb
 	return nil
 }
 
-// RecordFlowFeedback records a Human response and its hold atomically.
+// RecordFlowFeedback records a user response and its hold atomically.
 // It does not reinterpret that response as an instruction or an approval.
 func (g *TaskGraph) RecordFlowFeedback(flowID string, feedback FlowFeedback) (ReviewFlow, error) {
 	if !validFeedbackInput(feedback) || !feedback.At.IsZero() || feedback.HoldChangeID != "" || feedback.Resolution != nil {

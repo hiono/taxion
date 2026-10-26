@@ -175,7 +175,7 @@ func PlanWithArchived(db *store.Store, ledgerPath, repo string, includeArchived 
 			step.Instruction = "Reconcile the missing execution record with this active Task before issuing another Dispatch."
 		default:
 			step.Action = "RESTORE_CONTRACT"
-			step.Instruction = "Reuse recorded decisions and results to prepare the next contract update. Request Human approval for new decisions."
+			step.Instruction = "Reuse recorded decisions and results to prepare the next contract update. Request user approval for new decisions."
 			step.Gaps = contractGaps(task)
 		}
 		plan.Tasks = append(plan.Tasks, step)

@@ -13,7 +13,7 @@ Accepted
 直す Task の違いを、操作者が path ごとの設定から判断しなければならなかった。
 tool allowlist を広げるだけでは、Task の承認範囲とファイル操作の境界が一致しない。
 
-Human は、明示 path、Git 追跡済みファイル、割当 worktree 全体をレベルで選ぶ方式を採択した。
+利用者は、明示 path、Git 追跡済みファイル、割当 worktree 全体をレベルで選ぶ方式を採択した。
 既存 Task の許可を暗黙に変えず、新規 Task には制限された既定値を与える必要がある。
 
 ## Decision

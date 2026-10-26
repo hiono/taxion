@@ -182,7 +182,7 @@ func TestObserveRepairStatusRetainsSpecificStoppedCause(t *testing.T) {
 	}{
 		{"elapsed budget reached", "time-limit"},
 		{"deadline reached; reconcile and safely stop any active Dispatch before further authorization", "time-limit"},
-		{"repair ceiling reached; present saved findings and acceptance decisions to Human", "review-findings"},
+		{"repair ceiling reached; present saved findings and acceptance decisions to the user", "review-findings"},
 		{"nano-AIU ceiling reached", "usage-limit"},
 		{"account quota observation is missing", "usage-limit"},
 	} {

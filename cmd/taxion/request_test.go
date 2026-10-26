@@ -419,7 +419,7 @@ func testApprovedRequest(t *testing.T, resume bool, externalMode ...string) {
 		}
 		state, _ := db.LoadWorkspace()
 		if len(state.Graph.Dispatches) != 0 {
-			t.Fatal("planning issued code before Human approval")
+			t.Fatal("planning issued code before user approval")
 		}
 		answer := requestFixtureAnswer([]string{"検索の一致条件を教えてください。"})
 		if calls == 2 {

@@ -12,7 +12,7 @@ import (
 )
 
 // RecordPlannerAction records a selected non-execution decision at a held
-// boundary. Investigation, successor intake or Human input remain explicit;
+// boundary. Investigation, successor intake or user input remain explicit;
 // adopting a gap never turns it into a repair instruction.
 func RecordPlannerAction(db *store.Store, ledgerPath string, request PlannerDraftRequest) (core.ReviewFlow, error) {
 	if db == nil || request.Proposal.Answer == nil || request.Proposal.Context.Planner == nil ||

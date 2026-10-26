@@ -17,7 +17,7 @@ func TestApprovalChecksCompleteTuples(t *testing.T) {
 	second := candidate
 	second.Runtime.Account = "second-account"
 	second.Runtime.ContractRef = "second-contract"
-	approval := Approval{Kind: ApprovalKind, TaskID: "task", Reason: "Human approved these combinations", Allowed: []Config{candidate, second}}
+	approval := Approval{Kind: ApprovalKind, TaskID: "task", Reason: "the user approved these combinations", Allowed: []Config{candidate, second}}
 	encode := func(a Approval) string {
 		t.Helper()
 		data, err := json.Marshal(a)

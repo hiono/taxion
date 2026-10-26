@@ -227,7 +227,7 @@ func ObserveQuestion(db *store.Store, ledgerPath, repository, taskID string) (Qu
 }
 
 // AskQuestion is model-only: no tools, Dispatch binding, graph update or inferred
-// Human approval. The caller supplies a separately bounded, isolated runtime.
+// user approval. The caller supplies a separately bounded, isolated runtime.
 func AskQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text string, selected config.Config,
 	worker runtime.ConfigurationIdentity) (result QuestionResult, err error) {
 	return askQuestion(ctx, db, ledgerPath, taskID, text, selected, worker, false, nil)

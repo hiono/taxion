@@ -20,7 +20,7 @@ func TestTaskPlanPrintsObservationWithoutIssuingDispatch(t *testing.T) {
 		ID: "question", Title: "Investigate compatibility", Repo: "owner/repo",
 		Type: "INVESTIGATION", Status: core.Blocked, Issue: "Issue #74",
 		CreatedFrom: "human:question", DeferredReason: "Scope not yet approved",
-		ResumeCondition: "Human approval of investigation", NextAction: "Clarify investigation scope",
+		ResumeCondition: "user approval of investigation", NextAction: "Clarify investigation scope",
 	}
 	if err := (core.Ledger{Tasks: []core.Task{{ID: task.ID, Title: task.Title, Repo: task.Repo}}}).Save(storePath); err != nil {
 		t.Fatal(err)

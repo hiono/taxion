@@ -540,7 +540,7 @@ func currentApprovalConfiguration() core.ApprovalConfiguration {
 }
 
 // reportStoppedRepair tells the operator on stderr whether a stopped Flow
-// needs Human action, so the stop is not re-interpreted from prose.
+// needs user action, so the stop is not re-interpreted from prose.
 func reportStoppedRepair(out io.Writer, db *store.Store, storePath, flowID string, err error) error {
 	if err == nil {
 		return nil

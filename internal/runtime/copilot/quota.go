@@ -188,7 +188,7 @@ func mapQuota(result runtime.QuotaSnapshot, snapshot rpc.AccountQuotaSnapshot) r
 		result.Remaining = &remaining
 	}
 	result.RemainingPercentage = &snapshot.RemainingPercentage
-	// Overage availability is not Human approval to use paid overage.
+	// Overage availability is not user approval to use paid overage.
 	result.ExecutionDenied = !result.Unlimited && (snapshot.RemainingPercentage == 0 ||
 		snapshot.EntitlementRequests == 0 || snapshot.UsedRequests >= snapshot.EntitlementRequests)
 	return result

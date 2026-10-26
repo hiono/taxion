@@ -102,7 +102,7 @@ func IntakeHash(task core.GraphTask) (string, error) {
 	return fmt.Sprintf("sha256:%x", sha256.Sum256(data)), nil
 }
 
-// ProposeIntake records the original request and a contract for Human to inspect.
+// ProposeIntake records the original request and a contract for the user to inspect.
 // It never treats natural-language text as authorization or starts a worker.
 func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, error) {
 	if db == nil || strings.TrimSpace(request.Request) == "" || strings.TrimSpace(request.Actor) == "" ||
@@ -286,7 +286,7 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 				return fmt.Errorf("taxion: successor using the same worktree must retain the recorded latest output SHA")
 			}
 			// Preserve prior result, instruction, approval and ceiling snapshots.
-			flow.Status, flow.Reason = "STOPPED", "Human explicitly confirmed successor contract "+task.ID
+			flow.Status, flow.Reason = "STOPPED", "the user explicitly confirmed successor contract "+task.ID
 			storeFlow(state, flow)
 		} else if task.Supersedes != "" || request.Target != nil {
 			return fmt.Errorf("taxion: a superseding contract requires explicit predecessor-flow reapproval")

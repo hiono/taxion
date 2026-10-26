@@ -41,7 +41,7 @@ func (a *Adapter) mcpTools() []sdk.Tool {
 	for _, binding := range a.config.ToolPolicy.MCP {
 		result = append(result, sdk.Tool{
 			Name: binding.Name, Defer: sdk.ToolDeferNever,
-			Description: "Run the exact Human-approved request on a trusted local MCP server. Different arguments require a new approval.",
+			Description: "Run the exact user-approved request on a trusted local MCP server. Different arguments require a new approval.",
 			Parameters:  map[string]any{"type": "object", "const": binding.Arguments},
 			Handler: func(invocation sdk.ToolInvocation) (sdk.ToolResult, error) {
 				if invocation.ToolName != binding.Name || invocation.AgentID != "" || invocation.TraceContext == nil {

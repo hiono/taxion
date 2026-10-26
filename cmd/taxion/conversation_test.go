@@ -209,7 +209,7 @@ func TestWatchedConversationHoldsBeforeInputAndNeverApprovesOnEOF(t *testing.T) 
 				}
 				current, _ := state.Graph.ReviewFlow(flow.ID)
 				if !current.HandoffHeld() {
-					t.Fatal("console interpreted Human input before persisting the hold")
+					t.Fatal("console interpreted user input before persisting the hold")
 				}
 			}}
 			var output bytes.Buffer
@@ -220,7 +220,7 @@ func TestWatchedConversationHoldsBeforeInputAndNeverApprovesOnEOF(t *testing.T) 
 				started := make(chan struct{})
 				run := func(ctx context.Context, args []string, out io.Writer) error {
 					close(started)
-					if _, err := io.WriteString(out, "progress while Human input is available\n"); err != nil {
+					if _, err := io.WriteString(out, "progress while user input is available\n"); err != nil {
 						return err
 					}
 					<-ctx.Done()
@@ -240,7 +240,7 @@ func TestWatchedConversationHoldsBeforeInputAndNeverApprovesOnEOF(t *testing.T) 
 				}()
 				err := watchedConversation(append(args, "--interactive-execution"), input, &output, run)
 				if !errors.Is(err, context.Canceled) || !strings.Contains(output.String(), "already owns an execution") ||
-					!strings.Contains(output.String(), "progress while Human input") {
+					!strings.Contains(output.String(), "progress while user input") {
 					t.Fatal("interactive input blocked, allowed a second runner or ignored EOF safe stop", err, output.String())
 				}
 			} else {

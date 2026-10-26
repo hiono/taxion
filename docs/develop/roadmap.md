@@ -68,7 +68,7 @@ M14 まで延期しない。各 Issue の前提と完了条件は
 | --- | --- | --- |
 | [M10](https://github.com/hiono/taxion/milestone/16) | 階層化した Memory、Task Graph、Task lost の防止、実行契約 | #46〜#48・#66 |
 | [M11](https://github.com/hiono/taxion/milestone/17) | Go Copilot SDK、役割別 Session、system prompt・履歴の分離 | #49〜#51 |
-| [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映する自動実装・独立レビュー、実行主体・接続先・AI 契約の分離、commit 前の混入防止、Human の途中介入と状況・根拠の質問 | #52〜#54・#67・#69・#72〜#74 |
+| [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映する自動実装・独立レビュー、実行主体・接続先・AI 契約の分離、commit 前の混入防止、利用者の途中介入と状況・根拠の質問 | #52〜#54・#67・#69・#72〜#74 |
 | [M13](https://github.com/hiono/taxion/milestone/19) | 再起動からの復旧、永続的な作業記録、外部基盤 adapter の分離・対応評価 | #55〜#57・#70 |
 | [M14](https://github.com/hiono/taxion/milestone/20) | 仕様検索、Memory の移行、skills・tools 連携 | #58〜#61 |
 | [M15](https://github.com/hiono/taxion/milestone/21) | CLI と ACP サーバーを共通 controller に接続し、仕様検索から復旧・外部記録まで受け入れる | #62・#79 |
@@ -107,7 +107,7 @@ M12 の実 SDK 受入れを 2026-10-12 に完了した。
 
 M13 は実行・完了 checkpoint の再検証、同一 transaction の receipt・外部公開、
 出典付き失敗分析、全未公開 commit の秘密検査を実装した。
-SQLite と Git の障害回帰に加え、Human が承認した本文を新しい CLI で実 GitHub に公開し、
+SQLite と Git の障害回帰に加え、利用者が承認した本文を新しい CLI で実 GitHub に公開し、
 再送時に保存済み結果を再利用することを確認した。
 手順と証拠は [実行記録](../userguide/execution-records.md)、
 公式仕様と能力差は [開発基盤の対応評価](forge-capabilities.md) を参照する。

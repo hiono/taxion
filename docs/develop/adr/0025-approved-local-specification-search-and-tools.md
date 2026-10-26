@@ -9,7 +9,7 @@ Accepted
 ## Context
 
 M14 は、仕様書の取得から出典確認・Coder・Reviewer への受け渡しまでを自動化する。
-Human は、公開・合成資料をローカルで検索し、承認した合成本文を役割へ送信する方式を採択した。
+利用者は、公開・合成資料をローカルで検索し、承認した合成本文を役割へ送信する方式を採択した。
 M365 接続は、組織が利用環境と許可範囲を提示した場合に評価する条件付きの後続拡張として、
 [#77](https://github.com/hiono/taxion/issues/77) に記録する。
 
@@ -39,7 +39,7 @@ MCP executable は信頼された host code として承認する。
 権限不足・取得失敗・原本変更は error、検索結果なしは空配列として扱う。
 引用・tool 原本の外部公開は、用途別の明示承認に従う。
 
-通常 CI は無料回帰を実行し、有料 SDK 受入れは session 数と上限を Human が承認する。
+通常 CI は無料回帰を実行し、有料 SDK 受入れは session 数と上限を利用者が承認する。
 SDK credit は soft cap、tokens は usage event による事後観測の停止条件である。
 実 SDK 独立 Reviewer は #60 で受入れを完了した。
 実装手順と受入れ結果は [仕様入力](../specification-input.md)、

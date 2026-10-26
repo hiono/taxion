@@ -125,7 +125,7 @@ func Search(ctx context.Context, scope Scope, query string) (Result, error) {
 	}
 	if scope.Approval == nil || scope.Approval.Hash != hash ||
 		strings.TrimSpace(scope.Approval.Actor) == "" || strings.TrimSpace(scope.Approval.Source) == "" {
-		return Result{}, fmt.Errorf("taxion: local search requires sourced Human approval of the exact scope hash")
+		return Result{}, fmt.Errorf("taxion: local search requires sourced user approval of the exact scope hash")
 	}
 	terms := strings.Fields(strings.ToLower(query))
 	if len(terms) == 0 || len(query) > 512 {

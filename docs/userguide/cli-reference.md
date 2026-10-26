@@ -4,7 +4,7 @@
 
 この文書は、現在の CLI コマンドと実行上の制約をまとめる。初めて使う手順は[利用者ガイド](user-guide.md)、設定ファイルは[設定ガイド](configuration.md)を参照する。
 
-`--file JSON` を使う操作例は、オーケストレータや自動化の実装者向けの入力仕様である。通常の利用者は `ready` を読んだ agent または `request` の Planner に自然言語で依頼し、作業条件・設定・実行上限を承認する。JSON の生成、ID・hash の転記、コマンド実行は agent または `request` が担当する。この文書の Human は承認・判断を行う利用者、「Task 契約」は承認後に勝手に変更できない作業条件を指す。
+`--file JSON` を使う操作例は、オーケストレータや自動化の実装者向けの入力仕様である。通常の利用者は `ready` を読んだ agent または `request` の Planner に自然言語で依頼し、作業条件・設定・実行上限を承認する。JSON の生成、ID・hash の転記、コマンド実行は agent または `request` が担当する。「Task 契約」は承認後に勝手に変更できない作業条件を指す。
 
 コマンド一覧は `taxion --help`、各コマンドの入力条件はこの文書と所有仕様書に従う。採択した設計や未実装の要件は[要件と到達条件](../develop/orchestration-requirements.md)に分けて記録する。
 
@@ -82,7 +82,7 @@ taxion review --task <id> --sha <coder-sha> --repo <repo>
 
 ### 依頼の登録と Flow 実行
 
-`taxion request --repo REPO --max-ai-credits 30` は新規依頼の入口である。v0.7.19 からの既定は、申告した提供元の停止に任せる `provider`。課金条件に適合する提案を承認した場合、Task 上限を省略できる。条件・方式・移行は[課金ガイド](billing.md)にまとめる。`--timeout D` の既定は1時間。Copilot は30以上の session 別 soft ceiling を要求し、OpenCode はこの指定を省略する。Human は `/plan` で計画相談を開始し、範囲・完了条件・ホスト検証コマンドと課金条件を確認して `/approve` を選ぶ。保存済み契約と正の明示上限は変更しない。
+`taxion request --repo REPO --max-ai-credits 30` は新規依頼の入口である。v0.7.19 からの既定は、申告した提供元の停止に任せる `provider`。課金条件に適合する提案を承認した場合、Task 上限を省略できる。条件・方式・移行は[課金ガイド](billing.md)にまとめる。`--timeout D` の既定は1時間。Copilot は30以上の session 別 soft ceiling を要求し、OpenCode はこの指定を省略する。利用者は `/plan` で計画相談を開始し、範囲・完了条件・ホスト検証コマンドと課金条件を確認して `/approve` を選ぶ。保存済み契約と正の明示上限は変更しない。
 
 Taxion が intake、完全な hash の承認、Reviewer の設定承認、Flow、同梱の role 別指示を構成する。利用者が JSON や prompt ファイルを作る必要はない。計画中の `/quit`・EOF は記録を残すが、コード実行を開始しない。Planner error は自動 retry しない。
 
@@ -110,17 +110,17 @@ Taxion が intake、完全な hash の承認、Reviewer の設定承認、Flow�
 
 実行中の Flow を hold した場合、`/adopt` は最後に成功した `/plan` の結果を、未承認のバージョン付き補足として選ぶ。この処理に入れるのは、成功済み Coder の結果を保存した後の `REVIEW`、または独立した `REQUEST_CHANGES` を保存した後で修正回数上限内の `REPAIR` だけ。
 
-`/approve` は、変更のない契約内でその draft の完全一致を別途承認する。`/step` は別途 hold を解除し、実行する。計画・採用時には、これらの選択を推測しない。観測、Memory、target、hold ID、draft version の変更は拒否する。`/plan` が失敗した場合は console の proposal cache を消す。他の提案は修正へ強制的に変換せず、別の調査、再計画、Human 判断を要求する。
+`/approve` は、変更のない契約内でその draft の完全一致を別途承認する。`/step` は別途 hold を解除し、実行する。計画・採用時には、これらの選択を推測しない。観測、Memory、target、hold ID、draft version の変更は拒否する。`/plan` が失敗した場合は console の proposal cache を消す。他の提案は修正へ強制的に変換せず、別の調査、再計画、利用者の判断を要求する。
 
 同じ操作は `workflow planner-draft --file PATH` でも使える。request は `flowId`、`id`、`expectedDraftId`、`expectedChangeId`、`workflow feedback-target` の `target`、`actor`、`source`、`reason` を含む。`proposal` には `conversation plan` の JSON 結果をそのまま入れる。
 
-draft には観測時刻・hash、出典の結果・SHA 対象、Memory version、推論、不確実性を保存し、全履歴を再帰的に埋め込まない。同じ ID・内容の再送は元の version を返し、異なる内容での ID 再利用は拒否する。取り込んだ session ID と actor・source は提供された出典情報であり、認証済み provider・Human identity ではない。内容の妥当性と契約の維持には、引き続き明示的な Human 補足承認が必要。scope・acceptance・identity・予算の改訂、Orchestrator が選ぶ無人実行、新規依頼の intake は、補足承認とは別に扱う。
+draft には観測時刻・hash、出典の結果・SHA 対象、Memory version、推論、不確実性を保存し、全履歴を再帰的に埋め込まない。同じ ID・内容の再送は元の version を返し、異なる内容での ID 再利用は拒否する。取り込んだ session ID と actor・source は提供された出典情報であり、認証済み provider・利用者 identity ではない。内容の妥当性と契約の維持には、引き続き利用者による補足の明示承認が必要。scope・acceptance・identity・予算の改訂、Orchestrator が選ぶ無人実行、新規依頼の intake は、補足承認とは別に扱う。
 
 `conversation intake --file PATH` は、元の依頼本文 `request`、明示した `status: DRAFT` の `task`、`actor`、`source` を記録する。提案 Task は独立した `CODER`・`REVIEWER` を持ち、`authorizationId` と持込みの判断は持たない。scope・acceptance の未解決な不足は残せるが、不完全な契約を実行可能として確認することはできない。
 
 結果と `conversation proposal --task ID` は、契約全文と内容の `hash` を表示する。モデル・worker は呼ばない。任意の `planningSelection`・`planningReason` は、その draft への別途上限付き `conversation ask|plan` だけを承認し、`READY` にはしない。修正版は新しい Task ID で記録し、前の version を保持する。
 
-`conversation confirm --file PATH` は、`taskId`、`expectedHash`、`actor`、`source`、`reason`、設定全体の `selection`、明示した `additionalTaskIds` を受け取る。後続 Task の例は、上限付き Flow の正確な Reviewer Task ID。Human は scope、acceptance、検証 command、repository、identity、設定を、その hash と照合して承認する。
+`conversation confirm --file PATH` は、`taskId`、`expectedHash`、`actor`、`source`、`reason`、設定全体の `selection`、明示した `additionalTaskIds` を受け取る。後続 Task の例は、上限付き Flow の正確な Reviewer Task ID。利用者は scope、acceptance、検証 command、repository、identity、設定を、その hash と照合して承認する。
 
 確認は transaction 内で承認を記録して `READY` を準備するが、Dispatch は発行しない。実際の修正回数・時間・session ceiling は、別の `workflow start` で承認する。同一の確認の再送は状態を変えず、確認内容の変更や古い hash は拒否する。設定承認の対象を広げる場合は、新しい global 一意の decision ID が必要。
 
@@ -130,11 +130,11 @@ draft には観測時刻・hash、出典の結果・SHA 対象、Memory version�
 
 停止した Flow から部分成果または成功済み Coder の成果を引き継ぐ場合は、[作業継続手順](../develop/task-graph.md#停止した作業の継続)に従って別 worktree を用意する。元の baseline と保存済み commit／tree・変更 path を保持し、後続 Task の承認前に照合する。これは commit mode・snapshot mode のどちらにも必要で、成功済み Coder を再実行しない場合だけ `continueFromDispatchId` を指定する。一般の契約変更で同じ worktree を使う場合には、最後に記録した出力 SHA を後続 baseline に保持する追加条件があるが、予算停止の継続に必要な別 worktree の代わりにはならない。
 
-明示確認は前 Flow を停止し、Task を `superseded` にする。発行済み指示、結果、承認、元の上限は残す。successor は新しい承認と別の上限付き Flow を取得し、過去の承認を旧契約の拡大許可に読み替えない。actor・source は提供された出典情報であり、認証済み Human identity ではない。
+明示確認は前 Flow を停止し、Task を `superseded` にする。発行済み指示、結果、承認、元の上限は残す。successor は新しい承認と別の上限付き Flow を取得し、過去の承認を旧契約の拡大許可に読み替えない。actor・source は提供された出典情報であり、認証済み利用者 identity ではない。
 
 監視中の `/adopt` は、他の Planner 提案を `workflow planner-action` により、出典付き未解決 feedback として採用する。修正補足にはしない。`HOLD`・`HUMAN_REQUIRED` は hold と理由を保持する。`INVESTIGATE` は別の上限付き調査、`REPLAN` は明示的な successor intake・再承認へ進める。`REPORT` は作業を承認せず、選択した報告を記録する。
 
-これらの判断が未解決なら、Human が `feedback-resolve` で明示処置するか、承認済み finding を適用するか、successor を確認するまで継続を拒否する。助言の選択だけでは調査を実行せず、置換契約を承認しない。この明示 Human 確認は、自然言語契約の完全自動作成や Orchestrator の無人実行を提供する操作ではない。
+これらの判断が未解決なら、利用者が `feedback-resolve` で明示処置するか、承認済み finding を適用するか、successor を確認するまで継続を拒否する。助言の選択だけでは調査を実行せず、置換契約を承認しない。この利用者による明示確認は、自然言語契約の完全自動作成や Orchestrator の無人実行を提供する操作ではない。
 
 質問の観測は、Task 履歴、Dispatch 指示、Flow 契約内の過去の結果判断も整理する。結果全文と出典 hash は残し、再帰的に繰り返される指示は省く。整理した場合は `projection` で説明する。instruction hash は元の保存記録を識別し、その記録は `task graph` で確認できる。追加モデル呼出しは行わない。
 
@@ -142,7 +142,7 @@ draft には観測時刻・hash、出典の結果・SHA 対象、Memory version�
 
 `--path` は繰り返して1〜16ファイルを指定する。必須の `--max-bytes` は総出典量の上限で、最大65536。上限超過、欠落、binary は error とし、切り詰めた証拠を返さない。shell command、filter、外部 diff tool、model tool は許可しない。隔離した質問は通常の明示的な時間・session soft ceiling と service 利用許可確認を保つ。新しい Git 証拠は独自の SHA、観測期間、内容 hash を持ち、過去の担当がその file を検討したこと、テストしたこと、実行状態を確認したことの証拠にはならない。
 
-監視中の同等操作は `/investigate PATH QUESTION`。`--investigation-max-bytes` と設定した質問上限を使う。`/apply REVIEWER 0,2 HUMAN-INSTRUCTION` は、最後に成功した質問・調査から、0始まりの confirmed finding index を明示選択する。`CODER` は、独立した `REQUEST_CHANGES` の保存後で、修正回数上限内の場合だけ使う。
+監視中の同等操作は `/investigate PATH QUESTION`。`--investigation-max-bytes` と設定した質問上限を使う。`/apply REVIEWER 0,2 USER-INSTRUCTION` は、最後に成功した質問・調査から、0始まりの confirmed finding index を明示選択する。`CODER` は、独立した `REQUEST_CHANGES` の保存後で、修正回数上限内の場合だけ使う。
 
 選択した主張、引用、不確実性、出典 target、Memory version、上限内の調査証拠を保持した未承認補足を提案する。未選択の会話は次の指示にコピーしない。`/approve` と `/step` は別の操作。記録の変更、出典 bytes・hash の偽造、不正 index、非対応 role は拒否する。質問失敗時は応答 cache を消す。通常の質問を自動適用することはない。
 
@@ -154,11 +154,11 @@ draft には観測時刻・hash、出典の結果・SHA 対象、Memory version�
 
 Copilot で active session を所有する runner がない場合は、`runtime stop` で保存 session の完全一致を確認して接続する。OpenCode は別 process からの停止専用接続に対応せず、所有 runner で終了と部分成果の保存を確認する。新たな承認済み実行の前に所有権を照合する。
 
-監視中の `/interrupt`・`いま止める` は、`/hold` や Task cancellation と別の操作。`conversation watch --interactive-execution` は、選択した `/step`・`/auto` の実行中も Human 入力を受け付けることを明示選択する。二つ目の所有実行を拒否し、進捗と実行失敗を報告する。対象付き hold・中断も引き続き使える。
+監視中の `/interrupt`・`いま止める` は、`/hold` や Task cancellation と別の操作。`conversation watch --interactive-execution` は、選択した `/step`・`/auto` の実行中も利用者の入力を受け付けることを明示選択する。二つ目の所有実行を拒否し、進捗と実行失敗を報告する。対象付き hold・中断も引き続き使える。
 
 EOF・`/quit` はこの console が所有する実行だけを安全に中断し、cleanup を待つ。別 process の実行は cancel しない。flag がなければ同期的に実行する。非対話 workflow の既定と、変更不可の Flow 上限は維持する。中断は Flow を停止するものであり、再開や契約変更の許可ではない。
 
-`runtime`・`workflow run|step` の `--compact-context` は、role prompt から再帰的に入れ子になった過去の指示を省く。過去の結果全文、finding、検証の証拠、出典 hash、Human 判断、Memory、現在の契約は保つ。整理する各結果判断を実際の保存 Dispatch と照合し、モデルで要約したり、通知なく切り詰めたりしない。全履歴は `task graph` で参照できる。
+`runtime`・`workflow run|step` の `--compact-context` は、role prompt から再帰的に入れ子になった過去の指示を省く。過去の結果全文、finding、検証の証拠、出典 hash、利用者の判断、Memory、現在の契約は保つ。整理する各結果判断を実際の保存 Dispatch と照合し、モデルで要約したり、通知なく切り詰めたりしない。全履歴は `task graph` で参照できる。
 
 この option は system prompt と session configuration hash を変えるため、新規 session に使い、実行接続時も繰り返して指定する。`runtime stop` には指定しない。既存 session は元の option を保つ。繰返し入力を減らすもので、provider credit の保証ではない。context 生成に追加のモデル呼出しは行わない。
 
@@ -168,7 +168,7 @@ EOF・`/quit` はこの console が所有する実行だけを安全に中断し
 
 Reviewer の `changedFiles` は空の配列です。再現された Coder の差分はレビュー対象であり、Reviewer 自身の変更ではありません。`worktreeChanged` は Reviewer 開始後の変更を表します。実際に変更した場合は blocker として報告し、controller による tree の照合も成功扱いにしません。
 
-controller の検証待ちだけでは suspension を要求しない。ただし、実際の失敗、出力欠落、根拠のない Reviewer 承認、必要な Human 判断は引き続き進行を拒否する。新規 session に使い、実行接続時も繰り返す。`runtime stop` には指定しない。既存 session の既定 prompt は変更しない。
+controller の検証待ちだけでは suspension を要求しない。ただし、実際の失敗、出力欠落、根拠のない Reviewer 承認、必要な利用者の判断は引き続き進行を拒否する。新規 session に使い、実行接続時も繰り返す。`runtime stop` には指定しない。既存 session の既定 prompt は変更しない。
 
 ### 設定
 
@@ -333,7 +333,7 @@ execution:
 
 Taxion は OAuth、credential vault、token 更新、認証 file の直接解析を実装しない。利用者は provider tool で login し、CI・worker は provider が対応する credential を渡す。明示的な `env:NAME` は対応する provider に credential を渡すだけで、Taxion に保存しない。実装済みの GitLab adapter は、明示 API host、account、namespace・repository、permission を照合して別 host へ切り替えない。API endpoint と Git clone endpoint は別で、独自の clone SSH port は API port ではない。内部配置の識別情報を公開記録に含めない。
 
-Taxion は出典付き作業承認、期待 account と対象の検査、実行上限、観測を担当する。provider login は Taxion Task の作業承認ではない。service 利用資格と課金の判断は provider に任せ、公式 API の観測と Human が承認した利用根拠を区別する。独自の契約認証・課金システムは実装しない。
+Taxion は出典付き作業承認、期待 account と対象の検査、実行上限、観測を担当する。provider login は Taxion Task の作業承認ではない。service 利用資格と課金の判断は provider に任せ、公式 API の観測と利用者が承認した利用根拠を区別する。独自の契約認証・課金システムは実装しない。
 
 実行契約では次を区別する。
 
@@ -341,7 +341,7 @@ Taxion は出典付き作業承認、期待 account と対象の検査、実行�
 | --- | --- |
 | 認証 | 最新の provider 照会で選択した実 account を確認する。credential の所持だけでは一致を証明しない。 |
 | 認可 | 現在の Task と不変の Dispatch instruction に、選択する完全な tuple への同一の出典付き承認が必要。provider access は別に検査する。 |
-| AI 利用資格 | provider が決める。Copilot の選択済み Dispatch は公式 session quota API の明示的な account access・capacity 判定と出典付き Human 承認を照合する。OpenCode の provider access・account quota は未確認とする。`contractRef` は予定する契約を示すだけで、SDK の課金契約を選択したり、契約上の資格を証明したりしない。独自の契約認証は対象外。 |
+| AI 利用資格 | provider が決める。Copilot の選択済み Dispatch は公式 session quota API の明示的な account access・capacity 判定と出典付き利用者の承認を照合する。OpenCode の provider access・account quota は未確認とする。`contractRef` は予定する契約を示すだけで、SDK の課金契約を選択したり、契約上の資格を証明したりしない。独自の契約認証は対象外。 |
 | 契約上の支払者 | 契約または権限ある外部記録で判断し、account 名や token 所有者から推測しない。実装済み adapter では provider の支払者・invoice 情報を取得できない。 |
 | 実測使用量 | token、nano-AIU、quota request percentage は別の量。取得できた call 別 nano-AIU と status を報告し、account allowance と同じ単位であることを確認できない残高・割合は unavailable とする。任意の SDK credit ceiling は session 別 soft ceiling で、project 予算や請求額ではない。 |
 
@@ -369,7 +369,7 @@ schema は入れ子 namespace を含む `github`・`gitlab`・`bitbucket` の re
 {
   "kind": "taxion.execution-config.v1",
   "taskId": "task-id",
-  "reason": "Human approved these identities and this contract for the task",
+  "reason": "The user approved these identities and this contract for the task",
   "allowed": [
     {
       "version": 1,
@@ -391,9 +391,9 @@ schema は入れ子 namespace を含む `github`・`gitlab`・`bitbucket` の re
 }
 ```
 
-既存の `task track --file` で、この object を decision の `text` に JSON 文字列として保存し、`id: "human-decision-1"` と実 Human decision の `source` を付ける。各 `allowed` entry は完全な設定 tuple で、異なる entry の account・契約を混ぜない。Task の repository path と承認参照は一致が必要で、未決 Human decision と terminal Task は拒否する。検査は Task 状態を保つ。記録 decision は local な認可証拠で、このコマンドは作者認証、外部 credential 検証、runtime 操作の認可を行わない。runtime は後述の独立検査を行う。
+既存の `task track --file` で、この object を decision の `text` に JSON 文字列として保存し、`id: "human-decision-1"` と実際の利用者の判断を示す `source` を付ける。各 `allowed` entry は完全な設定 tuple で、異なる entry の account・契約を混ぜない。Task の repository path と承認参照は一致が必要で、未解決の利用者の判断と terminal Task は拒否する。検査は Task 状態を保つ。記録 decision は local な認可証拠で、このコマンドは作者認証、外部 credential 検証、runtime 操作の認可を行わない。runtime は後述の独立検査を行う。
 
-Human 承認の `reason` は選択 account・`contractRef` に対する用途と承認済み根拠、`source` は実 decision を示す。start・resume・send は provider 検査の前後で、現在 Task と発行済み Dispatch に同じ出典付き記録を要求する。参照だけ、または provider 照会成功だけでは Human 承認にならない。Taxion は記録と tuple を確認し、自由文 reason の法的な真偽は検証せず、provider quota 応答から支払者を特定しない。
+利用者の承認の `reason` は選択 account・`contractRef` に対する用途と承認済み根拠、`source` は実 decision を示す。start・resume・send は provider 検査の前後で、現在 Task と発行済み Dispatch に同じ出典付き記録を要求する。参照だけ、または provider 照会成功だけでは利用者の承認にならない。Taxion は記録と tuple を確認し、自由文 reason の法的な真偽は検証せず、provider quota 応答から支払者を特定しない。
 
 `config check --dispatch <dispatch-id>` は固定 Global・Project file と環境変数を、現在 Task 承認と保存 Dispatch instruction の両方に照合する。承認は Dispatch 発行時に含まれている必要があり、後から Task を承認しても既存 Dispatch の設定選択肢は増えない。欠落・停止済み Dispatch、inactive Task、repository 不一致、保存承認にない組合せは拒否する。`--task` と `--dispatch` は排他的とする。
 
@@ -411,7 +411,7 @@ taxion conversation ask --task <task-id> \
 
 応答は `confirmed`・`assumptions`・`unconfirmed` を分ける。確認済み主張は、渡した保存 Task、Dispatch、Memory version、review flow 内の解決可能な JSON pointer を引用する。記録証拠の説明であり、その真偽を独立検証したものではない。context は観測時刻と content hash を含める。回答中に記録が変わった場合は元 context を保持し、`recordsChangedDuringAnswer` を true にする。回答対象を通知なしに変更しない。context は選択 Task とその Flow に限る。
 
-質問は Dispatch の binding、Graph 更新、feedback 解決、instruction 編集、Human 承認取得、Coder・Reviewer 履歴への追加を行わない。失敗時も別 session ID と報告 token 使用量を結果に含め、次の有料試行前に取得可能な SDK credit status を確認できるようにする。usage 欠落、不正な引用、provider 失敗は error とする。取消後も質問 session を停止し、cleanup 失敗は明示する。128 KiB を超える入力と64 KiB を超える最終回答は拒否し、通知なしに切り詰めない。
+質問は Dispatch の binding、Graph 更新、feedback 解決、instruction 編集、利用者の承認取得、Coder・Reviewer 履歴への追加を行わない。失敗時も別 session ID と報告 token 使用量を結果に含め、次の有料試行前に取得可能な SDK credit status を確認できるようにする。usage 欠落、不正な引用、provider 失敗は error とする。取消後も質問 session を停止し、cleanup 失敗は明示する。128 KiB を超える入力と64 KiB を超える最終回答は拒否し、通知なしに切り詰めない。
 
 保存記録だけを読み、追加の実調査、handoff の hold・release、回答の instruction 適用は行わない。変更には明示的な `workflow handoff`、feedback、version 付き draft、または後述の監視 console を使う。依頼から計画までの対話と追加調査の受入れは、2026-10-12 に完了した M12 の実 SDK 受入れ（#53/#54・#73/#74）で確認した。文書作業の実モデル受入れと停止後の復旧は、完了済みの #78・#79・#80 に記録した。すべての CLI 入口の実モデル実行を確認したという意味ではない。
 
@@ -431,7 +431,7 @@ taxion conversation watch --flow <flow-id> --actor <human-id> \
   --scanner /absolute/path/to/betterleaks
 ```
 
-console は **入力を読む前に** handoff hold を保存する。次の role を止め、実行中 role は止めない。通常の EOF、入力 error、`/quit` では hold を維持する。`--interactive-execution` では入力を受け付けたまま実行する。この mode の EOF・終了では、この console が所有する実行に中断を要求して終了処理を待つ。他 process の実行は中断しない。timeout を承認にしない。actor・source は提供された decision metadata で、認証済み Human identity の証拠ではない。
+console は **入力を読む前に** handoff hold を保存する。次の role を止め、実行中 role は止めない。通常の EOF、入力 error、`/quit` では hold を維持する。`--interactive-execution` では入力を受け付けたまま実行する。この mode の EOF・終了では、この console が所有する実行に中断を要求して終了処理を待つ。他 process の実行は中断しない。timeout を承認にしない。actor・source は提供された decision metadata で、認証済み利用者 identity の証拠ではない。
 
 `/step`・`/continue`・`続行` は表示中の引継ぎを明示的に release し、最大1 role turn を実行する。`workflow step` は console なしで同じ runner を使う。`workflow run` と異なり、step 成功時は結果を保存し、次 role を発行せず runner claim を解放する。次の明示 step が結果を使って認可済み role を Dispatch するか、レビュー・受入れが十分なら完了を記録する。Flow が running の間は step 後に hold を戻す。
 
@@ -486,7 +486,7 @@ go test ./internal/forge -run '^TestLiveGitHubRepositoryAccess$'
 
 `allowed` は完全な設定 object のまま保つ。review ID は `<flow-id>-review-0` から `<flow-id>-review-<maxRepairs>` までの完全一致で、修正 Coder は実装 Task ID を保つ。承認する review Task だけを列挙し、空 ID、空白、pattern、重複、主 Task ID は拒否する。省略時は従来の単一 Task 範囲を保つ。別 Flow、未列挙の再レビュー、似た prefix の ID は認可しない。
 
-Controller は出典付き decision を変更せず生成 review Task と Dispatch instruction にコピーする。core と設定層は Task の完全一致 membership と同じ完全 allowed tuple を検査する。認可対象は設定選択だけで、Flow 上限、review scope、role 隔離、操作別認証は引き続き適用する。発行後に名前を足しても既存 Dispatch は拡張しない。新 Flow を始める前に Human 認可を記録する。
+Controller は出典付き decision を変更せず生成 review Task と Dispatch instruction にコピーする。core と設定層は Task の完全一致 membership と同じ完全 allowed tuple を検査する。認可対象は設定選択だけで、Flow 上限、review scope、role 隔離、操作別認証は引き続き適用する。発行後に名前を足しても既存 Dispatch は拡張しない。新 Flow を始める前に利用者の認可を記録する。
 
 Runtime command は active な Task Graph Dispatch と role 専用 system prompt file を要求する。Task の worktree と Dispatch recipient が role・workspace を選ぶ。保存 snapshot を永続 session 契約として role prompt に追加し、turn と SDK compaction をまたいで system context に保つ。SDK tool は明示 `--tools` allowlist を要求する。permission handler は Coder に割当 worktree 内の書込みと許可済み SDK tool の一回使用を許し、Reviewer には worktree の read access を個別承認する。相対 read path は割当 worktree を基準に解決する。worktree 内の既存 directory にある未作成 leaf も許し、tool が通常の file 不在を報告できるようにする。dangling symlink、範囲外 path、解決できない親 directory は拒否する。handler は SDK permission 要求に適用し、host・外部 tool は独自の保護を使う。resume は prompt、CLI、worktree、tool 設定を保存 hash と照合する。
 
@@ -494,7 +494,7 @@ Runtime command は active な Task Graph Dispatch と role 専用 system prompt
 
 SDK の session credit ceiling は応答後に判定される soft ceiling で、総費用を抑える保証ではない。credit と token は別の単位。`workflow run` の ceiling は各 Coder・Reviewer session に独立して適用し、**Flow 全体の合計予算ではない**。個人の課金 receipt を repository 文書・実行証拠に公開しない。
 
-`task plan --repo <repo>` は SQLite Task Graph と参照 Memory から後続操作を再構成する。延期 Task、その出典と再開条件、既存 decision、各 Dispatch の発行契約と結果を保つ。未決 Human decision、延期作業の再評価、証拠収集、review の照合、実行候補を分ける。計画生成は保存 Task 状態と認可を変えない。同じ出力は session 再生成後も `GET /api/tasks/plan?repo=<repo>` と ACP `taxion/plan` の `{"repository":"<repo>"}` から取得できる。
+`task plan --repo <repo>` は SQLite Task Graph と参照 Memory から後続操作を再構成する。延期 Task、その出典と再開条件、既存 decision、各 Dispatch の発行契約と結果を保つ。未解決の利用者の判断、延期作業の再評価、証拠収集、review の照合、実行候補を分ける。計画生成は保存 Task 状態と認可を変えない。同じ出力は session 再生成後も `GET /api/tasks/plan?repo=<repo>` と ACP `taxion/plan` の `{"repository":"<repo>"}` から取得できる。
 
 ### OpenCode ACP の実行
 
@@ -542,7 +542,7 @@ v0.7.16 の共通 runner は Reviewer の起動前に `review_budget` event を�
 
 `workflow handoff --file <path>` は既存 Flow に出典付き `HOLD`・`RELEASE` を保存し、`expectedChangeId` を最新 handoff change と比較する。hold は次 Dispatch の発行と未開始実行を止め、実行中 role の認可済み作業と最終結果は保つ。runner は引継ぎ時点で handoff-held error を返し、現在の結果を取り消さず claim を解放する。明示 release は不変の契約と上限で後の `workflow run`・`advance` を許すが、作業を直接開始せず、safety stop の Flow も復帰させない。request 形式と競合の制約は Task Graph に記載する。
 
-`workflow feedback-target --id <flow-id>` は最新 Dispatch の instruction と結果 identity を読む。`workflow feedback --file <path>` はその完全一致対象を比較し、出典付き Human 応答と handoff hold を一つの workspace transaction で保存する。元結果、verdict、認可を保ち、文章を自動送信したり契約変更の承認と扱ったりしない。古い対象は明示 error とし、feedback・hold を保存しない。対象変更に関係なく次引継ぎを保留する場合は `workflow handoff` を別に使う。
+`workflow feedback-target --id <flow-id>` は最新 Dispatch の instruction と結果 identity を読む。`workflow feedback --file <path>` はその完全一致対象を比較し、出典付き利用者応答と handoff hold を一つの workspace transaction で保存する。元結果、verdict、認可を保ち、文章を自動送信したり契約変更の承認と扱ったりしない。古い対象は明示 error とし、feedback・hold を保存しない。対象変更に関係なく次引継ぎを保留する場合は `workflow handoff` を別に使う。
 
 未解決 feedback は running Flow の release を止める。`workflow feedback-resolve` は最新観測対象と hold ID に出典付き `KEEP_CONTRACT` を記録する。release 前に全 pending feedback を解決する。解決自体は hold 解除も prompt 送信もしない。この初回処置は承認契約を保ち、新 instruction への feedback 適用は行わない。safety stop の Flow を release しても実行権限は戻らない。
 
@@ -558,7 +558,7 @@ usage event は選択 model と取得できた token・cache 件数を SQLite �
 
 role 別の file tool allowlist は既定で空。通常の native skill 利用には `skill` を追加するが、repository file の読取り・編集権限は増えない。通常の code・文書変更には `--coder-tools view,create,edit,apply_patch` を指定し、独立 Reviewer は `--reviewer-tools view` の read-only にする。
 
-Task の `fileAccess` は別の Human 承認済み SDK file permission 範囲で、SDK tool の許可や認可済み `scope` の拡張にはならない。`{"level":"exact","paths":["src/file.go"]}` は指定した正規化済み repository 相対 file だけを許し、指定済みの新 file も含む。新 Task の既定 `{"level":"committed"}` は Dispatch 開始 SHA で追跡済みの path を許す。`{"level":"all"}` は割当 worktree 全体の file・directory と新 file を許す。全 level で worktree 外と `.git` を拒否し、Reviewer は read-only を保つ。file permission callback と Git 結果検査は同じ保存 policy を適用する。`fileAccess` なしの旧 Task・Dispatch は従来動作を保つ。intake proposal で確認・承認してから confirm する。
+Task の `fileAccess` は利用者が別途承認する SDK file permission の範囲で、SDK tool の許可や認可済み `scope` の拡張にはならない。`{"level":"exact","paths":["src/file.go"]}` は指定した正規化済み repository 相対 file だけを許し、指定済みの新 file も含む。新 Task の既定 `{"level":"committed"}` は Dispatch 開始 SHA で追跡済みの path を許す。`{"level":"all"}` は割当 worktree 全体の file・directory と新 file を許す。全 level で worktree 外と `.git` を拒否し、Reviewer は read-only を保つ。file permission callback と Git 結果検査は同じ保存 policy を適用する。`fileAccess` なしの旧 Task・Dispatch は従来動作を保つ。intake proposal で確認・承認してから confirm する。
 
 Task の `validationCommands` は Controller の検査操作を認可する。新 Coder Dispatch は Conventional Commits の subject と contextual body を要求する。body は `intent(scope):`・`decision(scope):`・`rejected(scope):`・`constraint(scope):`・`learned(scope):` の action line で実際の理由を記録し、任意の Git trailer を続ける。Controller は結果受入れ前に保存実行開始 SHA 以降の全 commit を確認し、独立 Reviewer は理由と作業の一致を確認する。turn 終了時に構造化応答を検査し、repository・worktree・SHA・scope を実 Git で照合して、割当 worktree で認可 command を実行し、観測出力と完了を SQLite に保存する。検証 command は Controller の host 権限で `sh -c` として実行するため、Task 認可時にその作用も承認する。明示的な `dispatch transition --result-file` も同じ検証を行い、`--validation-timeout` は既定10分となる。
 
@@ -587,7 +587,7 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | コマンド | option と意味 |
 | --- | --- |
 | `role-packet create`, `role-packet verify` | `create` は `--task ID`・`--task-hash SHA256`・`--baseline-sha SHA`・`--target-tree-hash SHA`・`--scope-digest SHA256`・`--acceptance-digest SHA256`・`--role CODER\|VALIDATOR\|REVIEWER` を要求する。`--prohibit TEXT` は繰返し可能。`--previous-evidence-hash SHA256` は Validator・Reviewer で必須。`verify` は `--file JSON`・`--expected-hash SHA256` を要求する。両方とも canonical JSON を標準出力へ返し、状態変更や実行許可を行わない。[field と検査の制限](role-handoff-packets.md)を参照。 |
-| `ready` | 引数なしは、今の coding agent が Taxion を操作する静的メタプロンプトを stdout に出し、状態を変更しない。`--install-skill` は home の `.agents/skills/taxion/SKILL.md` に同梱版を明示配置して同じ prompt を出す。`--update-skill` は内容が未改変の Taxion 管理ファイルだけを同梱版へ更新し、同じ prompt を出す。`--check-skill` は本体の許容版・CLI 契約・内容を JSON で確認し、欠落・不一致・改変は非zero終了する。3つの option は併用不可。`--help` は入力形式を表示する。どの経路も設定・workspace・認証を要求せず、モデル・外部 process を起動しない。予算・scope・設定の Human 承認や独立 Reviewer を代替せず、実行準備やskill実ロードの診断でもない。 |
+| `ready` | 引数なしは、今の coding agent が Taxion を操作する静的メタプロンプトを stdout に出し、状態を変更しない。`--install-skill` は home の `.agents/skills/taxion/SKILL.md` に同梱版を明示配置して同じ prompt を出す。`--update-skill` は内容が未改変の Taxion 管理ファイルだけを同梱版へ更新し、同じ prompt を出す。`--check-skill` は本体の許容版・CLI 契約・内容を JSON で確認し、欠落・不一致・改変は非zero終了する。3つの option は併用不可。`--help` は入力形式を表示する。どの経路も設定・workspace・認証を要求せず、モデル・外部 process を起動しない。予算・scope・設定の利用者の承認や独立 Reviewer を代替せず、実行準備やskill実ロードの診断でもない。 |
 | `request` | 必須は `--repo REPO`。正の `--max-task-nano-aiu N` は hard ceiling で、使用量が不明なら追加 Dispatch/session を止める。省略・0は承認済み `provider` または `account`・`reset-daily` のみ許可する。[課金ガイド](billing.md)に条件を示す。`off`・`flow` での省略、負値・非有限値は拒否する。`--timeout D` は1秒以上で、既定は1時間。Copilot は30以上の `--max-ai-credits N` も要求し、OpenCode では省略する。任意の `--worktree PATH` は現在の repository root が既定で、clean かつ branch に接続している必要がある。`--max-repairs N` は既定1、範囲0–100。`--context-path FILE` は追跡済み UTF-8 text を最大16 file、合計64 KiB まで繰り返し指定できる。`--cli PATH`・`--base-directory PATH` は Copilot の executable と state directory を指定する。位置引数の文章を元依頼とし、省略時は console で入力する。`/plan` はモデルによる計画、`/approve` は表示計画と期限・repair 回数を持つ coding・review を認可し、`/quit` は実行前に終了する。Dispatch/session 数の上限は repair 上限から導出し、Copilot の credit ceiling は session 別で、合計予算ではない。 |
 | `config check` | `--billing` は新規提案用の申告済み課金条件と方式を JSON で表示し、他の option と併用しない。`--sources` は値を含めず設定 field の出典を表示する。`--capabilities` は静的 adapter 対応を示し、実 access・契約資格ではない。`--task ID` は保存 Task 承認、`--dispatch ID` はさらに保存 Dispatch instruction と解決済み設定を照合する。両者は最大一つだけ選ぶ。 |
 | `config bind` | `--dispatch ID` は未 binding Dispatch に現在選択中の固定 file 設定を保存する。任意の `--sources`・`--capabilities` は `config check` と同じ表示。credential 認証や契約資格の証明はせず、`--task` は受け付けない。 |
@@ -612,11 +612,11 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | `task track`, `task transition` | `--file JSON` で Task Graph request を渡す。新 Task の `fileAccess` は `{"level":"committed"}` が既定で、Task JSON の `{"level":"exact","paths":["repo/relative/file"]}`・`{"level":"all"}` で範囲を選ぶ。`outputMode` は `commit` が既定。`worktree-tree-snapshot` は commit なしで Controller 取得の Git tree をレビューする。snapshot mode、tree SHA、変更 path は承認契約の一部で、認可済み Task の policy 変更には新しい認可 decision が必要。更新時の `fileAccess` 省略は保存 policy を保つ。snapshot Task の更新では保存 `outputMode` を明示する。`task graph` は保存 Graph を表示し、`task plan --repo REPO` は認可を変えず後続計画を再構成する。 |
 | `dispatch` | `--task ID`・`--repo REPO` が必須。`--relationship TYPE` は `NONE`・`CONTINUES`・`AMENDS`・`SUPERSEDES`・`CANCELS`・`SUSPENDS`・`RESUMES`・`INDEPENDENT` を受け付ける。`NONE` は既定値で、`NONE` 以外または関連先を指定する場合は Task Graph の初期化が必要。`NONE` に `--related-dispatch`・`--relationship-reason` は指定できず、他の関係には両方必要。`INDEPENDENT` の関連先は別 Task の Dispatch でなければならない。 |
 | `dispatch transition` | `--id`・`--status`・`--actor`・`--reason` が必須。Dispatch を終了する遷移では `--result-file JSON` が必須で、成功時は認可済み検証も実行する。`--validation-timeout DURATION` は既定10分で、正の値を要求する。 |
-| `conversation intake`, `conversation confirm` | `--file JSON` は元依頼と提案契約、または正確な Human confirm を渡す。intake は proposal 保存、confirm はその完全一致契約の承認だけで、作業を発行しない。 |
+| `conversation intake`, `conversation confirm` | `--file JSON` は元依頼と提案契約、または正確な利用者 confirm を渡す。intake は proposal 保存、confirm はその完全一致契約の承認だけで、作業を発行しない。 |
 | `conversation proposal` | `--task ID` で保存 proposal と正確な hash を読む。 |
 | `conversation ask`, `conversation plan` | `--task ID`・`--question TEXT`・`--timeout DURATION` が必須。Copilot は30以上の `--max-ai-credits N` も要求し、OpenCode では省略する。`--cli PATH`・`--base-directory PATH` は Copilot executable と state directory を選ぶ。各 call の取得利用量を報告し、account 残高・利用率は同単位の allowance を確認できない限り unavailable とする。Copilot の credit は session 別 soft ceiling。 |
 | `conversation investigate` | ask・plan の option に加え、繰返し可能な `--path REPO_PATH` と必須 `--max-bytes N`（1–65,536）を受け付ける。保存 SHA の明示 file だけを読む。 |
-| `conversation watch` | `--flow ID`・`--actor ID`・`--source TEXT` で Flow と Human 入力を識別する。実行する `/ask`・`/plan` には正の `--question-timeout DURATION` が必要。Copilot は30以上の `--question-max-ai-credits N` も要求し、OpenCode では省略する。`/investigate` にはさらに1–65,536の `--investigation-max-bytes N` が必要。これらの既定値は未設定（0）。`--interactive-execution` はこの console の選択 run 中に Human 入力を受け、EOF・quit はこの console が所有する実行を安全に中断する。選択する `workflow run`・`workflow step` の option は `--` の後に指定する。 |
+| `conversation watch` | `--flow ID`・`--actor ID`・`--source TEXT` で Flow と利用者の入力を識別する。実行する `/ask`・`/plan` には正の `--question-timeout DURATION` が必要。Copilot は30以上の `--question-max-ai-credits N` も要求し、OpenCode では省略する。`/investigate` にはさらに1–65,536の `--investigation-max-bytes N` が必要。これらの既定値は未設定（0）。`--interactive-execution` はこの console の選択 run 中に利用者の入力を受け、EOF・quit はこの console が所有する実行を安全に中断する。選択する `workflow run`・`workflow step` の option は `--` の後に指定する。 |
 | `conversation search` | `--scope JSON`・`--task ID` と、非空で512 byte以内の検索語を `--question TEXT` または `--query TEXT` で指定する。承認済み local corpus を検索し、出典付き結果を Task に付ける。`--sdk` は有料 Orchestrator turn を一回だけ明示的に要求し、`--timeout DURATION`・`--max-ai-credits N` も必須となる。`--cli PATH`・`--base-directory PATH` で executable と state directory を選ぶ。`--sdk` なしでは local 検索だけで model を呼ばない。 |
 | `workflow start`, `workflow recover`, `workflow handoff`, `workflow interrupt`, `workflow terminate`, `workflow feedback`, `workflow feedback-resolve`, `workflow draft`, `workflow draft-discard`, `workflow draft-approve`, `workflow planner-draft`, `workflow planner-action`, `workflow question-draft` | 各操作の request を `--file JSON` で渡す。`workflow start` は期限・repair 回数・Task-wide nano-AIU ceiling を持つ Flow を認可し、初回 Coder Dispatch を発行する。`workflow terminate` は未確認・未開始 Coder Dispatch だけを取り消し、Flow を hold して新しい Task 契約による再承認を可能にする。`continueFromDispatchId` は停止後の保存済み Coder 成功結果を引き継ぐ。後続 Task は同じ output SHA、snapshot mode では同じ tree SHA・path も対象にする。recover、handoff、feedback、draft、planning は指定操作だけを行い、変更 scope・予算を通知なしに承認しない。形式は [Task Graph](../develop/task-graph.md) を参照する。 |
 | `workflow advance`, `workflow show`, `workflow evaluate`, `workflow feedback-target`, `workflow planning-context` | `--id FLOW_ID` で保存 review flow を選ぶ。`workflow evaluate` は Task 単位の承認上限・消費・残量を含む report を出す。前述の各節に従う読取り・遷移操作。 |

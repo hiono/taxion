@@ -51,4 +51,4 @@ log (raw: what happened)
 
 閾値設定、明示承認、Dispatch 検査を完成させるため M6-3 を再開した。採択した述語の範囲は [ADR-0019](0019-structured-memory-approval-and-dispatch-checks.md)、現在の操作と制約は Memory 文書に記載する。上記の初期3回実装は過去の記録である。
 
-M10 の Issue #66 は SQLite Memory に出典参照、版付き改訂、失効、lifecycle event を追加する。Task Graph の `memoryRefs` は Memory ID を参照し、Dispatch は欠落・置換済み・失効済み・未承認 guardrail の参照を拒否する。project・global は workspace の隣の同じ `memory.db` 内の scope のままで、保存先を分けない。旧 warning counter は個別証拠を保持しなかったため、移行は集計の出典を label で示し、各発生履歴を再構成しない。無関係 entry 間の conflict は Human が明示記録する関係とし、未解決なら両 entry の Dispatch 参照を止める。
+M10 の Issue #66 は SQLite Memory に出典参照、版付き改訂、失効、lifecycle event を追加する。Task Graph の `memoryRefs` は Memory ID を参照し、Dispatch は欠落・置換済み・失効済み・未承認 guardrail の参照を拒否する。project・global は workspace の隣の同じ `memory.db` 内の scope のままで、保存先を分けない。旧 warning counter は個別証拠を保持しなかったため、移行は集計の出典を label で示し、各発生履歴を再構成しない。無関係 entry 間の conflict は利用者が明示記録する関係とし、未解決なら両 entry の Dispatch 参照を止める。

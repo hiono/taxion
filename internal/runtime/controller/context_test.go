@@ -96,7 +96,7 @@ func testCompactPlanningContext(t *testing.T, db *store.Store, ledger string, be
 	}
 	for _, decision := range decisions {
 		if decision.ID == approval.ID && decision != approval {
-			t.Fatal("compact rendering changed Human approval")
+			t.Fatal("compact rendering changed user approval")
 		}
 		if !strings.HasPrefix(decision.ID, "result:") {
 			continue

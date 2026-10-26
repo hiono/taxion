@@ -230,7 +230,7 @@ func TestPlannerDraftRejectsStaleForgedAndNonExecutableAdvice(t *testing.T) {
 					t.Fatal(err)
 				}
 				if _, err := mem.Revise(memory.KindDecision, 1, memory.Entry{
-					Title: "Changed acceptance guidance", Body: "Human must reassess this newer version.",
+					Title: "Changed acceptance guidance", Body: "the user must reassess this newer version.",
 					SourceRefs: []string{"human:updated-memory"},
 				}, "human", "revise decision"); err != nil {
 					t.Fatal(err)

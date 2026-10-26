@@ -29,7 +29,7 @@ Controller が保存済みの出典と完全一致を照合し、担当に必要
 
 `--compact-context` は役割別の JSON projection を使う。
 目的、許可・禁止範囲、受入れ、必要な証拠、検証、レビュー対象、
-Human decision、Memory、仕様引用、予算方針を維持する。
+利用者の判断、Memory、仕様引用、予算方針を維持する。
 設定・intake 承認は ID・出典・理由を渡し、設定全体の転記を省く。
 通常の Task 関係情報の再掲も省き、依存と引継ぎ理由は保持する。
 Planner・質問 context では、別に結果が含まれる箇所の decision を ID 参照にする。

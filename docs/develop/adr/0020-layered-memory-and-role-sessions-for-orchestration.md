@@ -49,7 +49,7 @@ project/global は階層とは独立した適用範囲とし、情報をその�
 Task Graph と Dispatch は現在の実行状態、依存関係、権限を管理する。
 Memory は判断や経験の根拠を保存・再利用する。
 両者を ID と証拠で関連づけ、判断と実行状態の記録先を区別する。
-承認済み scope、acceptance、Human の判断、repository、baseline・対象 SHA、
+承認済み scope、acceptance、利用者の判断、repository、baseline・対象 SHA、
 指摘、是正結果、証拠から次の指示を構成する。
 controller は必須情報の欠落、矛盾、古い結果を検出すると実行を止め、
 不足項目と必要な確認を示す。次の指示は保存済みの判断と証拠から構成する。
@@ -82,7 +82,7 @@ controller が Task・Dispatch・role・repository・SHA と結果を照合す�
 完了判定には保存済み契約に一致する result と必要な evidence を要求する。
 Reviewer の承認は対象 SHA に結び、SHA が変わった成果物は再レビューする。
 
-Human の質問や懸念は Task に記録し、Dispatch の変更は明示的な遷移として管理する。
+利用者の質問や懸念は Task に記録し、Dispatch の変更は明示的な遷移として管理する。
 変更、停止、再開、差し替えの関係を記録し、各結果を対象 Dispatch と照合する。
 保留作業と独立した成果物には実行前に永続的な作業記録を用意する。
 Task Graph は実行状態を、Memory は判断の根拠を保持する。

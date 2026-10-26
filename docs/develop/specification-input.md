@@ -59,7 +59,7 @@ Task の登録・改訂は [Task Graph reference](task-graph.md) の状態と承
 
 Dispatch は承認と本文を含む仕様を複写し、instruction hash に含める。
 レビュー進行は、Coder・Reviewer・修正 Coder 間で同じスナップショットを要求する。
-Task の仕様を変更した場合は、更新した契約の Human 承認を求める。
+Task の仕様を変更した場合は、更新した契約の利用者の承認を求める。
 
 ローカル原本を指定した資料は、指示の生成、実行、質問への送信、外部公開で全文 hash を照合する。
 原本は 256 MiB までの通常ファイルを扱う。
@@ -90,7 +90,7 @@ Task の authorization・scope・acceptance を別のフィールドに保持す
 
 ## ローカル自動検索
 
-Human は、承認したローカル資料から本文を検索し、出典付き引用を
+利用者は、承認したローカル資料から本文を検索し、出典付き引用を
 Coder・Reviewer に渡す方式を採択した。公開・合成資料の判断は
 [ADR-0025](adr/0025-approved-local-specification-search-and-tools.md)、
 利用者が明示した会話要求の扱いは
@@ -160,7 +160,7 @@ message ID を変えた場合は別の scope hash になる。
 }
 ```
 
-`taxion specification scope-hash --scope scope.json` の hash を Human が確認し、
+`taxion specification scope-hash --scope scope.json` の hash を利用者が確認し、
 同じ JSON に `approval` を追加する。
 
 ```json
@@ -211,4 +211,4 @@ credit ceiling は SDK の session soft ceiling であり、請求額の hard ca
 
 実 SDK では、Orchestrator が検索を呼び、別 session の Coder が同じ引用を使って成功結果を保存した。
 その後の再承認済み Reviewer は、保存済みの Coder SHA・同じ引用・解放済み worktree を照合して
-`APPROVE` を返し、#60 の独立 Reviewer 受入れを完了した。追加の有料実行は新しい Human 承認を必要とする。
+`APPROVE` を返し、#60 の独立 Reviewer 受入れを完了した。追加の有料実行は新しい利用者の承認を必要とする。

@@ -97,7 +97,7 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 				t.Fatal(err)
 			}
 			approval := config.Approval{
-				Kind: config.ApprovalKind, TaskID: "implementation", Reason: "Human authorizes listed reviews within flow ceilings",
+				Kind: config.ApprovalKind, TaskID: "implementation", Reason: "the user authorizes listed reviews within flow ceilings",
 				Allowed: []config.Config{resolved.Config},
 			}
 			if scope != "none" {
@@ -144,7 +144,7 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 					found = found || saved == decision
 				}
 				if !found {
-					t.Fatal("generated Task changed or lost Human configuration approval")
+					t.Fatal("generated Task changed or lost user configuration approval")
 				}
 				return dispatch
 			}

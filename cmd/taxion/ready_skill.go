@@ -41,9 +41,9 @@ executables before issuing work. --store selects the ledger path, not workspace.
 Run internal Planner only when requested, not to repeat planning already done.
 Read saved Task, Flow, Dispatch results and evidence before choosing another run.
 For recovery, inspect workflow feedback-target and the saved partial/output tree;
-do not fabricate a successful result, stop proof or Human approval.
+do not fabricate a successful result, stop proof or user approval.
 Preserve completed work. New budgets, changed scope and permissions need explicit
-Human approval. Controller validation and independent same-target review are
+user approval. Controller validation and independent same-target review are
 required before claiming completion. Inventory and skill integrity checks do not
 prove authentication, authorization, model loading or successful execution.
 `
