@@ -254,7 +254,7 @@ func New(config Config) (*Adapter, error) {
 		mode = sdk.ModeEmpty
 	}
 	options := &sdk.ClientOptions{
-		Connection:       sdk.StdioConnection{Path: config.CLIPath},
+		Connection:       sdk.StdioConnection{Path: config.CLIPath, Args: []string{"--disable-builtin-mcps"}},
 		WorkingDirectory: config.WorkingDirectory, BaseDirectory: config.BaseDirectory,
 		LogLevel: "error", Mode: mode,
 	}
@@ -329,6 +329,7 @@ func (a *Adapter) ConfigHash() string {
 		MaxAICredits          float64                        `json:",omitempty"`
 		ToolPolicy            *tools.Policy                  `json:",omitempty"`
 		DiscoveryPolicy       string                         `json:",omitempty"`
+		BuiltinMCPPolicy      string
 	}{
 		Role:                  a.config.Role,
 		SystemPrompt:          a.config.SystemPrompt,
@@ -349,6 +350,7 @@ func (a *Adapter) ConfigHash() string {
 		MaxAICredits:          a.config.MaxAICredits,
 		ToolPolicy:            a.config.ToolPolicy,
 		DiscoveryPolicy:       discoveryPolicy,
+		BuiltinMCPPolicy:      "disabled-per-process-v1",
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])

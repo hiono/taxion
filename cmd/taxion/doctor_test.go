@@ -18,6 +18,8 @@ func doctorFixtureCLI(t *testing.T) string {
 	if err := os.WriteFile(cli, []byte(`#!/bin/sh
 [ "$1" = --no-auto-update ] || exit 1
 shift
+[ "$1" = --disable-builtin-mcps ] || exit 1
+shift
 [ "$1" = --version ] && { echo fixture; exit 0; }
 [ "$2" = list ] && [ "$3" = --json ] || exit 2
 if [ "$1" = mcp ]; then printf '{"mcpServers":{}}'; else printf '[]'; fi
@@ -55,7 +57,7 @@ execution: {requester: human, worker: local, approvalRef: fixture}
 		t.Fatal(err)
 	}
 	if report.Backend != "copilot" || report.Worktree != root || report.Mode != "native-cli-defaults" ||
-		report.BaseDirectory != filepath.Join(home, "chosen-copilot") {
+		report.BaseDirectory != filepath.Join(home, "chosen-copilot") || !report.BuiltinMCPsDisabled {
 		t.Fatal("doctor did not use the selected execution context", report)
 	}
 	for _, path := range []string{".taxion", report.BaseDirectory} {

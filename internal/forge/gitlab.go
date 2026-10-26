@@ -3,6 +3,7 @@ package forge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -78,7 +79,7 @@ func checkGitLabTarget(path, account string, write bool, query func(string) ([]b
 func checkGitLabTargetEndpoints(endpoints *config.Endpoints, path, account string, write bool, query func(string) ([]byte, error)) error {
 	user, err := query("user")
 	if err != nil {
-		return gitlabQueryError(endpoints, err)
+		return gitlabQueryError(endpoints, fmt.Errorf("identity-query: %w", err))
 	}
 	var identity struct {
 		Username string `json:"username"`
@@ -91,7 +92,7 @@ func checkGitLabTargetEndpoints(endpoints *config.Endpoints, path, account strin
 	}
 	body, err := query("projects/" + url.PathEscape(path))
 	if err != nil {
-		return gitlabQueryError(endpoints, err)
+		return gitlabQueryError(endpoints, fmt.Errorf("project-query: %w", err))
 	}
 	var project gitlabProject
 	if json.Unmarshal(body, &project) != nil || !strings.EqualFold(project.PathWithNamespace, path) {
@@ -218,6 +219,14 @@ func gitlabAPI(ctx context.Context, host string, env []string, method, endpoint 
 		return nil, ctx.Err()
 	}
 	if err != nil {
+		if method == "GET" {
+			reason := "command unavailable"
+			var exit *exec.ExitError
+			if errors.As(err, &exit) {
+				reason = fmt.Sprintf("command exit status %d", exit.ExitCode())
+			}
+			return nil, fmt.Errorf("taxion: GitLab read-only API query failed (%s, %s); no mutation requested; provider details withheld", method, reason)
+		}
 		return nil, fmt.Errorf("taxion: GitLab API failed; delivery may be uncertain, provider details withheld")
 	}
 	return output, nil

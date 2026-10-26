@@ -1,12 +1,12 @@
 {
-  "profileHash": "733b106cc5a8c348c32f193eb513a5c8813c8542a02569834fac358264cd0bd3",
-  "contentHash": "b5a8a9b0fd96828007108cf28f4051e91c7b50eaef8f57650fdfeaca5a3c9dbd",
-  "writerSession": "7baef537-20d4-442d-a0e3-5ca3f908f1ee",
-  "reviewerSession": "cdcf9a92-428c-4ee4-8147-3892d22d5394",
-  "decision": "APPROVE",
-  "source": "independent-review:cdcf9a92-428c-4ee4-8147-3892d22d5394",
+  "profileHash": "25805a3a784af71a1abbd4bf5d232143bd455a0798d39ea0aae17975763b5932",
+  "contentHash": "835278bb498730b8d0eec830ec416d1a42b38d3aa04a6031269c7ec53bc30f38",
   "statement": {
-    "at": "2026-10-26T10:58:09.172837321Z",
+    "at": "2026-10-26T23:03:25.59023695Z",
     "claims": null
-  }
+  },
+  "writerSession": "7baef537-20d4-442d-a0e3-5ca3f908f1ee",
+  "reviewerSession": "rc2-diagnostic-wording-review-20261027",
+  "decision": "APPROVE",
+  "source": "independent-review:rc2-diagnostic-wording-review-20261027"
 }

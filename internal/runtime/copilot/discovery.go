@@ -34,20 +34,21 @@ type DiscoveredAsset struct {
 }
 
 type DiscoveryReport struct {
-	Backend       string            `json:"backend"`
-	CLI           string            `json:"cli"`
-	Version       string            `json:"version"`
-	Worktree      string            `json:"worktree"`
-	BaseDirectory string            `json:"baseDirectory"`
-	Mode          string            `json:"mode"`
-	Paths         []DiscoveryPath   `json:"paths"`
-	Assets        []DiscoveredAsset `json:"assets"`
-	Problems      []string          `json:"problems"`
-	Limitations   []string          `json:"limitations"`
+	Backend             string            `json:"backend"`
+	CLI                 string            `json:"cli"`
+	Version             string            `json:"version"`
+	Worktree            string            `json:"worktree"`
+	BaseDirectory       string            `json:"baseDirectory"`
+	Mode                string            `json:"mode"`
+	BuiltinMCPsDisabled bool              `json:"builtinMcpsDisabled"`
+	Paths               []DiscoveryPath   `json:"paths"`
+	Assets              []DiscoveredAsset `json:"assets"`
+	Problems            []string          `json:"problems"`
+	Limitations         []string          `json:"limitations"`
 }
 
 func (a *Adapter) inspectCommand(ctx context.Context, args ...string) ([]byte, error) {
-	command := exec.CommandContext(ctx, a.config.CLIPath, append([]string{"--no-auto-update"}, args...)...)
+	command := exec.CommandContext(ctx, a.config.CLIPath, append([]string{"--no-auto-update", "--disable-builtin-mcps"}, args...)...)
 	command.Dir = a.config.WorkingDirectory
 	command.Env = []string{}
 	for _, item := range a.environment {
@@ -69,13 +70,15 @@ func (a *Adapter) Inspect(ctx context.Context) (DiscoveryReport, error) {
 	report := DiscoveryReport{
 		Backend: "copilot", CLI: a.config.CLIPath, Worktree: a.config.WorkingDirectory,
 		BaseDirectory: a.config.BaseDirectory, Mode: "native-cli-defaults",
-		Paths: []DiscoveryPath{}, Assets: []DiscoveredAsset{}, Problems: []string{},
+		BuiltinMCPsDisabled: true,
+		Paths:               []DiscoveryPath{}, Assets: []DiscoveredAsset{}, Problems: []string{},
 		Limitations: []string{
 			"Inventory is not proof of model selection, successful skill loading, or working server connections.",
 			"Role tool permissions and file-access restrictions still apply; native file hooks are host code, not sandboxed by those callbacks.",
 			"Path-specific instructions apply only to matching files. Missing native metadata is not inferred.",
 			"Authentication, paid service access and contract eligibility are not checked.",
 			"Remote organization customizations and resident-session caches are not queried; detected files are not a loaded-session inventory.",
+			"Built-in MCP servers are disabled in this runtime process without editing user settings. Other configured MCP servers, hooks and shell network access require separate policy checks.",
 		},
 	}
 	var failures []error

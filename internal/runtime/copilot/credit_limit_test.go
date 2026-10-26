@@ -35,10 +35,11 @@ func TestCreditLimitValidationBindingAndSDKConfiguration(t *testing.T) {
 		ResponseSchema   map[string]any
 		PermissionPolicy string
 		DiscoveryPolicy  string
+		BuiltinMCPPolicy string
 	}{
 		unlimited.config.Role, unlimited.config.SystemPrompt, unlimited.config.WorkingDirectory,
 		unlimited.config.CLIPath, unlimited.config.BaseDirectory, unlimited.config.AvailableTools,
-		unlimited.config.ResponseSchema, "coder-worktree-write-v1", "native-cli-discovery-v2",
+		unlimited.config.ResponseSchema, "coder-worktree-write-v1", "native-cli-discovery-v2", "disabled-per-process-v1",
 	})
 	if err != nil {
 		t.Fatal(err)

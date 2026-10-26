@@ -39,6 +39,8 @@ func TestNativeDoctorUsesExecutionContextWithoutModelOrForeignPaths(t *testing.T
 [ "$COPILOT_HOME" = "$TAXION_INSPECTION_HOME" ] || exit 11
 [ "$1" = --no-auto-update ] || exit 12
 shift
+[ "$1" = --disable-builtin-mcps ] || exit 15
+shift
 [ "$1" = --version ] && { printf 'fixture-1\n'; exit 0; }
 [ "$2" = list ] && [ "$3" = --json ] || exit 13
 case "$1" in
@@ -76,7 +78,7 @@ esac
 			t.Fatal("doctor leaks configuration contents or scans an unselected backend", unexpected)
 		}
 	}
-	if adapter.started || len(adapter.sessions) != 0 {
+	if adapter.started || len(adapter.sessions) != 0 || !report.BuiltinMCPsDisabled {
 		t.Fatal("doctor starts an SDK session")
 	}
 	if _, err := os.Stat(filepath.Join(root, "SHOULD_NOT_RUN")); !os.IsNotExist(err) {

@@ -186,6 +186,8 @@ prompt を自動再送しない。別 process/provider の session への再接�
 
 ## Skills・plugins・MCP・hooks と出力圧縮
 
+Copilot 子プロセスには `--disable-builtin-mcps` を常に渡し、組み込み MCP を無効にする。利用者の設定は編集せず、モデル提供元への通信も無効にしない。Doctor は `builtinMcpsDisabled: true` と設定一覧を区別して返す。他の MCP、フック、プラグイン、シェル通信まで禁止する隔離機能ではないため、Task の権限を別途確認する。この動作はセッションハッシュの `BuiltinMCPPolicy` に含め、従来のセッションへ新しい契約で接続しない。明示的に承認した独自 MCP の経路は維持する。
+
 通常の Copilot SDK session は create・resume ともに探索を明示的に有効にする。SDK に `nil` を渡すだけでは project・personal skill が読み込まれず、CLI の一覧と一致しない場合がある。探索方式は config hash の `native-cli-discovery-v2` に含め、旧方式の session を新しい実行契約で再開しない。明示 ToolPolicy と取消専用 adapter の探索抑止、role 別 file・shell permission は維持する。
 
 外側の coding agent 向けの操作 skill は `ready --install-skill` で明示配置する。
