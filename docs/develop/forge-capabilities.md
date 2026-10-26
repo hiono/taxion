@@ -12,7 +12,7 @@ GitHub adapter を共通の承認・送信状態・証拠照合の実装例と�
 | --- | --- | --- | --- |
 | GitHub.com | host、owner/repo、Issue/PR と番号 | Issue 作成・編集・comment・close、SHA を指定した PR review | Issue 作成・Issue/PR comment・Issue close を実装。Git・SQLite・gh 脚本で回帰確認し、承認済みコメントを実 GitHub へ一件公開して再送を照合 |
 | GitHub Enterprise Server | instance host、owner/repo、種別・番号、server 版 | server 版の REST API と権限に従う | 対象 host・版・credential を選定して追加受入れする |
-| GitLab.com・Self-Managed・Dedicated | instance host、project ID／URL encoded path、Issue/MR と project 内 iid | Issue 作成・note・close、MR note | Self-Managed adapter は実装済み。非公開の検証環境で Issue 経路を glab から追加検証した (#75)。MR の作成・approval・close／merge は未実装 |
+| GitLab.com・Self-Managed・Dedicated | instance host、project ID／URL encoded path、Issue/MR と project 内 iid | Issue 作成・note・close、MR note | Self-Managed の Issue adapter は実環境で確認済み (#75)。MR の作成・更新・close は `glab` から直接確認したが、Taxion の MR 作成・approval・close／merge は未実装。Web prefix を持つ MR の参照解決にも制約がある |
 | Bitbucket Cloud | workspace、repository UUID／slug、PR ID、別作業管理の host・project・key | Cloud REST API の repository・PR・comment・approval。Issue tracker の利用可否は対象 tenant の提供状況で確認する | Cloud／Data Center と作業管理を Human が選定してから実装する |
 | Bitbucket Data Center | instance host・context path、project key、repository slug／ID、PR ID、server 版 | Data Center REST API の PR・comment・参加者 approval／decline・merge | Data Center API 用 adapter と実環境受入れを後続にする |
 | Jira | 作業管理 host、project、Issue ID／key、transition ID | Issue 作成・comment、許可された workflow transition | repository adapter と独立した作業管理 adapter として選定する |
@@ -84,10 +84,35 @@ GitLab Self-Managed 環境で `glab` の host 指定、API account と project a
 Taxion adapter から一時 Issue を作成し、comment・close・送信結果の再照合まで実行した。
 非公開の instance・利用者・project・Issue の識別情報は公開しない。
 
-実験環境に merge request がなかったため、MR 操作は試していない。
-MR の実験は M15 の条件ではなく、実際の MR と必要な承認フローがある場合に再開する。
-instance tier と approval API の提供状況は未確認だが、これらは現在の GitHub 対応を受け入れる条件ではない。
-接続と Issue 操作では有料 AI 呼出しを行っていない。
+### 2026-10-26 の MR 追加確認
+
+Human の承認に基づき、指定された非公開の実験用 project で一時 branch と draft MR の作成・更新・close を実行した。
+既存ファイルと保護された既定 branch は変更せず、新しい branch に実験用テキストだけを追加した。
+merge、approval の付与、実験用モデル session の起動、既存成果の削除は行っていない。
+確認対象は Taxion `v0.7.19` のソースと、version API が `19.5.1`・`enterprise=false` を返す instance である。
+
+| 対象 | 実測と受入れ範囲 |
+| --- | --- |
+| Taxion の repository adapter | `TestLiveGitLabRepositoryAccess` で実効主体・project・書き込み権限の照合が成功 |
+| MR の作成・更新 | `glab api` で作成し、title と description の更新を再取得して照合。Taxion adapter からの操作ではない |
+| 対象 SHA | commit 応答、MR の `sha`、`diff_refs.head_sha`、実験 branch の先端が一致。ソース変更後の再審査は未実施 |
+| MR の close | API 操作後の再取得で `state=closed`・`closed_at`・`merged_at=null` を確認。既定 branch の SHA は実験前後で同一 |
+| approval | project の `approvals`、MR の `approvals`・`approval_state` はいずれも `404`。この主体では照合できず、承認済みとして扱わない |
+| 秘密保護機能 | project の `security_settings` は `404`、`secret_push_protection_enabled` は `null`。有効化・拒否・除外・監査の実環境受入れは未完了 |
+| CI | project は `builds_access_level=disabled`・`jobs_enabled=false`、MR の `head_pipeline` は `null`。pipeline 一覧は `403` のため列挙できず、CI 実行の受入れは行っていない |
+| Taxion の MR 参照 | 実際の MR URL を `ResolvePublicReference` に渡すと `unsupported GitLab reference`。Web prefix が repository path の前にある URL を、現在の照合処理が拒否する |
+
+MR の操作結果と API 応答は非公開で保存し、公開記録には host・account・project・MR 番号・実験 SHA を含めない。
+一時 MR は close 済みで、実験 branch は証拠として保持した。
+読み取り専用の adapter 照合と、provider API の直接操作を区別する。
+CLI・ACP を通した MR の一貫した操作、共通証拠への結合、approval 判定は確認済みとしない。
+
+#75 の残件は、MR 操作の Taxion 対応、明示した Web endpoint を使う参照解決、
+approval と秘密保護機能を検証できる環境での受入れである。
+`404` は、この主体で API を確認できなかった記録であり、機能不在や契約 tier の断定には使わない。
+MR の追加受入れは M15 や現在の GitHub 対応の受入れ条件には含めない。
+
+### Bitbucket の環境選定
 
 [#76](https://github.com/hiono/taxion/issues/76) で Bitbucket の Cloud／Data Center、
 Jira 等の作業管理、利用する認証主体・権限を先に採択する。
