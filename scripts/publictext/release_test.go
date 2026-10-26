@@ -48,6 +48,20 @@ func TestReleasePresentationUsesExactProfileAndStaticSource(t *testing.T) {
 		output.String() != "## Fixed\n\n設定内容を保持します。\n" {
 		t.Fatal("release notes changed or unavailable", output.String(), err)
 	}
+	if err := os.WriteFile("VERSION", []byte("1.2.4-rc.1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if mutation, err := releaseSource("v1.2.4-rc.1", false); err != nil || mutation.Title != "Taxion 1.2.4-rc.1" {
+		t.Fatal("RC release text identity rejected", mutation, err)
+	}
+	for _, tag := range []string{"v1.2.4-rc.0", "v1.2.4-rc.01", "v1.2.4-beta.1", "v1.2.4-rc.1+local"} {
+		if _, err := releaseSource(tag, false); err == nil {
+			t.Fatal("unsupported prerelease identity accepted", tag)
+		}
+	}
+	if err := os.WriteFile("VERSION", []byte("1.2.3\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	profiles.Projects[0].RequireSemanticReview = true
 	profile, err = json.Marshal(profiles)
 	if err != nil {

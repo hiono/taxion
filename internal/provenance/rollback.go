@@ -3,6 +3,7 @@ package provenance
 import (
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 var formalVersion = regexp.MustCompile(`^v(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$`)
@@ -46,6 +47,10 @@ func validRollbackPolicy(version, current string, platforms []string) bool {
 }
 
 func olderVersion(a, b string) bool {
+	if !ValidReleaseVersion(b) {
+		return false
+	}
+	b, _, _ = strings.Cut(b, "-rc.")
 	x, y := formalVersion.FindStringSubmatch(a), formalVersion.FindStringSubmatch(b)
 	if x == nil || y == nil {
 		return false

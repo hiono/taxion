@@ -67,7 +67,9 @@ product policy の登録自体にも正式 artifact の検証が必要。source 
 
 ## 拒否と復旧
 
-Gate は executable の実 path / bytes、embedded version / revision / release channel、manifest pin、platform、archive hash / contents、checksums を照合する。dirty、local build、Go install、candidate、未知 revision、version 偽装、manifest / archive の変更、再pack、symlink / PATH 差替えは拒否する。version が同じでも hash が違えば拒否する。
+Gate は executable の実 path / bytes、embedded version / revision / release channel、manifest pin、platform、archive hash / contents、checksums を照合する。dirty、local build、Go install、未公開の開発候補、未知 revision、version 偽装、manifest / archive の変更、再pack、symlink / PATH 差替えは拒否する。version が同じでも hash が違えば拒否する。
+
+公開済み試験版の `vMAJOR.MINOR.PATCH-rc.N` は、同じ配布検証と明示 pin の下で使用できる。N は正の整数とし、`beta` や任意の suffix は受け付けない。試験版を使う承認は安定版の承認から引き継がず、mise の版・配布情報・実行ファイル・policy を明示照合する。GitHub の最新安定版としては配布せず、戻し先には以前の公開済み安定版を使う。
 
 拒否時の JSON は `code: provenance-rejected`、`stateChanged: false` を返す。DB を開く前に拒否するため、Task、Flow、Dispatch、approval、audit、deadline、budget は変更しない。`--help` を flag の値として渡しても Gate を省略しない。
 

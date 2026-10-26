@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
+	"github.com/hiono/taxion/internal/provenance"
 	"github.com/hiono/taxion/internal/publictext"
 	"gopkg.in/yaml.v3"
 )
@@ -27,8 +27,8 @@ func releaseSource(tag string, requireReceipt bool) (publictext.Mutation, error)
 	if err != nil {
 		return publictext.Mutation{}, err
 	}
-	if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(tag) {
-		return publictext.Mutation{}, fmt.Errorf("release presentation requires a stable version tag")
+	if !provenance.ValidReleaseVersion(tag) {
+		return publictext.Mutation{}, fmt.Errorf("release presentation requires a stable or rc.N version tag")
 	}
 	version, err := os.ReadFile("VERSION")
 	if err != nil || "v"+strings.TrimSpace(string(version)) != tag {

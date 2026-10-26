@@ -112,6 +112,27 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(document["rollbackVersion"], "v0.7.9")
             self.assertEqual(set(document["rollbackPlatforms"]), {os + "-" + arch for os, arch in release.PLATFORMS})
 
+    def test_rc_manifest_uses_previous_stable_release(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            dist = self.fixture(root, "0.7.21-rc.1", "v0.7.20")
+            self.tags.return_value = ["v0.7.20", "v0.7.21", "v0.7.21-rc.1", "v0.7.19"]
+            with contextlib.chdir(root), mock.patch.dict(os.environ, GITHUB_RUN_ID="12345"), mock.patch.object(release, "command", return_value="go1.27.2"):
+                release.manifest(dist, "v0.7.21-rc.1")
+            document = json.loads((dist / "release-manifest.json").read_text())
+            self.assertEqual(document["version"], "v0.7.21-rc.1")
+            self.assertEqual(document["rollbackVersion"], "v0.7.20")
+            self.assertEqual(document["miseIdentifier"], "github:hiono/taxion@0.7.21-rc.1")
+            self.assertTrue(all("0.7.21-rc.1" in item["name"] for item in document["artifacts"]))
+            with mock.patch.object(mise_smoke.urllib.request, "urlopen") as fetch:
+                for target in ("v0.7.21", "v0.7.21-rc.1", "v0.7.20-rc.1"):
+                    with self.assertRaisesRegex(ValueError, "rollback policy"):
+                        mise_smoke.rollback_artifact(dict(document, rollbackVersion=target), "linux", "amd64")
+                fetch.assert_not_called()
+        for tag in ("v0.7.21-rc.0", "v0.7.21-rc.01", "v0.7.21-beta.1", "v0.7.21-rc.1+build", "v0.7.21-rc.1-snapshot"):
+            self.assertIsNone(release.release_version(tag))
+        self.assertEqual(release.release_version("v0.7.21-rc.12"), (0, 7, 21))
+
     def test_rollback_skips_unpublished_tags_and_uses_newest_older_release(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

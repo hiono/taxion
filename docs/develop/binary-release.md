@@ -42,6 +42,12 @@ manifest schema 2 は、全 archive と executable の hash、checksums hash、s
 
 旧配布物の撤回後の v0.7.15 だけは、workflow が `manifest --rollback-unavailable prior-distributions-withdrawn` を明示指定する。この指定は schema 3 と空の戻し先・対象環境、撤回理由を生成する。公開済みの対応版が残っている場合や API が失敗した場合は停止する。通常の版は従来どおり schema 2 と公開済みの戻し先を要求する。詳しい判断は [ADR-0048](adr/0048-explicit-unavailable-rollback-after-withdrawal.md) に記録する。
 
+## RC の公開
+
+試験版は `vMAJOR.MINOR.PATCH-rc.N`（N は正の整数）に固定する。`VERSION`、配布情報、実行ファイル、mise の選択は同じ版に一致させる。安定版と同じ検証・独立レビュー・配布照合を省略せず、GitHub Release は `prerelease` とし、`latest` にはしない。戻し先は試験版ではなく、その版より前の公開済み安定版を使う。同じ基本版の安定版を RC より前とは扱わない。
+
+利用者は RC を明示選択し、product policy の固定値と管理スキルの操作契約を別途承認する。自動で試験版へ更新せず、旧データベースへの計画の後付けや旧版での更新を行わない。配布検証の成功と実モデルの運用改善は別の結果として記録する。
+
 ## 開発と互換性
 
 source build は [Development mode](../userguide/binary-provenance.md#明示-policy-と初回設定) の隔離 store でのみ使用する。CLI の operation 開始前に immutable な明示 mode policy を要求する。既存 store の policy は自動補完しない。product policy の再pinや development への downgrade は自動実行しない。
