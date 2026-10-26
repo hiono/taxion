@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.3"
+const readySkillVersion = "1.3.4"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -38,6 +38,8 @@ never guess flags, JSON fields or valid lifecycle transitions.
 
 Keep the same executable environment for diagnosis and execution. Check required
 executables before issuing work. --store selects the ledger path, not workspace.db.
+Keep the saved work's explicit --store on every command; do not select a different
+workspace merely because its legacy ledger.json is absent.
 Run internal Planner only when requested, not to repeat planning already done.
 Read saved Task, Flow, Dispatch results and evidence before choosing another run.
 Session credit soft ceilings are not Flow totals or role allocations. The Flow
@@ -49,6 +51,13 @@ ceilings come from the saved plan; do not replace them with a common run flag.
 Use workflow budget to inspect saved stage observations and continuation advice.
 Positive native Flow caps need complete same-configuration usage or explicitly
 approved estimates for every reserved role; missing estimates block planning.
+Stage plan approval does not create an ApprovalBundle or packet delegation.
+Inspect contractGate, record missing approvals through the formal preview/confirm
+commands, then recompute the plan if its Task, configuration or request changed.
+Authorization text must permit execution, not only preview; correcting it needs
+a new exact hash approval. Never rewrite saved authorization.
+Copilot child processes disable built-in MCP servers without editing user settings;
+other network-capable tools and hooks still need separate permission checks.
 For recovery, inspect workflow feedback-target and the saved partial/output tree;
 do not fabricate a successful result, stop proof or user approval.
 Preserve completed work. New budgets, changed scope and permissions need explicit

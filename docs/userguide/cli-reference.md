@@ -571,6 +571,10 @@ Task の `validationCommands` は Controller の検査操作を認可する。�
 
 `workflow plan --file flow.json` は、READY Task と実行要求から工程計画を読取り専用で作る。実行要求は `workflow start` と共通で、`stageBudget:{"version":1}` を追加する。返却する `stateChanged` は `false`、`stagePlan.hash` は承認対象の完全なハッシュである。Task、要求、設定、見積もり結果が変われば、古いハッシュを使った開始を拒否する。
 
+返却する `contractGate` は、その時点の承認束の照合結果である。ハッシュが返っても実行可能とは限らない。承認束が不足していれば `task authorize --manifest FILE` の確認トークンを提示し、明示承認後に `--confirm TOKEN` で保存する。役割間の委譲には別の `task authorize-packets --request FILE` の事前確認と承認記録を使う。計画の承認は承認束や役割間委譲を作成しない。これらの操作で Task・設定・要求が変わった場合は計画を再作成し、新しいハッシュを承認する。
+
+要求の `authorization.text` もハッシュの対象である。事前確認だけを許可する文言を実行許可として使わない。必要なら実行条件を正しく記述してから再確認し、新しいハッシュを承認する。停止済み Flow の記録は書き換えない。文言だけから許可を自動解釈する仕組みではない。
+
 承認後は同じ入力に `stagePlanHash` を追加して `workflow start --file flow.json` を実行する。計画を省略した既存 Flow と `request` は従来動作を保ち、後続工程の時間予約を行わない。外側のオーケストレータが JSON を作成しても、利用者の承認を代行することにはならない。
 
 | `stageBudget` の項目 | 意味 |

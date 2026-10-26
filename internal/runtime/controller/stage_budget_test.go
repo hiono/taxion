@@ -93,6 +93,38 @@ func TestStagePlanPreviewIsReadOnlyAndBindsExactEnvelope(t *testing.T) {
 	}
 }
 
+func TestStagePlanReportsMissingBundleWithoutApprovingExecution(t *testing.T) {
+	configuration := approvalTestConfiguration(t, "https://api.example.test")
+	graph, task := approvalEntryGraph(t, configuration)
+	repairs := 0
+	request := ReviewFlowRequest{
+		ID: "plan-gate", TaskID: task.ID, Repository: task.Repo, MaxRepairs: &repairs,
+		TimeoutSeconds: 3600, Configuration: configuration,
+		StageBudget: &core.StageBudget{Version: 1},
+	}
+	bundles := graph.Approvals
+	graph.Approvals = nil
+	missing, err := PreviewStagePlan(graph, request)
+	if err != nil || missing.StateChanged || missing.ContractGate.Verdict != GateVerdictBlocked ||
+		len(missing.ContractGate.BlockingConditions) != 1 ||
+		missing.ContractGate.BlockingConditions[0].Code != "missing-approval-bundle" ||
+		missing.ContractGate.NextRequiredApproval == "" || missing.ContractGate.StateChanged {
+		t.Fatal("plan disguised missing durable approval", missing, err)
+	}
+	graph.Approvals = bundles
+	ready, err := PreviewStagePlan(graph, request)
+	if err != nil || ready.ContractGate.Verdict != GateVerdictPass ||
+		ready.Plan.Hash != missing.Plan.Hash {
+		t.Fatal("recording a matching bundle changed the plan or remained blocked", ready, err)
+	}
+	request.Configuration = approvalTestConfiguration(t, "https://changed.example.test")
+	drifted, err := PreviewStagePlan(graph, request)
+	if err != nil || drifted.ContractGate.Verdict == GateVerdictPass ||
+		drifted.Plan.Hash == ready.Plan.Hash {
+		t.Fatal("configuration drift did not invalidate authorization and plan", drifted, err)
+	}
+}
+
 func TestStageBudgetFakeClockAndNativeReservations(t *testing.T) {
 	db, ledger, request := stageFlowFixture(t)
 	request.StageBudget.ReviewNanoAIU, request.StageBudget.RepairNanoAIU = 20, 30

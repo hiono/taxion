@@ -23,6 +23,7 @@ type StagePlanPreview struct {
 	MaxNanoAIU   float64         `json:"maxNanoAiu"`
 	Plan         *core.StagePlan `json:"stagePlan"`
 	Limitations  []string        `json:"limitations"`
+	ContractGate GateReport      `json:"contractGate"`
 }
 
 // PreviewStagePlan does not create a Flow, a Dispatch or an account query.
@@ -30,6 +31,10 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 	task, ok := graph.GraphTask(request.TaskID)
 	if !ok || task.Status != core.Ready || request.StageBudget == nil {
 		return StagePlanPreview{}, fmt.Errorf("taxion: stage plan requires a READY Task and stageBudget version 1")
+	}
+	gate, err := ContractGateReport(graph, task.ID, request.Configuration)
+	if err != nil {
+		return StagePlanPreview{}, err
 	}
 	if err := request.StageBudget.Validate(); err != nil {
 		return StagePlanPreview{}, err
@@ -155,7 +160,9 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 		return StagePlanPreview{}, err
 	}
 	plan.Hash = "sha256:" + hash
-	return StagePlanPreview{FlowID: request.ID, TaskID: task.ID, MaxNanoAIU: request.MaxNanoAIU, Plan: plan, Limitations: []string{
+	return StagePlanPreview{FlowID: request.ID, TaskID: task.ID, MaxNanoAIU: request.MaxNanoAIU, Plan: plan, ContractGate: gate, Limitations: []string{
+		"The plan hash is not execution authorization. The current contract gate must pass separately; packet lifecycle delegation and runtime preflight are not established by this report.",
+		"Authorization text is part of the exact hash and must accurately describe the requested execution before approval. A preview-only decision cannot be reused as execution approval; amend the request and obtain a new hash approval.",
 		"Time reservations are controller deadlines, not a completion guarantee or provider credit reservation.",
 		"Session credit limits are soft; no token-to-credit or nano-AIU-to-credit conversion is performed.",
 		"Positive native Flow ceilings require estimates for every reserved role from complete same-configuration usage or an explicit approval; missing estimates block planning, never imply free work.",

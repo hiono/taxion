@@ -154,7 +154,7 @@ esac
 	}
 	selected.Repository.Path = "group/other/repo"
 	if err := CheckRepositoryAccess(context.Background(), selected, false); err == nil ||
-		strings.Contains(err.Error(), "private-provider-detail") {
+		!strings.Contains(err.Error(), "project-query") || strings.Contains(err.Error(), "private-provider-detail") {
 		t.Fatal("provider failure ignored or disclosed", err)
 	}
 	selected = gitLabConfig(t)
@@ -163,6 +163,28 @@ esac
 	cancel()
 	if err := CheckRepositoryAccess(ctx, selected, false); !errors.Is(err, context.Canceled) {
 		t.Fatal("cancellation ignored", err)
+	}
+}
+
+func TestGitLabReadFailuresDoNotImplyMutationDelivery(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "glab"),
+		[]byte("#!/bin/sh\necho private-provider-secret >&2\nexit 42\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	_, err := gitlabAPI(t.Context(), "gitlab.example", os.Environ(), "GET", "user", nil)
+	if err == nil || !strings.Contains(err.Error(), "command exit status 42") ||
+		!strings.Contains(err.Error(), "no mutation requested") ||
+		strings.Contains(err.Error(), "uncertain") || strings.Contains(err.Error(), "private-provider-secret") {
+		t.Fatal("read failure incorrectly implies delivery or exposes provider details", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "glab")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitlabAPI(t.Context(), "gitlab.example", os.Environ(), "GET", "user", nil); err == nil ||
+		!strings.Contains(err.Error(), "command unavailable") {
+		t.Fatal("missing CLI indistinguishable from provider failure", err)
 	}
 }
 

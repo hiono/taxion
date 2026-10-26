@@ -201,6 +201,20 @@ Changing a confirmed contract requires a new Task and approval, not reuse of the
 
 ## Execute an approved Flow
 
+Use the same explicit --store ledger path used for the saved work on every command.
+An absent ledger.json is not a missing workspace if its parent's initialized
+workspace.db exists. Do not silently switch to the worktree's default workspace.
+Before preparing the plan, inspect gate contract for the READY Task and current
+configuration. If the matching ApprovalBundle is absent, use task authorize
+--manifest FILE to preview its exact confirmation token, obtain approval, then
+record it with --confirm TOKEN. A conversation approval or stagePlanHash does not
+create this bundle. A verified-legacy classification is not a new bundle.
+For explicitly delegated same-contract review, preview task authorize-packets
+--request FILE, approve that exact authorization, and persist it with --confirm
+TOKEN before Flow issuance. Empty packet authorizations are not evidence of
+delegation. Do not invent a token or require another approval for already-covered
+internal transitions. Inspect each command's help for the manifest shape.
+
 Explain the repair count, deadline and session soft ceiling and record user authorization.
 Each runtime session's --max-ai-credits is a soft ceiling of at least 30, not a Flow total.
 Without a stage plan it is one common value for Coder and Reviewer: 300 does not
@@ -234,9 +248,16 @@ taxion workflow plan --file flow.json
 plan is read-only (stateChanged:false). It estimates validation/review/repair
 durations from matching saved work with a margin, otherwise labels cold estimates
 as uncertain. It rejects a plan with no room for mandatory stages. Display the
-plan, its hash and outer limits to the user. Do not invent approval. After explicit
+plan, its hash, contractGate and outer limits to the user. A returned hash alone
+does not authorize execution; contractGate must pass, and packet delegation and
+runtime checks remain separate. Do not invent approval. After explicit
 approval, copy stagePlan.hash into flow.json's stagePlanHash without changing the
 request, authorization, Task or effective configuration, then start:
+
+The authorization text is part of the hash. It must describe the requested
+execution accurately before preview. Do not execute a request whose decision
+only permits preview. Correct the request and obtain approval of the new hash;
+never rewrite an already-saved Flow or silently reuse the previous approval.
 
 taxion workflow start --file flow.json
 taxion workflow show --id FLOW-ID
@@ -249,6 +270,14 @@ Do not run before approval. After approval use the existing path below;
 do not require the user to create or transcribe role prompts.
 
 taxion workflow run --id FLOW-ID --builtin-prompts
+
+Copilot child processes disable built-in MCP servers without changing personal
+settings or disabling provider model communication. Doctor reports this process
+policy separately from configured inventory. It is not a general network sandbox:
+other MCP servers, hooks, plugins and shell access require their own checks.
+Do not edit global MCP settings merely to disable the built-in servers.
+The changed runtime policy has a new session hash; do not attach old running
+sessions using the new binding. Preserve them and use the explicit recovery path.
 
 Planned session ceilings come from stageBudget.coderSessionCredits and
 reviewerSessionCredits (optional, zero means unset). Explain them as soft per-session
