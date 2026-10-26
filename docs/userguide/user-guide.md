@@ -457,9 +457,11 @@ taxion task reauthorize --task TASK-ID \
 
 最初の command は保存せずに Task の state、proposal hash、現在の record hash、7次元の digest、redacted drift path、confirmation token を表示します。表示内容と effective configuration を確認してから、同じ token を渡します。確認前に Task または設定が変わると操作を拒否します。成功時は unique な設定承認 decision と ApprovalBundle だけを追記し、Task を READY のまま保ちます。同じ内容を再送しても記録は重複しません。詳細は[Task の検証と承認](task-validate-and-authorize.md#ready-task-の設定を再承認する)を参照してください。
 
-### Flow の上限を決めて開始する
+### Flow の上限と工程計画を承認して開始する
 
 `workflow start` は READY Task に対して Coder Dispatch を発行します。オーケストレータは repair 回数と期限を利用者に示し、作業条件の承認とは別に実行上限への承認を得てから `flow.json` を作成します。token 閾値で Flow は停止しません。
+
+工程配分を使う場合、オーケストレータは `stageBudget:{"version":1}` を指定して `workflow plan` で計画を作ります。利用者に工程別のクレジット数を必ず入力してもらう方式ではありません。利用者は全体期限・作業範囲・権限・修正回数・選択した課金方式と、表示された工程計画を承認します。入力ファイルとハッシュの転記はオーケストレータが担当します。
 
 ```json
 {
@@ -469,7 +471,14 @@ taxion task reauthorize --task TASK-ID \
   "reviewRoot": "/absolute/path/to/reviews",
   "maxRepairs": 1,
   "maxNanoAiu": 1000000000,
-  "timeoutSeconds": 1800,
+  "timeoutSeconds": 3600,
+  "stageBudget": {
+    "version": 1,
+    "coderSessionCredits": 30,
+    "reviewerSessionCredits": 30,
+    "reviewNanoAiu": 100000000,
+    "repairNanoAiu": 100000000
+  },
   "authorization": {
     "id": "task-example-flow-budget",
     "source": "human:budget-1",
@@ -477,6 +486,12 @@ taxion task reauthorize --task TASK-ID \
   }
 }
 ```
+
+```sh
+taxion workflow plan --file flow.json
+```
+
+結果は `stateChanged:false` で、実装・検証・独立レビュー・許可済み修正に使う時間の根拠と `stagePlan.hash` を表示します。承認を得た後、同じ `flow.json` に `stagePlanHash` としてその値を追加します。入力・設定・対象・見積もり根拠が変われば、以前のハッシュで開始できません。
 
 ```sh
 taxion workflow start --file flow.json
@@ -494,6 +509,12 @@ taxion workflow show --id task-example-flow
 ```
 
 `DISPATCH-ID` は start 結果の `dispatchIds[0]` で置き換えます。prompt file は各 role の system prompt です。`workflow run` に tool allowlist を渡さないと、Coder と Reviewer に SDK tool は渡りません。Coder には `view,create,edit,apply_patch`、読み取り専用の Reviewer には `view` を許可します。`workflow run` は Copilot runtime を実際に呼び出し、承認済み条件に従って Coder、独立 Reviewer、許可された修正を進めます。`--max-ai-credits` は per-session の soft ceiling です。
+
+計画付きの実行では、役割ごとのソフト上限を保存済み計画から適用します。異なる上限を承認した場合は共通の `--max-ai-credits` を省略します。この値は提供元のクレジット予約ではなく、厳密な請求上限も保証しません。工程計画を省略した既存の Flow と `request` は、引き続き全体期限と共通のセッション上限を使い、後続工程の時間を予約しません。どちらの経路を使ったかを説明する必要があります。
+
+時間見積もりがない場合の初期値は検証コマンドごとに60秒、レビュー600秒、修正600秒です。同じリポジトリと検証コマンドの成功記録を参照し、長い実績には20%の余裕を加えます。これはモデル内部時間の実測でも完了保証でもありません。必要なら `validationSeconds`・`reviewSeconds`・`repairSeconds` を明示して再提案できます。全体期限に収まらない計画は開始前に拒否します。正の全体利用額上限を指定した場合は、必要な役割の利用額見積もりも保存実績か明示指定から得られなければ開始できません。上記の利用額は承認手順の例で、固定比率の推奨値ではありません。詳細は [CLI リファレンス](cli-reference.md#工程計画と保存観測)を参照してください。
+
+実行担当には元の全体期限から後続工程分を引いた提出期限を伝えます。制御処理は提出・検証を別々の期限で監視し、時間切れなら停止証跡と部分成果を保存します。未完了の提出を成功扱いにしたり、残るレビュー時間を実装へ流用したりしません。再起動しても期限はリセットされません。
 
 未起動の Coder Dispatch を取り消して契約を作り直す場合は、`workflow terminate --file terminate.json` に `{ "flowId": "...", "dispatchId": "...", "actor": "human", "source": "human:recontract", "reason": "..." }` を渡します。これは未開始・未確認の Dispatch のみを取消し、Flow を hold します。次に新しい Task ID と作業条件を明示承認し、`workflow start` で再契約します。新しい Dispatch hash が生成され、以前の指示と audit history は保持されます。
 

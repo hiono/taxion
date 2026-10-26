@@ -13,7 +13,9 @@ import (
 )
 
 type TaskBudgetReport struct {
-	ResumeBasis *ResumeBasis `json:"resumeBasis,omitempty"`
+	ResumeBasis      *ResumeBasis      `json:"resumeBasis,omitempty"`
+	StagePlan        *core.StagePlan   `json:"stagePlan,omitempty"`
+	StageObservation *StageObservation `json:"stageObservation,omitempty"`
 
 	TaskID                   string   `json:"taskId"`
 	FlowID                   string   `json:"flowId"`
@@ -53,6 +55,7 @@ type ResumeBasis struct {
 	StartedAt         time.Time       `json:"startedAt"`
 	Deadline          time.Time       `json:"deadline"`
 	Budget            core.FlowBudget `json:"budget"`
+	StagePlan         *core.StagePlan `json:"stagePlan,omitempty"`
 }
 
 type budgetStopError struct{ reason string }
@@ -87,7 +90,8 @@ func taskBudgetReport(graph core.TaskGraph, flow core.ReviewFlow, now time.Time)
 		now = time.Now().UTC()
 	}
 	report := TaskBudgetReport{
-		TaskID: flow.TaskID, FlowID: flow.ID, DispatchLimit: flow.Budget.MaxDispatches,
+		StagePlan: core.CloneStagePlan(flow.StagePlan),
+		TaskID:    flow.TaskID, FlowID: flow.ID, DispatchLimit: flow.Budget.MaxDispatches,
 		CoderSessionLimit:    flow.Budget.MaxCoderSessions,
 		ReviewerSessionLimit: flow.Budget.MaxReviewerSessions,
 		MaxNanoAIU:           flow.Budget.MaxNanoAIU, AccountQuotaOnly: flow.Budget.AccountQuotaOnly,
@@ -184,6 +188,9 @@ func requireBudgetRoom(graph core.TaskGraph, flow core.ReviewFlow, role string) 
 }
 
 func requireSessionBudget(graph core.TaskGraph, flow core.ReviewFlow, role string) error {
+	if reason := stageStartStop(flow, role, time.Now().UTC()); reason != "" {
+		return &budgetStopError{reason: reason}
+	}
 	report := taskBudgetReport(graph, flow, time.Now().UTC())
 	switch {
 	case report.ElapsedRemainingMillis == 0:
@@ -247,6 +254,7 @@ func appendBudgetAudit(state *store.Workspace, flow core.ReviewFlow, kind string
 		Version: 1, ContractHash: contractHash, AuthorizationHash: authorizationHash,
 		InstructionHash: last.InstructionHash, DispatchID: last.ID,
 		StartedAt: flow.StartedAt, Deadline: flow.Deadline, Budget: flow.Budget,
+		StagePlan: core.CloneStagePlan(flow.StagePlan),
 	}
 	payload, err := json.Marshal(report)
 	if err != nil {

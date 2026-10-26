@@ -15,7 +15,7 @@ import tempfile
 import threading
 import urllib.request
 
-from release import archive_contents, formal_version
+from release import archive_contents, formal_version, release_version
 
 
 def run(arguments, env, directory):
@@ -36,7 +36,7 @@ def rollback_artifact(manifest, system, arch):
             raise ValueError("invalid unavailable rollback policy")
         return None
     if (manifest["schemaVersion"] != 2 or reason or not formal_version(target) or
-            not formal_version(version) or formal_version(target) >= formal_version(version) or
+            not release_version(version) or formal_version(target) >= release_version(version) or
             system + "-" + arch not in platforms):
         raise ValueError("invalid exact-platform rollback policy")
     if target == "v0.7.8":

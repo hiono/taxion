@@ -104,6 +104,11 @@ func reviewFlowFixtureWithPolicy(t *testing.T, outputMode string, guidance *core
 
 func reviewFlowFixtureWithRepository(t *testing.T, repo, outputMode string, guidance *core.BudgetGuidancePolicy,
 	decisions ...core.TaskDecision) (*store.Store, string, ReviewFlowRequest) {
+	return reviewFlowFixtureWithValidations(t, repo, outputMode, guidance, []string{"test -s internal/app.go"}, decisions...)
+}
+
+func reviewFlowFixtureWithValidations(t *testing.T, repo, outputMode string, guidance *core.BudgetGuidancePolicy,
+	commands []string, decisions ...core.TaskDecision) (*store.Store, string, ReviewFlowRequest) {
 	t.Helper()
 	dir := t.TempDir()
 	root := filepath.Join(dir, "repo")
@@ -143,7 +148,7 @@ func reviewFlowFixtureWithRepository(t *testing.T, repo, outputMode string, guid
 		Issue: "Issue #53", Owner: "CODER", Reviewer: "REVIEWER", Status: core.Draft,
 		Objective: "Implement application", Scope: []string{"internal"}, OutOfScope: []string{"README.md"},
 		Acceptance: []string{"application tested"}, RequiredEvidence: []string{"test-report"},
-		ValidationCommands: []string{"test -s internal/app.go"}, ExitCondition: "verified application",
+		ValidationCommands: commands, ExitCondition: "verified application",
 		Branch: "work/task", Worktree: root, BaselineSHA: gitTest(t, root, "rev-parse", "HEAD"),
 		CreatedFrom: "human:1", AuthorizationID: "implementation-authorization",
 		OutputMode:     outputMode,

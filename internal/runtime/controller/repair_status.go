@@ -52,6 +52,8 @@ func flowStopCause(flow core.ReviewFlow) string {
 	}
 	switch {
 	case flow.Reason == "elapsed budget reached", strings.HasPrefix(flow.Reason, "deadline reached"),
+		strings.Contains(flow.Reason, "stage submission deadline"),
+		strings.Contains(flow.Reason, "stage deadline"), strings.Contains(flow.Reason, "insufficient stage time"),
 		strings.Contains(flow.Reason, context.DeadlineExceeded.Error()):
 		return "time-limit"
 	case strings.HasPrefix(flow.Reason, "repair ceiling reached"):

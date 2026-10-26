@@ -225,6 +225,15 @@ func TestUserGuideColdStartExamplesWithoutSDK(t *testing.T) {
 		t.Fatal(err)
 	}
 	flowRequest.ReviewRoot = filepath.Join(dir, "reviews")
+	out.Reset()
+	if err := workflowCommand(t.Context(), []string{"plan", "--file", write("flow.json", flowRequest)}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var preview controller.StagePlanPreview
+	if err := json.Unmarshal(out.Bytes(), &preview); err != nil || preview.StateChanged || preview.Plan == nil {
+		t.Fatal("guide plan is not read-only", err)
+	}
+	flowRequest.StagePlanHash = preview.Plan.Hash
 	if err := workflowCmd([]string{"start", "--file", write("flow.json", flowRequest)}); err != nil {
 		t.Fatalf("guide flow is not executable: %v", err)
 	}

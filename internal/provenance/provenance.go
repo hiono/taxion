@@ -81,7 +81,11 @@ type Report struct {
 
 var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var revisionPattern = regexp.MustCompile(`^[a-f0-9]{40}$`)
-var versionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+var versionPattern = regexp.MustCompile(`^v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})(-rc\.[1-9][0-9]{0,8})?$`)
+
+func ValidReleaseVersion(version string) bool {
+	return versionPattern.MatchString(version)
+}
 
 func Decode(data []byte, target any) error {
 	// Reject duplicate keys as well as unknown fields: a pin must have one meaning.
@@ -187,7 +191,7 @@ func Verify(policy Policy, storeDirectory string, identity Identity) (Report, er
 		}
 		return report, nil
 	}
-	if !versionPattern.MatchString(identity.Version) || identity.Version == "v0.7.6" ||
+	if !ValidReleaseVersion(identity.Version) || identity.Version == "v0.7.6" ||
 		!revisionPattern.MatchString(identity.Revision) || identity.Dirty ||
 		identity.Channel != "github-release" {
 		return report, fmt.Errorf("product mode requires an unmodified official release build")

@@ -170,8 +170,16 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 			stored.StopCode = "SAFETY_STOP"
 			stored.Status, stored.Reason = "STOPPED", reason
 			stored.StopCause = "other"
-			if errors.Is(err, context.DeadlineExceeded) {
-				stored.StopCause = "time-limit"
+			var budgetErr *budgetStopError
+			if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &budgetErr) {
+				stored.StopCode = "BUDGET_STOP"
+				stored.StopCause = ""
+				stored.StopCause = flowStopCause(stored)
+			}
+			if stored.StopCode == "BUDGET_STOP" {
+				if auditErr := appendBudgetAudit(state, stored, "BUDGET_STOP", taskBudgetReport(state.Graph, stored, time.Now().UTC())); auditErr != nil {
+					return auditErr
+				}
 			}
 		}
 		stored.RunnerID = ""
@@ -313,10 +321,27 @@ func readAccountQuotaForCreditStatus(ctx context.Context, dispatch core.GraphDis
 // and after usage events, including before a final result can be adopted.
 func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispatch, cursor uint64, out io.Writer, check func() error) (err error) {
 	defer func() {
-		if err != nil {
-			err = errors.Join(err, c.stopIfExecuting(dispatch.ID))
+		if err == nil {
+			return
 		}
+		var budgetErr *budgetStopError
+		if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &budgetErr) {
+			state, loadErr := c.store.LoadWorkspace()
+			err = errors.Join(err, loadErr)
+			if loadErr == nil {
+				if flow, found := flowForDispatch(state.Graph, dispatch.ID); found && flow.Status == "RUNNING" {
+					err = errors.Join(err, stopFlowForBudget(c.store, flow.ID, "stage execution stopped: "+err.Error()))
+				}
+			}
+		}
+		err = errors.Join(err, c.stopIfExecuting(dispatch.ID))
 	}()
+	finishCtx := ctx
+	ctx, stageCancel, err := c.boundStageContext(ctx, dispatch, false)
+	if err != nil {
+		return err
+	}
+	defer stageCancel()
 	if out == nil {
 		return fmt.Errorf("taxion: runtime event output is required")
 	}
@@ -424,7 +449,7 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 				if err := checkLimits(true); err != nil {
 					return err
 				}
-				observed, finishErr := c.Finish(ctx, dispatch.ID, finalOutput)
+				observed, finishErr := c.Finish(finishCtx, dispatch.ID, finalOutput)
 				if finishErr != nil && observed == nil {
 					return errors.Join(finishErr, c.Fail(dispatch.ID, finishErr.Error()))
 				}

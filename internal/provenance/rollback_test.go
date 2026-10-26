@@ -52,6 +52,29 @@ func TestExplicitUnavailableRollbackProvenance(t *testing.T) {
 	}
 }
 
+func TestReleaseCandidateRequiresPinnedIdentityAndStableRollback(t *testing.T) {
+	for _, version := range []string{"v0.7.21-rc.1", "v0.7.21-rc.12"} {
+		policy, identity, manifest := releaseFixture(t, version)
+		manifest.RollbackVersion = "v0.7.20"
+		manifest.RollbackPlatforms = []string{"linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64", "windows-arm64"}
+		policy.ManifestSHA256 = Hash(writeJSON(t, policy.ManifestPath, manifest))
+		if _, err := Verify(policy, policy.StoreDirectory, identity); err != nil {
+			t.Fatal("explicit RC pin rejected", err)
+		}
+		for _, target := range []string{"v0.7.21", "v0.7.21-rc.1", "v0.7.20-rc.1"} {
+			candidate := manifest
+			candidate.RollbackVersion = target
+			if validManifestRollback(candidate) {
+				t.Fatal("RC rollback was not an older stable release", target)
+			}
+		}
+	}
+	for _, version := range []string{"v0.7.21-rc.0", "v0.7.21-rc.01", "v0.7.21-rc", "v0.7.21-beta.1", "v0.7.21-rc.1+local", "v0.7.21-rc.1-snapshot", "v0.07.21-rc.1"} {
+		if ValidReleaseVersion(version) {
+			t.Fatal("unsupported release accepted", version)
+		}
+	}
+}
 func TestPublishedRollbackPlatformPolicies(t *testing.T) {
 	all := []string{"linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64", "windows-arm64"}
 	if !validRollbackPolicy("v0.7.9", "v0.7.10", all) || !validRollbackPolicy("v0.7.8", "v0.7.9", []string{"linux-amd64"}) ||

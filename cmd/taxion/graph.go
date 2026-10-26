@@ -1035,6 +1035,11 @@ func dispatchTransitionCmd(args []string) error {
 			if result == nil {
 				return fmt.Errorf("successful dispatch requires a result file")
 			}
+			for _, flow := range state.Graph.ReviewFlows {
+				if flow.StagePlan != nil && slices.Contains(flow.DispatchIDs, dispatch.ID) {
+					return fmt.Errorf("planned Flow completion requires bound runtime finalization with its submission and validation deadlines")
+				}
+			}
 			if err := gitproof.ExecuteValidations(ctx, dispatch, result); err != nil {
 				return fmt.Errorf("dispatch Git verification: %w", err)
 			}

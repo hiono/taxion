@@ -134,8 +134,21 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 	if err := checkConfig([]string{"check", "--task", intake.Task.ID}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
+	output.Reset()
+	if err := workflowCommand(t.Context(), []string{"plan", "--file", write("flow.json", flow)}, &output); err != nil {
+		t.Fatal(err)
+	}
+	var stagePreview controller.StagePlanPreview
+	if err := json.Unmarshal(output.Bytes(), &stagePreview); err != nil || stagePreview.StateChanged ||
+		stagePreview.Plan == nil || stagePreview.Plan.Hash == "" {
+		t.Fatal("ready did not provide a read-only exact stage plan", err)
+	}
+	flow.StagePlanHash = stagePreview.Plan.Hash
 	if err := workflowCommand(t.Context(), []string{"start", "--file", write("flow.json", flow)}, io.Discard); err != nil {
 		t.Fatal(err)
+	}
+	if err := workflowCommand(t.Context(), []string{"run", "--id", flow.ID, "--builtin-prompts", "--max-ai-credits", "30"}, io.Discard); err == nil || !strings.Contains(err.Error(), "common session ceiling conflicts") {
+		t.Fatal("common run ceiling silently overrode the approved plan", err)
 	}
 	db, state, err := loadWorkspace()
 	if err != nil {
@@ -221,5 +234,14 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 	if coder.Result.OutputTreeSHA == "" || coder.Result.OutputTreeSHA != reviewer.Result.OutputTreeSHA ||
 		gitTest(t, root, "rev-parse", "HEAD") != intake.Task.BaselineSHA {
 		t.Fatal("recipe lost same-tree review or changed the baseline")
+	}
+	output.Reset()
+	if err := workflowCommand(t.Context(), []string{"budget", "--id", flow.ID}, &output); err != nil {
+		t.Fatal(err)
+	}
+	var budget controller.FlowBudgetObservation
+	if err := json.Unmarshal(output.Bytes(), &budget); err != nil || budget.StateChanged ||
+		len(budget.Stages) == 0 || budget.Budget.StagePlan == nil || len(budget.Continuation.RemainingAcceptance) != 0 {
+		t.Fatal("ready budget recipe lost saved observations", err)
 	}
 }

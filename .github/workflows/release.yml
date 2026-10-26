@@ -91,7 +91,12 @@ jobs:
             python3 scripts/release.py manifest --tag "$GITHUB_REF_NAME"
           fi
           go run ./scripts/publictext -release "$GITHUB_REF_NAME" > .release/public-notes.md
+          release_flags=()
+          if [[ "$GITHUB_REF_NAME" == *-rc.* ]]; then
+            release_flags+=(--prerelease --latest=false)
+          fi
           gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
+            "${release_flags[@]}" \
             --title "Taxion $(cat VERSION)" --notes-file .release/public-notes.md \
             dist/*.tar.gz dist/*.zip dist/SHA256SUMS \
             dist/release-manifest.json dist/release-manifest.sha256
@@ -149,16 +154,21 @@ jobs:
           TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256: ${{ secrets.PUBLIC_TEXT_PRIVATE_IDENTIFIER_SHA256 }}
         run: |
           go run ./scripts/publictext -release "$GITHUB_REF_NAME" > verified-notes.md
-          gh release view "$GITHUB_REF_NAME" --json name,body,tagName,isDraft > current-release.json
+          gh release view "$GITHUB_REF_NAME" --json name,body,tagName,isDraft,isPrerelease > current-release.json
           python3 - <<'PY'
           import json, os, pathlib
           release = json.loads(pathlib.Path("current-release.json").read_text())
           if (release["tagName"] != os.environ["GITHUB_REF_NAME"] or not release["isDraft"]
+              or release["isPrerelease"] != ("-rc." in os.environ["GITHUB_REF_NAME"])
               or release["name"] != "Taxion " + pathlib.Path("VERSION").read_text().strip()
               or release["body"] != pathlib.Path("verified-notes.md").read_text()):
               raise SystemExit("Draft identity or public text differs from the checked release")
           PY
-          gh release edit "$GITHUB_REF_NAME" --draft=false
+          if [[ "$GITHUB_REF_NAME" == *-rc.* ]]; then
+            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$GITHUB_REF_NAME" --draft=false
+          fi
           gh release download "$GITHUB_REF_NAME" --dir public
           python3 scripts/release.py verify-published --tag "$GITHUB_REF_NAME"
           cd public

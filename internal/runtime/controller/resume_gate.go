@@ -188,6 +188,9 @@ func checkResumeBudget(state store.Workspace, flow core.ReviewFlow, dispatch cor
 		!basis.Deadline.Equal(flow.Deadline) || !basis.StartedAt.Equal(flow.StartedAt) || basis.Budget != flow.Budget {
 		return fmt.Errorf("saved contract, authorization, instruction, limits or deadline binding differs")
 	}
+	if !reflect.DeepEqual(basis.StagePlan, flow.StagePlan) {
+		return fmt.Errorf("saved stage plan differs; a new exact plan approval is required")
+	}
 	current := taskBudgetReport(state.Graph, flow, saved.At)
 	recorded.ResumeBasis = nil
 	// Wall-clock elapsed fields are observational, not consumed counters.

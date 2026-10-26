@@ -55,8 +55,15 @@ def formal_version(tag):
     return tuple(map(int, match.groups())) if match else None
 
 
+def release_version(tag):
+    if formal_version(tag):
+        return formal_version(tag)
+    match = re.fullmatch(r"(v(?:0|[1-9][0-9]{0,8})\.(?:0|[1-9][0-9]{0,8})\.(?:0|[1-9][0-9]{0,8}))-rc\.[1-9][0-9]{0,8}", tag)
+    return formal_version(match.group(1)) if match else None
+
+
 def rollback_target(tag):
-    current = formal_version(tag)
+    current = release_version(tag)
     older = [t for t in published_formal_tags() if current and formal_version(t) and formal_version(t) < current]
     if not older:
         raise ValueError("rollback requires the previous formal release tag")

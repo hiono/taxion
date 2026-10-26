@@ -317,6 +317,9 @@ func (c *Controller) AuthorizeTools(ctx context.Context, dispatchID, sessionID s
 		if flow.Status != "RUNNING" || !time.Now().Before(flow.Deadline) {
 			return fmt.Errorf("taxion: tools require an active flow before its deadline")
 		}
+		if reason := stageBudgetStop(state.Graph, flow, dispatch, time.Now().UTC()); reason != "" {
+			return &budgetStopError{reason: reason}
+		}
 	}
 	return nil
 }

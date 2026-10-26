@@ -32,7 +32,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return encoder.Encode(value)
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {start|advance|run|resume|step|recover|accept-saved-review|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|evaluate|lanes}")
+		return fmt.Errorf("usage: taxion workflow {plan|start|advance|run|resume|step|recover|accept-saved-review|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|budget|evaluate|lanes}")
 	}
 	action := args[0]
 	if action == "accept-saved-review" {
@@ -55,9 +55,9 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	var laneTimeout time.Duration
 	var maxAICredits float64
 	switch action {
-	case "start", "recover", "handoff", "interrupt", "terminate", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve", "planner-draft", "planner-action", "question-draft":
+	case "start", "plan", "recover", "handoff", "interrupt", "terminate", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve", "planner-draft", "planner-action", "question-draft":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
-	case "advance", "show", "evaluate", "feedback-target", "repair-status", "planning-context":
+	case "advance", "show", "evaluate", "feedback-target", "repair-status", "planning-context", "budget":
 		fs.StringVar(&id, "id", "", "review flow ID")
 		if action == "evaluate" {
 			fs.BoolVar(&requireQuality, "require-quality", false, "fail unless saved same-target acceptance includes documentation consistency; not publication approval")
@@ -73,7 +73,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		fs.BoolVar(&builtinPrompts, "builtin-prompts", false, "use bundled snapshot-mode role prompts and file-tool defaults instead of prompt files")
 		fs.StringVar(&cli, "cli", "", "Copilot CLI path")
 		fs.StringVar(&base, "base-directory", "", "Copilot state directory")
-		fs.Float64Var(&maxAICredits, "max-ai-credits", 0, "per-session soft AI-credit ceiling, not a flow-wide budget (zero: unset; minimum: 30)")
+		fs.Float64Var(&maxAICredits, "max-ai-credits", 0, "legacy common per-session soft ceiling, not allocation/reservation; planned flows use approved per-role ceilings (zero: unset; minimum: 30)")
 		fs.StringVar(&coderTools, "coder-tools", "", "comma-separated Coder SDK tool allowlist")
 		fs.StringVar(&reviewerTools, "reviewer-tools", "", "comma-separated Reviewer SDK tool allowlist")
 		fs.BoolVar(&managedCommit, "managed-commit", false, "enable the Coder's bound taxion_commit SDK tool")
@@ -102,12 +102,45 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	if managedStage && !managedCommit {
 		return fmt.Errorf("workflow: --managed-stage requires --managed-commit")
 	}
-	fileAction := action == "start" || action == "recover" || action == "handoff" || action == "interrupt" || action == "terminate" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve" || action == "planner-draft" || action == "planner-action" || action == "question-draft"
+	fileAction := action == "plan" || action == "start" || action == "recover" || action == "handoff" || action == "interrupt" || action == "terminate" || action == "feedback" || action == "feedback-resolve" || action == "draft" || action == "draft-discard" || action == "draft-approve" || action == "planner-draft" || action == "planner-action" || action == "question-draft"
 	if len(fs.Args()) != 0 || fileAction && file == "" || !fileAction && id == "" && action != "lanes" {
 		return fmt.Errorf("workflow start, recover, handoff, interrupt, terminate, feedback, feedback-resolve, draft, draft-discard, draft-approve, planner-draft, planner-action and question-draft require --file; advance, run, step, show, evaluate, planning-context, feedback-target and repair-status require --id")
 	}
 	if action == "lanes" && taskID == "" {
 		return fmt.Errorf("workflow lanes requires --task")
+	}
+	if action == "plan" || action == "budget" {
+		db, err := store.OpenReadOnly(workspaceDBPath())
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			return err
+		}
+		if action == "budget" {
+			report, err := controller.ObserveFlowBudget(state, id)
+			if err != nil {
+				return err
+			}
+			return printJSON(report)
+		}
+		input, err := os.Open(file)
+		if err != nil {
+			return err
+		}
+		defer input.Close()
+		var request controller.ReviewFlowRequest
+		if err := core.DecodeGraphInput(input, &request); err != nil {
+			return err
+		}
+		request.Configuration = currentApprovalConfiguration()
+		preview, err := controller.PreviewStagePlan(state.Graph, request)
+		if err != nil {
+			return err
+		}
+		return printJSON(preview)
 	}
 	if action == "lanes" {
 		root := laneRoot
@@ -402,6 +435,15 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		if err := controller.CheckReviewFlowConfiguration(db, id, resolved.Config, tools); err != nil {
 			return fmt.Errorf("workflow %s: %w", action, err)
 		}
+		approvedFlow, exists := state.Graph.ReviewFlow(id)
+		if !exists {
+			return fmt.Errorf("workflow: Flow not found")
+		}
+		if approvedFlow.StagePlan != nil && maxAICredits != 0 &&
+			(maxAICredits != approvedFlow.StagePlan.CoderSessionCredits ||
+				maxAICredits != approvedFlow.StagePlan.ReviewerSessionCredits) {
+			return fmt.Errorf("workflow: common session ceiling conflicts with the approved per-role stage plan; omit --max-ai-credits")
+		}
 		ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 		run := controller.RunReviewFlow
@@ -427,10 +469,17 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 			if validationSubmission {
 				responseSchema = controller.BoundDispatchResultSchema(dispatch)
 			}
+			sessionCredits := maxAICredits
+			if approvedFlow.StagePlan != nil {
+				sessionCredits = approvedFlow.StagePlan.CoderSessionCredits
+				if dispatch.Recipient == "REVIEWER" {
+					sessionCredits = approvedFlow.StagePlan.ReviewerSessionCredits
+				}
+			}
 			return newDispatchWorker(ctx, db, dispatch, copilot.Config{
 				Role: dispatch.Recipient, SystemPrompt: runtimeSubmissionPrompt(prompts[dispatch.Recipient], contract, validationSubmission),
 				WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: cli, BaseDirectory: base,
-				MaxAICredits:         maxAICredits,
+				MaxAICredits:         sessionCredits,
 				EnableReviewProgress: reviewProgress,
 				AvailableTools:       tools[dispatch.Recipient], ResponseSchema: responseSchema,
 			}, managedCommit && dispatch.Recipient == "CODER", managedStage && dispatch.Recipient == "CODER", scanner)
