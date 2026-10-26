@@ -567,6 +567,33 @@ Task の `validationCommands` は Controller の検査操作を認可する。�
 `taxion records proposal|approve|send|cancel|reconcile|show|finding` は承認済み GitHub / GitLab 公開と出典付き失敗分析を管理する。承認は正確な対象・account・content hash とプロジェクトの Communication Profile を対応付ける。`TAXION_COMMUNICATION_PROFILES` で対象プロジェクトの設定ファイルを明示し、`update.statement.at` に記述時点、`update.statement.claims` に参照 URL とその状態を指定する。未設定・対象不一致・未確認の参照は送信できない。形式と更新時の再承認は[公開文章の検証手順](../develop/public-communication-validation.md#プロジェクト設定と-forge-共通検査)を参照する。送信不明は停止済み sender の claim 照合まで明示して保つ。`taxion git check-range --base <SHA>
 --head <SHA> --scanner <PATH>` は公開前に未公開の全 commit tree と message を scan する。[実行記録](execution-records.md)を参照する。
 
+#### 工程計画と保存観測
+
+`workflow plan --file flow.json` は、READY Task と実行要求から工程計画を読取り専用で作る。実行要求は `workflow start` と共通で、`stageBudget:{"version":1}` を追加する。返却する `stateChanged` は `false`、`stagePlan.hash` は承認対象の完全なハッシュである。Task、要求、設定、見積もり結果が変われば、古いハッシュを使った開始を拒否する。
+
+承認後は同じ入力に `stagePlanHash` を追加して `workflow start --file flow.json` を実行する。計画を省略した既存 Flow と `request` は従来動作を保ち、後続工程の時間予約を行わない。外側のオーケストレータが JSON を作成しても、利用者の承認を代行することにはならない。
+
+| `stageBudget` の項目 | 意味 |
+|---|---|
+| `version` | `1` を指定する |
+| `validationSeconds` | 各実装提出後の検証に使う秒数。未指定はコマンドごとに60秒と保存実績から見積もる |
+| `reviewSeconds` | 各独立レビューの予定秒数。未指定時の初期値は600秒 |
+| `repairSeconds` | 各修正の予定秒数。未指定時の初期値は600秒 |
+| `coderSessionCredits` / `reviewerSessionCredits` | 各役割のセッションのソフト上限。ゼロまたは未指定は設定なし。指定時は30以上 |
+| `reviewNanoAiu` / `repairNanoAiu` | 正の全体 `maxNanoAiu` がある場合だけ使う、各レビュー・修正の内部残額枠。必要な役割の正の見積もりが保存実績にも明示指定にもなければ計画を拒否する |
+
+時間の見積もりには、同じリポジトリと検証コマンドの直近の成功記録を最大20件使う。初期値と、保存した時間に20%の余裕を加えた値の大きい方を採用する。明示指定と見積もりの出典は `basis` に残す。全体期限に必須工程が入らなければ、範囲の分割か新しい外枠の承認を求め、Dispatch を発行しない。時間指定と全体期限は最大1年、修正上限は計画付き Flow では1000回までとする。
+
+実装の提出期限は、元の全体期限から後続の検証・レビュー・許可済み修正分を引いて求める。提出後の検証には検証分だけを使い、残る役割分へ食い込ませない。再接続・再起動・`step` でも元の期限を保つ。境界後の結果は受理せず、部分成果と停止証拠を保存して `BUDGET_STOP` にする。計画付き Flow の成功結果は、汎用の `dispatch transition --result-file` では受理せず、対応する実行環境の終了処理を通す。
+
+計画付きの `run`・`step`・`resume` は保存した役割別ソフト上限を適用する。共通の `--max-ai-credits` が両方の承認値と一致しない場合は拒否する。提供元のクレジット予約や厳密な請求上限の保証ではない。利用額の内部枠は完全な同じ設定の保存使用量か明示値だけを使い、未計測値を換算して埋めない。提供元停止方式には新しい残量照会を追加しない。
+
+`workflow budget --id FLOW-ID` は状態を変更せず、工程の開始・提出・検証・結果受理の観測時刻、適用したソフト上限、利用量の単位・範囲・完全性、停止理由、残る受入れ条件と保存された実装 tree を返す。時間はモデル内部時間ではなく、保存時刻に基づく。保存 tree の表示は現在の Git 同一性や品質検証の合格を意味しない。
+
+計画付き後続 Flow には `continuationChange` と `savedOutputDecision` を追加し、前回から完了可能性を変える条件と、保存成果を引き継ぐか基準から再実装する理由を記録する。この説明だけでは新しい作業を承認しない。旧作業場所と証拠を保持し、既存の後続 Task 承認・成果照合を行ってから、新しい計画を承認する。
+
+保存済み計画は発行監査と固定照合する。既存データへの遡及適用や計画の削除は行わない。計画・工程監査を含むデータを旧版で更新せず、戻す場合は現状を保護して更新前のバックアップを別配置で使う。詳細は [ADR-0053](../develop/adr/0053-enforce-approved-flow-stage-boundaries.md)。
+
 #### 停止後の保存済みレビュー結果の受理
 
 `workflow accept-saved-review` は、保存済み実装結果をレビューする Flow が、引継ぎ保留の入力検証エラーで停止理由を失った場合の受理専用操作である。新しい Flow・Dispatch・モデル session を作らず、検証 command も再実行しない。対象は `continueFromDispatchId` を持つツリースナップショット形式で、Dispatch が成功した Reviewer の1件だけ、判定が `APPROVE`、指摘・阻害事項が0件の `STOPPED / SAFETY_STOP` に限る。別の停止理由や通常の修正フローには使えない。

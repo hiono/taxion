@@ -1809,6 +1809,7 @@ func cloneGraph(g TaskGraph) TaskGraph {
 	}
 	for i := range copy.ReviewFlows {
 		copy.ReviewFlows[i].Contract = cloneTask(copy.ReviewFlows[i].Contract)
+		copy.ReviewFlows[i].StagePlan = CloneStagePlan(copy.ReviewFlows[i].StagePlan)
 		copy.ReviewFlows[i].DispatchIDs = slices.Clone(copy.ReviewFlows[i].DispatchIDs)
 		copy.ReviewFlows[i].Recoveries = cloneFlowRecoveries(copy.ReviewFlows[i].Recoveries)
 		copy.ReviewFlows[i].HandoffChanges = slices.Clone(copy.ReviewFlows[i].HandoffChanges)

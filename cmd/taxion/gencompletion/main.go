@@ -50,7 +50,7 @@ func generate() ([]byte, error) {
 		"memory conflict add", "memory conflict list", "memory conflict resolve", "help"} {
 		commands[name] = map[string]bool{}
 	}
-	for _, name := range []string{"workflow start", "workflow terminate"} {
+	for _, name := range []string{"workflow plan", "workflow start", "workflow terminate"} {
 		commands[name]["--file"] = true
 		commands[name]["--help"] = true
 	}
@@ -60,7 +60,7 @@ func generate() ([]byte, error) {
 		"provenance verify": true,
 		"memory checks":     true, "records show": true, "task graph": true,
 		"git hook": true, "git hook status": true, "git hook remove": true,
-		"memory conflict": true, "workflow start": true, "workflow terminate": true}
+		"memory conflict": true, "workflow plan": true, "workflow start": true, "workflow terminate": true}
 	directory, err := os.MkdirTemp("", "taxion-completion-*")
 	if err != nil {
 		return nil, err

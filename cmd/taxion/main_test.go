@@ -64,7 +64,7 @@ func TestUsageGroupsCommandsWithoutChangingSyntax(t *testing.T) {
 		seen[line] = true
 		groups[group]++
 	}
-	if len(groups) != 12 || len(seen) != 110 || !strings.Contains(commands, "records cancel") {
+	if len(groups) != 12 || len(seen) != 112 || !strings.Contains(commands, "records cancel") {
 		t.Fatalf("%d commands in categories: %v", len(seen), groups)
 	}
 	for name, count := range groups {

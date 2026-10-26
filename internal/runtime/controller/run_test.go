@@ -40,7 +40,10 @@ type configuredScriptedRuntime struct {
 	*scriptedRuntime
 	selection json.RawMessage
 	accounts  []string
+	credits   float64
 }
+
+func (s *configuredScriptedRuntime) SessionCreditCeiling() float64 { return s.credits }
 
 type quotaScriptedRuntime struct {
 	*configuredScriptedRuntime
@@ -296,7 +299,7 @@ func TestCreditStatusReportsApprovedRequestQuotaSeparatelyFromCredits(t *testing
 	}
 }
 
-func testFlowRunsRepairAndNewSHAReview(t *testing.T, stepped bool) {
+func testFlowRunsRepairAndNewSHAReview(t *testing.T, stepped bool, planned ...bool) {
 	resolved, err := config.Resolve([]config.Layer{{Source: "user", Input: []byte(`version: 1
 project: {id: demo}
 repository: {provider: github, host: github.com, path: owner/repo, account: scm-user, credentialRef: scm}
@@ -314,6 +317,19 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 		})),
 	}
 	db, ledger, request := reviewFlowFixture(t, decision)
+	if len(planned) != 0 && planned[0] {
+		request.StageBudget = &core.StageBudget{Version: 1, ValidationSeconds: 2, ReviewSeconds: 2, RepairSeconds: 2,
+			CoderSessionCredits: 300, ReviewerSessionCredits: 30, ReviewNanoAIU: 1, RepairNanoAIU: 1}
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			t.Fatal(err)
+		}
+		preview, err := PreviewStagePlan(state.Graph, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.StagePlanHash = preview.Plan.Hash
+	}
 	flow, err := StartReviewFlow(db, ledger, request)
 	if err != nil {
 		t.Fatal(err)
@@ -381,6 +397,12 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 			return nil
 		}
 		configured := &configuredScriptedRuntime{scriptedRuntime: worker, selection: mustFlowJSON(t, resolved.Config)}
+		if flow.StagePlan != nil {
+			configured.credits = flow.StagePlan.CoderSessionCredits
+			if dispatch.Recipient == "REVIEWER" {
+				configured.credits = flow.StagePlan.ReviewerSessionCredits
+			}
+		}
 		configuredWorkers = append(configuredWorkers, configured)
 		return configured, nil
 	}
@@ -435,6 +457,21 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 	for _, worker := range configuredWorkers {
 		if len(worker.accounts) != 2 || worker.accounts[0] != "ai-user" || worker.accounts[1] != "ai-user" {
 			t.Fatal("continuous flow bypassed start/send authentication", worker.accounts)
+		}
+	}
+	if flow.StagePlan != nil {
+		report, err := ObserveFlowBudget(state, flow.ID)
+		if err != nil || len(report.Stages) < 20 || len(report.Continuation.RemainingAcceptance) != 0 {
+			t.Fatal("planned execution did not retain role/validation timing", report, err)
+		}
+		for _, stage := range report.Stages {
+			ceiling := 300.0
+			if stage.Role == "REVIEWER" {
+				ceiling = 30
+			}
+			if stage.SessionSoftLimit != ceiling {
+				t.Fatal("applied ceiling differs from approved role limit", stage)
+			}
 		}
 	}
 	original, _ := state.Graph.GraphDispatch(flow.DispatchIDs[0])

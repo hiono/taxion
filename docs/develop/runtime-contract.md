@@ -1,5 +1,9 @@
 # Runtime 契約
 
+工程計画付き Flow は [ADR-0053](adr/0053-enforce-approved-flow-stage-boundaries.md) に従う。`core.StagePlan` は SDK に依存しない秒数・ネイティブ単位の内部残額枠・役割別ソフト上限であり、提供元のクレジット予約とは区別する。`PreviewStagePlan` で承認対象を作り、開始時に完全なハッシュを照合する。実装を検証する際は `TestStage*`・`TestPlanned*` を使い、従来の計画なし経路と提供元停止方式も回帰確認する。
+
+新しい実行環境は、ソフト上限を指定できる場合に `SessionCreditCeiling() float64` で実適用値を公開する。未指定はゼロである。制御処理はセッションを開始する前に保存計画と比較する。工程期限は `Start`・`Send`・`Resume`・`StreamEvents`・`Finish` とツール許可へ適用し、提出を受けた後の `Finish` は検証用の期限に切り替える。イベント監視が終了するまで提供元の停止証跡を確認し、異常終了後に時計や予算を作り直さない。
+
 ## SDK 共通インターフェース
 
 ```go

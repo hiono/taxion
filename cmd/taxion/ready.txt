@@ -203,6 +203,10 @@ Changing a confirmed contract requires a new Task and approval, not reuse of the
 
 Explain the repair count, deadline and session soft ceiling and record user authorization.
 Each runtime session's --max-ai-credits is a soft ceiling of at least 30, not a Flow total.
+Without a stage plan it is one common value for Coder and Reviewer: 300 does not
+reserve 30 for review. The global deadline includes coding, controller validation
+and independent review. Legacy unplanned Flows and request do not reserve later-stage
+time or define a Coder submission boundary; do not describe them as doing so.
 Report observed usage for each model call. Report balances/percentages as unavailable
 without an allowance in the same billing unit.
 Numbers below are examples, not the user's budget. Do not convert tokens to credits.
@@ -215,7 +219,8 @@ Numbers below are examples, not the user's budget. Do not convert tokens to cred
   "reviewRoot": "/absolute/path/to/reviews",
   "maxRepairs": 0,
   "maxNanoAiu": 1000000000,
-  "timeoutSeconds": 1800,
+  "timeoutSeconds": 3600,
+  "stageBudget": {"version": 1, "reviewNanoAiu": 100000000},
   "authorization": {
     "id": "ready-example-budget",
     "source": "human:budget-1",
@@ -223,6 +228,15 @@ Numbers below are examples, not the user's budget. Do not convert tokens to cred
   }
 }
 ```
+
+taxion workflow plan --file flow.json
+
+plan is read-only (stateChanged:false). It estimates validation/review/repair
+durations from matching saved work with a margin, otherwise labels cold estimates
+as uncertain. It rejects a plan with no room for mandatory stages. Display the
+plan, its hash and outer limits to the user. Do not invent approval. After explicit
+approval, copy stagePlan.hash into flow.json's stagePlanHash without changing the
+request, authorization, Task or effective configuration, then start:
 
 taxion workflow start --file flow.json
 taxion workflow show --id FLOW-ID
@@ -234,7 +248,25 @@ the tree without a commit and reproduces it in an independent Reviewer worktree.
 Do not run before approval. After approval use the existing path below;
 do not require the user to create or transcribe role prompts.
 
-taxion workflow run --id FLOW-ID --builtin-prompts --max-ai-credits SESSION-CREDIT-CEILING
+taxion workflow run --id FLOW-ID --builtin-prompts
+
+Planned session ceilings come from stageBudget.coderSessionCredits and
+reviewerSessionCredits (optional, zero means unset). Explain them as soft per-session
+limits, not provider credit reservations or guaranteed billing cutoffs. Omit
+--max-ai-credits on run when approved role limits differ. Automatic time allocation
+requires no role-specific credit entry. The native maxNanoAiu limit, if used, is in
+a different unit and cannot be converted to credits. Provider-stop keeps its declared
+no-overage contract and does not add unapproved quota reads.
+With a positive native Flow ceiling, every reserved role needs a positive estimate
+from complete same-configuration history or explicit approval; missing estimates
+block planning. The example's native estimate is not a ratio or a credit conversion.
+
+Controller boundaries use the original Flow deadline, including after restart.
+Submit the structured result before the role boundary; Controller validation gets
+its own reserved interval. Late or incomplete results are not promoted to success.
+Remaining mandatory-stage time/native allowances cannot be borrowed by Coder.
+Estimates are not completion guarantees; expand outer limits only with new approval.
+Changing a saved stage plan requires a new contract, never editing old state.
 
 ## Continue according to results
 
@@ -253,6 +285,11 @@ An exit code alone or a stdout self-report is not a formal receipt.
   contract; do not invent user decisions.
 - STOPPED, exhausted budget, FAILED or CANCELLED: do not blindly retry the same execution.
   Inspect saved partial work, baseline, outputTreeSha, changed paths and runtime-stop: evidence.
+  Use workflow budget --id FLOW-ID for saved stage times, applied ceilings and remaining
+  acceptance. Its saved-tree observation is not live identity or quality verification.
+  Before a planned successor, record continuationChange and savedOutputDecision:
+  what makes completion feasible, and why saved output is reused or a baseline restart
+  is necessary. Do not just repeat the same scope/deadline. Obtain new plan approval.
   For an active session, verify the target before runtime stop. Preserve old results and budgets.
   workflow recover only releases runner ownership with stop evidence; it adds no budget and
   does not rerun work. Continue with a successor Task, separate worktree, verified saved work

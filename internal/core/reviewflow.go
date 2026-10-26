@@ -18,6 +18,7 @@ type ReviewFlow struct {
 	ReviewRoot        string             `json:"reviewRoot"`
 	MaxRepairs        int                `json:"maxRepairs"`
 	Budget            FlowBudget         `json:"budget,omitempty"`
+	StagePlan         *StagePlan         `json:"stagePlan,omitempty"`
 	MaxTokens         int64              `json:"maxTokens,omitempty"` // legacy telemetry threshold; no longer gates execution
 	StartedAt         time.Time          `json:"startedAt"`
 	Deadline          time.Time          `json:"deadline"`
@@ -84,6 +85,7 @@ func (g TaskGraph) ReviewFlow(id string) (ReviewFlow, bool) {
 	for _, flow := range g.ReviewFlows {
 		if flow.ID == id {
 			flow.Contract = cloneTask(flow.Contract)
+			flow.StagePlan = CloneStagePlan(flow.StagePlan)
 			flow.DispatchIDs = slices.Clone(flow.DispatchIDs)
 			flow.Recoveries = cloneFlowRecoveries(flow.Recoveries)
 			flow.HandoffChanges = slices.Clone(flow.HandoffChanges)
@@ -115,6 +117,9 @@ func (g TaskGraph) validateReviewFlows() error {
 			return graphError("invalid bounded review flow %q", flow.ID)
 		}
 		budget := flow.Budget
+		if err := flow.StagePlan.Validate(flow); err != nil {
+			return err
+		}
 		if budget.MaxDispatches != 0 || budget.MaxCoderSessions != 0 ||
 			budget.MaxReviewerSessions != 0 || budget.MaxNanoAIU != 0 || budget.ExternalBudgetOnly() || budget.BudgetSource != "" {
 			if budget.MaxDispatches < 1 || budget.MaxCoderSessions < 1 ||

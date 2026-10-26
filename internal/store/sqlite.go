@@ -167,7 +167,7 @@ func (s *Store) InitializeWorkspace(state Workspace) (bool, error) {
 	if err := state.Records.validate(); err != nil {
 		return false, err
 	}
-	if err := state.Records.VerifyReviewAcceptances(state.Graph); err != nil {
+	if err := state.Records.VerifyFlowAudits(state.Graph); err != nil {
 		return false, err
 	}
 	if state.HasGraph {
@@ -239,7 +239,7 @@ func (s *Store) loadWorkspace(q workspaceReader) (Workspace, error) {
 				return Workspace{}, err
 			}
 		}
-		if err := state.Records.VerifyReviewAcceptances(state.Graph); err != nil {
+		if err := state.Records.VerifyFlowAudits(state.Graph); err != nil {
 			return Workspace{}, err
 		}
 		return state, nil
@@ -270,7 +270,7 @@ func (s *Store) loadWorkspace(q workspaceReader) (Workspace, error) {
 			return Workspace{}, err
 		}
 	}
-	if err := state.Records.VerifyReviewAcceptances(state.Graph); err != nil {
+	if err := state.Records.VerifyFlowAudits(state.Graph); err != nil {
 		return Workspace{}, err
 	}
 	return state, nil
@@ -419,7 +419,7 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	if err := state.Records.validate(); err != nil {
 		return err
 	}
-	if err := state.Records.VerifyReviewAcceptances(state.Graph); err != nil {
+	if err := state.Records.VerifyFlowAudits(state.Graph); err != nil {
 		return err
 	}
 	if state.HasGraph {

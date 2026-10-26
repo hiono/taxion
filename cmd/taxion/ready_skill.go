@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.2"
+const readySkillVersion = "1.3.3"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -40,6 +40,15 @@ Keep the same executable environment for diagnosis and execution. Check required
 executables before issuing work. --store selects the ledger path, not workspace.db.
 Run internal Planner only when requested, not to repeat planning already done.
 Read saved Task, Flow, Dispatch results and evidence before choosing another run.
+Session credit soft ceilings are not Flow totals or role allocations. The Flow
+deadline includes coding, host validation and independent review. For new stage
+allocation use workflow plan with stageBudget version 1, explain the exact plan,
+obtain approval, then start with its stagePlanHash. Do not label an unplanned
+Flow or the request command as reserving time or credits. Planned per-role soft
+ceilings come from the saved plan; do not replace them with a common run flag.
+Use workflow budget to inspect saved stage observations and continuation advice.
+Positive native Flow caps need complete same-configuration usage or explicitly
+approved estimates for every reserved role; missing estimates block planning.
 For recovery, inspect workflow feedback-target and the saved partial/output tree;
 do not fabricate a successful result, stop proof or user approval.
 Preserve completed work. New budgets, changed scope and permissions need explicit

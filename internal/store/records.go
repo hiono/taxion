@@ -316,7 +316,7 @@ func (r Records) validate() error {
 		budgetSequences[record.FlowID]++
 		if record.FlowID == "" || record.TaskID == "" ||
 			record.Sequence != budgetSequences[record.FlowID] || record.At.IsZero() ||
-			!slices.Contains([]string{"DISPATCH_ISSUED", "SESSION_STARTED", "USAGE_OBSERVED", "BUDGET_STOP", "RECONTRACT"}, record.Kind) ||
+			!slices.Contains([]string{"DISPATCH_ISSUED", "SESSION_STARTED", "USAGE_OBSERVED", "BUDGET_STOP", "RECONTRACT", "STAGE_OBSERVED"}, record.Kind) ||
 			!json.Valid([]byte(record.Payload)) ||
 			record.Hash != fmt.Sprintf("%x", sha256.Sum256([]byte(record.Payload))) {
 			return fmt.Errorf("invalid task budget audit record or sequence")
@@ -348,6 +348,43 @@ func (r Records) validate() error {
 func recordHash(value string) bool {
 	_, err := hex.DecodeString(value)
 	return err == nil && len(value) == 64
+}
+
+// VerifyFlowAudits binds new stage plans on normalized and legacy loads as well
+// as writes. Removing a plan must not silently restore legacy unlimited stages.
+func (r Records) VerifyFlowAudits(graph core.TaskGraph) error {
+	if err := r.VerifyReviewAcceptances(graph); err != nil {
+		return err
+	}
+	bound := map[string]bool{}
+	for _, audit := range r.Budgets {
+		if audit.Kind != "DISPATCH_ISSUED" {
+			continue
+		}
+		var report struct {
+			ResumeBasis *struct {
+				StagePlan *core.StagePlan `json:"stagePlan"`
+			} `json:"resumeBasis"`
+		}
+		if err := json.Unmarshal([]byte(audit.Payload), &report); err != nil {
+			return err
+		}
+		if report.ResumeBasis == nil {
+			continue
+		}
+		flow, exists := graph.ReviewFlow(audit.FlowID)
+		if !exists && report.ResumeBasis.StagePlan != nil ||
+			exists && !reflect.DeepEqual(flow.StagePlan, report.ResumeBasis.StagePlan) {
+			return fmt.Errorf("stage plan differs from immutable Flow issuance")
+		}
+		bound[audit.FlowID] = true
+	}
+	for _, flow := range graph.ReviewFlows {
+		if flow.StagePlan != nil && !bound[flow.ID] {
+			return fmt.Errorf("stage plan requires immutable issuance")
+		}
+	}
+	return nil
 }
 
 func decodeRecords(data string) (Records, error) {

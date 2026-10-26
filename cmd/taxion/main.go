@@ -63,6 +63,7 @@ Requests, planning and Task contracts:
   task authorize      Validate and bundle a Task; fill a fresh READY bundle without changing its contract (--manifest JSON)
   task authorize-packets  Preview/confirm a READY Task sequential packet lifecycle (--request JSON)
   task plan           Rebuild a follow-up plan from durable contracts and evidence (--repo required; --include-archived for history)
+  workflow plan       Preview controller stage deadlines and per-role session ceilings without changing state (--file JSON)
   gate <name>         Report the contract, resume, execution or publication gate without changing state (--task/--flow, --json)
   workflow repair-status Report whether the next repair needs user action, read-only (--id required)
 
@@ -95,7 +96,7 @@ Runtime sessions and ACP:
   acp                 Serve approved Dispatches over ACP (--coder-system-prompt-file, --max-ai-credits)
 
 Review flows and recovery:
-  workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON)
+  workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON; stagePlanHash for planned flows)
   workflow terminate  Cancel an untouched Dispatch and hold it for a new approved contract (--file JSON)
   workflow advance    Issue review/repair from the latest verified result (--id required)
   workflow run        Execute review/repair continuously with saved ceilings (--id; role prompt files or --builtin-prompts)
@@ -121,6 +122,7 @@ Review flows and recovery:
   resume              Print a resume acknowledgement (local stub; --session required)
 
 Evidence and external records:
+  workflow budget     Read stage timing, applied soft ceilings and saved-output continuation advice (--id required)
   workflow evaluate   Report saved quality gates and measured/unknown costs; no reward score (--id required)
   role-packet create  Emit an immutable reference-only role packet (explicit task, tree and contract digests)
   role-packet verify  Verify and read back a role packet (--file, --expected-hash); no execution

@@ -32,6 +32,10 @@ type ReviewFlowRequest struct {
 	TimeoutSeconds         int64                      `json:"timeoutSeconds"`
 	Authorization          core.TaskDecision          `json:"authorization"`
 	Configuration          core.ApprovalConfiguration `json:"configuration"`
+	StageBudget            *core.StageBudget          `json:"stageBudget,omitempty"`
+	StagePlanHash          string                     `json:"stagePlanHash,omitempty"`
+	ContinuationChange     string                     `json:"continuationChange,omitempty"`
+	SavedOutputDecision    string                     `json:"savedOutputDecision,omitempty"`
 }
 
 // DefaultFlowTimeout applies when a Flow request omits timeoutSeconds.
@@ -110,6 +114,25 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 		if request.MaxNanoAIU == 0 && core.ProviderBudget(task.BudgetGuidance) {
 			flow.Budget.BudgetSource = core.ProviderStopBudgetSource
 		}
+		if request.StageBudget != nil {
+			preview, err := PreviewStagePlan(state.Graph, request)
+			if err != nil {
+				return err
+			}
+			if request.StagePlanHash == "" || request.StagePlanHash != preview.Plan.Hash {
+				return fmt.Errorf("taxion: stage plan requires approval of its exact current hash; run workflow plan before start")
+			}
+			flow.StagePlan = preview.Plan
+			role := "CODER"
+			if flow.SourceDispatchID != "" {
+				role = "REVIEWER"
+			}
+			if !flow.StagePlan.SubmissionDeadline(flow, role).After(now) {
+				return fmt.Errorf("taxion: caller deadline leaves no time for the approved stage plan")
+			}
+		} else if request.StagePlanHash != "" {
+			return fmt.Errorf("taxion: stagePlanHash requires stageBudget")
+		}
 		if request.ContinueFromDispatchID == "" {
 			if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipNone, "", "", request.Configuration); err != nil {
 				return err
@@ -168,7 +191,7 @@ func stopUnstartedDispatch(db *store.Store, flowID, dispatchID, actor, source, r
 			return fmt.Errorf("taxion: re-contract requires the latest Dispatch of an unclaimed running flow")
 		}
 		dispatch, ok := state.Graph.GraphDispatch(dispatchID)
-		if !ok || dispatch.Recipient != "CODER" || dispatch.Status != core.DispatchIssued ||
+		if !ok || (dispatch.Recipient != "CODER" && !(stopCode == "BUDGET_STOP" && dispatch.Recipient == "REVIEWER")) || dispatch.Status != core.DispatchIssued ||
 			dispatch.Acknowledged || dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "" {
 			return fmt.Errorf("taxion: re-contract may terminate only an untouched issued Coder Dispatch")
 		}
@@ -261,6 +284,9 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 		if flow.RunnerID != runnerID {
 			return fmt.Errorf("%w: %s", ErrFlowClaimed, flow.RunnerID)
 		}
+		if err := verifyStagePlanBinding(state.Records, flow); err != nil {
+			return err
+		}
 		for _, id := range flow.DispatchIDs {
 			dispatch, _ := state.Graph.GraphDispatch(id)
 			if err := validateResultReceipt(state, dispatch); err != nil {
@@ -331,6 +357,9 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 			return nil
 		}
 		if active(last.Status) {
+			if reason := stageBudgetStop(state.Graph, flow, last, time.Now().UTC()); reason != "" {
+				return stopWithCode(reason, "BUDGET_STOP")
+			}
 			if reason := activeBudgetStop(taskBudgetReport(state.Graph, flow, time.Now().UTC())); reason != "" {
 				return stopWithCode(reason, "BUDGET_STOP")
 			}
@@ -534,6 +563,12 @@ func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.Rev
 	}
 	if err := requireBudgetRoom(state.Graph, *flow, dispatch.Recipient); err != nil {
 		return err
+	}
+	if reason := stageBudgetStop(state.Graph, *flow, dispatch, time.Now().UTC()); reason != "" {
+		return &budgetStopError{reason: reason}
+	}
+	if reason := stageStartStop(*flow, dispatch.Recipient, time.Now().UTC()); reason != "" {
+		return &budgetStopError{reason: reason}
 	}
 	if err := issueLifecyclePacket(state, *flow, dispatch); err != nil {
 		return err

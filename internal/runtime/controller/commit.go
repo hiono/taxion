@@ -73,11 +73,11 @@ func (c *Controller) managedGit(ctx context.Context, dispatchID, sessionID, publ
 			if !slices.Contains(flow.DispatchIDs, dispatchID) {
 				continue
 			}
-			if flow.Status != "RUNNING" || !time.Now().Before(flow.Deadline) {
+			if flow.Status != "RUNNING" || !time.Now().Before(stageDeadline(flow, dispatch, false)) {
 				return fmt.Errorf("managed commit requires an active review flow before its deadline")
 			}
 			var cancel context.CancelFunc
-			ctx, cancel = context.WithDeadline(ctx, flow.Deadline)
+			ctx, cancel = context.WithDeadline(ctx, stageDeadline(flow, dispatch, false))
 			defer cancel()
 		}
 		var err error
