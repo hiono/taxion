@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/memory"
@@ -110,7 +109,7 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 			Authorization: request.Authorization, DispatchIDs: []string{},
 		}
 		if request.MaxNanoAIU == 0 && core.ProviderBudget(task.BudgetGuidance) {
-			flow.Budget.BudgetSource = billing.ProviderStop
+			flow.Budget.BudgetSource = core.ProviderStopBudgetSource
 		}
 		if request.ContinueFromDispatchID == "" {
 			if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipNone, "", "", request.Configuration); err != nil {

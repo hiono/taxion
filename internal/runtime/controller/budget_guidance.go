@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
@@ -33,7 +32,7 @@ type budgetObservation struct {
 	AccountAllocation    string                 `json:"accountAllocation,omitempty"`
 	AllocationBasis      *quotaAllocationBasis  `json:"allocationBasis,omitempty"`
 	RemainingFloor       *float64               `json:"remainingFloor,omitempty"`
-	Billing              *billing.Settings      `json:"billing,omitempty"`
+	Billing              *core.BillingSettings  `json:"billing,omitempty"`
 	BillingVerification  string                 `json:"billingVerification,omitempty"`
 }
 
@@ -71,7 +70,7 @@ func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.Gr
 		if flow.Budget.AccountQuotaOnly && (mode != "account" || !core.AccountQuotaBudget(policy)) {
 			return nil, fmt.Errorf("taxion: account-quota-only flow cannot disable its approved residual-quota control")
 		}
-		if flow.Budget.BudgetSource == billing.ProviderStop && (mode != "provider" || !core.ProviderBudget(policy)) {
+		if flow.Budget.BudgetSource == core.ProviderStopBudgetSource && (mode != "provider" || !core.ProviderBudget(policy)) {
 			return nil, fmt.Errorf("taxion: provider-budget-only flow cannot change its approved billing policy")
 		}
 		if flow.Status != "RUNNING" || !time.Now().Before(flow.Deadline) {

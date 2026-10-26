@@ -6,8 +6,6 @@ import (
 	"reflect"
 	"slices"
 	"time"
-
-	"github.com/hiono/taxion/internal/billing"
 )
 
 // ReviewFlow retains the approved execution contract across controller
@@ -47,7 +45,7 @@ type FlowBudget struct {
 }
 
 func (b FlowBudget) ExternalBudgetOnly() bool {
-	return billing.ExternalBudget(b.BudgetSource, b.AccountQuotaOnly)
+	return BillingExternalBudget(b.BudgetSource, b.AccountQuotaOnly)
 }
 
 type FlowRecovery struct {
@@ -122,7 +120,7 @@ func (g TaskGraph) validateReviewFlows() error {
 			if budget.MaxDispatches < 1 || budget.MaxCoderSessions < 1 ||
 				budget.MaxReviewerSessions < 1 || math.IsNaN(budget.MaxNanoAIU) ||
 				math.IsInf(budget.MaxNanoAIU, 0) || budget.MaxNanoAIU < 0 ||
-				billing.ValidateBudget(budget.BudgetSource, budget.AccountQuotaOnly, budget.MaxNanoAIU,
+				ValidateBillingBudget(budget.BudgetSource, budget.AccountQuotaOnly, budget.MaxNanoAIU,
 					AccountQuotaBudget(flow.Contract.BudgetGuidance), ProviderBudget(flow.Contract.BudgetGuidance)) != nil {
 				return graphError("invalid approved budget for review flow %q", flow.ID)
 			}

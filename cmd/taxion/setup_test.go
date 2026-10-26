@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 )
@@ -72,7 +71,7 @@ func TestBillingSetupAndStandaloneConfigReport(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &report); err != nil {
 		t.Fatal("billing report is not standalone JSON", err, output.String())
 	}
-	want, _ := (billing.Settings{}).Resolve()
+	want, _ := (core.BillingSettings{}).Resolve()
 	if report.Policy == nil || report.Policy.Mode != "provider" || report.Policy.Billing == nil ||
 		*report.Policy.Billing != want || report.Provider != "copilot" || report.Account != "ai-user" ||
 		report.ContractRef != "operator-contract" || report.Verification != "human-declaration-not-provider-verified" {

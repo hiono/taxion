@@ -1,21 +1,20 @@
-// Package billing resolves declared billing conditions, not provider-side settings.
-package billing
+package core
 
 import (
 	"fmt"
 	"math"
 )
 
-const ProviderStop = "provider-stop"
+const ProviderStopBudgetSource = "provider-stop"
 
-type Settings struct {
+type BillingSettings struct {
 	Contract     string `yaml:"contract,omitempty" json:"contract,omitempty"`
 	Overage      string `yaml:"overage,omitempty" json:"overage,omitempty"`
 	AutoRecharge string `yaml:"autoRecharge,omitempty" json:"autoRecharge,omitempty"`
 	PaidFallback string `yaml:"paidFallback,omitempty" json:"paidFallback,omitempty"`
 }
 
-func (s Settings) Validate() error {
+func (s BillingSettings) Validate() error {
 	for _, field := range []struct {
 		name, value string
 		allowed     []string
@@ -37,9 +36,9 @@ func (s Settings) Validate() error {
 }
 
 // Resolve applies defaults only to new proposals. Stored contracts stay untouched.
-func (s Settings) Resolve() (Settings, error) {
+func (s BillingSettings) Resolve() (BillingSettings, error) {
 	if err := s.Validate(); err != nil {
-		return Settings{}, err
+		return BillingSettings{}, err
 	}
 	if s.Contract == "" {
 		s.Contract = "provider-limit"
@@ -59,17 +58,17 @@ func (s Settings) Resolve() (Settings, error) {
 	return s, nil
 }
 
-func (s Settings) ProviderStops() bool {
+func (s BillingSettings) ProviderStops() bool {
 	return s.Contract == "provider-limit" && s.Overage == "denied" &&
 		s.AutoRecharge == "disabled" && s.PaidFallback == "disabled"
 }
 
-func (s Settings) Complete() bool {
+func (s BillingSettings) Complete() bool {
 	return s.Validate() == nil && s.Contract != "" && s.Overage != "" &&
 		s.AutoRecharge != "" && s.PaidFallback != ""
 }
 
-func (s Settings) CheckSelection(selected Settings) error {
+func (s BillingSettings) CheckSelection(selected BillingSettings) error {
 	resolved, err := selected.Resolve()
 	if err != nil {
 		return err
@@ -80,17 +79,17 @@ func (s Settings) CheckSelection(selected Settings) error {
 	return nil
 }
 
-// ExternalBudget preserves the legacy account flag without migrating saved data.
-func ExternalBudget(source string, accountQuotaOnly bool) bool {
-	return source == ProviderStop || accountQuotaOnly
+// BillingExternalBudget preserves the legacy account flag without migrating saved data.
+func BillingExternalBudget(source string, accountQuotaOnly bool) bool {
+	return source == ProviderStopBudgetSource || accountQuotaOnly
 }
 
-func ValidateBudget(source string, accountQuotaOnly bool, ceiling float64, accountApproved, providerApproved bool) error {
+func ValidateBillingBudget(source string, accountQuotaOnly bool, ceiling float64, accountApproved, providerApproved bool) error {
 	if math.IsNaN(ceiling) || math.IsInf(ceiling, 0) || ceiling < 0 ||
-		source != "" && source != ProviderStop ||
-		source == ProviderStop && (!providerApproved || accountQuotaOnly || ceiling != 0) ||
+		source != "" && source != ProviderStopBudgetSource ||
+		source == ProviderStopBudgetSource && (!providerApproved || accountQuotaOnly || ceiling != 0) ||
 		accountQuotaOnly && (!accountApproved || ceiling != 0) ||
-		!ExternalBudget(source, accountQuotaOnly) && ceiling <= 0 {
+		!BillingExternalBudget(source, accountQuotaOnly) && ceiling <= 0 {
 		return fmt.Errorf("budget source must match its approved billing or account policy and native ceiling")
 	}
 	return nil

@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/core"
 )
 
@@ -41,7 +40,7 @@ func TestProviderBudgetNeverReadsQuotaForDispatchOrIsolatedTurns(t *testing.T) {
 	if _, err := CheckDispatchConfiguration(db, id, selection.Config); err != nil {
 		t.Fatal("unchanged billing declaration rejected", err)
 	}
-	for _, settings := range []billing.Settings{
+	for _, settings := range []core.BillingSettings{
 		{Contract: "metered"}, {Overage: "allowed"}, {AutoRecharge: "enabled"}, {PaidFallback: "unknown"},
 	} {
 		changed := selection.Config
@@ -68,7 +67,7 @@ func TestProviderOnlyFlowRetainsLimitsAndUnknownUsage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if (flow.Budget.BudgetSource == billing.ProviderStop) != (ceiling == 0) || flow.Budget.AccountQuotaOnly || state.Graph.Validate() != nil {
+		if (flow.Budget.BudgetSource == core.ProviderStopBudgetSource) != (ceiling == 0) || flow.Budget.AccountQuotaOnly || state.Graph.Validate() != nil {
 			t.Fatal("provider budget mode was not explicitly bound")
 		}
 		state.Graph.Dispatches[0].RuntimeSessionID = "fixture-session"

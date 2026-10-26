@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/hiono/taxion/internal/billing"
 )
 
 func TestBudgetGuidanceSelectionApprovalAndLegacyShape(t *testing.T) {
@@ -46,7 +44,7 @@ func TestBudgetGuidanceSelectionApprovalAndLegacyShape(t *testing.T) {
 
 func TestProviderBillingSelectionRequiresCompatibleDeclaration(t *testing.T) {
 	for _, contract := range []string{"", "provider-limit", "metered", "unknown"} {
-		selected := billing.Settings{Contract: contract}
+		selected := BillingSettings{Contract: contract}
 		policy, err := NewBillingBudgetGuidance("", "", selected)
 		if err != nil {
 			t.Fatal(err)
@@ -63,8 +61,8 @@ func TestProviderBillingSelectionRequiresCompatibleDeclaration(t *testing.T) {
 	}
 	for _, policy := range []*BudgetGuidancePolicy{
 		{Mode: "provider", Source: "request", AllowedModes: []string{"provider"}},
-		{Mode: "provider", Source: "request", AllowedModes: []string{"provider"}, Billing: &billing.Settings{Contract: "metered"}},
-		{Mode: "flow", Source: "request", AllowedModes: []string{"flow"}, Billing: &billing.Settings{Contract: "invalid"}},
+		{Mode: "provider", Source: "request", AllowedModes: []string{"provider"}, Billing: &BillingSettings{Contract: "metered"}},
+		{Mode: "flow", Source: "request", AllowedModes: []string{"flow"}, Billing: &BillingSettings{Contract: "invalid"}},
 	} {
 		if policy.Validate() == nil {
 			t.Fatal("unbound billing declaration accepted")

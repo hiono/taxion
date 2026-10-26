@@ -8,7 +8,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/store"
 )
@@ -59,7 +58,7 @@ type ResumeBasis struct {
 type budgetStopError struct{ reason string }
 
 func (r TaskBudgetReport) externalBudgetOnly() bool {
-	return billing.ExternalBudget(r.BudgetSource, r.AccountQuotaOnly)
+	return core.BillingExternalBudget(r.BudgetSource, r.AccountQuotaOnly)
 }
 
 func (e *budgetStopError) Error() string { return "taxion: BUDGET_STOP: " + e.reason }

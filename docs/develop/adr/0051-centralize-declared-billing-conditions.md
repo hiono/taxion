@@ -14,10 +14,14 @@ Accepted
 
 ## Decision
 
-`internal/billing` を課金条件の共通 API とする。契約形態、超過課金、自動チャージ、
+`internal/core/billing.go` を課金条件の共通 API とする。契約形態、超過課金、自動チャージ、
 有料切替えの値、既定の解決、提供元の停止に任せられる条件、承認済み条件との照合、
 予算方式と利用額上限の整合性をここで扱う。提供元固有の残量 API 呼出しは既存 adapter に残す。
 外部の課金設定を変更する API や汎用ルールエンジンは作らない。
+
+当初は独立 package としたが、SDK-001 の「core は標準ライブラリだけに依存する」
+という制約に抵触したため、課金専用ファイルとして core 内へ配置する。
+共通 API の責務と保存形式は変えず、純粋性の CI 検査も緩和しない。
 
 `billing` の4条件は補足指示方式と独立して保存できる。
 `provider` は自動残量照会なしで提供元の停止に任せる方式であり、
@@ -47,10 +51,12 @@ ADR-0029・ADR-0049 は当時の判断として残し、新規既定値はこの
 公開文書の repository 検査、`git diff --check` が成功した。
 独立した差分レビューの判定は APPROVE。次の回帰検証を追加・拡張した。
 
-`go test -race` は billing・config・core・store・CLI の各 package で成功した。
+再配置前の `go test -race` は billing・config・core・store・CLI の各 package で成功した。
 controller package 全体は既定の10分でタイムアウトし、全体成功とは扱わない。
 関連する `Provider|Billing|GuidanceOverride` の検証と、中断位置から残る9件の検証を
 それぞれ race detector 付きで実行し、成功した。data race の報告はなかった。
+最初の PR CI では全 package の race 検査も30分の上限内で成功した。
+core の純粋性違反は上記の配置変更で修正し、独立した課金 package への依存を取り除いた。
 
 | 検証 | 確認した動作 |
 | --- | --- |

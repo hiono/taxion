@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hiono/taxion/internal/billing"
+	"github.com/hiono/taxion/internal/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,8 +42,8 @@ type Config struct {
 		ApprovalRef    string `yaml:"approvalRef" json:"approvalRef"`
 		BudgetGuidance string `yaml:"budgetGuidance,omitempty" json:"budgetGuidance,omitempty"`
 	} `yaml:"execution" json:"execution"`
-	Endpoints Endpoints        `yaml:"endpoints,omitempty" json:"endpoints,omitempty"`
-	Billing   billing.Settings `yaml:"billing,omitempty" json:"billing,omitempty"`
+	Endpoints Endpoints            `yaml:"endpoints,omitempty" json:"endpoints,omitempty"`
+	Billing   core.BillingSettings `yaml:"billing,omitempty" json:"billing,omitempty"`
 }
 
 // Endpoints separates the addresses a GitLab instance serves from the project
@@ -185,13 +185,13 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	type configJSON Config
 	shadow := struct {
 		configJSON
-		Endpoints *Endpoints        `json:"endpoints,omitempty"`
-		Billing   *billing.Settings `json:"billing,omitempty"`
+		Endpoints *Endpoints            `json:"endpoints,omitempty"`
+		Billing   *core.BillingSettings `json:"billing,omitempty"`
 	}{configJSON: configJSON(c)}
 	if !c.Endpoints.Empty() {
 		shadow.Endpoints = &c.Endpoints
 	}
-	if c.Billing != (billing.Settings{}) {
+	if c.Billing != (core.BillingSettings{}) {
 		shadow.Billing = &c.Billing
 	}
 	return json.Marshal(shadow)

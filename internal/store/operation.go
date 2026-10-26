@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/core"
 )
 
@@ -37,7 +36,7 @@ func (o Operation) Active() bool {
 }
 
 func (o Operation) ExternalBudgetOnly() bool {
-	return billing.ExternalBudget(o.BudgetSource, o.AccountQuotaOnly)
+	return core.BillingExternalBudget(o.BudgetSource, o.AccountQuotaOnly)
 }
 
 func (o Operation) validate() error {
@@ -47,7 +46,7 @@ func (o Operation) validate() error {
 		math.IsNaN(o.MaxNanoAIU) || math.IsInf(o.MaxNanoAIU, 0) || o.MaxNanoAIU < 0 ||
 		o.AccountQuotaOnly && (o.Kind != "request" || o.MaxNanoAIU != 0) ||
 		o.BudgetSource != "" && (o.Kind != "request" ||
-			billing.ValidateBudget(o.BudgetSource, o.AccountQuotaOnly, o.MaxNanoAIU, true, true) != nil) ||
+			core.ValidateBillingBudget(o.BudgetSource, o.AccountQuotaOnly, o.MaxNanoAIU, true, true) != nil) ||
 		math.IsNaN(o.PlanningNanoAIU) || math.IsInf(o.PlanningNanoAIU, 0) || o.PlanningNanoAIU < 0 ||
 		o.Kind == "request" && o.PlanningUsageState != "complete" && o.PlanningUsageState != "unknown" ||
 		len(o.Checkpoint) != 0 && !json.Valid(o.Checkpoint) {

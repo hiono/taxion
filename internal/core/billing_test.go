@@ -1,4 +1,4 @@
-package billing
+package core
 
 import (
 	"math"
@@ -8,19 +8,19 @@ import (
 func TestSettingsResolveAndProviderStopConditions(t *testing.T) {
 	for _, test := range []struct {
 		name     string
-		settings Settings
+		settings BillingSettings
 		stops    bool
 	}{
-		{"default", Settings{}, true},
-		{"explicit", Settings{"provider-limit", "denied", "disabled", "disabled"}, true},
-		{"metered", Settings{Contract: "metered"}, false},
-		{"unknown", Settings{Contract: "unknown"}, false},
-		{"overage", Settings{Overage: "allowed"}, false},
-		{"overage-unknown", Settings{Overage: "unknown"}, false},
-		{"recharge", Settings{AutoRecharge: "enabled"}, false},
-		{"recharge-unknown", Settings{AutoRecharge: "unknown"}, false},
-		{"fallback", Settings{PaidFallback: "enabled"}, false},
-		{"fallback-unknown", Settings{PaidFallback: "unknown"}, false},
+		{"default", BillingSettings{}, true},
+		{"explicit", BillingSettings{"provider-limit", "denied", "disabled", "disabled"}, true},
+		{"metered", BillingSettings{Contract: "metered"}, false},
+		{"unknown", BillingSettings{Contract: "unknown"}, false},
+		{"overage", BillingSettings{Overage: "allowed"}, false},
+		{"overage-unknown", BillingSettings{Overage: "unknown"}, false},
+		{"recharge", BillingSettings{AutoRecharge: "enabled"}, false},
+		{"recharge-unknown", BillingSettings{AutoRecharge: "unknown"}, false},
+		{"fallback", BillingSettings{PaidFallback: "enabled"}, false},
+		{"fallback-unknown", BillingSettings{PaidFallback: "unknown"}, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			resolved, err := test.settings.Resolve()
@@ -31,7 +31,7 @@ func TestSettingsResolveAndProviderStopConditions(t *testing.T) {
 			if err != nil || again != resolved || resolved.CheckSelection(test.settings) != nil {
 				t.Fatal("billing resolution is not stable", err)
 			}
-			for _, changed := range []Settings{
+			for _, changed := range []BillingSettings{
 				{Contract: "metered"}, {Overage: "allowed"},
 				{AutoRecharge: "enabled"}, {PaidFallback: "enabled"},
 			} {
@@ -42,7 +42,7 @@ func TestSettingsResolveAndProviderStopConditions(t *testing.T) {
 			}
 		})
 	}
-	for _, invalid := range []Settings{
+	for _, invalid := range []BillingSettings{
 		{Contract: "unlimited"}, {Overage: "true"}, {AutoRecharge: "off"}, {PaidFallback: "auto"},
 	} {
 		if _, err := invalid.Resolve(); err == nil {
@@ -63,16 +63,16 @@ func TestBudgetSourcesPreserveLegacyAndExplicitCaps(t *testing.T) {
 		{"", true, 0, true, false, true},
 		{"", true, 1, true, false, false},
 		{"", true, 0, false, true, false},
-		{ProviderStop, false, 0, false, true, true},
-		{ProviderStop, false, 1, false, true, false},
-		{ProviderStop, true, 0, true, true, false},
-		{ProviderStop, false, 0, true, false, false},
+		{ProviderStopBudgetSource, false, 0, false, true, true},
+		{ProviderStopBudgetSource, false, 1, false, true, false},
+		{ProviderStopBudgetSource, true, 0, true, true, false},
+		{ProviderStopBudgetSource, false, 0, true, false, false},
 		{"unknown", false, 0, true, true, false},
 		{"", false, math.NaN(), false, false, false},
 		{"", false, math.Inf(1), false, false, false},
 		{"", false, -1, false, false, false},
 	} {
-		if (ValidateBudget(test.source, test.account, test.cap, test.accountApproved, test.providerApproved) == nil) != test.valid {
+		if (ValidateBillingBudget(test.source, test.account, test.cap, test.accountApproved, test.providerApproved) == nil) != test.valid {
 			t.Fatal("incorrect budget source validation", test)
 		}
 	}

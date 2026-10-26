@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
@@ -613,8 +612,8 @@ func TestSearch(t *testing.T) {
 			t.Fatal("quota-only request fabricated a native ceiling or lost its monitoring contract")
 		}
 	} else if providerOnly {
-		if state.Records.Operation.BudgetSource != billing.ProviderStop ||
-			state.Graph.ReviewFlows[0].Budget.BudgetSource != billing.ProviderStop ||
+		if state.Records.Operation.BudgetSource != core.ProviderStopBudgetSource ||
+			state.Graph.ReviewFlows[0].Budget.BudgetSource != core.ProviderStopBudgetSource ||
 			state.Graph.ReviewFlows[0].Budget.MaxNanoAIU != 0 {
 			t.Fatal("default provider request lost its approved external budget source")
 		}

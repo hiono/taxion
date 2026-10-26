@@ -18,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
@@ -289,7 +288,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		}
 	}
 	if resuming && (savedOperation.AccountQuotaOnly != (*taskNanoAIU == 0 && core.AccountQuotaBudget(guidance)) ||
-		(savedOperation.BudgetSource == billing.ProviderStop) != (*taskNanoAIU == 0 && core.ProviderBudget(guidance))) {
+		(savedOperation.BudgetSource == core.ProviderStopBudgetSource) != (*taskNanoAIU == 0 && core.ProviderBudget(guidance))) {
 		return fmt.Errorf("request checkpoint budget mode differs from saved operation")
 	}
 	if selected.Repository.Path != *repo {
@@ -434,7 +433,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		PlanningUsageState: "complete",
 	}
 	if *taskNanoAIU == 0 && core.ProviderBudget(guidance) {
-		operation.BudgetSource = billing.ProviderStop
+		operation.BudgetSource = core.ProviderStopBudgetSource
 	}
 	lease, err := db.LockOperation()
 	if err != nil {
@@ -753,7 +752,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				remainingNanoAIU = 0
 				budgetAuthorization = "Human selected /approve for the approved goal, deadline, repair limit and reset-daily account remaining floor without a nano-AIU ceiling"
 			}
-			if operation.BudgetSource == billing.ProviderStop {
+			if operation.BudgetSource == core.ProviderStopBudgetSource {
 				remainingNanoAIU = 0
 				budgetAuthorization = "Human selected /approve for the declared provider-stop-no-overage billing contract, goal, deadline and repair limit without a nano-AIU ceiling or automatic quota monitoring"
 			}

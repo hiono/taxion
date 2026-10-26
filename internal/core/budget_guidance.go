@@ -3,17 +3,15 @@ package core
 import (
 	"fmt"
 	"slices"
-
-	"github.com/hiono/taxion/internal/billing"
 )
 
 type BudgetGuidancePolicy struct {
-	Mode                string            `json:"mode"`
-	Source              string            `json:"source"`
-	AllowedModes        []string          `json:"allowedModes"`
-	AccountReadApproved bool              `json:"accountReadApproved,omitempty"`
-	AccountAllocation   string            `json:"accountAllocation,omitempty"`
-	Billing             *billing.Settings `json:"billing,omitempty"`
+	Mode                string           `json:"mode"`
+	Source              string           `json:"source"`
+	AllowedModes        []string         `json:"allowedModes"`
+	AccountReadApproved bool             `json:"accountReadApproved,omitempty"`
+	AccountAllocation   string           `json:"accountAllocation,omitempty"`
+	Billing             *BillingSettings `json:"billing,omitempty"`
 }
 
 func (p *BudgetGuidancePolicy) Validate() error {
@@ -67,7 +65,7 @@ func AccountQuotaBudget(p *BudgetGuidancePolicy) bool {
 }
 
 func NewBudgetGuidance(configured, override string) (*BudgetGuidancePolicy, error) {
-	return NewBillingBudgetGuidance(configured, override, billing.Settings{})
+	return NewBillingBudgetGuidance(configured, override, BillingSettings{})
 }
 
 func ProviderBudget(p *BudgetGuidancePolicy) bool {
@@ -78,7 +76,7 @@ func ExternalBudget(p *BudgetGuidancePolicy) bool {
 	return AccountQuotaBudget(p) || ProviderBudget(p)
 }
 
-func (p *BudgetGuidancePolicy) CheckBillingContract(selected billing.Settings) error {
+func (p *BudgetGuidancePolicy) CheckBillingContract(selected BillingSettings) error {
 	if p == nil {
 		return nil
 	}
@@ -91,7 +89,7 @@ func (p *BudgetGuidancePolicy) CheckBillingContract(selected billing.Settings) e
 	return nil
 }
 
-func NewBillingBudgetGuidance(configured, override string, selected billing.Settings) (*BudgetGuidancePolicy, error) {
+func NewBillingBudgetGuidance(configured, override string, selected BillingSettings) (*BudgetGuidancePolicy, error) {
 	settings, err := selected.Resolve()
 	if err != nil {
 		return nil, err

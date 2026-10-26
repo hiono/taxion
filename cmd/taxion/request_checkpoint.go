@@ -10,7 +10,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/hiono/taxion/internal/billing"
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime/controller"
@@ -119,7 +118,7 @@ func verifyRequestCheckpoint(state store.Workspace, operation store.Operation, c
 	if operation.AccountQuotaOnly && (operation.MaxNanoAIU != 0 || !core.AccountQuotaBudget(task.BudgetGuidance)) {
 		return false, fmt.Errorf("request account-only budget lacks its approved reset-daily policy")
 	}
-	if operation.BudgetSource != "" && billing.ValidateBudget(operation.BudgetSource, operation.AccountQuotaOnly,
+	if operation.BudgetSource != "" && core.ValidateBillingBudget(operation.BudgetSource, operation.AccountQuotaOnly,
 		operation.MaxNanoAIU, core.AccountQuotaBudget(task.BudgetGuidance), core.ProviderBudget(task.BudgetGuidance)) != nil {
 		return false, fmt.Errorf("request provider-only budget lacks its declared billing contract")
 	}
@@ -154,7 +153,7 @@ func verifyRequestCheckpoint(state store.Workspace, operation store.Operation, c
 			flow.Budget.BudgetSource != operation.BudgetSource ||
 			!operation.ExternalBudgetOnly() && flow.Budget.MaxNanoAIU > operation.MaxNanoAIU-operation.PlanningNanoAIU ||
 			operation.AccountQuotaOnly && !core.AccountQuotaBudget(flow.Contract.BudgetGuidance) ||
-			operation.BudgetSource == billing.ProviderStop && !core.ProviderBudget(flow.Contract.BudgetGuidance) ||
+			operation.BudgetSource == core.ProviderStopBudgetSource && !core.ProviderBudget(flow.Contract.BudgetGuidance) ||
 			flow.MaxRepairs != checkpoint.MaxRepairs || flow.Budget.MaxDispatches > 2+2*checkpoint.MaxRepairs ||
 			flow.Budget.MaxCoderSessions > 1+checkpoint.MaxRepairs || flow.Budget.MaxReviewerSessions > 1+checkpoint.MaxRepairs) {
 		return false, fmt.Errorf("request execution budget or deadline exceeds its approval")
