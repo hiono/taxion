@@ -542,6 +542,8 @@ v0.7.16 の共通 runner は Reviewer の起動前に `review_budget` event を�
 
 `workflow handoff --file <path>` は既存 Flow に出典付き `HOLD`・`RELEASE` を保存し、`expectedChangeId` を最新 handoff change と比較する。hold は次 Dispatch の発行と未開始実行を止め、実行中 role の認可済み作業と最終結果は保つ。runner は引継ぎ時点で handoff-held error を返し、現在の結果を取り消さず claim を解放する。明示 release は不変の契約と上限で後の `workflow run`・`advance` を許すが、作業を直接開始せず、safety stop の Flow も復帰させない。request 形式と競合の制約は Task Graph に記載する。
 
+Controller が停止時に作る `HOLD` の理由は、前後の空白だけを除いて記録する。Flow の停止理由には元の文字列を残し、`HOLD` の保存が失敗した場合も、そのエラーに元の理由を含める。これは停止理由の保存処理の修正であり、Git の再検証や受入れ条件を省略するものではない。保存済み Reviewer 結果が `APPROVE` でも、Flow が `STOPPED` なら `advance`・`recover`・`handoff RELEASE` で完了へ進める手順はない。結果と証拠を保ち、停止原因と対象の同一性を確認してから復旧方法を判断する。
+
 `workflow feedback-target --id <flow-id>` は最新 Dispatch の instruction と結果 identity を読む。`workflow feedback --file <path>` はその完全一致対象を比較し、出典付き利用者応答と handoff hold を一つの workspace transaction で保存する。元結果、verdict、認可を保ち、文章を自動送信したり契約変更の承認と扱ったりしない。古い対象は明示 error とし、feedback・hold を保存しない。対象変更に関係なく次引継ぎを保留する場合は `workflow handoff` を別に使う。
 
 未解決 feedback は running Flow の release を止める。`workflow feedback-resolve` は最新観測対象と hold ID に出典付き `KEEP_CONTRACT` を記録する。release 前に全 pending feedback を解決する。解決自体は hold 解除も prompt 送信もしない。この初回処置は承認契約を保ち、新 instruction への feedback 適用は行わない。safety stop の Flow を release しても実行権限は戻らない。
