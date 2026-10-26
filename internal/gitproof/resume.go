@@ -13,25 +13,33 @@ import (
 // CheckResumeStart observes an untouched Coder worktree. It does not refresh
 // the index, capture a snapshot, create objects, or run validation commands.
 func CheckResumeStart(ctx context.Context, dispatch core.GraphDispatch) error {
+	return checkSavedWorktree(ctx, dispatch, false)
+}
+
+func readOnlyGit(ctx context.Context, directory string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", append([]string{
+		"--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+		"-c", "core.untrackedCache=false", "-c", "core.filemode=true", "-c", "core.symlinks=true",
+		"-c", "core.ignoreStat=false", "-c", "core.trustctime=true", "-c", "core.checkStat=default",
+		"-C", directory,
+	}, args...)...)
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GIT_") {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
+	cmd.Env = append(cmd.Env, "GIT_OPTIONAL_LOCKS=0", "GIT_NO_REPLACE_OBJECTS=1")
+	output := &limitedOutput{remaining: 64 * 1024}
+	cmd.Stdout = output
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("read-only Git observation %s failed: %w", args[0], err)
+	}
+	return strings.TrimSpace(output.String()), nil
+}
+
+func checkSavedWorktree(ctx context.Context, dispatch core.GraphDispatch, allowDetached bool) error {
 	run := func(args ...string) (string, error) {
-		cmd := exec.CommandContext(ctx, "git", append([]string{
-			"--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
-			"-c", "core.untrackedCache=false", "-c", "core.filemode=true", "-c", "core.symlinks=true",
-			"-c", "core.ignoreStat=false", "-c", "core.trustctime=true", "-c", "core.checkStat=default",
-			"-C", dispatch.Instruction.Worktree,
-		}, args...)...)
-		for _, entry := range os.Environ() {
-			if !strings.HasPrefix(entry, "GIT_") {
-				cmd.Env = append(cmd.Env, entry)
-			}
-		}
-		cmd.Env = append(cmd.Env, "GIT_OPTIONAL_LOCKS=0", "GIT_NO_REPLACE_OBJECTS=1")
-		output := &limitedOutput{remaining: 64 * 1024}
-		cmd.Stdout = output
-		if err := cmd.Run(); err != nil {
-			return "", fmt.Errorf("resume Git observation failed")
-		}
-		return strings.TrimSpace(output.String()), nil
+		return readOnlyGit(ctx, dispatch.Instruction.Worktree, args...)
 	}
 	instruction := dispatch.Instruction
 	if dispatch.Recipient != "CODER" || !fullSHA(instruction.BaselineSHA) || !fullSHA(dispatch.ExpectedStartSHA()) {
@@ -53,8 +61,13 @@ func CheckResumeStart(ctx context.Context, dispatch core.GraphDispatch) error {
 	if err != nil || VerifyRepositoryRemote(dispatch, remote) != nil {
 		return fmt.Errorf("resume endpoint identity differs from approved configuration")
 	}
-	branch, err := run("symbolic-ref", "--quiet", "--short", "HEAD")
-	if err != nil || branch != instruction.Branch {
+	var branch string
+	if allowDetached {
+		branch, err = run("rev-parse", "--abbrev-ref", "HEAD")
+	} else {
+		branch, err = run("symbolic-ref", "--quiet", "--short", "HEAD")
+	}
+	if err != nil || branch != instruction.Branch && !(allowDetached && branch == "HEAD") {
 		return fmt.Errorf("resume branch differs from the saved contract")
 	}
 	head, err := run("rev-parse", "HEAD")
@@ -100,7 +113,7 @@ func CheckResumeStart(ctx context.Context, dispatch core.GraphDispatch) error {
 			return fmt.Errorf("resume target tree identity is invalid")
 		}
 	}
-	if _, err := run("diff-index", "--quiet", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", tree, "--"); err != nil {
+	if _, err := run("diff-index", "--cached", "--quiet", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", tree, "--"); err != nil {
 		return fmt.Errorf("resume index differs from the approved start tree")
 	}
 	if _, err := run("diff-files", "--quiet", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", "--"); err != nil {

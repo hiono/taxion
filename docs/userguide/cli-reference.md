@@ -542,7 +542,7 @@ v0.7.16 の共通 runner は Reviewer の起動前に `review_budget` event を�
 
 `workflow handoff --file <path>` は既存 Flow に出典付き `HOLD`・`RELEASE` を保存し、`expectedChangeId` を最新 handoff change と比較する。hold は次 Dispatch の発行と未開始実行を止め、実行中 role の認可済み作業と最終結果は保つ。runner は引継ぎ時点で handoff-held error を返し、現在の結果を取り消さず claim を解放する。明示 release は不変の契約と上限で後の `workflow run`・`advance` を許すが、作業を直接開始せず、safety stop の Flow も復帰させない。request 形式と競合の制約は Task Graph に記載する。
 
-Controller が停止時に作る `HOLD` の理由は、前後の空白だけを除いて記録する。Flow の停止理由には元の文字列を残し、`HOLD` の保存が失敗した場合も、そのエラーに元の理由を含める。これは停止理由の保存処理の修正であり、Git の再検証や受入れ条件を省略するものではない。保存済み Reviewer 結果が `APPROVE` でも、Flow が `STOPPED` なら `advance`・`recover`・`handoff RELEASE` で完了へ進める手順はない。結果と証拠を保ち、停止原因と対象の同一性を確認してから復旧方法を判断する。
+Controller が停止時に作る `HOLD` の理由は、前後の空白だけを除いて記録する。Flow の停止理由には元の文字列を残し、`HOLD` の保存が失敗した場合も、そのエラーに元の理由を含める。これは停止理由の保存処理の修正であり、Git の再検証や受入れ条件を省略するものではない。保存済み Reviewer 結果が `APPROVE` でも、Flow が `STOPPED` なら通常の `advance`・`recover`・`handoff RELEASE` で完了へは進まない。後述の受理専用操作は、理由消失の不具合で停止した限定条件だけを対象にする。
 
 `workflow feedback-target --id <flow-id>` は最新 Dispatch の instruction と結果 identity を読む。`workflow feedback --file <path>` はその完全一致対象を比較し、出典付き利用者応答と handoff hold を一つの workspace transaction で保存する。元結果、verdict、認可を保ち、文章を自動送信したり契約変更の承認と扱ったりしない。古い対象は明示 error とし、feedback・hold を保存しない。対象変更に関係なく次引継ぎを保留する場合は `workflow handoff` を別に使う。
 
@@ -566,6 +566,42 @@ Task の `validationCommands` は Controller の検査操作を認可する。�
 
 `taxion records proposal|approve|send|cancel|reconcile|show|finding` は承認済み GitHub / GitLab 公開と出典付き失敗分析を管理する。承認は正確な対象・account・content hash とプロジェクトの Communication Profile を対応付ける。`TAXION_COMMUNICATION_PROFILES` で対象プロジェクトの設定ファイルを明示し、`update.statement.at` に記述時点、`update.statement.claims` に参照 URL とその状態を指定する。未設定・対象不一致・未確認の参照は送信できない。形式と更新時の再承認は[公開文章の検証手順](../develop/public-communication-validation.md#プロジェクト設定と-forge-共通検査)を参照する。送信不明は停止済み sender の claim 照合まで明示して保つ。`taxion git check-range --base <SHA>
 --head <SHA> --scanner <PATH>` は公開前に未公開の全 commit tree と message を scan する。[実行記録](execution-records.md)を参照する。
+
+#### 停止後の保存済みレビュー結果の受理
+
+`workflow accept-saved-review` は、保存済み実装結果をレビューする Flow が、引継ぎ保留の入力検証エラーで停止理由を失った場合の受理専用操作である。新しい Flow・Dispatch・モデル session を作らず、検証 command も再実行しない。対象は `continueFromDispatchId` を持つツリースナップショット形式で、Dispatch が成功した Reviewer の1件だけ、判定が `APPROVE`、指摘・阻害事項が0件の `STOPPED / SAFETY_STOP` に限る。別の停止理由や通常の修正フローには使えない。
+
+配布物の照合、必要な provenance policy の登録、`ready` の確認後、同じ設定環境で次の承認ファイルを用意する。これは保存結果の受理だけの明示承認であり、実行・予算・公開の承認ではない。`actor`・`source` は利用者の判断と出典を記録するもので、認証用の資格情報ではない。
+
+```json
+{
+  "flowId": "<saved-flow-id>",
+  "actor": "<approver>",
+  "source": "<approval-reference>",
+  "reason": "期限前に保存された独立レビュー結果だけを受理する",
+  "allowExpired": true
+}
+```
+
+```sh
+taxion workflow accept-saved-review --file acceptance.json --preview
+```
+
+preview は workspace と Memory を読取り専用で開く。`stateChanged:false`、対象 Task・Reviewer Dispatch・完全な SHA と tree SHA、保存結果と instruction の hash、元の期限、期限超過の有無、確認できた検査と予定する遷移を表示する。失敗時は理由を示して非ゼロ終了し、受理しない。`allowExpired:true` は、期限前に成功結果を保存した Controller の receipt が確認できる場合に限り、期限後の受理だけを許す。期限そのものは延長せず、期限後に保存された結果は拒否する。
+
+確認後、同じファイルに preview の `hash` を `expectedHash` として追加し、`--preview` なしで実行する。ファイル中の判断、設定、保存状態が変わった場合は再び preview から確認する。適用時も Git を含む全条件を再検証する。
+
+```sh
+taxion workflow accept-saved-review --file acceptance.json
+```
+
+成功時は同じ Flow を `COMPLETED`、実装 Task を `APPROVED` → `COMPLETED` にする。Reviewer Task は結果保存時の `BLOCKED` と `Dispatch ended: SUCCEEDED` をそのまま保持し、preview の `reviewerTaskFinalStatus` も `BLOCKED` となる。Reviewer Task の再実行や未実施作業の完了を記録する操作ではない。
+
+元の HOLD は解除・削除しない。元の停止状態・理由・期限・HOLD 履歴を含む Flow 全体、結果と preview の hash、actor・source・reason、期限後受理の承認を `reviewAcceptances` へ追記する。`originalReasonUnavailable:true` は元の理由が二次エラーに置き換わって失われたことを示し、推定原因を確定した記録にはしない。
+
+元 Coder の worktree は `detached HEAD` でも、そのコミット・index・実ファイル・snapshotRef と保存 tree の一致を確認する。現在の実装 Task の worktree は承認済みブランチを要求する。両者は同じ Git オブジェクトデータベースに属し、解放済み Reviewer の path が存在しないことも必要になる。隠し index flag、有効な Git filter、未記録 file、契約・設定・承認・packet・Memory の不一致、残存 runner、実行中 Dispatch・operation、未解決 feedback・draft は拒否する。
+
+受理前には workspace・Memory・Git の元状態を保護する。受理は過去の停止を取り消す操作でも、公開許可でもない。受理記録を作った DB を、この記録を理解しない旧版で開いて更新しない。rollback が必要なら現 DB を保持し、受理前のバックアップを別配置で使う。DB の手修正、元 worktree のブランチ付け替え、再レビューによる回避は前提にしない。
 
 CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は stdio の ACP、`web/` は browser console を提供する。
 
@@ -623,6 +659,7 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | `workflow start`, `workflow recover`, `workflow handoff`, `workflow interrupt`, `workflow terminate`, `workflow feedback`, `workflow feedback-resolve`, `workflow draft`, `workflow draft-discard`, `workflow draft-approve`, `workflow planner-draft`, `workflow planner-action`, `workflow question-draft` | 各操作の request を `--file JSON` で渡す。`workflow start` は期限・repair 回数・Task-wide nano-AIU ceiling を持つ Flow を認可し、初回 Coder Dispatch を発行する。`workflow terminate` は未確認・未開始 Coder Dispatch だけを取り消し、Flow を hold して新しい Task 契約による再承認を可能にする。`continueFromDispatchId` は停止後の保存済み Coder 成功結果を引き継ぐ。後続 Task は同じ output SHA、snapshot mode では同じ tree SHA・path も対象にする。recover、handoff、feedback、draft、planning は指定操作だけを行い、変更 scope・予算を通知なしに承認しない。形式は [Task Graph](../develop/task-graph.md) を参照する。 |
 | `workflow advance`, `workflow show`, `workflow evaluate`, `workflow feedback-target`, `workflow planning-context` | `--id FLOW_ID` で保存 review flow を選ぶ。`workflow evaluate` は Task 単位の承認上限・消費・残量を含む report を出す。前述の各節に従う読取り・遷移操作。 |
 | `workflow evaluate` | `--id FLOW_ID` で保存品質証拠と測定済み／未測定の費用を JSON 表示する。読取り専用 SQLite 接続を使い、workspace 作成・移行・モデル実行をしない。`--require-quality` は完了した独立同一 target レビューと文書整合 criterion がなければ JSON を出したうえで非zero終了する。得点・自動公開承認・現在の Git の検証ではない。 |
+| `workflow accept-saved-review` | `--file JSON` で `flowId`・`actor`・`source`・`reason`・`allowExpired` を指定する。`--preview` は状態を変えず対象と検査を表示し、適用には同じ判断と preview の `hash` を `expectedHash` として要求する。引継ぎ保留の理由消失で停止したレビュー専用 snapshot Flow だけを対象に、モデルや検証 command を起動せず保存済み `APPROVE` を受理する。 |
 | `gate contract`, `gate execution`, `gate publication` | `gate contract` は `--task ID`、`gate execution`・`gate publication` は `--flow ID` を要求する。保存 Task・Flow・承認 bundle・評価証拠だけを読み、Task Graph・Dispatch・Flow・ledger を変更せずモデルも呼ばない。`--json` は version 1 の機械可読 report（gate 名、verdict、task/proposal/record/bundle/evidence hash、blockingConditions、drift と authorization impact、nextRequiredApproval、nextAuthorizedTransition、`stateChanged:false`）を出す。`--json` なしは同じ内容を人が読める形で出す。終了 code は 0 pass・1 fail・2 blocked で、未検証の項目を pass として報告しない。 |
 | `workflow lanes` | `--task ID` で保存 Task を選び、repository identity・baseline/worktree・contract 整合・handoff 準備の4つの読取り専用 lane を並行実行して JSON を表示する。`--timeout DURATION` は lane ごとの上限（既定5秒）、`--root PATH` は worktree を含むべき repository root（既定は現在 directory）を指定する。workspace・Task Graph・Dispatch・Flow・worktree・runtime session を変更せず、モデル session も開始しない。lane が一つでも失敗すると `executionGateOpen` は false になり、JSON を出したうえで非zero終了する。診断は credential を伏せる。 |
 | `workflow run`, `workflow step` | `--id FLOW_ID`・`--coder-prompt-file PATH`・`--reviewer-prompt-file PATH` で Flow と role prompt を選ぶ。file の代わりに `--builtin-prompts` を使うと、同梱 snapshot prompt、厳密な結果 identity、compact context、Controller validation submission を選ぶ。snapshot Flow を要求し、managed commit・stage は拒否する。この mode だけは tool 未指定時に Coder `view,create,edit,apply_patch`、Reviewer `view` を既定とし、明示空 list では file tool を追加しない。通常の native skill tool は別に追加する。任意の `--cli PATH`・`--base-directory PATH`・`--max-ai-credits N`・`--coder-tools LIST`・`--reviewer-tools LIST` で runtime と allowlist を選ぶ。`--managed-commit` は binding 済み Coder commit tool、`--managed-stage` は追加の scope 内 stage を有効にし、後者は前者を要求する。`--scanner PATH` は managed commit だけで有効。`--strict-result-identities`・`--compact-context`・`--controller-validation-submission` は各結果・context 検証 mode を変える。credit 上限は session 別で、Flow 全体ではない。 |

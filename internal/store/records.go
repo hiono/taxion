@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -29,6 +30,53 @@ type Records struct {
 	Requests             []RequestRecord           `json:"requests,omitempty"`
 	Restore              *RestoreRecord            `json:"restore,omitempty"`
 	Restores             []RestoreRecord           `json:"restores,omitempty"`
+	ReviewAcceptances    []ReviewAcceptance        `json:"reviewAcceptances,omitempty"`
+}
+
+type ReviewAcceptance struct {
+	FlowID                    string          `json:"flowId"`
+	DispatchID                string          `json:"dispatchId"`
+	InstructionHash           string          `json:"instructionHash"`
+	ResultHash                string          `json:"resultHash"`
+	PreviewHash               string          `json:"previewHash"`
+	Actor                     string          `json:"actor"`
+	Source                    string          `json:"source"`
+	Reason                    string          `json:"reason"`
+	AllowExpired              bool            `json:"allowExpired"`
+	OriginalReasonUnavailable bool            `json:"originalReasonUnavailable"`
+	PreviousFlow              core.ReviewFlow `json:"previousFlow"`
+	At                        time.Time       `json:"at"`
+}
+
+func (r Records) VerifyReviewAcceptances(graph core.TaskGraph) error {
+	seen := map[string]bool{}
+	for _, audit := range r.ReviewAcceptances {
+		prior := audit.PreviousFlow
+		current, exists := graph.ReviewFlow(audit.FlowID)
+		review, found := graph.GraphDispatch(audit.DispatchID)
+		resultHash, err := core.CanonicalSHA256(review.Result)
+		task, taskFound := graph.GraphTask(prior.TaskID)
+		if seen[audit.FlowID] || !exists || !found || !taskFound || audit.FlowID != prior.ID ||
+			audit.Actor == "" || audit.Source == "" || audit.Reason == "" || audit.At.IsZero() ||
+			!audit.OriginalReasonUnavailable || !recordHash(audit.PreviewHash) ||
+			err != nil || resultHash != audit.ResultHash || review.InstructionHash != audit.InstructionHash ||
+			review.Status != core.DispatchSucceeded || review.Result == nil || review.Result.ReviewVerdict != "APPROVE" ||
+			prior.Status != "STOPPED" || prior.StopCode != "SAFETY_STOP" || prior.Reason == "" ||
+			!prior.HandoffHeld() || prior.RunnerID != "" || len(prior.DispatchIDs) != 1 ||
+			prior.DispatchIDs[0] != review.ID || prior.SourceDispatchID == "" ||
+			task.Status != core.Completed || task.TargetSHA != review.Result.OutputSHA ||
+			task.TargetTreeSHA != review.Result.OutputTreeSHA ||
+			!audit.At.Before(prior.Deadline) && !audit.AllowExpired {
+			return fmt.Errorf("invalid saved review acceptance audit")
+		}
+		prior.Status, prior.StopCode, prior.StopCause = "COMPLETED", "", ""
+		prior.Reason = "saved independent review and acceptance verified for " + review.Result.OutputTreeSHA
+		if !reflect.DeepEqual(prior, current) {
+			return fmt.Errorf("accepted Flow differs from its retained stop audit")
+		}
+		seen[audit.FlowID] = true
+	}
+	return nil
 }
 
 type PublicationCancellation struct {

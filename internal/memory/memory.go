@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -89,6 +91,25 @@ type Entry struct {
 // Store is a SQLite-backed memory database.
 type Store struct {
 	db *sql.DB
+}
+
+// OpenReadOnly never creates a database or migrates its schema.
+func OpenReadOnly(path string) (*Store, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	uri := (&url.URL{Scheme: "file", Path: filepath.ToSlash(absolute),
+		RawQuery: "mode=ro&_pragma=query_only(1)"}).String()
+	db, err := sql.Open("sqlite", uri)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{db: db}, nil
 }
 
 // Open opens (creating if needed) the memory file at path and migrates the schema.

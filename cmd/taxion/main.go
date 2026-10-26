@@ -101,10 +101,10 @@ Review flows and recovery:
   workflow run        Execute review/repair continuously with saved ceilings (--id; role prompt files or --builtin-prompts)
   workflow step       Execute one role turn from a saved review flow (--id; role prompt files or --builtin-prompts)
   workflow show       Read the saved review flow and ceilings (--id required)
-  workflow evaluate   Report saved quality gates and measured/unknown costs; no reward score (--id required)
   workflow resume     Verify the saved unstarted Coder boundary, then run within its original contract (--id required)
   workflow lanes      Run read-only controller lanes for one Task and report a machine-readable gate
   workflow recover    Release interrupted runner ownership after recorded execution stop (--file JSON)
+  workflow accept-saved-review Preview or accept a saved APPROVE after the handoff diagnostic defect; no execution (--file JSON; --preview)
   workflow interrupt Request a targeted stop for the active flow (--file JSON)
   workflow handoff    Hold or release the next handoff with a sourced compare-and-swap request (--file JSON)
   workflow feedback-target Read the latest saved instruction/result target without changing execution (--id required)
@@ -121,6 +121,7 @@ Review flows and recovery:
   resume              Print a resume acknowledgement (local stub; --session required)
 
 Evidence and external records:
+  workflow evaluate   Report saved quality gates and measured/unknown costs; no reward score (--id required)
   role-packet create  Emit an immutable reference-only role packet (explicit task, tree and contract digests)
   role-packet verify  Verify and read back a role packet (--file, --expected-hash); no execution
   role-packet read    Read and verify a persisted canonical packet (--expected-hash)
