@@ -40,7 +40,7 @@ func PublicationHash(update store.ExternalUpdate) (string, error) {
 		!validPublicationTarget(update) ||
 		update.TaskID == "" || update.Account == "" || update.Actor == "" || update.ApprovalSource == "" ||
 		update.Kind != "ISSUE" && update.Kind != "PR" {
-		return "", fmt.Errorf("taxion: publication requires exact identity, target, account and sourced Human approval")
+		return "", fmt.Errorf("taxion: publication requires exact identity, target, account and sourced user approval")
 	}
 	if update.Status != "" || update.Hash != "" || update.Claim != "" || update.RemoteID != "" || update.Error != "" || !update.At.IsZero() {
 		return "", fmt.Errorf("taxion: proposal must contain only requested publication fields")
@@ -380,7 +380,7 @@ func ReconcilePublication(ctx context.Context, db *store.Store, id, expectedClai
 				}
 			} else {
 				// An absent marker cannot exclude an in-flight provider request.
-				return fmt.Errorf("taxion: remote delivery remains unconfirmed; Human must inspect provider state before new authorization")
+				return fmt.Errorf("taxion: remote delivery remains unconfirmed; the user must inspect provider state before new authorization")
 			}
 			update = *saved
 			return nil

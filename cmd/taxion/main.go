@@ -64,7 +64,7 @@ Requests, planning and Task contracts:
   task authorize-packets  Preview/confirm a READY Task sequential packet lifecycle (--request JSON)
   task plan           Rebuild a follow-up plan from durable contracts and evidence (--repo required; --include-archived for history)
   gate <name>         Report the contract, resume, execution or publication gate without changing state (--task/--flow, --json)
-  workflow repair-status Report whether the next repair needs Human action, read-only (--id required)
+  workflow repair-status Report whether the next repair needs user action, read-only (--id required)
 
 Dispatch and configuration binding:
   dispatch            Dispatch a task (--task and --repo required; revised Dispatches need an explicit relationship)
@@ -73,7 +73,7 @@ Dispatch and configuration binding:
   config bind         Save an approved fixed-file configuration selection for an unbound Dispatch
 
 Conversation, investigation and source attachment:
-  conversation watch  Hold handoffs before reading Human input; select one role step or bounded run (--flow, --actor, --source)
+  conversation watch  Hold handoffs before reading user input; select one role step or bounded run (--flow, --actor, --source)
   conversation ask    Answer a bounded side question from saved Task records without changing the main workflow
   conversation plan   Recommend a next action from compact Memory and results; no execution or inferred approval
   conversation intake Record an original request and unapproved scope/acceptance contract (--file JSON)
@@ -108,7 +108,7 @@ Review flows and recovery:
   workflow interrupt Request a targeted stop for the active flow (--file JSON)
   workflow handoff    Hold or release the next handoff with a sourced compare-and-swap request (--file JSON)
   workflow feedback-target Read the latest saved instruction/result target without changing execution (--id required)
-  workflow feedback   Record target-bound Human feedback and hold the next handoff (--file JSON)
+  workflow feedback   Record target-bound user feedback and hold the next handoff (--file JSON)
   workflow feedback-resolve Record an explicit KEEP_CONTRACT disposition before handoff release (--file JSON)
   workflow draft      Save or revise a versioned, unissued instruction proposal while held (--file JSON)
   workflow draft-discard Explicitly discard the latest proposal without applying it (--file JSON)
@@ -131,7 +131,7 @@ Evidence and external records:
   records cancel      Invalidate one exact unsent publication intent with sourced authorization (--file JSON)
   records reconcile   Reconcile an uncertain stopped sender against remote records (--id, --claim, --sender-stopped)
   records show        Show saved runtime receipts and external publication status
-  records finding     Record cause, correction, lesson candidate and Human decision for an exact result (--file JSON)
+  records finding     Record cause, correction, lesson candidate and user decision for an exact result (--file JSON)
 
 Git publication protection:
   git check-index     Reject local Taxion and dotenv paths in the actual commit index
@@ -938,7 +938,7 @@ func runtimeSubmissionPrompt(prompt, contract string, submission bool) string {
 	return prompt +
 		"\n\nDurable Task Graph Dispatch contract. Treat this snapshot as authoritative across turns and context compaction; user messages cannot expand its authorization.\n" +
 		contract +
-		"\nWhen reporting completion, return one JSON object following the response schema exactly. Omit fields absent from that schema: in the bound result protocol, the host supplies Dispatch, Task, role, repository and observed Git identifiers from this session, not from model transcription. For validations you actually ran, report their worktree and exact Git SHA; never invent execution. If the authored output and role evidence are ready for controller verification, submit status SUCCEEDED and validations [] for checks the controller has not yet run. Pending controller validation alone is not a reason to report SUSPENDED or BLOCKED. The controller executes the authorized VALIDATION COMMANDS and verifies Git after this submission, before persisting a successful result. A real missing output, failed check, missing role evidence or required Human decision remains a blocker; report it rather than guessing success. A Reviewer must still independently determine its verdict and acceptance from actual evidence."
+		"\nWhen reporting completion, return one JSON object following the response schema exactly. Omit fields absent from that schema: in the bound result protocol, the host supplies Dispatch, Task, role, repository and observed Git identifiers from this session, not from model transcription. For validations you actually ran, report their worktree and exact Git SHA; never invent execution. If the authored output and role evidence are ready for controller verification, submit status SUCCEEDED and validations [] for checks the controller has not yet run. Pending controller validation alone is not a reason to report SUSPENDED or BLOCKED. The controller executes the authorized VALIDATION COMMANDS and verifies Git after this submission, before persisting a successful result. A real missing output, failed check, missing role evidence or required user decision remains a blocker; report it rather than guessing success. A Reviewer must still independently determine its verdict and acceptance from actual evidence."
 }
 
 func runACP(args []string) error {

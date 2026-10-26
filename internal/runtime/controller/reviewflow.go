@@ -302,10 +302,10 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 			return stopWithCode("deadline reached; reconcile and safely stop any active Dispatch before further authorization", "BUDGET_STOP")
 		}
 		if !flowContractMatches(state.Graph, flow, task) {
-			return stop("Task scope, acceptance, authorization or execution contract changed; Human approval of a new flow is required")
+			return stop("Task scope, acceptance, authorization or execution contract changed; user approval of a new flow is required")
 		}
 		if err := state.Graph.CheckTaskSpecificationUse(task.ID, "runtime"); err != nil {
-			return stop("specification source or permission requires renewed Human approval: " + err.Error())
+			return stop("specification source or permission requires renewed user approval: " + err.Error())
 		}
 		if slices.Contains([]core.TaskStatus{core.Cancelled, core.Rejected, core.Superseded}, task.Status) {
 			return stop("Task ended with " + string(task.Status) + "; reconcile any active Dispatch")
@@ -314,7 +314,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 			return stop("Task is BLOCKED while its Dispatch is active; inspect the saved blocker and safely stop execution")
 		}
 		if task.Status == core.HumanDecisionRequired || task.HumanDecision != nil && task.HumanDecision.SelectedOptionID == "" {
-			return stop("Human decision required; present the Task's saved question and options")
+			return stop("user decision required; present the Task's saved question and options")
 		}
 		if last.Status == core.DispatchSuspended || last.Status == core.DispatchCancelRequested {
 			return stop("Dispatch " + last.ID + " requires safe stop or renewed authorization before continuation")
@@ -324,7 +324,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 			return fmt.Errorf("taxion: required flow Memory: %w", contextErr)
 		}
 		if !reflect.DeepEqual(context, last.Instruction.MemoryContext) {
-			return stop("required Memory differs from the issued snapshot; confirm the updated decision with Human")
+			return stop("required Memory differs from the issued snapshot; confirm the updated decision with the user")
 		}
 		if flow.HandoffHeld() && !last.ExecutionStarted && active(last.Status) {
 			stopped = fmt.Errorf("%w: %s", core.ErrHandoffHeld, flow.ID)
@@ -419,7 +419,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 				flow.Status, flow.Reason = "COMPLETED", "independent review and acceptance verified for "+task.TargetSHA
 			case "REQUEST_CHANGES":
 				if flow.Repairs >= flow.MaxRepairs {
-					return stopWithCode("repair ceiling reached; present saved findings and acceptance decisions to Human", "BUDGET_STOP")
+					return stopWithCode("repair ceiling reached; present saved findings and acceptance decisions to the user", "BUDGET_STOP")
 				}
 				for _, status := range []core.TaskStatus{core.RequestChanges, core.Blocked} {
 					if err := state.Graph.Transition(task.ID, status, "controller", "review requested changes", core.TransitionProof{}); err != nil {
@@ -447,7 +447,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 					return err
 				}
 			default:
-				return stop("Reviewer is BLOCKED; inspect saved acceptance decisions and findings with Human")
+				return stop("Reviewer is BLOCKED; inspect saved acceptance decisions and findings with the user")
 			}
 		}
 		storeFlow(state, flow)

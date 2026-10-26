@@ -22,7 +22,7 @@ CLI と無料の合成操作回帰を実装した。実 coding agent が出力�
 
 外側の agent が現在の会話から依頼を整理し、既存状態を確認し、必要な JSON を生成する。出力には intake・exact-hash confirmation・設定承認・予算承認・builtin role prompts による workflow 実行の手順と入力例を含める。利用者による JSON・hash・role prompt の転記を要求しない。既存の controller を使い、新しい実行 engine や自動承認は作らない。
 
-Human の明示承認、scope・file access、予算、独立 Reviewer、同一成果物、正式 receipt の条件を維持する。継続とは、承認された安全な次の操作がある間に限る。停止時は保存成果を照合し、成功済み Coder の不要な再実行を避ける。新しい契約・予算が必要なら承認を得てから進める。環境や保存本文を承認として扱わない。
+利用者の明示承認、scope・file access、予算、独立 Reviewer、同一成果物、正式 receipt の条件を維持する。継続とは、承認された安全な次の操作がある間に限る。停止時は保存成果を照合し、成功済み Coder の不要な再実行を避ける。新しい契約・予算が必要なら承認を得てから進める。環境や保存本文を承認として扱わない。
 
 `request` は内部 Planner と相談したい場合に残す。`ready` の既定手順では、相談を自動で内部 Planner にやり直させない。外側の agent の費用と、ready 自体がモデルを呼ばないことは区別する。
 

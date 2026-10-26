@@ -128,7 +128,7 @@ func TestFeedbackObservationRecordingAndReplayPreserveTargetAndAuthority(t *test
 	}
 	savedReview, _ := state.Graph.GraphDispatch(review.ID)
 	if !reflect.DeepEqual(review.Result, savedReview.Result) || savedReview.Result.ReviewVerdict != "REQUEST_CHANGES" {
-		t.Fatal("Human objection changed reviewer verdict or findings")
+		t.Fatal("user objection changed reviewer verdict or findings")
 	}
 	changedReview := review
 	resultCopy := *review.Result

@@ -23,7 +23,7 @@ func TestM14LiveSDKReauthorizedReview(t *testing.T) {
 	approvalMode := os.Getenv("TAXION_M14_REVIEW_APPROVAL")
 	preflight := approvalMode == "preflight-v2"
 	if !preflight && approvalMode != "approve-fixed-review" {
-		t.Skip("requires separate Human approval of the remaining Reviewer")
+		t.Skip("requires separate user approval of the remaining Reviewer")
 	}
 	root := os.Getenv("TAXION_M14_SDK_OUTPUT")
 	if !filepath.IsAbs(root) {
@@ -136,7 +136,7 @@ func TestM14LiveSDKReauthorizedReview(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if err := state.Graph.IssueDispatch(dispatch, "ORCHESTRATOR", "Human-reapproved independent review"); err != nil {
+		if err := state.Graph.IssueDispatch(dispatch, "ORCHESTRATOR", "user-reapproved independent review"); err != nil {
 			return err
 		}
 		state.Ledger.Dispatches = append(state.Ledger.Dispatches, core.Dispatch{

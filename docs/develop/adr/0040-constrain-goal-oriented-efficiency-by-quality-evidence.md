@@ -22,7 +22,7 @@ Reviewer の追加確認、Planner の再質問、各担当の調査は、担当
 
 Planner は安全で修正可能な既定案を使い、細部を一件ずつ質問に変えない。Coder は承認範囲内の通常の実装判断を進め、成果と証拠をまとめて引き継ぐ。Reviewer は acceptance 外の好みや任意の改善だけで修正・再レビューを発生させず、必要なら `workReport` に非blocking の助言を残す。実際の欠陥や未達条件を、費用削減のため任意扱いにはしない。外側の操作者も、結論を変えない進捗確認や再帰的な承認を追加しない。
 
-実装と関連文書を一つの成果物として扱う。新しい request の計画には、host が文書整合の acceptance を表示前に追加し、Human が確認した契約へ保存する。ready でも同じ criterion を手動契約へ含めるよう指示する。既存の全件 PASS・証拠参照・同一 target 検査を再利用し、文書 criterion が FAIL・欠落・証拠なしなら承認しない。無関係な文書の全件再検証は求めない。
+実装と関連文書を一つの成果物として扱う。新しい request の計画には、host が文書整合の acceptance を表示前に追加し、利用者が確認した契約へ保存する。ready でも同じ criterion を手動契約へ含めるよう指示する。既存の全件 PASS・証拠参照・同一 target 検査を再利用し、文書 criterion が FAIL・欠落・証拠なしなら承認しない。無関係な文書の全件再検証は求めない。
 
 `workflow evaluate --id ID` は保存済み graph を読取り専用で評価する。完了した独立同一 target レビューと文書 criterion がある場合のみ `RECORDED_PASS`、それ以外は `UNMET` とする。`--require-quality` は未達を非zero終了にし、操作者の公開前確認へ接続する。これは外部の `gh release` を遮断する仕組みでも、semantic な真偽を自動証明する仕組みでもない。既存契約を遡及変更せず、旧 Flow の評価は criterion 欠落を明示する。
 

@@ -25,7 +25,7 @@ import (
 // private output directory and separately approves these session ceilings.
 func TestM14LiveSDKAcquisitionAndIndependentReview(t *testing.T) {
 	if os.Getenv("TAXION_M14_SDK_APPROVAL") != "3-sessions-30-credits-20m" {
-		t.Skip("requires separate Human approval; never enable in normal CI")
+		t.Skip("requires separate user approval; never enable in normal CI")
 	}
 	root := os.Getenv("TAXION_M14_SDK_OUTPUT")
 	if !filepath.IsAbs(root) {

@@ -62,7 +62,7 @@ Memory の本文・版・出典、発行済み Dispatch の契約と結果を添
 
 計画の `action` は次に行う確認を表す。`REASSESS_DEFERRED` は保存済み再開条件の評価、
 `ASK_HUMAN` は未選択の質問への回答確認、`RESTORE_CONTRACT` は既存判断を使った契約の準備を示す。
-選択済みの Human decision は判断記録とともに復元し、新たな選択が必要な質問を Human に提示する。
+選択済みの利用者の判断は判断記録とともに復元し、新たな選択が必要な質問を利用者に提示する。
 `DISPATCH` は READY の実行候補を示し、実行時には通常の発行検査と Git 開始照合を行う。
 `gaps` は補完が必要な scope・acceptance・証拠・SHA・権限・検証コマンドなどの項目を示す。
 計画生成は Task の状態と権限を維持し、保留解除や承認を通常の記録済み遷移で行う。
@@ -108,7 +108,7 @@ acceptance、requiredEvidence、exitCondition、
 dispatch 前には branch、worktree、baselineSha も要求する。これらは Task の契約から
 Dispatch 指示へ複写される。targetSha は dispatch 時点で未確定でもよく、
 指示にはその時点の値を保存する。
-`validationCommands` は Human が許可した検証コマンドを実行順に保持する。
+`validationCommands` は利用者が許可した検証コマンドを実行順に保持する。
 Dispatch の発行には一つ以上のコマンドを要求し、controller は worktree を作業ディレクトリとして
 `sh -c` で実行する。コマンドの権限は controller の実行環境に従うため、
 Task の承認時にコマンドの副作用も確認する。
@@ -205,7 +205,7 @@ Task の `owner` は `CODER`、`reviewer` は `REVIEWER` とする。
 `maxRepairs` は追加の Coder 実行回数、`timeoutSeconds` は開始からの経過時間の上限を表す。
 `timeoutSeconds` を省略するか0を指定すると、既定の3600秒（1時間）を適用する。負の値は拒否する。
 新しい Flow は観測 token 数の閾値を停止条件にせず、期限・repair 回数・契約と権限の検査を行う。
-Human は Task の実行契約とともに、この進行と権限を承認する。
+利用者は Task の実行契約とともに、この進行と権限を承認する。
 
 ```json
 {
@@ -266,7 +266,7 @@ runner は Graph の `runnerId` を取得して単独で進行する。
 プロセスが強制終了した場合は保存済み所有者を残して二重実行を防ぐ。
 再開時は以前の SDK 実行と worktree・停止証拠を調査し、
 `workflow recover --file RECOVERY.json` で所有者を回復する。
-Human は元のプロセスの終了を確認し、active Dispatch を
+利用者は元のプロセスの終了を確認し、active Dispatch を
 `runtime stop` または実行結果の保存で終了状態にしてから回復を実行する。
 実行前の ISSUED Dispatch は通常の `dispatch transition` で取消を記録できる。
 SUSPENDED や CANCEL_REQUESTED は active な実行として照合し、停止確認を要求する。
@@ -288,7 +288,7 @@ runnerId を解放する。古い確認入力の再送は新しい所有者を�
 保存済み期限・修正回数・flow 状態を維持するため、
 停止済み flow の回復はその実行を再承認する操作と分けて扱う。
 成功結果が保存済みなら通常の advance でその SHA の独立レビューへ進み、
-取消・失敗の結果は通常の停止判定で Human への確認に戻る。
+取消・失敗の結果は通常の停止判定で利用者への確認に戻る。
 role prompt と `--coder-tools`・`--reviewer-tools`、任意の `--cli`・`--base-directory` は
 既存 SDK adapter の設定・権限検査を使用する。
 #53 で Coder の Git 操作を controller 管理ツールへ接続し、#54 の実 SDK 受入れで
@@ -372,11 +372,11 @@ Release 0.1.0 の #78 で引き続き追跡する。
 ### repair を自動で続行できるかの確認
 
 `workflow repair-status --id application-flow` は、workspace を読み取り専用で開き、保存済みの Flow を変更せずに読み、
-次の repair を Human に尋ねずに進めてよいかを JSON（`version: 1`）で返す。
+次の repair を利用者に尋ねずに進めてよいかを JSON（`version: 1`）で返す。
 `stateChanged` は常に `false` である。`status` は次のいずれかになる。
 
 - `repair-authorized`: 承認済み basis と保存済み ceiling の内側にある。
-  `workflow advance` または `run` で続行し、Human には尋ねない。
+  `workflow advance` または `run` で続行し、利用者には尋ねない。
   `advance` は Git の証拠、Memory、承認済み draft を改めて検証し、不一致なら停止する。
 - `reapproval-required`: 契約が保存済み Flow と一致しない、bundle-required で一致する bundle がない、
   仕様ソースの利用許可が無効になった、または停止コードが `RECONTRACT` である。`task reauthorize` が必要である。
@@ -384,7 +384,7 @@ Release 0.1.0 の #78 で引き続き追跡する。
   または停止コードが `BUDGET_STOP`・`BUDGET_LIMIT` である。
 - `human-decision-required`: `SAFETY_STOP` など、上記以外の理由で Flow が `STOPPED` になっている。
   Task が `CANCELLED`・`REJECTED`・`SUPERSEDED`・`BLOCKED`・`HUMAN_DECISION_REQUIRED` であるか、
-  Human の選択待ちである場合、handoff が hold されている場合、
+  利用者の選択待ちである場合、handoff が hold されている場合、
   Task が `WAITING_FOR_REVIEW` でないか review 結果が現在の target SHA と一致しない場合も含む。
   `STOPPED` は終端状態であり、自動では再開しない。
 - `invalid`: Task Graph の検証または承認の分類に失敗した。
@@ -393,7 +393,7 @@ Release 0.1.0 の #78 で引き続き追跡する。
 `run`・`step`・`advance` が停止済み Flow に当たると、stdout の JSON は変えずに、
 stderr へこの分類と `repair-status` の再実行コマンドを2行で出す。
 
-### 保存済みの出力を指定した Human の補足
+### 保存済みの出力を指定した利用者の補足
 
 `workflow feedback-target --id application-flow` は、最新の保存済み Dispatch と
 その結果を変更せずに読み出す。`flowId`、最新の `expectedChangeId` と
@@ -434,7 +434,7 @@ runtime の途中出力、未保存の Git 変更、脇の質疑を観測した�
 
 この例の `target` は説明用であり、実際には観測で取得した値を使う。
 更新時刻や hash を推測して入力しない。`evidence` は出典の参照であり、
-記録しただけで内容の正しさや Human の認証が検証されたことにはしない。
+記録しただけで内容の正しさや利用者の認証が検証されたことにはしない。
 `text` を実行指示、scope・acceptance の変更、承認として自動解釈しない。
 
 共通 controller は transaction 内で最新 Dispatch とその結果、保留変更 ID を照合し、
@@ -582,7 +582,7 @@ STOPPED flow は保留解除後も実行できず、未破棄の案を記録に�
 元の承認済み契約を使う。案の保存や破棄で発行済みの instruction、
 Reviewer の verdict、Task の承認、ROLE session へ送る本文は変更しない。
 `workflow show` と共通の計画出力で、SQLite 再起動後も全版を確認できる。
-actor と source は入力された出典情報であり、認証済み Human の本人証明ではない。
+actor と source は入力された出典情報であり、認証済み利用者の本人証明ではない。
 
 ### 契約を維持する補足を承認し、次の指示へ反映する
 
@@ -951,7 +951,7 @@ bundle-required の graph は、review flow 開始と各 role の Dispatch 発�
 
 Memory の参照先の検証と指示生成、役割別 Session の実行・再開は保存済み契約に従う。
 instruction v1〜v3 の履歴は読み込み、現在の実行には v4 の新しい Dispatch を発行する。
-Human の実際の認証・承認確認は後続 Issue で実装する。
+利用者の実際の認証・承認確認は後続 Issue で実装する。
 actor・decision・proof は caller が供給する作業記録である。
 実行環境の権限確認と repository・test record の証拠は、それぞれの管理元で確認する。
 

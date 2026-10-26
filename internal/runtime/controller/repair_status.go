@@ -19,14 +19,14 @@ const (
 	RepairCeilingExhausted   = "ceiling-exhausted"
 	RepairInvalid            = "invalid"
 	// RepairHumanDecision covers stops that are not a pending review repair. A
-	// STOPPED Flow is terminal, so continuing needs a Human decision.
+	// STOPPED Flow is terminal, so continuing needs a user decision.
 	RepairHumanDecision = "human-decision-required"
 	// RepairNotApplicable means the RUNNING Flow is not at a repair point.
 	RepairNotApplicable = "not-applicable"
 )
 
 // RepairStatus tells a controller whether the next repair is an internal
-// transition (ADR-0043) or needs Human action. It is an observation only.
+// transition (ADR-0043) or needs user action. It is an observation only.
 type RepairStatus struct {
 	StopCause                   string   `json:"stopCause,omitempty"`
 	ReviewContinuationCandidate string   `json:"reviewContinuationCandidate,omitempty"`
@@ -80,7 +80,7 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 		return status, nil
 	}
 
-	const humanNext = "present the saved stop reason, findings and acceptance to Human"
+	const humanNext = "present the saved stop reason, findings and acceptance to the user"
 	if err := state.Graph.Validate(); err != nil {
 		return set(RepairInvalid, "saved Task, Flow or Dispatch records are inconsistent: "+err.Error(), humanNext)
 	}
@@ -96,11 +96,11 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 		return set(RepairInvalid, "current Dispatch is missing", humanNext)
 	}
 	if !flowContractMatches(state.Graph, flow, task) {
-		return set(RepairReapprovalRequired, "current Task differs from the saved Flow contract", "obtain Human approval of a new contract")
+		return set(RepairReapprovalRequired, "current Task differs from the saved Flow contract", "obtain user approval of a new contract")
 	}
 	if state.Graph.ApprovalRequirement() == core.ApprovalBundleRequired {
 		if _, ok := state.Graph.MatchingApproval(task.ID, flow.Contract, configuration); !ok {
-			return set(RepairReapprovalRequired, "no saved ApprovalBundle covers the contract and effective configuration", "obtain Human approval of a new contract")
+			return set(RepairReapprovalRequired, "no saved ApprovalBundle covers the contract and effective configuration", "obtain user approval of a new contract")
 		}
 	}
 	candidateID := last.ID
@@ -125,7 +125,7 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 			value = RepairReapprovalRequired
 		}
 		return set(value, "saved completed Coder output is a candidate for review-only continuation; this observation grants no execution authority",
-			"obtain Human approval for a successor Task and a new review budget using continueFromDispatchId="+coder.ID+
+			"obtain user approval for a successor Task and a new review budget using continueFromDispatchId="+coder.ID+
 				"; revalidate receipts, Git target and configuration before review; do not rerun the completed Coder")
 	}
 	reviewRepair := last.Recipient == "REVIEWER" && last.Status == core.DispatchSucceeded &&
@@ -141,7 +141,7 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 		case "BUDGET_STOP", "BUDGET_LIMIT":
 			return set(RepairCeilingExhausted, "Flow stopped on a saved budget ceiling", humanNext)
 		case "RECONTRACT":
-			return set(RepairReapprovalRequired, "Flow stopped for recontract", "obtain Human approval of a new contract")
+			return set(RepairReapprovalRequired, "Flow stopped for recontract", "obtain user approval of a new contract")
 		}
 		return set(RepairHumanDecision, "STOPPED Flow is terminal; repair runs only after independent review requests changes in a RUNNING Flow", humanNext)
 	}
@@ -153,11 +153,11 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 	}
 	if err := state.Graph.CheckTaskSpecificationUse(task.ID, "runtime"); err != nil {
 		return set(RepairReapprovalRequired, "specification source or permission requires renewed approval: "+err.Error(),
-			"obtain Human approval of a new contract")
+			"obtain user approval of a new contract")
 	}
 	if slices.Contains([]core.TaskStatus{core.Cancelled, core.Rejected, core.Superseded, core.Blocked, core.HumanDecisionRequired}, task.Status) ||
 		task.HumanDecision != nil && task.HumanDecision.SelectedOptionID == "" {
-		return set(RepairHumanDecision, "Task status "+string(task.Status)+" or a pending Human decision stops the Flow", humanNext)
+		return set(RepairHumanDecision, "Task status "+string(task.Status)+" or a pending user decision stops the Flow", humanNext)
 	}
 	if err := requireSessionBudget(state.Graph, flow, "CODER"); err != nil {
 		return set(RepairCeilingExhausted, err.Error(), humanNext)
@@ -173,5 +173,5 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 		return set(RepairHumanDecision, "handoff is held; release it before the repair continues", humanNext)
 	}
 	return set(RepairAuthorized, "repair is an internal transition within the saved ceiling and approval",
-		"run workflow advance or run for this Flow without asking Human; advance still revalidates Git evidence, Memory and the approved draft")
+		"run workflow advance or run for this Flow without asking the user; advance still revalidates Git evidence, Memory and the approved draft")
 }

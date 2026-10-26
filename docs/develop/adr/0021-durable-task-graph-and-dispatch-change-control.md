@@ -108,7 +108,7 @@ GUIDANCE_VIOLATION、EVIDENCE_GAP、DEPENDENCY_BLOCKED を区別し、
 ### 必要な外部記録を実行前に用意する
 
 独立した成果物、保留作業、複数回の実行、独立レビュー、重要なリスク、
-Human の判断を必要とする作業は、Issue で追跡できるようにする。
+利用者の判断を必要とする作業は、Issue で追跡できるようにする。
 独立した lifecycle や acceptance があれば専用 Issue を使う。
 小さく、親と同じ lifecycle で、別の承認や保留を必要としない作業だけは、
 既存 Issue 内の Task ID 付き記録を使える。
@@ -151,7 +151,7 @@ Execution Started、Execution Result、Last Updated By、Last Transition を保�
 実行契約には worktree、SHA、指示の版、許可・禁止操作、必要な証拠も含める。
 受信、開始、停止、結果取得を別の事実として扱う。
 
-Human の質問・コメント・懸念は原則 NO_CHANGE とする。
+利用者の質問・コメント・懸念は原則 NO_CHANGE とする。
 明示的な変更要求、無効になった証拠、scope 違反、必須の制約違反などがなければ
 active Dispatch を維持し、懸念は別 Task として保存する。
 実行中または開始状況が不明な作業は状態を確認し、安全停止の証拠を得てから競合する作業を発行する。
@@ -205,7 +205,7 @@ Git object と検証結果の実物は repository と test record で確認し�
 
 会話の変更を状態遷移へ反映する前に、既存の Task と active Dispatch を確認する。
 既知の判断を再質問する代わりに永続記録から復元し、
-新しい判断が必要な箇所だけを Human に提示する。
+新しい判断が必要な箇所だけを利用者に提示する。
 このため、データの保持だけでなく、関係の整合性と遷移を検査する実装が必要になる。
 
 設計の実装は [#47](https://github.com/hiono/taxion/issues/47)、

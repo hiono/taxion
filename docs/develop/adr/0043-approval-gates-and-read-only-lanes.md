@@ -74,7 +74,7 @@ confirmation token は `proposalHash`、`bundleVersion`、`canonicalizationVersi
 
 これらは Task の契約、scope、acceptance、予算、権限、security 条件、設定選択を変更しない。Dispatch の発行自体は既存の実行入口検査を通る。
 
-`taxion workflow repair-status --id FLOW` は、次の repair がこの内部遷移に当たるかを read-only で分類する。`repair-authorized` なら Human に尋ねずに続行する（#161）。
+`taxion workflow repair-status --id FLOW` は、次の repair がこの内部遷移に当たるかを read-only で分類する。`repair-authorized` なら利用者に尋ねずに続行する（#161）。
 
 ### 再承認が必要な条件
 

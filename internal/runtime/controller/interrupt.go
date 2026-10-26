@@ -56,7 +56,7 @@ func RequestFlowInterrupt(db *store.Store, request InterruptRequest) (core.Revie
 		switch dispatch.Status {
 		case core.DispatchRunning:
 			return state.Graph.TransitionDispatch(dispatch.ID, core.DispatchCancelRequested, request.Actor,
-				"targeted Human interruption requested: "+request.ID, false, false, nil)
+				"targeted user interruption requested: "+request.ID, false, false, nil)
 		case core.DispatchIssued, core.DispatchAcknowledged:
 			// The persisted hold prevents a concurrent start. An unstarted
 			// session is not falsely reported as stopped.

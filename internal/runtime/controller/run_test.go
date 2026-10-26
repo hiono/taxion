@@ -429,7 +429,7 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 			found = found || recorded == decision
 		}
 		if !found {
-			t.Fatal("continuous flow modified the original Human configuration approval")
+			t.Fatal("continuous flow modified the original user configuration approval")
 		}
 	}
 	for _, worker := range configuredWorkers {

@@ -78,7 +78,7 @@ func Resolve(decisions []core.TaskDecision, taskID, role string) (*Policy, error
 		}
 		if approval.TaskID != taskID || strings.TrimSpace(approval.Actor) == "" ||
 			strings.TrimSpace(decision.Source) == "" || len(approval.Roles) == 0 {
-			return nil, fmt.Errorf("taxion: tools require Task-bound Human approval with a source")
+			return nil, fmt.Errorf("taxion: tools require Task-bound user approval with a source")
 		}
 		for approvedRole, policy := range approval.Roles {
 			if !slices.Contains([]string{"CODER", "REVIEWER", "ORCHESTRATOR", "PLANNER"}, approvedRole) {

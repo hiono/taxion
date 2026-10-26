@@ -2,7 +2,7 @@
 
 Taxion は、Task の判断・証拠・承認を共通 controller で管理し、
 repository 操作と外部の作業記録を接続先ごとの adapter に委ねる。
-M13 の Human 選択は「GitLab Self-Managed＋glab を先行。Bitbucket は環境選定後に実装」である。
+M13 の利用者の選択は「GitLab Self-Managed＋glab を先行。Bitbucket は環境選定後に実装」である。
 GitHub adapter を共通の承認・送信状態・証拠照合の実装例とし、
 追加 adapter と実環境受入れは M15 の完了条件と分けて後続 Issue で追跡する。
 
@@ -13,7 +13,7 @@ GitHub adapter を共通の承認・送信状態・証拠照合の実装例と�
 | GitHub.com | host、owner/repo、Issue/PR と番号 | Issue 作成・編集・comment・close、SHA を指定した PR review | Issue 作成・Issue/PR comment・Issue close を実装。Git・SQLite・gh 脚本で回帰確認し、承認済みコメントを実 GitHub へ一件公開して再送を照合 |
 | GitHub Enterprise Server | instance host、owner/repo、種別・番号、server 版 | server 版の REST API と権限に従う | 対象 host・版・credential を選定して追加受入れする |
 | GitLab.com・Self-Managed・Dedicated | instance host、project ID／URL encoded path、Issue/MR と project 内 iid | Issue 作成・note・close、MR note | Self-Managed の Issue adapter は実環境で確認済み (#75)。MR の作成・更新・close は `glab` から直接確認したが、Taxion の MR 作成・approval・close／merge は未実装。Web prefix を持つ MR の参照解決にも制約がある |
-| Bitbucket Cloud | workspace、repository UUID／slug、PR ID、別作業管理の host・project・key | Cloud REST API の repository・PR・comment・approval。Issue tracker の利用可否は対象 tenant の提供状況で確認する | Cloud／Data Center と作業管理を Human が選定してから実装する |
+| Bitbucket Cloud | workspace、repository UUID／slug、PR ID、別作業管理の host・project・key | Cloud REST API の repository・PR・comment・approval。Issue tracker の利用可否は対象 tenant の提供状況で確認する | Cloud／Data Center と作業管理を利用者が選定してから実装する |
 | Bitbucket Data Center | instance host・context path、project key、repository slug／ID、PR ID、server 版 | Data Center REST API の PR・comment・参加者 approval／decline・merge | Data Center API 用 adapter と実環境受入れを後続にする |
 | Jira | 作業管理 host、project、Issue ID／key、transition ID | Issue 作成・comment、許可された workflow transition | repository adapter と独立した作業管理 adapter として選定する |
 
@@ -69,12 +69,12 @@ adapter は能力を確認してから操作を受け付ける。
 | Bitbucket の検出・受信時 | Data Center の secret scanning は受信した新 commit を検出してメール・audit に記録する。受信拒否が必要な環境は管理者が pre-receive 保護を構成・受入れする。Cloud は選定した機能・契約の公式仕様と実測を記録する |
 | 公開後 | CI の秘密検出・merge gate と通知を有効化し、公開済み範囲の調査に使う |
 
-例外公開には、対象 SHA・内容・理由・期限・判断者と証拠を伴う Human 承認を要求する。
+例外公開には、対象 SHA・内容・理由・期限・判断者と証拠を伴う利用者の承認を要求する。
 provider の bypass と controller の例外判断は、互いの記録を関連づけて確認する。
 
 漏えい時は credential の失効・交換を先に行い、利用履歴と公開範囲を調査する。
 clone、fork、cache、ログ、添付の残存先を列挙し、管理者と保持・削除手順を決める。
-履歴書換えは Human が承認し、変更前後の SHA、署名、PR/MR、レビュー・検証証拠への影響を保存する。
+履歴書換えは利用者が承認し、変更前後の SHA、署名、PR/MR、レビュー・検証証拠への影響を保存する。
 古い clone からの再混入を防ぐ手順を共有し、新しい SHA でレビュー・検証をやり直す。
 
 ## 採択した後続作業と受入れ環境
@@ -86,7 +86,7 @@ Taxion adapter から一時 Issue を作成し、comment・close・送信結果�
 
 ### 2026-10-26 の MR 追加確認
 
-Human の承認に基づき、指定された非公開の実験用 project で一時 branch と draft MR の作成・更新・close を実行した。
+利用者の承認に基づき、指定された非公開の実験用 project で一時 branch と draft MR の作成・更新・close を実行した。
 既存ファイルと保護された既定 branch は変更せず、新しい branch に実験用テキストだけを追加した。
 merge、approval の付与、実験用モデル session の起動、既存成果の削除は行っていない。
 確認対象は Taxion `v0.7.19` のソースと、version API が `19.5.1`・`enterprise=false` を返す instance である。

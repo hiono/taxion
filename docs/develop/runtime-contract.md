@@ -30,7 +30,7 @@ session の作成・接続後と各モデル送信前に、設定を選択した
 
 照会後に承認を再確認する。新規 session が拒否された場合は、Dispatch に対応付けず停止する。この観測は前段の access receipt には追加せず、課金主体を識別したり、将来の利用許可を保証したりしない。safe stop は三つの外部確認を省略する。設定のない旧 controller の動作は変えない。
 
-現在の Task と発行済み指示で、選択 account と contract reference を同じ出典付き Human 承認が対象にしている必要がある。reason は承認した用途を記録する。その記録の照合で、記載内容の法的な正しさを検証したことにはならない。
+現在の Task と発行済み指示で、選択 account と contract reference を同じ出典付き利用者の承認が対象にしている必要がある。reason は承認した用途を記録する。その記録の照合で、記載内容の法的な正しさを検証したことにはならない。
 
 ### 保存記録への質問
 
@@ -48,7 +48,7 @@ Dispatch を対応付けず、Task・主 Flow の履歴や承認を変更しな�
 
 ### 質問結果の採用
 
-`RecordQuestionDraft` は、Planner 採用の transaction と既存の補足承認・公開処理を使う。選択した confirmed index と明示的な Human 指示だけを適用し、通常の会話を通知なくコピーしない。保存 context、Memory、role、修正回数上限、現在の結果対象を確認する。調査 SHA、file bytes、hash は採用前に再構成する。
+`RecordQuestionDraft` は、Planner 採用の transaction と既存の補足承認・公開処理を使う。選択した confirmed index と明示的な利用者の指示だけを適用し、通常の会話を通知なくコピーしない。保存 context、Memory、role、修正回数上限、現在の結果対象を確認する。調査 SHA、file bytes、hash は採用前に再構成する。
 
 上限内の出典 snapshot、選択した主張、不確実性、proposal hash を保存する。native session ID は提供された出典情報として扱う。proposal は認証済み provider 出力の証拠ではなく、内容の正しさも証明しない。
 
@@ -60,7 +60,7 @@ Dispatch を対応付けず、Task・主 Flow の履歴や承認を変更しな�
 
 ### 依頼の登録と再承認
 
-intake は、元の依頼本文を出典付きの未承認 `DRAFT` Task に保存する。任意の planning 設定承認が許可するのは、隔離した上限付き質問だけ。完全な hash に対する Human 確認は、`READY` 前に実行承認と設定承認を別々に記録する。scope・acceptance・検証 command が不足した契約は確認を通せない。確認だけでは作業を発行せず、Flow 上限も選ばない。
+intake は、元の依頼本文を出典付きの未承認 `DRAFT` Task に保存する。任意の planning 設定承認が許可するのは、隔離した上限付き質問だけ。完全な hash に対する利用者の確認は、`READY` 前に実行承認と設定承認を別々に記録する。scope・acceptance・検証 command が不足した契約は確認を通せない。確認だけでは作業を発行せず、Flow 上限も選ばない。
 
 発行済み契約を改訂する場合は successor Task を作る。前 Task の hold 済み対象が必要で、runner と active Dispatch がないことを要求する。旧 Flow の上限、承認、指示、結果は変更しない。明示的な再承認で前 Task を停止・置換し、別の上限を持つ作業を準備する。
 
@@ -273,7 +273,7 @@ RTK 自身の stdout・stderr・exit status も原本として保存する。
 各 role policy は `skills`、`plugins`、`mcp`、`rtk`、`compressionFilter`、
 `evidenceDirectory`、`allowPublication` を保持する。
 MCP binding は `name`、`command`、`args`、`inputs`、`tool`、`arguments` を固定する。
-この JSON を Task decision の `text` に保存し、decision の `source` に Human の判断の出典を記録する。
+この JSON を Task decision の `text` に保存し、decision の `source` に利用者の判断の出典を記録する。
 通常の Task 承認・発行手順は [Task Graph reference](task-graph.md) に従う。
 tools を使った Task の公開には `allowPublication: true` の明示承認を必要とする。
 
@@ -323,14 +323,14 @@ Reviewer は Coder の報告・テスト成功を未検証の主張として扱�
 
 `taxion ready` は、今の coding agent に既存 CLI の操作手順を渡す。静的な出力だけを行い、
 設定・workspace・Runtime を開かない。外側の agent が会話を改善して契約 JSON を生成し、
-Human の明示承認後に既存 intake・confirm・review flow を操作する。
+利用者の明示承認後に既存 intake・confirm・review flow を操作する。
 内部 Planner を使う次の `request` とは別の入口であり、外側の相談を再実行する前提にしない。
 出力だけで agent の判断品質を保証せず、合成操作回帰と実 agent の受入れを分ける。
 判断は [ADR-0031](adr/0031-bootstrap-the-current-coding-agent-with-ready.md) に記録する。
 
 `taxion request` は元の依頼を DRAFT として保存し、file・shell tool を持たない Planner
 観測を使って確認質問と実装計画を提案する。Planner の提案は実行承認ではない。
-Human の `/approve` を受けて CLI が intake confirmation と review flow を作り、
+利用者の `/approve` を受けて CLI が intake confirmation と review flow を作り、
 既存の Controller で Coder、検証、独立 Reviewer を実行する。
 Planner の各 call の観測利用量を記録する。token 閾値は後続作業を停止しない。
 相談記録・usage・失敗と実行先は request ID・連番・hash を持つ SQLite の
@@ -365,7 +365,7 @@ Controller は tree object をローカルの `refs/taxion/snapshots/` に保持
 Reviewer は baseline commit から同じ tree を別 worktree に再現し、開始時と終了時に照合する。
 Git tree に含まれない ignored file はレビュー対象に含まれない。
 
-`runtime`・`workflow run|step`・ACP の `--compact-context` は、担当に必要な目的・範囲・受入れ・検証・証拠・レビュー対象・Human decision・Memory・仕様引用・予算方針を JSON で渡す。設定と intake 承認は ID・出典・理由を保持し、設定全体の転記を省く。各 `result:` decision を保存済みの出典と照合し、必要な結果を渡す。欠落・改変した参照は拒否する。完全な不変 instruction と承認は DB に保持する。表示変更は system prompt・config hash を変えるため、旧 session に新 hash で再接続しない。取消専用 `runtime stop` は表示変更に依存しない。既存の非 compact session の原稿は維持する。
+`runtime`・`workflow run|step`・ACP の `--compact-context` は、担当に必要な目的・範囲・受入れ・検証・証拠・レビュー対象・利用者の判断・Memory・仕様引用・予算方針を JSON で渡す。設定と intake 承認は ID・出典・理由を保持し、設定全体の転記を省く。各 `result:` decision を保存済みの出典と照合し、必要な結果を渡す。欠落・改変した参照は拒否する。完全な不変 instruction と承認は DB に保持する。表示変更は system prompt・config hash を変えるため、旧 session に新 hash で再接続しない。取消専用 `runtime stop` は表示変更に依存しない。既存の非 compact session の原稿は維持する。
 
 新しい Flow の結果 decision は `taxion.result-ref.v1` の Dispatch ID・instruction hash・result hash を保存し、過去 instruction を再帰的に埋め込まない。旧形式も読み取り、必要な結果は Controller が同じ workspace 内から解決する。Planner・質問 context では結果を別に含む箇所の decision を参照にする。個別質問では同じ Task の結果を `task.dispatches` に保持し、別 Task の関連 Reviewer 等の結果を `results` に一度だけ含める。`/results/N/result` 以下も引用先として検証する。
 
@@ -377,7 +377,7 @@ Git tree に含まれない ignored file はレビュー対象に含まれない
 
 モデルへ渡す Planner context は `planner` と `observation` だけとし、同じ Task の legacy `task.task` wrapper は送らない。schema の引用候補と回答の出典検証もこの送信表現に合わせ、保存側にしかない `/task/task/...` は拒否する。保存した完全 context・観測 hash と、採用時の改変・鮮度検査は維持する。新規 `request` の計画 Task は計画の目的を持ち、元依頼を title・objective に複写しない。元依頼の全文は intake decision に保持し、対話の先頭は `/planner/task/decisions/0/text` を参照する。実行 Task を作る際にはその参照を元依頼へ戻し、計画 Task ID と全対話を保存する。計画専用の全 path 一覧と参照本文は実行 Task に複写しない。通常の個別質問の `/task/task/...` は変更しない。
 
-`RecordPlannerDraft`・`workflow planner-draft`・監視中の `/adopt` は、変更していない計画助言を未承認 `SUPPLEMENT` draft に採用する。発行前に再構成 context、結果対象、Memory、Graph、Flow 契約、保留した引継ぎを照合する。context field の欠落・偽造で有効な観測 hash を流用させない。transaction で Graph・Memory を再確認するが、独立 Memory 保存は database 間の atomic snapshot を提供しない。既存の契約維持 draft には結果に適合する `REVIEW`・`REPAIR` だけを入れる。draft に観測・出典 metadata と不確実性を残す。session ID は報告された出典で、検証済み provider receipt ではない。core の完全一致 ID による replay 検査で過去版を保つ。Human draft 承認と明示 handoff release は別操作で、Dispatch・実行には Controller 検査が引き続き適用される。`REPLAN`・`INVESTIGATE`・`HOLD`・`HUMAN_REQUIRED`・`REPORT` を通知なしに修正 instruction にしない。契約変更の再承認は #73 として実装し、M12 の実 SDK 受入れで確認した。decision に基づく無人進行は、この受入れでは確認していない。
+`RecordPlannerDraft`・`workflow planner-draft`・監視中の `/adopt` は、変更していない計画助言を未承認 `SUPPLEMENT` draft に採用する。発行前に再構成 context、結果対象、Memory、Graph、Flow 契約、保留した引継ぎを照合する。context field の欠落・偽造で有効な観測 hash を流用させない。transaction で Graph・Memory を再確認するが、独立 Memory 保存は database 間の atomic snapshot を提供しない。既存の契約維持 draft には結果に適合する `REVIEW`・`REPAIR` だけを入れる。draft に観測・出典 metadata と不確実性を残す。session ID は報告された出典で、検証済み provider receipt ではない。core の完全一致 ID による replay 検査で過去版を保つ。利用者 draft 承認と明示 handoff release は別操作で、Dispatch・実行には Controller 検査が引き続き適用される。`REPLAN`・`INVESTIGATE`・`HOLD`・`HUMAN_REQUIRED`・`REPORT` を通知なしに修正 instruction にしない。契約変更の再承認は #73 として実装し、M12 の実 SDK 受入れで確認した。decision に基づく無人進行は、この受入れでは確認していない。
 
 `runtime`・`workflow run|step` は任意の `--strict-result-identities` を受け付ける。native response schema は発行 Dispatch ID、Task ID、role、repository、期待実行開始 SHA を固定する。修正時は初期 baseline でなく不変の対象 SHA を使う。output SHA・verdict は報告事実のままで、Controller が独立検証する。`nextTransition` は既存 Task status の語彙に限定するが、遷移の選択や保存状態の変更はしない。config hash が変わるため実行接続にも同じ flag を指定し、取消専用 `runtime stop` には指定しない。旧 session 用の既定 schema は保ち、拒否応答を成功結果へ修復しない。shell 権限のない agent は `validations: []` を提出できる。Controller は成功した実装提出後に認可 command を実行し、実 exit code、時刻、Git 出典を保存する。実施前の command 実行を創作せず、検証待ちを test 成功の証拠としない。
 

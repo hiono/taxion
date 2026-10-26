@@ -205,7 +205,7 @@ func TestInstructionDraftRejectsInvalidStaleAndCorruptRecordsAtomically(t *testi
 		t.Fatal("pending proposal released")
 	}
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
-		state.Graph.ReviewFlows[0].Status, state.Graph.ReviewFlows[0].Reason = "STOPPED", "Human stopped the workflow"
+		state.Graph.ReviewFlows[0].Status, state.Graph.ReviewFlows[0].Reason = "STOPPED", "the user stopped the workflow"
 		return nil
 	}); err != nil {
 		t.Fatal(err)

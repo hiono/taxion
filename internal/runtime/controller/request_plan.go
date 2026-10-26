@@ -21,7 +21,7 @@ type RequestProposal struct {
 
 func ValidateRequestPlan(answer QuestionAnswer) error {
 	if answer.Recommendation != "HOLD" && answer.Recommendation != "HUMAN_REQUIRED" {
-		return fmt.Errorf("taxion: request Planner must hold a proposal or ask for Human clarification")
+		return fmt.Errorf("taxion: request Planner must hold a proposal or ask for user clarification")
 	}
 	if answer.Questions == nil {
 		return fmt.Errorf("taxion: request Planner must return an explicit questions list")

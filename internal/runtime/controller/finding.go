@@ -11,13 +11,13 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
-// RecordFailureAnalysis keeps a Human decision and proposed lesson with its exact result.
+// RecordFailureAnalysis keeps a user decision and proposed lesson with its exact result.
 func RecordFailureAnalysis(db *store.Store, record store.FailureRecord) (store.FailureRecord, error) {
 	if record.ID == "" || record.TaskID == "" || record.DispatchID == "" || record.ResultHash == "" ||
 		strings.TrimSpace(record.Cause) == "" || strings.TrimSpace(record.Correction) == "" ||
 		strings.TrimSpace(record.LessonCandidate) == "" || record.Actor == "" || record.DecisionSource == "" ||
 		len(record.ValidationEvidence) == 0 || !record.At.IsZero() {
-		return record, fmt.Errorf("taxion: finding requires exact result, cause, correction, candidate, validation and sourced Human decision")
+		return record, fmt.Errorf("taxion: finding requires exact result, cause, correction, candidate, validation and sourced user decision")
 	}
 	record.ValidationEvidence = slices.Clone(record.ValidationEvidence)
 	err := db.UpdateWorkspace(func(state *store.Workspace) error {

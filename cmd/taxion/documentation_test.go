@@ -122,6 +122,33 @@ func TestDocumentationAnchorsPreserveJapaneseAndDuplicateHeadings(t *testing.T) 
 	}
 }
 
+func TestUserFacingTerminology(t *testing.T) {
+	roleLabel := regexp.MustCompile(`\bHuman\b`)
+	paths := []string{"../../CONTRIBUTING.md"}
+	if err := filepath.WalkDir("../../docs", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && filepath.Ext(path) == ".md" {
+			paths = append(paths, path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		text := regexp.MustCompile("`[^`]*`").ReplaceAllString(documentationText(t, path), "")
+		if roleLabel.MatchString(text) {
+			t.Errorf("%s: describe people by their role, not an internal role label", path)
+		}
+	}
+	for name, text := range map[string]string{"help": usage, "ready": readyPrompt, "skill": readySkillBody} {
+		if roleLabel.MatchString(text) {
+			t.Errorf("%s: use user-facing terminology", name)
+		}
+	}
+}
+
 func TestConfigurationGuideCoversEveryFieldAndOverride(t *testing.T) {
 	body, err := os.ReadFile("../../docs/userguide/configuration.md")
 	if err != nil {

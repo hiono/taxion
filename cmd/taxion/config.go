@@ -126,7 +126,7 @@ func checkConfig(args []string, output io.Writer) error {
 		return err
 	}
 	if *task != "" {
-		_, err = fmt.Fprintln(output, "Configuration matches a sourced Task approval. Human identity, authentication, contract eligibility, and execution readiness have not been verified.")
+		_, err = fmt.Fprintln(output, "Configuration matches a sourced Task approval. User identity, authentication, contract eligibility, and execution readiness have not been verified.")
 		return err
 	}
 	_, err = fmt.Fprintln(output, "Configuration schema and required references are valid. Authentication, approval authority, contract eligibility, and adapter availability have not been verified.")

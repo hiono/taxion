@@ -77,7 +77,7 @@ func CheckApproval(input string, taskID, decisionID string, candidate Config) er
 		matched = matched || allowed == candidate
 	}
 	if !matched {
-		return fmt.Errorf("configuration is outside the recorded approval; obtain Human authorization for the selected combination")
+		return fmt.Errorf("configuration is outside the recorded approval; obtain user authorization for the selected combination")
 	}
 	return nil
 }

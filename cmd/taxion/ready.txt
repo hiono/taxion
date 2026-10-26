@@ -5,7 +5,7 @@ orchestrator. Understand and refine the user's request, inspect saved Taxion sta
 and advance approved Coder work, validation and independent Reviewer work.
 Do not ask the user to transcribe JSON, hashes, role prompts or artifacts.
 Create necessary local input files yourself and carry command results into the
-next input. These instructions do not prove Human approval, authentication or readiness.
+next input. These instructions do not prove user approval, authentication or readiness.
 
 ## Choose operations by purpose
 
@@ -16,7 +16,7 @@ need; do not run every command in order.
 | Situation | Operations | Mutation and approval boundaries |
 | --- | --- | --- |
 | First use or missing settings | init, config check, doctor, doctor fix | check and doctor are read-only; init/fix preview changes and require explicit application |
-| Refine a request and contract | task, conversation intake/proposal/confirm | inspect the proposal's exact hash; confirm only after Human approval |
+| Refine a request and contract | task, conversation intake/proposal/confirm | inspect the proposal's exact hash; confirm only after user approval |
 | Execute approved work | workflow start/run/step, runtime, acp | model execution needs approved configuration, permissions and budget; do not repeat existing planning with request |
 | Inspect results or continue stopped work | task graph, records show, workflow show/recover | distinguish saved state from live processes and Git; reuse successful work |
 | Handle sources, records and portability | specification, memory, records, workspace, git | ingestion, transmission, publication and restore permissions are separate |
@@ -159,12 +159,12 @@ Read the proposal's task and complete hash. It is still DRAFT, not authorized fo
 
 ### Approve the exact hash and configuration
 
-Create the following confirmation only after Human explicitly approves that contract and
+Create the following confirmation only after the user explicitly approves that contract and
 configuration selection. expectedHash must come from the actual proposal; selection must
 exactly match the actual resolved configuration. configurationDecisionId is
 selection.execution.approvalRef followed by @task:TASK-ID.
 Save approval for this request without rewriting the configuration approvalRef for each request.
-actor/source are audit labels; writing them does not constitute Human approval.
+actor/source are audit labels; writing them does not constitute user approval.
 For Flow ID FLOW-ID and maxRepairs N, include exact Task IDs FLOW-ID-review-0 through
 FLOW-ID-review-N in additional configuration approval. Do not extend the approved target set.
 
@@ -174,7 +174,7 @@ FLOW-ID-review-N in additional configuration approval. Do not extend the approve
   "expectedHash": "sha256:EXACT_HASH_FROM_PROPOSAL",
   "actor": "human",
   "source": "human:approval-1",
-  "reason": "Record of explicit Human approval of the presented contract and configuration",
+  "reason": "Record of explicit user approval of the presented contract and configuration",
   "configurationDecisionId": "ready-example-approval@task:ready-example",
   "additionalTaskIds": ["ready-example-flow-review-0"],
   "selection": {
@@ -201,7 +201,7 @@ Changing a confirmed contract requires a new Task and approval, not reuse of the
 
 ## Execute an approved Flow
 
-Explain the repair count, deadline and session soft ceiling and record Human authorization.
+Explain the repair count, deadline and session soft ceiling and record user authorization.
 Each runtime session's --max-ai-credits is a soft ceiling of at least 30, not a Flow total.
 Report observed usage for each model call. Report balances/percentages as unavailable
 without an allowance in the same billing unit.
@@ -219,7 +219,7 @@ Numbers below are examples, not the user's budget. Do not convert tokens to cred
   "authorization": {
     "id": "ready-example-budget",
     "source": "human:budget-1",
-    "text": "Record of explicit Human approval for execution and independent review with the presented deadline and repair count"
+    "text": "Record of explicit user approval for execution and independent review with the presented deadline and repair count"
   }
 }
 ```
@@ -250,7 +250,7 @@ An exit code alone or a stdout self-report is not a formal receipt.
   Commit, tag, Release and external publication need separate permission.
 - HELD, questions or contract changes: inspect the saved target and reason. Check existing
   workflow feedback/feedback-resolve/handoff operations against --help and the current
-  contract; do not invent Human decisions.
+  contract; do not invent user decisions.
 - STOPPED, exhausted budget, FAILED or CANCELLED: do not blindly retry the same execution.
   Inspect saved partial work, baseline, outputTreeSha, changed paths and runtime-stop: evidence.
   For an active session, verify the target before runtime stop. Preserve old results and budgets.

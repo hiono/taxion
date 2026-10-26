@@ -35,7 +35,7 @@ Return questions (an explicit array of strings) and proposal (null while
 essential decisions are missing, otherwise an object with title, objective,
 scope, outOfScope, acceptance, validationCommands).
 Scope and outOfScope are repository-relative paths or patterns, not prose.
-ValidationCommands are actual single-line shell commands proposed for Human
+ValidationCommands are actual single-line shell commands proposed for user
 approval; they run on the host and may have side effects. Do not guess a
 project's test command when its setup is unknown: ask or use the provided
 committed context. Propose only the work the user wants, not extra governance.
@@ -357,7 +357,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		ceiling = "Copilot AI-credit ceilings and account quota are unsupported; the explicit deadline and approved repair limit apply."
 	}
 	if guidance.Billing != nil {
-		ceiling += fmt.Sprintf("\nBilling conditions (Human declaration, not provider-verified): contract=%s; overage=%s; autoRecharge=%s; paidFallback=%s.",
+		ceiling += fmt.Sprintf("\nBilling conditions (user declaration, not provider-verified): contract=%s; overage=%s; autoRecharge=%s; paidFallback=%s.",
 			guidance.Billing.Contract, guidance.Billing.Overage, guidance.Billing.AutoRecharge, guidance.Billing.PaidFallback)
 	}
 	if core.ProviderBudget(guidance) {
@@ -475,7 +475,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				BudgetGuidance: core.CloneBudgetGuidance(guidance),
 				Worktree:       root, Branch: branch, BaselineSHA: baseline,
 			},
-			PlanningSelection: &selected, PlanningReason: "Human selected /plan for bounded request clarification",
+			PlanningSelection: &selected, PlanningReason: "the user selected /plan for bounded request clarification",
 			ConfigurationDecisionID: core.ConfigurationApprovalID(selected.Execution.ApprovalRef, id+"-planning"),
 		})
 		if err != nil {
@@ -680,7 +680,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 					Task: core.GraphTask{
 						ID: id, Title: proposal.Title, Objective: proposal.Objective, Repo: *repo,
 						Type: "IMPLEMENTATION", Status: core.Draft, CreatedFrom: source,
-						Issue: "NOT_REQUIRED: Human-approved local request",
+						Issue: "NOT_REQUIRED: user-approved local request",
 						Owner: "CODER", Reviewer: "REVIEWER", Scope: proposal.Scope, OutOfScope: proposal.OutOfScope,
 						Acceptance: proposal.Acceptance, ValidationCommands: proposal.ValidationCommands,
 						RequiredEvidence: []string{"work-report"}, ExitCondition: "Independent review approves all acceptance criteria",
@@ -709,7 +709,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if executionTask.Status == core.Draft {
 				if _, err := controller.ConfirmIntake(db, controller.IntakeConfirmation{
 					TaskID: id, ExpectedHash: hash, Actor: selected.Execution.Requester, Source: source,
-					Reason:    "Human selected /approve for the displayed plan, host validation commands, runtime, deadline and repair count",
+					Reason:    "the user selected /approve for the displayed plan, host validation commands, runtime, deadline and repair count",
 					Selection: selected, AdditionalTaskIDs: reviewers,
 					ConfigurationDecisionID: core.ConfigurationApprovalID(selected.Execution.ApprovalRef, id),
 					RequestOperationID:      id, RequestBasisHash: basis,
@@ -747,14 +747,14 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				return err
 			}
 			remainingNanoAIU := operation.MaxNanoAIU - operation.PlanningNanoAIU
-			budgetAuthorization := fmt.Sprintf("Human selected /approve for the approved goal, deadline, repair limit and Task-wide %.9g nano-AIU ceiling; prioritize acceptance within these limits", *taskNanoAIU)
+			budgetAuthorization := fmt.Sprintf("the user selected /approve for the approved goal, deadline, repair limit and Task-wide %.9g nano-AIU ceiling; prioritize acceptance within these limits", *taskNanoAIU)
 			if operation.AccountQuotaOnly {
 				remainingNanoAIU = 0
-				budgetAuthorization = "Human selected /approve for the approved goal, deadline, repair limit and reset-daily account remaining floor without a nano-AIU ceiling"
+				budgetAuthorization = "the user selected /approve for the approved goal, deadline, repair limit and reset-daily account remaining floor without a nano-AIU ceiling"
 			}
 			if operation.BudgetSource == core.ProviderStopBudgetSource {
 				remainingNanoAIU = 0
-				budgetAuthorization = "Human selected /approve for the declared provider-stop-no-overage billing contract, goal, deadline and repair limit without a nano-AIU ceiling or automatic quota monitoring"
+				budgetAuthorization = "the user selected /approve for the declared provider-stop-no-overage billing contract, goal, deadline and repair limit without a nano-AIU ceiling or automatic quota monitoring"
 			}
 			if _, err := controller.StartReviewFlowContext(controller.WithOperation(ctx, operation), db, storePath, controller.ReviewFlowRequest{
 				Configuration: configuration,

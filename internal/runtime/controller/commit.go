@@ -67,7 +67,7 @@ func (c *Controller) managedGit(ctx context.Context, dispatchID, sessionID, publ
 		}
 		task, ok := state.Graph.GraphTask(dispatch.TaskID)
 		if !ok || task.Status != core.Active {
-			return fmt.Errorf("managed commit requires an active Task without a pending stop or Human decision")
+			return fmt.Errorf("managed commit requires an active Task without a pending stop or user decision")
 		}
 		for _, flow := range state.Graph.ReviewFlows {
 			if !slices.Contains(flow.DispatchIDs, dispatchID) {
