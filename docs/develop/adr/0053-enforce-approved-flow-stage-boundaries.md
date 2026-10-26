@@ -38,6 +38,8 @@ Copilot の組み込み MCP は子プロセス引数で無効にし、利用者�
 
 2026-10-27 の後続修正では、`go build ./...`、`go vet ./...`、`go test ./...`、公開文のリポジトリ検査、公開処理用スクリプトの25試験が成功した。追加した回帰試験は `TestBuiltinMCPIsolationDoesNotEditUserSettings`、`TestGitLabReadFailuresDoNotImplyMutationDelivery`、`TestStagePlanReportsMissingBundleWithoutApprovingExecution`。独立レビューで診断文の終了コードに関する過大な説明を修正した。保存先と正本の集約方式の比較は Issue #192、実行前検査と承認手順の追跡は Issue #191 とし、今回の修正にデータ移行を含めない。
 
+ローカルの race 検証は `copilot`・`forge`・`cmd/taxion` の全試験と、controller の `TestStagePlan`・`TestPlanned` に一致する試験が成功した。controller 全体の race 検証は既定の10分で時間切れとなったため、全体成功とは記録しない。公開ゲートでは、既存どおり30分枠の全体 race 検証を必須とする。
+
 2026-10-26 に、偽時刻の境界、同一ハッシュ承認、計画改変の拒否、役割別上限の一致、停止時の部分成果保全、合成の実装・検証・修正・独立レビューを確認した。工程期限そのものによる監視停止、期限後の直接提出の拒否、検証の時間切れについても、全体期限より前に停止し、部分 tree を保存することを確認した。工程監査には、検証の開始・終了時刻と時間切れの理由が残る。
 
 次の検証はすべて成功した。race 検証は変更した工程制御・案内・保存経路に対象を絞っており、全テストの race 検証ではない。
