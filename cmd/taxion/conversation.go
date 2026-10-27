@@ -99,6 +99,11 @@ worktree. For snapshot input use task.outputMode=worktree-tree-snapshot,
 targetSha (baseline commit), targetTreeSha and targetChangedFiles from saved evidence.
 Do not relabel input as successful Coder output. reconciliationHash is only for
 the separate, explicitly approved reconcile-stopped recovery, not an executed SUSPENDED turn.
+For a stopped artifactSource input with FAILED validation and no Dispatches,
+use that exact Flow/Task as createdFrom/supersedes, not an older Coder Flow.
+intake automatically adds artifact-predecessor:TASK_ID with flowId, artifactHash
+and receiptHash (the complete artifact record digest) to the proposal.
+Do not supply or edit this decision. Preserve the same input in a separate worktree.
 intake saves an unapproved proposal; read it with conversation proposal --task TASK_ID.
 `
 
@@ -127,7 +132,18 @@ configurationDecisionId is optional; the Task-scoped form avoids changing approv
 additionalTaskIds lists only explicitly approved exact Reviewer Task IDs:
 FLOW_ID-review-0 through FLOW_ID-review-N for maxRepairs N; no wildcards.
 
-For a normal successor also supply replacesFlow (OLD_FLOW_ID) and target:
+For a normal successor also supply replacesFlow (OLD_FLOW_ID).
+Exception: a stopped artifactSource Flow with FAILED input validation and
+dispatchIds: [] requires target to be OMITTED, not null placeholders, an empty
+object or a fabricated Dispatch. Do not call workflow feedback-target for it.
+The proposal must contain the automatically bound artifact-predecessor decision.
+The exact terminal STOPPED/SAFETY_STOP, handoff hold, released runner, failure
+receipt and artifact identity are rechecked. Both worktrees must preserve the
+same baseline, targetSha, targetTreeSha and targetChangedFiles before approval.
+This strengthened receipt binding requires this CLI, not an unchanged RC5 binary;
+regenerate an older unconfirmed proposal through intake with a new unused Task ID,
+then approve its new hash. Preserve the old DRAFT rather than editing its decisions.
+For a predecessor with Dispatches, also supply target:
 copy the complete target object returned by workflow feedback-target --id OLD_FLOW_ID.
 target fields: dispatchId, taskId, repository, recipient, instructionHash, status,
 updatedAt, targetSha, outputSha, resultHash. Do not invent or remove fields.

@@ -24,7 +24,8 @@ func TestJSONOperationHelpExplainsInputsWithoutWorkspace(t *testing.T) {
 	}{
 		{"conversation intake", []string{"JSON envelope", "DRAFT", "supersedes", "targetTreeSha", "taxion ready"}},
 		{"conversation confirm", []string{"expectedHash", "selection", "configurationDecisionId", "additionalTaskIds", "replacesFlow",
-			"workflow feedback-target", "updatedAt", "resultHash", "ApprovalBundle", "No combined DRAFT"}},
+			"workflow feedback-target", "updatedAt", "resultHash", "ApprovalBundle", "No combined DRAFT",
+			"target to be OMITTED", "artifact-predecessor", "Both worktrees", "receipt"}},
 		{"workflow plan", []string{"JSON input", "READY", "stageBudget", "stagePlanHash", "provider-stop",
 			"continuationChange", "savedOutputDecision", "SUSPENDED", "no combined DRAFT"}},
 		{"workflow start", []string{"JSON input", "stageBudget", "stagePlanHash", "actual user approval", "not a model turn"}},
@@ -78,6 +79,12 @@ func TestOperationHelpExamplesMatchRequestTypes(t *testing.T) {
 		if !strings.Contains(text, "do not browse Taxion implementation sources with gh api") ||
 			!strings.Contains(text, "missing operation contract") {
 			t.Fatal("operator guidance routes missing help into source investigation")
+		}
+		for _, required := range []string{"receiptHash", "replacesFlow=FAILED_FLOW_ID", "OMITS target",
+			"--controller-validation-submission", "continuationChange", "savedOutputDecision"} {
+			if !strings.Contains(text, required) {
+				t.Fatalf("zero-Dispatch recovery guidance omits %q", required)
+			}
 		}
 	}
 }

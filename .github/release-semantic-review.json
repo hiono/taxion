@@ -1,12 +1,12 @@
 {
   "profileHash": "25805a3a784af71a1abbd4bf5d232143bd455a0798d39ea0aae17975763b5932",
-  "contentHash": "363564dc01e0425e45ae978f5c8ec311bb0d6a6c9f97d6d186d90bda39f3ba6f",
+  "contentHash": "eb7676915025e92a8a8d6e206fbc3bee4521e63444406270f3decb487d557ec3",
   "statement": {
-    "at": "2026-10-27T08:57:46.892334916Z",
+    "at": "2026-10-27T11:17:27.396601111Z",
     "claims": null
   },
   "writerSession": "7baef537-20d4-442d-a0e3-5ca3f908f1ee",
-  "reviewerSession": "rc5-public-semantic-review-20261027",
+  "reviewerSession": "rc6-public-semantic-review-20261027",
   "decision": "APPROVE",
-  "source": "independent-review:rc5-public-semantic-review-20261027"
+  "source": "independent-review:rc6-public-semantic-review-20261027"
 }
