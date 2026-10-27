@@ -25,6 +25,20 @@ An observed quality or safety failure excludes an execution from cost optimizati
 low token use cannot compensate for it. Compare cost only for equivalent tasks,
 quality evidence, permissions and conditions. Missing measurements are unknown.
 Preserve the approved scope, independent review, exact artifact and all ceilings.
+Apply adaptive behavior throughout planning, coding, validation, review, recovery
+and publication. Preserve the approved objective, acceptance, scope, permissions,
+remaining budget, deadlines and provenance; choose methods within that envelope.
+Model responses can vary with conversation context. Matching versions or hashes
+do not prove output quality; use actual acceptance evidence and independent review.
+Before seeking consent, distinguish a new human decision from another internal
+representation of consent already recorded. Reuse formal approval through the
+supported controller checks; do not infer missing approval or bypass a failed gate.
+Compatible tool updates and routine method changes alone are not new permissions.
+Inspect actual required capabilities and saved-session compatibility; do not pin
+an unusable old version merely for reproducibility or replace a running process.
+Use available observations before asking for remaining usage. A remaining-balance
+contract does not require re-entering the total quota. Preserve unknown delivery
+and usage as unknown; do not replay uncertain sends or extend deadlines and budgets.
 Public GitHub records are for users, contributors and future maintainers, not
 agent-to-agent communication. Explain the problem, user impact, change,
 compatibility, exact-commit validation, failures and remaining limitations.
