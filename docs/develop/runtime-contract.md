@@ -194,6 +194,12 @@ prompt を自動再送しない。別 process/provider の session への再接�
 
 ## Skills・plugins・MCP・hooks と出力圧縮
 
+開発版では、製品の実装・独立レビューを行う Dispatch と、Taxion を操作する外側の担当を区別する。共通の Dispatch 指示は、管理用 skill・DB・session directory・他 worktree の調査を製品実装の前提にしない。標準／カスタム指示と両 runtime の共通指示生成に適用する。controller が検証を担当するとき、Taxion 操作用 shell がないことや検証待ちだけでは中断しない。必要な製品ファイルにアクセスできない場合は、具体的なファイルと未達要件を報告し、権限は拡張しない。
+
+Copilot の Coder／Reviewer は SDK の `DisabledSkills: ["taxion"]` を新規接続と再接続で指定する。一般の製品 skill 探索、明示された skill／plugin、既存のファイル権限は維持する。除外一覧は session hash に含め、診断の `disabledSkills` に表示する。native 探索で見つかった同名 skill は `disabled-for-role` と表示し、利用可能と誤記しない。固定 ToolPolicy の skill／plugin は内容を固定した資産として `pinned-content` と表示する。この表示は読込み成功ではなく、plugin 内の skill にも名前による除外は適用される。Planner／外側の操作者はこの除外の対象外。これは同名の管理 skill の読込み制御であり、任意の別名 skill やファイル本文の混入を完全に防ぐ sandbox ではない。利用者の skill ファイルは編集しない。
+
+新しい指示と session 設定は旧 session の hash を変えるため、稼働中 session や停止済み Flow をこの変更だけで再送・再開しない。既存の出典・課金・停止理由を保ち、正式な継続手順で取り扱う。
+
 Copilot 子プロセスには `--disable-builtin-mcps` を常に渡し、組み込み MCP を無効にする。利用者の設定は編集せず、モデル提供元への通信も無効にしない。Doctor は `builtinMcpsDisabled: true` と設定一覧を区別して返す。他の MCP、フック、プラグイン、シェル通信まで禁止する隔離機能ではないため、Task の権限を別途確認する。この動作はセッションハッシュの `BuiltinMCPPolicy` に含め、従来のセッションへ新しい契約で接続しない。明示的に承認した独自 MCP の経路は維持する。
 
 通常の Copilot SDK session は create・resume ともに探索を明示的に有効にする。SDK に `nil` を渡すだけでは project・personal skill が読み込まれず、CLI の一覧と一致しない場合がある。探索方式は config hash の `native-cli-discovery-v2` に含め、旧方式の session を新しい実行契約で再開しない。明示 ToolPolicy と取消専用 adapter の探索抑止、role 別 file・shell permission は維持する。

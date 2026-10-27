@@ -7,6 +7,32 @@ import (
 	"github.com/hiono/taxion/internal/core"
 )
 
+func TestDispatchWorkersDoNotInheritOuterManagementResponsibilities(t *testing.T) {
+	for _, prompt := range []string{requestCoderPrompt, requestReviewerPrompt, "Custom role with repository guidance"} {
+		for _, submission := range []bool{false, true} {
+			rendered := runtimeSubmissionPrompt(prompt, "approved-product-contract", submission)
+			if strings.Count(rendered, dispatchWorkerPolicy) != 1 {
+				t.Fatal("standard or custom worker lacks its role boundary")
+			}
+			for _, required := range []string{
+				"not operating Taxion", "Do not become the orchestrator",
+				"Do not invoke Taxion management skills or commands",
+				"A denied unrelated management read is not itself a blocker",
+				"genuinely necessary product file", "do not broaden permissions",
+				"missing shell access to Taxion", "never invent checks",
+			} {
+				if !strings.Contains(rendered, required) {
+					t.Fatal("worker boundary omits a required responsibility", required)
+				}
+			}
+		}
+	}
+	if !strings.Contains(readySkillBody, "not a Coder or Reviewer executing a Taxion") ||
+		!strings.Contains(readySkillBody, "Do not run these management steps") {
+		t.Fatal("discovered management skill redirects Dispatch workers into orchestration")
+	}
+}
+
 func TestGoalPolicyCoversEveryRoleAndRuntimePrompt(t *testing.T) {
 	prompts := []string{readyPrompt, requestPlannerPrompt, plannerSystemPrompt, questionSystemPrompt}
 	for _, role := range []string{requestCoderPrompt, requestReviewerPrompt, "Custom role"} {

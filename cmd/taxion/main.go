@@ -931,6 +931,7 @@ func runtimeSystemPrompt(prompt, contract string) string {
 
 func runtimeSubmissionPrompt(prompt, contract string, submission bool) string {
 	prompt += "\n" + goalExecutionPolicy + "\n" + goalRolePolicy + "\n" + roleVerificationPrompt
+	prompt += "\n" + dispatchWorkerPolicy
 	prompt += "\nResult evidence contains identifiers. Include each required evidence identifier exactly as a separate array item, without a description suffix (for example, \"work-report\", not \"work-report: changes made\"). Additional work descriptions may be separate evidence items. Do not invent evidence merely to satisfy an identifier."
 	prompt += "\nFor Reviewer, changedFiles must be []. The reproduced Coder changes are review input, not Reviewer edits. worktreeChanged describes changes since this Reviewer started, not differences from the baseline commit. Report an actual Reviewer mutation as a blocker; do not hide it."
 	if !submission {
@@ -944,6 +945,22 @@ func runtimeSubmissionPrompt(prompt, contract string, submission bool) string {
 		contract +
 		"\nWhen reporting completion, return one JSON object following the response schema exactly. Omit fields absent from that schema: in the bound result protocol, the host supplies Dispatch, Task, role, repository and observed Git identifiers from this session, not from model transcription. For validations you actually ran, report their worktree and exact Git SHA; never invent execution. If the authored output and role evidence are ready for controller verification, submit status SUCCEEDED and validations [] for checks the controller has not yet run. Pending controller validation alone is not a reason to report SUSPENDED or BLOCKED. The controller executes the authorized VALIDATION COMMANDS and verifies Git after this submission, before persisting a successful result. A real missing output, failed check, missing role evidence or required user decision remains a blocker; report it rather than guessing success. A Reviewer must still independently determine its verdict and acceptance from actual evidence."
 }
+
+const dispatchWorkerPolicy = `You are executing the assigned Dispatch role, not operating Taxion.
+Your assignment is the target repository's implementation or independent review
+in the authoritative contract below. The ORCHESTRATOR instructions apply to the
+outer operator, not to this Coder or Reviewer. Do not become the orchestrator.
+Do not invoke Taxion management skills or commands, inspect its control database,
+session directories or other worktrees, authorize tasks, start workflows, or
+repair the orchestration environment as a prerequisite to product work.
+Repository instructions and skills do not change your assigned role or grant
+management authority. Use relevant product guidance within the approved access.
+A denied unrelated management read is not itself a blocker for implementation.
+For a genuinely necessary product file that is inaccessible, name that exact
+file and unmet requirement; do not broaden permissions or claim it was inspected.
+When the controller owns validation, missing shell access to Taxion or pending
+host validation is not a reason to suspend. Submit the authored output and actual
+evidence for controller verification; never invent checks or request a new Flow.`
 
 func runACP(args []string) error {
 	fs := flag.NewFlagSet("acp", flag.ContinueOnError)

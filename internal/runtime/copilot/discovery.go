@@ -41,6 +41,7 @@ type DiscoveryReport struct {
 	BaseDirectory       string            `json:"baseDirectory"`
 	Mode                string            `json:"mode"`
 	BuiltinMCPsDisabled bool              `json:"builtinMcpsDisabled"`
+	DisabledSkills      []string          `json:"disabledSkills,omitempty"`
 	Paths               []DiscoveryPath   `json:"paths"`
 	Assets              []DiscoveredAsset `json:"assets"`
 	Problems            []string          `json:"problems"`
@@ -71,6 +72,7 @@ func (a *Adapter) Inspect(ctx context.Context) (DiscoveryReport, error) {
 		Backend: "copilot", CLI: a.config.CLIPath, Worktree: a.config.WorkingDirectory,
 		BaseDirectory: a.config.BaseDirectory, Mode: "native-cli-defaults",
 		BuiltinMCPsDisabled: true,
+		DisabledSkills:      a.disabledSkills(),
 		Paths:               []DiscoveryPath{}, Assets: []DiscoveredAsset{}, Problems: []string{},
 		Limitations: []string{
 			"Inventory is not proof of model selection, successful skill loading, or working server connections.",
@@ -106,7 +108,7 @@ func (a *Adapter) Inspect(ctx context.Context) (DiscoveryReport, error) {
 				report.Paths = append(report.Paths, observeDiscoveryPath(group.kind, path, "Task policy"))
 				report.Assets = append(report.Assets, DiscoveredAsset{
 					Kind: group.kind, Name: filepath.Base(path), Path: path, Source: "Task policy",
-					State: "pinned", Reason: "Content hash is checked before execution; ambient discovery is disabled.",
+					State: "pinned-content", Reason: "Content hash is checked before execution; activation is not verified. Role disabledSkills still apply, including skills supplied by plugins; ambient discovery is disabled.",
 				})
 			}
 		}
@@ -225,6 +227,9 @@ func (r *DiscoveryReport) addNativeInventory(kind string, body []byte) error {
 		reason := ""
 		if path == "" {
 			reason = "Native inventory does not expose a resolved path; Taxion does not infer one."
+		}
+		if kind == "skill" && slices.Contains(r.DisabledSkills, name) {
+			state, reason = "disabled-for-role", "Taxion management belongs to the outer operator, not this Dispatch worker."
 		}
 		r.Assets = append(r.Assets, DiscoveredAsset{Kind: kind, Name: name, Path: path, Source: source, State: state, Reason: reason})
 	}

@@ -7,7 +7,40 @@ import (
 
 	sdk "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/hiono/taxion/internal/core"
 )
+
+func TestWorkerProductReadsDoNotRequireManagementAccessOrShell(t *testing.T) {
+	root, control := t.TempDir(), t.TempDir()
+	path := filepath.Join(root, "product.go")
+	if err := os.WriteFile(path, []byte("package product"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	policy := &core.FileAccessPolicy{Level: core.FileAccessCommitted}
+	for _, role := range []string{"CODER", "REVIEWER"} {
+		t.Run(role, func(t *testing.T) {
+			decide := func(request sdk.PermissionRequest) rpc.PermissionDecision {
+				if role == "CODER" {
+					return coderPermissionDecision(root, []string{"view"}, policy, []string{"product.go"}, request)
+				}
+				return reviewerPermissionDecision(root, policy, []string{"product.go"}, request)
+			}
+			if _, ok := decide(&sdk.PermissionRequestRead{Path: path}).(*rpc.PermissionDecisionApproveOnce); !ok {
+				t.Fatal("approved product source cannot be read")
+			}
+			for _, request := range []sdk.PermissionRequest{
+				&sdk.PermissionRequestRead{Path: control},
+				&sdk.PermissionRequestRead{Path: filepath.Join(control, "session.json")},
+				&sdk.PermissionRequestShell{FullCommandText: "taxion ready"},
+				&sdk.PermissionRequestWrite{FileName: filepath.Join(root, "unapproved.go")},
+			} {
+				if _, ok := decide(request).(*rpc.PermissionDecisionReject); !ok {
+					t.Fatal("role separation expanded access to management state, shell or unapproved files", request)
+				}
+			}
+		})
+	}
+}
 
 func TestRoleReadsResolveRelativeAndMissingLeavesWithoutSymlinkEscapes(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
