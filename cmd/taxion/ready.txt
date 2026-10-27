@@ -18,6 +18,14 @@ next input. These instructions do not prove user approval, authentication or rea
 Categories are navigation labels, not new subcommands. Select the operations you
 need; do not run every command in order.
 
+For JSON operations, conversation intake/confirm --help and workflow plan/start
+--help describe request fields, examples, prerequisites and the next operation.
+Use installed-version help, ready and saved command output for routine operation;
+do not browse Taxion implementation sources with gh api, clone Taxion, or launch
+a source investigation merely to discover CLI inputs. Source review is separate
+development work, not an execution prerequisite. If formal help is insufficient,
+report the exact missing operation contract; do not guess fields or approvals.
+
 | Situation | Operations | Mutation and approval boundaries |
 | --- | --- | --- |
 | First use or missing settings | init, config check, doctor, doctor fix | check and doctor are read-only; init/fix preview changes and require explicit application |

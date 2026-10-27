@@ -21,6 +21,51 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+const stagePlanInputHelp = `
+plan and start share this JSON input (examples are not user approval):
+{
+  "id": "FLOW_ID",
+  "taskId": "READY_TASK_ID",
+  "repository": "OWNER/REPO",
+  "reviewRoot": "/absolute/path/to/reviews",
+  "maxRepairs": 1,
+  "timeoutSeconds": 3600,
+  "stageBudget": {"version": 1},
+  "authorization": {
+    "id": "UNIQUE_AUTHORIZATION_ID",
+    "source": "human:ACTUAL_APPROVAL_REFERENCE",
+    "text": "Requested execution and independent review within the presented limits"
+  }
+}
+taskId must already be READY with an approved contract and configuration.
+For a DRAFT use conversation proposal/confirm first; no combined DRAFT preview exists.
+plan is read-only and starts no model. Its authorization text describes the
+requested execution, not a preview-only permission; it is part of the hash.
+Display stagePlan.hash, contractGate, timing and limits for actual user approval.
+Only after approval add stagePlanHash (the exact returned hash) to the same input,
+then workflow start --file REQUEST.json. start issues a Dispatch, not a model turn.
+Changed Task, configuration or request requires a new plan and hash approval.
+
+stageBudget optional fields:
+validationSeconds, reviewSeconds, repairSeconds: per-stage time estimates, with
+saved-history estimates and conservative defaults when omitted.
+coderSessionCredits, reviewerSessionCredits: optional per-role soft ceilings;
+zero/unset means no session ceiling, positive values must be at least 30.
+reviewNanoAiu, repairNanoAiu: reserved native usage estimates when maxNanoAiu is positive.
+maxNanoAiu is a separate optional positive Flow usage ceiling; omission is allowed
+only by the approved provider-stop or eligible account contract. Never convert credits.
+configuration is resolved by the CLI; do not invent configuration digest values.
+
+For a planned successor also supply continuationChange and savedOutputDecision,
+explaining changed completion conditions and preservation/reuse of saved input.
+continueFromDispatchId skips Coder only for a verified successful prior Coder;
+do not use it for an executed SUSPENDED Coder or input that was never its output.
+If mandatory stages do not fit, do not start or silently extend the deadline.
+After issuance, inspect doctor --dispatch DISPATCH_ID --json before paid execution.
+Use workflow run --id FLOW_ID --builtin-prompts for the bundled snapshot-mode
+worker/file-tool policy and controller validation, not a Taxion management shell.
+`
+
 func workflowCmd(args []string) error {
 	return workflowCommand(context.Background(), args, os.Stdout)
 }
@@ -43,6 +88,14 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	}
 	resumeSaved := action == "resume"
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
+	fs.SetOutput(output)
+	if action == "plan" || action == "start" {
+		fs.Usage = func() {
+			fmt.Fprintln(fs.Output(), "Usage of workflow "+action+":")
+			fs.PrintDefaults()
+			fmt.Fprint(fs.Output(), stagePlanInputHelp)
+		}
+	}
 	var file, id string
 	var coderPrompt, reviewerPrompt, cli, base, coderTools, reviewerTools string
 	var managedCommit bool
@@ -65,6 +118,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		if action == "evaluate" {
 			fs.BoolVar(&requireQuality, "require-quality", false, "fail unless saved same-target acceptance includes documentation consistency; not publication approval")
 		}
+
 	case "lanes":
 		fs.StringVar(&taskID, "task", "", "Task ID to inspect with read-only controller lanes")
 		fs.DurationVar(&laneTimeout, "timeout", controller.DefaultLaneTimeout, "per-lane timeout")

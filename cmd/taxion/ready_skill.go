@@ -40,6 +40,11 @@ the problem. Do not install or update it without the user's permission.
 Then run taxion ready to obtain this binary's current operation contract.
 Use taxion --help and taxion COMMAND --help for exact commands and options;
 never guess flags, JSON fields or valid lifecycle transitions.
+conversation intake/confirm --help and workflow plan/start --help explain JSON
+inputs and prerequisites. Use installed-version help, ready and saved output;
+do not browse Taxion implementation sources with gh api or clone Taxion merely
+to discover operation inputs. If formal help is insufficient, report the exact
+missing operation contract rather than inventing fields or starting source research.
 
 Keep the same executable environment for diagnosis and execution. Check required
 executables before issuing work. --store selects the ledger path, not workspace.db.
