@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.4"
+const readySkillVersion = "1.3.5"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -60,6 +60,13 @@ Copilot child processes disable built-in MCP servers without editing user settin
 other network-capable tools and hooks still need separate permission checks.
 For recovery, inspect workflow feedback-target and the saved partial/output tree;
 do not fabricate a successful result, stop proof or user approval.
+For a held SAFETY_STOP with only its first issued snapshot-input Coder and no
+start/session/result, workflow reconcile-stopped can preview a human decision.
+Require execution-quiescence evidence, acceptance of unknown delivery and the exact
+preview hash before cancellation. It preserves the old stop and approved INPUT,
+not new Coder output or proof of zero usage. A distinct-worktree successor needs
+reconciliationHash in both intake and confirmation, its exact proposal approval
+and cancelled feedback target. This does not authorize a new Flow or model run.
 Preserve completed work. New budgets, changed scope and permissions need explicit
 user approval. Controller validation and independent same-target review are
 required before claiming completion. Inventory and skill integrity checks do not

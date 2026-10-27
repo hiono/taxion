@@ -16,6 +16,7 @@ import (
 )
 
 type IntakeRequest struct {
+	ReconciliationHash      string         `json:"reconciliationHash,omitempty"`
 	Request                 string         `json:"request"`
 	Task                    core.GraphTask `json:"task"`
 	Actor                   string         `json:"actor"`
@@ -26,6 +27,7 @@ type IntakeRequest struct {
 }
 
 type IntakeConfirmation struct {
+	ReconciliationHash      string               `json:"reconciliationHash,omitempty"`
 	TaskID                  string               `json:"taskId"`
 	ExpectedHash            string               `json:"expectedHash"`
 	Actor                   string               `json:"actor"`
@@ -163,6 +165,14 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 		if !state.HasGraph {
 			state.HasGraph, state.Graph = true, core.TaskGraph{Version: 1}
 		}
+		if request.ReconciliationHash != "" {
+			if err := verifyReconciledInput(*state, task, request.ReconciliationHash); err != nil {
+				return err
+			}
+			task.Decisions = append(task.Decisions, core.TaskDecision{
+				ID: "reconciled-input:" + task.ID, Source: request.Source, Text: request.ReconciliationHash,
+			})
+		}
 		if previous, ok := state.Graph.GraphTask(task.ID); ok {
 			if !reflect.DeepEqual(previous, task) {
 				return fmt.Errorf("taxion: intake Task ID already contains another proposal; use a new Task ID")
@@ -222,8 +232,26 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		if err != nil {
 			return err
 		}
+		decisionCount := len(task.Decisions)
+		if decisionCount == 0 {
+			return fmt.Errorf("taxion: intake proposal lacks its original request")
+		}
+		if request.ReconciliationHash != "" {
+			if request.ReplacesFlow == "" || request.Target == nil {
+				return fmt.Errorf("taxion: reconciled successor requires its predecessor and exact cancelled Dispatch target")
+			}
+			decision := core.TaskDecision{ID: "reconciled-input:" + task.ID,
+				Source: task.Decisions[0].Source, Text: request.ReconciliationHash}
+			if !slices.Contains(task.Decisions, decision) {
+				return fmt.Errorf("taxion: reconciliation must be included in the exact intake proposal hash")
+			}
+			if err := verifyReconciledInput(*state, task, request.ReconciliationHash); err != nil {
+				return err
+			}
+			decisionCount--
+		}
 		if hash != request.ExpectedHash || task.Status != core.Draft || task.AuthorizationID != "" ||
-			task.Repo != request.Selection.Repository.Path || (len(task.Decisions) != 1 && len(task.Decisions) != 2) ||
+			task.Repo != request.Selection.Repository.Path || (decisionCount != 1 && decisionCount != 2) ||
 			task.Decisions[0].ID != "intake:"+task.ID || len(task.ValidationCommands) == 0 {
 			return fmt.Errorf("taxion: intake proposal changed or lacks explicit execution/validation contract")
 		}
@@ -260,6 +288,11 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 			if last.Recipient == "CODER" && last.Status == core.DispatchCancelled {
 				if unstarted {
 					// An unstarted Dispatch has no worktree changes to transfer.
+				} else if request.ReconciliationHash != "" {
+					audit, err := reconciledInput(*state, flow.ID, request.ReconciliationHash)
+					if err != nil || audit.Target != *request.Target {
+						return fmt.Errorf("taxion: reconciled input does not match the cancelled predecessor")
+					}
 				} else if last.Result == nil || last.Result.PartialGitEvidence == nil {
 					return fmt.Errorf("taxion: cancelled Coder work requires verified partial Git evidence before successor approval")
 				} else {
@@ -286,8 +319,10 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 				return fmt.Errorf("taxion: successor using the same worktree must retain the recorded latest output SHA")
 			}
 			// Preserve prior result, instruction, approval and ceiling snapshots.
-			flow.Status, flow.Reason = "STOPPED", "the user explicitly confirmed successor contract "+task.ID
-			storeFlow(state, flow)
+			if request.ReconciliationHash == "" {
+				flow.Status, flow.Reason = "STOPPED", "the user explicitly confirmed successor contract "+task.ID
+				storeFlow(state, flow)
+			}
 		} else if task.Supersedes != "" || request.Target != nil {
 			return fmt.Errorf("taxion: a superseding contract requires explicit predecessor-flow reapproval")
 		}

@@ -199,6 +199,20 @@ taxion config check --task TASK-ID
 confirm makes the Task READY but starts no Dispatch or model.
 Changing a confirmed contract requires a new Task and approval, not reuse of the old hash's approval.
 
+For STOPPED/SAFETY_STOP with HOLD and only the first issued snapshot-input Coder,
+workflow reconcile-stopped --file JSON --preview checks a narrow recovery route.
+Require actor/source/reason/evidence, noActiveExecutionConfirmed:true and
+acceptDeliveryUncertainty:true based on explicit human confirmation, not absent
+session records. Apply only with the exact returned hash as expectedHash. This
+cancels the issued instruction, blocks its Task and appends immutable evidence;
+it does not alter the old Flow, prove non-delivery or account for unknown usage.
+The preserved tree is the previously approved INPUT, never a new Coder result.
+For a successor, use a distinct worktree with the identical retained input,
+createdFrom:"flow:FLOW-ID", supersedes:"OLD-TASK-ID", and reconciliationHash in
+both conversation intake and confirm. Confirm also needs replacesFlow, the exact
+cancelled feedback target and the new proposal hash. New execution still requires
+separate bundle, packet, plan and runtime gates. Do not retry the old Flow.
+
 ## Execute an approved Flow
 
 Use the same explicit --store ledger path used for the saved work on every command.

@@ -331,6 +331,14 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	}
 	packetAudits := slices.Clone(state.Records.PacketAudits)
 	acceptances := make([]string, len(state.Records.ReviewAcceptances))
+	reconciliations := make([]string, len(state.Records.DispatchReconciliations))
+	for i, audit := range state.Records.DispatchReconciliations {
+		content, err := core.CanonicalJSON(audit)
+		if err != nil {
+			return err
+		}
+		reconciliations[i] = string(content)
+	}
 	for i, acceptance := range state.Records.ReviewAcceptances {
 		content, err := core.CanonicalJSON(acceptance)
 		if err != nil {
@@ -346,6 +354,15 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	}
 	if err := update(&state); err != nil {
 		return err
+	}
+	if len(state.Records.DispatchReconciliations) < len(reconciliations) {
+		return fmt.Errorf("stopped Dispatch reconciliation records are append-only")
+	}
+	for i, previous := range reconciliations {
+		content, err := core.CanonicalJSON(state.Records.DispatchReconciliations[i])
+		if err != nil || string(content) != previous {
+			return fmt.Errorf("stopped Dispatch reconciliation records are immutable")
+		}
 	}
 	if len(state.Records.ReviewAcceptances) < len(acceptances) {
 		return fmt.Errorf("saved review acceptance records are append-only")

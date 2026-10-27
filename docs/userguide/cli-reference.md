@@ -636,6 +636,35 @@ taxion workflow accept-saved-review --file acceptance.json
 
 CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は stdio の ACP、`web/` は browser console を提供する。
 
+## 停止済み初回指示の整合回復
+
+開発版の `workflow reconcile-stopped` は、`STOPPED / SAFETY_STOP`・`HOLD` の Flow と、開始記録のない初回 snapshot Coder の `ISSUED` Dispatch を整合させる。明示的な同じ `--store` を維持する。次は形式の例であり、実際の確認や承認を表さない。
+
+```json
+{
+  "flowId": "stopped-flow",
+  "dispatchId": "stopped-flow-dispatch-0",
+  "actor": "human",
+  "source": "human:reconciliation",
+  "reason": "配送不明を保持して指示を取り消す",
+  "evidence": ["人間が継続中の実行がないことを確認した根拠への参照"],
+  "noActiveExecutionConfirmed": true,
+  "acceptDeliveryUncertainty": true
+}
+```
+
+```sh
+taxion --store /explicit/workspace/ledger.json workflow reconcile-stopped --file reconciliation.json --preview
+# 提示した判断と hash の明示承認後、同じ JSON に expectedHash を追加する
+taxion --store /explicit/workspace/ledger.json workflow reconcile-stopped --file reconciliation.json
+```
+
+preview は `version:1`、`stateChanged:false`、`inputContractHash`、`inputTreeSha`、`inputOrigin:"approved-predecessor-input-contract"`、`deliveryStatus:"unknown"`、`usageStatus:"unavailable"`、予定遷移と `hash` を返す。適用は同じ状態と判断を再照合し、取消・Task の `BLOCKED` 遷移・監査追記を一括保存して `stateChanged:true` を返す。重複適用や変更したハッシュは拒否する。元の Flow・停止理由・承認・期限・予算は維持する。外部処理の停止や未配信・無課金を証明する操作ではない。
+
+後続入力は元の承認済み tree であり、新成果ではない。同一 repository の別 worktree に同一の commit・tree・変更 path を保全し、新しい `conversation intake` の Task に `createdFrom:"flow:stopped-flow"` と `supersedes` を設定する。intake request と `conversation confirm` request の両方に同じ `reconciliationHash` を渡す。confirm には新提案の `expectedHash`、`replacesFlow`、取消後に観測した正確な `target`、新しい設定承認も必要になる。対象が変われば拒否する。READY への確認は実行開始ではなく、承認束・委譲・工程計画と利用量を含む実行前検査は別途必要である。
+
+session・開始・結果・runtime receipt がある場合、入力が変わった場合、他の実行が稼働中の場合には使えない。人間の確認ができない場合も停止を維持する。通常取消だけではこの入力継承の根拠にならない。手順の判断基準は[失敗からの復旧](failure-recovery.md#flow-が停止している)を参照する。
+
 ## 全コマンドと option の索引
 
 v0.7.16 の Copilot `workflow run|step|resume` と `runtime` は、`--review-progress` で
@@ -691,6 +720,7 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | `workflow advance`, `workflow show`, `workflow evaluate`, `workflow feedback-target`, `workflow planning-context` | `--id FLOW_ID` で保存 review flow を選ぶ。`workflow evaluate` は Task 単位の承認上限・消費・残量を含む report を出す。前述の各節に従う読取り・遷移操作。 |
 | `workflow evaluate` | `--id FLOW_ID` で保存品質証拠と測定済み／未測定の費用を JSON 表示する。読取り専用 SQLite 接続を使い、workspace 作成・移行・モデル実行をしない。`--require-quality` は完了した独立同一 target レビューと文書整合 criterion がなければ JSON を出したうえで非zero終了する。得点・自動公開承認・現在の Git の検証ではない。 |
 | `workflow accept-saved-review` | `--file JSON` で `flowId`・`actor`・`source`・`reason`・`allowExpired` を指定する。`--preview` は状態を変えず対象と検査を表示し、適用には同じ判断と preview の `hash` を `expectedHash` として要求する。引継ぎ保留の理由消失で停止したレビュー専用 snapshot Flow だけを対象に、モデルや検証 command を起動せず保存済み `APPROVE` を受理する。 |
+| `workflow reconcile-stopped` | `--file JSON` と任意の `--preview`。停止済み初回 snapshot 指示の取消と承認済み入力の出典を保存する。人間の実行静止確認・配送不明の受入れ・完全ハッシュを要求し、旧 Flow と不明な利用量を保持する。 |
 | `gate contract`, `gate execution`, `gate publication` | `gate contract` は `--task ID`、`gate execution`・`gate publication` は `--flow ID` を要求する。保存 Task・Flow・承認 bundle・評価証拠だけを読み、Task Graph・Dispatch・Flow・ledger を変更せずモデルも呼ばない。`--json` は version 1 の機械可読 report（gate 名、verdict、task/proposal/record/bundle/evidence hash、blockingConditions、drift と authorization impact、nextRequiredApproval、nextAuthorizedTransition、`stateChanged:false`）を出す。`--json` なしは同じ内容を人が読める形で出す。終了 code は 0 pass・1 fail・2 blocked で、未検証の項目を pass として報告しない。 |
 | `workflow lanes` | `--task ID` で保存 Task を選び、repository identity・baseline/worktree・contract 整合・handoff 準備の4つの読取り専用 lane を並行実行して JSON を表示する。`--timeout DURATION` は lane ごとの上限（既定5秒）、`--root PATH` は worktree を含むべき repository root（既定は現在 directory）を指定する。workspace・Task Graph・Dispatch・Flow・worktree・runtime session を変更せず、モデル session も開始しない。lane が一つでも失敗すると `executionGateOpen` は false になり、JSON を出したうえで非zero終了する。診断は credential を伏せる。 |
 | `workflow run`, `workflow step` | `--id FLOW_ID`・`--coder-prompt-file PATH`・`--reviewer-prompt-file PATH` で Flow と role prompt を選ぶ。file の代わりに `--builtin-prompts` を使うと、同梱 snapshot prompt、厳密な結果 identity、compact context、Controller validation submission を選ぶ。snapshot Flow を要求し、managed commit・stage は拒否する。この mode だけは tool 未指定時に Coder `view,create,edit,apply_patch`、Reviewer `view` を既定とし、明示空 list では file tool を追加しない。通常の native skill tool は別に追加する。任意の `--cli PATH`・`--base-directory PATH`・`--max-ai-credits N`・`--coder-tools LIST`・`--reviewer-tools LIST` で runtime と allowlist を選ぶ。`--managed-commit` は binding 済み Coder commit tool、`--managed-stage` は追加の scope 内 stage を有効にし、後者は前者を要求する。`--scanner PATH` は managed commit だけで有効。`--strict-result-identities`・`--compact-context`・`--controller-validation-submission` は各結果・context 検証 mode を変える。credit 上限は session 別で、Flow 全体ではない。 |
