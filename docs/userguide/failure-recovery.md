@@ -51,9 +51,9 @@ v0.7.21-rc.5 の `artifactSource` Flow は、持込み入力の実際の Control
 
 ### Dispatch がない入力検証失敗からの修正用後続
 
-以下は Issue #203 の開発版契約であり、未配布である。RC5 には `target` 省略の内部処理があるが、
+以下は v0.7.21-rc.6 の契約である。RC5 には `target` 省略の内部処理があるが、
 失敗 receipt の提案への固定と後続 worktree の確認を含むこの契約は、文書追加だけでは利用できない。
-更新版が配布されるまで、RC5 操作機では新しい入力形式を試さず保存状態を維持する。
+RC5 操作機では新しい入力形式を試さず保存状態を維持し、正式な更新後にこの手順を使う。
 
 対象は `artifactSource` Flow の `STOPPED / SAFETY_STOP`、`HOLD`、
 `artifact.validation.status: FAILED`、`dispatchIds: []`、runner 解放済みの場合に限る。

@@ -656,7 +656,7 @@ Release 0.1.0 の #78 で引き続き追跡する。
 
 ### 停止した作業の継続
 
-Issue #203 の開発版では、Dispatch のない artifact 入力検証 `FAILED` を、
+v0.7.21-rc.6（Issue #203）では、Dispatch のない artifact 入力検証 `FAILED` を、
 成功済み Coder の継続とは別に扱う。通常 intake は `artifact-predecessor:TASK_ID` 決定に
 失敗 Flow ID・artifact hash・旧 artifact 全体の receipt digest を自動で固定し、
 提案 hash と確認対象へ含める。confirm は同じ決定と `replacesFlow`、`target` 省略を要求し、
