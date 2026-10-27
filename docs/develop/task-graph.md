@@ -656,6 +656,16 @@ Release 0.1.0 の #78 で引き続き追跡する。
 
 ### 停止した作業の継続
 
+Issue #203 の開発版では、Dispatch のない artifact 入力検証 `FAILED` を、
+成功済み Coder の継続とは別に扱う。通常 intake は `artifact-predecessor:TASK_ID` 決定に
+失敗 Flow ID・artifact hash・旧 artifact 全体の receipt digest を自動で固定し、
+提案 hash と確認対象へ含める。confirm は同じ決定と `replacesFlow`、`target` 省略を要求し、
+停止・保留・runner 解放と、別 worktree に保持した旧入力の同一性を照合する。
+未確定の `RUNNING`／`PENDING`、drift、既存提案の証拠欠落は拒否する。
+失敗 Flow・receipt は書き換えず、後続は Coder から始まる通常 Flow とする。
+RC5 の省略分岐だけではこの保証を満たさない。配布・操作手順は
+[失敗からの復旧](../userguide/failure-recovery.md#dispatch-がない入力検証失敗からの修正用後続)を参照する。
+
 旧 workspace に保存された `BUDGET_LIMIT` の停止と結果は履歴互換のため保持する。新しい Flow は token 閾値で停止しない。どの停止記録でも `workflow show --id FLOW-ID` で stop code、usage、最後の Dispatch result と Git evidence を確認する。停止済み Flow 自体は書き換えず、続行には新しい Task の承認が必要となる。
 
 `workflow recover` は、プロセス停止後に残った runner の所有権を解放する操作である。停止したプロセス、runner ID、全 Dispatch の終端状態を確認してから、次の内容を `taxion workflow recover --file REQUEST.json` に渡す。

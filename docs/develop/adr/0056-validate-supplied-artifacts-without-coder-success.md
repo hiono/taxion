@@ -44,6 +44,15 @@ process-stop を確認した正式 recovery でもコマンドの再実行を許
 派生 Reviewer の ApprovalBundle という記録形式だけを理由に再承認を要求しない。
 publication は従来どおり別承認。モデルの file tools は検証コマンドの実行権限の代わりにならない。
 
+Issue #203 の補足として、入力検証が `FAILED` で Dispatch がない終端 Flow は、
+既存 intake／confirm による通常修正用後続へ結び付ける。
+新しい target 型・架空 Dispatch・汎用 recovery engine は追加しない。
+intake は旧 artifact 全体の digest と artifact hash を自動決定に保存し、提案 hash に含める。
+confirm は失敗確定、停止・保留・runner 解放、決定の不変性、両 worktree の入力同一性を要求する。
+`target` は省略し、置換元は直近の失敗した入力 Flow とする。
+旧失敗 receipt は後続成功へ書き換えず、通常 Coder の修正・Controller 検証・独立レビューを別実績として保存する。
+RC5 には省略分岐があるが、この証拠固定と後続実入力照合は新しい binary を必要とする。
+
 ## Consequences
 
 旧結果・旧 session・終端 Flow は変更せず、持込み入力を Coder 成果や品質合格へ変換しない。

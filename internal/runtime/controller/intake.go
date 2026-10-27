@@ -165,6 +165,13 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 		if !state.HasGraph {
 			state.HasGraph, state.Graph = true, core.TaskGraph{Version: 1}
 		}
+		predecessor, err := artifactPredecessorDecision(state.Graph, task)
+		if err != nil {
+			return err
+		}
+		if predecessor != nil {
+			task.Decisions = append(task.Decisions, *predecessor)
+		}
 		if request.ReconciliationHash != "" {
 			if err := verifyReconciledInput(*state, task, request.ReconciliationHash); err != nil {
 				return err
@@ -239,6 +246,17 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		if decisionCount == 0 {
 			return fmt.Errorf("taxion: intake proposal lacks its original request")
 		}
+		predecessor, err := artifactPredecessorDecision(state.Graph, task)
+		if err != nil {
+			return err
+		}
+		if predecessor != nil {
+			if request.ReplacesFlow != strings.TrimPrefix(predecessor.Source, "flow:") ||
+				request.Target != nil || !slices.Contains(task.Decisions, *predecessor) {
+				return fmt.Errorf("taxion: artifact successor requires its exact proposal-bound failed receipt, replacesFlow and omitted target")
+			}
+			decisionCount--
+		}
 		if request.ReconciliationHash != "" {
 			if request.ReplacesFlow == "" || request.Target == nil {
 				return fmt.Errorf("taxion: reconciled successor requires its predecessor and exact cancelled Dispatch target")
@@ -272,6 +290,7 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 			}
 			if flow.Artifact != nil {
 				if len(flow.DispatchIDs) == 0 && request.Target != nil || task.BaselineSHA != flow.Contract.BaselineSHA ||
+					len(flow.DispatchIDs) == 0 && task.TargetSHA != flow.Artifact.Target.CommitSHA ||
 					task.TargetTreeSHA != flow.Artifact.Target.TreeSHA ||
 					!slices.Equal(task.TargetChangedFiles, flow.Artifact.Target.ChangedFiles) {
 					return fmt.Errorf("taxion: artifact successor must retain its exact input target without a model feedback target")
@@ -285,6 +304,15 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 				}
 				if err := gitproof.VerifyArtifact(flow.Contract, flow.Artifact.Target, flow.Artifact.Configuration.Selection); err != nil {
 					return err
+				}
+				if len(flow.DispatchIDs) == 0 {
+					selection, err := json.Marshal(request.Selection)
+					if err != nil {
+						return err
+					}
+					if err := gitproof.VerifyArtifact(task, flow.Artifact.Target, selection); err != nil {
+						return fmt.Errorf("taxion: successor worktree does not preserve the failed artifact input: %w", err)
+					}
 				}
 			} else {
 				last, _ := state.Graph.GraphDispatch(flow.LastDispatchID())

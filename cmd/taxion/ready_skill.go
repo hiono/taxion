@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.9"
+const readySkillVersion = "1.3.10"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -58,6 +58,29 @@ An empty diff still requires full approved-program review. Supplied input is not
 a Coder success or quality verdict. No automatic replay of failed/unknown command
 execution; preserve its receipt and stopped history. Repairs, optional packet
 lifecycle and restored artifact execution are not supported in this first slice.
+
+For FAILED artifact validation with dispatchIds: [], STOPPED/SAFETY_STOP and no
+runner, preserve the failed receipt and both input identities; do not retry.
+Create a separate-worktree DRAFT normal CODER/REVIEWER successor with
+supersedes=FAILED_TASK_ID and createdFrom=flow:FAILED_FLOW_ID; retain baselineSha,
+targetSha, targetTreeSha and targetChangedFiles. Intake binds artifactHash and
+receiptHash automatically. Read conversation intake/confirm --help for exact fields.
+Use conversation intake --file intake.json, then conversation proposal --task NEW_TASK_ID.
+After actual proposal/configuration approval, conversation confirm --file confirm.json
+uses replacesFlow=FAILED_FLOW_ID and OMITS target; no feedback-target or fake Dispatch.
+Both worktrees, stopped ownership and the bound failure receipt are verified.
+Receipt-bound confirmation requires this CLI; unchanged RC5 does not provide it.
+Use exact approved FLOW_ID-review-0 configuration coverage, not optional packet delegation.
+Then workflow plan --file flow.json for a normal Flow: OMIT artifactSource and
+continueFromDispatchId, maxRepairs: 0, stageBudget version 1, separately approved
+Coder1/Reviewer1 and execution limits; set continuationChange and savedOutputDecision.
+Approve only the actual new stagePlan hash, then workflow start --file flow.json
+and workflow run --id FLOW_ID --builtin-prompts --controller-validation-submission.
+Coder reports all baseline-to-final changedFiles, distinguishes imported input from
+edits, and neither claims pending Controller checks passed nor suspends solely
+for pending validation/review. No management shell authority is implied.
+Unknown/interrupted validation, active ownership or input drift stops this path.
+Never roll replacement back to an older Coder Flow or change the old failed receipt.
 
 Keep the same executable environment for diagnosis and execution. Check required
 executables before issuing work. --store selects the ledger path, not workspace.db.

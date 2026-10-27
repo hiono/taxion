@@ -49,6 +49,81 @@ v0.7.21-rc.5 の `artifactSource` Flow は、持込み入力の実際の Control
 元入力・検証出力・旧履歴を保全し、新しい契約判断から通常後続を作る。
 期限・予算・権限は引き延ばさず、publication 承認も代用しない。
 
+### Dispatch がない入力検証失敗からの修正用後続
+
+以下は Issue #203 の開発版契約であり、未配布である。RC5 には `target` 省略の内部処理があるが、
+失敗 receipt の提案への固定と後続 worktree の確認を含むこの契約は、文書追加だけでは利用できない。
+更新版が配布されるまで、RC5 操作機では新しい入力形式を試さず保存状態を維持する。
+
+対象は `artifactSource` Flow の `STOPPED / SAFETY_STOP`、`HOLD`、
+`artifact.validation.status: FAILED`、`dispatchIds: []`、runner 解放済みの場合に限る。
+`workflow show --id OLD_FLOW_ID` で保存状態を読み、検証コマンドの process も停止していることを確認する。
+コマンドは外部 process の消滅を証明しない。`RUNNING` のまま中断した検証を失敗確定として流用しない。
+既存の明示 `--store` を全操作で維持する。
+
+別 worktree に未検証入力をそのまま保全し、新しい `DRAFT` 契約を用意する。
+`supersedes` は失敗 Task、`createdFrom` は `flow:OLD_FLOW_ID` とする。
+`baselineSha`、`targetSha`（元 baseline commit）、`targetTreeSha`、`targetChangedFiles` を維持する。
+元の目的・受入れ条件・検証を引き継ぎ、通常の `CODER`／`REVIEWER` 担当にする。
+入力を新しい Coder 成果・品質合格へ付け替えず、古い Coder Flow に置換元を戻さない。
+元の承認や決定をコピーせず、正式な intake envelope を使う。
+
+```sh
+taxion conversation intake --help
+taxion conversation confirm --help
+taxion conversation intake --file intake.json
+taxion conversation proposal --task NEW_TASK_ID
+```
+
+intake は `artifact-predecessor:NEW_TASK_ID` 決定を自動生成し、`flowId`、
+`artifactHash`、`receiptHash` を提案へ固定する。`receiptHash` は対象・設定・検証 receipt を含む
+旧 `artifact` 全体の canonical SHA-256 である。手入力・変更はしない。
+完全な新提案 hash と実設定を提示し、差分承認を得てから確認する。
+
+```json
+{
+  "taskId": "NEW_TASK_ID",
+  "expectedHash": "sha256:ACTUAL_NEW_PROPOSAL_HASH",
+  "actor": "human",
+  "source": "human:ACTUAL_APPROVAL_REFERENCE",
+  "reason": "Approve the presented bounded repair successor and configuration",
+  "replacesFlow": "OLD_FLOW_ID",
+  "additionalTaskIds": ["NEW_FLOW_ID-review-0"],
+  "selection": {}
+}
+```
+
+この雛形の `selection: {}` は実行可能な設定ではない。`conversation confirm --help` の完全形式に従い、
+承認対象の実設定を入れる。必要ならその help にある Task-scoped `configurationDecisionId` を使う。
+`target` はキーごと省略する。空 object、架空 Dispatch、`workflow feedback-target` は使わない。
+confirm は提案固定 receipt、停止・所有権・保留、両 worktree の実入力同一性を再照合する。
+旧 Flow・失敗 receipt は不変のまま、元 Task のみ `SUPERSEDED` にする。
+RC5 で保存した未確認提案にはこの決定がないため、未使用の新 Task ID で新版の intake に再提案し、
+実際の新 hash を承認する。古い DRAFT の決定を書き換えない。
+
+```sh
+taxion conversation confirm --file confirm.json
+taxion workflow plan --file flow.json
+# 実際に生成した工程 hash の承認後、その hash を stagePlanHash に設定する。
+taxion workflow start --file flow.json
+taxion workflow run --id NEW_FLOW_ID --builtin-prompts --controller-validation-submission
+```
+
+`flow.json` は通常 Flow とし、`artifactSource` と `continueFromDispatchId` を省略する。
+`maxRepairs: 0`、`stageBudget.version: 1`、初回 Coder 1回・Reviewer 1回の承認範囲、
+必要な工程見積り、新しい期限・実行枠を設定する。
+`continuationChange` に今回完了可能な理由、`savedOutputDecision` に失敗入力を保持して修正する判断を記す。
+scope 外ファイル・編集権限・正確な Reviewer 設定 ID など、変わる点だけを追加判断する。
+未生成 hash や旧実行枠を新実行の許可に使わない。
+
+Coder の `changedFiles` は baseline から最終 snapshot までの全差分であり、持込みと追加編集量を区別する。
+未実施の Controller 検証・独立レビューを成功申告せず、それを待つことだけを理由に `SUSPENDED` ともしない。
+製品編集は承認範囲内の Coder、実検証は Controller、独立判断は Reviewer の担当である。
+外側 Controller の管理 shell 権限や無断編集を追加しない。
+未知の実行状態、入力 drift、scope 不足、認証・上限・期限不足では停止し、旧 Flow は再送しない。
+
+### その他の停止と継続
+
 Coder が製品の実装をせず Taxion の管理 skill や管理 DB・session directory を調べて停止した場合は、役割と指示の混同を先に調べる。API 接続成功は、役割が正しく割り当てられた証拠ではない。管理用 shell や広いファイル権限の追加、同じ構成の再試行を第一の対処にしない。製品の目的・担当・必要なファイルへの既存の権限・controller による検証の分担を照合する。ログの `denied-interactively-by-user` だけで実際に利用者が拒否したと断定しない。
 
 v0.7.21-rc.4 は Copilot Coder／Reviewer から同名の `taxion` 管理 skill を除外し、Dispatch の共通指示にも役割の境界を明記する。他の製品 skill を一括無効化せず、権限も増やさない。設定や指示を修正しても、終端 Flow の再送、旧 session の書換え、期限・予算の延長を許可するものではない。実装・検証・独立レビューの未実施を完了に変えず、元の停止・利用量と保存成果を保全して正式な後続を準備する。

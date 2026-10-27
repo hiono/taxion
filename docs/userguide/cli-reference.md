@@ -1,5 +1,12 @@
 # CLI と動作のリファレンス
 
+開発版（Issue #203）の `conversation intake|confirm` は、Dispatch がない
+`FAILED` 入力検証の停止 Flow を通常修正用後続へ結び付ける。
+`supersedes`／`createdFrom`／`replacesFlow` はその失敗 Task／Flow を指定し、`target` は省略する。
+intake が失敗 artifact・receipt digest を提案に固定し、confirm が両 worktree を再照合する。
+この補強は未配布であり、RC5 の既存 binary では利用できない。
+正確な入力例・承認順序・停止条件は[失敗からの復旧](failure-recovery.md#dispatch-がない入力検証失敗からの修正用後続)を参照する。
+
 `provenance configure --file POLICY.json` は明示 mode と対象 store、product時は正式artifactのpinを初回登録し、既存policyを上書きしません。`provenance verify` は実binaryとmanifest/archiveをread-onlyで照合します。詳細は [正式バイナリと運用モード](binary-provenance.md) を参照してください。policy未登録または不一致のoperationは、store接続前に `provenance-rejected` / `stateChanged: false` で拒否します。
 
 この文書は、現在の CLI コマンドと実行上の制約をまとめる。初めて使う手順は[利用者ガイド](user-guide.md)、設定ファイルは[設定ガイド](configuration.md)を参照する。

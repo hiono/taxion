@@ -389,6 +389,29 @@ Changing a saved stage plan requires a new contract, never editing old state.
 
 ## Continue according to results
 
+FAILED artifact input with dispatchIds: [] has no feedback target. Preserve its
+receipt and input, require STOPPED/SAFETY_STOP, handoff hold and released runner.
+Use a separate-worktree normal CODER/REVIEWER DRAFT successor: supersedes is the
+failed Task; createdFrom is flow:FAILED_FLOW_ID. Retain baselineSha, targetSha,
+targetTreeSha and targetChangedFiles; never replace an older Coder Flow instead.
+conversation intake --file intake.json binds artifactHash and receiptHash
+automatically; conversation proposal --task NEW_TASK_ID shows the exact new hash.
+After explicit contract/configuration approval, conversation confirm --file confirm.json
+uses replacesFlow=FAILED_FLOW_ID and OMITS target entirely. Do not call feedback-target,
+invent a Dispatch or supply target: {}. See conversation intake/confirm --help.
+Confirmation verifies both worktrees, stopped ownership and the bound receipt.
+This receipt-bound path needs this CLI; it is not supplied by unchanged RC5.
+Approve only needed new rights, scope/configuration changes and execution limits.
+For repair use exact FLOW_ID-review-0 coverage, Coder1/Reviewer1, maxRepairs: 0.
+Prepare a normal Flow without artifactSource or continueFromDispatchId, with
+stageBudget version 1, continuationChange and savedOutputDecision. Then workflow
+plan --file flow.json, approve its actual hash, workflow start --file flow.json,
+workflow run --id FLOW_ID --builtin-prompts --controller-validation-submission.
+Coder changedFiles is the full baseline-to-final diff, not only new edits.
+Pending Controller validation/review is neither success evidence nor a reason
+alone to suspend Coder submission. Unknown validation, drift or active execution
+blocks this path. No new run, deadline, budget or authority is implied by diagnosis.
+
 workflow run performs paid Coder work, validation, independent review and authorized repairs.
 Default --builtin-prompts tools are view,create,edit,apply_patch for Coder and view for Reviewer.
 Native skills use normal discovery; file/shell permissions are not expanded automatically.

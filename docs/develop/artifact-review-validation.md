@@ -60,3 +60,27 @@ Web の12テストを通過した。
 初期実装では修正ループ、任意 packet lifecycle 委譲、restore 後の直接実行を拒否する。
 通常 Coder Flow の全面的な成果物中心への移行は、Issue #201 の後続段階に残す。
 公開・リリース・製品 Task の再開は、このローカルな検証記録からは承認されない。
+
+## Dispatch のない入力検証失敗の後続契約（Issue #203）
+
+`artifact_successor_test.go` では、持込み29ファイルを actual host command で不合格にし、
+Dispatch なしの停止から別 worktree に同じ入力を保持して通常後続を提案・確認した。
+失敗 artifact と receipt の digest は自動決定として提案 hash に含める。
+新 Flow は `maxRepairs: 0`、Coder 1回・Reviewer 1回で、scripted runtime の Coder が修正し、
+Controller の実コマンド検証と別 Reviewer を経て完了する。
+実際の provider/model は使用せず、旧 Flow・receipt の完全一致を最後に確認する。
+
+古い提案 hash、架空 target、`replacesFlow` 省略、両 worktree の drift を確認時に拒否する。
+稼働中 runner／Flow、検証 `RUNNING`／`PENDING`／`PASSED` は後続根拠にせず、
+receipt 変更で自動決定が変わることも確認した。
+CLI help と ready／管理 skill 1.3.10 の回復案内は、workspace を作らないテストで照合する。
+既存の artifact・再承認テスト、変更箇所の race test と `mise run check` は成功した。
+
+独立実装レビューで、symlink 別名による同一 worktree の再利用を拒否できない点を指摘された。
+文字列比較を directory identity の比較へ変更し、同一 directory と symlink 別名を拒否する回帰テストを追加した。
+修正前の独立レビューはこの1点について `REQUEST_CHANGES` を返した。
+指摘箇所に限定した独立追レビューは、directory identity の比較と回帰テストを確認し `APPROVE` を返した。
+この追レビューを差分全体の新たな再承認とは扱わない。
+
+この実装は未配布である。RC5 操作機の記録は利用者からの報告であり、この開発機で読み出したとは扱わない。
+製品の修正・検証再実行・モデル実行・追加実行枠を許可せず、Issue #201 を完了扱いにしない。
