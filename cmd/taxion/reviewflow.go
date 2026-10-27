@@ -32,11 +32,14 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return encoder.Encode(value)
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {plan|start|advance|run|resume|step|recover|accept-saved-review|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|budget|evaluate|lanes}")
+		return fmt.Errorf("usage: taxion workflow {plan|start|advance|run|resume|step|recover|reconcile-stopped|accept-saved-review|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|budget|evaluate|lanes}")
 	}
 	action := args[0]
 	if action == "accept-saved-review" {
 		return acceptSavedReviewCommand(parent, args[1:], output)
+	}
+	if action == "reconcile-stopped" {
+		return reconcileStoppedDispatchCommand(args[1:], output)
 	}
 	resumeSaved := action == "resume"
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)

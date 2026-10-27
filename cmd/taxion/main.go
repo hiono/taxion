@@ -98,6 +98,7 @@ Runtime sessions and ACP:
 Review flows and recovery:
   workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON; stagePlanHash for planned flows)
   workflow terminate  Cancel an untouched Dispatch and hold it for a new approved contract (--file JSON)
+  workflow reconcile-stopped Preview or cancel a first issued snapshot Coder after SAFETY_STOP, retaining unknown delivery and input provenance (--file JSON; --preview)
   workflow advance    Issue review/repair from the latest verified result (--id required)
   workflow run        Execute review/repair continuously with saved ceilings (--id; role prompt files or --builtin-prompts)
   workflow step       Execute one role turn from a saved review flow (--id; role prompt files or --builtin-prompts)

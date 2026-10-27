@@ -64,11 +64,12 @@ func TestUsageGroupsCommandsWithoutChangingSyntax(t *testing.T) {
 		seen[line] = true
 		groups[group]++
 	}
-	if len(groups) != 12 || len(seen) != 112 || !strings.Contains(commands, "records cancel") {
+	if len(groups) != 12 || len(seen) != 113 || !strings.Contains(commands, "records cancel") ||
+		!strings.Contains(commands, "workflow reconcile-stopped") {
 		t.Fatalf("%d commands in categories: %v", len(seen), groups)
 	}
 	for name, count := range groups {
-		if count < 2 || count > 24 {
+		if count < 2 || count > 25 {
 			t.Errorf("category %s contains %d commands; keep discovery bounded", name, count)
 		}
 	}

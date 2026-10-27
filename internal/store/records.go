@@ -18,19 +18,20 @@ import (
 
 // Records shares the workspace transaction for recovery and approved publication.
 type Records struct {
-	Operation            *Operation                `json:"operation,omitempty"`
-	Packets              []PacketArtifact          `json:"packets,omitempty"`
-	PacketAuthorizations []PacketAuthorization     `json:"packetAuthorizations,omitempty"`
-	PacketAudits         []PacketAudit             `json:"packetAudits,omitempty"`
-	Events               []RuntimeReceipt          `json:"events,omitempty"`
-	Budgets              []BudgetAudit             `json:"budgets,omitempty"`
-	Updates              []ExternalUpdate          `json:"updates,omitempty"`
-	Cancellations        []PublicationCancellation `json:"publicationCancellations,omitempty"`
-	Findings             []FailureRecord           `json:"findings,omitempty"`
-	Requests             []RequestRecord           `json:"requests,omitempty"`
-	Restore              *RestoreRecord            `json:"restore,omitempty"`
-	Restores             []RestoreRecord           `json:"restores,omitempty"`
-	ReviewAcceptances    []ReviewAcceptance        `json:"reviewAcceptances,omitempty"`
+	Operation               *Operation                      `json:"operation,omitempty"`
+	Packets                 []PacketArtifact                `json:"packets,omitempty"`
+	PacketAuthorizations    []PacketAuthorization           `json:"packetAuthorizations,omitempty"`
+	PacketAudits            []PacketAudit                   `json:"packetAudits,omitempty"`
+	Events                  []RuntimeReceipt                `json:"events,omitempty"`
+	Budgets                 []BudgetAudit                   `json:"budgets,omitempty"`
+	Updates                 []ExternalUpdate                `json:"updates,omitempty"`
+	Cancellations           []PublicationCancellation       `json:"publicationCancellations,omitempty"`
+	Findings                []FailureRecord                 `json:"findings,omitempty"`
+	Requests                []RequestRecord                 `json:"requests,omitempty"`
+	Restore                 *RestoreRecord                  `json:"restore,omitempty"`
+	Restores                []RestoreRecord                 `json:"restores,omitempty"`
+	ReviewAcceptances       []ReviewAcceptance              `json:"reviewAcceptances,omitempty"`
+	DispatchReconciliations []StoppedDispatchReconciliation `json:"dispatchReconciliations,omitempty"`
 }
 
 type ReviewAcceptance struct {
@@ -353,6 +354,9 @@ func recordHash(value string) bool {
 // VerifyFlowAudits binds new stage plans on normalized and legacy loads as well
 // as writes. Removing a plan must not silently restore legacy unlimited stages.
 func (r Records) VerifyFlowAudits(graph core.TaskGraph) error {
+	if err := r.VerifyDispatchReconciliations(graph); err != nil {
+		return err
+	}
 	if err := r.VerifyReviewAcceptances(graph); err != nil {
 		return err
 	}

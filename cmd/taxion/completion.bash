@@ -113,7 +113,7 @@ _taxion_complete() {
         'task validate') candidates='--file --help --manifest' ;;
         'tools') candidates='hash' ;;
         'tools hash') candidates='--help --path' ;;
-        'workflow') candidates='accept-saved-review advance budget draft draft-approve draft-discard evaluate feedback feedback-resolve feedback-target handoff interrupt lanes plan planner-action planner-draft planning-context question-draft recover repair-status resume run show start step terminate' ;;
+        'workflow') candidates='accept-saved-review advance budget draft draft-approve draft-discard evaluate feedback feedback-resolve feedback-target handoff interrupt lanes plan planner-action planner-draft planning-context question-draft reconcile-stopped recover repair-status resume run show start step terminate' ;;
         'workflow accept-saved-review') candidates='--file --help --preview' ;;
         'workflow advance') candidates='--help --id' ;;
         'workflow budget') candidates='--help --id' ;;
@@ -132,6 +132,7 @@ _taxion_complete() {
         'workflow planner-draft') candidates='--file --help' ;;
         'workflow planning-context') candidates='--help --id' ;;
         'workflow question-draft') candidates='--file --help' ;;
+        'workflow reconcile-stopped') candidates='--file --help --preview' ;;
         'workflow recover') candidates='--file --help' ;;
         'workflow repair-status') candidates='--help --id' ;;
         'workflow resume') candidates='--base-directory --builtin-prompts --cli --coder-prompt-file --coder-tools --compact-context --controller-validation-submission --help --id --managed-commit --managed-stage --max-ai-credits --review-progress --reviewer-prompt-file --reviewer-tools --scanner --strict-result-identities' ;;

@@ -42,6 +42,10 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 
 `workflow recover` は runner の所有権を解放する操作であり、停止条件を解除して同じ作業を再実行する操作ではない。続行には新しい Dispatch と、必要なら新しい予算の承認が要る。
 
+開発版の `workflow reconcile-stopped` は、`STOPPED / SAFETY_STOP` と `HOLD` が保存され、初回の snapshot 入力を持つ Coder Dispatch だけが `ISSUED` のまま残った場合を対象とする。ACK・実行開始・session・結果・runtime receipt がある場合や、他の実行が稼働中の場合には使えない。人間が継続中の実行がないことを確認し、その根拠と配送不確実性の受入れを明示してから、preview の完全ハッシュを承認する。コマンド自身が外部実行を停止・照会するわけではない。
+
+適用すると Dispatch は `CANCELLED`、Task は `BLOCKED` となり、判断を追記保存する。元の停止理由・`HOLD`・承認・期限・予算は変更しない。未配信・未実行・無課金を証明せず、保持した tree はこの Dispatch の新成果ではなく、元の承認済み入力として扱う。後続 Task は別 worktree に同一入力を保全し、新提案と確認の両方に `reconciliationHash` を含める。新しい実行には別途承認が要る。通常取消だけではこの入力継承の根拠にならない。request と手順は [CLI リファレンス](cli-reference.md#停止済み初回指示の整合回復)を参照する。
+
 開発版では、`workflow repair-status --id <flow-id>` の
 `reviewContinuationCandidate` に成功済み Coder の Dispatch ID が表示される場合がある。
 保存結果の receipt と停止・所有権・引継ぎ保留の条件を確認した、レビュー専用継続の候補であり、
