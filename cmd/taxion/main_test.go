@@ -76,6 +76,31 @@ func TestUsageGroupsCommandsWithoutChangingSyntax(t *testing.T) {
 	t.Logf("%d command entries in %d categories: %v", len(seen), len(groups), groups)
 }
 
+func TestOperationGuidanceDistinguishesProviderStopFromBalanceRequirements(t *testing.T) {
+	for name, text := range map[string]string{
+		"help": usage, "ready": readyPrompt, "managed-skill": readySkillBody,
+	} {
+		t.Run(name, func(t *testing.T) {
+			normalized := strings.Join(strings.Fields(text), " ")
+			for _, required := range []string{
+				"provider / provider-stop",
+				"unknown balance alone does not block execution or require manual credits entry",
+				"account", "approved external balance checks",
+				"unavailable observations stop execution",
+				"Explicit positive usage limits and separately approved balance requirements still apply",
+				"Provider access checks are separate from numeric balance checks",
+				"No balance-only CLI is provided",
+				"config check --billing", "NEW proposals",
+				"Do not switch billing modes",
+			} {
+				if !strings.Contains(normalized, required) {
+					t.Errorf("%s omits billing distinction %q", name, required)
+				}
+			}
+		})
+	}
+}
+
 func TestTaskGraphRejectsIgnoredFileOption(t *testing.T) {
 	if err := taskGraphCmd("graph", []string{"--file", "ignored.json"}); err == nil {
 		t.Fatal("task graph accepted an unused --file option")
