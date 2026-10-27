@@ -202,6 +202,26 @@ func TestApprovedSkillsWithoutModelUse(t *testing.T) {
 	}
 }
 
+func TestWorkerManagementSkillExclusionAlsoAppliesToPinnedTools(t *testing.T) {
+	for _, role := range []string{"CODER", "REVIEWER"} {
+		t.Run(role, func(t *testing.T) {
+			config := toolsConfig(t)
+			config.Role = role
+			config.ToolPolicy.MCP = nil
+			adapter, err := New(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer adapter.Close()
+			for _, disabled := range [][]string{adapter.sessionConfig(nil).DisabledSkills, adapter.resumeConfig(nil).DisabledSkills} {
+				if !reflect.DeepEqual(disabled, []string{"taxion"}) {
+					t.Fatal("explicit tool policy restored orchestration skill", disabled)
+				}
+			}
+		})
+	}
+}
+
 func TestPinnedSkillToolRequiresApprovedAssets(t *testing.T) {
 	config := testConfig(t)
 	config.AvailableTools = []string{"skill"}
@@ -232,6 +252,14 @@ func TestNativeCustomizationDefaultsWithoutModelUse(t *testing.T) {
 			}
 			defer adapter.Close()
 			create, resume := adapter.sessionConfig(nil), adapter.resumeConfig(nil)
+			var excluded []string
+			if role == "CODER" || role == "REVIEWER" {
+				excluded = []string{"taxion"}
+			}
+			if !reflect.DeepEqual(create.DisabledSkills, excluded) ||
+				!reflect.DeepEqual(resume.DisabledSkills, excluded) {
+				t.Fatal("management skill exclusion differs from the assigned role", create.DisabledSkills, resume.DisabledSkills)
+			}
 			if create.EnableConfigDiscovery == nil || !*create.EnableConfigDiscovery ||
 				resume.EnableConfigDiscovery == nil || !*resume.EnableConfigDiscovery ||
 				create.EnableSkills == nil || !*create.EnableSkills ||

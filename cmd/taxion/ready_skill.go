@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.6"
+const readySkillVersion = "1.3.7"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -25,6 +25,11 @@ const readySkillPath = readySkillDirectory + "/SKILL.md"
 var acceptedReadySkillVersions = []string{readySkillVersion}
 
 const readySkillBody = `# Taxion orchestration
+
+This skill is for the outer operator, not a Coder or Reviewer executing a Taxion
+Dispatch. If you are such a worker, follow the assigned repository contract and
+return its structured result. Do not run these management steps, inspect control
+or session directories, or request a management shell before doing product work.
 
 Use this skill to operate Taxion for an approved coding task, inspect saved
 results, or continue stopped work without repeating completed work.

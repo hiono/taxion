@@ -45,8 +45,8 @@ func TestCreditLimitValidationBindingAndSDKConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256(legacy)
-	if unlimited.ConfigHash() != hex.EncodeToString(hash[:]) {
-		t.Fatal("zero limit changed the native-default session hash")
+	if unlimited.ConfigHash() == hex.EncodeToString(hash[:]) {
+		t.Fatal("worker skill exclusion silently reused the pre-exclusion session hash")
 	}
 	for _, limit := range []float64{30, 30.5, 60} {
 		cfg.MaxAICredits = limit

@@ -121,6 +121,17 @@ esac
 	}
 }
 
+func TestDoctorDistinguishesWorkerSkillExclusionFromNativeInventory(t *testing.T) {
+	report := DiscoveryReport{DisabledSkills: []string{"taxion"}}
+	if err := report.addNativeInventory("skill", []byte(`[{"name":"taxion","enabled":true},{"name":"product-guidance","enabled":true}]`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Assets) != 2 || report.Assets[0].State != "disabled-for-role" ||
+		report.Assets[1].State != "enabled" {
+		t.Fatal("doctor hides role exclusion or disables unrelated product skills", report.Assets)
+	}
+}
+
 func TestDoctorNativeInventoryErrorsAreNotEmptySuccess(t *testing.T) {
 	var report DiscoveryReport
 	for kind, input := range map[string]string{
@@ -129,6 +140,7 @@ func TestDoctorNativeInventoryErrorsAreNotEmptySuccess(t *testing.T) {
 		if err := report.addNativeInventory(kind, []byte(input)); err == nil || strings.Contains(err.Error(), "DO_NOT_PRINT") {
 			t.Fatal("unsupported native inventory silently accepted or exposed", kind, err)
 		}
+
 	}
 	config := testConfig(t)
 	adapter, err := New(config)
@@ -153,6 +165,29 @@ func TestPinnedDoctorDoesNotDiscoverAmbientAssets(t *testing.T) {
 	report, err := adapter.Inspect(t.Context())
 	if err != nil || report.Mode != "pinned-tools-policy" || len(report.Assets) != 0 || len(report.Paths) != 0 {
 		t.Fatal("pinned execution and doctor discovery differ", report, err)
+	}
+}
+
+func TestPinnedDoctorDoesNotClaimExcludedSkillsAreActive(t *testing.T) {
+	config := toolsConfig(t)
+	config.ToolPolicy.MCP = nil
+	adapter, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	report, err := adapter.Inspect(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.DisabledSkills) != 1 || report.DisabledSkills[0] != "taxion" || len(report.Assets) != 2 {
+		t.Fatal("pinned doctor omits role exclusions or approved assets", report)
+	}
+	for _, asset := range report.Assets {
+		if asset.State != "pinned-content" || !strings.Contains(asset.Reason, "activation is not verified") ||
+			!strings.Contains(asset.Reason, "disabledSkills still apply") {
+			t.Fatal("pinned content mistaken for enabled skills", asset)
+		}
 	}
 }
 

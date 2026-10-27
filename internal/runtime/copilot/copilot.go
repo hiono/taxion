@@ -330,6 +330,7 @@ func (a *Adapter) ConfigHash() string {
 		ToolPolicy            *tools.Policy                  `json:",omitempty"`
 		DiscoveryPolicy       string                         `json:",omitempty"`
 		BuiltinMCPPolicy      string
+		DisabledSkills        []string `json:",omitempty"`
 	}{
 		Role:                  a.config.Role,
 		SystemPrompt:          a.config.SystemPrompt,
@@ -351,6 +352,7 @@ func (a *Adapter) ConfigHash() string {
 		ToolPolicy:            a.config.ToolPolicy,
 		DiscoveryPolicy:       discoveryPolicy,
 		BuiltinMCPPolicy:      "disabled-per-process-v1",
+		DisabledSkills:        a.disabledSkills(),
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -751,6 +753,7 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 		Streaming:                          &streaming,
 		EnableConfigDiscovery:              discovery,
 		EnableSkills:                       discovery,
+		DisabledSkills:                     a.disabledSkills(),
 		EnableFileHooks:                    discovery,
 		EnableOnDemandInstructionDiscovery: discovery,
 		InfiniteSessions:                   infiniteSessions(),
@@ -781,6 +784,7 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		Streaming:                          &streaming,
 		EnableConfigDiscovery:              discovery,
 		EnableSkills:                       discovery,
+		DisabledSkills:                     a.disabledSkills(),
 		EnableFileHooks:                    discovery,
 		EnableOnDemandInstructionDiscovery: discovery,
 		InfiniteSessions:                   infiniteSessions(),
@@ -796,6 +800,13 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		config.Hooks = a.toolHooks()
 	}
 	return config
+}
+
+func (a *Adapter) disabledSkills() []string {
+	if a.config.Role == "CODER" || a.config.Role == "REVIEWER" {
+		return []string{"taxion"}
+	}
+	return nil
 }
 
 // ValidateAICreditLimit follows the CLI's soft-cap minimum; zero leaves limits unset.

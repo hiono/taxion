@@ -41,10 +41,12 @@ func TestConfigurationSelectionHashIsCompleteOwnedAndCanonical(t *testing.T) {
 		PermissionPolicy                                             string
 		DiscoveryPolicy                                              string
 		BuiltinMCPPolicy                                             string
+		DisabledSkills                                               []string `json:",omitempty"`
 	}{
 		legacy.config.Role, legacy.config.SystemPrompt, legacy.config.WorkingDirectory,
 		legacy.config.CLIPath, legacy.config.BaseDirectory, legacy.config.AvailableTools,
 		legacy.config.ResponseSchema, "coder-worktree-write-v1", "native-cli-discovery-v2", "disabled-per-process-v1",
+		[]string{"taxion"},
 	})
 	if err != nil {
 		t.Fatal(err)
