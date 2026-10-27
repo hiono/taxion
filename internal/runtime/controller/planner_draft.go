@@ -163,7 +163,7 @@ func recordAdviceDraft(db *store.Store, ledgerPath string, request PlannerDraftR
 		return core.ReviewFlow{}, fmt.Errorf("taxion: planner adoption requires a running held flow")
 	}
 	task, _ := before.Graph.GraphTask(flow.TaskID)
-	last, _ := before.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+	last, _ := before.Graph.GraphDispatch(flow.LastDispatchID())
 	target, err := core.ObserveFeedbackTarget(last)
 	if err != nil {
 		return core.ReviewFlow{}, err

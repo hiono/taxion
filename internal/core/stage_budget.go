@@ -72,7 +72,7 @@ func (s *StagePlan) Validate(flow ReviewFlow) error {
 		ReviewNanoAIU: s.ReviewNanoAIU, RepairNanoAIU: s.RepairNanoAIU}
 	if policy.Validate() != nil || s.ValidateNativeReservations(flow.Budget.MaxNanoAIU) != nil ||
 		!validDocumentHash(s.Hash) || s.TimeoutSeconds <= 0 || s.MaxRepairs < 0 || s.MaxRepairs > 1000 ||
-		s.MaxRepairs != flow.MaxRepairs || s.ReviewOnly != (flow.SourceDispatchID != "") ||
+		s.MaxRepairs != flow.MaxRepairs || s.ReviewOnly != flow.ReviewFirst() ||
 		s.ValidationSeconds <= 0 || s.ReviewSeconds <= 0 || s.RepairSeconds <= 0 ||
 		!validList(s.Basis) || len(s.Basis) == 0 ||
 		s.TimeoutSeconds > int64((365*24*time.Hour)/time.Second) ||

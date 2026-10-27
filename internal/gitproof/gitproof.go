@@ -257,37 +257,51 @@ func ExecuteValidations(ctx context.Context, dispatch core.GraphDispatch, result
 	}
 	root := result.GitEvidence.Worktree
 	result.GitEvidence = nil
-	result.Validations = nil
-	for _, authorized := range dispatch.Instruction.ValidationCommands {
+	var err error
+	result.Validations, err = executeValidationCommands(ctx, root, validationSHA(dispatch, result),
+		dispatch.Instruction.ValidationCommands, dispatch.Recipient == "REVIEWER" && result.ReviewVerdict != "APPROVE")
+	if err != nil {
+		return err
+	}
+	return Verify(dispatch, result)
+}
+
+func executeValidationCommands(ctx context.Context, root, sha string, commands []string, allowFailure bool) ([]core.DispatchValidation, error) {
+	checks := []core.DispatchValidation{}
+	for _, authorized := range commands {
+		if err := ctx.Err(); err != nil {
+			return checks, err
+		}
 		started := time.Now().UTC()
 		command := exec.CommandContext(ctx, "sh", "-c", authorized)
 		command.Dir = root
 		if err := configureValidationProcess(command); err != nil {
-			return err
+			return checks, err
 		}
 		command.WaitDelay = 5 * time.Second
 		output, err := command.CombinedOutput()
 		validation := core.DispatchValidation{
-			Command: authorized, Worktree: root, SHA: validationSHA(dispatch, result),
+			Command: authorized, Worktree: root, SHA: sha,
 			Output: string(output), StartedAt: started, FinishedAt: time.Now().UTC(),
 		}
 		if err != nil {
 			var exit *exec.ExitError
 			if !errors.As(err, &exit) {
-				return fmt.Errorf("execute validation %q: %w", authorized, err)
+				validation.ExitCode = -1
+				checks = append(checks, validation)
+				return checks, fmt.Errorf("execute validation %q: %w", authorized, err)
 			}
 			validation.ExitCode = exit.ExitCode()
 		}
-		result.Validations = append(result.Validations, validation)
+		checks = append(checks, validation)
 		if ctx.Err() != nil {
-			return fmt.Errorf("validation %q: %w", authorized, ctx.Err())
+			return checks, fmt.Errorf("validation %q: %w", authorized, ctx.Err())
 		}
-		if validation.ExitCode != 0 &&
-			(dispatch.Recipient != "REVIEWER" || result.ReviewVerdict == "APPROVE") {
-			return fmt.Errorf("controller validation %q failed with exit code %d: %s", authorized, validation.ExitCode, output)
+		if validation.ExitCode != 0 && !allowFailure {
+			return checks, fmt.Errorf("controller validation %q failed with exit code %d: %s", authorized, validation.ExitCode, output)
 		}
 	}
-	return Verify(dispatch, result)
+	return checks, nil
 }
 
 func validationSHA(dispatch core.GraphDispatch, result *core.DispatchResult) string {

@@ -22,6 +22,7 @@ var ErrFlowStopped = errors.New("taxion: review flow stopped")
 var ErrFlowClaimed = errors.New("taxion: review flow claimed by another runner")
 
 type ReviewFlowRequest struct {
+	ArtifactSource         string                     `json:"artifactSource,omitempty"`
 	ID                     string                     `json:"id"`
 	TaskID                 string                     `json:"taskId"`
 	ContinueFromDispatchID string                     `json:"continueFromDispatchId,omitempty"`
@@ -65,7 +66,8 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 		}
 		task, ok := state.Graph.GraphTask(request.TaskID)
 		if !state.HasGraph || !ok || task.Repo != request.Repository ||
-			task.Status != core.Ready || task.Owner != "CODER" || task.Reviewer != "REVIEWER" {
+			task.Status != core.Ready ||
+			(task.Owner != "CODER" && !(request.ArtifactSource != "" && task.Owner == "USER")) || task.Reviewer != "REVIEWER" {
 			return fmt.Errorf("taxion: review flow requires an authorized READY Coder Task with independent REVIEWER")
 		}
 		if err := checkFlowApproval(state.Graph, task, request.Configuration); err != nil {
@@ -114,6 +116,7 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 		if request.MaxNanoAIU == 0 && core.ProviderBudget(task.BudgetGuidance) {
 			flow.Budget.BudgetSource = core.ProviderStopBudgetSource
 		}
+		var plannedArtifact *core.ArtifactTarget
 		if request.StageBudget != nil {
 			preview, err := PreviewStagePlan(state.Graph, request)
 			if err != nil {
@@ -123,8 +126,9 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 				return fmt.Errorf("taxion: stage plan requires approval of its exact current hash; run workflow plan before start")
 			}
 			flow.StagePlan = preview.Plan
+			plannedArtifact = preview.Artifact
 			role := "CODER"
-			if flow.SourceDispatchID != "" {
+			if flow.SourceDispatchID != "" || request.ArtifactSource != "" {
 				role = "REVIEWER"
 			}
 			if !flow.StagePlan.SubmissionDeadline(flow, role).After(now) {
@@ -132,6 +136,13 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 			}
 		} else if request.StagePlanHash != "" {
 			return fmt.Errorf("taxion: stagePlanHash requires stageBudget")
+		}
+		if request.ArtifactSource != "" {
+			if err := startArtifactReview(state, &flow, request, plannedArtifact); err != nil {
+				return err
+			}
+			state.Graph.ReviewFlows = append(state.Graph.ReviewFlows, flow)
+			return appendBudgetAudit(state, flow, "INPUT_ACCEPTED", taskBudgetReport(state.Graph, flow, now))
 		}
 		if request.ContinueFromDispatchID == "" {
 			if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipNone, "", "", request.Configuration); err != nil {
@@ -323,7 +334,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 		}
 		stop := func(reason string) error { return stopWithCode(reason, "SAFETY_STOP") }
 		task, _ := state.Graph.GraphTask(flow.TaskID)
-		last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+		last, _ := state.Graph.GraphDispatch(flow.LastDispatchID())
 		if !time.Now().UTC().Before(flow.Deadline) {
 			return stopWithCode("deadline reached; reconcile and safely stop any active Dispatch before further authorization", "BUDGET_STOP")
 		}
@@ -344,6 +355,12 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 		}
 		if last.Status == core.DispatchSuspended || last.Status == core.DispatchCancelRequested {
 			return stop("Dispatch " + last.ID + " requires safe stop or renewed authorization before continuation")
+		}
+		if flow.Artifact != nil && len(flow.DispatchIDs) == 0 {
+			if flow.HandoffHeld() {
+				stopped = core.ErrHandoffHeld
+			}
+			return nil
 		}
 		context, contextErr := memory.ResolveDispatchContext(ledgerPath, last.Instruction.MemoryRefs)
 		if contextErr != nil {
@@ -701,15 +718,15 @@ func holdReviewFlowForStop(graph *core.TaskGraph, flow *core.ReviewFlow, reason 
 	if flow.HandoffHeld() {
 		return nil
 	}
-	if len(flow.DispatchIDs) == 0 {
-		return fmt.Errorf("taxion: cannot hold a stopped flow without a Dispatch")
+	if len(flow.DispatchIDs) == 0 && flow.Artifact == nil {
+		return fmt.Errorf("taxion: cannot hold a stopped flow without a Dispatch or input artifact")
 	}
 	expected := ""
 	if len(flow.HandoffChanges) != 0 {
 		expected = flow.HandoffChanges[len(flow.HandoffChanges)-1].ID
 	}
 	held, err := graph.ChangeHandoff(flow.ID, core.HandoffChange{
-		ID:               "flow-stop:" + flow.ID + ":" + flow.DispatchIDs[len(flow.DispatchIDs)-1],
+		ID:               "flow-stop:" + flow.ID + ":" + flow.LastDispatchID(),
 		ExpectedChangeID: expected, Action: "HOLD", Actor: "controller",
 		Source: "controller:flow-stop", Reason: strings.TrimSpace(reason),
 	})

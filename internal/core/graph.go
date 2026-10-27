@@ -558,6 +558,9 @@ func NewGraphDispatch(g TaskGraph, id, taskID, repo string, relationship Dispatc
 	if !ok || task.Status != Ready || task.Repo != repo {
 		return GraphDispatch{}, graphError("dispatch requires a matching READY task and repository")
 	}
+	if task.Owner != "CODER" && task.Owner != "REVIEWER" {
+		return GraphDispatch{}, graphError("non-model Tasks cannot issue model Dispatches")
+	}
 	if err := g.CheckExecutable(taskID, repo); err != nil {
 		return GraphDispatch{}, err
 	}
@@ -578,6 +581,11 @@ func NewGraphDispatch(g TaskGraph, id, taskID, repo string, relationship Dispatc
 }
 
 func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship DispatchRelationship, relatedID, relationshipReason string, memoryContext []DispatchMemoryEntry) (DispatchInstruction, error) {
+	for _, flow := range g.ReviewFlows {
+		if flow.Artifact != nil && flow.TaskID == task.ID {
+			return DispatchInstruction{}, graphError("artifact input Tasks cannot issue model Dispatches; use the validated independent review or an approved successor")
+		}
+	}
 	if !nonempty(id) || !validRelationship(relationship) {
 		return DispatchInstruction{}, graphError("dispatch requires an ID and valid relationship")
 	}
@@ -1540,7 +1548,7 @@ func (g TaskGraph) Validate() error {
 				return graphError("task %s requires nonempty canonical repository path segments", t.ID)
 			}
 		}
-		if !slices.Contains([]string{"INVESTIGATION", "DESIGN", "IMPLEMENTATION", "REVIEW", "EVIDENCE_COLLECTION"}, t.Type) || !validStatus(t.Status) {
+		if !slices.Contains([]string{"INVESTIGATION", "DESIGN", "IMPLEMENTATION", "VERIFICATION", "REVIEW", "EVIDENCE_COLLECTION"}, t.Type) || !validStatus(t.Status) {
 			return graphError("invalid type or status for %s", t.ID)
 		}
 		if !validIssue(t.Issue) {
@@ -1757,7 +1765,7 @@ func (g TaskGraph) executable(t GraphTask) error {
 	if t.DeferredReason != "" || !nonempty(t.AuthorizationID) || !nonempty(t.Objective) ||
 		len(t.Scope) == 0 || len(t.Acceptance) == 0 || len(t.RequiredEvidence) == 0 || !nonempty(t.ExitCondition) ||
 		!nonempty(t.Worktree) || !nonempty(t.Branch) || !nonempty(t.BaselineSHA) ||
-		(t.Owner != "CODER" && t.Owner != "REVIEWER") || strings.HasPrefix(t.Issue, "PENDING:") {
+		(t.Owner != "CODER" && t.Owner != "REVIEWER" && !(t.Owner == "USER" && t.Type == "VERIFICATION")) || strings.HasPrefix(t.Issue, "PENDING:") {
 		return graphError("task %s lacks authorization, execution, worktree, baseline or Issue registration", t.ID)
 	}
 	found := false
@@ -1808,6 +1816,7 @@ func cloneGraph(g TaskGraph) TaskGraph {
 		copy.Approvals[i].Configuration.Selection = slices.Clone(g.Approvals[i].Configuration.Selection)
 	}
 	for i := range copy.ReviewFlows {
+		copy.ReviewFlows[i].Artifact = cloneArtifactReview(copy.ReviewFlows[i].Artifact)
 		copy.ReviewFlows[i].Contract = cloneTask(copy.ReviewFlows[i].Contract)
 		copy.ReviewFlows[i].StagePlan = CloneStagePlan(copy.ReviewFlows[i].StagePlan)
 		copy.ReviewFlows[i].DispatchIDs = slices.Clone(copy.ReviewFlows[i].DispatchIDs)

@@ -13,9 +13,10 @@ import (
 )
 
 type TaskBudgetReport struct {
-	ResumeBasis      *ResumeBasis      `json:"resumeBasis,omitempty"`
-	StagePlan        *core.StagePlan   `json:"stagePlan,omitempty"`
-	StageObservation *StageObservation `json:"stageObservation,omitempty"`
+	Artifact         *core.ArtifactReview `json:"artifact,omitempty"`
+	ResumeBasis      *ResumeBasis         `json:"resumeBasis,omitempty"`
+	StagePlan        *core.StagePlan      `json:"stagePlan,omitempty"`
+	StageObservation *StageObservation    `json:"stageObservation,omitempty"`
 
 	TaskID                   string   `json:"taskId"`
 	FlowID                   string   `json:"flowId"`
@@ -47,6 +48,8 @@ type TaskBudgetReport struct {
 // ResumeBasis binds the issuance audit to the approved flow without copying
 // authorization text or replacing any execution record on restart.
 type ResumeBasis struct {
+	ArtifactHash      string          `json:"artifactHash,omitempty"`
+	ArtifactBasisHash string          `json:"artifactBasisHash,omitempty"`
 	Version           int             `json:"version"`
 	ContractHash      string          `json:"contractHash"`
 	AuthorizationHash string          `json:"authorizationHash"`
@@ -90,6 +93,7 @@ func taskBudgetReport(graph core.TaskGraph, flow core.ReviewFlow, now time.Time)
 		now = time.Now().UTC()
 	}
 	report := TaskBudgetReport{
+		Artifact:  flow.Artifact,
 		StagePlan: core.CloneStagePlan(flow.StagePlan),
 		TaskID:    flow.TaskID, FlowID: flow.ID, DispatchLimit: flow.Budget.MaxDispatches,
 		CoderSessionLimit:    flow.Budget.MaxCoderSessions,
@@ -145,7 +149,7 @@ func taskBudgetReport(graph core.TaskGraph, flow core.ReviewFlow, now time.Time)
 	elapsed := now.Sub(flow.StartedAt).Milliseconds()
 	report.ElapsedMilliseconds = max(elapsed, 0)
 	report.ElapsedRemainingMillis = max(report.ElapsedLimitMilliseconds-report.ElapsedMilliseconds, 0)
-	if flow.Budget.MaxDispatches == 0 || flow.Budget.MaxCoderSessions == 0 ||
+	if flow.Budget.MaxDispatches == 0 || flow.Budget.MaxCoderSessions == 0 && flow.Artifact == nil ||
 		flow.Budget.MaxReviewerSessions == 0 ||
 		!flow.Budget.ExternalBudgetOnly() && flow.Budget.MaxNanoAIU <= 0 {
 		report.Unknown = append(report.Unknown, "approved budget limits are unavailable")
@@ -246,8 +250,8 @@ func appendBudgetAudit(state *store.Workspace, flow core.ReviewFlow, kind string
 	if err != nil {
 		return err
 	}
-	last, ok := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
-	if !ok {
+	last, ok := state.Graph.GraphDispatch(flow.LastDispatchID())
+	if !ok && flow.Artifact == nil {
 		return fmt.Errorf("taxion: budget audit requires its saved Dispatch")
 	}
 	report.ResumeBasis = &ResumeBasis{
@@ -255,6 +259,13 @@ func appendBudgetAudit(state *store.Workspace, flow core.ReviewFlow, kind string
 		InstructionHash: last.InstructionHash, DispatchID: last.ID,
 		StartedAt: flow.StartedAt, Deadline: flow.Deadline, Budget: flow.Budget,
 		StagePlan: core.CloneStagePlan(flow.StagePlan),
+	}
+	if flow.Artifact != nil {
+		report.ResumeBasis.ArtifactHash = flow.Artifact.Target.Hash
+		report.ResumeBasis.ArtifactBasisHash, err = flow.Artifact.BasisHash()
+		if err != nil {
+			return err
+		}
 	}
 	payload, err := json.Marshal(report)
 	if err != nil {

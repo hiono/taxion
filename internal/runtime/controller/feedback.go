@@ -35,7 +35,7 @@ func ObserveFeedback(db *store.Store, flowID string) (FeedbackObservation, error
 	if !state.HasGraph || !ok {
 		return FeedbackObservation{}, fmt.Errorf("taxion: feedback observation requires an existing review flow")
 	}
-	last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+	last, _ := state.Graph.GraphDispatch(flow.LastDispatchID())
 	target, err := core.ObserveFeedbackTarget(last)
 	if err != nil {
 		return FeedbackObservation{}, err

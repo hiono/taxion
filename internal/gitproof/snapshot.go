@@ -164,10 +164,9 @@ func verifySnapshot(dispatch core.GraphDispatch, result *core.DispatchResult) er
 	}
 	refDispatchID := dispatch.ID
 	if dispatch.Recipient == "REVIEWER" {
-		if dispatch.RelatedID == "" {
-			return fmt.Errorf("Reviewer snapshot has no source Coder Dispatch")
+		if dispatch.RelatedID != "" {
+			refDispatchID = dispatch.RelatedID
 		}
-		refDispatchID = dispatch.RelatedID
 	}
 	if err := verifySnapshotRef(root, refDispatchID, result.OutputTreeSHA); err != nil {
 		return err
@@ -385,10 +384,14 @@ func verifyRetainedSnapshot(root, tree string) error {
 
 func applyTreeSnapshot(source string, dispatch core.GraphDispatch) error {
 	if dispatch.Instruction.OutputMode != core.OutputModeWorktreeTreeSnapshot ||
-		!fullSHA(dispatch.Instruction.TargetTreeSHA) || dispatch.RelatedID == "" {
-		return fmt.Errorf("Reviewer snapshot requires a source Dispatch and full target tree SHA")
+		!fullSHA(dispatch.Instruction.TargetTreeSHA) {
+		return fmt.Errorf("Reviewer snapshot requires a full target tree SHA")
 	}
-	if err := verifySnapshotRef(source, dispatch.RelatedID, dispatch.Instruction.TargetTreeSHA); err != nil {
+	refID := dispatch.RelatedID
+	if refID == "" {
+		refID = dispatch.ID
+	}
+	if err := verifySnapshotRef(source, refID, dispatch.Instruction.TargetTreeSHA); err != nil {
 		return err
 	}
 	targetFiles, err := changedFiles(source, dispatch.Instruction.BaselineSHA, dispatch.Instruction.TargetTreeSHA)
@@ -409,12 +412,14 @@ func applyTreeSnapshot(source string, dispatch core.GraphDispatch) error {
 	if err != nil {
 		return fmt.Errorf("create Reviewer snapshot patch: %w", err)
 	}
-	apply := exec.Command("git", "-C", dispatch.Instruction.Worktree, "apply", "--binary")
-	apply.Stdin = bytes.NewReader(patch)
-	var stderr bytes.Buffer
-	apply.Stderr = &stderr
-	if err := apply.Run(); err != nil {
-		return fmt.Errorf("apply Reviewer snapshot patch: %w: %s", err, strings.TrimSpace(stderr.String()))
+	if len(patch) != 0 {
+		apply := exec.Command("git", "-C", dispatch.Instruction.Worktree, "apply", "--binary")
+		apply.Stdin = bytes.NewReader(patch)
+		var stderr bytes.Buffer
+		apply.Stderr = &stderr
+		if err := apply.Run(); err != nil {
+			return fmt.Errorf("apply Reviewer snapshot patch: %w: %s", err, strings.TrimSpace(stderr.String()))
+		}
 	}
 	tree, files, _, err := captureWorktreeTree(dispatch.Instruction.Worktree,
 		dispatch.Instruction.BaselineSHA, dispatch.Instruction.BaselineSHA)

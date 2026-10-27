@@ -31,11 +31,44 @@ report the exact missing operation contract; do not guess fields or approvals.
 | First use or missing settings | init, config check, doctor, doctor fix | check and doctor are read-only; init/fix preview changes and require explicit application |
 | Refine a request and contract | task, conversation intake/proposal/confirm | inspect the proposal's exact hash; confirm only after user approval |
 | Execute approved work | workflow start/run/step, runtime, acp | model execution needs approved configuration, permissions and budget; do not repeat existing planning with request |
+| Validate and review supplied input without Coder | workflow plan/start, workflow validate-input, doctor --dispatch, workflow run | use artifactSource, snapshot mode and zero repairs; input is not a successful implementation |
 | Inspect results or continue stopped work | task graph, records show, workflow show/recover | distinguish saved state from live processes and Git; reuse successful work |
 | Handle sources, records and portability | specification, memory, records, workspace, git | ingestion, transmission, publication and restore permissions are separate |
 
 The following sections cover initial inspection, requests and approval, execution,
 results and recovery. JSON examples illustrate schemas, not actual values or approval.
+
+### Supplied input without implementation
+
+RC5 supports an artifact-first entry; it is not an RC4 command
+contract. For supplied unverified code, use a READY snapshot Task and workflow
+plan with artifactSource (a non-secret source reference), maxRepairs: 0 and
+stageBudget version 1. Do not set Coder session credits. The plan binds the full
+tree and Controller-observed changed paths; an empty diff still requires review
+of the approved program. It permits zero Coder Dispatches/sessions, not a fake
+Coder success. A USER-owned VERIFICATION Task is also supported through the
+existing manifest authorization path; an existing approved Coder contract can
+use this entry without relabeling its supplied input as implementation output.
+
+Reuse covered contract/configuration approvals; the new exact stage plan must
+authorize real validation commands and one Reviewer. The Reviewer configuration
+ID is FLOW_ID-review-0; existing additionalTaskIds may cover it. Neither bundle
+derivation nor optional packet formats justify an extra duplicate approval.
+After workflow start, workflow validate-input --id FLOW_ID executes the approved
+commands without a model and saves their actual outcomes. It issues the Reviewer
+only after validation succeeds and the target remains unchanged. Then inspect
+doctor --dispatch REVIEWER_DISPATCH_ID --json before workflow run --builtin-prompts.
+No Coder prompt, shell permission or manual changedFiles transcription is needed.
+run can also perform pending input validation before creating the Reviewer worker.
+Reviewer host result validation still executes the approved commands in the
+reproduced review worktree; it does not relabel the input-stage receipt.
+
+Use workflow show/budget/repair-status to inspect the input stage even when it
+has no Dispatch. A RUNNING receipt after interruption means unknown command
+execution, not permission to rerun. Recover the exact stopped process/runner
+formally; unknown/failed validation requires a successor decision. STOPPED Flow
+and rejected results remain unchanged. This first slice excludes repairs,
+optional packet lifecycle delegation and execution after workspace restore.
 
 ## Inspect first
 

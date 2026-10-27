@@ -105,6 +105,15 @@ checkpoint v2 は既存の正規化 document 保存を使い、operation ID、�
 入力終了後の質問再表示はモデルを使わない。最小計画・未回答質問の保存前に停止し、入力本文が失われた checkpoint は、依頼 digest を本文の代わりに使わず再開を拒否する。送信開始済みで結果が不明の Planner は checkpoint で検出し、再送しない。実行中に process が止まって runner claim が残った場合は、既存の停止確認・receipt/Git 照合を済ませてから再開する。復旧のために Task 契約、proposal hash、既存 decision、ApprovalBundle、budget hard-stop を書き換えない。旧 binary は未知の `operation` field を拒否するため、rollback は operation 保存前の snapshot を使用する。
 ## 保存結果と checkpoint の復旧
 
+開発版の持込み入力工程は [ADR-0056](adr/0056-validate-supplied-artifacts-without-coder-success.md)
+に従い、Dispatch のない Flow を保存できる。`ReviewFlow.Artifact` の対象・設定・検証記録を
+入力受理と実行開始・終了の追記監査へ結び付ける。
+結果不明の開始記録からコマンドを再送せず、Coder 成功を合成しない。
+`ValidateReviewFlowInput` は同じ runner を利用し、実測検証後の Reviewer 発行で止まる。
+通常の runner はその続きから Reviewer だけを起動する。
+入力の保持 ref と Reviewer の保持 ref は同じ tree を指し、終了時にも元入力を再照合する。
+移行中の通常 Coder Flow・成功済み結果の継続・saved-review acceptance の条件は維持する。
+
 停止済み初回指示の整合回復は [ADR-0054](adr/0054-reconcile-stopped-dispatch-input.md) に従う。preview は workspace を更新せず、適用は状態と人間の判断の完全ハッシュを transaction 内で再照合する。取消・Task の保留・追記専用の監査記録を一つの transaction に保存する。元の Flow は監査中の停止時点の写しと照合し、後続承認でも書き換えない。後続入力の照合には元 instruction と snapshot 検査を再利用し、出力 receipt を生成しない。Git の snapshot 検査は一時 index と object を使う場合があるが、実 index・作業ファイルは変更しない。
 
 新規開始用 `ContractGateReport` は READY を要求する。保存済みの未実行 Coder 境界は `ResumeContractGateReport` で別に評価し、Task の ACTIVE、対応 Flow の RUNNING、最新 Dispatch の ISSUED と未 acknowledge / 未実行 / session 不在を要求する。Flow の contract と現在 Task、instruction hash、正式 bundle / configuration / lifecycle packet、endpoint / Git、operation の排他、既存 audit の利用量・counter・期限を照合する。保存 runner claim は process 終了を推測して解放せず、残っていれば拒否する。

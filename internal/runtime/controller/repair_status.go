@@ -90,6 +90,12 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 		return set(RepairInvalid, "approval classification is invalid or ambiguous", humanNext)
 	}
 	task, taskOK := state.Graph.GraphTask(flow.TaskID)
+	if flow.Artifact != nil && len(flow.DispatchIDs) == 0 && taskOK {
+		if flow.Status == "STOPPED" {
+			return set(RepairHumanDecision, "input validation stopped; preserve its receipt and input, never replay commands implicitly", humanNext)
+		}
+		return set(RepairNotApplicable, "authorized non-model input validation is pending or in progress", "inspect workflow show; use workflow run at an unclaimed, unheld boundary")
+	}
 	if len(flow.DispatchIDs) == 0 || !taskOK {
 		return set(RepairInvalid, "Flow has no current Task or Dispatch", humanNext)
 	}

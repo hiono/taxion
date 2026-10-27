@@ -97,14 +97,20 @@ func RenderWorkspaceDispatchContext(state store.Workspace, dispatch core.GraphDi
 	var reviewDiff string
 	if saved.Recipient == "REVIEWER" && saved.ReviewWorktreeSource != "" {
 		coder, ok := state.Graph.GraphDispatch(saved.RelatedID)
-		if !ok || coder.Recipient != "CODER" || coder.Result == nil || coder.Status != core.DispatchSucceeded {
+		flow, artifact := flowForDispatch(state.Graph, saved.ID)
+		artifact = artifact && flow.Artifact != nil && flow.Artifact.Validation.Status == "PASSED"
+		if !artifact && (!ok || coder.Recipient != "CODER" || coder.Result == nil || coder.Status != core.DispatchSucceeded) {
 			return "", fmt.Errorf("taxion: review diff requires the saved successful Coder result")
+		}
+		baseline := coder.Instruction.BaselineSHA
+		if artifact {
+			baseline = flow.Artifact.Target.BaselineSHA
 		}
 		target := saved.Instruction.TargetSHA
 		if saved.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
 			target = saved.Instruction.TargetTreeSHA
 		}
-		reviewDiff, err = gitproof.ReviewDiff(saved.ReviewWorktreeSource, coder.Instruction.BaselineSHA, target)
+		reviewDiff, err = gitproof.ReviewDiff(saved.ReviewWorktreeSource, baseline, target)
 		if err != nil {
 			return "", fmt.Errorf("taxion: read immutable review diff: %w", err)
 		}

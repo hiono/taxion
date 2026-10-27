@@ -168,7 +168,7 @@ func (g *TaskGraph) RecordFlowFeedback(flowID string, feedback FlowFeedback) (Re
 	if flow.Status != "RUNNING" {
 		return ReviewFlow{}, graphError("new feedback requires a running review flow")
 	}
-	last, _ := g.dispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+	last, _ := g.dispatch(flow.LastDispatchID())
 	target, err := ObserveFeedbackTarget(last)
 	if err != nil {
 		return ReviewFlow{}, err

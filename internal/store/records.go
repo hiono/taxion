@@ -317,7 +317,8 @@ func (r Records) validate() error {
 		budgetSequences[record.FlowID]++
 		if record.FlowID == "" || record.TaskID == "" ||
 			record.Sequence != budgetSequences[record.FlowID] || record.At.IsZero() ||
-			!slices.Contains([]string{"DISPATCH_ISSUED", "SESSION_STARTED", "USAGE_OBSERVED", "BUDGET_STOP", "RECONTRACT", "STAGE_OBSERVED"}, record.Kind) ||
+			!slices.Contains([]string{"DISPATCH_ISSUED", "SESSION_STARTED", "USAGE_OBSERVED", "BUDGET_STOP", "RECONTRACT", "STAGE_OBSERVED",
+				"INPUT_ACCEPTED", "INPUT_VALIDATION_STARTED", "INPUT_VALIDATION_FINISHED"}, record.Kind) ||
 			!json.Valid([]byte(record.Payload)) ||
 			record.Hash != fmt.Sprintf("%x", sha256.Sum256([]byte(record.Payload))) {
 			return fmt.Errorf("invalid task budget audit record or sequence")
@@ -361,13 +362,18 @@ func (r Records) VerifyFlowAudits(graph core.TaskGraph) error {
 		return err
 	}
 	bound := map[string]bool{}
+	artifacts := map[string]*core.ArtifactReview{}
 	for _, audit := range r.Budgets {
-		if audit.Kind != "DISPATCH_ISSUED" {
+		input := slices.Contains([]string{"INPUT_ACCEPTED", "INPUT_VALIDATION_STARTED", "INPUT_VALIDATION_FINISHED"}, audit.Kind)
+		if audit.Kind != "DISPATCH_ISSUED" && !input {
 			continue
 		}
 		var report struct {
+			Artifact    *core.ArtifactReview `json:"artifact"`
 			ResumeBasis *struct {
-				StagePlan *core.StagePlan `json:"stagePlan"`
+				StagePlan         *core.StagePlan `json:"stagePlan"`
+				ArtifactHash      string          `json:"artifactHash"`
+				ArtifactBasisHash string          `json:"artifactBasisHash"`
 			} `json:"resumeBasis"`
 		}
 		if err := json.Unmarshal([]byte(audit.Payload), &report); err != nil {
@@ -381,11 +387,46 @@ func (r Records) VerifyFlowAudits(graph core.TaskGraph) error {
 			exists && !reflect.DeepEqual(flow.StagePlan, report.ResumeBasis.StagePlan) {
 			return fmt.Errorf("stage plan differs from immutable Flow issuance")
 		}
+		if input {
+			if !exists || flow.Artifact == nil || report.Artifact == nil || audit.TaskID != flow.TaskID {
+				return fmt.Errorf("input audit requires its saved artifact Flow")
+			}
+			basis, err := flow.Artifact.BasisHash()
+			auditBasis, auditErr := report.Artifact.BasisHash()
+			if err != nil || auditErr != nil || basis != auditBasis ||
+				!flow.Artifact.ObservedAt.Equal(report.Artifact.ObservedAt) ||
+				report.ResumeBasis.ArtifactBasisHash != basis ||
+				report.ResumeBasis.ArtifactHash != flow.Artifact.Target.Hash {
+				return fmt.Errorf("input artifact differs from immutable acceptance")
+			}
+			prior := artifacts[flow.ID]
+			status := report.Artifact.Validation.Status
+			switch audit.Kind {
+			case "INPUT_ACCEPTED":
+				if prior != nil || status != "PENDING" {
+					return fmt.Errorf("input acceptance must precede validation exactly once")
+				}
+			case "INPUT_VALIDATION_STARTED":
+				if prior == nil || prior.Validation.Status != "PENDING" || status != "RUNNING" {
+					return fmt.Errorf("input execution requires a unique durable start marker")
+				}
+			case "INPUT_VALIDATION_FINISHED":
+				if prior == nil || prior.Validation.Status != "RUNNING" || (status != "PASSED" && status != "FAILED") ||
+					!prior.Validation.StartedAt.Equal(report.Artifact.Validation.StartedAt) {
+					return fmt.Errorf("input result requires its exact execution marker")
+				}
+			}
+			artifacts[flow.ID] = report.Artifact
+		}
 		bound[audit.FlowID] = true
 	}
 	for _, flow := range graph.ReviewFlows {
 		if flow.StagePlan != nil && !bound[flow.ID] {
 			return fmt.Errorf("stage plan requires immutable issuance")
+		}
+		if flow.Artifact != nil && (artifacts[flow.ID] == nil ||
+			!reflect.DeepEqual(flow.Artifact.Validation, artifacts[flow.ID].Validation)) {
+			return fmt.Errorf("input validation requires its exact append-only execution receipt")
 		}
 	}
 	return nil

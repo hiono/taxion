@@ -119,6 +119,19 @@ func collectRepositories(ctx context.Context, state store.Workspace, add func([]
 			return nil, err
 		}
 	}
+	for _, flow := range state.Graph.ReviewFlows {
+		if flow.Artifact == nil {
+			continue
+		}
+		target := flow.Artifact.Target
+		if err := locate(target.Repository, flow.Contract.Worktree, target.CommitSHA, target.TreeSHA); err != nil {
+			return nil, err
+		}
+		for _, id := range append([]string{flow.ID}, flow.DispatchIDs...) {
+			digest := sha256.Sum256([]byte(id))
+			repos[target.Repository].Refs["refs/taxion/snapshots/"+hex.EncodeToString(digest[:])] = target.TreeSHA
+		}
+	}
 	for _, event := range state.Graph.DispatchHistory {
 		if event.Result == nil {
 			continue
@@ -180,7 +193,7 @@ func collectRepositories(ctx context.Context, state store.Workspace, add func([]
 		r := repos[id]
 		for i := range r.Paths {
 			for _, task := range state.Graph.Tasks {
-				if task.Worktree == r.Paths[i].Original && task.Owner == "CODER" {
+				if task.Worktree == r.Paths[i].Original && (task.Owner == "CODER" || task.Owner == "USER" && task.Type == "VERIFICATION") {
 					r.Paths[i].Branch = task.Branch
 				}
 			}
@@ -216,6 +229,20 @@ func collectRepositories(ctx context.Context, state store.Workspace, add func([]
 					if declared := gitproof.EndpointsFromSelection(d.Configuration); declared != nil {
 						endpoints = declared
 					}
+				}
+			}
+			for _, flow := range state.Graph.ReviewFlows {
+				if flow.Artifact == nil || flow.Artifact.Target.Repository != id {
+					continue
+				}
+				identity := core.GraphDispatch{Repository: id, Configuration: &core.DispatchConfiguration{
+					Selection: flow.Artifact.Configuration.Selection,
+				}}
+				if err := gitproof.VerifyRepositoryRemote(identity, strings.TrimSpace(string(remote))); err != nil {
+					return nil, err
+				}
+				if declared := gitproof.EndpointsFromSelection(identity.Configuration); declared != nil {
+					endpoints = declared
 				}
 			}
 			origin, err := bindOrigin(strings.TrimSpace(string(remote)), id, endpoints)

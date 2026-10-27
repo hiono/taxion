@@ -43,7 +43,8 @@ plan is read-only and starts no model. Its authorization text describes the
 requested execution, not a preview-only permission; it is part of the hash.
 Display stagePlan.hash, contractGate, timing and limits for actual user approval.
 Only after approval add stagePlanHash (the exact returned hash) to the same input,
-then workflow start --file REQUEST.json. start issues a Dispatch, not a model turn.
+then workflow start --file REQUEST.json. start issues a Dispatch, not a model turn,
+except for artifactSource: that entry saves unverified input without a Dispatch.
 Changed Task, configuration or request requires a new plan and hash approval.
 
 stageBudget optional fields:
@@ -64,6 +65,26 @@ If mandatory stages do not fit, do not start or silently extend the deadline.
 After issuance, inspect doctor --dispatch DISPATCH_ID --json before paid execution.
 Use workflow run --id FLOW_ID --builtin-prompts for the bundled snapshot-mode
 worker/file-tool policy and controller validation, not a Taxion management shell.
+
+Existing supplied input, without a Coder:
+Set artifactSource to a non-secret provenance reference, maxRepairs to 0, and
+stageBudget.coderSessionCredits to 0 (or omit it). Use snapshot output mode;
+USER-owned VERIFICATION Tasks and existing approved Coder contracts are supported.
+plan returns artifact (baseline, commit, full tree, Controller-derived changed paths
+and provenance hash); an empty diff does not eliminate review of the full target.
+The exact plan approval authorizes actual validation commands and one Reviewer,
+not an implementation result or publication. MaxCoderSessions is enforced as 0.
+After start: workflow validate-input --id FLOW_ID runs approved Controller commands,
+records real outcomes, checks target drift and issues only the Reviewer on success.
+It starts no model; commands may execute arbitrary code under the approved contract.
+Then doctor --dispatch REVIEWER_DISPATCH_ID --json and workflow run --id FLOW_ID
+--builtin-prompts. The exact Reviewer configuration ID is FLOW_ID-review-0;
+existing additionalTaskIds may cover it without optional packet delegation.
+No Coder prompt, shell permission, changedFiles transcription or success is required.
+run may perform the same pending validation stage if validate-input was omitted.
+FAILED or interrupted RUNNING validation is not replayable; preserve evidence and
+obtain a successor decision. STOPPED Flow/session/results are never rewritten.
+This first slice excludes repairs, optional packet lifecycle and restored execution.
 `
 
 func workflowCmd(args []string) error {
@@ -77,7 +98,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return encoder.Encode(value)
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {plan|start|advance|run|resume|step|recover|reconcile-stopped|accept-saved-review|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|budget|evaluate|lanes}")
+		return fmt.Errorf("usage: taxion workflow {plan|start|validate-input|advance|run|resume|step|recover|reconcile-stopped|accept-saved-review|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|budget|evaluate|lanes}")
 	}
 	action := args[0]
 	if action == "accept-saved-review" {
@@ -94,6 +115,15 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 			fmt.Fprintln(fs.Output(), "Usage of workflow "+action+":")
 			fs.PrintDefaults()
 			fmt.Fprint(fs.Output(), stagePlanInputHelp)
+		}
+	}
+	if action == "validate-input" {
+		fs.Usage = func() {
+			fmt.Fprintln(fs.Output(), "Usage of workflow validate-input:")
+			fs.PrintDefaults()
+			fmt.Fprintln(fs.Output(), "Execute the approved artifactSource Flow's Controller validation commands; no model is started.")
+			fmt.Fprintln(fs.Output(), "Requires a running, unclaimed artifact Flow before Reviewer issuance. Failed/unknown execution is not replayed.")
+			fmt.Fprintln(fs.Output(), "On success inspect doctor --dispatch REVIEWER_DISPATCH_ID --json before workflow run --id FLOW_ID --builtin-prompts.")
 		}
 	}
 	var file, id string
@@ -113,7 +143,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	switch action {
 	case "start", "plan", "recover", "handoff", "interrupt", "terminate", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve", "planner-draft", "planner-action", "question-draft":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
-	case "advance", "show", "evaluate", "feedback-target", "repair-status", "planning-context", "budget":
+	case "validate-input", "advance", "show", "evaluate", "feedback-target", "repair-status", "planning-context", "budget":
 		fs.StringVar(&id, "id", "", "review flow ID")
 		if action == "evaluate" {
 			fs.BoolVar(&requireQuality, "require-quality", false, "fail unless saved same-target acceptance includes documentation consistency; not publication approval")
@@ -439,10 +469,15 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		}
 		return printJSON(flow)
 	case "run", "step":
+		approved, _ := state.Graph.ReviewFlow(id)
+		artifactOnly := approved.Artifact != nil
+		if artifactOnly && (managedCommit || managedStage || coderPrompt != "" || coderTools != "") {
+			return fmt.Errorf("workflow: artifact-only review has no Coder prompt, tools or managed commit/stage")
+		}
 		if builtinPrompts && (coderPrompt != "" || reviewerPrompt != "" || managedCommit || managedStage) {
 			return fmt.Errorf("workflow: --builtin-prompts cannot be combined with prompt files or managed commit/stage")
 		}
-		if !builtinPrompts && (coderPrompt == "" || reviewerPrompt == "") {
+		if !builtinPrompts && ((!artifactOnly && coderPrompt == "") || reviewerPrompt == "") {
 			return fmt.Errorf("workflow run/step requires --coder-prompt-file and --reviewer-prompt-file")
 		}
 		prompts := map[string]string{}
@@ -463,6 +498,9 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 			}
 		} else {
 			for role, path := range map[string]string{"CODER": coderPrompt, "REVIEWER": reviewerPrompt} {
+				if artifactOnly && role == "CODER" {
+					continue
+				}
 				data, err := os.ReadFile(path)
 				if err != nil {
 					return fmt.Errorf("workflow run: read %s prompt: %w", role, err)
@@ -612,6 +650,12 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		}
 		reportErr := reportStoppedRepair(os.Stderr, db, storePath, id, err)
 		return errors.Join(printJSON(flow), err, reportErr)
+	case "validate-input":
+		flow, err := controller.ValidateReviewFlowInput(parent, db, storePath, id, currentApprovalConfiguration())
+		if flow.ID == "" {
+			return err
+		}
+		return errors.Join(printJSON(flow), err, reportStoppedRepair(os.Stderr, db, storePath, id, err))
 	default:
 		flow, ok := state.Graph.ReviewFlow(id)
 		if !state.HasGraph || !ok {

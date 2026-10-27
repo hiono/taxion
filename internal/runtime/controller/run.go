@@ -21,23 +21,29 @@ type WorkerFactory func(core.GraphDispatch) (runtime.Identity, error)
 // RunReviewFlow holds a durable single-runner claim. An interrupted process's
 // claim remains visible so another process cannot silently resume uncertain work.
 func RunReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, configuration ...core.ApprovalConfiguration) (core.ReviewFlow, error) {
-	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, false, false, configuration...)
+	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, false, false, false, configuration...)
 }
 
 // ResumeReviewFlow rechecks the read-only gate inside the runner claim
 // transaction, so a concurrent change cannot consume a stale passing report.
 func ResumeReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, configuration ...core.ApprovalConfiguration) (core.ReviewFlow, error) {
-	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, false, true, configuration...)
+	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, false, true, false, configuration...)
 }
 
 // StepReviewFlow executes at most one role turn. It does not issue the next
 // handoff after the turn completes; continuation remains an explicit decision.
 func StepReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, configuration ...core.ApprovalConfiguration) (core.ReviewFlow, error) {
-	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, true, false, configuration...)
+	return runReviewFlow(ctx, db, ledgerPath, id, factory, out, true, false, false, configuration...)
 }
 
-func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, singleTurn, resume bool, configuration ...core.ApprovalConfiguration) (result core.ReviewFlow, returnErr error) {
-	if db == nil || factory == nil || out == nil {
+// ValidateReviewFlowInput performs the approved host stage without creating a
+// model session, leaving the issued Reviewer available for worker diagnostics.
+func ValidateReviewFlowInput(ctx context.Context, db *store.Store, ledgerPath, id string, configuration core.ApprovalConfiguration) (core.ReviewFlow, error) {
+	return runReviewFlow(ctx, db, ledgerPath, id, nil, io.Discard, false, false, true, configuration)
+}
+
+func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, factory WorkerFactory, out io.Writer, singleTurn, resume, inputOnly bool, configuration ...core.ApprovalConfiguration) (result core.ReviewFlow, returnErr error) {
+	if db == nil || factory == nil && !inputOnly || out == nil {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: flow runner requires a store, worker factory and event output")
 	}
 	if _, inherited := ctx.Value(operationKey{}).(store.Operation); !inherited {
@@ -72,6 +78,9 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 		if !ok || flow.Status != "RUNNING" {
 			return fmt.Errorf("taxion: runner requires a running review flow")
 		}
+		if inputOnly && (flow.Artifact == nil || len(flow.DispatchIDs) != 0) {
+			return fmt.Errorf("taxion: validate-input requires an artifact Flow before its Reviewer Dispatch; it never replays validation")
+		}
 		if err := checkOperation(state, ctx, flow.TaskID, flow.ID); err != nil {
 			return err
 		}
@@ -94,6 +103,12 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 		}
 		if err = runCtx.Err(); err != nil {
 			break
+		}
+		if flow.Artifact != nil && len(flow.DispatchIDs) == 0 {
+			if err = runArtifactValidation(runCtx, db, ledgerPath, id, runnerID, selected); err != nil || inputOnly {
+				break
+			}
+			continue
 		}
 		state, loadErr := db.LoadWorkspace()
 		if loadErr != nil {

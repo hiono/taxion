@@ -92,7 +92,7 @@ func (f ReviewFlow) PendingDraftID() string {
 }
 
 func (g TaskGraph) checkDraftTarget(flow ReviewFlow, target FeedbackTarget, changeID string) error {
-	last, _ := g.dispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+	last, _ := g.dispatch(flow.LastDispatchID())
 	current, err := ObserveFeedbackTarget(last)
 	if err != nil {
 		return err

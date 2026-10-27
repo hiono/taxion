@@ -10,7 +10,20 @@
 
 ## CLI
 
-開発版の `conversation intake|confirm --help` と `workflow plan|start --help` は、
+v0.7.21-rc.5 の `workflow plan|start` は `artifactSource` を指定すると、持込み snapshot を
+Coder なしで受け付ける。`maxRepairs: 0`、`stageBudget.version: 1` とし、
+Coder の session 上限は設定しない。plan 出力の `artifact` と工程 hash を承認後、
+同じ入力に `stagePlanHash` を追加して start する。
+`workflow validate-input --id FLOW_ID` は承認済み検証コマンドだけを実行し、
+成功・対象不変の場合に限り Reviewer Dispatch を発行する。モデルは起動しない。
+その後は `doctor --dispatch REVIEWER_DISPATCH_ID --json`、
+`workflow run --id FLOW_ID --builtin-prompts` の順に進む。
+Reviewer 設定 ID は `FLOW_ID-review-0`。既存の `additionalTaskIds` が含む場合は再承認しない。
+通常の `run` も未実行の入力検証を先に処理する。
+修正ループ・任意 packet 委譲・restore 後の直接実行はこの入口の対象外。
+RC4 以前にはこの入口はない。
+
+v0.7.21-rc.5 の `conversation intake|confirm --help` と `workflow plan|start --help` は、
 JSON の項目・例・前提条件と次の操作を表示する。通常の操作では、導入済みの版の help・
 ready と保存出力を使い、入力形式を探すために Taxion の実装ソースを取得しない。
 正式な説明が不足する場合は、不明なコマンドと項目を具体的に報告する。

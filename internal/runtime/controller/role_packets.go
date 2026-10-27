@@ -382,7 +382,7 @@ func preparePacketValidator(db *store.Store, id, runnerID string) error {
 	if flow.HandoffHeld() || !time.Now().Before(flow.Deadline) {
 		return nil
 	}
-	last, ok := snapshot.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+	last, ok := snapshot.Graph.GraphDispatch(flow.LastDispatchID())
 	if !ok || flow.Status != "RUNNING" || last.Recipient != "CODER" || last.Status != core.DispatchSucceeded {
 		return nil
 	}

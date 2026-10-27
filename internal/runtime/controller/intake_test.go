@@ -834,6 +834,14 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	if err != nil || approved.Status != core.Ready {
 		t.Fatal("snapshot result was not explicitly approved for continuation", err)
 	}
+	afterConfirmation, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preserved, _ := afterConfirmation.Graph.ReviewFlow(flow.ID)
+	if !reflect.DeepEqual(flow, preserved) {
+		t.Fatal("successor confirmation rewrote the terminal predecessor Flow")
+	}
 	repairs := 0
 	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
 		ID: "snapshot-review-successor-flow", TaskID: approved.ID, Repository: approved.Repo,
