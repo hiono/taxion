@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.10"
+const readySkillVersion = "1.3.11"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -58,6 +58,20 @@ An empty diff still requires full approved-program review. Supplied input is not
 a Coder success or quality verdict. No automatic replay of failed/unknown command
 execution; preserve its receipt and stopped history. Repairs, optional packet
 lifecycle and restored artifact execution are not supported in this first slice.
+
+A receipt hash is NOT diagnostic content. For a repair successor, put the failed
+command, exit code, test names, assertions/messages, unclassified causes and
+unperformed checks in task.objective before proposal approval. Read saved output,
+redact credentials, label excerpts/truncation and retain evidence references.
+A management-directory path alone is insufficient; do not grant workers access
+to controller databases or session directories just to read failure diagnostics.
+After start, inspect the actual Coder Dispatch instruction in task graph BEFORE
+any model execution. Verify concrete diagnostics and role responsibilities, not
+only the receipt hash or intended intake JSON. Missing diagnostics block model
+launch. Preserve issued state and use approved change control; do not rewrite
+old instructions, silently add sessions or blindly restart.
+For running work, compare actual findings/edits with the objective, not only
+process liveness or log timestamps. Monitoring grants no new stop/restart budget.
 
 For FAILED artifact validation with dispatchIds: [], STOPPED/SAFETY_STOP and no
 runner, preserve the failed receipt and both input identities; do not retry.

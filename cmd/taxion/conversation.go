@@ -104,6 +104,15 @@ use that exact Flow/Task as createdFrom/supersedes, not an older Coder Flow.
 intake automatically adds artifact-predecessor:TASK_ID with flowId, artifactHash
 and receiptHash (the complete artifact record digest) to the proposal.
 Do not supply or edit this decision. Preserve the same input in a separate worktree.
+A receipt hash is NOT diagnostic content. For a repair successor, put the failed
+command, exit code, test names, assertions/messages, unclassified causes and
+unperformed checks in task.objective before proposal approval. Redact credentials,
+label excerpts/truncation and keep evidence references; do not guess missing causes.
+A management-directory path alone is not worker-readable diagnostic input.
+After start, inspect the actual Coder Dispatch instruction in task graph BEFORE
+any model execution. Verify the diagnostic content, not only its hash or the
+intended intake JSON. Missing content blocks model launch; preserve issued state
+and use approved change control, never edit old instructions or blindly restart.
 intake saves an unapproved proposal; read it with conversation proposal --task TASK_ID.
 `
 
