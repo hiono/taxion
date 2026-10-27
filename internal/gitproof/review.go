@@ -51,11 +51,15 @@ func ReverifyReleasedReview(dispatch core.GraphDispatch, result *core.DispatchRe
 		return fmt.Errorf("review source repository identity changed")
 	}
 	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
-		if result.GitEvidence.SnapshotRef != snapshotRef(dispatch.RelatedID) ||
+		refID := dispatch.RelatedID
+		if refID == "" {
+			refID = dispatch.ID
+		}
+		if result.GitEvidence.SnapshotRef != snapshotRef(refID) ||
 			result.GitEvidence.TreeSHA != dispatch.Instruction.TargetTreeSHA {
 			return fmt.Errorf("released review snapshot evidence differs from its target")
 		}
-		return verifySnapshotRef(source, dispatch.RelatedID, dispatch.Instruction.TargetTreeSHA)
+		return verifySnapshotRef(source, refID, dispatch.Instruction.TargetTreeSHA)
 	}
 	head, err := git(source, "rev-parse", result.OutputSHA+"^{commit}")
 	if err != nil || head != result.OutputSHA || head != dispatch.Instruction.TargetSHA {

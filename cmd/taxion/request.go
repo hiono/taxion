@@ -85,6 +85,9 @@ The controller runs the approved validation commands after submission.
 Return the saved structured result, with real blockers if the work cannot proceed.`
 
 const requestReviewerPrompt = `Independently review the reproduced target tree read-only.
+The target may be supplied by a user, without any Coder. Review the approved
+program and every acceptance criterion even when the baseline-to-target diff is
+empty. Imported files are input, not a Coder success or a prior quality verdict.
 Check every approved acceptance criterion and the actual changes. Do not modify
 files, create commits or expand scope. Include the work-report evidence identifier
 and the actual report text in workReport, not a session file path. Report the verdict,

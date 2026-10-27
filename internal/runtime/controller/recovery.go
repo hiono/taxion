@@ -54,7 +54,14 @@ func RecoverReviewFlow(db *store.Store, request RecoveryRequest) (core.ReviewFlo
 				return err
 			}
 		}
-		last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+		last, _ := state.Graph.GraphDispatch(flow.LastDispatchID())
+		if flow.Artifact != nil && flow.Artifact.Validation.Status == "RUNNING" {
+			if err := holdReviewFlowForStop(&state.Graph, &flow, "input validation execution outcome is unknown; do not replay commands"); err != nil {
+				return err
+			}
+			flow.Status, flow.StopCode, flow.StopCause, flow.Reason = "STOPPED", "SAFETY_STOP", "other",
+				"input validation execution outcome is unknown; preserve its receipt and use a newly approved successor"
+		}
 		if last.Status == core.DispatchSucceeded {
 			if err := revalidateFlowResult(state.Graph, flow, state.Records); err != nil {
 				return fmt.Errorf("taxion: recovery result revalidation: %w", err)
@@ -73,7 +80,7 @@ func RecoverReviewFlow(db *store.Store, request RecoveryRequest) (core.ReviewFlo
 }
 
 func revalidateFlowResult(graph core.TaskGraph, flow core.ReviewFlow, records ...store.Records) error {
-	last, ok := graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+	last, ok := graph.GraphDispatch(flow.LastDispatchID())
 	if !ok || last.Status != core.DispatchSucceeded || last.Result == nil {
 		return fmt.Errorf("flow checkpoint requires a successful saved result")
 	}
@@ -112,6 +119,16 @@ func revalidateFlowResult(graph core.TaskGraph, flow core.ReviewFlow, records ..
 	}
 	if err := gitproof.ReverifyReleasedReview(last, last.Result); err != nil {
 		return err
+	}
+	if flow.Artifact != nil {
+		if flow.Artifact.Validation.Status != "PASSED" || last.Recipient != "REVIEWER" ||
+			last.Result.OutputTreeSHA != flow.Artifact.Target.TreeSHA {
+			return fmt.Errorf("review differs from its validated input artifact")
+		}
+		if len(records) != 0 && records[0].Restore != nil {
+			return fmt.Errorf("restored artifact acceptance requires explicit successor verification")
+		}
+		return gitproof.VerifyArtifact(flow.Contract, flow.Artifact.Target, flow.Artifact.Configuration.Selection)
 	}
 	coderID := flow.SourceDispatchID
 	if len(flow.DispatchIDs) > 1 {

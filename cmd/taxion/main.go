@@ -96,7 +96,7 @@ Runtime sessions and ACP:
   acp                 Serve approved Dispatches over ACP (--coder-system-prompt-file, --max-ai-credits)
 
 Review flows and recovery:
-  workflow start      Authorize a bounded review flow and issue its Coder Dispatch (--file JSON; stagePlanHash for planned flows)
+  workflow start      Start an approved bounded flow; artifactSource accepts input without a Coder Dispatch (--file JSON)
   workflow terminate  Cancel an untouched Dispatch and hold it for a new approved contract (--file JSON)
   workflow reconcile-stopped Preview or cancel a first issued snapshot Coder after SAFETY_STOP, retaining unknown delivery and input provenance (--file JSON; --preview)
   workflow advance    Issue review/repair from the latest verified result (--id required)
@@ -123,6 +123,7 @@ Review flows and recovery:
   resume              Print a resume acknowledgement (local stub; --session required)
 
 Evidence and external records:
+  workflow validate-input Execute approved input validation without a model, then issue independent review (--id required)
   workflow budget     Read stage timing, applied soft ceilings and saved-output continuation advice (--id required)
   workflow evaluate   Report saved quality gates and measured/unknown costs; no reward score (--id required)
   role-packet create  Emit an immutable reference-only role packet (explicit task, tree and contract digests)

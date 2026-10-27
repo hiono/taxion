@@ -102,7 +102,7 @@ Task は ADR-0021 の識別、担当、scope、acceptance、証拠、対象 SHA�
 APPROVED の依存は COMPLETED に進んだ後も満たされる。
 参照不存在、自己参照、循環、同一依存の重複を拒否する。
 
-READY には `owner`（CODER または REVIEWER）、objective、scope、
+READY には `owner`（CODER または REVIEWER。開発版の VERIFICATION Task は USER も可）、objective、scope、
 acceptance、requiredEvidence、exitCondition、
 `authorizationId` と同じ ID の decision を要求する。
 dispatch 前には branch、worktree、baselineSha も要求する。これらは Task の契約から
@@ -191,6 +191,12 @@ Task と Dispatch の契約に含め、役割間で同じ引用スナップシ�
 入力と利用許可は [仕様入力の参照文書](specification-input.md) に従う。
 
 ## 上限付きレビュー進行
+
+開発版の持込み成果物からの検証開始は [ADR-0056](adr/0056-validate-supplied-artifacts-without-coder-success.md)
+に従う。`artifactSource` と承認済みの工程 hash を指定すると、モデル Dispatch のない入力工程を保存する。
+`workflow validate-input` は実際の Controller 検証後にだけ Reviewer を発行する。
+通常実装の Coder 成功・既存結果の継続とは別の入口であり、未検証入力の由来を変更しない。
+確認項目と検証記録は [持込み成果物の確認記録](artifact-review-validation.md)を参照。
 
 以下はオーケストレータ・自動化の実装者向けの CLI 入力仕様である。
 `REQUEST.json` は入力ファイルの仮名であり、利用者に手書きを求めるものではない。
@@ -958,6 +964,11 @@ actor・decision・proof は caller が供給する作業記録である。
 実行環境の権限確認と repository・test record の証拠は、それぞれの管理元で確認する。
 
 ## Task budget accounting
+
+開発版の持込み入力 Flow は、Coder Dispatch/session の実績だけでなく
+`maxCoderSessions` 自体もゼロとする。この明示的な入力工程に限り、ゼロ上限を
+「予算情報なし」とは扱わない。入力受理・検証開始・検証終了の追記監査を保存し、
+検証結果不明のまま開始記録を再利用しない。通常 Coder Flow の上限条件は変更しない。
 
 Review Flow は承認時に Dispatch 数、Coder/Reviewer session 数、Task-wide nano-AIU、elapsed time、repair 数の ceiling を保存する。`workflow evaluate --id FLOW_ID` は各上限の approved・consumed・remaining と使用量の完全性を報告する。re-review 数も修正上限から導出する。
 

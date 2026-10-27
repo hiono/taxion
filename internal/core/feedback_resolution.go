@@ -89,7 +89,7 @@ func (g *TaskGraph) ResolveFlowFeedback(flowID, feedbackID string, resolution Fe
 	if !flow.HandoffHeld() {
 		return ReviewFlow{}, graphError("feedback resolution requires a held handoff")
 	}
-	last, _ := g.dispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+	last, _ := g.dispatch(flow.LastDispatchID())
 	target, err := ObserveFeedbackTarget(last)
 	if err != nil {
 		return ReviewFlow{}, err

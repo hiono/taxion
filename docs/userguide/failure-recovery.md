@@ -38,6 +38,17 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 
 ## Flow が停止している
 
+v0.7.21-rc.5 の `artifactSource` Flow は、持込み入力の実際の Controller 検証から開始できる。
+`workflow show` の `artifact.validation` と `workflow budget` の `budget.artifact.validation` に、
+`PENDING`／`RUNNING`／`PASSED`／`FAILED`、対象 hash、コマンド別の実測結果を保存する。
+検証前には Dispatch がなく、持込み変更パスを Coder へ転記させる必要もない。
+利用者作成コード・拒否済み結果の入力は、成功済みの Coder 結果とは扱わない。
+
+`FAILED` または実行開始後の中断は、暗黙に再検証しない。中断後は旧 process の停止を確認して
+`workflow recover` で保存済み runner を整合するが、結果不明の検証は終端停止する。
+元入力・検証出力・旧履歴を保全し、新しい契約判断から通常後続を作る。
+期限・予算・権限は引き延ばさず、publication 承認も代用しない。
+
 Coder が製品の実装をせず Taxion の管理 skill や管理 DB・session directory を調べて停止した場合は、役割と指示の混同を先に調べる。API 接続成功は、役割が正しく割り当てられた証拠ではない。管理用 shell や広いファイル権限の追加、同じ構成の再試行を第一の対処にしない。製品の目的・担当・必要なファイルへの既存の権限・controller による検証の分担を照合する。ログの `denied-interactively-by-user` だけで実際に利用者が拒否したと断定しない。
 
 v0.7.21-rc.4 は Copilot Coder／Reviewer から同名の `taxion` 管理 skill を除外し、Dispatch の共通指示にも役割の境界を明記する。他の製品 skill を一括無効化せず、権限も増やさない。設定や指示を修正しても、終端 Flow の再送、旧 session の書換え、期限・予算の延長を許可するものではない。実装・検証・独立レビューの未実施を完了に変えず、元の停止・利用量と保存成果を保全して正式な後続を準備する。

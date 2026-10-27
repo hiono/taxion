@@ -11,6 +11,7 @@ import (
 // ReviewFlow retains the approved execution contract across controller
 // restarts. Dispatches carry each observed execution separately.
 type ReviewFlow struct {
+	Artifact          *ArtifactReview    `json:"artifact,omitempty"`
 	ID                string             `json:"id"`
 	TaskID            string             `json:"taskId"`
 	SourceDispatchID  string             `json:"sourceDispatchId,omitempty"`
@@ -85,6 +86,7 @@ func (g TaskGraph) ReviewFlow(id string) (ReviewFlow, bool) {
 	for _, flow := range g.ReviewFlows {
 		if flow.ID == id {
 			flow.Contract = cloneTask(flow.Contract)
+			flow.Artifact = cloneArtifactReview(flow.Artifact)
 			flow.StagePlan = CloneStagePlan(flow.StagePlan)
 			flow.DispatchIDs = slices.Clone(flow.DispatchIDs)
 			flow.Recoveries = cloneFlowRecoveries(flow.Recoveries)
@@ -103,7 +105,7 @@ func (g TaskGraph) validateReviewFlows() error {
 		task, ok := g.task(flow.TaskID)
 		if !ok || !nonempty(flow.ID) || ids[flow.ID] ||
 			flow.Contract.ID != task.ID || flow.Contract.Repo != task.Repo ||
-			flow.Contract.Owner != "CODER" || flow.Contract.Reviewer != "REVIEWER" ||
+			(flow.Contract.Owner != "CODER" && !(flow.Artifact != nil && flow.Contract.Owner == "USER")) || flow.Contract.Reviewer != "REVIEWER" ||
 			flow.Contract.Status != Ready || !filepath.IsAbs(flow.ReviewRoot) ||
 			flow.MaxRepairs < 0 || flow.Repairs < 0 || flow.Repairs > flow.MaxRepairs ||
 			flow.MaxTokens < 0 || flow.StartedAt.IsZero() || !flow.Deadline.After(flow.StartedAt) ||
@@ -113,7 +115,7 @@ func (g TaskGraph) validateReviewFlows() error {
 			!slices.Contains([]string{"", "time-limit", "usage-limit", "review-findings", "other"}, flow.StopCause) ||
 			flow.Status != "STOPPED" && flow.StopCause != "" ||
 			!nonempty(flow.Authorization.ID) || !nonempty(flow.Authorization.Source) || !nonempty(flow.Authorization.Text) ||
-			len(flow.DispatchIDs) == 0 || flow.Status != "RUNNING" && !nonempty(flow.Reason) {
+			len(flow.DispatchIDs) == 0 && flow.Artifact == nil || flow.Status != "RUNNING" && !nonempty(flow.Reason) {
 			return graphError("invalid bounded review flow %q", flow.ID)
 		}
 		budget := flow.Budget
@@ -122,7 +124,7 @@ func (g TaskGraph) validateReviewFlows() error {
 		}
 		if budget.MaxDispatches != 0 || budget.MaxCoderSessions != 0 ||
 			budget.MaxReviewerSessions != 0 || budget.MaxNanoAIU != 0 || budget.ExternalBudgetOnly() || budget.BudgetSource != "" {
-			if budget.MaxDispatches < 1 || budget.MaxCoderSessions < 1 ||
+			if budget.MaxDispatches < 1 || budget.MaxCoderSessions < 0 || budget.MaxCoderSessions == 0 && flow.Artifact == nil ||
 				budget.MaxReviewerSessions < 1 || math.IsNaN(budget.MaxNanoAIU) ||
 				math.IsInf(budget.MaxNanoAIU, 0) || budget.MaxNanoAIU < 0 ||
 				ValidateBillingBudget(budget.BudgetSource, budget.AccountQuotaOnly, budget.MaxNanoAIU,
@@ -131,6 +133,11 @@ func (g TaskGraph) validateReviewFlows() error {
 			}
 		}
 		ids[flow.ID] = true
+		if flow.Artifact != nil {
+			if err := g.validateArtifactFlow(flow); err != nil {
+				return err
+			}
+		}
 		if err := validateSpecifications(flow.Contract.Specifications); err != nil {
 			return err
 		}
@@ -192,7 +199,7 @@ func (g TaskGraph) validateReviewFlows() error {
 			if index%2 == 1 {
 				role = "REVIEWER"
 			}
-			if flow.SourceDispatchID != "" {
+			if flow.ReviewFirst() {
 				if index%2 == 0 {
 					role = "REVIEWER"
 				} else {
@@ -249,10 +256,13 @@ func (g TaskGraph) validateReviewFlows() error {
 			}
 			dispatches[id] = true
 		}
-		if flow.Repairs != (len(flow.DispatchIDs)-1)/2 {
+		if flow.Artifact == nil && flow.Repairs != (len(flow.DispatchIDs)-1)/2 {
 			return graphError("review flow repair count conflicts with Dispatch history")
 		}
 		if flow.Status == "COMPLETED" {
+			if len(flow.DispatchIDs) == 0 {
+				return graphError("completed flow requires independent review")
+			}
 			last, _ := g.dispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
 			if task.Status != Completed || last.Recipient != "REVIEWER" || last.Status != DispatchSucceeded ||
 				last.Result == nil || last.Result.ReviewVerdict != "APPROVE" ||

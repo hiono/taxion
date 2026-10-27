@@ -270,59 +270,77 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 					return fmt.Errorf("taxion: stop and reconcile every predecessor execution before reapproval")
 				}
 			}
-			last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
-			unstarted := last.Recipient == "CODER" && last.Status == core.DispatchCancelled &&
-				!last.ExecutionStarted && last.RuntimeSessionID == "" && last.Result != nil &&
-				flow.StopCode == "RECONTRACT" &&
-				slices.Contains(last.Result.Evidence, "not-started:"+last.ID)
-			if unstarted {
-				if request.Target != nil || task.BaselineSHA != last.Instruction.BaselineSHA {
-					return fmt.Errorf("taxion: unstarted Dispatch re-contract must retain its baseline and omit a feedback target")
+			if flow.Artifact != nil {
+				if len(flow.DispatchIDs) == 0 && request.Target != nil || task.BaselineSHA != flow.Contract.BaselineSHA ||
+					task.TargetTreeSHA != flow.Artifact.Target.TreeSHA ||
+					!slices.Equal(task.TargetChangedFiles, flow.Artifact.Target.ChangedFiles) {
+					return fmt.Errorf("taxion: artifact successor must retain its exact input target without a model feedback target")
 				}
-			} else {
-				if request.Target == nil {
-					return fmt.Errorf("taxion: executed predecessor re-contract requires an observed target")
-				}
-				target, err := core.ObserveFeedbackTarget(last)
-				if err != nil || target != *request.Target {
-					return core.ErrFeedbackStale
-				}
-			}
-			if last.Recipient == "CODER" && last.Status == core.DispatchCancelled {
-				if unstarted {
-					// An unstarted Dispatch has no worktree changes to transfer.
-				} else if request.ReconciliationHash != "" {
-					audit, err := reconciledInput(*state, flow.ID, request.ReconciliationHash)
-					if err != nil || audit.Target != *request.Target {
-						return fmt.Errorf("taxion: reconciled input does not match the cancelled predecessor")
-					}
-				} else if last.Result == nil || last.Result.PartialGitEvidence == nil {
-					return fmt.Errorf("taxion: cancelled Coder work requires verified partial Git evidence before successor approval")
-				} else {
-					if err := gitproof.VerifyPartialSuccessor(state.Records.RestoredDispatch(last), task); err != nil {
-						return fmt.Errorf("taxion: successor does not preserve the verified partial work: %w", err)
+				if len(flow.DispatchIDs) != 0 {
+					last, _ := state.Graph.GraphDispatch(flow.LastDispatchID())
+					target, err := core.ObserveFeedbackTarget(last)
+					if request.Target == nil || err != nil || target != *request.Target {
+						return core.ErrFeedbackStale
 					}
 				}
-			} else if flow.Status == "STOPPED" &&
-				last.Recipient == "CODER" && last.Status == core.DispatchSucceeded {
-				if _, err := budgetContinuationSource(state.Graph, task, last.ID, state.Records); err != nil {
-					return fmt.Errorf("taxion: successor does not preserve the completed Coder result: %w", err)
-				}
-			} else if last.Recipient == "REVIEWER" && (flow.StopCode == "BUDGET_LIMIT" ||
-				flow.StopCode == "SAFETY_STOP" && last.Status == core.DispatchCancelled) {
-				if len(flow.DispatchIDs) < 2 {
-					return fmt.Errorf("taxion: stopped Reviewer requires a saved Coder predecessor")
-				}
-				if _, err := budgetContinuationSource(state.Graph, task, flow.DispatchIDs[len(flow.DispatchIDs)-2], state.Records); err != nil {
+				if err := gitproof.VerifyArtifact(flow.Contract, flow.Artifact.Target, flow.Artifact.Configuration.Selection); err != nil {
 					return err
 				}
-			}
-			if last.Result != nil && last.Result.OutputSHA != "" && task.Worktree == flow.Contract.Worktree &&
-				task.BaselineSHA != last.Result.OutputSHA {
-				return fmt.Errorf("taxion: successor using the same worktree must retain the recorded latest output SHA")
+			} else {
+				last, _ := state.Graph.GraphDispatch(flow.LastDispatchID())
+				unstarted := last.Recipient == "CODER" && last.Status == core.DispatchCancelled &&
+					!last.ExecutionStarted && last.RuntimeSessionID == "" && last.Result != nil &&
+					flow.StopCode == "RECONTRACT" &&
+					slices.Contains(last.Result.Evidence, "not-started:"+last.ID)
+				if unstarted {
+					if request.Target != nil || task.BaselineSHA != last.Instruction.BaselineSHA {
+						return fmt.Errorf("taxion: unstarted Dispatch re-contract must retain its baseline and omit a feedback target")
+					}
+				} else {
+					if request.Target == nil {
+						return fmt.Errorf("taxion: executed predecessor re-contract requires an observed target")
+					}
+					target, err := core.ObserveFeedbackTarget(last)
+					if err != nil || target != *request.Target {
+						return core.ErrFeedbackStale
+					}
+				}
+				if last.Recipient == "CODER" && last.Status == core.DispatchCancelled {
+					if unstarted {
+						// An unstarted Dispatch has no worktree changes to transfer.
+					} else if request.ReconciliationHash != "" {
+						audit, err := reconciledInput(*state, flow.ID, request.ReconciliationHash)
+						if err != nil || audit.Target != *request.Target {
+							return fmt.Errorf("taxion: reconciled input does not match the cancelled predecessor")
+						}
+					} else if last.Result == nil || last.Result.PartialGitEvidence == nil {
+						return fmt.Errorf("taxion: cancelled Coder work requires verified partial Git evidence before successor approval")
+					} else {
+						if err := gitproof.VerifyPartialSuccessor(state.Records.RestoredDispatch(last), task); err != nil {
+							return fmt.Errorf("taxion: successor does not preserve the verified partial work: %w", err)
+						}
+					}
+				} else if flow.Status == "STOPPED" &&
+					last.Recipient == "CODER" && last.Status == core.DispatchSucceeded {
+					if _, err := budgetContinuationSource(state.Graph, task, last.ID, state.Records); err != nil {
+						return fmt.Errorf("taxion: successor does not preserve the completed Coder result: %w", err)
+					}
+				} else if last.Recipient == "REVIEWER" && (flow.StopCode == "BUDGET_LIMIT" ||
+					flow.StopCode == "SAFETY_STOP" && last.Status == core.DispatchCancelled) {
+					if len(flow.DispatchIDs) < 2 {
+						return fmt.Errorf("taxion: stopped Reviewer requires a saved Coder predecessor")
+					}
+					if _, err := budgetContinuationSource(state.Graph, task, flow.DispatchIDs[len(flow.DispatchIDs)-2], state.Records); err != nil {
+						return err
+					}
+				}
+				if last.Result != nil && last.Result.OutputSHA != "" && task.Worktree == flow.Contract.Worktree &&
+					task.BaselineSHA != last.Result.OutputSHA {
+					return fmt.Errorf("taxion: successor using the same worktree must retain the recorded latest output SHA")
+				}
 			}
 			// Preserve prior result, instruction, approval and ceiling snapshots.
-			if request.ReconciliationHash == "" {
+			if request.ReconciliationHash == "" && flow.Status != "STOPPED" {
 				flow.Status, flow.Reason = "STOPPED", "the user explicitly confirmed successor contract "+task.ID
 				storeFlow(state, flow)
 			}

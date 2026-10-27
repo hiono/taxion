@@ -117,7 +117,7 @@ func (g *TaskGraph) ApproveInstructionDraft(flowID string, approval DraftApprova
 }
 
 func (g TaskGraph) checkSupplementBoundary(flow ReviewFlow, draft InstructionDraft) error {
-	last, _ := g.dispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
+	last, _ := g.dispatch(flow.LastDispatchID())
 	target, err := ObserveFeedbackTarget(last)
 	if err != nil {
 		return err

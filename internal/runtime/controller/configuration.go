@@ -59,13 +59,21 @@ func CheckReviewFlowConfiguration(db *store.Store, flowID string, candidate conf
 	if err != nil {
 		return err
 	}
-	last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
-	if !slices.Contains(last.Instruction.Decisions, decision) {
+	last, _ := state.Graph.GraphDispatch(flow.LastDispatchID())
+	decisions := last.Instruction.Decisions
+	if flow.Artifact != nil && len(flow.DispatchIDs) == 0 {
+		decisions = flow.Contract.Decisions
+	}
+	if !slices.Contains(decisions, decision) {
 		return fmt.Errorf("taxion: configuration approval changed after Dispatch issuance; issue a newly authorized Dispatch")
 	}
 	task, _ := state.Graph.GraphTask(flow.TaskID)
-	for _, role := range []string{"CODER", "REVIEWER"} {
-		approved, err := tools.Resolve(last.Instruction.Decisions, flow.TaskID, role)
+	roles := []string{"CODER", "REVIEWER"}
+	if flow.Artifact != nil {
+		roles = []string{"REVIEWER"}
+	}
+	for _, role := range roles {
+		approved, err := tools.Resolve(decisions, flow.TaskID, role)
 		if err != nil {
 			return fmt.Errorf("taxion: preflight %s tools: %w", role, err)
 		}

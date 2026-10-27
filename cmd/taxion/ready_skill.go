@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.8"
+const readySkillVersion = "1.3.9"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -45,6 +45,19 @@ inputs and prerequisites. Use installed-version help, ready and saved output;
 do not browse Taxion implementation sources with gh api or clone Taxion merely
 to discover operation inputs. If formal help is insufficient, report the exact
 missing operation contract rather than inventing fields or starting source research.
+
+The RC5 artifactSource entry accepts unverified snapshot input without
+Coder success. Use workflow plan/start with maxRepairs: 0, stageBudget version 1
+and no Coder session ceiling; bind the actual tree/paths and new exact plan approval.
+Reuse covered contract/configuration approval and additionalTaskIds for FLOW_ID-review-0.
+workflow validate-input --id FLOW_ID runs approved Controller commands without
+a model and issues only the Reviewer after same-target validation succeeds.
+Then doctor --dispatch REVIEWER_DISPATCH_ID --json and workflow run --builtin-prompts.
+No Coder prompt, extra shell authority or manual changedFiles declaration is needed.
+An empty diff still requires full approved-program review. Supplied input is not
+a Coder success or quality verdict. No automatic replay of failed/unknown command
+execution; preserve its receipt and stopped history. Repairs, optional packet
+lifecycle and restored artifact execution are not supported in this first slice.
 
 Keep the same executable environment for diagnosis and execution. Check required
 executables before issuing work. --store selects the ledger path, not workspace.db.

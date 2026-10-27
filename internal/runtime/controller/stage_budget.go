@@ -12,18 +12,20 @@ import (
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
 )
 
 type StagePlanPreview struct {
-	StateChanged bool            `json:"stateChanged"`
-	FlowID       string          `json:"flowId"`
-	TaskID       string          `json:"taskId"`
-	MaxNanoAIU   float64         `json:"maxNanoAiu"`
-	Plan         *core.StagePlan `json:"stagePlan"`
-	Limitations  []string        `json:"limitations"`
-	ContractGate GateReport      `json:"contractGate"`
+	Artifact     *core.ArtifactTarget `json:"artifact,omitempty"`
+	StateChanged bool                 `json:"stateChanged"`
+	FlowID       string               `json:"flowId"`
+	TaskID       string               `json:"taskId"`
+	MaxNanoAIU   float64              `json:"maxNanoAiu"`
+	Plan         *core.StagePlan      `json:"stagePlan"`
+	Limitations  []string             `json:"limitations"`
+	ContractGate GateReport           `json:"contractGate"`
 }
 
 // PreviewStagePlan does not create a Flow, a Dispatch or an account query.
@@ -55,9 +57,20 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 		return StagePlanPreview{}, fmt.Errorf("taxion: stage plan requires finite limits, at most 1000 repairs and a deadline within one year")
 	}
 	policy := *request.StageBudget
+	var artifact *core.ArtifactTarget
+	if request.ArtifactSource != "" {
+		if *request.MaxRepairs != 0 || request.ContinueFromDispatchID != "" || policy.CoderSessionCredits != 0 {
+			return StagePlanPreview{}, fmt.Errorf("taxion: artifact review requires zero repairs and Coder permission, without a Coder continuation")
+		}
+		target, err := gitproof.ObserveArtifact(task, request.ArtifactSource, request.Configuration.Selection)
+		if err != nil {
+			return StagePlanPreview{}, err
+		}
+		artifact = &target
+	}
 	plan := &core.StagePlan{
 		Version: 1, TimeoutSeconds: request.TimeoutSeconds, MaxRepairs: *request.MaxRepairs,
-		ReviewOnly:        request.ContinueFromDispatchID != "",
+		ReviewOnly:        request.ContinueFromDispatchID != "" || artifact != nil,
 		ValidationSeconds: policy.ValidationSeconds, ReviewSeconds: policy.ReviewSeconds,
 		RepairSeconds:       policy.RepairSeconds,
 		CoderSessionCredits: policy.CoderSessionCredits, ReviewerSessionCredits: policy.ReviewerSessionCredits,
@@ -150,17 +163,21 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 	if plan.ReservedSeconds(0, role)+minimum > plan.TimeoutSeconds {
 		return StagePlanPreview{}, fmt.Errorf("taxion: planned mandatory stages leave insufficient room; split scope or obtain approval for a new outer envelope")
 	}
+	if artifact != nil && plan.ValidationSeconds+plan.ReviewSeconds > plan.TimeoutSeconds {
+		return StagePlanPreview{}, fmt.Errorf("taxion: input validation and independent review exceed the unchanged outer deadline")
+	}
 	request.StagePlanHash = ""
 	hash, err := core.CanonicalSHA256(struct {
-		Request ReviewFlowRequest `json:"request"`
-		Task    core.GraphTask    `json:"task"`
-		Plan    *core.StagePlan   `json:"plan"`
-	}{request, task, plan})
+		Request  ReviewFlowRequest    `json:"request"`
+		Task     core.GraphTask       `json:"task"`
+		Plan     *core.StagePlan      `json:"plan"`
+		Artifact *core.ArtifactTarget `json:"artifact,omitempty"`
+	}{request, task, plan, artifact})
 	if err != nil {
 		return StagePlanPreview{}, err
 	}
 	plan.Hash = "sha256:" + hash
-	return StagePlanPreview{FlowID: request.ID, TaskID: task.ID, MaxNanoAIU: request.MaxNanoAIU, Plan: plan, ContractGate: gate, Limitations: []string{
+	return StagePlanPreview{Artifact: artifact, FlowID: request.ID, TaskID: task.ID, MaxNanoAIU: request.MaxNanoAIU, Plan: plan, ContractGate: gate, Limitations: []string{
 		"The plan hash is not execution authorization. The current contract gate must pass separately; packet lifecycle delegation and runtime preflight are not established by this report.",
 		"Authorization text is part of the exact hash and must accurately describe the requested execution before approval. A preview-only decision cannot be reused as execution approval; amend the request and obtain a new hash approval.",
 		"Time reservations are controller deadlines, not a completion guarantee or provider credit reservation.",
@@ -359,6 +376,7 @@ type FlowBudgetObservation struct {
 }
 
 type ContinuationAdvice struct {
+	ArtifactHash        string   `json:"artifactHash,omitempty"`
 	RemainingAcceptance []string `json:"remainingAcceptance"`
 	SavedTree           string   `json:"savedTree,omitempty"`
 	SavedDispatch       string   `json:"savedDispatch,omitempty"`
@@ -405,6 +423,12 @@ func ObserveFlowBudget(state store.Workspace, id string) (FlowBudgetObservation,
 		}
 		break
 	}
+	if flow.Artifact != nil {
+		report.Continuation.ArtifactHash = flow.Artifact.Target.Hash
+		report.Continuation.SavedTree = flow.Artifact.Target.TreeSHA
+		report.Continuation.IdentityStatus = "saved-input; live identity and independent quality not established by this observation"
+		report.Continuation.NextAction = "Inspect the saved input validation receipt. Pending input can use the authorized validate-input/run boundary. Never replay failed or unknown command execution; preserve input and receipts for a separately approved successor. This report grants no execution or publication authority."
+	}
 	if flow.Status == "COMPLETED" {
 		report.Continuation.RemainingAcceptance = []string{}
 		report.Continuation.NextAction = "No execution is needed. Publication requires separate authorization."
@@ -416,7 +440,7 @@ func verifyStagePlanBinding(records store.Records, flow core.ReviewFlow) error {
 		return nil
 	}
 	for _, audit := range records.Budgets {
-		if audit.FlowID != flow.ID || audit.Kind != "DISPATCH_ISSUED" {
+		if audit.FlowID != flow.ID || (audit.Kind != "DISPATCH_ISSUED" && !(flow.Artifact != nil && audit.Kind == "INPUT_ACCEPTED")) {
 			continue
 		}
 		var report TaskBudgetReport
@@ -425,6 +449,15 @@ func verifyStagePlanBinding(records store.Records, flow core.ReviewFlow) error {
 		}
 		if report.ResumeBasis == nil || !reflect.DeepEqual(report.ResumeBasis.StagePlan, flow.StagePlan) {
 			return fmt.Errorf("taxion: saved stage plan differs from its immutable issuance approval")
+		}
+		if flow.Artifact != nil && report.ResumeBasis.ArtifactHash != flow.Artifact.Target.Hash {
+			return fmt.Errorf("taxion: input artifact differs from its immutable plan approval")
+		}
+		if flow.Artifact != nil {
+			hash, err := flow.Artifact.BasisHash()
+			if err != nil || hash != report.ResumeBasis.ArtifactBasisHash {
+				return fmt.Errorf("taxion: input artifact configuration differs from its immutable plan approval")
+			}
 		}
 		return nil
 	}
