@@ -31,6 +31,7 @@ func TestJSONOperationHelpExplainsInputsWithoutWorkspace(t *testing.T) {
 			"continuationChange", "savedOutputDecision", "SUSPENDED", "no combined DRAFT"}},
 		{"workflow start", []string{"JSON input", "stageBudget", "stagePlanHash", "actual user approval", "not a model turn"}},
 		{"workflow validate-input", []string{"no model", "artifactSource", "unknown", "doctor --dispatch"}},
+		{"workflow run", []string{"progress-monitor", "ten minutes", "no extra model"}},
 	} {
 		t.Run(test.command, func(t *testing.T) {
 			parts := strings.Fields(test.command)
