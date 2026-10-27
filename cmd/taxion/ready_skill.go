@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.7"
+const readySkillVersion = "1.3.8"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -81,7 +81,18 @@ and cancelled feedback target. This does not authorize a new Flow or model run.
 Preserve completed work. New budgets, changed scope and permissions need explicit
 user approval. Within that envelope, advance without repeated confirmation.
 Use available observations before asking for remaining usage; do not require a
-total quota for a remaining-balance contract. Tool version and conversation
+total quota for a remaining-balance contract.
+Determine balance requirements from the saved Task/Dispatch and Flow billing
+contract. provider / provider-stop does not automatically query account balances.
+An unknown balance alone does not block execution or require manual credits entry
+under this mode. account requires approved external balance checks; unavailable
+observations stop execution. Explicit positive usage limits and separately
+approved balance requirements still apply. Provider access checks are separate
+from numeric balance checks. No balance-only CLI is provided.
+config check --billing displays resolved settings for NEW proposals, not a live
+provider balance or permission to change saved work. Do not switch billing modes,
+expand limits or infer approval to query an account.
+Tool version and conversation
 reproducibility do not prove output quality. Check required capabilities and
 session compatibility; automatic provider updates are not implemented here.
 Controller validation and independent same-target review are

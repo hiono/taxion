@@ -252,6 +252,18 @@ remaining-balance contract does not require re-entering the total quota. Version
 changes alone are not new consent; check actual required capabilities and saved
 session compatibility. Automated provider updates are not implemented here.
 
+Determine balance requirements from the saved Task/Dispatch and Flow billing
+contract before asking the user for credits. provider / provider-stop does not
+automatically query account balances. An unknown balance alone does not block
+execution or require manual credits entry under this mode. Do not invent a
+balance-check requirement. account requires approved external balance checks;
+unavailable observations stop execution. Explicit positive usage limits and
+separately approved balance requirements still apply in every mode.
+Provider access checks are separate from numeric balance checks. No balance-only
+CLI is provided. config check --billing displays resolved settings for NEW
+proposals, not the saved work's authorization or a live provider balance.
+Do not switch billing modes, expand limits or infer approval to query an account.
+
 Explain the repair count, deadline and session soft ceiling and record user authorization.
 Each runtime session's --max-ai-credits is a soft ceiling of at least 30, not a Flow total.
 Without a stage plan it is one common value for Coder and Reviewer: 300 does not

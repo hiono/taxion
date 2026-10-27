@@ -47,7 +47,7 @@ Setup and discovery:
   doctor fix          Preview and explicitly repair missing Project settings and Git protection ([--set FIELD=VALUE], [--remote NAME], [--dry-run], [--yes])
   completion bash     Print offline bash command and option completion
   ready               Print coding-agent usage instructions; optional --install-skill / --update-skill / --check-skill
-  config check        Validate fixed Global/Project YAML and environment references ([--sources], [--capabilities], [--task], [--dispatch])
+  config check        Validate fixed Global/Project YAML and environment references ([--sources], [--capabilities], [--task], [--dispatch], [--billing])
   provenance configure  Bind an explicit development/product store policy (--file POLICY.json; never overwrites)
   provenance verify   Verify the operation mode and pinned release artifact without changing state
 
@@ -180,6 +180,16 @@ Specification sources and tools:
 
 Identity gate (REP-001): task create, dispatch and review require an explicit --repo.
 The target is never inferred from the working directory.
+
+Billing and balance checks:
+provider / provider-stop: no automatic account balance query; an unknown balance
+alone does not block execution or require manual credits entry under this mode.
+account: approved external balance checks are required; unavailable observations stop execution.
+Explicit positive usage limits and separately approved balance requirements still apply.
+Provider access checks are separate from numeric balance checks. No balance-only CLI is provided.
+config check --billing displays resolved settings for NEW proposals; it does not query a provider.
+For saved work, inspect its Task/Dispatch and Flow billing contract, not just current settings.
+Do not switch billing modes, expand limits or infer approval to query an account.
 
 Bash completion: source <(taxion completion bash)
 Add that line to ~/.bashrc for persistence, then open a new shell or run source ~/.bashrc.
