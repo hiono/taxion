@@ -63,6 +63,9 @@ Web の12テストを通過した。
 
 ## Dispatch のない入力検証失敗の後続契約（Issue #203）
 
+実装 commit: `0a1558c`（比較元 `de2d6f5e203e19f642c7c11799fa7bee4ccebf02`）。
+最終指摘修正後の `mise run check`、対象 race test、help 入力テスト、`git diff --check` は成功した。
+
 `artifact_successor_test.go` では、持込み29ファイルを actual host command で不合格にし、
 Dispatch なしの停止から別 worktree に同じ入力を保持して通常後続を提案・確認した。
 失敗 artifact と receipt の digest は自動決定として提案 hash に含める。
