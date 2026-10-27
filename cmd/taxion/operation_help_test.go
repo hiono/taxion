@@ -22,7 +22,8 @@ func TestJSONOperationHelpExplainsInputsWithoutWorkspace(t *testing.T) {
 		command string
 		fields  []string
 	}{
-		{"conversation intake", []string{"JSON envelope", "DRAFT", "supersedes", "targetTreeSha", "taxion ready"}},
+		{"conversation intake", []string{"JSON envelope", "DRAFT", "supersedes", "targetTreeSha", "taxion ready",
+			"A receipt hash is NOT diagnostic content", "task.objective", "task graph BEFORE"}},
 		{"conversation confirm", []string{"expectedHash", "selection", "configurationDecisionId", "additionalTaskIds", "replacesFlow",
 			"workflow feedback-target", "updatedAt", "resultHash", "ApprovalBundle", "No combined DRAFT",
 			"target to be OMITTED", "artifact-predecessor", "Both worktrees", "receipt"}},
@@ -81,7 +82,9 @@ func TestOperationHelpExamplesMatchRequestTypes(t *testing.T) {
 			t.Fatal("operator guidance routes missing help into source investigation")
 		}
 		for _, required := range []string{"receiptHash", "replacesFlow=FAILED_FLOW_ID", "OMITS target",
-			"--controller-validation-submission", "continuationChange", "savedOutputDecision"} {
+			"--controller-validation-submission", "continuationChange", "savedOutputDecision",
+			"A receipt hash is NOT diagnostic content", "task.objective", "task graph BEFORE",
+			"unperformed checks", "excerpts/truncation"} {
 			if !strings.Contains(text, required) {
 				t.Fatalf("zero-Dispatch recovery guidance omits %q", required)
 			}

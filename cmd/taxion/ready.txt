@@ -389,6 +389,23 @@ Changing a saved stage plan requires a new contract, never editing old state.
 
 ## Continue according to results
 
+### Repair diagnostic handoff before model launch
+
+A receipt hash is NOT diagnostic content. For a repair successor, include the
+failed command, exit code, test names, assertions/messages, unclassified causes
+and unperformed checks in task.objective before proposal approval. Read the
+saved validation output; redact credentials and label excerpts/truncation.
+Keep evidence references, but a management-directory path alone is insufficient:
+workers must not need access to the controller database or session directory.
+After start, inspect the actual Coder Dispatch instruction in task graph BEFORE
+any model execution. Check that the concrete diagnostics and Controller/Reviewer
+responsibilities are present, not merely a receipt hash or planned intake JSON.
+Missing diagnostics block model launch. Preserve issued work and use approved
+change control; do not rewrite old instructions, silently add sessions or retry.
+For already-running work, inspect actual findings and edits against the objective,
+not just process liveness or log timestamps. Monitoring does not authorize stops,
+restarts or extra budget; follow existing approval and interruption contracts.
+
 FAILED artifact input with dispatchIds: [] has no feedback target. Preserve its
 receipt and input, require STOPPED/SAFETY_STOP, handoff hold and released runner.
 Use a separate-worktree normal CODER/REVIEWER DRAFT successor: supersedes is the
