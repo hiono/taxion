@@ -20,7 +20,7 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 
 `blocked` は入力または承認の不足を表す。`blockingConditions` と `nextRequiredApproval` を確認する。
 
-- `missing-approval-bundle`: `taxion task authorize` で bundle を追記する。
+- `missing-approval-bundle`: 開発版では、元の正式な `conversation confirm --file confirmation.json` を先に照合・再実行する。未実行・未変更の READY Task に限り、確認履歴から不足 bundle を補完でき、同じ承認を取り直さない。元の要求や履歴がなければ推測で作らず、`taxion task authorize` で明示的に承認する。
 - `reapproval-required`: drift を確認し、新しい token で再承認する。
 - `quality-gate-unmet`: 同一 target の独立レビューと受入れ証拠を記録する。未検証のまま `pass` にしない。
 - `handoff-held`: 次の role を一つだけ実行する場合は handoff を release する。release は実行中の role を取り消さない。

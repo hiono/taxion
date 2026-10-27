@@ -66,6 +66,12 @@ Dispatch を対応付けず、Task・主 Flow の履歴や承認を変更しな�
 
 intake は、元の依頼本文を出典付きの未承認 `DRAFT` Task に保存する。任意の planning 設定承認が許可するのは、隔離した上限付き質問だけ。完全な hash に対する利用者の確認は、`READY` 前に実行承認と設定承認を別々に記録する。scope・acceptance・検証 command が不足した契約は確認を通せない。確認だけでは作業を発行せず、Flow 上限も選ばない。
 
+全機能での自律判断と確認の境界は [ADR-0055](adr/0055-adapt-within-approved-goals.md) に従う。目的・受入れ条件・権限・残予算・期限を保って手段を選び、人間には判断が実際に変わる差分だけを確認する。モデル応答や版の再現性を品質の代わりにせず、成果の検証と独立レビューを行う。
+
+開発版はその第一段階として、bundle-required graph の正式確認から canonicalization version 2 の ApprovalBundle を同一 transaction で導出する。proposalHash は元の確認、recordHash は確認後の READY 全体、7次元は保存契約と選択設定を束縛する。actor・source・reason・時刻は元の正式確認を引き継ぐ。旧形式の marker は変更しない。
+
+不足 bundle の補完は、完全一致する確認要求の再実行に限る。元の DRAFT hash、最初の READY 履歴と現在 Task、設定承認を照合し、Task の Flow・Graph／ledger Dispatch がないことを要求する。競合 bundle は上書きしない。確認と bundle 保存がともに成功するか、全体を取り消す。保存済み bundle の検証や実行入口は緩和せず、役割委譲を新たに生成する操作でもない。
+
 発行済み契約を改訂する場合は successor Task を作る。前 Task の hold 済み対象が必要で、runner と active Dispatch がないことを要求する。旧 Flow の上限、承認、指示、結果は変更しない。明示的な再承認で前 Task を停止・置換し、別の上限を持つ作業を準備する。
 
 実行を伴わない Planner の採用 action は、出典付きの未解決 feedback として扱い、修正指示にはしない。明示的な処置、別の調査、successor の再承認まで hold を保つ。同一入力の再送で、旧助言を別の role に適用しない。自動進行に追加のモデル呼出しは入れない。

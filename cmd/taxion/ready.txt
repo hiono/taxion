@@ -196,7 +196,10 @@ FLOW-ID-review-N in additional configuration approval. Do not extend the approve
 taxion conversation confirm --file confirmation.json
 taxion config check --task TASK-ID
 
-confirm makes the Task READY but starts no Dispatch or model.
+confirm makes the Task READY but starts no Dispatch or model. In bundle-required
+graphs it also derives the ApprovalBundle from that exact formal confirmation
+in the same transaction. Do not ask for the same contract approval again merely
+to create a different record format. Verified-legacy graphs are not migrated.
 Changing a confirmed contract requires a new Task and approval, not reuse of the old hash's approval.
 
 For STOPPED/SAFETY_STOP with HOLD and only the first issued snapshot-input Coder,
@@ -219,15 +222,30 @@ Use the same explicit --store ledger path used for the saved work on every comma
 An absent ledger.json is not a missing workspace if its parent's initialized
 workspace.db exists. Do not silently switch to the worktree's default workspace.
 Before preparing the plan, inspect gate contract for the READY Task and current
-configuration. If the matching ApprovalBundle is absent, use task authorize
---manifest FILE to preview its exact confirmation token, obtain approval, then
-record it with --confirm TOKEN. A conversation approval or stagePlanHash does not
-create this bundle. A verified-legacy classification is not a new bundle.
-For explicitly delegated same-contract review, preview task authorize-packets
+configuration. If an older formal confirmation lacks its bundle, replay its exact
+saved conversation confirm request first. For an unchanged, unexecuted READY Task,
+the original proposal and approval history can supply the missing bundle without
+new consent. Do not change the request or invent missing approval evidence.
+If that source cannot be reused, task authorize --manifest FILE provides explicit
+preview/confirmation. A stagePlanHash does not create a bundle. A verified-legacy
+classification is not a new bundle.
+Packet lifecycle delegation is opt-in, not mandatory for every Flow. If the
+confirmed configuration already covers all bounded Reviewer additionalTaskIds,
+do not ask for another delegation merely to execute those reviews.
+For explicitly requested same-contract packet lifecycle, preview task authorize-packets
 --request FILE, approve that exact authorization, and persist it with --confirm
 TOKEN before Flow issuance. Empty packet authorizations are not evidence of
 delegation. Do not invent a token or require another approval for already-covered
 internal transitions. Inspect each command's help for the manifest shape.
+
+Judge AI output by acceptance, controller validation and independent same-target
+review, not reproducibility of conversation or a matching tool version. Preserve
+purpose, acceptance, permissions, remaining budget, deadlines and provenance;
+choose internal steps within that envelope without repeated human questions.
+Use available saved/provider observations before asking for usage again. A
+remaining-balance contract does not require re-entering the total quota. Version
+changes alone are not new consent; check actual required capabilities and saved
+session compatibility. Automated provider updates are not implemented here.
 
 Explain the repair count, deadline and session soft ceiling and record user authorization.
 Each runtime session's --max-ai-credits is a soft ceiling of at least 30, not a Flow total.

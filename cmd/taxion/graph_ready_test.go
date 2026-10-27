@@ -100,6 +100,59 @@ func freshPreview(t *testing.T, file string) string {
 	return preview.Token
 }
 
+func TestTaskAuthorizeReusesFormalIntakeConfirmationWithoutAnotherToken(t *testing.T) {
+	request, _ := freshReadyFixture(t)
+	resolved, err := resolveConfiguration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := openWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := request.Task
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "actual-confirmation", core.Draft, "", nil
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		state.Graph.ApprovalSchemaVersion = core.CurrentApprovalSchemaVersion
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task, err = controller.ProposeIntake(db, controller.IntakeRequest{
+		Task: task, Request: "Implement this contract.", Actor: "human", Source: "human:request"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, _ := controller.IntakeHash(task)
+	task, err = controller.ConfirmIntake(db, controller.IntakeConfirmation{
+		TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirmed-contract",
+		Reason: "Approve the displayed contract once.", Selection: resolved.Config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := packetWorkspaceSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := freshManifest(t, graphRequest{Task: task, Actor: "operator", Reason: "Use the already approved contract."})
+	output, err := runReauthorizationCommand(t, []string{"authorize", "--manifest", file})
+	if err != nil {
+		t.Fatal("formal confirmation required a second token", output, err)
+	}
+	var report approvalGateReport
+	if err := json.Unmarshal([]byte(output), &report); err != nil || !report.Reused ||
+		report.ApprovalID != task.AuthorizationID {
+		t.Fatal("original derived approval was not reused", output, err)
+	}
+	after, err := packetWorkspaceSnapshot()
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("readback changed the original approval provenance", err)
+	}
+}
+
 func TestFreshReadyAuthorizationLifecycleAndRestart(t *testing.T) {
 	request, _ := freshReadyFixture(t)
 	file := freshManifest(t, request)

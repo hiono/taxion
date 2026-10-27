@@ -10,7 +10,9 @@
 
 ## CLI
 
-fresh な READY Task に設定承認だけが保存され、ApprovalBundle がまだない場合も、`task authorize --manifest FILE` を使う。manifest の `task` は保存済み record 全体と完全一致させ、`actor` と `reason` を指定する。Flow・Dispatch が存在せず、immutable proposal reference と既存の設定承認が現在の設定に一致する場合だけ、preview と `--confirm` で bundle を追記する。Task state・decisions・設定承認・deadline・budget は変更しない。同じ要求は保存済み bundle を再利用し、異なる bundle や処理中の source/configuration 変更は拒否する。詳細は [Task の検証と承認](task-validate-and-authorize.md#fresh-ready-task-の不足-bundle-を生成する)を参照する。
+開発版（未配布）の `conversation confirm` は、承認束を要求する保存形式では、正式確認から ApprovalBundle を同じ transaction で追記する。同じ契約への二度目の承認は不要。以前の正式確認がある未実行・未変更の `READY` Task も、保存済みの完全一致する確認要求を再実行すれば、不足する bundle だけを追記できる。旧形式を暗黙移行せず、Flow・Dispatch・役割委譲は生成しない。
+
+その正式確認を再利用できない場合は、`task authorize --manifest FILE` で明示的に承認する。manifest の `task` は保存済み record 全体と完全一致させ、`actor` と `reason` を指定する。Flow・Dispatch が存在せず、immutable proposal reference と既存の設定承認が現在の設定に一致する場合だけ、preview と `--confirm` で bundle を追記する。正式確認から導出済みの bundle は元の承認者・出典を保って読み戻し、新しい token を求めない。詳細は [Task の検証と承認](task-validate-and-authorize.md#fresh-ready-task-の不足-bundle-を生成する)を参照する。
 
 インストール済みの目的別コマンド一覧は `taxion --help`、各コマンドの flag は `taxion COMMAND -h` で確認する。分類は表示上の案内であり、コマンド名や option の構文は変えない。`ready` は状況ごとの操作と承認境界を先に示す。以下は代表的な操作例で、契約の詳細は Task Graph、設定、実行記録の各文書に記載する。
 

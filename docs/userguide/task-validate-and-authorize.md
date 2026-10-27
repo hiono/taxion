@@ -49,11 +49,13 @@ token が一致しない場合、Task は保存されない。`--confirm` は to
 
 ## fresh READY Task の不足 bundle を生成する
 
+開発版（未配布）の `conversation confirm` は、bundle-required graph では正式確認から bundle を同じ transaction で導出する。この場合、以下の追加承認は不要。以前の正式確認に bundle だけが欠けている場合も、元の完全一致する確認要求を再実行する。未実行・未変更の READY Task、元の DRAFT hash と最初の READY 履歴、設定承認が揃うときだけ、不足 bundle を追記する。旧形式は移行しない。元の確認を再利用できない場合は、以下の明示承認経路を使う。
+
 設定承認が現在の設定と一致している READY Task には、同じ `task authorize --manifest FILE` で初期 ApprovalBundle だけを追加できる。manifest の `task` は `taxion task graph` で読み戻した Task record 全体と完全一致させる。`actor` と `reason` は必須で、新しい `concern` は指定しない。保存済み intake confirmation に有効な immutable proposal reference があり、対象 Task に Flow・Dispatch がまだ存在しないことも必要になる。
 
 preview は `status`、`taskId`、`proposalHash`、`confirmationToken`、`stateChanged: false` を返す。token は version 1 の workspace snapshot hash、manifest 全体、effective configuration と出典を束縛する確認用 digest で、認証 credential ではない。内容を確認して同じ `--confirm` を渡すと、transaction 内で source と configuration を再照合し、canonicalization version 2 の bundle だけを追記する。確認時だけ SQLite の immediate transaction を使い、書込み競合は最大5秒待つ。待機によって古い承認を更新せず、先行する変更があれば再照合で拒否する。Task state、既存 decisions、configuration approval、Flow、Dispatch、deadline、budget は変更しない。
 
-同じ manifest の再送は既存 bundle を再利用する。異なる契約・proposal・設定・actor・reason の bundle がある場合は拒否し、履歴を置換しない。fresh 経路の拒否は `ready-authorization-invalid` または `ready-authorization-stale` と `stateChanged: false` を返す。manifest の未知 field や不正 JSON は既存の strict decoder で拒否し、`authorization-invalid-manifest` を返す。source や設定の読込み失敗も `authorization-invalid-source` / `authorization-invalid-configuration` として区別する。
+同じ manifest の再送は既存 bundle を再利用する。正式確認から導出した bundle も、契約・proposal・設定が一致すれば、新しい token を要求せず元の actor・source・reason のまま読み戻す。明示的な fresh 承認の bundle については、従来どおり actor・reason も一致させる。異なる契約・proposal・設定の bundle がある場合は拒否し、履歴を置換しない。fresh 経路の拒否は `ready-authorization-invalid` または `ready-authorization-stale` と `stateChanged: false` を返す。manifest の未知 field や不正 JSON は既存の strict decoder で拒否し、`authorization-invalid-manifest` を返す。source や設定の読込み失敗も `authorization-invalid-source` / `authorization-invalid-configuration` として区別する。
 
 生成後は通常の `task authorize-packets` と Contract Gate が bundle を利用する。bundle の生成だけでは packet、Flow、Dispatch、runtime は開始しない。設定 drift に対する `task reauthorize` や保存済み workflow の resume 条件も変えない。v0.7.7 へ rollback しても保存 bundle は削除せず保持するが、不足 bundle の生成にはこの修正を含む版を使う。
 
