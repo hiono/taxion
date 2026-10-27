@@ -443,7 +443,7 @@ taxion conversation confirm --file confirmation.json
 
 confirmation は Task を `READY` にしますが、Dispatch は発行しません。actor/source の文字列は保存されますが、CLI が利用者の身元を認証するわけではありません。
 
-開発版（未配布）では、承認束を要求する保存形式なら、この正式確認と同じ transaction で ApprovalBundle も追記します。同じ作業条件と設定を `task authorize` でもう一度承認する必要はありません。旧形式の扱いは変えません。古い正式確認に bundle だけが欠けている場合は、元の `confirmation.json` をそのまま再実行できます。未実行の `READY` 契約が元の確認履歴と完全一致するときだけ不足記録を補い、Task・履歴・期限・予算は変更しません。設定や契約を変えて元の承認を再利用することはできません。
+v0.7.21-rc.4 では、承認束を要求する保存形式なら、この正式確認と同じ transaction で ApprovalBundle も追記します。同じ作業条件と設定を `task authorize` でもう一度承認する必要はありません。旧形式の扱いは変えません。古い正式確認に bundle だけが欠けている場合は、元の `confirmation.json` をそのまま再実行できます。未実行の `READY` 契約が元の確認履歴と完全一致するときだけ不足記録を補い、Task・履歴・期限・予算は変更しません。設定や契約を変えて元の承認を再利用することはできません。
 
 `additionalTaskIds` は後述する Flow が作る Reviewer Task の設定承認です。この例の Flow ID は `task-example-flow`、修正上限は1回なので、初回レビューと再レビューの2件を列挙します。Flow ID または修正上限を変える場合は、この一覧も承認前に合わせてください。空の一覧では Coder だけが承認対象になり、独立 Reviewer の実行が拒否されます。`selection` は採用する設定ファイルの値と一致させます。
 

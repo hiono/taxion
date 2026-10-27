@@ -40,7 +40,7 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 
 Coder が製品の実装をせず Taxion の管理 skill や管理 DB・session directory を調べて停止した場合は、役割と指示の混同を先に調べる。API 接続成功は、役割が正しく割り当てられた証拠ではない。管理用 shell や広いファイル権限の追加、同じ構成の再試行を第一の対処にしない。製品の目的・担当・必要なファイルへの既存の権限・controller による検証の分担を照合する。ログの `denied-interactively-by-user` だけで実際に利用者が拒否したと断定しない。
 
-開発版（未配布）は Copilot Coder／Reviewer から同名の `taxion` 管理 skill を除外し、Dispatch の共通指示にも役割の境界を明記する。他の製品 skill を一括無効化せず、権限も増やさない。設定や指示を修正しても、終端 Flow の再送、旧 session の書換え、期限・予算の延長を許可するものではない。実装・検証・独立レビューの未実施を完了に変えず、元の停止・利用量と保存成果を保全して正式な後続を準備する。
+v0.7.21-rc.4 は Copilot Coder／Reviewer から同名の `taxion` 管理 skill を除外し、Dispatch の共通指示にも役割の境界を明記する。他の製品 skill を一括無効化せず、権限も増やさない。設定や指示を修正しても、終端 Flow の再送、旧 session の書換え、期限・予算の延長を許可するものではない。実装・検証・独立レビューの未実施を完了に変えず、元の停止・利用量と保存成果を保全して正式な後続を準備する。
 
 停止した Flow は `workflow show --id <flow-id>` で状態、停止 code、理由、Dispatch を確認し、`workflow evaluate --id <flow-id>` で approved/consumed/remaining と usage の完全性を確認する。`BUDGET_STOP` は ceiling 到達または usage 不明を意味する。不明な nano-AIU remaining は0として扱い、既存 bundle で新しい session/Dispatch を再開しない。部分実行の checkpoint と audit は保持し、新しい Task 契約・予算が承認されてから続行する。`workflow terminate` は未確認・未開始の Coder Dispatch に限る。
 

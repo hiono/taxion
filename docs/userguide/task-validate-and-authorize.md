@@ -49,7 +49,7 @@ token が一致しない場合、Task は保存されない。`--confirm` は to
 
 ## fresh READY Task の不足 bundle を生成する
 
-開発版（未配布）の `conversation confirm` は、bundle-required graph では正式確認から bundle を同じ transaction で導出する。この場合、以下の追加承認は不要。以前の正式確認に bundle だけが欠けている場合も、元の完全一致する確認要求を再実行する。未実行・未変更の READY Task、元の DRAFT hash と最初の READY 履歴、設定承認が揃うときだけ、不足 bundle を追記する。旧形式は移行しない。元の確認を再利用できない場合は、以下の明示承認経路を使う。
+v0.7.21-rc.4 の `conversation confirm` は、bundle-required graph では正式確認から bundle を同じ transaction で導出する。この場合、以下の追加承認は不要。以前の正式確認に bundle だけが欠けている場合も、元の完全一致する確認要求を再実行する。未実行・未変更の READY Task、元の DRAFT hash と最初の READY 履歴、設定承認が揃うときだけ、不足 bundle を追記する。旧形式は移行しない。元の確認を再利用できない場合は、以下の明示承認経路を使う。
 
 設定承認が現在の設定と一致している READY Task には、同じ `task authorize --manifest FILE` で初期 ApprovalBundle だけを追加できる。manifest の `task` は `taxion task graph` で読み戻した Task record 全体と完全一致させる。`actor` と `reason` は必須で、新しい `concern` は指定しない。保存済み intake confirmation に有効な immutable proposal reference があり、対象 Task に Flow・Dispatch がまだ存在しないことも必要になる。
 
