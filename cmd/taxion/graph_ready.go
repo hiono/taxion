@@ -80,8 +80,9 @@ func checkReadyAuthorization(state store.Workspace, request graphRequest, config
 		return core.ApprovalBundle{}, fmt.Errorf("Task authorization or existing configuration approval does not match")
 	}
 	for _, bundle := range state.Graph.ApprovalsForTask(task.ID) {
+		fromConfirmation := bundle.ID == task.AuthorizationID && bundle.ID == "intake-confirmation:"+task.ID
 		if bundle.ProposalHash != proposalHash || bundle.RecordHash != recordHash ||
-			bundle.Actor != request.Actor || bundle.Source != "human:"+request.Actor || bundle.Reason != request.Reason {
+			!fromConfirmation && (bundle.Actor != request.Actor || bundle.Source != "human:"+request.Actor || bundle.Reason != request.Reason) {
 			return core.ApprovalBundle{}, fmt.Errorf("existing bundle conflicts with the requested authorization")
 		}
 		if err := bundle.Verify(task, configuration); err != nil {

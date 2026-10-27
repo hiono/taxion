@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.5"
+const readySkillVersion = "1.3.6"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -52,8 +52,14 @@ Use workflow budget to inspect saved stage observations and continuation advice.
 Positive native Flow caps need complete same-configuration usage or explicitly
 approved estimates for every reserved role; missing estimates block planning.
 Stage plan approval does not create an ApprovalBundle or packet delegation.
-Inspect contractGate, record missing approvals through the formal preview/confirm
-commands, then recompute the plan if its Task, configuration or request changed.
+In bundle-required graphs, formal conversation confirm derives its exact bundle
+atomically. For an older unchanged, unexecuted READY Task, replay the original
+saved confirmation to derive a missing bundle before requesting consent again.
+Never invent or alter the original approval. Legacy graphs are not migrated.
+Inspect contractGate. Explicitly approved additionalTaskIds can already cover
+bounded Reviewer configurations; packet lifecycle is opt-in, not another
+mandatory approval for those reviews. Missing new rights still require consent.
+Recompute the plan only if its Task, configuration or request changed.
 Authorization text must permit execution, not only preview; correcting it needs
 a new exact hash approval. Never rewrite saved authorization.
 Copilot child processes disable built-in MCP servers without editing user settings;
@@ -68,7 +74,12 @@ not new Coder output or proof of zero usage. A distinct-worktree successor needs
 reconciliationHash in both intake and confirmation, its exact proposal approval
 and cancelled feedback target. This does not authorize a new Flow or model run.
 Preserve completed work. New budgets, changed scope and permissions need explicit
-user approval. Controller validation and independent same-target review are
+user approval. Within that envelope, advance without repeated confirmation.
+Use available observations before asking for remaining usage; do not require a
+total quota for a remaining-balance contract. Tool version and conversation
+reproducibility do not prove output quality. Check required capabilities and
+session compatibility; automatic provider updates are not implemented here.
+Controller validation and independent same-target review are
 required before claiming completion. Inventory and skill integrity checks do not
 prove authentication, authorization, model loading or successful execution.
 `

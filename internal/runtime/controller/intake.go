@@ -224,6 +224,9 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 				if decision != confirmation {
 					return fmt.Errorf("taxion: intake confirmation cannot be rewritten")
 				}
+				if err := appendConfirmedIntakeApproval(state, task, request); err != nil {
+					return err
+				}
 				result = task
 				return nil
 			}
@@ -375,7 +378,98 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 			}
 		}
 		result, _ = state.Graph.GraphTask(task.ID)
-		return nil
+		return appendConfirmedIntakeApproval(state, result, request)
 	})
 	return result, err
+}
+
+// A bundle is a representation of the exact formal confirmation, not a second
+// human decision. Legacy graphs keep their existing authorization semantics.
+func appendConfirmedIntakeApproval(state *store.Workspace, task core.GraphTask, request IntakeConfirmation) error {
+	switch state.Graph.ApprovalRequirement() {
+	case core.ApprovalVerifiedLegacy:
+		return nil
+	case core.ApprovalBundleRequired:
+	default:
+		return fmt.Errorf("taxion: cannot reuse confirmation with an ambiguous approval schema")
+	}
+	selection, err := json.Marshal(request.Selection)
+	if err != nil {
+		return err
+	}
+	configuration, err := core.SelectApprovalConfiguration(selection, nil)
+	if err != nil {
+		return err
+	}
+	if _, ok := state.Graph.MatchingApproval(task.ID, task, configuration); ok {
+		return nil
+	}
+	if task.Status != core.Ready {
+		for _, event := range state.Graph.History {
+			if event.TaskID == task.ID && event.Task.Status == core.Ready {
+				bundle, ok := state.Graph.MatchingApproval(task.ID, event.Task, configuration)
+				if ok && bundle.ID == "intake-confirmation:"+task.ID {
+					return nil // Replay preserves the original approval, not current execution eligibility.
+				}
+				break
+			}
+		}
+	}
+	if len(state.Graph.ApprovalsForTask(task.ID)) != 0 {
+		return fmt.Errorf("taxion: existing approval conflicts with the confirmed contract; use explicit reauthorization")
+	}
+	if task.Status != core.Ready || task.AuthorizationID != "intake-confirmation:"+task.ID {
+		return fmt.Errorf("taxion: confirmation reuse requires an unchanged unexecuted READY Task")
+	}
+	for _, flow := range state.Graph.ReviewFlows {
+		if flow.TaskID == task.ID {
+			return fmt.Errorf("taxion: confirmation reuse cannot authorize a Task with an existing Flow")
+		}
+	}
+	for _, dispatch := range state.Graph.Dispatches {
+		if dispatch.TaskID == task.ID {
+			return fmt.Errorf("taxion: confirmation reuse cannot authorize a Task with an existing Dispatch")
+		}
+	}
+	for _, dispatch := range state.Ledger.Dispatches {
+		if dispatch.TaskID == task.ID {
+			return fmt.Errorf("taxion: confirmation reuse cannot authorize a Task with a ledger Dispatch")
+		}
+	}
+	if _, err := checkTaskConfiguration(state.Graph, task.ID, request.Selection); err != nil {
+		return err
+	}
+	proposalHash, err := core.ImmutableProposalHash(task)
+	if err != nil || proposalHash != request.ExpectedHash {
+		return fmt.Errorf("taxion: confirmation reuse lacks its immutable proposal")
+	}
+	draftFound := false
+	var approved *core.GraphEvent
+	for i := range state.Graph.History {
+		event := &state.Graph.History[i]
+		if event.TaskID != task.ID {
+			continue
+		}
+		if event.Task.Status == core.Draft {
+			hash, err := IntakeHash(event.Task)
+			draftFound = draftFound || err == nil && hash == proposalHash
+		}
+		if event.Task.Status == core.Ready && approved == nil {
+			approved = event
+		}
+	}
+	if !draftFound || approved == nil || !reflect.DeepEqual(approved.Task, task) ||
+		approved.Actor != request.Actor || approved.Reason != request.Reason {
+		return fmt.Errorf("taxion: confirmation reuse requires the original unchanged approved contract and history")
+	}
+	bundle, err := core.ComposeReauthorizationApprovalBundleWithProposalHash(
+		"intake-confirmation:"+task.ID, proposalHash, task, configuration,
+		request.Actor, request.Source, request.Reason, approved.At)
+	if err != nil {
+		return err
+	}
+	if err := bundle.Verify(task, configuration); err != nil {
+		return err
+	}
+	return state.Graph.AppendApproval(bundle)
 }

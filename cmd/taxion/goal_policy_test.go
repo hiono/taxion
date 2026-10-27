@@ -46,6 +46,15 @@ func TestGoalPolicyCoversEveryRoleAndRuntimePrompt(t *testing.T) {
 			"consumer-project records read-only",
 			"Verify each referenced record exists and reached the claimed state",
 			"keep dated later updates separate",
+			"Apply adaptive behavior throughout planning, coding, validation, review, recovery",
+			"Model responses can vary with conversation context",
+			"do not prove output quality",
+			"another internal\nrepresentation of consent already recorded",
+			"do not infer missing approval or bypass a failed gate",
+			"Compatible tool updates and routine method changes alone are not new permissions",
+			"actual required capabilities and saved-session compatibility",
+			"does not require re-entering the total quota",
+			"do not replay uncertain sends or extend deadlines and budgets",
 		} {
 			if !strings.Contains(prompt, constraint) {
 				t.Errorf("prompt %d lacks %q", index, constraint)

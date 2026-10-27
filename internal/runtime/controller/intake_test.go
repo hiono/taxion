@@ -9,12 +9,258 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/store"
 	"github.com/hiono/taxion/internal/tools"
 )
+
+func intakeApprovalFixture(t *testing.T, bundleRequired bool) (*store.Store, IntakeConfirmation) {
+	t.Helper()
+	db, _, _, resolved := executionConfigurationFixture(t)
+	resolved.Config.Execution.ApprovalRef = "confirmed-intake-config"
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ := state.Graph.GraphTask("task")
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "confirmed-intake", core.Draft, "", nil
+	if bundleRequired {
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			state.Graph.ApprovalSchemaVersion = core.CurrentApprovalSchemaVersion
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	proposal, err := ProposeIntake(db, IntakeRequest{Task: task, Request: "Implement within this contract.",
+		Actor: "human", Source: "human:request"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := IntakeHash(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return db, IntakeConfirmation{TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirmed",
+		Reason: "Approve the displayed contract and selected configuration.", Selection: resolved.Config}
+}
+
+func TestIntakeConfirmationDerivesBundleWithoutSecondApproval(t *testing.T) {
+	db, request := intakeApprovalFixture(t, true)
+	before, _ := db.LoadWorkspace()
+	task, err := ConfirmIntake(db, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, ok := after.Graph.NewestApproval(task.ID)
+	if !ok || len(after.Graph.ApprovalsForTask(task.ID)) != 1 || bundle.ProposalHash != request.ExpectedHash ||
+		bundle.Actor != request.Actor || bundle.Source != request.Source || bundle.Reason != request.Reason {
+		t.Fatal("formal confirmation was not preserved as the approval basis", bundle)
+	}
+	selection, _ := json.Marshal(request.Selection)
+	configuration, err := core.SelectApprovalConfiguration(selection, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range core.ApprovalEntryStages() {
+		if err := checkEntryApproval(after.Graph, task, stage, configuration); err != nil {
+			t.Fatalf("same contract still needs a second approval at %s: %v", stage, err)
+		}
+	}
+	changed := request.Selection
+	changed.Runtime.Account = "another-account"
+	changedSelection, _ := json.Marshal(changed)
+	changedConfiguration, _ := core.SelectApprovalConfiguration(changedSelection, nil)
+	if err := bundle.Verify(task, changedConfiguration); err == nil {
+		t.Fatal("derived bundle authorized a different configuration")
+	}
+	if !reflect.DeepEqual(before.Graph.Dispatches, after.Graph.Dispatches) ||
+		!reflect.DeepEqual(before.Graph.ReviewFlows, after.Graph.ReviewFlows) ||
+		!reflect.DeepEqual(before.Records, after.Records) {
+		t.Fatal("confirmation issued execution or delegated unapproved roles")
+	}
+	if _, err := ConfirmIntake(db, request); err != nil {
+		t.Fatal(err)
+	}
+	replayed, _ := db.LoadWorkspace()
+	if !reflect.DeepEqual(after, replayed) {
+		t.Fatal("exact replay changed the original approval or created another bundle")
+	}
+}
+
+func TestIntakeConfirmationReplayMaterializesOnlyMissingBundle(t *testing.T) {
+	db, request := intakeApprovalFixture(t, false)
+	if _, err := ConfirmIntake(db, request); err != nil {
+		t.Fatal(err)
+	}
+	legacy, _ := db.LoadWorkspace()
+	if legacy.Graph.ApprovalRequirement() != core.ApprovalVerifiedLegacy || len(legacy.Graph.Approvals) != 0 {
+		t.Fatal("confirmation silently migrated a legacy graph")
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		state.Graph.ApprovalSchemaVersion = core.CurrentApprovalSchemaVersion
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := db.LoadWorkspace()
+	if _, err := ConfirmIntake(db, request); err != nil {
+		t.Fatal("original exact confirmation could not fill its missing representation", err)
+	}
+	after, _ := db.LoadWorkspace()
+	if len(after.Graph.Approvals) != 1 {
+		t.Fatal("confirmation replay did not append exactly one bundle")
+	}
+	after.Graph.Approvals = nil
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("confirmation replay changed the original contract, history, budget or execution records")
+	}
+}
+
+func TestIntakeConfirmationReuseRejectsUncoveredChanges(t *testing.T) {
+	db, request := intakeApprovalFixture(t, false)
+	task, err := ConfirmIntake(db, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, _ := db.LoadWorkspace()
+	original.Graph.ApprovalSchemaVersion = core.CurrentApprovalSchemaVersion
+	for name, mutate := range map[string]func(*store.Workspace, *core.GraphTask){
+		"objective":       func(_ *store.Workspace, task *core.GraphTask) { task.Objective += " changed" },
+		"acceptance":      func(_ *store.Workspace, task *core.GraphTask) { task.Acceptance = []string{"changed"} },
+		"scope":           func(_ *store.Workspace, task *core.GraphTask) { task.Scope = []string{"other"} },
+		"permissions":     func(_ *store.Workspace, task *core.GraphTask) { task.Owner = "REVIEWER" },
+		"authorization":   func(_ *store.Workspace, task *core.GraphTask) { task.AuthorizationID = "other" },
+		"active":          func(_ *store.Workspace, task *core.GraphTask) { task.Status = core.Active },
+		"missing-history": func(state *store.Workspace, _ *core.GraphTask) { state.Graph.History = nil },
+		"flow": func(state *store.Workspace, task *core.GraphTask) {
+			state.Graph.ReviewFlows = append(state.Graph.ReviewFlows, core.ReviewFlow{TaskID: task.ID})
+		},
+		"dispatch": func(state *store.Workspace, task *core.GraphTask) {
+			state.Graph.Dispatches = append(state.Graph.Dispatches, core.GraphDispatch{TaskID: task.ID})
+		},
+		"ledger-dispatch": func(state *store.Workspace, task *core.GraphTask) {
+			state.Ledger.Dispatches = append(state.Ledger.Dispatches, core.Dispatch{TaskID: task.ID})
+		},
+		"unknown-schema": func(state *store.Workspace, _ *core.GraphTask) {
+			state.Graph.ApprovalSchemaVersion = core.CurrentApprovalSchemaVersion + 1
+		},
+		"conflicting-bundle": func(state *store.Workspace, task *core.GraphTask) {
+			state.Graph.Approvals = append(state.Graph.Approvals, core.ApprovalBundle{TaskID: task.ID})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			data, err := json.Marshal(original)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var state store.Workspace
+			if err := json.Unmarshal(data, &state); err != nil {
+				t.Fatal(err)
+			}
+			current, _ := state.Graph.GraphTask(task.ID)
+			mutate(&state, &current)
+			before, _ := core.CanonicalSHA256(state)
+			if err := appendConfirmedIntakeApproval(&state, current, request); err == nil {
+				t.Fatal("confirmation reuse authorized a changed or executed contract")
+			}
+			after, _ := core.CanonicalSHA256(state)
+			if before != after {
+				t.Fatal("rejected reuse changed the workspace")
+			}
+		})
+	}
+	changed := request
+	changed.Selection.Runtime.Account = "another-account"
+	if _, err := ConfirmIntake(db, changed); err == nil {
+		t.Fatal("confirmation replay accepted a different setting")
+	}
+}
+
+func TestIntakeConfirmationAndBundlePersistAtomically(t *testing.T) {
+	db, request := intakeApprovalFixture(t, true)
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		other, _ := state.Graph.GraphTask("task")
+		selection, _ := json.Marshal(request.Selection)
+		configuration, err := core.SelectApprovalConfiguration(selection, nil)
+		if err != nil {
+			return err
+		}
+		bundle, err := core.ComposeApprovalBundle("intake-confirmation:"+request.TaskID,
+			other, other, configuration, "human", "human:other", "Other approval", time.Now())
+		if err != nil {
+			return err
+		}
+		return state.Graph.AppendApproval(bundle)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := db.LoadWorkspace()
+	if _, err := ConfirmIntake(db, request); err == nil {
+		t.Fatal("confirmation ignored a bundle persistence conflict")
+	}
+	after, _ := db.LoadWorkspace()
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("bundle save failure left a partially confirmed Task")
+	}
+}
+
+func TestConfirmedFlowUsesAlreadyApprovedReviewerWithoutNewDelegation(t *testing.T) {
+	db, ledger, flowRequest := reviewFlowFixture(t)
+	_, _, _, resolved := executionConfigurationFixture(t)
+	state, _ := db.LoadWorkspace()
+	task, _ := state.Graph.GraphTask(flowRequest.TaskID)
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "confirmed-flow", core.Draft, "", nil
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		state.Graph.ApprovalSchemaVersion = core.CurrentApprovalSchemaVersion
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := ProposeIntake(db, IntakeRequest{Task: task, Request: "Implement and independently review.",
+		Actor: "human", Source: "human:request"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, _ := IntakeHash(proposal)
+	confirmation := IntakeConfirmation{TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirm",
+		Reason: "Approve this contract and both bounded review configurations.", Selection: resolved.Config,
+		AdditionalTaskIDs: []string{flowRequest.ID + "-review-0", flowRequest.ID + "-review-1"}}
+	if _, err := ConfirmIntake(db, confirmation); err != nil {
+		t.Fatal(err)
+	}
+	flowRequest.TaskID = task.ID
+	selection, _ := json.Marshal(resolved.Config)
+	flowRequest.Configuration, err = core.SelectApprovalConfiguration(selection, resolved.Sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow, err := StartReviewFlow(db, ledger, flowRequest)
+	if err != nil {
+		t.Fatal("approved Flow could not start without another bundle/delegation approval", err)
+	}
+	if err := CheckReviewFlowConfiguration(db, flow.ID, resolved.Config, nil); err != nil {
+		t.Fatal("explicitly covered Reviewer incorrectly requires packet delegation", err)
+	}
+	state, _ = db.LoadWorkspace()
+	if len(state.Records.PacketAuthorizations) != 0 || len(state.Graph.Dispatches) != 1 {
+		t.Fatal("Flow invented delegation or issued duplicate work")
+	}
+	if _, err := ConfirmIntake(db, confirmation); err != nil {
+		t.Fatal("exact confirmation replay stopped an already issued Flow", err)
+	}
+	after, _ := db.LoadWorkspace()
+	if !reflect.DeepEqual(state, after) {
+		t.Fatal("confirmation replay after issuance changed the Flow or original approval")
+	}
+}
 
 func TestIntakeSeparatesOriginalRequestExactConfirmationAndExecution(t *testing.T) {
 	for _, repo := range []string{"owner/repo", "group/subgroup/project", strings.Repeat("group/", 21) + "project"} {
