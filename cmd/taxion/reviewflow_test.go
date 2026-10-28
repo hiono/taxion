@@ -182,7 +182,7 @@ func TestWorkflowCommandsPersistAuthorizedCeilings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := reportStoppedRepair(&stoppedOutput, db, storePath, flow.ID, context.DeadlineExceeded); err != nil ||
-		!strings.Contains(stoppedOutput.String(), "human-decision-required") ||
+		!strings.Contains(stoppedOutput.String(), "reconciliation-required") ||
 		!strings.Contains(stoppedOutput.String(), "workflow repair-status") {
 		t.Fatal("deadline error lost stopped-flow guidance", err, stoppedOutput.String())
 	}

@@ -18,9 +18,9 @@ const (
 	RepairReapprovalRequired = "reapproval-required"
 	RepairCeilingExhausted   = "ceiling-exhausted"
 	RepairInvalid            = "invalid"
-	// RepairHumanDecision covers stops that are not a pending review repair. A
-	// STOPPED Flow is terminal, so continuing needs a user decision.
-	RepairHumanDecision = "human-decision-required"
+	// RepairHumanDecision identifies an actual unresolved user decision.
+	RepairHumanDecision          = "human-decision-required"
+	RepairReconciliationRequired = "reconciliation-required"
 	// RepairNotApplicable means the RUNNING Flow is not at a repair point.
 	RepairNotApplicable = "not-applicable"
 )
@@ -92,7 +92,7 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 	task, taskOK := state.Graph.GraphTask(flow.TaskID)
 	if flow.Artifact != nil && len(flow.DispatchIDs) == 0 && taskOK {
 		if flow.Status == "STOPPED" {
-			return set(RepairHumanDecision, "input validation stopped; preserve its receipt and input, never replay commands implicitly", humanNext)
+			return set(RepairReconciliationRequired, "input validation stopped; preserve its receipt and input, never replay commands implicitly", humanNext)
 		}
 		return set(RepairNotApplicable, "authorized non-model input validation is pending or in progress", "inspect workflow show; use workflow run at an unclaimed, unheld boundary")
 	}
@@ -126,7 +126,7 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 			}
 		}
 		status.ReviewContinuationCandidate = coder.ID
-		value := RepairHumanDecision
+		value := RepairReconciliationRequired
 		if flow.StopCode == "BUDGET_STOP" || flow.StopCode == "BUDGET_LIMIT" {
 			value = RepairCeilingExhausted
 		} else if flow.StopCode == "RECONTRACT" {
@@ -151,7 +151,7 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 		case "RECONTRACT":
 			return set(RepairReapprovalRequired, "Flow stopped for recontract", "obtain user approval of a new contract")
 		}
-		return set(RepairHumanDecision, "STOPPED Flow is terminal; repair runs only after independent review requests changes in a RUNNING Flow", humanNext)
+		return set(RepairReconciliationRequired, "STOPPED Flow is terminal; repair runs only after independent review requests changes in a RUNNING Flow", humanNext)
 	}
 	if flow.Status != "RUNNING" || !reviewRepair {
 		return set(RepairNotApplicable, "Flow is not waiting on a review repair", "continue the Flow as saved")
@@ -163,9 +163,12 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 		return set(RepairReapprovalRequired, "specification source or permission requires renewed approval: "+err.Error(),
 			"obtain user approval of a new contract")
 	}
-	if slices.Contains([]core.TaskStatus{core.Cancelled, core.Rejected, core.Superseded, core.Blocked, core.HumanDecisionRequired}, task.Status) ||
+	if task.Status == core.HumanDecisionRequired ||
 		task.HumanDecision != nil && task.HumanDecision.SelectedOptionID == "" {
 		return set(RepairHumanDecision, "Task status "+string(task.Status)+" or a pending user decision stops the Flow", humanNext)
+	}
+	if slices.Contains([]core.TaskStatus{core.Cancelled, core.Rejected, core.Superseded, core.Blocked}, task.Status) {
+		return set(RepairReconciliationRequired, "Task status "+string(task.Status)+" requires saved-evidence reconciliation", humanNext)
 	}
 	if err := requireSessionBudget(state.Graph, flow, "CODER"); err != nil {
 		return set(RepairCeilingExhausted, err.Error(), humanNext)
@@ -175,10 +178,10 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 	}
 	if task.Status != core.WaitingForReview || last.Result.GitEvidence == nil || !last.Result.GitEvidence.WorktreeReleased ||
 		last.Result.OutputSHA != task.TargetSHA {
-		return set(RepairHumanDecision, "review result does not match the Task waiting for review with a released worktree and current target SHA", humanNext)
+		return set(RepairReconciliationRequired, "review result does not match the Task waiting for review with a released worktree and current target SHA", humanNext)
 	}
 	if flow.HandoffHeld() {
-		return set(RepairHumanDecision, "handoff is held; release it before the repair continues", humanNext)
+		return set(RepairReconciliationRequired, "handoff is held; release it before the repair continues", humanNext)
 	}
 	return set(RepairAuthorized, "repair is an internal transition within the saved ceiling and approval",
 		"run workflow advance or run for this Flow without asking the user; advance still revalidates Git evidence, Memory and the approved draft")

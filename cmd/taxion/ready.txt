@@ -431,6 +431,9 @@ duplicate or incremental list alone needs no new Coder, repair or approval.
 Instructions without this policy still require the full baseline-to-final list.
 Never edit a saved result to retrofit the policy; actual scope and Git checks,
 Controller validation and same-candidate independent review still apply.
+repair-status reconciliation-required means inspect saved approvals, stop evidence
+and targets through supported operations before asking for a new human decision.
+It is not authority to replay a terminal Flow, release a hold or expand permissions.
 Pending Controller validation/review is neither success evidence nor a reason
 alone to suspend Coder submission. Unknown validation, drift or active execution
 blocks this path. No new run, deadline, budget or authority is implied by diagnosis.

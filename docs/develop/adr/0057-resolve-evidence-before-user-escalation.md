@@ -40,6 +40,14 @@ Accepted。Issue #210。ADR-0055 の全工程方針を、差戻し経路の判�
 | 課金・時間：`stage_budget.go`、`budget_guidance.go` | 既存観測と承認方式で判断する。提出待ちも工程内として扱う | 未知の残量を創作せず、上限・期限を延長しない |
 | 公開：`publication.go`、`publictext` | 既存の正確な内容承認と配送証拠を再利用する | 内容変更、別公開先、配送不明の再送は許可しない |
 
+RC7 では `workflow repair-status` の停止・hold・結果不一致を一律に
+`human-decision-required` とする分類も修正し、`reconciliation-required` で
+Controller の照合作業と人間の未回答選択を区別する。状態を変更せず、承認や実行枠を
+付与しない。計画の不足項目も、保存承認・安全な観測で解決できるかを先に確認する。
+返却 JSON の version は1を保ち status 値を追加するため、外部の固定列挙利用者は更新する。
+これは同じ差戻し問題の配布までの追補であり、Issue #210 は RC の公開・配布照合を
+確認するまで完了扱いにしない。追加の定期点検機能は別変更で、この RC に含めない。
+
 ### 変更一覧の共通受理
 
 新規 Coder instruction は `changeManifestPolicy: git-diff-v1` を保持する。
@@ -65,6 +73,13 @@ policy のない保存済み指示は完全一致条件を維持する。未知�
 戻す場合は更新前の整合した保全一式を別環境で使う。更新後の成果・監査証拠は削除しない。
 
 ## Validation and remaining work
+
+RC7 追補では分類・計画・CLI 表示・持込み入力失敗の回帰試験と関連 race、
+`mise run check`、release tooling の既存12試験、公開文書の repository 検査が成功した。
+初回の全試験では、持込み入力の失敗を旧分類で期待していた既存試験が失敗したため、
+新しい照合要求を期待するよう同期し、全検査を再実施した。
+独立レビューで分類変更に重大な指摘はなく、正確な PR 文・公開リリース文も承認された。
+配布物の実検証はリリース処理で別途行う。製品適用・品質合格の証拠ではない。
 
 2026-10-28 に source `2fa493d47ee309298f99020074adad0d19beae3e` で
 `mise run check`（gofmt・vet・全 Go 試験・build・Web 試験）と、
