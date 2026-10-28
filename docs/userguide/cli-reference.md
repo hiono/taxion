@@ -196,6 +196,14 @@ EOF・`/quit` はこの console が所有する実行だけを安全に中断し
 
 Reviewer の `changedFiles` は空の配列です。再現された Coder の差分はレビュー対象であり、Reviewer 自身の変更ではありません。`worktreeChanged` は Reviewer 開始後の変更を表します。実際に変更した場合は blocker として報告し、controller による tree の照合も成功扱いにしません。
 
+**次版仕様・未実装：** [ADR-0055 の共通判定方針](../develop/adr/0055-adapt-within-approved-goals.md#全工程で使う判定順序仕様追補個別実装は未完了)
+では、機械的に確認できる申告差を Controller が確定証拠として補い、承認済みの次工程へ接続します。
+Coder の `changedFiles` も、[変更一覧の受理仕様](../develop/task-graph.md#関係と実行契約)
+に従って baseline から candidate までの全実差分を確定する方針です。現行版と配布済み ready・
+役割指示はまだ完全一致を要求します。この文書を根拠に結果を代筆・上書きしたり、
+現行の拒否を迂回したりしないでください。Reviewer 自身の変更禁止、scope、
+正式承認、工程予算、全検証と独立レビューの条件は変更しません。
+
 controller の検証待ちだけでは suspension を要求しない。ただし、実際の失敗、出力欠落、根拠のない Reviewer 承認、必要な利用者の判断は引き続き進行を拒否する。新規 session に使い、実行接続時も繰り返す。`runtime stop` には指定しない。既存 session の既定 prompt は変更しない。
 
 ### 設定
