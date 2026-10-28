@@ -158,7 +158,7 @@ func PlanWithArchived(db *store.Store, ledgerPath, repo string, includeArchived 
 			step.Instruction = "Issue a new Dispatch using this saved contract and Memory snapshot; verify Git at execution start."
 			if len(step.Gaps) != 0 {
 				step.Action = "RESOLVE_GAPS"
-				step.Instruction = "Record an approved contract update for the listed gaps before issuing a Dispatch."
+				step.Instruction = "Resolve listed gaps from saved approvals and safe observations first. Use the supported contract update; ask only for a new decision or missing authority, not internal transcription."
 			}
 		case task.Status == core.WaitingForEvidence:
 			step.Action = "COLLECT_EVIDENCE"

@@ -208,7 +208,7 @@ func TestArtifactValidationStopsBeforeAnyModelOnFailureOrDrift(t *testing.T) {
 			}
 			state, _ := db.LoadWorkspace()
 			status, err := ObserveRepairStatus(state, flow.ID, request.Configuration)
-			if err != nil || status.Status != RepairHumanDecision {
+			if err != nil || status.Status != RepairReconciliationRequired {
 				t.Fatalf("terminal input stop was not classified: %+v %v", status, err)
 			}
 			saved := flow.Artifact.Validation

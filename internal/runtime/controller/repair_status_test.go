@@ -74,7 +74,7 @@ func TestObserveRepairStatusClassifiesStops(t *testing.T) {
 		}, RepairReapprovalRequired},
 		{"safety-stop", func(_ *store.Workspace, f *core.ReviewFlow) {
 			f.Status, f.StopCode, f.Reason = "STOPPED", "SAFETY_STOP", "stop"
-		}, RepairHumanDecision},
+		}, RepairReconciliationRequired},
 		{"bundle-required", func(s *store.Workspace, _ *core.ReviewFlow) {
 			s.Graph.ApprovalSchemaVersion = core.CurrentApprovalSchemaVersion
 		}, RepairReapprovalRequired},
@@ -82,19 +82,19 @@ func TestObserveRepairStatusClassifiesStops(t *testing.T) {
 			if err := s.Graph.Transition(f.TaskID, core.Cancelled, "human", "cancel", core.TransitionProof{}); err != nil {
 				t.Fatal(err)
 			}
-		}, RepairHumanDecision},
+		}, RepairReconciliationRequired},
 		{"task-left-review", func(s *store.Workspace, f *core.ReviewFlow) {
 			if err := s.Graph.Transition(f.TaskID, core.RequestChanges, "human", "manual", core.TransitionProof{}); err != nil {
 				t.Fatal(err)
 			}
-		}, RepairHumanDecision},
+		}, RepairReconciliationRequired},
 		{"held-handoff", func(s *store.Workspace, f *core.ReviewFlow) {
 			held, err := s.Graph.ChangeHandoff(f.ID, core.HandoffChange{ID: "hold-1", Action: "HOLD", Actor: "human", Source: "test", Reason: "hold"})
 			if err != nil {
 				t.Fatal(err)
 			}
 			*f = held
-		}, RepairHumanDecision},
+		}, RepairReconciliationRequired},
 		{"unknown-approval-schema", func(s *store.Workspace, _ *core.ReviewFlow) {
 			s.Graph.ApprovalSchemaVersion = core.CurrentApprovalSchemaVersion + 1
 		}, RepairInvalid},

@@ -206,6 +206,9 @@ policy のない保存済み指示と配布済み旧版は完全一致条件を�
 Reviewer 自身の変更禁止、実差分の scope、正式承認、工程予算、全検証と独立レビューは維持します。
 管理スキルは1.3.12です。新しい保存フィールドを使った workspace を旧 binary で操作せず、
 戻す場合は更新前の保全一式を別環境で使用してください。
+RC7 の `workflow repair-status` は、停止・hold・成果物の不一致を `reconciliation-required`
+として返します。未回答の人間の選択だけを `human-decision-required` と区別します。
+前者は Controller による照合要求であり、再実行・hold 解除・権限変更の許可ではありません。
 
 controller の検証待ちだけでは suspension を要求しない。ただし、実際の失敗、出力欠落、根拠のない Reviewer 承認、必要な利用者の判断は引き続き進行を拒否する。新規 session に使い、実行接続時も繰り返す。`runtime stop` には指定しない。既存 session の既定 prompt は変更しない。
 

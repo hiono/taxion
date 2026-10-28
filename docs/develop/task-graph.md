@@ -434,11 +434,11 @@ Release 0.1.0 の #78 で引き続き追跡する。
   仕様ソースの利用許可が無効になった、または停止コードが `RECONTRACT` である。`task reauthorize` が必要である。
 - `ceiling-exhausted`: repair 回数、期限、session・Dispatch・credit の予算のいずれかが上限に達した。
   または停止コードが `BUDGET_STOP`・`BUDGET_LIMIT` である。
-- `human-decision-required`: `SAFETY_STOP` など、上記以外の理由で Flow が `STOPPED` になっている。
-  Task が `CANCELLED`・`REJECTED`・`SUPERSEDED`・`BLOCKED`・`HUMAN_DECISION_REQUIRED` であるか、
-  利用者の選択待ちである場合、handoff が hold されている場合、
-  Task が `WAITING_FOR_REVIEW` でないか review 結果が現在の target SHA と一致しない場合も含む。
-  `STOPPED` は終端状態であり、自動では再開しない。
+- `human-decision-required`: Task が `HUMAN_DECISION_REQUIRED` または未回答の選択待ちである。
+- `reconciliation-required`: `SAFETY_STOP` などの停止、取消済み・却下済み・置換済み・blocked の Task、
+  handoff hold、現在の target と一致しない review 結果など、保存証拠と正式操作による照合が必要である。
+  Controller はまず既存の承認・成果・停止証跡を照合し、必要な新しい意思決定だけを利用者へ返す。
+  この分類は実行許可や hold 解除ではない。`STOPPED` は終端状態であり、自動では再開しない。
 - `invalid`: Task Graph の検証または承認の分類に失敗した。
 - `not-applicable`: Flow が repair の境界にない。
 
