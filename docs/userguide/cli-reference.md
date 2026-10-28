@@ -204,7 +204,7 @@ Controller が baseline から candidate までの全実差分を `changedFiles`
 同じ確定一覧を使います。`changeManifest` は結果ファイルやモデルから指定できません。
 policy のない保存済み指示と配布済み旧版は完全一致条件を維持し、旧結果を書き換えません。
 Reviewer 自身の変更禁止、実差分の scope、正式承認、工程予算、全検証と独立レビューは維持します。
-管理スキルは1.3.12です。新しい保存フィールドを使った workspace を旧 binary で操作せず、
+管理スキルは1.3.13です。新しい保存フィールドを使った workspace を旧 binary で操作せず、
 戻す場合は更新前の保全一式を別環境で使用してください。
 RC7 の `workflow repair-status` は、停止・hold・成果物の不一致を `reconciliation-required`
 として返します。未回答の人間の選択だけを `human-decision-required` と区別します。
@@ -679,6 +679,12 @@ taxion workflow accept-saved-review --file acceptance.json
 CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は stdio の ACP、`web/` は browser console を提供する。
 
 ## 停止済み初回指示の整合回復
+
+`v0.7.21-rc.8` は、入力検証 `PASSED` の後に準備失敗した最初の持込み成果物 Reviewer にも対応する。応答・開始・session・結果・runtime receipt・管理済みレビュー worktree がある場合は対象外である。下記と同じ preview／適用操作を使い、配送不明と旧停止を保持して指示を取り消す。親 Task はレビュー待ちを維持する。
+
+この Reviewer の後続では、元 Task の実行契約と元 worktree／branch、候補 commit／tree／全変更一覧を維持する。新しい Task ID に `supersedes` と `createdFrom:"flow:旧FLOW_ID"` を設定し、intake／confirm の両方に `reconciliationHash` を渡す。confirm は `replacesFlow` と取消後の `workflow feedback-target` の正確な `target`、新提案の hash と実設定承認を使う。plan／start は元の `artifactSource` と `reuseArtifactValidation:true`、`maxRepairs:0`、新しい `reviewRoot` を指定する。後続の正式契約・工程計画・実行承認が必要で、旧 Flow は再送しない。
+
+合格した入力検証 stage は再実行せず、元 receipt と実施時刻を `artifact.validationSourceFlowId` 付きで保持する。Reviewer 結果受理時の既存検証は別に実施する。設定・候補・検証コマンド・権限の変更は拒否する。レビュー用 worktree を事前作成せず、衝突した旧場所は保全したまま新しい場所を Controller に作らせる。詳細は [ADR-0058](../develop/adr/0058-recover-unstarted-artifact-review.md) を参照する。
 
 開発版の `workflow reconcile-stopped` は、`STOPPED / SAFETY_STOP`・`HOLD` の Flow と、開始記録のない初回 snapshot Coder の `ISSUED` Dispatch を整合させる。明示的な同じ `--store` を維持する。次は形式の例であり、実際の確認や承認を表さない。
 

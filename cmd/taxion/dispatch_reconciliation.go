@@ -15,7 +15,7 @@ import (
 func reconcileStoppedDispatchCommand(args []string, output io.Writer) error {
 	fs := flag.NewFlagSet("workflow reconcile-stopped", flag.ContinueOnError)
 	file := fs.String("file", "", "JSON human decision, quiescence evidence, unknown-delivery acceptance and expectedHash")
-	preview := fs.Bool("preview", false, "inspect the stopped first Coder and approved input without changing workspace state")
+	preview := fs.Bool("preview", false, "inspect the stopped first Coder or validated artifact Reviewer without changing workspace state")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

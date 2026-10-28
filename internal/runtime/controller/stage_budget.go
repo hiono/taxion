@@ -58,6 +58,14 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 	}
 	policy := *request.StageBudget
 	var artifact *core.ArtifactTarget
+	if request.ReuseArtifactValidation {
+		if request.ArtifactSource == "" {
+			return StagePlanPreview{}, fmt.Errorf("taxion: validation reuse requires artifactSource")
+		}
+		if _, err := validatedArtifactSource(graph, task, request); err != nil {
+			return StagePlanPreview{}, err
+		}
+	}
 	if request.ArtifactSource != "" {
 		if *request.MaxRepairs != 0 || request.ContinueFromDispatchID != "" || policy.CoderSessionCredits != 0 {
 			return StagePlanPreview{}, fmt.Errorf("taxion: artifact review requires zero repairs and Coder permission, without a Coder continuation")
@@ -440,7 +448,8 @@ func verifyStagePlanBinding(records store.Records, flow core.ReviewFlow) error {
 		return nil
 	}
 	for _, audit := range records.Budgets {
-		if audit.FlowID != flow.ID || (audit.Kind != "DISPATCH_ISSUED" && !(flow.Artifact != nil && audit.Kind == "INPUT_ACCEPTED")) {
+		if audit.FlowID != flow.ID || (audit.Kind != "DISPATCH_ISSUED" &&
+			!(flow.Artifact != nil && (audit.Kind == "INPUT_ACCEPTED" || audit.Kind == "INPUT_VALIDATION_REUSED"))) {
 			continue
 		}
 		var report TaskBudgetReport

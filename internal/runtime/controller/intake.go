@@ -110,7 +110,8 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 	if db == nil || strings.TrimSpace(request.Request) == "" || strings.TrimSpace(request.Actor) == "" ||
 		strings.TrimSpace(request.Source) == "" || request.Task.Status != core.Draft ||
 		request.Task.AuthorizationID != "" || len(request.Task.Decisions) != 0 ||
-		request.Task.Owner != "CODER" || request.Task.Reviewer != "REVIEWER" {
+		(request.Task.Owner != "CODER" && !(request.Task.Owner == "USER" && request.ReconciliationHash != "")) ||
+		request.Task.Reviewer != "REVIEWER" {
 		return core.GraphTask{}, fmt.Errorf("taxion: intake requires an original request, sourced DRAFT contract and independent Coder/Reviewer without authorization")
 	}
 	text, err := json.Marshal(struct {

@@ -40,6 +40,28 @@ func startArtifactReview(state *store.Workspace, flow *core.ReviewFlow, request 
 		Target: target, Configuration: request.Configuration, ObservedAt: time.Now().UTC(),
 		Validation: core.ArtifactValidation{Status: "PENDING", TargetHash: target.Hash, Commands: []core.DispatchValidation{}},
 	}
+	if request.ReuseArtifactValidation {
+		prior, err := validatedArtifactSource(state.Graph, flow.Contract, request)
+		if err != nil {
+			return err
+		}
+		var hash string
+		for _, decision := range flow.Contract.Decisions {
+			if decision.ID == "reconciled-input:"+flow.TaskID {
+				hash = decision.Text
+			}
+		}
+		audit, err := reconciledInput(*state, prior.ID, hash)
+		if err != nil || !audit.PreviousFlow.StoppedArtifactReviewer(audit.PreviousDispatch) {
+			return fmt.Errorf("taxion: validation reuse requires its exact proposal-bound Reviewer reconciliation")
+		}
+		if err := gitproof.VerifyArtifact(prior.Contract, prior.Artifact.Target, request.Configuration.Selection); err != nil {
+			return err
+		}
+		inherited := *prior.Artifact
+		inherited.ValidationSourceFlowID = prior.ID
+		flow.Artifact = &inherited
+	}
 	flow.Budget.MaxDispatches, flow.Budget.MaxCoderSessions, flow.Budget.MaxReviewerSessions = 1, 0, 1
 	return state.Graph.Transition(flow.TaskID, core.Active, "controller",
 		"accept unverified input artifact; no implementation or quality success is asserted", core.TransitionProof{})
@@ -189,7 +211,7 @@ func issueArtifactReviewer(state *store.Workspace, ledgerPath string, flow *core
 		return err
 	}
 	review.Decisions = append(review.Decisions, flow.Authorization, core.TaskDecision{
-		ID: "input-artifact:" + a.Target.Hash, Source: "flow:" + flow.ID, Text: string(receipt),
+		ID: flow.ArtifactDecisionID(), Source: "flow:" + flow.ID, Text: string(receipt),
 	})
 	if err := state.Graph.Track(review, "controller", "derive same-contract Reviewer for validated supplied input"); err != nil {
 		return err

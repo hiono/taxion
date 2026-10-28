@@ -115,17 +115,18 @@ func previewDispatchReconciliation(state store.Workspace, request DispatchReconc
 	flow, found := state.Graph.ReviewFlow(request.FlowID)
 	dispatch, exists := state.Graph.GraphDispatch(request.DispatchID)
 	task, taskFound := state.Graph.GraphTask(flow.TaskID)
+	artifactReviewer := flow.StoppedArtifactReviewer(dispatch) && task.Status == core.WaitingForReview
 	if !state.HasGraph || !found || !exists || !taskFound || flow.Status != "STOPPED" ||
 		flow.StopCode != "SAFETY_STOP" || !flow.HandoffHeld() || flow.RunnerID != "" ||
 		len(flow.DispatchIDs) != 1 || flow.DispatchIDs[0] != dispatch.ID ||
-		dispatch.TaskID != flow.TaskID || dispatch.Recipient != "CODER" || dispatch.Status != core.DispatchIssued ||
+		(!artifactReviewer && (dispatch.TaskID != flow.TaskID || dispatch.Recipient != "CODER")) || dispatch.Status != core.DispatchIssued ||
 		dispatch.Acknowledged || dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "" ||
 		dispatch.RuntimeConfigHash != "" || dispatch.Result != nil ||
 		dispatch.ExecutionStartSHA != "" || len(dispatch.RuntimeUsage) != 0 ||
-		task.Status != core.Active || !flowContractMatches(state.Graph, flow, task) ||
+		(!artifactReviewer && task.Status != core.Active) || !flowContractMatches(state.Graph, flow, task) ||
 		state.Graph.IsArchived(task.ID) || flow.PendingDraftID() != "" || len(flow.PendingFeedbackIDs()) != 0 ||
-		flow.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot || flow.Contract.TargetTreeSHA == "" {
-		return fail("requires a held, unclaimed SAFETY_STOP, its first issued Coder, no start/session/result, and an unchanged ACTIVE snapshot-input contract")
+		flow.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot || (!artifactReviewer && flow.Contract.TargetTreeSHA == "") {
+		return fail("requires a held, unclaimed SAFETY_STOP, its first issued Coder or validated artifact Reviewer, no start/session/result, and an unchanged snapshot-input contract")
 	}
 	if operation := state.Records.Operation; operation != nil && operation.Active() {
 		return fail("an operation is still active")
@@ -155,8 +156,14 @@ func previewDispatchReconciliation(state store.Workspace, request DispatchReconc
 			return fail("this Flow already has a reconciliation")
 		}
 	}
-	if _, err := gitproof.ObserveSnapshotStart(state.Records.RestoredDispatch(dispatch)); err != nil {
-		return DispatchReconciliationPreview{}, fmt.Errorf("taxion: approved carried input must remain intact: %w", err)
+	var inputErr error
+	if artifactReviewer {
+		inputErr = gitproof.VerifyArtifact(flow.Contract, flow.Artifact.Target, flow.Artifact.Configuration.Selection)
+	} else {
+		_, inputErr = gitproof.ObserveSnapshotStart(state.Records.RestoredDispatch(dispatch))
+	}
+	if inputErr != nil {
+		return DispatchReconciliationPreview{}, fmt.Errorf("taxion: approved carried input must remain intact: %w", inputErr)
 	}
 	inputHash, err := core.CanonicalSHA256(flow.Contract)
 	if err != nil {
@@ -170,11 +177,17 @@ func previewDispatchReconciliation(state store.Workspace, request DispatchReconc
 	if err != nil {
 		return DispatchReconciliationPreview{}, err
 	}
+	taskTransition := "Task: ACTIVE -> BLOCKED"
+	inputTree := flow.Contract.TargetTreeSHA
+	if artifactReviewer {
+		taskTransition = "Reviewer Task -> BLOCKED; parent remains WAITING_FOR_REVIEW"
+		inputTree = flow.Artifact.Target.TreeSHA
+	}
 	return DispatchReconciliationPreview{
 		Version: 1, FlowID: flow.ID, DispatchID: dispatch.ID, InputContractHash: inputHash,
-		InputTreeSHA: flow.Contract.TargetTreeSHA, InputOrigin: "approved-predecessor-input-contract",
+		InputTreeSHA: inputTree, InputOrigin: "approved-predecessor-input-contract",
 		DeliveryStatus: "unknown", UsageStatus: "unavailable",
-		Transitions: []string{"Dispatch: ISSUED -> CANCELLED", "Task: ACTIVE -> BLOCKED", "append reconciliation; preserve Flow, HOLD, stop reason, authorization and ceilings"},
+		Transitions: []string{"Dispatch: ISSUED -> CANCELLED", taskTransition, "append reconciliation; preserve Flow, HOLD, stop reason, authorization and ceilings"},
 		Hash:        hash,
 	}, nil
 }
@@ -203,13 +216,21 @@ func verifyReconciledInput(state store.Workspace, task core.GraphTask, hash stri
 		return fmt.Errorf("taxion: reconciled input predecessor differs")
 	}
 	previous, found := state.Graph.GraphTask(audit.PreviousFlow.TaskID)
-	if !found || previous.Status != core.Blocked {
+	artifactReviewer := audit.PreviousFlow.StoppedArtifactReviewer(audit.PreviousDispatch)
+	if !found || (!artifactReviewer && previous.Status != core.Blocked) ||
+		artifactReviewer && previous.Status != core.WaitingForReview {
 		return fmt.Errorf("taxion: reconciled predecessor must remain BLOCKED and not already superseded")
 	}
 	for _, other := range state.Graph.Tasks {
 		if other.ID != task.ID && other.Supersedes == previous.ID && other.AuthorizationID != "" {
 			return fmt.Errorf("taxion: reconciled predecessor already has an authorized successor")
 		}
+	}
+	if artifactReviewer {
+		if err := verifyValidatedArtifactContract(audit.PreviousFlow, task); err != nil {
+			return err
+		}
+		return gitproof.VerifyArtifact(task, audit.PreviousFlow.Artifact.Target, audit.PreviousFlow.Artifact.Configuration.Selection)
 	}
 	return gitproof.VerifyApprovedInputSuccessor(state.Records.RestoredDispatch(audit.PreviousDispatch), task)
 }
