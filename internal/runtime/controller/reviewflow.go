@@ -22,21 +22,22 @@ var ErrFlowStopped = errors.New("taxion: review flow stopped")
 var ErrFlowClaimed = errors.New("taxion: review flow claimed by another runner")
 
 type ReviewFlowRequest struct {
-	ArtifactSource         string                     `json:"artifactSource,omitempty"`
-	ID                     string                     `json:"id"`
-	TaskID                 string                     `json:"taskId"`
-	ContinueFromDispatchID string                     `json:"continueFromDispatchId,omitempty"`
-	Repository             string                     `json:"repository"`
-	ReviewRoot             string                     `json:"reviewRoot"`
-	MaxRepairs             *int                       `json:"maxRepairs"`
-	MaxNanoAIU             float64                    `json:"maxNanoAiu"`
-	TimeoutSeconds         int64                      `json:"timeoutSeconds"`
-	Authorization          core.TaskDecision          `json:"authorization"`
-	Configuration          core.ApprovalConfiguration `json:"configuration"`
-	StageBudget            *core.StageBudget          `json:"stageBudget,omitempty"`
-	StagePlanHash          string                     `json:"stagePlanHash,omitempty"`
-	ContinuationChange     string                     `json:"continuationChange,omitempty"`
-	SavedOutputDecision    string                     `json:"savedOutputDecision,omitempty"`
+	ArtifactSource          string                     `json:"artifactSource,omitempty"`
+	ReuseArtifactValidation bool                       `json:"reuseArtifactValidation,omitempty"`
+	ID                      string                     `json:"id"`
+	TaskID                  string                     `json:"taskId"`
+	ContinueFromDispatchID  string                     `json:"continueFromDispatchId,omitempty"`
+	Repository              string                     `json:"repository"`
+	ReviewRoot              string                     `json:"reviewRoot"`
+	MaxRepairs              *int                       `json:"maxRepairs"`
+	MaxNanoAIU              float64                    `json:"maxNanoAiu"`
+	TimeoutSeconds          int64                      `json:"timeoutSeconds"`
+	Authorization           core.TaskDecision          `json:"authorization"`
+	Configuration           core.ApprovalConfiguration `json:"configuration"`
+	StageBudget             *core.StageBudget          `json:"stageBudget,omitempty"`
+	StagePlanHash           string                     `json:"stagePlanHash,omitempty"`
+	ContinuationChange      string                     `json:"continuationChange,omitempty"`
+	SavedOutputDecision     string                     `json:"savedOutputDecision,omitempty"`
 }
 
 // DefaultFlowTimeout applies when a Flow request omits timeoutSeconds.
@@ -142,7 +143,11 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 				return err
 			}
 			state.Graph.ReviewFlows = append(state.Graph.ReviewFlows, flow)
-			return appendBudgetAudit(state, flow, "INPUT_ACCEPTED", taskBudgetReport(state.Graph, flow, now))
+			kind := "INPUT_ACCEPTED"
+			if request.ReuseArtifactValidation {
+				kind = "INPUT_VALIDATION_REUSED"
+			}
+			return appendBudgetAudit(state, flow, kind, taskBudgetReport(state.Graph, flow, now))
 		}
 		if request.ContinueFromDispatchID == "" {
 			if err := issueFlowDispatch(state, ledgerPath, &flow, task, core.RelationshipNone, "", "", request.Configuration); err != nil {

@@ -98,7 +98,7 @@ Runtime sessions and ACP:
 Review flows and recovery:
   workflow start      Start an approved bounded flow; artifactSource accepts input without a Coder Dispatch (--file JSON)
   workflow terminate  Cancel an untouched Dispatch and hold it for a new approved contract (--file JSON)
-  workflow reconcile-stopped Preview or cancel a first issued snapshot Coder after SAFETY_STOP, retaining unknown delivery and input provenance (--file JSON; --preview)
+  workflow reconcile-stopped Preview or cancel a first issued snapshot Coder or validated artifact Reviewer after SAFETY_STOP, retaining unknown delivery (--file JSON; --preview)
   workflow advance    Issue review/repair from the latest verified result (--id required)
   workflow run        Execute review/repair continuously with saved ceilings (--id; role prompt files or --builtin-prompts)
   workflow step       Execute one role turn from a saved review flow (--id; role prompt files or --builtin-prompts)

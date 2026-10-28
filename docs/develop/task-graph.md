@@ -238,6 +238,8 @@ Task と Dispatch の契約に含め、役割間で同じ引用スナップシ�
 
 ## 上限付きレビュー進行
 
+`v0.7.21-rc.8` の未開始持込み Reviewer 復旧は [ADR-0058](adr/0058-recover-unstarted-artifact-review.md) に従う。入力検証合格後の準備失敗を正式に整合し、元契約・候補・設定を維持する後続が `reuseArtifactValidation:true` を指定できる。`artifact.validationSourceFlowId` と `INPUT_VALIDATION_REUSED` が合格 receipt と取消監査を結ぶ。旧 Flow は終端のまま、元の検証 stage は再実行しない。Reviewer の結果受理検証は維持する。
+
 開発版の持込み成果物からの検証開始は [ADR-0056](adr/0056-validate-supplied-artifacts-without-coder-success.md)
 に従う。`artifactSource` と承認済みの工程 hash を指定すると、モデル Dispatch のない入力工程を保存する。
 `workflow validate-input` は実際の Controller 検証後にだけ Reviewer を発行する。

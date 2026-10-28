@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.12"
+const readySkillVersion = "1.3.13"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -147,6 +147,16 @@ preview hash before cancellation. It preserves the old stop and approved INPUT,
 not new Coder output or proof of zero usage. A distinct-worktree successor needs
 reconciliationHash in both intake and confirmation, its exact proposal approval
 and cancelled feedback target. This does not authorize a new Flow or model run.
+The same reconcile-stopped operation also covers the first artifact Reviewer
+after PASSED input validation, but only with no acknowledgement, start, session,
+result, runtime receipt or managed review worktree. Preserve unknown delivery.
+For this case retain the unchanged source worktree and contract in the successor,
+use reconciliationHash in intake and confirmation, and pass the cancelled target.
+Use artifactSource from the original artifact and reuseArtifactValidation:true
+in the new plan/start request. This reuses the exact passed input-stage receipt,
+not the old terminal Flow. Use a fresh reviewRoot and never create its review
+worktree before the Controller. Reviewer result-acceptance validation still runs;
+input-stage reuse does not waive quality checks, plan approval or budget limits.
 Preserve completed work. New budgets, changed scope and permissions need explicit
 user approval. Within that envelope, advance without repeated confirmation.
 Use available observations before asking for remaining usage; do not require a

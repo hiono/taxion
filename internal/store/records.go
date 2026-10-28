@@ -318,7 +318,7 @@ func (r Records) validate() error {
 		if record.FlowID == "" || record.TaskID == "" ||
 			record.Sequence != budgetSequences[record.FlowID] || record.At.IsZero() ||
 			!slices.Contains([]string{"DISPATCH_ISSUED", "SESSION_STARTED", "USAGE_OBSERVED", "BUDGET_STOP", "RECONTRACT", "STAGE_OBSERVED",
-				"INPUT_ACCEPTED", "INPUT_VALIDATION_STARTED", "INPUT_VALIDATION_FINISHED"}, record.Kind) ||
+				"INPUT_ACCEPTED", "INPUT_VALIDATION_STARTED", "INPUT_VALIDATION_FINISHED", "INPUT_VALIDATION_REUSED"}, record.Kind) ||
 			!json.Valid([]byte(record.Payload)) ||
 			record.Hash != fmt.Sprintf("%x", sha256.Sum256([]byte(record.Payload))) {
 			return fmt.Errorf("invalid task budget audit record or sequence")
@@ -364,7 +364,7 @@ func (r Records) VerifyFlowAudits(graph core.TaskGraph) error {
 	bound := map[string]bool{}
 	artifacts := map[string]*core.ArtifactReview{}
 	for _, audit := range r.Budgets {
-		input := slices.Contains([]string{"INPUT_ACCEPTED", "INPUT_VALIDATION_STARTED", "INPUT_VALIDATION_FINISHED"}, audit.Kind)
+		input := slices.Contains([]string{"INPUT_ACCEPTED", "INPUT_VALIDATION_STARTED", "INPUT_VALIDATION_FINISHED", "INPUT_VALIDATION_REUSED"}, audit.Kind)
 		if audit.Kind != "DISPATCH_ISSUED" && !input {
 			continue
 		}
@@ -402,8 +402,30 @@ func (r Records) VerifyFlowAudits(graph core.TaskGraph) error {
 			prior := artifacts[flow.ID]
 			status := report.Artifact.Validation.Status
 			switch audit.Kind {
+			case "INPUT_VALIDATION_REUSED":
+				source := report.Artifact.ValidationSourceFlowID
+				original := artifacts[source]
+				if prior != nil || original == nil || status != "PASSED" {
+					return fmt.Errorf("validation reuse requires an existing passed append-only receipt")
+				}
+				expected := *original
+				expected.ValidationSourceFlowID = source
+				if !reflect.DeepEqual(expected, *report.Artifact) {
+					return fmt.Errorf("validation reuse changed its source receipt")
+				}
+				reconciled := false
+				for _, saved := range r.DispatchReconciliations {
+					if saved.PreviousFlow.ID == source && saved.PreviousFlow.StoppedArtifactReviewer(saved.PreviousDispatch) {
+						for _, decision := range flow.Contract.Decisions {
+							reconciled = reconciled || decision.ID == "reconciled-input:"+flow.TaskID && decision.Text == saved.PreviewHash
+						}
+					}
+				}
+				if !reconciled {
+					return fmt.Errorf("validation reuse lacks its proposal-bound Reviewer reconciliation")
+				}
 			case "INPUT_ACCEPTED":
-				if prior != nil || status != "PENDING" {
+				if prior != nil || status != "PENDING" || report.Artifact.ValidationSourceFlowID != "" {
 					return fmt.Errorf("input acceptance must precede validation exactly once")
 				}
 			case "INPUT_VALIDATION_STARTED":

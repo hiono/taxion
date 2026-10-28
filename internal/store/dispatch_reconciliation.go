@@ -42,10 +42,12 @@ func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 			audit.DeliveryStatus != "unknown" || audit.At.IsZero() ||
 			prior.Status != "STOPPED" || prior.StopCode != "SAFETY_STOP" || !prior.HandoffHeld() ||
 			prior.RunnerID != "" || len(prior.DispatchIDs) != 1 || prior.DispatchIDs[0] != before.ID ||
-			before.TaskID != prior.TaskID || before.Recipient != "CODER" || before.Status != core.DispatchIssued ||
+			(!prior.StoppedArtifactReviewer(before) && (before.TaskID != prior.TaskID || before.Recipient != "CODER")) ||
+			before.Status != core.DispatchIssued ||
 			before.Acknowledged || before.ExecutionStarted || before.RuntimeSessionID != "" || before.Result != nil ||
 			before.RuntimeConfigHash != "" || before.ExecutionStartSHA != "" || len(before.RuntimeUsage) != 0 ||
-			prior.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot || prior.Contract.TargetTreeSHA == "" ||
+			prior.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot ||
+			(!prior.StoppedArtifactReviewer(before) && prior.Contract.TargetTreeSHA == "") ||
 			!reflect.DeepEqual(flow, prior) || target != audit.Target ||
 			dispatch.Status != core.DispatchCancelled || dispatch.Result == nil ||
 			dispatch.Result.OutputSHA != "" || dispatch.Result.OutputTreeSHA != "" ||

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"maps"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"time"
 )
@@ -42,10 +43,22 @@ type ArtifactValidation struct {
 }
 
 type ArtifactReview struct {
-	Target        ArtifactTarget        `json:"target"`
-	Configuration ApprovalConfiguration `json:"configuration"`
-	ObservedAt    time.Time             `json:"observedAt"`
-	Validation    ArtifactValidation    `json:"validation"`
+	ValidationSourceFlowID string                `json:"validationSourceFlowId,omitempty"`
+	Target                 ArtifactTarget        `json:"target"`
+	Configuration          ApprovalConfiguration `json:"configuration"`
+	ObservedAt             time.Time             `json:"observedAt"`
+	Validation             ArtifactValidation    `json:"validation"`
+}
+
+// StoppedArtifactReviewer identifies preparation failure, not unknown model work.
+func (f ReviewFlow) StoppedArtifactReviewer(d GraphDispatch) bool {
+	return f.Status == "STOPPED" && f.StopCode == "SAFETY_STOP" && f.HandoffHeld() &&
+		f.RunnerID == "" && f.Artifact != nil && f.Artifact.Validation.Status == "PASSED" &&
+		len(f.DispatchIDs) == 1 && f.DispatchIDs[0] == d.ID &&
+		d.Recipient == "REVIEWER" && d.TaskID != f.TaskID && d.Status == DispatchIssued &&
+		!d.Acknowledged && !d.ExecutionStarted && d.RuntimeSessionID == "" && d.Result == nil &&
+		d.RuntimeConfigHash == "" && d.ExecutionStartSHA == "" && len(d.RuntimeUsage) == 0 &&
+		d.ReviewWorktreeSource == ""
 }
 
 func cloneArtifactReview(a *ArtifactReview) *ArtifactReview {
@@ -70,11 +83,20 @@ func (f ReviewFlow) LastDispatchID() string {
 
 func (f ReviewFlow) ReviewFirst() bool { return f.SourceDispatchID != "" || f.Artifact != nil }
 
+func (f ReviewFlow) ArtifactDecisionID() string {
+	id := "input-artifact:" + f.Artifact.Target.Hash
+	if f.Artifact.ValidationSourceFlowID != "" {
+		id += ":" + f.ID
+	}
+	return id
+}
+
 func (a ArtifactReview) BasisHash() (string, error) {
 	return CanonicalSHA256(struct {
-		Target        ArtifactTarget        `json:"target"`
-		Configuration ApprovalConfiguration `json:"configuration"`
-	}{a.Target, a.Configuration})
+		ValidationSourceFlowID string                `json:"validationSourceFlowId,omitempty"`
+		Target                 ArtifactTarget        `json:"target"`
+		Configuration          ApprovalConfiguration `json:"configuration"`
+	}{a.ValidationSourceFlowID, a.Target, a.Configuration})
 }
 
 func (g TaskGraph) validateArtifactFlow(f ReviewFlow) error {
@@ -88,6 +110,22 @@ func (g TaskGraph) validateArtifactFlow(f ReviewFlow) error {
 		return graphError("invalid artifact-first review contract")
 	}
 	v := a.Validation
+	if a.ValidationSourceFlowID != "" {
+		prior, ok := g.ReviewFlow(a.ValidationSourceFlowID)
+		if !ok || prior.ID == f.ID || prior.Status != "STOPPED" || prior.RunnerID != "" ||
+			prior.Artifact == nil || prior.Artifact.Validation.Status != "PASSED" ||
+			f.Contract.Supersedes != prior.TaskID || f.Contract.CreatedFrom != "flow:"+prior.ID ||
+			!f.StartedAt.After(prior.StartedAt) {
+			return graphError("invalid inherited artifact validation source")
+		}
+		expected := *prior.Artifact
+		expected.ValidationSourceFlowID = prior.ID
+		if !reflect.DeepEqual(*a, expected) ||
+			!slices.Equal(f.Contract.ValidationCommands, prior.Contract.ValidationCommands) ||
+			f.Contract.Worktree != prior.Contract.Worktree {
+			return graphError("inherited artifact validation differs from its original receipt")
+		}
+	}
 	if v.TargetHash != a.Target.Hash ||
 		!slices.Contains([]string{"PENDING", "RUNNING", "PASSED", "FAILED"}, v.Status) ||
 		v.Status == "PENDING" && !v.StartedAt.IsZero() ||
@@ -123,7 +161,7 @@ func (g TaskGraph) validateArtifactFlow(f ReviewFlow) error {
 		}
 		found := false
 		for _, decision := range d.Instruction.Decisions {
-			if decision.ID != "input-artifact:"+a.Target.Hash {
+			if decision.ID != f.ArtifactDecisionID() {
 				continue
 			}
 			var receipt ArtifactReview
