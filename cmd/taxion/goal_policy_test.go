@@ -81,6 +81,12 @@ func TestGoalPolicyCoversEveryRoleAndRuntimePrompt(t *testing.T) {
 			"actual required capabilities and saved-session compatibility",
 			"does not require re-entering the total quota",
 			"do not replay uncertain sends or extend deadlines and budgets",
+			"At every path back to the user",
+			"Resolve in-contract discrepancies from saved approvals",
+			"A technical failure is not a request for unrelated consent",
+			"not obtainable by safe approved observation",
+			"Do not treat a hold, warning or draft as a completed handoff",
+			"Do not waive unknown delivery, exhausted ceilings, identity or quality failures",
 		} {
 			if !strings.Contains(prompt, constraint) {
 				t.Errorf("prompt %d lacks %q", index, constraint)

@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.11"
+const readySkillVersion = "1.3.12"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -33,6 +33,20 @@ or session directories, or request a management shell before doing product work.
 
 Use this skill to operate Taxion for an approved coding task, inspect saved
 results, or continue stopped work without repeating completed work.
+
+Before returning work to the user, identify the unresolved human decision.
+Use saved approvals and observed evidence to resolve in-contract discrepancies.
+Technical failure alone does not require new consent. Use supported controller
+operations; ask only for a new material choice, authority, resource or essential
+information unavailable through approved observation. Batch related decisions.
+Never bypass identity, quality, unknown delivery, budget or deadline checks.
+A hold or approved draft is not completion: connect it to the next authorized action.
+
+New Coder instructions with changeManifestPolicy: git-diff-v1 let Controller
+derive the complete baseline-to-candidate diff and preserve the original claim
+in changeManifest. Missing, duplicate or incremental changedFiles alone requires
+no resubmission or extra Coder. Old instructions keep exact-list requirements.
+Never alter saved results or expand scope to bypass a rejection.
 
 Before operating Taxion, run taxion ready --check-skill. If it reports an
 incompatible, stale, missing or modified skill, stop using this copy and report

@@ -424,7 +424,13 @@ Prepare a normal Flow without artifactSource or continueFromDispatchId, with
 stageBudget version 1, continuationChange and savedOutputDecision. Then workflow
 plan --file flow.json, approve its actual hash, workflow start --file flow.json,
 workflow run --id FLOW_ID --builtin-prompts --controller-validation-submission.
-Coder changedFiles is the full baseline-to-final diff, not only new edits.
+For instructions with changeManifestPolicy: git-diff-v1, Coder changedFiles is
+an original claim. Controller derives the full baseline-to-candidate diff,
+including carried input, and retains the claim in changeManifest. A missing,
+duplicate or incremental list alone needs no new Coder, repair or approval.
+Instructions without this policy still require the full baseline-to-final list.
+Never edit a saved result to retrofit the policy; actual scope and Git checks,
+Controller validation and same-candidate independent review still apply.
 Pending Controller validation/review is neither success evidence nor a reason
 alone to suspend Coder submission. Unknown validation, drift or active execution
 blocks this path. No new run, deadline, budget or authority is implied by diagnosis.

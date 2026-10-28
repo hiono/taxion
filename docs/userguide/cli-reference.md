@@ -196,6 +196,17 @@ EOF・`/quit` はこの console が所有する実行だけを安全に中断し
 
 Reviewer の `changedFiles` は空の配列です。再現された Coder の差分はレビュー対象であり、Reviewer 自身の変更ではありません。`worktreeChanged` は Reviewer 開始後の変更を表します。実際に変更した場合は blocker として報告し、controller による tree の照合も成功扱いにしません。
 
+**開発版：** [ADR-0057](../develop/adr/0057-resolve-evidence-before-user-escalation.md)
+に従い、新規 Coder 指示は `changeManifestPolicy: git-diff-v1` を保存します。
+Controller が baseline から candidate までの全実差分を `changedFiles` に確定し、
+元の申告は `changeManifest.reportedChangedFiles` に保持します。申告の省略・重複・
+今回編集分だけの一覧を理由に再提出や追加 Coder を要求しません。検証・Reviewer 引継ぎも
+同じ確定一覧を使います。`changeManifest` は結果ファイルやモデルから指定できません。
+policy のない保存済み指示と配布済み旧版は完全一致条件を維持し、旧結果を書き換えません。
+Reviewer 自身の変更禁止、実差分の scope、正式承認、工程予算、全検証と独立レビューは維持します。
+管理スキルは1.3.12です。新しい保存フィールドを使った workspace を旧 binary で操作せず、
+戻す場合は更新前の保全一式を別環境で使用してください。
+
 controller の検証待ちだけでは suspension を要求しない。ただし、実際の失敗、出力欠落、根拠のない Reviewer 承認、必要な利用者の判断は引き続き進行を拒否する。新規 session に使い、実行接続時も繰り返す。`runtime stop` には指定しない。既存 session の既定 prompt は変更しない。
 
 ### 設定

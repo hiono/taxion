@@ -311,6 +311,7 @@ type DispatchResult struct {
 	OutputSHA          string                      `json:"outputSha"`
 	OutputTreeSHA      string                      `json:"outputTreeSha,omitempty"`
 	ChangedFiles       []string                    `json:"changedFiles"`
+	ChangeManifest     *DispatchChangeManifest     `json:"changeManifest,omitempty"`
 	Validations        []DispatchValidation        `json:"validations"`
 	GitEvidence        *DispatchGitEvidence        `json:"gitEvidence,omitempty"`
 	PartialGitEvidence *DispatchPartialGitEvidence `json:"partialGitEvidence,omitempty"`
@@ -324,6 +325,14 @@ type DispatchResult struct {
 	WorktreeChanged    *bool                       `json:"worktreeChanged,omitempty"`
 	NextTransition     TaskStatus                  `json:"nextTransition"`
 	ResumeCondition    string                      `json:"resumeCondition,omitempty"`
+}
+
+type DispatchChangeManifest struct {
+	Policy               string   `json:"policy"`
+	BaselineSHA          string   `json:"baselineSha"`
+	OutputSHA            string   `json:"outputSha"`
+	OutputTreeSHA        string   `json:"outputTreeSha,omitempty"`
+	ReportedChangedFiles []string `json:"reportedChangedFiles"`
 }
 
 type ExecutionObservation struct {
@@ -363,47 +372,48 @@ type DispatchFinding struct {
 }
 
 type DispatchInstruction struct {
-	Version             int                   `json:"version"`
-	DispatchTo          string                `json:"dispatchTo"`
-	DispatchID          string                `json:"dispatchId"`
-	Relationship        DispatchRelationship  `json:"relationship"`
-	RelatedDispatchID   string                `json:"relatedDispatchId"`
-	RelationshipReason  string                `json:"relationshipReason"`
-	ChangedFields       []string              `json:"changedFields"`
-	PreservedFields     []string              `json:"preservedFields"`
-	TaskID              string                `json:"taskId"`
-	TaskType            string                `json:"taskType"`
-	Title               string                `json:"title"`
-	Repository          string                `json:"repository"`
-	Issue               string                `json:"issue"`
-	ParentTaskID        string                `json:"parentTaskId"`
-	SiblingTaskIDs      []string              `json:"siblingTaskIds"`
-	DependsOn           []TaskDependency      `json:"dependsOn"`
-	Blocks              []string              `json:"blocks"`
-	Objective           string                `json:"objective"`
-	AuthorizedActions   []string              `json:"authorizedActions"`
-	ForbiddenActions    []string              `json:"forbiddenActions"`
-	Acceptance          []string              `json:"acceptance,omitempty"`
-	RequiredEvidence    []string              `json:"requiredEvidence"`
-	ValidationCommands  []string              `json:"validationCommands,omitempty"`
-	ExitCondition       string                `json:"exitCondition"`
-	Worktree            string                `json:"worktree"`
-	Branch              string                `json:"branch"`
-	BaselineSHA         string                `json:"baselineSha"`
-	TargetSHA           string                `json:"targetSha"`
-	OutputMode          string                `json:"outputMode,omitempty"`
-	TargetTreeSHA       string                `json:"targetTreeSha,omitempty"`
-	TargetChangedFiles  []string              `json:"targetChangedFiles,omitempty"`
-	FileAccess          *FileAccessPolicy     `json:"fileAccess,omitempty"`
-	BudgetGuidance      *BudgetGuidancePolicy `json:"budgetGuidance,omitempty"`
-	AuthorizationID     string                `json:"authorizationId"`
-	Decisions           []TaskDecision        `json:"decisions"`
-	HumanDecision       *HumanDecisionRequest `json:"humanDecision,omitempty"`
-	MemoryRefs          []string              `json:"memoryRefs"`
-	MemoryContext       []DispatchMemoryEntry `json:"memoryContext,omitempty"`
-	Specifications      []Specification       `json:"specifications,omitempty"`
-	ReturnFormat        []string              `json:"returnFormat"`
-	CommitMessagePolicy string                `json:"commitMessagePolicy,omitempty"`
+	Version              int                   `json:"version"`
+	DispatchTo           string                `json:"dispatchTo"`
+	DispatchID           string                `json:"dispatchId"`
+	Relationship         DispatchRelationship  `json:"relationship"`
+	RelatedDispatchID    string                `json:"relatedDispatchId"`
+	RelationshipReason   string                `json:"relationshipReason"`
+	ChangedFields        []string              `json:"changedFields"`
+	PreservedFields      []string              `json:"preservedFields"`
+	TaskID               string                `json:"taskId"`
+	TaskType             string                `json:"taskType"`
+	Title                string                `json:"title"`
+	Repository           string                `json:"repository"`
+	Issue                string                `json:"issue"`
+	ParentTaskID         string                `json:"parentTaskId"`
+	SiblingTaskIDs       []string              `json:"siblingTaskIds"`
+	DependsOn            []TaskDependency      `json:"dependsOn"`
+	Blocks               []string              `json:"blocks"`
+	Objective            string                `json:"objective"`
+	AuthorizedActions    []string              `json:"authorizedActions"`
+	ForbiddenActions     []string              `json:"forbiddenActions"`
+	Acceptance           []string              `json:"acceptance,omitempty"`
+	RequiredEvidence     []string              `json:"requiredEvidence"`
+	ValidationCommands   []string              `json:"validationCommands,omitempty"`
+	ExitCondition        string                `json:"exitCondition"`
+	Worktree             string                `json:"worktree"`
+	Branch               string                `json:"branch"`
+	BaselineSHA          string                `json:"baselineSha"`
+	TargetSHA            string                `json:"targetSha"`
+	OutputMode           string                `json:"outputMode,omitempty"`
+	TargetTreeSHA        string                `json:"targetTreeSha,omitempty"`
+	TargetChangedFiles   []string              `json:"targetChangedFiles,omitempty"`
+	FileAccess           *FileAccessPolicy     `json:"fileAccess,omitempty"`
+	BudgetGuidance       *BudgetGuidancePolicy `json:"budgetGuidance,omitempty"`
+	AuthorizationID      string                `json:"authorizationId"`
+	Decisions            []TaskDecision        `json:"decisions"`
+	HumanDecision        *HumanDecisionRequest `json:"humanDecision,omitempty"`
+	MemoryRefs           []string              `json:"memoryRefs"`
+	MemoryContext        []DispatchMemoryEntry `json:"memoryContext,omitempty"`
+	Specifications       []Specification       `json:"specifications,omitempty"`
+	ReturnFormat         []string              `json:"returnFormat"`
+	CommitMessagePolicy  string                `json:"commitMessagePolicy,omitempty"`
+	ChangeManifestPolicy string                `json:"changeManifestPolicy,omitempty"`
 }
 
 type DispatchMemoryEntry struct {
@@ -669,6 +679,9 @@ func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship Di
 		(task.OutputMode == "" || task.OutputMode == OutputModeCommit) {
 		instruction.CommitMessagePolicy = CommitMessagePolicy
 	}
+	if task.Owner == "CODER" {
+		instruction.ChangeManifestPolicy = ChangeManifestPolicy
+	}
 	if relationship != RelationshipNone && relationship != RelationshipIndependent {
 		instruction.ChangedFields, instruction.PreservedFields = compareDispatchInstructions(related.Instruction, instruction)
 		if relationship == RelationshipContinues && len(instruction.ChangedFields) != 0 {
@@ -691,6 +704,10 @@ func compareDispatchInstructions(previous, current DispatchInstruction) ([]strin
 			continue
 		case "CommitMessagePolicy":
 			if previous.CommitMessagePolicy == "" && current.CommitMessagePolicy == "" {
+				continue
+			}
+		case "ChangeManifestPolicy":
+			if previous.ChangeManifestPolicy == "" && current.ChangeManifestPolicy == "" {
 				continue
 			}
 		case "Specifications":
@@ -748,6 +765,8 @@ func dispatchInstructionIdentityMatchesTask(d GraphDispatch, task GraphTask) boo
 	acceptanceMatches := i.Version == 1 || slices.Equal(i.Acceptance, task.Acceptance)
 	memoryMatches := i.Version < 3 || validateDispatchMemoryContext(i.MemoryRefs, i.MemoryContext) == nil
 	policyMatches := i.CommitMessagePolicy == "" || i.CommitMessagePolicy == CommitMessagePolicy && d.Recipient == "CODER"
+	manifestMatches := i.ChangeManifestPolicy == "" ||
+		i.ChangeManifestPolicy == ChangeManifestPolicy && d.Recipient == "CODER"
 	fileAccessMatches := reflect.DeepEqual(i.FileAccess, task.FileAccess) &&
 		(i.FileAccess == nil || i.FileAccess.Validate() == nil)
 	guidanceMatches := reflect.DeepEqual(i.BudgetGuidance, task.BudgetGuidance) &&
@@ -759,7 +778,7 @@ func dispatchInstructionIdentityMatchesTask(d GraphDispatch, task GraphTask) boo
 			d.Recipient == "REVIEWER" && validSHA(i.TargetTreeSHA) &&
 				i.TargetTreeSHA == task.TargetTreeSHA &&
 				slices.Equal(i.TargetChangedFiles, task.TargetChangedFiles))
-	return versionMatches && acceptanceMatches && memoryMatches && policyMatches && fileAccessMatches && guidanceMatches &&
+	return versionMatches && acceptanceMatches && memoryMatches && policyMatches && manifestMatches && fileAccessMatches && guidanceMatches &&
 		outputModeMatches &&
 		validateSpecifications(i.Specifications) == nil && i.DispatchID == d.ID &&
 		i.TaskID == d.TaskID && i.Repository == d.Repository &&
@@ -1097,6 +1116,9 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 	fmt.Fprintf(&output, "RETURN FORMAT: %s", value)
 	if i.CommitMessagePolicy == CommitMessagePolicy {
 		fmt.Fprintf(&output, "\nCOMMIT MESSAGE REQUIREMENT: %s", CommitMessageInstruction)
+	}
+	if i.ChangeManifestPolicy == ChangeManifestPolicy {
+		output.WriteString("\nCHANGE MANIFEST POLICY: git-diff-v1. Report the files you changed; the controller derives the full baseline-to-candidate diff including carried input, preserves your claim separately, and checks all actual paths. Do not reproduce an inherited file list merely to satisfy exact equality. Never submit changeManifest; it is controller-generated evidence.")
 	}
 	if d.Recipient == "REVIEWER" {
 		output.WriteString("\nEVIDENCE REFERENCES: result.evidence contains identifiers. Each acceptance.evidence and findings.evidence entry must exactly match an entry in result.evidence. Put explanations in finding title/file/lines; cite the identifiers unchanged.")
@@ -1956,6 +1978,11 @@ func cloneDispatchResult(result *DispatchResult) *DispatchResult {
 	}
 	copy := *result
 	copy.ChangedFiles = slices.Clone(result.ChangedFiles)
+	if result.ChangeManifest != nil {
+		manifest := *result.ChangeManifest
+		manifest.ReportedChangedFiles = slices.Clone(result.ChangeManifest.ReportedChangedFiles)
+		copy.ChangeManifest = &manifest
+	}
 	copy.Validations = slices.Clone(result.Validations)
 	copy.Evidence = slices.Clone(result.Evidence)
 	copy.ExecutionEvidence = slices.Clone(result.ExecutionEvidence)

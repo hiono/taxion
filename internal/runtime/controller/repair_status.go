@@ -82,7 +82,7 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 		return status, nil
 	}
 
-	const humanNext = "present the saved stop reason, findings and acceptance to the user"
+	const humanNext = "inspect saved evidence and reconcile through supported controller operations; present a consolidated user question only for a new decision, authority, resource or essential unavailable information"
 	if err := state.Graph.Validate(); err != nil {
 		return set(RepairInvalid, "saved Task, Flow or Dispatch records are inconsistent: "+err.Error(), humanNext)
 	}
