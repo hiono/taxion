@@ -66,6 +66,17 @@ policy のない保存済み指示は完全一致条件を維持する。未知�
 
 ## Validation and remaining work
 
+2026-10-28 に source `2fa493d47ee309298f99020074adad0d19beae3e` で
+`mise run check`（gofmt・vet・全 Go 試験・build・Web 試験）と、
+gitproof・core・controller・CLI の変更対象に絞った race 試験が成功した。
+独立した読取り専用の差分レビューでは、変更一覧の確定、scope、再照合、
+旧指示と Reviewer の境界に重大な指摘はなかった。
+公開文書の repository 検査も成功した。実モデル・製品実行・配布は行っていない。
+
+最初の linked worktree での全検査は、CLI のローカル build identity に VCS revision が
+含まれず失敗した。同一 commit を通常の repository で検査し直すと、その試験と
+全検査が成功した。試験の削除・緩和や製品コードの回避処理は追加していない。
+
 モデルを起動しない回帰試験で、commit・snapshot の持込み差分、申告の省略・重複・過剰、
 元申告の保持、検証後の再照合、旧 policy の維持、範囲外変更・偽造証拠・candidate 不一致の
 拒否を確認する。自動 Flow と段階実行は、省略申告から検証・独立レビュー・許可済み修正・
