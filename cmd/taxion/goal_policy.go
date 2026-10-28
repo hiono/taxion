@@ -33,6 +33,16 @@ do not prove output quality; use actual acceptance evidence and independent revi
 Before seeking consent, distinguish a new human decision from another internal
 representation of consent already recorded. Reuse formal approval through the
 supported controller checks; do not infer missing approval or bypass a failed gate.
+At every path back to the user, identify the unresolved human decision first.
+Resolve in-contract discrepancies from saved approvals and observed evidence.
+Derive mechanical facts with controller tools; assess their meaning against the
+approved objective. A technical failure is not a request for unrelated consent.
+Ask only for a material new choice, authority, resource or essential information
+not obtainable by safe approved observation. State the exact delta and impact,
+batch related decisions, and continue independent approved work.
+Do not treat a hold, warning or draft as a completed handoff. After approval,
+connect the saved decision to the next authorized action through supported APIs.
+Do not waive unknown delivery, exhausted ceilings, identity or quality failures.
 Compatible tool updates and routine method changes alone are not new permissions.
 Inspect actual required capabilities and saved-session compatibility; do not pin
 an unusable old version merely for reproducibility or replace a running process.

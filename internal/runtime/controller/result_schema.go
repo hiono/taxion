@@ -51,6 +51,9 @@ func dispatchResultSchema(dispatch core.GraphDispatch, strict, bound bool) map[s
 		"dispatchId", "taskId", "recipient", "repository", "status", "startedSha", "outputSha",
 		"changedFiles", "validations", "evidence", "workReport", "blockers", "nextTransition", "resumeCondition",
 	}
+	if dispatch.Recipient == "CODER" && dispatch.Instruction.ChangeManifestPolicy == core.ChangeManifestPolicy {
+		properties["changedFiles"].(map[string]any)["description"] = "Report the files you changed. The controller derives the full baseline-to-candidate Git diff including carried input, checks every actual path and preserves your original list separately. Do not reproduce inherited file lists for exact equality."
+	}
 	if dispatch.Recipient == "REVIEWER" {
 		properties["changedFiles"] = map[string]any{
 			"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 0,

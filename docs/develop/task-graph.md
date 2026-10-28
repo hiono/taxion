@@ -161,14 +161,14 @@ subject・body・action line の形式を検査する。最新コミットだけ
 既存 repository の開始 SHA 以前のコミットと、
 この policy を持たない保存済み Dispatch は発行時の契約を保持する。
 
-**Coder の変更一覧は Controller が実差分から確定する（仕様変更・未実装）**
+**Coder の変更一覧は Controller が実差分から確定する（開発版）**
 
-全工程に共通する判断は [ADR-0055](adr/0055-adapt-within-approved-goals.md#全工程で使う判定順序仕様追補個別実装は未完了)
+全工程に共通する判断は [ADR-0055](adr/0055-adapt-within-approved-goals.md#全工程で使う判定順序)
 に従い、この項は変更一覧の具体的な受理条件を定める。
 
-この節は次版の受理仕様を定める。現行実装は Coder の `changedFiles` と baseline からの
-実差分の完全一致を要求し、不一致で停止する。以下の柔軟化はまだ利用できず、
-保存済みの失敗結果をこの仕様だけで成功へ変更してはならない。
+新規 Coder instruction の `changeManifestPolicy: git-diff-v1` に適用する。
+policy のない保存済み指示と配布済み旧版は、申告一覧と実差分の完全一致を要求する。
+保存済みの失敗結果をこの変更だけで成功へ変更してはならない。
 
 Coder の `changedFiles` は変更内容の申告であり、成果物の正当性を証明する情報ではない。
 Controller は承認済み baseline から確定した candidate までの全変更を Git から取得し、
@@ -184,7 +184,8 @@ Controller は35ファイルを確定して通常の検証へ進める。
 機械的な変更一覧の確定に追加モデル、Coder の再提出、repair 枠、新たな人間の承認を要求しない。
 これは一覧の補完であり、Coder の `SUSPENDED`、`BLOCKED`、失敗や未完了を成功に読み替える操作ではない。
 
-Coder の生の提出内容と申告一覧は不変のまま保存する。Controller は確定一覧、
+Coder の生の提出イベント・入力ファイルは変更せず、元の申告一覧を
+`changeManifest.reportedChangedFiles` に保存する。Controller は確定一覧、
 比較元・比較先の commit/tree、申告との差異を別の Controller 証拠として関連付ける。
 保存済みの提出本文・result hash・承認契約を上書きしない。
 後段の成果物照合・検証・Reviewer 引継ぎはこの同じ確定一覧と candidate 識別子を使い、
@@ -198,7 +199,7 @@ Coder の生の提出内容と申告一覧は不変のまま保存する。Contr
 検証開始前に candidate を固定し、全所定検証に合格した同一 candidate だけを独立 Reviewer に渡す。
 申告補完で検証・レビューを省略せず、予算・期限・権限も拡張しない。
 
-実装時は受理方式を版付きで識別し、既存 Dispatch の不変の指示と保存結果を移行・再解釈しない。
+受理方式は版付き policy で識別し、既存 Dispatch の不変の指示と保存結果を移行・再解釈しない。
 新方式では Coder 指示も申告と Controller 確定の区別に合わせ、
 commit・snapshot の両経路と直接の結果受理・自動 workflow の呼出しで一貫させる。
 受入条件は、持込み34ファイルと今回編集1ファイルの合計35ファイルを正しく引き継げること、
@@ -878,10 +879,10 @@ runtime はこの result schema を SDK に渡し、最終応答を Task・Dispa
 最終応答は controller が受理し、結果ファイルは `dispatch transition --result-file` から受理する。
 SUCCEEDED の受理時には CLI が Git worktree から origin、branch、baseline、HEAD、commit parent、
 差分、worktree の状態を読み直し、Git evidence として result に保存する。
-現行版では HEAD は outputSha と一致し、baseline は HEAD の祖先であり、差分は result の changedFiles と
-Task の scope に一致する必要がある。rename は移動元の削除と移動先の追加として両方の scope を確認する。
-次版の変更一覧の確定は[関係と実行契約](#関係と実行契約)の未実装仕様に従う。
-申告一覧の一致条件だけを置き換え、Git の真正性・scope・検証条件は維持する。
+HEAD は outputSha と一致し、baseline は HEAD の祖先であり、実差分は Task の scope 内でなければならない。
+新規 Coder の版付き policy では[関係と実行契約](#関係と実行契約)に従って Controller が
+result の changedFiles を確定し、元申告を別に保存する。policy のない旧指示は完全一致を維持する。
+rename は移動元の削除と移動先の追加として両方の scope を確認する。
 controller は保存済み `validationCommands` を実行し、command・exitCode・出力・開始終了時刻・
 実行 worktree・SHA を result に保存する。実行の前後で Git root、HEAD、clean 状態を照合する。
 agent が報告したコマンドは実行許可の根拠として使用せず、実行対象は Dispatch の保存済みコマンドから取得する。

@@ -369,7 +369,7 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 				gitTest(t, root, "add", "internal/app.go")
 				gitTest(t, root, "commit", "-m", "feat(app): "+dispatch.ID, "-m", "intent(app): satisfy the approved acceptance criterion")
 				result.OutputSHA = gitTest(t, root, "rev-parse", "HEAD")
-				result.ChangedFiles = []string{"internal/app.go"}
+				// Omit the list to exercise controller derivation through review and repair.
 			} else {
 				changed := false
 				result.WorktreeChanged = &changed
@@ -442,6 +442,11 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 		saved, _ := state.Graph.GraphDispatch(worker.dispatch.ID)
 		if saved.Status != core.DispatchSucceeded || len(saved.RuntimeUsage) != 1 {
 			t.Fatal("final results or usage not persisted")
+		}
+		if saved.Recipient == "CODER" && (saved.Result.ChangeManifest == nil ||
+			len(saved.Result.ChangeManifest.ReportedChangedFiles) != 0 ||
+			len(saved.Result.ChangedFiles) != 1 || saved.Result.ChangedFiles[0] != "internal/app.go") {
+			t.Fatal("workflow lost the original claim or canonical candidate before review")
 		}
 		if saved.Configuration == nil {
 			t.Fatal("continuous flow failed to persist configuration")
