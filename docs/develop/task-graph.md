@@ -161,6 +161,48 @@ subject・body・action line の形式を検査する。最新コミットだけ
 既存 repository の開始 SHA 以前のコミットと、
 この policy を持たない保存済み Dispatch は発行時の契約を保持する。
 
+**Coder の変更一覧は Controller が実差分から確定する（仕様変更・未実装）**
+
+この節は次版の受理仕様を定める。現行実装は Coder の `changedFiles` と baseline からの
+実差分の完全一致を要求し、不一致で停止する。以下の柔軟化はまだ利用できず、
+保存済みの失敗結果をこの仕様だけで成功へ変更してはならない。
+
+Coder の `changedFiles` は変更内容の申告であり、成果物の正当性を証明する情報ではない。
+Controller は承認済み baseline から確定した candidate までの全変更を Git から取得し、
+検証・Reviewer 引継ぎに使う正規の変更一覧を生成する。
+commit モードでは baseline commit と output commit、snapshot モードでは baseline commit と
+Controller が固定した output tree を比較する。後続 Coder の開始時点までに持ち込まれた変更も含め、
+今回の Coder が編集したファイルだけを全変更一覧とは扱わない。
+
+申告の省略、順序違い、重複、今回編集したファイルだけの申告、過剰な申告は、
+Git による確認が成立すれば申告差として記録し、それだけを理由に Dispatch を失敗させない。
+例えば、実差分が承認済み範囲の35ファイルで、Coder の申告がそのうち今回編集した1ファイルでも、
+Controller は35ファイルを確定して通常の検証へ進める。
+機械的な変更一覧の確定に追加モデル、Coder の再提出、repair 枠、新たな人間の承認を要求しない。
+これは一覧の補完であり、Coder の `SUSPENDED`、`BLOCKED`、失敗や未完了を成功に読み替える操作ではない。
+
+Coder の生の提出内容と申告一覧は不変のまま保存する。Controller は確定一覧、
+比較元・比較先の commit/tree、申告との差異を別の Controller 証拠として関連付ける。
+保存済みの提出本文・result hash・承認契約を上書きしない。
+後段の成果物照合・検証・Reviewer 引継ぎはこの同じ確定一覧と candidate 識別子を使い、
+生の申告との完全一致を再び要求して停止させない。
+
+柔軟化するのは申告一覧との一致条件だけである。repository・worktree・branch・baseline・
+実行開始 SHA・output commit/tree の本人性と整合、commit モードの clean 条件、
+既存の成果物保持条件、scope・fileAccess・除外範囲の確認は維持する。
+申告にないファイルも全件確認し、範囲外の実変更、差分取得不能、candidate の不一致や
+検証中の変更は拒否する。申告にだけ存在するパスはアクセスや検証コマンドの根拠にしない。
+検証開始前に candidate を固定し、全所定検証に合格した同一 candidate だけを独立 Reviewer に渡す。
+申告補完で検証・レビューを省略せず、予算・期限・権限も拡張しない。
+
+実装時は受理方式を版付きで識別し、既存 Dispatch の不変の指示と保存結果を移行・再解釈しない。
+新方式では Coder 指示も申告と Controller 確定の区別に合わせ、
+commit・snapshot の両経路と直接の結果受理・自動 workflow の呼出しで一貫させる。
+受入条件は、持込み34ファイルと今回編集1ファイルの合計35ファイルを正しく引き継げること、
+省略・重複・過剰申告を記録しても余分なモデルを起動しないこと、生の提出を保持すること、
+および範囲外変更・Git 取得失敗・candidate 不一致を従来どおり拒否することである。
+検証不合格や Coder の非成功結果から Reviewer を発行しないことも確認する。
+
 decision は一意の ID、source、text を持ち、修正した判断は新しい ID で追記する。
 人間の選択が必要な場合は `humanDecision` に質問、選択肢、推奨選択肢と理由を記録し、
 Task を `HUMAN_DECISION_REQUIRED` にする。選択後は option ID と対応する decision record を
