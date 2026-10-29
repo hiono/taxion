@@ -237,6 +237,13 @@ func TestAccountQuotaMappingAndUnapprovedReads(t *testing.T) {
 			t.Fatal("quota or paid overage mapping was wrong", result)
 		}
 	}
+	overage := mapQuota(runtime.QuotaSnapshot{}, rpc.AccountQuotaSnapshot{
+		EntitlementRequests: 50000, UsedRequests: 50010, RemainingPercentage: 0,
+		OverageAllowedWithExhaustedQuota: true,
+	})
+	if overage.State != "available" || overage.Remaining == nil || *overage.Remaining != 0 || !overage.ExecutionDenied {
+		t.Fatal("over-entitlement usage must not report negative remaining requests or permit execution", overage)
+	}
 	adapter, err := New(testConfig(t))
 	if err != nil {
 		t.Fatal(err)

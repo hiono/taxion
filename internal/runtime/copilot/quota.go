@@ -185,6 +185,9 @@ func mapQuota(result runtime.QuotaSnapshot, snapshot rpc.AccountQuotaSnapshot) r
 	result.Entitlement, result.Used = &snapshot.EntitlementRequests, &snapshot.UsedRequests
 	if !result.Unlimited {
 		remaining := snapshot.EntitlementRequests - snapshot.UsedRequests
+		if remaining < 0 {
+			remaining = 0
+		}
 		result.Remaining = &remaining
 	}
 	result.RemainingPercentage = &snapshot.RemainingPercentage

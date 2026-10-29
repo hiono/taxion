@@ -116,9 +116,9 @@ func allocateAccountQuota(quota *runtime.QuotaSnapshot, dayStart *float64, now t
 
 // accountDayStart returns the earliest available remaining percentage recorded today
 // for the same provider account, resource and reset cycle.
-func accountDayStart(events []store.RuntimeReceipt, quota *runtime.QuotaSnapshot, now time.Time) *float64 {
+func accountDayStart(events []store.RuntimeReceipt, quota *runtime.QuotaSnapshot, now time.Time) (*float64, error) {
 	if quota == nil {
-		return nil
+		return nil, nil
 	}
 	today := now.UTC().Truncate(24 * time.Hour)
 	var start *float64
@@ -127,19 +127,29 @@ func accountDayStart(events []store.RuntimeReceipt, quota *runtime.QuotaSnapshot
 		if receipt.Type != "budget-guidance" {
 			continue
 		}
+		if receipt.Hash != receiptHash(receipt.Payload) {
+			return nil, fmt.Errorf("taxion: saved account allocation receipt is invalid")
+		}
 		var body struct {
 			Observation struct {
 				Account *runtime.QuotaSnapshot `json:"account"`
 			} `json:"observation"`
 		}
 		if json.Unmarshal([]byte(receipt.Payload), &body) != nil {
-			continue
+			return nil, fmt.Errorf("taxion: saved account allocation receipt is invalid")
 		}
 		seen := body.Observation.Account
-		if seen == nil || seen.State != "available" || seen.RemainingPercentage == nil ||
-			seen.Provider != quota.Provider || seen.Account != quota.Account || seen.Resource != quota.Resource ||
-			seen.Scope != quota.Scope || seen.Unit != quota.Unit ||
-			(seen.ResetAt == nil) != (quota.ResetAt == nil) ||
+		if seen == nil || seen.Provider != quota.Provider || seen.Account != quota.Account ||
+			seen.Resource != quota.Resource || seen.Scope != quota.Scope || seen.Unit != quota.Unit ||
+			seen.State != "available" {
+			continue
+		}
+		if seen.RemainingPercentage == nil || seen.ObservedAt.IsZero() ||
+			math.IsNaN(*seen.RemainingPercentage) || math.IsInf(*seen.RemainingPercentage, 0) ||
+			*seen.RemainingPercentage < 0 || *seen.RemainingPercentage > 100 {
+			return nil, fmt.Errorf("taxion: saved account allocation receipt is invalid")
+		}
+		if (seen.ResetAt == nil) != (quota.ResetAt == nil) ||
 			seen.ResetAt != nil && quota.ResetAt != nil && !seen.ResetAt.Equal(*quota.ResetAt) ||
 			seen.ObservedAt.Before(today) || seen.ObservedAt.After(now) {
 			continue
@@ -153,7 +163,7 @@ func accountDayStart(events []store.RuntimeReceipt, quota *runtime.QuotaSnapshot
 		value := *quota.RemainingPercentage
 		start = &value
 	}
-	return start
+	return start, nil
 }
 
 func accountDenial(quota *runtime.QuotaSnapshot) error {
