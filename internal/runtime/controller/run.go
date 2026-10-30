@@ -335,6 +335,7 @@ func readAccountQuotaForCreditStatus(ctx context.Context, dispatch core.GraphDis
 // StreamEvents finalizes only a terminal turn. Monitoring applies while waiting
 // and after usage events, including before a final result can be adopted.
 func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispatch, cursor uint64, out io.Writer, check func() error) (err error) {
+	defer c.cancelTurn(dispatch.ID)
 	defer func() {
 		if err == nil {
 			return

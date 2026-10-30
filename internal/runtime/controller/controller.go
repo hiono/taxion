@@ -21,9 +21,11 @@ import (
 
 // Controller binds one role-scoped runtime to durable Task Graph Dispatches.
 type Controller struct {
-	store   *store.Store
-	runtime runtime.Identity
-	mu      sync.Mutex
+	store       *store.Store
+	runtime     runtime.Identity
+	mu          sync.Mutex
+	turnMu      sync.Mutex
+	turnCancels map[string]context.CancelFunc
 }
 
 func New(db *store.Store, worker runtime.Identity) (*Controller, error) {
@@ -33,7 +35,7 @@ func New(db *store.Store, worker runtime.Identity) (*Controller, error) {
 	if strings.TrimSpace(worker.Role()) == "" || strings.TrimSpace(worker.ConfigHash()) == "" {
 		return nil, fmt.Errorf("taxion: runtime role and configuration hash must not be empty")
 	}
-	return &Controller{store: db, runtime: worker}, nil
+	return &Controller{store: db, runtime: worker, turnCancels: make(map[string]context.CancelFunc)}, nil
 }
 
 func PrepareReview(db *store.Store, dispatchID, source string) (core.GraphDispatch, error) {
@@ -221,7 +223,12 @@ func (c *Controller) SendWithBudgetGuidance(ctx context.Context, dispatchID, pro
 	if err != nil {
 		return err
 	}
-	defer stageCancel()
+	sent := false
+	defer func() {
+		if !sent {
+			stageCancel()
+		}
+	}()
 	if dispatch.Status == core.DispatchCancelRequested || dispatch.Status == core.DispatchSuspended {
 		return fmt.Errorf("taxion: Dispatch status %s does not authorize sending instructions", dispatch.Status)
 	}
@@ -285,9 +292,15 @@ func (c *Controller) SendWithBudgetGuidance(ctx context.Context, dispatchID, pro
 	if err := c.observeStageIfFlow(dispatchID, "model-starting", ""); err != nil {
 		return err
 	}
+	// Send can return before the turn completes; retain its deadline and parent
+	// cancellation until streaming or a terminal transition releases it.
+	c.turnMu.Lock()
+	c.turnCancels[dispatchID] = stageCancel
+	c.turnMu.Unlock()
 	sendErr := c.runtime.Send(ctx, dispatch.RuntimeSessionID, prompt+supplement+stageText)
 	recordErr := c.recordBudgetGuidance(dispatch, observation, "send-returned", sendErr)
 	if err := errors.Join(sendErr, recordErr); err != nil {
+		defer c.cancelTurn(dispatchID)
 		if ctx.Err() != nil {
 			stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
@@ -298,7 +311,18 @@ func (c *Controller) SendWithBudgetGuidance(ctx context.Context, dispatchID, pro
 		}
 		return err
 	}
+	sent = true
 	return nil
+}
+
+func (c *Controller) cancelTurn(dispatchID string) {
+	c.turnMu.Lock()
+	cancel := c.turnCancels[dispatchID]
+	delete(c.turnCancels, dispatchID)
+	c.turnMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (c *Controller) Resume(ctx context.Context, dispatchID string) error {
@@ -343,6 +367,7 @@ func (c *Controller) Stop(ctx context.Context, dispatchID string) error {
 	if err := c.runtime.Stop(ctx, dispatch.RuntimeSessionID); err != nil {
 		return err
 	}
+	c.cancelTurn(dispatchID)
 	result := &core.DispatchResult{
 		DispatchID: dispatch.ID, TaskID: dispatch.TaskID, Recipient: dispatch.Recipient,
 		Repository: dispatch.Repository, Status: core.DispatchCancelled,
@@ -724,7 +749,7 @@ func (c *Controller) markRunning(ctx context.Context, dispatchID string) error {
 
 func (c *Controller) transition(dispatchID string, status core.DispatchStatus, reason string,
 	result *core.DispatchResult, acknowledged, started bool) error {
-	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+	err := c.store.UpdateWorkspace(func(state *store.Workspace) error {
 		if !state.HasGraph {
 			return fmt.Errorf("taxion: Task Graph is not initialized")
 		}
@@ -777,6 +802,11 @@ func (c *Controller) transition(dispatchID string, status core.DispatchStatus, r
 		}
 		return fmt.Errorf("taxion: Dispatch %q has no ledger projection", dispatchID)
 	})
+	if err == nil && (status == core.DispatchSucceeded || status == core.DispatchFailed ||
+		status == core.DispatchCancelled || status == core.DispatchSuspended) {
+		c.cancelTurn(dispatchID)
+	}
+	return err
 }
 
 func active(status core.DispatchStatus) bool {

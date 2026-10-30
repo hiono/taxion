@@ -701,8 +701,9 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 				CacheWrite *int64 `json:"cachedWriteTokens"`
 			} `json:"usage"`
 		}
-		err := a.call(ctx, "session/prompt", map[string]any{"sessionId": session,
+		promptErr := a.call(ctx, "session/prompt", map[string]any{"sessionId": session,
 			"prompt": []any{map[string]string{"type": "text", "text": prompt}}}, &result)
+		err := promptErr
 		a.mu.Lock()
 		failed := err != nil && ctx.Err() == nil && !a.stopped
 		a.mu.Unlock()
@@ -735,7 +736,12 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 				a.emit(runtime.Event{Type: runtime.EventUsage, Payload: string(payload)})
 			}
 		} else {
-			a.emit(runtime.Event{Type: "acp_usage_unavailable", Payload: `{"scope":"latest-assistant-message","reason":"ACP prompt response omitted usage; not zero/free/unlimited"}`})
+			reason := "ACP prompt response omitted usage; not zero/free/unlimited"
+			if promptErr != nil {
+				reason = "ACP prompt failed without usage; not zero/free/unlimited"
+			}
+			payload, _ := json.Marshal(map[string]string{"scope": "latest-assistant-message", "reason": reason})
+			a.emit(runtime.Event{Type: "acp_usage_unavailable", Payload: string(payload)})
 		}
 		switch {
 		case preservationErr != nil:
@@ -743,7 +749,11 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 		case failed:
 			a.emit(runtime.Event{Type: runtime.EventFailed, Payload: err.Error()})
 		case stopped || ctx.Err() != nil:
-			a.emit(runtime.Event{Type: runtime.EventCancelled, Payload: "ACP process terminated; approved partial files exported"})
+			reason := "ACP process terminated; approved partial files exported"
+			if ctx.Err() != nil {
+				reason = "ACP prompt " + ctx.Err().Error() + "; process terminated; approved partial files exported"
+			}
+			a.emit(runtime.Event{Type: runtime.EventCancelled, Payload: reason})
 		case err != nil:
 			a.emit(runtime.Event{Type: runtime.EventFailed, Payload: err.Error()})
 		case result.StopReason != "end_turn":

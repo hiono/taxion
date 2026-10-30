@@ -185,6 +185,28 @@ PATH 上の native `rg` が必要であり、隔離内の検索成功と実行�
 保存参照を共有するためであり、以前の参照が別 tree を指す場合に上書きしません。
 操作者の新しい観測を、旧 Dispatch の正式な取消・成功の receipt と混同しないでください。
 
+### バックエンド別の実証と再確認
+
+バックエンド共通の工程制御を変える場合も、Copilot と OpenCode の両方を確認します。工程計画を省略した過去の成功は、計画付き実行の証拠にはしません。Issue #231 の早期取消の回帰は次のモデルを呼ばない検査で確認できます。
+
+```bash
+go test ./internal/runtime/controller ./internal/runtime/openacp \
+  -run 'TestPlannedSendRetainsContext|TestPlannedControllerReceivesAsynchronousACPResponse|TestParentCancellation|TestExplicitDeadlineRequired'
+go test -race -timeout 30m ./internal/runtime/controller ./internal/runtime/copilot ./internal/runtime/openacp
+```
+
+最初の検査は、送信復帰後のコンテキスト生存、ローカル ACP の遅延応答、親の取消、実際の工程期限、停止時の部分成果保全を対象にします。正式な実モデル受入れは別に承認し、同じ対象の成果保存・コントローラ検証・独立レビューまで確認します。
+
+| 対象と条件 | 既存の証拠 | 適用範囲と残る確認 |
+|---|---|---|
+| Copilot SDK と共通コントローラ | `internal/runtime/copilot`、`internal/runtime/controller` の合成試験 | 認証・モデル・実課金の確認ではない。今回の修正後の実モデル受入れは未実施 |
+| OpenCode ACP と工程計画 | `TestPlannedControllerReceivesAsynchronousACPResponse` と工程制御の回帰 | 遅延応答するローカルプロセスを使用。実 OpenCode やモデルを呼ばない |
+| OpenCode の過去の実モデル受入れ | [`d368d71`](https://github.com/hiono/taxion/commit/d368d71) の最小応答、[`07fabd1`](https://github.com/hiono/taxion/commit/07fabd1) の文書採用、`cmd/taxion/opencode_live_test.go` | 当時の匿名 Big Pickle、限定した文書・権限での実証。実機用テストには工程計画がなく、現在の組合せ全体の保証ではない |
+| OpenCode 1.19.3 と `opencode/big-pickle` | Issue #231 の停止記録と直接実行の利用制限 | ACP の早期取消をローカル再現。直接実行の利用制限との歴史的因果と、修正後の実モデル受入れは未確認 |
+| OpenCode の `DeepSeek V4.1 Flash` | Issue #231 の利用者申告と、その後に提示された端末上の実回答 | 端末では回答を確認。Taxion の隔離・ACP・成果検証・独立レビューは未確認。モデルの自動切替を許可する証拠にはしない |
+
+再開時は、この表と対応する Issue・コミットを先に確認し、使用する CLI、モデル、権限、課金条件との違いを記録します。「実証がない」と「現在の条件では未確認」を区別し、停止済み履歴や成功済み成果を書き換えません。モデル提供元の診断、標準エラーだけの障害、両バックエンドの継続的な受入れなど、Issue #231 の未達条件はこの修正で削除せず、すべての条件を満たすまで閉じません。
+
 ### バックエンドと同じ探索を検証する
 
 通常のカスタマイズ探索は設定中のバックエンドに任せ、未選択バックエンドの配置を

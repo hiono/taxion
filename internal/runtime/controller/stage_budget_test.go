@@ -34,6 +34,118 @@ func stageFlowFixture(t *testing.T) (*store.Store, string, ReviewFlowRequest) {
 	return db, ledger, request
 }
 
+type asyncStageRuntime struct {
+	fakeRuntime
+	sendContext context.Context
+}
+
+func (w *asyncStageRuntime) Send(ctx context.Context, _, _ string) error {
+	w.sendContext = ctx
+	return w.sendErr
+}
+
+func TestPlannedSendRetainsContextUntilTurnCompletion(t *testing.T) {
+	for _, end := range []string{"result", "failure", "stop", "parent-cancel", "deadline", "send-error", "stream-error"} {
+		t.Run(end, func(t *testing.T) {
+			db, ledger, request := stageFlowFixture(t)
+			flow, err := StartReviewFlow(db, ledger, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state, _ := db.LoadWorkspace()
+			dispatch, _ := state.Graph.GraphDispatch(flow.DispatchIDs[0])
+			worker := &asyncStageRuntime{fakeRuntime: fakeRuntime{
+				role: "CODER", hash: "test", worktree: dispatch.Instruction.Worktree,
+			}}
+			control, err := New(db, worker)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if _, err := control.Start(ctx, dispatch.ID); err != nil {
+				t.Fatal(err)
+			}
+			if end == "deadline" {
+				// Move only the test clock; the saved stage deadline must bound Send.
+				flow.Deadline = time.Now().Add(time.Duration(flow.StagePlan.ReservedSeconds(0, "CODER"))*time.Second + time.Second)
+				if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+					storeFlow(state, flow)
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if end == "send-error" {
+				worker.sendErr = errors.New("send failed")
+			}
+			err = control.Send(ctx, dispatch.ID, "execute")
+			if end == "send-error" {
+				if !errors.Is(err, worker.sendErr) {
+					t.Fatal("send error was lost", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := worker.sendContext.Err(); err != nil {
+					t.Fatal("Send cancelled an asynchronous turn on return", err)
+				}
+				if deadline, ok := worker.sendContext.Deadline(); !ok || !deadline.Equal(stageDeadline(flow, dispatch, false)) {
+					t.Fatal("Send lost the approved stage deadline", deadline)
+				}
+			}
+			switch end {
+			case "result":
+				result := core.DispatchResult{
+					DispatchID: dispatch.ID, TaskID: dispatch.TaskID, Recipient: dispatch.Recipient,
+					Repository: dispatch.Repository, Status: core.DispatchFailed,
+					StartedSHA: dispatch.ExpectedStartSHA(), Blockers: []string{"test result"},
+					NextTransition: core.Blocked,
+				}
+				events := make(chan runtime.Event, 2)
+				worker.events = events
+				payload := string(mustFlowJSON(t, result))
+				go func() {
+					events <- runtime.Event{Type: runtime.EventOutput, Payload: payload}
+					events <- runtime.Event{Type: runtime.EventTurnFinished}
+					close(events)
+				}()
+				if err := control.StreamEvents(ctx, dispatch, 0, io.Discard, nil); err != nil {
+					t.Fatal("asynchronous result could not be finalized", err)
+				}
+			case "failure":
+				if err := control.Fail(dispatch.ID, "test failure"); err != nil {
+					t.Fatal(err)
+				}
+			case "stop":
+				if err := control.Stop(ctx, dispatch.ID); err != nil {
+					t.Fatal(err)
+				}
+			case "parent-cancel":
+				cancel()
+			case "stream-error":
+				if err := control.StreamEvents(ctx, dispatch, 0, nil, nil); err == nil {
+					t.Fatal("invalid stream succeeded")
+				}
+			}
+			select {
+			case <-worker.sendContext.Done():
+			case <-time.After(3 * time.Second):
+				t.Fatal("turn completion/cancellation did not release its context")
+			}
+			if end == "deadline" && !errors.Is(worker.sendContext.Err(), context.DeadlineExceeded) {
+				t.Fatal("stage deadline did not expire normally", worker.sendContext.Err())
+			}
+			if end == "parent-cancel" || end == "deadline" {
+				if err := control.Stop(t.Context(), dispatch.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func TestPlannedFlowRunsVerifiedRepairAndIndependentReview(t *testing.T) {
 	testFlowRunsRepairAndNewSHAReview(t, false, true)
 }

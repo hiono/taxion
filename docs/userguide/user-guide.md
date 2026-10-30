@@ -629,6 +629,8 @@ Copilot で Flow が停止しても Dispatch に保存 session が残る場合�
 
 OpenCode は別 process の `runtime stop` で保存 session へ接続できません。所有 runner で停止し、process の終了と部分成果の保存を確認します。`CANCEL_REQUESTED` のままなら取消完了とは扱わず、後続 Task の承認・実行を重ねません。詳しくは[OpenCode の設定と制約](configuration.md#opencode-acp-の設定と制約)を参照してください。
 
+工程計画付きの実行では、送信関数が戻っただけで応答待ちを取り消さず、親の取消または承認済み工程期限まで待機します。ACP の取消イベントに `context canceled` があればコンテキストの取消、`context deadline exceeded` があれば期限切れを観測しています。これらをモデル提供元の利用制限と同一視しないでください。`acp_usage_unavailable` は使用量不明であり、応答を得られなかった場合と応答内に使用量がなかった場合を説明で区別します。旧版の `ACP process terminated` だけの保存記録からは、この区別を遡って確定できません。提供元の詳細エラーの保存・伝達と修正後の実機受入れは Issue #231 で継続確認します。
+
 無料価格のモデルでも、rate limit により待機・失敗する場合があります。ACP 接続後に tool・assistant の出力がないことだけでは、原因や利用量を確定できません。操作者が OpenCode 側の診断で `Rate limit exceeded` を確認した場合は、同時実行や無条件の再送を重ねず、提供側の再試行案内に従います。承認済み期限で停止した場合も正式な取消と runner 解放を確認し、未完了のレビューを成功にはしません。別モデル・認証情報・接続方式への変更を、無料という理由だけで承認済みとは扱いません。
 
 OpenCode 1.19.0 の実受入れでは、モデルが `read` に `path` を渡して失敗し、`filePath` へ直すと読取りに成功しました。`edit` の `oldString` に read 出力の行番号を含めた場合も、実ファイルの本文と一致せず編集に失敗しました。後続 Task の指示では、その版の native tool schema に合わせた引数名を使い、行番号を本文へ含めないよう明示します。tool の失敗は編集済み・検証済みの根拠にはしません。

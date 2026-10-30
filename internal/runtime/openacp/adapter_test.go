@@ -123,6 +123,9 @@ func servePeer() {
 				}})
 				continue
 			}
+			if mode == "delayed" {
+				time.Sleep(100 * time.Millisecond)
+			}
 			if os.Getenv("TAXION_FAKE_HANG") == "1" {
 				continue
 			}
@@ -168,9 +171,12 @@ func testConfig(t *testing.T, role string) Config {
 		FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"result.txt"}}}
 }
 
-func fakeAdapter(t *testing.T, hang bool) *Adapter {
+func fakeAdapter(t *testing.T, hang bool, guidance ...*core.BudgetGuidancePolicy) *Adapter {
 	t.Helper()
 	config := testConfig(t, "CODER")
+	if len(guidance) != 0 {
+		config.BudgetGuidance = guidance[0]
+	}
 	a, err := New(config)
 	if err != nil {
 		t.Fatal(err)
@@ -807,6 +813,60 @@ func TestExplicitDeadlineRequiredAndExpiredTurnIsReaped(t *testing.T) {
 	}
 	for event := range events {
 		if event.Type == runtime.EventCancelled {
+			if !strings.Contains(event.Payload, context.DeadlineExceeded.Error()) {
+				t.Fatal("deadline cancellation lost its cause", event)
+			}
+			return
+		}
+	}
+	t.Fatal("terminal cancellation was lost")
+}
+
+func TestParentCancellationReportsCauseAndPreservesPartialOutput(t *testing.T) {
+	a := fakeAdapter(t, true)
+	parent, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	id, err := a.Start(parent, "bounded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, cancelTurn := context.WithCancel(parent)
+	defer cancelTurn()
+	if err := a.Send(turn, id, "execute"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(a.root, "workspace/result.txt"), []byte("partial"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cancelTurn()
+	if err := a.waitTurn(parent); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-a.done:
+	default:
+		t.Fatal("parent cancellation did not reap the process")
+	}
+	content, err := os.ReadFile(filepath.Join(a.Worktree(), "result.txt"))
+	if err != nil || string(content) != "partial" {
+		t.Fatal("parent cancellation lost partial output", err)
+	}
+	events, err := a.Events(parent, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknownUsage := false
+	for event := range events {
+		switch event.Type {
+		case "acp_usage_unavailable":
+			unknownUsage = strings.Contains(event.Payload, "prompt failed without usage") &&
+				strings.Contains(event.Payload, "not zero/free/unlimited")
+		case runtime.EventTurnFinished, runtime.EventFailed, runtime.EventUsage:
+			t.Fatal("cancelled prompt misclassified", event)
+		case runtime.EventCancelled:
+			if !unknownUsage || !strings.Contains(event.Payload, context.Canceled.Error()) || parent.Err() != nil {
+				t.Fatal("cancellation lost its cause or unknown usage", event)
+			}
 			return
 		}
 	}
