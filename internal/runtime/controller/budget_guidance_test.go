@@ -101,7 +101,7 @@ func TestGuidedAccountSendAndDurableReceipt(t *testing.T) {
 }
 
 func TestAccountGuidanceFailuresAndApprovedOverrides(t *testing.T) {
-	for _, name := range []string{"unavailable", "stale", "expired", "unsupported", "mismatch", "provider-mismatch", "exhausted", "invalid", "off", "flow", "unapproved"} {
+	for _, name := range []string{"unavailable", "stale", "expired", "unsupported", "mismatch", "provider-mismatch", "exhausted", "invalid", "negative-remaining", "off", "flow", "unapproved"} {
 		t.Run(name, func(t *testing.T) {
 			policy := budgetPolicy(t, "account")
 			if name == "unapproved" {
@@ -128,6 +128,9 @@ func TestAccountGuidanceFailuresAndApprovedOverrides(t *testing.T) {
 			case "invalid":
 				bad := int64(-2)
 				worker.quota.Used = &bad
+			case "negative-remaining":
+				bad := int64(-1)
+				worker.quota.Remaining = &bad
 			case "off", "flow":
 				mode = name
 			case "unapproved":

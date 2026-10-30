@@ -173,8 +173,10 @@ func TestAccountDayStartDoesNotReusePriorResetCycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := accountDayStart([]store.RuntimeReceipt{{Type: "budget-guidance", Payload: string(payload)}}, current, now)
-	if start == nil || *start != 45 {
+	receipt := store.RuntimeReceipt{Type: "budget-guidance", Payload: string(payload)}
+	receipt.Hash = receiptHash(receipt.Payload)
+	start, err := accountDayStart([]store.RuntimeReceipt{receipt}, current, now)
+	if err != nil || start == nil || *start != 45 {
 		t.Fatal("new cycle reused a prior-cycle day-start observation", start)
 	}
 }
@@ -232,7 +234,8 @@ func TestAccountDayStartUsesEarliestMatchingObservationToday(t *testing.T) {
 		quota := observedQuota()
 		quota.ObservedAt, quota.RemainingPercentage, quota.Account = at, &remaining, account
 		body, _ := json.Marshal(map[string]any{"observation": map[string]any{"account": quota}})
-		return store.RuntimeReceipt{Type: "budget-guidance", Payload: string(body)}
+		payload := string(body)
+		return store.RuntimeReceipt{Type: "budget-guidance", Payload: payload, Hash: receiptHash(payload)}
 	}
 	events := []store.RuntimeReceipt{
 		receipt(now.Add(-7*time.Hour), 60, "ai-user"), // yesterday
@@ -242,11 +245,19 @@ func TestAccountDayStartUsesEarliestMatchingObservationToday(t *testing.T) {
 		{Type: "provider-stream", Payload: "{}"},
 	}
 	current := allocationQuota(40, nil)
-	if start := accountDayStart(events, current, now); start == nil || *start != 45 {
+	if start, err := accountDayStart(events, current, now); err != nil || start == nil || *start != 45 {
 		t.Fatal("day start was not the earliest same-account observation today", start)
 	}
-	if start := accountDayStart(nil, current, now); start == nil || *start != 40 {
+	if start, err := accountDayStart(nil, current, now); err != nil || start == nil || *start != 40 {
 		t.Fatal("first observation of the day was not its own start", start)
+	}
+	events[1].Payload += " "
+	if _, err := accountDayStart(events, current, now); err == nil {
+		t.Fatal("tampered account allocation evidence was accepted")
+	}
+	invalid := allocationQuota(101, nil)
+	if _, err := accountDayStart([]store.RuntimeReceipt{allocationReceipt(t, &budgetObservation{Account: invalid})}, current, now); err == nil {
+		t.Fatal("invalid saved quota percentage was accepted")
 	}
 }
 

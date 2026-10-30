@@ -136,6 +136,46 @@ func TestSetupOpenCodeDoesNotRequireExecutablePin(t *testing.T) {
 	}
 }
 
+func TestModelFreeInitDoesNotRequireUserRuntimeReferences(t *testing.T) {
+	root := setupFixture(t, true)
+	var output bytes.Buffer
+	if err := setupCmd([]string{"--model-free", "--yes", "--set", "repository.provider=gitlab"},
+		strings.NewReader(""), &output, false, true); err != nil {
+		t.Fatal(output.String(), err)
+	}
+	layers, err := configurationLayers(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial, err := config.ResolvePartial(layers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if partial.Config.Repository.Account != "" || partial.Config.Repository.CredentialRef != "" ||
+		partial.Config.Runtime.Provider != "" || partial.Config.Runtime.Account != "" ||
+		partial.Config.Runtime.CredentialRef != "" || partial.Config.Runtime.ContractRef != "" ||
+		partial.Config.Execution.ApprovalRef != "" {
+		t.Fatal("model-free init invented user-specific configuration", partial.Config)
+	}
+	if _, err := resolveConfiguration(); err == nil {
+		t.Fatal("model execution configuration was accepted without runtime and approval references")
+	}
+	if _, err := newTaskBudgetGuidance(); err != nil {
+		t.Fatal("local Task intake requires runtime configuration", err)
+	}
+	db, _, err := loadWorkspace()
+	if err != nil {
+		t.Fatal("model-free init did not initialize workspace", err)
+	}
+	db.Close()
+	if _, err := os.Stat(filepath.Join(root, ".taxion", "config.yaml")); err != nil {
+		t.Fatal("model-free init did not save repository-local configuration", err)
+	}
+	if !strings.Contains(output.String(), "model execution remains unavailable") {
+		t.Fatal("setup did not explain the execution boundary", output.String())
+	}
+}
+
 func TestSetupGitLabColdStartAndRepeatWithoutModel(t *testing.T) {
 	root := setupFixture(t, true)
 	child := filepath.Join(root, "src", "nested")

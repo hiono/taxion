@@ -104,13 +104,18 @@ func IntakeHash(task core.GraphTask) (string, error) {
 	return fmt.Sprintf("sha256:%x", sha256.Sum256(data)), nil
 }
 
+func modelFreeVerification(task core.GraphTask) bool {
+	return task.ModelFree && task.Type == "VERIFICATION" && task.Owner == "USER"
+}
+
 // ProposeIntake records the original request and a contract for the user to inspect.
 // It never treats natural-language text as authorization or starts a worker.
 func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, error) {
 	if db == nil || strings.TrimSpace(request.Request) == "" || strings.TrimSpace(request.Actor) == "" ||
 		strings.TrimSpace(request.Source) == "" || request.Task.Status != core.Draft ||
 		request.Task.AuthorizationID != "" || len(request.Task.Decisions) != 0 ||
-		(request.Task.Owner != "CODER" && !(request.Task.Owner == "USER" && request.ReconciliationHash != "")) ||
+		(request.Task.Owner != "CODER" && !(modelFreeVerification(request.Task) ||
+			request.Task.Owner == "USER" && request.ReconciliationHash != "")) ||
 		request.Task.Reviewer != "REVIEWER" {
 		return core.GraphTask{}, fmt.Errorf("taxion: intake requires an original request, sourced DRAFT contract and independent Coder/Reviewer without authorization")
 	}
@@ -210,7 +215,19 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		strings.TrimSpace(request.Reason) == "" || request.ExpectedHash == "" {
 		return core.GraphTask{}, fmt.Errorf("taxion: intake confirmation requires exact proposal hash, actor, source and reason")
 	}
-	if err := request.Selection.Validate(); err != nil {
+	modelFree := false
+	if state, err := db.LoadWorkspace(); err != nil {
+		return core.GraphTask{}, err
+	} else if task, ok := state.Graph.GraphTask(request.TaskID); ok {
+		modelFree = modelFreeVerification(task)
+	}
+	if modelFree {
+		if request.Selection != (config.Config{}) || len(request.AdditionalTaskIDs) != 0 ||
+			request.ConfigurationDecisionID != "" || request.ReplacesFlow != "" || request.Target != nil ||
+			request.ReconciliationHash != "" {
+			return core.GraphTask{}, fmt.Errorf("taxion: model-free verification confirmation cannot include runtime configuration or execution authorization")
+		}
+	} else if err := request.Selection.Validate(); err != nil {
 		return core.GraphTask{}, err
 	}
 	text, err := json.Marshal(request)
@@ -224,8 +241,13 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		if !state.HasGraph || !ok {
 			return fmt.Errorf("taxion: intake confirmation requires a saved proposal")
 		}
-		if err := task.BudgetGuidance.CheckBillingContract(request.Selection.Billing); err != nil {
-			return err
+		if modelFreeVerification(task) != modelFree {
+			return fmt.Errorf("taxion: Task model-free classification changed during confirmation")
+		}
+		if !modelFree {
+			if err := task.BudgetGuidance.CheckBillingContract(request.Selection.Billing); err != nil {
+				return err
+			}
 		}
 		for _, decision := range task.Decisions {
 			if decision.ID == confirmation.ID {
@@ -273,7 +295,7 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 			decisionCount--
 		}
 		if hash != request.ExpectedHash || task.Status != core.Draft || task.AuthorizationID != "" ||
-			task.Repo != request.Selection.Repository.Path || (decisionCount != 1 && decisionCount != 2) ||
+			!modelFree && task.Repo != request.Selection.Repository.Path || (decisionCount != 1 && decisionCount != 2) ||
 			task.Decisions[0].ID != "intake:"+task.ID || len(task.ValidationCommands) == 0 {
 			return fmt.Errorf("taxion: intake proposal changed or lacks explicit execution/validation contract")
 		}
@@ -376,39 +398,43 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		} else if task.Supersedes != "" || request.Target != nil {
 			return fmt.Errorf("taxion: a superseding contract requires explicit predecessor-flow reapproval")
 		}
-		approvalText, err := json.Marshal(config.Approval{
-			Kind: config.ApprovalKind, TaskID: task.ID, Reason: request.Reason,
-			Allowed: []config.Config{request.Selection}, AdditionalTaskIDs: request.AdditionalTaskIDs,
-		})
-		if err != nil {
-			return err
-		}
-		decisionID := request.ConfigurationDecisionID
-		if decisionID == "" {
-			decisionID = request.Selection.Execution.ApprovalRef
-		}
-		if err := config.CheckApproval(string(approvalText), task.ID, decisionID, request.Selection); err != nil {
-			return err
-		}
-		existingApproval := false
-		for _, decision := range task.Decisions {
-			if decision.ID == decisionID {
-				if err := config.CheckApproval(decision.Text, task.ID, decision.ID, request.Selection); err != nil {
-					return err
-				}
-				if len(request.AdditionalTaskIDs) != 0 {
-					return fmt.Errorf("taxion: approval expansion needs a fresh explicit configuration approval ID")
-				}
-				existingApproval = true
+		if !modelFree {
+			approvalText, err := json.Marshal(config.Approval{
+				Kind: config.ApprovalKind, TaskID: task.ID, Reason: request.Reason,
+				Allowed: []config.Config{request.Selection}, AdditionalTaskIDs: request.AdditionalTaskIDs,
+			})
+			if err != nil {
+				return err
 			}
+			decisionID := request.ConfigurationDecisionID
+			if decisionID == "" {
+				decisionID = request.Selection.Execution.ApprovalRef
+			}
+			if err := config.CheckApproval(string(approvalText), task.ID, decisionID, request.Selection); err != nil {
+				return err
+			}
+			existingApproval := false
+			for _, decision := range task.Decisions {
+				if decision.ID == decisionID {
+					if err := config.CheckApproval(decision.Text, task.ID, decision.ID, request.Selection); err != nil {
+						return err
+					}
+					if len(request.AdditionalTaskIDs) != 0 {
+						return fmt.Errorf("taxion: approval expansion needs a fresh explicit configuration approval ID")
+					}
+					existingApproval = true
+				}
+			}
+			task.Decisions = append(task.Decisions, confirmation)
+			if !existingApproval {
+				task.Decisions = append(task.Decisions, core.TaskDecision{
+					ID: decisionID, Source: request.Source, Text: string(approvalText),
+				})
+			}
+		} else {
+			task.Decisions = append(task.Decisions, confirmation)
 		}
 		task.AuthorizationID = confirmation.ID
-		task.Decisions = append(task.Decisions, confirmation)
-		if !existingApproval {
-			task.Decisions = append(task.Decisions, core.TaskDecision{
-				ID: decisionID, Source: request.Source, Text: string(approvalText),
-			})
-		}
 		if err := state.Graph.Track(task, request.Actor, request.Reason); err != nil {
 			return err
 		}
@@ -425,6 +451,9 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 			}
 		}
 		result, _ = state.Graph.GraphTask(task.ID)
+		if modelFreeVerification(result) {
+			return nil
+		}
 		return appendConfirmedIntakeApproval(state, result, request)
 	})
 	return result, err
@@ -433,6 +462,9 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 // A bundle is a representation of the exact formal confirmation, not a second
 // human decision. Legacy graphs keep their existing authorization semantics.
 func appendConfirmedIntakeApproval(state *store.Workspace, task core.GraphTask, request IntakeConfirmation) error {
+	if modelFreeVerification(task) {
+		return nil
+	}
 	switch state.Graph.ApprovalRequirement() {
 	case core.ApprovalVerifiedLegacy:
 		return nil

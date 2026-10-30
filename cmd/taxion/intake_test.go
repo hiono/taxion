@@ -347,3 +347,120 @@ execution: {requester: human, worker: local, approvalRef: intake-config}
 		t.Fatal("proposal retrieval did not reconstruct saved state", err)
 	}
 }
+
+func TestModelFreeVerificationCompletesThroughCLIWithoutRuntime(t *testing.T) {
+	old := storePath
+	dir := t.TempDir()
+	storePath = filepath.Join(dir, "ledger.json")
+	t.Cleanup(func() { storePath = old })
+	db, err := store.Open(workspaceDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InitializeWorkspace(store.Workspace{
+		HasGraph: true, Graph: core.TaskGraph{Version: 1, ApprovalSchemaVersion: core.CurrentApprovalSchemaVersion},
+		Ledger: core.Ledger{},
+	}); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	sha := strings.Repeat("a", 40)
+	task := core.GraphTask{
+		ID: "manual-verification", Title: "Verify saved acceptance evidence", Repo: "owner/repo",
+		Type: "VERIFICATION", Issue: "NOT_REQUIRED: local verification", CreatedFrom: "human:request",
+		Owner: "USER", Reviewer: "REVIEWER", Status: core.Draft, ModelFree: true,
+		Objective:          "Verify the recorded acceptance evidence without model execution.",
+		Scope:              []string{"internal/runtime/controller/artifact_successor_test.go"},
+		OutOfScope:         []string{"source changes", "model execution"},
+		Acceptance:         []string{"focused test passes"},
+		RequiredEvidence:   []string{"focused-test-output"},
+		ValidationCommands: []string{"go test ./internal/runtime/controller -run TestFailedArtifactSuccessorBindsReceiptAndRunsCoderThenReview -count=1"},
+		Branch:             "review/issue-203", Worktree: dir, BaselineSHA: sha, TargetSHA: sha,
+		ExitCondition: "Independent evidence review is recorded",
+	}
+	write := func(name string, value any) string {
+		t.Helper()
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	var out bytes.Buffer
+	if err := conversationCmd([]string{"intake", "--file", write("intake.json", controller.IntakeRequest{
+		Request: "Record the approved model-free verification.", Task: task,
+		Actor: "human", Source: "human:request",
+	})}, &out); err != nil {
+		t.Fatal("model-free CLI intake required runtime configuration", err)
+	}
+	var proposal struct {
+		Task core.GraphTask `json:"task"`
+		Hash string         `json:"hash"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &proposal); err != nil ||
+		proposal.Task.Status != core.Draft || proposal.Hash == "" {
+		t.Fatal("intake did not return a DRAFT proposal and exact hash", err)
+	}
+	out.Reset()
+	if err := conversationCmd([]string{"proposal", "--task", task.ID}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out.Bytes(), &proposal); err != nil || proposal.Hash == "" {
+		t.Fatal("proposal command did not return the exact contract hash", err)
+	}
+	out.Reset()
+	if err := conversationCmd([]string{"confirm", "--file", write("confirm.json", controller.IntakeConfirmation{
+		TaskID: task.ID, ExpectedHash: proposal.Hash, Actor: "human", Source: "human:approval",
+		Reason: "Approve this exact model-free verification contract",
+	})}, &out); err != nil {
+		t.Fatal("exact-hash model-free confirmation failed", err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, _ := state.Graph.GraphTask(task.ID)
+	if ready.Status != core.Ready || len(state.Graph.Approvals) != 0 || len(state.Graph.Dispatches) != 0 {
+		t.Fatal("model-free confirmation created runtime approval or Dispatch", ready)
+	}
+
+	for _, status := range []core.TaskStatus{core.Active, core.WaitingForEvidence, core.WaitingForReview} {
+		if err := taskCmd([]string{"transition", "--file", write("transition.json", struct {
+			TaskID string          `json:"taskId"`
+			Status core.TaskStatus `json:"status"`
+			Actor  string          `json:"actor"`
+			Reason string          `json:"reason"`
+		}{task.ID, status, "human", "record model-free verification evidence"})}); err != nil {
+			t.Fatalf("transition to %s: %v", status, err)
+		}
+	}
+	proof := core.TransitionProof{
+		ActionPerformed: true, Evidence: task.RequiredEvidence, Acceptance: task.Acceptance,
+		ReviewedSHA: sha, Reviewer: task.Reviewer,
+	}
+	for _, status := range []core.TaskStatus{core.Approved, core.Completed} {
+		if err := taskCmd([]string{"transition", "--file", write("transition.json", struct {
+			TaskID string               `json:"taskId"`
+			Status core.TaskStatus      `json:"status"`
+			Actor  string               `json:"actor"`
+			Reason string               `json:"reason"`
+			Proof  core.TransitionProof `json:"proof"`
+		}{task.ID, status, "human", "record independently reviewed evidence", proof})}); err != nil {
+			t.Fatalf("transition to %s: %v", status, err)
+		}
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, _ := state.Graph.GraphTask(task.ID)
+	if completed.Status != core.Completed || len(state.Graph.Dispatches) != 0 {
+		t.Fatal("model-free CLI Task did not complete without Dispatch", completed)
+	}
+}

@@ -66,10 +66,10 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 			return err
 		}
 		task, ok := state.Graph.GraphTask(request.TaskID)
-		if !state.HasGraph || !ok || task.Repo != request.Repository ||
+		if !state.HasGraph || !ok || task.ModelFree || task.Repo != request.Repository ||
 			task.Status != core.Ready ||
 			(task.Owner != "CODER" && !(request.ArtifactSource != "" && task.Owner == "USER")) || task.Reviewer != "REVIEWER" {
-			return fmt.Errorf("taxion: review flow requires an authorized READY Coder Task with independent REVIEWER")
+			return fmt.Errorf("taxion: review flow requires an authorized READY executable Task with independent REVIEWER")
 		}
 		if err := checkFlowApproval(state.Graph, task, request.Configuration); err != nil {
 			return err

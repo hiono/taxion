@@ -115,7 +115,11 @@ func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.Gr
 			refreshQuotaState(observation, now)
 			err = allocateResetDaily(observation, accountAllocationReceipts(state.Records), now)
 		} else {
-			allocateAccountQuota(observation.Account, accountDayStart(state.Records.Events, observation.Account, now), now)
+			var dayStart *float64
+			dayStart, err = accountDayStart(state.Records.Events, observation.Account, now)
+			if err == nil {
+				allocateAccountQuota(observation.Account, dayStart, now)
+			}
 		}
 	}
 	return observation, err
@@ -164,6 +168,7 @@ func readBudgetQuota(ctx context.Context, worker runtime.Identity, selected conf
 		if quota.ObservedAt.IsZero() || quota.Resource == "" || quota.Scope == "" || quota.Unit == "" || quota.Source == "" ||
 			quota.Used != nil && *quota.Used < 0 ||
 			quota.Entitlement != nil && *quota.Entitlement < -1 ||
+			quota.Remaining != nil && *quota.Remaining < 0 ||
 			quota.RemainingPercentage != nil && (math.IsNaN(*quota.RemainingPercentage) ||
 				math.IsInf(*quota.RemainingPercentage, 0) || *quota.RemainingPercentage < 0 || *quota.RemainingPercentage > 100) {
 			quota.State, quota.Reason = "unavailable", "runtime returned incomplete or invalid quota values"
