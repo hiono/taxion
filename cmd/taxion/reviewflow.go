@@ -134,6 +134,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	var compactContext bool
 	var validationSubmission bool
 	var reviewProgress bool
+	var progressMonitor bool
 	var builtinPrompts bool
 	var requireQuality bool
 	var scanner string
@@ -169,12 +170,16 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		fs.BoolVar(&compactContext, "compact-context", false, "include exact prior results without nested instructions")
 		fs.BoolVar(&validationSubmission, "controller-validation-submission", false, "separate submission from controller-run checks; repeat on session attachment")
 		fs.BoolVar(&reviewProgress, "review-progress", false, "enable bounded Reviewer progress receipts (Copilot only); repeat on session attachment")
+		fs.BoolVar(&progressMonitor, "progress-monitor", false, "save and emit bounded progress_checkpoint requests every ten minutes; outer controller must assess content; no extra model, automatic stop or restart")
 		fs.StringVar(&scanner, "scanner", "betterleaks", "trusted Betterleaks executable (--managed-commit only)")
 	default:
 		return fmt.Errorf("unknown workflow action %q", action)
 	}
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
+	}
+	if progressMonitor {
+		parent = controller.WithProgressMonitor(parent)
 	}
 	if err := copilot.ValidateAICreditLimit(maxAICredits); err != nil {
 		return err

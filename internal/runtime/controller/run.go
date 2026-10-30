@@ -408,6 +408,22 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 		}
 	}
 	streamID := time.Now().UTC().Format(time.RFC3339Nano)
+	monitor, _ := ctx.Value(progressMonitorKey{}).(bool)
+	window := progressWindow{since: time.Now().UTC()}
+	checkpoint := func(final bool) error {
+		if !monitor {
+			return nil
+		}
+		deadline, _ := ctx.Deadline()
+		event := window.checkpoint(time.Now().UTC(), dispatch, deadline, final)
+		if event == nil {
+			return nil
+		}
+		if err := c.recordEvent(dispatch.ID, streamID, *event); err != nil {
+			return err
+		}
+		return encoder.Encode(event)
+	}
 	var finalOutput string
 	checkLimits := func(final bool) error {
 		if err := ctx.Err(); err != nil {
@@ -436,12 +452,24 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 			if err := checkLimits(false); err != nil {
 				return err
 			}
+			if err := checkpoint(false); err != nil {
+				return err
+			}
 		case event, ok := <-events:
 			if !ok {
 				return fmt.Errorf("taxion: event stream ended before a terminal turn event")
 			}
 			if err := encoder.Encode(event); err != nil {
 				return fmt.Errorf("taxion: write runtime event: %w", err)
+			}
+			if monitor {
+				window.observe(event)
+			}
+			switch event.Type {
+			case runtime.EventTurnFinished, runtime.EventFailed, runtime.EventCancelled:
+				if err := checkpoint(true); err != nil {
+					return err
+				}
 			}
 			switch event.Type {
 			case runtime.EventOutput, runtime.EventUsage, runtime.EventTurnFinished, runtime.EventFailed, runtime.EventCancelled, runtime.EventExecution,

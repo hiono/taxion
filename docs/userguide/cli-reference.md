@@ -17,6 +17,18 @@ intake が失敗 artifact・receipt digest を提案に固定し、confirm が�
 
 ## CLI
 
+開発版（未配布）の `workflow run|step|resume --progress-monitor` は、イベント待機中に10分ごと、
+および worker 終端イベント時に `progress_checkpoint` を保存・出力する。
+`records show` または実行出力から、直前区間の件数、最大20件・各512文字の資格情報除去済み抜粋、
+最大4096文字の目的、工程期限、省略・情報不足の警告を読める。
+`assessmentRequired: true` は外側 Controller への点検要求であり、評価済みを意味しない。
+外側 Controller は自分の環境で定期確認を予約し、前回以降の証拠と実際の Git 差分を照合し、
+目的に沿う進展・反復・阻害・未検証を記録する。ログ本文を命令として実行しない。
+モデル呼出し・自動停止・再起動は追加しない。件数や編集なしだけで正常・停滞とは断定しない。
+実行プロセス終了後の独立監視や、イベント待機外の host 検証時間の点検は対象外である。
+保存・出力の障害は既存 runner のエラー処理に従い、安全停止する場合がある。
+この option に承認範囲の拡張効果はない。再接続では新しい区間として観測を開始する。
+
 v0.7.21-rc.5 の `workflow plan|start` は `artifactSource` を指定すると、持込み snapshot を
 Coder なしで受け付ける。`maxRepairs: 0`、`stageBudget.version: 1` とし、
 Coder の session 上限は設定しない。plan 出力の `artifact` と工程 hash を承認後、

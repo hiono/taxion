@@ -135,11 +135,11 @@ _taxion_complete() {
         'workflow reconcile-stopped') candidates='--file --help --preview' ;;
         'workflow recover') candidates='--file --help' ;;
         'workflow repair-status') candidates='--help --id' ;;
-        'workflow resume') candidates='--base-directory --builtin-prompts --cli --coder-prompt-file --coder-tools --compact-context --controller-validation-submission --help --id --managed-commit --managed-stage --max-ai-credits --review-progress --reviewer-prompt-file --reviewer-tools --scanner --strict-result-identities' ;;
-        'workflow run') candidates='--base-directory --builtin-prompts --cli --coder-prompt-file --coder-tools --compact-context --controller-validation-submission --help --id --managed-commit --managed-stage --max-ai-credits --review-progress --reviewer-prompt-file --reviewer-tools --scanner --strict-result-identities' ;;
+        'workflow resume') candidates='--base-directory --builtin-prompts --cli --coder-prompt-file --coder-tools --compact-context --controller-validation-submission --help --id --managed-commit --managed-stage --max-ai-credits --progress-monitor --review-progress --reviewer-prompt-file --reviewer-tools --scanner --strict-result-identities' ;;
+        'workflow run') candidates='--base-directory --builtin-prompts --cli --coder-prompt-file --coder-tools --compact-context --controller-validation-submission --help --id --managed-commit --managed-stage --max-ai-credits --progress-monitor --review-progress --reviewer-prompt-file --reviewer-tools --scanner --strict-result-identities' ;;
         'workflow show') candidates='--help --id' ;;
         'workflow start') candidates='--file --help' ;;
-        'workflow step') candidates='--base-directory --builtin-prompts --cli --coder-prompt-file --coder-tools --compact-context --controller-validation-submission --help --id --managed-commit --managed-stage --max-ai-credits --review-progress --reviewer-prompt-file --reviewer-tools --scanner --strict-result-identities' ;;
+        'workflow step') candidates='--base-directory --builtin-prompts --cli --coder-prompt-file --coder-tools --compact-context --controller-validation-submission --help --id --managed-commit --managed-stage --max-ai-credits --progress-monitor --review-progress --reviewer-prompt-file --reviewer-tools --scanner --strict-result-identities' ;;
         'workflow terminate') candidates='--file --help' ;;
         'workflow validate-input') candidates='--help --id' ;;
         'workspace') candidates='inspect-snapshot restore snapshot' ;;
