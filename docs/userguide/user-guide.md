@@ -84,6 +84,10 @@ taxion doctor --worktree .
 taxion --help
 ```
 
+runtime や個人用 credential・contract・execution approval を設定せず、手動の検証 Task だけを記録する場合は `taxion init --model-free` を使えます。remote から repository provider を決められない場合は `--set repository.provider=...` を指定します。この初期化は部分設定を検証して workspace を準備しますが、モデル実行は有効にしません。後でモデルを使う場合は通常の `taxion init` で不足する設定を追加します。
+
+この経路で作る model-free Task は、明示した検証 command を持つ `USER` 所有の `VERIFICATION` に限られます。`conversation intake --file` で DRAFT を作り、`conversation proposal --task TASK_ID` が示す hash を確認してから、`conversation confirm --file` で同じ hash を承認します。model-free の確認 JSON には `selection` を含めません。Task は Dispatch や Review Flow を開始できず、完了には指定 evidence、全 acceptance、独立 reviewer と対象 SHA の一致を `task transition --file` の proof に記録する必要があります。
+
 `init` は不足項目を尋ね、設定への追加と Git 除外規則を表示します。適用を確認すると、Project 設定と DB を準備します。有効な `.git/info/exclude` の規則があれば再利用し、不足時だけ `.gitignore` へ追記します。既存設定の値は変更せず、省略項目だけを補います。DB が作成済みでも、設定の準備は続行できます。設定ファイルの権限は新規作成・更新時に `0600` とします。
 
 v0.3.1 では、端末上の未確定 provider・複数 remote・適用確認を上下キーと Enter で選択します。適用確認の初期値は `Cancel` で、`Apply` を選んだ場合だけ保存します。`yes` の文字入力は不要です。Ctrl-C・入力の終了では適用せず終了します。account・契約・承認参照などの自由入力は従来どおりです。非対話環境では、不足項目をすべて `--set` で渡し、`--dry-run` で変更案を確認後、同じ指定を `--yes` に替えて明示適用できます。`--yes` は表示する設定・Git 除外変更を保存する指定で、Task や予算の実行承認ではありません。公開済み v0.3.0 の適用確認は文字入力です。

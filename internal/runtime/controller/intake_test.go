@@ -944,6 +944,7 @@ func TestIntakeRejectsIncompleteOrImplicitAuthorization(t *testing.T) {
 	if _, err := ProposeIntake(db, IntakeRequest{Request: "request", Task: task, Actor: "human", Source: "human:request"}); err == nil {
 		t.Fatal("intake accepted an already authorized active Task")
 	}
+
 	task.ID, task.Status, task.AuthorizationID, task.Decisions = "incomplete", core.Draft, "", nil
 	task.Scope = nil
 	saved, err := ProposeIntake(db, IntakeRequest{Request: "Clarify scope", Task: task, Actor: "human", Source: "human:request"})
@@ -960,6 +961,98 @@ func TestIntakeRejectsIncompleteOrImplicitAuthorization(t *testing.T) {
 	after, _ := db.LoadWorkspace()
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("failed contract confirmation retained partial approval")
+	}
+}
+
+func TestModelFreeVerificationCanBeConfirmedAndCompletedWithoutRuntime(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "workspace.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.InitializeWorkspace(store.Workspace{
+		HasGraph: true, Graph: core.TaskGraph{Version: 1, ApprovalSchemaVersion: core.CurrentApprovalSchemaVersion},
+		Ledger: core.Ledger{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.Repeat("a", 40)
+	task := core.GraphTask{
+		ID: "manual-verification", Title: "Verify saved acceptance evidence", Repo: "owner/repo",
+		Type: "VERIFICATION", Issue: "Issue #203", CreatedFrom: "human:review-approval",
+		Owner: "USER", Reviewer: "REVIEWER", Status: core.Draft, ModelFree: true,
+		Objective:          "Re-run the model-free successor regression and record the evidence boundary.",
+		Scope:              []string{"internal/runtime/controller/artifact_successor_test.go"},
+		OutOfScope:         []string{"source changes", "model execution"},
+		Acceptance:         []string{"focused test passes", "public binary evidence is limited to read-only plan"},
+		RequiredEvidence:   []string{"focused-test-output"},
+		ValidationCommands: []string{"go test ./internal/runtime/controller -run TestFailedArtifactSuccessorBindsReceiptAndRunsCoderThenReview -count=1"},
+		Branch:             "review/issue-203", Worktree: dir, BaselineSHA: sha, TargetSHA: sha,
+		ExitCondition: "Independent evidence review is recorded",
+	}
+	proposal, err := ProposeIntake(db, IntakeRequest{
+		Request: "Record the approved model-free acceptance review.", Task: task,
+		Actor: "human", Source: "human:review-approval",
+	})
+	if err != nil {
+		t.Fatal("model-free verification proposal required runtime configuration", err)
+	}
+	hash, err := IntakeHash(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ConfirmIntake(db, IntakeConfirmation{
+		TaskID: proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:review-approval",
+		Reason: "Approve this exact model-free verification contract",
+	}); err != nil {
+		t.Fatal("model-free confirmation required a runtime selection", err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, _ := state.Graph.GraphTask(task.ID)
+	if ready.Status != core.Ready || len(state.Graph.Approvals) != 0 || len(state.Graph.Dispatches) != 0 {
+		t.Fatal("model-free confirmation created runtime approval or work", ready, state.Graph.Approvals, state.Graph.Dispatches)
+	}
+	if err := state.Graph.CheckExecutable(task.ID, task.Repo); err == nil {
+		t.Fatal("model-free verification became dispatchable")
+	}
+	request := ReviewFlowRequest{
+		ID: "manual-verification-flow", TaskID: task.ID, Repository: task.Repo,
+		ReviewRoot: filepath.Join(dir, "reviews"), MaxRepairs: new(int),
+		TimeoutSeconds: 60, MaxNanoAIU: 1,
+		Authorization: core.TaskDecision{ID: "flow-authorization", Source: "human:review-approval", Text: "No model execution"},
+	}
+	if _, err := StartReviewFlow(db, filepath.Join(dir, "ledger.json"), request); err == nil {
+		t.Fatal("model-free verification started a review flow")
+	}
+	for _, status := range []core.TaskStatus{core.Active, core.WaitingForEvidence, core.WaitingForReview} {
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			return state.Graph.Transition(task.ID, status, "human", "record model-free evidence review", core.TransitionProof{})
+		}); err != nil {
+			t.Fatalf("transition to %s: %v", status, err)
+		}
+	}
+	proof := core.TransitionProof{
+		ActionPerformed: true, Evidence: []string{"focused-test-output"},
+		Acceptance: task.Acceptance, ReviewedSHA: sha, Reviewer: task.Reviewer,
+	}
+	for _, status := range []core.TaskStatus{core.Approved, core.Completed} {
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			return state.Graph.Transition(task.ID, status, "human", "record independently reviewed evidence", proof)
+		}); err != nil {
+			t.Fatalf("transition to %s: %v", status, err)
+		}
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, _ := state.Graph.GraphTask(task.ID)
+	if completed.Status != core.Completed || len(state.Graph.Dispatches) != 0 {
+		t.Fatal("model-free Task did not complete without Dispatch", completed, state.Graph.Dispatches)
 	}
 }
 

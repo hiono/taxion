@@ -168,6 +168,7 @@ type GraphTask struct {
 	BaselineSHA        string                `json:"baselineSha"`
 	TargetSHA          string                `json:"targetSha"`
 	OutputMode         string                `json:"outputMode,omitempty"`
+	ModelFree          bool                  `json:"modelFree,omitempty"`
 	TargetTreeSHA      string                `json:"targetTreeSha,omitempty"`
 	TargetChangedFiles []string              `json:"targetChangedFiles,omitempty"`
 	FileAccess         *FileAccessPolicy     `json:"fileAccess,omitempty"`
@@ -1573,6 +1574,9 @@ func (g TaskGraph) Validate() error {
 		if !slices.Contains([]string{"INVESTIGATION", "DESIGN", "IMPLEMENTATION", "VERIFICATION", "REVIEW", "EVIDENCE_COLLECTION"}, t.Type) || !validStatus(t.Status) {
 			return graphError("invalid type or status for %s", t.ID)
 		}
+		if t.ModelFree && (t.Type != "VERIFICATION" || t.Owner != "USER" || len(t.ValidationCommands) == 0) {
+			return graphError("model-free Tasks require USER ownership, VERIFICATION type and explicit validation commands")
+		}
 		if !validIssue(t.Issue) {
 			return graphError("task %s requires an Issue reference or explicit NOT_REQUIRED reason", t.ID)
 		}
@@ -1815,6 +1819,9 @@ func (g TaskGraph) CheckExecutable(id, repo string) error {
 	t, ok := g.task(id)
 	if !ok {
 		return graphError("Task lost: untracked task %s", id)
+	}
+	if t.ModelFree {
+		return graphError("model-free verification Tasks cannot be dispatched")
 	}
 	if t.Repo != repo || t.Status != Ready {
 		return graphError("task %s requires matching repository and READY", id)

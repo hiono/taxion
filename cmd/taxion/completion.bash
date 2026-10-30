@@ -34,7 +34,7 @@ _taxion_complete() {
         'dispatch list') candidates='--help --include-archived --json --repo' ;;
         'dispatch transition') candidates='--actor --help --id --reason --result-file --status --validation-timeout' ;;
         'doctor') candidates='--base-directory --cli --dispatch --help --json --tools --worktree fix' ;;
-        'doctor fix') candidates='--dry-run --help --remote --set --yes' ;;
+        'doctor fix') candidates='--dry-run --help --model-free --remote --set --yes' ;;
         'gen-token') candidates='' ;;
         'git') candidates='check-index check-range hook' ;;
         'git check-index') candidates='--help --scanner --secrets' ;;
@@ -44,7 +44,7 @@ _taxion_complete() {
         'git hook remove') candidates='' ;;
         'git hook status') candidates='' ;;
         'help') candidates='' ;;
-        'init') candidates='--dry-run --help --remote --set --yes' ;;
+        'init') candidates='--dry-run --help --model-free --remote --set --yes' ;;
         'memory') candidates='approve checks configure conflict export get history inspect-snapshot list put restore revise revoke search snapshot source warn' ;;
         'memory approve') candidates='--check --help --id --scope --value' ;;
         'memory checks') candidates='' ;;

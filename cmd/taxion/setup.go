@@ -85,8 +85,9 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 	}
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
 	flags.SetOutput(output)
-	yes := flags.Bool("yes", false, "apply the displayed setup without a confirmation prompt; all missing references must be supplied")
+	yes := flags.Bool("yes", false, "apply the displayed setup without a confirmation prompt")
 	dryRun := flags.Bool("dry-run", false, "display the setup without changing files or initializing the database")
+	modelFree := flags.Bool("model-free", false, "initialize a local verification workspace without runtime or credential references")
 	remote := flags.String("remote", "", "select a Git remote when several exist")
 	values := setupValues{}
 	flags.Var(values, "set", "supply a missing configuration FIELD=VALUE; repeat for each field (never secrets)")
@@ -95,6 +96,9 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("setup accepts options only")
+	}
+	if *modelFree && !initialize {
+		return fmt.Errorf("--model-free is available only with init")
 	}
 	if err := validateWorkspaceStorePath(); err != nil {
 		return err
@@ -208,6 +212,10 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 		"repository.account", "repository.credentialRef", "runtime.provider", "runtime.account",
 		"runtime.credentialRef", "runtime.contractRef", "execution.requester", "execution.worker", "execution.approvalRef",
 		"runtime.acpCommand", "runtime.acpConfig", "runtime.acpConfigHash"} {
+		if *modelFree && (name == "repository.account" || name == "repository.credentialRef" ||
+			strings.HasPrefix(name, "runtime.") || name == "execution.approvalRef") {
+			continue
+		}
 		if existing[name] != "" || values[name] != "" {
 			continue
 		}
@@ -274,7 +282,11 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 	if err != nil {
 		return err
 	}
-	final, err := config.Resolve(append(layers, layer))
+	resolveSetup := config.Resolve
+	if *modelFree {
+		resolveSetup = config.ResolvePartial
+	}
+	final, err := resolveSetup(append(layers, layer))
 	if err != nil {
 		return err
 	}
@@ -346,7 +358,7 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 		return nil
 	}
 	if bytes.Equal(original, candidate) && bytes.Equal(ignoreBefore, ignoreAfter) {
-		if _, err := resolveConfiguration(); err != nil {
+		if err := validateSetupConfiguration(*modelFree); err != nil {
 			return fmt.Errorf("configuration still requires manual repair; no files changed: %w", err)
 		}
 		if initialize {
@@ -419,7 +431,7 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 			return fmt.Errorf("configuration was not written; Git protection may already have been saved, review the displayed changes: %w", err)
 		}
 	}
-	if _, err := resolveConfiguration(); err != nil {
+	if err := validateSetupConfiguration(*modelFree); err != nil {
 		return fmt.Errorf("setup files saved but final configuration check failed; database was not initialized: %w", err)
 	}
 	if initialize {
@@ -427,7 +439,24 @@ func setupCmd(args []string, input io.Reader, output io.Writer, interactive, ini
 			return fmt.Errorf("configuration saved; workspace initialization failed: %w", err)
 		}
 	}
+	if *modelFree {
+		_, err = fmt.Fprintln(output, "Model-free workspace initialized. No runtime, credential or execution approval was configured; model execution remains unavailable until normal setup is completed.")
+		return err
+	}
 	_, err = fmt.Fprintln(output, "Setup complete. Next: taxion config check --sources && taxion doctor. Model execution still requires authentication and explicit Task/budget approval.")
+	return err
+}
+
+func validateSetupConfiguration(modelFree bool) error {
+	if !modelFree {
+		_, err := resolveConfiguration()
+		return err
+	}
+	layers, err := configurationLayers(false)
+	if err != nil {
+		return err
+	}
+	_, err = config.ResolvePartial(layers)
 	return err
 }
 
