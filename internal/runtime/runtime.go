@@ -47,6 +47,7 @@ const (
 // Implementations must isolate Coder and Reviewer contexts (ROLE-001).
 type Runtime interface {
 	Start(ctx context.Context, taskID string) (sessionID string, err error)
+	// Send may return before completion; ctx must remain live for the turn.
 	Send(ctx context.Context, sessionID, prompt string) error
 	Resume(ctx context.Context, sessionID string) error
 	Stop(ctx context.Context, sessionID string) error
