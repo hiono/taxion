@@ -14,8 +14,9 @@ carry forward. A visible remaining balance is actionable information; a
 cumulative Session AIC figure is usage, not by itself a configured spending
 limit. ADR-0036 rejects stopping approved work at an unobservable token
 threshold, while ADR-0051 distinguishes provider-enforced limits from
-account-quota monitoring. This decision applies to the displayed Plan balance;
-it does not redefine either policy or treat Session AIC usage as a limit.
+account-quota monitoring. The Plan balance and a model provider's allowance
+are separate limits. This decision applies to the displayed Plan balance; it
+does not redefine either policy or treat Session AIC usage as a limit.
 
 ## Decision
 
@@ -35,11 +36,21 @@ Use the remaining balance for approved work that can reach a safe stopping
 point within it. Preserve incomplete work and its evidence for the next
 period.
 
+OpenCode lists Big Pickle among its free models and describes Go separately as
+a paid subscription with rolling-window and monthly usage limits
+(https://opencode.ai/ja/go). Do not count use of a confirmed free model against
+the Go monthly allowance or stop solely because the Go balance is unknown.
+Free-model availability may still impose its own limit; if reached, stop
+without switching to a paid model or subscription. When a paid monthly
+allowance is selected, verify its remaining amount before work that could
+exhaust it. If the selected route or fallback behavior is unknown, do not
+assume it is free or switch to a paid route.
+
 ## Consequences
 
 The operator should choose bounded, ready work and use the visible Plan
 balance rather than impose an additional conservation reserve. Work still
 requires the task's existing approvals, acceptance criteria, and validation.
 This ADR does not authorize speculative work, exceed an explicitly approved
-hard ceiling, or claim a precise conversion between Plan quota and Session
-AIC.
+hard ceiling, consume a paid monthly allowance without checking its headroom,
+or claim a precise conversion between Plan quota and Session AIC.
