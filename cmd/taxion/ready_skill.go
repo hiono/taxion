@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.15"
+const readySkillVersion = "1.3.16"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -149,7 +149,11 @@ reconciliationHash in both intake and confirmation, its exact proposal approval
 and cancelled feedback target. This does not authorize a new Flow or model run.
 The same reconcile-stopped operation also covers the first artifact Reviewer
 after PASSED input validation, but only with no acknowledgement, start, session,
-result, runtime receipt or managed review worktree. Preserve unknown delivery.
+result or runtime receipt. A prepared managed review worktree is allowed only
+when Controller verifies its registration, shared repository, detached baseline,
+unchanged baseline index, exact target files and absence of extra or ignored files.
+Preview returns preservedReviewWorktree; neither preview nor application removes
+or rewrites it. Preserve unknown delivery; session-starting is not model-start proof.
 For this case retain the unchanged source worktree and contract in the successor,
 use reconciliationHash in intake and confirmation, and pass the cancelled target.
 Use artifactSource from the original artifact and reuseArtifactValidation:true

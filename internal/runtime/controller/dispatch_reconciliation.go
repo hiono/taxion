@@ -24,17 +24,18 @@ type DispatchReconciliationRequest struct {
 }
 
 type DispatchReconciliationPreview struct {
-	Version           int      `json:"version"`
-	StateChanged      bool     `json:"stateChanged"`
-	FlowID            string   `json:"flowId"`
-	DispatchID        string   `json:"dispatchId"`
-	InputContractHash string   `json:"inputContractHash"`
-	InputTreeSHA      string   `json:"inputTreeSha"`
-	InputOrigin       string   `json:"inputOrigin"`
-	DeliveryStatus    string   `json:"deliveryStatus"`
-	UsageStatus       string   `json:"usageStatus"`
-	Transitions       []string `json:"transitions"`
-	Hash              string   `json:"hash"`
+	Version                 int      `json:"version"`
+	StateChanged            bool     `json:"stateChanged"`
+	FlowID                  string   `json:"flowId"`
+	DispatchID              string   `json:"dispatchId"`
+	InputContractHash       string   `json:"inputContractHash"`
+	InputTreeSHA            string   `json:"inputTreeSha"`
+	InputOrigin             string   `json:"inputOrigin"`
+	DeliveryStatus          string   `json:"deliveryStatus"`
+	UsageStatus             string   `json:"usageStatus"`
+	PreservedReviewWorktree string   `json:"preservedReviewWorktree,omitempty"`
+	Transitions             []string `json:"transitions"`
+	Hash                    string   `json:"hash"`
 }
 
 func ReconcileStoppedDispatch(db *store.Store, request DispatchReconciliationRequest, previewOnly bool) (DispatchReconciliationPreview, error) {
@@ -159,6 +160,9 @@ func previewDispatchReconciliation(state store.Workspace, request DispatchReconc
 	var inputErr error
 	if artifactReviewer {
 		inputErr = gitproof.VerifyArtifact(flow.Contract, flow.Artifact.Target, flow.Artifact.Configuration.Selection)
+		if inputErr == nil && dispatch.ReviewWorktreeSource != "" {
+			inputErr = gitproof.VerifyPreparedReviewWorktree(state.Records.RestoredDispatch(dispatch), flow.Contract.Worktree)
+		}
 	} else {
 		_, inputErr = gitproof.ObserveSnapshotStart(state.Records.RestoredDispatch(dispatch))
 	}
@@ -183,12 +187,17 @@ func previewDispatchReconciliation(state store.Workspace, request DispatchReconc
 		taskTransition = "Reviewer Task -> BLOCKED; parent remains WAITING_FOR_REVIEW"
 		inputTree = flow.Artifact.Target.TreeSHA
 	}
+	preservedReview := ""
+	if artifactReviewer && dispatch.ReviewWorktreeSource != "" {
+		preservedReview = state.Records.RestoredDispatch(dispatch).Instruction.Worktree
+	}
 	return DispatchReconciliationPreview{
 		Version: 1, FlowID: flow.ID, DispatchID: dispatch.ID, InputContractHash: inputHash,
 		InputTreeSHA: inputTree, InputOrigin: "approved-predecessor-input-contract",
 		DeliveryStatus: "unknown", UsageStatus: "unavailable",
-		Transitions: []string{"Dispatch: ISSUED -> CANCELLED", taskTransition, "append reconciliation; preserve Flow, HOLD, stop reason, authorization and ceilings"},
-		Hash:        hash,
+		PreservedReviewWorktree: preservedReview,
+		Transitions:             []string{"Dispatch: ISSUED -> CANCELLED", taskTransition, "append reconciliation; preserve Flow, HOLD, stop reason, authorization and ceilings"},
+		Hash:                    hash,
 	}, nil
 }
 

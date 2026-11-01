@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -162,4 +163,79 @@ func commonDirectory(worktree string) (string, error) {
 		return "", err
 	}
 	return canonical(directory)
+}
+
+// VerifyPreparedReviewWorktree preserves the real index and files. Snapshot
+// preparation leaves HEAD and the index at baseline, with the target in files.
+func VerifyPreparedReviewWorktree(dispatch core.GraphDispatch, source string) error {
+	if dispatch.Recipient != "REVIEWER" || dispatch.ReviewWorktreeSource == "" ||
+		dispatch.Instruction.OutputMode != core.OutputModeWorktreeTreeSnapshot {
+		return fmt.Errorf("prepared review requires a managed snapshot Reviewer")
+	}
+	actualSource, err := canonical(dispatch.ReviewWorktreeSource)
+	if err != nil {
+		return err
+	}
+	expectedSource, err := canonical(source)
+	if err != nil || actualSource != expectedSource {
+		return fmt.Errorf("prepared review source differs from the approved candidate")
+	}
+	root, err := worktreeRoot(dispatch.Instruction.Worktree)
+	if err != nil || root != filepath.Clean(dispatch.Instruction.Worktree) || root == actualSource {
+		return fmt.Errorf("prepared review must retain its exact separate worktree path")
+	}
+	sourceGit, err := commonDirectory(actualSource)
+	if err != nil {
+		return err
+	}
+	reviewGit, err := commonDirectory(root)
+	if err != nil || sourceGit != reviewGit {
+		return fmt.Errorf("prepared review belongs to another Git repository")
+	}
+	registry, err := git(actualSource, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return err
+	}
+	registered := false
+	for _, entry := range strings.Split(registry, "\x00") {
+		registered = registered || entry == "worktree "+root
+	}
+	if !registered {
+		return fmt.Errorf("prepared review is not registered in the candidate repository")
+	}
+	remote, err := git(root, "remote", "get-url", "origin")
+	if err != nil {
+		return err
+	}
+	if err := VerifyRepositoryRemote(dispatch, remote); err != nil {
+		return fmt.Errorf("prepared review repository identity changed")
+	}
+	if _, err := git(root, "symbolic-ref", "--quiet", "HEAD"); err == nil {
+		return fmt.Errorf("prepared review must retain detached HEAD")
+	} else {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			return fmt.Errorf("prepared review HEAD cannot be verified")
+		}
+	}
+	options := []string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.untrackedCache=false"}
+	if _, err := git(root, append(options, "diff", "--cached", "--quiet", "--no-ext-diff",
+		"--no-textconv", dispatch.Instruction.BaselineSHA, "--")...); err != nil {
+		return fmt.Errorf("prepared review index differs from its original baseline")
+	}
+	if err := CheckPortableWorktree(root, dispatch.Instruction.BaselineSHA, dispatch.Instruction.TargetTreeSHA); err != nil {
+		return fmt.Errorf("prepared review target changed: %w", err)
+	}
+	ignored, err := git(root, append(options, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")...)
+	if err != nil {
+		return err
+	}
+	if ignored != "" {
+		return fmt.Errorf("prepared review contains ignored files; preserve and resolve before reconciliation")
+	}
+	refID := dispatch.RelatedID
+	if refID == "" {
+		refID = dispatch.ID
+	}
+	return verifySnapshotRef(actualSource, refID, dispatch.Instruction.TargetTreeSHA)
 }
