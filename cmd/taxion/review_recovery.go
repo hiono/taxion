@@ -32,12 +32,20 @@ Already-approved Flows continue normally, without returning to this operation.
 For an EXECUTED artifact Reviewer formally stopped with a CANCELLED Dispatch, set
 continueStoppedExecution:true. Requires exact saved controller runtime-stop receipt,
 unchanged candidate and prepared review worktree, no active execution/owner or
-unresolved feedback, explicit uncertainty acceptance and deadline <= original Flow
-deadline. This does not resume a terminal session: it derives a Reviewer-only
+unresolved feedback and explicit uncertainty acceptance. By default deadline must
+be <= the unexpired original Flow deadline. This does not resume a terminal session: it derives a Reviewer-only
 successor, reuses the PASSED input receipt and carries bounded saved readable output
 into its actual instruction. Old Flow, session, usage, transcript and worktree remain.
 Missing saved output is stated as unknown, not invented analysis. No Coder, input
-validation replay, cumulative usage reset or deadline extension is authorized.
+validation replay, cumulative usage reset or automatic deadline extension is authorized.
+For an expired original deadline or an explicitly requested later window, include:
+"deadlineRecontract":{"previousDeadline":"EXACT_SAVED_RFC3339",
+"deadline":"SAME_AS_REQUEST_DEADLINE","reason":"EXPLICIT_CHANGE_REASON"}
+The new deadline must be later than the old one and still future at apply.
+This optional object works for unstarted and formally stopped executed artifact
+Reviewers. One outer hash binds both deadlines, reason, candidate, receipt and plan.
+Preview first, obtain one approval of that exact material deadline change and apply;
+do not ask separately for derived hashes. No old Flow or usage is rewritten.
 Use supported feedback resolution/recovery for an outstanding hold/runner; never
 edit the database or use unstarted reconcile-stopped for an executed Reviewer.`)
 	}

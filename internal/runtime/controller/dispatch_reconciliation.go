@@ -39,6 +39,10 @@ type DispatchReconciliationPreview struct {
 }
 
 func ReconcileStoppedDispatch(db *store.Store, request DispatchReconciliationRequest, previewOnly bool) (DispatchReconciliationPreview, error) {
+	return reconcileStoppedDispatch(db, request, previewOnly, nil)
+}
+
+func reconcileStoppedDispatch(db *store.Store, request DispatchReconciliationRequest, previewOnly bool, deadline *store.ReviewDeadlineRecontract) (DispatchReconciliationPreview, error) {
 	if db == nil {
 		return DispatchReconciliationPreview{}, fmt.Errorf("taxion: reconciliation requires an existing workspace")
 	}
@@ -64,6 +68,11 @@ func ReconcileStoppedDispatch(db *store.Store, request DispatchReconciliationReq
 		}
 		flow, _ := state.Graph.ReviewFlow(request.FlowID)
 		dispatch, _ := state.Graph.GraphDispatch(request.DispatchID)
+		if deadline != nil {
+			if !flow.StoppedArtifactReviewer(dispatch) || deadline.Validate(flow.Deadline, time.Now().UTC()) != nil {
+				return fmt.Errorf("taxion: invalid artifact Reviewer deadline recontract")
+			}
+		}
 		result := &core.DispatchResult{
 			DispatchID: dispatch.ID, TaskID: dispatch.TaskID, Recipient: dispatch.Recipient,
 			Repository: dispatch.Repository, Status: core.DispatchCancelled,
@@ -87,7 +96,8 @@ func ReconcileStoppedDispatch(db *store.Store, request DispatchReconciliationReq
 			return err
 		}
 		state.Records.DispatchReconciliations = append(state.Records.DispatchReconciliations, store.StoppedDispatchReconciliation{
-			PreviewHash: report.Hash, InputContractHash: report.InputContractHash,
+			DeadlineRecontract: deadline,
+			PreviewHash:        report.Hash, InputContractHash: report.InputContractHash,
 			Actor: request.Actor, Source: request.Source, Reason: request.Reason, Evidence: slices.Clone(request.Evidence),
 			NoActiveExecutionConfirmed: true, AcceptDeliveryUncertainty: true, DeliveryStatus: "unknown",
 			PreviousFlow: flow, PreviousDispatch: dispatch, Target: target, At: time.Now().UTC(),

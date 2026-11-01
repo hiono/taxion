@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.17"
+const readySkillVersion = "1.3.18"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -176,14 +176,23 @@ The absolute deadline never moves later on repeated preview or delayed apply.
 If the artifact Reviewer executed and its Dispatch is now CANCELLED by confirmed
 runtime stop, use recover-review with continueStoppedExecution:true, not unstarted
 reconcile-stopped or ordinary resume. Controller requires the exact stop receipt,
-same candidate/worktree, no active owner/feedback and no extension of the original
-deadline. It preserves the terminal session, transcript and usage, derives a
+same candidate/worktree and no active owner/feedback. Without deadlineRecontract
+the original deadline must remain valid and cannot be extended. It preserves the terminal session, transcript and usage, derives a
 Reviewer-only successor and carries saved readable output into the real instruction.
 This is not a terminal-session resume or recovery of unsaved thinking. Reuse the
 PASSED input receipt; never replay input validation or Coder work. Preserve unknown
 usage and the cumulative spending contract; use existing additional approval only
 where it actually covers this bounded follow-through. Do not request approval
 separately for the derived reconciliation, contract or plan hashes.
+If the source deadline expired, preview a future successor with deadlineRecontract:
+{previousDeadline: EXACT_SAVED_RFC3339, deadline: SAME_AS_REQUEST_DEADLINE,
+reason: EXPLICIT_CHANGE_REASON}. This works for unstarted and formally stopped
+executed artifact Reviewers. The outer hash binds both deadlines and the change
+reason with the existing candidate, receipt, plan and budget. Obtain this one new
+material deadline approval, then apply; never ask again for subordinate hashes.
+Do not edit or resume the expired Flow, reset cumulative use, rerun Coder/input
+validation or wait for approval before preparing the read-only combined preview.
+Changed or expired proposed deadlines invalidate consent, not saved work.
 Preserve completed work. New budgets, changed scope and permissions need explicit
 user approval. Before stop reserve is threatened, estimate unfinished work, repair,
 independent review and preservation in the observed unit. Request one bounded

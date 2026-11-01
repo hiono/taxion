@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
@@ -13,20 +14,37 @@ import (
 // StoppedDispatchReconciliation retains the original stop and input contract,
 // not a claim that the cancelled Dispatch produced or never executed that input.
 type StoppedDispatchReconciliation struct {
-	Kind                       string              `json:"kind,omitempty"`
-	PreviewHash                string              `json:"previewHash"`
-	InputContractHash          string              `json:"inputContractHash"`
-	Actor                      string              `json:"actor"`
-	Source                     string              `json:"source"`
-	Reason                     string              `json:"reason"`
-	Evidence                   []string            `json:"evidence"`
-	NoActiveExecutionConfirmed bool                `json:"noActiveExecutionConfirmed"`
-	AcceptDeliveryUncertainty  bool                `json:"acceptDeliveryUncertainty"`
-	DeliveryStatus             string              `json:"deliveryStatus"`
-	PreviousFlow               core.ReviewFlow     `json:"previousFlow"`
-	PreviousDispatch           core.GraphDispatch  `json:"previousDispatch"`
-	Target                     core.FeedbackTarget `json:"target"`
-	At                         time.Time           `json:"at"`
+	Kind                       string                    `json:"kind,omitempty"`
+	DeadlineRecontract         *ReviewDeadlineRecontract `json:"deadlineRecontract,omitempty"`
+	PreviewHash                string                    `json:"previewHash"`
+	InputContractHash          string                    `json:"inputContractHash"`
+	Actor                      string                    `json:"actor"`
+	Source                     string                    `json:"source"`
+	Reason                     string                    `json:"reason"`
+	Evidence                   []string                  `json:"evidence"`
+	NoActiveExecutionConfirmed bool                      `json:"noActiveExecutionConfirmed"`
+	AcceptDeliveryUncertainty  bool                      `json:"acceptDeliveryUncertainty"`
+	DeliveryStatus             string                    `json:"deliveryStatus"`
+	PreviousFlow               core.ReviewFlow           `json:"previousFlow"`
+	PreviousDispatch           core.GraphDispatch        `json:"previousDispatch"`
+	Target                     core.FeedbackTarget       `json:"target"`
+	At                         time.Time                 `json:"at"`
+}
+
+// ReviewDeadlineRecontract authorizes a successor deadline, never a rewrite of
+// the stopped Flow's deadline or authority to replay its execution.
+type ReviewDeadlineRecontract struct {
+	PreviousDeadline time.Time `json:"previousDeadline"`
+	Deadline         time.Time `json:"deadline"`
+	Reason           string    `json:"reason"`
+}
+
+func (d ReviewDeadlineRecontract) Validate(previous, at time.Time) error {
+	if !d.PreviousDeadline.Equal(previous) || !d.Deadline.After(previous) || !d.Deadline.After(at) ||
+		strings.TrimSpace(d.Reason) == "" || strings.TrimSpace(d.Reason) != d.Reason || core.Redact(d.Reason) != d.Reason {
+		return fmt.Errorf("invalid review deadline recontract: require exact previous deadline, future later deadline and sourced non-secret reason")
+	}
+	return nil
 }
 
 func (a StoppedDispatchReconciliation) ArtifactReviewer() bool {
@@ -43,13 +61,18 @@ func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 		dispatch, exists := graph.GraphDispatch(before.ID)
 		inputHash, err := core.CanonicalSHA256(prior.Contract)
 		target, targetErr := core.ObserveFeedbackTarget(dispatch)
+		if audit.DeadlineRecontract != nil {
+			if !audit.ArtifactReviewer() || audit.DeadlineRecontract.Validate(prior.Deadline, audit.At) != nil {
+				return fmt.Errorf("invalid artifact Reviewer deadline recontract audit")
+			}
+		}
 		if audit.Kind != "" {
 			if audit.Kind != "executed-artifact-review-continuation-v1" || seen[prior.ID] ||
 				!found || !exists || err != nil || targetErr != nil || audit.InputContractHash != inputHash ||
 				!recordHash(audit.PreviewHash) || audit.Actor == "" || audit.Source == "" || audit.Reason == "" ||
 				len(audit.Evidence) == 0 || !audit.NoActiveExecutionConfirmed || !audit.AcceptDeliveryUncertainty ||
 				audit.DeliveryStatus != "execution-observed-stop-confirmed-usage-may-be-incomplete" ||
-				audit.At.IsZero() || !audit.At.Before(prior.Deadline) ||
+				audit.At.IsZero() || !audit.At.Before(prior.Deadline) && audit.DeadlineRecontract == nil ||
 				!prior.StoppedExecutedArtifactReviewer(before) || !reflect.DeepEqual(flow, prior) ||
 				!reflect.DeepEqual(dispatch, before) || target != audit.Target {
 				return fmt.Errorf("invalid executed artifact Reviewer continuation audit")

@@ -16,6 +16,14 @@ import (
 )
 
 func TestReviewRecoveryOneApprovalStartsOnlyExactReviewSuccessor(t *testing.T) {
+	testUnstartedReviewRecovery(t, false)
+}
+
+func TestReviewRecoveryOneApprovalRecontractsExpiredUnstartedReviewer(t *testing.T) {
+	testUnstartedReviewRecovery(t, true)
+}
+
+func testUnstartedReviewRecovery(t *testing.T, expired bool) {
 	counter := filepath.Join(t.TempDir(), "validation-count")
 	db, ledger, initial, selected := artifactFixture(t, []string{"printf x >> " + counter}, false)
 	packet := core.ReviewInput{
@@ -60,6 +68,17 @@ func TestReviewRecoveryOneApprovalStartsOnlyExactReviewSuccessor(t *testing.T) {
 	if err == nil || old.Status != "STOPPED" {
 		t.Fatal("missing stopped prepared Reviewer", err)
 	}
+	if expired {
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			state.Graph.ReviewFlows[0].StartedAt = time.Now().UTC().Add(-2 * time.Minute)
+			state.Graph.ReviewFlows[0].Deadline = time.Now().UTC().Add(-time.Minute)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		state, _ := db.LoadWorkspace()
+		old, _ = state.Graph.ReviewFlow(old.ID)
+	}
 	request := ReviewRecoveryRequest{
 		Reconciliation: DispatchReconciliationRequest{
 			FlowID: old.ID, DispatchID: old.LastDispatchID(), Actor: "human", Source: "human:bounded-recovery",
@@ -70,6 +89,13 @@ func TestReviewRecoveryOneApprovalStartsOnlyExactReviewSuccessor(t *testing.T) {
 		TaskID: "single-recovery", FlowID: "single-recovery-flow", ReviewRoot: filepath.Join(t.TempDir(), "reviews"),
 		Deadline: old.Deadline, TimeoutSeconds: 600,
 		MaxNanoAIU: initial.MaxNanoAIU, StageBudget: *initial.StageBudget,
+	}
+	if expired {
+		request.Deadline = time.Now().UTC().Add(5 * time.Minute)
+		request.DeadlineRecontract = &store.ReviewDeadlineRecontract{
+			PreviousDeadline: old.Deadline, Deadline: request.Deadline,
+			Reason: "New bounded review window for preserved input, not a reset of usage",
+		}
 	}
 	before, _ := db.LoadWorkspace()
 	refs := func() string {
@@ -82,7 +108,7 @@ func TestReviewRecoveryOneApprovalStartsOnlyExactReviewSuccessor(t *testing.T) {
 	}
 	beforeRefs := refs()
 	extended := request
-	extended.Deadline = old.Deadline.Add(time.Second)
+	extended.Deadline = request.Deadline.Add(time.Second)
 	if _, err := RecoverArtifactReview(db, ledger, extended, true); err == nil {
 		t.Fatal("unstarted recovery extended the original deadline")
 	}

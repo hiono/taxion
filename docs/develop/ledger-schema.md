@@ -17,6 +17,11 @@
 正式停止 receipt のある実行済み成果物 Reviewer の継続判断を表す。
 後者は旧 Flow／指示／session／結果／利用量を変更せず、
 元指示と一致する Controller 停止 receipt を検査する。未知の種別は拒否する。
+`v0.7.21-rc.12` は同じ監査に任意の `deadlineRecontract` を追加する。
+`previousDeadline` は保存元の期限、`deadline` は承認した後続期限、
+`reason` は変更理由である。元期限の完全一致と監査時点でも未来の新期限を検証する。
+実行済み継続で監査時刻が旧期限以後なら、この明示記録を必須にする。
+既存の監査を追記後に変更せず、legacy Ledger の固定 wire と DB schema は維持する。
 `reviewInput` の内容は `kind:taxion.review-input.v1` の decision として保持する。
 根拠と制約は [ADR-0058](adr/0058-recover-unstarted-artifact-review.md)、
 実行契約は [Runtime 契約](runtime-contract.md#保存結果と-checkpoint-の復旧)を参照する。

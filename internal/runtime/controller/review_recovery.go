@@ -15,16 +15,17 @@ import (
 // ReviewRecoveryRequest binds one human decision to the entire review-only
 // successor. Subordinate hashes are derived, never separate consent requests.
 type ReviewRecoveryRequest struct {
-	ContinueStoppedExecution bool                          `json:"continueStoppedExecution,omitempty"`
-	Reconciliation           DispatchReconciliationRequest `json:"reconciliation"`
-	TaskID                   string                        `json:"taskId"`
-	FlowID                   string                        `json:"flowId"`
-	ReviewRoot               string                        `json:"reviewRoot"`
-	Deadline                 time.Time                     `json:"deadline"`
-	TimeoutSeconds           int64                         `json:"timeoutSeconds"`
-	MaxNanoAIU               float64                       `json:"maxNanoAiu"`
-	StageBudget              core.StageBudget              `json:"stageBudget"`
-	ExpectedHash             string                        `json:"expectedHash,omitempty"`
+	ContinueStoppedExecution bool                            `json:"continueStoppedExecution,omitempty"`
+	DeadlineRecontract       *store.ReviewDeadlineRecontract `json:"deadlineRecontract,omitempty"`
+	Reconciliation           DispatchReconciliationRequest   `json:"reconciliation"`
+	TaskID                   string                          `json:"taskId"`
+	FlowID                   string                          `json:"flowId"`
+	ReviewRoot               string                          `json:"reviewRoot"`
+	Deadline                 time.Time                       `json:"deadline"`
+	TimeoutSeconds           int64                           `json:"timeoutSeconds"`
+	MaxNanoAIU               float64                         `json:"maxNanoAiu"`
+	StageBudget              core.StageBudget                `json:"stageBudget"`
+	ExpectedHash             string                          `json:"expectedHash,omitempty"`
 }
 
 type ReviewRecoveryPreview struct {
@@ -141,7 +142,7 @@ func stageReviewRecovery(before store.Workspace, ledger string, request ReviewRe
 		}
 		reconciliation = preview
 		decision.ExpectedHash = reconciliation.Hash
-		if _, err := ReconcileStoppedDispatch(staged, decision, false); err != nil {
+		if _, err := reconcileStoppedDispatch(staged, decision, false, request.DeadlineRecontract); err != nil {
 			return fail(err)
 		}
 	}
