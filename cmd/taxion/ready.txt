@@ -312,12 +312,21 @@ preflight, review and result validation within saved limits. New material author
 still requires consent. Neither the absolute deadline nor budget is reset silently.
 An executed artifact Reviewer with a confirmed runtime stop and CANCELLED Dispatch
 uses the same recover-review input with continueStoppedExecution:true. This requires
-the exact saved stop receipt and original absolute deadline (or an earlier one).
+the exact saved stop receipt and, by default, an unexpired original deadline (or an earlier one).
 It preserves the terminal Flow/session/usage/transcript/worktree, reuses the PASSED
 input receipt, and includes saved readable analysis in a Reviewer-only successor.
 It does not restart Coder or input validation, resume the cancelled session, invent
 unsaved reasoning or reset cumulative usage. Unresolved runner/feedback and live or
 unknown execution must be reconciled through existing supported controls first.
+For an expired deadline, the same read-only recover-review preview accepts
+deadlineRecontract:{previousDeadline:EXACT_SAVED_RFC3339,
+deadline:SAME_AS_REQUEST_DEADLINE,reason:EXPLICIT_CHANGE_REASON}.
+Use a future later deadline for the successor; the original Flow stays unchanged.
+One exact outer hash binds both deadlines, the reason, candidate, receipt, stage
+plan and budget. Request that material deadline change once, not approval of each
+derived operation. This covers unstarted and formally stopped executed artifact
+Reviewers. No automatic extension, new budget, Coder/input-validation replay or
+usage reset follows. Preview the actual new envelope before asking for consent.
 
 Use the same explicit --store ledger path used for the saved work on every command.
 An absent ledger.json is not a missing workspace if its parent's initialized

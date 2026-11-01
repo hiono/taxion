@@ -23,6 +23,8 @@ Resume those artifacts, not a fresh investigation or baseline run. Do not claim
 to restore unsaved model reasoning. Invalidate only evidence affected by a material
 change; recheck mutable input and identity without replaying unchanged paid work.
 Keep cumulative usage and the original deadline across pause, new session or Flow;
+only an explicitly approved deadline recontract may give a successor a later
+deadline, without editing the stopped source;
 record extra approval as an explicit delta, never a reset. Unknown delivery and
 usage remain unknown. Do not replay an uncertain send or create duplicate workers.
 While waiting, collect and preserve existing worker results without new paid work;

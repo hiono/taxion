@@ -10,9 +10,18 @@ import (
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
+	"github.com/hiono/taxion/internal/store"
 )
 
 func TestExecutedArtifactReviewerContinuesSavedWorkWithinOriginalDeadline(t *testing.T) {
+	testExecutedReviewContinuation(t, false)
+}
+
+func TestExecutedArtifactReviewerRecontractsExpiredDeadlineWithoutDiscardingWork(t *testing.T) {
+	testExecutedReviewContinuation(t, true)
+}
+
+func testExecutedReviewContinuation(t *testing.T, expired bool) {
 	counter := filepath.Join(t.TempDir(), "validations")
 	db, ledger, initial, selected := artifactFixture(t, []string{"printf x >> " + counter}, false)
 	old, err := StartReviewFlow(db, ledger, initial)
@@ -52,6 +61,18 @@ func TestExecutedArtifactReviewerContinuesSavedWorkWithinOriginalDeadline(t *tes
 	if err == nil || old.Status != "STOPPED" {
 		t.Fatal("missing formal terminal stop", err)
 	}
+	if expired {
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			// A historical stopped fixture, not a production recovery mutation.
+			state.Graph.ReviewFlows[0].StartedAt = time.Now().UTC().Add(-2 * time.Minute)
+			state.Graph.ReviewFlows[0].Deadline = time.Now().UTC().Add(-time.Minute)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		state, _ := db.LoadWorkspace()
+		old, _ = state.Graph.ReviewFlow(old.ID)
+	}
 	before, _ := db.LoadWorkspace()
 	dispatch, _ = before.Graph.GraphDispatch(dispatch.ID)
 	if !old.StoppedExecutedArtifactReviewer(dispatch) {
@@ -68,6 +89,16 @@ func TestExecutedArtifactReviewerContinuesSavedWorkWithinOriginalDeadline(t *tes
 		Deadline: old.Deadline, TimeoutSeconds: initial.TimeoutSeconds,
 		MaxNanoAIU: initial.MaxNanoAIU, StageBudget: *initial.StageBudget,
 	}
+	if expired {
+		request.Deadline = time.Now().UTC().Add(5 * time.Minute)
+		if _, err := RecoverArtifactReview(db, ledger, request, true); err == nil {
+			t.Fatal("expired source accepted without explicit deadline recontract")
+		}
+		request.DeadlineRecontract = &store.ReviewDeadlineRecontract{
+			PreviousDeadline: old.Deadline, Deadline: request.Deadline,
+			Reason: "Authorize a new review window after the preserved stop expired; retain cumulative spending",
+		}
+	}
 	if _, err := ReconcileStoppedDispatch(db, request.Reconciliation, true); err == nil {
 		t.Fatal("unstarted reconciliation accepted executed Reviewer")
 	}
@@ -75,9 +106,13 @@ func TestExecutedArtifactReviewerContinuesSavedWorkWithinOriginalDeadline(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, badKind := range []string{"later-deadline", "missing-quiescence", "wrong-mode", "missing-stop", "mutated-receipt"} {
+	for _, badKind := range []string{"later-deadline", "missing-quiescence", "wrong-mode", "missing-stop", "mutated-receipt", "wrong-previous-deadline", "missing-change-reason"} {
 		t.Run(badKind, func(t *testing.T) {
 			bad := request
+			if request.DeadlineRecontract != nil {
+				copy := *request.DeadlineRecontract
+				bad.DeadlineRecontract = &copy
+			}
 			switch badKind {
 			case "later-deadline":
 				bad.Deadline = old.Deadline.Add(time.Second)
@@ -85,6 +120,15 @@ func TestExecutedArtifactReviewerContinuesSavedWorkWithinOriginalDeadline(t *tes
 				bad.Reconciliation.NoActiveExecutionConfirmed = false
 			case "wrong-mode":
 				bad.ContinueStoppedExecution = false
+			case "wrong-previous-deadline", "missing-change-reason":
+				if bad.DeadlineRecontract == nil {
+					t.Skip("only recontract has change metadata")
+				}
+				if badKind == "wrong-previous-deadline" {
+					bad.DeadlineRecontract.PreviousDeadline = old.Deadline.Add(-time.Second)
+				} else {
+					bad.DeadlineRecontract.Reason = ""
+				}
 			case "missing-stop", "mutated-receipt":
 				copy := dispatch
 				result := *copy.Result
@@ -119,20 +163,40 @@ func TestExecutedArtifactReviewerContinuesSavedWorkWithinOriginalDeadline(t *tes
 		t.Fatal("preview changed stopped execution")
 	}
 	request.ExpectedHash = preview.Hash
+	if expired {
+		changed := request
+		copy := *request.DeadlineRecontract
+		changed.DeadlineRecontract = &copy
+		copy.Reason += "; changed scope of deadline decision"
+		if _, err := RecoverArtifactReview(db, ledger, changed, false); err == nil {
+			t.Fatal("changed deadline decision reused old approval")
+		}
+	}
 	applied, err := RecoverArtifactReview(db, ledger, request, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if applied.Flow.Deadline.After(old.Deadline) {
-		t.Fatal("continuation extended original deadline")
+	if applied.Flow.Deadline.After(request.Deadline) || !expired && applied.Flow.Deadline.After(old.Deadline) {
+		t.Fatal("continuation exceeded approved deadline")
 	}
 	state, _ := db.LoadWorkspace()
 	preserved, _ := state.Graph.GraphDispatch(dispatch.ID)
-	if !reflect.DeepEqual(dispatch, preserved) {
-		t.Fatal("continuation rewrote old session/result/usage")
+	preservedFlow, _ := state.Graph.ReviewFlow(old.ID)
+	if !reflect.DeepEqual(dispatch, preserved) || !reflect.DeepEqual(old, preservedFlow) {
+		t.Fatal("continuation rewrote old deadline/session/result/usage")
 	}
 	if err := state.Records.VerifyDispatchReconciliations(state.Graph); err != nil {
 		t.Fatal(err)
+	}
+	if expired {
+		audit := &state.Records.DispatchReconciliations[0]
+		if !reflect.DeepEqual(audit.DeadlineRecontract, request.DeadlineRecontract) {
+			t.Fatal("deadline recontract missing from append-only audit")
+		}
+		audit.DeadlineRecontract = nil
+		if state.Records.VerifyDispatchReconciliations(state.Graph) == nil {
+			t.Fatal("expired executed continuation audit accepted without new deadline consent")
+		}
 	}
 	next, err := ValidateReviewFlowInput(t.Context(), db, ledger, applied.Flow.ID, initial.Configuration)
 	if err != nil {

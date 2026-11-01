@@ -14,8 +14,16 @@ import (
 
 func previewReviewRecoverySource(state store.Workspace, request ReviewRecoveryRequest) (DispatchReconciliationPreview, error) {
 	flow, found := state.Graph.ReviewFlow(request.Reconciliation.FlowID)
-	if !found || !time.Now().Before(flow.Deadline) || request.Deadline.After(flow.Deadline) {
-		return DispatchReconciliationPreview{}, fmt.Errorf("taxion: review recovery requires an unexpired original deadline and cannot extend it")
+	now := time.Now().UTC()
+	if !found {
+		return DispatchReconciliationPreview{}, fmt.Errorf("taxion: review recovery requires its original stopped Flow")
+	}
+	if change := request.DeadlineRecontract; change != nil {
+		if err := change.Validate(flow.Deadline, now); err != nil || !change.Deadline.Equal(request.Deadline) {
+			return DispatchReconciliationPreview{}, fmt.Errorf("taxion: deadlineRecontract must bind the exact old deadline, requested future deadline and explicit change reason")
+		}
+	} else if !now.Before(flow.Deadline) || request.Deadline.After(flow.Deadline) {
+		return DispatchReconciliationPreview{}, fmt.Errorf("taxion: original deadline expired or would be extended; preview an explicit deadlineRecontract for a new successor, never edit the stopped Flow")
 	}
 	if !request.ContinueStoppedExecution {
 		return previewDispatchReconciliation(state, request.Reconciliation)
@@ -28,7 +36,7 @@ func previewReviewRecoverySource(state store.Workspace, request ReviewRecoveryRe
 		!flowContractMatches(state.Graph, flow, task) || state.Graph.IsArchived(task.ID) ||
 		flow.PendingDraftID() != "" || len(flow.PendingFeedbackIDs()) != 0 ||
 		!decision.NoActiveExecutionConfirmed || !decision.AcceptDeliveryUncertainty || len(decision.Evidence) == 0 {
-		return DispatchReconciliationPreview{}, fmt.Errorf("taxion: executed Reviewer continuation requires its confirmed runtime stop, unchanged validated input, resolved feedback, no owner, explicit quiescence/usage uncertainty and no extension of the original deadline")
+		return DispatchReconciliationPreview{}, fmt.Errorf("taxion: executed Reviewer continuation requires its confirmed runtime stop, unchanged validated input, resolved feedback, no owner and explicit quiescence/usage uncertainty")
 	}
 	for _, text := range append([]string{decision.Actor, decision.Source, decision.Reason}, decision.Evidence...) {
 		if strings.TrimSpace(text) == "" || strings.TrimSpace(text) != text || core.Redact(text) != text {
@@ -80,7 +88,7 @@ func previewReviewRecoverySource(state store.Workspace, request ReviewRecoveryRe
 		InputTreeSHA: flow.Artifact.Target.TreeSHA, InputOrigin: "unchanged-validated-artifact",
 		DeliveryStatus: "execution-observed-stop-confirmed-usage-may-be-incomplete", UsageStatus: "preserved-not-assumed-zero",
 		PreservedReviewWorktree: dispatch.Instruction.Worktree,
-		Transitions:             []string{"preserve CANCELLED Dispatch, session, usage, output receipts and terminal Flow", "append continuation decision; create same-input Reviewer-only successor within original deadline"},
+		Transitions:             []string{"preserve CANCELLED Dispatch, session, usage, output receipts and terminal Flow", "append continuation decision; create same-input Reviewer-only successor within original or explicitly recontracted deadline"},
 	}, nil
 }
 
@@ -118,7 +126,8 @@ func recordExecutedReviewContinuation(db *store.Store, request ReviewRecoveryReq
 		d := request.Reconciliation
 		state.Records.DispatchReconciliations = append(state.Records.DispatchReconciliations, store.StoppedDispatchReconciliation{
 			Kind: "executed-artifact-review-continuation-v1", PreviewHash: hash, InputContractHash: report.InputContractHash,
-			Actor: d.Actor, Source: d.Source, Reason: d.Reason, Evidence: slices.Clone(d.Evidence),
+			DeadlineRecontract: request.DeadlineRecontract,
+			Actor:              d.Actor, Source: d.Source, Reason: d.Reason, Evidence: slices.Clone(d.Evidence),
 			NoActiveExecutionConfirmed: true, AcceptDeliveryUncertainty: true, DeliveryStatus: report.DeliveryStatus,
 			PreviousFlow: flow, PreviousDispatch: dispatch, Target: target, At: time.Now().UTC(),
 		})

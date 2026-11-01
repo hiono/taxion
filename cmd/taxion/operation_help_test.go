@@ -30,7 +30,7 @@ func TestJSONOperationHelpExplainsInputsWithoutWorkspace(t *testing.T) {
 		{"workflow plan", []string{"JSON input", "READY", "stageBudget", "stagePlanHash", "provider-stop",
 			"continuationChange", "savedOutputDecision", "SUSPENDED", "workflow recover-review", "one preview/approval"}},
 		{"workflow recover-review", []string{"expectedHash", "continueStoppedExecution", "runtime-stop receipt", "original Flow",
-			"saved readable output", "atomically", "No model"}},
+			"saved readable output", "atomically", "No model", "deadlineRecontract", "previousDeadline", "Preview first"}},
 		{"workflow budget", []string{"approvedCeiling", "preservation", "cumulative", "executionAuthorized:false", "priorFlows"}},
 		{"workflow start", []string{"JSON input", "stageBudget", "stagePlanHash", "actual user approval", "not a model turn"}},
 		{"workflow validate-input", []string{"no model", "artifactSource", "unknown", "doctor --dispatch"}},
