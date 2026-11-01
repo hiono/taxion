@@ -6,6 +6,11 @@ Date: 2026-10-30
 
 Accepted
 
+Amended 2026-11-01 by
+[ADR-0063](0063-apply-runtime-specific-billing-contracts.md): numeric balance
+requirements follow the selected runtime/provider and approved Task contract;
+a paid allowance does not by itself require numeric preflight monitoring.
+
 ## Context
 
 Near the end of a billing period, preserving unused Plan quota can prevent
@@ -41,9 +46,13 @@ a paid subscription with rolling-window and monthly usage limits
 (https://opencode.ai/ja/go). Do not count use of a confirmed free model against
 the Go monthly allowance or stop solely because the Go balance is unknown.
 Free-model availability may still impose its own limit; if reached, stop
-without switching to a paid model or subscription. When a paid monthly
-allowance is selected, verify its remaining amount before work that could
-exhaust it. If the selected route or fallback behavior is unknown, do not
+without switching to a paid model or subscription. When OpenCode Go is
+selected, the Task must explicitly choose required preflight balance checks
+or reliance on verified, declared provider-stop conditions without overage,
+auto-recharge or paid fallback. If required observations are unavailable,
+stop; under an approved provider-stop contract, unknown numeric balance alone
+is not a stop condition. This does not bypass a separately approved balance
+requirement or positive usage ceiling. If the selected route or fallback behavior is unknown, do not
 assume it is free or switch to a paid route.
 
 ## Consequences
@@ -52,5 +61,5 @@ The operator should choose bounded, ready work and use the visible Plan
 balance rather than impose an additional conservation reserve. Work still
 requires the task's existing approvals, acceptance criteria, and validation.
 This ADR does not authorize speculative work, exceed an explicitly approved
-hard ceiling, consume a paid monthly allowance without checking its headroom,
+hard ceiling, consume a paid allowance outside its approved Task policy,
 or claim a precise conversion between Plan quota and Session AIC.
