@@ -48,6 +48,10 @@ OpenCode Go の数値確認が必須で、利用可能な観測経路がない�
 
 Accepted. 2026-11-01 の利用者判断で runtime/provider 別の扱いと OpenCode Go の Task 別指定を採択した。今回の変更は文書と追跡の改善であり、runtime 動作の変更や新しいモデル実行を含まない。既存の課金判定・Copilot quota adapter を再利用し、案内・操作経路・バックエンド別受入れの残る改善は [Issue #234](https://github.com/hiono/taxion/issues/234) で追跡する。Fusion の実装は #216、OpenCode 診断と実証は #231、呼出し追跡は #227、品質付き費用評価は #90 を参照する。
 
+PR #235 後の開発版では、保存済み `account` Dispatch 向けの `runtime quota --dispatch ID` を追加した。既存の Copilot SDK と Controller 検査を再利用し、モデルを呼ばずに観測する。`ready`・help・管理スキル1.3.14には Copilot／OpenCode Free／Go、Task 別の数値必須条件、外側の操作担当の利用枠との分離を反映する。これは OpenCode account quota や Free／Go 実契約での停止動作を実装・実証したものではなく、バックエンド別受入れは #234 に残す。
+
+同変更では `go test ./...`、`go vet ./...`、`go build ./...` と変更経路の race test を実施した。`TestObserveAccountQuotaWithoutSessionOrWorkspaceMutation` は成功・取得不能・鮮度切れ・利用拒否・非 account 契約・読取り中の Dispatch 変更を確認し、session 開始・送信・再接続と workspace 変更がないことを検査する。独立レビューで通常の workspace open による作成・migration を指摘され、既存 `OpenReadOnly` に変更し、`TestRuntimeQuotaDoesNotInitializeWorkspace` を追加した。SDK protocol fixture と合成検査は実契約でのモデル利用受入れと区別する。
+
 文書のローカルリンク試験と公開文・path・secret-pattern の検査を実施した。ローカルでは非公開識別子一覧による照合を実施していないため、その成功を主張しない。これらの文書検査は実契約での上限停止やモデル品質の受入れ証拠ではない。最終 commit の必須検査は対応 PR を参照する。
 
 ## References

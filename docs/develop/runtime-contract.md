@@ -420,6 +420,8 @@ Reviewer の `acceptance[].evidence`・`findings[].evidence` は、最上位の 
 
 `runtime auth` は明示的な事前照会で、実行操作ではない。Copilot adapter の `auth.getStatus` 前に固定設定と現在・保存 Dispatch 承認を照合する。`CheckAuthentication` は認証済み account が要求 account と一致し、host が明示 `github.com` であることを確認する。SDK session を作らず、結果を cache せず、adapter config hash も変えない。返す error に provider 状態 message と生 RPC error は含めないが、取消は識別できる。
 
+開発版の `runtime quota --dispatch ID` は保存済み configuration を持つ active Dispatch の `account` guidance と現在・保存承認を照合し、既存の `ReadAccountQuota` と Controller の鮮度・account/provider・利用配分検査を使う。5秒と Flow 残時間の短い方で打ち切り、再試行しない。SDK process は使うが model session、実行認可、workspace の状態・receipt の保存は行わない。読取り後にも Task／Dispatch の一致と承認を照合し、変更時は観測を返さない。返却 JSON の `executionAuthorized` は常に false。既存の実行時検査を免除せず、停止 Flow は再開しない。OpenCode quota や無契約の任意アカウント照会には対応しない。`provider`／`provider-stop` では呼出しを要求せず、unsupported を理由に課金方式を自動変更しない。
+
 この照会は credential 参照の解決、repository actor 選択、契約資格の証明を行わない。実行時は同じ認証 method を別に使って確認する。local protocol fixture の成功は login 済み受入れの証拠ではない。
 
 `config bind --dispatch` は完全な承認済み設定選択、decision 参照、field 出典、記録時刻を Dispatch に保存する。Controller は一つの workspace transaction で現在 Task と発行 instruction の承認を確認して保存する。core は SDK 非依存 JSON を保存し、identity、出典、保存承認への membership を検査する。設定層は完全 tuple の schema を検査する。

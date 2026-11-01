@@ -23,7 +23,7 @@ OpenCode は実行 runtime、Free / Go は利用枠の区別です。Go には5�
 
 既存の `billing` 条件、`execution.budgetGuidance` と Task 承認を使い、新しい設定キーは追加しません。上表は [ADR-0063](../develop/adr/0063-apply-runtime-specific-billing-contracts.md) の方針です。OpenCode の account quota 読取りは未対応であり、Task ごとの選択・案内・バックエンド別受入れに残る改善は同 ADR の追跡先で管理します。この文書の更新によって未対応機能が利用可能になるわけではありません。
 
-数値確認が必要なときは、許可された既存の非推論観測を先に使い、取得元・アカウント・単位・対象期間・観測時刻を照合します。既存の観測で解決できる情報を利用者へ繰り返し転記させません。なお、残量だけを取得する専用 CLI は未実装です。SDK の quota API の存在と、任意の場面から呼べる製品 CLI の存在は区別してください。
+数値確認が必要なときは、許可された既存の非推論観測を先に使い、取得元・アカウント・単位・対象期間・観測時刻を照合します。既存の観測で解決できる情報を利用者へ繰り返し転記させません。開発版の `taxion runtime quota --dispatch ID` は、保存済みの設定承認と `account` 方式を持つ active Dispatch の Copilot quota を、モデル session を作らずに照会します。任意アカウントの照会や OpenCode quota の取得ではありません。
 
 LiteLLM は通過したモデル API リクエストの利用量・算定費用と独自予算を管理する候補です。Copilot provider 対応はありますが、その Proxy の残予算を Copilot の契約残量や Go の rolling allowance として使う根拠にはなりません。モデル API の接続を統一しても Coding Agent の session・ツール・権限・成果受け渡しは別です。Taxion への LiteLLM 導入と自動費用最適化 scheduler は未実装で、この方針で導入を決定しません。
 
@@ -91,13 +91,13 @@ taxion config check --sources
 
 提供元の上限停止と月内の利用配分は別です。`provider` は月内の残量を温存せず、
 残量10%などの閾値も設けません。`account` は月内配分を厳守したい場合に明示的に選びます。
-任意の頻度で残量だけを照会する専用 CLI や、照会失敗を警告だけにする新しい方式は未実装です。
+開発版の `runtime quota --dispatch ID` は保存済みの `account` 契約を照合して照会する明示操作です。`--system-prompt-file` は不要で、`--timeout` は既定5秒・最大5秒、再試行しません。停止済み Flow と期限切れ Flow は拒否します。観測可能な場合は quota と `executionAuthorized:false` を JSON で返し、取得不能・古い観測・利用拒否では非ゼロ終了します。Dispatch、承認、Flow、session は変更せず、実行時の検査も代替しません。`provider` 方式ではこの照会を要求せず、数値必須契約を満たせない場合に方式を自動変更することもありません。
 
 `provider`／`provider-stop` では、現在残量が不明という理由だけで実行を止めたり、
 利用者に credits の手入力を必須にしたりしません。ただし、明示した正の利用額上限や、
 別途承認した「残量確認を必須とする」条件は維持します。提供元の利用資格検査と数値残量の
 取得は別です。残量確認を追加するために、無断で `account` へ切り替えてはいけません。
-この区別は開発版の `--help`、`ready` と管理スキル1.3.8にも明記します。
+この区別は開発版の `--help`、`ready` と管理スキル1.3.14にも明記します。インストール済みスキルは利用者の許可なく更新しません。
 `config check --billing` は新規提案用の解決済み設定の表示であり、残量照会ではありません。
 保存済み作業では、現在の設定だけでなく Task／Dispatch と Flow の課金契約を確認します。
 

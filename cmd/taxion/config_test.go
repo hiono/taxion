@@ -171,6 +171,11 @@ execution:
 		t.Fatal("doctor changed saved Dispatch state", err)
 	}
 	authArgs := []string{"auth", "--dispatch", "dispatch", "--system-prompt-file", "missing-prompt", "--cli", "missing-copilot"}
+	output.Reset()
+	if err := runtimeQuotaCmd([]string{"--dispatch", "dispatch", "--cli", "missing-copilot"}, &output); err == nil ||
+		!strings.Contains(err.Error(), "approved account guidance") || output.Len() != 0 {
+		t.Fatal("quota probe reached the runtime without approved account guidance", err, output.String())
+	}
 	if err := runtimeCmd(authArgs); err == nil || !strings.Contains(err.Error(), "read system prompt") {
 		t.Fatal("approved auth probe did not reach local adapter inputs", err)
 	}
