@@ -33,8 +33,10 @@ func startArtifactReview(state *store.Workspace, flow *core.ReviewFlow, request 
 		return fmt.Errorf("taxion: artifact source must be a non-secret provenance reference")
 	}
 	target := *planned
-	if err := gitproof.RetainArtifact(flow.Contract, target, flow.ID, request.Configuration.Selection); err != nil {
-		return err
+	if !request.ReuseArtifactValidation {
+		if err := gitproof.RetainArtifact(flow.Contract, target, flow.ID, request.Configuration.Selection); err != nil {
+			return err
+		}
 	}
 	flow.Artifact = &core.ArtifactReview{
 		Target: target, Configuration: request.Configuration, ObservedAt: time.Now().UTC(),
@@ -52,7 +54,7 @@ func startArtifactReview(state *store.Workspace, flow *core.ReviewFlow, request 
 			}
 		}
 		audit, err := reconciledInput(*state, prior.ID, hash)
-		if err != nil || !audit.PreviousFlow.StoppedArtifactReviewer(audit.PreviousDispatch) {
+		if err != nil || !audit.ArtifactReviewer() {
 			return fmt.Errorf("taxion: validation reuse requires its exact proposal-bound Reviewer reconciliation")
 		}
 		if err := gitproof.VerifyArtifact(prior.Contract, prior.Artifact.Target, request.Configuration.Selection); err != nil {

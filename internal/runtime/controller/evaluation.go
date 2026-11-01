@@ -14,6 +14,8 @@ type FlowEvaluation struct {
 	FlowID                 string              `json:"flowId"`
 	QualityGate            string              `json:"qualityGate"`
 	CostComparisonEligible bool                `json:"costComparisonEligible"`
+	ReviewPurpose          string              `json:"reviewPurpose,omitempty"`
+	DiagnosticComplete     bool                `json:"diagnosticComplete,omitempty"`
 	Unmet                  []string            `json:"unmet"`
 	Dispatches             []EvaluatedDispatch `json:"dispatches"`
 	Repairs                int                 `json:"repairs"`
@@ -42,6 +44,11 @@ func EvaluateReviewFlow(graph core.TaskGraph, id string) (FlowEvaluation, error)
 	if !ok {
 		return FlowEvaluation{}, fmt.Errorf("taxion: evaluation requires an existing flow")
 	}
+	input, err := core.ReviewInputFromDecisions(flow.Contract.Decisions)
+	if err != nil {
+		return FlowEvaluation{}, err
+	}
+	diagnostic := input != nil && input.Purpose == "diagnostic"
 	report := FlowEvaluation{
 		FlowID: id, QualityGate: "UNMET", Unmet: []string{}, Dispatches: []EvaluatedDispatch{},
 		Repairs: flow.Repairs, TokenStatus: "unavailable",
@@ -64,7 +71,7 @@ func EvaluateReviewFlow(graph core.TaskGraph, id string) (FlowEvaluation, error)
 	if flow.Status != "COMPLETED" {
 		report.Unmet = append(report.Unmet, "Flow has not completed with independent same-target acceptance.")
 	}
-	if !slices.Contains(flow.Contract.Acceptance, core.DocumentationAcceptance) {
+	if !diagnostic && !slices.Contains(flow.Contract.Acceptance, core.DocumentationAcceptance) {
 		report.Unmet = append(report.Unmet, "Approved contract lacks the documentation-consistency criterion; legacy approvals are not upgraded retroactively.")
 	}
 	var total int64
@@ -118,6 +125,13 @@ func EvaluateReviewFlow(graph core.TaskGraph, id string) (FlowEvaluation, error)
 	}
 	if len(report.Unmet) == 0 {
 		report.QualityGate, report.CostComparisonEligible = "RECORDED_PASS", true
+	}
+	if input != nil {
+		report.ReviewPurpose = input.Purpose
+		if input.Purpose == "diagnostic" {
+			report.DiagnosticComplete = flow.Status == "COMPLETED" && len(report.Unmet) == 0
+			report.QualityGate, report.CostComparisonEligible = "NOT_ASSESSED_DIAGNOSTIC", false
+		}
 	}
 	return report, nil
 }

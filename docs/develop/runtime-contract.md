@@ -105,6 +105,26 @@ checkpoint v2 は既存の正規化 document 保存を使い、operation ID、�
 入力終了後の質問再表示はモデルを使わない。最小計画・未回答質問の保存前に停止し、入力本文が失われた checkpoint は、依頼 digest を本文の代わりに使わず再開を拒否する。送信開始済みで結果が不明の Planner は checkpoint で検出し、再送しない。実行中に process が止まって runner claim が残った場合は、既存の停止確認・receipt/Git 照合を済ませてから再開する。復旧のために Task 契約、proposal hash、既存 decision、ApprovalBundle、budget hard-stop を書き換えない。旧 binary は未知の `operation` field を拒否するため、rollback は operation 保存前の snapshot を使用する。
 ## 保存結果と checkpoint の復旧
 
+`v0.7.21-rc.11` の復旧は [ADR-0058](adr/0058-recover-unstarted-artifact-review.md) に従う。
+`workflow recover-review` は既存の取消・提案・確認・工程計画・Flow 作成を
+隔離メモリ内で検査し、一つの外側承認と実 store の transaction にまとめる。
+入力検証 receipt の再利用では新しい Flow 用の永続 Git ref を作らず、
+元の保持済み snapshot を照合する。preview と失敗時に ref や旧 worktree を変更しない。
+
+実行後に取消された最初の成果物 Reviewer は `continueStoppedExecution:true` を明示する。
+元指示に一致する停止 receipt、利用量、同じ候補と準備済み worktree、
+稼働実行・runner・未解決 feedback の不在を検査する。
+元期限を超えず、元の終端 Flow／session を書き換えない後続指示を作る。
+元入力検証を再実行せず、保存済み解析の墨消し済み末尾最大8192文字を実際の指示に含める。
+完全な保存出力は元記録に保持し、未保存の思考の復元を約束しない。
+
+intake の `reviewInput` は既存 Task decision の `taxion.review-input.v1` として保存し、
+承認対象の hash と実際の指示へ結び付ける。人の成果物・失敗途中の作業も対象とし、
+`diagnostic` の受入れ完了を製品品質の合格と分離する。
+品質評価は `NOT_ASSESSED_DIAGNOSTIC`、製品公開 gate は拒否する。
+残予算の `workflow budget --file` は観測単位と範囲の累計・残工程見込みから不足分を示し、
+先行 Flow の観測も返すが、追加権限・単位換算・累計上限の登録は行わない。
+
 開発版の持込み入力工程は [ADR-0056](adr/0056-validate-supplied-artifacts-without-coder-success.md)
 に従い、Dispatch のない Flow を保存できる。`ReviewFlow.Artifact` の対象・設定・検証記録を
 入力受理と実行開始・終了の追記監査へ結び付ける。

@@ -38,7 +38,9 @@ plan and start share this JSON input (examples are not user approval):
   }
 }
 taskId must already be READY with an approved contract and configuration.
-For a DRAFT use conversation proposal/confirm first; no combined DRAFT preview exists.
+For a DRAFT use conversation proposal/confirm first. For stopped validated artifact
+Reviewer recovery use workflow recover-review: one preview/approval atomically
+combines reconciliation, unchanged successor and plan instead of per-step consent.
 plan is read-only and starts no model. Its authorization text describes the
 requested execution, not a preview-only permission; it is part of the hash.
 Display stagePlan.hash, contractGate, timing and limits for actual user approval.
@@ -98,7 +100,7 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return encoder.Encode(value)
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {plan|start|validate-input|advance|run|resume|step|recover|reconcile-stopped|accept-saved-review|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|budget|evaluate|lanes}")
+		return fmt.Errorf("usage: taxion workflow {plan|start|validate-input|advance|run|resume|step|recover|reconcile-stopped|recover-review|accept-saved-review|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|budget|evaluate|lanes}")
 	}
 	action := args[0]
 	if action == "accept-saved-review" {
@@ -107,9 +109,28 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	if action == "reconcile-stopped" {
 		return reconcileStoppedDispatchCommand(args[1:], output)
 	}
+	if action == "recover-review" {
+		return recoverArtifactReviewCommand(args[1:], output)
+	}
 	resumeSaved := action == "resume"
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
 	fs.SetOutput(output)
+	if action == "budget" {
+		fs.Usage = func() {
+			fmt.Fprintln(fs.Output(), "Usage of workflow budget:")
+			fs.PrintDefaults()
+			fmt.Fprintln(fs.Output(), `Optional --file JSON estimates a bounded top-up before stopping. Required fields:
+unit (requests|tokens|credits|nanoAIU), source, scope, observedAt (RFC3339),
+used, approvedCeiling, remainingWork, repair, review, preservation.
+All numbers use ONE observed unit; missing is unknown, not zero. used is cumulative
+within the stated scope, including relevant predecessors and outer work. Do not
+replace a goal ceiling with provider entitlement. Refresh stale observations using
+approved reads. All remaining stage estimates are incremental, not prior work.
+Returns topUp (shortfall only; executionAuthorized:false) and saved priorFlows.
+No model/account query, write, deadline extension, approval or usage reset occurs.
+Keep results and continue the unfinished work after actual additional approval.`)
+		}
+	}
 	if action == "plan" || action == "start" {
 		fs.Usage = func() {
 			fmt.Fprintln(fs.Output(), "Usage of workflow "+action+":")
@@ -146,6 +167,9 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
 	case "validate-input", "advance", "show", "evaluate", "feedback-target", "repair-status", "planning-context", "budget":
 		fs.StringVar(&id, "id", "", "review flow ID")
+		if action == "budget" {
+			fs.StringVar(&file, "file", "", "optional same-unit cumulative observation and remaining-work estimate JSON")
+		}
 		if action == "evaluate" {
 			fs.BoolVar(&requireQuality, "require-quality", false, "fail unless saved same-target acceptance includes documentation consistency; not publication approval")
 		}
@@ -215,6 +239,22 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 			report, err := controller.ObserveFlowBudget(state, id)
 			if err != nil {
 				return err
+			}
+			if file != "" {
+				input, err := os.Open(file)
+				if err != nil {
+					return err
+				}
+				defer input.Close()
+				var estimate controller.BudgetContinuationEstimate
+				if err := core.DecodeGraphInput(input, &estimate); err != nil {
+					return err
+				}
+				advice, err := controller.EstimateBudgetContinuation(estimate)
+				if err != nil {
+					return err
+				}
+				report.TopUp = &advice
 			}
 			return printJSON(report)
 		}

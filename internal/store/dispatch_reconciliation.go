@@ -1,6 +1,8 @@
 package store
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"time"
@@ -11,6 +13,7 @@ import (
 // StoppedDispatchReconciliation retains the original stop and input contract,
 // not a claim that the cancelled Dispatch produced or never executed that input.
 type StoppedDispatchReconciliation struct {
+	Kind                       string              `json:"kind,omitempty"`
 	PreviewHash                string              `json:"previewHash"`
 	InputContractHash          string              `json:"inputContractHash"`
 	Actor                      string              `json:"actor"`
@@ -26,6 +29,11 @@ type StoppedDispatchReconciliation struct {
 	At                         time.Time           `json:"at"`
 }
 
+func (a StoppedDispatchReconciliation) ArtifactReviewer() bool {
+	return a.Kind == "" && a.PreviousFlow.StoppedArtifactReviewer(a.PreviousDispatch) ||
+		a.Kind == "executed-artifact-review-continuation-v1" && a.PreviousFlow.StoppedExecutedArtifactReviewer(a.PreviousDispatch)
+}
+
 func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 	seen := map[string]bool{}
 	for _, audit := range r.DispatchReconciliations {
@@ -35,6 +43,40 @@ func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 		dispatch, exists := graph.GraphDispatch(before.ID)
 		inputHash, err := core.CanonicalSHA256(prior.Contract)
 		target, targetErr := core.ObserveFeedbackTarget(dispatch)
+		if audit.Kind != "" {
+			if audit.Kind != "executed-artifact-review-continuation-v1" || seen[prior.ID] ||
+				!found || !exists || err != nil || targetErr != nil || audit.InputContractHash != inputHash ||
+				!recordHash(audit.PreviewHash) || audit.Actor == "" || audit.Source == "" || audit.Reason == "" ||
+				len(audit.Evidence) == 0 || !audit.NoActiveExecutionConfirmed || !audit.AcceptDeliveryUncertainty ||
+				audit.DeliveryStatus != "execution-observed-stop-confirmed-usage-may-be-incomplete" ||
+				audit.At.IsZero() || !audit.At.Before(prior.Deadline) ||
+				!prior.StoppedExecutedArtifactReviewer(before) || !reflect.DeepEqual(flow, prior) ||
+				!reflect.DeepEqual(dispatch, before) || target != audit.Target {
+				return fmt.Errorf("invalid executed artifact Reviewer continuation audit")
+			}
+			verifiedStop := false
+			for _, event := range r.Events {
+				if event.DispatchID != before.ID || event.Type != "verified-result" {
+					continue
+				}
+				var receipt struct {
+					Result *core.DispatchResult
+					Usage  []core.DispatchUsage
+				}
+				if json.Unmarshal([]byte(event.Payload), &receipt) == nil &&
+					event.SessionID == before.RuntimeSessionID &&
+					event.Hash == fmt.Sprintf("%x", sha256.Sum256([]byte(event.Payload))) &&
+					!event.At.After(audit.At) && reflect.DeepEqual(receipt.Result, before.Result) &&
+					reflect.DeepEqual(receipt.Usage, before.RuntimeUsage) {
+					verifiedStop = true
+				}
+			}
+			if !verifiedStop {
+				return fmt.Errorf("executed Reviewer continuation lacks its exact controller stop receipt and usage")
+			}
+			seen[prior.ID] = true
+			continue
+		}
 		if seen[prior.ID] || !found || !exists || err != nil || targetErr != nil ||
 			!recordHash(audit.PreviewHash) ||
 			audit.InputContractHash != inputHash || audit.Actor == "" || audit.Source == "" ||

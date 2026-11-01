@@ -16,14 +16,15 @@ import (
 )
 
 type IntakeRequest struct {
-	ReconciliationHash      string         `json:"reconciliationHash,omitempty"`
-	Request                 string         `json:"request"`
-	Task                    core.GraphTask `json:"task"`
-	Actor                   string         `json:"actor"`
-	Source                  string         `json:"source"`
-	PlanningSelection       *config.Config `json:"planningSelection,omitempty"`
-	PlanningReason          string         `json:"planningReason,omitempty"`
-	ConfigurationDecisionID string         `json:"configurationDecisionId,omitempty"`
+	ReviewInput             *core.ReviewInput `json:"reviewInput,omitempty"`
+	ReconciliationHash      string            `json:"reconciliationHash,omitempty"`
+	Request                 string            `json:"request"`
+	Task                    core.GraphTask    `json:"task"`
+	Actor                   string            `json:"actor"`
+	Source                  string            `json:"source"`
+	PlanningSelection       *config.Config    `json:"planningSelection,omitempty"`
+	PlanningReason          string            `json:"planningReason,omitempty"`
+	ConfigurationDecisionID string            `json:"configurationDecisionId,omitempty"`
 }
 
 type IntakeConfirmation struct {
@@ -115,7 +116,8 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 		strings.TrimSpace(request.Source) == "" || request.Task.Status != core.Draft ||
 		request.Task.AuthorizationID != "" || len(request.Task.Decisions) != 0 ||
 		(request.Task.Owner != "CODER" && !(modelFreeVerification(request.Task) ||
-			request.Task.Owner == "USER" && request.ReconciliationHash != "")) ||
+			request.Task.Owner == "USER" && (request.ReconciliationHash != "" ||
+				request.ReviewInput != nil && request.Task.Type == "VERIFICATION" && !request.Task.ModelFree))) ||
 		request.Task.Reviewer != "REVIEWER" {
 		return core.GraphTask{}, fmt.Errorf("taxion: intake requires an original request, sourced DRAFT contract and independent Coder/Reviewer without authorization")
 	}
@@ -131,7 +133,7 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 	if task.FileAccess == nil {
 		task.FileAccess = core.DefaultFileAccessPolicy()
 	}
-	if task.BudgetGuidance == nil {
+	if task.BudgetGuidance == nil && request.ReconciliationHash == "" {
 		mode := ""
 		var selected config.Config
 		if request.PlanningSelection != nil {
@@ -144,6 +146,18 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 		}
 	}
 	task.Decisions = []core.TaskDecision{{ID: "intake:" + task.ID, Source: request.Source, Text: string(text)}}
+	if request.ReviewInput != nil {
+		if err := request.ReviewInput.Validate(); err != nil {
+			return core.GraphTask{}, err
+		}
+		packet, err := json.Marshal(request.ReviewInput)
+		if err != nil {
+			return core.GraphTask{}, err
+		}
+		task.Decisions = append(task.Decisions, core.TaskDecision{
+			ID: "review-input:" + task.ID, Source: request.Source, Text: string(packet),
+		})
+	}
 	if request.PlanningSelection != nil {
 		if strings.TrimSpace(request.PlanningReason) == "" || request.PlanningSelection.Repository.Path != task.Repo {
 			return core.GraphTask{}, fmt.Errorf("taxion: isolated intake planning requires explicit configuration reason and matching repository")
@@ -185,6 +199,9 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 			task.Decisions = append(task.Decisions, core.TaskDecision{
 				ID: "reconciled-input:" + task.ID, Source: request.Source, Text: request.ReconciliationHash,
 			})
+			if continuation := reviewContinuationDecision(*state, task, request.ReconciliationHash); continuation != nil {
+				task.Decisions = append(task.Decisions, *continuation)
+			}
 		}
 		if previous, ok := state.Graph.GraphTask(task.ID); ok {
 			if !reflect.DeepEqual(previous, task) {
@@ -269,6 +286,13 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		if decisionCount == 0 {
 			return fmt.Errorf("taxion: intake proposal lacks its original request")
 		}
+		input, err := core.ReviewInputFromDecisions(task.Decisions)
+		if err != nil {
+			return err
+		}
+		if input != nil {
+			decisionCount--
+		}
 		predecessor, err := artifactPredecessorDecision(state.Graph, task)
 		if err != nil {
 			return err
@@ -291,6 +315,12 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 			}
 			if err := verifyReconciledInput(*state, task, request.ReconciliationHash); err != nil {
 				return err
+			}
+			decisionCount--
+		}
+		if continuation := reviewContinuationDecision(*state, task, request.ReconciliationHash); continuation != nil {
+			if !slices.Contains(task.Decisions, *continuation) {
+				return fmt.Errorf("taxion: executed Reviewer continuation must retain its exact readable saved output")
 			}
 			decisionCount--
 		}

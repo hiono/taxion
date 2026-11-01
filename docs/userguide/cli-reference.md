@@ -218,7 +218,7 @@ Controller が baseline から candidate までの全実差分を `changedFiles`
 同じ確定一覧を使います。`changeManifest` は結果ファイルやモデルから指定できません。
 policy のない保存済み指示と配布済み旧版は完全一致条件を維持し、旧結果を書き換えません。
 Reviewer 自身の変更禁止、実差分の scope、正式承認、工程予算、全検証と独立レビューは維持します。
-管理スキルは1.3.16です。インストール済みスキルは許可なく更新しません。新しい保存フィールドを使った workspace を旧 binary で操作せず、
+管理スキルは1.3.17です。インストール済みスキルは許可なく更新しません。新しい保存フィールドを使った workspace を旧 binary で操作せず、
 戻す場合は更新前の保全一式を別環境で使用してください。
 RC7 の `workflow repair-status` は、停止・hold・成果物の不一致を `reconciliation-required`
 として返します。未回答の人間の選択だけを `human-decision-required` と区別します。
@@ -695,6 +695,195 @@ taxion workflow accept-saved-review --file acceptance.json
 CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は stdio の ACP、`web/` は browser console を提供する。
 
 ## 停止済み初回指示の整合回復
+
+### 残工程の費用を見積もり、保存済み成果から続ける
+
+予算は一つの session ではなく、外側の調整、先行 Flow、残りの修正・検証・
+独立レビューを含む目的全体で管理する。上限を使い切る前に保存用の余裕を確保し、
+不足見込み分をまとめて確認する。承認待ちの間は新しい課金処理を開始しない。
+追加額は実測と残工程から求める見込みであり、完了保証や固定の追加枠ではない。
+
+`workflow budget --id FLOW_ID --file ESTIMATE.json` は、既存の読取り専用の報告に
+`topUp` を追加する。入力例は次のとおりで、数値や日時を承認値に流用しない。
+
+```json
+{
+  "unit": "requests",
+  "source": "承認済みの読取り専用利用量照会",
+  "scope": "外側処理と先行 Flow を含む今回の目的全体",
+  "observedAt": "2026-12-01T08:00:00Z",
+  "used": 900,
+  "approvedCeiling": 1050,
+  "remainingWork": 300,
+  "repair": 100,
+  "review": 150,
+  "preservation": 50
+}
+```
+
+全数値は一つの観測単位で指定する。`requests`、`tokens`、`credits`、`nanoAIU`
+を扱うが、相互に換算しない。`used` は記載した範囲の累計、
+`approvedCeiling` は人間が承認した上限であり、provider 全体枠ではない。
+残工程・修正余裕・独立レビュー・保存の見込みは、未完了部分の追加消費だけを含める。
+欠落・不明値をゼロで埋めず、古い観測は承認済みの方法で更新する。
+
+例では残150に対して必要見込み600となり、`additionalRequested:450` を返す。
+適用やモデル起動を行わず、`executionAuthorized:false` である。
+上限到達時は `BUDGET_STOP`、到達前でも不足見込みがあれば一括追加確認を案内する。
+これは見積り補助であり、provider 残量の自動照会や新しい累計上限の登録機能ではない。
+外側の operator が追加承認を根拠付きで記録し、既存の課金・期限検査を維持する。
+
+報告の `priorFlows` は、正式な `createdFrom` と `supersedes` で結ばれた先行 Flow の
+予算観測を保持する。新しい Flow の単体利用量を目的全体の累計と誤認しない。
+不明な利用量や配送を無課金・未配送として扱わない。
+稼働中 Flow への案内は、既存承認内の次の操作へ進むもので、
+同じ intake や工程承認のやり直しを要求しない。
+
+停止時はコード、未コミット成果、調査根拠、判断理由、承認、検証・レビュー結果、
+修正済み指摘と次の未完了操作を保全する。再開時はそれらを利用し、
+候補・設定・コマンドなどの変更に影響される根拠だけを再確認する。
+モデル内部の未保存の思考は復元できない。未知の配送の再送や、
+同じ背景の全文再送、重複 agent、根拠のない検証・レビュー反復を節約の対象とする。
+必要な独立レビューや安全検査は省略しない。
+
+### 人の成果物と失敗途中の作業を独立レビューへ渡す
+
+レビュー入力は Coder の成功結果に限定しない。
+人が追加したコード・文書・テストは既存の `artifactSource` 経路で扱える。
+`v0.7.21-rc.11` の `conversation intake` は、任意の `reviewInput` を受け取り、
+目的と質問、既知の失敗、検証状況、読める証拠を正式な提案へ固定する。
+次は intake 入力に追加する部分の例である。
+
+```json
+{
+  "reviewInput": {
+    "kind": "taxion.review-input.v1",
+    "purpose": "diagnostic",
+    "source": "human:preserved-partial-work",
+    "questions": ["同じテストの失敗が続く原因と未確認事項は何か"],
+    "knownFailures": ["TestClamp: expected 10, got 11。exit 1で2回失敗。原因未分類"],
+    "validationSummary": "製品テストは失敗。統合テストは未実施。証拠の同一性は別途検査する",
+    "evidence": ["TestClamp の上記 assertion を保存。完全な墨消し済みログは internal/failure.txt"]
+  }
+}
+```
+
+`purpose` は `quality` または `diagnostic`。全項目を明示し、`quality` の場合のみ
+`knownFailures` の空配列を許可する。hash や管理領域の path だけで診断内容を代用しない。
+失敗したコマンド、終了コード、テスト名、assertion、原因未分類、未実施検査を
+実際の保存出力から準備し、秘密を除去して抜粋・省略を示す。
+関連するコード・文書・テスト・ログは許可済み snapshot に含める。
+私的管理領域への権限を追加して読ませない。
+
+Task は `modelFree:false` の USER 所有 VERIFICATION、または既存の Coder 契約を使う。
+`acceptance` は実際の品質確認、または診断として答える質問と証拠に合わせる。
+正式な確認後、同じ `source` を `artifactSource` に指定し、
+`maxRepairs:0`、Coder 枠なしの工程計画でレビューへ進む。
+入力 snapshot と設定、権限、期限、費用を従来どおり検査する。
+入力検証コマンドは診断に必要な証拠を確認するものであり、
+失敗済み製品テストを成功扱いにしたり、不明な実行を再試行したりしない。
+必要証拠の検査が失敗したら、レビューを起動せず保存する。
+
+実際の Reviewer 指示には質問・失敗情報・検証状況と目的別の説明が含まれる。
+診断では原因・未解決点・推奨を `workReport` に証拠付きで記録し、
+診断の受入れ条件が未達なら指摘または `BLOCKED` とする。
+診断中に発見した製品の欠陥を隠さず、製品テストの失敗と区別して説明する。
+`APPROVE` は診断の受入れ完了であり、製品品質の合格ではない。
+完了報告は `qualityGate:NOT_ASSESSED_DIAGNOSTIC` と
+`diagnosticComplete:true` を返し、製品の Publication gate を開かない。
+診断報告自体の公開は別途、内容を固定した承認で扱う。
+Coder の自動起動、修正、再試行、任意の管理ログ収集は含まない。
+
+### レビュー復旧を一括承認する
+
+`v0.7.21-rc.11` の `workflow recover-review --file JSON --preview` は、
+停止した最初の検証済み成果物 Reviewer の取消、同一候補の後続契約、
+Reviewer-only の工程計画を一つの承認対象にまとめる。
+新しい人間の判断がない内部 hash の生成を理由に、承認質問を分割しない。
+既に工程計画まで承認済みなら本操作へ戻らず、保存済み承認で起動前検査とレビューを進める。
+
+入力は次の構造である。値は例であり、実際の停止状態・承認条件から Controller が準備する。
+`deadline` は新しい後続工程の絶対期限で、元 Flow の期限を変更しない。
+例の金額・時間を承認値に流用しない。`maxNanoAiu` と session credits、
+provider の requests を根拠なく換算しない。
+
+```json
+{
+  "reconciliation": {
+    "flowId": "stopped-flow",
+    "dispatchId": "stopped-flow-dispatch-0",
+    "actor": "operator",
+    "source": "human:review-recovery",
+    "reason": "Authorize the displayed review-only recovery within its limits",
+    "evidence": ["Actual execution-quiescence evidence reference"],
+    "noActiveExecutionConfirmed": true,
+    "acceptDeliveryUncertainty": true
+  },
+  "taskId": "successor-task",
+  "flowId": "successor-flow",
+  "reviewRoot": "/absolute/new-review-root",
+  "deadline": "2026-12-01T10:00:00Z",
+  "timeoutSeconds": 5400,
+  "maxNanoAiu": 1000000000,
+  "stageBudget": {
+    "version": 1,
+    "validationSeconds": 600,
+    "reviewSeconds": 3600,
+    "repairSeconds": 600
+  }
+}
+```
+
+preview は実 store を読取り専用で開き、隔離したメモリ内台帳で既存の
+reconcile、intake、confirm、plan、start の検査を実行する。
+モデル・host 検証・新 worktree を起動・作成せず、元候補と合格 receipt を保持する。
+`request`、`proposal`、`plan`、`flow`、保全先を含む `reconciliation` と、
+全保存状態・入力に結び付いた外側の `hash` を返す。
+
+その一括判断に対する承認後、返った外側の `hash` を入力の `expectedHash` に設定し、
+同じ `workflow recover-review --file JSON` で適用する。
+内部の取消時刻などによって下位 hash は変わり得るが、
+表示した候補・権限・設定・上限・絶対期限への承認から Controller が導出する。
+これらを別々に人間へ承認させない。一括承認と元の入力は
+後続 Flow の `authorization` に保存し、既存の個別監査も保持する。
+既存の承認を根拠なく一括承認へ読み替えない。
+
+状態変更、候補や準備済み worktree の drift、期限切れ、
+不足する停止証拠・配送不確実性の受容、設定不一致は適用全体を拒否する。
+既存の不変監査を維持する一つの SQLite transaction で保存するため、
+取消だけや後続契約だけが残る部分適用はない。
+絶対期限は遅延適用で延びず、`timeoutSeconds` との短い方を使用する。
+適用後は通常の `workflow validate-input` で合格 receipt の再照合と指示発行を行い、
+承認済み範囲の `workflow run` へ進む。入力検証stageの再実行とCoder起動はなく、
+Reviewer結果の受理検証は維持する。一括承認に含まれる実行について再承認を要求しない。
+承認対象に含まれない実行・公開・権限拡張の許可は推定しない。
+
+#### 実行後に正式停止した Reviewer を引き継ぐ
+
+Reviewer が実行済みで、正式な runtime stop により指示が `CANCELLED` になった場合は、
+同じ入力へ `continueStoppedExecution:true` を追加する。
+普通の `resume` や、未開始専用の `reconcile-stopped` へ迂回しない。
+Controller は同じ指示・session・結果・利用量と一致する停止 receipt、
+合格した入力 receipt、元候補、準備済みの変更されていない review worktree を検証する。
+runner、稼働指示、未解決の feedback／draft があれば拒否する。
+必要な feedback 解決や所有権解放は既存の正式操作と保存済み承認で扱い、
+DB や旧指示を書き換えない。
+
+`deadline` は元 Flow の絶対期限以下であり、期限切れ後の新しい実行は許可しない。
+新しい Flow の単体予算と、既に消費した分を含む承認累計を混同しない。
+元 Flow、`CANCELLED` 指示、session、実行・停止・利用量 receipt、
+完全な保存出力、旧 worktree はそのまま残す。
+後続の Reviewer へ、保存済み出力の末尾最大8192文字を墨消しして引き渡す。
+省略を明示し、出力が保存されていない場合は未保存と記す。
+hash だけの引継ぎや、未保存の思考の復元を約束しない。
+発見済み内容はデータとして引き継ぎ、命令や品質合格とは扱わない。
+
+これは終端 session の再開ではなく、同じレビューの後続指示を正式に導出する操作である。
+保存済み解析から続きを行い、Coder と入力検証 stage を再実行しない。
+実際の Reviewer 指示で抜粋と同一対象を確認し、承認済みの残予算・元期限内で実行する。
+結果受理検証は維持する。元の停止 receipt がない、対象が変わった、
+実行停止が確認できない場合は保存状態を維持して拒否する。
+取消前に有効なレビュー結果が得られていたことを捏造しない。
 
 `v0.7.21-rc.8` は、入力検証 `PASSED` の後に準備失敗した最初の持込み成果物 Reviewer にも対応する。応答・開始・session・結果・runtime receipt・管理済みレビュー worktree がある場合は対象外である。下記と同じ preview／適用操作を使い、配送不明と旧停止を保持して指示を取り消す。親 Task はレビュー待ちを維持する。
 

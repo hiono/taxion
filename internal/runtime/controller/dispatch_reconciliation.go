@@ -225,7 +225,7 @@ func verifyReconciledInput(state store.Workspace, task core.GraphTask, hash stri
 		return fmt.Errorf("taxion: reconciled input predecessor differs")
 	}
 	previous, found := state.Graph.GraphTask(audit.PreviousFlow.TaskID)
-	artifactReviewer := audit.PreviousFlow.StoppedArtifactReviewer(audit.PreviousDispatch)
+	artifactReviewer := audit.ArtifactReviewer()
 	if !found || (!artifactReviewer && previous.Status != core.Blocked) ||
 		artifactReviewer && previous.Status != core.WaitingForReview {
 		return fmt.Errorf("taxion: reconciled predecessor must remain BLOCKED and not already superseded")

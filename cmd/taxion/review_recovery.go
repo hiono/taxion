@@ -1,0 +1,86 @@
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/runtime/controller"
+	"github.com/hiono/taxion/internal/store"
+)
+
+func recoverArtifactReviewCommand(args []string, output io.Writer) error {
+	fs := flag.NewFlagSet("workflow recover-review", flag.ContinueOnError)
+	fs.SetOutput(output)
+	file := fs.String("file", "", "JSON: reconciliation decision/evidence, new taskId/flowId/reviewRoot, absolute deadline, timeoutSeconds, maxNanoAiu, stageBudget; expectedHash on apply")
+	preview := fs.Bool("preview", false, "preview reconciliation, identical-candidate contract and Reviewer-only plan as one approval; no store writes or model execution")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage of workflow recover-review:")
+		fs.PrintDefaults()
+		fmt.Fprintln(fs.Output(), `JSON requires reconciliation:{flowId,dispatchId,actor,source,reason,evidence,
+noActiveExecutionConfirmed:true,acceptDeliveryUncertainty:true}, taskId, flowId,
+reviewRoot (fresh absolute root), deadline (fixed RFC3339), timeoutSeconds,
+maxNanoAiu and stageBudget:{version:1,...}. No Coder/repair allocation.
+Preview returns one outer hash binding all saved state and the exact bounded request.
+After actual approval add expectedHash and apply the same file without --preview.
+Controller derives lower hashes, preserves existing audits and commits atomically.
+No model or host validation starts; use normal validate-input/run after apply.
+Already-approved Flows continue normally, without returning to this operation.
+For an EXECUTED artifact Reviewer formally stopped with a CANCELLED Dispatch, set
+continueStoppedExecution:true. Requires exact saved controller runtime-stop receipt,
+unchanged candidate and prepared review worktree, no active execution/owner or
+unresolved feedback, explicit uncertainty acceptance and deadline <= original Flow
+deadline. This does not resume a terminal session: it derives a Reviewer-only
+successor, reuses the PASSED input receipt and carries bounded saved readable output
+into its actual instruction. Old Flow, session, usage, transcript and worktree remain.
+Missing saved output is stated as unknown, not invented analysis. No Coder, input
+validation replay, cumulative usage reset or deadline extension is authorized.
+Use supported feedback resolution/recovery for an outstanding hold/runner; never
+edit the database or use unstarted reconcile-stopped for an executed Reviewer.`)
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *file == "" || fs.NArg() != 0 {
+		return fmt.Errorf("workflow recover-review requires --file and no positional arguments")
+	}
+	input, err := os.Open(*file)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	var request controller.ReviewRecoveryRequest
+	if err := core.DecodeGraphInput(input, &request); err != nil {
+		return err
+	}
+	if !*preview && request.ExpectedHash == "" {
+		return fmt.Errorf("workflow recover-review requires the single expectedHash from --preview")
+	}
+	info, err := os.Stat(workspaceDBPath())
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("workflow recover-review requires an existing workspace")
+	}
+	var db *store.Store
+	if *preview {
+		db, err = store.OpenReadOnly(workspaceDBPath())
+	} else {
+		db, err = store.Open(workspaceDBPath())
+	}
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	report, err := controller.RecoverArtifactReview(db, storePath, request, *preview)
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(output)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(report)
+}

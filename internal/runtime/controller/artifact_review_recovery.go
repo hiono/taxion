@@ -18,6 +18,14 @@ func verifyValidatedArtifactContract(prior core.ReviewFlow, next core.GraphTask)
 		return fmt.Errorf("taxion: validated artifact successor must retain its exact candidate")
 	}
 	old := prior.Contract
+	oldInput, err := core.ReviewInputFromDecisions(old.Decisions)
+	if err != nil {
+		return err
+	}
+	nextInput, err := core.ReviewInputFromDecisions(next.Decisions)
+	if err != nil || !reflect.DeepEqual(oldInput, nextInput) {
+		return fmt.Errorf("taxion: validation reuse cannot change or discard supplied review purpose and diagnostics")
+	}
 	next.ID, next.Status, next.AuthorizationID, next.Decisions = old.ID, old.Status, old.AuthorizationID, old.Decisions
 	next.Supersedes, next.CreatedFrom = old.Supersedes, old.CreatedFrom
 	next.NextAction, next.DeferredReason, next.ResumeCondition = old.NextAction, old.DeferredReason, old.ResumeCondition
@@ -31,13 +39,13 @@ func verifyValidatedArtifactContract(prior core.ReviewFlow, next core.GraphTask)
 func validatedArtifactSource(graph core.TaskGraph, task core.GraphTask, request ReviewFlowRequest) (core.ReviewFlow, error) {
 	prior, ok := graph.ReviewFlow(strings.TrimPrefix(task.CreatedFrom, "flow:"))
 	if !ok || task.CreatedFrom != "flow:"+prior.ID || prior.Status != "STOPPED" ||
-		prior.StopCode != "SAFETY_STOP" || prior.RunnerID != "" || !prior.HandoffHeld() ||
+		!slices.Contains([]string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT"}, prior.StopCode) || prior.RunnerID != "" || !prior.HandoffHeld() ||
 		len(prior.DispatchIDs) != 1 {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: validation reuse requires its held stopped artifact predecessor")
 	}
 	dispatch, ok := graph.GraphDispatch(prior.LastDispatchID())
 	if !ok || dispatch.Recipient != "REVIEWER" || dispatch.Status != core.DispatchCancelled ||
-		dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "" {
+		(dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "") && !prior.StoppedExecutedArtifactReviewer(dispatch) {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: validation reuse requires a reconciled unstarted Reviewer")
 	}
 	if err := verifyValidatedArtifactContract(prior, task); err != nil {

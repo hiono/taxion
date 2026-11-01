@@ -204,7 +204,7 @@ func ExecutionGateReport(graph core.TaskGraph, flowID string) (GateReport, error
 	report.Hashes.Evidence = evidence
 	switch flow.Status {
 	case "COMPLETED":
-		if evaluation.QualityGate != "RECORDED_PASS" {
+		if evaluation.QualityGate != "RECORDED_PASS" && !evaluation.DiagnosticComplete {
 			report.fail("quality-gate-unmet", "completed flow lacks same-target acceptance evidence")
 		}
 	case "RUNNING":
@@ -220,6 +220,9 @@ func ExecutionGateReport(graph core.TaskGraph, flowID string) (GateReport, error
 	}
 	if report.Verdict == GateVerdictPass {
 		report.NextAuthorizedTransition = "publication gate"
+		if evaluation.DiagnosticComplete {
+			report.NextAuthorizedTransition = "inspect completed diagnostic report; product quality remains unassessed"
+		}
 	}
 	return report, nil
 }
@@ -238,6 +241,15 @@ func PublicationGateReport(graph core.TaskGraph, flowID string) (GateReport, err
 	report.Verdict = execution.Verdict
 	if execution.Verdict != GateVerdictPass {
 		report.NextRequiredApproval = execution.NextRequiredApproval
+		return report, nil
+	}
+	flow, _ := graph.ReviewFlow(flowID)
+	input, err := core.ReviewInputFromDecisions(flow.Contract.Decisions)
+	if err != nil {
+		return GateReport{}, err
+	}
+	if input != nil && input.Purpose == "diagnostic" {
+		report.blocked("diagnostic-not-product-approval", "completed diagnosis is not product acceptance or publication authority; publishing the diagnostic report needs its own exact-content authorization")
 		return report, nil
 	}
 	task, ok := graph.GraphTask(execution.TaskID)

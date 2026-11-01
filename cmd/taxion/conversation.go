@@ -85,6 +85,22 @@ No live investigation has happened here; identify any needed investigation
 as unconfirmed. Keep the response concise and in the user's language.`
 
 const intakeInputHelp = `
+Optional reviewInput binds human-authored or partial/failed input without a Coder:
+{"kind":"taxion.review-input.v1","purpose":"diagnostic","source":"human:preserved-input",
+ "questions":["Why did TestClamp fail twice?"],
+ "knownFailures":["TestClamp exit 1: expected 10, got 11; cause not yet classified"],
+ "validationSummary":"Product test failed; integration tests not run; evidence integrity checked separately",
+ "evidence":["Redacted failure excerpt plus readable snapshot-local log references"]}
+purpose is quality or diagnostic. All fields are required; knownFailures may be
+empty only for quality. Evidence contains actual readable content, not only hashes.
+Use a non-modelFree USER-owned VERIFICATION Task (or a Coder contract); the new
+Task's acceptance describes this review, not fabricated Coder success.
+After confirmation, plan/start requires the exact source as artifactSource,
+maxRepairs:0 and zero Coder allocation. Diagnostic acceptance approves the diagnosis,
+not product quality; it cannot pass the product publication gate.
+Input validation commands must verify required evidence for the diagnostic task,
+not waive failed product tests or replay a prior unknown execution.
+
 JSON envelope: request (original user text), task (explicit DRAFT contract),
 actor and source (actual request provenance). taxion ready includes a full example.
 task requires the repository, objective, scope, acceptance, validationCommands,
