@@ -22,6 +22,9 @@ func TestRuntimeQuotaArgumentsDoNotAuthorizeExecution(t *testing.T) {
 		{"--dispatch", "d", "--budget-guidance", "account"},
 		{"--dispatch", "d", "--max-ai-credits", "30"},
 		{"--dispatch", "d", "--system-prompt-file", "prompt"},
+		{"--account", "fixture"}, {"--account", " fixture ", "--approve-account-read"},
+		{"--dispatch", "d", "--account", "fixture", "--approve-account-read"},
+		{"--dispatch", "d", "--approve-account-read"}, {"--approve-account-read"},
 	} {
 		output.Reset()
 		if err := runtimeQuotaCmd(args, &output); err == nil {
@@ -40,5 +43,12 @@ func TestRuntimeQuotaDoesNotInitializeWorkspace(t *testing.T) {
 	}
 	if _, err := os.Stat(workspaceDBPath()); !os.IsNotExist(err) || output.Len() != 0 {
 		t.Fatal("quota probe created a database or emitted a quota", err, output.String())
+	}
+	if err := runtimeQuotaCmd([]string{"--account", "fixture", "--approve-account-read", "--cli", filepath.Join(t.TempDir(), "missing-copilot")}, &output); err == nil ||
+		!strings.Contains(err.Error(), "operator quota client unavailable") {
+		t.Fatal("operator read required a Dispatch/workspace instead of reaching the read-only client", err)
+	}
+	if _, err := os.Stat(workspaceDBPath()); !os.IsNotExist(err) || output.Len() != 0 {
+		t.Fatal("operator probe created a database or emitted a quota", err, output.String())
 	}
 }

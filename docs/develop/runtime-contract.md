@@ -424,6 +424,8 @@ Reviewer の `acceptance[].evidence`・`findings[].evidence` は、最上位の 
 
 この照会は credential 参照の解決、repository actor 選択、契約資格の証明を行わない。実行時は同じ認証 method を別に使って確認する。local protocol fixture の成功は login 済み受入れの証拠ではない。
 
+`runtime quota --account ACCOUNT --approve-account-read` は外側の操作担当の既存読取り許可を使う独立した観測であり、Task、Dispatch、workspace、worker 設定を要求しない。保存済みログインの credential source と account/host を照合し、Dispatch と同じ SDK quota 読取りを共有する。周囲の token へ fallback せず、model session と store を作らない。アカウント全体の残量と承認済み追加上限から継続を判断でき、厳密な session 別帰属や worker の方式変更を前提にしない。取得不能・鮮度切れ・利用拒否は非ゼロ終了し、JSON の `executionAuthorized` は false のまま保つ。
+
 `config bind --dispatch` は完全な承認済み設定選択、decision 参照、field 出典、記録時刻を Dispatch に保存する。Controller は一つの workspace transaction で現在 Task と発行 instruction の承認を確認して保存する。core は SDK 非依存 JSON を保存し、identity、出典、保存承認への membership を検査する。設定層は完全 tuple の schema を検査する。
 
 選択後の Dispatch 設定検査と明示認証照会は、その tuple を要求する。同一値の再指定は初回出典と時刻を保つ。別値の binding や、既存 session に初めて選択を付けるには、新たに認可した Dispatch が必要。選択のない旧記録は読める。選択記録だけでは実認証・契約資格の証拠にならない。

@@ -111,6 +111,23 @@ func TestTaskGraphRejectsIgnoredFileOption(t *testing.T) {
 	}
 }
 
+func TestOuterOperatorBudgetGuidanceUsesWholeAccountHeadroom(t *testing.T) {
+	for name, text := range map[string]string{"ready": readyPrompt, "managed-skill": readySkillBody} {
+		for _, required := range []string{
+			"whole-account remaining headroom", "approved spending ceiling",
+			"next bounded work unit", "stop reserve",
+			"Exact per-call/session attribution is not a prerequisite",
+			"runtime quota --account ACCOUNT --approve-account-read",
+			"no Dispatch, Task, workspace or model session",
+			"not new user consent", "values already observable",
+		} {
+			if !strings.Contains(strings.Join(strings.Fields(text), " "), required) {
+				t.Errorf("%s omits practical operator budget rule %q", name, required)
+			}
+		}
+	}
+}
+
 func TestRecordsRejectOptionsNotSupportedByAction(t *testing.T) {
 	err := recordsCmd([]string{"show", "--file", "ignored.json"})
 	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -file") {

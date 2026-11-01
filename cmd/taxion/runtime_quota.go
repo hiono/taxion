@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/hiono/taxion/internal/runtime"
@@ -18,6 +19,8 @@ func runtimeQuotaCmd(args []string, output io.Writer) error {
 	fs := flag.NewFlagSet("runtime quota", flag.ContinueOnError)
 	fs.SetOutput(output)
 	dispatchID := fs.String("dispatch", "", "Dispatch with approved account guidance and saved configuration")
+	account := fs.String("account", "", "outer operator's Copilot account (instead of --dispatch)")
+	approveRead := fs.Bool("approve-account-read", false, "use existing permission for an operator account read; no execution approval")
 	cli := fs.String("cli", "", "Copilot CLI path (default: PATH)")
 	baseDirectory := fs.String("base-directory", "", "Copilot state directory (default: ~/.copilot)")
 	timeout := fs.Duration("timeout", 5*time.Second, "read-only observation timeout (at most 5s)")
@@ -27,8 +30,25 @@ func runtimeQuotaCmd(args []string, output io.Writer) error {
 		}
 		return err
 	}
-	if *dispatchID == "" || fs.NArg() != 0 || *timeout <= 0 || *timeout > 5*time.Second {
-		return fmt.Errorf("runtime quota: --dispatch is required; --timeout must be positive and at most 5s; positional arguments are not accepted")
+	if (*dispatchID == "") == (*account == "") || fs.NArg() != 0 || *timeout <= 0 || *timeout > 5*time.Second ||
+		(*account != "" && (!*approveRead || strings.TrimSpace(*account) != *account)) || (*dispatchID != "" && *approveRead) {
+		return fmt.Errorf("runtime quota: use --dispatch ID or --account ACCOUNT --approve-account-read; --timeout must be positive and at most 5s; positional arguments are not accepted")
+	}
+	if *account != "" {
+		ctx, cancel := signalContext(*timeout)
+		defer cancel()
+		quota, err := copilot.ReadLoggedInAccountQuota(ctx, *account, *cli, *baseDirectory)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			return err
+		}
+		outputErr := writeQuota(output, &quota)
+		if quota.State != "available" || quota.ExecutionDenied {
+			return errors.Join(fmt.Errorf("runtime quota: operator quota is unavailable, stale or denied"), outputErr)
+		}
+		return outputErr
 	}
 	if err := validateWorkspaceStorePath(); err != nil {
 		return err
@@ -77,10 +97,14 @@ func runtimeQuotaCmd(args []string, output io.Writer) error {
 	quota, observationErr := control.ObserveAccountQuota(ctx, dispatch.ID)
 	var outputErr error
 	if quota != nil {
-		outputErr = json.NewEncoder(output).Encode(struct {
-			Quota               *runtime.QuotaSnapshot `json:"quota"`
-			ExecutionAuthorized bool                   `json:"executionAuthorized"`
-		}{Quota: quota})
+		outputErr = writeQuota(output, quota)
 	}
 	return errors.Join(observationErr, outputErr, worker.Close())
+}
+
+func writeQuota(output io.Writer, quota *runtime.QuotaSnapshot) error {
+	return json.NewEncoder(output).Encode(struct {
+		Quota               *runtime.QuotaSnapshot `json:"quota"`
+		ExecutionAuthorized bool                   `json:"executionAuthorized"`
+	}{Quota: quota})
 }

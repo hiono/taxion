@@ -116,6 +116,7 @@ taxion runtime send --dispatch <id> --system-prompt-file <path> --prompt-file <p
 taxion runtime resume --dispatch <id> --system-prompt-file <path>
 taxion runtime events --dispatch <id> --system-prompt-file <path>
 taxion runtime quota --dispatch <id> [--timeout 5s]
+taxion runtime quota --account <outer-copilot-account> --approve-account-read [--timeout 5s]
 taxion runtime stop --dispatch <id>
 taxion runtime commit --dispatch <id> --system-prompt-file <path> --message-file <path> --scanner <path>
 taxion review --task <id> --sha <coder-sha> --repo <repo>
@@ -217,7 +218,7 @@ Controller が baseline から candidate までの全実差分を `changedFiles`
 同じ確定一覧を使います。`changeManifest` は結果ファイルやモデルから指定できません。
 policy のない保存済み指示と配布済み旧版は完全一致条件を維持し、旧結果を書き換えません。
 Reviewer 自身の変更禁止、実差分の scope、正式承認、工程予算、全検証と独立レビューは維持します。
-管理スキルは1.3.14です。インストール済みスキルは許可なく更新しません。新しい保存フィールドを使った workspace を旧 binary で操作せず、
+管理スキルは1.3.15です。インストール済みスキルは許可なく更新しません。新しい保存フィールドを使った workspace を旧 binary で操作せず、
 戻す場合は更新前の保全一式を別環境で使用してください。
 RC7 の `workflow repair-status` は、停止・hold・成果物の不一致を `reconciliation-required`
 として返します。未回答の人間の選択だけを `human-decision-required` と区別します。
@@ -789,7 +790,7 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | `workflow run`, `workflow step` | `--id FLOW_ID`・`--coder-prompt-file PATH`・`--reviewer-prompt-file PATH` で Flow と role prompt を選ぶ。file の代わりに `--builtin-prompts` を使うと、同梱 snapshot prompt、厳密な結果 identity、compact context、Controller validation submission を選ぶ。snapshot Flow を要求し、managed commit・stage は拒否する。この mode だけは tool 未指定時に Coder `view,create,edit,apply_patch`、Reviewer `view` を既定とし、明示空 list では file tool を追加しない。通常の native skill tool は別に追加する。任意の `--cli PATH`・`--base-directory PATH`・`--max-ai-credits N`・`--coder-tools LIST`・`--reviewer-tools LIST` で runtime と allowlist を選ぶ。`--managed-commit` は binding 済み Coder commit tool、`--managed-stage` は追加の scope 内 stage を有効にし、後者は前者を要求する。`--scanner PATH` は managed commit だけで有効。`--strict-result-identities`・`--compact-context`・`--controller-validation-submission` は各結果・context 検証 mode を変える。credit 上限は session 別で、Flow 全体ではない。 |
 | `runtime auth`, `start`, `send`, `resume`, `events`, `commit` | `--dispatch ID`・`--system-prompt-file PATH` が必須。`--cli PATH`・`--base-directory PATH`・任意の `--max-ai-credits N` で runtime を選び、非ゼロ credit 上限は30以上を要求する。`--tools LIST` は SDK allowlist。send は `--prompt-file PATH`、commit は `--message-file PATH` が必須。`--scanner PATH` は `runtime commit` または `--managed-commit` と併用する場合に使い、既定値は `betterleaks`。ほかの操作で明示すると拒否される。`--review-source-worktree PATH` は独立 Reviewer の start だけで使う。`--managed-commit` は binding 済み Coder commit tool、`--managed-stage` は scope 内 stage を追加する。開始時に使った `--strict-result-identities`・`--compact-context`・`--controller-validation-submission` は実行接続時にも指定する。`--timeout DURATION` は既定10分で、turn・event stream の待機を制限する。 |
 | `runtime stop` | `--dispatch ID` が必須。任意の `--cli PATH`・`--base-directory PATH`・正の `--timeout DURATION` だけを受け付け、timeout は既定10分。旧実行契約も含め、保存 session binding を取消だけに使う。prompt・tool・scanner・実行 mode の option は不要で、受け付けない。 |
-| `runtime quota` | `--dispatch ID` が必須。`--cli PATH`・`--base-directory PATH`・正の `--timeout DURATION`（既定5秒・最大5秒）を受け付ける。保存済みの Copilot `account` 契約のみ。prompt・credit・tool・mode override は不要で、受け付けない。quota JSON は一時点の観測で、実行許可ではない。 |
+| `runtime quota` | `--dispatch ID` または `--account ACCOUNT --approve-account-read` の一方が必須。前者は保存済み Copilot `account` Dispatch、後者は既存許可のある外側のログイン済みアカウントを workspace なしで照会する。`--cli PATH`・`--base-directory PATH`・正の `--timeout DURATION`（既定5秒・最大5秒）を受け付ける。prompt・credit・tool・mode override は不要で、受け付けない。quota JSON は一時点の観測で、実行許可ではない。 |
 | `acp` | `--coder-system-prompt-file PATH` が必須。Copilot は30以上の `--max-ai-credits N` も要求し、OpenCode では省略する。`--reviewer-system-prompt-file PATH` は任意。`--cli PATH`・`--base-directory PATH` は Copilot 用、`--tools LIST` は role の allowlist。正の `--timeout DURATION` は既定10分。`--compact-context`・`--controller-validation-submission`・`--managed-commit`・`--managed-stage`・`--scanner PATH` は `workflow run` と同じ意味・依存で、`--scanner` は `--managed-commit` を要求する。ACP は承認済み Dispatch を実行し、発行・承認はしない。 |
 | `records proposal`, `records finding` | `--file JSON` で正確な公開 request または失敗分析を渡す。 |
 | `records approve` | `--file JSON` で公開 request、`--scanner PATH` で local 秘密検査を選ぶ。 |

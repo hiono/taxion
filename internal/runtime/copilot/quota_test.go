@@ -51,12 +51,16 @@ func TestAccountQuotaUsesOnlyAuthAndReadRPC(t *testing.T) {
 		{"missing", "", "unavailable"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			testAccountQuotaReadRPC(t, test.timestamp, test.state)
+			for _, operator := range []bool{false, true} {
+				t.Run(fmt.Sprintf("operator-%t", operator), func(t *testing.T) {
+					testAccountQuotaReadRPC(t, test.timestamp, test.state, operator)
+				})
+			}
 		})
 	}
 }
 
-func testAccountQuotaReadRPC(t *testing.T, timestamp, expectedState string) {
+func testAccountQuotaReadRPC(t *testing.T, timestamp, expectedState string, operator bool) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -136,7 +140,20 @@ func testAccountQuotaReadRPC(t *testing.T, timestamp, expectedState string) {
 	hash := adapter.ConfigHash()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	result, err := adapter.ReadAccountQuota(ctx, "fixture")
+	var result runtime.QuotaSnapshot
+	if operator {
+		if err = adapter.client.Start(ctx); err != nil {
+			t.Fatal(err)
+		}
+		adapter.started = true
+		result, err = readSelectedAccountQuota(ctx, adapter.client, "fixture", runtime.QuotaSnapshot{
+			Provider: "copilot", Account: "fixture", Resource: "premium_interactions",
+			Scope: "outer operator account entitlement; cycle not established", Unit: "requests",
+			Source: "sdk.account.getQuota", State: "unavailable",
+		})
+	} else {
+		result, err = adapter.ReadAccountQuota(ctx, "fixture")
+	}
 	if err != nil || result.State != expectedState || *result.Entitlement != 50000 || *result.Used != 12300 ||
 		result.Remaining == nil || *result.Remaining != 37700 ||
 		*result.RemainingPercentage != 75.4 || result.ResetAt == nil || !result.ResetAt.Equal(time.Date(2099, 11, 1, 0, 0, 0, 0, time.UTC)) || result.ExpiresAt != nil ||

@@ -293,6 +293,17 @@ remaining-balance contract does not require re-entering the total quota. Version
 changes alone are not new consent; check actual required capabilities and saved
 session compatibility. Automated provider updates are not implemented here.
 
+For outer-operator budgeting, reason from whole-account remaining headroom,
+the approved spending ceiling and the next bounded work unit, including a stop reserve.
+Exact per-call/session attribution is not a prerequisite: a same-unit account usage
+delta can conservatively bound spending. Do not equate account balance with permission
+to spend it, convert billing units, or ask users to copy values already observable.
+Use existing approved observations first. If needed and already permitted, run
+runtime quota --account ACCOUNT --approve-account-read for the outer Copilot account.
+This logged-in read needs no Dispatch, Task, workspace or model session and verifies
+the named account. The flag expresses existing read permission, not new user consent.
+Do not create a Dispatch or change worker billing merely to inspect the operator quota.
+
 Determine balance requirements from the saved Task/Dispatch and Flow billing
 contract before asking the user for credits. provider / provider-stop does not
 automatically query account balances. An unknown balance alone does not block
@@ -310,6 +321,7 @@ Distinguish Copilot from OpenCode Free and Go; choose Go balance requirements pe
 Free routes do not require Go balance. Keep outer-operator and Dispatch usage separate.
 OpenCode account quota is unsupported: preserve required checks rather than silently
 switching modes. Under provider-stop do not run runtime quota or require a number.
+That restriction concerns the worker contract, not an independently approved outer read.
 config check --billing displays resolved settings for NEW
 proposals, not the saved work's authorization or a live provider balance.
 Do not switch billing modes, expand limits or infer approval to query an account.
