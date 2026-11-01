@@ -44,6 +44,17 @@ func TestProvenanceCLIFailsBeforeStoreMutation(t *testing.T) {
 			t.Fatal("rejected operation changed store")
 		}
 	}
+	output, err := run("runtime", "quota", "--account", "fixture", "--approve-account-read", "--cli", filepath.Join(t.TempDir(), "missing-copilot"))
+	if err == nil || bytes.Contains(output, []byte("provenance-rejected")) ||
+		!bytes.Contains(output, []byte("operator quota client unavailable")) ||
+		!equalFiles(before, snapshotFiles(t, directory)) {
+		t.Fatal("outer account read required a store policy or changed workspace", string(output), err)
+	}
+	output, err = run("runtime", "quota", "--dispatch", "d", "--account", "fixture", "--approve-account-read")
+	if err == nil || !bytes.Contains(output, []byte("use --dispatch ID or --account")) ||
+		!equalFiles(before, snapshotFiles(t, directory)) {
+		t.Fatal("mixed operator/Dispatch arguments reached the store", string(output), err)
+	}
 	policyFile := filepath.Join(t.TempDir(), "policy.json")
 	product := provenance.Policy{SchemaVersion: 1, Mode: "product", StoreDirectory: directory}
 	write := func(value any) {
@@ -56,7 +67,7 @@ func TestProvenanceCLIFailsBeforeStoreMutation(t *testing.T) {
 		}
 	}
 	write(product)
-	output, err := run("provenance", "configure", "--file", policyFile)
+	output, err = run("provenance", "configure", "--file", policyFile)
 	if err == nil || !strings.Contains(string(output), "official release build") ||
 		!equalFiles(before, snapshotFiles(t, directory)) {
 		t.Fatal("local binary configured product store", string(output), err)

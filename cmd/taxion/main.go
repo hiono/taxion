@@ -85,7 +85,7 @@ Conversation, investigation and source attachment:
 
 Runtime sessions and ACP:
   runtime auth        Check the effective Copilot account against approved Dispatch configuration without creating a session
-  runtime quota       Observe account quota for a saved approved account-mode Dispatch; no model session or execution authorization
+  runtime quota       Observe approved Copilot quota (--dispatch ID or --account ACCOUNT --approve-account-read); no model session or execution authorization
   runtime start       Start the Copilot session bound to an active Dispatch and send its authorized instruction
   runtime send        Send a follow-up prompt to the Dispatch session (--prompt-file required)
   runtime resume      Resume the Dispatch session
@@ -217,7 +217,11 @@ func main() {
 	}
 	var err error
 	shortHelp := provenanceHelpOnly(args)
-	if !explicitStore && !shortHelp &&
+	operatorQuota := len(args) > 2 && args[0] == "runtime" && args[1] == "quota" &&
+		slices.ContainsFunc(args[2:], func(arg string) bool {
+			return arg == "--account" || arg == "-account" || strings.HasPrefix(arg, "--account=") || strings.HasPrefix(arg, "-account=")
+		})
+	if !explicitStore && !shortHelp && !operatorQuota &&
 		!slices.Contains([]string{"ready", "completion", "-h", "--help", "help", "--version", "gen-token", "git"}, args[0]) {
 		storePath, err = defaultWorkspaceStorePath()
 		if err != nil {
@@ -225,7 +229,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if !shortHelp && !slices.Contains([]string{"--version", "help", "-h", "--help", "provenance", "completion", "gen-token"}, args[0]) &&
+	if !shortHelp && !operatorQuota && !slices.Contains([]string{"--version", "help", "-h", "--help", "provenance", "completion", "gen-token"}, args[0]) &&
 		args[0] != "git" && !(args[0] == "doctor" && (len(args) == 1 || args[1] != "fix")) &&
 		!(args[0] == "ready" && len(args) == 1) {
 		if _, err := verifyOperationProvenance(); err != nil {

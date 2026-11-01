@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.14"
+const readySkillVersion = "1.3.15"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -161,6 +161,16 @@ Preserve completed work. New budgets, changed scope and permissions need explici
 user approval. Within that envelope, advance without repeated confirmation.
 Use available observations before asking for remaining usage; do not require a
 total quota for a remaining-balance contract.
+For outer-operator budgeting, reason from whole-account remaining headroom,
+the approved spending ceiling and the next bounded work unit, including a stop reserve.
+Exact per-call/session attribution is not a prerequisite: a same-unit account usage
+delta can conservatively bound spending. Do not equate account balance with permission
+to spend it, convert billing units, or ask users to copy values already observable.
+Use existing approved observations first. If needed and already permitted, run
+runtime quota --account ACCOUNT --approve-account-read for the outer Copilot account.
+This logged-in read needs no Dispatch, Task, workspace or model session and verifies
+the named account. The flag expresses existing read permission, not new user consent.
+Do not create a Dispatch or change worker billing merely to inspect the operator quota.
 Determine balance requirements from the saved Task/Dispatch and Flow billing
 contract. provider / provider-stop does not automatically query account balances.
 An unknown balance alone does not block execution or require manual credits entry
@@ -177,6 +187,7 @@ Distinguish Copilot from OpenCode Free and Go; choose Go balance requirements pe
 Free routes do not require Go balance. Keep outer-operator and Dispatch usage separate.
 OpenCode account quota is unsupported: preserve required checks rather than silently
 switching modes. Under provider-stop do not run runtime quota or require a number.
+That restriction concerns the worker contract, not an independently approved outer read.
 config check --billing displays resolved settings for NEW proposals, not a live
 provider balance or permission to change saved work. Do not switch billing modes,
 expand limits or infer approval to query an account.

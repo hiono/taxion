@@ -46,6 +46,10 @@ OpenCode Go の数値確認が必須で、利用可能な観測経路がない�
 
 ## Status
 
+v0.7.21-rc.9 では、外側の操作担当向けに `runtime quota --account ACCOUNT --approve-account-read` を追加する。既存の選択アカウント SDK 読取りを共有し、Task や Dispatch の作成、worker の課金方式変更を要求しない。`ready` と管理スキル1.3.15は、全体残量・承認済み追加上限・次の作業単位・停止余裕から継続を判断する。厳密な session 別帰属や専用会計エンジンを前提にしない。同じ単位のアカウント使用量増分を保守的な上限として使い、取得済みの値を利用者へ再入力させない。外側と worker の予算の区別、明示上限と取得不能時の停止は維持する。
+
+候補 CLI のログイン済みアカウント読取りを、存在しない store を明示して実施し、workspace 作成なしで native quota と `executionAuthorized:false` が返ることを確認した。これは非推論 API の実接続確認であり、モデル実行や OpenCode の契約受入れではない。全 Go test、vet、build と対象経路の race test、独立した code／公開文レビューを実施した。配布の完了は公開 RC の workflow とダウンロードした実物の `ready`・help・スキル整合・残量読取りで確認し、結果を #234 に残す。
+
 Accepted. 2026-11-01 の利用者判断で runtime/provider 別の扱いと OpenCode Go の Task 別指定を採択した。今回の変更は文書と追跡の改善であり、runtime 動作の変更や新しいモデル実行を含まない。既存の課金判定・Copilot quota adapter を再利用し、案内・操作経路・バックエンド別受入れの残る改善は [Issue #234](https://github.com/hiono/taxion/issues/234) で追跡する。Fusion の実装は #216、OpenCode 診断と実証は #231、呼出し追跡は #227、品質付き費用評価は #90 を参照する。
 
 PR #235 後の開発版では、保存済み `account` Dispatch 向けの `runtime quota --dispatch ID` を追加した。既存の Copilot SDK と Controller 検査を再利用し、モデルを呼ばずに観測する。`ready`・help・管理スキル1.3.14には Copilot／OpenCode Free／Go、Task 別の数値必須条件、外側の操作担当の利用枠との分離を反映する。これは OpenCode account quota や Free／Go 実契約での停止動作を実装・実証したものではなく、バックエンド別受入れは #234 に残す。

@@ -3,11 +3,14 @@ package copilot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 
+	sdk "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/rpc"
 	executionconfig "github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/runtime"
@@ -35,7 +38,45 @@ func (a *Adapter) ReadAccountQuota(ctx context.Context, expectedAccount string) 
 		result.Reason = "quota client unavailable; provider details withheld"
 		return result, nil
 	}
-	status, err := a.client.GetAuthStatus(ctx)
+	return readSelectedAccountQuota(ctx, a.client, expectedAccount, result)
+}
+
+// ReadLoggedInAccountQuota observes the outer operator's account, not a Dispatch.
+// The caller must have permission to read that account; no execution is authorized.
+func ReadLoggedInAccountQuota(ctx context.Context, account, cli, baseDirectory string) (runtime.QuotaSnapshot, error) {
+	result := runtime.QuotaSnapshot{
+		Provider: "copilot", Account: account, Resource: "premium_interactions",
+		Scope: "outer operator account entitlement; cycle not established", Unit: "requests",
+		Source: "sdk.account.getQuota", State: "unavailable", ObservedAt: time.Now().UTC(),
+	}
+	if strings.TrimSpace(account) == "" || strings.TrimSpace(account) != account {
+		return result, fmt.Errorf("taxion: explicit operator account is required")
+	}
+	if cli == "" {
+		cli = "copilot"
+	}
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return result, err
+	}
+	options := &sdk.ClientOptions{
+		Connection:       sdk.StdioConnection{Path: cli, Args: []string{"--disable-builtin-mcps"}},
+		WorkingDirectory: workingDirectory, BaseDirectory: baseDirectory,
+		LogLevel: "error", Mode: sdk.ModeCopilotCli,
+	}
+	if err := configureCredential(options, "copilot:logged-in"); err != nil {
+		return result, err
+	}
+	client := sdk.NewClient(options)
+	if err := client.Start(ctx); err != nil {
+		return result, fmt.Errorf("taxion: operator quota client unavailable; provider details withheld")
+	}
+	result, readErr := readSelectedAccountQuota(ctx, client, account, result)
+	return result, errors.Join(readErr, client.Stop())
+}
+
+func readSelectedAccountQuota(ctx context.Context, client *sdk.Client, expectedAccount string, result runtime.QuotaSnapshot) (runtime.QuotaSnapshot, error) {
+	status, err := client.GetAuthStatus(ctx)
 	if err != nil {
 		result.Reason = "authentication status unavailable; provider details withheld"
 		return result, nil
@@ -43,12 +84,12 @@ func (a *Adapter) ReadAccountQuota(ctx context.Context, expectedAccount string) 
 	if err := checkAuthenticationStatus(status, expectedAccount); err != nil {
 		return result, err
 	}
-	users, err := a.client.RPC.Account.GetAllUsers(ctx)
+	users, err := client.RPC.Account.GetAllUsers(ctx)
 	if err != nil || users == nil {
 		result.Reason = "selected-account quota refresh credentials unavailable"
 		return result, nil
 	}
-	auth, err := a.client.RPC.Account.GetCurrentAuth(ctx)
+	auth, err := client.RPC.Account.GetCurrentAuth(ctx)
 	if err != nil || auth == nil {
 		result.Reason = "active quota authentication unavailable"
 		return result, nil
@@ -58,7 +99,7 @@ func (a *Adapter) ReadAccountQuota(ctx context.Context, expectedAccount string) 
 		result.Reason = err.Error()
 		return result, nil
 	}
-	quota, err := a.client.RPC.Account.GetQuota(ctx, request)
+	quota, err := client.RPC.Account.GetQuota(ctx, request)
 	result.ObservedAt = time.Now().UTC()
 	if err != nil || quota == nil {
 		result.Reason = "quota read failed or timed out; provider details withheld"
