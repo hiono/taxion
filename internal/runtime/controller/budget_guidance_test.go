@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
+	"github.com/hiono/taxion/internal/store"
 )
 
 type quotaRuntime struct {
@@ -48,6 +50,73 @@ func observedQuota() runtime.QuotaSnapshot {
 	return runtime.QuotaSnapshot{Provider: "copilot", Account: "ai-user", Resource: "premium_interactions",
 		Scope: "account", Unit: "requests", Source: "sdk.account.getQuota", State: "available",
 		ObservedAt: time.Now().UTC(), Entitlement: &entitlement, Used: &used, RemainingPercentage: &remaining}
+}
+
+func TestObserveAccountQuotaWithoutSessionOrWorkspaceMutation(t *testing.T) {
+	for _, name := range []string{"available", "unavailable", "stale", "exhausted", "provider", "unapproved", "dispatch-drift"} {
+		t.Run(name, func(t *testing.T) {
+			mode := "account"
+			if name == "provider" {
+				mode = "provider"
+			}
+			if name == "unapproved" {
+				mode = "flow"
+			}
+			db, id, base, _ := executionConfigurationFixture(t, budgetPolicy(t, mode))
+			worker := &quotaRuntime{configuredRuntime: base, quota: observedQuota()}
+			switch name {
+			case "unavailable":
+				worker.quota.State, worker.quota.Reason = "unavailable", "fixture read unavailable"
+			case "stale":
+				worker.quota.ObservedAt = time.Now().Add(-2 * time.Minute)
+			case "exhausted":
+				worker.quota.ExecutionDenied = true
+			case "dispatch-drift":
+				worker.onRead = func() {
+					if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+						return state.Graph.TransitionDispatch(id, core.DispatchAcknowledged, "controller", "acknowledged during quota read", true, false, nil)
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			before, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			control, err := New(db, worker)
+			if err != nil {
+				t.Fatal(err)
+			}
+			quota, err := control.ObserveAccountQuota(t.Context(), id)
+			if (err == nil) != (name == "available") {
+				t.Fatalf("unexpected observation result: quota=%+v err=%v", quota, err)
+			}
+			if name == "available" && (quota == nil || quota.Account != "ai-user" || quota.Unit != "requests" || quota.Source != "sdk.account.getQuota") {
+				t.Fatal("account-bound native observation lost", quota)
+			}
+			if name == "stale" && (quota == nil || quota.State != "stale") {
+				t.Fatal("stale quota reported as available", quota)
+			}
+			if name == "dispatch-drift" && quota != nil {
+				t.Fatal("observation returned after Dispatch changed")
+			}
+			expectedReads := 1
+			if name == "provider" || name == "unapproved" {
+				expectedReads = 0
+			}
+			if worker.reads != expectedReads || worker.starts != 0 || worker.resumes != 0 || len(worker.sends) != 0 || worker.stops != 0 {
+				t.Fatal("observation performed execution or an unauthorized quota read", worker)
+			}
+			if expectedReads > 0 && (worker.timeout <= 0 || worker.timeout > 5*time.Second) {
+				t.Fatal("quota read exceeded the bounded timeout", worker.timeout)
+			}
+			after, err := db.LoadWorkspace()
+			if err != nil || name != "dispatch-drift" && !reflect.DeepEqual(before, after) {
+				t.Fatal("read-only observation mutated saved work", err)
+			}
+		})
+	}
 }
 
 func TestGuidedAccountSendAndDurableReceipt(t *testing.T) {

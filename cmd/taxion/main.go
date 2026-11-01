@@ -85,6 +85,7 @@ Conversation, investigation and source attachment:
 
 Runtime sessions and ACP:
   runtime auth        Check the effective Copilot account against approved Dispatch configuration without creating a session
+  runtime quota       Observe account quota for a saved approved account-mode Dispatch; no model session or execution authorization
   runtime start       Start the Copilot session bound to an active Dispatch and send its authorized instruction
   runtime send        Send a follow-up prompt to the Dispatch session (--prompt-file required)
   runtime resume      Resume the Dispatch session
@@ -187,7 +188,11 @@ provider / provider-stop: no automatic account balance query; an unknown balance
 alone does not block execution or require manual credits entry under this mode.
 account: approved external balance checks are required; unavailable observations stop execution.
 Explicit positive usage limits and separately approved balance requirements still apply.
-Provider access checks are separate from numeric balance checks. No balance-only CLI is provided.
+Provider access checks are separate from numeric balance checks.
+runtime quota --dispatch ID reads approved Copilot account quota without a model session.
+It does not authorize execution or change billing modes; provider-stop needs no quota read.
+Distinguish Copilot from OpenCode Free and Go; choose Go balance requirements per Task.
+Free routes do not require Go balance. Keep outer-operator and Dispatch usage separate.
 config check --billing displays resolved settings for NEW proposals; it does not query a provider.
 For saved work, inspect its Task/Dispatch and Flow billing contract, not just current settings.
 Do not switch billing modes, expand limits or infer approval to query an account.
@@ -646,7 +651,10 @@ func resumeCmd(args []string) error {
 
 func runtimeCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion runtime {auth|start|send|resume|events|stop|commit} --dispatch ID [--system-prompt-file PATH; not used for stop]")
+		return fmt.Errorf("usage: taxion runtime {quota|auth|start|send|resume|events|stop|commit} --dispatch ID [--system-prompt-file PATH; not used for quota/stop]")
+	}
+	if args[0] == "quota" {
+		return runtimeQuotaCmd(args[1:], os.Stdout)
 	}
 	action := args[0]
 	switch action {

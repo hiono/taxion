@@ -64,7 +64,7 @@ func TestUsageGroupsCommandsWithoutChangingSyntax(t *testing.T) {
 		seen[line] = true
 		groups[group]++
 	}
-	if len(groups) != 12 || len(seen) != 114 || !strings.Contains(commands, "records cancel") ||
+	if len(groups) != 12 || len(seen) != 115 || !strings.Contains(commands, "records cancel") ||
 		!strings.Contains(commands, "workflow reconcile-stopped") || !strings.Contains(commands, "workflow validate-input") {
 		t.Fatalf("%d commands in categories: %v", len(seen), groups)
 	}
@@ -89,7 +89,11 @@ func TestOperationGuidanceDistinguishesProviderStopFromBalanceRequirements(t *te
 				"unavailable observations stop execution",
 				"Explicit positive usage limits and separately approved balance requirements still apply",
 				"Provider access checks are separate from numeric balance checks",
-				"No balance-only CLI is provided",
+				"runtime quota --dispatch ID", "without a model session",
+				"Distinguish Copilot from OpenCode Free and Go",
+				"choose Go balance requirements per Task",
+				"Free routes do not require Go balance",
+				"Keep outer-operator and Dispatch usage separate",
 				"config check --billing", "NEW proposals",
 				"Do not switch billing modes",
 			} {

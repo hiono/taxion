@@ -36,6 +36,72 @@ type budgetObservation struct {
 	BillingVerification  string                 `json:"billingVerification,omitempty"`
 }
 
+// ObserveAccountQuota does not start a session, mutate approvals or authorize execution.
+func (c *Controller) ObserveAccountQuota(ctx context.Context, dispatchID string) (*runtime.QuotaSnapshot, error) {
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return nil, err
+	}
+	if err := state.Graph.Validate(); err != nil {
+		return nil, err
+	}
+	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+	if !state.HasGraph || !ok || dispatch.Configuration == nil {
+		return nil, fmt.Errorf("taxion: quota observation requires a saved Dispatch configuration")
+	}
+	if dispatch.Recipient != c.runtime.Role() || !sameWorktree(dispatch.Instruction.Worktree, c.runtime.Worktree()) {
+		return nil, fmt.Errorf("taxion: quota observation runtime differs from the Dispatch role or worktree")
+	}
+	policy := dispatch.Instruction.BudgetGuidance
+	if policy == nil || policy.Mode != "account" || !policy.AccountReadApproved {
+		return nil, fmt.Errorf("taxion: quota observation requires approved account guidance; provider-stop does not require numeric balance")
+	}
+	if _, err := c.checkExecutionConfiguration(state.Graph, dispatchID); err != nil {
+		return nil, err
+	}
+	observation, readErr := c.prepareBudgetGuidance(ctx, dispatch, "")
+	after, err := c.store.LoadWorkspace()
+	if err != nil {
+		return nil, err
+	}
+	current, _ := after.Graph.GraphDispatch(dispatchID)
+	task, _ := state.Graph.GraphTask(dispatch.TaskID)
+	currentTask, _ := after.Graph.GraphTask(dispatch.TaskID)
+	if !reflect.DeepEqual(dispatch, current) || !reflect.DeepEqual(task, currentTask) {
+		return nil, fmt.Errorf("taxion: quota observation approval changed during the read; result withheld")
+	}
+	if observation != nil && observation.FlowID != "" {
+		beforeFlow, _ := state.Graph.ReviewFlow(observation.FlowID)
+		afterFlow, ok := after.Graph.ReviewFlow(observation.FlowID)
+		if !ok || !reflect.DeepEqual(beforeFlow, afterFlow) || !time.Now().Before(afterFlow.Deadline) {
+			return nil, fmt.Errorf("taxion: quota observation Flow changed or expired during the read; result withheld")
+		}
+	}
+	if _, err := c.checkExecutionConfiguration(after.Graph, dispatchID); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if observation == nil || observation.Account == nil {
+		if readErr != nil {
+			return nil, readErr
+		}
+		return nil, fmt.Errorf("taxion: account quota observation is missing")
+	}
+	refreshQuotaState(observation, time.Now().UTC())
+	if readErr != nil {
+		return observation.Account, fmt.Errorf("taxion: account quota observation failed; provider details withheld")
+	}
+	if observation.Account.State != "available" {
+		return observation.Account, fmt.Errorf("taxion: account quota is unavailable, unsupported or stale")
+	}
+	if reason := quotaExecutionStop(observation.Account); reason != "" {
+		return observation.Account, fmt.Errorf("taxion: %s", reason)
+	}
+	return observation.Account, nil
+}
+
 func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.GraphDispatch, override string) (*budgetObservation, error) {
 	policy := dispatch.Instruction.BudgetGuidance
 	if policy == nil {

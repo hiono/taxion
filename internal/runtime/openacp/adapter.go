@@ -136,7 +136,7 @@ func New(config Config) (*Adapter, error) {
 		return nil, err
 	}
 	if config.BudgetGuidance != nil && config.BudgetGuidance.Mode == "account" {
-		return nil, fmt.Errorf("openacp: account quota guidance is unsupported; approve flow or off guidance")
+		return nil, fmt.Errorf("openacp: account quota guidance is unsupported; preserve required balance checks or separately approve eligible provider-stop, flow or off guidance; no automatic billing-mode change")
 	}
 	if config.ToolPolicy != nil {
 		if err := config.ToolPolicy.Check(); err != nil {

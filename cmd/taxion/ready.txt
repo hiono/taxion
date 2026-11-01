@@ -300,8 +300,17 @@ execution or require manual credits entry under this mode. Do not invent a
 balance-check requirement. account requires approved external balance checks;
 unavailable observations stop execution. Explicit positive usage limits and
 separately approved balance requirements still apply in every mode.
-Provider access checks are separate from numeric balance checks. No balance-only
-CLI is provided. config check --billing displays resolved settings for NEW
+Provider access checks are separate from numeric balance checks.
+runtime quota --dispatch ID reads approved Copilot account quota without a model session.
+It requires a saved bound active account-mode Dispatch and matching current settings.
+No prompt file is needed; timeout is at most 5s, with no retry. JSON includes
+executionAuthorized:false. Unavailable/stale/exhausted quota returns an error;
+this observation neither changes state nor releases a stopped Flow.
+Distinguish Copilot from OpenCode Free and Go; choose Go balance requirements per Task.
+Free routes do not require Go balance. Keep outer-operator and Dispatch usage separate.
+OpenCode account quota is unsupported: preserve required checks rather than silently
+switching modes. Under provider-stop do not run runtime quota or require a number.
+config check --billing displays resolved settings for NEW
 proposals, not the saved work's authorization or a live provider balance.
 Do not switch billing modes, expand limits or infer approval to query an account.
 
