@@ -71,6 +71,13 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 			(task.Owner != "CODER" && !(request.ArtifactSource != "" && task.Owner == "USER")) || task.Reviewer != "REVIEWER" {
 			return fmt.Errorf("taxion: review flow requires an authorized READY executable Task with independent REVIEWER")
 		}
+		input, err := core.ReviewInputFromDecisions(task.Decisions)
+		if err != nil {
+			return err
+		}
+		if input != nil && (request.StageBudget == nil || request.ArtifactSource != input.Source) {
+			return fmt.Errorf("taxion: supplied review input requires a planned same-source artifact review, never a Coder Flow")
+		}
 		if err := checkFlowApproval(state.Graph, task, request.Configuration); err != nil {
 			return err
 		}
@@ -468,6 +475,13 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 					}
 				}
 				flow.Status, flow.Reason = "COMPLETED", "independent review and acceptance verified for "+task.TargetSHA
+				input, err := core.ReviewInputFromDecisions(flow.Contract.Decisions)
+				if err != nil {
+					return err
+				}
+				if input != nil && input.Purpose == "diagnostic" {
+					flow.Reason = "diagnostic review acceptance completed; product quality is not approved"
+				}
 			case "REQUEST_CHANGES":
 				if flow.Repairs >= flow.MaxRepairs {
 					return stopWithCode("repair ceiling reached; present saved findings and acceptance decisions to the user", "BUDGET_STOP")

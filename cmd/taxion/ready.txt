@@ -277,6 +277,48 @@ extended by this operation. New proposal and stage-plan hashes need valid approv
 
 ## Execute an approved Flow
 
+Budget continuity applies to the whole goal, including outer orchestration and
+predecessors: estimate unfinished work, repair, independent review and preservation
+before the stop reserve is threatened. Ask once for the bounded shortfall while
+headroom remains, not after exhausting the cap. A sample +1000 is not a fixed grant.
+Use workflow budget --id FLOW_ID --file ESTIMATE.json for read-only, explicitly
+scoped top-up advice and priorFlows; see --help. No automatic quota read, unit
+conversion or new authority follows. Preserve worker output, evidence, decisions,
+approvals, validation/review bases and next unfinished action before stopping.
+After approval continue those results; invalidate only materially changed bases.
+New Flow/session identities reset neither cumulative spending contracts nor existing
+deadlines. Do not repeat uncertain sends, unchanged checks or background narratives.
+Do not claim recovery of unsaved model reasoning.
+
+Review does not require Coder success. conversation intake accepts reviewInput
+(kind taxion.review-input.v1; purpose quality or diagnostic; source; questions;
+knownFailures; validationSummary; readable evidence) for human code/docs/tests,
+partial/failed output and repeated Coder failures. Bind the same artifactSource
+and zero Coder/repairs in the planned Flow; inspect the actual Reviewer context.
+For diagnosis, validate evidence integrity using explicitly approved commands,
+record failed product tests and unperformed checks honestly, and define acceptance
+for the diagnostic questions. Completed diagnosis is not product quality approval.
+No automatic repair, new model session or private-management-directory access follows.
+
+For stopped validated artifact Reviewer recovery requiring a new contract and plan,
+prefer workflow recover-review --file JSON --preview. One approval of the outer
+hash covers reconciliation, identical-candidate successor and Reviewer-only plan.
+The request includes the explicit quiescence/unknown-delivery decision, taskId,
+flowId, fresh reviewRoot, absolute deadline, timeoutSeconds, maxNanoAiu and stageBudget.
+Controller derives subordinate hashes and commits all changes atomically; it does
+not start a model. Do not split this decision into per-operation approval questions.
+Do not invoke recovery again for an already-approved Flow: continue its normal
+preflight, review and result validation within saved limits. New material authority
+still requires consent. Neither the absolute deadline nor budget is reset silently.
+An executed artifact Reviewer with a confirmed runtime stop and CANCELLED Dispatch
+uses the same recover-review input with continueStoppedExecution:true. This requires
+the exact saved stop receipt and original absolute deadline (or an earlier one).
+It preserves the terminal Flow/session/usage/transcript/worktree, reuses the PASSED
+input receipt, and includes saved readable analysis in a Reviewer-only successor.
+It does not restart Coder or input validation, resume the cancelled session, invent
+unsaved reasoning or reset cumulative usage. Unresolved runner/feedback and live or
+unknown execution must be reconciled through existing supported controls first.
+
 Use the same explicit --store ledger path used for the saved work on every command.
 An absent ledger.json is not a missing workspace if its parent's initialized
 workspace.db exists. Do not silently switch to the worktree's default workspace.

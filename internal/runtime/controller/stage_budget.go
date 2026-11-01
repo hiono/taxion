@@ -41,6 +41,10 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 	if err := request.StageBudget.Validate(); err != nil {
 		return StagePlanPreview{}, err
 	}
+	input, err := core.ReviewInputFromDecisions(task.Decisions)
+	if err != nil {
+		return StagePlanPreview{}, err
+	}
 	for _, previous := range graph.ReviewFlows {
 		if task.Supersedes == previous.TaskID && task.CreatedFrom == "flow:"+previous.ID &&
 			previous.Status == "STOPPED" &&
@@ -55,6 +59,10 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 		request.TimeoutSeconds <= 0 || request.TimeoutSeconds > int64(365*24*time.Hour/time.Second) ||
 		math.IsNaN(request.MaxNanoAIU) || math.IsInf(request.MaxNanoAIU, 0) || request.MaxNanoAIU < 0 {
 		return StagePlanPreview{}, fmt.Errorf("taxion: stage plan requires finite limits, at most 1000 repairs and a deadline within one year")
+	}
+	if input != nil && (request.ArtifactSource != input.Source || *request.MaxRepairs != 0 ||
+		request.StageBudget.CoderSessionCredits != 0) {
+		return StagePlanPreview{}, fmt.Errorf("taxion: supplied review input requires its exact artifactSource and zero Coder/repair allocation")
 	}
 	policy := *request.StageBudget
 	var artifact *core.ArtifactTarget
@@ -376,11 +384,13 @@ func (c *Controller) stageSupplement(dispatch core.GraphDispatch) (string, error
 }
 
 type FlowBudgetObservation struct {
-	StateChanged bool               `json:"stateChanged"`
-	Budget       TaskBudgetReport   `json:"budget"`
-	Stages       []StageObservation `json:"stages"`
-	StopReason   string             `json:"stopReason,omitempty"`
-	Continuation ContinuationAdvice `json:"continuation"`
+	StateChanged bool                      `json:"stateChanged"`
+	Budget       TaskBudgetReport          `json:"budget"`
+	Stages       []StageObservation        `json:"stages"`
+	StopReason   string                    `json:"stopReason,omitempty"`
+	Continuation ContinuationAdvice        `json:"continuation"`
+	TopUp        *BudgetContinuationAdvice `json:"topUp,omitempty"`
+	PriorFlows   []TaskBudgetReport        `json:"priorFlows,omitempty"`
 }
 
 type ContinuationAdvice struct {
@@ -436,6 +446,22 @@ func ObserveFlowBudget(state store.Workspace, id string) (FlowBudgetObservation,
 		report.Continuation.SavedTree = flow.Artifact.Target.TreeSHA
 		report.Continuation.IdentityStatus = "saved-input; live identity and independent quality not established by this observation"
 		report.Continuation.NextAction = "Inspect the saved input validation receipt. Pending input can use the authorized validate-input/run boundary. Never replay failed or unknown command execution; preserve input and receipts for a separately approved successor. This report grants no execution or publication authority."
+	}
+	if flow.Status == "RUNNING" {
+		report.Continuation.NextAction = "Continue the saved approved Flow through its next supported preflight, execution or result-acceptance boundary; do not restart intake, recompute an unchanged plan or ask again for already-covered authority. Preserve the existing deadline, cumulative spending contract and uncertain delivery."
+		if flow.HandoffHeld() {
+			report.Continuation.NextAction = "Inspect the saved handoff and existing consent; resolve only the missing material decision through supported controls. Preserve the issued work, approval, validation and deadline; do not restart."
+		}
+	}
+	seen := map[string]bool{flow.ID: true}
+	for current := flow; strings.HasPrefix(current.Contract.CreatedFrom, "flow:"); {
+		parent, ok := state.Graph.ReviewFlow(strings.TrimPrefix(current.Contract.CreatedFrom, "flow:"))
+		if !ok || parent.TaskID != current.Contract.Supersedes || seen[parent.ID] {
+			break
+		}
+		seen[parent.ID] = true
+		report.PriorFlows = append(report.PriorFlows, taskBudgetReport(state.Graph, parent, time.Now().UTC()))
+		current = parent
 	}
 	if flow.Status == "COMPLETED" {
 		report.Continuation.RemainingAcceptance = []string{}

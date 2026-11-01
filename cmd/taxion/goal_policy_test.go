@@ -87,6 +87,12 @@ func TestGoalPolicyCoversEveryRoleAndRuntimePrompt(t *testing.T) {
 			"not obtainable by safe approved observation",
 			"Do not treat a hold, warning or draft as a completed handoff",
 			"Do not waive unknown delivery, exhausted ceilings, identity or quality failures",
+			"Before the stop reserve is threatened",
+			"Request one bounded top-up",
+			"Resume those artifacts, not a fresh investigation",
+			"record extra approval as an explicit delta, never a reset",
+			"Review is not conditional on Coder success",
+			"Diagnostic acceptance concerns",
 		} {
 			if !strings.Contains(prompt, constraint) {
 				t.Errorf("prompt %d lacks %q", index, constraint)

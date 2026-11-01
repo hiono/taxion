@@ -15,6 +15,42 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+func TestWorkflowBudgetFileReachesExistingFlowLookupWithoutChangingWorkspace(t *testing.T) {
+	previous := storePath
+	storePath = filepath.Join(t.TempDir(), "ledger.json")
+	t.Cleanup(func() { storePath = previous })
+	db, err := store.Open(workspaceDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		state.HasGraph, state.Graph = true, core.TaskGraph{Version: 1}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(workspaceDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "estimate.json")
+	if err := os.WriteFile(file, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := workflowCommand(t.Context(), []string{"budget", "--id", "missing-flow", "--file", file}, &output); err == nil ||
+		!strings.Contains(err.Error(), "budget observation requires an existing Flow") {
+		t.Fatal("documented file option did not reach read-only Flow lookup", err)
+	}
+	after, err := os.ReadFile(workspaceDBPath())
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("budget observation changed the workspace", err)
+	}
+}
+
 func TestNewProposalBudgetGuidanceUsesConfigWithoutRequiringIdentity(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

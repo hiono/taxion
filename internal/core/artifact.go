@@ -61,6 +61,19 @@ func (f ReviewFlow) StoppedArtifactReviewer(d GraphDispatch) bool {
 		d.RuntimeConfigHash == "" && d.ExecutionStartSHA == "" && len(d.RuntimeUsage) == 0
 }
 
+// StoppedExecutedArtifactReviewer is terminal execution, not eligible for the
+// unstarted-dispatch reconciliation or an in-place session restart.
+func (f ReviewFlow) StoppedExecutedArtifactReviewer(d GraphDispatch) bool {
+	return f.Status == "STOPPED" && slices.Contains([]string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT"}, f.StopCode) &&
+		f.HandoffHeld() && f.RunnerID == "" && f.Artifact != nil && f.Artifact.Validation.Status == "PASSED" &&
+		len(f.DispatchIDs) == 1 && f.DispatchIDs[0] == d.ID && d.Recipient == "REVIEWER" &&
+		d.TaskID != f.TaskID && d.Status == DispatchCancelled && d.ExecutionStarted &&
+		d.RuntimeSessionID != "" && d.RuntimeConfigHash != "" && d.Result != nil &&
+		d.Result.Status == DispatchCancelled && d.Result.ReviewVerdict == "" &&
+		d.Result.OutputSHA == "" && d.Result.OutputTreeSHA == "" &&
+		slices.Contains(d.Result.Evidence, "runtime-stop:"+d.RuntimeSessionID)
+}
+
 func cloneArtifactReview(a *ArtifactReview) *ArtifactReview {
 	if a == nil {
 		return nil

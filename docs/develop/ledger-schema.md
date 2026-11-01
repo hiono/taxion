@@ -10,6 +10,18 @@
 
 ## キーの変更条件
 
+この文書の固定 wire は legacy Ledger の Task／Dispatch を対象とする。
+`v0.7.21-rc.11` の拡張はこの wire にキーを加えず、workspace の既存追記監査
+`Records.DispatchReconciliations` の任意の `kind` と、Task decision の内容を使う。
+`kind` 省略は従来の未開始取消、`executed-artifact-review-continuation-v1` は
+正式停止 receipt のある実行済み成果物 Reviewer の継続判断を表す。
+後者は旧 Flow／指示／session／結果／利用量を変更せず、
+元指示と一致する Controller 停止 receipt を検査する。未知の種別は拒否する。
+`reviewInput` の内容は `kind:taxion.review-input.v1` の decision として保持する。
+根拠と制約は [ADR-0058](adr/0058-recover-unstarted-artifact-review.md)、
+実行契約は [Runtime 契約](runtime-contract.md#保存結果と-checkpoint-の復旧)を参照する。
+新しい監査を旧 binary で操作せず、戻す場合は適用前の整合 backup を別配置で使う。
+
 キーを追加・削除・改名する場合は、次の全項目が必要。
 
 1. この文書を置換・修正する ADR。

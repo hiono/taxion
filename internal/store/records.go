@@ -415,7 +415,7 @@ func (r Records) VerifyFlowAudits(graph core.TaskGraph) error {
 				}
 				reconciled := false
 				for _, saved := range r.DispatchReconciliations {
-					if saved.PreviousFlow.ID == source && saved.PreviousFlow.StoppedArtifactReviewer(saved.PreviousDispatch) {
+					if saved.PreviousFlow.ID == source && saved.ArtifactReviewer() {
 						for _, decision := range flow.Contract.Decisions {
 							reconciled = reconciled || decision.ID == "reconciled-input:"+flow.TaskID && decision.Text == saved.PreviewHash
 						}

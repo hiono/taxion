@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.16"
+const readySkillVersion = "1.3.17"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -161,7 +161,55 @@ in the new plan/start request. This reuses the exact passed input-stage receipt,
 not the old terminal Flow. Use a fresh reviewRoot and never create its review
 worktree before the Controller. Reviewer result-acceptance validation still runs;
 input-stage reuse does not waive quality checks, plan approval or budget limits.
+For a stopped validated artifact Reviewer needing reconciliation AND a new
+contract/plan, prefer workflow recover-review --file JSON --preview. This presents
+one bounded decision covering quiescence, unknown delivery, exact candidate,
+unchanged configuration, new identities, fresh reviewRoot, zero Coder/repairs,
+absolute deadline and stage/budget ceilings. Approve only the outer hash once;
+apply atomically derives subordinate reconciliation/proposal/plan hashes, records
+their combined authority and creates the review-only Flow without a model session.
+Do not ask humans to approve each generated hash. Do not treat old consent as
+approval of a new envelope. Existing approved plans proceed through preflight,
+review and result validation without returning to this recovery operation.
+State/input drift rejects the whole apply with no partial cancellation or contract.
+The absolute deadline never moves later on repeated preview or delayed apply.
+If the artifact Reviewer executed and its Dispatch is now CANCELLED by confirmed
+runtime stop, use recover-review with continueStoppedExecution:true, not unstarted
+reconcile-stopped or ordinary resume. Controller requires the exact stop receipt,
+same candidate/worktree, no active owner/feedback and no extension of the original
+deadline. It preserves the terminal session, transcript and usage, derives a
+Reviewer-only successor and carries saved readable output into the real instruction.
+This is not a terminal-session resume or recovery of unsaved thinking. Reuse the
+PASSED input receipt; never replay input validation or Coder work. Preserve unknown
+usage and the cumulative spending contract; use existing additional approval only
+where it actually covers this bounded follow-through. Do not request approval
+separately for the derived reconciliation, contract or plan hashes.
 Preserve completed work. New budgets, changed scope and permissions need explicit
+user approval. Before stop reserve is threatened, estimate unfinished work, repair,
+independent review and preservation in the observed unit. Request one bounded
+top-up for the shortfall before exhaustion; +1000 is an example, not a fixed grant.
+workflow budget --id FLOW_ID --file ESTIMATE.json returns read-only topUp advice
+alongside saved continuation and priorFlows. See --help for exact fields. It grants
+no execution authority; observations and estimates are explicitly scoped, not
+currency conversions or automatic live quota queries.
+Preserve uncommitted worker output, evidence, decisions, approvals, validation and
+review results, addressed findings and the next unfinished action before stopping.
+After actual approval, continue those results without repeating unchanged work.
+Recheck only affected bases on drift. New sessions/Flows do not reset cumulative
+usage or existing deadlines. No repeated sends with unknown delivery. Never claim
+to recover unsaved model reasoning or spend repair/review reserve on explanation.
+For supplied code/docs/tests or diagnostic review of failed/partial work, intake
+accepts reviewInput with kind taxion.review-input.v1, purpose quality or diagnostic,
+source, questions, knownFailures, validationSummary and readable evidence. Use the
+same artifactSource, zero Coder/repairs and a planned Reviewer-only Flow. Include
+real failure excerpts and unknown/unperformed checks; do not pass only hashes or
+grant access to private control directories. Required input validation checks
+evidence integrity for diagnosis, not pretend that failed product tests pass.
+Use diagnostic acceptance for questions and analysis, not product correctness.
+Diagnostic findings belong in workReport; unmet diagnostic acceptance still blocks.
+Completed diagnostic evaluation is NOT_ASSESSED_DIAGNOSTIC, never product approval.
+Controller still validates inputs, result acceptance, identity, budget and deadline.
+Covered internal follow-through needs no repeated
 user approval. Within that envelope, advance without repeated confirmation.
 Use available observations before asking for remaining usage; do not require a
 total quota for a remaining-balance contract.

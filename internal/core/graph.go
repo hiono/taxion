@@ -983,6 +983,10 @@ func sameStringSet(left, right []string) bool {
 
 func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 	i := d.Instruction
+	input, err := ReviewInputFromDecisions(i.Decisions)
+	if err != nil {
+		return "", err
+	}
 	if err := CheckSpecificationUse(i.Specifications, "runtime"); err != nil {
 		return "", err
 	}
@@ -1000,6 +1004,9 @@ func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 		{"PARENT TASK ID", i.ParentTaskID},
 	}
 	var output strings.Builder
+	if input != nil {
+		fmt.Fprintln(&output, input.Guidance())
+	}
 	for _, line := range lines {
 		value, err := json.Marshal(line.value)
 		if err != nil {
@@ -1573,6 +1580,9 @@ func (g TaskGraph) Validate() error {
 		}
 		if !slices.Contains([]string{"INVESTIGATION", "DESIGN", "IMPLEMENTATION", "VERIFICATION", "REVIEW", "EVIDENCE_COLLECTION"}, t.Type) || !validStatus(t.Status) {
 			return graphError("invalid type or status for %s", t.ID)
+		}
+		if _, err := ReviewInputFromDecisions(t.Decisions); err != nil {
+			return err
 		}
 		if t.ModelFree && (t.Type != "VERIFICATION" || t.Owner != "USER" || len(t.ValidationCommands) == 0) {
 			return graphError("model-free Tasks require USER ownership, VERIFICATION type and explicit validation commands")
