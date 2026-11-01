@@ -377,12 +377,16 @@ Controller への検証提出を選ぶ。従来の prompt 指定・空 allowlist
 残予算を指示へ付加する設計は [ADR-0029](adr/0029-separate-budget-guidance-from-provider-quota.md)
 に採択し、Controller の送信補足と Copilot adapter の quota 読取りを実装した。
 Controller は保存済み Flow usage と adapter の非推論 read-only 観測を分離し、
-`off` / `flow` / `account` の解決結果に応じて既存の `Send` に補足する。
+`provider` / `off` / `flow` / `account` の解決結果に応じて既存の `Send` に補足する。
 動的観測は送信ごとの receipt に保存し、system prompt の変更や別の有料 turn を必要としない。
 単位・account・resource・対象期間・取得元・観測時刻と
 `available` / `unsupported` / `unavailable` / `stale` を保持する。
 quota の未知を成功やゼロに変えず、Copilot の実験的 API 型を core に漏らさない。
 stop-only 接続は quota 照会や新しい指示を発行しない。
+
+[ADR-0063](adr/0063-apply-runtime-specific-billing-contracts.md) は、共通の課金判定と provider 固有の観測を維持したまま、残量確認の必要性を runtime・利用枠・Task 契約ごとに区別する。Copilot の SDK quota 読取り能力を OpenCode の必須条件にせず、OpenCode Free に Go の残量を要求しない。Go の事前数値確認と provider 上限停止への委任は Task ごとに明示する。既存の `provider` 契約に新しい数値必須条件を加えたり、`account` の照会失敗を provider 停止へ自動変更したりしない。
+
+使用量、契約残量、利用資格・容量、Proxy 内予算は異なる観測である。提供元の account・resource・単位・期間が一致しない値を換算・合算しない。外側の操作担当の費用と Dispatch の費用も分ける。Task 別案内とバックエンド別受入れの未達は ADR の追跡先に残し、文書化だけで実装済みとしない。具体的な方式と現行の対応範囲は[課金ガイド](../userguide/billing.md#runtimeと利用枠ごとの選択)を正本とする。
 
 `taxion runtime start|send|resume|events|stop` は Copilot の CLI 実行経路とする。ACP server の `session/new` は CLI 発行の新 Dispatch ID だけを受け付け、Task・Dispatch は作らない。ACP・CLI は共通 Controller で session binding、tool 認可、event 保存、結果検証、safe stop を行う。新 ACP session は保存 Dispatch 契約への追加 context として prompt を一回送る。実行中 Dispatch への再接続は prompt を再送せず、既存 turn を観測する。Runtime 出力の差分は ACP session update として stream する。`taxion acp` は session 別 credit 上限、timeout、Coder system prompt を要求し、Reviewer Dispatch には Reviewer prompt も要求する。SDK の commit・stage tool は `--managed-commit`・`--managed-stage` の明示選択を保つ。ACP で再開できない保存 session は CLI runtime command で調査・照合する。
 

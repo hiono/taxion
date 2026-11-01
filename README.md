@@ -12,6 +12,8 @@ v0.5.0 は、不要になった停止済み試行を履歴を保って通常一�
 
 ## 使い始める
 
+Taxion は、既存 Coding Agent の使い分けと指示・成果の受け渡しを自動化し、手動コピーと不要なモデル消費を減らすためのツールです。安価な実行先であっても検証と独立レビューを省かず、再試行を含めて完了までの費用を評価します。Copilot と OpenCode の利用枠・残量確認は一律にせず、選択した提供元と Task の承認済み契約に従います。選択方法は[課金ガイド](docs/userguide/billing.md#runtimeと利用枠ごとの選択)に記載しています。
+
 製品運用向けの配布・導入手順は [正式バイナリと運用モード](docs/userguide/binary-provenance.md) を参照してください。GitHub backend の binary archive と承認済み provenance policy を使い、`go:` backend や source build は隔離した development mode に限定します。公開・platform 検証の完了前に候補を導入しません。
 
 [利用者ガイド](docs/userguide/user-guide.md)に、公開版・ソースからの導入、今の agent への `taxion ready` による操作手順の出力、設定・承認から結果確認までを記載しています。mise での導入・更新は、`mise install` → `mise use --pin` → `taxion --version` の順です。[導入・更新手順](docs/userguide/user-guide.md#導入方法)には、旧開発版が再選択される場合の注意も記載しています。

@@ -46,6 +46,8 @@ READY Task 再承認の判断は [ADR-0043](adr/0043-approval-gates-and-read-onl
 
 workspace 内の operation 直列化、承認済み preflight の一括実行、request checkpoint の再開は [Issue #133](https://github.com/hiono/taxion/issues/133) に対応する。現在の排他・保存・復旧契約は [Runtime 契約](runtime-contract.md#operation-の直列化と-request-checkpoint)、操作は[利用者ガイド](../userguide/user-guide.md#人のことばで依頼して計画を相談する)を参照する。
 
+既存 Coding Agent の使い分けによるモデル消費と手動受け渡しの削減、runtime/provider 別の残量確認、OpenCode Go の Task 別契約は [ADR-0063](adr/0063-apply-runtime-specific-billing-contracts.md) に記録する。[課金ガイド](../userguide/billing.md#runtimeと利用枠ごとの選択)を操作の正本とし、判断・案内の改善は [#234](https://github.com/hiono/taxion/issues/234)、Fusion は #216、OpenCode の診断・実証は #231 を参照する。文書の採択と実装・実運用受入れは区別する。
+
 ## ADR の状態と現在の参照先
 
 ADR-0001〜0043 はすべて `Accepted` の判断を記録する。採択は選択肢を決めたことを意味し、必要な実装がすべて済んだことは意味しない。後の改訂と実装時の補足を別に示し、元の判断と現在の動作を区別する。
