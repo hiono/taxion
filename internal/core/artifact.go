@@ -50,15 +50,15 @@ type ArtifactReview struct {
 	Validation             ArtifactValidation    `json:"validation"`
 }
 
-// StoppedArtifactReviewer identifies preparation failure, not unknown model work.
+// StoppedArtifactReviewer checks saved eligibility; Controller also verifies any
+// prepared worktree and requires execution-quiescence and unknown-delivery evidence.
 func (f ReviewFlow) StoppedArtifactReviewer(d GraphDispatch) bool {
 	return f.Status == "STOPPED" && f.StopCode == "SAFETY_STOP" && f.HandoffHeld() &&
 		f.RunnerID == "" && f.Artifact != nil && f.Artifact.Validation.Status == "PASSED" &&
 		len(f.DispatchIDs) == 1 && f.DispatchIDs[0] == d.ID &&
 		d.Recipient == "REVIEWER" && d.TaskID != f.TaskID && d.Status == DispatchIssued &&
 		!d.Acknowledged && !d.ExecutionStarted && d.RuntimeSessionID == "" && d.Result == nil &&
-		d.RuntimeConfigHash == "" && d.ExecutionStartSHA == "" && len(d.RuntimeUsage) == 0 &&
-		d.ReviewWorktreeSource == ""
+		d.RuntimeConfigHash == "" && d.ExecutionStartSHA == "" && len(d.RuntimeUsage) == 0
 }
 
 func cloneArtifactReview(a *ArtifactReview) *ArtifactReview {

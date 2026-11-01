@@ -16,6 +16,7 @@ Flow は終端停止し、モデル未起動の Reviewer 指示だけが残る�
 ## Decision
 
 `workflow reconcile-stopped` の対象に、最初の持込み成果物 Reviewer を追加する。
+以下は RC8 時点の条件であり、準備済み worktree への RC10 の拡張は後述する。
 保存状態が `STOPPED / SAFETY_STOP`、引継ぎ保留、runner なし、
 入力検証 `PASSED`、指示 `ISSUED` であることを要求する。
 応答・開始・session・結果・利用量・runtime receipt・管理済みレビュー worktree
@@ -44,6 +45,36 @@ Controller が承認済み判断と観測から入力を準備し、内部手続
 
 ## Compatibility and rollback
 
+### 準備済み worktree への拡張（v0.7.21-rc.10）
+
+追跡: Issue #238。
+
+`prepareReview` は管理済み worktree を作成してから `Start` へ進む。
+`session-starting` の記録後、repository identity query で失敗すると、
+worktree 作成済み・指示 `ISSUED`・session 未開始のまま停止する。
+RC9 までの worktree 不在条件では、この正常な起動順序から生じる停止を復旧できない。
+
+保存状態の適格性と、外部 worktree の検証を分離する。
+Controller は preview と適用の両方で元候補を照合し、準備済みの場合は
+候補との共通 Git repository、正確な場所での登録、detached baseline HEAD、
+baseline index、承認済み target tree のファイル、保持 snapshot ref を確認する。
+実 index とファイルは変更せず、既存の private index による照合を再利用する。
+追加ファイル・ignored ファイル・staged 変更・場所や内容の不一致は拒否し、
+自動修復や削除で通過させない。
+
+preview は `preservedReviewWorktree` を返す。取消監査の元 Dispatch は
+その場所と `ReviewWorktreeSource` を保持し、適用後も旧 worktree を残す。
+後続は従来どおり新しい `reviewRoot` で同一候補をレビューする。
+応答・開始・session・結果・利用量・runtime receipt、他の稼働実行の拒否、
+実行停止の証拠、配送不明の受容、正確な hash の承認は緩和しない。
+`session-starting` はモデル開始の証明ではなく、記録欠如は未配送・無課金の証明でもない。
+
+旧 worktree は取消後の成果物として保存するが、後続 Reviewer の入力とはしない。
+元候補と合格 receipt を引き継ぎ、入力検証の再実行と Coder 起動を追加しない。
+結果受理検証は維持する。期限切れ Flow は再開せず、
+新しい契約・工程計画・期限・予算に必要な承認を得る。
+新しい監査を旧版で操作せず、戻す場合は更新前の整合した backup を別配置で使う。
+
 新しい `validationSourceFlowId` と監査種別を持つ DB は旧版で操作しない。
 適用前の整合した backup を別配置で使う。既存の Coder 整合回復と、
 継承を指定しない入力検証の動作は維持する。汎用的な停止解除ではない。
@@ -58,3 +89,18 @@ Controller が承認済み判断と観測から入力を準備し、内部手続
 `mise run check` と、Controller・CLI・core・store の対象 race 試験に合格した。
 独立した正当性レビューと、公開 Issue・PR・配布文の読者視点レビューも承認済みである。
 実際の製品環境での適用は未実施であり、この記録を製品の品質合格とは扱わない。
+
+RC10 の回帰試験は `prepareReview` の成功後に repository identity 確認を失敗させる。
+runtime の `Start` が呼ばれず、旧 worktree と合格 receipt が保持されること、
+preview 後の変更も適用時に拒否すること、取消後に正式な後続契約を確認して
+Coder なし・入力検証再実行なしで独立レビューを完了できることを確認した。
+結果受理検証の実行回数も維持する。変更・追加・ignored・staged ファイル、
+branch の変更、元候補の不一致、場所の消失、登録の不一致を拒否する。
+
+`go vet ./...`、`go test ./...`、`go build ./...`、
+`go test -race ./internal/core ./internal/gitproof ./internal/store ./internal/runtime/controller ./cmd/taxion -run 'TestStopped|Test.*Artifact|Test.*Reconciliation|TestReadySkill' -count=1`
+が成功した。新しい経路は Controller の試験で実行され、
+Git 操作は一時 repository、runtime は試験用であり、実モデルを起動していない。
+既存の Web 試験12件、Python 試験25件、公開文の全114ファイル検査も成功した。
+準備済み worktree の独立した正当性レビューに blocking 指摘はなく、
+Issue・PR・配布文は正確な本文 hash に対する独立した読者視点レビューで承認された。

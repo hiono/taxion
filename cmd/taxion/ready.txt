@@ -262,6 +262,19 @@ both conversation intake and confirm. Confirm also needs replacesFlow, the exact
 cancelled feedback target and the new proposal hash. New execution still requires
 separate bundle, packet, plan and runtime gates. Do not retry the old Flow.
 
+For the first validated artifact Reviewer, the same operation also accepts a
+prepared managed review worktree after a pre-session failure. Controller verifies
+the unchanged candidate, registered separate worktree, shared repository, detached
+baseline HEAD, baseline index and exact target files, refusing extra or ignored files.
+The preview's preservedReviewWorktree remains untouched after cancellation.
+Do not delete or edit it to pass the gate. session-starting precedes authentication
+and runtime.Start; it is not proof of model execution or non-delivery.
+Reuse the candidate and passed receipt in a formally approved Reviewer-only
+successor with artifactSource and reuseArtifactValidation:true, a fresh reviewRoot,
+and reconciliationHash in intake and confirm. Do not replay input validation;
+Reviewer result-acceptance validation still runs. Expired Flow deadlines are not
+extended by this operation. New proposal and stage-plan hashes need valid approval.
+
 ## Execute an approved Flow
 
 Use the same explicit --store ledger path used for the saved work on every command.

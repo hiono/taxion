@@ -218,7 +218,7 @@ Controller が baseline から candidate までの全実差分を `changedFiles`
 同じ確定一覧を使います。`changeManifest` は結果ファイルやモデルから指定できません。
 policy のない保存済み指示と配布済み旧版は完全一致条件を維持し、旧結果を書き換えません。
 Reviewer 自身の変更禁止、実差分の scope、正式承認、工程予算、全検証と独立レビューは維持します。
-管理スキルは1.3.15です。インストール済みスキルは許可なく更新しません。新しい保存フィールドを使った workspace を旧 binary で操作せず、
+管理スキルは1.3.16です。インストール済みスキルは許可なく更新しません。新しい保存フィールドを使った workspace を旧 binary で操作せず、
 戻す場合は更新前の保全一式を別環境で使用してください。
 RC7 の `workflow repair-status` は、停止・hold・成果物の不一致を `reconciliation-required`
 として返します。未回答の人間の選択だけを `human-decision-required` と区別します。
@@ -697,6 +697,10 @@ CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は s
 ## 停止済み初回指示の整合回復
 
 `v0.7.21-rc.8` は、入力検証 `PASSED` の後に準備失敗した最初の持込み成果物 Reviewer にも対応する。応答・開始・session・結果・runtime receipt・管理済みレビュー worktree がある場合は対象外である。下記と同じ preview／適用操作を使い、配送不明と旧停止を保持して指示を取り消す。親 Task はレビュー待ちを維持する。
+
+`v0.7.21-rc.10` は、管理済みレビュー worktree の準備後、認証などで session 開始前に停止した場合も扱う。Controller は候補の不変性に加え、元候補との共通 Git repository、正確な場所の worktree 登録、detached HEAD と baseline の一致、baseline のままの index、承認済み target tree とファイルの一致を照合する。追加ファイルや ignored ファイル、staged 変更、登録や対象の不一致は拒否する。preview の `preservedReviewWorktree` は保全される場所を示し、適用後も削除・書換え・再利用しない。応答・開始・session・結果・利用量・runtime receipt がないこと、実行停止の確認証拠、配送不明の受容、正確な preview hash の承認は引き続き必要である。`session-starting` は runtime 開始前の観測であり、未配送や無課金の証明ではない。
+
+更新時は同じ store を維持し、[provenance の拒否と復旧](binary-provenance.md#拒否と復旧)に従って旧 policy と整合した DB を保全し、新配布物の pin を再承認してから旧 policy を退避・再登録する。`provenance configure` は既存 policy を上書きしない。確認後に管理スキル1.3.16へ更新する。版変更や reconcile は期限・予算を延長せず、後続の契約・工程計画・モデル実行を承認しない。
 
 この Reviewer の後続では、元 Task の実行契約と元 worktree／branch、候補 commit／tree／全変更一覧を維持する。新しい Task ID に `supersedes` と `createdFrom:"flow:旧FLOW_ID"` を設定し、intake／confirm の両方に `reconciliationHash` を渡す。confirm は `replacesFlow` と取消後の `workflow feedback-target` の正確な `target`、新提案の hash と実設定承認を使う。plan／start は元の `artifactSource` と `reuseArtifactValidation:true`、`maxRepairs:0`、新しい `reviewRoot` を指定する。後続の正式契約・工程計画・実行承認が必要で、旧 Flow は再送しない。
 
