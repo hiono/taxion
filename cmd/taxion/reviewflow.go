@@ -64,7 +64,8 @@ explaining changed completion conditions and preservation/reuse of saved input.
 continueFromDispatchId skips Coder only for a verified successful prior Coder;
 do not use it for an executed SUSPENDED Coder or input that was never its output.
 If mandatory stages do not fit, do not start or silently extend the deadline.
-After issuance, inspect doctor --dispatch DISPATCH_ID --json before paid execution.
+doctor --dispatch inspects an existing worktree without creating it. A newly issued
+Reviewer is prepared and inspected by run/step before any model starts.
 Use workflow run --id FLOW_ID --builtin-prompts for the bundled snapshot-mode
 worker/file-tool policy and controller validation, not a Taxion management shell.
 
@@ -79,8 +80,9 @@ not an implementation result or publication. MaxCoderSessions is enforced as 0.
 After start: workflow validate-input --id FLOW_ID runs approved Controller commands,
 records real outcomes, checks target drift and issues only the Reviewer on success.
 It starts no model; commands may execute arbitrary code under the approved contract.
-Then doctor --dispatch REVIEWER_DISPATCH_ID --json and workflow run --id FLOW_ID
---builtin-prompts. The exact Reviewer configuration ID is FLOW_ID-review-0;
+Then workflow run --id FLOW_ID --builtin-prompts prepares and inventories the exact
+Reviewer worktree before starting its model. doctor --worktree SOURCE gives only
+source-level diagnosis before preparation. The exact Reviewer configuration ID is FLOW_ID-review-0;
 existing additionalTaskIds may cover it without optional packet delegation.
 No Coder prompt, shell permission, changedFiles transcription or success is required.
 run may perform the same pending validation stage if validate-input was omitted.
@@ -100,9 +102,12 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return encoder.Encode(value)
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {plan|start|validate-input|advance|run|resume|step|recover|reconcile-stopped|recover-review|accept-saved-review|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|budget|evaluate|lanes}")
+		return fmt.Errorf("usage: taxion workflow {plan|start|validate-input|advance|run|resume|step|extend|recover|reconcile-stopped|recover-review|accept-saved-review|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|budget|evaluate|lanes}")
 	}
 	action := args[0]
+	if action == "extend" {
+		return extendFlowCommand(args[1:], output)
+	}
 	if action == "accept-saved-review" {
 		return acceptSavedReviewCommand(parent, args[1:], output)
 	}
@@ -115,6 +120,32 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	resumeSaved := action == "resume"
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
 	fs.SetOutput(output)
+	if action == "recover" {
+		fs.Usage = func() {
+			fmt.Fprintln(fs.Output(), "Usage of workflow recover:")
+			fs.PrintDefaults()
+			fmt.Fprintln(fs.Output(), `
+JSON requires flowId, expectedRunnerId, previousProcessStopped:true, actor, reason
+and unique evidence references. Verify the old process has ended; a saved runner
+claim is not a live-process observation. This operation never resends work.
+After recorded Dispatch termination, ordinary recovery releases that exact owner.
+For a RUNNING Reviewer whose native final answer was not accepted, additionally set
+finalizeSavedResult:true and validationDeadline to an explicitly authorized future
+host-validation deadline within one hour. --cli/--base-directory select the original
+Copilot environment. The Controller reads that bound session with pending work,
+tools, hooks and transcript repair disabled. It requires the same saved execution
+observations and a main-agent answer/turn end/routine shutdown, with completion
+before the original effective submission deadline. Caller-authored result files
+are not accepted. The normal finalizer runs host checks, closes the runtime,
+releases the managed worktree and saves the verified result before owner recovery.
+Durably completed host validation is not replayed. A validation start without its
+saved validated result has an unknown outcome and is rejected, not rerun.
+The host-validation window does not extend or restart model execution, reset usage,
+change maxRepairs or approve a product. Inspect the saved result, then advance
+within the original contract; REQUEST_CHANGES with zero repairs needs a bounded
+repair successor, not a silently increased repair count.`)
+		}
+	}
 	if action == "budget" {
 		fs.Usage = func() {
 			fmt.Fprintln(fs.Output(), "Usage of workflow budget:")
@@ -126,6 +157,10 @@ All numbers use ONE observed unit; missing is unknown, not zero. used is cumulat
 within the stated scope, including relevant predecessors and outer work. Do not
 replace a goal ceiling with provider entitlement. Refresh stale observations using
 approved reads. All remaining stage estimates are incremental, not prior work.
+Optional time:{deadline,remainingSeconds,repairSeconds,reviewSeconds,
+preservationSeconds,responseWaitSeconds} combines deadline and budget shortfalls.
+All time fields are explicit seconds; deadline must equal the Flow's current
+execution deadline. Present one joint approval before either boundary.
 Returns topUp (shortfall only; executionAuthorized:false) and saved priorFlows.
 No model/account query, write, deadline extension, approval or usage reset occurs.
 Keep results and continue the unfinished work after actual additional approval.`)
@@ -144,7 +179,8 @@ Keep results and continue the unfinished work after actual additional approval.`
 			fs.PrintDefaults()
 			fmt.Fprintln(fs.Output(), "Execute the approved artifactSource Flow's Controller validation commands; no model is started.")
 			fmt.Fprintln(fs.Output(), "Requires a running, unclaimed artifact Flow before Reviewer issuance. Failed/unknown execution is not replayed.")
-			fmt.Fprintln(fs.Output(), "On success inspect doctor --dispatch REVIEWER_DISPATCH_ID --json before workflow run --id FLOW_ID --builtin-prompts.")
+			fmt.Fprintln(fs.Output(), "On success workflow run --id FLOW_ID --builtin-prompts prepares and inspects the exact Reviewer worktree before starting its model; pre-preparation doctor --worktree SOURCE diagnoses only that source.")
+			fmt.Fprintln(fs.Output(), "doctor --dispatch inspects only an existing managed worktree and never prepares one.")
 		}
 	}
 	var file, id string
@@ -165,6 +201,10 @@ Keep results and continue the unfinished work after actual additional approval.`
 	switch action {
 	case "start", "plan", "recover", "handoff", "interrupt", "terminate", "feedback", "feedback-resolve", "draft", "draft-discard", "draft-approve", "planner-draft", "planner-action", "question-draft":
 		fs.StringVar(&file, "file", "", "JSON authorization and explicit review-flow ceilings")
+		if action == "recover" {
+			fs.StringVar(&cli, "cli", "", "original Copilot CLI path for nonexecuting saved-result observation")
+			fs.StringVar(&base, "base-directory", "", "original Copilot state directory")
+		}
 	case "validate-input", "advance", "show", "evaluate", "feedback-target", "repair-status", "planning-context", "budget":
 		fs.StringVar(&id, "id", "", "review flow ID")
 		if action == "budget" {
@@ -249,6 +289,12 @@ Keep results and continue the unfinished work after actual additional approval.`
 				var estimate controller.BudgetContinuationEstimate
 				if err := core.DecodeGraphInput(input, &estimate); err != nil {
 					return err
+				}
+				if estimate.Time != nil {
+					flow, _ := state.Graph.ReviewFlow(id)
+					if !estimate.Time.Deadline.Equal(flow.ExecutionDeadline()) {
+						return fmt.Errorf("workflow budget time estimate must use the exact current Flow execution deadline")
+					}
 				}
 				advice, err := controller.EstimateBudgetContinuation(estimate)
 				if err != nil {
@@ -508,6 +554,43 @@ Keep results and continue the unfinished work after actual additional approval.`
 		if err := core.DecodeGraphInput(input, &request); err != nil {
 			return err
 		}
+		if request.FinalizeSavedResult {
+			lease, err := db.LockOperation()
+			if err != nil {
+				return err
+			}
+			defer lease.Close()
+			current, err := db.LoadWorkspace()
+			if err != nil {
+				return err
+			}
+			flow, ok := current.Graph.ReviewFlow(request.FlowID)
+			if !ok {
+				return fmt.Errorf("workflow recover requires an existing Flow")
+			}
+			dispatch, _ := current.Graph.GraphDispatch(flow.LastDispatchID())
+			worker, err := copilot.NewForStop(dispatch, cli, base)
+			if err != nil {
+				return err
+			}
+			defer worker.Close()
+			control, err := controller.New(db, worker)
+			if err != nil {
+				return err
+			}
+			ctx := parent
+			if operation := current.Records.Operation; operation != nil && operation.Active() {
+				if operation.FlowID != request.FlowID {
+					return fmt.Errorf("workflow recover cannot adopt another operation")
+				}
+				ctx = controller.WithOperation(ctx, *operation)
+			}
+			recovered, err := control.RecoverSavedReview(ctx, request)
+			if err != nil {
+				return err
+			}
+			return printJSON(recovered)
+		}
 		flow, err := controller.RecoverReviewFlow(db, request)
 		if err != nil {
 			return err
@@ -616,13 +699,29 @@ Keep results and continue the unfinished work after actual additional approval.`
 					sessionCredits = approvedFlow.StagePlan.ReviewerSessionCredits
 				}
 			}
-			return newDispatchWorker(ctx, db, dispatch, copilot.Config{
+			worker, err := newDispatchWorker(ctx, db, dispatch, copilot.Config{
 				Role: dispatch.Recipient, SystemPrompt: runtimeSubmissionPrompt(prompts[dispatch.Recipient], contract, validationSubmission),
 				WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: cli, BaseDirectory: base,
 				MaxAICredits:         sessionCredits,
 				EnableReviewProgress: reviewProgress,
 				AvailableTools:       tools[dispatch.Recipient], ResponseSchema: responseSchema,
 			}, managedCommit && dispatch.Recipient == "CODER", managedStage && dispatch.Recipient == "CODER", scanner)
+			if err != nil {
+				return nil, err
+			}
+			if native, ok := worker.(*copilot.Adapter); ok {
+				inventoryContext, cancel := context.WithTimeout(ctx, 30*time.Second)
+				report, inspectErr := native.Inspect(inventoryContext)
+				cancel()
+				payload, encodeErr := json.Marshal(report)
+				if inspectErr == nil && encodeErr == nil {
+					encodeErr = json.NewEncoder(output).Encode(runtime.Event{Type: "runtime_inventory", Payload: string(payload)})
+				}
+				if err := errors.Join(inspectErr, encodeErr); err != nil {
+					return nil, errors.Join(err, worker.Close())
+				}
+			}
+			return worker, nil
 		}, output, configuration)
 		if flow.ID == "" {
 			return err

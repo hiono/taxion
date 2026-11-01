@@ -1,312 +1,111 @@
 # 開発への参加方法
 
+Taxion は、依頼と承認から実装・検証・独立レビューまでを進めるための CLI です。
+変更では、利用者の作業が完了することを重視します。既存の成果を再利用し、
+承認や保存の安全性を守りながら、不要な操作とやり直しを減らしてください。
+
+初めての変更は、環境の準備、対象箇所の修正と検証、PR の順で進めます。
+使い方を確認したい場合は[利用者ガイド](docs/userguide/user-guide.md)、
+実装の構成を調べる場合は[開発者向け索引](docs/develop/README.md)を参照してください。
+
 ## 開発環境
 
-必要な Go バージョンは `go.mod`、対応するツールチェーンは `mise.toml` に記載しています。ビルド前にリポジトリのツールを準備してください。
+Go の必要版は `go.mod`、開発ツールは `mise.toml` が正本です。
 
 ```bash
 mise install
 mise exec -- go version
-mise exec -- go test ./...
+mise exec -- go build ./...
 ```
 
-Go 全体のテストは `mise exec -- go test ./...` で実行します。
-PR を作成する前は `mise run check` で format・vet・Go test/build・Web test をまとめて確認します。
-動作の変更には、対応するガードレールと回帰テストが必要です。
-
-CLI のコマンド・flag を変えた場合は `mise exec -- go generate ./cmd/taxion` で
-bash 補完定義を更新します。生成処理は隔離した CLI の help を使い、
-通常テストの `TestCompletionMatchesActualCLIHelp` が生成済み定義との一致を確認します。
-
-1. [ロードマップ](docs/develop/roadmap.md)から小さな作業を選びます。
-2. `internal/core` の依存は標準ライブラリだけにします（SDK-001）。外部との接続は `internal/runtime/<name>/` に置きます。
-3. 動作を変更するときは、ガードレール ID とテストを対応付けます。
-4. 個人情報・内部情報・秘密情報を commit に含めません（PRIV-001）。push 前に `git diff` を確認します。
-5. ローカルで次の確認を実行します。
+修正中は変更した package のテストを実行し、PR 前に全体を確認します。
 
 ```bash
+mise exec -- go test ./internal/core
 mise run check
 ```
 
-Web の確認には Node 22.18 以上を使います。mise と CI は最低対応版の 22.18.0 に揃えています。
-依存 package のインストールは不要です。
-CI でも Go と Web の両方を検査します。これらの通常検査ではモデルを呼びません。
-README・利用者/開発者文書・ADR のローカルリンクと見出し参照も Go テストで検査します。
-`mise run check` は live integration の環境変数を無効にするため、
-shell に以前の opt-in が残っていても有料モデルや実サービスへの受入れを開始しません。
-実サービスの受入れは、対象テストと範囲・予算を別途指定して実行します。
+`mise run check` は format、vet、Go の test/build、文書リンク、Web のテストを確認します。
+有料モデルや実サービスのテストは起動しません。Web は Node 22.18.0 以降を使い、
+通常検査に追加 package のインストールは不要です。
+CLI のコマンド・flag を変えた場合は `mise exec -- go generate ./cmd/taxion` で補完も更新します。
 
-## 説明文の書き方
+## 変更から PR まで
 
-### 公開記録は利用者と貢献者に向けて書く
+取り組む問題と利用者にとっての完了条件を Issue または PR に書きます。
+関連する仕様と呼出し元を確認し、目的を満たす最小の変更にしてください。
+`internal/core` は標準ライブラリだけに依存し、外部サービスとの接続は runtime などの adapter に置きます。
 
-Issue、PR、レビューコメント、Release Notes、ADR は、OSS の利用者、将来の貢献者・保守者を第一読者とします。変更内容、変更した理由、確認できた検証結果を説明し、未確認の結果を成功と書きません。内部の作業指示、担当者間の通信、実行識別子、機械向けの判定値は転記せず、非公開の監査証跡に保存します。
+動作を変える場合は、その変更がなければ失敗する回帰テストを追加します。
+承認、予算、成果保全に関わる変更では、正常時だけでなく拒否・中断時にも
+保存成果と履歴が失われないことを確認します。詳しい実行・保存仕様は
+[Runtime 契約](docs/develop/runtime-contract.md)と[Ledger](docs/develop/ledger-schema.md)を参照してください。
 
-レビューで求められた修正は、何を直したかを具体的に説明します。たとえば「公開前の文書検証を実行手順に追加し、ローカルリンクと外部 URL の検証範囲を明記しました」と書きます。レビュー結果は「承認」「修正要求」として説明し、英語なら Approved / Changes requested を使います。Release Notes は利用者に影響する追加・修正・変更・削除、安全性、互換性を扱います。
+PR には問題、変更の理由、確認した結果、未確認の範囲を示します。
+利用者の操作や互換性が変わる場合は文書も同じ PR で更新し、設計の選択が変わる場合は ADR を残します。
+push 前に差分を確認し、秘密情報、個人情報、private な DB や生ログを含めないでください。
 
-この方針は公開済みの記録を含むすべての公開面に即時適用します。Closed / merged 済みの記録も文脈を確認し、編集可能なら是正します。判断、失敗、検証結果を保持し、編集が不適切または不能な場合は対象を明示した訂正を追加します。原文と変更内容は非公開で保管します。標準構成、機密情報、生成文章の要件は [Public Communication Policy](docs/develop/public-communication-policy.md)、判断理由は [ADR-0045](docs/develop/adr/0045-public-communication-for-users-and-contributors.md) を参照してください。
+## 検証する範囲を選ぶ
 
-### 日本語と正式な機能名を使う
+通常テストは一時 Git repository、合成応答、ローカルの protocol peer を使います。
+認証・モデル・外部サービスがなくても実行できることが、日常の開発の前提です。
+共通の実行制御を変える場合は、Copilot と OpenCode の両 adapter と Controller を確認します。
 
-Issue 本文、Milestone の説明、README、利用者・開発者向け文書は日本語で記載します。Memory、sanitizer、rate limiting、lockout、audit hash-chain などの定着した技術用語や機能名、識別子は元の表記を保ちます。コード、コマンド、API 名、引用原文も変更しません。操作は実際のコマンド名と flag を使い、その操作で何をするかを説明します。比喩や意味の近い別の語で置き換えません。
+```bash
+mise exec -- go test -race ./internal/runtime/controller ./internal/runtime/copilot ./internal/runtime/openacp
+```
 
-利用者向けの入口では、Taxion、各担当、実行ハーネス（Copilot・OpenCode）、開発基盤（GitHub・GitLab）の関係を機能説明より先に示します。必要な CLI・認証は選択ごとに分け、通常の利用者には自然言語による依頼と承認を案内します。JSON の生成・ID の転記・低レベルコマンドは、オーケストレータ向けの操作例と明記します。人の行動は「利用者の承認」「管理者の判断」など、文脈に合う立場で書き、主語が不要なら「承認」だけにします。英語の説明は `user` などを使います。Task 契約は「承認後に勝手に変更できない作業条件」と説明します。`human`・`humanDecision`・`HUMAN_DECISION_REQUIRED` などの入力値・識別子は変更しません。
+実サービスでの受入れは、通常検査とは別に対象、アカウント、モデル、権限、予算、期限を確認して行います。
+ローカル試験の成功を実サービスや文書品質の実証とは扱いません。
+停止時は成果・検証記録・累計消費を保持し、再実行が必要な範囲を判断します。
+継続の操作は[復旧ガイド](docs/userguide/failure-recovery.md)を参照してください。
 
-利用者向けの手順に、内部の Milestone 番号、旧パスの一覧、開発途中のデータ移行を前提知識として持ち込みません。履歴が必要なら開発者向け文書へリンクし、Milestone 自体を参照する場合は URL を使います。テストの区分は価格ではなく、モデル・外部サービスを呼ぶか、合成データか実データかで説明します。
-
-表記の訂正では、既存の判断・数値・当時の状態を維持します。公開済みの commit・tag・配布物は書き換えず、訂正 commit を追加します。過去のソースを原文として引用した箇所と、保存済みの承認記録は自動置換しません。
-
-提案、記録した判断、現在の実装を区別してください。過去の要件や結果は残し、現在の動作と誤解される場合は補足します。文章の整理を完了とする前に、関連する Issue、文書、コードコメント、表示文も確認します。
+実サービス用の入力と実行条件は、対象テストの近くに記載しています。
+[Copilot のテスト](internal/runtime/copilot/)、
+[OpenCode のテスト](internal/runtime/openacp/)、
+[文書作業の通し受入れ](cmd/taxion/opencode_live_test.go)から対象を選びます。
+個別試行の結果は対応する Issue・PR に記録し、この参加ガイドへ蓄積しません。
 
 ## 文書の配置と責務
 
-文書名は内容を表す小文字の英語名をハイフンで区切ります。一般のガイド・仕様書に通読順ではない連番を付けず、[利用者向け索引](docs/userguide/README.md)と[開発者向け索引](docs/develop/README.md)で読者の作業順を示します。ADR の識別番号は判断の参照として保持します。リリースノートは GitHub Release の本文として管理し、repository には保存しません。移動時は相互リンクだけでなく、文書を読むテストとコード内参照も更新します。
+読者が知りたいことに応じて更新先を選び、同じ説明は複製せずリンクします。
 
-| 配置 | 記載する内容 | 記載しない内容 |
-| --- | --- | --- |
-| `README.md` | プロジェクトの概要、導入への案内、参照文書 | 詳細仕様、作業報告 |
-| `docs/userguide/user-guide.md` | 導入と最初の承認済み Coder・Reviewer 実行 | option の完全な一覧 |
-| `docs/userguide/configuration.md` | 設定場所、優先順位、環境変数、実行前の確認の範囲 | credential の保管、契約上の利用資格の証明 |
-| `docs/userguide/cli-reference.md` | CLI 操作と許可・制約 | 製品要件、設計の理由 |
-| `docs/userguide/remote-access.md` | 公開接続の設定と手順 | 認証設計の判断 |
-| `docs/userguide/audit-log.md` | 監査項目、照合の限界、保存手順 | 監査機能の実装履歴 |
-| `docs/userguide/memory-model.md` | 現在の Memory の保存、scope、昇格、検索、export | 最初の提案モデル |
-| `docs/userguide/execution-records.md` | 実行の復旧、receipt、承認済み外部記録の公開 | 作業別の経過報告 |
-| `docs/develop/charter.md` | 設立時の対象範囲と制約 | 現在の機能一覧 |
-| `docs/develop/guardrails.md` | 必要な不変条件と実装での確認箇所 | 未実装の要件が強制されるという主張 |
-| `docs/develop/privacy-provenance.md` | 公開情報とレビューの規則 | 個別の情報削除報告 |
-| `docs/develop/runtime-contract.md` | Runtime 契約と現在の adapter の制約 | Runtime の評価履歴 |
-| `docs/develop/roadmap.md` | 計画と完了済み作業への参照 | 詳細な実装結果 |
-| `docs/develop/ledger-schema.md` | データ形式、API の入出力、検証条件 | API 設計の理由 |
-| `docs/develop/orchestration-requirements.md` | 採択済み要件、段階別受入れ、実装との差分 | 現在のコマンド一覧、完了の証拠 |
-| `docs/develop/task-graph.md` | 現在の Task Graph 操作、保存、状態遷移の検査と制約 | Runtime 実行の主張、Memory 設計の理由 |
-| `docs/develop/forge-capabilities.md` | 開発基盤ごとの仕様・実装・受入れと後続作業 | 未確認の基盤操作を対応済みとする説明 |
-| `docs/develop/specification-input.md` | 仕様の取得・用途別承認・照合 | 出典不明の資料、個別の調査ログ |
-| `docs/develop/decision-traceability.md` | ADR・Milestone と実装 Issue・現在の仕様の対応 | Issue 別の証拠、現在の仕様本文の代替 |
-| `docs/develop/adr/` | 判断、選択肢、理由、後続の補足 | 現在のコマンド説明の複製 |
-| `web/README.md` | Web console の準備と proxy の動作 | API 仕様の複製 |
-| `SECURITY.md` | 非公開の報告方法、保護対策、既知の限界 | 完全な保護の保証 |
-| Issues・PRs・Milestones | 範囲、進捗、実装結果、完了の証拠 | 現在の使い方を確認する唯一の資料 |
-| コードコメント | API 契約、分かりにくい局所的判断の理由 | 作業履歴、操作ガイド、コードの逐語説明 |
+| 読者の目的 | 更新先 |
+|---|---|
+| 概要を知り、導入する | `README.md`、[利用者向け索引](docs/userguide/README.md) |
+| 依頼・承認・実行・復旧を進める | 利用者ガイド、設定ガイド、復旧ガイド |
+| コマンドと入力形式を調べる | CLI リファレンス |
+| 仕組みと変更の影響を理解する | [開発者向け索引](docs/develop/README.md)から担当する仕様へ |
+| 設計を選んだ理由を知る | [ADR](docs/develop/adr/) |
+| 個別の変更と確認結果を調べる | Issue・PR、リリースごとの検証記録 |
 
-説明を複製せず、担当する文書へリンクします。過去の ADR の前提に誤りがあった場合は、その ADR に実装時の補足を加え、現在の動作は担当する仕様文書に記載してください。元の判断を説明なしに書き換えたり、どちらが現在の仕様か分からない矛盾を残したりしません。
+現在の使い方と、過去の判断・検証結果は区別してください。
+旧仕様を現行の規則として残さず、ADR では後続判断への参照を示します。
+ファイル名は内容を表す名前にし、ADR 以外の連番で通読順を作りません。
 
-## モデルを呼ばないテストと復旧の証拠
+## 説明文とコードコメント
 
-help を分類し直す場合はコマンド行の脱落・重複と分類内の件数を確認します。見出しはインデントせず、コマンド行と区別してください。`go generate ./cmd/taxion` の再生成前後で、表示だけの変更なら `completion.bash` に差分がないことも確認します。`ready` の原稿を変える場合は配置済み skill の互換性・明示更新と JSON 例の通し回帰を検証します。見出し追加だけで実 LLM の誤操作率や token 消費が改善したとは報告しません。
+公開説明は日本語で、利用者と貢献者に向けて変更と理由を直接書きます。
+コマンド、API、正式な機能名、引用原文の表記は保ちます。
+未確認のことは未確認とし、内部の作業通信や非公開の証拠を転記しません。
+公開内容の確認方法は[公開コミュニケーション方針](docs/develop/public-communication-policy.md)を参照してください。
 
-初回利用のゴールは、今の coding agent が `taxion ready` を読み、依頼の改善から承認済みの Coder・検証・独立 Reviewer・復旧までを操作することです。利用者による JSON や担当ごとの指示の転記は前提にしません。`ready` は静的な手順出力だけを行い、モデルや workspace を開きません。[ADR-0031](docs/develop/adr/0031-bootstrap-the-current-coding-agent-with-ready.md)を参照してください。
-
-`go test ./cmd/taxion -run TestReady` は、実出力の JSON、未承認・異なる hash の拒否、設定承認、Flow、host 検証、同一 tree の独立レビューを合成 Runtime と実 Git で確認します。操作は決定済みであり、実 agent が指示を理解し判断する品質の受入れとは区別します。既存の停止・successor 回帰も維持します。
-
-外側の agent を使わず、内部 Planner と計画を相談する入口も残します。`request` は intake、出典付き設定承認の照合、既存の Flow 実行処理を使います。別の実行処理は設けません。同梱指示は snapshot mode の明示選択であり、旧方式の空の tool 既定値は維持します。[ADR-0030](docs/develop/adr/0030-refine-natural-language-requests-with-planner.md)を参照してください。
-
-`go test ./cmd/taxion -run TestRequest` で、確認質問、計画改善、承認、同一 tree のレビュー、拒否と receipt を確認します。独自に作成した応答と実 Git を使い、モデル・login・ネットワークは不要です。実モデルが適切な計画を作ることや、skill を読み込むことの証明にはなりません。
-
-file access の承認、保持した tree のレビュー、停止専用接続は ADR-0026〜0028 に分けて記録しています。変更時は[ガードレール](docs/develop/guardrails.md)の FILE-001、SHA-001、STOP-001、LED-002、BUD-001 を維持します。login 済みアカウントによるコード作成・レビューの受入れ前に、次のテストを実行してください。
-
-```bash
-go test ./cmd/taxion ./internal/runtime/copilot ./internal/runtime/controller \
-  -run 'TestUserGuideColdStartExamplesWithoutSDK|TestStopOnly|TestSuspendedResultCanBeCancelled|TestReviewFlowUsesUnchangedExplicitMultiTaskConfigurationApproval'
-go test ./internal/gitproof ./internal/core
-```
-
-一時 workspace、実 Git、合成 SDK protocol peer を使うため、モデル指示は送信しません。login 済み SDK の結合テストは明示選択時だけ実行します。ローカルテストの成功で、アカウントの利用資格、provider の課金上限、コード作成・レビューの通し受入れを確認したことにはなりません。
-
-skill のテストでは、一時 directory に独自の合成指示を置き、リポジトリ所有の skill 専用 plugin fixture を使います。通常のテストに、特定の外部執筆 skill、個人の home path、global install、login、ネットワーク、有料モデルを要求しません。内容固定方式では担当別の承認、複数 asset、create・resume 時の照合、`skill` tool、成功・失敗の証拠、欠落・変更・未承認 asset の拒否を確認します。
-
-```bash
-go test ./internal/tools ./internal/runtime/copilot ./internal/runtime/controller \
-  -run 'TestAssetsApprovalsAndPluginSurface|TestApprovedSkillsWithoutModelUse|TestSkillToolRequiresApprovedAssets|TestSDKToolsCreateResumeRoleAndImmutableHash|TestReviewFlowPreflightsFutureSkillAssetsWithoutModelUse'
-```
-
-ローカルの native plugin discovery だけを確認する場合は、`TAXION_TEST_LOCAL_PLUGIN_DISCOVERY=1 go test ./internal/runtime/copilot -run TestLocalPluginDiscoveryWithoutModelUse` を明示して実行します。モデル指示は送信しません。要求した確認に必要な CLI がなければ失敗します。合成 hook の結果や native discovery は、実際の skill 読み込みや文書品質の証拠にはなりません。
-
-#78 では、別途承認した実文書の作業で、選択した3 skill の Coder による実 invocation、読み込み結果、点検の証拠、同じ tree の成果物に対する独立レビューの `SUCCEEDED / APPROVE` 受入れを確認しました。#78・#79・#80 の受入れは、停止後の部分成果復旧と Copilot 取消後の OpenCode 継続を含めて完了しています。外部 skill は操作者が試用時に用意する入力であり、Taxion の依存ではありません。その本文を fixture にコピーしません。
-
-実文書の前に、操作者が用意した3つの執筆 skill と `natural-japanese` の付随 lint を無課金で確認できます。次の絶対パスには `natural-japanese/`、`japanese-tech-writing/`、`cognitive-rhythm-writing/` が必要です。実行には既存の `uv` と、その script の依存・Python がローカルに揃っている必要があり、テストは `uv run --offline` でダウンロードを禁止します。
-
-```bash
-TAXION_DOCUMENT_SKILL_ROOT=/absolute/path/to/skills \
-  go test ./internal/gitproof -run '^TestDocumentSkillValidationPreflightWithoutModel$' -count=1 -v
-```
-
-この明示 opt-in は各 skill の内容 hash と原本不変を照合し、一時 Git repository の小さな文書へ、承認した host validation として実 lint を実行します。結果の JSON、検証時刻、対象 SHA を確認します。指定後に skill・実行ファイル・依存が不足していれば失敗し、成功に見せる skip はしません。未指定の通常テストでは実行せず、`mise run check` はこの入力を空にして外部 skill を使いません。
-
-この検査は SDK session を作らず、skill の実ロード、モデルによる規範の適用、実文書の品質、独立レビューは確認しません。SDK 内の任意 shell や worktree 外 read も許可しません。実作業では Task の `validationCommands` に入力と出力先を固定した検査を明示承認し、role が使える tool と file access は別に照合してください。lint は指摘があっても exit 0 を返すため、成功終了だけで合格とせず、指摘への対応または残す理由を記録します。
-
-保存済み障害の復旧前には、一貫した SQLite backup と元の worktree を保持してください。SDK の取消と、その後の workspace transaction は別々に確認します。取消が成功しても結果の保存に失敗する場合があります。suspension・cancellation の receipt、成果物 hash、観測済み利用量を残し、成功扱いにするために旧契約や予算を書き換えません。
-
-private database、生ログ、credential 値は commit に含めません。一般化した知見と採択した制約は ADR、現在の動作は担当する仕様文書、操作者の手順は利用者ガイドに記載します。
-
-### OpenCode ACP の回帰と実受入れ
-
-`go test ./internal/runtime/openacp` は独自の fake ACP peer で接続・権限拒否・切断・期限・
-取消・usage 欠落を確認します。外部 OpenCode、login、モデル、network は不要です。
-Linux の namespace 境界は `TAXION_NAMESPACE_TEST=1 go test -race ./internal/runtime/openacp`
-で opt-in にできます。この検査も外部モデルは使いません。隔離に必要な Linux command と
-PATH 上の native `rg` が必要であり、隔離内の検索成功と実行ファイルの read-only も照合します。
-
-実 OpenCode の確認は、操作者が用意した executable と `model` だけの JSON 設定を
-絶対パスで指定し、設定の生 SHA-256 を `TAXION_OPENCODE_CONFIG_HASH` に
-`sha256:` 付きで設定します。実行ファイルも固定する検査では、
-`TAXION_OPENCODE_HASH` にその生 SHA-256 を指定します。
-通常利用と同じ更新許容の確認では、この変数を未設定にします。
-`TAXION_OPENCODE_PATH` と `TAXION_OPENCODE_CONFIG` は各ファイルのパスです。
-`TAXION_OPENCODE_ACP_HANDSHAKE=1 go test ./internal/runtime/openacp -run '^TestLiveOpenCodeHandshake$'`
-は接続だけを確認し、prompt を送りません。`TAXION_OPENCODE_ACP_PROMPT=free-model-diagnostic`
-を明示した `TestLiveOpenCodePrompt` は最小 prompt を送る別検査です。stderr や model 応答を
-含む出力は非公開で扱い、接続成功を無料・認証・quota の保証にはしません。
-
-`TestOpenCodeLiveDocumentFlow` は実 Planner、限定した公開文書の Coder、host lint、
-独立 Reviewer を接続する別の受入れです。モデル送信と scope の承認後にだけ実行します。
-設定の model は `opencode/big-pickle` に固定し、他モデルへ切り替えません。
-公開 HEAD から独立 worktree を作り、選択した公開 ADR を検索・用途別承認付きで添付します。
-このテストは絶対 `TAXION_DOCUMENT_SKILL_ROOT` と、未作成の絶対保存先
-`TAXION_OPENCODE_LIVE_OUTPUT`、`TAXION_OPENCODE_LIVE_APPROVAL=free-big-pickle-document` を要求します。
-実行は `go test ./cmd/taxion -run '^TestOpenCodeLiveDocumentFlow$' -count=1 -v -timeout 17m` で、
-15 分の共通期限・修正 0 回です。private な DB、応答、event、worktree を保存し、
-失敗時も証拠を消しません。通常の `mise run check` はこれらの opt-in を無効にします。
-成功した Coder を検査名目で繰り返さず、失敗原文と正式 receipt から次の修正を判断します。
-追加質問に答えて計画を修正する場合は、同じ公開 baseline の有効な保存済み Planner 応答を
-`TAXION_OPENCODE_LIVE_PLANNER_PREVIOUS` に絶対パスで指定できます。保存ファイルの hash と
-引継ぎ元を別に記録し、以前の質問を再実行せず、新しい返答を実 Planner に渡します。
-質問が解消した有効な提案を指定した場合は、公開 ancestor baseline から worktree を作り、
-範囲・検証・skill 条件を再照合して、その計画を新しい Task の承認に使います。
-過去の計画を自動承認する機能や、成功済み Coder の再実行機能ではありません。
-成功判定では native event にある3 skill 各々の完了と、対象節末尾への1段落の挿入を確認します。
-元の本文や他の節を書き換えた場合、モデルの作業報告だけで成功とは扱いません。
-結果の解析に失敗した実 Coder の追記を引き継ぐ場合は、その保存済み `workspace.json` を
-`TAXION_OPENCODE_LIVE_CANDIDATE_PREVIOUS` に絶対パスで指定できます。
-旧 Flow の停止、Coder の失敗状態、同じ公開 baseline、対象1件・1段落を照合し、
-観測した tree と原本 hash を保存して新 Task の承認へ含めます。旧結果は変更しません。
-今回の skill 呼出し・本文確認と必要な誤りの修正を実施し、書き直しは避けます。
-各試行の Flow と候補の操作者観測には固有 ID を使います。同じ repository の
-保存参照を共有するためであり、以前の参照が別 tree を指す場合に上書きしません。
-操作者の新しい観測を、旧 Dispatch の正式な取消・成功の receipt と混同しないでください。
-
-### バックエンド別の実証と再確認
-
-バックエンド共通の工程制御を変える場合も、Copilot と OpenCode の両方を確認します。工程計画を省略した過去の成功は、計画付き実行の証拠にはしません。Issue #231 の早期取消の回帰は次のモデルを呼ばない検査で確認できます。
-
-```bash
-go test ./internal/runtime/controller ./internal/runtime/openacp \
-  -run 'TestPlannedSendRetainsContext|TestPlannedControllerReceivesAsynchronousACPResponse|TestParentCancellation|TestExplicitDeadlineRequired'
-go test -race -timeout 30m ./internal/runtime/controller ./internal/runtime/copilot ./internal/runtime/openacp
-```
-
-最初の検査は、送信復帰後のコンテキスト生存、ローカル ACP の遅延応答、親の取消、実際の工程期限、停止時の部分成果保全を対象にします。正式な実モデル受入れは別に承認し、同じ対象の成果保存・コントローラ検証・独立レビューまで確認します。
-
-| 対象と条件 | 既存の証拠 | 適用範囲と残る確認 |
-|---|---|---|
-| Copilot SDK と共通コントローラ | `internal/runtime/copilot`、`internal/runtime/controller` の合成試験 | 認証・モデル・実課金の確認ではない。今回の修正後の実モデル受入れは未実施 |
-| OpenCode ACP と工程計画 | `TestPlannedControllerReceivesAsynchronousACPResponse` と工程制御の回帰 | 遅延応答するローカルプロセスを使用。実 OpenCode やモデルを呼ばない |
-| OpenCode の過去の実モデル受入れ | [`d368d71`](https://github.com/hiono/taxion/commit/d368d71) の最小応答、[`07fabd1`](https://github.com/hiono/taxion/commit/07fabd1) の文書採用、`cmd/taxion/opencode_live_test.go` | 当時の匿名 Big Pickle、限定した文書・権限での実証。実機用テストには工程計画がなく、現在の組合せ全体の保証ではない |
-| OpenCode 1.19.3 と `opencode/big-pickle` | Issue #231 の停止記録と直接実行の利用制限 | ACP の早期取消をローカル再現。直接実行の利用制限との歴史的因果と、修正後の実モデル受入れは未確認 |
-| OpenCode の `DeepSeek V4.1 Flash` | Issue #231 の利用者申告と、その後に提示された端末上の実回答 | 端末では回答を確認。Taxion の隔離・ACP・成果検証・独立レビューは未確認。モデルの自動切替を許可する証拠にはしない |
-
-再開時は、この表と対応する Issue・コミットを先に確認し、使用する CLI、モデル、権限、課金条件との違いを記録します。「実証がない」と「現在の条件では未確認」を区別し、停止済み履歴や成功済み成果を書き換えません。モデル提供元の診断、標準エラーだけの障害、両バックエンドの継続的な受入れなど、Issue #231 の未達条件はこの修正で削除せず、すべての条件を満たすまで閉じません。
-
-### バックエンドと同じ探索を検証する
-
-通常のカスタマイズ探索は設定中のバックエンドに任せ、未選択バックエンドの配置を
-追加検索しません。`taxion doctor` は同じ adapter の worktree・CLI・環境・home を使い、
-native inventory と補足のファイル観測を表示します。回帰では一時 HOME と合成 CLI から
-渡された条件を確認し、無効化・不正形式・取得不能と、file hooks・MCP・モデルを
-起動しないことを検査します。doctor の成功を認証・実ロード・品質確認の代替にはしません。
+コメントはコードだけでは分からない理由や API の契約を説明します。
+実装の逐語説明と作業履歴は置かず、長い設計理由は ADR へ残します。
 
 ## 実行ハーネスと SDK の更新
 
-OpenCode の製品版と ACP の protocol version は別に扱います。
-接続は ACP v1、承認した model、隔離した `taxion` agent の一致で判定し、
-agent の名前・版は報告があれば記録します。製品版の固定や、任意の製品情報の欠落を
-理由に拒否せず、OpenCode の版番号だけを更新許可リストへ追加しません。
-根拠と未検証範囲は [ADR-0038 の追補](docs/develop/adr/0038-run-opencode-acp-with-sealed-role-boundaries.md#2026-10-17-追補実行ファイルの更新と接続互換性)に記録しています。
-
-利用者の CLI 更新と、開発側の再現実験を分けます。通常利用の `acpCommandHash` は省略可能で、
-同じパスの CLI 更新は新しい作業承認の理由にしません。Taxion が実行ファイルを複製し、
-実際に使った内容 hash を接続記録に残します。評価環境では版・hash を明示固定し、
-同じ条件で再現します。既存の明示 pin を自動解除したり、設定内容の承認や保存済み契約を
-書き換えたりはしません。開発側は合成 peer の互換・非互換ケースと namespace の回帰後に、
-更新した executable を指定して
-実 handshake、承認済み予算・期限で最小応答、変更の影響を受ける tool・skill・停止を確認します。
-最小応答だけで実作業の通し受入れや全モデルへの対応を完了扱いにしません。
-
-Copilot Go SDK は `go.mod` / `go.sum` に採用版を固定し、上流差分を確認して更新します。
-これは Taxion 開発者の依存管理であり、利用者に SDK の組合せ管理や CLI の固定を要求しません。
-SDK の版、CLI の製品版、SDK と CLI の通信プロトコルの版は別です。この通信は ACP では
-ありません。v1.0.22 の SDK は起動時に `connect`（旧 server では `ping`）で互換性を確認し、
-対応範囲外ならエラーにします。Taxion はこの確認を利用し、CLI の製品版の完全一致を
-独自に要求しません。根拠は上流の
-[`verifyProtocolVersion`](https://github.com/github/copilot-sdk/blob/go/v1.0.22/go/client.go)です。
-更新候補は `go list -m -u github.com/github/copilot-sdk/go` で調べ、
-採用する具体的な版を `go get github.com/github/copilot-sdk/go@vX.Y.Z` で指定します。
-create/resume、認証・権限、tool、停止、usage・credit、生成 event 型と CLI protocol の
-変更を調べ、`go mod tidy` と以下の回帰を行います。
-
-```bash
-mise exec -- go test -race ./internal/runtime/copilot ./internal/runtime/openacp
-mise exec -- go test ./internal/runtime/controller ./cmd/taxion
-mise run check
-```
-
-実 CLI の確認は通常テストと分けます。Copilot は利用者が確認した account を
-`TAXION_TEST_COPILOT_ACCOUNT` に指定し、
-`TAXION_COPILOT_ACCESS_INTEGRATION=1 go test ./internal/runtime/copilot -run '^TestLiveCopilotServiceAccessWithoutModelCall$'`
-でモデルを呼ばずに session・利用可否を確認できます。実モデルの操作確認は別途予算・期限を
-承認して行い、未実施の組合せは未検証と記録します。モデルの追加だけで SDK 更新が
-必要とも不要とも決めず、必要な API・event・モデル選択が利用できるかで判断します。
-実行契約や保存形式にも影響する更新では、移行条件と ADR・利用者文書を実装と同時に更新します。
-
-## 残予算の案内
-
-[ADR-0029](docs/develop/adr/0029-separate-budget-guidance-from-provider-quota.md)の残予算指示を controller と Copilot adapter に実装しています。Flow の token 計算、session の credit 上限（soft ceiling）、context 容量、アカウントの quota は区別します。provider 固有の quota API と課金型は adapter に置き、不明・期限切れの観測はその状態を明示します。
-
-login 済みアカウントの受入れを追加する前に、合成 fixture で、既定値と依頼別の優先順位、単位、利用量の欠落、quota 失敗、account の照合、時間制限付き読取り、停止条件が変わらないことを確認します。変動する観測は送信 receipt に記録し、承認済み system prompt を変更しません。OpenCode は adapter 契約の実装前に対応済み設定へ追加しません。
-
-新規 CLI proposal の `budgetGuidance` は Task・Dispatch の承認済み内容に含めます。旧 policy の省略時は、従来の指示形式を保ちます。account 読取りは任意の adapter 機能であり、選択済み account と policy の承認が必要です。`account.getQuota` は最大5秒の timeout で一回だけ呼びます。モデル turn、retry、内部 endpoint、Billing への代替照会は追加しません。
-
-`budget-guidance` receipt は別の stream ID を持ち、送信した補足全文と prepared・returned・denied の段階を保持します。隔離した Planner、質問、SDK 検索の結果にも、それぞれの観測と補足を保持します。
-
-モデルを呼ばないテストでは、設定層の既定値・override、期限切れ・取得不能、account 不一致、停止・利用量の確認、protocol frame を確認します。login 済み account の読取り専用受入れは、`TAXION_COPILOT_QUOTA_ACCEPTANCE=1` と `TAXION_QUOTA_ACCOUNT`、`TAXION_QUOTA_CLI`、`TAXION_QUOTA_BASE_DIRECTORY` を明示した場合だけ実行します。session を作成せず、モデル指示も送信しません。この成功はモデル品質やコード作成・レビューの Release 条件を満たした証拠にはなりません。
-
-固定 Copilot SDK の `Account.GetQuota` と session の `Usage.GetMetrics` は実験的 API です。quota の requests・割合、session 累積 cost、期間別 Billing REST report は別々の観測です。累積値を call 別 receipt に合算したり、対応する単位の定義なしに requests を credits へ換算したり、課金情報の取得不能をゼロと扱ったりしません。組織負担の利用量は個人 Billing report に含まれません。quota error 時に内部 endpoint や管理者 credential へ切り替えません。
-
-## コードコメント
-
-コメントには、制約、順序、許可・拒否の条件、選択理由を記載します。理由を書く前に周辺コードと呼出し元を読み、実装だけから意図を創作しません。名前、代入、分岐、テストの assertion、呼出し順序を繰り返すだけのコメントは削除します。英語コメントも日本語本文と同じ基準で確認します。
-
-公開 API と package の Go documentation は保ちます。戻り値、既定値、所有権、signature から分からない制約は、逐語説明ではなく API の契約です。protocol 上必要な動作と分かりにくい fixture の選択理由は関連コードの近くに置きます。長い設計理由は ADR に記録し、必要に応じてコードから参照します。
+SDK の依存版は `go.mod` と `go.sum` で管理します。
+更新では上流の互換性と、接続・権限・tool・取消・利用量の変更を確認し、
+両 adapter の回帰と影響する実サービス受入れを分けて行います。
+CLI の製品版と通信 protocol の版は区別します。現在の接続条件は
+[Runtime 契約](docs/develop/runtime-contract.md)、OpenCode 固有の判断は
+[ADR-0038](docs/develop/adr/0038-run-opencode-acp-with-sealed-role-boundaries.md)が正本です。
 
 ## リリース
 
-binary-only 配布を使う新 release の手順は [Binary release](docs/develop/binary-release.md) を正本とします。固定 GoReleaser / tag-triggered workflow / 全6 platform の native検証 / product provenance が対象です。以下の旧 Go backend 導入手順だけでは新しい product mode の受入れを満たしません。
-
-開発版で Taxion の Flow を使った実装・リリース作業では、文書整合 criterion を承認済み acceptance に含め、`taxion workflow evaluate --id FLOW-ID --require-quality` の成功も公開前に確認します。出力は保存証拠の条件充足であり、現在の候補・独立レビュー対象の一致、文書内容、公開権限は別に確認します。外部の Release コマンドを自動的に遮断するものではありません。既存の旧 Flow の criterion を後付けで書き換えて成功扱いにはしません。Taxion を使っていない作業では、同じ品質条件を通常の PR レビューと公開前確認で照合します。
-
-対象版の修正・補正・決定に伴う文書改善は、リリース前に完了させます。利用者の操作や制約は利用者ガイド・CLI リファレンス・設定ガイドへ、設計上の決定は必要な ADR と判断対応表へ反映し、Issue・PR・milestone の記述と整合させます。会話内の説明や公開後の追記を、リリース前の文書更新の代わりにはしません。
-
-候補 commit を固定する前に、対象版の変更と関連文書を照合し、記載した導入・更新・復旧手順を検証します。公開 tag の導入確認で文書の不足が判明した場合も、Release object の公開前に修正・検証・公開を済ませます。tag 内の文書や実装を直す必要がある場合は、既存 tag を移動せず、修正版の候補と新しい version を用意します。
-
-通常は M15 #79 と Release #78 の受入れ条件を満たすまで公開しません。Release owner が明示的に例外を承認する場合は、未達条件と判断根拠を対応する Issue に記録し、checkbox は完了扱いにせず残します。GitHub Release の本文には公開する version の機能と利用上の制約だけを記載します。未確認を成功として報告してはいけません。
-
-tag 作成前に開発環境の全確認コマンドを実行し、`git diff` と `git diff --cached` に非公開情報がないか確認します。GitHub Release に載せる本文を確認済み動作と利用上の制約に合わせ、候補 commit の SHA を固定します。通常は受入れ条件を満たしてから公開します。例外を承認した場合は Issue に未達条件と理由を記録します。tag と同名の Release が既にある場合は、対象 SHA と状態を確認し、自動で削除・移動しません。
-
-```bash
-git tag -a v0.5.0 -m "Taxion 0.5.0"
-git push origin v0.5.0
-git rev-parse 'v0.5.0^{commit}'
-git ls-remote origin 'refs/tags/v0.5.0*'
-```
-
-公開した tag の対象 commit が固定した候補と一致することを確認します。その後、既存の設定・インストールに影響しない隔離環境で、[利用者ガイドの導入・更新・削除手順](docs/userguide/user-guide.md#導入方法)を実行します。旧正式版からの更新だけでなく、旧開発版の pseudo-version が導入済みの状態でも、`mise install` → `mise use --pin` → `taxion --version` で対象の正式版になることを確認します。pseudo-version の過去成功を公開 tag の導入成功として扱いません。失敗した場合は Release object を公開せず、tag を保持して失敗箇所を記録します。
-
-導入確認の成功後に、GitHub Release 用の Markdown 本文を repository 外で確定し、確認結果を Issue に記録します。例外承認がある場合は、Issue に受入れ未達と判断を記録してから公開します。次の操作は tag が存在することを要求し、GitHub CLI による暗黙の tag 作成を避けます。
-
-```bash
-gh release create v0.5.0 --verify-tag --title "Taxion 0.5.0" \
-  --notes-file /tmp/taxion-v0.5.0-release-notes.md
-gh release view v0.5.0 --json tagName,targetCommitish,isDraft,isPrerelease,url,body
-```
-
-Release の tag・本文・公開状態と URL を再取得し、送信したノートと対象 tag を照合します。Release 作成後の記録だけで、未実施の導入確認や実 SDK 受入れを補ったことにはしません。
+正式な公開手順は[Binary release](docs/develop/binary-release.md)に一本化しています。
+候補と独立レビューの対象を一致させ、操作・更新・復旧の文書をコードと揃えてから公開します。
+公開済み tag と配布物は移動・置換せず、修正が必要なら新しい版を作ります。
+公開の結果と未達条件は対応する Issue・PR に残し、
+[GitHub Releases](https://github.com/hiono/taxion/releases)では利用者に影響する変更を説明します。

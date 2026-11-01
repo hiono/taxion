@@ -94,9 +94,14 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 	if err != nil {
 		return flow, err
 	}
-	runCtx, cancel := context.WithDeadline(ctx, flow.Deadline)
+	runCtx, cancel, deadlineErr := withFlowDeadline(ctx, db, flow.ID, nil, false)
+	if deadlineErr != nil {
+		// Still release the claim through the common save path.
+		err = deadlineErr
+		runCtx, cancel = ctx, func() {}
+	}
 	defer cancel()
-	for {
+	for err == nil {
 		flow, err = advanceReviewFlow(db, ledgerPath, id, runnerID, selected)
 		if err != nil || flow.Status != "RUNNING" {
 			break
@@ -224,7 +229,7 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 
 func writeReviewBudget(ctx context.Context, out io.Writer, flow core.ReviewFlow, dispatch core.GraphDispatch) error {
 	now := time.Now().UTC()
-	deadline, source := flow.Deadline, "flow"
+	deadline, source := flow.ExecutionDeadline(), "flow"
 	if caller, ok := ctx.Deadline(); ok && caller.Before(deadline) {
 		deadline, source = caller, "caller"
 	}
@@ -426,6 +431,25 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 		return encoder.Encode(event)
 	}
 	var finalOutput string
+	warned := ""
+	warnResources := func() error {
+		state, err := c.store.LoadWorkspace()
+		if err != nil {
+			return err
+		}
+		event, key, err := resourceWarning(state, dispatch, time.Now().UTC())
+		if err != nil || event == nil || key == warned {
+			return err
+		}
+		if err := c.recordEvent(dispatch.ID, streamID, *event); err != nil {
+			return err
+		}
+		if err := encoder.Encode(event); err != nil {
+			return err
+		}
+		warned = key
+		return nil
+	}
 	checkLimits := func(final bool) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -443,7 +467,13 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 			}
 			lastQuotaCheck = time.Now().UTC()
 		}
+		if !final {
+			return warnResources()
+		}
 		return nil
+	}
+	if err := warnResources(); err != nil {
+		return err
 	}
 	for {
 		select {
@@ -460,9 +490,6 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 			if !ok {
 				return fmt.Errorf("taxion: event stream ended before a terminal turn event")
 			}
-			if err := encoder.Encode(event); err != nil {
-				return fmt.Errorf("taxion: write runtime event: %w", err)
-			}
 			if monitor {
 				window.observe(event)
 			}
@@ -478,6 +505,9 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 				if err := c.recordEvent(dispatch.ID, streamID, event); err != nil {
 					return err
 				}
+			}
+			if err := encoder.Encode(event); err != nil {
+				return fmt.Errorf("taxion: write runtime event: %w", err)
 			}
 			switch event.Type {
 			case runtime.EventOutput:

@@ -20,7 +20,7 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 
 `blocked` は入力または承認の不足を表す。`blockingConditions` と `nextRequiredApproval` を確認する。
 
-- `missing-approval-bundle`: 開発版では、元の正式な `conversation confirm --file confirmation.json` を先に照合・再実行する。未実行・未変更の READY Task に限り、確認履歴から不足 bundle を補完でき、同じ承認を取り直さない。元の要求や履歴がなければ推測で作らず、`taxion task authorize` で明示的に承認する。
+- `missing-approval-bundle`: 元の正式な `conversation confirm --file confirmation.json` を先に照合・再実行する。未実行・未変更の READY Task に限り、確認履歴から不足 bundle を補完でき、同じ承認を取り直さない。元の要求や履歴がなければ推測で作らず、`taxion task authorize` で明示的に承認する。
 - `reapproval-required`: drift を確認し、新しい token で再承認する。
 - `quality-gate-unmet`: 同一 target の独立レビューと受入れ証拠を記録する。未検証のまま `pass` にしない。
 - `handoff-held`: 次の role を一つだけ実行する場合は handoff を release する。release は実行中の role を取り消さない。
@@ -36,9 +36,43 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 - `task-not-executable`: Task は既に完了、却下、取消のいずれかである。
 - `evidence-unavailable`: 保存済み Flow の証拠を評価できない。Flow と Dispatch の結果を確認する。
 
+## runner 終了後に回答だけが残っている
+
+保存した `RUNNING` は process が生きている証拠ではない。旧 runner の終了を確認し、
+Flow・Dispatch・session・最後の受信記録を照合する。正式結果がない Reviewer には
+`workflow recover --file recovery.json` の `finalizeSavedResult:true` を使う。
+入力形式は `workflow recover --help` を参照する。
+
+Controller は元の Copilot 環境から同じ session の履歴を取得する。
+pending work・tool・hook・transcript 修復を有効にせず、モデルへ再送しない。
+保存済み実行観測との一致と、元の有効な提出期限内の最終回答・turn 終了、
+正常 shutdown を要求する。回答ファイルや shutdown の申告だけでは受理しない。
+
+`validationDeadline` は承認範囲内で設定した host 検証専用の期限であり、
+モデル実行の期限延長ではない。通常と同じ結果検証、runtime 終了、管理 worktree 解放、
+正式 receipt 保存を経て runner 所有権を回収する。入力検証や Coder は繰り返さない。
+host 検証が開始済みで、検証済み結果の保存もない場合は、結果不明として再実行を拒否する。
+保存結果を確認してから `workflow advance` へ進む。
+`REQUEST_CHANGES` の受理は製品の承認ではなく、`maxRepairs:0` も変えない。
+修正には元の指摘・候補を保持した、明示承認済みの範囲内の後続を使う。
+
 ## Flow が停止している
 
-v0.7.21-rc.5 の `artifactSource` Flow は、持込み入力の実際の Controller 検証から開始できる。
+旧 runner の生存を確認でき、まだ `RUNNING` なら、`resource_approval_required` に応じて
+時間と費用の不足を一度に確認します。`workflow budget --file` で明示した累計観測と
+残工程・検証・レビュー・保存・回答待ちを見積もり、現在の工程期限前に一括承認を得ます。
+`workflow extend` の preview hash を承認して適用すると、元記録を保持したまま
+同じ Dispatch・session・runner の有効期限と native 上限を延長できます。
+承認待ちの先回り取消や自動増額はしません。手順は
+[実行を維持した期限・予算の延長](cli-reference.md#実行を維持した期限予算の延長)を参照してください。
+
+正式停止した入力検証合格済みの成果物 Reviewer は `workflow recover-review` を使います。
+未開始か実行済みかを正確に指定し、実行済みなら `continueStoppedExecution:true` を付けます。
+期限切れ後は `deadlineRecontract` を同じ要求へ含め、必要な新期限と予算を一度に承認します。
+候補・合格 receipt・保存解析・累計消費を保持し、Coder と入力検証は繰り返しません。
+これは稼働 session の延長とは異なり、新しい Reviewer-only 後続を作る操作です。
+
+`artifactSource` Flow は、持込み入力の実際の Controller 検証から開始できる。
 `workflow show` の `artifact.validation` と `workflow budget` の `budget.artifact.validation` に、
 `PENDING`／`RUNNING`／`PASSED`／`FAILED`、対象 hash、コマンド別の実測結果を保存する。
 検証前には Dispatch がなく、持込み変更パスを Coder へ転記させる必要もない。
@@ -47,13 +81,9 @@ v0.7.21-rc.5 の `artifactSource` Flow は、持込み入力の実際の Control
 `FAILED` または実行開始後の中断は、暗黙に再検証しない。中断後は旧 process の停止を確認して
 `workflow recover` で保存済み runner を整合するが、結果不明の検証は終端停止する。
 元入力・検証出力・旧履歴を保全し、新しい契約判断から通常後続を作る。
-期限・予算・権限は引き延ばさず、publication 承認も代用しない。
+期限・予算・権限を無承認で変更せず、publication 承認も代用しない。
 
 ### Dispatch がない入力検証失敗からの修正用後続
-
-以下は v0.7.21-rc.6 の契約である。RC5 には `target` 省略の内部処理があるが、
-失敗 receipt の提案への固定と後続 worktree の確認を含むこの契約は、文書追加だけでは利用できない。
-RC5 操作機では新しい入力形式を試さず保存状態を維持し、正式な更新後にこの手順を使う。
 
 対象は `artifactSource` Flow の `STOPPED / SAFETY_STOP`、`HOLD`、
 `artifact.validation.status: FAILED`、`dispatchIds: []`、runner 解放済みの場合に限る。
@@ -98,8 +128,8 @@ intake は `artifact-predecessor:NEW_TASK_ID` 決定を自動生成し、`flowId
 `target` はキーごと省略する。空 object、架空 Dispatch、`workflow feedback-target` は使わない。
 confirm は提案固定 receipt、停止・所有権・保留、両 worktree の実入力同一性を再照合する。
 旧 Flow・失敗 receipt は不変のまま、元 Task のみ `SUPERSEDED` にする。
-RC5 で保存した未確認提案にはこの決定がないため、未使用の新 Task ID で新版の intake に再提案し、
-実際の新 hash を承認する。古い DRAFT の決定を書き換えない。
+保存提案にこの決定がない場合は未使用の新 Task ID で再提案し、新 hash を承認する。
+古い DRAFT の決定を書き換えない。
 
 ```sh
 taxion conversation confirm --file confirm.json
@@ -126,17 +156,19 @@ Coder の `changedFiles` は baseline から最終 snapshot までの全差分�
 
 Coder が製品の実装をせず Taxion の管理 skill や管理 DB・session directory を調べて停止した場合は、役割と指示の混同を先に調べる。API 接続成功は、役割が正しく割り当てられた証拠ではない。管理用 shell や広いファイル権限の追加、同じ構成の再試行を第一の対処にしない。製品の目的・担当・必要なファイルへの既存の権限・controller による検証の分担を照合する。ログの `denied-interactively-by-user` だけで実際に利用者が拒否したと断定しない。
 
-v0.7.21-rc.4 は Copilot Coder／Reviewer から同名の `taxion` 管理 skill を除外し、Dispatch の共通指示にも役割の境界を明記する。他の製品 skill を一括無効化せず、権限も増やさない。設定や指示を修正しても、終端 Flow の再送、旧 session の書換え、期限・予算の延長を許可するものではない。実装・検証・独立レビューの未実施を完了に変えず、元の停止・利用量と保存成果を保全して正式な後続を準備する。
+Copilot Coder／Reviewer には同名の `taxion` 管理 skill を除外し、Dispatch の共通指示にも役割の境界を明記する。他の製品 skill を一括無効化せず、権限も増やさない。設定や指示の修正だけで終端 Flow の再送や旧 session の書換えは許可しない。未実施工程を完了に変えず、停止・利用量・成果を保全して正式な後続を準備する。
 
 停止した Flow は `workflow show --id <flow-id>` で状態、停止 code、理由、Dispatch を確認し、`workflow evaluate --id <flow-id>` で approved/consumed/remaining と usage の完全性を確認する。`BUDGET_STOP` は ceiling 到達または usage 不明を意味する。不明な nano-AIU remaining は0として扱い、既存 bundle で新しい session/Dispatch を再開しない。部分実行の checkpoint と audit は保持し、新しい Task 契約・予算が承認されてから続行する。`workflow terminate` は未確認・未開始の Coder Dispatch に限る。
 
-`workflow recover` は runner の所有権を解放する操作であり、停止条件を解除して同じ作業を再実行する操作ではない。続行には新しい Dispatch と、必要なら新しい予算の承認が要る。
+`workflow recover` は記録済み終端結果から runner の所有権を回収する。
+未確定の保存回答がある場合は前節の結果確定を先に行う。
+停止条件の解除や同じ実行の再送は行わず、新たなモデル作業にはその範囲をカバーする承認が要る。
 
-開発版の `workflow reconcile-stopped` は、`STOPPED / SAFETY_STOP` と `HOLD` が保存され、初回の snapshot 入力を持つ Coder Dispatch だけが `ISSUED` のまま残った場合を対象とする。ACK・実行開始・session・結果・runtime receipt がある場合や、他の実行が稼働中の場合には使えない。人間が継続中の実行がないことを確認し、その根拠と配送不確実性の受入れを明示してから、preview の完全ハッシュを承認する。コマンド自身が外部実行を停止・照会するわけではない。
+`workflow reconcile-stopped` は、`STOPPED / SAFETY_STOP` と `HOLD` が保存され、初回の snapshot 入力を持つ Coder Dispatch だけが `ISSUED` のまま残った場合を対象とする。ACK・実行開始・session・結果・runtime receipt がある場合や、他の実行が稼働中の場合には使えない。人間が継続中の実行がないことを確認し、その根拠と配送不確実性の受入れを明示してから、preview の完全ハッシュを承認する。コマンド自身が外部実行を停止・照会するわけではない。
 
 適用すると Dispatch は `CANCELLED`、Task は `BLOCKED` となり、判断を追記保存する。元の停止理由・`HOLD`・承認・期限・予算は変更しない。未配信・未実行・無課金を証明せず、保持した tree はこの Dispatch の新成果ではなく、元の承認済み入力として扱う。後続 Task は別 worktree に同一入力を保全し、新提案と確認の両方に `reconciliationHash` を含める。新しい実行には別途承認が要る。通常取消だけではこの入力継承の根拠にならない。request と手順は [CLI リファレンス](cli-reference.md#停止済み初回指示の整合回復)を参照する。
 
-開発版では、`workflow repair-status --id <flow-id>` の
+`workflow repair-status --id <flow-id>` の
 `reviewContinuationCandidate` に成功済み Coder の Dispatch ID が表示される場合がある。
 保存結果の receipt と停止・所有権・引継ぎ保留の条件を確認した、レビュー専用継続の候補であり、
 実行許可ではない。新しい Task・レビュー予算の承認と対象 Git 成果物・設定の再照合を経て、
@@ -182,6 +214,6 @@ lane は read-only であり、失敗しても保存状態は変わらない。
 
 ## rollback
 
-v0.7.0 の保存形式は additive である。rollback は binary を v0.6.x に戻し、ledger を書き換えない。bundle は残るが、旧 binary は従来の検査だけを行う。再度 v0.7.0 を使う場合も bundle はそのまま読める。
+戻し先は導入する配布物の manifest で確認する。稼働実行を停止・保全し、新版の実行・承認・監査履歴を旧版で操作しない。旧版が新形式を理解できるとは限らないため、必要なら更新前の整合したバックアップを別配置で使う。履歴を削除して旧版に合わせない。具体的な導入・再登録は[配布物の rollback と制約](binary-provenance.md#rollback-と制約)に従う。
 
 gate report と lane report は観測であり、失敗しても状態を変更しない。復旧の判断は人間が行う。

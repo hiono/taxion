@@ -1,37 +1,43 @@
 # Taxion
 
-Taxion は、coding agent と相談した依頼を、承認済みの Coder・検証・独立レビューへ進める CLI ツールです。今の agent に `taxion ready` を実行させると、その agent が Taxion を操作するためのメタプロンプトを受け取ります。JSON や担当ごとの指示を利用者がコピーして渡す必要はありません。
+Taxion は、coding agent と相談した依頼を、承認済みの実装・検証・独立レビューへ進める CLI です。
+担当の使い分けと指示・成果の受け渡しを自動化し、手動コピーと不要なやり直しを減らします。
+利用者は目的・範囲・実行上限を確認して承認し、Taxion が実行と成果の証拠を保存します。
 
-利用者が作業範囲と予算を承認すると、Taxion が担当への指示、実行結果、Git の証拠、レビュー結果をローカルに記録します。独立レビューでは、Coder が作成したものと同じ内容を確認します。
-
-Planner（計画）、Coder（実装）、Reviewer（独立レビュー）はエージェントの役割です。これらのサブエージェントを動かす実行ハーネスとして、Copilot CLI（Copilot SDK 経由）または OpenCode（ACP 経由）を選びます。会話中に Taxion を操作する agent はオーケストレータで、実装・レビューを担当するサブエージェントとは区別します。
-
-GitHub・GitLab はコードや Issue を管理する開発基盤で、実行ハーネスとは別の設定です。たとえば GitLab のリポジトリで Copilot を利用できます。必要な CLI と認証は[設定ガイド](docs/userguide/configuration.md#認証の準備)で選択ごとに確認してください。
-
-v0.5.0 は、不要になった停止済み試行を履歴を保って通常一覧・計画から外す `task archive` を追加した版です。v0.4.1 の GitLab 多階層 repository 対応、v0.4.0 のゴール指向方針・保存品質評価・ACP の互換性確認を引き継ぎます。実モデルによる文書作業、同一成果物の独立レビュー、部分成果からの復旧の記録は [Issue #78](https://github.com/hiono/taxion/issues/78)・[Issue #79](https://github.com/hiono/taxion/issues/79)・[Issue #80](https://github.com/hiono/taxion/issues/80)、版ごとの機能と制約は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
+Planner は計画、Coder は実装、Reviewer は独立レビューを担当します。
+実行ハーネスには Copilot CLI（Copilot SDK 経由）または OpenCode（ACP 経由）を選びます。
+GitHub・GitLab などの開発基盤とは別の設定で、GitLab のコードを Copilot で開発することもできます。
+対応する契約と利用枠の選択は[課金ガイド](docs/userguide/billing.md)を参照してください。
 
 ## 使い始める
 
-Taxion は、既存 Coding Agent の使い分けと指示・成果の受け渡しを自動化し、手動コピーと不要なモデル消費を減らすためのツールです。安価な実行先であっても検証と独立レビューを省かず、再試行を含めて完了までの費用を評価します。Copilot と OpenCode の利用枠・残量確認は一律にせず、選択した提供元と Task の承認済み契約に従います。選択方法は[課金ガイド](docs/userguide/billing.md#runtimeと利用枠ごとの選択)に記載しています。
+[利用者ガイド](docs/userguide/user-guide.md#導入方法)から正式バイナリを導入し、
+今の coding agent に `taxion ready` を実行して出力を読むよう伝えます。
+その agent が操作を担当するため、利用者が JSON や担当別 prompt を転記する必要はありません。
+`ready` 自体はモデルを呼ばず、設定や workspace も変更しません。
 
-製品運用向けの配布・導入手順は [正式バイナリと運用モード](docs/userguide/binary-provenance.md) を参照してください。GitHub backend の binary archive と承認済み provenance policy を使い、`go:` backend や source build は隔離した development mode に限定します。公開・platform 検証の完了前に候補を導入しません。
+`taxion init` で実行環境を準備し、利用者が提案と検証・レビュー・上限を承認して進めます。
+外側の coding agent を使わない場合は `taxion request` から内部 Planner に相談できます。
+導入から結果確認までの順序は[最初の依頼を進める](docs/userguide/README.md#最初の依頼を進める)にまとめています。
 
-[利用者ガイド](docs/userguide/user-guide.md)に、公開版・ソースからの導入、今の agent への `taxion ready` による操作手順の出力、設定・承認から結果確認までを記載しています。mise での導入・更新は、`mise install` → `mise use --pin` → `taxion --version` の順です。[導入・更新手順](docs/userguide/user-guide.md#導入方法)には、旧開発版が再選択される場合の注意も記載しています。
+## 保存した成果から続ける
 
-外側の coding agent を使わず、Taxion 内部の Planner と計画を相談する `taxion request` も別の入口として使えます。必要な option は[CLI リファレンス](docs/userguide/cli-reference.md)、設定ファイルと環境変数は[設定ガイド](docs/userguide/configuration.md)で確認できます。復旧・Memory・リモート接続などの文書は[利用者向け文書の一覧](docs/userguide/README.md)から参照できます。
+Taxion は作業条件、担当への指示、Git の対象、検証・レビュー結果、観測した利用量を保存します。
+独立レビューは実装と同じ成果物を対象にし、合格した検証を根拠なく繰り返しません。
+人が用意した成果物や途中の作業も、目的と実施済みの検査を明示してレビューできます。
 
-初回利用は[導入から結果確認までの順序](docs/userguide/README.md#最初の依頼を進める)、作業が停止した場合は[保存成果からの継続](docs/userguide/README.md#止まった作業を続ける)をたどってください。参照資料をすべて読む必要はありません。
+時間と費用が不足する見込みは、停止前にまとめて判断します。
+稼働実行の正式な上限変更は同じ session を維持し、正式停止後は成果と記録を引き継ぐ後続を作ります。
+操作と適用条件は[保存成果からの継続](docs/userguide/README.md#止まった作業を続ける)と[復旧ガイド](docs/userguide/failure-recovery.md)を参照してください。
+同じ承認内の内部遷移と、上限・権限の追加承認は区別します。
 
-`taxion doctor` で、設定したバックエンドと同じ検索先から見つかる skills・plugins・指示等を確認できます。通常はバックエンドの標準配置を使い、Taxion 用 directory へのコピーや skill ごとの hash 承認は不要です。
+## 仕組みを理解する・開発する
 
-`taxion init` が不足設定を尋ね、Git 除外・Project 設定・DB を準備します。`taxion doctor fix` は明示的な設定修復、`taxion completion bash` は設定不要の補完です。`taxion --help` の目的別一覧と `taxion ready` の状況別案内から、必要な操作を選べます。[設定と実行前の確認](docs/userguide/user-guide.md#設定と実行前の確認)で初回手順と旧版との違いを確認してください。
+[アーキテクチャ](docs/develop/architecture.md)は、CLI、Controller、実行ハーネス、
+保存状態と Git 成果物の関係を説明します。
+[開発への参加方法](CONTRIBUTING.md)から環境の準備と PR の手順へ、
+[開発者向け索引](docs/develop/README.md)から変更箇所の仕様へ進めます。
 
-引数なしの `ready` はモデルを呼ばず、設定や workspace も変更しません。明示的な `ready --install-skill` は標準の home 配下に版付き操作 skill を配置し、`ready --check-skill` はその互換性と内容を JSON で確認します。更新は `ready --update-skill` で明示し、利用者の編集は上書きしません。ただし、配置や出力だけで agent の実ロード・判断・操作品質を保証するコマンドではありません。外側の agent の費用と、その後の Taxion によるモデル実行の費用は別です。
-
-Taxion は coding agent や Git の認証を提供しません。新しい実行は予測不能な token 閾値で停止せず、各 model call で取得した利用量を報告します。account 残高・利用率は同じ課金単位の allowance を確認できない場合に unavailable と表示します。SDK session ceiling は別の soft ceiling で、総請求額を保証しません。
-
-## 開発する
-
-v0.4.0 では、共通・担当別のゴール指向方針、文書整合の acceptance、保存証拠を評価する `workflow evaluate` を追加しています。v0.3.1 には含まれません。評価は総合得点や学習時の報酬関数ではなく、品質未達を低コストで相殺しないための確認です。実モデルの行動品質・費用改善は実証しておらず、[Issue #90](https://github.com/hiono/taxion/issues/90) で公開機能とは分けて追跡します。
-
-[開発への参加方法](CONTRIBUTING.md)に、開発環境と変更時の確認事項を記載しています。[開発者向け文書の一覧](docs/develop/README.md)から、要件、現在の仕様、[ロードマップ](docs/develop/roadmap.md)、[設計判断の記録（ADR）](docs/develop/adr/)を参照できます。[脆弱性の報告](SECURITY.md)は公開 Issue ではなく、案内に従って非公開で行ってください。
+公開版の変更と検証結果は[GitHub Releases](https://github.com/hiono/taxion/releases)にあります。
+過去の判断は [ADR](docs/develop/adr/)に保存し、現在の使い方とは分けて扱います。
+脆弱性は [SECURITY.md](SECURITY.md) に従って非公開で報告してください。

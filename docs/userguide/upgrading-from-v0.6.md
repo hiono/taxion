@@ -1,52 +1,34 @@
-# v0.6.x からの更新
+# v0.6.x の保存状態からの更新
 
-v0.7.0 は v0.6.x の ledger をそのまま読む。必須の移行 command はない。更新後に必要な操作は、workspace の承認分類の確認だけである。
+このページは古い workspace の承認分類を確認するための補足である。
+現在の配布物の導入・policy 更新は[正式バイナリと運用モード](binary-provenance.md)、
+一般の操作は[利用者ガイド](user-guide.md)を参照する。
+旧版同士の差分を、現在の唯一の更新手順として使わない。
 
-## 変わること
+## 更新前に状態を保全する
 
-- Task の承認が bundle として追記される。
-- 実行入口が stage ごとに bundle を検査する。
-- contract・execution・publication の gate report を CLI から読める。
-- 実行前の read-only lane をモデル session なしで実行できる。
-- gate と lane の report は credential を伏せる。
-- Task 単位で Dispatch、session、usage、経過時間、repair/re-review を集計し、承認済み上限を表示する。
-- usage が不明・不完全な場合や上限到達時は `BUDGET_STOP` とし、新しい session・Dispatch を開始しない。
-- 未確認・未開始の Coder Dispatch に限り、Flow を hold して新しい Task 契約で再承認する最低限の再契約を行える。
-- approval、usage、budget stop、再契約の監査記録は追記のみで保存される。
-- v0.7.1 では READY Task の設定承認を `taxion task reauthorize --task TASK_ID` で追加できる。Task 契約、state、proposal hash、既存 decision は変更せず、確認済みの ApprovalBundle と設定承認 decision を追記する。
+実行を正式に停止し、session・runner の状態を確認して、整合した DB と設定・Git 成果物を保全する。
+同じ保存先を維持し、新配布物の固定値を承認して provenance policy と管理 skill を更新する。
+新 binary が旧 policy を自動で上書きすることはない。
 
-## 変えないこと
+## 保存済み承認を分類する
 
-- 既存 Task、Dispatch、Flow の保存形式と意味。
-- 既存 CLI の人間向け出力。
-- 既存の validation、review、publication の手順。
-- v0.6.x の Task が `verified-legacy` として実行入口を通る挙動。
+承認束の導入前の Task は、保存形式と根拠から `verified-legacy` または
+`invalid-or-ambiguous` に分類する。承認束を要求する graph は `bundle-required` として扱う。
+分類は graph 全体で決まり、Task ごとに混在させない。
 
-## 更新後の確認
+`taxion task graph` で保存状態を確認し、実行予定の Task の contract gate を読む。
+`pass` は既存契約での判定、`blocked` は必要な承認・証拠の不足、
+`fail` は矛盾や前提の不成立を示す。gate の成功だけでモデルや公開を自動開始しない。
 
-1. binary を更新する。
-2. `taxion doctor` で設定と保存先を確認する。
-3. `taxion task graph` で Task と承認の保存状態を確認する。
-4. 実行予定の Task で `taxion gate contract --task <task-id>` を実行する。
-
-| verdict | 対応 |
-| --- | --- |
-| `pass` | そのまま実行できる |
-| `blocked` | `nextRequiredApproval` に従って承認または証拠を追加する |
-| `fail` | 保存記録の矛盾を調査する。自動承認しない |
-
-`verified-legacy` の Task を bundle-required の運用に移す場合は、現在の契約で再承認する。手順は[drift と legacy Task](drift-and-legacy.md)を参照する。
-
-## 分類の確認
-
-更新直後の workspace は、保存済み schema 情報から `bundle-required` か `verified-legacy` のどちらかに分類される。分類は graph 全体で決まり、Task ごとに混在させない。実行予定の Task について、gate で分類と verdict を確認する。
+`verified-legacy` を bundle 必須の運用へ移す場合は現在の契約を正式に承認する。
+既存 READY Task の設定変更は `taxion task reauthorize --task TASK_ID` で追記し、
+元の契約・決定・proposal hash を上書きしない。詳しくは
+[drift と legacy](drift-and-legacy.md)と[承認操作](task-validate-and-authorize.md)を参照する。
 
 ## rollback
 
-binary を v0.6.x に戻しても ledger は書き換えない。旧 binary は v0.7.0/0.7.1 が追記した ApprovalBundle を認識せず、従来の検査だけを行う。v0.7.1 の READY Task 再承認が追加した canonicalization version 2 の bundle を保持したまま v0.7.0 へ戻すと、その bundle は未知の版として拒否されるため、再承認後の運用では v0.7.1 以降を使う。v0.6.x へ戻した環境で実行を続ける判断は、利用者が保存状態を確認して行う。
-
-rollback 後に gate report を再実行すると `observedAt` は新しくなるが、保存状態は変わらない。
-
-## 既知の制限
-
-v0.7.0 の範囲と制限は[v0.7.0 の既知の制限](v0.7.0-known-limitations.md)を参照する。Task 単位の集計、hard budget stop、最低限の再契約は v0.7.0 に含まれる。高度な集計分析、provider 横断の billing 集計、利用量予測、一般化した再契約 policy、dashboard と履歴分析は対象外である。
+新しい承認・指示・検証・復旧・延長監査を保存した DB を、それを理解しない旧 binary で操作しない。
+戻す場合は現在の成果を保全し、適用前の整合バックアップを別配置で使う。
+承認束や監査を削除して旧版に合わせる操作は行わない。
+利用可能な戻し先は導入するリリースの manifest、現在の適用範囲は[既知の制限](v0.7.0-known-limitations.md)で確認する。

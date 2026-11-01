@@ -35,6 +35,7 @@ type ReviewFlow struct {
 	HandoffChanges    []HandoffChange    `json:"handoffChanges,omitempty"`
 	Feedback          []FlowFeedback     `json:"feedback,omitempty"`
 	InstructionDrafts []InstructionDraft `json:"instructionDrafts,omitempty"`
+	Extensions        []FlowExtension    `json:"extensions,omitempty"`
 }
 
 type FlowBudget struct {
@@ -93,6 +94,7 @@ func (g TaskGraph) ReviewFlow(id string) (ReviewFlow, bool) {
 			flow.HandoffChanges = slices.Clone(flow.HandoffChanges)
 			flow.Feedback = cloneFlowFeedback(flow.Feedback)
 			flow.InstructionDrafts = cloneInstructionDrafts(flow.InstructionDrafts)
+			flow.Extensions = slices.Clone(flow.Extensions)
 			return flow, true
 		}
 	}
@@ -119,6 +121,9 @@ func (g TaskGraph) validateReviewFlows() error {
 			return graphError("invalid bounded review flow %q", flow.ID)
 		}
 		budget := flow.Budget
+		if err := flow.validateExtensions(); err != nil {
+			return err
+		}
 		if err := flow.StagePlan.Validate(flow); err != nil {
 			return err
 		}

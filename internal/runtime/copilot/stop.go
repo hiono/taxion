@@ -2,7 +2,9 @@ package copilot
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/hiono/taxion/internal/core"
@@ -23,14 +25,26 @@ func NewForStop(dispatch core.GraphDispatch, cli, base string) (*Adapter, error)
 		Role: dispatch.Recipient, WorkingDirectory: dispatch.Instruction.Worktree,
 		SystemPrompt: "Cancel the saved session only. No execution is authorized.",
 		CLIPath:      cli, BaseDirectory: base,
+		ResponseSchema: map[string]any{"$id": "urn:taxion:dispatch-result:bound:v1"},
 	}
 	if dispatch.Configuration != nil {
 		config.Configuration = dispatch.Configuration.Selection
+	}
+	// A crash can occur after releasing the managed worktree but before saving
+	// the result. Only the nonexecuting client may start from its source then.
+	releasedWorktree := false
+	if _, err := os.Lstat(config.WorkingDirectory); errors.Is(err, os.ErrNotExist) &&
+		dispatch.Recipient == "REVIEWER" && dispatch.ReviewWorktreeSource != "" {
+		config.WorkingDirectory = dispatch.ReviewWorktreeSource
+		releasedWorktree = true
 	}
 	adapter, err := New(config)
 	if err != nil {
 		return nil, err
 	}
 	adapter.stopSessionID, adapter.stopConfigHash = dispatch.RuntimeSessionID, dispatch.RuntimeConfigHash
+	if releasedWorktree {
+		adapter.config.WorkingDirectory = dispatch.Instruction.Worktree
+	}
 	return adapter, nil
 }

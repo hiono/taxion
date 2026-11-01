@@ -98,6 +98,18 @@ type StopAttachment interface {
 	ResumeForStop(context.Context, string) error
 }
 
+// SavedTurn is observed from the bound provider session, never supplied as a
+// caller-authored result. Reading it must not resume pending execution.
+type SavedTurn struct {
+	SessionID   string               `json:"sessionId"`
+	Payload     string               `json:"payload"`
+	SubmittedAt time.Time            `json:"submittedAt"`
+	FinishedAt  time.Time            `json:"finishedAt"`
+	HistoryHash string               `json:"historyHash"`
+	Events      []Event              `json:"events"`
+	UsageTotals []core.DispatchUsage `json:"usageTotals,omitempty"`
+}
+
 // ManagedCommit binds the host operation, not an agent-selected repository or scanner.
 type ManagedCommit struct {
 	DispatchID string

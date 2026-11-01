@@ -12,10 +12,12 @@ import (
 	"io"
 	"math"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/hiono/taxion/internal/config"
@@ -402,7 +404,9 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			expired, duration = true, time.Nanosecond
 		}
 	}
-	ctx, cancel := signalContext(duration)
+	signalCtx, cancelSignal := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancelSignal()
+	ctx, cancel := context.WithTimeout(signalCtx, duration)
 	defer cancel()
 	if err := os.Chmod(workspaceDBPath(), 0600); err != nil {
 		return fmt.Errorf("request requires a private workspace database: %w", err)
@@ -515,7 +519,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				}
 			}
 			terminalReported = true
-			return finishRequestExecution(ctx, db, &operation, &checkpoint, runner, *cli, *base, output)
+			return finishRequestExecution(signalCtx, db, &operation, &checkpoint, runner, *cli, *base, output)
 		}
 	}
 	if resuming && checkpoint.PlannerStarted {
@@ -780,7 +784,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				return err
 			}
 			terminalReported = true
-			return finishRequestExecution(ctx, db, &operation, &checkpoint, runner, *cli, *base, output)
+			return finishRequestExecution(signalCtx, db, &operation, &checkpoint, runner, *cli, *base, output)
 		}
 		if line == "" || strings.HasPrefix(line, "/") {
 			return fmt.Errorf("enter feedback in natural language, /approve or /quit")

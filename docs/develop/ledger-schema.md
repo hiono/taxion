@@ -1,28 +1,54 @@
-# Ledger のデータ形式
+# Ledger と workspace のデータ形式
 
-この文書は既存 Ledger の wire を定義する。
-版付き Task Graph は別ファイルとして導入し、ここにあるキーを変更しない。
-現在の操作は [Task Graph](task-graph.md)、
-分離と移行の決定は
-[ADR-0022](adr/0022-sqlite-atomic-workspace-state.md) を参照する。
+現在の保存単位は SQLite の workspace である。`store.Workspace` は基本記録の
+`Ledger`、実行契約と工程の `Graph`、実行・復旧・公開証拠の `Records` を同じ transaction で扱う。
+Task Graph が別ファイルに保存される構成ではない。
+全体の責務は[アーキテクチャ](architecture.md)、状態遷移は [Task Graph](task-graph.md)を参照する。
 
-以下の JSON 形式は、Go の core・CLI・API（`internal/core`、`internal/server`）と TypeScript の表示処理（`web/`）の間で固定した契約である。M2（#9〜#11）の終了時、2026-10-10 に固定した。
+## 現在の保存構造
+
+`internal/store/sqlite.go` が接続と transaction、`documents.go` が記録単位の保存を担当する。
+`workspace_documents` は area・field・position ごとに内容と hash を持ち、
+配列は要素単位、scalar と空値は position `-1` で保存する。
+`workspace_strings` は長い共通文字列を共有し、保存内容は圧縮する。
+形式情報は `workspace_format`、旧一括 JSON からの移行は store が扱う。
+
+`LoadWorkspace` は一貫した状態を読み、`UpdateWorkspace` は変更前後の整合と
+追記履歴を検証して保存する。SQL を直接編集して承認や停止条件を変更する操作は提供しない。
+`Open` は作成・移行を行い、`OpenReadOnly` は既存 DB を作成・移行せず読む。
+Memory は別の DB、成果物と保持 ref は Git に存在する。
+一ファイル移送は [利用者ガイド](../userguide/user-guide.md#別マシンへの一ファイル移送)に従う。
+
+Reviewer の結果確定は `Records.Events` の `review-finalization` receipt に、
+検証済みと runtime 終了済みの二段階を追記する。結果・指示・設定・session を束縛し、
+利用量は検証済み段階で保存時点の prefix、終了済み段階で全記録を照合する。
+`saved-turn-observed` は復旧要求、native 履歴 hash、回答・turn 完了時刻と shutdown 集計を保存する。
+利用量の不足分だけを Graph と budget audit に加算し、既存の receipt と消費を保持する。
+これらは実行観測であり、正式結果の `verified-result` の代用にはならない。
+
+以下の Ledger JSON は、CLI・HTTP API と Web 表示の互換契約である。
+Graph や Records の新しい field を、ここに定義した legacy Ledger のキー追加とは混同しない。
 
 ## キーの変更条件
 
 この文書の固定 wire は legacy Ledger の Task／Dispatch を対象とする。
-`v0.7.21-rc.11` の拡張はこの wire にキーを加えず、workspace の既存追記監査
+レビュー継続はこの wire にキーを加えず、workspace の既存追記監査
 `Records.DispatchReconciliations` の任意の `kind` と、Task decision の内容を使う。
 `kind` 省略は従来の未開始取消、`executed-artifact-review-continuation-v1` は
 正式停止 receipt のある実行済み成果物 Reviewer の継続判断を表す。
 後者は旧 Flow／指示／session／結果／利用量を変更せず、
 元指示と一致する Controller 停止 receipt を検査する。未知の種別は拒否する。
-`v0.7.21-rc.12` は同じ監査に任意の `deadlineRecontract` を追加する。
+同じ監査の任意の `deadlineRecontract` は期限切れ後の後続契約を表す。
 `previousDeadline` は保存元の期限、`deadline` は承認した後続期限、
 `reason` は変更理由である。元期限の完全一致と監査時点でも未来の新期限を検証する。
 実行済み継続で監査時刻が旧期限以後なら、この明示記録を必須にする。
 既存の監査を追記後に変更せず、legacy Ledger の固定 wire と DB schema は維持する。
 `reviewInput` の内容は `kind:taxion.review-input.v1` の decision として保持する。
+稼働中の延長は `ReviewFlow.extensions` と `Records.Budgets` の
+`RESOURCE_EXTENDED` に同じ追記判断を保存する。
+各判断は basis/hash、旧・新 deadline と native 上限、actor/source/reason、承認適用時刻を保持する。
+元期限・元予算・工程計画は変えず、有効値だけを最後の判断から求める。
+新記録の読取り時も全 prefix を照合し、削除・変更・監査のない延長を拒否する。
 根拠と制約は [ADR-0058](adr/0058-recover-unstarted-artifact-review.md)、
 実行契約は [Runtime 契約](runtime-contract.md#保存結果と-checkpoint-の復旧)を参照する。
 新しい監査を旧 binary で操作せず、戻す場合は適用前の整合 backup を別配置で使う。
@@ -34,7 +60,8 @@
 3. `internal/core/wire_test.go` の更新。CI でキー集合の完全一致を確認する。
 4. `web/src/types.ts` の同時更新。
 
-データ形式は #7 まで小文字 tag への変更などが続いた。固定は、M3・M4 の作業と ADR-0012 の再検討の前提である。
+保存構造の判断は [ADR-0022](adr/0022-sqlite-atomic-workspace-state.md)と
+[ADR-0033](adr/0033-reference-results-and-persist-workspace-records-incrementally.md)を参照する。
 
 ## Ledger object の最上位
 

@@ -80,7 +80,7 @@ func TestGoalPolicyCoversEveryRoleAndRuntimePrompt(t *testing.T) {
 			"Compatible tool updates and routine method changes alone are not new permissions",
 			"actual required capabilities and saved-session compatibility",
 			"does not require re-entering the total quota",
-			"do not replay uncertain sends or extend deadlines and budgets",
+			"do not replay uncertain sends or extend limits without approval",
 			"At every path back to the user",
 			"Resolve in-contract discrepancies from saved approvals",
 			"A technical failure is not a request for unrelated consent",

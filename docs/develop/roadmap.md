@@ -1,164 +1,48 @@
 # ロードマップ
 
-段階は Foundation、Core、Local、Adapter、Server、Platform、Future の順とする。
+現在の構成は[アーキテクチャ](architecture.md)、公開済み機能は
+[利用者ガイド](../userguide/user-guide.md)と[GitHub Releases](https://github.com/hiono/taxion/releases)が正本である。
+このページは未達事項を選び、過去の開発段階へたどるために使う。
+Issue の open 状態を「機能全体が未実装」、部分実装を「受入れ完了」とは読み替えない。
 
-checked の項目は各段階で完了した作業を記録し、現在の機能一覧を表すものではない。当初の read-only Web と localhost 限定 API は、その後に範囲を拡張した。詳細な実装結果は Issue、現在の動作は [README](../../README.md) から参照する仕様文書に記載する。[判断・Milestone 対応表](decision-traceability.md)で、段階名、ADR、Issue、現在の仕様を対応付ける。
+## 進めている課題
 
-- [x] Foundation / `bootstrap`：リポジトリ、CI、設立方針、ガードレール。
-- [x] Core / `core-conformance`：順序付き Sequence（CHK-002）、JSON Ledger（LED-001）。
-- [x] Local / `cli-ux`：`task list`、`dispatch list`、JSON 出力、`--repo` の確認（REP-001）。
-- [x] Adapter / `runtime-wiring`：process 内の local Runtime。不明・失敗時は処理を許可しない。
-- [x] Server / `sqlite-ledger`：pure-Go SQLite 保存と outbox（ADR-0009）。
-- [x] Platform / `acp-spike`：stdio 上の最小 ACP v1 server（dispatch・review）。
-- [x] Platform / `web-slice`：read-only Task Graph 表示（`web/`、TS、依存なし）。
-- [x] Future / `language-split-eval`：評価し、core 固定まで延期（ADR-0012）。
-- [x] M2 / `http-read-api` (#9)：Ledger の read-only HTTP API（GET のみ、localhost）。
-- [x] M2 / `web-api-client` (#10)：Web が `taxion serve` 経由で読み取る。接続失敗は 502。
-- [x] M2 / `wire-freeze` (#11)：schema 文書（05）、CI のキー固定、ADR-0012 の固定補足。
-- [x] M3 / `proc-runtime` (#12)：process を使う Runtime と worker process の監督。標準ライブラリのみ。
-- [x] M3 / `acp-methods` (#13)：明示的な taxion/dispatch・taxion/review。慣例形式は非推奨。
-- [x] M3 / `split-reeval-2` (#14)：ADR-0013 で再び DEFER と判断し、新しい再検討条件を記録。
-- [x] M4 / `write-api` (#15)：POST tasks・dispatches・reviews。CLI と同じ検査。
-- [x] M4 / `web-console` (#16)：Task・Dispatch・review form と POST の転送。接続失敗は 502。
-- [x] M4 / `adr-revisits` (#17)：ADR-0011 の改訂、ADR-0014 の分割しない判断、schema の書込み節。
-- [x] M5 / `token-auth` (#22)：token 認証、gen-token、Web 転送、loopback 外公開の拒否。
-- [x] M5 / `audit-trail` (#23)：変更・拒否の追記専用 JSONL。操作者がローテーションする。
-- [x] M5 / `public-prep` (#24)：ADR-0015 の保護設計、履歴 scan の合格、外部公開。
-- [x] M5 / `mode-switch` (#25)：F-lite の `--mode loopback|remote`、ADR-0016、IdP の延期。
-- [x] M6 / `memory-model` (#27–#28)：ADR-0017 の層・範囲・昇格と SQLite store。[Memory](../userguide/memory-model.md)に記載。
-- [x] M6 / `guideline-promotion` (#29)：設定可能な警告閾値、明示的な構造化承認、共通 Dispatch 検査（MEM-001、ADR-0019）。
-- [x] M6 / `retrieval-spike` (#30)：Memory 検索層を評価。
-- [x] M6 / `memory-search` (#31)：FTS5 trigram による検索。[Memory](../userguide/memory-model.md)に記載。
-- [x] M7 / `memory-export-and-scope` (#32–#34, #38–#40)：sanitizer、標準出力だけの export、明示的な global 書込み。現在の操作は [Memory](../userguide/memory-model.md)に記載。
-- [x] M8 / `server-hardening` (#41–#43)：操作者の自己申告ラベル、既定5回失敗の lockout、制約を明記した audit chain 照合。
-- [x] Future / `browser-terminal-eval` (#21)：手法と shell access の脅威モデルを ADR-0018 に記録。実装は延期中で、[SSH・editor 接続](../userguide/remote-access.md#自宅から開発用-docker-を使う場合)を使う。terminal 実装には別 Issue と browser 利用者の認証が必要で、接続先の M5 token だけでは足りない。
-- [x] Adapter / `copilot-sdk-eval`：Go SDK の対応確認と adapter 実装は
-  下記 M11 の #49〜#51 で追跡する。SDK 採用と役割別 Session の目的は
-  ADR-0020 に記録した。非対応は blocker として扱う。
+| 目的 | 追跡先 |
+|---|---|
+| 承認した外枠で柔軟に続け、検証・独立レビューまで到達する | [#196](https://github.com/hiono/taxion/issues/196)、[#189](https://github.com/hiono/taxion/issues/189)、[#201](https://github.com/hiono/taxion/issues/201) |
+| 実行基盤と利用枠に応じた課金判断を一貫させる | [#234](https://github.com/hiono/taxion/issues/234) |
+| バックエンドの診断と、実サービスでの受入れを確認する | [#231](https://github.com/hiono/taxion/issues/231)、[#216](https://github.com/hiono/taxion/issues/216) |
+| 永続化・独立実行・認可・追跡など、ハーネスの到達条件を確認する | [#220](https://github.com/hiono/taxion/issues/220)と関連 Issue |
+| 保存先の正本、機器間の継続、バックアップの復旧可能性を確認する | [#192](https://github.com/hiono/taxion/issues/192)、[#137](https://github.com/hiono/taxion/issues/137)、[#215](https://github.com/hiono/taxion/issues/215) |
+| ゴール指向方針が判断品質と総費用を改善するか実測する | [#90](https://github.com/hiono/taxion/issues/90) |
 
-各作業は小さな PR とし、`gofmt + vet + test`、公開可能な文書、SHA を固定したレビューを確認する。
+優先するのは、具体的な利用を止めている問題である。
+保存成果と既存の検証を使い、未達条件に必要な変更と確認へ絞る。
+新しい仕組みや追加の実モデル比較は、目的・範囲・予算を決めてから実施する。
+最新の状態は[未完了 Issue](https://github.com/hiono/taxion/issues?q=is%3Aissue%20is%3Aopen)で確認する。
 
-## 初回設定の診断と選択
+## 利用条件が揃ってから評価する課題
 
-[milestone #25](https://github.com/hiono/taxion/milestone/25)・[#86](https://github.com/hiono/taxion/issues/86) は、v0.3.0 公開後に判明した初回設定の不足を扱う。未設定 doctor と init/fix の検出を共有し、操作順に依存させない。項目の説明・必須入力の再質問、候補・保存元・未確認の区別、生成設定と全項目の違いを示す。[ADR-0039](adr/0039-prepare-project-configuration-with-explicit-repair.md) に判断を記録する。実装・文書・回帰・公開 CI が完了条件であり、新 Release の作成は含めない。
+GitLab の追加実環境受入れは [#75](https://github.com/hiono/taxion/issues/75)、
+Bitbucket は [#76](https://github.com/hiono/taxion/issues/76)、
+M365 は [#77](https://github.com/hiono/taxion/issues/77)で追跡する。
+契約と検証環境がない対象を、既存 CLI の完了条件へ暗黙に追加しない。
+能力と確認範囲は[開発基盤の対応評価](forge-capabilities.md)を参照する。
 
-[milestone #26](https://github.com/hiono/taxion/milestone/26)・[#89](https://github.com/hiono/taxion/issues/89) は v0.3.1 向けの英語表示と選択式入力を扱う。doctor で確認した既存設定は再選択せず、未確定 provider・複数 remote と適用確認だけを選択式にする。適用確認は `Cancel` を初期値にする。Taxion の固定文言と ready 原稿は英語へ統一し、ユーザー本文・外部出力・日本語文書は保持する。正式 tag・Release と、実装の公開は区別する。
+複数利用者の権限・session 所有権は [#71](https://github.com/hiono/taxion/issues/71)、
+Planner の独立化比較は [#64](https://github.com/hiono/taxion/issues/64)、
+Rust 導入は [#65](https://github.com/hiono/taxion/issues/65)の評価対象である。
+採択前の案を現行アーキテクチャとして説明しない。
 
-v0.3.1 の tag 導入・Release 公開は [#91](https://github.com/hiono/taxion/issues/91) で扱う。ゴール指向の質問・連携・停止規則と評価設計は [milestone #27](https://github.com/hiono/taxion/milestone/27)・[#90](https://github.com/hiono/taxion/issues/90) に分離し、v0.3.1 に追加しない。
+## 過去の開発段階
 
-## 次版のゴール指向実行と評価
+Foundation・Core・Local・Adapter・Server・Platform は初期の開発順であり、
+現在の機能を分類する構造ではない。M10〜M16 も当時の到達条件を追跡する識別子である。
+完了時の対象・検証結果は[要件と到達条件](orchestration-requirements.md)、
+ADR と実装の関係は[判断対応表](decision-traceability.md)から確認する。
 
-既存の ready・Planner・Coder・Reviewer の方針との差分として、情報不足の影響と修正可能性、既存情報、質問の情報価値に基づく判断を追加する。軽微な仮定は明示して進め、重大な未確定事項はまとめて質問する。保存成果を再利用し、追加調査・再レビューは未達条件や結論を変える根拠に結び付ける。新しい Researcher・Coordinator の常設は前提にしない。
-
-品質・安全性・承認・予算・独立レビュー・同一成果物照合を制約とし、それを満たす実行同士で費用・時間・重複作業を比較する。質問数や token 数の直接減点は採用しない。開発版は共通・担当別方針、新 request の文書整合 criterion、保存証拠の `workflow evaluate` と未達時の非zero終了を実装する。[ADR-0040](adr/0040-constrain-goal-oriented-efficiency-by-quality-evidence.md) に判定の範囲と限界を記録する。固定回帰と実モデルの判断品質評価は区別し、比較実行には別の予算・期限の明示承認を必要とする。実モデルの効果測定は未実施で、次版の番号・公開日は未確定とする。
-
-比較評価は、同一実装で指定した方針文だけを変え、文書 acceptance・必須検証・権限を共通にする。144実行を最小とする案と token・時間の両方に10%削減を求める案は撤回した。6分類・A/B各1回の12実行は評価手順の予備実験案であり、実行承認でも改善の証明でもない。完了済みロールの不要な再起動、必要確認の省略、全件・全ロールの負担を調べ、欠損や小標本を成功と扱わない。原稿・課題・採点・既存記録の不足を先に特定し、評価者と実行予算・期限を確保してから予備実験を判断する。詳細と文献の確認範囲は ADR-0040、残条件は [#90](https://github.com/hiono/taxion/issues/90) に集約する。
-
-## 階層化した Memory と自動実行の計画
-
-[ADR-0020](adr/0020-layered-memory-and-role-sessions-for-orchestration.md)
-を採択した実装方針とする。既存の完了記録は個別の成果であり、
-この到達条件の達成を意味しない。
-要件と検証条件は [Taxion の要件と到達条件](orchestration-requirements.md) に定義する。
-Memory の保存・参照・指示への反映は M10〜M12 に含め、
-M14 まで延期しない。各 Issue の前提と完了条件は
-[#46](https://github.com/hiono/taxion/issues/46) から参照できる。
-
-| 段階 | 対象 | Issue |
-| --- | --- | --- |
-| [M10](https://github.com/hiono/taxion/milestone/16) | 階層化した Memory、Task Graph、Task lost の防止、実行契約 | #46〜#48・#66 |
-| [M11](https://github.com/hiono/taxion/milestone/17) | Go Copilot SDK、役割別 Session、system prompt・履歴の分離 | #49〜#51 |
-| [M12](https://github.com/hiono/taxion/milestone/18) | Memory を指示に反映する自動実装・独立レビュー、実行主体・接続先・AI 契約の分離、commit 前の混入防止、利用者の途中介入と状況・根拠の質問 | #52〜#54・#67・#69・#72〜#74 |
-| [M13](https://github.com/hiono/taxion/milestone/19) | 再起動からの復旧、永続的な作業記録、外部基盤 adapter の分離・対応評価 | #55〜#57・#70 |
-| [M14](https://github.com/hiono/taxion/milestone/20) | 仕様検索、Memory の移行、skills・tools 連携 | #58〜#61 |
-| [M15](https://github.com/hiono/taxion/milestone/21) | CLI と ACP サーバーを共通 controller に接続し、仕様検索から復旧・外部記録まで受け入れる | #62・#79 |
-| [M16](https://github.com/hiono/taxion/milestone/22) | Planner 採用と Rust 導入の評価 | #64〜#65 |
-| [0.3.0 UX](https://github.com/hiono/taxion/milestone/24) | init の設定準備、doctor fix、bash 補完、help と ready の目的別案内。M16 とは独立した実利用の改善 | #82〜#85 |
-
-0.3.0 向けの初期設定は [ADR-0039](adr/0039-prepare-project-configuration-with-explicit-repair.md) に基づく。
-モデルを呼ばずに、既存設定・Git 情報の読取りと明示確認後の準備を行う。
-初期設定の成功と、認証・契約・モデル実行の成功は区別する。
-#82〜#84 の実装・検証後に一度 closed とし、目的別案内と公開作業を #85 に追加して再開した。
-v0.3.0 では目的別 help と ready の状況別案内も追加する。版ごとの公開状態と本文は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照する。
-
-M14 は 2026-10-13 に完了した。#60 の最終 Reviewer は保存済み Coder SHA を独立に承認し、公開 worktree と実 SDK 受入れも確認した。#58〜#61 はすべて closed である。
-
-[ADR-0024](adr/0024-human-handoff-control-and-side-questions.md) に基づき、
-M12 の #73/#74 は #53 の自動進行と #67 の計画・Memory に接続し、
-#54 の実 SDK 受入れで確認した。M12 の完了範囲は後述の受入れ結果に記録する。
-M13 の #55 は再起動と競合の復旧、M15 の #62 は CLI 発行済み Dispatch の
-ACP 実行・観測を受け入れた。
-[要件と到達条件](orchestration-requirements.md)の段階別判定条件にある仕様検索・予算停止後の復旧・最終報告・外部記録までの
-end-to-end 受入れは #79 に記録し、2026-10-17 に #78・#79・#80 を完了した。
-M15 と Release 0.1.0 milestone は closed とし、その後に追加した OpenCode ACP runtime と復旧修正を v0.2.0 の対象とする。
-M16 の比較評価は未実施であり、今回のリリースには含めない。#63 は M15 の完了条件ではなく、
-実作業が発生した場合に追加で確認する後続 Issue である。
-追加 forge は M15 の完了条件に含めない。#75 は GitLab Issue API の実験結果を記録し、
-MR を使う実環境が用意された場合に残りを検証する任意の後続 issue とする。
-Web UI、複数利用者の project 権限・session 所有権は必要性が具体化した時点で再評価する。
-Bitbucket は利用契約と検証環境がないため、M15 の対象に含めない。
-質問の観測は保留・中断の制御から分けた #74 で扱い、本流への反映を #73 に接続する。
-
-M12 の実 SDK 受入れを 2026-10-12 に完了した。
-修正と新 SHA の独立再レビューについては、既存の実行証拠を保持した。
-最終検証では、依頼受付、変更契約の再承認、Memory に基づく Planner 判断を確認した。
-質問・追加調査で選択した事項の反映、独立承認、SDK の中断も確認した。
-利用量と残る制約は [M12 の実 SDK 受入れ結果](orchestration-requirements.md#m12-の実-sdk-受入れ結果) を参照する。
-
-M13 は実行・完了 checkpoint の再検証、同一 transaction の receipt・外部公開、
-出典付き失敗分析、全未公開 commit の秘密検査を実装した。
-SQLite と Git の障害回帰に加え、利用者が承認した本文を新しい CLI で実 GitHub に公開し、
-再送時に保存済み結果を再利用することを確認した。
-手順と証拠は [実行記録](../userguide/execution-records.md)、
-公式仕様と能力差は [開発基盤の対応評価](forge-capabilities.md) を参照する。
-Bitbucket の adapter は #76 で後続候補として追跡する。
-現在の CLI・ACP サーバーの基本利用は追加 forge adapter に依存しない。
-
-## project・開発基盤・AI 契約の独立した管理
-
-[ADR-0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md)
-をこの分離と設定契約の採択判断とする。
-初期の設定入力は YAML とし、TOML・JSON の設定入力は将来拡張とする。
-Go の型付き設定を共通契約として維持する。
-設定は固定 Global／Project YAML と環境変数を用い、
-優先順位を環境変数 > Project > Global とする。
-`config check` は任意ファイル指定 option を廃止し、
-`.taxion/` 全体と cwd の実 `.env` の Git 状態を検査する。
-共有 Memory の配置と runtime 接続は #69 の後続作業とする。
-mise・CI は環境変数を注入し、
-実 `.env` はローカルの未追跡・ignore 対象として扱う。
-commit 前の index・秘密検査と明示 hook 導入は M12 #72、
-未公開コミットと外部記録の公開前検査は M13 #56、
-基盤側の保護と漏えい対応の評価は #70 で実施する。
-
-Taxion の core は Task・Dispatch・判断・証拠・承認を管理し、
-外部クライアント、開発基盤、AI runtime はそれぞれの adapter を通じて接続する。
-この境界により、同じ実行契約を異なる基盤と利用者の組合せに適用する。
-
-| 管理対象 | 独立して選択・確認する情報 |
-| --- | --- |
-| project と利用者 | 複数利用者で運用する場合の参加者、依頼者、承認者、実行・レビュー・停止の権限 |
-| repository | provider、host、path、Git 操作主体とアクセス権 |
-| 作業・レビュー記録 | 接続先、Issue・PR・MR 等の種別と ID、公開・更新の権限 |
-| AI runtime | 認証主体、利用権、契約参照、費用帰属、取得可能な利用量と上限 |
-| 実行環境 | 端末・共有サーバー・CI・worker、credential 保管先、実行の分離 |
-| 再開と担当交代 | 複数利用者で運用する場合の session 所有権、権限・契約の再検査、停止・引継ぎの承認 |
-
-M12 #69 で共通契約と既存 GitHub＋Copilot の明示的な主体選択を実装し、
-#54 の実 SDK 受入れで確認した。M13 #70 は GitHub・GitLab・Bitbucket の
-対応能力と外部記録 adapter の境界を評価し、追加実装を承認された後続 Issue に分ける。
-複数利用者の project 参加と契約選択は #71 に後続候補として保持する。
-GitLab Self-Managed の追加検証は #75 で追跡する。M15 の受入れに GitLab は要求しない。
-
-GitLab・Bitbucket を含む基盤・利用者・契約・worker の組合せは、
-具体的な利用計画が決まった時点で後続の受入れ範囲を定める。
-Bitbucket は利用契約と検証環境がないため #76 に後続候補として保持する。
-契約上の費用負担者と実測できる利用量は別々に記録し、
-提供側から取得できない課金情報は取得不能として明示する。
-
-実装の順序は #69 → #54、#69・#56 → #70、
-#55・#57・#60・#61 → #62 → #79 とする。#63 は承認済みの実作業が発生した場合に行う
-後続確認であり、M15 の完了条件ではない。#75 は M15 の完了をブロックしない。
-再開時の主体・接続先・契約の照合は #55、
-最初の GitHub 外部記録 adapter は #56、
-CLI と ACP サーバーの共通 controller 接続は #62 が担当する。
+初回設定の改善は [ADR-0039](adr/0039-prepare-project-configuration-with-explicit-repair.md)、
+Memory と役割の分離は [ADR-0020](adr/0020-layered-memory-and-role-sessions-for-orchestration.md)、
+project・開発基盤・実行契約の分離は [ADR-0023](adr/0023-independent-project-forge-runtime-and-configuration-contracts.md)、
+ゴール指向の判断は [ADR-0040](adr/0040-constrain-goal-oriented-efficiency-by-quality-evidence.md)に記録している。
+当時の「次版」の手順や完了済みの作業計画は、現在の操作手順へ重ねて掲載しない。

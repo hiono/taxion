@@ -62,7 +62,7 @@ func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 		inputHash, err := core.CanonicalSHA256(prior.Contract)
 		target, targetErr := core.ObserveFeedbackTarget(dispatch)
 		if audit.DeadlineRecontract != nil {
-			if !audit.ArtifactReviewer() || audit.DeadlineRecontract.Validate(prior.Deadline, audit.At) != nil {
+			if !audit.ArtifactReviewer() || audit.DeadlineRecontract.Validate(prior.ExecutionDeadline(), audit.At) != nil {
 				return fmt.Errorf("invalid artifact Reviewer deadline recontract audit")
 			}
 		}
@@ -72,7 +72,7 @@ func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 				!recordHash(audit.PreviewHash) || audit.Actor == "" || audit.Source == "" || audit.Reason == "" ||
 				len(audit.Evidence) == 0 || !audit.NoActiveExecutionConfirmed || !audit.AcceptDeliveryUncertainty ||
 				audit.DeliveryStatus != "execution-observed-stop-confirmed-usage-may-be-incomplete" ||
-				audit.At.IsZero() || !audit.At.Before(prior.Deadline) && audit.DeadlineRecontract == nil ||
+				audit.At.IsZero() || !audit.At.Before(prior.ExecutionDeadline()) && audit.DeadlineRecontract == nil ||
 				!prior.StoppedExecutedArtifactReviewer(before) || !reflect.DeepEqual(flow, prior) ||
 				!reflect.DeepEqual(dispatch, before) || target != audit.Target {
 				return fmt.Errorf("invalid executed artifact Reviewer continuation audit")

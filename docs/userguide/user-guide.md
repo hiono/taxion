@@ -8,72 +8,33 @@ Task は一件の作業記録で、目的・変更範囲・完了条件・検証
 
 ## 導入方法
 
-新しい製品運用環境への導入は [正式バイナリと運用モード](binary-provenance.md) に従います。以下の Go backend / source build 手順は旧版の説明と development mode 用であり、product mode の正式導入には使いません。新 CLI の `init` 等を実行する前に、同ガイドの明示 mode policy を登録してください。
-
-v0.5.0 tag は Go 1.26.0 で導入できます。各 version の変更内容は [GitHub Releases](https://github.com/hiono/taxion/releases) を参照してください。
-
-このガイドは v0.5.0 の機能を説明しています。OpenCode ACP は v0.1.0 に含まれません。
-停止済み試行の archive を使う場合は v0.5.0 を導入してください。GitLab のサブグループ付き repository path は v0.4.1、ゴール指向方針・保存品質評価・ACP の互換性確認は v0.4.0 から利用できます。開発中の変更を試す場合は main のソースからビルドします。
-公開 tag を導入しただけでは、後から追加された機能は使えません。
+製品運用では [GitHub Releases](https://github.com/hiono/taxion/releases) の正式バイナリを版指定で導入します。
+このガイドは同じソースの CLI を対象とし、古い版の操作を併記しません。
+公開版の選択、ハッシュと出典の照合、運用 policy の初回登録は
+[正式バイナリと運用モード](binary-provenance.md)に従ってください。
+以下は今回の候補版を選ぶ例であり、安定版への自動更新指定ではありません。
 
 ```sh
-mise use -g go@1.26.0
-mise install go:github.com/hiono/taxion/cmd/taxion@v0.5.0
-mise use -g --pin go:github.com/hiono/taxion/cmd/taxion@v0.5.0
+mise install github:hiono/taxion@0.7.21-rc.13
+mise use --pin github:hiono/taxion@0.7.21-rc.13
 mise exec -- taxion --version
 mise exec -- taxion --help
 ```
 
-更新時も、先に `mise install` で対象版を導入し、次に `mise use --pin` で選択してから版を確認します。`v0.5.0` は導入したい公開 version に置き換えます。次は、対象プロジェクトの directory で実行する例です。
+更新も先に対象版を導入してから選択します。稼働実行を旧バイナリのまま更新せず、
+台帳・設定・成果物の整合バックアップを保存してください。
+既存の `operation-policy.json` は自動上書きしません。承認した新しい配布物へ
+policy を正式更新し、同じ明示 store で `provenance verify` を行います。
+管理スキルの更新が許可されている場合は `ready --update-skill`、
+`ready --check-skill`、`ready` で版と操作契約を確認します。
+DB の削除・初期化し直しは更新手順ではありません。
 
-```sh
-mise install go:github.com/hiono/taxion/cmd/taxion@v0.5.0
-mise use --pin go:github.com/hiono/taxion/cmd/taxion@v0.5.0
-mise exec -- taxion --version
-```
-
-v0.5.0 の期待する表示は `taxion v0.5.0` です。global 設定を更新する場合は `mise use` に `-g` を付けます。プロジェクトの mise 設定に Taxion の指定がある場合は、global 設定よりそちらが優先されるため、プロジェクト側も更新してください。
-
-旧開発版が導入済みの場合、`mise use` だけでは、古い pseudo-version が再選択されることがあります。`--pin` は解決した版を保存する指定で、この再選択を防ぐものではありません。先に `mise install ...@v0.5.0` を実行して正式版を導入してください。古い版の個別削除や cache 消去、`.taxion` の設定・DB の削除や初期化し直しは不要です。
-
-v0.3.1 では `taxion --help` の先頭に `Version:` を表示し、`taxion --version` でも同じビルド情報を確認できます。Go の module version を使うため、公開 tag の導入では `v0.3.1`、commit 固定の導入では完全な pseudo-version を表示します。Git 情報を持つソースビルドでは revision と、未コミット変更がある場合の `modified=true` も表示します。情報のないビルドを公開版と推測せず、取得できない旨を表示します。設定・DB・外部 CLI は読みません。公開済み v0.3.0 と初回設定補正版 `dd352cf` には、この版表示は含まれません。
-
-```sh
-mise install 'go:github.com/hiono/taxion/cmd/taxion@<VERSION>'
-mise use -g --pin 'go:github.com/hiono/taxion/cmd/taxion@<VERSION>'
-mise exec -- taxion --version
-```
-
-削除するには、global mise 設定から Taxion を外します。
-
-```sh
-mise unuse -g go:github.com/hiono/taxion/cmd/taxion
-```
-
-Go backend の導入済み version が残り、他の設定でも使っていなければ、mise から個別に削除できます。
-
-```sh
-mise uninstall go:github.com/hiono/taxion/cmd/taxion@v0.5.0
-```
-
-ソースから実行する場合は Go 1.26.0 が必要です。
-
-```sh
-git clone https://github.com/hiono/taxion.git
-cd taxion
-mise install
-mise exec -- go build -o ./bin/taxion ./cmd/taxion
-export PATH="$PWD/bin:$PATH"
-./bin/taxion --help
-```
-
-`mise exec --` を使うため、shell への mise 有効化設定はビルドの前提ではありません。
-
-`go:` backend は Go の実行可能 package を `go install` で導入します。[mise の Go backend](https://mise.jdx.dev/dev-tools/backends/go.html) で Go と Taxion の version を選択できます。
+開発用のソースビルドと必要な Go の版は[開発環境](../../CONTRIBUTING.md#開発環境)を参照してください。
+ソースビルドを正式配布物と扱わず、development mode を明示します。
 
 ## 設定と実行前の確認
 
-以下の `init`・`doctor fix`・bash 補完は v0.3.0 の操作です。v0.2.0 の `init` は DB だけを作るため、その版では[設定ガイド](configuration.md)の YAML と Git 除外設定を手動で用意します。
+このガイドは現行 CLI の操作を説明します。設定項目の詳細は[設定ガイド](configuration.md)を参照してください。
 
 対象の Git repository で `taxion init` を実行します。既存の Global・Project 設定を読み、単一の Git remote から host と namespace/path を取得します。複数 remote は選択が必要です。GitLab Self-Managed など、host だけで provider を確定できない場合は provider も確認します。開発基盤と実行ハーネスの account は別々に指定します。
 
@@ -90,17 +51,17 @@ runtime や個人用 credential・contract・execution approval を設定せず�
 
 `init` は不足項目を尋ね、設定への追加と Git 除外規則を表示します。適用を確認すると、Project 設定と DB を準備します。有効な `.git/info/exclude` の規則があれば再利用し、不足時だけ `.gitignore` へ追記します。既存設定の値は変更せず、省略項目だけを補います。DB が作成済みでも、設定の準備は続行できます。設定ファイルの権限は新規作成・更新時に `0600` とします。
 
-v0.3.1 では、端末上の未確定 provider・複数 remote・適用確認を上下キーと Enter で選択します。適用確認の初期値は `Cancel` で、`Apply` を選んだ場合だけ保存します。`yes` の文字入力は不要です。Ctrl-C・入力の終了では適用せず終了します。account・契約・承認参照などの自由入力は従来どおりです。非対話環境では、不足項目をすべて `--set` で渡し、`--dry-run` で変更案を確認後、同じ指定を `--yes` に替えて明示適用できます。`--yes` は表示する設定・Git 除外変更を保存する指定で、Task や予算の実行承認ではありません。公開済み v0.3.0 の適用確認は文字入力です。
+端末上の未確定 provider・複数 remote・適用確認は上下キーと Enter で選択します。初期値は `Cancel` で、`Apply` を選んだ場合だけ保存します。Ctrl-C・入力の終了では適用しません。非対話環境では不足項目を `--set` で渡し、`--dry-run` で確認後、同じ指定を `--yes` に替えて適用します。`--yes` は設定・Git 除外変更の保存であり、Task や予算の実行承認ではありません。
 
 設定済みの provider や repository は再選択しません。`doctor` で確認した設定もそのまま使い、別の backend が PATH にあっても尋ね直しません。Git remote から一意に確定する値も入力不要です。未設定で複数候補がある場合や、private host から provider を特定できない場合だけ選択します。実行ファイルが見つかっただけでは利用する backend は確定しません。変更がなければ適用確認も省略します。
 
-v0.3.1 では、Taxion が用意する案内・質問・エラー・`doctor` の見出し・`ready` の操作手順を英語に統一しています。言語切替はありません。利用者の依頼・ファイル名・保存済み本文と、外部 CLI・モデルが返す内容は翻訳しません。日本語の依頼や既存の会話入力 alias も引き続き使えます。文書と GitHub Issue の日本語表記は変更しません。
+Taxion の案内・質問・エラー・`doctor`・`ready` の操作手順は英語です。言語切替はありません。利用者の依頼・ファイル名・保存済み本文や外部 CLI・モデルの応答は翻訳しません。日本語の依頼も使えます。
 
-v0.3.0 の対話入力では、候補のない質問に空入力すると、最後に一般的な入力エラーで終了します。v0.3.1 では各項目の意味と選択肢を表示し、必須項目の空入力・不正値はその場で再入力を求めます。候補が表示された項目は Enter で候補を選べます。Ctrl-C または入力の終了で中止した場合は、適用前なので設定・Git 除外・DB を変更しません。
+対話入力では必須項目の空入力・不正値をその場で確認します。表示された候補は Enter で選べます。適用前に中止した場合は設定・Git 除外・DB を変更しません。
 
-v0.3.1 では、設定がなくても `taxion doctor` が設定元、Git remote の候補、対応する runtime と PATH 上の実行ファイル、未設定・未確認の項目を表示します。設定不足は非zero終了となり、backend の詳細な一覧取得や Dispatch 検査には進みません。`doctor --json` では `setup` と `problem` を返します。壊れた設定や追跡済みの設定は、その問題を先に報告します。公開済み v0.3.0 の `doctor` は設定不足時にこの一覧を出しません。
+設定がなくても `taxion doctor` は設定元、Git remote 候補、runtime と PATH 上の実行ファイル、未設定・未確認の項目を表示します。設定不足では非zero終了し、backend の詳細な一覧取得や Dispatch 検査には進みません。`doctor --json` は `setup` と `problem` を返します。壊れた設定や追跡済みの設定は先に報告します。
 
-`doctor` を先に実行する必要はありません。v0.3.1 の `init` と `doctor fix` は同じ検出処理を実行し、その時点の環境を表示してから不足項目を尋ねます。前回の診断を保存・再利用せず、Git remote や PATH が変われば取り直します。検出した候補、既存設定の採用元、入力待ち、適用する追加設定を分けて表示するため、実行ファイルが見つかっただけで backend の選択・認証・承認が済んだことにはなりません。
+`doctor` を先に実行する必要はありません。`init` と `doctor fix` はその時点の環境を検出し、不足項目を尋ねます。実行ファイルの発見だけで backend の選択・認証・承認が済んだとは扱いません。
 
 生成する YAML は今回不足した設定であり、全項目のひな型ではありません。Global・環境変数から継承した値は複写せず、任意の `execution.budgetGuidance` と OpenCode 専用項目の要否は別に案内します。全 field と候補値は[設定ガイド](configuration.md#設定ファイル)、保存後の採用元は `taxion config check --sources` で確認します。
 
@@ -153,7 +114,7 @@ command -v taxion >/dev/null 2>&1 && source <(taxion completion bash)
 Linux では `runtime.provider: opencode` を選び、承認した OpenCode の executable と
 server 設定を使えます。[OpenCode の設定と制約](configuration.md#opencode-acp-の設定と制約)で
 必要な隔離環境、設定の内容 hash、未対応操作を確認してください。
-v0.4.0 では CLI の版固定や更新ごとの手動照合は不要です。Taxion が接続時の互換性を確認し、
+接続時には OpenCode との互換性を確認し、
 起動する実行ファイルの複製と内容 hash の記録を行います。
 厳密な再現性が必要な場合だけ実行ファイルの hash も固定できます。現在は認証情報を注入せず、
 実受入れは匿名の Big Pickle に限定しています。`doctor` と `runtime auth` は local asset の
@@ -281,15 +242,15 @@ taxion ready --check-skill
 taxion ready --update-skill
 ```
 
-配置先は OS が解決した home の `.agents/skills/taxion/SKILL.md` です。home の解決には Windows の `%USERPROFILE%` も使います。ただし、現在の Taxion 本体は検証コマンドの停止処理に Unix 専用 API を含み、Windows 向けビルドは通りません。Windows 実機での配置・実行も未確認であり、このパス対応だけで Windows 対応済みとは扱いません。
+配置先は OS が解決した home の `.agents/skills/taxion/SKILL.md` です。Windows は `%USERPROFILE%` も使います。対応 OS・architecture と配布物の検証結果は、導入するリリースの manifest と CI を確認してください。
 
 配置に symlink は使わないため、その作成用の権限は不要です。既存パスの symlink は追跡せず拒否し、管理対象外・改変済みファイルは上書きしません。初回配置は既存ファイルを置換せず、更新時も一時ファイルから完成した一ファイルを入れ替えます。filesystem の書込み許可・hard link・rename の対応は必要です。
 
-v0.3.1 の同梱 skill は `1.2.0`、v0.4.0 はゴール指向方針を含む `1.3.2` です。CLI 操作契約は `taxion.cli.v1` を維持します。v0.4.0 では旧 `1.2.0`・`1.3.0`・`1.3.1` も明示的な `--update-skill` が必要です。本体は許容 skill 版を明示リストで保持し、未知の minor・major 版を推測で許可しません。skill の metadata にも必要な CLI 契約、ready 原稿と内容のハッシュ、生成した本体の build 情報を保存します。確認は、本体の許容版と skill の要求契約の一致、現在の ready 原稿との一致、配置内容の整合性を判定します。製品 SemVer の推測ではなく、版を付けた CLI 操作契約を照合します。
+CLI 操作契約は `taxion.cli.v1` です。本体が許容する skill 版、必要な CLI 契約、現在の `ready` 原稿、配置内容のハッシュを照合します。未知の版を製品 SemVer から推測して許可しません。skill の metadata には生成元の build 情報も保存します。
 
 完了時は最終受入条件を判定し、依頼に含まれる ADR・Issue・milestone・PR に判断・根拠・結果を反映します。承認済みの変更をコミットし、必要な公開を確認してから完成を報告します。未達条件を閉じたり、依頼にない公開作業を追加したりはしません。
 
-v0.2.0 から更新した場合、配置済み skill `1.0.0` はそのまま使いません。`taxion ready --check-skill` で不一致を確認し、利用者の許可後に `taxion ready --update-skill` を実行します。既存 skill の自動更新は行わず、改変済みファイルは明示更新でも保全します。skill を配置していない場合は、引数なしの `taxion ready` を直接使えます。
+本体を更新したら `taxion ready --check-skill` で適合性を確認し、不一致なら許可後に `taxion ready --update-skill` を実行します。自動更新や改変済みファイルの上書きは行いません。未配置なら引数なしの `taxion ready` を直接使えます。
 
 `--check-skill` は JSON の `compatible`・`problem` と終了コードで判断します。不一致なら古い手順を使わず、明示的な更新の許可を得てください。改変を検出した場合は、利用者が内容を確認し退避・移動してから新規配置します。強制上書き option はありません。ハッシュは内容の整合性であり署名や承認ではありません。skill がロードされたことの証明にもならず、通常の CLI 操作を配置済み skill に依存させません。project の同名 skill などの優先順位は外側 agent の探索規則に従います。
 
@@ -305,13 +266,13 @@ taxion request --repo owner/repository \
 
 最初に「この画面に検索機能を追加して」のように依頼を書きます。表示された repository・worktree・実行 account・上限を確認し、`/plan` でモデルを使う Planner 対話を開始します。費用は選んだモデルの利用条件に従います。Planner の質問には人のことばで答え、提案が意図と違えば修正を伝えます。Planner は目的、変更範囲、完了条件、検証コマンドを提案します。質問が残っている間は実行できません。
 
-計画と検証コマンドの副作用を確認し、`/approve` で read-only preflight の4 lane を一括確認してから、コード作成、ホストでの非モデル検証、別 worktree での独立レビューまで継続します。lane ごとや担当ごとの再承認は求めません。Task、承認 hash、Flow、Reviewer Task ID、role prompt、指示の受渡しは Taxion が準備します。途中の進捗・usage は表示せず、最後に `gate`、operation ID、Flow ID、status、予算の JSON を返します。正常終了は `COMPLETED`、安全上の停止は `BLOCKED`、予算停止は `USAGE_EXCEEDED` です。commit、push、merge、公開、外部 Issue の作成は行いません。
+計画と検証コマンドの副作用を確認し、`/approve` で read-only preflight の4 lane を一括確認してから、コード作成、ホストでの非モデル検証、別 worktree での独立レビューまで継続します。lane ごとや担当ごとの再承認は求めません。Task、承認 hash、Flow、Reviewer Task ID、role prompt、指示の受渡しは Taxion が準備します。途中の worker transcript は隠しますが、停止前の `resource_approval_required` は表示します。最後に `gate`、operation ID、Flow ID、status、予算の JSON を返します。正常終了は `COMPLETED`、安全上の停止は `BLOCKED`、予算停止は `USAGE_EXCEEDED` です。commit、push、merge、公開、外部 Issue の作成は行いません。
 
 この入口は snapshot mode と `fileAccess: all` を明示して使います。worktree 内の新規ファイルを許可し、Coder には `view,create,edit,apply_patch`、Reviewer には `view` を渡します。変更結果の scope 検査、worktree 外と保護された path の拒否、Reviewer の読み取り専用制約は維持します。細かい file access や外部 skill の承認が必要な場合は、`ready` を読んだオーケストレータに次節の個別手順を任せます。
 
-v0.7.19 からの新規依頼は、提供元の上限停止と追加課金なしを申告する `provider` が既定です。表示した条件を `/plan`・`/approve` で承認した場合、Task ごとの利用額上限を省略できます。v0.7.16〜v0.7.18 の既定は `account`・`reset-daily` で、保存済み契約は変更しません。設定・監視・移行の条件は[課金ガイド](billing.md)を参照してください。
+新規依頼は、提供元の上限停止と追加課金なしを申告する `provider` が既定です。表示した条件を `/plan`・`/approve` で承認した場合、Task ごとの利用額上限を省略できます。保存済み契約は変更しません。設定・監視・移行の条件は[課金ガイド](billing.md)を参照してください。
 
-v0.7.17 では、同じアカウントに Copilot の保存認証と `gh` の認証がある場合、現在の認証種別・GitHub のホスト・アカウントを照合して残量照会の認証情報を選びます。同じ種別に複数の候補が残る場合や、現在の認証・資格情報を確認できない場合は停止します。認証の削除や切替えは行いません。照会はモデル session を作らず、資格情報を表示しません。
+残量照会は現在の認証種別・GitHub のホスト・アカウントを照合して認証情報を選びます。候補を一意に決められない場合や認証を確認できない場合は停止します。認証の削除・切替えやモデル session の作成は行わず、資格情報も表示しません。
 
 開始時の残量から計算した下限をリセットまで日割りで下げ、最後の24時間は下限0とします。nano-AIU へ換算した上限は作りません。Planner の使用量が不明でも残量を照合して続行できますが、不明な使用量を完全・無料とは記録しません。送信前・実行中・回答採用前に残量を確認します。提供元の反映遅延や停止までの消費があるため、厳密な請求上限と最終24時間の親の報告用残量は保証しません。
 
@@ -447,7 +408,7 @@ taxion conversation confirm --file confirmation.json
 
 confirmation は Task を `READY` にしますが、Dispatch は発行しません。actor/source の文字列は保存されますが、CLI が利用者の身元を認証するわけではありません。
 
-v0.7.21-rc.4 では、承認束を要求する保存形式なら、この正式確認と同じ transaction で ApprovalBundle も追記します。同じ作業条件と設定を `task authorize` でもう一度承認する必要はありません。旧形式の扱いは変えません。古い正式確認に bundle だけが欠けている場合は、元の `confirmation.json` をそのまま再実行できます。未実行の `READY` 契約が元の確認履歴と完全一致するときだけ不足記録を補い、Task・履歴・期限・予算は変更しません。設定や契約を変えて元の承認を再利用することはできません。
+承認束を要求する保存形式では、この正式確認と同じ transaction で ApprovalBundle も追記します。同じ条件と設定を `task authorize` でもう一度承認する必要はありません。古い正式確認に bundle だけが欠けている場合は、元の `confirmation.json` を再実行できます。未実行の `READY` 契約が元の履歴と完全一致するときだけ不足記録を補い、Task・履歴・期限・予算は変更しません。変更した設定や契約に元の承認は流用できません。
 
 `additionalTaskIds` は後述する Flow が作る Reviewer Task の設定承認です。この例の Flow ID は `task-example-flow`、修正上限は1回なので、初回レビューと再レビューの2件を列挙します。Flow ID または修正上限を変える場合は、この一覧も承認前に合わせてください。空の一覧では Coder だけが承認対象になり、独立 Reviewer の実行が拒否されます。`selection` は採用する設定ファイルの値と一致させます。
 
@@ -455,7 +416,7 @@ v0.7.21-rc.4 では、承認束を要求する保存形式なら、この正式�
 
 ### READY Task の設定承認を追加する
 
-既存の READY Task で保存済み設定承認と現在の effective configuration が異なる場合、v0.7.1 では Task ID を指定して設定承認を追記できます。この操作は Task 契約、state、proposal hash、既存 decision を変更せず、`task authorize --manifest` の新規登録経路も通りません。
+既存の READY Task で保存済み設定承認と現在の effective configuration が異なる場合は、Task ID を指定して設定承認を追記できます。Task 契約、state、proposal hash、既存 decision は変更せず、`task authorize --manifest` の新規登録操作も使いません。
 
 ```sh
 taxion task reauthorize --task TASK-ID
@@ -522,7 +483,7 @@ taxion workflow show --id task-example-flow
 
 時間見積もりがない場合の初期値は検証コマンドごとに60秒、レビュー600秒、修正600秒です。同じリポジトリと検証コマンドの成功記録を参照し、長い実績には20%の余裕を加えます。これはモデル内部時間の実測でも完了保証でもありません。必要なら `validationSeconds`・`reviewSeconds`・`repairSeconds` を明示して再提案できます。全体期限に収まらない計画は開始前に拒否します。正の全体利用額上限を指定した場合は、必要な役割の利用額見積もりも保存実績か明示指定から得られなければ開始できません。上記の利用額は承認手順の例で、固定比率の推奨値ではありません。詳細は [CLI リファレンス](cli-reference.md#工程計画と保存観測)を参照してください。
 
-実行担当には元の全体期限から後続工程分を引いた提出期限を伝えます。制御処理は提出・検証を別々の期限で監視し、時間切れなら停止証跡と部分成果を保存します。未完了の提出を成功扱いにしたり、残るレビュー時間を実装へ流用したりしません。再起動しても期限はリセットされません。
+実行担当には有効な承認済み全体期限から後続工程分を引いた提出期限を伝えます。制御処理は提出・検証を別々の期限で監視し、時間切れなら停止証跡と部分成果を保存します。未完了の提出を成功扱いにしたり、残るレビュー時間を実装へ流用したりしません。再起動しても期限はリセットされません。
 
 未起動の Coder Dispatch を取り消して契約を作り直す場合は、`workflow terminate --file terminate.json` に `{ "flowId": "...", "dispatchId": "...", "actor": "human", "source": "human:recontract", "reason": "..." }` を渡します。これは未開始・未確認の Dispatch のみを取消し、Flow を hold します。次に新しい Task ID と作業条件を明示承認し、`workflow start` で再契約します。新しい Dispatch hash が生成され、以前の指示と audit history は保持されます。
 
@@ -536,13 +497,13 @@ Copilot 子プロセスの組み込み MCP は、利用者の設定を変えず�
 
 GitLab の読取り API が失敗した場合、診断は読取り失敗と外部更新の配送不確実性を区別する。`identity-query` または `project-query` を確認する。CLI が起動して終了した場合は終了コード、それ以外は起動不能や取消などの理由を確認し、秘密を含む提供元の応答は公開しない。診断の改善は一時的な API 失敗の原因解決や自動再送の許可ではない。古い停止記録の文言は書き換えず、保存状態と稼働実体を照合する。
 
-v0.7.18 は workspace の短時間のロック競合を最大5秒待ちます。更新は読取り前に writer を予約し、workspace の読取りは一つの transaction で行います。これにより短い照会や別接続の更新が重なる場合を扱いますが、長時間の DB transaction や schema 移行との並行動作は保証しません。表示コマンドの一部にも初期化・移行があるため、全コマンドが無書込みとは限りません。待機後も保存できなければ実行を安全停止し、モデルや tool を自動で再実行しません。v0.7.17 以前では実行中の DB・CLI 照会を避けてください。
+workspace の短時間のロック競合は最大5秒待ちます。更新は読取り前に writer を予約し、workspace の読取りは一つの transaction で行います。長時間の DB transaction や schema 移行との並行動作は保証しません。表示コマンドの一部にも初期化・移行があるため、全コマンドが無書込みとは限りません。待機後も保存できなければ安全停止し、モデルや tool を自動再実行しません。
 
-残量監視の認証・照会は全体で最大5秒です。`account`・`reset-daily` は一度でも必要な残量を確認できなくなると停止し、過去の残量だけで実行を続けません。`BUDGET_STOP`・`usage-limit` でも、reason が `account quota monitoring failed` の場合は残量枯渇の証明ではありません。認証や通信の一時的失敗も含みます。停止要求がタイムアウトして `CANCEL_REQUESTED` が残る場合、runner がなくても停止済みとは判断しません。同じ store・実行環境で `runtime stop --dispatch DISPATCH_ID` を使い、保存 session の停止確認後に `CANCELLED` と `runtime-stop:` 証跡が記録されたことを確認します。失敗した場合は取消状態を手修正せず、新しい実行を始めないでください。これらの監視・停止通信の挙動は v0.7.18 の DB 競合修正では変更しません。
+残量監視の認証・照会は全体で最大5秒です。`account`・`reset-daily` は必要な残量を確認できなくなると停止し、過去の値だけでは続行しません。reason が `account quota monitoring failed` なら認証・通信失敗も含むため、残量枯渇とは断定できません。`CANCEL_REQUESTED` が残る場合は runner 不在だけで停止済みと判断せず、同じ store・環境で `runtime stop --dispatch DISPATCH_ID` を使います。保存 session の停止確認後に `CANCELLED` と `runtime-stop:` 証跡を確認します。失敗時は状態を手修正せず、新しい実行を始めないでください。
 
 ### 不要になった試行を一覧と計画から外す
 
-v0.5.0 の archive は、不要と判断した試行を通常の一覧と次の作業計画から外します。
+archive は、不要と判断した試行を通常の一覧と次の作業計画から外します。
 保存履歴は消さず、元の Task を完了扱いにもしません。Git の変更・branch・worktree・
 一時ファイル・設定・DB・Memory の削除や初期化は行いません。
 
@@ -575,9 +536,9 @@ archive 記録を持つ DB は v0.4.1 以前に戻して使わないでくださ
 古い branch や実装を入力源として選んだ問題は、archive では解決しません。
 次の依頼を始める前に、対象 branch・commit と受理済み成果を別に確認してください。
 
-### v0.4.0 のゴール指向方針と保存証拠の評価
+### ゴール指向方針と保存証拠の評価
 
-以下は v0.3.1 には含まれません。v0.4.0 は、最終成果・正確性と安全性・費用の順で判断し、質問数やレビュー回数を品質の代理にしません。軽微な仮定は明示して進め、重大な確認は維持します。各担当は既存の成果と証拠を再利用し、追加調査や再レビューを未達条件・新証拠・具体的リスクに結び付けます。
+最終成果・正確性と安全性・費用の順で判断し、質問数やレビュー回数を品質の代理にしません。軽微な仮定は明示して進め、重大な確認は維持します。各担当は既存の成果と証拠を再利用し、追加調査や再レビューを未達条件・新証拠・具体的リスクに結び付けます。
 
 細かな設定を一件ずつ尋ねたり、ロール間で結論を変えない確認を往復したりしないよう、担当別の指示も加えています。Planner は安全で修正可能な既定案を使い、Coder は承認範囲内の実装判断を進めます。Reviewer は任意の好みだけで修正・再レビューを要求せず、必要な助言は `workReport` に分けます。ただし、実際の欠陥や acceptance 未達は任意扱いにせず、全条件の証拠が揃ってから承認します。外側の操作者は引継ぎをまとめ、通常の判断に再承認を求めません。
 
@@ -601,7 +562,7 @@ Copilot の `--max-ai-credits` は session 単位の soft ceiling であり、
 アカウント全体の残 credit を表示する option ではありません。
 各 model call で取得できた nano-AIU と AI-credit status を表示します。
 account 残高、使用率、残り率は、同じ単位の allowance を確認できない場合は unavailable です。
-v0.7.19 からの既定 `provider` は自動の残量照会を行いません。明示した `account`・`reset-daily` は残量下限で制御します。どちらも追加のモデル呼出しはせず、保存済み契約は引き継ぎます。
+既定の `provider` は自動で残量を照会しません。明示した `account`・`reset-daily` は残量下限で制御します。どちらも追加のモデル呼出しはせず、保存済み契約を引き継ぎます。
 
 Copilot SDK の account quota、session の累積 cost、公式 Billing API の期間別使用量は
 別の情報です。requests の残り割合を AI Credit の絶対残量と読み替えたり、
@@ -614,10 +575,25 @@ Copilot SDK の account quota、session の累積 cost、公式 Billing API の�
 観測と補足は相談分も SQLite に保存し、`records show` で確認します。
 設定がない旧 Task / Dispatch へ新しい条件を遡及適用しません。
 
-残量が少なくても acceptance や独立レビューは省略しません。
-途中の成果を保存して停止し、続行には新しい予算を承認する、という境界を維持します。
+残時間・予算が完了見込みに足りなければ、停止前に両方を一つの判断として確認します。
+`resource_approval_required` は外側の操作者への判断要求であり、自動取消ではありません。
+回答待ちでも既存権限内の実行は維持し、必要な検証や独立レビューを省略しません。
+期限・工程境界の前に `workflow extend --file JSON --preview` で変更全体を提示し、
+承認後に同じ `expectedHash` で適用すると、同じ session のまま有効期限を延長できます。
+新規 session や入力検証の再実行、累計消費のリセットはありません。
+外側の累計予算を追加する場合も同じ判断に含め、通貨・requests・credits を換算しません。
+正確な入力は [CLI リファレンス](cli-reference.md#実行を維持した期限予算の延長)を参照してください。
+未承認のまま実上限へ達した場合だけ、安全に停止して成果を保全します。
 
 ### 保存結果と停止後の継続
+
+入力検証に合格した成果物 Reviewer の正式停止は、`workflow recover-review` の一括 preview を使います。
+実行済みなら `continueStoppedExecution:true`、元期限を過ぎていれば
+`deadlineRecontract` に保存期限・新期限・理由を指定します。
+一度の正確な承認から後続契約と計画を保存し、候補・合格入力検証・保存解析・累計消費を引き継ぎます。
+Coder と入力検証はやり直さず、結果受理検証は実施します。
+[一括復旧の入力仕様](cli-reference.md#レビュー復旧を一括承認する)がこの操作の正本です。
+以下の `resume` と成功 Coder 由来の継続は別の保存状態用であり、成果物 Reviewer の代替手順ではありません。
 
 発行された Coder Dispatch がまだ一度も acknowledge・実行されていない場合は、`taxion gate resume --flow FLOW-ID --json` で保存状態を変更せず再開条件を確認できます。新規開始の `gate contract` は READY Task 用なので、ACTIVE Task の再開判定には使いません。PASS の場合、`workflow resume --id FLOW-ID` に元の承認済み role prompt・tool option を指定すると、同じ Gate を再確認して保存 Dispatch から通常の実行へ進みます。期限・予算・counter は引き継ぎ、Task を READY に戻したり Flow を作り直したりしません。
 
@@ -639,7 +615,7 @@ OpenCode 1.19.0 の実受入れでは、モデルが `read` に `path` を渡し
 
 停止後は `workflow show --id FLOW-ID` と `task graph` で `CANCELLED`、`runtime-stop:` 証拠、部分 Git 証拠を確認します。`records show` では元の suspension と cancellation の結果 receipt を確認できます。取消要求だけが成功し、保存が失敗する場合もあるため、コマンドを呼んだだけで停止確認を済ませず、確認前に同じ成果物を使った実行を重ねないでください。
 
-新しい Flow は token 閾値で停止しません。既存 workspace に残る旧 `BUDGET_LIMIT` の停止記録は変更せず、部分成果や完了済み Coder 結果から続ける場合は、同じ成果物を持つ別 worktree と後続 Task の再承認が必要です。期限切れ・cancel 等で停止した作業も保存結果を確認してから続けます。commit mode は clean worktree、snapshot mode は保存 tree と同じ作業ファイルを要求します。`workflow recover` は残った runner 所有権だけを解放します。具体的な Git 手順と `continueFromDispatchId` の使い分けは[停止した作業の継続](../develop/task-graph.md#停止した作業の継続)を参照してください。
+新しい Flow は token 閾値で停止しません。既存 workspace に残る旧 `BUDGET_LIMIT` の停止記録は変更せず、部分成果や完了済み Coder 結果から続ける場合は、同じ成果物を持つ別 worktree と後続 Task の再承認が必要です。期限切れ・cancel 等で停止した作業も保存結果を確認してから続けます。commit mode は clean worktree、snapshot mode は保存 tree と同じ作業ファイルを要求します。`workflow recover` は正式結果に基づいて runner 所有権を回収します。終了済み session に未確定回答がある場合の照合・確定は[復旧ガイド](failure-recovery.md#runner-終了後に回答だけが残っている)、Git 手順と `continueFromDispatchId` の使い分けは[停止した作業の継続](../develop/task-graph.md#停止した作業の継続)を参照してください。
 
 snapshot mode で完了済み Coder 結果を引き継ぐ場合は、保存済み `outputSha`（baseline commit）、`outputTreeSha`、変更 path を承認した別 worktreeを用意します。後続 Task の target tree が一致することを `conversation confirm` が検査し、`workflow start` には元の Coder Dispatch ID を `continueFromDispatchId` として指定します。新しい Flow は Coder を再実行せず Reviewer から始まります。停止時点が `CANCELLED` の部分成果なら、同じ baseline と保存 tree を持つ別 worktreeを用意し、後続 Task を承認したうえで Coder から続けます。
 
@@ -649,7 +625,7 @@ Reviewer-only の後続実行も停止した場合は、成功 Coder を含む�
 
 packet を使うレビュー専用継続では、元 Flow の `objective`・scope・acceptance・出力方式を維持します。`objective` は残作業の説明ではなく、保存済み成果を評価する全体目的です。「レビューだけを行う」への書換えは目的変更として拒否します。実行する役割は `continueFromDispatchId` で指定するため、元の全体目的を維持しても Coder は再実行しません。
 
-v0.7.16 の `packet continuation changed the verified scope or acceptance` は、`objective` や出力方式の不一致でも表示されます。scope と acceptance が一致している場合は元 Flow の契約とこれらの項目を照合してください。変更済みの後続 Task が承認されている場合、その承認や元の Task は書き換えず、元の目的を維持した別IDの後続 Task を新たに承認します。元の成果・検証証跡・停止証跡を引き継ぎ、未達の他の照合条件を省略しません。
+後続 Task は元 Flow の目的・scope・acceptance・出力方式を照合します。不一致の契約を承認済みの場合は元の承認を書き換えず、元の目的を維持した別IDの後続 Task を承認します。成果・検証・停止証跡を引き継ぎ、他の照合条件も省略しません。
 
 ## 別マシンへの一ファイル移送
 

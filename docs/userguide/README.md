@@ -13,6 +13,11 @@
 
 ## 止まった作業を続ける
 
+稼働中に時間・費用不足が見込まれる場合は、[停止前の一括判断](cli-reference.md#実行を維持した期限予算の延長)を行い、
+正式承認による上限変更で同じ session を維持します。
+すでに正式停止した成果物レビューは、[復旧ガイド](failure-recovery.md#flow-が停止している)の
+`recover-review` で合格入力検証と保存解析を引き継ぎます。期限切れ後の新期限も同じ判断に含めます。
+
 最初からやり直す前に、[保存結果と停止後の継続](user-guide.md#保存結果と停止後の継続)で停止理由、保存成果、session の停止証拠を確認します。続行には後続 Task と新しい予算の承認が必要です。成功した Coder の成果が残っていれば、同じ成果物の Reviewer から続けます。
 
 保存状態と receipt の意味は[実行の復旧](execution-records.md#復旧時の照合)、承認する後続 Task と Git 操作の詳細は[停止した作業の継続](../develop/task-graph.md#停止した作業の継続)で確認します。`workflow recover` は残った runner 所有権を解放する操作であり、停止条件を解除して再実行する操作ではありません。
@@ -33,7 +38,7 @@
 | [drift と legacy の分類](drift-and-legacy.md) | 差分の dimension、authorization impact、verified-legacy の扱い |
 | [失敗からの復旧](failure-recovery.md) | entry code、blocked・fail、停止後の確認、rollback |
 | [v0.6 からの更新](upgrading-from-v0.6.md) | 保存形式、legacy 承認、移行と戻し方 |
-| [v0.7.0 の既知の制限](v0.7.0-known-limitations.md) | 対象外の機能、未確認事項、v0.7.1 候補 |
+| [既知の制限](v0.7.0-known-limitations.md) | 現在の実行・承認・互換性の適用範囲 |
 | [実行の復旧と外部記録](execution-records.md) | 保存結果の照合、復旧、承認済み記録の公開、失敗の記録 |
 | [Memory](memory-model.md) | 保存範囲、承認、検索、export、ローカル移行 |
 | [リモート接続](remote-access.md) | SSH 転送、token、公開接続時の設定 |

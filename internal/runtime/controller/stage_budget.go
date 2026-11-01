@@ -205,7 +205,7 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 
 func stageDeadline(flow core.ReviewFlow, dispatch core.GraphDispatch, validation bool) time.Time {
 	if flow.StagePlan == nil {
-		return flow.Deadline
+		return flow.ExecutionDeadline()
 	}
 	deadline := flow.StagePlan.SubmissionDeadline(flow, dispatch.Recipient)
 	if validation && dispatch.Recipient == "CODER" {
@@ -222,7 +222,7 @@ func stageBudgetStop(graph core.TaskGraph, flow core.ReviewFlow, dispatch core.G
 		return "stage submission deadline reached; preserve partial output and remaining mandatory stages"
 	}
 	report := taskBudgetReport(graph, flow, now)
-	if flow.Budget.MaxNanoAIU > 0 && (report.CreditsStatus != "complete" ||
+	if flow.NativeLimit() > 0 && (report.CreditsStatus != "complete" ||
 		report.NanoAIURemaining <= flow.StagePlan.ReservedNanoAIU(flow.Repairs, dispatch.Recipient)) {
 		return "native stage budget reserved for remaining mandatory stages; no provider credit reservation is implied"
 	}
@@ -339,7 +339,7 @@ func (c *Controller) boundStageContext(ctx context.Context, dispatch core.GraphD
 		return nil, nil, err
 	}
 	flow, found := flowForDispatch(state.Graph, dispatch.ID)
-	if !found || flow.StagePlan == nil {
+	if !found {
 		return ctx, func() {}, nil
 	}
 	if flow.Status != "RUNNING" {
@@ -353,7 +353,10 @@ func (c *Controller) boundStageContext(ctx context.Context, dispatch core.GraphD
 			return nil, nil, c.stopForStage(flow, dispatch, reason)
 		}
 	}
-	bounded, cancel := context.WithDeadline(ctx, stageDeadline(flow, dispatch, validation))
+	bounded, cancel, err := withFlowDeadline(ctx, c.store, flow.ID, &dispatch, validation)
+	if err != nil {
+		return nil, nil, err
+	}
 	if bounded.Err() != nil {
 		cancel()
 		return nil, nil, c.stopForStage(flow, dispatch, "stage deadline reached before execution")

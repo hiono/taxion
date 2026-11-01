@@ -22,9 +22,12 @@ validation/review basis, findings addressed and the next unfinished action.
 Resume those artifacts, not a fresh investigation or baseline run. Do not claim
 to restore unsaved model reasoning. Invalidate only evidence affected by a material
 change; recheck mutable input and identity without replaying unchanged paid work.
-Keep cumulative usage and the original deadline across pause, new session or Flow;
-only an explicitly approved deadline recontract may give a successor a later
-deadline, without editing the stopped source;
+Keep cumulative usage and the original deadline across pause, new session or Flow.
+Before time or spending threatens completion, include human response wait and ask
+one combined extension decision. Do not cancel still-authorized work preemptively.
+workflow extend applies exact approved live deadline/native deltas without
+restarting the session. Original issuance remains immutable. After formal stop,
+an explicitly approved deadline recontract gives only the successor a later deadline;
 record extra approval as an explicit delta, never a reset. Unknown delivery and
 usage remain unknown. Do not replay an uncertain send or create duplicate workers.
 While waiting, collect and preserve existing worker results without new paid work;
@@ -66,7 +69,7 @@ Inspect actual required capabilities and saved-session compatibility; do not pin
 an unusable old version merely for reproducibility or replace a running process.
 Use available observations before asking for remaining usage. A remaining-balance
 contract does not require re-entering the total quota. Preserve unknown delivery
-and usage as unknown; do not replay uncertain sends or extend deadlines and budgets.
+and usage as unknown; do not replay uncertain sends or extend limits without approval.
 Public GitHub records are for users, contributors and future maintainers, not
 agent-to-agent communication. Explain the problem, user impact, change,
 compatibility, exact-commit validation, failures and remaining limitations.

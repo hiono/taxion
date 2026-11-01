@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.18"
+const readySkillVersion = "1.3.19"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -60,18 +60,20 @@ do not browse Taxion implementation sources with gh api or clone Taxion merely
 to discover operation inputs. If formal help is insufficient, report the exact
 missing operation contract rather than inventing fields or starting source research.
 
-The RC5 artifactSource entry accepts unverified snapshot input without
+The artifactSource entry accepts unverified snapshot input without
 Coder success. Use workflow plan/start with maxRepairs: 0, stageBudget version 1
 and no Coder session ceiling; bind the actual tree/paths and new exact plan approval.
 Reuse covered contract/configuration approval and additionalTaskIds for FLOW_ID-review-0.
 workflow validate-input --id FLOW_ID runs approved Controller commands without
 a model and issues only the Reviewer after same-target validation succeeds.
-Then doctor --dispatch REVIEWER_DISPATCH_ID --json and workflow run --builtin-prompts.
+Then workflow run --builtin-prompts prepares and inventories the exact Reviewer
+worktree before starting its model. Before preparation, doctor --worktree SOURCE
+diagnoses only that source; doctor --dispatch never creates a missing worktree.
 No Coder prompt, extra shell authority or manual changedFiles declaration is needed.
 An empty diff still requires full approved-program review. Supplied input is not
 a Coder success or quality verdict. No automatic replay of failed/unknown command
-execution; preserve its receipt and stopped history. Repairs, optional packet
-lifecycle and restored artifact execution are not supported in this first slice.
+execution; preserve its receipt and stopped history. Artifact repairs, optional
+packet lifecycle and restored artifact execution are not supported.
 
 A receipt hash is NOT diagnostic content. For a repair successor, put the failed
 command, exit code, test names, assertions/messages, unclassified causes and
@@ -97,7 +99,7 @@ Use conversation intake --file intake.json, then conversation proposal --task NE
 After actual proposal/configuration approval, conversation confirm --file confirm.json
 uses replacesFlow=FAILED_FLOW_ID and OMITS target; no feedback-target or fake Dispatch.
 Both worktrees, stopped ownership and the bound failure receipt are verified.
-Receipt-bound confirmation requires this CLI; unchanged RC5 does not provide it.
+Receipt-bound confirmation requires the current CLI.
 Use exact approved FLOW_ID-review-0 configuration coverage, not optional packet delegation.
 Then workflow plan --file flow.json for a normal Flow: OMIT artifactSource and
 continueFromDispatchId, maxRepairs: 0, stageBudget version 1, separately approved
@@ -140,6 +142,15 @@ Copilot child processes disable built-in MCP servers without editing user settin
 other network-capable tools and hooks still need separate permission checks.
 For recovery, inspect workflow feedback-target and the saved partial/output tree;
 do not fabricate a successful result, stop proof or user approval.
+RUNNING does not prove a live process. When the exact stopped Reviewer's final answer
+remains in its bound native session but lacks a formal result, workflow recover can
+finalizeSavedResult with an authorized future validationDeadline within one hour.
+Read workflow recover --help. It observes without continuing work, requires the
+original on-time completion and matching saved execution observations, and rejoins
+normal host validation, runtime close, managed-worktree release and result storage.
+Recover ownership only after that result. Never resend, reset usage, increase
+maxRepairs or treat accepted REQUEST_CHANGES as product approval.
+Do not replay host commands when validation started without a durable validated result.
 For a held SAFETY_STOP with only its first issued snapshot-input Coder and no
 start/session/result, workflow reconcile-stopped can preview a human decision.
 Require execution-quiescence evidence, acceptance of unknown delivery and the exact
@@ -193,10 +204,22 @@ material deadline approval, then apply; never ask again for subordinate hashes.
 Do not edit or resume the expired Flow, reset cumulative use, rerun Coder/input
 validation or wait for approval before preparing the read-only combined preview.
 Changed or expired proposed deadlines invalidate consent, not saved work.
-Preserve completed work. New budgets, changed scope and permissions need explicit
-user approval. Before stop reserve is threatened, estimate unfinished work, repair,
-independent review and preservation in the observed unit. Request one bounded
-top-up for the shortfall before exhaustion; +1000 is an example, not a fixed grant.
+Preserve completed work. Before a time or spending boundary threatens completion,
+estimate unfinished work, repair, validation/review, preservation AND human response
+wait. On resource_approval_required, promptly ask ONE combined time/budget question.
+Do not cancel still-authorized work merely because an extension is needed.
+workflow extend --file JSON --preview binds the exact current Flow/Dispatch/session
+and old/new fixed deadlines and native ceilings. After actual consent apply the
+same expectedHash without --preview. This live operation does not take runner
+ownership or restart a session. Existing output, usage, candidate, validation and
+original plan remain; append-only authority changes only effective limits.
+Use it BEFORE the current stage boundary; a stopped Flow uses recover-review.
+Independent caller deadlines, provider stops and account reserves still apply.
+For external cumulative requests/tokens/credits, use the actual observed unit and
+record actual additional approval in the SAME decision, not a native-unit conversion.
+workflow budget --file optionally accepts time estimates including response wait.
+New budgets, changed scope and permissions need explicit user approval; +1000 is
+an example of a bounded top-up, not a fixed grant.
 workflow budget --id FLOW_ID --file ESTIMATE.json returns read-only topUp advice
 alongside saved continuation and priorFlows. See --help for exact fields. It grants
 no execution authority; observations and estimates are explicitly scoped, not

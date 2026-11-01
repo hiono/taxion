@@ -13,6 +13,7 @@ import (
 )
 
 type TaskBudgetReport struct {
+	Extensions       []core.FlowExtension `json:"extensions,omitempty"`
 	Artifact         *core.ArtifactReview `json:"artifact,omitempty"`
 	ResumeBasis      *ResumeBasis         `json:"resumeBasis,omitempty"`
 	StagePlan        *core.StagePlan      `json:"stagePlan,omitempty"`
@@ -98,9 +99,9 @@ func taskBudgetReport(graph core.TaskGraph, flow core.ReviewFlow, now time.Time)
 		TaskID:    flow.TaskID, FlowID: flow.ID, DispatchLimit: flow.Budget.MaxDispatches,
 		CoderSessionLimit:    flow.Budget.MaxCoderSessions,
 		ReviewerSessionLimit: flow.Budget.MaxReviewerSessions,
-		MaxNanoAIU:           flow.Budget.MaxNanoAIU, AccountQuotaOnly: flow.Budget.AccountQuotaOnly,
+		MaxNanoAIU:           flow.NativeLimit(), AccountQuotaOnly: flow.Budget.AccountQuotaOnly,
 		BudgetSource: flow.Budget.BudgetSource, CreditsStatus: "complete",
-		ElapsedLimitMilliseconds: flow.Deadline.Sub(flow.StartedAt).Milliseconds(),
+		ElapsedLimitMilliseconds: flow.ExecutionDeadline().Sub(flow.StartedAt).Milliseconds(),
 		RepairLimit:              flow.MaxRepairs, Repairs: flow.Repairs, Unknown: []string{},
 	}
 	sessions := map[string]map[string]bool{"CODER": {}, "REVIEWER": {}}
@@ -151,7 +152,7 @@ func taskBudgetReport(graph core.TaskGraph, flow core.ReviewFlow, now time.Time)
 	report.ElapsedRemainingMillis = max(report.ElapsedLimitMilliseconds-report.ElapsedMilliseconds, 0)
 	if flow.Budget.MaxDispatches == 0 || flow.Budget.MaxCoderSessions == 0 && flow.Artifact == nil ||
 		flow.Budget.MaxReviewerSessions == 0 ||
-		!flow.Budget.ExternalBudgetOnly() && flow.Budget.MaxNanoAIU <= 0 {
+		!flow.Budget.ExternalBudgetOnly() && flow.NativeLimit() <= 0 {
 		report.Unknown = append(report.Unknown, "approved budget limits are unavailable")
 		report.DispatchesRemaining = 0
 		report.CoderSessionsRemaining = 0
@@ -242,6 +243,9 @@ func stopFlowForBudget(db *store.Store, id, reason string) error {
 }
 
 func appendBudgetAudit(state *store.Workspace, flow core.ReviewFlow, kind string, report TaskBudgetReport) error {
+	if kind == "RESOURCE_EXTENDED" {
+		report.Extensions = flow.Extensions
+	}
 	contractHash, err := core.CanonicalSHA256(flow.Contract)
 	if err != nil {
 		return err

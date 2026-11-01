@@ -2,6 +2,27 @@
 
 この文書は、記録した判断、GitHub の Milestone・Issue、現在の仕様文書を対応付ける。ADR の採択は判断の記録であり、実装や受入れテストの完了を証明しない。現在の動作は参照先の仕様文書、実装の証拠は Issue と実行記録に記載する。
 
+## 現在の設計と履歴の読み方
+
+全体の構成は[アーキテクチャ](architecture.md)を正本とする。
+ADR は採択時の理由を残す資料であり、古い `Accepted` の記載だけで現在の全仕様を決めない。
+特に保存構造、課金方式、工程期限、復旧は後続判断で変わっている。
+
+| 設計領域 | 現在の仕様 | 判断の進展 |
+|---|---|---|
+| Task・保存・成果物 | [Task Graph](task-graph.md)、[workspace](ledger-schema.md) | 初期 Ledger と Graph の分離案から、SQLite の同一 transaction と Git 成果の照合へ |
+| 実行と完了 | [Runtime 契約](runtime-contract.md) | SDK から独立した契約、独立 Reviewer、持込み成果の検証へ |
+| 承認と観測 | [gate](../userguide/gates.md)、[承認束](../userguide/approval-bundle.md) | [ADR-0043](adr/0043-approval-gates-and-read-only-lanes.md)と現在の READY 承認 |
+| 配布と戻し方 | [provenance](../userguide/binary-provenance.md) | [ADR-0044](adr/0044-binary-distribution-and-cooperative-provenance.md)、[0048](adr/0048-explicit-unavailable-rollback-after-withdrawal.md) |
+| 公開と文章 | [公開方針](public-communication-policy.md)、[文章指針](writing-guidance.md) | [ADR-0045](adr/0045-public-communication-for-users-and-contributors.md)、[0046](adr/0046-bind-writing-sources-and-cancel-unsent-publications.md) |
+| 利用枠・課金条件 | [課金](../userguide/billing.md)、[実行記録](../userguide/execution-records.md) | [ADR-0049](adr/0049-monitor-approved-account-quota-during-execution.md)、[0051](adr/0051-centralize-declared-billing-conditions.md) |
+| 途中成果・保存済みレビュー | [復旧](../userguide/failure-recovery.md) | [ADR-0050](adr/0050-preserve-target-bound-review-progress.md)、[0052](adr/0052-accept-saved-review-without-restarting-execution.md)、[0054](adr/0054-reconcile-stopped-dispatch-input.md) |
+| 工程計画と停止前・停止後の継続 | [Runtime 契約](runtime-contract.md)、[CLI](../userguide/cli-reference.md) | [ADR-0053](adr/0053-enforce-approved-flow-stage-boundaries.md)の境界を、正式な追加承認に限って[0058](adr/0058-recover-unstarted-artifact-review.md)が補足する |
+| 目的に沿う判断・情報確認・持込み入力 | [Task Graph](task-graph.md)、[利用者ガイド](../userguide/user-guide.md) | [ADR-0055](adr/0055-adapt-within-approved-goals.md)、[0056](adr/0056-validate-supplied-artifacts-without-coder-success.md)、[0057](adr/0057-resolve-evidence-before-user-escalation.md) |
+
+未採択の提案と実装済み契約も区別する。たとえば実行基盤の追加評価は、現在の対応状況を Issue と仕様から確認する。
+以下の表は過去の開発段階と判断の出典であり、現在の作業順を指定するものではない。
+
 ## Milestone の番号
 
 GitHub の Milestone 番号とプロジェクトの段階名は異なる識別子である。最初の七つの GitHub Milestone は Foundation・Platform などの名前を使う。ロードマップで番号を付けた最初の段階は、GitHub Milestone #8 の M2。M10〜M15 は #16〜#21 に対応する。現在のロードマップと Milestone 名には M1 の定義がない。そのため、表では一対一の番号を創作せず、両方の名称を残す。

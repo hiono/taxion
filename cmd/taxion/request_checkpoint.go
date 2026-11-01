@@ -316,8 +316,14 @@ func finishRequestExecution(ctx context.Context, db *store.Store, operation *sto
 	if err := saveRequestCheckpoint(db, operation, *checkpoint); err != nil {
 		return err
 	}
+	ctx, cancel, err := controller.ReviewFlowContext(ctx, db, operation.FlowID)
+	if err != nil {
+		return err
+	}
+	defer cancel()
 	runErr := runner(controller.WithOperation(ctx, *operation), []string{"run", "--id", operation.FlowID, "--builtin-prompts",
-		"--max-ai-credits", fmt.Sprint(operation.SessionCreditLimit), "--cli", cli, "--base-directory", base}, io.Discard)
+		"--max-ai-credits", fmt.Sprint(operation.SessionCreditLimit), "--cli", cli, "--base-directory", base},
+		&resourceApprovalOutput{output: output})
 	summary, err := json.Marshal(struct {
 		FlowID    string `json:"flowId"`
 		ErrorHash string `json:"errorHash,omitempty"`

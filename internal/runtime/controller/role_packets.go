@@ -379,7 +379,7 @@ func preparePacketValidator(db *store.Store, id, runnerID string) error {
 	if flow.RunnerID != runnerID {
 		return fmt.Errorf("%w: %s", ErrFlowClaimed, flow.RunnerID)
 	}
-	if flow.HandoffHeld() || !time.Now().Before(flow.Deadline) {
+	if flow.HandoffHeld() || !time.Now().Before(flow.ExecutionDeadline()) {
 		return nil
 	}
 	last, ok := snapshot.Graph.GraphDispatch(flow.LastDispatchID())

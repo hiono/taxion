@@ -69,7 +69,7 @@ func reconcileStoppedDispatch(db *store.Store, request DispatchReconciliationReq
 		flow, _ := state.Graph.ReviewFlow(request.FlowID)
 		dispatch, _ := state.Graph.GraphDispatch(request.DispatchID)
 		if deadline != nil {
-			if !flow.StoppedArtifactReviewer(dispatch) || deadline.Validate(flow.Deadline, time.Now().UTC()) != nil {
+			if !flow.StoppedArtifactReviewer(dispatch) || deadline.Validate(flow.ExecutionDeadline(), time.Now().UTC()) != nil {
 				return fmt.Errorf("taxion: invalid artifact Reviewer deadline recontract")
 			}
 		}

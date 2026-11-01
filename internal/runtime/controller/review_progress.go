@@ -33,7 +33,7 @@ func (c *Controller) SaveReviewProgressForSession(ctx context.Context, dispatchI
 			return fmt.Errorf("taxion: review progress requires its running bound Reviewer session")
 		}
 		if flow, exists := flowForDispatch(state.Graph, dispatch.ID); exists &&
-			(flow.Status != "RUNNING" || !time.Now().UTC().Before(flow.Deadline)) {
+			(flow.Status != "RUNNING" || !time.Now().UTC().Before(flow.ExecutionDeadline())) {
 			return fmt.Errorf("taxion: review progress requires an active unexpired flow")
 		}
 		coder, ok := state.Graph.GraphDispatch(dispatch.RelatedID)
