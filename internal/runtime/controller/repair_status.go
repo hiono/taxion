@@ -156,7 +156,7 @@ func ObserveRepairStatus(state store.Workspace, flowID string, configuration cor
 	if flow.Status != "RUNNING" || !reviewRepair {
 		return set(RepairNotApplicable, "Flow is not waiting on a review repair", "continue the Flow as saved")
 	}
-	if !time.Now().UTC().Before(flow.Deadline) {
+	if !time.Now().UTC().Before(flow.ExecutionDeadline()) {
 		return set(RepairCeilingExhausted, "saved deadline has passed", humanNext)
 	}
 	if err := state.Graph.CheckTaskSpecificationUse(task.ID, "runtime"); err != nil {

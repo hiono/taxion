@@ -114,7 +114,7 @@ taxion role-packet read --expected-hash '<packetHash>'
 
 既存の packet create / verify と、lifecycle を明示承認していない Flow の動作は変えません。旧参照を保存 packet とみなす自動移行もありません。検証済み packet のない発行済み Dispatch の採用や、未保存 evidence からの再構成は対象外です。
 
-開発版のレビュー専用継続では、停止を確認した元 Flow の成功済み Coder と、
+レビュー専用継続では、停止を確認した元 Flow の成功済み Coder と、
 その元承認に結び付いた Validator の保存証跡を再利用できます。後続 Task の契約・予算、
 ApprovalBundle と packet lifecycle は別途承認してください。新しい Reviewer packet は
 新承認に結び付け、前段の evidence hash には元の検証報告を参照します。

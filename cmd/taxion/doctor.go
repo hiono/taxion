@@ -84,6 +84,10 @@ func doctorCmd(args []string, output io.Writer) (err error) {
 			return fmt.Errorf("doctor requires an existing saved Dispatch")
 		}
 		config.WorkingDirectory, config.Role = dispatch.Instruction.Worktree, dispatch.Recipient
+		if _, err := os.Lstat(config.WorkingDirectory); errors.Is(err, os.ErrNotExist) &&
+			dispatch.Recipient == "REVIEWER" && dispatch.ReviewWorktreeSource == "" {
+			return fmt.Errorf("doctor: Reviewer worktree is not prepared; inspect the source with --worktree for source-only diagnosis, then workflow run/step prepares and inspects the exact managed worktree before starting any model; doctor never creates worktrees")
+		}
 		if dispatch.Configuration != nil {
 			config.Configuration = dispatch.Configuration.Selection
 		}

@@ -19,10 +19,10 @@ func previewReviewRecoverySource(state store.Workspace, request ReviewRecoveryRe
 		return DispatchReconciliationPreview{}, fmt.Errorf("taxion: review recovery requires its original stopped Flow")
 	}
 	if change := request.DeadlineRecontract; change != nil {
-		if err := change.Validate(flow.Deadline, now); err != nil || !change.Deadline.Equal(request.Deadline) {
+		if err := change.Validate(flow.ExecutionDeadline(), now); err != nil || !change.Deadline.Equal(request.Deadline) {
 			return DispatchReconciliationPreview{}, fmt.Errorf("taxion: deadlineRecontract must bind the exact old deadline, requested future deadline and explicit change reason")
 		}
-	} else if !now.Before(flow.Deadline) || request.Deadline.After(flow.Deadline) {
+	} else if !now.Before(flow.ExecutionDeadline()) || request.Deadline.After(flow.ExecutionDeadline()) {
 		return DispatchReconciliationPreview{}, fmt.Errorf("taxion: original deadline expired or would be extended; preview an explicit deadlineRecontract for a new successor, never edit the stopped Flow")
 	}
 	if !request.ContinueStoppedExecution {

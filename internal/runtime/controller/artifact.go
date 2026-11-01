@@ -25,7 +25,7 @@ func startArtifactReview(state *store.Workspace, flow *core.ReviewFlow, request 
 	if _, enabled := state.Records.PacketAuthorization(flow.TaskID); enabled {
 		return fmt.Errorf("taxion: artifact-first packet lifecycle delegation is not supported; use a separately approved Task without optional packet delegation")
 	}
-	if time.Until(flow.Deadline) < time.Duration(flow.StagePlan.ValidationSeconds+flow.StagePlan.ReviewSeconds)*time.Second {
+	if time.Until(flow.ExecutionDeadline()) < time.Duration(flow.StagePlan.ValidationSeconds+flow.StagePlan.ReviewSeconds)*time.Second {
 		return fmt.Errorf("taxion: caller deadline cannot fit approved input validation and independent review")
 	}
 	if strings.TrimSpace(request.ArtifactSource) != request.ArtifactSource ||
@@ -141,7 +141,7 @@ func runArtifactValidation(ctx context.Context, db *store.Store, ledgerPath, id,
 	}
 	if execute {
 		deadline := flow.StartedAt.Add(time.Duration(flow.StagePlan.ValidationSeconds) * time.Second)
-		reserved := flow.Deadline.Add(-time.Duration(flow.StagePlan.ReviewSeconds) * time.Second)
+		reserved := flow.ExecutionDeadline().Add(-time.Duration(flow.StagePlan.ReviewSeconds) * time.Second)
 		if reserved.Before(deadline) {
 			deadline = reserved
 		}

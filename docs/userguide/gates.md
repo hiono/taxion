@@ -1,6 +1,6 @@
 # 契約・実行・公開の gate
 
-v0.7.0 は、作業の節目を3つの gate として観測する。gate は判定だけを行い、承認、Dispatch の発行、状態遷移を代行しない。gate が失敗しても保存状態は変わらない。
+作業の節目を3つの gate として観測する。gate は判定だけを行い、承認、Dispatch の発行、状態遷移を代行しない。gate が失敗しても保存状態は変わらない。
 
 ## 3つの gate
 
@@ -29,7 +29,7 @@ taxion gate contract --task <task-id> --json
 
 | field | 意味 |
 | --- | --- |
-| `version` | report schema の版。v0.7.0 は1 |
+| `version` | report schema の版。現在は1 |
 | `gate` | `contract`・`execution`・`publication` |
 | `taskId`・`flowId` | 対象の識別子 |
 | `verdict` | `pass`・`fail`・`blocked` |
@@ -69,9 +69,9 @@ taxion workflow lanes --task <task-id> --timeout 2s --root <repository-root>
 | `contract-consistency` | Task と最新 Dispatch instruction の objective、scope、acceptance、requiredEvidence が一致する |
 | `handoff-preparation` | 有効な Dispatch があり、return format と instruction hash が揃い、running flow が handoff を保持していない |
 
-lane は Task Graph、Dispatch、Flow、worktree、runtime を変更しない。一つでも失敗、取消、timeout になれば `executionGateOpen` は `false` になり、JSON を出したうえで非zero終了する。診断は credential を伏せる。v0.7.0 ではこの値は運用者向けの advisory で、gate や実行入口が lane report を自動で読むことはない。
+lane は Task Graph、Dispatch、Flow、worktree、runtime を変更しない。一つでも失敗、取消、timeout になれば `executionGateOpen` は `false` になり、JSON を出したうえで非zero終了する。診断は credential を伏せる。この値は運用者向けの advisory で、gate や実行入口が lane report を自動で読むことはない。
 
-lane report は gate report とは別の report である。v0.7.0 では両者を別々に読む。
+lane report は gate report とは別の report である。両者を別々に読む。
 
 ## 失敗したとき
 

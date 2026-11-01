@@ -113,7 +113,7 @@ func (s StagePlan) ReservedNanoAIU(repairs int, role string) float64 {
 }
 
 func (s StagePlan) SubmissionDeadline(flow ReviewFlow, role string) time.Time {
-	return flow.Deadline.Add(-time.Duration(s.ReservedSeconds(flow.Repairs, role)) * time.Second)
+	return flow.ExecutionDeadline().Add(-time.Duration(s.ReservedSeconds(flow.Repairs, role)) * time.Second)
 }
 
 func (s StagePlan) ValidateNativeReservations(limit float64) error {

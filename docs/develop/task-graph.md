@@ -102,7 +102,7 @@ Task は ADR-0021 の識別、担当、scope、acceptance、証拠、対象 SHA�
 APPROVED の依存は COMPLETED に進んだ後も満たされる。
 参照不存在、自己参照、循環、同一依存の重複を拒否する。
 
-READY には `owner`（CODER または REVIEWER。開発版の VERIFICATION Task は USER も可）、objective、scope、
+READY には `owner`（CODER または REVIEWER。VERIFICATION Task は USER も可）、objective、scope、
 acceptance、requiredEvidence、exitCondition、
 `authorizationId` と同じ ID の decision を要求する。
 dispatch 前には branch、worktree、baselineSha も要求する。これらは Task の契約から
@@ -161,7 +161,7 @@ subject・body・action line の形式を検査する。最新コミットだけ
 既存 repository の開始 SHA 以前のコミットと、
 この policy を持たない保存済み Dispatch は発行時の契約を保持する。
 
-**Coder の変更一覧は Controller が実差分から確定する（開発版）**
+**Coder の変更一覧は Controller が実差分から確定する**
 
 全工程に共通する判断は [ADR-0055](adr/0055-adapt-within-approved-goals.md#全工程で使う判定順序)
 に従い、この項は変更一覧の具体的な受理条件を定める。
@@ -238,9 +238,14 @@ Task と Dispatch の契約に含め、役割間で同じ引用スナップシ�
 
 ## 上限付きレビュー進行
 
-`v0.7.21-rc.8` の未開始持込み Reviewer 復旧は [ADR-0058](adr/0058-recover-unstarted-artifact-review.md) に従う。入力検証合格後の準備失敗を正式に整合し、元契約・候補・設定を維持する後続が `reuseArtifactValidation:true` を指定できる。`artifact.validationSourceFlowId` と `INPUT_VALIDATION_REUSED` が合格 receipt と取消監査を結ぶ。旧 Flow は終端のまま、元の検証 stage は再実行しない。Reviewer の結果受理検証は維持する。
+継続と上限変更は [ADR-0058](adr/0058-recover-unstarted-artifact-review.md) に従う。
+稼働中は時間と費用の不足を停止前にまとめて確認し、`workflow extend` の明示承認で
+同じ session を維持する。元の契約・計画・消費は保持し、extension と監査を追記する。
+正式停止した成果物 Reviewer は `workflow recover-review` で同じ候補・合格入力検証・
+保存解析から後続を作る。期限切れ後は同じ要求の `deadlineRecontract` を承認する。
+旧 Flow は終端のまま、Coder と入力検証は繰り返さず、結果受理検証は維持する。
 
-開発版の持込み成果物からの検証開始は [ADR-0056](adr/0056-validate-supplied-artifacts-without-coder-success.md)
+持込み成果物からの検証開始は [ADR-0056](adr/0056-validate-supplied-artifacts-without-coder-success.md)
 に従う。`artifactSource` と承認済みの工程 hash を指定すると、モデル Dispatch のない入力工程を保存する。
 `workflow validate-input` は実際の Controller 検証後にだけ Reviewer を発行する。
 通常実装の Coder 成功・既存結果の継続とは別の入口であり、未検証入力の由来を変更しない。
@@ -305,7 +310,10 @@ Reviewer の `BLOCKED`、必須 Memory の失効では、理由を持つ `STOPPE
 次の Dispatch 発行を連続して行う。各実行の終了時に SDK 接続を閉じる。
 途中の説明はイベントとして表示し、turn の最終応答を結果の採用に使う。
 
-run は保存済み期限を context の deadline に設定し、各 usage event を保存・報告する。
+run は追記承認を含む有効期限を再読取りする context を使い、各 usage event を保存・報告する。
+正式な延長は同じ worker context に反映し、独立 caller の期限と取消は維持する。
+応答待ちと利用量受信時の `resource_approval_required` は時間と費用の判断要求であり、
+承認や取消ではない。回答待ちも見込んで現在の工程期限前に一度の承認を得る。
 実行中は1秒ごとにも進行状態・Task 契約・必須 Memory を確認し、
 期限到達や契約変更・停止要求で `runtime stop` と同じ停止処理を行う。
 観測した token 数は実行を止める上限ではない。
@@ -704,7 +712,7 @@ Release 0.1.0 の #78 で引き続き追跡する。
 
 ### 停止した作業の継続
 
-v0.7.21-rc.6（Issue #203）では、Dispatch のない artifact 入力検証 `FAILED` を、
+Dispatch のない artifact 入力検証 `FAILED` を、
 成功済み Coder の継続とは別に扱う。通常 intake は `artifact-predecessor:TASK_ID` 決定に
 失敗 Flow ID・artifact hash・旧 artifact 全体の receipt digest を自動で固定し、
 提案 hash と確認対象へ含める。confirm は同じ決定と `replacesFlow`、`target` 省略を要求し、
@@ -768,7 +776,7 @@ git -C /absolute/path/to/successor status --porcelain
 
 packet の検証証跡を再利用する場合、後続契約は元 Flow の `objective`、scope、acceptance、出力方式を維持する。`objective` は成果物の全体目的であり、後続で実行する役割を表す field ではない。レビューだけの実行は `continueFromDispatchId` で選ぶ。目的の文字列をレビュー専用の説明へ変更しても同じ意味かどうかを controller は推測しないため、元の検証結果を流用しない。security と実行設定の一致、元の承認による検証証跡の照合も必要になる。
 
-v0.7.16 は `objective` と出力方式の不一致も `packet continuation changed the verified scope or acceptance` と表示する。v0.7.17 では目的と出力方式を分けて診断する。承認済み後続 Task の目的を変えてしまった場合は、その承認を上書きせず、別IDの後続 Task に元の目的を保持して新たに承認する。旧 Task、成果、検証、取消履歴は維持し、Coder や検証を繰り返すために通常 Flow へ戻さない。
+レビュー専用継続は元の目的と出力方式を別々に照合し、不一致の原因を分けて診断する。承認済み後続 Task の目的を変えてしまった場合は、その承認を上書きせず、別IDの後続 Task に元の目的を保持して新たに承認する。旧 Task、成果、検証、取消履歴は維持し、Coder や検証を繰り返すために通常 Flow へ戻さない。
 
 旧 `BUDGET_LIMIT` または `SAFETY_STOP` で Reviewer 実行が停止した場合も、直前の成功 Coder 結果を引き継げる。元の flow は `STOPPED`、上記いずれかの stop code、runner 所有権なし、handoff 保留を要求する。最後の Dispatch は、その Coder に独立レビューとして結び付いた `CANCELLED` の Reviewer であり、保存 session に対応する `runtime-stop:` 証拠が必要になる。実行中・停止未確認・別の Coder へのレビューは継続元にできない。停止理由の分類だけで続行を許可せず、成功結果、同一成果物、新しい Task と設定・期限の承認も照合する。旧 Flow の stop code や結果は変更しない。
 
@@ -956,7 +964,7 @@ HTTP API は `internal/runtime/local` を利用する。ACP は CLI が発行し
 
 ## 不要な停止済み試行を一覧と計画から外す
 
-v0.5.0 の `task archive` は、停止済みの試行を通常の Task／Dispatch 一覧と
+`task archive` は、停止済みの試行を通常の Task／Dispatch 一覧と
 `task plan` から外す。保存記録の削除や Git cleanup は行わない。
 元の Task 状態・承認・実行結果・履歴は保持し、Graph の `archives` に
 `taskIds`、`actor`、`source`、`reason`、`expectedHash`、`at` を追加する。
@@ -987,7 +995,7 @@ Web は HTTP の検査結果を表示する。Graph の read/edit API は今後�
 既存 Ledger の wire format は維持する。
 
 CLI・HTTP・ACP の更新は SQLite transaction で Ledger と Graph を一緒に変更する。
-v0.7.18 では、workspace の各接続に `busy_timeout(5000)` を設定し、更新 transaction は
+workspace の各接続に `busy_timeout(5000)` を設定し、更新 transaction は
 `BEGIN IMMEDIATE` で読取り前に writer を予約する。短時間の別接続の読取りや更新競合は、
 SQLite 内で最大5秒待つ。workspace 全体の読取りは一つの read transaction で行い、
 Ledger・Graph・保存記録を異なる commit から組み合わせない。
@@ -999,8 +1007,6 @@ Ledger・Graph・保存記録を異なる commit から組み合わせない。
 `task graph` を含む一部の既存 CLI は通常の workspace 初期化経路を使うため、
 表示目的でも無書込みとは限らない。長時間の外部 DB transaction や同時 schema 移行との
 並行動作、無制限の待機は保証しない。journal mode は変更せず、WAL への自動移行は行わない。
-v0.7.17 以前は通常経路にこの待機と writer 予約がなく、実行中の CLI 照会でも
-`SQLITE_BUSY` による停止が起こり得る。旧版では実行中の DB・CLI 照会を避ける。
 開発途中の JSON 保存形式を持つ workspace の読取り互換を実装に残している。
 対象は `.taxion/ledger.json` と `.graph.json` で、SQLite への初回取込みに限り読み、
 以後は更新しない。これは旧開発環境の記録を保持するための処理であり、
@@ -1025,7 +1031,7 @@ actor・decision・proof は caller が供給する作業記録である。
 
 ## Task budget accounting
 
-開発版の持込み入力 Flow は、Coder Dispatch/session の実績だけでなく
+持込み入力 Flow は、Coder Dispatch/session の実績だけでなく
 `maxCoderSessions` 自体もゼロとする。この明示的な入力工程に限り、ゼロ上限を
 「予算情報なし」とは扱わない。入力受理・検証開始・検証終了の追記監査を保存し、
 検証結果不明のまま開始記録を再利用しない。通常 Coder Flow の上限条件は変更しない。

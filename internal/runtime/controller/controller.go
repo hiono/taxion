@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -465,6 +466,13 @@ func (c *Controller) Finish(ctx context.Context, dispatchID, payload string) (fi
 			finishErr = errors.Join(finishErr, ctx.Err(), c.stopForStage(flow, dispatch, reason))
 		}
 	}()
+	return c.finishResult(ctx, dispatch, payload)
+}
+
+// finishResult is shared by live delivery and verified saved-session recovery.
+// Callers establish submission authority and a bounded host-validation context.
+func (c *Controller) finishResult(ctx context.Context, dispatch core.GraphDispatch, payload string) (*core.DispatchResult, error) {
+	dispatchID := dispatch.ID
 	if err := c.observeStageIfFlow(dispatchID, "submitted", "structured result received; not yet validated"); err != nil {
 		return nil, err
 	}
@@ -567,16 +575,10 @@ func (c *Controller) Finish(ctx context.Context, dispatchID, payload string) (fi
 			if err := dispatch.ValidateResult(result.Status, &result); err != nil {
 				return nil, err
 			}
-			closer, ok := c.runtime.(io.Closer)
-			if !ok {
-				return nil, fmt.Errorf("taxion: Reviewer runtime must support close before worktree release")
-			}
-			if err := closer.Close(); err != nil {
-				return nil, fmt.Errorf("taxion: close Reviewer runtime: %w", err)
-			}
-			if err := gitproof.ReleaseReviewWorktree(dispatch.ReviewWorktreeSource, dispatch, &result); err != nil {
+			if err := c.recordReviewFinalization(dispatch, &result, false); err != nil {
 				return nil, err
 			}
+			return c.finishReviewedResult(ctx, dispatch, &result, false)
 		}
 	}
 	if !slices.Contains([]core.DispatchStatus{core.DispatchSucceeded, core.DispatchFailed, core.DispatchSuspended}, result.Status) {
@@ -595,6 +597,46 @@ func (c *Controller) Finish(ctx context.Context, dispatchID, payload string) (fi
 		return &result, err
 	}
 	return &result, nil
+}
+
+// Validation is durable before closing external resources. Recovery resumes
+// these same phases, never replays host commands or releases unverified work.
+func (c *Controller) finishReviewedResult(ctx context.Context, dispatch core.GraphDispatch, result *core.DispatchResult, closed bool) (*core.DispatchResult, error) {
+	if !closed {
+		closer, ok := c.runtime.(io.Closer)
+		if !ok {
+			return nil, fmt.Errorf("taxion: Reviewer runtime must support close before worktree release")
+		}
+		if err := closer.Close(); err != nil {
+			return nil, fmt.Errorf("taxion: close Reviewer runtime: %w", err)
+		}
+		if err := c.recordReviewFinalization(dispatch, result, true); err != nil {
+			return nil, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if _, err := os.Lstat(dispatch.Instruction.Worktree); errors.Is(err, os.ErrNotExist) {
+		result.GitEvidence.WorktreeReleased = true
+		released := dispatch
+		released.Status = result.Status
+		if err := gitproof.ReverifyReleasedReview(released, result); err != nil {
+			return nil, err
+		}
+	} else if err := gitproof.ReleaseReviewWorktree(dispatch.ReviewWorktreeSource, dispatch, result); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := c.transition(dispatch.ID, result.Status, "final response verified", result, false, false); err != nil {
+		return nil, err
+	}
+	if err := c.observeStageIfFlow(dispatch.ID, "result-verified", string(result.Status)); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func (c *Controller) Events(ctx context.Context, dispatchID string) (<-chan runtime.Event, error) {

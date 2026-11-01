@@ -385,6 +385,18 @@ func TestReviewerDispatchResultValidatesAcceptanceFindingsAndWorktree(t *testing
 		NextTransition: WaitingForEvidence,
 	}
 	result.GitEvidence = testGitEvidence(dispatch, result)
+	result.Blockers = []string{"A verified review finding prevents product approval"}
+	if err := dispatch.ValidateResult(DispatchSucceeded, result); err == nil {
+		t.Fatal("approved a product while the Reviewer still reports blockers")
+	}
+	result.Acceptance[0].Status = "FAIL"
+	for _, verdict := range []string{"REQUEST_CHANGES", "BLOCKED"} {
+		result.ReviewVerdict = verdict
+		if err := dispatch.ValidateResult(DispatchSucceeded, result); err != nil {
+			t.Fatalf("completed non-approving review lost its blockers: %v", err)
+		}
+	}
+	result.Blockers, result.ReviewVerdict, result.Acceptance[0].Status = []string{}, "APPROVE", "PASS"
 	incomplete := *result
 	incomplete.Acceptance = nil
 	if err := g.TransitionDispatch(dispatch.ID, DispatchSucceeded, "reviewer", "incomplete result", false, false, &incomplete); err == nil {

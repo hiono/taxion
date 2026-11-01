@@ -73,7 +73,7 @@ func (c *Controller) ObserveAccountQuota(ctx context.Context, dispatchID string)
 	if observation != nil && observation.FlowID != "" {
 		beforeFlow, _ := state.Graph.ReviewFlow(observation.FlowID)
 		afterFlow, ok := after.Graph.ReviewFlow(observation.FlowID)
-		if !ok || !reflect.DeepEqual(beforeFlow, afterFlow) || !time.Now().Before(afterFlow.Deadline) {
+		if !ok || !reflect.DeepEqual(beforeFlow, afterFlow) || !time.Now().Before(afterFlow.ExecutionDeadline()) {
 			return nil, fmt.Errorf("taxion: quota observation Flow changed or expired during the read; result withheld")
 		}
 	}
@@ -139,13 +139,14 @@ func (c *Controller) prepareBudgetGuidance(ctx context.Context, dispatch core.Gr
 		if flow.Budget.BudgetSource == core.ProviderStopBudgetSource && (mode != "provider" || !core.ProviderBudget(policy)) {
 			return nil, fmt.Errorf("taxion: provider-budget-only flow cannot change its approved billing policy")
 		}
-		if flow.Status != "RUNNING" || !time.Now().Before(flow.Deadline) {
+		if flow.Status != "RUNNING" || !time.Now().Before(flow.ExecutionDeadline()) {
 			return nil, fmt.Errorf("taxion: budget guidance cannot send after flow stop or deadline")
 		}
 		used, known := flowTokens(state.Graph, flow)
 		if mode != "off" {
 			observation.FlowID, observation.FlowState = flow.ID, "usage-unavailable"
-			observation.Deadline = &flow.Deadline
+			deadline := flow.ExecutionDeadline()
+			observation.Deadline = &deadline
 			if known {
 				observation.FlowState = "available"
 				observation.UsedTokens = &used

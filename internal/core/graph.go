@@ -830,7 +830,10 @@ func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *Disp
 		return graphError("partial Git evidence requires a cancelled Coder dispatch and complete tree identity")
 	}
 	if status == DispatchSucceeded {
-		if !nonempty(result.OutputSHA) || len(result.Validations) == 0 || len(result.Evidence) == 0 || len(result.Blockers) != 0 {
+		reviewFindings := d.Recipient == "REVIEWER" && d.Instruction.Version >= 2 &&
+			slices.Contains([]string{"REQUEST_CHANGES", "BLOCKED"}, result.ReviewVerdict)
+		if !nonempty(result.OutputSHA) || len(result.Validations) == 0 || len(result.Evidence) == 0 ||
+			len(result.Blockers) != 0 && !reviewFindings {
 			return graphError("successful dispatch requires output SHA, validation and evidence")
 		}
 		if d.Instruction.OutputMode == OutputModeWorktreeTreeSnapshot {

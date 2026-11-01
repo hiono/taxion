@@ -1,5 +1,20 @@
 # Runtime 契約
 
+Runtime は Controller が役割ごとの実行を開始・送信・観測・停止するための SDK 非依存の境界である。
+Copilot は SDK、OpenCode は ACP を adapter 内で扱い、core の型へ外部 SDK を持ち込まない。
+全体の接続は[アーキテクチャ](architecture.md)、利用者の操作は
+[利用者ガイド](../userguide/user-guide.md)に分ける。
+
+## 実行の流れ
+
+Controller は保存済み Task と Dispatch の承認・対象・設定を照合し、
+役割と worktree を固定した adapter を作る。Start と session binding の後に指示を送り、
+イベントと利用量を保存し、最終結果を Git 対象と照合する。
+ホスト検証と独立レビューを経て結果を受理し、次の役割または完了へ進む。
+Send の復帰が turn の完了とは限らないため、実行 context はイベント観測と結果処理まで保持する。
+
+## 工程と実行上限
+
 工程計画付き Flow は [ADR-0053](adr/0053-enforce-approved-flow-stage-boundaries.md) に従う。`core.StagePlan` は SDK に依存しない秒数・ネイティブ単位の内部残額枠・役割別ソフト上限であり、提供元のクレジット予約とは区別する。`PreviewStagePlan` で承認対象を作り、開始時に完全なハッシュを照合する。実装を検証する際は `TestStage*`・`TestPlanned*` を使い、従来の計画なし経路と提供元停止方式も回帰確認する。
 
 新しい実行環境は、ソフト上限を指定できる場合に `SessionCreditCeiling() float64` で実適用値を公開する。未指定はゼロである。制御処理はセッションを開始する前に保存計画と比較する。工程期限は `Start`・`Send`・`Resume`・`StreamEvents`・`Finish` とツール許可へ適用し、提出を受けた後の `Finish` は検証用の期限に切り替える。イベント監視が終了するまで提供元の停止証跡を確認し、異常終了後に時計や予算を作り直さない。
@@ -68,7 +83,7 @@ intake は、元の依頼本文を出典付きの未承認 `DRAFT` Task に保�
 
 全機能での自律判断と確認の境界は [ADR-0055](adr/0055-adapt-within-approved-goals.md) に従う。目的・受入れ条件・権限・残予算・期限を保って手段を選び、人間には判断が実際に変わる差分だけを確認する。モデル応答や版の再現性を品質の代わりにせず、成果の検証と独立レビューを行う。
 
-開発版はその第一段階として、bundle-required graph の正式確認から canonicalization version 2 の ApprovalBundle を同一 transaction で導出する。proposalHash は元の確認、recordHash は確認後の READY 全体、7次元は保存契約と選択設定を束縛する。actor・source・reason・時刻は元の正式確認を引き継ぐ。旧形式の marker は変更しない。
+正式確認は、bundle-required graph の正式確認から canonicalization version 2 の ApprovalBundle を同一 transaction で導出する。proposalHash は元の確認、recordHash は確認後の READY 全体、7次元は保存契約と選択設定を束縛する。actor・source・reason・時刻は元の正式確認を引き継ぐ。旧形式の marker は変更しない。
 
 不足 bundle の補完は、完全一致する確認要求の再実行に限る。元の DRAFT hash、最初の READY 履歴と現在 Task、設定承認を照合し、Task の Flow・Graph／ledger Dispatch がないことを要求する。競合 bundle は上書きしない。確認と bundle 保存がともに成功するか、全体を取り消す。保存済み bundle の検証や実行入口は緩和せず、役割委譲を新たに生成する操作でもない。
 
@@ -105,7 +120,15 @@ checkpoint v2 は既存の正規化 document 保存を使い、operation ID、�
 入力終了後の質問再表示はモデルを使わない。最小計画・未回答質問の保存前に停止し、入力本文が失われた checkpoint は、依頼 digest を本文の代わりに使わず再開を拒否する。送信開始済みで結果が不明の Planner は checkpoint で検出し、再送しない。実行中に process が止まって runner claim が残った場合は、既存の停止確認・receipt/Git 照合を済ませてから再開する。復旧のために Task 契約、proposal hash、既存 decision、ApprovalBundle、budget hard-stop を書き換えない。旧 binary は未知の `operation` field を拒否するため、rollback は operation 保存前の snapshot を使用する。
 ## 保存結果と checkpoint の復旧
 
-`v0.7.21-rc.11` の復旧は [ADR-0058](adr/0058-recover-unstarted-artifact-review.md) に従う。
+継続と上限変更は [ADR-0058](adr/0058-recover-unstarted-artifact-review.md) に従う。
+稼働中は `workflow extend` の一つの承認判断を `ReviewFlow.extensions` と
+`RESOURCE_EXTENDED` へ原子的に追記する。元の期限・予算・工程計画を変更せず、
+`ExecutionDeadline()` と `NativeLimit()` で有効値を求める。
+runner と direct runtime の stage context は保存状態を再読取りし、
+承認された延長後も同じ context／session を維持する。独立 parent の取消・期限は優先する。
+`resource_approval_required` はモデル応答待ちと利用量観測時の判断要求であり、
+`request` でも隠さない。承認待ちの先回り取消、権限拡張、消費のリセットは行わない。
+
 `workflow recover-review` は既存の取消・提案・確認・工程計画・Flow 作成を
 隔離メモリ内で検査し、一つの外側承認と実 store の transaction にまとめる。
 入力検証 receipt の再利用では新しい Flow 用の永続 Git ref を作らず、
@@ -114,7 +137,7 @@ checkpoint v2 は既存の正規化 document 保存を使い、operation ID、�
 実行後に取消された最初の成果物 Reviewer は `continueStoppedExecution:true` を明示する。
 元指示に一致する停止 receipt、利用量、同じ候補と準備済み worktree、
 稼働実行・runner・未解決 feedback の不在を検査する。
-通常は元期限を超えない。`v0.7.21-rc.12` は明示的な `deadlineRecontract` により、
+通常は保存された有効期限を超えない。明示的な `deadlineRecontract` により、
 期限切れ後も同じ一括 preview で新期限の再契約を準備できる。
 保存された旧期限、新しい未来の期限、変更理由を外側 hash と追記監査に固定する。
 新期限は request の `deadline` と一致し、旧期限より後で適用時にも未来でなければならない。
@@ -131,7 +154,7 @@ intake の `reviewInput` は既存 Task decision の `taxion.review-input.v1` �
 残予算の `workflow budget --file` は観測単位と範囲の累計・残工程見込みから不足分を示し、
 先行 Flow の観測も返すが、追加権限・単位換算・累計上限の登録は行わない。
 
-開発版の持込み入力工程は [ADR-0056](adr/0056-validate-supplied-artifacts-without-coder-success.md)
+持込み入力工程は [ADR-0056](adr/0056-validate-supplied-artifacts-without-coder-success.md)
 に従い、Dispatch のない Flow を保存できる。`ReviewFlow.Artifact` の対象・設定・検証記録を
 入力受理と実行開始・終了の追記監査へ結び付ける。
 結果不明の開始記録からコマンドを再送せず、Coder 成功を合成しない。
@@ -147,6 +170,14 @@ intake の `reviewInput` は既存 Task decision の `taxion.review-input.v1` �
 新しい Dispatch の `DISPATCH_ISSUED` budget audit に `resumeBasis.version=1` を追加し、contract / Flow authorization / instruction の digest、Dispatch ID、開始時刻、deadline、budget を束縛する。既存 audit prefix と schema は書き換えない。旧 record にこの binding がない場合、自己申告 checkpoint や二重 readback で補完せず拒否する。Gate は record と Git を読むだけで、index 更新・snapshot capture・validation command・runtime 作成を行わない。`ResumeReviewFlow` は既存の process reservation を保持し、runner claim の更新 transaction 内で Gate を再評価してから通常 runner に渡す。不合格なら transaction は保存せず、operation や Flow を BLOCKED / STOPPED に書き換えない。
 
 `workflow recover` は、process の停止確認と終了 Dispatch の照合後に、保存した runner claim の完全一致を確認して解放する。最新結果が成功した Coder 提出なら、保存結果の契約と現在の Git の事実も確認する。対象は repository origin、branch、HEAD、baseline の祖先関係、変更 path、clean worktree、検証の出典、commit parent。今回の観測は、観測時刻を除き保存済み Git 証拠と一致する必要がある。元の結果と timestamp は変更しない。
+
+未確定の Reviewer 回答には `finalizeSavedResult:true` と短い `validationDeadline` を指定する。
+停止した同一 runner と native 履歴を照合し、元期限内の回答・turn 完了と正常 shutdown を要求する。
+通常の結果確定処理で host 検証済み段階と runtime 終了済み段階を追記してから、
+管理 worktree を解放し、正式結果を保存する。検証済み段階の利用量は保存時点の prefix と照合し、
+shutdown 集計の同単位の不足分を追記できる。runtime 終了済み段階は最終利用量と一致する必要がある。
+保存済みの検証を繰り返さず、結果不明の host コマンドも自動再実行しない。
+モデルへの再送、入力検証、修正回数の追加は行わず、正式結果の保存後に所有権を回収する。
 
 通常の Coder から Reviewer への引継ぎでも同じ検査を行う。復旧時の不一致は claim を残して明示 error を返す。引継ぎの不一致は、理由付きの `STOPPED` Flow を記録する。一致した結果は、保存した出力 SHA と完全一致する対象の独立レビューへ進める。この検査は Git と保存済み検証記録を読み、検証 command を再実行しない。command 実行は元の controller 提出時に行う。
 
@@ -229,7 +260,7 @@ prompt を自動再送しない。別 process/provider の session への再接�
 
 ## Skills・plugins・MCP・hooks と出力圧縮
 
-開発版では、製品の実装・独立レビューを行う Dispatch と、Taxion を操作する外側の担当を区別する。共通の Dispatch 指示は、管理用 skill・DB・session directory・他 worktree の調査を製品実装の前提にしない。標準／カスタム指示と両 runtime の共通指示生成に適用する。controller が検証を担当するとき、Taxion 操作用 shell がないことや検証待ちだけでは中断しない。必要な製品ファイルにアクセスできない場合は、具体的なファイルと未達要件を報告し、権限は拡張しない。
+製品の実装・独立レビューを行う Dispatch と、Taxion を操作する外側の担当を区別する。共通の Dispatch 指示は、管理用 skill・DB・session directory・他 worktree の調査を製品実装の前提にしない。標準／カスタム指示と両 runtime の共通指示生成に適用する。controller が検証を担当するとき、Taxion 操作用 shell がないことや検証待ちだけでは中断しない。必要な製品ファイルにアクセスできない場合は、具体的なファイルと未達要件を報告し、権限は拡張しない。
 
 Copilot の Coder／Reviewer は SDK の `DisabledSkills: ["taxion"]` を新規接続と再接続で指定する。一般の製品 skill 探索、明示された skill／plugin、既存のファイル権限は維持する。除外一覧は session hash に含め、診断の `disabledSkills` に表示する。native 探索で見つかった同名 skill は `disabled-for-role` と表示し、利用可能と誤記しない。固定 ToolPolicy の skill／plugin は内容を固定した資産として `pinned-content` と表示する。この表示は読込み成功ではなく、plugin 内の skill にも名前による除外は適用される。Planner／外側の操作者はこの除外の対象外。これは同名の管理 skill の読込み制御であり、任意の別名 skill やファイル本文の混入を完全に防ぐ sandbox ではない。利用者の skill ファイルは編集しない。
 
@@ -240,8 +271,12 @@ Copilot 子プロセスには `--disable-builtin-mcps` を常に渡し、組み�
 通常の Copilot SDK session は create・resume ともに探索を明示的に有効にする。SDK に `nil` を渡すだけでは project・personal skill が読み込まれず、CLI の一覧と一致しない場合がある。探索方式は config hash の `native-cli-discovery-v2` に含め、旧方式の session を新しい実行契約で再開しない。明示 ToolPolicy と取消専用 adapter の探索抑止、role 別 file・shell permission は維持する。
 
 外側の coding agent 向けの操作 skill は `ready --install-skill` で明示配置する。
-v0.4.0 の同梱 skill は `1.3.2`、metadata の形式は `"1"`、CLI 操作契約は `taxion.cli.v1` とする。ゴール指向方針と文書整合の原稿に、中間成果で最終依頼を完了扱いしない継続規則と、最終受入判定後に依頼された ADR・Issue・milestone・PR の整合更新、コミット、必要な公開確認を経て完成を報告する規則を追加した。公開済み v0.3.1 の `1.2.0` と旧開発版 `1.3.0`・`1.3.1` を含む旧管理ファイルは互換とせず、未改変の管理ファイルだけを明示更新する。これは操作者への指示であり、Controller が GitHub の記録を自動更新・強制する契約ではない。未達条件を完了扱いにせず、依頼外の記録や公開を要求しない。
-v0.3.0 の ready は状況別案内と初期設定の導線を更新した。旧 skill `1.0.0` は互換とせず、整合性を検査できる未改変の管理ファイルだけを利用者の明示許可で更新する。コマンド構文と JSON schema は変えず、CLI 操作契約は維持する。
+管理 skill の版は本体の明示許容リスト、metadata 形式 `"1"`、CLI 操作契約 `taxion.cli.v1`、
+現在の `ready` 原稿と配置内容の hash で照合する。旧版や未知の版を推測で互換と扱わず、
+未改変の管理ファイルだけを明示許可後に更新する。
+操作者は最終受入判定後、依頼された ADR・Issue・milestone・PR と実装を揃え、
+コミットと必要な公開確認を経て完成を報告する。これは Controller による外部記録の自動更新ではない。
+未達条件を完了扱いにせず、依頼外の記録や公開を要求しない。
 skill の本文・指示を変更するときは skill 版を更新し、CLI の破壊的変更では操作契約も更新する。
 本体の許容 skill 版は明示リストで管理し、未知の版は minor 変更でも自動許可しない。
 ready 原稿の hash は同じ版でも手順の陳腐化を検出する。本体の build 情報は生成元の記録であり、
@@ -353,7 +388,7 @@ Release 0.1.0 の文書 dogfood における実 skill 利用は、Issue #78 の�
 
 ## Dispatch の実行と context
 
-v0.4.0 は共通のゴール指向方針と担当別の責務を ready・Planner・質問回答・runtime・workflow・ACP の原稿へ接続する。追加作業には成果への具体的な寄与を求め、質問数やレビュー回数そのものを評価しない。承認・予算・独立性を維持し、関連文書も実装と同じ target で確認する。新しい request は文書整合 criterion を承認前の表示計画へ追加する。host の全件 acceptance 検査で FAIL・欠落・証拠なしを拒否するが、意味上の真偽や外部 Release 操作まで自動強制するものではない。
+共通のゴール指向方針と担当別の責務を ready・Planner・質問回答・runtime・workflow・ACP の原稿へ接続する。追加作業には成果への具体的な寄与を求め、質問数やレビュー回数そのものを評価しない。承認・予算・独立性を維持し、関連文書も実装と同じ target で確認する。新しい request は文書整合 criterion を承認前の表示計画へ追加する。host の全件 acceptance 検査で FAIL・欠落・証拠なしを拒否するが、意味上の真偽や外部 Release 操作まで自動強制するものではない。
 
 `workflow evaluate --id FLOW_ID --require-quality` は保存 graph の妥当性と、完了・独立同一 target 承認・文書 criterion を確認し、未達なら非zero終了する。`RECORDED_PASS` は保存証拠上の条件充足であって、実モデルの判断品質や安全性を独立実測した値ではない。集計範囲・欠損・未測定を JSON に明示し、品質未達と費用を加算して順位付けしない。[ADR-0040](adr/0040-constrain-goal-oriented-efficiency-by-quality-evidence.md) に対象経路と限界を記録する。
 
@@ -446,7 +481,7 @@ Reviewer の `acceptance[].evidence`・`findings[].evidence` は、最上位の 
 
 `runtime auth` は明示的な事前照会で、実行操作ではない。Copilot adapter の `auth.getStatus` 前に固定設定と現在・保存 Dispatch 承認を照合する。`CheckAuthentication` は認証済み account が要求 account と一致し、host が明示 `github.com` であることを確認する。SDK session を作らず、結果を cache せず、adapter config hash も変えない。返す error に provider 状態 message と生 RPC error は含めないが、取消は識別できる。
 
-開発版の `runtime quota --dispatch ID` は保存済み configuration を持つ active Dispatch の `account` guidance と現在・保存承認を照合し、既存の `ReadAccountQuota` と Controller の鮮度・account/provider・利用配分検査を使う。5秒と Flow 残時間の短い方で打ち切り、再試行しない。SDK process は使うが model session、実行認可、workspace の状態・receipt の保存は行わない。読取り後にも Task／Dispatch の一致と承認を照合し、変更時は観測を返さない。返却 JSON の `executionAuthorized` は常に false。既存の実行時検査を免除せず、停止 Flow は再開しない。OpenCode quota や無契約の任意アカウント照会には対応しない。`provider`／`provider-stop` では呼出しを要求せず、unsupported を理由に課金方式を自動変更しない。
+`runtime quota --dispatch ID` は保存済み configuration を持つ active Dispatch の `account` guidance と現在・保存承認を照合し、既存の `ReadAccountQuota` と Controller の鮮度・account/provider・利用配分検査を使う。5秒と Flow 残時間の短い方で打ち切り、再試行しない。SDK process は使うが model session、実行認可、workspace の状態・receipt の保存は行わない。読取り後にも Task／Dispatch の一致と承認を照合し、変更時は観測を返さない。返却 JSON の `executionAuthorized` は常に false。既存の実行時検査を免除せず、停止 Flow は再開しない。OpenCode quota や無契約の任意アカウント照会には対応しない。`provider`／`provider-stop` では呼出しを要求せず、unsupported を理由に課金方式を自動変更しない。
 
 この照会は credential 参照の解決、repository actor 選択、契約資格の証明を行わない。実行時は同じ認証 method を別に使って確認する。local protocol fixture の成功は login 済み受入れの証拠ではない。
 
@@ -478,7 +513,7 @@ local 検査は登録 SDK stage・commit handler を Controller・実 Git で呼
 
 ## event 購読の期間
 
-開発版の共通 runner は、Reviewer の作業場所を準備した後、runtime factory を呼ぶ前に
+共通 runner は、Reviewer の作業場所を準備した後、runtime factory を呼ぶ前に
 `review_budget` を合成する。version 1 の payload は保存 Flow の期限と、
 呼出し元 context を含む実効期限、出典、観測時刻、残り milliseconds を報告する。
 これは一回の観測であり、承認時間を再設定せず、十分なレビュー時間の予測もしない。

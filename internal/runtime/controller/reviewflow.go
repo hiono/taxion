@@ -347,7 +347,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 		stop := func(reason string) error { return stopWithCode(reason, "SAFETY_STOP") }
 		task, _ := state.Graph.GraphTask(flow.TaskID)
 		last, _ := state.Graph.GraphDispatch(flow.LastDispatchID())
-		if !time.Now().UTC().Before(flow.Deadline) {
+		if !time.Now().UTC().Before(flow.ExecutionDeadline()) {
 			return stopWithCode("deadline reached; reconcile and safely stop any active Dispatch before further authorization", "BUDGET_STOP")
 		}
 		if !flowContractMatches(state.Graph, flow, task) {

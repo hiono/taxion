@@ -114,7 +114,7 @@ _taxion_complete() {
         'task validate') candidates='--file --help --manifest' ;;
         'tools') candidates='hash' ;;
         'tools hash') candidates='--help --path' ;;
-        'workflow') candidates='accept-saved-review advance budget draft draft-approve draft-discard evaluate feedback feedback-resolve feedback-target handoff interrupt lanes plan planner-action planner-draft planning-context question-draft reconcile-stopped recover recover-review repair-status resume run show start step terminate validate-input' ;;
+        'workflow') candidates='accept-saved-review advance budget draft draft-approve draft-discard evaluate extend feedback feedback-resolve feedback-target handoff interrupt lanes plan planner-action planner-draft planning-context question-draft reconcile-stopped recover recover-review repair-status resume run show start step terminate validate-input' ;;
         'workflow accept-saved-review') candidates='--file --help --preview' ;;
         'workflow advance') candidates='--help --id' ;;
         'workflow budget') candidates='--file --help --id' ;;
@@ -122,6 +122,7 @@ _taxion_complete() {
         'workflow draft-approve') candidates='--file --help' ;;
         'workflow draft-discard') candidates='--file --help' ;;
         'workflow evaluate') candidates='--help --id --require-quality' ;;
+        'workflow extend') candidates='--file --help --preview' ;;
         'workflow feedback') candidates='--file --help' ;;
         'workflow feedback-resolve') candidates='--file --help' ;;
         'workflow feedback-target') candidates='--help --id' ;;
@@ -134,7 +135,7 @@ _taxion_complete() {
         'workflow planning-context') candidates='--help --id' ;;
         'workflow question-draft') candidates='--file --help' ;;
         'workflow reconcile-stopped') candidates='--file --help --preview' ;;
-        'workflow recover') candidates='--file --help' ;;
+        'workflow recover') candidates='--base-directory --cli --file --help' ;;
         'workflow recover-review') candidates='--file --help --preview' ;;
         'workflow repair-status') candidates='--help --id' ;;
         'workflow resume') candidates='--base-directory --builtin-prompts --cli --coder-prompt-file --coder-tools --compact-context --controller-validation-submission --help --id --managed-commit --managed-stage --max-ai-credits --progress-monitor --review-progress --reviewer-prompt-file --reviewer-tools --scanner --strict-result-identities' ;;

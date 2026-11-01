@@ -241,7 +241,7 @@ func TestUserGuideInstallsReleaseBeforeSelectingIt(t *testing.T) {
 			if strings.HasPrefix(line, "mise install ") {
 				installed = strings.TrimPrefix(line, "mise install ")
 			}
-			if !strings.HasPrefix(line, "mise use ") || !strings.Contains(line, "go:github.com/hiono/taxion/cmd/taxion@") {
+			if !strings.HasPrefix(line, "mise use ") || !strings.Contains(line, "github:hiono/taxion@") {
 				continue
 			}
 			if !strings.Contains(line, "--pin ") || installed == "" || !strings.HasSuffix(line, installed) {
@@ -253,16 +253,16 @@ func TestUserGuideInstallsReleaseBeforeSelectingIt(t *testing.T) {
 			checked++
 		}
 	}
-	if checked != 3 {
-		t.Errorf("expected initial, project update and global version examples, got %d", checked)
+	if checked != 1 {
+		t.Errorf("expected one canonical install/select example, got %d", checked)
 	}
 }
 
 func TestUserGuideDistinguishesACPBuildAndSkillPaths(t *testing.T) {
 	body := documentationText(t, "../../docs/userguide/user-guide.md")
 	for _, detail := range []string{
-		"OpenCode ACP は v0.1.0 に含まれません",
-		"v0.5.0 を導入してください",
+		"正式バイナリ",
+		"provenance verify",
 		"file read が許可された role に限り",
 		"`/config/opencode/skills/<skill-name>/`",
 		"未承認の外部 directory は拒否",

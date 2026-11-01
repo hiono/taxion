@@ -197,12 +197,12 @@ func previewSavedReview(ctx context.Context, state store.Workspace, ledgerPath s
 			successAt = receipt.At
 		}
 	}
-	if successAt.IsZero() || successAt.Before(flow.StartedAt) || !successAt.Before(flow.Deadline) ||
+	if successAt.IsZero() || successAt.Before(flow.StartedAt) || !successAt.Before(flow.ExecutionDeadline()) ||
 		last.Result.GitEvidence.VerifiedAt.Before(flow.StartedAt) || last.Result.GitEvidence.VerifiedAt.After(successAt) ||
 		hold.At.Before(successAt) || now.Before(successAt) {
 		return reject("saved success must have controller receipt and Git evidence before the original deadline")
 	}
-	expired := !now.Before(flow.Deadline)
+	expired := !now.Before(flow.ExecutionDeadline())
 	if expired && !request.AllowExpired {
 		return reject("deadline expired; explicit allowExpired approval for acceptance only is required")
 	}
@@ -255,7 +255,7 @@ func previewSavedReview(ctx context.Context, state store.Workspace, ledgerPath s
 		Version: 1, FlowID: flow.ID, TaskID: task.ID, ReviewerDispatchID: last.ID,
 		ReviewerTaskID: review.ID, ReviewerTaskStatus: review.Status, ReviewerTaskFinalStatus: review.Status,
 		OutputSHA: task.TargetSHA, OutputTreeSHA: task.TargetTreeSHA, InstructionHash: last.InstructionHash,
-		ResultHash: resultHash, Deadline: flow.Deadline, DeadlineExpired: expired, OriginalReasonUnavailable: true,
+		ResultHash: resultHash, Deadline: flow.ExecutionDeadline(), DeadlineExpired: expired, OriginalReasonUnavailable: true,
 		Checks: []string{"result-receipts", "success-before-deadline", "contract-and-acceptance",
 			"configuration-and-approvals", "independent-role-packets", "required-memory",
 			"snapshot-ref-and-tree", "retained-coder-snapshot", "current-task-branch-index-worktree", "released-review"},

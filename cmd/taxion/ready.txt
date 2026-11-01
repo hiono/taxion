@@ -31,7 +31,7 @@ report the exact missing operation contract; do not guess fields or approvals.
 | First use or missing settings | init, config check, doctor, doctor fix | check and doctor are read-only; init/fix preview changes and require explicit application |
 | Refine a request and contract | task, conversation intake/proposal/confirm | inspect the proposal's exact hash; confirm only after user approval |
 | Execute approved work | workflow start/run/step, runtime, acp | model execution needs approved configuration, permissions and budget; do not repeat existing planning with request |
-| Validate and review supplied input without Coder | workflow plan/start, workflow validate-input, doctor --dispatch, workflow run | use artifactSource, snapshot mode and zero repairs; input is not a successful implementation |
+| Validate and review supplied input without Coder | workflow plan/start, workflow validate-input, workflow run | use artifactSource, snapshot mode and zero repairs; run prepares and inventories the Reviewer worktree before any model |
 | Inspect results or continue stopped work | task graph, records show, workflow show/recover | distinguish saved state from live processes and Git; reuse successful work |
 | Handle sources, records and portability | specification, memory, records, workspace, git | ingestion, transmission, publication and restore permissions are separate |
 
@@ -40,8 +40,7 @@ results and recovery. JSON examples illustrate schemas, not actual values or app
 
 ### Supplied input without implementation
 
-RC5 supports an artifact-first entry; it is not an RC4 command
-contract. For supplied unverified code, use a READY snapshot Task and workflow
+For supplied unverified code, use a READY snapshot Task and workflow
 plan with artifactSource (a non-secret source reference), maxRepairs: 0 and
 stageBudget version 1. Do not set Coder session credits. The plan binds the full
 tree and Controller-observed changed paths; an empty diff still requires review
@@ -56,8 +55,10 @@ ID is FLOW_ID-review-0; existing additionalTaskIds may cover it. Neither bundle
 derivation nor optional packet formats justify an extra duplicate approval.
 After workflow start, workflow validate-input --id FLOW_ID executes the approved
 commands without a model and saves their actual outcomes. It issues the Reviewer
-only after validation succeeds and the target remains unchanged. Then inspect
-doctor --dispatch REVIEWER_DISPATCH_ID --json before workflow run --builtin-prompts.
+only after validation succeeds and the target remains unchanged.
+workflow run --builtin-prompts prepares and inventories the exact Reviewer worktree
+before starting its model. Before preparation, doctor --worktree SOURCE diagnoses
+only that source; doctor --dispatch never creates a missing worktree.
 No Coder prompt, shell permission or manual changedFiles transcription is needed.
 run can also perform pending input validation before creating the Reviewer worker.
 Reviewer host result validation still executes the approved commands in the
@@ -67,7 +68,7 @@ Use workflow show/budget/repair-status to inspect the input stage even when it
 has no Dispatch. A RUNNING receipt after interruption means unknown command
 execution, not permission to rerun. Recover the exact stopped process/runner
 formally; unknown/failed validation requires a successor decision. STOPPED Flow
-and rejected results remain unchanged. This first slice excludes repairs,
+and rejected results remain unchanged. Artifact review excludes repairs,
 optional packet lifecycle delegation and execution after workspace restore.
 
 ## Inspect first
@@ -281,8 +282,25 @@ Budget continuity applies to the whole goal, including outer orchestration and
 predecessors: estimate unfinished work, repair, independent review and preservation
 before the stop reserve is threatened. Ask once for the bounded shortfall while
 headroom remains, not after exhausting the cap. A sample +1000 is not a fixed grant.
+Before a time or spending boundary, resource_approval_required requests ONE
+combined human decision for unfinished work, validation/review, repair, preservation
+and response wait. Do not cancel still-authorized execution while awaiting consent.
+Use workflow extend --file JSON --preview for exact current Flow/Dispatch/session
+and old/new absolute deadlines and native ceilings; after actual consent apply
+the same file with expectedHash. This concurrent control preserves the same
+running session, original issuance, input receipt and cumulative usage. It does
+not take runner ownership or replay work. Expired/stopped work uses recover-review.
+Time-only consent keeps the native ceiling unchanged. An acknowledgement such as
+"+3 hours approved" is NOT an applied extension: require stateChanged:true, the
+same Flow/Dispatch/session binding and the approved effective deadline in saved
+state before reporting success. Never promise that an unchanged old deadline
+will keep a run alive. Older binaries without extend must not be described as
+supporting live extension; preserve their work for the verified upgrade/recovery.
+Independent caller deadlines, provider stops and account reserves remain hard.
 Use workflow budget --id FLOW_ID --file ESTIMATE.json for read-only, explicitly
-scoped top-up advice and priorFlows; see --help. No automatic quota read, unit
+scoped top-up advice and priorFlows; optional time estimates include response wait.
+Ask for any external cumulative top-up in that SAME decision; see --help.
+No automatic quota read, unit
 conversion or new authority follows. Preserve worker output, evidence, decisions,
 approvals, validation/review bases and next unfinished action before stopping.
 After approval continue those results; invalidate only materially changed bases.
@@ -465,7 +483,9 @@ With a positive native Flow ceiling, every reserved role needs a positive estima
 from complete same-configuration history or explicit approval; missing estimates
 block planning. The example's native estimate is not a ratio or a credit conversion.
 
-Controller boundaries use the original Flow deadline, including after restart.
+Controller boundaries use the effective approved Flow deadline, including after
+restart. The original deadline remains immutable; only an approved append-only
+extension changes the effective deadline without replacing the session.
 Submit the structured result before the role boundary; Controller validation gets
 its own reserved interval. Late or incomplete results are not promoted to success.
 Remaining mandatory-stage time/native allowances cannot be borrowed by Coder.
@@ -519,7 +539,7 @@ After explicit contract/configuration approval, conversation confirm --file conf
 uses replacesFlow=FAILED_FLOW_ID and OMITS target entirely. Do not call feedback-target,
 invent a Dispatch or supply target: {}. See conversation intake/confirm --help.
 Confirmation verifies both worktrees, stopped ownership and the bound receipt.
-This receipt-bound path needs this CLI; it is not supplied by unchanged RC5.
+This receipt-bound path requires the current CLI.
 Approve only needed new rights, scope/configuration changes and execution limits.
 For repair use exact FLOW_ID-review-0 coverage, Coder1/Reviewer1, maxRepairs: 0.
 Prepare a normal Flow without artifactSource or continueFromDispatchId, with
@@ -561,8 +581,14 @@ An exit code alone or a stdout self-report is not a formal receipt.
   what makes completion feasible, and why saved output is reused or a baseline restart
   is necessary. Do not just repeat the same scope/deadline. Obtain new plan approval.
   For an active session, verify the target before runtime stop. Preserve old results and budgets.
-  workflow recover only releases runner ownership with stop evidence; it adds no budget and
-  does not rerun work. Continue with a successor Task, separate worktree, verified saved work
+  workflow recover requires the exact stopped owner and evidence. If a RUNNING Reviewer's
+  completed answer remains only in its native session, use finalizeSavedResult:true with
+  an authorized validationDeadline (future, within one hour). See workflow recover --help.
+  This reads the original session without continuing work and uses normal result finalization
+  before releasing ownership. Completion must precede the original effective submission
+  deadline. It adds no model budget, changes no repair count and never resends work.
+  Host commands with an interrupted, unknown validation outcome are not replayed.
+  For new work, continue with a successor Task, separate worktree, verified saved work
   and explicit new budget approval. Use workflow start's continueFromDispatchId according to
   existing contracts, including reuse of a successful Coder. When only the Reviewer remains,
   choose that path rather than repeat successful Coder work.

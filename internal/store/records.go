@@ -67,7 +67,7 @@ func (r Records) VerifyReviewAcceptances(graph core.TaskGraph) error {
 			prior.DispatchIDs[0] != review.ID || prior.SourceDispatchID == "" ||
 			task.Status != core.Completed || task.TargetSHA != review.Result.OutputSHA ||
 			task.TargetTreeSHA != review.Result.OutputTreeSHA ||
-			!audit.At.Before(prior.Deadline) && !audit.AllowExpired {
+			!audit.At.Before(prior.ExecutionDeadline()) && !audit.AllowExpired {
 			return fmt.Errorf("invalid saved review acceptance audit")
 		}
 		prior.Status, prior.StopCode, prior.StopCause = "COMPLETED", "", ""
@@ -318,7 +318,7 @@ func (r Records) validate() error {
 		if record.FlowID == "" || record.TaskID == "" ||
 			record.Sequence != budgetSequences[record.FlowID] || record.At.IsZero() ||
 			!slices.Contains([]string{"DISPATCH_ISSUED", "SESSION_STARTED", "USAGE_OBSERVED", "BUDGET_STOP", "RECONTRACT", "STAGE_OBSERVED",
-				"INPUT_ACCEPTED", "INPUT_VALIDATION_STARTED", "INPUT_VALIDATION_FINISHED", "INPUT_VALIDATION_REUSED"}, record.Kind) ||
+				"INPUT_ACCEPTED", "INPUT_VALIDATION_STARTED", "INPUT_VALIDATION_FINISHED", "INPUT_VALIDATION_REUSED", "RESOURCE_EXTENDED"}, record.Kind) ||
 			!json.Valid([]byte(record.Payload)) ||
 			record.Hash != fmt.Sprintf("%x", sha256.Sum256([]byte(record.Payload))) {
 			return fmt.Errorf("invalid task budget audit record or sequence")
@@ -355,6 +355,28 @@ func recordHash(value string) bool {
 // VerifyFlowAudits binds new stage plans on normalized and legacy loads as well
 // as writes. Removing a plan must not silently restore legacy unlimited stages.
 func (r Records) VerifyFlowAudits(graph core.TaskGraph) error {
+	extensions := map[string]int{}
+	for _, audit := range r.Budgets {
+		if audit.Kind != "RESOURCE_EXTENDED" {
+			continue
+		}
+		var report struct {
+			Extensions []core.FlowExtension `json:"extensions"`
+		}
+		flow, ok := graph.ReviewFlow(audit.FlowID)
+		count := extensions[audit.FlowID] + 1
+		if err := json.Unmarshal([]byte(audit.Payload), &report); err != nil || !ok ||
+			audit.TaskID != flow.TaskID || len(report.Extensions) != count || count > len(flow.Extensions) ||
+			!reflect.DeepEqual(report.Extensions, flow.Extensions[:count]) {
+			return fmt.Errorf("resource extensions require their exact append-only approval audits")
+		}
+		extensions[audit.FlowID] = count
+	}
+	for _, flow := range graph.ReviewFlows {
+		if len(flow.Extensions) != extensions[flow.ID] {
+			return fmt.Errorf("resource extension differs from immutable approval history")
+		}
+	}
 	if err := r.VerifyDispatchReconciliations(graph); err != nil {
 		return err
 	}

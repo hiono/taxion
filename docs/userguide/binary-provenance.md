@@ -77,14 +77,25 @@ pin 変更、version upgrade、mode 変更は既存 policy を自動上書きし
 
 ## rollback と制約
 
-旧配布物の撤回により、v0.7.15 には利用可能な戻し先がない。撤回済みの版を指定したり、手元の旧ファイルを再公開したりしない。全6環境で同じ制約となる。ソースからのビルドや別環境のファイルで代替しない。
+戻し先は、その配布物の manifest にある `rollbackVersion` と `rollbackPlatforms` で確認する。
+通常の schema 2 は、現行版より古い公開済み安定版を記録する。下書き・先行版は選ばず、
+必要な配布ファイルが不足する場合は公開を停止する。
 
-この状態は配布情報の schema 3 で、`rollbackVersion: ""`、`rollbackPlatforms: []`、`rollbackUnavailableReason: "prior-distributions-withdrawn"` として記録する。`taxion provenance verify` にも理由を返す。検証済みの現行バイナリを利用できることと、旧版へ戻せることは別であり、戻し先の切替検査は成功と記録しない。schema 3 の理由の欠落や未知の理由、戻し先との併記は拒否する。旧実行ファイルは schema 3 を受け入れないため、v0.7.15 以降を使う。
+版を戻す前に稼働実行と成果物を停止・保全する。旧版が新しい保存形式や取消状態を解釈できるとは限らない。
+新版の記録は保持し、必要なら更新前の整合したバックアップを別配置で使う。
+runtime、store、approval、期限・累計消費を巻き戻す操作ではない。
+固定版を選択し、[拒否と復旧](#拒否と復旧)の正式手順で policy を再承認する。
 
-通常の配布情報は schema 2 を維持し、公開済みの正式版のうち現行版より古い最新の版を戻し先に記録する。下書き・先行版を選ばず、必要な配布ファイルが不足する場合は停止する。撤回による例外は配布者の明示指定が必要で、公開済みの対応版があれば使えない。通信失敗や権限不足を「戻し先なし」に読み替えない。
+配布物の撤回で戻し先がない例外は、schema 3 の `rollbackVersion: ""`、
+`rollbackPlatforms: []`、`rollbackUnavailableReason: "prior-distributions-withdrawn"` で明示する。
+v0.7.15 の配布がこの例である。`provenance verify` は理由を返し、
+未知・欠落した理由や、理由と戻し先の併記を拒否する。公開済みの対応版がある場合、
+通信失敗や権限不足を理由にこの例外を使わない。
 
-戻し先がない場合の復旧手段は、検証済みの同じ固定版の再導入、選択設定の解除、アンインストールである。無効化は稼働中の runtime を停止したうえで、対象 project / global の mise 設定から Taxion の項目を外す。binary を削除する場合は `mise uninstall github:hiono/taxion@0.7.15` を使う。この操作は version pin の設定を削除しないため、再導入時は pin を確認して `mise install` を実行する。既存の store と承認を削除したり、別の版へ暗黙に切り替えたりしない。複数の設定 layer がある環境では `mise which taxion` で選択結果も確認する。
-
-版を変更しても runtime、store、approval、期限・予算を巻き戻さない。既存 policy の再承認は[拒否と復旧](#拒否と復旧)に従う。旧版が新しい保存形式や取消状態を解釈できない場合は、保存データを改変せず操作を停止する。
+戻し先がない場合は、同じ検証済み固定版の再導入、選択設定の解除、アンインストールを使う。
+無効化は稼働 runtime を停止してから対象 project / global の mise 設定を外す。
+`mise uninstall github:hiono/taxion@VERSION` は実際の固定版を指定し、pin 設定は別に確認する。
+複数の設定 layer がある場合は `mise which taxion` で選択結果も確認する。
+撤回済みの旧ファイルやローカルビルドを正式配布の代わりにせず、復旧のために store と承認を削除しない。
 
 Windows archive は導入・identity / provenance の検証対象だが、controller の shell validation は Unix process-group cancellation を要求するため未対応で明示拒否する。Unix と同じ安全な process-tree 停止を実装するまで Windows の workflow 実行をサポート済みと扱わない。native archive smoke は workflow 実行の証明ではない。

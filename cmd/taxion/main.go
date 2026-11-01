@@ -101,6 +101,7 @@ Review flows and recovery:
   workflow terminate  Cancel an untouched Dispatch and hold it for a new approved contract (--file JSON)
   workflow reconcile-stopped Preview or cancel a first issued snapshot Coder or validated artifact Reviewer after SAFETY_STOP, retaining unknown delivery (--file JSON; --preview)
   workflow recover-review Preview or atomically approve reconciliation, identical artifact successor and Reviewer-only plan as one bounded decision (--file JSON; --preview)
+  workflow extend     Preview/apply one live deadline/native-budget extension without restarting the current session (--file JSON; --preview)
   workflow advance    Issue review/repair from the latest verified result (--id required)
   workflow run        Execute review/repair continuously with saved ceilings (--id; role prompt files or --builtin-prompts)
   workflow step       Execute one role turn from a saved review flow (--id; role prompt files or --builtin-prompts)

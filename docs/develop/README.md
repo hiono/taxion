@@ -1,52 +1,43 @@
 # 開発者向け文書
 
-初めて変更する場合は、[開発への参加方法](../../CONTRIBUTING.md#開発環境)で環境を準備し、[ロードマップ](roadmap.md)と対応 Issue から作業を選びます。利用者として動作を確認する手順は[利用者向け文書](../userguide/README.md)にあります。
+全体像は[アーキテクチャ](architecture.md)、環境の準備と PR は
+[開発への参加方法](../../CONTRIBUTING.md#開発環境)から読みます。
+使い方の確認は[利用者向け文書](../userguide/README.md)へ進んでください。
 
-## 変更箇所の仕様から検証へ進む
+## 変更する責務の仕様を読む
 
-全機能の設計・運用では、[承認済みの目的に沿って柔軟に対応する方針](adr/0055-adapt-within-approved-goals.md)を適用します。目的・受入れ条件・権限・残予算・期限を守り、手段は状況に応じて選びます。内部の形式や版の違いだけで同じ承認を繰り返さず、実際に新しい判断が必要な差分を示します。
+| 変更したいこと | 参照先 |
+|---|---|
+| 依頼・契約・承認・工程進行 | [Task Graph](task-graph.md)、[承認束](../userguide/approval-bundle.md)、[gate](../userguide/gates.md) |
+| 担当の実行・観測・停止・継続 | [Runtime 契約](runtime-contract.md)、[復旧ガイド](../userguide/failure-recovery.md) |
+| 状態と証拠の保存・互換性 | [Ledger と workspace](ledger-schema.md)、[Memory](../userguide/memory-model.md) |
+| 設定・認証・課金・配布物の照合 | [設定](../userguide/configuration.md)、[課金](../userguide/billing.md)、[provenance](../userguide/binary-provenance.md) |
+| 外部資料・開発基盤・公開記録 | [仕様入力](specification-input.md)、[開発基盤](forge-capabilities.md)、[公開文章](public-communication-policy.md) |
 
-予算の判断は、残工程・修正・独立レビュー・安全な保存までの総消費を対象にします。
-外側の調整と先行 Flow の消費を、新しい session や Flow でゼロに戻しません。
-上限到達前に不足見込みをまとめて確認し、保存済み成果と根拠から継続します。
-検証やレビューの再利用は対象・設定・コマンドなどの根拠に結び付け、
-変更に影響されるものだけを無効にします。未保存のモデル思考の復元は保証しません。
-`workflow budget --file` は見積り補助であり、追加承認や実行権限を生成しません。
+変更に関係する[ガードレール](guardrails.md)と回帰テストを確認し、
+[開発環境の検証手順](../../CONTRIBUTING.md#開発環境)を実行します。
+現在の使い方はガイド、現在の契約は仕様、理由は ADR、個別の結果は Issue・PR に書きます。
+更新先は[文書の配置と責務](../../CONTRIBUTING.md#文書の配置と責務)を参照してください。
+全仕様の通読や、過去の障害経緯の暗記は変更の前提にしません。
 
-レビュー対象を Coder 成功に限定しません。人のコード・文書・テストと、
-失敗・中断途中の成果は、目的・質問・失敗情報・実施済み／未実施検査を
-`reviewInput` に固定して Reviewer へ渡します。既存の Task decision に保持し、
-提案・承認束・工程計画・指示の hash に含めます。診断完了は製品品質合格と分離します。
-復旧の一括承認と不変条件は [ADR-0058](adr/0058-recover-unstarted-artifact-review.md)、
-入力例と制約は [CLI リファレンス](../userguide/cli-reference.md#停止済み初回指示の整合回復)を参照します。
+## 判断・計画・検証履歴を調べる
 
-Task の登録・承認・状態を変える場合は [Task Graph](task-graph.md)、実行担当や SDK 接続を変える場合は [Runtime 契約](runtime-contract.md)、保存形式を変える場合は [Ledger のデータ形式](ledger-schema.md)を読みます。接続する基盤の範囲は[開発基盤の対応評価](forge-capabilities.md)、資料の取扱いは[仕様入力と利用許可](specification-input.md)で確認します。
+| 資料 | 読む目的 |
+|---|---|
+| [ADR](adr/) | 設計を選んだ理由と後続判断 |
+| [判断・Milestone 対応表](decision-traceability.md) | 過去の判断から実装 Issue と現在の仕様をたどる |
+| [要件と到達条件](orchestration-requirements.md) | 採択した要件と段階別の検証履歴 |
+| [ロードマップ](roadmap.md) | 現在の未達事項と、過去の開発段階の参照 |
+| [設立時の方針](charter.md) | 初期の対象範囲。現在の構成の代用にはしない |
+| `*-validation.md` | 記載した候補と条件での検証結果。現在の全機能の保証ではない |
 
-対応する[ガードレール](guardrails.md)と回帰テストを確認して変更し、[開発環境の検証手順](../../CONTRIBUTING.md#開発環境)を実行します。操作の説明は利用者ガイド、現在の動作は所有する仕様書へ反映します。[文書の配置と責務](../../CONTRIBUTING.md#文書の配置と責務)で更新先を選びます。
+履歴には当時の版や制約を残しますが、現在の操作の正本とは分けます。
+後続判断で条件が変わった ADR は参照先を示し、古い判断と現在の仕様を併記して選ばせません。
 
-## 判断と実施結果を残して公開へ進む
+## 公開する
 
-変更の結果と証拠は Issue・PR に記録します。設計上の選択や制約が変わる場合は [ADR](adr/)に判断理由を残し、[判断・Milestone 対応表](decision-traceability.md)から現在の仕様へ案内します。ADR の採択だけで機能の受入れ完了にはしません。
-
-公開作業は[リリース手順](../../CONTRIBUTING.md#リリース)に従います。受入れ条件への例外は Issue に記録し、利用者向けの公開 version と各版の変更内容は[GitHub Releases](https://github.com/hiono/taxion/releases)で確認します。
-
-## 仕様・要件・履歴を必要に応じて参照する
-
-一覧を上から通読する必要はありません。設立時の方針と設計判断の履歴は、現在の操作手順と分けて扱います。
-
-| 文書 | 内容 |
-| --- | --- |
-| [プロジェクトの設立時の方針](charter.md) | 設立時の対象範囲と制約 |
-| [ガードレール](guardrails.md) | 必要な不変条件と実装での確認箇所 |
-| [公開情報と出典の方針](privacy-provenance.md) | 公開資料に含めない情報と確認手順 |
-| [Runtime 契約](runtime-contract.md) | SDK 共通インターフェースと現在の adapter の制約 |
-| [ロードマップ](roadmap.md) | 段階別の到達条件と追跡 Issue |
-| [Ledger のデータ形式](ledger-schema.md) | キー、API の入出力、変更条件 |
-| [要件と到達条件](orchestration-requirements.md) | 採択済み要件、段階別の受入れ、実装との差分 |
-| [Task Graph](task-graph.md) | 登録、状態遷移、実行条件、保存と互換性 |
-| [開発基盤の対応評価](forge-capabilities.md) | 対応する API、実装・受入れの区別、後続作業 |
-| [仕様入力と利用許可](specification-input.md) | 出典・バージョン・用途別承認と送信時の照合 |
-| [判断・Milestone 対応表](decision-traceability.md) | ADR、実装 Issue、現在の仕様の対応 |
-| [ADR](adr/) | 設計判断、選択肢、理由、後続の補足 |
-
-ADR の採択と機能の実装・受入れ完了は別々に確認します。過去の要件や結果は残し、現在の仕様と異なる場合は補足を記載します。
+コードと利用者・開発者文書、必要な ADR、Issue・PR を同じ対象に揃えます。
+公開作業は[リリース手順](../../CONTRIBUTING.md#リリース)から
+[Binary release](binary-release.md)へ進みます。
+公開版の内容は[GitHub Releases](https://github.com/hiono/taxion/releases)、
+実施した検証と未達事項は対応する Issue・PR に記録します。

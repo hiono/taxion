@@ -63,7 +63,7 @@ func ResumeContractGateReport(ctx context.Context, state store.Workspace, flowID
 	if err := checkResumeBudget(state, flow, dispatch); err != nil {
 		return reject("resume-budget-binding", err.Error())
 	}
-	if !time.Now().UTC().Before(flow.Deadline) {
+	if !time.Now().UTC().Before(flow.ExecutionDeadline()) {
 		return reject("resume-deadline-expired", "saved deadline has expired")
 	}
 	if err := requireSessionBudget(state.Graph, flow, dispatch.Recipient); err != nil {
@@ -121,7 +121,7 @@ func ResumeContractGateReport(ctx context.Context, state store.Workspace, flowID
 	if err := gitproof.CheckResumeStart(gitCtx, located); err != nil {
 		return reject("resume-worktree-mismatch", err.Error())
 	}
-	if !time.Now().UTC().Before(flow.Deadline) {
+	if !time.Now().UTC().Before(flow.ExecutionDeadline()) {
 		return reject("resume-deadline-expired", "saved deadline expired during observation")
 	}
 	report.NextAuthorizedTransition = "resume the saved unstarted Coder Dispatch"
@@ -192,6 +192,10 @@ func checkResumeBudget(state store.Workspace, flow core.ReviewFlow, dispatch cor
 		return fmt.Errorf("saved stage plan differs; a new exact plan approval is required")
 	}
 	current := taskBudgetReport(state.Graph, flow, saved.At)
+	// Extensions have their own immutable approval audits. The original issuance
+	// still binds every unchanged field, while telemetry uses effective limits.
+	recorded.MaxNanoAIU = current.MaxNanoAIU
+	recorded.ElapsedLimitMilliseconds = current.ElapsedLimitMilliseconds
 	recorded.ResumeBasis = nil
 	// Wall-clock elapsed fields are observational, not consumed counters.
 	recorded.ElapsedMilliseconds, recorded.ElapsedRemainingMillis = current.ElapsedMilliseconds, current.ElapsedRemainingMillis

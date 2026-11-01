@@ -37,3 +37,24 @@ func TestBudgetContinuationRequestsTopUpBeforeStopWithoutResettingUsage(t *testi
 		}
 	}
 }
+
+func TestTimeAndBudgetShortfallsShareOnePreStopDecision(t *testing.T) {
+	number := func(n float64) *float64 { return &n }
+	seconds := func(n int64) *int64 { return &n }
+	estimate := BudgetContinuationEstimate{
+		Unit: "requests", Source: "approved quota read", Scope: "whole goal", ObservedAt: time.Now().Add(-time.Second),
+		Used: number(900), ApprovedCeiling: number(1000), RemainingWork: number(200),
+		Repair: number(50), Review: number(100), Preservation: number(50),
+		Time: &TimeContinuationEstimate{Deadline: time.Now().Add(time.Minute), RemainingSeconds: seconds(120),
+			RepairSeconds: seconds(60), ReviewSeconds: seconds(120), PreservationSeconds: seconds(30), ResponseWaitSeconds: seconds(300)},
+	}
+	report, err := EstimateBudgetContinuation(estimate)
+	if err != nil || report.Time == nil || report.Time.AdditionalSeconds < 570 ||
+		report.AdditionalRequested != 300 || !strings.Contains(report.Action, "one combined") || report.ExecutionAuthorized {
+		t.Fatal("time and spending decisions were split or authorized automatically", report, err)
+	}
+	estimate.Time.ResponseWaitSeconds = nil
+	if _, err := EstimateBudgetContinuation(estimate); err == nil {
+		t.Fatal("unknown human response reserve treated as zero")
+	}
+}

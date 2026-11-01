@@ -69,6 +69,19 @@ func TestStopOnlyBindingCannotExecuteOrChangeSession(t *testing.T) {
 }
 
 func TestStopOnlySDKProtocolNeverCreatesOrSends(t *testing.T) {
+	for _, observe := range []bool{false, true} {
+		t.Run(fmt.Sprintf("observe=%t", observe), func(t *testing.T) {
+			testStopOnlySDKProtocol(t, observe)
+		})
+	}
+}
+
+func testStopOnlySDKProtocol(t *testing.T, observe bool) {
+	worktree := t.TempDir()
+	var history []sdk.SessionEvent
+	if observe {
+		history = completedSavedHistory(worktree)
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -86,12 +99,12 @@ func TestStopOnlySDKProtocolNeverCreatesOrSends(t *testing.T) {
 			done <- err
 			return
 		}
-		done <- serveStopProtocol(conn)
+		done <- serveStopProtocol(conn, history)
 	}()
 	dispatch := core.GraphDispatch{
 		Recipient: "CODER", Status: core.DispatchSuspended,
 		RuntimeSessionID: "saved-session", RuntimeConfigHash: strings.Repeat("a", 64),
-		Instruction: core.DispatchInstruction{Version: 4, Worktree: t.TempDir()},
+		Instruction: core.DispatchInstruction{Version: 4, Worktree: worktree},
 	}
 	adapter, err := NewForStop(dispatch, "/bin/true", t.TempDir())
 	if err != nil {
@@ -101,11 +114,18 @@ func TestStopOnlySDKProtocolNeverCreatesOrSends(t *testing.T) {
 		Connection: sdk.URIConnection{URL: listener.Addr().String()}, Mode: sdk.ModeEmpty,
 	})
 	defer adapter.Close()
-	if err := adapter.ResumeForStop(t.Context(), dispatch.RuntimeSessionID); err != nil {
-		t.Fatalf("resume: %v; protocol fixture: %v", err, <-done)
-	}
-	if err := adapter.Stop(t.Context(), dispatch.RuntimeSessionID); err != nil {
-		t.Fatal(err)
+	if observe {
+		result, err := adapter.ReadSavedTurn(t.Context(), dispatch.RuntimeSessionID)
+		if err != nil || result.Payload == "" || result.HistoryHash == "" {
+			t.Fatalf("saved observation: %+v, %v", result, err)
+		}
+	} else {
+		if err := adapter.ResumeForStop(t.Context(), dispatch.RuntimeSessionID); err != nil {
+			t.Fatalf("resume: %v; protocol fixture: %v", err, <-done)
+		}
+		if err := adapter.Stop(t.Context(), dispatch.RuntimeSessionID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := adapter.Close(); err != nil {
 		t.Fatal(err)
@@ -115,16 +135,110 @@ func TestStopOnlySDKProtocolNeverCreatesOrSends(t *testing.T) {
 	}
 }
 
-func serveStopProtocol(conn net.Conn) error {
+func TestSavedTurnRequiresBoundCompletedMainAgentHistory(t *testing.T) {
+	worktree := t.TempDir()
+	history := func() []sdk.SessionEvent {
+		return completedSavedHistory(worktree)
+	}
+	for _, test := range []struct {
+		name   string
+		change func([]sdk.SessionEvent) []sdk.SessionEvent
+	}{
+		{"missing-shutdown", func(events []sdk.SessionEvent) []sdk.SessionEvent { return events[:4] }},
+		{"wrong-session", func(events []sdk.SessionEvent) []sdk.SessionEvent {
+			events[0].Data.(*sdk.SessionStartData).SessionID = "another-session"
+			return events
+		}},
+		{"wrong-worktree", func(events []sdk.SessionEvent) []sdk.SessionEvent {
+			events[0].Data.(*sdk.SessionStartData).Context.Cwd = t.TempDir()
+			return events
+		}},
+		{"unbound-message", func(events []sdk.SessionEvent) []sdk.SessionEvent {
+			events[2].Data.(*sdk.AssistantMessageData).OriginatingMessageID = nil
+			return events
+		}},
+		{"wrong-turn", func(events []sdk.SessionEvent) []sdk.SessionEvent {
+			events[3].Data.(*sdk.AssistantTurnEndData).TurnID = "another-turn"
+			return events
+		}},
+		{"empty-turn", func(events []sdk.SessionEvent) []sdk.SessionEvent {
+			empty := ""
+			events[2].Data.(*sdk.AssistantMessageData).TurnID = &empty
+			events[3].Data.(*sdk.AssistantTurnEndData).TurnID = empty
+			return events
+		}},
+		{"subagent-answer", func(events []sdk.SessionEvent) []sdk.SessionEvent {
+			agent := "child"
+			events[2].AgentID = &agent
+			return events
+		}},
+		{"error-shutdown", func(events []sdk.SessionEvent) []sdk.SessionEvent {
+			events[4].Data.(*sdk.SessionShutdownData).ShutdownType = "error"
+			return events
+		}},
+		{"later-execution", func(events []sdk.SessionEvent) []sdk.SessionEvent {
+			return append(events, sdk.SessionEvent{ID: "later", Timestamp: time.Now().UTC(),
+				Data: &sdk.AssistantTurnStartData{TurnID: "uncompleted"}})
+		}},
+		{"duplicate-event", func(events []sdk.SessionEvent) []sdk.SessionEvent {
+			events[3].ID = events[2].ID
+			return events
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := savedTurn(test.change(history()), "saved-session", worktree); err == nil {
+				t.Fatal("ambiguous or unfinished history was accepted")
+			}
+		})
+	}
+	result, err := savedTurn(history(), "saved-session", worktree)
+	if err != nil || result.Payload == "" || result.HistoryHash == "" || len(result.Events) != 1 {
+		t.Fatal("completed main-agent result was not observed", result, err)
+	}
+	events := history()
+	message, turn := "input-message", "review-turn"
+	empty := events[2]
+	empty.ID = "empty-reasoning-message"
+	empty.Data = &sdk.AssistantMessageData{OriginatingMessageID: &message, TurnID: &turn}
+	events = append(events[:2], append([]sdk.SessionEvent{empty}, events[2:]...)...)
+	if observed, err := savedTurn(events, "saved-session", worktree); err != nil ||
+		observed.Payload != result.Payload || len(observed.Events) != 2 {
+		t.Fatal("empty native reasoning message hid the final answer", err)
+	}
+}
+
+func completedSavedHistory(worktree string) []sdk.SessionEvent {
+	message, turn := "input-message", "review-turn"
+	now := time.Now().UTC()
+	return []sdk.SessionEvent{
+		{ID: "start", Timestamp: now, Data: &sdk.SessionStartData{
+			SessionID: "saved-session", Context: &rpc.WorkingDirectoryContext{Cwd: worktree},
+		}},
+		{ID: "input", Timestamp: now, Data: &sdk.UserMessageData{MessageID: &message, Content: "execute saved contract"}},
+		{ID: "answer", Timestamp: now, Data: &sdk.AssistantMessageData{
+			Content:              `{"status":"SUCCEEDED","reviewVerdict":"REQUEST_CHANGES"}`,
+			OriginatingMessageID: &message, TurnID: &turn,
+		}},
+		{ID: "end", Timestamp: now, Data: &sdk.AssistantTurnEndData{TurnID: turn}},
+		{ID: "shutdown", Timestamp: now, Data: &sdk.SessionShutdownData{ShutdownType: "routine"}},
+	}
+}
+
+func serveStopProtocol(conn net.Conn, history []sdk.SessionEvent) error {
 	reader := bufio.NewReader(conn)
 	var methods []string
 	for {
 		header, err := textproto.NewReader(reader).ReadMIMEHeader()
 		if errors.Is(err, io.EOF) {
 			// SDK shutdown detaches its registered session again after Adapter.Stop.
-			if !reflect.DeepEqual(methods, []string{"connect", "session.resume", "session.options.update", "session.abort", "session.detach", "session.detach"}) {
+			expected := []string{"connect", "session.resume", "session.options.update", "session.abort", "session.detach", "session.detach"}
+			if history != nil {
+				expected = []string{"connect", "session.resume", "session.options.update", "session.getMessages", "session.detach", "session.detach"}
+			}
+			if !reflect.DeepEqual(methods, expected) {
 				return fmt.Errorf("unexpected cancellation sequence: %v", methods)
 			}
+
 			return nil
 		}
 		if err != nil {
@@ -169,6 +283,11 @@ func serveStopProtocol(conn net.Conn) error {
 				return fmt.Errorf("cancellation RPC targeted another session")
 			}
 			result["success"] = true
+		case "session.getMessages":
+			if history == nil || request.Params["sessionId"] != "saved-session" {
+				return fmt.Errorf("unbound saved-history request")
+			}
+			result["events"] = history
 		default:
 			return fmt.Errorf("stop-only adapter issued unauthorized RPC %q", request.Method)
 		}

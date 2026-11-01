@@ -262,7 +262,7 @@ func ObservePlannerContext(db *store.Store, ledgerPath, repository, taskID strin
 				result.Flows = append(result.Flows, PlannerFlow{
 					ID: flow.ID, Status: flow.Status, Reason: flow.Reason,
 					Repairs: flow.Repairs, MaxRepairs: flow.MaxRepairs,
-					Deadline: flow.Deadline, Held: flow.HandoffHeld(),
+					Deadline: flow.ExecutionDeadline(), Held: flow.HandoffHeld(),
 				})
 				for _, id := range flow.DispatchIDs {
 					related[id] = true

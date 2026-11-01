@@ -1,5 +1,9 @@
 # Taxion の要件と到達条件
 
+この文書は採択した要件と、M10〜M16 の段階別受入れを追跡する。
+当時の到達条件や実験結果は履歴であり、現在のすべての実行基盤・入口を検証済みとする根拠ではない。
+現在の構成は[アーキテクチャ](architecture.md)、操作は[利用者ガイド](../userguide/user-guide.md)を参照する。
+
 Taxion は、ユーザーとの会話から独立した担当へ作業を渡すオーケストレータである。
 階層化した Memory に判断と経験を保存し、Task Graph と実行契約に関連づける。
 目的は、指示・結果の手動コピーをなくすことに加え、
@@ -79,12 +83,13 @@ tmux の画面操作、別モデル API の契約、Session ごとの専用 cach
 | M15 | CLI と ACP サーバーから共通の状態を参照し、現在の対応構成で仕様検索から結果報告・復旧・外部記録まで通す。追加 forge は完了条件に含めない |
 | M16 | Planner と Rust を別々に比較評価し、採否、制約、必要な後続作業を記録する。評価を機能実装の完成と扱わない |
 
-M15 では #62 が CLI 発行済み Dispatch の ACP 実行・観測を受け入れたが、
-この段階のより広い end-to-end 条件は未完了である。仕様検索から予算停止後の復旧、
-最終報告、外部記録までを一続きに確認する残件を #79 に記録した。
+M15 では #62 が CLI 発行済み Dispatch の ACP 実行・観測を確認した。
+仕様検索から予算停止後の復旧、最終報告、外部記録を含む受入れ結果は
+完了済みの [#79](https://github.com/hiono/taxion/issues/79)に記録している。
+これは記録した構成での受入れであり、後から加わったすべての入口・実行基盤の保証ではない。
 #63 は実作業での追加確認であり、M15 の完了条件とは分けて扱う。
 
-最初の到達点は M12 とする。
+初期計画の最初の到達点は M12 とした。
 M12 は、受け渡し保留、実行中断、計画・コード・レビューへの対象付き補足、
 状況・根拠の質問から不足確認・明示反映・続行までを実 SDK で検証する。
 M13 は保留・指示案・反映記録の再起動と発行・開始との競合を照合する。
@@ -130,27 +135,21 @@ credential、非公開の資料や会話を公開 Issue・PR・ログへ転記�
 
 ## 現在の実装との差分
 
-次の区別を維持し、設計文書を現在の使用方法の参照にしない。
-個別の実装結果は Issue に記録し、機能が変わった時は参照文書を更新する。
+現在の実装と段階別の検証結果を混同しないため、実装の説明は担当仕様へ集約する。
+ここで古い機能一覧をもう一つ維持しない。
 
-| 対象 | 現在の部品 | この到達条件に向けて未実装の内容 |
-| --- | --- | --- |
-| Task・Dispatch | 版付き Task Graph、依存・concern ID 検査、scope out の保持、元の依頼の保存、契約 hash と設定の明示承認、停止確認後の後続契約の再承認、発行済み指示と変更関係・結果の保持 | 自然言語からの契約の全自動生成、参加者の本人認証 |
-| Runtime | local・proc と Go Copilot SDK、役割別 Session と system prompt、明示的な上限付き自動 dispatch・結果回収、実効認証・停止証拠、再起動時の設定照合と実行指示の再送拒否 | 複数利用者の session 所有権管理は後続候補 (#71) |
-| Review | controller の Git・検証結果照合、読み取り専用の独立 Reviewer、指摘からの修正と新 SHA の再レビュー、解放済み worktree・完了 checkpoint の再検証 | M15 で仕様検索・復旧・外部記録とつないだ受入れ (#79) |
-| Memory | SQLite、階層・出典・版と Task の連携、Coder・Reviewer 指示の保存時の参照、計画の再構成、更新・失効時の検査、検索・export、履歴と承認を保持する完全なローカル移行、承認済み skills・plugins・MCP・hooks・RTK 接続 | 共有保存の配置と M15 の共通操作 |
-| 復旧・外部記録 | 同一 transaction の Graph・receipt・承認済み公開・失敗分析、停止確認付き所有権解除、GitHub Issue 作成・Issue/PR コメント・証拠付き close、送信不明状態の照合、全未公開 commit の秘密検査 | M15 の CLI・ACP サーバー間の一連の受入れ。GitLab Issue adapter の追加実験 (#75) と Bitbucket adapter (#76) は M15 の完了条件外 |
-| CLI・ACP サーバー・Web | CLI と ACP が同じ Controller を使い、CLI 発行済み Dispatch を ACP から一度だけ実行 | #62 で Dispatch の実行・観測を受け入れた。M15 の仕様検索・復旧・外部記録を含む一連の受入れは #79 で確認する。ACP からの Task・Dispatch 発行と Web UI は対象外 |
-| 利用者の途中介入・質問 | 観測時刻・hash と対象付き補足、保留・解除と中断要求・停止証拠の分離、版付き指示案の改訂・承認・発行、変更契約の再承認、本流を変えない質問、固定 SHA の読み取り専用調査、選択した発見事項の明示反映、Memory に基づく Planner 助言と非実行判断の保存、再起動・発行競合の照合、CLI と実 SDK の受入れ | M15 で ACP サーバーから同じ controller 操作を利用する |
-| 仕様書 | 出典・版・用途別承認、役割間で同じ引用スナップショット、ローカル原本の変更検出と公開許可検査、公開・合成資料の PDF・DOCX・PPTX 自動検索と Task 添付、Orchestrator の検索 tool | M14 のローカル検索と実 SDK 独立 Reviewer 受入れを完了。M365 接続は組織の利用許可後に評価する条件付き拡張 (#77) |
-| 設定・認証主体 | 固定 Global・Project・環境参照と出典、設定の追跡・ignore 検査、repository と Copilot の主体・credential 参照・契約参照の分離、許可組合せと Dispatch・Session の照合、実効認証・権限の観測、SDK の管理 stage・commit と直接の index・秘密検査、signed-in SDK から独立レビューまでの受入れ、開発基盤の公式仕様評価と利用者の追加 adapter 採択 | 共有 Memory の配置、承認者の本人認証、法的な契約適格性の保証、追加 adapter の実環境受入れ |
+| 対象 | 現在の契約と適用範囲 |
+|---|---|
+| 依頼・Task・工程・Dispatch | [Task Graph](task-graph.md)、[gate](../userguide/gates.md)、[承認束](../userguide/approval-bundle.md) |
+| Copilot SDK・OpenCode ACP と役割別の実行 | [Runtime 契約](runtime-contract.md)、[課金条件](../userguide/billing.md) |
+| 実装・持込み成果の検証、独立レビュー、停止前延長と停止後継続 | [Runtime 契約](runtime-contract.md)、[復旧ガイド](../userguide/failure-recovery.md) |
+| SQLite・Git 成果・再起動・機器間移送 | [アーキテクチャ](architecture.md)、[保存形式](ledger-schema.md)、[Memory](../userguide/memory-model.md) |
+| 外部資料・開発基盤・公開操作 | [仕様入力](specification-input.md)、[開発基盤](forge-capabilities.md)、[外部記録](../userguide/execution-records.md) |
 
-現在の挙動は [Ledger schema](ledger-schema.md)、
-[Runtime contract](runtime-contract.md)、
-[Memory reference](../userguide/memory-model.md)、
-[Task Graph reference](task-graph.md) を参照する。
-SDK の確認結果は次節の検証範囲に限る。cache の命中保証、
-法的な契約適格性、仕様書検索の接続可否は個別の検証・判断を必要とする。
+残る受入れ・設計課題は[ロードマップ](roadmap.md)と対応 Issue で追跡する。
+参加者の本人認証、複数利用者の session 所有権、請求額や法的な契約適格性の保証を、
+既存の承認 digest や観測結果から導出しない。
+次節の実 SDK 結果も、記載した対象・日時・構成に限る。
 
 ## M12 の実 SDK 受入れ結果
 

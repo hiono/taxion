@@ -4,7 +4,7 @@ Taxion は、実行結果と送信予定の外部記録を Task Graph と同じ 
 controller が結果・Git・承認を照合し、GitHub adapter が承認された公開操作を実行する。
 CLI はローカルの信頼された管理者が操作する。`actor` と承認の出典は管理者が指定する参照であり、
 Taxion は参加者の本人認証を行わない。複数利用者の project 参加・権限、契約、session 所有権は
-M15 の完了条件ではなく、未実装の後続候補 #71 として追跡する。
+[#71](https://github.com/hiono/taxion/issues/71)で追跡する未実装の範囲である。
 
 ## 復旧時の照合
 
@@ -44,7 +44,7 @@ provider の永続 event ID として扱える範囲が限られるため、保�
 
 ### 利用量の単位と停止条件
 
-固定 SDK v1.0.19 の `assistant.usage` はモデル呼出しごとの利用量であり、
+現在の Copilot SDK adapter が扱う `assistant.usage` はモデル呼出しごとの利用量であり、
 session の累積カウンターではない。Taxion は各呼出しの `inputTokens` と
 `outputTokens` を Dispatch に保存し、Flow に属する Dispatch 分を合計する。
 cache read/write の内訳は保存するが、この token 合計へ別途加算しない。
@@ -78,8 +78,8 @@ account quota の読取りが承認済みの場合、Controller は新しい Dis
 取得できない場合は日割りの判定を行わず、5%の判定だけを行う。
 この固定5%方式は既存契約の動作として維持する。
 
-v0.7.16 では、Task の承認対象である `budgetGuidance` に
-v0.7.16 以降の新規の標準 `"accountAllocation":"reset-daily"` を承認すると、
+Task の承認対象である `budgetGuidance` に
+`"accountAllocation":"reset-daily"` を明示して承認すると、
 過去の固定5%方式の代わりに、
 リセットまで日割りで下がる残量下限を適用する。`accountReadApproved` と
 `account` の許可も必要である。既存 Task への追加は再承認を要する。
@@ -103,7 +103,7 @@ v0.7.16 以降の新規の標準 `"accountAllocation":"reset-daily"` を承認�
 この方式は親の報告用残量や厳密な請求上限を保証しない。最終24時間には親の残量も
 使い切る可能性がある。既存の時間制限と明示の `maxNanoAiu` 上限は維持する。
 
-v0.7.16 以降に新たに承認する `reset-daily` の Task は、Flow 開始要求の
+`reset-daily` を承認した Task は、Flow 開始要求の
 `maxNanoAiu` を省略・0にできる。保存する予算と評価結果の
 `accountQuotaOnly: true` が、nano-AIU 上限の代わりに残量下限で制御することを示す。
 `maxNanoAiu`・`nanoAiuRemaining` の0を残量枯渇や無制限と解釈しない。
@@ -119,9 +119,9 @@ v0.7.16 以降に新たに承認する `reset-daily` の Task は、Flow 開始�
 枠を使い切った場合は、提供元が超過利用を許可していても拒否する。
 残り率は単位に依存しないため、request 数、AI Credit、nano-AIU の間で換算しない。
 OpenCode のように account quota を読めない runtime では、この判定は行われず、
-時間の期限だけが適用される。
+`account` 方式での実行を拒否する。他の方式で実行できる条件は[課金ガイド](billing.md)を参照する。
 
-v0.7.16 では、Copilot の `account` mode は、送信前の残り率が取得不能・期限切れ・
+Copilot の `account` mode は、送信前の残り率が取得不能・期限切れ・
 未対応の場合も送信を拒否する。`off`・`flow` mode と、account quota 非対応の
 OpenCode を quota 検証済みとは扱わない。
 
@@ -149,8 +149,9 @@ SDK 検索では既存の検索証跡へ保存する。主役割の指示・結�
 消費を防ぐ課金保証ではない。親 Controller だけの消費量の実測は行っていない。
 
 既存 workspace の `maxTokens` と `BUDGET_LIMIT` は履歴互換のため読み取るが、
-新規実行の入力・停止条件には使わない。停止済み Flow の結果は書き換えず、
-継続には新しい Task の承認が必要となる。
+新規実行の入力・停止条件には使わない。停止済み Flow の結果は書き換えない。
+稼働中は時間と費用の不足見込みをまとめて判断し、正式な `workflow extend` で同じ実行を維持する。
+停止済みレビューは保存成果から後続を承認する。手順と適用条件は[復旧ガイド](failure-recovery.md)を参照する。
 
 OpenCode ACP の利用量は、取得元ごとに単位が異なる。ACP prompt response が返すのは最後の
 assistant message の usage であり、その turn の全 tool iteration の合計ではない。

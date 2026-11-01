@@ -37,7 +37,7 @@ Accepted。Issue #210。ADR-0055 の全工程方針を、差戻し経路の判�
 | 検証・レビュー：`reviewflow.go`、`result_schema.go` | 同じ確定成果物の実検証後に独立 Reviewer へ渡す。申告の再転記を求めない | 検証失敗・未検証・Reviewer の変更・未裏付けの承認を拒否 |
 | 修正・保留：`repair_status.go`、`draft_approval.go` | 承認枠内の修正は内部遷移とし、状態照会から無条件に人間へ返さない | HOLD と未承認 draft を進行許可にしない |
 | 停止・復旧：`recovery.go`、`cancellation.go`、`intake.go` | 既存停止証跡と成果を再利用し、必要な正式な後続契約を準備する | 不明な配送、旧実行との競合、終端履歴、予算の再利用禁止 |
-| 課金・時間：`stage_budget.go`、`budget_guidance.go` | 既存観測と承認方式で判断する。提出待ちも工程内として扱う | 未知の残量を創作せず、上限・期限を延長しない |
+| 課金・時間：`stage_budget.go`、`budget_guidance.go` | 既存観測と承認方式で判断する。提出待ちも工程内として扱う。停止前に時間と費用を一括確認し、[ADR-0058](0058-recover-unstarted-artifact-review.md) の追記承認で同じ実行を維持する | 未知の残量を創作せず、無承認の延長や独立 caller・provider 上限の迂回をしない |
 | 公開：`publication.go`、`publictext` | 既存の正確な内容承認と配送証拠を再利用する | 内容変更、別公開先、配送不明の再送は許可しない |
 
 RC7 では `workflow repair-status` の停止・hold・結果不一致を一律に
