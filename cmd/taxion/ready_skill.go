@@ -159,7 +159,7 @@ not new Coder output or proof of zero usage. A distinct-worktree successor needs
 reconciliationHash in both intake and confirmation, its exact proposal approval
 and cancelled feedback target. This does not authorize a new Flow or model run.
 The same reconcile-stopped operation also covers the first artifact Reviewer
-after PASSED input validation, but only with no acknowledgement, start, session,
+after eligible PASSED or diagnostic OBSERVED input validation, but only with no acknowledgement, start, session,
 result or runtime receipt. A prepared managed review worktree is allowed only
 when Controller verifies its registration, shared repository, detached baseline,
 unchanged baseline index, exact target files and absence of extra or ignored files.
@@ -168,7 +168,7 @@ or rewrites it. Preserve unknown delivery; session-starting is not model-start p
 For this case retain the unchanged source worktree and contract in the successor,
 use reconciliationHash in intake and confirmation, and pass the cancelled target.
 Use artifactSource from the original artifact and reuseArtifactValidation:true
-in the new plan/start request. This reuses the exact passed input-stage receipt,
+in the new plan/start request. This reuses the exact saved input-stage receipt,
 not the old terminal Flow. Use a fresh reviewRoot and never create its review
 worktree before the Controller. Reviewer result-acceptance validation still runs;
 input-stage reuse does not waive quality checks, plan approval or budget limits.
@@ -191,7 +191,7 @@ same candidate/worktree and no active owner/feedback. Without deadlineRecontract
 the original deadline must remain valid and cannot be extended. It preserves the terminal session, transcript and usage, derives a
 Reviewer-only successor and carries saved readable output into the real instruction.
 This is not a terminal-session resume or recovery of unsaved thinking. Reuse the
-PASSED input receipt; never replay input validation or Coder work. Preserve unknown
+saved PASSED/OBSERVED input receipt without relabeling; never replay input validation or Coder work. Preserve unknown
 usage and the cumulative spending contract; use existing additional approval only
 where it actually covers this bounded follow-through. Do not request approval
 separately for the derived reconciliation, contract or plan hashes.

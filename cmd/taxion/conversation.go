@@ -116,7 +116,8 @@ do not include an old unknown/terminal operation merely to recover its report.
 JSON envelope: request (original user text), task (explicit DRAFT contract),
 actor and source (actual request provenance). taxion ready includes a full example.
 task requires the repository, objective, scope, acceptance, validationCommands,
-worktree, branch, baselineSha and independent CODER/REVIEWER assignments.
+worktree, branch, baselineSha and independent review assignments. Ordinary work uses
+CODER/REVIEWER; explicit reviewInput also supports a USER-owned VERIFICATION Task.
 Do not supply authorizationId or imported approval decisions.
 Optional envelope fields: planningSelection, planningReason,
 configurationDecisionId, reconciliationHash. Planning permission does not approve execution.
