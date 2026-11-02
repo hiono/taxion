@@ -232,21 +232,6 @@ func issueArtifactReviewer(state *store.Workspace, ledgerPath string, flow *core
 		return err
 	}
 	review, _ = state.Graph.GraphTask(review.ID)
-	if state.Graph.ApprovalRequirement() == core.ApprovalBundleRequired {
-		source, ok := state.Graph.MatchingApproval(flow.TaskID, flow.Contract, configuration)
-		if !ok {
-			return fmt.Errorf("taxion: input review lacks its original ApprovalBundle")
-		}
-		bundle, err := core.ComposeApprovalBundleWithProposalHash("artifact-reviewer:"+review.ID, source.ProposalHash,
-			review, configuration, "controller", flow.Authorization.Source,
-			"derived same-target review under the exact approved input stage plan "+flow.StagePlan.Hash, time.Now().UTC())
-		if err != nil {
-			return err
-		}
-		if err := state.Graph.AppendApproval(bundle); err != nil {
-			return err
-		}
-	}
 	dispatchID := fmt.Sprintf("%s-dispatch-%d", flow.ID, len(flow.DispatchIDs))
 	if err := gitproof.RetainArtifact(flow.Contract, a.Target, dispatchID, configuration.Selection); err != nil {
 		return err

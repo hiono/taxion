@@ -56,6 +56,9 @@ func (g TaskGraph) CheckBundleAtEntry(taskID string, stage ApprovalEntryStage, c
 	if task.Status != Ready {
 		return ApprovalBundle{}, &EntryCheckError{Stage: stage, Code: "task-not-ready"}
 	}
+	if bundle, ok := g.MatchingApproval(taskID, task, current); ok {
+		return bundle, nil
+	}
 	var newest *ApprovalBundle
 	for index := len(g.Approvals) - 1; index >= 0; index-- {
 		bundle := g.Approvals[index]
@@ -66,13 +69,6 @@ func (g TaskGraph) CheckBundleAtEntry(taskID string, stage ApprovalEntryStage, c
 			candidate := bundle
 			newest = &candidate
 		}
-		if bundle.hashValid() != nil {
-			continue
-		}
-		if err := bundle.Verify(task, current); err != nil {
-			continue
-		}
-		return bundle, nil
 	}
 	failure := &EntryCheckError{Stage: stage, Code: "no-matching-bundle"}
 	if newest != nil {
