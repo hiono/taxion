@@ -16,6 +16,17 @@ help の例は承認ではなく、hash・設定・対象は実際の出力と�
 
 `conversation confirm` からの承認束の生成と、不足 bundle を補う明示操作は[Task の検証と承認](task-validate-and-authorize.md#fresh-ready-task-の不足-bundle-を生成する)を参照する。
 
+持込みのコード・文書・テストや失敗記録を Coder なしでレビューする場合は、
+`conversation intake --file` の `reviewInput` に対象の出典、目的、質問、既知の失敗、
+検証状況、読める証拠を指定する。`taxion.review-input.v1` はコマンド合格を必須とする。
+`taxion.review-input.v2` は `validationMode` を明示する。
+`required-pass` は全コマンドの exit 0、診断専用の `observe` は正常終了した失敗コマンドも
+`OBSERVED` として保存する。`identity-only` は空のコマンド一覧と、その理由を記した
+`validationSummary` を要求する。`observe` でも、保存済み証拠だけを評価するときは
+コマンドを空にできる。入力と結果受理の両段階で対象・権限・整合性を確認し、
+設定したコマンドは両段階で実行する。過去の成否不明操作を読み直す目的で再実行しない。
+形式と具体例は `conversation intake --help`、開始は `workflow plan|start --help` を参照する。
+
 インストール済みの目的別コマンド一覧は `taxion --help`、各コマンドの flag は `taxion COMMAND -h` で確認する。分類は表示上の案内であり、コマンド名や option の構文は変えない。`ready` は状況ごとの操作と承認境界を先に示す。以下は代表的な操作例で、契約の詳細は Task Graph、設定、実行記録の各文書に記載する。
 
 `--help`・`-h`・`help` は先頭に `Version:` を表示する。`taxion --version` は版・source revision・build 情報を出力し、追加引数を拒否する。正式配布物の照合は[配布物の由来検証](binary-provenance.md)に従う。開発ビルドは利用可能な Go module version・VCS 情報を使い、取得不能な情報は `unknown` とする。版表示自体は設定・Git コマンド・DB・ネットワークを使わない。

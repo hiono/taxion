@@ -203,7 +203,7 @@ func stageReviewRecovery(before store.Workspace, ledger string, request ReviewRe
 		ArtifactSource: old.Artifact.Target.Source, ReuseArtifactValidation: true,
 		Authorization:       core.TaskDecision{ID: "combined-review-approval:" + hash, Source: decision.Source, Text: "Authorize exactly this bounded review recovery, including derived reconciliation, confirmation and stage-plan hashes: " + string(authority)},
 		ContinuationChange:  "Controller creates a fresh review worktree within the approved recovery envelope",
-		SavedOutputDecision: "Preserve the exact candidate, old worktrees and passed input-validation receipt",
+		SavedOutputDecision: "Preserve the exact candidate, old worktrees and saved input-validation receipt",
 	}
 	state, err = staged.LoadWorkspace()
 	if err != nil {

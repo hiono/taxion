@@ -34,7 +34,8 @@ continueStoppedExecution:true. Requires exact saved controller runtime-stop rece
 unchanged candidate and prepared review worktree, no active execution/owner or
 unresolved feedback and explicit uncertainty acceptance. By default deadline must
 be <= the unexpired original Flow deadline. This does not resume a terminal session: it derives a Reviewer-only
-successor, reuses the PASSED input receipt and carries bounded saved readable output
+successor, reuses the eligible PASSED/diagnostic OBSERVED input receipt without
+relabeling it, and carries bounded saved readable output
 into its actual instruction. Old Flow, session, usage, transcript and worktree remain.
 Missing saved output is stated as unknown, not invented analysis. No Coder, input
 validation replay, cumulative usage reset or automatic deadline extension is authorized.

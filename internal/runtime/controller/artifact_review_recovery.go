@@ -10,7 +10,7 @@ import (
 )
 
 func verifyValidatedArtifactContract(prior core.ReviewFlow, next core.GraphTask) error {
-	if prior.Artifact == nil || prior.Artifact.Validation.Status != "PASSED" ||
+	if !prior.InputReadyForReview() ||
 		next.Supersedes != prior.TaskID || next.CreatedFrom != "flow:"+prior.ID ||
 		next.TargetSHA != prior.Artifact.Target.CommitSHA ||
 		next.TargetTreeSHA != prior.Artifact.Target.TreeSHA ||

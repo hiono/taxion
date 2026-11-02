@@ -27,15 +27,26 @@ func TestReviewRecoveryRecontractsUnstartedReviewerAfterDeadlineStop(t *testing.
 	testUnstartedReviewRecovery(t, true, true)
 }
 
-func testUnstartedReviewRecovery(t *testing.T, expired, deadlineStop bool) {
+func TestDiagnosticObservationRecoveryReusesFailedChecksWithoutReplay(t *testing.T) {
+	testUnstartedReviewRecovery(t, true, true, true)
+}
+
+func testUnstartedReviewRecovery(t *testing.T, expired, deadlineStop bool, observe ...bool) {
 	counter := filepath.Join(t.TempDir(), "validation-count")
-	db, ledger, initial, selected := artifactFixture(t, []string{"printf x >> " + counter}, false)
+	command := "printf x >> " + counter
+	if len(observe) != 0 && observe[0] {
+		command += "; exit 7"
+	}
+	db, ledger, initial, selected := artifactFixture(t, []string{command}, false)
 	packet := core.ReviewInput{
 		Kind: core.ReviewInputKind, Purpose: "diagnostic", Source: initial.ArtifactSource,
 		Questions:         []string{"Why did the saved Coder attempt fail repeatedly?"},
 		KnownFailures:     []string{"Saved TestClamp assertion failed twice; cause is unknown"},
 		ValidationSummary: "Product assertion failed; input receipt checks evidence integrity; integration checks not run",
 		Evidence:          []string{"TestClamp expected 10, got 11; saved redacted assertion excerpt"},
+	}
+	if len(observe) != 0 && observe[0] {
+		packet.Kind, packet.ValidationMode = core.ReviewInputKindV2, "observe"
 	}
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		task, _ := state.Graph.GraphTask(initial.TaskID)

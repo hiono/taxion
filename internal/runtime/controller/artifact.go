@@ -19,7 +19,8 @@ import (
 
 func startArtifactReview(state *store.Workspace, flow *core.ReviewFlow, request ReviewFlowRequest, planned *core.ArtifactTarget) error {
 	if flow.StagePlan == nil || planned == nil || *request.MaxRepairs != 0 || request.ContinueFromDispatchID != "" ||
-		flow.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot || len(flow.Contract.ValidationCommands) == 0 {
+		flow.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot ||
+		core.CheckReviewValidationCommands(flow.Contract.Decisions, flow.Contract.ValidationCommands) != nil {
 		return fmt.Errorf("taxion: artifact review requires an approved snapshot stage plan, validation commands and zero repairs")
 	}
 	if _, enabled := state.Records.PacketAuthorization(flow.TaskID); enabled {
@@ -124,7 +125,10 @@ func runArtifactValidation(ctx context.Context, db *store.Store, ledgerPath, id,
 			return err
 		}
 		switch flow.Artifact.Validation.Status {
-		case "PASSED":
+		case "PASSED", "OBSERVED":
+			if !flow.InputReadyForReview() {
+				return fmt.Errorf("taxion: input receipt does not match the approved review purpose")
+			}
 			return nil
 		case "PENDING":
 			flow.Artifact.Validation.Status, flow.Artifact.Validation.StartedAt = "RUNNING", time.Now().UTC()
@@ -159,6 +163,9 @@ func runArtifactValidation(ctx context.Context, db *store.Store, ledgerPath, id,
 			}
 			v := &current.Artifact.Validation
 			v.Commands, v.FinishedAt, v.Status = checks, time.Now().UTC(), "PASSED"
+			if mode, _ := core.ReviewValidationPolicy(current.Contract.Decisions); mode == "observe" {
+				v.Status = "OBSERVED"
+			}
 			if validationErr != nil {
 				v.Status, v.Error = "FAILED", core.Redact(validationErr.Error())
 			}
@@ -172,7 +179,7 @@ func runArtifactValidation(ctx context.Context, db *store.Store, ledgerPath, id,
 	return db.UpdateWorkspace(func(state *store.Workspace) error {
 		current, ok := state.Graph.ReviewFlow(id)
 		if !ok || current.RunnerID != runnerID || current.Status != "RUNNING" || current.HandoffHeld() ||
-			current.Artifact == nil || current.Artifact.Validation.Status != "PASSED" || len(current.DispatchIDs) != 0 {
+			!current.InputReadyForReview() || len(current.DispatchIDs) != 0 {
 			return fmt.Errorf("taxion: independent review requires the unchanged successful input validation boundary")
 		}
 		if err := gitproof.VerifyArtifact(current.Contract, current.Artifact.Target, configuration.Selection); err != nil {
@@ -194,7 +201,7 @@ func issueArtifactReviewer(state *store.Workspace, ledgerPath string, flow *core
 		OutputChangedFiles: a.Target.ChangedFiles, Evidence: []string{"validated-input:" + a.Target.Hash},
 	}
 	if err := state.Graph.Transition(flow.TaskID, core.WaitingForReview, "controller",
-		"actual Controller validation of supplied input completed; no Coder result is asserted", proof); err != nil {
+		"approved input observation completed; no Coder result or product quality is asserted", proof); err != nil {
 		return err
 	}
 	review := flow.Contract

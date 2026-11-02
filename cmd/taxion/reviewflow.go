@@ -78,7 +78,13 @@ and provenance hash); an empty diff does not eliminate review of the full target
 The exact plan approval authorizes actual validation commands and one Reviewer,
 not an implementation result or publication. MaxCoderSessions is enforced as 0.
 After start: workflow validate-input --id FLOW_ID runs approved Controller commands,
-records real outcomes, checks target drift and issues only the Reviewer on success.
+records real outcomes, checks target drift and issues only the Reviewer when the
+approved input policy is satisfied. reviewInput v1 uses required-pass. Explicit v2
+validationMode observe is diagnostic-only: normal nonzero command exits remain
+OBSERVED evidence, not product PASS. Interrupted execution and drift still stop.
+v2 identity-only accepts no commands; observe may also review saved evidence with
+no commands. No edited artifact is required. Target HEAD can be an approved
+descendant of baseline; plan retains both identities and the full baseline diff.
 It starts no model; commands may execute arbitrary code under the approved contract.
 Then workflow run --id FLOW_ID --builtin-prompts prepares and inventories the exact
 Reviewer worktree before starting its model. doctor --worktree SOURCE gives only
@@ -88,7 +94,8 @@ No Coder prompt, shell permission, changedFiles transcription or success is requ
 run may perform the same pending validation stage if validate-input was omitted.
 FAILED or interrupted RUNNING validation is not replayable; preserve evidence and
 obtain a successor decision. STOPPED Flow/session/results are never rewritten.
-This first slice excludes repairs, optional packet lifecycle and restored execution.
+In-Flow artifact repairs, optional packet lifecycle and restored execution remain
+unsupported. A repair needs a separately approved implementation successor.
 `
 
 func workflowCmd(args []string) error {

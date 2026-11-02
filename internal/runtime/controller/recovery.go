@@ -239,7 +239,7 @@ func revalidateFlowResult(graph core.TaskGraph, flow core.ReviewFlow, records ..
 		return err
 	}
 	if flow.Artifact != nil {
-		if flow.Artifact.Validation.Status != "PASSED" || last.Recipient != "REVIEWER" ||
+		if !flow.InputReadyForReview() || last.Recipient != "REVIEWER" ||
 			last.Result.OutputTreeSHA != flow.Artifact.Target.TreeSHA {
 			return fmt.Errorf("review differs from its validated input artifact")
 		}

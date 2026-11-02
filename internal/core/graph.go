@@ -64,6 +64,14 @@ func (d GraphDispatch) ExpectedStartSHA() string {
 }
 
 func validateReviewerResult(d GraphDispatch, result *DispatchResult) error {
+	input, err := ReviewInputFromDecisions(d.Instruction.Decisions)
+	if err != nil {
+		return err
+	}
+	if input != nil && input.Kind == ReviewInputKindV2 && input.Purpose == "diagnostic" &&
+		result.ReviewVerdict == "APPROVE" && !nonempty(result.WorkReport) {
+		return graphError("diagnostic completion requires a readable workReport, not only an approval verdict")
+	}
 	if !slices.Contains([]string{"APPROVE", "REQUEST_CHANGES", "BLOCKED"}, result.ReviewVerdict) ||
 		result.Acceptance == nil || result.Findings == nil || result.WorktreeChanged == nil ||
 		len(result.Acceptance) != len(d.Instruction.Acceptance) {
@@ -606,8 +614,11 @@ func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship Di
 	if err := CheckSpecificationUse(task.Specifications, "runtime"); err != nil {
 		return DispatchInstruction{}, err
 	}
-	if len(task.ValidationCommands) == 0 || !validList(task.ValidationCommands) {
+	if CheckReviewValidationCommands(task.Decisions, task.ValidationCommands) != nil {
 		return DispatchInstruction{}, graphError("dispatch requires explicitly authorized validation commands")
+	}
+	if mode, _ := ReviewValidationPolicy(task.Decisions); mode != "required-pass" && task.Owner != "REVIEWER" {
+		return DispatchInstruction{}, graphError("non-default validation policies are restricted to supplied-input Reviewers")
 	}
 	if (relationship == RelationshipNone && (relatedID != "" || relationshipReason != "")) ||
 		(relationship != RelationshipNone && relationship != RelationshipIndependent && relatedID == "") {
@@ -789,6 +800,10 @@ func dispatchInstructionIdentityMatchesTask(d GraphDispatch, task GraphTask) boo
 }
 
 func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *DispatchResult) error {
+	mode, err := ReviewValidationPolicy(d.Instruction.Decisions)
+	if err != nil || mode != "required-pass" && d.Recipient != "REVIEWER" {
+		return graphError("invalid review validation policy on dispatch result")
+	}
 	if result == nil || result.DispatchID != d.ID || result.TaskID != d.TaskID ||
 		result.Recipient != d.Recipient || result.Repository != d.Repository || result.Status != status ||
 		result.StartedSHA != d.ExpectedStartSHA() || !validStatus(result.NextTransition) {
@@ -810,7 +825,8 @@ func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *Disp
 			return graphError("dispatch result has an empty validation command")
 		}
 		if status == DispatchSucceeded && validation.ExitCode != 0 &&
-			(d.Recipient != "REVIEWER" || result.ReviewVerdict == "APPROVE") {
+			(d.Recipient != "REVIEWER" || result.ReviewVerdict == "APPROVE") &&
+			!(mode == "observe" && validation.ExitCode >= 0) {
 			return graphError("successful dispatch contains a failed validation")
 		}
 		if status == DispatchSucceeded && d.Instruction.Version >= 4 &&
@@ -832,7 +848,7 @@ func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *Disp
 	if status == DispatchSucceeded {
 		reviewFindings := d.Recipient == "REVIEWER" && d.Instruction.Version >= 2 &&
 			slices.Contains([]string{"REQUEST_CHANGES", "BLOCKED"}, result.ReviewVerdict)
-		if !nonempty(result.OutputSHA) || len(result.Validations) == 0 || len(result.Evidence) == 0 ||
+		if !nonempty(result.OutputSHA) || len(result.Validations) == 0 && mode == "required-pass" || len(result.Evidence) == 0 ||
 			len(result.Blockers) != 0 && !reviewFindings {
 			return graphError("successful dispatch requires output SHA, validation and evidence")
 		}
@@ -2248,7 +2264,11 @@ func (g *TaskGraph) Transition(id string, status TaskStatus, actor, reason strin
 			return graphError("output SHA is only accepted at evidence handoff")
 		}
 		if t.OutputMode == OutputModeWorktreeTreeSnapshot {
-			if proof.OutputSHA != t.BaselineSHA || !validSHA(proof.OutputTreeSHA) ||
+			target := t.BaselineSHA
+			if t.TargetSHA != "" {
+				target = t.TargetSHA
+			}
+			if proof.OutputSHA != target || !validSHA(proof.OutputTreeSHA) ||
 				!validList(proof.OutputChangedFiles) {
 				return graphError("snapshot handoff requires controller-observed tree SHA and changed paths")
 			}

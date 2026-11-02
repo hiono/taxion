@@ -326,7 +326,8 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		}
 		if hash != request.ExpectedHash || task.Status != core.Draft || task.AuthorizationID != "" ||
 			!modelFree && task.Repo != request.Selection.Repository.Path || (decisionCount != 1 && decisionCount != 2) ||
-			task.Decisions[0].ID != "intake:"+task.ID || len(task.ValidationCommands) == 0 {
+			task.Decisions[0].ID != "intake:"+task.ID ||
+			core.CheckReviewValidationCommands(task.Decisions, task.ValidationCommands) != nil {
 			return fmt.Errorf("taxion: intake proposal changed or lacks explicit execution/validation contract")
 		}
 		if request.ReplacesFlow != "" {

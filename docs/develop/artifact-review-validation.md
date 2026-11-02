@@ -58,8 +58,62 @@ Web の12テストを通過した。
 ## 未対応範囲
 
 初期実装では修正ループ、任意 packet lifecycle 委譲、restore 後の直接実行を拒否する。
-通常 Coder Flow の全面的な成果物中心への移行は、Issue #201 の後続段階に残す。
+通常 Coder Flow の変更一覧は既存の `git-diff-v1` で Controller が全差分を観測する。
+持込み入力も同じ Git ツリー観測と検証コマンド実行を使い、出典と目的を別に保持する。
 公開・リリース・製品 Task の再開は、このローカルな検証記録からは承認されない。
+
+## 目的別の入力と結果受理
+
+`review-input.v1` の必須コマンド合格を維持し、v2 は明示した検証方針を承認に結び付ける。
+診断の完了には読める `workReport` を要求し、製品品質と公開 gate は通さない。
+実装上の判断は [ADR-0065](adr/0065-separate-review-purpose-from-validation-success.md)を参照する。
+
+| 合成ケース | 期待する結果 | 回帰試験 |
+|---|---|---|
+| 人の途中成果と既知の失敗を渡す | Coder 0、入力と実 Reviewer 指示に証拠を保持 | `TestSuppliedReviewIntakeCarriesHumanArtifactsAndFailureDiagnosisWithoutCoder` |
+| 失敗コマンドと後続コマンドを診断する | exit 7 を `OBSERVED` に保存し、結果受理でも失敗を保持 | 同上の `failed-tests` |
+| 編集を残せない失敗反復の記録 | 空のコマンド・空の差分で診断し、架空の編集を作らない | 同上の `no-edited-artifact` |
+| コマンド不要と承認した文書レビュー | `identity-only` で対象・受入れ条件・結果を照合 | 同上の `document-review-only` |
+| baseline と異なる人の commit | 両 SHA、全差分、対象 tree を固定して Reviewer 結果を受理 | `TestArtifactCommittedTargetUsesApprovedBaselineWithoutCoder` |
+| 検証による対象変更・signal 終了 | 失敗を保存して停止し、Reviewer を発行しない | `TestDiagnosticObservationDoesNotWaiveIdentityOrUnknownExecution` |
+| 形式の降格・目的矛盾・曖昧な重複 | 新しい実行を許可しない | `TestReviewInputRejectsPolicyDowngradeAndAmbiguousPurpose` |
+| 診断 Reviewer の期限停止 | 正式再契約で元 receipt と消費を保持し、入力コマンドを再実行しない | `TestDiagnosticObservationRecoveryReusesFailedChecksWithoutReplay` |
+
+上表は通常の Go 回帰試験で扱う合成ケースであり、実モデルや別マシンでの結果の代用ではない。
+
+2026-11-02 に開発候補 `64b6302` の CLI と実モデルで、差分のない対象に対する診断を確認した。
+合成した失敗反復の記録と exit 7 のコマンドを入力し、Coder の許可上限・実行数ともに 0 のまま、
+独立 Reviewer の報告を正式受理した。入力と結果受理の双方で exit 7 を保持し、
+入力 receipt は `OBSERVED`、診断は完了、品質評価は `NOT_ASSESSED_DIAGNOSTIC`、
+公開判定は `diagnostic-not-product-approval` により拒否された。
+この結果は実製品のテスト失敗や原因を再現したものではない。
+
+最初の診断実行は、未開始 Reviewer に残る工程時間が不足して停止した。
+元結果・対象・期限を保全し、既存の開発承認内で新しい工程期限を明示して正式復旧した。
+保存した `OBSERVED` receipt を再利用し、入力コマンドと旧セッションは再実行していない。
+結果受理時のコマンド実行は、元から承認した別の確認として保持した。
+
+通常経路は `5cd5c30` の隔離した合成対象で、Coder 1 回、コントローラー検証、
+独立 Reviewer 1 回、同一対象の `APPROVE` と Flow 完了まで確認した。
+ただし、この試験契約は文書整合の必須条件を含めていなかったため、
+`workflow evaluate --require-quality` は `UNMET` を返した。
+完了した Flow を品質合格と読み替えず、元の試験契約・結果を保全した。
+
+実装 `fd31366` の独立レビューでは、復旧説明が `OBSERVED` receipt も合格済みと表現する
+不整合を 1 件検出した。`546c432` で保存済み receipt という中立な説明へ修正し、
+関連する help・管理スキルも同期した。初回の `REQUEST_CHANGES` は変更していない。
+
+検証は `fd31366` と同一 commit の通常 checkout で `go test ./...`、
+説明修正後に復旧・ready・help・文書の対象試験、
+`64b6302` で `go test -race -timeout 30m ./internal/runtime/controller -count=1`、
+`5cd5c30` で `go build ./...` と `go vet ./...` を実施した。
+Controller の race 試験は約 18 分 28 秒で終了した。
+linked worktree の版表示試験は VCS revision が付かず失敗したため、同一 commit の
+通常 checkout と未変更の main で成功することを分けて確認した。
+最初の race 試験は既定の 10 分で timeout し、CI と同じ 30 分設定で完了した。
+
+保存済み v1 の解釈は変更しない。v2 と `OBSERVED` を保存する前に workspace と Git を保全し、
+旧版への rollback はその保全状態から行う。旧版で新しい store の更新を試みない。
 
 ## Dispatch のない入力検証失敗の後続契約（Issue #203）
 

@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.19"
+const readySkillVersion = "1.3.20"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -159,7 +159,7 @@ not new Coder output or proof of zero usage. A distinct-worktree successor needs
 reconciliationHash in both intake and confirmation, its exact proposal approval
 and cancelled feedback target. This does not authorize a new Flow or model run.
 The same reconcile-stopped operation also covers the first artifact Reviewer
-after PASSED input validation, but only with no acknowledgement, start, session,
+after eligible PASSED or diagnostic OBSERVED input validation, but only with no acknowledgement, start, session,
 result or runtime receipt. A prepared managed review worktree is allowed only
 when Controller verifies its registration, shared repository, detached baseline,
 unchanged baseline index, exact target files and absence of extra or ignored files.
@@ -168,7 +168,7 @@ or rewrites it. Preserve unknown delivery; session-starting is not model-start p
 For this case retain the unchanged source worktree and contract in the successor,
 use reconciliationHash in intake and confirmation, and pass the cancelled target.
 Use artifactSource from the original artifact and reuseArtifactValidation:true
-in the new plan/start request. This reuses the exact passed input-stage receipt,
+in the new plan/start request. This reuses the exact saved input-stage receipt,
 not the old terminal Flow. Use a fresh reviewRoot and never create its review
 worktree before the Controller. Reviewer result-acceptance validation still runs;
 input-stage reuse does not waive quality checks, plan approval or budget limits.
@@ -191,7 +191,7 @@ same candidate/worktree and no active owner/feedback. Without deadlineRecontract
 the original deadline must remain valid and cannot be extended. It preserves the terminal session, transcript and usage, derives a
 Reviewer-only successor and carries saved readable output into the real instruction.
 This is not a terminal-session resume or recovery of unsaved thinking. Reuse the
-PASSED input receipt; never replay input validation or Coder work. Preserve unknown
+saved PASSED/OBSERVED input receipt without relabeling; never replay input validation or Coder work. Preserve unknown
 usage and the cumulative spending contract; use existing additional approval only
 where it actually covers this bounded follow-through. Do not request approval
 separately for the derived reconciliation, contract or plan hashes.
@@ -241,6 +241,19 @@ Use diagnostic acceptance for questions and analysis, not product correctness.
 Diagnostic findings belong in workReport; unmet diagnostic acceptance still blocks.
 Completed diagnostic evaluation is NOT_ASSESSED_DIAGNOSTIC, never product approval.
 Controller still validates inputs, result acceptance, identity, budget and deadline.
+For alternative validation policies use taxion.review-input.v2 and an explicit
+validationMode. required-pass preserves strict command success; observe is
+diagnostic-only, retains normal nonzero exits as OBSERVED and may use no commands
+to assess existing evidence without replay. identity-only requires no commands
+and a validationSummary explaining the approved omission. Neither mode waives
+identity, authorization, deadlines or interrupted-execution checks. Commands,
+when present, execute at both input and result-acceptance stages. Never reuse
+unknown-delivery commands merely to read their saved evidence. OBSERVED receipts
+use the same stopped-Reviewer recovery path; they remain observations, not PASS.
+An approved committed target may descend from baseline; retain both SHAs and
+the full diff. An unchanged repository plus recorded failed attempts needs no
+invented Coder output. In-Flow artifact repairs still require a separately
+approved implementation successor rather than an implicit extra Coder.
 Covered internal follow-through needs no repeated
 user approval. Within that envelope, advance without repeated confirmation.
 Use available observations before asking for remaining usage; do not require a

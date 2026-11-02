@@ -34,8 +34,15 @@ func ObserveArtifact(task core.GraphTask, source string, selection []byte) (core
 		return core.ArtifactTarget{}, err
 	}
 	head, err := git(root, "rev-parse", "HEAD")
-	if err != nil || head != task.BaselineSHA || task.TargetSHA != "" && task.TargetSHA != head {
-		return core.ArtifactTarget{}, fmt.Errorf("artifact input must retain the approved baseline commit")
+	target := task.TargetSHA
+	if target == "" {
+		target = task.BaselineSHA
+	}
+	if err != nil || head != target {
+		return core.ArtifactTarget{}, fmt.Errorf("artifact input must retain the approved target commit")
+	}
+	if _, err := git(root, "merge-base", "--is-ancestor", task.BaselineSHA, head); err != nil {
+		return core.ArtifactTarget{}, fmt.Errorf("artifact input baseline must be an ancestor of its target")
 	}
 	branch, err := git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil || branch != task.Branch {
@@ -85,14 +92,15 @@ func RetainArtifact(task core.GraphTask, target core.ArtifactTarget, id string, 
 func ValidateArtifact(ctx context.Context, task core.GraphTask, target core.ArtifactTarget,
 	selection []byte) ([]core.DispatchValidation, error) {
 	verify := func() error { return VerifyArtifact(task, target, selection) }
-	if len(task.ValidationCommands) == 0 {
-		return nil, fmt.Errorf("artifact validation requires approved commands")
+	if err := core.CheckReviewValidationCommands(task.Decisions, task.ValidationCommands); err != nil {
+		return nil, err
 	}
 	if err := verify(); err != nil {
 		return nil, err
 	}
+	mode, _ := core.ReviewValidationPolicy(task.Decisions)
 	checks, err := executeValidationCommands(ctx, task.Worktree, target.TreeSHA,
-		slices.Clone(task.ValidationCommands), false)
+		slices.Clone(task.ValidationCommands), mode == "observe")
 	if checkErr := verify(); checkErr != nil {
 		return checks, errors.Join(err, fmt.Errorf("artifact validation changed its target: %w", checkErr))
 	}

@@ -74,6 +74,12 @@ Contract・Execution・Publication の判定と、その後の実行・公開操
 モデルの出力、入力検証の合格、レビュー結果、結果受理の検証は別の証拠である。
 診断レビューの完了も製品品質の合格とは区別する。
 
+持込みレビューの v2 契約は、目的と検証方針を別々に承認する。
+必須コマンドの合格、失敗結果の観測、コマンドなしの対象照合を明示し、
+入力発行・結果受理・保存監査・停止後の引継ぎで同じ判定を使う。
+診断の完了には読める報告を要求し、製品テストの失敗を合格へ変換しない。
+判断理由と旧版の扱いは [ADR-0065](adr/0065-separate-review-purpose-from-validation-success.md)を参照する。
+
 ## 保存は一つの workspace を中心に行う
 
 `store.Workspace` は `Ledger`、`Graph`、`Records` を同じ SQLite transaction で扱う。
