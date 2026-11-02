@@ -16,14 +16,18 @@ import (
 )
 
 func TestReviewRecoveryOneApprovalStartsOnlyExactReviewSuccessor(t *testing.T) {
-	testUnstartedReviewRecovery(t, false)
+	testUnstartedReviewRecovery(t, false, false)
 }
 
 func TestReviewRecoveryOneApprovalRecontractsExpiredUnstartedReviewer(t *testing.T) {
-	testUnstartedReviewRecovery(t, true)
+	testUnstartedReviewRecovery(t, true, false)
 }
 
-func testUnstartedReviewRecovery(t *testing.T, expired bool) {
+func TestReviewRecoveryRecontractsUnstartedReviewerAfterDeadlineStop(t *testing.T) {
+	testUnstartedReviewRecovery(t, true, true)
+}
+
+func testUnstartedReviewRecovery(t *testing.T, expired, deadlineStop bool) {
 	counter := filepath.Join(t.TempDir(), "validation-count")
 	db, ledger, initial, selected := artifactFixture(t, []string{"printf x >> " + counter}, false)
 	packet := core.ReviewInput{
@@ -56,17 +60,19 @@ func testUnstartedReviewRecovery(t *testing.T, expired bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old, err = RunReviewFlow(t.Context(), db, ledger, old.ID, func(d core.GraphDispatch) (runtime.Identity, error) {
-		if err := BindConfiguration(db, d.ID, selected); err != nil {
-			return nil, err
+	if !deadlineStop {
+		old, err = RunReviewFlow(t.Context(), db, ledger, old.ID, func(d core.GraphDispatch) (runtime.Identity, error) {
+			if err := BindConfiguration(db, d.ID, selected); err != nil {
+				return nil, err
+			}
+			return &configuredRuntime{
+				fakeRuntime: &fakeRuntime{role: "REVIEWER", worktree: d.Instruction.Worktree, hash: "pre-session"},
+				selection:   mustFlowJSON(t, selected.Config), repositoryErr: fmt.Errorf("identity query failed"),
+			}, nil
+		}, io.Discard, initial.Configuration)
+		if err == nil || old.Status != "STOPPED" {
+			t.Fatal("missing stopped prepared Reviewer", err)
 		}
-		return &configuredRuntime{
-			fakeRuntime: &fakeRuntime{role: "REVIEWER", worktree: d.Instruction.Worktree, hash: "pre-session"},
-			selection:   mustFlowJSON(t, selected.Config), repositoryErr: fmt.Errorf("identity query failed"),
-		}, nil
-	}, io.Discard, initial.Configuration)
-	if err == nil || old.Status != "STOPPED" {
-		t.Fatal("missing stopped prepared Reviewer", err)
 	}
 	if expired {
 		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
@@ -78,6 +84,12 @@ func testUnstartedReviewRecovery(t *testing.T, expired bool) {
 		}
 		state, _ := db.LoadWorkspace()
 		old, _ = state.Graph.ReviewFlow(old.ID)
+	}
+	if deadlineStop {
+		old, err = AdvanceReviewFlow(db, ledger, old.ID, initial.Configuration)
+		if err == nil || old.Status != "STOPPED" || old.StopCode != "BUDGET_STOP" {
+			t.Fatal("expired unstarted Reviewer did not formally stop", err, old)
+		}
 	}
 	request := ReviewRecoveryRequest{
 		Reconciliation: DispatchReconciliationRequest{
@@ -133,7 +145,7 @@ func testUnstartedReviewRecovery(t *testing.T, expired bool) {
 		t.Fatal("preview created review root", err)
 	}
 	if preview.Flow.Budget.MaxCoderSessions != 0 || !preview.Flow.Deadline.Before(request.Deadline.Add(time.Nanosecond)) ||
-		preview.Reconciliation.PreservedReviewWorktree == "" {
+		!deadlineStop && preview.Reconciliation.PreservedReviewWorktree == "" {
 		t.Fatal("combined preview hid execution scope", preview)
 	}
 	if _, err := RecoverArtifactReview(db, ledger, request, false); err == nil {
@@ -229,7 +241,9 @@ func testUnstartedReviewRecovery(t *testing.T, expired bool) {
 	if string(count) != "xx" {
 		t.Fatal("result acceptance validation missing")
 	}
-	if _, err := os.Stat(preview.Reconciliation.PreservedReviewWorktree); err != nil {
-		t.Fatal("old worktree lost", err)
+	if !deadlineStop {
+		if _, err := os.Stat(preview.Reconciliation.PreservedReviewWorktree); err != nil {
+			t.Fatal("old worktree lost", err)
+		}
 	}
 }

@@ -57,6 +57,7 @@ func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 	for _, audit := range r.DispatchReconciliations {
 		prior := audit.PreviousFlow
 		before := audit.PreviousDispatch
+		artifactReviewer := prior.StoppedArtifactReviewer(before)
 		flow, found := graph.ReviewFlow(prior.ID)
 		dispatch, exists := graph.GraphDispatch(before.ID)
 		inputHash, err := core.CanonicalSHA256(prior.Contract)
@@ -105,14 +106,14 @@ func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 			audit.InputContractHash != inputHash || audit.Actor == "" || audit.Source == "" ||
 			audit.Reason == "" || len(audit.Evidence) == 0 || !audit.NoActiveExecutionConfirmed || !audit.AcceptDeliveryUncertainty ||
 			audit.DeliveryStatus != "unknown" || audit.At.IsZero() ||
-			prior.Status != "STOPPED" || prior.StopCode != "SAFETY_STOP" || !prior.HandoffHeld() ||
+			prior.Status != "STOPPED" || (!artifactReviewer && prior.StopCode != "SAFETY_STOP") || !prior.HandoffHeld() ||
 			prior.RunnerID != "" || len(prior.DispatchIDs) != 1 || prior.DispatchIDs[0] != before.ID ||
-			(!prior.StoppedArtifactReviewer(before) && (before.TaskID != prior.TaskID || before.Recipient != "CODER")) ||
+			(!artifactReviewer && (before.TaskID != prior.TaskID || before.Recipient != "CODER")) ||
 			before.Status != core.DispatchIssued ||
 			before.Acknowledged || before.ExecutionStarted || before.RuntimeSessionID != "" || before.Result != nil ||
 			before.RuntimeConfigHash != "" || before.ExecutionStartSHA != "" || len(before.RuntimeUsage) != 0 ||
 			prior.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot ||
-			(!prior.StoppedArtifactReviewer(before) && prior.Contract.TargetTreeSHA == "") ||
+			(!artifactReviewer && prior.Contract.TargetTreeSHA == "") ||
 			!reflect.DeepEqual(flow, prior) || target != audit.Target ||
 			dispatch.Status != core.DispatchCancelled || dispatch.Result == nil ||
 			dispatch.Result.OutputSHA != "" || dispatch.Result.OutputTreeSHA != "" ||

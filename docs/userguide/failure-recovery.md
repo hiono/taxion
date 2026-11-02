@@ -63,6 +63,11 @@ host 検証が開始済みで、検証済み結果の保存もない場合は、
 保存表示の `RUNNING` だけでは process の存在を判断しない。
 導入更新だけを理由に新規 intake・plan、Coder、入力検証へ戻らない。
 保存期限を過ぎていれば未開始でも無承認で実行せず、正式な停止後復旧と期限再契約を使う。
+未開始 Reviewer に runner がなく、保存期限を過ぎた場合は、
+`workflow advance --id FLOW_ID` がモデルを起動せず期限条件を評価し、`BUDGET_STOP` を保存する。
+停止を示す非ゼロ終了と保存状態を確認し、`workflow recover-review --preview` へ進む。
+検証済み成果物の未開始 Reviewer は予算停止からも復旧できるが、
+新期限への承認、静止確認、同じ候補と合格 receipt の照合は省略しない。
 `CANCELLED` Coder の成果を持込み入力へ移した場合も、旧結果を成功へ書き換えない。
 
 旧 runner の生存を確認でき、まだ `RUNNING` なら、`resource_approval_required` に応じて

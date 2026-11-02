@@ -53,7 +53,7 @@ type ArtifactReview struct {
 // StoppedArtifactReviewer checks saved eligibility; Controller also verifies any
 // prepared worktree and requires execution-quiescence and unknown-delivery evidence.
 func (f ReviewFlow) StoppedArtifactReviewer(d GraphDispatch) bool {
-	return f.Status == "STOPPED" && f.StopCode == "SAFETY_STOP" && f.HandoffHeld() &&
+	return f.Status == "STOPPED" && slices.Contains([]string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT"}, f.StopCode) && f.HandoffHeld() &&
 		f.RunnerID == "" && f.Artifact != nil && f.Artifact.Validation.Status == "PASSED" &&
 		len(f.DispatchIDs) == 1 && f.DispatchIDs[0] == d.ID &&
 		d.Recipient == "REVIEWER" && d.TaskID != f.TaskID && d.Status == DispatchIssued &&
