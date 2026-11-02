@@ -25,6 +25,19 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 同じ確認を反復せず、拒否された Task ID、stage、設定、drift と保存済みの対象範囲を照合する。
 停止済み Flow や発行済み指示をこの判定で書き換えたり、実行不明の処理を再送したりしない。
 
+### 計画・調査の採用が拒否された
+
+`advice-observation-missing` は出典となる観測の欠落、
+`advice-answer-missing` は回答不足、`advice-answer-invalid` は不正な引用や形式、
+`advice-observation-stale` は回答中の記録変更を表す。元の結果を保全し、
+保存済み記録との比較や不足の補完を先に行う。同じ担当の再実行や同じ承認の
+反復は必要条件ではない。正式な助言の記録がない資料は、新たな持込み入力として
+扱えるが、元の実行・品質・権限の証明には使わない。
+
+`advice-purpose-mismatch` の場合は、非実行の判断を修正指示へ転用していないか
+確認する。`HOLD` や `REPORT` などは `workflow planner-action` で明示採用し、
+担当を発行しない。対象や契約を変更する場合は、その差分に必要な承認を別に得る。
+
 ## gate が blocked を返す
 
 `blocked` は入力または承認の不足を表す。`blockingConditions` と `nextRequiredApproval` を確認する。

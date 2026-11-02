@@ -221,3 +221,27 @@ bundle 生成を削除した。通常の明示した設定対象で、初回レ�
 
 対象試験は成功した。全体試験、独立レビュー、CI、統合、配布と外部受入れは、
 この追記の時点では未完了であり、先の RC15 の成功記録で代用しない。
+
+初期候補 `f90940d` は通常複製で全体試験に合格し、対象の並行性検査、
+ビルド、静的検査、独立レビューを実施した。その後、判定を副作用のない
+`assessFlowRole` と認可の追記へ分離し、根拠ハッシュに Flow の上限を含めた。
+対象・役割・範囲・元の認可が変わる場合の拒否と、同じ根拠の決定性・不変性を追加確認した。
+実 CLI の `ready` レシピも bundle-required で実行し、任意の役割委譲なしで
+契約確認、計画、指示発行、実コマンド検証、同一対象の独立レビュー完了へ接続する。
+
+| 受入れ例 | 確認する既存・追加試験 |
+| --- | --- |
+| 人の文書を実装担当なしでレビュー | `TestSuppliedReviewIntakeCarriesHumanArtifactsAndFailureDiagnosisWithoutCoder` の `document-review-only` |
+| 失敗・変更なしの診断を製品合格にしない | 同試験の `failed-tests` / `no-edited-artifact` と `TestDiagnosticObservationDoesNotWaiveIdentityOrUnknownExecution` |
+| 計画・引用の再利用と失効 | `TestPlannerDraftRequiresExplicitApprovalAndPublishesWithoutRewritingResults`、`TestPlannerDraftRejectsStaleForgedAndNonExecutableAdvice`、`TestPlanObservationIdentifiesReturnedRecordsWithoutChangingWorkspace` |
+| 記録なし・不正・証拠不足の区別 | `TestInputObservationAcceptsUnchangedSuppliedInputButNotMalformedMetadata`、`TestInputObservationBlocksUnverifiedReceiptAndForbiddenCapture` |
+| 通常の役割遷移と明示した設定対象 | `TestBundleRoleAdmissionUsesExplicitCoverageWithoutPacketLifecycle`、bundle-required の `TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner` |
+| 停止・保存・移送と改変拒否 | 入力観測の後続契約試験、既存の receipt・packet・portable 試験 |
+
+これらは実 Git と模擬実行基盤による開発側の証拠である。外部側では RC15 の
+レビュー発行に失敗したとの報告があり、その受入れは不合格のまま保持する。
+同じ環境へ再試行や資料の再提出を要求せず、今回の内部試験や統合で
+外部側の成功へ読み替えない。外部製品の受入れと Issue #248 の設計・実装の
+受入れは別であり、未承認の外部操作を本 Issue に新しい完了条件として追加しない。
+本 Issue は記載した実 CLI の代表例、影響する経路、独立レビュー、
+移行・復旧記録まで照合したうえで判定する。

@@ -198,6 +198,69 @@ func TestPlannerDraftRequiresExplicitApprovalAndPublishesWithoutRewritingResults
 	}
 }
 
+func TestAdviceAdmissionSeparatesPurposeMetadataAndExecution(t *testing.T) {
+	db, ledger, request := plannerDraftFixture(t)
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, failure := range []string{"missing-observation", "missing-answer", "forged-source", "stale", "non-execution"} {
+		t.Run(failure, func(t *testing.T) {
+			proposal := request.Proposal
+			answer := *proposal.Answer
+			proposal.Answer = &answer
+			want := "verified"
+			switch failure {
+			case "missing-observation":
+				proposal.Context.Observation = nil
+				want = "absent"
+			case "missing-answer":
+				proposal.Answer = nil
+				want = "insufficient"
+			case "forged-source":
+				answer.Confirmed = []QuestionClaim{{Text: "forged claim", Sources: []string{"/planner/missing"}}}
+				want = "invalid"
+			case "stale":
+				proposal.Changed = true
+				want = "stale"
+			case "non-execution":
+				answer.Recommendation = "HOLD"
+			}
+			decision, _, err := assessAdviceInput(proposal, "instruction")
+			if err != nil || decision.Verdict != "blocked" || decision.Metadata != want ||
+				len(decision.Conditions) == 0 || len(decision.NextActions) == 0 {
+				t.Fatal("advice did not return explained purpose-specific refusal", decision, err)
+			}
+			repeated, _, err := assessAdviceInput(proposal, "instruction")
+			if err != nil || !reflect.DeepEqual(decision, repeated) {
+				t.Fatal("same advice and purpose produced a different decision", err)
+			}
+			for _, condition := range decision.Conditions {
+				if condition.RequiresApproval || condition.Resolution == "" || condition.EvidenceSource == "" {
+					t.Fatal("metadata correction was treated as execution approval", condition)
+				}
+			}
+			rejected := request
+			rejected.Proposal = proposal
+			_, err = RecordPlannerDraft(db, ledger, rejected)
+			var typed *core.InputDecisionError
+			if !errors.As(err, &typed) || !reflect.DeepEqual(typed.Decision, decision) {
+				t.Fatal("actual adoption bypassed the common admission decision", err)
+			}
+			if failure == "non-execution" {
+				accepted, role, err := assessAdviceInput(proposal, "non-execution")
+				if err != nil || accepted.Err() != nil || role != "" || accepted.BasisHash == decision.BasisHash {
+					t.Fatal("same advice could not be used for its non-execution purpose", accepted, err)
+				}
+			}
+		})
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("admission or refused adoption changed saved results or issued work", err)
+	}
+}
+
 func TestPlannerDraftRejectsStaleForgedAndNonExecutableAdvice(t *testing.T) {
 	for _, failure := range []string{"action", "changed", "target", "context", "new-hold", "wrong-flow", "missing-source", "repair-without-review", "memory"} {
 		t.Run(failure, func(t *testing.T) {
@@ -215,6 +278,7 @@ func TestPlannerDraftRejectsStaleForgedAndNonExecutableAdvice(t *testing.T) {
 				if _, err := ChangeHandoff(db, handoffRequest("new-release", "hold", "RELEASE")); err != nil {
 					t.Fatal(err)
 				}
+
 				if _, err := ChangeHandoff(db, handoffRequest("new-hold", "new-release", "HOLD")); err != nil {
 					t.Fatal(err)
 				}

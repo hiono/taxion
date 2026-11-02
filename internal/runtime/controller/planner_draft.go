@@ -58,27 +58,31 @@ func RecordQuestionDraft(db *store.Store, ledgerPath string, request QuestionDra
 // RecordPlannerDraft adopts advice as an unapproved supplement, not a verdict,
 // contract revision or authorization. Existing draft approval publishes it.
 func RecordPlannerDraft(db *store.Store, ledgerPath string, request PlannerDraftRequest) (core.ReviewFlow, error) {
-	if request.Proposal.Answer == nil || request.Proposal.Context.Planner == nil {
+	if request.Proposal.Context.Planner == nil {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: planner draft requires unchanged sourced planning advice")
 	}
-	role := ""
-	switch request.Proposal.Answer.Recommendation {
-	case "REVIEW":
-		role = "REVIEWER"
-	case "REPAIR":
-		role = "CODER"
-	default:
-		return core.ReviewFlow{}, fmt.Errorf("taxion: this planner action requires separate investigation, replanning or user decision; it cannot become an executable supplement")
+	decision, role, err := assessAdviceInput(request.Proposal, "instruction")
+	if err != nil {
+		return core.ReviewFlow{}, err
+	}
+	if err := decision.Err(); err != nil {
+		return core.ReviewFlow{}, err
 	}
 	return recordAdviceDraft(db, ledgerPath, request, role, request.Proposal.Answer, nil, "")
 }
 
 func recordAdviceDraft(db *store.Store, ledgerPath string, request PlannerDraftRequest, role string, answer *QuestionAnswer, selected []int, humanInstruction string) (core.ReviewFlow, error) {
-	if db == nil || request.Proposal.Context.Observation == nil || request.Proposal.Changed {
+	if db == nil {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: adoption requires unchanged sourced advice")
 	}
-	if err := validateQuestionAnswer(*request.Proposal.Answer, request.Proposal.Context); err != nil {
-		return core.ReviewFlow{}, err
+	if request.Proposal.Context.Planner == nil {
+		decision, _, err := assessAdviceInput(request.Proposal, "instruction")
+		if err != nil {
+			return core.ReviewFlow{}, err
+		}
+		if err := decision.Err(); err != nil {
+			return core.ReviewFlow{}, err
+		}
 	}
 	memoryEntries := request.Proposal.Context.Task.MemoryContext
 	targets := []core.FeedbackTarget{}
@@ -215,4 +219,74 @@ func recordAdviceDraft(db *store.Store, ledgerPath string, request PlannerDraftR
 		return err
 	})
 	return flow, err
+}
+
+func assessAdviceInput(proposal QuestionResult, purpose string) (core.InputDecision, string, error) {
+	decision, err := core.NewInputDecision(struct {
+		Proposal QuestionResult
+		Purpose  string
+	}{proposal, purpose})
+	if err != nil {
+		return decision, "", err
+	}
+	decision.NextActions = []string{"inspect saved evidence", "resolve listed conditions without replay"}
+	block := func(metadata, code, field, reason, resolution string) {
+		if metadata != "verified" || decision.Metadata == "verified" {
+			decision.Metadata = metadata
+		}
+		decision.Block(core.InputCondition{
+			Code: code, Field: field, Reason: reason, EvidenceSource: "saved-advice",
+			Resolution: resolution,
+		})
+	}
+	if proposal.Context.Observation == nil {
+		block("absent", "advice-observation-missing", "observation", "advice has no saved observation",
+			"Observe saved records or submit the material as supplied input; do not rerun the previous worker.")
+		return decision, "", nil
+	}
+	decision.Metadata = "verified"
+	if proposal.Changed {
+		block("stale", "advice-observation-stale", "observation", "records changed during the answer",
+			"Keep this answer and compare current saved records before selecting the next work.")
+	}
+	if proposal.Answer == nil {
+		block("insufficient", "advice-answer-missing", "answer", "advice has no validated answer",
+			"Supply a sourced answer or choose a separate bounded investigation; do not infer success.")
+		return decision, "", nil
+	}
+	if err := validateQuestionAnswer(*proposal.Answer, proposal.Context); err != nil {
+		block("invalid", "advice-answer-invalid", "answer", err.Error(),
+			"Preserve the rejected advice and correct its cited evidence; it cannot supply authorization.")
+	}
+	role := ""
+	switch purpose {
+	case "instruction":
+		if proposal.Context.Planner == nil {
+			break // A question's recipient is selected explicitly by its caller.
+		}
+		switch proposal.Answer.Recommendation {
+		case "REVIEW":
+			role = "REVIEWER"
+		case "REPAIR":
+			role = "CODER"
+		default:
+			block("verified", "advice-purpose-mismatch", "recommendation",
+				"non-execution advice cannot become an executable supplement",
+				"Select the non-execution action, investigation, replanning or user decision explicitly.")
+		}
+	case "non-execution":
+		if proposal.Context.Planner == nil || proposal.Context.Investigation != nil ||
+			!slices.Contains([]string{"REPLAN", "INVESTIGATE", "HOLD", "HUMAN_REQUIRED", "REPORT"}, proposal.Answer.Recommendation) {
+			block("invalid", "advice-purpose-mismatch", "recommendation",
+				"this input does not describe a supported non-execution Planner action",
+				"Use a sourced non-execution recommendation; an execution proposal remains unapproved.")
+		}
+	default:
+		block("invalid", "advice-purpose-unknown", "purpose", "unknown advice admission purpose",
+			"Choose instruction or non-execution explicitly.")
+	}
+	if decision.Verdict == "accept" {
+		decision.NextActions = []string{"record selected advice without issuing work or granting approval"}
+	}
+	return decision, role, nil
 }

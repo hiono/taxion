@@ -13,6 +13,22 @@ Controller は保存済み Task と Dispatch の承認・対象・設定を照�
 ホスト検証と独立レビューを経て結果を受理し、次の役割または完了へ進む。
 Send の復帰が turn の完了とは限らないため、実行 context はイベント観測と結果処理まで保持する。
 
+### 受入れ判定と発行境界
+
+入力の観測、入力の受入れ、計画・調査の採用、担当の認可は ADR-0066 に従う。
+`InputDecision` の合格は、その目的の入力に使えるという判断であり、
+品質・公開・新しい実行権限を表さない。計画・質問の採用は共通の
+`assessAdviceInput` を使い、引用と目的を照合してから、既存の保存前検査へ渡す。
+現在の観測・Memory・契約・排他の再確認は省略しない。
+
+`issueFlowDispatch` は `appendFlowEntryApproval` を共通入口とする。
+保存済みの認可を優先して使い、必要な場合だけ `assessFlowRole` で同一契約の
+役割・対象・修正上限・設定対象を照合し、役割認可を同じ transaction で追記する。
+その後の `checkEntryApproval` は、実行直前の条件を再確認する。
+持込み入力専用の認可生成は置かない。通常の経路で派生するレビュー担当へは、
+元 Task ID だけに束縛された正式確認を複写しないが、元の認可と提案 hash は保つ。
+verified-legacy と任意の packet 委譲の意味は変えない。
+
 ## 工程と実行上限
 
 工程計画付き Flow は [ADR-0053](adr/0053-enforce-approved-flow-stage-boundaries.md) に従う。`core.StagePlan` は SDK に依存しない秒数・ネイティブ単位の内部残額枠・役割別ソフト上限であり、提供元のクレジット予約とは区別する。`PreviewStagePlan` で承認対象を作り、開始時に完全なハッシュを照合する。実装を検証する際は `TestStage*`・`TestPlanned*` を使い、従来の計画なし経路と提供元停止方式も回帰確認する。

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"slices"
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/memory"
@@ -15,12 +14,14 @@ import (
 // boundary. Investigation, successor intake or user input remain explicit;
 // adopting a gap never turns it into a repair instruction.
 func RecordPlannerAction(db *store.Store, ledgerPath string, request PlannerDraftRequest) (core.ReviewFlow, error) {
-	if db == nil || request.Proposal.Answer == nil || request.Proposal.Context.Planner == nil ||
-		request.Proposal.Context.Observation == nil || request.Proposal.Context.Investigation != nil || request.Proposal.Changed ||
-		!slices.Contains([]string{"REPLAN", "INVESTIGATE", "HOLD", "HUMAN_REQUIRED", "REPORT"}, request.Proposal.Answer.Recommendation) {
+	if db == nil {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: planner action requires unchanged sourced non-execution advice")
 	}
-	if err := validateQuestionAnswer(*request.Proposal.Answer, request.Proposal.Context); err != nil {
+	decision, _, err := assessAdviceInput(request.Proposal, "non-execution")
+	if err != nil {
+		return core.ReviewFlow{}, err
+	}
+	if err := decision.Err(); err != nil {
 		return core.ReviewFlow{}, err
 	}
 	text, err := json.Marshal(struct {
