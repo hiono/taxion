@@ -3,12 +3,14 @@ package controller
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
+	"github.com/hiono/taxion/internal/store"
 )
 
 func TestProgressWindowBoundsAndResets(t *testing.T) {
@@ -59,12 +61,45 @@ func TestProgressMonitorPersistsOnlyWhenSelected(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			for index := range 100 {
+				payload := strings.Repeat("historical execution evidence ", 100)
+				state.Records.Events = append(state.Records.Events, store.RuntimeReceipt{
+					DispatchID: "old", SessionID: "old", StreamID: "old",
+					Sequence: uint64(index + 1), Type: runtime.EventOutput, Payload: payload,
+					Hash: receiptHash(payload), At: time.Now().UTC(),
+				})
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 		factory := func(dispatch core.GraphDispatch) (runtime.Identity, error) {
 			worker := &scriptedRuntime{
 				fakeRuntime: fakeRuntime{role: dispatch.Recipient, hash: "monitor-test", worktree: dispatch.Instruction.Worktree},
-				events:      make(chan runtime.Event, 2),
+				events:      make(chan runtime.Event, 302),
 			}
 			worker.script = func() error {
+				before, err := db.LoadWorkspace()
+				if err != nil {
+					return err
+				}
+				running, _ := before.Graph.ReviewFlow(flow.ID)
+				started := time.Now()
+				for range 300 {
+					unchanged, err := observeRunningFlow(db, ledger, flow.ID, running.RunnerID)
+					if err != nil || !unchanged {
+						t.Fatalf("active observation changed flow: %v %v", unchanged, err)
+					}
+				}
+				after, err := db.LoadWorkspace()
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatal("polling rewrote state or receipts", err)
+				}
+				t.Logf("300 active polls with 100 historical receipts: %s", time.Since(started))
+				for index := range 300 {
+					worker.events <- runtime.Event{Sequence: uint64(index + 1), Type: runtime.EventOutputDelta, Payload: "small delta"}
+				}
 				worker.events <- runtime.Event{Type: runtime.EventExecution, Payload: "read failed test"}
 				worker.events <- runtime.Event{Type: runtime.EventCancelled, Payload: "operator cancellation"}
 				return nil
@@ -84,11 +119,21 @@ func TestProgressMonitorPersistsOnlyWhenSelected(t *testing.T) {
 			t.Fatal(err)
 		}
 		count := 0
+		history := 0
 		for _, receipt := range state.Records.Events {
+			if receipt.DispatchID == "old" {
+				history++
+				if receipt.Hash != receiptHash(receipt.Payload) {
+					t.Fatal("historical receipt changed")
+				}
+			}
 			if receipt.Type == "progress_checkpoint" {
 				count++
 				if receipt.Hash != receiptHash(receipt.Payload) || !strings.Contains(receipt.Payload, "read failed test") {
 					t.Fatal("checkpoint lost evidence binding")
+				}
+				if history != 100 || strings.Count(output.String(), `"Type":"output_delta"`) != 300 {
+					t.Fatal("history or small deltas lost")
 				}
 			}
 		}

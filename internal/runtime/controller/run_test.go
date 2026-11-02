@@ -348,7 +348,7 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 				role: dispatch.Recipient, hash: "config:" + dispatch.ID,
 				worktree: dispatch.Instruction.Worktree, sessionID: "sdk:" + dispatch.ID,
 			},
-			dispatch: dispatch, events: make(chan runtime.Event, 8),
+			dispatch: dispatch, events: make(chan runtime.Event, 308),
 		}
 		workers = append(workers, worker)
 		worker.script = func() error {
@@ -388,6 +388,9 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 						t.Fatal("re-review lost original findings", err)
 					}
 				}
+			}
+			for index := range 300 {
+				worker.events <- runtime.Event{Sequence: uint64(index + 1), Type: runtime.EventOutputDelta, Payload: "small delta"}
 			}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: "intermediate explanation"}
 			usage := `{"model":"test","inputTokens":10,"outputTokens":5,"totalNanoAIU":123.5,"aiCreditsStatus":"complete"}`

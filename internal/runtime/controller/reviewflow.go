@@ -347,26 +347,10 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 		stop := func(reason string) error { return stopWithCode(reason, "SAFETY_STOP") }
 		task, _ := state.Graph.GraphTask(flow.TaskID)
 		last, _ := state.Graph.GraphDispatch(flow.LastDispatchID())
-		if !time.Now().UTC().Before(flow.ExecutionDeadline()) {
-			return stopWithCode("deadline reached; reconcile and safely stop any active Dispatch before further authorization", "BUDGET_STOP")
-		}
-		if !flowContractMatches(state.Graph, flow, task) {
-			return stop("Task scope, acceptance, authorization or execution contract changed; user approval of a new flow is required")
-		}
-		if err := state.Graph.CheckTaskSpecificationUse(task.ID, "runtime"); err != nil {
-			return stop("specification source or permission requires renewed user approval: " + err.Error())
-		}
-		if slices.Contains([]core.TaskStatus{core.Cancelled, core.Rejected, core.Superseded}, task.Status) {
-			return stop("Task ended with " + string(task.Status) + "; reconcile any active Dispatch")
-		}
-		if task.Status == core.Blocked && active(last.Status) {
-			return stop("Task is BLOCKED while its Dispatch is active; inspect the saved blocker and safely stop execution")
-		}
-		if task.Status == core.HumanDecisionRequired || task.HumanDecision != nil && task.HumanDecision.SelectedOptionID == "" {
-			return stop("user decision required; present the Task's saved question and options")
-		}
-		if last.Status == core.DispatchSuspended || last.Status == core.DispatchCancelRequested {
-			return stop("Dispatch " + last.ID + " requires safe stop or renewed authorization before continuation")
+		if reason, code, err := runningFlowStop(*state, flow, ledgerPath); err != nil {
+			return err
+		} else if reason != "" {
+			return stopWithCode(reason, code)
 		}
 		if flow.Artifact != nil && len(flow.DispatchIDs) == 0 {
 			if flow.HandoffHeld() {
@@ -374,24 +358,11 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 			}
 			return nil
 		}
-		context, contextErr := memory.ResolveDispatchContext(ledgerPath, last.Instruction.MemoryRefs)
-		if contextErr != nil {
-			return fmt.Errorf("taxion: required flow Memory: %w", contextErr)
-		}
-		if !reflect.DeepEqual(context, last.Instruction.MemoryContext) {
-			return stop("required Memory differs from the issued snapshot; confirm the updated decision with the user")
-		}
 		if flow.HandoffHeld() && !last.ExecutionStarted && active(last.Status) {
 			stopped = fmt.Errorf("%w: %s", core.ErrHandoffHeld, flow.ID)
 			return nil
 		}
 		if active(last.Status) {
-			if reason := stageBudgetStop(state.Graph, flow, last, time.Now().UTC()); reason != "" {
-				return stopWithCode(reason, "BUDGET_STOP")
-			}
-			if reason := activeBudgetStop(taskBudgetReport(state.Graph, flow, time.Now().UTC())); reason != "" {
-				return stopWithCode(reason, "BUDGET_STOP")
-			}
 			return nil
 		}
 		if last.Status != core.DispatchSucceeded || last.Result == nil {

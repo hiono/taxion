@@ -50,9 +50,11 @@ CREATE TABLE IF NOT EXISTS workspace_records (
 
 // Store is a sqlite-backed ledger.
 type Store struct {
-	db          *sql.DB
-	mu          sync.Mutex
-	operationMu sync.Mutex
+	db                  *sql.DB
+	mu                  sync.Mutex
+	operationMu         sync.Mutex
+	observation         *Workspace
+	observationRevision int64
 }
 
 type Workspace struct {

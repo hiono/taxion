@@ -58,6 +58,13 @@ host 検証が開始済みで、検証済み結果の保存もない場合は、
 
 ## Flow が停止している
 
+入力検証が `PASSED`、Reviewer が未開始の `ISSUED`、runner がない場合、
+有効期限と既存承認を照合して、その同じ Flow の `workflow run` からレビューを開始する。
+保存表示の `RUNNING` だけでは process の存在を判断しない。
+導入更新だけを理由に新規 intake・plan、Coder、入力検証へ戻らない。
+保存期限を過ぎていれば未開始でも無承認で実行せず、正式な停止後復旧と期限再契約を使う。
+`CANCELLED` Coder の成果を持込み入力へ移した場合も、旧結果を成功へ書き換えない。
+
 旧 runner の生存を確認でき、まだ `RUNNING` なら、`resource_approval_required` に応じて
 時間と費用の不足を一度に確認します。`workflow budget --file` で明示した累計観測と
 残工程・検証・レビュー・保存・回答待ちを見積もり、現在の工程期限前に一括承認を得ます。
