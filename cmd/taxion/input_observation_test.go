@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hiono/taxion/internal/runtime/controller"
@@ -31,6 +32,16 @@ func TestInputObservationDoesNotCreateWorkspace(t *testing.T) {
 		if _, err := os.Stat(filepath.Dir(storePath)); !os.IsNotExist(err) {
 			t.Fatal("observation created an unapproved workspace", args, err)
 		}
+	}
+}
+
+func TestInputAssessmentHelpDoesNotAdvertiseObservationMutationOptions(t *testing.T) {
+	var output bytes.Buffer
+	if err := workflowCommand(t.Context(), []string{"assess-input", "--help"}, &output); err == nil {
+		t.Fatal("expected help completion")
+	}
+	if strings.Contains(output.String(), "  -preview") {
+		t.Fatal("assessment advertises an unsupported observation option")
 	}
 }
 

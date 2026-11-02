@@ -117,7 +117,7 @@ _taxion_complete() {
         'workflow') candidates='accept-saved-review advance assess-input budget draft draft-approve draft-discard evaluate extend feedback feedback-resolve feedback-target handoff interrupt lanes observe-input plan planner-action planner-draft planning-context question-draft reconcile-stopped recover recover-review repair-status resume run show start step terminate validate-input' ;;
         'workflow accept-saved-review') candidates='--file --help --preview' ;;
         'workflow advance') candidates='--help --id' ;;
-        'workflow assess-input') candidates='--file --help --preview' ;;
+        'workflow assess-input') candidates='--file --help' ;;
         'workflow budget') candidates='--file --help --id' ;;
         'workflow draft') candidates='--file --help' ;;
         'workflow draft-approve') candidates='--file --help' ;;

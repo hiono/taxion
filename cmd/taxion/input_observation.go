@@ -17,7 +17,10 @@ func inputObservationCommand(action string, args []string, output io.Writer) err
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
 	fs.SetOutput(output)
 	file := fs.String("file", "", "explicit observation or input assessment JSON")
-	preview := fs.Bool("preview", false, "inspect exact input and observation authority; no database or retained-ref writes")
+	preview := false
+	if action == "observe-input" {
+		fs.BoolVar(&preview, "preview", false, "inspect exact input and observation authority; no database or retained-ref writes")
+	}
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage of workflow "+action+":")
 		fs.PrintDefaults()
@@ -45,7 +48,7 @@ No Coder/Reviewer model or validation command starts in either operation.`)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *file == "" || fs.NArg() != 0 || action == "assess-input" && *preview {
+	if *file == "" || fs.NArg() != 0 {
 		return fmt.Errorf("workflow %s requires --file; --preview is only for observe-input", action)
 	}
 	input, err := os.Open(*file)
@@ -57,7 +60,7 @@ No Coder/Reviewer model or validation command starts in either operation.`)
 		return err
 	}
 	var db *store.Store
-	if *preview || action == "assess-input" {
+	if preview || action == "assess-input" {
 		db, err = store.OpenReadOnly(workspaceDBPath())
 	} else {
 		db, err = store.Open(workspaceDBPath())
@@ -88,7 +91,7 @@ No Coder/Reviewer model or validation command starts in either operation.`)
 	if err := core.DecodeGraphInput(input, &request); err != nil {
 		return err
 	}
-	report, err := controller.ObserveInput(db, request, *preview)
+	report, err := controller.ObserveInput(db, request, preview)
 	var decisionError *core.InputDecisionError
 	if err != nil && !errors.As(err, &decisionError) {
 		return err
