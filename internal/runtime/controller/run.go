@@ -162,6 +162,9 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 		}
 		if setupErr == nil {
 			setupErr = control.StreamEvents(runCtx, dispatch, cursor, out, func() error {
+				if unchanged, err := observeRunningFlow(db, ledgerPath, id, runnerID); err != nil || unchanged {
+					return err
+				}
 				_, checkErr := advanceReviewFlow(db, ledgerPath, id, runnerID, selected)
 				return checkErr
 			})
@@ -433,11 +436,13 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 	var finalOutput string
 	warned := ""
 	warnResources := func() error {
-		state, err := c.store.LoadWorkspace()
-		if err != nil {
+		var event *runtime.Event
+		var key string
+		err := c.store.ObserveWorkspace(func(state store.Workspace) error {
+			var err error
+			event, key, err = resourceWarning(state, dispatch, time.Now().UTC())
 			return err
-		}
-		event, key, err := resourceWarning(state, dispatch, time.Now().UTC())
+		})
 		if err != nil || event == nil || key == warned {
 			return err
 		}

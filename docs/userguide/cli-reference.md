@@ -966,6 +966,13 @@ hash だけの引継ぎや、未保存の思考の復元を約束しない。
 導入、preview、期限判断、下位契約、計画をそれぞれ別の承認質問にしない。
 新期限の一括承認を待つ間、新たなモデルは起動しない。
 
+未開始の検証済み成果物 Reviewer は、`SAFETY_STOP` に加え、
+`BUDGET_STOP` と `BUDGET_LIMIT` からも同じ整合・後続作成を利用できる。
+期限が過ぎて runner がなければ、`workflow advance --id FLOW_ID` が
+モデルなしで正式な期限停止を保存する。非ゼロ終了を成功へ読み替えず、
+保存した停止理由と未開始状態を確認してから一括 preview を行う。
+通常の初回 Coder の整合条件は `SAFETY_STOP` のままである。
+
 入力検証 `PASSED` 後に準備失敗した最初の持込み成果物 Reviewer も整合対象となる。
 管理済みレビュー worktree がある場合は、元候補との共通 Git repository、正確な場所の登録、
 detached HEAD と baseline、変更のない index、承認済み target tree とファイルを照合する。

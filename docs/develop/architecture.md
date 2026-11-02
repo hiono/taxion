@@ -89,6 +89,12 @@ workspace DB 一つのコピーだけで移送や完全復旧が済むとは扱�
 詳しい保存形式は [Ledger と workspace のデータ形式](ledger-schema.md)、
 Task と Flow の操作は [Task Graph](task-graph.md)を参照する。
 
+期限と受信中の工程確認は、変更番号が同じ取引の検証済み状態を読み取り専用で再利用する。
+時刻と外部 Memory は毎回評価し、変更後は全体を再検証する。
+通常取得・更新・正式結果受理の検証は省略しない。
+責務と計測は [ADR-0064](adr/0064-observe-unchanged-workspaces-without-reloading-history.md) と
+[イベント観測の検証](event-observation-validation.md)を参照する。
+
 ## 実行を維持する変更と、停止後の継続
 
 runner は Flow を単独所有し、同じ Dispatch の重複実行を防ぐ。

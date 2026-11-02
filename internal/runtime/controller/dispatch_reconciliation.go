@@ -128,7 +128,7 @@ func previewDispatchReconciliation(state store.Workspace, request DispatchReconc
 	task, taskFound := state.Graph.GraphTask(flow.TaskID)
 	artifactReviewer := flow.StoppedArtifactReviewer(dispatch) && task.Status == core.WaitingForReview
 	if !state.HasGraph || !found || !exists || !taskFound || flow.Status != "STOPPED" ||
-		flow.StopCode != "SAFETY_STOP" || !flow.HandoffHeld() || flow.RunnerID != "" ||
+		(!artifactReviewer && flow.StopCode != "SAFETY_STOP") || !flow.HandoffHeld() || flow.RunnerID != "" ||
 		len(flow.DispatchIDs) != 1 || flow.DispatchIDs[0] != dispatch.ID ||
 		(!artifactReviewer && (dispatch.TaskID != flow.TaskID || dispatch.Recipient != "CODER")) || dispatch.Status != core.DispatchIssued ||
 		dispatch.Acknowledged || dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "" ||
@@ -137,7 +137,7 @@ func previewDispatchReconciliation(state store.Workspace, request DispatchReconc
 		(!artifactReviewer && task.Status != core.Active) || !flowContractMatches(state.Graph, flow, task) ||
 		state.Graph.IsArchived(task.ID) || flow.PendingDraftID() != "" || len(flow.PendingFeedbackIDs()) != 0 ||
 		flow.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot || (!artifactReviewer && flow.Contract.TargetTreeSHA == "") {
-		return fail("requires a held, unclaimed SAFETY_STOP, its first issued Coder or validated artifact Reviewer, no start/session/result, and an unchanged snapshot-input contract")
+		return fail("requires a held, unclaimed SAFETY_STOP or validated artifact Reviewer budget stop, its first issued Dispatch, no start/session/result, and an unchanged snapshot-input contract")
 	}
 	if operation := state.Records.Operation; operation != nil && operation.Active() {
 		return fail("an operation is still active")

@@ -40,18 +40,19 @@ func (c *flowDeadlineContext) Err() error {
 // context/session. Parent cancellation and independent caller deadlines still win.
 func withFlowDeadline(parent context.Context, db *store.Store, id string, dispatch *core.GraphDispatch, validation bool) (context.Context, context.CancelFunc, error) {
 	deadline := func() (time.Time, error) {
-		state, err := db.LoadWorkspace()
-		if err != nil {
-			return time.Time{}, err
-		}
-		flow, ok := state.Graph.ReviewFlow(id)
-		if !ok || flow.Status != "RUNNING" {
-			return time.Time{}, ErrFlowStopped
-		}
-		if dispatch != nil {
-			return stageDeadline(flow, *dispatch, validation), nil
-		}
-		return flow.ExecutionDeadline(), nil
+		var at time.Time
+		err := db.ObserveWorkspace(func(state store.Workspace) error {
+			flow, ok := state.Graph.ReviewFlow(id)
+			if !ok || flow.Status != "RUNNING" {
+				return ErrFlowStopped
+			}
+			at = flow.ExecutionDeadline()
+			if dispatch != nil {
+				at = stageDeadline(flow, *dispatch, validation)
+			}
+			return nil
+		})
+		return at, err
 	}
 	first, err := deadline()
 	if err != nil {

@@ -15,8 +15,8 @@ Task は一件の作業記録で、目的・変更範囲・完了条件・検証
 以下は今回の候補版を選ぶ例であり、安定版への自動更新指定ではありません。
 
 ```sh
-mise install github:hiono/taxion@0.7.21-rc.13
-mise use --pin github:hiono/taxion@0.7.21-rc.13
+mise install github:hiono/taxion@0.7.21-rc.14
+mise use --pin github:hiono/taxion@0.7.21-rc.14
 mise exec -- taxion --version
 mise exec -- taxion --help
 ```
