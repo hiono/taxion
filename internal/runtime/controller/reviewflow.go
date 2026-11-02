@@ -561,6 +561,9 @@ func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.Rev
 	default:
 		return fmt.Errorf("taxion: cannot classify dispatch entry for relationship %q", relationship)
 	}
+	if err := appendFlowEntryApproval(state, *flow, task.ID, stage, configuration); err != nil {
+		return err
+	}
 	if err := checkEntryApproval(state.Graph, task, stage, configuration); err != nil {
 		return err
 	}
@@ -687,6 +690,12 @@ func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.Rev
 	}
 	if err := prepareLifecycleReviewer(state, *flow, coder, &review, configuration); err != nil {
 		return err
+	}
+	if _, enabled := state.Records.PacketAuthorization(flow.TaskID); !enabled &&
+		state.Graph.ApprovalRequirement() == core.ApprovalBundleRequired {
+		review.Decisions = slices.DeleteFunc(review.Decisions, func(decision core.TaskDecision) bool {
+			return strings.HasPrefix(decision.ID, "intake-confirmation:")
+		})
 	}
 	if err := state.Graph.Track(review, "controller", "independent review authorized by flow"); err != nil {
 		return err

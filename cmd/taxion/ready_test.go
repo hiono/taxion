@@ -15,6 +15,7 @@ import (
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/runtime/controller"
+	"github.com/hiono/taxion/internal/store"
 )
 
 func TestReadyIsStaticWithoutConfigurationWorkspaceOrModel(t *testing.T) {
@@ -120,6 +121,12 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &proposal); err != nil || proposal.Task.Status != core.Draft {
 		t.Fatal("recipe failed to retain unapproved intent", err)
 	}
+	if err := updateWorkspace(func(state *store.Workspace) error {
+		state.Graph.ApprovalSchemaVersion = core.CurrentApprovalSchemaVersion
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := workflowCommand(t.Context(), []string{"start", "--file", write("flow.json", flow)}, io.Discard); err == nil {
 		t.Fatal("unapproved recipe issued work")
 	}
@@ -164,6 +171,10 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 		t.Fatal("recipe omitted future Reviewer authorization", err)
 	}
 	var roles []string
+	configuration, err := approvalConfiguration()
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, err = controller.RunReviewFlow(t.Context(), db, storePath, flow.ID,
 		func(dispatch core.GraphDispatch) (runtime.Identity, error) {
 			bound, bindErr := selectDispatchConfiguration(db, dispatch)
@@ -213,7 +224,7 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 				return nil
 			}
 			return &requestQuotaFixtureRuntime{worker}, nil
-		}, io.Discard)
+		}, io.Discard, configuration)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,6 +237,12 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 		t.Fatal("external operator recipe did not complete without Planner", saved.Status, roles)
 	}
 	coder, reviewer := state.Graph.Dispatches[0], state.Graph.Dispatches[1]
+	if state.Graph.ApprovalRequirement() != core.ApprovalBundleRequired ||
+		len(state.Graph.ApprovalsForTask(coder.TaskID)) != 1 ||
+		len(state.Graph.ApprovalsForTask(reviewer.TaskID)) != 1 ||
+		len(state.Records.PacketAuthorizations) != 0 {
+		t.Fatal("normal CLI recipe bypassed role bundles or required optional packet delegation")
+	}
 	if len(coder.Result.Validations) != 1 || coder.Result.Validations[0].Command != "git diff --check" ||
 		coder.Result.Validations[0].ExitCode != 0 || coder.Result.Validations[0].StartedAt.IsZero() ||
 		coder.Result.Validations[0].Worktree != root {

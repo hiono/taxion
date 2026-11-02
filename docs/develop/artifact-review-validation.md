@@ -203,3 +203,66 @@ PR #250 は `bd8c676af77137b5ddd7ad181da20c8bd149b645` として統合した。
 それ以外の変更パッケージは合格した。この実行全体を成功とは記録しない。
 試験版の公開はその後の明示承認による別工程であり、外部利用環境での
 元の依頼の受入れは、引き続き Issue #248 の未達条件である。
+
+### 役割間の共通受入れへの接続
+
+通常のレビュー発行は、任意の packet lifecycle を使わない場合、
+元の契約の bundle があっても派生した担当の bundle を生成していなかった。
+持込み入力と packet lifecycle はそれぞれ別の生成処理を持っていた。
+これは開発側の構造確認であり、外部側の拒否の完全な原因を再現したとの主張ではない。
+
+派生認可の判定を Dispatch 発行直前の共通経路へ移し、持込み入力専用の
+bundle 生成を削除した。通常の明示した設定対象で、初回レビュー、修正、
+再レビュー、独立レビュー完了へ進む回帰試験を追加した。
+元の提案確認を持つ bundle-required の契約を使い、親の認可が追記後も
+変わらないこと、対象に含まれない担当には仕事や認可を発行しないことを確認する。
+任意の packet lifecycle が修正を暗黙委譲しない既存試験と、
+設定変更時の入口拒否、持込み入力の既存試験も維持する。
+
+対象試験は成功した。全体試験、独立レビュー、CI、統合、配布と外部受入れは、
+この追記の時点では未完了であり、先の RC15 の成功記録で代用しない。
+
+初期候補 `f90940d` は通常複製で全体試験に合格し、対象の並行性検査、
+ビルド、静的検査、独立レビューを実施した。その後、判定を副作用のない
+`assessFlowRole` と認可の追記へ分離し、根拠ハッシュに Flow の上限を含めた。
+対象・役割・範囲・元の認可が変わる場合の拒否と、同じ根拠の決定性・不変性を追加確認した。
+実 CLI の `ready` レシピも bundle-required で実行し、任意の役割委譲なしで
+契約確認、計画、指示発行、実コマンド検証、同一対象の独立レビュー完了へ接続する。
+
+| 受入れ例 | 確認する既存・追加試験 |
+| --- | --- |
+| 人の文書を実装担当なしでレビュー | `TestSuppliedReviewIntakeCarriesHumanArtifactsAndFailureDiagnosisWithoutCoder` の `document-review-only` |
+| 失敗・変更なしの診断を製品合格にしない | 同試験の `failed-tests` / `no-edited-artifact` と `TestDiagnosticObservationDoesNotWaiveIdentityOrUnknownExecution` |
+| 計画・引用の再利用と失効 | `TestPlannerDraftRequiresExplicitApprovalAndPublishesWithoutRewritingResults`、`TestPlannerDraftRejectsStaleForgedAndNonExecutableAdvice`、`TestPlanObservationIdentifiesReturnedRecordsWithoutChangingWorkspace` |
+| 助言の目的・メタデータと実行の分離 | `TestAdviceAdmissionSeparatesPurposeMetadataAndExecution`、既存の質問採用・非実行判断の試験 |
+| 記録なし・不正・証拠不足の区別 | `TestInputObservationAcceptsUnchangedSuppliedInputButNotMalformedMetadata`、`TestInputObservationBlocksUnverifiedReceiptAndForbiddenCapture` |
+| 通常の役割遷移と明示した設定対象 | `TestBundleRoleAdmissionUsesExplicitCoverageWithoutPacketLifecycle`、bundle-required の `TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner` |
+| 停止・保存・移送と改変拒否 | 入力観測の後続契約試験、既存の receipt・packet・portable 試験 |
+
+これらは実 Git と模擬実行基盤による開発側の証拠である。外部側では RC15 の
+レビュー発行に失敗したとの報告があり、その受入れは不合格のまま保持する。
+同じ環境へ再試行や資料の再提出を要求せず、今回の内部試験や統合で
+外部側の成功へ読み替えない。外部製品の受入れと Issue #248 の設計・実装の
+受入れは別であり、未承認の外部操作を本 Issue に新しい完了条件として追加しない。
+本 Issue は記載した実 CLI の代表例、影響する経路、独立レビュー、
+移行・復旧記録まで照合したうえで判定する。
+
+### 共通判定を接続した候補の確定結果
+
+実装候補: `c674a9fa565ad5a89b2702d4dd79ec3bba63a462`。
+Go の確認には repository の `1.26.0` toolchain を使用した。
+
+| 確認 | 結果 |
+| --- | --- |
+| 通常複製の `go test ./...` | 全体成功。操作入口 44.761 秒、Controller 290.725 秒 |
+| 変更した役割・助言・実 CLI の対象試験 | 成功。引用、目的、設定、認可・対象の改変と副作用なしを含む |
+| 同じ対象の `go test -race` | 成功。操作入口 9.085 秒、Controller 45.558 秒 |
+| `gofmt`、`git diff --check`、`go vet ./...`、`go build ./...` | 成功 |
+| 文書・リンク・公開方針 | 成功。保護識別子の照合を含む120ファイル |
+| `npm --prefix web test` | 12件成功 |
+| 独立実装レビュー | `c674a9f` までの差分に重大な不具合の指摘なし。公開用 PR 本文も正確な内容と方針に対して承認 |
+
+全体試験は worktree 固有の版識別に影響されない通常複製で、上記の実装 commit を
+照合して実行した。後続の文書記録だけの変更を、この実装試験へ混同しない。
+統合の判定には [PR #252](https://github.com/hiono/taxion/pull/252) の
+正確な最終候補の CI と独立レビューを使い、途中の成功や配布済み RC15 を使わない。

@@ -11,10 +11,32 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 | `unknown-stage` | 実行入口の stage が未知 | CLI と binary の版を確認する |
 | `unknown-task` | Task が保存されていない | Task を承認する |
 | `task-not-ready` | Task の状態が実行可能でない | 状態遷移を確認する |
-| `no-matching-bundle` | 現在の basis を覆う bundle がない | 新しい manifest で再承認する |
+| `no-matching-bundle` | 現在の basis を覆う bundle がない | 拒否された担当・設定と保存した承認の対象を照合し、未承認の差分だけを確認する |
 | `invalid-bundle` | bundle の hash または版が一致しない | 保存記録を調査する |
 
 拒否時は Dispatch を発行しない。Task、Flow、Dispatch の状態は変わらない。
+
+通常の Flow 内のレビュー・修正・再レビューと持込み入力のレビューでは、
+保存済みの契約と設定承認に含まれる内部遷移の認可を、発行直前の共通経路で追記する。
+担当を設定承認の対象へ明示する必要があり、入力の受入れや実装成功だけで許可しない。
+任意の packet lifecycle の限定委譲を、修正の許可に広げることもない。
+
+元の Task の再承認確認が `already-authorized` でも、別の担当の実行許可を示すとは限らない。
+同じ確認を反復せず、拒否された Task ID、stage、設定、drift と保存済みの対象範囲を照合する。
+停止済み Flow や発行済み指示をこの判定で書き換えたり、実行不明の処理を再送したりしない。
+
+### 計画・調査の採用が拒否された
+
+`advice-observation-missing` は出典となる観測の欠落、
+`advice-answer-missing` は回答不足、`advice-answer-invalid` は不正な引用や形式、
+`advice-observation-stale` は回答中の記録変更を表す。元の結果を保全し、
+保存済み記録との比較や不足の補完を先に行う。同じ担当の再実行や同じ承認の
+反復は必要条件ではない。正式な助言の記録がない資料は、新たな持込み入力として
+扱えるが、元の実行・品質・権限の証明には使わない。
+
+`advice-purpose-mismatch` の場合は、非実行の判断を修正指示へ転用していないか
+確認する。`HOLD` や `REPORT` などは `workflow planner-action` で明示採用し、
+担当を発行しない。対象や契約を変更する場合は、その差分に必要な承認を別に得る。
 
 ## gate が blocked を返す
 
