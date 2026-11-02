@@ -61,6 +61,14 @@ func observeArtifact(task core.GraphTask, source string, selection []byte, prech
 	}
 	var paths []string
 	if precheck {
+		tracked, err := exec.Command("git", "-C", root, "-c", "core.fsmonitor=false", "ls-files", "-z").Output()
+		if err != nil {
+			return core.ArtifactTarget{}, fmt.Errorf("input observation cannot list tracked paths")
+		}
+		// Diff can run clean filters while checking tracked content.
+		if err := checkInputFilters(root, strings.Split(strings.TrimSuffix(string(tracked), "\x00"), "\x00")); err != nil {
+			return core.ArtifactTarget{}, err
+		}
 		paths, err = candidatePaths(root, task.BaselineSHA)
 		if err != nil {
 			return core.ArtifactTarget{}, err
@@ -73,18 +81,8 @@ func observeArtifact(task core.GraphTask, source string, selection []byte, prech
 				return core.ArtifactTarget{}, fmt.Errorf("input observation cannot capture dotenv or controller management paths")
 			}
 		}
-		if len(paths) != 0 {
-			args := append([]string{"-C", root, "-c", "core.fsmonitor=false", "check-attr", "-z", "filter", "--"}, paths...)
-			output, err := exec.Command("git", args...).Output()
-			if err != nil {
-				return core.ArtifactTarget{}, fmt.Errorf("input observation cannot verify Git attributes")
-			}
-			attributes := strings.Split(string(output), "\x00")
-			for i := 2; i < len(attributes); i += 3 {
-				if attributes[i] != "unspecified" && attributes[i] != "unset" {
-					return core.ArtifactTarget{}, fmt.Errorf("input observation cannot execute Git clean/process filters")
-				}
-			}
+		if err := checkInputFilters(root, paths); err != nil {
+			return core.ArtifactTarget{}, err
 		}
 	}
 	var tree string
@@ -112,6 +110,24 @@ func observeArtifact(task core.GraphTask, source string, selection []byte, prech
 	}
 	a.Hash = "sha256:" + hash
 	return a, a.Verify()
+}
+
+func checkInputFilters(root string, paths []string) error {
+	if len(paths) == 0 || len(paths) == 1 && paths[0] == "" {
+		return nil
+	}
+	args := append([]string{"-C", root, "-c", "core.fsmonitor=false", "check-attr", "-z", "filter", "--"}, paths...)
+	output, err := exec.Command("git", args...).Output()
+	if err != nil {
+		return fmt.Errorf("input observation cannot verify Git attributes")
+	}
+	attributes := strings.Split(string(output), "\x00")
+	for i := 2; i < len(attributes); i += 3 {
+		if attributes[i] != "unspecified" && attributes[i] != "unset" {
+			return fmt.Errorf("input observation cannot execute Git clean/process filters")
+		}
+	}
+	return nil
 }
 
 func candidatePaths(root, baseline string) ([]string, error) {

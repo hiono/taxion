@@ -59,4 +59,18 @@ func TestObserveInputChecksAuthorityBeforeCapturingBlobs(t *testing.T) {
 	if _, err := ObserveInput(task, "human:filter-input", selection); err == nil || !strings.Contains(err.Error(), "filters") {
 		t.Fatal("read-only observation could invoke a configured executable filter", err)
 	}
+	marker := filepath.Join(t.TempDir(), "filter-called")
+	gitCommand(t, root, "config", "filter.synthetic.clean", "touch "+marker)
+	if err := os.WriteFile(filepath.Join(root, ".git", "info", "attributes"), []byte("README.md filter=synthetic\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("changed tracked input"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ObserveInput(task, "human:tracked-filter", selection); err == nil {
+		t.Fatal("tracked clean filter was allowed before path discovery")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("path discovery executed a tracked-file filter", err)
+	}
 }

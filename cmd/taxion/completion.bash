@@ -114,9 +114,10 @@ _taxion_complete() {
         'task validate') candidates='--file --help --manifest' ;;
         'tools') candidates='hash' ;;
         'tools hash') candidates='--help --path' ;;
-        'workflow') candidates='accept-saved-review advance budget draft draft-approve draft-discard evaluate extend feedback feedback-resolve feedback-target handoff interrupt lanes plan planner-action planner-draft planning-context question-draft reconcile-stopped recover recover-review repair-status resume run show start step terminate validate-input' ;;
+        'workflow') candidates='accept-saved-review advance assess-input budget draft draft-approve draft-discard evaluate extend feedback feedback-resolve feedback-target handoff interrupt lanes observe-input plan planner-action planner-draft planning-context question-draft reconcile-stopped recover recover-review repair-status resume run show start step terminate validate-input' ;;
         'workflow accept-saved-review') candidates='--file --help --preview' ;;
         'workflow advance') candidates='--help --id' ;;
+        'workflow assess-input') candidates='--file --help --preview' ;;
         'workflow budget') candidates='--file --help --id' ;;
         'workflow draft') candidates='--file --help' ;;
         'workflow draft-approve') candidates='--file --help' ;;
@@ -129,6 +130,7 @@ _taxion_complete() {
         'workflow handoff') candidates='--file --help' ;;
         'workflow interrupt') candidates='--file --help' ;;
         'workflow lanes') candidates='--help --root --task --timeout' ;;
+        'workflow observe-input') candidates='--file --help --preview' ;;
         'workflow plan') candidates='--file --help' ;;
         'workflow planner-action') candidates='--file --help' ;;
         'workflow planner-draft') candidates='--file --help' ;;
