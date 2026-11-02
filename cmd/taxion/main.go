@@ -126,6 +126,8 @@ Review flows and recovery:
   resume              Print a resume acknowledgement (local stub; --session required)
 
 Evidence and external records:
+  workflow observe-input Preview or record current input under explicit observation authority without rewriting old results (--file JSON; --preview)
+  workflow assess-input Return the typed admission decision and safe next actions for a saved Task (--file JSON)
   workflow validate-input Execute approved input validation without a model, then issue independent review (--id required)
   workflow budget     Read stage timing, applied soft ceilings and saved-output continuation advice (--id required)
   workflow evaluate   Report saved quality gates and measured/unknown costs; no reward score (--id required)

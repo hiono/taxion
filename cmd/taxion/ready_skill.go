@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.20"
+const readySkillVersion = "1.3.21"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -230,6 +230,24 @@ After actual approval, continue those results without repeating unchanged work.
 Recheck only affected bases on drift. New sessions/Flows do not reset cumulative
 usage or existing deadlines. No repeated sends with unknown delivery. Never claim
 to recover unsaved model reasoning or spend repair/review reserve on explanation.
+For supplied code/docs/tests or diagnostic review of failed/partial work, intake
+can bind observationHash from workflow observe-input. This records current input
+under explicit capture scope; it does not invent a successful old result or
+stop-time authorship. Read observe-input --help for exact fields. Preview first,
+then obtain actual approval of the exact observation hash and apply. Retain the
+old Flow, session, stop receipt and unknown usage. Saved source metadata cannot be
+omitted; absent metadata is ordinary supplied input, not a reason to require Coder.
+An executed terminal Dispatch requires its exact controller result receipt even
+when partial Git evidence is missing. Forbidden paths, file-access limits, active
+ownership, unresolved feedback and repository identity still block unsafe reads.
+Use observationHash in both intake and confirm, the exact new proposal/configuration
+approval and normal plan/start gates. Implementation needs a distinct worktree
+with the exact observed tree in the same repository; do not edit the preserved source.
+workflow assess-input --file JSON returns typed conditions, saved evidence sources,
+required material changes and next actions; accept is not execution or quality approval.
+Concrete saved blockers and validation output are carried in issued worker metadata,
+not only hashes; unknown authorship, unrecorded checks and usage remain unknown.
+Do not install this skill or apply a candidate to another environment without approval.
 For supplied code/docs/tests or diagnostic review of failed/partial work, intake
 accepts reviewInput with kind taxion.review-input.v1, purpose quality or diagnostic,
 source, questions, knownFailures, validationSummary and readable evidence. Use the

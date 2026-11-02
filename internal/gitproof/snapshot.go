@@ -210,6 +210,10 @@ func verifySnapshot(dispatch core.GraphDispatch, result *core.DispatchResult) er
 }
 
 func captureWorktreeTree(root, baseline, head string) (tree string, files []string, clean bool, err error) {
+	return captureWorktreePaths(root, baseline, head, nil)
+}
+
+func captureWorktreePaths(root, baseline, head string, paths []string) (tree string, files []string, clean bool, err error) {
 	index, err := os.CreateTemp("", "taxion-snapshot-index-*")
 	if err != nil {
 		return "", nil, false, fmt.Errorf("create snapshot Git index: %w", err)
@@ -231,13 +235,23 @@ func captureWorktreeTree(root, baseline, head string) (tree string, files []stri
 			err = errors.Join(err, fmt.Errorf("remove snapshot Git index: %w", removeErr))
 		}
 	}()
-	if _, err := gitWithIndex(root, indexPath, "read-tree", head); err != nil {
+	options := []string{}
+	if paths != nil {
+		options = []string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.untrackedCache=false"}
+	}
+	if _, err := gitWithIndex(root, indexPath, append(options, "read-tree", head)...); err != nil {
 		return "", nil, false, err
 	}
-	if _, err := gitWithIndex(root, indexPath, "add", "-A", "--", "."); err != nil {
-		return "", nil, false, fmt.Errorf("snapshot worktree: %w", err)
+	if paths == nil || len(paths) != 0 {
+		args := []string{"add", "-A", "--", "."}
+		if paths != nil {
+			args = append([]string{"--literal-pathspecs", "add", "-A", "--"}, paths...)
+		}
+		if _, err := gitWithIndex(root, indexPath, append(options, args...)...); err != nil {
+			return "", nil, false, fmt.Errorf("snapshot worktree: %w", err)
+		}
 	}
-	tree, err = gitWithIndex(root, indexPath, "write-tree")
+	tree, err = gitWithIndex(root, indexPath, append(options, "write-tree")...)
 	if err != nil {
 		return "", nil, false, fmt.Errorf("write snapshot Git tree: %w", err)
 	}
@@ -248,7 +262,7 @@ func captureWorktreeTree(root, baseline, head string) (tree string, files []stri
 	if err != nil {
 		return "", nil, false, err
 	}
-	status, err := git(root, "status", "--porcelain", "--untracked-files=all")
+	status, err := git(root, append(options, "status", "--porcelain", "--untracked-files=all")...)
 	if err != nil {
 		return "", nil, false, err
 	}
