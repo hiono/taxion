@@ -80,6 +80,38 @@ Web の12テストを通過した。
 | 診断 Reviewer の期限停止 | 正式再契約で元 receipt と消費を保持し、入力コマンドを再実行しない | `TestDiagnosticObservationRecoveryReusesFailedChecksWithoutReplay` |
 
 上表は通常の Go 回帰試験で扱う合成ケースであり、実モデルや別マシンでの結果の代用ではない。
+
+2026-11-02 に開発候補 `64b6302` の CLI と実モデルで、差分のない対象に対する診断を確認した。
+合成した失敗反復の記録と exit 7 のコマンドを入力し、Coder の許可上限・実行数ともに 0 のまま、
+独立 Reviewer の報告を正式受理した。入力と結果受理の双方で exit 7 を保持し、
+入力 receipt は `OBSERVED`、診断は完了、品質評価は `NOT_ASSESSED_DIAGNOSTIC`、
+公開判定は `diagnostic-not-product-approval` により拒否された。
+この結果は実製品のテスト失敗や原因を再現したものではない。
+
+最初の診断実行は、未開始 Reviewer に残る工程時間が不足して停止した。
+元結果・対象・期限を保全し、既存の開発承認内で新しい工程期限を明示して正式復旧した。
+保存した `OBSERVED` receipt を再利用し、入力コマンドと旧セッションは再実行していない。
+結果受理時のコマンド実行は、元から承認した別の確認として保持した。
+
+通常経路は `5cd5c30` の隔離した合成対象で、Coder 1 回、コントローラー検証、
+独立 Reviewer 1 回、同一対象の `APPROVE` と Flow 完了まで確認した。
+ただし、この試験契約は文書整合の必須条件を含めていなかったため、
+`workflow evaluate --require-quality` は `UNMET` を返した。
+完了した Flow を品質合格と読み替えず、元の試験契約・結果を保全した。
+
+実装 `fd31366` の独立レビューでは、復旧説明が `OBSERVED` receipt も合格済みと表現する
+不整合を 1 件検出した。`546c432` で保存済み receipt という中立な説明へ修正し、
+関連する help・管理スキルも同期した。初回の `REQUEST_CHANGES` は変更していない。
+
+検証は `fd31366` と同一 commit の通常 checkout で `go test ./...`、
+説明修正後に復旧・ready・help・文書の対象試験、
+`64b6302` で `go test -race -timeout 30m ./internal/runtime/controller -count=1`、
+`5cd5c30` で `go build ./...` と `go vet ./...` を実施した。
+Controller の race 試験は約 18 分 28 秒で終了した。
+linked worktree の版表示試験は VCS revision が付かず失敗したため、同一 commit の
+通常 checkout と未変更の main で成功することを分けて確認した。
+最初の race 試験は既定の 10 分で timeout し、CI と同じ 30 分設定で完了した。
+
 保存済み v1 の解釈は変更しない。v2 と `OBSERVED` を保存する前に workspace と Git を保全し、
 旧版への rollback はその保全状態から行う。旧版で新しい store の更新を試みない。
 
