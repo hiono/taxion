@@ -698,6 +698,66 @@ taxion workflow accept-saved-review --file acceptance.json
 
 CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は stdio の ACP、`web/` は browser console を提供する。
 
+## 入力の観測と受入れ判定
+
+`workflow observe-input --file REQUEST.json --preview` は、現在の入力を
+明示した観測範囲で取得する。旧契約への適合判定は `observation.priorPolicy`、
+取得可否は `decision` に分かれる。旧範囲に適合しない入力でも、新たな観測の権限、
+対象照合、停止証拠がそろえば記録できる。旧結果を成功へ書き換える操作ではない。
+
+```json
+{
+  "taskId": "SOURCE_TASK",
+  "flowId": "STOPPED_FLOW",
+  "dispatchId": "LAST_TERMINAL_DISPATCH",
+  "scope": ["src", "tests"],
+  "targetSha": "EXACT_CURRENT_HEAD",
+  "actor": "human",
+  "source": "evidence:CURRENT_OBSERVATION",
+  "reason": "現在の入力を新しい目的で検証する",
+  "evidence": ["保存した停止記録と実行停止の確認"],
+  "noActiveExecutionConfirmed": true,
+  "acceptDeliveryUncertainty": true
+}
+```
+
+識別子・範囲・確認文は例であり、実際の権限や証拠の代用にならない。
+既存の処理記録がある場合、`flowId` と最新の `dispatchId` を省略できない。
+処理記録がない入力では両方を省略でき、前工程の実行を要求しない。
+`configuration` は明示した設定の JSON で、省略時は保存済み指示の設定を使う。
+どちらもなければ取得を拒否する。設定を得る際は `config check --sources` を使い、
+資格情報の値を転記しない。
+
+取得後に `observation.hash` を確認し、実際の承認を得て、同じ要求へ
+`expectedHash` を追加して `--preview` なしで適用する。
+確認はデータベース・保持参照を更新しないが、一時索引から Git オブジェクトを生成し得る。
+適用は追記専用の観測記録と保持参照を作る。ファイル・実索引・ブランチは変更しない。
+観測時点は新しい取得時点であり、停止時点の状態、作者、未記録の利用量を証明しない。
+
+`workflow assess-input --file REQUEST.json` の入力は `{"taskId":"SAVED_PROPOSAL"}`。
+出力は `version:1`、`basisHash`、`metadata`、`verdict`、`conditions`、
+`nextActions`。`metadata` は観測参照の有無と整合を表し、品質評価ではない。
+`absent` は前工程なし、`verified` は記録の照合済み、`invalid` は不正な参照、
+`stale` は現在の入力との不一致、`insufficient` は取得に必要な証拠の不足を表す。
+各条件は `code`、`field`、`reason`、`evidenceSource`、`resolution`、
+`requiresApproval` を持つ。判定と旧契約への適合は同じ型で返す。
+受入れ可否は終了コード `0` が `accept`、`1` が拒否または操作エラー。
+拒否理由の分類は終了コードの推測ではなく `conditions[].code` を使う。
+
+観測記録を使う後続は `conversation intake` と `conversation confirm` の両方に
+同じ `observationHash` を指定する。正式確定でも同じ受入れ判定を実行する。
+旧作業との関係、確認対象、設定・契約の承認、実行計画の承認は省略しない。
+保存した阻害理由、検証コマンド・終了値・出力、未確認事項は新しい担当への
+指示に含まれる。実装用の後続は、元入力を保全する別作業ツリーを同じリポジトリに用意する。
+持込み検証・診断は既存の `reviewInput` と `artifactSource` の目的別設定を使う。
+`accept` は実行・品質合格・公開の許可ではなく、新たなモデルも起動しない。
+
+禁止パス・ファイル参照制約・リポジトリ同一性・稼働所有権・未解決の人間判断は維持する。
+取消済みでも正式な結果受理記録がなければ、確認文だけで補えない。
+環境変数ファイルと管理用ディレクトリは取得対象にできず、
+取得するパスに外部フィルターが設定されている場合も拒否する。
+不足項目を推測したり、既存メタデータを「なし」へ変更したりして再実行しない。
+
 ## 停止済み初回指示の整合回復
 
 ### 残工程の費用を見積もり、保存済み成果から続ける

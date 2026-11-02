@@ -16,6 +16,7 @@ import (
 )
 
 type IntakeRequest struct {
+	ObservationHash         string            `json:"observationHash,omitempty"`
 	ReviewInput             *core.ReviewInput `json:"reviewInput,omitempty"`
 	ReconciliationHash      string            `json:"reconciliationHash,omitempty"`
 	Request                 string            `json:"request"`
@@ -28,6 +29,7 @@ type IntakeRequest struct {
 }
 
 type IntakeConfirmation struct {
+	ObservationHash         string               `json:"observationHash,omitempty"`
 	ReconciliationHash      string               `json:"reconciliationHash,omitempty"`
 	TaskID                  string               `json:"taskId"`
 	ExpectedHash            string               `json:"expectedHash"`
@@ -185,6 +187,19 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 		if !state.HasGraph {
 			state.HasGraph, state.Graph = true, core.TaskGraph{Version: 1}
 		}
+		if request.ObservationHash != "" {
+			if request.ReconciliationHash != "" {
+				return fmt.Errorf("taxion: observation and unstarted reconciliation are distinct input sources")
+			}
+			reference, err := observationDecision(*state, task, request.ObservationHash)
+			if err != nil {
+				return err
+			}
+			task.Decisions = append(task.Decisions, reference)
+			if err := verifyObservedIntake(*state, task, request.ObservationHash, nil); err != nil {
+				return err
+			}
+		}
 		predecessor, err := artifactPredecessorDecision(state.Graph, task)
 		if err != nil {
 			return err
@@ -293,6 +308,23 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		if input != nil {
 			decisionCount--
 		}
+		observationHash, err := taskObservationHash(task)
+		if err != nil {
+			return err
+		}
+		if observationHash != "" || request.ObservationHash != "" {
+			if request.ReconciliationHash != "" {
+				return fmt.Errorf("taxion: observed input cannot be relabelled as an unstarted reconciliation")
+			}
+			selection, err := json.Marshal(request.Selection)
+			if err != nil {
+				return err
+			}
+			if err := verifyObservedIntake(*state, task, request.ObservationHash, selection); err != nil {
+				return err
+			}
+			decisionCount--
+		}
 		predecessor, err := artifactPredecessorDecision(state.Graph, task)
 		if err != nil {
 			return err
@@ -342,7 +374,21 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 					return fmt.Errorf("taxion: stop and reconcile every predecessor execution before reapproval")
 				}
 			}
-			if flow.Artifact != nil {
+			if request.ObservationHash != "" {
+				observation, _ := state.Records.InputObservation(request.ObservationHash)
+				if observation.SourceFlowID != flow.ID {
+					return fmt.Errorf("taxion: observed successor must retain its exact source Flow")
+				}
+				if observation.SourceDispatchID != "" {
+					last, _ := state.Graph.GraphDispatch(observation.SourceDispatchID)
+					target, err := core.ObserveFeedbackTarget(last)
+					if request.Target == nil || err != nil || target != *request.Target {
+						return core.ErrFeedbackStale
+					}
+				} else if request.Target != nil {
+					return fmt.Errorf("taxion: observation without a Dispatch must omit feedback target")
+				}
+			} else if flow.Artifact != nil {
 				if len(flow.DispatchIDs) == 0 && request.Target != nil || task.BaselineSHA != flow.Contract.BaselineSHA ||
 					len(flow.DispatchIDs) == 0 && task.TargetSHA != flow.Artifact.Target.CommitSHA ||
 					task.TargetTreeSHA != flow.Artifact.Target.TreeSHA ||

@@ -120,7 +120,10 @@ worktree, branch, baselineSha and independent review assignments. Ordinary work 
 CODER/REVIEWER; explicit reviewInput also supports a USER-owned VERIFICATION Task.
 Do not supply authorizationId or imported approval decisions.
 Optional envelope fields: planningSelection, planningReason,
-configurationDecisionId, reconciliationHash. Planning permission does not approve execution.
+configurationDecisionId, reconciliationHash, observationHash. Planning permission does not approve execution.
+observationHash selects a recorded workflow observe-input acquisition, not an old
+success result. The Controller includes concrete saved blockers, validation output
+and unknowns in the actual worker metadata. It must remain unchanged in confirm.
 
 For a normal successor set task.supersedes to the old Task ID and task.createdFrom
 to flow:OLD_FLOW_ID. Preserve the approved input and evidence in a separate
@@ -189,6 +192,9 @@ The old Flow must be held, have no runner claim or active Dispatch, and satisfy
 saved stop/result and Git-input continuation checks. SUSPENDED alone is not proof.
 The successor must identify supersedes/createdFrom and preserve the matching input.
 reconciliationHash is only for the distinct reconcile-stopped recovery contract.
+For explicitly observed input retain observationHash from intake. This is distinct
+from reconciliationHash; do not combine them. The same typed admission decision
+is rerun against the exact saved source, current target, scope and ownership.
 requestOperationId/requestBasisHash belong to request checkpoint binding; do not
 invent them for a manually prepared successor.
 

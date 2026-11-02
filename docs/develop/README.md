@@ -32,6 +32,7 @@
 | `*-validation.md` | 記載した候補と条件での検証結果。現在の全機能の保証ではない |
 | [イベント観測の検証](event-observation-validation.md) | 合成履歴の監視コストと通常受信の回帰条件 |
 | [持込みレビューの検証](artifact-review-validation.md) | 入力の出典・目的・検証方針と停止後の引継ぎ |
+| [入力観測と受入れの設計](adr/0066-separate-observation-admission-and-execution.md) | 観測・旧方針への適合・新契約の入力受入れ・実行許可の分離 |
 
 履歴には当時の版や制約を残しますが、現在の操作の正本とは分けます。
 後続判断で条件が変わった ADR は参照先を示し、古い判断と現在の仕様を併記して選ばせません。

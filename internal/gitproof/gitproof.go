@@ -407,6 +407,37 @@ func withinAny(path string, scopes []string) bool {
 // CheckChangedPaths applies the same Dispatch scope to pre-commit trees and
 // final Git evidence. Callers obtain the paths from Git, not agent reports.
 func CheckChangedPaths(dispatch core.GraphDispatch, files []string) error {
+	decision, err := AssessChangedPaths(dispatch, files)
+	if err != nil {
+		return err
+	}
+	if decision.Verdict == "blocked" {
+		return fmt.Errorf("%s", decision.Conditions[0].Reason)
+	}
+	return nil
+}
+
+func AssessChangedPaths(dispatch core.GraphDispatch, files []string) (core.InputDecision, error) {
+	decision, err := core.NewInputDecision(struct {
+		Instruction core.DispatchInstruction `json:"instruction"`
+		Files       []string                 `json:"files"`
+	}{dispatch.Instruction, files})
+	if err != nil {
+		return decision, err
+	}
+	decision.Metadata = "verified"
+	if err := checkChangedPaths(dispatch, files); err != nil {
+		decision.Block(core.InputCondition{
+			Code: "path-policy-unmet", Field: "changedFiles", Reason: err.Error(),
+			EvidenceSource:   "git-diff-and-issued-file-policy",
+			Resolution:       "Preserve the original result; preview an explicitly scoped observation for diagnosis or a newly approved contract.",
+			RequiresApproval: true,
+		})
+	}
+	return decision, nil
+}
+
+func checkChangedPaths(dispatch core.GraphDispatch, files []string) error {
 	var committed map[string]struct{}
 	if policy := dispatch.Instruction.FileAccess; policy != nil && policy.Level == core.FileAccessCommitted && len(files) > 0 {
 		paths, err := TrackedPathsAt(dispatch.Instruction.Worktree, dispatch.ExpectedStartSHA())

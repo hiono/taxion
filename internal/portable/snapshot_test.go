@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/memory"
 	"github.com/hiono/taxion/internal/store"
 )
@@ -20,6 +21,61 @@ func TestSnapshotRequiresTerminalOperation(t *testing.T) {
 		if terminal := state == "COMPLETED" || state == "CANCELLED"; terminal != (err == nil) {
 			t.Fatalf("operation %s: %v", state, err)
 		}
+	}
+}
+
+func TestPortableIncludesCurrentObservationTreeAndRetainedReference(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		output, err := git(t.Context(), root, nil, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	run("init", "-b", "work/input")
+	run("remote", "add", "origin", "https://github.com/owner/repo.git")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("baseline"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README.md")
+	run("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "baseline")
+	task := core.GraphTask{
+		ID: "source", Repo: "owner/repo", Worktree: root, Branch: "work/input",
+		BaselineSHA: run("rev-parse", "HEAD"), OutputMode: core.OutputModeWorktreeTreeSnapshot,
+		Scope: []string{"input.txt"}, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessAll},
+	}
+	task.TargetSHA = task.BaselineSHA
+	if err := os.WriteFile(filepath.Join(root, "input.txt"), []byte("unverified supplied input"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	selection := []byte(`{"repository":{"host":"github.com","path":"owner/repo"}}`)
+	target, err := gitproof.ObserveInput(task, "human:input", selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const hash = "synthetic-observation"
+	if err := gitproof.RetainInput(task, target, "observation:"+hash, selection); err != nil {
+		t.Fatal(err)
+	}
+	state := store.Workspace{
+		Graph:   core.TaskGraph{Tasks: []core.GraphTask{task}},
+		Records: store.Records{InputObservations: []store.InputObservation{{Hash: hash, Contract: task, Target: target}}},
+	}
+	repositories, err := collectRepositories(t.Context(), state, func(data []byte) (string, error) {
+		if len(data) == 0 {
+			t.Fatal("observation object pack was empty")
+		}
+		return "synthetic-pack", nil
+	})
+	if err != nil || len(repositories) != 1 {
+		t.Fatal("observation was not portable", err)
+	}
+	r := repositories[0]
+	if len(r.Paths) != 1 || r.Paths[0].Tree != target.TreeSHA ||
+		!strings.Contains(fmt.Sprint(r.Refs), target.TreeSHA) {
+		t.Fatal("portable input lost its current tree or retention ref", r)
 	}
 }
 

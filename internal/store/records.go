@@ -18,6 +18,7 @@ import (
 
 // Records shares the workspace transaction for recovery and approved publication.
 type Records struct {
+	InputObservations       []InputObservation              `json:"inputObservations,omitempty"`
 	Operation               *Operation                      `json:"operation,omitempty"`
 	Packets                 []PacketArtifact                `json:"packets,omitempty"`
 	PacketAuthorizations    []PacketAuthorization           `json:"packetAuthorizations,omitempty"`
@@ -355,6 +356,9 @@ func recordHash(value string) bool {
 // VerifyFlowAudits binds new stage plans on normalized and legacy loads as well
 // as writes. Removing a plan must not silently restore legacy unlimited stages.
 func (r Records) VerifyFlowAudits(graph core.TaskGraph) error {
+	if err := r.VerifyInputObservations(graph); err != nil {
+		return err
+	}
 	extensions := map[string]int{}
 	for _, audit := range r.Budgets {
 		if audit.Kind != "RESOURCE_EXTENDED" {

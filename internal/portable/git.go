@@ -186,6 +186,14 @@ func collectRepositories(ctx context.Context, state store.Workspace, add func([]
 			sources[d.Repository] = append(sources[d.Repository], state.Records.RestoredDispatch(d).ReviewWorktreeSource)
 		}
 	}
+	for _, observation := range state.Records.InputObservations {
+		target := observation.Target
+		if err := locate(target.Repository, observation.Contract.Worktree, target.CommitSHA, target.TreeSHA); err != nil {
+			return nil, err
+		}
+		digest := sha256.Sum256([]byte("observation:" + observation.Hash))
+		repos[target.Repository].Refs["refs/taxion/snapshots/"+hex.EncodeToString(digest[:])] = target.TreeSHA
+	}
 	var result []repository
 	ids := mapKeys(repos)
 	slices.Sort(ids)
@@ -330,8 +338,7 @@ func checkPortableObjects(data []byte) error {
 				if mode == "160000" {
 					return fmt.Errorf("portable snapshot cannot include unresolved submodule content")
 				}
-				if name == ".taxion" || name == ".env" || strings.HasPrefix(name, ".env.") &&
-					name != ".env.example" && name != ".env.sample" && name != ".env.template" {
+				if core.ProhibitedArtifactPath(name) {
 					return fmt.Errorf("portable Git objects contain prohibited local state or dotenv paths")
 				}
 				tree = objects[20:]

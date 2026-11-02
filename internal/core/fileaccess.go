@@ -55,3 +55,14 @@ func CloneFileAccessPolicy(policy *FileAccessPolicy) *FileAccessPolicy {
 	copy.Paths = slices.Clone(policy.Paths)
 	return &copy
 }
+
+// ProhibitedArtifactPath applies to new observations and portable Git artifacts.
+func ProhibitedArtifactPath(path string) bool {
+	for _, name := range strings.Split(filepath.ToSlash(path), "/") {
+		if name == ".taxion" || name == ".env" || strings.HasPrefix(name, ".env.") &&
+			name != ".env.example" && name != ".env.sample" && name != ".env.template" {
+			return true
+		}
+	}
+	return false
+}
