@@ -234,6 +234,7 @@ bundle 生成を削除した。通常の明示した設定対象で、初回レ�
 | 人の文書を実装担当なしでレビュー | `TestSuppliedReviewIntakeCarriesHumanArtifactsAndFailureDiagnosisWithoutCoder` の `document-review-only` |
 | 失敗・変更なしの診断を製品合格にしない | 同試験の `failed-tests` / `no-edited-artifact` と `TestDiagnosticObservationDoesNotWaiveIdentityOrUnknownExecution` |
 | 計画・引用の再利用と失効 | `TestPlannerDraftRequiresExplicitApprovalAndPublishesWithoutRewritingResults`、`TestPlannerDraftRejectsStaleForgedAndNonExecutableAdvice`、`TestPlanObservationIdentifiesReturnedRecordsWithoutChangingWorkspace` |
+| 助言の目的・メタデータと実行の分離 | `TestAdviceAdmissionSeparatesPurposeMetadataAndExecution`、既存の質問採用・非実行判断の試験 |
 | 記録なし・不正・証拠不足の区別 | `TestInputObservationAcceptsUnchangedSuppliedInputButNotMalformedMetadata`、`TestInputObservationBlocksUnverifiedReceiptAndForbiddenCapture` |
 | 通常の役割遷移と明示した設定対象 | `TestBundleRoleAdmissionUsesExplicitCoverageWithoutPacketLifecycle`、bundle-required の `TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner` |
 | 停止・保存・移送と改変拒否 | 入力観測の後続契約試験、既存の receipt・packet・portable 試験 |
@@ -245,3 +246,23 @@ bundle 生成を削除した。通常の明示した設定対象で、初回レ�
 受入れは別であり、未承認の外部操作を本 Issue に新しい完了条件として追加しない。
 本 Issue は記載した実 CLI の代表例、影響する経路、独立レビュー、
 移行・復旧記録まで照合したうえで判定する。
+
+### 共通判定を接続した候補の確定結果
+
+実装候補: `c674a9fa565ad5a89b2702d4dd79ec3bba63a462`。
+Go の確認には repository の `1.26.0` toolchain を使用した。
+
+| 確認 | 結果 |
+| --- | --- |
+| 通常複製の `go test ./...` | 全体成功。操作入口 44.761 秒、Controller 290.725 秒 |
+| 変更した役割・助言・実 CLI の対象試験 | 成功。引用、目的、設定、認可・対象の改変と副作用なしを含む |
+| 同じ対象の `go test -race` | 成功。操作入口 9.085 秒、Controller 45.558 秒 |
+| `gofmt`、`git diff --check`、`go vet ./...`、`go build ./...` | 成功 |
+| 文書・リンク・公開方針 | 成功。保護識別子の照合を含む120ファイル |
+| `npm --prefix web test` | 12件成功 |
+| 独立実装レビュー | `c674a9f` までの差分に重大な不具合の指摘なし。公開用 PR 本文も正確な内容と方針に対して承認 |
+
+全体試験は worktree 固有の版識別に影響されない通常複製で、上記の実装 commit を
+照合して実行した。後続の文書記録だけの変更を、この実装試験へ混同しない。
+統合の判定には [PR #252](https://github.com/hiono/taxion/pull/252) の
+正確な最終候補の CI と独立レビューを使い、途中の成功や配布済み RC15 を使わない。
