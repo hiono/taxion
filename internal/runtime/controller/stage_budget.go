@@ -78,6 +78,9 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 		if *request.MaxRepairs != 0 || request.ContinueFromDispatchID != "" || policy.CoderSessionCredits != 0 {
 			return StagePlanPreview{}, fmt.Errorf("taxion: artifact review requires zero repairs and Coder permission, without a Coder continuation")
 		}
+		if err := core.CheckReviewValidationCommands(task.Decisions, task.ValidationCommands); err != nil {
+			return StagePlanPreview{}, err
+		}
 		target, err := gitproof.ObserveArtifact(task, request.ArtifactSource, request.Configuration.Selection)
 		if err != nil {
 			return StagePlanPreview{}, err

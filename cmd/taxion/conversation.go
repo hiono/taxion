@@ -101,6 +101,18 @@ not product quality; it cannot pass the product publication gate.
 Input validation commands must verify required evidence for the diagnostic task,
 not waive failed product tests or replay a prior unknown execution.
 
+For an explicit alternative validation policy use kind taxion.review-input.v2
+and validationMode: required-pass, observe or identity-only. v1 remains strict.
+required-pass requires commands and every exit code zero. observe is diagnostic-only:
+normal nonzero exits are retained as OBSERVED, not PASSED, and do not prevent
+diagnostic acceptance. Interrupted commands, target drift and Controller authorization failures
+still stop. observe may use an empty command list to review recorded evidence
+without executing it again. identity-only requires an empty command list and an
+explicit validationSummary explaining why no command execution is required.
+Repository, target, authorization and independent review checks still apply.
+The approved commands run both at input observation and Reviewer result acceptance;
+do not include an old unknown/terminal operation merely to recover its report.
+
 JSON envelope: request (original user text), task (explicit DRAFT contract),
 actor and source (actual request provenance). taxion ready includes a full example.
 task requires the repository, objective, scope, acceptance, validationCommands,

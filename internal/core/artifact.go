@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -26,7 +27,7 @@ func (a ArtifactTarget) Verify() error {
 	a.Hash = ""
 	digest, err := CanonicalSHA256(a)
 	if err != nil || hash != "sha256:"+digest || a.Version != 1 || !nonempty(a.Source) ||
-		!nonempty(a.Repository) || !validSHA(a.BaselineSHA) || a.CommitSHA != a.BaselineSHA ||
+		!nonempty(a.Repository) || !validSHA(a.BaselineSHA) || !validSHA(a.CommitSHA) ||
 		!validSHA(a.TreeSHA) || !validList(a.ChangedFiles) {
 		return graphError("invalid input artifact identity")
 	}
@@ -50,11 +51,45 @@ type ArtifactReview struct {
 	Validation             ArtifactValidation    `json:"validation"`
 }
 
+// ReviewDiffBaselineSHA differs from the execution commit for committed supplied input.
+func (d GraphDispatch) ReviewDiffBaselineSHA() (string, error) {
+	baseline, found := d.Instruction.BaselineSHA, false
+	for _, decision := range d.Instruction.Decisions {
+		if !strings.HasPrefix(decision.ID, "input-artifact:") {
+			continue
+		}
+		var receipt ArtifactReview
+		if found || json.Unmarshal([]byte(decision.Text), &receipt) != nil ||
+			receipt.Target.Verify() != nil || d.Recipient != "REVIEWER" ||
+			receipt.Target.Repository != d.Repository || receipt.Target.CommitSHA != d.Instruction.BaselineSHA ||
+			receipt.Target.TreeSHA != d.Instruction.TargetTreeSHA ||
+			!slices.Equal(receipt.Target.ChangedFiles, d.Instruction.TargetChangedFiles) {
+			return "", graphError("Reviewer diff requires its exact supplied-input target")
+		}
+		baseline, found = receipt.Target.BaselineSHA, true
+	}
+	return baseline, nil
+}
+
+// InputReadyForReview is shared by issuance, rendering and stopped-flow recovery.
+// OBSERVED is evidence for an explicitly authorized diagnosis, never a product pass.
+func (f ReviewFlow) InputReadyForReview() bool {
+	if f.Artifact == nil {
+		return false
+	}
+	mode, err := ReviewValidationPolicy(f.Contract.Decisions)
+	if err != nil {
+		return false
+	}
+	return f.Artifact.Validation.Status == "PASSED" && mode != "observe" ||
+		f.Artifact.Validation.Status == "OBSERVED" && mode == "observe"
+}
+
 // StoppedArtifactReviewer checks saved eligibility; Controller also verifies any
 // prepared worktree and requires execution-quiescence and unknown-delivery evidence.
 func (f ReviewFlow) StoppedArtifactReviewer(d GraphDispatch) bool {
 	return f.Status == "STOPPED" && slices.Contains([]string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT"}, f.StopCode) && f.HandoffHeld() &&
-		f.RunnerID == "" && f.Artifact != nil && f.Artifact.Validation.Status == "PASSED" &&
+		f.RunnerID == "" && f.InputReadyForReview() &&
 		len(f.DispatchIDs) == 1 && f.DispatchIDs[0] == d.ID &&
 		d.Recipient == "REVIEWER" && d.TaskID != f.TaskID && d.Status == DispatchIssued &&
 		!d.Acknowledged && !d.ExecutionStarted && d.RuntimeSessionID == "" && d.Result == nil &&
@@ -65,7 +100,7 @@ func (f ReviewFlow) StoppedArtifactReviewer(d GraphDispatch) bool {
 // unstarted-dispatch reconciliation or an in-place session restart.
 func (f ReviewFlow) StoppedExecutedArtifactReviewer(d GraphDispatch) bool {
 	return f.Status == "STOPPED" && slices.Contains([]string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT"}, f.StopCode) &&
-		f.HandoffHeld() && f.RunnerID == "" && f.Artifact != nil && f.Artifact.Validation.Status == "PASSED" &&
+		f.HandoffHeld() && f.RunnerID == "" && f.InputReadyForReview() &&
 		len(f.DispatchIDs) == 1 && f.DispatchIDs[0] == d.ID && d.Recipient == "REVIEWER" &&
 		d.TaskID != f.TaskID && d.Status == DispatchCancelled && d.ExecutionStarted &&
 		d.RuntimeSessionID != "" && d.RuntimeConfigHash != "" && d.Result != nil &&
@@ -123,10 +158,14 @@ func (g TaskGraph) validateArtifactFlow(f ReviewFlow) error {
 		return graphError("invalid artifact-first review contract")
 	}
 	v := a.Validation
+	mode, err := ReviewValidationPolicy(f.Contract.Decisions)
+	if err != nil || CheckReviewValidationCommands(f.Contract.Decisions, f.Contract.ValidationCommands) != nil {
+		return graphError("artifact validation policy differs from its approved review input")
+	}
 	if a.ValidationSourceFlowID != "" {
 		prior, ok := g.ReviewFlow(a.ValidationSourceFlowID)
 		if !ok || prior.ID == f.ID || prior.Status != "STOPPED" || prior.RunnerID != "" ||
-			prior.Artifact == nil || prior.Artifact.Validation.Status != "PASSED" ||
+			!prior.InputReadyForReview() ||
 			f.Contract.Supersedes != prior.TaskID || f.Contract.CreatedFrom != "flow:"+prior.ID ||
 			!f.StartedAt.After(prior.StartedAt) {
 			return graphError("invalid inherited artifact validation source")
@@ -140,23 +179,24 @@ func (g TaskGraph) validateArtifactFlow(f ReviewFlow) error {
 		}
 	}
 	if v.TargetHash != a.Target.Hash ||
-		!slices.Contains([]string{"PENDING", "RUNNING", "PASSED", "FAILED"}, v.Status) ||
+		!slices.Contains([]string{"PENDING", "RUNNING", "PASSED", "OBSERVED", "FAILED"}, v.Status) ||
 		v.Status == "PENDING" && !v.StartedAt.IsZero() ||
 		(v.Status == "PENDING" || v.Status == "RUNNING") && (len(v.Commands) != 0 || !v.FinishedAt.IsZero() || v.Error != "") ||
 		v.Status != "PENDING" && v.StartedAt.IsZero() ||
 		v.Status != "PENDING" && v.StartedAt.Before(a.ObservedAt) ||
-		(v.Status == "PASSED" || v.Status == "FAILED") && (v.FinishedAt.IsZero() || v.FinishedAt.Before(v.StartedAt)) ||
-		v.Status == "PASSED" && (v.Error != "" || len(v.Commands) != len(f.Contract.ValidationCommands)) ||
+		(v.Status == "PASSED" || v.Status == "OBSERVED" || v.Status == "FAILED") && (v.FinishedAt.IsZero() || v.FinishedAt.Before(v.StartedAt)) ||
+		(v.Status == "PASSED" || v.Status == "OBSERVED") &&
+			(!f.InputReadyForReview() || v.Error != "" || len(v.Commands) != len(f.Contract.ValidationCommands)) ||
 		v.Status == "FAILED" && !nonempty(v.Error) ||
-		v.Status != "PASSED" && len(f.DispatchIDs) != 0 {
+		!f.InputReadyForReview() && len(f.DispatchIDs) != 0 {
 		return graphError("invalid artifact validation receipt")
 	}
 	for i, check := range v.Commands {
 		if i >= len(f.Contract.ValidationCommands) || check.Command != f.Contract.ValidationCommands[i] ||
 			check.Worktree != f.Contract.Worktree || check.SHA != a.Target.TreeSHA ||
-			check.StartedAt.Before(v.StartedAt) || check.FinishedAt.Before(check.StartedAt) ||
+			check.StartedAt.IsZero() || check.StartedAt.Before(v.StartedAt) || check.FinishedAt.Before(check.StartedAt) ||
 			!v.FinishedAt.IsZero() && check.FinishedAt.After(v.FinishedAt) ||
-			v.Status == "PASSED" && check.ExitCode != 0 {
+			(v.Status == "PASSED" && check.ExitCode != 0 || mode == "observe" && v.Status == "OBSERVED" && check.ExitCode < 0) {
 			return graphError("artifact validation differs from its approved commands or target")
 		}
 	}

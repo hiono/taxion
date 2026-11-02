@@ -155,6 +155,27 @@ func TestSnapshotTaskCompletionRequiresExactTreeReview(t *testing.T) {
 	}
 }
 
+func TestSnapshotHandoffUsesTheApprovedTargetCommit(t *testing.T) {
+	task := graphTask("snapshot-target")
+	task.OutputMode = OutputModeWorktreeTreeSnapshot
+	task.TargetSHA = strings.Repeat("b", 40)
+	g := trackedGraph(t, task)
+	move(t, &g, task.ID, Ready, TransitionProof{})
+	move(t, &g, task.ID, Active, TransitionProof{})
+	proof := TransitionProof{OutputTreeSHA: strings.Repeat("c", 40), OutputChangedFiles: []string{"src/file.go"}}
+	for _, sha := range []string{task.BaselineSHA, strings.Repeat("d", 40)} {
+		proof.OutputSHA = sha
+		if err := g.Transition(task.ID, WaitingForReview, "controller", "wrong commit", proof); err == nil {
+			t.Fatal("snapshot handoff accepted a commit other than its approved target")
+		}
+	}
+	proof.OutputSHA = task.TargetSHA
+	move(t, &g, task.ID, WaitingForReview, proof)
+	if err := g.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDispatchLifecycleRequiresAcknowledgement(t *testing.T) {
 	g := trackedGraph(t, graphTask("task"))
 	move(t, &g, "task", Ready, TransitionProof{})

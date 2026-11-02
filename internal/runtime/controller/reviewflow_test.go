@@ -286,6 +286,7 @@ func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, ve
 			}
 		} else {
 			changed := false
+			result.WorkReport = "Independent review assessed the supplied evidence; observed failures and unperformed checks remain as recorded."
 			result.ReviewVerdict, result.WorktreeChanged, result.Findings = verdict, &changed, []core.DispatchFinding{}
 			status := "PASS"
 			if verdict != "APPROVE" {

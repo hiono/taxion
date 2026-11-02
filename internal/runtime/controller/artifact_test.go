@@ -188,6 +188,46 @@ func TestArtifactInputReachesIndependentReviewWithoutCoder(t *testing.T) {
 	}
 }
 
+func TestArtifactCommittedTargetUsesApprovedBaselineWithoutCoder(t *testing.T) {
+	db, ledger, request, selected := artifactFixture(t, []string{"test -s internal/input-00.txt"}, false)
+	state, _ := db.LoadWorkspace()
+	task, _ := state.Graph.GraphTask(request.TaskID)
+	baseline := task.BaselineSHA
+	gitTest(t, task.Worktree, "add", "internal")
+	gitTest(t, task.Worktree, "commit", "-m", "human-authored input")
+	target := gitTest(t, task.Worktree, "rev-parse", "HEAD")
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		if err := state.Graph.Transition(task.ID, core.Draft, "human", "approve committed target", core.TransitionProof{}); err != nil {
+			return err
+		}
+		task.Status, task.TargetSHA = core.Draft, target
+		if err := state.Graph.Track(task, "human", "retain distinct baseline and target"); err != nil {
+			return err
+		}
+		return state.Graph.Transition(task.ID, core.Ready, "human", "ready", core.TransitionProof{})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	refreshArtifactPlan(t, db, &request)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow, err = ValidateReviewFlowInput(t.Context(), db, ledger, flow.ID, request.Configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flow.Artifact.Target.BaselineSHA != baseline || flow.Artifact.Target.CommitSHA != target ||
+		len(flow.Artifact.Target.ChangedFiles) != 29 || flow.Budget.MaxCoderSessions != 0 {
+		t.Fatal("committed target lost its baseline or invented a Coder")
+	}
+	executeFlowDispatch(t, db, flow, "APPROVE", true, selected)
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID, request.Configuration)
+	if err != nil || flow.Status != "COMPLETED" {
+		t.Fatal("committed input did not complete", flow.Status, err)
+	}
+}
+
 func TestArtifactValidationStopsBeforeAnyModelOnFailureOrDrift(t *testing.T) {
 	for _, command := range []string{"exit 7", "printf changed >> internal/input-00.txt"} {
 		t.Run(command, func(t *testing.T) {

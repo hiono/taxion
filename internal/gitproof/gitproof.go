@@ -246,8 +246,12 @@ func ExecuteValidations(ctx context.Context, dispatch core.GraphDispatch, result
 		result.Validations[index].FinishedAt = time.Time{}
 		result.Validations[index].Output = ""
 	}
-	if len(dispatch.Instruction.ValidationCommands) == 0 {
+	if err := core.CheckReviewValidationCommands(dispatch.Instruction.Decisions, dispatch.Instruction.ValidationCommands); err != nil {
 		return fmt.Errorf("controller validation requires authorized commands")
+	}
+	mode, err := core.ReviewValidationPolicy(dispatch.Instruction.Decisions)
+	if err != nil || mode != "required-pass" && dispatch.Recipient != "REVIEWER" {
+		return fmt.Errorf("controller validation policy requires an authorized supplied-input Reviewer")
 	}
 	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot &&
 		dispatch.Recipient == "CODER" {
@@ -260,9 +264,8 @@ func ExecuteValidations(ctx context.Context, dispatch core.GraphDispatch, result
 	}
 	root := result.GitEvidence.Worktree
 	result.GitEvidence = nil
-	var err error
 	result.Validations, err = executeValidationCommands(ctx, root, validationSHA(dispatch, result),
-		dispatch.Instruction.ValidationCommands, dispatch.Recipient == "REVIEWER" && result.ReviewVerdict != "APPROVE")
+		dispatch.Instruction.ValidationCommands, mode == "observe" || dispatch.Recipient == "REVIEWER" && result.ReviewVerdict != "APPROVE")
 	if err != nil {
 		return err
 	}
@@ -299,6 +302,9 @@ func executeValidationCommands(ctx context.Context, root, sha string, commands [
 		checks = append(checks, validation)
 		if ctx.Err() != nil {
 			return checks, fmt.Errorf("validation %q: %w", authorized, ctx.Err())
+		}
+		if validation.ExitCode < 0 {
+			return checks, fmt.Errorf("validation %q did not exit normally", authorized)
 		}
 		if validation.ExitCode != 0 && !allowFailure {
 			return checks, fmt.Errorf("controller validation %q failed with exit code %d: %s", authorized, validation.ExitCode, output)

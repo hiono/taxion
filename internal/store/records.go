@@ -427,7 +427,7 @@ func (r Records) VerifyFlowAudits(graph core.TaskGraph) error {
 			case "INPUT_VALIDATION_REUSED":
 				source := report.Artifact.ValidationSourceFlowID
 				original := artifacts[source]
-				if prior != nil || original == nil || status != "PASSED" {
+				if prior != nil || original == nil || !flow.InputReadyForReview() {
 					return fmt.Errorf("validation reuse requires an existing passed append-only receipt")
 				}
 				expected := *original
@@ -455,7 +455,7 @@ func (r Records) VerifyFlowAudits(graph core.TaskGraph) error {
 					return fmt.Errorf("input execution requires a unique durable start marker")
 				}
 			case "INPUT_VALIDATION_FINISHED":
-				if prior == nil || prior.Validation.Status != "RUNNING" || (status != "PASSED" && status != "FAILED") ||
+				if prior == nil || prior.Validation.Status != "RUNNING" || (status != "PASSED" && status != "OBSERVED" && status != "FAILED") ||
 					!prior.Validation.StartedAt.Equal(report.Artifact.Validation.StartedAt) {
 					return fmt.Errorf("input result requires its exact execution marker")
 				}

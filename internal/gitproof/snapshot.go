@@ -129,7 +129,11 @@ func verifySnapshot(dispatch core.GraphDispatch, result *core.DispatchResult) er
 	if branch != "(detached)" && branch != dispatch.Instruction.Branch {
 		return fmt.Errorf("snapshot worktree branch %q does not match Dispatch branch %q", branch, dispatch.Instruction.Branch)
 	}
-	tree, files, clean, err := captureWorktreeTree(root, baseline, head)
+	diffBaseline, err := dispatch.ReviewDiffBaselineSHA()
+	if err != nil {
+		return err
+	}
+	tree, files, clean, err := captureWorktreeTree(root, diffBaseline, head)
 	if err != nil {
 		return err
 	}
@@ -145,7 +149,7 @@ func verifySnapshot(dispatch core.GraphDispatch, result *core.DispatchResult) er
 			return err
 		}
 	} else {
-		targetFiles, err := changedFiles(root, baseline, dispatch.Instruction.TargetTreeSHA)
+		targetFiles, err := changedFiles(root, diffBaseline, dispatch.Instruction.TargetTreeSHA)
 		if err != nil {
 			return err
 		}
@@ -394,7 +398,11 @@ func applyTreeSnapshot(source string, dispatch core.GraphDispatch) error {
 	if err := verifySnapshotRef(source, refID, dispatch.Instruction.TargetTreeSHA); err != nil {
 		return err
 	}
-	targetFiles, err := changedFiles(source, dispatch.Instruction.BaselineSHA, dispatch.Instruction.TargetTreeSHA)
+	diffBaseline, err := dispatch.ReviewDiffBaselineSHA()
+	if err != nil {
+		return err
+	}
+	targetFiles, err := changedFiles(source, diffBaseline, dispatch.Instruction.TargetTreeSHA)
 	if err != nil {
 		return err
 	}
@@ -422,7 +430,7 @@ func applyTreeSnapshot(source string, dispatch core.GraphDispatch) error {
 		}
 	}
 	tree, files, _, err := captureWorktreeTree(dispatch.Instruction.Worktree,
-		dispatch.Instruction.BaselineSHA, dispatch.Instruction.BaselineSHA)
+		diffBaseline, dispatch.Instruction.BaselineSHA)
 	if err != nil {
 		return err
 	}
