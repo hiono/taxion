@@ -113,14 +113,36 @@ func servePeer() {
 			if mode == "disconnect" {
 				return
 			}
+			if mode == "stderr-warning" {
+				fmt.Fprintln(os.Stderr, "Free usage limit reached token=secret-provider-diagnostics")
+			}
+			if mode == "stderr-limit" || mode == "stderr-unknown" {
+				detail := "Unauthorized token=secret-provider-diagnostics"
+				if mode == "stderr-limit" {
+					detail = "Free usage limit reached token=secret-provider-diagnostics"
+				}
+				fmt.Fprintln(os.Stderr, detail)
+				return
+			}
 			if mode == "malformed" {
 				fmt.Fprintln(os.Stdout, "not-json")
 				continue
 			}
-			if mode == "rpc-error" {
-				_ = encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{
-					"code": -32602, "message": "secret-provider-diagnostics",
-				}})
+			if mode == "rpc-error" || mode == "rpc-limit" || mode == "rpc-limit-exit" || mode == "rpc-data-limit" {
+				detail := "secret-provider-diagnostics"
+				if mode == "rpc-limit" || mode == "rpc-limit-exit" {
+					detail = "Free usage limit reached token=secret-provider-diagnostics"
+				}
+				rpcError := map[string]any{
+					"code": -32602, "message": detail,
+				}
+				if mode == "rpc-data-limit" {
+					rpcError["data"] = map[string]string{"message": "Free usage limit reached token=secret-provider-diagnostics"}
+				}
+				_ = encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": rpcError})
+				if mode == "rpc-limit-exit" {
+					return
+				}
 				continue
 			}
 			if mode == "delayed" {
@@ -205,6 +227,7 @@ func TestCompatibleAgentUpdatesUseProtocolAndSessionChecks(t *testing.T) {
 		{"new-major", "2.0.0"},
 		{"version", "unknown"},
 		{"missing-version", ""},
+		{"stderr-warning", "1.19.0"},
 	} {
 		t.Run(test.version, func(t *testing.T) {
 			t.Setenv("TAXION_FAKE_MODE", test.mode)
@@ -777,6 +800,78 @@ func TestFakePeerFailuresDeniedClientOperationsAndUnknownUsage(t *testing.T) {
 			}
 			t.Fatal("no terminal event")
 		})
+	}
+}
+
+func TestProviderFailureSignalsWithholdDetailsAndPreserveUnknownUsage(t *testing.T) {
+	for _, test := range []struct {
+		mode, source, signal string
+	}{
+		{"rpc-limit", "RPC", "free-usage-limit-reported"},
+		{"rpc-limit-exit", "RPC", "free-usage-limit-reported"},
+		{"rpc-data-limit", "RPC", "free-usage-limit-reported"},
+		{"rpc-error", "RPC", "unknown"},
+		{"stderr-limit", "stderr", "free-usage-limit-reported"},
+		{"stderr-unknown", "stderr", "unknown"},
+		{"disconnect", "stderr", "unknown"},
+	} {
+		t.Run(test.mode, func(t *testing.T) {
+			t.Setenv("TAXION_FAKE_MODE", test.mode)
+			a := fakeAdapter(t, false)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			id, err := a.Start(ctx, "task")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := a.Send(ctx, id, "execute"); err != nil {
+				t.Fatal(err)
+			}
+			events, err := a.Events(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			unknownUsage := false
+			for event := range events {
+				if strings.Contains(event.Payload, "secret-provider-diagnostics") {
+					t.Fatal("raw provider details escaped")
+				}
+				switch event.Type {
+				case "acp_usage_unavailable":
+					unknownUsage = strings.Contains(event.Payload, "not zero/free/unlimited")
+				case runtime.EventTurnFinished, runtime.EventCancelled, runtime.EventUsage:
+					t.Fatal("failed prompt was misclassified", event)
+				case runtime.EventFailed:
+					want := test.source + " provider signal: " + test.signal
+					if !unknownUsage || !strings.Contains(event.Payload, want) ||
+						!strings.Contains(event.Payload, "details withheld") {
+						t.Fatal("failure lost signal source or unknown usage", event)
+					}
+					return
+				}
+			}
+			t.Fatal("no failure observed")
+		})
+	}
+}
+
+func TestDiagnosticStderrBoundsAndSplitWrites(t *testing.T) {
+	var stderr diagnosticStderr
+	for _, part := range []string{strings.Repeat("x", 8192), "Free usage ", "limit reached secret"} {
+		if n, err := stderr.Write([]byte(part)); err != nil || n != len(part) {
+			t.Fatal("stderr write failed", n, err)
+		}
+	}
+	if len(stderr.tail) != 4096 || stderr.signal() != "free-usage-limit-reported" {
+		t.Fatal("bounded stderr lost a split signal")
+	}
+	stderr.reset()
+	if stderr.signal() != "unknown" {
+		t.Fatal("a new request inherited the previous failure signal")
+	}
+	_, _ = stderr.Write([]byte(strings.Repeat("x", 8192)))
+	if stderr.signal() != "unknown" || len(stderr.tail) != 4096 {
+		t.Fatal("discarded evidence retained a stale classification")
 	}
 }
 

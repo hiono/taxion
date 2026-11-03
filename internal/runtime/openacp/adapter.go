@@ -43,7 +43,9 @@ type Config struct {
 type response struct {
 	Result json.RawMessage `json:"result"`
 	Error  *struct {
-		Code int `json:"code"`
+		Code    int             `json:"code"`
+		Message string          `json:"message"`
+		Data    json.RawMessage `json:"data"`
 	} `json:"error"`
 }
 
@@ -73,6 +75,7 @@ type Adapter struct {
 	stopped         bool
 	closed          bool
 	failure         error
+	stderr          diagnosticStderr
 	preservationErr error
 	turn            int64
 	turnDone        chan struct{}
@@ -175,7 +178,7 @@ func (a *Adapter) ConfigHash() string {
 	data, _ := json.Marshal(struct {
 		Adapter string `json:"adapter"`
 		Config
-	}{"openacp-isolated-v13", a.config})
+	}{"openacp-isolated-v14", a.config})
 	return hashBytes(data)
 }
 func (a *Adapter) ExecutionConfiguration() json.RawMessage {
@@ -362,7 +365,7 @@ func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 		return "", errors.Join(err, input.Close())
 	}
 	if cmd.Stderr == nil {
-		cmd.Stderr = io.Discard
+		cmd.Stderr = &a.stderr
 	}
 	if err := cmd.Start(); err != nil {
 		return "", errors.Join(err, input.Close(), output.Close())
@@ -451,25 +454,33 @@ func (a *Adapter) call(ctx context.Context, method string, params, result any) e
 	done := a.done
 	a.mu.Unlock()
 	defer func() { a.mu.Lock(); delete(a.pending, id); a.mu.Unlock() }()
+	a.stderr.reset()
 	if err := a.writeContext(ctx, map[string]any{"jsonrpc": "2.0", "id": number, "method": method, "params": params}); err != nil {
 		return err
 	}
+	var message response
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-done:
-		return fmt.Errorf("openacp: connection closed during %s", method)
-	case message := <-ch:
-		if message.Error != nil {
-			return fmt.Errorf("openacp: %s rejected (RPC code %d; server details withheld)", method, message.Error.Code)
+		// Prefer a received RPC response over a simultaneous process exit.
+		select {
+		case message = <-ch:
+		default:
+			return fmt.Errorf("openacp: connection closed during %s (stderr provider signal: %s; details withheld)", method, a.stderr.signal())
 		}
-		if result != nil {
-			if err := json.Unmarshal(message.Result, result); err != nil {
-				return fmt.Errorf("openacp: malformed %s response: %w", method, err)
-			}
-		}
-		return nil
+	case message = <-ch:
 	}
+	if message.Error != nil {
+		signal := providerSignal(message.Error.Message + " " + string(message.Error.Data))
+		return fmt.Errorf("openacp: %s rejected (RPC code %d; RPC provider signal: %s; server details withheld)", method, message.Error.Code, signal)
+	}
+	if result != nil {
+		if err := json.Unmarshal(message.Result, result); err != nil {
+			return fmt.Errorf("openacp: malformed %s response: %w", method, err)
+		}
+	}
+	return nil
 }
 
 func (a *Adapter) writeContext(ctx context.Context, message any) error {

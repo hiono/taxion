@@ -283,6 +283,20 @@ handoff が hold されている場合、hold は次の role を止めるだけ�
 元の受入れ条件まで確認する。具体的な入力は
 [観測と受入れのリファレンス](cli-reference.md#入力の観測と受入れ判定)に従う。
 
+## OpenCode ACP が応答前に停止した
+
+RPC の拒否では RPC code と `RPC provider signal`、応答のない切断では
+`stderr provider signal` を確認する。`free-usage-limit-reported` は既知の制限文面を
+受け取ったことを示し、`unknown` は取得できた範囲では分類できないことを示す。
+認証・通信・枯渇を推測せず、別の直接実行のエラーを過去の ACP 停止原因へ転記しない。
+標準エラーは末尾4096バイトだけをメモリで照合し、原文は表示・保存しない。
+
+これらの理由は既存の実行出力・`failed` 記録で確認できる。利用量欠落は
+`acp_usage_unavailable` であり、ゼロや無料とは扱わない。取消・期限切れはその理由を維持する。
+無料制限の報告だけを根拠に有料経路・別モデルへ切り替えたり、同じ停止を自動再送したりしない。
+部分成果と旧記録を保持し、必要な構成・費用・期限の差分を承認してから後続を用意する。
+過去の実証と今回の未実施範囲は [バックエンド別の確認記録](../develop/backend-acceptance.md)を参照する。
+
 ## lane が失敗した
 
 `taxion workflow lanes` は、いずれかの lane が失敗、取消、timeout になると execution gate を閉じる。診断には失敗した lane と redacted な理由が含まれる。
