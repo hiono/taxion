@@ -199,6 +199,8 @@ Distinguish Copilot from OpenCode Free and Go; choose Go balance requirements pe
 Free routes do not require Go balance. Keep outer-operator and Dispatch usage separate.
 config check --billing displays resolved settings for NEW proposals; it does not query a provider.
 For saved work, inspect its Task/Dispatch and Flow billing contract, not just current settings.
+config check --billing --task ID or --dispatch ID displays the saved policy after approval checks.
+It reads a workspace snapshot, does not migrate legacy guidance, and grants no execution authority.
 Do not switch billing modes, expand limits or infer approval to query an account.
 
 Bash completion: source <(taxion completion bash)

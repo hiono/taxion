@@ -81,8 +81,32 @@ taxion config check --sources
 未指定条件は既定として解決され、設定元一覧にない項目は明示設定ではありません。
 `verification` は `human-declaration-not-provider-verified` です。
 この表示はローカル設定の検査だけで、残量照会、モデル起動、提供元への設定変更を行いません。
-`--sources`・`--capabilities`・`--task`・`--dispatch`・`bind` とは併用しません。
-保存済み契約との照合には通常の `config check --task` または `--dispatch` を使います。
+`--sources`・`--capabilities`・`bind` とは併用しません。
+
+保存済み契約の方式を表示する場合は対象を明示します。
+
+```sh
+taxion config check --billing --task TASK_ID
+taxion config check --billing --dispatch DISPATCH_ID
+```
+
+現在の設定を既存の承認照合で確認した後、Task または不変の Dispatch 指示の
+`policy` を返します。Task で選んだ `account` を現在の新規提案用 `provider` に
+置換しません。`contractBasis` は `saved-task`／`saved-dispatch`、対象なしなら
+`new-proposal` です。保存契約の表示では、現在の設定元を保存ポリシーの由来と誤解しないよう
+`sources` を省略し、`policy.source` は保存値を維持します。
+現在の設定が保存承認と異なれば非ゼロ終了し、保存済みの条件も書き換えません。
+
+対象には既存の承認照合と同じ有効状態が必要です。終端・停止済みの契約の参照には
+`workflow show` などの保存表示を使います。旧契約に方式がなければ欠落として拒否し、
+新規提案の既定値を補いません。DB・WAL・SHM の一時コピーから読み、元ファイルは変更しません。
+残量・認証・契約資格を照会せず、モデルも起動しません。
+`executionAuthorized:false` であり、表示成功は実行許可や残量取得成功ではありません。
+
+OpenCode の Free／Go は `runtime.contractRef` に対応する操作者の契約確認から区別し、
+参照名だけで資格を保証しません。Go の Task で数値必須の `account` を選んだ場合、
+この表示は取得能力を追加しないため、未対応の残量観測を満たしたことにはできません。
+確認済みの `provider` 契約なら数値残量だけを理由に停止せず、既存の4条件と別途指定した上限を維持します。
 
 ## 実行中の扱い
 

@@ -27,7 +27,7 @@ func checkConfig(args []string, output io.Writer) error {
 	fs := flag.NewFlagSet("config "+args[0], flag.ContinueOnError)
 	sources := fs.Bool("sources", false, "show field origins without configuration values")
 	capabilities := fs.Bool("capabilities", false, "show adapter implementation coverage, not live access or eligibility")
-	showBilling := fs.Bool("billing", false, "show effective declared billing conditions and budget policy as JSON; does not read or change provider settings")
+	showBilling := fs.Bool("billing", false, "show declared billing and budget policy as JSON; --task or --dispatch selects saved policy; no provider read or change")
 	task := fs.String("task", "", "check the resolved configuration against this Task's recorded approval")
 	dispatch := fs.String("dispatch", "", "check both current Task approval and the saved Dispatch instruction")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -46,27 +46,69 @@ func checkConfig(args []string, output io.Writer) error {
 	if bind && (*dispatch == "" || *task != "") {
 		return fmt.Errorf("config bind requires --dispatch and does not accept --task")
 	}
-	if *showBilling && (bind || *sources || *capabilities || *task != "" || *dispatch != "") {
-		return fmt.Errorf("config check --billing shows new-proposal defaults; cannot combine with bind, --sources, --capabilities, --task or --dispatch")
+	if *showBilling && (bind || *sources || *capabilities) {
+		return fmt.Errorf("config check --billing cannot combine with bind, --sources or --capabilities")
 	}
 	resolved, err := resolveConfiguration()
 	if err != nil {
 		return err
 	}
 	if *showBilling {
-		policy, err := core.NewBillingBudgetGuidance(resolved.Config.Execution.BudgetGuidance, "", resolved.Config.Billing)
+		var policy *core.BudgetGuidancePolicy
+		basis, origins := "new-proposal", resolved.Sources
+		taskID := *task
+		if *task == "" && *dispatch == "" {
+			policy, err = core.NewBillingBudgetGuidance(resolved.Config.Execution.BudgetGuidance, "", resolved.Config.Billing)
+		} else {
+			if err := validateWorkspaceStorePath(); err != nil {
+				return err
+			}
+			db, done, err := openWorkspaceSnapshot(workspaceDBPath())
+			if err != nil {
+				return err
+			}
+			defer done()
+			if *dispatch != "" {
+				_, err = controller.CheckDispatchConfiguration(db, *dispatch, resolved.Config)
+			} else {
+				_, err = controller.CheckConfiguration(db, *task, resolved.Config)
+			}
+			if err != nil {
+				return err
+			}
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				return err
+			}
+			if *dispatch != "" {
+				recorded, _ := state.Graph.GraphDispatch(*dispatch)
+				policy, basis = recorded.Instruction.BudgetGuidance, "saved-dispatch"
+				taskID = recorded.TaskID
+			} else {
+				recorded, _ := state.Graph.GraphTask(*task)
+				policy, basis = recorded.BudgetGuidance, "saved-task"
+			}
+			if policy == nil {
+				return fmt.Errorf("config check --billing: saved contract has no budget guidance; new-proposal defaults were not applied")
+			}
+			origins = nil
+		}
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(output).Encode(struct {
-			Provider     string                     `json:"provider"`
-			Account      string                     `json:"account"`
-			ContractRef  string                     `json:"contractRef"`
-			Verification string                     `json:"verification"`
-			Policy       *core.BudgetGuidancePolicy `json:"policy"`
-			Sources      map[string]string          `json:"sources"`
+			Provider            string                     `json:"provider"`
+			Account             string                     `json:"account"`
+			ContractRef         string                     `json:"contractRef"`
+			Verification        string                     `json:"verification"`
+			Policy              *core.BudgetGuidancePolicy `json:"policy"`
+			Sources             map[string]string          `json:"sources,omitempty"`
+			ContractBasis       string                     `json:"contractBasis"`
+			TaskID              string                     `json:"taskId,omitempty"`
+			DispatchID          string                     `json:"dispatchId,omitempty"`
+			ExecutionAuthorized bool                       `json:"executionAuthorized"`
 		}{resolved.Config.Runtime.Provider, resolved.Config.Runtime.Account, resolved.Config.Runtime.ContractRef,
-			"human-declaration-not-provider-verified", policy, resolved.Sources})
+			"human-declaration-not-provider-verified", policy, origins, basis, taskID, *dispatch, false})
 	}
 	if *task != "" || *dispatch != "" {
 		db, err := openWorkspace()

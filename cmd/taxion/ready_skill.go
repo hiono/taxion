@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.21"
+const readySkillVersion = "1.3.22"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -304,7 +304,13 @@ OpenCode account quota is unsupported: preserve required checks rather than sile
 switching modes. Under provider-stop do not run runtime quota or require a number.
 That restriction concerns the worker contract, not an independently approved outer read.
 config check --billing displays resolved settings for NEW proposals, not a live
-provider balance or permission to change saved work. Do not switch billing modes,
+provider balance or permission to change saved work.
+For saved work, use config check --billing --task ID or --dispatch ID.
+These compare current settings with recorded approval, then display the saved
+budget policy from a read-only workspace snapshot, not proposal defaults.
+Missing legacy guidance is not upgraded. DB/WAL/SHM remain unchanged, no runtime
+starts, and executionAuthorized:false grants no execution or quota-read authority.
+Do not switch billing modes,
 expand limits or infer approval to query an account.
 Tool version and conversation
 reproducibility do not prove output quality. Check required capabilities and

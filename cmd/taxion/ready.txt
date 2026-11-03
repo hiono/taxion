@@ -409,6 +409,12 @@ switching modes. Under provider-stop do not run runtime quota or require a numbe
 That restriction concerns the worker contract, not an independently approved outer read.
 config check --billing displays resolved settings for NEW
 proposals, not the saved work's authorization or a live provider balance.
+For saved work, use config check --billing --task ID or --dispatch ID.
+These compare current settings with recorded approval, then display the saved
+budget policy, not current proposal defaults. They inspect a workspace snapshot
+without changing DB/WAL/SHM or starting a runtime. Legacy missing guidance is
+reported as missing, not upgraded. executionAuthorized:false is not permission
+to run. Policy source is saved; current configuration origins are not relabeled.
 Do not switch billing modes, expand limits or infer approval to query an account.
 
 Explain the repair count, deadline and session soft ceiling and record user authorization.
