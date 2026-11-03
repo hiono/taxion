@@ -29,6 +29,7 @@ form{margin-bottom:1.5rem}input{margin-right:.5rem;padding:.25rem .4rem}
 #msg{min-height:1.5em;font-weight:bold}</style>
 </head><body>
 <h1>Taxion Task Graph<span class="badge">localhost console</span></h1>
+<p>Ledger references are not verified quality acceptance. Model-free completion is a user-recorded claim, not independent validation. Use workflow evaluate --require-quality and the publication gate for saved same-target evidence.</p>
 <div id="msg"></div>
 <h2>Create task</h2>
 <form id="f-task"><input name="title" placeholder="title" required><input name="repo" placeholder="repo (required)" required><button>Create</button></form>

@@ -88,6 +88,7 @@ describe("localhost console (API-backed)", () => {
     assert.match(html, /<h2>Create task<\/h2>/);
     assert.match(html, /<h2>Dispatch task<\/h2>/);
     assert.match(html, /<h2>Bind review evidence<\/h2>/);
+    assert.match(html, /Model-free completion is a user-recorded claim, not independent validation/);
     assert.doesNotMatch(html, /Order —/);
   });
 

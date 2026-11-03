@@ -53,6 +53,10 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 Flow が `COMPLETED`、Reviewer が `SUCCEEDED` / `APPROVE` でも品質ゲートは未達になる。
 `workflow evaluate --id FLOW_ID --require-quality` の理由を先に読み、
 成功した実装・レビューを診断のために再実行しない。
+完了済み Flow の実行・公開ゲートにも評価の具体的な不足理由を表示する。
+`targetSha` / `targetTreeSha` は保存済みの対象であり、現在の Git の再検証結果ではない。
+命令形式4より前の成功結果も読めるが、Controller による検証・Git 証拠を
+要求しない形式だったため、それだけでは品質合格にしない。
 
 旧契約・結果・停止履歴を変更せず、品質ゲートの合格が必要な場合だけ、
 不足する条件を含む新契約と同一対象の独立レビューを承認する。

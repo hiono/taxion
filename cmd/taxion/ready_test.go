@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -88,6 +89,9 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 		if err := core.DecodeGraphInput(bytes.NewReader(examples[index][1]), target); err != nil {
 			t.Fatal("ready recipe no longer matches CLI input", index, err)
 		}
+	}
+	if !slices.Contains(intake.Task.Acceptance, core.DocumentationAcceptance) {
+		t.Fatal("ready recipe omits the required documentation-consistency contract")
 	}
 	intake.Task.Repo = resolved.Config.Repository.Path
 	intake.Task.Worktree = root
@@ -210,9 +214,11 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 					result.WorktreeChanged = &changed
 					result.ReviewVerdict, result.NextTransition = "APPROVE", core.Approved
 					result.Findings = []core.DispatchFinding{}
-					result.Acceptance = []core.DispatchAcceptance{{
-						Criterion: dispatch.Instruction.Acceptance[0], Status: "PASS", Evidence: []string{"work-report"},
-					}}
+					for _, criterion := range dispatch.Instruction.Acceptance {
+						result.Acceptance = append(result.Acceptance, core.DispatchAcceptance{
+							Criterion: criterion, Status: "PASS", Evidence: []string{"work-report"},
+						})
+					}
 				}
 				body, err := json.Marshal(result)
 				if err != nil {
@@ -260,5 +266,22 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &budget); err != nil || budget.StateChanged ||
 		len(budget.Stages) == 0 || budget.Budget.StagePlan == nil || len(budget.Continuation.RemainingAcceptance) != 0 {
 		t.Fatal("ready budget recipe lost saved observations", err)
+	}
+	output.Reset()
+	if err := workflowCommand(t.Context(), []string{"evaluate", "--id", flow.ID, "--require-quality"}, &output); err != nil {
+		t.Fatal("ready recipe completed without satisfying saved quality requirements", err)
+	}
+	var quality controller.FlowEvaluation
+	if err := json.Unmarshal(output.Bytes(), &quality); err != nil || quality.QualityGate != "RECORDED_PASS" ||
+		quality.TargetSHA != reviewer.Result.OutputSHA || quality.TargetTreeSHA != reviewer.Result.OutputTreeSHA {
+		t.Fatal("CLI quality evaluation lost same-target acceptance", quality, err)
+	}
+	output.Reset()
+	if err := gateCommand([]string{"publication", "--flow", flow.ID, "--json"}, &output); err != nil {
+		t.Fatal("ready recipe did not reach the publication gate", err)
+	}
+	var gate controller.GateReport
+	if err := json.Unmarshal(output.Bytes(), &gate); err != nil || gate.Verdict != controller.GateVerdictPass || gate.StateChanged {
+		t.Fatal("publication gate did not preserve the quality observation", gate, err)
 	}
 }

@@ -2,7 +2,9 @@ package controller
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -63,7 +65,19 @@ func TestFlowEvaluationRequiresDocumentedSameTargetAcceptance(t *testing.T) {
 				!bytes.Equal(before, mustFlowJSON(t, state.Graph)) {
 				t.Fatal("evaluation changed state or misclassified quality/cost", report, err)
 			}
-			for _, mutation := range []string{"missing", "unavailable", "partial", "overflow", "duplicate", "changed-target"} {
+			task, _ := state.Graph.GraphTask(flow.TaskID)
+			if report.TargetSHA != task.TargetSHA || report.TargetTreeSHA != task.TargetTreeSHA || report.TargetTreeSHA == "" {
+				t.Fatal("evaluation omitted its reviewed target", report)
+			}
+			publication, err := PublicationGateReport(state.Graph, flow.ID)
+			if err != nil || (publication.Verdict == GateVerdictPass) != report.CostComparisonEligible {
+				t.Fatal("publication disagrees with saved quality evidence", publication, err)
+			}
+			if criterion != core.DocumentationAcceptance &&
+				!strings.Contains(publication.BlockingConditions[0].Message, "documentation-consistency criterion") {
+				t.Fatal("publication hid the actual missing contract condition", publication)
+			}
+			for _, mutation := range []string{"missing", "unavailable", "partial", "overflow", "duplicate", "changed-target", "missing-command", "failed-command", "missing-acceptance", "legacy-result"} {
 				t.Run(mutation, func(t *testing.T) {
 					var graph core.TaskGraph
 					if err := json.Unmarshal(before, &graph); err != nil {
@@ -88,11 +102,38 @@ func TestFlowEvaluationRequiresDocumentedSameTargetAcceptance(t *testing.T) {
 						}
 					case "changed-target":
 						graph.Dispatches[len(graph.Dispatches)-1].Result.OutputTreeSHA = strings.Repeat("b", 40)
+					case "missing-command":
+						graph.Dispatches[len(graph.Dispatches)-1].Result.Validations = nil
+					case "failed-command":
+						graph.Dispatches[len(graph.Dispatches)-1].Result.Validations[0].ExitCode = 1
+					case "missing-acceptance":
+						graph.Dispatches[len(graph.Dispatches)-1].Result.Acceptance = nil
+					case "legacy-result":
+						for index := range graph.Dispatches {
+							d := &graph.Dispatches[index]
+							d.Instruction.Version = 3
+							data, err := json.Marshal(d.Instruction)
+							if err != nil {
+								t.Fatal(err)
+							}
+							d.InstructionHash = fmt.Sprintf("%x", sha256.Sum256(data))
+							d.Result.GitEvidence = nil
+						}
 					}
 					got, err := EvaluateReviewFlow(graph, flow.ID)
-					if mutation == "changed-target" {
+					if mutation == "changed-target" || mutation == "missing-command" ||
+						mutation == "failed-command" || mutation == "missing-acceptance" {
 						if err == nil {
-							t.Fatal("accepted stale review target")
+							t.Fatal("accepted incomplete or failed same-target quality evidence")
+						}
+						gate, gateErr := PublicationGateReport(graph, flow.ID)
+						if gateErr == nil && gate.Verdict == GateVerdictPass {
+							t.Fatal("invalid quality evidence passed publication")
+						}
+					} else if mutation == "legacy-result" {
+						if err != nil || got.QualityGate != "UNMET" || got.CostComparisonEligible ||
+							!strings.Contains(strings.Join(got.Unmet, " "), "predates controller-observed") {
+							t.Fatal("legacy self-report became verified acceptance", got, err)
 						}
 					} else if mutation == "unavailable" {
 						if err != nil || got.InputOutputTokens != nil || got.TokenStatus != "unavailable" {

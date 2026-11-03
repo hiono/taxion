@@ -325,3 +325,39 @@ PR #252 は `646d68157697dcac6b59138a18f7bf5d36cdd7a9` として統合した。
 #90 の行動・費用改善、その他の継続改善は未達条件を保ったまま追跡する。
 今回の共通受入れに必要な代表ケースと、任意形式・全役割を自動解釈する構想を区別する。
 正式版の公開完了は、別途そのタグの全配布処理と公開物を照合して判断する。
+
+## 対象に結び付いた品質完了（Issue #221）
+
+v0.7.21 からの後続変更。実行コードの受入れ、入力診断、利用者申告の完了、
+品質ゲート、公開承認を分ける。採用判断と実行順は
+[ADR-0067](adr/0067-prioritize-target-bound-quality-evidence.md)に記録する。
+同版の配布成功を、この後続変更の配布済み証拠には使わない。
+
+`ready` の新規契約例は必須文書整合条件を含める。
+`workflow evaluate` は保存済みの対象 SHA / tree を表示し、
+古い形式の自己申告だけでは品質合格にしない。公開ゲートは同じ評価の不足理由を伝える。
+旧契約、結果、停止記録の移行や自動再送は行わない。
+
+| 受入れ条件・経路 | 確認する証拠 |
+|---|---|
+| 通常の実装・同一 tree の独立レビュー・公開ゲート | `TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner`。実 CLI の契約例を読み、実 Git・実コマンド・保存グラフ・独立した模擬 Reviewer で `--require-quality` と公開ゲートまで確認 |
+| 持込み入力の失敗拒否・成功受理 | `TestArtifactValidationStopsBeforeAnyModelOnFailureOrDrift` / `TestArtifactInputReachesIndependentReviewWithoutCoder`。検証失敗・検証中の対象変更でモデルを発行せず、正常入力は Coder なしで独立レビューへ進む |
+| 保存レビューの正式受理 | `TestSavedReviewFinalizationRejoinsNormalValidationAfterRunnerLoss`。旧結果を捏造せず通常の Controller 検証へ再接続 |
+| コマンド・対象・受入れの欠落や失敗 | `TestFlowEvaluationRequiresDocumentedSameTargetAcceptance`。欠落、非ゼロ終了、古い tree、受入れ欠落をグラフ検査で拒否。文書条件不足の理由が公開ゲートまで伝わる |
+| 旧形式の結果と現在の検証証拠の区別 | 同試験の `legacy-result`。形式3の結果は読取り互換性を保ち、検証済み品質・費用比較適格にはしない |
+| 利用者申告の完了 | `TestModelFreeVerificationCanBeConfirmedAndCompletedWithoutRuntime` / `TestModelFreeVerificationCompletesThroughCLIWithoutRuntime`。モデルなしの記録は可能だが、Dispatch・Flow・品質合格・公開ゲートを生成しない |
+| 必須条件ごとの根拠、独立性、作業場所の変更拒否 | `TestReviewerDispatchResultValidatesAcceptanceFindingsAndWorktree` と `TestDocumentationAcceptanceCannotBeCompensatedByOtherPasses`。一つの未達を他の合格で補わない |
+| Controller による実コマンドと対象束縛 | `TestControllerPersistsObservedValidationFailure`、`TestControllerExecutesOnlyAuthorizedValidation`、`TestVerifyRejectsRepositoryScopeAndValidationMismatch`。実行しなかった検証や worker の成功文だけでは受理しない |
+| Web での表示 | `web/test/server.test.ts`。台帳・参照と検証済み品質、モデルなしの利用者申告を区別して表示 |
+
+外部側の実モデルを含む製品フローの確認範囲は、前節の RC16 に対する操作者報告である。
+独立レビューと元の作業は完了したが、旧契約の品質ゲート未達は保持する。
+今回追加する CLI の正例・反例はローカルの結合試験であり、
+外部台帳を直接検査した結果や、全構成の実モデル・実ブラウザ受入れとは数えない。
+
+ブラウザなどの必須検証は承認済みコマンドとして対象の SHA / tree に束縛する。
+ここで確認するのは実行・非ゼロ終了・欠落・対象変更を扱う共通経路であり、
+ブラウザ能力そのものや未指定のテストの十分性は保証しない。
+実ブラウザの対応構成・隔離・受入れは #226 の未達条件を保持する。
+レビューの意味上の正しさと見逃し率、提供元の完全な会計や費用改善も未測定である。
+各試験の結果と正確な候補の CI は、この後続変更の PR に対応付けて判断する。

@@ -12,6 +12,8 @@ import (
 // FlowEvaluation reports saved evidence, not an independent judgment or reward.
 type FlowEvaluation struct {
 	FlowID                 string              `json:"flowId"`
+	TargetSHA              string              `json:"targetSha,omitempty"`
+	TargetTreeSHA          string              `json:"targetTreeSha,omitempty"`
 	QualityGate            string              `json:"qualityGate"`
 	CostComparisonEligible bool                `json:"costComparisonEligible"`
 	ReviewPurpose          string              `json:"reviewPurpose,omitempty"`
@@ -68,6 +70,8 @@ func EvaluateReviewFlow(graph core.TaskGraph, id string) (FlowEvaluation, error)
 		return FlowEvaluation{}, err
 	}
 	report.Budget = &budget
+	task, _ := graph.GraphTask(flow.TaskID)
+	report.TargetSHA, report.TargetTreeSHA = task.TargetSHA, task.TargetTreeSHA
 	if flow.Status != "COMPLETED" {
 		report.Unmet = append(report.Unmet, "Flow has not completed with independent same-target acceptance.")
 	}
@@ -83,6 +87,9 @@ func EvaluateReviewFlow(graph core.TaskGraph, id string) (FlowEvaluation, error)
 		if dispatch.Result != nil {
 			entry.OutputSHA, entry.OutputTreeSHA = dispatch.Result.OutputSHA, dispatch.Result.OutputTreeSHA
 			report.ExecutionObservations += len(dispatch.Result.ExecutionEvidence)
+			if dispatch.Status == core.DispatchSucceeded && dispatch.Instruction.Version < 4 {
+				report.Unmet = append(report.Unmet, fmt.Sprintf("Dispatch %s predates controller-observed validation and Git evidence; legacy results are readable but not verified quality acceptance.", dispatch.ID))
+			}
 		}
 		report.Dispatches = append(report.Dispatches, entry)
 		if len(dispatch.RuntimeUsage) == 0 {
