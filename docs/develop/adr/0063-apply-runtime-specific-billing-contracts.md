@@ -60,6 +60,11 @@ PR #235 後の開発版では、保存済み `account` Dispatch 向けの `runti
 
 ## References
 
+保存契約の表示に関する後続は [ADR-0069](0069-show-saved-task-billing-policy.md) と
+[課金判断の確認記録](../billing-validation.md)を参照する。
+`config check --billing --task ID`／`--dispatch ID` は保存方式を表示するが、
+OpenCode の残量取得能力や実契約の受入れを追加するものではない。
+
 - [ADR-0051](0051-centralize-declared-billing-conditions.md): 共通の課金判定
 - [ADR-0059](0059-treat-copilot-fusion-as-provider-routing.md): Fusion 対応
 - [ADR-0060](0060-use-remaining-plan-quota-on-final-workday.md): 最終稼働日の利用枠

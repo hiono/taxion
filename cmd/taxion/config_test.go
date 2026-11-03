@@ -277,6 +277,129 @@ execution:
 	}
 }
 
+func TestBillingReportUsesSavedTaskAndDispatchPolicyWithoutMutation(t *testing.T) {
+	for _, test := range []struct {
+		name, provider, contract, mode string
+	}{
+		{"copilot-account", "copilot", "account-contract", "account"},
+		{"opencode-free", "opencode", "verified-free-route", "provider"},
+		{"opencode-go-account", "opencode", "go-contract", "account"},
+		{"opencode-go-provider", "opencode", "go-contract", "provider"},
+		{"legacy", "copilot", "legacy-contract", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root, _ := requestFixture(t)
+			t.Setenv("TAXION_EXECUTION_BUDGET_GUIDANCE", "provider")
+			t.Setenv("TAXION_RUNTIME_CONTRACT_REF", test.contract)
+			t.Setenv("TAXION_RUNTIME_PROVIDER", test.provider)
+			t.Setenv("TAXION_BILLING_CONTRACT", "provider-limit")
+			t.Setenv("TAXION_BILLING_OVERAGE", "denied")
+			t.Setenv("TAXION_BILLING_AUTO_RECHARGE", "disabled")
+			t.Setenv("TAXION_BILLING_PAID_FALLBACK", "disabled")
+			if test.provider == "opencode" {
+				t.Setenv("TAXION_RUNTIME_ACCOUNT", "opencode-managed")
+				t.Setenv("TAXION_RUNTIME_CREDENTIAL_REF", "opencode-managed")
+				t.Setenv("TAXION_RUNTIME_ACP_COMMAND", "/not-executed/opencode")
+				t.Setenv("TAXION_RUNTIME_ACP_CONFIG", "/not-read/opencode.json")
+				t.Setenv("TAXION_RUNTIME_ACP_CONFIG_HASH", "sha256:"+strings.Repeat("a", 64))
+			}
+			selected, err := resolveConfiguration()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var policy *core.BudgetGuidancePolicy
+			if test.mode != "" {
+				policy, err = core.NewBillingBudgetGuidance("", test.mode, selected.Config.Billing)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			approval, err := json.Marshal(config.Approval{
+				Kind: config.ApprovalKind, TaskID: "billing-task", Reason: "explicit Task billing choice",
+				Allowed: []config.Config{selected.Config},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := updateWorkspace(func(state *store.Workspace) error {
+				state.HasGraph, state.Graph = true, core.TaskGraph{Version: 1}
+				task := core.GraphTask{
+					ID: "billing-task", Title: "billing", Repo: selected.Config.Repository.Path,
+					Type: "IMPLEMENTATION", Issue: "Issue #234", Status: core.Draft,
+					Owner: "CODER", Reviewer: "REVIEWER", CreatedFrom: "human:billing",
+					Objective: "inspect approved billing", Scope: []string{"README.md"},
+					Acceptance: []string{"verified"}, RequiredEvidence: []string{"report"},
+					ValidationCommands: []string{"go test ./..."}, ExitCondition: "verified",
+					Worktree: root, Branch: "work/request", BaselineSHA: strings.Repeat("a", 40),
+					AuthorizationID: selected.Config.Execution.ApprovalRef,
+					Decisions: []core.TaskDecision{{ID: selected.Config.Execution.ApprovalRef,
+						Source: "human:billing", Text: string(approval)}},
+					BudgetGuidance: policy,
+				}
+				state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{ID: task.ID, Title: task.Title, Repo: task.Repo})
+				if err := state.Graph.Track(task, "human", "record billing choice"); err != nil {
+					return err
+				}
+				if err := state.Graph.Transition(task.ID, core.Ready, "human", "ready", core.TransitionProof{}); err != nil {
+					return err
+				}
+				dispatch, err := core.NewGraphDispatch(state.Graph, "billing-dispatch", task.ID, task.Repo, core.RelationshipNone, "", "")
+				if err != nil {
+					return err
+				}
+				state.Ledger.Dispatches = append(state.Ledger.Dispatches, core.Dispatch{
+					ID: dispatch.ID, TaskID: dispatch.TaskID, Repo: dispatch.Repository, Active: true, CreatedAt: dispatch.CreatedAt,
+				})
+				return state.Graph.IssueDispatch(dispatch, "controller", "issue")
+			}); err != nil {
+				t.Fatal(err)
+			}
+			db, err := openWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			before := snapshotFiles(t, filepath.Dir(workspaceDBPath()))
+			for _, target := range []string{"task", "dispatch"} {
+				id := "billing-" + target
+				var output bytes.Buffer
+				err := checkConfig([]string{"check", "--billing", "--" + target, id}, &output)
+				if test.mode == "" {
+					if err == nil || !strings.Contains(err.Error(), "defaults were not applied") || output.Len() != 0 {
+						t.Fatal("legacy contract was silently upgraded", err, output.String())
+					}
+					continue
+				}
+				var report struct {
+					ContractBasis, Provider, ContractRef, Verification string
+					TaskID, DispatchID                                 string
+					Policy                                             *core.BudgetGuidancePolicy
+					Sources                                            map[string]string
+					ExecutionAuthorized                                bool
+				}
+				if err != nil || json.Unmarshal(output.Bytes(), &report) != nil ||
+					report.ContractBasis != "saved-"+target || report.Provider != test.provider ||
+					report.TaskID != "billing-task" || (report.DispatchID != "") != (target == "dispatch") ||
+					report.ContractRef != test.contract || !reflect.DeepEqual(report.Policy, policy) ||
+					len(report.Sources) != 0 || report.ExecutionAuthorized ||
+					report.Verification != "human-declaration-not-provider-verified" ||
+					strings.Contains(output.String(), "credentialRef") {
+					t.Fatal("saved Task policy was replaced by defaults or overstated verification", err, output.String())
+				}
+				t.Setenv("TAXION_BILLING_PAID_FALLBACK", "unknown")
+				output.Reset()
+				if err := checkConfig([]string{"check", "--billing", "--" + target, id}, &output); err == nil || output.Len() != 0 {
+					t.Fatal("changed billing reused saved authorization", err, output.String())
+				}
+				t.Setenv("TAXION_BILLING_PAID_FALLBACK", "disabled")
+			}
+			if !reflect.DeepEqual(before, snapshotFiles(t, filepath.Dir(workspaceDBPath()))) {
+				t.Fatal("billing report changed database, WAL, SHM or other workspace files")
+			}
+		})
+	}
+}
+
 func TestConfigCheckReportsExplicitEndpointIdentity(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Chdir(t.TempDir())
