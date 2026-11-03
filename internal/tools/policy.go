@@ -25,12 +25,15 @@ type Asset struct {
 // MCPTool exposes one fixed request to a trusted local server. The server's
 // process is approved host code, not sandboxed by SDK permission callbacks.
 type MCPTool struct {
-	Name      string          `json:"name"`
-	Command   Asset           `json:"command"`
-	Args      []string        `json:"args"`
-	Inputs    []Asset         `json:"inputs,omitempty"`
-	Tool      string          `json:"tool"`
-	Arguments json.RawMessage `json:"arguments"`
+	Name          string          `json:"name"`
+	Command       Asset           `json:"command"`
+	Args          []string        `json:"args"`
+	Inputs        []Asset         `json:"inputs,omitempty"`
+	Tool          string          `json:"tool"`
+	Arguments     json.RawMessage `json:"arguments"`
+	CredentialRef string          `json:"credentialRef,omitempty"`
+	OperationID   string          `json:"operationId,omitempty"`
+	ExpiresAt     string          `json:"expiresAt,omitempty"`
 }
 
 type Policy struct {
@@ -152,6 +155,9 @@ func (p Policy) CheckShape() error {
 	}
 	names := map[string]bool{}
 	for _, tool := range p.MCP {
+		if err := tool.checkBrokerShape(); err != nil {
+			return err
+		}
 		if !validName(tool.Name) || !strings.HasPrefix(tool.Name, "mcp_") || !validName(tool.Tool) || names[tool.Name] {
 			return fmt.Errorf("taxion: MCP requires unique nonreserved exact tool names")
 		}

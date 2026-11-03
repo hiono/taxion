@@ -217,6 +217,21 @@ func New(config Config) (*Adapter, error) {
 			return nil, err
 		}
 		config.ToolPolicy = config.ToolPolicy.Clone()
+		if config.ToolPolicy.HasBroker() {
+			if config.AuthorizeTools == nil || len(config.AvailableTools) != 0 ||
+				len(config.ToolPolicy.Skills)+len(config.ToolPolicy.Plugins) != 0 || config.ToolPolicy.RTK != nil ||
+				config.ManagedCommit != nil || config.ManagedSearch != nil || config.ManagedReviewProgress != nil {
+				return nil, fmt.Errorf("taxion: credential broker requires controller authorization and an operations-only role")
+			}
+			for _, tool := range config.ToolPolicy.MCP {
+				if tool.CredentialRef == "" {
+					return nil, fmt.Errorf("taxion: credential broker cannot share a role with ordinary MCP tools")
+				}
+			}
+			if err := config.ToolPolicy.CheckBrokerCredentials(); err != nil {
+				return nil, err
+			}
+		}
 		for _, tool := range config.ToolPolicy.MCP {
 			if slices.Contains(config.AvailableTools, tool.Name) {
 				return nil, fmt.Errorf("taxion: approved MCP name conflicts with an existing tool")
@@ -267,10 +282,14 @@ func New(config Config) (*Adapter, error) {
 		// Construct offline so safe stop can record cancellation before attempting
 		// attachment, even when the saved credential is no longer available.
 		credentialErr = configureCredential(options, selected.Runtime.CredentialRef)
+		if strings.HasPrefix(strings.ToUpper(selected.Runtime.CredentialRef), "ENV:TAXION_BROKER_") {
+			return nil, fmt.Errorf("taxion: broker credentials cannot authenticate the model runtime")
+		}
 	}
 	if options.Env == nil {
 		options.Env = os.Environ()
 	}
+	options.Env = tools.WithoutBrokerCredentials(options.Env)
 	return &Adapter{
 		config:        config,
 		client:        sdk.NewClient(options),
@@ -310,49 +329,51 @@ func (a *Adapter) ConfigHash() string {
 		}
 	}
 	data, _ := json.Marshal(struct {
-		Role                  string
-		SystemPrompt          string
-		WorkingDirectory      string
-		CLIPath               string
-		BaseDirectory         string
-		AvailableTools        []string
-		FileAccess            *core.FileAccessPolicy     `json:",omitempty"`
-		BudgetGuidance        *core.BudgetGuidancePolicy `json:",omitempty"`
-		TrackedFiles          []string                   `json:",omitempty"`
-		ResponseSchema        map[string]any
-		PermissionPolicy      string
-		ManagedCommit         *runtime.ManagedCommit         `json:",omitempty"`
-		ManagedSearch         *runtime.ManagedSearch         `json:",omitempty"`
-		ManagedReviewProgress *runtime.ManagedReviewProgress `json:",omitempty"`
-		ManagedCommitPolicy   string                         `json:",omitempty"`
-		Configuration         json.RawMessage                `json:",omitempty"`
-		MaxAICredits          float64                        `json:",omitempty"`
-		ToolPolicy            *tools.Policy                  `json:",omitempty"`
-		DiscoveryPolicy       string                         `json:",omitempty"`
-		BuiltinMCPPolicy      string
-		DisabledSkills        []string `json:",omitempty"`
+		Role                   string
+		SystemPrompt           string
+		WorkingDirectory       string
+		CLIPath                string
+		BaseDirectory          string
+		AvailableTools         []string
+		FileAccess             *core.FileAccessPolicy     `json:",omitempty"`
+		BudgetGuidance         *core.BudgetGuidancePolicy `json:",omitempty"`
+		TrackedFiles           []string                   `json:",omitempty"`
+		ResponseSchema         map[string]any
+		PermissionPolicy       string
+		ManagedCommit          *runtime.ManagedCommit         `json:",omitempty"`
+		ManagedSearch          *runtime.ManagedSearch         `json:",omitempty"`
+		ManagedReviewProgress  *runtime.ManagedReviewProgress `json:",omitempty"`
+		ManagedCommitPolicy    string                         `json:",omitempty"`
+		Configuration          json.RawMessage                `json:",omitempty"`
+		MaxAICredits           float64                        `json:",omitempty"`
+		ToolPolicy             *tools.Policy                  `json:",omitempty"`
+		DiscoveryPolicy        string                         `json:",omitempty"`
+		BuiltinMCPPolicy       string
+		BrokerCredentialPolicy string
+		DisabledSkills         []string `json:",omitempty"`
 	}{
-		Role:                  a.config.Role,
-		SystemPrompt:          a.config.SystemPrompt,
-		WorkingDirectory:      a.config.WorkingDirectory,
-		CLIPath:               a.config.CLIPath,
-		BaseDirectory:         a.config.BaseDirectory,
-		AvailableTools:        a.config.AvailableTools,
-		FileAccess:            a.config.FileAccess,
-		BudgetGuidance:        a.config.BudgetGuidance,
-		TrackedFiles:          a.config.TrackedFiles,
-		ResponseSchema:        a.config.ResponseSchema,
-		PermissionPolicy:      permissionPolicy,
-		ManagedCommit:         a.config.ManagedCommit,
-		ManagedSearch:         a.config.ManagedSearch,
-		ManagedReviewProgress: a.config.ManagedReviewProgress,
-		ManagedCommitPolicy:   managedCommitPolicy,
-		Configuration:         a.config.Configuration,
-		MaxAICredits:          a.config.MaxAICredits,
-		ToolPolicy:            a.config.ToolPolicy,
-		DiscoveryPolicy:       discoveryPolicy,
-		BuiltinMCPPolicy:      "disabled-per-process-v1",
-		DisabledSkills:        a.disabledSkills(),
+		Role:                   a.config.Role,
+		SystemPrompt:           a.config.SystemPrompt,
+		WorkingDirectory:       a.config.WorkingDirectory,
+		CLIPath:                a.config.CLIPath,
+		BaseDirectory:          a.config.BaseDirectory,
+		AvailableTools:         a.config.AvailableTools,
+		FileAccess:             a.config.FileAccess,
+		BudgetGuidance:         a.config.BudgetGuidance,
+		TrackedFiles:           a.config.TrackedFiles,
+		ResponseSchema:         a.config.ResponseSchema,
+		PermissionPolicy:       permissionPolicy,
+		ManagedCommit:          a.config.ManagedCommit,
+		ManagedSearch:          a.config.ManagedSearch,
+		ManagedReviewProgress:  a.config.ManagedReviewProgress,
+		ManagedCommitPolicy:    managedCommitPolicy,
+		Configuration:          a.config.Configuration,
+		MaxAICredits:           a.config.MaxAICredits,
+		ToolPolicy:             a.config.ToolPolicy,
+		DiscoveryPolicy:        discoveryPolicy,
+		BuiltinMCPPolicy:       "disabled-per-process-v1",
+		BrokerCredentialPolicy: "host-only-env-v1",
+		DisabledSkills:         a.disabledSkills(),
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -862,6 +883,19 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 				if permission.ToolName == tool.Name {
 					decision = &rpc.PermissionDecisionApproveOnce{}
 				}
+			}
+		}
+		if a.config.ToolPolicy != nil && a.config.ToolPolicy.HasBroker() {
+			allowed := false
+			if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
+				(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
+				for _, tool := range a.config.ToolPolicy.MCP {
+					allowed = allowed || permission.ToolName == tool.Name
+				}
+			}
+			if !allowed {
+				reason := "Credential broker roles permit only exact approved operations"
+				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
 			}
 		}
 		if handle, err := a.lookup(invocation.SessionID); err == nil {

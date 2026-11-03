@@ -386,6 +386,12 @@ RTK 自身の stdout・stderr・exit status も原本として保存する。
 各 role policy は `skills`、`plugins`、`mcp`、`rtk`、`compressionFilter`、
 `evidenceDirectory`、`allowPublication` を保持する。
 MCP binding は `name`、`command`、`args`、`inputs`、`tool`、`arguments` を固定する。
+認証付きの操作専用役割では、`credentialRef`、`operationId`、`expiresAt` を追加する。
+この opt-in は専用環境変数の host 側仲介、一回限りの試行記録、応答内容の非返却を使い、
+通常 MCP の原本保存とは区別する。role の他 tool・skill と混在させない。
+具体的な入力、取消・結果不明の復旧、未対応 runtime と信頼境界は
+[認証付き操作の手順](../userguide/credential-broker.md)と
+[ADR-0070](adr/0070-mediate-exact-credentialed-operations.md)を参照する。
 この JSON を Task decision の `text` に保存し、decision の `source` に利用者の判断の出典を記録する。
 通常の Task 承認・発行手順は [Task Graph reference](task-graph.md) に従う。
 tools を使った Task の公開には `allowPublication: true` の明示承認を必要とする。

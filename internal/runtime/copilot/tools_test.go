@@ -11,11 +11,77 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	sdk "github.com/github/copilot-sdk/go"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/tools"
 )
+
+func TestBrokerRoleKeepsHostSecretOutsideSDKAndDeniesOtherTools(t *testing.T) {
+	config := toolsConfig(t)
+	config.Role = "CODER"
+	config.AvailableTools = nil
+	config.ToolPolicy.Skills, config.ToolPolicy.Plugins = nil, nil
+	binding := &config.ToolPolicy.MCP[0]
+	binding.CredentialRef = "env:TAXION_BROKER_TEST"
+	binding.OperationID = "synthetic-mail"
+	binding.ExpiresAt = time.Now().Add(time.Minute).UTC().Format(time.RFC3339)
+	config.AuthorizeTools = func(context.Context, string) error { return errors.New("approval revoked") }
+	t.Setenv("TAXION_BROKER_TEST", "synthetic-host-only-canary")
+	adapter, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	for _, entry := range adapter.environment {
+		if strings.Contains(entry, "TAXION_BROKER_") || strings.Contains(entry, "synthetic-host-only-canary") {
+			t.Fatal("broker secret inherited by model process")
+		}
+	}
+	create, resume := adapter.sessionConfig(nil), adapter.resumeConfig(nil)
+	if *create.EnableConfigDiscovery || *create.EnableFileHooks || *create.EnableSkills ||
+		!reflect.DeepEqual(create.AvailableTools, resume.AvailableTools) ||
+		len(create.AvailableTools) != 1 || create.AvailableTools[0] != binding.Name {
+		t.Fatal("broker acquired native tools, hooks or skills")
+	}
+	for _, request := range []sdk.PermissionRequest{
+		&sdk.PermissionRequestRead{Path: filepath.Join(config.WorkingDirectory, "secret")},
+		&sdk.PermissionRequestShell{FullCommandText: "printenv"},
+		&sdk.PermissionRequestCustomTool{ToolName: "skill"},
+		&sdk.PermissionRequestCustomTool{ToolName: "mcp_send_to_attacker"},
+	} {
+		decision, err := create.OnPermissionRequest(request, sdk.PermissionInvocation{})
+		if err != nil || string(decision.Kind()) == "approve-once" {
+			t.Fatal("injected non-operation permission granted", err)
+		}
+	}
+	adapter.sessions["broker-session"] = &managedSession{
+		sdk: &sdk.Session{}, busy: true, watchers: map[*subscription]struct{}{},
+	}
+	defer delete(adapter.sessions, "broker-session")
+	_, err = create.Tools[0].Handler(sdk.ToolInvocation{
+		ToolName: binding.Name, SessionID: "broker-session", TraceContext: t.Context(),
+		Arguments: map[string]any{"source": "synthetic"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "approval revoked") {
+		t.Fatal("revoked controller authorization reached trusted server", err)
+	}
+	config.AuthorizeTools = nil
+	if _, err := New(config); err == nil {
+		t.Fatal("broker constructed without controller authorization")
+	}
+	config.AuthorizeTools = func(context.Context, string) error { return nil }
+	config.AvailableTools = []string{"bash"}
+	if _, err := New(config); err == nil {
+		t.Fatal("broker shared a shell-capable role")
+	}
+	config.AvailableTools = nil
+	config.ToolPolicy.MCP[0].Arguments = json.RawMessage(`{"secret":"synthetic-host-only-canary"}`)
+	if _, err := New(config); err == nil {
+		t.Fatal("literal broker credential entered a model-visible tool schema")
+	}
+}
 
 func toolsConfig(t *testing.T) Config {
 	t.Helper()
