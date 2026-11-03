@@ -1,6 +1,7 @@
 package openacp
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -16,7 +17,16 @@ import (
 )
 
 func TestPlannedControllerReceivesAsynchronousACPResponse(t *testing.T) {
-	t.Setenv("TAXION_FAKE_MODE", "delayed")
+	for _, mode := range []string{"delayed", "rpc-limit", "stderr-limit"} {
+		t.Run(mode, func(t *testing.T) {
+			testPlannedControllerResponse(t, mode)
+		})
+	}
+}
+
+func testPlannedControllerResponse(t *testing.T, mode string) {
+	t.Helper()
+	t.Setenv("TAXION_FAKE_MODE", mode)
 	guidance, err := core.NewBillingBudgetGuidance("", "provider", core.BillingSettings{})
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +108,39 @@ func TestPlannedControllerReceivesAsynchronousACPResponse(t *testing.T) {
 	}
 	if err := control.Send(ctx, id, "execute"); err != nil {
 		t.Fatal(err)
+	}
+	if mode != "delayed" {
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			t.Fatal(err)
+		}
+		dispatch, _ := state.Graph.GraphDispatch(id)
+		var output bytes.Buffer
+		err = control.StreamEvents(ctx, dispatch, 0, &output, nil)
+		if err == nil || !strings.Contains(err.Error(), "free-usage-limit-reported") ||
+			strings.Contains(output.String()+err.Error(), "secret-provider-diagnostics") {
+			t.Fatal("Controller lost the safe failure signal", err)
+		}
+		state, err = db.LoadWorkspace()
+		if err != nil {
+			t.Fatal(err)
+		}
+		failed, unknownUsage := false, false
+		for _, event := range state.Records.Events {
+			if strings.Contains(event.Payload, "secret-provider-diagnostics") {
+				t.Fatal("raw diagnostics were persisted")
+			}
+			if event.Type == runtime.EventFailed {
+				failed = strings.Contains(event.Payload, "free-usage-limit-reported")
+			}
+			if event.Type == "acp_usage_unavailable" {
+				unknownUsage = strings.Contains(event.Payload, "not zero/free/unlimited")
+			}
+		}
+		if !failed || !unknownUsage {
+			t.Fatal("Controller did not save failure and unknown-usage evidence")
+		}
+		return
 	}
 	events, err := control.Events(ctx, id)
 	if err != nil {

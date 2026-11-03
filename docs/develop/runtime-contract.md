@@ -268,6 +268,13 @@ Flow 全体の既知 token 合計として使わない。`usage_update` の cont
 `acp_capabilities` は送信時に記録して Start 後の cursor からも取得できるようにする。
 account quota・Copilot AI-credit ceiling は未対応で、指定された上限を黙って無効にしない。
 
+RPC の拒否と応答なしの切断では、取得経路と秘匿化した固定の提供元信号を返す。
+標準エラーの末尾4096バイトと RPC の詳細はメモリ内で照合し、原文を診断へ保存しない。
+既知の無料制限文面は `free-usage-limit-reported`、未分類は `unknown` とする。
+これは原因確定・認証照合・残量観測ではない。取消・期限と正常応答は既存の判定を維持する。
+Controller は既存の `failed` event と理由へ接続する。判断と限界は
+[ADR-0068](adr/0068-preserve-safe-acp-failure-signals.md)を参照する。
+
 停止では取消通知の後に process の終了・reap と export を確認する。異常切断を正常完了にせず、
 prompt を自動再送しない。別 process/provider の session への再接続は拒否し、
 新しい設定と予算を承認した successor Task で継続する。provider 認証と repository permission は

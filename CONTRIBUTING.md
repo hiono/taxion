@@ -102,6 +102,10 @@ CLI の製品版と通信 protocol の版は区別します。現在の接続条
 [Runtime 契約](docs/develop/runtime-contract.md)、OpenCode 固有の判断は
 [ADR-0038](docs/develop/adr/0038-run-opencode-acp-with-sealed-role-boundaries.md)が正本です。
 
+バックエンドに影響する変更では [バックエンド別の確認記録](docs/develop/backend-acceptance.md)を参照し、
+Copilot と OpenCode の合成確認、過去の実証、現在の実受入れの未達を区別する。
+通常試験で実モデルを開始せず、追加実証に必要な構成・費用・権限の承認を先に確認する。
+
 ## リリース
 
 正式な公開手順は[Binary release](docs/develop/binary-release.md)に一本化しています。
