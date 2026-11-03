@@ -18,6 +18,8 @@ product operation は、承認済み manifest hash pin、archive hash、executab
 
 development mode は隔離 fixture/store に限定する。product policy を上書きする便宜的な mode switch は作らない。利用者が管理する manifest pin と policy を trust root とし、付属 checksum だけを独立署名と見なさない。
 
+2026-11-03 追補: Taxion 自体を開発・検証するときは、開発者が専用の一時 directory、store、development policy を用意する。利用者の product store や product policy を開発環境として要求・流用せず、そこに保存済みの状態も変更しない。policy の `storeDirectory` には隔離 store の実体 path を指定し、検証には開発中の source build を使う。この準備はモデル実行、外部サービス利用、予算超過の許可にはならず、それらは別の承認と契約に従う。
+
 これは協調的な CLI による誤使用防止であり、local administrator を防御しない。検査を削除した source や旧 binary に対する物理的な SQLite 書込み遮断、別 writer service、daemon、OS identity 分離は実装しない。hash 検査の削除や policy 改変が可能な管理者を防御できるとは記載しない。
 
 ## 結果と rollback
