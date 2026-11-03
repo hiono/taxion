@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
@@ -205,7 +206,7 @@ func ExecutionGateReport(graph core.TaskGraph, flowID string) (GateReport, error
 	switch flow.Status {
 	case "COMPLETED":
 		if evaluation.QualityGate != "RECORDED_PASS" && !evaluation.DiagnosticComplete {
-			report.fail("quality-gate-unmet", "completed flow lacks same-target acceptance evidence")
+			report.fail("quality-gate-unmet", strings.Join(evaluation.Unmet, " "))
 		}
 	case "RUNNING":
 		if flow.HandoffHeld() {

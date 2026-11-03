@@ -1054,6 +1054,12 @@ func TestModelFreeVerificationCanBeConfirmedAndCompletedWithoutRuntime(t *testin
 	if completed.Status != core.Completed || len(state.Graph.Dispatches) != 0 {
 		t.Fatal("model-free Task did not complete without Dispatch", completed, state.Graph.Dispatches)
 	}
+	if _, err := EvaluateReviewFlow(state.Graph, request.ID); err == nil {
+		t.Fatal("user-recorded completion became evaluated quality acceptance")
+	}
+	if _, err := PublicationGateReport(state.Graph, request.ID); err == nil {
+		t.Fatal("user-recorded completion became publication evidence")
+	}
 }
 
 func TestPlannerNonExecutionActionRecordsDecisionWithoutRepair(t *testing.T) {

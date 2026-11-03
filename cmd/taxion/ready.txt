@@ -185,7 +185,10 @@ instead of asking them to edit generated JSON.
     "scope": ["README.md"],
     "outOfScope": [],
     "fileAccess": {"level": "committed"},
-    "acceptance": ["README.md contains the approved explanation"],
+    "acceptance": [
+      "README.md contains the approved explanation",
+      "User-facing behavior, configuration, constraints and affected documentation agree at the reviewed target; affected operational steps are verified, or non-applicability is justified with evidence."
+    ],
     "requiredEvidence": ["work-report"],
     "validationCommands": ["git diff --check"],
     "branch": "work/ready-example",
