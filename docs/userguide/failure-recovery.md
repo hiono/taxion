@@ -48,6 +48,22 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 - `handoff-held`: 次の role を一つだけ実行する場合は handoff を release する。release は実行中の role を取り消さない。
 - `task-not-ready`・`task-not-approved`: Task の状態遷移または公開承認を確認する。
 
+`quality-gate-unmet` では、対象の不一致だけでなく承認済み契約の受入れ条件も確認する。
+旧契約に `ready` が示す必須の文書整合 criterion がなければ、
+Flow が `COMPLETED`、Reviewer が `SUCCEEDED` / `APPROVE` でも品質ゲートは未達になる。
+`workflow evaluate --id FLOW_ID --require-quality` の理由を先に読み、
+成功した実装・レビューを診断のために再実行しない。
+
+旧契約・結果・停止履歴を変更せず、品質ゲートの合格が必要な場合だけ、
+不足する条件を含む新契約と同一対象の独立レビューを承認する。
+持込み入力のレビューでは既存の成果と適用可能な検証証拠を再利用できるが、
+旧レビューの承認を新条件へ付け替える正式操作はない。
+コマンド不要と承認した `review-input.v2` の `identity-only` でも、
+対象照合、受入れ条件、独立レビューの検査は省略しない。
+追加の Reviewer・費用・期限が旧承認に含まれなければ差分承認が必要である。
+`accept-saved-review` は限定した停止状態の結果受理であり、
+完了済み Flow の条件追加や品質ゲート未達の迂回には使わない。
+
 ## gate が fail を返す
 
 `fail` は保存記録の矛盾または前提の不成立を表す。自動で修復しない。
