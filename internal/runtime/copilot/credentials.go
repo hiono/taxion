@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	sdk "github.com/github/copilot-sdk/go"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 var credentialEnvName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
@@ -42,7 +43,7 @@ func configureCredential(options *sdk.ClientOptions, ref string) error {
 		}
 		env = append(env, item)
 	}
-	options.Env = env
+	options.Env = tools.WithoutBrokerCredentials(env)
 	options.GitHubToken = token
 	options.UseLoggedInUser = &loggedIn
 	return nil

@@ -12,6 +12,7 @@ func TestExplicitCredentialSelectionDoesNotFallBackOrExposeValues(t *testing.T) 
 		t.Setenv(key, "ambient-private-fixture")
 	}
 	t.Setenv("TAXION_TEST_CREDENTIAL", "selected-private-fixture")
+	t.Setenv("TAXION_BROKER_TEST", "broker-private-fixture")
 	for _, ref := range []string{"copilot:logged-in", "env:TAXION_TEST_CREDENTIAL"} {
 		options := &sdk.ClientOptions{}
 		if err := configureCredential(options, ref); err != nil {
@@ -24,7 +25,7 @@ func TestExplicitCredentialSelectionDoesNotFallBackOrExposeValues(t *testing.T) 
 		}
 		for _, item := range options.Env {
 			key, _, _ := strings.Cut(item, "=")
-			if key == "COPILOT_GITHUB_TOKEN" || key == "GH_TOKEN" || key == "GITHUB_TOKEN" ||
+			if key == "COPILOT_GITHUB_TOKEN" || key == "GH_TOKEN" || key == "GITHUB_TOKEN" || key == "TAXION_BROKER_TEST" ||
 				!loggedIn && key == "TAXION_TEST_CREDENTIAL" {
 				t.Fatal("ambient or named credential remained in child environment")
 			}

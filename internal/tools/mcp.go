@@ -31,6 +31,23 @@ func (p Policy) CallMCP(ctx context.Context, name string, arguments any) (json.R
 	if err := p.Check(); err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("taxion: MCP request cancelled or expired")
+	}
+	credential := ""
+	if selected.CredentialRef != "" {
+		expires, _ := time.Parse(time.RFC3339, selected.ExpiresAt)
+		if !time.Now().Before(expires) {
+			return nil, fmt.Errorf("taxion: broker approval expired")
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, expires)
+		defer cancel()
+		credential, err = p.brokerCredential(*selected)
+		if err != nil {
+			return nil, err
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, selected.Command.Path, selected.Args...)
@@ -41,6 +58,12 @@ func (p Policy) CallMCP(ctx context.Context, name string, arguments any) (json.R
 	// A server runs with host permissions. Only explicitly trusted commands
 	// and their pinned inputs belong here; ambient credentials are withheld.
 	command.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + command.Dir, "LANG=C.UTF-8"}
+	if credential != "" {
+		command.Env = append(command.Env, credential)
+		if err := p.consumeOperation(ctx, *selected); err != nil {
+			return nil, err
+		}
+	}
 	input, err := command.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("taxion: open MCP input")
@@ -124,6 +147,25 @@ func (p Policy) CallMCP(ctx context.Context, name string, arguments any) (json.R
 		_ = command.Process.Kill()
 	}
 	waitErr := command.Wait()
+	if credential != "" {
+		var status struct {
+			IsError bool              `json:"isError"`
+			Content []json.RawMessage `json:"content"`
+		}
+		succeeded := callErr == nil && waitErr == nil &&
+			json.Unmarshal(result, &status) == nil && status.Content != nil && !status.IsError
+		receipt, err := p.Save(Evidence{Tool: name, Phase: "broker", Input: struct {
+			OperationID string `json:"operationId"`
+			Succeeded   bool   `json:"succeeded"`
+		}{selected.OperationID, succeeded}})
+		if err != nil {
+			return nil, err
+		}
+		if !succeeded {
+			return nil, fmt.Errorf("taxion: broker outcome unknown or failed; do not retry; private evidence %s", receipt)
+		}
+		return json.RawMessage(`{"content":[{"type":"text","text":"Approved operation completed; response content withheld."}],"isError":false}`), nil
+	}
 	receipt, saveErr := p.Save(Evidence{Tool: name, Phase: "mcp", Input: struct {
 		Result json.RawMessage `json:"result,omitempty"`
 		Stdout string          `json:"stdout"`
