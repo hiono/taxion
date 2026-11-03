@@ -24,17 +24,29 @@ LiteLLM は model API の会計・独自予算の候補であり、Coding Agent 
 
 安さだけで実行先を決めず、必須検証と同一対象の独立レビューを完了条件として維持する。費用の比較には再試行・修正・レビューも含め、通貨や課金単位が異なる値は無理に合算しない。必要な指示・成果・証拠を受け渡し、全会話の再送や計画の重複生成を避ける。
 
+### 2026-11-03 追補: Taskで事前承認するACP fallback
+
+Copilotを主経路とするTaskは、OpenCode Freeまたは既存契約のACP対応runtimeを、fallback候補として個別に事前承認できる。Task契約には候補runtime・model・provider、課金方式、追加課金の有無と上限、利用できる範囲、fallback後に残すcheckpointを明記する。Freeという表示や既存契約の存在だけから、利用可能性や追加費用なしを推定しない。契約・上限・利用資格が確認できない候補は承認対象にできない。
+
+主runtimeが利用枠の停止に達した場合、Controllerは現在のDispatchを停止し、確定済みの出力と利用量の既知・未知を保存する。delivery、runnerの終了、対象treeを確認でき、Task契約でfallbackが事前承認されている場合に限り、そのcheckpointを引き継ぐ新しいTask/Dispatchを開始できる。これは実行中sessionのruntime差し替えや、結果不明のsessionの再送ではない。Task契約にないruntimeへの切替え、追加費用、上限変更には新たな承認が要る。
+
+fallbackの出力はCopilotと同等の品質・可用性・保証を意味しない。fallbackで作業をcheckpointまで進めても、Taskの最終完了や公開の扱いにはならない。PR・merge・release前には、そのTaskで定めた必須検証と同一対象の独立レビューを引き続き満たす。runtimeを切り替えても、承認済み期限・残予算・停止余裕は更新されず、異なる課金単位を換算して共通枠にしない。
+
 ## Alternatives considered
 
 全 runtime で残量を必須にする案は採らない。数値の取得能力と追加課金防止を混同し、承認済み provider-stop や Free 利用を不必要に止めるからである。逆に、全契約を provider 停止へ委ねる案も採らない。承認した残量下限や利用量上限を守る条件を失うからである。
 
 LiteLLM へ全面置換する案は採らない。モデル API の集計だけでは、既存 SDK/ACP の session、tool permission、成果保存、provider の契約残量を代替できない。自動分類・最安選択は今回実装せず、まず既存契約と観測の利用を一貫させる。
 
+同一session内でproviderを自動差し替えする案も採らない。停止時点の利用量やdeliveryが不明な場合に別の実行を重ねると、重複作業や未承認の費用につながる。fallbackは保存済みcheckpointからの別Task/Dispatchとして扱う。
+
 ## Consequences
 
 操作担当は保存済み契約と既存証拠から次の認可済み操作を選び、技術的な取得経路を使わずに残量入力や再承認へ戻さない。人間へ返すのは、新しい利用枠・課金方式・予算など未解決の実質的な選択だけとする。API の存在は利用可能な CLI の存在やバックエンド別受入れの完了を意味しない。
 
 OpenCode Go の数値確認が必須で、利用可能な観測経路がない場合は停止する。`provider` は月内配分や進行中 call の厳密な費用上限を保証しない。事後 usage しか得られない制限を、提供元が call 前に拒否する hard ceiling と説明しない。
+
+Taskがfallbackを事前承認していれば、Copilotの停止後に新しい承認を待たずに続行できる場合がある。ただし、Controllerが旧Dispatchの停止とcheckpointを確認できない場合、または承認済みの期限・課金条件を満たせない場合は停止する。fallbackは利用枠の回避策ではなく、既に承認した別runtimeによるcheckpoint継続である。
 
 ## Security and operational impact
 
@@ -58,6 +70,8 @@ PR #235 後の開発版では、保存済み `account` Dispatch 向けの `runti
 
 文書のローカルリンク試験と公開文・path・secret-pattern の検査を実施した。ローカルでは非公開識別子一覧による照合を実施していないため、その成功を主張しない。これらの文書検査は実契約での上限停止やモデル品質の受入れ証拠ではない。最終 commit の必須検査は対応 PR を参照する。
 
+2026-11-03、利用者はCopilotを主経路とし、枠到達後はTaskで事前承認したFreeまたは既存契約のACP runtimeでcheckpointまで続行する方針を選択した。fallbackは別Task/Dispatchで開始し、PR・merge・releaseの検証条件は維持する。この判断と実装条件はIssue #234で追跡する。OpenCode Free固有の診断・最低限の受入れはIssue #231で追跡する。
+
 ## References
 
 保存契約の表示に関する後続は [ADR-0069](0069-show-saved-task-billing-policy.md) と
@@ -65,6 +79,8 @@ PR #235 後の開発版では、保存済み `account` Dispatch 向けの `runti
 `config check --billing --task ID`／`--dispatch ID` は保存方式を表示するが、
 OpenCode の残量取得能力や実契約の受入れを追加するものではない。
 
+- [Issue #234](https://github.com/hiono/taxion/issues/234): Task単位の課金判断とcheckpoint fallback
+- [Issue #231](https://github.com/hiono/taxion/issues/231): OpenCode Free fallbackの診断・受入れ
 - [ADR-0051](0051-centralize-declared-billing-conditions.md): 共通の課金判定
 - [ADR-0059](0059-treat-copilot-fusion-as-provider-routing.md): Fusion 対応
 - [ADR-0060](0060-use-remaining-plan-quota-on-final-workday.md): 最終稼働日の利用枠

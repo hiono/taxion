@@ -18,6 +18,8 @@ mise exec -- go version
 mise exec -- go build ./...
 ```
 
+Taxion CLI 自体を検証するときは、[development mode の手順](docs/userguide/binary-provenance.md#明示-policy-と初回設定)に従い、専用の一時 store と development policy を用意します。`storeDirectory` には store の実体 path を指定し、開発中の source build に同じ store を明示して `provenance configure`、`provenance verify`、`ready --check-skill`、`ready` を実行します。利用者の product store や policy は使いません。この設定はモデル実行や外部サービス利用の承認を与えません。
+
 修正中は変更した package のテストを実行し、PR 前に全体を確認します。
 
 ```bash
