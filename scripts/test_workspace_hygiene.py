@@ -43,6 +43,12 @@ class WorkspaceHygieneTests(unittest.TestCase):
         self.git("commit", "-qm", "unmerged")
         self.assertIn("RELEASE_BRANCH_NOT_MERGED", workspace_hygiene.inspect(self.root)["rejections"])
 
+    def test_candidate_worktree_metadata_is_not_release_staging(self):
+        admin = Path(self.git("rev-parse", "--absolute-git-dir")) / "worktrees" / "candidate"
+        admin.mkdir(parents=True)
+        result = workspace_hygiene.inspect(self.root)
+        self.assertNotIn("EXISTING_BUILD_ARTIFACT_OR_STAGING", result["rejections"])
+
     def test_unknown_reference_coverage_and_noncanonical_reject_without_cleanup(self):
         other = Path(self.temp.name) / "review"
         self.git("worktree", "add", "--detach", str(other), "HEAD")

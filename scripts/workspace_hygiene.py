@@ -75,8 +75,10 @@ def inspect(root, ownership=None, evidence=None):
         worktrees.append(item)
     staging = [str(root / name) for name in ("dist", ".release", "taxion", "taxion.exe", "bin/taxion", "bin/taxion.exe")
                if (root / name).exists() or (root / name).is_symlink()]
+    git_worktrees = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "worktrees"
     staging += sorted({str(path) for pattern in (".git/*/dist", ".git/*/stage*", ".git/*/candidate*", ".git/*/artifacts")
-                       for path in root.glob(pattern) if path.is_dir() or path.is_symlink()})
+                       for path in root.glob(pattern)
+                       if (path.is_dir() or path.is_symlink()) and git_worktrees not in path.parents})
     if staging:
         reasons.append("EXISTING_BUILD_ARTIFACT_OR_STAGING")
     branches = git(root, "for-each-ref", "--format=%(refname) %(objectname)", "--merged=origin/main", "refs/heads").splitlines()
