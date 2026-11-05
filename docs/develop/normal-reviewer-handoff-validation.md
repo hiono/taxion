@@ -32,6 +32,31 @@
 既存の持込み成果物の準備済み復旧テストも、登録解除、別 source、欠落 worktree などの拒否を確認する。
 不変な旧指示を編集する運用手順は提供しない。新指示で差分出典を保存し、旧指示は履歴として保持する。
 
+### 決定表とテストの対応
+
+許可・拒否の規範は [ADR-0071 の条件表](adr/0071-preserve-accepted-coder-review-lineage.md#差分対象パスの条件表)を正本とする。
+上の結果表と以下の対応は確認範囲であり、条件の全組合せを試験済みという主張ではない。
+テスト名は `internal/runtime/controller/normal_review_handoff_test.go` 内を指す。
+
+| 決定表の対応 | 実際の確認範囲 | 回帰テスト |
+| --- | --- | --- |
+| P2〜P5、E1／E2／E6 | A≠B、dirty snapshot／commit target、全28パスと今回申告4パス、受理から独立レビューまで | `TestNormalReviewerUsesOriginalCoderDiffBaseline` |
+| R1〜R4、R8／R10、E3〜E6 | 準備有無×旧期限の有効／期限切れ、取消後の Coder0・Reviewer1・repair0、固定期限と receipt 再照合 | `TestNormalReviewerReconciliationContinuesAcceptedOutputOnly` |
+| P7、R5／R6／R8／R9 | ACK・開始・session・利用量・owner・receipt、不正 manifest・対象・契約、不確実性の承認不足で取消拒否 | `TestNormalReviewerReconciliationRejectsUnsafeState` |
+| R2／R7、E3 | 準備有無、source・extra・ignored・index・HEAD の drift、未記録の実パスで拒否・保存不変 | `TestNormalReviewerReconciliationRejectsMutableGitDrift` |
+| G2、E3 | 出典 metadata がない旧版形式の不変な指示を保持して取消 | `TestNormalReviewerReconcilesLegacyInstructionWithoutLineage` |
+| G2／G3 | 通常 Flow を持込み成果物専用復旧へ渡した場合の確認済み／未評価条件 | `TestNormalReviewerCombinedRecoveryExplainsUnsupportedSource` |
+
+A＝B など既存の基本経路は既存の reviewflow／snapshot テストの対象であり、
+今回追加した A≠B の専用再現と同一のケースとして数えない。
+P6 の「P を R に縮小しない」は全28パス保持の肯定検査と、不正 manifest／target の拒否で確認する。
+表のすべての不正表現を一つずつ注入した試験という意味ではない。
+E7 の品質・公開条件は既存の品質確認を参照し、この対応表で全完了経路を試験済みとはしない。
+
+[RC 履歴監査](rc-decision-boundary-audit.md)の全16版の対応と、
+本表の現行合成回帰を区別する。過去の全 RC を再実行してはいない。
+運用機の原本照合・通常レビュー再開、全条件の直積、実サービスでの費用・見逃し率は未確認である。
+
 ## 検証と独立レビュー
 
 2026-11-05、修正候補で `go vet ./...`、`go build ./...`、
