@@ -150,7 +150,7 @@ func taskBudgetReport(graph core.TaskGraph, flow core.ReviewFlow, now time.Time)
 	elapsed := now.Sub(flow.StartedAt).Milliseconds()
 	report.ElapsedMilliseconds = max(elapsed, 0)
 	report.ElapsedRemainingMillis = max(report.ElapsedLimitMilliseconds-report.ElapsedMilliseconds, 0)
-	if flow.Budget.MaxDispatches == 0 || flow.Budget.MaxCoderSessions == 0 && flow.Artifact == nil ||
+	if flow.Budget.MaxDispatches == 0 || flow.Budget.MaxCoderSessions == 0 && !flow.ReviewFirst() ||
 		flow.Budget.MaxReviewerSessions == 0 ||
 		!flow.Budget.ExternalBudgetOnly() && flow.NativeLimit() <= 0 {
 		report.Unknown = append(report.Unknown, "approved budget limits are unavailable")

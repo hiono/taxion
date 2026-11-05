@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.22"
+const readySkillVersion = "1.3.23"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -318,7 +318,7 @@ session compatibility; automatic provider updates are not implemented here.
 Controller validation and independent same-target review are
 required before claiming completion. Inventory and skill integrity checks do not
 prove authentication, authorization, model loading or successful execution.
-`
+` + "\n## Accepted Coder output and unstarted normal Reviewer recovery\n" + normalReviewerRecoveryHelp
 
 type readySkillMetadata struct {
 	Manager     string `yaml:"manager" json:"manager"`

@@ -199,8 +199,11 @@ func checkResumeBudget(state store.Workspace, flow core.ReviewFlow, dispatch cor
 	recorded.ResumeBasis = nil
 	// Wall-clock elapsed fields are observational, not consumed counters.
 	recorded.ElapsedMilliseconds, recorded.ElapsedRemainingMillis = current.ElapsedMilliseconds, current.ElapsedRemainingMillis
-	if !reflect.DeepEqual(recorded, current) || flow.Budget.MaxDispatches != 2+2*flow.MaxRepairs ||
-		flow.Budget.MaxCoderSessions != 1+flow.MaxRepairs || flow.Budget.MaxReviewerSessions != 1+flow.MaxRepairs {
+	normalLimits := flow.Budget.MaxDispatches == 2+2*flow.MaxRepairs && flow.Budget.MaxCoderSessions == 1+flow.MaxRepairs
+	continuedLimits := flow.SourceDispatchID != "" && flow.Budget.MaxDispatches == 1+2*flow.MaxRepairs &&
+		flow.Budget.MaxCoderSessions == flow.MaxRepairs
+	if !reflect.DeepEqual(recorded, current) || !normalLimits && !continuedLimits ||
+		flow.Budget.MaxReviewerSessions != 1+flow.MaxRepairs {
 		return fmt.Errorf("saved budget, usage or counters differ from Dispatch history")
 	}
 	return nil

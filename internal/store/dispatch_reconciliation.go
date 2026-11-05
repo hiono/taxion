@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -54,10 +55,13 @@ func (a StoppedDispatchReconciliation) ArtifactReviewer() bool {
 
 func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 	seen := map[string]bool{}
+	cancelled := map[string]bool{}
 	for _, audit := range r.DispatchReconciliations {
 		prior := audit.PreviousFlow
 		before := audit.PreviousDispatch
 		artifactReviewer := prior.StoppedArtifactReviewer(before)
+		coderReviewer := graph.StoppedCoderReviewer(prior, before)
+		reviewer := artifactReviewer || coderReviewer
 		flow, found := graph.ReviewFlow(prior.ID)
 		dispatch, exists := graph.GraphDispatch(before.ID)
 		inputHash, err := core.CanonicalSHA256(prior.Contract)
@@ -106,14 +110,14 @@ func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 			audit.InputContractHash != inputHash || audit.Actor == "" || audit.Source == "" ||
 			audit.Reason == "" || len(audit.Evidence) == 0 || !audit.NoActiveExecutionConfirmed || !audit.AcceptDeliveryUncertainty ||
 			audit.DeliveryStatus != "unknown" || audit.At.IsZero() ||
-			prior.Status != "STOPPED" || (!artifactReviewer && prior.StopCode != "SAFETY_STOP") || !prior.HandoffHeld() ||
-			prior.RunnerID != "" || len(prior.DispatchIDs) != 1 || prior.DispatchIDs[0] != before.ID ||
-			(!artifactReviewer && (before.TaskID != prior.TaskID || before.Recipient != "CODER")) ||
+			prior.Status != "STOPPED" || (!reviewer && prior.StopCode != "SAFETY_STOP") || !prior.HandoffHeld() ||
+			prior.RunnerID != "" || (!coderReviewer && (len(prior.DispatchIDs) != 1 || prior.DispatchIDs[0] != before.ID)) ||
+			(!reviewer && (before.TaskID != prior.TaskID || before.Recipient != "CODER")) ||
 			before.Status != core.DispatchIssued ||
 			before.Acknowledged || before.ExecutionStarted || before.RuntimeSessionID != "" || before.Result != nil ||
 			before.RuntimeConfigHash != "" || before.ExecutionStartSHA != "" || len(before.RuntimeUsage) != 0 ||
 			prior.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot ||
-			(!artifactReviewer && prior.Contract.TargetTreeSHA == "") ||
+			(!reviewer && prior.Contract.TargetTreeSHA == "") ||
 			!reflect.DeepEqual(flow, prior) || target != audit.Target ||
 			dispatch.Status != core.DispatchCancelled || dispatch.Result == nil ||
 			dispatch.Result.OutputSHA != "" || dispatch.Result.OutputTreeSHA != "" ||
@@ -137,6 +141,13 @@ func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 			return fmt.Errorf("reconciled Dispatch differs from its original issued instruction")
 		}
 		seen[prior.ID] = true
+		cancelled[before.ID] = true
+	}
+	for _, dispatch := range graph.Dispatches {
+		if dispatch.Result != nil && !cancelled[dispatch.ID] &&
+			slices.ContainsFunc(dispatch.Result.Evidence, func(e string) bool { return strings.HasPrefix(e, "reconciled-stop:") }) {
+			return fmt.Errorf("reconciled cancellation lacks its exact saved reconciliation audit")
+		}
 	}
 	return nil
 }

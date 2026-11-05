@@ -32,6 +32,9 @@ func TestJSONOperationHelpExplainsInputsWithoutWorkspace(t *testing.T) {
 		{"workflow recover-review", []string{"expectedHash", "continueStoppedExecution", "runtime-stop receipt", "original Flow",
 			"saved readable output", "atomically", "No model", "deadlineRecontract", "previousDeadline", "Preview first"}},
 		{"workflow budget", []string{"approvedCeiling", "preservation", "cumulative", "executionAuthorized:false", "priorFlows"}},
+		{"workflow terminate", []string{"Complete JSON", "flowId", "dispatchId", "RUNNING", "CODER", "BLOCKED", "reconcile-stopped"}},
+		{"workflow reconcile-stopped", []string{"Complete reconciliation JSON", "noActiveExecutionConfirmed", "acceptDeliveryUncertainty",
+			"accepted-coder-output", "expectedHash", "continueFromDispatchId", "deadline", "reportedChangedFiles", "CANCELLED", "WAITING_FOR_REVIEW"}},
 		{"workflow extend", []string{"previousDeadline", "previousMaxNanoAiu", "expectedHash", "SAME session", "resource_approval_required"}},
 		{"workflow start", []string{"JSON input", "stageBudget", "stagePlanHash", "actual user approval", "not a model turn"}},
 		{"workflow validate-input", []string{"no model", "artifactSource", "unknown", "doctor --dispatch"}},
@@ -70,10 +73,27 @@ func TestOperationHelpExamplesMatchRequestTypes(t *testing.T) {
 	}{
 		{intakeConfirmationHelp, &controller.IntakeConfirmation{}},
 		{stagePlanInputHelp, &controller.ReviewFlowRequest{}},
+		{normalReviewerRecoveryHelp, &controller.DispatchReconciliationRequest{}},
 	} {
 		_, example, ok := strings.Cut(test.text, "\n{")
 		if !ok {
 			t.Fatal("help omits a JSON example")
+		}
+		_, planExample, found := strings.Cut(normalReviewerRecoveryHelp, "Complete plan/start JSON for the confirmed successor:\n")
+		if !found {
+			t.Fatal("normal Reviewer recovery omitted successor JSON")
+		}
+		planExample, _, _ = strings.Cut(planExample, "\nThe example date")
+		if err := core.DecodeGraphInput(strings.NewReader(planExample), &controller.ReviewFlowRequest{}); err != nil {
+			t.Fatal("normal Reviewer successor example differs from request schema", err)
+		}
+		_, confirmExample, found := strings.Cut(normalReviewerRecoveryHelp, "values; include the approved billing/budgetGuidance/fileAccess when present):\n")
+		if !found {
+			t.Fatal("normal Reviewer recovery omitted confirmation JSON")
+		}
+		confirmExample, _, _ = strings.Cut(confirmExample, "\nNo placeholder")
+		if err := core.DecodeGraphInput(strings.NewReader(confirmExample), &controller.IntakeConfirmation{}); err != nil {
+			t.Fatal("normal Reviewer confirmation example differs from request schema", err)
 		}
 		example, _, ok = strings.Cut(example, "\n}\n")
 		if !ok {

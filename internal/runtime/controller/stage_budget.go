@@ -65,6 +65,9 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 		return StagePlanPreview{}, fmt.Errorf("taxion: supplied review input requires its exact artifactSource and zero Coder/repair allocation")
 	}
 	policy := *request.StageBudget
+	if request.ContinueFromDispatchID != "" && *request.MaxRepairs == 0 && policy.CoderSessionCredits != 0 {
+		return StagePlanPreview{}, fmt.Errorf("taxion: review-only Coder continuation requires zero Coder session allocation")
+	}
 	var artifact *core.ArtifactTarget
 	if request.ReuseArtifactValidation {
 		if request.ArtifactSource == "" {
@@ -184,6 +187,10 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 	}
 	if artifact != nil && plan.ValidationSeconds+plan.ReviewSeconds > plan.TimeoutSeconds {
 		return StagePlanPreview{}, fmt.Errorf("taxion: input validation and independent review exceed the unchanged outer deadline")
+	}
+	if request.Deadline != nil &&
+		!request.Deadline.After(time.Now().UTC().Add(time.Duration(plan.ReservedSeconds(0, role)+minimum)*time.Second)) {
+		return StagePlanPreview{}, fmt.Errorf("taxion: approved absolute deadline leaves insufficient time for mandatory stages; obtain a new successor approval")
 	}
 	request.StagePlanHash = ""
 	hash, err := core.CanonicalSHA256(struct {

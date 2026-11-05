@@ -24,6 +24,11 @@ func recoverArtifactReviewCommand(args []string, output io.Writer) error {
 noActiveExecutionConfirmed:true,acceptDeliveryUncertainty:true}, taskId, flowId,
 reviewRoot (fresh absolute root), deadline (fixed RFC3339), timeoutSeconds,
 maxNanoAiu and stageBudget:{version:1,...}. No Coder/repair allocation.
+This combined operation is artifactSource-only. For a normal Flow with an accepted
+Coder and an unstarted Reviewer, use workflow reconcile-stopped --help and the
+existing continueFromDispatchId successor. A rejection lists confirmed failed
+saved-state conditions separately from Git/runtime/budget checks not evaluated.
+Do not infer which remaining predicates passed from a composite rejection.
 Preview returns one outer hash binding all saved state and the exact bounded request.
 After actual approval add expectedHash and apply the same file without --preview.
 Controller derives lower hashes, preserves existing audits and commits atomically.

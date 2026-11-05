@@ -32,6 +32,7 @@ type ReviewFlowRequest struct {
 	MaxRepairs              *int                       `json:"maxRepairs"`
 	MaxNanoAIU              float64                    `json:"maxNanoAiu"`
 	TimeoutSeconds          int64                      `json:"timeoutSeconds"`
+	Deadline                *time.Time                 `json:"deadline,omitempty"`
 	Authorization           core.TaskDecision          `json:"authorization"`
 	Configuration           core.ApprovalConfiguration `json:"configuration"`
 	StageBudget             *core.StageBudget          `json:"stageBudget,omitempty"`
@@ -99,6 +100,14 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 		}
 		now := time.Now().UTC()
 		deadline := now.Add(time.Duration(request.TimeoutSeconds) * time.Second)
+		if request.Deadline != nil {
+			if !request.Deadline.After(now) {
+				return fmt.Errorf("taxion: approved absolute Flow deadline expired; obtain a new successor approval")
+			}
+			if request.Deadline.Before(deadline) {
+				deadline = request.Deadline.UTC()
+			}
+		}
 		if limit, ok := ctx.Deadline(); ok {
 			if !now.Before(limit) {
 				return fmt.Errorf("taxion: caller deadline reached before the review flow started")
@@ -120,6 +129,10 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 			},
 			StartedAt: now, Deadline: deadline, Status: "RUNNING",
 			Authorization: request.Authorization, DispatchIDs: []string{},
+		}
+		if request.ContinueFromDispatchID != "" {
+			flow.Budget.MaxCoderSessions--
+			flow.Budget.MaxDispatches--
 		}
 		if request.MaxNanoAIU == 0 && core.ProviderBudget(task.BudgetGuidance) {
 			flow.Budget.BudgetSource = core.ProviderStopBudgetSource
@@ -259,8 +272,21 @@ func budgetContinuationSource(graph core.TaskGraph, task core.GraphTask, sourceI
 		task.CreatedFrom != "flow:"+predecessor.ID || task.Supersedes != predecessor.TaskID {
 		return core.GraphDispatch{}, fmt.Errorf("taxion: completed-Coder continuation requires the exact held stopped predecessor flow and successor Task")
 	}
+	last, _ := graph.GraphDispatch(predecessor.LastDispatchID())
+	if last.Recipient == "REVIEWER" && last.RuntimeSessionID == "" {
+		if len(records) == 0 || records[0].VerifyDispatchReconciliations(graph) != nil ||
+			!slices.ContainsFunc(records[0].DispatchReconciliations, func(a store.StoppedDispatchReconciliation) bool {
+				return a.PreviousFlow.ID == predecessor.ID && a.PreviousDispatch.ID == last.ID &&
+					graph.StoppedCoderReviewer(a.PreviousFlow, a.PreviousDispatch)
+			}) {
+			return core.GraphDispatch{}, fmt.Errorf("taxion: unstarted Reviewer continuation requires its exact saved reconciliation")
+		}
+	}
 	located := source
 	if len(records) != 0 {
+		if err := validateResultReceipt(&store.Workspace{Graph: graph, Records: records[0]}, source); err != nil {
+			return core.GraphDispatch{}, err
+		}
 		located = records[0].RestoredDispatch(source)
 	}
 	if err := gitproof.VerifyCompletedSuccessor(located, task); err != nil {
@@ -672,6 +698,28 @@ func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.Rev
 		ID: review.AuthorizationID, Source: flow.Authorization.Source,
 		Text: flow.Authorization.Text + "; independently review the recorded Coder result",
 	}, sourceDecision)
+	review.Decisions = slices.DeleteFunc(review.Decisions, func(decision core.TaskDecision) bool {
+		return strings.HasPrefix(decision.ID, "coder-review-target:")
+	})
+	if review.OutputMode == core.OutputModeWorktreeTreeSnapshot && coder.Instruction.BaselineSHA != coder.Result.OutputSHA {
+		target := core.ArtifactTarget{
+			Version: 1, Repository: coder.Repository, BaselineSHA: coder.Instruction.BaselineSHA,
+			CommitSHA: coder.Result.OutputSHA, TreeSHA: coder.Result.OutputTreeSHA,
+			ChangedFiles: slices.Clone(coder.Result.ChangedFiles), Source: "dispatch:" + coder.ID,
+		}
+		hash, err := core.CanonicalSHA256(target)
+		if err != nil {
+			return err
+		}
+		target.Hash = "sha256:" + hash
+		content, err := json.Marshal(target)
+		if err != nil {
+			return err
+		}
+		review.Decisions = append(review.Decisions, core.TaskDecision{
+			ID: "coder-review-target:" + coder.ID, Source: target.Source, Text: string(content),
+		})
+	}
 	if flow.SourceDispatchID == coder.ID {
 		for _, predecessor := range state.Graph.ReviewFlows {
 			if "flow:"+predecessor.ID != flow.Contract.CreatedFrom {
