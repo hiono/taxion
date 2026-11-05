@@ -105,6 +105,7 @@ type SavedTurn struct {
 	Payload     string               `json:"payload"`
 	SubmittedAt time.Time            `json:"submittedAt"`
 	FinishedAt  time.Time            `json:"finishedAt"`
+	ShutdownAt  time.Time            `json:"shutdownAt"`
 	HistoryHash string               `json:"historyHash"`
 	Events      []Event              `json:"events"`
 	UsageTotals []core.DispatchUsage `json:"usageTotals,omitempty"`

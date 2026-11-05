@@ -804,7 +804,8 @@ taxion --store /absolute/path/to/ledger.json workflow record-failed-review \
 ```
 
 元の Copilot 環境から、同じ session の期限内完了、turn end、routine shutdown と
-保存された実行観測を照合する。完了は元の正式失敗より後であってはならない。
+保存された実行観測を照合する。回答、turn end、shutdown の順序を確認し、
+shutdown まで元の提出期限内かつ元の正式失敗以前でなければならない。
 準備済みの別 Reviewer worktree と保持 tree も確認する。
 回答 JSON の持込み、別 session、`APPROVE`、`BLOCKED`、変更・解放済み worktree、
 復元 workspace は拒否する。

@@ -109,14 +109,9 @@ func (c *Controller) RecordFailedReview(ctx context.Context, request FailedRevie
 	if err := validateResultReceipt(&state, dispatch); err != nil {
 		return FailedReviewReport{}, err
 	}
-	var failureAt time.Time
-	for _, receipt := range state.Records.Events {
-		if receipt.DispatchID == dispatch.ID && receipt.Type == "verified-result" {
-			failureAt = receipt.At
-		}
-	}
-	if failureAt.IsZero() {
-		return reject("the FAILED result requires its original controller receipt")
+	failureAt, err := state.Records.FailedReviewReceiptAt(dispatch)
+	if err != nil {
+		return FailedReviewReport{}, err
 	}
 	if err := verifyStagePlanBinding(state.Records, flow); err != nil {
 		return FailedReviewReport{}, err
@@ -138,7 +133,10 @@ func (c *Controller) RecordFailedReview(ctx context.Context, request FailedRevie
 	if turn.SessionID != dispatch.RuntimeSessionID ||
 		turn.SubmittedAt.Before(dispatch.CreatedAt) || !turn.SubmittedAt.Before(stageDeadline(flow, dispatch, false)) ||
 		turn.FinishedAt.Before(turn.SubmittedAt) || !turn.FinishedAt.Before(stageDeadline(flow, dispatch, false)) ||
-		turn.FinishedAt.After(time.Now()) || turn.FinishedAt.After(failureAt) {
+		turn.FinishedAt.After(time.Now()) || turn.FinishedAt.After(failureAt) ||
+		turn.ShutdownAt.IsZero() || turn.ShutdownAt.Before(turn.FinishedAt) ||
+		!turn.ShutdownAt.Before(stageDeadline(flow, dispatch, false)) ||
+		turn.ShutdownAt.After(time.Now()) || turn.ShutdownAt.After(failureAt) {
 		return reject("native history must prove completion before the original submission deadline")
 	}
 	if _, err := matchSavedTurn(state.Records, dispatch, turn); err != nil {
@@ -180,7 +178,7 @@ func (c *Controller) RecordFailedReview(ctx context.Context, request FailedRevie
 		Supplement: store.FailedReviewSupplement{
 			Version: 1, FlowID: flow.ID, DispatchID: dispatch.ID, DispatchHash: hash, ReceiptHash: receiptsHash,
 			HistoryHash: turn.HistoryHash, Answer: answer, NativeUsageTotals: turn.UsageTotals,
-			SubmittedAt: turn.SubmittedAt, FinishedAt: turn.FinishedAt,
+			SubmittedAt: turn.SubmittedAt, FinishedAt: turn.FinishedAt, ShutdownAt: turn.ShutdownAt,
 			Actor: request.Actor, Source: request.Source, Reason: request.Reason, Evidence: request.Evidence,
 			ExpectedRunnerID: request.ExpectedRunnerID,
 		},

@@ -214,6 +214,10 @@ func TestSavedTurnRequiresBoundCompletedMainAgentHistory(t *testing.T) {
 			events[4].Data.(*sdk.SessionShutdownData).ShutdownType = "error"
 			return events
 		}},
+		{"shutdown-before-turn-end", func(events []sdk.SessionEvent) []sdk.SessionEvent {
+			events[4].Timestamp = events[3].Timestamp.Add(-time.Second)
+			return events
+		}},
 		{"later-execution", func(events []sdk.SessionEvent) []sdk.SessionEvent {
 			return append(events, sdk.SessionEvent{ID: "later", Timestamp: time.Now().UTC(),
 				Data: &sdk.AssistantTurnStartData{TurnID: "uncompleted"}})
@@ -229,8 +233,10 @@ func TestSavedTurnRequiresBoundCompletedMainAgentHistory(t *testing.T) {
 			}
 		})
 	}
-	result, err := savedTurn(history(), "saved-session", worktree)
-	if err != nil || result.Payload == "" || result.HistoryHash == "" || len(result.Events) != 1 {
+	original := history()
+	result, err := savedTurn(original, "saved-session", worktree)
+	if err != nil || result.Payload == "" || result.HistoryHash == "" || len(result.Events) != 1 ||
+		!result.ShutdownAt.Equal(original[4].Timestamp) {
 		t.Fatal("completed main-agent result was not observed", result, err)
 	}
 	events := history()

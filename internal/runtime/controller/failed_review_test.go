@@ -87,7 +87,7 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 	now := time.Now().UTC()
 	worker.turn = runtime.SavedTurn{
 		SessionID: dispatch.RuntimeSessionID, Payload: string(mustFlowJSON(t, answer)),
-		SubmittedAt: now, FinishedAt: now, HistoryHash: "sha256:" + strings.Repeat("a", 64),
+		SubmittedAt: now, FinishedAt: now, ShutdownAt: now, HistoryHash: "sha256:" + strings.Repeat("a", 64),
 		Events: []runtime.Event{anchor}, UsageTotals: []core.DispatchUsage{{Model: "native-model", InputTokens: &totalInput}},
 	}
 	if err := control.Fail(dispatch.ID, "ECONNRESET after saved routine shutdown"); err != nil {
@@ -103,12 +103,22 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 		Evidence: []string{"process-exit:confirmed"},
 	}
 	before, _ := db.LoadWorkspace()
+	failed, _ := before.Graph.GraphDispatch(dispatch.ID)
+	failureAt, err := before.Records.FailedReviewReceiptAt(failed)
+	if err != nil {
+		t.Fatal(err)
+	}
 	initialTurn, initialRequest, initialAnswer := worker.turn, request, answer
 	for name, change := range map[string]func(){
-		"wrong-session":   func() { worker.turn.SessionID = "another-session" },
-		"late":            func() { worker.turn.FinishedAt = flow.Deadline.Add(time.Second) },
-		"wrong-history":   func() { worker.turn.Events = []runtime.Event{{Type: runtime.EventExecution, Payload: "unrelated"}} },
-		"missing-history": func() { worker.turn.HistoryHash = "" },
+		"wrong-session":          func() { worker.turn.SessionID = "another-session" },
+		"late":                   func() { worker.turn.FinishedAt = flow.Deadline.Add(time.Second) },
+		"missing-shutdown-time":  func() { worker.turn.ShutdownAt = time.Time{} },
+		"shutdown-before-end":    func() { worker.turn.ShutdownAt = now.Add(-time.Second) },
+		"shutdown-after-failure": func() { worker.turn.ShutdownAt = failureAt.Add(time.Nanosecond) },
+		"future-shutdown":        func() { worker.turn.ShutdownAt = time.Now().Add(time.Minute) },
+		"late-shutdown":          func() { worker.turn.ShutdownAt = flow.Deadline.Add(time.Second) },
+		"wrong-history":          func() { worker.turn.Events = []runtime.Event{{Type: runtime.EventExecution, Payload: "unrelated"}} },
+		"missing-history":        func() { worker.turn.HistoryHash = "" },
 		"lower-usage": func() {
 			lower := int64(9)
 			worker.turn.UsageTotals = []core.DispatchUsage{{Model: "native-model", InputTokens: &lower}}
@@ -188,6 +198,33 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 	after, err := db.LoadWorkspace()
 	if err != nil || len(after.Records.FailedReviewSupplements) != 1 {
 		t.Fatal("supplement did not survive reload", err)
+	}
+	for _, invalid := range []string{"completion-after-failure", "missing-failure-receipt", "wrong-failure-receipt"} {
+		records := after.Records
+		records.Events = append([]store.RuntimeReceipt(nil), records.Events...)
+		records.FailedReviewSupplements = append([]store.FailedReviewSupplement(nil), records.FailedReviewSupplements...)
+		supplement := &records.FailedReviewSupplements[0]
+		if invalid == "completion-after-failure" {
+			supplement.FinishedAt = failureAt.Add(time.Nanosecond)
+			supplement.ShutdownAt = supplement.FinishedAt
+			supplement.At = failureAt.Add(time.Second)
+		} else {
+			var events []store.RuntimeReceipt
+			for _, receipt := range records.Events {
+				if receipt.DispatchID == dispatch.ID && receipt.Type == "verified-result" {
+					if invalid == "missing-failure-receipt" {
+						continue
+					}
+					receipt.Payload, receipt.Hash = "{}", receiptHash("{}")
+				}
+				events = append(events, receipt)
+			}
+			records.Events = events
+			supplement.ReceiptHash, _ = records.DispatchReceiptsHash(dispatch.ID)
+		}
+		if err := records.VerifyFlowAudits(after.Graph); err == nil {
+			t.Fatal("durable verifier accepted invalid original completion proof", invalid)
+		}
 	}
 	before.Records.FailedReviewSupplements = after.Records.FailedReviewSupplements
 	if !reflect.DeepEqual(before, after) || worker.starts != starts || len(worker.sends) != sends || worker.stops != stops {

@@ -31,6 +31,9 @@ transcript 修復を有効にしない。保存済みの実行 anchor と native
 Caller が作った回答 JSON の入力は提供しない。
 
 apply は同じ要求、workspace 全体、元 Dispatch、native 履歴、保存回答を含む preview hash を要求する。
+回答、turn 終了、routine shutdown の順序と各時刻を保持し、
+shutdown まで元の提出期限内かつ元の正式失敗以前であることを要求する。
+保存形式の読取り・更新でも元の FAILED receipt の内容と時刻を照合する。
 処理中の workspace 変更は transaction 内で再確認して拒否する。
 追記記録の削除・入れ子の書換えと、元 Dispatch の指示・結果・利用量の変更は拒否する。
 現在の Task・Flow・owner・operation・既存 receipt は変更しない。
