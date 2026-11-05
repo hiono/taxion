@@ -56,6 +56,32 @@ func (d GraphDispatch) ValidateResult(status DispatchStatus, result *DispatchRes
 	return validateDispatchResult(d, status, result)
 }
 
+// ValidateFailedReviewSupplement checks a negative saved answer, not a successful
+// DispatchResult. Model-reported validations never become controller evidence.
+func (d GraphDispatch) ValidateFailedReviewSupplement(result *DispatchResult) error {
+	if d.Status != DispatchFailed || d.Recipient != "REVIEWER" ||
+		d.Instruction.Version != DispatchInstructionVersion ||
+		d.Instruction.OutputMode != OutputModeWorktreeTreeSnapshot ||
+		result == nil || result.Status != DispatchSucceeded || result.ReviewVerdict != "REQUEST_CHANGES" ||
+		result.DispatchID != d.ID || result.TaskID != d.TaskID || result.Recipient != d.Recipient ||
+		result.Repository != d.Repository || result.StartedSHA != d.ExecutionStartSHA ||
+		d.ExecutionStartSHA == "" || d.ExecutionStartSHA != d.ExpectedStartSHA() ||
+		result.OutputSHA != d.ExecutionStartSHA || result.OutputTreeSHA != "" ||
+		result.GitEvidence != nil || result.PartialGitEvidence != nil || result.ChangeManifest != nil ||
+		len(result.ExecutionEvidence) != 0 || !validStatus(result.NextTransition) ||
+		result.WorktreeChanged == nil || *result.WorktreeChanged || len(result.ChangedFiles) != 0 ||
+		len(result.Evidence) == 0 || !validList(result.Evidence) || !validList(result.Blockers) {
+		return graphError("failed review supplement requires a bound read-only REQUEST_CHANGES answer without controller evidence")
+	}
+	for _, required := range d.Instruction.RequiredEvidence {
+		if !slices.Contains(result.Evidence, required) ||
+			required == "work-report" && strings.TrimSpace(result.WorkReport) == "" {
+			return graphError("failed review supplement is missing required evidence")
+		}
+	}
+	return validateReviewerResult(d, result)
+}
+
 func (d GraphDispatch) ExpectedStartSHA() string {
 	if d.Instruction.Version >= 4 && d.Recipient == "CODER" && d.Instruction.TargetSHA != "" {
 		return d.Instruction.TargetSHA

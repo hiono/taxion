@@ -115,6 +115,33 @@ func TestSecretPathPolicyPrecedesScanner(t *testing.T) {
 	}
 }
 
+func TestUnchangedCIEnvironmentExampleRejectsBeforeSecretScanner(t *testing.T) {
+	root := t.TempDir()
+	gitTest(t, root, "init", "-q")
+	gitTest(t, root, "config", "user.name", "Test")
+	gitTest(t, root, "config", "user.email", "test@example.invalid")
+	writeTest(t, root, ".env.ci.example", "EXAMPLE_VALUE=placeholder\n")
+	writeTest(t, root, "source.txt", "original\n")
+	gitTest(t, root, "add", ".")
+	gitTest(t, root, "commit", "-qm", "test baseline")
+	writeTest(t, root, "source.txt", "changed\n")
+	gitTest(t, root, "add", "source.txt")
+	if changed := gitTest(t, root, "diff", "--cached", "--name-only"); strings.Contains(changed, ".env.ci.example") {
+		t.Fatal("example fixture unexpectedly changed")
+	}
+	before := gitTest(t, root, "ls-files", "--stage")
+	if err := CheckIndex(context.Background(), root); err == nil {
+		t.Fatal("full-index policy did not reject unchanged environment example")
+	}
+	if err := CheckSecrets(context.Background(), root, filepath.Join(t.TempDir(), "absent-scanner")); err == nil ||
+		!strings.Contains(err.Error(), "prohibited local paths") {
+		t.Fatal("unchanged example did not reject before scanner discovery", err)
+	}
+	if before != gitTest(t, root, "ls-files", "--stage") {
+		t.Fatal("rejection changed index")
+	}
+}
+
 func TestSecretScanRejectsMissingObjectsAndIgnoresReplacementBlobs(t *testing.T) {
 	root := t.TempDir()
 	gitTest(t, root, "init", "-q")

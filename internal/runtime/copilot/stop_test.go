@@ -68,15 +68,47 @@ func TestStopOnlyBindingCannotExecuteOrChangeSession(t *testing.T) {
 	}
 }
 
-func TestStopOnlySDKProtocolNeverCreatesOrSends(t *testing.T) {
-	for _, observe := range []bool{false, true} {
-		t.Run(fmt.Sprintf("observe=%t", observe), func(t *testing.T) {
-			testStopOnlySDKProtocol(t, observe)
-		})
+func TestFailedReviewObservationCannotExecute(t *testing.T) {
+	dispatch := core.GraphDispatch{
+		Recipient: "REVIEWER", Status: core.DispatchFailed,
+		RuntimeSessionID: "saved-session", RuntimeConfigHash: strings.Repeat("a", 64),
+		Instruction: core.DispatchInstruction{Version: 5, Worktree: t.TempDir()},
+	}
+	if _, err := NewForStop(dispatch, "/bin/true", t.TempDir()); err == nil {
+		t.Fatal("ordinary stop constructor now accepts a failed Dispatch")
+	}
+	adapter, err := NewForFailedReview(dispatch, "/bin/true", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	if _, err := adapter.Start(t.Context(), "task"); err == nil {
+		t.Fatal("failed review observer started a model")
+	}
+	if err := adapter.Send(t.Context(), dispatch.RuntimeSessionID, "execute"); err == nil {
+		t.Fatal("failed review observer sent model work")
+	}
+	if err := adapter.Resume(t.Context(), dispatch.RuntimeSessionID); err == nil {
+		t.Fatal("failed review observer resumed execution")
+	}
+	dispatch.Recipient = "CODER"
+	if _, err := NewForFailedReview(dispatch, "/bin/true", t.TempDir()); err == nil {
+		t.Fatal("failed Coder accepted as negative review")
 	}
 }
 
-func testStopOnlySDKProtocol(t *testing.T, observe bool) {
+func TestStopOnlySDKProtocolNeverCreatesOrSends(t *testing.T) {
+	for _, observe := range []bool{false, true} {
+		t.Run(fmt.Sprintf("observe=%t", observe), func(t *testing.T) {
+			testStopOnlySDKProtocol(t, observe, false)
+		})
+	}
+	t.Run("failed-review-observation", func(t *testing.T) {
+		testStopOnlySDKProtocol(t, true, true)
+	})
+}
+
+func testStopOnlySDKProtocol(t *testing.T, observe, failedReview bool) {
 	worktree := t.TempDir()
 	var history []sdk.SessionEvent
 	if observe {
@@ -106,7 +138,13 @@ func testStopOnlySDKProtocol(t *testing.T, observe bool) {
 		RuntimeSessionID: "saved-session", RuntimeConfigHash: strings.Repeat("a", 64),
 		Instruction: core.DispatchInstruction{Version: 4, Worktree: worktree},
 	}
-	adapter, err := NewForStop(dispatch, "/bin/true", t.TempDir())
+	var adapter *Adapter
+	if failedReview {
+		dispatch.Recipient, dispatch.Status = "REVIEWER", core.DispatchFailed
+		adapter, err = NewForFailedReview(dispatch, "/bin/true", t.TempDir())
+	} else {
+		adapter, err = NewForStop(dispatch, "/bin/true", t.TempDir())
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

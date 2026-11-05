@@ -333,6 +333,14 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	}
 	packetAudits := slices.Clone(state.Records.PacketAudits)
 	acceptances := make([]string, len(state.Records.ReviewAcceptances))
+	supplements := make([]string, len(state.Records.FailedReviewSupplements))
+	for i, supplement := range state.Records.FailedReviewSupplements {
+		content, err := core.CanonicalJSON(supplement)
+		if err != nil {
+			return err
+		}
+		supplements[i] = string(content)
+	}
 	observations := make([]string, len(state.Records.InputObservations))
 	for i, observation := range state.Records.InputObservations {
 		content, err := core.CanonicalJSON(observation)
@@ -364,6 +372,15 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	}
 	if err := update(&state); err != nil {
 		return err
+	}
+	if len(state.Records.FailedReviewSupplements) < len(supplements) {
+		return fmt.Errorf("failed review supplements are append-only")
+	}
+	for i, previous := range supplements {
+		content, err := core.CanonicalJSON(state.Records.FailedReviewSupplements[i])
+		if err != nil || string(content) != previous {
+			return fmt.Errorf("failed review supplements are immutable")
+		}
 	}
 	if len(state.Records.InputObservations) < len(observations) {
 		return fmt.Errorf("input observations are append-only")

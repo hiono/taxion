@@ -80,58 +80,10 @@ func (c *Controller) adoptSavedTurn(dispatch core.GraphDispatch, flow core.Revie
 			current.InstructionHash != dispatch.InstructionHash || owner.RunnerID != request.ExpectedRunnerID {
 			return fmt.Errorf("taxion: saved finalization binding changed during observation")
 		}
-		// Match durable observations in order against the provider's own history.
-		// A path or caller-supplied JSON is not evidence that this turn belongs here.
 		stream := "saved-turn:" + turn.HistoryHash
-		cursor, anchors := 0, 0
-		matched := make(map[int]bool)
-		for _, receipt := range state.Records.Events {
-			if receipt.DispatchID != dispatch.ID ||
-				receipt.Type != runtime.EventExecution && receipt.Type != runtime.EventUsage && receipt.Type != runtime.EventOutput {
-				continue
-			}
-			if receipt.SessionID != turn.SessionID || receipt.Hash != receiptHash(receipt.Payload) {
-				return fmt.Errorf("taxion: saved runtime observation is inconsistent")
-			}
-			// Per-call usage is ephemeral in Copilot history. Keep its durable
-			// receipts; reconcile missing metrics from the shutdown totals below.
-			if receipt.Type == runtime.EventUsage {
-				for index, event := range turn.Events {
-					if !matched[index] && event.Type == receipt.Type && event.Payload == receipt.Payload {
-						matched[index] = true
-						break
-					}
-				}
-				continue
-			}
-			if receipt.StreamID == stream {
-				index := int(receipt.Sequence) - 1
-				if index < 0 || index >= len(turn.Events) || turn.Events[index].Type != receipt.Type ||
-					turn.Events[index].Payload != receipt.Payload {
-					return fmt.Errorf("taxion: previously adopted provider history differs")
-				}
-				matched[index] = true
-				continue
-			}
-			found := false
-			for cursor < len(turn.Events) {
-				index := cursor
-				event := turn.Events[cursor]
-				cursor++
-				if event.Type == receipt.Type && event.Payload == receipt.Payload {
-					matched[index], found = true, true
-					if event.Type == runtime.EventExecution {
-						anchors++
-					}
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("taxion: provider history differs from the durable execution observations")
-			}
-		}
-		if anchors == 0 {
-			return fmt.Errorf("taxion: saved finalization requires a matching durable execution observation")
+		matched, err := matchSavedTurn(state.Records, dispatch, turn)
+		if err != nil {
+			return err
 		}
 		now := time.Now().UTC()
 		for index, event := range turn.Events {
@@ -183,6 +135,63 @@ func (c *Controller) adoptSavedTurn(dispatch core.GraphDispatch, flow core.Revie
 		})
 		return nil
 	})
+}
+
+// Match durable observations in order against the provider's own history.
+// Caller-authored answer files cannot establish this execution binding.
+func matchSavedTurn(records store.Records, dispatch core.GraphDispatch, turn runtime.SavedTurn) (map[int]bool, error) {
+	stream := "saved-turn:" + turn.HistoryHash
+	cursor, anchors := 0, 0
+	matched := make(map[int]bool)
+	for _, receipt := range records.Events {
+		if receipt.DispatchID != dispatch.ID ||
+			receipt.Type != runtime.EventExecution && receipt.Type != runtime.EventUsage && receipt.Type != runtime.EventOutput {
+			continue
+		}
+		if receipt.SessionID != turn.SessionID || receipt.Hash != receiptHash(receipt.Payload) {
+			return nil, fmt.Errorf("taxion: saved runtime observation is inconsistent")
+		}
+		// Per-call usage is ephemeral; retain its receipts and compare the
+		// provider's shutdown totals separately.
+		if receipt.Type == runtime.EventUsage {
+			for index, event := range turn.Events {
+				if !matched[index] && event.Type == receipt.Type && event.Payload == receipt.Payload {
+					matched[index] = true
+					break
+				}
+			}
+			continue
+		}
+		if receipt.StreamID == stream {
+			index := int(receipt.Sequence) - 1
+			if index < 0 || index >= len(turn.Events) || turn.Events[index].Type != receipt.Type ||
+				turn.Events[index].Payload != receipt.Payload {
+				return nil, fmt.Errorf("taxion: previously adopted provider history differs")
+			}
+			matched[index] = true
+			continue
+		}
+		found := false
+		for cursor < len(turn.Events) {
+			index := cursor
+			event := turn.Events[cursor]
+			cursor++
+			if event.Type == receipt.Type && event.Payload == receipt.Payload {
+				matched[index], found = true, true
+				if event.Type == runtime.EventExecution {
+					anchors++
+				}
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("taxion: provider history differs from the durable execution observations")
+		}
+	}
+	if anchors == 0 {
+		return nil, fmt.Errorf("taxion: saved finalization requires a matching durable execution observation")
+	}
+	return matched, nil
 }
 
 func reconcileSavedUsage(dispatch *core.GraphDispatch, totals []core.DispatchUsage, at time.Time) error {

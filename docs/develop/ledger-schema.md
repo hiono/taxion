@@ -26,6 +26,16 @@ Reviewer の結果確定は `Records.Events` の `review-finalization` receipt �
 利用量の不足分だけを Graph と budget audit に加算し、既存の receipt と消費を保持する。
 これらは実行観測であり、正式結果の `verified-result` の代用にはならない。
 
+`Records.FailedReviewSupplements` は、正式失敗した snapshot Reviewer の native 回答を
+負の指摘として追記する任意の配列である。`dispatchHash` は元 Dispatch 全体を固定し、
+`receiptHash` はその Dispatch の元 runtime receipt 列を固定する。
+`historyHash` は native 履歴、`previewHash` は承認した要求と観測対象を束縛する。
+回答・元期限内完了時刻・shutdown 集計・申請者・承認出所・停止証拠・記録時点を保存する。
+回答のモデル申告 `status` を正式 Dispatch 状態や品質結果として使わない。
+追記の削除・変更と元 Dispatch の変更を拒否し、既存 receipt・Graph・利用量は書き換えない。
+操作と対象条件は [ADR-0072](adr/0072-append-negative-review-after-formal-failure.md) を参照する。
+新 field を知らない旧版へ渡すための記録削除は提供しない。
+
 以下の Ledger JSON は、CLI・HTTP API と Web 表示の互換契約である。
 Graph や Records の新しい field を、ここに定義した legacy Ledger のキー追加とは混同しない。
 

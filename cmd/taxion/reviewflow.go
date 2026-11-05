@@ -113,9 +113,12 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 		return encoder.Encode(value)
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: taxion workflow {plan|start|validate-input|advance|run|resume|step|extend|recover|reconcile-stopped|recover-review|accept-saved-review|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|budget|evaluate|lanes}")
+		return fmt.Errorf("usage: taxion workflow {plan|start|validate-input|advance|run|resume|step|extend|recover|reconcile-stopped|recover-review|accept-saved-review|record-failed-review|handoff|interrupt|terminate|feedback-target|repair-status|planning-context|planner-draft|planner-action|question-draft|feedback|feedback-resolve|draft|draft-discard|draft-approve|show|budget|evaluate|lanes}")
 	}
 	action := args[0]
+	if action == "record-failed-review" {
+		return recordFailedReviewCommand(parent, args[1:], output)
+	}
 	if action == "observe-input" || action == "assess-input" {
 		return inputObservationCommand(action, args[1:], output)
 	}

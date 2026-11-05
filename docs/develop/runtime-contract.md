@@ -137,6 +137,11 @@ checkpoint v2 は既存の正規化 document 保存を使い、operation ID、�
 ## 保存結果と checkpoint の復旧
 
 継続と上限変更は [ADR-0058](adr/0058-recover-unstarted-artifact-review.md) に従う。
+正式 `FAILED` の保存済み `REQUEST_CHANGES` は
+[ADR-0072](adr/0072-append-negative-review-after-formal-failure.md) の追記操作で扱う。
+停止専用 attachment と同じ非実行設定で元 native 履歴を読み、
+元 Dispatch・実行観測・期限・準備済み Reviewer tree を照合する。
+失敗履歴を変更せず、モデル送信、host 検証再実行、品質受理、owner 回収は行わない。
 稼働中は `workflow extend` の一つの承認判断を `ReviewFlow.extensions` と
 `RESOURCE_EXTENDED` へ原子的に追記する。元の期限・予算・工程計画を変更せず、
 `ExecutionDeadline()` と `NativeLimit()` で有効値を求める。
