@@ -92,6 +92,7 @@ func savedTurn(events []sdk.SessionEvent, sessionID, worktree string) (runtime.S
 			}
 		case *sdk.SessionShutdownData:
 			shutdown = data.ShutdownType == "routine" && ended && result.Payload != ""
+			result.ShutdownAt = event.Timestamp
 			result.UsageTotals = nil
 			models := make([]string, 0, len(data.ModelMetrics))
 			for model := range data.ModelMetrics {
@@ -124,7 +125,7 @@ func savedTurn(events []sdk.SessionEvent, sessionID, worktree string) (runtime.S
 		}
 	}
 	if !started || !ended || !shutdown || messageID == "" ||
-		result.FinishedAt.Before(result.SubmittedAt) {
+		result.FinishedAt.Before(result.SubmittedAt) || result.ShutdownAt.Before(result.FinishedAt) {
 		return fail()
 	}
 	body, err := json.Marshal(events)

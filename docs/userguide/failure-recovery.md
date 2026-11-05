@@ -81,7 +81,7 @@ Flow が `COMPLETED`、Reviewer が `SUCCEEDED` / `APPROVE` でも品質ゲー�
 ## runner 終了後に回答だけが残っている
 
 保存した `RUNNING` は process が生きている証拠ではない。旧 runner の終了を確認し、
-Flow・Dispatch・session・最後の受信記録を照合する。正式結果がない Reviewer には
+Flow・Dispatch・session・最後の受信記録を照合する。正式結果がない `RUNNING` Reviewer には
 `workflow recover --file recovery.json` の `finalizeSavedResult:true` を使う。
 入力形式は `workflow recover --help` を参照する。
 
@@ -97,6 +97,15 @@ host 検証が開始済みで、検証済み結果の保存もない場合は、
 保存結果を確認してから `workflow advance` へ進む。
 `REQUEST_CHANGES` の受理は製品の承認ではなく、`maxRepairs:0` も変えない。
 修正には元の指摘・候補を保持した、明示承認済みの範囲内の後続を使う。
+
+既に正式 `FAILED` の Reviewer はこの確定操作の対象外である。
+保存回答が `REQUEST_CHANGES` なら、
+[`workflow record-failed-review`](cli-reference.md#failed-reviewer-の保存回答を追記する) の
+preview と承認済み hash による追記を使う。元の失敗結果、利用量、Task、Flow は変更しない。
+モデルへ再送せず、host 検証も繰り返さない。指摘は正式な追加記録になるが、
+品質結果の受理・修正実行・Flow 完了にはならない。
+元 native 履歴の完了、実行 anchor、期限、同一候補を照合できなければ拒否する。
+運用機の原本を調べる権限や追記操作の承認は、開発側の合成検証とは別に確認する。
 
 ## Flow が停止している
 

@@ -275,6 +275,8 @@ _.file = ".env"
 
 `git check-index` は Git の実際の index 全体を検査し、作業ファイルの内容を読まず、Git 状態も変更しない。path の構成要素に `.taxion` があるもの、basename が `.env` または `.env.` で始まるものを拒否する。入れ子、強制追加、index 内の symlink、変更していない追跡済み local file も対象とし、これらの削除を stage することは許可する。値を含めない共有例は `.taxion/` 外の `docs/environment.example`・`docs/taxion-config.example.yaml` などに置く。`.env.example` も意図的に禁止対象に含める。
 
+変更していない `.env.ci.example` も同じ禁止対象であり、`--secrets` の scanner 探索・内容検査より先に拒否する。
+
 部分 commit の `GIT_INDEX_FILE` と linked worktree を含め、Git が選択した repository と index を使う。subdirectory から実行しても index 全体を検査する。error は分類別件数だけを表示し、file 名や値は表示しない。読めない index と unmerged index は不合格とする。手動 commit の直前か pre-commit hook から実行する。このコマンド自体は hook を設置せず、Controller 管理の commit は後述する同じ検査を直接実行する。検査は path だけなので、source file・共有例・`mise.toml` にコピーした秘密には内容検査が必要となる。`--secrets` で後述の local 内容検査を追加する。
 
 `git check-index --secrets` は信頼する [Betterleaks 1.9.0](https://github.com/betterleaks/betterleaks/releases/tag/v1.9.0) binary を要求する。PATH 上の `betterleaks` か `--scanner` の指定を使い、導入前に公開 checksum で release archive を照合する。scanner の欠落・非互換・失敗・中断・不正な report は拒否する。Taxion の Go 依存に scanner package は追加しない。
@@ -772,6 +774,56 @@ bundle-required の通常・持込み入力では、保存済みの親契約と�
 任意の packet 委譲は不要だが、追加 Task ID による正確な設定対象は必要である。
 元 Task が承認済みという理由だけで、別の設定や契約を許可しない。
 既存の packet 委譲を選んだ場合は、その限定を維持する。
+
+## FAILED Reviewer の保存回答を追記する
+
+`workflow record-failed-review` は、正式 `FAILED` になった最新の snapshot Reviewer に、
+保存済み `REQUEST_CHANGES` を追加の正式な指摘記録として結び付ける。
+`RUNNING` の結果確定や、`CANCELLED` から新たなモデル実行を行う操作とは区別する。
+
+最初に元 process の終了と保存済み owner を確認し、次の JSON を作る。
+`expectedRunnerId` は現在保存された値と完全一致させる。claim がなければ空文字列を指定する。
+
+```json
+{
+  "flowId": "FAILED_REVIEW_FLOW_ID",
+  "dispatchId": "FAILED_REVIEWER_DISPATCH_ID",
+  "expectedRunnerId": "EXACT_SAVED_RUNNER_OR_EMPTY",
+  "previousProcessStopped": true,
+  "actor": "human",
+  "source": "human:ACTUAL_APPROVAL_REFERENCE",
+  "reason": "保存された指摘を失敗履歴と区別して保持する",
+  "evidence": ["process-exit:ACTUAL_OBSERVATION"]
+}
+```
+
+```bash
+taxion --store /absolute/path/to/ledger.json workflow record-failed-review \
+  --file decision.json --preview \
+  --cli /absolute/path/to/copilot --base-directory /original/copilot/base
+```
+
+元の Copilot 環境から、同じ session の期限内完了、turn end、routine shutdown と
+保存された実行観測を照合する。回答、turn end、shutdown の順序を確認し、
+shutdown まで元の提出期限内かつ元の正式失敗以前でなければならない。
+準備済みの別 Reviewer worktree と保持 tree も確認する。
+回答 JSON の持込み、別 session、`APPROVE`、`BLOCKED`、変更・解放済み worktree、
+復元 workspace は拒否する。
+
+返された `supplement.answer` と非実行・品質未受理の表示を確認し、実際に承認した場合だけ
+その `hash` を同じ JSON の `expectedHash` に追加して `--preview` なしで実行する。
+要求、workspace、native 履歴が変われば新しい preview が必要になる。
+`stateChanged:true` は追記だけを表す。元の Dispatch は `FAILED` のままで、
+`qualityAccepted:false`、`executionAuthorized:false`、
+`validationStatus:NOT_REPLAYED_NOT_ACCEPTED`、`accountingReconciled:false` を返す。
+回答中の検証申告と shutdown 集計は、host 検証や照合済みの消費残量として使わない。
+
+保存後は `taxion --store /absolute/path/to/ledger.json records show` の
+`failedReviewSupplements` で確認できる。同じ Dispatch への二重追記は拒否する。
+この操作は owner 回収、Flow 再開、修正、再レビュー、品質合格、公開を許可しない。
+後続判断では元候補と指摘、未確認の検証・累計消費を保持する。
+追記後の workspace を旧版へ渡すために新 field を削ってはならない。
+設計の条件表は [ADR-0072](../develop/adr/0072-append-negative-review-after-formal-failure.md) を参照する。
 
 ## 停止済み初回指示の整合回復
 
@@ -1357,6 +1409,7 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | `workflow evaluate` | `--id FLOW_ID` で保存品質証拠と測定済み／未測定の費用を JSON 表示する。`targetSha` / `targetTreeSha` は保存グラフの対象を示す。読取り専用 SQLite 接続を使い、workspace 作成・移行・モデル実行をしない。`--require-quality` は完了した独立同一 target レビュー、Controller による必須コマンドと Git の証拠、文書整合 criterion がなければ JSON を出したうえで非zero終了する。命令形式4より前の成功結果は読めるが、検証済み品質へ昇格しない。得点・自動公開承認・現在の Git の検証ではない。 |
 | `workflow extend` | `--file JSON --preview` は稼働実行と変更前後の期限・native 上限の読取り専用 preview。正確な一括承認後、同じ要求へ `expectedHash` を追加し、`--preview` なしで適用する。元記録・累計消費・同じ session を保持する。[条件と形式](#実行を維持した期限予算の延長)を参照。 |
 | `workflow accept-saved-review` | `--file JSON` で `flowId`・`actor`・`source`・`reason`・`allowExpired` を指定する。`--preview` は状態を変えず対象と検査を表示し、適用には同じ判断と preview の `hash` を `expectedHash` として要求する。引継ぎ保留の理由消失で停止したレビュー専用 snapshot Flow だけを対象に、モデルや検証 command を起動せず保存済み `APPROVE` を受理する。 |
+| `workflow record-failed-review` | `--file JSON` と `--preview` で最新の正式 `FAILED` Reviewer の native `REQUEST_CHANGES` を照合する。承認した `expectedHash` により指摘だけを追記する。`--cli`・`--base-directory` は元 Copilot 環境を指定する。失敗履歴・利用量・Task・Flow は変更せず、品質受理・モデル送信・検証再実行を行わない。 |
 | `workflow reconcile-stopped` | `--file JSON` と任意の `--preview`。停止済み初回 snapshot 指示の取消と承認済み入力の出典を保存する。人間の実行静止確認・配送不明の受入れ・完全ハッシュを要求し、旧 Flow と不明な利用量を保持する。 |
 | `gate contract`, `gate execution`, `gate publication` | `gate contract` は `--task ID`、`gate execution`・`gate publication` は `--flow ID` を要求する。保存 Task・Flow・承認 bundle・評価証拠だけを読み、Task Graph・Dispatch・Flow・ledger を変更せずモデルも呼ばない。`--json` は version 1 の機械可読 report（gate 名、verdict、task/proposal/record/bundle/evidence hash、blockingConditions、drift と authorization impact、nextRequiredApproval、nextAuthorizedTransition、`stateChanged:false`）を出す。`--json` なしは同じ内容を人が読める形で出す。終了 code は 0 pass・1 fail・2 blocked で、未検証の項目を pass として報告しない。 |
 | `workflow lanes` | `--task ID` で保存 Task を選び、repository identity・baseline/worktree・contract 整合・handoff 準備の4つの読取り専用 lane を並行実行して JSON を表示する。`--timeout DURATION` は lane ごとの上限（既定5秒）、`--root PATH` は worktree を含むべき repository root（既定は現在 directory）を指定する。workspace・Task Graph・Dispatch・Flow・worktree・runtime session を変更せず、モデル session も開始しない。lane が一つでも失敗すると `executionGateOpen` は false になり、JSON を出したうえで非zero終了する。診断は credential を伏せる。 |

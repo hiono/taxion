@@ -21,6 +21,21 @@ func NewForStop(dispatch core.GraphDispatch, cli, base string) (*Adapter, error)
 		}, dispatch.Status) {
 		return nil, fmt.Errorf("taxion: stop-only adapter requires a saved execution session and configuration hash")
 	}
+	return newForSavedSession(dispatch, cli, base)
+}
+
+// NewForFailedReview permits only nonexecuting observation of the saved session.
+// The ordinary cancellation constructor deliberately still rejects FAILED.
+func NewForFailedReview(dispatch core.GraphDispatch, cli, base string) (*Adapter, error) {
+	hash, err := hex.DecodeString(dispatch.RuntimeConfigHash)
+	if err != nil || len(hash) != 32 || dispatch.RuntimeSessionID == "" ||
+		dispatch.Status != core.DispatchFailed || dispatch.Recipient != "REVIEWER" {
+		return nil, fmt.Errorf("taxion: failed review observation requires a failed Reviewer and saved session identity")
+	}
+	return newForSavedSession(dispatch, cli, base)
+}
+
+func newForSavedSession(dispatch core.GraphDispatch, cli, base string) (*Adapter, error) {
 	config := Config{
 		Role: dispatch.Recipient, WorkingDirectory: dispatch.Instruction.Worktree,
 		SystemPrompt: "Cancel the saved session only. No execution is authorized.",
