@@ -12,11 +12,11 @@ Task は一件の作業記録で、目的・変更範囲・完了条件・検証
 このガイドは同じソースの CLI を対象とし、古い版の操作を併記しません。
 公開版の選択、ハッシュと出典の照合、運用 policy の初回登録は
 [正式バイナリと運用モード](binary-provenance.md)に従ってください。
-以下は v0.7.22 を固定する例であり、最新版への自動更新指定ではありません。
+以下は v0.7.23 を固定する例であり、最新版への自動更新指定ではありません。
 
 ```sh
-mise install github:hiono/taxion@0.7.22
-mise use --pin github:hiono/taxion@0.7.22
+mise install github:hiono/taxion@0.7.23
+mise use --pin github:hiono/taxion@0.7.23
 mise exec -- taxion --version
 mise exec -- taxion --help
 ```

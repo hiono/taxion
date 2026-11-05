@@ -11,7 +11,8 @@ import (
 var readyInstructions string
 
 var readyPrompt = readyInstructions + "\n## Goal-oriented execution policy\n\n" +
-	goalExecutionPolicy + "\n" + goalRolePolicy + "\n"
+	goalExecutionPolicy + "\n" + goalRolePolicy + "\n" +
+	"\n## Accepted Coder output and unstarted normal Reviewer recovery\n" + normalReviewerRecoveryHelp
 
 func readyCmd(args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("ready", flag.ContinueOnError)

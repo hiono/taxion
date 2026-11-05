@@ -51,10 +51,24 @@ type ArtifactReview struct {
 	Validation             ArtifactValidation    `json:"validation"`
 }
 
-// ReviewDiffBaselineSHA differs from the execution commit for committed supplied input.
+// ReviewDiffBaselineSHA preserves the full diff independently of the execution commit.
 func (d GraphDispatch) ReviewDiffBaselineSHA() (string, error) {
 	baseline, found := d.Instruction.BaselineSHA, false
 	for _, decision := range d.Instruction.Decisions {
+		if strings.HasPrefix(decision.ID, "coder-review-target:") {
+			var target ArtifactTarget
+			if found || json.Unmarshal([]byte(decision.Text), &target) != nil ||
+				target.Verify() != nil || d.Recipient != "REVIEWER" || d.RelatedID == "" ||
+				decision.ID != "coder-review-target:"+d.RelatedID ||
+				decision.Source != "dispatch:"+d.RelatedID || target.Source != decision.Source ||
+				target.Repository != d.Repository || target.CommitSHA != d.Instruction.BaselineSHA ||
+				target.CommitSHA != d.Instruction.TargetSHA || target.TreeSHA != d.Instruction.TargetTreeSHA ||
+				!slices.Equal(target.ChangedFiles, d.Instruction.TargetChangedFiles) {
+				return "", graphError("Reviewer diff requires its exact accepted Coder target")
+			}
+			baseline, found = target.BaselineSHA, true
+			continue
+		}
 		if !strings.HasPrefix(decision.ID, "input-artifact:") {
 			continue
 		}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -79,8 +80,34 @@ func (g TaskGraph) HasBudgetContinuationSource(flow ReviewFlow, sourceID string)
 		flow.DispatchIDs[len(flow.DispatchIDs)-2] == sourceID &&
 		last.Recipient == "REVIEWER" && last.Status == DispatchCancelled &&
 		last.Relationship == RelationshipIndependent && last.RelatedID == sourceID &&
-		last.RuntimeSessionID != "" && last.Result != nil &&
-		slices.Contains(last.Result.Evidence, "runtime-stop:"+last.RuntimeSessionID)
+		last.Result != nil &&
+		(last.RuntimeSessionID != "" && slices.Contains(last.Result.Evidence, "runtime-stop:"+last.RuntimeSessionID) ||
+			!last.Acknowledged && !last.ExecutionStarted && last.RuntimeSessionID == "" &&
+				last.RuntimeConfigHash == "" && last.ExecutionStartSHA == "" && len(last.RuntimeUsage) == 0 &&
+				len(last.Result.Evidence) >= 2 && strings.HasPrefix(last.Result.Evidence[0], "reconciled-stop:") &&
+				last.Result.Evidence[1] == "delivery:unknown")
+}
+
+// StoppedCoderReviewer is the unstarted last Reviewer of a normal Coder Flow.
+// Controller additionally verifies the accepted result receipt and mutable Git state.
+func (g TaskGraph) StoppedCoderReviewer(f ReviewFlow, d GraphDispatch) bool {
+	if f.Artifact != nil || f.Status != "STOPPED" ||
+		!slices.Contains([]string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT"}, f.StopCode) ||
+		!f.HandoffHeld() || f.RunnerID != "" || len(f.DispatchIDs) < 2 ||
+		f.LastDispatchID() != d.ID || d.TaskID == f.TaskID || d.Recipient != "REVIEWER" ||
+		d.Relationship != RelationshipIndependent || d.Status != DispatchIssued ||
+		d.Acknowledged || d.ExecutionStarted || d.RuntimeSessionID != "" || d.Result != nil ||
+		d.RuntimeConfigHash != "" || d.ExecutionStartSHA != "" || len(d.RuntimeUsage) != 0 {
+		return false
+	}
+	coder, ok := g.dispatch(f.DispatchIDs[len(f.DispatchIDs)-2])
+	return ok && coder.ID == d.RelatedID && coder.TaskID == f.TaskID && coder.Recipient == "CODER" &&
+		coder.Status == DispatchSucceeded && coder.Result != nil && coder.Result.Status == DispatchSucceeded &&
+		coder.Result.GitEvidence != nil && coder.Instruction.OutputMode == OutputModeWorktreeTreeSnapshot &&
+		d.Instruction.OutputMode == OutputModeWorktreeTreeSnapshot &&
+		d.Instruction.BaselineSHA == coder.Result.OutputSHA && d.Instruction.TargetSHA == coder.Result.OutputSHA &&
+		d.Instruction.TargetTreeSHA == coder.Result.OutputTreeSHA &&
+		slices.Equal(d.Instruction.TargetChangedFiles, coder.Result.ChangedFiles)
 }
 
 func (g TaskGraph) ReviewFlow(id string) (ReviewFlow, bool) {
@@ -129,7 +156,7 @@ func (g TaskGraph) validateReviewFlows() error {
 		}
 		if budget.MaxDispatches != 0 || budget.MaxCoderSessions != 0 ||
 			budget.MaxReviewerSessions != 0 || budget.MaxNanoAIU != 0 || budget.ExternalBudgetOnly() || budget.BudgetSource != "" {
-			if budget.MaxDispatches < 1 || budget.MaxCoderSessions < 0 || budget.MaxCoderSessions == 0 && flow.Artifact == nil ||
+			if budget.MaxDispatches < 1 || budget.MaxCoderSessions < 0 || budget.MaxCoderSessions == 0 && !flow.ReviewFirst() ||
 				budget.MaxReviewerSessions < 1 || math.IsNaN(budget.MaxNanoAIU) ||
 				math.IsInf(budget.MaxNanoAIU, 0) || budget.MaxNanoAIU < 0 ||
 				ValidateBillingBudget(budget.BudgetSource, budget.AccountQuotaOnly, budget.MaxNanoAIU,
@@ -257,6 +284,14 @@ func (g TaskGraph) validateReviewFlows() error {
 					instruction.BaselineSHA != prior.Result.OutputSHA ||
 					filepath.Dir(instruction.Worktree) != flow.ReviewRoot) {
 					return graphError("review flow requires an independent worktree at the verified Coder SHA")
+				}
+				if role == "REVIEWER" && slices.ContainsFunc(instruction.Decisions, func(d TaskDecision) bool {
+					return strings.HasPrefix(d.ID, "coder-review-target:")
+				}) {
+					baseline, err := dispatch.ReviewDiffBaselineSHA()
+					if err != nil || baseline != prior.Instruction.BaselineSHA {
+						return graphError("review target differs from the original accepted Coder baseline")
+					}
 				}
 			}
 			dispatches[id] = true

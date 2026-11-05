@@ -44,6 +44,10 @@ combines reconciliation, unchanged successor and plan instead of per-step consen
 plan is read-only and starts no model. Its authorization text describes the
 requested execution, not a preview-only permission; it is part of the hash.
 Display stagePlan.hash, contractGate, timing and limits for actual user approval.
+Optional deadline is an actually approved fixed RFC3339 absolute upper bound;
+timeoutSeconds may shorten it but delayed start cannot move it later. Expired or
+insufficient remaining time rejects. For a stopped normal Flow's unstarted
+Reviewer, read workflow reconcile-stopped --help, not recover-review.
 Only after approval add stagePlanHash (the exact returned hash) to the same input,
 then workflow start --file REQUEST.json. start issues a Dispatch, not a model turn,
 except for artifactSource: that entry saves unverified input without a Dispatch.
@@ -130,6 +134,30 @@ func workflowCommand(parent context.Context, args []string, output io.Writer) er
 	resumeSaved := action == "resume"
 	fs := flag.NewFlagSet("workflow "+action, flag.ContinueOnError)
 	fs.SetOutput(output)
+	if action == "terminate" {
+		fs.Usage = func() {
+			fmt.Fprintln(fs.Output(), "Usage of workflow terminate:")
+			fs.PrintDefaults()
+			fmt.Fprintln(fs.Output(), `
+Complete JSON:
+{
+  "flowId": "RUNNING_UNCLAIMED_FLOW_ID",
+  "dispatchId": "LATEST_UNTOUCHED_CODER_DISPATCH_ID",
+  "actor": "human",
+  "source": "human:ACTUAL_APPROVAL_REFERENCE",
+  "reason": "Actual decision to cancel the untouched Coder and approve a separate successor"
+}
+Requires a RUNNING Flow with no runner and its latest CODER Dispatch ISSUED,
+unacknowledged, not execution-started and without a runtime session.
+This sourced decision is cancellation authority, not successor approval.
+Expected: Dispatch CANCELLED, Task BLOCKED, Flow STOPPED/RECONTRACT with HOLD.
+No model starts, old instructions/results/usage remain; no new work is authorized.
+This operation does NOT cancel a STOPPED Flow's Reviewer. Use workflow
+reconcile-stopped --help for that case; do not guess JSON or edit the store.
+An executed or uncertain-delivery Dispatch requires formal reconciliation,
+not an inference of zero usage from missing records.`)
+		}
+	}
 	if action == "recover" {
 		fs.Usage = func() {
 			fmt.Fprintln(fs.Output(), "Usage of workflow recover:")

@@ -775,6 +775,204 @@ bundle-required の通常・持込み入力では、保存済みの親契約と�
 
 ## 停止済み初回指示の整合回復
 
+### 受理済み Coder 出力からのレビュー継続
+
+対象は通常 Flow の受理済み `SUCCEEDED` Coder と、その直後の未開始 `ISSUED` Reviewer である。
+Flow は `STOPPED`、`HOLD`、runner なし、停止 code は `SAFETY_STOP`、`BUDGET_STOP`、
+`BUDGET_LIMIT` のいずれかでなければならない。ACK・実行開始・session・runtime receipt・結果がある
+Reviewer は対象外である。記録がないことだけでは、未送信や無課金を証明できない。
+
+全操作で既存の明示 `--store` を維持する。最初に次の読取りで旧 Flow、Task、Dispatch、
+保存済み結果と検証 receipt、期限・設定・利用量を照合し、実 process の静止を別途確認する。
+`doctor` は未作成の review worktree を作らない。
+
+```sh
+taxion --store "$S" ready --check-skill
+taxion --store "$S" ready
+taxion --store "$S" workflow show --id OLD_FLOW_ID
+taxion --store "$S" task graph
+taxion --store "$S" workflow budget --id OLD_FLOW_ID
+taxion --store "$S" doctor --dispatch OLD_REVIEWER_DISPATCH_ID
+```
+
+Coder の `changeManifest.baselineSha` を A、`outputSha` を B、`outputTreeSha` を T とする。
+A と B は異なってよい。レビュー実行場所の HEAD は B、照合する差分は A から完全 tree T までである。
+`changedFiles` は Controller が確定した全パスであり、`reportedChangedFiles` の申告だけへ置き換えない。
+以下の値は説明用 placeholder であり、SHA、hash、日時、許可を捏造する入力ではない。
+
+取消判断の完全な JSON は次の形式である。
+
+```json
+{
+  "flowId": "OLD_FLOW_ID",
+  "dispatchId": "OLD_REVIEWER_DISPATCH_ID",
+  "actor": "human",
+  "source": "human:ACTUAL_APPROVAL_REFERENCE",
+  "reason": "受理済みCoder出力を保持して未開始Reviewerを取り消す。配信と利用量の不確実性を受け入れる",
+  "evidence": ["実際に確認したprocess静止の根拠。秘密やsession識別子は公開しない"],
+  "noActiveExecutionConfirmed": true,
+  "acceptDeliveryUncertainty": true
+}
+```
+
+```sh
+taxion --store "$S" workflow reconcile-stopped --file reconcile.json --preview
+# 実際のpreview全体を確認し、返されたhashへの承認後、同じJSONへexpectedHashを追加する。
+taxion --store "$S" workflow reconcile-stopped --file reconcile.json
+taxion --store "$S" workflow feedback-target --id OLD_FLOW_ID
+```
+
+preview の `inputOrigin` は `accepted-coder-output`、`inputTreeSha` は T でなければならない。
+管理 worktree が未作成なら、保存上も未準備で実パスが存在しないことを確認する。
+準備済みなら登録、共通 repository、detached HEAD、baseline の index、完全 target、
+余分なファイルと ignored file がないことを Controller が照合し、`preservedReviewWorktree` を返す。
+登録のない残存パスや未確定の準備状態は自動削除せず拒否する。
+
+適用後は Reviewer Dispatch が `CANCELLED`、Reviewer Task が `BLOCKED` になる。
+親 Task は `WAITING_FOR_REVIEW`、旧 Flow は元の `STOPPED/HOLD` のままである。
+Coder の成功、検証 receipt、利用量、失敗履歴、指示は保持する。取消は新実行の許可ではない。
+
+同じ repository の別 worktree に B を HEAD として完全 tree T を保持し、
+承認する新 Task の元 baseline A、B、T、全変更パスを照合する。
+既存の後続 DRAFT が整合 hash を含まない場合、その履歴を残して未使用 ID で次の intake を行う。
+以下の objective・scope・受入れ条件・検証・fileAccess・budgetGuidance は、実際の旧契約と照合して維持する。
+
+```json
+{
+  "request": "受理済み出力だけを新期限内で独立レビューする。Coderと入力検証を再実行しない",
+  "actor": "human",
+  "source": "human:ACTUAL_REQUEST_REFERENCE",
+  "reconciliationHash": "EXACT_APPLIED_RECONCILIATION_HASH",
+  "task": {
+    "id": "NEW_TASK_ID",
+    "title": "受理済み出力の独立レビュー",
+    "repo": "OWNER/REPO",
+    "type": "IMPLEMENTATION",
+    "owner": "CODER",
+    "reviewer": "REVIEWER",
+    "status": "DRAFT",
+    "objective": "旧契約の目的と受理済み検証の内容を保持する",
+    "scope": ["APPROVED_SCOPE"],
+    "outOfScope": ["APPROVED_EXCLUSION"],
+    "acceptance": ["UNCHANGED_ACCEPTANCE"],
+    "requiredEvidence": ["UNCHANGED_EVIDENCE"],
+    "validationCommands": ["UNCHANGED_APPROVED_VALIDATION_COMMAND"],
+    "exitCondition": "UNCHANGED_EXIT_CONDITION",
+    "worktree": "/absolute/preserved-successor",
+    "branch": "work/review-only-successor",
+    "baselineSha": "ORIGINAL_CODER_BASELINE_A",
+    "targetSha": "ACCEPTED_OUTPUT_COMMIT_B",
+    "targetTreeSha": "ACCEPTED_FULL_TREE_T",
+    "targetChangedFiles": ["ALL_CONTROLLER_DERIVED_PATHS"],
+    "outputMode": "worktree-tree-snapshot",
+    "supersedes": "OLD_TASK_ID",
+    "createdFrom": "flow:OLD_FLOW_ID"
+  }
+}
+```
+
+`owner: CODER` は保存成功結果を継承する親契約の役割であり、Coder の新実行枠ではない。
+旧承認 decisions はコピーしない。`conversation intake --file intake.json` の後、
+`conversation proposal --task NEW_TASK_ID` で実提案 hash と完全設定の承認を得る。
+`conversation confirm --help` の完全な設定例へ、`replacesFlow: OLD_FLOW_ID`、
+同じ `reconciliationHash`、適用後の `feedback-target` が返した完全な `target` を加える。
+`target` の全フィールドをコピーし、省略や手入力で hash を作らない。
+新 Reviewer の設定承認は `additionalTaskIds: ["NEW_FLOW_ID-review-0"]` に限定する。
+確認後の Task は `READY` となるが、Dispatch やモデルはまだ起動しない。
+
+```json
+{
+  "taskId": "NEW_TASK_ID",
+  "expectedHash": "EXACT_PROPOSAL_HASH",
+  "actor": "human",
+  "source": "human:ACTUAL_APPROVAL_REFERENCE",
+  "reason": "保持対象、レビューのみの後続、実際の完全設定を承認する",
+  "configurationDecisionId": "APPROVAL_REF@task:NEW_TASK_ID",
+  "additionalTaskIds": ["NEW_FLOW_ID-review-0"],
+  "replacesFlow": "OLD_FLOW_ID",
+  "reconciliationHash": "EXACT_APPLIED_RECONCILIATION_HASH",
+  "target": {
+    "dispatchId": "OLD_REVIEWER_DISPATCH_ID",
+    "taskId": "OLD_REVIEWER_TASK_ID",
+    "repository": "OWNER/REPO",
+    "recipient": "REVIEWER",
+    "instructionHash": "EXACT_CANCELLED_INSTRUCTION_HASH",
+    "status": "CANCELLED",
+    "updatedAt": "2099-01-01T00:00:00Z",
+    "targetSha": "EXACT_TARGET_COMMIT_B",
+    "outputSha": "",
+    "resultHash": "EXACT_CANCELLED_RESULT_HASH"
+  },
+  "selection": {
+    "version": 1,
+    "project": {"id": "PROJECT_ID"},
+    "repository": {"provider": "github", "host": "github.com", "path": "OWNER/REPO", "account": "SCM_ACCOUNT", "credentialRef": "SCM_CREDENTIAL"},
+    "runtime": {"provider": "copilot", "account": "RUNTIME_ACCOUNT", "credentialRef": "RUNTIME_CREDENTIAL", "contractRef": "CONTRACT_REF"},
+    "execution": {"requester": "REQUESTER", "worker": "WORKER", "approvalRef": "APPROVAL_REF"}
+  }
+}
+```
+
+上記の `selection` は最小の形の例である。実際の `config check --sources` に課金・予算・
+fileAccess が含まれていれば、それも含む完全な設定を使う。`target` の説明用日時・hash は入力しない。
+
+次は工程計画の完全な JSON 例である。例の日付・見積りは承認値ではない。
+元期限が切れている場合は、将来の固定絶対期限と追加枠の差分を明示して新承認を得る。
+旧 Flow を再開したり、その期限や利用量を書き換えたりしない。
+
+```json
+{
+  "id": "NEW_FLOW_ID",
+  "taskId": "NEW_TASK_ID",
+  "repository": "OWNER/REPO",
+  "reviewRoot": "/absolute/fresh-review-root",
+  "continueFromDispatchId": "ACCEPTED_CODER_DISPATCH_ID",
+  "maxRepairs": 0,
+  "timeoutSeconds": 3600,
+  "deadline": "2099-01-01T01:00:00Z",
+  "stageBudget": {
+    "version": 1,
+    "coderSessionCredits": 0,
+    "validationSeconds": 600,
+    "reviewSeconds": 1800
+  },
+  "continuationChange": "明示承認された将来期限でレビューのみ行う",
+  "savedOutputDecision": "同じ完全target、受理済みCoderと検証receipt、旧利用量と失敗履歴を保持する",
+  "authorization": {
+    "id": "NEW_REVIEW_AUTHORIZATION_ID",
+    "source": "human:ACTUAL_APPROVAL_REFERENCE",
+    "text": "実際に提示した固定期限、Reviewer1・Coder0・repair0と実効課金契約の範囲で実行を承認する"
+  }
+}
+```
+
+`maxNanoAiu` の省略には、元から承認済みの外部課金契約が必要である。
+native 上限を使う契約では実際に承認した `maxNanoAiu` と `stageBudget.reviewNanoAiu` を指定する。
+credits や requests を nano-AIU へ換算しない。
+`artifactSource` と `reuseArtifactValidation` は省略し、`validate-input` は実行しない。
+
+```sh
+taxion --store "$S" conversation confirm --file confirm.json
+taxion --store "$S" workflow plan --file flow.json
+# 実際のstagePlan.hashへの承認後、同じJSONへstagePlanHashを追加する。
+taxion --store "$S" workflow start --file flow.json
+taxion --store "$S" workflow show --id NEW_FLOW_ID
+taxion --store "$S" workflow budget --id NEW_FLOW_ID
+taxion --store "$S" workflow run --id NEW_FLOW_ID --builtin-prompts --controller-validation-submission
+```
+
+後続は `sourceDispatchId` が受理済み Coder、Dispatch は Reviewer 1件、
+Coder 上限0、Reviewer 上限1、repair0になる。新期限は `deadline` を超えず、
+遅れて開始しても後ろへ動かない。通常の identity・設定・予算・品質ゲートと
+Reviewer 結果受理時の検証は実行するが、受理済み Coder の検証は再実行しない。
+失敗・中断・結果不明のコマンドを、成功記録を得るために再実行する手順ではない。
+
+実行中の owner/process、ACK/session/receipt、対象 drift、準備状態不明、未解決 feedback、
+必要な利用量不明、承認不足、残時間不足があれば停止する。
+`recover-review` は持込み成果物専用であり、通常 Flow の複合拒否から
+静止・Git・予算条件まで不成立または成立と推定しない。新しい診断は、
+保存状態で確認できた失敗条件と、まだ評価していない条件を分けて表示する。
+
 ### 残工程の費用を見積もり、保存済み成果から続ける
 
 予算は一つの session ではなく、外側の調整、先行 Flow、残りの修正・検証・

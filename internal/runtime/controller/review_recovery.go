@@ -103,7 +103,25 @@ func stageReviewRecovery(before store.Workspace, ledger string, request ReviewRe
 	}
 	if !found || !exists || !eligible || request.FlowID == old.ID ||
 		request.TaskID == old.TaskID || request.StageBudget.CoderSessionCredits != 0 {
-		return fail(fmt.Errorf("taxion: combined recovery requires the first stopped validated artifact Reviewer, new identities and zero Coder allocation"))
+		failed := []string{}
+		if !found {
+			failed = append(failed, "source Flow not found")
+		}
+		if !exists {
+			failed = append(failed, "source Dispatch not found")
+		}
+		if found && old.Artifact == nil {
+			failed = append(failed, "source is a normal Coder Flow, not an artifact Flow; use reconcile-stopped then continueFromDispatchId")
+		} else if found && exists && !eligible {
+			failed = append(failed, "saved artifact Reviewer eligibility predicate is false (stopped/hold/ownership/input-validation/role/lifecycle)")
+		}
+		if request.FlowID == old.ID || request.TaskID == old.TaskID {
+			failed = append(failed, "successor identities must be new")
+		}
+		if request.StageBudget.CoderSessionCredits != 0 {
+			failed = append(failed, "Coder session allocation must be zero")
+		}
+		return fail(fmt.Errorf("taxion: combined recovery rejected; confirmed failed conditions: %s; not evaluated: execution quiescence, runtime receipts, mutable Git/worktree integrity, configuration and remaining budget/deadline gates", strings.Join(failed, "; ")))
 	}
 	// Do not alias the caller's snapshots while running normal controller writes.
 	data, err := json.Marshal(before)

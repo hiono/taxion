@@ -100,6 +100,13 @@ host 検証が開始済みで、検証済み結果の保存もない場合は、
 
 ## Flow が停止している
 
+通常 Flow で Coder の出力を正式受理した後、未開始 Reviewer の準備で停止した場合は、
+持込み成果物用の `recover-review` ではなく、`reconcile-stopped` と既存の
+`continueFromDispatchId` を使う。取消・後続作成の完全な入力例と停止条件は
+[受理済み Coder 出力からのレビュー継続](cli-reference.md#受理済み-coder-出力からのレビュー継続)を参照する。
+元 baseline と実行 commit が異なる snapshot では、元 baseline から完全 tree までの
+全変更パスを保持する。Coder が今回申告したパスだけへ縮めない。
+
 `review-input.v2` の診断用 `observe` では、コマンドの非ゼロ終了を
 `OBSERVED` として保存できる。これは製品テストの合格ではない。
 対象の改変、強制終了、期限超過、成否不明の実行は引き続き停止する。
@@ -112,11 +119,14 @@ host 検証が開始済みで、検証済み結果の保存もない場合は、
 保存表示の `RUNNING` だけでは process の存在を判断しない。
 導入更新だけを理由に新規 intake・plan、Coder、入力検証へ戻らない。
 保存期限を過ぎていれば未開始でも無承認で実行せず、正式な停止後復旧と期限再契約を使う。
-未開始 Reviewer に runner がなく、保存期限を過ぎた場合は、
+入力検証済みの持込み成果物 Flow で未開始 Reviewer に runner がなく、保存期限を過ぎた場合は、
 `workflow advance --id FLOW_ID` がモデルを起動せず期限条件を評価し、`BUDGET_STOP` を保存する。
 停止を示す非ゼロ終了と保存状態を確認し、`workflow recover-review --preview` へ進む。
 検証済み成果物の未開始 Reviewer は予算停止からも復旧できるが、
 新期限への承認、静止確認、同じ候補と合格 receipt の照合は省略しない。
+通常 Coder Flow の Reviewer が既に `STOPPED/HOLD` なら `advance` で旧 Flow を復活させず、
+上記の `reconcile-stopped`、後続の intake/confirm、`continueFromDispatchId` を使う。
+新しい固定絶対期限を明示承認し、同じ Coder 成功結果と受理 receipt を照合する。
 `CANCELLED` Coder の成果を持込み入力へ移した場合も、旧結果を成功へ書き換えない。
 
 旧 runner の生存を確認でき、まだ `RUNNING` なら、`resource_approval_required` に応じて
