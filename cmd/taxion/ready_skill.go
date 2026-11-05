@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.23"
+const readySkillVersion = "1.3.24"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -34,6 +34,37 @@ or session directories, or request a management shell before doing product work.
 Use this skill to operate Taxion for an approved coding task, inspect saved
 results, or continue stopped work without repeating completed work.
 
+## Route by observed state
+
+Before choosing a procedure, inspect the saved Task, Flow, Dispatch, receipts and
+worktree state. Classify the input source, formal result, Dispatch lifecycle,
+candidate identity and authorization; do not route from conversational labels.
+Use the installed CLI's ready output and help for the exact operations available
+in that version.
+Correlate records by Task, Flow and Dispatch: Controller results establish formal
+state, issued instructions show what was sent, native session output shows the
+saved answer, and logs show only their recorded observations. Treat checkpoints
+and retrospective reports as leads, not substitutes for those records.
+
+| Observed state | Route | Do not substitute |
+|---|---|---|
+| New request without an approved executable Task | Normal intake, proposal and confirmation | Treating DRAFT, READY or a held Flow as execution approval |
+| Supplied artifact without accepted Coder output | artifactSource validation and the approved Reviewer-only path | Calling it a successful Coder or using normal Coder recovery |
+| Artifact validation failed and dispatchIds is empty | Preserve input identities and failed receipt; use a separately approved implementation successor if supported | A feedback target, fabricated Dispatch or blind retry |
+| STOPPED normal Flow; Coder SUCCEEDED; exact Reviewer ISSUED but unacknowledged and without start, session, runtime configuration, usage, result or runtime receipt | Normal Coder recovery; retain A, B, T and every Controller-derived changed path | Artifact recovery or reducing the full baseline-to-tree diff to B-to-T |
+| STOPPED artifact Flow; first Reviewer after eligible PASSED/OBSERVED validation; no acknowledgement, start, session, result or runtime receipt | reconcile-stopped only when saved-state and managed-worktree checks pass | Hand-creating the Controller-managed worktree or assuming missing records prove no delivery |
+| Artifact Reviewer executed and CANCELLED with its confirmed stop receipt, same candidate/worktree and no active owner or feedback | recover-review with continueStoppedExecution when eligible | Unstarted reconciliation or ordinary resume |
+| Native final answer exists but formal result is missing | Use workflow recover only when its exact completion and observation preconditions match | Treating saved text as formal acceptance, APPROVE or product completion |
+| Identity, ownership, delivery, state or supported procedure is unknown | Preserve evidence and stop at the specific unresolved condition | Guessing status, changing saved input or bypassing a gate |
+
+Use the relevant procedure below only when its complete preconditions hold.
+An absent record proves only that the record is absent; it does not prove that
+no execution, delivery or usage occurred. A native answer, successful command,
+validated artifact, accepted review result and product-quality approval are
+different facts.
+
+## Shared operating controls
+
 Before returning work to the user, identify the unresolved human decision.
 Use saved approvals and observed evidence to resolve in-contract discrepancies.
 Technical failure alone does not require new consent. Use supported controller
@@ -48,6 +79,8 @@ in changeManifest. Missing, duplicate or incremental changedFiles alone requires
 no resubmission or extra Coder. Old instructions keep exact-list requirements.
 Never alter saved results or expand scope to bypass a rejection.
 
+## Verify the installed contract
+
 Before operating Taxion, run taxion ready --check-skill. If it reports an
 incompatible, stale, missing or modified skill, stop using this copy and report
 the problem. Do not install or update it without the user's permission.
@@ -59,6 +92,8 @@ inputs and prerequisites. Use installed-version help, ready and saved output;
 do not browse Taxion implementation sources with gh api or clone Taxion merely
 to discover operation inputs. If formal help is insufficient, report the exact
 missing operation contract rather than inventing fields or starting source research.
+
+## Supplied artifacts and Reviewer-only execution
 
 The artifactSource entry accepts unverified snapshot input without
 Coder success. Use workflow plan/start with maxRepairs: 0, stageBudget version 1
@@ -75,6 +110,8 @@ a Coder success or quality verdict. No automatic replay of failed/unknown comman
 execution; preserve its receipt and stopped history. Artifact repairs, optional
 packet lifecycle and restored artifact execution are not supported.
 
+## Evidence and repair handoff
+
 A receipt hash is NOT diagnostic content. For a repair successor, put the failed
 command, exit code, test names, assertions/messages, unclassified causes and
 unperformed checks in task.objective before proposal approval. Read saved output,
@@ -88,6 +125,8 @@ launch. Preserve issued state and use approved change control; do not rewrite
 old instructions, silently add sessions or blindly restart.
 For running work, compare actual findings/edits with the objective, not only
 process liveness or log timestamps. Monitoring grants no new stop/restart budget.
+
+## Failed artifact validation
 
 For FAILED artifact validation with dispatchIds: [], STOPPED/SAFETY_STOP and no
 runner, preserve the failed receipt and both input identities; do not retry.
@@ -111,6 +150,8 @@ edits, and neither claims pending Controller checks passed nor suspends solely
 for pending validation/review. No management shell authority is implied.
 Unknown/interrupted validation, active ownership or input drift stops this path.
 Never roll replacement back to an older Coder Flow or change the old failed receipt.
+
+## Existing Flow, budget and recovery
 
 Keep the same executable environment for diagnosis and execution. Check required
 executables before issuing work. --store selects the ledger path, not workspace.db.
@@ -224,6 +265,10 @@ workflow budget --id FLOW_ID --file ESTIMATE.json returns read-only topUp advice
 alongside saved continuation and priorFlows. See --help for exact fields. It grants
 no execution authority; observations and estimates are explicitly scoped, not
 currency conversions or automatic live quota queries.
+Honor an explicitly requested monitoring cadence and distinguish helper health
+from worker state. Before a time or spending boundary, account for preservation
+and human response time; if the work cannot finish within the approved ceiling,
+preserve the current evidence and report the exact stop condition and next action.
 Preserve uncommitted worker output, evidence, decisions, approvals, validation and
 review results, addressed findings and the next unfinished action before stopping.
 After actual approval, continue those results without repeating unchanged work.
