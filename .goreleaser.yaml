@@ -64,6 +64,7 @@ release:
     ## Refs
     
     修正: https://github.com/hiono/taxion/issues/277 、https://github.com/hiono/taxion/issues/278 。
+    実装PR: https://github.com/hiono/taxion/pull/280 。
     正式配布: https://github.com/hiono/taxion/issues/279 。配布Issueは両方の修正Issueに依存します。
     マイルストーン: https://github.com/hiono/taxion/milestone/39 。
 changelog:
