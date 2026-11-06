@@ -86,5 +86,12 @@ CIや公開処理の合格を代替しない。
 この後の日本語表記の調整には、別の厳密な公開文審査を行い、上記承認を流用しない。
 実profileによる決定的な表記検査は、保護識別子policyが必要な段階まで通過した。
 手元にないpolicyを仮の値で置き換えず、実policyを使うCIと公開処理の検査を残す。
+最終表記は`publication-082-presentation-review-flow-dispatch-0`で正式に`APPROVE`となった。
+session `a88b8fee-650b-4c65-b1a9-968fda68ad42`が承認した本文hashは
+`aa34e3c8d5666d73f52947a9b416b5f41e6cc5465f037a07bd70d414136667ac`である。
+配布用の審査記録には、この本文と判定時刻に一致する値だけを保存する。
+実Go実装の公開文検査も審査記録・表記の照合を通過し、
+`publication requires TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256`で停止した。
+これは手元の保護識別子検査と参照先API照合が未実施という記録であり、公開成功ではない。
 新しいCIと正式Release全体、公開前後それぞれ6環境のnative確認、
 配布byte・checksum・provenanceの照合が完了するまでは、配布完了と扱わない。
