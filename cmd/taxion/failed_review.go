@@ -195,9 +195,17 @@ func writeFailedReviewReport(output io.Writer, report controller.FailedReviewRep
 	if errors.As(err, &timing) {
 		copy := *timing
 		var failure *controller.FailedReviewOperationError
-		if errors.As(err, &failure) {
-			copy.CleanupFailed = copy.CleanupFailed || failure.CleanupFailed
+		if !errors.As(err, &failure) {
+			failure = controller.NewFailedReviewOperationError("native-read", "NOT_WRITTEN", err)
 		}
+		copy.Phase = failure.Phase
+		copy.Cause = "timing-rejected"
+		copy.Persistence = failure.Persistence
+		copy.Message = "The saved reviewer timing is not eligible for this append."
+		copy.CleanupFailed = copy.CleanupFailed || failure.CleanupFailed
+		copy.ObservationTimeout = failure.ObservationTimeout
+		copy.EffectiveDeadline = failure.EffectiveDeadline
+		copy.ElapsedMilliseconds = failure.ElapsedMilliseconds
 		if encodeErr := json.NewEncoder(output).Encode(&copy); encodeErr != nil {
 			return errors.Join(err, controller.NewFailedReviewOperationError("output", "NOT_WRITTEN", encodeErr))
 		}

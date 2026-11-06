@@ -47,6 +47,13 @@ type FailedReviewReport struct {
 type FailedReviewTimingError struct {
 	Version               int                     `json:"version"`
 	Code                  string                  `json:"code"`
+	Phase                 string                  `json:"phase"`
+	Cause                 string                  `json:"cause"`
+	Persistence           string                  `json:"persistence"`
+	Message               string                  `json:"message"`
+	ObservationTimeout    string                  `json:"observationTimeout,omitempty"`
+	EffectiveDeadline     time.Time               `json:"effectiveDeadline,omitzero"`
+	ElapsedMilliseconds   int64                   `json:"elapsedMilliseconds,omitempty"`
 	StateChanged          bool                    `json:"stateChanged"`
 	QualityAccepted       bool                    `json:"qualityAccepted"`
 	ExecutionAuthorized   bool                    `json:"executionAuthorized"`
@@ -76,7 +83,8 @@ type FailedReviewOperationError struct {
 }
 
 func (e *FailedReviewOperationError) Error() string {
-	return "taxion: failed review observation: " + e.Message
+	return fmt.Sprintf("taxion: failed review observation: phase=%s cause=%s persistence=%s: %s",
+		e.Phase, e.Cause, e.Persistence, e.Message)
 }
 
 func (e *FailedReviewOperationError) Unwrap() error { return e.err }

@@ -25,6 +25,9 @@ PR #280 の独立レビューでは、未ラップのsetupエラーと時刻拒�
 未ラップのエラーも元工程で安全な型へ変換し、deferと通常経路で同じ出力処理を使う。
 時刻拒否では既存の期限・採用元・`failedChecks`を保ち、
 追加失敗を`cleanupFailed: true`で示す。元エラーは変更せず、秘密値は出力しない。
+時刻拒否も元のoperationの`phase`・`persistence`・観測期限・経過時間を保持し、
+固定の`cause: timing-rejected`を返す。stderrにも工程・原因・保存結果を出すため、
+stdout自体の出力失敗でも保存結果を取り違えない。
 
 修正後に`go test ./cmd/taxion -run TestFailedReview -count=1`、
 `go test -race ./cmd/taxion ./internal/runtime/controller -run TestFailedReview -count=1 -timeout 5m`、

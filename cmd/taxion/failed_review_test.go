@@ -143,7 +143,9 @@ func TestFailedReviewTimingRejectionEmitsDiagnosticsAndRetainsError(t *testing.T
 		diagnosis.Code != original.Code || !diagnosis.Timing.SubmissionDeadline.Equal(deadline) ||
 		diagnosis.StateChanged || diagnosis.QualityAccepted || diagnosis.ExecutionAuthorized ||
 		diagnosis.DeadlineSource != original.DeadlineSource || diagnosis.ReservedSeconds != 1230 ||
-		len(diagnosis.FailedChecks) != 1 || diagnosis.RemainingEligibility != "NOT_EVALUATED" {
+		len(diagnosis.FailedChecks) != 1 || diagnosis.RemainingEligibility != "NOT_EVALUATED" ||
+		diagnosis.Phase != "native-read" || diagnosis.Cause != "timing-rejected" ||
+		diagnosis.Persistence != "NOT_WRITTEN" || diagnosis.Message == "" {
 		t.Fatal("invalid non-applying timing diagnosis", diagnosis, err)
 	}
 	output.Reset()
@@ -155,8 +157,22 @@ func TestFailedReviewTimingRejectionEmitsDiagnosticsAndRetainsError(t *testing.T
 		diagnosis.Code != original.Code || !diagnosis.Timing.SubmissionDeadline.Equal(deadline) ||
 		diagnosis.DeadlineSource != original.DeadlineSource || len(diagnosis.FailedChecks) != 1 ||
 		diagnosis.FailedChecks[0] != original.FailedChecks[0] || !diagnosis.CleanupFailed ||
-		original.CleanupFailed || strings.Contains(output.String(), "private") {
+		diagnosis.Phase != "native-timing" || diagnosis.Persistence != "NOT_WRITTEN" ||
+		original.CleanupFailed || original.Phase != "" || strings.Contains(output.String(), "private") {
 		t.Fatal("cleanup obscured or mutated the timing diagnostic", output.String(), err)
+	}
+	output.Reset()
+	wrapped := controller.NewFailedReviewOperationError("native-read", "NOT_WRITTEN", original)
+	wrapped.ObservationTimeout = "30s"
+	wrapped.EffectiveDeadline = deadline
+	wrapped.ElapsedMilliseconds = 42
+	_ = writeFailedReviewReport(&output, controller.FailedReviewReport{}, wrapped)
+	if err := json.Unmarshal(output.Bytes(), &diagnosis); err != nil ||
+		diagnosis.ObservationTimeout != "30s" || !diagnosis.EffectiveDeadline.Equal(deadline) ||
+		diagnosis.ElapsedMilliseconds != 42 || original.ObservationTimeout != "" ||
+		!strings.Contains(wrapped.Error(), "phase=native-read") ||
+		!strings.Contains(wrapped.Error(), "persistence=NOT_WRITTEN") {
+		t.Fatal("timing projection lost operation diagnostics", output.String(), err)
 	}
 	output.Reset()
 	unrelated := errors.New("unrelated rejection")
