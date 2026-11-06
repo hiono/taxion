@@ -157,6 +157,7 @@ var audienceMismatch = regexp.MustCompile(`(?i)(?:初回設定.{0,50}報告と.{
 var internalTitle = regexp.MustCompile(`(?i)(?:^(?:repair completed|re-review dispatched|finding report|role handoff required|governance handoff)\b|(?:報告と|確認入力の再質問|試行を.*退役))`)
 var commitTitle = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_-]*)(\([^()\r\n]*\))?(!?)\s*[:：]`)
 var classifiedTitle = regexp.MustCompile(`(?i)^(?:M[0-9]+(?:[-－][A-Za-z0-9]+|追補)*\s*[:：]|v?[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:\s+UX)?\s*[:：]|(?:次版|後続候補|将来検討)\s*[:：])`)
+var milestoneTitle = regexp.MustCompile(`^M[0-9]{2}[:：]?\s+(\S.*)$`)
 var webLink = regexp.MustCompile(`https?://[^\s<>()\x60]+`)
 var fencedCode = regexp.MustCompile("(?s)```.*?```")
 var latinWord = regexp.MustCompile(`[A-Za-z][A-Za-z0-9_.:/@+-]*`)
@@ -229,13 +230,25 @@ func checkLanguage(text, language string, profile Profile) error {
 // CheckPresentation checks the exact text. Rendering must happen before this
 // function and approval; it deliberately never rewrites approved prose.
 func CheckPresentation(profile Profile, title, body string) error {
+	return CheckPresentationForSurface(profile, title, body, "")
+}
+
+func CheckPresentationForSurface(profile Profile, title, body, surface string) error {
 	if err := profile.Validate(); err != nil {
 		return err
+	}
+	if strings.ContainsAny(title, "\r\n") || len(title) > 256 {
+		return fmt.Errorf("public title must be a single reader-facing description of a change or problem")
+	}
+	if surface == "milestone" {
+		if match := milestoneTitle.FindStringSubmatch(title); len(match) > 0 {
+			title = match[1]
+		}
 	}
 	if err := checkAudience(title + "\n" + body); err != nil {
 		return err
 	}
-	if strings.ContainsAny(title, "\r\n") || len(title) > 256 || internalTitle.MatchString(proseText(title)) {
+	if internalTitle.MatchString(proseText(title)) {
 		return fmt.Errorf("public title must be a single reader-facing description of a change or problem")
 	}
 	if profile.TitleStyle == "plain-statement" {

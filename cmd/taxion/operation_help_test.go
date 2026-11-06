@@ -22,7 +22,7 @@ func TestJSONOperationHelpExplainsInputsWithoutWorkspace(t *testing.T) {
 		command string
 		fields  []string
 	}{
-		{"conversation intake", []string{"JSON envelope", "DRAFT", "supersedes", "targetTreeSha", "taxion ready",
+		{"conversation intake", []string{"JSON envelope", "DRAFT", "supersedes", "targetTreeSha", "taxion ready", "contextSources", "taxion_read_context",
 			"A receipt hash is NOT diagnostic content", "task.objective", "task graph BEFORE"}},
 		{"conversation confirm", []string{"expectedHash", "selection", "configurationDecisionId", "additionalTaskIds", "replacesFlow",
 			"workflow feedback-target", "updatedAt", "resultHash", "ApprovalBundle", "No combined DRAFT",

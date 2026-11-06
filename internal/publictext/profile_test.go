@@ -37,6 +37,35 @@ func configuredProfile(t *testing.T) Profile {
 	return profiles.Projects[0]
 }
 
+func TestMilestoneNumberIsMetadataOnlyOnMilestoneTitles(t *testing.T) {
+	profile := configuredProfile(t)
+	profile.TitleStyle = "plain-statement"
+	profile.PrimaryLanguage, profile.TitleLanguage, profile.BodyLanguage = "ja", "ja", "ja"
+	profile.SecondaryLanguages = []string{"en"}
+	profile.TechnicalTerms = []string{"CLI"}
+	for _, test := range []struct {
+		name, surface, title, body string
+		reject                     bool
+	}{
+		{"number", "milestone", "M17 CLI の原文参照を整える", "", false},
+		{"colon", "milestone", "M17: CLI の原文参照を整える", "", false},
+		{"issue", "issue", "M17: CLI の原文参照を整える", "", true},
+		{"commit-title", "milestone", "M17: fix(core): CLI を修正する", "", true},
+		{"mixed-title", "milestone", "M17: Explain source access", "", true},
+		{"mixed-body", "milestone", "M17 CLI の原文参照を整える", "M17", true},
+		{"malformed-number", "milestone", "M17x CLI の原文参照を整える", "", true},
+		{"newlines", "milestone", "M17:\nCLI の原文参照を整える", "", true},
+		{"original-length", "milestone", "M17 " + strings.Repeat("界", 85), "", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := CheckPresentationForSurface(profile, test.title, test.body, test.surface)
+			if (err != nil) != test.reject {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestProfilesExplicitProjectIsolation(t *testing.T) {
 	profile := configuredProfile(t)
 	selected, err := LoadProfile(profile.Provider, profile.Host, profile.Repository)

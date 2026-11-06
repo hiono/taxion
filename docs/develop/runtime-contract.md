@@ -31,9 +31,11 @@ verified-legacy と任意の packet 委譲の意味は変えない。
 
 ## 工程と実行上限
 
-工程計画付き Flow は [ADR-0053](adr/0053-enforce-approved-flow-stage-boundaries.md) に従う。`core.StagePlan` は SDK に依存しない秒数・ネイティブ単位の内部残額枠・役割別ソフト上限であり、提供元のクレジット予約とは区別する。`PreviewStagePlan` で承認対象を作り、開始時に完全なハッシュを照合する。実装を検証する際は `TestStage*`・`TestPlanned*` を使い、従来の計画なし経路と提供元停止方式も回帰確認する。
+工程計画は [ADR-0073](adr/0073-effect-scoped-continuation.md) に従う。`core.StagePlan` の version 2 は時間・ネイティブ使用量の見積もりを助言として扱い、agent が承認済みの全体期限・実使用量・役割別回数の範囲内で配分する。見積もりの不足だけでは実行を禁止しない。version 1 は [ADR-0053](adr/0053-enforce-approved-flow-stage-boundaries.md) の承認済み工程予約を維持する。version 2 の計画 hash は対象・認可外枠を固定し、見積もりと抽出根拠は含めない。開始時に保存した計画全体は発行監査と照合し、版も見積もりも書き換えない。
 
-新しい実行環境は、ソフト上限を指定できる場合に `SessionCreditCeiling() float64` で実適用値を公開する。未指定はゼロである。制御処理はセッションを開始する前に保存計画と比較する。工程期限は `Start`・`Send`・`Resume`・`StreamEvents`・`Finish` とツール許可へ適用し、提出を受けた後の `Finish` は検証用の期限に切り替える。イベント監視が終了するまで提供元の停止証跡を確認し、異常終了後に時計や予算を作り直さない。
+新しい実行環境は、ソフト上限を指定できる場合に `SessionCreditCeiling() float64` で実適用値を公開する。未指定はゼロである。制御処理はセッションを開始する前に保存計画と比較する。version 2 の提出・ホスト検証・成果物入力検証は有効な全体期限を使い、独立した呼出し元期限が早ければそちらを守る。version 1 の工程期限と検証枠は従来どおりである。イベント監視が終了するまで提供元の停止証跡を確認し、異常終了後に時計や予算を作り直さない。
+
+runner は runtime `Start` を試みる前の準備失敗と、それ以降の実行不明を区別する。前者だけなら `preparation-blocked` 観測を追記して runner claim を解除し、同じ `RUNNING` Flow と未開始 Dispatch を保つ。再実行を自動では行わない。返却エラーが準備失敗でも、現在の取消・期限・予算が停止を要求すれば従来どおり停止する。
 
 ## SDK 共通インターフェース
 
@@ -129,11 +131,17 @@ request・独立質問・review runner は workspace DB と別の `.operation-lo
 
 checkpoint v2 は既存の正規化 document 保存を使い、operation ID、最小の提案・未回答質問、依頼 digest、承認参照、preflight と再開用 option を保持する。会話全文、prompt・response 全文、推論、調査ファイル本文は保存しない。planning receipt は入力・結果の digest と成否だけを持ち、Task の元依頼 decision も digest を参照する。credential pattern を含む最小計画は保存前に拒否する。
 
+これとは別に、新しい `request` は人の依頼・追記と表示用 Planner 出力を private な
+append-only `context-source` record に固定する。既知の credential pattern は秘匿化し、
+元入力 digest と秘匿化の有無を版に残す。Planner は同じ request の資料だけを reader で参照する。
+実行提案では資料を Task Decision へコピーし、提案・承認 hash に含める。
+公開された Planner の説明は含めるが、内部推論や native transcript は含めない。
+
 `Approved` は状態表示であり、再開の承認根拠ではない。承認済み再開では、正式な intake confirmation の Task ID・operation ID・proposal hash・authorization reference・設定・basis digest を照合し、元の DRAFT 契約、承認後の契約と現在の Graph／Flow の整合を検証する。basis は最小計画・option・設定・期限・予算・消費量を含む。成功済み preflight は、この basis と report digest を持つ execution receipt と照合する。checkpoint checksum は保存内容の変化の検出に使い、承認の代用にはしない。旧 checkpoint の会話 field は読み取り時に捨て、再保存・暗黙移行しない。承認束縛のない旧版と未知版は再開・取消しを拒否し、保存済み記録を保持して明示的な照合を求める。
 
 再開は保存済み期限と上限を維持し、Planner の実測使用量を Flow 上限から差し引く。利用量不明なら追加モデル呼出しを止める。`request --status` では owner と checkpoint 本文を除き、state と予算を返す。`claimRecorded` は保存した claim の有無であり、process の生存証明ではない。承認後は既存4 lane を一括実行し、既存 bounded runner に Coder・非モデル validation・Reviewer を任せる。実行 event は保存するが console へ逐次報告しない。未終了 operation は portable snapshot の対象にできない。
 
-入力終了後の質問再表示はモデルを使わない。最小計画・未回答質問の保存前に停止し、入力本文が失われた checkpoint は、依頼 digest を本文の代わりに使わず再開を拒否する。送信開始済みで結果が不明の Planner は checkpoint で検出し、再送しない。実行中に process が止まって runner claim が残った場合は、既存の停止確認・receipt/Git 照合を済ませてから再開する。復旧のために Task 契約、proposal hash、既存 decision、ApprovalBundle、budget hard-stop を書き換えない。旧 binary は未知の `operation` field を拒否するため、rollback は operation 保存前の snapshot を使用する。
+入力終了後の質問再表示はモデルを使わない。最小計画・未回答質問の保存前に停止しても、同じ request の保存原文があれば未開始 Planner へ渡せる。入力本文が失われた旧 checkpoint は、依頼 digest を本文の代わりに使わず再開を拒否する。送信開始済みで結果が不明の Planner は checkpoint で検出し、再送しない。実行中に process が止まって runner claim が残った場合は、既存の停止確認・receipt/Git 照合を済ませてから再開する。復旧のために Task 契約、proposal hash、既存 decision、ApprovalBundle、budget hard-stop を書き換えない。旧 binary は未知の `operation` field を拒否するため、rollback は operation 保存前の snapshot を使用する。
 ## 保存結果と checkpoint の復旧
 
 継続と上限変更は [ADR-0058](adr/0058-recover-unstarted-artifact-review.md) に従う。
@@ -189,9 +197,27 @@ intake の `reviewInput` は既存 Task decision の `taxion.review-input.v1` �
 
 停止済み初回指示の整合回復は [ADR-0054](adr/0054-reconcile-stopped-dispatch-input.md) に従う。preview は workspace を更新せず、適用は状態と人間の判断の完全ハッシュを transaction 内で再照合する。取消・Task の保留・追記専用の監査記録を一つの transaction に保存する。元の Flow は監査中の停止時点の写しと照合し、後続承認でも書き換えない。後続入力の照合には元 instruction と snapshot 検査を再利用し、出力 receipt を生成しない。Git の snapshot 検査は一時 index と object を使う場合があるが、実 index・作業ファイルは変更しない。
 
-新規開始用 `ContractGateReport` は READY を要求する。保存済みの未実行 Coder 境界は `ResumeContractGateReport` で別に評価し、Task の ACTIVE、対応 Flow の RUNNING、最新 Dispatch の ISSUED と未 acknowledge / 未実行 / session 不在を要求する。Flow の contract と現在 Task、instruction hash、正式 bundle / configuration / lifecycle packet、endpoint / Git、operation の排他、既存 audit の利用量・counter・期限を照合する。保存 runner claim は process 終了を推測して解放せず、残っていれば拒否する。
+新規開始用 `ContractGateReport` は READY を要求する。保存済みの未開始 role は
+`ResumeContractGateReport` で評価し、Coder、Reviewer、修正・再レビュー、持込み入力の
+検証後の Reviewer に共通の判定を使う。通常 runner と resume は同じ未開始判定を使う。
+role Task の ACTIVE は保存したまま、発行前 READY のローカルな比較値で正確な承認を照合する。
+verified-legacy は通常の実行と同じ分類を維持し、bundle-aware な graph の欠落を legacy へ格下げしない。
+任意 packet lifecycle を新しい必須条件にせず、有効な場合だけ canonical packet を検証する。
+Flow の contract と現在 Task、instruction hash、configuration、endpoint / Git、
+operation の排他、既存 audit の利用量・counter・期限を照合する。
+hold の release 後で未実行なら、acknowledge や最初の send より前の session 作成だけでは拒否しない。
+保存 session は同じ binding へ再接続し、利用量を引き継ぐ。開始済みの実行は再送しない。
+保存 runner claim は process 終了を推測して解放せず、残っていれば拒否する。
 
-新しい Dispatch の `DISPATCH_ISSUED` budget audit に `resumeBasis.version=1` を追加し、contract / Flow authorization / instruction の digest、Dispatch ID、開始時刻、deadline、budget を束縛する。既存 audit prefix と schema は書き換えない。旧 record にこの binding がない場合、自己申告 checkpoint や二重 readback で補完せず拒否する。Gate は record と Git を読むだけで、index 更新・snapshot capture・validation command・runtime 作成を行わない。`ResumeReviewFlow` は既存の process reservation を保持し、runner claim の更新 transaction 内で Gate を再評価してから通常 runner に渡す。不合格なら transaction は保存せず、operation や Flow を BLOCKED / STOPPED に書き換えない。
+各 role の `DISPATCH_ISSUED` budget audit の `resumeBasis.version=1` は、contract /
+Flow authorization / instruction の digest、Dispatch ID、開始時刻、deadline、budget を束縛する。
+比較には最新の発行 audit を使い、後発の session 作成や stage 観測があるという理由だけで
+発行時の binding を捨てない。既存 session の現在の消費・残量も別に照合する。
+既存 audit prefix と schema は書き換えない。旧 record に binding がなければ推測で補完しない。
+Gate は record と Git を読み、実 index 更新・snapshot capture・validation command・runtime 作成を行わない。
+準備済み snapshot の照合には一時 index を使うが、外部 filter は実行せず context の期限を適用する。
+`ResumeReviewFlow` は process reservation を保持し、runner claim の更新 transaction 内でも同じ Gate を評価する。
+不合格なら transaction は保存せず、operation や Flow を BLOCKED / STOPPED に書き換えない。
 
 `workflow recover` は、process の停止確認と終了 Dispatch の照合後に、保存した runner claim の完全一致を確認して解放する。最新結果が成功した Coder 提出なら、保存結果の契約と現在の Git の事実も確認する。対象は repository origin、branch、HEAD、baseline の祖先関係、変更 path、clean worktree、検証の出典、commit parent。今回の観測は、観測時刻を除き保存済み Git 証拠と一致する必要がある。元の結果と timestamp は変更しない。
 
@@ -430,6 +456,28 @@ Release 0.1.0 の文書 dogfood における実 skill 利用は、Issue #78 の�
 `workflow evaluate --id FLOW_ID --require-quality` は保存 graph の妥当性と、完了・独立同一 target 承認・文書 criterion を確認し、未達なら非zero終了する。`RECORDED_PASS` は保存証拠上の条件充足であって、実モデルの判断品質や安全性を独立実測した値ではない。集計範囲・欠損・未測定を JSON に明示し、品質未達と費用を加算して順位付けしない。[ADR-0040](adr/0040-constrain-goal-oriented-efficiency-by-quality-evidence.md) に対象経路と限界を記録する。
 
 Planner→Coder、Planner→Reviewer、Coder→Reviewer は、Taxion に保存した契約・結果を参照して引き継ぐ。モデルに ID・承認・hash の転記や、送り手の SDK session ファイルの再読取りを要求しない。結果 ID の解決では、保存元 Dispatch と instruction hash を照合し、存在しない参照や保存結果との不一致をエラーにする。権限内で本文まで解決できることを引継ぎの条件とする。
+
+instruction version 6 は、保存済み依頼・承認・追加の `contextSources`・選択済み
+Memory/仕様・固定した前工程結果を `ContextDocument` として読み直せる。
+入力資料は既存 Task Decision に append-only で保存し、既存の提案・承認 hash で固定する。
+本文ではなく出典・版・hash の索引を示し、Copilot の固定データ用 reader または
+OpenACP の読取り専用 `/config/taxion-context` から全文へ到達できる。
+Copilot のページ境界は Unicode 文字単位とし、別 hash・別資料・範囲外・書込み要求を拒否する。
+OpenACP は OS の読取り専用 mount と正確な read permission を組み合わせ、
+製品 tool が空でも資料だけを読める。管理 DB・他 Task・native session の内部推論は対象外である。
+Git を持たない隔離環境では OpenCode の native project worktree は `/` となるため、
+permission はそこからの相対 path に固定する。製品読取りは `workspace` 内だけに限定する。
+資料は192 Unicode文字以下の
+JSONL chunk として保存し、native read の長行打切りを避ける。`limit:8` で行ページを読み、
+各 `text` を余分な区切りなしで連結して元の本文を復元する。これは要約ではなく可逆な表現である。
+仕様の送信許可は選択 provider に照合し、抜粋の許可を元ファイル全文へ拡張しない。
+
+この索引は提供済み資料の snapshot であり、外側の会話全文の自動取得や完全性証明ではない。
+未提供の種類・本文は未提供として扱い、必要な原文を推測しない。
+Reviewer は依頼・承認と実際の固定成果物を独立に照合し、読取り回数を品質 gate にはしない。
+原文の導入版6と従来の結果・証拠の最低対応版5を分離する。
+version 5 の Dispatch の結果受理・追記証拠・継続を残し、
+追加資料がない旧 provider 構成の hash・prompt・tool surface を維持する。
 
 新しい bound session が `work-report` を提出するときは、役割を問わず識別子を `evidence` に、報告本文を `workReport` に保存する。本文が空の成功結果は拒否する。SDK session のファイルパスだけでは報告を引き継げない。旧結果は書き換えず、必要な証拠を出典付きで明示的に補足する。報告本文は送り手の主張であり、実施済みの証明とは区別する。
 

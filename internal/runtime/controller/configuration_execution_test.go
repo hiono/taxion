@@ -75,6 +75,10 @@ func executionConfigurationFixture(t *testing.T, guidance ...*core.BudgetGuidanc
 }
 
 func executionConfigurationCredentialFixture(t *testing.T, credentialRef string, guidance ...*core.BudgetGuidancePolicy) (*store.Store, string, *configuredRuntime, config.Resolution) {
+	return executionConfigurationDecisionsFixture(t, credentialRef, nil, guidance...)
+}
+
+func executionConfigurationDecisionsFixture(t *testing.T, credentialRef string, decisions []core.TaskDecision, guidance ...*core.BudgetGuidancePolicy) (*store.Store, string, *configuredRuntime, config.Resolution) {
 	t.Helper()
 	root := t.TempDir()
 	gitTest(t, root, "init", "-b", "work/task")
@@ -112,6 +116,7 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 	if len(guidance) != 0 {
 		task.BudgetGuidance = core.CloneBudgetGuidance(guidance[0])
 	}
+	task.Decisions = append(task.Decisions, decisions...)
 	graph := core.TaskGraph{Version: 1}
 	if err := graph.Track(task, "human", "register"); err != nil {
 		t.Fatal(err)

@@ -93,7 +93,7 @@ func AcceptSavedReview(ctx context.Context, db *store.Store, ledgerPath string, 
 			FlowID: flow.ID, DispatchID: last.ID, InstructionHash: last.InstructionHash,
 			ResultHash: preview.ResultHash, PreviewHash: preview.Hash,
 			Actor: request.Actor, Source: request.Source, Reason: request.Reason,
-			AllowExpired: request.AllowExpired, OriginalReasonUnavailable: true,
+			AllowExpired: request.AllowExpired, OriginalReasonUnavailable: preview.OriginalReasonUnavailable,
 			PreviousFlow: previous, At: time.Now().UTC(),
 		})
 		preview.StateChanged = true
@@ -117,9 +117,9 @@ func previewSavedReview(ctx context.Context, state store.Workspace, ledgerPath s
 	}
 	flow, ok := state.Graph.ReviewFlow(request.FlowID)
 	if !state.HasGraph || !ok || flow.Status != "STOPPED" || flow.StopCode != "SAFETY_STOP" ||
-		flow.Reason != lostHandoffStopReason || flow.RunnerID != "" || !flow.HandoffHeld() ||
+		flow.RunnerID != "" || !flow.HandoffHeld() ||
 		flow.SourceDispatchID == "" || len(flow.DispatchIDs) != 1 || flow.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot {
-		return reject("requires an unclaimed review-only snapshot Flow stopped by the lost-handoff-reason defect")
+		return reject("requires an unclaimed review-only snapshot Flow with a saved safety stop")
 	}
 	hold := flow.HandoffChanges[len(flow.HandoffChanges)-1]
 	if hold.ID != "flow-stop:"+flow.ID+":"+flow.DispatchIDs[0] ||
@@ -255,7 +255,8 @@ func previewSavedReview(ctx context.Context, state store.Workspace, ledgerPath s
 		Version: 1, FlowID: flow.ID, TaskID: task.ID, ReviewerDispatchID: last.ID,
 		ReviewerTaskID: review.ID, ReviewerTaskStatus: review.Status, ReviewerTaskFinalStatus: review.Status,
 		OutputSHA: task.TargetSHA, OutputTreeSHA: task.TargetTreeSHA, InstructionHash: last.InstructionHash,
-		ResultHash: resultHash, Deadline: flow.ExecutionDeadline(), DeadlineExpired: expired, OriginalReasonUnavailable: true,
+		ResultHash: resultHash, Deadline: flow.ExecutionDeadline(), DeadlineExpired: expired,
+		OriginalReasonUnavailable: flow.Reason == lostHandoffStopReason,
 		Checks: []string{"result-receipts", "success-before-deadline", "contract-and-acceptance",
 			"configuration-and-approvals", "independent-role-packets", "required-memory",
 			"snapshot-ref-and-tree", "retained-coder-snapshot", "current-task-branch-index-worktree", "released-review"},

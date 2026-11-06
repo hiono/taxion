@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -159,6 +160,10 @@ func TestRequestResumeWithoutMinimalPlanNeverSubstitutesRequestDigest(t *testing
 			operation.Checkpoint, operation.CheckpointHash = data, core.SHA256Hex(data)
 			if err := db.UpdateWorkspace(func(current *store.Workspace) error {
 				current.Records.Operation = &operation
+				// Legacy checkpoints predate the private source archive.
+				current.Records.Requests = slices.DeleteFunc(current.Records.Requests, func(record store.RequestRecord) bool {
+					return record.Kind == "context-source"
+				})
 				return nil
 			}); err != nil {
 				t.Fatal(err)
@@ -259,11 +264,59 @@ func TestRequestApprovalRejectsAuthoritativeRecordAndExecutionDrift(t *testing.T
 	}
 }
 
-func TestRequestPersistentBytesContainOnlyMinimalPlanAndDigests(t *testing.T) {
+func TestRequestResumeReadsCapturedOriginalInsteadOfDigest(t *testing.T) {
+	_, args := requestFixture(t)
+	const original = "  Preserve exact original intent, not just the objective.  "
+	planner := fixturePlan(t, requestFixtureAnswer([]string{"Which behavior?"}))
+	if err := requestCommand(append(args, original), strings.NewReader("/plan\n"), io.Discard, planner, nil); err != nil {
+		t.Fatal(err)
+	}
+	db, state, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	operation := *state.Records.Operation
+	var checkpoint requestCheckpoint
+	if err := json.Unmarshal(operation.Checkpoint, &checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint.Answer, checkpoint.PlannerStarted = nil, false
+	operation.State, operation.Owner = "RUNNING", ""
+	data, err := json.Marshal(checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation.Checkpoint, operation.CheckpointHash = data, core.SHA256Hex(data)
+	if err := db.UpdateWorkspace(func(current *store.Workspace) error {
+		current.Records.Operation = &operation
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	resumed := func(ctx context.Context, db *store.Store, selected config.Config, task core.GraphTask,
+		text string, credits float64, cli, base string) (controller.QuestionResult, error) {
+		calls++
+		var input struct {
+			Messages []requestMessage `json:"conversation"`
+		}
+		if err := json.Unmarshal([]byte(text), &input); err != nil || len(input.Messages) != 1 ||
+			input.Messages[0].Text != original || input.Messages[0].Source == "" {
+			t.Fatal("resumed Planner lost the captured wording or provenance", err, text)
+		}
+		return planner(ctx, db, selected, task, text, credits, cli, base)
+	}
+	if err := requestCommand([]string{"--resume", operation.ID}, strings.NewReader("/quit\n"), io.Discard, resumed, nil); err != nil || calls != 1 {
+		t.Fatal("available originals did not permit a bounded unstarted continuation", err, calls)
+	}
+}
+
+func TestRequestKeepsCheckpointMinimalAndPreservesRedactedSources(t *testing.T) {
 	_, args := requestFixture(t)
 	secret := "ghp_" + strings.Repeat("z", 24)
 	prompt := "private original request " + secret
-	response := "private response and reasoning " + secret
+	response := "public displayed assumption " + secret
 	answer := requestFixtureAnswer([]string{})
 	answer.Assumptions = []string{response}
 	if err := requestCommand(append(args, prompt), strings.NewReader("/plan\n/approve\n"), io.Discard,
@@ -293,6 +346,15 @@ func TestRequestPersistentBytesContainOnlyMinimalPlanAndDigests(t *testing.T) {
 	for _, receipt := range state.Records.Requests {
 		if receipt.Kind != "planning" {
 			continue
+		}
+		documents, err := requestContextSources(state, state.Records.Operation.ID)
+		if err != nil || len(documents) != 2 {
+			t.Fatal("private source snapshots were not preserved", err)
+		}
+		for _, document := range documents {
+			if !strings.HasSuffix(document.Version, ":redacted") || strings.Contains(document.Text, secret) {
+				t.Fatal("source snapshot lost its explicit redaction provenance")
+			}
 		}
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(receipt.Payload), &fields); err != nil ||

@@ -59,12 +59,36 @@ func TestStageNativeReservationsCannotDisappear(t *testing.T) {
 
 func TestStageBudgetRejectsInvalidAndNonfiniteLimits(t *testing.T) {
 	for _, policy := range []StageBudget{
-		{Version: 2}, {Version: 1, ValidationSeconds: -1}, {Version: 1, ReviewSeconds: math.MaxInt64},
+		{Version: 3}, {Version: 1, ValidationSeconds: -1}, {Version: 1, ReviewSeconds: math.MaxInt64},
 		{Version: 1, CoderSessionCredits: 29}, {Version: 1, ReviewerSessionCredits: math.NaN()},
 		{Version: 1, ReviewNanoAIU: math.Inf(1)}, {Version: 1, RepairNanoAIU: -1},
 	} {
 		if policy.Validate() == nil {
 			t.Fatalf("invalid stage budget accepted: %+v", policy)
 		}
+	}
+}
+
+func TestAdvisoryStagePlanDoesNotTurnForecastsIntoLimits(t *testing.T) {
+	start := time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)
+	plan := &StagePlan{Version: 2, Hash: "sha256:" + strings.Repeat("a", 64),
+		TimeoutSeconds: 60, MaxRepairs: 1, ValidationSeconds: 600, ReviewSeconds: 600, RepairSeconds: 600,
+		Basis: []string{"uncertain forecasts"}}
+	flow := ReviewFlow{StartedAt: start, Deadline: start.Add(time.Minute), MaxRepairs: 1,
+		Budget: FlowBudget{MaxNanoAIU: 100}, StagePlan: plan}
+	if err := plan.Validate(flow); err != nil {
+		t.Fatal("estimates rejected an otherwise bounded plan", err)
+	}
+	for _, role := range []string{"CODER", "REVIEWER"} {
+		if !plan.SubmissionDeadline(flow, role).Equal(flow.ExecutionDeadline()) {
+			t.Fatal("forecast changed the approved hard deadline")
+		}
+	}
+	if plan.ReservedSeconds(0, "CODER") <= plan.TimeoutSeconds {
+		t.Fatal("remaining-work forecast was lost")
+	}
+	plan.Version = 1
+	if plan.Validate(flow) == nil {
+		t.Fatal("legacy hard reservations were silently changed")
 	}
 }

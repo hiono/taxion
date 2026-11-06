@@ -48,7 +48,7 @@ func reviewBasis(args []string, output io.Writer) error {
 	if m.GuidanceDigest != digest {
 		return fmt.Errorf("select compatible guidance before writing the mutation")
 	}
-	if err := publictext.CheckPresentation(p, m.Title, m.Body); err != nil {
+	if err := publictext.CheckPresentationForSurface(p, m.Title, m.Body, m.Surface); err != nil {
 		return err
 	}
 	protected := strings.Fields(os.Getenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256"))

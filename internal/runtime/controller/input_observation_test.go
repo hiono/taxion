@@ -109,6 +109,17 @@ func TestObservedInputPreservesCancelledResultAndCompletesApprovedSuccessor(t *t
 	if err != nil || decision.Verdict != "accept" || decision.Metadata != "verified" {
 		t.Fatal("shared assessment rejected exact observed input", decision, err)
 	}
+	assessmentState, _ := db.LoadWorkspace()
+	assessmentState.Records.Operation = &store.Operation{ID: "other-operation", State: "RUNNING"}
+	beforeAssessment := mustFlowJSON(t, assessmentState)
+	observed, err := assessObservedInput(assessmentState, proposal, nil)
+	if err != nil || observed.Verdict != "accept" ||
+		string(beforeAssessment) != string(mustFlowJSON(t, assessmentState)) {
+		t.Fatal("read-only assessment was blocked by execution-only quiescence or changed state", observed, err)
+	}
+	if err := verifyObservedIntake(assessmentState, proposal, o.Hash, nil); err == nil {
+		t.Fatal("read-only eligibility was treated as permission to apply during another operation")
+	}
 	hash, _ := IntakeHash(proposal)
 	target, _ := core.ObserveFeedbackTarget(old)
 	_, _, _, selected := executionConfigurationFixture(t)

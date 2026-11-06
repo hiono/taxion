@@ -379,7 +379,6 @@ func assessObservedInput(state store.Workspace, task core.GraphTask, selection [
 		block("metadata-drift", "decisions", "saved failure diagnostics or observation provenance changed", "observation:"+hash,
 			"Propose from the saved observation without editing or dropping diagnostic evidence.", true)
 	}
-	inputQuiescence(state, &decision)
 	if task.Repo != o.Target.Repository || task.BaselineSHA != o.Target.BaselineSHA ||
 		task.TargetSHA != o.Target.CommitSHA || task.TargetTreeSHA != o.Target.TreeSHA ||
 		!slices.Equal(task.TargetChangedFiles, o.Target.ChangedFiles) {
@@ -435,5 +434,6 @@ func verifyObservedIntake(state store.Workspace, task core.GraphTask, hash strin
 	if err != nil {
 		return err
 	}
+	inputQuiescence(state, &decision)
 	return decision.Err()
 }

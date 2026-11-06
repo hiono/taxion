@@ -54,6 +54,7 @@ type Config struct {
 	MaxAICredits          float64
 	ToolPolicy            *tools.Policy
 	AuthorizeTools        func(context.Context, string) error
+	ContextDocuments      []core.ContextDocument
 }
 
 type Adapter struct {
@@ -64,11 +65,12 @@ type Adapter struct {
 	stopSessionID  string
 	stopConfigHash string
 
-	opMu     sync.Mutex
-	mu       sync.Mutex
-	started  bool
-	closed   bool
-	sessions map[string]*managedSession
+	opMu      sync.Mutex
+	mu        sync.Mutex
+	started   bool
+	closed    bool
+	sessions  map[string]*managedSession
+	quotaOnly bool
 }
 
 type managedSession struct {
@@ -171,6 +173,10 @@ func New(config Config) (*Adapter, error) {
 		return nil, fmt.Errorf("taxion: resolve Copilot home: %w", err)
 	}
 	config.AvailableTools = slices.Clone(config.AvailableTools)
+	if err := core.CheckContextDocuments(config.ContextDocuments); err != nil {
+		return nil, err
+	}
+	config.ContextDocuments = slices.Clone(config.ContextDocuments)
 	if len(config.Configuration) != 0 {
 		var selected executionconfig.Config
 		if err := core.DecodeGraphInput(strings.NewReader(string(config.Configuration)), &selected); err != nil {
@@ -264,6 +270,15 @@ func New(config Config) (*Adapter, error) {
 		config.ManagedReviewProgress = &binding
 		config.AvailableTools = append(config.AvailableTools, ReviewProgressToolName)
 	}
+	if len(config.ContextDocuments) != 0 {
+		if slices.Contains(config.AvailableTools, ReadContextToolName) {
+			return nil, fmt.Errorf("taxion: source reader is reserved for its host binding")
+		}
+		config.AvailableTools = append(config.AvailableTools, ReadContextToolName)
+		config.SystemPrompt += "\n\n" + core.SourceContextGuidance +
+			"\nUse taxion_read_context with id, hash, offset and limit (Unicode characters, up to 4096 per page); continue with nextOffset until eof.\n" +
+			core.ContextDocumentIndex(config.ContextDocuments)
+	}
 	mode := sdk.ModeCopilotCli
 	if config.ToolPolicy != nil {
 		mode = sdk.ModeEmpty
@@ -351,6 +366,7 @@ func (a *Adapter) ConfigHash() string {
 		BuiltinMCPPolicy       string
 		BrokerCredentialPolicy string
 		DisabledSkills         []string `json:",omitempty"`
+		ContextDocumentsHash   string   `json:",omitempty"`
 	}{
 		Role:                   a.config.Role,
 		SystemPrompt:           a.config.SystemPrompt,
@@ -374,6 +390,7 @@ func (a *Adapter) ConfigHash() string {
 		BuiltinMCPPolicy:       "disabled-per-process-v1",
 		BrokerCredentialPolicy: "host-only-env-v1",
 		DisabledSkills:         a.disabledSkills(),
+		ContextDocumentsHash:   core.ContextDocumentsHash(a.config.ContextDocuments),
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -403,6 +420,9 @@ func (a *Adapter) ToolPolicy() *tools.Policy {
 }
 
 func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
+	if a.quotaOnly {
+		return "", fmt.Errorf("taxion: quota-only observer cannot start a model session")
+	}
 	if a.stopSessionID != "" {
 		return "", fmt.Errorf("taxion: stop-only adapter cannot create sessions")
 	}
@@ -437,6 +457,9 @@ func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 }
 
 func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
+	if a.quotaOnly {
+		return fmt.Errorf("taxion: quota-only observer cannot send model input")
+	}
 	if a.stopSessionID != "" {
 		return fmt.Errorf("taxion: stop-only adapter cannot send instructions")
 	}
@@ -478,6 +501,9 @@ func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
 }
 
 func (a *Adapter) Resume(ctx context.Context, sessionID string) error {
+	if a.quotaOnly {
+		return fmt.Errorf("taxion: quota-only observer cannot resume a model session")
+	}
 	if a.stopSessionID != "" {
 		return fmt.Errorf("taxion: stop-only adapter cannot resume execution")
 	}
@@ -857,6 +883,7 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 		return nil
 	}
 	return func(request sdk.PermissionRequest, invocation sdk.PermissionInvocation) (rpc.PermissionDecision, error) {
+		contextRead := false
 		decision := reviewerPermissionDecision(a.config.WorkingDirectory, a.config.FileAccess, a.config.TrackedFiles, request)
 		if a.config.Role == "CODER" {
 			decision = coderPermissionDecision(a.config.WorkingDirectory, a.config.AvailableTools,
@@ -865,6 +892,12 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
 			permission.ToolName == "skill" && slices.Contains(a.config.AvailableTools, "skill") &&
 			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
+			decision = &rpc.PermissionDecisionApproveOnce{}
+		}
+		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
+			len(a.config.ContextDocuments) != 0 && permission.ToolName == ReadContextToolName &&
+			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
+			contextRead = true
 			decision = &rpc.PermissionDecisionApproveOnce{}
 		}
 		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
@@ -886,7 +919,7 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 			}
 		}
 		if a.config.ToolPolicy != nil && a.config.ToolPolicy.HasBroker() {
-			allowed := false
+			allowed := contextRead
 			if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
 				(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
 				for _, tool := range a.config.ToolPolicy.MCP {

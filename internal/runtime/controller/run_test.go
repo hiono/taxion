@@ -210,8 +210,67 @@ func TestReviewBudgetOutputFailureDoesNotStartReviewer(t *testing.T) {
 		calls++
 		return nil, errors.New("unexpected runtime creation")
 	}, failingWriter{})
-	if err == nil || !strings.Contains(err.Error(), "write review budget") || calls != 0 || flow.Status != "STOPPED" || flow.RunnerID != "" {
+	if err == nil || !strings.Contains(err.Error(), "write review budget") || calls != 0 || flow.Status != "RUNNING" || flow.HandoffHeld() || flow.RunnerID != "" {
 		t.Fatalf("output failure started a Reviewer or left its runner claimed: %+v calls=%d err=%v", flow, calls, err)
+	}
+}
+
+func TestPreparationErrorDoesNotMaskLiveStop(t *testing.T) {
+	for _, cause := range []error{nil, context.Canceled, context.DeadlineExceeded} {
+		name := "not-cancelled"
+		if cause != nil {
+			name = cause.Error()
+		}
+		t.Run(name, func(t *testing.T) {
+			db, ledger, request := reviewFlowFixture(t)
+			flow, err := StartReviewFlow(db, ledger, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
+			flow, err = RunReviewFlow(ctx, db, ledger, flow.ID, func(core.GraphDispatch) (runtime.Identity, error) {
+				if cause != nil {
+					cancel(cause)
+				}
+				return nil, errors.New("preparation failed")
+			}, io.Discard)
+			wantStatus, wantCode := "RUNNING", ""
+			if cause != nil {
+				wantStatus, wantCode = "STOPPED", "SAFETY_STOP"
+				if cause == context.DeadlineExceeded {
+					wantCode = "BUDGET_STOP"
+				}
+			}
+			if err == nil || flow.Status != wantStatus || flow.StopCode != wantCode || flow.RunnerID != "" {
+				t.Fatalf("preparation error lost live stop: %+v err=%v", flow, err)
+			}
+		})
+	}
+}
+
+func TestPreparationErrorPreservesVersionOneStageStop(t *testing.T) {
+	db, ledger, request := stageFlowFixture(t)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow, err = RunReviewFlow(t.Context(), db, ledger, flow.ID, func(dispatch core.GraphDispatch) (runtime.Identity, error) {
+		// Move only the fixture clock past the v1 cutoff, not the outer deadline.
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			saved, _ := state.Graph.ReviewFlow(flow.ID)
+			saved.Deadline = time.Now().UTC().Add(time.Duration(saved.StagePlan.ReservedSeconds(0, dispatch.Recipient))*time.Second - time.Nanosecond)
+			storeFlow(state, saved)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return nil, errors.New("preparation failed")
+	}, io.Discard)
+	if err == nil || flow.Status != "STOPPED" || flow.StopCode != "BUDGET_STOP" ||
+		!flow.ExecutionDeadline().After(time.Now().UTC()) || flow.RunnerID != "" ||
+		!strings.Contains(err.Error(), "stage submission deadline") {
+		t.Fatalf("preparation masked the v1 cutoff before the outer deadline: %+v err=%v", flow, err)
 	}
 }
 
@@ -696,8 +755,8 @@ func TestRunnerRefusesInterruptedOwnershipAndPersistsSetupFailure(t *testing.T) 
 				if calls != 0 || saved.RunnerID != "interrupted-process" || saved.Status != "RUNNING" {
 					t.Fatal("runner took over an interrupted execution")
 				}
-			} else if calls != 1 || saved.Status != "STOPPED" || saved.RunnerID != "" ||
-				!strings.Contains(saved.Reason, "SDK configuration unavailable") {
+			} else if calls != 1 || saved.Status != "RUNNING" || saved.RunnerID != "" ||
+				saved.StopCode != "" || saved.HandoffHeld() {
 				t.Fatalf("setup failure not persisted: %+v", saved)
 			}
 		})

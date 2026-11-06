@@ -9,6 +9,30 @@ import (
 	"time"
 )
 
+func TestExistingReferenceDoesNotClaimItsLaterCompletion(t *testing.T) {
+	at := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	target := "https://github.com/example/tool/pull/12"
+	observed := Reference{URL: target, CreatedAt: at.Add(-time.Hour), StateAt: at.Add(time.Hour), State: "COMPLETED"}
+	resolve := func(context.Context, string) (Reference, error) { return observed, nil }
+	for _, state := range []string{"EXISTS", "COMPLETED"} {
+		statement := StatementContext{At: at, Claims: []ReferenceClaim{{URL: target, State: state}}}
+		for _, err := range []error{
+			VerifyReference(t.Context(), target, state, at, resolve),
+			CheckForgeReferences(t.Context(), target, statement, "github", "github.com", "example/tool", resolve),
+		} {
+			if (err != nil) != (state == "COMPLETED") {
+				t.Fatalf("%s: %v", state, err)
+			}
+		}
+	}
+	observed.CreatedAt = at.Add(time.Minute)
+	statement := StatementContext{At: at, Claims: []ReferenceClaim{{URL: target, State: "EXISTS"}}}
+	if VerifyReference(t.Context(), target, "EXISTS", at, resolve) == nil ||
+		CheckForgeReferences(t.Context(), target, statement, "github", "github.com", "example/tool", resolve) == nil {
+		t.Fatal("future object accepted as an existing reference")
+	}
+}
+
 func TestTemporalMessagePolicy(t *testing.T) {
 	for _, text := range []string{
 		"完了した結果は後続コメントに記載している",

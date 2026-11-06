@@ -67,6 +67,7 @@ func newRoleWorker(config copilot.Config) (configuredWorker, error) {
 		Configuration: config.Configuration, FileAccess: config.FileAccess, TrackedFiles: config.TrackedFiles,
 		ResponseSchema: config.ResponseSchema, BudgetGuidance: config.BudgetGuidance,
 		ToolPolicy: config.ToolPolicy, AvailableTools: config.AvailableTools,
+		ContextDocuments: config.ContextDocuments,
 	})
 }
 
@@ -116,12 +117,20 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 		}
 	}
 	var graph core.TaskGraph
+	config.ContextDocuments = nil
 	if db != nil {
 		state, err := db.LoadWorkspace()
 		if err != nil {
 			return nil, err
 		}
 		graph = state.Graph
+		config.ContextDocuments, err = controller.DispatchContextDocuments(state, dispatch)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if dispatch.Instruction.Version >= core.ContextAccessInstructionVersion && db == nil {
+		return nil, fmt.Errorf("runtime: original context requires a saved workspace")
 	}
 	config.ToolPolicy, err = tools.ResolveForTask(graph, dispatch.Instruction.Decisions, dispatch.TaskID, dispatch.Recipient)
 	if err != nil {

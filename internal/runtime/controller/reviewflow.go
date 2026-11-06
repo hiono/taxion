@@ -394,7 +394,7 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 		if last.Status != core.DispatchSucceeded || last.Result == nil {
 			return stop("Dispatch " + last.ID + " ended with " + string(last.Status) + "; inspect its saved blockers and stop evidence")
 		}
-		if last.Instruction.Version < core.DispatchInstructionVersion || last.Result.GitEvidence == nil {
+		if last.Instruction.Version < core.StructuredResultInstructionVersion || last.Result.GitEvidence == nil {
 			return stop("latest result lacks current controller-observed Git evidence")
 		}
 		if err := last.ValidateResult(last.Status, last.Result); err != nil {

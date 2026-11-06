@@ -2,6 +2,7 @@ package gitproof
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -272,12 +273,16 @@ func captureWorktreePaths(root, baseline, head string, paths []string) (tree str
 // CheckPortableWorktree refuses unrecorded edits instead of silently losing
 // them during migration. Ignored files are not part of recorded Git artifacts.
 func CheckPortableWorktree(root, head, tree string) error {
-	actualHead, err := git(root, "rev-parse", "HEAD")
+	return checkPortableWorktree(context.Background(), root, head, tree)
+}
+
+func checkPortableWorktree(ctx context.Context, root, head, tree string) error {
+	actualHead, err := readOnlyGit(ctx, root, "rev-parse", "HEAD")
 	if err != nil || actualHead != head {
 		return fmt.Errorf("portable worktree HEAD differs from recorded evidence")
 	}
 	if tree == "" {
-		tree, err = git(root, "rev-parse", head+"^{tree}")
+		tree, err = readOnlyGit(ctx, root, "rev-parse", head+"^{tree}")
 		if err != nil {
 			return err
 		}
@@ -295,14 +300,25 @@ func CheckPortableWorktree(root, head, tree string) error {
 		return err
 	}
 	defer os.Remove(path)
-	options := []string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.untrackedCache=false"}
-	if _, err := gitWithIndex(root, path, append(options, "read-tree", tree)...); err != nil {
+	run := func(args ...string) (string, error) {
+		return readOnlyGitWithIndex(ctx, root, path, args...)
+	}
+	if _, err := run("read-tree", tree); err != nil {
 		return err
 	}
-	if _, err := gitWithIndex(root, path, append(options, "diff", "--quiet", "--no-ext-diff", "--no-textconv")...); err != nil {
+	files, err := run("ls-files", "-z")
+	if err != nil {
+		return err
+	}
+	if files != "" {
+		if err := checkReadOnlyFilters(ctx, root, strings.Split(strings.TrimSuffix(files, "\x00"), "\x00")); err != nil {
+			return err
+		}
+	}
+	if _, err := run("diff", "--quiet", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none"); err != nil {
 		return fmt.Errorf("portable worktree contains unrecorded changes; reconcile before snapshot")
 	}
-	extra, err := gitWithIndex(root, path, append(options, "ls-files", "--others", "--exclude-standard")...)
+	extra, err := run("ls-files", "--others", "--exclude-standard")
 	if err != nil {
 		return err
 	}

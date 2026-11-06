@@ -26,7 +26,7 @@ func startArtifactReview(state *store.Workspace, flow *core.ReviewFlow, request 
 	if _, enabled := state.Records.PacketAuthorization(flow.TaskID); enabled {
 		return fmt.Errorf("taxion: artifact-first packet lifecycle delegation is not supported; use a separately approved Task without optional packet delegation")
 	}
-	if time.Until(flow.ExecutionDeadline()) < time.Duration(flow.StagePlan.ValidationSeconds+flow.StagePlan.ReviewSeconds)*time.Second {
+	if flow.StagePlan.Version == 1 && time.Until(flow.ExecutionDeadline()) < time.Duration(flow.StagePlan.ValidationSeconds+flow.StagePlan.ReviewSeconds)*time.Second {
 		return fmt.Errorf("taxion: caller deadline cannot fit approved input validation and independent review")
 	}
 	if strings.TrimSpace(request.ArtifactSource) != request.ArtifactSource ||
@@ -144,12 +144,24 @@ func runArtifactValidation(ctx context.Context, db *store.Store, ledgerPath, id,
 		return err
 	}
 	if execute {
-		deadline := flow.StartedAt.Add(time.Duration(flow.StagePlan.ValidationSeconds) * time.Second)
-		reserved := flow.ExecutionDeadline().Add(-time.Duration(flow.StagePlan.ReviewSeconds) * time.Second)
-		if reserved.Before(deadline) {
-			deadline = reserved
+		deadline := flow.ExecutionDeadline()
+		if flow.StagePlan.Version == 1 {
+			deadline = flow.StartedAt.Add(time.Duration(flow.StagePlan.ValidationSeconds) * time.Second)
+			reserved := flow.ExecutionDeadline().Add(-time.Duration(flow.StagePlan.ReviewSeconds) * time.Second)
+			if reserved.Before(deadline) {
+				deadline = reserved
+			}
 		}
-		bounded, cancel := context.WithDeadline(ctx, deadline)
+		var bounded context.Context
+		var cancel context.CancelFunc
+		if flow.StagePlan.Version == 2 {
+			bounded, cancel, err = withFlowDeadline(ctx, db, id, nil, false)
+			if err != nil {
+				return err
+			}
+		} else {
+			bounded, cancel = context.WithDeadline(ctx, deadline)
+		}
 		checks, validationErr := gitproof.ValidateArtifact(bounded, flow.Contract, flow.Artifact.Target, configuration.Selection)
 		cancel()
 		for i := range checks {

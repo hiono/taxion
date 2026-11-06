@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/hiono/taxion/internal/config"
@@ -123,7 +124,13 @@ func verifyRequestCheckpoint(state store.Workspace, operation store.Operation, c
 		return false, fmt.Errorf("request provider-only budget lacks its declared billing contract")
 	}
 	if checkpoint.Answer == nil && !checkpoint.PlannerStarted {
-		return false, fmt.Errorf("request checkpoint has no minimal plan or pending question; transient input is unavailable; reconcile before continuation")
+		documents, err := requestContextSources(state, operation.ID)
+		if err != nil {
+			return false, err
+		}
+		if !slices.ContainsFunc(documents, func(document core.ContextDocument) bool { return document.Kind == "request" }) {
+			return false, fmt.Errorf("request checkpoint has no minimal plan or pending question; transient input is unavailable; reconcile before continuation")
+		}
 	}
 	approved := checkpoint.AuthorizationID != "" || checkpoint.Approved ||
 		operation.Phase == "EXECUTION" || operation.Phase == "PREFLIGHT"

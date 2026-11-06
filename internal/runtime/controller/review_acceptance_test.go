@@ -219,6 +219,37 @@ func TestAcceptSavedReviewConcurrentApply(t *testing.T) {
 	}
 }
 
+func TestAcceptSavedReviewUsesEvidenceInsteadOfIncidentMessage(t *testing.T) {
+	db, ledger, request, acceptance := savedReviewAcceptanceFixture(t)
+	const reason = "acceptance bookkeeping failed after the independent review completed"
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		flow, _ := state.Graph.ReviewFlow(request.ID)
+		flow.Reason = reason
+		flow.HandoffChanges[len(flow.HandoffChanges)-1].Reason = reason
+		storeFlow(state, flow)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := AcceptSavedReview(t.Context(), db, ledger, acceptance, request.Configuration, true)
+	if err != nil || preview.OriginalReasonUnavailable {
+		t.Fatal("proof was rejected because the incident message differed", preview, err)
+	}
+	acceptance.ExpectedHash = preview.Hash
+	if _, err := AcceptSavedReview(t.Context(), db, ledger, acceptance, request.Configuration, false); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil || len(state.Records.ReviewAcceptances) != 1 {
+		t.Fatal("acceptance audit could not be read", err)
+	}
+	audit := state.Records.ReviewAcceptances[0]
+	if audit.OriginalReasonUnavailable || audit.PreviousFlow.Reason != reason ||
+		audit.PreviousFlow.HandoffChanges[len(audit.PreviousFlow.HandoffChanges)-1].Reason != reason {
+		t.Fatal("known stop reason was lost or relabeled as unavailable")
+	}
+}
+
 func acceptanceFiles(t *testing.T, roots ...string) map[string][]byte {
 	t.Helper()
 	files := map[string][]byte{}

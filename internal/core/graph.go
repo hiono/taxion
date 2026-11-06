@@ -60,7 +60,7 @@ func (d GraphDispatch) ValidateResult(status DispatchStatus, result *DispatchRes
 // DispatchResult. Model-reported validations never become controller evidence.
 func (d GraphDispatch) ValidateFailedReviewSupplement(result *DispatchResult) error {
 	if d.Status != DispatchFailed || d.Recipient != "REVIEWER" ||
-		d.Instruction.Version != DispatchInstructionVersion ||
+		d.Instruction.Version < StructuredResultInstructionVersion || d.Instruction.Version > DispatchInstructionVersion ||
 		d.Instruction.OutputMode != OutputModeWorktreeTreeSnapshot ||
 		result == nil || result.Status != DispatchSucceeded || result.ReviewVerdict != "REQUEST_CHANGES" ||
 		result.DispatchID != d.ID || result.TaskID != d.TaskID || result.Recipient != d.Recipient ||
@@ -149,7 +149,9 @@ func validateReviewerResult(d GraphDispatch, result *DispatchResult) error {
 	return nil
 }
 
-const DispatchInstructionVersion = 5
+const StructuredResultInstructionVersion = 5
+const ContextAccessInstructionVersion = 6
+const DispatchInstructionVersion = ContextAccessInstructionVersion
 
 const OutputModeCommit = "commit"
 const OutputModeWorktreeTreeSnapshot = "worktree-tree-snapshot"
@@ -1028,6 +1030,13 @@ func sameStringSet(left, right []string) bool {
 
 func RenderDispatchInstruction(d GraphDispatch) (string, error) {
 	i := d.Instruction
+	if i.Version >= ContextAccessInstructionVersion {
+		var err error
+		i.Decisions, err = ProjectContextSourceDecisions(i.Decisions)
+		if err != nil {
+			return "", err
+		}
+	}
 	input, err := ReviewInputFromDecisions(i.Decisions)
 	if err != nil {
 		return "", err
@@ -1627,6 +1636,9 @@ func (g TaskGraph) Validate() error {
 			return graphError("invalid type or status for %s", t.ID)
 		}
 		if _, err := ReviewInputFromDecisions(t.Decisions); err != nil {
+			return err
+		}
+		if _, err := ContextDocumentsFromDecisions(t.Decisions); err != nil {
 			return err
 		}
 		if t.ModelFree && (t.Type != "VERIFICATION" || t.Owner != "USER" || len(t.ValidationCommands) == 0) {

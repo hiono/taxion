@@ -103,6 +103,36 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 		Actor: "human", Source: "human:negative-answer-approval", Reason: "retain original findings without accepting quality",
 		Evidence: []string{"process-exit:confirmed"},
 	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		other, _ := state.Graph.GraphTask(dispatch.TaskID)
+		other.ID, other.Status, other.CreatedFrom = "unrelated-task", core.Draft, "human:unrelated-work"
+		other.Worktree = filepath.Join(t.TempDir(), "unrelated-review")
+		other.DeferredReason, other.ParentID, other.DependsOn, other.HumanDecision = "", "", nil, nil
+		other.MemoryRefs = nil
+		if err := state.Graph.Track(other, "human", "separate authorized work"); err != nil {
+			return err
+		}
+		if err := state.Graph.Transition(other.ID, core.Ready, "human", "separate work ready", core.TransitionProof{}); err != nil {
+			return err
+		}
+		unrelated, err := core.NewGraphDispatch(state.Graph, "unrelated-dispatch", other.ID, other.Repo,
+			core.RelationshipNone, "", "", nil)
+		if err != nil {
+			return err
+		}
+		if err := state.Graph.IssueDispatch(unrelated, "controller", "separate authorized work"); err != nil {
+			return err
+		}
+		state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{
+			ID: other.ID, Title: other.Title, Repo: other.Repo, CreatedAt: time.Now().UTC(),
+		})
+		state.Ledger.Dispatches = append(state.Ledger.Dispatches, core.Dispatch{
+			ID: unrelated.ID, TaskID: other.ID, Repo: other.Repo, Active: true, CreatedAt: time.Now().UTC(),
+		})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	before, _ := db.LoadWorkspace()
 	failed, _ := before.Graph.GraphDispatch(dispatch.ID)
 	failureAt, err := before.Records.FailedReviewReceiptAt(failed)
@@ -180,6 +210,21 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 	if !reflect.DeepEqual(before, afterPreview) {
 		t.Fatal("preview changed workspace")
 	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		other, _ := state.Graph.GraphTask("unrelated-task")
+		other.ID, other.Status, other.CreatedFrom = "unrelated-followup", core.Draft, "human:unrelated-followup"
+		state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{
+			ID: other.ID, Title: other.Title, Repo: other.Repo, CreatedAt: time.Now().UTC(),
+		})
+		return state.Graph.Track(other, "human", "independent planning")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	afterIndependentProgress, err := control.RecordFailedReview(t.Context(), request, true)
+	if err != nil || afterIndependentProgress.Hash != preview.Hash {
+		t.Fatal("unrelated progress changed negative-evidence consent", err)
+	}
+	before, _ = db.LoadWorkspace()
 	request.ExpectedHash = strings.Repeat("b", 64)
 	if _, err := control.RecordFailedReview(t.Context(), request, false); err == nil {
 		t.Fatal("stale preview was applied")
@@ -259,7 +304,11 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 		func(s *store.Workspace) { s.Records.Events = nil },
 		func(s *store.Workspace) { s.Records.FailedReviewSupplements[0].Reason = "changed" },
 		func(s *store.Workspace) {
-			s.Graph.Dispatches[len(s.Graph.Dispatches)-1].Result.Blockers = []string{"rewritten failure"}
+			for index := range s.Graph.Dispatches {
+				if s.Graph.Dispatches[index].ID == dispatch.ID {
+					s.Graph.Dispatches[index].Result.Blockers = []string{"rewritten failure"}
+				}
+			}
 		},
 	} {
 		if err := db.UpdateWorkspace(func(s *store.Workspace) error { mutate(s); return nil }); err == nil {

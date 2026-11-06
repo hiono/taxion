@@ -2,6 +2,7 @@ package gitproof
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,39 @@ import (
 
 	"github.com/hiono/taxion/internal/core"
 )
+
+func TestPortableWorktreeDoesNotLimitTrackedPathList(t *testing.T) {
+	root := t.TempDir()
+	gitCommand(t, root, "init", "-b", "work/task")
+	gitCommand(t, root, "config", "user.name", "Taxion Test")
+	gitCommand(t, root, "config", "user.email", "taxion-test@example.com")
+	for i := range 330 {
+		name := fmt.Sprintf("%03d-%s.txt", i, strings.Repeat("x", 220))
+		if err := os.WriteFile(filepath.Join(root, name), []byte("unchanged\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitCommand(t, root, "add", ".")
+	gitCommand(t, root, "commit", "-m", "large tracked path listing")
+	if len(gitCommand(t, root, "ls-files", "-z")) <= 64*1024 {
+		t.Fatal("fixture does not exceed the old observation cap")
+	}
+	indexPath := gitCommand(t, root, "rev-parse", "--git-path", "index")
+	if !filepath.IsAbs(indexPath) {
+		indexPath = filepath.Join(root, indexPath)
+	}
+	before, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckPortableWorktree(root, gitCommand(t, root, "rev-parse", "HEAD"), ""); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(indexPath)
+	if err != nil || string(before) != string(after) {
+		t.Fatal("portable proof changed the real index", err)
+	}
+}
 
 func TestWorktreeTreeSnapshotIsReviewedWithoutCommit(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repo")

@@ -155,6 +155,16 @@ execution:
 	if len(selectedWorker.ExecutionConfiguration()) == 0 {
 		t.Fatal("saved selection not supplied to the SDK identity")
 	}
+	legacyDispatch := selectedDispatch
+	legacyDispatch.Instruction.Version = core.StructuredResultInstructionVersion
+	legacyWorker, err := newDispatchWorker(context.Background(), db, legacyDispatch, workerConfig, false, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacyWorker.Close()
+	if legacyWorker.ConfigHash() == selectedWorker.ConfigHash() {
+		t.Fatal("common worker factory omitted the new Dispatch's source reader")
+	}
 	t.Setenv("HOME", t.TempDir())
 	output.Reset()
 	if err := doctorCmd([]string{"--dispatch", "dispatch", "--cli", doctorFixtureCLI(t),

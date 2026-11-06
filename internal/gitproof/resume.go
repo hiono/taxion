@@ -16,7 +16,78 @@ func CheckResumeStart(ctx context.Context, dispatch core.GraphDispatch) error {
 	return checkSavedWorktree(ctx, dispatch, false)
 }
 
+// CheckResumeReview reads the immutable candidate used by preparation. Mutable
+// source files are not the Reviewer input; preparation uses the saved Git objects.
+func CheckResumeReview(ctx context.Context, dispatch core.GraphDispatch, source string) error {
+	if dispatch.Recipient != "REVIEWER" || !fullSHA(dispatch.Instruction.BaselineSHA) {
+		return fmt.Errorf("resume requires the saved Reviewer candidate")
+	}
+	remote, err := readOnlyGit(ctx, source, "remote", "get-url", "origin")
+	if err != nil || VerifyRepositoryRemote(dispatch, remote) != nil {
+		return fmt.Errorf("resume review source repository identity differs")
+	}
+	target, err := readOnlyGit(ctx, source, "rev-parse", "--verify", dispatch.Instruction.BaselineSHA+"^{commit}")
+	if err != nil || target != dispatch.Instruction.BaselineSHA {
+		return fmt.Errorf("resume review candidate commit is unavailable")
+	}
+	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+		refID := dispatch.RelatedID
+		if refID == "" {
+			refID = dispatch.ID
+		}
+		tree, err := readOnlyGit(ctx, source, "rev-parse", "--verify", snapshotRef(refID)+"^{tree}")
+		if err != nil || tree != dispatch.Instruction.TargetTreeSHA {
+			return fmt.Errorf("resume review snapshot differs from the issued target")
+		}
+	}
+	if dispatch.ReviewWorktreeSource == "" {
+		if _, err := os.Lstat(dispatch.Instruction.Worktree); !os.IsNotExist(err) {
+			return fmt.Errorf("resume review destination exists without a managed preparation record")
+		}
+		return nil
+	}
+	if dispatch.Instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot {
+		return verifyPreparedReviewWorktree(ctx, dispatch, source)
+	}
+	expectedSource, err := canonical(source)
+	if err != nil {
+		return err
+	}
+	actualSource, err := canonical(dispatch.ReviewWorktreeSource)
+	if err != nil || actualSource != expectedSource {
+		return fmt.Errorf("resume prepared review source differs")
+	}
+	sourceCommon, err := readOnlyGit(ctx, source, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return err
+	}
+	reviewCommon, err := readOnlyGit(ctx, dispatch.Instruction.Worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil || reviewCommon != sourceCommon {
+		return fmt.Errorf("resume prepared review belongs to another repository")
+	}
+	dispatch.Recipient = "CODER"
+	return checkSavedWorktree(ctx, dispatch, true)
+}
+
 func readOnlyGit(ctx context.Context, directory string, args ...string) (string, error) {
+	cmd := observationGitCommand(ctx, directory, "", args...)
+	output := &limitedOutput{remaining: 64 * 1024}
+	cmd.Stdout = output
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("read-only Git observation %s failed: %w", args[0], err)
+	}
+	return strings.TrimSpace(output.String()), nil
+}
+
+func readOnlyGitWithIndex(ctx context.Context, directory, index string, args ...string) (string, error) {
+	output, err := observationGitCommand(ctx, directory, index, args...).Output()
+	if err != nil {
+		return "", fmt.Errorf("read-only Git observation %s failed: %w", args[0], err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func observationGitCommand(ctx context.Context, directory, index string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", append([]string{
 		"--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
 		"-c", "core.untrackedCache=false", "-c", "core.filemode=true", "-c", "core.symlinks=true",
@@ -29,12 +100,10 @@ func readOnlyGit(ctx context.Context, directory string, args ...string) (string,
 		}
 	}
 	cmd.Env = append(cmd.Env, "GIT_OPTIONAL_LOCKS=0", "GIT_NO_REPLACE_OBJECTS=1")
-	output := &limitedOutput{remaining: 64 * 1024}
-	cmd.Stdout = output
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("read-only Git observation %s failed: %w", args[0], err)
+	if index != "" {
+		cmd.Env = append(cmd.Env, "GIT_INDEX_FILE="+index)
 	}
-	return strings.TrimSpace(output.String()), nil
+	return cmd
 }
 
 func checkSavedWorktree(ctx context.Context, dispatch core.GraphDispatch, allowDetached bool) error {
@@ -94,17 +163,8 @@ func checkSavedWorktree(ctx context.Context, dispatch core.GraphDispatch, allowD
 			paths = append(paths, entry[2:])
 		}
 	}
-	if len(paths) != 0 {
-		attributes, err := run(append([]string{"check-attr", "--all", "-z", "--"}, paths...)...)
-		if err != nil {
-			return err
-		}
-		fields := strings.Split(attributes, "\x00")
-		for index := 1; index+1 < len(fields); index += 3 {
-			if fields[index] == "filter" && fields[index+1] != "unset" && fields[index+1] != "unspecified" {
-				return fmt.Errorf("resume tracked Git filters may execute commands during observation")
-			}
-		}
+	if err := checkReadOnlyFilters(ctx, instruction.Worktree, paths); err != nil {
+		return err
 	}
 	tree := head
 	if instruction.OutputMode == core.OutputModeWorktreeTreeSnapshot && instruction.TargetTreeSHA != "" {
@@ -122,6 +182,23 @@ func checkSavedWorktree(ctx context.Context, dispatch core.GraphDispatch, allowD
 	untracked, err := run("ls-files", "--others", "--exclude-standard")
 	if err != nil || untracked != "" {
 		return fmt.Errorf("resume worktree has unrecorded files")
+	}
+	return nil
+}
+
+func checkReadOnlyFilters(ctx context.Context, root string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	attributes, err := readOnlyGitWithIndex(ctx, root, "", append([]string{"check-attr", "filter", "-z", "--"}, paths...)...)
+	if err != nil {
+		return err
+	}
+	fields := strings.Split(attributes, "\x00")
+	for i := 1; i+1 < len(fields); i += 3 {
+		if fields[i] == "filter" && fields[i+1] != "unset" && fields[i+1] != "unspecified" {
+			return fmt.Errorf("tracked Git filters may execute commands during observation")
+		}
 	}
 	return nil
 }

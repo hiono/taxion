@@ -13,8 +13,29 @@ import (
 	sdk "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/rpc"
 	executionconfig "github.com/hiono/taxion/internal/config"
+	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 )
+
+// NewForQuota creates only an account observer, without executable file, tool
+// or source preparation. The controller checks the saved account authority.
+func NewForQuota(dispatch core.GraphDispatch, cli, base string) (*Adapter, error) {
+	policy := dispatch.Instruction.BudgetGuidance
+	if dispatch.Configuration == nil || policy == nil || policy.Mode != "account" || !policy.AccountReadApproved {
+		return nil, fmt.Errorf("taxion: quota observer requires a saved configuration and approved account guidance")
+	}
+	adapter, err := New(Config{
+		Role: dispatch.Recipient, WorkingDirectory: dispatch.Instruction.Worktree,
+		SystemPrompt: "Account quota observation only; model execution is forbidden.",
+		CLIPath:      cli, BaseDirectory: base, Configuration: dispatch.Configuration.Selection,
+		BudgetGuidance: core.CloneBudgetGuidance(policy),
+	})
+	if err != nil {
+		return nil, err
+	}
+	adapter.quotaOnly = true
+	return adapter, nil
+}
 
 func (a *Adapter) ReadAccountQuota(ctx context.Context, expectedAccount string) (runtime.QuotaSnapshot, error) {
 	result := runtime.QuotaSnapshot{

@@ -101,7 +101,9 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 		runCtx, cancel = ctx, func() {}
 	}
 	defer cancel()
+	preparing := false
 	for err == nil {
+		preparing = false
 		flow, err = advanceReviewFlow(db, ledgerPath, id, runnerID, selected)
 		if err != nil || flow.Status != "RUNNING" {
 			break
@@ -121,15 +123,13 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 			break
 		}
 		dispatch, _ := state.Graph.GraphDispatch(flow.DispatchIDs[len(flow.DispatchIDs)-1])
-		releasedUnstarted := len(flow.HandoffChanges) != 0 && !flow.HandoffHeld() && !dispatch.ExecutionStarted
-		if dispatch.Status != core.DispatchIssued && !(releasedUnstarted && dispatch.Status == core.DispatchAcknowledged) ||
-			dispatch.RuntimeSessionID != "" && !releasedUnstarted {
-			err = fmt.Errorf("taxion: continuous runner requires a fresh issued Dispatch; reconcile existing session %s", dispatch.RuntimeSessionID)
+		if err = checkUnstartedDispatch(flow, dispatch); err != nil {
 			break
 		}
 		if err = checkLifecyclePacket(&state, dispatch.ID); err != nil {
 			break
 		}
+		preparing = true
 		if dispatch.Recipient == "REVIEWER" {
 			dispatch, err = prepareReview(runCtx, db, dispatch.ID, flow.Contract.Worktree)
 			if err != nil {
@@ -151,6 +151,7 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 		}
 		control, setupErr := New(db, worker)
 		if setupErr == nil {
+			preparing = false
 			_, setupErr = control.Start(runCtx, dispatch.ID)
 		}
 		var cursor uint64
@@ -186,6 +187,32 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 			return fmt.Errorf("taxion: flow runner claim changed during execution")
 		}
 		if err != nil && stored.Status == "RUNNING" && !handoffHeldOnly(err) {
+			now := time.Now().UTC()
+			report := taskBudgetReport(state.Graph, stored, now)
+			dispatch, _ := state.Graph.GraphDispatch(stored.LastDispatchID())
+			stageStop := ""
+			if preparing {
+				stageStop = stageBudgetStop(state.Graph, stored, dispatch, now)
+			}
+			var budgetErr *budgetStopError
+			budgetStopped := errors.As(err, &budgetErr) || activeBudgetStop(report) != "" || stageStop != ""
+			if stageStop != "" {
+				err = errors.Join(err, errors.New(stageStop))
+			}
+			if preparing && runCtx.Err() == nil && !budgetStopped {
+				report.StageObservation = &StageObservation{
+					DispatchID: dispatch.ID, Role: dispatch.Recipient, Phase: "preparation-blocked",
+					At: time.Now().UTC(), Deadline: stageDeadline(stored, dispatch, false),
+					Reason: core.Redact(err.Error()),
+				}
+				if auditErr := appendBudgetAudit(state, stored, "STAGE_OBSERVED", report); auditErr != nil {
+					return auditErr
+				}
+				stored.RunnerID = ""
+				storeFlow(state, stored)
+				flow = stored
+				return nil
+			}
 			reason := "runner failed: " + err.Error()
 			if holdErr := holdReviewFlowForStop(&state.Graph, &stored, reason); holdErr != nil {
 				return holdErr
@@ -193,8 +220,7 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 			stored.StopCode = "SAFETY_STOP"
 			stored.Status, stored.Reason = "STOPPED", reason
 			stored.StopCause = "other"
-			var budgetErr *budgetStopError
-			if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &budgetErr) {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded) || budgetStopped {
 				stored.StopCode = "BUDGET_STOP"
 				stored.StopCause = ""
 				stored.StopCause = flowStopCause(stored)
@@ -228,6 +254,21 @@ func runReviewFlow(ctx context.Context, db *store.Store, ledgerPath, id string, 
 		}
 	}
 	return flow, errors.Join(err, saveErr)
+}
+
+// A released hold can leave a bound session before the first send. Reattach
+// that session; never treat an execution-started Dispatch as a fresh turn.
+func checkUnstartedDispatch(flow core.ReviewFlow, dispatch core.GraphDispatch) error {
+	if flow.HandoffHeld() {
+		return core.ErrHandoffHeld
+	}
+	released := len(flow.HandoffChanges) != 0
+	if dispatch.ExecutionStarted || dispatch.Result != nil || dispatch.Acknowledged && !released ||
+		dispatch.Status != core.DispatchIssued && !(released && dispatch.Status == core.DispatchAcknowledged) ||
+		dispatch.RuntimeSessionID != "" && !released {
+		return fmt.Errorf("taxion: execution is not an unstarted Dispatch; inspect its saved session and result before continuing")
+	}
+	return nil
 }
 
 func writeReviewBudget(ctx context.Context, out io.Writer, flow core.ReviewFlow, dispatch core.GraphDispatch) error {

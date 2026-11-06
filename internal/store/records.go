@@ -61,7 +61,7 @@ func (r Records) VerifyReviewAcceptances(graph core.TaskGraph) error {
 		task, taskFound := graph.GraphTask(prior.TaskID)
 		if seen[audit.FlowID] || !exists || !found || !taskFound || audit.FlowID != prior.ID ||
 			audit.Actor == "" || audit.Source == "" || audit.Reason == "" || audit.At.IsZero() ||
-			!audit.OriginalReasonUnavailable || !recordHash(audit.PreviewHash) ||
+			!recordHash(audit.PreviewHash) ||
 			err != nil || resultHash != audit.ResultHash || review.InstructionHash != audit.InstructionHash ||
 			review.Status != core.DispatchSucceeded || review.Result == nil || review.Result.ReviewVerdict != "APPROVE" ||
 			prior.Status != "STOPPED" || prior.StopCode != "SAFETY_STOP" || prior.Reason == "" ||
@@ -255,7 +255,7 @@ func (r Records) validate() error {
 		key := record.RequestID + ":" + record.Kind
 		requestSequences[key]++
 		payload := []byte(record.Payload)
-		if strings.TrimSpace(record.RequestID) == "" || record.Kind != "planning" && record.Kind != "execution" ||
+		if strings.TrimSpace(record.RequestID) == "" || record.Kind != "planning" && record.Kind != "execution" && record.Kind != "context-source" ||
 			record.Sequence != requestSequences[key] || record.At.IsZero() || !json.Valid(payload) ||
 			record.Hash != fmt.Sprintf("%x", sha256.Sum256(payload)) {
 			return fmt.Errorf("invalid request record or incomplete sequence")

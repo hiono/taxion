@@ -41,6 +41,40 @@ execution: {requester: requester, worker: local, approvalRef: approval}
 	return data
 }
 
+func TestQuotaOnlyConstructorIgnoresExecutableInputsAndForbidsModelCalls(t *testing.T) {
+	cfg := testConfig(t)
+	policy, err := core.NewBudgetGuidance("", "account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer, err := NewForQuota(core.GraphDispatch{
+		Recipient: "CODER", Configuration: &core.DispatchConfiguration{Selection: quotaTestSelection(t, "fixture")},
+		Instruction: core.DispatchInstruction{
+			Worktree: cfg.WorkingDirectory, BudgetGuidance: policy,
+			FileAccess: &core.FileAccessPolicy{Level: core.FileAccessCommitted},
+			Decisions:  []core.TaskDecision{{Text: "unavailable execution source"}},
+		},
+	}, cfg.CLIPath, cfg.BaseDirectory)
+	if err != nil {
+		t.Fatal("numeric observation required tracked paths or source preparation", err)
+	}
+	defer observer.Close()
+	if _, err := observer.Start(t.Context(), "task"); err == nil {
+		t.Fatal("quota observer started a model")
+	}
+	for _, call := range []func() error{
+		func() error { return observer.Send(t.Context(), "session", "input") },
+		func() error { return observer.Resume(t.Context(), "session") },
+	} {
+		if err := call(); err == nil {
+			t.Fatal("quota observer executed a model operation")
+		}
+	}
+	if observer.started || len(observer.sessions) != 0 || observer.ToolPolicy() != nil {
+		t.Fatal("quota constructor loaded an execution capability")
+	}
+}
+
 func TestAccountQuotaUsesOnlyAuthAndReadRPC(t *testing.T) {
 	for _, test := range []struct {
 		name, timestamp, state string
@@ -131,7 +165,13 @@ func testAccountQuotaReadRPC(t *testing.T, timestamp, expectedState string, oper
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter, err := New(cfg)
+	adapter, err := NewForQuota(core.GraphDispatch{
+		Recipient: cfg.Role, Configuration: &core.DispatchConfiguration{Selection: cfg.Configuration},
+		Instruction: core.DispatchInstruction{
+			Worktree: cfg.WorkingDirectory, BudgetGuidance: cfg.BudgetGuidance,
+			FileAccess: &core.FileAccessPolicy{Level: core.FileAccessCommitted},
+		},
+	}, cfg.CLIPath, cfg.BaseDirectory)
 	if err != nil {
 		t.Fatal(err)
 	}

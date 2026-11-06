@@ -250,7 +250,7 @@ func (s *Server) newSession(cwd, dispatchID string) (string, error) {
 		return "", fmt.Errorf("Task Graph is not initialized")
 	}
 	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
-	if !ok || dispatch.Instruction.Version < core.DispatchInstructionVersion {
+	if !ok || dispatch.Instruction.Version < core.StructuredResultInstructionVersion {
 		return "", fmt.Errorf("Dispatch %q is not a fresh, currently approved Dispatch", dispatchID)
 	}
 	fresh := dispatch.Status == core.DispatchIssued && !dispatch.ExecutionStarted

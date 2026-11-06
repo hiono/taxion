@@ -75,7 +75,7 @@ func CheckMutationText(m Mutation) (Profile, error) {
 	if !slices.Contains([]string{"issue", "pull-request", "comment", "review", "release", "milestone", "tag", "ci-summary", "wiki"}, m.Surface) {
 		return Profile{}, fmt.Errorf("unsupported public text surface")
 	}
-	if err := CheckPresentation(profile, m.Title, m.Body); err != nil {
+	if err := CheckPresentationForSurface(profile, m.Title, m.Body, m.Surface); err != nil {
 		return Profile{}, err
 	}
 	digests := strings.Fields(os.Getenv("TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256"))

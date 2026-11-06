@@ -12,7 +12,7 @@ import (
 var temporalContradiction = regexp.MustCompile(`(?i)(?:未公開(?:の|な)?\s*release.{0,40}(?:利用可能|公開済み)|未実施.{0,40}(?:PASS済み|成功済み)|未起動.{0,40}(?:APPROVE済み|承認済み)|未merge.{0,40}main.{0,20}反映済み|(?:unpublished|not[- ]yet[- ]published) release.{0,40}(?:is available|has been published)|CI has passed when the run is still pending|後ほど作成される.{0,30}記載している|まだ作成されていないartifact.{0,30}hashは次のとおり)`)
 var positionalReference = regexp.MustCompile(`(?i)(?:後続コメント|次のコメント|後続\s*PR|後続\s*release|次の記録|完了後の成果物|later comment|following release|completed as described later|will be recorded below)`)
 var plannedReference = regexp.MustCompile(`(?i)(?:完了後.{0,50}(?:追記|公開|記載)(?:します|する予定)|対応後.{0,50}(?:記載|追記|公開)する|(?:検証|CI).{0,20}完了後.{0,30}(?:判断|公開)(?:します|する)|(?:まだ|現時点).{0,30}(?:未公開|未作成|ありません)|まだ.{0,20}(?:作成|公開)されていません|will (?:record|publish|add)|will be (?:recorded|published)|not yet (?:created|available))`)
-var stableReference = regexp.MustCompile(`https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(?:issues|pull|commit|actions/runs|releases/(?:tag|download))/[^\s<>()\x60]+`)
+var stableReference = regexp.MustCompile(`https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(?:issues|pull|milestone|commit|actions/runs|releases/(?:tag|download))/[^\s<>()\x60]+`)
 var completedLater = regexp.MustCompile(`(?i)(?:完了した結果.{0,30}(?:後続コメント|次のコメント).{0,30}(?:記載している|記載済み)|(?:completed result|review result).{0,50}(?:recorded in a later comment|is in (?:the )?next comment))`)
 
 func checkTemporal(text string, document bool) error {
@@ -58,8 +58,8 @@ func VerifyReference(ctx context.Context, target, state string, at time.Time, re
 		return fmt.Errorf("public reference could not be verified: %w", err)
 	}
 	if observed.URL != target || observed.CreatedAt.IsZero() || observed.CreatedAt.After(at) ||
-		observed.StateAt.IsZero() || observed.StateAt.Before(observed.CreatedAt) || observed.StateAt.After(at) ||
-		observed.State != state {
+		observed.StateAt.IsZero() || observed.StateAt.Before(observed.CreatedAt) ||
+		state != "EXISTS" && (observed.StateAt.After(at) || observed.State != state) {
 		return fmt.Errorf("public reference did not exist in the claimed state at the statement timestamp")
 	}
 	return nil
@@ -107,7 +107,7 @@ func CheckForgeReferences(ctx context.Context, text string, statement StatementC
 		}
 		if observed.URL != target || observed.CreatedAt.IsZero() || observed.CreatedAt.After(statement.At) ||
 			observed.StateAt.IsZero() || observed.StateAt.Before(observed.CreatedAt) ||
-			observed.StateAt.After(statement.At) || observed.State != claims[target] {
+			claims[target] != "EXISTS" && (observed.StateAt.After(statement.At) || observed.State != claims[target]) {
 			return fmt.Errorf("public reference did not exist in the claimed state at the statement timestamp")
 		}
 		seen[target] = true

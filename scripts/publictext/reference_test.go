@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,8 @@ func TestGitHubReferenceStatesAndTransitionTimes(t *testing.T) {
 		{"pull", map[string]any{"state": "open"}, "IN_PROGRESS", at.Add(-time.Hour)},
 		{"pull", map[string]any{"merged_at": at.Add(-time.Minute)}, "COMPLETED", at.Add(-time.Minute)},
 		{"pull", map[string]any{"state": "closed", "closed_at": at}, "FAILED", at},
+		{"milestone", map[string]any{"state": "open"}, "EXISTS", at.Add(-time.Hour)},
+		{"milestone", map[string]any{"state": "closed", "closed_at": at}, "CLOSED", at},
 		{"run", map[string]any{"status": "in_progress", "conclusion": nil}, "IN_PROGRESS", at.Add(-time.Hour)},
 		{"run", map[string]any{"status": "completed", "conclusion": "success", "updated_at": at}, "COMPLETED", at},
 		{"run", map[string]any{"status": "completed", "conclusion": "failure", "updated_at": at}, "FAILED", at},
@@ -59,6 +62,31 @@ func TestGitHubReferenceStatesAndTransitionTimes(t *testing.T) {
 		if _, err := resolveGitHub(t.Context(), target); err == nil {
 			t.Fatal("unsupported URL accepted without authoritative metadata")
 		}
+	}
+}
+
+func TestMilestoneReferenceContextCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("local gh protocol fixture uses a POSIX shell")
+	}
+	dir := t.TempDir()
+	target := "https://github.com/example/tool/milestone/17"
+	metadata := `{"html_url":"` + target + `","state":"closed","created_at":"2026-01-01T10:00:00Z","closed_at":"2026-01-01T13:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte("#!/bin/sh\nprintf '%s\\n' '"+metadata+"'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	contextFile := filepath.Join(dir, "context.json")
+	if err := os.WriteFile(contextFile, []byte(`{"at":"2026-01-01T12:00:00Z","claims":[{"url":"`+target+`","state":"EXISTS"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	textFile := filepath.Join(dir, "references.txt")
+	if err := os.WriteFile(textFile, []byte(target+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output, warnings bytes.Buffer
+	if err := run([]string{"-context", contextFile, textFile}, &output, &warnings); err != nil {
+		t.Fatal(err)
 	}
 }
 
