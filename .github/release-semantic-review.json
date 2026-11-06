@@ -1,19 +1,18 @@
 {
   "profileHash": "25805a3a784af71a1abbd4bf5d232143bd455a0798d39ea0aae17975763b5932",
-  "contentHash": "9df71d140629a365c4d1abb35b455d8b0e58d2ad56b8f9bcc1f135feb488dcd5",
+  "contentHash": "88014cfea3f6ec4b7aa30d0ce671a356467f2088db7242ec37035589d05f9dcc",
   "statement": {
-    "at": "2026-11-06T05:14:05.513470Z",
+    "at": "2026-11-06T15:16:25.529208Z",
     "claims": [
-      {"url": "https://github.com/hiono/taxion/issues/272", "state": "EXISTS"},
-      {"url": "https://github.com/hiono/taxion/issues/274", "state": "EXISTS"},
-      {"url": "https://github.com/hiono/taxion/issues/275", "state": "EXISTS"},
-      {"url": "https://github.com/hiono/taxion/milestone/38", "state": "EXISTS"},
-      {"url": "https://github.com/hiono/taxion/pull/273", "state": "EXISTS"},
-      {"url": "https://github.com/hiono/taxion/pull/276", "state": "EXISTS"}
+      {"url": "https://github.com/hiono/taxion/issues/277", "state": "EXISTS"},
+      {"url": "https://github.com/hiono/taxion/issues/278", "state": "EXISTS"},
+      {"url": "https://github.com/hiono/taxion/pull/280", "state": "EXISTS"},
+      {"url": "https://github.com/hiono/taxion/issues/279", "state": "EXISTS"},
+      {"url": "https://github.com/hiono/taxion/milestone/39", "state": "EXISTS"}
     ]
   },
-  "writerSession": "redesign-080-author-7baef537",
-  "reviewerSession": "11e5e7e8-1c1c-4600-a744-b02f8de4da09",
+  "writerSession": "publication-082-operator-7baef537",
+  "reviewerSession": "2ead3353-c5e8-4469-a992-5f137d0a91d3",
   "decision": "APPROVE",
-  "source": "independent-review:11e5e7e8-1c1c-4600-a744-b02f8de4da09"
+  "source": "independent-review:2ead3353-c5e8-4469-a992-5f137d0a91d3"
 }
