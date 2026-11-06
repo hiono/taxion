@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
 )
@@ -21,9 +22,13 @@ func TestFailedReviewSupplementPreservesFailureAndNeverReplaysValidation(t *test
 	}
 }
 
-func testFailedReviewSupplement(t *testing.T, mode string) {
+func testFailedReviewSupplement(t *testing.T, mode string, publicCLI ...bool) {
 	counter := filepath.Join(t.TempDir(), "validations")
-	db, ledger, start, selected := artifactFixture(t, []string{"printf x >> " + counter}, mode == "normal", "CODER")
+	owners := []string{"CODER"}
+	if len(publicCLI) != 0 {
+		owners = append(owners, "native-cli")
+	}
+	db, ledger, start, selected := artifactFixture(t, []string{"printf x >> " + counter}, mode == "normal", owners...)
 	if mode == "normal" {
 		start.ArtifactSource = ""
 		start.StageBudget.ReviewNanoAIU = 1
@@ -58,6 +63,9 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 		fakeRuntime: &fakeRuntime{role: "REVIEWER", hash: "saved-review", worktree: dispatch.Instruction.Worktree, bound: true},
 		selection:   mustFlowJSON(t, selected.Config),
 	}}
+	if len(publicCLI) != 0 {
+		worker.fakeRuntime.hash = strings.Repeat("a", 64)
+	}
 	control, err := New(db, worker)
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +148,13 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 		t.Fatal(err)
 	}
 	initialTurn, initialRequest, initialAnswer := worker.turn, request, answer
+	if len(publicCLI) != 0 {
+		testFailedReviewPublicCLI(t, db, ledger, flow, dispatch, request, worker.turn)
+		if count, err := os.ReadFile(counter); err != nil || string(count) != "x" {
+			t.Fatal("public CLI replayed product validation", string(count), err)
+		}
+		return
+	}
 	for name, change := range map[string]func(){
 		"wrong-session":         func() { worker.turn.SessionID = "another-session" },
 		"late":                  func() { worker.turn.FinishedAt = flow.Deadline.Add(time.Second) },
@@ -206,6 +221,30 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 		preview.AccountingReconciled || preview.DispatchStatus != core.DispatchFailed {
 		t.Fatal("preview failed or claimed quality/execution/accounting", preview, err)
 	}
+	alternateTimeoutPreview, err := control.RecordFailedReviewWithTimeout(t.Context(), request, true, time.Minute)
+	if err != nil || alternateTimeoutPreview.Hash != preview.Hash {
+		t.Fatal("observation timeout changed the legacy approval hash", alternateTimeoutPreview.Hash, preview.Hash, err)
+	}
+	originalRuntime := control.runtime
+	blocking := &blockingFailedReviewRuntime{configuredFailedReviewIdentity: worker}
+	control.runtime = blocking
+	_, timeoutErr := control.RecordFailedReviewWithTimeout(t.Context(), request, true, time.Minute)
+	control.runtime = originalRuntime
+	var timeoutFailure *FailedReviewOperationError
+	if !errors.Is(timeoutErr, context.DeadlineExceeded) || !errors.As(timeoutErr, &timeoutFailure) ||
+		timeoutFailure.Phase != "native-read" || timeoutFailure.Persistence != "NOT_WRITTEN" ||
+		timeoutFailure.ObservationTimeout != "1m0s" || timeoutFailure.EffectiveDeadline.IsZero() {
+		t.Fatalf("native read timeout did not produce safe phase diagnostics: failure=%+v err=%v", timeoutFailure, timeoutErr)
+	}
+	control.runtime = blocking
+	parentCtx, cancelParent := context.WithTimeout(t.Context(), 30*time.Second)
+	parentDeadline, _ := parentCtx.Deadline()
+	_, timeoutErr = control.RecordFailedReviewWithTimeout(parentCtx, request, true, time.Minute)
+	cancelParent()
+	if !errors.Is(timeoutErr, context.DeadlineExceeded) || !blocking.deadline.Equal(parentDeadline) {
+		t.Fatal("operation timeout overrode the earlier caller deadline", timeoutErr)
+	}
+	control.runtime = originalRuntime
 	afterPreview, _ := db.LoadWorkspace()
 	if !reflect.DeepEqual(before, afterPreview) {
 		t.Fatal("preview changed workspace")
@@ -315,9 +354,57 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 			t.Fatal("immutable supplement or original failure was rewritten")
 		}
 	}
+
 	cancelled, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := control.RecordFailedReview(cancelled, request, true); err == nil {
 		t.Fatal("cancelled processing succeeded")
 	}
+	for _, invalidTimeout := range []time.Duration{0, MaxFailedReviewObservationTimeout + time.Nanosecond} {
+		if _, err := control.RecordFailedReviewWithTimeout(t.Context(), request, true, invalidTimeout); err == nil {
+			t.Fatal("invalid observation timeout accepted", invalidTimeout)
+		} else {
+			var failure *FailedReviewOperationError
+			if !errors.As(err, &failure) || failure.Phase != "configuration" || failure.Persistence != "NOT_WRITTEN" {
+				t.Fatal("timeout configuration failure lacks safe diagnostics", err)
+			}
+		}
+	}
+	control.mu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := control.RecordFailedReviewWithTimeout(t.Context(), request, true, 20*time.Millisecond)
+		done <- err
+	}()
+	time.Sleep(40 * time.Millisecond)
+	control.mu.Unlock()
+	err = <-done
+	var failure *FailedReviewOperationError
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &failure) ||
+		failure.Phase != "controller-lock" || failure.Persistence != "NOT_WRITTEN" {
+		t.Fatal("contended Controller lock did not preserve timeout identity and phase", err)
+	}
+	cancelledGit, cancelGit := context.WithCancel(t.Context())
+	cancelGit()
+	if err := gitproof.VerifyPreparedReviewWorktreeContext(cancelledGit, core.GraphDispatch{}, ""); !errors.Is(err, context.Canceled) {
+		t.Fatal("prepared-Git verifier obscured cancellation identity", err)
+	}
+}
+
+type configuredFailedReviewIdentity interface {
+	runtime.Identity
+	runtime.ConfigurationIdentity
+}
+
+type blockingFailedReviewRuntime struct {
+	configuredFailedReviewIdentity
+	deadline time.Time
+}
+
+func (r *blockingFailedReviewRuntime) ReadSavedTurn(ctx context.Context, _ string) (runtime.SavedTurn, error) {
+	r.deadline, _ = ctx.Deadline()
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	<-ctx.Done()
+	return runtime.SavedTurn{}, ctx.Err()
 }

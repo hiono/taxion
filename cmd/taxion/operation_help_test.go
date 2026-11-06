@@ -41,6 +41,8 @@ func TestJSONOperationHelpExplainsInputsWithoutWorkspace(t *testing.T) {
 		{"workflow run", []string{"progress-monitor", "ten minutes", "no extra model"}},
 		{"workflow recover", []string{"expectedRunnerId", "previousProcessStopped", "finalizeSavedResult",
 			"validationDeadline", "host-validation", "REQUEST_CHANGES", "-cli", "-base-directory"}},
+		{"workflow record-failed-review", []string{"observation-timeout", "default 30s", "at most 5m",
+			"mutex waits may exceed", "store open/migration", "operation lease", "NOT_WRITTEN", "UNKNOWN", "COMMITTED"}},
 	} {
 		t.Run(test.command, func(t *testing.T) {
 			parts := strings.Fields(test.command)

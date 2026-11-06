@@ -43,8 +43,12 @@ func dispatchResultSchema(dispatch core.GraphDispatch, strict, bound bool) map[s
 			"description": fmt.Sprintf("Evidence identifiers, not narrative reports. For SUCCEEDED, include every required identifier as a separate exact array item: %q. Do not append descriptions to these identifiers; additional evidence may be separate items. Acceptance and finding evidence must reference exact strings present in this array.", dispatch.Instruction.RequiredEvidence)},
 		"workReport": map[string]any{"type": "string",
 			"description": "The actual work report, including checks performed, observations and retained issues with reasons. Store the report text here, not in an SDK session file or external path. It is saved in the workspace and handed to the independent reviewer as evidence, not as instructions."},
-		"blockers":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-		"nextTransition":  map[string]any{"type": "string"},
+		"blockers": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"nextTransition": map[string]any{"type": "string", "enum": []core.TaskStatus{
+			core.Draft, core.Ready, core.Active, core.WaitingForEvidence, core.WaitingForReview,
+			core.RequestChanges, core.Blocked, core.HumanDecisionRequired, core.Approved,
+			core.Completed, core.Rejected, core.Cancelled, core.Superseded,
+		}},
 		"resumeCondition": map[string]any{"type": "string"},
 	}
 	required := []string{
@@ -86,11 +90,6 @@ func dispatchResultSchema(dispatch core.GraphDispatch, strict, bound bool) map[s
 		required = append(required, "reviewVerdict", "acceptance", "findings", "worktreeChanged")
 	}
 	if strict {
-		properties["nextTransition"] = map[string]any{"type": "string", "enum": []core.TaskStatus{
-			core.Draft, core.Ready, core.Active, core.WaitingForEvidence, core.WaitingForReview,
-			core.RequestChanges, core.Blocked, core.HumanDecisionRequired, core.Approved,
-			core.Completed, core.Rejected, core.Cancelled, core.Superseded,
-		}}
 		for field, value := range map[string]string{
 			"dispatchId": dispatch.ID, "taskId": dispatch.TaskID, "recipient": dispatch.Recipient,
 			"repository": dispatch.Repository, "startedSha": dispatch.ExpectedStartSHA(),

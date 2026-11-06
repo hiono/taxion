@@ -35,6 +35,24 @@ func TestInputObservationDoesNotCreateWorkspace(t *testing.T) {
 	}
 }
 
+func TestInputObservationHelpExampleMatchesRequestSchema(t *testing.T) {
+	var output bytes.Buffer
+	_ = workflowCommand(t.Context(), []string{"observe-input", "--help"}, &output)
+	example := `["cmd/taxion"]`
+	if !strings.Contains(output.String(), example) || !strings.Contains(output.String(), "relative to the source worktree") {
+		t.Fatal("observation scope has no usable JSON/path contract")
+	}
+	var request controller.InputObservationRequest
+	if err := json.Unmarshal([]byte(`{"scope":`+example+`}`), &request); err != nil || len(request.Scope) != 1 {
+		t.Fatal("documented scope example does not match the actual request", err)
+	}
+	for _, invalid := range []string{`{"scope":"cmd/taxion"}`, `{"scope":{"paths":["cmd/taxion"]}}`} {
+		if err := json.Unmarshal([]byte(invalid), &request); err == nil {
+			t.Fatal("ambiguous scope representation accepted", invalid)
+		}
+	}
+}
+
 func TestInputAssessmentHelpDoesNotAdvertiseObservationMutationOptions(t *testing.T) {
 	var output bytes.Buffer
 	if err := workflowCommand(t.Context(), []string{"assess-input", "--help"}, &output); err == nil {

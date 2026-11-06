@@ -25,7 +25,11 @@ func inputObservationCommand(action string, args []string, output io.Writer) err
 		fmt.Fprintln(fs.Output(), "Usage of workflow "+action+":")
 		fs.PrintDefaults()
 		fmt.Fprintln(fs.Output(), `observe-input JSON:
-taskId, optional flowId and dispatchId, scope (explicit read/capture paths),
+taskId, optional flowId and dispatchId, scope (JSON array of explicit read/capture
+path strings, not an object or a single string; for example ["cmd/taxion"]),
+Paths are relative to the source worktree: an exact file, a directory including
+its descendants, or a filepath.Match pattern. "*" does not cross directories.
+The array must be nonempty. Existing forbidden paths still take precedence.
 targetSha (exact current HEAD), actor, source, reason, evidence (redacted strings),
 noActiveExecutionConfirmed:true, acceptDeliveryUncertainty:true.
 configuration may supply the exact non-secret resolved repository configuration;

@@ -141,9 +141,15 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) LoadWorkspace() (Workspace, error) {
+	return s.LoadWorkspaceContext(context.Background())
+}
+
+// LoadWorkspaceContext observes a workspace using the caller's cancellation
+// context. Waiting for the Store's in-process mutex remains outside its bound.
+func (s *Store) LoadWorkspaceContext(ctx context.Context) (Workspace, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -283,11 +289,74 @@ func (s *Store) loadWorkspace(q workspaceReader) (Workspace, error) {
 func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tx, err := s.db.Begin()
+	return s.updateWorkspaceLocked(context.Background(), update, nil)
+}
+
+type FailedReviewPersistence string
+
+const (
+	FailedReviewNotWritten FailedReviewPersistence = "NOT_WRITTEN"
+	FailedReviewUnknown    FailedReviewPersistence = "UNKNOWN"
+	FailedReviewCommitted  FailedReviewPersistence = "COMMITTED"
+)
+
+// AppendFailedReviewSupplementContext is the narrow context-aware transaction
+// for the append-only negative-review record. The state hash is checked inside
+// the transaction immediately before append.
+func (s *Store) AppendFailedReviewSupplementContext(ctx context.Context, expectedStateHash string, supplement *FailedReviewSupplement) (FailedReviewPersistence, error) {
+	if supplement == nil {
+		return FailedReviewNotWritten, fmt.Errorf("failed review supplement is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := workspaceUpdateResult{}
+	err := s.updateWorkspaceLocked(ctx, func(state *Workspace) error {
+		hash, err := core.CanonicalSHA256(*state)
+		if err != nil || hash != expectedStateHash {
+			return fmt.Errorf("taxion: workspace changed during saved review observation; preview again")
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		supplement.At = time.Now().UTC()
+		state.Records.FailedReviewSupplements = append(state.Records.FailedReviewSupplements, *supplement)
+		return nil
+	}, &result)
+	return result.failedReviewPersistence(err), err
+}
+
+type workspaceUpdateResult struct {
+	started        bool
+	rollbackProven bool
+}
+
+func (r workspaceUpdateResult) failedReviewPersistence(err error) FailedReviewPersistence {
+	if err == nil {
+		return FailedReviewCommitted
+	}
+	if !r.started || r.rollbackProven {
+		return FailedReviewNotWritten
+	}
+	return FailedReviewUnknown
+}
+
+func (s *Store) updateWorkspaceLocked(ctx context.Context, update func(*Workspace) error, result *workspaceUpdateResult) (err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		if result != nil {
+			result.rollbackProven = true
+		}
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err != nil {
+			if result != nil {
+				result.rollbackProven = tx.Rollback() == nil
+			} else {
+				_ = tx.Rollback()
+			}
+		}
+	}()
 	state, err := s.loadWorkspace(tx)
 	if err != nil {
 		return err
@@ -482,6 +551,9 @@ func (s *Store) UpdateWorkspace(update func(*Workspace) error) error {
 		if err := state.Graph.CheckLedger(state.Ledger); err != nil {
 			return err
 		}
+	}
+	if result != nil {
+		result.started = true
 	}
 	if err := saveWorkspaceDocuments(tx, state); err != nil {
 		return err

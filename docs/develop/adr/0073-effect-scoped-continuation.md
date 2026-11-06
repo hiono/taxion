@@ -47,7 +47,7 @@ Task は目的と契約、Flow は達成計画、Dispatch は個別の実行を�
 | 操作の種類 | 禁止する副作用 | 他の操作へ持ち込まない条件 |
 | --- | --- | --- |
 | 読取り・診断 | 権限外の読取り、秘密の出力、読取りを装った実行 | 実行の残予算不足だけで保存証拠の確認を拒否しない |
-| 証拠の追記 | 原本改変、帰属の捏造、未検証事実の合格認定 | 接続終了や transport failure を回答内容と同一視しない |
+| 証拠の追記 | 原本改変、帰属の捏造、未検証事実の合格認定。timeout/cancel 後の不明な commit を成功・rollback と推測しない | 接続終了や transport failure を回答内容と同一視しない。`UNKNOWN` は記録確認を要求し、同じ canonical approval hash だけでは解決しない |
 | 未開始の実行 | 契約外の対象・権限、二重送信、競合、資源超過 | role 名や任意 packet 機能の未使用だけで拒否しない |
 | 結果受理・品質判定 | 別候補の証拠流用、検証・独立レビューの捏造 | transport status だけで完成済み証拠を捨てない |
 | 公開・外部変更 | 未承認公開、秘密漏洩、配送不明の再送 | 内部工程の許可を公開権限とみなさない |
@@ -94,6 +94,14 @@ artifact input validation の未開始／完了／実行結果不明は区別し
 見積もり不足・超過だけでは再承認を要求しない。実上限への到達、
 正の native 上限に対する使用量不明、品質不足は別に判定する。
 provider-stop での残高不明を、この変更で停止条件へ追加しない。
+
+保存済み FAILED Reviewer の負の回答を追記する observation は元の提出期限と別の
+Controller 内上限を持つ。既定30秒、明示値は正で最大5分とし、呼出し元の早い
+deadline/cancellation を優先する。これは操作全体の厳密な wall-clock cap ではない。
+CLI の file/store read、Store open/migration、Copilot runtime setup、operation lease、cleanup/output と Controller/Store の
+in-process mutex wait は予算外として文書化し、SQL/native/Git 処理には context を渡す。
+この継続判断は負の証拠の append に限り、Flow・FAILED・usage・元の承認や hash shape、
+再実行 eligibility を変更しない。
 
 version 2 の計画 hash は対象・設定・認可・期限・実使用量上限・回数・役割別ソフト上限を
 固定する。助言にすぎない時間/native 見積もりと実績の抽出根拠は hash から除く。

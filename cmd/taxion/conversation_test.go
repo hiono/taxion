@@ -129,8 +129,8 @@ func TestStrictResultSchemaPinsIssuedIdentitiesAndRepairStart(t *testing.T) {
 				core.Draft, core.Ready, core.Active, core.WaitingForEvidence, core.WaitingForReview,
 				core.RequestChanges, core.Blocked, core.HumanDecisionRequired, core.Approved,
 				core.Completed, core.Rejected, core.Cancelled, core.Superseded,
-			}) || ordinary["nextTransition"].(map[string]any)["enum"] != nil {
-				t.Fatal("strict schema must allow actual Task states without changing legacy schemas")
+			}) || !reflect.DeepEqual(ordinary["nextTransition"].(map[string]any)["enum"], transitions) {
+				t.Fatal("ordinary and strict schemas must allow the same actual Task states")
 			}
 			for field, expected := range map[string]string{
 				"dispatchId": dispatch.ID, "taskId": dispatch.TaskID, "recipient": dispatch.Recipient,

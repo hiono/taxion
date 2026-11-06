@@ -22,6 +22,40 @@ func graphTask(id string) GraphTask {
 		FileAccess: DefaultFileAccessPolicy()}
 }
 
+func TestDispatchResultMismatchNamesFieldWithoutSubmittedValue(t *testing.T) {
+	dispatch := GraphDispatch{ID: "dispatch", TaskID: "task", Recipient: "CODER", Repository: "owner/repo"}
+	dispatch.Instruction.BaselineSHA = strings.Repeat("a", 40)
+	valid := DispatchResult{
+		DispatchID: dispatch.ID, TaskID: dispatch.TaskID, Recipient: dispatch.Recipient,
+		Repository: dispatch.Repository, Status: DispatchFailed,
+		StartedSHA: dispatch.ExpectedStartSHA(), NextTransition: Blocked,
+	}
+	if err := validateDispatchResult(dispatch, DispatchFailed, &valid); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		field  string
+		mutate func(*DispatchResult)
+	}{
+		{"dispatchId", func(r *DispatchResult) { r.DispatchID = "private-value" }},
+		{"taskId", func(r *DispatchResult) { r.TaskID = "private-value" }},
+		{"recipient", func(r *DispatchResult) { r.Recipient = "private-value" }},
+		{"repository", func(r *DispatchResult) { r.Repository = "private-value" }},
+		{"status", func(r *DispatchResult) { r.Status = "private-value" }},
+		{"startedSha", func(r *DispatchResult) { r.StartedSHA = "private-value" }},
+		{"nextTransition", func(r *DispatchResult) { r.NextTransition = "private-value" }},
+	} {
+		t.Run(test.field, func(t *testing.T) {
+			result := valid
+			test.mutate(&result)
+			err := validateDispatchResult(dispatch, DispatchFailed, &result)
+			if err == nil || !strings.Contains(err.Error(), test.field) || strings.Contains(err.Error(), "private-value") {
+				t.Fatalf("missing safe field diagnostic: %v", err)
+			}
+		})
+	}
+}
+
 func TestGraphRepositoryPreservesNestedNamespaces(t *testing.T) {
 	for _, repo := range []string{"owner/repo", "group/subgroup/project", strings.Repeat("group/", 21) + "project"} {
 		task := graphTask("nested")

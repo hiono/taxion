@@ -832,10 +832,26 @@ func validateDispatchResult(d GraphDispatch, status DispatchStatus, result *Disp
 	if err != nil || mode != "required-pass" && d.Recipient != "REVIEWER" {
 		return graphError("invalid review validation policy on dispatch result")
 	}
-	if result == nil || result.DispatchID != d.ID || result.TaskID != d.TaskID ||
-		result.Recipient != d.Recipient || result.Repository != d.Repository || result.Status != status ||
-		result.StartedSHA != d.ExpectedStartSHA() || !validStatus(result.NextTransition) {
-		return graphError("dispatch result does not match the active instruction")
+	if result == nil {
+		return graphError("dispatch result is required")
+	}
+	for _, field := range []struct {
+		name    string
+		matches bool
+	}{
+		{"dispatchId", result.DispatchID == d.ID},
+		{"taskId", result.TaskID == d.TaskID},
+		{"recipient", result.Recipient == d.Recipient},
+		{"repository", result.Repository == d.Repository},
+		{"status", result.Status == status},
+		{"startedSha", result.StartedSHA == d.ExpectedStartSHA()},
+	} {
+		if !field.matches {
+			return graphError("dispatch result field %s does not match the active instruction", field.name)
+		}
+	}
+	if !validStatus(result.NextTransition) {
+		return graphError("dispatch result field nextTransition requires a valid TaskStatus")
 	}
 	if status != DispatchSucceeded && result.OutputTreeSHA != "" {
 		return graphError("non-successful dispatch cannot report an output tree SHA")
