@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"modernc.org/sqlite"
 )
 
 func openTest(t *testing.T) *Store {
@@ -283,5 +286,131 @@ func TestFailedReviewTransactionCancellationDoesNotCommit(t *testing.T) {
 	afterHash, _ := core.CanonicalSHA256(after)
 	if beforeHash != afterHash {
 		t.Fatalf("cancelled transaction changed evidence: rollbackProven=%v", result.rollbackProven)
+	}
+}
+
+type failedReviewFaultConnector struct {
+	location string
+	mode     string
+	cancel   context.CancelFunc
+	failure  error
+}
+
+func (c *failedReviewFaultConnector) Driver() driver.Driver { return &sqlite.Driver{} }
+
+func (c *failedReviewFaultConnector) Connect(context.Context) (driver.Conn, error) {
+	conn, err := c.Driver().Open(c.location)
+	if err != nil {
+		return nil, err
+	}
+	return &failedReviewFaultConn{Conn: conn, fault: c}, nil
+}
+
+type failedReviewFaultConn struct {
+	driver.Conn
+	fault *failedReviewFaultConnector
+}
+
+func (c *failedReviewFaultConn) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {
+	var tx driver.Tx
+	var err error
+	if conn, ok := c.Conn.(driver.ConnBeginTx); ok {
+		tx, err = conn.BeginTx(ctx, options)
+	} else {
+		tx, err = c.Conn.Begin()
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &failedReviewFaultTx{Tx: tx, fault: c.fault}, nil
+}
+
+func (c *failedReviewFaultConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	if c.fault.mode == "rollback-error" && strings.Contains(query, "INSERT INTO workspace_state") {
+		return nil, c.fault.failure
+	}
+	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+}
+
+type failedReviewFaultTx struct {
+	driver.Tx
+	fault *failedReviewFaultConnector
+}
+
+func (tx *failedReviewFaultTx) Commit() error {
+	if err := tx.Tx.Commit(); err != nil {
+		return err
+	}
+	if tx.fault.mode == "ambiguous-commit" {
+		return tx.fault.failure
+	}
+	if tx.fault.mode == "cancel-after-commit" {
+		tx.fault.cancel()
+	}
+	return nil
+}
+
+func (tx *failedReviewFaultTx) Rollback() error {
+	if err := tx.Tx.Rollback(); err != nil {
+		return err
+	}
+	if tx.fault.mode == "rollback-error" {
+		return tx.fault.failure
+	}
+	return nil
+}
+
+func TestFailedReviewTransactionFaultOutcomes(t *testing.T) {
+	for _, mode := range []string{"ambiguous-commit", "rollback-error", "cancel-after-commit"} {
+		t.Run(mode, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "fault.db")
+			s, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			original := s.db
+			location, err := workspaceLocation(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			injected := errors.New("injected transaction fault")
+			faultDB := sql.OpenDB(&failedReviewFaultConnector{
+				location: location.String(), mode: mode, cancel: cancel, failure: injected,
+			})
+			defer faultDB.Close()
+			s.db = faultDB
+			result := workspaceUpdateResult{}
+			s.mu.Lock()
+			err = s.updateWorkspaceLocked(ctx, func(state *Workspace) error {
+				state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{
+					ID: "fault-write", Title: "transaction boundary", Repo: "owner/repo", CreatedAt: time.Now().UTC(),
+				})
+				return nil
+			}, &result)
+			s.mu.Unlock()
+			s.db = original
+			outcome := result.failedReviewPersistence(err)
+			if mode == "cancel-after-commit" {
+				if err != nil || outcome != FailedReviewCommitted || !errors.Is(ctx.Err(), context.Canceled) {
+					t.Fatalf("successful commit was overwritten by cancellation: %s %v", outcome, err)
+				}
+			} else if !errors.Is(err, injected) || outcome != FailedReviewUnknown || result.rollbackProven {
+				t.Fatalf("uncertain transaction claimed known persistence: %s %v %+v", outcome, err, result)
+			}
+			after, err := s.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantTasks := 1
+			if mode == "rollback-error" {
+				wantTasks = 0
+			}
+			if len(after.Ledger.Tasks) != wantTasks {
+				t.Fatalf("actual committed/rolled-back state differs: %+v", after.Ledger.Tasks)
+			}
+		})
 	}
 }

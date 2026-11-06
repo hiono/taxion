@@ -322,18 +322,22 @@ func (s *Store) AppendFailedReviewSupplementContext(ctx context.Context, expecte
 		state.Records.FailedReviewSupplements = append(state.Records.FailedReviewSupplements, *supplement)
 		return nil
 	}, &result)
-	if err == nil {
-		return FailedReviewCommitted, nil
-	}
-	if !result.started || result.rollbackProven {
-		return FailedReviewNotWritten, err
-	}
-	return FailedReviewUnknown, err
+	return result.failedReviewPersistence(err), err
 }
 
 type workspaceUpdateResult struct {
 	started        bool
 	rollbackProven bool
+}
+
+func (r workspaceUpdateResult) failedReviewPersistence(err error) FailedReviewPersistence {
+	if err == nil {
+		return FailedReviewCommitted
+	}
+	if !r.started || r.rollbackProven {
+		return FailedReviewNotWritten
+	}
+	return FailedReviewUnknown
 }
 
 func (s *Store) updateWorkspaceLocked(ctx context.Context, update func(*Workspace) error, result *workspaceUpdateResult) (err error) {

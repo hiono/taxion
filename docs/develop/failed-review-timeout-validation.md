@@ -17,6 +17,11 @@ DB照合を含む全操作に20msを割り当てて特定工程を期待する�
 
 Store試験は取消済みcontext、保存前競合、mutex待機中の取消とtransaction中の取消を確認する。
 commit失敗後にrollbackを確認できない場合を成功や未保存へ置き換えない。
+`TestFailedReviewTransactionFaultOutcomes`は合成driver経由で実SQLiteを使い、
+実commit後のエラー、書込み後のrollbackエラー、成功commit直後の取消を注入する。
+前二者は`UNKNOWN`を返し、実保存状態が異なっても未保存と推定しない。
+成功commitはcontextが取消済みになっても`COMMITTED`を保持する。
+この三例の通常・race試験とStoreの`go vet`はexit 0となった。
 cleanupの追加失敗で元工程を失う問題は、CLIの独立した回帰試験で確認する。
 結果schemaの状態値と、不一致フィールド名だけを示す検証も対象に含める。
 
