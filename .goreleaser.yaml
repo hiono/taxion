@@ -64,6 +64,7 @@ release:
     
     ## Refs
     
+    実装と配布候補PR: https://github.com/hiono/taxion/pull/276 。
     全面改定: https://github.com/hiono/taxion/issues/274 。正式配布と移行: https://github.com/hiono/taxion/issues/275 。元の時刻判定: https://github.com/hiono/taxion/issues/272 、https://github.com/hiono/taxion/pull/273 。
     マイルストーン: https://github.com/hiono/taxion/milestone/38 。正式配布Issueは全面改定Issueに、元の調査Issueは正式配布Issueに依存します。
 changelog:

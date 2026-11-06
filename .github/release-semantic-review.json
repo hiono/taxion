@@ -1,14 +1,15 @@
 {
   "profileHash": "25805a3a784af71a1abbd4bf5d232143bd455a0798d39ea0aae17975763b5932",
-  "contentHash": "443ac2e775784fe0be48345b9d53a7eb0b44b1e5fcb0c4c0e0aa6639038ee126",
+  "contentHash": "9df71d140629a365c4d1abb35b455d8b0e58d2ad56b8f9bcc1f135feb488dcd5",
   "statement": {
-    "at": "2026-11-06T05:09:19.599367Z",
+    "at": "2026-11-06T05:14:05.513470Z",
     "claims": [
       {"url": "https://github.com/hiono/taxion/issues/272", "state": "EXISTS"},
       {"url": "https://github.com/hiono/taxion/issues/274", "state": "EXISTS"},
       {"url": "https://github.com/hiono/taxion/issues/275", "state": "EXISTS"},
       {"url": "https://github.com/hiono/taxion/milestone/38", "state": "EXISTS"},
-      {"url": "https://github.com/hiono/taxion/pull/273", "state": "EXISTS"}
+      {"url": "https://github.com/hiono/taxion/pull/273", "state": "EXISTS"},
+      {"url": "https://github.com/hiono/taxion/pull/276", "state": "EXISTS"}
     ]
   },
   "writerSession": "redesign-080-author-7baef537",
