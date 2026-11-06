@@ -141,6 +141,9 @@ checkpoint v2 は既存の正規化 document 保存を使い、operation ID、�
 [ADR-0072](adr/0072-append-negative-review-after-formal-failure.md) の追記操作で扱う。
 停止専用 attachment と同じ非実行設定で元 native 履歴を読み、
 元 Dispatch・実行観測・期限・準備済み Reviewer tree を照合する。
+回答・turn 終了は元の FAILED `verified-result.at` 以前とし、後発の routine shutdown は
+停止証拠として分離する。shutdown も保存済み提出期限前・観測時刻以前であることと、
+後続の実行がないことを要求する。時刻拒否は個別の失敗比較と採用期限を JSON で返す。
 失敗履歴を変更せず、モデル送信、host 検証再実行、品質受理、owner 回収は行わない。
 稼働中は `workflow extend` の一つの承認判断を `ReviewFlow.extensions` と
 `RESOURCE_EXTENDED` へ原子的に追記する。元の期限・予算・工程計画を変更せず、

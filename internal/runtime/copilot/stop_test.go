@@ -251,6 +251,37 @@ func TestSavedTurnRequiresBoundCompletedMainAgentHistory(t *testing.T) {
 	}
 }
 
+func TestSavedTurnRejectsLaterSubagentActivity(t *testing.T) {
+	worktree, child := t.TempDir(), "child"
+	for _, test := range []struct {
+		name string
+		data sdk.SessionEventData
+	}{
+		{"tool-start", &sdk.ToolExecutionStartData{}},
+		{"tool-complete", &sdk.ToolExecutionCompleteData{}},
+		{"turn-start", &sdk.AssistantTurnStartData{TurnID: "child-turn"}},
+		{"turn-end", &sdk.AssistantTurnEndData{TurnID: "child-turn"}},
+		{"message", &sdk.AssistantMessageData{Content: "child output"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, at := range []int{2, 4, 5} {
+				events := completedSavedHistory(worktree)
+				childEvent := sdk.SessionEvent{
+					ID: "child-activity", Timestamp: events[at-1].Timestamp, AgentID: &child, Data: test.data,
+				}
+				events = append(events[:at], append([]sdk.SessionEvent{childEvent}, events[at:]...)...)
+				_, err := savedTurn(events, "saved-session", worktree)
+				if at == 2 && err != nil {
+					t.Fatal("child activity before the final main-agent answer was rejected", err)
+				}
+				if at != 2 && err == nil {
+					t.Fatal("child activity after the final answer was ignored", at)
+				}
+			}
+		})
+	}
+}
+
 func completedSavedHistory(worktree string) []sdk.SessionEvent {
 	message, turn := "input-message", "review-turn"
 	now := time.Now().UTC()

@@ -31,8 +31,12 @@ Reviewer の結果確定は `Records.Events` の `review-finalization` receipt �
 `receiptHash` はその Dispatch の元 runtime receipt 列を固定する。
 `historyHash` は native 履歴、`previewHash` は承認した要求と観測対象を束縛する。
 回答・元期限内完了時刻・shutdown 時刻と集計・申請者・承認出所・停止証拠・記録時点を保存する。
-回答から shutdown までの順序、元の正式失敗以前であることと FAILED receipt の内容は、
+回答から shutdown までの順序、回答・turn 終了が元の FAILED receipt 時刻以前であること、
+回答・turn 終了・shutdown が保存済み提出期限前であることと FAILED receipt の内容は、
 読取り・更新時にも照合する。
+shutdown は失敗記録より後でもよいが、追記記録の時刻より後ではならない。
+Controller と保存時検証は共通の時刻比較を使う。失敗後の shutdown を持つ記録は、
+その条件を理解する版だけで扱い、v0.7.24 へ渡さない。
 回答のモデル申告 `status` を正式 Dispatch 状態や品質結果として使わない。
 追記の削除・変更と元 Dispatch の変更を拒否し、既存 receipt・Graph・利用量は書き換えない。
 操作と対象条件は [ADR-0072](adr/0072-append-negative-review-after-formal-failure.md) を参照する。

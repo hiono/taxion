@@ -47,13 +47,18 @@ func savedTurn(events []sdk.SessionEvent, sessionID, worktree string) (runtime.S
 	var messageID, turnID string
 	seen := map[string]bool{}
 	for _, event := range events {
-		if event.AgentID != nil && *event.AgentID != "" {
-			continue
-		}
 		if event.ID == "" || seen[event.ID] || event.Timestamp.IsZero() {
 			return fail()
 		}
 		seen[event.ID] = true
+		if event.AgentID != nil && *event.AgentID != "" {
+			switch event.Data.(type) {
+			case *sdk.UserMessageData, *sdk.AssistantMessageData, *sdk.AssistantTurnStartData,
+				*sdk.AssistantTurnEndData, *sdk.ToolExecutionStartData, *sdk.ToolExecutionCompleteData:
+				result.Payload, ended, shutdown = "", false, false
+			}
+			continue
+		}
 		switch data := event.Data.(type) {
 		case *sdk.SessionStartData:
 			if started || data.SessionID != sessionID || data.Context == nil ||

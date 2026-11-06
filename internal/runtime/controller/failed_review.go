@@ -38,6 +38,26 @@ type FailedReviewReport struct {
 	Hash                 string                       `json:"hash"`
 }
 
+type FailedReviewTimingError struct {
+	Version               int                     `json:"version"`
+	Code                  string                  `json:"code"`
+	StateChanged          bool                    `json:"stateChanged"`
+	QualityAccepted       bool                    `json:"qualityAccepted"`
+	ExecutionAuthorized   bool                    `json:"executionAuthorized"`
+	Timing                core.FailedReviewTiming `json:"timing"`
+	OriginalFlowDeadline  time.Time               `json:"originalFlowDeadline"`
+	EffectiveFlowDeadline time.Time               `json:"effectiveFlowDeadline"`
+	DeadlineSource        string                  `json:"deadlineSource"`
+	ReservedSeconds       int64                   `json:"reservedSeconds"`
+	FailedResultSource    string                  `json:"failedResultSource"`
+	FailedChecks          []string                `json:"failedChecks"`
+	RemainingEligibility  string                  `json:"remainingEligibility"`
+}
+
+func (e *FailedReviewTimingError) Error() string {
+	return "taxion: failed review supplement: native timing rejected: " + strings.Join(e.FailedChecks, ", ")
+}
+
 // RecordFailedReview appends only a sourced negative answer. It never finishes
 // the Dispatch, changes usage, releases its owner, or executes host validations.
 func (c *Controller) RecordFailedReview(ctx context.Context, request FailedReviewRequest, previewOnly bool) (FailedReviewReport, error) {
@@ -130,14 +150,29 @@ func (c *Controller) RecordFailedReview(ctx context.Context, request FailedRevie
 	if err != nil {
 		return FailedReviewReport{}, err
 	}
-	if turn.SessionID != dispatch.RuntimeSessionID ||
-		turn.SubmittedAt.Before(dispatch.CreatedAt) || !turn.SubmittedAt.Before(stageDeadline(flow, dispatch, false)) ||
-		turn.FinishedAt.Before(turn.SubmittedAt) || !turn.FinishedAt.Before(stageDeadline(flow, dispatch, false)) ||
-		turn.FinishedAt.After(time.Now()) || turn.FinishedAt.After(failureAt) ||
-		turn.ShutdownAt.IsZero() || turn.ShutdownAt.Before(turn.FinishedAt) ||
-		!turn.ShutdownAt.Before(stageDeadline(flow, dispatch, false)) ||
-		turn.ShutdownAt.After(time.Now()) || turn.ShutdownAt.After(failureAt) {
-		return reject("native history must prove completion before the original submission deadline")
+	if turn.SessionID != dispatch.RuntimeSessionID {
+		return reject("native history belongs to a different session")
+	}
+	timing := core.FailedReviewTiming{
+		DispatchCreatedAt: dispatch.CreatedAt, SubmittedAt: turn.SubmittedAt, FinishedAt: turn.FinishedAt,
+		ShutdownAt: turn.ShutdownAt, FailedResultAt: failureAt,
+		SubmissionDeadline: stageDeadline(flow, dispatch, false), ObservedAt: time.Now().UTC(),
+	}
+	if failed := timing.FailedChecks(); len(failed) != 0 {
+		source := "flow.deadline"
+		if len(flow.Extensions) != 0 {
+			source = "flow.extensions[last].deadline"
+		}
+		var reserved int64
+		if flow.StagePlan != nil {
+			reserved = flow.StagePlan.ReservedSeconds(flow.Repairs, dispatch.Recipient)
+		}
+		return FailedReviewReport{}, &FailedReviewTimingError{
+			Version: 1, Code: "failed-review-timing-rejected", Timing: timing,
+			OriginalFlowDeadline: flow.Deadline, EffectiveFlowDeadline: flow.ExecutionDeadline(),
+			DeadlineSource: source, ReservedSeconds: reserved, FailedResultSource: "verified-result.at",
+			FailedChecks: failed, RemainingEligibility: "NOT_EVALUATED",
+		}
 	}
 	if _, err := matchSavedTurn(state.Records, dispatch, turn); err != nil {
 		return FailedReviewReport{}, err
