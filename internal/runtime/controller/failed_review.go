@@ -50,6 +50,7 @@ type FailedReviewTimingError struct {
 	StateChanged          bool                    `json:"stateChanged"`
 	QualityAccepted       bool                    `json:"qualityAccepted"`
 	ExecutionAuthorized   bool                    `json:"executionAuthorized"`
+	CleanupFailed         bool                    `json:"cleanupFailed,omitempty"`
 	Timing                core.FailedReviewTiming `json:"timing"`
 	OriginalFlowDeadline  time.Time               `json:"originalFlowDeadline"`
 	EffectiveFlowDeadline time.Time               `json:"effectiveFlowDeadline"`

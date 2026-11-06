@@ -20,6 +20,17 @@ commit失敗後にrollbackを確認できない場合を成功や未保存へ置
 cleanupの追加失敗で元工程を失う問題は、CLIの独立した回帰試験で確認する。
 結果schemaの状態値と、不一致フィールド名だけを示す検証も対象に含める。
 
+PR #280 の独立レビューでは、未ラップのsetupエラーと時刻拒否にcleanup失敗が
+重なると、cleanupだけの診断になる問題が指摘された。
+未ラップのエラーも元工程で安全な型へ変換し、deferと通常経路で同じ出力処理を使う。
+時刻拒否では既存の期限・採用元・`failedChecks`を保ち、
+追加失敗を`cleanupFailed: true`で示す。元エラーは変更せず、秘密値は出力しない。
+
+修正後に`go test ./cmd/taxion -run TestFailedReview -count=1`、
+`go test -race ./cmd/taxion ./internal/runtime/controller -run TestFailedReview -count=1 -timeout 5m`、
+変更packageの`go vet`、`git diff --check`がexit 0となった。
+これは変更箇所の確認であり、新候補の独立品質合格や正式Releaseの完了ではない。
+
 ## 公開CLIの合成確認
 
 候補binaryを明示して次を実行する。

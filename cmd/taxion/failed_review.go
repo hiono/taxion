@@ -22,15 +22,15 @@ func recordFailedReviewCommand(ctx context.Context, args []string, output io.Wri
 	diagnosticWritten := false
 	defer func() {
 		if err := closeFailedReviewResources(&closers); err != nil {
-			resultErr = failedReviewCleanupFailure(resultErr, persistence, err)
+			resultErr = failedReviewCleanupFailure(resultErr, phase, persistence, err)
 			diagnosticWritten = false
 		}
 		if resultErr != nil && !errors.Is(resultErr, flag.ErrHelp) && !diagnosticWritten {
 			var failure *controller.FailedReviewOperationError
 			if !errors.As(resultErr, &failure) {
-				failure = controller.NewFailedReviewOperationError(phase, persistence, resultErr)
+				resultErr = controller.NewFailedReviewOperationError(phase, persistence, resultErr)
 			}
-			resultErr = writeFailedReviewDiagnostic(output, failure)
+			resultErr = writeFailedReviewReport(output, controller.FailedReviewReport{}, resultErr)
 		}
 	}()
 	fs := flag.NewFlagSet("workflow record-failed-review", flag.ContinueOnError)
@@ -160,22 +160,25 @@ APPROVE, BLOCKED, restored workspaces and released/changed review trees are reje
 		persistence = failure.Persistence
 	}
 	if cleanupErr := closeFailedReviewResources(&closers); cleanupErr != nil {
-		return failedReviewCleanupFailure(err, persistence, cleanupErr)
+		return failedReviewCleanupFailure(err, phase, persistence, cleanupErr)
 	}
 	resultErr = writeFailedReviewReport(output, report, err)
 	diagnosticWritten = err != nil
 	return resultErr
 }
 
-func failedReviewCleanupFailure(primaryErr error, persistence string, cleanupErr error) error {
+func failedReviewCleanupFailure(primaryErr error, phase, persistence string, cleanupErr error) error {
 	cleanup := controller.NewFailedReviewOperationError("cleanup", persistence, cleanupErr)
-	var primary *controller.FailedReviewOperationError
-	if errors.As(primaryErr, &primary) {
-		copy := *primary
-		copy.CleanupFailed = true
-		return errors.Join(&copy, cleanup)
+	if primaryErr == nil {
+		return cleanup
 	}
-	return controller.NewFailedReviewOperationError("cleanup", persistence, errors.Join(primaryErr, cleanupErr))
+	var primary *controller.FailedReviewOperationError
+	if !errors.As(primaryErr, &primary) {
+		primary = controller.NewFailedReviewOperationError(phase, persistence, primaryErr)
+	}
+	copy := *primary
+	copy.CleanupFailed = true
+	return errors.Join(&copy, cleanup)
 }
 
 func closeFailedReviewResources(closers *[]func() error) error {
@@ -190,7 +193,12 @@ func closeFailedReviewResources(closers *[]func() error) error {
 func writeFailedReviewReport(output io.Writer, report controller.FailedReviewReport, err error) error {
 	var timing *controller.FailedReviewTimingError
 	if errors.As(err, &timing) {
-		if encodeErr := json.NewEncoder(output).Encode(timing); encodeErr != nil {
+		copy := *timing
+		var failure *controller.FailedReviewOperationError
+		if errors.As(err, &failure) {
+			copy.CleanupFailed = copy.CleanupFailed || failure.CleanupFailed
+		}
+		if encodeErr := json.NewEncoder(output).Encode(&copy); encodeErr != nil {
 			return errors.Join(err, controller.NewFailedReviewOperationError("output", "NOT_WRITTEN", encodeErr))
 		}
 		return err

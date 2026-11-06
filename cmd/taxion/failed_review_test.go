@@ -115,7 +115,7 @@ func (failedReviewErrorWriter) Write([]byte) (int, error) {
 
 func TestFailedReviewCleanupRetainsPrimaryPhase(t *testing.T) {
 	primary := controller.NewFailedReviewOperationError("native-read", "NOT_WRITTEN", errors.New("private native failure"))
-	err := failedReviewCleanupFailure(primary, "NOT_WRITTEN", errors.New("private cleanup failure"))
+	err := failedReviewCleanupFailure(primary, "observation", "NOT_WRITTEN", errors.New("private cleanup failure"))
 	var output bytes.Buffer
 	_ = writeFailedReviewReport(&output, controller.FailedReviewReport{}, err)
 	var diagnostic controller.FailedReviewOperationError
@@ -147,6 +147,18 @@ func TestFailedReviewTimingRejectionEmitsDiagnosticsAndRetainsError(t *testing.T
 		t.Fatal("invalid non-applying timing diagnosis", diagnosis, err)
 	}
 	output.Reset()
+	withCleanup := failedReviewCleanupFailure(original, "native-timing", "NOT_WRITTEN", errors.New("private cleanup failure"))
+	if err := writeFailedReviewReport(&output, controller.FailedReviewReport{}, withCleanup); !errors.Is(err, original) {
+		t.Fatal("cleanup discarded the timing error identity", err)
+	}
+	if err := json.Unmarshal(output.Bytes(), &diagnosis); err != nil ||
+		diagnosis.Code != original.Code || !diagnosis.Timing.SubmissionDeadline.Equal(deadline) ||
+		diagnosis.DeadlineSource != original.DeadlineSource || len(diagnosis.FailedChecks) != 1 ||
+		diagnosis.FailedChecks[0] != original.FailedChecks[0] || !diagnosis.CleanupFailed ||
+		original.CleanupFailed || strings.Contains(output.String(), "private") {
+		t.Fatal("cleanup obscured or mutated the timing diagnostic", output.String(), err)
+	}
+	output.Reset()
 	unrelated := errors.New("unrelated rejection")
 	if err := writeFailedReviewReport(&output, controller.FailedReviewReport{}, unrelated); !errors.Is(err, unrelated) || output.Len() == 0 {
 		t.Fatal("unrelated rejection lacks safe failure diagnostics", output.String(), err)
@@ -156,5 +168,16 @@ func TestFailedReviewTimingRejectionEmitsDiagnosticsAndRetainsError(t *testing.T
 		operation.Phase != "observation" || operation.Persistence != "NOT_WRITTEN" ||
 		strings.Contains(output.String(), "unrelated rejection") {
 		t.Fatal("generic failure diagnostic was unsafe", output.String(), err)
+	}
+	output.Reset()
+	withCleanup = failedReviewCleanupFailure(unrelated, "runtime-setup", "NOT_WRITTEN", errors.New("private cleanup failure"))
+	if err := writeFailedReviewReport(&output, controller.FailedReviewReport{}, withCleanup); !errors.Is(err, unrelated) {
+		t.Fatal("cleanup discarded the setup error identity", err)
+	}
+	if err := json.Unmarshal(output.Bytes(), &operation); err != nil ||
+		operation.Phase != "runtime-setup" || operation.Persistence != "NOT_WRITTEN" ||
+		!operation.CleanupFailed || strings.Contains(output.String(), "unrelated rejection") ||
+		strings.Contains(output.String(), "private") {
+		t.Fatal("cleanup obscured the safe setup diagnostic", output.String(), err)
 	}
 }
