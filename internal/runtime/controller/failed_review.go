@@ -103,24 +103,6 @@ func (c *Controller) RecordFailedReview(ctx context.Context, request FailedRevie
 			return reject("a supplement is already recorded; inspect it instead of processing twice")
 		}
 	}
-	if operation := state.Records.Operation; operation != nil && operation.Active() && operation.FlowID != flow.ID {
-		return reject("another operation is active")
-	}
-	for _, other := range state.Graph.Dispatches {
-		if active(other.Status) {
-			return reject("a Dispatch is still active")
-		}
-	}
-	for _, other := range state.Graph.ReviewFlows {
-		if other.ID != flow.ID && (other.Status == "RUNNING" || other.RunnerID != "") {
-			return reject("another Flow is running or claimed")
-		}
-	}
-	for _, other := range state.Ledger.Dispatches {
-		if other.Active {
-			return reject("a legacy Dispatch is still active")
-		}
-	}
 	task, _ := state.Graph.GraphTask(flow.TaskID)
 	if state.Graph.IsArchived(task.ID) || state.Graph.IsArchived(dispatch.TaskID) ||
 		!flowContractMatches(state.Graph, flow, task) {
@@ -164,7 +146,7 @@ func (c *Controller) RecordFailedReview(ctx context.Context, request FailedRevie
 			source = "flow.extensions[last].deadline"
 		}
 		var reserved int64
-		if flow.StagePlan != nil {
+		if flow.StagePlan != nil && flow.StagePlan.Version == 1 {
 			reserved = flow.StagePlan.ReservedSeconds(flow.Repairs, dispatch.Recipient)
 		}
 		return FailedReviewReport{}, &FailedReviewTimingError{
@@ -220,11 +202,14 @@ func (c *Controller) RecordFailedReview(ctx context.Context, request FailedRevie
 	}
 	expected := request.ExpectedHash
 	request.ExpectedHash = ""
+	roleTask, _ := state.Graph.GraphTask(dispatch.TaskID)
 	report.Hash, err = core.CanonicalSHA256(struct {
-		State   store.Workspace
-		Request FailedReviewRequest
-		Report  FailedReviewReport
-	}{state, request, report})
+		Flow     core.ReviewFlow
+		Task     core.GraphTask
+		RoleTask core.GraphTask
+		Request  FailedReviewRequest
+		Report   FailedReviewReport
+	}{flow, task, roleTask, request, report})
 	if err != nil {
 		return FailedReviewReport{}, err
 	}

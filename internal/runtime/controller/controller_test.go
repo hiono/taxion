@@ -314,6 +314,14 @@ func dispatchStoreWithEvidence(t *testing.T, evidence string, worktree ...string
 }
 
 func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
+	for _, version := range []int{core.StructuredResultInstructionVersion, core.DispatchInstructionVersion} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			testControllerFinishesAndRestoresVerifiedResult(t, version)
+		})
+	}
+}
+
+func testControllerFinishesAndRestoresVerifiedResult(t *testing.T, version int) {
 	root := t.TempDir()
 	gitTest(t, root, "init", "-b", "work/task")
 	gitTest(t, root, "config", "user.name", "Taxion Test")
@@ -327,6 +335,18 @@ func TestControllerFinishesAndRestoresVerifiedResult(t *testing.T) {
 	baseline := gitTest(t, root, "rev-parse", "HEAD")
 	db, path, id := dispatchStoreWithEvidence(t, "controller-validation", root)
 	defer db.Close()
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		state.Graph.Dispatches[0].Instruction.Version = version
+		body, err := json.Marshal(state.Graph.Dispatches[0].Instruction)
+		if err != nil {
+			return err
+		}
+		hash := sha256.Sum256(body)
+		state.Graph.Dispatches[0].InstructionHash = hex.EncodeToString(hash[:])
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	worker := &fakeRuntime{role: "CODER", hash: "config-v1", worktree: root}
 	control, err := New(db, worker)
 	if err != nil {

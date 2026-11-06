@@ -106,7 +106,7 @@ Review flows and recovery:
   workflow run        Execute review/repair continuously with saved ceilings (--id; role prompt files or --builtin-prompts)
   workflow step       Execute one role turn from a saved review flow (--id; role prompt files or --builtin-prompts)
   workflow show       Read the saved review flow and ceilings (--id required)
-  workflow resume     Verify the saved unstarted Coder boundary, then run within its original contract (--id required)
+  workflow resume     Verify the saved unstarted role boundary, then run within its original contract (--id required)
   workflow lanes      Run read-only controller lanes for one Task and report a machine-readable gate
   workflow recover    Release interrupted runner ownership after recorded execution stop (--file JSON)
   workflow accept-saved-review Preview or accept a saved APPROVE after the handoff diagnostic defect; no execution (--file JSON; --preview)
@@ -787,7 +787,7 @@ func runtimeCmd(args []string) error {
 		}
 		return errors.Join(control.Stop(ctx, dispatch.ID), worker.Close())
 	}
-	if dispatch.Instruction.Version < core.DispatchInstructionVersion {
+	if dispatch.Instruction.Version < core.StructuredResultInstructionVersion {
 		return fmt.Errorf("runtime: Dispatch %q predates the current execution contract; issue a new Dispatch", *dispatchID)
 	}
 	var expectedAccount string

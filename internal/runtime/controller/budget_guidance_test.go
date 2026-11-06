@@ -12,6 +12,7 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 type quotaRuntime struct {
@@ -20,6 +21,38 @@ type quotaRuntime struct {
 	reads   int
 	timeout time.Duration
 	onRead  func()
+}
+
+func TestQuotaObservationDoesNotRequireExecutableToolPolicy(t *testing.T) {
+	approval, err := json.Marshal(tools.Approval{
+		Kind: tools.ApprovalKind, TaskID: "task", Actor: "human",
+		Roles: map[string]tools.Policy{"CODER": {EvidenceDirectory: t.TempDir()}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, id, base, _ := executionConfigurationDecisionsFixture(t, "ai",
+		[]core.TaskDecision{{ID: "approved-tools", Source: "human:fixture", Text: string(approval)}},
+		budgetPolicy(t, "account"))
+	worker := &quotaRuntime{configuredRuntime: base, quota: observedQuota()}
+	control, err := New(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.checkExecutionConfiguration(before.Graph, id); err == nil {
+		t.Fatal("data-free observer unexpectedly satisfies executable tool policy")
+	}
+	if _, err := control.ObserveAccountQuota(t.Context(), id); err != nil || worker.reads != 1 || worker.starts != 0 {
+		t.Fatal("tool-approved Dispatch blocked a nonexecuting account read", err)
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("account observation changed authority or workspace", err)
+	}
 }
 
 func (f *quotaRuntime) ReadAccountQuota(ctx context.Context, account string) (runtime.QuotaSnapshot, error) {

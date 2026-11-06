@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,6 +20,10 @@ import (
 )
 
 func resumeGateFixture(t *testing.T, timeout ...int64) (*store.Store, string, ReviewFlowRequest, core.ReviewFlow) {
+	return resumeGateFixtureWithPackets(t, true, timeout...)
+}
+
+func resumeGateFixtureWithPackets(t *testing.T, packets bool, timeout ...int64) (*store.Store, string, ReviewFlowRequest, core.ReviewFlow) {
 	t.Helper()
 	resolved := packetConfigurationFixture(t)
 	proposal, err := core.CanonicalSHA256("synthetic-resume-proposal")
@@ -27,7 +32,8 @@ func resumeGateFixture(t *testing.T, timeout ...int64) (*store.Store, string, Re
 	}
 	proposal = "sha256:" + proposal
 	approval := config.Approval{Kind: config.ApprovalKind, TaskID: "implementation",
-		Reason: "synthetic exact config", Allowed: []config.Config{resolved.Config}}
+		Reason: "synthetic exact config", Allowed: []config.Config{resolved.Config},
+		AdditionalTaskIDs: []string{"flow-review-0", "flow-review-1"}}
 	db, ledger, request := reviewFlowFixture(t,
 		core.TaskDecision{ID: "intake-confirmation:implementation", Source: "human:synthetic",
 			Text: `{"taskId":"implementation","expectedHash":"` + proposal + `"}`},
@@ -52,21 +58,23 @@ func resumeGateFixture(t *testing.T, timeout ...int64) (*store.Store, string, Re
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db.UpdateWorkspace(func(state *store.Workspace) error {
-		task, _ := state.Graph.GraphTask(request.TaskID)
-		for _, bundle := range state.Graph.ApprovalsForTask(request.TaskID) {
-			if err := bundle.Verify(task, request.Configuration); err != nil {
-				t.Fatalf("synthetic approval fixture: %v", err)
+	if packets {
+		err = db.UpdateWorkspace(func(state *store.Workspace) error {
+			task, _ := state.Graph.GraphTask(request.TaskID)
+			for _, bundle := range state.Graph.ApprovalsForTask(request.TaskID) {
+				if err := bundle.Verify(task, request.Configuration); err != nil {
+					t.Fatalf("synthetic approval fixture: %v", err)
+				}
 			}
-		}
-		auth, err := PreviewPacketAuthorization(*state, request.TaskID, "human", "human:synthetic", "sequential packets", nil, request.Configuration)
+			auth, err := PreviewPacketAuthorization(*state, request.TaskID, "human", "human:synthetic", "sequential packets", nil, request.Configuration)
+			if err != nil {
+				return err
+			}
+			return AppendPacketAuthorization(state, auth, request.Configuration)
+		})
 		if err != nil {
-			return err
+			t.Fatal(err)
 		}
-		return AppendPacketAuthorization(state, auth, request.Configuration)
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	ready, _ := db.LoadWorkspace()
 	report, err := ContractGateReport(ready.Graph, request.TaskID, request.Configuration)
@@ -144,9 +152,26 @@ func TestResumeContractGateReadOnlyRestartAndConcurrent(t *testing.T) {
 }
 
 func TestResumeRunsSavedDispatchThroughSequentialHandoff(t *testing.T) {
-	db, ledger, request, flow := resumeGateFixture(t)
+	for _, packets := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary-approval", true: "packet-lifecycle"}[packets], func(t *testing.T) {
+			testResumeRunsSavedDispatchThroughSequentialHandoff(t, packets)
+		})
+	}
+}
+
+func testResumeRunsSavedDispatchThroughSequentialHandoff(t *testing.T, packets bool) {
+	db, ledger, request, flow := resumeGateFixtureWithPackets(t, packets)
 	before, _ := db.LoadWorkspace()
 	original, _ := before.Graph.GraphDispatch(flow.DispatchIDs[0])
+	blocked, err := RunReviewFlow(t.Context(), db, ledger, flow.ID, func(core.GraphDispatch) (runtime.Identity, error) {
+		return nil, errors.New("worker executable temporarily unavailable")
+	}, io.Discard, request.Configuration)
+	afterPreparation, _ := db.LoadWorkspace()
+	if err == nil || blocked.Status != "RUNNING" || blocked.RunnerID != "" || blocked.HandoffHeld() ||
+		!reflect.DeepEqual(before.Graph, afterPreparation.Graph) ||
+		len(afterPreparation.Records.Budgets) != len(before.Records.Budgets)+1 {
+		t.Fatal("preparation failure invalidated issued authority or execution state", blocked, err)
+	}
 	resolved := packetConfigurationFixture(t)
 	var roles []string
 	factory := func(dispatch core.GraphDispatch) (runtime.Identity, error) {
@@ -199,8 +224,182 @@ func TestResumeRunsSavedDispatchThroughSequentialHandoff(t *testing.T) {
 	if saved.InstructionHash != original.InstructionHash || len(after.Graph.Dispatches) != 2 ||
 		complete.StartedAt != flow.StartedAt || complete.Deadline != flow.Deadline || complete.Budget != flow.Budget ||
 		!reflect.DeepEqual(before.Graph.Approvals, after.Graph.Approvals[:len(before.Graph.Approvals)]) ||
-		len(after.Records.Packets) != 3 {
+		packets && len(after.Records.Packets) != 3 || !packets && len(after.Records.Packets) != 0 {
 		t.Fatal("resume recreated a Dispatch, changed limits or original approval, or lost sequential packets")
+	}
+}
+
+func TestResumeAtEveryIssuedRoleBoundary(t *testing.T) {
+	for _, packets := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary-approval", true: "packet-lifecycle"}[packets], func(t *testing.T) {
+			db, ledger, request, flow := resumeGateFixtureWithPackets(t, packets)
+			selected := packetConfigurationFixture(t)
+			for i, verdict := range []string{"", "REQUEST_CHANGES", "", "APPROVE"} {
+				state, err := db.LoadWorkspace()
+				if err != nil {
+					t.Fatal(err)
+				}
+				before := mustFlowJSON(t, state)
+				report, err := ResumeContractGateReport(t.Context(), state, flow.ID, request.Configuration)
+				if err != nil || report.Verdict != GateVerdictPass ||
+					!bytes.Equal(before, mustFlowJSON(t, state)) {
+					t.Fatalf("issued boundary %d rejected or changed: %+v %v", i, report, err)
+				}
+				executeFlowDispatch(t, db, flow, verdict, true, selected)
+				flow, err = AdvanceReviewFlow(db, ledger, flow.ID, request.Configuration)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if flow.Status != "COMPLETED" || flow.Repairs != 1 {
+				t.Fatal("saved role approvals did not complete repair and re-review", flow)
+			}
+		})
+	}
+}
+
+func TestResumeArtifactReviewerDoesNotReplayInputValidation(t *testing.T) {
+	for _, prepared := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unprepared", true: "prepared"}[prepared], func(t *testing.T) {
+			counter := filepath.Join(t.TempDir(), "validation-count")
+			db, ledger, request, selected := artifactFixture(t, []string{"printf x >> " + counter}, false)
+			flow, err := StartReviewFlow(db, ledger, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			flow, err = ValidateReviewFlowInput(t.Context(), db, ledger, flow.ID, request.Configuration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if prepared {
+				if _, err := PrepareReview(db, flow.LastDispatchID(), flow.Contract.Worktree); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, _ := db.LoadWorkspace()
+			report, err := ResumeContractGateReport(t.Context(), before, flow.ID, request.Configuration)
+			if err != nil || report.Verdict != GateVerdictPass {
+				t.Fatalf("artifact Reviewer rejected: %+v %v", report, err)
+			}
+			after, _ := db.LoadWorkspace()
+			if !reflect.DeepEqual(before, after) {
+				t.Fatal("preview changed saved artifact validation")
+			}
+			if data, err := os.ReadFile(counter); err != nil || string(data) != "x" {
+				t.Fatal("preview replayed input validation", string(data), err)
+			}
+			factory := func(d core.GraphDispatch) (runtime.Identity, error) {
+				if err := BindConfiguration(db, d.ID, selected); err != nil {
+					return nil, err
+				}
+				w := &scriptedRuntime{fakeRuntime: fakeRuntime{
+					role: d.Recipient, hash: "resume-artifact", worktree: d.Instruction.Worktree, bound: true,
+				}, events: make(chan runtime.Event, 3)}
+				w.script = func() error {
+					unchanged := false
+					answer := core.DispatchResult{
+						Status: core.DispatchSucceeded, StartedSHA: d.ExpectedStartSHA(), OutputSHA: d.ExpectedStartSHA(),
+						Evidence: []string{"test-report"}, ChangedFiles: []string{}, WorktreeChanged: &unchanged,
+						ReviewVerdict: "APPROVE", Findings: []core.DispatchFinding{}, NextTransition: core.Approved,
+						Acceptance: []core.DispatchAcceptance{{Criterion: "application tested", Status: "PASS", Evidence: []string{"test-report"}}},
+					}
+					w.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"synthetic","totalNanoAIU":1,"aiCreditsStatus":"complete"}`}
+					w.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(mustFlowJSON(t, answer))}
+					w.events <- runtime.Event{Type: runtime.EventTurnFinished}
+					return nil
+				}
+				return &configuredScriptedRuntime{scriptedRuntime: w, selection: mustFlowJSON(t, selected.Config)}, nil
+			}
+			complete, err := ResumeReviewFlow(t.Context(), db, ledger, flow.ID, factory, io.Discard, request.Configuration)
+			if err != nil || complete.Status != "COMPLETED" || len(complete.DispatchIDs) != 1 {
+				t.Fatal("saved artifact did not complete without a Coder", complete, err)
+			}
+			if data, err := os.ReadFile(counter); err != nil || string(data) != "xx" {
+				t.Fatal("expected input validation once and result acceptance once", string(data), err)
+			}
+		})
+	}
+}
+
+func TestResumePreparedReviewerPreviewDoesNotExecuteGitFilters(t *testing.T) {
+	db, ledger, request, _ := artifactFixture(t, []string{"true"}, false)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow, err = ValidateReviewFlowInput(t.Context(), db, ledger, flow.ID, request.Configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, err := PrepareReview(db, flow.LastDispatchID(), flow.Contract.Worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "filter-ran")
+	gitTest(t, dispatch.Instruction.Worktree, "config", "filter.resume.clean", "printf ran > "+marker+"; cat")
+	attributes := gitTest(t, dispatch.Instruction.Worktree, "rev-parse", "--git-path", "info/attributes")
+	if err := os.WriteFile(attributes, []byte("README.md filter=resume\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	index := gitTest(t, dispatch.Instruction.Worktree, "rev-parse", "--git-path", "index")
+	indexBefore, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := db.LoadWorkspace()
+	report, err := ResumeContractGateReport(t.Context(), before, flow.ID, request.Configuration)
+	if err != nil || report.Verdict != GateVerdictFail ||
+		report.BlockingConditions[0].Code != "resume-worktree-mismatch" {
+		t.Fatal("filter-dependent observation was not rejected", report, err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("preview executed a clean filter", err)
+	}
+	indexAfter, err := os.ReadFile(index)
+	after, loadErr := db.LoadWorkspace()
+	if err != nil || loadErr != nil || !bytes.Equal(indexBefore, indexAfter) || !reflect.DeepEqual(before, after) {
+		t.Fatal("preview modified its index or saved state", err, loadErr)
+	}
+}
+
+func TestResumeReusesReleasedUnstartedSession(t *testing.T) {
+	db, _, request, flow := resumeGateFixtureWithPackets(t, false)
+	selected := packetConfigurationFixture(t)
+	dispatchID := flow.LastDispatchID()
+	if err := BindConfiguration(db, dispatchID, selected); err != nil {
+		t.Fatal(err)
+	}
+	worker := &configuredRuntime{fakeRuntime: &fakeRuntime{
+		role: "CODER", hash: "released-session", worktree: flow.Contract.Worktree,
+	}, selection: mustFlowJSON(t, selected.Config)}
+	control, err := New(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Start(t.Context(), dispatchID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ChangeHandoff(db, handoffRequest("hold", "", "HOLD")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ChangeHandoff(db, handoffRequest("release", "hold", "RELEASE")); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := db.LoadWorkspace()
+	report, err := ResumeContractGateReport(t.Context(), state, flow.ID, request.Configuration)
+	if err != nil || report.Verdict != GateVerdictPass {
+		t.Fatal("released session was mistaken for a previously sent execution", report, err)
+	}
+	if _, err := control.Start(t.Context(), dispatchID); err != nil || worker.starts != 1 || worker.resumes != 1 {
+		t.Fatal("continuation replaced the original session instead of reattaching it", err)
+	}
+	if err := control.Send(t.Context(), dispatchID, "execute once"); err != nil {
+		t.Fatal(err)
+	}
+	state, _ = db.LoadWorkspace()
+	report, err = ResumeContractGateReport(t.Context(), state, flow.ID, request.Configuration)
+	if err != nil || report.Verdict == GateVerdictPass {
+		t.Fatal("already-sent execution was admitted as an unstarted session", report, err)
 	}
 }
 

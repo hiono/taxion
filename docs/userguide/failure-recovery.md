@@ -20,6 +20,15 @@ bundle-required の Task が実行入口で拒否された場合、code は次�
 保存済みの契約と設定承認に含まれる内部遷移の認可を、発行直前の共通経路で追記する。
 担当を設定承認の対象へ明示する必要があり、入力の受入れや実装成功だけで許可しない。
 任意の packet lifecycle の限定委譲を、修正の許可に広げることもない。
+一方、元の Flow 契約・設定・修正上限が既に許可する修正を、
+任意 packet 機能を有効にしたという理由だけで拒否しない。
+
+保存した RUNNING Flow の未開始 role は `gate resume --flow ID --json` で確認し、
+`workflow resume --id ID` で同じ契約の続きへ進める。Coder 専用ではなく、
+Reviewer、修正・再レビュー、持込み入力の検証後の Reviewer も対象になる。
+packet lifecycle の追加承認は必要ない。明示的な hold は release し、
+最初の send より前に作成済みの session は再作成せず同じ binding へ再接続する。
+開始済みの実行、STOPPED Flow、FAILED の保存回答処理をこの操作で再送・上書きしない。
 
 元の Task の再承認確認が `already-authorized` でも、別の担当の実行許可を示すとは限らない。
 同じ確認を反復せず、拒否された Task ID、stage、設定、drift と保存済みの対象範囲を照合する。
@@ -112,6 +121,12 @@ Flow の表示期限だけから提出期限を推測せず、`NOT_EVALUATED` �
 運用機の原本を調べる権限や追記操作の承認は、開発側の合成検証とは別に確認する。
 
 ## Flow が停止している
+
+runtime `Start` を試みる前の準備・出力先・runtime 構築の失敗だけなら、Flow は
+`RUNNING`、同じ role の Dispatch は未開始のまま残る。`workflow budget` の
+`preparation-blocked` 観測を確認し、承認済み範囲内の技術的問題を解消して同じ
+`run` / `resume` を続ける。この場合に停止取消や後続 Task の再承認は要求しない。
+実際の取消・期限・予算による停止と、runtime 開始を試みた後の実行不明は区別する。
 
 通常 Flow で Coder の出力を正式受理した後、未開始 Reviewer の準備で停止した場合は、
 持込み成果物用の `recover-review` ではなく、`reconcile-stopped` と既存の

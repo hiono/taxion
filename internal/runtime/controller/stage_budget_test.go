@@ -167,6 +167,7 @@ func TestStagePlanPreviewIsReadOnlyAndBindsExactEnvelope(t *testing.T) {
 	}
 	for _, mutate := range []func(*ReviewFlowRequest){
 		func(r *ReviewFlowRequest) { r.TimeoutSeconds++ },
+		func(r *ReviewFlowRequest) { r.StageBudget.Version = 2 },
 		func(r *ReviewFlowRequest) { r.StageBudget.ReviewerSessionCredits = 30 },
 		func(r *ReviewFlowRequest) { r.Authorization.Text += " changed" },
 		func(r *ReviewFlowRequest) { r.MaxNanoAIU++ },
@@ -179,6 +180,7 @@ func TestStagePlanPreviewIsReadOnlyAndBindsExactEnvelope(t *testing.T) {
 		if _, err := StartReviewFlow(db, ledger, bad); err == nil {
 			t.Fatal("changed plan was silently authorized")
 		}
+
 	}
 	flow, err := StartReviewFlow(db, ledger, request)
 	if err != nil || flow.StagePlan == nil || flow.StagePlan.Hash != request.StagePlanHash {
@@ -202,6 +204,94 @@ func TestStagePlanPreviewIsReadOnlyAndBindsExactEnvelope(t *testing.T) {
 	report, err := ObserveFlowBudget(after, flow.ID)
 	if err == nil || report.Budget.FlowID != "" {
 		t.Fatal("observation invented an absent Flow")
+	}
+}
+
+func TestAdvisoryStagePlanRetainsActualHardLimits(t *testing.T) {
+	db, ledger, request := stageFlowFixture(t)
+	request.TimeoutSeconds, request.MaxNanoAIU = 60, 100
+	request.StageBudget = &core.StageBudget{Version: 2, ValidationSeconds: 600, ReviewSeconds: 600, RepairSeconds: 600,
+		ReviewNanoAIU: 50, RepairNanoAIU: 50}
+	state, _ := db.LoadWorkspace()
+	preview, err := PreviewStagePlan(state.Graph, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.StagePlanHash = preview.Plan.Hash
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal("forecast prevented issuing the approved role", err)
+	}
+	state, _ = db.LoadWorkspace()
+	dispatch, _ := state.Graph.GraphDispatch(flow.LastDispatchID())
+	for _, validation := range []bool{false, true} {
+		if !stageDeadline(flow, dispatch, validation).Equal(flow.ExecutionDeadline()) {
+			t.Fatal("submission or validation exceeded the outer deadline")
+		}
+	}
+	if stageStartStop(flow, "CODER", flow.StartedAt) != "" {
+		t.Fatal("forecast became a start prohibition")
+	}
+	complete, used := "complete", 99.0
+	state.Graph.Dispatches[0].RuntimeSessionID = "observed-session"
+	state.Graph.Dispatches[0].RuntimeUsage = []core.DispatchUsage{{TotalNanoAIU: &used, AICreditsStatus: &complete}}
+	if stageBudgetStop(state.Graph, flow, dispatch, flow.StartedAt) != "" ||
+		activeBudgetStop(taskBudgetReport(state.Graph, flow, flow.StartedAt)) != "" {
+		t.Fatal("forecast reservation stopped actual in-budget work")
+	}
+	if remaining := taskBudgetReport(state.Graph, flow, flow.StartedAt).CoderSessionsRemaining; remaining != flow.Budget.MaxCoderSessions-1 {
+		t.Fatal("advisory planning reset a consumed Coder session")
+	}
+	used = 100
+	if activeBudgetStop(taskBudgetReport(state.Graph, flow, flow.StartedAt)) == "" {
+		t.Fatal("actual native ceiling was ignored")
+	}
+	state.Graph.Dispatches[0].RuntimeUsage = []core.DispatchUsage{{Model: "unpriced-observed-call"}}
+	if activeBudgetStop(taskBudgetReport(state.Graph, flow, flow.StartedAt)) == "" {
+		t.Fatal("unknown actual usage became free work")
+	}
+	if stageBudgetStop(state.Graph, flow, dispatch, flow.ExecutionDeadline()) == "" {
+		t.Fatal("approved hard deadline was ignored")
+	}
+}
+
+func TestAdvisoryStagePlanHashBindsAuthorityNotForecasts(t *testing.T) {
+	db, _, request := stageFlowFixture(t)
+	request.StageBudget.Version = 2
+	state, _ := db.LoadWorkspace()
+	explicit, err := PreviewStagePlan(state.Graph, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.StageBudget = &core.StageBudget{Version: 2}
+	estimated, err := PreviewStagePlan(state.Graph, request)
+	if err != nil || explicit.Plan.Hash != estimated.Plan.Hash ||
+		reflect.DeepEqual(explicit.Plan.Basis, estimated.Plan.Basis) {
+		t.Fatal("advisory estimates or their basis changed material approval", err)
+	}
+	for _, mutate := range []func(*ReviewFlowRequest){
+		func(r *ReviewFlowRequest) { r.TimeoutSeconds++ },
+		func(r *ReviewFlowRequest) { r.MaxNanoAIU++ },
+		func(r *ReviewFlowRequest) {
+			deadline := time.Now().UTC().Add(10 * time.Minute)
+			r.Deadline = &deadline
+		},
+		func(r *ReviewFlowRequest) { repairs := *r.MaxRepairs + 1; r.MaxRepairs = &repairs },
+		func(r *ReviewFlowRequest) { r.StageBudget.ReviewerSessionCredits = 30 },
+		func(r *ReviewFlowRequest) { r.Authorization.Text += " changed" },
+		func(r *ReviewFlowRequest) { r.StageBudget.Version = 1 },
+		func(r *ReviewFlowRequest) {
+			r.Configuration = approvalTestConfiguration(t, "https://changed.example.test")
+		},
+	} {
+		changed := request
+		policy := *request.StageBudget
+		changed.StageBudget = &policy
+		mutate(&changed)
+		next, err := PreviewStagePlan(state.Graph, changed)
+		if err == nil && next.Plan.Hash == estimated.Plan.Hash {
+			t.Fatal("changed material authority reused the approval")
+		}
 	}
 }
 

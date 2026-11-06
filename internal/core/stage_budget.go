@@ -43,8 +43,8 @@ func (s *StageBudget) Validate() error {
 	if s == nil {
 		return nil
 	}
-	if s.Version != 1 {
-		return graphError("stage budget requires version 1")
+	if s.Version != 1 && s.Version != 2 {
+		return graphError("stage budget requires version 1 or 2")
 	}
 	for _, seconds := range []int64{s.ValidationSeconds, s.ReviewSeconds, s.RepairSeconds} {
 		if seconds < 0 || seconds > int64((365*24*time.Hour)/time.Second) {
@@ -77,8 +77,8 @@ func (s *StagePlan) Validate(flow ReviewFlow) error {
 		!validList(s.Basis) || len(s.Basis) == 0 ||
 		s.TimeoutSeconds > int64((365*24*time.Hour)/time.Second) ||
 		flow.Deadline.Sub(flow.StartedAt) > time.Duration(s.TimeoutSeconds)*time.Second ||
-		s.ReservedSeconds(0, "CODER") >= s.TimeoutSeconds && !s.ReviewOnly ||
-		s.ReservedSeconds(0, "REVIEWER") >= s.TimeoutSeconds && s.ReviewOnly {
+		s.Version == 1 && (s.ReservedSeconds(0, "CODER") >= s.TimeoutSeconds && !s.ReviewOnly ||
+			s.ReservedSeconds(0, "REVIEWER") >= s.TimeoutSeconds && s.ReviewOnly) {
 		return graphError("invalid approved stage plan")
 	}
 	return nil
@@ -113,10 +113,16 @@ func (s StagePlan) ReservedNanoAIU(repairs int, role string) float64 {
 }
 
 func (s StagePlan) SubmissionDeadline(flow ReviewFlow, role string) time.Time {
+	if s.Version == 2 {
+		return flow.ExecutionDeadline()
+	}
 	return flow.ExecutionDeadline().Add(-time.Duration(s.ReservedSeconds(flow.Repairs, role)) * time.Second)
 }
 
 func (s StagePlan) ValidateNativeReservations(limit float64) error {
+	if s.Version == 2 {
+		return nil
+	}
 	if limit <= 0 {
 		if s.ReviewNanoAIU != 0 || s.RepairNanoAIU != 0 {
 			return graphError("native stage reservations require an approved native Flow ceiling")

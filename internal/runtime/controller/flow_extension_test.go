@@ -220,7 +220,7 @@ func TestLiveExtensionRejectsDriftExpiredStageAndKeepsCallerDeadline(t *testing.
 		t.Fatal("late consent revived expired stage")
 	}
 	event, _, err := resourceWarning(state, dispatch, now.Add(-time.Second))
-	if err != nil || event == nil || !strings.Contains(event.Payload, "Ask once now") {
+	if err != nil || event == nil || !strings.Contains(event.Payload, "ask once now") {
 		t.Fatal("missing pre-stop combined decision request", event, err)
 	}
 }

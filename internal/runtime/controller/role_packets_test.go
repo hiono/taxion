@@ -641,7 +641,7 @@ func TestPacketLifecycleMissingReviewerBlocksWorktreeAndRuntime(t *testing.T) {
 	}
 }
 
-func TestPacketLifecycleDoesNotDelegateRepairApproval(t *testing.T) {
+func TestPacketLifecycleDoesNotRestrictExistingRepairAuthority(t *testing.T) {
 	db, ledger, request, auth := packetFlowFixture(t)
 	authorizePacketFixture(t, db, request, auth)
 	flow, err := StartReviewFlow(db, ledger, request)
@@ -658,13 +658,24 @@ func TestPacketLifecycleDoesNotDelegateRepairApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = AdvanceReviewFlow(db, ledger, flow.ID, request.Configuration)
-	if err == nil {
-		t.Fatal("Reviewer lifecycle approval authorized an unrelated repair entry")
+	continued, err := AdvanceReviewFlow(db, ledger, flow.ID, request.Configuration)
+	if err != nil {
+		t.Fatal("optional Reviewer packets blocked the original bounded repair authority", err)
 	}
 	after, loadErr := db.LoadWorkspace()
-	if loadErr != nil || !reflect.DeepEqual(before, after) {
-		t.Fatalf("failed repair check changed packet or Task state: %v", loadErr)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	repair, ok := after.Graph.GraphDispatch(continued.LastDispatchID())
+	if !ok || repair.Recipient != "CODER" || repair.Relationship != core.RelationshipAmends ||
+		continued.Repairs != 1 || continued.Budget != flow.Budget ||
+		!reflect.DeepEqual(before.Records.PacketAuthorizations, after.Records.PacketAuthorizations) ||
+		!reflect.DeepEqual(before.Graph.Dispatches, after.Graph.Dispatches[:len(before.Graph.Dispatches)]) {
+		t.Fatal("repair changed existing authority, limits or execution history")
+	}
+	approved := after.Graph.Approvals[len(after.Graph.Approvals)-1]
+	if approved.TaskID != flow.TaskID || strings.HasPrefix(approved.Source, "packet-lifecycle:") {
+		t.Fatal("repair was authorized from Reviewer packet delegation rather than the original contract")
 	}
 }
 

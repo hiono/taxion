@@ -28,9 +28,6 @@ func appendFlowEntryApproval(state *store.Workspace, flow core.ReviewFlow, taskI
 	if state.Graph.ApprovalRequirement() != core.ApprovalBundleRequired {
 		return fmt.Errorf("taxion: role admission approval schema is ambiguous")
 	}
-	if _, enabled := state.Records.PacketAuthorization(flow.TaskID); enabled {
-		return checkEntryApproval(state.Graph, task, stage, configuration)
-	}
 	source, ok := state.Graph.MatchingApproval(flow.TaskID, flow.Contract, configuration)
 	if !ok {
 		return checkEntryApproval(state.Graph, task, stage, configuration)

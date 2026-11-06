@@ -240,6 +240,16 @@ func (c *Controller) checkExecutionConfiguration(graph core.TaskGraph, dispatchI
 	if err := c.checkToolPolicy(graph, dispatch); err != nil {
 		return config.Config{}, err
 	}
+	return c.checkAccountConfiguration(graph, dispatchID)
+}
+
+// Account observation verifies its payer and billing authority, not executable
+// tool assets. Execution still passes checkToolPolicy above.
+func (c *Controller) checkAccountConfiguration(graph core.TaskGraph, dispatchID string) (config.Config, error) {
+	dispatch, ok := graph.GraphDispatch(dispatchID)
+	if !ok {
+		return config.Config{}, fmt.Errorf("taxion: configuration Dispatch not found")
+	}
 	if identity, ok := c.runtime.(runtime.BudgetGuidanceIdentity); ok &&
 		!reflect.DeepEqual(identity.BudgetGuidancePolicy(), dispatch.Instruction.BudgetGuidance) {
 		return config.Config{}, fmt.Errorf("taxion: runtime budget guidance differs from the immutable Dispatch approval")

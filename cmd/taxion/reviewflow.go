@@ -30,7 +30,7 @@ plan and start share this JSON input (examples are not user approval):
   "reviewRoot": "/absolute/path/to/reviews",
   "maxRepairs": 1,
   "timeoutSeconds": 3600,
-  "stageBudget": {"version": 1},
+  "stageBudget": {"version": 2},
   "authorization": {
     "id": "UNIQUE_AUTHORIZATION_ID",
     "source": "human:ACTUAL_APPROVAL_REFERENCE",
@@ -46,7 +46,7 @@ requested execution, not a preview-only permission; it is part of the hash.
 Display stagePlan.hash, contractGate, timing and limits for actual user approval.
 Optional deadline is an actually approved fixed RFC3339 absolute upper bound;
 timeoutSeconds may shorten it but delayed start cannot move it later. Expired or
-insufficient remaining time rejects. For a stopped normal Flow's unstarted
+an expired deadline rejects. For a stopped normal Flow's unstarted
 Reviewer, read workflow reconcile-stopped --help, not recover-review.
 Only after approval add stagePlanHash (the exact returned hash) to the same input,
 then workflow start --file REQUEST.json. start issues a Dispatch, not a model turn,
@@ -56,9 +56,14 @@ Changed Task, configuration or request requires a new plan and hash approval.
 stageBudget optional fields:
 validationSeconds, reviewSeconds, repairSeconds: per-stage time estimates, with
 saved-history estimates and conservative defaults when omitted.
+Version 2 treats time/native estimates as advice: reallocate within the approved
+outer deadline and actual usage/session/Dispatch/repair limits. Forecasts alone do
+not stop work or require another approval. Validation and independent review remain
+mandatory. Version 1 retains its approved hard stage reservations unchanged;
+never rewrite an existing plan version. New version means a new exact plan hash.
 coderSessionCredits, reviewerSessionCredits: optional per-role soft ceilings;
 zero/unset means no session ceiling, positive values must be at least 30.
-reviewNanoAiu, repairNanoAiu: reserved native usage estimates when maxNanoAiu is positive.
+reviewNanoAiu, repairNanoAiu: native usage forecasts, hard reservations only in version 1.
 maxNanoAiu is a separate optional positive Flow usage ceiling; omission is allowed
 only by the approved provider-stop or eligible account contract. Never convert credits.
 configuration is resolved by the CLI; do not invent configuration digest values.
@@ -67,7 +72,8 @@ For a planned successor also supply continuationChange and savedOutputDecision,
 explaining changed completion conditions and preservation/reuse of saved input.
 continueFromDispatchId skips Coder only for a verified successful prior Coder;
 do not use it for an executed SUSPENDED Coder or input that was never its output.
-If mandatory stages do not fit, do not start or silently extend the deadline.
+Assess remaining mandatory work; request additional authority only when the saved
+outer envelope is insufficient. Never silently extend a deadline or omit review.
 doctor --dispatch inspects an existing worktree without creating it. A newly issued
 Reviewer is prepared and inspected by run/step before any model starts.
 Use workflow run --id FLOW_ID --builtin-prompts for the bundled snapshot-mode

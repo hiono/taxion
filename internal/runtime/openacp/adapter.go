@@ -38,6 +38,7 @@ type Config struct {
 	BudgetGuidance   *core.BudgetGuidancePolicy
 	ToolPolicy       *tools.Policy
 	AvailableTools   []string
+	ContextDocuments []core.ContextDocument `json:",omitempty"`
 }
 
 type response struct {
@@ -165,6 +166,10 @@ func New(config Config) (*Adapter, error) {
 		config.ToolPolicy = config.ToolPolicy.Clone()
 	}
 	config.Configuration = slices.Clone(config.Configuration)
+	if err := core.CheckContextDocuments(config.ContextDocuments); err != nil {
+		return nil, err
+	}
+	config.ContextDocuments = slices.Clone(config.ContextDocuments)
 	return &Adapter{config: config, pending: map[string]chan response{}, wake: make(chan struct{}), launch: sandboxCommand}, nil
 }
 
@@ -175,10 +180,15 @@ func (a *Adapter) UsesBoundResultIdentity() bool {
 	return a.config.ResponseSchema["$id"] == "urn:taxion:dispatch-result:bound:v1"
 }
 func (a *Adapter) ConfigHash() string {
+	contextPolicy := ""
+	if len(a.config.ContextDocuments) != 0 {
+		contextPolicy = "source-jsonl-unicode-v1"
+	}
 	data, _ := json.Marshal(struct {
 		Adapter string `json:"adapter"`
 		Config
-	}{"openacp-isolated-v14", a.config})
+		ContextPolicy string `json:",omitempty"`
+	}{"openacp-isolated-v14", a.config, contextPolicy})
 	return hashBytes(data)
 }
 func (a *Adapter) ExecutionConfiguration() json.RawMessage {
@@ -306,6 +316,11 @@ func (a *Adapter) prepare() error {
 		return err
 	}
 	systemPrompt := a.config.SystemPrompt + "\n\nWorkspace paths in the saved contract identify the HOST worktree. Its authorized snapshot is at /workspace. Work only there; no Git metadata or shell is provided. Approved skills and their reference files are copied under /config/opencode/skills/<skill-name>; use those native paths, not host or .agents/skills paths from the saved contract. Quoted specification bodies are supplied in context; their localPath records provenance, not an available workspace file. Read those quoted bodies instead of searching for the original source files. Use native tools for every claimed file edit or skill load. The final JSON reports actual operations; it does not instruct the host to edit files. Never claim operations that were not executed. The host executes approved validation commands after submission. Your final assistant message must begin with { and end with }. Do not introduce it with narration or put text outside the JSON object. Return only one JSON object conforming to this schema:\n" + string(schema)
+	contextPrompt, err := a.prepareContext(permission)
+	if err != nil {
+		return err
+	}
+	systemPrompt += contextPrompt
 	agent, err := json.Marshal(map[string]any{
 		"mode": "primary", "permission": permission, "steps": 12, "prompt": systemPrompt,
 	})

@@ -12,11 +12,11 @@ Task は一件の作業記録で、目的・変更範囲・完了条件・検証
 このガイドは同じソースの CLI を対象とし、古い版の操作を併記しません。
 公開版の選択、ハッシュと出典の照合、運用 policy の初回登録は
 [正式バイナリと運用モード](binary-provenance.md)に従ってください。
-以下は v0.7.25 を固定する例であり、最新版への自動更新指定ではありません。
+以下は v0.8.0 を固定する例であり、最新版への自動更新指定ではありません。
 
 ```sh
-mise install github:hiono/taxion@0.7.25
-mise use --pin github:hiono/taxion@0.7.25
+mise install github:hiono/taxion@0.8.0
+mise use --pin github:hiono/taxion@0.8.0
 mise exec -- taxion --version
 mise exec -- taxion --help
 ```
@@ -280,7 +280,7 @@ taxion request --repo owner/repository \
 
 過去の資産を引き継ぐ場合は、保存済み Task・Dispatch・中断 checkpoint の方式、期限、明示上限をそのまま使います。設定ファイルの `flow`・`off` 指定も維持します。旧方式を新たに明示する場合は、たとえば `--budget-guidance flow --max-task-nano-aiu 1000000000` のように上限を指定します。正の上限は Planner の使用量を差し引く hard ceiling で、使用量が不明なら停止します。新方式にも追加の正の上限を指定できますが、既存の承認済み上限を自動で削除・拡大することはありません。
 
-Planner はファイル・shell tool を持たず、今回の依頼または回答、最小の提案・未回答質問、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストを受け取ります。会話履歴や元依頼の全文を永続保存せず、元依頼は digest だけを decision に残します。path は directory ごとにまとめ、全件を保持したまま共通部分の繰り返しを減らします。通常は native な skill と指示も読み込みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。
+Planner は製品のファイル・shell tool を持たず、今回の依頼または回答、最小の提案・未回答質問、追跡済み path の一覧と `--context-path` で選んだ commit 内のテキストを受け取ります。依頼原文、人の追記、表示用の計画・理由・質問は、private workspace に出典・版・hash 付きで保存し、専用の reader から読み直せます。既知の credential pattern は秘匿化し、秘匿化した資料であることと元入力の digest を残します。path は directory ごとにまとめ、全件を保持したまま共通部分の繰り返しを減らします。通常は native な skill と指示も読み込みます。必要な source を渡す場合は option を繰り返します（最大16ファイル、計64 KiB）。未読のコードを調査済みとは扱いません。
 
 同じ workspace の active operation は1件です。質問待ちでは、その質問への自然言語の回答と明示的な `/quit` だけを受け付けます。未解決の質問への `/approve` や別 request、別 workflow は拒否します。EOF は checkpoint と質問待ちを保持し、`/quit` は operation を終了します。次の操作で状態を読み、同じ checkpoint から回答を続けられます。予算・期限・実行設定の override は受け付けません。
 
@@ -293,7 +293,7 @@ taxion request --resume REQUEST_ID
 
 `--status` はモデルを呼ばず、operation の version・state・phase・期限・session soft ceiling・nano-AIU 上限・Planner 使用量と、存在する Flow の予算を JSON で返します。所有 token と相談本文は表示しません。`--resume` は保存済みの質問を再表示し、回答があるまで Planner を再実行しません。承認済み実行では保存済み Flow と結果から継続し、完了済み Coder を再実行しません。process が終了すれば実行予約は解放されますが、送信の成否が不明な Planner、未照合の session、残った runner claim、安全停止済み Flow は自動再送・自動解除しません。既存の停止・照合・再契約手順を使い、依頼の最初からの作り直しは求めません。
 
-checkpoint v2 は最小の計画・質問、依頼 digest、承認参照、期限・予算を SQLite DB に保存します。planning receipt は完全な入力・結果の代わりに digest と成否を残し、実行先は Flow ID、失敗は digest で参照します。会話全文、prompt・response 全文、private reasoning は checkpoint、receipt、実行 Task へ保存しません。承認済み再開では正式な confirmation decision と Task・operation・proposal・設定・予算の一致を検証し、`Approved=true` だけでは進めません。承認束縛のない旧 checkpoint は本文を移行せず再開を拒否するため、保存記録の明示的な照合が必要です。既存の過去記録は削除しません。
+checkpoint v2 は最小の計画・質問、依頼 digest、承認参照、期限・予算を SQLite DB に保存します。planning receipt は完全な入力・結果の代わりに digest と成否を残し、実行先は Flow ID、失敗は digest で参照します。別の append-only source record に固定した依頼・追記・表示用計画を、承認対象の実行 Task へコピーして Coder と Reviewer の両方へ渡します。checkpoint に会話全文を詰めたり、private reasoning や native transcript を保存したりする方式ではありません。承認済み再開では正式な confirmation decision と Task・operation・proposal・設定・予算の一致を検証し、`Approved=true` だけでは進めません。承認束縛のない旧 checkpoint は本文を移行せず再開を拒否するため、保存記録の明示的な照合が必要です。既存の過去記録は削除しません。
 
 実行イベントは Flow から正式な Dispatch・receipt を参照し、二重保存しません。新しい `requests/` の JSON や `execution.log` は作りません。確認・明示 export は `taxion records show` を使います。計画にも非公開情報を含み得るため、公開先への転記には注意してください。保存前に DB の file mode を所有者だけが読み書きできる設定にします。
 
@@ -335,11 +335,37 @@ git worktree add -b work/task-example /absolute/path/to/task-worktree "$BASE_SHA
 
 オーケストレータは、依頼内容、scope、禁止範囲、acceptance、証拠、検証 command を `request.json` にまとめて `conversation intake` を実行します。Task の `status` は `DRAFT`、`owner` は `CODER`、`reviewer` は独立した `REVIEWER` とし、authorization は入力しません。
 
+`request` には要約した目的だけでなく、実際に提供された依頼原文を残します。
+設計理由・未解決事項・追加の承認原文・前工程の資料は、任意の `contextSources` に
+`id`、`kind`、`source`、`version`、`text` として原文を記録できます。
+内容 hash は Controller が計算し、提案の承認対象に含めます。
+資格情報を含めず、伏字を施した資料はその版を明示してください。
+
+新しい Dispatch は資料の出典・版・hash の索引と、原文を読み直す手段を担当へ渡します。
+Copilot は `taxion_read_context` で hash を指定し、文字単位のページを末尾まで読めます。
+OpenACP は同じ資料を読取り専用の `/config/taxion-context` から読みます。
+製品ファイルの読取り・変更・実行権限は増えません。
+Reviewer は Coder の説明だけで判断せず、依頼原文・承認条件と実際の成果を独立に照合します。
+
+自動共有するのは Taxion に保存した資料であり、未提供の会話全文を取得する機能ではありません。
+不足する原文を推測で補ったり、原文がそろったと主張したりしないでください。
+必須でない資料の種類がないことだけでは実行を止めません。
+発行済みの旧 Dispatch の prompt・tool・設定 hash は変更しません。
+
 ```json
 {
   "request": "実施したい変更の元の依頼文",
   "actor": "human",
   "source": "human:request-1",
+  "contextSources": [
+    {
+      "id": "design",
+      "kind": "design",
+      "source": "human:design-1",
+      "version": "revision-1",
+      "text": "実際に提示された設計理由と未解決事項の原文"
+    }
+  ],
   "task": {
     "id": "task-example",
     "title": "変更の短い説明",
@@ -449,7 +475,7 @@ taxion task reauthorize --task TASK-ID \
 
 `workflow start` は READY Task に対して Coder Dispatch を発行します。オーケストレータは repair 回数と期限を利用者に示し、作業条件の承認とは別に実行上限への承認を得てから `flow.json` を作成します。token 閾値で Flow は停止しません。
 
-工程配分を使う場合、オーケストレータは `stageBudget:{"version":1}` を指定して `workflow plan` で計画を作ります。利用者に工程別のクレジット数を必ず入力してもらう方式ではありません。利用者は全体期限・作業範囲・権限・修正回数・選択した課金方式と、表示された工程計画を承認します。入力ファイルとハッシュの転記はオーケストレータが担当します。
+新しい工程計画では、オーケストレータは `stageBudget:{"version":2}` を指定して `workflow plan` で計画を作ります。時間・使用量の見積もりは助言とし、agent が承認済みの全体期限・実使用量・回数内で配分します。利用者は対象・作業範囲・権限・実上限・役割別ソフト上限を承認し、見積もり不足や超過だけでは再承認しません。入力ファイルとハッシュの転記はオーケストレータが担当します。既存の version 1 計画と予約は変更しません。
 
 ```json
 {
@@ -461,7 +487,7 @@ taxion task reauthorize --task TASK-ID \
   "maxNanoAiu": 1000000000,
   "timeoutSeconds": 3600,
   "stageBudget": {
-    "version": 1,
+    "version": 2,
     "coderSessionCredits": 30,
     "reviewerSessionCredits": 30,
     "reviewNanoAiu": 100000000,
@@ -479,7 +505,7 @@ taxion task reauthorize --task TASK-ID \
 taxion workflow plan --file flow.json
 ```
 
-結果は `stateChanged:false` で、実装・検証・独立レビュー・許可済み修正に使う時間の根拠と `stagePlan.hash` を表示します。承認を得た後、同じ `flow.json` に `stagePlanHash` としてその値を追加します。入力・設定・対象・見積もり根拠が変われば、以前のハッシュで開始できません。
+結果は `stateChanged:false` で、実装・検証・独立レビュー・許可済み修正に使う時間の根拠と `stagePlan.hash` を表示します。承認を得た後、同じ `flow.json` に `stagePlanHash` としてその値を追加します。version 2 の hash は対象・設定・認可外枠を固定し、助言の見積もりや抽出根拠の変化だけでは変わりません。version 1 は見積もりも固定します。
 
 ```sh
 taxion workflow start --file flow.json
@@ -500,9 +526,9 @@ taxion workflow show --id task-example-flow
 
 計画付きの実行では、役割ごとのソフト上限を保存済み計画から適用します。異なる上限を承認した場合は共通の `--max-ai-credits` を省略します。この値は提供元のクレジット予約ではなく、厳密な請求上限も保証しません。工程計画を省略した既存の Flow と `request` は、引き続き全体期限と共通のセッション上限を使い、後続工程の時間を予約しません。どちらの経路を使ったかを説明する必要があります。
 
-時間見積もりがない場合の初期値は検証コマンドごとに60秒、レビュー600秒、修正600秒です。同じリポジトリと検証コマンドの成功記録を参照し、長い実績には20%の余裕を加えます。これはモデル内部時間の実測でも完了保証でもありません。必要なら `validationSeconds`・`reviewSeconds`・`repairSeconds` を明示して再提案できます。全体期限に収まらない計画は開始前に拒否します。正の全体利用額上限を指定した場合は、必要な役割の利用額見積もりも保存実績か明示指定から得られなければ開始できません。上記の利用額は承認手順の例で、固定比率の推奨値ではありません。詳細は [CLI リファレンス](cli-reference.md#工程計画と保存観測)を参照してください。
+時間見積もりがない場合の初期値は検証コマンドごとに60秒、レビュー600秒、修正600秒です。同じリポジトリと検証コマンドの成功記録を参照し、長い実績には20%の余裕を加えます。これはモデル内部時間の実測でも完了保証でもありません。version 2 では見積もりが不足したり全体枠を超えたりするだけでは開始を拒否しません。version 1 は従来どおり後続工程の予約時間と利用額見積もりを要求します。上記の利用額は承認手順の例で、固定比率の推奨値ではありません。詳細は [CLI リファレンス](cli-reference.md#工程計画と保存観測)を参照してください。
 
-実行担当には有効な承認済み全体期限から後続工程分を引いた提出期限を伝えます。制御処理は提出・検証を別々の期限で監視し、時間切れなら停止証跡と部分成果を保存します。未完了の提出を成功扱いにしたり、残るレビュー時間を実装へ流用したりしません。再起動しても期限はリセットされません。
+version 2 は提出・ホスト検証・成果物入力検証を有効な全体期限で監視します。version 1 は後続工程分を引いた提出期限と別の検証枠を保ちます。独立した呼出し元期限が早ければそちらを守り、実期限切れには停止証跡と部分成果を保存します。どちらも未完了を成功にせず、再起動で期限をリセットしません。
 
 未起動の Coder Dispatch を取り消して契約を作り直す場合は、`workflow terminate --file terminate.json` に `{ "flowId": "...", "dispatchId": "...", "actor": "human", "source": "human:recontract", "reason": "..." }` を渡します。これは未開始・未確認の Dispatch のみを取消し、Flow を hold します。次に新しい Task ID と作業条件を明示承認し、`workflow start` で再契約します。新しい Dispatch hash が生成され、以前の指示と audit history は保持されます。
 
@@ -628,9 +654,11 @@ Coder と入力検証はやり直さず、結果受理検証は実施します�
 [一括復旧の入力仕様](cli-reference.md#レビュー復旧を一括承認する)がこの操作の正本です。
 以下の `resume` と成功 Coder 由来の継続は別の保存状態用であり、成果物 Reviewer の代替手順ではありません。
 
-発行された Coder Dispatch がまだ一度も acknowledge・実行されていない場合は、`taxion gate resume --flow FLOW-ID --json` で保存状態を変更せず再開条件を確認できます。新規開始の `gate contract` は READY Task 用なので、ACTIVE Task の再開判定には使いません。PASS の場合、`workflow resume --id FLOW-ID` に元の承認済み role prompt・tool option を指定すると、同じ Gate を再確認して保存 Dispatch から通常の実行へ進みます。期限・予算・counter は引き継ぎ、Task を READY に戻したり Flow を作り直したりしません。
+発行済み role が未実行なら、`taxion gate resume --flow FLOW-ID --json` で保存状態を変更せず再開条件を確認できます。Coder、Reviewer、許可済み修正・再レビュー、成果物 Reviewer を同じ境界で扱います。PASS の場合、`workflow resume --id FLOW-ID` に元の承認済み role prompt・tool option を指定し、同じ認可・期限・counter で続けます。Task を READY に戻したり Flow を作り直したりしません。
 
-resume Gate は正式な bundle、configuration、canonical packet、未所有の runner、Git の保存 start tree と未記録 file 不在を要求します。versioned resume binding がない旧 budget audit は `resume-budget-binding` で拒否し、自動 migration や checkpoint 上書きは行いません。実行中・acknowledged 済み session、STOPPED Flow、完了結果から次 role へ進む場合は、この新しい Gate ではなく、以下の既存の照合・停止・継続手順を使ってください。
+resume Gate は保存 schema に応じた認可、configuration、未所有の runner、Git の保存対象と未記録 file 不在を照合します。packet は lifecycle を明示選択した場合だけ必要です。release 済みで最初の send より前の session は同じ binding に再接続でき、開始済みの実行は再送しません。versioned resume binding がない旧 audit、STOPPED Flow、完了済み結果は別の照合・停止・継続手順を使います。
+
+runtime Start を試みる前の準備・出力・runtime 構築だけの失敗では、同じ RUNNING Flow と発行済み role を保ちます。`preparation-blocked` の監査を確認し、承認範囲内の技術問題だけを直して同じ run/resume を使います。自動 retry や新しい承認は作りません。実際の取消・期限・予算違反や Start 試行後の成否不明は従来の停止処理を保ちます。
 
 `workflow show` の status、stop code、利用量、保存結果、Git evidence、Reviewer verdict を確認します。`COMPLETED` や `APPROVE` だけで作業成果を判断せず、対象 SHA と acceptance evidence が依頼を満たすかを確認してください。
 

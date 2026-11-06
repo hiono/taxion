@@ -1,6 +1,7 @@
 package gitproof
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -168,6 +169,10 @@ func commonDirectory(worktree string) (string, error) {
 // VerifyPreparedReviewWorktree preserves the real index and files. Snapshot
 // preparation leaves HEAD and the index at baseline, with the target in files.
 func VerifyPreparedReviewWorktree(dispatch core.GraphDispatch, source string) error {
+	return verifyPreparedReviewWorktree(context.Background(), dispatch, source)
+}
+
+func verifyPreparedReviewWorktree(ctx context.Context, dispatch core.GraphDispatch, source string) error {
 	if dispatch.Recipient != "REVIEWER" || dispatch.ReviewWorktreeSource == "" ||
 		dispatch.Instruction.OutputMode != core.OutputModeWorktreeTreeSnapshot {
 		return fmt.Errorf("prepared review requires a managed snapshot Reviewer")
@@ -180,19 +185,19 @@ func VerifyPreparedReviewWorktree(dispatch core.GraphDispatch, source string) er
 	if err != nil || actualSource != expectedSource {
 		return fmt.Errorf("prepared review source differs from the approved candidate")
 	}
-	root, err := worktreeRoot(dispatch.Instruction.Worktree)
+	root, err := readOnlyGit(ctx, dispatch.Instruction.Worktree, "rev-parse", "--show-toplevel")
 	if err != nil || root != filepath.Clean(dispatch.Instruction.Worktree) || root == actualSource {
 		return fmt.Errorf("prepared review must retain its exact separate worktree path")
 	}
-	sourceGit, err := commonDirectory(actualSource)
+	sourceGit, err := readOnlyGit(ctx, actualSource, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return err
 	}
-	reviewGit, err := commonDirectory(root)
+	reviewGit, err := readOnlyGit(ctx, root, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil || sourceGit != reviewGit {
 		return fmt.Errorf("prepared review belongs to another Git repository")
 	}
-	registry, err := git(actualSource, "worktree", "list", "--porcelain", "-z")
+	registry, err := readOnlyGit(ctx, actualSource, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
 		return err
 	}
@@ -203,14 +208,14 @@ func VerifyPreparedReviewWorktree(dispatch core.GraphDispatch, source string) er
 	if !registered {
 		return fmt.Errorf("prepared review is not registered in the candidate repository")
 	}
-	remote, err := git(root, "remote", "get-url", "origin")
+	remote, err := readOnlyGit(ctx, root, "remote", "get-url", "origin")
 	if err != nil {
 		return err
 	}
 	if err := VerifyRepositoryRemote(dispatch, remote); err != nil {
 		return fmt.Errorf("prepared review repository identity changed")
 	}
-	if _, err := git(root, "symbolic-ref", "--quiet", "HEAD"); err == nil {
+	if _, err := readOnlyGit(ctx, root, "symbolic-ref", "--quiet", "HEAD"); err == nil {
 		return fmt.Errorf("prepared review must retain detached HEAD")
 	} else {
 		var exit *exec.ExitError
@@ -218,15 +223,14 @@ func VerifyPreparedReviewWorktree(dispatch core.GraphDispatch, source string) er
 			return fmt.Errorf("prepared review HEAD cannot be verified")
 		}
 	}
-	options := []string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.untrackedCache=false"}
-	if _, err := git(root, append(options, "diff", "--cached", "--quiet", "--no-ext-diff",
-		"--no-textconv", dispatch.Instruction.BaselineSHA, "--")...); err != nil {
+	if _, err := readOnlyGit(ctx, root, "diff", "--cached", "--quiet", "--no-ext-diff",
+		"--no-textconv", "--ignore-submodules=none", dispatch.Instruction.BaselineSHA, "--"); err != nil {
 		return fmt.Errorf("prepared review index differs from its original baseline")
 	}
-	if err := CheckPortableWorktree(root, dispatch.Instruction.BaselineSHA, dispatch.Instruction.TargetTreeSHA); err != nil {
+	if err := checkPortableWorktree(ctx, root, dispatch.Instruction.BaselineSHA, dispatch.Instruction.TargetTreeSHA); err != nil {
 		return fmt.Errorf("prepared review target changed: %w", err)
 	}
-	ignored, err := git(root, append(options, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")...)
+	ignored, err := readOnlyGit(ctx, root, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
 	if err != nil {
 		return err
 	}
@@ -237,5 +241,9 @@ func VerifyPreparedReviewWorktree(dispatch core.GraphDispatch, source string) er
 	if refID == "" {
 		refID = dispatch.ID
 	}
-	return verifySnapshotRef(actualSource, refID, dispatch.Instruction.TargetTreeSHA)
+	tree, err := readOnlyGit(ctx, actualSource, "rev-parse", "--verify", snapshotRef(refID)+"^{tree}")
+	if err != nil || tree != dispatch.Instruction.TargetTreeSHA {
+		return fmt.Errorf("prepared review snapshot ref changed")
+	}
+	return nil
 }

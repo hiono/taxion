@@ -16,6 +16,22 @@ help の例は承認ではなく、hash・設定・対象は実際の出力と�
 
 `conversation confirm` からの承認束の生成と、不足 bundle を補う明示操作は[Task の検証と承認](task-validate-and-authorize.md#fresh-ready-task-の不足-bundle-を生成する)を参照する。
 
+`conversation intake` の `request` は依頼原文、任意の `contextSources` は追加の
+原文資料を保存する。各資料は `id`、`kind`、`source`、`version`、UTF-8 の `text` を持つ。
+`hash` は自動計算し、指定された場合は内容との一致を要求する。`taxion:` で始まる ID は予約済み。
+資料の変更は proposal hash を変える。管理領域への参照 path だけでは本文の代わりにならない。
+原文へ遡る手順と例は[利用者ガイド](user-guide.md#依頼を未承認-task-として記録する)を参照する。
+新規 Dispatch の Copilot 用 `taxion_read_context` は `id`、`hash`、`offset`、
+`limit` を受け取り、`nextOffset` と `eof` を返す。offset/limit は Unicode 文字単位で、
+limit は1〜4096。OpenACP は索引の正確な `/config/taxion-context` path を native read の
+`limit:8` で行ページごとに読む。短い JSONL chunk の `text` を余分な区切りなしで連結すると、
+長い一行も含め元の本文を復元できる。
+どちらも担当に渡した固定資料以外を読めず、旧 Dispatch の tool surface は変更しない。
+
+`request` も依頼・人の追記・表示用 Planner 出力を private な append-only source record に残し、
+実行提案の hash に固定する。既知の credential pattern は秘匿化し、元入力 digest と秘匿化を明示する。
+operation checkpoint と planning receipt は最小のままで、private reasoning や native transcript は保存しない。
+
 持込みのコード・文書・テストや失敗記録を Coder なしでレビューする場合は、
 `conversation intake --file` の `reviewInput` に対象の出典、目的、質問、既知の失敗、
 検証状況、読める証拠を指定する。`taxion.review-input.v1` はコマンド合格を必須とする。
@@ -566,13 +582,15 @@ tool 定義の存在から実行許可を推定しない。最新 assistant mess
 
 ### 上限付き review flow
 
-`gate contract --task ID` は新規開始専用で、READY 要件を維持する。`gate resume --flow ID --json` は保存済みの ACTIVE Task / RUNNING Flow と、発行済み未実行の Coder Dispatch を対象にした別の read-only Contract Gate である。runner claim、acknowledge、execution start、runtime session、hold、未発行 draft がある場合は拒否する。Task / Flow / Dispatch、contract / authorization hash、承認 bundle、task-bound configuration、endpoint、canonical packet、Git baseline / branch / start tree、他の active operation、保存済み予算・counter・期限を照合する。診断 code は `resume-` で始まり、評価で Task や実行状態、Git index、packet、budget を変更しない。
+`gate contract --task ID` は新規開始専用で、READY 要件を維持する。`gate resume --flow ID --json` は保存済み RUNNING Flow の発行済み未開始 Dispatch を対象にした read-only Contract Gate である。Coder、Reviewer、修正・再レビュー、持込み入力の検証後の Reviewer で同じ入口を使う。現在の role Task は ACTIVE のまま、発行時の承認・設定・instruction、contract / authorization hash、対象 Git object と worktree、operation の排他、保存済み予算・counter・期限を照合する。packet lifecycle は任意で、有効な場合だけ canonical packet を検証する。診断 code は `resume-` で始まり、評価で Task や実行状態、Git index、packet、budget を変更しない。
 
 `workflow resume --id ID` は `workflow run` と同じ role prompt / tool option を受け付ける。resume Gate の成功後、runner claim の transaction 内でも同じ条件を再確認し、既存 Dispatch を再作成せず通常の runner へ渡す。合格 report は所有権や新しい実行承認の代わりではない。別の operation に所属する Flow は、その operation の正式な所有経路なしでは実行できない。既存の `workflow run`、`workflow step`、`request --resume` の構文と継続動作は変更しない。
 
-Git 観測では `assume-unchanged` / `skip-worktree` など、追跡 file の変更を隠す index flag がある場合も拒否する。flag や index を自動変更して通過させず、実行属性・symlink・stat の検査も省略しない。追跡 file に有効な `filter` 属性がある場合は、観測中に外部 clean / process command を起動する可能性があるため拒否し、属性や filter 設定を変更しない。各 Git 観測の出力上限は 64 KiB で、超過時も拒否する。
+Git 観測では `assume-unchanged` / `skip-worktree` など、追跡 file の変更を隠す index flag がある場合も拒否する。flag や index を自動変更して通過させず、実行属性・symlink・stat の検査も省略しない。追跡 file に有効な `filter` 属性がある場合は、観測中に外部 clean / process command を起動する可能性があるため拒否し、属性や filter 設定を変更しない。既存の Coder 開始 metadata 観測の出力上限は 64 KiB。準備済み snapshot の一時 index による照合へ、その上限を新たに適用しない。
 
-resume 用 binding は新しい Dispatch の append-only budget audit に version 1 として保存する。contract / authorization / instruction hash、Dispatch ID、開始時刻・期限・上限と、同時点の利用量・counter を照合する。binding のない旧 audit は補完・上書きせず `resume-budget-binding` で拒否する。canonical packet artifact のない旧記録も検証済みとして扱わない。この Gate は acknowledged / 実行中 session、結果から次 role を発行する段階、STOPPED Flow の復帰には使わず、それぞれ既存の停止・結果照合・後続契約の手順を使う。snapshot mode では、承認済み start tree と index / tracked worktree が一致し、未記録 file がないことも必要になる。
+resume 用 binding は各 role の Dispatch の append-only budget audit に version 1 として保存する。最新の発行時 contract / authorization / instruction hash、Dispatch ID、開始時刻・期限・上限と、利用量・counter を照合する。binding のない旧 audit は補完・上書きせず `resume-budget-binding` で拒否する。明示的な hold、未処理 draft、runner claim、実行開始済みや結果のある Dispatch は対象外。hold の release 後で未開始なら acknowledge 済みでも扱え、最初の send より前に作成された保存 session は同じ binding へ再接続する。利用量はリセットしない。結果から次 role を発行する段階、STOPPED Flow の復帰、FAILED の保存回答処理には、それぞれの既存操作を使う。
+
+Coder の開始対象は保存 branch / HEAD / index / files と照合する。Reviewer は準備に使う immutable commit / snapshot ref を照合し、準備済みなら管理 worktree の同一性も確認する。preview では Reviewer worktree を作らない。持込み入力の Reviewer 継続で入力検証 command を再実行せず、結果受理時の検証は通常どおり行う。
 
 `workflow start` は、明示的な修正回数と経過時間（`timeoutSeconds`、省略時は1時間）を持つ認可済み Coder 契約を保存し、初回 Dispatch を発行する。`workflow advance` は最新の検証済み結果から独立 Reviewer または同じ受入れ条件と出典付き finding を持つ修正 Dispatch を発行する。現在の output SHA の承認で実装 Task を COMPLETED にする。`workflow run` は隔離した Coder・Reviewer SDK adapter を作り、指示・結果のコピーなしに SQLite の Dispatch を順に実行する。usage event 後に利用量を保存・報告し、契約・Memory の変更を監視して、保存 deadline で runtime を止める。token 閾値では停止しない。`--coder-tools`・`--reviewer-tools` は明示 allowlist のまま保つ。永続 runner claim は同時 run を防ぎ、中断 process の claim は明示的な照合なしに再利用しない。旧 process の終了と、その Dispatch の完了・取消を確認した後、`workflow recover --file <path>` で観測 runner ID を比較し、actor、理由、証拠を記録して所有を解放する。保存契約と結果は後続操作にも適用する。認可・停止条件は [Task Graph](../develop/task-graph.md) を参照する。
 
@@ -586,7 +604,7 @@ v0.7.16 の共通 runner は Reviewer の起動前に `review_budget` event を�
 
 `workflow handoff --file <path>` は既存 Flow に出典付き `HOLD`・`RELEASE` を保存し、`expectedChangeId` を最新 handoff change と比較する。hold は次 Dispatch の発行と未開始実行を止め、実行中 role の認可済み作業と最終結果は保つ。runner は引継ぎ時点で handoff-held error を返し、現在の結果を取り消さず claim を解放する。明示 release は不変の契約と上限で後の `workflow run`・`advance` を許すが、作業を直接開始せず、safety stop の Flow も復帰させない。request 形式と競合の制約は Task Graph に記載する。
 
-Controller が停止時に作る `HOLD` の理由は、前後の空白だけを除いて記録する。Flow の停止理由には元の文字列を残し、`HOLD` の保存が失敗した場合も、そのエラーに元の理由を含める。これは停止理由の保存処理の修正であり、Git の再検証や受入れ条件を省略するものではない。保存済み Reviewer 結果が `APPROVE` でも、Flow が `STOPPED` なら通常の `advance`・`recover`・`handoff RELEASE` で完了へは進まない。後述の受理専用操作は、理由消失の不具合で停止した限定条件だけを対象にする。
+Controller が停止時に作る `HOLD` の理由は、前後の空白だけを除いて記録する。Flow の停止理由には元の文字列を残し、`HOLD` の保存が失敗した場合も、そのエラーに元の理由を含める。これは停止理由の保存処理の修正であり、Git の再検証や受入れ条件を省略するものではない。保存済み Reviewer 結果が `APPROVE` でも、Flow が `STOPPED` なら通常の `advance`・`recover`・`handoff RELEASE` で完了へは進まない。後述の受理専用操作は既存の証拠条件を照合し、特定の過去エラーメッセージだけを必須にしない。
 
 `workflow feedback-target --id <flow-id>` は最新 Dispatch の instruction と結果 identity を読む。`workflow feedback --file <path>` はその完全一致対象を比較し、出典付き利用者応答と handoff hold を一つの workspace transaction で保存する。元結果、verdict、認可を保ち、文章を自動送信したり契約変更の承認と扱ったりしない。古い対象は明示 error とし、feedback・hold を保存しない。対象変更に関係なく次引継ぎを保留する場合は `workflow handoff` を別に使う。
 
@@ -613,7 +631,7 @@ Task の `validationCommands` は Controller の検査操作を認可する。�
 
 #### 工程計画と保存観測
 
-`workflow plan --file flow.json` は、READY Task と実行要求から工程計画を読取り専用で作る。実行要求は `workflow start` と共通で、`stageBudget:{"version":1}` を追加する。返却する `stateChanged` は `false`、`stagePlan.hash` は承認対象の完全なハッシュである。Task、要求、設定、見積もり結果が変われば、古いハッシュを使った開始を拒否する。
+`workflow plan --file flow.json` は、READY Task と実行要求から工程計画を読取り専用で作る。実行要求は `workflow start` と共通で、新しい計画には `stageBudget:{"version":2}` を指定する。返却する `stateChanged` は `false`。version 2 の `stagePlan.hash` は対象・設定・認可・期限・実使用量上限・回数・役割別ソフト上限を固定し、助言である時間/native 見積もりと抽出根拠は含めない。version 1 は従来どおり見積もりも含む。対象や認可外枠、計画の版が変われば古いハッシュで開始できない。
 
 返却する `contractGate` は、その時点の承認束の照合結果である。ハッシュが返っても実行可能とは限らない。承認束が不足していれば `task authorize --manifest FILE` の確認トークンを提示し、明示承認後に `--confirm TOKEN` で保存する。役割間の委譲には別の `task authorize-packets --request FILE` の事前確認と承認記録を使う。計画の承認は承認束や役割間委譲を作成しない。これらの操作で Task・設定・要求が変わった場合は計画を再作成し、新しいハッシュを承認する。
 
@@ -623,24 +641,24 @@ Task の `validationCommands` は Controller の検査操作を認可する。�
 
 | `stageBudget` の項目 | 意味 |
 |---|---|
-| `version` | `1` を指定する |
+| `version` | `2` は時間・使用量の見積もりを助言として扱う。`1` は承認済みの工程予約を維持する |
 | `validationSeconds` | 各実装提出後の検証に使う秒数。未指定はコマンドごとに60秒と保存実績から見積もる |
 | `reviewSeconds` | 各独立レビューの予定秒数。未指定時の初期値は600秒 |
 | `repairSeconds` | 各修正の予定秒数。未指定時の初期値は600秒 |
 | `coderSessionCredits` / `reviewerSessionCredits` | 各役割のセッションのソフト上限。ゼロまたは未指定は設定なし。指定時は30以上 |
-| `reviewNanoAiu` / `repairNanoAiu` | 正の全体 `maxNanoAiu` がある場合だけ使う、各レビュー・修正の内部残額枠。必要な役割の正の見積もりが保存実績にも明示指定にもなければ計画を拒否する |
+| `reviewNanoAiu` / `repairNanoAiu` | 各レビュー・修正の使用量の予測。version 2 は未見積もりや予測超過だけで拒否しない。version 1 の正の `maxNanoAiu` では必要な役割の正の予約値を要求する |
 
-時間の見積もりには、同じリポジトリと検証コマンドの直近の成功記録を最大20件使う。初期値と、保存した時間に20%の余裕を加えた値の大きい方を採用する。明示指定と見積もりの出典は `basis` に残す。全体期限に必須工程が入らなければ、範囲の分割か新しい外枠の承認を求め、Dispatch を発行しない。時間指定と全体期限は最大1年、修正上限は計画付き Flow では1000回までとする。
+時間の見積もりには、同じリポジトリと検証コマンドの直近の成功記録を最大20件使う。初期値と、保存した時間に20%の余裕を加えた値の大きい方を採用する。明示指定と見積もりの出典は `basis` に残す。version 2 では agent が実際の進捗を評価し、承認済みの全体期限・実使用量・回数内で配分する。見積もりの超過だけでは Dispatch を拒否せず、品質条件も省略しない。version 1 は従来どおり予約が収まらなければ発行しない。時間指定と全体期限は最大1年、修正上限は計画付き Flow では1000回までとする。
 
-実装の提出期限は、有効な承認済み全体期限から後続の検証・レビュー・許可済み修正分を引いて求める。提出後の検証には検証分だけを使い、残る役割分へ食い込ませない。再接続・再起動・`step` でも保存済みの有効期限を保ち、単なる再起動で延長しない。境界後の実行結果は受理せず、部分成果と停止証拠を保存して `BUDGET_STOP` にする。計画付き Flow の成功結果は、汎用の `dispatch transition --result-file` では受理せず、対応する実行環境の終了処理を通す。
+version 2 の提出・ホスト検証・成果物入力検証には、有効な承認済み全体期限を使う。独立した呼出し元期限が早ければそちらを守る。version 1 は全体期限から後続工程の予約を引く従来の提出期限・検証枠を使う。再接続・再起動・`step` でも保存済みの有効期限を保ち、単なる再起動で延長しない。実際の上限到達では部分成果と停止証拠を保存して `BUDGET_STOP` にする。計画付き Flow の成功結果は、汎用の `dispatch transition --result-file` では受理せず、対応する実行環境の終了処理を通す。
 
-計画付きの `run`・`step`・`resume` は保存した役割別ソフト上限を適用する。共通の `--max-ai-credits` が両方の承認値と一致しない場合は拒否する。提供元のクレジット予約や厳密な請求上限の保証ではない。利用額の内部枠は完全な同じ設定の保存使用量か明示値だけを使い、未計測値を換算して埋めない。提供元停止方式には新しい残量照会を追加しない。
+計画付きの `run`・`step`・`resume` は保存した役割別ソフト上限を適用する。共通の `--max-ai-credits` が両方の承認値と一致しない場合は拒否する。提供元のクレジット予約や厳密な請求上限の保証ではない。version 2 でも正の実使用量上限、不完全な使用量観測による停止、session・Dispatch・修正回数の上限は維持する。未計測値を換算して埋めず、提供元停止方式には新しい残量照会を追加しない。
 
 `workflow budget --id FLOW-ID` は状態を変更せず、工程の開始・提出・検証・結果受理の観測時刻、適用したソフト上限、利用量の単位・範囲・完全性、停止理由、残る受入れ条件と保存された実装 tree を返す。時間はモデル内部時間ではなく、保存時刻に基づく。保存 tree の表示は現在の Git 同一性や品質検証の合格を意味しない。
 
 計画付き後続 Flow には `continuationChange` と `savedOutputDecision` を追加し、前回から完了可能性を変える条件と、保存成果を引き継ぐか基準から再実装する理由を記録する。この説明だけでは新しい作業を承認しない。旧作業場所と証拠を保持し、既存の後続 Task 承認・成果照合を行ってから、新しい計画を承認する。
 
-保存済み計画は発行監査と固定照合する。既存データへの遡及適用や計画の削除は行わない。計画・工程監査を含むデータを旧版で更新せず、戻す場合は現状を保護して更新前のバックアップを別配置で使う。詳細は [ADR-0053](../develop/adr/0053-enforce-approved-flow-stage-boundaries.md)。
+保存済み計画は発行監査と固定照合する。既存データへの遡及適用、版の変更、計画の削除は行わない。version 1 から version 2 への変更には新しい計画と正確な hash の承認が必要で、旧 Flow は保持する。version 2 の計画を含むデータを未対応の旧版で更新せず、戻す場合は現状を保護して更新前のバックアップを別配置で使う。判断は [ADR-0073](../develop/adr/0073-effect-scoped-continuation.md)、旧方式は [ADR-0053](../develop/adr/0053-enforce-approved-flow-stage-boundaries.md) を参照する。
 
 #### runner 終了後の未確定回答
 
@@ -664,7 +682,7 @@ Task の `validationCommands` は Controller の検査操作を認可する。�
 
 #### 停止後の保存済みレビュー結果の受理
 
-`workflow accept-saved-review` は、保存済み実装結果をレビューする Flow が、引継ぎ保留の入力検証エラーで停止理由を失った場合の受理専用操作である。新しい Flow・Dispatch・モデル session を作らず、検証 command も再実行しない。対象は `continueFromDispatchId` を持つツリースナップショット形式で、Dispatch が成功した Reviewer の1件だけ、判定が `APPROVE`、指摘・阻害事項が0件の `STOPPED / SAFETY_STOP` に限る。別の停止理由や通常の修正フローには使えない。
+`workflow accept-saved-review` は、保存済み実装結果をレビューする Flow の、受理記帳だけを行う操作である。新しい Flow・Dispatch・モデル session を作らず、検証 command も再実行しない。対象は `continueFromDispatchId` を持つツリースナップショット形式で、Dispatch が成功した Reviewer の1件だけ、判定が `APPROVE`、指摘・阻害事項が0件の `STOPPED / SAFETY_STOP` に限る。特定の不具合のエラー文との一致は要求せず、保存した停止・HOLD・結果・対象・承認の証拠で判定する。予算停止、取消、通常の修正フローや未検証結果を合格にする操作ではない。
 
 配布物の照合、必要な provenance policy の登録、`ready` の確認後、同じ設定環境で次の承認ファイルを用意する。これは保存結果の受理だけの明示承認であり、実行・予算・公開の承認ではない。`actor`・`source` は利用者の判断と出典を記録するもので、認証用の資格情報ではない。
 
@@ -692,7 +710,7 @@ taxion workflow accept-saved-review --file acceptance.json
 
 成功時は同じ Flow を `COMPLETED`、実装 Task を `APPROVED` → `COMPLETED` にする。Reviewer Task は結果保存時の `BLOCKED` と `Dispatch ended: SUCCEEDED` をそのまま保持し、preview の `reviewerTaskFinalStatus` も `BLOCKED` となる。Reviewer Task の再実行や未実施作業の完了を記録する操作ではない。
 
-元の HOLD は解除・削除しない。元の停止状態・理由・期限・HOLD 履歴を含む Flow 全体、結果と preview の hash、actor・source・reason、期限後受理の承認を `reviewAcceptances` へ追記する。`originalReasonUnavailable:true` は元の理由が二次エラーに置き換わって失われたことを示し、推定原因を確定した記録にはしない。
+元の HOLD は解除・削除しない。元の停止状態・理由・期限・HOLD 履歴を含む Flow 全体、結果と preview の hash、actor・source・reason、期限後受理の承認を `reviewAcceptances` へ追記する。旧不具合で元の理由が二次エラーへ置き換わった場合だけ `originalReasonUnavailable:true` とし、理由が保存されている場合は `false` とする。推定原因を確定した記録にはしない。
 
 元 Coder の worktree は `detached HEAD` でも、そのコミット・index・実ファイル・snapshotRef と保存 tree の一致を確認する。現在の実装 Task の worktree は承認済みブランチを要求する。両者は同じ Git オブジェクトデータベースに属し、解放済み Reviewer の path が存在しないことも必要になる。隠し index flag、有効な Git filter、未記録 file、契約・設定・承認・packet・Memory の不一致、残存 runner、実行中 Dispatch・operation、未解決 feedback・draft は拒否する。
 
@@ -745,6 +763,9 @@ CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は s
 `requiresApproval` を持つ。判定と旧契約への適合は同じ型で返す。
 受入れ可否は終了コード `0` が `accept`、`1` が拒否または操作エラー。
 拒否理由の分類は終了コードの推測ではなく `conditions[].code` を使う。
+この読取り専用の判定に、全 workspace の実行停止は要求しない。
+`accept` は適格性の判定であり、状態変更・実行・品質の承認ではない。
+実際の観測保存と intake の確定では、既存の停止・所有権の検査を別に行う。
 
 観測記録を使う後続は `conversation intake` と `conversation confirm` の両方に
 同じ `observationHash` を指定する。正式確定でも同じ受入れ判定を実行する。
@@ -995,7 +1016,7 @@ fileAccess が含まれていれば、それも含む完全な設定を使う。
   "timeoutSeconds": 3600,
   "deadline": "2099-01-01T01:00:00Z",
   "stageBudget": {
-    "version": 1,
+    "version": 2,
     "coderSessionCredits": 0,
     "validationSeconds": 600,
     "reviewSeconds": 1800
@@ -1011,7 +1032,7 @@ fileAccess が含まれていれば、それも含む完全な設定を使う。
 ```
 
 `maxNanoAiu` の省略には、元から承認済みの外部課金契約が必要である。
-native 上限を使う契約では実際に承認した `maxNanoAiu` と `stageBudget.reviewNanoAiu` を指定する。
+native 上限を使う契約では実際に承認した `maxNanoAiu` を指定する。`stageBudget.reviewNanoAiu` は version 2 では助言であり、省略しても実使用量の観測は省略できない。version 1 では必要な予約値も指定する。
 credits や requests を nano-AIU へ換算しない。
 `artifactSource` と `reuseArtifactValidation` は省略し、`validate-input` は実行しない。
 
@@ -1223,7 +1244,7 @@ provider の requests を根拠なく換算しない。
   "timeoutSeconds": 5400,
   "maxNanoAiu": 1000000000,
   "stageBudget": {
-    "version": 1,
+    "version": 2,
     "validationSeconds": 600,
     "reviewSeconds": 3600,
     "repairSeconds": 600
@@ -1375,7 +1396,7 @@ OpenCode は非対応。停止原因と記録欠落時の扱いは[失敗から�
 
 | 追加コマンド | option と制約 |
 | --- | --- |
-| `gate resume` | `--flow ID`、任意の `--json`。保存済み未実行 Coder 境界を read-only で照合する。新規開始の READY 要件は変更しない。終了 code は 0 pass・1 fail・2 blocked。 |
+| `gate resume` | `--flow ID`、任意の `--json`。保存済み未開始 role の実行境界を read-only で照合する。新規開始の READY 要件は変更しない。終了 code は 0 pass・1 fail・2 blocked。 |
 | `workflow resume` | `--id FLOW_ID` と `workflow run` と同じ runtime / role prompt / tool option。resume Gate と transaction 内の再照合後、保存済み runner 経路へ進む。拒否時は実行 record を変更しない。 |
 
 `taxion --help` は command 名と主用途を表示する。次の索引は実装済み subcommand と option を示す。`--store PATH` は command より前に指定し、旧 ledger のパスで workspace を選ぶ。同じ directory の `workspace.db` が正本となり、DB ファイル自体を `--store` に指定することはできない。各操作には表の名前付き option を使う。
@@ -1420,7 +1441,7 @@ runtime は固定設定の `runtime.provider` で選ぶ。`--cli`・`--base-dire
 | `workflow advance`, `workflow show`, `workflow evaluate`, `workflow feedback-target`, `workflow planning-context` | `--id FLOW_ID` で保存 review flow を選ぶ。`workflow evaluate` は Task 単位の承認上限・消費・残量を含む report を出す。前述の各節に従う読取り・遷移操作。 |
 | `workflow evaluate` | `--id FLOW_ID` で保存品質証拠と測定済み／未測定の費用を JSON 表示する。`targetSha` / `targetTreeSha` は保存グラフの対象を示す。読取り専用 SQLite 接続を使い、workspace 作成・移行・モデル実行をしない。`--require-quality` は完了した独立同一 target レビュー、Controller による必須コマンドと Git の証拠、文書整合 criterion がなければ JSON を出したうえで非zero終了する。命令形式4より前の成功結果は読めるが、検証済み品質へ昇格しない。得点・自動公開承認・現在の Git の検証ではない。 |
 | `workflow extend` | `--file JSON --preview` は稼働実行と変更前後の期限・native 上限の読取り専用 preview。正確な一括承認後、同じ要求へ `expectedHash` を追加し、`--preview` なしで適用する。元記録・累計消費・同じ session を保持する。[条件と形式](#実行を維持した期限予算の延長)を参照。 |
-| `workflow accept-saved-review` | `--file JSON` で `flowId`・`actor`・`source`・`reason`・`allowExpired` を指定する。`--preview` は状態を変えず対象と検査を表示し、適用には同じ判断と preview の `hash` を `expectedHash` として要求する。引継ぎ保留の理由消失で停止したレビュー専用 snapshot Flow だけを対象に、モデルや検証 command を起動せず保存済み `APPROVE` を受理する。 |
+| `workflow accept-saved-review` | `--file JSON` で `flowId`・`actor`・`source`・`reason`・`allowExpired` を指定する。`--preview` は状態を変えず対象と検査を表示し、適用には同じ判断と preview の `hash` を `expectedHash` として要求する。STOPPED/SAFETY_STOP のレビュー専用 snapshot Flow を既存の品質・hold・Git・packet 等の証拠で照合し、モデルや検証 command を起動せず保存済み `APPROVE` を受理する。特定の過去の停止理由文言は要求しない。 |
 | `workflow record-failed-review` | `--file JSON` と `--preview` で最新の正式 `FAILED` Reviewer の native `REQUEST_CHANGES` を照合する。承認した `expectedHash` により指摘だけを追記する。`--cli`・`--base-directory` は元 Copilot 環境を指定する。失敗履歴・利用量・Task・Flow は変更せず、品質受理・モデル送信・検証再実行を行わない。 |
 | `workflow reconcile-stopped` | `--file JSON` と任意の `--preview`。停止済み初回 snapshot 指示の取消と承認済み入力の出典を保存する。人間の実行静止確認・配送不明の受入れ・完全ハッシュを要求し、旧 Flow と不明な利用量を保持する。 |
 | `gate contract`, `gate execution`, `gate publication` | `gate contract` は `--task ID`、`gate execution`・`gate publication` は `--flow ID` を要求する。保存 Task・Flow・承認 bundle・評価証拠だけを読み、Task Graph・Dispatch・Flow・ledger を変更せずモデルも呼ばない。`--json` は version 1 の機械可読 report（gate 名、verdict、task/proposal/record/bundle/evidence hash、blockingConditions、drift と authorization impact、nextRequiredApproval、nextAuthorizedTransition、`stateChanged:false`）を出す。`--json` なしは同じ内容を人が読める形で出す。終了 code は 0 pass・1 fail・2 blocked で、未検証の項目を pass として報告しない。 |

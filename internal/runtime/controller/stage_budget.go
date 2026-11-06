@@ -32,7 +32,7 @@ type StagePlanPreview struct {
 func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePlanPreview, error) {
 	task, ok := graph.GraphTask(request.TaskID)
 	if !ok || task.Status != core.Ready || request.StageBudget == nil {
-		return StagePlanPreview{}, fmt.Errorf("taxion: stage plan requires a READY Task and stageBudget version 1")
+		return StagePlanPreview{}, fmt.Errorf("taxion: stage plan requires a READY Task and stageBudget version 1 or 2")
 	}
 	gate, err := ContractGateReport(graph, task.ID, request.Configuration)
 	if err != nil {
@@ -59,6 +59,9 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 		request.TimeoutSeconds <= 0 || request.TimeoutSeconds > int64(365*24*time.Hour/time.Second) ||
 		math.IsNaN(request.MaxNanoAIU) || math.IsInf(request.MaxNanoAIU, 0) || request.MaxNanoAIU < 0 {
 		return StagePlanPreview{}, fmt.Errorf("taxion: stage plan requires finite limits, at most 1000 repairs and a deadline within one year")
+	}
+	if request.Deadline != nil && !request.Deadline.After(time.Now().UTC()) {
+		return StagePlanPreview{}, fmt.Errorf("taxion: approved absolute deadline has expired")
 	}
 	if input != nil && (request.ArtifactSource != input.Source || *request.MaxRepairs != 0 ||
 		request.StageBudget.CoderSessionCredits != 0) {
@@ -91,7 +94,7 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 		artifact = &target
 	}
 	plan := &core.StagePlan{
-		Version: 1, TimeoutSeconds: request.TimeoutSeconds, MaxRepairs: *request.MaxRepairs,
+		Version: policy.Version, TimeoutSeconds: request.TimeoutSeconds, MaxRepairs: *request.MaxRepairs,
 		ReviewOnly:        request.ContinueFromDispatchID != "" || artifact != nil,
 		ValidationSeconds: policy.ValidationSeconds, ReviewSeconds: policy.ReviewSeconds,
 		RepairSeconds:       policy.RepairSeconds,
@@ -182,23 +185,30 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 	if role == "CODER" {
 		minimum = 60
 	}
-	if plan.ReservedSeconds(0, role)+minimum > plan.TimeoutSeconds {
+	if plan.Version == 1 && plan.ReservedSeconds(0, role)+minimum > plan.TimeoutSeconds {
 		return StagePlanPreview{}, fmt.Errorf("taxion: planned mandatory stages leave insufficient room; split scope or obtain approval for a new outer envelope")
 	}
-	if artifact != nil && plan.ValidationSeconds+plan.ReviewSeconds > plan.TimeoutSeconds {
+	if plan.Version == 1 && artifact != nil && plan.ValidationSeconds+plan.ReviewSeconds > plan.TimeoutSeconds {
 		return StagePlanPreview{}, fmt.Errorf("taxion: input validation and independent review exceed the unchanged outer deadline")
 	}
-	if request.Deadline != nil &&
+	if plan.Version == 1 && request.Deadline != nil &&
 		!request.Deadline.After(time.Now().UTC().Add(time.Duration(plan.ReservedSeconds(0, role)+minimum)*time.Second)) {
 		return StagePlanPreview{}, fmt.Errorf("taxion: approved absolute deadline leaves insufficient time for mandatory stages; obtain a new successor approval")
 	}
 	request.StagePlanHash = ""
+	hashRequest, hashPlan := request, *plan
+	if plan.Version == 2 {
+		hashRequest.StageBudget = &core.StageBudget{Version: policy.Version,
+			CoderSessionCredits: policy.CoderSessionCredits, ReviewerSessionCredits: policy.ReviewerSessionCredits}
+		hashPlan.ValidationSeconds, hashPlan.ReviewSeconds, hashPlan.RepairSeconds = 0, 0, 0
+		hashPlan.ReviewNanoAIU, hashPlan.RepairNanoAIU, hashPlan.Basis = 0, 0, nil
+	}
 	hash, err := core.CanonicalSHA256(struct {
 		Request  ReviewFlowRequest    `json:"request"`
 		Task     core.GraphTask       `json:"task"`
 		Plan     *core.StagePlan      `json:"plan"`
 		Artifact *core.ArtifactTarget `json:"artifact,omitempty"`
-	}{request, task, plan, artifact})
+	}{hashRequest, task, &hashPlan, artifact})
 	if err != nil {
 		return StagePlanPreview{}, err
 	}
@@ -206,10 +216,10 @@ func PreviewStagePlan(graph core.TaskGraph, request ReviewFlowRequest) (StagePla
 	return StagePlanPreview{Artifact: artifact, FlowID: request.ID, TaskID: task.ID, MaxNanoAIU: request.MaxNanoAIU, Plan: plan, ContractGate: gate, Limitations: []string{
 		"The plan hash is not execution authorization. The current contract gate must pass separately; packet lifecycle delegation and runtime preflight are not established by this report.",
 		"Authorization text is part of the exact hash and must accurately describe the requested execution before approval. A preview-only decision cannot be reused as execution approval; amend the request and obtain a new hash approval.",
-		"Time reservations are controller deadlines, not a completion guarantee or provider credit reservation.",
+		"Version 1 time reservations are controller deadlines. Version 2 time and native usage estimates are advice only; the approved outer deadline, actual usage and role/repair limits remain hard boundaries.",
 		"Session credit limits are soft; no token-to-credit or nano-AIU-to-credit conversion is performed.",
-		"Positive native Flow ceilings require estimates for every reserved role from complete same-configuration usage or an explicit approval; missing estimates block planning, never imply free work.",
-		"Saved duration includes host work and waiting. Cold estimates remain uncertain; overrides require a new exact plan approval.",
+		"Version 1 positive native Flow ceilings require estimates for every reserved role. Version 2 missing estimates do not imply free work or waive complete actual usage checks.",
+		"Saved duration includes host work and waiting. Version 1 hashes bind forecasts and their basis. Version 2 hashes bind the material authorization envelope, not advisory forecasts or their sampled basis; changing authority still requires a new approval.",
 	}}, nil
 }
 
@@ -218,7 +228,7 @@ func stageDeadline(flow core.ReviewFlow, dispatch core.GraphDispatch, validation
 		return flow.ExecutionDeadline()
 	}
 	deadline := flow.StagePlan.SubmissionDeadline(flow, dispatch.Recipient)
-	if validation && dispatch.Recipient == "CODER" {
+	if flow.StagePlan.Version == 1 && validation && dispatch.Recipient == "CODER" {
 		deadline = deadline.Add(time.Duration(flow.StagePlan.ValidationSeconds) * time.Second)
 	}
 	return deadline
@@ -232,7 +242,7 @@ func stageBudgetStop(graph core.TaskGraph, flow core.ReviewFlow, dispatch core.G
 		return "stage submission deadline reached; preserve partial output and remaining mandatory stages"
 	}
 	report := taskBudgetReport(graph, flow, now)
-	if flow.NativeLimit() > 0 && (report.CreditsStatus != "complete" ||
+	if flow.StagePlan.Version == 1 && flow.NativeLimit() > 0 && (report.CreditsStatus != "complete" ||
 		report.NanoAIURemaining <= flow.StagePlan.ReservedNanoAIU(flow.Repairs, dispatch.Recipient)) {
 		return "native stage budget reserved for remaining mandatory stages; no provider credit reservation is implied"
 	}
@@ -240,7 +250,7 @@ func stageBudgetStop(graph core.TaskGraph, flow core.ReviewFlow, dispatch core.G
 }
 
 func stageStartStop(flow core.ReviewFlow, role string, now time.Time) string {
-	if flow.StagePlan == nil {
+	if flow.StagePlan == nil || flow.StagePlan.Version == 2 {
 		return ""
 	}
 	minimum := int64(60)

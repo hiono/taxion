@@ -88,6 +88,8 @@ preview は DB・WAL・SHM に書き込みません。token は Task の現在�
 preview の `reviewerApprovalPolicy: same-contract-reviewer/v1` は、実 Coder evidence の検査後に作る派生 Reviewer Task の bundle 追加も承認します。Controller は同じ objective・scope・acceptance と、完全に一致する configuration を要求し、元 proposal reference と lifecycle 承認 hash を出典にして派生 Task 専用 bundle を追記します。元 Task の intake confirmation は変更せず、`sha256:` 形式の元参照がある場合は派生 Task ID に束縛した confirmation を作ります。intake receipt を持たない manifest 承認の v1 Task では receipt を創作せず、prefix なしの元 proposal reference をそのまま bundle に保持します。既存の bundle 検査はそのまま適用します。
 
 この承認は repair の契約変更や configuration の権限拡張を認めません。repair / re-review、tool、configuration の追加 Task ID などに既存の承認が必要なら、その条件を満たすまで停止します。
+元の Flow 契約と設定が既に許可する bounded repair は、その既存承認から認可します。
+packet を利用したという理由だけで修正を拒否したり、同じ契約の再承認を求めたりしません。
 
 ## Controller による逐次保存と検証
 

@@ -1018,6 +1018,14 @@ func TestNamespaceIsolation(t *testing.T) {
 	for _, role := range []string{"CODER", "REVIEWER"} {
 		t.Run(role, func(t *testing.T) {
 			config := testConfig(t, role)
+			document, err := core.CaptureContextDocument(core.ContextDocument{
+				ID: "original", Kind: "request", Source: "human:original", Version: "1",
+				Text: "Original source is actually readable inside the namespace.",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.ContextDocuments = []core.ContextDocument{document}
 			forbidden := filepath.Join(t.TempDir(), "host-secret-sentinel")
 			if err := os.WriteFile(forbidden, []byte("must-not-be-visible"), 0600); err != nil {
 				t.Fatal(err)
@@ -1076,6 +1084,14 @@ func checkNamespaceBoundary() error {
 	}
 	if err := os.WriteFile("/config/opencode/opencode.json", []byte("{}"), 0600); err == nil {
 		return fmt.Errorf("sealed permission configuration is writable")
+	}
+	source, err := os.ReadFile("/config/taxion-context/0000.txt")
+	original, readErr := readNativeContextChunks(source)
+	if err != nil || readErr != nil || original != "Original source is actually readable inside the namespace." {
+		return fmt.Errorf("original context is inaccessible inside the namespace: %v", err)
+	}
+	if err := os.WriteFile("/config/taxion-context/0000.txt", []byte("substituted"), 0600); err == nil {
+		return fmt.Errorf("original context is writable inside the namespace")
 	}
 	if err := os.WriteFile("/workspace/new.txt", []byte("probe"), 0600); (err != nil) != probe.ReadOnly {
 		return fmt.Errorf("OS worktree write boundary differs from role: %v", err)

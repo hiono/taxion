@@ -23,7 +23,9 @@ func recoverArtifactReviewCommand(args []string, output io.Writer) error {
 		fmt.Fprintln(fs.Output(), `JSON requires reconciliation:{flowId,dispatchId,actor,source,reason,evidence,
 noActiveExecutionConfirmed:true,acceptDeliveryUncertainty:true}, taskId, flowId,
 reviewRoot (fresh absolute root), deadline (fixed RFC3339), timeoutSeconds,
-maxNanoAiu and stageBudget:{version:1,...}. No Coder/repair allocation.
+maxNanoAiu and stageBudget:{version:2,...}. No Coder/repair allocation.
+Stage version 2 forecasts are advice within the fixed outer limits; version 1
+retains hard stage reservations. This is separate from reviewInput version.
 This combined operation is artifactSource-only. For a normal Flow with an accepted
 Coder and an unstarted Reviewer, use workflow reconcile-stopped --help and the
 existing continueFromDispatchId successor. A rejection lists confirmed failed

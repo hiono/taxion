@@ -16,16 +16,17 @@ import (
 )
 
 type IntakeRequest struct {
-	ObservationHash         string            `json:"observationHash,omitempty"`
-	ReviewInput             *core.ReviewInput `json:"reviewInput,omitempty"`
-	ReconciliationHash      string            `json:"reconciliationHash,omitempty"`
-	Request                 string            `json:"request"`
-	Task                    core.GraphTask    `json:"task"`
-	Actor                   string            `json:"actor"`
-	Source                  string            `json:"source"`
-	PlanningSelection       *config.Config    `json:"planningSelection,omitempty"`
-	PlanningReason          string            `json:"planningReason,omitempty"`
-	ConfigurationDecisionID string            `json:"configurationDecisionId,omitempty"`
+	ContextSources          []core.ContextDocument `json:"contextSources,omitempty"`
+	ObservationHash         string                 `json:"observationHash,omitempty"`
+	ReviewInput             *core.ReviewInput      `json:"reviewInput,omitempty"`
+	ReconciliationHash      string                 `json:"reconciliationHash,omitempty"`
+	Request                 string                 `json:"request"`
+	Task                    core.GraphTask         `json:"task"`
+	Actor                   string                 `json:"actor"`
+	Source                  string                 `json:"source"`
+	PlanningSelection       *config.Config         `json:"planningSelection,omitempty"`
+	PlanningReason          string                 `json:"planningReason,omitempty"`
+	ConfigurationDecisionID string                 `json:"configurationDecisionId,omitempty"`
 }
 
 type IntakeConfirmation struct {
@@ -148,6 +149,16 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 		}
 	}
 	task.Decisions = []core.TaskDecision{{ID: "intake:" + task.ID, Source: request.Source, Text: string(text)}}
+	for _, document := range request.ContextSources {
+		decision, err := core.ContextDocumentDecision(document, "context-source:"+task.ID+":"+document.ID)
+		if err != nil {
+			return core.GraphTask{}, err
+		}
+		task.Decisions = append(task.Decisions, decision)
+	}
+	if _, err := core.ContextDocumentsFromDecisions(task.Decisions); err != nil {
+		return core.GraphTask{}, err
+	}
 	if request.ReviewInput != nil {
 		if err := request.ReviewInput.Validate(); err != nil {
 			return core.GraphTask{}, err
@@ -301,6 +312,11 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		if decisionCount == 0 {
 			return fmt.Errorf("taxion: intake proposal lacks its original request")
 		}
+		contextSources, err := core.ContextDocumentsFromDecisions(task.Decisions)
+		if err != nil {
+			return err
+		}
+		decisionCount -= len(contextSources)
 		input, err := core.ReviewInputFromDecisions(task.Decisions)
 		if err != nil {
 			return err

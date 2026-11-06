@@ -14,7 +14,7 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
-func TestStoppedArtifactReviewerReusesValidationWithoutCoderOrInputReplay(t *testing.T) {
+func TestArtifactReviewerReusesValidationAfterPreparationFailureOrStop(t *testing.T) {
 	for _, prepared := range []bool{false, true} {
 		t.Run(fmt.Sprintf("prepared=%v", prepared), func(t *testing.T) {
 			testStoppedArtifactReviewerRecovery(t, prepared)
@@ -78,8 +78,30 @@ func testStoppedArtifactReviewerRecovery(t *testing.T, prepared bool) {
 	if prepared {
 		wantCalls = 1
 	}
-	if err == nil || old.Status != "STOPPED" || calls != wantCalls || old.Artifact.Validation.Status != "PASSED" {
+	wantStatus := "RUNNING"
+	if prepared {
+		wantStatus = "STOPPED"
+	}
+	if err == nil || old.Status != wantStatus || calls != wantCalls || old.Artifact.Validation.Status != "PASSED" {
 		t.Fatalf("preparation failure not reproduced: %+v %v", old, err)
+	}
+	if !prepared {
+		if old.RunnerID != "" || old.HandoffHeld() {
+			t.Fatal("preparation failure retained ownership or created a hold")
+		}
+		if err := os.Remove(reviewer.Instruction.Worktree); err != nil {
+			t.Fatal(err)
+		}
+		executeFlowDispatch(t, db, old, "APPROVE", true, selected)
+		completed, err := AdvanceReviewFlow(db, ledger, old.ID, request.Configuration)
+		if err != nil || completed.Status != "COMPLETED" || completed.ID != old.ID ||
+			len(completed.DispatchIDs) != 1 || completed.Budget.MaxCoderSessions != 0 {
+			t.Fatalf("same authorized Reviewer did not complete: %+v %v", completed, err)
+		}
+		if count, err := os.ReadFile(counter); err != nil || string(count) != "xx" {
+			t.Fatalf("input validation replayed or result validation omitted: %q %v", count, err)
+		}
+		return
 	}
 	state, _ = db.LoadWorkspace()
 	reviewer, _ = state.Graph.GraphDispatch(reviewer.ID)

@@ -9,8 +9,8 @@ import (
 )
 
 func (s *Store) AppendRequestRecord(id, kind, payload string) error {
-	if strings.TrimSpace(id) == "" || kind != "planning" && kind != "execution" {
-		return fmt.Errorf("request record requires an ID and planning or execution kind")
+	if strings.TrimSpace(id) == "" || kind != "planning" && kind != "execution" && kind != "context-source" {
+		return fmt.Errorf("request record requires an ID and planning, execution or context-source kind")
 	}
 	if !json.Valid([]byte(payload)) {
 		return fmt.Errorf("request record requires a valid JSON payload")

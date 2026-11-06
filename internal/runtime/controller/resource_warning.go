@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
@@ -31,7 +32,7 @@ func resourceWarning(state store.Workspace, dispatch core.GraphDispatch, now tim
 		reserved = flow.StagePlan.ReservedSeconds(flow.Repairs, dispatch.Recipient) + flow.StagePlan.ValidationSeconds
 	}
 	// Conservative remaining-work estimates are not a claim about model progress.
-	needed := time.Duration(roleSeconds+reserved+300+60) * time.Second
+	needed := time.Duration(min(roleSeconds+reserved+300+60, math.MaxInt64/int64(time.Second))) * time.Second
 	report := taskBudgetReport(state.Graph, flow, now)
 	timeShort := flow.ExecutionDeadline().Sub(now) <= needed
 	usageShort := flow.NativeLimit() > 0 && report.CreditsStatus == "complete" &&
@@ -56,7 +57,7 @@ func resourceWarning(state store.Workspace, dispatch core.GraphDispatch, now tim
 		ExecutionAuthorized  bool             `json:"executionAuthorized"`
 		Action               string           `json:"action"`
 	}{1, flow.ID, dispatch.ID, dispatch.RuntimeSessionID, timeShort, usageShort, report, deadline, true, false,
-		"Ask once now for time and any observed same-unit budget shortfall, including remaining work, validation/review, repair, preservation and response wait. Use workflow budget --file for external cumulative spending and workflow extend --preview for exact live Flow approval. Do not cancel valid execution while awaiting consent. No automatic top-up, usage reset, unit conversion or caller-deadline override. Stop safely only at an actual unextended hard boundary."})
+		"Assess actual progress and remaining mandatory work. For a version 2 plan, first reallocate forecasts within the approved outer envelope; an estimate alone does not require new consent. If additional resources are still needed, ask once now for time and any observed same-unit budget shortfall, including validation/review, repair, preservation and response wait. Use workflow budget --file for external cumulative spending and workflow extend --preview for exact live Flow approval. Do not cancel valid execution while awaiting consent. No automatic top-up, usage reset, unit conversion or caller-deadline override. Stop safely only at an actual unextended hard boundary."})
 	if err != nil {
 		return nil, "", err
 	}

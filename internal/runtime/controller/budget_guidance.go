@@ -56,7 +56,7 @@ func (c *Controller) ObserveAccountQuota(ctx context.Context, dispatchID string)
 	if policy == nil || policy.Mode != "account" || !policy.AccountReadApproved {
 		return nil, fmt.Errorf("taxion: quota observation requires approved account guidance; provider-stop does not require numeric balance")
 	}
-	if _, err := c.checkExecutionConfiguration(state.Graph, dispatchID); err != nil {
+	if _, err := c.checkAccountConfiguration(state.Graph, dispatchID); err != nil {
 		return nil, err
 	}
 	observation, readErr := c.prepareBudgetGuidance(ctx, dispatch, "")
@@ -77,7 +77,7 @@ func (c *Controller) ObserveAccountQuota(ctx context.Context, dispatchID string)
 			return nil, fmt.Errorf("taxion: quota observation Flow changed or expired during the read; result withheld")
 		}
 	}
-	if _, err := c.checkExecutionConfiguration(after.Graph, dispatchID); err != nil {
+	if _, err := c.checkAccountConfiguration(after.Graph, dispatchID); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {

@@ -471,6 +471,26 @@ func testApprovedRequest(t *testing.T, resume bool, externalMode ...string) {
 				strings.Contains(received, "部分一致です。") || strings.Contains(received, "検索機能をつけて") {
 				t.Fatal("role context lost its approved plan or retained raw conversation", dispatch.Recipient)
 			}
+			sourceState, err := db.LoadWorkspace()
+			if err != nil {
+				return nil, err
+			}
+			documents, err := controller.DispatchContextDocuments(sourceState, dispatch)
+			if err != nil {
+				return nil, err
+			}
+			for _, original := range []string{"検索機能をつけて", "部分一致です。"} {
+				if !slices.ContainsFunc(documents, func(document core.ContextDocument) bool {
+					return document.Kind == "request" && document.Text == original
+				}) {
+					t.Fatal("independent role cannot consult original request or clarification", dispatch.Recipient, original)
+				}
+			}
+			if !slices.ContainsFunc(documents, func(document core.ContextDocument) bool {
+				return document.Kind == "design" && strings.Contains(document.Text, "検索の一致条件を教えてください。")
+			}) {
+				t.Fatal("public Planner questions were reduced to a summary")
+			}
 			if dispatch.Recipient == "REVIEWER" &&
 				(!strings.Contains(received, "Implemented case-insensitive search; checked missing and Japanese queries.") ||
 					!strings.Contains(received, `"reviewDiff"`) || !strings.Contains(received, "+func Search")) {
@@ -672,9 +692,13 @@ func TestSearch(t *testing.T) {
 		gitTest(t, root, "rev-parse", "HEAD") != coder.Instruction.BaselineSHA {
 		t.Fatal("request changed commit identity or reviewed another tree")
 	}
-	var planning, requestRecords int
+	var planning, requestRecords, sourceRecords int
 	for _, record := range state.Records.Requests {
 		if record.RequestID != state.Records.Operation.ID {
+			continue
+		}
+		if record.Kind == "context-source" {
+			sourceRecords++
 			continue
 		}
 		requestRecords++
@@ -687,6 +711,9 @@ func TestSearch(t *testing.T) {
 	}
 	if planning != 2 {
 		t.Fatal("Planner conversation or usage receipts missing", planning)
+	}
+	if sourceRecords != 4 {
+		t.Fatal("request, clarification or displayed Planner source missing", sourceRecords)
 	}
 	wantRecords := 4
 	if resume {

@@ -99,6 +99,34 @@ func refreshArtifactPlan(t *testing.T, db *store.Store, request *ReviewFlowReque
 	request.StagePlanHash = preview.Plan.Hash
 }
 
+func TestAdvisoryArtifactValidationUsesOuterDeadline(t *testing.T) {
+	for _, expires := range []bool{false, true} {
+		t.Run(fmt.Sprint("expires=", expires), func(t *testing.T) {
+			db, ledger, request, _ := artifactFixture(t, []string{"sleep 2; test -s internal/input-00.txt"}, false)
+			request.StageBudget.Version = 2
+			request.StageBudget.ValidationSeconds, request.StageBudget.ReviewSeconds = 1, 3600
+			request.TimeoutSeconds = 60
+			if expires {
+				request.TimeoutSeconds = 1
+			}
+			refreshArtifactPlan(t, db, &request)
+			flow, err := StartReviewFlow(db, ledger, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			flow, err = ValidateReviewFlowInput(t.Context(), db, ledger, flow.ID, request.Configuration)
+			if expires {
+				if err == nil || flow.Status != "STOPPED" || flow.StopCode != "BUDGET_STOP" || len(flow.DispatchIDs) != 0 {
+					t.Fatal("artifact exceeded its actual deadline or issued a Reviewer", flow, err)
+				}
+			} else if err != nil || flow.Artifact.Validation.Status != "PASSED" || len(flow.DispatchIDs) != 1 ||
+				flow.Artifact.Validation.FinishedAt.Sub(flow.Artifact.Validation.StartedAt) <= time.Second {
+				t.Fatal("validation was stopped at its forecast rather than the hard deadline", flow, err)
+			}
+		})
+	}
+}
+
 func TestArtifactInputReachesIndependentReviewWithoutCoder(t *testing.T) {
 	for _, committed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("baselineEqualsTarget=%v", committed), func(t *testing.T) {

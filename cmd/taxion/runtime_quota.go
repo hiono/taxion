@@ -82,11 +82,7 @@ func runtimeQuotaCmd(args []string, output io.Writer) error {
 	}
 	ctx, cancel := signalContext(*timeout)
 	defer cancel()
-	worker, err := newDispatchWorker(ctx, db, dispatch, copilot.Config{
-		Role: dispatch.Recipient, WorkingDirectory: dispatch.Instruction.Worktree,
-		SystemPrompt: "Read-only account quota observation. No model session or prompt is authorized.",
-		CLIPath:      *cli, BaseDirectory: *baseDirectory,
-	}, false, false, "")
+	worker, err := copilot.NewForQuota(dispatch, *cli, *baseDirectory)
 	if err != nil {
 		return err
 	}
