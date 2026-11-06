@@ -26,6 +26,7 @@ Reviewer のモデル回答が保存されても、通信切断により Control
 | `FAILED`、`APPROVE` または `BLOCKED` | 完了した native 履歴があっても対象外 | 拒否する。今回の負の指摘記録から一般化しない |
 | `FAILED`、原文・実行 anchor・期限・候補のいずれかが不明または不一致 | 回答ファイルや申告で不足を補わない | 拒否し、元の履歴を保存する |
 | 同じ Dispatch の追記済み回答 | 二重処理しない | 既存記録を確認する |
+| 保存回答の観測が timeout/cancel、または処理・出力に失敗 | operation phase と追記境界を明示し、秘密を含む native/SQL/Git error は表示しない | `NOT_WRITTEN` は追記前または rollback を証明できた場合のみ、commit の成否が不明なら `UNKNOWN`、成功後の出力失敗も `COMMITTED` |
 
 ### 時刻・状態を組み合わせる判断
 
@@ -50,6 +51,7 @@ Reviewer のモデル回答が保存されても、通信切断により Control
 | T10 | 保存済み延長が存在する | 延長後期限と現在の保存済み修正回数から `D` を求め、T1〜T9を同じ規則で評価する |
 | T11 | 複数の時刻条件が不成立 | 失敗した比較をすべて返す。後続の適格性は `NOT_EVALUATED` |
 | T12 | preview 後の native 履歴・workspace 変化、二重追記、旧版で新条件の記録を読む | 適用・再処理・旧版読取りをそれぞれ拒否し、元履歴を保持する |
+| T13 | operation observation timeout/cancel、store append が未開始、証明済み rollback、または commit 結果不明 | static phase/cause と `NOT_WRITTEN` / `UNKNOWN` / `COMMITTED` を返す。`UNKNOWN` は記録を調べ、同じ hash だけで配送・保存済みと判断しない |
 
 時刻の同時成立・不成立は共通 `FailedReviewTiming` で Controller と保存時に評価する。
 T1〜T6・T8・T11 の比較は `TestFailedReviewTimingSeparatesAnswerFromShutdown`、
@@ -130,6 +132,18 @@ DB の table schema は変えず、任意の Records 配列を追加する。
 失敗後の shutdown を持つ追記記録は v0.7.24 の読取り条件に適合しない。
 その記録を保存した DB を旧版へ渡さず、更新前の整合バックアップを別配置で使う。
 既存の `recover`、`recover-review`、`accept-saved-review` の状態条件は維持する。
+
+追記の Controller observation は既定30秒、正の値で最大5分とし、CLI の
+`--observation-timeout` で指定する。呼出し元のより早い deadline/cancellation が優先される。
+context は Controller lock の取得前に開始し、native read、prepared Git verifier、
+初回 Store read と append transaction へ伝播する。cancellable SQL/native/Git 処理を含む
+Controller observation の上限であり、CLI の file/store read、DB open/migration、
+Copilot runtime setup、operation lease、cleanup/output、および Controller/Store の
+in-process mutex 待ちは対象外である。
+したがってコマンド全体の厳密な wall-clock 上限とは主張しない。
+失敗 JSON は versioned static phase/cause/message と persistence code だけを出し、
+内部 error identity は Unwrap で保持する。supplement の canonical hash と保存 schema、
+既存 `expectedHash` は変えない。
 
 ## Status
 

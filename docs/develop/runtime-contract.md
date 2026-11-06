@@ -153,6 +153,17 @@ append-only `context-source` record に固定する。既知の credential patte
 停止証拠として分離する。shutdown も保存済み提出期限前・観測時刻以前であることと、
 後続の実行がないことを要求する。時刻拒否は個別の失敗比較と採用期限を JSON で返す。
 失敗履歴を変更せず、モデル送信、host 検証再実行、品質受理、owner 回収は行わない。
+`--observation-timeout` は既定30秒、正の値で最大5分であり、より早い呼出し元の
+deadline/cancellation が優先される。context は Controller lock 前から observation に適用し、
+native read、prepared Git verification、初回 Store read と append transaction へ伝播する。
+これは厳密な command wall-clock cap ではない。CLI の file/store read、Store open/migration、
+Copilot runtime setup、operation lease、
+cleanup/output と Controller/Store mutex wait は上限外である。
+失敗は versioned な静的 phase/cause/message と `NOT_WRITTEN`、`UNKNOWN`、`COMMITTED` を返す。
+supplement の書込み前、または authoritative rollback proof がある場合だけ `NOT_WRITTEN` とし、
+commit 不明は `UNKNOWN` とする。`UNKNOWN` は `records show` 等で記録を確認し、
+同 hash の再利用を保存確認の代わりにしない。成功 commit 後の出力失敗も `COMMITTED` のまま。
+内部 error identity は Unwrap で保持するが、native/SQL/Git の原文は表示しない。
 稼働中は `workflow extend` の一つの承認判断を `ReviewFlow.extensions` と
 `RESOURCE_EXTENDED` へ原子的に追記する。元の期限・予算・工程計画を変更せず、
 `ExecutionDeadline()` と `NativeLimit()` で有効値を求める。

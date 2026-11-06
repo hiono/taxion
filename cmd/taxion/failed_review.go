@@ -15,16 +15,36 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
-func recordFailedReviewCommand(ctx context.Context, args []string, output io.Writer) error {
+func recordFailedReviewCommand(ctx context.Context, args []string, output io.Writer) (resultErr error) {
+	phase := "cli-setup"
+	persistence := "NOT_WRITTEN"
+	var closers []func() error
+	diagnosticWritten := false
+	defer func() {
+		if err := closeFailedReviewResources(&closers); err != nil {
+			resultErr = failedReviewCleanupFailure(resultErr, persistence, err)
+			diagnosticWritten = false
+		}
+		if resultErr != nil && !errors.Is(resultErr, flag.ErrHelp) && !diagnosticWritten {
+			var failure *controller.FailedReviewOperationError
+			if !errors.As(resultErr, &failure) {
+				failure = controller.NewFailedReviewOperationError(phase, persistence, resultErr)
+			}
+			resultErr = writeFailedReviewDiagnostic(output, failure)
+		}
+	}()
 	fs := flag.NewFlagSet("workflow record-failed-review", flag.ContinueOnError)
-	fs.SetOutput(output)
+	fs.SetOutput(io.Discard)
 	file := fs.String("file", "", "JSON sourced decision for the exact failed Reviewer")
 	preview := fs.Bool("preview", false, "observe and verify without changing the workspace")
+	timeout := fs.Duration("observation-timeout", controller.DefaultFailedReviewObservationTimeout, "maximum saved-review observation time (positive, at most 5m)")
 	cli := fs.String("cli", "", "original Copilot CLI path")
 	base := fs.String("base-directory", "", "original Copilot base directory")
 	fs.Usage = func() {
 		fmt.Fprintln(output, "Usage of workflow record-failed-review:")
+		fs.SetOutput(output)
 		fs.PrintDefaults()
+		fs.SetOutput(io.Discard)
 		fmt.Fprintln(output, `
 JSON requires flowId, dispatchId, expectedRunnerId (exact saved value, possibly ""),
 previousProcessStopped:true, actor, source, reason and unique non-secret evidence.
@@ -38,6 +58,16 @@ durable execution observations. Caller-authored answer files are not accepted.
 Answer and turn end must not follow the original verified FAILED result receipt.
 Routine shutdown may follow that failure, but must precede the saved submission
 deadline and not be in the future, with no later main-agent or tool execution.
+--observation-timeout bounds Controller observation (default 30s; positive, at
+most 5m) and never extends an earlier caller deadline. The bound starts before
+the Controller lock and covers cancellable native, Git and SQLite transaction
+work. Controller/store mutex waits may exceed it. CLI file/store reads, store open/migration,
+Copilot runtime setup, operation lease acquisition and cleanup/output are outside this bound; no exact
+full-command wall-clock cap is promised. Setup and operation failures emit
+versioned, redacted phase and persistence diagnostics. UNKNOWN requires record
+inspection; matching expectedHash alone does not establish delivery.
+Persistence codes are NOT_WRITTEN, UNKNOWN and COMMITTED; a committed append
+remains COMMITTED if later output fails.
 Timing rejection prints non-secret JSON with the effective submission deadline,
 its source, reserved seconds, failed-result receipt time and failedChecks.
 remainingEligibility:NOT_EVALUATED means later identity/answer/tree checks did not run.
@@ -53,22 +83,34 @@ APPROVE, BLOCKED, restored workspaces and released/changed review trees are reje
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *timeout <= 0 || *timeout > controller.MaxFailedReviewObservationTimeout {
+		phase = "configuration"
+		return fmt.Errorf("observation timeout must be positive and at most five minutes")
+	}
 	if *file == "" || fs.NArg() != 0 {
 		return fmt.Errorf("workflow record-failed-review requires --file and no positional arguments")
 	}
+	phase = "file-open"
 	input, err := os.Open(*file)
 	if err != nil {
 		return err
 	}
-	defer input.Close()
+	phase = "input-decode"
 	var request controller.FailedReviewRequest
-	if err := core.DecodeGraphInput(input, &request); err != nil {
-		return err
+	decodeErr := core.DecodeGraphInput(input, &request)
+	closeErr := input.Close()
+	if decodeErr != nil {
+		return decodeErr
+	}
+	if closeErr != nil {
+		phase = "cleanup"
+		return closeErr
 	}
 	if !*preview && request.ExpectedHash == "" {
 		return fmt.Errorf("workflow record-failed-review requires expectedHash from --preview")
 	}
 	var db *store.Store
+	phase = "store-open"
 	if *preview {
 		db, err = store.OpenReadOnly(workspaceDBPath())
 	} else {
@@ -80,14 +122,16 @@ APPROVE, BLOCKED, restored workspaces and released/changed review trees are reje
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	closers = append(closers, db.Close)
 	if !*preview {
+		phase = "operation-lease"
 		lease, err := db.LockOperation()
 		if err != nil {
 			return err
 		}
-		defer lease.Close()
+		closers = append(closers, lease.Close)
 	}
+	phase = "initial-read"
 	state, err := db.LoadWorkspace()
 	if err != nil {
 		return err
@@ -96,28 +140,83 @@ APPROVE, BLOCKED, restored workspaces and released/changed review trees are reje
 	if !ok {
 		return fmt.Errorf("workflow record-failed-review requires an existing Dispatch")
 	}
+	phase = "runtime-setup"
 	worker, err := copilot.NewForFailedReview(dispatch, *cli, *base)
 	if err != nil {
 		return err
 	}
-	defer worker.Close()
+	closers = append(closers, worker.Close)
 	control, err := controller.New(db, worker)
 	if err != nil {
 		return err
 	}
-	report, err := control.RecordFailedReview(ctx, request, *preview)
-	return writeFailedReviewReport(output, report, err)
+	phase = "observation"
+	report, err := control.RecordFailedReviewWithTimeout(ctx, request, *preview, *timeout)
+	if report.StateChanged {
+		persistence = string(store.FailedReviewCommitted)
+	}
+	var failure *controller.FailedReviewOperationError
+	if errors.As(err, &failure) {
+		persistence = failure.Persistence
+	}
+	if cleanupErr := closeFailedReviewResources(&closers); cleanupErr != nil {
+		return failedReviewCleanupFailure(err, persistence, cleanupErr)
+	}
+	resultErr = writeFailedReviewReport(output, report, err)
+	diagnosticWritten = err != nil
+	return resultErr
+}
+
+func failedReviewCleanupFailure(primaryErr error, persistence string, cleanupErr error) error {
+	cleanup := controller.NewFailedReviewOperationError("cleanup", persistence, cleanupErr)
+	var primary *controller.FailedReviewOperationError
+	if errors.As(primaryErr, &primary) {
+		copy := *primary
+		copy.CleanupFailed = true
+		return errors.Join(&copy, cleanup)
+	}
+	return controller.NewFailedReviewOperationError("cleanup", persistence, errors.Join(primaryErr, cleanupErr))
+}
+
+func closeFailedReviewResources(closers *[]func() error) error {
+	var errs []error
+	for index := len(*closers) - 1; index >= 0; index-- {
+		errs = append(errs, (*closers)[index]())
+	}
+	*closers = nil
+	return errors.Join(errs...)
 }
 
 func writeFailedReviewReport(output io.Writer, report controller.FailedReviewReport, err error) error {
 	var timing *controller.FailedReviewTimingError
 	if errors.As(err, &timing) {
-		return errors.Join(err, json.NewEncoder(output).Encode(timing))
+		if encodeErr := json.NewEncoder(output).Encode(timing); encodeErr != nil {
+			return errors.Join(err, controller.NewFailedReviewOperationError("output", "NOT_WRITTEN", encodeErr))
+		}
+		return err
 	}
 	if err != nil {
-		return err
+		var failure *controller.FailedReviewOperationError
+		if !errors.As(err, &failure) {
+			failure = controller.NewFailedReviewOperationError("observation", "NOT_WRITTEN", err)
+		}
+		return writeFailedReviewDiagnostic(output, failure)
 	}
 	encoder := json.NewEncoder(output)
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(report)
+	if err := encoder.Encode(report); err != nil {
+		persistence := "NOT_WRITTEN"
+		if report.StateChanged {
+			persistence = "COMMITTED"
+		}
+		return controller.NewFailedReviewOperationError("output", persistence, err)
+	}
+	return nil
+}
+
+func writeFailedReviewDiagnostic(output io.Writer, failure *controller.FailedReviewOperationError) error {
+	if err := json.NewEncoder(output).Encode(failure); err != nil {
+		return errors.Join(failure, controller.NewFailedReviewOperationError("output", failure.Persistence, err))
+	}
+	return failure
 }

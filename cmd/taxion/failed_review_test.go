@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime/controller"
+	"github.com/hiono/taxion/internal/store"
 )
 
 func TestFailedReviewHelpSeparatesNegativeRecordFromQualityRecovery(t *testing.T) {
@@ -18,7 +21,7 @@ func TestFailedReviewHelpSeparatesNegativeRecordFromQualityRecovery(t *testing.T
 	if err := workflowCommand(t.Context(), []string{"record-failed-review", "--help"}, &output); !errors.Is(err, flag.ErrHelp) {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"REQUEST_CHANGES", "expectedHash", "FAILED", "remain unchanged", "No model send", "RUNNING recovery", "CANCELLED", "Routine shutdown may follow", "failedChecks", "NOT_EVALUATED"} {
+	for _, text := range []string{"REQUEST_CHANGES", "expectedHash", "FAILED", "remain unchanged", "No model send", "RUNNING recovery", "CANCELLED", "Routine shutdown may follow", "failedChecks", "NOT_EVALUATED", "observation-timeout", "NOT_WRITTEN", "UNKNOWN", "COMMITTED"} {
 		if !strings.Contains(output.String(), text) {
 			t.Fatalf("help omitted %q", text)
 		}
@@ -26,6 +29,96 @@ func TestFailedReviewHelpSeparatesNegativeRecordFromQualityRecovery(t *testing.T
 	}
 	if err := workflowCommand(t.Context(), []string{"record-failed-review"}, &output); err == nil {
 		t.Fatal("missing explicit request accepted")
+	}
+}
+
+func TestFailedReviewSetupFailureIsRedactedAndPhased(t *testing.T) {
+	var output bytes.Buffer
+	secretPath := "/private/path-that-must-not-be-reported.json"
+	err := recordFailedReviewCommand(t.Context(), []string{"--file", secretPath, "--preview"}, &output)
+	var failure *controller.FailedReviewOperationError
+	if !errors.As(err, &failure) || failure.Phase != "file-open" || failure.Persistence != "NOT_WRITTEN" {
+		t.Fatal("setup failure lacks safe diagnostics", err)
+	}
+	if strings.Contains(output.String(), secretPath) || strings.Contains(output.String(), "no such file") {
+		t.Fatal("diagnostic exposed a native setup error", output.String())
+	}
+	var decoded controller.FailedReviewOperationError
+	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil ||
+		decoded.Version != 1 || decoded.Phase != failure.Phase || decoded.Persistence != "NOT_WRITTEN" {
+		t.Fatal("invalid failure JSON", output.String(), err)
+	}
+}
+
+func TestFailedReviewCLISetupUsesSyntheticStoreAndEmitsPhaseJSON(t *testing.T) {
+	previous := storePath
+	storePath = filepath.Join(t.TempDir(), "workspace", "ledger.json")
+	t.Cleanup(func() { storePath = previous })
+	if err := os.MkdirAll(filepath.Dir(workspaceDBPath()), 0700); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(workspaceDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	requestPath := filepath.Join(t.TempDir(), "decision.json")
+	request := `{"flowId":"synthetic-flow","dispatchId":"synthetic-dispatch","expectedRunnerId":"","previousProcessStopped":true,"actor":"test","source":"test:synthetic","reason":"exercise public CLI setup","evidence":["synthetic-stop"]}`
+	if err := os.WriteFile(requestPath, []byte(request), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err = workflowCommand(t.Context(), []string{"record-failed-review", "--file", requestPath, "--preview"}, &output)
+	var failure *controller.FailedReviewOperationError
+	if !errors.As(err, &failure) || failure.Phase != "initial-read" ||
+		failure.Persistence != "NOT_WRITTEN" || strings.Contains(output.String(), requestPath) {
+		t.Fatal("synthetic CLI setup failure was not safely diagnosed", output.String(), err)
+	}
+}
+
+func TestFailedReviewTimeoutOptionIsBounded(t *testing.T) {
+	for _, value := range []string{"0", "-1s", "5m1s"} {
+		var output bytes.Buffer
+		err := recordFailedReviewCommand(t.Context(), []string{"--observation-timeout", value}, &output)
+		var failure *controller.FailedReviewOperationError
+		if !errors.As(err, &failure) || failure.Phase != "configuration" || failure.Persistence != "NOT_WRITTEN" {
+			t.Fatalf("invalid timeout %q lacks safe configuration diagnostics: %v", value, err)
+		}
+		if strings.Contains(output.String(), value) {
+			t.Fatalf("invalid timeout value leaked into diagnostics: %s", output.String())
+		}
+	}
+}
+
+func TestFailedReviewOutputFailureRemainsCommitted(t *testing.T) {
+	err := writeFailedReviewReport(failedReviewErrorWriter{}, controller.FailedReviewReport{StateChanged: true}, nil)
+	var failure *controller.FailedReviewOperationError
+	if !errors.As(err, &failure) || failure.Phase != "output" || failure.Persistence != "COMMITTED" {
+		t.Fatal("output failure lost committed persistence state", err)
+	}
+	err = writeFailedReviewReport(failedReviewErrorWriter{}, controller.FailedReviewReport{}, nil)
+	if !errors.As(err, &failure) || failure.Phase != "output" || failure.Persistence != "NOT_WRITTEN" {
+		t.Fatal("preview output failure claimed persistence", err)
+	}
+}
+
+type failedReviewErrorWriter struct{}
+
+func (failedReviewErrorWriter) Write([]byte) (int, error) {
+	return 0, errors.New("private output failure")
+}
+
+func TestFailedReviewCleanupRetainsPrimaryPhase(t *testing.T) {
+	primary := controller.NewFailedReviewOperationError("native-read", "NOT_WRITTEN", errors.New("private native failure"))
+	err := failedReviewCleanupFailure(primary, "NOT_WRITTEN", errors.New("private cleanup failure"))
+	var output bytes.Buffer
+	_ = writeFailedReviewReport(&output, controller.FailedReviewReport{}, err)
+	var diagnostic controller.FailedReviewOperationError
+	if json.Unmarshal(output.Bytes(), &diagnostic) != nil || diagnostic.Phase != "native-read" ||
+		!diagnostic.CleanupFailed || strings.Contains(output.String(), "private") || primary.CleanupFailed {
+		t.Fatalf("cleanup obscured or mutated the primary diagnostic: %s", output.String())
 	}
 }
 
@@ -52,7 +145,13 @@ func TestFailedReviewTimingRejectionEmitsDiagnosticsAndRetainsError(t *testing.T
 	}
 	output.Reset()
 	unrelated := errors.New("unrelated rejection")
-	if err := writeFailedReviewReport(&output, controller.FailedReviewReport{}, unrelated); err != unrelated || output.Len() != 0 {
-		t.Fatal("unrelated rejection changed behavior", output.String(), err)
+	if err := writeFailedReviewReport(&output, controller.FailedReviewReport{}, unrelated); !errors.Is(err, unrelated) || output.Len() == 0 {
+		t.Fatal("unrelated rejection lacks safe failure diagnostics", output.String(), err)
+	}
+	var operation controller.FailedReviewOperationError
+	if err := json.Unmarshal(output.Bytes(), &operation); err != nil ||
+		operation.Phase != "observation" || operation.Persistence != "NOT_WRITTEN" ||
+		strings.Contains(output.String(), "unrelated rejection") {
+		t.Fatal("generic failure diagnostic was unsafe", output.String(), err)
 	}
 }

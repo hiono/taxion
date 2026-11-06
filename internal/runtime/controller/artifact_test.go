@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,9 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 `)}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if slices.Contains(owners, "native-cli") {
+		selected.Config.Runtime.CredentialRef = "copilot:logged-in"
 	}
 	decision := core.TaskDecision{ID: selected.Config.Execution.ApprovalRef, Source: "human:input-review",
 		Text: string(mustFlowJSON(t, config.Approval{

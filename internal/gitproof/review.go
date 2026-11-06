@@ -169,7 +169,15 @@ func commonDirectory(worktree string) (string, error) {
 // VerifyPreparedReviewWorktree preserves the real index and files. Snapshot
 // preparation leaves HEAD and the index at baseline, with the target in files.
 func VerifyPreparedReviewWorktree(dispatch core.GraphDispatch, source string) error {
-	return verifyPreparedReviewWorktree(context.Background(), dispatch, source)
+	return VerifyPreparedReviewWorktreeContext(context.Background(), dispatch, source)
+}
+
+func VerifyPreparedReviewWorktreeContext(ctx context.Context, dispatch core.GraphDispatch, source string) error {
+	err := verifyPreparedReviewWorktree(ctx, dispatch, source)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 func verifyPreparedReviewWorktree(ctx context.Context, dispatch core.GraphDispatch, source string) error {

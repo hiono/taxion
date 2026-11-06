@@ -742,6 +742,10 @@ CLI は local-first とする。`taxion serve` は HTTP API、`taxion acp` は s
 ```
 
 識別子・範囲・確認文は例であり、実際の権限や証拠の代用にならない。
+`scope` は文字列の JSON 配列であり、文字列単体やオブジェクトではない。
+各要素は元の worktree からの相対パスで、単一ファイル、配下を含むディレクトリ、
+または Go の `filepath.Match` パターンを指定する。`*` はディレクトリ区切りを越えない。
+空配列を認めず、既存の禁止パスと参照制限を優先する。
 既存の処理記録がある場合、`flowId` と最新の `dispatchId` を省略できない。
 処理記録がない入力では両方を省略でき、前工程の実行を要求しない。
 `configuration` は明示した設定の JSON で、省略時は保存済み指示の設定を使う。
@@ -842,6 +846,30 @@ routine shutdown は失敗記録より後でもよいが、turn end 以後、同
 `failedResultSource:verified-result.at` は Dispatch の `updatedAt` や実行中の failed event とは異なる。
 `remainingEligibility:NOT_EVALUATED` は、後続の実行 anchor・回答・tree の照合が未実施という意味である。
 時刻診断だけから全適格性を断定せず、時刻・正式結果・履歴を書き換えて再試行しない。
+
+`--observation-timeout DURATION` は Controller observation の上限で、省略時は30秒、
+指定値は正で最大5分である。呼出し元 context の deadline/cancellation が先ならそちらを守り、
+元の Flow 提出期限や実行 eligibility は延長しない。上限は Controller lock 前から始まり、
+native read、prepared Git verifier、初回 Store read と append transaction を対象にする。
+CLI file/store read、Store open/migration、Copilot runtime setup、apply 時の operation lease、
+cleanup/output、Controller/Store の mutex wait は
+範囲外なので、コマンド全体の厳密な wall-clock cap ではない。
+
+その他の失敗も stdout に version 1 の静的 `code`、`phase`、`cause`、`message`、
+`persistence` を持つ非秘密 JSON を返す。`NOT_WRITTEN` は追記前または rollback を証明できた場合、
+`COMMITTED` は commit 成功後（後続 output が失敗しても同じ）を表す。
+commit error 等で結果不明なら `UNKNOWN` であり、records を調査する。
+一致する `expectedHash` だけでは保存済みとは判断せず、診断を見て自動 retry しない。
+内部 error identity は保持するが、native/SQL/Git の生 error は出力しない。
+Controller 内の失敗では `observationTimeout`、実際に採用した `effectiveDeadline`、
+`elapsedMilliseconds` も確認できる。後続の cleanup も失敗した場合は元の `phase` を
+保持し、`cleanupFailed:true` を付ける。既知の安全な拒否理由は `failed-review-rejected`
+として返し、任意の native error や入力値をその理由へ転載しない。
+
+Dispatch 結果の `nextTransition` は TaskStatus であり、次の作業を説明する自由文ではない。
+通常・strict・bound の結果 schema は同じ状態値を要求する。説明は `workReport` または
+`resumeCondition` に書く。識別子・状態が指示と合わない場合、検証エラーは不一致の
+フィールド名を示し、提出された値は出力しない。
 
 返された `supplement.answer` と非実行・品質未受理の表示を確認し、実際に承認した場合だけ
 その `hash` を同じ JSON の `expectedHash` に追加して `--preview` なしで実行する。

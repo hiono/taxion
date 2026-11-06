@@ -1,6 +1,8 @@
 package store
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -182,6 +184,7 @@ func TestOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
+
 	if _, err := s.Enqueue("evidence.bound", `{"sha":"abc"}`); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -201,5 +204,84 @@ func TestOutbox(t *testing.T) {
 	}
 	if len(claimed) != 1 || claimed[0].Type != "evidence.bound" {
 		t.Fatalf("expected one remaining entry, got %+v", claimed)
+	}
+}
+
+func TestFailedReviewContextTransactionsClassifyPrewriteFailures(t *testing.T) {
+	s := openTest(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.LoadWorkspaceContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled initial read lost cancellation identity: %v", err)
+	}
+
+	outcome, err := s.AppendFailedReviewSupplementContext(context.Background(), "stale-state-hash", &FailedReviewSupplement{})
+	if err == nil || outcome != FailedReviewNotWritten {
+		t.Fatalf("pre-write conflict was not safely classified: outcome=%s err=%v", outcome, err)
+	}
+}
+
+func TestFailedReviewCancelledMutexWaitNeverWrites(t *testing.T) {
+	s := openTest(t)
+	before, err := s.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	s.mu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		outcome, err := s.AppendFailedReviewSupplementContext(ctx, "", &FailedReviewSupplement{})
+		if outcome != FailedReviewNotWritten {
+			done <- fmt.Errorf("cancelled wait persistence=%s: %w", outcome, err)
+			return
+		}
+		done <- err
+	}()
+	cancel()
+	s.mu.Unlock()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled mutex wait lost cancellation identity: %v", err)
+	}
+	after, err := s.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeHash, _ := core.CanonicalSHA256(before)
+	afterHash, _ := core.CanonicalSHA256(after)
+	if beforeHash != afterHash {
+		t.Fatal("cancelled mutex wait changed saved evidence")
+	}
+}
+
+func TestFailedReviewTransactionCancellationDoesNotCommit(t *testing.T) {
+	s := openTest(t)
+	before, err := s.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	result := workspaceUpdateResult{}
+	s.mu.Lock()
+	err = s.updateWorkspaceLocked(ctx, func(state *Workspace) error {
+		state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{
+			ID: "cancelled-write", Title: "must not persist", Repo: "owner/repo", CreatedAt: time.Now().UTC(),
+		})
+		cancel()
+		return nil
+	}, &result)
+	s.mu.Unlock()
+	if err == nil {
+		t.Fatal("cancelled transaction claimed commit success")
+	}
+	after, err := s.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeHash, _ := core.CanonicalSHA256(before)
+	afterHash, _ := core.CanonicalSHA256(after)
+	if beforeHash != afterHash {
+		t.Fatalf("cancelled transaction changed evidence: rollbackProven=%v", result.rollbackProven)
 	}
 }
