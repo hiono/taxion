@@ -58,8 +58,8 @@ func VerifyReference(ctx context.Context, target, state string, at time.Time, re
 		return fmt.Errorf("public reference could not be verified: %w", err)
 	}
 	if observed.URL != target || observed.CreatedAt.IsZero() || observed.CreatedAt.After(at) ||
-		observed.StateAt.IsZero() || observed.StateAt.Before(observed.CreatedAt) || observed.StateAt.After(at) ||
-		observed.State != state {
+		observed.StateAt.IsZero() || observed.StateAt.Before(observed.CreatedAt) ||
+		state != "EXISTS" && (observed.StateAt.After(at) || observed.State != state) {
 		return fmt.Errorf("public reference did not exist in the claimed state at the statement timestamp")
 	}
 	return nil
@@ -107,7 +107,7 @@ func CheckForgeReferences(ctx context.Context, text string, statement StatementC
 		}
 		if observed.URL != target || observed.CreatedAt.IsZero() || observed.CreatedAt.After(statement.At) ||
 			observed.StateAt.IsZero() || observed.StateAt.Before(observed.CreatedAt) ||
-			observed.StateAt.After(statement.At) || observed.State != claims[target] {
+			claims[target] != "EXISTS" && (observed.StateAt.After(statement.At) || observed.State != claims[target]) {
 			return fmt.Errorf("public reference did not exist in the claimed state at the statement timestamp")
 		}
 		seen[target] = true

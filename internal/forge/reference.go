@@ -67,6 +67,8 @@ func ResolveGitHubReference(ctx context.Context, target string, env []string) (p
 			}
 			endpoint = base + "/" + apiKind + "/" + path[3]
 		}
+	case len(path) == 4 && path[2] == "milestone" && number.MatchString(path[3]) && parsed.Fragment == "":
+		endpoint, kind = base+"/milestones/"+path[3], "milestone"
 	case len(path) == 5 && path[2] == "actions" && path[3] == "runs" && number.MatchString(path[4]) && parsed.Fragment == "":
 		endpoint, kind = base+"/actions/runs/"+path[4], "run"
 	case len(path) == 5 && path[2] == "releases" && path[3] == "tag" && parsed.Fragment == "" && regexp.MustCompile(`^[A-Za-z0-9_.-]+$`).MatchString(path[4]):
@@ -118,7 +120,7 @@ func ReferenceMetadata(target, kind string, data []byte) (publictext.Reference, 
 		if !value.UpdatedAt.IsZero() {
 			result.StateAt = value.UpdatedAt
 		}
-	case "issues":
+	case "issues", "milestone":
 		if value.State == "closed" {
 			result.State, result.StateAt = "CLOSED", value.ClosedAt
 			if value.StateReason == "completed" {

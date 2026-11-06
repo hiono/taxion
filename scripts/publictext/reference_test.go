@@ -25,6 +25,8 @@ func TestGitHubReferenceStatesAndTransitionTimes(t *testing.T) {
 		{"pull", map[string]any{"state": "open"}, "IN_PROGRESS", at.Add(-time.Hour)},
 		{"pull", map[string]any{"merged_at": at.Add(-time.Minute)}, "COMPLETED", at.Add(-time.Minute)},
 		{"pull", map[string]any{"state": "closed", "closed_at": at}, "FAILED", at},
+		{"milestone", map[string]any{"state": "open"}, "EXISTS", at.Add(-time.Hour)},
+		{"milestone", map[string]any{"state": "closed", "closed_at": at}, "CLOSED", at},
 		{"run", map[string]any{"status": "in_progress", "conclusion": nil}, "IN_PROGRESS", at.Add(-time.Hour)},
 		{"run", map[string]any{"status": "completed", "conclusion": "success", "updated_at": at}, "COMPLETED", at},
 		{"run", map[string]any{"status": "completed", "conclusion": "failure", "updated_at": at}, "FAILED", at},
