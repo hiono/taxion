@@ -89,6 +89,9 @@ func TestFailedReviewTimeoutOptionIsBounded(t *testing.T) {
 		if strings.Contains(output.String(), value) {
 			t.Fatalf("invalid timeout value leaked into diagnostics: %s", output.String())
 		}
+		if strings.Contains(output.String(), "effectiveDeadline") {
+			t.Fatalf("configuration rejection reported an unstarted observation deadline: %s", output.String())
+		}
 	}
 }
 

@@ -69,7 +69,7 @@ type FailedReviewOperationError struct {
 	Message             string    `json:"message"`
 	CleanupFailed       bool      `json:"cleanupFailed,omitempty"`
 	ObservationTimeout  string    `json:"observationTimeout,omitempty"`
-	EffectiveDeadline   time.Time `json:"effectiveDeadline,omitempty"`
+	EffectiveDeadline   time.Time `json:"effectiveDeadline,omitzero"`
 	ElapsedMilliseconds int64     `json:"elapsedMilliseconds,omitempty"`
 	err                 error
 }
