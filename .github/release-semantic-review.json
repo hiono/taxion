@@ -1,12 +1,12 @@
 {
   "profileHash": "25805a3a784af71a1abbd4bf5d232143bd455a0798d39ea0aae17975763b5932",
-  "contentHash": "e74554055f80058c3daaf6f61c0b094c3c61e709f56a728e33b16c7923ddf0fc",
+  "contentHash": "7467f16379a4fcbcb40e212d52f06bb45c0d78b8d49ccb6b3d244b7df1dcfbb5",
   "statement": {
-    "at": "2026-11-05T01:01:58.272069188Z",
+    "at": "2026-11-06T00:11:51.887413596Z",
     "claims": null
   },
-  "writerSession": "normal-review-recovery-author-v0723",
-  "reviewerSession": "independent-normal-review-final-v0723",
+  "writerSession": "release-0724-author-7baef537",
+  "reviewerSession": "61345ca2-83ea-4408-ac69-16db01425724",
   "decision": "APPROVE",
-  "source": "independent-review:47c33eecf42118d577a91a0f64eab38564e16462"
+  "source": "independent-review:61345ca2-83ea-4408-ac69-16db01425724"
 }
