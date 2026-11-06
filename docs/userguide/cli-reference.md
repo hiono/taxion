@@ -805,10 +805,22 @@ taxion --store /absolute/path/to/ledger.json workflow record-failed-review \
 
 元の Copilot 環境から、同じ session の期限内完了、turn end、routine shutdown と
 保存された実行観測を照合する。回答、turn end、shutdown の順序を確認し、
-shutdown まで元の提出期限内かつ元の正式失敗以前でなければならない。
+回答と turn end は提出期限前かつ元の FAILED `verified-result` 記録時刻以前でなければならない。
+routine shutdown は失敗記録より後でもよいが、turn end 以後、同じ提出期限前、
+観測時刻以前で、後続の main-agent・tool 実行がないことを要求する。
 準備済みの別 Reviewer worktree と保持 tree も確認する。
 回答 JSON の持込み、別 session、`APPROVE`、`BLOCKED`、変更・解放済み worktree、
 復元 workspace は拒否する。
+
+時刻条件による拒否は終了コード 1 とともに stdout へ
+`code:failed-review-timing-rejected` の非秘密 JSON を返す。
+`timing` は回答・turn end・shutdown・失敗 receipt・観測時刻と `submissionDeadline`、
+`failedChecks` は満たさない比較をすべて示す。
+`originalFlowDeadline`、`effectiveFlowDeadline`、`deadlineSource`、`reservedSeconds` を使い、
+保存済み延長と未使用修正枠の予約を含む採用期限を確認する。
+`failedResultSource:verified-result.at` は Dispatch の `updatedAt` や実行中の failed event とは異なる。
+`remainingEligibility:NOT_EVALUATED` は、後続の実行 anchor・回答・tree の照合が未実施という意味である。
+時刻診断だけから全適格性を断定せず、時刻・正式結果・履歴を書き換えて再試行しない。
 
 返された `supplement.answer` と非実行・品質未受理の表示を確認し、実際に承認した場合だけ
 その `hash` を同じ JSON の `expectedHash` に追加して `--preview` なしで実行する。

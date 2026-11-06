@@ -20,10 +20,48 @@ Reviewer のモデル回答が保存されても、通信切断により Control
 |---|---|---|
 | `RUNNING`、正式結果なし | 元 runner の停止、期限内 native 完了、元実行との照合、host 検証権限 | 既存 `recover`。通常の結果確定へ合流する |
 | `CANCELLED`、成果物 Reviewer | 元契約に一致する停止 receipt、検証済み候補、後続の承認 | 既存 `recover-review`。新たな Reviewer 実行を伴う |
-| `FAILED`、`REQUEST_CHANGES` | 同じ session・設定・指示・実行観測、元期限内かつ正式失敗前の完了、停止確認、準備済み tree の一致 | 新操作。指摘だけを追記する |
+| `FAILED`、`REQUEST_CHANGES`、shutdown が失敗記録以前 | 同じ session・設定・指示・実行観測、期限内の回答と turn 終了、停止確認、準備済み tree の一致 | 指摘だけを追記する |
+| 同じ負の回答、shutdown だけが失敗記録より後 | 回答と turn 終了は失敗記録以前。正常 shutdown は turn 終了以後、保存済み提出期限前、観測時刻以前で、後続実行なし | 接続終了を回答完了と区別して指摘だけを追記する |
+| 回答または turn 終了が失敗記録より後 | 正常 shutdown があっても対象外 | 拒否する |
 | `FAILED`、`APPROVE` または `BLOCKED` | 完了した native 履歴があっても対象外 | 拒否する。今回の負の指摘記録から一般化しない |
 | `FAILED`、原文・実行 anchor・期限・候補のいずれかが不明または不一致 | 回答ファイルや申告で不足を補わない | 拒否し、元の履歴を保存する |
 | 同じ Dispatch の追記済み回答 | 二重処理しない | 既存記録を確認する |
+
+### 時刻・状態を組み合わせる判断
+
+上の状態表だけでは時系列の網羅を示さない。
+`A` は回答保存、`E` は対応する turn 終了、`F` は元の FAILED `verified-result.at`、
+`S` は routine shutdown、`D` は保存済み提出期限、`O` は今回の観測時刻とする。
+`F` を実行中の failed event や Dispatch の `updatedAt` で置き換えない。
+共通条件は同一 session・実行 anchor・候補・停止証拠と `REQUEST_CHANGES` であり、
+次の「時刻条件を満たす」は全適格性・品質の合格ではない。
+
+| ID | 時系列または証拠の組合せ | 判断 |
+| --- | --- | --- |
+| T1 | `A ≤ E ≤ S ≤ F ≤ O`、`A/E/S < D` | 時刻条件を満たす。後続の適格性照合へ進む |
+| T2 | `A ≤ E ≤ F < S ≤ O`、`A/E/S < D` | 時刻条件を満たす。正常な接続終了だけを失敗後に許す |
+| T3 | `A > F` または `E > F` | 拒否。失敗後のモデル提出は接続終了と区別する |
+| T4 | `A ≥ D`、`E ≥ D`、`S ≥ D` のいずれか | 拒否。期限と同時刻も期限内に含めない |
+| T5 | `A` が Dispatch 作成前、`E < A`、`S < E` | 拒否。順序矛盾を許可しない |
+| T6 | `E > O`、`S > O`、`F > O` | 拒否。未来の証拠を使わない |
+| T7 | 回答・turn 終了・routine shutdown の欠落、非正常終了、別 session、後続実行 | 拒否。main agent 以外の後続 tool・turn 活動も含め、時刻の推測や回答ファイルで補わない |
+| T8 | `O ≥ D` だが `A/E/S < D` で他条件も一致 | 観測の遅さだけでは拒否しない。新しい実行は許可しない |
+| T9 | Flow の元期限内だが、保存済み予約を引いた `D` を超える | 拒否。元期限だけで期限内と断定しない |
+| T10 | 保存済み延長が存在する | 延長後期限と現在の保存済み修正回数から `D` を求め、T1〜T9を同じ規則で評価する |
+| T11 | 複数の時刻条件が不成立 | 失敗した比較をすべて返す。後続の適格性は `NOT_EVALUATED` |
+| T12 | preview 後の native 履歴・workspace 変化、二重追記、旧版で新条件の記録を読む | 適用・再処理・旧版読取りをそれぞれ拒否し、元履歴を保持する |
+
+時刻の同時成立・不成立は共通 `FailedReviewTiming` で Controller と保存時に評価する。
+T1〜T6・T8・T11 の比較は `TestFailedReviewTimingSeparatesAnswerFromShutdown`、
+T2 と、T3〜T6 の代表的な拒否診断、preview／追記／再読取り・不変性は
+`TestFailedReviewSupplementPreservesFailureAndNeverReplaysValidation` で確認する。
+T7 の native 履歴は `TestSavedTurn*` と `TestStopOnlySDKProtocolNeverCreatesOrSends`、
+回答前の子 agent 活動と、回答後・shutdown 前後の活動を区別する
+`TestSavedTurnRejectsLaterSubagentActivity`、
+T12 の変更拒否・履歴保持は同じ Controller 試験で確認する。
+T9・T10 の予約・延長は既存の工程計画試験と期限計算のコード照合が対象であり、
+指摘追記操作との全組合せ、原本・実サービス試験は未実施である。
+T12 の旧版拒否は旧版の保存検証条件からの互換性判断であり、旧版での全操作を再試験していない。
 
 preview は実行を再開せず元 Copilot session を観測する。pending work、tools、hooks、
 transcript 修復を有効にしない。保存済みの実行 anchor と native 履歴を照合し、
@@ -32,7 +70,9 @@ Caller が作った回答 JSON の入力は提供しない。
 
 apply は同じ要求、workspace 全体、元 Dispatch、native 履歴、保存回答を含む preview hash を要求する。
 回答、turn 終了、routine shutdown の順序と各時刻を保持し、
-shutdown まで元の提出期限内かつ元の正式失敗以前であることを要求する。
+回答と turn 終了は保存済み提出期限前かつ元の FAILED `verified-result` receipt の時刻以前とする。
+shutdown はその失敗記録より後でもよいが、turn 終了以後、同じ提出期限前かつ観測時刻以前とする。
+後続の main-agent 実行・tool 実行や曖昧な native 履歴は引き続き拒否する。
 保存形式の読取り・更新でも元の FAILED receipt の内容と時刻を照合する。
 処理中の workspace 変更は transaction 内で再確認して拒否する。
 追記記録の削除・入れ子の書換えと、元 Dispatch の指示・結果・利用量の変更は拒否する。
@@ -58,6 +98,18 @@ shutdown 集計は追加証拠として保持するが、旧利用量をリセ�
 
 ## Consequences
 
+v0.7.24 は shutdown まで失敗記録以前であることを要求していた。
+匿名化された報告では、回答・turn 終了は失敗前、routine shutdown は通信失敗後だった。
+この時系列を合成再現し、モデル提出の完了と接続終了を別の証拠として扱う判断へ変更した。
+失敗基準は元の `verified-result.at` であり、実行中の failed event や Dispatch の
+`updatedAt` ではない。個別実行の全原本や適格性を確認済みとは扱わない。
+
+提出期限は `ExecutionDeadline()`、工程計画がある場合はそこから未使用修正枠の
+`repairSeconds + validationSeconds + reviewSeconds` を引いた値を使う。
+保存済み延長があれば末尾の期限を採用し、元の Flow 期限だけで期限内と断定しない。
+時刻拒否は非秘密 JSON に採用期限・出所・予約秒数・各時刻・全失敗比較を返す。
+後続の実行 anchor・回答・tree 照合は `NOT_EVALUATED` とし、診断を適格性の証明にしない。
+
 保存された指摘を参照しながら、失敗理由と未確認の品質・利用量を区別できる。
 旧 Flow を再開したり Task を自動で `REQUEST_CHANGES` へ遷移させたりはしない。
 準備済み Reviewer worktree が解放・移動・変更された場合、commit mode、復元 workspace、
@@ -75,6 +127,8 @@ credential に見える回答や申請情報は出力・追記を拒否し、原
 DB の table schema は変えず、任意の Records 配列を追加する。
 追記前の既存 workspace はそのまま読める。追記後は新 field を理解する版を使用する。
 旧版へ戻すために追記記録を削除する移行は提供しない。必要なら操作前の保全済み複製を使う。
+失敗後の shutdown を持つ追記記録は v0.7.24 の読取り条件に適合しない。
+その記録を保存した DB を旧版へ渡さず、更新前の整合バックアップを別配置で使う。
 既存の `recover`、`recover-review`、`accept-saved-review` の状態条件は維持する。
 
 ## Status

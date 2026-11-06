@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -34,6 +35,12 @@ Only the latest FAILED managed snapshot Reviewer is supported. The original
 Copilot session must have a bound final REQUEST_CHANGES answer, matching turn end
 and routine shutdown before its original submission deadline, plus matching
 durable execution observations. Caller-authored answer files are not accepted.
+Answer and turn end must not follow the original verified FAILED result receipt.
+Routine shutdown may follow that failure, but must precede the saved submission
+deadline and not be in the future, with no later main-agent or tool execution.
+Timing rejection prints non-secret JSON with the effective submission deadline,
+its source, reserved seconds, failed-result receipt time and failedChecks.
+remainingEligibility:NOT_EVALUATED means later identity/answer/tree checks did not run.
 The exact prepared Reviewer tree must remain available and unchanged.
 This appends a formal negative-answer supplement only. FAILED result, Flow, Task,
 owner, usage and existing receipts remain unchanged. No model send, host validation
@@ -99,6 +106,14 @@ APPROVE, BLOCKED, restored workspaces and released/changed review trees are reje
 		return err
 	}
 	report, err := control.RecordFailedReview(ctx, request, *preview)
+	return writeFailedReviewReport(output, report, err)
+}
+
+func writeFailedReviewReport(output io.Writer, report controller.FailedReviewReport, err error) error {
+	var timing *controller.FailedReviewTimingError
+	if errors.As(err, &timing) {
+		return errors.Join(err, json.NewEncoder(output).Encode(timing))
+	}
 	if err != nil {
 		return err
 	}

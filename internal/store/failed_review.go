@@ -45,6 +45,11 @@ func (r Records) VerifyFailedReviewSupplements(graph core.TaskGraph) error {
 		if flow.StagePlan != nil {
 			deadline = flow.StagePlan.SubmissionDeadline(flow, dispatch.Recipient)
 		}
+		timing := core.FailedReviewTiming{
+			DispatchCreatedAt: dispatch.CreatedAt, SubmittedAt: supplement.SubmittedAt, FinishedAt: supplement.FinishedAt,
+			ShutdownAt: supplement.ShutdownAt, FailedResultAt: failureAt,
+			SubmissionDeadline: deadline, ObservedAt: supplement.At,
+		}
 		if supplement.Version != 1 || !found || !ok || seen[dispatch.ID] ||
 			flow.LastDispatchID() != dispatch.ID || hash != supplement.DispatchHash || err != nil ||
 			receiptErr != nil || receiptsHash != supplement.ReceiptHash ||
@@ -52,12 +57,7 @@ func (r Records) VerifyFailedReviewSupplements(graph core.TaskGraph) error {
 			!recordHash(supplement.PreviewHash) ||
 			!strings.HasPrefix(supplement.HistoryHash, "sha256:") ||
 			!recordHash(strings.TrimPrefix(supplement.HistoryHash, "sha256:")) ||
-			supplement.At.IsZero() || supplement.SubmittedAt.Before(dispatch.CreatedAt) ||
-			supplement.FinishedAt.Before(supplement.SubmittedAt) ||
-			supplement.FinishedAt.After(supplement.At) || len(supplement.Evidence) == 0 ||
-			!supplement.FinishedAt.Before(deadline) ||
-			supplement.ShutdownAt.IsZero() || supplement.ShutdownAt.Before(supplement.FinishedAt) ||
-			!supplement.ShutdownAt.Before(deadline) || supplement.ShutdownAt.After(failureAt) ||
+			supplement.At.IsZero() || len(supplement.Evidence) == 0 || len(timing.FailedChecks()) != 0 ||
 			dispatch.ValidateFailedReviewSupplement(&supplement.Answer) != nil {
 			return fmt.Errorf("invalid failed review supplement or changed original Dispatch")
 		}

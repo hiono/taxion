@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -110,15 +111,18 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 	}
 	initialTurn, initialRequest, initialAnswer := worker.turn, request, answer
 	for name, change := range map[string]func(){
-		"wrong-session":          func() { worker.turn.SessionID = "another-session" },
-		"late":                   func() { worker.turn.FinishedAt = flow.Deadline.Add(time.Second) },
-		"missing-shutdown-time":  func() { worker.turn.ShutdownAt = time.Time{} },
-		"shutdown-before-end":    func() { worker.turn.ShutdownAt = now.Add(-time.Second) },
-		"shutdown-after-failure": func() { worker.turn.ShutdownAt = failureAt.Add(time.Nanosecond) },
-		"future-shutdown":        func() { worker.turn.ShutdownAt = time.Now().Add(time.Minute) },
-		"late-shutdown":          func() { worker.turn.ShutdownAt = flow.Deadline.Add(time.Second) },
-		"wrong-history":          func() { worker.turn.Events = []runtime.Event{{Type: runtime.EventExecution, Payload: "unrelated"}} },
-		"missing-history":        func() { worker.turn.HistoryHash = "" },
+		"wrong-session":         func() { worker.turn.SessionID = "another-session" },
+		"late":                  func() { worker.turn.FinishedAt = flow.Deadline.Add(time.Second) },
+		"missing-shutdown-time": func() { worker.turn.ShutdownAt = time.Time{} },
+		"shutdown-before-end":   func() { worker.turn.ShutdownAt = now.Add(-time.Second) },
+		"turn-after-failure": func() {
+			worker.turn.FinishedAt = failureAt.Add(time.Nanosecond)
+			worker.turn.ShutdownAt = worker.turn.FinishedAt
+		},
+		"future-shutdown": func() { worker.turn.ShutdownAt = time.Now().Add(time.Minute) },
+		"late-shutdown":   func() { worker.turn.ShutdownAt = flow.Deadline.Add(time.Second) },
+		"wrong-history":   func() { worker.turn.Events = []runtime.Event{{Type: runtime.EventExecution, Payload: "unrelated"}} },
+		"missing-history": func() { worker.turn.HistoryHash = "" },
 		"lower-usage": func() {
 			lower := int64(9)
 			worker.turn.UsageTotals = []core.DispatchUsage{{Model: "native-model", InputTokens: &lower}}
@@ -146,8 +150,18 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			change()
-			if _, err := control.RecordFailedReview(t.Context(), request, true); err == nil {
+			_, err := control.RecordFailedReview(t.Context(), request, true)
+			if err == nil {
 				t.Fatal("invalid negative answer was accepted")
+			}
+			if name == "turn-after-failure" {
+				var diagnosis *FailedReviewTimingError
+				if !errors.As(err, &diagnosis) || diagnosis.FailedResultSource != "verified-result.at" ||
+					!diagnosis.Timing.FailedResultAt.Equal(failureAt) || diagnosis.DeadlineSource != "flow.deadline" ||
+					!diagnosis.Timing.SubmissionDeadline.Equal(stageDeadline(flow, failed, false)) ||
+					diagnosis.RemainingEligibility != "NOT_EVALUATED" {
+					t.Fatal("missing exact non-secret timing diagnosis", err)
+				}
 			}
 			after, _ := db.LoadWorkspace()
 			if !reflect.DeepEqual(before, after) {
@@ -156,6 +170,7 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 			worker.turn, request, answer = initialTurn, initialRequest, initialAnswer
 		})
 	}
+	worker.turn.ShutdownAt = failureAt.Add(time.Nanosecond)
 	preview, err := control.RecordFailedReview(t.Context(), request, true)
 	if err != nil || preview.StateChanged || preview.QualityAccepted || preview.ExecutionAuthorized ||
 		preview.AccountingReconciled || preview.DispatchStatus != core.DispatchFailed {
@@ -199,7 +214,7 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 	if err != nil || len(after.Records.FailedReviewSupplements) != 1 {
 		t.Fatal("supplement did not survive reload", err)
 	}
-	for _, invalid := range []string{"completion-after-failure", "missing-failure-receipt", "wrong-failure-receipt"} {
+	for _, invalid := range []string{"completion-after-failure", "shutdown-after-record", "missing-failure-receipt", "wrong-failure-receipt"} {
 		records := after.Records
 		records.Events = append([]store.RuntimeReceipt(nil), records.Events...)
 		records.FailedReviewSupplements = append([]store.FailedReviewSupplement(nil), records.FailedReviewSupplements...)
@@ -208,6 +223,8 @@ func testFailedReviewSupplement(t *testing.T, mode string) {
 			supplement.FinishedAt = failureAt.Add(time.Nanosecond)
 			supplement.ShutdownAt = supplement.FinishedAt
 			supplement.At = failureAt.Add(time.Second)
+		} else if invalid == "shutdown-after-record" {
+			supplement.ShutdownAt = supplement.At.Add(time.Nanosecond)
 		} else {
 			var events []store.RuntimeReceipt
 			for _, receipt := range records.Events {

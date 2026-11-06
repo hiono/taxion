@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.24"
+const readySkillVersion = "1.3.25"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -55,6 +55,7 @@ and retrospective reports as leads, not substitutes for those records.
 | STOPPED artifact Flow; first Reviewer after eligible PASSED/OBSERVED validation; no acknowledgement, start, session, result or runtime receipt | reconcile-stopped only when saved-state and managed-worktree checks pass | Hand-creating the Controller-managed worktree or assuming missing records prove no delivery |
 | Artifact Reviewer executed and CANCELLED with its confirmed stop receipt, same candidate/worktree and no active owner or feedback | recover-review with continueStoppedExecution when eligible | Unstarted reconciliation or ordinary resume |
 | Native final answer exists but formal result is missing | Use workflow recover only when its exact completion and observation preconditions match | Treating saved text as formal acceptance, APPROVE or product completion |
+| Latest managed snapshot Reviewer is formally FAILED with a saved REQUEST_CHANGES | record-failed-review preview, then separately approved expectedHash; answer and turn end must not follow the original verified-result receipt, while routine shutdown may follow it before the saved submission deadline | RUNNING recovery, rewriting FAILED, resending the model or treating findings as quality acceptance |
 | Identity, ownership, delivery, state or supported procedure is unknown | Preserve evidence and stop at the specific unresolved condition | Guessing status, changing saved input or bypassing a gate |
 
 Use the relevant procedure below only when its complete preconditions hold.
@@ -183,6 +184,17 @@ Copilot child processes disable built-in MCP servers without editing user settin
 other network-capable tools and hooks still need separate permission checks.
 For recovery, inspect workflow feedback-target and the saved partial/output tree;
 do not fabricate a successful result, stop proof or user approval.
+For a formally FAILED managed snapshot Reviewer, record-failed-review observes the
+original bound native REQUEST_CHANGES without execution. Confirm the old process
+has stopped and retain its unchanged prepared worktree. Answer and turn end must
+be on time and no later than the failed verified-result receipt. Routine shutdown
+may follow that receipt, but must still precede the saved submission deadline,
+not be in the future, and have no later main-agent or tool execution.
+Use --preview; timing rejection returns failedChecks, the adopted deadline and
+its source/reservations. NOT_EVALUATED does not certify later eligibility checks.
+Only after exact preview approval apply its expectedHash. This appends findings,
+not quality acceptance, usage reconciliation, owner release, Flow restart or
+authority for repair/review. Never replace saved times/results to pass a gate.
 RUNNING does not prove a live process. When the exact stopped Reviewer's final answer
 remains in its bound native session but lacks a formal result, workflow recover can
 finalizeSavedResult with an authorized future validationDeadline within one hour.
