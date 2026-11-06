@@ -249,6 +249,20 @@ OpenCode 1.19.3 の実 permission 評価でも、資料・製品・skill と拒�
 報告された FAILED REQUEST_CHANGES は ADR-0072 の保存回答処理の事例であり、
 未開始 Dispatch の resume がその事例を解決したとは説明しない。
 
+## 公開単位と追跡
+
+今回の公開単位は `0.8.0` とし、新しい到達目標 `M17` を
+[Milestone 38](https://github.com/hiono/taxion/milestone/38) に対応付ける。
+これは今回の到達目標への新規採番であり、未採番の過去の計画を復元したという意味ではない。
+既存の採番・割当・完了状態を一括変更しない。
+
+[実装 #274](https://github.com/hiono/taxion/issues/274)、
+[正式配布 #275](https://github.com/hiono/taxion/issues/275)、
+[元の復旧依頼 #272](https://github.com/hiono/taxion/issues/272) の順に依存を記録する。
+正式配布はソースの承認だけで完了とせず、配布処理全体と公開後の配布物の照合、
+更新・切戻し手順と依頼への回答の引渡しまでを含める。
+運用環境への導入や運用台帳の変更を、この公開から自動的に許可しない。
+
 ## 互換性・移行・rollback
 
 保存済みの契約、Dispatch、FAILED、利用量、期限、receipt を書き換えない。
