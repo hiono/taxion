@@ -87,9 +87,22 @@ func TestReadyExplainsPlannerWritingAndRequestRecoveryBoundaries(t *testing.T) {
 		if !strings.Contains(output.String(), text) {
 			t.Errorf("missing Planner/writing boundary: %s", text)
 		}
-		if !strings.Contains(readySkillBody, "durably bound attempts, with a nonexecuting preview and exact-hash apply") ||
-			strings.Contains(readySkillBody, "this CLI has no public preview/apply") {
-			t.Fatal("installed skill contradicts supported direct-question recovery")
+	}
+	if !strings.Contains(readySkillBody, "durably bound attempts, with a nonexecuting preview and exact-hash apply") {
+		t.Fatal("installed skill omits supported direct-question recovery")
+	}
+	guide, err := os.ReadFile("../../docs/userguide/cli-reference.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, contradiction := range []string{
+		"this CLI has no public preview/apply",
+		"plan or investigate recovery are not supported",
+		"Legacy v0.8.2 checkpoints and direct conversation",
+		"質問用 receipt の preview/apply 復旧はない",
+	} {
+		if strings.Contains(readySkillBody, contradiction) || bytes.Contains(guide, []byte(contradiction)) {
+			t.Errorf("recovery guidance contradicts supported durable bindings: %s", contradiction)
 		}
 	}
 }

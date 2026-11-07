@@ -137,7 +137,7 @@ apply は排他的な operation lease を取得し、native history を再観測
 
 `conversation search` は、承認済みの Markdown、PDF、DOCX、PPTX の抜粋を、編集可能な Task に自動で添付する。会話 export は private に分類し、明示選択した user message だけを検索対象にする。console は metadata を表示し、ローカルの非公開状態には引用した出典全文と用途別の承認を保持する。取込み、選択した runtime への送信、外部公開は別々に承認する。
 
-`conversation ask`・`conversation plan`・`conversation investigate` は別々にモデルを呼び出す操作。それぞれ明示 deadline を設け、Copilot は session 別 credit ceiling も要求する。各質問は workspace operation で直列化され、attempt・session・送信意図・検証済み terminal 回答を private request receipt に追記する。回答 receipt は quota 再確認・cleanup より先に保存される。Stop が失敗した場合もその回答は保存されるが、operation は `BLOCKED` のままである。`taxion request --status` で状態を確認し、現行版に質問用 receipt の preview/apply 復旧はないため再送や cancel をしない。OpenCode の料金・account quota は未確認とし、Copilot の credit ceiling を指定して代用しない。token 利用量は呼出しごとに報告するが、停止条件にはしない。通常 CI はローカル回帰テストを使う。
+`conversation ask`・`conversation plan`・`conversation investigate` は別々にモデルを呼び出す操作。それぞれ明示 deadline を設け、Copilot は session 別 credit ceiling も要求する。各質問は workspace operation で直列化され、attempt・session・送信意図・検証済み terminal 回答を private request receipt に追記する。回答 receipt は quota 再確認・cleanup より先に保存される。Stop が失敗した場合もその回答は保存されるが、operation は `BLOCKED` のままである。`taxion request --status` で状態を確認し、保存した attempt binding がある直接質問は前述の `request recover` の preview と完全なハッシュによる apply で照合する。再送は行わず、終了記録・利用量・回答が不確実な場合は停止証拠と明示承認を伴う取消だけを許可する。binding のない旧直接質問は対象外であり、足りない記録を推測しない。OpenCode の料金・account quota は未確認とし、Copilot の credit ceiling を指定して代用しない。token 利用量は呼出しごとに報告するが、停止条件にはしない。通常 CI はローカル回帰テストを使う。
 
 実 SDK の独立 Reviewer 受入れは、再承認した実行で、保持した Coder SHA の承認と worktree の解放を確認して完了した。scope 承認、parser の制約、受入れ記録は[仕様入力](../develop/specification-input.md)を参照する。
 

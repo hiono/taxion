@@ -440,7 +440,7 @@ required before claiming completion. Inventory and skill integrity checks do not
 prove authentication, authorization, model loading or successful execution.
 ` + `
 
-## Recover a saved request Planner answer
+## Recover a saved request Planner or direct-question answer
 
 For an interrupted new request Planner, first inspect taxion request --status.
 Never resume, cancel or resend a BLOCKED Planner attempt with uncertain delivery.
@@ -451,9 +451,13 @@ questions, limitations and preview hash. Only then repeat the exact decision
 fields with --apply --expected-hash HASH. Apply adopts the completed answer,
 checkpoint, receipt and deduplicated usage atomically; it does not send, abort,
 extend limits, or approve execution. Expired, ambiguous, drifting or incomplete
-evidence is refused. Legacy v0.8.2 checkpoints and direct conversation ask,
-plan or investigate recovery are not supported; preserve them and do not infer
-their missing session/input/usage evidence.
+evidence is refused. Durably bound conversation ask, plan and investigate
+attempts use this same nonexecuting preview and exact-hash apply.
+For a v0.8.2 version-2 request without an attempt binding, explicitly use
+--associate-legacy --session ID --input-hash SHA256 --confirm-stopped with
+original-input and stopped-process evidence; never infer historical bindings.
+Version-1 checkpoints, unbound legacy direct questions and non-Copilot saved
+history remain unsupported. Preserve their missing evidence and never resend.
 ` + "\n## Accepted Coder output and unstarted normal Reviewer recovery\n" + normalReviewerRecoveryHelp
 
 type readySkillMetadata struct {
