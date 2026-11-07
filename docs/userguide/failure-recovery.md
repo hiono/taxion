@@ -93,7 +93,7 @@ Flow が `COMPLETED`、Reviewer が `SUCCEEDED` / `APPROVE` でも品質ゲー�
 
 `taxion request recover ... --preview` は、保存した Copilot main turn と入力・Task・出典・元期限・利用量を照合する。新しい attempt receipt がない v0.8.2 の version-2 request には、元 session・native input の hash・元 process tree の停止証拠を指定する `--associate-legacy` がある。これは旧 receipt の捏造ではなく、新しい明示的な照合判断として保存する。binding のない旧直接質問や version-1 checkpoint は対象外となる。
 
-同じ判断項目と preview hash の apply は回答・checkpoint・利用量・照合判断を一つの transaction で保存する。通常の継続は `--resolution continue`、その operation の終了は `--resolution cancel` で選ぶ。routine shutdown や利用量が欠ける場合、不正な回答を未受理のまま残す場合は、停止証拠を示して `--confirm-stopped --accept-uncertainty --resolution cancel` を選ぶ。不確実性は記録に残り、未知の利用量をゼロ扱いしない。
+同じ判断項目と preview hash の apply は回答・checkpoint・利用量・照合判断を一つの transaction で保存する。通常の継続は `--resolution continue`、その operation の終了は `--resolution cancel` で選ぶ。routine shutdown やnative 集計利用量が欠落・不完全な場合、不正な回答を未受理のまま残す場合は、停止証拠を示して `--confirm-stopped --accept-uncertainty --resolution cancel` を選ぶ。per-call usage から分かる利用量は下限として保持し、native 集計の不足や不確実性は unknown のまま記録する。既知の集計不一致は拒否する。未知の利用量をゼロ扱いしない。
 
 モデルの送信・Abort、元期限・予算・承認の更新は行わない。期限超過後も期限前に完了した回答の照合と取消はできるが、継続実行はできない。実際の owner が lease を保持している場合、native 履歴が変化した場合、別の Flow が実行中の場合には apply を拒否する。解除後の作業は通常の gate を通す。旧版へ戻すために receipt を削除せず、更新前の整合した private backup を保持する。
 

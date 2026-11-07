@@ -63,12 +63,16 @@ func TestRequestRecoveryLegacyCancelPreservesCheckpointUsageAndReleasesStore(t *
 		"question": string(question), "context": map[string]any{"planner": map[string]any{"task": checkpoint.Task}},
 	})
 	now := time.Now().UTC()
+	inputTokens, outputTokens := int64(21), int64(8)
 	turn := runtime.SavedTurn{
 		SessionID: "saved-native", Input: string(input), InputHash: core.SHA256Hex(input),
 		MessageID: "original-input", TurnID: "original-turn", Payload: string(answerBytes),
 		SubmittedAt: now.Add(-2 * time.Second), FinishedAt: now.Add(-time.Second),
 		HistoryHash: "sha256:" + strings.Repeat("b", 64),
 		Events:      []runtime.Event{{Type: runtime.EventOutput, Payload: string(answerBytes)}},
+		UsageTotals: []core.DispatchUsage{{
+			Model: "model", InputTokens: &inputTokens, OutputTokens: &outputTokens,
+		}},
 	}
 	oldObserver := observeSavedPlannerTurn
 	observations := 0
@@ -128,6 +132,9 @@ func TestRequestRecoveryLegacyCancelPreservesCheckpointUsageAndReleasesStore(t *
 	if err := json.Unmarshal(preview.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
+	if report.UsageStatus != "unknown" {
+		t.Fatal("incomplete native usage aggregate was treated as complete")
+	}
 	unchanged, err := db.LoadWorkspace()
 	if err != nil || !reflect.DeepEqual(before, unchanged) {
 		t.Fatal("read-only legacy preview changed saved state", err)
@@ -184,6 +191,170 @@ func TestRequestRecoveryLegacyCancelPreservesCheckpointUsageAndReleasesStore(t *
 	}
 }
 
+func TestRequestRecoveryCancelRetainsPerCallUsageWithIncompleteNativeTotals(t *testing.T) {
+	_, args := requestFixture(t)
+	var initialOutput bytes.Buffer
+	if err := requestCommand(append(args, "preserve a stopped request"), strings.NewReader("/plan\n"),
+		&initialOutput, func(context.Context, *store.Store, config.Config, core.GraphTask, string, float64, string, string) (controller.QuestionResult, error) {
+			return controller.QuestionResult{}, errors.New("stop after the Planner send")
+		}, nil); err == nil {
+		t.Fatal("fixture did not preserve the interrupted request")
+	}
+	db, before, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	lease, err := db.LockOperation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lease.Claim(store.Operation{ID: before.Records.Operation.ID, Owner: "stopped-owner"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := *before.Records.Operation
+	var checkpoint requestCheckpoint
+	if err := json.Unmarshal(operation.Checkpoint, &checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	task, ok := before.Graph.GraphTask(checkpoint.Task.ID)
+	if !ok {
+		t.Fatal("planning task is missing")
+	}
+	taskHash, err := core.CanonicalSHA256(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectionHash, err := core.CanonicalSHA256(checkpoint.Selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner, _, err := observeRecoveredAdvice(db, checkpoint, operation.Kind, plannerAttemptEvidence{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceHash, err := controller.PlannerQuestionSourceHash(planner)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	answer := requestFixtureAnswer([]string{"Which checks?"})
+	payload, err := json.Marshal(answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputTokens, outputTokens, amount := int64(21), int64(8), 3.5
+	complete := "complete"
+	base := time.Now().UTC()
+	sequence := uint64(0)
+	for _, record := range before.Records.Requests {
+		if record.RequestID == operation.ID && record.Kind == "planning" {
+			if record.Sequence > sequence {
+				sequence = record.Sequence
+			}
+			if !base.After(record.At) {
+				base = record.At.Add(time.Millisecond)
+			}
+		}
+	}
+	inputHash := core.SHA256Hex([]byte("bound planner input"))
+	turn := runtime.SavedTurn{
+		SessionID: "saved-native", InputHash: inputHash, MessageID: "message", TurnID: "turn",
+		Payload: string(payload), SubmittedAt: base.Add(3 * time.Millisecond),
+		FinishedAt: base.Add(4 * time.Millisecond), HistoryHash: "sha256:" + strings.Repeat("c", 64),
+		Events: []runtime.Event{{Type: runtime.EventOutput, Payload: string(payload)}},
+		UsageTotals: []core.DispatchUsage{{
+			Model: "model", InputTokens: &inputTokens, OutputTokens: &outputTokens,
+		}},
+	}
+	initial := plannerAttemptEvidence{
+		Version: 1, Phase: "attempt", AttemptID: "attempt-usage", OperationID: operation.ID,
+		TaskID: checkpoint.Task.ID, TaskHash: taskHash, ConfigHash: selectionHash,
+		SelectionHash: selectionHash, Worktree: checkpoint.Task.Worktree, InputHash: inputHash,
+		SourceHash: sourceHash, Deadline: operation.Deadline.UTC().Format(time.RFC3339Nano),
+	}
+	session := initial
+	session.Phase, session.SessionID = "session", turn.SessionID
+	send := session
+	send.Phase, send.PromptHash = "send-intent", turn.InputHash
+	terminal := plannerTerminalEvidence{
+		Version: 1, AttemptID: initial.AttemptID, SessionID: turn.SessionID, InputHash: inputHash,
+		PromptHash: send.PromptHash, SourceHash: sourceHash, OutputHash: core.SHA256Hex(payload),
+		Terminal: runtime.EventTurnFinished, ObservedAt: turn.FinishedAt.Add(time.Millisecond),
+		Answer: answer, Usage: []core.DispatchUsage{{
+			Model: "model", InputTokens: &inputTokens, OutputTokens: &outputTokens,
+			TotalNanoAIU: &amount, AICreditsStatus: &complete,
+		}},
+	}
+	var receipts []store.RequestRecord
+	for index, evidence := range []any{initial, session, send, terminal} {
+		data, err := json.Marshal(evidence)
+		if err != nil {
+			t.Fatal(err)
+		}
+		at := []time.Time{base, base.Add(time.Millisecond), base.Add(2 * time.Millisecond), base.Add(6 * time.Millisecond)}[index]
+		receipts = append(receipts, store.RequestRecord{
+			RequestID: operation.ID, Kind: "planning", Sequence: sequence + uint64(index+1),
+			Payload: string(data), Hash: core.SHA256Hex(data), At: at,
+		})
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		state.Records.Requests = append(state.Records.Requests, receipts...)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldObserver := observeSavedPlannerTurn
+	t.Cleanup(func() { observeSavedPlannerTurn = oldObserver })
+	observeSavedPlannerTurn = func(binding plannerAttemptEvidence, _, _ string, confirmed bool) (runtime.SavedTurn, error) {
+		if binding.AttemptID != initial.AttemptID || !confirmed {
+			t.Fatal("recovery lost the exact stopped attempt binding")
+		}
+		return turn, nil
+	}
+	recoveryArgs := []string{
+		"--id", operation.ID, "--actor", "human", "--source", "actual-stop-approval",
+		"--reason", "reconcile only the stopped request", "--evidence", "specific-process-stop",
+		"--confirm-stopped", "--accept-uncertainty", "--resolution", "cancel",
+	}
+	mismatchedTokens := outputTokens + 1
+	turn.UsageTotals[0].OutputTokens = &mismatchedTokens
+	if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &bytes.Buffer{}); err == nil {
+		t.Fatal("cancellation accepted a known conflict in native usage totals")
+	}
+	turn.UsageTotals[0].OutputTokens = &outputTokens
+	var preview bytes.Buffer
+	if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &preview); err != nil {
+		t.Fatal(err)
+	}
+	var report requestRecoveryPreview
+	if err := json.Unmarshal(preview.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.UsageStatus != "unknown" {
+		t.Fatal("incomplete native totals were treated as complete")
+	}
+	if err := requestRecoveryCommand(append(recoveryArgs, "--apply", "--expected-hash", report.Hash), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Records.Operation.State != "CANCELLED" ||
+		after.Records.Operation.PlanningNanoAIU != operation.PlanningNanoAIU+amount ||
+		after.Records.Operation.PlanningUsageState != "unknown" {
+		t.Fatal("cancellation failed to retain known per-call usage and aggregate uncertainty")
+	}
+}
+
 func TestRecoveredQuestionUsageMustMatchNativeShutdownTotals(t *testing.T) {
 	input, output, amount := int64(21), int64(8), 3.5
 	complete := "complete"
@@ -203,14 +374,33 @@ func TestRecoveredQuestionUsageMustMatchNativeShutdownTotals(t *testing.T) {
 	if matchesQuestionUsage(calls, totals) {
 		t.Fatal("conflicting native cost totals were accepted")
 	}
+	if !questionUsageTotalsConflict(calls, totals) {
+		t.Fatal("known native cost conflict was treated as missing aggregate data")
+	}
 	totals[0].TotalNanoAIU = nil
 	if matchesQuestionUsage(calls, totals) {
 		t.Fatal("missing native cost totals were accepted")
+	}
+	if questionUsageTotalsConflict(calls, totals) {
+		t.Fatal("incomplete but non-conflicting native totals were rejected")
+	}
+	if questionUsageTotalsConflict(calls, nil) {
+		t.Fatal("missing native aggregate totals were treated as a conflict")
 	}
 	totals[0].TotalNanoAIU = &amount
 	totals[0].OutputTokens = nil
 	if matchesQuestionUsage(calls, totals) {
 		t.Fatal("incomplete native token totals were accepted")
+	}
+	totals[0].InputTokens = &input
+	totals[0].OutputTokens = &output
+	mismatchedTokens := output + 1
+	totals[0].OutputTokens = &mismatchedTokens
+	if !questionUsageTotalsConflict(calls, totals) {
+		t.Fatal("known native token conflict was treated as missing aggregate data")
+	}
+	if !questionUsageTotalsConflict(nil, totals) {
+		t.Fatal("native totals without durable per-call usage were accepted")
 	}
 }
 

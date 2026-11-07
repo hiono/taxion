@@ -751,8 +751,10 @@ func buildRequestRecoveryPreview(state store.Workspace, checkpoint requestCheckp
 		!plainQuestion && !uncertainCancellation && controller.ValidatePlannerAnswer(answer, planner) != nil {
 		return fail("saved context drifted or the answer is no longer valid for request planning")
 	}
-	if turnHasExecution(turn) || !matchesQuestionUsage(terminal.Usage, turn.UsageTotals) &&
-		!(uncertainCancellation && len(terminal.Usage) == 0 && len(turn.UsageTotals) == 0) {
+	usageMatches := matchesQuestionUsage(terminal.Usage, turn.UsageTotals)
+	usageUncertain := uncertainCancellation && (len(terminal.Usage) == 0 && len(turn.UsageTotals) == 0 ||
+		len(terminal.Usage) != 0 && !questionUsageTotalsConflict(terminal.Usage, turn.UsageTotals))
+	if turnHasExecution(turn) || !usageMatches && !usageUncertain {
 		return fail("saved turn contains tools or incomplete/conflicting usage")
 	}
 	if operation.Deadline.IsZero() && !sideQuestion {
@@ -775,6 +777,9 @@ func buildRequestRecoveryPreview(state store.Workspace, checkpoint requestCheckp
 	total, usageStatus, err := plannerUsageTotal(terminal.Usage)
 	if err != nil {
 		return fail("saved usage is invalid")
+	}
+	if uncertainCancellation && !usageMatches {
+		usageStatus = "unknown"
 	}
 	if usageStatus != "complete" && !operation.ExternalBudgetOnly() && !uncertainCancellation {
 		return fail("native usage is incomplete under the approved numeric budget")
@@ -859,74 +864,108 @@ func turnHasExecution(turn runtime.SavedTurn) bool {
 }
 
 func matchesQuestionUsage(calls, totals []core.DispatchUsage) bool {
+	matches, _ := compareQuestionUsage(calls, totals)
+	return matches
+}
+
+func questionUsageTotalsConflict(calls, totals []core.DispatchUsage) bool {
+	_, conflict := compareQuestionUsage(calls, totals)
+	return conflict
+}
+
+func compareQuestionUsage(calls, totals []core.DispatchUsage) (bool, bool) {
 	if len(calls) == 0 || len(totals) == 0 {
-		return false
+		return false, len(calls) == 0 && len(totals) != 0
 	}
 	type modelUsage struct {
 		input, output, cacheRead, cacheWrite                     int64
 		inputKnown, outputKnown, cacheReadKnown, cacheWriteKnown bool
+		cacheReadComplete, cacheWriteComplete                    bool
 		nanoAIU                                                  float64
-		nanoAIUKnown                                             bool
+		nanoAIUKnown, nanoAIUComplete                            bool
 	}
 	sum := map[string]modelUsage{}
 	for _, call := range calls {
 		if strings.TrimSpace(call.Model) == "" || call.InputTokens == nil || call.OutputTokens == nil ||
 			*call.InputTokens < 0 || *call.OutputTokens < 0 {
-			return false
+			return false, true
 		}
 		value := sum[call.Model]
+		if _, exists := sum[call.Model]; !exists {
+			value.cacheReadComplete, value.cacheWriteComplete, value.nanoAIUComplete = true, true, true
+		}
 		if *call.InputTokens > math.MaxInt64-value.input || *call.OutputTokens > math.MaxInt64-value.output {
-			return false
+			return false, true
 		}
 		value.input += *call.InputTokens
 		value.output += *call.OutputTokens
 		value.inputKnown, value.outputKnown = true, true
 		if call.CacheReadTokens != nil {
 			if *call.CacheReadTokens < 0 || *call.CacheReadTokens > math.MaxInt64-value.cacheRead {
-				return false
+				return false, true
 			}
 			value.cacheRead += *call.CacheReadTokens
 			value.cacheReadKnown = true
+		} else {
+			value.cacheReadComplete = false
 		}
 		if call.CacheWriteTokens != nil {
 			if *call.CacheWriteTokens < 0 || *call.CacheWriteTokens > math.MaxInt64-value.cacheWrite {
-				return false
+				return false, true
 			}
 			value.cacheWrite += *call.CacheWriteTokens
 			value.cacheWriteKnown = true
+		} else {
+			value.cacheWriteComplete = false
 		}
 		if call.TotalNanoAIU != nil {
 			if math.IsNaN(*call.TotalNanoAIU) || math.IsInf(*call.TotalNanoAIU, 0) || *call.TotalNanoAIU < 0 {
-				return false
+				return false, true
 			}
 			value.nanoAIU += *call.TotalNanoAIU
 			if math.IsInf(value.nanoAIU, 0) {
-				return false
+				return false, true
 			}
 			value.nanoAIUKnown = true
+		} else {
+			value.nanoAIUComplete = false
 		}
 		sum[call.Model] = value
 	}
-	if len(sum) != len(totals) {
-		return false
-	}
+	matches := len(sum) == len(totals)
+	seen := map[string]bool{}
 	for _, total := range totals {
+		if strings.TrimSpace(total.Model) == "" || seen[total.Model] {
+			return false, true
+		}
+		seen[total.Model] = true
 		value, ok := sum[total.Model]
-		if !ok || total.InputTokens == nil || total.OutputTokens == nil ||
-			!value.inputKnown || !value.outputKnown ||
-			*total.InputTokens != value.input || *total.OutputTokens != value.output {
-			return false
+		if !ok {
+			return false, true
 		}
-		if value.cacheReadKnown && (total.CacheReadTokens == nil || *total.CacheReadTokens != value.cacheRead) ||
-			value.cacheWriteKnown && (total.CacheWriteTokens == nil || *total.CacheWriteTokens != value.cacheWrite) {
-			return false
+		if total.InputTokens != nil && *total.InputTokens < 0 || total.OutputTokens != nil && *total.OutputTokens < 0 ||
+			total.CacheReadTokens != nil && *total.CacheReadTokens < 0 ||
+			total.CacheWriteTokens != nil && *total.CacheWriteTokens < 0 ||
+			total.TotalNanoAIU != nil && (math.IsNaN(*total.TotalNanoAIU) || math.IsInf(*total.TotalNanoAIU, 0) || *total.TotalNanoAIU < 0) {
+			return false, true
 		}
-		if value.nanoAIUKnown != (total.TotalNanoAIU != nil) ||
-			value.nanoAIUKnown && math.Abs(*total.TotalNanoAIU-value.nanoAIU) > 1e-6 {
-			return false
+		if total.InputTokens == nil || total.OutputTokens == nil || !value.inputKnown || !value.outputKnown {
+			matches = false
+		} else if *total.InputTokens != value.input || *total.OutputTokens != value.output {
+			return false, true
+		}
+		if value.cacheReadKnown && total.CacheReadTokens == nil ||
+			value.cacheWriteKnown && total.CacheWriteTokens == nil ||
+			value.nanoAIUKnown != (total.TotalNanoAIU != nil) {
+			matches = false
+		}
+		if total.CacheReadTokens != nil && value.cacheReadComplete && *total.CacheReadTokens != value.cacheRead ||
+			total.CacheWriteTokens != nil && value.cacheWriteComplete && *total.CacheWriteTokens != value.cacheWrite ||
+			total.TotalNanoAIU != nil && value.nanoAIUComplete && math.Abs(*total.TotalNanoAIU-value.nanoAIU) > 1e-6 {
+			return false, true
 		}
 	}
-	return true
+	return matches, false
 }
 
 func recordRecoveredPlannerUsage(state *store.Workspace, operation *store.Operation,

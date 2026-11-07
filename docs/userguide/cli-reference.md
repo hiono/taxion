@@ -131,7 +131,7 @@ Taxion が intake、完全な hash の承認、Reviewer の設定承認、Flow�
 
 v0.8.2 の version-2 checkpoint に attempt binding がない場合は、`--associate-legacy --session ID --input-hash SHA256 --confirm-stopped` を追加する。`--input-hash` は変更していない native user input の SHA-256 であり、その本文に含まれる元依頼と計画 Task ID も照合する。停止確認には元 process tree の停止証拠を `--evidence` で示す。新しい照合判断を記録するもので、旧 receipt や当時の runtime 設定の binding を復元したと主張するものではない。旧 version-1 checkpoint、Copilot 以外の provider、binding のない旧直接質問は対象外となる。
 
-`--resolution continue` が既定であり、request は確認質問または未承認提案の状態へ戻る。元期限が過ぎた場合や累積利用量が未知の場合には、新しい実行を許可しない。`--resolution cancel` は照合後にその operation だけを `CANCELLED` とし、元 checkpoint・保存回答の参照・履歴・利用量を保持する。routine shutdown や集計利用量がない場合、不正な回答を未受理の証拠として残す場合には、停止証拠と `--accept-uncertainty` を追加する。この不確実性の受入れは取消専用であり、未知の利用量をゼロに変えず、既知の下限を減らさない。
+`--resolution continue` が既定であり、request は確認質問または未承認提案の状態へ戻る。元期限が過ぎた場合や累積利用量が未知の場合には、新しい実行を許可しない。`--resolution cancel` は照合後にその operation だけを `CANCELLED` とし、元 checkpoint・保存回答の参照・履歴・利用量を保持する。routine shutdown や集計利用量がない、または不完全な場合、不正な回答を未受理の証拠として残す場合には、停止証拠と `--accept-uncertainty` を追加する。native 集計値が per-call usage と一致する限り、欠落分は未知のまま扱い、既知の利用量を下限として保持する。既知の不一致は拒否する。この不確実性の受入れは取消専用であり、未知の利用量をゼロに変えず、既知の下限を減らさない。
 
 apply は排他的な operation lease を取得し、native history を再観測してから保存する。停止済み process の owner 表示だけが残る場合も、実際に lease を取得できなければ拒否する。同じ判断と hash の重複 apply は再課金・再送・重複保存を行わない。解除後の Task や Flow は通常の契約・設定・実行 gate を通す。
 
