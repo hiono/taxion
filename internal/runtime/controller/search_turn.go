@@ -98,12 +98,10 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 			if !ok {
 				return turn, fmt.Errorf("taxion: search stream ended before completion")
 			}
-			if event.AgentID != "" || event.Sequence != 0 && event.Sequence <= sequence {
+			if event.AgentID != "" || event.Sequence == 0 || event.Sequence <= sequence {
 				return turn, fmt.Errorf("taxion: search main-agent lifecycle is ambiguous")
 			}
-			if event.Sequence != 0 {
-				sequence = event.Sequence
-			}
+			sequence = event.Sequence
 			switch event.Type {
 			case runtime.EventInput:
 				if messageID != "" || event.MessageID == "" {

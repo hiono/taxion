@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -199,6 +200,39 @@ func TestSearchRequiresBoundTurnEndBeforeIdle(t *testing.T) {
 			defer cancel()
 			if _, err := RunSearchTurn(ctx, worker, "task", "query"); err == nil || errors.Is(err, context.DeadlineExceeded) {
 				t.Fatal("unbound or later activity did not fail closed", err)
+			}
+			if worker.stops != 1 {
+				t.Fatal("rejected search did not preserve cleanup")
+			}
+		})
+	}
+}
+
+func TestSearchRejectsUnsequencedEvents(t *testing.T) {
+	for _, missing := range []int{0, 1, 2, 3, 4} {
+		t.Run(fmt.Sprint(missing), func(t *testing.T) {
+			_, _, base, _ := questionFixture(t)
+			base.role = "ORCHESTRATOR"
+			stream := []runtime.Event{
+				{Type: runtime.EventInput, MessageID: "search-input"},
+				{Type: runtime.EventTurnStarted, TurnID: "search-turn"},
+				{Type: runtime.EventOutput, MessageID: "search-input", TurnID: "search-turn", Payload: "answer"},
+				{Type: runtime.EventUsage, Payload: "{}"},
+				{Type: runtime.EventTurnEnded, TurnID: "search-turn"},
+			}
+			events := make(chan runtime.Event, len(stream))
+			for i, event := range stream {
+				if i != missing {
+					event.Sequence = uint64(i + 1)
+				}
+				events <- event
+			}
+			close(events)
+			worker := &questionRuntime{configuredRuntime: base, events: events}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			if _, err := RunSearchTurn(ctx, worker, "task", "query"); err == nil || errors.Is(err, context.DeadlineExceeded) {
+				t.Fatal("missing event sequence did not fail closed", err)
 			}
 			if worker.stops != 1 {
 				t.Fatal("rejected search did not preserve cleanup")

@@ -300,6 +300,35 @@ func TestSavedTurnRejectsLaterSubagentActivity(t *testing.T) {
 	}
 }
 
+func TestSavedTurnRejectsDeltaOutsideActiveTurn(t *testing.T) {
+	worktree := t.TempDir()
+	for _, at := range []int{2, 5} {
+		for _, stopped := range []bool{false, true} {
+			events := completedSavedHistory(worktree)
+			delta := sdk.SessionEvent{
+				ID: "delta", Timestamp: events[at-1].Timestamp,
+				Data: &sdk.AssistantMessageDeltaData{DeltaContent: "later output"},
+			}
+			events = append(events[:at], append([]sdk.SessionEvent{delta}, events[at:]...)...)
+			if stopped {
+				events = events[:len(events)-1]
+			}
+			if _, err := savedQuestionTurn(events, "saved-session", worktree, stopped); err == nil {
+				t.Fatal("out-of-turn delta accepted", at, stopped)
+			}
+		}
+	}
+	events := completedSavedHistory(worktree)
+	delta := sdk.SessionEvent{
+		ID: "delta", Timestamp: events[2].Timestamp,
+		Data: &sdk.AssistantMessageDeltaData{DeltaContent: "active output"},
+	}
+	events = append(events[:3], append([]sdk.SessionEvent{delta}, events[3:]...)...)
+	if _, err := savedTurn(events, "saved-session", worktree); err != nil {
+		t.Fatal("active main-turn delta rejected", err)
+	}
+}
+
 func completedSavedHistory(worktree string) []sdk.SessionEvent {
 	message, turn := "input-message", "review-turn"
 	now := time.Now().UTC()

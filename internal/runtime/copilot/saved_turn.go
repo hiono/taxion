@@ -73,6 +73,14 @@ func savedQuestionTurn(events []sdk.SessionEvent, sessionID, worktree string, st
 		if event.AgentID != nil && *event.AgentID != "" {
 			return fail()
 		}
+		normalized, recognized := normalizeEvent(event)
+		if ended && recognized {
+			switch normalized.Type {
+			case runtime.EventUsage, runtime.EventContextUsage, runtime.EventTurnFinished:
+			default:
+				return fail()
+			}
+		}
 		switch data := event.Data.(type) {
 		case *sdk.SessionStartData:
 			if started || data.SessionID != sessionID || data.Context == nil ||
@@ -120,6 +128,10 @@ func savedQuestionTurn(events []sdk.SessionEvent, sessionID, worktree string, st
 			}
 			result.Payload = data.Content
 			result.TurnID = turnID
+		case *sdk.AssistantMessageDeltaData:
+			if !started || !turnStarted || messageID == "" {
+				return fail()
+			}
 		case *sdk.AssistantTurnEndData:
 			if !turnStarted || result.Payload == "" || data.TurnID != turnID {
 				return fail()
@@ -166,7 +178,7 @@ func savedQuestionTurn(events []sdk.SessionEvent, sessionID, worktree string, st
 		case *sdk.ToolExecutionStartData, *sdk.ToolExecutionCompleteData:
 			result.Payload, turnStarted, ended, shutdown = "", false, false, false
 		}
-		if normalized, ok := normalizeEvent(event); ok {
+		if recognized {
 			switch normalized.Type {
 			case runtime.EventExecution, runtime.EventUsage, runtime.EventOutput:
 				result.Events = append(result.Events, normalized)
