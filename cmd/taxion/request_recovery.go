@@ -23,6 +23,8 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+var errNoRecordedPlannerAttempt = errors.New("request recovery has no recorded Planner attempt")
+
 type plannerAttemptEvidence struct {
 	Version       int    `json:"version"`
 	Phase         string `json:"phase"`
@@ -209,7 +211,7 @@ func requestRecoveryCommand(args []string, output io.Writer) (returnErr error) {
 		return fmt.Errorf("request recovery requires the saved Copilot native session; this provider has no supported saved-turn reader")
 	}
 	binding, terminal, cleanup, sessionAt, err := requestRecoveryRecords(state, *id)
-	if err != nil && !request.AssociateLegacy {
+	if err != nil && !(request.AssociateLegacy && errors.Is(err, errNoRecordedPlannerAttempt)) {
 		return err
 	}
 	if request.AssociateLegacy {
@@ -306,6 +308,9 @@ func requestRecoveryCommand(args []string, output io.Writer) (returnErr error) {
 		}
 		fresh, freshTerminal, freshCleanup, freshSessionAt, err := requestRecoveryRecords(*current, *id)
 		if request.AssociateLegacy {
+			if err != nil && !errors.Is(err, errNoRecordedPlannerAttempt) {
+				return err
+			}
 			if hasPlannerAttemptRecords(*current, *id) {
 				return fmt.Errorf("legacy association evidence changed")
 			}
@@ -633,6 +638,9 @@ func requestRecoveryRecords(state store.Workspace, operationID string) (plannerA
 				recovered = true
 			}
 		}
+	}
+	if attempts == 0 && sessions == 0 && sends == 0 && terminals == 0 && cleanups == 0 {
+		return initial, terminal, cleanup, time.Time{}, errNoRecordedPlannerAttempt
 	}
 	if attempts != 1 || sessions != 1 || sends != 1 || terminals > 1 || cleanups > 1 ||
 		attemptSequence >= sessionSequence || sessionSequence >= sendSequence ||

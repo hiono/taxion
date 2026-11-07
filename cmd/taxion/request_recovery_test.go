@@ -71,8 +71,10 @@ func TestRequestRecoveryLegacyCancelPreservesCheckpointUsageAndReleasesStore(t *
 		Events:      []runtime.Event{{Type: runtime.EventOutput, Payload: string(answerBytes)}},
 	}
 	oldObserver := observeSavedPlannerTurn
+	observations := 0
 	t.Cleanup(func() { observeSavedPlannerTurn = oldObserver })
 	observeSavedPlannerTurn = func(binding plannerAttemptEvidence, cli, base string, confirmed bool) (runtime.SavedTurn, error) {
+		observations++
 		if binding.SessionID != turn.SessionID || binding.Worktree != checkpoint.Task.Worktree || !confirmed {
 			t.Fatal("native observation lost its exact saved binding")
 		}
@@ -82,6 +84,34 @@ func TestRequestRecoveryLegacyCancelPreservesCheckpointUsageAndReleasesStore(t *
 		"--reason", "reconcile and release only the stopped request", "--evidence", "specific-original-process-tree-stopped",
 		"--session", turn.SessionID, "--input-hash", turn.InputHash, "--associate-legacy", "--confirm-stopped",
 		"--accept-uncertainty", "--resolution", "cancel"}
+	var planningSequence uint64
+	for _, record := range before.Records.Requests {
+		if record.RequestID == operation.ID && record.Kind == "planning" {
+			planningSequence++
+		}
+	}
+	legacyPayload := `{"legacyObservation":true}`
+	legacyRecords := []store.RequestRecord{
+		{RequestID: operation.ID, Kind: "planning", Sequence: planningSequence + 1, At: now,
+			Payload: legacyPayload, Hash: core.SHA256Hex([]byte(legacyPayload))},
+		{RequestID: operation.ID, Kind: "planning", Sequence: planningSequence + 2, At: now.Add(-time.Second),
+			Payload: legacyPayload, Hash: core.SHA256Hex([]byte(legacyPayload))},
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		state.Records.Requests = append(append([]store.RequestRecord{}, before.Records.Requests...), legacyRecords...)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &bytes.Buffer{}); err == nil || observations != 0 {
+		t.Fatal("legacy association bypassed ambiguous receipt ordering", err, observations)
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		state.Records.Requests = before.Records.Requests
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	var preview bytes.Buffer
 	if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &preview); err != nil {
 		t.Fatal(err)

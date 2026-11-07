@@ -578,8 +578,10 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				if !turnStarted || turnEnded {
 					return result, fmt.Errorf("taxion: question output delta arrived outside its main turn")
 				}
-			case runtime.EventContextUsage:
+			case runtime.EventContextUsage, "acp_connection", "acp_capabilities":
 				break
+			case "acp_usage_unavailable":
+				return result, fmt.Errorf("taxion: question turn has unavailable provider usage; not zero")
 			default:
 				return result, fmt.Errorf("taxion: question runtime emitted an unsupported event")
 			case runtime.EventTurnEnded, runtime.EventTurnFinished:
@@ -593,7 +595,7 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				if !turnStarted || !turnEnded || strings.TrimSpace(output) == "" {
 					return result, fmt.Errorf("taxion: question ended without one complete main-agent answer")
 				}
-				if err := drainCompletedTurn(events, &result.Usage, &lastSequence); err != nil {
+				if err := drainCompletedTurn(ctx, events, &result.Usage, &lastSequence); err != nil {
 					return result, err
 				}
 				if err := validateQuestionUsage(result.Usage); err != nil {

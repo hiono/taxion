@@ -241,6 +241,48 @@ func TestSearchRejectsUnsequencedEvents(t *testing.T) {
 	}
 }
 
+func TestSearchAllowsOnlyBoundManagedAcquisition(t *testing.T) {
+	for _, scenario := range []string{"managed", "other-tool", "unknown", "permission", "incomplete"} {
+		t.Run(scenario, func(t *testing.T) {
+			_, _, base, _ := questionFixture(t)
+			base.role = "ORCHESTRATOR"
+			activity := runtime.Event{Type: runtime.EventExecution, Payload: `{"phase":"tool-start","callId":"search-call","tool":"taxion_search"}`}
+			switch scenario {
+			case "other-tool":
+				activity.Payload = `{"phase":"tool-start","callId":"search-call","tool":"bash"}`
+			case "unknown":
+				activity.Type = "unknown-provider-event"
+			case "permission":
+				activity.Type = runtime.EventPermission
+			}
+			stream := []runtime.Event{
+				{Type: runtime.EventInput, MessageID: "search-input"},
+				{Type: runtime.EventTurnStarted, TurnID: "search-turn"},
+				activity,
+			}
+			if scenario != "incomplete" {
+				stream = append(stream, runtime.Event{Type: runtime.EventExecution, Payload: `{"phase":"tool-complete","callId":"search-call","success":true}`})
+			}
+			stream = append(stream,
+				runtime.Event{Type: runtime.EventOutput, MessageID: "search-input", TurnID: "search-turn", Payload: "answer"},
+				runtime.Event{Type: runtime.EventTurnEnded, TurnID: "search-turn"},
+				runtime.Event{Type: runtime.EventTurnFinished})
+			events := make(chan runtime.Event, len(stream))
+			for i, event := range stream {
+				event.Sequence = uint64(i + 1)
+				events <- event
+			}
+			worker := &questionRuntime{configuredRuntime: base, events: events}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			_, err := RunSearchTurn(ctx, worker, "task", "query")
+			if (err == nil) != (scenario == "managed") || worker.stops != 1 {
+				t.Fatal("managed acquisition or prohibited activity misclassified", scenario, err)
+			}
+		})
+	}
+}
+
 func TestIsolatedNonAccountModesDoNotReadQuota(t *testing.T) {
 	for _, mode := range []string{"off", "flow", "provider"} {
 		t.Run(mode, func(t *testing.T) {

@@ -84,6 +84,8 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 	var messageID, turnID string
 	var sequence uint64
 	started, answered := false, false
+	searchCallID := ""
+	searchComplete := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -114,10 +116,38 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 				}
 				started, turnID = true, event.TurnID
 			case runtime.EventOutput:
-				if !started || event.MessageID != messageID || event.TurnID != turnID || strings.TrimSpace(event.Payload) == "" {
+				if !started || event.MessageID != messageID || event.TurnID != turnID {
 					return turn, fmt.Errorf("taxion: search answer is outside its main turn")
 				}
-				answered = true
+				if strings.TrimSpace(event.Payload) != "" {
+					answered = true
+				}
+			case runtime.EventOutputDelta:
+				if !started {
+					return turn, fmt.Errorf("taxion: search activity is outside its main turn")
+				}
+			case runtime.EventContextUsage:
+			case runtime.EventExecution:
+				var observation core.ExecutionObservation
+				if !started || core.DecodeGraphInput(strings.NewReader(event.Payload), &observation) != nil ||
+					observation.CallID == "" {
+					return turn, fmt.Errorf("taxion: search execution observation is invalid")
+				}
+				switch observation.Phase {
+				case "tool-start":
+					if observation.Tool != "taxion_search" || searchCallID != "" {
+						return turn, fmt.Errorf("taxion: search attempted an unauthorized acquisition")
+					}
+					searchCallID = observation.CallID
+				case "tool-complete":
+					if observation.CallID != searchCallID || searchComplete ||
+						observation.Success == nil || !*observation.Success {
+						return turn, fmt.Errorf("taxion: search acquisition completion is ambiguous")
+					}
+					searchComplete = true
+				default:
+					return turn, fmt.Errorf("taxion: search emitted unsupported execution activity")
+				}
 			case runtime.EventUsage:
 				var usage core.DispatchUsage
 				if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &usage); err != nil {
@@ -127,15 +157,18 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 			case runtime.EventFailed, runtime.EventCancelled:
 				return turn, fmt.Errorf("taxion: search runtime failed or was cancelled; provider details withheld")
 			case runtime.EventTurnEnded:
-				if !started || !answered || event.TurnID != turnID || sequence == 0 {
+				if !started || !answered || event.TurnID != turnID || sequence == 0 ||
+					searchCallID != "" && !searchComplete {
 					return turn, fmt.Errorf("taxion: search ended without a bound main-agent answer")
 				}
-				if err := drainCompletedTurn(events, &turn.Usage, &sequence); err != nil {
+				if err := drainCompletedTurn(ctx, events, &turn.Usage, &sequence); err != nil {
 					return turn, err
 				}
 				return turn, checkQuota()
 			case runtime.EventTurnFinished:
 				return turn, fmt.Errorf("taxion: search became idle without a bound main-agent turn end")
+			default:
+				return turn, fmt.Errorf("taxion: search emitted an unsupported event")
 			}
 		}
 	}

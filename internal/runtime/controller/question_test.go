@@ -97,6 +97,76 @@ func questionEventsWithUsage(answer, usage string) chan runtime.Event {
 
 const savedQuestionAnswer = `{"confirmed":[{"text":"The saved Task is Active.","sources":["/task/task/status","/observation/contentHash"]}],"assumptions":[],"unconfirmed":["Live runtime state has not been queried."]}`
 
+func TestCompletedTurnWaitsForProviderBoundary(t *testing.T) {
+	for _, scenario := range []string{"idle", "child", "execution", "closed", "timeout"} {
+		t.Run(scenario, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			events := make(chan runtime.Event, 1)
+			done := make(chan error, 1)
+			go func() {
+				var usage []core.DispatchUsage
+				sequence := uint64(1)
+				done <- drainCompletedTurn(ctx, events, &usage, &sequence)
+			}()
+			select {
+			case err := <-done:
+				t.Fatal("transiently empty stream accepted before provider boundary", err)
+			case <-time.After(20 * time.Millisecond):
+			}
+			switch scenario {
+			case "idle":
+				events <- runtime.Event{Type: runtime.EventTurnFinished, Sequence: 2}
+			case "child":
+				events <- runtime.Event{Type: runtime.EventContextUsage, AgentID: "child", Sequence: 2}
+			case "execution":
+				events <- runtime.Event{Type: runtime.EventExecution, Sequence: 2}
+			case "closed":
+				close(events)
+			case "timeout":
+				cancel()
+			}
+			err := <-done
+			if (err == nil) != (scenario == "idle" || scenario == "closed") {
+				t.Fatal("provider boundary or delayed activity incorrectly classified", scenario, err)
+			}
+		})
+	}
+}
+
+func TestQuestionAcceptsOpenACPMetadataButNotUnknownUsage(t *testing.T) {
+	for _, unavailable := range []bool{false, true} {
+		db, path, base, selected := questionFixture(t)
+		base.role = "ORCHESTRATOR"
+		stream := make(chan runtime.Event, 9)
+		metadata := []runtime.Event{
+			{Type: "acp_connection", Payload: `{"transport":"stdio"}`},
+			{Type: "acp_capabilities", Payload: `{"usage":"latest-assistant-message-not-total"}`},
+		}
+		if unavailable {
+			metadata = append(metadata, runtime.Event{Type: "acp_usage_unavailable", Payload: `{"reason":"omitted usage"}`})
+		}
+		for i, event := range metadata {
+			event.Sequence = uint64(i + 1)
+			stream <- event
+		}
+		original := questionEvents(savedQuestionAnswer)
+		for i := 0; i < 6; i++ {
+			event := <-original
+			event.Sequence += uint64(len(metadata))
+			stream <- event
+		}
+		worker := &questionRuntime{configuredRuntime: base, events: stream}
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		result, err := AskQuestion(ctx, db, filepath.Join(filepath.Dir(path), "ledger.json"), "task", "status?", selected.Config, worker)
+		cancel()
+		if unavailable && (err == nil || result.Answer != nil) ||
+			!unavailable && (err != nil || result.Answer == nil) || worker.stops != 1 {
+			t.Fatal("provider metadata or unknown usage incorrectly accepted", unavailable, result, err)
+		}
+	}
+}
+
 func questionFixture(t *testing.T, guidance ...*core.BudgetGuidancePolicy) (*store.Store, string, *configuredRuntime, config.Resolution) {
 	t.Helper()
 	original, _, worker, resolved := executionConfigurationFixture(t, guidance...)
