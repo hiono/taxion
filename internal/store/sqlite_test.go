@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -290,13 +292,22 @@ func TestFailedReviewTransactionCancellationDoesNotCommit(t *testing.T) {
 }
 
 type failedReviewFaultConnector struct {
-	location string
-	mode     string
-	cancel   context.CancelFunc
-	failure  error
+	driver        driver.Driver
+	location      string
+	mode          string
+	cancel        context.CancelFunc
+	failure       error
+	queryPrefix   string
+	statement     string
+	safetyContext context.Context
 }
 
-func (c *failedReviewFaultConnector) Driver() driver.Driver { return &sqlite.Driver{} }
+func (c *failedReviewFaultConnector) Driver() driver.Driver {
+	if c.driver != nil {
+		return c.driver
+	}
+	return &sqlite.Driver{}
+}
 
 func (c *failedReviewFaultConnector) Connect(context.Context) (driver.Conn, error) {
 	conn, err := c.Driver().Open(c.location)
@@ -329,7 +340,23 @@ func (c *failedReviewFaultConn) ExecContext(ctx context.Context, query string, a
 	if c.fault.mode == "rollback-error" && strings.Contains(query, "INSERT INTO workspace_state") {
 		return nil, c.fault.failure
 	}
+	ctx, query = c.statementContext(ctx, query)
 	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+}
+
+func (c *failedReviewFaultConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	ctx, query = c.statementContext(ctx, query)
+	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+}
+
+func (c *failedReviewFaultConn) statementContext(ctx context.Context, query string) (context.Context, string) {
+	if c.fault.statement != "" && strings.HasPrefix(query, c.fault.queryPrefix) {
+		if ctx.Done() == nil {
+			ctx = c.fault.safetyContext
+		}
+		return ctx, c.fault.statement
+	}
+	return ctx, query
 }
 
 type failedReviewFaultTx struct {
@@ -360,6 +387,110 @@ func (tx *failedReviewFaultTx) Rollback() error {
 	return nil
 }
 
+var failedReviewStatementFunctionID atomic.Uint64
+
+func TestFailedReviewInFlightSQLiteCancellation(t *testing.T) {
+	for _, test := range []struct {
+		name, queryPrefix string
+		write             bool
+		deadline          bool
+	}{
+		{"workspace-row", "SELECT ledger_json", false, false},
+		{"workspace-row-deadline", "SELECT ledger_json", false, true},
+		{"document-strings", "SELECT hash,content,bytes FROM workspace_strings", false, false},
+		{"pooled-string-write", "INSERT INTO workspace_strings", true, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "inflight.db")
+			s, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			if _, err := s.InitializeWorkspace(Workspace{}); err != nil {
+				t.Fatal(err)
+			}
+			before, err := s.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			started := make(chan struct{})
+			var once sync.Once
+			function := fmt.Sprintf("taxion_statement_started_%d", failedReviewStatementFunctionID.Add(1))
+			if err := sqlite.RegisterScalarFunction(function, 0, func(*sqlite.FunctionContext, []driver.Value) (driver.Value, error) {
+				once.Do(func() { close(started) })
+				return int64(0), nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			location, err := workspaceLocation(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			safety, stopSafety := context.WithTimeout(t.Context(), 3*time.Second)
+			defer stopSafety()
+			faultDB := sql.OpenDB(&failedReviewFaultConnector{
+				driver: s.db.Driver(), location: location.String(), queryPrefix: test.queryPrefix, safetyContext: safety,
+				statement: "WITH RECURSIVE n(x) AS (SELECT " + function +
+					"() UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT sum(x) FROM n",
+			})
+			defer faultDB.Close()
+			subject := &Store{db: faultDB}
+			ctx, cancel := context.WithCancel(t.Context())
+			wantError := context.Canceled
+			if test.deadline {
+				cancel()
+				ctx, cancel = context.WithTimeout(t.Context(), 500*time.Millisecond)
+				wantError = context.DeadlineExceeded
+			}
+			defer cancel()
+			if !test.deadline {
+				go func() {
+					select {
+					case <-started:
+						cancel()
+					case <-ctx.Done():
+					}
+				}()
+			}
+			result := workspaceUpdateResult{}
+			if test.write {
+				err = subject.updateWorkspaceLocked(ctx, func(state *Workspace) error {
+					state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{
+						ID: "cancelled-statement", Title: strings.Repeat("x", 600),
+					})
+					return nil
+				}, &result)
+			} else {
+				_, err = subject.LoadWorkspaceContext(ctx)
+			}
+			select {
+			case <-started:
+			default:
+				t.Fatalf("SQLite statement never began executing: %v", err)
+			}
+			if safety.Err() != nil {
+				t.Fatalf("statement reached fixture safety timeout instead of caller cancellation: %v", err)
+			}
+			if !errors.Is(err, wantError) {
+				t.Fatalf("in-flight statement did not honor caller cancellation: %v", err)
+			}
+			if test.write && result.failedReviewPersistence(err) == FailedReviewCommitted {
+				t.Fatal("cancelled statement claimed a successful commit")
+			}
+			actual, err := s.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeHash, _ := core.CanonicalSHA256(before)
+			afterHash, _ := core.CanonicalSHA256(actual)
+			if beforeHash != afterHash {
+				t.Fatal("cancelled SQLite statement changed persisted workspace")
+			}
+		})
+	}
+}
+
 func TestFailedReviewTransactionFaultOutcomes(t *testing.T) {
 	for _, mode := range []string{"ambiguous-commit", "rollback-error", "cancel-after-commit"} {
 		t.Run(mode, func(t *testing.T) {
@@ -368,6 +499,7 @@ func TestFailedReviewTransactionFaultOutcomes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			defer s.Close()
 			original := s.db
 			location, err := workspaceLocation(path)

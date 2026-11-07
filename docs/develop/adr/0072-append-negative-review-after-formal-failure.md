@@ -77,6 +77,10 @@ shutdown はその失敗記録より後でもよいが、turn 終了以後、同
 後続の main-agent 実行・tool 実行や曖昧な native 履歴は引き続き拒否する。
 保存形式の読取り・更新でも元の FAILED receipt の内容と時刻を照合する。
 処理中の workspace 変更は transaction 内で再確認して拒否する。
+観測用のtransactionでは、同じcontextを`QueryRowContext`・`QueryContext`・`ExecContext`へ渡す。
+文書と文字列プールの補助処理も同じ接続で実行し、途中でbackground contextへ戻さない。
+標準APIにcontext引数のない`Commit`・`Rollback`と、メモリ上の検証・JSON処理の強制中断は保証しない。
+取消時も、確定・取り消しを証明できた範囲だけで保存結果を分類する。
 追記記録の削除・入れ子の書換えと、元 Dispatch の指示・結果・利用量の変更は拒否する。
 現在の Task・Flow・owner・operation・既存 receipt は変更しない。
 別の稼働実行があれば拒否し、同じ旧 Flow の claim は停止確認と完全一致した場合だけ保持したまま観測する。

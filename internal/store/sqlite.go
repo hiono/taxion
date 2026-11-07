@@ -144,6 +144,23 @@ func (s *Store) LoadWorkspace() (Workspace, error) {
 	return s.LoadWorkspaceContext(context.Background())
 }
 
+type workspaceContextTx struct {
+	*sql.Tx
+	ctx context.Context
+}
+
+func (tx workspaceContextTx) QueryRow(query string, args ...any) *sql.Row {
+	return tx.Tx.QueryRowContext(tx.ctx, query, args...)
+}
+
+func (tx workspaceContextTx) Query(query string, args ...any) (*sql.Rows, error) {
+	return tx.Tx.QueryContext(tx.ctx, query, args...)
+}
+
+func (tx workspaceContextTx) Exec(query string, args ...any) (sql.Result, error) {
+	return tx.Tx.ExecContext(tx.ctx, query, args...)
+}
+
 // LoadWorkspaceContext observes a workspace using the caller's cancellation
 // context. Waiting for the Store's in-process mutex remains outside its bound.
 func (s *Store) LoadWorkspaceContext(ctx context.Context) (Workspace, error) {
@@ -154,7 +171,7 @@ func (s *Store) LoadWorkspaceContext(ctx context.Context) (Workspace, error) {
 		return Workspace{}, err
 	}
 	defer tx.Rollback()
-	state, err := s.loadWorkspace(tx)
+	state, err := s.loadWorkspace(workspaceContextTx{Tx: tx, ctx: ctx})
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -357,7 +374,8 @@ func (s *Store) updateWorkspaceLocked(ctx context.Context, update func(*Workspac
 			}
 		}
 	}()
-	state, err := s.loadWorkspace(tx)
+	statements := workspaceContextTx{Tx: tx, ctx: ctx}
+	state, err := s.loadWorkspace(statements)
 	if err != nil {
 		return err
 	}
@@ -555,15 +573,15 @@ func (s *Store) updateWorkspaceLocked(ctx context.Context, update func(*Workspac
 	if result != nil {
 		result.started = true
 	}
-	if err := saveWorkspaceDocuments(tx, state); err != nil {
+	if err := saveWorkspaceDocuments(statements, state); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO workspace_state(id,revision,ledger_json,graph_json,graph_present)
+	if _, err := statements.Exec(`INSERT INTO workspace_state(id,revision,ledger_json,graph_json,graph_present)
 		VALUES(1,1,'{}','{}',?) ON CONFLICT(id)
 		DO UPDATE SET revision=workspace_state.revision+1,graph_present=excluded.graph_present`, boolInt(state.HasGraph)); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO workspace_records VALUES(1,'{}') ON CONFLICT(id) DO NOTHING`); err != nil {
+	if _, err := statements.Exec(`INSERT INTO workspace_records VALUES(1,'{}') ON CONFLICT(id) DO NOTHING`); err != nil {
 		return err
 	}
 	return tx.Commit()

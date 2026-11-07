@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,7 +18,7 @@ type documentString struct {
 
 // Pool long JSON string tokens without re-encoding the surrounding document:
 // RawMessage key order and the exact bytes of historical contracts must survive.
-func poolDocumentStrings(tx *sql.Tx, data string) (string, string, error) {
+func poolDocumentStrings(tx workspaceWriter, data string) (string, string, error) {
 	var content strings.Builder
 	references := []documentString{}
 	last := 0
