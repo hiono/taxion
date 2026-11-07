@@ -53,6 +53,7 @@ Setup and discovery:
 
 Requests, planning and Task contracts:
   request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --timeout, --max-ai-credits)
+  request recover     Preview or apply hash-bound, nonexecuting reconciliation of one saved Planner answer (--id, --preview or --apply --expected-hash)
   task create         Create a task (--title and --repo required)
   task list           List unarchived tasks ([--repo] filter, [--json], [--include-archived])
   task archive        Remove stopped tasks and associated work from normal views, keeping history (--tasks, --actor, --source, --reason; --dry-run then --expected-hash)

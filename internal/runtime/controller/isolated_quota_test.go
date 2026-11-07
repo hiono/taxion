@@ -47,11 +47,11 @@ func TestIsolatedQuotaFinalGateAndCleanup(t *testing.T) {
 				db, path, base, selected := questionFixture(t, policy)
 				base.role = "ORCHESTRATOR"
 				worker := &isolatedQuotaRuntime{
-					questionRuntime: &questionRuntime{configuredRuntime: base, events: questionEventsWithUsage(savedQuestionAnswer, "")},
+					questionRuntime: &questionRuntime{configuredRuntime: base, events: questionEventsWithUsage(savedQuestionAnswer, `{"model":"fixture","inputTokens":10,"outputTokens":5}`)},
 					policy:          policy, quota: observedQuota(),
 				}
 				if entry == "planner" {
-					worker.events = questionEventsWithUsage(`{"recommendation":"HUMAN_REQUIRED","confirmed":[{"text":"Task status","sources":["/planner/task/status"]}],"assumptions":[],"unconfirmed":["Live state unknown."]}`, "")
+					worker.events = questionEventsWithUsage(`{"recommendation":"HUMAN_REQUIRED","confirmed":[{"text":"Task status","sources":["/planner/task/status"]}],"assumptions":[],"unconfirmed":["Live state unknown."]}`, `{"model":"fixture","inputTokens":10,"outputTokens":5}`)
 				}
 				reset := time.Now().Add(8 * 24 * time.Hour)
 				worker.quota.ResetAt = &reset
@@ -97,7 +97,7 @@ func TestIsolatedQuotaFinalGateAndCleanup(t *testing.T) {
 					}
 					result, runErr := ask(ctx, db, filepath.Join(filepath.Dir(path), "ledger.json"), "task", "status?", selected.Config, worker)
 					err, observations, initial = runErr, result.QuotaObservations, result.BudgetGuidance
-					accepted = result.Answer != nil
+					accepted = runErr == nil && result.Answer != nil
 				}
 				if worker.stops != 1 || worker.reads != 2 || len(observations) != 1 || len(worker.sends) != 1 ||
 					initial == nil || *initial.Account.RemainingPercentage != 76 {
@@ -111,7 +111,10 @@ func TestIsolatedQuotaFinalGateAndCleanup(t *testing.T) {
 					count := 0
 					for _, receipt := range state.Records.Requests {
 						if receipt.Kind == "planning" {
-							count++
+							var fields map[string]json.RawMessage
+							if json.Unmarshal([]byte(receipt.Payload), &fields) == nil && fields["observation"] != nil {
+								count++
+							}
 							if receipt.RequestID == "" || receipt.Hash != receiptHash(receipt.Payload) {
 								t.Fatal("isolated quota evidence not bound to session or contents")
 							}

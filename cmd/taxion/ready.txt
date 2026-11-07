@@ -35,6 +35,42 @@ report the exact missing operation contract; do not guess fields or approvals.
 | Inspect results or continue stopped work | task graph, records show, workflow show/recover | distinguish saved state from live processes and Git; reuse successful work |
 | Handle sources, records and portability | specification, memory, records, workspace, git | ingestion, transmission, publication and restore permissions are separate |
 
+### Planner and document writing
+
+Planner is implemented, not merely planned. Use `taxion request --help` for
+interactive planning of a new request: `/plan` explicitly starts a paid Planner,
+and `/approve` selects execution of the displayed proposal within its approved
+configuration, budget and deadline. Do not start request to repeat an existing plan.
+For advice about an existing Task, use `taxion conversation plan --help`; this
+starts a separately bounded ORCHESTRATOR session over saved context, not a Coder
+or Reviewer. A proposal or recommendation is not approval or a quality verdict.
+`proposal:null` with `HUMAN_REQUIRED` means clarification is needed, not an
+accepted plan or an unimplemented Planner.
+
+For an existing held Flow, `workflow planning-context` reads its planning basis.
+`workflow planner-draft` records eligible advice as an unapproved instruction
+supplement; `workflow planner-action` records a non-execution decision.
+Use each operation's --help. An instruction supplement needs existing draft
+approval before it can enter a role instruction.
+`taxion request recover` provides a nonexecuting preview and exact-hash apply for
+request Planner and durably bound side-question attempts. It verifies the native
+main turn, sent input, source, Task, configuration, worktree, original deadline
+and usage. A missing terminal receipt does not require another model send.
+Explicit legacy association supports v0.8.2 version-2 request checkpoints; it is
+a new evidence-bound decision, not a fabricated historical receipt or runtime
+configuration binding. Older version-1 checkpoints, unbound legacy side questions
+and providers without this saved-turn reader fail closed.
+Invalid or uncertain turns retain the admission hold. Preserve their evidence;
+use only the exact stopped-process reconciliation and cancellation below, never
+rewrite the checkpoint, resend Planner or substitute an unrelated workflow.
+
+There is no standalone Writer command or WRITER execution role. Authoring
+documents is CODER work under an approved Task whose scope includes those files,
+with validation and independent REVIEWER acceptance. Use the intake/proposal/
+confirm and workflow operations below; do not invent a Writer session or treat
+Planner advice as reviewed documentation. Public-text writer/reviewer receipt
+identifiers describe publication evidence, not a general Writer execution API.
+
 The following sections cover initial inspection, requests and approval, execution,
 results and recovery. JSON examples illustrate schemas, not actual values or approval.
 
@@ -500,6 +536,34 @@ its own reserved interval. Late or incomplete results are not promoted to succes
 Remaining mandatory-stage time/native allowances cannot be borrowed by Coder.
 Estimates are not completion guarantees; expand outer limits only with new approval.
 Changing a saved stage plan requires a new contract, never editing old state.
+
+## Recover a saved request Planner answer
+
+For an interrupted request Planner or direct side question, inspect the saved
+operation first. Do not resume or resend a paid attempt with uncertain delivery.
+Use `taxion request recover --id ID --actor ACTOR --source SOURCE --reason REASON
+--evidence REF --preview` to read-only verify the native saved turn and exact
+request/task/configuration/source/deadline/usage bindings. Review the answer,
+questions, limitations and preview hash. Only then repeat the exact decision
+fields with `--apply --expected-hash HASH`. Apply adopts the completed answer,
+checkpoint, receipt and deduplicated usage atomically; it does not send, abort,
+extend limits, or approve execution. Native history is reobserved after acquiring
+the exclusive operation lease; live ownership, history drift and conflicting
+bindings refuse acceptance.
+For a v0.8.2 version-2 request without attempt records, add `--associate-legacy
+--session ID --input-hash SHA256 --confirm-stopped` and cite the original process
+tree stop using `--evidence`. The hash binds unchanged native user input containing
+the original request and planning Task. Historical configuration uncertainty is
+reported, not invented away. This association does not support version-1
+checkpoints, unbound old side questions or other providers.
+`--resolution continue` preserves questions/unapproved advice; expired deadlines
+and unknown cumulative usage still block execution. To end only this operation,
+preview `--resolution cancel`. Missing routine shutdown/aggregate usage or an
+invalid answer requires stopped-process evidence and `--accept-uncertainty`;
+that consent permits cancellation only, never continuation. Original checkpoint,
+answer references, history and known usage floors remain. Unknown usage is not
+zero. A stale owner string can be reconciled only when the lease is actually
+available. After cancellation, follow-on work must pass its ordinary gates.
 
 ## Continue according to results
 

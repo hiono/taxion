@@ -85,6 +85,7 @@ func (answer QuestionAnswer) MarshalJSON() ([]byte, error) {
 
 type QuestionResult struct {
 	SessionID         string               `json:"sessionId"`
+	AttemptID         string               `json:"attemptId,omitempty"`
 	Context           QuestionContext      `json:"context"`
 	Answer            *QuestionAnswer      `json:"answer,omitempty"`
 	Usage             []core.DispatchUsage `json:"usage"`
@@ -94,6 +95,7 @@ type QuestionResult struct {
 	BudgetSupplement  string               `json:"budgetSupplement,omitempty"`
 	InstructionSent   bool                 `json:"instructionSent,omitempty"`
 	InvalidAnswer     string               `json:"invalidAnswer,omitempty"`
+	Redacted          bool                 `json:"redacted,omitempty"`
 }
 
 func questionContextsEqual(current, supplied QuestionContext) (bool, error) {
@@ -329,38 +331,96 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 	if err := checkOperation(&state, ctx, taskID, ""); err != nil {
 		return result, err
 	}
-	uncertainExecution := true
-	if _, inherited := ctx.Value(operationKey{}).(store.Operation); !inherited {
+	var operation *store.Operation
+	sessionStopped, questionCompleted := false, false
+	if inherited, ok := ctx.Value(operationKey{}).(store.Operation); ok {
+		operation = &inherited
+	} else {
 		deadline, _ := ctx.Deadline()
 		lease, lockErr := db.LockOperation()
 		if lockErr != nil {
 			return result, lockErr
 		}
 		defer func() { err = errors.Join(err, lease.Close()) }()
-		operation, claimErr := lease.Claim(store.Operation{
+		claimed, claimErr := lease.Claim(store.Operation{
 			Version: 1, ID: "question-" + rand.Text(), Kind: "question", TaskID: taskID,
 			State: "RUNNING", Phase: "QUESTION", Owner: rand.Text(), Deadline: deadline,
 		}, false)
 		if claimErr != nil {
 			return result, claimErr
 		}
+		operation = &claimed
 		defer func() {
-			operation.State = "COMPLETED"
-			if uncertainExecution {
-				operation.State = "BLOCKED"
+			operation.State = "BLOCKED"
+			if questionCompleted && sessionStopped {
+				operation.State = "COMPLETED"
 			}
-			err = errors.Join(err, db.SaveOperation(operation), db.ReleaseOperation(operation.ID, operation.Owner))
+			err = errors.Join(err, db.SaveOperation(*operation), db.ReleaseOperation(operation.ID, operation.Owner))
 		}()
+	}
+	if operation == nil {
+		return result, fmt.Errorf("taxion: question has no durable operation identity")
+	}
+	attemptID := rand.Text()
+	result.AttemptID = attemptID
+	inputHash := core.SHA256Hex(input)
+	sourceHash := result.Context.Observation.ContentHash
+	taskHash, err := core.CanonicalSHA256(result.Context.Task.Task)
+	if err != nil {
+		return result, err
+	}
+	selectionHash, err := core.CanonicalSHA256(selected)
+	if err != nil {
+		return result, err
+	}
+	attempt := struct {
+		Version       int    `json:"version"`
+		Phase         string `json:"phase"`
+		AttemptID     string `json:"attemptId"`
+		OperationID   string `json:"operationId"`
+		TaskID        string `json:"taskId"`
+		TaskHash      string `json:"taskHash"`
+		ConfigHash    string `json:"configHash"`
+		SelectionHash string `json:"selectionHash"`
+		Worktree      string `json:"worktree"`
+		SessionID     string `json:"sessionId,omitempty"`
+		InputHash     string `json:"inputHash"`
+		PromptHash    string `json:"promptHash,omitempty"`
+		SourceHash    string `json:"sourceHash"`
+		Deadline      string `json:"deadline,omitempty"`
+	}{1, "attempt", attemptID, operation.ID, taskID, taskHash, worker.ConfigHash(), selectionHash, worker.Worktree(), "", inputHash, "", sourceHash, ""}
+	if deadline, ok := ctx.Deadline(); ok {
+		attempt.Deadline = deadline.UTC().Format(time.RFC3339Nano)
+	}
+	saveAttempt := func(phase string, value any) error {
+		attempt.Phase = phase
+		payload, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		return db.AppendRequestRecord(operation.ID, "planning", string(payload))
+	}
+	if err := saveAttempt("attempt", attempt); err != nil {
+		return result, err
 	}
 	result.SessionID, err = worker.Start(ctx, taskID)
 	if err != nil {
 		return result, questionProviderError(ctx, "session creation", err)
 	}
+	attempt.SessionID = result.SessionID
+	if err := saveAttempt("session", attempt); err != nil {
+		return result, err
+	}
 	defer func() {
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		stopErr := worker.Stop(stopCtx, result.SessionID)
-		uncertainExecution = stopErr != nil
+		sessionStopped = stopErr == nil
+		err = errors.Join(err, saveAttempt("cleanup", struct {
+			AttemptID string `json:"attemptId"`
+			SessionID string `json:"sessionId"`
+			Stopped   bool   `json:"stopped"`
+		}{attemptID, result.SessionID, sessionStopped}))
 		err = errors.Join(err, questionProviderError(stopCtx, "session cleanup", stopErr))
 	}()
 	if err := worker.CheckServiceAccess(ctx, result.SessionID); err != nil {
@@ -423,10 +483,15 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 	if err != nil {
 		return result, questionProviderError(ctx, "event subscription", err)
 	}
-	if err := worker.Send(ctx, result.SessionID, string(input)+result.BudgetSupplement); err != nil {
+	prompt := string(input) + result.BudgetSupplement
+	attempt.PromptHash = core.SHA256Hex([]byte(prompt))
+	if err := saveAttempt("send-intent", attempt); err != nil {
+		return result, err
+	}
+	if err := worker.Send(ctx, result.SessionID, prompt); err != nil {
 		return result, questionProviderError(ctx, "instruction send", err)
 	}
-	result.InstructionSent = result.BudgetGuidance != nil
+	result.InstructionSent = true
 	lastQuotaCheck := time.Now()
 	if result.BudgetGuidance != nil && result.BudgetGuidance.Account != nil {
 		lastQuotaCheck = result.BudgetGuidance.Account.ObservedAt
@@ -440,6 +505,9 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 		return errors.Join(quotaErr, saveQuota(observation, quotaErr != nil))
 	}
 	var output string
+	turnStarted, turnEnded := false, false
+	var messageID, turnID string
+	var lastSequence uint64
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -459,8 +527,31 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 			if !ok {
 				return result, fmt.Errorf("taxion: question stream ended without a terminal turn")
 			}
+			if event.Sequence != 0 {
+				if event.Sequence <= lastSequence {
+					return result, fmt.Errorf("taxion: question runtime event sequence is ambiguous")
+				}
+				lastSequence = event.Sequence
+			} else {
+				return result, fmt.Errorf("taxion: question runtime event lacks a stable sequence")
+			}
 			switch event.Type {
+			case runtime.EventInput:
+				if event.AgentID != "" || messageID != "" || event.MessageID == "" {
+					return result, fmt.Errorf("taxion: question runtime input identity is ambiguous")
+				}
+				messageID = event.MessageID
+			case runtime.EventTurnStarted:
+				if event.AgentID != "" || messageID == "" || event.TurnID == "" ||
+					turnStarted || turnEnded || output != "" {
+					return result, fmt.Errorf("taxion: question runtime started an ambiguous turn")
+				}
+				turnStarted, turnID = true, event.TurnID
 			case runtime.EventOutput:
+				if event.AgentID != "" || event.MessageID != messageID || event.TurnID != turnID ||
+					!turnStarted || turnEnded {
+					return result, fmt.Errorf("taxion: question output arrived outside its main turn")
+				}
 				if len(event.Payload) > 64*1024 {
 					return result, fmt.Errorf("taxion: question answer exceeds the 64 KiB output ceiling")
 				}
@@ -477,17 +568,41 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 						return result, err
 					}
 				}
-			case runtime.EventFailed, runtime.EventCancelled:
+			case runtime.EventFailed, runtime.EventCancelled, runtime.EventExecution,
+				runtime.EventPermission, runtime.EventCompaction:
 				return result, fmt.Errorf("taxion: question runtime failed or was cancelled; provider details withheld")
-			case runtime.EventTurnFinished:
+			case runtime.EventOutputDelta:
+				if event.AgentID != "" || !turnStarted || turnEnded {
+					return result, fmt.Errorf("taxion: question output delta arrived outside its main turn")
+				}
+			case runtime.EventContextUsage:
+				break
+			default:
+				return result, fmt.Errorf("taxion: question runtime emitted an unsupported event")
+			case runtime.EventTurnEnded, runtime.EventTurnFinished:
+				if event.Type == runtime.EventTurnEnded {
+					if event.AgentID != "" || event.TurnID != turnID ||
+						!turnStarted || turnEnded || strings.TrimSpace(output) == "" {
+						return result, fmt.Errorf("taxion: question runtime ended an ambiguous turn")
+					}
+					turnEnded = true
+				}
+				if !turnStarted || !turnEnded || strings.TrimSpace(output) == "" {
+					return result, fmt.Errorf("taxion: question ended without one complete main-agent answer")
+				}
+				if err := drainCompletedTurn(events, &result.Usage, &lastSequence); err != nil {
+					return result, err
+				}
+				if err := validateQuestionUsage(result.Usage); err != nil {
+					return result, err
+				}
 				if err := recheck(); err != nil {
 					return result, err
 				}
-				if err := checkQuota(); err != nil {
-					return result, err
-				}
 				var answer QuestionAnswer
-				if err := core.DecodeGraphInput(strings.NewReader(output), &answer); err != nil {
+				result.Redacted = core.Redact(output) != output
+				answer, err = DecodeQuestionAnswer(output)
+				if err != nil {
 					result.InvalidAnswer = output
 					return result, fmt.Errorf("taxion: question answer has an invalid shape")
 				}
@@ -506,11 +621,80 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				result.Changed = now.Observation.ContentHash != result.Context.Observation.ContentHash
 				// The independently hashed Git observation is attached separately
 				// from the saved-record observation and never uses mutable HEAD.
+				observedAt := time.Now().UTC()
+				receipt, err := json.Marshal(struct {
+					Version    int                  `json:"version"`
+					AttemptID  string               `json:"attemptId"`
+					SessionID  string               `json:"sessionId"`
+					InputHash  string               `json:"inputHash"`
+					PromptHash string               `json:"promptHash"`
+					SourceHash string               `json:"sourceHash"`
+					OutputHash string               `json:"outputHash"`
+					Terminal   string               `json:"terminalEvent"`
+					ObservedAt time.Time            `json:"observedAt"`
+					Answer     QuestionAnswer       `json:"answer"`
+					Usage      []core.DispatchUsage `json:"usage"`
+				}{1, attemptID, result.SessionID, inputHash, attempt.PromptHash, sourceHash, core.SHA256Hex([]byte(output)),
+					event.Type, observedAt, answer, result.Usage})
+				if err != nil {
+					return result, err
+				}
+				if core.Redact(string(receipt)) != string(receipt) {
+					return result, fmt.Errorf("taxion: validated question answer contains a credential-like value")
+				}
+				if err := db.AppendRequestRecord(operation.ID, "planning", string(receipt)); err != nil {
+					return result, err
+				}
 				result.Answer = &answer
+				if err := checkQuota(); err != nil {
+					return result, err
+				}
+				questionCompleted = true
 				return result, nil
 			}
 		}
 	}
+}
+
+func ValidatePlannerAnswer(answer QuestionAnswer, context PlannerContext) error {
+	return validateQuestionAnswer(answer, QuestionContext{Planner: &context})
+}
+
+func ValidateQuestionAnswer(answer QuestionAnswer, context QuestionContext) error {
+	return validateQuestionAnswer(answer, context)
+}
+
+func DecodeQuestionAnswer(output string) (QuestionAnswer, error) {
+	var answer QuestionAnswer
+	if err := core.DecodeGraphInput(strings.NewReader(output), &answer); err != nil {
+		return answer, err
+	}
+	if answer.Proposal != nil {
+		data, err := json.Marshal(answer.Proposal)
+		if err != nil {
+			return answer, err
+		}
+		if core.Redact(string(data)) != string(data) {
+			return answer, fmt.Errorf("taxion: executable proposal contains a credential-like value")
+		}
+	}
+	if err := core.DecodeGraphInput(strings.NewReader(core.Redact(output)), &answer); err != nil {
+		return answer, err
+	}
+	return answer, nil
+}
+
+func validateQuestionUsage(usage []core.DispatchUsage) error {
+	if len(usage) == 0 {
+		return fmt.Errorf("taxion: question turn has no complete usage evidence")
+	}
+	for _, call := range usage {
+		if strings.TrimSpace(call.Model) == "" || call.InputTokens == nil || call.OutputTokens == nil ||
+			*call.InputTokens < 0 || *call.OutputTokens < 0 {
+			return fmt.Errorf("taxion: question turn has incomplete or invalid usage evidence")
+		}
+	}
+	return nil
 }
 
 func questionProviderError(ctx context.Context, operation string, err error) error {

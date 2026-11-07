@@ -357,8 +357,13 @@ func TestRequestKeepsCheckpointMinimalAndPreservesRedactedSources(t *testing.T) 
 			}
 		}
 		var fields map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(receipt.Payload), &fields); err != nil ||
-			fields["input"] != nil || fields["result"] != nil || fields["inputHash"] == nil || fields["resultHash"] == nil {
+		if err := json.Unmarshal([]byte(receipt.Payload), &fields); err != nil {
+			t.Fatal(err)
+		}
+		if fields["resultHash"] == nil {
+			continue
+		}
+		if fields["input"] != nil || fields["result"] != nil || fields["inputHash"] == nil {
 			t.Fatal("planning receipt retained full input/result", err)
 		}
 	}

@@ -184,6 +184,42 @@ func reviewFlowFixtureWithValidations(t *testing.T, repo, outputMode string, gui
 	}
 }
 
+func TestTerminateUnstartedDispatchClearsLedgerProjectionAtomically(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatchID := flow.LastDispatchID()
+	if err := TerminateUnstartedDispatch(db, flow.ID, dispatchID, "human", "human:recontract",
+		"replace the untouched request with a separately approved successor"); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+	flow, flowOK := state.Graph.ReviewFlow(flow.ID)
+	if !ok || !flowOK || dispatch.Status != core.DispatchCancelled ||
+		dispatch.Result == nil || !slices.Contains(dispatch.Result.Evidence, "not-started:"+dispatchID) ||
+		flow.Status != "STOPPED" || flow.StopCode != "RECONTRACT" {
+		t.Fatalf("termination evidence was not preserved: dispatch=%+v flow=%+v", dispatch, flow)
+	}
+	for _, projection := range state.Ledger.Dispatches {
+		if projection.ID == dispatchID {
+			if projection.Active {
+				t.Fatal("terminal Graph Dispatch remains active in the Ledger projection")
+			}
+			if err := state.Graph.CheckLedger(state.Ledger); err != nil {
+				t.Fatal("Graph and Ledger projections disagree after termination:", err)
+			}
+			return
+		}
+	}
+	t.Fatal("terminated Dispatch lost its Ledger projection")
+}
+
 func mustFlowJSON(t *testing.T, value any) []byte {
 	t.Helper()
 	data, err := json.Marshal(value)

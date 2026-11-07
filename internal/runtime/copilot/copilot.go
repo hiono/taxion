@@ -695,6 +695,10 @@ func (a *Adapter) EventsAfter(ctx context.Context, sessionID string, cursor uint
 }
 
 func (a *Adapter) Close() error {
+	return a.close(true)
+}
+
+func (a *Adapter) close(abortBusy bool) error {
 	a.opMu.Lock()
 	defer a.opMu.Unlock()
 	a.mu.Lock()
@@ -721,7 +725,7 @@ func (a *Adapter) Close() error {
 			handle.mu.Lock()
 			busy := handle.busy
 			handle.mu.Unlock()
-			if busy {
+			if busy && abortBusy {
 				if err := session.Abort(ctx); err != nil {
 					errs = append(errs, fmt.Errorf("abort Copilot session %s: %w", session.SessionID, err))
 				} else {
@@ -1228,6 +1232,26 @@ func within(root, target string) bool {
 func (h *managedSession) onEvent(event sdk.SessionEvent) {
 	mapped, ok := normalizeEvent(event)
 	if ok {
+		if event.AgentID != nil {
+			mapped.AgentID = *event.AgentID
+		}
+		switch data := event.Data.(type) {
+		case *sdk.UserMessageData:
+			if data.MessageID != nil {
+				mapped.MessageID = *data.MessageID
+			}
+		case *sdk.AssistantMessageData:
+			if data.OriginatingMessageID != nil {
+				mapped.MessageID = *data.OriginatingMessageID
+			}
+			if data.TurnID != nil {
+				mapped.TurnID = *data.TurnID
+			}
+		case *sdk.AssistantTurnStartData:
+			mapped.TurnID = data.TurnID
+		case *sdk.AssistantTurnEndData:
+			mapped.TurnID = data.TurnID
+		}
 		h.emit(mapped)
 	}
 }
@@ -1259,6 +1283,8 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 		return runtime.Event{Type: runtime.EventExecution, Payload: string(payload)}, true
 	case *sdk.AssistantMessageData:
 		return runtime.Event{Type: runtime.EventOutput, Payload: data.Content}, true
+	case *sdk.UserMessageData:
+		return runtime.Event{Type: runtime.EventInput}, true
 	case *sdk.AssistantMessageDeltaData:
 		return runtime.Event{Type: runtime.EventOutputDelta, Payload: data.DeltaContent}, true
 	case *sdk.AssistantTurnStartData:

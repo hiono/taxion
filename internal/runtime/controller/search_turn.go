@@ -81,6 +81,9 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 		}
 		return quotaErr
 	}
+	var messageID, turnID string
+	var sequence uint64
+	started, answered := false, false
 	for {
 		select {
 		case <-ctx.Done():
@@ -95,7 +98,28 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 			if !ok {
 				return turn, fmt.Errorf("taxion: search stream ended before completion")
 			}
+			if event.AgentID != "" || event.Sequence != 0 && event.Sequence <= sequence {
+				return turn, fmt.Errorf("taxion: search main-agent lifecycle is ambiguous")
+			}
+			if event.Sequence != 0 {
+				sequence = event.Sequence
+			}
 			switch event.Type {
+			case runtime.EventInput:
+				if messageID != "" || event.MessageID == "" {
+					return turn, fmt.Errorf("taxion: search input identity is ambiguous")
+				}
+				messageID = event.MessageID
+			case runtime.EventTurnStarted:
+				if started || messageID == "" || event.TurnID == "" {
+					return turn, fmt.Errorf("taxion: search turn identity is ambiguous")
+				}
+				started, turnID = true, event.TurnID
+			case runtime.EventOutput:
+				if !started || event.MessageID != messageID || event.TurnID != turnID || strings.TrimSpace(event.Payload) == "" {
+					return turn, fmt.Errorf("taxion: search answer is outside its main turn")
+				}
+				answered = true
 			case runtime.EventUsage:
 				var usage core.DispatchUsage
 				if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &usage); err != nil {
@@ -104,6 +128,14 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 				turn.Usage = append(turn.Usage, usage)
 			case runtime.EventFailed, runtime.EventCancelled:
 				return turn, fmt.Errorf("taxion: search runtime failed or was cancelled; provider details withheld")
+			case runtime.EventTurnEnded:
+				if !started || !answered || event.TurnID != turnID || sequence == 0 {
+					return turn, fmt.Errorf("taxion: search ended without a bound main-agent answer")
+				}
+				if err := drainCompletedTurn(events, &turn.Usage, &sequence); err != nil {
+					return turn, err
+				}
+				return turn, checkQuota()
 			case runtime.EventTurnFinished:
 				return turn, checkQuota()
 			}

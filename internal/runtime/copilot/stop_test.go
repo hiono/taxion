@@ -157,6 +157,16 @@ func testStopOnlySDKProtocol(t *testing.T, observe, failedReview bool) {
 		if err != nil || result.Payload == "" || result.HistoryHash == "" {
 			t.Fatalf("saved observation: %+v, %v", result, err)
 		}
+		handle, err := adapter.lookup(dispatch.RuntimeSessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		handle.mu.Lock()
+		handle.busy = true
+		handle.mu.Unlock()
+		if err := adapter.CloseSavedObservation(); err != nil {
+			t.Fatal(err)
+		}
 	} else {
 		if err := adapter.ResumeForStop(t.Context(), dispatch.RuntimeSessionID); err != nil {
 			t.Fatalf("resume: %v; protocol fixture: %v", err, <-done)
@@ -192,30 +202,30 @@ func TestSavedTurnRequiresBoundCompletedMainAgentHistory(t *testing.T) {
 			return events
 		}},
 		{"unbound-message", func(events []sdk.SessionEvent) []sdk.SessionEvent {
-			events[2].Data.(*sdk.AssistantMessageData).OriginatingMessageID = nil
+			events[3].Data.(*sdk.AssistantMessageData).OriginatingMessageID = nil
 			return events
 		}},
 		{"wrong-turn", func(events []sdk.SessionEvent) []sdk.SessionEvent {
-			events[3].Data.(*sdk.AssistantTurnEndData).TurnID = "another-turn"
+			events[4].Data.(*sdk.AssistantTurnEndData).TurnID = "another-turn"
 			return events
 		}},
 		{"empty-turn", func(events []sdk.SessionEvent) []sdk.SessionEvent {
 			empty := ""
-			events[2].Data.(*sdk.AssistantMessageData).TurnID = &empty
-			events[3].Data.(*sdk.AssistantTurnEndData).TurnID = empty
+			events[3].Data.(*sdk.AssistantMessageData).TurnID = &empty
+			events[4].Data.(*sdk.AssistantTurnEndData).TurnID = empty
 			return events
 		}},
 		{"subagent-answer", func(events []sdk.SessionEvent) []sdk.SessionEvent {
 			agent := "child"
-			events[2].AgentID = &agent
+			events[3].AgentID = &agent
 			return events
 		}},
 		{"error-shutdown", func(events []sdk.SessionEvent) []sdk.SessionEvent {
-			events[4].Data.(*sdk.SessionShutdownData).ShutdownType = "error"
+			events[5].Data.(*sdk.SessionShutdownData).ShutdownType = "error"
 			return events
 		}},
 		{"shutdown-before-turn-end", func(events []sdk.SessionEvent) []sdk.SessionEvent {
-			events[4].Timestamp = events[3].Timestamp.Add(-time.Second)
+			events[5].Timestamp = events[4].Timestamp.Add(-time.Second)
 			return events
 		}},
 		{"later-execution", func(events []sdk.SessionEvent) []sdk.SessionEvent {
@@ -236,15 +246,26 @@ func TestSavedTurnRequiresBoundCompletedMainAgentHistory(t *testing.T) {
 	original := history()
 	result, err := savedTurn(original, "saved-session", worktree)
 	if err != nil || result.Payload == "" || result.HistoryHash == "" || len(result.Events) != 1 ||
-		!result.ShutdownAt.Equal(original[4].Timestamp) {
+		result.InputHash != core.SHA256Hex([]byte("execute saved contract")) ||
+		result.MessageID != "input-message" || result.TurnID != "review-turn" ||
+		!result.ShutdownAt.Equal(original[5].Timestamp) {
 		t.Fatal("completed main-agent result was not observed", result, err)
+	}
+	withoutShutdown := original[:5]
+	if _, err := savedTurn(withoutShutdown, "saved-session", worktree); err == nil {
+		t.Fatal("routine-shutdown requirement was silently removed")
+	}
+	stopped, err := savedQuestionTurn(withoutShutdown, "saved-session", worktree, true)
+	if err != nil || !stopped.ShutdownAt.IsZero() || len(stopped.UsageTotals) != 0 ||
+		stopped.Input != "execute saved contract" || !stopped.SubmittedAt.Equal(original[1].Timestamp) {
+		t.Fatal("explicit stopped observation fabricated shutdown/usage or lost native input identity", err)
 	}
 	events := history()
 	message, turn := "input-message", "review-turn"
-	empty := events[2]
+	empty := events[3]
 	empty.ID = "empty-reasoning-message"
 	empty.Data = &sdk.AssistantMessageData{OriginatingMessageID: &message, TurnID: &turn}
-	events = append(events[:2], append([]sdk.SessionEvent{empty}, events[2:]...)...)
+	events = append(events[:3], append([]sdk.SessionEvent{empty}, events[3:]...)...)
 	if observed, err := savedTurn(events, "saved-session", worktree); err != nil ||
 		observed.Payload != result.Payload || len(observed.Events) != 2 {
 		t.Fatal("empty native reasoning message hid the final answer", err)
@@ -271,10 +292,7 @@ func TestSavedTurnRejectsLaterSubagentActivity(t *testing.T) {
 				}
 				events = append(events[:at], append([]sdk.SessionEvent{childEvent}, events[at:]...)...)
 				_, err := savedTurn(events, "saved-session", worktree)
-				if at == 2 && err != nil {
-					t.Fatal("child activity before the final main-agent answer was rejected", err)
-				}
-				if at != 2 && err == nil {
+				if err == nil {
 					t.Fatal("child activity after the final answer was ignored", at)
 				}
 			}
@@ -290,6 +308,7 @@ func completedSavedHistory(worktree string) []sdk.SessionEvent {
 			SessionID: "saved-session", Context: &rpc.WorkingDirectoryContext{Cwd: worktree},
 		}},
 		{ID: "input", Timestamp: now, Data: &sdk.UserMessageData{MessageID: &message, Content: "execute saved contract"}},
+		{ID: "turn-start", Timestamp: now, Data: &sdk.AssistantTurnStartData{TurnID: turn}},
 		{ID: "answer", Timestamp: now, Data: &sdk.AssistantMessageData{
 			Content:              `{"status":"SUCCEEDED","reviewVerdict":"REQUEST_CHANGES"}`,
 			OriginatingMessageID: &message, TurnID: &turn,

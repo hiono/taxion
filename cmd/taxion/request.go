@@ -180,6 +180,9 @@ func requestCmd(args []string, input io.Reader, output io.Writer) error {
 
 func requestCommand(args []string, input io.Reader, output io.Writer, planner requestPlanner,
 	runner func(context.Context, []string, io.Writer) error) (returnErr error) {
+	if len(args) != 0 && args[0] == "recover" {
+		return requestRecoveryCommand(args[1:], output)
+	}
 	terminalReported, failureGate := false, "BLOCKED"
 	defer func() {
 		if returnErr != nil && !terminalReported {
@@ -577,6 +580,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			return err
 		}
 		var answer controller.QuestionAnswer
+		answerRedacted := false
 		if checkpoint.Answer == nil {
 			if !operation.ExternalBudgetOnly() && (operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU) {
 				operation.State = "USAGE_EXCEEDED"
@@ -597,29 +601,36 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			receipt, err := json.Marshal(struct {
 				Version     int    `json:"version"`
 				OperationID string `json:"operationId"`
+				AttemptID   string `json:"attemptId,omitempty"`
 				InputHash   string `json:"inputHash"`
 				ResultHash  string `json:"resultHash"`
 				Failed      bool   `json:"failed"`
-			}{2, id, core.SHA256Hex(text), core.SHA256Hex(resultBytes), planErr != nil})
+			}{2, id, result.AttemptID, core.SHA256Hex(text), core.SHA256Hex(resultBytes), planErr != nil})
 			if err != nil {
 				return errors.Join(planErr, err)
 			}
 			if err := db.AppendRequestRecord(id, "planning", string(receipt)); err != nil {
 				return errors.Join(planErr, err)
 			}
-			if len(result.Usage) == 0 {
-				operation.PlanningUsageState = "unknown"
-			}
-			for _, usage := range result.Usage {
-				if usage.TotalNanoAIU == nil || usage.AICreditsStatus == nil || *usage.AICreditsStatus != "complete" ||
-					math.IsNaN(*usage.TotalNanoAIU) || math.IsInf(*usage.TotalNanoAIU, 0) || *usage.TotalNanoAIU < 0 {
+			if result.AttemptID != "" {
+				if err := recordPlannerUsage(db, &operation, result.AttemptID, result.Usage); err != nil {
+					return errors.Join(planErr, err)
+				}
+			} else {
+				if len(result.Usage) == 0 {
 					operation.PlanningUsageState = "unknown"
-				} else {
-					total := operation.PlanningNanoAIU + *usage.TotalNanoAIU
-					if math.IsInf(total, 0) {
+				}
+				for _, usage := range result.Usage {
+					if usage.TotalNanoAIU == nil || usage.AICreditsStatus == nil || *usage.AICreditsStatus != "complete" ||
+						math.IsNaN(*usage.TotalNanoAIU) || math.IsInf(*usage.TotalNanoAIU, 0) || *usage.TotalNanoAIU < 0 {
 						operation.PlanningUsageState = "unknown"
 					} else {
-						operation.PlanningNanoAIU = total
+						total := operation.PlanningNanoAIU + *usage.TotalNanoAIU
+						if math.IsInf(total, 0) {
+							operation.PlanningUsageState = "unknown"
+						} else {
+							operation.PlanningNanoAIU = total
+						}
 					}
 				}
 			}
@@ -634,6 +645,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			}
 			checkpoint.PlannerStarted = false
 			answer = *result.Answer
+			answerRedacted = result.Redacted
 		} else {
 			answer = *checkpoint.Answer
 		}
@@ -648,7 +660,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if err := displayRequestPlan(&displayed, answer); err != nil {
 				return err
 			}
-			if err := captureRequestSource(db, id, "design", "planner:"+task.ID, displayed.String()); err != nil {
+			if err := captureRequestSource(db, id, "design", "planner:"+task.ID, displayed.String(), answerRedacted); err != nil {
 				return err
 			}
 		}

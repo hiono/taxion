@@ -68,6 +68,28 @@ func TestReadyNavigationSeparatesSetupApprovalAndExecution(t *testing.T) {
 	}
 }
 
+func TestReadyExplainsPlannerWritingAndRequestRecoveryBoundaries(t *testing.T) {
+	var output bytes.Buffer
+	if err := readyCmd(nil, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{
+		"### Planner and document writing",
+		"Planner is implemented, not merely planned",
+		"`taxion request --help`", "`taxion conversation plan --help`",
+		"`proposal:null` with `HUMAN_REQUIRED`",
+		"`workflow planner-draft`", "`workflow planner-action`",
+		"`taxion request recover`",
+		"no standalone Writer command or WRITER execution role",
+		"documents is CODER work under an approved Task",
+		"independent REVIEWER acceptance",
+	} {
+		if !strings.Contains(output.String(), text) {
+			t.Errorf("missing Planner/writing boundary: %s", text)
+		}
+	}
+}
+
 func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 	root, _ := requestFixture(t)
 	resolved, err := resolveConfiguration()

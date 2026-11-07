@@ -145,6 +145,24 @@ func (r *requestFixtureRuntime) EventsAfter(context.Context, string, uint64) (<-
 }
 func (r *requestFixtureRuntime) Send(_ context.Context, _, text string) error { return r.send(text) }
 
+func emitFixturePlannerTurn(worker *requestFixtureRuntime, usage, output string) {
+	go func() {
+		message, turn := worker.id+"-input", worker.id+"-turn"
+		for index, event := range []runtime.Event{
+			{Type: runtime.EventInput, MessageID: message},
+			{Type: runtime.EventTurnStarted, TurnID: turn},
+			{Type: runtime.EventUsage, Payload: usage},
+			{Type: runtime.EventOutput, Payload: output, MessageID: message, TurnID: turn},
+			{Type: runtime.EventTurnEnded, TurnID: turn},
+			{Type: runtime.EventTurnFinished},
+		} {
+			event.Sequence = uint64(index + 1)
+			worker.events <- event
+		}
+		close(worker.events)
+	}()
+}
+
 func requestFixture(t *testing.T) (string, []string) {
 	t.Helper()
 	t.Chdir(t.TempDir())
@@ -269,9 +287,7 @@ func fixturePlan(t *testing.T, answer controller.QuestionAnswer, accountOnly ...
 				!strings.HasPrefix(request.Request, "request-digest:sha256:") || len(conversation.Messages) == 0 {
 				t.Fatal("Planner lacks its transient turn or the saved request digest")
 			}
-			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`}
-			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
-			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
+			emitFixturePlannerTurn(worker, `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`, string(body))
 			return nil
 		}
 		if len(accountOnly) != 0 && accountOnly[0] {
@@ -574,9 +590,7 @@ func TestSearch(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`}
-				worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
-				worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
+				emitFixturePlannerTurn(worker, `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`, string(body))
 				return nil
 			}
 			if accountOnly {
@@ -692,7 +706,7 @@ func TestSearch(t *testing.T) {
 		gitTest(t, root, "rev-parse", "HEAD") != coder.Instruction.BaselineSHA {
 		t.Fatal("request changed commit identity or reviewed another tree")
 	}
-	var planning, requestRecords, sourceRecords int
+	var planning, adviceReceipts, requestRecords, sourceRecords int
 	for _, record := range state.Records.Requests {
 		if record.RequestID != state.Records.Operation.ID {
 			continue
@@ -704,12 +718,18 @@ func TestSearch(t *testing.T) {
 		requestRecords++
 		if record.Kind == "planning" {
 			planning++
+			var fields map[string]json.RawMessage
+			if json.Unmarshal([]byte(record.Payload), &fields) == nil && fields["resultHash"] != nil {
+				adviceReceipts++
+			} else {
+				requestRecords--
+			}
 			if record.Sequence != uint64(planning) || !json.Valid([]byte(record.Payload)) {
 				t.Fatal("invalid saved Planner receipt", record)
 			}
 		}
 	}
-	if planning != 2 {
+	if adviceReceipts != 2 {
 		t.Fatal("Planner conversation or usage receipts missing", planning)
 	}
 	if sourceRecords != 4 {
@@ -876,9 +896,7 @@ func TestRequestWholeModelInputIncludesLongOriginalRequestOnce(t *testing.T) {
 			if len(sent)*100 > len(legacy)*50 {
 				t.Fatalf("whole model input saved less than 50%%: %d versus %d bytes", len(sent), len(legacy))
 			}
-			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5}`}
-			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
-			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
+			emitFixturePlannerTurn(worker, `{"model":"fixture","inputTokens":10,"outputTokens":5}`, string(body))
 			return nil
 		}
 		return controller.AskPlanner(ctx, db, storePath, task.ID, text, selected, worker)

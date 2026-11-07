@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.27"
+const readySkillVersion = "1.3.28"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -115,6 +115,12 @@ operations; ask only for a new material choice, authority, resource or essential
 information unavailable through approved observation. Batch related decisions.
 Never bypass identity, quality, unknown delivery, budget or deadline checks.
 A hold or approved draft is not completion: connect it to the next authorized action.
+
+Direct conversation ask/plan/investigate turns persist their attempt identity,
+session binding, send intent and any validated terminal answer before cleanup.
+If cleanup fails, the answer remains evidence but the workspace operation is
+BLOCKED. Check taxion request --status; this CLI has no public preview/apply
+recovery for these receipts. Preserve them and do not resend or cancel.
 
 New Coder instructions with changeManifestPolicy: git-diff-v1 let Controller
 derive the complete baseline-to-candidate diff and preserve the original claim
@@ -429,6 +435,22 @@ session compatibility; automatic provider updates are not implemented here.
 Controller validation and independent same-target review are
 required before claiming completion. Inventory and skill integrity checks do not
 prove authentication, authorization, model loading or successful execution.
+` + `
+
+## Recover a saved request Planner answer
+
+For an interrupted new request Planner, first inspect taxion request --status.
+Never resume, cancel or resend a BLOCKED Planner attempt with uncertain delivery.
+Use taxion request recover --id ID --actor ACTOR --source SOURCE --reason REASON
+--evidence REF --preview to read-only verify the native saved turn and exact
+request/task/configuration/source/deadline/usage bindings. Review the answer,
+questions, limitations and preview hash. Only then repeat the exact decision
+fields with --apply --expected-hash HASH. Apply adopts the completed answer,
+checkpoint, receipt and deduplicated usage atomically; it does not send, abort,
+extend limits, or approve execution. Expired, ambiguous, drifting or incomplete
+evidence is refused. Legacy v0.8.2 checkpoints and direct conversation ask,
+plan or investigate recovery are not supported; preserve them and do not infer
+their missing session/input/usage evidence.
 ` + "\n## Accepted Coder output and unstarted normal Reviewer recovery\n" + normalReviewerRecoveryHelp
 
 type readySkillMetadata struct {

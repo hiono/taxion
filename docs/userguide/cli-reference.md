@@ -127,9 +127,17 @@ Taxion が intake、完全な hash の承認、Reviewer の設定承認、Flow�
 
 `request --status` は read-only の JSON で現在の operation と Flow 予算を返す。`request --resume ID` は保存済みの設定・上限・期限・質問・承認を再利用し、他の option を受け付けない。EOF では質問待ちを残し、`/quit` では終了する。`request --cancel ID` は実行停止と照合を済ませた idle request の operation だけを終了し、Task や既存判断を変更しない。稼働中 Flow・未終了 Dispatch・成否不明の Planner は取消しを拒否する。同じ workspace で別の active operation や workflow を開始できない。質問待ちには回答だけを適用し、承認後の4 lane preflight は一括実行する。同一契約内の Coder・非モデル validation・Reviewer の間では再承認せず、中間の進捗を表示しない。最終 JSON の `gate` は `COMPLETED`、`BLOCKED`、`USAGE_EXCEEDED`、明示取消しは `CANCELLED`。Planner の実測 nano-AIU を全体の上限から控除し、残量だけを Flow に割り当てる。取得量が未知の場合は次のモデル呼出しを止める。期限と予算は再開で増えず、未照合の実行・送信を自動 retry しない。詳細は[利用者ガイド](user-guide.md#人のことばで依頼して計画を相談する)を参照する。
 
+`taxion request recover --id ID --actor ACTOR --source SOURCE --reason REASON --evidence REF --preview` は、停止した request Planner と直接質問の保存回答を照合する。`--cli` と `--base-directory` は元の Copilot session の観測先を指定する。preview は workspace を read-only で開き、保存した入力・Task・設定・出典・main message/turn・元期限・利用量を照合する。同じ判断項目と表示された hash に対して `--apply --expected-hash HASH` を指定すると、回答・checkpoint・利用量・受理記録を一つの transaction で保存する。モデル送信、Abort、期限・予算の更新、実行承認は行わない。
+
+v0.8.2 の version-2 checkpoint に attempt binding がない場合は、`--associate-legacy --session ID --input-hash SHA256 --confirm-stopped` を追加する。`--input-hash` は変更していない native user input の SHA-256 であり、その本文に含まれる元依頼と計画 Task ID も照合する。停止確認には元 process tree の停止証拠を `--evidence` で示す。新しい照合判断を記録するもので、旧 receipt や当時の runtime 設定の binding を復元したと主張するものではない。旧 version-1 checkpoint、Copilot 以外の provider、binding のない旧直接質問は対象外となる。
+
+`--resolution continue` が既定であり、request は確認質問または未承認提案の状態へ戻る。元期限が過ぎた場合や累積利用量が未知の場合には、新しい実行を許可しない。`--resolution cancel` は照合後にその operation だけを `CANCELLED` とし、元 checkpoint・保存回答の参照・履歴・利用量を保持する。routine shutdown や集計利用量がない場合、不正な回答を未受理の証拠として残す場合には、停止証拠と `--accept-uncertainty` を追加する。この不確実性の受入れは取消専用であり、未知の利用量をゼロに変えず、既知の下限を減らさない。
+
+apply は排他的な operation lease を取得し、native history を再観測してから保存する。停止済み process の owner 表示だけが残る場合も、実際に lease を取得できなければ拒否する。同じ判断と hash の重複 apply は再課金・再送・重複保存を行わない。解除後の Task や Flow は通常の契約・設定・実行 gate を通す。
+
 `conversation search` は、承認済みの Markdown、PDF、DOCX、PPTX の抜粋を、編集可能な Task に自動で添付する。会話 export は private に分類し、明示選択した user message だけを検索対象にする。console は metadata を表示し、ローカルの非公開状態には引用した出典全文と用途別の承認を保持する。取込み、選択した runtime への送信、外部公開は別々に承認する。
 
-`conversation ask`・`conversation plan`・`conversation investigate` は別々にモデルを呼び出す操作。それぞれ明示 deadline を設け、Copilot は session 別 credit ceiling も要求する。OpenCode の料金・account quota は未確認とし、Copilot の credit ceiling を指定して代用しない。token 利用量は呼出しごとに報告するが、停止条件にはしない。通常 CI はローカル回帰テストを使う。
+`conversation ask`・`conversation plan`・`conversation investigate` は別々にモデルを呼び出す操作。それぞれ明示 deadline を設け、Copilot は session 別 credit ceiling も要求する。各質問は workspace operation で直列化され、attempt・session・送信意図・検証済み terminal 回答を private request receipt に追記する。回答 receipt は quota 再確認・cleanup より先に保存される。Stop が失敗した場合もその回答は保存されるが、operation は `BLOCKED` のままである。`taxion request --status` で状態を確認し、現行版に質問用 receipt の preview/apply 復旧はないため再送や cancel をしない。OpenCode の料金・account quota は未確認とし、Copilot の credit ceiling を指定して代用しない。token 利用量は呼出しごとに報告するが、停止条件にはしない。通常 CI はローカル回帰テストを使う。
 
 実 SDK の独立 Reviewer 受入れは、再承認した実行で、保持した Coder SHA の承認と worktree の解放を確認して完了した。scope 承認、parser の制約、受入れ記録は[仕様入力](../develop/specification-input.md)を参照する。
 

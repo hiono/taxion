@@ -241,6 +241,17 @@ func stopUnstartedDispatch(db *store.Store, flowID, dispatchID, actor, source, r
 		if err := state.Graph.TransitionDispatch(dispatchID, core.DispatchCancelled, actor, reason, false, false, result); err != nil {
 			return err
 		}
+		projected := false
+		for i := range state.Ledger.Dispatches {
+			if state.Ledger.Dispatches[i].ID == dispatchID {
+				state.Ledger.Dispatches[i].Active = false
+				projected = true
+				break
+			}
+		}
+		if !projected {
+			return fmt.Errorf("taxion: terminated Dispatch %q has no ledger projection", dispatchID)
+		}
 		if err := holdReviewFlowForStop(&state.Graph, &flow, reason); err != nil {
 			return err
 		}

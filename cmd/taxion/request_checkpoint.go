@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"slices"
 	"time"
 
@@ -206,6 +207,102 @@ func recordRequestPreflight(db *store.Store, operation store.Operation, checkpoi
 		return err
 	}
 	return db.AppendRequestRecord(operation.ID, "execution", payload)
+}
+
+type plannerUsageReceipt struct {
+	Version   int     `json:"version"`
+	AttemptID string  `json:"attemptId"`
+	UsageHash string  `json:"usageHash"`
+	Amount    float64 `json:"nanoAiu"`
+	State     string  `json:"state"`
+}
+
+func plannerUsageTotal(usage []core.DispatchUsage) (float64, string, error) {
+	total, state := 0.0, "complete"
+	if len(usage) == 0 {
+		return 0, "unknown", nil
+	}
+	for _, call := range usage {
+		if call.TotalNanoAIU == nil {
+			state = "unknown"
+			continue
+		}
+		value := *call.TotalNanoAIU
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			return 0, "unknown", fmt.Errorf("request Planner reported invalid nano-AIU usage")
+		}
+		total += value
+		if math.IsInf(total, 0) || call.AICreditsStatus == nil || *call.AICreditsStatus != "complete" {
+			state = "unknown"
+		}
+	}
+	if math.IsInf(total, 0) {
+		return 0, "unknown", fmt.Errorf("request Planner nano-AIU total overflowed")
+	}
+	return total, state, nil
+}
+
+func recordPlannerUsage(db *store.Store, operation *store.Operation, attemptID string, usage []core.DispatchUsage) error {
+	if attemptID == "" {
+		return fmt.Errorf("request Planner usage requires its durable attempt ID")
+	}
+	usageHash, err := core.CanonicalSHA256(usage)
+	if err != nil {
+		return err
+	}
+	amount, usageState, err := plannerUsageTotal(usage)
+	if err != nil {
+		return err
+	}
+	receipt := plannerUsageReceipt{1, attemptID, usageHash, amount, usageState}
+	payload, err := json.Marshal(receipt)
+	if err != nil {
+		return err
+	}
+	return db.UpdateWorkspace(func(state *store.Workspace) error {
+		current := state.Records.Operation
+		if current == nil || current.ID != operation.ID || current.Kind != "request" ||
+			current.Owner == "" || current.Owner != operation.Owner {
+			return fmt.Errorf("request Planner operation ownership changed")
+		}
+		for _, record := range state.Records.Requests {
+			if record.RequestID != operation.ID || record.Kind != "planning" {
+				continue
+			}
+			var previous plannerUsageReceipt
+			if json.Unmarshal([]byte(record.Payload), &previous) != nil ||
+				previous.Version != 1 || previous.AttemptID != attemptID || previous.UsageHash == "" {
+				continue
+			}
+			if previous.UsageHash != usageHash || previous.Amount != amount || previous.State != usageState {
+				return fmt.Errorf("request Planner attempt has conflicting usage receipts")
+			}
+			*operation = *current
+			return nil
+		}
+		next := *current
+		next.PlanningNanoAIU += amount
+		if math.IsInf(next.PlanningNanoAIU, 0) {
+			return fmt.Errorf("request Planner cumulative usage overflowed")
+		}
+		if usageState == "unknown" {
+			next.PlanningUsageState = "unknown"
+		}
+		next.Checkpoint = append(json.RawMessage(nil), current.Checkpoint...)
+		state.Records.Operation = &next
+		sequence := uint64(1)
+		for _, record := range state.Records.Requests {
+			if record.RequestID == operation.ID && record.Kind == "planning" {
+				sequence++
+			}
+		}
+		state.Records.Requests = append(state.Records.Requests, store.RequestRecord{
+			RequestID: operation.ID, Kind: "planning", Sequence: sequence,
+			Payload: string(payload), Hash: core.SHA256Hex(payload), At: time.Now().UTC(),
+		})
+		*operation = next
+		return nil
+	})
 }
 
 func minimalRequestAnswer(answer controller.QuestionAnswer) controller.QuestionAnswer {

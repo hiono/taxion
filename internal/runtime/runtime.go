@@ -7,17 +7,20 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"github.com/hiono/taxion/internal/core"
 	"time"
 
+	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/tools"
 )
 
 // Event is a plain, SDK-neutral runtime event.
 type Event struct {
-	Type     string
-	Payload  string
-	Sequence uint64 `json:"sequence,omitempty"`
+	Type      string
+	Payload   string
+	Sequence  uint64 `json:"sequence,omitempty"`
+	MessageID string `json:"messageId,omitempty"`
+	TurnID    string `json:"turnId,omitempty"`
+	AgentID   string `json:"agentId,omitempty"`
 }
 
 const (
@@ -102,6 +105,10 @@ type StopAttachment interface {
 // caller-authored result. Reading it must not resume pending execution.
 type SavedTurn struct {
 	SessionID   string               `json:"sessionId"`
+	InputHash   string               `json:"inputHash"`
+	Input       string               `json:"-"`
+	MessageID   string               `json:"messageId"`
+	TurnID      string               `json:"turnId"`
 	Payload     string               `json:"payload"`
 	SubmittedAt time.Time            `json:"submittedAt"`
 	FinishedAt  time.Time            `json:"finishedAt"`

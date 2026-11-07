@@ -24,7 +24,7 @@ func requestContextSources(state store.Workspace, id string) ([]core.ContextDocu
 	return documents, core.CheckContextDocuments(documents)
 }
 
-func captureRequestSource(db *store.Store, id, kind, source, text string) error {
+func captureRequestSource(db *store.Store, id, kind, source, text string, alreadyRedacted ...bool) error {
 	state, err := db.LoadWorkspace()
 	if err != nil {
 		return err
@@ -35,7 +35,7 @@ func captureRequestSource(db *store.Store, id, kind, source, text string) error 
 	}
 	version := "sha256:" + core.SHA256Hex([]byte(text))
 	redacted := core.Redact(text)
-	if redacted != text {
+	if redacted != text || len(alreadyRedacted) != 0 && alreadyRedacted[0] {
 		version += ":redacted"
 	}
 	document, err := core.CaptureContextDocument(core.ContextDocument{
