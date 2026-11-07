@@ -285,7 +285,7 @@ func TestQuestionOnlyCompletesAfterDurableAnswerAndSuccessfulStop(t *testing.T) 
 }
 
 func TestQuestionRejectsMismatchedLiveMessageAndTurnIdentity(t *testing.T) {
-	for _, mode := range []string{"missing-input", "wrong-output-message", "wrong-output-turn", "wrong-turn-end"} {
+	for _, mode := range []string{"missing-input", "wrong-output-message", "wrong-output-turn", "wrong-turn-end", "child-usage"} {
 		t.Run(mode, func(t *testing.T) {
 			db, databasePath, worker, resolved := questionFixture(t)
 			worker.role = "ORCHESTRATOR"
@@ -303,6 +303,8 @@ func TestQuestionRejectsMismatchedLiveMessageAndTurnIdentity(t *testing.T) {
 				saved[3].TurnID = "another-turn"
 			case "wrong-turn-end":
 				saved[4].TurnID = "another-turn"
+			case "child-usage":
+				saved[2].AgentID = "child-agent"
 			}
 			events = make(chan runtime.Event, len(saved))
 			for _, event := range saved {

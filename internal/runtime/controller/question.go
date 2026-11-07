@@ -527,6 +527,9 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 			if !ok {
 				return result, fmt.Errorf("taxion: question stream ended without a terminal turn")
 			}
+			if event.AgentID != "" {
+				return result, fmt.Errorf("taxion: question runtime emitted child-agent activity")
+			}
 			if event.Sequence != 0 {
 				if event.Sequence <= lastSequence {
 					return result, fmt.Errorf("taxion: question runtime event sequence is ambiguous")
@@ -537,18 +540,18 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 			}
 			switch event.Type {
 			case runtime.EventInput:
-				if event.AgentID != "" || messageID != "" || event.MessageID == "" {
+				if messageID != "" || event.MessageID == "" {
 					return result, fmt.Errorf("taxion: question runtime input identity is ambiguous")
 				}
 				messageID = event.MessageID
 			case runtime.EventTurnStarted:
-				if event.AgentID != "" || messageID == "" || event.TurnID == "" ||
+				if messageID == "" || event.TurnID == "" ||
 					turnStarted || turnEnded || output != "" {
 					return result, fmt.Errorf("taxion: question runtime started an ambiguous turn")
 				}
 				turnStarted, turnID = true, event.TurnID
 			case runtime.EventOutput:
-				if event.AgentID != "" || event.MessageID != messageID || event.TurnID != turnID ||
+				if event.MessageID != messageID || event.TurnID != turnID ||
 					!turnStarted || turnEnded {
 					return result, fmt.Errorf("taxion: question output arrived outside its main turn")
 				}
@@ -572,7 +575,7 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				runtime.EventPermission, runtime.EventCompaction:
 				return result, fmt.Errorf("taxion: question runtime failed or was cancelled; provider details withheld")
 			case runtime.EventOutputDelta:
-				if event.AgentID != "" || !turnStarted || turnEnded {
+				if !turnStarted || turnEnded {
 					return result, fmt.Errorf("taxion: question output delta arrived outside its main turn")
 				}
 			case runtime.EventContextUsage:
@@ -581,7 +584,7 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				return result, fmt.Errorf("taxion: question runtime emitted an unsupported event")
 			case runtime.EventTurnEnded, runtime.EventTurnFinished:
 				if event.Type == runtime.EventTurnEnded {
-					if event.AgentID != "" || event.TurnID != turnID ||
+					if event.TurnID != turnID ||
 						!turnStarted || turnEnded || strings.TrimSpace(output) == "" {
 						return result, fmt.Errorf("taxion: question runtime ended an ambiguous turn")
 					}

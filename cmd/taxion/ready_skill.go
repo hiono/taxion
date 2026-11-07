@@ -443,15 +443,20 @@ prove authentication, authorization, model loading or successful execution.
 ## Recover a saved request Planner or direct-question answer
 
 For an interrupted new request Planner, first inspect taxion request --status.
-Never resume, cancel or resend a BLOCKED Planner attempt with uncertain delivery.
+Do not resume or resend a BLOCKED Planner attempt with uncertain delivery.
+Ordinary request --cancel does not reconcile such an attempt. Use the saved
+recovery decision below; --resolution cancel requires matching evidence and,
+for uncertain terminal results, confirmed stopped-process and uncertainty consent.
 Use taxion request recover --id ID --actor ACTOR --source SOURCE --reason REASON
 --evidence REF --preview to read-only verify the native saved turn and exact
 request/task/configuration/source/deadline/usage bindings. Review the answer,
 questions, limitations and preview hash. Only then repeat the exact decision
 fields with --apply --expected-hash HASH. Apply adopts the completed answer,
 checkpoint, receipt and deduplicated usage atomically; it does not send, abort,
-extend limits, or approve execution. Expired, ambiguous, drifting or incomplete
-evidence is refused. Durably bound conversation ask, plan and investigate
+extend limits, or approve execution. Ambiguous, drifting or still-active history
+is refused. Incomplete terminal/usage evidence permits only confirmed cancellation;
+it never authorizes continuation. Expired execution limits remain unchanged.
+Durably bound conversation ask, plan and investigate
 attempts use this same nonexecuting preview and exact-hash apply.
 For a v0.8.2 version-2 request without an attempt binding, explicitly use
 --associate-legacy --session ID --input-hash SHA256 --confirm-stopped with

@@ -99,6 +99,7 @@ func TestReadyExplainsPlannerWritingAndRequestRecoveryBoundaries(t *testing.T) {
 		"this CLI has no public preview/apply",
 		"plan or investigate recovery are not supported",
 		"Legacy v0.8.2 checkpoints and direct conversation",
+		"Never resume, cancel or resend a BLOCKED Planner attempt",
 		"質問用 receipt の preview/apply 復旧はない",
 	} {
 		if strings.Contains(readySkillBody, contradiction) || bytes.Contains(guide, []byte(contradiction)) {
