@@ -851,6 +851,10 @@ routine shutdown は失敗記録より後でもよいが、turn end 以後、同
 指定値は正で最大5分である。呼出し元 context の deadline/cancellation が先ならそちらを守り、
 元の Flow 提出期限や実行 eligibility は延長しない。上限は Controller lock 前から始まり、
 native read、prepared Git verifier、初回 Store read と append transaction を対象にする。
+Storeの読取り・文書保存・文字列プール・更新文にも同じcontextを渡し、
+実行中のSQLite文に取消と期限を伝える。
+context引数のない`Commit`・`Rollback`や、メモリ上の検証・JSON処理の強制中断は保証しない。
+確定・取り消し後の保存結果は別に判定し、取消だけから未保存とは推定しない。
 CLI file/store read、Store open/migration、Copilot runtime setup、apply 時の operation lease、
 cleanup/output、Controller/Store の mutex wait は
 範囲外なので、コマンド全体の厳密な wall-clock cap ではない。

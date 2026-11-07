@@ -121,7 +121,10 @@ Flow の表示期限だけから提出期限を推測せず、`NOT_EVALUATED` �
 `--observation-timeout` は既定30秒、正の値で最大5分であり、呼出し元のより早い deadline/cancellation
 を守る。CLI file/store read、Store open/migration、Copilot runtime setup、operation lease、
 cleanup/output、Controller/Store mutex wait は上限外なので、
-コマンド全体の厳密な wall-clock cap ではない。native/Git/SQLite の observation error には静的 phase と
+コマンド全体の厳密な wall-clock cap ではない。
+Storeの読取りと追記は、文書・文字列プールを含むSQL文にも同じcontextを渡す。
+context引数のない`Commit`・`Rollback`と、メモリ上の検証・JSON処理の強制中断は保証しない。
+native/Git/SQLite の observation error には静的 phase と
 persistence 診断が付く。`NOT_WRITTEN` は追記前または証明済み rollback、`COMMITTED` は成功 commit、
 `UNKNOWN` は commit の成否不明である。`UNKNOWN` は保存記録を確認し、同じ hash だけで成功と推測しない。
 運用機の原本を調べる権限や追記操作の承認は、開発側の合成検証とは別に確認する。

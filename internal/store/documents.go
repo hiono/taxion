@@ -24,6 +24,11 @@ type workspaceReader interface {
 	Query(string, ...any) (*sql.Rows, error)
 }
 
+type workspaceWriter interface {
+	workspaceReader
+	Exec(string, ...any) (sql.Result, error)
+}
+
 // Arrays are individual records; position -1 preserves scalar and empty values.
 func workspaceDocuments(state Workspace) (map[[3]string]string, error) {
 	areas := map[string]any{"ledger": state.Ledger, "graph": state.Graph, "records": state.Records}
@@ -54,7 +59,7 @@ func workspaceDocuments(state Workspace) (map[[3]string]string, error) {
 	return documents, nil
 }
 
-func saveWorkspaceDocuments(tx *sql.Tx, state Workspace) error {
+func saveWorkspaceDocuments(tx workspaceWriter, state Workspace) error {
 	documents, err := workspaceDocuments(state)
 	if err != nil {
 		return err
