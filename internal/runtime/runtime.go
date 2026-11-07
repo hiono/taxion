@@ -39,6 +39,17 @@ const (
 	EventExecution    = "execution_observation"
 )
 
+// QuestionEventAllowed is shared by live and saved advice-only turns.
+func QuestionEventAllowed(eventType string) bool {
+	switch eventType {
+	case EventInput, EventOutput, EventOutputDelta, EventTurnStarted, EventTurnEnded,
+		EventTurnFinished, EventUsage, EventContextUsage, "acp_connection", "acp_capabilities":
+		return true
+	default:
+		return false
+	}
+}
+
 // Runtime is the minimal control-plane contract:
 //
 //	Start   — begin isolated execution for a task

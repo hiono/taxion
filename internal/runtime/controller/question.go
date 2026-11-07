@@ -530,6 +530,12 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 			if event.AgentID != "" {
 				return result, fmt.Errorf("taxion: question runtime emitted child-agent activity")
 			}
+			if event.Type == "acp_usage_unavailable" {
+				return result, fmt.Errorf("taxion: question turn has unavailable provider usage; not zero")
+			}
+			if !runtime.QuestionEventAllowed(event.Type) {
+				return result, fmt.Errorf("taxion: question runtime emitted prohibited activity; provider details withheld")
+			}
 			if event.Sequence != 0 {
 				if event.Sequence <= lastSequence {
 					return result, fmt.Errorf("taxion: question runtime event sequence is ambiguous")
@@ -571,17 +577,12 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 						return result, err
 					}
 				}
-			case runtime.EventFailed, runtime.EventCancelled, runtime.EventExecution,
-				runtime.EventPermission, runtime.EventCompaction:
-				return result, fmt.Errorf("taxion: question runtime failed or was cancelled; provider details withheld")
 			case runtime.EventOutputDelta:
 				if !turnStarted || turnEnded {
 					return result, fmt.Errorf("taxion: question output delta arrived outside its main turn")
 				}
 			case runtime.EventContextUsage, "acp_connection", "acp_capabilities":
 				break
-			case "acp_usage_unavailable":
-				return result, fmt.Errorf("taxion: question turn has unavailable provider usage; not zero")
 			default:
 				return result, fmt.Errorf("taxion: question runtime emitted an unsupported event")
 			case runtime.EventTurnEnded, runtime.EventTurnFinished:

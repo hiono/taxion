@@ -845,9 +845,10 @@ func buildRequestRecoveryPreview(state store.Workspace, checkpoint requestCheckp
 func turnHasExecution(turn runtime.SavedTurn) bool {
 	outputs := 0
 	for _, event := range turn.Events {
-		switch event.Type {
-		case runtime.EventExecution:
+		if !runtime.QuestionEventAllowed(event.Type) {
 			return true
+		}
+		switch event.Type {
 		case runtime.EventOutput:
 			if strings.TrimSpace(event.Payload) != "" {
 				outputs++

@@ -40,6 +40,26 @@ func (w *isolatedQuotaRuntime) ReadAccountQuota(ctx context.Context, account str
 	return quota, nil
 }
 
+func managedSearchEvents(usage string) chan runtime.Event {
+	source := questionEventsWithUsage("search receipt", usage)
+	events := make(chan runtime.Event, cap(source)+2)
+	var sequence uint64
+	send := func(event runtime.Event) {
+		sequence++
+		event.Sequence = sequence
+		events <- event
+	}
+	for len(source) != 0 {
+		event := <-source
+		send(event)
+		if event.Type == runtime.EventTurnStarted {
+			send(runtime.Event{Type: runtime.EventExecution, Payload: `{"phase":"tool-start","callId":"search-call","tool":"taxion_search"}`})
+			send(runtime.Event{Type: runtime.EventExecution, Payload: `{"phase":"tool-complete","callId":"search-call","success":true}`})
+		}
+	}
+	return events
+}
+
 func TestIsolatedQuotaFinalGateAndCleanup(t *testing.T) {
 	for _, entry := range []string{"question", "planner", "search"} {
 		for _, failure := range []string{"", "reserve", "stale", "missing", "cycle", "resource", "unlimited", "stop-failed"} {
@@ -53,6 +73,9 @@ func TestIsolatedQuotaFinalGateAndCleanup(t *testing.T) {
 				}
 				if entry == "planner" {
 					worker.events = questionEventsWithUsage(`{"recommendation":"HUMAN_REQUIRED","confirmed":[{"text":"Task status","sources":["/planner/task/status"]}],"assumptions":[],"unconfirmed":["Live state unknown."]}`, `{"model":"fixture","inputTokens":10,"outputTokens":5}`)
+				}
+				if entry == "search" {
+					worker.events = managedSearchEvents(`{"model":"fixture","inputTokens":10,"outputTokens":5}`)
 				}
 				reset := time.Now().Add(8 * 24 * time.Hour)
 				worker.quota.ResetAt = &reset
@@ -242,7 +265,7 @@ func TestSearchRejectsUnsequencedEvents(t *testing.T) {
 }
 
 func TestSearchAllowsOnlyBoundManagedAcquisition(t *testing.T) {
-	for _, scenario := range []string{"managed", "other-tool", "unknown", "permission", "incomplete"} {
+	for _, scenario := range []string{"managed", "other-tool", "unknown", "permission", "incomplete", "no-acquisition"} {
 		t.Run(scenario, func(t *testing.T) {
 			_, _, base, _ := questionFixture(t)
 			base.role = "ORCHESTRATOR"
@@ -258,9 +281,11 @@ func TestSearchAllowsOnlyBoundManagedAcquisition(t *testing.T) {
 			stream := []runtime.Event{
 				{Type: runtime.EventInput, MessageID: "search-input"},
 				{Type: runtime.EventTurnStarted, TurnID: "search-turn"},
-				activity,
 			}
-			if scenario != "incomplete" {
+			if scenario != "no-acquisition" {
+				stream = append(stream, activity)
+			}
+			if scenario != "incomplete" && scenario != "no-acquisition" {
 				stream = append(stream, runtime.Event{Type: runtime.EventExecution, Payload: `{"phase":"tool-complete","callId":"search-call","success":true}`})
 			}
 			stream = append(stream,
@@ -299,7 +324,7 @@ func TestIsolatedNonAccountModesDoNotReadQuota(t *testing.T) {
 			if err != nil || result.Answer == nil || worker.reads != 0 || len(result.QuotaObservations) != 0 {
 				t.Fatal("non-account question queried account quota", err)
 			}
-			worker.events = questionEvents(savedQuestionAnswer)
+			worker.events = managedSearchEvents(`{"model":"test","inputTokens":10,"outputTokens":5}`)
 			turn, err := RunSearchTurn(ctx, worker, "task", "query")
 			if err != nil || worker.reads != 0 || len(turn.QuotaObservations) != 0 {
 				t.Fatal("non-account search queried account quota", err)

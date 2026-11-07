@@ -329,6 +329,34 @@ func TestSavedTurnRejectsDeltaOutsideActiveTurn(t *testing.T) {
 	}
 }
 
+func TestSavedQuestionChecksActivityBeforeReceiptProjection(t *testing.T) {
+	worktree := t.TempDir()
+	for _, activity := range []sdk.SessionEvent{
+		{Data: &sdk.PermissionCompletedData{Result: rpc.PermissionDeniedByPermissionRequestHook{}}},
+		{Data: &sdk.SessionCompactionStartData{}},
+		{Data: &sdk.SessionCompactionCompleteData{Success: true}},
+		{Data: &sdk.ModelCallFailureData{}},
+	} {
+		events := completedSavedHistory(worktree)
+		activity.ID, activity.Timestamp = "activity", events[2].Timestamp
+		events = append(events[:3], append([]sdk.SessionEvent{activity}, events[3:]...)...)
+		for _, stopped := range []bool{false, true} {
+			history := events
+			if stopped {
+				history = history[:len(history)-1]
+			}
+			if _, err := savedQuestionTurn(history, "saved-session", worktree, stopped); err == nil {
+				t.Fatalf("advisory activity %T disappeared before admission (stopped=%v)", activity.Data, stopped)
+			}
+		}
+		// Generic review recovery retains its existing indexed receipt projection.
+		result, err := savedTurn(events, "saved-session", worktree)
+		if err != nil || len(result.Events) != 1 || result.Events[0].Payload != result.Payload {
+			t.Fatalf("generic saved review receipt compatibility lost for %T: %+v, %v", activity.Data, result, err)
+		}
+	}
+}
+
 func completedSavedHistory(worktree string) []sdk.SessionEvent {
 	message, turn := "input-message", "review-turn"
 	now := time.Now().UTC()

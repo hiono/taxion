@@ -158,7 +158,7 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 				return turn, fmt.Errorf("taxion: search runtime failed or was cancelled; provider details withheld")
 			case runtime.EventTurnEnded:
 				if !started || !answered || event.TurnID != turnID || sequence == 0 ||
-					searchCallID != "" && !searchComplete {
+					searchCallID == "" || !searchComplete {
 					return turn, fmt.Errorf("taxion: search ended without a bound main-agent answer")
 				}
 				if err := drainCompletedTurn(ctx, events, &turn.Usage, &sequence); err != nil {

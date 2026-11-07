@@ -112,6 +112,14 @@ func TestRequestRecoveryLegacyCancelPreservesCheckpointUsageAndReleasesStore(t *
 	}); err != nil {
 		t.Fatal(err)
 	}
+	originalEvents := turn.Events
+	for _, activity := range []string{runtime.EventPermission, runtime.EventCompaction, "unknown-advisory-activity"} {
+		turn.Events = append(append([]runtime.Event{}, originalEvents...), runtime.Event{Type: activity})
+		if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &bytes.Buffer{}); err == nil {
+			t.Fatal("public recovery accepted prohibited saved advisory activity", activity)
+		}
+	}
+	turn.Events = originalEvents
 	var preview bytes.Buffer
 	if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &preview); err != nil {
 		t.Fatal(err)

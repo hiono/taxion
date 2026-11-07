@@ -18,14 +18,14 @@ import (
 // ReadSavedTurn uses the nonexecuting attachment also used for cancellation.
 // In particular it never sends, aborts, repairs transcripts or continues work.
 func (a *Adapter) ReadSavedTurn(ctx context.Context, sessionID string) (runtime.SavedTurn, error) {
-	return a.readSavedQuestionTurn(ctx, sessionID, false)
+	return a.readSavedTurn(ctx, sessionID, false, false)
 }
 
 func (a *Adapter) ReadSavedQuestionTurn(ctx context.Context, sessionID string, stoppedConfirmed bool) (runtime.SavedTurn, error) {
-	return a.readSavedQuestionTurn(ctx, sessionID, stoppedConfirmed)
+	return a.readSavedTurn(ctx, sessionID, stoppedConfirmed, true)
 }
 
-func (a *Adapter) readSavedQuestionTurn(ctx context.Context, sessionID string, stoppedConfirmed bool) (runtime.SavedTurn, error) {
+func (a *Adapter) readSavedTurn(ctx context.Context, sessionID string, stoppedConfirmed, advisory bool) (runtime.SavedTurn, error) {
 	if a.stopSessionID == "" || sessionID != a.stopSessionID {
 		return runtime.SavedTurn{}, fmt.Errorf("taxion: saved result observation requires a bound nonexecuting attachment")
 	}
@@ -43,14 +43,18 @@ func (a *Adapter) readSavedQuestionTurn(ctx context.Context, sessionID string, s
 	if err != nil {
 		return runtime.SavedTurn{}, err
 	}
-	return savedQuestionTurn(events, sessionID, a.Worktree(), stoppedConfirmed)
+	return savedSessionTurn(events, sessionID, a.Worktree(), stoppedConfirmed, advisory)
 }
 
 func savedTurn(events []sdk.SessionEvent, sessionID, worktree string) (runtime.SavedTurn, error) {
-	return savedQuestionTurn(events, sessionID, worktree, false)
+	return savedSessionTurn(events, sessionID, worktree, false, false)
 }
 
 func savedQuestionTurn(events []sdk.SessionEvent, sessionID, worktree string, stoppedConfirmed bool) (runtime.SavedTurn, error) {
+	return savedSessionTurn(events, sessionID, worktree, stoppedConfirmed, true)
+}
+
+func savedSessionTurn(events []sdk.SessionEvent, sessionID, worktree string, stoppedConfirmed, advisory bool) (runtime.SavedTurn, error) {
 	fail := func() (runtime.SavedTurn, error) {
 		return runtime.SavedTurn{}, fmt.Errorf("taxion: saved session has no unambiguous completed main-agent result")
 	}
@@ -74,6 +78,9 @@ func savedQuestionTurn(events []sdk.SessionEvent, sessionID, worktree string, st
 			return fail()
 		}
 		normalized, recognized := normalizeEvent(event)
+		if advisory && recognized && !runtime.QuestionEventAllowed(normalized.Type) {
+			return fail()
+		}
 		if ended && recognized {
 			switch normalized.Type {
 			case runtime.EventUsage, runtime.EventContextUsage, runtime.EventTurnFinished:
