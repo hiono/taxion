@@ -137,7 +137,7 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 				}
 				return turn, checkQuota()
 			case runtime.EventTurnFinished:
-				return turn, checkQuota()
+				return turn, fmt.Errorf("taxion: search became idle without a bound main-agent turn end")
 			}
 		}
 	}

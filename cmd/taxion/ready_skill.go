@@ -119,8 +119,11 @@ A hold or approved draft is not completion: connect it to the next authorized ac
 Direct conversation ask/plan/investigate turns persist their attempt identity,
 session binding, send intent and any validated terminal answer before cleanup.
 If cleanup fails, the answer remains evidence but the workspace operation is
-BLOCKED. Check taxion request --status; this CLI has no public preview/apply
-recovery for these receipts. Preserve them and do not resend or cancel.
+BLOCKED. Inspect taxion request --status and use taxion request recover for
+durably bound attempts, with a nonexecuting preview and exact-hash apply.
+Preserve the original answer, uncertainty and deadline; do not resend.
+Unbound legacy direct-question receipts are unsupported. Uncertain terminal
+evidence permits only the explicitly confirmed stopped-attempt cancellation.
 
 New Coder instructions with changeManifestPolicy: git-diff-v1 let Controller
 derive the complete baseline-to-candidate diff and preserve the original claim

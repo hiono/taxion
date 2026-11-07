@@ -87,6 +87,10 @@ func TestReadyExplainsPlannerWritingAndRequestRecoveryBoundaries(t *testing.T) {
 		if !strings.Contains(output.String(), text) {
 			t.Errorf("missing Planner/writing boundary: %s", text)
 		}
+		if !strings.Contains(readySkillBody, "durably bound attempts, with a nonexecuting preview and exact-hash apply") ||
+			strings.Contains(readySkillBody, "this CLI has no public preview/apply") {
+			t.Fatal("installed skill contradicts supported direct-question recovery")
+		}
 	}
 }
 

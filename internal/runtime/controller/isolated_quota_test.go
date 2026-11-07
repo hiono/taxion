@@ -170,6 +170,43 @@ func TestIsolatedQuotaUnavailableBeforeSend(t *testing.T) {
 	}
 }
 
+func TestSearchRequiresBoundTurnEndBeforeIdle(t *testing.T) {
+	for _, scenario := range []string{"idle-only", "answer-without-end", "later-output"} {
+		t.Run(scenario, func(t *testing.T) {
+			_, _, base, _ := questionFixture(t)
+			base.role = "ORCHESTRATOR"
+			events := make(chan runtime.Event, 6)
+			var sequence uint64
+			send := func(event runtime.Event) {
+				sequence++
+				event.Sequence = sequence
+				events <- event
+			}
+			if scenario != "idle-only" {
+				send(runtime.Event{Type: runtime.EventInput, MessageID: "search-input"})
+				send(runtime.Event{Type: runtime.EventTurnStarted, TurnID: "search-turn"})
+				send(runtime.Event{Type: runtime.EventOutput, MessageID: "search-input", TurnID: "search-turn", Payload: "answer"})
+			}
+			if scenario == "later-output" {
+				send(runtime.Event{Type: runtime.EventTurnEnded, TurnID: "search-turn"})
+				send(runtime.Event{Type: runtime.EventOutput, MessageID: "search-input", TurnID: "search-turn", Payload: "later activity"})
+			} else {
+				send(runtime.Event{Type: runtime.EventTurnFinished})
+			}
+			close(events)
+			worker := &questionRuntime{configuredRuntime: base, events: events}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			if _, err := RunSearchTurn(ctx, worker, "task", "query"); err == nil || errors.Is(err, context.DeadlineExceeded) {
+				t.Fatal("unbound or later activity did not fail closed", err)
+			}
+			if worker.stops != 1 {
+				t.Fatal("rejected search did not preserve cleanup")
+			}
+		})
+	}
+}
+
 func TestIsolatedNonAccountModesDoNotReadQuota(t *testing.T) {
 	for _, mode := range []string{"off", "flow", "provider"} {
 		t.Run(mode, func(t *testing.T) {
