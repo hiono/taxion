@@ -959,9 +959,12 @@ func compareQuestionUsage(calls, totals []core.DispatchUsage) (bool, bool) {
 			value.nanoAIUKnown != (total.TotalNanoAIU != nil) {
 			matches = false
 		}
-		if total.CacheReadTokens != nil && value.cacheReadComplete && *total.CacheReadTokens != value.cacheRead ||
-			total.CacheWriteTokens != nil && value.cacheWriteComplete && *total.CacheWriteTokens != value.cacheWrite ||
-			total.TotalNanoAIU != nil && value.nanoAIUComplete && math.Abs(*total.TotalNanoAIU-value.nanoAIU) > 1e-6 {
+		if total.CacheReadTokens != nil && (*total.CacheReadTokens < value.cacheRead ||
+			value.cacheReadComplete && *total.CacheReadTokens != value.cacheRead) ||
+			total.CacheWriteTokens != nil && (*total.CacheWriteTokens < value.cacheWrite ||
+				value.cacheWriteComplete && *total.CacheWriteTokens != value.cacheWrite) ||
+			total.TotalNanoAIU != nil && (value.nanoAIU-*total.TotalNanoAIU > 1e-6 ||
+				value.nanoAIUComplete && math.Abs(*total.TotalNanoAIU-value.nanoAIU) > 1e-6) {
 			return false, true
 		}
 	}

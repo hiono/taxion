@@ -56,6 +56,16 @@ Copilot と OpenACP の全件 race、およびCLI・Controllerの `Request|Recov
 
 検索の共通終了判定は、許可した `taxion_search` の開始と成功した完了を必須とした。取得なしを拒否する回帰を追加し、利用枠を検査する正常系fixtureにも実際の取得イベントを含めた。Copilot・Controller・CLIの対象raceは通過し、公開復旧の追加検査後のCLI対象raceも通過した。補正後の独立品質判定、公開文面、全件race、保護されたCIと正式配布は、この記録時点では未完了である。
 
+`1eb9afc` の独立レビューは `REQUEST_CHANGES` として正式受理されている。
+一部の呼出しの cache-read、cache-write または nano-AIU が不明な場合、
+既知の小計を下回る native 集計まで矛盾なしと判断する不具合が残っていた。
+共有の利用量比較で、完全な呼出し別内訳がなくても既知の小計を下回る集計を拒否する。
+不明な内訳をゼロと推定せず、小計以上の集計を不足だけで矛盾とみなさない。
+3次元の回帰は修正前に全て失敗し、修正後は通過した。
+公開復旧の対象試験、CLI 全通常・全 race、build、vet、diff check も通過した。
+この補正後の候補に対する独立品質承認、保護された公開検査、正式配布と
+下流の実運用再開は未完了であり、過去のレビュー結果を合格へ書き換えない。
+
 外部連携用の5環境変数を `0` にして、許可のない GitHub・GitLab・Copilot integration を実行しない。
 必要な最終確認は `go build ./...`、`go vet ./...`、`go test ./...`、
 変更した runtime package と CLI の race test、`gofmt`、生成 completion と `git diff --check`。

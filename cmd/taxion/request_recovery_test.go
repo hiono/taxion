@@ -404,6 +404,45 @@ func TestRecoveredQuestionUsageMustMatchNativeShutdownTotals(t *testing.T) {
 	}
 }
 
+func TestRecoveredQuestionPartialUsageCannotHideNativeConflict(t *testing.T) {
+	for _, dimension := range []string{"cache-read", "cache-write", "native-cost"} {
+		t.Run(dimension, func(t *testing.T) {
+			input, output, totalInput, totalOutput := int64(21), int64(8), int64(42), int64(16)
+			known, smaller, larger := int64(10), int64(9), int64(11)
+			knownCost, smallerCost, largerCost := 3.5, 3.0, 4.0
+			calls := []core.DispatchUsage{
+				{Model: "model", InputTokens: &input, OutputTokens: &output},
+				{Model: "model", InputTokens: &input, OutputTokens: &output},
+			}
+			totals := []core.DispatchUsage{{
+				Model: "model", InputTokens: &totalInput, OutputTokens: &totalOutput,
+			}}
+			switch dimension {
+			case "cache-read":
+				calls[0].CacheReadTokens, totals[0].CacheReadTokens = &known, &smaller
+			case "cache-write":
+				calls[0].CacheWriteTokens, totals[0].CacheWriteTokens = &known, &smaller
+			case "native-cost":
+				calls[0].TotalNanoAIU, totals[0].TotalNanoAIU = &knownCost, &smallerCost
+			}
+			if matchesQuestionUsage(calls, totals) || !questionUsageTotalsConflict(calls, totals) {
+				t.Fatal("missing per-call usage hid a known aggregate conflict")
+			}
+			switch dimension {
+			case "cache-read":
+				totals[0].CacheReadTokens = &larger
+			case "cache-write":
+				totals[0].CacheWriteTokens = &larger
+			case "native-cost":
+				totals[0].TotalNanoAIU = &largerCost
+			}
+			if questionUsageTotalsConflict(calls, totals) {
+				t.Fatal("missing per-call usage was inferred as zero")
+			}
+		})
+	}
+}
+
 func TestRequestRecoveryApplyIsIdempotentOnlyForExactDecision(t *testing.T) {
 	request := requestRecoveryInput{
 		OperationID: "request-1", Actor: "human", Source: "decision-1",
