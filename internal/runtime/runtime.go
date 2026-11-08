@@ -37,6 +37,7 @@ const (
 	EventCompaction   = "compaction"
 	EventPermission   = "permission"
 	EventExecution    = "execution_observation"
+	EventUnclassified = "unclassified_native_event"
 )
 
 // QuestionEventAllowed is shared by live and saved advice-only turns.

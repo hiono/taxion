@@ -470,7 +470,7 @@ func TestQuestionRejectsIncompleteUsageButKeepsHistoricalSoftLimitBehavior(t *te
 }
 
 func TestQuestionRejectsInvalidSourcesAndFailures(t *testing.T) {
-	for _, mode := range []string{"bad-source", "missing-source", "null-lists", "empty-answer", "runtime-failure", "stream-ended", "cancelled", "stop-failure", "oversize-input", "missing-turn-start", "missing-turn-end"} {
+	for _, mode := range []string{"bad-source", "missing-source", "null-lists", "empty-answer", "runtime-failure", "unclassified-native", "stream-ended", "cancelled", "stop-failure", "oversize-input", "missing-turn-start", "missing-turn-end"} {
 		t.Run(mode, func(t *testing.T) {
 			db, databasePath, worker, resolved := questionFixture(t)
 			worker.role = "ORCHESTRATOR"
@@ -490,6 +490,9 @@ func TestQuestionRejectsInvalidSourcesAndFailures(t *testing.T) {
 			case "runtime-failure":
 				q.events = make(chan runtime.Event, 1)
 				q.events <- runtime.Event{Type: runtime.EventFailed, Payload: "private-provider-detail"}
+			case "unclassified-native":
+				q.events = make(chan runtime.Event, 1)
+				q.events <- runtime.Event{Type: runtime.EventUnclassified, Payload: "private-provider-detail", Sequence: 1}
 			case "stream-ended":
 				q.events = make(chan runtime.Event)
 				close(q.events)

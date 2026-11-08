@@ -100,19 +100,27 @@ func TestFailedReviewObservationCannotExecute(t *testing.T) {
 func TestStopOnlySDKProtocolNeverCreatesOrSends(t *testing.T) {
 	for _, observe := range []bool{false, true} {
 		t.Run(fmt.Sprintf("observe=%t", observe), func(t *testing.T) {
-			testStopOnlySDKProtocol(t, observe, false)
+			testStopOnlySDKProtocol(t, observe, false, false)
 		})
 	}
 	t.Run("failed-review-observation", func(t *testing.T) {
-		testStopOnlySDKProtocol(t, true, true)
+		testStopOnlySDKProtocol(t, true, true, false)
+	})
+	t.Run("unclassified-advisory-observation", func(t *testing.T) {
+		testStopOnlySDKProtocol(t, true, false, true)
 	})
 }
 
-func testStopOnlySDKProtocol(t *testing.T, observe, failedReview bool) {
+func testStopOnlySDKProtocol(t *testing.T, observe, failedReview, unclassified bool) {
 	worktree := t.TempDir()
 	var history []sdk.SessionEvent
 	if observe {
 		history = completedSavedHistory(worktree)
+		if unclassified {
+			unknown := sdk.SessionEvent{ID: "unknown", Timestamp: history[2].Timestamp,
+				Data: &rpc.RawSessionEventData{EventType: "future.activity", Raw: json.RawMessage(`{"secret":"private-event-body"}`)}}
+			history = append(history[:3], append([]sdk.SessionEvent{unknown}, history[3:]...)...)
+		}
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -153,9 +161,15 @@ func testStopOnlySDKProtocol(t *testing.T, observe, failedReview bool) {
 	})
 	defer adapter.Close()
 	if observe {
-		result, err := adapter.ReadSavedTurn(t.Context(), dispatch.RuntimeSessionID)
-		if err != nil || result.Payload == "" || result.HistoryHash == "" {
-			t.Fatalf("saved observation: %+v, %v", result, err)
+		if unclassified {
+			if _, err := adapter.ReadSavedQuestionTurn(t.Context(), dispatch.RuntimeSessionID, false); err == nil {
+				t.Fatal("SDK-decoded unclassified event was accepted as a saved question")
+			}
+		} else {
+			result, err := adapter.ReadSavedTurn(t.Context(), dispatch.RuntimeSessionID)
+			if err != nil || result.Payload == "" || result.HistoryHash == "" {
+				t.Fatalf("saved observation: %+v, %v", result, err)
+			}
 		}
 		handle, err := adapter.lookup(dispatch.RuntimeSessionID)
 		if err != nil {
@@ -354,6 +368,58 @@ func TestSavedQuestionChecksActivityBeforeReceiptProjection(t *testing.T) {
 		if err != nil || len(result.Events) != 1 || result.Events[0].Payload != result.Payload {
 			t.Fatalf("generic saved review receipt compatibility lost for %T: %+v, %v", activity.Data, result, err)
 		}
+	}
+}
+
+func TestSavedQuestionRejectsUnclassifiedNativeEvents(t *testing.T) {
+	worktree := t.TempDir()
+	child, edit := "child", true
+	for _, data := range []sdk.SessionEventData{
+		&rpc.RawSessionEventData{EventType: "future.activity", Raw: json.RawMessage(`{"secret":"private-event-body"}`)},
+		&sdk.HookStartData{},
+		&sdk.ModelCallStartData{ParentToolCallID: &child},
+		&sdk.ModelCallFinishedData{ContainsBuiltInFileEditRequest: &edit},
+		&sdk.ModelCallFinalResultData{},
+		nil,
+	} {
+		for _, at := range []int{3, 5} {
+			events := completedSavedHistory(worktree)
+			unknown := sdk.SessionEvent{ID: "unclassified", Timestamp: events[at-1].Timestamp, Data: data}
+			events = append(events[:at], append([]sdk.SessionEvent{unknown}, events[at:]...)...)
+			for _, stopped := range []bool{false, true} {
+				history := events
+				if stopped {
+					history = history[:len(history)-1]
+				}
+				if _, err := savedQuestionTurn(history, "saved-session", worktree, stopped); err == nil {
+					t.Fatalf("unclassified %T accepted at %d (stopped=%v)", data, at, stopped)
+				}
+			}
+			if data != nil {
+				result, err := savedTurn(events, "saved-session", worktree)
+				if err != nil || len(result.Events) != 1 || result.Events[0].Payload != result.Payload {
+					t.Fatalf("legacy Reviewer receipt projection changed for %T: %+v, %v", data, result, err)
+				}
+			}
+		}
+	}
+}
+
+func TestSavedQuestionPreservesKnownSessionMetadata(t *testing.T) {
+	worktree := t.TempDir()
+	events := completedSavedHistory(worktree)
+	for index, data := range []sdk.SessionEventData{
+		&sdk.SystemMessageData{}, &sdk.SessionInfoData{},
+		&sdk.SessionAutoModeResolvedData{},
+		&sdk.SessionUsageCheckpointData{},
+	} {
+		metadata := sdk.SessionEvent{ID: fmt.Sprintf("metadata-%d", index), Timestamp: events[0].Timestamp, Data: data}
+		events = append(events[:1], append([]sdk.SessionEvent{metadata}, events[1:]...)...)
+	}
+	result, err := savedQuestionTurn(events, "saved-session", worktree, false)
+	if err != nil || result.Input != "execute saved contract" ||
+		result.InputHash != core.SHA256Hex([]byte(result.Input)) || len(result.Events) != 1 {
+		t.Fatal("known metadata prevented a valid saved question or altered its input/receipt", result, err)
 	}
 }
 

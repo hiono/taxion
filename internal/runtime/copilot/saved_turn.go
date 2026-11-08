@@ -81,7 +81,9 @@ func savedSessionTurn(events []sdk.SessionEvent, sessionID, worktree string, sto
 		if advisory && recognized && !runtime.QuestionEventAllowed(normalized.Type) {
 			return fail()
 		}
-		if ended && recognized {
+		// Keep the existing indexed Reviewer receipt separate from advisory admission.
+		projected := recognized && normalized.Type != runtime.EventUnclassified
+		if ended && projected {
 			switch normalized.Type {
 			case runtime.EventUsage, runtime.EventContextUsage, runtime.EventTurnFinished:
 			default:
@@ -185,7 +187,7 @@ func savedSessionTurn(events []sdk.SessionEvent, sessionID, worktree string, sto
 		case *sdk.ToolExecutionStartData, *sdk.ToolExecutionCompleteData:
 			result.Payload, turnStarted, ended, shutdown = "", false, false, false
 		}
-		if recognized {
+		if projected {
 			switch normalized.Type {
 			case runtime.EventExecution, runtime.EventUsage, runtime.EventOutput:
 				result.Events = append(result.Events, normalized)

@@ -3,6 +3,7 @@ package copilot
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -130,7 +131,7 @@ func TestNormalizeEventUsesSDKNeutralTypes(t *testing.T) {
 		{"context usage", sdk.SessionEvent{Data: &sdk.SessionUsageInfoData{CurrentTokens: 1200, TokenLimit: 8000}}, runtime.Event{Type: runtime.EventContextUsage, Payload: `{"currentTokens":1200,"tokenLimit":8000,"messagesLength":0}`}, true},
 		{"compaction", sdk.SessionEvent{Data: &sdk.SessionCompactionStartData{Model: &model, CurrentTokens: &inputTokens}}, runtime.Event{Type: runtime.EventCompaction, Payload: `{"phase":"started","model":"gpt-6-luna","currentTokens":120}`}, true},
 		{"permission completion", sdk.SessionEvent{Data: &sdk.PermissionCompletedData{Result: rpc.PermissionDeniedByPermissionRequestHook{}}}, runtime.Event{Type: runtime.EventPermission, Payload: `{"result":"denied-by-permission-request-hook"}`}, true},
-		{"unmapped", sdk.SessionEvent{}, runtime.Event{}, false},
+		{"missing data", sdk.SessionEvent{}, runtime.Event{Type: runtime.EventFailed, Payload: "native session event has no data"}, true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -275,6 +276,46 @@ func TestEventsAfterCursorSkipsCompletedTurns(t *testing.T) {
 		if event.Type == runtime.EventOutput && event.Payload != "current" {
 			t.Fatalf("replayed previous turn output: %+v", event)
 		}
+	}
+}
+
+func TestUnclassifiedSDKEventsReachAdmission(t *testing.T) {
+	child := "child"
+	for _, test := range []struct {
+		name  string
+		data  sdk.SessionEventData
+		agent *string
+	}{
+		{"opaque", &rpc.RawSessionEventData{EventType: "future.activity", Raw: json.RawMessage(`{"secret":"private-event-body"}`)}, nil},
+		{"unmapped-known-type", &sdk.HookStartData{}, nil},
+		{"missing-data", nil, nil},
+		{"invalid-usage", &sdk.AssistantUsageData{CopilotUsage: &rpc.AssistantUsageCopilotUsage{TotalNanoAiu: math.NaN()}}, nil},
+		{"child-metadata", &sdk.SessionStartData{}, &child},
+		{"unmapped-model-child", &sdk.ModelCallStartData{ParentToolCallID: &child}, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handle := &managedSession{sdk: &sdk.Session{}, watchers: map[*subscription]struct{}{}}
+			adapter := &Adapter{sessions: map[string]*managedSession{"session": handle}}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			events, err := adapter.Events(ctx, "session")
+			if err != nil {
+				t.Fatal(err)
+			}
+			handle.onEvent(sdk.SessionEvent{Data: test.data, AgentID: test.agent})
+			select {
+			case event := <-events:
+				if event.Sequence == 0 || runtime.QuestionEventAllowed(event.Type) ||
+					strings.Contains(event.Payload, "private-event-body") {
+					t.Fatal("unclassified native activity was accepted or disclosed", event)
+				}
+				if test.agent != nil && event.AgentID != *test.agent {
+					t.Fatal("child-agent identity disappeared from metadata", event)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("unclassified native activity disappeared before admission")
+			}
+		})
 	}
 }
 

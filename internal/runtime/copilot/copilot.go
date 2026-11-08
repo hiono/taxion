@@ -1257,7 +1257,16 @@ func (h *managedSession) onEvent(event sdk.SessionEvent) {
 }
 
 func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
+	if event.Data == nil {
+		return runtime.Event{Type: runtime.EventFailed, Payload: "native session event has no data"}, true
+	}
 	switch data := event.Data.(type) {
+	case *sdk.SessionStartData, *sdk.SessionShutdownData, *sdk.SessionInfoData,
+		*sdk.SystemMessageData, *sdk.SessionAutoModeResolvedData, *sdk.SessionUsageCheckpointData:
+		if event.AgentID != nil && *event.AgentID != "" {
+			return runtime.Event{Type: runtime.EventUnclassified}, true
+		}
+		return runtime.Event{}, false
 	case *sdk.SkillInvokedData:
 		payload, _ := json.Marshal(core.ExecutionObservation{
 			Phase: "skill-invoked", Skill: data.Name, Path: data.Path,
@@ -1327,7 +1336,7 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			TotalNanoAIU: totalNanoAIU, AICreditsStatus: data.AiCreditsStatus,
 		})
 		if err != nil {
-			return runtime.Event{}, false
+			return runtime.Event{Type: runtime.EventFailed, Payload: "invalid native usage event"}, true
 		}
 		return runtime.Event{Type: runtime.EventUsage, Payload: string(payload)}, true
 	case *sdk.SessionUsageInfoData:
@@ -1344,7 +1353,7 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			ToolDefinition: data.ToolDefinitionsTokens, Messages: data.MessagesLength,
 		})
 		if err != nil {
-			return runtime.Event{}, false
+			return runtime.Event{Type: runtime.EventFailed, Payload: "invalid native context usage event"}, true
 		}
 		return runtime.Event{Type: runtime.EventContextUsage, Payload: string(payload)}, true
 	case *sdk.SessionCompactionStartData:
@@ -1359,7 +1368,7 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			TokenLimit: data.TokenLimit, ConversationTokens: data.ConversationTokens,
 		})
 		if err != nil {
-			return runtime.Event{}, false
+			return runtime.Event{Type: runtime.EventFailed, Payload: "invalid native compaction event"}, true
 		}
 		return runtime.Event{Type: runtime.EventCompaction, Payload: string(payload)}, true
 	case *sdk.SessionCompactionCompleteData:
@@ -1383,7 +1392,7 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			PreCompactionMessages: data.PreCompactionMessagesLength, MessagesRemoved: data.MessagesRemoved,
 		})
 		if err != nil {
-			return runtime.Event{}, false
+			return runtime.Event{Type: runtime.EventFailed, Payload: "invalid native compaction event"}, true
 		}
 		return runtime.Event{Type: runtime.EventCompaction, Payload: string(payload)}, true
 	case *sdk.PermissionCompletedData:
@@ -1391,13 +1400,13 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			Result string `json:"result"`
 		}{Result: string(data.Result.Kind())})
 		if err != nil {
-			return runtime.Event{}, false
+			return runtime.Event{Type: runtime.EventFailed, Payload: "invalid native permission event"}, true
 		}
 		return runtime.Event{Type: runtime.EventPermission, Payload: string(payload)}, true
 	case *sdk.AbortData:
 		return runtime.Event{Type: runtime.EventCancelled, Payload: string(data.Reason)}, true
 	default:
-		return runtime.Event{}, false
+		return runtime.Event{Type: runtime.EventUnclassified}, true
 	}
 }
 
