@@ -484,11 +484,25 @@ func terminalFromSavedPlanner(binding plannerAttemptEvidence, turn runtime.Saved
 		}
 		answer = controller.QuestionAnswer{}
 	}
+	var usage []core.DispatchUsage
+	for _, event := range turn.Events {
+		if event.Type != runtime.EventUsage {
+			continue
+		}
+		var call core.DispatchUsage
+		if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &call); err != nil {
+			return plannerTerminalEvidence{}, fmt.Errorf("saved native usage event is invalid")
+		}
+		usage = append(usage, call)
+	}
+	if len(usage) == 0 {
+		usage = turn.UsageTotals
+	}
 	return plannerTerminalEvidence{
 		Version: 2, AttemptID: binding.AttemptID, SessionID: binding.SessionID,
 		InputHash: binding.InputHash, PromptHash: binding.PromptHash, SourceHash: binding.SourceHash,
 		OutputHash: core.SHA256Hex([]byte(turn.Payload)), Terminal: runtime.EventTurnEnded,
-		Answer: answer, Usage: turn.UsageTotals,
+		Answer: answer, Usage: usage,
 		InvalidAnswer: invalid,
 	}, nil
 }

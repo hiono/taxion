@@ -98,6 +98,23 @@ build、vet、gofmt、diff checkは通過した。未知活動のController拒�
 新候補の独立品質・ADR判定、保護されたCI、正式配布と実運用再開は、
 この追記時点では未完了である。
 
+`27e7057` の独立レビューは `REQUEST_CHANGES`、ADR-0074は `FAIL` として
+正式受理された。入力検証と結果受理時のbuild・vet・全通常試験・diff checkは通過したが、
+terminal receiptがない復旧で、保存された個別利用量を生成処理が捨て、
+native集計を期待値へコピーする不具合が残っていた。
+比較関数単体の回帰では、この呼出し元による自己比較を検出できなかった。
+
+共有の終了観測生成では、保存された `EventUsage` があればその個別値を保持し、
+不正な値の復号を拒否する。個別記録がない旧履歴では既存のnative集計入力を維持する。
+preview、apply時の再照合、旧履歴関連付けは同じ生成処理を使い、
+既存のreceipt・停止・承認・利用量を変更しない。
+公開 `request recover` の回帰をterminal receiptの有無で実行し、
+native集計が既知利用量を下回る場合の拒否と、不完全な集計での既知利用量保持を
+previewからapplyまで検査した。元実装を使うGo source overlayでは
+`cancellation accepted a known conflict in native usage totals` と失敗し、
+補正後はCLI全件race、build、vet、gofmt、diff checkが通過した。
+この補正後の独立品質・ADR判定、保護されたCI、正式配布と実運用再開は未完了である。
+
 外部連携用の5環境変数を `0` にして、許可のない GitHub・GitLab・Copilot integration を実行しない。
 必要な最終確認は `go build ./...`、`go vet ./...`、`go test ./...`、
 変更した runtime package と CLI の race test、`gofmt`、生成 completion と `git diff --check`。

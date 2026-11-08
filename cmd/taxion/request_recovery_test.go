@@ -192,6 +192,15 @@ func TestRequestRecoveryLegacyCancelPreservesCheckpointUsageAndReleasesStore(t *
 }
 
 func TestRequestRecoveryCancelRetainsPerCallUsageWithIncompleteNativeTotals(t *testing.T) {
+	for _, mode := range []string{"with-terminal", "without-terminal"} {
+		t.Run(mode, func(t *testing.T) {
+			testRequestRecoveryCancelUsage(t, mode == "with-terminal")
+		})
+	}
+}
+
+func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent bool) {
+	t.Helper()
 	_, args := requestFixture(t)
 	var initialOutput bytes.Buffer
 	if err := requestCommand(append(args, "preserve a stopped request"), strings.NewReader("/plan\n"),
@@ -293,8 +302,17 @@ func TestRequestRecoveryCancelRetainsPerCallUsageWithIncompleteNativeTotals(t *t
 			TotalNanoAIU: &amount, AICreditsStatus: &complete,
 		}},
 	}
+	usagePayload, err := json.Marshal(terminal.Usage[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn.Events = append([]runtime.Event{{Type: runtime.EventUsage, Payload: string(usagePayload)}}, turn.Events...)
 	var receipts []store.RequestRecord
-	for index, evidence := range []any{initial, session, send, terminal} {
+	evidence := []any{initial, session, send}
+	if terminalPresent {
+		evidence = append(evidence, terminal)
+	}
+	for index, evidence := range evidence {
 		data, err := json.Marshal(evidence)
 		if err != nil {
 			t.Fatal(err)
@@ -324,12 +342,20 @@ func TestRequestRecoveryCancelRetainsPerCallUsageWithIncompleteNativeTotals(t *t
 		"--reason", "reconcile only the stopped request", "--evidence", "specific-process-stop",
 		"--confirm-stopped", "--accept-uncertainty", "--resolution", "cancel",
 	}
-	mismatchedTokens := outputTokens + 1
+	mismatchedTokens := outputTokens - 1
 	turn.UsageTotals[0].OutputTokens = &mismatchedTokens
 	if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &bytes.Buffer{}); err == nil {
 		t.Fatal("cancellation accepted a known conflict in native usage totals")
 	}
 	turn.UsageTotals[0].OutputTokens = &outputTokens
+	if !terminalPresent {
+		turn.Events[0].Payload = "private-invalid-usage"
+		if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &bytes.Buffer{}); err == nil ||
+			strings.Contains(err.Error(), "private-invalid-usage") {
+			t.Fatal("invalid saved usage was accepted or disclosed", err)
+		}
+		turn.Events[0].Payload = string(usagePayload)
+	}
 	var preview bytes.Buffer
 	if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &preview); err != nil {
 		t.Fatal(err)
