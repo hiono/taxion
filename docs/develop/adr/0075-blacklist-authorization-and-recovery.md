@@ -64,7 +64,7 @@ Accepted 2026-11-08 by explicit user decision. 取消・後続入力・保存結
 
 前の変更では、取消入口で `RECONTRACT` を受け入れても、後続の入力検証再利用が
 旧停止 code 一覧で拒否していた。入口だけの変更で後続の分類と保存監査を同期しなかったことが原因である。
-Decision を緩めて既存コードを適合とみなさず、次の直接依存を合わせて是正する。
+Decision を緩めて既存コードを適合とみなさず、次の直接依存を合わせて是正した。
 
 - `StoppedExecutedArtifactReviewer`、`HasBudgetContinuationSource` と後続確認は、停止・役割・結果・receipt の構造で判定する。
 - 成果物の検証再利用と失敗入力の後続作成は、停止 code に依存せず、既存の入力・設定・失敗 receipt を照合する。
@@ -81,8 +81,20 @@ Graph の既知の停止 code、Task・Dispatch の型付き状態遷移、実�
 最後に追加した `RECONTRACT` の実行済み Reviewer 継続、通常後続の確認、
 保存結果受理と必要な usage の拒否を含む対象 race 試験も成功した。
 一方、全通常試験と変更 package の全 race 試験を合わせた検証ジョブは、
-事前に設定した1950秒の上限で終了した。全 race は Controller と CLI の終了結果がなく未完了である。
-残る固定期限内に同じ検証単位を完了できないため、変更と証拠を checkpoint に保全して停止する。
+事前に設定した1950秒の上限で終了した。この時点では全 race の Controller と CLI の終了結果がなく未完了だった。
+当初の固定期限内に同じ検証単位を完了できないため、変更と証拠を
+`f4cba6a` の checkpoint に保全して停止した。
+
+固定期限の明示的な追加承認後、同じ checkpoint に対する変更 package の全 race を再実施し、
+次のコマンドが終了 code 0 で成功した。
+
+```sh
+go test -race -timeout 30m ./internal/core ./internal/store ./internal/runtime/controller ./cmd/taxion
+```
+
+Controller は1399.561秒、CLI は168.312秒で成功し、core と store は成功済みのキャッシュを使用した。
+検証中は承認された5分間隔の監視を併設し、ジョブ終了時に監視も停止した。
+これは対象となる停止 code 判定の是正と回帰検証の完了であり、
 追加是正を全体適合、配布可能、下流の公開復旧問題解消と扱わない。
 
 ### 検証と申し送り
