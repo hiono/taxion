@@ -66,6 +66,17 @@ Copilot と OpenACP の全件 race、およびCLI・Controllerの `Request|Recov
 この補正後の候補に対する独立品質承認、保護された公開検査、正式配布と
 下流の実運用再開は未完了であり、過去のレビュー結果を合格へ書き換えない。
 
+別の停止済み Flow に未開始の `ISSUED` Dispatch が残ると、対象の取消を相互に
+遮断する不具合を確認した。同じ workspace に2個の停止 Flow を作る回帰は、
+修正前の公開 reconciliation で `another Dispatch is active` と失敗した。
+共有判定では、停止・hold・所有権なしの対応 Flow、未開始状態、実行証拠と
+runtime receipt の不在を照合し、Graph と ledger の拒否条件を揃えた。
+停止 code や役割の許可一覧は追加せず、他の Flow・Dispatch は変更しない。
+対象の取消後に他の保存指示が不変であることと、他方の稼働・session・receipt による
+拒否を含む通常・race の対象試験、build、vet、gofmt、diff check は通過した。
+この追記時点で新候補の全体検証、独立品質・ADR適合判定、保護されたCI、
+正式配布と下流の実運用再開は未完了である。
+
 外部連携用の5環境変数を `0` にして、許可のない GitHub・GitLab・Copilot integration を実行しない。
 必要な最終確認は `go build ./...`、`go vet ./...`、`go test ./...`、
 変更した runtime package と CLI の race test、`gofmt`、生成 completion と `git diff --check`。

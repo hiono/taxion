@@ -300,6 +300,79 @@ func TestStoppedDispatchReconciliationRejectsInsufficientEvidence(t *testing.T) 
 	}
 }
 
+func TestStoppedDispatchReconciliationPreservesOtherUnstartedFlow(t *testing.T) {
+	db, ledger, _, request := stoppedInputFixture(t)
+	zero := 0
+	other, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
+		ID: "other-stopped-flow", TaskID: "implementation", Repository: "owner/repo",
+		ReviewRoot: filepath.Join(t.TempDir(), "other-review"), MaxRepairs: &zero,
+		TimeoutSeconds: 600, MaxNanoAIU: 1e12,
+		Authorization: core.TaskDecision{ID: "other-flow-approval", Source: "human:other", Text: "authorize the independent other flow"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		if err := holdReviewFlowForStop(&state.Graph, &other, "preserve unstarted work"); err != nil {
+			return err
+		}
+		other.Status, other.StopCode, other.Reason = "STOPPED", "BUDGET_STOP", "preserve unstarted work"
+		storeFlow(state, other)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := ReconcileStoppedDispatch(db, request, true)
+	if err != nil {
+		t.Fatal("another stopped unstarted Flow prevented target reconciliation", err)
+	}
+	for _, evidence := range []string{"running", "session", "receipt"} {
+		t.Run(evidence, func(t *testing.T) {
+			var snapshot store.Workspace
+			if err := core.DecodeGraphInput(strings.NewReader(string(mustFlowJSON(t, before))), &snapshot); err != nil {
+				t.Fatal(err)
+			}
+			switch evidence {
+			case "running":
+				for i := range snapshot.Graph.ReviewFlows {
+					if snapshot.Graph.ReviewFlows[i].ID == other.ID {
+						snapshot.Graph.ReviewFlows[i].Status = "RUNNING"
+					}
+				}
+			case "session":
+				for i := range snapshot.Graph.Dispatches {
+					if snapshot.Graph.Dispatches[i].ID == other.DispatchIDs[0] {
+						snapshot.Graph.Dispatches[i].RuntimeSessionID = "other-session"
+					}
+				}
+			case "receipt":
+				snapshot.Records.Events = []store.RuntimeReceipt{{DispatchID: other.DispatchIDs[0]}}
+			}
+			if _, err := previewDispatchReconciliation(snapshot, request); err == nil {
+				t.Fatal("other execution evidence was ignored")
+			}
+		})
+	}
+	request.ExpectedHash = preview.Hash
+	if _, err := ReconcileStoppedDispatch(db, request, false); err != nil {
+		t.Fatal(err)
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedOther, _ := after.Graph.ReviewFlow(other.ID)
+	beforeDispatch, _ := before.Graph.GraphDispatch(other.DispatchIDs[0])
+	afterDispatch, _ := after.Graph.GraphDispatch(other.DispatchIDs[0])
+	if !reflect.DeepEqual(other, savedOther) || !reflect.DeepEqual(beforeDispatch, afterDispatch) {
+		t.Fatal("target cancellation changed the other stopped Flow or Dispatch")
+	}
+}
+
 func TestStoppedFirstCoderReconciliationDoesNotDependOnStopCode(t *testing.T) {
 	for _, stopCode := range []string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT", "RECONTRACT"} {
 		for _, baselineOnly := range []bool{false, true} {

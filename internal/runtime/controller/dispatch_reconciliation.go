@@ -160,13 +160,33 @@ func previewDispatchReconciliation(state store.Workspace, request DispatchReconc
 			return fail("a Flow is still running or claimed")
 		}
 	}
+	stoppedUnstarted := map[string]bool{}
 	for _, other := range state.Graph.Dispatches {
 		if other.ID != dispatch.ID && active(other.Status) {
-			return fail("another Dispatch is active")
+			if other.Status != core.DispatchIssued || other.Acknowledged || other.ExecutionStarted ||
+				other.ExecutionStartSHA != "" || other.RuntimeSessionID != "" || other.RuntimeConfigHash != "" ||
+				len(other.RuntimeUsage) != 0 || other.Result != nil {
+				return fail("another Dispatch is active")
+			}
+			for _, otherFlow := range state.Graph.ReviewFlows {
+				if slices.Contains(otherFlow.DispatchIDs, other.ID) {
+					stoppedUnstarted[other.ID] = otherFlow.Status == "STOPPED" &&
+						otherFlow.HandoffHeld() && otherFlow.RunnerID == ""
+					break
+				}
+			}
+			if !stoppedUnstarted[other.ID] {
+				return fail("another Dispatch is active")
+			}
+			for _, receipt := range state.Records.Events {
+				if receipt.DispatchID == other.ID {
+					return fail("another Dispatch has runtime receipts")
+				}
+			}
 		}
 	}
 	for _, legacy := range state.Ledger.Dispatches {
-		if legacy.Active && legacy.ID != dispatch.ID {
+		if legacy.Active && legacy.ID != dispatch.ID && !stoppedUnstarted[legacy.ID] {
 			return fail("a legacy Dispatch is active")
 		}
 	}
