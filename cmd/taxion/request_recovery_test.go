@@ -195,14 +195,16 @@ func TestRequestRecoveryLegacyCancelPreservesCheckpointUsageAndReleasesStore(t *
 func TestRequestRecoveryCancelRetainsPerCallUsageWithIncompleteNativeTotals(t *testing.T) {
 	for _, mode := range []string{"with-terminal", "without-terminal"} {
 		for _, partial := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/partial-calls-%t", mode, partial), func(t *testing.T) {
-				testRequestRecoveryCancelUsage(t, mode == "with-terminal", partial)
-			})
+			for _, checkpoint := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/partial-calls-%t/checkpoint-%t", mode, partial, checkpoint), func(t *testing.T) {
+					testRequestRecoveryCancelUsage(t, mode == "with-terminal", partial, checkpoint)
+				})
+			}
 		}
 	}
 }
 
-func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls bool) {
+func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls, checkpointPresent bool) {
 	t.Helper()
 	_, args := requestFixture(t)
 	var initialOutput bytes.Buffer
@@ -323,6 +325,22 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls 
 		}
 		turn.Events = append([]runtime.Event{{Type: runtime.EventUsage, Payload: string(data)}}, turn.Events...)
 	}
+	expectedAmount := amount
+	if checkpointPresent {
+		checkpoint := runtime.UsageCheckpoint{TotalNanoAIU: &amount}
+		if partialCalls {
+			checkpoint.UsageTotals = turn.UsageTotals
+		} else {
+			// Historical un-attributed accounting has a known subtotal, not a made-up model or call.
+			expectedAmount += 1.5
+			checkpoint.TotalNanoAIU = &expectedAmount
+		}
+		data, err := json.Marshal(checkpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		turn.Events = append(turn.Events, runtime.Event{Type: runtime.EventUsageCheckpoint, Payload: string(data)})
+	}
 	var receipts []store.RequestRecord
 	evidence := []any{initial, session, send}
 	if terminalPresent {
@@ -405,7 +423,7 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls 
 		t.Fatal(err)
 	}
 	if after.Records.Operation.State != "CANCELLED" ||
-		after.Records.Operation.PlanningNanoAIU != operation.PlanningNanoAIU+amount ||
+		after.Records.Operation.PlanningNanoAIU != operation.PlanningNanoAIU+expectedAmount ||
 		after.Records.Operation.PlanningUsageState != "unknown" {
 		t.Fatal("cancellation failed to retain known per-call usage and aggregate uncertainty")
 	}

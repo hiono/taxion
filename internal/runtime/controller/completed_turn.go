@@ -10,7 +10,7 @@ import (
 	"github.com/hiono/taxion/internal/runtime"
 )
 
-func drainCompletedTurn(ctx context.Context, events <-chan runtime.Event, usage *[]core.DispatchUsage, sequence *uint64) error {
+func drainCompletedTurn(ctx context.Context, events <-chan runtime.Event, usage *[]core.DispatchUsage, sequence *uint64, sessionID string) error {
 	finished := false
 	for {
 		var event runtime.Event
@@ -43,6 +43,10 @@ func drainCompletedTurn(ctx context.Context, events <-chan runtime.Event, usage 
 			}
 			call.ObservedAt = time.Now().UTC()
 			*usage = append(*usage, call)
+		case runtime.EventUsageCheckpoint:
+			if _, matches, err := runtime.DecodeUsageCheckpoint(event.Payload, sessionID, *usage); err != nil || !matches {
+				return fmt.Errorf("taxion: completed main turn has incomplete or conflicting checkpoint accounting")
+			}
 		case runtime.EventTurnFinished:
 			if finished {
 				return fmt.Errorf("taxion: completed main turn has duplicate terminal boundaries")

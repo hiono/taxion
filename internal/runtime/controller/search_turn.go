@@ -154,6 +154,10 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 					return turn, fmt.Errorf("taxion: search usage is invalid")
 				}
 				turn.Usage = append(turn.Usage, usage)
+			case runtime.EventUsageCheckpoint:
+				if _, matches, err := runtime.DecodeUsageCheckpoint(event.Payload, session, turn.Usage); err != nil || !matches {
+					return turn, fmt.Errorf("taxion: search checkpoint has incomplete or conflicting accounting")
+				}
 			case runtime.EventFailed, runtime.EventCancelled:
 				return turn, fmt.Errorf("taxion: search runtime failed or was cancelled; provider details withheld")
 			case runtime.EventTurnEnded:
@@ -161,7 +165,7 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 					searchCallID == "" || !searchComplete {
 					return turn, fmt.Errorf("taxion: search ended without a bound main-agent answer")
 				}
-				if err := drainCompletedTurn(ctx, events, &turn.Usage, &sequence); err != nil {
+				if err := drainCompletedTurn(ctx, events, &turn.Usage, &sequence, session); err != nil {
 					return turn, err
 				}
 				return turn, checkQuota()

@@ -17,6 +17,7 @@ import (
 	sdk "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/rpc"
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/runtime"
 )
 
 func TestStopOnlyBindingCannotExecuteOrChangeSession(t *testing.T) {
@@ -418,11 +419,74 @@ func TestSavedQuestionPreservesKnownSessionMetadata(t *testing.T) {
 	}
 	result, err := savedQuestionTurn(events, "saved-session", worktree, false)
 	if err != nil || result.Input != "execute saved contract" ||
-		result.InputHash != core.SHA256Hex([]byte(result.Input)) || len(result.Events) != 1 {
+		result.InputHash != core.SHA256Hex([]byte(result.Input)) || len(result.Events) != 2 ||
+		result.Events[0].Type != runtime.EventUsageCheckpoint {
 		t.Fatal("known metadata prevented a valid saved question or altered its input/receipt", result, err)
 	}
 }
 
+func TestSavedQuestionObservesAccountingCheckpointWithoutAnotherCall(t *testing.T) {
+	worktree := t.TempDir()
+	events := completedSavedHistory(worktree)
+	input, output, zero, amount := int64(21), int64(8), int64(0), 3.5
+	status := rpc.AiCreditsStatusComplete
+	accounting := &sdk.UsageAccountingIdentity{SourceSessionID: "saved-session", Sequence: 1, UsageID: "call"}
+	usage := sdk.SessionEvent{ID: "usage", Timestamp: events[0].Timestamp, Data: &sdk.AssistantUsageData{
+		Model: "model", InputTokens: &input, OutputTokens: &output,
+		CacheReadTokens: &zero, CacheWriteTokens: &zero, Accounting: accounting,
+		CopilotUsage: &rpc.AssistantUsageCopilotUsage{TotalNanoAiu: amount}, AiCreditsStatus: &status,
+	}}
+	checkpoint := &sdk.SessionUsageCheckpointData{
+		TotalNanoAiu: amount, UsageAccountingWatermarks: map[string]int64{"saved-session": 1},
+		AccountingSnapshot: &rpc.UsageGetMetricsResult{
+			TotalNanoAiu: &amount, AiCreditsStatus: &status,
+			ModelMetrics: map[string]rpc.UsageMetricsModelMetric{"model": {
+				TotalNanoAiu: &amount, AiCreditsStatus: &status,
+				Usage: rpc.UsageMetricsModelMetricUsage{InputTokens: input, OutputTokens: output},
+			}},
+			AgentMetrics: map[string]rpc.UsageMetricsAgentMetric{"main": {}},
+		},
+	}
+	events = append(events[:3], append([]sdk.SessionEvent{usage}, events[3:]...)...)
+	events = append(events[:len(events)-1], append([]sdk.SessionEvent{{
+		ID: "checkpoint", Timestamp: events[0].Timestamp, Data: checkpoint,
+	}}, events[len(events)-1:]...)...)
+	result, err := savedQuestionTurn(events, "saved-session", worktree, false)
+	if err != nil || len(result.Events) != 3 || result.Events[2].Type != runtime.EventUsageCheckpoint {
+		t.Fatal("SDK checkpoint disappeared from saved advisory accounting", result, err)
+	}
+	var call core.DispatchUsage
+	if json.Unmarshal([]byte(result.Events[0].Payload), &call) != nil {
+		t.Fatal("individual SDK receipt was lost")
+	}
+	observed, matches, err := runtime.DecodeUsageCheckpoint(result.Events[2].Payload, "saved-session", []core.DispatchUsage{call})
+	if err != nil || !matches || observed.KnownNanoAIU([]core.DispatchUsage{call}) != amount {
+		t.Fatal("checkpoint was not independently matched or was counted twice", observed, matches, err)
+	}
+	indexed, err := savedTurn(events, "saved-session", worktree)
+	if err != nil || len(indexed.Events) != 2 {
+		t.Fatal("existing indexed Reviewer projection changed", indexed, err)
+	}
+	partial := rpc.AiCreditsStatusPartial
+	checkpoint.AccountingSnapshot.AiCreditsStatus = &partial
+	normalized, recognized := normalizeEvent(sdk.SessionEvent{Data: checkpoint})
+	if !recognized {
+		t.Fatal("partial aggregate accounting disappeared")
+	}
+	if _, matches, err := runtime.DecodeUsageCheckpoint(normalized.Payload, "saved-session", []core.DispatchUsage{call}); err != nil || matches {
+		t.Fatal("global partial accounting was falsely certified from complete model subtotals", matches, err)
+	}
+	checkpoint.AccountingSnapshot.AiCreditsStatus = &status
+	checkpoint.AccountingSnapshot.AgentMetrics["child"] = rpc.UsageMetricsAgentMetric{}
+	if _, err := savedQuestionTurn(events, "saved-session", worktree, false); err == nil {
+		t.Fatal("checkpoint hid child-agent accounting")
+	}
+	delete(checkpoint.AccountingSnapshot.AgentMetrics, "child")
+	checkpoint.TotalNanoAiu = -1
+	if _, err := savedQuestionTurn(events, "saved-session", worktree, false); err == nil {
+		t.Fatal("negative checkpoint accounting was accepted")
+	}
+}
 func completedSavedHistory(worktree string) []sdk.SessionEvent {
 	message, turn := "input-message", "review-turn"
 	now := time.Now().UTC()

@@ -1262,11 +1262,16 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 	}
 	switch data := event.Data.(type) {
 	case *sdk.SessionStartData, *sdk.SessionShutdownData, *sdk.SessionInfoData,
-		*sdk.SystemMessageData, *sdk.SessionAutoModeResolvedData, *sdk.SessionUsageCheckpointData:
+		*sdk.SystemMessageData, *sdk.SessionAutoModeResolvedData:
 		if event.AgentID != nil && *event.AgentID != "" {
 			return runtime.Event{Type: runtime.EventUnclassified}, true
 		}
 		return runtime.Event{}, false
+	case *sdk.SessionUsageCheckpointData:
+		if event.AgentID != nil && *event.AgentID != "" {
+			return runtime.Event{Type: runtime.EventUnclassified}, true
+		}
+		return normalizeUsageCheckpoint(data), true
 	case *sdk.SkillInvokedData:
 		payload, _ := json.Marshal(core.ExecutionObservation{
 			Phase: "skill-invoked", Skill: data.Name, Path: data.Path,

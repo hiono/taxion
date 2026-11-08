@@ -107,7 +107,7 @@ func TestCompletedTurnWaitsForProviderBoundary(t *testing.T) {
 			go func() {
 				var usage []core.DispatchUsage
 				sequence := uint64(1)
-				done <- drainCompletedTurn(ctx, events, &usage, &sequence)
+				done <- drainCompletedTurn(ctx, events, &usage, &sequence, "question-session")
 			}()
 			select {
 			case err := <-done:
@@ -241,6 +241,62 @@ func TestQuestionAnswersSavedRecordsWithoutChangingWorkspace(t *testing.T) {
 	restored, err := ObserveQuestion(reopened, path, "owner/repo", "task")
 	if err != nil || restored.Observation.ContentHash != result.Context.Observation.ContentHash {
 		t.Fatal("question observation depended on session history", err)
+	}
+}
+
+func TestQuestionValidatesLiveAndDrainedCheckpointsWithoutDuplicateUsage(t *testing.T) {
+	for _, mode := range []string{"live", "drain", "wrong-session", "invalid"} {
+		t.Run(mode, func(t *testing.T) {
+			db, databasePath, worker, resolved := questionFixture(t)
+			defer db.Close()
+			worker.role = "ORCHESTRATOR"
+			payload := `{"model":"test","inputTokens":10,"outputTokens":5,"cacheReadTokens":0,"cacheWriteTokens":0,"totalNanoAIU":3.5,"aiCreditsStatus":"complete"}`
+			var usage core.DispatchUsage
+			if err := json.Unmarshal([]byte(payload), &usage); err != nil {
+				t.Fatal(err)
+			}
+			checkpoint := runtime.UsageCheckpoint{UsageTotals: []core.DispatchUsage{usage}, TotalNanoAIU: usage.TotalNanoAIU}
+			if mode == "wrong-session" {
+				checkpoint.Watermarks = map[string]int64{"another-native-session": 1}
+			}
+			body, err := json.Marshal(checkpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "invalid" {
+				body = []byte(`{"usageTotals":"private-invalid-checkpoint"}`)
+			}
+			original := questionEventsWithUsage(savedQuestionAnswer, payload)
+			events := make(chan runtime.Event, 7)
+			sequence, at := uint64(0), 3
+			if mode == "drain" || mode == "wrong-session" {
+				at = 5
+			}
+			send := func(event runtime.Event) {
+				sequence++
+				event.Sequence = sequence
+				events <- event
+			}
+			for index := 0; index < 6; index++ {
+				if index == at {
+					send(runtime.Event{Type: runtime.EventUsageCheckpoint, Payload: string(body)})
+				}
+				send(<-original)
+			}
+			q := &questionRuntime{configuredRuntime: worker, events: events}
+			result, err := AskQuestion(t.Context(), db, filepath.Join(filepath.Dir(databasePath), "ledger.json"),
+				"task", "Observe the saved Task.", resolved.Config, q)
+			valid := mode == "live" || mode == "drain"
+			if (err == nil) != valid || len(result.Usage) != 1 ||
+				err != nil && strings.Contains(err.Error(), "private-invalid-checkpoint") {
+				t.Fatal("checkpoint admission lost accounting, duplicated it, or disclosed private payload", result, err)
+			}
+			after, loadErr := db.LoadWorkspace()
+			if loadErr != nil || valid && after.Records.Operation.State != "COMPLETED" ||
+				!valid && after.Records.Operation.State == "COMPLETED" {
+				t.Fatal("checkpoint receipt acceptance was not preserved", loadErr)
+			}
+		})
 	}
 }
 

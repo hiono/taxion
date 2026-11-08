@@ -577,6 +577,10 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 						return result, err
 					}
 				}
+			case runtime.EventUsageCheckpoint:
+				if _, matches, err := runtime.DecodeUsageCheckpoint(event.Payload, result.SessionID, result.Usage); err != nil || !matches {
+					return result, fmt.Errorf("taxion: question usage checkpoint has incomplete or conflicting accounting")
+				}
 			case runtime.EventOutputDelta:
 				if !turnStarted || turnEnded {
 					return result, fmt.Errorf("taxion: question output delta arrived outside its main turn")
@@ -596,7 +600,7 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				if !turnStarted || !turnEnded || strings.TrimSpace(output) == "" {
 					return result, fmt.Errorf("taxion: question ended without one complete main-agent answer")
 				}
-				if err := drainCompletedTurn(ctx, events, &result.Usage, &lastSequence); err != nil {
+				if err := drainCompletedTurn(ctx, events, &result.Usage, &lastSequence, result.SessionID); err != nil {
 					return result, err
 				}
 				if err := validateQuestionUsage(result.Usage); err != nil {

@@ -766,6 +766,11 @@ func buildRequestRecoveryPreview(state store.Workspace, checkpoint requestCheckp
 		return fail("saved context drifted or the answer is no longer valid for request planning")
 	}
 	usageMatches := matchesQuestionUsage(terminal.Usage, turn.UsageTotals)
+	checkpointMatches, checkpointFloor, checkpointErr := savedCheckpointUsage(turn)
+	if checkpointErr != nil {
+		return fail("saved usage checkpoint is invalid, out of scope or contradictory")
+	}
+	usageMatches = usageMatches && checkpointMatches
 	usageUncertain := uncertainCancellation && (len(terminal.Usage) == 0 && len(turn.UsageTotals) == 0 ||
 		len(terminal.Usage) != 0 && !questionUsageTotalsConflict(terminal.Usage, turn.UsageTotals))
 	if turnHasExecution(turn) || !usageMatches && !usageUncertain {
@@ -791,6 +796,10 @@ func buildRequestRecoveryPreview(state store.Workspace, checkpoint requestCheckp
 	total, usageStatus, err := plannerUsageTotal(terminal.Usage)
 	if err != nil {
 		return fail("saved usage is invalid")
+	}
+	total = max(total, checkpointFloor)
+	if math.IsNaN(total) || math.IsInf(total, 0) {
+		return fail("saved checkpoint cost is invalid")
 	}
 	if uncertainCancellation && !usageMatches {
 		usageStatus = "unknown"
@@ -888,104 +897,60 @@ func questionUsageTotalsConflict(calls, totals []core.DispatchUsage) bool {
 }
 
 func compareQuestionUsage(calls, totals []core.DispatchUsage) (bool, bool) {
-	if len(calls) == 0 || len(totals) == 0 {
-		return false, len(calls) == 0 && len(totals) != 0
-	}
-	type modelUsage struct {
-		input, output, cacheRead, cacheWrite                     int64
-		inputKnown, outputKnown, cacheReadKnown, cacheWriteKnown bool
-		cacheReadComplete, cacheWriteComplete                    bool
-		nanoAIU                                                  float64
-		nanoAIUKnown, nanoAIUComplete                            bool
-	}
-	sum := map[string]modelUsage{}
-	for _, call := range calls {
-		if strings.TrimSpace(call.Model) == "" || call.InputTokens == nil || call.OutputTokens == nil ||
-			*call.InputTokens < 0 || *call.OutputTokens < 0 {
-			return false, true
-		}
-		value := sum[call.Model]
-		if _, exists := sum[call.Model]; !exists {
-			value.cacheReadComplete, value.cacheWriteComplete, value.nanoAIUComplete = true, true, true
-		}
-		if *call.InputTokens > math.MaxInt64-value.input || *call.OutputTokens > math.MaxInt64-value.output {
-			return false, true
-		}
-		value.input += *call.InputTokens
-		value.output += *call.OutputTokens
-		value.inputKnown, value.outputKnown = true, true
-		if call.CacheReadTokens != nil {
-			if *call.CacheReadTokens < 0 || *call.CacheReadTokens > math.MaxInt64-value.cacheRead {
-				return false, true
+	return core.CompareUsage(calls, totals)
+}
+
+func savedCheckpointUsage(turn runtime.SavedTurn) (bool, float64, error) {
+	var calls []core.DispatchUsage
+	for _, event := range turn.Events {
+		if event.Type == runtime.EventUsage {
+			var call core.DispatchUsage
+			if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &call); err != nil {
+				return false, 0, err
 			}
-			value.cacheRead += *call.CacheReadTokens
-			value.cacheReadKnown = true
-		} else {
-			value.cacheReadComplete = false
-		}
-		if call.CacheWriteTokens != nil {
-			if *call.CacheWriteTokens < 0 || *call.CacheWriteTokens > math.MaxInt64-value.cacheWrite {
-				return false, true
-			}
-			value.cacheWrite += *call.CacheWriteTokens
-			value.cacheWriteKnown = true
-		} else {
-			value.cacheWriteComplete = false
-		}
-		if call.TotalNanoAIU != nil {
-			if math.IsNaN(*call.TotalNanoAIU) || math.IsInf(*call.TotalNanoAIU, 0) || *call.TotalNanoAIU < 0 {
-				return false, true
-			}
-			value.nanoAIU += *call.TotalNanoAIU
-			if math.IsInf(value.nanoAIU, 0) {
-				return false, true
-			}
-			value.nanoAIUKnown = true
-		} else {
-			value.nanoAIUComplete = false
-		}
-		sum[call.Model] = value
-	}
-	matches := len(sum) == len(totals)
-	seen := map[string]bool{}
-	for _, total := range totals {
-		if strings.TrimSpace(total.Model) == "" || seen[total.Model] {
-			return false, true
-		}
-		seen[total.Model] = true
-		value, ok := sum[total.Model]
-		if !ok {
-			return false, true
-		}
-		if total.InputTokens != nil && *total.InputTokens < 0 || total.OutputTokens != nil && *total.OutputTokens < 0 ||
-			total.CacheReadTokens != nil && *total.CacheReadTokens < 0 ||
-			total.CacheWriteTokens != nil && *total.CacheWriteTokens < 0 ||
-			total.TotalNanoAIU != nil && (math.IsNaN(*total.TotalNanoAIU) || math.IsInf(*total.TotalNanoAIU, 0) || *total.TotalNanoAIU < 0) {
-			return false, true
-		}
-		if total.InputTokens == nil || total.OutputTokens == nil || !value.inputKnown || !value.outputKnown {
-			matches = false
-		} else if *total.InputTokens != value.input || *total.OutputTokens != value.output {
-			return false, true
-		}
-		if value.cacheReadKnown && total.CacheReadTokens == nil ||
-			value.cacheWriteKnown && total.CacheWriteTokens == nil ||
-			value.nanoAIUKnown != (total.TotalNanoAIU != nil) ||
-			total.CacheReadTokens != nil && !value.cacheReadComplete ||
-			total.CacheWriteTokens != nil && !value.cacheWriteComplete ||
-			total.TotalNanoAIU != nil && !value.nanoAIUComplete {
-			matches = false
-		}
-		if total.CacheReadTokens != nil && (*total.CacheReadTokens < value.cacheRead ||
-			value.cacheReadComplete && *total.CacheReadTokens != value.cacheRead) ||
-			total.CacheWriteTokens != nil && (*total.CacheWriteTokens < value.cacheWrite ||
-				value.cacheWriteComplete && *total.CacheWriteTokens != value.cacheWrite) ||
-			total.TotalNanoAIU != nil && (value.nanoAIU-*total.TotalNanoAIU > 1e-6 ||
-				value.nanoAIUComplete && math.Abs(*total.TotalNanoAIU-value.nanoAIU) > 1e-6) {
-			return false, true
+			calls = append(calls, call)
 		}
 	}
-	return matches, false
+	var prior []core.DispatchUsage
+	matches, floor := true, 0.0
+	for _, event := range turn.Events {
+		if event.Type == runtime.EventUsage {
+			var call core.DispatchUsage
+			if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &call); err != nil {
+				return false, 0, err
+			}
+			prior = append(prior, call)
+		}
+		if event.Type != runtime.EventUsageCheckpoint {
+			continue
+		}
+		checkpoint, exact, err := runtime.DecodeUsageCheckpoint(event.Payload, turn.SessionID, prior)
+		if err != nil {
+			return false, 0, err
+		}
+		known := checkpoint.KnownNanoAIU(calls)
+		if math.IsInf(known, 0) || math.IsNaN(known) {
+			return false, 0, fmt.Errorf("invalid checkpoint cost")
+		}
+		if len(calls) == 0 && len(turn.UsageTotals) != 0 {
+			// Legacy aggregate-only history still has no independent per-call proof.
+			aggregate, status, err := plannerUsageTotal(turn.UsageTotals)
+			if err != nil || status == "complete" && known > aggregate+1e-6 || core.UsageBelowKnown(checkpoint.UsageTotals, turn.UsageTotals) {
+				return false, 0, fmt.Errorf("checkpoint conflicts with final aggregate")
+			}
+			exact = known <= aggregate+1e-6
+		}
+		floor = max(floor, known)
+		matches = matches && exact
+	}
+	finalKnown, finalStatus, err := plannerUsageTotal(turn.UsageTotals)
+	if err != nil {
+		return false, 0, err
+	}
+	if finalStatus == "complete" && len(turn.UsageTotals) != 0 && floor > finalKnown+1e-6 {
+		return false, 0, fmt.Errorf("checkpoint exceeds final aggregate")
+	}
+	return matches, floor, nil
 }
 
 func recordRecoveredPlannerUsage(state *store.Workspace, operation *store.Operation,

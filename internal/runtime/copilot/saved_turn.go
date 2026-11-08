@@ -82,7 +82,8 @@ func savedSessionTurn(events []sdk.SessionEvent, sessionID, worktree string, sto
 			return fail()
 		}
 		// Keep the existing indexed Reviewer receipt separate from advisory admission.
-		projected := recognized && normalized.Type != runtime.EventUnclassified
+		projected := recognized && normalized.Type != runtime.EventUnclassified &&
+			normalized.Type != runtime.EventUsageCheckpoint
 		if ended && projected {
 			switch normalized.Type {
 			case runtime.EventUsage, runtime.EventContextUsage, runtime.EventTurnFinished:
@@ -192,6 +193,9 @@ func savedSessionTurn(events []sdk.SessionEvent, sessionID, worktree string, sto
 			case runtime.EventExecution, runtime.EventUsage, runtime.EventOutput:
 				result.Events = append(result.Events, normalized)
 			}
+		}
+		if advisory && normalized.Type == runtime.EventUsageCheckpoint {
+			result.Events = append(result.Events, normalized)
 		}
 	}
 	if !started || !ended || (!shutdown && !(stoppedConfirmed && !shutdownSeen)) || messageID == "" || result.InputHash == "" ||

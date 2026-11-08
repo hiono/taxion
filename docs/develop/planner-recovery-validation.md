@@ -134,6 +134,34 @@ receipt有無双方の取消previewからapplyで、既知費用とunknown状態
 この新しい補正後の独立全体品質・ADR判定、保護されたCI、正式配布と
 下流の実運用再開は未完了である。過去の停止結果を合格へ書き換えない。
 
+`e818850` の追加レビューは、保存回答では `REQUEST_CHANGES` だったが、
+acceptance の参照が結果全体の evidence に含まれておらず、Controller は正式に
+`FAILED` とした。保存回答のADR合格記述を、正式な品質承認として扱わない。
+
+SDK `v1.0.22` の原文と保存履歴を確認すると、`session.usage_checkpoint` は
+cache の管理情報だけでなく、先行する利用量receiptを包含する累計会計snapshotだった。
+最初の不整合は、SDK正規化がこの観測を未検査で捨てる段階にある。
+個別利用量と累計snapshotを同じ呼出しとして加算すると、同じ費用を二重計上する。
+
+累計snapshotをSDK非依存の別イベントで保持し、質問・検索・回答終了後の検査へ渡す。
+通常受理では、それまでの個別利用量と累計を照合し、scopeとwatermarkも確認する。
+保存した質問の累計は個別receiptへ変換せず、通常Reviewerの既存receipt索引も変えない。
+公開復旧のpreviewとapplyは同じ照合を使い、不完全な観測では通常継続を認めない。
+明示停止と不確実性承認付き取消では、帰属不明の既知費用も捨てず、
+watermarkで累計の外にあると確認できた後続receiptの費用だけを加える。
+未提供の値をゼロや存在しないモデル識別子で補わず、旧aggregate-only入力は維持する。
+
+追加回帰は実SDK型から保存質問への読取りと通常Reviewerの索引互換性、
+live・終了後双方の質問受理、scope不一致・不正値の拒否、公開取消での既知累計費用保持を
+対象とする。修正前のGo overlayではSDK観測の消失と、receipt有無双方の
+公開取消での既知費用消失を再現した。
+全通常試験、build、vet、SDK・Controllerの対象raceとCLI全件raceは通過した。
+global費用のpartial状態を追加保持した後も全通常試験と対象raceを通過し、
+値がないpartial観測を消さない最後の条件補正は対象raceで検証した。
+同一候補の実行前・結果受理時の必須検証は別途維持する。
+この追記時点では、
+新候補の独立全体品質・ADR判定、保護されたCI、正式配布と実運用再開は未完了である。
+
 外部連携用の5環境変数を `0` にして、許可のない GitHub・GitLab・Copilot integration を実行しない。
 必要な最終確認は `go build ./...`、`go vet ./...`、`go test ./...`、
 変更した runtime package と CLI の race test、`gofmt`、生成 completion と `git diff --check`。

@@ -24,27 +24,28 @@ type Event struct {
 }
 
 const (
-	EventInput        = "input"
-	EventOutput       = "output"
-	EventOutputDelta  = "output_delta"
-	EventTurnStarted  = "turn_started"
-	EventTurnEnded    = "turn_ended"
-	EventTurnFinished = "turn_finished"
-	EventFailed       = "failed"
-	EventCancelled    = "cancelled"
-	EventUsage        = "usage"
-	EventContextUsage = "context_usage"
-	EventCompaction   = "compaction"
-	EventPermission   = "permission"
-	EventExecution    = "execution_observation"
-	EventUnclassified = "unclassified_native_event"
+	EventInput           = "input"
+	EventOutput          = "output"
+	EventOutputDelta     = "output_delta"
+	EventTurnStarted     = "turn_started"
+	EventTurnEnded       = "turn_ended"
+	EventTurnFinished    = "turn_finished"
+	EventFailed          = "failed"
+	EventCancelled       = "cancelled"
+	EventUsage           = "usage"
+	EventUsageCheckpoint = "usage_checkpoint"
+	EventContextUsage    = "context_usage"
+	EventCompaction      = "compaction"
+	EventPermission      = "permission"
+	EventExecution       = "execution_observation"
+	EventUnclassified    = "unclassified_native_event"
 )
 
 // QuestionEventAllowed is shared by live and saved advice-only turns.
 func QuestionEventAllowed(eventType string) bool {
 	switch eventType {
 	case EventInput, EventOutput, EventOutputDelta, EventTurnStarted, EventTurnEnded,
-		EventTurnFinished, EventUsage, EventContextUsage, "acp_connection", "acp_capabilities":
+		EventTurnFinished, EventUsage, EventUsageCheckpoint, EventContextUsage, "acp_connection", "acp_capabilities":
 		return true
 	default:
 		return false
