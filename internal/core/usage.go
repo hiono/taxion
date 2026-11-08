@@ -16,6 +16,109 @@ func UsageBelowKnown(calls, totals []DispatchUsage) bool {
 	return conflict
 }
 
+func CompareProviderModelUsage(calls []DispatchUsage, totals []ProviderModelMetric) (bool, bool) {
+	type usage struct {
+		input, output, cacheRead, cacheWrite int64
+		cost                                 float64
+		costKnown, complete                  bool
+	}
+	key := func(model string, provider *UsageModelProvider) string {
+		if strings.TrimSpace(model) == "" {
+			return ""
+		}
+		if provider == nil {
+			return model + "\x00"
+		}
+		if provider.ID == "" || provider.Kind == "" {
+			return ""
+		}
+		return strings.Join([]string{model, provider.ID, provider.Kind}, "\x00")
+	}
+	sums := make(map[string]usage)
+	complete := len(calls) != 0 && len(totals) != 0
+	for _, call := range calls {
+		id := key(call.Model, call.Provider)
+		if id == "" || call.InputTokens == nil || call.OutputTokens == nil {
+			complete = false
+			continue
+		}
+		value, exists := sums[id]
+		if !exists {
+			value.complete = true
+		}
+		if call.InputTokens != nil {
+			if *call.InputTokens < 0 || *call.InputTokens > math.MaxInt64-value.input {
+				return false, true
+			}
+			value.input += *call.InputTokens
+		}
+		if call.OutputTokens != nil {
+			if *call.OutputTokens < 0 || *call.OutputTokens > math.MaxInt64-value.output {
+				return false, true
+			}
+			value.output += *call.OutputTokens
+		}
+		if call.CacheReadTokens == nil {
+			value.complete = false
+		} else if *call.CacheReadTokens < 0 || *call.CacheReadTokens > math.MaxInt64-value.cacheRead {
+			return false, true
+		} else {
+			value.cacheRead += *call.CacheReadTokens
+		}
+		if call.CacheWriteTokens == nil {
+			value.complete = false
+		} else if *call.CacheWriteTokens < 0 || *call.CacheWriteTokens > math.MaxInt64-value.cacheWrite {
+			return false, true
+		} else {
+			value.cacheWrite += *call.CacheWriteTokens
+		}
+		if call.TotalNanoAIU == nil {
+			value.complete = false
+		} else if math.IsNaN(*call.TotalNanoAIU) || math.IsInf(*call.TotalNanoAIU, 0) || *call.TotalNanoAIU < 0 {
+			return false, true
+		} else {
+			value.cost += *call.TotalNanoAIU
+			value.costKnown = true
+		}
+		if math.IsInf(value.cost, 0) {
+			return false, true
+		}
+		sums[id] = value
+	}
+	seen := make(map[string]bool)
+	matched := 0
+	for _, total := range totals {
+		if total.ModelID == nil {
+			complete = false
+			continue
+		}
+		id := key(*total.ModelID, total.Provider)
+		if id == "" || seen[id] {
+			complete = false
+			continue
+		}
+		seen[id] = true
+		value, ok := sums[id]
+		if !ok {
+			continue
+		}
+		metric := total.Metrics
+		if metric.Usage.InputTokens < value.input || metric.Usage.OutputTokens < value.output ||
+			metric.Usage.CacheReadTokens < value.cacheRead || metric.Usage.CacheWriteTokens < value.cacheWrite ||
+			value.costKnown && (metric.TotalNanoAIU == nil || *metric.TotalNanoAIU+1e-6 < value.cost) {
+			return false, true
+		}
+		matched++
+		if metric.Usage.InputTokens != value.input || metric.Usage.OutputTokens != value.output ||
+			metric.Usage.CacheReadTokens != value.cacheRead || metric.Usage.CacheWriteTokens != value.cacheWrite ||
+			value.costKnown && (metric.TotalNanoAIU == nil || math.Abs(*metric.TotalNanoAIU-value.cost) > 1e-6) ||
+			!value.complete {
+			complete = false
+		}
+	}
+	return complete && matched == len(sums) && matched == len(totals), false
+}
+
 func compareUsage(calls, totals []DispatchUsage, completeCalls bool) (bool, bool) {
 	if len(calls) == 0 || len(totals) == 0 {
 		return false, completeCalls && len(calls) == 0 && len(totals) != 0

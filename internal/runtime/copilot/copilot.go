@@ -82,6 +82,7 @@ type managedSession struct {
 	stopped  bool
 	busy     bool
 	stopOnly bool
+	turnDone chan struct{}
 	sequence uint64
 	history  []runtime.Event
 	watchers map[*subscription]struct{}
@@ -463,6 +464,12 @@ func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
 	if a.stopSessionID != "" {
 		return fmt.Errorf("taxion: stop-only adapter cannot send instructions")
 	}
+	a.mu.Lock()
+	closed := a.closed
+	a.mu.Unlock()
+	if closed {
+		return ErrClosedAdapter
+	}
 	if strings.TrimSpace(prompt) == "" {
 		return fmt.Errorf("taxion: prompt must not be empty")
 	}
@@ -486,6 +493,7 @@ func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
 	}
 	if !stopped && session != nil {
 		handle.busy = true
+		handle.turnDone = make(chan struct{})
 	}
 	handle.mu.Unlock()
 	if stopped || session == nil {
@@ -506,6 +514,12 @@ func (a *Adapter) Resume(ctx context.Context, sessionID string) error {
 	}
 	if a.stopSessionID != "" {
 		return fmt.Errorf("taxion: stop-only adapter cannot resume execution")
+	}
+	a.mu.Lock()
+	closed := a.closed
+	a.mu.Unlock()
+	if closed {
+		return ErrClosedAdapter
 	}
 	if a.config.ToolPolicy != nil {
 		if err := a.config.ToolPolicy.Check(); err != nil {
@@ -550,6 +564,10 @@ func (a *Adapter) resume(ctx context.Context, sessionID string, stopOnly bool) e
 		return nil
 	}
 	handle.stopped = false
+	handle.stopOnly = stopOnly
+	if handle.busy {
+		handle.turnDone = make(chan struct{})
+	}
 	handle.mu.Unlock()
 	config := a.resumeConfig(handle.onEvent)
 	if stopOnly {
@@ -559,6 +577,8 @@ func (a *Adapter) resume(ctx context.Context, sessionID string, stopOnly bool) e
 	if err != nil {
 		handle.mu.Lock()
 		handle.stopped = true
+		handle.busy = false
+		handle.turnDone = nil
 		handle.mu.Unlock()
 		return fmt.Errorf("taxion: resume Copilot session: %w", err)
 	}
@@ -603,39 +623,7 @@ func (a *Adapter) Stop(ctx context.Context, sessionID string) error {
 	}
 	handle.opMu.Lock()
 	defer handle.opMu.Unlock()
-	handle.mu.Lock()
-	session, stopped := handle.sdk, handle.stopped
-	handle.mu.Unlock()
-	if stopped || session == nil {
-		return nil
-	}
-	handle.mu.Lock()
-	busy, stopOnly := handle.busy, handle.stopOnly
-	handle.mu.Unlock()
-	if busy || stopOnly {
-		if err := session.Abort(ctx); err != nil {
-			return fmt.Errorf("taxion: abort Copilot session: %w", err)
-		}
-		handle.mu.Lock()
-		stillBusy := handle.busy
-		handle.mu.Unlock()
-		if stillBusy {
-			handle.emit(runtime.Event{Type: runtime.EventCancelled, Payload: "stopped"})
-		}
-	}
-	handle.mu.Lock()
-	handle.stopped = true
-	handle.sdk = nil
-	watchers := handle.watchers
-	handle.watchers = map[*subscription]struct{}{}
-	handle.mu.Unlock()
-	for watcher := range watchers {
-		watcher.close()
-	}
-	if err := session.Disconnect(); err != nil {
-		return fmt.Errorf("taxion: disconnect Copilot session: %w", err)
-	}
-	return nil
+	return handle.stop(ctx, true, true)
 }
 
 func (a *Adapter) Events(ctx context.Context, sessionID string) (<-chan runtime.Event, error) {
@@ -702,7 +690,7 @@ func (a *Adapter) close(abortBusy bool) error {
 	a.opMu.Lock()
 	defer a.opMu.Unlock()
 	a.mu.Lock()
-	if a.closed {
+	if a.closed && !a.started {
 		a.mu.Unlock()
 		return nil
 	}
@@ -715,47 +703,29 @@ func (a *Adapter) close(abortBusy bool) error {
 	a.mu.Unlock()
 
 	var errs []error
+	active := false
 	for _, handle := range sessions {
 		handle.opMu.Lock()
-		handle.mu.Lock()
-		session := handle.sdk
-		handle.mu.Unlock()
-		if session != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			handle.mu.Lock()
-			busy := handle.busy
-			handle.mu.Unlock()
-			if busy && abortBusy {
-				if err := session.Abort(ctx); err != nil {
-					errs = append(errs, fmt.Errorf("abort Copilot session %s: %w", session.SessionID, err))
-				} else {
-					handle.mu.Lock()
-					stillBusy := handle.busy
-					handle.mu.Unlock()
-					if stillBusy {
-						handle.emit(runtime.Event{Type: runtime.EventCancelled, Payload: "adapter closed"})
-					}
-				}
-			}
-			cancel()
-			handle.mu.Lock()
-			handle.stopped = true
-			handle.sdk = nil
-			watchers := handle.watchers
-			handle.watchers = map[*subscription]struct{}{}
-			handle.mu.Unlock()
-			for watcher := range watchers {
-				watcher.close()
-			}
-			if err := session.Disconnect(); err != nil {
-				errs = append(errs, fmt.Errorf("disconnect Copilot session %s: %w", session.SessionID, err))
-			}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := handle.stop(ctx, abortBusy, false); err != nil {
+			errs = append(errs, err)
 		}
+		cancel()
+		handle.mu.Lock()
+		active = active || handle.sdk != nil
+		handle.mu.Unlock()
 		handle.opMu.Unlock()
+	}
+	if active {
+		return errors.Join(errs...)
 	}
 	if started {
 		if err := a.client.Stop(); err != nil {
 			errs = append(errs, fmt.Errorf("stop Copilot client: %w", err))
+		} else {
+			a.mu.Lock()
+			a.started = false
+			a.mu.Unlock()
 		}
 	}
 	return errors.Join(errs...)
@@ -1309,6 +1279,9 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 		if data.Aborted != nil && *data.Aborted {
 			return runtime.Event{Type: runtime.EventCancelled}, true
 		}
+		if data.Mode != nil && *data.Mode == sdk.SessionModeAutopilot {
+			return runtime.Event{}, false
+		}
 		return runtime.Event{Type: runtime.EventTurnFinished}, true
 	case *sdk.SessionErrorData:
 		return runtime.Event{Type: runtime.EventFailed, Payload: data.Message}, true
@@ -1321,11 +1294,23 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 	case *sdk.AssistantUsageData:
 		// Usage is reported per model API call; preserve its stable identity for deduplication.
 		var totalNanoAIU *float64
-		if data.CopilotUsage != nil {
-			totalNanoAIU = &data.CopilotUsage.TotalNanoAiu
+		if data.CopilotUsage != nil &&
+			(data.CopilotUsage.TotalNanoAiu != 0 ||
+				data.AiCreditsStatus != nil && *data.AiCreditsStatus == rpc.AiCreditsStatusComplete) {
+			amount := data.CopilotUsage.TotalNanoAiu
+			totalNanoAIU = &amount
+		}
+		var provider *core.UsageModelProvider
+		if data.Provider != nil {
+			provider = &core.UsageModelProvider{
+				ID: data.Provider.ID, Kind: string(data.Provider.Kind), Label: data.Provider.Label,
+			}
 		}
 		payload, err := json.Marshal(struct {
 			Model            string                       `json:"model"`
+			ModelDisplayName *string                      `json:"modelDisplayName,omitempty"`
+			Provider         *core.UsageModelProvider     `json:"provider,omitempty"`
+			ModelProvider    *string                      `json:"modelProvider,omitempty"`
 			Accounting       *sdk.UsageAccountingIdentity `json:"accounting,omitempty"`
 			IsAuto           *bool                        `json:"isAuto,omitempty"`
 			InputTokens      *int64                       `json:"inputTokens,omitempty"`
@@ -1335,7 +1320,8 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			TotalNanoAIU     *float64                     `json:"totalNanoAIU,omitempty"`
 			AICreditsStatus  *rpc.AiCreditsStatus         `json:"aiCreditsStatus,omitempty"`
 		}{
-			Model: data.Model, IsAuto: data.IsAuto, InputTokens: data.InputTokens,
+			Model: data.Model, ModelDisplayName: data.ModelDisplayName, Provider: provider,
+			ModelProvider: data.ModelProvider, IsAuto: data.IsAuto, InputTokens: data.InputTokens,
 			OutputTokens: data.OutputTokens, CacheReadTokens: data.CacheReadTokens,
 			CacheWriteTokens: data.CacheWriteTokens, Accounting: data.Accounting,
 			TotalNanoAIU: totalNanoAIU, AICreditsStatus: data.AiCreditsStatus,
@@ -1409,7 +1395,7 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 		}
 		return runtime.Event{Type: runtime.EventPermission, Payload: string(payload)}, true
 	case *sdk.AbortData:
-		return runtime.Event{Type: runtime.EventCancelled, Payload: string(data.Reason)}, true
+		return runtime.Event{}, false
 	default:
 		return runtime.Event{Type: runtime.EventUnclassified}, true
 	}
@@ -1429,9 +1415,11 @@ func (h *managedSession) emit(event runtime.Event) {
 	}
 	h.sequence++
 	event.Sequence = h.sequence
-	switch event.Type {
-	case runtime.EventTurnFinished, runtime.EventFailed, runtime.EventCancelled:
-		h.busy = false
+	if event.Type == runtime.EventTurnStarted && event.AgentID == "" {
+		h.busy = true
+		if h.turnDone == nil {
+			h.turnDone = make(chan struct{})
+		}
 	}
 	h.history = append(h.history, event)
 	watchers := make([]*subscription, 0, len(h.watchers))
@@ -1445,6 +1433,63 @@ func (h *managedSession) emit(event runtime.Event) {
 		case <-watcher.done:
 		}
 	}
+	if event.AgentID == "" && (event.Type == runtime.EventTurnFinished || event.Type == runtime.EventCancelled) {
+		h.mu.Lock()
+		h.busy = false
+		if h.turnDone != nil {
+			close(h.turnDone)
+			h.turnDone = nil
+		}
+		h.mu.Unlock()
+	}
+}
+
+func (h *managedSession) stop(ctx context.Context, abortBusy, abortStopOnly bool) error {
+	h.mu.Lock()
+	session, stopped, busy, stopOnly, turnDone := h.sdk, h.stopped, h.busy, h.stopOnly, h.turnDone
+	if session != nil && !stopped && abortStopOnly && stopOnly && !busy {
+		busy = true
+		h.busy = true
+		turnDone = make(chan struct{})
+		h.turnDone = turnDone
+	}
+	h.mu.Unlock()
+	if session == nil {
+		return nil
+	}
+	shouldAbort := !stopped && (busy && !stopOnly || abortStopOnly && stopOnly)
+	if shouldAbort {
+		if !abortBusy {
+			return fmt.Errorf("taxion: cannot disconnect Copilot session while a turn is active")
+		}
+		if err := session.Abort(ctx); err != nil {
+			return fmt.Errorf("taxion: abort Copilot session: %w", err)
+		}
+		if turnDone == nil {
+			return fmt.Errorf("taxion: active Copilot turn has no completion boundary")
+		}
+		select {
+		case <-turnDone:
+		case <-ctx.Done():
+			return fmt.Errorf("taxion: wait for Copilot abort completion: %w", ctx.Err())
+		}
+	}
+	err := session.Disconnect()
+	h.mu.Lock()
+	h.stopped = true
+	if err == nil {
+		h.sdk = nil
+	}
+	watchers := h.watchers
+	h.watchers = map[*subscription]struct{}{}
+	h.mu.Unlock()
+	for watcher := range watchers {
+		watcher.close()
+	}
+	if err != nil {
+		return fmt.Errorf("taxion: disconnect Copilot session: %w", err)
+	}
+	return nil
 }
 
 func (h *managedSession) forward(ctx context.Context, watcher *subscription) {

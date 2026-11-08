@@ -43,18 +43,19 @@ type plannerAttemptEvidence struct {
 }
 
 type plannerTerminalEvidence struct {
-	Version       int                       `json:"version"`
-	AttemptID     string                    `json:"attemptId"`
-	SessionID     string                    `json:"sessionId"`
-	InputHash     string                    `json:"inputHash"`
-	PromptHash    string                    `json:"promptHash"`
-	SourceHash    string                    `json:"sourceHash"`
-	OutputHash    string                    `json:"outputHash"`
-	Terminal      string                    `json:"terminalEvent"`
-	ObservedAt    time.Time                 `json:"observedAt"`
-	Answer        controller.QuestionAnswer `json:"answer"`
-	Usage         []core.DispatchUsage      `json:"usage"`
-	InvalidAnswer bool                      `json:"invalidAnswer,omitempty"`
+	Version          int                       `json:"version"`
+	AttemptID        string                    `json:"attemptId"`
+	SessionID        string                    `json:"sessionId"`
+	InputHash        string                    `json:"inputHash"`
+	PromptHash       string                    `json:"promptHash"`
+	SourceHash       string                    `json:"sourceHash"`
+	OutputHash       string                    `json:"outputHash"`
+	Terminal         string                    `json:"terminalEvent"`
+	ObservedAt       time.Time                 `json:"observedAt"`
+	Answer           controller.QuestionAnswer `json:"answer"`
+	Usage            []core.DispatchUsage      `json:"usage"`
+	UsageCheckpoints []runtime.UsageCheckpoint `json:"usageCheckpoints,omitempty"`
+	InvalidAnswer    bool                      `json:"invalidAnswer,omitempty"`
 }
 
 type plannerCleanupEvidence struct {
@@ -502,7 +503,7 @@ func terminalFromSavedPlanner(binding plannerAttemptEvidence, turn runtime.Saved
 		Version: 2, AttemptID: binding.AttemptID, SessionID: binding.SessionID,
 		InputHash: binding.InputHash, PromptHash: binding.PromptHash, SourceHash: binding.SourceHash,
 		OutputHash: core.SHA256Hex([]byte(turn.Payload)), Terminal: runtime.EventTurnEnded,
-		Answer: answer, Usage: usage,
+		Answer: answer, Usage: usage, UsageCheckpoints: turn.UsageCheckpoints,
 		InvalidAnswer: invalid,
 	}, nil
 }
@@ -770,7 +771,20 @@ func buildRequestRecoveryPreview(state store.Workspace, checkpoint requestCheckp
 	if checkpointErr != nil {
 		return fail("saved usage checkpoint is invalid, out of scope or contradictory")
 	}
-	usageMatches = usageMatches && checkpointMatches
+	finalCheckpointMatches := len(turn.UsageCheckpoints) != 0 && checkpointMatches
+	if finalCheckpointMatches && len(terminal.Usage) != 0 {
+		payload, err := json.Marshal(turn.UsageCheckpoints[len(turn.UsageCheckpoints)-1])
+		if err != nil {
+			return fail("saved final checkpoint cannot be read")
+		}
+		_, exact, err := runtime.DecodeUsageCheckpoint(string(payload), turn.SessionID, terminal.Usage)
+		if err != nil {
+			return fail("saved final checkpoint conflicts with terminal usage")
+		}
+		finalCheckpointMatches = exact
+	}
+	usageMatches = (usageMatches || finalCheckpointMatches &&
+		(len(turn.UsageTotals) == 0 || len(terminal.Usage) == 0)) && checkpointMatches
 	usageUncertain := uncertainCancellation && (len(terminal.Usage) == 0 && len(turn.UsageTotals) == 0 ||
 		len(terminal.Usage) != 0 && !questionUsageTotalsConflict(terminal.Usage, turn.UsageTotals))
 	if turnHasExecution(turn) || !usageMatches && !usageUncertain {
@@ -798,6 +812,9 @@ func buildRequestRecoveryPreview(state store.Workspace, checkpoint requestCheckp
 		return fail("saved usage is invalid")
 	}
 	total = max(total, checkpointFloor)
+	if finalCheckpointMatches {
+		usageStatus = "complete"
+	}
 	if math.IsNaN(total) || math.IsInf(total, 0) {
 		return fail("saved checkpoint cost is invalid")
 	}
@@ -913,6 +930,27 @@ func savedCheckpointUsage(turn runtime.SavedTurn) (bool, float64, error) {
 	}
 	var prior []core.DispatchUsage
 	matches, floor := true, 0.0
+	check := func(payload string) error {
+		checkpoint, exact, err := runtime.DecodeUsageCheckpoint(payload, turn.SessionID, prior)
+		if err != nil {
+			return err
+		}
+		known := checkpoint.KnownNanoAIU(calls)
+		if math.IsInf(known, 0) || math.IsNaN(known) {
+			return fmt.Errorf("invalid checkpoint cost")
+		}
+		if len(calls) == 0 && len(turn.UsageTotals) != 0 {
+			aggregate, status, err := plannerUsageTotal(turn.UsageTotals)
+			if err != nil || status == "complete" && known > aggregate+1e-6 ||
+				core.UsageBelowKnown(checkpoint.UsageTotals, turn.UsageTotals) {
+				return fmt.Errorf("checkpoint conflicts with final aggregate")
+			}
+			exact = exact && status == "complete" && known <= aggregate+1e-6
+		}
+		floor = max(floor, known)
+		matches = matches && exact
+		return nil
+	}
 	for _, event := range turn.Events {
 		if event.Type == runtime.EventUsage {
 			var call core.DispatchUsage
@@ -924,24 +962,18 @@ func savedCheckpointUsage(turn runtime.SavedTurn) (bool, float64, error) {
 		if event.Type != runtime.EventUsageCheckpoint {
 			continue
 		}
-		checkpoint, exact, err := runtime.DecodeUsageCheckpoint(event.Payload, turn.SessionID, prior)
+		if err := check(event.Payload); err != nil {
+			return false, 0, err
+		}
+	}
+	for _, checkpoint := range turn.UsageCheckpoints {
+		payload, err := json.Marshal(checkpoint)
 		if err != nil {
 			return false, 0, err
 		}
-		known := checkpoint.KnownNanoAIU(calls)
-		if math.IsInf(known, 0) || math.IsNaN(known) {
-			return false, 0, fmt.Errorf("invalid checkpoint cost")
+		if err := check(string(payload)); err != nil {
+			return false, 0, err
 		}
-		if len(calls) == 0 && len(turn.UsageTotals) != 0 {
-			// Legacy aggregate-only history still has no independent per-call proof.
-			aggregate, status, err := plannerUsageTotal(turn.UsageTotals)
-			if err != nil || status == "complete" && known > aggregate+1e-6 || core.UsageBelowKnown(checkpoint.UsageTotals, turn.UsageTotals) {
-				return false, 0, fmt.Errorf("checkpoint conflicts with final aggregate")
-			}
-			exact = known <= aggregate+1e-6
-		}
-		floor = max(floor, known)
-		matches = matches && exact
 	}
 	finalKnown, finalStatus, err := plannerUsageTotal(turn.UsageTotals)
 	if err != nil {

@@ -120,12 +120,13 @@ func (c *Controller) adoptSavedTurn(dispatch core.GraphDispatch, flow core.Revie
 			}
 		}
 		body, err := json.Marshal(struct {
-			Request     RecoveryRequest      `json:"request"`
-			HistoryHash string               `json:"historyHash"`
-			SubmittedAt time.Time            `json:"submittedAt"`
-			FinishedAt  time.Time            `json:"finishedAt"`
-			UsageTotals []core.DispatchUsage `json:"usageTotals,omitempty"`
-		}{request, turn.HistoryHash, turn.SubmittedAt, turn.FinishedAt, turn.UsageTotals})
+			Request          RecoveryRequest           `json:"request"`
+			HistoryHash      string                    `json:"historyHash"`
+			SubmittedAt      time.Time                 `json:"submittedAt"`
+			FinishedAt       time.Time                 `json:"finishedAt"`
+			UsageTotals      []core.DispatchUsage      `json:"usageTotals,omitempty"`
+			UsageCheckpoints []runtime.UsageCheckpoint `json:"usageCheckpoints,omitempty"`
+		}{request, turn.HistoryHash, turn.SubmittedAt, turn.FinishedAt, turn.UsageTotals, turn.UsageCheckpoints})
 		if err != nil {
 			return err
 		}

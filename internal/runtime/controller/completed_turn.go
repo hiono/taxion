@@ -10,26 +10,17 @@ import (
 	"github.com/hiono/taxion/internal/runtime"
 )
 
-func drainCompletedTurn(ctx context.Context, events <-chan runtime.Event, usage *[]core.DispatchUsage, sequence *uint64, sessionID string) error {
-	finished := false
+func drainCompletedTurn(ctx context.Context, events <-chan runtime.Event, usage *[]core.DispatchUsage, checkpoints *[]runtime.UsageCheckpoint, sequence *uint64, sessionID string) error {
 	for {
 		var event runtime.Event
 		var open bool
-		if finished {
-			select {
-			case event, open = <-events:
-			default:
-				return nil
-			}
-		} else {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case event, open = <-events:
-			}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, open = <-events:
 		}
 		if !open {
-			return nil
+			return fmt.Errorf("taxion: completed main turn stream closed before its provider boundary")
 		}
 		if event.AgentID != "" || event.Sequence == 0 || event.Sequence <= *sequence {
 			return fmt.Errorf("taxion: completed main turn has ambiguous or child activity")
@@ -44,14 +35,15 @@ func drainCompletedTurn(ctx context.Context, events <-chan runtime.Event, usage 
 			call.ObservedAt = time.Now().UTC()
 			*usage = append(*usage, call)
 		case runtime.EventUsageCheckpoint:
-			if _, matches, err := runtime.DecodeUsageCheckpoint(event.Payload, sessionID, *usage); err != nil || !matches {
+			checkpoint, matches, err := runtime.DecodeUsageCheckpoint(event.Payload, sessionID, *usage)
+			if err == nil {
+				*checkpoints = append(*checkpoints, checkpoint)
+			}
+			if err != nil || !matches {
 				return fmt.Errorf("taxion: completed main turn has incomplete or conflicting checkpoint accounting")
 			}
 		case runtime.EventTurnFinished:
-			if finished {
-				return fmt.Errorf("taxion: completed main turn has duplicate terminal boundaries")
-			}
-			finished = true
+			return nil
 		case runtime.EventContextUsage, "acp_connection", "acp_capabilities":
 		default:
 			return fmt.Errorf("taxion: completed main turn has later activity; receipt acceptance withheld")

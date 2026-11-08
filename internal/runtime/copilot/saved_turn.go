@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -154,24 +153,26 @@ func savedSessionTurn(events []sdk.SessionEvent, sessionID, worktree string, sto
 			shutdownSeen = true
 			shutdown = data.ShutdownType == "routine" && ended && result.Payload != ""
 			result.ShutdownAt = event.Timestamp
-			result.UsageTotals = nil
-			models := make([]string, 0, len(data.ModelMetrics))
-			for model := range data.ModelMetrics {
-				models = append(models, model)
+			checkpoint, err := normalizeUsageShutdown(data)
+			if err != nil {
+				return fail()
 			}
-			slices.Sort(models)
-			for _, model := range models {
-				metric := data.ModelMetrics[model]
-				usage := core.DispatchUsage{
-					Model: model, InputTokens: &metric.Usage.InputTokens, OutputTokens: &metric.Usage.OutputTokens,
-					CacheReadTokens: &metric.Usage.CacheReadTokens, CacheWriteTokens: &metric.Usage.CacheWriteTokens,
-					TotalNanoAIU: metric.TotalNanoAiu,
-				}
-				if metric.TotalNanoAiu != nil {
-					complete := "complete"
-					usage.AICreditsStatus = &complete
-				}
-				result.UsageTotals = append(result.UsageTotals, usage)
+			result.UsageTotals = checkpoint.UsageTotals
+			if data.AccountingSnapshot != nil || len(data.ModelMetrics) != 0 ||
+				len(data.ProviderModelMetrics) != 0 || data.TotalNanoAiu != nil ||
+				data.TotalPremiumRequests != nil || len(data.UsageAccountingWatermarks) != 0 {
+				result.UsageCheckpoints = append(result.UsageCheckpoints, checkpoint)
+			}
+		case *sdk.SessionUsageCheckpointData:
+			if normalized.Type != runtime.EventUsageCheckpoint {
+				return fail()
+			}
+			checkpoint, _, err := runtime.DecodeUsageCheckpoint(normalized.Payload, sessionID, nil)
+			if err != nil {
+				return fail()
+			}
+			if !advisory {
+				result.UsageCheckpoints = append(result.UsageCheckpoints, checkpoint)
 			}
 		case *sdk.SessionErrorData:
 			return fail()

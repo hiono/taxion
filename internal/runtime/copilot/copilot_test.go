@@ -3,6 +3,7 @@ package copilot
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"os/exec"
@@ -101,6 +102,9 @@ func TestExecutionObservationsExcludeToolContentAndCommands(t *testing.T) {
 func TestNormalizeEventUsesSDKNeutralTypes(t *testing.T) {
 	message := "provider failure"
 	model := "gpt-6-luna"
+	modelDisplayName, modelProvider := "GPT-6 Luna", "openai"
+	provider := &rpc.ModelProviderRef{ID: "openai/byok", Kind: rpc.ModelProviderKind("openai"), Label: "OpenAI"}
+	autopilot, aborted := sdk.SessionModeAutopilot, true
 	auto := true
 	inputTokens, outputTokens := int64(120), int64(30)
 	cacheRead, cacheWrite := int64(100), int64(20)
@@ -115,11 +119,14 @@ func TestNormalizeEventUsesSDKNeutralTypes(t *testing.T) {
 		{"started", sdk.SessionEvent{Data: &sdk.AssistantTurnStartData{}}, runtime.Event{Type: runtime.EventTurnStarted}, true},
 		{"ended", sdk.SessionEvent{Data: &sdk.AssistantTurnEndData{}}, runtime.Event{Type: runtime.EventTurnEnded}, true},
 		{"finished", sdk.SessionEvent{Data: &sdk.SessionIdleData{}}, runtime.Event{Type: runtime.EventTurnFinished}, true},
+		{"autopilot idle", sdk.SessionEvent{Data: &sdk.SessionIdleData{Mode: &autopilot}}, runtime.Event{}, false},
+		{"aborted idle", sdk.SessionEvent{Data: &sdk.SessionIdleData{Aborted: &aborted}}, runtime.Event{Type: runtime.EventCancelled}, true},
 		{"session error", sdk.SessionEvent{Data: &sdk.SessionErrorData{Message: message}}, runtime.Event{Type: runtime.EventFailed, Payload: message}, true},
 		{"model error", sdk.SessionEvent{Data: &sdk.ModelCallFailureData{ErrorMessage: &message}}, runtime.Event{Type: runtime.EventFailed, Payload: message}, true},
-		{"abort", sdk.SessionEvent{Data: &sdk.AbortData{}}, runtime.Event{Type: runtime.EventCancelled}, true},
+		{"abort notice", sdk.SessionEvent{Data: &sdk.AbortData{}}, runtime.Event{}, false},
 		{"usage", sdk.SessionEvent{Data: &sdk.AssistantUsageData{
-			Model: model, IsAuto: &auto, InputTokens: &inputTokens, OutputTokens: &outputTokens,
+			Model: model, ModelDisplayName: &modelDisplayName, Provider: provider, ModelProvider: &modelProvider,
+			IsAuto: &auto, InputTokens: &inputTokens, OutputTokens: &outputTokens,
 			CacheReadTokens: &cacheRead, CacheWriteTokens: &cacheWrite,
 			CopilotUsage: &rpc.AssistantUsageCopilotUsage{TotalNanoAiu: 123.5},
 			AiCreditsStatus: func() *rpc.AiCreditsStatus {
@@ -127,7 +134,7 @@ func TestNormalizeEventUsesSDKNeutralTypes(t *testing.T) {
 				return &status
 			}(),
 			Accounting: &sdk.UsageAccountingIdentity{SourceSessionID: "session", Sequence: 7, UsageID: "call-7"},
-		}}, runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"gpt-6-luna","accounting":{"sequence":7,"sourceSessionId":"session","usageId":"call-7"},"isAuto":true,"inputTokens":120,"outputTokens":30,"cacheReadTokens":100,"cacheWriteTokens":20,"totalNanoAIU":123.5,"aiCreditsStatus":"complete"}`}, true},
+		}}, runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"gpt-6-luna","modelDisplayName":"GPT-6 Luna","provider":{"id":"openai/byok","kind":"openai","label":"OpenAI"},"modelProvider":"openai","accounting":{"sequence":7,"sourceSessionId":"session","usageId":"call-7"},"isAuto":true,"inputTokens":120,"outputTokens":30,"cacheReadTokens":100,"cacheWriteTokens":20,"totalNanoAIU":123.5,"aiCreditsStatus":"complete"}`}, true},
 		{"context usage", sdk.SessionEvent{Data: &sdk.SessionUsageInfoData{CurrentTokens: 1200, TokenLimit: 8000}}, runtime.Event{Type: runtime.EventContextUsage, Payload: `{"currentTokens":1200,"tokenLimit":8000,"messagesLength":0}`}, true},
 		{"compaction", sdk.SessionEvent{Data: &sdk.SessionCompactionStartData{Model: &model, CurrentTokens: &inputTokens}}, runtime.Event{Type: runtime.EventCompaction, Payload: `{"phase":"started","model":"gpt-6-luna","currentTokens":120}`}, true},
 		{"permission completion", sdk.SessionEvent{Data: &sdk.PermissionCompletedData{Result: rpc.PermissionDeniedByPermissionRequestHook{}}}, runtime.Event{Type: runtime.EventPermission, Payload: `{"result":"denied-by-permission-request-hook"}`}, true},
@@ -140,6 +147,95 @@ func TestNormalizeEventUsesSDKNeutralTypes(t *testing.T) {
 				t.Fatalf("normalizeEvent() = %+v, %v; want %+v, %v", got, ok, test.want, test.ok)
 			}
 		})
+	}
+}
+
+func TestNormalizeUsageDistinguishesUnreportedAndCompleteZeroCost(t *testing.T) {
+	partial := rpc.AiCreditsStatusPartial
+	complete := rpc.AiCreditsStatusComplete
+	for _, test := range []struct {
+		name   string
+		amount float64
+		status *rpc.AiCreditsStatus
+		known  bool
+	}{
+		{"missing zero", 0, nil, false},
+		{"partial zero", 0, &partial, false},
+		{"complete zero", 0, &complete, true},
+		{"partial positive", 2, &partial, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			event, ok := normalizeEvent(sdk.SessionEvent{Data: &sdk.AssistantUsageData{
+				Model: "model", CopilotUsage: &rpc.AssistantUsageCopilotUsage{TotalNanoAiu: test.amount},
+				AiCreditsStatus: test.status,
+			}})
+			if !ok || event.Type != runtime.EventUsage {
+				t.Fatal("usage event was not normalized", event)
+			}
+			var usage core.DispatchUsage
+			if err := json.Unmarshal([]byte(event.Payload), &usage); err != nil {
+				t.Fatal(err)
+			}
+			if (usage.TotalNanoAIU != nil) != test.known {
+				t.Fatalf("known cost = %v; want known=%v", usage.TotalNanoAIU, test.known)
+			}
+		})
+	}
+}
+
+func TestIdleCompletesOnlyAfterRecordingAndQueuingMainEvents(t *testing.T) {
+	for _, aborted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("aborted=%t", aborted), func(t *testing.T) {
+			done := make(chan struct{})
+			watcher := &subscription{queue: make(chan runtime.Event, 8), done: make(chan struct{})}
+			handle := &managedSession{busy: true, turnDone: done,
+				watchers: map[*subscription]struct{}{watcher: {}}}
+			autopilot, child := sdk.SessionModeAutopilot, "child"
+			handle.onEvent(sdk.SessionEvent{Data: &sdk.AbortData{}})
+			handle.onEvent(sdk.SessionEvent{Data: &sdk.SessionIdleData{Mode: &autopilot}})
+			handle.onEvent(sdk.SessionEvent{AgentID: &child, Data: &sdk.SessionIdleData{}})
+			handle.onEvent(sdk.SessionEvent{Data: &sdk.SessionErrorData{Message: "failure"}})
+			select {
+			case <-done:
+				t.Fatal("non-idle notification released the main session")
+			default:
+			}
+			handle.onEvent(sdk.SessionEvent{Data: &sdk.AssistantUsageData{Model: "model"}})
+			handle.onEvent(sdk.SessionEvent{Data: &sdk.SessionIdleData{Aborted: &aborted}})
+			select {
+			case <-done:
+			default:
+				t.Fatal("main idle did not release the session")
+			}
+			if handle.busy || len(handle.history) != 4 || len(watcher.queue) != 4 {
+				t.Fatal("completion preceded history or watcher queuing", handle.history)
+			}
+			for index, event := range handle.history {
+				if delivered := <-watcher.queue; delivered != event || event.Sequence != uint64(index+1) {
+					t.Fatal("FIFO event sequence was not preserved", delivered, event)
+				}
+			}
+		})
+	}
+}
+
+func TestObservedMainTurnStartCreatesCompletionBoundary(t *testing.T) {
+	handle := &managedSession{}
+	child := "child"
+	handle.onEvent(sdk.SessionEvent{AgentID: &child, Data: &sdk.AssistantTurnStartData{}})
+	if handle.busy || handle.turnDone != nil {
+		t.Fatal("child turn was mistaken for main-session ownership")
+	}
+	handle.onEvent(sdk.SessionEvent{Data: &sdk.AssistantTurnStartData{}})
+	if !handle.busy || handle.turnDone == nil {
+		t.Fatal("observed main turn has no completion boundary")
+	}
+	done := handle.turnDone
+	handle.onEvent(sdk.SessionEvent{Data: &sdk.SessionIdleData{}})
+	select {
+	case <-done:
+	default:
+		t.Fatal("observed main idle did not release its boundary")
 	}
 }
 

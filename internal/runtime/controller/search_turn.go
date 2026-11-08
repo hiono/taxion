@@ -14,11 +14,12 @@ import (
 )
 
 type SearchTurn struct {
-	SessionID         string               `json:"sessionId"`
-	Usage             []core.DispatchUsage `json:"usage"`
-	BudgetGuidance    *budgetObservation   `json:"budgetGuidance,omitempty"`
-	QuotaObservations []*budgetObservation `json:"quotaObservations,omitempty"`
-	BudgetSupplement  string               `json:"budgetSupplement,omitempty"`
+	SessionID         string                    `json:"sessionId"`
+	Usage             []core.DispatchUsage      `json:"usage"`
+	UsageCheckpoints  []runtime.UsageCheckpoint `json:"usageCheckpoints,omitempty"`
+	BudgetGuidance    *budgetObservation        `json:"budgetGuidance,omitempty"`
+	QuotaObservations []*budgetObservation      `json:"quotaObservations,omitempty"`
+	BudgetSupplement  string                    `json:"budgetSupplement,omitempty"`
 }
 
 // RunSearchTurn observes one bounded acquisition turn. Model prose is not the
@@ -155,7 +156,11 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 				}
 				turn.Usage = append(turn.Usage, usage)
 			case runtime.EventUsageCheckpoint:
-				if _, matches, err := runtime.DecodeUsageCheckpoint(event.Payload, session, turn.Usage); err != nil || !matches {
+				checkpoint, matches, err := runtime.DecodeUsageCheckpoint(event.Payload, session, turn.Usage)
+				if err == nil {
+					turn.UsageCheckpoints = append(turn.UsageCheckpoints, checkpoint)
+				}
+				if err != nil || !matches {
 					return turn, fmt.Errorf("taxion: search checkpoint has incomplete or conflicting accounting")
 				}
 			case runtime.EventFailed, runtime.EventCancelled:
@@ -165,7 +170,7 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 					searchCallID == "" || !searchComplete {
 					return turn, fmt.Errorf("taxion: search ended without a bound main-agent answer")
 				}
-				if err := drainCompletedTurn(ctx, events, &turn.Usage, &sequence, session); err != nil {
+				if err := drainCompletedTurn(ctx, events, &turn.Usage, &turn.UsageCheckpoints, &sequence, session); err != nil {
 					return turn, err
 				}
 				return turn, checkQuota()

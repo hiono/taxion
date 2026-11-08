@@ -84,18 +84,19 @@ func (answer QuestionAnswer) MarshalJSON() ([]byte, error) {
 }
 
 type QuestionResult struct {
-	SessionID         string               `json:"sessionId"`
-	AttemptID         string               `json:"attemptId,omitempty"`
-	Context           QuestionContext      `json:"context"`
-	Answer            *QuestionAnswer      `json:"answer,omitempty"`
-	Usage             []core.DispatchUsage `json:"usage"`
-	Changed           bool                 `json:"recordsChangedDuringAnswer"`
-	BudgetGuidance    *budgetObservation   `json:"budgetGuidance,omitempty"`
-	QuotaObservations []*budgetObservation `json:"quotaObservations,omitempty"`
-	BudgetSupplement  string               `json:"budgetSupplement,omitempty"`
-	InstructionSent   bool                 `json:"instructionSent,omitempty"`
-	InvalidAnswer     string               `json:"invalidAnswer,omitempty"`
-	Redacted          bool                 `json:"redacted,omitempty"`
+	SessionID         string                    `json:"sessionId"`
+	AttemptID         string                    `json:"attemptId,omitempty"`
+	Context           QuestionContext           `json:"context"`
+	Answer            *QuestionAnswer           `json:"answer,omitempty"`
+	Usage             []core.DispatchUsage      `json:"usage"`
+	UsageCheckpoints  []runtime.UsageCheckpoint `json:"usageCheckpoints,omitempty"`
+	Changed           bool                      `json:"recordsChangedDuringAnswer"`
+	BudgetGuidance    *budgetObservation        `json:"budgetGuidance,omitempty"`
+	QuotaObservations []*budgetObservation      `json:"quotaObservations,omitempty"`
+	BudgetSupplement  string                    `json:"budgetSupplement,omitempty"`
+	InstructionSent   bool                      `json:"instructionSent,omitempty"`
+	InvalidAnswer     string                    `json:"invalidAnswer,omitempty"`
+	Redacted          bool                      `json:"redacted,omitempty"`
 }
 
 func questionContextsEqual(current, supplied QuestionContext) (bool, error) {
@@ -578,7 +579,11 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 					}
 				}
 			case runtime.EventUsageCheckpoint:
-				if _, matches, err := runtime.DecodeUsageCheckpoint(event.Payload, result.SessionID, result.Usage); err != nil || !matches {
+				checkpoint, matches, err := runtime.DecodeUsageCheckpoint(event.Payload, result.SessionID, result.Usage)
+				if err == nil {
+					result.UsageCheckpoints = append(result.UsageCheckpoints, checkpoint)
+				}
+				if err != nil || !matches {
 					return result, fmt.Errorf("taxion: question usage checkpoint has incomplete or conflicting accounting")
 				}
 			case runtime.EventOutputDelta:
@@ -600,7 +605,7 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				if !turnStarted || !turnEnded || strings.TrimSpace(output) == "" {
 					return result, fmt.Errorf("taxion: question ended without one complete main-agent answer")
 				}
-				if err := drainCompletedTurn(ctx, events, &result.Usage, &lastSequence, result.SessionID); err != nil {
+				if err := drainCompletedTurn(ctx, events, &result.Usage, &result.UsageCheckpoints, &lastSequence, result.SessionID); err != nil {
 					return result, err
 				}
 				if err := validateQuestionUsage(result.Usage); err != nil {
@@ -633,19 +638,20 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				// from the saved-record observation and never uses mutable HEAD.
 				observedAt := time.Now().UTC()
 				receipt, err := json.Marshal(struct {
-					Version    int                  `json:"version"`
-					AttemptID  string               `json:"attemptId"`
-					SessionID  string               `json:"sessionId"`
-					InputHash  string               `json:"inputHash"`
-					PromptHash string               `json:"promptHash"`
-					SourceHash string               `json:"sourceHash"`
-					OutputHash string               `json:"outputHash"`
-					Terminal   string               `json:"terminalEvent"`
-					ObservedAt time.Time            `json:"observedAt"`
-					Answer     QuestionAnswer       `json:"answer"`
-					Usage      []core.DispatchUsage `json:"usage"`
+					Version          int                       `json:"version"`
+					AttemptID        string                    `json:"attemptId"`
+					SessionID        string                    `json:"sessionId"`
+					InputHash        string                    `json:"inputHash"`
+					PromptHash       string                    `json:"promptHash"`
+					SourceHash       string                    `json:"sourceHash"`
+					OutputHash       string                    `json:"outputHash"`
+					Terminal         string                    `json:"terminalEvent"`
+					ObservedAt       time.Time                 `json:"observedAt"`
+					Answer           QuestionAnswer            `json:"answer"`
+					Usage            []core.DispatchUsage      `json:"usage"`
+					UsageCheckpoints []runtime.UsageCheckpoint `json:"usageCheckpoints,omitempty"`
 				}{1, attemptID, result.SessionID, inputHash, attempt.PromptHash, sourceHash, core.SHA256Hex([]byte(output)),
-					event.Type, observedAt, answer, result.Usage})
+					event.Type, observedAt, answer, result.Usage, result.UsageCheckpoints})
 				if err != nil {
 					return result, err
 				}

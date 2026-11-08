@@ -102,32 +102,35 @@ func TestCompletedTurnWaitsForProviderBoundary(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
-			events := make(chan runtime.Event, 1)
+			events := make(chan runtime.Event)
 			done := make(chan error, 1)
 			go func() {
 				var usage []core.DispatchUsage
+				var checkpoints []runtime.UsageCheckpoint
 				sequence := uint64(1)
-				done <- drainCompletedTurn(ctx, events, &usage, &sequence, "question-session")
+				done <- drainCompletedTurn(ctx, events, &usage, &checkpoints, &sequence, "question-session")
 			}()
 			select {
 			case err := <-done:
 				t.Fatal("transiently empty stream accepted before provider boundary", err)
-			case <-time.After(20 * time.Millisecond):
+			case events <- runtime.Event{Type: runtime.EventContextUsage, Sequence: 2}:
+			case <-ctx.Done():
+				t.Fatal("completed-turn reader did not consume the synchronization event")
 			}
 			switch scenario {
 			case "idle":
-				events <- runtime.Event{Type: runtime.EventTurnFinished, Sequence: 2}
+				events <- runtime.Event{Type: runtime.EventTurnFinished, Sequence: 3}
 			case "child":
-				events <- runtime.Event{Type: runtime.EventContextUsage, AgentID: "child", Sequence: 2}
+				events <- runtime.Event{Type: runtime.EventContextUsage, AgentID: "child", Sequence: 3}
 			case "execution":
-				events <- runtime.Event{Type: runtime.EventExecution, Sequence: 2}
+				events <- runtime.Event{Type: runtime.EventExecution, Sequence: 3}
 			case "closed":
 				close(events)
 			case "timeout":
 				cancel()
 			}
 			err := <-done
-			if (err == nil) != (scenario == "idle" || scenario == "closed") {
+			if (err == nil) != (scenario == "idle") {
 				t.Fatal("provider boundary or delayed activity incorrectly classified", scenario, err)
 			}
 		})
@@ -250,12 +253,23 @@ func TestQuestionValidatesLiveAndDrainedCheckpointsWithoutDuplicateUsage(t *test
 			db, databasePath, worker, resolved := questionFixture(t)
 			defer db.Close()
 			worker.role = "ORCHESTRATOR"
-			payload := `{"model":"test","inputTokens":10,"outputTokens":5,"cacheReadTokens":0,"cacheWriteTokens":0,"totalNanoAIU":3.5,"aiCreditsStatus":"complete"}`
+			payload := `{"model":"test","provider":{"id":"provider","kind":"openai","label":"Provider"},"inputTokens":10,"outputTokens":5,"cacheReadTokens":0,"cacheWriteTokens":0,"totalNanoAIU":3.5,"aiCreditsStatus":"complete"}`
 			var usage core.DispatchUsage
 			if err := json.Unmarshal([]byte(payload), &usage); err != nil {
 				t.Fatal(err)
 			}
-			checkpoint := runtime.UsageCheckpoint{UsageTotals: []core.DispatchUsage{usage}, TotalNanoAIU: usage.TotalNanoAIU}
+			checkpoint := runtime.UsageCheckpoint{
+				UsageTotals: []core.DispatchUsage{usage}, TotalNanoAIU: usage.TotalNanoAIU,
+				AICreditsStatus: usage.AICreditsStatus,
+				ProviderModelMetrics: []core.ProviderModelMetric{{
+					ModelID: &usage.Model, Provider: usage.Provider,
+					Metrics: core.ProviderModelUsageMetrics{
+						AICreditsStatus: usage.AICreditsStatus, TotalNanoAIU: usage.TotalNanoAIU,
+						Usage: core.ProviderModelTokenUsage{InputTokens: 10, OutputTokens: 5},
+					},
+				}},
+			}
+			checkpoint.UsageTotals[0].Provider = nil
 			if mode == "wrong-session" {
 				checkpoint.Watermarks = map[string]int64{"another-native-session": 1}
 			}
@@ -296,11 +310,30 @@ func TestQuestionValidatesLiveAndDrainedCheckpointsWithoutDuplicateUsage(t *test
 				!valid && after.Records.Operation.State == "COMPLETED" {
 				t.Fatal("checkpoint receipt acceptance was not preserved", loadErr)
 			}
+			if valid {
+				if len(result.UsageCheckpoints) != 1 ||
+					!reflect.DeepEqual(result.UsageCheckpoints[0].ProviderModelMetrics, checkpoint.ProviderModelMetrics) {
+					t.Fatal("live or drained provider/model checkpoint was dropped", result.UsageCheckpoints)
+				}
+				retained := false
+				for _, record := range after.Records.Requests {
+					var receipt struct {
+						UsageCheckpoints []runtime.UsageCheckpoint `json:"usageCheckpoints"`
+					}
+					if json.Unmarshal([]byte(record.Payload), &receipt) == nil &&
+						reflect.DeepEqual(receipt.UsageCheckpoints, result.UsageCheckpoints) {
+						retained = true
+					}
+				}
+				if !retained {
+					t.Fatal("provider/model checkpoint did not survive durable receipt storage")
+				}
+			}
 		})
 	}
 }
 
-func TestQuestionMainTurnEndWithoutIdleAndLaterActivity(t *testing.T) {
+func TestQuestionRequiresIdleCompletionBoundary(t *testing.T) {
 	for _, test := range []struct {
 		name  string
 		later bool
@@ -325,12 +358,8 @@ func TestQuestionMainTurnEndWithoutIdleAndLaterActivity(t *testing.T) {
 			q := &questionRuntime{configuredRuntime: worker, events: events}
 			result, err := AskQuestion(t.Context(), db, filepath.Join(filepath.Dir(databasePath), "ledger.json"),
 				"task", "What is saved?", resolved.Config, q)
-			if test.later {
-				if err == nil || result.Answer != nil {
-					t.Fatal("later tool activity was accepted after the main turn end")
-				}
-			} else if err != nil || result.Answer == nil {
-				t.Fatal("bound completed main turn depended on session.idle", err)
+			if err == nil || result.Answer != nil {
+				t.Fatal("answer was accepted without a valid idle completion boundary", test.name, err)
 			}
 		})
 	}

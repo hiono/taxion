@@ -117,18 +117,19 @@ type StopAttachment interface {
 // SavedTurn is observed from the bound provider session, never supplied as a
 // caller-authored result. Reading it must not resume pending execution.
 type SavedTurn struct {
-	SessionID   string               `json:"sessionId"`
-	InputHash   string               `json:"inputHash"`
-	Input       string               `json:"-"`
-	MessageID   string               `json:"messageId"`
-	TurnID      string               `json:"turnId"`
-	Payload     string               `json:"payload"`
-	SubmittedAt time.Time            `json:"submittedAt"`
-	FinishedAt  time.Time            `json:"finishedAt"`
-	ShutdownAt  time.Time            `json:"shutdownAt"`
-	HistoryHash string               `json:"historyHash"`
-	Events      []Event              `json:"events"`
-	UsageTotals []core.DispatchUsage `json:"usageTotals,omitempty"`
+	SessionID        string               `json:"sessionId"`
+	InputHash        string               `json:"inputHash"`
+	Input            string               `json:"-"`
+	MessageID        string               `json:"messageId"`
+	TurnID           string               `json:"turnId"`
+	Payload          string               `json:"payload"`
+	SubmittedAt      time.Time            `json:"submittedAt"`
+	FinishedAt       time.Time            `json:"finishedAt"`
+	ShutdownAt       time.Time            `json:"shutdownAt"`
+	HistoryHash      string               `json:"historyHash"`
+	Events           []Event              `json:"events"`
+	UsageTotals      []core.DispatchUsage `json:"usageTotals,omitempty"`
+	UsageCheckpoints []UsageCheckpoint    `json:"usageCheckpoints,omitempty"`
 }
 
 // ManagedCommit binds the host operation, not an agent-selected repository or scanner.

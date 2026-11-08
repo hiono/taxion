@@ -2,6 +2,7 @@ package copilot
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -101,18 +102,21 @@ func TestFailedReviewObservationCannotExecute(t *testing.T) {
 func TestStopOnlySDKProtocolNeverCreatesOrSends(t *testing.T) {
 	for _, observe := range []bool{false, true} {
 		t.Run(fmt.Sprintf("observe=%t", observe), func(t *testing.T) {
-			testStopOnlySDKProtocol(t, observe, false, false)
+			testStopOnlySDKProtocol(t, observe, false, false, false)
 		})
 	}
 	t.Run("failed-review-observation", func(t *testing.T) {
-		testStopOnlySDKProtocol(t, true, true, false)
+		testStopOnlySDKProtocol(t, true, true, false, false)
 	})
 	t.Run("unclassified-advisory-observation", func(t *testing.T) {
-		testStopOnlySDKProtocol(t, true, false, true)
+		testStopOnlySDKProtocol(t, true, false, true, false)
+	})
+	t.Run("abort-response-without-idle", func(t *testing.T) {
+		testStopOnlySDKProtocol(t, false, false, false, true)
 	})
 }
 
-func testStopOnlySDKProtocol(t *testing.T, observe, failedReview, unclassified bool) {
+func testStopOnlySDKProtocol(t *testing.T, observe, failedReview, unclassified, cancelBeforeIdle bool) {
 	worktree := t.TempDir()
 	var history []sdk.SessionEvent
 	if observe {
@@ -128,6 +132,17 @@ func testStopOnlySDKProtocol(t *testing.T, observe, failedReview, unclassified b
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	var idleGate, abortResponded chan struct{}
+	if cancelBeforeIdle {
+		idleGate, abortResponded = make(chan struct{}), make(chan struct{})
+		defer func() {
+			select {
+			case <-idleGate:
+			default:
+				close(idleGate)
+			}
+		}()
+	}
 	done := make(chan error, 1)
 	go func() {
 		conn, err := listener.Accept()
@@ -140,7 +155,7 @@ func testStopOnlySDKProtocol(t *testing.T, observe, failedReview, unclassified b
 			done <- err
 			return
 		}
-		done <- serveStopProtocol(conn, history)
+		done <- serveStopProtocol(conn, history, idleGate, abortResponded)
 	}()
 	dispatch := core.GraphDispatch{
 		Recipient: "CODER", Status: core.DispatchSuspended,
@@ -186,7 +201,50 @@ func testStopOnlySDKProtocol(t *testing.T, observe, failedReview, unclassified b
 		if err := adapter.ResumeForStop(t.Context(), dispatch.RuntimeSessionID); err != nil {
 			t.Fatalf("resume: %v; protocol fixture: %v", err, <-done)
 		}
-		if err := adapter.Stop(t.Context(), dispatch.RuntimeSessionID); err != nil {
+		if cancelBeforeIdle {
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			stopped := make(chan error, 1)
+			go func() { stopped <- adapter.Stop(ctx, dispatch.RuntimeSessionID) }()
+			select {
+			case <-abortResponded:
+			case err := <-stopped:
+				t.Fatal("Stop returned before its Abort response", err)
+			case <-ctx.Done():
+				t.Fatal("Abort response was not observed")
+			}
+			cancel()
+			if err := <-stopped; !errors.Is(err, context.Canceled) {
+				t.Fatal("Abort RPC success was treated as idle completion", err)
+			}
+			handle, err := adapter.lookup(dispatch.RuntimeSessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handle.mu.Lock()
+			preserved, boundary := !handle.stopped && handle.sdk != nil && handle.busy, handle.turnDone
+			handle.mu.Unlock()
+			if !preserved || boundary == nil {
+				t.Fatal("failed idle wait discarded the active session")
+			}
+			close(idleGate)
+			<-boundary
+			cursor, err := adapter.EventCursor(dispatch.RuntimeSessionID)
+			if err != nil || cursor != 2 {
+				t.Fatal("post-Abort usage and idle were not recorded", cursor, err)
+			}
+			replayContext, cancelReplay := context.WithCancel(t.Context())
+			replay, err := adapter.EventsAfter(replayContext, dispatch.RuntimeSessionID, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, kind := range []string{runtime.EventUsage, runtime.EventCancelled} {
+				if event := <-replay; event.Type != kind {
+					t.Fatal("post-Abort event was lost from history replay", event)
+				}
+			}
+			cancelReplay()
+		} else if err := adapter.Stop(t.Context(), dispatch.RuntimeSessionID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -487,6 +545,237 @@ func TestSavedQuestionObservesAccountingCheckpointWithoutAnotherCall(t *testing.
 		t.Fatal("negative checkpoint accounting was accepted")
 	}
 }
+
+func TestUsageCheckpointRequiresEvidenceForZeroCost(t *testing.T) {
+	for _, payload := range []string{`{}`, `{"totalNanoAiu":0}`} {
+		var event sdk.SessionEvent
+		wire := `{"id":"checkpoint","type":"session.usage_checkpoint","timestamp":"2026-11-09T00:00:00Z","data":` + payload + `}`
+		if err := json.Unmarshal([]byte(wire), &event); err != nil {
+			t.Fatal(err)
+		}
+		normalized, ok := normalizeEvent(event)
+		if !ok {
+			t.Fatal("SDK checkpoint was discarded")
+		}
+		checkpoint, matches, err := runtime.DecodeUsageCheckpoint(normalized.Payload, "saved-session", nil)
+		if err != nil || matches || checkpoint.TotalNanoAIU != nil {
+			t.Fatal("SDK wire zero without completeness evidence was certified", payload, checkpoint, matches, err)
+		}
+	}
+	missing := normalizeUsageCheckpoint(&sdk.SessionUsageCheckpointData{})
+	if missing.Type != runtime.EventUsageCheckpoint {
+		t.Fatal("empty SDK checkpoint was not retained as incomplete evidence", missing)
+	}
+	if _, matches, err := runtime.DecodeUsageCheckpoint(missing.Payload, "saved-session", nil); err != nil || matches {
+		t.Fatal("SDK decode zero without presence evidence was certified", matches, err)
+	}
+	zero := 0.0
+	status := rpc.AiCreditsStatusComplete
+	explicit := normalizeUsageCheckpoint(&sdk.SessionUsageCheckpointData{
+		AccountingSnapshot: &rpc.UsageGetMetricsResult{TotalNanoAiu: &zero, AiCreditsStatus: &status},
+	})
+	checkpoint, matches, err := runtime.DecodeUsageCheckpoint(explicit.Payload, "saved-session", nil)
+	if err != nil || !matches || checkpoint.TotalNanoAIU == nil || *checkpoint.TotalNanoAIU != 0 {
+		t.Fatal("complete snapshot zero was not preserved", checkpoint, matches, err)
+	}
+}
+
+func TestShutdownDoesNotInferCompleteFromCostPresence(t *testing.T) {
+	amount := 3.5
+	checkpoint, err := normalizeUsageShutdown(&sdk.SessionShutdownData{
+		TotalNanoAiu: &amount,
+		ModelMetrics: map[string]rpc.ShutdownModelMetric{
+			"model": {TotalNanoAiu: &amount},
+		},
+	})
+	if err != nil || checkpoint.AICreditsStatus != nil ||
+		len(checkpoint.UsageTotals) != 1 || checkpoint.UsageTotals[0].AICreditsStatus != nil {
+		t.Fatal("shutdown cost presence was promoted to complete accounting", checkpoint, err)
+	}
+	payload, err := json.Marshal(checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, matches, err := runtime.DecodeUsageCheckpoint(string(payload), "saved-session", nil); err != nil || matches {
+		t.Fatal("shutdown without completeness evidence was accepted", matches, err)
+	}
+}
+
+func TestShutdownProviderModelMetricsMatchReceiptsAcrossProviders(t *testing.T) {
+	status := rpc.AiCreditsStatusComplete
+	model, display := "model", "Model Display"
+	amountA, amountB, total := 3.5, 1.5, 5.0
+	inputA, outputA, cacheReadA, cacheWriteA := int64(21), int64(8), int64(2), int64(1)
+	inputB, outputB, cacheReadB, cacheWriteB := int64(11), int64(4), int64(1), int64(0)
+	makeMetric := func(amount float64, input, output, cacheRead, cacheWrite int64) rpc.UsageMetricsModelMetric {
+		count, cost := int64(1), amount/5
+		return rpc.UsageMetricsModelMetric{
+			AiCreditsStatus: &status, TotalNanoAiu: &amount,
+			Requests: rpc.UsageMetricsModelMetricRequests{Cost: cost, Count: count},
+			Usage: rpc.UsageMetricsModelMetricUsage{
+				InputTokens: input, OutputTokens: output, CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
+			},
+		}
+	}
+	providerA := &rpc.ModelProviderRef{ID: "provider-a", Kind: rpc.ModelProviderKind("openai"), Label: "Provider A"}
+	providerB := &rpc.ModelProviderRef{ID: "provider-b", Kind: rpc.ModelProviderKind("openai"), Label: "Provider B"}
+	metricA, metricB := makeMetric(amountA, inputA, outputA, cacheReadA, cacheWriteA),
+		makeMetric(amountB, inputB, outputB, cacheReadB, cacheWriteB)
+	providerMetrics := []rpc.UsageMetricsProviderModelMetric{
+		{ModelID: &model, ModelDisplayName: &display, Provider: providerA, Metrics: metricA},
+		{ModelID: &model, ModelDisplayName: &display, Provider: providerB, Metrics: metricB},
+	}
+	modelMetric := makeMetric(total, inputA+inputB, outputA+outputB,
+		cacheReadA+cacheReadB, cacheWriteA+cacheWriteB)
+	modelMetric.Requests.Count = 2
+	modelMetric.Requests.Cost = 1
+	checkpoint, err := normalizeUsageShutdown(&sdk.SessionShutdownData{
+		ShutdownType: "routine", TotalNanoAiu: &total,
+		AccountingSnapshot: &rpc.UsageGetMetricsResult{
+			TotalNanoAiu: &total, AiCreditsStatus: &status,
+			ModelMetrics:         map[string]rpc.UsageMetricsModelMetric{"model": modelMetric},
+			ProviderModelMetrics: providerMetrics,
+			AgentMetrics:         map[string]rpc.UsageMetricsAgentMetric{"main": {}},
+		},
+		ProviderModelMetrics: providerMetrics,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeCall := func(provider *rpc.ModelProviderRef, amount float64, input, output, cacheRead, cacheWrite int64, sequence int64) core.DispatchUsage {
+		return core.DispatchUsage{
+			Model: model, Provider: &core.UsageModelProvider{
+				ID: provider.ID, Kind: string(provider.Kind), Label: provider.Label,
+			},
+			InputTokens: &input, OutputTokens: &output, CacheReadTokens: &cacheRead,
+			CacheWriteTokens: &cacheWrite, TotalNanoAIU: &amount, AICreditsStatus: func() *string {
+				value := string(status)
+				return &value
+			}(),
+			Accounting: &core.UsageAccountingIdentity{
+				SourceSessionID: "saved-session", Sequence: sequence, UsageID: fmt.Sprintf("call-%d", sequence),
+			},
+		}
+	}
+	calls := []core.DispatchUsage{
+		makeCall(providerA, amountA, inputA, outputA, cacheReadA, cacheWriteA, 1),
+		makeCall(providerB, amountB, inputB, outputB, cacheReadB, cacheWriteB, 2),
+	}
+	payload, err := json.Marshal(checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, matches, err := runtime.DecodeUsageCheckpoint(string(payload), "saved-session", calls); err != nil || !matches {
+		t.Fatal("provider/model checkpoint did not match individual receipts", matches, err)
+	}
+	checkpoint.UsageTotals = nil
+	payload, err = json.Marshal(checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, matches, err := runtime.DecodeUsageCheckpoint(string(payload), "saved-session", calls); err != nil || !matches {
+		t.Fatal("provider/model-only checkpoint did not match individual receipts", matches, err)
+	}
+	for _, test := range []struct {
+		name     string
+		change   func(*runtime.UsageCheckpoint)
+		conflict bool
+	}{
+		{"missing provider aggregate", func(c *runtime.UsageCheckpoint) { c.ProviderModelMetrics = nil }, false},
+		{"partial", func(c *runtime.UsageCheckpoint) {
+			status := "partial"
+			c.AICreditsStatus = &status
+		}, false},
+		{"missing known cost", func(c *runtime.UsageCheckpoint) { c.TotalNanoAIU = nil }, false},
+		{"wrong scope", func(c *runtime.UsageCheckpoint) { c.Watermarks = map[string]int64{"other-session": 2} }, true},
+		{"duplicate provider", func(c *runtime.UsageCheckpoint) {
+			c.ProviderModelMetrics = append(c.ProviderModelMetrics, c.ProviderModelMetrics[0])
+		}, true},
+		{"provider below receipt", func(c *runtime.UsageCheckpoint) {
+			c.ProviderModelMetrics[0].Metrics.Usage.InputTokens--
+		}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var changed runtime.UsageCheckpoint
+			if err := json.Unmarshal(payload, &changed); err != nil {
+				t.Fatal(err)
+			}
+			test.change(&changed)
+			data, err := json.Marshal(changed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, matches, err := runtime.DecodeUsageCheckpoint(string(data), "saved-session", calls)
+			if matches || (err != nil) != test.conflict {
+				t.Fatal("incomplete or conflicting accounting accepted", decoded, matches, err)
+			}
+		})
+	}
+	for index := range calls {
+		calls[index].Provider = nil
+		checkpoint.ProviderModelMetrics[index].Provider = nil
+	}
+	checkpoint.ProviderModelMetrics = checkpoint.ProviderModelMetrics[:1]
+	checkpoint.ProviderModelMetrics[0].Metrics = normalizeProviderMetrics([]rpc.UsageMetricsProviderModelMetric{
+		{ModelID: &model, Metrics: modelMetric},
+	})[0].Metrics
+	payload, err = json.Marshal(checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, matches, err := runtime.DecodeUsageCheckpoint(string(payload), "saved-session", calls); err != nil || !matches {
+		t.Fatal("explicitly unknown provider was guessed or rejected", matches, err)
+	}
+}
+
+func TestSavedTurnPreservesShutdownProviderModelMetrics(t *testing.T) {
+	worktree := t.TempDir()
+	events := completedSavedHistory(worktree)
+	model, display := "model", "Model Display"
+	amount, cost, requestCount := 3.5, 0.75, int64(1)
+	input, output, cacheRead, cacheWrite := int64(21), int64(8), int64(2), int64(1)
+	status := rpc.AiCreditsStatusComplete
+	provider := &rpc.ModelProviderRef{ID: "provider-id", Kind: rpc.ModelProviderKind("openai"), Label: "OpenAI"}
+	metric := rpc.UsageMetricsModelMetric{
+		AiCreditsStatus: &status, TotalNanoAiu: &amount,
+		Requests:     rpc.UsageMetricsModelMetricRequests{Cost: cost, Count: requestCount},
+		TokenDetails: map[string]rpc.UsageMetricsModelMetricTokenDetail{"input": {TokenCount: input}},
+		Usage: rpc.UsageMetricsModelMetricUsage{
+			InputTokens: input, OutputTokens: output, CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
+		},
+	}
+	providerMetric := rpc.UsageMetricsProviderModelMetric{
+		ModelID: &model, ModelDisplayName: &display, Provider: provider, Metrics: metric,
+	}
+	events[len(events)-1].Data = &sdk.SessionShutdownData{
+		ShutdownType: "routine", TotalNanoAiu: &amount,
+		AccountingSnapshot: &rpc.UsageGetMetricsResult{
+			TotalNanoAiu: &amount, AiCreditsStatus: &status,
+			ModelMetrics:         map[string]rpc.UsageMetricsModelMetric{"model": metric},
+			ProviderModelMetrics: []rpc.UsageMetricsProviderModelMetric{providerMetric},
+			AgentMetrics:         map[string]rpc.UsageMetricsAgentMetric{"main": {}},
+		},
+		ProviderModelMetrics: []rpc.UsageMetricsProviderModelMetric{providerMetric},
+	}
+	turn, err := savedQuestionTurn(events, "saved-session", worktree, false)
+	if err != nil || len(turn.UsageCheckpoints) != 1 || len(turn.UsageTotals) != 1 {
+		t.Fatal("shutdown accounting was not preserved", turn, err)
+	}
+	if turn.UsageTotals[0].RequestCount == nil || *turn.UsageTotals[0].RequestCount != requestCount ||
+		turn.UsageTotals[0].RequestCost == nil || *turn.UsageTotals[0].RequestCost != cost ||
+		turn.UsageTotals[0].TokenDetails["input"] != input {
+		t.Fatal("model aggregate details were dropped", turn.UsageTotals)
+	}
+	providerSnapshot := turn.UsageCheckpoints[0].ProviderModelMetrics
+	if len(providerSnapshot) != 1 || providerSnapshot[0].ModelID == nil ||
+		*providerSnapshot[0].ModelID != model || providerSnapshot[0].Provider == nil ||
+		providerSnapshot[0].Provider.ID != provider.ID ||
+		providerSnapshot[0].Metrics.Requests.Cost != cost ||
+		providerSnapshot[0].Metrics.Usage.InputTokens != input {
+		t.Fatal("shutdown provider/model attribution was dropped", providerSnapshot)
+	}
+}
+
 func completedSavedHistory(worktree string) []sdk.SessionEvent {
 	message, turn := "input-message", "review-turn"
 	now := time.Now().UTC()
@@ -505,7 +794,7 @@ func completedSavedHistory(worktree string) []sdk.SessionEvent {
 	}
 }
 
-func serveStopProtocol(conn net.Conn, history []sdk.SessionEvent) error {
+func serveStopProtocol(conn net.Conn, history []sdk.SessionEvent, idleGate <-chan struct{}, abortResponded chan<- struct{}) error {
 	reader := bufio.NewReader(conn)
 	var methods []string
 	for {
@@ -563,6 +852,24 @@ func serveStopProtocol(conn net.Conn, history []sdk.SessionEvent) error {
 			if request.Params["sessionId"] != "saved-session" {
 				return fmt.Errorf("cancellation RPC targeted another session")
 			}
+			if request.Method == "session.abort" && idleGate == nil {
+				notification, err := json.Marshal(map[string]any{
+					"jsonrpc": "2.0", "method": "session.event",
+					"params": map[string]any{
+						"sessionId": "saved-session",
+						"event": map[string]any{
+							"id": "abort-idle", "timestamp": time.Now().UTC(), "type": "session.idle",
+							"ephemeral": true, "data": map[string]any{"aborted": true},
+						},
+					},
+				})
+				if err != nil {
+					return err
+				}
+				if _, err := fmt.Fprintf(conn, "Content-Length: %d\r\n\r\n%s", len(notification), notification); err != nil {
+					return err
+				}
+			}
 			result["success"] = true
 		case "session.getMessages":
 			if history == nil || request.Params["sessionId"] != "saved-session" {
@@ -578,6 +885,26 @@ func serveStopProtocol(conn net.Conn, history []sdk.SessionEvent) error {
 		}
 		if _, err := fmt.Fprintf(conn, "Content-Length: %d\r\n\r\n%s", len(response), response); err != nil {
 			return err
+		}
+		if request.Method == "session.abort" && idleGate != nil {
+			close(abortResponded)
+			<-idleGate
+			for _, data := range []sdk.SessionEventData{
+				&sdk.AssistantUsageData{Model: "model"},
+				&sdk.SessionIdleData{Aborted: func() *bool { value := true; return &value }()},
+			} {
+				notification, err := json.Marshal(map[string]any{
+					"jsonrpc": "2.0", "method": "session.event",
+					"params": map[string]any{"sessionId": "saved-session",
+						"event": sdk.SessionEvent{ID: string(data.Type()), Timestamp: time.Now().UTC(), Data: data}},
+				})
+				if err != nil {
+					return err
+				}
+				if _, err := fmt.Fprintf(conn, "Content-Length: %d\r\n\r\n%s", len(notification), notification); err != nil {
+					return err
+				}
+			}
 		}
 	}
 }

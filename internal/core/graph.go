@@ -298,18 +298,61 @@ type UsageAccountingIdentity struct {
 	UsageID         string `json:"usageId"`
 }
 
+type UsageModelProvider struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Label string `json:"label"`
+}
+
 type DispatchUsage struct {
 	Model            string                   `json:"model"`
+	ModelDisplayName *string                  `json:"modelDisplayName,omitempty"`
+	Provider         *UsageModelProvider      `json:"provider,omitempty"`
+	ModelProvider    *string                  `json:"modelProvider,omitempty"`
 	Scope            string                   `json:"scope,omitempty"`
 	IsAuto           *bool                    `json:"isAuto,omitempty"`
 	InputTokens      *int64                   `json:"inputTokens,omitempty"`
 	OutputTokens     *int64                   `json:"outputTokens,omitempty"`
 	CacheReadTokens  *int64                   `json:"cacheReadTokens,omitempty"`
 	CacheWriteTokens *int64                   `json:"cacheWriteTokens,omitempty"`
+	ReasoningTokens  *int64                   `json:"reasoningTokens,omitempty"`
+	RequestCount     *int64                   `json:"requestCount,omitempty"`
+	RequestCost      *float64                 `json:"requestCost,omitempty"`
+	TokenDetails     map[string]int64         `json:"tokenDetails,omitempty"`
+	CacheExpiresAt   *time.Time               `json:"cacheExpiresAt,omitempty"`
 	TotalNanoAIU     *float64                 `json:"totalNanoAIU,omitempty"`
 	AICreditsStatus  *string                  `json:"aiCreditsStatus,omitempty"`
 	Accounting       *UsageAccountingIdentity `json:"accounting,omitempty"`
 	ObservedAt       time.Time                `json:"observedAt"`
+}
+
+type ProviderModelMetric struct {
+	ModelID          *string                   `json:"modelId"`
+	ModelDisplayName *string                   `json:"modelDisplayName,omitempty"`
+	Provider         *UsageModelProvider       `json:"provider"`
+	Metrics          ProviderModelUsageMetrics `json:"metrics"`
+}
+
+type ProviderModelUsageMetrics struct {
+	AICreditsStatus *string                 `json:"aiCreditsStatus,omitempty"`
+	CacheExpiresAt  *time.Time              `json:"cacheExpiresAt,omitempty"`
+	Requests        ProviderModelRequests   `json:"requests"`
+	TokenDetails    map[string]int64        `json:"tokenDetails,omitempty"`
+	TotalNanoAIU    *float64                `json:"totalNanoAIU,omitempty"`
+	Usage           ProviderModelTokenUsage `json:"usage"`
+}
+
+type ProviderModelRequests struct {
+	Cost  float64 `json:"cost"`
+	Count int64   `json:"count"`
+}
+
+type ProviderModelTokenUsage struct {
+	CacheReadTokens  int64  `json:"cacheReadTokens"`
+	CacheWriteTokens int64  `json:"cacheWriteTokens"`
+	InputTokens      int64  `json:"inputTokens"`
+	OutputTokens     int64  `json:"outputTokens"`
+	ReasoningTokens  *int64 `json:"reasoningTokens,omitempty"`
 }
 
 type DispatchValidation struct {

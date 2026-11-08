@@ -19,6 +19,76 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+func TestSavedCheckpointUsagePreservesCheckpointOrderAcrossRecovery(t *testing.T) {
+	complete := "complete"
+	input, output, twoTokens := int64(1), int64(1), int64(2)
+	first, second := 1.0, 2.0
+	call := func(sequence int64, usageID string, amount float64) core.DispatchUsage {
+		return core.DispatchUsage{
+			Model: "model", InputTokens: &input, OutputTokens: &output, TotalNanoAIU: &amount,
+			AICreditsStatus: &complete,
+			Accounting: &core.UsageAccountingIdentity{
+				SourceSessionID: "session", Sequence: sequence, UsageID: usageID,
+			},
+		}
+	}
+	firstCall, secondCall := call(1, "call-1", first), call(2, "call-2", second)
+	one, three := 1.0, 3.0
+	watermarkOne, watermarkTwo := int64(1), int64(2)
+	earlier := runtime.UsageCheckpoint{
+		TotalNanoAIU: &one, AICreditsStatus: &complete,
+		Watermarks: map[string]int64{"session": watermarkOne},
+		UsageTotals: []core.DispatchUsage{{
+			Model: "model", InputTokens: &input, OutputTokens: &output,
+			TotalNanoAIU: &one, AICreditsStatus: &complete,
+		}},
+	}
+	later := runtime.UsageCheckpoint{
+		TotalNanoAIU: &three, AICreditsStatus: &complete,
+		Watermarks: map[string]int64{"session": watermarkTwo},
+		UsageTotals: []core.DispatchUsage{{
+			Model: "model", InputTokens: &twoTokens, OutputTokens: &twoTokens,
+			TotalNanoAIU: &three, AICreditsStatus: &complete,
+		}},
+	}
+	encode := func(value any) string {
+		t.Helper()
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	turn := runtime.SavedTurn{
+		SessionID: "session",
+		Events: []runtime.Event{
+			{Type: runtime.EventUsage, Sequence: 1, Payload: encode(firstCall)},
+			{Type: runtime.EventUsageCheckpoint, Sequence: 2, Payload: encode(earlier)},
+			{Type: runtime.EventUsage, Sequence: 3, Payload: encode(secondCall)},
+		},
+		UsageTotals: []core.DispatchUsage{{
+			Model: "model", InputTokens: &twoTokens, OutputTokens: &twoTokens,
+			TotalNanoAIU: &three, AICreditsStatus: &complete,
+		}},
+		UsageCheckpoints: []runtime.UsageCheckpoint{later},
+	}
+	matches, floor, err := savedCheckpointUsage(turn)
+	if err != nil || !matches || floor != 3 {
+		t.Fatalf("ordered checkpoint recovery = (%v, %v, %v)", matches, floor, err)
+	}
+	turn.Events = nil
+	matches, floor, err = savedCheckpointUsage(turn)
+	if err != nil || !matches || floor != 3 {
+		t.Fatalf("receiptless scoped snapshot recovery = (%v, %v, %v)", matches, floor, err)
+	}
+	partial := "partial"
+	turn.UsageCheckpoints[0].AICreditsStatus = &partial
+	matches, floor, err = savedCheckpointUsage(turn)
+	if err != nil || matches || floor != 3 {
+		t.Fatalf("partial receiptless snapshot = (%v, %v, %v)", matches, floor, err)
+	}
+}
+
 func TestRequestRecoveryLegacyCancelPreservesCheckpointUsageAndReleasesStore(t *testing.T) {
 	_, args := requestFixture(t)
 	original := "retain the stopped planning attempt"
@@ -197,14 +267,17 @@ func TestRequestRecoveryCancelRetainsPerCallUsageWithIncompleteNativeTotals(t *t
 		for _, partial := range []bool{false, true} {
 			for _, checkpoint := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/partial-calls-%t/checkpoint-%t", mode, partial, checkpoint), func(t *testing.T) {
-					testRequestRecoveryCancelUsage(t, mode == "with-terminal", partial, checkpoint)
+					testRequestRecoveryCancelUsage(t, mode == "with-terminal", partial, checkpoint, false)
 				})
 			}
 		}
 	}
+	t.Run("scoped-snapshot-without-individual-receipts", func(t *testing.T) {
+		testRequestRecoveryCancelUsage(t, false, false, false, true)
+	})
 }
 
-func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls, checkpointPresent bool) {
+func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls, checkpointPresent, snapshotOnly bool) {
 	t.Helper()
 	_, args := requestFixture(t)
 	var initialOutput bytes.Buffer
@@ -327,7 +400,7 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 	}
 	expectedAmount := amount
 	if checkpointPresent {
-		checkpoint := runtime.UsageCheckpoint{TotalNanoAIU: &amount}
+		checkpoint := runtime.UsageCheckpoint{TotalNanoAIU: &amount, AICreditsStatus: &complete}
 		if partialCalls {
 			checkpoint.UsageTotals = turn.UsageTotals
 		} else {
@@ -340,6 +413,15 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 			t.Fatal(err)
 		}
 		turn.Events = append(turn.Events, runtime.Event{Type: runtime.EventUsageCheckpoint, Payload: string(data)})
+	}
+	if snapshotOnly {
+		turn.Events = []runtime.Event{{Type: runtime.EventOutput, Payload: string(payload)}}
+		turn.UsageTotals[0].TotalNanoAIU, turn.UsageTotals[0].AICreditsStatus = &amount, &complete
+		turn.UsageCheckpoints = []runtime.UsageCheckpoint{{
+			UsageTotals:  append([]core.DispatchUsage(nil), turn.UsageTotals...),
+			TotalNanoAIU: &amount, AICreditsStatus: &complete,
+			Watermarks: map[string]int64{turn.SessionID: 1},
+		}}
 	}
 	var receipts []store.RequestRecord
 	evidence := []any{initial, session, send}
@@ -383,7 +465,7 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 		t.Fatal("cancellation accepted a known conflict in native usage totals")
 	}
 	turn.UsageTotals[0].OutputTokens = originalOutput
-	if !terminalPresent {
+	if !terminalPresent && !snapshotOnly {
 		usagePayload := turn.Events[0].Payload
 		turn.Events[0].Payload = "private-invalid-usage"
 		if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &bytes.Buffer{}); err == nil ||
@@ -412,8 +494,12 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 	if err := json.Unmarshal(preview.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.UsageStatus != "unknown" {
-		t.Fatal("incomplete native totals were treated as complete")
+	expectedStatus := "unknown"
+	if snapshotOnly {
+		expectedStatus = "complete"
+	}
+	if report.UsageStatus != expectedStatus {
+		t.Fatal("snapshot completeness was misclassified", report.UsageStatus, expectedStatus)
 	}
 	if err := requestRecoveryCommand(append(recoveryArgs, "--apply", "--expected-hash", report.Hash), &bytes.Buffer{}); err != nil {
 		t.Fatal(err)

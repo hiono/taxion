@@ -186,6 +186,103 @@ scannerだけのCPU affinityを限定した別試行でもcommit treeの期限�
 必要な最終確認は `go build ./...`、`go vet ./...`、`go test ./...`、
 変更した runtime package と CLI の race test、`gofmt`、生成 completion と `git diff --check`。
 
+## 第五審査残件のSDK契約修正（2026-11-09）
+
+調査開始時の候補は `fix/native-event-contract-083`、
+HEADは `e00cae25b58952f164b3a53794061a86f24f4c14`、worktreeはcleanだった。
+`e00cae2` の直接の親はコード修正 `0e061f9475a34b96b067605701c5295dcf6ba3f5` である。
+依存SDKは `github.com/github/copilot-sdk/go v1.0.22` のまま変更していない。
+公開mainの基準 `6a9f91255e3dd566fefb62032395a88f5d16cff1` から元候補までは75ファイル、
+5,482行追加・226行削除であり、今回の差分とは別である。
+第五審査の `REQUEST_CHANGES`／Controller `FAILED`／ADR-0074 `FAIL` と保存証跡は変更しない。
+
+### 追証結果と最初の不整合
+
+以下の「確認済み」は候補とSDKのソース契約についての判定であり、元の本番障害の個別原因を確定したという意味ではない。
+行番号は今回の修正候補に対応する。
+
+| 問題 | 元候補の実態と最初の不整合 | 修正した契約 | 確度・参照 |
+| --- | --- | --- | --- |
+| ゼロ累計 | SDKの非pointer `TotalNanoAiu` はwire欠落と明示0をデコード後に区別できない。正数だけを設定する正規化と、空checkpointを完全扱いする受入れ判定が併存していた | pointerで存在が観測できた費用と `complete` を保持する。根拠のない0は未知のまま、明示的な完全ゼロだけを受理する | 確認済み。`copilot/usage_checkpoint.go:17 normalizeUsageCheckpoint`、`runtime/usage_checkpoint.go:21 DecodeUsageCheckpoint` |
+| 個別Provider | `AssistantUsageData` に存在するID・kind・labelを中立JSONへ渡していなかった | `DispatchUsage` のoptional Provider・表示名・modelProviderを保持する。旧記録のProviderは推測しない | 確認済み。`copilot/copilot.go:1229 normalizeEvent` |
+| checkpoint／shutdown集計 | Provider/Model集計を正規化・保存回答へ渡さず、shutdownのnested snapshotも復旧へ届かなかった | 集計をreceiptとは別の `UsageCheckpoint` に保持し、保存回答、質問・検索結果、terminal receipt、公開復旧へ引き継ぐ | 確認済み。`copilot/usage_checkpoint.go:91 normalizeUsageShutdown`、`copilot/saved_turn.go:56 savedSessionTurn` |
+| 二重計上 | SDKのProvider/Model集計は先行receiptを包含する。今回、既存実装による実際の二重課金は確認していない | global・model・Provider/Modelは同じ費用の別集計として最大値を採用し、watermark外のreceiptだけ加算する。完全なscope付きsnapshotはreceiptが保存されていなくても照合できる | SDK包含契約は確認済み。既存の二重課金は未確認。`runtime/usage_checkpoint.go:251 KnownNanoAIU`、`core/usage.go:19 CompareProviderModelUsage` |
+| 早期受理 | `drainCompletedTurn` はidle後の一時的な空queueを成功とし、境界前のchannel closeも成功にしていた | 回答の `assistant.turn_end` とproviderの通常idleを分ける。空queueと境界前のcloseを成功証拠にしない | 確認済み。`controller/completed_turn.go:13 drainCompletedTurn` |
+| Stop時の欠落 | Abort RPC成功後にstopped設定・watcher終了を行い、後から来るcallbackを履歴へ記録しない経路があった | main idleを履歴・watcher queueへ記録してからStopを解除する。待機取消ではsessionを保全する。Disconnect失敗でもbindingを捨てない | コード経路は確認済み。元のnative履歴で欠落した個別イベントは未確認。`copilot/copilot.go:1202 onEvent`、`:1404 emit`、`:1447 stop` |
+| Autopilot idle | SDKの `Mode` を参照せず、継続境界をターン完了へ正規化していた | Autopilot idleは継続、aborted idleは取消として区別する。Abort通知やモデルエラーだけではidle待機を解除しない | 確認済み。`copilot/copilot.go:1229 normalizeEvent` |
+
+SDK側の根拠は `rpc/zsession_events.go:853 SessionUsageCheckpointData`、
+`:2236 SessionIdleData`、`:2925 SessionShutdownData`、
+`rpc/zrpc.go:25370 AiCreditsStatus` と `session.go:1556 dispatchEvent`、`processEvents`、`Abort` である。
+SDKはcallbackをFIFOで同期実行するが、idleの受信だけで費用の完全性やsession切断まで保証するものではない。
+`EventsAfter` の保証はTaxionがすでに記録した履歴の再送に限られ、未到着callbackの取得には使わない。
+
+### 修正範囲と既存修正の評価
+
+`0e061f9` のcheckpoint／receipt分離、known-cost floor、watermark・scope検査を維持した。
+不足していたのは、SDKからその契約へ渡す情報と、回答生成・idle・停止を同一視していた境界条件である。
+ゼロ値の問題とProvider情報の問題は異なる変換欠落であり、非同期完了は別のライフサイクル不整合である。
+同じ単一原因とは断定しない。
+
+今回の追加は既存DTOのoptional項目と既存の正規化・保存・照合・停止処理に限定した。
+新しいイベントファミリー、SDK依存変更、汎用usage基盤、固定sleep、審査回数変更は導入していない。
+ADR-0075/0076、古い承認・receipt・native履歴、運用storeは変更していない。
+
+### 回帰対象と残る制約
+
+SDK wireの費用欠落／明示0、完全ゼロ、partial／正数、Providerあり／不明、
+同一Modelの複数Provider、nested／top-level集計、shutdown読取り、
+scope不一致・重複Provider・既知receiptより小さい集計・費用欠落を検証する。
+質問のlive／drainからStoreに保存したterminal receiptまでProvider/Model集計を確認し、
+保存checkpointの順序、receiptなしのscope付き復旧、partialを完全へ昇格しないことを確認する。
+
+非同期試験はchannel、callback、sequenceで同期する。
+通常idle・Autopilot idle・aborted idle・child idle・Abort通知・失敗通知を区別し、
+Abort応答後にidleを保留してStopを取消した場合のsession保全、
+その後のusageとidleの履歴・cursor・再送をSDK RPC fixtureで確認する。
+境界前のchannel close、取消、期限、後続実行の拒否も維持する。
+再接続だけでbusyと推測しない。観測したmain turn startで完了待機を登録し、childの開始では登録しない。
+
+これらはモデルを起動しないローカル契約試験である。
+本番のイベント発行順、元の運用storeのpreview/apply、独立Reviewerによる新候補の合格、
+公開CI、公開・配布・TKB3復旧は未確認・未実施であり、この修正の成功証拠へ混ぜない。
+旧データを新しいProviderや完全費用へ補完しないため、不完全な既存履歴は引き続き保留または承認済み取消を要する。
+
+SDK `session.go:2077 Disconnect` はRPCに `context.Background()` を使い、
+RPC失敗時にもlocal event processingをretireする。
+そのため、呼出し元の期限だけでDisconnectの待機時間を制限できるとは保証しない。
+失敗後の同じbindingは明示cleanup retryのために保持するが、live sessionとして再送しない。
+idle後にSDKへ到着する未知の会計イベントを、StopやEventsAfterで全回収できたとも主張しない。
+費用の完全性は保存checkpointのstatus、scope、watermarkと個別receiptの整合で判定する。
+
+### 最終ローカル検証と利用量
+
+| 検証 | 結果・範囲 |
+| --- | --- |
+| gofmt、go build ./...、go vet ./...、go test ./...、git diff --check | 最終コードでPASS。通常試験2,776件、23package |
+| 対象race | core／runtime／copilot／CLIの904件とController関連177件がPASS。最後のmain turn start修正後はcopilot全310件もPASS。件数は重複を含むので合算しない |
+| 公開request recover preview／exact-hash apply回帰 | receiptなしのscope付き完全snapshotを含む10ケースPASS。合成fixtureであり本番storeの成功証明ではない |
+| go test -race ./... | Controller packageが600秒suite timeout。全raceは未完了でありPASSではない。timeoutだけでdata raceやdeadlockとは断定しない |
+| 全indexed内容のsecret scan | Betterleaks v1.9.0で5.91 MBのsnapshotをscanし、leakなし。別indexからexportし、repositoryの実indexは変更しなかった |
+| 未公開commit全範囲のsecret scan | main基準6a9f912..元候補e00cae2をcheck-rangeで実行。fb671283929932cc0e45e60fbdfd1f0fcab1d00cでcontext deadline exceeded。未完了でありPASSではない |
+
+Scannerは公式v1.9.0 linux_x64 archiveを公開checksumと照合した。
+SHA-256は `f8b185a39ffcece2a1ca82bf3a4e7435cd81963ffd16b7a9128daf75f35f6de7`。
+全indexed内容のscanとcommit履歴全範囲のscanは別の検証であり、前者で後者のtimeoutを補わない。
+
+外側operatorの正規照会は `taxion runtime quota --account hrykono --approve-account-read --cli /home/onohr/.local/bin/copilot`。
+`hiono` はGitHub操作用でありquota照会先ではない。
+`2026-11-08T23:22:48.106Z`（08:22 JST）の `sdk.account.getQuota` は
+19,600/50,000 requests使用、account残30,400を返した。
+人間提供の起点19,400との差200 requestsは同一accountの累計差分であり、厳密な作業別課金ではない。
+承認済み作業上限20,200、reserve 50を維持すると、この観測時の作業枠は550 requestsとなる。
+固定期限08:46 JST、審査枠は変更していない。
+Session AIC usは別単位でありrequestsへ換算していない。
+照会結果の `executionAuthorized:false` は追加の実行・審査承認ではない。
+
+第六審査、push、公開CI、公開・配布、共有環境への適用、TKB3復旧は実施していない。
+Issue #282への申し送りは修正commitとこの記録を参照し、第五審査のFAILを維持する。
+
 ## 実運用との区別
 
 native 保存履歴の復旧回帰は合成 fixture と SDK reader の検証である。

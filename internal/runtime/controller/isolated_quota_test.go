@@ -23,6 +23,64 @@ type isolatedQuotaRuntime struct {
 	onRead func(int, *runtime.QuotaSnapshot) error
 }
 
+func TestSearchPreservesLiveAndDrainedUsageCheckpoints(t *testing.T) {
+	for _, drained := range []bool{false, true} {
+		t.Run(fmt.Sprintf("drained=%t", drained), func(t *testing.T) {
+			db, _, base, _ := questionFixture(t)
+			defer db.Close()
+			base.role = "ORCHESTRATOR"
+			payload := `{"model":"test","provider":{"id":"provider","kind":"openai","label":"Provider"},"inputTokens":10,"outputTokens":5,"cacheReadTokens":0,"cacheWriteTokens":0,"totalNanoAIU":3.5,"aiCreditsStatus":"complete"}`
+			var usage core.DispatchUsage
+			if err := json.Unmarshal([]byte(payload), &usage); err != nil {
+				t.Fatal(err)
+			}
+			checkpoint := runtime.UsageCheckpoint{
+				UsageTotals: []core.DispatchUsage{usage}, TotalNanoAIU: usage.TotalNanoAIU,
+				AICreditsStatus: usage.AICreditsStatus,
+				ProviderModelMetrics: []core.ProviderModelMetric{{
+					ModelID: &usage.Model, Provider: usage.Provider,
+					Metrics: core.ProviderModelUsageMetrics{
+						AICreditsStatus: usage.AICreditsStatus, TotalNanoAIU: usage.TotalNanoAIU,
+						Usage: core.ProviderModelTokenUsage{InputTokens: 10, OutputTokens: 5},
+					},
+				}},
+			}
+			body, err := json.Marshal(checkpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := managedSearchEvents(payload)
+			close(source)
+			events := make(chan runtime.Event, len(source)+1)
+			sequence := uint64(0)
+			emit := func(event runtime.Event) {
+				sequence++
+				event.Sequence = sequence
+				events <- event
+			}
+			for event := range source {
+				if !drained && event.Type == runtime.EventTurnEnded ||
+					drained && event.Type == runtime.EventTurnFinished {
+					emit(runtime.Event{Type: runtime.EventUsageCheckpoint, Payload: string(body)})
+				}
+				emit(event)
+			}
+			worker := &questionRuntime{configuredRuntime: base, events: events}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			turn, err := RunSearchTurn(ctx, worker, "task", "query")
+			if err != nil || len(turn.Usage) != 1 || len(turn.UsageCheckpoints) != 1 ||
+				len(turn.UsageCheckpoints[0].ProviderModelMetrics) != 1 ||
+				turn.UsageCheckpoints[0].ProviderModelMetrics[0].Provider == nil ||
+				turn.UsageCheckpoints[0].ProviderModelMetrics[0].Provider.ID != "provider" ||
+				turn.UsageCheckpoints[0].TotalNanoAIU == nil ||
+				*turn.UsageCheckpoints[0].TotalNanoAIU != 3.5 {
+				t.Fatal("search checkpoint was lost or counted as another receipt", turn, err)
+			}
+		})
+	}
+}
+
 func (w *isolatedQuotaRuntime) BudgetGuidancePolicy() *core.BudgetGuidancePolicy { return w.policy }
 
 func (w *isolatedQuotaRuntime) ReadAccountQuota(ctx context.Context, account string) (runtime.QuotaSnapshot, error) {
