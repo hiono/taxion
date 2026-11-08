@@ -113,7 +113,7 @@ func (f ReviewFlow) StoppedArtifactReviewer(d GraphDispatch) bool {
 // StoppedExecutedArtifactReviewer is terminal execution, not eligible for the
 // unstarted-dispatch reconciliation or an in-place session restart.
 func (f ReviewFlow) StoppedExecutedArtifactReviewer(d GraphDispatch) bool {
-	return f.Status == "STOPPED" && slices.Contains([]string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT"}, f.StopCode) &&
+	return f.Status == "STOPPED" &&
 		f.HandoffHeld() && f.RunnerID == "" && f.InputReadyForReview() &&
 		len(f.DispatchIDs) == 1 && f.DispatchIDs[0] == d.ID && d.Recipient == "REVIEWER" &&
 		d.TaskID != f.TaskID && d.Status == DispatchCancelled && d.ExecutionStarted &&

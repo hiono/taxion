@@ -434,7 +434,6 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 				last, _ := state.Graph.GraphDispatch(flow.LastDispatchID())
 				unstarted := last.Recipient == "CODER" && last.Status == core.DispatchCancelled &&
 					!last.ExecutionStarted && last.RuntimeSessionID == "" && last.Result != nil &&
-					flow.StopCode == "RECONTRACT" &&
 					slices.Contains(last.Result.Evidence, "not-started:"+last.ID)
 				if unstarted {
 					if request.Target != nil || task.BaselineSHA != last.Instruction.BaselineSHA {
@@ -469,8 +468,7 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 					if _, err := budgetContinuationSource(state.Graph, task, last.ID, state.Records); err != nil {
 						return fmt.Errorf("taxion: successor does not preserve the completed Coder result: %w", err)
 					}
-				} else if last.Recipient == "REVIEWER" && (flow.StopCode == "BUDGET_LIMIT" ||
-					flow.StopCode == "SAFETY_STOP" && last.Status == core.DispatchCancelled) {
+				} else if last.Recipient == "REVIEWER" && last.Status == core.DispatchCancelled {
 					if len(flow.DispatchIDs) < 2 {
 						return fmt.Errorf("taxion: stopped Reviewer requires a saved Coder predecessor")
 					}

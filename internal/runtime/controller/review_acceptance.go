@@ -116,10 +116,10 @@ func previewSavedReview(ctx context.Context, state store.Workspace, ledgerPath s
 		return ReviewAcceptancePreview{}, err
 	}
 	flow, ok := state.Graph.ReviewFlow(request.FlowID)
-	if !state.HasGraph || !ok || flow.Status != "STOPPED" || flow.StopCode != "SAFETY_STOP" ||
+	if !state.HasGraph || !ok || flow.Status != "STOPPED" ||
 		flow.RunnerID != "" || !flow.HandoffHeld() ||
 		flow.SourceDispatchID == "" || len(flow.DispatchIDs) != 1 || flow.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot {
-		return reject("requires an unclaimed review-only snapshot Flow with a saved safety stop")
+		return reject("requires an unclaimed stopped review-only snapshot Flow")
 	}
 	hold := flow.HandoffChanges[len(flow.HandoffChanges)-1]
 	if hold.ID != "flow-stop:"+flow.ID+":"+flow.DispatchIDs[0] ||
@@ -205,6 +205,12 @@ func previewSavedReview(ctx context.Context, state store.Workspace, ledgerPath s
 	expired := !now.Before(flow.ExecutionDeadline())
 	if expired && !request.AllowExpired {
 		return reject("deadline expired; explicit allowExpired approval for acceptance only is required")
+	}
+	budget := taskBudgetReport(state.Graph, flow, now)
+	if budget.Dispatches > budget.DispatchLimit || budget.CoderSessions > budget.CoderSessionLimit ||
+		budget.ReviewerSessions > budget.ReviewerSessionLimit ||
+		budget.MaxNanoAIU > 0 && (budget.CreditsStatus != "complete" || budget.ConsumedNanoAIU > budget.MaxNanoAIU) {
+		return reject("saved execution exceeds approved limits or required usage evidence is incomplete")
 	}
 	auth, enabled, err := lifecycleAuthorization(&state, flow)
 	if err != nil {

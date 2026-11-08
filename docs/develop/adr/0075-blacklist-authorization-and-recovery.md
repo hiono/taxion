@@ -51,14 +51,39 @@ Controller は、承認済み操作を現在の状態から適用できる型付
 
 ## Status
 
-Accepted 2026-11-08 by explicit user decision. 未開始 Dispatch の取消について部分実装。
+Accepted 2026-11-08 by explicit user decision. 取消・後続入力・保存結果受理の停止 code 判定を是正。
 全認可入口の移行、独立レビューとリリースは未完了。
 
-今回の実装対象は未開始 Dispatch の `workflow reconcile-stopped` と保存監査の照合、
+初回の実装対象は未開始 Dispatch の `workflow reconcile-stopped` と保存監査の照合、
 承認済み baseline-only 入力の後続検証である。停止 code による許可一覧を初回 Coder と
 未開始 Reviewer の分類から除去し、Graph schema、契約と入力、実行・配送の証拠を検査する。
 取消は期限切れ後にも旧 Flow を変更せず行える。新たな実行の期限・予算承認を代替しない。
-実行済み session の復旧や全認可入口の移行、独立レビュー、配布はこの変更の完了範囲に含めない。
+実行済み session の復旧や全認可入口の移行、独立レビュー、配布は初回の変更の完了範囲に含めなかった。
+
+### 残存不整合の是正
+
+前の変更では、取消入口で `RECONTRACT` を受け入れても、後続の入力検証再利用が
+旧停止 code 一覧で拒否していた。入口だけの変更で後続の分類と保存監査を同期しなかったことが原因である。
+Decision を緩めて既存コードを適合とみなさず、次の直接依存を合わせて是正する。
+
+- `StoppedExecutedArtifactReviewer`、`HasBudgetContinuationSource` と後続確認は、停止・役割・結果・receipt の構造で判定する。
+- 成果物の検証再利用と失敗入力の後続作成は、停止 code に依存せず、既存の入力・設定・失敗 receipt を照合する。
+- `accept-saved-review` と保存監査は、期限前の成功 receipt、独立 `APPROVE`、現在の入力・承認で判定する。正の利用額上限で usage が不明な場合、または実行枠を超えた場合は拒否する。
+- 稼働中の未開始指示の取消は Coder と Reviewer を同じ境界で扱う。開始・session・runtime configuration・usage・result・runtime receipt があれば未開始取消を拒否する。
+
+Graph の既知の停止 code、Task・Dispatch の型付き状態遷移、実際の承認対象や設定の一覧は
+構造と権限の検査であり、許可操作の列挙漏れによる拒否とは区別して維持する。
+この是正の根拠は上記の具体的な分岐と呼出し関係であり、文字列検索だけを全認可入口の完了証拠にしない。
+実行済み session の同一候補・正式停止 receipt・必要な累計 usage の照合は省略しない。
+既存 Flow/store への適用、新モデル実行、merge、release は行わない。
+
+追加是正では build、vet、全通常試験、CLI と文書リンク試験が成功した。
+最後に追加した `RECONTRACT` の実行済み Reviewer 継続、通常後続の確認、
+保存結果受理と必要な usage の拒否を含む対象 race 試験も成功した。
+一方、全通常試験と変更 package の全 race 試験を合わせた検証ジョブは、
+事前に設定した1950秒の上限で終了した。全 race は Controller と CLI の終了結果がなく未完了である。
+残る固定期限内に同じ検証単位を完了できないため、変更と証拠を checkpoint に保全して停止する。
+追加是正を全体適合、配布可能、下流の公開復旧問題解消と扱わない。
 
 ### 検証と申し送り
 

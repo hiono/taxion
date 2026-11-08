@@ -208,7 +208,7 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 }
 
 // TerminateUnstartedDispatch is the safe first half of re-contracting: it
-// permanently cancels an issued, untouched Coder Dispatch and holds its flow.
+// permanently cancels an issued, untouched Dispatch and holds its flow.
 // A successor Task must be explicitly approved and issued with a new hash.
 func TerminateUnstartedDispatch(db *store.Store, flowID, dispatchID, actor, source, reason string) error {
 	if db == nil || strings.TrimSpace(actor) == "" || strings.TrimSpace(source) == "" ||
@@ -227,9 +227,15 @@ func stopUnstartedDispatch(db *store.Store, flowID, dispatchID, actor, source, r
 			return fmt.Errorf("taxion: re-contract requires the latest Dispatch of an unclaimed running flow")
 		}
 		dispatch, ok := state.Graph.GraphDispatch(dispatchID)
-		if !ok || (dispatch.Recipient != "CODER" && !(stopCode == "BUDGET_STOP" && dispatch.Recipient == "REVIEWER")) || dispatch.Status != core.DispatchIssued ||
-			dispatch.Acknowledged || dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "" {
-			return fmt.Errorf("taxion: re-contract may terminate only an untouched issued Coder Dispatch")
+		if !ok || dispatch.Status != core.DispatchIssued || dispatch.Acknowledged ||
+			dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "" || dispatch.RuntimeConfigHash != "" ||
+			dispatch.ExecutionStartSHA != "" || len(dispatch.RuntimeUsage) != 0 || dispatch.Result != nil {
+			return fmt.Errorf("taxion: re-contract may terminate only an untouched issued Dispatch without execution evidence")
+		}
+		for _, receipt := range state.Records.Events {
+			if receipt.DispatchID == dispatch.ID {
+				return fmt.Errorf("taxion: re-contract requires separate reconciliation for a Dispatch with runtime receipts")
+			}
 		}
 		result := &core.DispatchResult{
 			DispatchID: dispatch.ID, TaskID: dispatch.TaskID, Recipient: dispatch.Recipient,

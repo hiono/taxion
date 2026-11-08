@@ -453,6 +453,17 @@ func TestStoppedReviewerCancellationDoesNotRequireListedStopCode(t *testing.T) {
 			if err := after.Records.VerifyFlowAudits(after.Graph); err != nil {
 				t.Fatal(err)
 			}
+			if artifact {
+				next := flow.Contract
+				next.ID, next.Supersedes, next.CreatedFrom = "next-review", flow.TaskID, "flow:"+flow.ID
+				next.TargetSHA, next.TargetTreeSHA = flow.Artifact.Target.CommitSHA, flow.Artifact.Target.TreeSHA
+				next.TargetChangedFiles = flow.Artifact.Target.ChangedFiles
+				if _, err := validatedArtifactSource(after.Graph, next, ReviewFlowRequest{
+					ArtifactSource: flow.Artifact.Target.Source, Configuration: flow.Artifact.Configuration,
+				}); err != nil {
+					t.Fatal("reconciled RECONTRACT input rejected by downstream validation reuse:", err)
+				}
+			}
 		})
 	}
 }

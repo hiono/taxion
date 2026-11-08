@@ -39,7 +39,7 @@ func verifyValidatedArtifactContract(prior core.ReviewFlow, next core.GraphTask)
 func validatedArtifactSource(graph core.TaskGraph, task core.GraphTask, request ReviewFlowRequest) (core.ReviewFlow, error) {
 	prior, ok := graph.ReviewFlow(strings.TrimPrefix(task.CreatedFrom, "flow:"))
 	if !ok || task.CreatedFrom != "flow:"+prior.ID || prior.Status != "STOPPED" ||
-		!slices.Contains([]string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT"}, prior.StopCode) || prior.RunnerID != "" || !prior.HandoffHeld() ||
+		prior.RunnerID != "" || !prior.HandoffHeld() ||
 		len(prior.DispatchIDs) != 1 {
 		return core.ReviewFlow{}, fmt.Errorf("taxion: validation reuse requires its held stopped artifact predecessor")
 	}

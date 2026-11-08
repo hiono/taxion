@@ -605,7 +605,7 @@ from a warning. Monitoring ends with event streaming; it is not a background
 service and does not inspect time spent outside streaming host validation.
 
 FAILED artifact input with dispatchIds: [] has no feedback target. Preserve its
-receipt and input, require STOPPED/SAFETY_STOP, handoff hold and released runner.
+receipt and input, require STOPPED, handoff hold and released runner.
 Use a separate-worktree normal CODER/REVIEWER DRAFT successor: supersedes is the
 failed Task; createdFrom is flow:FAILED_FLOW_ID. Retain baselineSha, targetSha,
 targetTreeSha and targetChangedFiles; never replace an older Coder Flow instead.

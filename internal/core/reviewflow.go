@@ -61,9 +61,7 @@ type FlowRecovery struct {
 }
 
 func (g TaskGraph) HasBudgetContinuationSource(flow ReviewFlow, sourceID string) bool {
-	// Legacy budget stops and reconciled safety stops share the same source checks.
-	if flow.Status != "STOPPED" || (flow.StopCode != "BUDGET_LIMIT" && flow.StopCode != "BUDGET_STOP" &&
-		flow.StopCode != "RECONTRACT" && flow.StopCode != "SAFETY_STOP") ||
+	if flow.Status != "STOPPED" ||
 		flow.RunnerID != "" || !flow.HandoffHeld() || len(flow.DispatchIDs) == 0 {
 		return false
 	}

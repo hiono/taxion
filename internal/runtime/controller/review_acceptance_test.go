@@ -15,6 +15,109 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+func TestTerminateUnstartedReviewerDoesNotRequireBudgetStop(t *testing.T) {
+	db, ledger, request, _ := packetReviewSuccessorFixture(t, core.OutputModeWorktreeTreeSnapshot)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatchID := flow.DispatchIDs[0]
+	if err := TerminateUnstartedDispatch(db, flow.ID, dispatchID, "human", "human:change", "retain accepted input for a new contract"); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped, _ := state.Graph.ReviewFlow(flow.ID)
+	dispatch, _ := state.Graph.GraphDispatch(dispatchID)
+	if stopped.StopCode != "RECONTRACT" || !stopped.HandoffHeld() ||
+		dispatch.Status != core.DispatchCancelled || dispatch.RuntimeSessionID != "" {
+		t.Fatal("Reviewer cancellation changed execution or lost stopped history")
+	}
+}
+
+func TestSavedReviewAcceptanceRejectsUnavailableUsageAndInvalidBudget(t *testing.T) {
+	for _, unknownUsage := range []bool{false, true} {
+		t.Run(map[bool]string{false: "session-limit", true: "unknown-usage"}[unknownUsage], func(t *testing.T) {
+			db, ledger, request, acceptance := savedReviewAcceptanceFixture(t)
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			flow, _ := state.Graph.ReviewFlow(acceptance.FlowID)
+			if unknownUsage {
+				flow.Budget.MaxNanoAIU = 1
+				for i := range state.Graph.Dispatches {
+					dispatch := &state.Graph.Dispatches[i]
+					if dispatch.ID != flow.DispatchIDs[0] {
+						continue
+					}
+					dispatch.RuntimeUsage = nil
+					body, err := json.Marshal(struct {
+						Result *core.DispatchResult
+						Usage  []core.DispatchUsage
+					}{dispatch.Result, dispatch.RuntimeUsage})
+					if err != nil {
+						t.Fatal(err)
+					}
+					for j := range state.Records.Events {
+						receipt := &state.Records.Events[j]
+						if receipt.DispatchID == dispatch.ID && receipt.Type == "verified-result" {
+							receipt.Payload, receipt.Hash = string(body), receiptHash(string(body))
+						}
+					}
+				}
+			} else {
+				flow.Budget.MaxReviewerSessions = 0
+			}
+			storeFlow(&state, flow)
+			_, err = previewSavedReview(t.Context(), state, ledger, acceptance, request.Configuration, time.Now().UTC())
+			expected := "invalid approved budget"
+			if unknownUsage {
+				expected = "saved execution exceeds approved limits or required usage evidence is incomplete"
+			}
+			if err == nil || !strings.Contains(err.Error(), expected) {
+				t.Fatalf("missing concrete usage/budget denial: %v", err)
+			}
+		})
+	}
+}
+
+func TestSavedReviewAcceptanceUsesEvidenceInsteadOfStopCode(t *testing.T) {
+	for _, code := range []string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT", "RECONTRACT"} {
+		t.Run(code, func(t *testing.T) {
+			db, ledger, request, acceptance := savedReviewAcceptanceFixture(t)
+			if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+				flow, _ := state.Graph.ReviewFlow(acceptance.FlowID)
+				flow.StopCode = code
+				storeFlow(state, flow)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := db.LoadWorkspace()
+			preview, err := AcceptSavedReview(t.Context(), db, ledger, acceptance, request.Configuration, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			acceptance.ExpectedHash = preview.Hash
+			if _, err := AcceptSavedReview(t.Context(), db, ledger, acceptance, request.Configuration, false); err != nil {
+				t.Fatal(err)
+			}
+			after, err := db.LoadWorkspace()
+			if err != nil || after.Records.VerifyReviewAcceptances(after.Graph) != nil {
+				t.Fatal("acceptance audit rejected:", err)
+			}
+			if !reflect.DeepEqual(before.Records.Events, after.Records.Events) ||
+				!reflect.DeepEqual(before.Records.Budgets, after.Records.Budgets) ||
+				!reflect.DeepEqual(before.Graph.Dispatches, after.Graph.Dispatches) {
+				t.Fatal("acceptance changed receipts, usage or execution")
+			}
+		})
+	}
+}
+
 func savedReviewAcceptanceFixture(t *testing.T) (*store.Store, string, ReviewFlowRequest, ReviewAcceptanceRequest) {
 	t.Helper()
 	db, ledger, request, coder := packetReviewSuccessorFixture(t, core.OutputModeWorktreeTreeSnapshot)

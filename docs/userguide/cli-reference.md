@@ -690,7 +690,7 @@ version 2 の提出・ホスト検証・成果物入力検証には、有効な�
 
 #### 停止後の保存済みレビュー結果の受理
 
-`workflow accept-saved-review` は、保存済み実装結果をレビューする Flow の、受理記帳だけを行う操作である。新しい Flow・Dispatch・モデル session を作らず、検証 command も再実行しない。対象は `continueFromDispatchId` を持つツリースナップショット形式で、Dispatch が成功した Reviewer の1件だけ、判定が `APPROVE`、指摘・阻害事項が0件の `STOPPED / SAFETY_STOP` に限る。特定の不具合のエラー文との一致は要求せず、保存した停止・HOLD・結果・対象・承認の証拠で判定する。予算停止、取消、通常の修正フローや未検証結果を合格にする操作ではない。
+`workflow accept-saved-review` は、保存済み実装結果をレビューする Flow の、受理記帳だけを行う操作である。新しい Flow・Dispatch・モデル session を作らず、検証 command も再実行しない。対象は `continueFromDispatchId` を持つツリースナップショット形式で、Dispatch が成功した Reviewer の1件だけ、判定が `APPROVE`、指摘・阻害事項が0件の `STOPPED` に限る。停止 code や特定の不具合のエラー文との一致は要求せず、保存した停止・HOLD・結果・対象・承認の証拠で判定する。承認済み実行枠の超過、正の利用額上限に必要な usage evidence の欠落・不完全は拒否する。取消済み指示、通常の修正フローや未検証結果を合格にする操作ではない。
 
 配布物の照合、必要な provenance policy の登録、`ready` の確認後、同じ設定環境で次の承認ファイルを用意する。これは保存結果の受理だけの明示承認であり、実行・予算・公開の承認ではない。`actor`・`source` は利用者の判断と出典を記録するもので、認証用の資格情報ではない。
 
@@ -1375,8 +1375,9 @@ hash だけの引継ぎや、未保存の思考の復元を約束しない。
 導入、preview、期限判断、下位契約、計画をそれぞれ別の承認質問にしない。
 新期限の一括承認を待つ間、新たなモデルは起動しない。
 
-未開始の検証済み成果物 Reviewer は、`SAFETY_STOP` に加え、
-`BUDGET_STOP` と `BUDGET_LIMIT` からも同じ整合・後続作成を利用できる。
+未開始と正式停止済みの検証済み成果物 Reviewer は、停止 code の許可一覧に依存せず、
+保存状態と実行証拠が一致すれば同じ入力の整合・後続作成を利用できる。
+`RECONTRACT` で取消した未開始 Reviewer の入力検証再利用も同じ条件で扱う。
 期限が過ぎて runner がなければ、`workflow advance --id FLOW_ID` が
 モデルなしで正式な期限停止を保存する。非ゼロ終了を成功へ読み替えず、
 保存した停止理由と未開始状態を確認してから一括 preview を行う。

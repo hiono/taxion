@@ -64,7 +64,7 @@ func (r Records) VerifyReviewAcceptances(graph core.TaskGraph) error {
 			!recordHash(audit.PreviewHash) ||
 			err != nil || resultHash != audit.ResultHash || review.InstructionHash != audit.InstructionHash ||
 			review.Status != core.DispatchSucceeded || review.Result == nil || review.Result.ReviewVerdict != "APPROVE" ||
-			prior.Status != "STOPPED" || prior.StopCode != "SAFETY_STOP" || prior.Reason == "" ||
+			prior.Status != "STOPPED" || prior.Reason == "" ||
 			!prior.HandoffHeld() || prior.RunnerID != "" || len(prior.DispatchIDs) != 1 ||
 			prior.DispatchIDs[0] != review.ID || prior.SourceDispatchID == "" ||
 			task.Status != core.Completed || task.TargetSHA != review.Result.OutputSHA ||

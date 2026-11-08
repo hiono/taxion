@@ -180,7 +180,7 @@ process liveness or log timestamps. Monitoring grants no new stop/restart budget
 
 ## Failed artifact validation
 
-For FAILED artifact validation with dispatchIds: [], STOPPED/SAFETY_STOP and no
+For FAILED artifact validation with dispatchIds: [], STOPPED and no
 runner, preserve the failed receipt and both input identities; do not retry.
 Create a separate-worktree DRAFT normal CODER/REVIEWER successor with
 supersedes=FAILED_TASK_ID and createdFrom=flow:FAILED_FLOW_ID; retain baselineSha,

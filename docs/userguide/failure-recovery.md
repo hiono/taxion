@@ -201,8 +201,9 @@ runtime `Start` を試みる前の準備・出力先・runtime 構築の失敗�
 
 ### Dispatch がない入力検証失敗からの修正用後続
 
-対象は `artifactSource` Flow の `STOPPED / SAFETY_STOP`、`HOLD`、
+対象は `artifactSource` Flow の `STOPPED`、`HOLD`、
 `artifact.validation.status: FAILED`、`dispatchIds: []`、runner 解放済みの場合に限る。
+停止 code の列挙漏れだけでは拒否しない。失敗 receipt と入力の一致、停止・所有権の照合は維持する。
 `workflow show --id OLD_FLOW_ID` で保存状態を読み、検証コマンドの process も停止していることを確認する。
 コマンドは外部 process の消滅を証明しない。`RUNNING` のまま中断した検証を失敗確定として流用しない。
 既存の明示 `--store` を全操作で維持する。

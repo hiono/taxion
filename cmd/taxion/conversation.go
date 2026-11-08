@@ -191,7 +191,7 @@ Exception: a stopped artifactSource Flow with FAILED input validation and
 dispatchIds: [] requires target to be OMITTED, not null placeholders, an empty
 object or a fabricated Dispatch. Do not call workflow feedback-target for it.
 The proposal must contain the automatically bound artifact-predecessor decision.
-The exact terminal STOPPED/SAFETY_STOP, handoff hold, released runner, failure
+The exact terminal STOPPED state, handoff hold, released runner, failure
 receipt and artifact identity are rechecked. Both worktrees must preserve the
 same baseline, targetSha, targetTreeSha and targetChangedFiles before approval.
 This strengthened receipt binding requires this CLI, not an unchanged RC5 binary;
