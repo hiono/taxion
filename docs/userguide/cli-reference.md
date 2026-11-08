@@ -903,8 +903,8 @@ Dispatch 結果の `nextTransition` は TaskStatus であり、次の作業を�
 ### 受理済み Coder 出力からのレビュー継続
 
 対象は通常 Flow の受理済み `SUCCEEDED` Coder と、その直後の未開始 `ISSUED` Reviewer である。
-Flow は `STOPPED`、`HOLD`、runner なし、停止 code は `SAFETY_STOP`、`BUDGET_STOP`、
-`BUDGET_LIMIT` のいずれかでなければならない。ACK・実行開始・session・runtime receipt・結果がある
+Flow は `STOPPED`、`HOLD`、runner なしでなければならない。停止 code の許可一覧では判定しない。
+ACK・実行開始・session・runtime receipt・結果がある
 Reviewer は対象外である。記録がないことだけでは、未送信や無課金を証明できない。
 
 全操作で既存の明示 `--store` を維持する。最初に次の読取りで旧 Flow、Task、Dispatch、
@@ -1380,7 +1380,8 @@ hash だけの引継ぎや、未保存の思考の復元を約束しない。
 期限が過ぎて runner がなければ、`workflow advance --id FLOW_ID` が
 モデルなしで正式な期限停止を保存する。非ゼロ終了を成功へ読み替えず、
 保存した停止理由と未開始状態を確認してから一括 preview を行う。
-通常の初回 Coder の整合条件は `SAFETY_STOP` のままである。
+初回 Coder と未開始 Reviewer の取消では、停止 code の列挙漏れだけでは拒否しない。
+旧期限が過ぎても取消は旧 Flow を再開・延長せず、不明な配送・利用量を保持する。
 
 入力検証 `PASSED` 後に準備失敗した最初の持込み成果物 Reviewer も整合対象となる。
 管理済みレビュー worktree がある場合は、元候補との共通 Git repository、正確な場所の登録、
@@ -1399,7 +1400,7 @@ binary や skill の更新だけで期限・予算・後続実行は承認され
 
 合格した入力検証 stage は再実行せず、元 receipt と実施時刻を `artifact.validationSourceFlowId` 付きで保持する。Reviewer 結果受理時の既存検証は別に実施する。設定・候補・検証コマンド・権限の変更は拒否する。レビュー用 worktree を事前作成せず、衝突した旧場所は保全したまま新しい場所を Controller に作らせる。詳細は [ADR-0058](../develop/adr/0058-recover-unstarted-artifact-review.md) を参照する。
 
-開発版の `workflow reconcile-stopped` は、`STOPPED / SAFETY_STOP`・`HOLD` の Flow と、開始記録のない初回 snapshot Coder の `ISSUED` Dispatch を整合させる。明示的な同じ `--store` を維持する。次は形式の例であり、実際の確認や承認を表さない。
+開発版の `workflow reconcile-stopped` は、`STOPPED`・`HOLD` の Flow と、開始記録のない初回 snapshot Coder の `ISSUED` Dispatch を整合させる。停止 code は許可一覧にしない。入力は明示 snapshot または対象欄が空の baseline-only で、後者では元 worktree の clean baseline を検査する。明示的な同じ `--store` を維持する。次は形式の例であり、実際の確認や承認を表さない。
 
 ```json
 {
@@ -1422,7 +1423,7 @@ taxion --store /explicit/workspace/ledger.json workflow reconcile-stopped --file
 
 preview は `version:1`、`stateChanged:false`、`inputContractHash`、`inputTreeSha`、`inputOrigin:"approved-predecessor-input-contract"`、`deliveryStatus:"unknown"`、`usageStatus:"unavailable"`、予定遷移と `hash` を返す。適用は同じ状態と判断を再照合し、取消・Task の `BLOCKED` 遷移・監査追記を一括保存して `stateChanged:true` を返す。重複適用や変更したハッシュは拒否する。元の Flow・停止理由・承認・期限・予算は維持する。外部処理の停止や未配信・無課金を証明する操作ではない。
 
-後続入力は元の承認済み tree であり、新成果ではない。同一 repository の別 worktree に同一の commit・tree・変更 path を保全し、新しい `conversation intake` の Task に `createdFrom:"flow:stopped-flow"` と `supersedes` を設定する。intake request と `conversation confirm` request の両方に同じ `reconciliationHash` を渡す。confirm には新提案の `expectedHash`、`replacesFlow`、取消後に観測した正確な `target`、新しい設定承認も必要になる。対象が変われば拒否する。READY への確認は実行開始ではなく、承認束・委譲・工程計画と利用量を含む実行前検査は別途必要である。
+後続入力は元の承認済み tree または clean baseline であり、新成果ではない。baseline-only では `inputTreeSha` と対象欄は空のまま保持する。同一 repository の別 worktree に同一の commit・tree・変更 path を保全し、新しい `conversation intake` の Task に `createdFrom:"flow:stopped-flow"` と `supersedes` を設定する。intake request と `conversation confirm` request の両方に同じ `reconciliationHash` を渡す。confirm には新提案の `expectedHash`、`replacesFlow`、取消後に観測した正確な `target`、新しい設定承認も必要になる。対象が変われば拒否する。READY への確認は実行開始ではなく、承認束・委譲・工程計画と利用量を含む実行前検査は別途必要である。
 
 session・開始・結果・runtime receipt がある場合、入力が変わった場合、他の実行が稼働中の場合には使えない。人間の確認ができない場合も停止を維持する。通常取消だけではこの入力継承の根拠にならない。手順の判断基準は[失敗からの復旧](failure-recovery.md#flow-が停止している)を参照する。
 

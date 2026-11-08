@@ -267,8 +267,11 @@ normal host validation, runtime close, managed-worktree release and result stora
 Recover ownership only after that result. Never resend, reset usage, increase
 maxRepairs or treat accepted REQUEST_CHANGES as product approval.
 Do not replay host commands when validation started without a durable validated result.
-For a held SAFETY_STOP with only its first issued snapshot-input Coder and no
+For a held STOPPED Flow with only its first issued snapshot-input Coder and no
 start/session/result, workflow reconcile-stopped can preview a human decision.
+Stop codes are not an authorization allowlist. Baseline-only input is supported
+only when the original and successor worktrees preserve the exact clean baseline.
+Cancellation does not restart or extend an expired Flow.
 Require execution-quiescence evidence, acceptance of unknown delivery and the exact
 preview hash before cancellation. It preserves the old stop and approved INPUT,
 not new Coder output or proof of zero usage. A distinct-worktree successor needs

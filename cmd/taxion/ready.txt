@@ -288,8 +288,11 @@ in the same transaction. Do not ask for the same contract approval again merely
 to create a different record format. Verified-legacy graphs are not migrated.
 Changing a confirmed contract requires a new Task and approval, not reuse of the old hash's approval.
 
-For STOPPED/SAFETY_STOP with HOLD and only the first issued snapshot-input Coder,
+For STOPPED with HOLD and only the first issued snapshot-input Coder,
 workflow reconcile-stopped --file JSON --preview checks a narrow recovery route.
+Stop codes are not an authorization allowlist. Baseline-only input is supported
+with exact clean-baseline verification; cancellation does not restart or extend
+an expired Flow.
 Require actor/source/reason/evidence, noActiveExecutionConfirmed:true and
 acceptDeliveryUncertainty:true based on explicit human confirmation, not absent
 session records. Apply only with the exact returned hash as expectedHash. This
