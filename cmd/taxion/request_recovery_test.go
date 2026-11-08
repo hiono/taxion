@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"strings"
@@ -193,13 +194,15 @@ func TestRequestRecoveryLegacyCancelPreservesCheckpointUsageAndReleasesStore(t *
 
 func TestRequestRecoveryCancelRetainsPerCallUsageWithIncompleteNativeTotals(t *testing.T) {
 	for _, mode := range []string{"with-terminal", "without-terminal"} {
-		t.Run(mode, func(t *testing.T) {
-			testRequestRecoveryCancelUsage(t, mode == "with-terminal")
-		})
+		for _, partial := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/partial-calls-%t", mode, partial), func(t *testing.T) {
+				testRequestRecoveryCancelUsage(t, mode == "with-terminal", partial)
+			})
+		}
 	}
 }
 
-func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent bool) {
+func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls bool) {
 	t.Helper()
 	_, args := requestFixture(t)
 	var initialOutput bytes.Buffer
@@ -302,11 +305,24 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent bool) {
 			TotalNanoAIU: &amount, AICreditsStatus: &complete,
 		}},
 	}
-	usagePayload, err := json.Marshal(terminal.Usage[0])
-	if err != nil {
-		t.Fatal(err)
+	if partialCalls {
+		known, native, zeroCost := int64(10), int64(11), 0.0
+		nativeInput, nativeOutput := inputTokens*2, outputTokens*2
+		second := terminal.Usage[0]
+		second.TotalNanoAIU = &zeroCost
+		terminal.Usage[0].CacheReadTokens = &known
+		terminal.Usage = append(terminal.Usage, second)
+		turn.UsageTotals[0].InputTokens, turn.UsageTotals[0].OutputTokens = &nativeInput, &nativeOutput
+		turn.UsageTotals[0].CacheReadTokens, turn.UsageTotals[0].TotalNanoAIU = &native, &amount
+		turn.UsageTotals[0].AICreditsStatus = &complete
 	}
-	turn.Events = append([]runtime.Event{{Type: runtime.EventUsage, Payload: string(usagePayload)}}, turn.Events...)
+	for index := len(terminal.Usage) - 1; index >= 0; index-- {
+		data, err := json.Marshal(terminal.Usage[index])
+		if err != nil {
+			t.Fatal(err)
+		}
+		turn.Events = append([]runtime.Event{{Type: runtime.EventUsage, Payload: string(data)}}, turn.Events...)
+	}
 	var receipts []store.RequestRecord
 	evidence := []any{initial, session, send}
 	if terminalPresent {
@@ -342,19 +358,33 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent bool) {
 		"--reason", "reconcile only the stopped request", "--evidence", "specific-process-stop",
 		"--confirm-stopped", "--accept-uncertainty", "--resolution", "cancel",
 	}
-	mismatchedTokens := outputTokens - 1
+	originalOutput := turn.UsageTotals[0].OutputTokens
+	mismatchedTokens := *originalOutput - 1
 	turn.UsageTotals[0].OutputTokens = &mismatchedTokens
 	if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &bytes.Buffer{}); err == nil {
 		t.Fatal("cancellation accepted a known conflict in native usage totals")
 	}
-	turn.UsageTotals[0].OutputTokens = &outputTokens
+	turn.UsageTotals[0].OutputTokens = originalOutput
 	if !terminalPresent {
+		usagePayload := turn.Events[0].Payload
 		turn.Events[0].Payload = "private-invalid-usage"
 		if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &bytes.Buffer{}); err == nil ||
 			strings.Contains(err.Error(), "private-invalid-usage") {
 			t.Fatal("invalid saved usage was accepted or disclosed", err)
 		}
-		turn.Events[0].Payload = string(usagePayload)
+		turn.Events[0].Payload = usagePayload
+	}
+	if partialCalls && terminalPresent {
+		if delay := time.Until(turn.FinishedAt); delay > 0 {
+			time.Sleep(delay)
+		}
+		turn.ShutdownAt = time.Now().UTC()
+		continueArgs := append([]string(nil), recoveryArgs[:len(recoveryArgs)-3]...)
+		continueArgs = append(continueArgs, "--resolution", "continue", "--preview")
+		err := requestRecoveryCommand(continueArgs, &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "incomplete/conflicting usage") {
+			t.Fatal("ordinary continuation did not reject partial usage at the shared admission check", err)
+		}
 	}
 	var preview bytes.Buffer
 	if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &preview); err != nil {
@@ -462,8 +492,8 @@ func TestRecoveredQuestionPartialUsageCannotHideNativeConflict(t *testing.T) {
 			case "native-cost":
 				totals[0].TotalNanoAIU = &largerCost
 			}
-			if questionUsageTotalsConflict(calls, totals) {
-				t.Fatal("missing per-call usage was inferred as zero")
+			if matchesQuestionUsage(calls, totals) || questionUsageTotalsConflict(calls, totals) {
+				t.Fatal("missing per-call usage was inferred as zero or accepted as a complete match")
 			}
 		})
 	}

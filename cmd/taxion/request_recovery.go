@@ -970,7 +970,10 @@ func compareQuestionUsage(calls, totals []core.DispatchUsage) (bool, bool) {
 		}
 		if value.cacheReadKnown && total.CacheReadTokens == nil ||
 			value.cacheWriteKnown && total.CacheWriteTokens == nil ||
-			value.nanoAIUKnown != (total.TotalNanoAIU != nil) {
+			value.nanoAIUKnown != (total.TotalNanoAIU != nil) ||
+			total.CacheReadTokens != nil && !value.cacheReadComplete ||
+			total.CacheWriteTokens != nil && !value.cacheWriteComplete ||
+			total.TotalNanoAIU != nil && !value.nanoAIUComplete {
 			matches = false
 		}
 		if total.CacheReadTokens != nil && (*total.CacheReadTokens < value.cacheRead ||
