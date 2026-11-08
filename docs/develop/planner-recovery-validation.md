@@ -162,6 +162,26 @@ global費用のpartial状態を追加保持した後も全通常試験と対象r
 この追記時点では、
 新候補の独立全体品質・ADR判定、保護されたCI、正式配布と実運用再開は未完了である。
 
+`0e061f9` の第五Reviewerは原文と実候補の読取りに成功したが、
+判定は `REQUEST_CHANGES`、Controller結果は `FAILED`、ADR-0074は `FAIL` だった。
+入力段階のbuild・vet・全通常試験・diff checkは、同一treeで全て通過した。
+Reviewer結果受理段階の検証は未実行であり、入力検証をその代用としない。
+
+未解決の指摘は、SDKの累計費用がゼロの場合の観測消失、
+`ProviderModelMetrics` の観測消失と、待機通知後の一時的な空キューによる早期受理である。
+正規化で正の値だけを保持する条件とprovider/model集計を扱わない実装、
+終了後検査の非blocking分岐はソースで確認した。
+指摘されたゼロ集計の取消経路と遅延イベントの実運用再現は未確認である。
+SDKは費用の完全性も別に定義するため、ゼロを無料と推定したり、
+提供者やモデルが不明な集計に架空の識別子を補ったりして修正しない。
+
+同一のpinned scanner `betterleaks 1.9.0` による未公開commit全範囲の検査は、
+scannerだけのCPU affinityを限定した別試行でもcommit treeの期限で終了した。
+検出なしや全範囲PASSとして扱わず、ルール・期限・公開条件を緩和しない。
+第五審査の保存結果・native履歴・管理worktree・候補の未追跡ファイルを保全した。
+承認された追加審査枠は使い切っており、過去の合格を新候補へ転用しない。
+この時点で修正完了・公開資格は未達であり、PR、CI、merge、配布と実運用再開は未実施である。
+
 外部連携用の5環境変数を `0` にして、許可のない GitHub・GitLab・Copilot integration を実行しない。
 必要な最終確認は `go build ./...`、`go vet ./...`、`go test ./...`、
 変更した runtime package と CLI の race test、`gofmt`、生成 completion と `git diff --check`。
