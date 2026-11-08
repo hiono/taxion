@@ -82,6 +82,9 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 		if err := checkFlowApproval(state.Graph, task, request.Configuration); err != nil {
 			return err
 		}
+		if _, err := core.ADRComplianceRequirements(task.Acceptance, task.Specifications); err != nil {
+			return err
+		}
 		if request.MaxNanoAIU == 0 && !core.ExternalBudget(task.BudgetGuidance) {
 			return fmt.Errorf("taxion: omitted maxNanoAiu requires approved provider billing or account guidance with reset-daily allocation")
 		}

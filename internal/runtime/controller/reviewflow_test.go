@@ -158,6 +158,11 @@ func reviewFlowFixtureWithValidations(t *testing.T, repo, outputMode string, gui
 		BudgetGuidance: core.CloneBudgetGuidance(guidance),
 	}
 	task.Decisions = append(task.Decisions, decisions...)
+	for _, decision := range decisions {
+		if decision.ID == "synthetic-adr-not-applicable" {
+			task.Acceptance = append(task.Acceptance, core.ADRNotApplicableCriterion, core.DocumentationAcceptance)
+		}
+	}
 	if err := graph.Track(task, "human", "authorize Task"); err != nil {
 		t.Fatal(err)
 	}
@@ -327,9 +332,19 @@ func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, ve
 			status := "PASS"
 			if verdict != "APPROVE" {
 				status = "FAIL"
+				if verdict == "BLOCKED" {
+					status = "BLOCKED"
+				}
 				result.Findings = []core.DispatchFinding{{Severity: "HIGH", Title: "Add missing acceptance test", File: "internal/app.go", Lines: "1", Evidence: []string{"test-report"}}}
 			}
-			result.Acceptance = []core.DispatchAcceptance{{Criterion: flow.Contract.Acceptance[0], Status: status, Evidence: []string{"test-report"}}}
+			for _, criterion := range flow.Contract.Acceptance {
+				evidence := []string{"test-report"}
+				if strings.HasPrefix(criterion, core.ADRCompliancePrefix) {
+					evidence = append(evidence, criterion)
+					result.Evidence = append(result.Evidence, criterion)
+				}
+				result.Acceptance = append(result.Acceptance, core.DispatchAcceptance{Criterion: criterion, Status: status, Evidence: evidence})
+			}
 		}
 		payload := mustFlowJSON(t, result)
 		if base.bound {

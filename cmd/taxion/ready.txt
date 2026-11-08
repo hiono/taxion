@@ -74,6 +74,17 @@ identifiers describe publication evidence, not a general Writer execution API.
 The following sections cover initial inspection, requests and approval, execution,
 results and recovery. JSON examples illustrate schemas, not actual values or approval.
 
+Before proposal approval, bind applicable ADR originals in task.specifications
+and their exact adr-compliance:<specification-id>:<SpecificationHash> criteria
+in task.acceptance. Source ingestion and runtime-use approval remain separate.
+Only an explicitly approved non-applicability claim may use
+adr-compliance:not-applicable; the independent Reviewer must supply evidence
+and explain its reason in workReport. Do not invent it for missing sources.
+Contract gate status bound fixes the review basis, not ADR correctness.
+Execution/publication gates require the formal same-candidate independent result:
+violations fail, incomplete checks block. Legacy approvals are not rewritten,
+and gate resume is not ADR-quality acceptance.
+
 ### Supplied input without implementation
 
 For supplied unverified code, use a READY snapshot Task and workflow

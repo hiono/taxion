@@ -49,6 +49,7 @@ type GateReport struct {
 	FlowID                   string               `json:"flowId,omitempty"`
 	Verdict                  string               `json:"verdict"`
 	Hashes                   GateHashes           `json:"hashes"`
+	ADRCompliance            *ADRGateCheck        `json:"adrCompliance,omitempty"`
 	BlockingConditions       []GateCondition      `json:"blockingConditions"`
 	Drifts                   []core.ApprovalDrift `json:"drifts,omitempty"`
 	AuthorizationImpact      string               `json:"authorizationImpact,omitempty"`
@@ -106,9 +107,12 @@ func ContractGateReport(graph core.TaskGraph, taskID string, configuration ...co
 		report.blocked("task-not-ready", "Task must be READY before execution entry")
 		return report, nil
 	}
+	checkADRContract(&report, task)
 	switch graph.ApprovalRequirement() {
 	case core.ApprovalVerifiedLegacy:
-		report.NextAuthorizedTransition = "execute within the verified legacy contract"
+		if report.Verdict == GateVerdictPass {
+			report.NextAuthorizedTransition = "execute within the verified legacy contract"
+		}
 		return report, nil
 	case core.ApprovalInvalidOrAmbiguous:
 		report.AuthorizationImpact = core.ImpactInvalid
@@ -138,7 +142,9 @@ func ContractGateReport(graph core.TaskGraph, taskID string, configuration ...co
 		report.Hashes.Proposal = bundle.ProposalHash
 		report.Hashes.Record = bundle.RecordHash
 		report.Hashes.Bundle = bundle.BundleHash
-		report.NextAuthorizedTransition = "start or advance the review flow"
+		if report.Verdict == GateVerdictPass {
+			report.NextAuthorizedTransition = "start or advance the review flow"
+		}
 		return report, nil
 	}
 	var entry *core.EntryCheckError
@@ -189,6 +195,7 @@ func ExecutionGateReport(graph core.TaskGraph, flowID string) (GateReport, error
 	}
 	report := newGateReport(GateExecution, flow.TaskID)
 	report.FlowID = flow.ID
+	checkADRReview(&report, graph, flow)
 	if flow.Status == "STOPPED" {
 		report.fail("flow-stopped", "flow is stopped; saved findings require a decision")
 		return report, nil
@@ -238,19 +245,23 @@ func PublicationGateReport(graph core.TaskGraph, flowID string) (GateReport, err
 	report := newGateReport(GatePublication, execution.TaskID)
 	report.FlowID = execution.FlowID
 	report.Hashes = execution.Hashes
+	report.ADRCompliance = execution.ADRCompliance
 	report.BlockingConditions = append(report.BlockingConditions, execution.BlockingConditions...)
 	report.Verdict = execution.Verdict
-	if execution.Verdict != GateVerdictPass {
-		report.NextRequiredApproval = execution.NextRequiredApproval
-		return report, nil
-	}
 	flow, _ := graph.ReviewFlow(flowID)
 	input, err := core.ReviewInputFromDecisions(flow.Contract.Decisions)
 	if err != nil {
+		if execution.Verdict != GateVerdictPass {
+			return report, nil
+		}
 		return GateReport{}, err
 	}
 	if input != nil && input.Purpose == "diagnostic" {
 		report.blocked("diagnostic-not-product-approval", "completed diagnosis is not product acceptance or publication authority; publishing the diagnostic report needs its own exact-content authorization")
+		return report, nil
+	}
+	if execution.Verdict != GateVerdictPass {
+		report.NextRequiredApproval = execution.NextRequiredApproval
 		return report, nil
 	}
 	task, ok := graph.GraphTask(execution.TaskID)

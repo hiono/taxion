@@ -146,7 +146,7 @@ func validateReviewerResult(d GraphDispatch, result *DispatchResult) error {
 	if result.ReviewVerdict == "REQUEST_CHANGES" && allPassed && len(result.Findings) == 0 {
 		return graphError("Reviewer requested changes without a failed criterion or finding")
 	}
-	return nil
+	return validateADRReviewerAcceptance(d, result)
 }
 
 const StructuredResultInstructionVersion = 5
@@ -640,6 +640,9 @@ func dispatchInstruction(g TaskGraph, task GraphTask, id string, relationship Di
 		return DispatchInstruction{}, err
 	}
 	if err := CheckSpecificationUse(task.Specifications, "runtime"); err != nil {
+		return DispatchInstruction{}, err
+	}
+	if _, err := ADRComplianceRequirements(task.Acceptance, task.Specifications); err != nil {
 		return DispatchInstruction{}, err
 	}
 	if CheckReviewValidationCommands(task.Decisions, task.ValidationCommands) != nil {

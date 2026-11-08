@@ -54,6 +54,10 @@ Controller は、承認済み操作を現在の状態から適用できる型付
 Accepted 2026-11-08 by explicit user decision. 取消・後続入力・保存結果受理の停止 code 判定を是正。
 全認可入口の移行、独立レビューとリリースは未完了。
 
+適用 ADR と独立レビューの根拠をゲートへ固定する追加契約は
+[ADR-0076](0076-bind-adr-compliance-to-independent-gates.md) に記録する。
+本 ADR の Decision を弱めて既存の逸脱を正当化しない。
+
 初回の実装対象は未開始 Dispatch の `workflow reconcile-stopped` と保存監査の照合、
 承認済み baseline-only 入力の後続検証である。停止 code による許可一覧を初回 Coder と
 未開始 Reviewer の分類から除去し、Graph schema、契約と入力、実行・配送の証拠を検査する。

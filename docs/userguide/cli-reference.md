@@ -637,6 +637,41 @@ Task の `validationCommands` は Controller の検査操作を認可する。�
 `taxion records proposal|approve|send|cancel|reconcile|show|finding` は承認済み GitHub / GitLab 公開と出典付き失敗分析を管理する。承認は正確な対象・account・content hash とプロジェクトの Communication Profile を対応付ける。`TAXION_COMMUNICATION_PROFILES` で対象プロジェクトの設定ファイルを明示し、`update.statement.at` に記述時点、`update.statement.claims` に参照 URL とその状態を指定する。未設定・対象不一致・未確認の参照は送信できない。形式と更新時の再承認は[公開文章の検証手順](../develop/public-communication-validation.md#プロジェクト設定と-forge-共通検査)を参照する。送信不明は停止済み sender の claim 照合まで明示して保つ。`taxion git check-range --base <SHA>
 --head <SHA> --scanner <PATH>` は公開前に未公開の全 commit tree と message を scan する。[実行記録](execution-records.md)を参照する。
 
+#### ADR適合の確認
+
+`gate contract|execution|publication` は、承認済み Task の ADR criterion と独立 Reviewer の判断を確認する。
+`--json` の `adrCompliance` と通常表示の `ADR compliance` に確認状態を出す。
+Contract の `bound` は確認対象を固定した状態であり、候補の適合合格ではない。
+必要な確認の未宣言・未完了は `blocked`、根拠の不正や正式に確認した違反は `fail` となり、
+既存の非ゼロ exit code を返す。未確認を `pass` として扱わない。
+
+適用する ADR の原文を既存の `specifications` で承認し、
+その `SpecificationHash` を使った `adr-compliance:<specification-id>:<hash>` を
+新提案の `acceptance` に入れる。既存の source ingestion・runtime・publication の許可はそれぞれ別に必要となる。
+次は形式だけの例であり、実際の source・hash・承認ではない。
+
+```json
+{
+  "acceptance": ["adr-compliance:ADR-0075:<exact-SpecificationHash>"]
+}
+```
+
+`<exact-SpecificationHash>` は `sha256:` prefix を含む実際の値へ置き換える。
+ファイル単体の document hash では代用しない。
+
+独立 Reviewer は、同じ完全な criterion を `acceptance[].criterion` と evidence に含め、
+確認した原文と候補の具体的な箇所を他の evidence として残す。
+一般的な test 成功や Coder の自己申告では代用しない。
+結果の未保存、別の候補、source の差替え、確認不能では公開側へ進めない。
+ADR 適合 `pass` だけで品質・公開承認・期限・予算を解除することもない。
+
+適用する ADR がない場合だけ、提案へ `adr-compliance:not-applicable` を明示する。
+合格には独立 Reviewer の evidence と、理由を述べた `workReport` が必要となる。
+資料の未取得や確認不足を非適用へ付け替えない。
+旧 Task・承認・結果は自動変更せず、必要な新提案は既存の正式な差分承認で扱う。
+`gate resume` の成功は ADR 適合合格ではない。
+契約、制約と rollback は [ADR-0076](../develop/adr/0076-bind-adr-compliance-to-independent-gates.md) を参照する。
+
 #### 工程計画と保存観測
 
 `workflow plan --file flow.json` は、READY Task と実行要求から工程計画を読取り専用で作る。実行要求は `workflow start` と共通で、新しい計画には `stageBudget:{"version":2}` を指定する。返却する `stateChanged` は `false`。version 2 の `stagePlan.hash` は対象・設定・認可・期限・実使用量上限・回数・役割別ソフト上限を固定し、助言である時間/native 見積もりと抽出根拠は含めない。version 1 は従来どおり見積もりも含む。対象や認可外枠、計画の版が変われば古いハッシュで開始できない。

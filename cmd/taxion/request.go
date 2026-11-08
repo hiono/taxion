@@ -98,6 +98,11 @@ Check every approved acceptance criterion and the actual changes. Do not modify
 files, create commits or expand scope. Include the work-report evidence identifier
 and the actual report text in workReport, not a session file path. Report the verdict,
 acceptance decisions and findings using the saved structured result.
+For adr-compliance: criteria, independently compare the pinned ADR original
+with the candidate and cite concrete evidence. Include the complete criterion
+in both its acceptance evidence and the result evidence, for PASS, FAIL or BLOCKED.
+For adr-compliance:not-applicable, explain the independent reason in workReport;
+missing originals or incomplete checks are not proof of non-applicability.
 Do not invent tests: the controller executes the approved commands. Inspect the
 exact target tree from the contract, but do not include outputTreeSha: the controller
 sets it. Approve only supported conclusions.`

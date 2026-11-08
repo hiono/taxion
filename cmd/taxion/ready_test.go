@@ -137,6 +137,7 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 	intake.Task.Worktree = root
 	intake.Task.Branch = gitTest(t, root, "branch", "--show-current")
 	intake.Task.BaselineSHA = gitTest(t, root, "rev-parse", "HEAD")
+	intake.Task.Acceptance = append(intake.Task.Acceptance, core.ADRNotApplicableCriterion)
 	confirmation.Selection = resolved.Config
 	confirmation.ConfigurationDecisionID = resolved.Config.Execution.ApprovalRef + "@task:" + intake.Task.ID
 	flow.Repository = intake.Task.Repo
@@ -254,9 +255,15 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 					result.WorktreeChanged = &changed
 					result.ReviewVerdict, result.NextTransition = "APPROVE", core.Approved
 					result.Findings = []core.DispatchFinding{}
+					result.WorkReport = "This synthetic README fixture has no applicable architecture decision."
 					for _, criterion := range dispatch.Instruction.Acceptance {
+						evidence := []string{"work-report"}
+						if strings.HasPrefix(criterion, core.ADRCompliancePrefix) {
+							evidence = append(evidence, criterion)
+							result.Evidence = append(result.Evidence, criterion)
+						}
 						result.Acceptance = append(result.Acceptance, core.DispatchAcceptance{
-							Criterion: criterion, Status: "PASS", Evidence: []string{"work-report"},
+							Criterion: criterion, Status: "PASS", Evidence: evidence,
 						})
 					}
 				}
