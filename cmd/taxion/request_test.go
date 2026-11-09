@@ -21,6 +21,7 @@ import (
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/runtime/controller"
+	"github.com/hiono/taxion/internal/runtime/copilot"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -313,6 +314,10 @@ func TestRequestResumesApprovedFlowWithoutRepeatingCoder(t *testing.T) {
 	testApprovedRequest(t, true)
 }
 
+func TestRequestClarificationOptInReachesOwnedRoleFactoryAndResume(t *testing.T) {
+	testApprovedRequest(t, true, "clarification")
+}
+
 func TestRequestAccountQuotaOmitsNativeCeilingAndResumes(t *testing.T) {
 	testApprovedRequest(t, true, "account")
 }
@@ -405,6 +410,10 @@ func testApprovedRequest(t *testing.T, resume bool, externalMode ...string) {
 	root, args := requestFixture(t)
 	accountOnly := len(externalMode) != 0 && externalMode[0] == "account"
 	providerOnly := len(externalMode) != 0 && externalMode[0] == "provider"
+	clarification := len(externalMode) != 0 && externalMode[0] == "clarification"
+	if clarification {
+		args = append(args, "--clarification-intake")
+	}
 	if accountOnly || providerOnly {
 		var defaults []string
 		for index := 0; index < len(args); index++ {
@@ -457,6 +466,9 @@ func testApprovedRequest(t *testing.T, resume bool, externalMode ...string) {
 		if !strings.Contains(strings.Join(runArgs, " "), "--builtin-prompts") {
 			t.Fatal("request required user-created role prompts")
 		}
+		if slices.Contains(runArgs, "--clarification-intake") != clarification {
+			t.Fatal("request or resume lost the explicit clarification choice", runArgs)
+		}
 		db, _, err := loadWorkspace()
 		if err != nil {
 			return err
@@ -484,6 +496,27 @@ func testApprovedRequest(t *testing.T, resume bool, externalMode ...string) {
 			dispatch, err = selectDispatchConfiguration(db, dispatch)
 			if err != nil {
 				return nil, err
+			}
+			if clarification {
+				cfg := copilot.Config{
+					Role: dispatch.Recipient, SystemPrompt: "approved role", CLIPath: "/bin/true",
+					WorkingDirectory: dispatch.Instruction.Worktree, BaseDirectory: t.TempDir(),
+					EnableClarification: true,
+				}
+				bound, err := newDispatchWorker(ctx, db, dispatch, cfg, false, false, "")
+				if err != nil {
+					return nil, err
+				}
+				defer bound.Close()
+				cfg.EnableClarification = false
+				plain, err := newDispatchWorker(ctx, db, dispatch, cfg, false, false, "")
+				if err != nil {
+					return nil, err
+				}
+				defer plain.Close()
+				if bound.ConfigHash() == plain.ConfigHash() {
+					t.Fatal("actual Role factory did not bind the host intake tool to its configuration")
+				}
 			}
 			received, err := controller.RenderDispatchContext(db, dispatch, true)
 			if err != nil {

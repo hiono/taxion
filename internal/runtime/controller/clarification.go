@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -65,6 +66,13 @@ type ClarificationReceipt struct {
 
 type clarificationKey struct{}
 
+type ClarificationOrigin struct {
+	SessionID   string `json:"sessionId"`
+	OperationID string `json:"operationId"`
+	Owner       string `json:"owner"`
+	RunnerID    string `json:"runnerId"`
+}
+
 // These are planning receipts, not authorization or executable instructions.
 type Clarification struct {
 	Version   int                  `json:"version"`
@@ -77,6 +85,7 @@ type Clarification struct {
 	State     string               `json:"state"`
 	Answer    *ClarificationAnswer `json:"answer,omitempty"`
 	At        time.Time            `json:"at"`
+	Origin    *ClarificationOrigin `json:"origin,omitempty"`
 }
 
 func ObserveClarification(db *store.Store, taskID, dispatchID string) (ClarificationContext, error) {
@@ -167,6 +176,16 @@ func clarificationContext(state store.Workspace, taskID, dispatchID string) (Cla
 func RequestClarification(db *store.Store, input ClarificationRequest) (Clarification, error) {
 	var result Clarification
 	err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		var err error
+		result, err = requestClarification(state, input, nil)
+		return err
+	})
+	return result, err
+}
+
+func requestClarification(state *store.Workspace, input ClarificationRequest, origin *ClarificationOrigin) (Clarification, error) {
+	var result Clarification
+	err := func() error {
 		context, err := clarificationContext(*state, input.TaskID, input.DispatchID)
 		if err != nil {
 			return err
@@ -260,6 +279,17 @@ func RequestClarification(db *store.Store, input ClarificationRequest) (Clarific
 		if err != nil {
 			return err
 		}
+		if origin != nil {
+			contract := input
+			contract.ID, contract.BasisHash, contract.Deadline = "", context.ScopeHash, time.Time{}
+			signature, err = core.CanonicalSHA256(struct {
+				Request ClarificationRequest
+				Origin  ClarificationOrigin
+			}{contract, *origin})
+			if err != nil {
+				return err
+			}
+		}
 		history, err := clarifications(*state)
 		if err != nil {
 			return err
@@ -269,6 +299,19 @@ func RequestClarification(db *store.Store, input ClarificationRequest) (Clarific
 				return fmt.Errorf("taxion: clarification ID already binds different question evidence")
 			}
 			if saved.Signature == signature {
+				if origin != nil && (saved.Origin == nil || *saved.Origin != *origin ||
+					saved.Request.TaskID != input.TaskID || saved.Request.DispatchID != input.DispatchID ||
+					saved.Request.Role != input.Role) {
+					return fmt.Errorf("taxion: clarification replay belongs to a different execution origin")
+				}
+				if origin != nil {
+					prior, current := saved.Request, input
+					prior.ID, prior.BasisHash, prior.Deadline = "", context.ScopeHash, time.Time{}
+					current.ID, current.BasisHash, current.Deadline = "", context.ScopeHash, time.Time{}
+					if !reflect.DeepEqual(prior, current) {
+						return fmt.Errorf("taxion: clarification replay differs from the original question contract")
+					}
+				}
 				if !now.Before(saved.Request.Deadline) {
 					return fmt.Errorf("taxion: saved clarification deadline expired; do not extend it through replay")
 				}
@@ -281,10 +324,10 @@ func RequestClarification(db *store.Store, input ClarificationRequest) (Clarific
 		}
 		result = Clarification{
 			Version: 1, Phase: "clarification.request", Request: input, Context: context,
-			Signature: signature, Route: route, Recipient: recipient, State: "OBSERVED", At: now,
+			Signature: signature, Route: route, Recipient: recipient, State: "OBSERVED", At: now, Origin: origin,
 		}
 		return appendClarification(state, result)
-	})
+	}()
 	return result, err
 }
 

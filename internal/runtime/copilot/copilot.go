@@ -50,6 +50,8 @@ type Config struct {
 	ManagedSearch         *runtime.ManagedSearch
 	ManagedReviewProgress *runtime.ManagedReviewProgress
 	EnableReviewProgress  bool
+	EnableClarification   bool
+	ManagedClarification  *runtime.ManagedClarification
 	Configuration         json.RawMessage
 	MaxAICredits          float64
 	ToolPolicy            *tools.Policy
@@ -204,7 +206,8 @@ func New(config Config) (*Adapter, error) {
 		}
 	}
 	if slices.Contains(config.AvailableTools, ManagedCommitToolName) || slices.Contains(config.AvailableTools, ManagedStageToolName) ||
-		slices.Contains(config.AvailableTools, ManagedSearchToolName) || slices.Contains(config.AvailableTools, ReviewProgressToolName) {
+		slices.Contains(config.AvailableTools, ManagedSearchToolName) || slices.Contains(config.AvailableTools, ReviewProgressToolName) ||
+		slices.Contains(config.AvailableTools, ClarificationToolName) {
 		return nil, fmt.Errorf("taxion: managed commit tool is reserved; enable it through the host binding")
 	}
 	if config.ManagedCommit != nil {
@@ -227,7 +230,7 @@ func New(config Config) (*Adapter, error) {
 		if config.ToolPolicy.HasBroker() {
 			if config.AuthorizeTools == nil || len(config.AvailableTools) != 0 ||
 				len(config.ToolPolicy.Skills)+len(config.ToolPolicy.Plugins) != 0 || config.ToolPolicy.RTK != nil ||
-				config.ManagedCommit != nil || config.ManagedSearch != nil || config.ManagedReviewProgress != nil {
+				config.ManagedCommit != nil || config.ManagedSearch != nil || config.ManagedReviewProgress != nil || config.ManagedClarification != nil {
 				return nil, fmt.Errorf("taxion: credential broker requires controller authorization and an operations-only role")
 			}
 			for _, tool := range config.ToolPolicy.MCP {
@@ -270,6 +273,16 @@ func New(config Config) (*Adapter, error) {
 		}
 		config.ManagedReviewProgress = &binding
 		config.AvailableTools = append(config.AvailableTools, ReviewProgressToolName)
+	}
+	if config.ManagedClarification != nil {
+		binding := *config.ManagedClarification
+		if config.Role != "CODER" && config.Role != "REVIEWER" ||
+			binding.DispatchID == "" || binding.ScopeHash == "" || binding.OperationID == "" ||
+			binding.Owner == "" || binding.FlowID == "" || binding.RunnerID == "" || binding.Request == nil {
+			return nil, fmt.Errorf("taxion: clarification requires a bound Role, operation owner, runner and host handler")
+		}
+		config.ManagedClarification = &binding
+		config.AvailableTools = append(config.AvailableTools, ClarificationToolName)
 	}
 	if len(config.ContextDocuments) != 0 {
 		if slices.Contains(config.AvailableTools, ReadContextToolName) {
@@ -359,6 +372,7 @@ func (a *Adapter) ConfigHash() string {
 		ManagedCommit          *runtime.ManagedCommit         `json:",omitempty"`
 		ManagedSearch          *runtime.ManagedSearch         `json:",omitempty"`
 		ManagedReviewProgress  *runtime.ManagedReviewProgress `json:",omitempty"`
+		ManagedClarification   *runtime.ManagedClarification  `json:",omitempty"`
 		ManagedCommitPolicy    string                         `json:",omitempty"`
 		Configuration          json.RawMessage                `json:",omitempty"`
 		MaxAICredits           float64                        `json:",omitempty"`
@@ -383,6 +397,7 @@ func (a *Adapter) ConfigHash() string {
 		ManagedCommit:          a.config.ManagedCommit,
 		ManagedSearch:          a.config.ManagedSearch,
 		ManagedReviewProgress:  a.config.ManagedReviewProgress,
+		ManagedClarification:   a.config.ManagedClarification,
 		ManagedCommitPolicy:    managedCommitPolicy,
 		Configuration:          a.config.Configuration,
 		MaxAICredits:           a.config.MaxAICredits,
@@ -881,6 +896,11 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 		}
 		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
 			a.config.ManagedReviewProgress != nil && permission.ToolName == ReviewProgressToolName &&
+			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
+			decision = &rpc.PermissionDecisionApproveOnce{}
+		}
+		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
+			a.config.ManagedClarification != nil && permission.ToolName == ClarificationToolName &&
 			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
 			decision = &rpc.PermissionDecisionApproveOnce{}
 		}

@@ -423,7 +423,7 @@ func cancelRequestOperation(id string, output io.Writer) (returnErr error) {
 
 func finishRequestExecution(ctx context.Context, db *store.Store, operation *store.Operation,
 	checkpoint *requestCheckpoint, runner func(context.Context, []string, io.Writer) error,
-	cli, base string, output io.Writer) (returnErr error) {
+	cli, base string, clarificationIntake bool, output io.Writer) (returnErr error) {
 	reported := false
 	defer func() {
 		if returnErr != nil && !reported {
@@ -442,9 +442,12 @@ func finishRequestExecution(ctx context.Context, db *store.Store, operation *sto
 		return err
 	}
 	defer cancel()
-	runErr := runner(controller.WithOperation(ctx, *operation), []string{"run", "--id", operation.FlowID, "--builtin-prompts",
-		"--max-ai-credits", fmt.Sprint(operation.SessionCreditLimit), "--cli", cli, "--base-directory", base},
-		&resourceApprovalOutput{output: output})
+	runArgs := []string{"run", "--id", operation.FlowID, "--builtin-prompts",
+		"--max-ai-credits", fmt.Sprint(operation.SessionCreditLimit), "--cli", cli, "--base-directory", base}
+	if clarificationIntake {
+		runArgs = append(runArgs, "--clarification-intake")
+	}
+	runErr := runner(controller.WithOperation(ctx, *operation), runArgs, &resourceApprovalOutput{output: output})
 	summary, err := json.Marshal(struct {
 		FlowID    string `json:"flowId"`
 		ErrorHash string `json:"errorHash,omitempty"`

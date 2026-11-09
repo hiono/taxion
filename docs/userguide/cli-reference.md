@@ -521,9 +521,25 @@ taxion conversation plan --task TASK --clarification QUESTION_ID \
 この場合、回答本体・usage・cleanup・所有権は従来の質問receiptで管理し、
 ClarificationはそのID・sequence・hashを参照する。回答参照の存在はcleanup成功や受理を意味しない。
 人間またはCoderの回答は外側のAgentまたは人間が明示的に渡す方式であり、
-実行中Roleからの自発的質問とCoderへの自動配信は未接続である。実モデルでの動作改善は未評価。
+Coderへの自動配信は未接続である。実モデルでの動作改善は未評価。
+
+Copilotの実行中Coder／Reviewerからの質問保存は、`request --clarification-intake` で
+明示的に有効にできる。保存したrequestの再開では、この選択も復元する。
+`workflow run|step|resume --clarification-intake` にも同じ入口があるが、
+保存済みrequestの実行operationとowner、Flow runnerが必要であり、単独Flowでは拒否する。
+OpenCodeとcredential brokerを使用するRoleでは、このオプションを使用できない。
+
+有効時は既存SDK host toolの `taxion_clarify` を登録する。Roleは質問ID、分類、原文、
+理由、不確実性、参照、回答形式、判断への影響、停止条件、期限を渡す。
+Task／Dispatch／session／ownerはモデルの推測で補わず、hostが保存済み実行と照合する。
+停止要求済みDispatch、停止・idle状態のsession、失効したowner、対象・証拠の変更は拒否する。
+質問原文は既存のcanonical receiptだけに保存し、toolは参照と `OBSERVED` を返す。
+同じ実行の再送は追記せず、同じIDでの原文変更や別ownerへの付け替えは拒否する。
+このtoolは回答の受理、実配信、HOLD、Runtime Stop、依存作業の自動停止・再開を行わない。
+Roleへの説明でも未回答に依存する作業を進めないよう求めるが、その行動を実モデルで検証していない。
+
 旧binaryへのrollbackでは、これらの新しいplanning phaseを処理できると仮定せず、
-未解決質問とreceiptを保持したprivate backupから判断する。
+今回追加したorigin metadataも含めて、未解決質問とreceiptを保持したprivate backupから判断する。
 
 ### 保存 Flow の監視と明示的な続行
 

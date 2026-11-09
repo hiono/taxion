@@ -209,6 +209,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	repairs := fs.Int("max-repairs", 1, "maximum repair turns after independent review")
 	cli := fs.String("cli", "", "Copilot CLI executable")
 	base := fs.String("base-directory", "", "Copilot state directory")
+	clarificationIntake := fs.Bool("clarification-intake", false, "opt into bound running-Role question observation through the Copilot host tool; no automatic continuation")
 	budgetGuidance := fs.String("budget-guidance", "", "new-request budget policy: provider (default declared no-overage contract), account (reset-daily), off or flow")
 	var paths stringListFlag
 	fs.Var(&paths, "context-path", "committed text file to send to Planner (repeatable; total up to 64 KiB)")
@@ -548,7 +549,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				}
 			}
 			terminalReported = true
-			return finishRequestExecution(signalCtx, db, &operation, &checkpoint, runner, *cli, *base, output)
+			return finishRequestExecution(signalCtx, db, &operation, &checkpoint, runner, *cli, *base, *clarificationIntake, output)
 		}
 	}
 	if resuming && checkpoint.PlannerStarted {
@@ -847,7 +848,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				return err
 			}
 			terminalReported = true
-			return finishRequestExecution(signalCtx, db, &operation, &checkpoint, runner, *cli, *base, output)
+			return finishRequestExecution(signalCtx, db, &operation, &checkpoint, runner, *cli, *base, *clarificationIntake, output)
 		}
 		if line == "" || strings.HasPrefix(line, "/") {
 			return fmt.Errorf("enter feedback in natural language, /approve or /quit")

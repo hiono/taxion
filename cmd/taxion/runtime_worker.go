@@ -7,6 +7,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"slices"
 
 	executionconfig "github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
@@ -54,6 +55,7 @@ func newRoleWorker(config copilot.Config) (configuredWorker, error) {
 		return copilot.New(config)
 	}
 	if config.MaxAICredits != 0 || config.ManagedCommit != nil || config.ManagedSearch != nil || config.EnableReviewProgress ||
+		config.EnableClarification || config.ManagedClarification != nil ||
 		config.CLIPath != "" || config.BaseDirectory != "" {
 		return nil, fmt.Errorf("runtime: OpenCode uses approved acpCommand/acpConfig; Copilot credit caps, CLI overrides, managed commit, managed SDK search and review progress are unsupported")
 	}
@@ -138,6 +140,48 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 	}
 	if config.ToolPolicy != nil && db == nil {
 		return nil, fmt.Errorf("taxion: approved tools require a saved workspace")
+	}
+	if config.EnableClarification {
+		if db == nil {
+			return nil, fmt.Errorf("runtime: clarification intake requires its saved operation")
+		}
+		state, err := db.LoadWorkspace()
+		if err != nil {
+			return nil, err
+		}
+		operation := state.Records.Operation
+		observed, err := controller.ObserveClarification(db, dispatch.TaskID, dispatch.ID)
+		if err != nil {
+			return nil, err
+		}
+		var flow core.ReviewFlow
+		if operation != nil {
+			flow, _ = state.Graph.ReviewFlow(operation.FlowID)
+		}
+		if operation == nil || operation.Owner == "" || operation.State != "RUNNING" ||
+			operation.Phase != "EXECUTION" || flow.ID == "" || flow.RunnerID == "" ||
+			!slices.Contains(flow.DispatchIDs, dispatch.ID) {
+			return nil, fmt.Errorf("runtime: clarification intake requires an owned executing operation and runner")
+		}
+		binding := runtime.ManagedClarification{
+			DispatchID: dispatch.ID, ScopeHash: observed.ScopeHash,
+			OperationID: operation.ID, Owner: operation.Owner, FlowID: flow.ID, RunnerID: flow.RunnerID,
+		}
+		binding.Request = func(ctx context.Context, sessionID string, body json.RawMessage) (json.RawMessage, error) {
+			bounded, cancel := context.WithCancel(hostContext)
+			stop := context.AfterFunc(ctx, cancel)
+			defer stop()
+			defer cancel()
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			control, err := controller.New(db, worker)
+			if err != nil {
+				return nil, err
+			}
+			return control.ObserveRoleClarification(bounded, binding, sessionID, body)
+		}
+		config.ManagedClarification = &binding
 	}
 	if config.ToolPolicy != nil {
 		config.AuthorizeTools = func(ctx context.Context, sessionID string) error {

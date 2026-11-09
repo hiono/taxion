@@ -717,3 +717,125 @@ index更新後に再実行し、結果をcommit本文へ記録する。
 実モデル比較、公開CI、本番store、機器間の実移送、全履歴secret scan、
 SDK未到着イベントの完全回収、Disconnect期限は未検証・未保証のままである。
 第五審査FAIL、第六審査・push・公開・配布・TKB3復旧の未承認状態を維持する。
+
+## 実行中Roleの質問取込み（2026-11-09、#283の限定単位）
+
+開始時は `fix/native-event-contract-083` の `321c607`、clean、未pushだった。
+親の `9afdf08` とその後の17ファイルの成果を保持した。
+他worktreeのdirty成果18件はread-onlyで確認し、変更していない。
+#283／#282／#228／#196／#189／#220／#90の最新本文・コメントを取得し、
+本文は前回取得分と一致した。Issueの完了条件を引継ぎ報告で置き換えていない。
+19:14 JSTの正規照会は20,850 requests、19:22 JSTは20,900 requestsだった。
+承認上限21,100、reserve 50、利用可能上限21,050、期限20:48:12 JSTを維持した。
+
+### 接続点と責務境界
+
+不足していたのは、既存の質問保存APIに実行中Roleのhost toolを接続する処理だった。
+新しい質問engineや保存領域を作らず、Copilotのmanaged tool登録を再利用した。
+経路は `request --clarification-intake` → 保存request引数 →
+`workflow run --clarification-intake` → `newDispatchWorker` →
+SDKの `taxion_clarify` handler → `Controller.ObserveRoleClarification` →
+共通の `requestClarification` → 既存planning `RequestRecord` である。
+requestのcheckpoint再開でも引数を復元する。既定では無効であり、
+OpenCodeとcredential brokerのRoleでは明示オプトインを拒否する。
+
+factoryは既存operationのID・owner、Flow・runner、Dispatch、仕様のscope hashを固定する。
+handlerはroot sessionの識別、実行中turn、停止・cancel状態、64 KiB上限を確認する。
+Controllerは同一Workspace transactionで、保存済みDispatchのRUNNING状態、session、
+runtime Role・config・worktree、operationのEXECUTION／RUNNING状態とowner、
+Flow所属・runner・期限、Task・仕様・証拠の同一性を照合して追記する。
+Task／Dispatch／Roleを入力で明示した場合も、不一致は拒否する。
+質問期限はoperation期限を超えない。
+
+toolの有無と固定対象は既存runtime config hashへ含める。
+再開時に更新されるownerとrunnerはconfig hashに含めず、各呼出しで保存状態と照合する。
+これらをhashへ含めると、正当に再取得したleaseだけで既存sessionのconfig照合が失敗するためである。
+旧ownerのcallbackは拒否し、保存済み質問のIDを新ownerの質問へ付け替えることも拒否する。
+originは既存receipt内のsession・operation・owner・runnerの出典情報であり、
+別の承認・ownership管理ではない。
+
+質問本文はcanonical receipt内だけに保存し、toolはID・状態・宛先・RequestRecord参照を返す。
+重複判定には質問契約とoriginのhashに加え、対象・originと正規化した原文の明示比較を使用する。
+同一実行の並行再送も単一追記とし、同じIDの本文変更を拒否する。
+入力の観測は `OBSERVED` までであり、回答受理・承認・Dispatch・owner取得を発生させない。
+HOLDによるhandoff停止と実行中Roleの観測を区別し、このtoolからHOLDやRuntime Stopを変更しない。
+
+### 受入れ条件と再現経路
+
+| 今回の条件 | 検証する実経路・判定 |
+| --- | --- |
+| host toolからControllerへ到達 | `TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation` がSDKの実登録handlerから実Controller・一時storeまで通す |
+| Role／session／Dispatch／Task／ownerの照合 | unknown session、nested agent、owner／operation／runner／対象／Role／設定／scopeの不一致を拒否 |
+| 停止済み・失効済み実行の拒否 | stopped／idle／cancel済みcontext、CancelRequested、operation phase変更、期限切れを拒否。Stop要求を停止完了と扱わない |
+| canonical保存と本文非複製 | RequestRecordだけが1件増え、原文とoriginを保持。toolは参照を返す。store再open後も同じ履歴 |
+| 重複・混在の拒否 | 逐次2回と並行8回の再送で1件だけ追記。同じIDの本文変更、owner更新後の旧callback・質問ID付け替えを拒否 |
+| 観測と権限の分離 | OBSERVEDのまま、回答なし。Graph・Ledger・HOLD・operation・ownerは不変。managed approval要求とReviewerのwrite拒否も維持 |
+| 実利用入口と再開時の選択 | `TestRequestClarificationOptInReachesOwnedRoleFactoryAndResume` がrequest引数、checkpoint再開、実factoryのbinding構成を確認。Role実行自体は合成runtime |
+| 既存Planner・保存・停止契約 | Clarification／Question／Planner／Operation／Feedback／HOLD／Stop／Recovery／Resumeの対象回帰とadapter・storeの既存suiteを実行 |
+
+SDK handler試験は実モデルを呼ばず、SDKのsessionを合成する。
+request試験のfake Roleが検証・独立レビューへ到達しても、
+今回のtoolを使った実モデル行動や#284の回答後再検証E2Eの証拠にはしない。
+初期fixtureのFlow承認・Ledger projection不足、Stop要求時のacknowledgement引数誤りは、
+既存保存契約に合わせてfixtureを修正した。製品の拒否条件は緩和していない。
+
+### この接続の検証結果
+
+`go build ./...`、`go vet ./...`、変更Goファイルのgofmt、
+`go generate ./cmd/taxion`、`git diff --check` はPASS。
+新しい本体差分に対して実行した通常・raceの結果は次のとおりである。
+前節の `321c607` の結果や初期fixture失敗を成功数に合算していない。
+
+| 実行 | PASS / FAIL / SKIP |
+| --- | --- |
+| `go test -json -count=1 -timeout 10m ./internal/runtime/copilot ./internal/store` | 392 / 0 / 11 |
+| `go test -json -count=1 -timeout 10m ./internal/runtime/controller -run "$SELECTOR"` | 166 / 0 / 0 |
+| `TAXION_TEST_FAILED_REVIEW_CLI=build go test -json -count=1 -timeout 10m ./cmd/taxion` | 399 / 0 / 2 |
+| 上記adapter／storeに `-race` を付加 | 392 / 0 / 11 |
+| 上記controllerに `-race` を付加 | 166 / 0 / 0 |
+| 上記CLIに `-race` を付加 | 399 / 0 / 2 |
+
+`SELECTOR` は次の実行可能な正規表現である。
+
+```bash
+SELECTOR='Test(Clarification|ReviewerClarification|Question|Planner|Operation|RecoveryRequiresStoppedExecutionAndExactOwner|TargetedInterrupt|FlowRunnerObservesInterrupt|InterruptOfUnstarted|HandoffCleanup|Feedback|ResumeContractGate|StoppedTurn|ReviewProgress)'
+```
+
+各行はsubtest込みの件数で、通常・raceはそれぞれ957 PASS／0 FAIL／13 SKIPである。
+raceの報告とpackage timeoutはない。SKIPは、実Copilot session・書込権限・compaction・
+継続session usage・account quota・native履歴・実サービス・plugin探索の11件と、
+実Betterleaks full hookおよび実OpenCode document flowの2件である。
+全packageの通常・raceの再実行は行わず、今回の変更と関係する上記範囲に限定した。
+初期の対象試験では、fixtureのFlow／Ledger不備とStop要求引数の不備でFAILし、
+保存契約に合わせて修正後、登録handlerとrequest再開の両試験がPASSした。
+
+JSONLはsession artifactに保存し、照合用のSHA-256を残す。
+
+| 証跡名 | SHA-256 |
+| --- | --- |
+| `intake-20261109-adapters-store-normal.jsonl` | `f0108a4c452878757a31145873f1b027a0f89e59d8d9a813483d40761bac803a` |
+| `intake-20261109-controller-normal.jsonl` | `a1c04d5c00b93b91716c4d74216b39541b37d7303207ba9772962ce7af7d6ff5` |
+| `intake-20261109-cli-normal.jsonl` | `75fc7d04fa4efb0016fc1de22b9555f72830bb2eef930bc58c9b83980e631d2c` |
+| `intake-20261109-adapters-store-race.jsonl` | `ebc298832638c49a782bdc81cfd1d77e89b4b5981e4a1525fffc87734ab765ec` |
+| `intake-20261109-controller-race.jsonl` | `46603e42c8a86f0c0ac24d061c441019949851ade1277192a4e16a29abb14d9f` |
+| `intake-20261109-cli-race.jsonl` | `4fbd26068b263303b5f1d478b5cbd3cd1b20e614ee565750a1f374a2ab6e4a6b` |
+
+19:35 JSTの正規照会は21,000 requestsで、reserveを除いた残り50 requestsを
+最終記録・index検査・ローカル保存に使用し、追加の実装単位を開始しない。
+最終index検査は、前節と同じhashに固定したtask-local Betterleaks 1.9.0で
+`go run ./cmd/taxion git check-index --secrets --scanner EXACT_TASK_LOCAL_BINARY` を実行する。
+実行結果とlogのhashはcommit本文に記録する。全履歴scanやSKIPしたhookとは区別する。
+
+### 未達条件と次の最小作業
+
+#283全体は未完了であり、Coderへの実配信と矛盾回答の保存・解決は今回の対象外である。
+次の最小作業は、保存済みCoder宛質問を既存Coder実行へ配信する接続点と、
+回答のcanonical receipt・独立Reviewerとの境界を確認することである。
+#284は未着手で、回答後のACCEPTED／AUTHORIZED／DISPATCHED、正式な再開、
+依存作業の自動制御や汎用Recoveryを実装していない。
+#282／#228の全条件、#90／#189／#220およびADR-0062のH5全体の達成とも区別する。
+
+実モデル、公開CI、本番store、OpenCode intake、機器間の実移送、全履歴secret scan、
+SDK未到着イベントの完全回収、Disconnect期限は未検証・未保証のままである。
+旧binaryはorigin付きreceiptの読取りに失敗し得るため、rollback前に原本を保持する。
+第五審査FAILを維持し、第六審査・push・PR・公開・配布・TKB3復旧は実施しない。
