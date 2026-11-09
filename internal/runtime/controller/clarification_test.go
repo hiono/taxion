@@ -173,7 +173,8 @@ func TestClarificationConcurrentReplayAndAnswerSurviveRestart(t *testing.T) {
 		t.Fatal("new session reissued a question or lost the observed answer", again, err)
 	}
 	after, err := reopened.LoadWorkspace()
-	if err != nil || len(after.Records.Requests) != len(before.Records.Requests)+2 {
+	if err != nil || len(after.Records.Requests) != len(before.Records.Requests)+3 || again.Conflict == nil ||
+		again.Conflict.Text != answer.Text || again.Conflict.At.IsZero() {
 		t.Fatal("retry appended duplicate question or answer receipts", err)
 	}
 	after.Records.Requests = before.Records.Requests

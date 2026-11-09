@@ -1309,3 +1309,150 @@ Push／PR／Merge／Release、第六審査、TKB3復旧は実施しない。
 22:42:42 JSTの正規観測は使用21,350、承認上限21,500、reserve50、作業可能残100 requestsだった。
 今回の終了期限は23:00 JSTへ短縮されており、以前の23:48:12 JSTを使用しない。
 固定したtask-local Betterleaks 1.9.0による最終index検査結果とscan log hashをcommit本文へ記録する。
+
+## Clarificationライフサイクルの統合評価と改善順序
+
+今回の起点は`1404845bf183cc2b88bbf81f2732b031ad1d4568`である。
+追加400 requestsにより承認上限は21,900、reserveは50を維持する。
+直近の正規観測は23:09:30 JSTの21,450 requestsで、作業可能残は400だった。
+期限の追加2時間は従来の23:00を基準とし、11月10日01:00 JSTまでとする。
+調査・計画60、実装160、検証・レビュー120、最終整理60を目安とし、reserveは配分しない。
+
+### 起点の到達点と責務
+
+FACT: 実装・試験とIssue #283／#284の受入れ条件を照合した。
+既存の成功試験は対応するコード経路の根拠として再利用し、実モデルの行動の根拠にはしない。
+
+| 到達点 | 実装と確認できる範囲 | 不足・責務 |
+| --- | --- | --- |
+| 保存情報の再利用・可逆的な仮定 | `RequestClarification`のREUSE／ASSUMEとscope検査 | 原文が意味的に十分か、仮定が妥当かは呼出側の判断。実モデル未評価 |
+| 適切な質問先と原文保存 | Role別route、Task／Dispatch／scope、canonical RequestRecord | 質問後に依存作業を停止する統合は#284 |
+| Plannerへの質問 | `AskPlannerClarification`→既存`AskPlanner`、canonical終端receipt参照 | 隔離Orchestratorと既存の設定・予算・ownership契約が必要 |
+| Coderへの引継ぎ | RelatedIDの解決、明示的な正式後続Coder指定、HELD記録 | SDK inboxはrootを確証できず無効。配信完了・ACKの実環境証明なし |
+| 回答の記録 | CLIの明示回答、回答者・出典・host時刻、OBSERVED維持 | 異なる回答は拒否するだけで、その回答本文が残らない |
+| 回答後の再検証 | scopeを観測する基礎関数と既存InputDecisionがある | Clarification専用の読取り専用評価がない。正式な受理・Recovery接続は#284 |
+| 不明配信と再起動 | REQUESTED／HELDの履歴を保持し本文を再送しない | 帰属を失わない完了証拠の復元は未実装 |
+
+既存機構との対応は次のとおりである。`AskQuestion`／`AskPlanner`は
+`internal/runtime/controller/question.go`に実在し、toolなしの隔離質問として再利用できる。
+`HumanDecisionRequest`は既存Taskの選択・判断metadataであり、回答を認可へ変換するAPIではない。
+SteeringはADR-0024の設計上の参照であり、この起点のGo実装には対応名のAPIを確認できない。
+存在を推測して配信先にしない。#220が参照するADR-0062も、この起点のtrackedファイルには存在しない。
+その文書があるものとして判断せず、現物のあるADR-0024、0066、0073と既存Issueを根拠にする。
+
+### 実施計画と完了判定
+
+DECISION: SDK root問題に独立した、回答証拠と次の判断の可視性を先に改善する。
+安全な代替として、公開CLIで質問を読み、明示的な出典付き回答を観測し、
+既存の正式な計画・承認・実行gateへ戻す経路を使う。
+これはCoder到達ACKの代替証明ではなく、人間が回答を仲介する別の経路である。
+SDK inboxの再有効化、停止済みCoderの再開、暗黙のDispatch発行は行わない。
+
+| 順序 | 独立した作業単位と受入れ条件 | 依存・実装境界 |
+| --- | --- | --- |
+| 1 | 矛盾する回答もcanonical履歴へ保存し、元回答を上書きしない。同じ回答の逐次・並行retryは追記しない | 既存RequestRecordとOBSERVEDを再利用。意味的な解決や承認は行わない |
+| 2 | 読取り専用の回答評価を既存InputDecisionで返す。矛盾、期限、対象・scope・session・ownerの変化を阻止条件として表示する | 1の証拠を使用。保存済み予算検査を再利用し、実残量・認可・再開を証明しない |
+| 2と同時 | 保存済み回答からの明示選択を観測判断として記録する。候補receiptと評価hashを固定し、異なる質問・古い観測・無言の選択変更を拒否する | 既存TaskDecisionの出典・理由を再利用。回答の受理・実行許可ではなく、SDKにも依存しない |
+| 3 | 公開CLIの質問→回答→評価→矛盾保存→再評価と、再起動・並行処理を検証する | 1・2の共通schema確定後に接続。通常・race、build／vet／固定scannerと証跡を保存 |
+| 次工程 | 実SDKでroot帰属または子Agent起動拒否を証明し、帰属付き完了証拠の保存・復元を接続する | 未確認API・空AgentIDによる昇格は禁止。wire／provider／modelの検証を分離する |
+| 後続統合 | 観測した回答選択を正式gate、Stop／HOLD／Recovery、独立レビューへ接続する | #283の回答契約と#284の正式統合を区別。既存#282／#228／#196を再実装しない |
+
+通常・raceの試験は独立して実行できる。共通schemaを変更する実装同士は並行しない。
+実際の再開は既存gateに委ね、InputDecisionの`accept`をACCEPTED／AUTHORIZED／DISPATCHEDと同一視しない。
+回答の論理的妥当性、任意の回答からの自動再開、実モデルの自発的質問行動は今回の完了条件に含めない。
+これらを含む全到達点に未達がある間、#283／#284はOPEN、第五審査はFAILを維持する。
+
+### 実装結果と確認根拠
+
+FACT: 異なる回答を`clarification.conflict`として元と同じcanonical RequestRecordへ保存する。
+元回答は上書きせず、回答者・出典・host時刻・本文を保持したあと、未解決を示すエラーを返す。
+回答者・出典・本文の違いを保守的に検出するもので、論理矛盾を意味解析したという主張ではない。
+同じ質問の同一回答は並行retryでも追記しない。別質問の同じ回答を誤って抑止しない。
+
+保存した回答の選択には`resolve-answer --file`を追加した。
+既存TaskDecisionの出典・理由と、`assess`の評価hash、選択する回答のID・sequence・hashを記録する。
+同じsnapshotをトランザクション内で再評価し、古い観測、別質問、hash不一致、宛先外Roleを拒否する。
+選択結果は観測判断として追記し、元の回答と宛先を変更しない。
+同じ判断の逐次・並行retryと再起動後のretryは追記せず、別の判断への上書きも拒否する。
+既知の回答の再入力では解決を取り消さず、新しい回答証拠が追加された場合だけ未解決へ戻す。
+保存時の選択先・直前receipt・判断IDの整合も読取り時に検証する。
+
+DECISION: 回答者や選択者のRole・actorはCLIで申告した出典metadataとして扱う。
+認証や仕様所有者の権限を証明するものではないため、選択を正式な受理・承認へ変換しない。
+`OBSERVED`と、ADR-0066の入力適合を示す`accept`を維持する。
+権限変更、期限切れ、対象・scope・session・ownerの変化、Stop/HOLD、不明配信は
+回答の保存や選択では解除せず、既存の正式gateへ戻す。
+
+`assess --id`は一つの保存snapshotから現在のTask／Dispatch／scope／evidence、
+session／設定／Role／状態、operation owner／runner／期限、FlowのStop/HOLD、
+保存済み予算、未回答・未解決・人間承認・REQUESTEDの配信不明を読取り専用で評価する。
+`savedBudget`は保存済み情報に限り、実provider残量の証明ではない。
+評価はRequestRecord、Graph、承認、Dispatch、operationを更新せず、Runtimeも操作しない。
+
+変更箇所はControllerの既存Clarification投影と、新しいassessment／resolutionの処理、
+対応する試験、CLI・help・completion生成・offline helpの許可一覧である。
+既存ADR-0024／0066／0073の観測と認可の区別を再利用し、
+新しい質問engine、scheduler、永続化基盤、Roleは追加していない。
+
+### 検証範囲と再現コマンド
+
+FACT: 以下は実際に実行したコマンドである。通常・raceは別々のコマンドで完走した。
+全packageの全試験を一括実行した結果ではない。
+
+```bash
+gofmt -w internal/runtime/controller/clarification.go \
+  internal/runtime/controller/clarification_assessment.go \
+  internal/runtime/controller/clarification_assessment_test.go \
+  internal/runtime/controller/clarification_owned_assessment_test.go \
+  internal/runtime/controller/clarification_resolution.go \
+  internal/runtime/controller/clarification_resolution_test.go \
+  cmd/taxion/clarification.go cmd/taxion/clarification_test.go
+go generate ./cmd/taxion
+go test ./internal/runtime/controller ./cmd/taxion -run Clarification -count=1 -timeout 3m
+go build ./...
+go vet ./...
+git diff --check
+go test -json ./internal/runtime/copilot ./internal/runtime/controller ./cmd/taxion \
+  -run 'Clarification|Question|Provenance|Completion|TargetedInterrupt|FlowRunnerObservesInterrupt|StoppedTurn' \
+  -count=1 -timeout 5m
+go test -race -json ./internal/runtime/copilot ./internal/runtime/controller ./cmd/taxion \
+  -run 'Clarification|Question|Provenance|Completion|TargetedInterrupt|FlowRunnerObservesInterrupt|StoppedTurn' \
+  -count=1 -timeout 8m
+```
+
+通常・raceともに187 PASS／0 FAIL／0 SKIPで、package別ではCopilot27、Controller146、CLI14だった。
+件数は親とsubtestを含む完了testイベント数である。build、vet、completion生成、diff検査もPASS。
+新しい試験fixtureではGraphだけでなくLedgerと履歴の整合が必要だったため、そのfixtureを修正した。
+また、completion生成で新しいhelpを参照できるよう既存のoffline help一覧を更新した。
+製品のvalidationやprovenance policyを緩めたわけではない。
+
+公開CLIの別process試験は、質問→未回答評価→回答→適合評価→矛盾保存→保留評価→
+明示選択→再評価→履歴取得を実行し、Graph・承認・Dispatch・HOLD・operationの不変を確認した。
+Controller試験では実intake・実storeとfake Runtimeを使用し、owner変更・失効、
+HOLD・Stop、配信不明が回答後も解除されないことを確認した。
+並行選択、再起動、古いhash、別質問、宛先外Role、選択変更、追加証拠による再保留も検証した。
+raceのCLI試験で起動する子binary自体は通常の`go build`であり、Go試験側のrace検査と区別する。
+
+実SDK wire RPC、実provider、実モデルの呼出しは実施していない。
+内部の受信処理を直接呼ぶ合成試験は、SDK inboxの登録や実際のCoder到達を証明しない。
+SDK 1.0.22のroot帰属と切断後の完了証拠復元は今回変更せず、inbox無効化を維持した。
+
+| 保存した証跡 | SHA-256 |
+| --- | --- |
+| `clarification-lifecycle-20261109-final-normal.jsonl` | `099d443ab7122b9fd561d6b232eb013f7fea79ed22eeb0ce586cd2e8228d894c` |
+| `clarification-lifecycle-20261109-final-race.jsonl` | `f8da212c15903ffc0617f1d6b3180f3c5e3e39891e634ef1da50b7765c538e18` |
+
+最終整理前の正規観測は23:47:17 JSTの21,600 requestsだった。
+承認上限21,900との差300からreserve50を除き、作業可能残は250である。
+account entitlementの残量を追加の作業権限には含めず、01:00 JSTの期限も変更していない。
+
+### 未達条件と次の判断
+
+PROPOSAL: 次の独立した作業単位は、観測した回答・選択receiptを既存の正式な入力確定と
+Recoveryのpreviewへ結び付け、現時点の権限・対象・期限を検証することである。
+SDK root問題に依存する自動配信は別に扱い、確実な帰属と保存・復元を証明できるまで有効化しない。
+SDK調査と正式gateへの入力設計は独立して調査できるが、共通の状態更新へ同時着手しない。
+
+回答の意味的妥当性、選択者の権限、実モデルの質問行動、Coderの到達・ACK、
+正式な回答受理と自動Recovery、実環境E2E、後続の独立品質レビューは未確認である。
+#283／#284はOPEN、第五審査FAILを維持し、今回の入力適合や回答選択だけでは完成扱いにしない。

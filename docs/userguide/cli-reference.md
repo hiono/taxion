@@ -476,12 +476,14 @@ taxion conversation ask --task <task-id> \
 
 `conversation clarification` は、質問先と回答の出典を既存の planning receipt に保存する。
 回答は `OBSERVED` のままで、受理・承認・Dispatch、HOLD、Runtime Stopを行わない。
-この入口だけで依存作業の停止や安全な自動再開が完成したとは扱わない（#283は継続中、#284は未着手）。
+この入口だけで依存作業の停止や安全な自動再開が完成したとは扱わない（#283は継続中、#284の正式統合は未実装）。
 
 ```bash
 taxion conversation clarification observe --task TASK --dispatch DISPATCH
 taxion conversation clarification request --file question.json
 taxion conversation clarification answer --file answer.json
+taxion conversation clarification assess --id QUESTION_ID
+taxion conversation clarification resolve-answer --file resolution.json
 taxion conversation clarification resolve-coder --id QUESTION_ID
 taxion conversation clarification history
 ```
@@ -509,7 +511,8 @@ referenceを原文扱いしない。軽微な不足は `category: "minor"` と
 回答JSONは `{"id":"質問ID","answer":{"role":"PLANNER","actor":"回答者",
 "source":"実際の出典","text":"回答"}}` の形とし、受信時刻はControllerが保存する。
 同一対象・同一仕様の再送は元の質問を返し、同じ回答の再送は追記しない。
-異なる回答による上書きは拒否する。新たな矛盾の保存と解決、回答後の再検証は未完了である。
+異なる回答による上書きは拒否し、その回答も観測履歴へ保存する。
+保存済み回答からの明示選択は観測判断として記録できるが、回答の正式な受理とgate・Recoveryへの接続は未完了である。
 
 Planner宛の保存質問だけは、既存の有料・tool-free Planner入口へ明示的に接続できる。
 このコマンドも通常の設定承認、account／repository検査、期限、session ceilingを必要とする。
@@ -538,6 +541,45 @@ Task／Dispatch／session／ownerはモデルの推測で補わず、hostが保�
 同じ実行の再送は追記せず、同じIDでの原文変更や別ownerへの付け替えは拒否する。
 このtoolは回答の受理、実配信、HOLD、Runtime Stop、依存作業の自動停止・再開を行わない。
 Roleへの説明でも未回答に依存する作業を進めないよう求めるが、その行動を実モデルで検証していない。
+
+回答の保存後は`assess --id`で、現在の保存記録との適合を読取り専用で確認できる。
+`state`は`OBSERVED`のままで、`decision.verdict: "accept"`は次の正式な契約確認の入力にできるという意味である。
+回答の意味的な妥当性、ACCEPTED、AUTHORIZED、DISPATCHED、Runtimeの稼働や配信完了を証明しない。
+実際の続行には既存の対象・設定・証拠・承認・予算・期限gateを使う。
+`savedBudget`は保存済み観測からの評価であり、実provider残量の照会ではない。
+
+異なる回答者・出典・本文の回答は、元の回答を上書きせず、
+`clarification.conflict`として同じcanonical履歴へ保存したうえでエラーを返す。
+`history`の`conflict`に回答者・出典・host時刻・本文が残り、`assess`は`blocked`となる。
+同じ質問への同一回答の逐次・並行retryは追記しない。
+元の回答を再入力しても矛盾は消えず、古い回答を受理済みとして再利用しない。
+仕様所有者または人間が回答を選ぶ場合は、`assess`の`candidates`から回答とreceiptを確認し、
+同じ出力の`decision.basisHash`を`expectedHash`へ渡す。
+`resolve-answer`の入力は次の形になる。receiptとhashには観測した実値を使う。
+
+```json
+{
+  "id": "QUESTION_ID",
+  "expectedHash": "ASSESSMENT_BASIS_HASH",
+  "selected": {"requestId": "clarification:QUESTION_ID", "sequence": 3, "hash": "ANSWER_RECORD_HASH"},
+  "role": "HUMAN",
+  "actor": "仕様所有者",
+  "source": "判断の実際の出典",
+  "reason": "この回答を選んだ理由"
+}
+```
+
+選択先は同じ質問の保存済み回答に限定し、観測後の証拠変更、別質問、hash不一致を拒否する。
+`role`は質問の宛先Roleまたは`HUMAN`とし、回答者・出典はCLIで申告したmetadataとして記録する。
+認証や仕様所有者の権限の証明ではなく、既存TaskDecisionの形式で出典・理由を残す観測判断である。
+`clarification.resolution`には選択先と観測時のreceiptを保存し、元の質問・回答・矛盾本文を変更しない。
+`answer`は元回答のままなので、選択された回答は`resolution.selected`に一致する`candidates`から読む。
+同じ選択の逐次・並行retryは追記せず、別の選択への上書きも拒否する。
+既知の矛盾回答を再入力しても解決を取り消さないが、新しい回答証拠が追加された場合は再び`blocked`となる。
+質問の状態は`OBSERVED`のままで、権限不足、Stop/HOLD、期限切れや配信不明は解決しない。
+正式な受理・承認・再開には後続のgateが必要である。
+`clarification.conflict`／`clarification.resolution`を理解しない旧binaryへ戻す場合はreceiptを削除せず、
+対応版または未変更のprivate backupを使う。
 
 Coder宛の質問は保存時に、Reviewer Dispatchの `RelatedID` と既存Flowの対応から
 配信先を解決する。以前保存した質問は `resolve-coder --id` で同じ処理を呼べる。

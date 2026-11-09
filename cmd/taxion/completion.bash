@@ -23,12 +23,14 @@ _taxion_complete() {
         'config check') candidates='--billing --capabilities --dispatch --help --sources --task' ;;
         'conversation') candidates='ask clarification confirm intake investigate plan proposal search watch' ;;
         'conversation ask') candidates='--base-directory --clarification --cli --help --max-ai-credits --question --task --timeout' ;;
-        'conversation clarification') candidates='--help answer handoff history observe request resolve-coder' ;;
+        'conversation clarification') candidates='--help answer assess handoff history observe request resolve-answer resolve-coder' ;;
         'conversation clarification answer') candidates='--file --help' ;;
+        'conversation clarification assess') candidates='--help --id' ;;
         'conversation clarification handoff') candidates='--dispatch --help --id --reason' ;;
         'conversation clarification history') candidates='--help' ;;
         'conversation clarification observe') candidates='--dispatch --help --task' ;;
         'conversation clarification request') candidates='--file --help' ;;
+        'conversation clarification resolve-answer') candidates='--file --help' ;;
         'conversation clarification resolve-coder') candidates='--help --id' ;;
         'conversation confirm') candidates='--file --help --task' ;;
         'conversation intake') candidates='--file --help --task' ;;

@@ -105,14 +105,54 @@ func TestClarificationCLIRecordsHumanAnswerWithoutApprovalOrDispatch(t *testing.
 	answer := map[string]any{"id": request.ID, "answer": controller.ClarificationAnswer{
 		Role: "HUMAN", Actor: "user", Source: "human:clarification", Text: "Preserve the documented behavior.",
 	}}
+	var assessment controller.ClarificationAssessment
+	if err := json.Unmarshal(run("conversation", "clarification", "assess", "--id", request.ID), &assessment); err != nil ||
+		assessment.State != "OBSERVED" || assessment.Decision.Verdict != "blocked" {
+		t.Fatal("unanswered question was admitted", assessment, err)
+	}
 	output.Reset()
 	output.Write(run("conversation", "clarification", "answer", "--file", write("answer.json", answer)))
+	if err := json.Unmarshal(run("conversation", "clarification", "assess", "--id", request.ID), &assessment); err != nil ||
+		assessment.State != "OBSERVED" || assessment.Decision.Verdict != "accept" {
+		t.Fatal("observed answer was not eligible as input", assessment, err)
+	}
 	output.Reset()
 	output.Write(run("conversation", "clarification", "history"))
 	var history []controller.Clarification
 	if err := json.Unmarshal(output.Bytes(), &history); err != nil || len(history) != 2 ||
 		history[1].Answer == nil || history[1].Answer.At.IsZero() || history[1].State != "OBSERVED" {
 		t.Fatal("CLI reopen lost provenance or accepted the answer automatically", output.String(), err)
+	}
+	conflict := map[string]any{"id": request.ID, "answer": controller.ClarificationAnswer{
+		Role: "HUMAN", Actor: "user", Source: "human:second-interpretation", Text: "Replace the documented behavior.",
+	}}
+	args := []string{"--store", storePath, "conversation", "clarification", "answer", "--file", write("conflict.json", conflict)}
+	if output, err := exec.Command(binary, args...).CombinedOutput(); err == nil || !bytes.Contains(output, []byte("retained as OBSERVED")) {
+		t.Fatal("public CLI accepted a conflicting answer", string(output), err)
+	}
+	if err := json.Unmarshal(run("conversation", "clarification", "assess", "--id", request.ID), &assessment); err != nil ||
+		assessment.Decision.Verdict != "blocked" {
+		t.Fatal("conflict did not block input admission", assessment, err)
+	}
+	if err := json.Unmarshal(run("conversation", "clarification", "history"), &history); err != nil || len(history) != 3 ||
+		history[2].Conflict == nil || history[2].Conflict.Source != "human:second-interpretation" ||
+		history[2].Answer.Text != "Preserve the documented behavior." {
+		t.Fatal("public CLI did not preserve both answer sources", history, err)
+	}
+	resolution := controller.ClarificationResolutionRequest{
+		ID: request.ID, ExpectedHash: assessment.Decision.BasisHash, Selected: assessment.Candidates[1].Receipt,
+		Role: "HUMAN", Actor: "specification-owner", Source: "human:explicit-judgment",
+		Reason: "The second interpretation is intended; this does not approve execution.",
+	}
+	run("conversation", "clarification", "resolve-answer", "--file", write("resolution.json", resolution))
+	if err := json.Unmarshal(run("conversation", "clarification", "assess", "--id", request.ID), &assessment); err != nil ||
+		assessment.State != "OBSERVED" || assessment.Decision.Verdict != "accept" || assessment.Resolution == nil ||
+		assessment.Resolution.Selected != resolution.Selected {
+		t.Fatal("public CLI did not retain the explicit observational judgment", assessment, err)
+	}
+	if err := json.Unmarshal(run("conversation", "clarification", "history"), &history); err != nil || len(history) != 4 ||
+		history[3].Answer.Text != "Preserve the documented behavior." || history[3].Resolution == nil {
+		t.Fatal("resolution overwrote the original evidence", history, err)
 	}
 	after, err := db.LoadWorkspace()
 	if err != nil {

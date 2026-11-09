@@ -75,19 +75,21 @@ type ClarificationOrigin struct {
 
 // These are planning receipts, not authorization or executable instructions.
 type Clarification struct {
-	Version   int                    `json:"version"`
-	Phase     string                 `json:"phase"`
-	Request   ClarificationRequest   `json:"request"`
-	Context   ClarificationContext   `json:"context"`
-	Signature string                 `json:"signature"`
-	Route     string                 `json:"route"`
-	Recipient string                 `json:"recipient,omitempty"`
-	State     string                 `json:"state"`
-	Answer    *ClarificationAnswer   `json:"answer,omitempty"`
-	At        time.Time              `json:"at"`
-	Origin    *ClarificationOrigin   `json:"origin,omitempty"`
-	Delivery  *ClarificationDelivery `json:"delivery,omitempty"`
-	Handoff   *ClarificationHandoff  `json:"handoff,omitempty"`
+	Version    int                      `json:"version"`
+	Phase      string                   `json:"phase"`
+	Request    ClarificationRequest     `json:"request"`
+	Context    ClarificationContext     `json:"context"`
+	Signature  string                   `json:"signature"`
+	Route      string                   `json:"route"`
+	Recipient  string                   `json:"recipient,omitempty"`
+	State      string                   `json:"state"`
+	Answer     *ClarificationAnswer     `json:"answer,omitempty"`
+	Conflict   *ClarificationAnswer     `json:"conflict,omitempty"`
+	Resolution *ClarificationResolution `json:"resolution,omitempty"`
+	At         time.Time                `json:"at"`
+	Origin     *ClarificationOrigin     `json:"origin,omitempty"`
+	Delivery   *ClarificationDelivery   `json:"delivery,omitempty"`
+	Handoff    *ClarificationHandoff    `json:"handoff,omitempty"`
 }
 
 func ObserveClarification(db *store.Store, taskID, dispatchID string) (ClarificationContext, error) {
@@ -340,6 +342,7 @@ func requestClarification(state *store.Workspace, input ClarificationRequest, or
 
 func AnswerClarification(db *store.Store, id string, answer ClarificationAnswer) (Clarification, error) {
 	var result Clarification
+	var conflictErr error
 	err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		history, err := clarifications(*state)
 		if err != nil {
@@ -366,7 +369,23 @@ func AnswerClarification(db *store.Store, id string, answer ClarificationAnswer)
 			old.At, answer.At = time.Time{}, time.Time{}
 			if old.Receipt != nil || old.Role != answer.Role || old.Actor != answer.Actor ||
 				old.Source != answer.Source || old.Text != answer.Text {
-				return fmt.Errorf("taxion: contradictory answer requires new evidence and revalidation")
+				conflictErr = fmt.Errorf("taxion: conflicting answer retained as OBSERVED; resolution and revalidation are required")
+				for _, saved := range history {
+					prior := saved.Conflict
+					if saved.Request.ID == id && prior != nil && prior.Role == answer.Role && prior.Actor == answer.Actor &&
+						prior.Source == answer.Source && prior.Text == answer.Text {
+						if result.Resolution != nil {
+							conflictErr = nil
+						}
+						return nil
+					}
+				}
+				answer.At = time.Now().UTC()
+				result.Phase, result.Conflict, result.Resolution = "clarification.conflict", &answer, nil
+				return appendClarification(state, result)
+			}
+			if result.Conflict != nil && result.Resolution == nil {
+				conflictErr = fmt.Errorf("taxion: earlier conflicting answer remains unresolved")
 			}
 			return nil
 		}
@@ -374,7 +393,10 @@ func AnswerClarification(db *store.Store, id string, answer ClarificationAnswer)
 		result.Phase, result.Answer = "clarification.answer", &answer
 		return appendClarification(state, result)
 	})
-	return result, err
+	if err != nil {
+		return result, err
+	}
+	return result, conflictErr
 }
 
 func ClarificationHistory(db *store.Store) ([]Clarification, error) {
@@ -382,6 +404,10 @@ func ClarificationHistory(db *store.Store) ([]Clarification, error) {
 	if err != nil {
 		return nil, err
 	}
+	return clarificationHistory(state)
+}
+
+func clarificationHistory(state store.Workspace) ([]Clarification, error) {
 	history, err := clarifications(state)
 	if err != nil {
 		return nil, err
@@ -395,30 +421,38 @@ func ClarificationHistory(db *store.Store) ([]Clarification, error) {
 		if err != nil {
 			return nil, err
 		}
-		answer := history[i].Answer
-		if answer == nil || answer.Receipt == nil {
-			continue
+		if err := hydrateClarificationAnswer(state, history[i].Answer); err != nil {
+			return nil, err
 		}
-		found := false
-		for _, record := range state.Records.Requests {
-			ref := answer.Receipt
-			if record.Kind != "planning" || record.RequestID != ref.RequestID || record.Sequence != ref.Sequence {
-				continue
+		if history[i].Resolution != nil {
+			if err := validateClarificationResolution(state, history[i]); err != nil {
+				return nil, err
 			}
-			var terminal struct {
-				Answer json.RawMessage `json:"answer"`
-			}
-			if record.Hash != ref.Hash || json.Unmarshal([]byte(record.Payload), &terminal) != nil ||
-				len(terminal.Answer) == 0 || string(terminal.Answer) == "null" {
-				return nil, fmt.Errorf("taxion: clarification answer receipt is invalid")
-			}
-			answer.Text, found = string(terminal.Answer), true
-		}
-		if !found {
-			return nil, fmt.Errorf("taxion: clarification answer receipt is unavailable")
 		}
 	}
 	return history, nil
+}
+
+func hydrateClarificationAnswer(state store.Workspace, answer *ClarificationAnswer) error {
+	if answer == nil || answer.Receipt == nil {
+		return nil
+	}
+	for _, record := range state.Records.Requests {
+		ref := answer.Receipt
+		if record.Kind != "planning" || record.RequestID != ref.RequestID || record.Sequence != ref.Sequence {
+			continue
+		}
+		var terminal struct {
+			Answer json.RawMessage `json:"answer"`
+		}
+		if record.Hash != ref.Hash || json.Unmarshal([]byte(record.Payload), &terminal) != nil ||
+			len(terminal.Answer) == 0 || string(terminal.Answer) == "null" {
+			return fmt.Errorf("taxion: clarification answer receipt is invalid")
+		}
+		answer.Text = string(terminal.Answer)
+		return nil
+	}
+	return fmt.Errorf("taxion: clarification answer receipt is unavailable")
 }
 
 // AskPlannerClarification uses the existing isolated question lifecycle and
@@ -522,7 +556,11 @@ func clarifications(state store.Workspace) ([]Clarification, error) {
 		if err := core.DecodeGraphInput(strings.NewReader(record.Payload), &saved); err != nil ||
 			saved.Version != 1 || record.RequestID != "clarification:"+saved.Request.ID ||
 			saved.State != "OBSERVED" ||
-			saved.Phase != "clarification.request" && saved.Phase != "clarification.answer" {
+			saved.Phase != "clarification.request" && saved.Phase != "clarification.answer" && saved.Phase != "clarification.conflict" && saved.Phase != "clarification.resolution" ||
+			saved.Phase == "clarification.conflict" && (saved.Answer == nil || saved.Conflict == nil) ||
+			saved.Phase == "clarification.resolution" && (saved.Answer == nil || saved.Conflict == nil || saved.Resolution == nil) ||
+			saved.Phase != "clarification.conflict" && saved.Phase != "clarification.resolution" && saved.Conflict != nil ||
+			saved.Phase != "clarification.resolution" && saved.Resolution != nil {
 			return nil, fmt.Errorf("taxion: invalid saved clarification receipt")
 		}
 		history = append(history, saved)

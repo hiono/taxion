@@ -13,11 +13,11 @@ import (
 
 func clarificationCmd(args []string, output io.Writer) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(output, "Usage of conversation clarification:\n  observe --task ID [--dispatch ID]\n  request --file FILE\n  answer --file FILE\n  resolve-coder --id ID\n  handoff --id ID --dispatch ID --reason TEXT\n  history\n\nObservation only; no approval, Dispatch, HOLD or runtime stop.")
+		fmt.Fprintln(output, "Usage of conversation clarification:\n  observe --task ID [--dispatch ID]\n  request --file FILE\n  answer --file FILE\n  assess --id ID\n  resolve-answer --file FILE\n  resolve-coder --id ID\n  handoff --id ID --dispatch ID --reason TEXT\n  history\n\nObservation only; no approval, Dispatch, HOLD or runtime stop.")
 		return flag.ErrHelp
 	}
 	action := args[0]
-	if action != "observe" && action != "request" && action != "answer" && action != "history" && action != "resolve-coder" && action != "handoff" {
+	if action != "observe" && action != "request" && action != "answer" && action != "assess" && action != "resolve-answer" && action != "history" && action != "resolve-coder" && action != "handoff" {
 		return fmt.Errorf("unknown clarification action")
 	}
 	fs := flag.NewFlagSet("conversation clarification "+action, flag.ContinueOnError)
@@ -27,13 +27,15 @@ func clarificationCmd(args []string, output io.Writer) error {
 		fs.StringVar(&id, "id", "", "saved Reviewer question ID")
 		fs.StringVar(&dispatchID, "dispatch", "", "explicit formally issued running successor Coder")
 		fs.StringVar(&reason, "reason", "", "explicit reason for the handoff; does not change the original destination")
+	} else if action == "assess" {
+		fs.StringVar(&id, "id", "", "saved clarification ID; read-only evidence assessment, never execution permission")
 	} else if action == "resolve-coder" {
 		fs.StringVar(&id, "id", "", "saved Reviewer question ID; resolve and hold, never start or steer a Coder")
 	} else if action == "observe" {
 		fs.StringVar(&taskID, "task", "", "saved Task identity")
 		fs.StringVar(&dispatchID, "dispatch", "", "saved sender Dispatch identity")
 	} else if action != "history" {
-		fs.StringVar(&file, "file", "", "strict JSON request or {id, answer} input")
+		fs.StringVar(&file, "file", "", "strict JSON request, {id, answer}, or source-attributed resolution input")
 	}
 	fs.Usage = func() {
 		fmt.Fprintf(output, "Usage of conversation clarification %s:\n", action)
@@ -45,10 +47,10 @@ func clarificationCmd(args []string, output io.Writer) error {
 	}
 	if fs.NArg() != 0 ||
 		action == "observe" && taskID == "" ||
-		action == "resolve-coder" && id == "" ||
+		(action == "assess" || action == "resolve-coder") && id == "" ||
 		action == "handoff" && (id == "" || dispatchID == "" || reason == "") ||
-		(action == "request" || action == "answer") && file == "" {
-		return fmt.Errorf("clarification observe requires --task [--dispatch]; request/answer require --file; resolve-coder requires --id; handoff requires --id --dispatch --reason; history accepts no flags")
+		(action == "request" || action == "answer" || action == "resolve-answer") && file == "" {
+		return fmt.Errorf("clarification observe requires --task [--dispatch]; request/answer/resolve-answer require --file; assess/resolve-coder require --id; handoff requires --id --dispatch --reason; history accepts no flags")
 	}
 	db, _, err := loadWorkspace()
 	if err != nil {
@@ -57,6 +59,8 @@ func clarificationCmd(args []string, output io.Writer) error {
 	defer db.Close()
 	var result any
 	switch action {
+	case "assess":
+		result, err = controller.AssessClarification(db, id)
 	case "handoff":
 		result, err = controller.HandoffCoderClarification(db, id, dispatchID, reason)
 	case "resolve-coder":
@@ -75,6 +79,11 @@ func clarificationCmd(args []string, output io.Writer) error {
 			var request controller.ClarificationRequest
 			if err = core.DecodeGraphInput(input, &request); err == nil {
 				result, err = controller.RequestClarification(db, request)
+			}
+		} else if action == "resolve-answer" {
+			var request controller.ClarificationResolutionRequest
+			if err = core.DecodeGraphInput(input, &request); err == nil {
+				result, err = controller.ResolveClarificationConflict(db, request)
 			}
 		} else {
 			var request struct {
