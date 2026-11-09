@@ -1133,3 +1133,112 @@ JSONLはsession artifactに保存した。証跡hashは次のとおり。
 元Coderへ直接届ける機能ではなく、承認された明示的な後続Coder引継ぎだけを実装した。
 #284は未着手、第五審査FAILを維持する。
 Push／PR／Merge／Release、第六審査、TKB3復旧、実モデルへの追加照会は行わない。
+
+## 配信・ACK契約の独立監査と安全停止（2026-11-09）
+
+### FACT：監査対象と実行条件
+
+対象は`de0ef5634b907463d31019355a7f5d930d312886`、親は`14cfe40`である。
+開始時のbranchは`fix/native-event-contract-083`、worktreeはcleanで、
+親からの後続履歴は対象commit一件だった。既存commitは変更しない。
+別コンテキストのread-onlyレビューで`git show --stat`と実差分、
+既存SDK 1.0.22のAPI・イベント型・callback実装、登録と入力経路、保存・復元を確認した。
+実provider・実モデルへの照会は行っていない。
+
+22:02:07 JSTの正規照会では使用21,300 requests、承認上限21,500、
+reserve50、作業可能残150、期限23:48:12 JSTだった。
+口座全体の残量は追加の実行承認に含めない。
+
+### FACT：root帰属の未確定条件
+
+`internal/runtime/copilot/clarification.go`のinbox guardは、
+空の`ToolInvocation.AgentID`を許容し、同じsessionがbusyであることを検査する。
+しかし固定SDKの`types.go:2064–2066`には、空値はrootだけでなく、
+runtimeが子Agentの帰属を付けない場合にも使用されると明記されている。
+したがって、この空値検査だけからroot限定を結論できない。
+既存の合成試験は明示的な`AgentID: "child"`を拒否するが、
+帰属が提供されないケースを独立に証明していない。
+
+これはSDK契約上の曖昧さの確認であり、実環境での侵入再現ではない。
+AvailableTools、permission、Role policyがすべての実行経路で子Agent生成を
+禁止することまでは本監査で確定していない。
+限定した追加確認でも、`internal/runtime/copilot/tools.go:104–105`のpolicy hookが
+`task`／`run_subagent`／`agent`を拒否することは確認したが、
+`ToolPolicy == nil`を含む全inbox登録経路への適用は未確定だった。
+この前提を確認せず、到達可能な権限違反を断定することも、
+逆にroot限定の安全性を確認済みと扱うこともできない。
+
+### FACT：SDK応答と不明結果の復元
+
+SDKの`session.go:1925–1965`は、空でない`TextResultForLLM`を
+`HandlePendingToolCall`へ渡す。handlerの成功は完了イベントを合成しない。
+`rpc/zsession_events.go:3280–3292`にtool完了の型とcall識別があり、
+`5722–5723`の`Result.Content`はモデル向け文字列だが、
+token効率のため切り詰められる可能性がある。
+このため、同一hashになることはSDKだけでは保証されない。
+現実装が改変・省略を成功扱いしない方向は維持する。
+合成試験では、返した文字列をそのまま完了イベントへ設定している。
+wire往復や実サービスのイベント生成・本文保存は検証していない。
+
+生イベント側の`recordEvent`は到達projectorを呼ぶが、
+`internal/runtime/controller/receipts.go`の`adoptSavedTurn`は、
+復元したイベントを保存しても`recordClarificationArrival`を呼ばない。
+一致済みイベントのreplayもprojection前に終了する。
+handoff再構築はRequestRecordの段階を読むだけなので、
+切断中の完了を後で取得しても`REQUESTED`から進まず、ACKは拒否される。
+再送しない安全側の動作はあるが、確定できる不明結果の復元は未完成である。
+
+さらに既存`RuntimeReceipt`はAgentIDを保持していない。
+保存済みreceiptだけからrootを推定して再投影すると、帰属不明のイベントまで
+昇格させる可能性がある。単にprojectorを追加呼出しするだけの修正は採用しない。
+
+### DECISION：追加実装の停止
+
+root帰属の安全条件が未確定のため、配信・ACKの実行を追加せず、
+不明結果の再処理と矛盾回答の新規実装も停止した。
+変更は監査記録とCLI制約の訂正に限定する。
+inboxをコード上で無効化・修正したわけではなく、重大な違反を再現済みという判定でもない。
+前節の985 PASSは限定的な合成試験の証拠であり、上記の不足を解消する根拠として流用しない。
+
+#283はOPENで、今回の監査だけで受入れ条件のcheckboxは変更しない。
+矛盾回答の保存・解決待ち・仕様所有者への委任は、本区間では未監査・未実装である。
+#284は未着手、第五審査FAILを維持する。
+Push／PR／Merge／Release、第六審査、TKB3復旧は行わない。
+
+### PROPOSAL：次の最小作業
+
+最初に、固定SDK／実行設定で子Agent生成が禁止されることを全経路で示すか、
+SDKから確実なroot帰属を取得できる方法を、モデルを使わない最小のwire試験で確認する。
+どちらも確認できなければinboxをfail-closedにする。
+その後、検証済みnative履歴から帰属を保持して到達証拠を復元し、
+同一owner／session／scope／期限の検査と同じtransactionで一度だけ投影する。
+これが成立してから矛盾回答の保存・解決へ進む。新しい権限・予算を承認した提案ではない。
+
+### 検証記録
+
+製品コードを変更していないことを`git diff --name-only -- '*.go'`で確認した。
+`go build ./...`、`go vet ./...`、`git diff --check`はPASS。
+gofmt対象の変更とcompletionの変更はないため、再生成・整形は行っていない。
+次の二つのコマンドはそれぞれ完走し、各5 PASS／0 FAIL／0 SKIPだった。
+
+```bash
+go test -json -count=1 -timeout 3m ./internal/runtime/controller ./internal/runtime/copilot ./cmd/taxion -run 'TestClarification(Successor|InboxSDK)|TestUserFacingTerminology'
+go test -race -json -count=1 -timeout 3m ./internal/runtime/controller ./internal/runtime/copilot ./cmd/taxion -run 'TestClarification(Successor|InboxSDK)|TestUserFacingTerminology'
+```
+
+この結果は既存の合成・fake Runtime試験と用語検査に限る。
+新たな帰属不明callのwire再現、検証済み履歴からの配信段階復元、
+矛盾回答の保存・解決の試験は未実施であり、上の成功数に含めない。
+実SDK wire RPC／実provider／実モデルは未検証。
+監査結果と異なる意味で、既存試験の成功を安全性の証明に使わない。
+
+| session artifact | SHA-256 |
+| --- | --- |
+| `clarification-audit-20261109-normal.jsonl` | `9495ef4a1373ad39a771ad785e8a5edaa454d8bafe2207c16879c44f2ef2c062` |
+| `clarification-audit-20261109-race.jsonl` | `18b6ac06b35956fdda87fea6aac81823fc32aa6676033538fb0fea28a866bc61` |
+
+22:08:26 JSTの保存前観測は使用21,300 requests、作業可能残150、reserve50で、
+承認済み期限は23:48:12 JSTのままである。
+最終indexは固定したtask-local Betterleaks 1.9.0で
+`go run ./cmd/taxion git check-index --secrets --scanner EXACT_TASK_LOCAL_BINARY`を実行し、
+結果とscan logのhashをcommit本文に記録する。

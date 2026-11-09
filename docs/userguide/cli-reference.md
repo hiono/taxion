@@ -573,7 +573,8 @@ Coderが安全なtool入力境界で `{"action":"receive"}` を呼ぶと、
 明示的に引き継がれた質問をcanonical receiptから一度だけ返す。
 この時点は `REQUESTED` であり、送信先への到達確認ではない。
 同じsession・tool callに対応するSDKの成功完了イベントで、モデル向け応答のhashまで一致した場合に
-`DELIVERED` を記録する。改変・省略された応答、イベント欠落、別callや子Agentのイベントでは進めない。
+`DELIVERED` を記録する。改変・省略された応答、イベント欠落、別call、
+AgentIDが明示された子Agentのイベントでは進めない。
 質問を読んだCoderが `{"action":"ack","id":"質問ID","receipt":"受信時のreceipt.hash"}` を呼び、
 現在の実行bindingと配信証跡を照合できた場合にだけ `ACKNOWLEDGED` を記録する。
 
@@ -584,6 +585,17 @@ ACKは回答でも受理でもなく、質問の状態は`OBSERVED`のままで�
 旧protocolのsessionへtoolを後付けしない。追加toolは設定hashを変えるため、
 旧sessionの再利用は既存のidentity検査で拒否される。
 実provider／実モデルでの配信は未検証であり、受信後の回答保存は従来の明示入力のままである。
+
+独立監査では、SDKの空の`AgentID`がrootだけでなく帰属情報のない呼出しも表すことを確認した。
+この実装の空値検査だけではroot限定を保証できない。
+Roleの設定で子Agentを起動できないことが全経路で成立するか、
+別の確実なroot帰属情報を取得できるまでは、inboxを安全に利用できると判断しない。
+実環境で帰属不明の子Agentがこの入口へ到達できるかは未確認であり、
+到達可能な脆弱性を再現済みという意味ではない。
+また、切断後に履歴から取得した成功イベントを保存しても、
+配信段階を復元する処理は未接続である。本文は再送せず`REQUESTED`のままとなる。
+これらの制約を解消するまで、追加の実配信・ACK試験は停止する。
+コード上の機能無効化や修正を行ったという意味ではない。
 
 旧binaryへのrollbackでは、これらの新しいplanning phaseを処理できると仮定せず、
 今回追加したorigin metadataも含めて、未解決質問とreceiptを保持したprivate backupから判断する。
