@@ -517,6 +517,35 @@ func testApprovedRequest(t *testing.T, resume bool, externalMode ...string) {
 				if bound.ConfigHash() == plain.ConfigHash() {
 					t.Fatal("actual Role factory did not bind the host intake tool to its configuration")
 				}
+				if dispatch.Recipient == "REVIEWER" {
+					observed, err := controller.ObserveClarification(db, dispatch.TaskID, dispatch.ID)
+					if err != nil {
+						return nil, err
+					}
+					question, err := controller.RequestClarification(db, controller.ClarificationRequest{
+						ID: "evidence:" + dispatch.ID, TaskID: dispatch.TaskID, DispatchID: dispatch.ID,
+						Role: "REVIEWER", Category: "evidence", BasisHash: observed.Hash,
+						Question: "Which test demonstrates the accepted behavior?", Reason: "Independent evidence clarification",
+						Uncertainty: "test evidence", References: []string{"taxion:clarification-task"},
+						AnswerFormat: "text", DecisionImpact: "Select evidence to review",
+						StopCondition: "Do not infer missing evidence", Deadline: time.Now().Add(time.Minute),
+					})
+					if err != nil {
+						return nil, err
+					}
+					var output bytes.Buffer
+					if err := clarificationCmd([]string{"resolve-coder", "--id", question.Request.ID}, &output); err != nil {
+						return nil, err
+					}
+					var delivery controller.ClarificationDelivery
+					if err := json.Unmarshal(output.Bytes(), &delivery); err != nil {
+						return nil, err
+					}
+					if delivery.Status != "HELD" || delivery.Target == nil ||
+						delivery.Target.DispatchID != dispatch.RelatedID || delivery.Target.SessionID == "" {
+						t.Fatal("request/CLI delivery control guessed or restarted the existing Coder", delivery)
+					}
+				}
 			}
 			received, err := controller.RenderDispatchContext(db, dispatch, true)
 			if err != nil {

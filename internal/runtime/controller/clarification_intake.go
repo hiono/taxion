@@ -69,10 +69,11 @@ func (c *Controller) ObserveRoleClarification(ctx context.Context, binding runti
 	// The receipt remains canonical; the tool returns a reference, not another
 	// copy of the question or an authorization to continue dependent work.
 	return json.Marshal(struct {
-		ID        string `json:"id"`
-		State     string `json:"state"`
-		Route     string `json:"route"`
-		Recipient string `json:"recipient"`
-		RequestID string `json:"requestId"`
-	}{result.Request.ID, result.State, result.Route, result.Recipient, "clarification:" + result.Request.ID})
+		ID        string                 `json:"id"`
+		State     string                 `json:"state"`
+		Route     string                 `json:"route"`
+		Recipient string                 `json:"recipient"`
+		RequestID string                 `json:"requestId"`
+		Delivery  *ClarificationDelivery `json:"delivery,omitempty"`
+	}{result.Request.ID, result.State, result.Route, result.Recipient, "clarification:" + result.Request.ID, result.Delivery})
 }

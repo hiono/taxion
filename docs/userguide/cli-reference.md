@@ -482,6 +482,7 @@ taxion conversation ask --task <task-id> \
 taxion conversation clarification observe --task TASK --dispatch DISPATCH
 taxion conversation clarification request --file question.json
 taxion conversation clarification answer --file answer.json
+taxion conversation clarification resolve-coder --id QUESTION_ID
 taxion conversation clarification history
 ```
 
@@ -537,6 +538,20 @@ Task／Dispatch／session／ownerはモデルの推測で補わず、hostが保�
 同じ実行の再送は追記せず、同じIDでの原文変更や別ownerへの付け替えは拒否する。
 このtoolは回答の受理、実配信、HOLD、Runtime Stop、依存作業の自動停止・再開を行わない。
 Roleへの説明でも未回答に依存する作業を進めないよう求めるが、その行動を実モデルで検証していない。
+
+Coder宛の質問は保存時に、Reviewer Dispatchの `RelatedID` と既存Flowの対応から
+配信先を解決する。以前保存した質問は `resolve-coder --id` で同じ処理を呼べる。
+質問のsession／ownerを宛先へ流用せず、CoderのTask／Dispatch／session／設定・仕様と、
+実行中なら既存operation owner／runnerを照合する。終了済みCoderへ現在のReviewer ownerを付与しない。
+対象不明・不一致・失効は配信せず、`delivery.status: "HELD"` と理由を返す。
+
+現在の既存入力経路ではRUNNING／busy中のCoderへ安全な通知を送れないため、
+この候補版は解決できた質問も保留し、送信済みとは扱わない。
+`HELD` は配信状況であり、TaskのHOLD、承認、Dispatch、Runtime Stopではない。
+保留記録はcanonical質問のID・sequence・hashと宛先metadataだけを既存RequestRecordへ保存する。
+再送・並行解決で追記せず、別session・owner・Dispatchへ自動で付け替えない。
+`history` の `delivery` は保存時のsnapshotであり、`resolve-coder` は現在の変化を
+保留理由として返すが、元のsnapshotを書き換えない。質問本文や回答本文を配信記録へ複製しない。
 
 旧binaryへのrollbackでは、これらの新しいplanning phaseを処理できると仮定せず、
 今回追加したorigin metadataも含めて、未解決質問とreceiptを保持したprivate backupから判断する。

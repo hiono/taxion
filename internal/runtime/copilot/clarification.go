@@ -19,6 +19,7 @@ func (a *Adapter) clarificationTools() []sdk.Tool {
 		Description: "Record a clarification from this running Role with its saved Task, Dispatch, session and owner. " +
 			"Consult saved sources first. Report the reason, uncertainty, consulted references, expected answer and affected decision. " +
 			"Observation only: this does not accept answers, approve work, dispatch another Role or stop the runtime. " +
+			"Coder destinations use the saved Reviewer relationship. Delivery HELD is not a Task HOLD or proof of delivery. " +
 			"Do not proceed with work depending on an unanswered question. Return real blockers in the existing result contract.",
 		Parameters: map[string]any{
 			"type": "object", "additionalProperties": false,

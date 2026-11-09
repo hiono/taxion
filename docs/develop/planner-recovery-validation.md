@@ -839,3 +839,172 @@ JSONLはsession artifactに保存し、照合用のSHA-256を残す。
 SDK未到着イベントの完全回収、Disconnect期限は未検証・未保証のままである。
 旧binaryはorigin付きreceiptの読取りに失敗し得るため、rollback前に原本を保持する。
 第五審査FAILを維持し、第六審査・push・PR・公開・配布・TKB3復旧は実施しない。
+
+## Coder宛質問の配信接続調査（2026-11-09、BUDGET_STOP）
+
+開始時は `fix/native-event-contract-083` の
+`b5c19f91ce60e53529f3a6a4568204b8cc2c808f`、worktree cleanだった。
+他worktreeはread-onlyで確認し、変更していない。
+#283／#90はOPENで、本文は前回取得分と一致し、前回の記録コメントを確認した。
+19:41 JSTの正規照会は21,000 requestsだったが、
+19:42:49 JSTの実装可否判断時に21,050 requestsとなった。
+承認上限21,100、reserve 50を差し引いた作業可能残はゼロである。
+期限20:48:12 JSTを変更せず、配信実装・追加試験を開始しない。
+
+確認できた生成元は `controller/clarification.go:requestClarification` である。
+Reviewerのimplementation／evidence質問は `Recipient: CODER` として保存される。
+`Request.DispatchID` と `Context.Dispatch` は質問したReviewerの実行を指し、
+`Origin` のsession・ownerも発行元の情報である。配信先Coderのbindingではない。
+既存 `ClarificationHistory` とcanonical RequestRecordを再利用できるが、
+質問保存の重複抑止は配信の冪等性や到達確認を保証しない。
+
+候補となる接続先は `Controller.SendWithBudgetGuidance` と
+`runtime.Identity.Send`／`copilot.Adapter.Send` である。
+前者はRUNNINGのDispatchに対して実際のSendを行わず `markRunning` を返す。
+後者はbusy sessionに `ErrSessionBusy` を返す。
+したがって既存Sendの成功をそのまま「実行中Coderへ配信成功」と記録できない。
+SDKのSend戻り値もadapterでは捨てており、質問IDに結び付いた永続的な配信確認はない。
+
+実行中workerを保持しているのは `controller/run.go:runReviewFlow` の
+Start→Send→StreamEvents→Closeの区間である。
+この区間が既存実行へ接続する候補であり、新しいRoleやsessionを起動する必要はない。
+ただし通常の逐次FlowではCoderをCloseしてからReviewerを実行する。
+`core/reviewflow.go:StoppedCoderReviewer` もReviewerの `RelatedID` が
+成功済みCoderを指す条件を明示している。
+同じFlowにCoderが存在するだけでは、生きた配信先が存在する証拠にならない。
+ReviewerとCoderのTaskも同じIDとは限らず、単純なTask一致や最新Coder検索では解決しない。
+
+次の最小単位は、質問のcanonical参照とReviewerの `RelatedID` から
+既存CoderのTask／Dispatch／session／owner／実行状態を解決し、
+一意に照合できない場合や終了済みの場合は配信せず保留する対象解決処理である。
+実送信へ進む前に、busy中入力、配信要求と確認の区別、
+並行再送、送信途中停止、結果不明時の非再送を既存receiptで表現できるか確認する。
+既存のSend拒否条件を削除したり、終了済みCoderを勝手に再起動したりしない。
+
+今回は製品コードを変更せず、試験も実行していない。
+実SDK handlerからCoderへ届くこと、実モデルの挙動、配信成功・失敗・再開は未検証である。
+開始時のIssue JSONはsession artifactに保存した。
+#283は `e0f5f35f09216a4bb89b6720cb91b69c733e57f467fe9c735cd738c97045936d`、
+#90は `b9e899d2e51425262e3b2abf5bf4ca4feeaa88e7927591cf52faf6349514ae3a`。
+HEADの `controller/controller.go` のSHA-256は
+`059b13eca121d93cec0fb8e42b0c8342284fe08775bc4263ec5291390cf55e99`、
+`copilot/copilot.go` は
+`4cde1ab0dd288961ff4722816783517c8bb9896409b911006483da8626ffff89`。
+新しいIssue完了条件は達成扱いにせず、#284未着手・第五審査FAILを維持する。
+
+## RelatedIDによるCoder解決と配信保留（2026-11-09）
+
+開始時は `fix/native-event-contract-083` の
+`b5c19f91ce60e53529f3a6a4568204b8cc2c808f` で、前節の未コミット文書差分を保持した。
+既存の調査と取得済み #283／#90 の本文・コメントを再利用し、他worktreeは変更していない。
+承認上限は21,500 requests、reserve 50、利用可能上限21,450、期限23:48:12 JSTへ延長された。
+19:54 JSTの正規照会は21,050、20:06 JSTは21,100 requestsだった。
+
+### 実装した接続と既存責務
+
+`requestClarification` のCoder宛観測から、同じWorkspace transaction内で宛先を解決する。
+これにより既存host tool／Controller／CLIの質問保存から保留処理へ接続する。
+以前から保存されている質問には
+`conversation clarification resolve-coder --id QUESTION_ID` を追加した。
+この入口にも従来のprovenance検査を適用し、helpだけを例外とする。
+
+宛先はReviewer Dispatchの `RelatedID` から一意に選ぶ。
+質問元Task／Dispatch／session／configと保存snapshot、Reviewerを含む唯一のFlow、
+CoderのTask／Dispatch／Role／repository／instruction、既存の `CreatedFrom` を照合する。
+通常FlowではCoderはFlowのTaskに対応する。承認済みのreview-first continuationでは、
+既存 `SourceDispatchID` と `Contract.Supersedes` で元CoderのTaskを照合する。
+同じrepositoryの最新Coderや別sessionを推測で選ばない。
+
+初期試験でReviewer TaskのParentID一致を仮定したところ、正当な既存Flowを誤拒絶した。
+`issueFlowReviewer` はParentIDを空にし、`CreatedFrom` を使うため、
+既存のRelatedID／Flow所属／CreatedFrom契約に合わせて修正した。
+拒否条件を一括削除したり、新しい親子関係を生成したりしていない。
+
+終了済み・停止要求済みCoderは識別できても、現在のReviewer ownerを付与せず保留する。
+仮に対象が実行中なら、session・configと仕様scopeに加え、既存の実行operation、
+そのowner、Flow runner、期限、質問元originを照合する。
+ownerは質問metadataのコピーではなく、既存実行leaseから解決する。
+入力経路のRUNNING／busy拒否を迂回せず、最後まで照合できても `no-safe-input-path` として保留する。
+通常FlowがReviewerへ進む前にCoderを終了・Closeする既存順序も変えていない。
+
+### canonical保存と再送
+
+配信保留は `ClarificationDelivery` のversion 1 metadataとして、
+既存planning RequestRecordの `clarification-delivery:QUESTION_ID` に1件だけ追記する。
+内容は元質問のID・sequence・hash、宛先snapshot、`HELD`、理由、時刻であり、
+質問・回答本文や元質問snapshotを複製しない。新table・scheduler・brokerを追加していない。
+元質問の参照を照合し、並行再送もWorkspace transactionで単一追記にする。
+
+再確認でsession／owner／対象・証拠が変われば、元の宛先を保持したまま保留を返す。
+元snapshotを更新したり、新しい宛先へ再送したりしない。
+`ClarificationHistory` はcanonical参照を検証して保留metadataを表示する。
+履歴は保存時snapshotであり、再確認時の一時的な理由変更は既存receiptを書き換えない。
+送信を開始していないため、配信成功・開始済み・結果不明を捏造しない。
+将来実送信へ進む際のprovider確認と不明結果の照合・冪等性は未実装である。
+
+質問自体は `OBSERVED` のままである。配信の `HELD` はTaskのHOLDとは別であり、
+受理・承認・Dispatch、Role起動、Runtime Stop、owner取得を発生させない。
+回答の自動受理、矛盾解決、#284の正式再検証・Recoveryは追加していない。
+
+### 検証する受入れ条件
+
+| 条件 | 実経路・確認範囲 |
+| --- | --- |
+| 正しいRelatedID解決と終了済み保留 | 既存Flowのfake Coderを実Controllerで完了させ、Reviewerの保存質問から元CoderのID／sessionを解決する |
+| 不明・不一致・失効 | RelatedID、候補重複、Role、Task、Dispatch、session、scope、owner、期限のmetadata probeで保留。live probeは未保存の仮想状態であり、正当な並行Flowを実行した証拠ではない |
+| 再送・並行処理 | 同じ質問の再保存と8並行の解決で元質問＋保留の2 receiptだけ。別sessionへの付け替えと異なるcanonical参照を拒否する |
+| 旧質問と再open | 配信metadataのない既存snapshotを通常のstoreへ読み込み、初回解決後の再openで同じ参照を保持する |
+| 実利用入口 | requestの既存Coder→Reviewer経路から質問保存とCLI handlerのresolve-coderを通し、元Coderを保留する。モデルの代わりにfake Roleを使用 |
+| SDKの入力拒否維持 | 実Copilot adapterのSendに合成busy／stopped sessionを渡して、SDK送信前の既存拒否を確認する |
+| 権限と実行不変 | Graph・Ledger・HOLD・operation・ownerは不変。既存Clarification／Planner／Stop／ownership／Recovery回帰を実行する |
+
+実Coderへの配信、providerの到達確認、実モデル、本番store、公開CIは未検証である。
+#283は実配信・矛盾回答解決を残し、#284未着手・第五審査FAILを維持する。
+push／PR／Merge／Release、第六審査、TKB3復旧は実施しない。
+
+### この単位の検証結果
+
+`go build ./...`、`go vet ./...`、gofmt、
+`go generate ./cmd/taxion`、`git diff --check` はPASS。
+新しい製品差分に対し、次のコマンドを実行した。
+
+| 実行 | PASS / FAIL / SKIP |
+| --- | --- |
+| `go test -json -count=1 -timeout 10m ./internal/runtime/copilot ./internal/store` | 393 / 0 / 11 |
+| `go test -json -count=1 -timeout 10m ./internal/runtime/controller -run "$SELECTOR"` | 189 / 0 / 0 |
+| `TAXION_TEST_FAILED_REVIEW_CLI=build go test -json -count=1 -timeout 10m ./cmd/taxion` | 399 / 0 / 2 |
+| 上記adapter／storeに `-race` を付加 | 393 / 0 / 11 |
+| 上記controllerに `-race` を付加 | 189 / 0 / 0 |
+| 上記CLIに `-race` を付加 | 399 / 0 / 2 |
+
+```bash
+SELECTOR='Test(CoderClarification|Clarification|ReviewerClarification|Question|Planner|Operation|RecoveryRequiresStoppedExecutionAndExactOwner|TargetedInterrupt|FlowRunnerObservesInterrupt|InterruptOfUnstarted|HandoffCleanup|Feedback|ResumeContractGate|StoppedTurn|ReviewProgress|LegacyBudgetStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun|BudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun)'
+```
+
+各行はsubtest込みで、通常・raceはそれぞれ981 PASS／0 FAIL／13 SKIPである。
+raceの報告・package timeoutはない。SKIPは、実Copilot session、実サービス、
+quota／native履歴、plugin探索の11件と、実scanner full hook・実OpenCode document flowの2件である。
+前の実装単位の成功数や初期失敗を合算していない。
+全packageの通常・race再実行、実SDKへの通知RPC、実モデルの到達確認は行っていない。
+
+初期の対象試験では、ParentIDの誤った前提で正当な宛先を誤拒絶したため、
+既存のCreatedFrom契約を使用するよう本体を修正した。
+その後のlive metadata probeでは、関連元の確定結果を消すと先に証拠検査で拒否されるため、
+確定証拠を保持した仮想状態と明示的なstale scopeを分けて検査した。
+試験追加時の関数配置による構文エラーと、helpの行数をsubcommand数と取り違えた
+索引試験の失敗も修正し、対象試験の再実行後に上表の回帰を完走した。
+
+JSONLはsession artifactに保存し、照合用のSHA-256を残す。
+
+| 証跡名 | SHA-256 |
+| --- | --- |
+| `coder-resolution-20261109-adapters-store-normal.jsonl` | `2b0a5ecc2401bded4e24cd146823e8d6e9938affe642ce3931652806e79d8f15` |
+| `coder-resolution-20261109-controller-normal.jsonl` | `179ed56c4c9867f3f3c7afc2af12d0f4c508f33a783cafb03be0bcf675a0b239` |
+| `coder-resolution-20261109-cli-normal.jsonl` | `053a42bc96dbcc5fca88b9c0ab33ae3a8bb3c9b4dc51692a881baf8ea5d8dbe8` |
+| `coder-resolution-20261109-adapters-store-race.jsonl` | `ddb38c89abce4cdf78d63866da03a351f2ecd860a029611caa7040c207fa8904` |
+| `coder-resolution-20261109-controller-race.jsonl` | `e6f01d166848b1ce663f0b8bdd4cfdbc3d276dfefed687211e44de5ab8801302` |
+| `coder-resolution-20261109-cli-race.jsonl` | `c0ab841e445757dbddc3ed6bb795659a80308ecbcecbe1dda2c5714df148cad6` |
+
+最終indexは、前節と同じarchive／binary hashに固定したtask-local Betterleaks 1.9.0で
+`go run ./cmd/taxion git check-index --secrets --scanner EXACT_TASK_LOCAL_BINARY` を実行する。
+結果とlogのhashはcommit本文に記録し、全履歴scanやSKIPしたhookとは区別する。

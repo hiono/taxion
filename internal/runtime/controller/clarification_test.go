@@ -209,6 +209,10 @@ func TestReviewerClarificationRoutesEvidenceToCoderWithoutChangingReviewer(t *te
 		if err != nil || got.Recipient != expected {
 			t.Fatalf("Reviewer %s clarification was misrouted: %+v %v", category, got, err)
 		}
+		if expected == "CODER" && (got.Delivery == nil || got.Delivery.Status != "HELD" ||
+			got.Delivery.Target == nil || got.Delivery.Target.DispatchID != dispatch.RelatedID) {
+			t.Fatal("Reviewer question did not resolve and hold its existing Coder", got)
+		}
 		if _, err := AnswerClarification(db, got.Request.ID, ClarificationAnswer{
 			Role: "REVIEWER", Actor: "reviewer", Source: "self", Text: "I will implement the fix myself.",
 		}); err == nil {

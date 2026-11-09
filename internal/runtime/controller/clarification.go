@@ -75,17 +75,18 @@ type ClarificationOrigin struct {
 
 // These are planning receipts, not authorization or executable instructions.
 type Clarification struct {
-	Version   int                  `json:"version"`
-	Phase     string               `json:"phase"`
-	Request   ClarificationRequest `json:"request"`
-	Context   ClarificationContext `json:"context"`
-	Signature string               `json:"signature"`
-	Route     string               `json:"route"`
-	Recipient string               `json:"recipient,omitempty"`
-	State     string               `json:"state"`
-	Answer    *ClarificationAnswer `json:"answer,omitempty"`
-	At        time.Time            `json:"at"`
-	Origin    *ClarificationOrigin `json:"origin,omitempty"`
+	Version   int                    `json:"version"`
+	Phase     string                 `json:"phase"`
+	Request   ClarificationRequest   `json:"request"`
+	Context   ClarificationContext   `json:"context"`
+	Signature string                 `json:"signature"`
+	Route     string                 `json:"route"`
+	Recipient string                 `json:"recipient,omitempty"`
+	State     string                 `json:"state"`
+	Answer    *ClarificationAnswer   `json:"answer,omitempty"`
+	At        time.Time              `json:"at"`
+	Origin    *ClarificationOrigin   `json:"origin,omitempty"`
+	Delivery  *ClarificationDelivery `json:"delivery,omitempty"`
 }
 
 func ObserveClarification(db *store.Store, taskID, dispatchID string) (ClarificationContext, error) {
@@ -328,6 +329,11 @@ func requestClarification(state *store.Workspace, input ClarificationRequest, or
 		}
 		return appendClarification(state, result)
 	}()
+	if err == nil && result.Route == "ASK" && result.Recipient == "CODER" {
+		var delivery ClarificationDelivery
+		delivery, err = resolveCoderClarification(state, result.Request.ID)
+		result.Delivery = &delivery
+	}
 	return result, err
 }
 
@@ -380,6 +386,10 @@ func ClarificationHistory(db *store.Store) ([]Clarification, error) {
 		return nil, err
 	}
 	for i := range history {
+		history[i].Delivery, err = savedClarificationDelivery(state, history[i].Request.ID)
+		if err != nil {
+			return nil, err
+		}
 		answer := history[i].Answer
 		if answer == nil || answer.Receipt == nil {
 			continue

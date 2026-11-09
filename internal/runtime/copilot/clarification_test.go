@@ -31,6 +31,7 @@ func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing
 		AuthorizationID: "decision:1",
 		Decisions:       []core.TaskDecision{{ID: "decision:1", Source: "human:1", Text: "approve"}},
 	}
+
 	if err := graph.Track(task, "human", "register"); err != nil {
 		t.Fatal(err)
 	}
@@ -346,5 +347,22 @@ func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing
 	}
 	if result, err := handler(invocation); err == nil || result.ResultType == "success" {
 		t.Fatal("storage failure was hidden")
+	}
+}
+
+func TestClarificationDeliveryCannotBypassBusyOrStoppedCoder(t *testing.T) {
+	adapter, err := New(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, busy := range []bool{true, false} {
+		adapter.sessions["coder"] = &managedSession{sdk: &sdk.Session{}, busy: busy, stopped: !busy}
+		want := ErrStoppedSession
+		if busy {
+			want = ErrSessionBusy
+		}
+		if err := adapter.Send(t.Context(), "coder", "A saved clarification needs an answer"); !errors.Is(err, want) {
+			t.Fatal("notification bypassed the existing Coder input boundary", err, want)
+		}
 	}
 }

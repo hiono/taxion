@@ -13,17 +13,19 @@ import (
 
 func clarificationCmd(args []string, output io.Writer) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(output, "Usage of conversation clarification:\n  observe --task ID [--dispatch ID]\n  request --file FILE\n  answer --file FILE\n  history\n\nObservation only; no approval, Dispatch, HOLD or runtime stop.")
+		fmt.Fprintln(output, "Usage of conversation clarification:\n  observe --task ID [--dispatch ID]\n  request --file FILE\n  answer --file FILE\n  resolve-coder --id ID\n  history\n\nObservation only; no approval, Dispatch, HOLD or runtime stop.")
 		return flag.ErrHelp
 	}
 	action := args[0]
-	if action != "observe" && action != "request" && action != "answer" && action != "history" {
+	if action != "observe" && action != "request" && action != "answer" && action != "history" && action != "resolve-coder" {
 		return fmt.Errorf("unknown clarification action")
 	}
 	fs := flag.NewFlagSet("conversation clarification "+action, flag.ContinueOnError)
 	fs.SetOutput(output)
-	var taskID, dispatchID, file string
-	if action == "observe" {
+	var taskID, dispatchID, file, id string
+	if action == "resolve-coder" {
+		fs.StringVar(&id, "id", "", "saved Reviewer question ID; resolve and hold, never start or steer a Coder")
+	} else if action == "observe" {
 		fs.StringVar(&taskID, "task", "", "saved Task identity")
 		fs.StringVar(&dispatchID, "dispatch", "", "saved sender Dispatch identity")
 	} else if action != "history" {
@@ -39,8 +41,9 @@ func clarificationCmd(args []string, output io.Writer) error {
 	}
 	if fs.NArg() != 0 ||
 		action == "observe" && taskID == "" ||
+		action == "resolve-coder" && id == "" ||
 		(action == "request" || action == "answer") && file == "" {
-		return fmt.Errorf("clarification observe requires --task [--dispatch]; request/answer require --file; history accepts no flags")
+		return fmt.Errorf("clarification observe requires --task [--dispatch]; request/answer require --file; resolve-coder requires --id; history accepts no flags")
 	}
 	db, _, err := loadWorkspace()
 	if err != nil {
@@ -49,6 +52,8 @@ func clarificationCmd(args []string, output io.Writer) error {
 	defer db.Close()
 	var result any
 	switch action {
+	case "resolve-coder":
+		result, err = controller.ResolveCoderClarification(db, id)
 	case "observe":
 		result, err = controller.ObserveClarification(db, taskID, dispatchID)
 	case "history":

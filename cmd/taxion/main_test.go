@@ -67,6 +67,7 @@ func TestUsageGroupsCommandsWithoutChangingSyntax(t *testing.T) {
 	if len(groups) != 12 || len(seen) != 121 || !strings.Contains(commands, "records cancel") ||
 		!strings.Contains(commands, "request recover") ||
 		!strings.Contains(commands, "conversation clarification") ||
+		!strings.Contains(commands, "resolve-coder") ||
 		!strings.Contains(commands, "workflow extend") ||
 		!strings.Contains(commands, "workflow recover-review") ||
 		!strings.Contains(commands, "workflow reconcile-stopped") || !strings.Contains(commands, "workflow validate-input") {
