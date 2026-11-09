@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"time"
@@ -39,19 +40,29 @@ func (c *Controller) recordEvent(dispatchID, streamID string, event runtime.Even
 			}
 		}
 		now := time.Now().UTC()
-		if event.Type == runtime.EventUsage {
+		if event.Type == runtime.EventUsage || event.Type == runtime.EventUsageCheckpoint {
 			var usage core.DispatchUsage
-			if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &usage); err != nil {
-				return err
+			if event.Type == runtime.EventUsage {
+				if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &usage); err != nil {
+					return err
+				}
+				if !nonnegativeUsage(usage) {
+					return fmt.Errorf("taxion: invalid runtime event usage")
+				}
+				usage.ObservedAt = now
 			}
-			if !nonnegativeUsage(usage) {
-				return fmt.Errorf("taxion: invalid runtime event usage")
-			}
-			usage.ObservedAt = now
 			for i := range state.Graph.Dispatches {
 				if state.Graph.Dispatches[i].ID == dispatchID {
-					if err := appendRuntimeUsage(&state.Graph.Dispatches[i], usage); err != nil {
-						return err
+					if event.Type == runtime.EventUsage {
+						if err := appendRuntimeUsage(&state.Graph.Dispatches[i], usage); err != nil {
+							return err
+						}
+					} else {
+						checkpoint, _, err := runtime.DecodeUsageCheckpoint(event.Payload, dispatch.RuntimeSessionID, dispatch.RuntimeUsage)
+						if err != nil {
+							return err
+						}
+						appendRuntimeCheckpoint(&state.Graph.Dispatches[i], checkpoint)
 					}
 					break
 				}
@@ -100,21 +111,56 @@ func (c *Controller) adoptSavedTurn(dispatch core.GraphDispatch, flow core.Revie
 					return err
 				}
 			}
+			if event.Type == runtime.EventUsageCheckpoint {
+				checkpoint, _, err := runtime.DecodeUsageCheckpoint(event.Payload, turn.SessionID, current.RuntimeUsage)
+				if err != nil {
+					return err
+				}
+				appendRuntimeCheckpoint(&current, checkpoint)
+			}
 			state.Records.Events = append(state.Records.Events, store.RuntimeReceipt{
 				DispatchID: dispatch.ID, SessionID: turn.SessionID, StreamID: stream,
 				Sequence: uint64(index + 1), Type: event.Type, Payload: event.Payload,
 				Hash: receiptHash(event.Payload), At: now,
 			})
 		}
-		if err := reconcileSavedUsage(&current, turn.UsageTotals, now); err != nil {
-			return err
+		for _, checkpoint := range turn.UsageCheckpoints {
+			appendRuntimeCheckpoint(&current, checkpoint)
+		}
+		if len(current.RuntimeUsageCheckpoints) == 0 {
+			if err := reconcileSavedUsage(&current, turn.UsageTotals, now); err != nil {
+				return err
+			}
+		} else {
+			summary, err := core.SummarizeUsage(turn.SessionID, current.RuntimeUsage, current.RuntimeUsageCheckpoints)
+			if err != nil {
+				return err
+			}
+			totals, err := core.SummarizeUsage("", turn.UsageTotals, nil)
+			if err != nil {
+				return err
+			}
+			if totals.CreditsStatus == "complete" && summary.NanoAIU != nil &&
+				(*summary.NanoAIU > *totals.NanoAIU+1e-6 ||
+					summary.CreditsStatus == "complete" && math.Abs(*summary.NanoAIU-*totals.NanoAIU) > 1e-6) ||
+				totals.TokenStatus == "complete" && summary.InputOutputTokens != nil &&
+					(*summary.InputOutputTokens > *totals.InputOutputTokens ||
+						summary.TokenStatus == "complete" && *summary.InputOutputTokens != *totals.InputOutputTokens) {
+				return fmt.Errorf("taxion: saved checkpoint conflicts with final aggregate")
+			}
+			for _, checkpoint := range current.RuntimeUsageCheckpoints {
+				if len(turn.UsageTotals) != 0 && core.UsageBelowKnown(checkpoint.UsageTotals, turn.UsageTotals) {
+					return fmt.Errorf("taxion: saved checkpoint exceeds final model aggregate")
+				}
+			}
 		}
 		for index := range state.Graph.Dispatches {
 			if state.Graph.Dispatches[index].ID == current.ID {
 				state.Graph.Dispatches[index] = current
 			}
 		}
-		if len(current.RuntimeUsage) != len(dispatch.RuntimeUsage) {
+		if len(current.RuntimeUsage) != len(dispatch.RuntimeUsage) ||
+			len(current.RuntimeUsageCheckpoints) != len(dispatch.RuntimeUsageCheckpoints) {
 			if err := appendBudgetAudit(state, flow, "USAGE_OBSERVED", taskBudgetReport(state.Graph, flow, now)); err != nil {
 				return err
 			}
@@ -249,28 +295,25 @@ func cloneUsageMetric(value *int64) *int64 {
 }
 
 func appendRuntimeUsage(dispatch *core.GraphDispatch, usage core.DispatchUsage) error {
-	if usage.Accounting != nil {
-		for _, previous := range dispatch.RuntimeUsage {
-			if previous.Accounting == nil || *previous.Accounting != *usage.Accounting {
-				continue
-			}
-			usage.ObservedAt = previous.ObservedAt
-			if !reflect.DeepEqual(previous, usage) {
-				return fmt.Errorf("taxion: runtime usage accounting identity was reused with different metrics")
-			}
-			return nil
+	return core.AppendUsage(&dispatch.RuntimeUsage, usage)
+}
+
+func appendRuntimeCheckpoint(dispatch *core.GraphDispatch, checkpoint core.UsageCheckpoint) {
+	for _, previous := range dispatch.RuntimeUsageCheckpoints {
+		if reflect.DeepEqual(previous, checkpoint) {
+			return
 		}
 	}
-	dispatch.RuntimeUsage = append(dispatch.RuntimeUsage, usage)
-	return nil
+	dispatch.RuntimeUsageCheckpoints = append(dispatch.RuntimeUsageCheckpoints, checkpoint)
 }
 
 type reviewFinalization struct {
-	Result          *core.DispatchResult `json:"result"`
-	Usage           []core.DispatchUsage `json:"usage"`
-	InstructionHash string               `json:"instructionHash"`
-	ConfigHash      string               `json:"configHash"`
-	RuntimeClosed   bool                 `json:"runtimeClosed"`
+	Result           *core.DispatchResult   `json:"result"`
+	Usage            []core.DispatchUsage   `json:"usage"`
+	InstructionHash  string                 `json:"instructionHash"`
+	ConfigHash       string                 `json:"configHash"`
+	RuntimeClosed    bool                   `json:"runtimeClosed"`
+	UsageCheckpoints []core.UsageCheckpoint `json:"usageCheckpoints,omitempty"`
 }
 
 func savedReviewFinalization(state store.Workspace, dispatch core.GraphDispatch) (*reviewFinalization, error) {
@@ -287,6 +330,10 @@ func savedReviewFinalization(state store.Workspace, dispatch core.GraphDispatch)
 			phase.InstructionHash != dispatch.InstructionHash || phase.ConfigHash != dispatch.RuntimeConfigHash ||
 			len(phase.Usage) > len(dispatch.RuntimeUsage) ||
 			len(phase.Usage) != 0 && !reflect.DeepEqual(phase.Usage, dispatch.RuntimeUsage[:len(phase.Usage)]) ||
+			len(phase.UsageCheckpoints) > len(dispatch.RuntimeUsageCheckpoints) ||
+			len(phase.UsageCheckpoints) != 0 &&
+				!reflect.DeepEqual(phase.UsageCheckpoints, dispatch.RuntimeUsageCheckpoints[:len(phase.UsageCheckpoints)]) ||
+			phase.RuntimeClosed && len(phase.UsageCheckpoints) != len(dispatch.RuntimeUsageCheckpoints) ||
 			phase.RuntimeClosed && len(phase.Usage) != len(dispatch.RuntimeUsage) || phase.Result == nil ||
 			phase.Result.Status != core.DispatchSucceeded || phase.Result.GitEvidence == nil {
 			return nil, fmt.Errorf("taxion: saved review finalization differs from its bound validated result")
@@ -331,6 +378,7 @@ func (c *Controller) recordReviewFinalization(dispatch core.GraphDispatch, resul
 		body, err := json.Marshal(reviewFinalization{
 			Result: result, Usage: current.RuntimeUsage, InstructionHash: current.InstructionHash,
 			ConfigHash: current.RuntimeConfigHash, RuntimeClosed: closed,
+			UsageCheckpoints: current.RuntimeUsageCheckpoints,
 		})
 		if err != nil {
 			return err
@@ -359,19 +407,25 @@ func validateResultReceipt(state *store.Workspace, dispatch core.GraphDispatch) 
 			}
 			if latest != nil {
 				var prior struct {
-					Result *core.DispatchResult
-					Usage  []core.DispatchUsage
+					Result           *core.DispatchResult
+					Usage            []core.DispatchUsage
+					UsageCheckpoints []core.UsageCheckpoint `json:",omitempty"`
 				}
 				if err := core.DecodeGraphInput(strings.NewReader(latest.Payload), &prior); err != nil ||
 					prior.Result == nil || prior.Result.Status != core.DispatchSuspended ||
 					prior.Result.DispatchID != dispatch.ID || prior.Result.TaskID != dispatch.TaskID ||
 					prior.Result.Recipient != dispatch.Recipient || prior.Result.Repository != dispatch.Repository ||
-					len(prior.Usage) > len(dispatch.RuntimeUsage) {
+					len(prior.Usage) > len(dispatch.RuntimeUsage) ||
+					len(prior.UsageCheckpoints) > len(dispatch.RuntimeUsageCheckpoints) {
 					return fmt.Errorf("taxion: historical result is not a suspension of the same Dispatch")
 				}
 				for index, usage := range prior.Usage {
 					if !reflect.DeepEqual(usage, dispatch.RuntimeUsage[index]) {
 						return fmt.Errorf("taxion: historical result usage differs from the saved session")
+					}
+					if !reflect.DeepEqual(prior.UsageCheckpoints, dispatch.RuntimeUsageCheckpoints[:len(prior.UsageCheckpoints)]) &&
+						len(prior.UsageCheckpoints) != 0 {
+						return fmt.Errorf("taxion: historical result checkpoints differ from the saved session")
 					}
 				}
 			}
@@ -381,9 +435,10 @@ func validateResultReceipt(state *store.Workspace, dispatch core.GraphDispatch) 
 	}
 	if latest != nil {
 		body, err := json.Marshal(struct {
-			Result *core.DispatchResult
-			Usage  []core.DispatchUsage
-		}{dispatch.Result, dispatch.RuntimeUsage})
+			Result           *core.DispatchResult
+			Usage            []core.DispatchUsage
+			UsageCheckpoints []core.UsageCheckpoint `json:",omitempty"`
+		}{dispatch.Result, dispatch.RuntimeUsage, dispatch.RuntimeUsageCheckpoints})
 		if err != nil || latest.Hash != receiptHash(string(body)) {
 			return fmt.Errorf("taxion: saved result differs from controller receipt")
 		}

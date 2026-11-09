@@ -29,18 +29,20 @@ func drainCompletedTurn(ctx context.Context, events <-chan runtime.Event, usage 
 		switch event.Type {
 		case runtime.EventUsage:
 			var call core.DispatchUsage
-			if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &call); err != nil {
+			if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &call); err != nil || !core.ValidUsageMetadata(call) {
 				return fmt.Errorf("taxion: completed main turn has invalid usage")
 			}
 			call.ObservedAt = time.Now().UTC()
-			*usage = append(*usage, call)
+			if err := core.AppendUsage(usage, call); err != nil {
+				return err
+			}
 		case runtime.EventUsageCheckpoint:
-			checkpoint, matches, err := runtime.DecodeUsageCheckpoint(event.Payload, sessionID, *usage)
+			checkpoint, _, err := runtime.DecodeUsageCheckpoint(event.Payload, sessionID, *usage)
 			if err == nil {
 				*checkpoints = append(*checkpoints, checkpoint)
 			}
-			if err != nil || !matches {
-				return fmt.Errorf("taxion: completed main turn has incomplete or conflicting checkpoint accounting")
+			if err != nil {
+				return fmt.Errorf("taxion: completed main turn has conflicting checkpoint accounting")
 			}
 		case runtime.EventTurnFinished:
 			return nil

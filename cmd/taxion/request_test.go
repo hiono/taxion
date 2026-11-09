@@ -145,13 +145,18 @@ func (r *requestFixtureRuntime) EventsAfter(context.Context, string, uint64) (<-
 }
 func (r *requestFixtureRuntime) Send(_ context.Context, _, text string) error { return r.send(text) }
 
-func emitFixturePlannerTurn(worker *requestFixtureRuntime, usage, output string) {
+func emitFixturePlannerTurn(worker *requestFixtureRuntime, usage, output string, checkpointOnly ...bool) {
 	go func() {
 		message, turn := worker.id+"-input", worker.id+"-turn"
+		usageEvent := runtime.Event{Type: runtime.EventUsage, Payload: usage}
+		if len(checkpointOnly) != 0 && checkpointOnly[0] {
+			usageEvent = runtime.Event{Type: runtime.EventUsageCheckpoint,
+				Payload: `{"usageTotals":[` + usage + `],"totalNanoAIU":1,"aiCreditsStatus":"complete","watermarks":{"` + worker.id + `":1}}`}
+		}
 		for index, event := range []runtime.Event{
 			{Type: runtime.EventInput, MessageID: message},
 			{Type: runtime.EventTurnStarted, TurnID: turn},
-			{Type: runtime.EventUsage, Payload: usage},
+			usageEvent,
 			{Type: runtime.EventOutput, Payload: output, MessageID: message, TurnID: turn},
 			{Type: runtime.EventTurnEnded, TurnID: turn},
 			{Type: runtime.EventTurnFinished},
@@ -287,7 +292,8 @@ func fixturePlan(t *testing.T, answer controller.QuestionAnswer, accountOnly ...
 				!strings.HasPrefix(request.Request, "request-digest:sha256:") || len(conversation.Messages) == 0 {
 				t.Fatal("Planner lacks its transient turn or the saved request digest")
 			}
-			emitFixturePlannerTurn(worker, `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`, string(body))
+			emitFixturePlannerTurn(worker, `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`,
+				string(body), len(accountOnly) > 1 && accountOnly[1])
 			return nil
 		}
 		if len(accountOnly) != 0 && accountOnly[0] {

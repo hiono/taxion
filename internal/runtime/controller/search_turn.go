@@ -151,17 +151,19 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 				}
 			case runtime.EventUsage:
 				var usage core.DispatchUsage
-				if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &usage); err != nil {
+				if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &usage); err != nil || !core.ValidUsageMetadata(usage) {
 					return turn, fmt.Errorf("taxion: search usage is invalid")
 				}
-				turn.Usage = append(turn.Usage, usage)
+				if err := core.AppendUsage(&turn.Usage, usage); err != nil {
+					return turn, err
+				}
 			case runtime.EventUsageCheckpoint:
-				checkpoint, matches, err := runtime.DecodeUsageCheckpoint(event.Payload, session, turn.Usage)
+				checkpoint, _, err := runtime.DecodeUsageCheckpoint(event.Payload, session, turn.Usage)
 				if err == nil {
 					turn.UsageCheckpoints = append(turn.UsageCheckpoints, checkpoint)
 				}
-				if err != nil || !matches {
-					return turn, fmt.Errorf("taxion: search checkpoint has incomplete or conflicting accounting")
+				if err != nil {
+					return turn, fmt.Errorf("taxion: search checkpoint has conflicting accounting")
 				}
 			case runtime.EventFailed, runtime.EventCancelled:
 				return turn, fmt.Errorf("taxion: search runtime failed or was cancelled; provider details withheld")
@@ -171,6 +173,9 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 					return turn, fmt.Errorf("taxion: search ended without a bound main-agent answer")
 				}
 				if err := drainCompletedTurn(ctx, events, &turn.Usage, &turn.UsageCheckpoints, &sequence, session); err != nil {
+					return turn, err
+				}
+				if _, err := core.SummarizeUsage(session, turn.Usage, turn.UsageCheckpoints); err != nil {
 					return turn, err
 				}
 				return turn, checkQuota()

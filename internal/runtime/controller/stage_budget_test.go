@@ -147,11 +147,11 @@ func TestPlannedSendRetainsContextUntilTurnCompletion(t *testing.T) {
 }
 
 func TestPlannedFlowRunsVerifiedRepairAndIndependentReview(t *testing.T) {
-	testFlowRunsRepairAndNewSHAReview(t, false, true)
+	testFlowRunsRepairAndNewSHAReview(t, false, flowRunOptions{planned: true})
 }
 
 func TestPlannedStepPreservesSameApprovalAndClock(t *testing.T) {
-	testFlowRunsRepairAndNewSHAReview(t, true, true)
+	testFlowRunsRepairAndNewSHAReview(t, true, flowRunOptions{planned: true})
 }
 
 func TestStagePlanPreviewIsReadOnlyAndBindsExactEnvelope(t *testing.T) {

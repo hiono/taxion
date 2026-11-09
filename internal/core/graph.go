@@ -267,29 +267,30 @@ const (
 )
 
 type GraphDispatch struct {
-	ID                   string                 `json:"id"`
-	TaskID               string                 `json:"taskId"`
-	Repository           string                 `json:"repository"`
-	Recipient            string                 `json:"recipient"`
-	RuntimeSessionID     string                 `json:"runtimeSessionId,omitempty"`
-	RuntimeConfigHash    string                 `json:"runtimeConfigHash,omitempty"`
-	Configuration        *DispatchConfiguration `json:"configuration,omitempty"`
-	ReviewWorktreeSource string                 `json:"reviewWorktreeSource,omitempty"`
-	ExecutionStartSHA    string                 `json:"executionStartSha,omitempty"`
-	RuntimeUsage         []DispatchUsage        `json:"runtimeUsage,omitempty"`
-	Status               DispatchStatus         `json:"status"`
-	Relationship         DispatchRelationship   `json:"relationship"`
-	RelatedID            string                 `json:"relatedDispatchId"`
-	Instruction          DispatchInstruction    `json:"instruction"`
-	InstructionHash      string                 `json:"instructionHash"`
-	IssuedEvidence       []string               `json:"issuedEvidence"`
-	Acknowledged         bool                   `json:"acknowledged"`
-	ExecutionStarted     bool                   `json:"executionStarted"`
-	Result               *DispatchResult        `json:"result,omitempty"`
-	LastUpdatedBy        string                 `json:"lastUpdatedBy"`
-	LastTransition       string                 `json:"lastTransition"`
-	CreatedAt            time.Time              `json:"createdAt"`
-	UpdatedAt            time.Time              `json:"updatedAt"`
+	ID                      string                 `json:"id"`
+	TaskID                  string                 `json:"taskId"`
+	Repository              string                 `json:"repository"`
+	Recipient               string                 `json:"recipient"`
+	RuntimeSessionID        string                 `json:"runtimeSessionId,omitempty"`
+	RuntimeConfigHash       string                 `json:"runtimeConfigHash,omitempty"`
+	Configuration           *DispatchConfiguration `json:"configuration,omitempty"`
+	ReviewWorktreeSource    string                 `json:"reviewWorktreeSource,omitempty"`
+	ExecutionStartSHA       string                 `json:"executionStartSha,omitempty"`
+	RuntimeUsage            []DispatchUsage        `json:"runtimeUsage,omitempty"`
+	RuntimeUsageCheckpoints []UsageCheckpoint      `json:"runtimeUsageCheckpoints,omitempty"`
+	Status                  DispatchStatus         `json:"status"`
+	Relationship            DispatchRelationship   `json:"relationship"`
+	RelatedID               string                 `json:"relatedDispatchId"`
+	Instruction             DispatchInstruction    `json:"instruction"`
+	InstructionHash         string                 `json:"instructionHash"`
+	IssuedEvidence          []string               `json:"issuedEvidence"`
+	Acknowledged            bool                   `json:"acknowledged"`
+	ExecutionStarted        bool                   `json:"executionStarted"`
+	Result                  *DispatchResult        `json:"result,omitempty"`
+	LastUpdatedBy           string                 `json:"lastUpdatedBy"`
+	LastTransition          string                 `json:"lastTransition"`
+	CreatedAt               time.Time              `json:"createdAt"`
+	UpdatedAt               time.Time              `json:"updatedAt"`
 }
 
 type UsageAccountingIdentity struct {
@@ -1550,16 +1551,13 @@ func (g TaskGraph) Validate() error {
 		if d.ExecutionStartSHA != "" && (!validSHA(d.ExecutionStartSHA) || d.ExecutionStartSHA != d.ExpectedStartSHA()) {
 			return graphError("observed execution start SHA does not match the Dispatch")
 		}
-		if d.RuntimeSessionID == "" && len(d.RuntimeUsage) != 0 {
+		if d.RuntimeSessionID == "" && (len(d.RuntimeUsage) != 0 || len(d.RuntimeUsageCheckpoints) != 0) {
 			return graphError("runtime usage has no session binding for Dispatch %s", d.ID)
 		}
 		if d.RuntimeSessionID != "" {
 			usageIDs := map[UsageAccountingIdentity]bool{}
 			for _, usage := range d.RuntimeUsage {
-				if !nonempty(usage.Model) || usage.ObservedAt.IsZero() ||
-					usage.Scope != "" && usage.Scope != "latest-assistant-message" ||
-					!validOptionalCount(usage.InputTokens) || !validOptionalCount(usage.OutputTokens) ||
-					!validOptionalCount(usage.CacheReadTokens) || !validOptionalCount(usage.CacheWriteTokens) {
+				if !ValidUsageMetadata(usage) || usage.ObservedAt.IsZero() {
 					return graphError("invalid runtime usage record for Dispatch %s", d.ID)
 				}
 				if usage.Accounting != nil {
@@ -1569,6 +1567,15 @@ func (g TaskGraph) Validate() error {
 						return graphError("invalid or duplicate runtime usage accounting identity for Dispatch %s", d.ID)
 					}
 					usageIDs[identity] = true
+				}
+			}
+			for _, checkpoint := range d.RuntimeUsageCheckpoints {
+				payload, err := json.Marshal(checkpoint)
+				if err != nil {
+					return graphError("invalid runtime usage checkpoint for Dispatch %s", d.ID)
+				}
+				if _, _, err := DecodeUsageCheckpoint(string(payload), d.RuntimeSessionID, d.RuntimeUsage); err != nil {
+					return graphError("conflicting runtime usage checkpoint for Dispatch %s", d.ID)
 				}
 			}
 			if previous, exists := runtimeSessionRoles[d.RuntimeSessionID]; exists &&
@@ -2016,18 +2023,30 @@ func cloneDispatch(d GraphDispatch) GraphDispatch {
 	d.IssuedEvidence = slices.Clone(d.IssuedEvidence)
 	d.RuntimeUsage = slices.Clone(d.RuntimeUsage)
 	for i := range d.RuntimeUsage {
-		usage := &d.RuntimeUsage[i]
-		if usage.IsAuto != nil {
-			value := *usage.IsAuto
-			usage.IsAuto = &value
+		d.RuntimeUsage[i] = cloneDispatchUsage(d.RuntimeUsage[i])
+	}
+	d.RuntimeUsageCheckpoints = slices.Clone(d.RuntimeUsageCheckpoints)
+	for i := range d.RuntimeUsageCheckpoints {
+		checkpoint := &d.RuntimeUsageCheckpoints[i]
+		checkpoint.TotalNanoAIU = cloneUsageValue(checkpoint.TotalNanoAIU)
+		checkpoint.AICreditsStatus = cloneUsageValue(checkpoint.AICreditsStatus)
+		checkpoint.TotalPremiumRequests = cloneUsageValue(checkpoint.TotalPremiumRequests)
+		checkpoint.Watermarks = maps.Clone(checkpoint.Watermarks)
+		checkpoint.UsageTotals = slices.Clone(checkpoint.UsageTotals)
+		for j := range checkpoint.UsageTotals {
+			checkpoint.UsageTotals[j] = cloneDispatchUsage(checkpoint.UsageTotals[j])
 		}
-		usage.InputTokens = cloneCount(usage.InputTokens)
-		usage.OutputTokens = cloneCount(usage.OutputTokens)
-		usage.CacheReadTokens = cloneCount(usage.CacheReadTokens)
-		usage.CacheWriteTokens = cloneCount(usage.CacheWriteTokens)
-		if usage.Accounting != nil {
-			identity := *usage.Accounting
-			usage.Accounting = &identity
+		checkpoint.ProviderModelMetrics = slices.Clone(checkpoint.ProviderModelMetrics)
+		for j := range checkpoint.ProviderModelMetrics {
+			metric := &checkpoint.ProviderModelMetrics[j]
+			metric.ModelID = cloneUsageValue(metric.ModelID)
+			metric.ModelDisplayName = cloneUsageValue(metric.ModelDisplayName)
+			metric.Provider = cloneUsageValue(metric.Provider)
+			metric.Metrics.AICreditsStatus = cloneUsageValue(metric.Metrics.AICreditsStatus)
+			metric.Metrics.CacheExpiresAt = cloneUsageValue(metric.Metrics.CacheExpiresAt)
+			metric.Metrics.TokenDetails = maps.Clone(metric.Metrics.TokenDetails)
+			metric.Metrics.TotalNanoAIU = cloneUsageValue(metric.Metrics.TotalNanoAIU)
+			metric.Metrics.Usage.ReasoningTokens = cloneUsageValue(metric.Metrics.Usage.ReasoningTokens)
 		}
 	}
 	d.Instruction.SiblingTaskIDs = slices.Clone(d.Instruction.SiblingTaskIDs)
@@ -2090,6 +2109,34 @@ func cloneDispatchMemoryContext(entries []DispatchMemoryEntry) []DispatchMemoryE
 		}
 	}
 	return out
+}
+
+func cloneDispatchUsage(usage DispatchUsage) DispatchUsage {
+	usage.ModelDisplayName = cloneUsageValue(usage.ModelDisplayName)
+	usage.Provider = cloneUsageValue(usage.Provider)
+	usage.ModelProvider = cloneUsageValue(usage.ModelProvider)
+	usage.IsAuto = cloneBool(usage.IsAuto)
+	usage.InputTokens = cloneCount(usage.InputTokens)
+	usage.OutputTokens = cloneCount(usage.OutputTokens)
+	usage.CacheReadTokens = cloneCount(usage.CacheReadTokens)
+	usage.CacheWriteTokens = cloneCount(usage.CacheWriteTokens)
+	usage.ReasoningTokens = cloneCount(usage.ReasoningTokens)
+	usage.RequestCount = cloneCount(usage.RequestCount)
+	usage.RequestCost = cloneUsageValue(usage.RequestCost)
+	usage.TokenDetails = maps.Clone(usage.TokenDetails)
+	usage.CacheExpiresAt = cloneUsageValue(usage.CacheExpiresAt)
+	usage.TotalNanoAIU = cloneUsageValue(usage.TotalNanoAIU)
+	usage.AICreditsStatus = cloneUsageValue(usage.AICreditsStatus)
+	usage.Accounting = cloneUsageValue(usage.Accounting)
+	return usage
+}
+
+func cloneUsageValue[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func cloneCount(value *int64) *int64 {

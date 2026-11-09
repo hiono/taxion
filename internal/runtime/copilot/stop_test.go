@@ -266,6 +266,9 @@ func TestSavedTurnRequiresBoundCompletedMainAgentHistory(t *testing.T) {
 		change func([]sdk.SessionEvent) []sdk.SessionEvent
 	}{
 		{"missing-shutdown", func(events []sdk.SessionEvent) []sdk.SessionEvent { return events[:4] }},
+		{"missing-turn-start", func(events []sdk.SessionEvent) []sdk.SessionEvent {
+			return append(events[:2], events[3:]...)
+		}},
 		{"wrong-session", func(events []sdk.SessionEvent) []sdk.SessionEvent {
 			events[0].Data.(*sdk.SessionStartData).SessionID = "another-session"
 			return events
@@ -667,6 +670,12 @@ func TestShutdownProviderModelMetricsMatchReceiptsAcrossProviders(t *testing.T) 
 	}
 	if _, matches, err := runtime.DecodeUsageCheckpoint(string(payload), "saved-session", calls); err != nil || !matches {
 		t.Fatal("provider/model checkpoint did not match individual receipts", matches, err)
+	}
+	summary, err := core.SummarizeUsage("saved-session", calls, []core.UsageCheckpoint{checkpoint})
+	if err != nil || summary.NanoAIU == nil || *summary.NanoAIU != total ||
+		summary.InputOutputTokens == nil || *summary.InputOutputTokens != inputA+inputB+outputA+outputB ||
+		summary.CreditsStatus != "complete" || summary.TokenStatus != "complete" {
+		t.Fatal("model and provider aggregates were counted as additional usage", summary, err)
 	}
 	checkpoint.UsageTotals = nil
 	payload, err = json.Marshal(checkpoint)

@@ -536,6 +536,13 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 			if !ok {
 				return fmt.Errorf("taxion: event stream ended before a terminal turn event")
 			}
+			if event.AgentID != "" && (event.Type == runtime.EventOutput || event.Type == runtime.EventTurnFinished ||
+				event.Type == runtime.EventFailed || event.Type == runtime.EventCancelled) {
+				if err := encoder.Encode(event); err != nil {
+					return fmt.Errorf("taxion: write child runtime event: %w", err)
+				}
+				continue
+			}
 			if monitor {
 				window.observe(event)
 			}
@@ -546,7 +553,7 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 				}
 			}
 			switch event.Type {
-			case runtime.EventOutput, runtime.EventUsage, runtime.EventTurnFinished, runtime.EventFailed, runtime.EventCancelled, runtime.EventExecution,
+			case runtime.EventOutput, runtime.EventUsage, runtime.EventUsageCheckpoint, runtime.EventTurnFinished, runtime.EventFailed, runtime.EventCancelled, runtime.EventExecution,
 				runtime.EventContextUsage, "acp_capabilities", "acp_usage_unavailable", "acp_tool_update", "acp_message_start":
 				if err := c.recordEvent(dispatch.ID, streamID, event); err != nil {
 					return err
@@ -562,6 +569,10 @@ func (c *Controller) StreamEvents(ctx context.Context, dispatch core.GraphDispat
 				if err := writeCreditStatus(ctx, encoder, dispatch, event, c.runtime); err != nil {
 					return err
 				}
+				if err := checkLimits(false); err != nil {
+					return err
+				}
+			case runtime.EventUsageCheckpoint:
 				if err := checkLimits(false); err != nil {
 					return err
 				}

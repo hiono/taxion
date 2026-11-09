@@ -297,3 +297,184 @@ version-1 checkpoint、binding のない旧直接質問、非 Copilot provider �
 新しい receipt を削除して旧版へ戻さず、更新前の整合した private backup を保持する。
 汎用 scheduler、無条件の履歴復元、自動再送、未知利用量の推定補完は実装しない。
 リリースノートは [ADR-0037](adr/0037-publish-release-notes-on-github-only.md) に従い GitHub Release に保存する。
+
+## 再開監査の変更前分析（2026-11-09）
+
+### 基準と履歴
+
+今回の基準は未公開の `3aa73017d6561ce38dbf208e9cb46c6194f90ba6`、
+branch `fix/native-event-contract-083` のcleanなworktreeである。
+公開mainは `6a9f91255e3dd566fefb62032395a88f5d16cff1`。
+候補branchはremoteに存在せず、GitHub上で候補を審査したとは扱わない。
+`0e061f9`、`e00cae2`、第五審査のFAILを保持する。
+
+変更前のbuild、vet、通常試験2,776件／23packageを再実行し、PASSを確認した。
+Controller全raceは783件PASS、8件SKIP後、suite全体の600秒timeoutでINCOMPLETEとなった。
+最後の `TestRecoveryPreservesSuccessfulResultForHandoff` 自体の経過は1秒で、
+stackはSQLite初期化中だった。timeoutだけからこの試験のdeadlockやdata raceとは判定しない。
+完全JSONログはoperator証跡 `083-baseline-controller-race.jsonl` に保持する。
+
+過去の修正は別々の境界を対象としていた。
+`c5778d7` はrequest復旧、`2a95820` はmain turn終了とSearch順序、
+`3b76f6a` は保存advice受理、`c76b097` はpartial subtotal矛盾、
+`0e061f9` と `3aa7301` はSDK checkpoint／Provider／idleを対象とする。
+PR #269の失敗Reviewer回答追記も、PR #280の保存review apply診断も、
+Plannerの正式受理やusage完全性、所有権解放を代替しない。
+
+### 不整合と影響範囲
+
+| 不整合 | 発生点と伝播先 |
+| --- | --- |
+| checkpoint観測が会計へ届かない | Dispatch `StreamEvents` → `recordEvent` → Graph → task／stage／Flow予算。保存turnもreceipt保存だけではGraph会計に反映されない |
+| watermarkより後のreceiptをsnapshot内として比較する | 共通 `DecodeUsageCheckpoint` → Question／Search／drain／保存回答復旧。`KnownNanoAIU` の包含規則と不一致 |
+| 観測と受理を混同する | Question／Search／drainがpartial checkpointを即拒否し、Questionは完全checkpointだけの回答も拒否する |
+| Planner計上がcheckpointを落とす | `QuestionResult` → `recordPlannerUsage` → Operation累計／復旧時の差分計上 |
+| 子agentを親の完了に使う | Dispatch `StreamEvents` のoutput／terminal consumer。SDK SendAndWaitやQuestionとは異なる |
+| 新usage metadataのcopyが不完全 | Graph cloneのProvider、費用、status、追加token等のalias → 保存前後の独立性 |
+| identityによる重複排除が不統一 | Dispatch receiptにはあるがQuestion／Search／drain／保存回答の配列にはない |
+
+これらは実装経路で確認した欠陥であり、本番で二重課金や誤受理が実際に起きたという観測ではない。
+Issue #282のPlannerStarted残存とは、回答受理・累計会計・cleanupの順序で接続する。
+所有権guardを削除して解決しない。
+
+### 修正設計と不変条件
+
+既存 `UsageCheckpoint` のJSON契約を維持し、個別API callとは別の観測として保持する。
+Graphに保持する必要がある場合も同じDTOを共有し、新しい正規形式や架空receiptを作らない。
+費用集計ではsnapshotの包含範囲と範囲外receiptを分け、最大の既知floorを使う。
+不完全な観測は保存し、最終受理や予算判定とは区別する。
+
+変更後も次の条件を維持する。
+
+- 未取得、明示ゼロ、partial、非該当を同一視せず、欠落を推測で補わない。
+- watermarkで覆われたcallを二重計上せず、後続callの既知費用を失わない。
+- session／Provider／Model／Accounting identityの矛盾を、別の完全snapshotで迂回しない。
+- 同identity・同metricsは冪等、同identity・異metricsは拒否する。
+- checkpointのない旧データのJSONとPlanner usage hashを維持する。
+- main完了と子agent完了、Abort応答とidle、保存回答と正式受理を区別する。
+- liveとsavedのscope・会計条件を一致させ、元deadline・承認・所有権制約を緩めない。
+- Graph clone後のusage metadataを変更しても原本が変わらない。
+- empty queueやSDK Disconnectを、未到着イベントを含む完全回収の証明にしない。
+
+共通DTO／包含判定、全consumer接続、Planner受理・会計の順で変更単位を分ける。
+各単位で変更前の再現試験と直接・関連経路の回帰を比較する。
+snapshotのみ、receiptとの重複、watermark外tail、partial tail、複数Provider、
+子agent終了後のmain継続、保存後の再読込、clone独立性を重点対象とする。
+正当な旧操作を新guardで拒否した場合も回帰として扱う。
+
+### 実利用と権限の未解決事項
+
+PATHのbinaryはrevision `4334fed`、表示 `v0.7.21-rc.13`、対応skill `1.3.19`。
+installed skill `1.3.28` とは `ready --check-skill` がincompatibleを返した。
+この組合せで管理操作や実モデル実行を進めず、共有installを変更しない。
+アクセス可能なTKB3 worktreeと承認済みTask／Flowは未特定であり、製品開発再開とは扱わない。
+
+09:59 JSTの正規account照会は19,700／50,000 requests使用。
+承認上限20,200とreserve 50を維持した作業残枠は450 requestsである。
+outer期限は人間が追加承認した12:00 JSTとし、旧Flow期限は変更しない。
+第六審査、外部実行依頼、push、公開・配布、TKB3復旧は禁止のままである。
+
+### 検証中の設計見直し
+
+最初の全対象package試験では、既存Evaluationの欠落・重複usageケースと、
+receiptなしsnapshotの復旧ケースが不合格になった。この候補は不合格のまま原因を再分析した。
+共通のFlow fixtureへcheckpointを常時追加したため、従来「個別receipt以外の証拠なし」を前提とした試験の入力を変えていた。
+既存fixtureの入力と期待値を維持し、checkpoint付きFlowは明示した別ケースへ分離する。
+重複・scope不正のusageを集計不能としても、観測そのものを「未取得」へ変えない。
+
+復旧側では、native aggregateを個別receipt配列へ入れる旧fallbackと、
+新しいscope付きcheckpointを同時に使うことが不整合だった。
+checkpointがある場合はaggregateを個別callへ変換せず、元のcheckpointとして集計する。
+checkpointのない旧fallbackと旧hashは維持する。
+
+外部予算契約では、完全な回答・token照合と、creditsの完全性を別々に判定する。
+有効なpartial checkpointだけを理由に、liveで受理できる回答をsaved経路で拒否しない。
+この場合もcreditsはunknownのまま保持する。
+正のnative費用上限、scope矛盾、既知subtotal矛盾、停止・期限・所有権の各guardは緩めない。
+公開CLIのpreview／exact-hash applyと既存の拒否試験で、この区別を確認する。
+
+さらに、aggregateから架空deltaを作らない変更でも、旧reconciliationの
+「保存済み消費を下回る最終aggregateは拒否する」という条件を維持する必要がある。
+checkpointと最終aggregateの既知subtotalを比較し、双方がcompleteなら総量の一致も要求する。
+より小さい費用・tokenと、complete checkpointより大きい費用を拒否する回帰ケースを先に追加し、
+新しいcheckpoint分岐が従来の拒否条件を迂回することを再現してから修正する。
+
+### 再接続した契約と検証証跡
+
+既存checkpoint DTOとdecoderをcoreへ移し、runtimeの公開型・関数はalias／wrapperとして維持した。
+Graph、Dispatchのlive／saved受信、task／stage／Flow予算、Evaluation、
+Plannerのlive／recovery累計で同じ包含判定を使う。
+Graph cloneはProvider、Accounting identity、追加token、費用、status、snapshotのnested値を独立にcopyする。
+review-finalizationとverified-resultはcheckpointもbindする。
+checkpointなしの旧Planner usage hashと旧result hashは変更しない。
+
+| 確認 | 今回の結果 |
+| --- | --- |
+| gofmt、build、vet、diff check | PASS |
+| 通常試験、公開CLI合成fixture有効 | 最終treeは2,802件PASS、32件SKIP、FAILなし。変更前は2,776件PASS。件数にはsubtestを含む |
+| 全repository race、公開CLI合成fixture有効 | PASS。2,802件PASS、32件SKIP、FAILなし。22package PASS、1packageは試験なし。Controllerは1,657.607秒で完了し、既存CIの30分timeout内 |
+| public-text repository policy | UNVERIFIED。必須の `TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256` が環境にないためfail-closed |
+| indexed secret scan | 最終indexのtree IDと結果を同一commit本文・operator証跡へ記録する。未実施・失敗・timeoutはPASSとしない |
+| 未公開commit全範囲のsecret scan | INCOMPLETE。既存20commitを10件ずつの祖先範囲へ分けて同時実行した追試も、各595秒と終了猶予5秒以内でtimeout。範囲全体や後続commitをPASSとしない |
+| 実モデル、本番store、公開CI、第六審査 | UNVERIFIED／未実施 |
+
+operator証跡の最終通常試験は `083-consumer-final-normal-v2-20261109.jsonl`、
+最終raceは `083-consumer-final-race-v2-20261109.jsonl`、
+途中の失敗は `083-consumer-intermediate-failures-20261109.txt` に保持する。
+未コミット候補全体は `083-consumer-prevalidation-20261109.tar.gz` とpatchにも保全した。
+turn-start fixture修正後の候補は `083-consumer-final-v2-20261109.tar.gz` にも保全した。
+最終確認後の差分で新たな失敗が確認された場合、これらの結果だけで合格としない。
+
+公開CLI fixtureを有効にした最初の全repository raceは、2,800件PASS、32件SKIP、
+`TestFailedReviewPublicCLISynthetic` 1件FAILだった。data raceの報告はなかったが、suiteはFAILである。
+同じ試験は非raceでも失敗し、保存した基準 `3aa7301` のarchive上でも同じnative-read拒否を再現した。
+基準の追証は `083-baseline-public-cli-race-20261109.log` に保持する。
+fixtureがtool完了と回答の間のmain turn startを欠いており、既存readerが正しく拒否していた。
+本番readerのguardや期待値は緩めず、fixtureに対応するturn startを追加する。
+turn startなしを拒否するreaderの負例も追加し、通常・race双方で再確認する。
+この既存不合格を変更による回帰や合格と混同せず、最終treeの結果を別に記録する。
+fixture修正後はbuild・vetと通常・raceの全repository試験を再実行し、上表の最終結果を得た。
+本番readerの変更はない。既存の負例も維持し、確認した試験では変更による新しい失敗は残っていない。
+実モデル等の未確認範囲を含む回帰ゼロや、第五審査の合格を意味しない。
+
+range scanの境界は公開mainから `f4cba6a9026d06607a7bcc72d2bba4704357a459`、
+同commitから `3aa73017d6561ce38dbf208e9cb46c6194f90ba6` までとした。
+両方ともexit 124であり、`083-range-a-20261109.log`／`083-range-b-20261109.log` と実行結果を保持する。
+scannerは公式release checksumを照合したBetterleaks 1.9.0をtask-local配置し、
+共有install、remote、既存commit、operation policyは変更していない。
+
+### 利用経路ごとの制限
+
+| 利用経路 | 実利用判定と根拠 |
+| --- | --- |
+| 調査・読み取り | CONDITIONAL GO。正規quota照会、Git／SDKの調査、隔離storeのfixtureに限定する |
+| Planner | NO-GO。live／savedの会計・正式受理の合成回帰は確認したが、実モデルと対象Taskは未確認 |
+| Coder | NO-GO。合成Flowの開始・保存・復旧を製品実装の成功とは扱わない |
+| Reviewer | NO-GO。第五審査FAILを維持する。失敗回答の追記は品質受理・実行許可・会計確定ではない |
+| cancellation／resume | NO-GO。実セッションでの中断・復旧と未到着イベントの回収は未確認 |
+| usage／quota | CONDITIONAL GO。requestsの正規account readのみ。unknown creditsの確定・ゼロ補完・換算はしない |
+| store ownership | NO-GO。本番storeの確認・復旧は未実施。隔離fixtureの所有権・別workflow試験で代替しない |
+
+SDKのAbort RPC応答はidle到達ではなく、空queueもcallback終了の証明ではない。
+Disconnectの待機とidle後の未到着eventの完全回収は保証しない。
+Providerがnilの観測は、根拠なく非該当や特定Providerへ変換しない。
+観測値の既知floorと完全な費用確定を区別する。
+
+### CLIの追証と開発再開の申し送り
+
+共有installを変更せず、今回のsourceからtask-local binaryをbuildした。
+候補worktree直下ではoperation policyがなく、entrypointが `stateChanged:false` で拒否した。
+policyを作成・緩和せず、既存の管理対象workspaceからread-onlyの `ready --check-skill` を行うと、
+候補binaryとinstalled skill `1.3.28` は `compatible:true` だった。
+PATHの旧binaryとskillの不適合が解消したわけではなく、候補の公開・配布・採用も行っていない。
+
+新しいGraph checkpointはoptionalで、旧storeの読み込みとcheckpointなしのhashは維持する。
+新fieldを含むstoreを旧binaryへ渡せるとは保証しない。
+rollbackのためにcheckpointを削除せず、互換性を確認したbinaryと整合したbackupを使う。
+
+本来の製品のworkspace、承認済みTask／Issue、受け入れ条件は未特定である。
+Issue #282の修正を製品開発の代わりにせず、実開発の再開は未実施とする。
+第六審査・外部実行依頼・公開・配布・TKB3復旧は追加承認なしに開始しない。
+11:38 JSTの正規照会は20,100／50,000 requests使用で、
+承認上限20,200・reserve 50を維持した観測時残枠は50 requestsだった。
+この残枠を新しい審査の承認として使わない。outer期限12:00 JSTと元Flow期限を維持する。

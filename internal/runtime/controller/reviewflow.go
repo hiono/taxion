@@ -853,21 +853,35 @@ func flowTokens(graph core.TaskGraph, flow core.ReviewFlow) (int64, bool) {
 	known := true
 	for _, id := range flow.DispatchIDs {
 		dispatch, _ := graph.GraphDispatch(id)
-		if !active(dispatch.Status) && len(dispatch.RuntimeUsage) == 0 {
-			known = false
-		}
-		for _, usage := range dispatch.RuntimeUsage {
-			if usage.InputTokens == nil || usage.OutputTokens == nil || usage.Scope == "latest-assistant-message" {
+		if len(dispatch.RuntimeUsageCheckpoints) == 0 {
+			if !active(dispatch.Status) && len(dispatch.RuntimeUsage) == 0 {
 				known = false
 			}
-			for _, value := range []*int64{usage.InputTokens, usage.OutputTokens} {
-				if value != nil {
-					if *value > math.MaxInt64-total {
-						return math.MaxInt64, known
+			for _, usage := range dispatch.RuntimeUsage {
+				if usage.InputTokens == nil || usage.OutputTokens == nil || usage.Scope == "latest-assistant-message" {
+					known = false
+				}
+				for _, value := range []*int64{usage.InputTokens, usage.OutputTokens} {
+					if value != nil {
+						if *value > math.MaxInt64-total {
+							return math.MaxInt64, known
+						}
+						total += *value
 					}
-					total += *value
 				}
 			}
+			continue
+		}
+		summary, err := core.SummarizeUsage(dispatch.RuntimeSessionID, dispatch.RuntimeUsage, dispatch.RuntimeUsageCheckpoints)
+		if err != nil || summary.TokenStatus != "complete" &&
+			(!active(dispatch.Status) || len(dispatch.RuntimeUsage) != 0 || len(dispatch.RuntimeUsageCheckpoints) != 0) {
+			known = false
+		}
+		if summary.InputOutputTokens != nil {
+			if *summary.InputOutputTokens > math.MaxInt64-total {
+				return math.MaxInt64, false
+			}
+			total += *summary.InputOutputTokens
 		}
 	}
 	return total, known
@@ -878,17 +892,16 @@ func flowNanoAIU(graph core.TaskGraph, flow core.ReviewFlow) (*float64, string) 
 	seen, complete := false, true
 	for _, id := range flow.DispatchIDs {
 		dispatch, _ := graph.GraphDispatch(id)
-		for _, usage := range dispatch.RuntimeUsage {
-			if usage.TotalNanoAIU == nil || math.IsNaN(*usage.TotalNanoAIU) ||
-				math.IsInf(*usage.TotalNanoAIU, 0) || *usage.TotalNanoAIU < 0 {
-				complete = false
-				continue
-			}
-			total += *usage.TotalNanoAIU
+		if len(dispatch.RuntimeUsage) == 0 && len(dispatch.RuntimeUsageCheckpoints) == 0 {
+			continue
+		}
+		summary, err := core.SummarizeUsage(dispatch.RuntimeSessionID, dispatch.RuntimeUsage, dispatch.RuntimeUsageCheckpoints)
+		if err != nil || summary.CreditsStatus != "complete" {
+			complete = false
+		}
+		if summary.NanoAIU != nil {
+			total += *summary.NanoAIU
 			seen = true
-			if usage.AICreditsStatus == nil || *usage.AICreditsStatus != "complete" {
-				complete = false
-			}
 		}
 	}
 	if !seen {

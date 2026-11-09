@@ -277,9 +277,30 @@ func TestRequestRecoveryCancelRetainsPerCallUsageWithIncompleteNativeTotals(t *t
 	})
 }
 
-func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls, checkpointPresent, snapshotOnly bool) {
+func TestRequestRecoveryProviderAcceptsBoundAnswerWithoutCertifyingUnknownCredits(t *testing.T) {
+	testRequestRecoveryCancelUsage(t, true, false, true, false, true)
+}
+
+func TestRequestRecoveryNativeLimitStillRejectsPartialCredits(t *testing.T) {
+	testRequestRecoveryCancelUsage(t, true, false, true, false, true, true)
+}
+
+func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls, checkpointPresent, snapshotOnly bool, externalPartial ...bool) {
 	t.Helper()
+	allowPartial := len(externalPartial) != 0 && externalPartial[0]
+	nativePartial := len(externalPartial) > 1 && externalPartial[1]
 	_, args := requestFixture(t)
+	if allowPartial && !nativePartial {
+		var defaults []string
+		for index := 0; index < len(args); index++ {
+			if args[index] == "--max-task-nano-aiu" || args[index] == "--budget-guidance" {
+				index++
+				continue
+			}
+			defaults = append(defaults, args[index])
+		}
+		args = defaults
+	}
 	var initialOutput bytes.Buffer
 	if err := requestCommand(append(args, "preserve a stopped request"), strings.NewReader("/plan\n"),
 		&initialOutput, func(context.Context, *store.Store, config.Config, core.GraphTask, string, float64, string, string) (controller.QuestionResult, error) {
@@ -391,6 +412,9 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 		turn.UsageTotals[0].CacheReadTokens, turn.UsageTotals[0].TotalNanoAIU = &native, &amount
 		turn.UsageTotals[0].AICreditsStatus = &complete
 	}
+	if allowPartial {
+		terminal.Usage[0].TotalNanoAIU, terminal.Usage[0].AICreditsStatus = nil, nil
+	}
 	for index := len(terminal.Usage) - 1; index >= 0; index-- {
 		data, err := json.Marshal(terminal.Usage[index])
 		if err != nil {
@@ -401,7 +425,14 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 	expectedAmount := amount
 	if checkpointPresent {
 		checkpoint := runtime.UsageCheckpoint{TotalNanoAIU: &amount, AICreditsStatus: &complete}
-		if partialCalls {
+		if allowPartial {
+			partial := "partial"
+			checkpoint = runtime.UsageCheckpoint{
+				AICreditsStatus: &partial, Watermarks: map[string]int64{turn.SessionID: 0},
+			}
+			terminal.UsageCheckpoints = []runtime.UsageCheckpoint{checkpoint}
+			expectedAmount = 0
+		} else if partialCalls {
 			checkpoint.UsageTotals = turn.UsageTotals
 		} else {
 			// Historical un-attributed accounting has a known subtotal, not a made-up model or call.
@@ -458,6 +489,10 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 		"--reason", "reconcile only the stopped request", "--evidence", "specific-process-stop",
 		"--confirm-stopped", "--accept-uncertainty", "--resolution", "cancel",
 	}
+	if allowPartial {
+		recoveryArgs = append(recoveryArgs[:len(recoveryArgs)-3], "--resolution", "continue")
+		turn.ShutdownAt = base.Add(5 * time.Millisecond)
+	}
 	originalOutput := turn.UsageTotals[0].OutputTokens
 	mismatchedTokens := *originalOutput - 1
 	turn.UsageTotals[0].OutputTokens = &mismatchedTokens
@@ -486,6 +521,20 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 			t.Fatal("ordinary continuation did not reject partial usage at the shared admission check", err)
 		}
 	}
+	if nativePartial {
+		before, err := db.LoadWorkspace()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &bytes.Buffer{}); err == nil {
+			t.Fatal("partial credits bypassed a positive native ceiling")
+		}
+		after, err := db.LoadWorkspace()
+		if err != nil || !reflect.DeepEqual(before, after) {
+			t.Fatal("rejected numeric-budget recovery changed saved state", err)
+		}
+		return
+	}
 	var preview bytes.Buffer
 	if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &preview); err != nil {
 		t.Fatal(err)
@@ -508,7 +557,11 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Records.Operation.State != "CANCELLED" ||
+	expectedState := "CANCELLED"
+	if allowPartial {
+		expectedState = "WAITING_FOR_ANSWER"
+	}
+	if after.Records.Operation.State != expectedState ||
 		after.Records.Operation.PlanningNanoAIU != operation.PlanningNanoAIU+expectedAmount ||
 		after.Records.Operation.PlanningUsageState != "unknown" {
 		t.Fatal("cancellation failed to retain known per-call usage and aggregate uncertainty")

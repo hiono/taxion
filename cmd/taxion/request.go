@@ -618,25 +618,23 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				return errors.Join(planErr, err)
 			}
 			if result.AttemptID != "" {
-				if err := recordPlannerUsage(db, &operation, result.AttemptID, result.Usage); err != nil {
+				if err := recordPlannerUsage(db, &operation, result.AttemptID, result); err != nil {
 					return errors.Join(planErr, err)
 				}
 			} else {
-				if len(result.Usage) == 0 {
+				summary, err := core.SummarizeUsage(result.SessionID, result.Usage, result.UsageCheckpoints)
+				if err != nil {
+					return errors.Join(planErr, err)
+				}
+				if summary.CreditsStatus != "complete" {
 					operation.PlanningUsageState = "unknown"
 				}
-				for _, usage := range result.Usage {
-					if usage.TotalNanoAIU == nil || usage.AICreditsStatus == nil || *usage.AICreditsStatus != "complete" ||
-						math.IsNaN(*usage.TotalNanoAIU) || math.IsInf(*usage.TotalNanoAIU, 0) || *usage.TotalNanoAIU < 0 {
-						operation.PlanningUsageState = "unknown"
-					} else {
-						total := operation.PlanningNanoAIU + *usage.TotalNanoAIU
-						if math.IsInf(total, 0) {
-							operation.PlanningUsageState = "unknown"
-						} else {
-							operation.PlanningNanoAIU = total
-						}
+				if summary.NanoAIU != nil {
+					total := operation.PlanningNanoAIU + *summary.NanoAIU
+					if math.IsInf(total, 0) {
+						return fmt.Errorf("request Planner cumulative usage overflowed")
 					}
+					operation.PlanningNanoAIU = total
 				}
 			}
 			if err := saveRequestCheckpoint(db, &operation, checkpoint); err != nil {

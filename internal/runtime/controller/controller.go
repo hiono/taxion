@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -818,9 +817,10 @@ func (c *Controller) transition(dispatchID string, status core.DispatchStatus, r
 		if result != nil {
 			saved, _ := state.Graph.GraphDispatch(dispatchID)
 			body, err := json.Marshal(struct {
-				Result *core.DispatchResult
-				Usage  []core.DispatchUsage
-			}{saved.Result, saved.RuntimeUsage})
+				Result           *core.DispatchResult
+				Usage            []core.DispatchUsage
+				UsageCheckpoints []core.UsageCheckpoint `json:",omitempty"`
+			}{saved.Result, saved.RuntimeUsage, saved.RuntimeUsageCheckpoints})
 			if err != nil {
 				return err
 			}
@@ -874,26 +874,5 @@ func sameWorktree(expected, actual string) bool {
 }
 
 func nonnegativeUsage(usage core.DispatchUsage) bool {
-	if usage.Scope != "" && usage.Scope != "latest-assistant-message" {
-		return false
-	}
-	if usage.Accounting != nil && (strings.TrimSpace(usage.Accounting.SourceSessionID) == "" ||
-		usage.Accounting.Sequence <= 0 || strings.TrimSpace(usage.Accounting.UsageID) == "") {
-		return false
-	}
-	for _, value := range []*int64{
-		usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheWriteTokens,
-	} {
-		if value != nil && *value < 0 {
-			return false
-		}
-	}
-	if usage.TotalNanoAIU != nil && (math.IsNaN(*usage.TotalNanoAIU) ||
-		math.IsInf(*usage.TotalNanoAIU, 0) || *usage.TotalNanoAIU < 0) {
-		return false
-	}
-	if usage.AICreditsStatus != nil && !slices.Contains([]string{"complete", "partial", "unavailable"}, *usage.AICreditsStatus) {
-		return false
-	}
-	return strings.TrimSpace(usage.Model) != ""
+	return core.ValidUsageMetadata(usage)
 }

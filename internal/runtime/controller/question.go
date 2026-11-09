@@ -568,23 +568,25 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				output = event.Payload
 			case runtime.EventUsage:
 				var usage core.DispatchUsage
-				if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &usage); err != nil {
+				if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &usage); err != nil || !core.ValidUsageMetadata(usage) {
 					return result, fmt.Errorf("taxion: question usage is invalid")
 				}
 				usage.ObservedAt = time.Now().UTC()
-				result.Usage = append(result.Usage, usage)
+				if err := core.AppendUsage(&result.Usage, usage); err != nil {
+					return result, err
+				}
 				if time.Since(lastQuotaCheck) >= time.Minute {
 					if err := checkQuota(); err != nil {
 						return result, err
 					}
 				}
 			case runtime.EventUsageCheckpoint:
-				checkpoint, matches, err := runtime.DecodeUsageCheckpoint(event.Payload, result.SessionID, result.Usage)
+				checkpoint, _, err := runtime.DecodeUsageCheckpoint(event.Payload, result.SessionID, result.Usage)
 				if err == nil {
 					result.UsageCheckpoints = append(result.UsageCheckpoints, checkpoint)
 				}
-				if err != nil || !matches {
-					return result, fmt.Errorf("taxion: question usage checkpoint has incomplete or conflicting accounting")
+				if err != nil {
+					return result, fmt.Errorf("taxion: question usage checkpoint has conflicting accounting")
 				}
 			case runtime.EventOutputDelta:
 				if !turnStarted || turnEnded {
@@ -608,7 +610,7 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				if err := drainCompletedTurn(ctx, events, &result.Usage, &result.UsageCheckpoints, &lastSequence, result.SessionID); err != nil {
 					return result, err
 				}
-				if err := validateQuestionUsage(result.Usage); err != nil {
+				if err := validateQuestionResultUsage(result); err != nil {
 					return result, err
 				}
 				if err := recheck(); err != nil {
@@ -698,6 +700,20 @@ func DecodeQuestionAnswer(output string) (QuestionAnswer, error) {
 		return answer, err
 	}
 	return answer, nil
+}
+
+func validateQuestionResultUsage(result QuestionResult) error {
+	summary, err := core.SummarizeUsage(result.SessionID, result.Usage, result.UsageCheckpoints)
+	if err != nil {
+		return err
+	}
+	if len(result.Usage) == 0 {
+		if summary.CreditsStatus == "complete" &&
+			(summary.TokenStatus == "complete" || summary.NanoAIU != nil && *summary.NanoAIU == 0) {
+			return nil
+		}
+	}
+	return validateQuestionUsage(result.Usage)
 }
 
 func validateQuestionUsage(usage []core.DispatchUsage) error {

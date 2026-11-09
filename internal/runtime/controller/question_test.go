@@ -350,6 +350,7 @@ func TestQuestionRequiresIdleCompletionBoundary(t *testing.T) {
 				if event.Type != runtime.EventTurnFinished {
 					events <- event
 				}
+
 			}
 			if test.later {
 				events <- runtime.Event{Type: runtime.EventExecution, Sequence: 20}
@@ -360,6 +361,55 @@ func TestQuestionRequiresIdleCompletionBoundary(t *testing.T) {
 				"task", "What is saved?", resolved.Config, q)
 			if err == nil || result.Answer != nil {
 				t.Fatal("answer was accepted without a valid idle completion boundary", test.name, err)
+			}
+		})
+	}
+}
+
+func TestQuestionRetainsPartialAndCheckpointOnlyUsage(t *testing.T) {
+	for _, mode := range []string{"checkpoint-only", "partial", "duplicate"} {
+		t.Run(mode, func(t *testing.T) {
+			db, databasePath, worker, resolved := questionFixture(t)
+			defer db.Close()
+			worker.role = "ORCHESTRATOR"
+			payload := `{"model":"test","inputTokens":10,"outputTokens":5,"accounting":{"sourceSessionId":"sdk-session","sequence":1,"usageId":"call"}}`
+			if mode == "checkpoint-only" {
+				payload = ""
+			}
+			original := questionEventsWithUsage(savedQuestionAnswer, payload)
+			close(original)
+			events := make(chan runtime.Event, 10)
+			var sequence uint64
+			send := func(event runtime.Event) {
+				sequence++
+				event.Sequence = sequence
+				events <- event
+			}
+			for event := range original {
+				if event.Type == runtime.EventTurnEnded && mode != "duplicate" {
+					checkpoint := `{"usageTotals":[{"model":"test","inputTokens":10,"outputTokens":5,"totalNanoAIU":3.5,"aiCreditsStatus":"complete"}],"totalNanoAIU":3.5,"aiCreditsStatus":"complete","watermarks":{"sdk-session":1}}`
+					if mode == "partial" {
+						checkpoint = `{"watermarks":{"sdk-session":1},"aiCreditsStatus":"partial"}`
+					}
+					send(runtime.Event{Type: runtime.EventUsageCheckpoint, Payload: checkpoint})
+				}
+				send(event)
+				if mode == "duplicate" && event.Type == runtime.EventUsage {
+					send(event)
+				}
+			}
+			q := &questionRuntime{configuredRuntime: worker, events: events}
+			result, err := AskQuestion(t.Context(), db, filepath.Join(filepath.Dir(databasePath), "ledger.json"),
+				"task", "Observe the saved Task.", resolved.Config, q)
+			if err != nil || result.Answer == nil {
+				t.Fatal("valid observed usage prevented answer acceptance", mode, err)
+			}
+			expected := 1
+			if mode == "checkpoint-only" {
+				expected = 0
+			}
+			if len(result.Usage) != expected || mode != "duplicate" && len(result.UsageCheckpoints) != 1 {
+				t.Fatal("usage observation was duplicated or discarded", result.Usage, result.UsageCheckpoints)
 			}
 		})
 	}

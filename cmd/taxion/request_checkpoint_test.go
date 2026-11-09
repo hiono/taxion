@@ -544,6 +544,45 @@ func TestRequestExpiredCheckpointStopsWithoutRepeatingPlanner(t *testing.T) {
 	}
 }
 
+func TestRequestCheckpointOnlyUsageSurvivesRecoveryWithoutDoubleCounting(t *testing.T) {
+	_, args := requestFixture(t)
+	if err := requestCommand(append(args, "add search"), strings.NewReader("/plan\n"), io.Discard,
+		fixturePlan(t, requestFixtureAnswer([]string{}), false, true), nil); err != nil {
+		t.Fatal(err)
+	}
+	db, state, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if state.Records.Operation.PlanningNanoAIU != 1 || state.Records.Operation.PlanningUsageState != "complete" {
+		t.Fatal("live checkpoint did not reach Planner cumulative accounting")
+	}
+	var terminal plannerTerminalEvidence
+	for _, record := range state.Records.Requests {
+		var candidate plannerTerminalEvidence
+		if json.Unmarshal([]byte(record.Payload), &candidate) == nil && len(candidate.UsageCheckpoints) == 1 {
+			terminal = candidate
+		}
+	}
+	if terminal.AttemptID == "" || len(terminal.Usage) != 0 || len(terminal.UsageCheckpoints) != 1 {
+		t.Fatal("durable terminal receipt lost the original checkpoint")
+	}
+	before := len(state.Records.Requests)
+	if err := recordRecoveredPlannerUsage(&state, state.Records.Operation, terminal.AttemptID,
+		terminal.Usage, 1, "complete", terminal.UsageCheckpoints...); err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Records.Requests) != before || state.Records.Operation.PlanningNanoAIU != 1 {
+		t.Fatal("recovery counted the live checkpoint again")
+	}
+	legacy, err := plannerUsageHash(terminal.Usage, nil)
+	expected, expectedErr := core.CanonicalSHA256(terminal.Usage)
+	if err != nil || expectedErr != nil || legacy != expected {
+		t.Fatal("checkpoint-free legacy usage hash changed")
+	}
+}
+
 func TestRequestUnknownPlanningUsageStopsBeforeAnotherPaidCall(t *testing.T) {
 	_, args := requestFixture(t)
 	calls := 0

@@ -22,6 +22,64 @@ func graphTask(id string) GraphTask {
 		FileAccess: DefaultFileAccessPolicy()}
 }
 
+func TestDispatchCloneOwnsAllUsageMetadata(t *testing.T) {
+	var usage DispatchUsage
+	if err := json.Unmarshal([]byte(`{"model":"test","modelDisplayName":"Test","provider":{"id":"provider","kind":"openai","label":"Provider"},"modelProvider":"native","isAuto":true,"inputTokens":1,"outputTokens":2,"cacheReadTokens":0,"cacheWriteTokens":0,"reasoningTokens":3,"requestCount":1,"requestCost":0.5,"tokenDetails":{"reasoning":3},"cacheExpiresAt":"2026-11-09T00:00:00Z","totalNanoAIU":4,"aiCreditsStatus":"complete","accounting":{"sourceSessionId":"session","sequence":1,"usageId":"call"}}`), &usage); err != nil {
+		t.Fatal(err)
+	}
+	dispatch := GraphDispatch{
+		RuntimeUsage: []DispatchUsage{usage},
+		RuntimeUsageCheckpoints: []UsageCheckpoint{{
+			UsageTotals: []DispatchUsage{usage}, Watermarks: map[string]int64{"session": 1},
+			TotalNanoAIU: usage.TotalNanoAIU, AICreditsStatus: usage.AICreditsStatus,
+			ProviderModelMetrics: []ProviderModelMetric{{
+				ModelID: &usage.Model, ModelDisplayName: usage.ModelDisplayName, Provider: usage.Provider,
+				Metrics: ProviderModelUsageMetrics{
+					TotalNanoAIU: usage.TotalNanoAIU, AICreditsStatus: usage.AICreditsStatus,
+					TokenDetails: usage.TokenDetails, CacheExpiresAt: usage.CacheExpiresAt,
+					Usage: ProviderModelTokenUsage{ReasoningTokens: usage.ReasoningTokens},
+				},
+			}},
+		}},
+	}
+	before, _ := json.Marshal(dispatch)
+	copied := cloneDispatch(dispatch)
+	got := &copied.RuntimeUsage[0]
+	*got.ModelDisplayName = "Changed"
+	got.Provider.ID = "other"
+	*got.ModelProvider = "other"
+	*got.IsAuto = false
+	for _, value := range []*int64{got.InputTokens, got.OutputTokens, got.CacheReadTokens,
+		got.CacheWriteTokens, got.ReasoningTokens, got.RequestCount} {
+		*value++
+	}
+	*got.RequestCost++
+	got.TokenDetails["reasoning"]++
+	*got.CacheExpiresAt = got.CacheExpiresAt.Add(time.Hour)
+	*got.TotalNanoAIU++
+	*got.AICreditsStatus = "partial"
+	got.Accounting.UsageID = "other"
+	checkpoint := &copied.RuntimeUsageCheckpoints[0]
+	*checkpoint.TotalNanoAIU++
+	*checkpoint.AICreditsStatus = "partial"
+	checkpoint.Watermarks["session"]++
+	checkpoint.UsageTotals[0].Provider.ID = "other"
+	checkpoint.UsageTotals[0].TokenDetails["reasoning"]++
+	metric := &checkpoint.ProviderModelMetrics[0]
+	*metric.ModelID = "other"
+	*metric.ModelDisplayName = "Other"
+	metric.Provider.ID = "other"
+	*metric.Metrics.TotalNanoAIU++
+	*metric.Metrics.AICreditsStatus = "partial"
+	*metric.Metrics.CacheExpiresAt = metric.Metrics.CacheExpiresAt.Add(time.Hour)
+	*metric.Metrics.Usage.ReasoningTokens++
+	metric.Metrics.TokenDetails["reasoning"]++
+	after, _ := json.Marshal(dispatch)
+	if string(before) != string(after) {
+		t.Fatal("mutating cloned usage changed the original Dispatch")
+	}
+}
+
 func TestDispatchResultMismatchNamesFieldWithoutSubmittedValue(t *testing.T) {
 	dispatch := GraphDispatch{ID: "dispatch", TaskID: "task", Recipient: "CODER", Repository: "owner/repo"}
 	dispatch.Instruction.BaselineSHA = strings.Repeat("a", 40)

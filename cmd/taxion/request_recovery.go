@@ -334,7 +334,7 @@ func requestRecoveryCommand(args []string, output io.Writer) (returnErr error) {
 		if next.Hash != *expectedHash {
 			return fmt.Errorf("request recovery state changed during apply; preview again")
 		}
-		if err := recordRecoveredPlannerUsage(current, savedOperation, binding.AttemptID, terminal.Usage, usageAmount, usageStatus); err != nil {
+		if err := recordRecoveredPlannerUsage(current, savedOperation, binding.AttemptID, terminal.Usage, usageAmount, usageStatus, terminal.UsageCheckpoints...); err != nil {
 			return err
 		}
 		minimal := minimalRequestAnswer(answer)
@@ -494,9 +494,11 @@ func terminalFromSavedPlanner(binding plannerAttemptEvidence, turn runtime.Saved
 		if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &call); err != nil {
 			return plannerTerminalEvidence{}, fmt.Errorf("saved native usage event is invalid")
 		}
-		usage = append(usage, call)
+		if err := core.AppendUsage(&usage, call); err != nil {
+			return plannerTerminalEvidence{}, err
+		}
 	}
-	if len(usage) == 0 {
+	if len(usage) == 0 && len(turn.UsageCheckpoints) == 0 {
 		usage = turn.UsageTotals
 	}
 	return plannerTerminalEvidence{
@@ -773,18 +775,13 @@ func buildRequestRecoveryPreview(state store.Workspace, checkpoint requestCheckp
 	}
 	finalCheckpointMatches := len(turn.UsageCheckpoints) != 0 && checkpointMatches
 	if finalCheckpointMatches && len(terminal.Usage) != 0 {
-		payload, err := json.Marshal(turn.UsageCheckpoints[len(turn.UsageCheckpoints)-1])
-		if err != nil {
-			return fail("saved final checkpoint cannot be read")
-		}
-		_, exact, err := runtime.DecodeUsageCheckpoint(string(payload), turn.SessionID, terminal.Usage)
+		summary, err := core.SummarizeUsage(turn.SessionID, terminal.Usage, turn.UsageCheckpoints)
 		if err != nil {
 			return fail("saved final checkpoint conflicts with terminal usage")
 		}
-		finalCheckpointMatches = exact
+		finalCheckpointMatches = summary.CreditsStatus == "complete"
 	}
-	usageMatches = (usageMatches || finalCheckpointMatches &&
-		(len(turn.UsageTotals) == 0 || len(terminal.Usage) == 0)) && checkpointMatches
+	usageMatches = (usageMatches || finalCheckpointMatches) && (checkpointMatches || operation.ExternalBudgetOnly())
 	usageUncertain := uncertainCancellation && (len(terminal.Usage) == 0 && len(turn.UsageTotals) == 0 ||
 		len(terminal.Usage) != 0 && !questionUsageTotalsConflict(terminal.Usage, turn.UsageTotals))
 	if turnHasExecution(turn) || !usageMatches && !usageUncertain {
@@ -807,13 +804,23 @@ func buildRequestRecoveryPreview(state store.Workspace, checkpoint requestCheckp
 			return fail("request recovery cannot associate a Planner turn with a Dispatch or Flow")
 		}
 	}
-	total, usageStatus, err := plannerUsageTotal(terminal.Usage)
+	terminalSummary, err := core.SummarizeUsage(turn.SessionID, terminal.Usage, terminal.UsageCheckpoints)
 	if err != nil {
 		return fail("saved usage is invalid")
+	}
+	total, usageStatus := 0.0, "unknown"
+	if terminalSummary.NanoAIU != nil {
+		total = *terminalSummary.NanoAIU
+	}
+	if terminalSummary.CreditsStatus == "complete" {
+		usageStatus = "complete"
 	}
 	total = max(total, checkpointFloor)
 	if finalCheckpointMatches {
 		usageStatus = "complete"
+	}
+	if !checkpointMatches {
+		usageStatus = "unknown"
 	}
 	if math.IsNaN(total) || math.IsInf(total, 0) {
 		return fail("saved checkpoint cost is invalid")
@@ -919,61 +926,36 @@ func compareQuestionUsage(calls, totals []core.DispatchUsage) (bool, bool) {
 
 func savedCheckpointUsage(turn runtime.SavedTurn) (bool, float64, error) {
 	var calls []core.DispatchUsage
+	var checkpoints []runtime.UsageCheckpoint
 	for _, event := range turn.Events {
 		if event.Type == runtime.EventUsage {
 			var call core.DispatchUsage
 			if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &call); err != nil {
 				return false, 0, err
 			}
-			calls = append(calls, call)
-		}
-	}
-	var prior []core.DispatchUsage
-	matches, floor := true, 0.0
-	check := func(payload string) error {
-		checkpoint, exact, err := runtime.DecodeUsageCheckpoint(payload, turn.SessionID, prior)
-		if err != nil {
-			return err
-		}
-		known := checkpoint.KnownNanoAIU(calls)
-		if math.IsInf(known, 0) || math.IsNaN(known) {
-			return fmt.Errorf("invalid checkpoint cost")
-		}
-		if len(calls) == 0 && len(turn.UsageTotals) != 0 {
-			aggregate, status, err := plannerUsageTotal(turn.UsageTotals)
-			if err != nil || status == "complete" && known > aggregate+1e-6 ||
-				core.UsageBelowKnown(checkpoint.UsageTotals, turn.UsageTotals) {
-				return fmt.Errorf("checkpoint conflicts with final aggregate")
-			}
-			exact = exact && status == "complete" && known <= aggregate+1e-6
-		}
-		floor = max(floor, known)
-		matches = matches && exact
-		return nil
-	}
-	for _, event := range turn.Events {
-		if event.Type == runtime.EventUsage {
-			var call core.DispatchUsage
-			if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &call); err != nil {
+			if err := core.AppendUsage(&calls, call); err != nil {
 				return false, 0, err
 			}
-			prior = append(prior, call)
 		}
-		if event.Type != runtime.EventUsageCheckpoint {
-			continue
-		}
-		if err := check(event.Payload); err != nil {
-			return false, 0, err
+		if event.Type == runtime.EventUsageCheckpoint {
+			checkpoint, _, err := runtime.DecodeUsageCheckpoint(event.Payload, turn.SessionID, calls)
+			if err != nil {
+				return false, 0, err
+			}
+			checkpoints = append(checkpoints, checkpoint)
 		}
 	}
-	for _, checkpoint := range turn.UsageCheckpoints {
-		payload, err := json.Marshal(checkpoint)
-		if err != nil {
-			return false, 0, err
-		}
-		if err := check(string(payload)); err != nil {
-			return false, 0, err
-		}
+	checkpoints = append(checkpoints, turn.UsageCheckpoints...)
+	if len(checkpoints) == 0 {
+		return true, 0, nil
+	}
+	summary, err := core.SummarizeUsage(turn.SessionID, calls, checkpoints)
+	if err != nil {
+		return false, 0, err
+	}
+	floor := 0.0
+	if summary.NanoAIU != nil {
+		floor = *summary.NanoAIU
 	}
 	finalKnown, finalStatus, err := plannerUsageTotal(turn.UsageTotals)
 	if err != nil {
@@ -982,12 +964,27 @@ func savedCheckpointUsage(turn runtime.SavedTurn) (bool, float64, error) {
 	if finalStatus == "complete" && len(turn.UsageTotals) != 0 && floor > finalKnown+1e-6 {
 		return false, 0, fmt.Errorf("checkpoint exceeds final aggregate")
 	}
-	return matches, floor, nil
+	finalSummary, err := core.SummarizeUsage("", turn.UsageTotals, nil)
+	if err != nil {
+		return false, 0, err
+	}
+	if finalStatus == "complete" && summary.CreditsStatus == "complete" && math.Abs(floor-finalKnown) > 1e-6 ||
+		finalSummary.TokenStatus == "complete" && summary.InputOutputTokens != nil &&
+			(*summary.InputOutputTokens > *finalSummary.InputOutputTokens ||
+				summary.TokenStatus == "complete" && *summary.InputOutputTokens != *finalSummary.InputOutputTokens) {
+		return false, 0, fmt.Errorf("final aggregate conflicts with saved checkpoint")
+	}
+	for _, checkpoint := range checkpoints {
+		if len(turn.UsageTotals) != 0 && core.UsageBelowKnown(checkpoint.UsageTotals, turn.UsageTotals) {
+			return false, 0, fmt.Errorf("checkpoint conflicts with final aggregate")
+		}
+	}
+	return summary.CreditsStatus == "complete", floor, nil
 }
 
 func recordRecoveredPlannerUsage(state *store.Workspace, operation *store.Operation,
-	attemptID string, usage []core.DispatchUsage, amount float64, usageState string) error {
-	hash, err := core.CanonicalSHA256(usage)
+	attemptID string, usage []core.DispatchUsage, amount float64, usageState string, checkpoints ...runtime.UsageCheckpoint) error {
+	hash, err := plannerUsageHash(usage, checkpoints)
 	if err != nil {
 		return err
 	}

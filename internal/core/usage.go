@@ -1,9 +1,60 @@
 package core
 
 import (
+	"fmt"
 	"math"
+	"reflect"
 	"strings"
 )
+
+// AppendUsage preserves one observation per accounting identity.
+func AppendUsage(calls *[]DispatchUsage, usage DispatchUsage) error {
+	if usage.Accounting != nil {
+		for _, previous := range *calls {
+			if previous.Accounting == nil || *previous.Accounting != *usage.Accounting {
+				continue
+			}
+			usage.ObservedAt = previous.ObservedAt
+			if !reflect.DeepEqual(previous, usage) {
+				return fmt.Errorf("taxion: runtime usage accounting identity was reused with different metrics")
+			}
+			return nil
+		}
+	}
+	*calls = append(*calls, usage)
+	return nil
+}
+
+func ValidUsageMetadata(usage DispatchUsage) bool {
+	if strings.TrimSpace(usage.Model) == "" || usage.Scope != "" && usage.Scope != "latest-assistant-message" {
+		return false
+	}
+	if usage.Provider != nil && (strings.TrimSpace(usage.Provider.ID) == "" || strings.TrimSpace(usage.Provider.Kind) == "") {
+		return false
+	}
+	if usage.Accounting != nil && (strings.TrimSpace(usage.Accounting.SourceSessionID) == "" ||
+		usage.Accounting.Sequence <= 0 || strings.TrimSpace(usage.Accounting.UsageID) == "") {
+		return false
+	}
+	for _, value := range []*int64{usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens,
+		usage.CacheWriteTokens, usage.ReasoningTokens, usage.RequestCount} {
+		if value != nil && *value < 0 {
+			return false
+		}
+	}
+	for _, value := range usage.TokenDetails {
+		if value < 0 {
+			return false
+		}
+	}
+	for _, value := range []*float64{usage.TotalNanoAIU, usage.RequestCost} {
+		if value != nil && (math.IsNaN(*value) || math.IsInf(*value, 0) || *value < 0) {
+			return false
+		}
+	}
+	return usage.AICreditsStatus == nil || *usage.AICreditsStatus == "complete" ||
+		*usage.AICreditsStatus == "partial" || *usage.AICreditsStatus == "unavailable"
+}
 
 // CompareUsage distinguishes an exact observation from missing or conflicting totals.
 func CompareUsage(calls, totals []DispatchUsage) (bool, bool) {
@@ -38,13 +89,16 @@ func CompareProviderModelUsage(calls []DispatchUsage, totals []ProviderModelMetr
 	complete := len(calls) != 0 && len(totals) != 0
 	for _, call := range calls {
 		id := key(call.Model, call.Provider)
-		if id == "" || call.InputTokens == nil || call.OutputTokens == nil {
+		if id == "" {
 			complete = false
 			continue
 		}
 		value, exists := sums[id]
 		if !exists {
 			value.complete = true
+		}
+		if call.InputTokens == nil || call.OutputTokens == nil {
+			value.complete = false
 		}
 		if call.InputTokens != nil {
 			if *call.InputTokens < 0 || *call.InputTokens > math.MaxInt64-value.input {
@@ -132,20 +186,28 @@ func compareUsage(calls, totals []DispatchUsage, completeCalls bool) (bool, bool
 	}
 	sum := map[string]modelUsage{}
 	for _, call := range calls {
-		if strings.TrimSpace(call.Model) == "" || call.InputTokens == nil || call.OutputTokens == nil ||
-			*call.InputTokens < 0 || *call.OutputTokens < 0 {
+		if strings.TrimSpace(call.Model) == "" || completeCalls && (call.InputTokens == nil || call.OutputTokens == nil) ||
+			call.InputTokens != nil && *call.InputTokens < 0 || call.OutputTokens != nil && *call.OutputTokens < 0 {
 			return false, true
 		}
 		value := sum[call.Model]
 		if _, exists := sum[call.Model]; !exists {
 			value.cacheReadComplete, value.cacheWriteComplete, value.nanoAIUComplete = true, true, true
 		}
-		if *call.InputTokens > math.MaxInt64-value.input || *call.OutputTokens > math.MaxInt64-value.output {
-			return false, true
+		if call.InputTokens != nil {
+			if *call.InputTokens > math.MaxInt64-value.input {
+				return false, true
+			}
+			value.input += *call.InputTokens
+			value.inputKnown = true
 		}
-		value.input += *call.InputTokens
-		value.output += *call.OutputTokens
-		value.inputKnown, value.outputKnown = true, true
+		if call.OutputTokens != nil {
+			if *call.OutputTokens > math.MaxInt64-value.output {
+				return false, true
+			}
+			value.output += *call.OutputTokens
+			value.outputKnown = true
+		}
 		if call.CacheReadTokens != nil {
 			if *call.CacheReadTokens < 0 || *call.CacheReadTokens > math.MaxInt64-value.cacheRead {
 				return false, true
@@ -200,8 +262,11 @@ func compareUsage(calls, totals []DispatchUsage, completeCalls bool) (bool, bool
 		}
 		if total.InputTokens == nil || total.OutputTokens == nil || !value.inputKnown || !value.outputKnown {
 			matches = false
-		} else if *total.InputTokens < value.input || *total.OutputTokens < value.output ||
-			completeCalls && (*total.InputTokens != value.input || *total.OutputTokens != value.output) {
+		}
+		if total.InputTokens != nil && (*total.InputTokens < value.input ||
+			completeCalls && value.inputKnown && *total.InputTokens != value.input) ||
+			total.OutputTokens != nil && (*total.OutputTokens < value.output ||
+				completeCalls && value.outputKnown && *total.OutputTokens != value.output) {
 			return false, true
 		}
 		if value.cacheReadKnown && total.CacheReadTokens == nil ||

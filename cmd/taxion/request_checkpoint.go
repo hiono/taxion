@@ -242,17 +242,34 @@ func plannerUsageTotal(usage []core.DispatchUsage) (float64, string, error) {
 	return total, state, nil
 }
 
-func recordPlannerUsage(db *store.Store, operation *store.Operation, attemptID string, usage []core.DispatchUsage) error {
+func plannerUsageHash(usage []core.DispatchUsage, checkpoints []core.UsageCheckpoint) (string, error) {
+	if len(checkpoints) == 0 {
+		return core.CanonicalSHA256(usage)
+	}
+	return core.CanonicalSHA256(struct {
+		Usage       []core.DispatchUsage   `json:"usage"`
+		Checkpoints []core.UsageCheckpoint `json:"usageCheckpoints"`
+	}{usage, checkpoints})
+}
+
+func recordPlannerUsage(db *store.Store, operation *store.Operation, attemptID string, result controller.QuestionResult) error {
 	if attemptID == "" {
 		return fmt.Errorf("request Planner usage requires its durable attempt ID")
 	}
-	usageHash, err := core.CanonicalSHA256(usage)
+	usageHash, err := plannerUsageHash(result.Usage, result.UsageCheckpoints)
 	if err != nil {
 		return err
 	}
-	amount, usageState, err := plannerUsageTotal(usage)
+	summary, err := core.SummarizeUsage(result.SessionID, result.Usage, result.UsageCheckpoints)
 	if err != nil {
 		return err
+	}
+	amount, usageState := 0.0, "unknown"
+	if summary.NanoAIU != nil {
+		amount = *summary.NanoAIU
+	}
+	if summary.CreditsStatus == "complete" {
+		usageState = "complete"
 	}
 	receipt := plannerUsageReceipt{1, attemptID, usageHash, amount, usageState}
 	payload, err := json.Marshal(receipt)
