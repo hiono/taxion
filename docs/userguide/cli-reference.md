@@ -542,6 +542,23 @@ Task／Dispatch／session／ownerはモデルの推測で補わず、hostが保�
 このtoolは回答の受理、実配信、HOLD、Runtime Stop、依存作業の自動停止・再開を行わない。
 Roleへの説明でも未回答に依存する作業を進めないよう求めるが、その行動を実モデルで検証していない。
 
+protocol 3の新しいRole sessionでは、同じ`taxion_clarify`へ
+`{"action":"read","id":"自分が発行した質問ID"}`を渡すと、
+保存済み回答の`candidates`、出典・時刻・receipt、`resolution`と現在の`decision`を取得できる。
+質問の再送や人間による回答本文の貼り直しは不要で、読取りによる記録の追記も行わない。
+回答が未着なら候補は空であり、待機中の反復pollを要求しない。
+独立した作業の区切りなど、次の安全なtool呼出し時に確認する。
+別質問の原文を受信するinboxではなく、同じTask／Dispatch／Role／session／owner／runnerで
+発行した質問への返信だけを返す。別origin、終了・停止要求済みのDispatch、
+owner・scopeの変化、実行期限切れは拒否する。
+回答の取得後も既存の停止・承認条件は残り、新たな矛盾は`blocked`として返す。
+64 KiBを超える応答は切り詰めず拒否する。
+
+旧protocolのsessionにはこの読取りを後付けしない。protocol変更は設定hashを変えるため、
+旧sessionを新設定で再利用できない。回答を作るRoleの自動起動や、実行中Flowからの
+Planner呼出しのownership統合は未実装である。SDKの空AgentIDによるroot帰属の制約も変わらず、
+この読取りはrootの本人認証、配信完了、ACKを証明しない。SDK inboxの無効化は維持する。
+
 回答の保存後は`assess --id`で、現在の保存記録との適合を読取り専用で確認できる。
 `state`は`OBSERVED`のままで、`decision.verdict: "accept"`は次の正式な契約確認の入力にできるという意味である。
 回答の意味的な妥当性、ACCEPTED、AUTHORIZED、DISPATCHED、Runtimeの稼働や配信完了を証明しない。

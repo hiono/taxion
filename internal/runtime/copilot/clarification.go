@@ -41,6 +41,21 @@ func (a *Adapter) clarificationTools() []sdk.Tool {
 		},
 		Handler: a.clarificationTool,
 	}}
+	if a.config.ManagedClarification.ProtocolVersion >= 3 {
+		tools[0].Description += " Use action=read with only id to read saved answers to your own question during this execution; " +
+			"do not repeat the question or poll while waiting. Consult the canonical candidates, sources, conflicts and decision before revising your plan. " +
+			"An accept verdict means input eligibility, not acceptance, approval or permission to resume dependent work. " +
+			"This cannot receive questions addressed to another Role and does not enable the disabled Coder inbox."
+		tools[0].Parameters["properties"].(map[string]any)["action"] = map[string]any{
+			"type": "string", "enum": []string{"request", "read"},
+		}
+		required := tools[0].Parameters["required"]
+		tools[0].Parameters["required"] = []string{"id"}
+		tools[0].Parameters["anyOf"] = []any{
+			map[string]any{"required": required},
+			map[string]any{"properties": map[string]any{"action": map[string]any{"const": "read"}}, "required": []string{"action"}},
+		}
+	}
 	return tools
 }
 

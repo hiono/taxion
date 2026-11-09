@@ -164,7 +164,7 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 			return nil, fmt.Errorf("runtime: clarification intake requires an owned executing operation and runner")
 		}
 		binding := runtime.ManagedClarification{
-			ProtocolVersion: 2,
+			ProtocolVersion: 3,
 			DispatchID:      dispatch.ID, ScopeHash: observed.ScopeHash,
 			OperationID: operation.ID, Owner: operation.Owner, FlowID: flow.ID, RunnerID: flow.RunnerID,
 		}

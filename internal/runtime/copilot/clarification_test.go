@@ -65,7 +65,8 @@ func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing
 	graph.ReviewFlows = []core.ReviewFlow{flow}
 	var adapter *Adapter
 	binding := runtime.ManagedClarification{
-		DispatchID: dispatch.ID, OperationID: "operation", Owner: "owner",
+		ProtocolVersion: 3,
+		DispatchID:      dispatch.ID, OperationID: "operation", Owner: "owner",
 		FlowID: flow.ID, RunnerID: flow.RunnerID,
 	}
 	if _, err := db.InitializeWorkspace(store.Workspace{
@@ -99,6 +100,14 @@ func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing
 	plain, err := New(disabled)
 	if err != nil || plain.ConfigHash() == adapter.ConfigHash() {
 		t.Fatal("opt-in is not configuration-bound", err)
+	}
+	oldBinding := binding
+	oldBinding.ProtocolVersion = 2
+	oldConfig := cfg
+	oldConfig.ManagedClarification = &oldBinding
+	oldAdapter, err := New(oldConfig)
+	if err != nil || oldAdapter.ConfigHash() == adapter.ConfigHash() {
+		t.Fatal("answer-read protocol was not bound to a new session configuration", err)
 	}
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		state.Records.Operation = &store.Operation{
@@ -332,6 +341,140 @@ func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing
 			t.Fatal("previous execution's question ID was silently rebound to the renewed owner")
 		}
 	})
+	readInvocation := invocation
+	readInvocation.Arguments = map[string]any{"action": "read", "id": request.ID}
+	read := func() controller.ClarificationAssessment {
+		t.Helper()
+		before, err := db.LoadWorkspace()
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := handler(readInvocation)
+		var report controller.ClarificationAssessment
+		if err != nil || result.ResultType != "success" ||
+			json.Unmarshal([]byte(result.TextResultForLLM), &report) != nil {
+			t.Fatal("bound SDK tool did not return canonical answer evidence", result, err)
+		}
+		after, err := db.LoadWorkspace()
+		if err != nil || !reflect.DeepEqual(before, after) {
+			t.Fatal("answer read changed records, authority, HOLD or ownership", err)
+		}
+		return report
+	}
+	pending := read()
+	if pending.ID != request.ID || len(pending.Candidates) != 0 || pending.Decision.Verdict != "blocked" {
+		t.Fatal("unanswered question was treated as resolved", pending)
+	}
+	control, err := controller.New(db, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.ObserveRoleClarification(t.Context(), oldBinding, "session",
+		json.RawMessage(`{"action":"read","id":"question"}`)); err == nil {
+		t.Fatal("legacy protocol silently gained answer-read access")
+	}
+	for _, args := range []map[string]any{
+		{"action": "read", "id": "missing"},
+		{"action": "read", "id": request.ID, "question": "replace the question"},
+		{"action": "read"},
+		{"action": "approve", "id": request.ID},
+	} {
+		bad := readInvocation
+		bad.Arguments = args
+		if _, err := handler(bad); err == nil {
+			t.Fatal("invalid answer read accepted", args)
+		}
+	}
+	answer := controller.ClarificationAnswer{
+		Role: "PLANNER", Actor: "planner-session", Source: "spec:behavior", Text: "Preserve the current behavior.",
+	}
+	if _, err := controller.AnswerClarification(db, request.ID, answer); err != nil {
+		t.Fatal(err)
+	}
+	answered := read()
+	if answered.State != "OBSERVED" || answered.Decision.Verdict != "blocked" ||
+		!slices.ContainsFunc(answered.Decision.Conditions, func(c core.InputCondition) bool { return c.Code == "clarification-budget" }) ||
+		slices.ContainsFunc(answered.Decision.Conditions, func(c core.InputCondition) bool { return c.Code == "clarification-unanswered" }) ||
+		len(answered.Candidates) != 1 ||
+		answered.Candidates[0].Answer.Text != answer.Text || answered.Candidates[0].Answer.Source != answer.Source ||
+		answered.Candidates[0].Answer.At.IsZero() || answered.Candidates[0].Receipt.Hash == "" {
+		t.Fatal("answer source, receipt or observation boundary missing", answered)
+	}
+	// No question is resent when independent work reaches another safe tool call.
+	for range 2 {
+		if got := read(); got.Receipt != answered.Receipt {
+			t.Fatal("repeated answer reads created new evidence")
+		}
+	}
+	for range cap(results) {
+		go func() {
+			result, err := handler(readInvocation)
+			var report controller.ClarificationAssessment
+			if err == nil && (json.Unmarshal([]byte(result.TextResultForLLM), &report) != nil || report.Receipt != answered.Receipt) {
+				err = errors.New("concurrent read changed canonical evidence")
+			}
+			results <- err
+		}()
+	}
+	for range cap(results) {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	conflict := answer
+	conflict.Source, conflict.Text = "spec:alternative", "Replace the behavior."
+	if _, err := controller.AnswerClarification(db, request.ID, conflict); err == nil {
+		t.Fatal("contradictory answer was accepted")
+	}
+	disputed := read()
+	if disputed.Decision.Verdict != "blocked" || len(disputed.Candidates) != 2 || disputed.Resolution != nil {
+		t.Fatal("running Role did not observe the conflicting evidence", disputed)
+	}
+	if _, err := controller.ResolveClarificationConflict(db, controller.ClarificationResolutionRequest{
+		ID: request.ID, ExpectedHash: disputed.Decision.BasisHash, Selected: disputed.Candidates[1].Receipt,
+		Role: "HUMAN", Actor: "owner", Source: "decision:behavior", Reason: "Use the updated specification.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	selected := read()
+	if selected.State != "OBSERVED" || selected.Resolution == nil ||
+		selected.Resolution.Selected != disputed.Candidates[1].Receipt || selected.Candidates[0].Answer.Text != answer.Text {
+		t.Fatal("selection overwrote the original evidence or granted authority", selected)
+	}
+	foreign := request
+	foreign.ID, foreign.Uncertainty = "foreign", "a different uncertainty"
+	observedForeign, err := controller.ObserveClarification(db, task.ID, dispatch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign.TaskID, foreign.DispatchID, foreign.Role, foreign.BasisHash = task.ID, dispatch.ID, "CODER", observedForeign.Hash
+	if _, err := controller.RequestClarification(db, foreign); err != nil {
+		t.Fatal(err)
+	}
+	other := readInvocation
+	other.Arguments = map[string]any{"action": "read", "id": foreign.ID}
+	if _, err := handler(other); err == nil {
+		t.Fatal("answer read became a recipient inbox for a question from another origin")
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		state.Records.Operation.Owner = "new-owner"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handler(readInvocation); err == nil {
+		t.Fatal("former owner read answer evidence")
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		state.Records.Operation.Owner = binding.Owner
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	history, err = controller.ClarificationHistory(db)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -343,6 +486,39 @@ func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing
 	recovered, err := controller.ClarificationHistory(reopened)
 	if err != nil || !reflect.DeepEqual(recovered, history) {
 		t.Fatal("reopen lost the canonical question or execution origin", recovered, err)
+	}
+	adapter.config.ManagedClarification.Request = func(ctx context.Context, session string, body json.RawMessage) (json.RawMessage, error) {
+		control, err := controller.New(reopened, adapter)
+		if err != nil {
+			return nil, err
+		}
+		return control.ObserveRoleClarification(ctx, binding, session, body)
+	}
+	result, err := handler(readInvocation)
+	var restored controller.ClarificationAssessment
+	if err != nil || json.Unmarshal([]byte(result.TextResultForLLM), &restored) != nil ||
+		restored.Receipt != selected.Receipt || !reflect.DeepEqual(restored.Candidates, selected.Candidates) ||
+		!reflect.DeepEqual(restored.Resolution, selected.Resolution) {
+		t.Fatal("store reopen changed or lost the selected answer evidence", result, err)
+	}
+	newEvidence := answer
+	newEvidence.Source, newEvidence.Text = "spec:third", "A third interpretation."
+	if _, err := controller.AnswerClarification(reopened, request.ID, newEvidence); err == nil {
+		t.Fatal("new conflict accepted")
+	}
+	result, err = handler(readInvocation)
+	restored = controller.ClarificationAssessment{}
+	if err != nil || json.Unmarshal([]byte(result.TextResultForLLM), &restored) != nil ||
+		restored.Resolution != nil || len(restored.Candidates) != 3 ||
+		!slices.ContainsFunc(restored.Decision.Conditions, func(c core.InputCondition) bool { return c.Code == "clarification-conflict" }) {
+		t.Fatal("new evidence did not invalidate the answer selection visible to the Role", result, err)
+	}
+	newEvidence.Source, newEvidence.Text = "spec:long", strings.Repeat("Additional evidence. ", 4000)
+	if _, err := controller.AnswerClarification(reopened, request.ID, newEvidence); err == nil {
+		t.Fatal("oversized conflicting answer was accepted")
+	}
+	if result, err := handler(readInvocation); err == nil || result.TextResultForLLM != "" {
+		t.Fatal("bounded answer read returned silently truncated evidence", result, err)
 	}
 	adapter.config.ManagedClarification.Request = func(context.Context, string, json.RawMessage) (json.RawMessage, error) {
 		return nil, errors.New("save failed")

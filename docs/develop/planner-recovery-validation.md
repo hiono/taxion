@@ -1456,3 +1456,152 @@ SDK調査と正式gateへの入力設計は独立して調査できるが、共�
 回答の意味的妥当性、選択者の権限、実モデルの質問行動、Coderの到達・ACK、
 正式な回答受理と自動Recovery、実環境E2E、後続の独立品質レビューは未確認である。
 #283／#284はOPEN、第五審査FAILを維持し、今回の入力適合や回答選択だけでは完成扱いにしない。
+
+## 相互情報補完のIssue精査と質問元への返信参照（2026-11-10）
+
+FACT: 起点は`fix/native-event-contract-083`の`8d3ca2c`で、worktreeはcleanだった。
+08:08:48 JSTの`runtime quota --account hrykono --approve-account-read`は
+使用21,700 requests、account残28,300を返した。承認上限21,900とreserve50から、
+この単位で使える量は150 requestsとした。account残量を支出許可に読み替えていない。
+今回の時間上限は2人日であり、以前の01:00までの作業単位とは分ける。
+予算は調査30、実装50、検証45、記録・保全25 requestsを目安とし、reserveは配分しない。
+
+### Issue群は必要条件を持つが、固定Flowだけでは目標を満たさない
+
+FACT: GitHubのOPEN Issue全31件、直近のCLOSED Issue30件の索引を取得し、
+#90、#283、#284、#224、#64、#196、#220の本文を確認した。
+実装は`clarification_intake.go`、`question.go`、`operation.go`、
+`context.go`、`clarification_assessment.go`、SDKの`clarification.go`と関連試験を照合した。
+ADR-0040の品質制約とADR-0066の観測・認可分離を継承する。
+全Issueの全コメントや全ADRを通読したという意味ではない。
+
+| 所有するIssue | 目標への適合と不足 |
+| --- | --- |
+| #90 | 質問・連携・費用・品質を横断管理する。往復通信と判断更新の受入れ証拠が必要 |
+| #283 | 既存情報の再利用、相手の選定、回答・矛盾・選択を所有。質問元sessionへ回答を返す経路が欠けていた |
+| #284 | 回答後の正式受理・認可・Recoveryを所有。返信を読む機能の前提にしない |
+| #282／#228 | 回答保存・ownershipと中断後の復元を再利用。新しい保存基盤は不要 |
+| #224／#64 | 独立した相談実行とPlanner起動の効果を扱う。固定Flow以外の相談と実行中operationの境界は未統合 |
+| #189／#196 | 工程・予算・承認内適応を管理する。動的な相談の代替にはならない |
+| #223／#225／#227 | 必要な入力、反復抑止、帰属を支える。相互理解や実モデルでの成立自体の証明ではない |
+
+INFERENCE: Issue群の方向性は部分適合であり、番号の統合や新Issueは不要と判断した。
+#283に双方向の応答参照と判断更新の受入れ条件を補い、#90でG1～G8を追跡する。
+Reviewerを後工程だけに固定しない相談は残課題として明記する。
+
+FACT: `ObserveRoleClarification`は質問を保存して参照だけを返し、
+回答本文や矛盾は公開CLI／store側に残っていた。
+また`askQuestion`は`checkOperation`へ空のFlow IDを渡すため、
+RUNNING Flowがあると既存の排他制御が相談開始を拒否する。
+`WithOperation`の伝播だけではこのFlow検査を通らない。
+この拒否を迂回してPlanner sessionを追加する変更は行わなかった。
+
+### 既存toolで自分の質問への返信を読めるようにする
+
+DECISION: 新しい会話エンジンや受信inboxを作らず、`taxion_clarify`のprotocol 3に
+`action: "read"`と質問IDだけを指定する観測を追加した。
+既存のsession／設定／worktree、operation owner／runner／期限、scope検査を質問登録と共有し、
+さらに元質問のTask／Dispatch／Role／originを照合する。
+宛先Roleという理由だけで他者の質問を取得させず、SDK inboxも有効化しない。
+空AgentIDからrootを証明できるとする判断は追加していない。
+
+FACT: `assessClarification`を再利用し、canonical回答候補、出典・時刻・receipt、
+矛盾、明示選択、保存時点の適合判定を返す。
+Graph、RequestRecord、承認、HOLD、ownerを書き換えない。
+質問本文の再送や、返信本文の人間による再転記は不要になる。
+ただし、回答者の起動・回答生成・保存が自動化されたわけではない。
+取得後にモデルが判断を更新したことも未実証である。
+同じ実行の次の安全なtool呼出しで読み、反復pollは指示しない。
+応答は64 KiBに制限し、超過時に部分本文を返さない。
+旧protocolには追加機能を後付けせず、設定hashの違いで新設定からの再利用を拒否する。
+
+### G1～G8は実モデルの成立まで含めて判定する
+
+次の判定は相互情報補完の全体に対するもので、限定経路の試験合格とは区別する。
+
+| Gate | 判定 | 今回確認した動作と未達条件 |
+| --- | --- | --- |
+| G1 相互情報交換 | FAIL | SDK登録handler→Controller→実storeで、質問元がPlanner名義の保存返信と矛盾・選択を取得。回答元の自動実行と3 Roleすべての双方向連携は未接続 |
+| G2 相互理解更新 | BLOCKED | 回答・根拠をモデル向け応答へ返せる。実モデルが自身の計画・判断を更新した証拠はない |
+| G3 動的協調 | FAIL | 結果提出を待たず同じ実行中に返信参照できるが、RUNNING Flowから任意の相手へ相談するownership経路は不足 |
+| G4 合意形成 | FAIL | 矛盾保持、明示選択、新証拠による再保留を実storeで確認。Role間の反論・判断理由の往復と合意形成は未実装 |
+| G5 協調制御 | FAIL | 同一質問・並行retry・返信読取りで二重登録しないことを確認。実モデルの不要議論や反復pollを抑制した証拠はない |
+| G6 人間との協調 | FAIL | 明示回答・選択と権限の分離、owner変更時の読取り拒否を確認。実モデル協調中の人間による方向修正E2Eは未確認 |
+| G7 継続性 | FAIL | store再open後に同じorigin／選択／回答receiptを参照できる。新session・失効ownerへの継続は拒否し、正式Recoveryの統合は未達 |
+| G8 実環境での成立 | BLOCKED | 実SDK wire RPC／provider／modelの協調実行は行っていない |
+
+合成sessionと実storeの試験は、保存された返信をモデル境界へ返す限定往復の証拠である。
+実際のPlannerが回答したこと、root限定、到達ACK、意味的な妥当性、G1全体の合格は証明しない。
+全体のPASSはまだなく、#283／#284のOPENと第五審査FAILを維持する。
+
+### 次は実行中の相談元・回答元を同じ承認枠へ結び付ける
+
+DECISION: 今回は返信の参照までに限定し、正式gateやSDK配信証明を主目的にしなかった。
+既存の工程順序を変えただけではなく、動作中の質問元sessionが自ら保存返信を取得する経路を追加した。
+一方、応答生成はまだ外部からの明示操作に依存し、人間の仲介を全面的には解消していない。
+
+次の最優先は#283／#282／#224の境界で、既存の隔離質問実行をRUNNING operationへ
+安全に関連付け、質問→回答生成→質問元の参照を一つの承認済み相談として検証することである。
+session・親子帰属・累計予算・期限・取消・不明結果を保持し、
+Reviewerは独立した成果評価とは別の助言コンテキストを使う。
+その後、同じ問いについて根拠付きの反論・提案を往復させ、判断更新を記録する。
+通常の実装相談と、正式な受理・認可・Recoveryを要する変更は分ける。
+#284は後者の統合を担当し、今回の返信読取りを正式受理とみなさない。
+
+ownershipの設計と、固定した小課題による実モデルの受入れ手順は独立して準備できる。
+共通の状態更新は並行実装しない。新たなモデル実行は残予算だけでなく
+対象・構成・課金・独立性の承認条件が揃ってから行う。
+
+### 検証コマンドと確認範囲
+
+以下の通常・raceはそれぞれ別のコマンドで完走した。全packageの全試験ではない。
+
+```bash
+gofmt -w internal/runtime/controller/clarification_intake.go \
+  internal/runtime/copilot/clarification.go \
+  internal/runtime/copilot/clarification_test.go cmd/taxion/runtime_worker.go
+go test ./internal/runtime/copilot ./internal/runtime/controller -run Clarification -count=1
+go test ./internal/runtime/copilot -run TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation -count=1
+go test -json ./internal/runtime/copilot ./internal/runtime/controller ./cmd/taxion \
+  -run 'Clarification|Question|Provenance|Completion|DispatchWorker' -count=1 -timeout 5m
+go test -race -json ./internal/runtime/copilot ./internal/runtime/controller ./cmd/taxion \
+  -run 'Clarification|Question|Provenance|Completion|DispatchWorker' -count=1 -timeout 8m
+go build ./...
+go vet ./...
+go generate ./cmd/taxion
+git diff --check
+```
+
+FACT: 最初のClarification対象試験は、既存fixtureのnative予算上限による`blocked`を
+新しい返信参照試験が`accept`と期待してFAILした。
+製品の予算検査は変更せず、回答取得後も予算blockが残ることを検証する形に修正した。
+再実行はPASSし、最終の通常・raceは各184 PASS／0 FAIL／0 SKIPだった。
+内訳はCopilot27、Controller141、CLI16で、親とsubtestの完了イベントを含む。
+build、vet、gofmt、completion生成、diff検査もPASS。completionの差分はない。
+
+SDK 1.0.22の登録済みtool handlerを合成呼出しし、実SQLite storeで
+未回答→返信→反復・並行読取り→矛盾→選択→再open→新証拠の追加を実行した。
+別origin、旧protocol、owner変更、不正な入力、応答上限超過も拒否した。
+実SDK wire RPC／provider／modelの試験はSKIPであり、未実施を通常試験のSKIP件数へ含めていない。
+回答者の`PLANNER`はfixtureの申告metadataで、実Plannerの本人認証ではない。
+既存の受入れ・HOLD・Stop・設定・質問保存の回帰を同時に実行した。
+独立した品質Reviewerによる同一候補の評価は未実施である。
+
+| 証跡 | SHA-256 |
+| --- | --- |
+| `mutual-info-20261110-normal.jsonl` | `ba0e2caba0c46cb61e58465aaf4c12ad363a0ad3c52e9e7424a02a03a04d8f45` |
+| `mutual-info-20261110-race.jsonl` | `505f7aecc303df1d79e8e05618a643726782503d483d755ba152800ad86b1d81` |
+
+最終indexの機密検査には、既存の固定Betterleaks 1.9.0 binaryを使用する。
+コマンドは`go run ./cmd/taxion git check-index --secrets --scanner "$SCANNER"`であり、
+`SCANNER`は既にchecksum照合済みのtask-local binaryの絶対pathを指す。
+結果は`mutual-info-20261110-index-scan.log`へ保存する。
+日本語lintは直接Python実行で辞書依存が不足したが、
+`uv run --offline`で宣言済みの依存を使うと実行できた。
+新しい節の検出はFACTラベル、技術用語、既存節との文頭反復、
+工程変更との区別を説明する対比だったため、事実区分と意味の明確さを優先して残した。
+
+08:18:41 JSTの整理前観測は使用21,800 requestsだった。
+開始時からのaccount差分は100、承認上限まで100、reserveを除く作業可能残は50である。
+この差分は他のaccount利用も含み得る保守的な観測で、厳密なsession別消費ではない。
+追加実装には使わず、残りを記録・検査・commitに限定する。
