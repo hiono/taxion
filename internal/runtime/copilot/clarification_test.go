@@ -17,6 +17,7 @@ import (
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/runtime/controller"
 	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing.T) {
@@ -368,7 +369,7 @@ func TestClarificationDeliveryCannotBypassBusyOrStoppedCoder(t *testing.T) {
 	}
 }
 
-func TestClarificationInboxSDKRegistrationBindingAndCompletion(t *testing.T) {
+func TestClarificationInboxFailsClosedWithoutRootAttribution(t *testing.T) {
 	cfg := testConfig(t)
 	calls := 0
 	cfg.ManagedClarification = &runtime.ManagedClarification{
@@ -388,64 +389,58 @@ func TestClarificationInboxSDKRegistrationBindingAndCompletion(t *testing.T) {
 			return json.RawMessage(`{"id":"question","handoff":{"phase":"clarification.handoff","status":"REQUESTED"},"receipt":{"hash":"receipt"},"question":{"question":"Which evidence is missing?"}}`), nil
 		},
 	}
-	adapter, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adapter.sessions["coder"] = &managedSession{sdk: &sdk.Session{}, busy: true}
-	var handler sdk.ToolHandler
-	for _, tools := range [][]sdk.Tool{adapter.sessionConfig(nil).Tools, adapter.resumeConfig(nil).Tools} {
-		found := false
-		for _, tool := range tools {
-			if tool.Name == ClarificationInboxToolName {
-				found, handler = true, tool.Handler
-				if tool.SkipPermission || tool.IsTerminal {
-					t.Fatal("inbox bypassed permissions or stopped the turn")
+	for _, policy := range []*tools.Policy{nil, {EvidenceDirectory: t.TempDir()}} {
+		cfg.ToolPolicy = policy
+		adapter, err := New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		adapter.sessions["coder"] = &managedSession{sdk: &sdk.Session{}, busy: true}
+		for _, names := range [][]string{adapter.sessionConfig(nil).AvailableTools, adapter.resumeConfig(nil).AvailableTools} {
+			if slices.Contains(names, ClarificationInboxToolName) {
+				t.Fatal("disabled inbox allowlisted")
+			}
+		}
+		for _, registered := range [][]sdk.Tool{adapter.sessionConfig(nil).Tools, adapter.resumeConfig(nil).Tools} {
+			intakeRegistered := false
+			for _, tool := range registered {
+				if tool.Name == ClarificationInboxToolName {
+					t.Fatal("unattributed inbox registered")
+				}
+				intakeRegistered = intakeRegistered || tool.Name == ClarificationToolName
+			}
+			if !intakeRegistered {
+				t.Fatal("inbox disablement removed clarification intake")
+			}
+		}
+		for _, agentID := range []string{"", "child"} {
+			for _, action := range []string{"receive", "ack"} {
+				invocation := sdk.ToolInvocation{ToolName: ClarificationInboxToolName, ToolCallID: "call", SessionID: "coder",
+					AgentID: agentID, TraceContext: t.Context(), Arguments: map[string]any{"action": action}}
+				for range 2 {
+					if result, err := adapter.clarificationInboxTool(invocation); err == nil || result.ResultType == "success" {
+						t.Fatal("disabled inbox invocation or replay reached its callback", agentID, action)
+					}
 				}
 			}
 		}
-		if !found {
-			t.Fatal("inbox missing from create/resume SDK config")
+		if calls != 0 {
+			t.Fatal("unverified attribution reached Controller callback")
+		}
+		injected := cfg
+		injected.AvailableTools = append(slices.Clone(cfg.AvailableTools), ClarificationInboxToolName)
+		if _, err := New(injected); err == nil {
+			t.Fatal("disabled inbox manually allowlisted")
 		}
 	}
-	invocation := sdk.ToolInvocation{ToolName: ClarificationInboxToolName, ToolCallID: "receive-call", SessionID: "coder",
-		TraceContext: t.Context(), Arguments: map[string]any{"action": "receive"}}
-	for _, kind := range []string{"session", "nested", "missing-call", "idle", "stopped", "cancelled"} {
-		bad := invocation
-		handle := adapter.sessions["coder"]
-		switch kind {
-		case "session":
-			bad.SessionID = "other"
-		case "nested":
-			bad.AgentID = "child"
-		case "missing-call":
-			bad.ToolCallID = ""
-		case "idle":
-			handle.busy = false
-		case "stopped":
-			handle.stopped = true
-		case "cancelled":
-			ctx, cancel := context.WithCancel(t.Context())
-			cancel()
-			bad.TraceContext = ctx
-		}
-		if _, err := handler(bad); err == nil {
-			t.Fatal("unsafe SDK inbox invocation accepted", kind)
-		}
-		handle.busy, handle.stopped = true, false
-	}
-	if calls != 0 {
-		t.Fatal("invalid calls reached Controller callback")
-	}
-	got, err := handler(invocation)
-	if err != nil || calls != 1 || got.ResultType != "success" ||
-		!strings.Contains(got.TextResultForLLM, `"REQUESTED"`) || strings.Contains(got.TextResultForLLM, `"DELIVERED"`) {
-		t.Fatal("tool callback success invented delivery", got, err)
-	}
+}
+
+func TestClarificationNativeCompletionPreservesContentEvidence(t *testing.T) {
+	content := `{"handoff":{"phase":"clarification.handoff"},"receipt":{"hash":"receipt"}}`
 	handle := &managedSession{}
 	handle.onEvent(sdk.SessionEvent{ID: "native-complete", Timestamp: time.Now(),
 		Data: &sdk.ToolExecutionCompleteData{ToolCallID: "receive-call", Success: true,
-			Result: &rpc.ToolExecutionCompleteResult{Content: got.TextResultForLLM}}})
+			Result: &rpc.ToolExecutionCompleteResult{Content: content}}})
 	if len(handle.history) != 1 || handle.history[0].Type != runtime.EventExecution || handle.history[0].Sequence == 0 ||
 		!strings.Contains(handle.history[0].Payload, `"callId":"receive-call"`) {
 		t.Fatal("SDK completion did not retain the exact tool correlation", handle.history)
@@ -453,13 +448,5 @@ func TestClarificationInboxSDKRegistrationBindingAndCompletion(t *testing.T) {
 	var observation core.ExecutionObservation
 	if err := json.Unmarshal([]byte(handle.history[0].Payload), &observation); err != nil || observation.ContentHash == "" {
 		t.Fatal("model-facing result hash was not retained", observation, err)
-	}
-	legacy := cfg
-	copy := *cfg.ManagedClarification
-	copy.ProtocolVersion, copy.Inbox = 0, nil
-	legacy.ManagedClarification = &copy
-	old, err := New(legacy)
-	if err != nil || old.ConfigHash() == adapter.ConfigHash() {
-		t.Fatal("inbox protocol capability is not configuration-bound", err)
 	}
 }

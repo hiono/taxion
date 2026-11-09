@@ -283,10 +283,9 @@ func New(config Config) (*Adapter, error) {
 		}
 		config.ManagedClarification = &binding
 		config.AvailableTools = append(config.AvailableTools, ClarificationToolName)
-		if binding.ProtocolVersion == 2 && binding.Inbox != nil && config.Role == "CODER" {
-			config.AvailableTools = append(config.AvailableTools, ClarificationInboxToolName)
-			config.SystemPrompt += "\nAt safe tool-input boundaries, use taxion_clarification_inbox to check explicitly handed-off questions. Acknowledge a received question with its receipt hash; this never expands your approved instruction."
-		}
+	}
+	if slices.Contains(config.AvailableTools, ClarificationInboxToolName) {
+		return nil, fmt.Errorf("taxion: clarification inbox cannot be allowlisted without verified root attribution")
 	}
 	if len(config.ContextDocuments) != 0 {
 		if slices.Contains(config.AvailableTools, ReadContextToolName) {
@@ -904,9 +903,7 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 			decision = &rpc.PermissionDecisionApproveOnce{}
 		}
 		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
-			a.config.ManagedClarification != nil && (permission.ToolName == ClarificationToolName ||
-			a.config.Role == "CODER" && a.config.ManagedClarification.ProtocolVersion == 2 &&
-				a.config.ManagedClarification.Inbox != nil && permission.ToolName == ClarificationInboxToolName) &&
+			a.config.ManagedClarification != nil && permission.ToolName == ClarificationToolName &&
 			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
 			decision = &rpc.PermissionDecisionApproveOnce{}
 		}

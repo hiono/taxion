@@ -1242,3 +1242,70 @@ go test -race -json -count=1 -timeout 3m ./internal/runtime/controller ./interna
 最終indexは固定したtask-local Betterleaks 1.9.0で
 `go run ./cmd/taxion git check-index --secrets --scanner EXACT_TASK_LOCAL_BINARY`を実行し、
 結果とscan logのhashをcommit本文に記録する。
+
+## SDK inboxの無効化と既存回答の保全
+
+DECISION: SDK 1.0.22でroot呼出しを確証できないため、
+`taxion_clarification_inbox`をSDK経路で無効化した。
+空のAgentIDをrootと解釈する方式へ戻さず、登録・許可・直接呼出しを拒否する。
+質問取込みの`taxion_clarify`、明示的handoff、canonical質問・元宛先・回答履歴は保持する。
+配信機能の完成ではなく、根拠の不足した入口を閉じる修正である。
+
+FACT: 開始時は`fix/native-event-contract-083`、HEAD
+`74c2317f8a07aed788ec3af3bbfd029fbcde9e54`でworktreeはcleanだった。
+SDKの`ToolInvocation.AgentID`は`session.go`の`executeToolAndRespond`で渡された値をそのまま設定する。
+`types.go`には、runtimeが帰属を提供しない子Agent呼出しでも空値となる契約がある。
+`IncludeSubAgentStreamingEvents`はイベント転送の設定であり、子Agent起動の拒否を証明しない。
+`ToolPolicy`がnilのnative構成ではpolicy hookを設置しないため、
+hookだけを根拠としたinbox許可も採用しない。実環境での子Agent到達は再現していない。
+
+変更はSDK adapterと関連テストに限定した。
+`internal/runtime/copilot/clarification.go`ではinboxを登録対象から外し、
+残るhandlerもController callbackを呼ばずにエラーを返す。
+`internal/runtime/copilot/copilot.go`では自動allowlist・SystemPromptの利用誘導・自動許可を除去し、
+`AvailableTools`への明示追加を設定エラーとした。
+`clarification_test.go`ではToolPolicyのnil／non-nil、新規／再開session、
+空／子Agent ID、receive／ackとその再実行を検証し、callbackが一度も呼ばれないことを確認した。
+質問取込みtoolの登録は両構成で維持される。
+
+配信完了証拠の復元は追加していない。既存RuntimeReceiptにはAgentIDがなく、
+保存turnのイベントを無条件に投影すると帰属不明を到達確認へ昇格させるためである。
+既存のREQUESTEDは未確認のまま、HELDは保留のままとし、本文の自動再送や推測による昇格を追加しない。
+SDK型の完了イベントを直接渡す合成試験では、call IDとモデル向けcontent hashの保持だけを確認した。
+root保証、実SDK wire RPC、実provider、実モデルでの配信確認を意味しない。
+
+回答処理は変更していない。既存`AnswerClarification`は異なるRole／Actor／Source／Textを
+既存回答と照合し、不一致なら追記前に拒否する。同一回答のretryでは追記しない。
+既存試験で、矛盾回答を拒否した後のDB再openでも元の回答・出典・時刻が残り、
+OBSERVEDを越える承認・Dispatch・HOLD・所有権変更を起こさないことを確認した。
+矛盾回答自体の保存と判断者による解決は未実装である。
+
+以下は作業worktreeでrtk経由により実行したコマンドである。
+通常とraceは別々に実行し、それぞれ63 PASS／0 FAIL／0 SKIPだった
+（Copilot 22、Controller 37、CLI 4）。全suiteの完走としては扱わない。
+
+```bash
+rtk proxy go test -json -count=1 -timeout 3m ./internal/runtime/copilot ./internal/runtime/controller ./cmd/taxion -run "Clarification|TargetedInterrupt|FlowRunnerObservesInterrupt|StoppedTurn|Provenance|UserFacingTerminology"
+rtk proxy go test -race -json -count=1 -timeout 3m ./internal/runtime/copilot ./internal/runtime/controller ./cmd/taxion -run "Clarification|TargetedInterrupt|FlowRunnerObservesInterrupt|StoppedTurn|Provenance|UserFacingTerminology"
+rtk proxy go build ./...
+rtk proxy go vet ./...
+rtk proxy gofmt -w internal/runtime/copilot/clarification.go internal/runtime/copilot/clarification_test.go internal/runtime/copilot/copilot.go
+rtk git diff --check
+```
+
+build／vet／gofmt／diff checkもPASS。通常・raceのJSONはsession artifactへ保存した。
+
+| session artifact | SHA-256 |
+| --- | --- |
+| `clarification-safety-20261109-normal.jsonl` | `bb1d1ad315bea3fb0cbed655c337ed7f638742100c4bc29d16aebdf23c87dcb9` |
+| `clarification-safety-20261109-race.jsonl` | `263c93f466165b3931df4a5ffef90b4fa82feeef711dbf7da198a3050f3dce12` |
+
+PROPOSAL: 再有効化には、実SDK wireでroot帰属を証明できる情報または子Agent起動拒否を
+全登録経路で成立させる条件を確定し、その証拠を保存receiptまで維持する必要がある。
+その後に、unknown outcomeの安全な復元と矛盾回答の保存・解決を実装する。
+#283はOPEN、第五審査FAILを維持し、#284には着手しない。
+Push／PR／Merge／Release、第六審査、TKB3復旧は実施しない。
+
+22:42:42 JSTの正規観測は使用21,350、承認上限21,500、reserve50、作業可能残100 requestsだった。
+今回の終了期限は23:00 JSTへ短縮されており、以前の23:48:12 JSTを使用しない。
+固定したtask-local Betterleaks 1.9.0による最終index検査結果とscan log hashをcommit本文へ記録する。

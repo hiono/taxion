@@ -567,16 +567,12 @@ taxion conversation clarification handoff --id QUESTION \
 期限切れや回答済みの質問は拒否する。一つの質問に対する引継ぎ先の自動選択・再変更は行わない。
 このコマンドはsessionを起動せず、承認・実行指示も発行しない。
 
-`--clarification-intake`を有効にした新しいCoder実行には、
-SDK host tool `taxion_clarification_inbox` を登録する。
-Coderが安全なtool入力境界で `{"action":"receive"}` を呼ぶと、
-明示的に引き継がれた質問をcanonical receiptから一度だけ返す。
-この時点は `REQUESTED` であり、送信先への到達確認ではない。
-同じsession・tool callに対応するSDKの成功完了イベントで、モデル向け応答のhashまで一致した場合に
-`DELIVERED` を記録する。改変・省略された応答、イベント欠落、別call、
-AgentIDが明示された子Agentのイベントでは進めない。
-質問を読んだCoderが `{"action":"ack","id":"質問ID","receipt":"受信時のreceipt.hash"}` を呼び、
-現在の実行bindingと配信証跡を照合できた場合にだけ `ACKNOWLEDGED` を記録する。
+SDK host tool `taxion_clarification_inbox` は現在無効であり、
+`--clarification-intake`を指定しても、このSDK経路では質問本文の受信やACKは行えない。
+既存の保存契約では、本文を返す前の`REQUESTED`と、対応する成功完了イベント・
+モデル向け応答hashの一致を伴う`DELIVERED`を区別する。
+`ACKNOWLEDGED`には受信receipt hashの明示確認と現在の実行bindingの照合が必要である。
+これらの内部段階は保持するが、空のAgentIDをrootの確証としたSDK利用は再開しない。
 
 途中停止や到達不明では質問本文を自動再送しない。再呼出しは保存済みmetadataだけを返す。
 ACKの再送は追記せず、イベントより先に届いたACKは拒否する。
@@ -594,8 +590,12 @@ Roleの設定で子Agentを起動できないことが全経路で成立する�
 到達可能な脆弱性を再現済みという意味ではない。
 また、切断後に履歴から取得した成功イベントを保存しても、
 配信段階を復元する処理は未接続である。本文は再送せず`REQUESTED`のままとなる。
-これらの制約を解消するまで、追加の実配信・ACK試験は停止する。
-コード上の機能無効化や修正を行ったという意味ではない。
+現在の候補版では、この制約に対応してSDKへのinbox登録を無効化している。
+`ToolPolicy`の有無にかかわらず新規・再開sessionへ登録せず、
+`AvailableTools`への明示追加も設定エラーとする。直接handlerを呼び出しても拒否する。
+`handoff`による明示的な引継ぎ記録は保持するが、このSDK経路では本文を配信しない。
+上記の配信・ACK段階は内部の保存契約であり、現在利用可能なSDK操作を示すものではない。
+質問取込みの`taxion_clarify`は維持する。
 
 旧binaryへのrollbackでは、これらの新しいplanning phaseを処理できると仮定せず、
 今回追加したorigin metadataも含めて、未解決質問とreceiptを保持したprivate backupから判断する。
