@@ -545,13 +545,45 @@ Coder宛の質問は保存時に、Reviewer Dispatchの `RelatedID` と既存Flo
 実行中なら既存operation owner／runnerを照合する。終了済みCoderへ現在のReviewer ownerを付与しない。
 対象不明・不一致・失効は配信せず、`delivery.status: "HELD"` と理由を返す。
 
-現在の既存入力経路ではRUNNING／busy中のCoderへ安全な通知を送れないため、
-この候補版は解決できた質問も保留し、送信済みとは扱わない。
+この解決だけではRUNNING／busy中のCoderへ通知せず、
+解決できた質問も保留し、送信済みとは扱わない。
 `HELD` は配信状況であり、TaskのHOLD、承認、Dispatch、Runtime Stopではない。
 保留記録はcanonical質問のID・sequence・hashと宛先metadataだけを既存RequestRecordへ保存する。
 再送・並行解決で追記せず、別session・owner・Dispatchへ自動で付け替えない。
 `history` の `delivery` は保存時のsnapshotであり、`resolve-coder` は現在の変化を
 保留理由として返すが、元のsnapshotを書き換えない。質問本文や回答本文を配信記録へ複製しない。
+
+Reviewerの発行には元Coderの完了が必要なので、終了済みの元Coderへは配信しない。
+正式発行され、通常の実行経路でRUNNINGになった直後の修正Coderへだけ、
+明示的に質問を引き継げる。元の宛先は変更しない。
+
+```bash
+taxion conversation clarification handoff --id QUESTION \
+  --dispatch SUCCESSOR_CODER_DISPATCH --reason "修正時に確認する根拠"
+```
+
+同じFlowで該当Reviewerの直後に正式発行された修正Coderを指定する。
+別Flow、別Task、不明・終了済みのDispatch、session・owner・runner・仕様scopeの変更、
+期限切れや回答済みの質問は拒否する。一つの質問に対する引継ぎ先の自動選択・再変更は行わない。
+このコマンドはsessionを起動せず、承認・実行指示も発行しない。
+
+`--clarification-intake`を有効にした新しいCoder実行には、
+SDK host tool `taxion_clarification_inbox` を登録する。
+Coderが安全なtool入力境界で `{"action":"receive"}` を呼ぶと、
+明示的に引き継がれた質問をcanonical receiptから一度だけ返す。
+この時点は `REQUESTED` であり、送信先への到達確認ではない。
+同じsession・tool callに対応するSDKの成功完了イベントで、モデル向け応答のhashまで一致した場合に
+`DELIVERED` を記録する。改変・省略された応答、イベント欠落、別callや子Agentのイベントでは進めない。
+質問を読んだCoderが `{"action":"ack","id":"質問ID","receipt":"受信時のreceipt.hash"}` を呼び、
+現在の実行bindingと配信証跡を照合できた場合にだけ `ACKNOWLEDGED` を記録する。
+
+途中停止や到達不明では質問本文を自動再送しない。再呼出しは保存済みmetadataだけを返す。
+ACKの再送は追記せず、イベントより先に届いたACKは拒否する。
+`history`の`handoff`で最後の確認段階を参照できる。
+ACKは回答でも受理でもなく、質問の状態は`OBSERVED`のままである。
+旧protocolのsessionへtoolを後付けしない。追加toolは設定hashを変えるため、
+旧sessionの再利用は既存のidentity検査で拒否される。
+実provider／実モデルでの配信は未検証であり、受信後の回答保存は従来の明示入力のままである。
 
 旧binaryへのrollbackでは、これらの新しいplanning phaseを処理できると仮定せず、
 今回追加したorigin metadataも含めて、未解決質問とreceiptを保持したprivate backupから判断する。

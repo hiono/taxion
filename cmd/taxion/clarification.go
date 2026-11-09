@@ -13,17 +13,21 @@ import (
 
 func clarificationCmd(args []string, output io.Writer) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(output, "Usage of conversation clarification:\n  observe --task ID [--dispatch ID]\n  request --file FILE\n  answer --file FILE\n  resolve-coder --id ID\n  history\n\nObservation only; no approval, Dispatch, HOLD or runtime stop.")
+		fmt.Fprintln(output, "Usage of conversation clarification:\n  observe --task ID [--dispatch ID]\n  request --file FILE\n  answer --file FILE\n  resolve-coder --id ID\n  handoff --id ID --dispatch ID --reason TEXT\n  history\n\nObservation only; no approval, Dispatch, HOLD or runtime stop.")
 		return flag.ErrHelp
 	}
 	action := args[0]
-	if action != "observe" && action != "request" && action != "answer" && action != "history" && action != "resolve-coder" {
+	if action != "observe" && action != "request" && action != "answer" && action != "history" && action != "resolve-coder" && action != "handoff" {
 		return fmt.Errorf("unknown clarification action")
 	}
 	fs := flag.NewFlagSet("conversation clarification "+action, flag.ContinueOnError)
 	fs.SetOutput(output)
-	var taskID, dispatchID, file, id string
-	if action == "resolve-coder" {
+	var taskID, dispatchID, file, id, reason string
+	if action == "handoff" {
+		fs.StringVar(&id, "id", "", "saved Reviewer question ID")
+		fs.StringVar(&dispatchID, "dispatch", "", "explicit formally issued running successor Coder")
+		fs.StringVar(&reason, "reason", "", "explicit reason for the handoff; does not change the original destination")
+	} else if action == "resolve-coder" {
 		fs.StringVar(&id, "id", "", "saved Reviewer question ID; resolve and hold, never start or steer a Coder")
 	} else if action == "observe" {
 		fs.StringVar(&taskID, "task", "", "saved Task identity")
@@ -42,8 +46,9 @@ func clarificationCmd(args []string, output io.Writer) error {
 	if fs.NArg() != 0 ||
 		action == "observe" && taskID == "" ||
 		action == "resolve-coder" && id == "" ||
+		action == "handoff" && (id == "" || dispatchID == "" || reason == "") ||
 		(action == "request" || action == "answer") && file == "" {
-		return fmt.Errorf("clarification observe requires --task [--dispatch]; request/answer require --file; resolve-coder requires --id; history accepts no flags")
+		return fmt.Errorf("clarification observe requires --task [--dispatch]; request/answer require --file; resolve-coder requires --id; handoff requires --id --dispatch --reason; history accepts no flags")
 	}
 	db, _, err := loadWorkspace()
 	if err != nil {
@@ -52,6 +57,8 @@ func clarificationCmd(args []string, output io.Writer) error {
 	defer db.Close()
 	var result any
 	switch action {
+	case "handoff":
+		result, err = controller.HandoffCoderClarification(db, id, dispatchID, reason)
 	case "resolve-coder":
 		result, err = controller.ResolveCoderClarification(db, id)
 	case "observe":

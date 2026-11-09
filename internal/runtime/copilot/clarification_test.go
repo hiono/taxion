@@ -12,6 +12,7 @@ import (
 	"time"
 
 	sdk "github.com/github/copilot-sdk/go"
+	"github.com/github/copilot-sdk/go/rpc"
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/runtime/controller"
@@ -364,5 +365,101 @@ func TestClarificationDeliveryCannotBypassBusyOrStoppedCoder(t *testing.T) {
 		if err := adapter.Send(t.Context(), "coder", "A saved clarification needs an answer"); !errors.Is(err, want) {
 			t.Fatal("notification bypassed the existing Coder input boundary", err, want)
 		}
+	}
+}
+
+func TestClarificationInboxSDKRegistrationBindingAndCompletion(t *testing.T) {
+	cfg := testConfig(t)
+	calls := 0
+	cfg.ManagedClarification = &runtime.ManagedClarification{
+		ProtocolVersion: 2, DispatchID: "repair", ScopeHash: "scope", OperationID: "operation",
+		Owner: "owner", FlowID: "flow", RunnerID: "runner",
+		Request: func(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+			return nil, errors.New("not an intake request")
+		},
+		Inbox: func(ctx context.Context, session, call string, body json.RawMessage) (json.RawMessage, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if session != "coder" || call != "receive-call" || !json.Valid(body) {
+				t.Fatal("SDK inbox lost its host invocation identity", session, call)
+			}
+			calls++
+			return json.RawMessage(`{"id":"question","handoff":{"phase":"clarification.handoff","status":"REQUESTED"},"receipt":{"hash":"receipt"},"question":{"question":"Which evidence is missing?"}}`), nil
+		},
+	}
+	adapter, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter.sessions["coder"] = &managedSession{sdk: &sdk.Session{}, busy: true}
+	var handler sdk.ToolHandler
+	for _, tools := range [][]sdk.Tool{adapter.sessionConfig(nil).Tools, adapter.resumeConfig(nil).Tools} {
+		found := false
+		for _, tool := range tools {
+			if tool.Name == ClarificationInboxToolName {
+				found, handler = true, tool.Handler
+				if tool.SkipPermission || tool.IsTerminal {
+					t.Fatal("inbox bypassed permissions or stopped the turn")
+				}
+			}
+		}
+		if !found {
+			t.Fatal("inbox missing from create/resume SDK config")
+		}
+	}
+	invocation := sdk.ToolInvocation{ToolName: ClarificationInboxToolName, ToolCallID: "receive-call", SessionID: "coder",
+		TraceContext: t.Context(), Arguments: map[string]any{"action": "receive"}}
+	for _, kind := range []string{"session", "nested", "missing-call", "idle", "stopped", "cancelled"} {
+		bad := invocation
+		handle := adapter.sessions["coder"]
+		switch kind {
+		case "session":
+			bad.SessionID = "other"
+		case "nested":
+			bad.AgentID = "child"
+		case "missing-call":
+			bad.ToolCallID = ""
+		case "idle":
+			handle.busy = false
+		case "stopped":
+			handle.stopped = true
+		case "cancelled":
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			bad.TraceContext = ctx
+		}
+		if _, err := handler(bad); err == nil {
+			t.Fatal("unsafe SDK inbox invocation accepted", kind)
+		}
+		handle.busy, handle.stopped = true, false
+	}
+	if calls != 0 {
+		t.Fatal("invalid calls reached Controller callback")
+	}
+	got, err := handler(invocation)
+	if err != nil || calls != 1 || got.ResultType != "success" ||
+		!strings.Contains(got.TextResultForLLM, `"REQUESTED"`) || strings.Contains(got.TextResultForLLM, `"DELIVERED"`) {
+		t.Fatal("tool callback success invented delivery", got, err)
+	}
+	handle := &managedSession{}
+	handle.onEvent(sdk.SessionEvent{ID: "native-complete", Timestamp: time.Now(),
+		Data: &sdk.ToolExecutionCompleteData{ToolCallID: "receive-call", Success: true,
+			Result: &rpc.ToolExecutionCompleteResult{Content: got.TextResultForLLM}}})
+	if len(handle.history) != 1 || handle.history[0].Type != runtime.EventExecution || handle.history[0].Sequence == 0 ||
+		!strings.Contains(handle.history[0].Payload, `"callId":"receive-call"`) {
+		t.Fatal("SDK completion did not retain the exact tool correlation", handle.history)
+	}
+	var observation core.ExecutionObservation
+	if err := json.Unmarshal([]byte(handle.history[0].Payload), &observation); err != nil || observation.ContentHash == "" {
+		t.Fatal("model-facing result hash was not retained", observation, err)
+	}
+	legacy := cfg
+	copy := *cfg.ManagedClarification
+	copy.ProtocolVersion, copy.Inbox = 0, nil
+	legacy.ManagedClarification = &copy
+	old, err := New(legacy)
+	if err != nil || old.ConfigHash() == adapter.ConfigHash() {
+		t.Fatal("inbox protocol capability is not configuration-bound", err)
 	}
 }

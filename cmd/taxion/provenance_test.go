@@ -36,6 +36,7 @@ func TestProvenanceCLIFailsBeforeStoreMutation(t *testing.T) {
 		{"conversation", "clarification", "request", "--file", file},
 		{"conversation", "clarification", "answer", "--file", file},
 		{"conversation", "clarification", "resolve-coder", "--id", "question"},
+		{"conversation", "clarification", "handoff", "--id", "question", "--dispatch", "repair", "--reason", "explicit transfer"},
 		{"conversation", "clarification", "history"},
 		{"conversation", "clarification", "request", "--file", "--help"},
 		{"serve"},

@@ -1008,3 +1008,128 @@ JSONLはsession artifactに保存し、照合用のSHA-256を残す。
 最終indexは、前節と同じarchive／binary hashに固定したtask-local Betterleaks 1.9.0で
 `go run ./cmd/taxion git check-index --secrets --scanner EXACT_TASK_LOCAL_BINARY` を実行する。
 結果とlogのhashはcommit本文に記録し、全履歴scanやSKIPしたhookとは区別する。
+
+## 正式な後続Coderへの明示的引継ぎと到達ACK（2026-11-09）
+
+開始時は`fix/native-event-contract-083`の`14cfe40`、cleanであった。
+20:37 JSTの正規照会は使用21,200 requests、承認上限21,500、reserve50、
+作業可能残250、期限23:48:12 JST。21:14 JSTの実装後観測も使用21,200であった。
+口座全体の残量を、この作業の追加承認とみなしていない。
+
+### 承認された対象変更
+
+`internal/core/reviewflow.go`はReviewerの前のCoderに`SUCCEEDED`と確定結果を要求する。
+終了済みCoderへの送信禁止と、元Coderへの実配信は同時に成立しない。
+固定SDK 1.0.22には`MessageOptions.Mode`のenqueue／immediateがあるが、
+終了済みDispatchを再開せずにこの条件を解消するAPIではない。
+この衝突について確認し、元の宛先を保持したまま、
+正式発行された後続Coderへの明示的引継ぎに対象を変更する承認を得た。
+並行Role実行、終了済みDispatchの再開、暗黙の宛先変更は承認対象に含めない。
+
+### 接続と保存
+
+`conversation clarification handoff --id --dispatch --reason`は、
+同一Flow内で対象Reviewerの直後に正式発行された修正Coderだけを選択する。
+Reviewerの確定結果、元CoderとのRelatedID、修正CoderのAMENDS関係を照合する。
+対象は通常の経路で既にRUNNINGになっている必要があり、このコマンドでは起動しない。
+Task／Dispatch／Role／session／設定hash／仕様scope／operation owner／runner／期限を
+保存snapshotと比較し、各入力と到達イベントでも現在のbindingを再検証する。
+
+既存の`ManagedClarification`にprotocol 2のinbox callbackを接続した。
+Coder用の登録済みSDK host tool `taxion_clarification_inbox`が、
+安全なtool入力境界で`receive`を呼んだときだけ質問を返すpull方式である。
+`Send`のbusy拒否を変更せず、新しいturn、session、Dispatch、schedulerを作らない。
+旧opt-in sessionの設定hashを維持したまま新しいtoolを後付けすることもない。
+
+元の`clarification-delivery`と質問・回答は変更しない。
+新しい記録は既存planning RequestRecord内の`clarification-handoff:<id>`に追記する。
+元質問と元宛先のcanonical ID／sequence／hash、明示した理由、新しい宛先snapshotだけを持ち、
+質問本文は元のreceiptから取得する。引継ぎ先は一つで、同じ引継ぎは追記せず、
+別の宛先・理由への置換は拒否する。
+
+| 配信段階 | 根拠 |
+| --- | --- |
+| `HELD` | 明示的な引継ぎを保存。本文の投入前 |
+| `REQUESTED` | Coderのreceive callに対して、本文を返す前に同一transactionでcall IDを保存 |
+| `DELIVERED` | 既存SDKイベント射影・Controllerの`recordEvent`を通った、同じroot session／callの成功tool完了。モデル向け本文を含む応答全体のhashも一致 |
+| `ACKNOWLEDGED` | Coderが別のinbox呼出しで受信時のrequest receipt hashを明示し、現在のbindingとDELIVEREDを照合 |
+
+`DELIVERED`はモデル向けtool結果が対象sessionのイベントに記録されたことを表す。
+モデルが内容を理解したことは証明しない。`ACKNOWLEDGED`もCoder側の明示的な受信確認に限る。
+hashだけで同一性を保証せず、保存済みQuestion／Task／Dispatch／session／ownerと
+SDKのcall・成功イベントを合わせて検証する。応答が圧縮・改変・欠落した場合は昇格しない。
+ACKのreceipt hashは認証用bearer tokenではない。
+質問は`OBSERVED`のままで、回答受理・承認・実行許可・Task HOLDには進めない。
+
+本文を返す試行は一回に限定する。並行receiveは一件だけが本文を得る。
+結果不明での再呼出し・store再openはmetadataを返し、本文を再送しない。
+成功イベントやACKの再送は配信段階を増やさず、イベント前のACKは拒否する。
+停止・期限切れ・owner失効後の遅延イベントでは昇格しない。
+不明結果の自動回復・新宛先への再配信は未実装であり、#284には接続していない。
+
+### 検証範囲
+
+正常系は、既存Flow fixtureで元Coder完了、ReviewerのREQUEST_CHANGES、
+正式な修正Coder発行、通常ControllerのStart／Sendまで進めた実storeとfake Runtimeで検査した。
+receiveの並行要求、API成功だけで昇格しないこと、別call・失敗・子Agent・改変本文のイベント拒否、
+正しい完了イベント、明示ACK・重複ACK、各binding不一致、終了済み対象、
+保存・再open後の不明結果、失効ownerの遅延イベントを検査した。
+Graph／Ledger／HOLD／承認／operation所有権に変更がなく、元の宛先と質問状態が保たれることも検査した。
+
+SDK側は実際のcreate／resume登録から取り出したhandlerと既存のnativeイベント射影を、
+合成managed session・ToolInvocation・ToolExecutionCompleteDataで検査した。
+SDK callbackの参照型とcall IDの保持、停止・idle・子Agent・無効session・cancelを確認した。
+これは実provider接続やSDK wire RPCの統合試験ではない。
+実モデルへの配信、モデルの自発的なinbox利用、実サービスのイベントpayloadとACKは未検証である。
+
+初期の試験追加では関数の配置ミスによる構文エラーを修正した。
+最初の通常回帰では、metadata内のcanonical`question`参照を本文と誤認する文字列assertionが失敗した。
+top-level本文fieldをJSONで判定するよう試験だけを修正した。
+既知の失敗を避けるため途中のraceを停止し、成功済みadapter／storeの結果を再利用して
+影響するController／CLIを再実行した。中断したraceを成功数に含めない。
+
+最終結果は通常・raceともに985 PASS／0 FAIL／13 SKIPであった。
+SKIPの内訳は節1.12と同じ実サービス系11件、固定scanner full hookと実OpenCode document flowの2件である。
+build／vet／gofmt／completion再生成／diff checkもPASS。
+21:29:43 JSTの保存前観測は使用21,300、作業可能残150、reserve50を維持した。
+
+```bash
+SELECTOR='Test(CoderClarification|Clarification|ReviewerClarification|Question|Planner|Operation|RecoveryRequiresStoppedExecutionAndExactOwner|TargetedInterrupt|FlowRunnerObservesInterrupt|InterruptOfUnstarted|HandoffCleanup|Feedback|ResumeContractGate|StoppedTurn|ReviewProgress|LegacyBudgetStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun|BudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun)'
+go build ./...
+go vet ./...
+go generate ./cmd/taxion
+go test -json -count=1 -timeout 10m ./internal/runtime/copilot ./internal/store
+go test -json -count=1 -timeout 10m ./internal/runtime/controller -run "$SELECTOR"
+TAXION_TEST_FAILED_REVIEW_CLI=build go test -json -count=1 -timeout 10m ./cmd/taxion
+go test -race -json -count=1 -timeout 10m ./internal/runtime/copilot ./internal/store
+go test -race -json -count=1 -timeout 10m ./internal/runtime/controller -run "$SELECTOR"
+TAXION_TEST_FAILED_REVIEW_CLI=build go test -race -json -count=1 -timeout 10m ./cmd/taxion
+```
+
+| 対象 | 通常 PASS / FAIL / SKIP | race PASS / FAIL / SKIP |
+| --- | --- | --- |
+| Copilot／store | 394 / 0 / 11 | 394 / 0 / 11 |
+| Controllerの上記selector | 192 / 0 / 0 | 192 / 0 / 0 |
+| CLI package全体 | 399 / 0 / 2 | 399 / 0 / 2 |
+
+JSONLはsession artifactに保存した。証跡hashは次のとおり。
+
+| 証跡名 | SHA-256 |
+| --- | --- |
+| `clarification-ack-20261109-adapters-store-normal.jsonl` | `e7fd5f00821f7c72f58fe31b2ebf68cdc190e7f2b8e4414504bb77f93077d3f7` |
+| `clarification-ack-20261109-controller-normal.jsonl` | `20cafa2039933d752b16a0a14f9666b70529c6fb39c0a97e630ca04280b85976` |
+| `clarification-ack-20261109-cli-normal.jsonl` | `3a96174d2edb7f0c9cfc96aa04a2cd5b20c2ec13edea9a1e6bb84f755cb423a9` |
+| `clarification-ack-20261109-adapters-store-race.jsonl` | `b88b83ff3d4e9ba202d53b57448774ab1d5b21fe39ddfe29b05dd001cbacb007` |
+| `clarification-ack-20261109-controller-race.jsonl` | `093ff53900d7aa90cf388c6a7004c7bb0bd6df48d5a83083b2ea556eb4d6a3cc` |
+| `clarification-ack-20261109-cli-race.jsonl` | `b0a7f0ea6abeb8caa0ba5236b84c6449f3266b02f101813e74fd26ea76ad54d3` |
+
+最終indexは固定したtask-local Betterleaks 1.9.0で
+`go run ./cmd/taxion git check-index --secrets --scanner EXACT_TASK_LOCAL_BINARY`を実行し、
+結果とscan logのhashをcommit本文に記録する。SKIPしたfull hookや全履歴scanとは別の検査である。
+
+### 残課題と境界
+
+#283全体は未完了であり、矛盾回答の解決、実providerでの到達確認、不明結果の安全な再処理が残る。
+元Coderへ直接届ける機能ではなく、承認された明示的な後続Coder引継ぎだけを実装した。
+#284は未着手、第五審査FAILを維持する。
+Push／PR／Merge／Release、第六審査、TKB3復旧、実モデルへの追加照会は行わない。

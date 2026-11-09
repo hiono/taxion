@@ -155,13 +155,15 @@ type ManagedReviewProgress struct {
 // Owner and RunnerID are live leases, not session configuration. The host
 // checks them against saved state on every invocation, including after resume.
 type ManagedClarification struct {
-	DispatchID  string                                                                  `json:"dispatchId"`
-	ScopeHash   string                                                                  `json:"scopeHash"`
-	OperationID string                                                                  `json:"operationId"`
-	Owner       string                                                                  `json:"-"`
-	FlowID      string                                                                  `json:"flowId"`
-	RunnerID    string                                                                  `json:"-"`
-	Request     func(context.Context, string, json.RawMessage) (json.RawMessage, error) `json:"-"`
+	ProtocolVersion int                                                                             `json:"protocolVersion,omitempty"`
+	DispatchID      string                                                                          `json:"dispatchId"`
+	ScopeHash       string                                                                          `json:"scopeHash"`
+	OperationID     string                                                                          `json:"operationId"`
+	Owner           string                                                                          `json:"-"`
+	FlowID          string                                                                          `json:"flowId"`
+	RunnerID        string                                                                          `json:"-"`
+	Request         func(context.Context, string, json.RawMessage) (json.RawMessage, error)         `json:"-"`
+	Inbox           func(context.Context, string, string, json.RawMessage) (json.RawMessage, error) `json:"-"`
 }
 
 type QuotaSnapshot struct {

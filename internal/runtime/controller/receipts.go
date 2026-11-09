@@ -78,7 +78,7 @@ func (c *Controller) recordEvent(dispatchID, streamID string, event runtime.Even
 			Sequence: event.Sequence, Type: event.Type, Payload: event.Payload,
 			Hash: receiptHash(event.Payload), At: now,
 		})
-		return nil
+		return recordClarificationArrival(state, dispatch, event)
 	})
 }
 

@@ -164,7 +164,8 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 			return nil, fmt.Errorf("runtime: clarification intake requires an owned executing operation and runner")
 		}
 		binding := runtime.ManagedClarification{
-			DispatchID: dispatch.ID, ScopeHash: observed.ScopeHash,
+			ProtocolVersion: 2,
+			DispatchID:      dispatch.ID, ScopeHash: observed.ScopeHash,
 			OperationID: operation.ID, Owner: operation.Owner, FlowID: flow.ID, RunnerID: flow.RunnerID,
 		}
 		binding.Request = func(ctx context.Context, sessionID string, body json.RawMessage) (json.RawMessage, error) {
@@ -180,6 +181,17 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 				return nil, err
 			}
 			return control.ObserveRoleClarification(bounded, binding, sessionID, body)
+		}
+		binding.Inbox = func(ctx context.Context, sessionID, callID string, body json.RawMessage) (json.RawMessage, error) {
+			bounded, cancel := context.WithCancel(hostContext)
+			stop := context.AfterFunc(ctx, cancel)
+			defer stop()
+			defer cancel()
+			control, err := controller.New(db, worker)
+			if err != nil {
+				return nil, err
+			}
+			return control.ReceiveCoderClarification(bounded, binding, sessionID, callID, body)
 		}
 		config.ManagedClarification = &binding
 	}

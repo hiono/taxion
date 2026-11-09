@@ -87,6 +87,7 @@ type Clarification struct {
 	At        time.Time              `json:"at"`
 	Origin    *ClarificationOrigin   `json:"origin,omitempty"`
 	Delivery  *ClarificationDelivery `json:"delivery,omitempty"`
+	Handoff   *ClarificationHandoff  `json:"handoff,omitempty"`
 }
 
 func ObserveClarification(db *store.Store, taskID, dispatchID string) (ClarificationContext, error) {
@@ -387,6 +388,10 @@ func ClarificationHistory(db *store.Store) ([]Clarification, error) {
 	}
 	for i := range history {
 		history[i].Delivery, err = savedClarificationDelivery(state, history[i].Request.ID)
+		if err != nil {
+			return nil, err
+		}
+		history[i].Handoff, _, err = savedClarificationHandoff(state, history[i].Request.ID)
 		if err != nil {
 			return nil, err
 		}

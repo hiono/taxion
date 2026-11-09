@@ -283,6 +283,10 @@ func New(config Config) (*Adapter, error) {
 		}
 		config.ManagedClarification = &binding
 		config.AvailableTools = append(config.AvailableTools, ClarificationToolName)
+		if binding.ProtocolVersion == 2 && binding.Inbox != nil && config.Role == "CODER" {
+			config.AvailableTools = append(config.AvailableTools, ClarificationInboxToolName)
+			config.SystemPrompt += "\nAt safe tool-input boundaries, use taxion_clarification_inbox to check explicitly handed-off questions. Acknowledge a received question with its receipt hash; this never expands your approved instruction."
+		}
 	}
 	if len(config.ContextDocuments) != 0 {
 		if slices.Contains(config.AvailableTools, ReadContextToolName) {
@@ -900,7 +904,9 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 			decision = &rpc.PermissionDecisionApproveOnce{}
 		}
 		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
-			a.config.ManagedClarification != nil && permission.ToolName == ClarificationToolName &&
+			a.config.ManagedClarification != nil && (permission.ToolName == ClarificationToolName ||
+			a.config.Role == "CODER" && a.config.ManagedClarification.ProtocolVersion == 2 &&
+				a.config.ManagedClarification.Inbox != nil && permission.ToolName == ClarificationInboxToolName) &&
 			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
 			decision = &rpc.PermissionDecisionApproveOnce{}
 		}
@@ -1281,9 +1287,20 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 		payload, _ := json.Marshal(observation)
 		return runtime.Event{Type: runtime.EventExecution, Payload: string(payload)}, true
 	case *sdk.ToolExecutionCompleteData:
-		payload, _ := json.Marshal(core.ExecutionObservation{
+		observation := core.ExecutionObservation{
 			Phase: "tool-complete", CallID: data.ToolCallID, Success: &data.Success,
-		})
+		}
+		if data.Result != nil {
+			var inbox struct {
+				Handoff struct {
+					Phase string `json:"phase"`
+				} `json:"handoff"`
+			}
+			if json.Unmarshal([]byte(data.Result.Content), &inbox) == nil && inbox.Handoff.Phase == "clarification.handoff" {
+				observation.ContentHash = fmt.Sprintf("%x", sha256.Sum256([]byte(data.Result.Content)))
+			}
+		}
+		payload, _ := json.Marshal(observation)
 		return runtime.Event{Type: runtime.EventExecution, Payload: string(payload)}, true
 	case *sdk.AssistantMessageData:
 		return runtime.Event{Type: runtime.EventOutput, Payload: data.Content}, true
