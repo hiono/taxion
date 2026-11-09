@@ -546,3 +546,65 @@ gofmtと変更差分を確認し、本番Goコード、DTO、schema、store、Ru
 再開時のread-only棚卸しは57 worktree、うち18件dirty、未確認0件だった。
 未コミット成果がある他worktreeは変更しない。訂正は元branchの追加commitとして保存し、
 既存履歴、共有install、operation policy、元Task／Flow／Dispatchを変更しない。
+
+## Stop中の観測と回答受理の接続（2026-11-09）
+
+最初の不整合は、providerのidle後からStop完了までにTaxion履歴へ登録したusageを、
+質問・検索の返却結果とcleanup receiptに反映していなかったことにある。
+回答本体はStop前のterminal receiptに保存済みでも、復旧時にその古いusageだけを
+native集計値と照合すると、正当な回答を不整合として拒絶していた。
+これは [ADR-0074](adr/0074-reconcile-interrupted-request-planner-attempts.md) と
+#282の送信済みPlanner照合・所有権解放に関わる保存／受理の接続不備である。
+Permission、Approval、Dispatchの拒否条件を緩めて解決する問題ではない。
+
+既存のEventCursorでStop成功後の履歴を読み、共通のDispatchUsage／UsageCheckpointへ
+正規化する。質問の回答は従来どおりStop前に保存し、後続の有効な会計観測を
+append-only cleanup receiptのoptional `usage`／`usageCheckpoints`へ保存する。
+後続activity、曖昧なsequence、子agent、資格情報らしい内容、矛盾する会計情報を
+正常な完了証拠として受理しない。cleanup保存失敗や観測エラーでも回答を削除せず、
+advisory operationを完了扱いにしない。物理的なStop成功と受理拒絶は別に保存する。
+
+CLI復旧のpreviewとapplyは、保存terminalとcleanupの会計を同じ方法で統合する。
+terminal receiptがない場合はnative履歴から復元するため、そこに含まれる
+Stop中のusageをcleanupから再加算しない。
+`postStopError`のある試行を、通常の回答受理や次の試行への自動移行で解決済みにしない。
+既存の停止確認付きuncertainty cancellationだけを別の判断として扱う。
+受理後のPlannerStarted解除は、次段階の実行承認を与えない。
+
+回帰は、回答がStop前に永続化されること、Stop中のusage／checkpointが保存されること、
+terminal receiptの有無にかかわらず公開CLIのpreview→applyで回答を受理できること、
+累積集計との整合、receipt重複、期限切れ、後続activityの拒絶を確認する。
+受理後もApprovedはfalseでDispatchは増加しないことを検査する。
+既存のApproval、HOLD、Runtime Stop、所有権、Recovery／Resumeの試験は維持する。
+
+| 検証 | 状態 |
+| --- | --- |
+| 質問・検索・公開CLI復旧の対象試験 | PASS |
+| gofmt、build、vet | PASS |
+| 全repository通常試験 | 2,811 PASS／33 SKIP／0 FAIL、22 packages |
+| controller／cmd/taxionのrace試験 | 1,533 PASS／11 SKIP／0 FAIL、2 packages |
+| skippedだった公開CLIの合成復旧回帰 | 候補binaryを指定して通常・raceとも1 PASS／0 SKIP／0 FAIL |
+| 最終indexのsecret scan | 同一treeの判定をcommit本文とoperator証跡に記録する（全履歴検査とは別） |
+
+公開CLI回帰のSKIPは候補binaryの環境変数未指定によるものだった。
+補完後の未実施は通常32件、変更packageのrace 10件であり、これらをPASSへ読み替えない。
+JSONL証跡はoperator側の `083-stopped-tail-{normal,race}-20261109.jsonl` と
+`083-stopped-tail-public-cli-{normal,race}-20261109.jsonl` に保存した。
+検証コマンドは次のとおり（公開CLIの合成fixtureはモデルを実行しない）。
+
+```bash
+go build ./...
+go vet ./...
+go test -json -timeout 30m ./...
+go test -race -json -timeout 30m ./internal/runtime/controller ./cmd/taxion
+TAXION_TEST_FAILED_REVIEW_CLI=build go test ./internal/runtime/controller -run '^TestFailedReviewPublicCLISynthetic$' -count=1
+TAXION_TEST_FAILED_REVIEW_CLI=build go test -race ./internal/runtime/controller -run '^TestFailedReviewPublicCLISynthetic$' -count=1
+```
+
+この修正で保証するのは、既にTaxion履歴へ登録されたStop中の観測の保持である。
+SDK v1.0.22のDisconnectはcallerのStop contextを受け取らず、
+未到着callbackの全回収も保証しない。このSDK境界、実モデル、本番store、
+公開CI、全未公開履歴のsecret scan、保護識別子の網羅確認は未解決・未検証のままとする。
+旧cleanup形式は読み取れるが、新しい会計投影のある未解決試行には更新後の復旧readerを使い、
+古いbinaryへのrollbackのためにreceiptを削除しない。
+第五審査FAILを変更せず、第六審査、push、公開・配布、TKB3復旧は実施しない。

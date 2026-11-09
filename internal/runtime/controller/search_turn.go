@@ -36,11 +36,17 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 		return turn, err
 	}
 	turn.SessionID = session
+	var sequence uint64
+	providerBoundary := false
 	defer func() {
 		stopContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := worker.Stop(stopContext, session); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("taxion: stop isolated search session: %w", err))
+		} else if providerBoundary {
+			_, _, tailErr := observeStoppedTurn(stopContext, worker, session, sequence, &turn.Usage, &turn.UsageCheckpoints)
+			_, usageErr := core.SummarizeUsage(session, turn.Usage, turn.UsageCheckpoints)
+			returnErr = errors.Join(returnErr, tailErr, usageErr)
 		}
 	}()
 	events, err := worker.Events(ctx, session)
@@ -83,7 +89,6 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 		return quotaErr
 	}
 	var messageID, turnID string
-	var sequence uint64
 	started, answered := false, false
 	searchCallID := ""
 	searchComplete := false
@@ -175,6 +180,7 @@ func RunSearchTurn(ctx context.Context, worker runtime.Identity, taskID, query s
 				if err := drainCompletedTurn(ctx, events, &turn.Usage, &turn.UsageCheckpoints, &sequence, session); err != nil {
 					return turn, err
 				}
+				providerBoundary = true
 				if _, err := core.SummarizeUsage(session, turn.Usage, turn.UsageCheckpoints); err != nil {
 					return turn, err
 				}

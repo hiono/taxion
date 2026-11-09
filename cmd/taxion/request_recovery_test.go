@@ -285,10 +285,24 @@ func TestRequestRecoveryNativeLimitStillRejectsPartialCredits(t *testing.T) {
 	testRequestRecoveryCancelUsage(t, true, false, true, false, true, true)
 }
 
+func TestRequestRecoveryIncludesStoppedUsageBeforeAcceptance(t *testing.T) {
+	for _, terminal := range []bool{false, true} {
+		t.Run(fmt.Sprintf("terminal=%t", terminal), func(t *testing.T) {
+			testRequestRecoveryCancelUsage(t, terminal, false, false, false, true, false, true)
+		})
+	}
+}
+
+func TestRequestRecoveryRejectsPostStopActivityDespiteValidNativeAnswer(t *testing.T) {
+	testRequestRecoveryCancelUsage(t, true, false, false, false, true, false, false, true)
+}
+
 func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls, checkpointPresent, snapshotOnly bool, externalPartial ...bool) {
 	t.Helper()
 	allowPartial := len(externalPartial) != 0 && externalPartial[0]
 	nativePartial := len(externalPartial) > 1 && externalPartial[1]
+	stoppedTail := len(externalPartial) > 2 && externalPartial[2]
+	rejectedTail := len(externalPartial) > 3 && externalPartial[3]
 	_, args := requestFixture(t)
 	if allowPartial && !nativePartial {
 		var defaults []string
@@ -401,6 +415,23 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 			TotalNanoAIU: &amount, AICreditsStatus: &complete,
 		}},
 	}
+	var cleanup *plannerCleanupEvidence
+	if stoppedTail || rejectedTail {
+		cleanup = &plannerCleanupEvidence{
+			AttemptID: initial.AttemptID, SessionID: turn.SessionID, Stopped: true, PostStopError: rejectedTail,
+		}
+	}
+	if stoppedTail {
+		earlyInput, earlyOutput, earlyCost := int64(15), int64(5), 1.5
+		lateInput, lateOutput, lateCost := int64(6), int64(3), 2.0
+		terminal.Usage[0].InputTokens, terminal.Usage[0].OutputTokens = &earlyInput, &earlyOutput
+		terminal.Usage[0].TotalNanoAIU = &earlyCost
+		turn.UsageTotals[0].TotalNanoAIU, turn.UsageTotals[0].AICreditsStatus = &amount, &complete
+		cleanup.Usage = []core.DispatchUsage{{
+			Model: "model", InputTokens: &lateInput, OutputTokens: &lateOutput, TotalNanoAIU: &lateCost,
+			AICreditsStatus: &complete,
+		}}
+	}
 	if partialCalls {
 		known, native, zeroCost := int64(10), int64(11), 0.0
 		nativeInput, nativeOutput := inputTokens*2, outputTokens*2
@@ -412,7 +443,7 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 		turn.UsageTotals[0].CacheReadTokens, turn.UsageTotals[0].TotalNanoAIU = &native, &amount
 		turn.UsageTotals[0].AICreditsStatus = &complete
 	}
-	if allowPartial {
+	if allowPartial && !stoppedTail {
 		terminal.Usage[0].TotalNanoAIU, terminal.Usage[0].AICreditsStatus = nil, nil
 	}
 	for index := len(terminal.Usage) - 1; index >= 0; index-- {
@@ -421,6 +452,13 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 			t.Fatal(err)
 		}
 		turn.Events = append([]runtime.Event{{Type: runtime.EventUsage, Payload: string(data)}}, turn.Events...)
+	}
+	if stoppedTail {
+		data, err := json.Marshal(cleanup.Usage[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		turn.Events = append(turn.Events, runtime.Event{Type: runtime.EventUsage, Payload: string(data)})
 	}
 	expectedAmount := amount
 	if checkpointPresent {
@@ -459,12 +497,15 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 	if terminalPresent {
 		evidence = append(evidence, terminal)
 	}
+	if cleanup != nil {
+		evidence = append(evidence, cleanup)
+	}
 	for index, evidence := range evidence {
 		data, err := json.Marshal(evidence)
 		if err != nil {
 			t.Fatal(err)
 		}
-		at := []time.Time{base, base.Add(time.Millisecond), base.Add(2 * time.Millisecond), base.Add(6 * time.Millisecond)}[index]
+		at := []time.Time{base, base.Add(time.Millisecond), base.Add(2 * time.Millisecond), base.Add(6 * time.Millisecond), base.Add(7 * time.Millisecond)}[index]
 		receipts = append(receipts, store.RequestRecord{
 			RequestID: operation.ID, Kind: "planning", Sequence: sequence + uint64(index+1),
 			Payload: string(data), Hash: core.SHA256Hex(data), At: at,
@@ -521,13 +562,13 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 			t.Fatal("ordinary continuation did not reject partial usage at the shared admission check", err)
 		}
 	}
-	if nativePartial {
+	if nativePartial || rejectedTail {
 		before, err := db.LoadWorkspace()
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := requestRecoveryCommand(append(recoveryArgs, "--preview"), &bytes.Buffer{}); err == nil {
-			t.Fatal("partial credits bypassed a positive native ceiling")
+			t.Fatal("partial credits or known post-stop activity bypassed admission")
 		}
 		after, err := db.LoadWorkspace()
 		if err != nil || !reflect.DeepEqual(before, after) {
@@ -544,7 +585,7 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 		t.Fatal(err)
 	}
 	expectedStatus := "unknown"
-	if snapshotOnly {
+	if snapshotOnly || stoppedTail {
 		expectedStatus = "complete"
 	}
 	if report.UsageStatus != expectedStatus {
@@ -565,6 +606,16 @@ func testRequestRecoveryCancelUsage(t *testing.T, terminalPresent, partialCalls,
 		after.Records.Operation.PlanningNanoAIU != operation.PlanningNanoAIU+expectedAmount ||
 		after.Records.Operation.PlanningUsageState != "unknown" {
 		t.Fatal("cancellation failed to retain known per-call usage and aggregate uncertainty")
+	}
+	if stoppedTail {
+		var accepted requestCheckpoint
+		if err := json.Unmarshal(after.Records.Operation.Checkpoint, &accepted); err != nil {
+			t.Fatal(err)
+		}
+		if accepted.PlannerStarted || accepted.Answer == nil || accepted.Approved ||
+			len(after.Graph.Dispatches) != len(before.Graph.Dispatches) {
+			t.Fatal("accepted advice failed to release PlannerStarted or granted execution authority")
+		}
 	}
 }
 

@@ -412,17 +412,37 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 	if err := saveAttempt("session", attempt); err != nil {
 		return result, err
 	}
+	var lastSequence uint64
+	providerBoundary := false
 	defer func() {
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		stopErr := worker.Stop(stopCtx, result.SessionID)
 		sessionStopped = stopErr == nil
-		err = errors.Join(err, saveAttempt("cleanup", struct {
-			AttemptID string `json:"attemptId"`
-			SessionID string `json:"sessionId"`
-			Stopped   bool   `json:"stopped"`
-		}{attemptID, result.SessionID, sessionStopped}))
+		var tailUsage []core.DispatchUsage
+		var tailCheckpoints []runtime.UsageCheckpoint
+		var tailErr error
+		if sessionStopped && providerBoundary {
+			tailUsage, tailCheckpoints, tailErr = observeStoppedTurn(stopCtx, worker, result.SessionID, lastSequence, &result.Usage, &result.UsageCheckpoints)
+			tailErr = errors.Join(tailErr, validateQuestionResultUsage(result))
+			if tailErr != nil {
+				questionCompleted = false
+			}
+		}
+		cleanupErr := saveAttempt("cleanup", struct {
+			AttemptID        string                    `json:"attemptId"`
+			SessionID        string                    `json:"sessionId"`
+			Stopped          bool                      `json:"stopped"`
+			Usage            []core.DispatchUsage      `json:"usage,omitempty"`
+			UsageCheckpoints []runtime.UsageCheckpoint `json:"usageCheckpoints,omitempty"`
+			PostStopError    bool                      `json:"postStopError,omitempty"`
+		}{attemptID, result.SessionID, sessionStopped, tailUsage, tailCheckpoints, tailErr != nil})
+		if cleanupErr != nil {
+			questionCompleted = false
+		}
+		err = errors.Join(err, cleanupErr)
 		err = errors.Join(err, questionProviderError(stopCtx, "session cleanup", stopErr))
+		err = errors.Join(err, tailErr)
 	}()
 	if err := worker.CheckServiceAccess(ctx, result.SessionID); err != nil {
 		return result, err
@@ -508,7 +528,6 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 	var output string
 	turnStarted, turnEnded := false, false
 	var messageID, turnID string
-	var lastSequence uint64
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -610,6 +629,7 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				if err := drainCompletedTurn(ctx, events, &result.Usage, &result.UsageCheckpoints, &lastSequence, result.SessionID); err != nil {
 					return result, err
 				}
+				providerBoundary = true
 				if err := validateQuestionResultUsage(result); err != nil {
 					return result, err
 				}

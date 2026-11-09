@@ -59,9 +59,32 @@ type plannerTerminalEvidence struct {
 }
 
 type plannerCleanupEvidence struct {
-	AttemptID string `json:"attemptId"`
-	SessionID string `json:"sessionId"`
-	Stopped   bool   `json:"stopped"`
+	AttemptID        string                    `json:"attemptId"`
+	SessionID        string                    `json:"sessionId"`
+	Stopped          bool                      `json:"stopped"`
+	Usage            []core.DispatchUsage      `json:"usage,omitempty"`
+	UsageCheckpoints []runtime.UsageCheckpoint `json:"usageCheckpoints,omitempty"`
+	PostStopError    bool                      `json:"postStopError,omitempty"`
+}
+
+func mergePlannerCleanupUsage(terminal *plannerTerminalEvidence, cleanup plannerCleanupEvidence) error {
+	for _, call := range cleanup.Usage {
+		if err := core.AppendUsage(&terminal.Usage, call); err != nil {
+			return err
+		}
+	}
+	for _, checkpoint := range cleanup.UsageCheckpoints {
+		body, err := json.Marshal(checkpoint)
+		if err != nil {
+			return err
+		}
+		if _, _, err := runtime.DecodeUsageCheckpoint(string(body), terminal.SessionID, terminal.Usage); err != nil {
+			return err
+		}
+		terminal.UsageCheckpoints = append(terminal.UsageCheckpoints, checkpoint)
+	}
+	_, err := core.SummarizeUsage(terminal.SessionID, terminal.Usage, terminal.UsageCheckpoints)
+	return err
 }
 
 type requestRecoveryInput struct {
@@ -234,6 +257,11 @@ func requestRecoveryCommand(args []string, output io.Writer) (returnErr error) {
 	if err != nil {
 		return err
 	}
+	if terminal.AttemptID != "" {
+		if err := mergePlannerCleanupUsage(&terminal, cleanup); err != nil {
+			return err
+		}
+	}
 	if request.AssociateLegacy {
 		binding, terminal, sessionAt, err = associateLegacyPlanner(state, checkpoint, *operation, request, turn, planner)
 		if err != nil {
@@ -308,6 +336,9 @@ func requestRecoveryCommand(args []string, output io.Writer) (returnErr error) {
 			savedCheckpoint = checkpoint
 		}
 		fresh, freshTerminal, freshCleanup, freshSessionAt, err := requestRecoveryRecords(*current, *id)
+		if err == nil && freshTerminal.AttemptID != "" {
+			err = mergePlannerCleanupUsage(&freshTerminal, freshCleanup)
+		}
 		if request.AssociateLegacy {
 			if err != nil && !errors.Is(err, errNoRecordedPlannerAttempt) {
 				return err
@@ -614,7 +645,7 @@ func requestRecoveryRecords(state store.Workspace, operationID string) (plannerA
 			switch attempt.Phase {
 			case "attempt":
 				if attempts != 0 {
-					if !(terminals == 1 && cleanups == 1 && cleanup.Stopped) && !recovered {
+					if !(terminals == 1 && cleanups == 1 && cleanup.Stopped && !cleanup.PostStopError) && !recovered {
 						return initial, terminal, cleanup, time.Time{}, fmt.Errorf("earlier Planner attempt remains unresolved")
 					}
 					attempts, sessions, sends, terminals, cleanups = 0, 0, 0, 0, 0
@@ -696,6 +727,9 @@ func buildRequestRecoveryPreview(state store.Workspace, checkpoint requestCheckp
 	controller.QuestionAnswer, float64, string, error) {
 	fail := func(reason string) (requestRecoveryPreview, controller.QuestionAnswer, float64, string, error) {
 		return requestRecoveryPreview{}, controller.QuestionAnswer{}, 0, "", fmt.Errorf("request recovery: %s", reason)
+	}
+	if cleanup.PostStopError && !(request.Resolution == "cancel" && request.AcceptUncertainty && request.StoppedConfirmed) {
+		return fail("observed post-stop activity requires confirmed uncertainty cancellation, not answer acceptance")
 	}
 	sideQuestion := operation.Kind == "question"
 	if !state.HasGraph || operation.Kind != "request" && !sideQuestion || operation.ID != request.OperationID ||

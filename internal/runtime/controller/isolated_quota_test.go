@@ -24,8 +24,8 @@ type isolatedQuotaRuntime struct {
 }
 
 func TestSearchPreservesLiveAndDrainedUsageCheckpoints(t *testing.T) {
-	for _, drained := range []bool{false, true} {
-		t.Run(fmt.Sprintf("drained=%t", drained), func(t *testing.T) {
+	for _, mode := range []string{"live", "drained", "stopped"} {
+		t.Run(mode, func(t *testing.T) {
 			db, _, base, _ := questionFixture(t)
 			defer db.Close()
 			base.role = "ORCHESTRATOR"
@@ -59,13 +59,16 @@ func TestSearchPreservesLiveAndDrainedUsageCheckpoints(t *testing.T) {
 				events <- event
 			}
 			for event := range source {
-				if !drained && event.Type == runtime.EventTurnEnded ||
-					drained && event.Type == runtime.EventTurnFinished {
+				if mode == "live" && event.Type == runtime.EventTurnEnded ||
+					mode == "drained" && event.Type == runtime.EventTurnFinished {
 					emit(runtime.Event{Type: runtime.EventUsageCheckpoint, Payload: string(body)})
 				}
 				emit(event)
 			}
 			worker := &questionRuntime{configuredRuntime: base, events: events}
+			if mode == "stopped" {
+				worker.stoppedEvents = []runtime.Event{{Type: runtime.EventUsageCheckpoint, Sequence: sequence + 1, Payload: string(body)}}
+			}
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
 			turn, err := RunSearchTurn(ctx, worker, "task", "query")
