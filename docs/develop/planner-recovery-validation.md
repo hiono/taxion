@@ -1,5 +1,9 @@
 # Planner・直接質問の照合と所有権の検証
 
+この記録の「実業務の対象未特定」をOSS開発の停止理由とした判断は誤りです。
+[2026-11-09の方針訂正](#oss開発と実業務利用の方針訂正2026-11-09)を適用してください。
+当時の候補・試験・予算・権限の記録と、現在のOSS開発方針は区別します。
+
 Issue #282、[ADR-0074](adr/0074-reconcile-interrupted-request-planner-attempts.md) の検証記録。
 v0.8.2 の公開 baseline は `6a9f91255e3dd566fefb62032395a88f5d16cff1`。
 初回 Coder と承認済み repair は正式に FAILED となり、両 worktree の未コミット成果、native 回答、停止結果と観測記録を保全した。
@@ -367,7 +371,9 @@ snapshotのみ、receiptとの重複、watermark外tail、partial tail、複数P
 PATHのbinaryはrevision `4334fed`、表示 `v0.7.21-rc.13`、対応skill `1.3.19`。
 installed skill `1.3.28` とは `ready --check-skill` がincompatibleを返した。
 この組合せで管理操作や実モデル実行を進めず、共有installを変更しない。
-アクセス可能なTKB3 worktreeと承認済みTask／Flowは未特定であり、製品開発再開とは扱わない。
+当時の報告は、実業務worktreeと承認済みTask／Flowの未特定を停止理由として扱った。
+これはOSS開発と実業務利用の混同による誤りであり、下記の方針訂正で撤回する。
+実業務開発の再開は未実施だが、機密workspaceの提示をOSS側の修正・検証の前提にはしない。
 
 09:59 JSTの正規account照会は19,700／50,000 requests使用。
 承認上限20,200とreserve 50を維持した作業残枠は450 requestsである。
@@ -445,10 +451,13 @@ scannerは公式release checksumを照合したBetterleaks 1.9.0をtask-local配
 
 ### 利用経路ごとの制限
 
+以下は実モデル・実業務環境での利用判定の記録であり、
+OSS側の読み取り、修正、隔離fixture検証を一律に禁止する判定ではない。
+
 | 利用経路 | 実利用判定と根拠 |
 | --- | --- |
 | 調査・読み取り | CONDITIONAL GO。正規quota照会、Git／SDKの調査、隔離storeのfixtureに限定する |
-| Planner | NO-GO。live／savedの会計・正式受理の合成回帰は確認したが、実モデルと対象Taskは未確認 |
+| Planner | NO-GO。live／savedの会計・正式受理の合成回帰は確認したが、実モデルでの正式受理・終了・保存・復旧は未確認 |
 | Coder | NO-GO。合成Flowの開始・保存・復旧を製品実装の成功とは扱わない |
 | Reviewer | NO-GO。第五審査FAILを維持する。失敗回答の追記は品質受理・実行許可・会計確定ではない |
 | cancellation／resume | NO-GO。実セッションでの中断・復旧と未到着イベントの回収は未確認 |
@@ -472,9 +481,68 @@ PATHの旧binaryとskillの不適合が解消したわけではなく、候補�
 新fieldを含むstoreを旧binaryへ渡せるとは保証しない。
 rollbackのためにcheckpointを削除せず、互換性を確認したbinaryと整合したbackupを使う。
 
-本来の製品のworkspace、承認済みTask／Issue、受け入れ条件は未特定である。
-Issue #282の修正を製品開発の代わりにせず、実開発の再開は未実施とする。
+機密workspace、実業務のTask／Issue、受け入れ条件の提示はOSS版Taxion開発の前提条件ではない。
+OSS側でTaxionを安定させ、安定版を実業務環境へ導入し、非機密の知見をOSS側へ戻す。
+実業務開発の再開は未実施であり、Issue #282の修正をその成功とは扱わない。
 第六審査・外部実行依頼・公開・配布・TKB3復旧は追加承認なしに開始しない。
 11:38 JSTの正規照会は20,100／50,000 requests使用で、
 承認上限20,200・reserve 50を維持した観測時残枠は50 requestsだった。
 この残枠を新しい審査の承認として使わない。outer期限12:00 JSTと元Flow期限を維持する。
+
+## OSS開発と実業務利用の方針訂正（2026-11-09）
+
+停止理由の訂正は、保存済みcommit `84406f11d2703d88ae61b811dc61d1956dc37085` を起点とする。
+同commitと先行する `0e061f9`、`e00cae2`、`3aa7301` は改変せず、
+訂正前の記録をGit履歴で参照できるように保持する。
+
+誤認は、当初のOSS開発と実業務利用の分離を判断へ反映せず、
+実業務の開始条件をOSS側の安定化の前提へ転用したことによる。
+従来のADR-0002は実装・履歴の移植を禁じていたが、
+開発Agentの入口には「機密workspaceの提示をOSS開発の前提にしない」という指示がなかった。
+合意を適用しなかった判断を、対象情報の不足や利用者側の問題として扱わない。
+
+| 訂正前の記録（`84406f1`） | 訂正 |
+| --- | --- |
+| 「実利用と権限の未解決事項」で実業務worktree／Taskの未特定を停止理由にした | 機密workspaceの提示はOSS開発の前提ではない |
+| Plannerの利用判定に「対象Taskは未確認」を含めた | 実モデルの受入れは未確認。実業務Taskの未提示でOSS修正を禁止しない |
+| 「CLIの追証と開発再開の申し送り」で本来の製品workspace／Task未特定を前提にした | OSS側でTaxionを安定化し、実業務導入と非機密フィードバックを分ける |
+
+方針の正本は [公開情報と出典の方針](privacy-provenance.md#oss-development-boundary) に統合し、
+ADR-0002で適用範囲を確認する。[開発Agentの指示](../../AGENTS.md) から参照して判断に適用する。
+実業務環境内の承認済み機密コード処理、Runtime・DTO・store・既存の拒否条件と承認境界は変更しない。
+
+旧枠の停止時点は20,150 requests使用、承認上限20,200、reserve 50で作業残枠0だった。
+12:00 JSTの期限も経過していた。停止理由は利用可能な承認済み予算の消尽と期限経過であり、
+機密workspaceや実業務Taskの未提示ではない。
+追加承認後の13:33 JSTの正規照会は20,200／50,000 requests使用で、
+上限20,700・reserve 50を除いた観測時残枠は450 requests、
+新しいouter期限は `2026-11-09T16:25:42.772+09:00` である。
+元Flowの期限や審査回数は変更しない。
+
+技術的な未解決事項と、予算による停止・再開は別に記録する。
+SDK Disconnectの待機とidle後の未到着eventの完全回収は未保証、
+全未公開履歴のsecret scanはINCOMPLETE、
+保護識別子の網羅確認、実モデル、本番store、公開CI、実業務導入はUNVERIFIEDのままとする。
+保存済み通常・race試験のPASSを、これらの確認済みや第五審査合格へ読み替えない。
+第六審査・外部実行依頼・push・公開・配布・導入・復旧は、
+この訂正や追加予算だけでは承認されない。
+
+本訂正の確認範囲は文書と開発Agentの参照である。
+変更前の `84406f1` の文書試験PASSを保存済み証跡として保持し、
+変更後は次の既存試験を実行してPASSを確認した。
+
+```bash
+go test ./cmd/taxion -run '^Test(Documentation|UserFacingTerminology|UserGuide|DeveloperGuide)' -count=1
+git diff --check
+```
+
+文書リンク試験の対象に `AGENTS.md` を加え、Agentの入口から正本とADRへのリンク・anchorも検査する。
+gofmtと変更差分を確認し、本番Goコード、DTO、schema、store、Runtimeの変更はない。
+変更前の全repository通常・race試験を再実行したとは扱わず、
+実モデルによる指示遵守や実業務への導入を確認したとも扱わない。
+最終indexのsecret scanは同じtreeに結び付けてcommit本文とoperator証跡へ記録し、
+全未公開履歴や保護識別子の網羅検査の代わりにはしない。
+
+再開時のread-only棚卸しは57 worktree、うち18件dirty、未確認0件だった。
+未コミット成果がある他worktreeは変更しない。訂正は元branchの追加commitとして保存し、
+既存履歴、共有install、operation policy、元Task／Flow／Dispatchを変更しない。

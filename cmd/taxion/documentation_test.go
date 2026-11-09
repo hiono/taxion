@@ -69,7 +69,7 @@ func documentationAnchors(text string) map[string]bool {
 
 func TestDocumentationLocalLinksWithoutNetwork(t *testing.T) {
 	root := filepath.Join("..", "..")
-	documents := []string{"README.md", "CONTRIBUTING.md", "SECURITY.md", "web/README.md"}
+	documents := []string{"AGENTS.md", "README.md", "CONTRIBUTING.md", "SECURITY.md", "web/README.md"}
 	if err := filepath.WalkDir(filepath.Join(root, "docs"), func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
