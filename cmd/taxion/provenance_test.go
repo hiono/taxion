@@ -33,6 +33,10 @@ func TestProvenanceCLIFailsBeforeStoreMutation(t *testing.T) {
 		{"task", "authorize", "--manifest", file},
 		{"task", "create", "--title", "--help", "--repo", "synthetic/repository"},
 		{"workflow", "start", "--file", file},
+		{"conversation", "clarification", "request", "--file", file},
+		{"conversation", "clarification", "answer", "--file", file},
+		{"conversation", "clarification", "history"},
+		{"conversation", "clarification", "request", "--file", "--help"},
 		{"serve"},
 	} {
 		output, err := run(args...)

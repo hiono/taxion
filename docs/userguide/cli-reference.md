@@ -472,6 +472,59 @@ taxion conversation ask --task <task-id> \
 
 保存記録だけを読み、追加の実調査、handoff の hold・release、回答の instruction 適用は行わない。変更には明示的な `workflow handoff`、feedback、version 付き draft、または後述の監視 console を使う。依頼から計画までの対話と追加調査の受入れは、2026-10-12 に完了した M12 の実 SDK 受入れ（#53/#54・#73/#74）で確認した。文書作業の実モデル受入れと停止後の復旧は、完了済みの #78・#79・#80 に記録した。すべての CLI 入口の実モデル実行を確認したという意味ではない。
 
+### Clarification の観測と回答保存（候補版・部分実装）
+
+`conversation clarification` は、質問先と回答の出典を既存の planning receipt に保存する。
+回答は `OBSERVED` のままで、受理・承認・Dispatch、HOLD、Runtime Stopを行わない。
+この入口だけで依存作業の停止や安全な自動再開が完成したとは扱わない（#283は継続中、#284は未着手）。
+
+```bash
+taxion conversation clarification observe --task TASK --dispatch DISPATCH
+taxion conversation clarification request --file question.json
+taxion conversation clarification answer --file answer.json
+taxion conversation clarification history
+```
+
+`observe` の `hash` を質問の `basisHash` に使う。Coder／Reviewerは本人の保存済み
+Dispatchを必須とし、PlannerはTaskだけを指定できる。質問JSONは `id`、`taskId`、
+必要なら `dispatchId`、`role`（`PLANNER`／`CODER`／`REVIEWER`）、`basisHash`、
+`category`、`question`、`reason`、`uncertainty`、参照済み情報の `references`、
+`answerFormat`（`text`／`json`）、`decisionImpact`、`stopCondition`、
+RFC 3339の `deadline` を含む。参照済みという申告や回答者のmetadataは、認証や内容の真偽の証明ではない。
+
+`specification` はPlannerへ、仕様所有者不明のPlannerの質問は人間へ送る宛先を記録する。
+`specificationOwnerRole` は `PLANNER`／`HUMAN` を明示できる。
+Reviewerの `implementation`／`evidence` はCoder、`authority`／`intent`／
+`irreversible`／`scope-change`／`budget-change`／`deadline-change` は人間が宛先となる。
+`safety`／`identity`／`integrity`／`budget`／`deadline` と期限切れは `STOP` を返すが、
+この値はRuntime停止完了の証明ではない。
+
+既存の原文で解決できると判断した場合は、`category: "saved"` と、`references`にも含めた
+`savedSourceId` を指定する。選択Task／Dispatchに結び付いた原文だけを返し、digestだけの
+referenceを原文扱いしない。軽微な不足は `category: "minor"` と
+`assumption: {"text":"仮定","impact":["承認済みscopeの項目"],"reversible":true}` を記録できる。
+不可逆な仮定とscope外の影響は拒否する。資料が回答を満たすか、仮定が軽微かという意味的判断は呼出側に残る。
+
+回答JSONは `{"id":"質問ID","answer":{"role":"PLANNER","actor":"回答者",
+"source":"実際の出典","text":"回答"}}` の形とし、受信時刻はControllerが保存する。
+同一対象・同一仕様の再送は元の質問を返し、同じ回答の再送は追記しない。
+異なる回答による上書きは拒否する。新たな矛盾の保存と解決、回答後の再検証は未完了である。
+
+Planner宛の保存質問だけは、既存の有料・tool-free Planner入口へ明示的に接続できる。
+このコマンドも通常の設定承認、account／repository検査、期限、session ceilingを必要とする。
+
+```bash
+taxion conversation plan --task TASK --clarification QUESTION_ID \
+  --timeout 2m --max-ai-credits 30
+```
+
+この場合、回答本体・usage・cleanup・所有権は従来の質問receiptで管理し、
+ClarificationはそのID・sequence・hashを参照する。回答参照の存在はcleanup成功や受理を意味しない。
+人間またはCoderの回答は外側のAgentまたは人間が明示的に渡す方式であり、
+実行中Roleからの自発的質問とCoderへの自動配信は未接続である。実モデルでの動作改善は未評価。
+旧binaryへのrollbackでは、これらの新しいplanning phaseを処理できると仮定せず、
+未解決質問とreceiptを保持したprivate backupから判断する。
+
 ### 保存 Flow の監視と明示的な続行
 
 `workflow run|step|resume --progress-monitor` はイベント待機中に10分ごとと、担当の終端イベント時に

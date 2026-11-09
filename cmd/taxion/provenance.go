@@ -69,7 +69,9 @@ func provenanceHelpOnly(args []string) bool {
 	}
 	path := strings.Join(args[:len(args)-1], " ")
 	if slices.Contains([]string{"git hook install", "git hook status", "git hook remove",
-		"memory conflict add", "memory conflict list", "memory conflict resolve"}, path) {
+		"memory conflict add", "memory conflict list", "memory conflict resolve",
+		"conversation clarification observe", "conversation clarification request",
+		"conversation clarification answer", "conversation clarification history"}, path) {
 		return true
 	}
 	for _, line := range strings.Split(usage, "\n") {

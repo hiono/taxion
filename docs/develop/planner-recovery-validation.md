@@ -608,3 +608,112 @@ SDK v1.0.22のDisconnectはcallerのStop contextを受け取らず、
 旧cleanup形式は読み取れるが、新しい会計投影のある未解決試行には更新後の復旧readerを使い、
 古いbinaryへのrollbackのためにreceiptを削除しない。
 第五審査FAILを変更せず、第六審査、push、公開・配布、TKB3復旧は実施しない。
+
+## Clarification契約の最初の実装単位（2026-11-09）
+
+開始時は `fix/native-event-contract-083` の `9afdf08`、clean、未pushだった。
+親は `d1ccc36` で、方針訂正を再実装していない。
+commit本文の通常・race・公開CLI補完の4 JSONLは、実ファイルのSHA-256と集計が一致した。
+他worktreeのdirty成果18件はread-onlyで確認し、変更していない。
+最新の #90／#283／#284／#282／#228／#196／#189／#220 の本文・コメントを取得した。
+
+| 対象 | 実装と既存証拠 | 残る受入れ条件 | 開始時判定 |
+| --- | --- | --- | --- |
+| #282 | `9afdf08` のStop後観測、cleanup、preview/apply、二重計上拒否の回帰 | 独立した品質判定、正式配布などを含むIssue全体 | UNKNOWN（該当の既存回帰はPASS） |
+| #228 | 既存RequestRecord、snapshot、operation、Recovery | 質問契約の新セッション復元、移送先での実受入れ | UNKNOWN |
+| #283 | AskQuestion、AskPlanner、HumanDecisionRequest、Feedbackは存在 | 型付きルーティングと実際の質問・回答接続 | FAIL |
+| #284 | 既存の承認、HOLD、所有権、Recovery検査は存在 | 新しい質問契約の再検証と続行E2E | FAIL |
+
+今回の単位は、明示的なController／CLI入力による宛先判定、原文再利用の選択、
+可逆な仮定の範囲検査、質問の重複抑止、回答の出典・受信時刻の保存までである。
+全状態を `OBSERVED` とし、`ACCEPTED`、`AUTHORIZED`、`DISPATCHED` を生成しない。
+宛先のrole名とactor/sourceは監査metadataであり、本人認証や実行権限の代用ではない。
+
+| 既存機構 | 再利用・責務境界 |
+| --- | --- |
+| RequestRecord / Workspace transaction | `planning` kindと既存sequence／SHA-256を使用。新table・新kind・別保存領域を作らない。判定と追記を同一transactionで行えるよう既存appendをWorkspaceからも呼ぶ |
+| ContextDocument / DispatchContextDocuments | 既に選択対象に結び付いた原文だけを提示。digestだけのreferenceは回答原文にしない |
+| ApprovalBundleの7次元 | 仕様・対象・証拠の照合hashに再利用。観測snapshotのhashとは区別し、進捗時刻だけで同じ仕様質問を再発行しない。どちらのhashも承認ではない |
+| AskPlanner / AskQuestion | Planner宛だけ、既存tool-free sessionと設定・期限検査に接続。Coder／Reviewerへ読み書き可能な新sessionを作らない |
+| #282のterminal / cleanup / operation | 回答本体は従来のterminal receiptだけに保存し、質問側はID・sequence・hash参照を保存する。参照時に原本を読み直す。usage、checkpoint、所有権、Stopの処理を複製しない |
+| #228 snapshot / store reopen | 既存planning receiptから質問・観測回答を復元する。新しいsnapshot engineを作らない |
+| HumanDecisionRequest / #196 | 情報としての人間の回答を正式なdecisionや承認へ変換しない。scope／予算／期限の変更は従来の明示承認が必要 |
+| Feedback / HOLD / instruction draft / interrupt | 今回の観測APIから変更しない。STOPという宛先判定とRuntime停止完了を混同しない。一括Steering APIの実装済み扱いもしない |
+
+Planner回答は通常のterminal receiptと質問への参照を同じtransactionで追記する。
+同時に人間の回答が到着して参照接続を拒否しても、正常に観測したPlannerのterminalを
+rollbackしない。Stop失敗時も回答は観測として保持し、既存operationをBLOCKEDにする。
+参照だけを根拠にcleanup成功、受理、次工程の権限を推定しない。
+
+合成試験は、保存原文の返却と質問非発行、scope内の仮定、ロール別宛先、
+Reviewerの自己回答拒否、同時再送の単一追記、同一回答の冪等性、異なる回答の上書き拒否、
+進捗と仕様hashの分離、既存Planner呼出し、canonical回答の参照・再open、
+Stop失敗、同時回答による接続失敗時の原本保持を対象とする。
+公開CLIの試験は、開発用の一時store／provenance policyで実binaryを起動し、
+observe→request→人間の回答→historyを通して、Graph・承認・Dispatch・HOLD・所有権が
+変わらないことを確認する。CLI help／completionの追加でprovenance検査を迂回しないことも検査する。
+いずれも実モデルを呼ばない。
+
+### 未達条件と次の実装
+
+#283全体は未完了である。現状の分類は呼出側の明示入力を検査するもので、
+自然言語から既存資料で解決済みかを自動判断した証拠ではない。
+実行中Roleからの自発的質問取り込み、Coder宛の実Role回答への接続、
+矛盾する回答を追加観測として保持して解決する処理、受理済み情報の利用側への反映が残る。
+質問の保存や宛先表示だけで、安全な待機・続行が完成したとは扱わない。
+次の単位は、既存のRole呼出し・tool許可・ownershipを維持した質問取り込みと宛先への接続である。
+
+#284は未着手とする。回答後の仕様・対象・証拠・権限・予算・期限・owner再検証、
+依存作業の停止と独立作業の続行、正式な受理・承認・Dispatch、二重実行防止、
+同一成果物の検証・独立Reviewer到達のE2Eを、この単位のPASSで代用しない。
+#90／#189／#220の品質基準やADR-0062のH5全体の達成とも区別する。
+ADR-0062のIssue参照原文は履歴 `8945b4c` に存在し、現在の候補にはファイルがない。
+この差を未確認の採択済み実装として補完せず、今回その文書を復元していない。
+
+### この単位の検証結果
+
+`go build ./...`、`go vet ./...`、変更Goファイルのgofmt、`git diff --check` はPASS。
+新しいfixtureで既存の拒否条件を弱めず、Plannerの出典付きconfirmedを使用した。
+
+| 実行 | 実際の結果 |
+| --- | --- |
+| `TAXION_TEST_FAILED_REVIEW_CLI=build go test -json -timeout 30m ./...` | 初回2,820 PASS／2 FAIL／32 SKIP。FAILは新しい文書の人間の呼称とhelpのコマンド数だった |
+| `TAXION_TEST_FAILED_REVIEW_CLI=build go test -json -count=1 -timeout 15m ./cmd/taxion` | 呼称を既存規範に合わせ、実際に追加したcommandを索引試験へ反映後、398 PASS／0 FAIL／2 SKIP |
+| `go test -json ./internal/runtime/controller -run 'TestClarificationReplayPreservesTheAnswerContract$' -count=1` | 最後に追加した回答先・形式・期限の再送回帰、1 PASS |
+| `TAXION_TEST_FAILED_REVIEW_CLI=build go test -race -json -timeout 30m ./internal/runtime/controller ./internal/store ./cmd/taxion` | 初回1,544 PASS／2 FAIL／10 SKIPに加え、controller packageが30分でtimeout。単一コマンドの完走とは扱わない |
+| `TAXION_TEST_FAILED_REVIEW_CLI=build go test -race -json -count=1 -timeout 15m ./cmd/taxion` | 同じhelp・文書の修正後、398 PASS／0 FAIL／2 SKIP |
+| 同じ再送回帰の `go test -race -json ... -count=1` | 1 PASS |
+| timeoutしたcontrollerの未完了29 top-level testだけを `-race -json -timeout 30m -count=1 -run SELECTOR` で再実行 | subtest込み59 PASS／0 FAIL。初回の完了済み結果と照合し、現行のcontroller top-level 331件すべてにPASSまたはSKIPの終端がある。data raceの報告なし |
+
+同じpackage／test名の修正後結果を採用し、再実行を二重計上しない集計は、
+通常2,823 PASS／0残存FAIL／32 SKIP、race1,606 PASS／0残存FAIL／10 SKIPとなる。
+初回の2 FAILとrace package timeoutを削除せず、上表の再実行と区別して保持する。
+分割raceの完了は、単一の全package raceコマンドが時間内に完走した証拠ではない。
+
+SKIPは、明示的に有効化していない実モデル・実サービス・実store／resource比較、
+実scannerを使う追加hook／managed stage評価、document skill環境、
+既存の未対象recontract組合せなどである。
+最終indexだけのscanner実行は、SKIPしたhook／全履歴試験を代替しない。
+実binary CLIと既存のfailed-review CLI回帰は合成環境で実行した。
+
+JSONLはsession artifactに保存し、照合用のSHA-256を残す。
+
+| 証跡名 | SHA-256 |
+| --- | --- |
+| `clarification-20261109-normal.jsonl` | `4ab0e4fd9f5dd42367b1b00966b69fddda2c8611807ff94f5e9856ae71d0eb79` |
+| `clarification-20261109-cli-normal-fixed.jsonl` | `98ffc5fa80a95dd814f5d53bfd9373a4fbee6c4adb7b1e411e0c8f51bec86728` |
+| `clarification-20261109-replay-normal.jsonl` | `b5463d85b205ff310b3c54c0eb9dcc1c778abed7b867602774f0fb830cd55e16` |
+| `clarification-20261109-race.jsonl` | `c768ead8fc58909cf978c6c9775b7a94b15bf27af3bb7fc4e6971602a67cd9f2` |
+| `clarification-20261109-cli-race-fixed.jsonl` | `dde7c19428d7c68320efcc3d07ccd785b8fbe1d80cb0569b5089823733b4a1a4` |
+| `clarification-20261109-replay-race.jsonl` | `ea0a160fcf8ca7dcbdd7757e0a5c99e231a92d1123ee7890b9937e0c17efa347` |
+| `clarification-20261109-controller-race-remainder.jsonl` | `b321de10a3f02124641c8d7a86d6f1d628a5e669824cbc1677d50fb612af7774` |
+
+最終indexではtask-local Betterleaks 1.9.0を使用する。
+scanner archiveは `f8b185a39ffcece2a1ca82bf3a4e7435cd81963ffd16b7a9128daf75f35f6de7`、
+binaryは `0ace40b41652344608f89967fe93c6caf4faae9a4df20423632c7efb02a4d4e1` と照合した。
+実行コマンドは `go run ./cmd/taxion git check-index --secrets --scanner EXACT_TASK_LOCAL_BINARY`。
+index更新後に再実行し、結果をcommit本文へ記録する。
+
+実モデル比較、公開CI、本番store、機器間の実移送、全履歴secret scan、
+SDK未到着イベントの完全回収、Disconnect期限は未検証・未保証のままである。
+第五審査FAIL、第六審査・push・公開・配布・TKB3復旧の未承認状態を維持する。

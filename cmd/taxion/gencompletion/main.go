@@ -47,7 +47,9 @@ func generate() ([]byte, error) {
 		return false
 	})
 	for _, name := range []string{"git hook install", "git hook status", "git hook remove",
-		"memory conflict add", "memory conflict list", "memory conflict resolve", "help"} {
+		"memory conflict add", "memory conflict list", "memory conflict resolve",
+		"conversation clarification observe", "conversation clarification request",
+		"conversation clarification answer", "conversation clarification history", "help"} {
 		commands[name] = map[string]bool{}
 	}
 	for _, name := range []string{"workflow plan", "workflow start", "workflow terminate"} {

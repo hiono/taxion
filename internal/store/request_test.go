@@ -1,6 +1,8 @@
 package store
 
 import (
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -38,5 +40,34 @@ func TestRequestRecordsPreservePayloadAndRollbackSequence(t *testing.T) {
 	}
 	if err := db.AppendRequestRecord("request", "execution", "not JSON"); err == nil {
 		t.Fatal("invalid request payload accepted")
+	}
+}
+
+func TestRequestRecordsComposeAtomicallyWithWorkspaceDecisions(t *testing.T) {
+	db := openTest(t)
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejected := errors.New("decision changed before commit")
+	err = db.UpdateWorkspace(func(state *Workspace) error {
+		if err := state.AppendRequestRecord("clarification:q", "planning", `{"phase":"clarification.request"}`); err != nil {
+			return err
+		}
+		return rejected
+	})
+	if !errors.Is(err, rejected) {
+		t.Fatal("workspace transaction did not return its decision failure", err)
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("failed decision retained a partial receipt", err)
+	}
+	if err := db.AppendRequestRecord("clarification:q", "planning", `{"phase":"clarification.request"}`); err != nil {
+		t.Fatal(err)
+	}
+	after, err = db.LoadWorkspace()
+	if err != nil || len(after.Records.Requests) != 1 || after.Records.Requests[0].Sequence != 1 {
+		t.Fatal("rolled-back receipt consumed a sequence number", err)
 	}
 }

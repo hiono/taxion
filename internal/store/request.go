@@ -9,24 +9,38 @@ import (
 )
 
 func (s *Store) AppendRequestRecord(id, kind, payload string) error {
+	if err := validateRequestRecord(id, kind, payload); err != nil {
+		return err
+	}
+	return s.UpdateWorkspace(func(state *Workspace) error {
+		return state.AppendRequestRecord(id, kind, payload)
+	})
+}
+
+func (state *Workspace) AppendRequestRecord(id, kind, payload string) error {
+	if err := validateRequestRecord(id, kind, payload); err != nil {
+		return err
+	}
+	sequence := uint64(1)
+	for _, record := range state.Records.Requests {
+		if record.RequestID == id && record.Kind == kind {
+			sequence++
+		}
+	}
+	record := RequestRecord{
+		RequestID: id, Kind: kind, Sequence: sequence, Payload: payload,
+		Hash: fmt.Sprintf("%x", sha256.Sum256([]byte(payload))), At: time.Now().UTC(),
+	}
+	state.Records.Requests = append(state.Records.Requests, record)
+	return nil
+}
+
+func validateRequestRecord(id, kind, payload string) error {
 	if strings.TrimSpace(id) == "" || kind != "planning" && kind != "execution" && kind != "context-source" {
 		return fmt.Errorf("request record requires an ID and planning, execution or context-source kind")
 	}
 	if !json.Valid([]byte(payload)) {
 		return fmt.Errorf("request record requires a valid JSON payload")
 	}
-	return s.UpdateWorkspace(func(state *Workspace) error {
-		sequence := uint64(1)
-		for _, record := range state.Records.Requests {
-			if record.RequestID == id && record.Kind == kind {
-				sequence++
-			}
-		}
-		record := RequestRecord{
-			RequestID: id, Kind: kind, Sequence: sequence, Payload: payload,
-			Hash: fmt.Sprintf("%x", sha256.Sum256([]byte(payload))), At: time.Now().UTC(),
-		}
-		state.Records.Requests = append(state.Records.Requests, record)
-		return nil
-	})
+	return nil
 }

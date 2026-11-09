@@ -680,7 +680,7 @@ func askQuestion(ctx context.Context, db *store.Store, ledgerPath, taskID, text 
 				if core.Redact(string(receipt)) != string(receipt) {
 					return result, fmt.Errorf("taxion: validated question answer contains a credential-like value")
 				}
-				if err := db.AppendRequestRecord(operation.ID, "planning", string(receipt)); err != nil {
+				if err := persistQuestionTerminal(ctx, db, operation.ID, taskID, result.SessionID, string(receipt)); err != nil {
 					return result, err
 				}
 				result.Answer = &answer

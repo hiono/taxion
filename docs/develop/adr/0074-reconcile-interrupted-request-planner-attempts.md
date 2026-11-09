@@ -101,6 +101,14 @@ usage after the original process stop. This is not proof of zero cost.
 
 ## Compatibility
 
+The explicit Clarification adapter (#283) retains questions as planning receipts
+and references the canonical Planner answer by request ID, sequence and hash.
+It does not create another Planner answer, usage ledger, operation owner or
+snapshot mechanism. A reference is only an observation: it does not establish
+cleanup, answer acceptance, authorization or Dispatch. A conflicting concurrent
+answer must not roll back an already observed canonical terminal receipt.
+Controller acceptance and continuation integration remain #284 work.
+
 The workspace schema and append-only request records are retained. Upgrading
 does not rewrite old checkpoints or native histories. Downgrade is not a
 migration: retain an intact private backup before opening a v0.8.3 workspace

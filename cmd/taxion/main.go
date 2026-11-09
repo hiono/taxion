@@ -78,6 +78,7 @@ Conversation, investigation and source attachment:
   conversation watch  Hold handoffs before reading user input; select one role step or bounded run (--flow, --actor, --source)
   conversation ask    Answer a bounded side question from saved Task records without changing the main workflow
   conversation plan   Recommend a next action from compact Memory and results; no execution or inferred approval
+  conversation clarification Observe, route and retain advisory questions/answers; no approval or execution
   conversation intake Record an original request and unapproved scope/acceptance contract (--file JSON)
   conversation proposal Read a saved proposed contract and its exact hash (--task ID)
   conversation confirm Explicitly approve that exact contract/configuration without issuing work (--file JSON)

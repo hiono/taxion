@@ -220,6 +220,9 @@ No combined DRAFT contract-and-stage-plan preview is provided.
 `
 
 func conversationCmd(args []string, output io.Writer) error {
+	if len(args) != 0 && args[0] == "clarification" {
+		return clarificationCmd(args[1:], output)
+	}
 	if len(args) != 0 && args[0] == "search" {
 		return searchCmd(args[1:], output, true)
 	}
@@ -307,6 +310,7 @@ func conversationCmd(args []string, output io.Writer) error {
 	fs := flag.NewFlagSet("conversation "+args[0], flag.ContinueOnError)
 	task := fs.String("task", "", "Task whose sourced approval and saved records authorize this question")
 	question := fs.String("question", "", "natural-language side question; not added to main history")
+	clarification := fs.String("clarification", "", "saved clarification ID routed to Planner; plan only, instead of --question")
 	timeout := fs.Duration("timeout", 0, "explicit question deadline")
 	credits := fs.Float64("max-ai-credits", 0, "explicit per-session soft AI-credit ceiling (minimum: 30)")
 	cli := fs.String("cli", "", "Copilot CLI executable")
@@ -320,7 +324,9 @@ func conversationCmd(args []string, output io.Writer) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 || strings.TrimSpace(*task) == "" || strings.TrimSpace(*question) == "" ||
+	if fs.NArg() != 0 || strings.TrimSpace(*task) == "" ||
+		(strings.TrimSpace(*question) == "") == (strings.TrimSpace(*clarification) == "") ||
+		*clarification != "" && args[0] != "plan" ||
 		*timeout <= 0 || *credits < 0 {
 		return fmt.Errorf("conversation ask requires a Task, question, positive time limit and session credit ceiling")
 	}
@@ -399,7 +405,9 @@ func conversationCmd(args []string, output io.Writer) error {
 	}
 	var result controller.QuestionResult
 	var questionErr error
-	if args[0] == "investigate" {
+	if *clarification != "" {
+		result, questionErr = controller.AskPlannerClarification(ctx, db, storePath, *task, *clarification, resolved.Config, worker)
+	} else if args[0] == "investigate" {
 		result, questionErr = controller.AskInvestigation(ctx, db, storePath, *task, *question, resolved.Config, worker,
 			controller.InvestigationRequest{Paths: paths, MaxBytes: maxBytes})
 	} else {
