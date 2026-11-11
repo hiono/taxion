@@ -335,3 +335,55 @@ func TestClarificationSuccessorStoppedBeforeReceive(t *testing.T) {
 		t.Fatal("stopped handoff was marked delivered", history, err)
 	}
 }
+
+
+func TestSuccessorCoderCanAnswerOnlyItsCarriedReviewerQuestion(t *testing.T) {
+	db, control, binding, id, _ := clarificationSuccessorFixture(t)
+	binding.ProtocolVersion = 3
+	body, err := json.Marshal(map[string]string{
+		"action": "answer", "id": id, "answer": "The evidence confirms the requested behavior; retain the existing API contract.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := control.ObserveRoleClarification(t.Context(), binding, "successor-session", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt struct {
+		ID             string `json:"id"`
+		State          string `json:"state"`
+		Role           string `json:"role"`
+		SourceDispatch string `json:"sourceDispatch"`
+	}
+	if err := json.Unmarshal(response, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.ID != id || receipt.State != "ANSWERED" || receipt.Role != "CODER" || receipt.SourceDispatch != binding.DispatchID {
+		t.Fatal("unexpected clarification answer receipt", receipt)
+	}
+	history, err := ClarificationHistory(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var answered Clarification
+	for _, saved := range history {
+		if saved.Request.ID == id {
+			answered = saved
+		}
+	}
+	if answered.Answer == nil || answered.Answer.Role != "CODER" ||
+		answered.Answer.Source != "dispatch:"+binding.DispatchID ||
+		!strings.Contains(answered.Answer.Text, "existing API contract") {
+		t.Fatal("successor Coder answer was not bound to its Dispatch", answered)
+	}
+}
+
+func TestSuccessorCoderCannotAnswerUncarriedReviewerQuestion(t *testing.T) {
+	db, control, binding, _, _ := clarificationSuccessorFixture(t)
+	binding.ProtocolVersion = 3
+	body := json.RawMessage(`{"action":"answer","id":"unrelated-question","answer":"answer"}`)
+	if _, err := control.ObserveRoleClarification(t.Context(), binding, "successor-session", body); err == nil {
+		t.Fatal("successor Coder answered a question not carried by its Dispatch")
+	}
+}
