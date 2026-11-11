@@ -20,12 +20,12 @@ func (a *Adapter) clarificationTools() []sdk.Tool {
 		Description: "Record a clarification from this running Role with its saved Task, Dispatch, session and owner. " +
 			"Ask in natural language. Only the question is required; provide category or other context when it materially helps routing. " +
 			"The host derives Task, Dispatch, session, owner, source references and deadline from the bound execution. " +
-			"Observation only: this does not accept answers, approve work, dispatch another Role or stop the runtime. " +
+			"Questions are observations only. Use action=answer with only id and answer to answer a Reviewer question explicitly carried by this successor Coder Dispatch. The host verifies the original Reviewer, Flow and Dispatch. An answer is not approval or permission to expand scope. " +
 			"Do not proceed with work depending on an unanswered question. Return real blockers in the existing result contract.",
 		Parameters: map[string]any{
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]any{
-				"id": text, "question": text, "reason": text, "uncertainty": text,
+				"id": text, "question": text, "answer": text, "reason": text, "uncertainty": text,
 				"decisionImpact": text, "stopCondition": text,
 				"category": map[string]any{"type": "string", "enum": []string{
 					"specification", "implementation", "evidence", "authority", "intent", "irreversible",
@@ -46,13 +46,14 @@ func (a *Adapter) clarificationTools() []sdk.Tool {
 			"An accept verdict means input eligibility, not acceptance, approval or permission to resume dependent work. " +
 			"This cannot receive questions addressed to another Role and does not enable the disabled Coder inbox."
 		tools[0].Parameters["properties"].(map[string]any)["action"] = map[string]any{
-			"type": "string", "enum": []string{"request", "read"},
+			"type": "string", "enum": []string{"request", "read", "answer"},
 		}
 		required := tools[0].Parameters["required"]
 		tools[0].Parameters["required"] = []string{}
 		tools[0].Parameters["anyOf"] = []any{
 			map[string]any{"required": required},
 			map[string]any{"properties": map[string]any{"action": map[string]any{"const": "read"}}, "required": []string{"action", "id"}},
+			map[string]any{"properties": map[string]any{"action": map[string]any{"const": "answer"}}, "required": []string{"action", "id", "answer"}},
 		}
 	}
 	return tools
