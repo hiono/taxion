@@ -134,7 +134,15 @@ func clarificationContext(state store.Workspace, taskID, dispatchID string) (Cla
 			return context, err
 		}
 	}
-	dimensions, err := core.BundleDimensions(task, core.ApprovalConfiguration{Digest: configuration})
+	// Dispatch results and carried clarification evidence are progress records,
+	// not changes to the approved permission scope used to bind a question.
+	scopeTask := task
+	scopeTask.Decisions = slices.DeleteFunc(slices.Clone(task.Decisions), func(decision core.TaskDecision) bool {
+		return strings.HasPrefix(decision.ID, "result:") ||
+			strings.HasPrefix(decision.ID, "clarification-question:") ||
+			strings.HasPrefix(decision.ID, "clarification-answer:")
+	})
+	dimensions, err := core.BundleDimensions(scopeTask, core.ApprovalConfiguration{Digest: configuration})
 	if err != nil {
 		return context, err
 	}
