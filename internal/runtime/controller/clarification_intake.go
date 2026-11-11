@@ -122,6 +122,91 @@ func (c *Controller) ObserveRoleClarification(ctx context.Context, binding runti
 	}{result.Request.ID, result.State, result.Route, result.Recipient, "clarification:" + result.Request.ID, result.Delivery})
 }
 
+func (c *Controller) answerRoleClarification(ctx context.Context, binding runtime.ManagedClarification, sessionID, id, answer string) (json.RawMessage, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var result Clarification
+	err := c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		observed, err := c.roleClarificationContext(ctx, *state, binding, sessionID)
+		if err != nil {
+			return err
+		}
+		dispatch := observed.Dispatch
+		if dispatch == nil || dispatch.Recipient != "CODER" {
+			return fmt.Errorf("taxion: only the successor Coder may answer a carried Reviewer question")
+		}
+		flow, found := state.Graph.ReviewFlow(binding.FlowID)
+		if !found || flow.Status != "RUNNING" || flow.LastDispatchID() != dispatch.ID ||
+			dispatch.Relationship != core.RelationshipAmends || dispatch.TaskID != flow.TaskID {
+			return fmt.Errorf("taxion: clarification answer requires the current repair Dispatch in its original Flow")
+		}
+		history, err := clarifications(*state)
+		if err != nil {
+			return err
+		}
+		for _, saved := range history {
+			if saved.Request.ID == id {
+				result = saved
+			}
+		}
+		if result.Version == 0 || result.Request.Role != "REVIEWER" ||
+			result.Request.TaskID != dispatch.TaskID || result.Route != "ASK" || result.Recipient != "CODER" {
+			return fmt.Errorf("taxion: answer requires a saved Reviewer question addressed to Coder")
+		}
+		source, ok := state.Graph.GraphDispatch(result.Request.DispatchID)
+		if !ok || source.Recipient != "REVIEWER" {
+			return fmt.Errorf("taxion: original Reviewer Dispatch is unavailable")
+		}
+		carried, err := reviewerClarificationDecisions(*state, flow, source)
+		if err != nil {
+			return err
+		}
+		var expected *core.TaskDecision
+		for i := range carried {
+			if carried[i].ID == "clarification-question:"+id {
+				expected = &carried[i]
+				break
+			}
+		}
+		foundInDispatch := false
+		if expected != nil {
+			for _, decision := range dispatch.Instruction.Decisions {
+				foundInDispatch = foundInDispatch || decision == *expected
+			}
+		}
+		delivery, err := savedClarificationDelivery(*state, id)
+		if err != nil || delivery == nil || delivery.Target == nil ||
+			delivery.Target.FlowID != flow.ID || delivery.Target.TaskID != dispatch.TaskID ||
+			delivery.Target.Role != "CODER" || source.RelatedID != delivery.Target.DispatchID ||
+			dispatch.RelatedID != delivery.Target.DispatchID || !foundInDispatch {
+			return fmt.Errorf("taxion: Reviewer question is not bound to this exact successor Coder Dispatch")
+		}
+		sourceIndex := slices.Index(flow.DispatchIDs, source.ID)
+		dispatchIndex := slices.Index(flow.DispatchIDs, dispatch.ID)
+		if sourceIndex < 0 || dispatchIndex != sourceIndex+1 {
+			return fmt.Errorf("taxion: clarification answer requires the immediate successor Dispatch")
+		}
+		operation := state.Records.Operation
+		if operation == nil || operation.ID != binding.OperationID || operation.Owner != binding.Owner ||
+			operation.State != "RUNNING" || operation.Phase != "EXECUTION" {
+			return fmt.Errorf("taxion: clarification answer requires the current execution owner")
+		}
+		result, _, err = answerClarification(state, id, ClarificationAnswer{
+			Role: "CODER", Actor: operation.Owner, Source: "dispatch:" + dispatch.ID, Text: answer,
+		})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(struct {
+		ID             string `json:"id"`
+		State          string `json:"state"`
+		Role           string `json:"role"`
+		SourceDispatch string `json:"sourceDispatch"`
+	}{id, "ANSWERED", "CODER", binding.DispatchID})
+}
+
 func (c *Controller) roleClarificationContext(ctx context.Context, state store.Workspace, binding runtime.ManagedClarification, sessionID string) (ClarificationContext, error) {
 	if err := ctx.Err(); err != nil {
 		return ClarificationContext{}, err
