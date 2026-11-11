@@ -131,9 +131,11 @@ func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing
 	handle := &managedSession{sdk: &sdk.Session{}, busy: true}
 	adapter.sessions["session"] = handle
 	var handler sdk.ToolHandler
+	var clarificationTool sdk.Tool
 	for _, tool := range adapter.sessionConfig(nil).Tools {
 		if tool.Name == ClarificationToolName {
 			handler = tool.Handler
+			clarificationTool = tool
 			if tool.SkipPermission || tool.IsTerminal {
 				t.Fatal("clarification bypasses permissions or ends the turn")
 			}
@@ -141,6 +143,16 @@ func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing
 	}
 	if handler == nil || !slices.Contains(adapter.resumeConfig(nil).AvailableTools, ClarificationToolName) {
 		t.Fatal("clarification missing from create/resume registration")
+	}
+	properties := clarificationTool.Parameters["properties"].(map[string]any)
+	actions := properties["action"].(map[string]any)["enum"].([]string)
+	if !slices.Contains(actions, "answer") {
+		t.Fatal("protocol 3 does not expose the successor answer action")
+	}
+	anyOf := clarificationTool.Parameters["anyOf"].([]any)
+	answerSchema := anyOf[2].(map[string]any)
+	if !reflect.DeepEqual(answerSchema["required"], []string{"action", "id", "answer"}) {
+		t.Fatal("answer action does not require its exact question ID and answer", answerSchema)
 	}
 	request := controller.ClarificationRequest{
 		ID: "question", Question: "Which behavior is intended?",
