@@ -1,6 +1,11 @@
 package controller
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/hiono/taxion/internal/core"
+)
 
 func TestClarificationScopeHashSurvivesSourceDispatchCompletion(t *testing.T) {
 	db, ledger, request := reviewFlowFixture(t)
@@ -42,5 +47,31 @@ func TestClarificationScopeHashSurvivesSourceDispatchCompletion(t *testing.T) {
 	}
 	if before.Hash == after.Hash {
 		t.Fatal("full clarification context did not retain the changed execution result")
+	}
+
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor, ok := func() (core.GraphDispatch, bool) {
+		state, loadErr := db.LoadWorkspace()
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		return state.Graph.GraphDispatch(flow.LastDispatchID())
+	}()
+	if !ok || successor.Recipient != "CODER" {
+		t.Fatal("REQUEST_CHANGES did not issue the successor Coder Dispatch")
+	}
+	foundQuestion := false
+	for _, decision := range successor.Instruction.Decisions {
+		if decision.ID == "clarification-question:"+input.ID {
+			foundQuestion = strings.Contains(decision.Text, input.Question) &&
+				strings.Contains(decision.Text, input.DecisionImpact) &&
+				strings.Contains(decision.Text, input.StopCondition)
+		}
+	}
+	if !foundQuestion {
+		t.Fatal("successor Coder Dispatch does not carry the saved Reviewer question")
 	}
 }
