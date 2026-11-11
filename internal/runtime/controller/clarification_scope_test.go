@@ -63,6 +63,10 @@ func TestClarificationScopeHashSurvivesSourceDispatchCompletion(t *testing.T) {
 	if !ok || successor.Recipient != "CODER" {
 		t.Fatal("REQUEST_CHANGES did not issue the successor Coder Dispatch")
 	}
+	afterHandoff, err := ObserveClarification(db, reviewer.TaskID, reviewer.ID)
+	if err != nil || afterHandoff.ScopeHash != before.ScopeHash {
+		t.Fatal("carrying the question into the successor changed the original scope", err)
+	}
 	foundQuestion := false
 	for _, decision := range successor.Instruction.Decisions {
 		if decision.ID == "clarification-question:"+input.ID {
