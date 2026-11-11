@@ -17,12 +17,22 @@ import (
 func (c *Controller) ObserveRoleClarification(ctx context.Context, binding runtime.ManagedClarification, sessionID string, body json.RawMessage) (json.RawMessage, error) {
 	var envelope struct {
 		Action string `json:"action,omitempty"`
+		Answer string `json:"answer,omitempty"`
 		ClarificationRequest
 	}
 	if len(body) > 64*1024 || core.DecodeGraphInput(strings.NewReader(string(body)), &envelope) != nil {
 		return nil, fmt.Errorf("taxion: invalid bounded clarification input")
 	}
 	input := envelope.ClarificationRequest
+	if envelope.Action == "answer" {
+		other := input
+		other.ID = ""
+		if binding.ProtocolVersion < 3 || input.ID == "" || strings.TrimSpace(envelope.Answer) == "" ||
+			!reflect.DeepEqual(other, ClarificationRequest{}) {
+			return nil, fmt.Errorf("taxion: clarification answer requires protocol 3 and only the carried question ID and answer")
+		}
+		return c.answerRoleClarification(ctx, binding, sessionID, input.ID, envelope.Answer)
+	}
 	if envelope.Action == "read" {
 		other := input
 		other.ID = ""
