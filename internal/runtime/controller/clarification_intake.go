@@ -126,6 +126,7 @@ func (c *Controller) answerRoleClarification(ctx context.Context, binding runtim
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var result Clarification
+	var answerConflict error
 	err := c.store.UpdateWorkspace(func(state *store.Workspace) error {
 		observed, err := c.roleClarificationContext(ctx, *state, binding, sessionID)
 		if err != nil {
@@ -191,13 +192,16 @@ func (c *Controller) answerRoleClarification(ctx context.Context, binding runtim
 			operation.State != "RUNNING" || operation.Phase != "EXECUTION" {
 			return fmt.Errorf("taxion: clarification answer requires the current execution owner")
 		}
-		result, _, err = answerClarification(state, id, ClarificationAnswer{
+		result, answerConflict, err = answerClarification(state, id, ClarificationAnswer{
 			Role: "CODER", Actor: operation.Owner, Source: "dispatch:" + dispatch.ID, Text: answer,
 		})
 		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	if answerConflict != nil {
+		return nil, answerConflict
 	}
 	return json.Marshal(struct {
 		ID             string `json:"id"`
