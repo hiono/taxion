@@ -513,6 +513,11 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 				if supplement != nil {
 					task.Decisions = append(task.Decisions, *supplement)
 				}
+				clarificationDecisions, err := reviewerClarificationDecisions(*state, flow, last)
+				if err != nil {
+					return err
+				}
+				task.Decisions = append(task.Decisions, clarificationDecisions...)
 				task.DeferredReason, task.ResumeCondition = "", ""
 				if err := state.Graph.Track(task, "controller", "preserve findings and acceptance for authorized repair"); err != nil {
 					return err
@@ -650,6 +655,81 @@ func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.Rev
 		}
 	}
 	return nil
+}
+
+// reviewerClarificationDecisions carries unanswered Reviewer questions into the
+// formally issued repair Dispatch. It does not send to a busy session or grant
+// authority; the successor receives the question as read-only source context.
+func reviewerClarificationDecisions(state store.Workspace, flow core.ReviewFlow, reviewer core.GraphDispatch) ([]core.TaskDecision, error) {
+	if reviewer.Recipient != "REVIEWER" || reviewer.Status != core.DispatchSucceeded ||
+		reviewer.Result == nil || reviewer.Result.ReviewVerdict != "REQUEST_CHANGES" {
+		return nil, nil
+	}
+	history, err := clarifications(state)
+	if err != nil {
+		return nil, err
+	}
+	latest := make(map[string]Clarification)
+	for _, saved := range history {
+		if saved.Request.Role == "REVIEWER" && saved.Request.TaskID == flow.TaskID &&
+			saved.Request.DispatchID == reviewer.ID && saved.Route == "ASK" && saved.Recipient == "CODER" {
+			latest[saved.Request.ID] = saved
+		}
+	}
+	ids := make([]string, 0, len(latest))
+	for id := range latest {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	decisions := make([]core.TaskDecision, 0, len(ids))
+	for _, id := range ids {
+		saved := latest[id]
+		if saved.Request.ID == "" {
+			continue
+		}
+		current, err := clarificationContext(state, saved.Request.TaskID, saved.Request.DispatchID)
+		if err != nil || current.ScopeHash != saved.Context.ScopeHash {
+			return nil, fmt.Errorf("taxion: Reviewer clarification %s no longer matches its source scope", id)
+		}
+		if !time.Now().Before(saved.Request.Deadline) {
+			return nil, fmt.Errorf("taxion: Reviewer clarification %s expired before its repair Dispatch", id)
+		}
+		delivery, err := savedClarificationDelivery(state, id)
+		if err != nil || delivery == nil || delivery.Question.RequestID != "clarification:"+id ||
+			delivery.Target == nil || delivery.Target.FlowID != flow.ID {
+			return nil, fmt.Errorf("taxion: Reviewer clarification %s has no verified original Coder delivery", id)
+		}
+		question := struct {
+			Kind           string   `json:"kind"`
+			ID             string   `json:"id"`
+			SourceDispatch string   `json:"sourceDispatch"`
+			Question       string   `json:"question"`
+			Reason         string   `json:"reason"`
+			Uncertainty    string   `json:"uncertainty"`
+			References     []string `json:"references"`
+			AnswerFormat   string   `json:"answerFormat"`
+			DecisionImpact string   `json:"decisionImpact"`
+			StopCondition  string   `json:"stopCondition"`
+			Answer         string   `json:"answer,omitempty"`
+		}{
+			Kind: "taxion.clarification-question.v1", ID: id, SourceDispatch: reviewer.ID,
+			Question: saved.Request.Question, Reason: saved.Request.Reason,
+			Uncertainty: saved.Request.Uncertainty, References: slices.Clone(saved.Request.References),
+			AnswerFormat: saved.Request.AnswerFormat, DecisionImpact: saved.Request.DecisionImpact,
+			StopCondition: saved.Request.StopCondition,
+		}
+		if saved.Answer != nil {
+			question.Answer = saved.Answer.Text
+		}
+		body, err := json.Marshal(question)
+		if err != nil || core.Redact(string(body)) != string(body) {
+			return nil, fmt.Errorf("taxion: Reviewer clarification %s contains invalid or credential-bearing content", id)
+		}
+		decisions = append(decisions, core.TaskDecision{
+			ID: "clarification-question:" + id, Source: "clarification:" + id, Text: string(body),
+		})
+	}
+	return decisions, nil
 }
 
 func flowResultDecision(dispatch core.GraphDispatch) (core.TaskDecision, error) {
