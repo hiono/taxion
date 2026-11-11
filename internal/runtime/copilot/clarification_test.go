@@ -143,10 +143,7 @@ func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing
 		t.Fatal("clarification missing from create/resume registration")
 	}
 	request := controller.ClarificationRequest{
-		ID: "question", Category: "specification", Question: "Which behavior is intended?",
-		Reason: "Two acceptance interpretations", Uncertainty: "behavior", References: []string{"decision:1"},
-		AnswerFormat: "text", DecisionImpact: "Select the implementation", StopCondition: "Do not execute dependent work",
-		Deadline: deadline,
+		ID: "question", Question: "Which behavior is intended?",
 	}
 	body, _ := json.Marshal(request)
 	var arguments map[string]any
@@ -294,7 +291,11 @@ func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing
 	if err != nil || len(history) != 1 || history[0].State != "OBSERVED" || history[0].Answer != nil ||
 		history[0].Request.TaskID != task.ID || history[0].Request.DispatchID != dispatch.ID ||
 		history[0].Request.Role != "CODER" || history[0].Request.Question != request.Question ||
-		history[0].Origin == nil || history[0].Origin.Owner != "owner" || history[0].Origin.SessionID != "session" {
+		history[0].Request.Category != "specification" || history[0].Recipient != "PLANNER" ||
+		history[0].Request.Reason == "" || history[0].Request.Uncertainty == "" ||
+		len(history[0].Request.References) == 0 || history[0].Request.AnswerFormat != "text" ||
+		history[0].Request.DecisionImpact == "" || history[0].Request.StopCondition == "" ||
+		!history[0].Request.Deadline.Equal(deadline) || history[0].Origin == nil || history[0].Origin.Owner != "owner" || history[0].Origin.SessionID != "session" {
 		t.Fatal("canonical origin, original text or observation boundary lost", history, err)
 	}
 	after, err := db.LoadWorkspace()
