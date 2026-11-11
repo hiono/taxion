@@ -340,59 +340,67 @@ func AnswerClarification(db *store.Store, id string, answer ClarificationAnswer)
 	var result Clarification
 	var conflictErr error
 	err := db.UpdateWorkspace(func(state *store.Workspace) error {
-		history, err := clarifications(*state)
-		if err != nil {
-			return err
-		}
-		for _, saved := range history {
-			if saved.Request.ID == id {
-				result = saved
-			}
-		}
-		if result.Version == 0 || result.Route != "ASK" {
-			return fmt.Errorf("taxion: answer requires a saved, routed clarification")
-		}
-		if answer.Receipt != nil || answer.Role != result.Recipient && answer.Role != "HUMAN" ||
-			strings.TrimSpace(answer.Actor) == "" || strings.TrimSpace(answer.Source) == "" ||
-			strings.TrimSpace(answer.Text) == "" {
-			return fmt.Errorf("taxion: answer requires the routed respondent and explicit provenance")
-		}
-		if result.Request.AnswerFormat == "json" && !json.Valid([]byte(answer.Text)) {
-			return fmt.Errorf("taxion: clarification requires a JSON answer")
-		}
-		if result.Answer != nil {
-			old := *result.Answer
-			old.At, answer.At = time.Time{}, time.Time{}
-			if old.Receipt != nil || old.Role != answer.Role || old.Actor != answer.Actor ||
-				old.Source != answer.Source || old.Text != answer.Text {
-				conflictErr = fmt.Errorf("taxion: conflicting answer retained as OBSERVED; resolution and revalidation are required")
-				for _, saved := range history {
-					prior := saved.Conflict
-					if saved.Request.ID == id && prior != nil && prior.Role == answer.Role && prior.Actor == answer.Actor &&
-						prior.Source == answer.Source && prior.Text == answer.Text {
-						if result.Resolution != nil {
-							conflictErr = nil
-						}
-						return nil
-					}
-				}
-				answer.At = time.Now().UTC()
-				result.Phase, result.Conflict, result.Resolution = "clarification.conflict", &answer, nil
-				return appendClarification(state, result)
-			}
-			if result.Conflict != nil && result.Resolution == nil {
-				conflictErr = fmt.Errorf("taxion: earlier conflicting answer remains unresolved")
-			}
-			return nil
-		}
-		answer.At = time.Now().UTC()
-		result.Phase, result.Answer = "clarification.answer", &answer
-		return appendClarification(state, result)
+		var err error
+		result, conflictErr, err = answerClarification(state, id, answer)
+		return err
 	})
 	if err != nil {
 		return result, err
 	}
 	return result, conflictErr
+}
+
+func answerClarification(state *store.Workspace, id string, answer ClarificationAnswer) (Clarification, error, error) {
+	var result Clarification
+	var conflictErr error
+	history, err := clarifications(*state)
+	if err != nil {
+		return result, nil, err
+	}
+	for _, saved := range history {
+		if saved.Request.ID == id {
+			result = saved
+		}
+	}
+	if result.Version == 0 || result.Route != "ASK" {
+		return result, nil, fmt.Errorf("taxion: answer requires a saved, routed clarification")
+	}
+	if answer.Receipt != nil || answer.Role != result.Recipient && answer.Role != "HUMAN" ||
+		strings.TrimSpace(answer.Actor) == "" || strings.TrimSpace(answer.Source) == "" ||
+		strings.TrimSpace(answer.Text) == "" {
+		return result, nil, fmt.Errorf("taxion: answer requires the routed respondent and explicit provenance")
+	}
+	if result.Request.AnswerFormat == "json" && !json.Valid([]byte(answer.Text)) {
+		return result, nil, fmt.Errorf("taxion: clarification requires a JSON answer")
+	}
+	if result.Answer != nil {
+		old := *result.Answer
+		old.At, answer.At = time.Time{}, time.Time{}
+		if old.Receipt != nil || old.Role != answer.Role || old.Actor != answer.Actor ||
+			old.Source != answer.Source || old.Text != answer.Text {
+			conflictErr = fmt.Errorf("taxion: conflicting answer retained as OBSERVED; resolution and revalidation are required")
+			for _, saved := range history {
+				prior := saved.Conflict
+				if saved.Request.ID == id && prior != nil && prior.Role == answer.Role && prior.Actor == answer.Actor &&
+					prior.Source == answer.Source && prior.Text == answer.Text {
+					if result.Resolution != nil {
+						conflictErr = nil
+					}
+					return result, conflictErr, nil
+				}
+			}
+			answer.At = time.Now().UTC()
+			result.Phase, result.Conflict, result.Resolution = "clarification.conflict", &answer, nil
+			return result, conflictErr, appendClarification(state, result)
+		}
+		if result.Conflict != nil && result.Resolution == nil {
+			conflictErr = fmt.Errorf("taxion: earlier conflicting answer remains unresolved")
+		}
+		return result, conflictErr, nil
+	}
+	answer.At = time.Now().UTC()
+	result.Phase, result.Answer = "clarification.answer", &answer
+	return result, nil, appendClarification(state, result)
 }
 
 func ClarificationHistory(db *store.Store) ([]Clarification, error) {
