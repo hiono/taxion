@@ -377,6 +377,34 @@ func TestSuccessorCoderCanAnswerOnlyItsCarriedReviewerQuestion(t *testing.T) {
 		!strings.Contains(answered.Answer.Text, "existing API contract") {
 		t.Fatal("successor Coder answer was not bound to its Dispatch", answered)
 	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow, ok := state.Graph.ReviewFlow(binding.FlowID)
+	if !ok {
+		t.Fatal("original Review Flow is missing")
+	}
+	coder, ok := state.Graph.GraphDispatch(binding.DispatchID)
+	if !ok {
+		t.Fatal("successor Coder Dispatch is missing")
+	}
+	coder.Status = core.DispatchSucceeded
+	coder.Result = &core.DispatchResult{}
+	decisions, err := clarificationAnswerDecisions(state, flow, coder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundAnswer := false
+	for _, decision := range decisions {
+		if decision.ID == "clarification-answer:"+id {
+			foundAnswer = strings.Contains(decision.Text, "existing API contract") &&
+				strings.Contains(decision.Text, binding.DispatchID)
+		}
+	}
+	if !foundAnswer {
+		t.Fatal("Coder answer was not projected into the next Reviewer evidence")
+	}
 }
 
 func TestSuccessorCoderCannotAnswerUncarriedReviewerQuestion(t *testing.T) {
