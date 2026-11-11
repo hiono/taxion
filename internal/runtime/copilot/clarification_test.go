@@ -454,7 +454,7 @@ func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing
 		selected.Resolution.Selected != disputed.Candidates[1].Receipt || selected.Candidates[0].Answer.Text != answer.Text {
 		t.Fatal("selection overwrote the original evidence or granted authority", selected)
 	}
-	foreign := request
+	foreign := history[0].Request
 	foreign.ID, foreign.Uncertainty = "foreign", "a different uncertainty"
 	observedForeign, err := controller.ObserveClarification(db, task.ID, dispatch.ID)
 	if err != nil {

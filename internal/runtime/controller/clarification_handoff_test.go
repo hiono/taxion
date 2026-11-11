@@ -336,10 +336,21 @@ func TestClarificationSuccessorStoppedBeforeReceive(t *testing.T) {
 	}
 }
 
-
 func TestSuccessorCoderCanAnswerOnlyItsCarriedReviewerQuestion(t *testing.T) {
 	db, control, binding, id, _ := clarificationSuccessorFixture(t)
 	binding.ProtocolVersion = 3
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := clarifications(before)
+	if err != nil || len(saved) != 1 {
+		t.Fatal(saved, err)
+	}
+	successor, ok := before.Graph.GraphDispatch(binding.DispatchID)
+	if !ok || saved[0].Request.TaskID == successor.TaskID {
+		t.Fatal("fixture must use distinct Reviewer and Coder Tasks")
+	}
 	body, err := json.Marshal(map[string]string{
 		"action": "answer", "id": id, "answer": "The evidence confirms the requested behavior; retain the existing API contract.",
 	})
@@ -408,10 +419,95 @@ func TestSuccessorCoderCanAnswerOnlyItsCarriedReviewerQuestion(t *testing.T) {
 }
 
 func TestSuccessorCoderCannotAnswerUncarriedReviewerQuestion(t *testing.T) {
-	db, control, binding, _, _ := clarificationSuccessorFixture(t)
+	_, control, binding, _, _ := clarificationSuccessorFixture(t)
 	binding.ProtocolVersion = 3
 	body := json.RawMessage(`{"action":"answer","id":"unrelated-question","answer":"answer"}`)
 	if _, err := control.ObserveRoleClarification(t.Context(), binding, "successor-session", body); err == nil {
 		t.Fatal("successor Coder answered a question not carried by its Dispatch")
+	}
+}
+
+func TestSuccessorCoderRejectsInvalidReviewerBindings(t *testing.T) {
+	for _, kind := range []string{
+		"other-flow", "source-outside-flow", "unrelated-coder", "non-immediate-successor",
+		"non-reviewer-source", "wrong-source-task", "uncarried-question",
+	} {
+		t.Run(kind, func(t *testing.T) {
+			db, control, binding, id, _ := clarificationSuccessorFixture(t)
+			binding.ProtocolVersion = 3
+			err := db.UpdateWorkspace(func(state *store.Workspace) error {
+				history, err := clarifications(*state)
+				if err != nil || len(history) != 1 {
+					return fmt.Errorf("unexpected question history: %v", err)
+				}
+				sourceID := history[0].Request.DispatchID
+				for i := range state.Graph.Dispatches {
+					dispatch := &state.Graph.Dispatches[i]
+					if dispatch.ID == sourceID {
+						switch kind {
+						case "non-reviewer-source":
+							dispatch.Recipient = "CODER"
+						case "wrong-source-task":
+							dispatch.TaskID = state.Records.Operation.TaskID
+						}
+					}
+					if dispatch.ID == binding.DispatchID {
+						switch kind {
+						case "unrelated-coder":
+							dispatch.RelatedID = "unrelated-coder"
+						case "uncarried-question":
+							var decisions []core.TaskDecision
+							for _, decision := range dispatch.Instruction.Decisions {
+								if decision.ID != "clarification-question:"+id {
+									decisions = append(decisions, decision)
+								}
+							}
+							dispatch.Instruction.Decisions = decisions
+						}
+					}
+				}
+				for i := range state.Graph.ReviewFlows {
+					flow := &state.Graph.ReviewFlows[i]
+					if flow.ID != binding.FlowID {
+						continue
+					}
+					switch kind {
+					case "source-outside-flow":
+						var ids []string
+						for _, dispatchID := range flow.DispatchIDs {
+							if dispatchID != sourceID {
+								ids = append(ids, dispatchID)
+							}
+						}
+						flow.DispatchIDs = ids
+					case "non-immediate-successor":
+						flow.DispatchIDs[0], flow.DispatchIDs[1] = flow.DispatchIDs[1], flow.DispatchIDs[0]
+					}
+				}
+				return nil
+			})
+			if err != nil && !strings.HasPrefix(err.Error(), "task graph rejected:") {
+				t.Fatal(err)
+			}
+			if err == nil {
+				if kind == "other-flow" {
+					binding.FlowID = "other-flow"
+				}
+				body := json.RawMessage(fmt.Sprintf(`{"action":"answer","id":%q,"answer":"answer"}`, id))
+				if _, err := control.ObserveRoleClarification(t.Context(), binding, "successor-session", body); err == nil {
+					t.Fatal("invalid Reviewer-to-Coder binding accepted")
+				}
+			} else {
+				t.Logf("invalid binding rejected before Role admission: %v", err)
+			}
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			history, err := clarifications(state)
+			if err != nil || len(history) != 1 || history[0].Answer != nil {
+				t.Fatal("rejected answer changed saved evidence", history, err)
+			}
+		})
 	}
 }

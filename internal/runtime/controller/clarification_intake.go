@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -151,11 +152,11 @@ func (c *Controller) answerRoleClarification(ctx context.Context, binding runtim
 			}
 		}
 		if result.Version == 0 || result.Request.Role != "REVIEWER" ||
-			result.Request.TaskID != dispatch.TaskID || result.Route != "ASK" || result.Recipient != "CODER" {
+			result.Route != "ASK" || result.Recipient != "CODER" {
 			return fmt.Errorf("taxion: answer requires a saved Reviewer question addressed to Coder")
 		}
 		source, ok := state.Graph.GraphDispatch(result.Request.DispatchID)
-		if !ok || source.Recipient != "REVIEWER" {
+		if !ok || source.Recipient != "REVIEWER" || result.Request.TaskID != source.TaskID {
 			return fmt.Errorf("taxion: original Reviewer Dispatch is unavailable")
 		}
 		carried, err := reviewerClarificationDecisions(*state, flow, source)

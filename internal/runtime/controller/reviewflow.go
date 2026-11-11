@@ -662,6 +662,7 @@ func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.Rev
 // authority; the successor receives the question as read-only source context.
 func reviewerClarificationDecisions(state store.Workspace, flow core.ReviewFlow, reviewer core.GraphDispatch) ([]core.TaskDecision, error) {
 	if reviewer.Recipient != "REVIEWER" || reviewer.Status != core.DispatchSucceeded ||
+		reviewer.Relationship != core.RelationshipIndependent || !slices.Contains(flow.DispatchIDs, reviewer.ID) ||
 		reviewer.Result == nil || reviewer.Result.ReviewVerdict != "REQUEST_CHANGES" {
 		return nil, nil
 	}
@@ -671,7 +672,7 @@ func reviewerClarificationDecisions(state store.Workspace, flow core.ReviewFlow,
 	}
 	latest := make(map[string]Clarification)
 	for _, saved := range history {
-		if saved.Request.Role == "REVIEWER" && saved.Request.TaskID == flow.TaskID &&
+		if saved.Request.Role == "REVIEWER" && saved.Request.TaskID == reviewer.TaskID &&
 			saved.Request.DispatchID == reviewer.ID && saved.Route == "ASK" && saved.Recipient == "CODER" {
 			latest[saved.Request.ID] = saved
 		}
@@ -769,7 +770,8 @@ func legacyFlowResultDecision(dispatch core.GraphDispatch) (core.TaskDecision, e
 // clarificationAnswerDecisions returns only answers authored by the exact
 // immediate Coder successor that is now being independently reviewed.
 func clarificationAnswerDecisions(state store.Workspace, flow core.ReviewFlow, coder core.GraphDispatch) ([]core.TaskDecision, error) {
-	if coder.Recipient != "CODER" || coder.Status != core.DispatchSucceeded || coder.Result == nil {
+	if coder.Recipient != "CODER" || coder.Status != core.DispatchSucceeded || coder.Result == nil ||
+		coder.TaskID != flow.TaskID || coder.Relationship != core.RelationshipAmends {
 		return nil, nil
 	}
 	history, err := clarifications(state)
@@ -778,8 +780,7 @@ func clarificationAnswerDecisions(state store.Workspace, flow core.ReviewFlow, c
 	}
 	latest := make(map[string]Clarification)
 	for _, saved := range history {
-		if saved.Request.Role == "REVIEWER" && saved.Request.TaskID == flow.TaskID &&
-			saved.Route == "ASK" && saved.Recipient == "CODER" {
+		if saved.Request.Role == "REVIEWER" && saved.Route == "ASK" && saved.Recipient == "CODER" {
 			latest[saved.Request.ID] = saved
 		}
 	}
@@ -797,7 +798,8 @@ func clarificationAnswerDecisions(state store.Workspace, flow core.ReviewFlow, c
 		}
 		source, ok := state.Graph.GraphDispatch(saved.Request.DispatchID)
 		delivery, deliveryErr := savedClarificationDelivery(state, id)
-		if !ok || source.Recipient != "REVIEWER" || source.Status != core.DispatchSucceeded ||
+		if !ok || saved.Request.TaskID != source.TaskID || source.Recipient != "REVIEWER" ||
+			source.Relationship != core.RelationshipIndependent || source.Status != core.DispatchSucceeded ||
 			source.Result == nil || source.Result.ReviewVerdict != "REQUEST_CHANGES" ||
 			deliveryErr != nil || delivery == nil || delivery.Target == nil ||
 			delivery.Target.FlowID != flow.ID || delivery.Target.DispatchID != source.RelatedID ||
@@ -810,14 +812,14 @@ func clarificationAnswerDecisions(state store.Workspace, flow core.ReviewFlow, c
 			return nil, fmt.Errorf("taxion: Coder clarification answer %s no longer matches its Reviewer source scope", id)
 		}
 		body, err := json.Marshal(struct {
-			Kind           string    `json:"kind"`
-			ID             string    `json:"id"`
-			Reviewer       string    `json:"reviewerDispatch"`
-			Coder          string    `json:"coderDispatch"`
-			Question       string    `json:"question"`
-			Answer         string    `json:"answer"`
-			Actor          string    `json:"actor"`
-			AnsweredAt     time.Time `json:"answeredAt"`
+			Kind       string    `json:"kind"`
+			ID         string    `json:"id"`
+			Reviewer   string    `json:"reviewerDispatch"`
+			Coder      string    `json:"coderDispatch"`
+			Question   string    `json:"question"`
+			Answer     string    `json:"answer"`
+			Actor      string    `json:"actor"`
+			AnsweredAt time.Time `json:"answeredAt"`
 		}{
 			Kind: "taxion.clarification-answer.v1", ID: id, Reviewer: source.ID, Coder: coder.ID,
 			Question: saved.Request.Question, Answer: saved.Answer.Text,
