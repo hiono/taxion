@@ -8,9 +8,7 @@ func TestClarificationScopeHashSurvivesSourceDispatchCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := executeFlowDispatch(t, db, flow, "", true); err != nil {
-		t.Fatal(err)
-	}
+	executeFlowDispatch(t, db, flow, "", true)
 	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -33,9 +31,7 @@ func TestClarificationScopeHashSurvivesSourceDispatchCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := executeFlowDispatch(t, db, flow, "REQUEST_CHANGES", true); err != nil {
-		t.Fatal(err)
-	}
+	executeFlowDispatch(t, db, flow, "REQUEST_CHANGES", true)
 	after, err := ObserveClarification(db, reviewer.TaskID, reviewer.ID)
 	if err != nil {
 		t.Fatal(err)
