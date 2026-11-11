@@ -121,17 +121,13 @@ func clarificationContext(state store.Workspace, taskID, dispatchID string) (Cla
 			return context, err
 		}
 	}
-	configuration, instruction, result := "", "", ""
+	configuration, instruction := "", ""
 	if context.Dispatch != nil {
 		configuration, err = core.CanonicalSHA256(context.Dispatch.Configuration)
 		if err != nil {
 			return context, err
 		}
 		instruction = context.Dispatch.InstructionHash
-		result, err = core.CanonicalSHA256(context.Dispatch.Result)
-		if err != nil {
-			return context, err
-		}
 	} else {
 		configuration, err = core.CanonicalSHA256(nil)
 		if err != nil {
@@ -153,11 +149,11 @@ func clarificationContext(state store.Workspace, taskID, dispatchID string) (Cla
 		Issue, ChangeRef                                                            string
 		Dependencies                                                                []core.TaskDependency
 		Dimensions                                                                  core.ApprovalDimensions
-		DispatchID, InstructionHash, ResultHash, DocumentsHash                      string
-		FlowID                                                                      string
-		Deadline                                                                    time.Time
+		DispatchID, InstructionHash, DocumentsHash string
+		FlowID                                     string
+		Deadline                                  time.Time
 	}{task.ID, task.Repo, task.Type, task.Objective, task.ParentID, task.Supersedes, task.CreatedFrom, task.TargetSHA, task.Issue, task.ChangeRef,
-		task.DependsOn, dimensions, dispatchID, instruction, result, core.ContextDocumentsHash(documents), flowID, deadline})
+		task.DependsOn, dimensions, dispatchID, instruction, core.ContextDocumentsHash(documents), flowID, deadline})
 	if err != nil {
 		return context, err
 	}
