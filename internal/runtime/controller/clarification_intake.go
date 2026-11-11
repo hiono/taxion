@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -50,7 +51,45 @@ func (c *Controller) ObserveRoleClarification(ctx context.Context, binding runti
 		}
 		operation := state.Records.Operation
 		input.TaskID, input.DispatchID, input.Role, input.BasisHash = dispatch.TaskID, dispatch.ID, dispatch.Recipient, observed.Hash
-		if input.Deadline.After(operation.Deadline) {
+		if input.ID == "" {
+			input.ID = "clarification-" + rand.Text()
+		}
+		if input.Category == "" {
+			switch dispatch.Recipient {
+			case "REVIEWER":
+				input.Category = "implementation"
+			case "CODER":
+				input.Category = "specification"
+				if input.SpecificationOwnerRole == "" {
+					input.SpecificationOwnerRole = "PLANNER"
+				}
+			default:
+				return fmt.Errorf("taxion: unsupported clarification sender role")
+			}
+		}
+		if input.Reason == "" {
+			input.Reason = "The current Role cannot resolve this question from its bound Task and Dispatch context."
+		}
+		if input.Uncertainty == "" {
+			input.Uncertainty = "The required information is not established by the current execution context."
+		}
+		if len(input.References) == 0 {
+			for _, document := range observed.Documents {
+				if document.ID != "" {
+					input.References = append(input.References, document.ID)
+				}
+			}
+		}
+		if input.AnswerFormat == "" {
+			input.AnswerFormat = "text"
+		}
+		if input.DecisionImpact == "" {
+			input.DecisionImpact = "The answer may affect the current implementation or review decision within the saved scope."
+		}
+		if input.StopCondition == "" {
+			input.StopCondition = "Do not proceed with work that depends on this answer until it has been assessed."
+		}
+		if input.Deadline.IsZero() || input.Deadline.After(operation.Deadline) {
 			input.Deadline = operation.Deadline
 		}
 		result, err = requestClarification(state, input, &ClarificationOrigin{
