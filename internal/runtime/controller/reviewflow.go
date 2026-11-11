@@ -710,16 +710,12 @@ func reviewerClarificationDecisions(state store.Workspace, flow core.ReviewFlow,
 			AnswerFormat   string   `json:"answerFormat"`
 			DecisionImpact string   `json:"decisionImpact"`
 			StopCondition  string   `json:"stopCondition"`
-			Answer         string   `json:"answer,omitempty"`
 		}{
 			Kind: "taxion.clarification-question.v1", ID: id, SourceDispatch: reviewer.ID,
 			Question: saved.Request.Question, Reason: saved.Request.Reason,
 			Uncertainty: saved.Request.Uncertainty, References: slices.Clone(saved.Request.References),
 			AnswerFormat: saved.Request.AnswerFormat, DecisionImpact: saved.Request.DecisionImpact,
 			StopCondition: saved.Request.StopCondition,
-		}
-		if saved.Answer != nil {
-			question.Answer = saved.Answer.Text
 		}
 		body, err := json.Marshal(question)
 		if err != nil || core.Redact(string(body)) != string(body) {
@@ -768,6 +764,73 @@ func legacyFlowResultDecision(dispatch core.GraphDispatch) (core.TaskDecision, e
 		return core.TaskDecision{}, fmt.Errorf("taxion: encode flow result provenance: %w", err)
 	}
 	return core.TaskDecision{ID: "result:" + dispatch.ID, Source: "dispatch:" + dispatch.ID, Text: string(value)}, nil
+}
+
+// clarificationAnswerDecisions returns only answers authored by the exact
+// immediate Coder successor that is now being independently reviewed.
+func clarificationAnswerDecisions(state store.Workspace, flow core.ReviewFlow, coder core.GraphDispatch) ([]core.TaskDecision, error) {
+	if coder.Recipient != "CODER" || coder.Status != core.DispatchSucceeded || coder.Result == nil {
+		return nil, nil
+	}
+	history, err := clarifications(state)
+	if err != nil {
+		return nil, err
+	}
+	latest := make(map[string]Clarification)
+	for _, saved := range history {
+		if saved.Request.Role == "REVIEWER" && saved.Request.TaskID == flow.TaskID &&
+			saved.Route == "ASK" && saved.Recipient == "CODER" {
+			latest[saved.Request.ID] = saved
+		}
+	}
+	ids := make([]string, 0, len(latest))
+	for id := range latest {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	coderIndex := slices.Index(flow.DispatchIDs, coder.ID)
+	decisions := make([]core.TaskDecision, 0, len(ids))
+	for _, id := range ids {
+		saved := latest[id]
+		if saved.Answer == nil || saved.Answer.Role != "CODER" || saved.Answer.Source != "dispatch:"+coder.ID {
+			continue
+		}
+		source, ok := state.Graph.GraphDispatch(saved.Request.DispatchID)
+		delivery, deliveryErr := savedClarificationDelivery(state, id)
+		if !ok || source.Recipient != "REVIEWER" || source.Status != core.DispatchSucceeded ||
+			source.Result == nil || source.Result.ReviewVerdict != "REQUEST_CHANGES" ||
+			deliveryErr != nil || delivery == nil || delivery.Target == nil ||
+			delivery.Target.FlowID != flow.ID || delivery.Target.DispatchID != source.RelatedID ||
+			coder.RelatedID != delivery.Target.DispatchID ||
+			coderIndex < 1 || slices.Index(flow.DispatchIDs, source.ID) != coderIndex-1 {
+			return nil, fmt.Errorf("taxion: Coder clarification answer %s is not bound to the immediate Reviewer successor pair", id)
+		}
+		current, err := clarificationContext(state, saved.Request.TaskID, saved.Request.DispatchID)
+		if err != nil || current.ScopeHash != saved.Context.ScopeHash {
+			return nil, fmt.Errorf("taxion: Coder clarification answer %s no longer matches its Reviewer source scope", id)
+		}
+		body, err := json.Marshal(struct {
+			Kind           string    `json:"kind"`
+			ID             string    `json:"id"`
+			Reviewer       string    `json:"reviewerDispatch"`
+			Coder          string    `json:"coderDispatch"`
+			Question       string    `json:"question"`
+			Answer         string    `json:"answer"`
+			Actor          string    `json:"actor"`
+			AnsweredAt     time.Time `json:"answeredAt"`
+		}{
+			Kind: "taxion.clarification-answer.v1", ID: id, Reviewer: source.ID, Coder: coder.ID,
+			Question: saved.Request.Question, Answer: saved.Answer.Text,
+			Actor: saved.Answer.Actor, AnsweredAt: saved.Answer.At,
+		})
+		if err != nil || core.Redact(string(body)) != string(body) {
+			return nil, fmt.Errorf("taxion: Coder clarification answer %s contains invalid or credential-bearing content", id)
+		}
+		decisions = append(decisions, core.TaskDecision{
+			ID: "clarification-answer:" + id, Source: "clarification:" + id, Text: string(body),
+		})
+	}
+	return decisions, nil
 }
 
 func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.ReviewFlow,
@@ -820,6 +883,11 @@ func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.Rev
 			ID: "coder-review-target:" + coder.ID, Source: target.Source, Text: string(content),
 		})
 	}
+	clarificationAnswers, err := clarificationAnswerDecisions(*state, *flow, coder)
+	if err != nil {
+		return err
+	}
+	review.Decisions = append(review.Decisions, clarificationAnswers...)
 	if flow.SourceDispatchID == coder.ID {
 		for _, predecessor := range state.Graph.ReviewFlows {
 			if "flow:"+predecessor.ID != flow.Contract.CreatedFrom {
