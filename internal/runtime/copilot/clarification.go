@@ -20,7 +20,7 @@ func (a *Adapter) clarificationTools() []sdk.Tool {
 		Description: "Record a clarification from this running Role with its saved Task, Dispatch, session and owner. " +
 			"Ask in natural language. Only the question is required; provide category or other context when it materially helps routing. " +
 			"The host derives Task, Dispatch, session, owner, source references and deadline from the bound execution. " +
-			"Questions are observations only. Use action=answer with only id and answer to answer a Reviewer question explicitly carried by this successor Coder Dispatch. The host verifies the original Reviewer, Flow and Dispatch. An answer is not approval or permission to expand scope. " +
+			"Question requests are observations only. Use action=answer with only id and answer to answer a Reviewer question explicitly carried by this successor Coder Dispatch. The host verifies the original Reviewer, Flow and Dispatch. An answer is not approval or permission to expand scope. " +
 			"Do not proceed with work depending on an unanswered question. Return real blockers in the existing result contract.",
 		Parameters: map[string]any{
 			"type": "object", "additionalProperties": false,
@@ -44,7 +44,7 @@ func (a *Adapter) clarificationTools() []sdk.Tool {
 		tools[0].Description += " Use action=read with only id to read saved answers to your own question during this execution; " +
 			"do not repeat the question or poll while waiting. Consult the canonical candidates, sources, conflicts and decision before revising your plan. " +
 			"An accept verdict means input eligibility, not acceptance, approval or permission to resume dependent work. " +
-			"This cannot receive questions addressed to another Role and does not enable the disabled Coder inbox."
+			"Answers are accepted only for questions explicitly carried by this successor Coder Dispatch; this does not enable the disabled Coder inbox."
 		tools[0].Parameters["properties"].(map[string]any)["action"] = map[string]any{
 			"type": "string", "enum": []string{"request", "read", "answer"},
 		}
