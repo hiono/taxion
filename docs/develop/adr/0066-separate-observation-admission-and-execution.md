@@ -213,3 +213,25 @@ PR #252 の統合では、独立レビューと正確な候補の CI を確認�
 開発側が外部台帳を直接検査したとの主張はしない。
 旧契約の文書整合条件不足による品質ゲート未達と過去の失敗は保持する。
 受入れ条件との対応と確認範囲は[確認記録](../artifact-review-validation.md#正式版への受入れ照合)を参照する。
+
+## 2026-11-11 追補：自然言語 Clarification の入力と Role 間配送境界
+
+### 入力契約
+
+Role が Clarification を記録する際のモデル入力は自然言語の質問を最小必須項目とする。ID、分類、理由、不確実性、参照資料、回答形式、判断への影響、停止条件、期限は、Role が明示できる場合に任意情報として受け取る。省略時は、Controller が現在の bound Task / Dispatch / session / operation と保存済み Context から導出する。導出できない必須の安全・権限情報を推測して補完してはならない。
+
+Controller が導出した値は、モデルの申告と区別できるよう保存し、元の質問・実行 identity・scope hash に結び付ける。質問本文は自然言語のまま保持する。質問を記録したことは回答の受理、実行許可、承認、HOLD 解除を意味しない。
+
+### Role 間配送
+
+SDK の AgentID が root / child の呼出元を区別できない場合、空値を root の証明として扱わない。現在の Copilot inbox はこの理由で無効化を維持する。既存の保存済み配送 receipt、対象 Dispatch、session、operation owner、runner、scope、期限の照合を省略して inbox を再有効化してはならない。
+
+busy session への直接 Send も行わない。Role 間の質問は、実行中の Role の結果・Controller が保存した Job 状態・既存の後続 Dispatch / Recovery 経路で引き継ぐ。Reviewer から Coder への質問は、Reviewer の判断と質問を保存し、対象と承認範囲を維持した Coder の後続作業へ接続する。後続 Dispatch が未発行であれば、受信したかのように記録しない。
+
+### 状態と受入れ
+
+OBSERVED は質問・回答候補の保存を示す。ACCEPTED は既存の証拠・契約との適合を示す。AUTHORIZED は承認済み範囲に対する実行許可を示す。DISPATCHED は後続担当への正式な発行を示す。これらを一つの成功状態へ統合しない。
+
+回答後は、対象 Job、Dispatch、scope、session、operation owner、runner、予算、期限、承認条件を既存 Controller で再検証する。同一 Job の再開が成立するまで、質問への回答だけで実行を再開したと報告しない。新しい証拠との矛盾、対象変更、権限不足、期限・予算超過は既存の停止・承認経路で扱う。
+
+本追補の自然言語入力簡素化はコード上の入力契約に適用する。Role 間の安全な配送、回答後の Recovery 接続、実モデル E2E は別の実装・受入れ事項として #283 / #284 / #90 で追跡する。SDK inbox の無効化を仕様変更だけで解除しない。
