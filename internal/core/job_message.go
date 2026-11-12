@@ -69,6 +69,11 @@ func (g TaskGraph) validateJobMessages() error {
 			message.At.IsZero() {
 			return graphError("invalid Job collaboration message %q", message.ID)
 		}
+		if message.FromRole == "CODER" || message.FromRole == "REVIEWER" {
+			if message.SourceDispatchID == "" {
+				return graphError("Coder and Reviewer Job messages require a source Dispatch")
+			}
+		}
 		if message.SourceDispatchID != "" {
 			dispatch, ok := dispatches[message.SourceDispatchID]
 			if !ok || dispatch.TaskID != message.TaskID || dispatch.Recipient != message.FromRole {
