@@ -64,13 +64,13 @@ jobs:
       - run: python scripts/mise_smoke.py
         env:
           GITHUB_TOKEN: ${{ github.token }}
-  native-smoke-macos:
+  native-smoke-macos-apple-silicon:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: archives
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15-intel, macos-15]
+        runner: [macos-15]
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
