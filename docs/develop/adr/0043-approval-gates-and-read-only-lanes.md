@@ -193,3 +193,17 @@ budget audit は Dispatch 発行、session 開始、usage 観測、budget stop�
 - legacy Task を一括で bundle-required に変換する: 未承認の変更を承認済みと誤認する危険がある。
 - lane をモデル session 内で実行する: 実行前の確認に課金と非決定性を持ち込むため採用しない。
 - gate report を既定の人間出力に混ぜる: 既存 CLI の出力契約を変えるため、機械可読 mode を明示 opt-in とする。
+
+## 2026-11-11 追補：Role間の自然言語ハンドオフと承認境界
+
+Role 間の情報伝達は、承認済みの目的・範囲・権限を変更しない限り、自然言語を基本として扱う。Handoff Packet や内部 receipt の hash は、対象・出所・改変検知・承認根拠の同一性を確認するために使う。これらの検証を、自然言語の説明が固定 schema の全項目を満たすことや、情報が完全に揃っていることの要求へ拡張しない。
+
+Role の質問入力では、実行中の Task・Dispatch・session・operation から Controller が確定できる情報を導出する。質問文以外の reason、uncertainty、references、answer format、decision impact、stop condition、deadline などを、Role が毎回重複して申告することを必須にしない。導出した情報は保存し、元の実行・質問との出所を保持する。
+
+この簡素化は承認を与えない。回答の受領、質問の記録、受信 receipt は ACCEPTED、AUTHORIZED、DISPATCHED、Task の HOLD 解除、品質合格の代替ではない。承認束の完全性、対象・権限・scope・acceptance・予算・期限・security 条件の照合は維持する。
+
+通常の session / command / pending-message / MCP 状態更新だけでは、承認 basis が変化していない限り再承認を要求しない。承認対象、Job identity、実行権限、対象成果物、scope、acceptance、予算・期限・security 条件に実質的な変更がある場合は、既存の drift 判定と change-control を適用する。hash 検証そのものを無効化したり、イベント名だけで安全性を判定したりしない。
+
+Role 間の質問を稼働中の別 session へ無条件に Send してはならない。SDK が root / child 呼出元を区別できない場合、inbox を有効化してはならない。busy session への送信を避け、既存の Job / Flow の継続・後続 Dispatch 経路で受け渡す。配送の HELD / REQUESTED / DELIVERED / ACKNOWLEDGED は、それぞれ保存された配送状態の意味だけを持ち、実際の到達を証拠なしに推定しない。
+
+この追補は Approval Gate を緩和するものではなく、承認の真正性と Role 間の情報伝達に対する過剰な形式制約を分離するものである。実モデルによる Planner → Coder → Reviewer の完走と、同一 Job の質問・回答・再開は #90、#283、#284 の実行証拠で確認する。コード変更や合成テストだけを実モデル連携の成功と扱わない。

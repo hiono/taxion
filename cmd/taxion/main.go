@@ -53,6 +53,7 @@ Setup and discovery:
 
 Requests, planning and Task contracts:
   request             Refine a natural-language request with Planner, then approve coding/review without JSON or prompt files (--repo, --timeout, --max-ai-credits)
+  request recover     Preview or apply hash-bound, nonexecuting reconciliation of one saved Planner answer (--id, --preview or --apply --expected-hash)
   task create         Create a task (--title and --repo required)
   task list           List unarchived tasks ([--repo] filter, [--json], [--include-archived])
   task archive        Remove stopped tasks and associated work from normal views, keeping history (--tasks, --actor, --source, --reason; --dry-run then --expected-hash)
@@ -77,6 +78,7 @@ Conversation, investigation and source attachment:
   conversation watch  Hold handoffs before reading user input; select one role step or bounded run (--flow, --actor, --source)
   conversation ask    Answer a bounded side question from saved Task records without changing the main workflow
   conversation plan   Recommend a next action from compact Memory and results; no execution or inferred approval
+  conversation clarification Observe questions/answers; resolve-coder records HELD; handoff explicitly selects a successor
   conversation intake Record an original request and unapproved scope/acceptance contract (--file JSON)
   conversation proposal Read a saved proposed contract and its exact hash (--task ID)
   conversation confirm Explicitly approve that exact contract/configuration without issuing work (--file JSON)

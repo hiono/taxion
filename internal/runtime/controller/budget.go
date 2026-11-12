@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
@@ -121,17 +120,13 @@ func taskBudgetReport(graph core.TaskGraph, flow core.ReviewFlow, now time.Time)
 				sessions[dispatch.Recipient] = map[string]bool{}
 			}
 			sessions[dispatch.Recipient][dispatch.RuntimeSessionID] = true
-			if len(dispatch.RuntimeUsage) == 0 && !active(dispatch.Status) {
+			summary, err := core.SummarizeUsage(dispatch.RuntimeSessionID, dispatch.RuntimeUsage, dispatch.RuntimeUsageCheckpoints)
+			if err != nil || summary.CreditsStatus != "complete" &&
+				(len(dispatch.RuntimeUsage) != 0 || len(dispatch.RuntimeUsageCheckpoints) != 0 || !active(dispatch.Status)) {
 				report.CreditsStatus = "unknown"
 			}
-			for _, usage := range dispatch.RuntimeUsage {
-				if usage.TotalNanoAIU == nil || math.IsNaN(*usage.TotalNanoAIU) ||
-					math.IsInf(*usage.TotalNanoAIU, 0) || *usage.TotalNanoAIU < 0 ||
-					usage.AICreditsStatus == nil || *usage.AICreditsStatus != "complete" {
-					report.CreditsStatus = "unknown"
-					continue
-				}
-				report.ConsumedNanoAIU += *usage.TotalNanoAIU
+			if summary.NanoAIU != nil {
+				report.ConsumedNanoAIU += *summary.NanoAIU
 			}
 		}
 	}

@@ -16,7 +16,7 @@ const normalReviewerRecoveryHelp = `
 Normal Coder Flow recovery (not artifactSource):
 The latest Reviewer must be ISSUED, unacknowledged, with no execution start,
 session, runtime configuration, usage, result or runtime receipt. The held Flow
-must be STOPPED (SAFETY_STOP/BUDGET_STOP/BUDGET_LIMIT), unclaimed, with its exact
+must be STOPPED, unclaimed, with its exact
 accepted SUCCEEDED Coder and unchanged contract/candidate. Missing records prove
 neither non-delivery nor zero usage. Check real process quiescence separately.
 An absent managed worktree is allowed only if its path is absent; a recorded
@@ -130,6 +130,24 @@ unrecorded preparation, unresolved feedback, unknown required usage or insuffici
 budget/deadline/authorization. Reconcile does not authorize the successor model.
 `
 
+const firstCoderRecoveryHelp = `
+First Coder cancellation-only recovery:
+A stopped, held, unclaimed Flow with its first untouched ISSUED Coder can use
+the same reconciliation JSON, with the Coder dispatchId. Stop codes do not form
+an authorization allowlist; invalid schemas and unsafe state still fail.
+The approved worktree-tree-snapshot input may be baseline-only (empty target
+fields) or an explicit retained snapshot. Preserve the exact input and contract.
+Require human execution-quiescence evidence, unknown-delivery acceptance and
+the exact preview hash. Missing execution/usage records do not prove zero usage.
+Cancellation remains available after the old deadline: it does not resume or
+extend the Flow, issue a model call, or authorize a successor. Preview reports
+inputOrigin=approved-predecessor-input-contract; inputTreeSha may be empty for
+baseline-only input. Apply atomically cancels Dispatch, blocks Task and appends
+an audit, preserving Flow, authorization, ceilings, deadline and unknown usage.
+A successor requires distinct-worktree input verification and a separately
+approved contract, future deadline, budget and execution plan.
+`
+
 func reconcileStoppedDispatchCommand(args []string, output io.Writer) error {
 	fs := flag.NewFlagSet("workflow reconcile-stopped", flag.ContinueOnError)
 	fs.SetOutput(output)
@@ -138,6 +156,7 @@ func reconcileStoppedDispatchCommand(args []string, output io.Writer) error {
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage of workflow reconcile-stopped:")
 		fs.PrintDefaults()
+		fmt.Fprint(fs.Output(), firstCoderRecoveryHelp)
 		fmt.Fprint(fs.Output(), normalReviewerRecoveryHelp)
 	}
 	if err := fs.Parse(args); err != nil {

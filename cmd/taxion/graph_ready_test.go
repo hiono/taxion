@@ -209,8 +209,10 @@ func TestFreshReadyAuthorizationLifecycleAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	gate, err := controller.ContractGateReport(state.Graph, request.Task.ID, configuration)
-	if err != nil || gate.Verdict != controller.GateVerdictPass {
-		t.Fatal("fresh bundle is not usable by start gate", gate, err)
+	if err != nil || gate.Verdict != controller.GateVerdictBlocked ||
+		gate.ADRCompliance == nil || gate.ADRCompliance.Status != "blocked" ||
+		gate.Hashes.Bundle != bundle.BundleHash {
+		t.Fatal("authorization must preserve the bundle without inventing legacy ADR acceptance", gate, err)
 	}
 	resolved, err := resolveConfiguration()
 	if err != nil {

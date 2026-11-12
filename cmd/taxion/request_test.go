@@ -21,6 +21,7 @@ import (
 	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/runtime/controller"
+	"github.com/hiono/taxion/internal/runtime/copilot"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -144,6 +145,29 @@ func (r *requestFixtureRuntime) EventsAfter(context.Context, string, uint64) (<-
 	return r.events, nil
 }
 func (r *requestFixtureRuntime) Send(_ context.Context, _, text string) error { return r.send(text) }
+
+func emitFixturePlannerTurn(worker *requestFixtureRuntime, usage, output string, checkpointOnly ...bool) {
+	go func() {
+		message, turn := worker.id+"-input", worker.id+"-turn"
+		usageEvent := runtime.Event{Type: runtime.EventUsage, Payload: usage}
+		if len(checkpointOnly) != 0 && checkpointOnly[0] {
+			usageEvent = runtime.Event{Type: runtime.EventUsageCheckpoint,
+				Payload: `{"usageTotals":[` + usage + `],"totalNanoAIU":1,"aiCreditsStatus":"complete","watermarks":{"` + worker.id + `":1}}`}
+		}
+		for index, event := range []runtime.Event{
+			{Type: runtime.EventInput, MessageID: message},
+			{Type: runtime.EventTurnStarted, TurnID: turn},
+			usageEvent,
+			{Type: runtime.EventOutput, Payload: output, MessageID: message, TurnID: turn},
+			{Type: runtime.EventTurnEnded, TurnID: turn},
+			{Type: runtime.EventTurnFinished},
+		} {
+			event.Sequence = uint64(index + 1)
+			worker.events <- event
+		}
+		close(worker.events)
+	}()
+}
 
 func requestFixture(t *testing.T) (string, []string) {
 	t.Helper()
@@ -269,9 +293,8 @@ func fixturePlan(t *testing.T, answer controller.QuestionAnswer, accountOnly ...
 				!strings.HasPrefix(request.Request, "request-digest:sha256:") || len(conversation.Messages) == 0 {
 				t.Fatal("Planner lacks its transient turn or the saved request digest")
 			}
-			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`}
-			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
-			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
+			emitFixturePlannerTurn(worker, `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`,
+				string(body), len(accountOnly) > 1 && accountOnly[1])
 			return nil
 		}
 		if len(accountOnly) != 0 && accountOnly[0] {
@@ -289,6 +312,10 @@ func TestRequestRefinesHumanIntentAndRunsSameTreeReviewWithoutCopyPaste(t *testi
 
 func TestRequestResumesApprovedFlowWithoutRepeatingCoder(t *testing.T) {
 	testApprovedRequest(t, true)
+}
+
+func TestRequestClarificationOptInReachesOwnedRoleFactoryAndResume(t *testing.T) {
+	testApprovedRequest(t, true, "clarification")
 }
 
 func TestRequestAccountQuotaOmitsNativeCeilingAndResumes(t *testing.T) {
@@ -383,6 +410,10 @@ func testApprovedRequest(t *testing.T, resume bool, externalMode ...string) {
 	root, args := requestFixture(t)
 	accountOnly := len(externalMode) != 0 && externalMode[0] == "account"
 	providerOnly := len(externalMode) != 0 && externalMode[0] == "provider"
+	clarification := len(externalMode) != 0 && externalMode[0] == "clarification"
+	if clarification {
+		args = append(args, "--clarification-intake")
+	}
 	if accountOnly || providerOnly {
 		var defaults []string
 		for index := 0; index < len(args); index++ {
@@ -435,6 +466,9 @@ func testApprovedRequest(t *testing.T, resume bool, externalMode ...string) {
 		if !strings.Contains(strings.Join(runArgs, " "), "--builtin-prompts") {
 			t.Fatal("request required user-created role prompts")
 		}
+		if slices.Contains(runArgs, "--clarification-intake") != clarification {
+			t.Fatal("request or resume lost the explicit clarification choice", runArgs)
+		}
 		db, _, err := loadWorkspace()
 		if err != nil {
 			return err
@@ -462,6 +496,56 @@ func testApprovedRequest(t *testing.T, resume bool, externalMode ...string) {
 			dispatch, err = selectDispatchConfiguration(db, dispatch)
 			if err != nil {
 				return nil, err
+			}
+			if clarification {
+				cfg := copilot.Config{
+					Role: dispatch.Recipient, SystemPrompt: "approved role", CLIPath: "/bin/true",
+					WorkingDirectory: dispatch.Instruction.Worktree, BaseDirectory: t.TempDir(),
+					EnableClarification: true,
+				}
+				bound, err := newDispatchWorker(ctx, db, dispatch, cfg, false, false, "")
+				if err != nil {
+					return nil, err
+				}
+				defer bound.Close()
+				cfg.EnableClarification = false
+				plain, err := newDispatchWorker(ctx, db, dispatch, cfg, false, false, "")
+				if err != nil {
+					return nil, err
+				}
+				defer plain.Close()
+				if bound.ConfigHash() == plain.ConfigHash() {
+					t.Fatal("actual Role factory did not bind the host intake tool to its configuration")
+				}
+				if dispatch.Recipient == "REVIEWER" {
+					observed, err := controller.ObserveClarification(db, dispatch.TaskID, dispatch.ID)
+					if err != nil {
+						return nil, err
+					}
+					question, err := controller.RequestClarification(db, controller.ClarificationRequest{
+						ID: "evidence:" + dispatch.ID, TaskID: dispatch.TaskID, DispatchID: dispatch.ID,
+						Role: "REVIEWER", Category: "evidence", BasisHash: observed.Hash,
+						Question: "Which test demonstrates the accepted behavior?", Reason: "Independent evidence clarification",
+						Uncertainty: "test evidence", References: []string{"taxion:clarification-task"},
+						AnswerFormat: "text", DecisionImpact: "Select evidence to review",
+						StopCondition: "Do not infer missing evidence", Deadline: time.Now().Add(time.Minute),
+					})
+					if err != nil {
+						return nil, err
+					}
+					var output bytes.Buffer
+					if err := clarificationCmd([]string{"resolve-coder", "--id", question.Request.ID}, &output); err != nil {
+						return nil, err
+					}
+					var delivery controller.ClarificationDelivery
+					if err := json.Unmarshal(output.Bytes(), &delivery); err != nil {
+						return nil, err
+					}
+					if delivery.Status != "HELD" || delivery.Target == nil ||
+						delivery.Target.DispatchID != dispatch.RelatedID || delivery.Target.SessionID == "" {
+						t.Fatal("request/CLI delivery control guessed or restarted the existing Coder", delivery)
+					}
+				}
 			}
 			received, err := controller.RenderDispatchContext(db, dispatch, true)
 			if err != nil {
@@ -574,9 +658,7 @@ func TestSearch(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`}
-				worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
-				worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
+				emitFixturePlannerTurn(worker, `{"model":"fixture","inputTokens":10,"outputTokens":5,"totalNanoAIU":1,"aiCreditsStatus":"complete"}`, string(body))
 				return nil
 			}
 			if accountOnly {
@@ -692,7 +774,7 @@ func TestSearch(t *testing.T) {
 		gitTest(t, root, "rev-parse", "HEAD") != coder.Instruction.BaselineSHA {
 		t.Fatal("request changed commit identity or reviewed another tree")
 	}
-	var planning, requestRecords, sourceRecords int
+	var planning, adviceReceipts, requestRecords, sourceRecords int
 	for _, record := range state.Records.Requests {
 		if record.RequestID != state.Records.Operation.ID {
 			continue
@@ -704,12 +786,18 @@ func TestSearch(t *testing.T) {
 		requestRecords++
 		if record.Kind == "planning" {
 			planning++
+			var fields map[string]json.RawMessage
+			if json.Unmarshal([]byte(record.Payload), &fields) == nil && fields["resultHash"] != nil {
+				adviceReceipts++
+			} else {
+				requestRecords--
+			}
 			if record.Sequence != uint64(planning) || !json.Valid([]byte(record.Payload)) {
 				t.Fatal("invalid saved Planner receipt", record)
 			}
 		}
 	}
-	if planning != 2 {
+	if adviceReceipts != 2 {
 		t.Fatal("Planner conversation or usage receipts missing", planning)
 	}
 	if sourceRecords != 4 {
@@ -876,9 +964,7 @@ func TestRequestWholeModelInputIncludesLongOriginalRequestOnce(t *testing.T) {
 			if len(sent)*100 > len(legacy)*50 {
 				t.Fatalf("whole model input saved less than 50%%: %d versus %d bytes", len(sent), len(legacy))
 			}
-			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"fixture","inputTokens":10,"outputTokens":5}`}
-			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(body)}
-			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
+			emitFixturePlannerTurn(worker, `{"model":"fixture","inputTokens":10,"outputTokens":5}`, string(body))
 			return nil
 		}
 		return controller.AskPlanner(ctx, db, storePath, task.ID, text, selected, worker)

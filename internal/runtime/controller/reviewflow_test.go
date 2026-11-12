@@ -158,6 +158,11 @@ func reviewFlowFixtureWithValidations(t *testing.T, repo, outputMode string, gui
 		BudgetGuidance: core.CloneBudgetGuidance(guidance),
 	}
 	task.Decisions = append(task.Decisions, decisions...)
+	for _, decision := range decisions {
+		if decision.ID == "synthetic-adr-not-applicable" {
+			task.Acceptance = append(task.Acceptance, core.ADRNotApplicableCriterion, core.DocumentationAcceptance)
+		}
+	}
 	if err := graph.Track(task, "human", "authorize Task"); err != nil {
 		t.Fatal(err)
 	}
@@ -182,6 +187,42 @@ func reviewFlowFixtureWithValidations(t *testing.T, repo, outputMode string, gui
 		MaxNanoAIU:    1e12,
 		Authorization: core.TaskDecision{ID: "flow-authorization", Source: "human:1", Text: "authorize one repair and independent re-review within saved ceilings"},
 	}
+}
+
+func TestTerminateUnstartedDispatchClearsLedgerProjectionAtomically(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatchID := flow.LastDispatchID()
+	if err := TerminateUnstartedDispatch(db, flow.ID, dispatchID, "human", "human:recontract",
+		"replace the untouched request with a separately approved successor"); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch, ok := state.Graph.GraphDispatch(dispatchID)
+	flow, flowOK := state.Graph.ReviewFlow(flow.ID)
+	if !ok || !flowOK || dispatch.Status != core.DispatchCancelled ||
+		dispatch.Result == nil || !slices.Contains(dispatch.Result.Evidence, "not-started:"+dispatchID) ||
+		flow.Status != "STOPPED" || flow.StopCode != "RECONTRACT" {
+		t.Fatalf("termination evidence was not preserved: dispatch=%+v flow=%+v", dispatch, flow)
+	}
+	for _, projection := range state.Ledger.Dispatches {
+		if projection.ID == dispatchID {
+			if projection.Active {
+				t.Fatal("terminal Graph Dispatch remains active in the Ledger projection")
+			}
+			if err := state.Graph.CheckLedger(state.Ledger); err != nil {
+				t.Fatal("Graph and Ledger projections disagree after termination:", err)
+			}
+			return
+		}
+	}
+	t.Fatal("terminated Dispatch lost its Ledger projection")
 }
 
 func mustFlowJSON(t *testing.T, value any) []byte {
@@ -291,9 +332,19 @@ func executeFlowDispatch(t *testing.T, db *store.Store, flow core.ReviewFlow, ve
 			status := "PASS"
 			if verdict != "APPROVE" {
 				status = "FAIL"
+				if verdict == "BLOCKED" {
+					status = "BLOCKED"
+				}
 				result.Findings = []core.DispatchFinding{{Severity: "HIGH", Title: "Add missing acceptance test", File: "internal/app.go", Lines: "1", Evidence: []string{"test-report"}}}
 			}
-			result.Acceptance = []core.DispatchAcceptance{{Criterion: flow.Contract.Acceptance[0], Status: status, Evidence: []string{"test-report"}}}
+			for _, criterion := range flow.Contract.Acceptance {
+				evidence := []string{"test-report"}
+				if strings.HasPrefix(criterion, core.ADRCompliancePrefix) {
+					evidence = append(evidence, criterion)
+					result.Evidence = append(result.Evidence, criterion)
+				}
+				result.Acceptance = append(result.Acceptance, core.DispatchAcceptance{Criterion: criterion, Status: status, Evidence: evidence})
+			}
 		}
 		payload := mustFlowJSON(t, result)
 		if base.bound {

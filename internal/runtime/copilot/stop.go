@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 
 	"github.com/hiono/taxion/internal/core"
@@ -33,6 +34,28 @@ func NewForFailedReview(dispatch core.GraphDispatch, cli, base string) (*Adapter
 		return nil, fmt.Errorf("taxion: failed review observation requires a failed Reviewer and saved session identity")
 	}
 	return newForSavedSession(dispatch, cli, base)
+}
+
+// NewForSavedQuestionSession attaches only to the uniquely recorded Planner
+// session. It cannot create, send to, resume or abort model work.
+func NewForSavedQuestionSession(sessionID, configHash, worktree, cli, base string) (*Adapter, error) {
+	hash, err := hex.DecodeString(configHash)
+	if err != nil || len(hash) != 32 || sessionID == "" || !filepath.IsAbs(worktree) {
+		return nil, fmt.Errorf("taxion: saved question observation requires a session, configuration hash and absolute worktree")
+	}
+	dispatch := core.GraphDispatch{
+		Recipient: "ORCHESTRATOR", Status: core.DispatchRunning,
+		RuntimeSessionID: sessionID, RuntimeConfigHash: configHash,
+		Instruction: core.DispatchInstruction{Worktree: worktree},
+	}
+	return newForSavedSession(dispatch, cli, base)
+}
+
+func (a *Adapter) CloseSavedObservation() error {
+	if a.stopSessionID == "" {
+		return fmt.Errorf("taxion: observation-only close requires a bound saved session")
+	}
+	return a.close(false)
 }
 
 func newForSavedSession(dispatch core.GraphDispatch, cli, base string) (*Adapter, error) {

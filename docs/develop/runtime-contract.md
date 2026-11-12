@@ -73,7 +73,13 @@ session の作成・接続後と各モデル送信前に、設定を選択した
 
 保存記録についての質問には、別の file・shell tool を持たない Orchestrator Runtime を使う。通常は native skills と指示を利用する。出典付き Task 設定承認、今回の認証確認、repository の読取り権限、provider の service 確認、明示的な期限と session soft ceiling が必要。回答は、渡した観測に存在する field を引用し、記録された事実、仮定、不明な点を分ける。観測は現在の実行状態の証明にはならない。
 
-Dispatch を対応付けず、Task・主 Flow の履歴や承認を変更しない。排他制御用の `Records.Operation` だけを記録する。返された session・usage は質問に属し、主 Flow には属さない。利用量不明と不正な引用は質問を止める。cancel 後の safe cleanup は独自の上限付き context を使い、error を隠さない。
+Dispatch を対応付けず、Task・主 Flow の履歴や承認を変更しない。排他制御用の `Records.Operation` と append-only `Records.Requests` に質問 attempt を記録する。attempt の前に Task・設定・worktree・入力・出典・期限の hash を保存し、Start 後に session、Send 前に送信意図を保存する。検証済み回答・出力 hash・terminal event・その時点の利用量は、quota 再確認と cleanup より先に一つの receipt として追記する。返された session・usage は質問に属し、主 Flow には属さない。利用量不明と不正な引用は質問を止める。cancel 後の safe cleanup は独自の上限付き context を使い、error を隠さない。
+
+直接質問の operation は、検証済み回答の receipt が保存され、session の Stop が成功した場合だけ `COMPLETED` になる。欠落・不正な回答、失敗した送信、未知の停止状態は `BLOCKED` のまま保持する。native input・main message・turn の ID を照合した `assistant.turn_end` も完了候補として扱い、待機中の後続実行・子 agent・不正な利用量は拒否する。`session.idle` だけには依存しない。質問と検索は同じ後続イベント検査を使う。質問の回答 receipt と利用量は quota 再確認・cleanup より前に保存する。
+
+`request recover --preview` / `--apply --expected-hash` は、request と durable binding を持つ直接質問の正式な照合を行う。送信済み binding があれば、terminal receipt の保存前に停止した場合も native history から現在の照合証拠を作る。v0.8.2 の version-2 request で binding がない場合は、明示的な legacy association によって元依頼・計画 Task・native input・worktree・main turn を確認する。当時の runtime 設定が durably bound だったとは主張しない。
+
+apply は operation lease を取得後、native history を再観測し、回答・checkpoint・重複排除した利用量・判断記録を一つの workspace transaction で保存する。停止確認のある取消だけは、不完全な集計利用量や不正な回答を未受理の証拠として保持できる。既知の利用量を減らさず、不確実性を記録し、元期限・予算・承認を変えない。取消で owner を解放しても、後続 Task の通常 gate は省略しない。version-1 checkpoint、binding のない旧直接質問、saved-turn reader のない provider は対象外となる。
 
 過去の結果判断は実際の保存済み Dispatch と照合し、Task・履歴、指示、Flow 契約に繰り返される内容を整理する。結果全文、Memory、出典 hash は残す。`projection` は、元の instruction hash が整理後の指示の hash ではないことを説明する。保存履歴は変更しない。4 role の質問入力テストは、追加モデル呼出しなしで JSON 入力を元の半分未満にすることを要求する。
 

@@ -303,7 +303,7 @@ func observeStage(db *store.Store, dispatchID, phase, reason string, worker runt
 		}
 		report := taskBudgetReport(state.Graph, flow, time.Now().UTC())
 		completeness := report.CreditsStatus
-		if len(dispatch.RuntimeUsage) == 0 {
+		if len(dispatch.RuntimeUsage) == 0 && len(dispatch.RuntimeUsageCheckpoints) == 0 {
 			completeness = "unavailable"
 		}
 		report.StageObservation = &StageObservation{

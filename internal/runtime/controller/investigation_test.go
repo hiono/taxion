@@ -40,6 +40,7 @@ func TestInvestigationUsesApprovedReadOnlySourcesWithSeparateObservation(t *test
 	}
 	after, err := db.LoadWorkspace()
 	before.Records.Operation = after.Records.Operation
+	before.Records.Requests = after.Records.Requests
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("investigation changed main history or approval", err)
 	}

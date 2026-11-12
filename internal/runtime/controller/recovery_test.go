@@ -30,7 +30,7 @@ func (w *savedReviewRuntime) ReadSavedTurn(context.Context, string) (runtime.Sav
 func (w *savedReviewRuntime) Close() error { return w.closeErr }
 
 func TestSavedReviewFinalizationRejoinsNormalValidationAfterRunnerLoss(t *testing.T) {
-	for _, phase := range []string{"native-only", "validation-unknown", "validated", "validated-shutdown-usage", "validated-shutdown-usage-retry", "runtime-closed", "worktree-released"} {
+	for _, phase := range []string{"native-only", "checkpoint-only", "validation-unknown", "validated", "validated-shutdown-usage", "validated-shutdown-usage-retry", "runtime-closed", "worktree-released"} {
 		t.Run(phase, func(t *testing.T) {
 			testSavedReviewFinalization(t, phase)
 		})
@@ -38,6 +38,7 @@ func TestSavedReviewFinalizationRejoinsNormalValidationAfterRunnerLoss(t *testin
 }
 
 func testSavedReviewFinalization(t *testing.T, phase string) {
+	checkpointOnly := phase == "checkpoint-only"
 	counter := filepath.Join(t.TempDir(), "validations")
 	db, ledger, request, selected := artifactFixture(t, []string{"printf x >> " + counter}, false)
 	request.StageBudget.ValidationSeconds, request.StageBudget.ReviewSeconds = 1, 1
@@ -81,10 +82,15 @@ func testSavedReviewFinalization(t *testing.T, phase string) {
 	input, cost := int64(10), float64(100)
 	complete := "complete"
 	usage := core.DispatchUsage{Model: "native-model", InputTokens: &input, TotalNanoAIU: &cost, AICreditsStatus: &complete}
-	if err := control.recordEvent(dispatch.ID, "original-stream", runtime.Event{
-		Type: runtime.EventUsage, Payload: string(mustFlowJSON(t, usage)), Sequence: 2,
-	}); err != nil {
-		t.Fatal(err)
+	if !checkpointOnly {
+		if err := control.recordEvent(dispatch.ID, "original-stream", runtime.Event{
+			Type: runtime.EventUsage, Payload: string(mustFlowJSON(t, usage)), Sequence: 2,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		zero := int64(0)
+		usage.OutputTokens = &zero
 	}
 	unchanged := false
 	payload := string(mustFlowJSON(t, core.DispatchResult{
@@ -104,6 +110,12 @@ func testSavedReviewFinalization(t *testing.T, phase string) {
 		Events:      []runtime.Event{anchor, {Type: runtime.EventOutput, Payload: payload}},
 		UsageTotals: []core.DispatchUsage{usage},
 	}
+	if checkpointOnly {
+		worker.turn.UsageCheckpoints = []core.UsageCheckpoint{{
+			UsageTotals: []core.DispatchUsage{usage}, TotalNanoAIU: &cost, AICreditsStatus: &complete,
+			Watermarks: map[string]int64{dispatch.RuntimeSessionID: 1},
+		}}
+	}
 	recovery := RecoveryRequest{
 		FlowID: flow.ID, ExpectedRunnerID: "exited-runner", PreviousProcessStopped: true,
 		Actor: "controller", Reason: "reconcile the observed ended session", Evidence: []string{"process-exit:confirmed"},
@@ -115,12 +127,32 @@ func testSavedReviewFinalization(t *testing.T, phase string) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, invalid := range []func(){
+	invalidTurns := []func(){
 		func() { worker.turn.SessionID = "another-session" },
 		func() { worker.turn.SubmittedAt = flow.Deadline.Add(time.Second) },
 		func() { worker.turn.Events[0].Payload = "unrelated execution" },
 		func() { recovery.ExpectedRunnerID = "another-runner" },
-	} {
+	}
+	if checkpointOnly {
+		for _, change := range []string{"lower-cost", "higher-cost", "lower-tokens"} {
+			invalidTurns = append(invalidTurns, func() {
+				total := usage
+				switch change {
+				case "lower-cost":
+					value := cost - 1
+					total.TotalNanoAIU = &value
+				case "higher-cost":
+					value := cost + 1
+					total.TotalNanoAIU = &value
+				case "lower-tokens":
+					value := input - 1
+					total.InputTokens = &value
+				}
+				worker.turn.UsageTotals = []core.DispatchUsage{total}
+			})
+		}
+	}
+	for _, invalid := range invalidTurns {
 		originalTurn, originalRecovery := worker.turn, recovery
 		originalTurn.Events = append([]runtime.Event(nil), worker.turn.Events...)
 		before, _ := db.LoadWorkspace()
@@ -149,7 +181,7 @@ func testSavedReviewFinalization(t *testing.T, phase string) {
 		}
 		return
 	}
-	if phase != "native-only" {
+	if phase != "native-only" && !checkpointOnly {
 		worker.closeErr = errors.New("simulated process loss after durable validation")
 		if _, err := control.Finish(t.Context(), dispatch.ID, payload); !errors.Is(err, worker.closeErr) {
 			t.Fatal("expected interruption at runtime close, got", err)
@@ -211,19 +243,32 @@ func testSavedReviewFinalization(t *testing.T, phase string) {
 			nativeCost += *usage.TotalNanoAIU
 		}
 	}
-	if nativeCost != cost {
+	if checkpointOnly {
+		summary, err := core.SummarizeUsage(saved.RuntimeSessionID, saved.RuntimeUsage, saved.RuntimeUsageCheckpoints)
+		if err != nil || summary.NanoAIU == nil || *summary.NanoAIU != cost ||
+			summary.CreditsStatus != "complete" || len(saved.RuntimeUsage) != 0 || len(saved.RuntimeUsageCheckpoints) != 1 {
+			t.Fatal("saved checkpoint was lost or converted into a synthetic call", err)
+		}
+		probe := saved
+		probe.RuntimeUsageCheckpoints = nil
+		if _, err := savedReviewFinalization(state, probe); err == nil {
+			t.Fatal("closed finalization did not bind checkpoint observations")
+		}
+	} else if nativeCost != cost {
 		t.Fatal("saved usage was reset or missing shutdown consumption", nativeCost, cost)
 	}
-	changedUsage := append([]core.DispatchUsage(nil), saved.RuntimeUsage...)
-	changedUsage[0].Model = "changed-history"
-	for _, invalidUsage := range [][]core.DispatchUsage{
-		changedUsage, saved.RuntimeUsage[:0],
-		append(append([]core.DispatchUsage(nil), saved.RuntimeUsage...), core.DispatchUsage{Model: "after-close"}),
-	} {
-		probe := saved
-		probe.RuntimeUsage = invalidUsage
-		if _, err := savedReviewFinalization(state, probe); err == nil {
-			t.Fatal("closed usage accepted a changed prefix, truncation or later append")
+	if !checkpointOnly {
+		changedUsage := append([]core.DispatchUsage(nil), saved.RuntimeUsage...)
+		changedUsage[0].Model = "changed-history"
+		for _, invalidUsage := range [][]core.DispatchUsage{
+			changedUsage, saved.RuntimeUsage[:0],
+			append(append([]core.DispatchUsage(nil), saved.RuntimeUsage...), core.DispatchUsage{Model: "after-close"}),
+		} {
+			probe := saved
+			probe.RuntimeUsage = invalidUsage
+			if _, err := savedReviewFinalization(state, probe); err == nil {
+				t.Fatal("closed usage accepted a changed prefix, truncation or later append")
+			}
 		}
 	}
 	count, _ := os.ReadFile(counter)

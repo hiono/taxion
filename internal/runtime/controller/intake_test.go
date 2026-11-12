@@ -598,7 +598,11 @@ func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T
 }
 
 func TestBudgetContinuationReusesCoderAfterReviewerSafeStop(t *testing.T) {
-	testContinuationReusesCoderAfterReviewerSafeStop(t, "BUDGET_LIMIT")
+	for _, code := range []string{"BUDGET_LIMIT", "BUDGET_STOP", "RECONTRACT"} {
+		t.Run(code, func(t *testing.T) {
+			testContinuationReusesCoderAfterReviewerSafeStop(t, code)
+		})
+	}
 }
 
 func TestSafetyStopContinuationReusesCoderAfterReviewerSafeStop(t *testing.T) {
@@ -721,7 +725,7 @@ func TestSafetyStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *te
 }
 
 func TestAlreadySupersededStoppedSnapshotCoderContinuesAtReviewerWithoutRerun(t *testing.T) {
-	for _, stopCode := range []string{"BUDGET_LIMIT", "SAFETY_STOP"} {
+	for _, stopCode := range []string{"BUDGET_LIMIT", "SAFETY_STOP", "BUDGET_STOP", "RECONTRACT"} {
 		t.Run(stopCode, func(t *testing.T) {
 			testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t, stopCode, true)
 		})
@@ -737,7 +741,7 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	}
 	coder := executeFlowDispatch(t, db, flow, "", true)
 	flow = persistLegacyBudgetStoppedFlow(t, db, flow.ID)
-	if stopCode == "SAFETY_STOP" {
+	if stopCode != "BUDGET_LIMIT" {
 		flow.StopCode, flow.MaxTokens, flow.Reason = stopCode, 0, "deadline reached"
 		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 			storeFlow(state, flow)

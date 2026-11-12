@@ -15,6 +15,109 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+func TestTerminateUnstartedReviewerDoesNotRequireBudgetStop(t *testing.T) {
+	db, ledger, request, _ := packetReviewSuccessorFixture(t, core.OutputModeWorktreeTreeSnapshot)
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatchID := flow.DispatchIDs[0]
+	if err := TerminateUnstartedDispatch(db, flow.ID, dispatchID, "human", "human:change", "retain accepted input for a new contract"); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped, _ := state.Graph.ReviewFlow(flow.ID)
+	dispatch, _ := state.Graph.GraphDispatch(dispatchID)
+	if stopped.StopCode != "RECONTRACT" || !stopped.HandoffHeld() ||
+		dispatch.Status != core.DispatchCancelled || dispatch.RuntimeSessionID != "" {
+		t.Fatal("Reviewer cancellation changed execution or lost stopped history")
+	}
+}
+
+func TestSavedReviewAcceptanceRejectsUnavailableUsageAndInvalidBudget(t *testing.T) {
+	for _, unknownUsage := range []bool{false, true} {
+		t.Run(map[bool]string{false: "session-limit", true: "unknown-usage"}[unknownUsage], func(t *testing.T) {
+			db, ledger, request, acceptance := savedReviewAcceptanceFixture(t)
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			flow, _ := state.Graph.ReviewFlow(acceptance.FlowID)
+			if unknownUsage {
+				flow.Budget.MaxNanoAIU = 1
+				for i := range state.Graph.Dispatches {
+					dispatch := &state.Graph.Dispatches[i]
+					if dispatch.ID != flow.DispatchIDs[0] {
+						continue
+					}
+					dispatch.RuntimeUsage = nil
+					body, err := json.Marshal(struct {
+						Result *core.DispatchResult
+						Usage  []core.DispatchUsage
+					}{dispatch.Result, dispatch.RuntimeUsage})
+					if err != nil {
+						t.Fatal(err)
+					}
+					for j := range state.Records.Events {
+						receipt := &state.Records.Events[j]
+						if receipt.DispatchID == dispatch.ID && receipt.Type == "verified-result" {
+							receipt.Payload, receipt.Hash = string(body), receiptHash(string(body))
+						}
+					}
+				}
+			} else {
+				flow.Budget.MaxReviewerSessions = 0
+			}
+			storeFlow(&state, flow)
+			_, err = previewSavedReview(t.Context(), state, ledger, acceptance, request.Configuration, time.Now().UTC())
+			expected := "invalid approved budget"
+			if unknownUsage {
+				expected = "saved execution exceeds approved limits or required usage evidence is incomplete"
+			}
+			if err == nil || !strings.Contains(err.Error(), expected) {
+				t.Fatalf("missing concrete usage/budget denial: %v", err)
+			}
+		})
+	}
+}
+
+func TestSavedReviewAcceptanceUsesEvidenceInsteadOfStopCode(t *testing.T) {
+	for _, code := range []string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT", "RECONTRACT"} {
+		t.Run(code, func(t *testing.T) {
+			db, ledger, request, acceptance := savedReviewAcceptanceFixture(t)
+			if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+				flow, _ := state.Graph.ReviewFlow(acceptance.FlowID)
+				flow.StopCode = code
+				storeFlow(state, flow)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := db.LoadWorkspace()
+			preview, err := AcceptSavedReview(t.Context(), db, ledger, acceptance, request.Configuration, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			acceptance.ExpectedHash = preview.Hash
+			if _, err := AcceptSavedReview(t.Context(), db, ledger, acceptance, request.Configuration, false); err != nil {
+				t.Fatal(err)
+			}
+			after, err := db.LoadWorkspace()
+			if err != nil || after.Records.VerifyReviewAcceptances(after.Graph) != nil {
+				t.Fatal("acceptance audit rejected:", err)
+			}
+			if !reflect.DeepEqual(before.Records.Events, after.Records.Events) ||
+				!reflect.DeepEqual(before.Records.Budgets, after.Records.Budgets) ||
+				!reflect.DeepEqual(before.Graph.Dispatches, after.Graph.Dispatches) {
+				t.Fatal("acceptance changed receipts, usage or execution")
+			}
+		})
+	}
+}
+
 func savedReviewAcceptanceFixture(t *testing.T) (*store.Store, string, ReviewFlowRequest, ReviewAcceptanceRequest) {
 	t.Helper()
 	db, ledger, request, coder := packetReviewSuccessorFixture(t, core.OutputModeWorktreeTreeSnapshot)
@@ -274,20 +377,111 @@ func acceptanceFiles(t *testing.T, roots ...string) map[string][]byte {
 }
 
 func TestAcceptSavedReviewFailsClosed(t *testing.T) {
+	db, ledger, baseRequest, baseAcceptance := savedReviewAcceptanceFixture(t)
+	baseline, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	baselineJSON, err := core.CanonicalJSON(baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow, ok := baseline.Graph.ReviewFlow(baseRequest.ID)
+	if !ok {
+		t.Fatal("saved review fixture is missing its flow")
+	}
+	last, ok := baseline.Graph.GraphDispatch(flow.DispatchIDs[0])
+	if !ok {
+		t.Fatal("saved review fixture is missing its reviewer dispatch")
+	}
+	coder, ok := baseline.Graph.GraphDispatch(flow.SourceDispatchID)
+	if !ok {
+		t.Fatal("saved review fixture is missing its source dispatch")
+	}
+
+	contractRoot, sourceRoot := flow.Contract.Worktree, coder.Instruction.Worktree
+	branchName := gitTest(t, contractRoot, "branch", "--show-current")
+	headSHA := gitTest(t, contractRoot, "rev-parse", "HEAD")
+	contractIndex := gitTest(t, contractRoot, "rev-parse", "--path-format=absolute", "--git-path", "index")
+	indexData, err := os.ReadFile(contractIndex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type fileSnapshot struct {
+		content []byte
+		mode    fs.FileMode
+	}
+	worktreeFiles := map[string]fileSnapshot{}
+	for _, root := range []string{contractRoot, sourceRoot} {
+		path := filepath.Join(root, "internal", "app.go")
+		if _, exists := worktreeFiles[path]; exists {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		worktreeFiles[path] = fileSnapshot{content: data, mode: info.Mode().Perm()}
+	}
+	snapshotRef := coder.Result.GitEvidence.SnapshotRef
+	snapshotSHA := ""
+	if snapshotRef != "" {
+		snapshotSHA = gitTest(t, contractRoot, "rev-parse", snapshotRef)
+	}
+	reviewPath := last.Instruction.Worktree
+	_, reviewPathErr := os.Stat(reviewPath)
+	reviewPathExisted := reviewPathErr == nil
+	if reviewPathErr != nil && !os.IsNotExist(reviewPathErr) {
+		t.Fatal(reviewPathErr)
+	}
+
+	restoreWorkspace := func(t *testing.T) {
+		t.Helper()
+		var restored store.Workspace
+		if err := json.Unmarshal(baselineJSON, &restored); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			*state = restored
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restoreWorktreeFile := func(t *testing.T, root string) {
+		t.Helper()
+		path := filepath.Join(root, "internal", "app.go")
+		snapshot, ok := worktreeFiles[path]
+		if !ok {
+			t.Fatalf("missing worktree snapshot for %s", path)
+		}
+		if err := os.WriteFile(path, snapshot.content, snapshot.mode); err != nil {
+			t.Fatal(err)
+		}
+		gitTest(t, root, "update-index", "--refresh", "--", "internal/app.go")
+	}
+
 	for _, failure := range []string{"expiry", "stale-hash", "actor", "reason", "runner", "other-stop",
 		"configuration", "snapshot-ref", "current-branch", "current-index",
 		"current-worktree", "source-worktree", "review-path", "late-result"} {
 		t.Run(failure, func(t *testing.T) {
-			db, ledger, request, acceptance := savedReviewAcceptanceFixture(t)
+			request, acceptance := baseRequest, baseAcceptance
 			preview, err := AcceptSavedReview(t.Context(), db, ledger, acceptance, request.Configuration, true)
 			if err != nil {
 				t.Fatal(err)
 			}
 			acceptance.ExpectedHash = preview.Hash
-			state, _ := db.LoadWorkspace()
-			flow, _ := state.Graph.ReviewFlow(request.ID)
-			last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[0])
-			coder, _ := state.Graph.GraphDispatch(flow.SourceDispatchID)
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			currentFlow, _ := state.Graph.ReviewFlow(request.ID)
+			currentLast, _ := state.Graph.GraphDispatch(currentFlow.DispatchIDs[0])
+			currentCoder, _ := state.Graph.GraphDispatch(currentFlow.SourceDispatchID)
 			switch failure {
 			case "expiry":
 				acceptance.AllowExpired = false
@@ -300,33 +494,33 @@ func TestAcceptSavedReviewFailsClosed(t *testing.T) {
 			case "configuration":
 				request.Configuration = core.ApprovalConfiguration{}
 			case "snapshot-ref":
-				gitTest(t, flow.Contract.Worktree, "update-ref", "-d", coder.Result.GitEvidence.SnapshotRef)
+				gitTest(t, currentFlow.Contract.Worktree, "update-ref", "-d", currentCoder.Result.GitEvidence.SnapshotRef)
 			case "current-branch":
-				gitTest(t, flow.Contract.Worktree, "switch", "--detach")
+				gitTest(t, currentFlow.Contract.Worktree, "switch", "--detach")
 			case "current-index":
-				gitTest(t, flow.Contract.Worktree, "read-tree", flow.Contract.BaselineSHA)
+				gitTest(t, currentFlow.Contract.Worktree, "read-tree", currentFlow.Contract.BaselineSHA)
 			case "current-worktree", "source-worktree":
-				root := flow.Contract.Worktree
+				root := currentFlow.Contract.Worktree
 				if failure == "source-worktree" {
-					root = coder.Instruction.Worktree
+					root = currentCoder.Instruction.Worktree
 				}
-				if err := os.WriteFile(filepath.Join(root, "internal/app.go"), []byte("drift"), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(root, "internal", "app.go"), []byte("drift"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			case "review-path":
-				if err := os.MkdirAll(last.Instruction.Worktree, 0700); err != nil {
+				if err := os.MkdirAll(currentLast.Instruction.Worktree, 0700); err != nil {
 					t.Fatal(err)
 				}
 			default:
 				if err := db.UpdateWorkspace(func(s *store.Workspace) error {
-					changed, _ := s.Graph.ReviewFlow(flow.ID)
+					changed, _ := s.Graph.ReviewFlow(currentFlow.ID)
 					switch failure {
 					case "runner":
 						changed.RunnerID = "still-owned"
 					case "other-stop":
 						changed.Reason = "a different safety stop"
 					case "late-result":
-						changed.Deadline = last.Result.GitEvidence.VerifiedAt
+						changed.Deadline = currentLast.Result.GitEvidence.VerifiedAt
 					}
 					storeFlow(s, changed)
 					return nil
@@ -347,6 +541,32 @@ func TestAcceptSavedReviewFailsClosed(t *testing.T) {
 				t.Fatal("rejected acceptance changed saved state", err)
 			}
 		})
+		switch failure {
+		case "runner", "other-stop", "late-result":
+			restoreWorkspace(t)
+		case "snapshot-ref":
+			gitTest(t, contractRoot, "update-ref", snapshotRef, snapshotSHA)
+		case "current-branch":
+			if branchName != "" {
+				gitTest(t, contractRoot, "switch", branchName)
+			} else {
+				gitTest(t, contractRoot, "switch", "--detach", headSHA)
+			}
+		case "current-index":
+			if err := os.WriteFile(contractIndex, indexData, 0600); err != nil {
+				t.Fatal(err)
+			}
+		case "current-worktree":
+			restoreWorktreeFile(t, contractRoot)
+		case "source-worktree":
+			restoreWorktreeFile(t, sourceRoot)
+		case "review-path":
+			if !reviewPathExisted {
+				if err := os.RemoveAll(reviewPath); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
 	}
 }
 

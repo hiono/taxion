@@ -147,6 +147,14 @@ func TestSteppedFlowWaitsForHumanBetweenRoles(t *testing.T) {
 	testFlowRunsRepairAndNewSHAReview(t, true)
 }
 
+func TestCheckpointOnlyFlowRunsWithoutSyntheticUsageReceipts(t *testing.T) {
+	testFlowRunsRepairAndNewSHAReview(t, false, flowRunOptions{checkpointOnly: true})
+}
+
+func TestCheckpointFlowIgnoresChildCompletionAndCountsSnapshotsOnce(t *testing.T) {
+	testFlowRunsRepairAndNewSHAReview(t, false, flowRunOptions{checkpoints: true})
+}
+
 func TestReviewBudgetReportsEffectiveDeadlineWithoutChangingContract(t *testing.T) {
 	flow := core.ReviewFlow{ID: "flow", Deadline: time.Now().UTC().Add(time.Hour)}
 	dispatch := core.GraphDispatch{ID: "review", Recipient: "REVIEWER"}
@@ -358,7 +366,17 @@ func TestCreditStatusReportsApprovedRequestQuotaSeparatelyFromCredits(t *testing
 	}
 }
 
-func testFlowRunsRepairAndNewSHAReview(t *testing.T, stepped bool, planned ...bool) {
+type flowRunOptions struct {
+	planned, checkpoints, checkpointOnly bool
+}
+
+func testFlowRunsRepairAndNewSHAReview(t *testing.T, stepped bool, options ...flowRunOptions) {
+	var selected flowRunOptions
+	if len(options) != 0 {
+		selected = options[0]
+	}
+	checkpointOnly := selected.checkpointOnly
+	withCheckpoints := selected.checkpoints || checkpointOnly
 	resolved, err := config.Resolve([]config.Layer{{Source: "user", Input: []byte(`version: 1
 project: {id: demo}
 repository: {provider: github, host: github.com, path: owner/repo, account: scm-user, credentialRef: scm}
@@ -376,7 +394,7 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 		})),
 	}
 	db, ledger, request := reviewFlowFixture(t, decision)
-	if len(planned) != 0 && planned[0] {
+	if selected.planned {
 		request.StageBudget = &core.StageBudget{Version: 1, ValidationSeconds: 2, ReviewSeconds: 2, RepairSeconds: 2,
 			CoderSessionCredits: 300, ReviewerSessionCredits: 30, ReviewNanoAIU: 1, RepairNanoAIU: 1}
 		state, err := db.LoadWorkspace()
@@ -452,8 +470,20 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 				worker.events <- runtime.Event{Sequence: uint64(index + 1), Type: runtime.EventOutputDelta, Payload: "small delta"}
 			}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: "intermediate explanation"}
+			if withCheckpoints {
+				worker.events <- runtime.Event{Type: runtime.EventOutput, AgentID: "child", Payload: "child explanation, not the result"}
+				worker.events <- runtime.Event{Type: runtime.EventTurnFinished, AgentID: "child"}
+			}
 			usage := `{"model":"test","inputTokens":10,"outputTokens":5,"totalNanoAIU":123.5,"aiCreditsStatus":"complete"}`
-			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: usage}
+			checkpoint := `{"usageTotals":[` + usage + `],"totalNanoAIU":123.5,"aiCreditsStatus":"complete"`
+			if checkpointOnly {
+				checkpoint += `,"watermarks":{"sdk:` + dispatch.ID + `":1}`
+			} else {
+				worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: usage}
+			}
+			if withCheckpoints {
+				worker.events <- runtime.Event{Type: runtime.EventUsageCheckpoint, Payload: checkpoint + `}`}
+			}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(mustFlowJSON(t, result))}
 			worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
 			return nil
@@ -502,8 +532,20 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 			t.Fatalf("unclosed runtime or unnecessary stop: %+v", worker.fakeRuntime)
 		}
 		saved, _ := state.Graph.GraphDispatch(worker.dispatch.ID)
-		if saved.Status != core.DispatchSucceeded || len(saved.RuntimeUsage) != 1 {
+		expectedCalls := 1
+		expectedCheckpoints := 0
+		if withCheckpoints {
+			expectedCheckpoints = 1
+		}
+		if checkpointOnly {
+			expectedCalls = 0
+		}
+		if saved.Status != core.DispatchSucceeded || len(saved.RuntimeUsage) != expectedCalls || len(saved.RuntimeUsageCheckpoints) != expectedCheckpoints {
 			t.Fatal("final results or usage not persisted")
+		}
+		report := taskBudgetReport(state.Graph, flow, time.Now().UTC())
+		if report.ConsumedNanoAIU != 123.5*float64(len(workers)) || report.CreditsStatus != "complete" {
+			t.Fatal("checkpoint duplicated costs or lost completeness", report.ConsumedNanoAIU, report.CreditsStatus)
 		}
 		if saved.Recipient == "CODER" && (saved.Result.ChangeManifest == nil ||
 			len(saved.Result.ChangeManifest.ReportedChangedFiles) != 0 ||
@@ -579,7 +621,11 @@ execution: {requester: requester, worker: local, approvalRef: configuration-appr
 		}
 		creditStatuses++
 	}
-	if creditStatuses != len(workers) {
+	expectedStatuses := len(workers)
+	if checkpointOnly {
+		expectedStatuses = 0
+	}
+	if creditStatuses != expectedStatuses {
 		t.Fatalf("got %d statuses for %d calls", creditStatuses, len(workers))
 	}
 	testCompactPlanningContext(t, db, ledger, state, review, decision)

@@ -10,7 +10,7 @@ import (
 // a Coder output or a partial-result receipt.
 func VerifyApprovedInputSuccessor(source core.GraphDispatch, task core.GraphTask) error {
 	if source.Recipient != "CODER" || source.Instruction.OutputMode != core.OutputModeWorktreeTreeSnapshot ||
-		source.Instruction.TargetTreeSHA == "" || task.OutputMode != core.OutputModeWorktreeTreeSnapshot ||
+		task.OutputMode != core.OutputModeWorktreeTreeSnapshot ||
 		task.Repo != source.Repository || task.BaselineSHA != source.Instruction.BaselineSHA ||
 		task.TargetSHA != source.Instruction.TargetSHA || task.TargetTreeSHA != source.Instruction.TargetTreeSHA ||
 		!sameFiles(task.TargetChangedFiles, source.Instruction.TargetChangedFiles) {

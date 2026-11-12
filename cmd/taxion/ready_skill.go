@@ -16,7 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const readySkillVersion = "1.3.27"
+const readySkillVersion = "1.3.28"
 const readyCLIContract = "taxion.cli.v1"
 const readySkillDirectory = ".agents/skills/taxion"
 const readySkillPath = readySkillDirectory + "/SKILL.md"
@@ -116,6 +116,15 @@ information unavailable through approved observation. Batch related decisions.
 Never bypass identity, quality, unknown delivery, budget or deadline checks.
 A hold or approved draft is not completion: connect it to the next authorized action.
 
+Direct conversation ask/plan/investigate turns persist their attempt identity,
+session binding, send intent and any validated terminal answer before cleanup.
+If cleanup fails, the answer remains evidence but the workspace operation is
+BLOCKED. Inspect taxion request --status and use taxion request recover for
+durably bound attempts, with a nonexecuting preview and exact-hash apply.
+Preserve the original answer, uncertainty and deadline; do not resend.
+Unbound legacy direct-question receipts are unsupported. Uncertain terminal
+evidence permits only the explicitly confirmed stopped-attempt cancellation.
+
 New Coder instructions with changeManifestPolicy: git-diff-v1 let Controller
 derive the complete baseline-to-candidate diff and preserve the original claim
 in changeManifest. Missing, duplicate or incremental changedFiles alone requires
@@ -171,7 +180,7 @@ process liveness or log timestamps. Monitoring grants no new stop/restart budget
 
 ## Failed artifact validation
 
-For FAILED artifact validation with dispatchIds: [], STOPPED/SAFETY_STOP and no
+For FAILED artifact validation with dispatchIds: [], STOPPED and no
 runner, preserve the failed receipt and both input identities; do not retry.
 Create a separate-worktree DRAFT normal CODER/REVIEWER successor with
 supersedes=FAILED_TASK_ID and createdFrom=flow:FAILED_FLOW_ID; retain baselineSha,
@@ -258,8 +267,11 @@ normal host validation, runtime close, managed-worktree release and result stora
 Recover ownership only after that result. Never resend, reset usage, increase
 maxRepairs or treat accepted REQUEST_CHANGES as product approval.
 Do not replay host commands when validation started without a durable validated result.
-For a held SAFETY_STOP with only its first issued snapshot-input Coder and no
+For a held STOPPED Flow with only its first issued snapshot-input Coder and no
 start/session/result, workflow reconcile-stopped can preview a human decision.
+Stop codes are not an authorization allowlist. Baseline-only input is supported
+only when the original and successor worktrees preserve the exact clean baseline.
+Cancellation does not restart or extend an expired Flow.
 Require execution-quiescence evidence, acceptance of unknown delivery and the exact
 preview hash before cancellation. It preserves the old stop and approved INPUT,
 not new Coder output or proof of zero usage. A distinct-worktree successor needs
@@ -429,6 +441,31 @@ session compatibility; automatic provider updates are not implemented here.
 Controller validation and independent same-target review are
 required before claiming completion. Inventory and skill integrity checks do not
 prove authentication, authorization, model loading or successful execution.
+` + `
+
+## Recover a saved request Planner or direct-question answer
+
+For an interrupted new request Planner, first inspect taxion request --status.
+Do not resume or resend a BLOCKED Planner attempt with uncertain delivery.
+Ordinary request --cancel does not reconcile such an attempt. Use the saved
+recovery decision below; --resolution cancel requires matching evidence and,
+for uncertain terminal results, confirmed stopped-process and uncertainty consent.
+Use taxion request recover --id ID --actor ACTOR --source SOURCE --reason REASON
+--evidence REF --preview to read-only verify the native saved turn and exact
+request/task/configuration/source/deadline/usage bindings. Review the answer,
+questions, limitations and preview hash. Only then repeat the exact decision
+fields with --apply --expected-hash HASH. Apply adopts the completed answer,
+checkpoint, receipt and deduplicated usage atomically; it does not send, abort,
+extend limits, or approve execution. Ambiguous, drifting or still-active history
+is refused. Incomplete terminal/usage evidence permits only confirmed cancellation;
+it never authorizes continuation. Expired execution limits remain unchanged.
+Durably bound conversation ask, plan and investigate
+attempts use this same nonexecuting preview and exact-hash apply.
+For a v0.8.2 version-2 request without an attempt binding, explicitly use
+--associate-legacy --session ID --input-hash SHA256 --confirm-stopped with
+original-input and stopped-process evidence; never infer historical bindings.
+Version-1 checkpoints, unbound legacy direct questions and non-Copilot saved
+history remain unsupported. Preserve their missing evidence and never resend.
 ` + "\n## Accepted Coder output and unstarted normal Reviewer recovery\n" + normalReviewerRecoveryHelp
 
 type readySkillMetadata struct {

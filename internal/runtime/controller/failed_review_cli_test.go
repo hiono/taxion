@@ -53,6 +53,7 @@ func testFailedReviewPublicCLI(t *testing.T, db *store.Store, ledger string, flo
 		}},
 		{ID: "input", Timestamp: turn.SubmittedAt, Data: &sdk.UserMessageData{MessageID: &message, Content: "synthetic saved review"}},
 		{ID: "tool", Timestamp: turn.SubmittedAt, Data: &sdk.ToolExecutionCompleteData{ToolCallID: "read-original", Success: true}},
+		{ID: "turn-start", Timestamp: turn.SubmittedAt, Data: &sdk.AssistantTurnStartData{TurnID: turnID}},
 		{ID: "answer", Timestamp: turn.SubmittedAt, Data: &sdk.AssistantMessageData{
 			Content: turn.Payload, OriginatingMessageID: &message, TurnID: &turnID,
 		}},

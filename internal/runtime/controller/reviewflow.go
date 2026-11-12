@@ -82,6 +82,9 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 		if err := checkFlowApproval(state.Graph, task, request.Configuration); err != nil {
 			return err
 		}
+		if _, err := core.ADRComplianceRequirements(task.Acceptance, task.Specifications); err != nil {
+			return err
+		}
 		if request.MaxNanoAIU == 0 && !core.ExternalBudget(task.BudgetGuidance) {
 			return fmt.Errorf("taxion: omitted maxNanoAiu requires approved provider billing or account guidance with reset-daily allocation")
 		}
@@ -208,7 +211,7 @@ func StartReviewFlowContext(ctx context.Context, db *store.Store, ledgerPath str
 }
 
 // TerminateUnstartedDispatch is the safe first half of re-contracting: it
-// permanently cancels an issued, untouched Coder Dispatch and holds its flow.
+// permanently cancels an issued, untouched Dispatch and holds its flow.
 // A successor Task must be explicitly approved and issued with a new hash.
 func TerminateUnstartedDispatch(db *store.Store, flowID, dispatchID, actor, source, reason string) error {
 	if db == nil || strings.TrimSpace(actor) == "" || strings.TrimSpace(source) == "" ||
@@ -227,9 +230,15 @@ func stopUnstartedDispatch(db *store.Store, flowID, dispatchID, actor, source, r
 			return fmt.Errorf("taxion: re-contract requires the latest Dispatch of an unclaimed running flow")
 		}
 		dispatch, ok := state.Graph.GraphDispatch(dispatchID)
-		if !ok || (dispatch.Recipient != "CODER" && !(stopCode == "BUDGET_STOP" && dispatch.Recipient == "REVIEWER")) || dispatch.Status != core.DispatchIssued ||
-			dispatch.Acknowledged || dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "" {
-			return fmt.Errorf("taxion: re-contract may terminate only an untouched issued Coder Dispatch")
+		if !ok || dispatch.Status != core.DispatchIssued || dispatch.Acknowledged ||
+			dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "" || dispatch.RuntimeConfigHash != "" ||
+			dispatch.ExecutionStartSHA != "" || len(dispatch.RuntimeUsage) != 0 || dispatch.Result != nil {
+			return fmt.Errorf("taxion: re-contract may terminate only an untouched issued Dispatch without execution evidence")
+		}
+		for _, receipt := range state.Records.Events {
+			if receipt.DispatchID == dispatch.ID {
+				return fmt.Errorf("taxion: re-contract requires separate reconciliation for a Dispatch with runtime receipts")
+			}
 		}
 		result := &core.DispatchResult{
 			DispatchID: dispatch.ID, TaskID: dispatch.TaskID, Recipient: dispatch.Recipient,
@@ -240,6 +249,17 @@ func stopUnstartedDispatch(db *store.Store, flowID, dispatchID, actor, source, r
 		}
 		if err := state.Graph.TransitionDispatch(dispatchID, core.DispatchCancelled, actor, reason, false, false, result); err != nil {
 			return err
+		}
+		projected := false
+		for i := range state.Ledger.Dispatches {
+			if state.Ledger.Dispatches[i].ID == dispatchID {
+				state.Ledger.Dispatches[i].Active = false
+				projected = true
+				break
+			}
+		}
+		if !projected {
+			return fmt.Errorf("taxion: terminated Dispatch %q has no ledger projection", dispatchID)
 		}
 		if err := holdReviewFlowForStop(&state.Graph, &flow, reason); err != nil {
 			return err
@@ -493,6 +513,11 @@ func advanceReviewFlow(db *store.Store, ledgerPath, id, runnerID string, configu
 				if supplement != nil {
 					task.Decisions = append(task.Decisions, *supplement)
 				}
+				clarificationDecisions, err := reviewerClarificationDecisions(*state, flow, last)
+				if err != nil {
+					return err
+				}
+				task.Decisions = append(task.Decisions, clarificationDecisions...)
 				task.DeferredReason, task.ResumeCondition = "", ""
 				if err := state.Graph.Track(task, "controller", "preserve findings and acceptance for authorized repair"); err != nil {
 					return err
@@ -632,6 +657,78 @@ func issueFlowDispatch(state *store.Workspace, ledgerPath string, flow *core.Rev
 	return nil
 }
 
+// reviewerClarificationDecisions carries unanswered Reviewer questions into the
+// formally issued repair Dispatch. It does not send to a busy session or grant
+// authority; the successor receives the question as read-only source context.
+func reviewerClarificationDecisions(state store.Workspace, flow core.ReviewFlow, reviewer core.GraphDispatch) ([]core.TaskDecision, error) {
+	if reviewer.Recipient != "REVIEWER" || reviewer.Status != core.DispatchSucceeded ||
+		reviewer.Relationship != core.RelationshipIndependent || !slices.Contains(flow.DispatchIDs, reviewer.ID) ||
+		reviewer.Result == nil || reviewer.Result.ReviewVerdict != "REQUEST_CHANGES" {
+		return nil, nil
+	}
+	history, err := clarifications(state)
+	if err != nil {
+		return nil, err
+	}
+	latest := make(map[string]Clarification)
+	for _, saved := range history {
+		if saved.Request.Role == "REVIEWER" && saved.Request.TaskID == reviewer.TaskID &&
+			saved.Request.DispatchID == reviewer.ID && saved.Route == "ASK" && saved.Recipient == "CODER" {
+			latest[saved.Request.ID] = saved
+		}
+	}
+	ids := make([]string, 0, len(latest))
+	for id := range latest {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	decisions := make([]core.TaskDecision, 0, len(ids))
+	for _, id := range ids {
+		saved := latest[id]
+		if saved.Request.ID == "" {
+			continue
+		}
+		current, err := clarificationContext(state, saved.Request.TaskID, saved.Request.DispatchID)
+		if err != nil || current.ScopeHash != saved.Context.ScopeHash {
+			return nil, fmt.Errorf("taxion: Reviewer clarification %s no longer matches its source scope", id)
+		}
+		if !time.Now().Before(saved.Request.Deadline) {
+			return nil, fmt.Errorf("taxion: Reviewer clarification %s expired before its repair Dispatch", id)
+		}
+		delivery, err := savedClarificationDelivery(state, id)
+		if err != nil || delivery == nil || delivery.Question.RequestID != "clarification:"+id ||
+			delivery.Target == nil || delivery.Target.FlowID != flow.ID {
+			return nil, fmt.Errorf("taxion: Reviewer clarification %s has no verified original Coder delivery", id)
+		}
+		question := struct {
+			Kind           string   `json:"kind"`
+			ID             string   `json:"id"`
+			SourceDispatch string   `json:"sourceDispatch"`
+			Question       string   `json:"question"`
+			Reason         string   `json:"reason"`
+			Uncertainty    string   `json:"uncertainty"`
+			References     []string `json:"references"`
+			AnswerFormat   string   `json:"answerFormat"`
+			DecisionImpact string   `json:"decisionImpact"`
+			StopCondition  string   `json:"stopCondition"`
+		}{
+			Kind: "taxion.clarification-question.v1", ID: id, SourceDispatch: reviewer.ID,
+			Question: saved.Request.Question, Reason: saved.Request.Reason,
+			Uncertainty: saved.Request.Uncertainty, References: slices.Clone(saved.Request.References),
+			AnswerFormat: saved.Request.AnswerFormat, DecisionImpact: saved.Request.DecisionImpact,
+			StopCondition: saved.Request.StopCondition,
+		}
+		body, err := json.Marshal(question)
+		if err != nil || core.Redact(string(body)) != string(body) {
+			return nil, fmt.Errorf("taxion: Reviewer clarification %s contains invalid or credential-bearing content", id)
+		}
+		decisions = append(decisions, core.TaskDecision{
+			ID: "clarification-question:" + id, Source: "clarification:" + id, Text: string(body),
+		})
+	}
+	return decisions, nil
+}
+
 func flowResultDecision(dispatch core.GraphDispatch) (core.TaskDecision, error) {
 	result, err := json.Marshal(dispatch.Result)
 	if err != nil {
@@ -668,6 +765,74 @@ func legacyFlowResultDecision(dispatch core.GraphDispatch) (core.TaskDecision, e
 		return core.TaskDecision{}, fmt.Errorf("taxion: encode flow result provenance: %w", err)
 	}
 	return core.TaskDecision{ID: "result:" + dispatch.ID, Source: "dispatch:" + dispatch.ID, Text: string(value)}, nil
+}
+
+// clarificationAnswerDecisions returns only answers authored by the exact
+// immediate Coder successor that is now being independently reviewed.
+func clarificationAnswerDecisions(state store.Workspace, flow core.ReviewFlow, coder core.GraphDispatch) ([]core.TaskDecision, error) {
+	if coder.Recipient != "CODER" || coder.Status != core.DispatchSucceeded || coder.Result == nil ||
+		coder.TaskID != flow.TaskID || coder.Relationship != core.RelationshipAmends {
+		return nil, nil
+	}
+	history, err := clarifications(state)
+	if err != nil {
+		return nil, err
+	}
+	latest := make(map[string]Clarification)
+	for _, saved := range history {
+		if saved.Request.Role == "REVIEWER" && saved.Route == "ASK" && saved.Recipient == "CODER" {
+			latest[saved.Request.ID] = saved
+		}
+	}
+	ids := make([]string, 0, len(latest))
+	for id := range latest {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	coderIndex := slices.Index(flow.DispatchIDs, coder.ID)
+	decisions := make([]core.TaskDecision, 0, len(ids))
+	for _, id := range ids {
+		saved := latest[id]
+		if saved.Answer == nil || saved.Answer.Role != "CODER" || saved.Answer.Source != "dispatch:"+coder.ID {
+			continue
+		}
+		source, ok := state.Graph.GraphDispatch(saved.Request.DispatchID)
+		delivery, deliveryErr := savedClarificationDelivery(state, id)
+		if !ok || saved.Request.TaskID != source.TaskID || source.Recipient != "REVIEWER" ||
+			source.Relationship != core.RelationshipIndependent || source.Status != core.DispatchSucceeded ||
+			source.Result == nil || source.Result.ReviewVerdict != "REQUEST_CHANGES" ||
+			deliveryErr != nil || delivery == nil || delivery.Target == nil ||
+			delivery.Target.FlowID != flow.ID || delivery.Target.DispatchID != source.RelatedID ||
+			coder.RelatedID != delivery.Target.DispatchID ||
+			coderIndex < 1 || slices.Index(flow.DispatchIDs, source.ID) != coderIndex-1 {
+			return nil, fmt.Errorf("taxion: Coder clarification answer %s is not bound to the immediate Reviewer successor pair", id)
+		}
+		current, err := clarificationContext(state, saved.Request.TaskID, saved.Request.DispatchID)
+		if err != nil || current.ScopeHash != saved.Context.ScopeHash {
+			return nil, fmt.Errorf("taxion: Coder clarification answer %s no longer matches its Reviewer source scope", id)
+		}
+		body, err := json.Marshal(struct {
+			Kind       string    `json:"kind"`
+			ID         string    `json:"id"`
+			Reviewer   string    `json:"reviewerDispatch"`
+			Coder      string    `json:"coderDispatch"`
+			Question   string    `json:"question"`
+			Answer     string    `json:"answer"`
+			Actor      string    `json:"actor"`
+			AnsweredAt time.Time `json:"answeredAt"`
+		}{
+			Kind: "taxion.clarification-answer.v1", ID: id, Reviewer: source.ID, Coder: coder.ID,
+			Question: saved.Request.Question, Answer: saved.Answer.Text,
+			Actor: saved.Answer.Actor, AnsweredAt: saved.Answer.At,
+		})
+		if err != nil || core.Redact(string(body)) != string(body) {
+			return nil, fmt.Errorf("taxion: Coder clarification answer %s contains invalid or credential-bearing content", id)
+		}
+		decisions = append(decisions, core.TaskDecision{
+			ID: "clarification-answer:" + id, Source: "clarification:" + id, Text: string(body),
+		})
+	}
+	return decisions, nil
 }
 
 func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.ReviewFlow,
@@ -720,6 +885,11 @@ func issueFlowReviewer(state *store.Workspace, ledgerPath string, flow *core.Rev
 			ID: "coder-review-target:" + coder.ID, Source: target.Source, Text: string(content),
 		})
 	}
+	clarificationAnswers, err := clarificationAnswerDecisions(*state, *flow, coder)
+	if err != nil {
+		return err
+	}
+	review.Decisions = append(review.Decisions, clarificationAnswers...)
 	if flow.SourceDispatchID == coder.ID {
 		for _, predecessor := range state.Graph.ReviewFlows {
 			if "flow:"+predecessor.ID != flow.Contract.CreatedFrom {
@@ -833,21 +1003,35 @@ func flowTokens(graph core.TaskGraph, flow core.ReviewFlow) (int64, bool) {
 	known := true
 	for _, id := range flow.DispatchIDs {
 		dispatch, _ := graph.GraphDispatch(id)
-		if !active(dispatch.Status) && len(dispatch.RuntimeUsage) == 0 {
-			known = false
-		}
-		for _, usage := range dispatch.RuntimeUsage {
-			if usage.InputTokens == nil || usage.OutputTokens == nil || usage.Scope == "latest-assistant-message" {
+		if len(dispatch.RuntimeUsageCheckpoints) == 0 {
+			if !active(dispatch.Status) && len(dispatch.RuntimeUsage) == 0 {
 				known = false
 			}
-			for _, value := range []*int64{usage.InputTokens, usage.OutputTokens} {
-				if value != nil {
-					if *value > math.MaxInt64-total {
-						return math.MaxInt64, known
+			for _, usage := range dispatch.RuntimeUsage {
+				if usage.InputTokens == nil || usage.OutputTokens == nil || usage.Scope == "latest-assistant-message" {
+					known = false
+				}
+				for _, value := range []*int64{usage.InputTokens, usage.OutputTokens} {
+					if value != nil {
+						if *value > math.MaxInt64-total {
+							return math.MaxInt64, known
+						}
+						total += *value
 					}
-					total += *value
 				}
 			}
+			continue
+		}
+		summary, err := core.SummarizeUsage(dispatch.RuntimeSessionID, dispatch.RuntimeUsage, dispatch.RuntimeUsageCheckpoints)
+		if err != nil || summary.TokenStatus != "complete" &&
+			(!active(dispatch.Status) || len(dispatch.RuntimeUsage) != 0 || len(dispatch.RuntimeUsageCheckpoints) != 0) {
+			known = false
+		}
+		if summary.InputOutputTokens != nil {
+			if *summary.InputOutputTokens > math.MaxInt64-total {
+				return math.MaxInt64, false
+			}
+			total += *summary.InputOutputTokens
 		}
 	}
 	return total, known
@@ -858,17 +1042,16 @@ func flowNanoAIU(graph core.TaskGraph, flow core.ReviewFlow) (*float64, string) 
 	seen, complete := false, true
 	for _, id := range flow.DispatchIDs {
 		dispatch, _ := graph.GraphDispatch(id)
-		for _, usage := range dispatch.RuntimeUsage {
-			if usage.TotalNanoAIU == nil || math.IsNaN(*usage.TotalNanoAIU) ||
-				math.IsInf(*usage.TotalNanoAIU, 0) || *usage.TotalNanoAIU < 0 {
-				complete = false
-				continue
-			}
-			total += *usage.TotalNanoAIU
+		if len(dispatch.RuntimeUsage) == 0 && len(dispatch.RuntimeUsageCheckpoints) == 0 {
+			continue
+		}
+		summary, err := core.SummarizeUsage(dispatch.RuntimeSessionID, dispatch.RuntimeUsage, dispatch.RuntimeUsageCheckpoints)
+		if err != nil || summary.CreditsStatus != "complete" {
+			complete = false
+		}
+		if summary.NanoAIU != nil {
+			total += *summary.NanoAIU
 			seen = true
-			if usage.AICreditsStatus == nil || *usage.AICreditsStatus != "complete" {
-				complete = false
-			}
 		}
 	}
 	if !seen {

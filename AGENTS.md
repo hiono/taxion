@@ -1,5 +1,14 @@
 # Orchestrator operating rules
 
+- For Taxion's own OSS development, apply the
+  [OSS/work-environment boundary](docs/develop/privacy-provenance.md#oss-development-boundary).
+  Never require access to a user's confidential repository, code, workspace,
+  or business Task as a prerequisite. Continue authorized OSS-reproducible
+  work using nonconfidential conditions, observations, and expected behavior.
+- Keep business code and workspaces in the business environment. This does
+  not prohibit authorized Taxion use within that environment. Extra budget
+  or time alone grants no additional review, publication, distribution,
+  installation, or recovery authority.
 - Keep the user's final outcome as the completion criterion. A passing test,
   completed review, or progress report is not a substitute for an authorized
   merge or other requested delivery. Continue to the next authorized action.
