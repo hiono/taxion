@@ -5,6 +5,22 @@ Copilot は SDK、OpenCode は ACP を adapter 内で扱い、core の型へ外�
 全体の接続は[アーキテクチャ](architecture.md)、利用者の操作は
 [利用者ガイド](../userguide/user-guide.md)に分ける。
 
+## Job 協調と Runtime の境界（ADR-0077）
+
+Job は協調と成果を保持する継続単位であり、Runtime session や一回の Dispatch とは別の寿命を持つ。
+Runtime adapter は一つの Role execution を開始・観測・停止する。Job の工程順序や質問 protocol を決める責務は持たない。
+
+Role 間の依頼、質問、回答、判断、部分成果は同じ Job に関連付ける。
+受信 Role には Job の目的、既存 Context、関連成果、必要な協調履歴を渡し、固定された質問 schema の充足を実行条件にしない。
+Role は情報不足だけで拒否せず、自分で判断して進めるか、必要な相手へ自然言語で確認する。
+
+Controller は Job と execution の対応、出所、状態、権限、承認、予算、期限、競合、安全性を管理する。
+Role の回答は承認・認可・scope の変更を意味しない。独立 Reviewer の実行環境と判断も維持する。
+
+現在の ReviewFlow / Clarification / Dispatch の実装は、この目標モデルの完成を意味しない。
+これらの構造を互換性維持のために温存せず、Job 中心の協調を妨げる場合は置き換える。
+設計の詳細は [Job 中心の Role 協調](role-collaboration.md) を参照する。
+
 ## 実行の流れ
 
 Controller は保存済み Task と Dispatch の承認・対象・設定を照合し、
