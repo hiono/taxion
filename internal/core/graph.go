@@ -510,6 +510,7 @@ type TaskGraph struct {
 	Archives              []TaskArchive    `json:"archives,omitempty"`
 	ApprovalSchemaVersion int              `json:"approvalSchemaVersion,omitempty"`
 	Approvals             []ApprovalBundle `json:"approvals,omitempty"`
+	JobMessages           []JobMessage     `json:"jobMessages,omitempty"`
 }
 
 func graphError(format string, args ...any) error {
@@ -1457,6 +1458,9 @@ func (g TaskGraph) Validate() error {
 	if g.Version != 1 {
 		return graphError("unsupported version %d", g.Version)
 	}
+	if err := g.validateJobMessages(); err != nil {
+		return err
+	}
 	ids := map[string]bool{}
 	decisionIDs := map[string]TaskDecision{}
 	for _, t := range g.Tasks {
@@ -1923,6 +1927,7 @@ func cloneGraph(g TaskGraph) TaskGraph {
 	}
 	copy.ReviewFlows = slices.Clone(g.ReviewFlows)
 	copy.Approvals = slices.Clone(g.Approvals)
+	copy.JobMessages = slices.Clone(g.JobMessages)
 	for i := range copy.Approvals {
 		copy.Approvals[i].Configuration.Sources = maps.Clone(g.Approvals[i].Configuration.Sources)
 		copy.Approvals[i].Configuration.Selection = slices.Clone(g.Approvals[i].Configuration.Selection)

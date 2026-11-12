@@ -13,9 +13,28 @@ Taxion は、承認した作業を複数の役割へ渡し、実行と成果の�
 JSON を生成する主体が違っても、利用者の承認と実行条件は共通である。
 
 Planner、Coder、Reviewer は役割であって、常駐サービスではない。
-Coder と Reviewer は独立した session と worktree を使い、
-Controller が承認済みの指示と対象をそれぞれに渡す。
+各 Role は Job の目的と共有 Context を受け取り、担当領域の判断を行う。
+Role 間の協調は固定された Planner → Coder → Reviewer の直列手順に限定しない。
+必要に応じて別 Role へ仕事を渡し、質問・回答・部分成果を同じ Job に蓄積して続行する。
+実行 session は Role ごとに分離し、Reviewer の独立性も維持する。
 人のコードや途中成果の独立レビューは、Coder 成功を前提にせず持込み入力から開始する。
+
+## Job 中心の Role 協調
+
+Job（Task）は作業の継続単位であり、Dispatch や session はその Job を進めるための実行単位である。
+Job の意味的な完全性を Controller が審査して Role の受渡しを拒否してはならない。
+受信 Role は自然言語、既存 Context、成果物、過去のやり取りから判断し、可能な範囲を進める。
+可逆で影響の小さい不足は仮定と不確実性を示して進め、判断に必要な情報だけを相手 Role に尋ねる。
+回答・判断・部分成果は元の Job に結び付け、担当 Role がその情報を使って作業を再開する。
+
+Role 間の会話は固定 schema の質問票ではなく、Job に属する追記型の協調記録として扱う。
+質問の分類、理由、回答形式、参照一覧などを一律の必須項目にしない。
+Controller が検証するのは Job と出所の対応、実行状態、権限、承認、安全性であり、
+質問の意味や情報の十分性は担当 Role が判断する。
+
+既存の ReviewFlow、Clarification、Dispatch の形はこのモデルを制約しない。
+必要な場合は役割・実行・保存モデルを再設計し、既存 protocol の互換性を維持するためだけの分岐を増やさない。
+設計の正本は [Job 中心の Role 協調](role-collaboration.md) と [ADR-0077](adr/0077-job-centered-role-collaboration.md) とする。
 
 ## 処理と依存関係
 
