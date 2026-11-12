@@ -34,6 +34,9 @@ func newSubagentGuard(ready bool) *subagentGuard {
 }
 
 func (a *Adapter) sessionHooks(handle *managedSession) *sdk.SessionHooks {
+	if handle == nil && a.config.ToolPolicy == nil {
+		return nil
+	}
 	var hooks *sdk.SessionHooks
 	if a.config.ToolPolicy != nil {
 		hooks = a.toolHooks()
