@@ -79,6 +79,9 @@ func (a *Adapter) clarificationTool(invocation sdk.ToolInvocation) (sdk.ToolResu
 	if !active {
 		return sdk.ToolResult{}, fmt.Errorf("taxion: clarification requires an active Role turn")
 	}
+	if err := handle.subagentState().check(); err != nil {
+		return sdk.ToolResult{}, err
+	}
 	if err := invocation.TraceContext.Err(); err != nil {
 		return sdk.ToolResult{}, err
 	}

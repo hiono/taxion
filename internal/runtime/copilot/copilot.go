@@ -78,6 +78,7 @@ type Adapter struct {
 type managedSession struct {
 	sdk *sdk.Session
 
+	subagents *subagentGuard
 	opMu     sync.Mutex
 	emitMu   sync.Mutex
 	mu       sync.Mutex
@@ -458,7 +459,7 @@ func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 	if err := a.ensureStarted(ctx); err != nil {
 		return "", err
 	}
-	handle := &managedSession{watchers: map[*subscription]struct{}{}}
+	handle := &managedSession{watchers: map[*subscription]struct{}{}, subagents: newSubagentGuard(true)}
 	session, err := a.client.CreateSession(ctx, a.sessionConfig(handle.onEvent))
 	if err != nil {
 		return "", fmt.Errorf("taxion: create Copilot session: %w", err)
@@ -569,17 +570,25 @@ func (a *Adapter) resume(ctx context.Context, sessionID string, stopOnly bool) e
 		return ErrClosedAdapter
 	}
 	handle := a.sessions[sessionID]
+	rebuildSubagents := handle == nil
 	if handle == nil {
-		handle = &managedSession{watchers: map[*subscription]struct{}{}}
+		handle = &managedSession{watchers: map[*subscription]struct{}{}, subagents: newSubagentGuard(false)}
 	}
 	a.mu.Unlock()
 
 	handle.opMu.Lock()
 	defer handle.opMu.Unlock()
 	handle.mu.Lock()
+	if handle.subagents == nil {
+		handle.subagents = newSubagentGuard(false)
+		rebuildSubagents = true
+	}
 	if !handle.stopped && handle.sdk != nil {
 		handle.mu.Unlock()
 		return nil
+	}
+	if rebuildSubagents && !stopOnly {
+		handle.subagents.beginRebuild()
 	}
 	handle.stopped = false
 	handle.stopOnly = stopOnly
@@ -593,12 +602,23 @@ func (a *Adapter) resume(ctx context.Context, sessionID string, stopOnly bool) e
 	}
 	session, err := a.client.ResumeSession(ctx, sessionID, config)
 	if err != nil {
+		if rebuildSubagents && !stopOnly {
+			handle.subagents.failRebuild()
+		}
 		handle.mu.Lock()
 		handle.stopped = true
 		handle.busy = false
 		handle.turnDone = nil
 		handle.mu.Unlock()
 		return fmt.Errorf("taxion: resume Copilot session: %w", err)
+	}
+	if rebuildSubagents && !stopOnly {
+		history, historyErr := session.GetEvents(ctx)
+		if historyErr != nil {
+			handle.subagents.failRebuild()
+		} else {
+			handle.subagents.rebuild(history)
+		}
 	}
 	handle.mu.Lock()
 	handle.sdk = session
@@ -799,13 +819,13 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 		SessionLimits:                      a.sessionLimits(),
 		OnPermissionRequest:                a.permissionHandler(),
 		OnEvent:                            onEvent,
+		Hooks:                              a.sessionHooks(handle),
 	}
 	if a.config.ToolPolicy != nil {
 		enabled := len(a.config.ToolPolicy.Skills)+len(a.config.ToolPolicy.Plugins) != 0
 		config.EnableSkills = &enabled
 		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
 		config.Tools = append(config.Tools, a.mcpTools()...)
-		config.Hooks = a.toolHooks()
 	}
 	return config
 }
@@ -830,13 +850,13 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		SessionLimits:                      a.sessionLimits(),
 		OnPermissionRequest:                a.permissionHandler(),
 		OnEvent:                            onEvent,
+		Hooks:                              a.sessionHooks(handle),
 	}
 	if a.config.ToolPolicy != nil {
 		enabled := len(a.config.ToolPolicy.Skills)+len(a.config.ToolPolicy.Plugins) != 0
 		config.EnableSkills = &enabled
 		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
 		config.Tools = append(config.Tools, a.mcpTools()...)
-		config.Hooks = a.toolHooks()
 	}
 	return config
 }
@@ -1223,6 +1243,7 @@ func within(root, target string) bool {
 }
 
 func (h *managedSession) onEvent(event sdk.SessionEvent) {
+	h.subagentState().observeEvent(event)
 	mapped, ok := normalizeEvent(event)
 	if ok {
 		if event.AgentID != nil {
@@ -1283,6 +1304,22 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 		}
 		payload, _ := json.Marshal(observation)
 		return runtime.Event{Type: runtime.EventExecution, Payload: string(payload)}, true
+	case *sdk.SubagentStartedData:
+		payload, _ := json.Marshal(struct {
+			ToolCallID string `json:"toolCallId"`
+			Resumable  *bool  `json:"resumable,omitempty"`
+		}{data.ToolCallID, data.Resumable})
+		return runtime.Event{Type: runtime.EventSubagentStarted, Payload: string(payload)}, true
+	case *sdk.SubagentCompletedData:
+		payload, _ := json.Marshal(struct {
+			ToolCallID string `json:"toolCallId"`
+		}{data.ToolCallID})
+		return runtime.Event{Type: runtime.EventSubagentCompleted, Payload: string(payload)}, true
+	case *sdk.SubagentFailedData:
+		payload, _ := json.Marshal(struct {
+			ToolCallID string `json:"toolCallId"`
+		}{data.ToolCallID})
+		return runtime.Event{Type: runtime.EventSubagentFailed, Payload: string(payload)}, true
 	case *sdk.ToolExecutionCompleteData:
 		observation := core.ExecutionObservation{
 			Phase: "tool-complete", CallID: data.ToolCallID, Success: &data.Success,

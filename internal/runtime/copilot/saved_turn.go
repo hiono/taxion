@@ -191,7 +191,8 @@ func savedSessionTurn(events []sdk.SessionEvent, sessionID, worktree string, sto
 		}
 		if projected {
 			switch normalized.Type {
-			case runtime.EventExecution, runtime.EventUsage, runtime.EventOutput:
+			case runtime.EventExecution, runtime.EventUsage, runtime.EventOutput,
+				runtime.EventSubagentStarted, runtime.EventSubagentCompleted, runtime.EventSubagentFailed:
 				result.Events = append(result.Events, normalized)
 			}
 		}

@@ -192,7 +192,9 @@ func matchSavedTurn(records store.Records, dispatch core.GraphDispatch, turn run
 	matched := make(map[int]bool)
 	for _, receipt := range records.Events {
 		if receipt.DispatchID != dispatch.ID ||
-			receipt.Type != runtime.EventExecution && receipt.Type != runtime.EventUsage && receipt.Type != runtime.EventOutput {
+			receipt.Type != runtime.EventExecution && receipt.Type != runtime.EventUsage && receipt.Type != runtime.EventOutput &&
+			receipt.Type != runtime.EventSubagentStarted && receipt.Type != runtime.EventSubagentCompleted &&
+			receipt.Type != runtime.EventSubagentFailed {
 			continue
 		}
 		if receipt.SessionID != turn.SessionID || receipt.Hash != receiptHash(receipt.Payload) {

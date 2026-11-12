@@ -128,7 +128,7 @@ func TestClarificationHostToolPersistsOnlyBoundRunningRoleObservation(t *testing
 	}); err != nil {
 		t.Fatal(err)
 	}
-	handle := &managedSession{sdk: &sdk.Session{}, busy: true}
+	handle := &managedSession{sdk: &sdk.Session{}, busy: true, subagents: newSubagentGuard(true)}
 	adapter.sessions["session"] = handle
 	var handler sdk.ToolHandler
 	var clarificationTool sdk.Tool
@@ -584,7 +584,7 @@ func TestClarificationInboxFailsClosedWithoutRootAttribution(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		adapter.sessions["coder"] = &managedSession{sdk: &sdk.Session{}, busy: true}
+		adapter.sessions["coder"] = &managedSession{sdk: &sdk.Session{}, busy: true, subagents: newSubagentGuard(true)}
 		for _, names := range [][]string{adapter.sessionConfig(nil).AvailableTools, adapter.resumeConfig(nil).AvailableTools} {
 			if slices.Contains(names, ClarificationInboxToolName) {
 				t.Fatal("disabled inbox allowlisted")
