@@ -502,7 +502,7 @@ type TaskWaiver struct {
 type TaskGraph struct {
 	Version               int              `json:"version"`
 	Jobs                  []Job            `json:"jobs,omitempty"`
-	RoleExecutions        []RoleExecution  `json:"roleExecutions,omitempty"`
+	RoleExecutions        []RoleExecution      `json:"roleExecutions,omitempty"`
 	RoleExecutionHistory  []RoleExecutionEvent `json:"roleExecutionHistory,omitempty"`
 	Tasks                 []GraphTask      `json:"tasks"`
 	Concerns              []Concern        `json:"concerns"`

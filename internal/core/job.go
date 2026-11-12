@@ -23,6 +23,7 @@ type Job struct {
 type JobStatus string
 
 const (
+	JobDraft     JobStatus = "DRAFT"
 	JobActive    JobStatus = "ACTIVE"
 	JobWaiting   JobStatus = "WAITING"
 	JobCompleted JobStatus = "COMPLETED"
@@ -31,7 +32,7 @@ const (
 )
 
 func validJobStatus(status JobStatus) bool {
-	return slices.Contains([]JobStatus{JobActive, JobWaiting, JobCompleted, JobFailed, JobCancelled}, status)
+	return slices.Contains([]JobStatus{JobDraft, JobActive, JobWaiting, JobCompleted, JobFailed, JobCancelled}, status)
 }
 
 type RoleExecutionStatus string
@@ -349,6 +350,11 @@ func (g TaskGraph) validateJobModel() error {
 			}
 		}
 	}
+	for _, task := range g.Tasks {
+		if _, collides := jobs[task.ID]; collides {
+			return graphError("Job and Task identities must be distinct")
+		}
+	}
 	if len(g.Jobs) == 0 && len(g.RoleExecutions) != 0 {
 		return graphError("RoleExecutions require first-class Jobs")
 	}
@@ -357,7 +363,7 @@ func (g TaskGraph) validateJobModel() error {
 	for _, execution := range g.RoleExecutions {
 		_, jobOK := jobs[execution.JobID]
 		if strings.TrimSpace(execution.ID) == "" || executions[execution.ID].ID != "" ||
-			!jobOK || execution.ID == execution.JobID ||
+			!jobOK || execution.ID == execution.JobID || jobs[execution.ID].ID != "" || tasks[execution.ID].ID != "" ||
 			strings.TrimSpace(execution.Role) == "" || !validRoleExecutionStatus(execution.Status) ||
 			execution.CreatedAt.IsZero() || execution.UpdatedAt.Before(execution.CreatedAt) ||
 			(execution.RuntimeSessionID == "") != (execution.RuntimeConfigHash == "") ||
