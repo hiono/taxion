@@ -405,19 +405,16 @@ func TestAcceptSavedReviewFailsClosed(t *testing.T) {
 	contractRoot, sourceRoot := flow.Contract.Worktree, coder.Instruction.Worktree
 	branchName := gitTest(t, contractRoot, "branch", "--show-current")
 	headSHA := gitTest(t, contractRoot, "rev-parse", "HEAD")
-	indexFiles := map[string][]byte{}
-	for _, root := range []string{contractRoot, sourceRoot} {
-		index := gitTest(t, root, "rev-parse", "--path-format=absolute", "--git-path", "index")
-		if _, exists := indexFiles[index]; exists {
-			continue
-		}
-		data, err := os.ReadFile(index)
-		if err != nil {
-			t.Fatal(err)
-		}
-		indexFiles[index] = data
+	contractIndex := gitTest(t, contractRoot, "rev-parse", "--path-format=absolute", "--git-path", "index")
+	indexData, err := os.ReadFile(contractIndex)
+	if err != nil {
+		t.Fatal(err)
 	}
-	worktreeFiles := map[string][]byte{}
+	type fileSnapshot struct {
+		content []byte
+		mode    fs.FileMode
+	}
+	worktreeFiles := map[string]fileSnapshot{}
 	for _, root := range []string{contractRoot, sourceRoot} {
 		path := filepath.Join(root, "internal", "app.go")
 		if _, exists := worktreeFiles[path]; exists {
@@ -427,7 +424,11 @@ func TestAcceptSavedReviewFailsClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		worktreeFiles[path] = data
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		worktreeFiles[path] = fileSnapshot{content: data, mode: info.Mode().Perm()}
 	}
 	snapshotRef := coder.Result.GitEvidence.SnapshotRef
 	snapshotSHA := ""
@@ -441,38 +442,8 @@ func TestAcceptSavedReviewFailsClosed(t *testing.T) {
 		t.Fatal(reviewPathErr)
 	}
 
-	resetFixture := func(t *testing.T) {
+	restoreWorkspace := func(t *testing.T) {
 		t.Helper()
-		for path, data := range worktreeFiles {
-			if err := os.WriteFile(path, data, 0600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if branchName != "" {
-			if current := gitTest(t, contractRoot, "branch", "--show-current"); current != branchName {
-				gitTest(t, contractRoot, "switch", branchName)
-			}
-		} else if current := gitTest(t, contractRoot, "rev-parse", "HEAD"); current != headSHA {
-			gitTest(t, contractRoot, "switch", "--detach", headSHA)
-		}
-		if snapshotRef != "" {
-			gitTest(t, contractRoot, "update-ref", snapshotRef, snapshotSHA)
-		}
-		for path, data := range worktreeFiles {
-			if err := os.WriteFile(path, data, 0600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		for path, data := range indexFiles {
-			if err := os.WriteFile(path, data, 0600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if !reviewPathExisted {
-			if err := os.RemoveAll(reviewPath); err != nil {
-				t.Fatal(err)
-			}
-		}
 		var restored store.Workspace
 		if err := json.Unmarshal(baselineJSON, &restored); err != nil {
 			t.Fatal(err)
@@ -484,14 +455,23 @@ func TestAcceptSavedReviewFailsClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	restoreWorktreeFile := func(t *testing.T, root string) {
+		t.Helper()
+		path := filepath.Join(root, "internal", "app.go")
+		snapshot, ok := worktreeFiles[path]
+		if !ok {
+			t.Fatalf("missing worktree snapshot for %s", path)
+		}
+		if err := os.WriteFile(path, snapshot.content, snapshot.mode); err != nil {
+			t.Fatal(err)
+		}
+		gitTest(t, root, "update-index", "--refresh", "--", "internal/app.go")
+	}
 
-	for index, failure := range []string{"expiry", "stale-hash", "actor", "reason", "runner", "other-stop",
+	for _, failure := range []string{"expiry", "stale-hash", "actor", "reason", "runner", "other-stop",
 		"configuration", "snapshot-ref", "current-branch", "current-index",
 		"current-worktree", "source-worktree", "review-path", "late-result"} {
 		t.Run(failure, func(t *testing.T) {
-			if index != 0 {
-				resetFixture(t)
-			}
 			started := time.Now()
 			defer func() { t.Logf("phase=total elapsed=%s", time.Since(started)) }()
 			request, acceptance := baseRequest, baseAcceptance
@@ -570,6 +550,32 @@ func TestAcceptSavedReviewFailsClosed(t *testing.T) {
 				t.Fatal("rejected acceptance changed saved state", err)
 			}
 		})
+		switch failure {
+		case "runner", "other-stop", "late-result":
+			restoreWorkspace(t)
+		case "snapshot-ref":
+			gitTest(t, contractRoot, "update-ref", snapshotRef, snapshotSHA)
+		case "current-branch":
+			if branchName != "" {
+				gitTest(t, contractRoot, "switch", branchName)
+			} else {
+				gitTest(t, contractRoot, "switch", "--detach", headSHA)
+			}
+		case "current-index":
+			if err := os.WriteFile(contractIndex, indexData, 0600); err != nil {
+				t.Fatal(err)
+			}
+		case "current-worktree":
+			restoreWorktreeFile(t, contractRoot)
+		case "source-worktree":
+			restoreWorktreeFile(t, sourceRoot)
+		case "review-path":
+			if !reviewPathExisted {
+				if err := os.RemoveAll(reviewPath); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
 	}
 }
 
