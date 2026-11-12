@@ -181,7 +181,6 @@ type HumanDecisionRequest struct {
 // Parent/children, siblings and blocks are derived from parentId and dependsOn.
 type GraphTask struct {
 	ID                 string                `json:"id"`
-	JobID              string                `json:"jobId,omitempty"`
 	Title              string                `json:"title"`
 	Repo               string                `json:"repo"`
 	Type               string                `json:"type"`

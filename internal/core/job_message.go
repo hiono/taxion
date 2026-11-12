@@ -1,6 +1,7 @@
 package core
 
 import (
+	"slices"
 	"strings"
 	"time"
 )
@@ -85,8 +86,7 @@ func (g TaskGraph) validateJobMessages() error {
 				return graphError("Job message references an unknown Job")
 			}
 			if message.TaskID != "" {
-				task, ok := tasks[message.TaskID]
-				if !ok || task.JobID != message.JobID {
+				if _, ok := tasks[message.TaskID]; !ok || !slices.Contains(jobs[message.JobID].TaskIDs, message.TaskID) {
 					return graphError("Job message references a Task outside its Job")
 				}
 			}

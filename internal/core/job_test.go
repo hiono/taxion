@@ -11,9 +11,9 @@ func newJobGraph() TaskGraph {
 		Version: 1,
 		Jobs: []Job{{
 			ID: "job-a", Request: "Original request", Goal: "Complete the requested work",
-			RootTaskID: "task-a", Status: JobActive, CreatedAt: now, UpdatedAt: now,
+			RootTaskID: "task-a", TaskIDs: []string{"task-a"}, Status: JobActive, CreatedAt: now, UpdatedAt: now,
 		}},
-		Tasks: []GraphTask{{ID: "task-a", JobID: "job-a"}},
+		Tasks: []GraphTask{{ID: "task-a"}},
 	}
 }
 
@@ -88,10 +88,10 @@ func TestRoleExecutionRejectsCrossJobParentAndTask(t *testing.T) {
 	graph := newJobGraph()
 	now := time.Now().UTC()
 	graph.Jobs = append(graph.Jobs, Job{
-		ID: "job-b", Request: "Other request", Goal: "Other goal", RootTaskID: "task-b",
+		ID: "job-b", Request: "Other request", Goal: "Other goal", RootTaskID: "task-b", TaskIDs: []string{"task-b"},
 		Status: JobActive, CreatedAt: now, UpdatedAt: now,
 	})
-	graph.Tasks = append(graph.Tasks, GraphTask{ID: "task-b", JobID: "job-b"})
+	graph.Tasks = append(graph.Tasks, GraphTask{ID: "task-b"})
 	if err := graph.AppendRoleExecution(RoleExecution{
 		ID: "exec-a", JobID: "job-a", TaskID: "task-a", Role: "CODER",
 		Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
@@ -163,7 +163,7 @@ func TestJobMessageRejectsCrossJobExecutionReply(t *testing.T) {
 	graph := newJobGraph()
 	now := time.Now().UTC()
 	graph.Jobs = append(graph.Jobs, Job{
-		ID: "job-b", Request: "Other request", Goal: "Other goal", RootTaskID: "task-b",
+		ID: "job-b", Request: "Other request", Goal: "Other goal", RootTaskID: "task-b", TaskIDs: []string{"task-b"},
 		Status: JobActive, CreatedAt: now, UpdatedAt: now,
 	})
 	graph.Tasks = append(graph.Tasks, GraphTask{ID: "task-b", JobID: "job-b"})

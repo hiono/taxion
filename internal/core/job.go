@@ -13,6 +13,7 @@ type Job struct {
 	Request     string    `json:"request"`
 	Goal        string    `json:"goal"`
 	RootTaskID  string    `json:"rootTaskId"`
+	TaskIDs     []string  `json:"taskIds"`
 	Constraints []string  `json:"constraints,omitempty"`
 	Status      JobStatus `json:"status"`
 	CreatedAt   time.Time `json:"createdAt"`
@@ -120,6 +121,71 @@ func (g TaskGraph) Job(id string) (Job, bool) {
 		}
 	}
 	return Job{}, false
+}
+
+// JobForTask resolves the Job that owns a Task without changing the Task contract.
+func (g TaskGraph) JobForTask(taskID string) (Job, bool) {
+	for _, job := range g.Jobs {
+		if slices.Contains(job.TaskIDs, taskID) {
+			job.Constraints = slices.Clone(job.Constraints)
+			job.TaskIDs = slices.Clone(job.TaskIDs)
+			return job, true
+		}
+	}
+	return Job{}, false
+}
+
+// CreateJob binds an existing root Task to a new Job. Job membership is stored
+// on the Job so existing Task approval hashes and history remain unchanged.
+func (g *TaskGraph) CreateJob(job Job) error {
+	if g == nil {
+		return graphError("Job creation requires a Task Graph")
+	}
+	next := cloneGraph(*g)
+	if job.CreatedAt.IsZero() {
+		job.CreatedAt = time.Now().UTC()
+	}
+	if job.UpdatedAt.IsZero() {
+		job.UpdatedAt = job.CreatedAt
+	}
+	if len(job.TaskIDs) == 0 && job.RootTaskID != "" {
+		job.TaskIDs = []string{job.RootTaskID}
+	}
+	next.Jobs = append(next.Jobs, job)
+	if err := next.validateJobModel(); err != nil {
+		return err
+	}
+	*g = next
+	return nil
+}
+
+// AttachTaskToJob adds a separately identified work item to an existing Job.
+func (g *TaskGraph) AttachTaskToJob(jobID, taskID string) error {
+	if g == nil || strings.TrimSpace(jobID) == "" || strings.TrimSpace(taskID) == "" {
+		return graphError("Task attachment requires a Job and Task ID")
+	}
+	next := cloneGraph(*g)
+	if _, ok := next.GraphTask(taskID); !ok {
+		return graphError("Task %s does not exist", taskID)
+	}
+	for i := range next.Jobs {
+		if next.Jobs[i].ID != jobID {
+			if slices.Contains(next.Jobs[i].TaskIDs, taskID) {
+				return graphError("Task %s already belongs to another Job", taskID)
+			}
+			continue
+		}
+		if !slices.Contains(next.Jobs[i].TaskIDs, taskID) {
+			next.Jobs[i].TaskIDs = append(next.Jobs[i].TaskIDs, taskID)
+			next.Jobs[i].UpdatedAt = time.Now().UTC()
+		}
+		if err := next.validateJobModel(); err != nil {
+			return err
+		}
+		*g = next
+		return nil
+	}
+	return graphError("Job %s not found", jobID)
 }
 
 func (g TaskGraph) RoleExecution(id string) (RoleExecution, bool) {
@@ -247,35 +313,44 @@ func (g *TaskGraph) BindRoleExecutionSession(id, sessionID, configHash string) e
 }
 
 func (g TaskGraph) validateJobModel() error {
-	jobs := make(map[string]Job, len(g.Jobs))
 	tasks := make(map[string]GraphTask, len(g.Tasks))
 	for _, task := range g.Tasks {
 		tasks[task.ID] = task
 	}
+	jobs := make(map[string]Job, len(g.Jobs))
+	taskOwners := make(map[string]string)
 	for _, job := range g.Jobs {
 		if strings.TrimSpace(job.ID) == "" || jobs[job.ID].ID != "" ||
 			strings.TrimSpace(job.Request) == "" || strings.TrimSpace(job.Goal) == "" ||
 			strings.TrimSpace(job.RootTaskID) == "" || !validJobStatus(job.Status) ||
 			job.CreatedAt.IsZero() || job.UpdatedAt.Before(job.CreatedAt) ||
-			!validList(job.Constraints) {
+			!validList(job.Constraints) || !validList(job.TaskIDs) ||
+			!slices.Contains(job.TaskIDs, job.RootTaskID) {
 			return graphError("invalid or duplicate Job %q", job.ID)
 		}
 		root, ok := tasks[job.RootTaskID]
-		if !ok || root.JobID != job.ID || root.ParentID != "" || root.ID == job.ID {
-			return graphError("Job %s requires a distinct root Task assigned to that Job", job.ID)
+		if !ok || root.ParentID != "" || root.ID == job.ID {
+			return graphError("Job %s requires a distinct registered root Task", job.ID)
+		}
+		for _, taskID := range job.TaskIDs {
+			task, ok := tasks[taskID]
+			if !ok || taskID == job.ID || taskOwners[taskID] != "" {
+				return graphError("Job %s contains a missing, colliding or multiply-owned Task", job.ID)
+			}
+			taskOwners[taskID] = job.ID
+			_ = task
 		}
 		jobs[job.ID] = job
 	}
-	if len(g.Jobs) == 0 && len(g.RoleExecutions) != 0 {
-		return graphError("RoleExecutions require first-class Jobs")
-	}
-	if len(g.Jobs) != 0 {
-		for _, task := range g.Tasks {
-			job, ok := jobs[task.JobID]
-			if !ok || task.JobID == task.ID || job.ID == "" {
-				return graphError("Task %s must belong to a distinct registered Job", task.ID)
+	for _, job := range g.Jobs {
+		for _, taskID := range job.TaskIDs {
+			if taskID == job.ID {
+				return graphError("Job and Task identities must be distinct")
 			}
 		}
+	}
+	if len(g.Jobs) == 0 && len(g.RoleExecutions) != 0 {
+		return graphError("RoleExecutions require first-class Jobs")
 	}
 	executions := make(map[string]RoleExecution, len(g.RoleExecutions))
 	sessions := make(map[string]string, len(g.RoleExecutions))
@@ -291,11 +366,8 @@ func (g TaskGraph) validateJobModel() error {
 			(roleExecutionTerminal(execution.Status) != !execution.FinishedAt.IsZero()) {
 			return graphError("invalid RoleExecution %q", execution.ID)
 		}
-		if execution.TaskID != "" {
-			task, ok := tasks[execution.TaskID]
-			if !ok || task.JobID != execution.JobID {
-				return graphError("RoleExecution %s references a Task outside its Job", execution.ID)
-			}
+		if execution.TaskID != "" && taskOwners[execution.TaskID] != execution.JobID {
+			return graphError("RoleExecution %s references a Task outside its Job", execution.ID)
 		}
 		if execution.ParentExecutionID != "" && execution.ParentExecutionID == execution.ID {
 			return graphError("RoleExecution cannot be its own parent")
@@ -364,8 +436,6 @@ func (g TaskGraph) validateJobModel() error {
 		if states[execution.ID] != execution.Status {
 			return graphError("RoleExecution %s does not match its transition history", execution.ID)
 		}
-	}
-	for _, execution := range g.RoleExecutions {
 		if execution.TriggerMessageID != "" {
 			found := false
 			for _, message := range g.JobMessages {
