@@ -460,7 +460,7 @@ func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 		return "", err
 	}
 	handle := &managedSession{watchers: map[*subscription]struct{}{}, subagents: newSubagentGuard(true)}
-	session, err := a.client.CreateSession(ctx, a.sessionConfig(handle.onEvent))
+	session, err := a.client.CreateSession(ctx, a.sessionConfig(handle))
 	if err != nil {
 		return "", fmt.Errorf("taxion: create Copilot session: %w", err)
 	}
@@ -596,7 +596,7 @@ func (a *Adapter) resume(ctx context.Context, sessionID string, stopOnly bool) e
 		handle.turnDone = make(chan struct{})
 	}
 	handle.mu.Unlock()
-	config := a.resumeConfig(handle.onEvent)
+	config := a.resumeConfig(handle)
 	if stopOnly {
 		config = a.stopResumeConfig(handle.onEvent)
 	}
@@ -798,7 +798,11 @@ func (a *Adapter) lookup(sessionID string) (*managedSession, error) {
 	return handle, nil
 }
 
-func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionConfig {
+func (a *Adapter) sessionConfig(handle *managedSession) *sdk.SessionConfig {
+	var onEvent sdk.SessionEventHandler
+	if handle != nil {
+		onEvent = handle.onEvent
+	}
 	streaming := true
 	// SDK nil does not inherit the CLI's project/personal skill discovery.
 	native := a.config.ToolPolicy == nil
@@ -830,7 +834,11 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 	return config
 }
 
-func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessionConfig {
+func (a *Adapter) resumeConfig(handle *managedSession) *sdk.ResumeSessionConfig {
+	var onEvent sdk.SessionEventHandler
+	if handle != nil {
+		onEvent = handle.onEvent
+	}
 	streaming := true
 	native := a.config.ToolPolicy == nil
 	discovery := &native

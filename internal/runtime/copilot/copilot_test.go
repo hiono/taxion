@@ -676,7 +676,7 @@ func TestLiveReviewerSessionCannotWrite(t *testing.T) {
 	}
 	target := filepath.Join(worktree, "blocked.txt")
 	handle := &managedSession{watchers: map[*subscription]struct{}{}}
-	config := adapter.sessionConfig(handle.onEvent)
+	config := adapter.sessionConfig(handle)
 	config.Tools = []sdk.Tool{sdk.DefineTool("taxion_test_write", "Create a file in the assigned worktree",
 		func(_ struct{}, _ sdk.ToolInvocation) (sdk.ToolResult, error) {
 			if err := os.WriteFile(target, []byte("must not exist"), 0o600); err != nil {
@@ -770,7 +770,7 @@ func TestLiveCompactionRetainsRoleAndDurableContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	handle := &managedSession{watchers: map[*subscription]struct{}{}}
-	config := adapter.sessionConfig(handle.onEvent)
+	config := adapter.sessionConfig(handle)
 	backgroundThreshold, bufferThreshold := 0.005, 0.01
 	config.InfiniteSessions = &sdk.InfiniteSessionConfig{
 		Enabled:                       boolPointer(true),
@@ -887,7 +887,7 @@ func TestLiveCoderCanUseAuthorizedWriteTool(t *testing.T) {
 	}
 	target := filepath.Join(worktree, "created.txt")
 	handle := &managedSession{watchers: map[*subscription]struct{}{}}
-	config := adapter.sessionConfig(handle.onEvent)
+	config := adapter.sessionConfig(handle)
 	config.Tools = []sdk.Tool{sdk.DefineTool("taxion_test_write", "Create created.txt in the assigned worktree",
 		func(_ struct{}, _ sdk.ToolInvocation) (sdk.ToolResult, error) {
 			if err := os.WriteFile(target, []byte("authorized coder write"), 0o600); err != nil {
