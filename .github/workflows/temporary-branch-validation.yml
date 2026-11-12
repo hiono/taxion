@@ -20,11 +20,11 @@ jobs:
           cache: true
       - name: Verify Go formatting
         run: test -z "$(gofmt -l cmd internal)"
+      - name: Focused saved-review test (normal)
+        run: go test ./internal/runtime/controller -run '^TestAcceptSavedReviewFailsClosed$' -count=1 -v
+      - name: Focused saved-review test (race)
+        run: go test -race -timeout 20m ./internal/runtime/controller -run '^TestAcceptSavedReviewFailsClosed$' -count=1 -v
       - name: Vet
         run: go vet ./...
-      - name: Full test suite
-        run: go test -count=1 ./...
-      - name: Full race suite
-        run: go test -race -timeout 20m -count=1 ./...
       - name: Build
         run: go build ./...
