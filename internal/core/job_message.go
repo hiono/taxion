@@ -27,8 +27,10 @@ type JobMessage struct {
 // Legacy records without JobID are addressed by their former TaskID.
 func (g TaskGraph) JobConversation(jobID string) []JobMessage {
 	messages := make([]JobMessage, 0)
+	job, isJob := g.Job(jobID)
 	for _, message := range g.JobMessages {
-		if message.JobID == jobID || message.JobID == "" && message.TaskID == jobID {
+		if message.JobID == jobID ||
+			message.JobID == "" && (message.TaskID == jobID || isJob && slices.Contains(job.TaskIDs, message.TaskID)) {
 			messages = append(messages, message)
 		}
 	}

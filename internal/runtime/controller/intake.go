@@ -637,13 +637,10 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		if err := ensureIntakeJob(&state.Graph, task, originalIntakeRequest(task, task.Objective)); err != nil {
 			return err
 		}
-		if job, ok := state.Graph.JobForTask(task.ID); ok {
-			for index := range state.Graph.Jobs {
-				if state.Graph.Jobs[index].ID == job.ID &&
-					(state.Graph.Jobs[index].Status == core.JobDraft || state.Graph.Jobs[index].Status == core.JobWaiting) {
-					state.Graph.Jobs[index].Status = core.JobActive
-					state.Graph.Jobs[index].UpdatedAt = time.Now().UTC()
-				}
+		if job, ok := state.Graph.JobForTask(task.ID); ok &&
+			(job.Status == core.JobDraft || job.Status == core.JobWaiting) {
+			if err := state.Graph.TransitionJob(job.ID, core.JobActive, request.Actor, "intake approved", time.Now().UTC()); err != nil {
+				return err
 			}
 		}
 		if request.ReplacesFlow != "" {

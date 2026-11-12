@@ -504,6 +504,7 @@ type TaskGraph struct {
 	Jobs                  []Job                `json:"jobs,omitempty"`
 	RoleExecutions        []RoleExecution      `json:"roleExecutions,omitempty"`
 	RoleExecutionHistory  []RoleExecutionEvent `json:"roleExecutionHistory,omitempty"`
+	JobHistory            []JobEvent           `json:"jobHistory,omitempty"`
 	Tasks                 []GraphTask          `json:"tasks"`
 	Concerns              []Concern            `json:"concerns"`
 	History               []GraphEvent         `json:"history"`
@@ -1941,6 +1942,7 @@ func cloneGraph(g TaskGraph) TaskGraph {
 	}
 	copy.RoleExecutions = slices.Clone(g.RoleExecutions)
 	copy.RoleExecutionHistory = slices.Clone(g.RoleExecutionHistory)
+	copy.JobHistory = slices.Clone(g.JobHistory)
 	for i := range copy.Approvals {
 		copy.Approvals[i].Configuration.Sources = maps.Clone(g.Approvals[i].Configuration.Sources)
 		copy.Approvals[i].Configuration.Selection = slices.Clone(g.Approvals[i].Configuration.Selection)

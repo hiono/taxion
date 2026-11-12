@@ -20,6 +20,15 @@ type Job struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
+type JobEvent struct {
+	JobID  string    `json:"jobId"`
+	From   JobStatus `json:"from,omitempty"`
+	To     JobStatus `json:"to"`
+	Actor  string    `json:"actor"`
+	Reason string    `json:"reason"`
+	At     time.Time `json:"at"`
+}
+
 type JobStatus string
 
 const (
@@ -30,6 +39,21 @@ const (
 	JobFailed    JobStatus = "FAILED"
 	JobCancelled JobStatus = "CANCELLED"
 )
+
+func jobTransitionAllowed(from, to JobStatus) bool {
+	switch from {
+	case JobDraft:
+		return to == JobActive || to == JobCancelled
+	case JobActive:
+		return slices.Contains([]JobStatus{JobWaiting, JobCompleted, JobFailed, JobCancelled}, to)
+	case JobWaiting:
+		return slices.Contains([]JobStatus{JobActive, JobCompleted, JobFailed, JobCancelled}, to)
+	case JobFailed, JobCompleted:
+		return to == JobWaiting
+	default:
+		return false
+	}
+}
 
 func validJobStatus(status JobStatus) bool {
 	return slices.Contains([]JobStatus{JobDraft, JobActive, JobWaiting, JobCompleted, JobFailed, JobCancelled}, status)
@@ -153,11 +177,73 @@ func (g *TaskGraph) CreateJob(job Job) error {
 		job.TaskIDs = []string{job.RootTaskID}
 	}
 	next.Jobs = append(next.Jobs, job)
+	next.JobHistory = append(next.JobHistory, JobEvent{
+		JobID: job.ID, To: job.Status, Actor: "controller",
+		Reason: "Job created from intake contract", At: job.CreatedAt,
+	})
 	if err := next.validateJobModel(); err != nil {
 		return err
 	}
 	*g = next
 	return nil
+}
+
+// TransitionJob records a Job state transition independently of Task state.
+func (g *TaskGraph) TransitionJob(id string, status JobStatus, actor, reason string, at time.Time) error {
+	if g == nil || strings.TrimSpace(actor) == "" || strings.TrimSpace(reason) == "" {
+		return graphError("Job transition requires graph, actor and reason")
+	}
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	next := cloneGraph(*g)
+	if err := transitionJob(&next, id, status, actor, reason, at); err != nil {
+		return err
+	}
+	if err := next.validateJobModel(); err != nil {
+		return err
+	}
+	*g = next
+	return nil
+}
+
+func transitionJob(graph *TaskGraph, id string, status JobStatus, actor, reason string, at time.Time) error {
+	for i := range graph.Jobs {
+		job := &graph.Jobs[i]
+		if job.ID != id {
+			continue
+		}
+		if job.Status == status {
+			return nil
+		}
+		hasHistory := false
+		for _, event := range graph.JobHistory {
+			if event.JobID == id {
+				hasHistory = true
+				break
+			}
+		}
+		if !hasHistory {
+			graph.JobHistory = append(graph.JobHistory, JobEvent{
+				JobID: id, To: job.Status, Actor: "controller",
+				Reason: "existing Job state adopted", At: job.CreatedAt,
+			})
+		}
+		if !jobTransitionAllowed(job.Status, status) {
+			return graphError("invalid Job transition %s -> %s", job.Status, status)
+		}
+		if at.Before(job.UpdatedAt) {
+			return graphError("Job transition timestamp precedes the latest Job update")
+		}
+		previous := job.Status
+		job.Status = status
+		job.UpdatedAt = at
+		graph.JobHistory = append(graph.JobHistory, JobEvent{
+			JobID: id, From: previous, To: status, Actor: actor, Reason: reason, At: at,
+		})
+		return nil
+	}
+	return graphError("Job %s not found", id)
 }
 
 // AttachTaskToJob adds a separately identified work item to an existing Job.
@@ -176,9 +262,17 @@ func (g *TaskGraph) AttachTaskToJob(jobID, taskID string) error {
 			}
 			continue
 		}
+		if next.Jobs[i].Status == JobCancelled {
+			return graphError("cannot attach a Task to a cancelled Job")
+		}
 		if !slices.Contains(next.Jobs[i].TaskIDs, taskID) {
 			next.Jobs[i].TaskIDs = append(next.Jobs[i].TaskIDs, taskID)
 			next.Jobs[i].UpdatedAt = time.Now().UTC()
+			if next.Jobs[i].Status == JobCompleted || next.Jobs[i].Status == JobFailed {
+				if err := transitionJob(&next, jobID, JobWaiting, "controller", "successor Task proposed", time.Now().UTC()); err != nil {
+					return err
+				}
+			}
 		}
 		if err := next.validateJobModel(); err != nil {
 			return err
@@ -353,6 +447,31 @@ func (g TaskGraph) validateJobModel() error {
 	for _, task := range g.Tasks {
 		if _, collides := jobs[task.ID]; collides {
 			return graphError("Job and Task identities must be distinct")
+		}
+	}
+	jobStates := make(map[string]JobStatus, len(g.Jobs))
+	jobEventAt := make(map[string]time.Time, len(g.Jobs))
+	for _, event := range g.JobHistory {
+		job, ok := jobs[event.JobID]
+		if !ok || strings.TrimSpace(event.Actor) == "" || strings.TrimSpace(event.Reason) == "" ||
+			!validJobStatus(event.To) || event.At.IsZero() || event.At.Before(job.CreatedAt) ||
+			(!jobEventAt[event.JobID].IsZero() && event.At.Before(jobEventAt[event.JobID])) {
+			return graphError("invalid Job history event")
+		}
+		previous, exists := jobStates[event.JobID]
+		if !exists {
+			if event.From != "" {
+				return graphError("Job history must begin with its initial state")
+			}
+		} else if event.From != previous || !jobTransitionAllowed(previous, event.To) {
+			return graphError("invalid Job history transition")
+		}
+		jobStates[event.JobID] = event.To
+		jobEventAt[event.JobID] = event.At
+	}
+	for _, job := range g.Jobs {
+		if state, exists := jobStates[job.ID]; exists && state != job.Status {
+			return graphError("Job %s does not match its state history", job.ID)
 		}
 	}
 	if len(g.Jobs) == 0 && len(g.RoleExecutions) != 0 {

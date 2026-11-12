@@ -211,3 +211,37 @@ func TestJobConversationUsesFirstClassJobID(t *testing.T) {
 		t.Fatalf("JobConversation(JobID) = %d, want 1", got)
 	}
 }
+
+func TestJobStateTransitionsAreAudited(t *testing.T) {
+	now := time.Now().UTC()
+	graph := TaskGraph{Version: 1, Tasks: []GraphTask{{ID: "task-root"}}}
+	if err := graph.CreateJob(Job{
+		ID: "job-root", Request: "Original request", Goal: "Complete work",
+		RootTaskID: "task-root", Status: JobDraft, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateJob: %v", err)
+	}
+	for i, status := range []JobStatus{JobActive, JobWaiting, JobActive} {
+		if err := graph.TransitionJob("job-root", status, "controller", "test transition", now.Add(time.Duration(i+1)*time.Second)); err != nil {
+			t.Fatalf("TransitionJob to %s: %v", status, err)
+		}
+	}
+	if len(graph.JobHistory) != 4 || graph.Jobs[0].Status != JobActive {
+		t.Fatalf("Job history does not match current state: %+v", graph.JobHistory)
+	}
+	if err := graph.TransitionJob("job-root", JobDraft, "controller", "invalid regression", now.Add(5*time.Second)); err == nil {
+		t.Fatal("invalid Job state regression must be rejected")
+	}
+}
+
+func TestJobConversationIncludesLegacyTaskMessagesForJob(t *testing.T) {
+	graph := newJobGraph()
+	now := time.Now().UTC()
+	graph.JobMessages = []JobMessage{{
+		ID: "legacy-message", TaskID: "task-a", FromRole: "HUMAN", ToRole: "PLANNER",
+		Body: "Legacy task-scoped message", Source: "human:legacy", At: now,
+	}}
+	if got := len(graph.JobConversation("job-a")); got != 1 {
+		t.Fatalf("JobConversation(JobID) omitted legacy Task message: %d", got)
+	}
+}

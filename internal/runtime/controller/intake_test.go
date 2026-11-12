@@ -1168,4 +1168,7 @@ func TestIntakeCreatesDistinctJobWithoutChangingTaskContract(t *testing.T) {
 	if !ok || job.Status != core.JobActive {
 		t.Fatalf("confirmed intake did not activate its Job: %+v", job)
 	}
+	if len(after.Graph.JobHistory) != 2 {
+		t.Fatalf("Job lifecycle history length = %d, want creation and approval events", len(after.Graph.JobHistory))
+	}
 }
