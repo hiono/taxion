@@ -377,15 +377,124 @@ func acceptanceFiles(t *testing.T, roots ...string) map[string][]byte {
 }
 
 func TestAcceptSavedReviewFailsClosed(t *testing.T) {
-	for _, failure := range []string{"expiry", "stale-hash", "actor", "reason", "runner", "other-stop",
+	fixtureStarted := time.Now()
+	db, ledger, baseRequest, baseAcceptance := savedReviewAcceptanceFixture(t)
+	t.Logf("phase=shared-fixture elapsed=%s", time.Since(fixtureStarted))
+
+	baseline, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	baselineJSON, err := core.CanonicalJSON(baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow, ok := baseline.Graph.ReviewFlow(baseRequest.ID)
+	if !ok {
+		t.Fatal("saved review fixture is missing its flow")
+	}
+	last, ok := baseline.Graph.GraphDispatch(flow.DispatchIDs[0])
+	if !ok {
+		t.Fatal("saved review fixture is missing its reviewer dispatch")
+	}
+	coder, ok := baseline.Graph.GraphDispatch(flow.SourceDispatchID)
+	if !ok {
+		t.Fatal("saved review fixture is missing its source dispatch")
+	}
+
+	contractRoot, sourceRoot := flow.Contract.Worktree, coder.Instruction.Worktree
+	branchName := gitTest(t, contractRoot, "branch", "--show-current")
+	headSHA := gitTest(t, contractRoot, "rev-parse", "HEAD")
+	indexFiles := map[string][]byte{}
+	for _, root := range []string{contractRoot, sourceRoot} {
+		index := gitTest(t, root, "rev-parse", "--path-format=absolute", "--git-path", "index")
+		if _, exists := indexFiles[index]; exists {
+			continue
+		}
+		data, err := os.ReadFile(index)
+		if err != nil {
+			t.Fatal(err)
+		}
+		indexFiles[index] = data
+	}
+	worktreeFiles := map[string][]byte{}
+	for _, root := range []string{contractRoot, sourceRoot} {
+		path := filepath.Join(root, "internal", "app.go")
+		if _, exists := worktreeFiles[path]; exists {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		worktreeFiles[path] = data
+	}
+	snapshotRef := coder.Result.GitEvidence.SnapshotRef
+	snapshotSHA := ""
+	if snapshotRef != "" {
+		snapshotSHA = gitTest(t, contractRoot, "rev-parse", snapshotRef)
+	}
+	reviewPath := last.Instruction.Worktree
+	_, reviewPathErr := os.Stat(reviewPath)
+	reviewPathExisted := reviewPathErr == nil
+	if reviewPathErr != nil && !os.IsNotExist(reviewPathErr) {
+		t.Fatal(reviewPathErr)
+	}
+
+	resetFixture := func(t *testing.T) {
+		t.Helper()
+		for path, data := range worktreeFiles {
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if branchName != "" {
+			if current := gitTest(t, contractRoot, "branch", "--show-current"); current != branchName {
+				gitTest(t, contractRoot, "switch", branchName)
+			}
+		} else if current := gitTest(t, contractRoot, "rev-parse", "HEAD"); current != headSHA {
+			gitTest(t, contractRoot, "switch", "--detach", headSHA)
+		}
+		if snapshotRef != "" {
+			gitTest(t, contractRoot, "update-ref", snapshotRef, snapshotSHA)
+		}
+		for path, data := range worktreeFiles {
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for path, data := range indexFiles {
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !reviewPathExisted {
+			if err := os.RemoveAll(reviewPath); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var restored store.Workspace
+		if err := json.Unmarshal(baselineJSON, &restored); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			*state = restored
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for index, failure := range []string{"expiry", "stale-hash", "actor", "reason", "runner", "other-stop",
 		"configuration", "snapshot-ref", "current-branch", "current-index",
 		"current-worktree", "source-worktree", "review-path", "late-result"} {
 		t.Run(failure, func(t *testing.T) {
+			if index != 0 {
+				resetFixture(t)
+			}
 			started := time.Now()
 			defer func() { t.Logf("phase=total elapsed=%s", time.Since(started)) }()
-			fixtureStarted := time.Now()
-			db, ledger, request, acceptance := savedReviewAcceptanceFixture(t)
-			t.Logf("phase=fixture elapsed=%s", time.Since(fixtureStarted))
+			request, acceptance := baseRequest, baseAcceptance
 			previewStarted := time.Now()
 			preview, err := AcceptSavedReview(t.Context(), db, ledger, acceptance, request.Configuration, true)
 			t.Logf("phase=preview elapsed=%s", time.Since(previewStarted))
@@ -393,10 +502,13 @@ func TestAcceptSavedReviewFailsClosed(t *testing.T) {
 				t.Fatal(err)
 			}
 			acceptance.ExpectedHash = preview.Hash
-			state, _ := db.LoadWorkspace()
-			flow, _ := state.Graph.ReviewFlow(request.ID)
-			last, _ := state.Graph.GraphDispatch(flow.DispatchIDs[0])
-			coder, _ := state.Graph.GraphDispatch(flow.SourceDispatchID)
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			currentFlow, _ := state.Graph.ReviewFlow(request.ID)
+			currentLast, _ := state.Graph.GraphDispatch(currentFlow.DispatchIDs[0])
+			currentCoder, _ := state.Graph.GraphDispatch(currentFlow.SourceDispatchID)
 			switch failure {
 			case "expiry":
 				acceptance.AllowExpired = false
@@ -409,33 +521,33 @@ func TestAcceptSavedReviewFailsClosed(t *testing.T) {
 			case "configuration":
 				request.Configuration = core.ApprovalConfiguration{}
 			case "snapshot-ref":
-				gitTest(t, flow.Contract.Worktree, "update-ref", "-d", coder.Result.GitEvidence.SnapshotRef)
+				gitTest(t, currentFlow.Contract.Worktree, "update-ref", "-d", currentCoder.Result.GitEvidence.SnapshotRef)
 			case "current-branch":
-				gitTest(t, flow.Contract.Worktree, "switch", "--detach")
+				gitTest(t, currentFlow.Contract.Worktree, "switch", "--detach")
 			case "current-index":
-				gitTest(t, flow.Contract.Worktree, "read-tree", flow.Contract.BaselineSHA)
+				gitTest(t, currentFlow.Contract.Worktree, "read-tree", currentFlow.Contract.BaselineSHA)
 			case "current-worktree", "source-worktree":
-				root := flow.Contract.Worktree
+				root := currentFlow.Contract.Worktree
 				if failure == "source-worktree" {
-					root = coder.Instruction.Worktree
+					root = currentCoder.Instruction.Worktree
 				}
-				if err := os.WriteFile(filepath.Join(root, "internal/app.go"), []byte("drift"), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(root, "internal", "app.go"), []byte("drift"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			case "review-path":
-				if err := os.MkdirAll(last.Instruction.Worktree, 0700); err != nil {
+				if err := os.MkdirAll(currentLast.Instruction.Worktree, 0700); err != nil {
 					t.Fatal(err)
 				}
 			default:
 				if err := db.UpdateWorkspace(func(s *store.Workspace) error {
-					changed, _ := s.Graph.ReviewFlow(flow.ID)
+					changed, _ := s.Graph.ReviewFlow(currentFlow.ID)
 					switch failure {
 					case "runner":
 						changed.RunnerID = "still-owned"
 					case "other-stop":
 						changed.Reason = "a different safety stop"
 					case "late-result":
-						changed.Deadline = last.Result.GitEvidence.VerifiedAt
+						changed.Deadline = currentLast.Result.GitEvidence.VerifiedAt
 					}
 					storeFlow(s, changed)
 					return nil
@@ -443,21 +555,17 @@ func TestAcceptSavedReviewFailsClosed(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			beforeStarted := time.Now()
 			before, err := db.LoadWorkspace()
-			t.Logf("phase=before-state-load elapsed=%s", time.Since(beforeStarted))
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			applyStarted := time.Now()
+			rejectStarted := time.Now()
 			if _, err := AcceptSavedReview(t.Context(), db, ledger, acceptance, request.Configuration, false); err == nil {
 				t.Fatal("unsafe acceptance succeeded")
 			}
-			t.Logf("phase=reject-apply elapsed=%s", time.Since(applyStarted))
-			afterStarted := time.Now()
+			t.Logf("phase=reject-apply elapsed=%s", time.Since(rejectStarted))
 			after, err := db.LoadWorkspace()
-			t.Logf("phase=after-state-load elapsed=%s", time.Since(afterStarted))
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatal("rejected acceptance changed saved state", err)
 			}
