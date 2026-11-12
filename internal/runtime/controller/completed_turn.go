@@ -1,0 +1,114 @@
+package controller
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/runtime"
+)
+
+func observeStoppedTurn(ctx context.Context, worker runtime.Identity, sessionID string, sequence uint64,
+	usage *[]core.DispatchUsage, checkpoints *[]runtime.UsageCheckpoint) ([]core.DispatchUsage, []runtime.UsageCheckpoint, error) {
+	history, ok := worker.(runtime.EventCursor)
+	if !ok {
+		return nil, nil, nil
+	}
+	events, err := history.EventsAfter(ctx, sessionID, sequence)
+	if err != nil {
+		return nil, nil, fmt.Errorf("taxion: stopped turn history is unavailable; provider details withheld")
+	}
+	var tailUsage []core.DispatchUsage
+	var tailCheckpoints []runtime.UsageCheckpoint
+	var invalid error
+	for {
+		if err := ctx.Err(); err != nil {
+			return tailUsage, tailCheckpoints, errors.Join(invalid, err)
+		}
+		select {
+		case <-ctx.Done():
+			return tailUsage, tailCheckpoints, errors.Join(invalid, ctx.Err())
+		case event, open := <-events:
+			if !open {
+				return tailUsage, tailCheckpoints, invalid
+			}
+			if event.AgentID != "" || event.Sequence == 0 || event.Sequence <= sequence {
+				invalid = errors.Join(invalid, fmt.Errorf("taxion: stopped turn has ambiguous or child activity"))
+				continue
+			}
+			sequence = event.Sequence
+			if core.Redact(event.Payload) != event.Payload {
+				invalid = errors.Join(invalid, fmt.Errorf("taxion: stopped turn contains credential-like content"))
+				continue
+			}
+			switch event.Type {
+			case runtime.EventUsage:
+				var call core.DispatchUsage
+				if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &call); err != nil || !core.ValidUsageMetadata(call) {
+					invalid = errors.Join(invalid, fmt.Errorf("taxion: stopped turn has invalid usage"))
+					continue
+				}
+				call.ObservedAt = time.Now().UTC()
+				tailUsage = append(tailUsage, call)
+				invalid = errors.Join(invalid, core.AppendUsage(usage, call))
+			case runtime.EventUsageCheckpoint:
+				checkpoint, _, err := runtime.DecodeUsageCheckpoint(event.Payload, sessionID, *usage)
+				if err != nil {
+					invalid = errors.Join(invalid, fmt.Errorf("taxion: stopped turn has conflicting checkpoint accounting"))
+					continue
+				}
+				*checkpoints = append(*checkpoints, checkpoint)
+				tailCheckpoints = append(tailCheckpoints, checkpoint)
+			case runtime.EventContextUsage, "acp_connection", "acp_capabilities":
+			default:
+				invalid = errors.Join(invalid, fmt.Errorf("taxion: stopped turn has later activity; receipt acceptance withheld"))
+			}
+		}
+	}
+}
+
+func drainCompletedTurn(ctx context.Context, events <-chan runtime.Event, usage *[]core.DispatchUsage, checkpoints *[]runtime.UsageCheckpoint, sequence *uint64, sessionID string) error {
+	for {
+		var event runtime.Event
+		var open bool
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, open = <-events:
+		}
+		if !open {
+			return fmt.Errorf("taxion: completed main turn stream closed before its provider boundary")
+		}
+		if event.AgentID != "" || event.Sequence == 0 || event.Sequence <= *sequence {
+			return fmt.Errorf("taxion: completed main turn has ambiguous or child activity")
+		}
+		*sequence = event.Sequence
+		switch event.Type {
+		case runtime.EventUsage:
+			var call core.DispatchUsage
+			if err := core.DecodeGraphInput(strings.NewReader(event.Payload), &call); err != nil || !core.ValidUsageMetadata(call) {
+				return fmt.Errorf("taxion: completed main turn has invalid usage")
+			}
+			call.ObservedAt = time.Now().UTC()
+			if err := core.AppendUsage(usage, call); err != nil {
+				return err
+			}
+		case runtime.EventUsageCheckpoint:
+			checkpoint, _, err := runtime.DecodeUsageCheckpoint(event.Payload, sessionID, *usage)
+			if err == nil {
+				*checkpoints = append(*checkpoints, checkpoint)
+			}
+			if err != nil {
+				return fmt.Errorf("taxion: completed main turn has conflicting checkpoint accounting")
+			}
+		case runtime.EventTurnFinished:
+			return nil
+		case runtime.EventContextUsage, "acp_connection", "acp_capabilities":
+		default:
+			return fmt.Errorf("taxion: completed main turn has later activity; receipt acceptance withheld")
+		}
+	}
+}

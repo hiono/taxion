@@ -1,0 +1,285 @@
+package controller
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/runtime"
+	"github.com/hiono/taxion/internal/store"
+)
+
+func (c *Controller) ObserveRoleClarification(ctx context.Context, binding runtime.ManagedClarification, sessionID string, body json.RawMessage) (json.RawMessage, error) {
+	var envelope struct {
+		Action string `json:"action,omitempty"`
+		Answer string `json:"answer,omitempty"`
+		ClarificationRequest
+	}
+	if len(body) > 64*1024 || core.DecodeGraphInput(strings.NewReader(string(body)), &envelope) != nil {
+		return nil, fmt.Errorf("taxion: invalid bounded clarification input")
+	}
+	input := envelope.ClarificationRequest
+	if envelope.Action == "answer" {
+		other := input
+		other.ID = ""
+		if binding.ProtocolVersion < 3 || input.ID == "" || strings.TrimSpace(envelope.Answer) == "" ||
+			!reflect.DeepEqual(other, ClarificationRequest{}) {
+			return nil, fmt.Errorf("taxion: clarification answer requires protocol 3 and only the carried question ID and answer")
+		}
+		return c.answerRoleClarification(ctx, binding, sessionID, input.ID, envelope.Answer)
+	}
+	if envelope.Action == "read" {
+		other := input
+		other.ID = ""
+		if binding.ProtocolVersion < 3 || input.ID == "" || !reflect.DeepEqual(other, ClarificationRequest{}) {
+			return nil, fmt.Errorf("taxion: clarification read requires protocol 3 and only the original question ID")
+		}
+		return c.readRoleClarification(ctx, binding, sessionID, input.ID)
+	}
+	if envelope.Action != "" && envelope.Action != "request" {
+		return nil, fmt.Errorf("taxion: unknown clarification action")
+	}
+	var result Clarification
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	err := c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		observed, err := c.roleClarificationContext(ctx, *state, binding, sessionID)
+		if err != nil {
+			return err
+		}
+		dispatch := observed.Dispatch
+		if input.TaskID != "" && input.TaskID != dispatch.TaskID ||
+			input.DispatchID != "" && input.DispatchID != dispatch.ID ||
+			input.Role != "" && input.Role != dispatch.Recipient ||
+			input.BasisHash != "" && input.BasisHash != observed.Hash {
+			return fmt.Errorf("taxion: clarification target or source does not match the running session")
+		}
+		operation := state.Records.Operation
+		input.TaskID, input.DispatchID, input.Role, input.BasisHash = dispatch.TaskID, dispatch.ID, dispatch.Recipient, observed.Hash
+		if input.ID == "" {
+			input.ID = "clarification-" + rand.Text()
+		}
+		if input.Category == "" {
+			switch dispatch.Recipient {
+			case "REVIEWER":
+				input.Category = "implementation"
+			case "CODER":
+				input.Category = "specification"
+				if input.SpecificationOwnerRole == "" {
+					input.SpecificationOwnerRole = "PLANNER"
+				}
+			default:
+				return fmt.Errorf("taxion: unsupported clarification sender role")
+			}
+		}
+		if input.Reason == "" {
+			input.Reason = "The current Role cannot resolve this question from its bound Task and Dispatch context."
+		}
+		if input.Uncertainty == "" {
+			input.Uncertainty = "The required information is not established by the current execution context."
+		}
+		if len(input.References) == 0 {
+			for _, document := range observed.Documents {
+				if document.ID != "" {
+					input.References = append(input.References, document.ID)
+				}
+			}
+		}
+		if input.AnswerFormat == "" {
+			input.AnswerFormat = "text"
+		}
+		if input.DecisionImpact == "" {
+			input.DecisionImpact = "The answer may affect the current implementation or review decision within the saved scope."
+		}
+		if input.StopCondition == "" {
+			input.StopCondition = "Do not proceed with work that depends on this answer until it has been assessed."
+		}
+		if input.Deadline.IsZero() || input.Deadline.After(operation.Deadline) {
+			input.Deadline = operation.Deadline
+		}
+		result, err = requestClarification(state, input, &ClarificationOrigin{
+			SessionID: sessionID, OperationID: operation.ID, Owner: operation.Owner, RunnerID: binding.RunnerID,
+		})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	// The receipt remains canonical; the tool returns a reference, not another
+	// copy of the question or an authorization to continue dependent work.
+	return json.Marshal(struct {
+		ID        string                 `json:"id"`
+		State     string                 `json:"state"`
+		Route     string                 `json:"route"`
+		Recipient string                 `json:"recipient"`
+		RequestID string                 `json:"requestId"`
+		Delivery  *ClarificationDelivery `json:"delivery,omitempty"`
+	}{result.Request.ID, result.State, result.Route, result.Recipient, "clarification:" + result.Request.ID, result.Delivery})
+}
+
+func (c *Controller) answerRoleClarification(ctx context.Context, binding runtime.ManagedClarification, sessionID, id, answer string) (json.RawMessage, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var result Clarification
+	var answerConflict error
+	err := c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		observed, err := c.roleClarificationContext(ctx, *state, binding, sessionID)
+		if err != nil {
+			return err
+		}
+		dispatch := observed.Dispatch
+		if dispatch == nil || dispatch.Recipient != "CODER" {
+			return fmt.Errorf("taxion: only the successor Coder may answer a carried Reviewer question")
+		}
+		flow, found := state.Graph.ReviewFlow(binding.FlowID)
+		if !found || flow.Status != "RUNNING" || flow.LastDispatchID() != dispatch.ID ||
+			dispatch.Relationship != core.RelationshipAmends || dispatch.TaskID != flow.TaskID {
+			return fmt.Errorf("taxion: clarification answer requires the current repair Dispatch in its original Flow")
+		}
+		history, err := clarifications(*state)
+		if err != nil {
+			return err
+		}
+		for _, saved := range history {
+			if saved.Request.ID == id {
+				result = saved
+			}
+		}
+		if result.Version == 0 || result.Request.Role != "REVIEWER" ||
+			result.Route != "ASK" || result.Recipient != "CODER" {
+			return fmt.Errorf("taxion: answer requires a saved Reviewer question addressed to Coder")
+		}
+		source, ok := state.Graph.GraphDispatch(result.Request.DispatchID)
+		if !ok || source.Recipient != "REVIEWER" || result.Request.TaskID != source.TaskID {
+			return fmt.Errorf("taxion: original Reviewer Dispatch is unavailable")
+		}
+		carried, err := reviewerClarificationDecisions(*state, flow, source)
+		if err != nil {
+			return err
+		}
+		var expected *core.TaskDecision
+		for i := range carried {
+			if carried[i].ID == "clarification-question:"+id {
+				expected = &carried[i]
+				break
+			}
+		}
+		foundInDispatch := false
+		if expected != nil {
+			for _, decision := range dispatch.Instruction.Decisions {
+				foundInDispatch = foundInDispatch || decision == *expected
+			}
+		}
+		delivery, err := savedClarificationDelivery(*state, id)
+		if err != nil || delivery == nil || delivery.Target == nil ||
+			delivery.Target.FlowID != flow.ID || delivery.Target.TaskID != dispatch.TaskID ||
+			delivery.Target.Role != "CODER" || source.RelatedID != delivery.Target.DispatchID ||
+			dispatch.RelatedID != delivery.Target.DispatchID || !foundInDispatch {
+			return fmt.Errorf("taxion: Reviewer question is not bound to this exact successor Coder Dispatch")
+		}
+		sourceIndex := slices.Index(flow.DispatchIDs, source.ID)
+		dispatchIndex := slices.Index(flow.DispatchIDs, dispatch.ID)
+		if sourceIndex < 0 || dispatchIndex != sourceIndex+1 {
+			return fmt.Errorf("taxion: clarification answer requires the immediate successor Dispatch")
+		}
+		operation := state.Records.Operation
+		if operation == nil || operation.ID != binding.OperationID || operation.Owner != binding.Owner ||
+			operation.State != "RUNNING" || operation.Phase != "EXECUTION" {
+			return fmt.Errorf("taxion: clarification answer requires the current execution owner")
+		}
+		result, answerConflict, err = answerClarification(state, id, ClarificationAnswer{
+			Role: "CODER", Actor: operation.Owner, Source: "dispatch:" + dispatch.ID, Text: answer,
+		})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if answerConflict != nil {
+		return nil, answerConflict
+	}
+	return json.Marshal(struct {
+		ID             string `json:"id"`
+		State          string `json:"state"`
+		Role           string `json:"role"`
+		SourceDispatch string `json:"sourceDispatch"`
+	}{id, "ANSWERED", "CODER", binding.DispatchID})
+}
+
+func (c *Controller) roleClarificationContext(ctx context.Context, state store.Workspace, binding runtime.ManagedClarification, sessionID string) (ClarificationContext, error) {
+	if err := ctx.Err(); err != nil {
+		return ClarificationContext{}, err
+	}
+	dispatch, ok := state.Graph.GraphDispatch(binding.DispatchID)
+	if !state.HasGraph || !ok || dispatch.Status != core.DispatchRunning ||
+		sessionID == "" || dispatch.RuntimeSessionID != sessionID ||
+		dispatch.Recipient != c.runtime.Role() || dispatch.RuntimeConfigHash != c.runtime.ConfigHash() ||
+		!sameWorktree(dispatch.Instruction.Worktree, c.runtime.Worktree()) {
+		return ClarificationContext{}, fmt.Errorf("taxion: clarification requires its running bound Role session")
+	}
+	operation := state.Records.Operation
+	flow, found := flowForDispatch(state.Graph, dispatch.ID)
+	now := time.Now().UTC()
+	if operation == nil || binding.OperationID == "" || binding.Owner == "" ||
+		operation.ID != binding.OperationID || operation.Owner != binding.Owner ||
+		operation.State != "RUNNING" || operation.Phase != "EXECUTION" ||
+		operation.FlowID != binding.FlowID || !now.Before(operation.Deadline) ||
+		!found || flow.ID != binding.FlowID || flow.TaskID != operation.TaskID ||
+		flow.Status != "RUNNING" || binding.RunnerID == "" || flow.RunnerID != binding.RunnerID ||
+		!now.Before(flow.ExecutionDeadline()) {
+		return ClarificationContext{}, fmt.Errorf("taxion: clarification operation owner, runner or deadline changed")
+	}
+	observed, err := clarificationContext(state, dispatch.TaskID, dispatch.ID)
+	if err != nil {
+		return observed, err
+	}
+	if binding.ScopeHash == "" || observed.ScopeHash != binding.ScopeHash {
+		return observed, fmt.Errorf("taxion: clarification source does not match the running session")
+	}
+	return observed, nil
+}
+
+func (c *Controller) readRoleClarification(ctx context.Context, binding runtime.ManagedClarification, sessionID, id string) (json.RawMessage, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return nil, err
+	}
+	observed, err := c.roleClarificationContext(ctx, state, binding, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	history, err := clarifications(state)
+	if err != nil {
+		return nil, err
+	}
+	var question Clarification
+	for _, entry := range history {
+		if entry.Request.ID == id {
+			question = entry
+		}
+	}
+	origin := question.Origin
+	if origin == nil || origin.SessionID != sessionID || origin.OperationID != binding.OperationID ||
+		origin.Owner != binding.Owner || origin.RunnerID != binding.RunnerID ||
+		question.Request.TaskID != observed.Task.ID || question.Request.DispatchID != binding.DispatchID ||
+		question.Request.Role != observed.Dispatch.Recipient || question.Context.ScopeHash != observed.ScopeHash {
+		return nil, fmt.Errorf("taxion: clarification read requires this execution's original question")
+	}
+	report, err := assessClarification(state, id)
+	if err != nil {
+		return nil, err
+	}
+	body, err := json.Marshal(report)
+	if err != nil || len(body) > 64*1024 {
+		return nil, fmt.Errorf("taxion: clarification assessment exceeds the bounded response")
+	}
+	return body, nil
+}

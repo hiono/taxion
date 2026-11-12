@@ -8,6 +8,10 @@ Accepted。停止レビューの復旧は Issue #213・#238・#240・#242 の変
 旧版ごとの操作順は併記しない。利用時の入力は
 [CLI リファレンス](../../userguide/cli-reference.md#停止済み初回指示の整合回復)を正本とする。
 
+[ADR-0075](0075-blacklist-authorization-and-recovery.md) に従い、停止 code の許可一覧は
+未開始取消、検証 receipt の再利用、正式停止済み Reviewer の分類に使わない。
+停止 receipt、session と利用量、入力同一性、所有権、期限と承認の検査は維持する。
+
 ## Context
 
 レビュー対象は成功した Coder の出力に限らず、人のコード・文書・テストや失敗途中の作業も含む。

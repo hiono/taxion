@@ -1,13 +1,16 @@
 package controller
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
 	"github.com/hiono/taxion/internal/store"
 )
 
@@ -236,12 +239,13 @@ func TestStoppedDispatchReconciliationPreservesInputAndStop(t *testing.T) {
 func TestStoppedDispatchReconciliationRejectsInsufficientEvidence(t *testing.T) {
 	db, _, flow, request := stoppedInputFixture(t)
 	state, _ := db.LoadWorkspace()
-	for _, change := range []string{"missing-evidence", "unconfirmed-execution", "unknown-delivery-not-accepted", "running", "session", "runtime-receipt", "started", "start-sha", "usage", "acknowledged", "runner", "another-dispatch", "no-input", "not-first", "changed-tree"} {
+	for _, change := range []string{"missing-evidence", "unconfirmed-execution", "unknown-delivery-not-accepted", "running", "session", "runtime-receipt", "started", "start-sha", "usage", "acknowledged", "runner", "another-dispatch", "no-input", "not-first", "ledger-mismatch", "task-input-drift", "unknown-stop-schema", "changed-tree"} {
 		t.Run(change, func(t *testing.T) {
 			var snapshot store.Workspace
 			if err := core.DecodeGraphInput(strings.NewReader(string(mustFlowJSON(t, state))), &snapshot); err != nil {
 				t.Fatal(err)
 			}
+
 			req := request
 			d := &snapshot.Graph.Dispatches[0]
 			f := &snapshot.Graph.ReviewFlows[0]
@@ -274,6 +278,16 @@ func TestStoppedDispatchReconciliationRejectsInsufficientEvidence(t *testing.T) 
 				f.Contract.TargetTreeSHA = ""
 			case "not-first":
 				f.DispatchIDs = append(f.DispatchIDs, "other")
+			case "ledger-mismatch":
+				snapshot.Ledger.Dispatches = nil
+			case "task-input-drift":
+				for i := range snapshot.Graph.Tasks {
+					if snapshot.Graph.Tasks[i].ID == flow.TaskID {
+						snapshot.Graph.Tasks[i].TargetTreeSHA = strings.Repeat("f", 40)
+					}
+				}
+			case "unknown-stop-schema":
+				f.StopCode = "UNKNOWN_SCHEMA_VALUE"
 			case "changed-tree":
 				if err := os.WriteFile(filepath.Join(flow.Contract.Worktree, "internal/input.go"), []byte("drift"), 0600); err != nil {
 					t.Fatal(err)
@@ -281,6 +295,247 @@ func TestStoppedDispatchReconciliationRejectsInsufficientEvidence(t *testing.T) 
 			}
 			if _, err := previewDispatchReconciliation(snapshot, req); err == nil {
 				t.Fatal("unsafe reconciliation accepted", change)
+			}
+		})
+	}
+}
+
+func TestStoppedDispatchReconciliationPreservesOtherUnstartedFlow(t *testing.T) {
+	db, ledger, _, request := stoppedInputFixture(t)
+	zero := 0
+	other, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
+		ID: "other-stopped-flow", TaskID: "implementation", Repository: "owner/repo",
+		ReviewRoot: filepath.Join(t.TempDir(), "other-review"), MaxRepairs: &zero,
+		TimeoutSeconds: 600, MaxNanoAIU: 1e12,
+		Authorization: core.TaskDecision{ID: "other-flow-approval", Source: "human:other", Text: "authorize the independent other flow"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		if err := holdReviewFlowForStop(&state.Graph, &other, "preserve unstarted work"); err != nil {
+			return err
+		}
+		other.Status, other.StopCode, other.Reason = "STOPPED", "BUDGET_STOP", "preserve unstarted work"
+		storeFlow(state, other)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := ReconcileStoppedDispatch(db, request, true)
+	if err != nil {
+		t.Fatal("another stopped unstarted Flow prevented target reconciliation", err)
+	}
+	for _, evidence := range []string{"running", "session", "receipt"} {
+		t.Run(evidence, func(t *testing.T) {
+			var snapshot store.Workspace
+			if err := core.DecodeGraphInput(strings.NewReader(string(mustFlowJSON(t, before))), &snapshot); err != nil {
+				t.Fatal(err)
+			}
+			switch evidence {
+			case "running":
+				for i := range snapshot.Graph.ReviewFlows {
+					if snapshot.Graph.ReviewFlows[i].ID == other.ID {
+						snapshot.Graph.ReviewFlows[i].Status = "RUNNING"
+					}
+				}
+			case "session":
+				for i := range snapshot.Graph.Dispatches {
+					if snapshot.Graph.Dispatches[i].ID == other.DispatchIDs[0] {
+						snapshot.Graph.Dispatches[i].RuntimeSessionID = "other-session"
+					}
+				}
+			case "receipt":
+				snapshot.Records.Events = []store.RuntimeReceipt{{DispatchID: other.DispatchIDs[0]}}
+			}
+			if _, err := previewDispatchReconciliation(snapshot, request); err == nil {
+				t.Fatal("other execution evidence was ignored")
+			}
+		})
+	}
+	request.ExpectedHash = preview.Hash
+	if _, err := ReconcileStoppedDispatch(db, request, false); err != nil {
+		t.Fatal(err)
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedOther, _ := after.Graph.ReviewFlow(other.ID)
+	beforeDispatch, _ := before.Graph.GraphDispatch(other.DispatchIDs[0])
+	afterDispatch, _ := after.Graph.GraphDispatch(other.DispatchIDs[0])
+	if !reflect.DeepEqual(other, savedOther) || !reflect.DeepEqual(beforeDispatch, afterDispatch) {
+		t.Fatal("target cancellation changed the other stopped Flow or Dispatch")
+	}
+}
+
+func TestStoppedFirstCoderReconciliationDoesNotDependOnStopCode(t *testing.T) {
+	for _, stopCode := range []string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT", "RECONTRACT"} {
+		for _, baselineOnly := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/baselineOnly=%t", stopCode, baselineOnly), func(t *testing.T) {
+				var db *store.Store
+				var flow core.ReviewFlow
+				var request DispatchReconciliationRequest
+				if baselineOnly {
+					var ledger string
+					var start ReviewFlowRequest
+					db, ledger, start = reviewFlowFixtureWithOutputMode(t, core.OutputModeWorktreeTreeSnapshot)
+					var err error
+					flow, err = StartReviewFlow(db, ledger, start)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					request = DispatchReconciliationRequest{
+						FlowID: flow.ID, DispatchID: flow.LastDispatchID(), Actor: "human", Source: "human:reconcile",
+						Reason: "Cancel without asserting non-delivery", Evidence: []string{"synthetic process quiescence"},
+						NoActiveExecutionConfirmed: true, AcceptDeliveryUncertainty: true,
+					}
+				} else {
+					db, _, flow, request = stoppedInputFixture(t)
+				}
+				if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+					if !flow.HandoffHeld() {
+						if err := holdReviewFlowForStop(&state.Graph, &flow, "fixed deadline elapsed"); err != nil {
+							return err
+						}
+					}
+					flow.Status, flow.StopCode, flow.Reason = "STOPPED", stopCode, "fixed deadline elapsed"
+					flow.StartedAt = time.Now().UTC().Add(-2 * time.Hour)
+					flow.Deadline = flow.StartedAt.Add(time.Hour)
+					storeFlow(state, flow)
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				before, err := db.LoadWorkspace()
+				if err != nil {
+					t.Fatal(err)
+				}
+				report, err := ReconcileStoppedDispatch(db, request, true)
+				if err != nil || report.UsageStatus != "unavailable" || report.DeliveryStatus != "unknown" {
+					t.Fatalf("preview: %+v, %v", report, err)
+				}
+				afterPreview, _ := db.LoadWorkspace()
+				if !reflect.DeepEqual(before, afterPreview) {
+					t.Fatal("preview changed saved state")
+				}
+				request.ExpectedHash = report.Hash
+				if _, err := ReconcileStoppedDispatch(db, request, false); err != nil {
+					t.Fatal(err)
+				}
+				after, err := db.LoadWorkspace()
+				if err != nil {
+					t.Fatal(err)
+				}
+				saved, _ := after.Graph.ReviewFlow(flow.ID)
+				dispatch, _ := after.Graph.GraphDispatch(request.DispatchID)
+				task, _ := after.Graph.GraphTask(flow.TaskID)
+				if !reflect.DeepEqual(saved, flow) || task.Status != core.Blocked ||
+					dispatch.Status != core.DispatchCancelled || dispatch.ExecutionStarted ||
+					dispatch.Acknowledged || dispatch.RuntimeSessionID != "" || len(dispatch.RuntimeUsage) != 0 ||
+					dispatch.Result.OutputTreeSHA != "" || len(after.Records.Events) != len(before.Records.Events) {
+					t.Fatal("cancellation changed authorization, deadline, usage or execution evidence")
+				}
+				if err := after.Records.VerifyFlowAudits(after.Graph); err != nil {
+					t.Fatal(err)
+				}
+				if err := after.Graph.CheckLedger(after.Ledger); err != nil {
+					t.Fatal(err)
+				}
+				if baselineOnly {
+					successor := flow.Contract
+					successor.Worktree, successor.Branch = filepath.Join(t.TempDir(), "successor"), "work/baseline-successor"
+					gitTest(t, flow.Contract.Worktree, "worktree", "add", "-b", successor.Branch, successor.Worktree, successor.BaselineSHA)
+					original := before.Records.RestoredDispatch(before.Graph.Dispatches[0])
+					if err := gitproof.VerifyApprovedInputSuccessor(original, successor); err != nil {
+						t.Fatal("unchanged baseline-only successor rejected:", err)
+					}
+					if err := os.WriteFile(filepath.Join(successor.Worktree, "README.md"), []byte("drift"), 0600); err != nil {
+						t.Fatal(err)
+					}
+					if err := gitproof.VerifyApprovedInputSuccessor(original, successor); err == nil {
+						t.Fatal("changed baseline-only successor accepted")
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestStoppedReviewerCancellationDoesNotRequireListedStopCode(t *testing.T) {
+	for _, artifact := range []bool{false, true} {
+		t.Run(fmt.Sprintf("artifact=%t", artifact), func(t *testing.T) {
+			var db *store.Store
+			var flow core.ReviewFlow
+			var request DispatchReconciliationRequest
+			if artifact {
+				var ledger string
+				var start ReviewFlowRequest
+				db, ledger, start, _ = artifactFixture(t, []string{"test -s internal/input-00.txt"}, false)
+				var err error
+				flow, err = StartReviewFlow(db, ledger, start)
+				if err != nil {
+					t.Fatal(err)
+				}
+				flow, err = ValidateReviewFlowInput(t.Context(), db, ledger, flow.ID, start.Configuration)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request = DispatchReconciliationRequest{
+					FlowID: flow.ID, DispatchID: flow.LastDispatchID(), Actor: "human", Source: "human:reconcile",
+					Reason: "Cancel without asserting non-delivery", Evidence: []string{"synthetic process quiescence"},
+					NoActiveExecutionConfirmed: true, AcceptDeliveryUncertainty: true,
+				}
+			} else {
+				db, _, flow, _, request = stoppedNormalReviewer(t, false, true)
+			}
+			if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+				if !flow.HandoffHeld() {
+					if err := holdReviewFlowForStop(&state.Graph, &flow, "separate successor requested"); err != nil {
+						return err
+					}
+				}
+				flow.Status, flow.StopCode, flow.Reason = "STOPPED", "RECONTRACT", "separate successor requested"
+				storeFlow(state, flow)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := db.LoadWorkspace()
+			preview, err := ReconcileStoppedDispatch(db, request, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.ExpectedHash = preview.Hash
+			if _, err := ReconcileStoppedDispatch(db, request, false); err != nil {
+				t.Fatal(err)
+			}
+			after, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved, _ := after.Graph.ReviewFlow(flow.ID)
+			if !reflect.DeepEqual(flow, saved) || !reflect.DeepEqual(before.Records.Events, after.Records.Events) {
+				t.Fatal("cancellation rewrote Flow or execution receipts")
+			}
+			if err := after.Records.VerifyFlowAudits(after.Graph); err != nil {
+				t.Fatal(err)
+			}
+			if artifact {
+				next := flow.Contract
+				next.ID, next.Supersedes, next.CreatedFrom = "next-review", flow.TaskID, "flow:"+flow.ID
+				next.TargetSHA, next.TargetTreeSHA = flow.Artifact.Target.CommitSHA, flow.Artifact.Target.TreeSHA
+				next.TargetChangedFiles = flow.Artifact.Target.ChangedFiles
+				if _, err := validatedArtifactSource(after.Graph, next, ReviewFlowRequest{
+					ArtifactSource: flow.Artifact.Target.Source, Configuration: flow.Artifact.Configuration,
+				}); err != nil {
+					t.Fatal("reconciled RECONTRACT input rejected by downstream validation reuse:", err)
+				}
 			}
 		})
 	}

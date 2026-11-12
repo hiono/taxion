@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/store"
 )
 
 func gateTestTask() core.GraphTask {
 	return core.GraphTask{
 		ID: "gate-task", Title: "Gate", Repo: "owner/repo", Type: "IMPLEMENTATION",
 		Status: core.Ready, Owner: "CODER", Reviewer: "REVIEWER",
-		Objective: "ship", Scope: []string{"src"}, Acceptance: []string{"tests pass"},
+		Objective: "ship", Scope: []string{"src"}, Acceptance: []string{"tests pass", core.ADRNotApplicableCriterion},
 		RequiredEvidence: []string{"test-report"}, ExitCondition: "tests pass",
 		Branch: "work", BaselineSHA: strings.Repeat("a", 40), Worktree: "/repo/.taxion/worktrees/gate-task",
 	}
@@ -342,6 +343,183 @@ func gateDeepCopy(t *testing.T, graph core.TaskGraph) core.TaskGraph {
 		t.Fatal(err)
 	}
 	return copy
+}
+
+func TestADRGateBlocksUnboundRequirementsWithoutRewritingApproval(t *testing.T) {
+	task := gateTestTask()
+	task.Acceptance = []string{"tests pass"}
+	graph := core.TaskGraph{Version: 1, Tasks: []core.GraphTask{task}}
+	before, _ := core.CanonicalJSON(graph)
+	report, err := ContractGateReport(graph, task.ID)
+	if err != nil || report.Verdict != GateVerdictBlocked || !hasGateCondition(report, "adr-requirements-unbound") ||
+		report.NextAuthorizedTransition != "" {
+		t.Fatalf("missing ADR requirements passed: %+v %v", report, err)
+	}
+	after, _ := core.CanonicalJSON(graph)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("gate rewrote the old Task or approval")
+	}
+}
+
+func TestADRContractGatePinsSourceAndRedactsIdentifiers(t *testing.T) {
+	secret := "gho_" + strings.Repeat("Z", 40)
+	spec := core.Specification{
+		ID: "ADR-" + secret, Title: "Explicit denials", Source: "repository",
+		Location: "docs/adr/decision.md", Version: "approved-1", RetrievedAt: time.Now().UTC(),
+		Body: "Preserve immutable execution evidence.", Usage: "independent ADR review",
+	}
+	hash, err := core.SpecificationHash(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Ingestion = &core.SpecificationApproval{Actor: "human", Source: "human:source", Hash: hash}
+	spec.Copilot = &core.SpecificationApproval{Actor: "human", Source: "human:runtime-source", Hash: hash}
+	criterion, _ := core.ADRComplianceCriterion(spec)
+	task := gateTestTask()
+	task.Acceptance, task.Specifications = []string{criterion}, []core.Specification{spec}
+	graph := core.TaskGraph{Version: 1, Tasks: []core.GraphTask{task}}
+	report, err := ContractGateReport(graph, task.ID)
+	if err != nil || report.Verdict != GateVerdictPass || report.ADRCompliance.Status != "bound" {
+		t.Fatalf("approved source did not bind: %+v %v", report, err)
+	}
+	data, _ := json.Marshal(report)
+	if strings.Contains(string(data), secret) {
+		t.Fatal("ADR gate disclosed a credential-like identifier")
+	}
+	graph.Tasks[0].Specifications[0].Body += " Unapproved replacement."
+	report, err = ContractGateReport(graph, task.ID)
+	if err != nil || !hasGateCondition(report, "adr-requirements-invalid") || report.Verdict != GateVerdictFail {
+		t.Fatalf("ADR drift passed its old approval: %+v %v", report, err)
+	}
+}
+
+func TestADRGatesRequireIndependentSameCandidateDecisions(t *testing.T) {
+	for _, test := range []struct {
+		verdict, status, gate string
+	}{
+		{"APPROVE", "pass", GateVerdictPass},
+		{"REQUEST_CHANGES", "fail", GateVerdictFail},
+		{"BLOCKED", "blocked", GateVerdictBlocked},
+	} {
+		t.Run(test.verdict, func(t *testing.T) {
+			db, ledger, request := reviewFlowFixture(t, core.TaskDecision{
+				ID: "synthetic-adr-not-applicable", Source: "human:synthetic",
+				Text: "No ADR applies to the synthetic application; independent review must confirm the reason.",
+			})
+			flow, err := StartReviewFlow(db, ledger, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state, _ := db.LoadWorkspace()
+			pending, _ := ExecutionGateReport(state.Graph, flow.ID)
+			if !hasGateCondition(pending, "adr-review-unavailable") {
+				t.Fatal("Coder-only execution passed independent ADR review")
+			}
+			executeFlowDispatch(t, db, flow, "", true)
+			flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			executeFlowDispatch(t, db, flow, test.verdict, true)
+			if test.verdict == "APPROVE" {
+				flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			state, _ = db.LoadWorkspace()
+			before, _ := core.CanonicalJSON(state.Graph)
+			for _, gate := range []func(core.TaskGraph, string) (GateReport, error){ExecutionGateReport, PublicationGateReport} {
+				report, err := gate(state.Graph, flow.ID)
+				if err != nil || report.Verdict != test.gate || report.ADRCompliance == nil ||
+					report.ADRCompliance.Status != test.status || report.StateChanged {
+					t.Fatalf("ADR decision not enforced: %+v %v", report, err)
+				}
+			}
+			drift := gateDeepCopy(t, state.Graph)
+			drift.Tasks[0].TargetSHA = strings.Repeat("f", 40)
+			report, _ := ExecutionGateReport(drift, flow.ID)
+			if !hasGateCondition(report, "adr-review-basis-mismatch") {
+				t.Fatal("ADR verdict carried over to a different candidate")
+			}
+			drift = gateDeepCopy(t, state.Graph)
+			drift.Tasks[0].Acceptance = []string{"changed ADR scope"}
+			report, _ = ExecutionGateReport(drift, flow.ID)
+			if !hasGateCondition(report, "adr-review-basis-mismatch") {
+				t.Fatal("ADR verdict carried over to a different approved scope")
+			}
+			after, _ := core.CanonicalJSON(state.Graph)
+			if !reflect.DeepEqual(before, after) {
+				t.Fatal("ADR gate observation modified saved evidence")
+			}
+		})
+	}
+}
+
+func TestADRGateViolationOutranksIncompleteDecision(t *testing.T) {
+	db, ledger, request := reviewFlowFixture(t)
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		task, _ := state.Graph.GraphTask(request.TaskID)
+		task.Acceptance = []string{core.DocumentationAcceptance}
+		for _, id := range []string{"ADR-one", "ADR-two"} {
+			spec := core.Specification{
+				ID: id, Title: id, Source: "repository", Location: "docs/adr/" + id + ".md",
+				Version: "approved-1", RetrievedAt: time.Now().UTC(),
+				Body: "Preserve execution evidence.", Usage: "independent ADR review",
+			}
+			hash, err := core.SpecificationHash(spec)
+			if err != nil {
+				return err
+			}
+			spec.Ingestion = &core.SpecificationApproval{Actor: "human", Source: "human:source", Hash: hash}
+			spec.Copilot = &core.SpecificationApproval{Actor: "human", Source: "human:runtime-source", Hash: hash}
+			criterion, err := core.ADRComplianceCriterion(spec)
+			if err != nil {
+				return err
+			}
+			task.Specifications = append(task.Specifications, spec)
+			task.Acceptance = append(task.Acceptance, criterion)
+		}
+		task.Status = core.Draft
+		state.Graph = core.TaskGraph{Version: 1}
+		if err := state.Graph.Track(task, "human", "bind two synthetic ADR decisions"); err != nil {
+			return err
+		}
+		return state.Graph.Transition(task.ID, core.Ready, "human", "approve both source criteria", core.TransitionProof{})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	flow, err := StartReviewFlow(db, ledger, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executeFlowDispatch(t, db, flow, "", true)
+	flow, err = AdvanceReviewFlow(db, ledger, flow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executeFlowDispatch(t, db, flow, "REQUEST_CHANGES", true)
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, order := range [][]string{{"BLOCKED", "FAIL"}, {"FAIL", "BLOCKED"}} {
+		graph := gateDeepCopy(t, state.Graph)
+		last := &graph.Dispatches[len(graph.Dispatches)-1]
+		index := 0
+		for i := range last.Result.Acceptance {
+			if strings.HasPrefix(last.Result.Acceptance[i].Criterion, core.ADRCompliancePrefix) {
+				last.Result.Acceptance[i].Status = order[index]
+				index++
+			}
+		}
+		report := newGateReport(GateExecution, flow.TaskID)
+		checkADRReview(&report, graph, flow)
+		if report.Verdict != GateVerdictFail || report.ADRCompliance.Status != "fail" ||
+			!hasGateCondition(report, "adr-violation") {
+			t.Fatalf("incomplete ADR hid a known violation for %v: %+v", order, report)
+		}
+	}
 }
 
 func TestGateExitCodesAreStable(t *testing.T) {

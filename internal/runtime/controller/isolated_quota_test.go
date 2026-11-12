@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,6 +21,67 @@ type isolatedQuotaRuntime struct {
 	quota  runtime.QuotaSnapshot
 	reads  int
 	onRead func(int, *runtime.QuotaSnapshot) error
+}
+
+func TestSearchPreservesLiveAndDrainedUsageCheckpoints(t *testing.T) {
+	for _, mode := range []string{"live", "drained", "stopped"} {
+		t.Run(mode, func(t *testing.T) {
+			db, _, base, _ := questionFixture(t)
+			defer db.Close()
+			base.role = "ORCHESTRATOR"
+			payload := `{"model":"test","provider":{"id":"provider","kind":"openai","label":"Provider"},"inputTokens":10,"outputTokens":5,"cacheReadTokens":0,"cacheWriteTokens":0,"totalNanoAIU":3.5,"aiCreditsStatus":"complete"}`
+			var usage core.DispatchUsage
+			if err := json.Unmarshal([]byte(payload), &usage); err != nil {
+				t.Fatal(err)
+			}
+			checkpoint := runtime.UsageCheckpoint{
+				UsageTotals: []core.DispatchUsage{usage}, TotalNanoAIU: usage.TotalNanoAIU,
+				AICreditsStatus: usage.AICreditsStatus,
+				ProviderModelMetrics: []core.ProviderModelMetric{{
+					ModelID: &usage.Model, Provider: usage.Provider,
+					Metrics: core.ProviderModelUsageMetrics{
+						AICreditsStatus: usage.AICreditsStatus, TotalNanoAIU: usage.TotalNanoAIU,
+						Usage: core.ProviderModelTokenUsage{InputTokens: 10, OutputTokens: 5},
+					},
+				}},
+			}
+			body, err := json.Marshal(checkpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := managedSearchEvents(payload)
+			close(source)
+			events := make(chan runtime.Event, len(source)+1)
+			sequence := uint64(0)
+			emit := func(event runtime.Event) {
+				sequence++
+				event.Sequence = sequence
+				events <- event
+			}
+			for event := range source {
+				if mode == "live" && event.Type == runtime.EventTurnEnded ||
+					mode == "drained" && event.Type == runtime.EventTurnFinished {
+					emit(runtime.Event{Type: runtime.EventUsageCheckpoint, Payload: string(body)})
+				}
+				emit(event)
+			}
+			worker := &questionRuntime{configuredRuntime: base, events: events}
+			if mode == "stopped" {
+				worker.stoppedEvents = []runtime.Event{{Type: runtime.EventUsageCheckpoint, Sequence: sequence + 1, Payload: string(body)}}
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			turn, err := RunSearchTurn(ctx, worker, "task", "query")
+			if err != nil || len(turn.Usage) != 1 || len(turn.UsageCheckpoints) != 1 ||
+				len(turn.UsageCheckpoints[0].ProviderModelMetrics) != 1 ||
+				turn.UsageCheckpoints[0].ProviderModelMetrics[0].Provider == nil ||
+				turn.UsageCheckpoints[0].ProviderModelMetrics[0].Provider.ID != "provider" ||
+				turn.UsageCheckpoints[0].TotalNanoAIU == nil ||
+				*turn.UsageCheckpoints[0].TotalNanoAIU != 3.5 {
+				t.Fatal("search checkpoint was lost or counted as another receipt", turn, err)
+			}
+		})
+	}
 }
 
 func (w *isolatedQuotaRuntime) BudgetGuidancePolicy() *core.BudgetGuidancePolicy { return w.policy }
@@ -39,6 +101,26 @@ func (w *isolatedQuotaRuntime) ReadAccountQuota(ctx context.Context, account str
 	return quota, nil
 }
 
+func managedSearchEvents(usage string) chan runtime.Event {
+	source := questionEventsWithUsage("search receipt", usage)
+	events := make(chan runtime.Event, cap(source)+2)
+	var sequence uint64
+	send := func(event runtime.Event) {
+		sequence++
+		event.Sequence = sequence
+		events <- event
+	}
+	for len(source) != 0 {
+		event := <-source
+		send(event)
+		if event.Type == runtime.EventTurnStarted {
+			send(runtime.Event{Type: runtime.EventExecution, Payload: `{"phase":"tool-start","callId":"search-call","tool":"taxion_search"}`})
+			send(runtime.Event{Type: runtime.EventExecution, Payload: `{"phase":"tool-complete","callId":"search-call","success":true}`})
+		}
+	}
+	return events
+}
+
 func TestIsolatedQuotaFinalGateAndCleanup(t *testing.T) {
 	for _, entry := range []string{"question", "planner", "search"} {
 		for _, failure := range []string{"", "reserve", "stale", "missing", "cycle", "resource", "unlimited", "stop-failed"} {
@@ -47,11 +129,14 @@ func TestIsolatedQuotaFinalGateAndCleanup(t *testing.T) {
 				db, path, base, selected := questionFixture(t, policy)
 				base.role = "ORCHESTRATOR"
 				worker := &isolatedQuotaRuntime{
-					questionRuntime: &questionRuntime{configuredRuntime: base, events: questionEventsWithUsage(savedQuestionAnswer, "")},
+					questionRuntime: &questionRuntime{configuredRuntime: base, events: questionEventsWithUsage(savedQuestionAnswer, `{"model":"fixture","inputTokens":10,"outputTokens":5}`)},
 					policy:          policy, quota: observedQuota(),
 				}
 				if entry == "planner" {
-					worker.events = questionEventsWithUsage(`{"recommendation":"HUMAN_REQUIRED","confirmed":[{"text":"Task status","sources":["/planner/task/status"]}],"assumptions":[],"unconfirmed":["Live state unknown."]}`, "")
+					worker.events = questionEventsWithUsage(`{"recommendation":"HUMAN_REQUIRED","confirmed":[{"text":"Task status","sources":["/planner/task/status"]}],"assumptions":[],"unconfirmed":["Live state unknown."]}`, `{"model":"fixture","inputTokens":10,"outputTokens":5}`)
+				}
+				if entry == "search" {
+					worker.events = managedSearchEvents(`{"model":"fixture","inputTokens":10,"outputTokens":5}`)
 				}
 				reset := time.Now().Add(8 * 24 * time.Hour)
 				worker.quota.ResetAt = &reset
@@ -97,7 +182,7 @@ func TestIsolatedQuotaFinalGateAndCleanup(t *testing.T) {
 					}
 					result, runErr := ask(ctx, db, filepath.Join(filepath.Dir(path), "ledger.json"), "task", "status?", selected.Config, worker)
 					err, observations, initial = runErr, result.QuotaObservations, result.BudgetGuidance
-					accepted = result.Answer != nil
+					accepted = runErr == nil && result.Answer != nil
 				}
 				if worker.stops != 1 || worker.reads != 2 || len(observations) != 1 || len(worker.sends) != 1 ||
 					initial == nil || *initial.Account.RemainingPercentage != 76 {
@@ -111,7 +196,10 @@ func TestIsolatedQuotaFinalGateAndCleanup(t *testing.T) {
 					count := 0
 					for _, receipt := range state.Records.Requests {
 						if receipt.Kind == "planning" {
-							count++
+							var fields map[string]json.RawMessage
+							if json.Unmarshal([]byte(receipt.Payload), &fields) == nil && fields["observation"] != nil {
+								count++
+							}
 							if receipt.RequestID == "" || receipt.Hash != receiptHash(receipt.Payload) {
 								t.Fatal("isolated quota evidence not bound to session or contents")
 							}
@@ -167,6 +255,120 @@ func TestIsolatedQuotaUnavailableBeforeSend(t *testing.T) {
 	}
 }
 
+func TestSearchRequiresBoundTurnEndBeforeIdle(t *testing.T) {
+	for _, scenario := range []string{"idle-only", "answer-without-end", "later-output"} {
+		t.Run(scenario, func(t *testing.T) {
+			_, _, base, _ := questionFixture(t)
+			base.role = "ORCHESTRATOR"
+			events := make(chan runtime.Event, 6)
+			var sequence uint64
+			send := func(event runtime.Event) {
+				sequence++
+				event.Sequence = sequence
+				events <- event
+			}
+			if scenario != "idle-only" {
+				send(runtime.Event{Type: runtime.EventInput, MessageID: "search-input"})
+				send(runtime.Event{Type: runtime.EventTurnStarted, TurnID: "search-turn"})
+				send(runtime.Event{Type: runtime.EventOutput, MessageID: "search-input", TurnID: "search-turn", Payload: "answer"})
+			}
+			if scenario == "later-output" {
+				send(runtime.Event{Type: runtime.EventTurnEnded, TurnID: "search-turn"})
+				send(runtime.Event{Type: runtime.EventOutput, MessageID: "search-input", TurnID: "search-turn", Payload: "later activity"})
+			} else {
+				send(runtime.Event{Type: runtime.EventTurnFinished})
+			}
+			close(events)
+			worker := &questionRuntime{configuredRuntime: base, events: events}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			if _, err := RunSearchTurn(ctx, worker, "task", "query"); err == nil || errors.Is(err, context.DeadlineExceeded) {
+				t.Fatal("unbound or later activity did not fail closed", err)
+			}
+			if worker.stops != 1 {
+				t.Fatal("rejected search did not preserve cleanup")
+			}
+		})
+	}
+}
+
+func TestSearchRejectsUnsequencedEvents(t *testing.T) {
+	for _, missing := range []int{0, 1, 2, 3, 4} {
+		t.Run(fmt.Sprint(missing), func(t *testing.T) {
+			_, _, base, _ := questionFixture(t)
+			base.role = "ORCHESTRATOR"
+			stream := []runtime.Event{
+				{Type: runtime.EventInput, MessageID: "search-input"},
+				{Type: runtime.EventTurnStarted, TurnID: "search-turn"},
+				{Type: runtime.EventOutput, MessageID: "search-input", TurnID: "search-turn", Payload: "answer"},
+				{Type: runtime.EventUsage, Payload: "{}"},
+				{Type: runtime.EventTurnEnded, TurnID: "search-turn"},
+			}
+			events := make(chan runtime.Event, len(stream))
+			for i, event := range stream {
+				if i != missing {
+					event.Sequence = uint64(i + 1)
+				}
+				events <- event
+			}
+			close(events)
+			worker := &questionRuntime{configuredRuntime: base, events: events}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			if _, err := RunSearchTurn(ctx, worker, "task", "query"); err == nil || errors.Is(err, context.DeadlineExceeded) {
+				t.Fatal("missing event sequence did not fail closed", err)
+			}
+			if worker.stops != 1 {
+				t.Fatal("rejected search did not preserve cleanup")
+			}
+		})
+	}
+}
+
+func TestSearchAllowsOnlyBoundManagedAcquisition(t *testing.T) {
+	for _, scenario := range []string{"managed", "other-tool", "unknown", "permission", "incomplete", "no-acquisition"} {
+		t.Run(scenario, func(t *testing.T) {
+			_, _, base, _ := questionFixture(t)
+			base.role = "ORCHESTRATOR"
+			activity := runtime.Event{Type: runtime.EventExecution, Payload: `{"phase":"tool-start","callId":"search-call","tool":"taxion_search"}`}
+			switch scenario {
+			case "other-tool":
+				activity.Payload = `{"phase":"tool-start","callId":"search-call","tool":"bash"}`
+			case "unknown":
+				activity.Type = "unknown-provider-event"
+			case "permission":
+				activity.Type = runtime.EventPermission
+			}
+			stream := []runtime.Event{
+				{Type: runtime.EventInput, MessageID: "search-input"},
+				{Type: runtime.EventTurnStarted, TurnID: "search-turn"},
+			}
+			if scenario != "no-acquisition" {
+				stream = append(stream, activity)
+			}
+			if scenario != "incomplete" && scenario != "no-acquisition" {
+				stream = append(stream, runtime.Event{Type: runtime.EventExecution, Payload: `{"phase":"tool-complete","callId":"search-call","success":true}`})
+			}
+			stream = append(stream,
+				runtime.Event{Type: runtime.EventOutput, MessageID: "search-input", TurnID: "search-turn", Payload: "answer"},
+				runtime.Event{Type: runtime.EventTurnEnded, TurnID: "search-turn"},
+				runtime.Event{Type: runtime.EventTurnFinished})
+			events := make(chan runtime.Event, len(stream))
+			for i, event := range stream {
+				event.Sequence = uint64(i + 1)
+				events <- event
+			}
+			worker := &questionRuntime{configuredRuntime: base, events: events}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			_, err := RunSearchTurn(ctx, worker, "task", "query")
+			if (err == nil) != (scenario == "managed") || worker.stops != 1 {
+				t.Fatal("managed acquisition or prohibited activity misclassified", scenario, err)
+			}
+		})
+	}
+}
+
 func TestIsolatedNonAccountModesDoNotReadQuota(t *testing.T) {
 	for _, mode := range []string{"off", "flow", "provider"} {
 		t.Run(mode, func(t *testing.T) {
@@ -183,7 +385,7 @@ func TestIsolatedNonAccountModesDoNotReadQuota(t *testing.T) {
 			if err != nil || result.Answer == nil || worker.reads != 0 || len(result.QuotaObservations) != 0 {
 				t.Fatal("non-account question queried account quota", err)
 			}
-			worker.events = questionEvents(savedQuestionAnswer)
+			worker.events = managedSearchEvents(`{"model":"test","inputTokens":10,"outputTokens":5}`)
 			turn, err := RunSearchTurn(ctx, worker, "task", "query")
 			if err != nil || worker.reads != 0 || len(turn.QuotaObservations) != 0 {
 				t.Fatal("non-account search queried account quota", err)

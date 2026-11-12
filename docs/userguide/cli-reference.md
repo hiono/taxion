@@ -127,9 +127,17 @@ Taxion が intake、完全な hash の承認、Reviewer の設定承認、Flow�
 
 `request --status` は read-only の JSON で現在の operation と Flow 予算を返す。`request --resume ID` は保存済みの設定・上限・期限・質問・承認を再利用し、他の option を受け付けない。EOF では質問待ちを残し、`/quit` では終了する。`request --cancel ID` は実行停止と照合を済ませた idle request の operation だけを終了し、Task や既存判断を変更しない。稼働中 Flow・未終了 Dispatch・成否不明の Planner は取消しを拒否する。同じ workspace で別の active operation や workflow を開始できない。質問待ちには回答だけを適用し、承認後の4 lane preflight は一括実行する。同一契約内の Coder・非モデル validation・Reviewer の間では再承認せず、中間の進捗を表示しない。最終 JSON の `gate` は `COMPLETED`、`BLOCKED`、`USAGE_EXCEEDED`、明示取消しは `CANCELLED`。Planner の実測 nano-AIU を全体の上限から控除し、残量だけを Flow に割り当てる。取得量が未知の場合は次のモデル呼出しを止める。期限と予算は再開で増えず、未照合の実行・送信を自動 retry しない。詳細は[利用者ガイド](user-guide.md#人のことばで依頼して計画を相談する)を参照する。
 
+`taxion request recover --id ID --actor ACTOR --source SOURCE --reason REASON --evidence REF --preview` は、停止した request Planner と直接質問の保存回答を照合する。`--cli` と `--base-directory` は元の Copilot session の観測先を指定する。preview は workspace を read-only で開き、保存した入力・Task・設定・出典・main message/turn・元期限・利用量を照合する。同じ判断項目と表示された hash に対して `--apply --expected-hash HASH` を指定すると、回答・checkpoint・利用量・受理記録を一つの transaction で保存する。モデル送信、Abort、期限・予算の更新、実行承認は行わない。
+
+v0.8.2 の version-2 checkpoint に attempt binding がない場合は、`--associate-legacy --session ID --input-hash SHA256 --confirm-stopped` を追加する。`--input-hash` は変更していない native user input の SHA-256 であり、その本文に含まれる元依頼と計画 Task ID も照合する。停止確認には元 process tree の停止証拠を `--evidence` で示す。新しい照合判断を記録するもので、旧 receipt や当時の runtime 設定の binding を復元したと主張するものではない。旧 version-1 checkpoint、Copilot 以外の provider、binding のない旧直接質問は対象外となる。
+
+`--resolution continue` が既定であり、request は確認質問または未承認提案の状態へ戻る。元期限が過ぎた場合や累積利用量が未知の場合には、新しい実行を許可しない。`--resolution cancel` は照合後にその operation だけを `CANCELLED` とし、元 checkpoint・保存回答の参照・履歴・利用量を保持する。routine shutdown や集計利用量がない、または不完全な場合、不正な回答を未受理の証拠として残す場合には、停止証拠と `--accept-uncertainty` を追加する。native 集計値が per-call usage と一致する限り、欠落分は未知のまま扱い、既知の利用量を下限として保持する。既知の不一致は拒否する。この不確実性の受入れは取消専用であり、未知の利用量をゼロに変えず、既知の下限を減らさない。
+
+apply は排他的な operation lease を取得し、native history を再観測してから保存する。停止済み process の owner 表示だけが残る場合も、実際に lease を取得できなければ拒否する。同じ判断と hash の重複 apply は再課金・再送・重複保存を行わない。解除後の Task や Flow は通常の契約・設定・実行 gate を通す。
+
 `conversation search` は、承認済みの Markdown、PDF、DOCX、PPTX の抜粋を、編集可能な Task に自動で添付する。会話 export は private に分類し、明示選択した user message だけを検索対象にする。console は metadata を表示し、ローカルの非公開状態には引用した出典全文と用途別の承認を保持する。取込み、選択した runtime への送信、外部公開は別々に承認する。
 
-`conversation ask`・`conversation plan`・`conversation investigate` は別々にモデルを呼び出す操作。それぞれ明示 deadline を設け、Copilot は session 別 credit ceiling も要求する。OpenCode の料金・account quota は未確認とし、Copilot の credit ceiling を指定して代用しない。token 利用量は呼出しごとに報告するが、停止条件にはしない。通常 CI はローカル回帰テストを使う。
+`conversation ask`・`conversation plan`・`conversation investigate` は別々にモデルを呼び出す操作。それぞれ明示 deadline を設け、Copilot は session 別 credit ceiling も要求する。各質問は workspace operation で直列化され、attempt・session・送信意図・検証済み terminal 回答を private request receipt に追記する。回答 receipt は quota 再確認・cleanup より先に保存される。Stop が失敗した場合もその回答は保存されるが、operation は `BLOCKED` のままである。`taxion request --status` で状態を確認し、保存した attempt binding がある直接質問は前述の `request recover` の preview と完全なハッシュによる apply で照合する。再送は行わず、終了記録・利用量・回答が不確実な場合は停止証拠と明示承認を伴う取消だけを許可する。binding のない旧直接質問は対象外であり、足りない記録を推測しない。OpenCode の料金・account quota は未確認とし、Copilot の credit ceiling を指定して代用しない。token 利用量は呼出しごとに報告するが、停止条件にはしない。通常 CI はローカル回帰テストを使う。
 
 実 SDK の独立 Reviewer 受入れは、再承認した実行で、保持した Coder SHA の承認と worktree の解放を確認して完了した。scope 承認、parser の制約、受入れ記録は[仕様入力](../develop/specification-input.md)を参照する。
 
@@ -464,6 +472,193 @@ taxion conversation ask --task <task-id> \
 
 保存記録だけを読み、追加の実調査、handoff の hold・release、回答の instruction 適用は行わない。変更には明示的な `workflow handoff`、feedback、version 付き draft、または後述の監視 console を使う。依頼から計画までの対話と追加調査の受入れは、2026-10-12 に完了した M12 の実 SDK 受入れ（#53/#54・#73/#74）で確認した。文書作業の実モデル受入れと停止後の復旧は、完了済みの #78・#79・#80 に記録した。すべての CLI 入口の実モデル実行を確認したという意味ではない。
 
+### Clarification の観測と回答保存（候補版・部分実装）
+
+`conversation clarification` は、質問先と回答の出典を既存の planning receipt に保存する。
+回答は `OBSERVED` のままで、受理・承認・Dispatch、HOLD、Runtime Stopを行わない。
+この入口だけで依存作業の停止や安全な自動再開が完成したとは扱わない（#283は継続中、#284の正式統合は未実装）。
+
+```bash
+taxion conversation clarification observe --task TASK --dispatch DISPATCH
+taxion conversation clarification request --file question.json
+taxion conversation clarification answer --file answer.json
+taxion conversation clarification assess --id QUESTION_ID
+taxion conversation clarification resolve-answer --file resolution.json
+taxion conversation clarification resolve-coder --id QUESTION_ID
+taxion conversation clarification history
+```
+
+`observe` の `hash` を質問の `basisHash` に使う。Coder／Reviewerは本人の保存済み
+Dispatchを必須とし、PlannerはTaskだけを指定できる。質問JSONは `id`、`taskId`、
+必要なら `dispatchId`、`role`（`PLANNER`／`CODER`／`REVIEWER`）、`basisHash`、
+`category`、`question`、`reason`、`uncertainty`、参照済み情報の `references`、
+`answerFormat`（`text`／`json`）、`decisionImpact`、`stopCondition`、
+RFC 3339の `deadline` を含む。参照済みという申告や回答者のmetadataは、認証や内容の真偽の証明ではない。
+
+`specification` はPlannerへ、仕様所有者不明のPlannerの質問は人間へ送る宛先を記録する。
+`specificationOwnerRole` は `PLANNER`／`HUMAN` を明示できる。
+Reviewerの `implementation`／`evidence` はCoder、`authority`／`intent`／
+`irreversible`／`scope-change`／`budget-change`／`deadline-change` は人間が宛先となる。
+`safety`／`identity`／`integrity`／`budget`／`deadline` と期限切れは `STOP` を返すが、
+この値はRuntime停止完了の証明ではない。
+
+既存の原文で解決できると判断した場合は、`category: "saved"` と、`references`にも含めた
+`savedSourceId` を指定する。選択Task／Dispatchに結び付いた原文だけを返し、digestだけの
+referenceを原文扱いしない。軽微な不足は `category: "minor"` と
+`assumption: {"text":"仮定","impact":["承認済みscopeの項目"],"reversible":true}` を記録できる。
+不可逆な仮定とscope外の影響は拒否する。資料が回答を満たすか、仮定が軽微かという意味的判断は呼出側に残る。
+
+回答JSONは `{"id":"質問ID","answer":{"role":"PLANNER","actor":"回答者",
+"source":"実際の出典","text":"回答"}}` の形とし、受信時刻はControllerが保存する。
+同一対象・同一仕様の再送は元の質問を返し、同じ回答の再送は追記しない。
+異なる回答による上書きは拒否し、その回答も観測履歴へ保存する。
+保存済み回答からの明示選択は観測判断として記録できるが、回答の正式な受理とgate・Recoveryへの接続は未完了である。
+
+Planner宛の保存質問だけは、既存の有料・tool-free Planner入口へ明示的に接続できる。
+このコマンドも通常の設定承認、account／repository検査、期限、session ceilingを必要とする。
+
+```bash
+taxion conversation plan --task TASK --clarification QUESTION_ID \
+  --timeout 2m --max-ai-credits 30
+```
+
+この場合、回答本体・usage・cleanup・所有権は従来の質問receiptで管理し、
+ClarificationはそのID・sequence・hashを参照する。回答参照の存在はcleanup成功や受理を意味しない。
+人間またはCoderの回答は外側のAgentまたは人間が明示的に渡す方式であり、
+Coderへの自動配信は未接続である。実モデルでの動作改善は未評価。
+
+Copilotの実行中Coder／Reviewerからの質問保存は、`request --clarification-intake` で
+明示的に有効にできる。保存したrequestの再開では、この選択も復元する。
+`workflow run|step|resume --clarification-intake` にも同じ入口があるが、
+保存済みrequestの実行operationとowner、Flow runnerが必要であり、単独Flowでは拒否する。
+OpenCodeとcredential brokerを使用するRoleでは、このオプションを使用できない。
+
+有効時は既存SDK host toolの `taxion_clarify` を登録する。Roleは質問ID、分類、原文、
+理由、不確実性、参照、回答形式、判断への影響、停止条件、期限を渡す。
+Task／Dispatch／session／ownerはモデルの推測で補わず、hostが保存済み実行と照合する。
+停止要求済みDispatch、停止・idle状態のsession、失効したowner、対象・証拠の変更は拒否する。
+質問原文は既存のcanonical receiptだけに保存し、toolは参照と `OBSERVED` を返す。
+同じ実行の再送は追記せず、同じIDでの原文変更や別ownerへの付け替えは拒否する。
+このtoolは回答の受理、実配信、HOLD、Runtime Stop、依存作業の自動停止・再開を行わない。
+Roleへの説明でも未回答に依存する作業を進めないよう求めるが、その行動を実モデルで検証していない。
+
+protocol 3の新しいRole sessionでは、同じ`taxion_clarify`へ
+`{"action":"read","id":"自分が発行した質問ID"}`を渡すと、
+保存済み回答の`candidates`、出典・時刻・receipt、`resolution`と現在の`decision`を取得できる。
+質問の再送や人間による回答本文の貼り直しは不要で、読取りによる記録の追記も行わない。
+回答が未着なら候補は空であり、待機中の反復pollを要求しない。
+独立した作業の区切りなど、次の安全なtool呼出し時に確認する。
+別質問の原文を受信するinboxではなく、同じTask／Dispatch／Role／session／owner／runnerで
+発行した質問への返信だけを返す。別origin、終了・停止要求済みのDispatch、
+owner・scopeの変化、実行期限切れは拒否する。
+回答の取得後も既存の停止・承認条件は残り、新たな矛盾は`blocked`として返す。
+64 KiBを超える応答は切り詰めず拒否する。
+
+旧protocolのsessionにはこの読取りを後付けしない。protocol変更は設定hashを変えるため、
+旧sessionを新設定で再利用できない。回答を作るRoleの自動起動や、実行中Flowからの
+Planner呼出しのownership統合は未実装である。SDKの空AgentIDによるroot帰属の制約も変わらず、
+この読取りはrootの本人認証、配信完了、ACKを証明しない。SDK inboxの無効化は維持する。
+
+回答の保存後は`assess --id`で、現在の保存記録との適合を読取り専用で確認できる。
+`state`は`OBSERVED`のままで、`decision.verdict: "accept"`は次の正式な契約確認の入力にできるという意味である。
+回答の意味的な妥当性、ACCEPTED、AUTHORIZED、DISPATCHED、Runtimeの稼働や配信完了を証明しない。
+実際の続行には既存の対象・設定・証拠・承認・予算・期限gateを使う。
+`savedBudget`は保存済み観測からの評価であり、実provider残量の照会ではない。
+
+異なる回答者・出典・本文の回答は、元の回答を上書きせず、
+`clarification.conflict`として同じcanonical履歴へ保存したうえでエラーを返す。
+`history`の`conflict`に回答者・出典・host時刻・本文が残り、`assess`は`blocked`となる。
+同じ質問への同一回答の逐次・並行retryは追記しない。
+元の回答を再入力しても矛盾は消えず、古い回答を受理済みとして再利用しない。
+仕様所有者または人間が回答を選ぶ場合は、`assess`の`candidates`から回答とreceiptを確認し、
+同じ出力の`decision.basisHash`を`expectedHash`へ渡す。
+`resolve-answer`の入力は次の形になる。receiptとhashには観測した実値を使う。
+
+```json
+{
+  "id": "QUESTION_ID",
+  "expectedHash": "ASSESSMENT_BASIS_HASH",
+  "selected": {"requestId": "clarification:QUESTION_ID", "sequence": 3, "hash": "ANSWER_RECORD_HASH"},
+  "role": "HUMAN",
+  "actor": "仕様所有者",
+  "source": "判断の実際の出典",
+  "reason": "この回答を選んだ理由"
+}
+```
+
+選択先は同じ質問の保存済み回答に限定し、観測後の証拠変更、別質問、hash不一致を拒否する。
+`role`は質問の宛先Roleまたは`HUMAN`とし、回答者・出典はCLIで申告したmetadataとして記録する。
+認証や仕様所有者の権限の証明ではなく、既存TaskDecisionの形式で出典・理由を残す観測判断である。
+`clarification.resolution`には選択先と観測時のreceiptを保存し、元の質問・回答・矛盾本文を変更しない。
+`answer`は元回答のままなので、選択された回答は`resolution.selected`に一致する`candidates`から読む。
+同じ選択の逐次・並行retryは追記せず、別の選択への上書きも拒否する。
+既知の矛盾回答を再入力しても解決を取り消さないが、新しい回答証拠が追加された場合は再び`blocked`となる。
+質問の状態は`OBSERVED`のままで、権限不足、Stop/HOLD、期限切れや配信不明は解決しない。
+正式な受理・承認・再開には後続のgateが必要である。
+`clarification.conflict`／`clarification.resolution`を理解しない旧binaryへ戻す場合はreceiptを削除せず、
+対応版または未変更のprivate backupを使う。
+
+Coder宛の質問は保存時に、Reviewer Dispatchの `RelatedID` と既存Flowの対応から
+配信先を解決する。以前保存した質問は `resolve-coder --id` で同じ処理を呼べる。
+質問のsession／ownerを宛先へ流用せず、CoderのTask／Dispatch／session／設定・仕様と、
+実行中なら既存operation owner／runnerを照合する。終了済みCoderへ現在のReviewer ownerを付与しない。
+対象不明・不一致・失効は配信せず、`delivery.status: "HELD"` と理由を返す。
+
+この解決だけではRUNNING／busy中のCoderへ通知せず、
+解決できた質問も保留し、送信済みとは扱わない。
+`HELD` は配信状況であり、TaskのHOLD、承認、Dispatch、Runtime Stopではない。
+保留記録はcanonical質問のID・sequence・hashと宛先metadataだけを既存RequestRecordへ保存する。
+再送・並行解決で追記せず、別session・owner・Dispatchへ自動で付け替えない。
+`history` の `delivery` は保存時のsnapshotであり、`resolve-coder` は現在の変化を
+保留理由として返すが、元のsnapshotを書き換えない。質問本文や回答本文を配信記録へ複製しない。
+
+Reviewerの発行には元Coderの完了が必要なので、終了済みの元Coderへは配信しない。
+正式発行され、通常の実行経路でRUNNINGになった直後の修正Coderへだけ、
+明示的に質問を引き継げる。元の宛先は変更しない。
+
+```bash
+taxion conversation clarification handoff --id QUESTION \
+  --dispatch SUCCESSOR_CODER_DISPATCH --reason "修正時に確認する根拠"
+```
+
+同じFlowで該当Reviewerの直後に正式発行された修正Coderを指定する。
+別Flow、別Task、不明・終了済みのDispatch、session・owner・runner・仕様scopeの変更、
+期限切れや回答済みの質問は拒否する。一つの質問に対する引継ぎ先の自動選択・再変更は行わない。
+このコマンドはsessionを起動せず、承認・実行指示も発行しない。
+
+SDK host tool `taxion_clarification_inbox` は現在無効であり、
+`--clarification-intake`を指定しても、このSDK経路では質問本文の受信やACKは行えない。
+既存の保存契約では、本文を返す前の`REQUESTED`と、対応する成功完了イベント・
+モデル向け応答hashの一致を伴う`DELIVERED`を区別する。
+`ACKNOWLEDGED`には受信receipt hashの明示確認と現在の実行bindingの照合が必要である。
+これらの内部段階は保持するが、空のAgentIDをrootの確証としたSDK利用は再開しない。
+
+途中停止や到達不明では質問本文を自動再送しない。再呼出しは保存済みmetadataだけを返す。
+ACKの再送は追記せず、イベントより先に届いたACKは拒否する。
+`history`の`handoff`で最後の確認段階を参照できる。
+ACKは回答でも受理でもなく、質問の状態は`OBSERVED`のままである。
+旧protocolのsessionへtoolを後付けしない。追加toolは設定hashを変えるため、
+旧sessionの再利用は既存のidentity検査で拒否される。
+実provider／実モデルでの配信は未検証であり、受信後の回答保存は従来の明示入力のままである。
+
+独立監査では、SDKの空の`AgentID`がrootだけでなく帰属情報のない呼出しも表すことを確認した。
+この実装の空値検査だけではroot限定を保証できない。
+Roleの設定で子Agentを起動できないことが全経路で成立するか、
+別の確実なroot帰属情報を取得できるまでは、inboxを安全に利用できると判断しない。
+実環境で帰属不明の子Agentがこの入口へ到達できるかは未確認であり、
+到達可能な脆弱性を再現済みという意味ではない。
+また、切断後に履歴から取得した成功イベントを保存しても、
+配信段階を復元する処理は未接続である。本文は再送せず`REQUESTED`のままとなる。
+現在の候補版では、この制約に対応してSDKへのinbox登録を無効化している。
+`ToolPolicy`の有無にかかわらず新規・再開sessionへ登録せず、
+`AvailableTools`への明示追加も設定エラーとする。直接handlerを呼び出しても拒否する。
+`handoff`による明示的な引継ぎ記録は保持するが、このSDK経路では本文を配信しない。
+上記の配信・ACK段階は内部の保存契約であり、現在利用可能なSDK操作を示すものではない。
+質問取込みの`taxion_clarify`は維持する。
+
+旧binaryへのrollbackでは、これらの新しいplanning phaseを処理できると仮定せず、
+今回追加したorigin metadataも含めて、未解決質問とreceiptを保持したprivate backupから判断する。
+
 ### 保存 Flow の監視と明示的な続行
 
 `workflow run|step|resume --progress-monitor` はイベント待機中に10分ごとと、担当の終端イベント時に
@@ -629,6 +824,41 @@ Task の `validationCommands` は Controller の検査操作を認可する。�
 `taxion records proposal|approve|send|cancel|reconcile|show|finding` は承認済み GitHub / GitLab 公開と出典付き失敗分析を管理する。承認は正確な対象・account・content hash とプロジェクトの Communication Profile を対応付ける。`TAXION_COMMUNICATION_PROFILES` で対象プロジェクトの設定ファイルを明示し、`update.statement.at` に記述時点、`update.statement.claims` に参照 URL とその状態を指定する。未設定・対象不一致・未確認の参照は送信できない。形式と更新時の再承認は[公開文章の検証手順](../develop/public-communication-validation.md#プロジェクト設定と-forge-共通検査)を参照する。送信不明は停止済み sender の claim 照合まで明示して保つ。`taxion git check-range --base <SHA>
 --head <SHA> --scanner <PATH>` は公開前に未公開の全 commit tree と message を scan する。[実行記録](execution-records.md)を参照する。
 
+#### ADR適合の確認
+
+`gate contract|execution|publication` は、承認済み Task の ADR criterion と独立 Reviewer の判断を確認する。
+`--json` の `adrCompliance` と通常表示の `ADR compliance` に確認状態を出す。
+Contract の `bound` は確認対象を固定した状態であり、候補の適合合格ではない。
+必要な確認の未宣言・未完了は `blocked`、根拠の不正や正式に確認した違反は `fail` となり、
+既存の非ゼロ exit code を返す。未確認を `pass` として扱わない。
+
+適用する ADR の原文を既存の `specifications` で承認し、
+その `SpecificationHash` を使った `adr-compliance:<specification-id>:<hash>` を
+新提案の `acceptance` に入れる。既存の source ingestion・runtime・publication の許可はそれぞれ別に必要となる。
+次は形式だけの例であり、実際の source・hash・承認ではない。
+
+```json
+{
+  "acceptance": ["adr-compliance:ADR-0075:<exact-SpecificationHash>"]
+}
+```
+
+`<exact-SpecificationHash>` は `sha256:` prefix を含む実際の値へ置き換える。
+ファイル単体の document hash では代用しない。
+
+独立 Reviewer は、同じ完全な criterion を `acceptance[].criterion` と evidence に含め、
+確認した原文と候補の具体的な箇所を他の evidence として残す。
+一般的な test 成功や Coder の自己申告では代用しない。
+結果の未保存、別の候補、source の差替え、確認不能では公開側へ進めない。
+ADR 適合 `pass` だけで品質・公開承認・期限・予算を解除することもない。
+
+適用する ADR がない場合だけ、提案へ `adr-compliance:not-applicable` を明示する。
+合格には独立 Reviewer の evidence と、理由を述べた `workReport` が必要となる。
+資料の未取得や確認不足を非適用へ付け替えない。
+旧 Task・承認・結果は自動変更せず、必要な新提案は既存の正式な差分承認で扱う。
+`gate resume` の成功は ADR 適合合格ではない。
+契約、制約と rollback は [ADR-0076](../develop/adr/0076-bind-adr-compliance-to-independent-gates.md) を参照する。
+
 #### 工程計画と保存観測
 
 `workflow plan --file flow.json` は、READY Task と実行要求から工程計画を読取り専用で作る。実行要求は `workflow start` と共通で、新しい計画には `stageBudget:{"version":2}` を指定する。返却する `stateChanged` は `false`。version 2 の `stagePlan.hash` は対象・設定・認可・期限・実使用量上限・回数・役割別ソフト上限を固定し、助言である時間/native 見積もりと抽出根拠は含めない。version 1 は従来どおり見積もりも含む。対象や認可外枠、計画の版が変われば古いハッシュで開始できない。
@@ -682,7 +912,7 @@ version 2 の提出・ホスト検証・成果物入力検証には、有効な�
 
 #### 停止後の保存済みレビュー結果の受理
 
-`workflow accept-saved-review` は、保存済み実装結果をレビューする Flow の、受理記帳だけを行う操作である。新しい Flow・Dispatch・モデル session を作らず、検証 command も再実行しない。対象は `continueFromDispatchId` を持つツリースナップショット形式で、Dispatch が成功した Reviewer の1件だけ、判定が `APPROVE`、指摘・阻害事項が0件の `STOPPED / SAFETY_STOP` に限る。特定の不具合のエラー文との一致は要求せず、保存した停止・HOLD・結果・対象・承認の証拠で判定する。予算停止、取消、通常の修正フローや未検証結果を合格にする操作ではない。
+`workflow accept-saved-review` は、保存済み実装結果をレビューする Flow の、受理記帳だけを行う操作である。新しい Flow・Dispatch・モデル session を作らず、検証 command も再実行しない。対象は `continueFromDispatchId` を持つツリースナップショット形式で、Dispatch が成功した Reviewer の1件だけ、判定が `APPROVE`、指摘・阻害事項が0件の `STOPPED` に限る。停止 code や特定の不具合のエラー文との一致は要求せず、保存した停止・HOLD・結果・対象・承認の証拠で判定する。承認済み実行枠の超過、正の利用額上限に必要な usage evidence の欠落・不完全は拒否する。取消済み指示、通常の修正フローや未検証結果を合格にする操作ではない。
 
 配布物の照合、必要な provenance policy の登録、`ready` の確認後、同じ設定環境で次の承認ファイルを用意する。これは保存結果の受理だけの明示承認であり、実行・予算・公開の承認ではない。`actor`・`source` は利用者の判断と出典を記録するもので、認証用の資格情報ではない。
 
@@ -895,8 +1125,8 @@ Dispatch 結果の `nextTransition` は TaskStatus であり、次の作業を�
 ### 受理済み Coder 出力からのレビュー継続
 
 対象は通常 Flow の受理済み `SUCCEEDED` Coder と、その直後の未開始 `ISSUED` Reviewer である。
-Flow は `STOPPED`、`HOLD`、runner なし、停止 code は `SAFETY_STOP`、`BUDGET_STOP`、
-`BUDGET_LIMIT` のいずれかでなければならない。ACK・実行開始・session・runtime receipt・結果がある
+Flow は `STOPPED`、`HOLD`、runner なしでなければならない。停止 code の許可一覧では判定しない。
+ACK・実行開始・session・runtime receipt・結果がある
 Reviewer は対象外である。記録がないことだけでは、未送信や無課金を証明できない。
 
 全操作で既存の明示 `--store` を維持する。最初に次の読取りで旧 Flow、Task、Dispatch、
@@ -1367,12 +1597,14 @@ hash だけの引継ぎや、未保存の思考の復元を約束しない。
 導入、preview、期限判断、下位契約、計画をそれぞれ別の承認質問にしない。
 新期限の一括承認を待つ間、新たなモデルは起動しない。
 
-未開始の検証済み成果物 Reviewer は、`SAFETY_STOP` に加え、
-`BUDGET_STOP` と `BUDGET_LIMIT` からも同じ整合・後続作成を利用できる。
+未開始と正式停止済みの検証済み成果物 Reviewer は、停止 code の許可一覧に依存せず、
+保存状態と実行証拠が一致すれば同じ入力の整合・後続作成を利用できる。
+`RECONTRACT` で取消した未開始 Reviewer の入力検証再利用も同じ条件で扱う。
 期限が過ぎて runner がなければ、`workflow advance --id FLOW_ID` が
 モデルなしで正式な期限停止を保存する。非ゼロ終了を成功へ読み替えず、
 保存した停止理由と未開始状態を確認してから一括 preview を行う。
-通常の初回 Coder の整合条件は `SAFETY_STOP` のままである。
+初回 Coder と未開始 Reviewer の取消では、停止 code の列挙漏れだけでは拒否しない。
+旧期限が過ぎても取消は旧 Flow を再開・延長せず、不明な配送・利用量を保持する。
 
 入力検証 `PASSED` 後に準備失敗した最初の持込み成果物 Reviewer も整合対象となる。
 管理済みレビュー worktree がある場合は、元候補との共通 Git repository、正確な場所の登録、
@@ -1391,7 +1623,7 @@ binary や skill の更新だけで期限・予算・後続実行は承認され
 
 合格した入力検証 stage は再実行せず、元 receipt と実施時刻を `artifact.validationSourceFlowId` 付きで保持する。Reviewer 結果受理時の既存検証は別に実施する。設定・候補・検証コマンド・権限の変更は拒否する。レビュー用 worktree を事前作成せず、衝突した旧場所は保全したまま新しい場所を Controller に作らせる。詳細は [ADR-0058](../develop/adr/0058-recover-unstarted-artifact-review.md) を参照する。
 
-開発版の `workflow reconcile-stopped` は、`STOPPED / SAFETY_STOP`・`HOLD` の Flow と、開始記録のない初回 snapshot Coder の `ISSUED` Dispatch を整合させる。明示的な同じ `--store` を維持する。次は形式の例であり、実際の確認や承認を表さない。
+開発版の `workflow reconcile-stopped` は、`STOPPED`・`HOLD` の Flow と、開始記録のない初回 snapshot Coder の `ISSUED` Dispatch を整合させる。停止 code は許可一覧にしない。入力は明示 snapshot または対象欄が空の baseline-only で、後者では元 worktree の clean baseline を検査する。明示的な同じ `--store` を維持する。次は形式の例であり、実際の確認や承認を表さない。
 
 ```json
 {
@@ -1414,7 +1646,7 @@ taxion --store /explicit/workspace/ledger.json workflow reconcile-stopped --file
 
 preview は `version:1`、`stateChanged:false`、`inputContractHash`、`inputTreeSha`、`inputOrigin:"approved-predecessor-input-contract"`、`deliveryStatus:"unknown"`、`usageStatus:"unavailable"`、予定遷移と `hash` を返す。適用は同じ状態と判断を再照合し、取消・Task の `BLOCKED` 遷移・監査追記を一括保存して `stateChanged:true` を返す。重複適用や変更したハッシュは拒否する。元の Flow・停止理由・承認・期限・予算は維持する。外部処理の停止や未配信・無課金を証明する操作ではない。
 
-後続入力は元の承認済み tree であり、新成果ではない。同一 repository の別 worktree に同一の commit・tree・変更 path を保全し、新しい `conversation intake` の Task に `createdFrom:"flow:stopped-flow"` と `supersedes` を設定する。intake request と `conversation confirm` request の両方に同じ `reconciliationHash` を渡す。confirm には新提案の `expectedHash`、`replacesFlow`、取消後に観測した正確な `target`、新しい設定承認も必要になる。対象が変われば拒否する。READY への確認は実行開始ではなく、承認束・委譲・工程計画と利用量を含む実行前検査は別途必要である。
+後続入力は元の承認済み tree または clean baseline であり、新成果ではない。baseline-only では `inputTreeSha` と対象欄は空のまま保持する。同一 repository の別 worktree に同一の commit・tree・変更 path を保全し、新しい `conversation intake` の Task に `createdFrom:"flow:stopped-flow"` と `supersedes` を設定する。intake request と `conversation confirm` request の両方に同じ `reconciliationHash` を渡す。confirm には新提案の `expectedHash`、`replacesFlow`、取消後に観測した正確な `target`、新しい設定承認も必要になる。対象が変われば拒否する。READY への確認は実行開始ではなく、承認束・委譲・工程計画と利用量を含む実行前検査は別途必要である。
 
 session・開始・結果・runtime receipt がある場合、入力が変わった場合、他の実行が稼働中の場合には使えない。人間の確認ができない場合も停止を維持する。通常取消だけではこの入力継承の根拠にならない。手順の判断基準は[失敗からの復旧](failure-recovery.md#flow-が停止している)を参照する。
 

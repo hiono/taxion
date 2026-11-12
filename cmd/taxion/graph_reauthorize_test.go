@@ -318,10 +318,11 @@ func testReadyTaskReauthorization(t *testing.T, withBundle bool, reference strin
 		t.Fatal("fixture did not persist the v0.7.2 reauthorization bundle versions")
 	}
 	gate, err := controller.ContractGateReport(after, task.ID, currentConfiguration)
-	if err != nil || gate.Verdict != controller.GateVerdictPass ||
+	if err != nil || gate.Verdict != controller.GateVerdictBlocked ||
+		gate.ADRCompliance == nil || gate.ADRCompliance.Status != "blocked" ||
 		gate.Hashes.Bundle != reauthorized.BundleHash || gate.NextRequiredApproval != "" ||
 		gate.StateChanged || len(gate.Drifts) != 0 {
-		t.Fatalf("read-only gate rejected its own reauthorization bundle: %+v, %v", gate, err)
+		t.Fatalf("reauthorization must preserve its bundle without inventing legacy ADR acceptance: %+v, %v", gate, err)
 	}
 	entry, err := after.CheckBundleAtEntry(task.ID, core.EntryStartReviewFlow, currentConfiguration)
 	if err != nil || entry.BundleHash != reauthorized.BundleHash {

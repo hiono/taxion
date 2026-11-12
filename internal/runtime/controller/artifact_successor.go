@@ -13,7 +13,7 @@ func artifactPredecessorDecision(graph core.TaskGraph, task core.GraphTask) (*co
 		if task.CreatedFrom != "flow:"+flow.ID || flow.Artifact == nil || len(flow.DispatchIDs) != 0 {
 			continue
 		}
-		if task.Supersedes != flow.TaskID || flow.Status != "STOPPED" || flow.StopCode != "SAFETY_STOP" ||
+		if task.Supersedes != flow.TaskID || flow.Status != "STOPPED" ||
 			flow.RunnerID != "" || !flow.HandoffHeld() || flow.Artifact.Validation.Status != "FAILED" {
 			return nil, fmt.Errorf("taxion: artifact successor requires a held terminal FAILED input validation with no runner or Dispatch")
 		}

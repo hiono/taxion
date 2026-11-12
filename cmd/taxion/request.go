@@ -98,6 +98,11 @@ Check every approved acceptance criterion and the actual changes. Do not modify
 files, create commits or expand scope. Include the work-report evidence identifier
 and the actual report text in workReport, not a session file path. Report the verdict,
 acceptance decisions and findings using the saved structured result.
+For adr-compliance: criteria, independently compare the pinned ADR original
+with the candidate and cite concrete evidence. Include the complete criterion
+in both its acceptance evidence and the result evidence, for PASS, FAIL or BLOCKED.
+For adr-compliance:not-applicable, explain the independent reason in workReport;
+missing originals or incomplete checks are not proof of non-applicability.
 Do not invent tests: the controller executes the approved commands. Inspect the
 exact target tree from the contract, but do not include outputTreeSha: the controller
 sets it. Approve only supported conclusions.`
@@ -180,6 +185,9 @@ func requestCmd(args []string, input io.Reader, output io.Writer) error {
 
 func requestCommand(args []string, input io.Reader, output io.Writer, planner requestPlanner,
 	runner func(context.Context, []string, io.Writer) error) (returnErr error) {
+	if len(args) != 0 && args[0] == "recover" {
+		return requestRecoveryCommand(args[1:], output)
+	}
 	terminalReported, failureGate := false, "BLOCKED"
 	defer func() {
 		if returnErr != nil && !terminalReported {
@@ -201,6 +209,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 	repairs := fs.Int("max-repairs", 1, "maximum repair turns after independent review")
 	cli := fs.String("cli", "", "Copilot CLI executable")
 	base := fs.String("base-directory", "", "Copilot state directory")
+	clarificationIntake := fs.Bool("clarification-intake", false, "opt into bound running-Role question observation through the Copilot host tool; no automatic continuation")
 	budgetGuidance := fs.String("budget-guidance", "", "new-request budget policy: provider (default declared no-overage contract), account (reset-daily), off or flow")
 	var paths stringListFlag
 	fs.Var(&paths, "context-path", "committed text file to send to Planner (repeatable; total up to 64 KiB)")
@@ -540,7 +549,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				}
 			}
 			terminalReported = true
-			return finishRequestExecution(signalCtx, db, &operation, &checkpoint, runner, *cli, *base, output)
+			return finishRequestExecution(signalCtx, db, &operation, &checkpoint, runner, *cli, *base, *clarificationIntake, output)
 		}
 	}
 	if resuming && checkpoint.PlannerStarted {
@@ -577,6 +586,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			return err
 		}
 		var answer controller.QuestionAnswer
+		answerRedacted := false
 		if checkpoint.Answer == nil {
 			if !operation.ExternalBudgetOnly() && (operation.PlanningUsageState != "complete" || operation.PlanningNanoAIU >= operation.MaxNanoAIU) {
 				operation.State = "USAGE_EXCEEDED"
@@ -597,30 +607,35 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			receipt, err := json.Marshal(struct {
 				Version     int    `json:"version"`
 				OperationID string `json:"operationId"`
+				AttemptID   string `json:"attemptId,omitempty"`
 				InputHash   string `json:"inputHash"`
 				ResultHash  string `json:"resultHash"`
 				Failed      bool   `json:"failed"`
-			}{2, id, core.SHA256Hex(text), core.SHA256Hex(resultBytes), planErr != nil})
+			}{2, id, result.AttemptID, core.SHA256Hex(text), core.SHA256Hex(resultBytes), planErr != nil})
 			if err != nil {
 				return errors.Join(planErr, err)
 			}
 			if err := db.AppendRequestRecord(id, "planning", string(receipt)); err != nil {
 				return errors.Join(planErr, err)
 			}
-			if len(result.Usage) == 0 {
-				operation.PlanningUsageState = "unknown"
-			}
-			for _, usage := range result.Usage {
-				if usage.TotalNanoAIU == nil || usage.AICreditsStatus == nil || *usage.AICreditsStatus != "complete" ||
-					math.IsNaN(*usage.TotalNanoAIU) || math.IsInf(*usage.TotalNanoAIU, 0) || *usage.TotalNanoAIU < 0 {
+			if result.AttemptID != "" {
+				if err := recordPlannerUsage(db, &operation, result.AttemptID, result); err != nil {
+					return errors.Join(planErr, err)
+				}
+			} else {
+				summary, err := core.SummarizeUsage(result.SessionID, result.Usage, result.UsageCheckpoints)
+				if err != nil {
+					return errors.Join(planErr, err)
+				}
+				if summary.CreditsStatus != "complete" {
 					operation.PlanningUsageState = "unknown"
-				} else {
-					total := operation.PlanningNanoAIU + *usage.TotalNanoAIU
+				}
+				if summary.NanoAIU != nil {
+					total := operation.PlanningNanoAIU + *summary.NanoAIU
 					if math.IsInf(total, 0) {
-						operation.PlanningUsageState = "unknown"
-					} else {
-						operation.PlanningNanoAIU = total
+						return fmt.Errorf("request Planner cumulative usage overflowed")
 					}
+					operation.PlanningNanoAIU = total
 				}
 			}
 			if err := saveRequestCheckpoint(db, &operation, checkpoint); err != nil {
@@ -634,6 +649,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			}
 			checkpoint.PlannerStarted = false
 			answer = *result.Answer
+			answerRedacted = result.Redacted
 		} else {
 			answer = *checkpoint.Answer
 		}
@@ -648,7 +664,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if err := displayRequestPlan(&displayed, answer); err != nil {
 				return err
 			}
-			if err := captureRequestSource(db, id, "design", "planner:"+task.ID, displayed.String()); err != nil {
+			if err := captureRequestSource(db, id, "design", "planner:"+task.ID, displayed.String(), answerRedacted); err != nil {
 				return err
 			}
 		}
@@ -832,7 +848,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				return err
 			}
 			terminalReported = true
-			return finishRequestExecution(signalCtx, db, &operation, &checkpoint, runner, *cli, *base, output)
+			return finishRequestExecution(signalCtx, db, &operation, &checkpoint, runner, *cli, *base, *clarificationIntake, output)
 		}
 		if line == "" || strings.HasPrefix(line, "/") {
 			return fmt.Errorf("enter feedback in natural language, /approve or /quit")

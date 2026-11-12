@@ -92,9 +92,6 @@ func EvaluateReviewFlow(graph core.TaskGraph, id string) (FlowEvaluation, error)
 			}
 		}
 		report.Dispatches = append(report.Dispatches, entry)
-		if len(dispatch.RuntimeUsage) == 0 {
-			complete = false
-		}
 		for _, usage := range dispatch.RuntimeUsage {
 			observed = true
 			if usage.Accounting != nil {
@@ -104,17 +101,18 @@ func EvaluateReviewFlow(graph core.TaskGraph, id string) (FlowEvaluation, error)
 				}
 				seenUsage[*usage.Accounting] = true
 			}
-			if usage.Scope != "" || usage.InputTokens == nil || usage.OutputTokens == nil {
+		}
+		summary, err := core.SummarizeUsage(dispatch.RuntimeSessionID, dispatch.RuntimeUsage, dispatch.RuntimeUsageCheckpoints)
+		if err != nil || summary.TokenStatus != "complete" {
+			complete = false
+		}
+		if summary.InputOutputTokens != nil {
+			observed = true
+			if *summary.InputOutputTokens > math.MaxInt64-total {
 				complete = false
 				continue
 			}
-			for _, value := range []int64{*usage.InputTokens, *usage.OutputTokens} {
-				if value < 0 || value > math.MaxInt64-total {
-					complete = false
-					continue
-				}
-				total += value
-			}
+			total += *summary.InputOutputTokens
 		}
 	}
 	if observed {

@@ -19,7 +19,7 @@ func TestFlowEvaluationRequiresDocumentedSameTargetAcceptance(t *testing.T) {
 			db, ledger, request := reviewFlowFixtureWithOutputMode(t, core.OutputModeWorktreeTreeSnapshot)
 			if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 				task, _ := state.Graph.GraphTask(request.TaskID)
-				task.Acceptance = []string{criterion}
+				task.Acceptance = []string{criterion, core.ADRNotApplicableCriterion}
 				task.Status = core.Draft
 				state.Graph = core.TaskGraph{Version: 1}
 				if err := state.Graph.Track(task, "human", "define explicit quality criterion"); err != nil {

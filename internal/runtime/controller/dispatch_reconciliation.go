@@ -124,23 +124,33 @@ func previewDispatchReconciliation(state store.Workspace, request DispatchReconc
 	if err := state.Graph.Validate(); err != nil {
 		return DispatchReconciliationPreview{}, err
 	}
+	if err := state.Graph.CheckLedger(state.Ledger); err != nil {
+		return DispatchReconciliationPreview{}, err
+	}
 	flow, found := state.Graph.ReviewFlow(request.FlowID)
 	dispatch, exists := state.Graph.GraphDispatch(request.DispatchID)
 	task, taskFound := state.Graph.GraphTask(flow.TaskID)
 	artifactReviewer := flow.StoppedArtifactReviewer(dispatch) && task.Status == core.WaitingForReview
 	coderReviewer := state.Graph.StoppedCoderReviewer(flow, dispatch) && task.Status == core.WaitingForReview
+	firstCoder := state.Graph.StoppedFirstCoder(flow, dispatch) && task.Status == core.Active
 	reviewer := artifactReviewer || coderReviewer
-	if !state.HasGraph || !found || !exists || !taskFound || flow.Status != "STOPPED" ||
-		(!reviewer && flow.StopCode != "SAFETY_STOP") || !flow.HandoffHeld() || flow.RunnerID != "" ||
-		(!coderReviewer && (len(flow.DispatchIDs) != 1 || flow.DispatchIDs[0] != dispatch.ID)) ||
-		(!reviewer && (dispatch.TaskID != flow.TaskID || dispatch.Recipient != "CODER")) || dispatch.Status != core.DispatchIssued ||
-		dispatch.Acknowledged || dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "" ||
-		dispatch.RuntimeConfigHash != "" || dispatch.Result != nil ||
-		dispatch.ExecutionStartSHA != "" || len(dispatch.RuntimeUsage) != 0 ||
-		(!reviewer && task.Status != core.Active) || !flowContractMatches(state.Graph, flow, task) ||
+	if !state.HasGraph || !found || !exists || !taskFound {
+		return fail("Flow, Dispatch and parent Task must exist in the same workspace")
+	}
+	if flow.Status != "STOPPED" || !flow.HandoffHeld() || flow.RunnerID != "" {
+		return fail("Flow must be stopped, held and unclaimed; running or claimed execution cannot be reconciled")
+	}
+	if dispatch.Status != core.DispatchIssued || dispatch.Acknowledged || dispatch.ExecutionStarted ||
+		dispatch.RuntimeSessionID != "" || dispatch.RuntimeConfigHash != "" || dispatch.Result != nil ||
+		dispatch.ExecutionStartSHA != "" || len(dispatch.RuntimeUsage) != 0 {
+		return fail("Dispatch must be ISSUED without acknowledgement, execution, session, configuration, usage or result; observed execution requires separate reconciliation")
+	}
+	if (!reviewer && !firstCoder) || !flowContractMatches(state.Graph, flow, task) ||
+		firstCoder && (task.TargetSHA != flow.Contract.TargetSHA || task.TargetTreeSHA != flow.Contract.TargetTreeSHA ||
+			!slices.Equal(task.TargetChangedFiles, flow.Contract.TargetChangedFiles)) ||
 		state.Graph.IsArchived(task.ID) || flow.PendingDraftID() != "" || len(flow.PendingFeedbackIDs()) != 0 ||
-		flow.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot || (!reviewer && flow.Contract.TargetTreeSHA == "") {
-		return fail("requires a held, unclaimed stopped snapshot Flow and an untouched issued Dispatch: first input Coder, first validated artifact Reviewer, or latest normal Reviewer after an accepted Coder; no acknowledgement/start/session/result and unchanged contract")
+		flow.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot {
+		return fail("input or Task topology cannot be carried safely: requires unchanged snapshot contract, no archive or pending decisions, and a first Coder, validated artifact Reviewer, or latest normal Reviewer after an accepted Coder")
 	}
 	if operation := state.Records.Operation; operation != nil && operation.Active() {
 		return fail("an operation is still active")
@@ -150,13 +160,33 @@ func previewDispatchReconciliation(state store.Workspace, request DispatchReconc
 			return fail("a Flow is still running or claimed")
 		}
 	}
+	stoppedUnstarted := map[string]bool{}
 	for _, other := range state.Graph.Dispatches {
 		if other.ID != dispatch.ID && active(other.Status) {
-			return fail("another Dispatch is active")
+			if other.Status != core.DispatchIssued || other.Acknowledged || other.ExecutionStarted ||
+				other.ExecutionStartSHA != "" || other.RuntimeSessionID != "" || other.RuntimeConfigHash != "" ||
+				len(other.RuntimeUsage) != 0 || other.Result != nil {
+				return fail("another Dispatch is active")
+			}
+			for _, otherFlow := range state.Graph.ReviewFlows {
+				if slices.Contains(otherFlow.DispatchIDs, other.ID) {
+					stoppedUnstarted[other.ID] = otherFlow.Status == "STOPPED" &&
+						otherFlow.HandoffHeld() && otherFlow.RunnerID == ""
+					break
+				}
+			}
+			if !stoppedUnstarted[other.ID] {
+				return fail("another Dispatch is active")
+			}
+			for _, receipt := range state.Records.Events {
+				if receipt.DispatchID == other.ID {
+					return fail("another Dispatch has runtime receipts")
+				}
+			}
 		}
 	}
 	for _, legacy := range state.Ledger.Dispatches {
-		if legacy.Active && legacy.ID != dispatch.ID {
+		if legacy.Active && legacy.ID != dispatch.ID && !stoppedUnstarted[legacy.ID] {
 			return fail("a legacy Dispatch is active")
 		}
 	}
