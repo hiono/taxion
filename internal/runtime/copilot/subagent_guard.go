@@ -40,8 +40,10 @@ func (a *Adapter) sessionHooks(handle *managedSession) *sdk.SessionHooks {
 	} else {
 		hooks = &sdk.SessionHooks{}
 	}
-	hooks.OnSubagentStart = handle.onSubagentStart
-	hooks.OnSubagentStop = handle.onSubagentStop
+	if handle != nil {
+		hooks.OnSubagentStart = handle.onSubagentStart
+		hooks.OnSubagentStop = handle.onSubagentStop
+	}
 	return hooks
 }
 
