@@ -181,6 +181,7 @@ type HumanDecisionRequest struct {
 // Parent/children, siblings and blocks are derived from parentId and dependsOn.
 type GraphTask struct {
 	ID                 string                `json:"id"`
+	JobID              string                `json:"jobId,omitempty"`
 	Title              string                `json:"title"`
 	Repo               string                `json:"repo"`
 	Type               string                `json:"type"`
@@ -501,6 +502,9 @@ type TaskWaiver struct {
 
 type TaskGraph struct {
 	Version               int              `json:"version"`
+	Jobs                  []Job            `json:"jobs,omitempty"`
+	RoleExecutions        []RoleExecution  `json:"roleExecutions,omitempty"`
+	RoleExecutionHistory  []RoleExecutionEvent `json:"roleExecutionHistory,omitempty"`
 	Tasks                 []GraphTask      `json:"tasks"`
 	Concerns              []Concern        `json:"concerns"`
 	History               []GraphEvent     `json:"history"`
@@ -1458,6 +1462,9 @@ func (g TaskGraph) Validate() error {
 	if g.Version != 1 {
 		return graphError("unsupported version %d", g.Version)
 	}
+	if err := g.validateJobModel(); err != nil {
+		return err
+	}
 	if err := g.validateJobMessages(); err != nil {
 		return err
 	}
@@ -1928,6 +1935,12 @@ func cloneGraph(g TaskGraph) TaskGraph {
 	copy.ReviewFlows = slices.Clone(g.ReviewFlows)
 	copy.Approvals = slices.Clone(g.Approvals)
 	copy.JobMessages = slices.Clone(g.JobMessages)
+	copy.Jobs = slices.Clone(g.Jobs)
+	for i := range copy.Jobs {
+		copy.Jobs[i].Constraints = slices.Clone(g.Jobs[i].Constraints)
+	}
+	copy.RoleExecutions = slices.Clone(g.RoleExecutions)
+	copy.RoleExecutionHistory = slices.Clone(g.RoleExecutionHistory)
 	for i := range copy.Approvals {
 		copy.Approvals[i].Configuration.Sources = maps.Clone(g.Approvals[i].Configuration.Sources)
 		copy.Approvals[i].Configuration.Selection = slices.Clone(g.Approvals[i].Configuration.Selection)
