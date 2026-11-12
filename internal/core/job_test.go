@@ -190,3 +190,24 @@ func TestJobMessageRejectsCrossJobExecutionReply(t *testing.T) {
 		t.Fatal("cross-Job reply must be rejected")
 	}
 }
+
+func TestCloneGraphCopiesJobMembershipSlices(t *testing.T) {
+	graph := newJobGraph()
+	cloned := cloneGraph(graph)
+	cloned.Jobs[0].TaskIDs[0] = "changed"
+	if graph.Jobs[0].TaskIDs[0] != "task-a" {
+		t.Fatal("cloneGraph shares Job TaskIDs backing storage")
+	}
+}
+
+func TestJobConversationUsesFirstClassJobID(t *testing.T) {
+	graph := newJobGraph()
+	now := time.Now().UTC()
+	graph.JobMessages = []JobMessage{{
+		ID: "message-1", JobID: "job-a", FromRole: "HUMAN", ToRole: "PLANNER",
+		Body: "Please assess this assumption.", Source: "human:request", At: now,
+	}}
+	if got := len(graph.JobConversation("job-a")); got != 1 {
+		t.Fatalf("JobConversation(JobID) = %d, want 1", got)
+	}
+}

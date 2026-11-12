@@ -26,9 +26,9 @@ func AppendJobMessage(db *store.Store, message core.JobMessage) error {
 }
 
 // JobConversation reads the append-only collaboration history for one Job.
-func JobConversation(db *store.Store, taskID string) ([]core.JobMessage, error) {
-	if db == nil || strings.TrimSpace(taskID) == "" {
-		return nil, fmt.Errorf("taxion: Job conversation requires a workspace and Task ID")
+func JobConversation(db *store.Store, jobID string) ([]core.JobMessage, error) {
+	if db == nil || strings.TrimSpace(jobID) == "" {
+		return nil, fmt.Errorf("taxion: Job conversation requires a workspace and Job ID")
 	}
 	state, err := db.LoadWorkspace()
 	if err != nil {
@@ -37,8 +37,12 @@ func JobConversation(db *store.Store, taskID string) ([]core.JobMessage, error) 
 	if !state.HasGraph {
 		return nil, fmt.Errorf("taxion: Job conversation requires a Task Graph")
 	}
-	if _, ok := state.Graph.GraphTask(taskID); !ok {
-		return nil, fmt.Errorf("taxion: Job conversation Task does not exist")
+	if _, ok := state.Graph.Job(jobID); !ok {
+		// Legacy conversations are addressed by their former TaskID until
+		// the workspace is explicitly associated with a first-class Job.
+		if _, legacy := state.Graph.GraphTask(jobID); !legacy {
+			return nil, fmt.Errorf("taxion: Job conversation does not exist")
+		}
 	}
-	return state.Graph.JobConversation(taskID), nil
+	return state.Graph.JobConversation(jobID), nil
 }
