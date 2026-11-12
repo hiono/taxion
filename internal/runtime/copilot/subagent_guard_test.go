@@ -106,13 +106,13 @@ func TestSubagentGuardLifecycleEventIDsAreContentBound(t *testing.T) {
 		guard := newSubagentGuard(true)
 		resumable := false
 		event := sdk.SessionEvent{
-			ID: "same",
+			ID:   "same",
 			Data: &sdk.SubagentStartedData{ToolCallID: "call", Resumable: &resumable},
 		}
 		guard.observeEvent(event)
 		guard.observeEvent(event)
 		guard.observeEvent(sdk.SessionEvent{
-			ID: "finish",
+			ID:   "finish",
 			Data: &sdk.SubagentCompletedData{ToolCallID: "call"},
 		})
 		if err := guard.check(); err != nil {
@@ -124,15 +124,15 @@ func TestSubagentGuardLifecycleEventIDsAreContentBound(t *testing.T) {
 		guard := newSubagentGuard(true)
 		resumable := false
 		guard.observeEvent(sdk.SessionEvent{
-			ID: "same",
+			ID:   "same",
 			Data: &sdk.SubagentStartedData{ToolCallID: "first", Resumable: &resumable},
 		})
 		guard.observeEvent(sdk.SessionEvent{
-			ID: "same",
+			ID:   "same",
 			Data: &sdk.SubagentStartedData{ToolCallID: "different", Resumable: &resumable},
 		})
 		guard.observeEvent(sdk.SessionEvent{
-			ID: "finish",
+			ID:   "finish",
 			Data: &sdk.SubagentCompletedData{ToolCallID: "first"},
 		})
 		if guard.check() == nil {
