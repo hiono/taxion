@@ -37,11 +37,11 @@ const (
 	EventContextUsage    = "context_usage"
 	EventCompaction      = "compaction"
 	EventPermission      = "permission"
-	EventExecution          = "execution_observation"
-	EventSubagentStarted    = "subagent_started"
-	EventSubagentCompleted  = "subagent_completed"
-	EventSubagentFailed     = "subagent_failed"
-	EventUnclassified       = "unclassified_native_event"
+	EventExecution         = "execution_observation"
+	EventSubagentStarted   = "subagent_started"
+	EventSubagentCompleted = "subagent_completed"
+	EventSubagentFailed    = "subagent_failed"
+	EventUnclassified      = "unclassified_native_event"
 )
 
 // QuestionEventAllowed is shared by live and saved advice-only turns.

@@ -79,16 +79,16 @@ type managedSession struct {
 	sdk *sdk.Session
 
 	subagents *subagentGuard
-	opMu     sync.Mutex
-	emitMu   sync.Mutex
-	mu       sync.Mutex
-	stopped  bool
-	busy     bool
-	stopOnly bool
-	turnDone chan struct{}
-	sequence uint64
-	history  []runtime.Event
-	watchers map[*subscription]struct{}
+	opMu      sync.Mutex
+	emitMu    sync.Mutex
+	mu        sync.Mutex
+	stopped   bool
+	busy      bool
+	stopOnly  bool
+	turnDone  chan struct{}
+	sequence  uint64
+	history   []runtime.Event
+	watchers  map[*subscription]struct{}
 }
 
 type subscription struct {

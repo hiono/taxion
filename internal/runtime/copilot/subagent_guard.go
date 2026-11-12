@@ -13,23 +13,23 @@ type subagentLifecycle struct {
 }
 
 type subagentGuard struct {
-	mu              sync.Mutex
-	ready           bool
-	rebuilding      bool
-	pending         []sdk.SessionEvent
-	hookActive      map[string]struct{}
-	hookFault       bool
-	lifecycle       map[string]subagentLifecycle
-	lifecycleSeen   map[string]struct{}
-	lifecycleFault  bool
+	mu             sync.Mutex
+	ready          bool
+	rebuilding     bool
+	pending        []sdk.SessionEvent
+	hookActive     map[string]struct{}
+	hookFault      bool
+	lifecycle      map[string]subagentLifecycle
+	lifecycleSeen  map[string]struct{}
+	lifecycleFault bool
 }
 
 func newSubagentGuard(ready bool) *subagentGuard {
 	return &subagentGuard{
-		ready:          ready,
-		hookActive:     make(map[string]struct{}),
-		lifecycle:      make(map[string]subagentLifecycle),
-		lifecycleSeen:  make(map[string]struct{}),
+		ready:         ready,
+		hookActive:    make(map[string]struct{}),
+		lifecycle:     make(map[string]subagentLifecycle),
+		lifecycleSeen: make(map[string]struct{}),
 	}
 }
 

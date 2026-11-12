@@ -157,9 +157,9 @@ func clarificationContext(state store.Workspace, taskID, dispatchID string) (Cla
 		Issue, ChangeRef                                                            string
 		Dependencies                                                                []core.TaskDependency
 		Dimensions                                                                  core.ApprovalDimensions
-		DispatchID, InstructionHash, DocumentsHash string
-		FlowID                                     string
-		Deadline                                  time.Time
+		DispatchID, InstructionHash, DocumentsHash                                  string
+		FlowID                                                                      string
+		Deadline                                                                    time.Time
 	}{task.ID, task.Repo, task.Type, task.Objective, task.ParentID, task.Supersedes, task.CreatedFrom, task.TargetSHA, task.Issue, task.ChangeRef,
 		task.DependsOn, dimensions, dispatchID, instruction, core.ContextDocumentsHash(documents), flowID, deadline})
 	if err != nil {
