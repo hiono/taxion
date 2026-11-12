@@ -377,10 +377,7 @@ func acceptanceFiles(t *testing.T, roots ...string) map[string][]byte {
 }
 
 func TestAcceptSavedReviewFailsClosed(t *testing.T) {
-	fixtureStarted := time.Now()
 	db, ledger, baseRequest, baseAcceptance := savedReviewAcceptanceFixture(t)
-	t.Logf("phase=shared-fixture elapsed=%s", time.Since(fixtureStarted))
-
 	baseline, err := db.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)
@@ -472,12 +469,8 @@ func TestAcceptSavedReviewFailsClosed(t *testing.T) {
 		"configuration", "snapshot-ref", "current-branch", "current-index",
 		"current-worktree", "source-worktree", "review-path", "late-result"} {
 		t.Run(failure, func(t *testing.T) {
-			started := time.Now()
-			defer func() { t.Logf("phase=total elapsed=%s", time.Since(started)) }()
 			request, acceptance := baseRequest, baseAcceptance
-			previewStarted := time.Now()
 			preview, err := AcceptSavedReview(t.Context(), db, ledger, acceptance, request.Configuration, true)
-			t.Logf("phase=preview elapsed=%s", time.Since(previewStarted))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -540,11 +533,9 @@ func TestAcceptSavedReviewFailsClosed(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			rejectStarted := time.Now()
 			if _, err := AcceptSavedReview(t.Context(), db, ledger, acceptance, request.Configuration, false); err == nil {
 				t.Fatal("unsafe acceptance succeeded")
 			}
-			t.Logf("phase=reject-apply elapsed=%s", time.Since(rejectStarted))
 			after, err := db.LoadWorkspace()
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatal("rejected acceptance changed saved state", err)
