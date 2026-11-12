@@ -1132,3 +1132,39 @@ func TestIntakeRejectsLedgerIDCollision(t *testing.T) {
 		t.Fatal("rejected collision changed the workspace")
 	}
 }
+
+func TestIntakeCreatesDistinctJobWithoutChangingTaskContract(t *testing.T) {
+	db, request := intakeApprovalFixture(t, false)
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := before.Graph.GraphTask(request.TaskID)
+	if !ok {
+		t.Fatal("intake Task was not saved")
+	}
+	job, ok := before.Graph.JobForTask(task.ID)
+	if !ok || job.ID == task.ID || job.RootTaskID != task.ID ||
+		!slices.Contains(job.TaskIDs, task.ID) || job.Status != core.JobDraft ||
+		job.Request != "Implement within this contract." {
+		t.Fatalf("intake Job does not preserve a distinct Job identity and original request: %+v", job)
+	}
+	hash, err := IntakeHash(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hash != request.ExpectedHash {
+		t.Fatal("Job membership changed the Task contract hash")
+	}
+	if _, err := ConfirmIntake(db, request); err != nil {
+		t.Fatal(err)
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok = after.Graph.JobForTask(task.ID)
+	if !ok || job.Status != core.JobActive {
+		t.Fatalf("confirmed intake did not activate its Job: %+v", job)
+	}
+}
