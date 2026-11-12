@@ -119,6 +119,7 @@ ADR-0001〜0043 はすべて `Accepted` の判断を記録する。採択は選�
 | [0041](adr/0041-archive-retired-tasks-without-erasing-history.md) | 停止済みの不要な試行を通常一覧・計画から外し、承認・実行履歴と参照を残す | #103、`task-graph.md`、`cli-reference.md`、`user-guide.md`。v0.5.0 の archive は物理削除や Git cleanup を行わない |
 | [0042](adr/0042-gitlab-endpoint-binding-separates-api-clone-and-ssh-identities.md) | GitLab の subpath と標準外の SSH port を独立した endpoint として照合し、legacy 設定と version 1 snapshot の動作を変えない | #105、`configuration.md`、`guardrails.md`。v0.6.0 で公開する |
 | [0043](adr/0043-approval-gates-and-read-only-lanes.md) | #107–#114; PR #115–#121; [#131](https://github.com/hiono/taxion/issues/131) | Accepted. Current references: `gates.md`, `approval-bundle.md`, `drift-and-legacy.md`, `role-handoff-packets.md`, `task-graph.md`, `v0.7.0-known-limitations.md`。逐次 packet store、READY lifecycle 承認と同一契約 Reviewer 委譲は `runtime-contract.md` と `role_packets_test.go` でも検証する。 |
+| [0077](adr/0077-job-centered-role-collaboration.md) | Job を継続単位とし、固定工程や Clarification protocol に拘束されない Role 協調へ再設計する | `role-collaboration.md`、`architecture.md`、`runtime-contract.md`。実装と実モデル受入れは Issue #283 / PR #292 で追跡。現時点で E2E 完了は未確認。 |
 
 
 ## ADR-0077: Job 中心の Role 協調
