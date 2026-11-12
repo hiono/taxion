@@ -2,6 +2,7 @@ package copilot
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	sdk "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/rpc"
 	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/runtime"
 )
 
 func TestStopOnlyBindingCannotExecuteOrChangeSession(t *testing.T) {
@@ -100,25 +102,47 @@ func TestFailedReviewObservationCannotExecute(t *testing.T) {
 func TestStopOnlySDKProtocolNeverCreatesOrSends(t *testing.T) {
 	for _, observe := range []bool{false, true} {
 		t.Run(fmt.Sprintf("observe=%t", observe), func(t *testing.T) {
-			testStopOnlySDKProtocol(t, observe, false)
+			testStopOnlySDKProtocol(t, observe, false, false, false)
 		})
 	}
 	t.Run("failed-review-observation", func(t *testing.T) {
-		testStopOnlySDKProtocol(t, true, true)
+		testStopOnlySDKProtocol(t, true, true, false, false)
+	})
+	t.Run("unclassified-advisory-observation", func(t *testing.T) {
+		testStopOnlySDKProtocol(t, true, false, true, false)
+	})
+	t.Run("abort-response-without-idle", func(t *testing.T) {
+		testStopOnlySDKProtocol(t, false, false, false, true)
 	})
 }
 
-func testStopOnlySDKProtocol(t *testing.T, observe, failedReview bool) {
+func testStopOnlySDKProtocol(t *testing.T, observe, failedReview, unclassified, cancelBeforeIdle bool) {
 	worktree := t.TempDir()
 	var history []sdk.SessionEvent
 	if observe {
 		history = completedSavedHistory(worktree)
+		if unclassified {
+			unknown := sdk.SessionEvent{ID: "unknown", Timestamp: history[2].Timestamp,
+				Data: &rpc.RawSessionEventData{EventType: "future.activity", Raw: json.RawMessage(`{"secret":"private-event-body"}`)}}
+			history = append(history[:3], append([]sdk.SessionEvent{unknown}, history[3:]...)...)
+		}
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	var idleGate, abortResponded chan struct{}
+	if cancelBeforeIdle {
+		idleGate, abortResponded = make(chan struct{}), make(chan struct{})
+		defer func() {
+			select {
+			case <-idleGate:
+			default:
+				close(idleGate)
+			}
+		}()
+	}
 	done := make(chan error, 1)
 	go func() {
 		conn, err := listener.Accept()
@@ -131,7 +155,7 @@ func testStopOnlySDKProtocol(t *testing.T, observe, failedReview bool) {
 			done <- err
 			return
 		}
-		done <- serveStopProtocol(conn, history)
+		done <- serveStopProtocol(conn, history, idleGate, abortResponded)
 	}()
 	dispatch := core.GraphDispatch{
 		Recipient: "CODER", Status: core.DispatchSuspended,
@@ -153,15 +177,74 @@ func testStopOnlySDKProtocol(t *testing.T, observe, failedReview bool) {
 	})
 	defer adapter.Close()
 	if observe {
-		result, err := adapter.ReadSavedTurn(t.Context(), dispatch.RuntimeSessionID)
-		if err != nil || result.Payload == "" || result.HistoryHash == "" {
-			t.Fatalf("saved observation: %+v, %v", result, err)
+		if unclassified {
+			if _, err := adapter.ReadSavedQuestionTurn(t.Context(), dispatch.RuntimeSessionID, false); err == nil {
+				t.Fatal("SDK-decoded unclassified event was accepted as a saved question")
+			}
+		} else {
+			result, err := adapter.ReadSavedTurn(t.Context(), dispatch.RuntimeSessionID)
+			if err != nil || result.Payload == "" || result.HistoryHash == "" {
+				t.Fatalf("saved observation: %+v, %v", result, err)
+			}
+		}
+		handle, err := adapter.lookup(dispatch.RuntimeSessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		handle.mu.Lock()
+		handle.busy = true
+		handle.mu.Unlock()
+		if err := adapter.CloseSavedObservation(); err != nil {
+			t.Fatal(err)
 		}
 	} else {
 		if err := adapter.ResumeForStop(t.Context(), dispatch.RuntimeSessionID); err != nil {
 			t.Fatalf("resume: %v; protocol fixture: %v", err, <-done)
 		}
-		if err := adapter.Stop(t.Context(), dispatch.RuntimeSessionID); err != nil {
+		if cancelBeforeIdle {
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			stopped := make(chan error, 1)
+			go func() { stopped <- adapter.Stop(ctx, dispatch.RuntimeSessionID) }()
+			select {
+			case <-abortResponded:
+			case err := <-stopped:
+				t.Fatal("Stop returned before its Abort response", err)
+			case <-ctx.Done():
+				t.Fatal("Abort response was not observed")
+			}
+			cancel()
+			if err := <-stopped; !errors.Is(err, context.Canceled) {
+				t.Fatal("Abort RPC success was treated as idle completion", err)
+			}
+			handle, err := adapter.lookup(dispatch.RuntimeSessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handle.mu.Lock()
+			preserved, boundary := !handle.stopped && handle.sdk != nil && handle.busy, handle.turnDone
+			handle.mu.Unlock()
+			if !preserved || boundary == nil {
+				t.Fatal("failed idle wait discarded the active session")
+			}
+			close(idleGate)
+			<-boundary
+			cursor, err := adapter.EventCursor(dispatch.RuntimeSessionID)
+			if err != nil || cursor != 2 {
+				t.Fatal("post-Abort usage and idle were not recorded", cursor, err)
+			}
+			replayContext, cancelReplay := context.WithCancel(t.Context())
+			replay, err := adapter.EventsAfter(replayContext, dispatch.RuntimeSessionID, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, kind := range []string{runtime.EventUsage, runtime.EventCancelled} {
+				if event := <-replay; event.Type != kind {
+					t.Fatal("post-Abort event was lost from history replay", event)
+				}
+			}
+			cancelReplay()
+		} else if err := adapter.Stop(t.Context(), dispatch.RuntimeSessionID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -183,6 +266,9 @@ func TestSavedTurnRequiresBoundCompletedMainAgentHistory(t *testing.T) {
 		change func([]sdk.SessionEvent) []sdk.SessionEvent
 	}{
 		{"missing-shutdown", func(events []sdk.SessionEvent) []sdk.SessionEvent { return events[:4] }},
+		{"missing-turn-start", func(events []sdk.SessionEvent) []sdk.SessionEvent {
+			return append(events[:2], events[3:]...)
+		}},
 		{"wrong-session", func(events []sdk.SessionEvent) []sdk.SessionEvent {
 			events[0].Data.(*sdk.SessionStartData).SessionID = "another-session"
 			return events
@@ -192,30 +278,30 @@ func TestSavedTurnRequiresBoundCompletedMainAgentHistory(t *testing.T) {
 			return events
 		}},
 		{"unbound-message", func(events []sdk.SessionEvent) []sdk.SessionEvent {
-			events[2].Data.(*sdk.AssistantMessageData).OriginatingMessageID = nil
+			events[3].Data.(*sdk.AssistantMessageData).OriginatingMessageID = nil
 			return events
 		}},
 		{"wrong-turn", func(events []sdk.SessionEvent) []sdk.SessionEvent {
-			events[3].Data.(*sdk.AssistantTurnEndData).TurnID = "another-turn"
+			events[4].Data.(*sdk.AssistantTurnEndData).TurnID = "another-turn"
 			return events
 		}},
 		{"empty-turn", func(events []sdk.SessionEvent) []sdk.SessionEvent {
 			empty := ""
-			events[2].Data.(*sdk.AssistantMessageData).TurnID = &empty
-			events[3].Data.(*sdk.AssistantTurnEndData).TurnID = empty
+			events[3].Data.(*sdk.AssistantMessageData).TurnID = &empty
+			events[4].Data.(*sdk.AssistantTurnEndData).TurnID = empty
 			return events
 		}},
 		{"subagent-answer", func(events []sdk.SessionEvent) []sdk.SessionEvent {
 			agent := "child"
-			events[2].AgentID = &agent
+			events[3].AgentID = &agent
 			return events
 		}},
 		{"error-shutdown", func(events []sdk.SessionEvent) []sdk.SessionEvent {
-			events[4].Data.(*sdk.SessionShutdownData).ShutdownType = "error"
+			events[5].Data.(*sdk.SessionShutdownData).ShutdownType = "error"
 			return events
 		}},
 		{"shutdown-before-turn-end", func(events []sdk.SessionEvent) []sdk.SessionEvent {
-			events[4].Timestamp = events[3].Timestamp.Add(-time.Second)
+			events[5].Timestamp = events[4].Timestamp.Add(-time.Second)
 			return events
 		}},
 		{"later-execution", func(events []sdk.SessionEvent) []sdk.SessionEvent {
@@ -236,15 +322,26 @@ func TestSavedTurnRequiresBoundCompletedMainAgentHistory(t *testing.T) {
 	original := history()
 	result, err := savedTurn(original, "saved-session", worktree)
 	if err != nil || result.Payload == "" || result.HistoryHash == "" || len(result.Events) != 1 ||
-		!result.ShutdownAt.Equal(original[4].Timestamp) {
+		result.InputHash != core.SHA256Hex([]byte("execute saved contract")) ||
+		result.MessageID != "input-message" || result.TurnID != "review-turn" ||
+		!result.ShutdownAt.Equal(original[5].Timestamp) {
 		t.Fatal("completed main-agent result was not observed", result, err)
+	}
+	withoutShutdown := original[:5]
+	if _, err := savedTurn(withoutShutdown, "saved-session", worktree); err == nil {
+		t.Fatal("routine-shutdown requirement was silently removed")
+	}
+	stopped, err := savedQuestionTurn(withoutShutdown, "saved-session", worktree, true)
+	if err != nil || !stopped.ShutdownAt.IsZero() || len(stopped.UsageTotals) != 0 ||
+		stopped.Input != "execute saved contract" || !stopped.SubmittedAt.Equal(original[1].Timestamp) {
+		t.Fatal("explicit stopped observation fabricated shutdown/usage or lost native input identity", err)
 	}
 	events := history()
 	message, turn := "input-message", "review-turn"
-	empty := events[2]
+	empty := events[3]
 	empty.ID = "empty-reasoning-message"
 	empty.Data = &sdk.AssistantMessageData{OriginatingMessageID: &message, TurnID: &turn}
-	events = append(events[:2], append([]sdk.SessionEvent{empty}, events[2:]...)...)
+	events = append(events[:3], append([]sdk.SessionEvent{empty}, events[3:]...)...)
 	if observed, err := savedTurn(events, "saved-session", worktree); err != nil ||
 		observed.Payload != result.Payload || len(observed.Events) != 2 {
 		t.Fatal("empty native reasoning message hid the final answer", err)
@@ -271,14 +368,420 @@ func TestSavedTurnRejectsLaterSubagentActivity(t *testing.T) {
 				}
 				events = append(events[:at], append([]sdk.SessionEvent{childEvent}, events[at:]...)...)
 				_, err := savedTurn(events, "saved-session", worktree)
-				if at == 2 && err != nil {
-					t.Fatal("child activity before the final main-agent answer was rejected", err)
-				}
-				if at != 2 && err == nil {
+				if err == nil {
 					t.Fatal("child activity after the final answer was ignored", at)
 				}
 			}
 		})
+	}
+}
+
+func TestSavedTurnRejectsDeltaOutsideActiveTurn(t *testing.T) {
+	worktree := t.TempDir()
+	for _, at := range []int{2, 5} {
+		for _, stopped := range []bool{false, true} {
+			events := completedSavedHistory(worktree)
+			delta := sdk.SessionEvent{
+				ID: "delta", Timestamp: events[at-1].Timestamp,
+				Data: &sdk.AssistantMessageDeltaData{DeltaContent: "later output"},
+			}
+			events = append(events[:at], append([]sdk.SessionEvent{delta}, events[at:]...)...)
+			if stopped {
+				events = events[:len(events)-1]
+			}
+			if _, err := savedQuestionTurn(events, "saved-session", worktree, stopped); err == nil {
+				t.Fatal("out-of-turn delta accepted", at, stopped)
+			}
+		}
+	}
+	events := completedSavedHistory(worktree)
+	delta := sdk.SessionEvent{
+		ID: "delta", Timestamp: events[2].Timestamp,
+		Data: &sdk.AssistantMessageDeltaData{DeltaContent: "active output"},
+	}
+	events = append(events[:3], append([]sdk.SessionEvent{delta}, events[3:]...)...)
+	if _, err := savedTurn(events, "saved-session", worktree); err != nil {
+		t.Fatal("active main-turn delta rejected", err)
+	}
+}
+
+func TestSavedQuestionChecksActivityBeforeReceiptProjection(t *testing.T) {
+	worktree := t.TempDir()
+	for _, activity := range []sdk.SessionEvent{
+		{Data: &sdk.PermissionCompletedData{Result: rpc.PermissionDeniedByPermissionRequestHook{}}},
+		{Data: &sdk.SessionCompactionStartData{}},
+		{Data: &sdk.SessionCompactionCompleteData{Success: true}},
+		{Data: &sdk.ModelCallFailureData{}},
+	} {
+		events := completedSavedHistory(worktree)
+		activity.ID, activity.Timestamp = "activity", events[2].Timestamp
+		events = append(events[:3], append([]sdk.SessionEvent{activity}, events[3:]...)...)
+		for _, stopped := range []bool{false, true} {
+			history := events
+			if stopped {
+				history = history[:len(history)-1]
+			}
+			if _, err := savedQuestionTurn(history, "saved-session", worktree, stopped); err == nil {
+				t.Fatalf("advisory activity %T disappeared before admission (stopped=%v)", activity.Data, stopped)
+			}
+		}
+		// Generic review recovery retains its existing indexed receipt projection.
+		result, err := savedTurn(events, "saved-session", worktree)
+		if err != nil || len(result.Events) != 1 || result.Events[0].Payload != result.Payload {
+			t.Fatalf("generic saved review receipt compatibility lost for %T: %+v, %v", activity.Data, result, err)
+		}
+	}
+}
+
+func TestSavedQuestionRejectsUnclassifiedNativeEvents(t *testing.T) {
+	worktree := t.TempDir()
+	child, edit := "child", true
+	for _, data := range []sdk.SessionEventData{
+		&rpc.RawSessionEventData{EventType: "future.activity", Raw: json.RawMessage(`{"secret":"private-event-body"}`)},
+		&sdk.HookStartData{},
+		&sdk.ModelCallStartData{ParentToolCallID: &child},
+		&sdk.ModelCallFinishedData{ContainsBuiltInFileEditRequest: &edit},
+		&sdk.ModelCallFinalResultData{},
+		nil,
+	} {
+		for _, at := range []int{3, 5} {
+			events := completedSavedHistory(worktree)
+			unknown := sdk.SessionEvent{ID: "unclassified", Timestamp: events[at-1].Timestamp, Data: data}
+			events = append(events[:at], append([]sdk.SessionEvent{unknown}, events[at:]...)...)
+			for _, stopped := range []bool{false, true} {
+				history := events
+				if stopped {
+					history = history[:len(history)-1]
+				}
+				if _, err := savedQuestionTurn(history, "saved-session", worktree, stopped); err == nil {
+					t.Fatalf("unclassified %T accepted at %d (stopped=%v)", data, at, stopped)
+				}
+			}
+			if data != nil {
+				result, err := savedTurn(events, "saved-session", worktree)
+				if err != nil || len(result.Events) != 1 || result.Events[0].Payload != result.Payload {
+					t.Fatalf("legacy Reviewer receipt projection changed for %T: %+v, %v", data, result, err)
+				}
+			}
+		}
+	}
+}
+
+func TestSavedQuestionPreservesKnownSessionMetadata(t *testing.T) {
+	worktree := t.TempDir()
+	events := completedSavedHistory(worktree)
+	for index, data := range []sdk.SessionEventData{
+		&sdk.SystemMessageData{}, &sdk.SessionInfoData{},
+		&sdk.SessionAutoModeResolvedData{},
+		&sdk.SessionUsageCheckpointData{},
+	} {
+		metadata := sdk.SessionEvent{ID: fmt.Sprintf("metadata-%d", index), Timestamp: events[0].Timestamp, Data: data}
+		events = append(events[:1], append([]sdk.SessionEvent{metadata}, events[1:]...)...)
+	}
+	result, err := savedQuestionTurn(events, "saved-session", worktree, false)
+	if err != nil || result.Input != "execute saved contract" ||
+		result.InputHash != core.SHA256Hex([]byte(result.Input)) || len(result.Events) != 2 ||
+		result.Events[0].Type != runtime.EventUsageCheckpoint {
+		t.Fatal("known metadata prevented a valid saved question or altered its input/receipt", result, err)
+	}
+}
+
+func TestSavedQuestionObservesAccountingCheckpointWithoutAnotherCall(t *testing.T) {
+	worktree := t.TempDir()
+	events := completedSavedHistory(worktree)
+	input, output, zero, amount := int64(21), int64(8), int64(0), 3.5
+	status := rpc.AiCreditsStatusComplete
+	accounting := &sdk.UsageAccountingIdentity{SourceSessionID: "saved-session", Sequence: 1, UsageID: "call"}
+	usage := sdk.SessionEvent{ID: "usage", Timestamp: events[0].Timestamp, Data: &sdk.AssistantUsageData{
+		Model: "model", InputTokens: &input, OutputTokens: &output,
+		CacheReadTokens: &zero, CacheWriteTokens: &zero, Accounting: accounting,
+		CopilotUsage: &rpc.AssistantUsageCopilotUsage{TotalNanoAiu: amount}, AiCreditsStatus: &status,
+	}}
+	checkpoint := &sdk.SessionUsageCheckpointData{
+		TotalNanoAiu: amount, UsageAccountingWatermarks: map[string]int64{"saved-session": 1},
+		AccountingSnapshot: &rpc.UsageGetMetricsResult{
+			TotalNanoAiu: &amount, AiCreditsStatus: &status,
+			ModelMetrics: map[string]rpc.UsageMetricsModelMetric{"model": {
+				TotalNanoAiu: &amount, AiCreditsStatus: &status,
+				Usage: rpc.UsageMetricsModelMetricUsage{InputTokens: input, OutputTokens: output},
+			}},
+			AgentMetrics: map[string]rpc.UsageMetricsAgentMetric{"main": {}},
+		},
+	}
+	events = append(events[:3], append([]sdk.SessionEvent{usage}, events[3:]...)...)
+	events = append(events[:len(events)-1], append([]sdk.SessionEvent{{
+		ID: "checkpoint", Timestamp: events[0].Timestamp, Data: checkpoint,
+	}}, events[len(events)-1:]...)...)
+	result, err := savedQuestionTurn(events, "saved-session", worktree, false)
+	if err != nil || len(result.Events) != 3 || result.Events[2].Type != runtime.EventUsageCheckpoint {
+		t.Fatal("SDK checkpoint disappeared from saved advisory accounting", result, err)
+	}
+	var call core.DispatchUsage
+	if json.Unmarshal([]byte(result.Events[0].Payload), &call) != nil {
+		t.Fatal("individual SDK receipt was lost")
+	}
+	observed, matches, err := runtime.DecodeUsageCheckpoint(result.Events[2].Payload, "saved-session", []core.DispatchUsage{call})
+	if err != nil || !matches || observed.KnownNanoAIU([]core.DispatchUsage{call}) != amount {
+		t.Fatal("checkpoint was not independently matched or was counted twice", observed, matches, err)
+	}
+	indexed, err := savedTurn(events, "saved-session", worktree)
+	if err != nil || len(indexed.Events) != 2 {
+		t.Fatal("existing indexed Reviewer projection changed", indexed, err)
+	}
+	partial := rpc.AiCreditsStatusPartial
+	checkpoint.AccountingSnapshot.AiCreditsStatus = &partial
+	normalized, recognized := normalizeEvent(sdk.SessionEvent{Data: checkpoint})
+	if !recognized {
+		t.Fatal("partial aggregate accounting disappeared")
+	}
+	if _, matches, err := runtime.DecodeUsageCheckpoint(normalized.Payload, "saved-session", []core.DispatchUsage{call}); err != nil || matches {
+		t.Fatal("global partial accounting was falsely certified from complete model subtotals", matches, err)
+	}
+	checkpoint.AccountingSnapshot.AiCreditsStatus = &status
+	checkpoint.AccountingSnapshot.AgentMetrics["child"] = rpc.UsageMetricsAgentMetric{}
+	if _, err := savedQuestionTurn(events, "saved-session", worktree, false); err == nil {
+		t.Fatal("checkpoint hid child-agent accounting")
+	}
+	delete(checkpoint.AccountingSnapshot.AgentMetrics, "child")
+	checkpoint.TotalNanoAiu = -1
+	if _, err := savedQuestionTurn(events, "saved-session", worktree, false); err == nil {
+		t.Fatal("negative checkpoint accounting was accepted")
+	}
+}
+
+func TestUsageCheckpointRequiresEvidenceForZeroCost(t *testing.T) {
+	for _, payload := range []string{`{}`, `{"totalNanoAiu":0}`} {
+		var event sdk.SessionEvent
+		wire := `{"id":"checkpoint","type":"session.usage_checkpoint","timestamp":"2026-11-09T00:00:00Z","data":` + payload + `}`
+		if err := json.Unmarshal([]byte(wire), &event); err != nil {
+			t.Fatal(err)
+		}
+		normalized, ok := normalizeEvent(event)
+		if !ok {
+			t.Fatal("SDK checkpoint was discarded")
+		}
+		checkpoint, matches, err := runtime.DecodeUsageCheckpoint(normalized.Payload, "saved-session", nil)
+		if err != nil || matches || checkpoint.TotalNanoAIU != nil {
+			t.Fatal("SDK wire zero without completeness evidence was certified", payload, checkpoint, matches, err)
+		}
+	}
+	missing := normalizeUsageCheckpoint(&sdk.SessionUsageCheckpointData{})
+	if missing.Type != runtime.EventUsageCheckpoint {
+		t.Fatal("empty SDK checkpoint was not retained as incomplete evidence", missing)
+	}
+	if _, matches, err := runtime.DecodeUsageCheckpoint(missing.Payload, "saved-session", nil); err != nil || matches {
+		t.Fatal("SDK decode zero without presence evidence was certified", matches, err)
+	}
+	zero := 0.0
+	status := rpc.AiCreditsStatusComplete
+	explicit := normalizeUsageCheckpoint(&sdk.SessionUsageCheckpointData{
+		AccountingSnapshot: &rpc.UsageGetMetricsResult{TotalNanoAiu: &zero, AiCreditsStatus: &status},
+	})
+	checkpoint, matches, err := runtime.DecodeUsageCheckpoint(explicit.Payload, "saved-session", nil)
+	if err != nil || !matches || checkpoint.TotalNanoAIU == nil || *checkpoint.TotalNanoAIU != 0 {
+		t.Fatal("complete snapshot zero was not preserved", checkpoint, matches, err)
+	}
+}
+
+func TestShutdownDoesNotInferCompleteFromCostPresence(t *testing.T) {
+	amount := 3.5
+	checkpoint, err := normalizeUsageShutdown(&sdk.SessionShutdownData{
+		TotalNanoAiu: &amount,
+		ModelMetrics: map[string]rpc.ShutdownModelMetric{
+			"model": {TotalNanoAiu: &amount},
+		},
+	})
+	if err != nil || checkpoint.AICreditsStatus != nil ||
+		len(checkpoint.UsageTotals) != 1 || checkpoint.UsageTotals[0].AICreditsStatus != nil {
+		t.Fatal("shutdown cost presence was promoted to complete accounting", checkpoint, err)
+	}
+	payload, err := json.Marshal(checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, matches, err := runtime.DecodeUsageCheckpoint(string(payload), "saved-session", nil); err != nil || matches {
+		t.Fatal("shutdown without completeness evidence was accepted", matches, err)
+	}
+}
+
+func TestShutdownProviderModelMetricsMatchReceiptsAcrossProviders(t *testing.T) {
+	status := rpc.AiCreditsStatusComplete
+	model, display := "model", "Model Display"
+	amountA, amountB, total := 3.5, 1.5, 5.0
+	inputA, outputA, cacheReadA, cacheWriteA := int64(21), int64(8), int64(2), int64(1)
+	inputB, outputB, cacheReadB, cacheWriteB := int64(11), int64(4), int64(1), int64(0)
+	makeMetric := func(amount float64, input, output, cacheRead, cacheWrite int64) rpc.UsageMetricsModelMetric {
+		count, cost := int64(1), amount/5
+		return rpc.UsageMetricsModelMetric{
+			AiCreditsStatus: &status, TotalNanoAiu: &amount,
+			Requests: rpc.UsageMetricsModelMetricRequests{Cost: cost, Count: count},
+			Usage: rpc.UsageMetricsModelMetricUsage{
+				InputTokens: input, OutputTokens: output, CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
+			},
+		}
+	}
+	providerA := &rpc.ModelProviderRef{ID: "provider-a", Kind: rpc.ModelProviderKind("openai"), Label: "Provider A"}
+	providerB := &rpc.ModelProviderRef{ID: "provider-b", Kind: rpc.ModelProviderKind("openai"), Label: "Provider B"}
+	metricA, metricB := makeMetric(amountA, inputA, outputA, cacheReadA, cacheWriteA),
+		makeMetric(amountB, inputB, outputB, cacheReadB, cacheWriteB)
+	providerMetrics := []rpc.UsageMetricsProviderModelMetric{
+		{ModelID: &model, ModelDisplayName: &display, Provider: providerA, Metrics: metricA},
+		{ModelID: &model, ModelDisplayName: &display, Provider: providerB, Metrics: metricB},
+	}
+	modelMetric := makeMetric(total, inputA+inputB, outputA+outputB,
+		cacheReadA+cacheReadB, cacheWriteA+cacheWriteB)
+	modelMetric.Requests.Count = 2
+	modelMetric.Requests.Cost = 1
+	checkpoint, err := normalizeUsageShutdown(&sdk.SessionShutdownData{
+		ShutdownType: "routine", TotalNanoAiu: &total,
+		AccountingSnapshot: &rpc.UsageGetMetricsResult{
+			TotalNanoAiu: &total, AiCreditsStatus: &status,
+			ModelMetrics:         map[string]rpc.UsageMetricsModelMetric{"model": modelMetric},
+			ProviderModelMetrics: providerMetrics,
+			AgentMetrics:         map[string]rpc.UsageMetricsAgentMetric{"main": {}},
+		},
+		ProviderModelMetrics: providerMetrics,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeCall := func(provider *rpc.ModelProviderRef, amount float64, input, output, cacheRead, cacheWrite int64, sequence int64) core.DispatchUsage {
+		return core.DispatchUsage{
+			Model: model, Provider: &core.UsageModelProvider{
+				ID: provider.ID, Kind: string(provider.Kind), Label: provider.Label,
+			},
+			InputTokens: &input, OutputTokens: &output, CacheReadTokens: &cacheRead,
+			CacheWriteTokens: &cacheWrite, TotalNanoAIU: &amount, AICreditsStatus: func() *string {
+				value := string(status)
+				return &value
+			}(),
+			Accounting: &core.UsageAccountingIdentity{
+				SourceSessionID: "saved-session", Sequence: sequence, UsageID: fmt.Sprintf("call-%d", sequence),
+			},
+		}
+	}
+	calls := []core.DispatchUsage{
+		makeCall(providerA, amountA, inputA, outputA, cacheReadA, cacheWriteA, 1),
+		makeCall(providerB, amountB, inputB, outputB, cacheReadB, cacheWriteB, 2),
+	}
+	payload, err := json.Marshal(checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, matches, err := runtime.DecodeUsageCheckpoint(string(payload), "saved-session", calls); err != nil || !matches {
+		t.Fatal("provider/model checkpoint did not match individual receipts", matches, err)
+	}
+	summary, err := core.SummarizeUsage("saved-session", calls, []core.UsageCheckpoint{checkpoint})
+	if err != nil || summary.NanoAIU == nil || *summary.NanoAIU != total ||
+		summary.InputOutputTokens == nil || *summary.InputOutputTokens != inputA+inputB+outputA+outputB ||
+		summary.CreditsStatus != "complete" || summary.TokenStatus != "complete" {
+		t.Fatal("model and provider aggregates were counted as additional usage", summary, err)
+	}
+	checkpoint.UsageTotals = nil
+	payload, err = json.Marshal(checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, matches, err := runtime.DecodeUsageCheckpoint(string(payload), "saved-session", calls); err != nil || !matches {
+		t.Fatal("provider/model-only checkpoint did not match individual receipts", matches, err)
+	}
+	for _, test := range []struct {
+		name     string
+		change   func(*runtime.UsageCheckpoint)
+		conflict bool
+	}{
+		{"missing provider aggregate", func(c *runtime.UsageCheckpoint) { c.ProviderModelMetrics = nil }, false},
+		{"partial", func(c *runtime.UsageCheckpoint) {
+			status := "partial"
+			c.AICreditsStatus = &status
+		}, false},
+		{"missing known cost", func(c *runtime.UsageCheckpoint) { c.TotalNanoAIU = nil }, false},
+		{"wrong scope", func(c *runtime.UsageCheckpoint) { c.Watermarks = map[string]int64{"other-session": 2} }, true},
+		{"duplicate provider", func(c *runtime.UsageCheckpoint) {
+			c.ProviderModelMetrics = append(c.ProviderModelMetrics, c.ProviderModelMetrics[0])
+		}, true},
+		{"provider below receipt", func(c *runtime.UsageCheckpoint) {
+			c.ProviderModelMetrics[0].Metrics.Usage.InputTokens--
+		}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var changed runtime.UsageCheckpoint
+			if err := json.Unmarshal(payload, &changed); err != nil {
+				t.Fatal(err)
+			}
+			test.change(&changed)
+			data, err := json.Marshal(changed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, matches, err := runtime.DecodeUsageCheckpoint(string(data), "saved-session", calls)
+			if matches || (err != nil) != test.conflict {
+				t.Fatal("incomplete or conflicting accounting accepted", decoded, matches, err)
+			}
+		})
+	}
+	for index := range calls {
+		calls[index].Provider = nil
+		checkpoint.ProviderModelMetrics[index].Provider = nil
+	}
+	checkpoint.ProviderModelMetrics = checkpoint.ProviderModelMetrics[:1]
+	checkpoint.ProviderModelMetrics[0].Metrics = normalizeProviderMetrics([]rpc.UsageMetricsProviderModelMetric{
+		{ModelID: &model, Metrics: modelMetric},
+	})[0].Metrics
+	payload, err = json.Marshal(checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, matches, err := runtime.DecodeUsageCheckpoint(string(payload), "saved-session", calls); err != nil || !matches {
+		t.Fatal("explicitly unknown provider was guessed or rejected", matches, err)
+	}
+}
+
+func TestSavedTurnPreservesShutdownProviderModelMetrics(t *testing.T) {
+	worktree := t.TempDir()
+	events := completedSavedHistory(worktree)
+	model, display := "model", "Model Display"
+	amount, cost, requestCount := 3.5, 0.75, int64(1)
+	input, output, cacheRead, cacheWrite := int64(21), int64(8), int64(2), int64(1)
+	status := rpc.AiCreditsStatusComplete
+	provider := &rpc.ModelProviderRef{ID: "provider-id", Kind: rpc.ModelProviderKind("openai"), Label: "OpenAI"}
+	metric := rpc.UsageMetricsModelMetric{
+		AiCreditsStatus: &status, TotalNanoAiu: &amount,
+		Requests:     rpc.UsageMetricsModelMetricRequests{Cost: cost, Count: requestCount},
+		TokenDetails: map[string]rpc.UsageMetricsModelMetricTokenDetail{"input": {TokenCount: input}},
+		Usage: rpc.UsageMetricsModelMetricUsage{
+			InputTokens: input, OutputTokens: output, CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
+		},
+	}
+	providerMetric := rpc.UsageMetricsProviderModelMetric{
+		ModelID: &model, ModelDisplayName: &display, Provider: provider, Metrics: metric,
+	}
+	events[len(events)-1].Data = &sdk.SessionShutdownData{
+		ShutdownType: "routine", TotalNanoAiu: &amount,
+		AccountingSnapshot: &rpc.UsageGetMetricsResult{
+			TotalNanoAiu: &amount, AiCreditsStatus: &status,
+			ModelMetrics:         map[string]rpc.UsageMetricsModelMetric{"model": metric},
+			ProviderModelMetrics: []rpc.UsageMetricsProviderModelMetric{providerMetric},
+			AgentMetrics:         map[string]rpc.UsageMetricsAgentMetric{"main": {}},
+		},
+		ProviderModelMetrics: []rpc.UsageMetricsProviderModelMetric{providerMetric},
+	}
+	turn, err := savedQuestionTurn(events, "saved-session", worktree, false)
+	if err != nil || len(turn.UsageCheckpoints) != 1 || len(turn.UsageTotals) != 1 {
+		t.Fatal("shutdown accounting was not preserved", turn, err)
+	}
+	if turn.UsageTotals[0].RequestCount == nil || *turn.UsageTotals[0].RequestCount != requestCount ||
+		turn.UsageTotals[0].RequestCost == nil || *turn.UsageTotals[0].RequestCost != cost ||
+		turn.UsageTotals[0].TokenDetails["input"] != input {
+		t.Fatal("model aggregate details were dropped", turn.UsageTotals)
+	}
+	providerSnapshot := turn.UsageCheckpoints[0].ProviderModelMetrics
+	if len(providerSnapshot) != 1 || providerSnapshot[0].ModelID == nil ||
+		*providerSnapshot[0].ModelID != model || providerSnapshot[0].Provider == nil ||
+		providerSnapshot[0].Provider.ID != provider.ID ||
+		providerSnapshot[0].Metrics.Requests.Cost != cost ||
+		providerSnapshot[0].Metrics.Usage.InputTokens != input {
+		t.Fatal("shutdown provider/model attribution was dropped", providerSnapshot)
 	}
 }
 
@@ -290,6 +793,7 @@ func completedSavedHistory(worktree string) []sdk.SessionEvent {
 			SessionID: "saved-session", Context: &rpc.WorkingDirectoryContext{Cwd: worktree},
 		}},
 		{ID: "input", Timestamp: now, Data: &sdk.UserMessageData{MessageID: &message, Content: "execute saved contract"}},
+		{ID: "turn-start", Timestamp: now, Data: &sdk.AssistantTurnStartData{TurnID: turn}},
 		{ID: "answer", Timestamp: now, Data: &sdk.AssistantMessageData{
 			Content:              `{"status":"SUCCEEDED","reviewVerdict":"REQUEST_CHANGES"}`,
 			OriginatingMessageID: &message, TurnID: &turn,
@@ -299,7 +803,7 @@ func completedSavedHistory(worktree string) []sdk.SessionEvent {
 	}
 }
 
-func serveStopProtocol(conn net.Conn, history []sdk.SessionEvent) error {
+func serveStopProtocol(conn net.Conn, history []sdk.SessionEvent, idleGate <-chan struct{}, abortResponded chan<- struct{}) error {
 	reader := bufio.NewReader(conn)
 	var methods []string
 	for {
@@ -357,6 +861,24 @@ func serveStopProtocol(conn net.Conn, history []sdk.SessionEvent) error {
 			if request.Params["sessionId"] != "saved-session" {
 				return fmt.Errorf("cancellation RPC targeted another session")
 			}
+			if request.Method == "session.abort" && idleGate == nil {
+				notification, err := json.Marshal(map[string]any{
+					"jsonrpc": "2.0", "method": "session.event",
+					"params": map[string]any{
+						"sessionId": "saved-session",
+						"event": map[string]any{
+							"id": "abort-idle", "timestamp": time.Now().UTC(), "type": "session.idle",
+							"ephemeral": true, "data": map[string]any{"aborted": true},
+						},
+					},
+				})
+				if err != nil {
+					return err
+				}
+				if _, err := fmt.Fprintf(conn, "Content-Length: %d\r\n\r\n%s", len(notification), notification); err != nil {
+					return err
+				}
+			}
 			result["success"] = true
 		case "session.getMessages":
 			if history == nil || request.Params["sessionId"] != "saved-session" {
@@ -372,6 +894,26 @@ func serveStopProtocol(conn net.Conn, history []sdk.SessionEvent) error {
 		}
 		if _, err := fmt.Fprintf(conn, "Content-Length: %d\r\n\r\n%s", len(response), response); err != nil {
 			return err
+		}
+		if request.Method == "session.abort" && idleGate != nil {
+			close(abortResponded)
+			<-idleGate
+			for _, data := range []sdk.SessionEventData{
+				&sdk.AssistantUsageData{Model: "model"},
+				&sdk.SessionIdleData{Aborted: func() *bool { value := true; return &value }()},
+			} {
+				notification, err := json.Marshal(map[string]any{
+					"jsonrpc": "2.0", "method": "session.event",
+					"params": map[string]any{"sessionId": "saved-session",
+						"event": sdk.SessionEvent{ID: string(data.Type()), Timestamp: time.Now().UTC(), Data: data}},
+				})
+				if err != nil {
+					return err
+				}
+				if _, err := fmt.Fprintf(conn, "Content-Length: %d\r\n\r\n%s", len(notification), notification); err != nil {
+					return err
+				}
+			}
 		}
 	}
 }

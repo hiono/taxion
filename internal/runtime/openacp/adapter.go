@@ -80,6 +80,8 @@ type Adapter struct {
 	preservationErr error
 	turn            int64
 	turnDone        chan struct{}
+	inputMessageID  string
+	turnID          string
 
 	launch func(context.Context, string, string, bool) (*exec.Cmd, error)
 }
@@ -666,7 +668,12 @@ func (a *Adapter) update(params json.RawMessage) {
 		if newMessage {
 			a.emit(runtime.Event{Type: "acp_message_start", Payload: event.Update.MessageID})
 		}
-		a.emit(runtime.Event{Type: runtime.EventOutputDelta, Payload: content.Text})
+		a.mu.Lock()
+		messageID, turnID := a.inputMessageID, a.turnID
+		a.mu.Unlock()
+		a.emit(runtime.Event{
+			Type: runtime.EventOutputDelta, Payload: content.Text, MessageID: messageID, TurnID: turnID,
+		})
 	} else if isTool {
 		a.emit(runtime.Event{Type: "acp_tool_update", Payload: string(params)})
 		if observation != nil {
@@ -700,6 +707,9 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 	a.toolCalls = map[string]core.ExecutionObservation{}
 	a.turn++
 	turn := a.turn
+	a.inputMessageID = fmt.Sprintf("%s-prompt-%d", session, turn)
+	a.turnID = fmt.Sprintf("%s-turn-%d", session, turn)
+	inputMessageID, turnID := a.inputMessageID, a.turnID
 	a.turnDone = make(chan struct{})
 	turnDone := a.turnDone
 	connection := a.connection
@@ -708,7 +718,8 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 		a.emit(runtime.Event{Type: "acp_connection", Payload: connection})
 	}
 	a.emit(runtime.Event{Type: "acp_capabilities", Payload: `{"transport":"stdio","isolation":"linux-namespaces-copy","providerAuthentication":"unverified","quota":"unsupported","crossProcessResume":"unsupported","shell":"unsupported","usage":"latest-assistant-message-not-total","modelOperation":"unsupported"}`})
-	a.emit(runtime.Event{Type: runtime.EventTurnStarted})
+	a.emit(runtime.Event{Type: runtime.EventInput, MessageID: inputMessageID})
+	a.emit(runtime.Event{Type: runtime.EventTurnStarted, TurnID: turnID})
 	go func() {
 		defer func() {
 			a.mu.Lock()
@@ -790,7 +801,10 @@ func (a *Adapter) Send(ctx context.Context, session, prompt string) error {
 				a.protocolFailure(err.Error())
 				return
 			}
-			a.emit(runtime.Event{Type: runtime.EventOutput, Payload: output})
+			a.emit(runtime.Event{
+				Type: runtime.EventOutput, Payload: output, MessageID: inputMessageID, TurnID: turnID,
+			})
+			a.emit(runtime.Event{Type: runtime.EventTurnEnded, TurnID: turnID})
 			a.emit(runtime.Event{Type: runtime.EventTurnFinished})
 		}
 	}()

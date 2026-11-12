@@ -18,9 +18,11 @@ import (
 
 type questionRuntime struct {
 	*configuredRuntime
-	events  chan runtime.Event
-	onSend  func()
-	stopErr error
+	events        chan runtime.Event
+	onSend        func()
+	onStop        func()
+	stopErr       error
+	stoppedEvents []runtime.Event
 }
 
 func TestQuestionContextComparisonPreservesFormattedConfigurationAndRejectsForgedContent(t *testing.T) {
@@ -65,7 +67,21 @@ func (q *questionRuntime) Send(ctx context.Context, id, text string) error {
 }
 func (q *questionRuntime) Stop(context.Context, string) error {
 	q.stops++
+	if q.onStop != nil {
+		q.onStop()
+	}
 	return q.stopErr
+}
+
+func (q *questionRuntime) EventsAfter(_ context.Context, _ string, cursor uint64) (<-chan runtime.Event, error) {
+	events := make(chan runtime.Event, len(q.stoppedEvents))
+	for _, event := range q.stoppedEvents {
+		if event.Sequence > cursor {
+			events <- event
+		}
+	}
+	close(events)
+	return events, nil
 }
 
 func questionEvents(answer string) chan runtime.Event {
@@ -73,16 +89,201 @@ func questionEvents(answer string) chan runtime.Event {
 }
 
 func questionEventsWithUsage(answer, usage string) chan runtime.Event {
-	events := make(chan runtime.Event, 3)
-	if usage != "" {
-		events <- runtime.Event{Type: runtime.EventUsage, Payload: usage}
+	events := make(chan runtime.Event, 6)
+	var sequence uint64
+	send := func(event runtime.Event) {
+		sequence++
+		event.Sequence = sequence
+		events <- event
 	}
-	events <- runtime.Event{Type: runtime.EventOutput, Payload: answer}
-	events <- runtime.Event{Type: runtime.EventTurnFinished}
+	send(runtime.Event{Type: runtime.EventInput, MessageID: "question-input"})
+	send(runtime.Event{Type: runtime.EventTurnStarted, TurnID: "question-turn"})
+	if usage != "" {
+		send(runtime.Event{Type: runtime.EventUsage, Payload: usage})
+	}
+	send(runtime.Event{Type: runtime.EventOutput, Payload: answer, MessageID: "question-input", TurnID: "question-turn"})
+	send(runtime.Event{Type: runtime.EventTurnEnded, TurnID: "question-turn"})
+	send(runtime.Event{Type: runtime.EventTurnFinished})
 	return events
 }
 
 const savedQuestionAnswer = `{"confirmed":[{"text":"The saved Task is Active.","sources":["/task/task/status","/observation/contentHash"]}],"assumptions":[],"unconfirmed":["Live runtime state has not been queried."]}`
+
+func TestQuestionPreservesStoppedTurnObservations(t *testing.T) {
+	for _, kind := range []string{runtime.EventUsage, runtime.EventUsageCheckpoint, runtime.EventOutput} {
+		t.Run(kind, func(t *testing.T) {
+			db, path, base, selected := questionFixture(t)
+			defer db.Close()
+			base.role = "ORCHESTRATOR"
+			payload := `{"model":"test","inputTokens":2,"outputTokens":1}`
+			if kind == runtime.EventUsageCheckpoint {
+				payload = `{"totalNanoAiu":3}`
+			}
+			q := &questionRuntime{
+				configuredRuntime: base, events: questionEvents(savedQuestionAnswer),
+			}
+			q.onStop = func() {
+				state, err := db.LoadWorkspace()
+				if err != nil {
+					t.Fatal(err)
+				}
+				saved := false
+				for _, record := range state.Records.Requests {
+					var body struct {
+						Answer *QuestionAnswer `json:"answer"`
+					}
+					if json.Unmarshal([]byte(record.Payload), &body) == nil && body.Answer != nil &&
+						len(body.Answer.Confirmed) == 1 {
+						saved = true
+					}
+				}
+				if !saved {
+					t.Fatal("validated answer was not durable before runtime cleanup")
+				}
+				q.stoppedEvents = []runtime.Event{{Type: kind, Sequence: 7, Payload: payload}}
+			}
+			result, err := AskQuestion(context.Background(), db,
+				filepath.Join(filepath.Dir(path), "ledger.json"), "task", "What is saved?", selected.Config, q)
+			if kind == runtime.EventOutput {
+				if err == nil || result.Answer == nil {
+					t.Fatalf("later activity accepted or saved answer lost: answer=%t err=%v", result.Answer != nil, err)
+				}
+				state, loadErr := db.LoadWorkspace()
+				if loadErr != nil || state.Records.Operation.State != "BLOCKED" {
+					t.Fatal("late activity did not preserve the admission hold", loadErr)
+				}
+				return
+			}
+			if err != nil || kind == runtime.EventUsage && len(result.Usage) != 2 ||
+				kind == runtime.EventUsageCheckpoint && len(result.UsageCheckpoints) != 1 {
+				t.Fatalf("shutdown observations discarded: usage=%d checkpoints=%d err=%v", len(result.Usage), len(result.UsageCheckpoints), err)
+			}
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if state.Records.Operation.State != "COMPLETED" {
+				t.Fatal("valid stopped-turn accounting blocked advisory completion")
+			}
+			found := false
+			for _, record := range state.Records.Requests {
+				var body struct {
+					Stopped          bool                      `json:"stopped"`
+					Usage            []core.DispatchUsage      `json:"usage"`
+					UsageCheckpoints []runtime.UsageCheckpoint `json:"usageCheckpoints"`
+				}
+				if json.Unmarshal([]byte(record.Payload), &body) == nil && body.Stopped {
+					found = kind == runtime.EventUsage && len(body.Usage) == 1 ||
+						kind == runtime.EventUsageCheckpoint && len(body.UsageCheckpoints) == 1
+				}
+			}
+			if !found {
+				t.Fatal("shutdown observations were not saved for recovery")
+			}
+		})
+	}
+}
+
+func TestStoppedTurnDeduplicatesUsageAndHonorsDeadline(t *testing.T) {
+	input, output := int64(2), int64(1)
+	call := core.DispatchUsage{
+		Model: "test", InputTokens: &input, OutputTokens: &output,
+		Accounting: &core.UsageAccountingIdentity{SourceSessionID: "sdk-session", Sequence: 1, UsageID: "stop-call"},
+	}
+	body, err := json.Marshal(call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := &questionRuntime{stoppedEvents: []runtime.Event{
+		{Type: runtime.EventUsage, Sequence: 7, Payload: string(body)},
+		{Type: runtime.EventUsage, Sequence: 8, Payload: string(body)},
+	}}
+	var usage []core.DispatchUsage
+	var checkpoints []runtime.UsageCheckpoint
+	tail, _, err := observeStoppedTurn(t.Context(), worker, "sdk-session", 6, &usage, &checkpoints)
+	if err != nil || len(usage) != 1 || len(tail) != 2 {
+		t.Fatalf("duplicate receipt accounting changed: usage=%d tail=%d err=%v", len(usage), len(tail), err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, _, err = observeStoppedTurn(ctx, worker, "sdk-session", 6, &usage, &checkpoints)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatal("expired observation boundary was accepted", err)
+	}
+}
+
+func TestCompletedTurnWaitsForProviderBoundary(t *testing.T) {
+	for _, scenario := range []string{"idle", "child", "execution", "closed", "timeout"} {
+		t.Run(scenario, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			events := make(chan runtime.Event)
+			done := make(chan error, 1)
+			go func() {
+				var usage []core.DispatchUsage
+				var checkpoints []runtime.UsageCheckpoint
+				sequence := uint64(1)
+				done <- drainCompletedTurn(ctx, events, &usage, &checkpoints, &sequence, "question-session")
+			}()
+			select {
+			case err := <-done:
+				t.Fatal("transiently empty stream accepted before provider boundary", err)
+			case events <- runtime.Event{Type: runtime.EventContextUsage, Sequence: 2}:
+			case <-ctx.Done():
+				t.Fatal("completed-turn reader did not consume the synchronization event")
+			}
+			switch scenario {
+			case "idle":
+				events <- runtime.Event{Type: runtime.EventTurnFinished, Sequence: 3}
+			case "child":
+				events <- runtime.Event{Type: runtime.EventContextUsage, AgentID: "child", Sequence: 3}
+			case "execution":
+				events <- runtime.Event{Type: runtime.EventExecution, Sequence: 3}
+			case "closed":
+				close(events)
+			case "timeout":
+				cancel()
+			}
+			err := <-done
+			if (err == nil) != (scenario == "idle") {
+				t.Fatal("provider boundary or delayed activity incorrectly classified", scenario, err)
+			}
+		})
+	}
+}
+
+func TestQuestionAcceptsOpenACPMetadataButNotUnknownUsage(t *testing.T) {
+	for _, unavailable := range []bool{false, true} {
+		db, path, base, selected := questionFixture(t)
+		base.role = "ORCHESTRATOR"
+		stream := make(chan runtime.Event, 9)
+		metadata := []runtime.Event{
+			{Type: "acp_connection", Payload: `{"transport":"stdio"}`},
+			{Type: "acp_capabilities", Payload: `{"usage":"latest-assistant-message-not-total"}`},
+		}
+		if unavailable {
+			metadata = append(metadata, runtime.Event{Type: "acp_usage_unavailable", Payload: `{"reason":"omitted usage"}`})
+		}
+		for i, event := range metadata {
+			event.Sequence = uint64(i + 1)
+			stream <- event
+		}
+		original := questionEvents(savedQuestionAnswer)
+		for i := 0; i < 6; i++ {
+			event := <-original
+			event.Sequence += uint64(len(metadata))
+			stream <- event
+		}
+		worker := &questionRuntime{configuredRuntime: base, events: stream}
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		result, err := AskQuestion(ctx, db, filepath.Join(filepath.Dir(path), "ledger.json"), "task", "status?", selected.Config, worker)
+		cancel()
+		if unavailable && (err == nil || result.Answer != nil) ||
+			!unavailable && (err != nil || result.Answer == nil) || worker.stops != 1 {
+			t.Fatal("provider metadata or unknown usage incorrectly accepted", unavailable, result, err)
+		}
+	}
+}
 
 func questionFixture(t *testing.T, guidance ...*core.BudgetGuidancePolicy) (*store.Store, string, *configuredRuntime, config.Resolution) {
 	t.Helper()
@@ -120,7 +321,25 @@ func TestQuestionAnswersSavedRecordsWithoutChangingWorkspace(t *testing.T) {
 	if after.Records.Operation == nil || after.Records.Operation.State != "COMPLETED" || after.Records.Operation.Owner != "" {
 		t.Fatal("question did not finish its admission record")
 	}
+	operationID := after.Records.Operation.ID
+	receiptFound := false
+	for _, record := range after.Records.Requests {
+		if record.RequestID != operationID || record.Kind != "planning" {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(record.Payload), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["answer"] != nil && (payload["terminalEvent"] == runtime.EventTurnFinished || payload["terminalEvent"] == runtime.EventTurnEnded) {
+			receiptFound = true
+		}
+	}
+	if !receiptFound {
+		t.Fatal("validated terminal answer was not durably recorded")
+	}
 	after.Records.Operation = before.Records.Operation
+	after.Records.Requests = before.Records.Requests
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("question mutated state, authorization or main-role history", err)
 	}
@@ -140,6 +359,294 @@ func TestQuestionAnswersSavedRecordsWithoutChangingWorkspace(t *testing.T) {
 	restored, err := ObserveQuestion(reopened, path, "owner/repo", "task")
 	if err != nil || restored.Observation.ContentHash != result.Context.Observation.ContentHash {
 		t.Fatal("question observation depended on session history", err)
+	}
+}
+
+func TestQuestionValidatesLiveAndDrainedCheckpointsWithoutDuplicateUsage(t *testing.T) {
+	for _, mode := range []string{"live", "drain", "wrong-session", "invalid"} {
+		t.Run(mode, func(t *testing.T) {
+			db, databasePath, worker, resolved := questionFixture(t)
+			defer db.Close()
+			worker.role = "ORCHESTRATOR"
+			payload := `{"model":"test","provider":{"id":"provider","kind":"openai","label":"Provider"},"inputTokens":10,"outputTokens":5,"cacheReadTokens":0,"cacheWriteTokens":0,"totalNanoAIU":3.5,"aiCreditsStatus":"complete"}`
+			var usage core.DispatchUsage
+			if err := json.Unmarshal([]byte(payload), &usage); err != nil {
+				t.Fatal(err)
+			}
+			checkpoint := runtime.UsageCheckpoint{
+				UsageTotals: []core.DispatchUsage{usage}, TotalNanoAIU: usage.TotalNanoAIU,
+				AICreditsStatus: usage.AICreditsStatus,
+				ProviderModelMetrics: []core.ProviderModelMetric{{
+					ModelID: &usage.Model, Provider: usage.Provider,
+					Metrics: core.ProviderModelUsageMetrics{
+						AICreditsStatus: usage.AICreditsStatus, TotalNanoAIU: usage.TotalNanoAIU,
+						Usage: core.ProviderModelTokenUsage{InputTokens: 10, OutputTokens: 5},
+					},
+				}},
+			}
+			checkpoint.UsageTotals[0].Provider = nil
+			if mode == "wrong-session" {
+				checkpoint.Watermarks = map[string]int64{"another-native-session": 1}
+			}
+			body, err := json.Marshal(checkpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "invalid" {
+				body = []byte(`{"usageTotals":"private-invalid-checkpoint"}`)
+			}
+			original := questionEventsWithUsage(savedQuestionAnswer, payload)
+			events := make(chan runtime.Event, 7)
+			sequence, at := uint64(0), 3
+			if mode == "drain" || mode == "wrong-session" {
+				at = 5
+			}
+			send := func(event runtime.Event) {
+				sequence++
+				event.Sequence = sequence
+				events <- event
+			}
+			for index := 0; index < 6; index++ {
+				if index == at {
+					send(runtime.Event{Type: runtime.EventUsageCheckpoint, Payload: string(body)})
+				}
+				send(<-original)
+			}
+			q := &questionRuntime{configuredRuntime: worker, events: events}
+			result, err := AskQuestion(t.Context(), db, filepath.Join(filepath.Dir(databasePath), "ledger.json"),
+				"task", "Observe the saved Task.", resolved.Config, q)
+			valid := mode == "live" || mode == "drain"
+			if (err == nil) != valid || len(result.Usage) != 1 ||
+				err != nil && strings.Contains(err.Error(), "private-invalid-checkpoint") {
+				t.Fatal("checkpoint admission lost accounting, duplicated it, or disclosed private payload", result, err)
+			}
+			after, loadErr := db.LoadWorkspace()
+			if loadErr != nil || valid && after.Records.Operation.State != "COMPLETED" ||
+				!valid && after.Records.Operation.State == "COMPLETED" {
+				t.Fatal("checkpoint receipt acceptance was not preserved", loadErr)
+			}
+			if valid {
+				if len(result.UsageCheckpoints) != 1 ||
+					!reflect.DeepEqual(result.UsageCheckpoints[0].ProviderModelMetrics, checkpoint.ProviderModelMetrics) {
+					t.Fatal("live or drained provider/model checkpoint was dropped", result.UsageCheckpoints)
+				}
+				retained := false
+				for _, record := range after.Records.Requests {
+					var receipt struct {
+						UsageCheckpoints []runtime.UsageCheckpoint `json:"usageCheckpoints"`
+					}
+					if json.Unmarshal([]byte(record.Payload), &receipt) == nil &&
+						reflect.DeepEqual(receipt.UsageCheckpoints, result.UsageCheckpoints) {
+						retained = true
+					}
+				}
+				if !retained {
+					t.Fatal("provider/model checkpoint did not survive durable receipt storage")
+				}
+			}
+		})
+	}
+}
+
+func TestQuestionRequiresIdleCompletionBoundary(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		later bool
+	}{
+		{"no-idle", false}, {"later-activity", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, databasePath, worker, resolved := questionFixture(t)
+			worker.role = "ORCHESTRATOR"
+			events := make(chan runtime.Event, 20)
+			source := questionEvents(savedQuestionAnswer)
+			close(source)
+			for event := range source {
+				if event.Type != runtime.EventTurnFinished {
+					events <- event
+				}
+
+			}
+			if test.later {
+				events <- runtime.Event{Type: runtime.EventExecution, Sequence: 20}
+			}
+			close(events)
+			q := &questionRuntime{configuredRuntime: worker, events: events}
+			result, err := AskQuestion(t.Context(), db, filepath.Join(filepath.Dir(databasePath), "ledger.json"),
+				"task", "What is saved?", resolved.Config, q)
+			if err == nil || result.Answer != nil {
+				t.Fatal("answer was accepted without a valid idle completion boundary", test.name, err)
+			}
+		})
+	}
+}
+
+func TestQuestionRetainsPartialAndCheckpointOnlyUsage(t *testing.T) {
+	for _, mode := range []string{"checkpoint-only", "partial", "duplicate"} {
+		t.Run(mode, func(t *testing.T) {
+			db, databasePath, worker, resolved := questionFixture(t)
+			defer db.Close()
+			worker.role = "ORCHESTRATOR"
+			payload := `{"model":"test","inputTokens":10,"outputTokens":5,"accounting":{"sourceSessionId":"sdk-session","sequence":1,"usageId":"call"}}`
+			if mode == "checkpoint-only" {
+				payload = ""
+			}
+			original := questionEventsWithUsage(savedQuestionAnswer, payload)
+			close(original)
+			events := make(chan runtime.Event, 10)
+			var sequence uint64
+			send := func(event runtime.Event) {
+				sequence++
+				event.Sequence = sequence
+				events <- event
+			}
+			for event := range original {
+				if event.Type == runtime.EventTurnEnded && mode != "duplicate" {
+					checkpoint := `{"usageTotals":[{"model":"test","inputTokens":10,"outputTokens":5,"totalNanoAIU":3.5,"aiCreditsStatus":"complete"}],"totalNanoAIU":3.5,"aiCreditsStatus":"complete","watermarks":{"sdk-session":1}}`
+					if mode == "partial" {
+						checkpoint = `{"watermarks":{"sdk-session":1},"aiCreditsStatus":"partial"}`
+					}
+					send(runtime.Event{Type: runtime.EventUsageCheckpoint, Payload: checkpoint})
+				}
+				send(event)
+				if mode == "duplicate" && event.Type == runtime.EventUsage {
+					send(event)
+				}
+			}
+			q := &questionRuntime{configuredRuntime: worker, events: events}
+			result, err := AskQuestion(t.Context(), db, filepath.Join(filepath.Dir(databasePath), "ledger.json"),
+				"task", "Observe the saved Task.", resolved.Config, q)
+			if err != nil || result.Answer == nil {
+				t.Fatal("valid observed usage prevented answer acceptance", mode, err)
+			}
+			expected := 1
+			if mode == "checkpoint-only" {
+				expected = 0
+			}
+			if len(result.Usage) != expected || mode != "duplicate" && len(result.UsageCheckpoints) != 1 {
+				t.Fatal("usage observation was duplicated or discarded", result.Usage, result.UsageCheckpoints)
+			}
+		})
+	}
+}
+
+func TestQuestionOnlyCompletesAfterDurableAnswerAndSuccessfulStop(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		answer      string
+		stopErr     error
+		wantAnswer  bool
+		wantReceipt bool
+	}{
+		{name: "invalid answer despite successful stop", answer: `{"confirmed":[],"assumptions":[],"unconfirmed":[]}`},
+		{name: "valid answer retained when stop fails", answer: savedQuestionAnswer, stopErr: errors.New("stop failed"), wantAnswer: true, wantReceipt: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, databasePath, worker, resolved := questionFixture(t)
+			worker.role = "ORCHESTRATOR"
+			q := &questionRuntime{configuredRuntime: worker, events: questionEvents(test.answer), stopErr: test.stopErr}
+			terminalSavedBeforeCleanup := false
+			q.onStop = func() {
+				state, err := db.LoadWorkspace()
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				for _, record := range state.Records.Requests {
+					if record.Kind != "planning" {
+						continue
+					}
+					var payload map[string]any
+					if err := json.Unmarshal([]byte(record.Payload), &payload); err != nil {
+						t.Fatal(err)
+					}
+					terminalSavedBeforeCleanup = terminalSavedBeforeCleanup ||
+						payload["answer"] != nil && (payload["terminalEvent"] == runtime.EventTurnFinished || payload["terminalEvent"] == runtime.EventTurnEnded)
+				}
+			}
+			result, err := AskQuestion(context.Background(), db,
+				filepath.Join(filepath.Dir(databasePath), "ledger.json"), "task", "What is saved?", resolved.Config, q)
+			if err == nil || (result.Answer != nil) != test.wantAnswer {
+				t.Fatalf("question result = %+v, error = %v", result, err)
+			}
+			if terminalSavedBeforeCleanup != test.wantReceipt {
+				t.Fatal("terminal answer was not persisted before runtime cleanup")
+			}
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if state.Records.Operation == nil || state.Records.Operation.State != "BLOCKED" {
+				t.Fatal("question without confirmed quiescence and durable success did not retain the admission hold")
+			}
+			receiptFound := false
+			for _, record := range state.Records.Requests {
+				if record.RequestID != state.Records.Operation.ID || record.Kind != "planning" {
+					continue
+				}
+				var payload map[string]any
+				if err := json.Unmarshal([]byte(record.Payload), &payload); err != nil {
+					t.Fatal(err)
+				}
+				receiptFound = receiptFound || payload["attemptId"] != nil && payload["answer"] != nil
+			}
+			if receiptFound != test.wantReceipt {
+				t.Fatalf("durable terminal answer receipt=%v, want %v", receiptFound, test.wantReceipt)
+			}
+			followOn := &questionRuntime{configuredRuntime: worker, events: questionEvents(savedQuestionAnswer)}
+			startsBeforeFollowOn := followOn.starts
+			if _, err := AskQuestion(context.Background(), db,
+				filepath.Join(filepath.Dir(databasePath), "ledger.json"), "task", "Can I continue?", resolved.Config, followOn); err == nil ||
+				followOn.starts != startsBeforeFollowOn {
+				t.Fatal("follow-on question bypassed the unresolved operation", err)
+			}
+		})
+	}
+}
+
+func TestQuestionRejectsMismatchedLiveMessageAndTurnIdentity(t *testing.T) {
+	for _, mode := range []string{"missing-input", "wrong-output-message", "wrong-output-turn", "wrong-turn-end", "child-usage"} {
+		t.Run(mode, func(t *testing.T) {
+			db, databasePath, worker, resolved := questionFixture(t)
+			worker.role = "ORCHESTRATOR"
+			events := questionEvents(savedQuestionAnswer)
+			saved := make([]runtime.Event, 0, len(events))
+			for len(events) != 0 {
+				saved = append(saved, <-events)
+			}
+			switch mode {
+			case "missing-input":
+				saved[0].MessageID = ""
+			case "wrong-output-message":
+				saved[3].MessageID = "another-input"
+			case "wrong-output-turn":
+				saved[3].TurnID = "another-turn"
+			case "wrong-turn-end":
+				saved[4].TurnID = "another-turn"
+			case "child-usage":
+				saved[2].AgentID = "child-agent"
+			}
+			events = make(chan runtime.Event, len(saved))
+			for _, event := range saved {
+				events <- event
+			}
+			q := &questionRuntime{configuredRuntime: worker, events: events}
+			result, err := AskQuestion(context.Background(), db,
+				filepath.Join(filepath.Dir(databasePath), "ledger.json"), "task",
+				"Which turn is this?", resolved.Config, q)
+			if err == nil || result.Answer != nil {
+				t.Fatal("question accepted an unbound live answer", err)
+			}
+			state, err := db.LoadWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, record := range state.Records.Requests {
+				if record.Kind == "planning" && strings.Contains(record.Payload, `"answer"`) {
+					t.Fatal("ambiguous turn wrote a terminal answer receipt")
+				}
+			}
+		})
 	}
 }
 
@@ -182,7 +689,7 @@ func TestQuestionRejectsUnapprovedProviderDeniedAndChangedApproval(t *testing.T)
 	}
 }
 
-func TestQuestionAcceptsMissingOrOverLimitTokenUsage(t *testing.T) {
+func TestQuestionRejectsIncompleteUsageButKeepsHistoricalSoftLimitBehavior(t *testing.T) {
 	for _, mode := range []string{"missing-usage", "missing-count", "over-former-limit"} {
 		t.Run(mode, func(t *testing.T) {
 			db, databasePath, worker, resolved := questionFixture(t)
@@ -192,21 +699,28 @@ func TestQuestionAcceptsMissingOrOverLimitTokenUsage(t *testing.T) {
 			case "missing-usage":
 				q.events = questionEventsWithUsage(savedQuestionAnswer, "")
 			case "missing-count":
-				q.events = questionEventsWithUsage(savedQuestionAnswer, `{"inputTokens":10}`)
+				q.events = questionEventsWithUsage(savedQuestionAnswer, `{"model":"test","inputTokens":10}`)
 			case "over-former-limit":
-				q.events = questionEventsWithUsage(savedQuestionAnswer, `{"inputTokens":1001,"outputTokens":2000}`)
+				q.events = questionEventsWithUsage(savedQuestionAnswer, `{"model":"test","inputTokens":1001,"outputTokens":2000}`)
 			}
 			result, err := AskQuestion(context.Background(), db, filepath.Join(filepath.Dir(databasePath), "ledger.json"),
 				"task", "What is saved?", resolved.Config, q)
-			if err != nil || result.Answer == nil || q.starts != 1 || q.stops != 1 {
-				t.Fatalf("token accounting prevented a completed question: result=%+v err=%v", result, err)
+			if mode == "over-former-limit" {
+				if err != nil || result.Answer == nil {
+					t.Fatalf("reported usage exceeded an obsolete token threshold: result=%+v err=%v", result, err)
+				}
+			} else if err == nil || result.Answer != nil {
+				t.Fatalf("incomplete usage was accepted: result=%+v err=%v", result, err)
+			}
+			if q.starts != 1 || q.stops != 1 {
+				t.Fatalf("question session lifecycle differs: starts=%d stops=%d", q.starts, q.stops)
 			}
 		})
 	}
 }
 
 func TestQuestionRejectsInvalidSourcesAndFailures(t *testing.T) {
-	for _, mode := range []string{"bad-source", "missing-source", "null-lists", "empty-answer", "runtime-failure", "stream-ended", "cancelled", "stop-failure", "oversize-input"} {
+	for _, mode := range []string{"bad-source", "missing-source", "null-lists", "empty-answer", "runtime-failure", "unclassified-native", "stream-ended", "cancelled", "stop-failure", "oversize-input", "missing-turn-start", "missing-turn-end"} {
 		t.Run(mode, func(t *testing.T) {
 			db, databasePath, worker, resolved := questionFixture(t)
 			worker.role = "ORCHESTRATOR"
@@ -226,6 +740,9 @@ func TestQuestionRejectsInvalidSourcesAndFailures(t *testing.T) {
 			case "runtime-failure":
 				q.events = make(chan runtime.Event, 1)
 				q.events <- runtime.Event{Type: runtime.EventFailed, Payload: "private-provider-detail"}
+			case "unclassified-native":
+				q.events = make(chan runtime.Event, 1)
+				q.events <- runtime.Event{Type: runtime.EventUnclassified, Payload: "private-provider-detail", Sequence: 1}
 			case "stream-ended":
 				q.events = make(chan runtime.Event)
 				close(q.events)
@@ -235,6 +752,18 @@ func TestQuestionRejectsInvalidSourcesAndFailures(t *testing.T) {
 				q.stopErr = errors.New("stop failed")
 			case "oversize-input":
 				text = strings.Repeat("x", 128*1024)
+			case "missing-turn-start":
+				q.events = make(chan runtime.Event, 4)
+				q.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":10,"outputTokens":5}`, Sequence: 1}
+				q.events <- runtime.Event{Type: runtime.EventOutput, Payload: savedQuestionAnswer, Sequence: 2}
+				q.events <- runtime.Event{Type: runtime.EventTurnEnded, Sequence: 3}
+				q.events <- runtime.Event{Type: runtime.EventTurnFinished, Sequence: 4}
+			case "missing-turn-end":
+				q.events = make(chan runtime.Event, 4)
+				q.events <- runtime.Event{Type: runtime.EventTurnStarted, Sequence: 1}
+				q.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"test","inputTokens":10,"outputTokens":5}`, Sequence: 2}
+				q.events <- runtime.Event{Type: runtime.EventOutput, Payload: savedQuestionAnswer, Sequence: 3}
+				q.events <- runtime.Event{Type: runtime.EventTurnFinished, Sequence: 4}
 			}
 			result, err := AskQuestion(ctx, db, filepath.Join(filepath.Dir(databasePath), "ledger.json"),
 				"task", text, resolved.Config, q)

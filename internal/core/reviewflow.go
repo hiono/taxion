@@ -61,9 +61,7 @@ type FlowRecovery struct {
 }
 
 func (g TaskGraph) HasBudgetContinuationSource(flow ReviewFlow, sourceID string) bool {
-	// Legacy budget stops and reconciled safety stops share the same source checks.
-	if flow.Status != "STOPPED" || (flow.StopCode != "BUDGET_LIMIT" && flow.StopCode != "BUDGET_STOP" &&
-		flow.StopCode != "RECONTRACT" && flow.StopCode != "SAFETY_STOP") ||
+	if flow.Status != "STOPPED" ||
 		flow.RunnerID != "" || !flow.HandoffHeld() || len(flow.DispatchIDs) == 0 {
 		return false
 	}
@@ -92,7 +90,6 @@ func (g TaskGraph) HasBudgetContinuationSource(flow ReviewFlow, sourceID string)
 // Controller additionally verifies the accepted result receipt and mutable Git state.
 func (g TaskGraph) StoppedCoderReviewer(f ReviewFlow, d GraphDispatch) bool {
 	if f.Artifact != nil || f.Status != "STOPPED" ||
-		!slices.Contains([]string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT"}, f.StopCode) ||
 		!f.HandoffHeld() || f.RunnerID != "" || len(f.DispatchIDs) < 2 ||
 		f.LastDispatchID() != d.ID || d.TaskID == f.TaskID || d.Recipient != "REVIEWER" ||
 		d.Relationship != RelationshipIndependent || d.Status != DispatchIssued ||
@@ -108,6 +105,22 @@ func (g TaskGraph) StoppedCoderReviewer(f ReviewFlow, d GraphDispatch) bool {
 		d.Instruction.BaselineSHA == coder.Result.OutputSHA && d.Instruction.TargetSHA == coder.Result.OutputSHA &&
 		d.Instruction.TargetTreeSHA == coder.Result.OutputTreeSHA &&
 		slices.Equal(d.Instruction.TargetChangedFiles, coder.Result.ChangedFiles)
+}
+
+// StoppedFirstCoder identifies a first issued Coder eligible for explicit
+// reconciliation. It does not establish that the instruction was not delivered.
+func (g TaskGraph) StoppedFirstCoder(f ReviewFlow, d GraphDispatch) bool {
+	return f.Artifact == nil && f.SourceDispatchID == "" && f.Status == "STOPPED" &&
+		f.HandoffHeld() && f.RunnerID == "" && len(f.DispatchIDs) == 1 &&
+		f.LastDispatchID() == d.ID && d.TaskID == f.TaskID && d.Recipient == "CODER" &&
+		d.Relationship == RelationshipNone && d.RelatedID == "" && d.Status == DispatchIssued &&
+		!d.Acknowledged && !d.ExecutionStarted && d.RuntimeSessionID == "" &&
+		d.RuntimeConfigHash == "" && d.Result == nil && d.ExecutionStartSHA == "" &&
+		len(d.RuntimeUsage) == 0 && f.Contract.OutputMode == OutputModeWorktreeTreeSnapshot &&
+		d.Instruction.OutputMode == OutputModeWorktreeTreeSnapshot &&
+		d.Repository == f.Contract.Repo && d.Instruction.BaselineSHA == f.Contract.BaselineSHA &&
+		d.Instruction.TargetSHA == f.Contract.TargetSHA && d.Instruction.TargetTreeSHA == f.Contract.TargetTreeSHA &&
+		slices.Equal(d.Instruction.TargetChangedFiles, f.Contract.TargetChangedFiles)
 }
 
 func (g TaskGraph) ReviewFlow(id string) (ReviewFlow, bool) {

@@ -123,6 +123,11 @@ func printGateReport(output io.Writer, report controller.GateReport) error {
 	if _, err := fmt.Fprintf(output, "verdict: %s\n", report.Verdict); err != nil {
 		return err
 	}
+	if report.ADRCompliance != nil {
+		if _, err := fmt.Fprintf(output, "ADR compliance: %s\n", report.ADRCompliance.Status); err != nil {
+			return err
+		}
+	}
 	for _, hash := range []struct{ name, value string }{
 		{"task", report.Hashes.Task}, {"proposal", report.Hashes.Proposal},
 		{"record", report.Hashes.Record}, {"bundle", report.Hashes.Bundle},

@@ -34,7 +34,7 @@ func completedFixture(t *testing.T) (*store.Store, string, core.ReviewFlow) {
 }
 
 func TestCompletedCheckpointRechecksEvidenceAfterRestart(t *testing.T) {
-	for _, change := range []string{"none", "head", "review-path", "receipt", "usage", "result", "missing-receipt"} {
+	for _, change := range []string{"none", "head", "review-path", "receipt", "usage", "checkpoint", "result", "missing-receipt"} {
 		t.Run(change, func(t *testing.T) {
 			db, ledger, flow := completedFixture(t)
 			state, err := db.LoadWorkspace()
@@ -49,7 +49,7 @@ func TestCompletedCheckpointRechecksEvidenceAfterRestart(t *testing.T) {
 				if err := os.MkdirAll(review.Instruction.Worktree, 0700); err != nil {
 					t.Fatal(err)
 				}
-			case "receipt", "usage", "result", "missing-receipt":
+			case "receipt", "usage", "checkpoint", "result", "missing-receipt":
 				if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 					switch change {
 					case "receipt":
@@ -57,6 +57,8 @@ func TestCompletedCheckpointRechecksEvidenceAfterRestart(t *testing.T) {
 					case "usage":
 						changed := int64(99)
 						state.Graph.Dispatches[0].RuntimeUsage[0].InputTokens = &changed
+					case "checkpoint":
+						state.Graph.Dispatches[0].RuntimeUsageCheckpoints = []core.UsageCheckpoint{{}}
 					case "result":
 						state.Graph.Dispatches[1].Result.Evidence = append(state.Graph.Dispatches[1].Result.Evidence, "changed evidence")
 					case "missing-receipt":

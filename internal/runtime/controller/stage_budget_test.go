@@ -147,11 +147,11 @@ func TestPlannedSendRetainsContextUntilTurnCompletion(t *testing.T) {
 }
 
 func TestPlannedFlowRunsVerifiedRepairAndIndependentReview(t *testing.T) {
-	testFlowRunsRepairAndNewSHAReview(t, false, true)
+	testFlowRunsRepairAndNewSHAReview(t, false, flowRunOptions{planned: true})
 }
 
 func TestPlannedStepPreservesSameApprovalAndClock(t *testing.T) {
-	testFlowRunsRepairAndNewSHAReview(t, true, true)
+	testFlowRunsRepairAndNewSHAReview(t, true, flowRunOptions{planned: true})
 }
 
 func TestStagePlanPreviewIsReadOnlyAndBindsExactEnvelope(t *testing.T) {
@@ -308,16 +308,17 @@ func TestStagePlanReportsMissingBundleWithoutApprovingExecution(t *testing.T) {
 	graph.Approvals = nil
 	missing, err := PreviewStagePlan(graph, request)
 	if err != nil || missing.StateChanged || missing.ContractGate.Verdict != GateVerdictBlocked ||
-		len(missing.ContractGate.BlockingConditions) != 1 ||
-		missing.ContractGate.BlockingConditions[0].Code != "missing-approval-bundle" ||
+		!hasGateCondition(missing.ContractGate, "missing-approval-bundle") ||
 		missing.ContractGate.NextRequiredApproval == "" || missing.ContractGate.StateChanged {
 		t.Fatal("plan disguised missing durable approval", missing, err)
 	}
 	graph.Approvals = bundles
 	ready, err := PreviewStagePlan(graph, request)
-	if err != nil || ready.ContractGate.Verdict != GateVerdictPass ||
+	if err != nil || ready.ContractGate.Verdict != GateVerdictBlocked ||
+		!hasGateCondition(ready.ContractGate, "adr-requirements-unbound") ||
+		hasGateCondition(ready.ContractGate, "missing-approval-bundle") ||
 		ready.Plan.Hash != missing.Plan.Hash {
-		t.Fatal("recording a matching bundle changed the plan or remained blocked", ready, err)
+		t.Fatal("bundle recording changed the plan or invented legacy ADR acceptance", ready, err)
 	}
 	request.Configuration = approvalTestConfiguration(t, "https://changed.example.test")
 	drifted, err := PreviewStagePlan(graph, request)

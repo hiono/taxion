@@ -35,6 +35,7 @@ func resumeGateFixtureWithPackets(t *testing.T, packets bool, timeout ...int64) 
 		Reason: "synthetic exact config", Allowed: []config.Config{resolved.Config},
 		AdditionalTaskIDs: []string{"flow-review-0", "flow-review-1"}}
 	db, ledger, request := reviewFlowFixture(t,
+		core.TaskDecision{ID: "synthetic-adr-not-applicable", Source: "human:synthetic", Text: "No ADR applies to this synthetic fixture; independent review must explain this."},
 		core.TaskDecision{ID: "intake-confirmation:implementation", Source: "human:synthetic",
 			Text: `{"taskId":"implementation","expectedHash":"` + proposal + `"}`},
 		core.TaskDecision{ID: core.ConfigurationApprovalID(resolved.Config.Execution.ApprovalRef, "implementation"),
@@ -206,7 +207,15 @@ func testResumeRunsSavedDispatchThroughSequentialHandoff(t *testing.T, packets b
 				changed := false
 				result.WorktreeChanged, result.ReviewVerdict = &changed, "APPROVE"
 				result.Findings = []core.DispatchFinding{}
-				result.Acceptance = []core.DispatchAcceptance{{Criterion: "application tested", Status: "PASS", Evidence: []string{"test-report"}}}
+				result.WorkReport = "No ADR applies to the synthetic application fixture."
+				for _, criterion := range dispatch.Instruction.Acceptance {
+					evidence := []string{"test-report"}
+					if strings.HasPrefix(criterion, core.ADRCompliancePrefix) {
+						evidence = append(evidence, criterion)
+						result.Evidence = append(result.Evidence, criterion)
+					}
+					result.Acceptance = append(result.Acceptance, core.DispatchAcceptance{Criterion: criterion, Status: "PASS", Evidence: evidence})
+				}
 			}
 			worker.events <- runtime.Event{Type: runtime.EventUsage, Payload: `{"model":"synthetic","totalNanoAIU":1,"aiCreditsStatus":"complete"}`}
 			worker.events <- runtime.Event{Type: runtime.EventOutput, Payload: string(mustFlowJSON(t, result))}

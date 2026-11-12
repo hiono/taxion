@@ -14,14 +14,18 @@ import (
 )
 
 func TestExecutedArtifactReviewerContinuesSavedWorkWithinOriginalDeadline(t *testing.T) {
-	testExecutedReviewContinuation(t, false)
+	testExecutedReviewContinuation(t, false, "")
 }
 
 func TestExecutedArtifactReviewerRecontractsExpiredDeadlineWithoutDiscardingWork(t *testing.T) {
-	testExecutedReviewContinuation(t, true)
+	testExecutedReviewContinuation(t, true, "")
 }
 
-func testExecutedReviewContinuation(t *testing.T, expired bool) {
+func TestExecutedArtifactReviewerContinuesAfterRecontractStop(t *testing.T) {
+	testExecutedReviewContinuation(t, false, "RECONTRACT")
+}
+
+func testExecutedReviewContinuation(t *testing.T, expired bool, stopCode string) {
 	counter := filepath.Join(t.TempDir(), "validations")
 	db, ledger, initial, selected := artifactFixture(t, []string{"printf x >> " + counter}, false)
 	old, err := StartReviewFlow(db, ledger, initial)
@@ -60,6 +64,15 @@ func testExecutedReviewContinuation(t *testing.T, expired bool) {
 	old, err = AdvanceReviewFlow(db, ledger, old.ID, initial.Configuration)
 	if err == nil || old.Status != "STOPPED" {
 		t.Fatal("missing formal terminal stop", err)
+	}
+	if stopCode != "" {
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			old.StopCode = stopCode
+			storeFlow(state, old)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if expired {
 		if err := db.UpdateWorkspace(func(state *store.Workspace) error {

@@ -50,6 +50,8 @@ type Config struct {
 	ManagedSearch         *runtime.ManagedSearch
 	ManagedReviewProgress *runtime.ManagedReviewProgress
 	EnableReviewProgress  bool
+	EnableClarification   bool
+	ManagedClarification  *runtime.ManagedClarification
 	Configuration         json.RawMessage
 	MaxAICredits          float64
 	ToolPolicy            *tools.Policy
@@ -76,15 +78,17 @@ type Adapter struct {
 type managedSession struct {
 	sdk *sdk.Session
 
-	opMu     sync.Mutex
-	emitMu   sync.Mutex
-	mu       sync.Mutex
-	stopped  bool
-	busy     bool
-	stopOnly bool
-	sequence uint64
-	history  []runtime.Event
-	watchers map[*subscription]struct{}
+	subagents *subagentGuard
+	opMu      sync.Mutex
+	emitMu    sync.Mutex
+	mu        sync.Mutex
+	stopped   bool
+	busy      bool
+	stopOnly  bool
+	turnDone  chan struct{}
+	sequence  uint64
+	history   []runtime.Event
+	watchers  map[*subscription]struct{}
 }
 
 type subscription struct {
@@ -203,7 +207,8 @@ func New(config Config) (*Adapter, error) {
 		}
 	}
 	if slices.Contains(config.AvailableTools, ManagedCommitToolName) || slices.Contains(config.AvailableTools, ManagedStageToolName) ||
-		slices.Contains(config.AvailableTools, ManagedSearchToolName) || slices.Contains(config.AvailableTools, ReviewProgressToolName) {
+		slices.Contains(config.AvailableTools, ManagedSearchToolName) || slices.Contains(config.AvailableTools, ReviewProgressToolName) ||
+		slices.Contains(config.AvailableTools, ClarificationToolName) {
 		return nil, fmt.Errorf("taxion: managed commit tool is reserved; enable it through the host binding")
 	}
 	if config.ManagedCommit != nil {
@@ -226,7 +231,7 @@ func New(config Config) (*Adapter, error) {
 		if config.ToolPolicy.HasBroker() {
 			if config.AuthorizeTools == nil || len(config.AvailableTools) != 0 ||
 				len(config.ToolPolicy.Skills)+len(config.ToolPolicy.Plugins) != 0 || config.ToolPolicy.RTK != nil ||
-				config.ManagedCommit != nil || config.ManagedSearch != nil || config.ManagedReviewProgress != nil {
+				config.ManagedCommit != nil || config.ManagedSearch != nil || config.ManagedReviewProgress != nil || config.ManagedClarification != nil {
 				return nil, fmt.Errorf("taxion: credential broker requires controller authorization and an operations-only role")
 			}
 			for _, tool := range config.ToolPolicy.MCP {
@@ -269,6 +274,19 @@ func New(config Config) (*Adapter, error) {
 		}
 		config.ManagedReviewProgress = &binding
 		config.AvailableTools = append(config.AvailableTools, ReviewProgressToolName)
+	}
+	if config.ManagedClarification != nil {
+		binding := *config.ManagedClarification
+		if config.Role != "CODER" && config.Role != "REVIEWER" ||
+			binding.DispatchID == "" || binding.ScopeHash == "" || binding.OperationID == "" ||
+			binding.Owner == "" || binding.FlowID == "" || binding.RunnerID == "" || binding.Request == nil {
+			return nil, fmt.Errorf("taxion: clarification requires a bound Role, operation owner, runner and host handler")
+		}
+		config.ManagedClarification = &binding
+		config.AvailableTools = append(config.AvailableTools, ClarificationToolName)
+	}
+	if slices.Contains(config.AvailableTools, ClarificationInboxToolName) {
+		return nil, fmt.Errorf("taxion: clarification inbox cannot be allowlisted without verified root attribution")
 	}
 	if len(config.ContextDocuments) != 0 {
 		if slices.Contains(config.AvailableTools, ReadContextToolName) {
@@ -358,6 +376,7 @@ func (a *Adapter) ConfigHash() string {
 		ManagedCommit          *runtime.ManagedCommit         `json:",omitempty"`
 		ManagedSearch          *runtime.ManagedSearch         `json:",omitempty"`
 		ManagedReviewProgress  *runtime.ManagedReviewProgress `json:",omitempty"`
+		ManagedClarification   *runtime.ManagedClarification  `json:",omitempty"`
 		ManagedCommitPolicy    string                         `json:",omitempty"`
 		Configuration          json.RawMessage                `json:",omitempty"`
 		MaxAICredits           float64                        `json:",omitempty"`
@@ -382,6 +401,7 @@ func (a *Adapter) ConfigHash() string {
 		ManagedCommit:          a.config.ManagedCommit,
 		ManagedSearch:          a.config.ManagedSearch,
 		ManagedReviewProgress:  a.config.ManagedReviewProgress,
+		ManagedClarification:   a.config.ManagedClarification,
 		ManagedCommitPolicy:    managedCommitPolicy,
 		Configuration:          a.config.Configuration,
 		MaxAICredits:           a.config.MaxAICredits,
@@ -439,8 +459,8 @@ func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 	if err := a.ensureStarted(ctx); err != nil {
 		return "", err
 	}
-	handle := &managedSession{watchers: map[*subscription]struct{}{}}
-	session, err := a.client.CreateSession(ctx, a.sessionConfig(handle.onEvent))
+	handle := &managedSession{watchers: map[*subscription]struct{}{}, subagents: newSubagentGuard(true)}
+	session, err := a.client.CreateSession(ctx, a.sessionConfig(handle))
 	if err != nil {
 		return "", fmt.Errorf("taxion: create Copilot session: %w", err)
 	}
@@ -462,6 +482,12 @@ func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
 	}
 	if a.stopSessionID != "" {
 		return fmt.Errorf("taxion: stop-only adapter cannot send instructions")
+	}
+	a.mu.Lock()
+	closed := a.closed
+	a.mu.Unlock()
+	if closed {
+		return ErrClosedAdapter
 	}
 	if strings.TrimSpace(prompt) == "" {
 		return fmt.Errorf("taxion: prompt must not be empty")
@@ -486,6 +512,7 @@ func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
 	}
 	if !stopped && session != nil {
 		handle.busy = true
+		handle.turnDone = make(chan struct{})
 	}
 	handle.mu.Unlock()
 	if stopped || session == nil {
@@ -506,6 +533,12 @@ func (a *Adapter) Resume(ctx context.Context, sessionID string) error {
 	}
 	if a.stopSessionID != "" {
 		return fmt.Errorf("taxion: stop-only adapter cannot resume execution")
+	}
+	a.mu.Lock()
+	closed := a.closed
+	a.mu.Unlock()
+	if closed {
+		return ErrClosedAdapter
 	}
 	if a.config.ToolPolicy != nil {
 		if err := a.config.ToolPolicy.Check(); err != nil {
@@ -537,30 +570,55 @@ func (a *Adapter) resume(ctx context.Context, sessionID string, stopOnly bool) e
 		return ErrClosedAdapter
 	}
 	handle := a.sessions[sessionID]
+	rebuildSubagents := handle == nil
 	if handle == nil {
-		handle = &managedSession{watchers: map[*subscription]struct{}{}}
+		handle = &managedSession{watchers: map[*subscription]struct{}{}, subagents: newSubagentGuard(false)}
 	}
 	a.mu.Unlock()
 
 	handle.opMu.Lock()
 	defer handle.opMu.Unlock()
 	handle.mu.Lock()
+	if handle.subagents == nil {
+		handle.subagents = newSubagentGuard(false)
+		rebuildSubagents = true
+	}
 	if !handle.stopped && handle.sdk != nil {
 		handle.mu.Unlock()
 		return nil
 	}
+	if rebuildSubagents && !stopOnly {
+		handle.subagents.beginRebuild()
+	}
 	handle.stopped = false
+	handle.stopOnly = stopOnly
+	if handle.busy {
+		handle.turnDone = make(chan struct{})
+	}
 	handle.mu.Unlock()
-	config := a.resumeConfig(handle.onEvent)
+	config := a.resumeConfig(handle)
 	if stopOnly {
 		config = a.stopResumeConfig(handle.onEvent)
 	}
 	session, err := a.client.ResumeSession(ctx, sessionID, config)
 	if err != nil {
+		if rebuildSubagents && !stopOnly {
+			handle.subagents.failRebuild()
+		}
 		handle.mu.Lock()
 		handle.stopped = true
+		handle.busy = false
+		handle.turnDone = nil
 		handle.mu.Unlock()
 		return fmt.Errorf("taxion: resume Copilot session: %w", err)
+	}
+	if rebuildSubagents && !stopOnly {
+		history, historyErr := session.GetEvents(ctx)
+		if historyErr != nil {
+			handle.subagents.failRebuild()
+		} else {
+			handle.subagents.rebuild(history)
+		}
 	}
 	handle.mu.Lock()
 	handle.sdk = session
@@ -603,39 +661,7 @@ func (a *Adapter) Stop(ctx context.Context, sessionID string) error {
 	}
 	handle.opMu.Lock()
 	defer handle.opMu.Unlock()
-	handle.mu.Lock()
-	session, stopped := handle.sdk, handle.stopped
-	handle.mu.Unlock()
-	if stopped || session == nil {
-		return nil
-	}
-	handle.mu.Lock()
-	busy, stopOnly := handle.busy, handle.stopOnly
-	handle.mu.Unlock()
-	if busy || stopOnly {
-		if err := session.Abort(ctx); err != nil {
-			return fmt.Errorf("taxion: abort Copilot session: %w", err)
-		}
-		handle.mu.Lock()
-		stillBusy := handle.busy
-		handle.mu.Unlock()
-		if stillBusy {
-			handle.emit(runtime.Event{Type: runtime.EventCancelled, Payload: "stopped"})
-		}
-	}
-	handle.mu.Lock()
-	handle.stopped = true
-	handle.sdk = nil
-	watchers := handle.watchers
-	handle.watchers = map[*subscription]struct{}{}
-	handle.mu.Unlock()
-	for watcher := range watchers {
-		watcher.close()
-	}
-	if err := session.Disconnect(); err != nil {
-		return fmt.Errorf("taxion: disconnect Copilot session: %w", err)
-	}
-	return nil
+	return handle.stop(ctx, true, true)
 }
 
 func (a *Adapter) Events(ctx context.Context, sessionID string) (<-chan runtime.Event, error) {
@@ -695,10 +721,14 @@ func (a *Adapter) EventsAfter(ctx context.Context, sessionID string, cursor uint
 }
 
 func (a *Adapter) Close() error {
+	return a.close(true)
+}
+
+func (a *Adapter) close(abortBusy bool) error {
 	a.opMu.Lock()
 	defer a.opMu.Unlock()
 	a.mu.Lock()
-	if a.closed {
+	if a.closed && !a.started {
 		a.mu.Unlock()
 		return nil
 	}
@@ -711,47 +741,29 @@ func (a *Adapter) Close() error {
 	a.mu.Unlock()
 
 	var errs []error
+	active := false
 	for _, handle := range sessions {
 		handle.opMu.Lock()
-		handle.mu.Lock()
-		session := handle.sdk
-		handle.mu.Unlock()
-		if session != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			handle.mu.Lock()
-			busy := handle.busy
-			handle.mu.Unlock()
-			if busy {
-				if err := session.Abort(ctx); err != nil {
-					errs = append(errs, fmt.Errorf("abort Copilot session %s: %w", session.SessionID, err))
-				} else {
-					handle.mu.Lock()
-					stillBusy := handle.busy
-					handle.mu.Unlock()
-					if stillBusy {
-						handle.emit(runtime.Event{Type: runtime.EventCancelled, Payload: "adapter closed"})
-					}
-				}
-			}
-			cancel()
-			handle.mu.Lock()
-			handle.stopped = true
-			handle.sdk = nil
-			watchers := handle.watchers
-			handle.watchers = map[*subscription]struct{}{}
-			handle.mu.Unlock()
-			for watcher := range watchers {
-				watcher.close()
-			}
-			if err := session.Disconnect(); err != nil {
-				errs = append(errs, fmt.Errorf("disconnect Copilot session %s: %w", session.SessionID, err))
-			}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := handle.stop(ctx, abortBusy, false); err != nil {
+			errs = append(errs, err)
 		}
+		cancel()
+		handle.mu.Lock()
+		active = active || handle.sdk != nil
+		handle.mu.Unlock()
 		handle.opMu.Unlock()
+	}
+	if active {
+		return errors.Join(errs...)
 	}
 	if started {
 		if err := a.client.Stop(); err != nil {
 			errs = append(errs, fmt.Errorf("stop Copilot client: %w", err))
+		} else {
+			a.mu.Lock()
+			a.started = false
+			a.mu.Unlock()
 		}
 	}
 	return errors.Join(errs...)
@@ -786,7 +798,11 @@ func (a *Adapter) lookup(sessionID string) (*managedSession, error) {
 	return handle, nil
 }
 
-func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionConfig {
+func (a *Adapter) sessionConfig(handle *managedSession) *sdk.SessionConfig {
+	var onEvent sdk.SessionEventHandler
+	if handle != nil {
+		onEvent = handle.onEvent
+	}
 	streaming := true
 	// SDK nil does not inherit the CLI's project/personal skill discovery.
 	native := a.config.ToolPolicy == nil
@@ -807,18 +823,22 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 		SessionLimits:                      a.sessionLimits(),
 		OnPermissionRequest:                a.permissionHandler(),
 		OnEvent:                            onEvent,
+		Hooks:                              a.sessionHooks(handle),
 	}
 	if a.config.ToolPolicy != nil {
 		enabled := len(a.config.ToolPolicy.Skills)+len(a.config.ToolPolicy.Plugins) != 0
 		config.EnableSkills = &enabled
 		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
 		config.Tools = append(config.Tools, a.mcpTools()...)
-		config.Hooks = a.toolHooks()
 	}
 	return config
 }
 
-func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessionConfig {
+func (a *Adapter) resumeConfig(handle *managedSession) *sdk.ResumeSessionConfig {
+	var onEvent sdk.SessionEventHandler
+	if handle != nil {
+		onEvent = handle.onEvent
+	}
 	streaming := true
 	native := a.config.ToolPolicy == nil
 	discovery := &native
@@ -838,13 +858,13 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		SessionLimits:                      a.sessionLimits(),
 		OnPermissionRequest:                a.permissionHandler(),
 		OnEvent:                            onEvent,
+		Hooks:                              a.sessionHooks(handle),
 	}
 	if a.config.ToolPolicy != nil {
 		enabled := len(a.config.ToolPolicy.Skills)+len(a.config.ToolPolicy.Plugins) != 0
 		config.EnableSkills = &enabled
 		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
 		config.Tools = append(config.Tools, a.mcpTools()...)
-		config.Hooks = a.toolHooks()
 	}
 	return config
 }
@@ -907,6 +927,11 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 		}
 		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
 			a.config.ManagedReviewProgress != nil && permission.ToolName == ReviewProgressToolName &&
+			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
+			decision = &rpc.PermissionDecisionApproveOnce{}
+		}
+		if permission, ok := request.(*sdk.PermissionRequestCustomTool); ok &&
+			a.config.ManagedClarification != nil && permission.ToolName == ClarificationToolName &&
 			(permission.ManagedApprovalRequired == nil || !*permission.ManagedApprovalRequired) {
 			decision = &rpc.PermissionDecisionApproveOnce{}
 		}
@@ -1226,14 +1251,49 @@ func within(root, target string) bool {
 }
 
 func (h *managedSession) onEvent(event sdk.SessionEvent) {
+	h.subagentState().observeEvent(event)
 	mapped, ok := normalizeEvent(event)
 	if ok {
+		if event.AgentID != nil {
+			mapped.AgentID = *event.AgentID
+		}
+		switch data := event.Data.(type) {
+		case *sdk.UserMessageData:
+			if data.MessageID != nil {
+				mapped.MessageID = *data.MessageID
+			}
+		case *sdk.AssistantMessageData:
+			if data.OriginatingMessageID != nil {
+				mapped.MessageID = *data.OriginatingMessageID
+			}
+			if data.TurnID != nil {
+				mapped.TurnID = *data.TurnID
+			}
+		case *sdk.AssistantTurnStartData:
+			mapped.TurnID = data.TurnID
+		case *sdk.AssistantTurnEndData:
+			mapped.TurnID = data.TurnID
+		}
 		h.emit(mapped)
 	}
 }
 
 func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
+	if event.Data == nil {
+		return runtime.Event{Type: runtime.EventFailed, Payload: "native session event has no data"}, true
+	}
 	switch data := event.Data.(type) {
+	case *sdk.SessionStartData, *sdk.SessionShutdownData, *sdk.SessionInfoData,
+		*sdk.SystemMessageData, *sdk.SessionAutoModeResolvedData:
+		if event.AgentID != nil && *event.AgentID != "" {
+			return runtime.Event{Type: runtime.EventUnclassified}, true
+		}
+		return runtime.Event{}, false
+	case *sdk.SessionUsageCheckpointData:
+		if event.AgentID != nil && *event.AgentID != "" {
+			return runtime.Event{Type: runtime.EventUnclassified}, true
+		}
+		return normalizeUsageCheckpoint(data), true
 	case *sdk.SkillInvokedData:
 		payload, _ := json.Marshal(core.ExecutionObservation{
 			Phase: "skill-invoked", Skill: data.Name, Path: data.Path,
@@ -1252,13 +1312,42 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 		}
 		payload, _ := json.Marshal(observation)
 		return runtime.Event{Type: runtime.EventExecution, Payload: string(payload)}, true
+	case *sdk.SubagentStartedData:
+		payload, _ := json.Marshal(struct {
+			ToolCallID string `json:"toolCallId"`
+			Resumable  *bool  `json:"resumable,omitempty"`
+		}{data.ToolCallID, data.Resumable})
+		return runtime.Event{Type: runtime.EventSubagentStarted, Payload: string(payload)}, true
+	case *sdk.SubagentCompletedData:
+		payload, _ := json.Marshal(struct {
+			ToolCallID string `json:"toolCallId"`
+		}{data.ToolCallID})
+		return runtime.Event{Type: runtime.EventSubagentCompleted, Payload: string(payload)}, true
+	case *sdk.SubagentFailedData:
+		payload, _ := json.Marshal(struct {
+			ToolCallID string `json:"toolCallId"`
+		}{data.ToolCallID})
+		return runtime.Event{Type: runtime.EventSubagentFailed, Payload: string(payload)}, true
 	case *sdk.ToolExecutionCompleteData:
-		payload, _ := json.Marshal(core.ExecutionObservation{
+		observation := core.ExecutionObservation{
 			Phase: "tool-complete", CallID: data.ToolCallID, Success: &data.Success,
-		})
+		}
+		if data.Result != nil {
+			var inbox struct {
+				Handoff struct {
+					Phase string `json:"phase"`
+				} `json:"handoff"`
+			}
+			if json.Unmarshal([]byte(data.Result.Content), &inbox) == nil && inbox.Handoff.Phase == "clarification.handoff" {
+				observation.ContentHash = fmt.Sprintf("%x", sha256.Sum256([]byte(data.Result.Content)))
+			}
+		}
+		payload, _ := json.Marshal(observation)
 		return runtime.Event{Type: runtime.EventExecution, Payload: string(payload)}, true
 	case *sdk.AssistantMessageData:
 		return runtime.Event{Type: runtime.EventOutput, Payload: data.Content}, true
+	case *sdk.UserMessageData:
+		return runtime.Event{Type: runtime.EventInput}, true
 	case *sdk.AssistantMessageDeltaData:
 		return runtime.Event{Type: runtime.EventOutputDelta, Payload: data.DeltaContent}, true
 	case *sdk.AssistantTurnStartData:
@@ -1268,6 +1357,9 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 	case *sdk.SessionIdleData:
 		if data.Aborted != nil && *data.Aborted {
 			return runtime.Event{Type: runtime.EventCancelled}, true
+		}
+		if data.Mode != nil && *data.Mode == sdk.SessionModeAutopilot {
+			return runtime.Event{}, false
 		}
 		return runtime.Event{Type: runtime.EventTurnFinished}, true
 	case *sdk.SessionErrorData:
@@ -1281,11 +1373,23 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 	case *sdk.AssistantUsageData:
 		// Usage is reported per model API call; preserve its stable identity for deduplication.
 		var totalNanoAIU *float64
-		if data.CopilotUsage != nil {
-			totalNanoAIU = &data.CopilotUsage.TotalNanoAiu
+		if data.CopilotUsage != nil &&
+			(data.CopilotUsage.TotalNanoAiu != 0 ||
+				data.AiCreditsStatus != nil && *data.AiCreditsStatus == rpc.AiCreditsStatusComplete) {
+			amount := data.CopilotUsage.TotalNanoAiu
+			totalNanoAIU = &amount
+		}
+		var provider *core.UsageModelProvider
+		if data.Provider != nil {
+			provider = &core.UsageModelProvider{
+				ID: data.Provider.ID, Kind: string(data.Provider.Kind), Label: data.Provider.Label,
+			}
 		}
 		payload, err := json.Marshal(struct {
 			Model            string                       `json:"model"`
+			ModelDisplayName *string                      `json:"modelDisplayName,omitempty"`
+			Provider         *core.UsageModelProvider     `json:"provider,omitempty"`
+			ModelProvider    *string                      `json:"modelProvider,omitempty"`
 			Accounting       *sdk.UsageAccountingIdentity `json:"accounting,omitempty"`
 			IsAuto           *bool                        `json:"isAuto,omitempty"`
 			InputTokens      *int64                       `json:"inputTokens,omitempty"`
@@ -1295,13 +1399,14 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			TotalNanoAIU     *float64                     `json:"totalNanoAIU,omitempty"`
 			AICreditsStatus  *rpc.AiCreditsStatus         `json:"aiCreditsStatus,omitempty"`
 		}{
-			Model: data.Model, IsAuto: data.IsAuto, InputTokens: data.InputTokens,
+			Model: data.Model, ModelDisplayName: data.ModelDisplayName, Provider: provider,
+			ModelProvider: data.ModelProvider, IsAuto: data.IsAuto, InputTokens: data.InputTokens,
 			OutputTokens: data.OutputTokens, CacheReadTokens: data.CacheReadTokens,
 			CacheWriteTokens: data.CacheWriteTokens, Accounting: data.Accounting,
 			TotalNanoAIU: totalNanoAIU, AICreditsStatus: data.AiCreditsStatus,
 		})
 		if err != nil {
-			return runtime.Event{}, false
+			return runtime.Event{Type: runtime.EventFailed, Payload: "invalid native usage event"}, true
 		}
 		return runtime.Event{Type: runtime.EventUsage, Payload: string(payload)}, true
 	case *sdk.SessionUsageInfoData:
@@ -1318,7 +1423,7 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			ToolDefinition: data.ToolDefinitionsTokens, Messages: data.MessagesLength,
 		})
 		if err != nil {
-			return runtime.Event{}, false
+			return runtime.Event{Type: runtime.EventFailed, Payload: "invalid native context usage event"}, true
 		}
 		return runtime.Event{Type: runtime.EventContextUsage, Payload: string(payload)}, true
 	case *sdk.SessionCompactionStartData:
@@ -1333,7 +1438,7 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			TokenLimit: data.TokenLimit, ConversationTokens: data.ConversationTokens,
 		})
 		if err != nil {
-			return runtime.Event{}, false
+			return runtime.Event{Type: runtime.EventFailed, Payload: "invalid native compaction event"}, true
 		}
 		return runtime.Event{Type: runtime.EventCompaction, Payload: string(payload)}, true
 	case *sdk.SessionCompactionCompleteData:
@@ -1357,7 +1462,7 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			PreCompactionMessages: data.PreCompactionMessagesLength, MessagesRemoved: data.MessagesRemoved,
 		})
 		if err != nil {
-			return runtime.Event{}, false
+			return runtime.Event{Type: runtime.EventFailed, Payload: "invalid native compaction event"}, true
 		}
 		return runtime.Event{Type: runtime.EventCompaction, Payload: string(payload)}, true
 	case *sdk.PermissionCompletedData:
@@ -1365,13 +1470,13 @@ func normalizeEvent(event sdk.SessionEvent) (runtime.Event, bool) {
 			Result string `json:"result"`
 		}{Result: string(data.Result.Kind())})
 		if err != nil {
-			return runtime.Event{}, false
+			return runtime.Event{Type: runtime.EventFailed, Payload: "invalid native permission event"}, true
 		}
 		return runtime.Event{Type: runtime.EventPermission, Payload: string(payload)}, true
 	case *sdk.AbortData:
-		return runtime.Event{Type: runtime.EventCancelled, Payload: string(data.Reason)}, true
-	default:
 		return runtime.Event{}, false
+	default:
+		return runtime.Event{Type: runtime.EventUnclassified}, true
 	}
 }
 
@@ -1389,9 +1494,11 @@ func (h *managedSession) emit(event runtime.Event) {
 	}
 	h.sequence++
 	event.Sequence = h.sequence
-	switch event.Type {
-	case runtime.EventTurnFinished, runtime.EventFailed, runtime.EventCancelled:
-		h.busy = false
+	if event.Type == runtime.EventTurnStarted && event.AgentID == "" {
+		h.busy = true
+		if h.turnDone == nil {
+			h.turnDone = make(chan struct{})
+		}
 	}
 	h.history = append(h.history, event)
 	watchers := make([]*subscription, 0, len(h.watchers))
@@ -1405,6 +1512,63 @@ func (h *managedSession) emit(event runtime.Event) {
 		case <-watcher.done:
 		}
 	}
+	if event.AgentID == "" && (event.Type == runtime.EventTurnFinished || event.Type == runtime.EventCancelled) {
+		h.mu.Lock()
+		h.busy = false
+		if h.turnDone != nil {
+			close(h.turnDone)
+			h.turnDone = nil
+		}
+		h.mu.Unlock()
+	}
+}
+
+func (h *managedSession) stop(ctx context.Context, abortBusy, abortStopOnly bool) error {
+	h.mu.Lock()
+	session, stopped, busy, stopOnly, turnDone := h.sdk, h.stopped, h.busy, h.stopOnly, h.turnDone
+	if session != nil && !stopped && abortStopOnly && stopOnly && !busy {
+		busy = true
+		h.busy = true
+		turnDone = make(chan struct{})
+		h.turnDone = turnDone
+	}
+	h.mu.Unlock()
+	if session == nil {
+		return nil
+	}
+	shouldAbort := !stopped && (busy && !stopOnly || abortStopOnly && stopOnly)
+	if shouldAbort {
+		if !abortBusy {
+			return fmt.Errorf("taxion: cannot disconnect Copilot session while a turn is active")
+		}
+		if err := session.Abort(ctx); err != nil {
+			return fmt.Errorf("taxion: abort Copilot session: %w", err)
+		}
+		if turnDone == nil {
+			return fmt.Errorf("taxion: active Copilot turn has no completion boundary")
+		}
+		select {
+		case <-turnDone:
+		case <-ctx.Done():
+			return fmt.Errorf("taxion: wait for Copilot abort completion: %w", ctx.Err())
+		}
+	}
+	err := session.Disconnect()
+	h.mu.Lock()
+	h.stopped = true
+	if err == nil {
+		h.sdk = nil
+	}
+	watchers := h.watchers
+	h.watchers = map[*subscription]struct{}{}
+	h.mu.Unlock()
+	for watcher := range watchers {
+		watcher.close()
+	}
+	if err != nil {
+		return fmt.Errorf("taxion: disconnect Copilot session: %w", err)
+	}
+	return nil
 }
 
 func (h *managedSession) forward(ctx context.Context, watcher *subscription) {

@@ -89,6 +89,14 @@ Flow が `COMPLETED`、Reviewer が `SUCCEEDED` / `APPROVE` でも品質ゲー�
 
 ## runner 終了後に回答だけが残っている
 
+`conversation ask`・`conversation plan`・`conversation investigate` と request Planner は、回答の受理が不確実な場合、同じ workspace の実行を止める。cleanup の成功だけで回答を受理せず、失敗しても保存した回答や利用量を削除しない。`taxion request --status` で operation を確認し、元の送信を繰り返さない。
+
+`taxion request recover ... --preview` は、保存した Copilot main turn と入力・Task・出典・元期限・利用量を照合する。新しい attempt receipt がない v0.8.2 の version-2 request には、元 session・native input の hash・元 process tree の停止証拠を指定する `--associate-legacy` がある。これは旧 receipt の捏造ではなく、新しい明示的な照合判断として保存する。binding のない旧直接質問や version-1 checkpoint は対象外となる。
+
+同じ判断項目と preview hash の apply は回答・checkpoint・利用量・照合判断を一つの transaction で保存する。通常の継続は `--resolution continue`、その operation の終了は `--resolution cancel` で選ぶ。routine shutdown やnative 集計利用量が欠落・不完全な場合、不正な回答を未受理のまま残す場合は、停止証拠を示して `--confirm-stopped --accept-uncertainty --resolution cancel` を選ぶ。per-call usage から分かる利用量は下限として保持し、native 集計の不足や不確実性は unknown のまま記録する。既知の集計不一致は拒否する。未知の利用量をゼロ扱いしない。
+
+モデルの送信・Abort、元期限・予算・承認の更新は行わない。期限超過後も期限前に完了した回答の照合と取消はできるが、継続実行はできない。実際の owner が lease を保持している場合、native 履歴が変化した場合、別の Flow が実行中の場合には apply を拒否する。解除後の作業は通常の gate を通す。旧版へ戻すために receipt を削除せず、更新前の整合した private backup を保持する。
+
 保存した `RUNNING` は process が生きている証拠ではない。旧 runner の終了を確認し、
 Flow・Dispatch・session・最後の受信記録を照合する。正式結果がない `RUNNING` Reviewer には
 `workflow recover --file recovery.json` の `finalizeSavedResult:true` を使う。
@@ -193,8 +201,9 @@ runtime `Start` を試みる前の準備・出力先・runtime 構築の失敗�
 
 ### Dispatch がない入力検証失敗からの修正用後続
 
-対象は `artifactSource` Flow の `STOPPED / SAFETY_STOP`、`HOLD`、
+対象は `artifactSource` Flow の `STOPPED`、`HOLD`、
 `artifact.validation.status: FAILED`、`dispatchIds: []`、runner 解放済みの場合に限る。
+停止 code の列挙漏れだけでは拒否しない。失敗 receipt と入力の一致、停止・所有権の照合は維持する。
 `workflow show --id OLD_FLOW_ID` で保存状態を読み、検証コマンドの process も停止していることを確認する。
 コマンドは外部 process の消滅を証明しない。`RUNNING` のまま中断した検証を失敗確定として流用しない。
 既存の明示 `--store` を全操作で維持する。
@@ -272,9 +281,9 @@ Copilot Coder／Reviewer には同名の `taxion` 管理 skill を除外し、Di
 未確定の保存回答がある場合は前節の結果確定を先に行う。
 停止条件の解除や同じ実行の再送は行わず、新たなモデル作業にはその範囲をカバーする承認が要る。
 
-`workflow reconcile-stopped` は、`STOPPED / SAFETY_STOP` と `HOLD` が保存され、初回の snapshot 入力を持つ Coder Dispatch だけが `ISSUED` のまま残った場合を対象とする。ACK・実行開始・session・結果・runtime receipt がある場合や、他の実行が稼働中の場合には使えない。人間が継続中の実行がないことを確認し、その根拠と配送不確実性の受入れを明示してから、preview の完全ハッシュを承認する。コマンド自身が外部実行を停止・照会するわけではない。
+`workflow reconcile-stopped` は、`STOPPED` と `HOLD` が保存され、初回の snapshot 入力を持つ Coder Dispatch だけが `ISSUED` のまま残った場合を対象とする。停止 code の許可一覧では判定せず、元の clean baseline だけを持つ入力にも対応する。ACK・実行開始・session・結果・runtime receipt がある場合や、他の実行が稼働中の場合には使えない。人間が継続中の実行がないことを確認し、その根拠と配送不確実性の受入れを明示してから、preview の完全ハッシュを承認する。コマンド自身が外部実行を停止・照会するわけではない。
 
-適用すると Dispatch は `CANCELLED`、Task は `BLOCKED` となり、判断を追記保存する。元の停止理由・`HOLD`・承認・期限・予算は変更しない。未配信・未実行・無課金を証明せず、保持した tree はこの Dispatch の新成果ではなく、元の承認済み入力として扱う。後続 Task は別 worktree に同一入力を保全し、新提案と確認の両方に `reconciliationHash` を含める。新しい実行には別途承認が要る。通常取消だけではこの入力継承の根拠にならない。request と手順は [CLI リファレンス](cli-reference.md#停止済み初回指示の整合回復)を参照する。
+旧期限が過ぎても、この取消は実行の再開や期限延長を行わない。適用すると Dispatch は `CANCELLED`、Task は `BLOCKED` となり、判断を追記保存する。元の停止理由・`HOLD`・承認・期限・予算は変更しない。未配信・未実行・無課金を証明せず、保持した tree はこの Dispatch の新成果ではなく、元の承認済み入力として扱う。後続 Task は別 worktree に同一入力を保全し、新提案と確認の両方に `reconciliationHash` を含める。新しい実行には別途承認が要る。通常取消だけではこの入力継承の根拠にならない。request と手順は [CLI リファレンス](cli-reference.md#停止済み初回指示の整合回復)を参照する。
 
 `workflow repair-status --id <flow-id>` の
 `reviewContinuationCandidate` に成功済み Coder の Dispatch ID が表示される場合がある。

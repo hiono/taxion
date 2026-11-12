@@ -68,6 +68,46 @@ func TestReadyNavigationSeparatesSetupApprovalAndExecution(t *testing.T) {
 	}
 }
 
+func TestReadyExplainsPlannerWritingAndRequestRecoveryBoundaries(t *testing.T) {
+	var output bytes.Buffer
+	if err := readyCmd(nil, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{
+		"### Planner and document writing",
+		"Planner is implemented, not merely planned",
+		"`taxion request --help`", "`taxion conversation plan --help`",
+		"`proposal:null` with `HUMAN_REQUIRED`",
+		"`workflow planner-draft`", "`workflow planner-action`",
+		"`taxion request recover`",
+		"no standalone Writer command or WRITER execution role",
+		"documents is CODER work under an approved Task",
+		"independent REVIEWER acceptance",
+	} {
+		if !strings.Contains(output.String(), text) {
+			t.Errorf("missing Planner/writing boundary: %s", text)
+		}
+	}
+	if !strings.Contains(readySkillBody, "durably bound attempts, with a nonexecuting preview and exact-hash apply") {
+		t.Fatal("installed skill omits supported direct-question recovery")
+	}
+	guide, err := os.ReadFile("../../docs/userguide/cli-reference.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, contradiction := range []string{
+		"this CLI has no public preview/apply",
+		"plan or investigate recovery are not supported",
+		"Legacy v0.8.2 checkpoints and direct conversation",
+		"Never resume, cancel or resend a BLOCKED Planner attempt",
+		"質問用 receipt の preview/apply 復旧はない",
+	} {
+		if strings.Contains(readySkillBody, contradiction) || bytes.Contains(guide, []byte(contradiction)) {
+			t.Errorf("recovery guidance contradicts supported durable bindings: %s", contradiction)
+		}
+	}
+}
+
 func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 	root, _ := requestFixture(t)
 	resolved, err := resolveConfiguration()
@@ -97,6 +137,7 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 	intake.Task.Worktree = root
 	intake.Task.Branch = gitTest(t, root, "branch", "--show-current")
 	intake.Task.BaselineSHA = gitTest(t, root, "rev-parse", "HEAD")
+	intake.Task.Acceptance = append(intake.Task.Acceptance, core.ADRNotApplicableCriterion)
 	confirmation.Selection = resolved.Config
 	confirmation.ConfigurationDecisionID = resolved.Config.Execution.ApprovalRef + "@task:" + intake.Task.ID
 	flow.Repository = intake.Task.Repo
@@ -214,9 +255,15 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 					result.WorktreeChanged = &changed
 					result.ReviewVerdict, result.NextTransition = "APPROVE", core.Approved
 					result.Findings = []core.DispatchFinding{}
+					result.WorkReport = "This synthetic README fixture has no applicable architecture decision."
 					for _, criterion := range dispatch.Instruction.Acceptance {
+						evidence := []string{"work-report"}
+						if strings.HasPrefix(criterion, core.ADRCompliancePrefix) {
+							evidence = append(evidence, criterion)
+							result.Evidence = append(result.Evidence, criterion)
+						}
 						result.Acceptance = append(result.Acceptance, core.DispatchAcceptance{
-							Criterion: criterion, Status: "PASS", Evidence: []string{"work-report"},
+							Criterion: criterion, Status: "PASS", Evidence: evidence,
 						})
 					}
 				}

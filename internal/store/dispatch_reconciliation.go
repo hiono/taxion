@@ -61,6 +61,7 @@ func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 		before := audit.PreviousDispatch
 		artifactReviewer := prior.StoppedArtifactReviewer(before)
 		coderReviewer := graph.StoppedCoderReviewer(prior, before)
+		firstCoder := graph.StoppedFirstCoder(prior, before)
 		reviewer := artifactReviewer || coderReviewer
 		flow, found := graph.ReviewFlow(prior.ID)
 		dispatch, exists := graph.GraphDispatch(before.ID)
@@ -110,14 +111,13 @@ func (r Records) VerifyDispatchReconciliations(graph core.TaskGraph) error {
 			audit.InputContractHash != inputHash || audit.Actor == "" || audit.Source == "" ||
 			audit.Reason == "" || len(audit.Evidence) == 0 || !audit.NoActiveExecutionConfirmed || !audit.AcceptDeliveryUncertainty ||
 			audit.DeliveryStatus != "unknown" || audit.At.IsZero() ||
-			prior.Status != "STOPPED" || (!reviewer && prior.StopCode != "SAFETY_STOP") || !prior.HandoffHeld() ||
+			prior.Status != "STOPPED" || (!reviewer && !firstCoder) || !prior.HandoffHeld() ||
 			prior.RunnerID != "" || (!coderReviewer && (len(prior.DispatchIDs) != 1 || prior.DispatchIDs[0] != before.ID)) ||
 			(!reviewer && (before.TaskID != prior.TaskID || before.Recipient != "CODER")) ||
 			before.Status != core.DispatchIssued ||
 			before.Acknowledged || before.ExecutionStarted || before.RuntimeSessionID != "" || before.Result != nil ||
 			before.RuntimeConfigHash != "" || before.ExecutionStartSHA != "" || len(before.RuntimeUsage) != 0 ||
 			prior.Contract.OutputMode != core.OutputModeWorktreeTreeSnapshot ||
-			(!reviewer && prior.Contract.TargetTreeSHA == "") ||
 			!reflect.DeepEqual(flow, prior) || target != audit.Target ||
 			dispatch.Status != core.DispatchCancelled || dispatch.Result == nil ||
 			dispatch.Result.OutputSHA != "" || dispatch.Result.OutputTreeSHA != "" ||

@@ -414,11 +414,22 @@ func observePlannerQuestion(db *store.Store, ledgerPath, repository, taskID stri
 	context := QuestionContext{
 		Task: PlanningTask{Task: planning.Task}, Flows: []core.ReviewFlow{}, Planner: &planning,
 	}
-	content, err := json.Marshal(context)
+	observation.ContentHash, err = PlannerQuestionSourceHash(planning)
 	if err != nil {
 		return QuestionContext{}, err
 	}
-	observation.ContentHash = fmt.Sprintf("sha256:%x", sha256.Sum256(content))
 	context.Observation = &observation
 	return context, nil
+}
+
+func PlannerQuestionSourceHash(planning PlannerContext) (string, error) {
+	planning.Observation = nil
+	context := QuestionContext{
+		Task: PlanningTask{Task: planning.Task}, Flows: []core.ReviewFlow{}, Planner: &planning,
+	}
+	content, err := json.Marshal(context)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("sha256:%x", sha256.Sum256(content)), nil
 }

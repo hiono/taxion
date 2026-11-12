@@ -7,34 +7,53 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"github.com/hiono/taxion/internal/core"
 	"time"
 
+	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/tools"
 )
 
 // Event is a plain, SDK-neutral runtime event.
 type Event struct {
-	Type     string
-	Payload  string
-	Sequence uint64 `json:"sequence,omitempty"`
+	Type      string
+	Payload   string
+	Sequence  uint64 `json:"sequence,omitempty"`
+	MessageID string `json:"messageId,omitempty"`
+	TurnID    string `json:"turnId,omitempty"`
+	AgentID   string `json:"agentId,omitempty"`
 }
 
 const (
-	EventInput        = "input"
-	EventOutput       = "output"
-	EventOutputDelta  = "output_delta"
-	EventTurnStarted  = "turn_started"
-	EventTurnEnded    = "turn_ended"
-	EventTurnFinished = "turn_finished"
-	EventFailed       = "failed"
-	EventCancelled    = "cancelled"
-	EventUsage        = "usage"
-	EventContextUsage = "context_usage"
-	EventCompaction   = "compaction"
-	EventPermission   = "permission"
-	EventExecution    = "execution_observation"
+	EventInput             = "input"
+	EventOutput            = "output"
+	EventOutputDelta       = "output_delta"
+	EventTurnStarted       = "turn_started"
+	EventTurnEnded         = "turn_ended"
+	EventTurnFinished      = "turn_finished"
+	EventFailed            = "failed"
+	EventCancelled         = "cancelled"
+	EventUsage             = "usage"
+	EventUsageCheckpoint   = "usage_checkpoint"
+	EventContextUsage      = "context_usage"
+	EventCompaction        = "compaction"
+	EventPermission        = "permission"
+	EventExecution         = "execution_observation"
+	EventSubagentStarted   = "subagent_started"
+	EventSubagentCompleted = "subagent_completed"
+	EventSubagentFailed    = "subagent_failed"
+	EventUnclassified      = "unclassified_native_event"
 )
+
+// QuestionEventAllowed is shared by live and saved advice-only turns.
+func QuestionEventAllowed(eventType string) bool {
+	switch eventType {
+	case EventInput, EventOutput, EventOutputDelta, EventTurnStarted, EventTurnEnded,
+		EventTurnFinished, EventUsage, EventUsageCheckpoint, EventContextUsage, "acp_connection", "acp_capabilities":
+		return true
+	default:
+		return false
+	}
+}
 
 // Runtime is the minimal control-plane contract:
 //
@@ -101,14 +120,19 @@ type StopAttachment interface {
 // SavedTurn is observed from the bound provider session, never supplied as a
 // caller-authored result. Reading it must not resume pending execution.
 type SavedTurn struct {
-	SessionID   string               `json:"sessionId"`
-	Payload     string               `json:"payload"`
-	SubmittedAt time.Time            `json:"submittedAt"`
-	FinishedAt  time.Time            `json:"finishedAt"`
-	ShutdownAt  time.Time            `json:"shutdownAt"`
-	HistoryHash string               `json:"historyHash"`
-	Events      []Event              `json:"events"`
-	UsageTotals []core.DispatchUsage `json:"usageTotals,omitempty"`
+	SessionID        string               `json:"sessionId"`
+	InputHash        string               `json:"inputHash"`
+	Input            string               `json:"-"`
+	MessageID        string               `json:"messageId"`
+	TurnID           string               `json:"turnId"`
+	Payload          string               `json:"payload"`
+	SubmittedAt      time.Time            `json:"submittedAt"`
+	FinishedAt       time.Time            `json:"finishedAt"`
+	ShutdownAt       time.Time            `json:"shutdownAt"`
+	HistoryHash      string               `json:"historyHash"`
+	Events           []Event              `json:"events"`
+	UsageTotals      []core.DispatchUsage `json:"usageTotals,omitempty"`
+	UsageCheckpoints []UsageCheckpoint    `json:"usageCheckpoints,omitempty"`
 }
 
 // ManagedCommit binds the host operation, not an agent-selected repository or scanner.
@@ -129,6 +153,20 @@ type ManagedSearch struct {
 type ManagedReviewProgress struct {
 	Basis core.ReviewProgress                                                `json:"basis"`
 	Save  func(context.Context, string, core.ReviewProgress) (string, error) `json:"-"`
+}
+
+// Owner and RunnerID are live leases, not session configuration. The host
+// checks them against saved state on every invocation, including after resume.
+type ManagedClarification struct {
+	ProtocolVersion int                                                                             `json:"protocolVersion,omitempty"`
+	DispatchID      string                                                                          `json:"dispatchId"`
+	ScopeHash       string                                                                          `json:"scopeHash"`
+	OperationID     string                                                                          `json:"operationId"`
+	Owner           string                                                                          `json:"-"`
+	FlowID          string                                                                          `json:"flowId"`
+	RunnerID        string                                                                          `json:"-"`
+	Request         func(context.Context, string, json.RawMessage) (json.RawMessage, error)         `json:"-"`
+	Inbox           func(context.Context, string, string, json.RawMessage) (json.RawMessage, error) `json:"-"`
 }
 
 type QuotaSnapshot struct {

@@ -27,6 +27,13 @@ func TestFailedArtifactSuccessorBindsReceiptAndRunsCoderThenReview(t *testing.T)
 	task.TargetSHA, task.TargetTreeSHA = old.Artifact.Target.CommitSHA, old.Artifact.Target.TreeSHA
 	task.TargetChangedFiles = old.Artifact.Target.ChangedFiles
 	gitTest(t, old.Contract.Worktree, "worktree", "add", "-b", task.Branch, task.Worktree, task.BaselineSHA)
+	for _, code := range []string{"SAFETY_STOP", "BUDGET_STOP", "BUDGET_LIMIT", "RECONTRACT"} {
+		stopped := old
+		stopped.StopCode = code
+		if _, err := artifactPredecessorDecision(core.TaskGraph{ReviewFlows: []core.ReviewFlow{stopped}}, task); err != nil {
+			t.Fatalf("failed input rejected only because of stop code %s: %v", code, err)
+		}
+	}
 	t.Run("reject predecessor alias", func(t *testing.T) {
 		alias := filepath.Join(t.TempDir(), "alias")
 		if err := os.Symlink(old.Contract.Worktree, alias); err != nil {

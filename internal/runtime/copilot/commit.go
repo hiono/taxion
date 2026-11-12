@@ -12,7 +12,7 @@ const ManagedCommitToolName = "taxion_commit"
 
 func (a *Adapter) managedTools() []sdk.Tool {
 	if a.config.ManagedCommit == nil {
-		return append(append(a.searchTools(), a.reviewProgressTools()...), a.contextTools()...)
+		return append(append(append(a.searchTools(), a.reviewProgressTools()...), a.contextTools()...), a.clarificationTools()...)
 	}
 	tools := []sdk.Tool{{
 		Name:  ManagedCommitToolName,
@@ -43,7 +43,7 @@ func (a *Adapter) managedTools() []sdk.Tool {
 			Handler: a.stageTool,
 		})
 	}
-	return append(append(append(tools, a.searchTools()...), a.reviewProgressTools()...), a.contextTools()...)
+	return append(append(append(append(tools, a.searchTools()...), a.reviewProgressTools()...), a.contextTools()...), a.clarificationTools()...)
 }
 
 func (a *Adapter) commitTool(invocation sdk.ToolInvocation) (sdk.ToolResult, error) {

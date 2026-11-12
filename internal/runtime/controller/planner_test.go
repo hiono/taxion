@@ -24,6 +24,7 @@ func TestPlannerUsesIsolatedBoundedQuestionWithoutApplyingRecommendation(t *test
 	}
 	after, err := db.LoadWorkspace()
 	before.Records.Operation = after.Records.Operation
+	before.Records.Requests = after.Records.Requests
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatal("planner advice applied a decision or changed main history", err)
 	}

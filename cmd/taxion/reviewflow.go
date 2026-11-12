@@ -238,6 +238,7 @@ Keep results and continue the unfinished work after actual additional approval.`
 	var compactContext bool
 	var validationSubmission bool
 	var reviewProgress bool
+	var clarificationIntake bool
 	var progressMonitor bool
 	var builtinPrompts bool
 	var requireQuality bool
@@ -281,6 +282,7 @@ Keep results and continue the unfinished work after actual additional approval.`
 		fs.BoolVar(&compactContext, "compact-context", false, "include exact prior results without nested instructions")
 		fs.BoolVar(&validationSubmission, "controller-validation-submission", false, "separate submission from controller-run checks; repeat on session attachment")
 		fs.BoolVar(&reviewProgress, "review-progress", false, "enable bounded Reviewer progress receipts (Copilot only); repeat on session attachment")
+		fs.BoolVar(&clarificationIntake, "clarification-intake", false, "record bound running-Role questions through the Copilot host tool; requires an owned request; no delivery or execution approval")
 		fs.BoolVar(&progressMonitor, "progress-monitor", false, "save and emit bounded progress_checkpoint requests every ten minutes; outer controller must assess content; no extra model, automatic stop or restart")
 		fs.StringVar(&scanner, "scanner", "betterleaks", "trusted Betterleaks executable (--managed-commit only)")
 	default:
@@ -751,6 +753,7 @@ Keep results and continue the unfinished work after actual additional approval.`
 				WorkingDirectory: dispatch.Instruction.Worktree, CLIPath: cli, BaseDirectory: base,
 				MaxAICredits:         sessionCredits,
 				EnableReviewProgress: reviewProgress,
+				EnableClarification:  clarificationIntake,
 				AvailableTools:       tools[dispatch.Recipient], ResponseSchema: responseSchema,
 			}, managedCommit && dispatch.Recipient == "CODER", managedStage && dispatch.Recipient == "CODER", scanner)
 			if err != nil {
