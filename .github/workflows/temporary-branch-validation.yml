@@ -19,7 +19,9 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Report Go formatting differences
-        run: gofmt -l cmd internal
+        run: |
+          gofmt -l cmd internal
+          gofmt -d cmd internal
       - name: Vet
         run: go vet ./...
       - name: Full test suite
