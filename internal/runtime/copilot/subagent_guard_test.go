@@ -101,6 +101,46 @@ func TestSubagentGuardRejectsBrokenCorrelations(t *testing.T) {
 	})
 }
 
+func TestSubagentGuardLifecycleEventIDsAreContentBound(t *testing.T) {
+	t.Run("identical replay is idempotent", func(t *testing.T) {
+		guard := newSubagentGuard(true)
+		resumable := false
+		event := sdk.SessionEvent{
+			ID: "same",
+			Data: &sdk.SubagentStartedData{ToolCallID: "call", Resumable: &resumable},
+		}
+		guard.observeEvent(event)
+		guard.observeEvent(event)
+		guard.observeEvent(sdk.SessionEvent{
+			ID: "finish",
+			Data: &sdk.SubagentCompletedData{ToolCallID: "call"},
+		})
+		if err := guard.check(); err != nil {
+			t.Fatalf("identical event replay was not idempotent: %v", err)
+		}
+	})
+
+	t.Run("conflicting replay fails closed", func(t *testing.T) {
+		guard := newSubagentGuard(true)
+		resumable := false
+		guard.observeEvent(sdk.SessionEvent{
+			ID: "same",
+			Data: &sdk.SubagentStartedData{ToolCallID: "first", Resumable: &resumable},
+		})
+		guard.observeEvent(sdk.SessionEvent{
+			ID: "same",
+			Data: &sdk.SubagentStartedData{ToolCallID: "different", Resumable: &resumable},
+		})
+		guard.observeEvent(sdk.SessionEvent{
+			ID: "finish",
+			Data: &sdk.SubagentCompletedData{ToolCallID: "first"},
+		})
+		if guard.check() == nil {
+			t.Fatal("conflicting event ID replay was accepted")
+		}
+	})
+}
+
 func TestSubagentGuardRebuildExcludesOnlyConfirmedNonresumableChildren(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -20,7 +20,7 @@ type subagentGuard struct {
 	hookActive     map[string]struct{}
 	hookFault      bool
 	lifecycle      map[string]subagentLifecycle
-	lifecycleSeen  map[string]struct{}
+	lifecycleSeen  map[string]string
 	lifecycleFault bool
 }
 
@@ -29,7 +29,7 @@ func newSubagentGuard(ready bool) *subagentGuard {
 		ready:         ready,
 		hookActive:    make(map[string]struct{}),
 		lifecycle:     make(map[string]subagentLifecycle),
-		lifecycleSeen: make(map[string]struct{}),
+		lifecycleSeen: make(map[string]string),
 	}
 }
 
@@ -136,15 +136,35 @@ func (g *subagentGuard) observeEvent(event sdk.SessionEvent) {
 	g.applyLifecycleEvent(event)
 }
 
+func lifecycleFingerprint(event sdk.SessionEvent) string {
+	switch data := event.Data.(type) {
+	case *sdk.SubagentStartedData:
+		if data.Resumable == nil {
+			return fmt.Sprintf("started:%q:unknown", data.ToolCallID)
+		}
+		return fmt.Sprintf("started:%q:%t", data.ToolCallID, *data.Resumable)
+	case *sdk.SubagentCompletedData:
+		return fmt.Sprintf("completed:%q", data.ToolCallID)
+	case *sdk.SubagentFailedData:
+		return fmt.Sprintf("failed:%q", data.ToolCallID)
+	default:
+		return fmt.Sprintf("%T", event.Data)
+	}
+}
+
 func (g *subagentGuard) applyLifecycleEvent(event sdk.SessionEvent) {
 	if event.ID == "" {
 		g.lifecycleFault = true
 		return
 	}
-	if _, duplicate := g.lifecycleSeen[event.ID]; duplicate {
+	fingerprint := lifecycleFingerprint(event)
+	if previous, duplicate := g.lifecycleSeen[event.ID]; duplicate {
+		if previous != fingerprint {
+			g.lifecycleFault = true
+		}
 		return
 	}
-	g.lifecycleSeen[event.ID] = struct{}{}
+	g.lifecycleSeen[event.ID] = fingerprint
 
 	switch data := event.Data.(type) {
 	case *sdk.SubagentStartedData:
@@ -192,7 +212,7 @@ func (g *subagentGuard) rebuild(events []sdk.SessionEvent) {
 	defer g.mu.Unlock()
 
 	g.lifecycle = make(map[string]subagentLifecycle)
-	g.lifecycleSeen = make(map[string]struct{})
+	g.lifecycleSeen = make(map[string]string)
 	g.lifecycleFault = false
 	for _, event := range events {
 		if isSubagentLifecycle(event.Data) {
