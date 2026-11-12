@@ -8,7 +8,7 @@ import (
 func TestJobConversationAllowsNaturalLanguageWithoutQuestionSchema(t *testing.T) {
 	graph := TaskGraph{
 		Version: 1,
-		Tasks: []GraphTask{{ID: "job-1"}},
+		Tasks:   []GraphTask{{ID: "job-1"}},
 		JobMessages: []JobMessage{
 			{ID: "m1", TaskID: "job-1", FromRole: "CODER", ToRole: "PLANNER",
 				Body: "この仕様の意図を確認したい。現状の情報から実装できる部分は先に進める。",
@@ -29,7 +29,7 @@ func TestJobConversationAllowsNaturalLanguageWithoutQuestionSchema(t *testing.T)
 func TestJobConversationRejectsReplyToDifferentJobOrRole(t *testing.T) {
 	graph := TaskGraph{
 		Version: 1,
-		Tasks: []GraphTask{{ID: "job-1"}, {ID: "job-2"}},
+		Tasks:   []GraphTask{{ID: "job-1"}, {ID: "job-2"}},
 		JobMessages: []JobMessage{
 			{ID: "m1", TaskID: "job-1", FromRole: "CODER", ToRole: "PLANNER",
 				Body: "質問", Source: "dispatch:coder-1", At: time.Now().UTC()},
