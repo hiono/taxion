@@ -274,8 +274,8 @@ Scannerは公式v1.9.0 linux_x64 archiveを公開checksumと照合した。
 SHA-256は `f8b185a39ffcece2a1ca82bf3a4e7435cd81963ffd16b7a9128daf75f35f6de7`。
 全indexed内容のscanとcommit履歴全範囲のscanは別の検証であり、前者で後者のtimeoutを補わない。
 
-外側operatorの正規照会は `taxion runtime quota --account hrykono --approve-account-read --cli /home/onohr/.local/bin/copilot`。
-`hiono` はGitHub操作用でありquota照会先ではない。
+外側operatorのquota照会では、正しい利用者アカウントとCopilot CLIの実行ファイルを明示する。
+GitHub操作用アカウントをquota照会先として使用しない。
 `2026-11-08T23:22:48.106Z`（08:22 JST）の `sdk.account.getQuota` は
 19,600/50,000 requests使用、account残30,400を返した。
 人間提供の起点19,400との差200 requestsは同一accountの累計差分であり、厳密な作業別課金ではない。
