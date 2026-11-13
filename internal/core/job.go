@@ -160,20 +160,30 @@ func (g TaskGraph) JobForTask(taskID string) (Job, bool) {
 // CreateJob creates an independent collaboration unit. Tasks acquire membership
 // by storing this Job's ID on the Task itself.
 func (g *TaskGraph) CreateJob(job Job) error {
-	if g == nil {
-		return graphError("Job creation requires a Task Graph")
+	return g.CreateJobWithActor(job, "controller", "Job created from intake contract", time.Time{})
+}
+
+// CreateJobWithActor creates a Job and records the proposal source in Job history.
+func (g *TaskGraph) CreateJobWithActor(job Job, actor, reason string, at time.Time) error {
+	if g == nil || strings.TrimSpace(actor) == "" || strings.TrimSpace(reason) == "" {
+		return graphError("Job creation requires a Task Graph, actor and reason")
 	}
-	next := cloneGraph(*g)
+	if at.IsZero() {
+		at = job.CreatedAt
+	}
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
 	if job.CreatedAt.IsZero() {
-		job.CreatedAt = time.Now().UTC()
+		job.CreatedAt = at
 	}
 	if job.UpdatedAt.IsZero() {
 		job.UpdatedAt = job.CreatedAt
 	}
+	next := cloneGraph(*g)
 	next.Jobs = append(next.Jobs, job)
 	next.JobHistory = append(next.JobHistory, JobEvent{
-		JobID: job.ID, To: job.Status, Actor: "controller",
-		Reason: "Job created from intake contract", At: job.CreatedAt,
+		JobID: job.ID, To: job.Status, Actor: actor, Reason: reason, At: at,
 	})
 	if err := next.validateJobModel(); err != nil {
 		return err
