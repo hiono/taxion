@@ -32,6 +32,8 @@ type JobBudget struct {
 	MaxRoleExecutions       int     `json:"maxRoleExecutions"`
 	MaxConcurrentExecutions int     `json:"maxConcurrentExecutions"`
 	MaxNanoAIU              float64 `json:"maxNanoAiu"`
+	AccountQuotaOnly        bool    `json:"accountQuotaOnly,omitempty"`
+	BudgetSource            string  `json:"budgetSource,omitempty"`
 }
 
 func (c JobContract) Validate() error {
