@@ -13,18 +13,18 @@ import (
 )
 
 type jobRoleRuntimeFake struct {
-	role       string
-	configHash string
-	selection  json.RawMessage
-	taskID     string
-	sessionID  string
-	prompt     string
-	startCount  int
-	resumeCount int
-	stopCount   int
-	events      chan runtime.Event
-	stopErr        error
-	authErr        error
+	role            string
+	configHash      string
+	selection       json.RawMessage
+	taskID          string
+	sessionID       string
+	prompt          string
+	startCount      int
+	resumeCount     int
+	stopCount       int
+	events          chan runtime.Event
+	stopErr         error
+	authErr         error
 	expectedAccount string
 }
 
