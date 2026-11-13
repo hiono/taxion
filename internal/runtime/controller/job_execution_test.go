@@ -15,22 +15,22 @@ import (
 )
 
 type jobRoleRuntimeFake struct {
-	role                  string
-	configHash            string
-	selection             json.RawMessage
-	taskID                string
-	sessionID             string
-	prompt                string
-	startCount            int
-	resumeCount           int
-	sendCount             int
-	onResume              func()
-	stopCount             int
-	events                chan runtime.Event
-	stopErr               error
-	authErr               error
-	expectedAccount       string
-	toolPolicy            *tools.Policy
+	role                   string
+	configHash             string
+	selection              json.RawMessage
+	taskID                 string
+	sessionID              string
+	prompt                 string
+	startCount             int
+	resumeCount            int
+	sendCount              int
+	onResume               func()
+	stopCount              int
+	events                 chan runtime.Event
+	stopErr                error
+	authErr                error
+	expectedAccount        string
+	toolPolicy             *tools.Policy
 	jobOperationAuthorizer func(context.Context, string, string) error
 }
 

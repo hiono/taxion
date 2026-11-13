@@ -65,11 +65,11 @@ type Adapter struct {
 	stopSessionID  string
 	stopConfigHash string
 
-	opMu      sync.Mutex
-	mu        sync.Mutex
-	started   bool
-	closed    bool
-	sessions  map[string]*managedSession
+	opMu                  sync.Mutex
+	mu                    sync.Mutex
+	started               bool
+	closed                bool
+	sessions              map[string]*managedSession
 	quotaOnly             bool
 	authorizeJobOperation func(context.Context, string, string) error
 }
