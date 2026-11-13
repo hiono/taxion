@@ -78,6 +78,10 @@ Job と Task の関連は **Task 側が `JobID` を保持する単方向参照**
 
 **Exit gate:** Job approval が唯一の Job-level authority であり、Task/RoleExecution は承認済み Job scope を超えられないこと、旧 Task approval が新 Job の authority にならないこと、成果・証拠の provenance と受入れ責任が明確であることを ADR とテスト可能な規則で確定する。Exit gate 通過前に Runtime 実行経路へ Job approval を接続しない。
 
+**2026-11-13 時点の是正事項:** Phase 1A が未完了であるにもかかわらず、現行コードには `JobRoleController.Start / Resume / Send` と操作認可経路が存在する。これらは Phase 1A の完了証拠とはみなさず、以降の Runtime 経路拡張・CLI 接続を停止する。先に Job approval の authority 契約、移行規則、Task approval 非継承テスト、Job completion 条件を確定する。
+
+新しい Job intake は JobApproval のみを Job-level authority とする。旧 Task approval bundle や Task configuration decision を新規に authority として生成・継承・変換しない。旧 workspace に存在する Task approval 等は、明示的な migration/history として保全する場合に限り読み取る。新しい Job の認可判定は旧 Task approval の有無・内容に依存させない。
+
 ### Phase 1 — Job と RoleExecution の永続化モデル
 
 - [x] Job を Task から独立した first-class entity として導入する。
