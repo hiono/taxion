@@ -643,15 +643,6 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		if answer.Proposal != nil && !slices.Contains(answer.Proposal.Acceptance, core.DocumentationAcceptance) {
 			answer.Proposal.Acceptance = append(answer.Proposal.Acceptance, core.DocumentationAcceptance)
 		}
-		if answer.Proposal != nil && len(answer.Questions) == 0 {
-			if _, err := controller.ProposeJob(db, controller.JobIntakeRequest{
-				JobID: id + "-job", Request: "request-digest:" + checkpoint.RequestHash,
-				Goal: "Complete the approved request plan", Actor: selected.Execution.Requester,
-				Source: "planner:" + task.ID,
-			}); err != nil {
-				return err
-			}
-		}
 		if checkpoint.Answer == nil {
 			var displayed bytes.Buffer
 			if err := displayRequestPlan(&displayed, answer); err != nil {
