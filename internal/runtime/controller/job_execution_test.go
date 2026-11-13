@@ -74,7 +74,7 @@ func (f *jobRoleRuntimeFake) CheckServiceAccess(context.Context, string) error {
 
 func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.GraphTask, json.RawMessage) {
 	t.Helper()
-	db, request := intakeApprovalFixture(t, false)
+	db, request := jobIntakeApprovalFixture(t)
 	selection := json.RawMessage(`{"runtime":{"profile":"job-role-test","account":"test-account"}}`)
 	sources := map[string]string{"runtime.profile": "project", "runtime.account": "project"}
 	configuration, err := core.SelectApprovalConfiguration(selection, sources)

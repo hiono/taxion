@@ -737,6 +737,12 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				if err != nil {
 					return err
 				}
+				if _, err := controller.ProposeJob(db, controller.JobIntakeRequest{
+					JobID: id + "-job", Request: string(executionRequest), Goal: proposal.Objective,
+					Actor: selected.Execution.Requester, Source: "planner:" + task.ID,
+				}); err != nil {
+					return err
+				}
 				executionTask, err = controller.ProposeIntake(db, controller.IntakeRequest{
 					Request: string(executionRequest), Actor: selected.Execution.Requester, Source: "planner:" + task.ID,
 					ContextSources: contextSources,

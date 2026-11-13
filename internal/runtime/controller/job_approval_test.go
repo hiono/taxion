@@ -150,7 +150,7 @@ func TestProposeJobContractRejectsExistingTaskOutsideRoleScope(t *testing.T) {
 }
 
 func TestConfirmIntakeAcceptsPersistedCanonicalContractDeadline(t *testing.T) {
-	db, confirmation := intakeApprovalFixture(t, false)
+	db, confirmation := jobIntakeApprovalFixture(t)
 	state, err := db.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +192,7 @@ func TestConfirmIntakeAcceptsPersistedCanonicalContractDeadline(t *testing.T) {
 }
 
 func TestProposeJobContractReturnsExactProposalAndHash(t *testing.T) {
-	db, confirmation := intakeApprovalFixture(t, false)
+	db, confirmation := jobIntakeApprovalFixture(t)
 	state, err := db.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)
