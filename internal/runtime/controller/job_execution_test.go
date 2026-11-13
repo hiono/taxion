@@ -386,6 +386,17 @@ func TestJobRoleControllerSendRejectsApprovalRevokedDuringResume(t *testing.T) {
 	if worker.sendCount != 0 {
 		t.Fatalf("Runtime received %d turns after approval revocation", worker.sendCount)
 	}
+	if worker.stopCount != 1 {
+		t.Fatalf("Runtime stop count after approval revocation = %d, want 1", worker.stopCount)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, ok := state.Graph.RoleExecution("send-revoked-exec")
+	if !ok || execution.Status != core.RoleExecutionSuspended {
+		t.Fatalf("revoked RoleExecution status = %+v, want SUSPENDED", execution)
+	}
 }
 
 func TestJobRoleControllerDoesNotStartUnapprovedJob(t *testing.T) {

@@ -242,7 +242,25 @@ func (c *JobRoleController) Send(ctx context.Context, executionID, prompt string
 		return state.Graph.BindRoleExecutionContextHash(executionID, contextHash)
 	})
 	if err != nil {
-		return err
+		// Resume may reactivate a provider session before the latest Job state is
+		// revalidated. If that revalidation fails, stop the session so stale
+		// authorization cannot leave an executable Runtime behind.
+		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		stopErr := c.runtime.Stop(stopCtx, execution.RuntimeSessionID)
+		cancel()
+		if stopErr != nil {
+			return errors.Join(err, fmt.Errorf("taxion: stop Runtime after Job revalidation failure: %w", stopErr))
+		}
+		suspendErr := c.store.UpdateWorkspace(func(state *store.Workspace) error {
+			current, ok := state.Graph.RoleExecution(executionID)
+			if !ok || current.RuntimeSessionID != execution.RuntimeSessionID ||
+				current.Status != core.RoleExecutionRunning {
+				return fmt.Errorf("taxion: RoleExecution changed while stopping a stale Runtime")
+			}
+			return state.Graph.TransitionRoleExecution(executionID, core.RoleExecutionSuspended,
+				"controller", "Job authorization revalidation failed after Runtime resume", time.Now().UTC())
+		})
+		return errors.Join(err, suspendErr)
 	}
 	message := "Current Job context (authoritative snapshot):\n" + rendered +
 		"\n\nCurrent instruction:\n" + prompt
