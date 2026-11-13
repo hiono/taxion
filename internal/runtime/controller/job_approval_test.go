@@ -146,3 +146,45 @@ func TestProposeJobContractRejectsExistingTaskOutsideRoleScope(t *testing.T) {
 		t.Fatal("fixture Task must identify an owner")
 	}
 }
+
+
+func TestProposeJobContractReturnsExactProposalAndHash(t *testing.T) {
+	db, confirmation := intakeApprovalFixture(t, false)
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok := state.Graph.JobForTask(confirmation.TaskID)
+	if !ok || confirmation.JobContract == nil {
+		t.Fatal("fixture must provide a Job and explicit contract")
+	}
+	proposal, hash, err := ProposeJobContract(db, JobContractProposalRequest{
+		JobID: job.ID, Contract: *confirmation.JobContract,
+		Actor: "human", Source: "human:job-contract",
+		Reason: "propose exact contract for approval",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedState, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := storedState.Graph.Job(job.ID)
+	if !ok {
+		t.Fatal("proposed Job was not persisted")
+	}
+	want, err := core.JobProposal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHash, err := want.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(proposal, want) || hash != wantHash ||
+		proposal.JobID != job.ID || proposal.Contract.Revision != 1 {
+		t.Fatalf("returned proposal does not match persisted contract: proposal=%+v want=%+v hash=%q wantHash=%q",
+			proposal, want, hash, wantHash)
+	}
+}
