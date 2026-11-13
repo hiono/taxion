@@ -149,8 +149,8 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 	output, err := core.NewJobOutput(core.JobOutput{
 		ID:              "output-authorized", JobID: job.ID, TaskID: task.ID,
 		RoleExecutionID: "exec-authorized", Repository: task.Repo, Kind: "test-report",
-		ContentSHA256:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		CreatedAt:       now.Add(4 * time.Second),
+		ContentSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		CreatedAt:     now.Add(4 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
