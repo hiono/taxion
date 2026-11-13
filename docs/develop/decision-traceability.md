@@ -126,3 +126,7 @@ ADR-0001〜0043 はすべて `Accepted` の判断を記録する。採択は選�
 
 [ADR-0077](adr/0077-job-centered-role-collaboration.md) は、既存の固定工程・Clarification protocol を前提とせず、Job を継続単位として Role が判断・相談・引継ぎを行う設計を採択する。設計の正本は [role-collaboration.md](role-collaboration.md)。Issue #283 は実装と実モデル受入れを追跡する。PR #289 の従来実装はこの判断の実装根拠として扱わず、置換対象として評価する。
 
+
+## ドメイン不変条件の全経路強制
+
+[ADR-0079](adr/0079-enforce-domain-invariants-across-state-paths.md) は、論理条件をドメインモデルの規範とし、状態変更・永続化・復元・外部入力の全該当経路で強制する決定を記録する。[ドメイン不変条件と実装・検証対応表](domain-invariants.md)で、Job completion readiness の判定・遷移 gate・Graph validation・回帰テストを対応付ける。ADR の採択は他の不変条件の実装完了を意味しない。

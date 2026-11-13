@@ -335,6 +335,14 @@ func TestJobStateTransitionsAreAudited(t *testing.T) {
 	if err := persistedCompleted.Validate(); err == nil {
 		t.Fatal("persisted COMPLETED Job without approval and evidence must be rejected")
 	}
+	encoded, err := json.Marshal(persistedCompleted)
+	if err != nil {
+		t.Fatalf("marshal invalid persisted graph fixture: %v", err)
+	}
+	var restored TaskGraph
+	if err := json.Unmarshal(encoded, &restored); err == nil {
+		t.Fatal("restoring a persisted COMPLETED Job without approval and evidence must be rejected")
+	}
 }
 
 func TestJobConversationIncludesLegacyTaskMessagesForJob(t *testing.T) {

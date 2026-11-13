@@ -1,7 +1,7 @@
 # Job 中心の Role 実行モデル実装計画
 
 Status: In progress  
-Decision: [ADR-0077](adr/0077-job-centered-role-collaboration.md)  
+Decision: [ADR-0077](adr/0077-job-centered-role-collaboration.md), [ADR-0079](adr/0079-enforce-domain-invariants-across-state-paths.md)  
 Tracking: [Issue #283](https://github.com/hiono/taxion/issues/283)  
 Implementation: [PR #292](https://github.com/hiono/taxion/pull/292)
 
@@ -74,7 +74,7 @@ Job と Task の関連は **Task 側が `JobID` を保持する単方向参照**
 - [x] Job scope と Task scope の包含関係、および RoleExecution ごとの最小権限評価式を定義する。
 - [ ] Job approval と既存 Task approval bundle の役割を分離する。旧 Task approval / packet / dispatch records を Job approval へ移行・継承しないことを migration test で固定する。
 - [x] Job output / evidence reference の provenance、immutability、verification state、acceptance condition との対応を定義する。
-- [ ] Job completion の判定条件と unresolved execution / safety state による停止条件を定義する。
+- [x] Job completion の判定条件と unresolved execution / safety state による停止条件を定義する。論理条件・判定・遷移 gate・Graph validation・テストの対応は [domain-invariants.md](domain-invariants.md) に記録する。
 
 **Exit gate:** Job approval が唯一の Job-level authority であり、Task/RoleExecution は承認済み Job scope を超えられないこと、旧 Task approval が新 Job の authority にならないこと、成果・証拠の provenance と受入れ責任が明確であることを ADR とテスト可能な規則で確定する。Exit gate 通過前に Runtime 実行経路へ Job approval を接続しない。
 
@@ -167,3 +167,8 @@ Job と Task の関連は **Task 側が `JobID` を保持する単方向参照**
 - CI 成功はコード検査の結果であり、実モデルの協調成功を意味しない。
 - PR は Draft のまま維持し、利用者の明示承認なしに merge しない。
 - フェーズの exit gate を満たさない場合、後続フェーズへ進んだ扱いにしない。
+
+
+### Domain invariant enforcement (ADR-0079)
+
+Job completion は、判定関数の存在だけでは完了条件を実装したことにならない事例として扱う。現在は `transitionJob` の遷移 gate と `validateJobModel` の persisted Graph validation の両方で completion readiness を強制する。今後、Job approval・Task scope・RoleExecution・output/evidence の各不変条件についても、状態変更、永続化、復元、Controller の privileged operation 直前検査を対応表に記録し、未確認経路を完了扱いしない。

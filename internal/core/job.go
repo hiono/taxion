@@ -233,6 +233,12 @@ func transitionJob(graph *TaskGraph, id string, status JobStatus, actor, reason 
 				Reason: "existing Job state adopted", At: job.CreatedAt,
 			})
 		}
+		if status == JobCompleted {
+			ready, missing := graph.jobCompletionReadiness(id)
+			if !ready {
+				return graphError("Job %s cannot complete: %s", id, strings.Join(missing, "; "))
+			}
+		}
 		if !jobTransitionAllowed(job.Status, status) {
 			return graphError("invalid Job transition %s -> %s", job.Status, status)
 		}
