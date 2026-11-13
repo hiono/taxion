@@ -863,6 +863,8 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		config.EnableSkills = &enabled
 		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
 		config.Tools = append(config.Tools, a.mcpTools()...)
+	}
+	if a.config.ToolPolicy != nil || a.hasJobOperationAuthorizer() {
 		config.Hooks = a.toolHooks()
 	}
 	return config

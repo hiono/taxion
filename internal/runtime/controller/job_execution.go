@@ -487,7 +487,7 @@ func (c *JobRoleController) AuthorizeOperation(executionID, operation string, at
 // active RoleExecution by the exact provider session and checks that binding
 // again before allowing the requested operation.
 func (c *JobRoleController) AuthorizeSessionOperation(ctx context.Context, sessionID, operation string, at time.Time) error {
-	if c == nil || c.store == nil || c.runtime == nil || strings.TrimSpace(sessionID) == "" {
+	if c == nil || c.store == nil || c.runtime == nil || ctx == nil || strings.TrimSpace(sessionID) == "" {
 		return fmt.Errorf("taxion: Job session authorization requires an identified Runtime session")
 	}
 	if err := ctx.Err(); err != nil {
