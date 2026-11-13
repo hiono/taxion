@@ -252,6 +252,9 @@ func (c *JobRoleController) Send(ctx context.Context, executionID, prompt string
 			return errors.Join(err, fmt.Errorf("taxion: stop Runtime after Job revalidation failure: %w", stopErr))
 		}
 		suspendErr := c.store.UpdateWorkspace(func(state *store.Workspace) error {
+			if !state.HasGraph {
+				return fmt.Errorf("taxion: Job Role send requires a Task Graph while suspending stale Runtime")
+			}
 			current, ok := state.Graph.RoleExecution(executionID)
 			if !ok || current.RuntimeSessionID != execution.RuntimeSessionID ||
 				current.Status != core.RoleExecutionRunning {

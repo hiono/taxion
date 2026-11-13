@@ -399,6 +399,57 @@ func TestJobRoleControllerSendRejectsApprovalRevokedDuringResume(t *testing.T) {
 	}
 }
 
+func TestJobRoleControllerKeepsExecutionRunningWhenStaleRuntimeCannotBeStopped(t *testing.T) {
+	db, job, task, selection := jobRoleFixture(t, true)
+	now := time.Now().UTC()
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendRoleExecution(core.RoleExecution{
+			ID: "send-revoked-stop-fails", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker := &jobRoleRuntimeFake{
+		role: "CODER", configHash: "runtime-config-hash", selection: selection,
+		stopErr: fmt.Errorf("provider could not stop session"),
+	}
+	controller, err := NewJobRoleController(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Start(context.Background(), "send-revoked-stop-fails"); err != nil {
+		t.Fatal(err)
+	}
+	worker.onResume = func() {
+		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			for i := range state.Graph.Jobs {
+				if state.Graph.Jobs[i].ID == job.ID {
+					state.Graph.Jobs[i].Contract.Revision++
+					return nil
+				}
+			}
+			return fmt.Errorf("Job %s disappeared", job.ID)
+		}); err != nil {
+			t.Errorf("revoke current Job approval: %v", err)
+		}
+	}
+	if err := controller.Send(context.Background(), "send-revoked-stop-fails", "Continue the work."); err == nil {
+		t.Fatal("Send must report failed revalidation and failed Runtime stop")
+	}
+	if worker.sendCount != 0 || worker.stopCount != 1 {
+		t.Fatalf("send count=%d stop count=%d, want 0 and 1", worker.sendCount, worker.stopCount)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, ok := state.Graph.RoleExecution("send-revoked-stop-fails")
+	if !ok || execution.Status != core.RoleExecutionRunning {
+		t.Fatalf("execution status = %+v, want RUNNING while provider stop is unconfirmed", execution)
+	}
+}
+
 func TestJobRoleControllerDoesNotStartUnapprovedJob(t *testing.T) {
 	db, job, task, selection := jobRoleFixture(t, false)
 	now := time.Now().UTC()
