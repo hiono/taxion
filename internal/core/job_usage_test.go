@@ -110,3 +110,32 @@ func TestJobUsageRejectsDuplicateProviderAccountingIdentity(t *testing.T) {
 		t.Fatal("duplicate provider accounting identity must be rejected")
 	}
 }
+
+func TestCloneJobUsageCopiesProviderUsagePointers(t *testing.T) {
+	isAuto := true
+	input, output, cacheRead, cacheWrite := int64(1), int64(2), int64(3), int64(4)
+	amount := 5.0
+	credits := "available"
+	original := JobUsage{Usage: DispatchUsage{
+		IsAuto: &isAuto, InputTokens: &input, OutputTokens: &output,
+		CacheReadTokens: &cacheRead, CacheWriteTokens: &cacheWrite,
+		TotalNanoAIU: &amount, AICreditsStatus: &credits,
+		Accounting: &UsageAccountingIdentity{SourceSessionID: "session", Sequence: 1, UsageID: "usage"},
+	}}
+	cloned := cloneJobUsage(original)
+	*cloned.Usage.IsAuto = false
+	*cloned.Usage.InputTokens = 10
+	*cloned.Usage.OutputTokens = 20
+	*cloned.Usage.CacheReadTokens = 30
+	*cloned.Usage.CacheWriteTokens = 40
+	*cloned.Usage.TotalNanoAIU = 50
+	*cloned.Usage.AICreditsStatus = "exhausted"
+	cloned.Usage.Accounting.Sequence = 2
+
+	if !*original.Usage.IsAuto || *original.Usage.InputTokens != 1 ||
+		*original.Usage.OutputTokens != 2 || *original.Usage.CacheReadTokens != 3 ||
+		*original.Usage.CacheWriteTokens != 4 || *original.Usage.TotalNanoAIU != 5 ||
+		*original.Usage.AICreditsStatus != "available" || original.Usage.Accounting.Sequence != 1 {
+		t.Fatal("cloned JobUsage shares mutable Provider usage pointers with the original")
+	}
+}
