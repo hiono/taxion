@@ -310,7 +310,6 @@ func TestJobRoleControllerDoesNotStartUnapprovedJob(t *testing.T) {
 	}
 }
 
-
 func TestJobRoleControllerStartsPlannerWithoutTaskAssignment(t *testing.T) {
 	db, job, _, selection := jobRoleFixture(t, true)
 	now := time.Now().UTC()
@@ -421,7 +420,6 @@ func TestJobRoleControllerResumeRevalidatesCurrentJobApproval(t *testing.T) {
 		t.Fatalf("Runtime resumed %d times after approval became stale", worker.resumeCount)
 	}
 }
-
 
 func TestJobRolesExchangeMessagesAndResumeWithinOneJob(t *testing.T) {
 	db, job, task, selection := jobRoleFixture(t, true)
