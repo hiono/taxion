@@ -55,6 +55,7 @@ type IntakeConfirmation struct {
 	RequestOperationID      string               `json:"requestOperationId,omitempty"`
 	RequestBasisHash        string               `json:"requestBasisHash,omitempty"`
 	JobContract             *core.JobContract    `json:"jobContract,omitempty"`
+	ExpectedJobContractHash string               `json:"expectedJobContractHash,omitempty"`
 }
 
 // VerifyRequestConfirmation reads the formal intake decision and its original
@@ -119,17 +120,13 @@ func VerifyRequestConfirmation(graph core.TaskGraph, taskID, operationID, propos
 		if !ok {
 			return fmt.Errorf("taxion: approved request Task has no owning Job")
 		}
-		jobApprovalFound := false
-		for _, approval := range graph.JobApprovals {
-			if approval.Proposal.JobID == job.ID &&
-				approval.Proposal.Revision == confirmation.JobContract.Revision &&
-				reflect.DeepEqual(approval.Proposal.Contract, *confirmation.JobContract) &&
-				approval.Verify() == nil {
-				jobApprovalFound = true
-				break
-			}
+		if confirmation.ExpectedJobContractHash == "" {
+			return fmt.Errorf("taxion: request approval lacks the exact Job contract hash")
 		}
-		if !jobApprovalFound {
+		approval, ok := graph.CurrentJobApproval(job.ID)
+		if !ok || approval.ProposalHash != confirmation.ExpectedJobContractHash ||
+			approval.Proposal.Revision != confirmation.JobContract.Revision ||
+			!reflect.DeepEqual(approval.Proposal.Contract, *confirmation.JobContract) {
 			return fmt.Errorf("taxion: request approval lacks the exact immutable Job approval")
 		}
 	}
@@ -454,24 +451,6 @@ func BuildJobContractForIntake(task core.GraphTask, configuration core.ApprovalC
 	return contract, nil
 }
 
-func defaultJobContractForIntake(task core.GraphTask, selection config.Config) (*core.JobContract, error) {
-	encoded, err := json.Marshal(selection)
-	if err != nil {
-		return nil, err
-	}
-	configuration, err := core.SelectApprovalConfiguration(encoded, nil)
-	if err != nil {
-		return nil, err
-	}
-	contract, err := BuildJobContractForIntake(task, configuration,
-		core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 2, MaxNanoAIU: 1000},
-		time.Now().UTC().Add(24*time.Hour))
-	if err != nil {
-		return nil, err
-	}
-	return &contract, nil
-}
-
 func cloneIntakeJobContract(contract *core.JobContract) (*core.JobContract, error) {
 	if contract == nil {
 		return nil, nil
@@ -552,6 +531,9 @@ func appendConfirmedJobApproval(state *store.Workspace, task core.GraphTask, req
 	if err != nil {
 		return err
 	}
+	if request.ExpectedJobContractHash == "" || proposalHash != request.ExpectedJobContractHash {
+		return fmt.Errorf("taxion: Job contract differs from the exact proposal shown for approval")
+	}
 	if existing, ok := state.Graph.CurrentJobApproval(job.ID); ok && existing.ProposalHash == proposalHash {
 		return nil
 	}
@@ -587,21 +569,22 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 	}
 	modelFree := modelFreeVerification(taskForContract)
 	if modelFree {
-		if request.JobContract != nil {
-			return core.GraphTask{}, fmt.Errorf("taxion: model-free verification cannot include a Job execution contract")
+		if request.JobContract != nil || request.ExpectedJobContractHash != "" {
+			return core.GraphTask{}, fmt.Errorf("taxion: model-free verification cannot include Job execution authorization")
 		}
-	} else if request.JobContract == nil {
-		job, ok := initialState.Graph.JobForTask(taskForContract.ID)
-		if !ok {
-			return core.GraphTask{}, fmt.Errorf("taxion: intake Task has no owning Job")
-		}
-		if job.Contract != nil {
+	} else {
+		if request.JobContract == nil {
+			job, ok := initialState.Graph.JobForTask(taskForContract.ID)
+			if !ok || job.Contract == nil {
+				return core.GraphTask{}, fmt.Errorf("taxion: non-model-free intake requires an explicitly proposed Job contract")
+			}
 			request.JobContract, err = cloneIntakeJobContract(job.Contract)
-		} else {
-			request.JobContract, err = defaultJobContractForIntake(taskForContract, request.Selection)
+			if err != nil {
+				return core.GraphTask{}, err
+			}
 		}
-		if err != nil {
-			return core.GraphTask{}, err
+		if strings.TrimSpace(request.ExpectedJobContractHash) == "" {
+			return core.GraphTask{}, fmt.Errorf("taxion: non-model-free intake requires the exact displayed Job contract hash")
 		}
 	}
 	if modelFree {
