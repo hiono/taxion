@@ -1,10 +1,9 @@
 package core
 
 import (
-	"encoding/json"
 	"math"
+	"maps"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -74,7 +73,7 @@ func cloneJobContract(contract *JobContract) *JobContract {
 		copy.Repositories[i].FileAccess.Paths = slices.Clone(contract.Repositories[i].FileAccess.Paths)
 	}
 	copy.Configuration.Selection = slices.Clone(contract.Configuration.Selection)
-	copy.Configuration.Sources = mapsCloneStringString(contract.Configuration.Sources)
+	copy.Configuration.Sources = maps.Clone(contract.Configuration.Sources)
 	return &copy
 }
 
@@ -303,5 +302,3 @@ func (g TaskGraph) HasUnapprovedJob(jobID string) bool {
 	return !ok
 }
 
-var _ = strings.TrimSpace
-var _ = json.Valid
