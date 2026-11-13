@@ -213,11 +213,10 @@ func TestIntakeReplayCannotChangeExplicitJobMembership(t *testing.T) {
 	}
 	task, _ := state.Graph.GraphTask("task")
 	task.ID, task.Status, task.AuthorizationID, task.Decisions = "replay-membership", core.Draft, "", nil
-	proposal, err := ProposeIntake(db, IntakeRequest{
+	if _, err := ProposeIntake(db, IntakeRequest{
 		Task: task, Request: "Keep the original Task authorization mode.",
 		Actor: "human", Source: "human:legacy",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	job, err := ProposeJob(db, JobIntakeRequest{
