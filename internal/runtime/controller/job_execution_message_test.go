@@ -2,8 +2,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
