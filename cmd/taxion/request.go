@@ -643,10 +643,61 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		if answer.Proposal != nil && !slices.Contains(answer.Proposal.Acceptance, core.DocumentationAcceptance) {
 			answer.Proposal.Acceptance = append(answer.Proposal.Acceptance, core.DocumentationAcceptance)
 		}
+		var jobApprovalProposal core.JobApprovalProposal
+		var jobApprovalHash string
+		if answer.Proposal != nil && len(answer.Questions) == 0 {
+			job, err := controller.ProposeJob(db, controller.JobIntakeRequest{
+				JobID: id + "-job", Request: "request-digest:" + checkpoint.RequestHash,
+				Goal: "Complete the approved request plan", Actor: selected.Execution.Requester,
+				Source: "planner:" + task.ID,
+			})
+			if err != nil {
+				return err
+			}
+			approvalConfiguration, err := approvalConfigurationFor(selected, resolved.Sources)
+			if err != nil {
+				return err
+			}
+			remainingNanoAIU := operation.MaxNanoAIU - operation.PlanningNanoAIU
+			if operation.ExternalBudgetOnly() {
+				remainingNanoAIU = 0
+			}
+			executionTaskProposal := core.GraphTask{
+				ID: id, JobID: job.ID, Title: answer.Proposal.Title, Objective: answer.Proposal.Objective,
+				Repo: *repo, Type: "IMPLEMENTATION", Status: core.Draft, CreatedFrom: source,
+				Issue: "NOT_REQUIRED: user-approved local request",
+				Owner: "CODER", Reviewer: "REVIEWER", Scope: answer.Proposal.Scope,
+				OutOfScope: answer.Proposal.OutOfScope, Acceptance: answer.Proposal.Acceptance,
+				ValidationCommands: answer.Proposal.ValidationCommands,
+				RequiredEvidence: []string{"work-report"}, ExitCondition: "Independent review approves all acceptance criteria",
+				OutputMode: core.OutputModeWorktreeTreeSnapshot, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessAll},
+				BudgetGuidance: core.CloneBudgetGuidance(guidance), Worktree: root, Branch: branch, BaselineSHA: baseline,
+			}
+			contract, err := controller.BuildJobContractForIntake(executionTaskProposal, approvalConfiguration, core.JobBudget{
+				MaxRoleExecutions: 2 + 2*(*repairs), MaxConcurrentExecutions: 1,
+				MaxNanoAIU: remainingNanoAIU, AccountQuotaOnly: operation.AccountQuotaOnly,
+				BudgetSource: operation.BudgetSource,
+			}, operation.Deadline)
+			if err != nil {
+				return err
+			}
+			jobApprovalProposal, jobApprovalHash, err = controller.ProposeJobContract(db, controller.JobContractProposalRequest{
+				JobID: job.ID, Contract: contract, Actor: selected.Execution.Requester,
+				Source: "planner:" + task.ID, Reason: "propose the exact request execution boundary for human approval",
+			})
+			if err != nil {
+				return err
+			}
+		}
 		if checkpoint.Answer == nil {
 			var displayed bytes.Buffer
 			if err := displayRequestPlan(&displayed, answer); err != nil {
 				return err
+			}
+			if jobApprovalHash != "" {
+				if err := displayRequestJobContract(&displayed, jobApprovalProposal, jobApprovalHash); err != nil {
+					return err
+				}
 			}
 			if err := captureRequestSource(db, id, "design", "planner:"+task.ID, displayed.String()); err != nil {
 				return err
@@ -666,6 +717,11 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 		} else {
 			if err := displayRequestPlan(output, answer); err != nil {
 				return err
+			}
+			if jobApprovalHash != "" {
+				if err := displayRequestJobContract(output, jobApprovalProposal, jobApprovalHash); err != nil {
+					return err
+				}
 			}
 			line, err = read()
 		}
@@ -733,7 +789,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 					Request: string(executionRequest), Actor: selected.Execution.Requester, Source: "planner:" + task.ID,
 					ContextSources: contextSources,
 					Task: core.GraphTask{
-						ID: id, Title: proposal.Title, Objective: proposal.Objective, Repo: *repo,
+						ID: id, JobID: id + "-job", Title: proposal.Title, Objective: proposal.Objective, Repo: *repo,
 						Type: "IMPLEMENTATION", Status: core.Draft, CreatedFrom: source,
 						Issue: "NOT_REQUIRED: user-approved local request",
 						Owner: "CODER", Reviewer: "REVIEWER", Scope: proposal.Scope, OutOfScope: proposal.OutOfScope,
@@ -768,6 +824,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 					Selection: selected, AdditionalTaskIDs: reviewers,
 					ConfigurationDecisionID: core.ConfigurationApprovalID(selected.Execution.ApprovalRef, id),
 					RequestOperationID:      id, RequestBasisHash: basis,
+					JobContract: &jobApprovalProposal.Contract, ExpectedJobContractHash: jobApprovalHash,
 				}); err != nil {
 					return err
 				}
@@ -885,6 +942,23 @@ func displayRequestPlan(output io.Writer, answer controller.QuestionAnswer) erro
 	fmt.Fprintln(&text, "Enter revisions or answers in natural language. Use /approve to execute a plan with all questions resolved, or /quit to exit.")
 	_, err := output.Write(text.Bytes())
 	return err
+}
+
+func displayRequestJobContract(output io.Writer, proposal core.JobApprovalProposal, hash string) error {
+	data, err := json.MarshalIndent(proposal, "", "  ")
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(output, "\nJob execution contract (approval required):"); err != nil {
+		return err
+	}
+	if _, err := output.Write(data); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(output, "\nJob proposal hash: %s\nApprove only this exact Job contract with /approve.\n", hash); err != nil {
+		return err
+	}
+	return nil
 }
 
 func displayRequestUsage(output io.Writer, usage []core.DispatchUsage, sessionCeiling float64,
