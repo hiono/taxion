@@ -127,6 +127,64 @@ func (c *JobRoleController) Start(ctx context.Context, executionID string) (stri
 	return sessionID, nil
 }
 
+// Resume reattaches a waiting or suspended RoleExecution only while its
+// current Job approval, budget, Task scope and Runtime identity remain valid.
+func (c *JobRoleController) Resume(ctx context.Context, executionID string) error {
+	if c == nil || c.store == nil || c.runtime == nil {
+		return fmt.Errorf("taxion: Job Role controller is not initialized")
+	}
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	if !state.HasGraph {
+		return fmt.Errorf("taxion: Job Role resume requires a Task Graph")
+	}
+	execution, ok := state.Graph.RoleExecution(executionID)
+	if !ok || execution.Role != c.runtime.Role() || execution.RuntimeSessionID == "" ||
+		execution.RuntimeConfigHash != c.runtime.ConfigHash() {
+		return fmt.Errorf("taxion: RoleExecution is not bound to this Runtime")
+	}
+	job, ok := state.Graph.Job(execution.JobID)
+	if !ok || job.Contract == nil {
+		return fmt.Errorf("taxion: RoleExecution has no Job contract")
+	}
+	if err := state.Graph.CheckRoleExecutionResume(executionID, time.Now().UTC()); err != nil {
+		return err
+	}
+	if err := c.checkConfiguration(ctx, job); err != nil {
+		return err
+	}
+	if err := c.runtime.Resume(ctx, execution.RuntimeSessionID); err != nil {
+		return err
+	}
+	if identity, ok := c.runtime.(runtime.ConfigurationIdentity); ok {
+		if err := identity.CheckServiceAccess(ctx, execution.RuntimeSessionID); err != nil {
+			return err
+		}
+	}
+	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		current, ok := state.Graph.RoleExecution(executionID)
+		if !ok || current.RuntimeSessionID != execution.RuntimeSessionID ||
+			current.RuntimeConfigHash != c.runtime.ConfigHash() {
+			return fmt.Errorf("taxion: RoleExecution Runtime binding changed during resume")
+		}
+		now := time.Now().UTC()
+		if err := state.Graph.CheckRoleExecutionResume(executionID, now); err != nil {
+			return err
+		}
+		if err := state.Graph.TransitionRoleExecution(executionID, core.RoleExecutionRunning,
+			"controller", "Job Role Runtime session resumed", now); err != nil {
+			return err
+		}
+		_, contextHash, err := BuildJobExecutionContext(state.Graph, executionID)
+		if err != nil {
+			return err
+		}
+		return state.Graph.BindRoleExecutionContextHash(executionID, contextHash)
+	})
+}
+
 // Send refreshes the Job context before every Role turn. The Runtime receives
 // the current Job scope, messages, Tasks, outputs and evidence as one snapshot.
 func (c *JobRoleController) Send(ctx context.Context, executionID, prompt string) error {
