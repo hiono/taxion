@@ -44,3 +44,54 @@ func TestJobConversationRejectsReplyToDifferentJobOrRole(t *testing.T) {
 		t.Fatal("cross-Job reply must be rejected")
 	}
 }
+
+
+func TestJobMessageReplyBindsExactRoleExecutions(t *testing.T) {
+	now := time.Now().UTC()
+	graph := TaskGraph{
+		Version: 1,
+		Jobs: []Job{{ID: "job-reply", Request: "request", Goal: "goal",
+			Status: JobActive, CreatedAt: now, UpdatedAt: now}},
+	}
+	for _, execution := range []RoleExecution{
+		{ID: "coder", JobID: "job-reply", Role: "CODER", Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
+		{ID: "planner-1", JobID: "job-reply", Role: "PLANNER", Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
+		{ID: "planner-2", JobID: "job-reply", Role: "PLANNER", Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := graph.AppendRoleExecution(execution); err != nil {
+			t.Fatalf("append execution %s: %v", execution.ID, err)
+		}
+	}
+	if err := graph.AppendJobMessage(JobMessage{
+		ID: "request-1", JobID: "job-reply", FromRole: "CODER", ToRole: "PLANNER",
+		Body: "Please check this assumption.", Source: "role-execution:coder",
+		SourceExecutionID: "coder", TargetExecutionID: "planner-1", At: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("append request: %v", err)
+	}
+
+	wrongSender := JobMessage{
+		ID: "reply-wrong-sender", JobID: "job-reply", FromRole: "PLANNER", ToRole: "CODER",
+		Body: "Answer from another Planner execution.", Source: "role-execution:planner-2",
+		SourceExecutionID: "planner-2", TargetExecutionID: "coder",
+		ReplyTo: "request-1", At: now.Add(2 * time.Second),
+	}
+	if err := graph.AppendJobMessage(wrongSender); err == nil {
+		t.Fatal("reply from a different execution of the same Role must be rejected")
+	}
+
+	wrongTarget := wrongSender
+	wrongTarget.ID = "reply-wrong-target"
+	wrongTarget.SourceExecutionID = "planner-1"
+	wrongTarget.TargetExecutionID = "planner-2"
+	if err := graph.AppendJobMessage(wrongTarget); err == nil {
+		t.Fatal("reply targeting a different originating execution must be rejected")
+	}
+
+	validReply := wrongSender
+	validReply.ID = "reply-valid"
+	validReply.SourceExecutionID = "planner-1"
+	if err := graph.AppendJobMessage(validReply); err != nil {
+		t.Fatalf("reply from and to the exact addressed executions should be accepted: %v", err)
+	}
+}
