@@ -141,4 +141,3 @@ func (g TaskGraph) JobUsageRecords(jobID string) []JobUsage {
 	}
 	return result
 }
-
