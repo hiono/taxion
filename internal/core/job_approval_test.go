@@ -199,7 +199,7 @@ func TestCheckRoleExecutionStartRequiresCurrentJobApproval(t *testing.T) {
 	task := GraphTask{
 		ID: "task-start", Title: "Start Task", JobID: job.ID, Repo: "example/repo",
 		Type: "IMPLEMENTATION", Status: Draft, CreatedFrom: "test:job-approval",
-		Issue: "NOT_REQUIRED: isolated Job approval unit test",
+		Issue:      "NOT_REQUIRED: isolated Job approval unit test",
 		FileAccess: &FileAccessPolicy{Level: FileAccessExact, Paths: []string{"src/main.go"}},
 	}
 	graph := TaskGraph{Version: 1, Jobs: []Job{job}, Tasks: []GraphTask{task}}

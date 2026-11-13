@@ -14,7 +14,7 @@ func TestJobCompletionReadyBlocksSuspendedRoleExecution(t *testing.T) {
 	task := GraphTask{
 		ID: "task-completion", Title: "Completion Task", JobID: job.ID, Repo: "example/repo",
 		Type: "IMPLEMENTATION", Status: Draft, CreatedFrom: "test:job-artifact",
-		Issue: "NOT_REQUIRED: isolated Job completion unit test",
+		Issue:      "NOT_REQUIRED: isolated Job completion unit test",
 		FileAccess: &FileAccessPolicy{Level: FileAccessCommitted},
 	}
 	graph := TaskGraph{Version: 1, Jobs: []Job{job}, Tasks: []GraphTask{task}}
