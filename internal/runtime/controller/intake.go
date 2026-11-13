@@ -345,8 +345,8 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 		if strings.TrimSpace(request.PlanningReason) == "" || request.PlanningSelection.Repository.Path != task.Repo {
 			return core.GraphTask{}, fmt.Errorf("taxion: isolated intake planning requires explicit configuration reason and matching repository")
 		}
-		selection := *request.PlanningSelection
-		decisionID := request.ConfigurationDecisionID
+		selection:  = *request.PlanningSelection
+		decisionID: = request.ConfigurationDecisionID
 		if decisionID == "" {
 			decisionID = selection.Execution.ApprovalRef
 		}
@@ -442,19 +442,19 @@ func BuildJobContractForIntake(task core.GraphTask, configuration core.ApprovalC
 		operations = append(operations, "test.run")
 	}
 	contract := core.JobContract{
-		Revision        : 1,
-		Roles           : []string{"PLANNER", "CODER", "REVIEWER"},
-		Acceptance      : slices.Clone(task.Acceptance),
+		Revision:         1,
+		Roles:            []string{"PLANNER", "CODER", "REVIEWER"},
+		Acceptance:       slices.Clone(task.Acceptance),
 		RequiredEvidence: slices.Clone(task.RequiredEvidence),
-		Repositories    : []core.JobRepositoryScope{{
+		Repositories:     []core.JobRepositoryScope{{
 			Repository: task.Repo,
 			FileAccess: *task.FileAccess,
 		}},
-		Operations          : operations,
-		Budget              : budget,
-		Deadline            : deadline,
+		Operations:           operations,
+		Budget:               budget,
+		Deadline:             deadline,
 		SecurityRestrictions: []string{"no credential export", "no network access"},
-		Configuration       : configuration,
+		Configuration:        configuration,
 	}
 	if err := contract.Validate(); err != nil {
 		return core.JobContract{}, err
@@ -827,7 +827,7 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		}
 		if !modelFree {
 			approvalText, err := json.Marshal(config.Approval{
-				Kind   : config.ApprovalKind, TaskID: task.ID, Reason: request.Reason,
+				Kind:    config.ApprovalKind, TaskID: task.ID, Reason: request.Reason,
 				Allowed: []config.Config{request.Selection}, AdditionalTaskIDs: request.AdditionalTaskIDs,
 			})
 			if err != nil {

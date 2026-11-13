@@ -76,7 +76,7 @@ func intakeApprovalFixture(t *testing.T, bundleRequired bool) (*store.Store, Int
 		t.Fatal(err)
 	}
 	return db, IntakeConfirmation{TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirmed",
-		Reason   : "Approve the displayed Task and Job contracts and selected configuration.",
+		Reason:    "Approve the displayed Task and Job contracts and selected configuration.",
 		Selection: resolved.Config, JobContract: &contract, ExpectedJobContractHash: jobHash}
 }
 
@@ -319,7 +319,7 @@ func TestConfirmedFlowUsesAlreadyApprovedReviewerWithoutNewDelegation(t *testing
 	}
 	hash, _ := IntakeHash(proposal)
 	confirmation := IntakeConfirmation{TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirm",
-		Reason           : "Approve this contract and both bounded review configurations.", Selection: resolved.Config,
+		Reason:            "Approve this contract and both bounded review configurations.", Selection: resolved.Config,
 		AdditionalTaskIDs: []string{flowRequest.ID + "-review-0", flowRequest.ID + "-review-1"}}
 	confirmation = withExplicitJobContractForIntake(t, db, confirmation)
 	if _, err := ConfirmIntake(db, confirmation); err != nil {
@@ -390,7 +390,7 @@ func testIntakeRepositoryConfirmation(t *testing.T, repo string) {
 		t.Fatal(err)
 	}
 	confirmation := IntakeConfirmation{TaskID: saved.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirm",
-		Reason           : "Confirm this scope, acceptance, validation, actors and contract.", Selection: resolved.Config,
+		Reason:            "Confirm this scope, acceptance, validation, actors and contract.", Selection: resolved.Config,
 		AdditionalTaskIDs: []string{"intake-flow-review-0", "intake-flow-review-1"}}
 	confirmation = withExplicitJobContractForIntake(t, db, confirmation)
 	before, _ := db.LoadWorkspace()
@@ -449,11 +449,11 @@ func TestReapprovalCreatesSuccessorWithoutRewritingIssuedContract(t *testing.T) 
 	}
 	hash, _ := IntakeHash(saved)
 	confirm := IntakeConfirmation{TaskID: saved.ID, ExpectedHash: hash, Actor: "human", Source: "human:reapprove",
-		Reason      : "Explicitly approve revised scope, acceptance and selected identity.", Selection: selected.Config,
+		Reason:       "Explicitly approve revised scope, acceptance and selected identity.", Selection: selected.Config,
 		ReplacesFlow: old.ID, Target: &planner.Target, AdditionalTaskIDs: []string{"successor-flow-review-0"}}
 	confirm = withExplicitJobContractForIntake(t, db, confirm)
-	stale := confirm
-	target := *confirm.Target
+	stale:  = confirm
+	target: = *confirm.Target
 	target.OutputSHA = old.Contract.BaselineSHA
 	stale.Target = &target
 	if _, err := ConfirmIntake(db, stale); err == nil {
@@ -476,8 +476,8 @@ func TestReapprovalCreatesSuccessorWithoutRewritingIssuedContract(t *testing.T) 
 	}
 	repairs := 0
 	if _, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
-		ID           : "successor-flow", TaskID: saved.ID, Repository: saved.Repo, ReviewRoot: old.ReviewRoot,
-		MaxRepairs   : &repairs, TimeoutSeconds: 30, MaxNanoAIU: 1e12,
+		ID:            "successor-flow", TaskID: saved.ID, Repository: saved.Repo, ReviewRoot: old.ReviewRoot,
+		MaxRepairs:    &repairs, TimeoutSeconds: 30, MaxNanoAIU: 1e12,
 		Authorization: core.TaskDecision{ID: "new-flow-approval", Source: "human:new-budget", Text: "Authorize a separately bounded successor"},
 	}); err != nil {
 		t.Fatal("old held flow blocked explicitly approved successor execution", err)
@@ -499,8 +499,8 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatchID := flow.DispatchIDs[0]
-	worker := &fakeRuntime{role: "CODER", hash: "budget-runtime", worktree: flow.Contract.Worktree}
+	dispatchID: = flow.DispatchIDs[0]
+	worker:     = &fakeRuntime{role: "CODER", hash: "budget-runtime", worktree: flow.Contract.Worktree}
 	control, err := New(db, worker)
 	if err != nil {
 		t.Fatal(err)
@@ -539,8 +539,8 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 		gitTest(t, sourceWorktree, "add", "-A")
 		gitTest(t, sourceWorktree, "commit", "-m", "chore: checkpoint partial work")
 	}
-	targetSHA := gitTest(t, sourceWorktree, "rev-parse", "HEAD")
-	successorWorktree := filepath.Join(t.TempDir(), "successor")
+	targetSHA:         = gitTest(t, sourceWorktree, "rev-parse", "HEAD")
+	successorWorktree: = filepath.Join(t.TempDir(), "successor")
 	gitTest(t, sourceWorktree, "worktree", "add", "-b", "work/successor", successorWorktree, targetSHA)
 	task := flow.Contract
 	task.ID, task.Status, task.AuthorizationID, task.Decisions = "budget-successor", core.Draft, "", nil
@@ -561,7 +561,7 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 	_, _, _, selection := executionConfigurationFixture(t)
 	proposal, err := ProposeIntake(db, IntakeRequest{
 		Request: "Continue the stopped work from its recorded partial tree with a new budget.",
-		Task   : task, Actor: "human", Source: "human:budget-successor",
+		Task:    task, Actor: "human", Source: "human:budget-successor",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -575,8 +575,8 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 		t.Fatal(err)
 	}
 	confirmation := withExplicitJobContractForIntake(t, db, IntakeConfirmation{
-		TaskID   : proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:budget-successor",
-		Reason   : "Approve the exact partial tree and successor contract under a new execution budget.",
+		TaskID:    proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:budget-successor",
+		Reason:    "Approve the exact partial tree and successor contract under a new execution budget.",
 		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
 	})
 	approved, err := ConfirmIntake(db, confirmation)
@@ -585,8 +585,8 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 	}
 	repairs := 0
 	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
-		ID           : "budget-successor-flow", TaskID: approved.ID, Repository: approved.Repo, ReviewRoot: flow.ReviewRoot,
-		MaxRepairs   : &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
+		ID:            "budget-successor-flow", TaskID: approved.ID, Repository: approved.Repo, ReviewRoot: flow.ReviewRoot,
+		MaxRepairs:    &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
 		Authorization: core.TaskDecision{ID: "new-budget", Source: "human:new-budget", Text: "Approve a separate execution budget"},
 	})
 	if err != nil {
@@ -648,7 +648,7 @@ func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T
 	_, _, _, selection := executionConfigurationFixture(t)
 	proposal, err := ProposeIntake(db, IntakeRequest{
 		Request: "Continue the saved Coder result directly at independent review with a new budget.",
-		Task   : task, Actor: "human", Source: "human:review-successor",
+		Task:    task, Actor: "human", Source: "human:review-successor",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -662,8 +662,8 @@ func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T
 		t.Fatal(err)
 	}
 	confirmation := withExplicitJobContractForIntake(t, db, IntakeConfirmation{
-		TaskID   : proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:review-successor",
-		Reason   : "Approve the exact saved Coder output and a new independent-review budget.",
+		TaskID:    proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:review-successor",
+		Reason:    "Approve the exact saved Coder output and a new independent-review budget.",
 		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
 	})
 	approved, err := ConfirmIntake(db, confirmation)
@@ -672,9 +672,9 @@ func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T
 	}
 	repairs := 0
 	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
-		ID                    : "review-successor-flow", TaskID: approved.ID, Repository: approved.Repo, ReviewRoot: flow.ReviewRoot,
+		ID:                     "review-successor-flow", TaskID: approved.ID, Repository: approved.Repo, ReviewRoot: flow.ReviewRoot,
 		ContinueFromDispatchID: coder.ID, MaxRepairs: &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
-		Authorization         : core.TaskDecision{ID: "new-review-budget", Source: "human:new-review-budget", Text: "Approve a separate review budget"},
+		Authorization:          core.TaskDecision{ID: "new-review-budget", Source: "human:new-review-budget", Text: "Approve a separate review budget"},
 	})
 	if err != nil {
 		t.Fatal("new flow did not continue at the saved Coder result", err)
@@ -866,7 +866,7 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	_, _, _, selection := executionConfigurationFixture(t)
 	proposal, err := ProposeIntake(db, IntakeRequest{
 		Request: "Continue the saved uncommitted Coder tree directly at independent review.",
-		Task   : task, Actor: "human", Source: "human:snapshot-review-successor",
+		Task:    task, Actor: "human", Source: "human:snapshot-review-successor",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -895,7 +895,7 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 		Skills: []tools.Asset{{Path: skills, Hash: skillHash}}, EvidenceDirectory: filepath.Join(t.TempDir(), "review-evidence"),
 	}
 	approval, err := json.Marshal(tools.Approval{
-		Kind : tools.ApprovalKind, TaskID: proposal.ID, Actor: "human",
+		Kind:  tools.ApprovalKind, TaskID: proposal.ID, Actor: "human",
 		Roles: map[string]tools.Policy{"REVIEWER": policy},
 	})
 	if err != nil {
@@ -918,10 +918,10 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 		t.Fatal(err)
 	}
 	confirmation := withExplicitJobContractForIntake(t, db, IntakeConfirmation{
-		TaskID                 : proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:snapshot-review-successor",
-		Reason                 : "Approve the exact saved tree and a separate independent-review budget.",
-		Selection              : selection.Config, ReplacesFlow: flow.ID, Target: &target,
-		AdditionalTaskIDs      : []string{"snapshot-review-successor-flow-review-0"},
+		TaskID:                  proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:snapshot-review-successor",
+		Reason:                  "Approve the exact saved tree and a separate independent-review budget.",
+		Selection:               selection.Config, ReplacesFlow: flow.ID, Target: &target,
+		AdditionalTaskIDs:       []string{"snapshot-review-successor-flow-review-0"},
 		ConfigurationDecisionID: core.ConfigurationApprovalID(selection.Config.Execution.ApprovalRef, proposal.ID),
 	})
 	approved, err := ConfirmIntake(db, confirmation)
@@ -938,11 +938,11 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	}
 	repairs := 0
 	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
-		ID           : "snapshot-review-successor-flow", TaskID: approved.ID, Repository: approved.Repo,
-		ReviewRoot   : flow.ReviewRoot, ContinueFromDispatchID: coder.ID,
-		MaxRepairs   : &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
+		ID:            "snapshot-review-successor-flow", TaskID: approved.ID, Repository: approved.Repo,
+		ReviewRoot:    flow.ReviewRoot, ContinueFromDispatchID: coder.ID,
+		MaxRepairs:    &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
 		Authorization: core.TaskDecision{
-			ID  : "new-snapshot-review-budget", Source: "human:new-snapshot-review-budget",
+			ID:   "new-snapshot-review-budget", Source: "human:new-snapshot-review-budget",
 			Text: "Approve a separate review budget",
 		},
 	})
@@ -1018,7 +1018,7 @@ func TestDraftPlanningApprovalDoesNotAuthorizeExecution(t *testing.T) {
 	task, _ := state.Graph.GraphTask("task")
 	task.ID, task.Status, task.AuthorizationID, task.Decisions = "planning-intake", core.Draft, "", nil
 	saved, err := ProposeIntake(db, IntakeRequest{Request: "Clarify this scope and acceptance before implementation.",
-		Task          : task, Actor: "human", Source: "human:request", PlanningSelection: &resolved.Config,
+		Task:           task, Actor: "human", Source: "human:request", PlanningSelection: &resolved.Config,
 		PlanningReason: "Authorize only a separate bounded tool-free planning conversation."})
 	if err != nil {
 		t.Fatal(err)
@@ -1067,27 +1067,27 @@ func TestModelFreeVerificationCanBeConfirmedAndCompletedWithoutRuntime(t *testin
 	defer db.Close()
 	if _, err := db.InitializeWorkspace(store.Workspace{
 		HasGraph: true, Graph: core.TaskGraph{Version: 1, ApprovalSchemaVersion: core.CurrentApprovalSchemaVersion},
-		Ledger  : core.Ledger{},
+		Ledger:   core.Ledger{},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	sha := strings.Repeat("a", 40)
-	task := core.GraphTask{
-		ID                : "manual-verification", Title: "Verify saved acceptance evidence", Repo: "owner/repo",
-		Type              : "VERIFICATION", Issue: "Issue #203", CreatedFrom: "human:review-approval",
-		Owner             : "USER", Reviewer: "REVIEWER", Status: core.Draft, ModelFree: true,
-		Objective         : "Re-run the model-free successor regression and record the evidence boundary.",
-		Scope             : []string{"internal/runtime/controller/artifact_successor_test.go"},
-		OutOfScope        : []string{"source changes", "model execution"},
-		Acceptance        : []string{"focused test passes", "public binary evidence is limited to read-only plan"},
-		RequiredEvidence  : []string{"focused-test-output"},
+	sha:  = strings.Repeat("a", 40)
+	task: = core.GraphTask{
+		ID:                 "manual-verification", Title: "Verify saved acceptance evidence", Repo: "owner/repo",
+		Type:               "VERIFICATION", Issue: "Issue #203", CreatedFrom: "human:review-approval",
+		Owner:              "USER", Reviewer: "REVIEWER", Status: core.Draft, ModelFree: true,
+		Objective:          "Re-run the model-free successor regression and record the evidence boundary.",
+		Scope:              []string{"internal/runtime/controller/artifact_successor_test.go"},
+		OutOfScope:         []string{"source changes", "model execution"},
+		Acceptance:         []string{"focused test passes", "public binary evidence is limited to read-only plan"},
+		RequiredEvidence:   []string{"focused-test-output"},
 		ValidationCommands: []string{"go test ./internal/runtime/controller -run TestFailedArtifactSuccessorBindsReceiptAndRunsCoderThenReview -count=1"},
-		Branch            : "review/issue-203", Worktree: dir, BaselineSHA: sha, TargetSHA: sha,
-		ExitCondition     : "Independent evidence review is recorded",
+		Branch:             "review/issue-203", Worktree: dir, BaselineSHA: sha, TargetSHA: sha,
+		ExitCondition:      "Independent evidence review is recorded",
 	}
 	proposal, err := ProposeIntake(db, IntakeRequest{
 		Request: "Record the approved model-free acceptance review.", Task: task,
-		Actor  : "human", Source: "human:review-approval",
+		Actor:   "human", Source: "human:review-approval",
 	})
 	if err != nil {
 		t.Fatal("model-free verification proposal required runtime configuration", err)
@@ -1114,10 +1114,10 @@ func TestModelFreeVerificationCanBeConfirmedAndCompletedWithoutRuntime(t *testin
 		t.Fatal("model-free verification became dispatchable")
 	}
 	request := ReviewFlowRequest{
-		ID            : "manual-verification-flow", TaskID: task.ID, Repository: task.Repo,
-		ReviewRoot    : filepath.Join(dir, "reviews"), MaxRepairs: new(int),
+		ID:             "manual-verification-flow", TaskID: task.ID, Repository: task.Repo,
+		ReviewRoot:     filepath.Join(dir, "reviews"), MaxRepairs: new(int),
 		TimeoutSeconds: 60, MaxNanoAIU: 1,
-		Authorization : core.TaskDecision{ID: "flow-authorization", Source: "human:review-approval", Text: "No model execution"},
+		Authorization:  core.TaskDecision{ID: "flow-authorization", Source: "human:review-approval", Text: "No model execution"},
 	}
 	if _, err := StartReviewFlow(db, filepath.Join(dir, "ledger.json"), request); err == nil {
 		t.Fatal("model-free verification started a review flow")
@@ -1131,7 +1131,7 @@ func TestModelFreeVerificationCanBeConfirmedAndCompletedWithoutRuntime(t *testin
 	}
 	proof := core.TransitionProof{
 		ActionPerformed: true, Evidence: []string{"focused-test-output"},
-		Acceptance     : task.Acceptance, ReviewedSHA: sha, Reviewer: task.Reviewer,
+		Acceptance:      task.Acceptance, ReviewedSHA: sha, Reviewer: task.Reviewer,
 	}
 	for _, status := range []core.TaskStatus{core.Approved, core.Completed} {
 		if err := db.UpdateWorkspace(func(state *store.Workspace) error {
@@ -1181,7 +1181,7 @@ func TestPlannerNonExecutionActionRecordsDecisionWithoutRepair(t *testing.T) {
 			}
 			if _, err := ResolveFeedback(db, FeedbackResolutionRequest{
 				FlowID: flow.ID, FeedbackID: request.ID, FeedbackResolution: core.FeedbackResolution{
-					ID   : "dispose-action", ExpectedChangeID: "hold", Target: request.Target, Action: "KEEP_CONTRACT",
+					ID:    "dispose-action", ExpectedChangeID: "hold", Target: request.Target, Action: "KEEP_CONTRACT",
 					Actor: "human", Source: "human:decision", Reason: "Explicitly retain original contract after considering advice",
 				},
 			}); err != nil {
@@ -1275,7 +1275,7 @@ func TestProposeJobBeforeTasksAndAttachMultipleTasks(t *testing.T) {
 	db, _, _, _ := executionConfigurationFixture(t)
 	proposal := JobIntakeRequest{
 		JobID: "job-before-task", Request: "Implement the approved feature.",
-		Goal : "Deliver the requested behavior with independent review.",
+		Goal:  "Deliver the requested behavior with independent review.",
 		Actor: "human", Source: "human:job-proposal",
 	}
 	job, err := ProposeJob(db, proposal)
