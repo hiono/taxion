@@ -58,7 +58,7 @@ func TestJobCompletionReadyBlocksSuspendedRoleExecution(t *testing.T) {
 		ID: "output-completion", JobID: job.ID, TaskID: task.ID,
 		RoleExecutionID: "exec-coder", Repository: task.Repo, Kind: "test-report",
 		ContentSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		CreatedAt: now.Add(5 * time.Second),
+		CreatedAt:     now.Add(5 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 	output, err := NewJobOutput(JobOutput{
 		ID: "output-without-task", JobID: job.ID,
 		RoleExecutionID: "exec-without-task-producer", Repository: "example/repo",
-		Kind: "test-report",
+		Kind:          "test-report",
 		ContentSHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		CreatedAt: now.Add(5 * time.Second),
 	})
@@ -176,7 +176,7 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 		RoleExecutionID: "exec-without-task-producer", Repository: "unapproved/repo",
 		Kind: "test-report",
 		ContentSHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-		CreatedAt: now.Add(8 * time.Second),
+		CreatedAt:     now.Add(8 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +193,7 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 		RoleExecutionID: "exec-without-task-producer", Repository: "example/repo",
 		Kind: "test-report",
 		ContentSHA256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-		CreatedAt: now.Add(9 * time.Second),
+		CreatedAt:     now.Add(9 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
