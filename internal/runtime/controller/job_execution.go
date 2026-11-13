@@ -1,0 +1,217 @@
+package controller
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/runtime"
+	"github.com/hiono/taxion/internal/store"
+)
+
+// JobRoleController runs one RoleExecution against its approved Job contract.
+// It does not reuse Task Dispatches or Task approval bundles.
+type JobRoleController struct {
+	store   *store.Store
+	runtime runtime.Identity
+}
+
+func NewJobRoleController(db *store.Store, worker runtime.Identity) (*JobRoleController, error) {
+	if db == nil || worker == nil || strings.TrimSpace(worker.Role()) == "" ||
+		strings.TrimSpace(worker.ConfigHash()) == "" {
+		return nil, fmt.Errorf("taxion: Job Role controller requires a store and identified runtime")
+	}
+	return &JobRoleController{store: db, runtime: worker}, nil
+}
+
+func (c *JobRoleController) checkConfiguration(ctx context.Context, job core.Job) error {
+	identity, ok := c.runtime.(runtime.ConfigurationIdentity)
+	if !ok {
+		return fmt.Errorf("taxion: Job Role runtime must expose its selected configuration")
+	}
+	selected, err := core.SelectApprovalConfiguration(
+		identity.ExecutionConfiguration(), job.Contract.Configuration.Sources,
+	)
+	if err != nil || selected.Digest != job.Contract.Configuration.Digest {
+		return fmt.Errorf("taxion: Job Role runtime configuration differs from approved Job configuration")
+	}
+	if err := identity.CheckRepositoryAccess(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Start creates and binds a Runtime session only after checking the current
+// Job approval, role allowlist, Task scope, deadline, and execution ceilings.
+func (c *JobRoleController) Start(ctx context.Context, executionID string) (string, error) {
+	if c == nil || c.store == nil || c.runtime == nil {
+		return "", fmt.Errorf("taxion: Job Role controller is not initialized")
+	}
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return "", err
+	}
+	if !state.HasGraph {
+		return "", fmt.Errorf("taxion: Job Role start requires a Task Graph")
+	}
+	execution, ok := state.Graph.RoleExecution(executionID)
+	if !ok || execution.Role != c.runtime.Role() {
+		return "", fmt.Errorf("taxion: RoleExecution does not match the selected Runtime role")
+	}
+	job, ok := state.Graph.Job(execution.JobID)
+	if !ok || job.Contract == nil {
+		return "", fmt.Errorf("taxion: RoleExecution has no approved Job contract")
+	}
+	if execution.RuntimeSessionID != "" {
+		return "", fmt.Errorf("taxion: RoleExecution already has a Runtime session; use Resume")
+	}
+	if err := state.Graph.CheckRoleExecutionStart(executionID, time.Now().UTC()); err != nil {
+		return "", err
+	}
+	if err := c.checkConfiguration(ctx, job); err != nil {
+		return "", err
+	}
+	sessionID, err := c.runtime.Start(ctx, execution.TaskID)
+	if err != nil {
+		return "", err
+	}
+	if identity, ok := c.runtime.(runtime.ConfigurationIdentity); ok {
+		if err := identity.CheckServiceAccess(ctx, sessionID); err != nil {
+			return "", errors.Join(err, c.runtime.Stop(ctx, sessionID))
+		}
+	}
+	err = c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		if !state.HasGraph {
+			return fmt.Errorf("taxion: Job Role Task Graph disappeared during Runtime start")
+		}
+		now := time.Now().UTC()
+		if err := state.Graph.CheckRoleExecutionStart(executionID, now); err != nil {
+			return err
+		}
+		if err := state.Graph.TransitionRoleExecution(executionID, core.RoleExecutionRunning,
+			"controller", "Job Role Runtime session started", now); err != nil {
+			return err
+		}
+		if err := state.Graph.BindRoleExecutionSession(executionID, sessionID, c.runtime.ConfigHash()); err != nil {
+			return err
+		}
+		_, contextHash, err := BuildJobExecutionContext(state.Graph, executionID)
+		if err != nil {
+			return err
+		}
+		return state.Graph.BindRoleExecutionContextHash(executionID, contextHash)
+	})
+	if err != nil {
+		return "", errors.Join(err, c.runtime.Stop(ctx, sessionID))
+	}
+	return sessionID, nil
+}
+
+// Send refreshes the Job context before every Role turn. The Runtime receives
+// the current Job scope, messages, Tasks, outputs and evidence as one snapshot.
+func (c *JobRoleController) Send(ctx context.Context, executionID, prompt string) error {
+	if c == nil || c.store == nil || c.runtime == nil || strings.TrimSpace(prompt) == "" {
+		return fmt.Errorf("taxion: Job Role send requires an initialized controller and prompt")
+	}
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	if !state.HasGraph {
+		return fmt.Errorf("taxion: Job Role send requires a Task Graph")
+	}
+	execution, ok := state.Graph.RoleExecution(executionID)
+	if !ok || execution.Status != core.RoleExecutionRunning ||
+		execution.Role != c.runtime.Role() || execution.RuntimeSessionID == "" ||
+		execution.RuntimeConfigHash != c.runtime.ConfigHash() {
+		return fmt.Errorf("taxion: RoleExecution is not bound to this Runtime")
+	}
+	context, contextHash, err := BuildJobExecutionContext(state.Graph, executionID)
+	if err != nil {
+		return err
+	}
+	rendered, err := RenderJobExecutionContext(context)
+	if err != nil {
+		return err
+	}
+	if err := c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.BindRoleExecutionContextHash(executionID, contextHash)
+	}); err != nil {
+		return err
+	}
+	if err := c.runtime.Resume(ctx, execution.RuntimeSessionID); err != nil {
+		return err
+	}
+	message := "Current Job context (authoritative snapshot):\n" + rendered +
+		"\n\nCurrent instruction:\n" + prompt
+	return c.runtime.Send(ctx, execution.RuntimeSessionID, message)
+}
+
+// Events exposes only the event stream bound to this RoleExecution session.
+func (c *JobRoleController) Events(ctx context.Context, executionID string) (<-chan runtime.Event, error) {
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return nil, err
+	}
+	execution, ok := state.Graph.RoleExecution(executionID)
+	if !ok || execution.Status != core.RoleExecutionRunning ||
+		execution.Role != c.runtime.Role() || execution.RuntimeSessionID == "" ||
+		execution.RuntimeConfigHash != c.runtime.ConfigHash() {
+		return nil, fmt.Errorf("taxion: RoleExecution is not bound to this Runtime")
+	}
+	return c.runtime.Events(ctx, execution.RuntimeSessionID)
+}
+
+// AuthorizeOperation is called by the Runtime tool adapter immediately before
+// each privileged operation; a Job message or Task approval is not sufficient.
+func (c *JobRoleController) AuthorizeOperation(executionID, operation string, at time.Time) error {
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	if !state.HasGraph {
+		return fmt.Errorf("taxion: operation authorization requires a Task Graph")
+	}
+	return state.Graph.CheckRoleExecutionOperation(executionID, operation, at)
+}
+
+// Finish persists a terminal outcome after the Runtime turn has been observed.
+func (c *JobRoleController) Finish(executionID string, status core.RoleExecutionStatus, actor, reason string, at time.Time) error {
+	if status != core.RoleExecutionSucceeded && status != core.RoleExecutionFailed &&
+		status != core.RoleExecutionCancelled {
+		return fmt.Errorf("taxion: Job Role finish requires a terminal outcome")
+	}
+	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		if !state.HasGraph {
+			return fmt.Errorf("taxion: Job Role finish requires a Task Graph")
+		}
+		return state.Graph.TransitionRoleExecution(executionID, status, actor, reason, at)
+	})
+}
+
+// Stop requests cancellation before stopping the provider session. A failed
+// stop remains CANCEL_REQUESTED and therefore blocks Job completion.
+func (c *JobRoleController) Stop(ctx context.Context, executionID, reason string) error {
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	execution, ok := state.Graph.RoleExecution(executionID)
+	if !ok || execution.Status != core.RoleExecutionRunning || execution.RuntimeSessionID == "" {
+		return fmt.Errorf("taxion: Job Role stop requires a running bound execution")
+	}
+	now := time.Now().UTC()
+	if err := c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.TransitionRoleExecution(executionID, core.RoleExecutionCancelRequested,
+			"controller", reason, now)
+	}); err != nil {
+		return err
+	}
+	if err := c.runtime.Stop(ctx, execution.RuntimeSessionID); err != nil {
+		return err
+	}
+	return c.Finish(executionID, core.RoleExecutionCancelled, "controller", reason, time.Now().UTC())
+}
