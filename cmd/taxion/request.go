@@ -760,28 +760,44 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			var jobApprovalHash string
 			if !resumeApproved {
 				approvalConfiguration, err := approvalConfigurationFor(selected, resolved.Sources)
-				if err != nil { return err }
+				if err != nil {
+					return err
+				}
 				remainingNanoAIU := operation.MaxNanoAIU - operation.PlanningNanoAIU
-				if operation.ExternalBudgetOnly() { remainingNanoAIU = 0 }
+				if operation.ExternalBudgetOnly() {
+					remainingNanoAIU = 0
+				}
 				contract, err := controller.BuildJobContractForIntake(executionTask, approvalConfiguration, core.JobBudget{
-					MaxRoleExecutions: 2 + 2*(*repairs), MaxConcurrentExecutions: 1,
-					MaxNanoAIU: remainingNanoAIU, AccountQuotaOnly: operation.AccountQuotaOnly,
-					BudgetSource: operation.BudgetSource,
+					MaxRoleExecutions:       2 + 2*(*repairs),
+					MaxConcurrentExecutions: 1,
+					MaxNanoAIU:              remainingNanoAIU,
+					AccountQuotaOnly:        operation.AccountQuotaOnly,
+					BudgetSource:            operation.BudgetSource,
 				}, operation.Deadline)
-				if err != nil { return err }
+				if err != nil {
+					return err
+				}
 				jobApprovalProposal, jobApprovalHash, err = controller.ProposeJobContract(db, controller.JobContractProposalRequest{
 					JobID: id + "-job", Contract: contract, Actor: selected.Execution.Requester,
 					Source: "planner:" + task.ID, Reason: "propose the exact request execution boundary for human approval",
 				})
-				if err != nil { return err }
-				if err := displayRequestJobContract(output, jobApprovalProposal, jobApprovalHash); err != nil { return err }
-				if err := saveRequestCheckpoint(db, &operation, checkpoint); err != nil { return err }
+				if err != nil {
+					return err
+				}
+				if err := displayRequestJobContract(output, jobApprovalProposal, jobApprovalHash); err != nil {
+					return err
+				}
+				if err := saveRequestCheckpoint(db, &operation, checkpoint); err != nil {
+					return err
+				}
 				line, err = read()
 				if errors.Is(err, io.EOF) {
 					operation.State = "WAITING_FOR_APPROVAL"
 					return saveRequestCheckpoint(db, &operation, checkpoint)
 				}
-				if err != nil { return err }
+				if err != nil {
+					return err
+				}
 				if line == "/quit" {
 					operation.State = "CANCELLED"
 					return saveRequestCheckpoint(db, &operation, checkpoint)
