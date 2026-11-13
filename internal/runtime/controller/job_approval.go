@@ -94,10 +94,11 @@ func ProposeJobContract(db *store.Store, request JobContractProposalRequest) (co
 		if !ok {
 			return fmt.Errorf("taxion: Job disappeared while proposing its contract")
 		}
-		proposal, err := core.JobProposal(updated)
+		candidate, err := core.JobProposal(updated)
 		if err != nil {
 			return err
 		}
+		proposal = candidate
 		proposalHash, err = proposal.Hash()
 		return err
 	})
