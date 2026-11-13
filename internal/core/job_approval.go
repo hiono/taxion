@@ -15,18 +15,18 @@ import (
 // Task prose is not an authorization source; only these structured dimensions
 // can constrain repository and Runtime access.
 type JobContract struct {
-	Revision             int                   `json:"revision"`
-	Roles                []string              `json:"roles"`
-	Acceptance           []string              `json:"acceptance"`
-	RequiredEvidence     []string              `json:"requiredEvidence"`
-	Repositories         []JobRepositoryScope  `json:"repositories"`
-	Operations           []string              `json:"operations"`
+	Revision             int                          `json:"revision"`
+	Roles                []string                     `json:"roles"`
+	Acceptance           []string                     `json:"acceptance"`
+	RequiredEvidence     []string                     `json:"requiredEvidence"`
+	Repositories         []JobRepositoryScope         `json:"repositories"`
+	Operations           []string                     `json:"operations"`
 	RoleToolPolicies     map[string]JobRoleToolPolicy `json:"roleToolPolicies,omitempty"`
-	RoleOperations       map[string][]string   `json:"roleOperations,omitempty"`
-	Budget               JobBudget             `json:"budget"`
-	Deadline             time.Time             `json:"deadline"`
-	SecurityRestrictions []string              `json:"securityRestrictions,omitempty"`
-	Configuration        ApprovalConfiguration `json:"configuration"`
+	RoleOperations       map[string][]string          `json:"roleOperations,omitempty"`
+	Budget               JobBudget                    `json:"budget"`
+	Deadline             time.Time                    `json:"deadline"`
+	SecurityRestrictions []string                     `json:"securityRestrictions,omitempty"`
+	Configuration        ApprovalConfiguration        `json:"configuration"`
 }
 
 type JobRepositoryScope struct {
@@ -94,6 +94,12 @@ func (c JobContract) Validate() error {
 		return graphError("Job contract requires revision, acceptance, evidence, scope, operations, budget, deadline and configuration")
 	}
 	repositories := map[string]bool{}
+	if len(c.RoleToolPolicies) > 0 && len(c.RoleToolPolicies) != len(c.Roles) {
+		return graphError("Job contract must define an explicit tool policy for every Role")
+	}
+	if len(c.RoleOperations) > 0 && len(c.RoleOperations) != len(c.Roles) {
+		return graphError("Job contract must define an explicit operation grant for every Role")
+	}
 	for role, policy := range c.RoleToolPolicies {
 		if !slices.Contains(c.Roles, role) {
 			return graphError("Job contract contains tool policy for an unapproved role %q", role)

@@ -74,13 +74,26 @@ func (f *jobRoleRuntimeFake) Events(_ context.Context, sessionID string) (<-chan
 	return f.events, nil
 }
 func (f *jobRoleRuntimeFake) ExecutionConfiguration() json.RawMessage { return f.selection }
-func (f *jobRoleRuntimeFake) ToolPolicy() *tools.Policy { return f.toolPolicy }
+func (f *jobRoleRuntimeFake) ToolPolicy() *tools.Policy       { return f.toolPolicy }
 func (f *jobRoleRuntimeFake) CheckAuthentication(_ context.Context, account string) error {
 	f.expectedAccount = account
 	return f.authErr
 }
 func (f *jobRoleRuntimeFake) CheckRepositoryAccess(context.Context) error      { return nil }
 func (f *jobRoleRuntimeFake) CheckServiceAccess(context.Context, string) error { return nil }
+
+func emptyJobRoleToolPolicies(t *testing.T) map[string]core.JobRoleToolPolicy {
+	t.Helper()
+	policy, err := core.NewJobRoleToolPolicy(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]core.JobRoleToolPolicy{
+		"PLANNER":  policy,
+		"CODER":    policy,
+		"REVIEWER": policy,
+	}
+}
 
 func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.GraphTask, json.RawMessage) {
 	t.Helper()
@@ -123,11 +136,7 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 						"CODER":    {"repository.read", "repository.write", "process.exec", "test.run"},
 						"REVIEWER": {"repository.read"},
 					},
-					RoleToolPolicies: func() map[string]core.JobRoleToolPolicy {
-						policy, err := core.NewJobRoleToolPolicy(nil)
-						if err != nil { t.Fatal(err) }
-						return map[string]core.JobRoleToolPolicy{"PLANNER": policy, "CODER": policy, "REVIEWER": policy}
-					}(),
+					RoleToolPolicies: emptyJobRoleToolPolicies(t),
 					Budget:   core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
 					Deadline: now.Add(time.Hour), Configuration: configuration,
 				}
@@ -334,13 +343,17 @@ func TestJobRoleControllerRejectsRuntimeToolPolicyNotInJobApproval(t *testing.T)
 			ID: "unapproved-tool-policy", JobID: job.ID, TaskID: task.ID, Role: "CODER",
 			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
 		})
-	}); err != nil { t.Fatal(err) }
+	}); err != nil {
+		t.Fatal(err)
+	}
 	worker := &jobRoleRuntimeFake{
 		role: "CODER", configHash: "runtime-config-hash", selection: selection,
 		toolPolicy: &tools.Policy{},
 	}
 	controller, err := NewJobRoleController(db, worker)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := controller.Start(context.Background(), "unapproved-tool-policy"); err == nil {
 		t.Fatal("Runtime tool policy absent from the approved Job contract must be rejected")
 	}

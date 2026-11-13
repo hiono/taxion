@@ -400,8 +400,8 @@ func BuildJobContractForIntake(task core.GraphTask, configuration core.ApprovalC
 		return core.JobContract{}, err
 	}
 	roleToolPolicies := map[string]core.JobRoleToolPolicy{
-		"PLANNER": noExtensions,
-		"CODER": noExtensions,
+		"PLANNER":  noExtensions,
+		"CODER":    noExtensions,
 		"REVIEWER": noExtensions,
 	}
 	contract := core.JobContract{
