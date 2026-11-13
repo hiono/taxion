@@ -240,22 +240,35 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 		!strings.Contains(worker.prompt, "Please review the implementation") {
 		t.Fatalf("Runtime did not receive the approved Job context: %s", worker.prompt)
 	}
-	secondUsage := 60.0
-	if err := controller.RecordUsage("job-role-exec", core.DispatchUsage{
-		Model: "test-model", TotalNanoAIU: &secondUsage,
-		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 2, UsageID: "usage-2"},
-		ObservedAt: time.Now().UTC(),
-	}); err != nil {
+	go func() {
+		worker.events <- runtime.Event{
+			Type: runtime.EventUsage,
+			Payload: `{"model":"test-model","accounting":{"sourceSessionId":"` + sessionID + `","sequence":2,"usageId":"usage-2"},"totalNanoAIU":60}`,
+		}
+		worker.events <- runtime.Event{Type: runtime.EventTurnFinished}
+		close(worker.events)
+	}()
+	eventStream, err := controller.Events(context.Background(), "job-role-exec")
+	if err != nil {
 		t.Fatal(err)
+	}
+	usageEventObserved := false
+	for event := range eventStream {
+		if event.Type == runtime.EventUsage {
+			usageEventObserved = true
+		}
+		if event.Type == runtime.EventFailed {
+			t.Fatalf("Runtime usage event was rejected: %s", event.Payload)
+		}
+	}
+	if !usageEventObserved {
+		t.Fatal("Runtime usage event was not forwarded")
 	}
 	if err := controller.AuthorizeOperation("job-role-exec", "repository.write", time.Now().UTC()); err == nil {
 		t.Fatal("Job AIU budget exhaustion must block further operations")
 	}
 	if err := controller.Send(context.Background(), "job-role-exec", "another turn"); err == nil {
 		t.Fatal("Job AIU budget exhaustion must block further model turns")
-	}
-	if _, err := controller.Events(context.Background(), "job-role-exec"); err != nil {
-		t.Fatal(err)
 	}
 	if err := controller.Finish("job-role-exec", core.RoleExecutionSucceeded, "controller", "turn completed", time.Now().UTC()); err != nil {
 		t.Fatal(err)
