@@ -186,28 +186,55 @@ func (c *JobRoleController) AuthorizeOperation(executionID, operation string, at
 }
 
 // RecordUsage appends an immutable provider accounting observation to the Job ledger.
+// Replayed identical provider observations are idempotent.
 func (c *JobRoleController) RecordUsage(executionID string, usage core.DispatchUsage) error {
-	if c == nil || c.store == nil || usage.Accounting == nil || usage.Accounting.UsageID == "" {
-		return fmt.Errorf("taxion: Job usage requires a provider accounting identity")
+	if c == nil || c.store == nil || c.runtime == nil || !nonnegativeUsage(usage) ||
+		usage.TotalNanoAIU == nil || usage.Accounting == nil ||
+		strings.TrimSpace(usage.Accounting.UsageID) == "" {
+		return fmt.Errorf("taxion: Job usage requires a matching Runtime and complete accounting data")
 	}
-	state, err := c.store.LoadWorkspace()
-	if err != nil {
-		return err
-	}
-	execution, ok := state.Graph.RoleExecution(executionID)
-	if !ok || execution.RuntimeSessionID == "" ||
-		(execution.Status != core.RoleExecutionRunning && execution.Status != core.RoleExecutionSucceeded &&
-			execution.Status != core.RoleExecutionFailed && execution.Status != core.RoleExecutionCancelled) {
-		return fmt.Errorf("taxion: Job usage requires a bound RoleExecution")
-	}
-	record, err := core.NewJobUsage(core.JobUsage{
-		ID: execution.RuntimeSessionID + ":" + usage.Accounting.UsageID,
-		JobID: execution.JobID, RoleExecutionID: execution.ID, Usage: usage,
-	})
-	if err != nil {
-		return err
+	if usage.ObservedAt.IsZero() {
+		usage.ObservedAt = time.Now().UTC()
 	}
 	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		if !state.HasGraph {
+			return fmt.Errorf("taxion: Job usage requires a Task Graph")
+		}
+		execution, ok := state.Graph.RoleExecution(executionID)
+		if !ok || execution.RuntimeSessionID == "" ||
+			execution.RuntimeSessionID != usage.Accounting.SourceSessionID ||
+			execution.Role != c.runtime.Role() ||
+			execution.RuntimeConfigHash != c.runtime.ConfigHash() {
+			return fmt.Errorf("taxion: Job usage does not match this RoleExecution Runtime binding")
+		}
+		identityHash, err := core.CanonicalSHA256(struct {
+			SourceSessionID string
+			Sequence        int64
+			UsageID         string
+		}{
+			SourceSessionID: usage.Accounting.SourceSessionID,
+			Sequence:        usage.Accounting.Sequence,
+			UsageID:         usage.Accounting.UsageID,
+		})
+		if err != nil {
+			return err
+		}
+		record, err := core.NewJobUsage(core.JobUsage{
+			ID: "usage-" + identityHash, JobID: execution.JobID,
+			RoleExecutionID: execution.ID, Usage: usage,
+		})
+		if err != nil {
+			return err
+		}
+		for _, existing := range state.Graph.JobUsageRecords(execution.JobID) {
+			if existing.Usage.Accounting == nil || *existing.Usage.Accounting != *usage.Accounting {
+				continue
+			}
+			if existing.RecordHash == record.RecordHash {
+				return nil
+			}
+			return fmt.Errorf("taxion: provider usage identity was replayed with different content")
+		}
 		return state.Graph.AppendJobUsage(record)
 	})
 }
