@@ -77,26 +77,6 @@ func TestLegacyJobMigrationRejectsMissingTaskReferences(t *testing.T) {
 	}
 }
 
-func TestLegacyJobMigrationRejectsMissingTaskReferences(t *testing.T) {
-	data := []byte(`{
-		"version": 1,
-		"jobs": [{
-			"id": "job-legacy",
-			"request": "Original request",
-			"goal": "Complete work",
-			"rootTaskId": "task-missing",
-			"taskIds": ["task-missing"],
-			"status": "ACTIVE",
-			"createdAt": "2026-11-13T00:00:00Z",
-			"updatedAt": "2026-11-13T00:00:00Z"
-		}],
-		"tasks": []
-	}`)
-	var graph TaskGraph
-	if err := json.Unmarshal(data, &graph); err == nil {
-		t.Fatal("legacy Job references to missing Tasks must not be silently discarded")
-	}
-}
 
 func TestJobAndTaskHaveDistinctIdentity(t *testing.T) {
 	graph := newJobGraph()
