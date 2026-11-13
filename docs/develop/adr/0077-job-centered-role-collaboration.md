@@ -58,6 +58,19 @@ Job approval is the sole source of authority for work performed under a first-cl
 
 The canonical Job approval proposal is a versioned value, not a digest of mutable Task records. Its explicit scope must be inspectable before confirmation. It must not contain resolved credentials; configuration is represented by approved selection and source references/digests.
 
+The Job approval proposal has the following canonical dimensions. These are explicit fields, not free-form descriptions interpreted as permission:
+
+1. **Identity and intent:** JobID, monotonically increasing approval revision, request, goal, and constraints.
+2. **Acceptance:** required acceptance conditions and required evidence kinds.
+3. **Repository scope:** an allowlist of canonical repository identities. Each entry carries a file-access ceiling using the existing exact/committed/all policy. Exact paths are normalized repository-relative paths; a Task using exact access must be a subset of the approved path list. A Task cannot introduce a repository absent from the Job allowlist.
+4. **Operations:** a normalized allowlist of operation identifiers mapped by Controller to concrete tool/runtime actions. Unknown identifiers fail closed. Role policy is intersected with this allowlist; neither Task text nor Role messages can add operations.
+5. **Budget and time:** explicit Job ceilings for aggregate usage and concurrency plus an absolute deadline. Task and RoleExecution limits are subordinate ceilings. Existing advisory budget guidance is not itself an authorization ceiling.
+6. **Security and configuration:** restrictions and selected non-secret configuration references/digests. Resolved credentials are never stored in the approval proposal.
+
+Task Scope and OutOfScope remain work-intent descriptions. They are not machine-readable permission grants. Enforceable containment is evaluated using repository identity, FileAccessPolicy, operation identifiers, budget, deadline, and security policy. A Task may narrow each dimension; it may not widen it. If a dimension cannot be compared safely, execution is denied pending an explicit Job revision and approval.
+
+A proposal hash is computed from a versioned canonical encoding of all dimensions above. The append-only approval record binds JobID + revision + proposal hash + approver/source/reason/time. Reusing an approval ID with different content, approving a stale revision, or changing any bound dimension invalidates authorization. Every privileged operation checks that the approval still matches the current Job revision and remaining Job budget.
+
 ### Job outputs and evidence
 
 Job owns the durable index of accepted outputs and evidence references; the underlying bytes may remain in repository objects or existing artifact storage.

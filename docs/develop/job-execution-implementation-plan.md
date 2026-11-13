@@ -71,9 +71,9 @@ Job と Task の関連は **Task 側が `JobID` を保持する単方向参照**
 
 - [ ] Job の承認対象を immutable revision として定義する（request、goal、constraints、acceptance、scope、allowed operations、repository/resource、budget、deadline、security、configuration references）。
 - [ ] Job approval record の canonical proposal hash、record hash、version、approver/source/reason/time、append-only 更新規則を定義する。
-- [ ] Job scope と Task scope の包含関係、および RoleExecution ごとの最小権限評価式を定義する。
+- [x] Job scope と Task scope の包含関係、および RoleExecution ごとの最小権限評価式を定義する。
 - [ ] Job approval と既存 Task approval bundle の役割を分離する。旧 Task approval / packet / dispatch records を Job approval へ移行・継承しないことを migration test で固定する。
-- [ ] Job output / evidence reference の provenance、immutability、verification state、acceptance condition との対応を定義する。
+- [x] Job output / evidence reference の provenance、immutability、verification state、acceptance condition との対応を定義する。
 - [ ] Job completion の判定条件と unresolved execution / safety state による停止条件を定義する。
 
 **Exit gate:** Job approval が唯一の Job-level authority であり、Task/RoleExecution は承認済み Job scope を超えられないこと、旧 Task approval が新 Job の authority にならないこと、成果・証拠の provenance と受入れ責任が明確であることを ADR とテスト可能な規則で確定する。Exit gate 通過前に Runtime 実行経路へ Job approval を接続しない。

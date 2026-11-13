@@ -40,6 +40,8 @@ Job の承認は JobID に結び付く独立した権限記録とし、Task appr
 - 旧 Task approval bundle、authorization decision、packet receipt、dispatch audit は旧 Task の履歴として保存する。新 Job の承認へ移行・継承しない。
 - Jobless legacy Task は変更しない。そこから派生する新 Job は独立して承認し、旧 Task は provenance として参照する。
 
+Job approval の scope は構造化して保持する。repository allowlist と各 repository の file-access ceiling、Controller が解釈する operation allowlist、aggregate budget / concurrency ceiling、absolute deadline、安全制約、secret を含まない configuration reference を proposal hash に含める。Task の Scope / OutOfScope は作業意図の記述であり、権限として解釈しない。Task は repository・file access・operation・budget・deadline を Job の許可範囲内に狭めることだけができる。比較不能または未知の operation は fail-closed とする。
+
 Job は成果物と検証証拠の append-only index を保持する。参照は Job、Task（該当する場合）、RoleExecution、repository/resource、immutable content identity、producer、時刻を特定する。Role は成果・証拠を提案できるが、自身の成果を受入れ済みと判定できない。受入れ判定は独立 Reviewer または指定 verifier が記録する。Job 完了には必須 acceptance condition を裏付ける provenance-valid な証拠が必要である。
 
 ## Controller が拒否・停止する境界
