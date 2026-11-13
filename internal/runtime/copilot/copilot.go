@@ -484,7 +484,7 @@ func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
 		return fmt.Errorf("taxion: prompt must not be empty")
 	}
 	if a.config.ToolPolicy != nil {
-		if err := a.checkToolPolicy(ctx, sessionID); err != nil {
+		if err := a.checkApprovedToolPolicy(ctx, sessionID); err != nil {
 			return err
 		}
 	}

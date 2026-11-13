@@ -21,17 +21,9 @@ func (a *Adapter) extensionDirectories() ([]string, []string) {
 	return skills, plugins
 }
 
-func (a *Adapter) checkToolPolicy(ctx context.Context, sessionID, operation string) error {
+func (a *Adapter) checkApprovedToolPolicy(ctx context.Context, sessionID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-	if authorize := a.jobOperationAuthorizer(); authorize != nil {
-		if operation == "" {
-			return fmt.Errorf("taxion: Job tool requires an operation mapping")
-		}
-		if err := authorize(ctx, sessionID, operation); err != nil {
-			return err
-		}
 	}
 	if a.config.AuthorizeTools != nil {
 		if err := a.config.AuthorizeTools(ctx, sessionID); err != nil {
@@ -42,6 +34,18 @@ func (a *Adapter) checkToolPolicy(ctx context.Context, sessionID, operation stri
 		return a.config.ToolPolicy.Check()
 	}
 	return nil
+}
+
+func (a *Adapter) checkToolPolicy(ctx context.Context, sessionID, operation string) error {
+	if authorize := a.jobOperationAuthorizer(); authorize != nil {
+		if operation == "" {
+			return fmt.Errorf("taxion: Job tool requires an operation mapping")
+		}
+		if err := authorize(ctx, sessionID, operation); err != nil {
+			return err
+		}
+	}
+	return a.checkApprovedToolPolicy(ctx, sessionID)
 }
 
 func (a *Adapter) mcpTools() []sdk.Tool {

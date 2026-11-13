@@ -19,6 +19,11 @@ func validJobContract(t *testing.T) *JobContract {
 		Revision: 1, Roles: []string{"PLANNER", "CODER", "REVIEWER"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
 		Repositories:         []JobRepositoryScope{{Repository: "example/repo", FileAccess: FileAccessPolicy{Level: FileAccessCommitted}}},
 		Operations:           []string{"repository.read", "repository.write", "test.run"},
+		RoleOperations: map[string][]string{
+			"PLANNER":  {"repository.read"},
+			"CODER":    {"repository.read", "repository.write", "test.run"},
+			"REVIEWER": {"repository.read"},
+		},
 		Budget:               JobBudget{MaxRoleExecutions: 10, MaxConcurrentExecutions: 2, MaxNanoAIU: 100},
 		Deadline:             time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC),
 		SecurityRestrictions: []string{"no-secret-export"}, Configuration: config,
