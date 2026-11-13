@@ -69,7 +69,7 @@ func (f *jobRoleRuntimeFake) CheckAuthentication(_ context.Context, account stri
 	f.expectedAccount = account
 	return f.authErr
 }
-func (f *jobRoleRuntimeFake) CheckRepositoryAccess(context.Context) error { return nil }
+func (f *jobRoleRuntimeFake) CheckRepositoryAccess(context.Context) error      { return nil }
 func (f *jobRoleRuntimeFake) CheckServiceAccess(context.Context, string) error { return nil }
 
 func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.GraphTask, json.RawMessage) {
@@ -108,8 +108,8 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 						Repository: task.Repo, FileAccess: *task.FileAccess,
 					}},
 					Operations: []string{"repository.read", "repository.write", "test.run"},
-					Budget: core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
-					Deadline: now.Add(time.Hour), Configuration: configuration,
+					Budget:     core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
+					Deadline:   now.Add(time.Hour), Configuration: configuration,
 				}
 				job = state.Graph.Jobs[i]
 				break
