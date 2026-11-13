@@ -104,6 +104,9 @@ func (g *TaskGraph) AppendJobOutput(output JobOutput) error {
 	if g == nil {
 		return graphError("Job output requires a Task Graph")
 	}
+	if err := output.Verify(); err != nil {
+		return err
+	}
 	next := cloneGraph(*g)
 	for _, existing := range next.JobOutputs {
 		if existing.ID == output.ID {
@@ -121,6 +124,9 @@ func (g *TaskGraph) AppendJobOutput(output JobOutput) error {
 func (g *TaskGraph) AppendJobEvidence(evidence JobEvidence) error {
 	if g == nil {
 		return graphError("Job evidence requires a Task Graph")
+	}
+	if err := evidence.Verify(); err != nil {
+		return err
 	}
 	next := cloneGraph(*g)
 	for _, existing := range next.JobEvidence {
@@ -155,8 +161,8 @@ func (g TaskGraph) validateJobArtifacts() error {
 		task, taskOK := tasks[output.TaskID]
 		execution, executionOK := executions[output.RoleExecutionID]
 		if !jobOK || job.Contract == nil || !taskOK || !executionOK ||
-			!nonempty(output.ID) || !nonempty(output.Kind) || !validContentSHA256(output.ContentSHA256) ||
-			output.CreatedAt.IsZero() || output.CreatedAt.Before(job.CreatedAt) ||
+			output.Verify() != nil || !nonempty(output.ID) || !nonempty(output.Kind) || !validContentSHA256(output.ContentSHA256) ||
+			output.CreatedAt.IsZero() || output.CreatedAt.Before(job.CreatedAt) || output.CreatedAt.Before(execution.CreatedAt) ||
 			task.JobID != job.ID || task.Repo != output.Repository ||
 			execution.JobID != job.ID || execution.TaskID != task.ID ||
 			!TaskWithinJobScope(task, *job.Contract) {
@@ -167,6 +173,9 @@ func (g TaskGraph) validateJobArtifacts() error {
 		}) {
 			return graphError("Job output repository is outside the approved Job scope")
 		}
+		if _, exists := outputs[output.ID]; exists {
+			return graphError("duplicate Job output ID")
+		}
 		outputs[output.ID] = output
 	}
 	seenEvidence := map[string]bool{}
@@ -175,9 +184,9 @@ func (g TaskGraph) validateJobArtifacts() error {
 		task, taskOK := tasks[evidence.TaskID]
 		producer, producerOK := executions[evidence.ProducedByExecutionID]
 		if !jobOK || job.Contract == nil || !taskOK || !producerOK ||
-			!nonempty(evidence.ID) || !nonempty(evidence.Acceptance) || !nonempty(evidence.Kind) ||
+			evidence.Verify() != nil || !nonempty(evidence.ID) || !nonempty(evidence.Acceptance) || !nonempty(evidence.Kind) ||
 			!validContentSHA256(evidence.ContentSHA256) || evidence.CreatedAt.IsZero() ||
-			evidence.CreatedAt.Before(job.CreatedAt) || seenEvidence[evidence.ID] ||
+			evidence.CreatedAt.Before(job.CreatedAt) || evidence.CreatedAt.Before(producer.CreatedAt) || seenEvidence[evidence.ID] ||
 			task.JobID != job.ID || producer.JobID != job.ID || producer.TaskID != task.ID ||
 			!slices.Contains(job.Contract.Acceptance, evidence.Acceptance) ||
 			!slices.Contains(job.Contract.RequiredEvidence, evidence.Kind) {
@@ -187,7 +196,7 @@ func (g TaskGraph) validateJobArtifacts() error {
 		if evidence.OutputID != "" {
 			output, ok := outputs[evidence.OutputID]
 			if !ok || output.JobID != job.ID || output.TaskID != task.ID ||
-				output.ContentSHA256 != evidence.ContentSHA256 {
+				output.ContentSHA256 != evidence.ContentSHA256 || output.CreatedAt.After(evidence.CreatedAt) {
 				return graphError("Job evidence references a missing or mismatched output")
 			}
 		}
@@ -203,9 +212,12 @@ func (g TaskGraph) validateJobArtifacts() error {
 			}
 			if evidence.VerifiedByExecutionID != "" {
 				verifier, ok := executions[evidence.VerifiedByExecutionID]
-				if !ok || verifier.JobID != job.ID || verifier.ID == producer.ID {
-					return graphError("Job evidence must be verified by an independent execution")
+				if !ok || verifier.JobID != job.ID || verifier.ID == producer.ID ||
+					verifier.Role != evidence.VerifiedBy || verifier.Status != RoleExecutionSucceeded {
+					return graphError("Job evidence must be verified by an independent completed execution")
 				}
+			} else if evidence.VerifiedBy != "controller" && evidence.VerifiedBy != "human" {
+				return graphError("Job evidence requires an independent verifier")
 			}
 		default:
 			return graphError("unknown Job evidence status")
@@ -217,6 +229,9 @@ func (g TaskGraph) validateJobArtifacts() error {
 // JobCompletionReady reports whether every mandatory acceptance condition has
 // passing evidence and no RoleExecution remains active or unresolved.
 func (g TaskGraph) JobCompletionReady(jobID string) (bool, []string) {
+	if err := g.Validate(); err != nil {
+		return false, []string{err.Error()}
+	}
 	job, ok := g.Job(jobID)
 	if !ok || job.Contract == nil || g.HasUnapprovedJob(jobID) {
 		return false, []string{"current Job contract is missing or unapproved"}

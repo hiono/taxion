@@ -54,13 +54,30 @@ func TestJobCompletionReadyBlocksSuspendedRoleExecution(t *testing.T) {
 			t.Fatalf("transition %s to %s: %v", transition.id, transition.status, err)
 		}
 	}
-	if err := graph.AppendJobEvidence(JobEvidence{
-		ID: "evidence-completion", JobID: job.ID, TaskID: task.ID,
-		ProducedByExecutionID: "exec-coder", Acceptance: "tests pass", Kind: "test-report",
+	output, err := NewJobOutput(JobOutput{
+		ID: "output-completion", JobID: job.ID, TaskID: task.ID,
+		RoleExecutionID: "exec-coder", Repository: task.Repo, Kind: "test-report",
 		ContentSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		Status: "passed", VerifiedBy: "REVIEWER", VerifiedByExecutionID: "exec-reviewer",
+		CreatedAt: now.Add(5 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendJobOutput(output); err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := NewJobEvidence(JobEvidence{
+		ID: "evidence-completion", JobID: job.ID, TaskID: task.ID,
+		ProducedByExecutionID: "exec-coder", OutputID: output.ID,
+		Acceptance: "tests pass", Kind: "test-report",
+		ContentSHA256: output.ContentSHA256, Status: "passed",
+		VerifiedBy: "REVIEWER", VerifiedByExecutionID: "exec-reviewer",
 		CreatedAt: now.Add(6 * time.Second), VerifiedAt: now.Add(7 * time.Second),
-	}); err != nil {
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendJobEvidence(evidence); err != nil {
 		t.Fatal(err)
 	}
 
