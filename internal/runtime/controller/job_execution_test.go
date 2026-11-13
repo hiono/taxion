@@ -167,6 +167,42 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// A replay of the same provider observation is idempotent.
+	if err := controller.RecordUsage("job-role-exec", core.DispatchUsage{
+		Model: "test-model", TotalNanoAIU: &firstUsage,
+		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 1, UsageID: "usage-1"},
+		ObservedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("identical usage replay must be idempotent: %v", err)
+	}
+	conflictingUsage := 41.0
+	if err := controller.RecordUsage("job-role-exec", core.DispatchUsage{
+		Model: "test-model", TotalNanoAIU: &conflictingUsage,
+		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 1, UsageID: "usage-1"},
+		ObservedAt: time.Now().UTC(),
+	}); err == nil {
+		t.Fatal("same provider identity with different usage content must be rejected")
+	}
+	otherRuntime, err := NewJobRoleController(db, &jobRoleRuntimeFake{
+		role: "REVIEWER", configHash: worker.configHash, selection: selection,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := otherRuntime.RecordUsage("job-role-exec", core.DispatchUsage{
+		Model: "test-model", TotalNanoAIU: &firstUsage,
+		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 3, UsageID: "usage-other-runtime"},
+		ObservedAt: time.Now().UTC(),
+	}); err == nil {
+		t.Fatal("another Role Runtime must not record usage for this execution")
+	}
+	usageState, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(usageState.Graph.JobUsageRecords(job.ID)); got != 1 {
+		t.Fatalf("idempotent usage replay created %d records, want 1", got)
+	}
 	if err := controller.AuthorizeOperation("job-role-exec", "repository.write", time.Now().UTC()); err != nil {
 		t.Fatalf("approved Job operation rejected: %v", err)
 	}
