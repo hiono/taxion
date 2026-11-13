@@ -561,6 +561,15 @@ func (g *TaskGraph) UnmarshalJSON(data []byte) error {
 			owners[taskID] = oldJob.ID
 		}
 	}
+	taskIDs := make(map[string]bool, len(g.Tasks))
+	for _, task := range g.Tasks {
+		taskIDs[task.ID] = true
+	}
+	for taskID := range owners {
+		if !taskIDs[taskID] {
+			return fmt.Errorf("legacy Job references missing Task %s", taskID)
+		}
+	}
 	for i := range g.Tasks {
 		if owner := owners[g.Tasks[i].ID]; owner != "" {
 			if g.Tasks[i].JobID != "" && g.Tasks[i].JobID != owner {
