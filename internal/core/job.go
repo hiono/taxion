@@ -16,6 +16,7 @@ type Job struct {
 	Status      JobStatus `json:"status"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+	Contract    *JobContract `json:"contract,omitempty"`
 }
 
 type JobEvent struct {
@@ -140,6 +141,7 @@ func (g TaskGraph) Job(id string) (Job, bool) {
 	for _, job := range g.Jobs {
 		if job.ID == id {
 			job.Constraints = slices.Clone(job.Constraints)
+			job.Contract = cloneJobContract(job.Contract)
 			return job, true
 		}
 	}
@@ -363,6 +365,9 @@ func (g *TaskGraph) BindRoleExecutionSession(id, sessionID, configHash string) e
 }
 
 func (g TaskGraph) validateJobModel() error {
+	if err := g.validateJobApprovals(); err != nil {
+		return err
+	}
 	tasks := make(map[string]GraphTask, len(g.Tasks))
 	for _, task := range g.Tasks {
 		if task.ID == "" || tasks[task.ID].ID != "" {
