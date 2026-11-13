@@ -572,7 +572,6 @@ func (g TaskGraph) validateJobModel() error {
 			}
 		}
 	}
-	return nil
 	for _, job := range g.Jobs {
 		if job.Status != JobCompleted {
 			continue
@@ -582,5 +581,5 @@ func (g TaskGraph) validateJobModel() error {
 			return graphError("completed Job %s is not completion-ready: %s", job.ID, strings.Join(missing, "; "))
 		}
 	}
-
+	return nil
 }
