@@ -598,6 +598,8 @@ type TaskGraph struct {
 	ApprovalSchemaVersion int                  `json:"approvalSchemaVersion,omitempty"`
 	Approvals             []ApprovalBundle     `json:"approvals,omitempty"`
 	JobApprovals          []JobApproval        `json:"jobApprovals,omitempty"`
+	JobOutputs            []JobOutput          `json:"jobOutputs,omitempty"`
+	JobEvidence            []JobEvidence        `json:"jobEvidence,omitempty"`
 	JobMessages           []JobMessage         `json:"jobMessages,omitempty"`
 }
 
@@ -2020,6 +2022,8 @@ func cloneGraph(g TaskGraph) TaskGraph {
 	copy.Approvals = slices.Clone(g.Approvals)
 	copy.JobMessages = slices.Clone(g.JobMessages)
 	copy.JobApprovals = slices.Clone(g.JobApprovals)
+	copy.JobOutputs = slices.Clone(g.JobOutputs)
+	copy.JobEvidence = slices.Clone(g.JobEvidence)
 	for i := range copy.JobApprovals {
 		copy.JobApprovals[i] = cloneJobApproval(g.JobApprovals[i])
 	}

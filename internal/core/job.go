@@ -368,6 +368,9 @@ func (g TaskGraph) validateJobModel() error {
 	if err := g.validateJobApprovals(); err != nil {
 		return err
 	}
+	if err := g.validateJobArtifacts(); err != nil {
+		return err
+	}
 	tasks := make(map[string]GraphTask, len(g.Tasks))
 	for _, task := range g.Tasks {
 		if task.ID == "" || tasks[task.ID].ID != "" {
