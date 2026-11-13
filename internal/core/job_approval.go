@@ -378,6 +378,9 @@ func (g TaskGraph) CheckRoleExecutionStart(executionID string, at time.Time) err
 			return graphError("RoleExecution Task exceeds the approved Job scope")
 		}
 	}
+	if job.Contract.Budget.MaxNanoAIU <= 0 {
+		return graphError("Job Role runtime requires a native AIU ceiling; external-only budget monitoring is not available")
+	}
 	if g.JobUsageTotal(job.ID) >= job.Contract.Budget.MaxNanoAIU {
 		return graphError("Job AIU budget is exhausted")
 	}
@@ -421,6 +424,9 @@ func (g TaskGraph) CheckRoleExecutionResume(executionID string, at time.Time) er
 	}
 	if !slices.Contains(job.Contract.Roles, execution.Role) {
 		return graphError("RoleExecution role is outside the approved Job role scope")
+	}
+	if job.Contract.Budget.MaxNanoAIU <= 0 {
+		return graphError("Job Role runtime requires a native AIU ceiling; external-only budget monitoring is not available")
 	}
 	if g.JobUsageTotal(job.ID) >= job.Contract.Budget.MaxNanoAIU {
 		return graphError("Job AIU budget is exhausted")
@@ -481,6 +487,9 @@ func (g TaskGraph) CheckRoleExecutionTurn(executionID string, at time.Time) erro
 			return graphError("RoleExecution Task exceeds the approved Job scope")
 		}
 	}
+	if job.Contract.Budget.MaxNanoAIU <= 0 {
+		return graphError("Job Role runtime requires a native AIU ceiling; external-only budget monitoring is not available")
+	}
 	if g.JobUsageTotal(job.ID) >= job.Contract.Budget.MaxNanoAIU {
 		return graphError("Job AIU budget is exhausted")
 	}
@@ -521,6 +530,9 @@ func (g TaskGraph) CheckRoleExecutionOperation(executionID, operation string, at
 	}
 	if _, ok := g.CurrentJobApproval(job.ID); !ok {
 		return graphError("Runtime operation requires explicit approval of the current Job revision")
+	}
+	if job.Contract.Budget.MaxNanoAIU <= 0 {
+		return graphError("Job Role runtime requires a native AIU ceiling; external-only budget monitoring is not available")
 	}
 	if g.JobUsageTotal(job.ID) >= job.Contract.Budget.MaxNanoAIU {
 		return graphError("Job AIU budget is exhausted")
