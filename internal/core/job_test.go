@@ -318,7 +318,23 @@ func TestJobStateTransitionsAreAudited(t *testing.T) {
 	if err := graph.TransitionJob("job-root", JobDraft, "controller", "invalid regression", now.Add(5*time.Second)); err == nil {
 		t.Fatal("invalid Job state regression must be rejected")
 	}
-}
+	if err := graph.TransitionJob("job-root", JobCompleted, "controller", "premature completion", now.Add(6*time.Second)); err == nil {
+		t.Fatal("Job must not transition to COMPLETED without approved acceptance evidence")
+	}
+	if graph.Jobs[0].Status != JobActive {
+		t.Fatal("rejected completion transition mutated the original graph")
+	}
+
+	persistedCompleted := cloneGraph(graph)
+	persistedCompleted.Jobs[0].Status = JobCompleted
+	persistedCompleted.Jobs[0].UpdatedAt = now.Add(6 * time.Second)
+	persistedCompleted.JobHistory = append(persistedCompleted.JobHistory, JobEvent{
+		JobID: "job-root", From: JobActive, To: JobCompleted,
+		Actor: "controller", Reason: "tampered persisted completion", At: now.Add(6 * time.Second),
+	})
+	if err := persistedCompleted.Validate(); err == nil {
+		t.Fatal("persisted COMPLETED Job without approval and evidence must be rejected")
+	}
 
 func TestJobConversationIncludesLegacyTaskMessagesForJob(t *testing.T) {
 	graph := newJobGraph()

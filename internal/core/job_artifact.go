@@ -241,6 +241,12 @@ func (g TaskGraph) JobCompletionReady(jobID string) (bool, []string) {
 	if err := g.Validate(); err != nil {
 		return false, []string{err.Error()}
 	}
+	return g.jobCompletionReadiness(jobID)
+}
+
+// jobCompletionReadiness evaluates completion invariants without calling Validate.
+// validateJobModel uses it to reject persisted COMPLETED states that lack evidence.
+func (g TaskGraph) jobCompletionReadiness(jobID string) (bool, []string) {
 	job, ok := g.Job(jobID)
 	if !ok || job.Contract == nil || g.HasUnapprovedJob(jobID) {
 		return false, []string{"current Job contract is missing or unapproved"}
