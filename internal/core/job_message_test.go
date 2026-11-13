@@ -45,7 +45,6 @@ func TestJobConversationRejectsReplyToDifferentJobOrRole(t *testing.T) {
 	}
 }
 
-
 func TestJobMessageReplyBindsExactRoleExecutions(t *testing.T) {
 	now := time.Now().UTC()
 	graph := TaskGraph{
