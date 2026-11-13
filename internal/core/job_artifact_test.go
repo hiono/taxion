@@ -8,12 +8,12 @@ import (
 func TestJobCompletionReadyBlocksSuspendedRoleExecution(t *testing.T) {
 	now := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
 	job := Job{
-		ID: "job-completion", Request: "request", Goal: "goal",
+		ID    : "job-completion", Request: "request", Goal: "goal",
 		Status: JobActive, CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t),
 	}
 	task := GraphTask{
-		ID: "task-completion", Title: "Completion Task", JobID: job.ID, Repo: "example/repo",
-		Type: "IMPLEMENTATION", Status: Draft, CreatedFrom: "test:job-artifact",
+		ID        : "task-completion", Title: "Completion Task", JobID: job.ID, Repo: "example/repo",
+		Type      : "IMPLEMENTATION", Status: Draft, CreatedFrom: "test:job-artifact",
 		FileAccess: &FileAccessPolicy{Level: FileAccessCommitted},
 	}
 	graph := TaskGraph{Version: 1, Jobs: []Job{job}, Tasks: []GraphTask{task}}
@@ -56,10 +56,10 @@ func TestJobCompletionReadyBlocksSuspendedRoleExecution(t *testing.T) {
 		}
 	}
 	output, err := NewJobOutput(JobOutput{
-		ID: "output-completion", JobID: job.ID, TaskID: task.ID,
+		ID             : "output-completion", JobID: job.ID, TaskID: task.ID,
 		RoleExecutionID: "exec-coder", Repository: task.Repo, Kind:          "test-report",
-		ContentSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		CreatedAt:     now.Add(5 * time.Second),
+		ContentSHA256  : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		CreatedAt      : now.Add(5 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -68,12 +68,12 @@ func TestJobCompletionReadyBlocksSuspendedRoleExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidence, err := NewJobEvidence(JobEvidence{
-		ID: "evidence-completion", JobID: job.ID, TaskID: task.ID,
+		ID                   : "evidence-completion", JobID: job.ID, TaskID: task.ID,
 		ProducedByExecutionID: "exec-coder", OutputID: output.ID,
-		Acceptance: "tests pass", Kind: "test-report",
-		ContentSHA256: output.ContentSHA256, Status: "passed",
-		VerifiedBy: "REVIEWER", VerifiedByExecutionID: "exec-reviewer",
-		CreatedAt: now.Add(6 * time.Second), VerifiedAt: now.Add(7 * time.Second),
+		Acceptance           : "tests pass", Kind: "test-report",
+		ContentSHA256        : output.ContentSHA256, Status: "passed",
+		VerifiedBy           : "REVIEWER", VerifiedByExecutionID: "exec-reviewer",
+		CreatedAt            : now.Add(6 * time.Second), VerifiedAt: now.Add(7 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestJobCompletionReadyBlocksSuspendedRoleExecution(t *testing.T) {
 func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 	now := time.Date(2026, 11, 13, 1, 0, 0, 0, time.UTC)
 	job := Job{
-		ID: "job-without-task", Request: "request", Goal: "goal",
+		ID    : "job-without-task", Request: "request", Goal: "goal",
 		Status: JobActive, CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t),
 	}
 	graph := TaskGraph{Version: 1, Jobs: []Job{job}}
@@ -141,11 +141,11 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 	}
 
 	output, err := NewJobOutput(JobOutput{
-		ID: "output-without-task", JobID: job.ID,
+		ID             : "output-without-task", JobID: job.ID,
 		RoleExecutionID: "exec-without-task-producer", Repository: "example/repo",
-		Kind:          "test-report",
-		ContentSHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		CreatedAt:     now.Add(5 * time.Second),
+		Kind           : "test-report",
+		ContentSHA256  : "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		CreatedAt      : now.Add(5 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -155,12 +155,12 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 	}
 
 	evidence, err := NewJobEvidence(JobEvidence{
-		ID: "evidence-without-task", JobID: job.ID,
+		ID                   : "evidence-without-task", JobID: job.ID,
 		ProducedByExecutionID: "exec-without-task-producer", OutputID: output.ID,
-		Acceptance: "tests pass", Kind: "test-report",
-		ContentSHA256: output.ContentSHA256, Status: "passed",
-		VerifiedBy: "REVIEWER", VerifiedByExecutionID: "exec-without-task-reviewer",
-		CreatedAt: now.Add(6 * time.Second), VerifiedAt: now.Add(7 * time.Second),
+		Acceptance           : "tests pass", Kind: "test-report",
+		ContentSHA256        : output.ContentSHA256, Status: "passed",
+		VerifiedBy           : "REVIEWER", VerifiedByExecutionID: "exec-without-task-reviewer",
+		CreatedAt            : now.Add(6 * time.Second), VerifiedAt: now.Add(7 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -173,11 +173,11 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 	}
 
 	outOfScope, err := NewJobOutput(JobOutput{
-		ID: "output-outside-job-scope", JobID: job.ID,
+		ID             : "output-outside-job-scope", JobID: job.ID,
 		RoleExecutionID: "exec-without-task-producer", Repository: "unapproved/repo",
-		Kind:          "test-report",
-		ContentSHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-		CreatedAt:     now.Add(8 * time.Second),
+		Kind           : "test-report",
+		ContentSHA256  : "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		CreatedAt      : now.Add(8 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -190,11 +190,11 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 	}
 
 	mismatchedTask, err := NewJobOutput(JobOutput{
-		ID: "output-task-mismatch", JobID: job.ID, TaskID: "unrelated-task",
+		ID             : "output-task-mismatch", JobID: job.ID, TaskID: "unrelated-task",
 		RoleExecutionID: "exec-without-task-producer", Repository: "example/repo",
-		Kind: "test-report",
-		ContentSHA256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-		CreatedAt:     now.Add(9 * time.Second),
+		Kind           : "test-report",
+		ContentSHA256  : "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		CreatedAt      : now.Add(9 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
