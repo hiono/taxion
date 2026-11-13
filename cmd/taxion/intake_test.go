@@ -248,14 +248,6 @@ func TestUserGuideColdStartExamplesWithoutSDK(t *testing.T) {
 		t.Fatal(err)
 	}
 	confirmation.ExpectedHash = proposal.Hash
-	approvalDB, err := openWorkspace()
-	if err != nil {
-		t.Fatal(err)
-	}
-	bindTestJobApproval(t, approvalDB, &confirmation)
-	if err := approvalDB.Close(); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.MkdirAll(filepath.Join(dir, ".taxion"), 0700); err != nil {
 		t.Fatal(err)
 	}
