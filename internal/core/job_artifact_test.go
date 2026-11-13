@@ -97,7 +97,6 @@ func TestJobCompletionReadyBlocksSuspendedRoleExecution(t *testing.T) {
 	}
 }
 
-
 func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 	now := time.Date(2026, 11, 13, 1, 0, 0, 0, time.UTC)
 	job := Job{

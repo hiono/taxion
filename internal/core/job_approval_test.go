@@ -190,7 +190,6 @@ func TestCheckRoleExecutionOperationRequiresCurrentJobApprovalAndScope(t *testin
 	}
 }
 
-
 func TestCheckRoleExecutionStartRequiresCurrentJobApproval(t *testing.T) {
 	now := time.Now().UTC()
 	job := Job{
@@ -242,7 +241,6 @@ func TestCheckRoleExecutionStartRequiresCurrentJobApproval(t *testing.T) {
 		t.Fatal("expired Job must not start a RoleExecution")
 	}
 }
-
 
 func TestCheckRoleExecutionStartAllowsJobLevelPlannerBeforeTasksExist(t *testing.T) {
 	now := time.Now().UTC()
