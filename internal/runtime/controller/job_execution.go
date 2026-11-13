@@ -182,6 +182,36 @@ func (c *JobRoleController) AuthorizeOperation(executionID, operation string, at
 	return state.Graph.CheckRoleExecutionOperation(executionID, operation, at)
 }
 
+// PostMessage appends a natural-language request or reply addressed to one
+// concrete RoleExecution in the same Job. It does not start or authorize it.
+func (c *JobRoleController) PostMessage(executionID, targetExecutionID, messageID, body, replyTo string, at time.Time) error {
+	if c == nil || c.store == nil || strings.TrimSpace(messageID) == "" ||
+		strings.TrimSpace(body) == "" || at.IsZero() {
+		return fmt.Errorf("taxion: Job message requires controller, identity, body and timestamp")
+	}
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	source, ok := state.Graph.RoleExecution(executionID)
+	if !ok || source.Status != core.RoleExecutionRunning || source.Role != c.runtime.Role() {
+		return fmt.Errorf("taxion: Job message source must be this Runtime's running RoleExecution")
+	}
+	target, ok := state.Graph.RoleExecution(targetExecutionID)
+	if !ok || target.JobID != source.JobID || target.Role == source.Role {
+		return fmt.Errorf("taxion: Job message target must be another RoleExecution in the same Job")
+	}
+	message := core.JobMessage{
+		ID: messageID, JobID: source.JobID, FromRole: source.Role, ToRole: target.Role,
+		Body: body, Source: "role-execution:" + executionID,
+		SourceExecutionID: executionID, TargetExecutionID: targetExecutionID,
+		ReplyTo: replyTo, At: at,
+	}
+	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendJobMessage(message)
+	})
+}
+
 // Finish persists a terminal outcome after the Runtime turn has been observed.
 func (c *JobRoleController) Finish(executionID string, status core.RoleExecutionStatus, actor, reason string, at time.Time) error {
 	if status != core.RoleExecutionSucceeded && status != core.RoleExecutionFailed &&
