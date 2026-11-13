@@ -159,6 +159,14 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if sessionID != worker.sessionID || worker.taskID != task.ID || worker.startCount != 1 {
 		t.Fatalf("unexpected Runtime binding: session=%q task=%q starts=%d", sessionID, worker.taskID, worker.startCount)
 	}
+	firstUsage := 40.0
+	if err := controller.RecordUsage("job-role-exec", core.DispatchUsage{
+		Model: "test-model", TotalNanoAIU: &firstUsage,
+		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 1, UsageID: "usage-1"},
+		ObservedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := controller.AuthorizeOperation("job-role-exec", "repository.write", time.Now().UTC()); err != nil {
 		t.Fatalf("approved Job operation rejected: %v", err)
 	}
@@ -185,6 +193,20 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 		!strings.Contains(worker.prompt, "repository.write") ||
 		!strings.Contains(worker.prompt, "Please review the implementation") {
 		t.Fatalf("Runtime did not receive the approved Job context: %s", worker.prompt)
+	}
+	secondUsage := 60.0
+	if err := controller.RecordUsage("job-role-exec", core.DispatchUsage{
+		Model: "test-model", TotalNanoAIU: &secondUsage,
+		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 2, UsageID: "usage-2"},
+		ObservedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.AuthorizeOperation("job-role-exec", "repository.write", time.Now().UTC()); err == nil {
+		t.Fatal("Job AIU budget exhaustion must block further operations")
+	}
+	if err := controller.Send(context.Background(), "job-role-exec", "another turn"); err == nil {
+		t.Fatal("Job AIU budget exhaustion must block further model turns")
 	}
 	if _, err := controller.Events(context.Background(), "job-role-exec"); err != nil {
 		t.Fatal(err)
