@@ -37,7 +37,7 @@ type JobEvidence struct {
 	VerifiedBy            string    `json:"verifiedBy,omitempty"`
 	VerifiedByExecutionID string    `json:"verifiedByExecutionId,omitempty"`
 	CreatedAt             time.Time `json:"createdAt"`
-	VerifiedAt             time.Time `json:"verifiedAt,omitempty"`
+	VerifiedAt            time.Time `json:"verifiedAt,omitempty"`
 }
 
 func validContentSHA256(value string) bool {
