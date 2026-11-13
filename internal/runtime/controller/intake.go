@@ -841,13 +841,15 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		if err := state.Graph.Transition(task.ID, core.Ready, request.Actor, request.Reason, core.TransitionProof{}); err != nil {
 			return err
 		}
-		job, ok := state.Graph.JobForTask(task.ID)
-		if !ok {
-			return fmt.Errorf("taxion: approved Task is not associated with a Job")
-		}
-		if job.Status == core.JobDraft || job.Status == core.JobWaiting {
-			if err := state.Graph.TransitionJob(job.ID, core.JobActive, request.Actor, "intake approved", time.Now().UTC()); err != nil {
-				return err
+		if task.JobID != "" {
+			job, ok := state.Graph.Job(task.JobID)
+			if !ok || job.Status == core.JobCancelled {
+				return fmt.Errorf("taxion: approved Task references no usable Job")
+			}
+			if job.Status == core.JobDraft || job.Status == core.JobWaiting {
+				if err := state.Graph.TransitionJob(job.ID, core.JobActive, request.Actor, "intake approved", time.Now().UTC()); err != nil {
+					return err
+				}
 			}
 		}
 		if request.ReplacesFlow != "" {
