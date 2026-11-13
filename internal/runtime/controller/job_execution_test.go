@@ -74,7 +74,7 @@ func (f *jobRoleRuntimeFake) Events(_ context.Context, sessionID string) (<-chan
 	return f.events, nil
 }
 func (f *jobRoleRuntimeFake) ExecutionConfiguration() json.RawMessage { return f.selection }
-func (f *jobRoleRuntimeFake) ToolPolicy() *tools.Policy       { return f.toolPolicy }
+func (f *jobRoleRuntimeFake) ToolPolicy() *tools.Policy               { return f.toolPolicy }
 func (f *jobRoleRuntimeFake) CheckAuthentication(_ context.Context, account string) error {
 	f.expectedAccount = account
 	return f.authErr
@@ -137,8 +137,8 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 						"REVIEWER": {"repository.read"},
 					},
 					RoleToolPolicies: emptyJobRoleToolPolicies(t),
-					Budget:   core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
-					Deadline: now.Add(time.Hour), Configuration: configuration,
+					Budget:           core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
+					Deadline:         now.Add(time.Hour), Configuration: configuration,
 				}
 				job = state.Graph.Jobs[i]
 				break
