@@ -324,7 +324,7 @@ func TestRequestKeepsCheckpointMinimalAndPreservesRedactedSources(t *testing.T) 
 	response := "public displayed assumption " + secret
 	answer := requestFixtureAnswer([]string{})
 	answer.Assumptions = []string{response}
-	if err := requestCommand(append(args, prompt), strings.NewReader("/plan\n/approve\n"), io.Discard,
+	if err := requestCommand(append(args, prompt), strings.NewReader("/plan\n/approve\n/approve\n"), io.Discard,
 		fixturePlan(t, answer), func(context.Context, []string, io.Writer) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
