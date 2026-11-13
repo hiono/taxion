@@ -647,7 +647,7 @@ func TestSearch(t *testing.T) {
 		}
 	}
 	coder, reviewer := state.Graph.Dispatches[0], state.Graph.Dispatches[1]
-	if strings.Count(out.String(), core.DocumentationAcceptance) != 1 ||
+	if strings.Count(out.String(), core.DocumentationAcceptance) != 2 ||
 		!slices.Contains(coder.Instruction.Acceptance, core.DocumentationAcceptance) ||
 		!slices.Equal(coder.Instruction.Acceptance, reviewer.Instruction.Acceptance) {
 		t.Fatal("displayed documentation acceptance did not reach the approved Coder and Reviewer contracts")
