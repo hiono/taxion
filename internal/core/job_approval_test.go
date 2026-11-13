@@ -16,7 +16,7 @@ func validJobContract(t *testing.T) *JobContract {
 		t.Fatal(err)
 	}
 	return &JobContract{
-		Revision: 1, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
+		Revision: 1, Roles: []string{"PLANNER", "CODER", "REVIEWER"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
 		Repositories:         []JobRepositoryScope{{Repository: "example/repo", FileAccess: FileAccessPolicy{Level: FileAccessCommitted}}},
 		Operations:           []string{"repository.read", "repository.write", "test.run"},
 		Budget:               JobBudget{MaxRoleExecutions: 10, MaxConcurrentExecutions: 2, MaxNanoAIU: 100},

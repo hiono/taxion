@@ -59,6 +59,7 @@ type JobContextSummary struct {
 	Constraints          []string                  `json:"constraints,omitempty"`
 	Status               string                    `json:"status"`
 	ApprovalRevision     int                       `json:"approvalRevision,omitempty"`
+	Roles                []string                  `json:"roles,omitempty"`
 	Approved             bool                      `json:"approved"`
 	Acceptance           []string                  `json:"acceptance,omitempty"`
 	RequiredEvidence     []string                  `json:"requiredEvidence,omitempty"`
@@ -146,6 +147,7 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 	}
 	if job.Contract != nil {
 		jobSummary.ApprovalRevision = job.Contract.Revision
+		jobSummary.Roles = append([]string(nil), job.Contract.Roles...)
 		jobSummary.Acceptance = append([]string(nil), job.Contract.Acceptance...)
 		jobSummary.RequiredEvidence = append([]string(nil), job.Contract.RequiredEvidence...)
 		jobSummary.Repositories = append([]core.JobRepositoryScope(nil), job.Contract.Repositories...)
