@@ -561,7 +561,7 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 	_, _, _, selection := executionConfigurationFixture(t)
 	proposal, err := ProposeIntake(db, IntakeRequest{
 		Request: "Continue the stopped work from its recorded partial tree with a new budget.",
-		Task: task, Actor: "human", Source: "human:budget-successor",
+		Task:    task, Actor: "human", Source: "human:budget-successor",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -648,7 +648,7 @@ func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T
 	_, _, _, selection := executionConfigurationFixture(t)
 	proposal, err := ProposeIntake(db, IntakeRequest{
 		Request: "Continue the saved Coder result directly at independent review with a new budget.",
-		Task: task, Actor: "human", Source: "human:review-successor",
+		Task:    task, Actor: "human", Source: "human:review-successor",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -866,7 +866,7 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	_, _, _, selection := executionConfigurationFixture(t)
 	proposal, err := ProposeIntake(db, IntakeRequest{
 		Request: "Continue the saved uncommitted Coder tree directly at independent review.",
-		Task: task, Actor: "human", Source: "human:snapshot-review-successor",
+		Task:    task, Actor: "human", Source: "human:snapshot-review-successor",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -919,7 +919,7 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	}
 	confirmation := withExplicitJobContractForIntake(t, db, IntakeConfirmation{
 		TaskID: proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:snapshot-review-successor",
-		Reason:                  "Approve the exact saved tree and a separate independent-review budget.",
+		Reason:    "Approve the exact saved tree and a separate independent-review budget.",
 		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
 		AdditionalTaskIDs:       []string{"snapshot-review-successor-flow-review-0"},
 		ConfigurationDecisionID: core.ConfigurationApprovalID(selection.Config.Execution.ApprovalRef, proposal.ID),
@@ -1067,7 +1067,7 @@ func TestModelFreeVerificationCanBeConfirmedAndCompletedWithoutRuntime(t *testin
 	defer db.Close()
 	if _, err := db.InitializeWorkspace(store.Workspace{
 		HasGraph: true, Graph: core.TaskGraph{Version: 1, ApprovalSchemaVersion: core.CurrentApprovalSchemaVersion},
-		Ledger:   core.Ledger{},
+		Ledger: core.Ledger{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1082,8 +1082,8 @@ func TestModelFreeVerificationCanBeConfirmedAndCompletedWithoutRuntime(t *testin
 		Acceptance:         []string{"focused test passes", "public binary evidence is limited to read-only plan"},
 		RequiredEvidence:   []string{"focused-test-output"},
 		ValidationCommands: []string{"go test ./internal/runtime/controller -run TestFailedArtifactSuccessorBindsReceiptAndRunsCoderThenReview -count=1"},
-		Branch: "review/issue-203", Worktree: dir, BaselineSHA: sha, TargetSHA: sha,
-		ExitCondition:      "Independent evidence review is recorded",
+		Branch:             "review/issue-203", Worktree: dir, BaselineSHA: sha, TargetSHA: sha,
+		ExitCondition: "Independent evidence review is recorded",
 	}
 	proposal, err := ProposeIntake(db, IntakeRequest{
 		Request: "Record the approved model-free acceptance review.", Task: task,
