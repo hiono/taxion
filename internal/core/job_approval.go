@@ -414,6 +414,12 @@ func (g TaskGraph) CheckRoleExecutionTurn(executionID string, at time.Time) erro
 	if !slices.Contains(job.Contract.Roles, execution.Role) {
 		return graphError("RoleExecution role is outside the approved Job role scope")
 	}
+	if execution.TaskID != "" {
+		task, ok := g.GraphTask(execution.TaskID)
+		if !ok || task.JobID != job.ID || !TaskWithinJobScope(task, *job.Contract) {
+			return graphError("RoleExecution Task exceeds the approved Job scope")
+		}
+	}
 	if g.JobUsageTotal(job.ID) >= job.Contract.Budget.MaxNanoAIU {
 		return graphError("Job AIU budget is exhausted")
 	}
