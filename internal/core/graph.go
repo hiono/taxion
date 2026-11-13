@@ -599,7 +599,7 @@ type TaskGraph struct {
 	Approvals             []ApprovalBundle     `json:"approvals,omitempty"`
 	JobApprovals          []JobApproval        `json:"jobApprovals,omitempty"`
 	JobOutputs            []JobOutput          `json:"jobOutputs,omitempty"`
-	JobEvidence            []JobEvidence        `json:"jobEvidence,omitempty"`
+	JobEvidence           []JobEvidence        `json:"jobEvidence,omitempty"`
 	JobMessages           []JobMessage         `json:"jobMessages,omitempty"`
 }
 
