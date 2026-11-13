@@ -426,7 +426,7 @@ func cloneIntakeJobContract(contract *core.JobContract) (*core.JobContract, erro
 
 func taskCoveredByJobContract(task core.GraphTask, contract core.JobContract) error {
 	if !core.TaskWithinJobContract(task, contract) {
-		return fmt.Errorf("taxion: Task repository or file access exceeds the approved Job scope")
+		return fmt.Errorf("taxion: Task exceeds the approved Job contract")
 	}
 	return nil
 }

@@ -204,6 +204,11 @@ func TestCheckRoleExecutionOperationRequiresCurrentJobApprovalAndScope(t *testin
 	if err := graph.CheckRoleExecutionOperation("exec-a", "test.run", now.Add(4*time.Second)); err != nil {
 		t.Fatalf("explicitly approved operation rejected: %v", err)
 	}
+	graph.Tasks[0].Acceptance = []string{"unapproved acceptance"}
+	if err := graph.CheckRoleExecutionOperation("exec-a", "repository.read", now.Add(4*time.Second)); err == nil {
+		t.Fatal("Runtime operation must reject a Task whose acceptance exceeds the approved Job contract")
+	}
+	graph.Tasks[0].Acceptance = nil
 	if err := graph.CheckRoleExecutionOperation("exec-a", "network.access", now.Add(4*time.Second)); err == nil {
 		t.Fatal("operation outside the approved Job scope must be rejected")
 	}
