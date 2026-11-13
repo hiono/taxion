@@ -195,7 +195,7 @@ func (g TaskGraph) JobCompletionReady(jobID string) (bool, []string) {
 	}
 	for _, execution := range g.RoleExecutionsForJob(jobID) {
 		switch execution.Status {
-		case RoleExecutionCreated, RoleExecutionRunning, RoleExecutionWaiting, RoleExecutionCancelRequested:
+		case RoleExecutionCreated, RoleExecutionRunning, RoleExecutionWaiting, RoleExecutionCancelRequested, RoleExecutionSuspended:
 			missing = append(missing, "unresolved RoleExecution: "+execution.ID)
 		}
 	}
