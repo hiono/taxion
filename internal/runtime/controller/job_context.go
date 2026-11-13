@@ -143,7 +143,7 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 		return JobExecutionContext{}, "", fmt.Errorf("taxion: RoleExecution %s has no Job", executionID)
 	}
 	jobSummary := JobContextSummary{
-		ID:          job.ID, Request: job.Request, Goal: job.Goal,
+		ID: job.ID, Request: job.Request, Goal: job.Goal,
 		Constraints: append([]string(nil), job.Constraints...), Status: string(job.Status),
 	}
 	if job.Contract != nil {
@@ -176,19 +176,19 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 			continue
 		}
 		result.Tasks = append(result.Tasks, JobTaskContext{
-			ID:                 task.ID, Title: task.Title, Repository: task.Repo, Type: task.Type,
-			Issue:              task.Issue, ChangeRef: task.ChangeRef, ParentID: task.ParentID,
+			ID: task.ID, Title: task.Title, Repository: task.Repo, Type: task.Type,
+			Issue: task.Issue, ChangeRef: task.ChangeRef, ParentID: task.ParentID,
 			DependsOn:          append([]core.TaskDependency(nil), task.DependsOn...),
-			Owner:              task.Owner, Reviewer: task.Reviewer, Status: string(task.Status),
-			Priority:           task.Priority, Objective: task.Objective,
-			Scope:              append([]string(nil), task.Scope...), OutOfScope: append([]string(nil), task.OutOfScope...),
+			Owner: task.Owner, Reviewer: task.Reviewer, Status: string(task.Status),
+			Priority: task.Priority, Objective: task.Objective,
+			Scope: append([]string(nil), task.Scope...), OutOfScope: append([]string(nil), task.OutOfScope...),
 			Acceptance:         append([]string(nil), task.Acceptance...),
 			RequiredEvidence:   append([]string(nil), task.RequiredEvidence...),
 			ValidationCommands: append([]string(nil), task.ValidationCommands...),
-			BaselineSHA:        task.BaselineSHA, TargetSHA: task.TargetSHA, OutputMode: task.OutputMode,
-			TargetTreeSHA:      task.TargetTreeSHA, TargetChangedFiles: append([]string(nil), task.TargetChangedFiles...),
-			Risk:               task.Risk, CreatedFrom: task.CreatedFrom, NextAction: task.NextAction,
-			ExitCondition:      task.ExitCondition, DeferredReason: task.DeferredReason,
+			BaselineSHA: task.BaselineSHA, TargetSHA: task.TargetSHA, OutputMode: task.OutputMode,
+			TargetTreeSHA: task.TargetTreeSHA, TargetChangedFiles: append([]string(nil), task.TargetChangedFiles...),
+			Risk: task.Risk, CreatedFrom: task.CreatedFrom, NextAction: task.NextAction,
+			ExitCondition: task.ExitCondition, DeferredReason: task.DeferredReason,
 			ResumeCondition:    task.ResumeCondition,
 		})
 	}
@@ -200,9 +200,9 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 			continue
 		}
 		result.Outputs = append(result.Outputs, JobOutputContext{
-			ID:         output.ID, TaskID: output.TaskID, RoleExecutionID: output.RoleExecutionID,
+			ID: output.ID, TaskID: output.TaskID, RoleExecutionID: output.RoleExecutionID,
 			Repository: output.Repository, Kind: output.Kind, ContentSHA256: output.ContentSHA256,
-			CommitSHA:  output.CommitSHA, TreeSHA: output.TreeSHA, BlobSHA: output.BlobSHA,
+			CommitSHA: output.CommitSHA, TreeSHA: output.TreeSHA, BlobSHA: output.BlobSHA,
 			CreatedAt:  output.CreatedAt,
 		})
 	}
@@ -211,17 +211,17 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 			continue
 		}
 		result.Evidence = append(result.Evidence, JobEvidenceContext{
-			ID:                    evidence.ID, TaskID: evidence.TaskID, ProducedByExecutionID: evidence.ProducedByExecutionID,
-			OutputID:              evidence.OutputID, Acceptance: evidence.Acceptance, Kind: evidence.Kind,
-			ContentSHA256:         evidence.ContentSHA256, Status: evidence.Status, VerifiedBy: evidence.VerifiedBy,
+			ID: evidence.ID, TaskID: evidence.TaskID, ProducedByExecutionID: evidence.ProducedByExecutionID,
+			OutputID: evidence.OutputID, Acceptance: evidence.Acceptance, Kind: evidence.Kind,
+			ContentSHA256: evidence.ContentSHA256, Status: evidence.Status, VerifiedBy: evidence.VerifiedBy,
 			VerifiedByExecutionID: evidence.VerifiedByExecutionID, CreatedAt: evidence.CreatedAt,
 			VerifiedAt:            evidence.VerifiedAt,
 		})
 	}
 	for _, message := range graph.JobConversation(job.ID) {
 		result.Messages = append(result.Messages, JobMessageContext{
-			ID:                message.ID, FromRole: message.FromRole, ToRole: message.ToRole,
-			Body:              message.Body, SourceExecutionID: message.SourceExecutionID,
+			ID: message.ID, FromRole: message.FromRole, ToRole: message.ToRole,
+			Body: message.Body, SourceExecutionID: message.SourceExecutionID,
 			TargetExecutionID: message.TargetExecutionID, ReplyTo: message.ReplyTo, At: message.At,
 		})
 	}
@@ -235,10 +235,10 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 
 func projectRoleExecution(execution core.RoleExecution) RoleExecutionSummary {
 	return RoleExecutionSummary{
-		ID:                execution.ID, Role: execution.Role, TaskID: execution.TaskID,
+		ID: execution.ID, Role: execution.Role, TaskID: execution.TaskID,
 		ParentExecutionID: execution.ParentExecutionID, TriggerMessageID: execution.TriggerMessageID,
-		Status:            string(execution.Status), CreatedAt: execution.CreatedAt, StartedAt: execution.StartedAt,
-		UpdatedAt:         execution.UpdatedAt, FinishedAt: execution.FinishedAt,
+		Status: string(execution.Status), CreatedAt: execution.CreatedAt, StartedAt: execution.StartedAt,
+		UpdatedAt: execution.UpdatedAt, FinishedAt: execution.FinishedAt,
 	}
 }
 

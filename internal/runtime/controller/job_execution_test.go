@@ -102,14 +102,14 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 		for i := range state.Graph.Jobs {
 			if state.Graph.Jobs[i].ID == job.ID {
 				state.Graph.Jobs[i].Contract = &core.JobContract{
-					Revision:   1, Roles: []string{"PLANNER", "CODER", "REVIEWER"},
+					Revision: 1, Roles: []string{"PLANNER", "CODER", "REVIEWER"},
 					Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
 					Repositories: []core.JobRepositoryScope{{
 						Repository: task.Repo, FileAccess: *task.FileAccess,
 					}},
 					Operations: []string{"repository.read", "repository.write", "test.run"},
-					Budget:     core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
-					Deadline:   now.Add(time.Hour), Configuration: configuration,
+					Budget: core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
+					Deadline: now.Add(time.Hour), Configuration: configuration,
 				}
 				job = state.Graph.Jobs[i]
 				break
@@ -147,14 +147,14 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	now := time.Now().UTC()
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		return state.Graph.AppendRoleExecution(core.RoleExecution{
-			ID:     "job-role-exec", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			ID: "job-role-exec", JobID: job.ID, TaskID: task.ID, Role: "CODER",
 			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
 		})
 	}); err != nil {
 		t.Fatal(err)
 	}
 	worker := &jobRoleRuntimeFake{
-		role:   "CODER", configHash: "runtime-config-hash", selection: selection,
+		role: "CODER", configHash: "runtime-config-hash", selection: selection,
 		events: make(chan runtime.Event),
 	}
 	controller, err := NewJobRoleController(db, worker)
@@ -173,7 +173,7 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	}
 	firstUsage := 40.0
 	if err := controller.RecordUsage("job-role-exec", core.DispatchUsage{
-		Model:      "test-model", TotalNanoAIU: &firstUsage,
+		Model: "test-model", TotalNanoAIU: &firstUsage,
 		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 1, UsageID: "usage-1"},
 		ObservedAt: time.Now().UTC(),
 	}); err != nil {
@@ -181,7 +181,7 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	}
 	// A replay of the same provider observation is idempotent.
 	if err := controller.RecordUsage("job-role-exec", core.DispatchUsage{
-		Model:      "test-model", TotalNanoAIU: &firstUsage,
+		Model: "test-model", TotalNanoAIU: &firstUsage,
 		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 1, UsageID: "usage-1"},
 		ObservedAt: time.Now().UTC(),
 	}); err != nil {
@@ -189,7 +189,7 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	}
 	conflictingUsage := 41.0
 	if err := controller.RecordUsage("job-role-exec", core.DispatchUsage{
-		Model:      "test-model", TotalNanoAIU: &conflictingUsage,
+		Model: "test-model", TotalNanoAIU: &conflictingUsage,
 		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 1, UsageID: "usage-1"},
 		ObservedAt: time.Now().UTC(),
 	}); err == nil {
@@ -202,7 +202,7 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := otherRuntime.RecordUsage("job-role-exec", core.DispatchUsage{
-		Model:      "test-model", TotalNanoAIU: &firstUsage,
+		Model: "test-model", TotalNanoAIU: &firstUsage,
 		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 3, UsageID: "usage-other-runtime"},
 		ObservedAt: time.Now().UTC(),
 	}); err == nil {
@@ -223,7 +223,7 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	}
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		return state.Graph.AppendRoleExecution(core.RoleExecution{
-			ID:     "job-role-reviewer", JobID: job.ID, TaskID: task.ID, Role: "REVIEWER",
+			ID: "job-role-reviewer", JobID: job.ID, TaskID: task.ID, Role: "REVIEWER",
 			Status: core.RoleExecutionCreated, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 		})
 	}); err != nil {
@@ -291,7 +291,7 @@ func TestJobRoleControllerDoesNotStartUnapprovedJob(t *testing.T) {
 	now := time.Now().UTC()
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		return state.Graph.AppendRoleExecution(core.RoleExecution{
-			ID:     "job-role-unapproved", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			ID: "job-role-unapproved", JobID: job.ID, TaskID: task.ID, Role: "CODER",
 			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
 		})
 	}); err != nil {
@@ -316,14 +316,14 @@ func TestJobRoleControllerStartsPlannerWithoutTaskAssignment(t *testing.T) {
 	now := time.Now().UTC()
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		return state.Graph.AppendRoleExecution(core.RoleExecution{
-			ID:     "job-level-planner", JobID: job.ID, Role: "PLANNER",
+			ID: "job-level-planner", JobID: job.ID, Role: "PLANNER",
 			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
 		})
 	}); err != nil {
 		t.Fatal(err)
 	}
 	worker := &jobRoleRuntimeFake{
-		role:   "PLANNER", configHash: "runtime-config-hash", selection: selection,
+		role: "PLANNER", configHash: "runtime-config-hash", selection: selection,
 		events: make(chan runtime.Event),
 	}
 	controller, err := NewJobRoleController(db, worker)
@@ -343,14 +343,14 @@ func TestJobRoleControllerDoesNotStartWithAuthenticationMismatch(t *testing.T) {
 	now := time.Now().UTC()
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		return state.Graph.AppendRoleExecution(core.RoleExecution{
-			ID:     "job-role-auth-failure", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			ID: "job-role-auth-failure", JobID: job.ID, TaskID: task.ID, Role: "CODER",
 			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
 		})
 	}); err != nil {
 		t.Fatal(err)
 	}
 	worker := &jobRoleRuntimeFake{
-		role:    "CODER", configHash: "runtime-config-hash", selection: selection,
+		role: "CODER", configHash: "runtime-config-hash", selection: selection,
 		authErr: context.Canceled,
 	}
 	controller, err := NewJobRoleController(db, worker)
@@ -370,14 +370,14 @@ func TestJobRoleControllerResumeRevalidatesCurrentJobApproval(t *testing.T) {
 	now := time.Now().UTC()
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		return state.Graph.AppendRoleExecution(core.RoleExecution{
-			ID:     "job-role-resume", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			ID: "job-role-resume", JobID: job.ID, TaskID: task.ID, Role: "CODER",
 			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
 		})
 	}); err != nil {
 		t.Fatal(err)
 	}
 	worker := &jobRoleRuntimeFake{
-		role:   "CODER", configHash: "runtime-config-hash", selection: selection,
+		role: "CODER", configHash: "runtime-config-hash", selection: selection,
 		events: make(chan runtime.Event),
 	}
 	controller, err := NewJobRoleController(db, worker)
@@ -440,11 +440,11 @@ func TestJobRolesExchangeMessagesAndResumeWithinOneJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	coderRuntime := &jobRoleRuntimeFake{
-		role:   "CODER", configHash: "runtime-config-hash", selection: selection,
+		role: "CODER", configHash: "runtime-config-hash", selection: selection,
 		events: make(chan runtime.Event),
 	}
 	reviewerRuntime := &jobRoleRuntimeFake{
-		role:   "REVIEWER", configHash: "runtime-config-hash", selection: selection,
+		role: "REVIEWER", configHash: "runtime-config-hash", selection: selection,
 		events: make(chan runtime.Event),
 	}
 	coder, err := NewJobRoleController(db, coderRuntime)
@@ -515,14 +515,14 @@ func TestJobRoleControlsRejectAnotherRuntimeIdentity(t *testing.T) {
 	now := time.Now().UTC()
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		return state.Graph.AppendRoleExecution(core.RoleExecution{
-			ID:     "identity-bound-exec", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			ID: "identity-bound-exec", JobID: job.ID, TaskID: task.ID, Role: "CODER",
 			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
 		})
 	}); err != nil {
 		t.Fatal(err)
 	}
 	coderRuntime := &jobRoleRuntimeFake{
-		role:   "CODER", configHash: "runtime-config-hash", selection: selection,
+		role: "CODER", configHash: "runtime-config-hash", selection: selection,
 		events: make(chan runtime.Event),
 	}
 	coder, err := NewJobRoleController(db, coderRuntime)
@@ -533,7 +533,7 @@ func TestJobRoleControlsRejectAnotherRuntimeIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	reviewerRuntime := &jobRoleRuntimeFake{
-		role:   "REVIEWER", configHash: "runtime-config-hash", selection: selection,
+		role: "REVIEWER", configHash: "runtime-config-hash", selection: selection,
 		events: make(chan runtime.Event),
 	}
 	reviewer, err := NewJobRoleController(db, reviewerRuntime)

@@ -21,7 +21,7 @@ func TestJobContractProposalRequiresExactUserApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	proposal, proposalHash, err := ProposeJobContract(db, JobContractProposalRequest{
-		JobID:  job.ID, Contract: contract, Actor: "planner",
+		JobID: job.ID, Contract: contract, Actor: "planner",
 		Source: "planner", Reason: "Propose the bounded execution contract",
 	})
 	if err != nil {
@@ -80,7 +80,7 @@ func TestJobContractProposalRequiresExactUserApproval(t *testing.T) {
 	updatedContract := *stored.Contract
 	updatedContract.Budget.MaxNanoAIU += 100
 	updatedProposal, updatedHash, err := ProposeJobContract(db, JobContractProposalRequest{
-		JobID:  job.ID, Contract: updatedContract, Actor: "planner",
+		JobID: job.ID, Contract: updatedContract, Actor: "planner",
 		Source: "planner", Reason: "increase approved budget",
 	})
 	if err != nil {
@@ -125,7 +125,7 @@ func TestProposeJobContractRejectsExistingTaskOutsideRoleScope(t *testing.T) {
 	contract := *job.Contract
 	contract.Roles = []string{"PLANNER", "REVIEWER"}
 	if _, _, err := ProposeJobContract(db, JobContractProposalRequest{
-		JobID:  job.ID, Contract: contract, Actor: "planner",
+		JobID: job.ID, Contract: contract, Actor: "planner",
 		Source: "planner", Reason: "remove Coder authority",
 	}); err == nil {
 		t.Fatal("Job contract revision must not exclude an existing Task owner")
@@ -159,8 +159,8 @@ func TestProposeJobContractReturnsExactProposalAndHash(t *testing.T) {
 		t.Fatal("fixture must provide a Job and explicit contract")
 	}
 	proposal, hash, err := ProposeJobContract(db, JobContractProposalRequest{
-		JobID:  job.ID, Contract: *confirmation.JobContract,
-		Actor:  "human", Source: "human:job-contract",
+		JobID: job.ID, Contract: *confirmation.JobContract,
+		Actor: "human", Source: "human:job-contract",
 		Reason: "propose exact contract for approval",
 	})
 	if err != nil {
