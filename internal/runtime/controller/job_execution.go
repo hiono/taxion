@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -37,6 +38,18 @@ func (c *JobRoleController) checkConfiguration(ctx context.Context, job core.Job
 	)
 	if err != nil || selected.Digest != job.Contract.Configuration.Digest {
 		return fmt.Errorf("taxion: Job Role runtime configuration differs from approved Job configuration")
+	}
+	var approvedSelection struct {
+		Runtime struct {
+			Account string `json:"account"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal(job.Contract.Configuration.Selection, &approvedSelection); err != nil ||
+		strings.TrimSpace(approvedSelection.Runtime.Account) == "" {
+		return fmt.Errorf("taxion: approved Job configuration must identify the expected Runtime account")
+	}
+	if err := identity.CheckAuthentication(ctx, approvedSelection.Runtime.Account); err != nil {
+		return err
 	}
 	if err := identity.CheckRepositoryAccess(ctx); err != nil {
 		return err
