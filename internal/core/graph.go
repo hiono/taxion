@@ -2033,6 +2033,10 @@ func cloneGraph(g TaskGraph) TaskGraph {
 	copy.JobApprovals = slices.Clone(g.JobApprovals)
 	copy.JobOutputs = slices.Clone(g.JobOutputs)
 	copy.JobEvidence = slices.Clone(g.JobEvidence)
+	copy.JobUsage = slices.Clone(g.JobUsage)
+	for i := range copy.JobUsage {
+		copy.JobUsage[i] = cloneJobUsage(g.JobUsage[i])
+	}
 	for i := range copy.JobApprovals {
 		copy.JobApprovals[i] = cloneJobApproval(g.JobApprovals[i])
 	}

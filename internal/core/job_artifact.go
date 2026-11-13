@@ -237,6 +237,9 @@ func (g TaskGraph) JobCompletionReady(jobID string) (bool, []string) {
 		return false, []string{"current Job contract is missing or unapproved"}
 	}
 	missing := make([]string, 0)
+	if g.JobUsageTotal(jobID) > job.Contract.Budget.MaxNanoAIU {
+		missing = append(missing, "Job AIU budget exceeded")
+	}
 	for _, acceptance := range job.Contract.Acceptance {
 		passed := false
 		for _, evidence := range g.JobEvidence {
