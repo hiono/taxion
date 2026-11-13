@@ -609,6 +609,7 @@ type TaskGraph struct {
 	JobApprovals          []JobApproval        `json:"jobApprovals,omitempty"`
 	JobOutputs            []JobOutput          `json:"jobOutputs,omitempty"`
 	JobEvidence           []JobEvidence        `json:"jobEvidence,omitempty"`
+	JobUsage              []JobUsage           `json:"jobUsage,omitempty"`
 	JobMessages           []JobMessage         `json:"jobMessages,omitempty"`
 }
 
