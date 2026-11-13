@@ -198,7 +198,7 @@ func TestCheckRoleExecutionStartRequiresCurrentJobApproval(t *testing.T) {
 		CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t),
 	}
 	task := GraphTask{
-		ID: "task-start", JobID: job.ID, Repo: "example/repo",
+		ID: "task-start", Title: "Start Task", JobID: job.ID, Repo: "example/repo", CreatedFrom: "test:job-approval",
 		FileAccess: &FileAccessPolicy{Level: FileAccessExact, Paths: []string{"src/main.go"}},
 	}
 	graph := TaskGraph{Version: 1, Jobs: []Job{job}, Tasks: []GraphTask{task}}
