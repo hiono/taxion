@@ -335,6 +335,7 @@ func TestJobStateTransitionsAreAudited(t *testing.T) {
 	if err := persistedCompleted.Validate(); err == nil {
 		t.Fatal("persisted COMPLETED Job without approval and evidence must be rejected")
 	}
+}
 
 func TestJobConversationIncludesLegacyTaskMessagesForJob(t *testing.T) {
 	graph := newJobGraph()
