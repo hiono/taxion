@@ -38,6 +38,10 @@ func TestTaskGraphUnmarshalMigratesLegacyJobOwnershipToTask(t *testing.T) {
 	if !ok || task.JobID != "job-legacy" {
 		t.Fatalf("legacy Task ownership was not moved to Task.JobID: task=%+v found=%v", task, ok)
 	}
+	// The fixture omits legacy history; establish a current-format tracking event.
+	if err := graph.Track(task, "migration-test", "record migrated Task"); err != nil {
+		t.Fatalf("track migrated Task: %v", err)
+	}
 	if _, ok := graph.Job("job-legacy"); !ok {
 		t.Fatal("legacy Job was lost during ownership migration")
 	}

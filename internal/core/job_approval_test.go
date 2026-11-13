@@ -203,6 +203,9 @@ func TestCheckRoleExecutionStartRequiresCurrentJobApproval(t *testing.T) {
 		FileAccess: &FileAccessPolicy{Level: FileAccessExact, Paths: []string{"src/main.go"}},
 	}
 	graph := TaskGraph{Version: 1, Jobs: []Job{job}, Tasks: []GraphTask{task}}
+	if err := graph.Track(task, "test", "track Job approval Task"); err != nil {
+		t.Fatal(err)
+	}
 	if err := graph.AppendRoleExecution(RoleExecution{
 		ID: "exec-start", JobID: job.ID, TaskID: task.ID, Role: "CODER",
 		Status: RoleExecutionCreated, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second),

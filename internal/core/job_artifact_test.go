@@ -18,6 +18,9 @@ func TestJobCompletionReadyBlocksSuspendedRoleExecution(t *testing.T) {
 		FileAccess: &FileAccessPolicy{Level: FileAccessCommitted},
 	}
 	graph := TaskGraph{Version: 1, Jobs: []Job{job}, Tasks: []GraphTask{task}}
+	if err := graph.Track(task, "test", "track Job completion Task"); err != nil {
+		t.Fatal(err)
+	}
 	proposal, err := JobProposal(job)
 	if err != nil {
 		t.Fatal(err)

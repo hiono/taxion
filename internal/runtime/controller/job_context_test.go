@@ -124,6 +124,9 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 		FileAccess: &core.FileAccessPolicy{Level: core.FileAccessCommitted},
 	}
 	graph := core.TaskGraph{Version: 1, Jobs: []core.Job{job}, Tasks: []core.GraphTask{task}}
+	if err := graph.Track(task, "test", "track authorized Job context Task"); err != nil {
+		t.Fatal(err)
+	}
 	if err := graph.AppendJobApproval(approval); err != nil {
 		t.Fatal(err)
 	}
