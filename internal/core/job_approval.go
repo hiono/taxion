@@ -12,6 +12,7 @@ import (
 // can constrain repository and Runtime access.
 type JobContract struct {
 	Revision             int                   `json:"revision"`
+	Roles                []string              `json:"roles"`
 	Acceptance           []string              `json:"acceptance"`
 	RequiredEvidence     []string              `json:"requiredEvidence"`
 	Repositories         []JobRepositoryScope  `json:"repositories"`
@@ -34,7 +35,7 @@ type JobBudget struct {
 }
 
 func (c JobContract) Validate() error {
-	if c.Revision < 1 || !validList(c.Acceptance) || len(c.Acceptance) == 0 ||
+	if c.Revision < 1 || !validList(c.Roles) || len(c.Roles) == 0 || !validList(c.Acceptance) || len(c.Acceptance) == 0 ||
 		!validList(c.RequiredEvidence) || len(c.RequiredEvidence) == 0 ||
 		len(c.Repositories) == 0 || !validList(c.Operations) ||
 		len(c.Operations) == 0 || !validList(c.SecurityRestrictions) ||
