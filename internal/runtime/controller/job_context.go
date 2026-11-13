@@ -15,13 +15,13 @@ import (
 // budget internals and controller-only execution bindings are intentionally
 // excluded.
 type JobExecutionContext struct {
-	Job        JobContextSummary       `json:"job"`
-	Current    RoleExecutionSummary    `json:"currentExecution"`
-	Tasks      []JobTaskContext        `json:"tasks"`
-	Executions []RoleExecutionSummary  `json:"roleExecutions"`
-	Messages   []JobMessageContext     `json:"messages"`
-	Outputs    []JobOutputContext      `json:"outputs"`
-	Evidence   []JobEvidenceContext    `json:"evidence"`
+	Job        JobContextSummary      `json:"job"`
+	Current    RoleExecutionSummary   `json:"currentExecution"`
+	Tasks      []JobTaskContext       `json:"tasks"`
+	Executions []RoleExecutionSummary `json:"roleExecutions"`
+	Messages   []JobMessageContext    `json:"messages"`
+	Outputs    []JobOutputContext     `json:"outputs"`
+	Evidence   []JobEvidenceContext   `json:"evidence"`
 }
 
 type JobOutputContext struct {
@@ -178,18 +178,18 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 		result.Tasks = append(result.Tasks, JobTaskContext{
 			ID: task.ID, Title: task.Title, Repository: task.Repo, Type: task.Type,
 			Issue: task.Issue, ChangeRef: task.ChangeRef, ParentID: task.ParentID,
-			DependsOn:          append([]core.TaskDependency(nil), task.DependsOn...),
-			Owner: task.Owner, Reviewer: task.Reviewer, Status: string(task.Status),
+			DependsOn: append([]core.TaskDependency(nil), task.DependsOn...),
+			Owner:     task.Owner, Reviewer: task.Reviewer, Status: string(task.Status),
 			Priority: task.Priority, Objective: task.Objective,
 			Scope: append([]string(nil), task.Scope...), OutOfScope: append([]string(nil), task.OutOfScope...),
 			Acceptance:         append([]string(nil), task.Acceptance...),
 			RequiredEvidence:   append([]string(nil), task.RequiredEvidence...),
 			ValidationCommands: append([]string(nil), task.ValidationCommands...),
-			BaselineSHA: task.BaselineSHA, TargetSHA: task.TargetSHA, OutputMode: task.OutputMode,
+			BaselineSHA:        task.BaselineSHA, TargetSHA: task.TargetSHA, OutputMode: task.OutputMode,
 			TargetTreeSHA: task.TargetTreeSHA, TargetChangedFiles: append([]string(nil), task.TargetChangedFiles...),
 			Risk: task.Risk, CreatedFrom: task.CreatedFrom, NextAction: task.NextAction,
 			ExitCondition: task.ExitCondition, DeferredReason: task.DeferredReason,
-			ResumeCondition:    task.ResumeCondition,
+			ResumeCondition: task.ResumeCondition,
 		})
 	}
 	for _, item := range graph.RoleExecutionsForJob(job.ID) {
@@ -203,7 +203,7 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 			ID: output.ID, TaskID: output.TaskID, RoleExecutionID: output.RoleExecutionID,
 			Repository: output.Repository, Kind: output.Kind, ContentSHA256: output.ContentSHA256,
 			CommitSHA: output.CommitSHA, TreeSHA: output.TreeSHA, BlobSHA: output.BlobSHA,
-			CreatedAt:  output.CreatedAt,
+			CreatedAt: output.CreatedAt,
 		})
 	}
 	for _, evidence := range graph.JobEvidence {
@@ -215,7 +215,7 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 			OutputID: evidence.OutputID, Acceptance: evidence.Acceptance, Kind: evidence.Kind,
 			ContentSHA256: evidence.ContentSHA256, Status: evidence.Status, VerifiedBy: evidence.VerifiedBy,
 			VerifiedByExecutionID: evidence.VerifiedByExecutionID, CreatedAt: evidence.CreatedAt,
-			VerifiedAt:            evidence.VerifiedAt,
+			VerifiedAt: evidence.VerifiedAt,
 		})
 	}
 	for _, message := range graph.JobConversation(job.ID) {
