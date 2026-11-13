@@ -1,0 +1,120 @@
+package controller
+
+import (
+	"testing"
+
+	"github.com/hiono/taxion/internal/core"
+)
+
+func TestJobContractProposalRequiresExactUserApproval(t *testing.T) {
+	db, _, _, _ := executionConfigurationFixture(t)
+	_, fixtureJob, _, _ := jobRoleFixture(t, true)
+	contract := *fixtureJob.Contract
+
+	job, err := ProposeJob(db, JobIntakeRequest{
+		JobID: "job-approval-flow", Request: "Deliver a feature.",
+		Goal: "Complete the feature with independent review.",
+		Actor: "human", Source: "human:job-proposal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, proposalHash, err := ProposeJobContract(db, JobContractProposalRequest{
+		JobID: job.ID, Contract: contract, Actor: "planner",
+		Source: "planner", Reason: "Propose the bounded execution contract",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proposal.JobID != job.ID || proposal.Revision != 1 || proposalHash == "" {
+		t.Fatalf("unexpected Job contract proposal: %+v hash=%q", proposal, proposalHash)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := state.Graph.Job(job.ID)
+	if !ok || stored.Status != core.JobDraft || stored.Contract == nil {
+		t.Fatalf("Job proposal should remain unapproved and DRAFT: %+v", stored)
+	}
+	if _, ok := state.Graph.CurrentJobApproval(job.ID); ok || len(state.Graph.JobApprovals) != 0 {
+		t.Fatal("proposing a Job contract must not create an approval")
+	}
+
+	if _, err := ConfirmJob(db, JobApprovalConfirmationRequest{
+		JobID: job.ID, ExpectedHash: "stale-hash", Actor: "human", Reason: "approve",
+	}); err == nil {
+		t.Fatal("stale proposal hash must not be approved")
+	}
+	approval, err := ConfirmJob(db, JobApprovalConfirmationRequest{
+		JobID: job.ID, ExpectedHash: proposalHash, Actor: "human", Reason: "approve exact proposal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approval.Source != "user" || approval.ProposalHash != proposalHash {
+		t.Fatalf("approval does not bind the exact user decision: %+v", approval)
+	}
+	if _, err := ConfirmJob(db, JobApprovalConfirmationRequest{
+		JobID: job.ID, ExpectedHash: proposalHash, Actor: "human", Reason: "retry",
+	}); err != nil {
+		t.Fatalf("exact approval retry should be idempotent: %v", err)
+	}
+
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok = state.Graph.Job(job.ID)
+	if !ok || stored.Status != core.JobActive {
+		t.Fatalf("approved Job should be ACTIVE: %+v", stored)
+	}
+	if _, ok := state.Graph.CurrentJobApproval(job.ID); !ok {
+		t.Fatal("explicitly approved Job has no current approval")
+	}
+	if len(state.Graph.JobApprovals) != 1 {
+		t.Fatalf("approval retry created %d records, want 1", len(state.Graph.JobApprovals))
+	}
+
+	updatedContract := *stored.Contract
+	updatedContract.Budget.MaxNanoAIU += 100
+	updatedProposal, updatedHash, err := ProposeJobContract(db, JobContractProposalRequest{
+		JobID: job.ID, Contract: updatedContract, Actor: "planner",
+		Source: "planner", Reason: "increase approved budget",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedProposal.Revision != 2 || updatedHash == proposalHash {
+		t.Fatalf("contract revision was not advanced: revision=%d hash=%q", updatedProposal.Revision, updatedHash)
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _ = state.Graph.Job(job.ID)
+	if stored.Status != core.JobWaiting {
+		t.Fatalf("revised active Job should wait for reapproval, got %s", stored.Status)
+	}
+	if _, ok := state.Graph.CurrentJobApproval(job.ID); ok {
+		t.Fatal("previous approval must not authorize the revised contract")
+	}
+	if _, err := ConfirmJob(db, JobApprovalConfirmationRequest{
+		JobID: job.ID, ExpectedHash: proposalHash, Actor: "human", Reason: "approve old revision",
+	}); err == nil {
+		t.Fatal("old proposal hash must not approve the revised contract")
+	}
+	if _, err := ConfirmJob(db, JobApprovalConfirmationRequest{
+		JobID: job.ID, ExpectedHash: updatedHash, Actor: "human", Reason: "approve revised contract",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _ = state.Graph.Job(job.ID)
+	if stored.Status != core.JobActive || len(state.Graph.JobApprovals) != 2 {
+		t.Fatalf("reapproved Job state/history mismatch: status=%s approvals=%d", stored.Status, len(state.Graph.JobApprovals))
+	}
+}
