@@ -391,6 +391,49 @@ func (g TaskGraph) CheckRoleExecutionStart(executionID string, at time.Time) err
 	return nil
 }
 
+// CheckRoleExecutionTurn validates the authority and remaining Job budget
+// before a running Role receives another model turn.
+func (g TaskGraph) CheckRoleExecutionTurn(executionID string, at time.Time) error {
+	if at.IsZero() {
+		return graphError("Role turn requires a timestamp")
+	}
+	execution, ok := g.RoleExecution(executionID)
+	if !ok || execution.Status != RoleExecutionRunning {
+		return graphError("Role turn requires a running RoleExecution")
+	}
+	job, ok := g.Job(execution.JobID)
+	if !ok || job.Status != JobActive || job.Contract == nil {
+		return graphError("Role turn requires an active Job contract")
+	}
+	if at.After(job.Contract.Deadline) {
+		return graphError("Job deadline has expired")
+	}
+	if _, ok := g.CurrentJobApproval(job.ID); !ok {
+		return graphError("Role turn requires approval of the current Job revision")
+	}
+	if !slices.Contains(job.Contract.Roles, execution.Role) {
+		return graphError("RoleExecution role is outside the approved Job role scope")
+	}
+	if g.JobUsageTotal(job.ID) >= job.Contract.Budget.MaxNanoAIU {
+		return graphError("Job AIU budget is exhausted")
+	}
+	executions := g.RoleExecutionsForJob(job.ID)
+	if len(executions) > job.Contract.Budget.MaxRoleExecutions {
+		return graphError("Job RoleExecution budget is exhausted")
+	}
+	concurrent := 0
+	for _, candidate := range executions {
+		switch candidate.Status {
+		case RoleExecutionCreated, RoleExecutionRunning, RoleExecutionWaiting, RoleExecutionCancelRequested:
+			concurrent++
+		}
+	}
+	if concurrent > job.Contract.Budget.MaxConcurrentExecutions {
+		return graphError("Job concurrent RoleExecution limit is exceeded")
+	}
+	return nil
+}
+
 // CheckRoleExecutionOperation verifies Job-level authority immediately before a
 // privileged Runtime operation. Role-specific policy must be intersected by the
 // Controller; this check never grants permissions on its own.
