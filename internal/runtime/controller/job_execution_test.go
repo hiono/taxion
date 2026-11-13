@@ -110,11 +110,11 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 			if state.Graph.Jobs[i].ID == job.ID {
 				state.Graph.Jobs[i].Contract = &core.JobContract{
 					Revision: 1, Roles: []string{"PLANNER", "CODER", "REVIEWER"},
-					Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
+					Acceptance: append([]string(nil), task.Acceptance...), RequiredEvidence: append([]string(nil), task.RequiredEvidence...),
 					Repositories: []core.JobRepositoryScope{{
 						Repository: task.Repo, FileAccess: *task.FileAccess,
 					}},
-					Operations: []string{"repository.read", "repository.write", "test.run"},
+					Operations: []string{"repository.read", "repository.write", "process.exec", "test.run"},
 					Budget:     core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
 					Deadline:   now.Add(time.Hour), Configuration: configuration,
 				}

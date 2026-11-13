@@ -71,6 +71,12 @@ func TestTaskCannotWidenApprovedJobContract(t *testing.T) {
 	if !TaskWithinJobContract(commands, contract) {
 		t.Fatal("approved validation operations should permit validation commands")
 	}
+
+	readOnly := contract
+	readOnly.Operations = []string{"repository.read"}
+	if !TaskWithinJobContract(task, readOnly) {
+		t.Fatal("a Task must not be forced to receive repository.write when its Job contract grants read-only access")
+	}
 }
 
 func TestTaskGraphRejectsTaskContractOutsideApprovedJob(t *testing.T) {
