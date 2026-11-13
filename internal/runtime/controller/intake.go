@@ -504,7 +504,15 @@ func appendConfirmedJobApproval(state *store.Workspace, task core.GraphTask, req
 	if modelFreeVerification(task) {
 		return nil
 	}
-	job, ok := state.Graph.JobForTask(task.ID)
+	if state == nil {
+		return fmt.Errorf("taxion: Job approval requires a workspace")
+	}
+
+	// Stage the contract and approval on a candidate graph. A rejected or
+	// replayed confirmation must not mutate the caller's workspace.
+	graph := state.Graph
+	graph.Jobs = append([]core.Job(nil), state.Graph.Jobs...)
+	job, ok := graph.JobForTask(task.ID)
 	if !ok || request.JobContract == nil {
 		return fmt.Errorf("taxion: non-model-free intake requires an explicit Job contract")
 	}
@@ -537,13 +545,6 @@ func appendConfirmedJobApproval(state *store.Workspace, task core.GraphTask, req
 		}
 	}
 	job.Contract = &contract
-	job.UpdatedAt = time.Now().UTC()
-	for i := range state.Graph.Jobs {
-		if state.Graph.Jobs[i].ID == job.ID {
-			state.Graph.Jobs[i] = job
-			break
-		}
-	}
 	proposal, err := core.JobProposal(job)
 	if err != nil {
 		return err
@@ -555,10 +556,10 @@ func appendConfirmedJobApproval(state *store.Workspace, task core.GraphTask, req
 	if request.ExpectedJobContractHash == "" || proposalHash != request.ExpectedJobContractHash {
 		return fmt.Errorf("taxion: Job contract differs from the exact proposal shown for approval")
 	}
-	if existing, ok := state.Graph.CurrentJobApproval(job.ID); ok && existing.ProposalHash == proposalHash {
+	if existing, ok := graph.CurrentJobApproval(job.ID); ok && existing.ProposalHash == proposalHash {
 		return nil
 	}
-	for _, existing := range state.Graph.JobApprovals {
+	for _, existing := range graph.JobApprovals {
 		if existing.Proposal.JobID == job.ID && existing.Proposal.Revision == contract.Revision {
 			return fmt.Errorf("taxion: Job revision already has an approval history but is not currently authorized")
 		}
@@ -570,7 +571,18 @@ func appendConfirmedJobApproval(state *store.Workspace, task core.GraphTask, req
 	if err != nil {
 		return err
 	}
-	return state.Graph.AppendJobApproval(approval)
+	job.UpdatedAt = time.Now().UTC()
+	for i := range graph.Jobs {
+		if graph.Jobs[i].ID == job.ID {
+			graph.Jobs[i] = job
+			break
+		}
+	}
+	if err := graph.AppendJobApproval(approval); err != nil {
+		return err
+	}
+	state.Graph = graph
+	return nil
 }
 
 // ConfirmIntake confirms exactly the displayed contract. A changed contract is
@@ -908,6 +920,19 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 // A bundle is a representation of the exact formal confirmation, not a second
 // human decision. Legacy graphs keep their existing authorization semantics.
 func appendConfirmedIntakeApproval(state *store.Workspace, task core.GraphTask, request IntakeConfirmation) error {
+	if state == nil {
+		return fmt.Errorf("taxion: intake approval requires a workspace")
+	}
+	candidate := *state
+	candidate.Graph.Jobs = append([]core.Job(nil), state.Graph.Jobs...)
+	if err := appendConfirmedIntakeApprovalCandidate(&candidate, task, request); err != nil {
+		return err
+	}
+	state.Graph = candidate.Graph
+	return nil
+}
+
+func appendConfirmedIntakeApprovalCandidate(state *store.Workspace, task core.GraphTask, request IntakeConfirmation) error {
 	if modelFreeVerification(task) {
 		return nil
 	}

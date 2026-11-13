@@ -254,7 +254,7 @@ func TestJobEvidenceRequiresReviewerExecution(t *testing.T) {
 			ID: id, JobID: job.ID, ProducedByExecutionID: "producer",
 			Acceptance: "tests pass", Kind: "test-report",
 			ContentSHA256: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-			Status: "passed", VerifiedBy: verifiedBy, VerifiedByExecutionID: verifierID,
+			Status:        "passed", VerifiedBy: verifiedBy, VerifiedByExecutionID: verifierID,
 			CreatedAt: now.Add(4 * time.Second), VerifiedAt: now.Add(5 * time.Second),
 		})
 		if err != nil {
