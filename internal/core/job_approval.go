@@ -249,8 +249,8 @@ func (g TaskGraph) validateJobApprovals() error {
 	}
 	for _, approval := range g.JobApprovals {
 		job, ok := jobs[approval.Proposal.JobID]
-		if !ok || ids[approval.ID] || approval.Verify() != nil ||
-			approval.At.Before(job.CreatedAt) {
+		if !ok || job.Contract == nil || approval.Proposal.Revision > job.Contract.Revision ||
+			ids[approval.ID] || approval.Verify() != nil || approval.At.Before(job.CreatedAt) {
 			return graphError("invalid or orphaned Job approval")
 		}
 		ids[approval.ID] = true
@@ -267,6 +267,20 @@ func (g TaskGraph) validateJobApprovals() error {
 		if job.Contract != nil {
 			if err := job.Contract.Validate(); err != nil {
 				return err
+			}
+			current, err := JobProposal(job)
+			if err != nil {
+				return err
+			}
+			currentHash, err := current.Hash()
+			if err != nil {
+				return err
+			}
+			for _, approval := range g.JobApprovals {
+				if approval.Proposal.JobID == job.ID && approval.Proposal.Revision == job.Contract.Revision &&
+					approval.ProposalHash != currentHash {
+					return graphError("Job contract changed without incrementing its approval revision")
+				}
 			}
 		}
 	}

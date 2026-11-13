@@ -87,3 +87,54 @@ func TestJobContractRejectsUnknownAndUnboundedScope(t *testing.T) {
 		t.Fatal("duplicate repository scope must be rejected")
 	}
 }
+
+
+func TestJobApprovalAppendAndRevisionInvalidation(t *testing.T) {
+	now := time.Now().UTC()
+	job := Job{
+		ID: "job-a", Request: "request", Goal: "goal", Status: JobActive,
+		CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t),
+	}
+	graph := TaskGraph{Version: 1, Jobs: []Job{job}}
+	proposal, err := JobProposal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval, err := NewJobApproval("approval-1", "human", "user", "approve", proposal, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendJobApproval(approval); err != nil {
+		t.Fatalf("append Job approval: %v", err)
+	}
+	if _, ok := graph.CurrentJobApproval("job-a"); !ok {
+		t.Fatal("current Job approval was not found")
+	}
+	graph.Jobs[0].Contract.Operations = append(graph.Jobs[0].Contract.Operations, "network.access")
+	if err := graph.validateJobModel(); err == nil {
+		t.Fatal("changing an approved contract without a new revision must be rejected")
+	}
+	graph.Jobs[0].Contract.Revision = 2
+	if err := graph.validateJobModel(); err != nil {
+		t.Fatalf("new revision should preserve historical approval: %v", err)
+	}
+	if !graph.HasUnapprovedJob("job-a") {
+		t.Fatal("new Job revision must require explicit approval")
+	}
+}
+
+func TestTaskGraphRejectsTaskScopeOutsideApprovedJobContract(t *testing.T) {
+	now := time.Now().UTC()
+	job := Job{
+		ID: "job-a", Request: "request", Goal: "goal", Status: JobActive,
+		CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t),
+	}
+	task := GraphTask{
+		ID: "task-a", JobID: "job-a", Repo: "example/repo",
+		FileAccess: &FileAccessPolicy{Level: FileAccessAll},
+	}
+	graph := TaskGraph{Version: 1, Jobs: []Job{job}, Tasks: []GraphTask{task}}
+	if err := graph.validateJobModel(); err == nil {
+		t.Fatal("Task must not widen Job file access")
+	}
+}

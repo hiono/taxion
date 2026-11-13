@@ -389,8 +389,12 @@ func (g TaskGraph) validateJobModel() error {
 		if task.JobID == "" {
 			continue // Unassigned legacy Tasks remain readable; new intake always assigns a Job.
 		}
-		if _, ok := jobs[task.JobID]; !ok || task.ID == task.JobID {
+		owner, ok := jobs[task.JobID]
+		if !ok || task.ID == task.JobID {
 			return graphError("Task %s references a missing or colliding Job", task.ID)
+		}
+		if owner.Contract != nil && !TaskWithinJobScope(task, *owner.Contract) {
+			return graphError("Task %s exceeds its Job repository or file-access scope", task.ID)
 		}
 	}
 	for _, job := range g.Jobs {
