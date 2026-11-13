@@ -116,12 +116,12 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 					}},
 					Operations: []string{"repository.read", "repository.write", "process.exec", "test.run"},
 					RoleOperations: map[string][]string{
-						"PLANNER": {"repository.read"},
-						"CODER": {"repository.read", "repository.write", "process.exec", "test.run"},
+						"PLANNER":  {"repository.read"},
+						"CODER":    {"repository.read", "repository.write", "process.exec", "test.run"},
 						"REVIEWER": {"repository.read"},
 					},
-					Budget:     core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
-					Deadline:   now.Add(time.Hour), Configuration: configuration,
+					Budget:   core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
+					Deadline: now.Add(time.Hour), Configuration: configuration,
 				}
 				job = state.Graph.Jobs[i]
 				break
