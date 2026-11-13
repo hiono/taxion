@@ -23,20 +23,20 @@ type JobExecutionContext struct {
 }
 
 type JobContextSummary struct {
-	ID                   string                   `json:"id"`
-	Request              string                   `json:"request"`
-	Goal                 string                   `json:"goal"`
-	Constraints          []string                 `json:"constraints,omitempty"`
-	Status               string                   `json:"status"`
-	ApprovalRevision     int                      `json:"approvalRevision,omitempty"`
-	Approved             bool                     `json:"approved"`
-	Acceptance           []string                 `json:"acceptance,omitempty"`
-	RequiredEvidence     []string                 `json:"requiredEvidence,omitempty"`
+	ID                   string                    `json:"id"`
+	Request              string                    `json:"request"`
+	Goal                 string                    `json:"goal"`
+	Constraints          []string                  `json:"constraints,omitempty"`
+	Status               string                    `json:"status"`
+	ApprovalRevision     int                       `json:"approvalRevision,omitempty"`
+	Approved             bool                      `json:"approved"`
+	Acceptance           []string                  `json:"acceptance,omitempty"`
+	RequiredEvidence     []string                  `json:"requiredEvidence,omitempty"`
 	Repositories         []core.JobRepositoryScope `json:"repositories,omitempty"`
-	Operations           []string                 `json:"operations,omitempty"`
-	Budget               core.JobBudget           `json:"budget,omitempty"`
-	Deadline             time.Time                `json:"deadline,omitempty"`
-	SecurityRestrictions []string                 `json:"securityRestrictions,omitempty"`
+	Operations           []string                  `json:"operations,omitempty"`
+	Budget               core.JobBudget            `json:"budget,omitempty"`
+	Deadline             time.Time                 `json:"deadline,omitempty"`
+	SecurityRestrictions []string                  `json:"securityRestrictions,omitempty"`
 }
 
 type JobTaskContext struct {
@@ -127,7 +127,7 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 		_, jobSummary.Approved = graph.CurrentJobApproval(job.ID)
 	}
 	result := JobExecutionContext{
-		Job: jobSummary,
+		Job:        jobSummary,
 		Current:    projectRoleExecution(execution),
 		Tasks:      make([]JobTaskContext, 0),
 		Executions: make([]RoleExecutionSummary, 0),
