@@ -11,9 +11,9 @@ func newJobGraph() TaskGraph {
 		Version: 1,
 		Jobs: []Job{{
 			ID: "job-a", Request: "Original request", Goal: "Complete the requested work",
-			RootTaskID: "task-a", TaskIDs: []string{"task-a"}, Status: JobActive, CreatedAt: now, UpdatedAt: now,
+			Status: JobActive, CreatedAt: now, UpdatedAt: now,
 		}},
-		Tasks: []GraphTask{{ID: "task-a"}},
+		Tasks: []GraphTask{{ID: "task-a", JobID: "job-a"}},
 	}
 }
 
@@ -88,10 +88,10 @@ func TestRoleExecutionRejectsCrossJobParentAndTask(t *testing.T) {
 	graph := newJobGraph()
 	now := time.Now().UTC()
 	graph.Jobs = append(graph.Jobs, Job{
-		ID: "job-b", Request: "Other request", Goal: "Other goal", RootTaskID: "task-b", TaskIDs: []string{"task-b"},
+		ID: "job-b", Request: "Other request", Goal: "Other goal",
 		Status: JobActive, CreatedAt: now, UpdatedAt: now,
 	})
-	graph.Tasks = append(graph.Tasks, GraphTask{ID: "task-b"})
+	graph.Tasks = append(graph.Tasks, GraphTask{ID: "task-b", JobID: "job-b"})
 	if err := graph.AppendRoleExecution(RoleExecution{
 		ID: "exec-a", JobID: "job-a", TaskID: "task-a", Role: "CODER",
 		Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
@@ -191,12 +191,12 @@ func TestJobMessageRejectsCrossJobExecutionReply(t *testing.T) {
 	}
 }
 
-func TestCloneGraphCopiesJobMembershipSlices(t *testing.T) {
+func TestCloneGraphCopiesTaskOwnership(t *testing.T) {
 	graph := newJobGraph()
 	cloned := cloneGraph(graph)
-	cloned.Jobs[0].TaskIDs[0] = "changed"
-	if graph.Jobs[0].TaskIDs[0] != "task-a" {
-		t.Fatal("cloneGraph shares Job TaskIDs backing storage")
+	cloned.Tasks[0].JobID = "changed"
+	if graph.Tasks[0].JobID != "job-a" {
+		t.Fatal("cloneGraph shares Task ownership state")
 	}
 }
 
@@ -212,12 +212,32 @@ func TestJobConversationUsesFirstClassJobID(t *testing.T) {
 	}
 }
 
+func TestJobExistsWithoutTasksAndMultipleTasksShareIt(t *testing.T) {
+	now := time.Now().UTC()
+	graph := TaskGraph{Version: 1}
+	if err := graph.CreateJob(Job{ID: "job-empty", Request: "Request", Goal: "Goal", Status: JobDraft, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("Job must exist independently of Tasks: %v", err)
+	}
+	if err := graph.Track(GraphTask{ID: "task-one", JobID: "job-empty", Status: Draft}, "test", "first Task"); err != nil {
+		t.Fatalf("track first Task: %v", err)
+	}
+	if err := graph.Track(GraphTask{ID: "task-two", JobID: "job-empty", Status: Draft}, "test", "second Task"); err != nil {
+		t.Fatalf("track second Task: %v", err)
+	}
+	if got, ok := graph.JobForTask("task-one"); !ok || got.ID != "job-empty" {
+		t.Fatal("Task.JobID did not resolve its Job")
+	}
+	if got, ok := graph.JobForTask("task-two"); !ok || got.ID != "job-empty" {
+		t.Fatal("second Task did not resolve the shared Job")
+	}
+}
+
 func TestJobStateTransitionsAreAudited(t *testing.T) {
 	now := time.Now().UTC()
 	graph := TaskGraph{Version: 1, Tasks: []GraphTask{{ID: "task-root"}}}
 	if err := graph.CreateJob(Job{
 		ID: "job-root", Request: "Original request", Goal: "Complete work",
-		RootTaskID: "task-root", Status: JobDraft, CreatedAt: now, UpdatedAt: now,
+		Status: JobDraft, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("CreateJob: %v", err)
 	}
