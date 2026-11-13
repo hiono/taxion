@@ -588,6 +588,13 @@ func (g *TaskGraph) UnmarshalJSON(data []byte) error {
 			g.ReviewFlows[i].Contract.JobID = owner
 		}
 	}
+	// A restored first-class Job must satisfy the current domain invariants.
+	// Legacy Task-only graphs remain readable without entering the Job model.
+	if len(g.Jobs) > 0 {
+		if err := g.validateJobModel(); err != nil {
+			return fmt.Errorf("validate restored Job model: %w", err)
+		}
+	}
 	return nil
 }
 

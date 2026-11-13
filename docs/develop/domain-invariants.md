@@ -6,16 +6,16 @@
 
 ## 完了条件の論理定義
 
-Job (j) が `COMPLETED` であるための条件を次のように定義する。
+Job \(j\) が \`COMPLETED\` であるための条件を次のように定義する。
 
-[
+\[
 Completed(j) \Rightarrow
 Approved(j)
 \land AcceptanceSatisfied(j)
 \land RequiredEvidenceSatisfied(j)
 \land BudgetWithinLimit(j)
 \land NoUnresolvedExecution(j)
-]
+\]
 
 ここで、
 
@@ -29,15 +29,15 @@ Approved(j)
 
 ## 現在の実装対応
 
-| 条件 | 規範的な判定 | 強制箇所 | 回帰検証 |
-|---|---|---|---|
-| Job completion readiness | `TaskGraph.jobCompletionReadiness` / `JobCompletionReady` | `transitionJob` の `COMPLETED` 遷移 gate、`validateJobModel` の保存可能状態検証 | `TestJobStateTransitionsAreAudited` |
-| Job / Task の所有整合性 | Task.JobID から Job を一意に解決 | `validateJobModel`、Task の追加・更新経路 | Job/Task ownership tests |
-| RoleExecution の所属・履歴整合性 | JobID / TaskID / ParentExecutionID と履歴状態の整合性 | RoleExecution mutation と `validateJobModel` | RoleExecution lifecycle / cross-Job tests |
-| Job output / evidence provenance | 出所、Job、Task、Execution、content identity、verification の整合性 | `AppendJobOutput` / `AppendJobEvidence`、`validateJobArtifacts` | Job artifact / evidence tests |
-| Job approval scope | 承認済み Job 契約と Task / RoleExecution の scope 包含 | Controller の privileged operation 直前検査、Graph contract validation | approval / execution authorization tests |
+| 条件 | 規範的な判定 | 強制箇所 | 回帰検証 | 確認状態 |
+|---|---|---|---|---|
+| Job completion readiness | `TaskGraph.jobCompletionReadiness` / `JobCompletionReady` | `transitionJob` の `COMPLETED` 遷移 gate、`validateJobModel`、`TaskGraph.UnmarshalJSON` の Job 復元検証 | `TestJobStateTransitionsAreAudited`（遷移拒否、保存状態検証、JSON 復元拒否） | このPRで実装・検証中 |
+| Job / Task の所有整合性 | Task.JobID から Job を一意に解決 | `validateJobModel`、Task の追加・更新経路 | Job/Task ownership tests | 経路の継続監査 |
+| RoleExecution の所属・履歴整合性 | JobID / TaskID / ParentExecutionID と履歴状態の整合性 | RoleExecution mutation と `validateJobModel` | RoleExecution lifecycle / cross-Job tests | 経路の継続監査 |
+| Job output / evidence provenance | 出所、Job、Task、Execution、content identity、verification の整合性 | `AppendJobOutput` / `AppendJobEvidence`、`validateJobArtifacts` | Job artifact / evidence tests | 経路の継続監査 |
+| Job approval scope | 承認済み Job 契約と Task / RoleExecution の scope 包含 | Controller の privileged operation 直前検査、Graph contract validation | approval / execution authorization tests | 経路の継続監査 |
 
-表の各行は現在確認した実装範囲であり、将来の変更を自動的に保証するものではない。テスト名・対象ファイルは実装変更に合わせて更新する。未調査の経路は実装済みと推定せず、監査対象として残す。
+「経路の継続監査」は、判定ロジックや一部の gate が存在することを示すだけで、生成・更新・保存・復元・実行の全経路で不変条件が強制されると認定した状態ではない。監査完了の根拠を得るまで、実装完了として扱わない。
 
 ## 変更時の必須手順
 
