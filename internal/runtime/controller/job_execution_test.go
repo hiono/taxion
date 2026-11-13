@@ -32,7 +32,7 @@ func (f *jobRoleRuntimeFake) Worktree() string   { return "/tmp/job-role-worktre
 func (f *jobRoleRuntimeFake) Start(_ context.Context, taskID string) (string, error) {
 	f.startCount++
 	f.taskID = taskID
-	f.sessionID = "job-session-" + taskID
+	f.sessionID = "job-session-" + f.role + "-" + taskID
 	return f.sessionID, nil
 }
 func (f *jobRoleRuntimeFake) Send(_ context.Context, sessionID, prompt string) error {
@@ -403,5 +403,93 @@ func TestJobRoleControllerResumeRevalidatesCurrentJobApproval(t *testing.T) {
 	}
 	if worker.resumeCount != 1 {
 		t.Fatalf("Runtime resumed %d times after approval became stale", worker.resumeCount)
+	}
+}
+
+
+func TestJobRolesExchangeMessagesAndResumeWithinOneJob(t *testing.T) {
+	db, job, task, selection := jobRoleFixture(t, true)
+	now := time.Now().UTC()
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		for _, execution := range []core.RoleExecution{
+			{ID: "collab-coder", JobID: job.ID, TaskID: task.ID, Role: "CODER", Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
+			{ID: "collab-reviewer", JobID: job.ID, TaskID: task.ID, Role: "REVIEWER", Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
+		} {
+			if err := state.Graph.AppendRoleExecution(execution); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	coderRuntime := &jobRoleRuntimeFake{
+		role: "CODER", configHash: "runtime-config-hash", selection: selection,
+		events: make(chan runtime.Event),
+	}
+	reviewerRuntime := &jobRoleRuntimeFake{
+		role: "REVIEWER", configHash: "runtime-config-hash", selection: selection,
+		events: make(chan runtime.Event),
+	}
+	coder, err := NewJobRoleController(db, coderRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewer, err := NewJobRoleController(db, reviewerRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coder.Start(context.Background(), "collab-coder"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reviewer.Start(context.Background(), "collab-reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := coder.PostMessage("collab-coder", "collab-reviewer", "collab-request",
+		"Review the implementation against the Job acceptance criteria.", "", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := coder.Wait("collab-coder", "waiting for independent review", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := reviewer.Send(context.Background(), "collab-reviewer", "Review the pending implementation."); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reviewerRuntime.prompt, "Review the implementation against the Job acceptance criteria.") {
+		t.Fatal("Reviewer did not receive the addressed Job request")
+	}
+	if err := reviewer.PostMessage("collab-reviewer", "collab-coder", "collab-reply",
+		"Review passed; retain the evidence reference and proceed.", "collab-request", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := reviewer.Wait("collab-reviewer", "waiting for Coder follow-up", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := coder.Resume(context.Background(), "collab-coder"); err != nil {
+		t.Fatal(err)
+	}
+	if err := coder.Send(context.Background(), "collab-coder", "Apply the review response."); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(coderRuntime.prompt, "Review passed; retain the evidence reference and proceed.") {
+		t.Fatal("Coder did not receive the Reviewer reply after resuming")
+	}
+	if err := reviewer.Resume(context.Background(), "collab-reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := reviewer.Finish("collab-reviewer", core.RoleExecutionSucceeded, "controller", "review complete", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := coder.Finish("collab-coder", core.RoleExecutionSucceeded, "controller", "implementation complete", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := state.Graph.JobConversation(job.ID)
+	if len(messages) != 2 || messages[0].TargetExecutionID != "collab-reviewer" ||
+		messages[1].TargetExecutionID != "collab-coder" || messages[1].ReplyTo != "collab-request" {
+		t.Fatalf("Job conversation did not preserve addressed request/reply provenance: %+v", messages)
 	}
 }
