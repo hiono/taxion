@@ -147,6 +147,49 @@ func TestProposeJobContractRejectsExistingTaskOutsideRoleScope(t *testing.T) {
 	}
 }
 
+
+func TestConfirmIntakeAcceptsPersistedCanonicalContractDeadline(t *testing.T) {
+	db, confirmation := intakeApprovalFixture(t, false)
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := state.Graph.GraphTask(confirmation.TaskID)
+	if !ok {
+		t.Fatalf("Task %s is missing", confirmation.TaskID)
+	}
+	selection, err := json.Marshal(confirmation.Selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration, err := core.SelectApprovalConfiguration(selection, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract, err := BuildJobContractForIntake(task, configuration,
+		core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 2, MaxNanoAIU: 1000},
+		time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok := state.Graph.JobForTask(task.ID)
+	if !ok {
+		t.Fatalf("Task %s has no owning Job", task.ID)
+	}
+	proposal, hash, err := ProposeJobContract(db, JobContractProposalRequest{
+		JobID: job.ID, Contract: contract, Actor: "planner",
+		Source: "planner:test", Reason: "approve the exact persisted contract",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmation.JobContract = &proposal.Contract
+	confirmation.ExpectedJobContractHash = hash
+	if _, err := ConfirmIntake(db, confirmation); err != nil {
+		t.Fatalf("confirm persisted Job contract: %v", err)
+	}
+}
+
 func TestProposeJobContractReturnsExactProposalAndHash(t *testing.T) {
 	db, confirmation := intakeApprovalFixture(t, false)
 	state, err := db.LoadWorkspace()
