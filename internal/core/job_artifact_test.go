@@ -57,7 +57,7 @@ func TestJobCompletionReadyBlocksSuspendedRoleExecution(t *testing.T) {
 	}
 	output, err := NewJobOutput(JobOutput{
 		ID: "output-completion", JobID: job.ID, TaskID: task.ID,
-		RoleExecutionID: "exec-coder", Repository: task.Repo, Kind:          "test-report",
+		RoleExecutionID: "exec-coder", Repository: task.Repo, Kind: "test-report",
 		ContentSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		CreatedAt:     now.Add(5 * time.Second),
 	})
