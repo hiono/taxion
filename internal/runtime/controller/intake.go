@@ -54,6 +54,7 @@ type IntakeConfirmation struct {
 	Target                  *core.FeedbackTarget `json:"target,omitempty"`
 	RequestOperationID      string               `json:"requestOperationId,omitempty"`
 	RequestBasisHash        string               `json:"requestBasisHash,omitempty"`
+	JobContract             *core.JobContract    `json:"jobContract,omitempty"`
 }
 
 // VerifyRequestConfirmation reads the formal intake decision and its original
@@ -394,6 +395,154 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 		return nil
 	})
 	return result, err
+}
+
+// BuildJobContractForIntake binds a new Job to the exact Task scope and
+// the explicitly approved runtime configuration and execution budget.
+func BuildJobContractForIntake(task core.GraphTask, configuration core.ApprovalConfiguration, budget core.JobBudget, deadline time.Time) (core.JobContract, error) {
+	if task.FileAccess == nil || strings.TrimSpace(task.Repo) == "" ||
+		len(task.Acceptance) == 0 || len(task.RequiredEvidence) == 0 {
+		return core.JobContract{}, fmt.Errorf("taxion: Job contract requires repository access, acceptance criteria and evidence")
+	}
+	operations := []string{"repository.read", "repository.write", "process.exec"}
+	if len(task.ValidationCommands) > 0 {
+		operations = append(operations, "test.run")
+	}
+	contract := core.JobContract{
+		Revision: 1,
+		Roles: []string{"PLANNER", "CODER", "REVIEWER"},
+		Acceptance: slices.Clone(task.Acceptance),
+		RequiredEvidence: slices.Clone(task.RequiredEvidence),
+		Repositories: []core.JobRepositoryScope{{
+			Repository: task.Repo,
+			FileAccess: *task.FileAccess,
+		}},
+		Operations: operations,
+		Budget: budget,
+		Deadline: deadline,
+		SecurityRestrictions: []string{"no credential export", "no network access"},
+		Configuration: configuration,
+	}
+	if err := contract.Validate(); err != nil {
+		return core.JobContract{}, err
+	}
+	return contract, nil
+}
+
+func defaultJobContractForIntake(task core.GraphTask, selection config.Config) (*core.JobContract, error) {
+	encoded, err := json.Marshal(selection)
+	if err != nil {
+		return nil, err
+	}
+	configuration, err := core.SelectApprovalConfiguration(encoded, nil)
+	if err != nil {
+		return nil, err
+	}
+	contract, err := BuildJobContractForIntake(task, configuration,
+		core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 2, MaxNanoAIU: 1000},
+		time.Now().UTC().Add(24*time.Hour))
+	if err != nil {
+		return nil, err
+	}
+	return &contract, nil
+}
+
+func cloneIntakeJobContract(contract *core.JobContract) (*core.JobContract, error) {
+	if contract == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(contract)
+	if err != nil {
+		return nil, err
+	}
+	var clone core.JobContract
+	if err := json.Unmarshal(encoded, &clone); err != nil {
+		return nil, err
+	}
+	return &clone, nil
+}
+
+func taskCoveredByJobContract(task core.GraphTask, contract core.JobContract) error {
+	if !core.TaskWithinJobScope(task, contract) ||
+		!slices.Contains(contract.Operations, "repository.read") ||
+		!slices.Contains(contract.Operations, "repository.write") {
+		return fmt.Errorf("taxion: Task repository or file access exceeds the approved Job scope")
+	}
+	for _, acceptance := range task.Acceptance {
+		if !slices.Contains(contract.Acceptance, acceptance) {
+			return fmt.Errorf("taxion: Task acceptance criterion is outside the approved Job contract")
+		}
+	}
+	for _, evidence := range task.RequiredEvidence {
+		if !slices.Contains(contract.RequiredEvidence, evidence) {
+			return fmt.Errorf("taxion: Task evidence requirement is outside the approved Job contract")
+		}
+	}
+	if len(task.ValidationCommands) > 0 &&
+		(!slices.Contains(contract.Operations, "process.exec") || !slices.Contains(contract.Operations, "test.run")) {
+		return fmt.Errorf("taxion: Task validation commands are outside the approved Job operation scope")
+	}
+	return nil
+}
+
+func appendConfirmedJobApproval(state *store.Workspace, task core.GraphTask, request IntakeConfirmation) error {
+	if modelFreeVerification(task) {
+		return nil
+	}
+	job, ok := state.Graph.JobForTask(task.ID)
+	if !ok || request.JobContract == nil {
+		return fmt.Errorf("taxion: non-model-free intake requires an explicit Job contract")
+	}
+	contract := *request.JobContract
+	if err := contract.Validate(); err != nil {
+		return err
+	}
+	if err := taskCoveredByJobContract(task, contract); err != nil {
+		return err
+	}
+	if job.Contract == nil {
+		if contract.Revision != 1 {
+			return fmt.Errorf("taxion: first Job approval must use revision 1")
+		}
+	} else if !reflect.DeepEqual(*job.Contract, contract) {
+		if contract.Revision != job.Contract.Revision+1 {
+			return fmt.Errorf("taxion: changed Job contract requires the next revision")
+		}
+	} else if contract.Revision != job.Contract.Revision {
+		return fmt.Errorf("taxion: unchanged Job contract must retain its revision")
+	}
+	job.Contract = &contract
+	job.UpdatedAt = time.Now().UTC()
+	for i := range state.Graph.Jobs {
+		if state.Graph.Jobs[i].ID == job.ID {
+			state.Graph.Jobs[i] = job
+			break
+		}
+	}
+	proposal, err := core.JobProposal(job)
+	if err != nil {
+		return err
+	}
+	proposalHash, err := proposal.Hash()
+	if err != nil {
+		return err
+	}
+	if existing, ok := state.Graph.CurrentJobApproval(job.ID); ok && existing.ProposalHash == proposalHash {
+		return nil
+	}
+	for _, existing := range state.Graph.JobApprovals {
+		if existing.Proposal.JobID == job.ID && existing.Proposal.Revision == contract.Revision {
+			return fmt.Errorf("taxion: Job revision already has an approval history but is not currently authorized")
+		}
+	}
+	approval, err := core.NewJobApproval(
+		fmt.Sprintf("job-approval:%s:%d", job.ID, contract.Revision),
+		request.Actor, "user", request.Reason, proposal, time.Now().UTC(),
+	)
+	if err != nil {
+		return err
+	}
+	return state.Graph.AppendJobApproval(approval)
 }
 
 // ConfirmIntake confirms exactly the displayed contract. A changed contract is
