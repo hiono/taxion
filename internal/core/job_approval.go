@@ -164,7 +164,7 @@ func cloneJobContract(contract *JobContract) *JobContract {
 	copy.Acceptance = slices.Clone(contract.Acceptance)
 	copy.RequiredEvidence = slices.Clone(contract.RequiredEvidence)
 	copy.Operations = slices.Clone(contract.Operations)
-copy.ValidationCommands = slices.Clone(contract.ValidationCommands)
+	copy.ValidationCommands = slices.Clone(contract.ValidationCommands)
 	if contract.RoleToolPolicies != nil {
 		copy.RoleToolPolicies = make(map[string]JobRoleToolPolicy, len(contract.RoleToolPolicies))
 		for role, policy := range contract.RoleToolPolicies {
