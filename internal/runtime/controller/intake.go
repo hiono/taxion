@@ -552,11 +552,32 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		strings.TrimSpace(request.Reason) == "" || request.ExpectedHash == "" {
 		return core.GraphTask{}, fmt.Errorf("taxion: intake confirmation requires exact proposal hash, actor, source and reason")
 	}
-	modelFree := false
-	if state, err := db.LoadWorkspace(); err != nil {
+	initialState, err := db.LoadWorkspace()
+	if err != nil {
 		return core.GraphTask{}, err
-	} else if task, ok := state.Graph.GraphTask(request.TaskID); ok {
-		modelFree = modelFreeVerification(task)
+	}
+	taskForContract, taskFound := initialState.Graph.GraphTask(request.TaskID)
+	if !initialState.HasGraph || !taskFound {
+		return core.GraphTask{}, fmt.Errorf("taxion: intake confirmation requires a saved proposal")
+	}
+	modelFree := modelFreeVerification(taskForContract)
+	if modelFree {
+		if request.JobContract != nil {
+			return core.GraphTask{}, fmt.Errorf("taxion: model-free verification cannot include a Job execution contract")
+		}
+	} else if request.JobContract == nil {
+		job, ok := initialState.Graph.JobForTask(taskForContract.ID)
+		if !ok {
+			return core.GraphTask{}, fmt.Errorf("taxion: intake Task has no owning Job")
+		}
+		if job.Contract != nil {
+			request.JobContract, err = cloneIntakeJobContract(job.Contract)
+		} else {
+			request.JobContract, err = defaultJobContractForIntake(taskForContract, request.Selection)
+		}
+		if err != nil {
+			return core.GraphTask{}, err
+		}
 	}
 	if modelFree {
 		if request.Selection != (config.Config{}) || len(request.AdditionalTaskIDs) != 0 ||
@@ -860,6 +881,9 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 func appendConfirmedIntakeApproval(state *store.Workspace, task core.GraphTask, request IntakeConfirmation) error {
 	if modelFreeVerification(task) {
 		return nil
+	}
+	if err := appendConfirmedJobApproval(state, task, request); err != nil {
+		return err
 	}
 	switch state.Graph.ApprovalRequirement() {
 	case core.ApprovalVerifiedLegacy:
