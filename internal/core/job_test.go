@@ -1,6 +1,8 @@
 package core
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -14,6 +16,43 @@ func newJobGraph() TaskGraph {
 			Status: JobActive, CreatedAt: now, UpdatedAt: now,
 		}},
 		Tasks: []GraphTask{{ID: "task-a", JobID: "job-a"}},
+	}
+}
+
+func TestLegacyJobTaskMembershipMigratesToTaskJobID(t *testing.T) {
+	data := []byte(`{
+		"version": 1,
+		"jobs": [{
+			"id": "job-legacy",
+			"request": "Original request",
+			"goal": "Complete work",
+			"rootTaskId": "task-legacy",
+			"taskIds": ["task-legacy", "task-child"],
+			"status": "ACTIVE",
+			"createdAt": "2026-11-13T00:00:00Z",
+			"updatedAt": "2026-11-13T00:00:00Z"
+		}],
+		"tasks": [
+			{"id": "task-legacy"},
+			{"id": "task-child"}
+		]
+	}`)
+	var graph TaskGraph
+	if err := json.Unmarshal(data, &graph); err != nil {
+		t.Fatalf("migrate legacy Job membership: %v", err)
+	}
+	for _, taskID := range []string{"task-legacy", "task-child"} {
+		task, ok := graph.GraphTask(taskID)
+		if !ok || task.JobID != "job-legacy" {
+			t.Fatalf("Task %s JobID = %q, want job-legacy", taskID, task.JobID)
+		}
+	}
+	encoded, err := json.Marshal(graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"taskIds"`) || strings.Contains(string(encoded), `"rootTaskId"`) {
+		t.Fatalf("legacy reverse membership leaked into current model: %s", encoded)
 	}
 }
 
