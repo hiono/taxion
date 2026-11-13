@@ -321,6 +321,7 @@ func TestConfirmedFlowUsesAlreadyApprovedReviewerWithoutNewDelegation(t *testing
 	confirmation := IntakeConfirmation{TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirm",
 		Reason: "Approve this contract and both bounded review configurations.", Selection: resolved.Config,
 		AdditionalTaskIDs: []string{flowRequest.ID + "-review-0", flowRequest.ID + "-review-1"}}
+	confirmation = withExplicitJobContractForIntake(t, db, confirmation)
 	if _, err := ConfirmIntake(db, confirmation); err != nil {
 		t.Fatal(err)
 	}
@@ -391,6 +392,7 @@ func testIntakeRepositoryConfirmation(t *testing.T, repo string) {
 	confirmation := IntakeConfirmation{TaskID: saved.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirm",
 		Reason: "Confirm this scope, acceptance, validation, actors and contract.", Selection: resolved.Config,
 		AdditionalTaskIDs: []string{"intake-flow-review-0", "intake-flow-review-1"}}
+	confirmation = withExplicitJobContractForIntake(t, db, confirmation)
 	before, _ := db.LoadWorkspace()
 	wrongRepository := confirmation
 	wrongRepository.Selection.Repository.Path = "other/" + repo
@@ -449,6 +451,7 @@ func TestReapprovalCreatesSuccessorWithoutRewritingIssuedContract(t *testing.T) 
 	confirm := IntakeConfirmation{TaskID: saved.ID, ExpectedHash: hash, Actor: "human", Source: "human:reapprove",
 		Reason: "Explicitly approve revised scope, acceptance and selected identity.", Selection: selected.Config,
 		ReplacesFlow: old.ID, Target: &planner.Target, AdditionalTaskIDs: []string{"successor-flow-review-0"}}
+	confirm = withExplicitJobContractForIntake(t, db, confirm)
 	stale := confirm
 	target := *confirm.Target
 	target.OutputSHA = old.Contract.BaselineSHA
@@ -571,11 +574,12 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	approved, err := ConfirmIntake(db, IntakeConfirmation{
+	confirmation := withExplicitJobContractForIntake(t, db, IntakeConfirmation{
 		TaskID: proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:budget-successor",
 		Reason:    "Approve the exact partial tree and successor contract under a new execution budget.",
 		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
 	})
+	approved, err := ConfirmIntake(db, confirmation)
 	if err != nil || approved.Status != core.Ready {
 		t.Fatal("verified partial tree was not explicitly reapproved", err)
 	}
@@ -657,11 +661,12 @@ func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	approved, err := ConfirmIntake(db, IntakeConfirmation{
+	confirmation := withExplicitJobContractForIntake(t, db, IntakeConfirmation{
 		TaskID: proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:review-successor",
 		Reason:    "Approve the exact saved Coder output and a new independent-review budget.",
 		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
 	})
+	approved, err := ConfirmIntake(db, confirmation)
 	if err != nil || approved.Status != core.Ready {
 		t.Fatal("completed Coder result was not explicitly approved for continuation", err)
 	}
@@ -912,13 +917,14 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	approved, err := ConfirmIntake(db, IntakeConfirmation{
+	confirmation := withExplicitJobContractForIntake(t, db, IntakeConfirmation{
 		TaskID: proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:snapshot-review-successor",
 		Reason:    "Approve the exact saved tree and a separate independent-review budget.",
 		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
 		AdditionalTaskIDs:       []string{"snapshot-review-successor-flow-review-0"},
 		ConfigurationDecisionID: core.ConfigurationApprovalID(selection.Config.Execution.ApprovalRef, proposal.ID),
 	})
+	approved, err := ConfirmIntake(db, confirmation)
 	if err != nil || approved.Status != core.Ready {
 		t.Fatal("snapshot result was not explicitly approved for continuation", err)
 	}
