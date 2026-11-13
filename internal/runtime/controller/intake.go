@@ -108,6 +108,31 @@ func VerifyRequestConfirmation(graph core.TaskGraph, taskID, operationID, propos
 	} else if !reflect.DeepEqual(task, *approved) {
 		return fmt.Errorf("taxion: approved request contract drifted")
 	}
+	if !modelFreeVerification(task) {
+		if confirmation.JobContract == nil {
+			return fmt.Errorf("taxion: request approval lacks its Job contract")
+		}
+		if err := taskCoveredByJobContract(task, *confirmation.JobContract); err != nil {
+			return err
+		}
+		job, ok := graph.JobForTask(taskID)
+		if !ok {
+			return fmt.Errorf("taxion: approved request Task has no owning Job")
+		}
+		jobApprovalFound := false
+		for _, approval := range graph.JobApprovals {
+			if approval.Proposal.JobID == job.ID &&
+				approval.Proposal.Revision == confirmation.JobContract.Revision &&
+				reflect.DeepEqual(approval.Proposal.Contract, *confirmation.JobContract) &&
+				approval.Verify() == nil {
+				jobApprovalFound = true
+				break
+			}
+		}
+		if !jobApprovalFound {
+			return fmt.Errorf("taxion: request approval lacks the exact immutable Job approval")
+		}
+	}
 	return nil
 }
 
