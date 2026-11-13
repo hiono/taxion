@@ -70,6 +70,13 @@ func ProposeJobContract(db *store.Store, request JobContractProposalRequest) (co
 		if err := contract.Validate(); err != nil {
 			return err
 		}
+		for _, task := range state.Graph.Tasks {
+			if task.JobID == job.ID {
+				if err := taskCoveredByJobContract(task, contract); err != nil {
+					return fmt.Errorf("taxion: Job contract does not cover Task %s: %w", task.ID, err)
+				}
+			}
+		}
 		if job.Status == core.JobActive {
 			if err := state.Graph.TransitionJob(job.ID, core.JobWaiting, request.Actor,
 				"Job contract revision proposed: "+request.Reason, time.Now().UTC()); err != nil {
