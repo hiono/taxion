@@ -270,6 +270,17 @@ func (g TaskGraph) JobCompletionReady(jobID string) (bool, []string) {
 		switch execution.Status {
 		case RoleExecutionCreated, RoleExecutionRunning, RoleExecutionWaiting, RoleExecutionCancelRequested, RoleExecutionSuspended:
 			missing = append(missing, "unresolved RoleExecution: "+execution.ID)
+		case RoleExecutionSucceeded:
+			accounted := false
+			for _, usage := range g.JobUsage {
+				if usage.JobID == jobID && usage.RoleExecutionID == execution.ID {
+					accounted = true
+					break
+				}
+			}
+			if !accounted {
+				missing = append(missing, "missing usage accounting: "+execution.ID)
+			}
 		}
 	}
 	return len(missing) == 0, missing
