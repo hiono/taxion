@@ -182,6 +182,29 @@ func TestJobIntakeUsesOnlyJobApprovalOnBundleRequiredGraph(t *testing.T) {
 	}
 }
 
+func TestModelFreeVerificationCannotJoinJob(t *testing.T) {
+	db, _, _, _ := executionConfigurationFixture(t)
+	job, err := ProposeJob(db, JobIntakeRequest{
+		JobID: "job-model-free", Request: "Job request.", Goal: "Model-free evidence is separate.",
+		Actor: "human", Source: "human:job-proposal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ := state.Graph.GraphTask("task")
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "model-free-job-task", core.Draft, "", nil
+	task.Owner, task.Type, task.ModelFree, task.JobID = "USER", "VERIFICATION", true, job.ID
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: task, Request: "Record human verification evidence.", Actor: "human", Source: "human:model-free",
+	}); err == nil {
+		t.Fatal("model-free verification was attached to Job execution authority")
+	}
+}
+
 func TestIntakeReplayCannotChangeExplicitJobMembership(t *testing.T) {
 	db, _, _, _ := executionConfigurationFixture(t)
 	state, err := db.LoadWorkspace()

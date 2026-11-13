@@ -64,6 +64,9 @@ type IntakeConfirmation struct {
 // contract. A checkpoint's approval flag is never an authorization source.
 func VerifyRequestConfirmation(graph core.TaskGraph, taskID, operationID, proposalHash, authorizationID, basisHash string, selected config.Config) error {
 	task, ok := graph.GraphTask(taskID)
+	if ok && modelFreeVerification(task) && task.JobID != "" {
+		return fmt.Errorf("taxion: model-free verification cannot be attached to a Job")
+	}
 	if !ok || taskID != operationID || authorizationID != "intake-confirmation:"+taskID ||
 		task.AuthorizationID != authorizationID || basisHash == "" {
 		return fmt.Errorf("taxion: request approval identity mismatch")
@@ -210,8 +213,8 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 		(request.Task.Owner != "CODER" && !(modelFreeVerification(request.Task) ||
 			request.Task.Owner == "USER" && (request.ReconciliationHash != "" ||
 				request.ReviewInput != nil && request.Task.Type == "VERIFICATION" && !request.Task.ModelFree))) ||
-		request.Task.Reviewer != "REVIEWER" {
-		return core.GraphTask{}, fmt.Errorf("taxion: intake requires an original request, sourced DRAFT contract and independent Coder/Reviewer without authorization")
+		request.Task.Reviewer != "REVIEWER" || modelFreeVerification(request.Task) && request.Task.JobID != "" {
+		return core.GraphTask{}, fmt.Errorf("taxion: intake requires an original request, sourced DRAFT contract and independent Coder/Reviewer without authorization; model-free verification cannot join a Job")
 	}
 	text, err := json.Marshal(struct {
 		Kind    string `json:"kind"`
@@ -546,6 +549,9 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 	}
 	modelFree := modelFreeVerification(taskForContract)
 	if modelFree {
+		if taskForContract.JobID != "" {
+			return core.GraphTask{}, fmt.Errorf("taxion: model-free verification cannot be attached to a Job")
+		}
 		if request.JobContract != nil || request.ExpectedJobContractHash != "" {
 			return core.GraphTask{}, fmt.Errorf("taxion: model-free verification cannot include Job execution authorization")
 		}
