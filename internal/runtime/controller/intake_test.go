@@ -18,6 +18,14 @@ import (
 )
 
 func intakeApprovalFixture(t *testing.T, bundleRequired bool) (*store.Store, IntakeConfirmation) {
+	return intakeApprovalFixtureMode(t, bundleRequired, false)
+}
+
+func jobIntakeApprovalFixture(t *testing.T) (*store.Store, IntakeConfirmation) {
+	return intakeApprovalFixtureMode(t, false, true)
+}
+
+func intakeApprovalFixtureMode(t *testing.T, bundleRequired, jobMode bool) (*store.Store, IntakeConfirmation) {
 	t.Helper()
 	db, _, _, resolved := executionConfigurationFixture(t)
 	resolved.Config.Execution.ApprovalRef = "confirmed-intake-config"
@@ -35,6 +43,16 @@ func intakeApprovalFixture(t *testing.T, bundleRequired bool) (*store.Store, Int
 			t.Fatal(err)
 		}
 	}
+	if jobMode {
+		job, err := ProposeJob(db, JobIntakeRequest{
+			JobID: "job-confirmed-intake", Request: "Implement within this contract.",
+			Goal: "Implement the confirmed Task contract.", Actor: "human", Source: "human:job-proposal",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		task.JobID = job.ID
+	}
 	proposal, err := ProposeIntake(db, IntakeRequest{Task: task, Request: "Implement within this contract.",
 		Actor: "human", Source: "human:request"})
 	if err != nil {
@@ -44,40 +62,44 @@ func intakeApprovalFixture(t *testing.T, bundleRequired bool) (*store.Store, Int
 	if err != nil {
 		t.Fatal(err)
 	}
-	configurationBytes, err := json.Marshal(resolved.Config)
-	if err != nil {
-		t.Fatal(err)
+	confirmation := IntakeConfirmation{TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirmed",
+		Reason: "Approve the displayed Task contract and selected configuration.", Selection: resolved.Config}
+	if jobMode {
+		configurationBytes, err := json.Marshal(resolved.Config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		approvalConfiguration, err := core.SelectApprovalConfiguration(configurationBytes, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contract, err := BuildJobContractForIntake(proposal, approvalConfiguration,
+			core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 2, MaxNanoAIU: 1000},
+			time.Now().UTC().Add(24*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err = db.LoadWorkspace()
+		if err != nil {
+			t.Fatal(err)
+		}
+		job, ok := state.Graph.Job(task.JobID)
+		if !ok {
+			t.Fatal("explicit Job is missing")
+		}
+		job.Contract = &contract
+		jobProposal, err := core.JobProposal(job)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jobHash, err := jobProposal.Hash()
+		if err != nil {
+			t.Fatal(err)
+		}
+		confirmation.JobContract = &contract
+		confirmation.ExpectedJobContractHash = jobHash
 	}
-	approvalConfiguration, err := core.SelectApprovalConfiguration(configurationBytes, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	contract, err := BuildJobContractForIntake(proposal, approvalConfiguration,
-		core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 2, MaxNanoAIU: 1000},
-		time.Now().UTC().Add(24*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	state, err = db.LoadWorkspace()
-	if err != nil {
-		t.Fatal(err)
-	}
-	job, ok := state.Graph.JobForTask(task.ID)
-	if !ok {
-		t.Fatal("intake Task has no owning Job")
-	}
-	job.Contract = &contract
-	jobProposal, err := core.JobProposal(job)
-	if err != nil {
-		t.Fatal(err)
-	}
-	jobHash, err := jobProposal.Hash()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return db, IntakeConfirmation{TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirmed",
-		Reason:    "Approve the displayed Task and Job contracts and selected configuration.",
-		Selection: resolved.Config, JobContract: &contract, ExpectedJobContractHash: jobHash}
+	return db, confirmation
 }
 
 func withExplicitJobContractForIntake(t *testing.T, db *store.Store, request IntakeConfirmation) IntakeConfirmation {
@@ -90,10 +112,12 @@ func withExplicitJobContractForIntake(t *testing.T, db *store.Store, request Int
 	if !ok {
 		t.Fatalf("Task %s is missing", request.TaskID)
 	}
-	if modelFreeVerification(task) {
+	if modelFreeVerification(task) || task.JobID == "" {
+		// Legacy Task/ReviewFlow fixtures must not be upgraded to Job authority
+		// merely to satisfy a helper intended for first-class Job tests.
 		return request
 	}
-	job, ok := state.Graph.JobForTask(task.ID)
+	job, ok := state.Graph.Job(task.JobID)
 	if !ok {
 		t.Fatalf("Task %s has no owning Job", task.ID)
 	}
@@ -134,6 +158,78 @@ func withExplicitJobContractForIntake(t *testing.T, db *store.Store, request Int
 		t.Fatal(err)
 	}
 	return request
+}
+
+func TestJobIntakeUsesOnlyJobApprovalOnBundleRequiredGraph(t *testing.T) {
+	db, request := intakeApprovalFixtureMode(t, true, true)
+	if _, err := ConfirmIntake(db, request); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := state.Graph.GraphTask(request.TaskID)
+	if !ok || task.JobID == "" {
+		t.Fatal("explicit Job Task was not retained")
+	}
+	if len(state.Graph.ApprovalsForTask(task.ID)) != 0 {
+		t.Fatal("Job intake minted a legacy Task ApprovalBundle")
+	}
+	approval, ok := state.Graph.CurrentJobApproval(task.JobID)
+	if !ok || approval.ProposalHash != request.ExpectedJobContractHash {
+		t.Fatal("Job intake did not persist the exact JobApproval")
+	}
+}
+
+func TestIntakeRejectsCrossModeTaskAncestry(t *testing.T) {
+	db, _, _, _ := executionConfigurationFixture(t)
+	job, err := ProposeJob(db, JobIntakeRequest{
+		JobID: "job-cross-mode", Request: "A first-class Job request.",
+		Goal: "Keep all Tasks within one authorization mode.", Actor: "human", Source: "human:job-proposal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _ := state.Graph.GraphTask("task")
+	legacyParent := base
+	legacyParent.ID, legacyParent.Status, legacyParent.AuthorizationID, legacyParent.Decisions = "legacy-parent", core.Draft, "", nil
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: legacyParent, Request: "Legacy parent.", Actor: "human", Source: "human:legacy",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	jobChild := base
+	jobChild.ID, jobChild.Status, jobChild.AuthorizationID, jobChild.Decisions = "job-child", core.Draft, "", nil
+	jobChild.JobID, jobChild.ParentID = job.ID, legacyParent.ID
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: jobChild, Request: "Job child must not reference a legacy parent.",
+		Actor: "human", Source: "human:job-child",
+	}); err == nil {
+		t.Fatal("Job Task referencing a legacy Task was accepted")
+	}
+
+	jobParent := base
+	jobParent.ID, jobParent.Status, jobParent.AuthorizationID, jobParent.Decisions = "job-parent", core.Draft, "", nil
+	jobParent.JobID = job.ID
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: jobParent, Request: "Job parent.", Actor: "human", Source: "human:job-parent",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	legacyChild := base
+	legacyChild.ID, legacyChild.Status, legacyChild.AuthorizationID, legacyChild.Decisions = "legacy-child", core.Draft, "", nil
+	legacyChild.ParentID = jobParent.ID
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: legacyChild, Request: "Legacy child must not reference a Job parent.",
+		Actor: "human", Source: "human:legacy-child",
+	}); err == nil {
+		t.Fatal("Legacy Task referencing a Job Task was accepted")
+	}
 }
 
 func TestIntakeConfirmationDerivesBundleWithoutSecondApproval(t *testing.T) {
@@ -1228,7 +1324,7 @@ func TestIntakeRejectsLedgerIDCollision(t *testing.T) {
 }
 
 func TestIntakeCreatesDistinctJobWithoutChangingTaskContract(t *testing.T) {
-	db, request := intakeApprovalFixture(t, false)
+	db, request := jobIntakeApprovalFixture(t)
 	before, err := db.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)
@@ -1351,7 +1447,7 @@ func TestProposeJobBeforeTasksAndAttachMultipleTasks(t *testing.T) {
 }
 
 func TestConfirmIntakeRequiresIndependentJobContractHash(t *testing.T) {
-	db, request := intakeApprovalFixture(t, false)
+	db, request := jobIntakeApprovalFixture(t)
 	before, err := db.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)

@@ -12,7 +12,7 @@ import (
 )
 
 func TestBuildJobExecutionContextIsJobScopedAndExcludesRuntimeBindings(t *testing.T) {
-	db, request := intakeApprovalFixture(t, false)
+	db, request := jobIntakeApprovalFixture(t)
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		job, ok := state.Graph.JobForTask(request.TaskID)
 		if !ok {

@@ -109,16 +109,21 @@ func VerifyRequestConfirmation(graph core.TaskGraph, taskID, operationID, propos
 	} else if !reflect.DeepEqual(task, *approved) {
 		return fmt.Errorf("taxion: approved request contract drifted")
 	}
-	if !modelFreeVerification(task) {
+	if !modelFreeVerification(task) && task.JobID == "" {
+		if confirmation.JobContract != nil || confirmation.ExpectedJobContractHash != "" {
+			return fmt.Errorf("taxion: legacy Task approval cannot carry Job authorization")
+		}
+	}
+	if !modelFreeVerification(task) && task.JobID != "" {
 		if confirmation.JobContract == nil {
 			return fmt.Errorf("taxion: request approval lacks its Job contract")
 		}
 		if err := taskCoveredByJobContract(task, *confirmation.JobContract); err != nil {
 			return err
 		}
-		job, ok := graph.JobForTask(taskID)
-		if !ok {
-			return fmt.Errorf("taxion: approved request Task has no owning Job")
+		job, ok := graph.Job(task.JobID)
+		if !ok || job.Status == core.JobCancelled {
+			return fmt.Errorf("taxion: approved request Task references no usable Job")
 		}
 		if confirmation.ExpectedJobContractHash == "" {
 			return fmt.Errorf("taxion: request approval lacks the exact Job contract hash")
@@ -194,94 +199,6 @@ func ProposeJob(db *store.Store, request JobIntakeRequest) (core.Job, error) {
 		return core.Job{}, err
 	}
 	return result, nil
-}
-
-func originalIntakeRequest(task core.GraphTask, fallback string) string {
-	for _, decision := range task.Decisions {
-		if decision.ID != "intake:"+task.ID {
-			continue
-		}
-		var record struct {
-			Request string `json:"request"`
-		}
-		if json.Unmarshal([]byte(decision.Text), &record) == nil && strings.TrimSpace(record.Request) != "" {
-			return record.Request
-		}
-	}
-	if strings.TrimSpace(fallback) != "" {
-		return fallback
-	}
-	return "Original request unavailable for legacy Task " + task.ID
-}
-
-// ensureIntakeJob assigns the Task's canonical JobID before the Task is tracked.
-// Job ownership is stored on Task; Job never maintains a reverse Task ID list.
-func ensureIntakeJob(graph *core.TaskGraph, task *core.GraphTask, request string) error {
-	if graph == nil || task == nil {
-		return fmt.Errorf("taxion: Job assignment requires a graph and Task")
-	}
-	if task.JobID != "" {
-		job, ok := graph.Job(task.JobID)
-		if !ok || job.Status == core.JobCancelled {
-			return fmt.Errorf("taxion: Task references an unknown or cancelled Job")
-		}
-		if job.Contract != nil {
-			if err := taskCoveredByJobContract(*task, *job.Contract); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	anchorID := task.Supersedes
-	if anchorID == "" {
-		anchorID = task.ParentID
-	}
-	seen := map[string]bool{}
-	for anchorID != "" {
-		if seen[anchorID] {
-			return fmt.Errorf("taxion: Task ancestry contains a cycle while assigning Job")
-		}
-		seen[anchorID] = true
-		parent, exists := graph.GraphTask(anchorID)
-		if !exists {
-			return fmt.Errorf("taxion: predecessor Task %s is unavailable for Job assignment", anchorID)
-		}
-		if parent.JobID != "" {
-			job, ok := graph.Job(parent.JobID)
-			if !ok || job.Status == core.JobCancelled {
-				return fmt.Errorf("taxion: predecessor Task has no usable Job")
-			}
-			task.JobID = job.ID
-			if job.Contract != nil {
-				if err := taskCoveredByJobContract(*task, *job.Contract); err != nil {
-					return err
-				}
-			}
-			if job.Status == core.JobCompleted || job.Status == core.JobFailed {
-				return graph.TransitionJob(job.ID, core.JobWaiting, "controller", "successor Task proposed", time.Now().UTC())
-			}
-			return nil
-		}
-		anchorID = parent.ParentID
-	}
-	jobID, err := newIntakeJobID()
-	if err != nil {
-		return err
-	}
-	goal := task.Objective
-	if strings.TrimSpace(goal) == "" {
-		goal = task.Title
-	}
-	status := core.JobDraft
-	if task.ParentID != "" || task.Supersedes != "" {
-		status = core.JobActive
-	}
-	job := core.Job{ID: jobID, Request: request, Goal: goal, Status: status}
-	if err := graph.CreateJob(job); err != nil {
-		return err
-	}
-	task.JobID = jobID
-	return nil
 }
 
 func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, error) {
@@ -400,14 +317,11 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 			}
 		}
 		if previous, ok := state.Graph.GraphTask(task.ID); ok {
-			// JobID is assigned by the first proposal. Reconstruct it before
-			// comparing an exact replay of the caller's original Task input.
-			task.JobID = previous.JobID
+			if previous.JobID != task.JobID {
+				return fmt.Errorf("taxion: intake replay cannot change explicit Job membership")
+			}
 			if !reflect.DeepEqual(previous, task) {
 				return fmt.Errorf("taxion: intake Task ID already contains another proposal; use a new Task ID")
-			}
-			if previous.JobID == "" {
-				return fmt.Errorf("taxion: existing Task requires explicit Job migration before reuse")
 			}
 			result = previous
 			return nil
@@ -417,8 +331,30 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 				return fmt.Errorf("taxion: intake Task ID already exists in the ledger; use a new Task ID")
 			}
 		}
-		if err := ensureIntakeJob(&state.Graph, &task, request.Request); err != nil {
-			return err
+		// Job membership is explicit. An unbound Task remains in the legacy
+		// Task/ReviewFlow authorization model; intake never creates or infers a Job.
+		if task.JobID != "" {
+			job, ok := state.Graph.Job(task.JobID)
+			if !ok || job.Status == core.JobCancelled {
+				return fmt.Errorf("taxion: intake Task references an unknown or cancelled Job")
+			}
+			if job.Contract != nil {
+				if err := taskCoveredByJobContract(task, *job.Contract); err != nil {
+					return err
+				}
+			}
+		}
+		for _, predecessorID := range []string{task.ParentID, task.Supersedes} {
+			if predecessorID == "" {
+				continue
+			}
+			predecessor, exists := state.Graph.GraphTask(predecessorID)
+			if !exists {
+				return fmt.Errorf("taxion: predecessor Task %s is unavailable for explicit intake association", predecessorID)
+			}
+			if predecessor.JobID != task.JobID {
+				return fmt.Errorf("taxion: Task ancestry cannot cross legacy Task and Job authorization modes")
+			}
 		}
 		if err := state.Graph.Track(task, request.Actor, "Propose explicit scope and acceptance for the original request"); err != nil {
 			return err
@@ -605,11 +541,18 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		if request.JobContract != nil || request.ExpectedJobContractHash != "" {
 			return core.GraphTask{}, fmt.Errorf("taxion: model-free verification cannot include Job execution authorization")
 		}
+	} else if taskForContract.JobID == "" {
+		if request.JobContract != nil || request.ExpectedJobContractHash != "" {
+			return core.GraphTask{}, fmt.Errorf("taxion: legacy Task intake cannot include Job execution authorization")
+		}
 	} else {
+		job, ok := initialState.Graph.Job(taskForContract.JobID)
+		if !ok || job.Status == core.JobCancelled {
+			return core.GraphTask{}, fmt.Errorf("taxion: Job intake requires an existing, usable Job")
+		}
 		if request.JobContract == nil {
-			job, ok := initialState.Graph.JobForTask(taskForContract.ID)
-			if !ok || job.Contract == nil {
-				return core.GraphTask{}, fmt.Errorf("taxion: non-model-free intake requires an explicitly proposed Job contract")
+			if job.Contract == nil {
+				return core.GraphTask{}, fmt.Errorf("taxion: Job intake requires an explicitly proposed Job contract")
 			}
 			request.JobContract, err = cloneIntakeJobContract(job.Contract)
 			if err != nil {
@@ -617,7 +560,7 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 			}
 		}
 		if strings.TrimSpace(request.ExpectedJobContractHash) == "" {
-			return core.GraphTask{}, fmt.Errorf("taxion: non-model-free intake requires the exact displayed Job contract hash")
+			return core.GraphTask{}, fmt.Errorf("taxion: Job intake requires the exact displayed Job contract hash")
 		}
 	}
 	if modelFree {
@@ -936,8 +879,10 @@ func appendConfirmedIntakeApprovalCandidate(state *store.Workspace, task core.Gr
 	if modelFreeVerification(task) {
 		return nil
 	}
-	if err := appendConfirmedJobApproval(state, task, request); err != nil {
-		return err
+	if task.JobID != "" {
+		// A first-class Job has one Job-level authority. Do not mint or reuse
+		// a legacy Task ApprovalBundle on this path.
+		return appendConfirmedJobApproval(state, task, request)
 	}
 	switch state.Graph.ApprovalRequirement() {
 	case core.ApprovalVerifiedLegacy:
