@@ -44,8 +44,40 @@ func intakeApprovalFixture(t *testing.T, bundleRequired bool) (*store.Store, Int
 	if err != nil {
 		t.Fatal(err)
 	}
+	configurationBytes, err := json.Marshal(resolved.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalConfiguration, err := core.SelectApprovalConfiguration(configurationBytes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract, err := BuildJobContractForIntake(proposal, approvalConfiguration,
+		core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 2, MaxNanoAIU: 1000},
+		time.Now().UTC().Add(24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok := state.Graph.JobForTask(task.ID)
+	if !ok {
+		t.Fatal("intake Task has no owning Job")
+	}
+	job.Contract = &contract
+	jobProposal, err := core.JobProposal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobHash, err := jobProposal.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return db, IntakeConfirmation{TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirmed",
-		Reason: "Approve the displayed contract and selected configuration.", Selection: resolved.Config}
+		Reason: "Approve the displayed Task and Job contracts and selected configuration.",
+		Selection: resolved.Config, JobContract: &contract, ExpectedJobContractHash: jobHash}
 }
 
 func TestIntakeConfirmationDerivesBundleWithoutSecondApproval(t *testing.T) {
