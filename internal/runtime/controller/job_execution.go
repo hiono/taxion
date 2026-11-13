@@ -74,7 +74,11 @@ func (c *JobRoleController) Start(ctx context.Context, executionID string) (stri
 	if err := c.checkConfiguration(ctx, job); err != nil {
 		return "", err
 	}
-	sessionID, err := c.runtime.Start(ctx, execution.TaskID)
+	runtimeTaskID := execution.TaskID
+	if runtimeTaskID == "" {
+		runtimeTaskID = job.ID
+	}
+	sessionID, err := c.runtime.Start(ctx, runtimeTaskID)
 	if err != nil {
 		return "", err
 	}

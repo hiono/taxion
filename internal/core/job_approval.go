@@ -365,12 +365,11 @@ func (g TaskGraph) CheckRoleExecutionStart(executionID string, at time.Time) err
 	if _, ok := g.CurrentJobApproval(job.ID); !ok {
 		return graphError("RoleExecution start requires explicit approval of the current Job revision")
 	}
-	if execution.TaskID == "" {
-		return graphError("RoleExecution start requires a Task assignment")
-	}
-	task, ok := g.GraphTask(execution.TaskID)
-	if !ok || task.JobID != job.ID || !TaskWithinJobScope(task, *job.Contract) {
-		return graphError("RoleExecution Task exceeds the approved Job scope")
+	if execution.TaskID != "" {
+		task, ok := g.GraphTask(execution.TaskID)
+		if !ok || task.JobID != job.ID || !TaskWithinJobScope(task, *job.Contract) {
+			return graphError("RoleExecution Task exceeds the approved Job scope")
+		}
 	}
 	executions := g.RoleExecutionsForJob(job.ID)
 	if len(executions) > job.Contract.Budget.MaxRoleExecutions {
