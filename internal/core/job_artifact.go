@@ -25,19 +25,19 @@ type JobOutput struct {
 // JobEvidence records a verification result for one Job acceptance condition.
 // A producer cannot verify its own evidence.
 type JobEvidence struct {
-	ID                      string    `json:"id"`
-	JobID                   string    `json:"jobId"`
-	TaskID                  string    `json:"taskId"`
-	ProducedByExecutionID   string    `json:"producedByExecutionId"`
-	OutputID                string    `json:"outputId,omitempty"`
-	Acceptance              string    `json:"acceptance"`
-	Kind                    string    `json:"kind"`
-	ContentSHA256           string    `json:"contentSha256"`
-	Status                  string    `json:"status"`
-	VerifiedBy              string    `json:"verifiedBy,omitempty"`
-	VerifiedByExecutionID   string    `json:"verifiedByExecutionId,omitempty"`
-	CreatedAt               time.Time `json:"createdAt"`
-	VerifiedAt              time.Time `json:"verifiedAt,omitempty"`
+	ID                    string    `json:"id"`
+	JobID                 string    `json:"jobId"`
+	TaskID                string    `json:"taskId"`
+	ProducedByExecutionID string    `json:"producedByExecutionId"`
+	OutputID              string    `json:"outputId,omitempty"`
+	Acceptance            string    `json:"acceptance"`
+	Kind                  string    `json:"kind"`
+	ContentSHA256         string    `json:"contentSha256"`
+	Status                string    `json:"status"`
+	VerifiedBy            string    `json:"verifiedBy,omitempty"`
+	VerifiedByExecutionID string    `json:"verifiedByExecutionId,omitempty"`
+	CreatedAt             time.Time `json:"createdAt"`
+	VerifiedAt             time.Time `json:"verifiedAt,omitempty"`
 }
 
 func validContentSHA256(value string) bool {
