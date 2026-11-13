@@ -590,7 +590,7 @@ func TestSearch(t *testing.T) {
 		return err
 	}
 	var out bytes.Buffer
-	err := requestCommand(append(args, "検索機能をつけて"), strings.NewReader("/plan\n部分一致です。\n/approve\n"), &out, planner, runner)
+	err := requestCommand(append(args, "検索機能をつけて"), strings.NewReader("/plan\n部分一致です。\n/approve\n/approve\n"), &out, planner, runner)
 	if resume {
 		if err == nil || roles != 1 {
 			t.Fatal("fixture did not stop after exactly one Coder", err, roles)
@@ -773,7 +773,7 @@ func TestRequestDoesNotInferApprovalOrRepeatAfterFailure(t *testing.T) {
 			case "eof":
 				input = "/plan\n"
 			case "unanswered":
-				input = "/plan\n/approve\n"
+				input = "/plan\n/approve\n/approve\n"
 			case "dirty":
 				if err := os.WriteFile(filepath.Join(root, "unexpected"), []byte("keep"), 0600); err != nil {
 					t.Fatal(err)

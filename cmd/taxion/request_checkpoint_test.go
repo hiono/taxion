@@ -26,7 +26,7 @@ func TestRequestCheckpointRequiresFormalBoundApprovalBeforeResume(t *testing.T) 
 			approved := mode != "approved-flag" && mode != "missing-approval"
 			input := "/plan\n"
 			if approved {
-				input += "/approve\n"
+				input += "/approve\n/approve\n"
 			}
 			runs := 0
 			runner := func(context.Context, []string, io.Writer) error { runs++; return nil }
@@ -109,7 +109,7 @@ func TestRequestMinimalPlanRejectsCredentialBeforeTaskCreation(t *testing.T) {
 	secret := "github_pat_" + strings.Repeat("z", 24)
 	answer := requestFixtureAnswer([]string{})
 	answer.Proposal.Objective = "invalid plan " + secret
-	if err := requestCommand(append(args, "add search"), strings.NewReader("/plan\n/approve\n"), io.Discard,
+	if err := requestCommand(append(args, "add search"), strings.NewReader("/plan\n/approve\n/approve\n"), io.Discard,
 		fixturePlan(t, answer), nil); err == nil {
 		t.Fatal("credential-like plan was accepted")
 	}
@@ -423,7 +423,7 @@ func TestRequestCancellationPreservesTaskAndRefusesActiveWorkflow(t *testing.T) 
 			question := []string{"Which behavior?"}
 			input := "/plan\n"
 			if active {
-				question, input = []string{}, "/plan\n/approve\n"
+				question, input = []string{}, "/plan\n/approve\n/approve\n"
 			}
 			runner := func(context.Context, []string, io.Writer) error { return nil }
 			if err := requestCommand(append(args, "add search"), strings.NewReader(input), io.Discard,
