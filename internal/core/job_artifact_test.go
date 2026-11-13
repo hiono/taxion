@@ -171,4 +171,38 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 	if err := graph.Validate(); err != nil {
 		t.Fatalf("valid Job-level artifacts without Tasks must validate: %v", err)
 	}
+
+	outOfScope, err := NewJobOutput(JobOutput{
+		ID: "output-outside-job-scope", JobID: job.ID,
+		RoleExecutionID: "exec-without-task-producer", Repository: "unapproved/repo",
+		Kind: "test-report",
+		ContentSHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		CreatedAt: now.Add(8 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendJobOutput(outOfScope); err == nil {
+		t.Fatal("Job-level output outside the approved repository scope must be rejected")
+	}
+	if len(graph.JobOutputs) != 1 {
+		t.Fatal("rejected Job-level output must not mutate the graph")
+	}
+
+	mismatchedTask, err := NewJobOutput(JobOutput{
+		ID: "output-task-mismatch", JobID: job.ID, TaskID: "unrelated-task",
+		RoleExecutionID: "exec-without-task-producer", Repository: "example/repo",
+		Kind: "test-report",
+		ContentSHA256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		CreatedAt: now.Add(9 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendJobOutput(mismatchedTask); err == nil {
+		t.Fatal("Job output TaskID must match the producing RoleExecution")
+	}
+	if len(graph.JobOutputs) != 1 {
+		t.Fatal("rejected Task-mismatched output must not mutate the graph")
+	}
 }
