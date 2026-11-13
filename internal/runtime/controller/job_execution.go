@@ -228,6 +228,25 @@ func (c *JobRoleController) Send(ctx context.Context, executionID, prompt string
 	return c.runtime.Send(ctx, execution.RuntimeSessionID, message)
 }
 
+// Wait records that a RoleExecution is awaiting another Role or external input.
+func (c *JobRoleController) Wait(executionID, reason string, at time.Time) error {
+	if c == nil || c.store == nil || strings.TrimSpace(reason) == "" || at.IsZero() {
+		return fmt.Errorf("taxion: Job Role wait requires controller, reason and timestamp")
+	}
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	execution, ok := state.Graph.RoleExecution(executionID)
+	if !ok || execution.Status != core.RoleExecutionRunning || execution.Role != c.runtime.Role() {
+		return fmt.Errorf("taxion: only this Runtime's running RoleExecution can wait")
+	}
+	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.TransitionRoleExecution(executionID, core.RoleExecutionWaiting,
+			"controller", reason, at)
+	})
+}
+
 // Events exposes only the event stream bound to this RoleExecution session.
 func (c *JobRoleController) Events(ctx context.Context, executionID string) (<-chan runtime.Event, error) {
 	state, err := c.store.LoadWorkspace()
