@@ -121,6 +121,7 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 	for _, execution := range []RoleExecution{
 		{ID: "exec-without-task-producer", JobID: job.ID, Role: "CODER", Status: RoleExecutionCreated, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)},
 		{ID: "exec-without-task-reviewer", JobID: job.ID, Role: "REVIEWER", Status: RoleExecutionCreated, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)},
+		{ID: "exec-without-task-planner", JobID: job.ID, Role: "PLANNER", Status: RoleExecutionCreated, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)},
 	} {
 		if err := graph.AppendRoleExecution(execution); err != nil {
 			t.Fatalf("append %s: %v", execution.ID, err)
@@ -135,6 +136,8 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 		{"exec-without-task-producer", RoleExecutionSucceeded, now.Add(4 * time.Second)},
 		{"exec-without-task-reviewer", RoleExecutionRunning, now.Add(3 * time.Second)},
 		{"exec-without-task-reviewer", RoleExecutionSucceeded, now.Add(5 * time.Second)},
+		{"exec-without-task-planner", RoleExecutionRunning, now.Add(3 * time.Second)},
+		{"exec-without-task-planner", RoleExecutionSucceeded, now.Add(5 * time.Second)},
 	} {
 		if err := graph.TransitionRoleExecution(transition.id, transition.status, "controller", "test transition", transition.at); err != nil {
 			t.Fatalf("transition %s to %s: %v", transition.id, transition.status, err)
@@ -205,5 +208,79 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 	}
 	if len(graph.JobOutputs) != 1 {
 		t.Fatal("rejected Task-mismatched output must not mutate the graph")
+	}
+}
+
+// TestJobEvidenceRequiresReviewerExecution prevents a completed non-Reviewer
+// Role from self-identifying as the verifier through the free-form VerifiedBy field.
+func TestJobEvidenceRequiresReviewerExecution(t *testing.T) {
+	now := time.Date(2026, 11, 13, 2, 0, 0, 0, time.UTC)
+	job := Job{
+		ID: "job-verifier-policy", Request: "request", Goal: "goal",
+		Status: JobActive, CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t),
+	}
+	graph := TaskGraph{Version: 1, Jobs: []Job{job}}
+	proposal, err := JobProposal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval, err := NewJobApproval("approval-verifier-policy", "human", "user", "approve", proposal, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendJobApproval(approval); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, execution := range []RoleExecution{
+		{ID: "producer", JobID: job.ID, Role: "CODER", Status: RoleExecutionCreated, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)},
+		{ID: "reviewer", JobID: job.ID, Role: "REVIEWER", Status: RoleExecutionCreated, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)},
+		{ID: "planner", JobID: job.ID, Role: "PLANNER", Status: RoleExecutionCreated, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)},
+	} {
+		if err := graph.AppendRoleExecution(execution); err != nil {
+			t.Fatalf("append %s: %v", execution.ID, err)
+		}
+	}
+	for _, id := range []string{"producer", "reviewer", "planner"} {
+		for _, status := range []RoleExecutionStatus{RoleExecutionRunning, RoleExecutionSucceeded} {
+			if err := graph.TransitionRoleExecution(id, status, "controller", "test transition", now.Add(3*time.Second)); err != nil {
+				t.Fatalf("transition %s to %s: %v", id, status, err)
+			}
+		}
+	}
+
+	newEvidence := func(id, verifiedBy, verifierID string) JobEvidence {
+		evidence, err := NewJobEvidence(JobEvidence{
+			ID: id, JobID: job.ID, ProducedByExecutionID: "producer",
+			Acceptance: "tests pass", Kind: "test-report",
+			ContentSHA256: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			Status: "passed", VerifiedBy: verifiedBy, VerifiedByExecutionID: verifierID,
+			CreatedAt: now.Add(4 * time.Second), VerifiedAt: now.Add(5 * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return evidence
+	}
+
+	if err := graph.AppendJobEvidence(newEvidence("non-reviewer-verifier", "PLANNER", "planner")); err == nil {
+		t.Fatal("a completed non-Reviewer execution must not verify Job evidence")
+	}
+	if err := graph.AppendJobEvidence(newEvidence("producer-self-verification", "CODER", "producer")); err == nil {
+		t.Fatal("the evidence producer must not verify its own evidence")
+	}
+	if err := graph.AppendJobEvidence(newEvidence("missing-verifier-execution", "REVIEWER", "")); err == nil {
+		t.Fatal("a free-form Reviewer name without an execution must not verify evidence")
+	}
+	if len(graph.JobEvidence) != 0 {
+		t.Fatal("rejected verification attempts must not mutate Job evidence")
+	}
+	if err := graph.AppendJobEvidence(newEvidence("reviewer-verification", "REVIEWER", "reviewer")); err != nil {
+		t.Fatalf("an independent completed Reviewer execution must verify evidence: %v", err)
+	}
+	for _, verifier := range []string{"human", "controller"} {
+		if err := graph.AppendJobEvidence(newEvidence("explicit-"+verifier, verifier, "")); err != nil {
+			t.Fatalf("explicit %s verification must remain supported: %v", verifier, err)
+		}
 	}
 }

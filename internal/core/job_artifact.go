@@ -221,7 +221,8 @@ func (g TaskGraph) validateJobArtifacts() error {
 			if evidence.VerifiedByExecutionID != "" {
 				verifier, ok := executions[evidence.VerifiedByExecutionID]
 				if !ok || verifier.JobID != job.ID || verifier.ID == producer.ID ||
-					verifier.Role != evidence.VerifiedBy || verifier.Status != RoleExecutionSucceeded {
+					verifier.Role != "REVIEWER" || evidence.VerifiedBy != verifier.Role ||
+					verifier.Status != RoleExecutionSucceeded {
 					return graphError("Job evidence must be verified by an independent completed execution")
 				}
 			} else if evidence.VerifiedBy != "controller" && evidence.VerifiedBy != "human" {
