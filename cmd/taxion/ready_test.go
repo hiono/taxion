@@ -139,6 +139,10 @@ func TestReadyRecipeDrivesApprovedSameTreeReviewWithoutPlanner(t *testing.T) {
 		t.Fatal("recipe confirmed a different proposal")
 	}
 	confirmation.ExpectedHash = proposal.Hash
+	approvalDB, err := openWorkspace()
+	if err != nil { t.Fatal(err) }
+	bindTestJobApproval(t, approvalDB, &confirmation)
+	if err := approvalDB.Close(); err != nil { t.Fatal(err) }
 	if err := conversationCmd([]string{"confirm", "--file", write("confirmation.json", confirmation)}, io.Discard); err != nil {
 		t.Fatal(err)
 	}

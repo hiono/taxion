@@ -124,9 +124,12 @@ func TestTaskAuthorizeReusesFormalIntakeConfirmationWithoutAnotherToken(t *testi
 		t.Fatal(err)
 	}
 	hash, _ := controller.IntakeHash(task)
-	task, err = controller.ConfirmIntake(db, controller.IntakeConfirmation{
+	confirmation := controller.IntakeConfirmation{
 		TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirmed-contract",
-		Reason: "Approve the displayed contract once.", Selection: resolved.Config})
+		Reason: "Approve the displayed Task and Job contracts once.", Selection: resolved.Config,
+	}
+	bindTestJobApproval(t, db, &confirmation)
+	task, err = controller.ConfirmIntake(db, confirmation)
 	if err != nil {
 		t.Fatal(err)
 	}
