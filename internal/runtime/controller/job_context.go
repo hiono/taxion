@@ -15,11 +15,11 @@ import (
 // budget internals and controller-only execution bindings are intentionally
 // excluded.
 type JobExecutionContext struct {
-	Job           JobContextSummary        `json:"job"`
-	Current       RoleExecutionSummary     `json:"currentExecution"`
-	Tasks         []JobTaskContext         `json:"tasks"`
-	Executions    []RoleExecutionSummary   `json:"roleExecutions"`
-	Messages      []JobMessageContext      `json:"messages"`
+	Job        JobContextSummary      `json:"job"`
+	Current    RoleExecutionSummary   `json:"currentExecution"`
+	Tasks      []JobTaskContext       `json:"tasks"`
+	Executions []RoleExecutionSummary `json:"roleExecutions"`
+	Messages   []JobMessageContext    `json:"messages"`
 }
 
 type JobContextSummary struct {
@@ -31,35 +31,35 @@ type JobContextSummary struct {
 }
 
 type JobTaskContext struct {
-	ID                 string                 `json:"id"`
-	Title              string                 `json:"title"`
-	Repository         string                 `json:"repository"`
-	Type               string                 `json:"type"`
-	Issue              string                 `json:"issue,omitempty"`
-	ChangeRef          string                 `json:"changeRef,omitempty"`
-	ParentID           string                 `json:"parentId,omitempty"`
-	DependsOn          []core.TaskDependency  `json:"dependsOn,omitempty"`
-	Owner              string                 `json:"owner"`
-	Reviewer           string                 `json:"reviewer,omitempty"`
-	Status             string                 `json:"status"`
-	Priority           string                 `json:"priority,omitempty"`
-	Objective          string                 `json:"objective"`
-	Scope              []string               `json:"scope"`
-	OutOfScope         []string               `json:"outOfScope"`
-	Acceptance         []string               `json:"acceptance"`
-	RequiredEvidence   []string               `json:"requiredEvidence"`
-	ValidationCommands []string               `json:"validationCommands,omitempty"`
-	BaselineSHA        string                 `json:"baselineSha,omitempty"`
-	TargetSHA          string                 `json:"targetSha,omitempty"`
-	OutputMode         string                 `json:"outputMode,omitempty"`
-	TargetTreeSHA      string                 `json:"targetTreeSha,omitempty"`
-	TargetChangedFiles []string               `json:"targetChangedFiles,omitempty"`
-	Risk               string                 `json:"risk,omitempty"`
-	CreatedFrom        string                 `json:"createdFrom,omitempty"`
-	NextAction         string                 `json:"nextAction,omitempty"`
-	ExitCondition      string                 `json:"exitCondition,omitempty"`
-	DeferredReason     string                 `json:"deferredReason,omitempty"`
-	ResumeCondition    string                 `json:"resumeCondition,omitempty"`
+	ID                 string                `json:"id"`
+	Title              string                `json:"title"`
+	Repository         string                `json:"repository"`
+	Type               string                `json:"type"`
+	Issue              string                `json:"issue,omitempty"`
+	ChangeRef          string                `json:"changeRef,omitempty"`
+	ParentID           string                `json:"parentId,omitempty"`
+	DependsOn          []core.TaskDependency `json:"dependsOn,omitempty"`
+	Owner              string                `json:"owner"`
+	Reviewer           string                `json:"reviewer,omitempty"`
+	Status             string                `json:"status"`
+	Priority           string                `json:"priority,omitempty"`
+	Objective          string                `json:"objective"`
+	Scope              []string              `json:"scope"`
+	OutOfScope         []string              `json:"outOfScope"`
+	Acceptance         []string              `json:"acceptance"`
+	RequiredEvidence   []string              `json:"requiredEvidence"`
+	ValidationCommands []string              `json:"validationCommands,omitempty"`
+	BaselineSHA        string                `json:"baselineSha,omitempty"`
+	TargetSHA          string                `json:"targetSha,omitempty"`
+	OutputMode         string                `json:"outputMode,omitempty"`
+	TargetTreeSHA      string                `json:"targetTreeSha,omitempty"`
+	TargetChangedFiles []string              `json:"targetChangedFiles,omitempty"`
+	Risk               string                `json:"risk,omitempty"`
+	CreatedFrom        string                `json:"createdFrom,omitempty"`
+	NextAction         string                `json:"nextAction,omitempty"`
+	ExitCondition      string                `json:"exitCondition,omitempty"`
+	DeferredReason     string                `json:"deferredReason,omitempty"`
+	ResumeCondition    string                `json:"resumeCondition,omitempty"`
 }
 
 type RoleExecutionSummary struct {
@@ -104,10 +104,10 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 			ID: job.ID, Request: job.Request, Goal: job.Goal,
 			Constraints: append([]string(nil), job.Constraints...), Status: string(job.Status),
 		},
-		Current: projectRoleExecution(execution),
-		Tasks: make([]JobTaskContext, 0, len(job.TaskIDs)),
+		Current:    projectRoleExecution(execution),
+		Tasks:      make([]JobTaskContext, 0, len(job.TaskIDs)),
 		Executions: make([]RoleExecutionSummary, 0),
-		Messages: make([]JobMessageContext, 0),
+		Messages:   make([]JobMessageContext, 0),
 	}
 	for _, taskID := range job.TaskIDs {
 		task, exists := graph.GraphTask(taskID)
@@ -118,13 +118,13 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 			ID: task.ID, Title: task.Title, Repository: task.Repo, Type: task.Type,
 			Issue: task.Issue, ChangeRef: task.ChangeRef, ParentID: task.ParentID,
 			DependsOn: append([]core.TaskDependency(nil), task.DependsOn...),
-			Owner: task.Owner, Reviewer: task.Reviewer, Status: string(task.Status),
+			Owner:     task.Owner, Reviewer: task.Reviewer, Status: string(task.Status),
 			Priority: task.Priority, Objective: task.Objective,
 			Scope: append([]string(nil), task.Scope...), OutOfScope: append([]string(nil), task.OutOfScope...),
-			Acceptance: append([]string(nil), task.Acceptance...),
-			RequiredEvidence: append([]string(nil), task.RequiredEvidence...),
+			Acceptance:         append([]string(nil), task.Acceptance...),
+			RequiredEvidence:   append([]string(nil), task.RequiredEvidence...),
 			ValidationCommands: append([]string(nil), task.ValidationCommands...),
-			BaselineSHA: task.BaselineSHA, TargetSHA: task.TargetSHA, OutputMode: task.OutputMode,
+			BaselineSHA:        task.BaselineSHA, TargetSHA: task.TargetSHA, OutputMode: task.OutputMode,
 			TargetTreeSHA: task.TargetTreeSHA, TargetChangedFiles: append([]string(nil), task.TargetChangedFiles...),
 			Risk: task.Risk, CreatedFrom: task.CreatedFrom, NextAction: task.NextAction,
 			ExitCondition: task.ExitCondition, DeferredReason: task.DeferredReason,
