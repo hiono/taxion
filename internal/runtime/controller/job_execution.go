@@ -127,6 +127,9 @@ func (c *JobRoleController) Send(ctx context.Context, executionID, prompt string
 	if !state.HasGraph {
 		return fmt.Errorf("taxion: Job Role send requires a Task Graph")
 	}
+	if err := state.Graph.CheckRoleExecutionTurn(executionID, time.Now().UTC()); err != nil {
+		return err
+	}
 	execution, ok := state.Graph.RoleExecution(executionID)
 	if !ok || execution.Status != core.RoleExecutionRunning ||
 		execution.Role != c.runtime.Role() || execution.RuntimeSessionID == "" ||
@@ -180,6 +183,33 @@ func (c *JobRoleController) AuthorizeOperation(executionID, operation string, at
 		return fmt.Errorf("taxion: operation authorization requires a Task Graph")
 	}
 	return state.Graph.CheckRoleExecutionOperation(executionID, operation, at)
+}
+
+// RecordUsage appends an immutable provider accounting observation to the Job ledger.
+func (c *JobRoleController) RecordUsage(executionID string, usage core.DispatchUsage) error {
+	if c == nil || c.store == nil || usage.Accounting == nil || usage.Accounting.UsageID == "" {
+		return fmt.Errorf("taxion: Job usage requires a provider accounting identity")
+	}
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
+		return err
+	}
+	execution, ok := state.Graph.RoleExecution(executionID)
+	if !ok || execution.RuntimeSessionID == "" ||
+		(execution.Status != core.RoleExecutionRunning && execution.Status != core.RoleExecutionSucceeded &&
+			execution.Status != core.RoleExecutionFailed && execution.Status != core.RoleExecutionCancelled) {
+		return fmt.Errorf("taxion: Job usage requires a bound RoleExecution")
+	}
+	record, err := core.NewJobUsage(core.JobUsage{
+		ID: execution.RuntimeSessionID + ":" + usage.Accounting.UsageID,
+		JobID: execution.JobID, RoleExecutionID: execution.ID, Usage: usage,
+	})
+	if err != nil {
+		return err
+	}
+	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendJobUsage(record)
+	})
 }
 
 // PostMessage appends a natural-language request or reply addressed to one
