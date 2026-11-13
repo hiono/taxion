@@ -279,7 +279,44 @@ func (c *JobRoleController) Events(ctx context.Context, executionID string) (<-c
 	if err != nil || execution.Status != core.RoleExecutionRunning {
 		return nil, fmt.Errorf("taxion: RoleExecution is not a running session bound to this Runtime")
 	}
-	return c.runtime.Events(ctx, execution.RuntimeSessionID)
+	source, err := c.runtime.Events(ctx, execution.RuntimeSessionID)
+	if err != nil {
+		return nil, err
+	}
+	events := make(chan runtime.Event)
+	go func() {
+		defer close(events)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-source:
+				if !ok {
+					return
+				}
+				if event.Type == runtime.EventUsage {
+					var usage core.DispatchUsage
+					if err := json.Unmarshal([]byte(event.Payload), &usage); err != nil {
+						event = runtime.Event{Type: runtime.EventFailed, Payload: "invalid Job usage event: " + err.Error()}
+					} else {
+						usage.ObservedAt = time.Now().UTC()
+						if err := c.RecordUsage(executionID, usage); err != nil {
+							event = runtime.Event{Type: runtime.EventFailed, Payload: "Job usage rejected: " + err.Error()}
+						}
+					}
+				}
+				select {
+				case events <- event:
+				case <-ctx.Done():
+					return
+				}
+				if event.Type == runtime.EventFailed {
+					return
+				}
+			}
+		}
+	}()
+	return events, nil
 }
 
 // AuthorizeOperation is called by the Runtime tool adapter immediately before
