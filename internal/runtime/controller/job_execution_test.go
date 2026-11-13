@@ -46,6 +46,7 @@ func (f *jobRoleRuntimeFake) Resume(_ context.Context, sessionID string) error {
 	if sessionID != f.sessionID {
 		return context.Canceled
 	}
+	f.resumeCount++
 	return nil
 }
 func (f *jobRoleRuntimeFake) Stop(_ context.Context, sessionID string) error {
@@ -345,5 +346,62 @@ func TestJobRoleControllerDoesNotStartWithAuthenticationMismatch(t *testing.T) {
 	}
 	if worker.startCount != 0 {
 		t.Fatalf("Runtime started %d times after authentication failure", worker.startCount)
+	}
+}
+
+func TestJobRoleControllerResumeRevalidatesCurrentJobApproval(t *testing.T) {
+	db, job, task, selection := jobRoleFixture(t, true)
+	now := time.Now().UTC()
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendRoleExecution(core.RoleExecution{
+			ID: "job-role-resume", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker := &jobRoleRuntimeFake{
+		role: "CODER", configHash: "runtime-config-hash", selection: selection,
+		events: make(chan runtime.Event),
+	}
+	controller, err := NewJobRoleController(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Start(context.Background(), "job-role-resume"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.TransitionRoleExecution("job-role-resume", core.RoleExecutionSuspended,
+			"controller", "awaiting follow-up", time.Now().UTC())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Resume(context.Background(), "job-role-resume"); err != nil {
+		t.Fatalf("approved suspended execution should resume: %v", err)
+	}
+	if worker.resumeCount != 1 {
+		t.Fatalf("Runtime resume count = %d, want 1", worker.resumeCount)
+	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		if err := state.Graph.TransitionRoleExecution("job-role-resume", core.RoleExecutionSuspended,
+			"controller", "awaiting another follow-up", time.Now().UTC()); err != nil {
+			return err
+		}
+		for i := range state.Graph.Jobs {
+			if state.Graph.Jobs[i].ID == job.ID {
+				state.Graph.Jobs[i].Contract.Revision++
+				state.Graph.Jobs[i].Constraints = append(state.Graph.Jobs[i].Constraints, "new unapproved constraint")
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Resume(context.Background(), "job-role-resume"); err == nil {
+		t.Fatal("stale Job approval must block Runtime resume")
+	}
+	if worker.resumeCount != 1 {
+		t.Fatalf("Runtime resumed %d times after approval became stale", worker.resumeCount)
 	}
 }
