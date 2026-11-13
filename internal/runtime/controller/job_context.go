@@ -15,11 +15,41 @@ import (
 // budget internals and controller-only execution bindings are intentionally
 // excluded.
 type JobExecutionContext struct {
-	Job        JobContextSummary      `json:"job"`
-	Current    RoleExecutionSummary   `json:"currentExecution"`
-	Tasks      []JobTaskContext       `json:"tasks"`
-	Executions []RoleExecutionSummary `json:"roleExecutions"`
-	Messages   []JobMessageContext    `json:"messages"`
+	Job        JobContextSummary       `json:"job"`
+	Current    RoleExecutionSummary    `json:"currentExecution"`
+	Tasks      []JobTaskContext        `json:"tasks"`
+	Executions []RoleExecutionSummary  `json:"roleExecutions"`
+	Messages   []JobMessageContext     `json:"messages"`
+	Outputs    []JobOutputContext      `json:"outputs"`
+	Evidence   []JobEvidenceContext    `json:"evidence"`
+}
+
+type JobOutputContext struct {
+	ID              string    `json:"id"`
+	TaskID          string    `json:"taskId"`
+	RoleExecutionID string    `json:"roleExecutionId"`
+	Repository      string    `json:"repository"`
+	Kind            string    `json:"kind"`
+	ContentSHA256   string    `json:"contentSha256"`
+	CommitSHA       string    `json:"commitSha,omitempty"`
+	TreeSHA         string    `json:"treeSha,omitempty"`
+	BlobSHA         string    `json:"blobSha,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+}
+
+type JobEvidenceContext struct {
+	ID                    string    `json:"id"`
+	TaskID                string    `json:"taskId"`
+	ProducedByExecutionID string    `json:"producedByExecutionId"`
+	OutputID              string    `json:"outputId,omitempty"`
+	Acceptance            string    `json:"acceptance"`
+	Kind                  string    `json:"kind"`
+	ContentSHA256         string    `json:"contentSha256"`
+	Status                string    `json:"status"`
+	VerifiedBy            string    `json:"verifiedBy,omitempty"`
+	VerifiedByExecutionID string    `json:"verifiedByExecutionId,omitempty"`
+	CreatedAt             time.Time `json:"createdAt"`
+	VerifiedAt            time.Time `json:"verifiedAt,omitempty"`
 }
 
 type JobContextSummary struct {
@@ -132,6 +162,8 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 		Tasks:      make([]JobTaskContext, 0),
 		Executions: make([]RoleExecutionSummary, 0),
 		Messages:   make([]JobMessageContext, 0),
+		Outputs:    make([]JobOutputContext, 0),
+		Evidence:   make([]JobEvidenceContext, 0),
 	}
 	for _, task := range graph.Tasks {
 		if task.JobID != job.ID {
@@ -156,6 +188,29 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 	}
 	for _, item := range graph.RoleExecutionsForJob(job.ID) {
 		result.Executions = append(result.Executions, projectRoleExecution(item))
+	}
+	for _, output := range graph.JobOutputs {
+		if output.JobID != job.ID {
+			continue
+		}
+		result.Outputs = append(result.Outputs, JobOutputContext{
+			ID: output.ID, TaskID: output.TaskID, RoleExecutionID: output.RoleExecutionID,
+			Repository: output.Repository, Kind: output.Kind, ContentSHA256: output.ContentSHA256,
+			CommitSHA: output.CommitSHA, TreeSHA: output.TreeSHA, BlobSHA: output.BlobSHA,
+			CreatedAt: output.CreatedAt,
+		})
+	}
+	for _, evidence := range graph.JobEvidence {
+		if evidence.JobID != job.ID {
+			continue
+		}
+		result.Evidence = append(result.Evidence, JobEvidenceContext{
+			ID: evidence.ID, TaskID: evidence.TaskID, ProducedByExecutionID: evidence.ProducedByExecutionID,
+			OutputID: evidence.OutputID, Acceptance: evidence.Acceptance, Kind: evidence.Kind,
+			ContentSHA256: evidence.ContentSHA256, Status: evidence.Status, VerifiedBy: evidence.VerifiedBy,
+			VerifiedByExecutionID: evidence.VerifiedByExecutionID, CreatedAt: evidence.CreatedAt,
+			VerifiedAt: evidence.VerifiedAt,
+		})
 	}
 	for _, message := range graph.JobConversation(job.ID) {
 		result.Messages = append(result.Messages, JobMessageContext{

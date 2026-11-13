@@ -116,17 +116,58 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	graph := core.TaskGraph{Version: 1, Jobs: []core.Job{job}}
+	task := core.GraphTask{
+		ID: "task-authorized", JobID: job.ID, Repo: "example/repo",
+		FileAccess: &core.FileAccessPolicy{Level: core.FileAccessCommitted},
+	}
+	graph := core.TaskGraph{Version: 1, Jobs: []core.Job{job}, Tasks: []core.GraphTask{task}}
 	if err := graph.AppendJobApproval(approval); err != nil {
 		t.Fatal(err)
 	}
 	if err := graph.AppendRoleExecution(core.RoleExecution{
-		ID: "exec-authorized", JobID: job.ID, Role: "PLANNER",
+		ID: "exec-authorized", JobID: job.ID, TaskID: task.ID, Role: "PLANNER",
 		Status: core.RoleExecutionCreated, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := graph.TransitionRoleExecution("exec-authorized", core.RoleExecutionRunning, "controller", "start", now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendRoleExecution(core.RoleExecution{
+		ID: "exec-reviewer", JobID: job.ID, TaskID: task.ID, Role: "REVIEWER",
+		Status: core.RoleExecutionCreated, CreatedAt: now.Add(4 * time.Second), UpdatedAt: now.Add(4 * time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.TransitionRoleExecution("exec-reviewer", core.RoleExecutionRunning, "controller", "start", now.Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.TransitionRoleExecution("exec-reviewer", core.RoleExecutionSucceeded, "controller", "verified", now.Add(6*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	output, err := core.NewJobOutput(core.JobOutput{
+		ID: "output-authorized", JobID: job.ID, TaskID: task.ID,
+		RoleExecutionID: "exec-authorized", Repository: task.Repo, Kind: "test-report",
+		ContentSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		CreatedAt: now.Add(4 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendJobOutput(output); err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := core.NewJobEvidence(core.JobEvidence{
+		ID: "evidence-authorized", JobID: job.ID, TaskID: task.ID,
+		ProducedByExecutionID: "exec-authorized", OutputID: output.ID,
+		Acceptance: "tests pass", Kind: "test-report", ContentSHA256: output.ContentSHA256,
+		Status: "passed", VerifiedBy: "REVIEWER", VerifiedByExecutionID: "exec-reviewer",
+		CreatedAt: now.Add(5 * time.Second), VerifiedAt: now.Add(6 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendJobEvidence(evidence); err != nil {
 		t.Fatal(err)
 	}
 	context, _, err := BuildJobExecutionContext(graph, "exec-authorized")
@@ -135,7 +176,8 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 	}
 	if !context.Job.Approved || context.Job.ApprovalRevision != 1 ||
 		len(context.Job.Repositories) != 1 || len(context.Job.Operations) != 2 ||
-		context.Job.Budget.MaxRoleExecutions != 4 || len(context.Job.Acceptance) != 1 {
+		context.Job.Budget.MaxRoleExecutions != 4 || len(context.Job.Acceptance) != 1 ||
+		len(context.Outputs) != 1 || len(context.Evidence) != 1 {
 		t.Fatalf("Job approval boundary missing from Role context: %+v", context.Job)
 	}
 	if strings.Contains(mustRenderContext(t, context), "approvalRef") {
