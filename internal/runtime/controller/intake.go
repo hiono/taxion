@@ -395,6 +395,15 @@ func BuildJobContractForIntake(task core.GraphTask, configuration core.ApprovalC
 		"CODER":    coderOperations,
 		"REVIEWER": {"repository.read"},
 	}
+	noExtensions, err := core.NewJobRoleToolPolicy(nil)
+	if err != nil {
+		return core.JobContract{}, err
+	}
+	roleToolPolicies := map[string]core.JobRoleToolPolicy{
+		"PLANNER": noExtensions,
+		"CODER": noExtensions,
+		"REVIEWER": noExtensions,
+	}
 	contract := core.JobContract{
 		Revision:         1,
 		Roles:            []string{"PLANNER", "CODER", "REVIEWER"},
@@ -406,6 +415,7 @@ func BuildJobContractForIntake(task core.GraphTask, configuration core.ApprovalC
 		}},
 		Operations:           operations,
 		RoleOperations:       roleOperations,
+		RoleToolPolicies:     roleToolPolicies,
 		Budget:               budget,
 		Deadline:             deadline,
 		SecurityRestrictions: []string{"no credential export", "no network access"},

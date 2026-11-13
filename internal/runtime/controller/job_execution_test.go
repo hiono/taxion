@@ -11,6 +11,7 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 type jobRoleRuntimeFake struct {
@@ -29,6 +30,7 @@ type jobRoleRuntimeFake struct {
 	stopErr         error
 	authErr         error
 	expectedAccount string
+	toolPolicy      *tools.Policy
 }
 
 func (f *jobRoleRuntimeFake) Role() string       { return f.role }
@@ -72,6 +74,7 @@ func (f *jobRoleRuntimeFake) Events(_ context.Context, sessionID string) (<-chan
 	return f.events, nil
 }
 func (f *jobRoleRuntimeFake) ExecutionConfiguration() json.RawMessage { return f.selection }
+func (f *jobRoleRuntimeFake) ToolPolicy() *tools.Policy { return f.toolPolicy }
 func (f *jobRoleRuntimeFake) CheckAuthentication(_ context.Context, account string) error {
 	f.expectedAccount = account
 	return f.authErr
@@ -120,6 +123,11 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 						"CODER":    {"repository.read", "repository.write", "process.exec", "test.run"},
 						"REVIEWER": {"repository.read"},
 					},
+					RoleToolPolicies: func() map[string]core.JobRoleToolPolicy {
+						policy, err := core.NewJobRoleToolPolicy(nil)
+						if err != nil { t.Fatal(err) }
+						return map[string]core.JobRoleToolPolicy{"PLANNER": policy, "CODER": policy, "REVIEWER": policy}
+					}(),
 					Budget:   core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
 					Deadline: now.Add(time.Hour), Configuration: configuration,
 				}
@@ -315,6 +323,29 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if execution.Status != core.RoleExecutionSucceeded || execution.RuntimeSessionID != sessionID ||
 		len(execution.ContextHash) != 64 {
 		t.Fatalf("RoleExecution did not persist its terminal state and context binding: %+v", execution)
+	}
+}
+
+func TestJobRoleControllerRejectsRuntimeToolPolicyNotInJobApproval(t *testing.T) {
+	db, job, task, selection := jobRoleFixture(t, true)
+	now := time.Now().UTC()
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendRoleExecution(core.RoleExecution{
+			ID: "unapproved-tool-policy", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
+		})
+	}); err != nil { t.Fatal(err) }
+	worker := &jobRoleRuntimeFake{
+		role: "CODER", configHash: "runtime-config-hash", selection: selection,
+		toolPolicy: &tools.Policy{},
+	}
+	controller, err := NewJobRoleController(db, worker)
+	if err != nil { t.Fatal(err) }
+	if _, err := controller.Start(context.Background(), "unapproved-tool-policy"); err == nil {
+		t.Fatal("Runtime tool policy absent from the approved Job contract must be rejected")
+	}
+	if worker.startCount != 0 {
+		t.Fatalf("Runtime started %d times before tool-policy approval, want 0", worker.startCount)
 	}
 }
 

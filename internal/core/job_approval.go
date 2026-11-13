@@ -1,6 +1,10 @@
 package core
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"maps"
 	"math"
 	"slices"
@@ -17,6 +21,7 @@ type JobContract struct {
 	RequiredEvidence     []string              `json:"requiredEvidence"`
 	Repositories         []JobRepositoryScope  `json:"repositories"`
 	Operations           []string              `json:"operations"`
+	RoleToolPolicies     map[string]JobRoleToolPolicy `json:"roleToolPolicies,omitempty"`
 	RoleOperations       map[string][]string   `json:"roleOperations,omitempty"`
 	Budget               JobBudget             `json:"budget"`
 	Deadline             time.Time             `json:"deadline"`
@@ -27,6 +32,40 @@ type JobContract struct {
 type JobRepositoryScope struct {
 	Repository string           `json:"repository"`
 	FileAccess FileAccessPolicy `json:"fileAccess"`
+}
+
+type JobRoleToolPolicy struct {
+	Snapshot json.RawMessage `json:"snapshot"`
+	Digest   string          `json:"digest"`
+}
+
+// NewJobRoleToolPolicy stores a canonical, reviewable snapshot. A nil snapshot
+// explicitly means that the Role has no approved extension tools.
+func NewJobRoleToolPolicy(snapshot json.RawMessage) (JobRoleToolPolicy, error) {
+	if len(snapshot) == 0 {
+		snapshot = json.RawMessage("null")
+	}
+	var value any
+	if !json.Valid(snapshot) || json.Unmarshal(snapshot, &value) != nil {
+		return JobRoleToolPolicy{}, graphError("Job Role tool policy must be valid JSON")
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return JobRoleToolPolicy{}, err
+	}
+	sum := sha256.Sum256(canonical)
+	return JobRoleToolPolicy{Snapshot: canonical, Digest: "sha256:" + hex.EncodeToString(sum[:])}, nil
+}
+
+func (p JobRoleToolPolicy) Validate() error {
+	if len(p.Snapshot) == 0 {
+		return graphError("Job Role tool policy requires an explicit snapshot")
+	}
+	canonical, err := NewJobRoleToolPolicy(p.Snapshot)
+	if err != nil || !bytes.Equal(canonical.Snapshot, p.Snapshot) || canonical.Digest != p.Digest {
+		return graphError("Job Role tool policy snapshot or digest is invalid")
+	}
+	return nil
 }
 
 type JobBudget struct {
@@ -55,6 +94,14 @@ func (c JobContract) Validate() error {
 		return graphError("Job contract requires revision, acceptance, evidence, scope, operations, budget, deadline and configuration")
 	}
 	repositories := map[string]bool{}
+	for role, policy := range c.RoleToolPolicies {
+		if !slices.Contains(c.Roles, role) {
+			return graphError("Job contract contains tool policy for an unapproved role %q", role)
+		}
+		if err := policy.Validate(); err != nil {
+			return err
+		}
+	}
 	for role, operations := range c.RoleOperations {
 		if !slices.Contains(c.Roles, role) {
 			return graphError("Job contract contains role operations for an unapproved role %q", role)
@@ -103,6 +150,13 @@ func cloneJobContract(contract *JobContract) *JobContract {
 	copy.Acceptance = slices.Clone(contract.Acceptance)
 	copy.RequiredEvidence = slices.Clone(contract.RequiredEvidence)
 	copy.Operations = slices.Clone(contract.Operations)
+	if contract.RoleToolPolicies != nil {
+		copy.RoleToolPolicies = make(map[string]JobRoleToolPolicy, len(contract.RoleToolPolicies))
+		for role, policy := range contract.RoleToolPolicies {
+			policy.Snapshot = slices.Clone(policy.Snapshot)
+			copy.RoleToolPolicies[role] = policy
+		}
+	}
 	if contract.RoleOperations != nil {
 		copy.RoleOperations = make(map[string][]string, len(contract.RoleOperations))
 		for role, operations := range contract.RoleOperations {

@@ -65,6 +65,7 @@ type JobContextSummary struct {
 	RequiredEvidence     []string                  `json:"requiredEvidence,omitempty"`
 	Repositories         []core.JobRepositoryScope `json:"repositories,omitempty"`
 	Operations           []string                  `json:"operations,omitempty"`
+RoleOperations       []string                  `json:"roleOperations,omitempty"`
 	Budget               core.JobBudget            `json:"budget,omitempty"`
 	UsedNanoAIU          float64                   `json:"usedNanoAiu"`
 	Deadline             time.Time                 `json:"deadline,omitempty"`
@@ -156,6 +157,7 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 			jobSummary.Repositories[i].FileAccess.Paths = append([]string(nil), job.Contract.Repositories[i].FileAccess.Paths...)
 		}
 		jobSummary.Operations = append([]string(nil), job.Contract.Operations...)
+jobSummary.RoleOperations = append([]string(nil), job.Contract.RoleOperations[execution.Role]...)
 		jobSummary.Budget = job.Contract.Budget
 		jobSummary.UsedNanoAIU = graph.JobUsageTotal(job.ID)
 		jobSummary.Deadline = job.Contract.Deadline

@@ -11,6 +11,7 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/tools"
 )
 
 // JobRoleController runs one RoleExecution against its approved Job contract.
@@ -28,7 +29,40 @@ func NewJobRoleController(db *store.Store, worker runtime.Identity) (*JobRoleCon
 	return &JobRoleController{store: db, runtime: worker}, nil
 }
 
+func (c *JobRoleController) checkRoleToolPolicy(job core.Job) error {
+	if job.Contract == nil {
+		return fmt.Errorf("taxion: Job Role tool policy requires an approved Job contract")
+	}
+	identity, ok := c.runtime.(runtime.ToolPolicyIdentity)
+	if !ok {
+		return fmt.Errorf("taxion: Job Role runtime must expose its selected tool policy")
+	}
+	approved, ok := job.Contract.RoleToolPolicies[c.runtime.Role()]
+	if !ok {
+		return fmt.Errorf("taxion: Job contract has no explicit tool policy for Role %s", c.runtime.Role())
+	}
+	if err := approved.Validate(); err != nil {
+		return err
+	}
+	var policy *tools.Policy
+	if err := json.Unmarshal(approved.Snapshot, &policy); err != nil {
+		return fmt.Errorf("taxion: approved Job Role tool policy is invalid")
+	}
+	if policy != nil {
+		if err := policy.CheckShape(); err != nil {
+			return err
+		}
+	}
+	if !tools.Equal(identity.ToolPolicy(), policy) {
+		return fmt.Errorf("taxion: Runtime tool policy differs from the immutable Job Role approval")
+	}
+	return nil
+}
+
 func (c *JobRoleController) checkConfiguration(ctx context.Context, job core.Job) error {
+	if err := c.checkRoleToolPolicy(job); err != nil {
+		return err
+	}
 	identity, ok := c.runtime.(runtime.ConfigurationIdentity)
 	if !ok {
 		return fmt.Errorf("taxion: Job Role runtime must expose its selected configuration")
@@ -108,6 +142,17 @@ func (c *JobRoleController) Start(ctx context.Context, executionID string) (stri
 		if err := state.Graph.CheckRoleExecutionStart(executionID, now); err != nil {
 			return err
 		}
+		currentExecution, ok := state.Graph.RoleExecution(executionID)
+		if !ok {
+			return fmt.Errorf("taxion: RoleExecution disappeared during Runtime start")
+		}
+		currentJob, ok := state.Graph.Job(currentExecution.JobID)
+		if !ok || currentJob.Contract == nil {
+			return fmt.Errorf("taxion: Job contract disappeared during Runtime start")
+		}
+		if err := c.checkRoleToolPolicy(currentJob); err != nil {
+			return err
+		}
 		if err := state.Graph.TransitionRoleExecution(executionID, core.RoleExecutionRunning,
 			"controller", "Job Role Runtime session started", now); err != nil {
 			return err
@@ -173,6 +218,13 @@ func (c *JobRoleController) Resume(ctx context.Context, executionID string) erro
 		if err := state.Graph.CheckRoleExecutionResume(executionID, now); err != nil {
 			return err
 		}
+		currentJob, ok := state.Graph.Job(current.JobID)
+		if !ok || currentJob.Contract == nil {
+			return fmt.Errorf("taxion: Job contract disappeared during Runtime resume")
+		}
+		if err := c.checkRoleToolPolicy(currentJob); err != nil {
+			return err
+		}
 		if err := state.Graph.TransitionRoleExecution(executionID, core.RoleExecutionRunning,
 			"controller", "Job Role Runtime session resumed", now); err != nil {
 			return err
@@ -211,6 +263,13 @@ func (c *JobRoleController) Send(ctx context.Context, executionID, prompt string
 		execution.RuntimeConfigHash != c.runtime.ConfigHash() {
 		return fmt.Errorf("taxion: RoleExecution is not bound to this Runtime")
 	}
+	job, ok := state.Graph.Job(execution.JobID)
+	if !ok || job.Contract == nil {
+		return fmt.Errorf("taxion: RoleExecution has no Job contract")
+	}
+	if err := c.checkRoleToolPolicy(job); err != nil {
+		return err
+	}
 	// Resume may take time. Re-read and re-authorize after it returns so the
 	// prompt contains the latest Job state and cannot use a stale approval.
 	if err := c.runtime.Resume(ctx, execution.RuntimeSessionID); err != nil {
@@ -230,6 +289,13 @@ func (c *JobRoleController) Send(ctx context.Context, executionID, prompt string
 			current.Role != c.runtime.Role() || current.RuntimeSessionID != execution.RuntimeSessionID ||
 			current.RuntimeConfigHash != c.runtime.ConfigHash() {
 			return fmt.Errorf("taxion: RoleExecution Runtime binding changed before sending the turn")
+		}
+		currentJob, ok := state.Graph.Job(current.JobID)
+		if !ok || currentJob.Contract == nil {
+			return fmt.Errorf("taxion: Job contract disappeared before sending the turn")
+		}
+		if err := c.checkRoleToolPolicy(currentJob); err != nil {
+			return err
 		}
 		context, contextHash, err := BuildJobExecutionContext(state.Graph, executionID)
 		if err != nil {
@@ -373,6 +439,13 @@ func (c *JobRoleController) AuthorizeOperation(executionID, operation string, at
 	execution, err := c.requireBoundExecution(state.Graph, executionID)
 	if err != nil || execution.Status != core.RoleExecutionRunning {
 		return fmt.Errorf("taxion: operation requires a running execution bound to this Runtime")
+	}
+	job, ok := state.Graph.Job(execution.JobID)
+	if !ok || job.Contract == nil {
+		return fmt.Errorf("taxion: Runtime operation requires an approved Job contract")
+	}
+	if err := c.checkRoleToolPolicy(job); err != nil {
+		return err
 	}
 	return state.Graph.CheckRoleExecutionOperation(executionID, operation, at)
 }
