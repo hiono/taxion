@@ -88,7 +88,6 @@ func TestBuildJobExecutionContextIsJobScopedAndExcludesRuntimeBindings(t *testin
 	}
 }
 
-
 func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 	now := time.Now().UTC()
 	selection := json.RawMessage(`{"repository":{"path":"example/repo"},"execution":{"approvalRef":"config:v1"}}`)

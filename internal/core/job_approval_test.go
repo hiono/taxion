@@ -138,7 +138,6 @@ func TestTaskGraphRejectsTaskScopeOutsideApprovedJobContract(t *testing.T) {
 	}
 }
 
-
 func TestCheckRoleExecutionOperationRequiresCurrentJobApprovalAndScope(t *testing.T) {
 	now := time.Now().UTC()
 	job := Job{
