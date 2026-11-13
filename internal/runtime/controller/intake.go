@@ -17,6 +17,8 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+// IntakeRequest selects legacy Task intake when Task.JobID is empty and
+// first-class Job intake only when Task.JobID names an existing Job.
 type IntakeRequest struct {
 	ContextSources          []core.ContextDocument `json:"contextSources,omitempty"`
 	ObservationHash         string                 `json:"observationHash,omitempty"`
@@ -340,6 +342,12 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 			}
 			if job.Contract != nil {
 				if err := taskCoveredByJobContract(task, *job.Contract); err != nil {
+					return err
+				}
+			}
+			if job.Status == core.JobCompleted || job.Status == core.JobFailed {
+				if err := state.Graph.TransitionJob(job.ID, core.JobWaiting, "controller",
+					"successor Task explicitly attached", time.Now().UTC()); err != nil {
 					return err
 				}
 			}

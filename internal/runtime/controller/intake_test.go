@@ -182,6 +182,38 @@ func TestJobIntakeUsesOnlyJobApprovalOnBundleRequiredGraph(t *testing.T) {
 	}
 }
 
+func TestIntakeReplayCannotChangeExplicitJobMembership(t *testing.T) {
+	db, _, _, _ := executionConfigurationFixture(t)
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ := state.Graph.GraphTask("task")
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "replay-membership", core.Draft, "", nil
+	proposal, err := ProposeIntake(db, IntakeRequest{
+		Task: task, Request: "Keep the original Task authorization mode.",
+		Actor: "human", Source: "human:legacy",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := ProposeJob(db, JobIntakeRequest{
+		JobID: "job-replay-membership", Request: "Separate Job.", Goal: "No retroactive membership changes.",
+		Actor: "human", Source: "human:job-proposal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := proposal
+	changed.JobID = job.ID
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: changed, Request: "Keep the original Task authorization mode.",
+		Actor: "human", Source: "human:legacy",
+	}); err == nil {
+		t.Fatal("exact Task replay silently changed legacy/Job authorization mode")
+	}
+}
+
 func TestIntakeRejectsCrossModeTaskAncestry(t *testing.T) {
 	db, _, _, _ := executionConfigurationFixture(t)
 	job, err := ProposeJob(db, JobIntakeRequest{
