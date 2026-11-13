@@ -115,12 +115,14 @@ type RoleExecutionSummary struct {
 }
 
 type JobMessageContext struct {
-	ID       string    `json:"id"`
-	FromRole string    `json:"fromRole"`
-	ToRole   string    `json:"toRole"`
-	Body     string    `json:"body"`
-	ReplyTo  string    `json:"replyTo,omitempty"`
-	At       time.Time `json:"at"`
+	ID                string    `json:"id"`
+	FromRole          string    `json:"fromRole"`
+	ToRole            string    `json:"toRole"`
+	Body              string    `json:"body"`
+	SourceExecutionID string    `json:"sourceExecutionId,omitempty"`
+	TargetExecutionID string    `json:"targetExecutionId,omitempty"`
+	ReplyTo           string    `json:"replyTo,omitempty"`
+	At                time.Time `json:"at"`
 }
 
 // BuildJobExecutionContext assembles a deterministic, Job-scoped context.
@@ -215,7 +217,8 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 	for _, message := range graph.JobConversation(job.ID) {
 		result.Messages = append(result.Messages, JobMessageContext{
 			ID: message.ID, FromRole: message.FromRole, ToRole: message.ToRole,
-			Body: message.Body, ReplyTo: message.ReplyTo, At: message.At,
+			Body: message.Body, SourceExecutionID: message.SourceExecutionID,
+			TargetExecutionID: message.TargetExecutionID, ReplyTo: message.ReplyTo, At: message.At,
 		})
 	}
 	encoded, err := json.Marshal(result)
