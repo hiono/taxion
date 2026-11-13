@@ -31,6 +31,14 @@ type IntakeRequest struct {
 	ConfigurationDecisionID string                 `json:"configurationDecisionId,omitempty"`
 }
 
+type JobIntakeRequest struct {
+	JobID   string `json:"jobId,omitempty"`
+	Request string `json:"request"`
+	Goal    string `json:"goal"`
+	Actor   string `json:"actor"`
+	Source  string `json:"source"`
+}
+
 type IntakeConfirmation struct {
 	ObservationHash         string               `json:"observationHash,omitempty"`
 	ReconciliationHash      string               `json:"reconciliationHash,omitempty"`
@@ -122,6 +130,47 @@ func newIntakeJobID() (string, error) {
 		return "", fmt.Errorf("taxion: create Job identity: %w", err)
 	}
 	return "job-" + hex.EncodeToString(value[:]), nil
+}
+
+// ProposeJob creates a durable Job without creating a Task. A caller-supplied
+// JobID makes exact retries idempotent and can later be referenced by multiple Tasks.
+func ProposeJob(db *store.Store, request JobIntakeRequest) (core.Job, error) {
+	if db == nil || strings.TrimSpace(request.Request) == "" || strings.TrimSpace(request.Goal) == "" ||
+		strings.TrimSpace(request.Actor) == "" || strings.TrimSpace(request.Source) == "" {
+		return core.Job{}, fmt.Errorf("taxion: Job proposal requires request, goal, actor and source")
+	}
+	jobID := strings.TrimSpace(request.JobID)
+	if jobID == "" {
+		var err error
+		jobID, err = newIntakeJobID()
+		if err != nil {
+			return core.Job{}, err
+		}
+	}
+	var result core.Job
+	err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		if existing, ok := state.Graph.Job(jobID); ok {
+			if existing.Request != request.Request || existing.Goal != request.Goal ||
+				existing.Status != core.JobDraft {
+				return fmt.Errorf("taxion: Job ID already contains another proposal")
+			}
+			result = existing
+			return nil
+		}
+		job := core.Job{
+			ID: jobID, Request: request.Request, Goal: request.Goal, Status: core.JobDraft,
+		}
+		if err := state.Graph.CreateJobWithActor(job, request.Actor,
+			"Job proposed from "+request.Source, time.Now().UTC()); err != nil {
+			return err
+		}
+		result, _ = state.Graph.Job(jobID)
+		return nil
+	})
+	if err != nil {
+		return core.Job{}, err
+	}
+	return result, nil
 }
 
 func originalIntakeRequest(task core.GraphTask, fallback string) string {
