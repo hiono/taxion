@@ -19,8 +19,10 @@ type jobRoleRuntimeFake struct {
 	taskID     string
 	sessionID  string
 	prompt     string
-	startCount int
-	events     chan runtime.Event
+	startCount  int
+	resumeCount int
+	stopCount   int
+	events      chan runtime.Event
 	stopErr        error
 	authErr        error
 	expectedAccount string
