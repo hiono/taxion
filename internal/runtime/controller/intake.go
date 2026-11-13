@@ -446,7 +446,7 @@ func BuildJobContractForIntake(task core.GraphTask, configuration core.ApprovalC
 		Roles:            []string{"PLANNER", "CODER", "REVIEWER"},
 		Acceptance:       slices.Clone(task.Acceptance),
 		RequiredEvidence: slices.Clone(task.RequiredEvidence),
-		Repositories:     []core.JobRepositoryScope{{
+		Repositories: []core.JobRepositoryScope{{
 			Repository: task.Repo,
 			FileAccess: *task.FileAccess,
 		}},
