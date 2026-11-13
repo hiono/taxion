@@ -11,7 +11,7 @@ import (
 type JobOutput struct {
 	ID              string    `json:"id"`
 	JobID           string    `json:"jobId"`
-	TaskID          string    `json:"taskId"`
+	TaskID          string    `json:"taskId,omitempty"`
 	RoleExecutionID string    `json:"roleExecutionId"`
 	Repository      string    `json:"repository"`
 	Kind            string    `json:"kind"`
@@ -28,7 +28,7 @@ type JobOutput struct {
 type JobEvidence struct {
 	ID                    string    `json:"id"`
 	JobID                 string    `json:"jobId"`
-	TaskID                string    `json:"taskId"`
+	TaskID                string    `json:"taskId,omitempty"`
 	ProducedByExecutionID string    `json:"producedByExecutionId"`
 	OutputID              string    `json:"outputId,omitempty"`
 	Acceptance            string    `json:"acceptance"`
@@ -41,7 +41,6 @@ type JobEvidence struct {
 	VerifiedAt            time.Time `json:"verifiedAt,omitempty"`
 	RecordHash            string    `json:"recordHash"`
 }
-
 
 func (o JobOutput) computeRecordHash() (string, error) {
 	copy := o
@@ -158,15 +157,19 @@ func (g TaskGraph) validateJobArtifacts() error {
 	}
 	for _, output := range g.JobOutputs {
 		job, jobOK := jobs[output.JobID]
-		task, taskOK := tasks[output.TaskID]
 		execution, executionOK := executions[output.RoleExecutionID]
-		if !jobOK || job.Contract == nil || !taskOK || !executionOK ||
+		if !jobOK || job.Contract == nil || !executionOK ||
 			output.Verify() != nil || !nonempty(output.ID) || !nonempty(output.Kind) || !validContentSHA256(output.ContentSHA256) ||
 			output.CreatedAt.IsZero() || output.CreatedAt.Before(job.CreatedAt) || output.CreatedAt.Before(execution.CreatedAt) ||
-			task.JobID != job.ID || task.Repo != output.Repository ||
-			execution.JobID != job.ID || execution.TaskID != task.ID ||
-			!TaskWithinJobScope(task, *job.Contract) {
+			execution.JobID != job.ID || execution.TaskID != output.TaskID {
 			return graphError("invalid or out-of-scope Job output")
+		}
+		if output.TaskID != "" {
+			task, taskOK := tasks[output.TaskID]
+			if !taskOK || task.JobID != job.ID || task.Repo != output.Repository ||
+				!TaskWithinJobScope(task, *job.Contract) {
+				return graphError("invalid or out-of-scope Job output Task")
+			}
 		}
 		if !slices.ContainsFunc(job.Contract.Repositories, func(scope JobRepositoryScope) bool {
 			return scope.Repository == output.Repository
@@ -181,21 +184,26 @@ func (g TaskGraph) validateJobArtifacts() error {
 	seenEvidence := map[string]bool{}
 	for _, evidence := range g.JobEvidence {
 		job, jobOK := jobs[evidence.JobID]
-		task, taskOK := tasks[evidence.TaskID]
 		producer, producerOK := executions[evidence.ProducedByExecutionID]
-		if !jobOK || job.Contract == nil || !taskOK || !producerOK ||
+		if !jobOK || job.Contract == nil || !producerOK ||
 			evidence.Verify() != nil || !nonempty(evidence.ID) || !nonempty(evidence.Acceptance) || !nonempty(evidence.Kind) ||
 			!validContentSHA256(evidence.ContentSHA256) || evidence.CreatedAt.IsZero() ||
 			evidence.CreatedAt.Before(job.CreatedAt) || evidence.CreatedAt.Before(producer.CreatedAt) || seenEvidence[evidence.ID] ||
-			task.JobID != job.ID || producer.JobID != job.ID || producer.TaskID != task.ID ||
+			producer.JobID != job.ID || producer.TaskID != evidence.TaskID ||
 			!slices.Contains(job.Contract.Acceptance, evidence.Acceptance) ||
 			!slices.Contains(job.Contract.RequiredEvidence, evidence.Kind) {
 			return graphError("invalid or out-of-scope Job evidence")
 		}
+		if evidence.TaskID != "" {
+			task, taskOK := tasks[evidence.TaskID]
+			if !taskOK || task.JobID != job.ID || !TaskWithinJobScope(task, *job.Contract) {
+				return graphError("invalid or out-of-scope Job evidence Task")
+			}
+		}
 		seenEvidence[evidence.ID] = true
 		if evidence.OutputID != "" {
 			output, ok := outputs[evidence.OutputID]
-			if !ok || output.JobID != job.ID || output.TaskID != task.ID ||
+			if !ok || output.JobID != job.ID || output.TaskID != evidence.TaskID ||
 				output.ContentSHA256 != evidence.ContentSHA256 || output.CreatedAt.After(evidence.CreatedAt) {
 				return graphError("Job evidence references a missing or mismatched output")
 			}
