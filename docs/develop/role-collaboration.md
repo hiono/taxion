@@ -29,6 +29,19 @@ Taxion は、完全な依頼情報を要求する検証装置ではない。不�
 7. Reviewer は独立した判断を行い、Coder の自己申告や session に依存しない。
 8. Job の完了は、成果・検証証拠・受入れ条件・承認範囲を照合して判断する。
 
+## Job の承認・scope・成果物
+
+Job の承認は JobID に結び付く独立した権限記録とし、Task approval や会話履歴から導出しない。
+
+- 承認対象は Job の immutable revision とする。依頼、目的、制約、受入れ条件、明示的な実行 scope、許可操作、repository/resource 境界、budget 上限、deadline、安全制約、有効な設定参照を一つの proposal hash に束縛する。
+- 承認 basis が変わった場合は revision を更新し、新しい明示承認を要求する。旧 approval を書き換えたり、自動的に再利用したりしない。
+- Task は Job scope の内側で作業を分解する。Task の scope・budget・deadline は Job 承認範囲を狭めることはできるが、拡張できない。
+- RoleExecution の作成時だけでなく、各 privileged Runtime 操作の直前に Job approval、Task の絞り込み、Role policy、Runtime config、残予算を再検証する。
+- 旧 Task approval bundle、authorization decision、packet receipt、dispatch audit は旧 Task の履歴として保存する。新 Job の承認へ移行・継承しない。
+- Jobless legacy Task は変更しない。そこから派生する新 Job は独立して承認し、旧 Task は provenance として参照する。
+
+Job は成果物と検証証拠の append-only index を保持する。参照は Job、Task（該当する場合）、RoleExecution、repository/resource、immutable content identity、producer、時刻を特定する。Role は成果・証拠を提案できるが、自身の成果を受入れ済みと判定できない。受入れ判定は独立 Reviewer または指定 verifier が記録する。Job 完了には必須 acceptance condition を裏付ける provenance-valid な証拠が必要である。
+
 ## Controller が拒否・停止する境界
 
 意味的な情報不足、任意 metadata の欠落、表現差、未確定の実装詳細だけでは拒否しない。

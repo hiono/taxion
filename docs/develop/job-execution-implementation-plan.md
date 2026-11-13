@@ -67,11 +67,22 @@ Job と Task の関連は **Task 側が `JobID` を保持する単方向参照**
 
 **Exit gate:** データモデル、状態遷移、実行開始から終了までの責務分担、移行規則がコード着手可能な粒度で定義されていること。
 
+### Phase 1A — Job authority / output / evidence の設計ゲート
+
+- [ ] Job の承認対象を immutable revision として定義する（request、goal、constraints、acceptance、scope、allowed operations、repository/resource、budget、deadline、security、configuration references）。
+- [ ] Job approval record の canonical proposal hash、record hash、version、approver/source/reason/time、append-only 更新規則を定義する。
+- [ ] Job scope と Task scope の包含関係、および RoleExecution ごとの最小権限評価式を定義する。
+- [ ] Job approval と既存 Task approval bundle の役割を分離する。旧 Task approval / packet / dispatch records を Job approval へ移行・継承しないことを migration test で固定する。
+- [ ] Job output / evidence reference の provenance、immutability、verification state、acceptance condition との対応を定義する。
+- [ ] Job completion の判定条件と unresolved execution / safety state による停止条件を定義する。
+
+**Exit gate:** Job approval が唯一の Job-level authority であり、Task/RoleExecution は承認済み Job scope を超えられないこと、旧 Task approval が新 Job の authority にならないこと、成果・証拠の provenance と受入れ責任が明確であることを ADR とテスト可能な規則で確定する。Exit gate 通過前に Runtime 実行経路へ Job approval を接続しない。
+
 ### Phase 1 — Job と RoleExecution の永続化モデル
 
-- [ ] Job を Task から独立した first-class entity として導入する。
-- [ ] Task に JobID を持たせ、Job.TaskIDs による逆方向の重複管理を撤廃する。
-- [ ] Job を Task の有無に依存せず生成・永続化できるようにする。
+- [x] Job を Task から独立した first-class entity として導入する。
+- [x] Task に JobID を持たせ、Job.TaskIDs による逆方向の重複管理を撤廃する。
+- [x] Job を Task の有無に依存せず生成・永続化できるようにする。
 - [ ] intake を Job 生成と Task 生成の責務に分解し、Task は既存 Job に所属させる。
 - [ ] RoleExecution に Job、担当 Role、対象 Task（必要な場合）、親実行、状態、Runtime binding、開始・終了・停止理由、結果参照を保持する。
 - [ ] RoleExecution の状態遷移と重複実行防止を core で検証する。

@@ -44,6 +44,32 @@ Controller は意味的な情報の完全性を判定して Role の判断を代
 
 一方、必要性が実証されていない汎用 scheduler、常駐 Role、質問専用エンジンを先行導入しない。実際の Job 協調を成立させる最小の実行・保存モデルから構築する。
 
+### Job authority and approval boundary
+
+Job approval is the sole source of authority for work performed under a first-class Job. It is distinct from Job conversation, Task planning, and RoleExecution records.
+
+- A Job approval binds an immutable Job revision: request, goal, constraints, acceptance conditions, explicit execution scope, allowed operations, repository/resource boundaries, budget ceilings, deadline, security restrictions, and effective configuration references.
+- The approval record is keyed by JobID and records the approved revision/proposal hash, canonicalization version, approver identity/source/reason, and approval time. The record is append-only; a changed approval basis requires a new revision and explicit approval.
+- A Task is an implementation decomposition, not an authority source. Its effective scope and permissions must be a subset of the currently approved Job scope. A Task may narrow scope, budget, or deadline, but may not widen them.
+- Each RoleExecution is independently checked against the current Job approval and the Task's narrowed scope, Role policy, runtime configuration, and remaining budget immediately before every privileged Runtime operation. A previously created RoleExecution or Job message is not a grant.
+- Task-level approvals may remain only as additional, narrower gates where a concrete operation requires them. They cannot replace, widen, or imply Job approval.
+- Legacy Task approval bundles, authorization decisions, packet receipts, and dispatch audit records remain historical evidence for the legacy Task. They are not migrated into Job approval and cannot authorize a new Job or a new RoleExecution.
+- A legacy Task without JobID remains unchanged. A new Job that supersedes work from that Task must receive its own approval; references to the legacy Task are provenance only.
+
+The canonical Job approval proposal is a versioned value, not a digest of mutable Task records. Its explicit scope must be inspectable before confirmation. It must not contain resolved credentials; configuration is represented by approved selection and source references/digests.
+
+### Job outputs and evidence
+
+Job owns the durable index of accepted outputs and evidence references; the underlying bytes may remain in repository objects or existing artifact storage.
+
+- An output reference identifies the Job, originating Task (if any), producing RoleExecution, repository/resource, immutable content identity (commit/tree/blob or equivalent), and creation time.
+- Evidence references identify the claim or acceptance condition they support, evidence type, immutable content identity, producer, and verification status/result. Evidence records distinguish observed, passed, failed, and unverified states.
+- A Role may propose outputs/evidence, but cannot mark its own output accepted or turn a message into verification evidence. Controller records provenance; an independent Reviewer or configured verifier records acceptance.
+- Job completion requires all mandatory acceptance conditions to be satisfied by current, provenance-valid evidence, and no unresolved safety or execution-state uncertainty.
+- Superseding or replacing an output appends a new reference and preserves prior history; it does not rewrite the provenance of prior results.
+
+JobApproval, JobOutput, and JobEvidence are conceptual boundaries to implement. Exact storage structs and migration details are settled in the implementation plan before runtime authorization is changed.
+
 ## Alternatives considered
 
 - 既存 Clarification の宛先と successor Dispatch だけを拡張する: 固定工程・固定 protocol に設計が拘束されるため却下。
