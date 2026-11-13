@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -504,9 +505,10 @@ type TaskWaiver struct {
 // The old fields are accepted only as an input migration format and are never
 // represented or emitted by the current domain model.
 func (g *TaskGraph) UnmarshalJSON(data []byte) error {
-	type plain TaskGraph
-	var decoded plain
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	// Remove only the two explicitly supported legacy Job fields before
+	// strict decoding. All other unknown fields remain errors.
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(data, &envelope); err != nil {
 		return err
 	}
 	var legacy struct {
@@ -517,6 +519,32 @@ func (g *TaskGraph) UnmarshalJSON(data []byte) error {
 		} `json:"jobs"`
 	}
 	if err := json.Unmarshal(data, &legacy); err != nil {
+		return err
+	}
+	if rawJobs, ok := envelope["jobs"]; ok {
+		var jobs []map[string]json.RawMessage
+		if err := json.Unmarshal(rawJobs, &jobs); err != nil {
+			return err
+		}
+		for _, oldJob := range jobs {
+			delete(oldJob, "rootTaskId")
+			delete(oldJob, "taskIds")
+		}
+		cleanJobs, err := json.Marshal(jobs)
+		if err != nil {
+			return err
+		}
+		envelope["jobs"] = cleanJobs
+	}
+	cleanData, err := json.Marshal(envelope)
+	if err != nil {
+		return err
+	}
+	type plain TaskGraph
+	var decoded plain
+	decoder := json.NewDecoder(bytes.NewReader(cleanData))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
 		return err
 	}
 	*g = TaskGraph(decoded)

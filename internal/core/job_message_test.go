@@ -8,13 +8,14 @@ import (
 func TestJobConversationAllowsNaturalLanguageWithoutQuestionSchema(t *testing.T) {
 	graph := TaskGraph{
 		Version:    1,
-		Tasks:      []GraphTask{{ID: "job-1"}},
-		Dispatches: []GraphDispatch{{ID: "d1", TaskID: "job-1", Recipient: "CODER"}},
+		Jobs:       []Job{{ID: "job-1", Request: "request", Goal: "goal", Status: JobActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}},
+		Tasks:      []GraphTask{{ID: "task-1", JobID: "job-1"}},
+		Dispatches: []GraphDispatch{{ID: "d1", TaskID: "task-1", Recipient: "CODER"}},
 		JobMessages: []JobMessage{
-			{ID: "m1", TaskID: "job-1", FromRole: "CODER", ToRole: "PLANNER",
+			{ID: "m1", TaskID: "task-1", FromRole: "CODER", ToRole: "PLANNER",
 				Body:   "この仕様の意図を確認したい。現状の情報から実装できる部分は先に進める。",
 				Source: "dispatch:d1", SourceDispatchID: "d1", At: time.Now().UTC()},
-			{ID: "m2", TaskID: "job-1", FromRole: "PLANNER", ToRole: "CODER",
+			{ID: "m2", TaskID: "task-1", FromRole: "PLANNER", ToRole: "CODER",
 				Body:   "既存仕様を優先する。例外条件は現状のままとする。",
 				Source: "planner-session:job-1", ReplyTo: "m1", At: time.Now().UTC()},
 		},

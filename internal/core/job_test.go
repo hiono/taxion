@@ -19,6 +19,28 @@ func newJobGraph() TaskGraph {
 	}
 }
 
+func TestAssignTaskToJobMigratesLegacyTaskSnapshots(t *testing.T) {
+	now := time.Now().UTC()
+	graph := TaskGraph{Version: 1}
+	task := graphTask("legacy-task")
+	if err := graph.Track(task, "human", "register legacy Task"); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.CreateJob(Job{ID: "new-job", Request: "request", Goal: "goal", Status: JobDraft, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AssignTaskToJob("new-job", "legacy-task"); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := graph.GraphTask("legacy-task")
+	if current.JobID != "new-job" || graph.History[0].Task.JobID != "new-job" {
+		t.Fatal("legacy Task ownership was not migrated consistently")
+	}
+	if err := graph.Validate(); err != nil {
+		t.Fatalf("migrated graph is invalid: %v", err)
+	}
+}
+
 func TestLegacyJobTaskMembershipMigratesToTaskJobID(t *testing.T) {
 	data := []byte(`{
 		"version": 1,

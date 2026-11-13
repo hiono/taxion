@@ -180,6 +180,53 @@ func (g *TaskGraph) CreateJob(job Job) error {
 	return nil
 }
 
+// AssignTaskToJob migrates an unassigned legacy Task to a first-class Job.
+// It updates historical Task snapshots and ReviewFlow contracts so the
+// persisted graph has one consistent ownership identity. Existing approvals
+// are not rewritten; the changed Task record requires re-approval.
+func (g *TaskGraph) AssignTaskToJob(jobID, taskID string) error {
+	if g == nil || strings.TrimSpace(jobID) == "" || strings.TrimSpace(taskID) == "" {
+		return graphError("Task ownership migration requires a Job and Task ID")
+	}
+	next := cloneGraph(*g)
+	if _, ok := next.Job(jobID); !ok {
+		return graphError("Job %s not found", jobID)
+	}
+	task, ok := next.GraphTask(taskID)
+	if !ok {
+		return graphError("Task %s not found", taskID)
+	}
+	if task.JobID == jobID {
+		return nil
+	}
+	if task.JobID != "" {
+		return graphError("Task %s already belongs to another Job", taskID)
+	}
+	for i := range next.Tasks {
+		if next.Tasks[i].ID == taskID {
+			next.Tasks[i].JobID = jobID
+		}
+	}
+	for i := range next.History {
+		if next.History[i].TaskID == taskID {
+			next.History[i].Task.JobID = jobID
+		}
+	}
+	for i := range next.ReviewFlows {
+		if next.ReviewFlows[i].TaskID == taskID {
+			next.ReviewFlows[i].Contract.JobID = jobID
+		}
+	}
+	if err := next.validateJobModel(); err != nil {
+		return err
+	}
+	if err := next.validateJobMessages(); err != nil {
+		return err
+	}
+	*g = next
+	return nil
+}
+
 // TransitionJob records a Job state transition independently of Task state.
 func (g *TaskGraph) TransitionJob(id string, status JobStatus, actor, reason string, at time.Time) error {
 	if g == nil || strings.TrimSpace(actor) == "" || strings.TrimSpace(reason) == "" {
