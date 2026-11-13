@@ -159,7 +159,6 @@ func ensureIntakeJob(graph *core.TaskGraph, task *core.GraphTask, request string
 		anchorID = task.ParentID
 	}
 	seen := map[string]bool{}
-	unassigned := make([]string, 0)
 	for anchorID != "" {
 		if seen[anchorID] {
 			return fmt.Errorf("taxion: Task ancestry contains a cycle while assigning Job")
@@ -174,18 +173,12 @@ func ensureIntakeJob(graph *core.TaskGraph, task *core.GraphTask, request string
 			if !ok || job.Status == core.JobCancelled {
 				return fmt.Errorf("taxion: predecessor Task has no usable Job")
 			}
-			for _, legacyTaskID := range unassigned {
-				if err := graph.AssignTaskToJob(job.ID, legacyTaskID); err != nil {
-					return err
-				}
-			}
 			task.JobID = job.ID
 			if job.Status == core.JobCompleted || job.Status == core.JobFailed {
 				return graph.TransitionJob(job.ID, core.JobWaiting, "controller", "successor Task proposed", time.Now().UTC())
 			}
 			return nil
 		}
-		unassigned = append(unassigned, parent.ID)
 		anchorID = parent.ParentID
 	}
 	jobID, err := newIntakeJobID()
@@ -203,11 +196,6 @@ func ensureIntakeJob(graph *core.TaskGraph, task *core.GraphTask, request string
 	job := core.Job{ID: jobID, Request: request, Goal: goal, Status: status}
 	if err := graph.CreateJob(job); err != nil {
 		return err
-	}
-	for _, legacyTaskID := range unassigned {
-		if err := graph.AssignTaskToJob(jobID, legacyTaskID); err != nil {
-			return err
-		}
 	}
 	task.JobID = jobID
 	return nil
