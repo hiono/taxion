@@ -35,6 +35,7 @@ jobs:
           unformatted="$(gofmt -l cmd internal)"
           if [ -n "$unformatted" ]; then
             printf '%s\n' "$unformatted"
+            while IFS= read -r file; do gofmt -d "$file"; done <<< "$unformatted"
             exit 1
           fi
       - run: go vet ./...
