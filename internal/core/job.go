@@ -364,6 +364,29 @@ func (g *TaskGraph) BindRoleExecutionSession(id, sessionID, configHash string) e
 	return graphError("RoleExecution %s not found", id)
 }
 
+func (g *TaskGraph) BindRoleExecutionContextHash(id, contextHash string) error {
+	if g == nil || !validContentSHA256(contextHash) {
+		return graphError("RoleExecution context binding requires a valid context hash")
+	}
+	next := cloneGraph(*g)
+	for i := range next.RoleExecutions {
+		execution := &next.RoleExecutions[i]
+		if execution.ID != id {
+			continue
+		}
+		if execution.Status != RoleExecutionRunning || execution.RuntimeSessionID == "" {
+			return graphError("RoleExecution context binding requires a running, bound session")
+		}
+		execution.ContextHash = contextHash
+		if err := next.validateJobModel(); err != nil {
+			return err
+		}
+		*g = next
+		return nil
+	}
+	return graphError("RoleExecution %s not found", id)
+}
+
 func (g TaskGraph) validateJobModel() error {
 	if err := g.validateJobApprovals(); err != nil {
 		return err
