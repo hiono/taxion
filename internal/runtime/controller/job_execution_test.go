@@ -335,6 +335,20 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	}
 }
 
+func TestJobContractRejectsIncompleteRoleAuthorizationMaps(t *testing.T) {
+	_, job, _, _ := jobRoleFixture(t, true)
+	contract := *job.Contract
+	delete(contract.RoleOperations, "REVIEWER")
+	if err := contract.Validate(); err == nil {
+		t.Fatal("Job contract with a partial Role operation map must be rejected")
+	}
+	contract = *job.Contract
+	delete(contract.RoleToolPolicies, "REVIEWER")
+	if err := contract.Validate(); err == nil {
+		t.Fatal("Job contract with a partial Role tool-policy map must be rejected")
+	}
+}
+
 func TestJobRoleControllerRejectsRuntimeToolPolicyNotInJobApproval(t *testing.T) {
 	db, job, task, selection := jobRoleFixture(t, true)
 	now := time.Now().UTC()
