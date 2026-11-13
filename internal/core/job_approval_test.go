@@ -211,6 +211,19 @@ func TestCheckRoleExecutionStartRequiresCurrentJobApproval(t *testing.T) {
 	if err := graph.CheckRoleExecutionStart("exec-start", now.Add(2*time.Second)); err == nil {
 		t.Fatal("unapproved Job must not start a RoleExecution")
 	}
+	taskApproval, err := ComposeApprovalBundle(
+		"task-approval-only", task, task, job.Contract.Configuration,
+		"human", "user", "approve Task work", now.Add(2*time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendApproval(taskApproval); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.CheckRoleExecutionStart("exec-start", now.Add(2*time.Second)); err == nil {
+		t.Fatal("Task approval must not grant Job execution authority")
+	}
 	proposal, err := JobProposal(job)
 	if err != nil {
 		t.Fatal(err)
