@@ -11,7 +11,7 @@ func newJobGraph() TaskGraph {
 	now := time.Now().UTC()
 	return TaskGraph{
 		Version: 1,
-		Jobs:    []Job{{
+		Jobs: []Job{{
 			ID: "job-a", Request: "Original request", Goal: "Complete the requested work",
 			Status: JobActive, CreatedAt: now, UpdatedAt: now,
 		}},
@@ -76,7 +76,6 @@ func TestLegacyJobMigrationRejectsMissingTaskReferences(t *testing.T) {
 		t.Fatal("legacy Job references to missing Tasks must not be silently discarded")
 	}
 }
-
 
 func TestJobAndTaskHaveDistinctIdentity(t *testing.T) {
 	graph := newJobGraph()
