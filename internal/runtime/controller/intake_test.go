@@ -227,7 +227,7 @@ func TestIntakeReplayCannotChangeExplicitJobMembership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed := proposal
+	changed := task
 	changed.JobID = job.ID
 	if _, err := ProposeIntake(db, IntakeRequest{
 		Task: changed, Request: "Keep the original Task authorization mode.",
