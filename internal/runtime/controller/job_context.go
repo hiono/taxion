@@ -105,14 +105,13 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 			Constraints: append([]string(nil), job.Constraints...), Status: string(job.Status),
 		},
 		Current:    projectRoleExecution(execution),
-		Tasks:      make([]JobTaskContext, 0, len(job.TaskIDs)),
+		Tasks:      make([]JobTaskContext, 0),
 		Executions: make([]RoleExecutionSummary, 0),
 		Messages:   make([]JobMessageContext, 0),
 	}
-	for _, taskID := range job.TaskIDs {
-		task, exists := graph.GraphTask(taskID)
-		if !exists {
-			return JobExecutionContext{}, "", fmt.Errorf("taxion: Job %s references missing Task %s", job.ID, taskID)
+	for _, task := range graph.Tasks {
+		if task.JobID != job.ID {
+			continue
 		}
 		result.Tasks = append(result.Tasks, JobTaskContext{
 			ID: task.ID, Title: task.Title, Repository: task.Repo, Type: task.Type,

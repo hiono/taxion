@@ -181,6 +181,7 @@ type HumanDecisionRequest struct {
 // Parent/children, siblings and blocks are derived from parentId and dependsOn.
 type GraphTask struct {
 	ID                 string                `json:"id"`
+	JobID              string                `json:"jobId,omitempty"`
 	Title              string                `json:"title"`
 	Repo               string                `json:"repo"`
 	Type               string                `json:"type"`
@@ -497,6 +498,60 @@ type TaskWaiver struct {
 	Acceptance []string `json:"acceptance"`
 	Evidence   []string `json:"evidence"`
 	Children   []string `json:"children"`
+}
+
+// UnmarshalJSON migrates the former Job-owned Task list into Task.JobID.
+// The old fields are accepted only as an input migration format and are never
+// represented or emitted by the current domain model.
+func (g *TaskGraph) UnmarshalJSON(data []byte) error {
+	type plain TaskGraph
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var legacy struct {
+		Jobs []struct {
+			ID         string   `json:"id"`
+			RootTaskID string   `json:"rootTaskId"`
+			TaskIDs    []string `json:"taskIds"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return err
+	}
+	*g = TaskGraph(decoded)
+	owners := make(map[string]string)
+	for _, oldJob := range legacy.Jobs {
+		ids := append([]string(nil), oldJob.TaskIDs...)
+		if oldJob.RootTaskID != "" && !slices.Contains(ids, oldJob.RootTaskID) {
+			ids = append(ids, oldJob.RootTaskID)
+		}
+		for _, taskID := range ids {
+			if previous := owners[taskID]; previous != "" && previous != oldJob.ID {
+				return fmt.Errorf("legacy Task %s belongs to multiple Jobs", taskID)
+			}
+			owners[taskID] = oldJob.ID
+		}
+	}
+	for i := range g.Tasks {
+		if owner := owners[g.Tasks[i].ID]; owner != "" {
+			if g.Tasks[i].JobID != "" && g.Tasks[i].JobID != owner {
+				return fmt.Errorf("Task %s has conflicting Job ownership during migration", g.Tasks[i].ID)
+			}
+			g.Tasks[i].JobID = owner
+		}
+	}
+	for i := range g.History {
+		if owner := owners[g.History[i].TaskID]; owner != "" {
+			g.History[i].Task.JobID = owner
+		}
+	}
+	for i := range g.ReviewFlows {
+		if owner := owners[g.ReviewFlows[i].TaskID]; owner != "" {
+			g.ReviewFlows[i].Contract.JobID = owner
+		}
+	}
+	return nil
 }
 
 type TaskGraph struct {
@@ -2224,7 +2279,7 @@ func (g *TaskGraph) trackInto(t GraphTask, actor, reason string) error {
 	next := cloneGraph(*g)
 	t = cloneTask(t)
 	if old, ok := next.task(t.ID); ok {
-		if terminal(old.Status) || old.Status != t.Status || old.Repo != t.Repo || old.CreatedFrom != t.CreatedFrom ||
+		if terminal(old.Status) || old.Status != t.Status || old.JobID != t.JobID || old.Repo != t.Repo || old.CreatedFrom != t.CreatedFrom ||
 			!slices.Contains([]TaskStatus{Draft, Blocked, HumanDecisionRequired}, old.Status) {
 			return graphError("task identity/status or running/terminal contract cannot be edited")
 		}

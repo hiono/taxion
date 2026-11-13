@@ -1,7 +1,6 @@
 package core
 
 import (
-	"slices"
 	"strings"
 	"time"
 )
@@ -24,14 +23,18 @@ type JobMessage struct {
 }
 
 // JobConversation returns a Job's collaboration history in append order.
-// Legacy records without JobID are addressed by their former TaskID.
+// Legacy Task-scoped records are resolved through Task.JobID.
 func (g TaskGraph) JobConversation(jobID string) []JobMessage {
 	messages := make([]JobMessage, 0)
-	job, isJob := g.Job(jobID)
 	for _, message := range g.JobMessages {
-		if message.JobID == jobID ||
-			message.JobID == "" && (message.TaskID == jobID || isJob && slices.Contains(job.TaskIDs, message.TaskID)) {
+		if message.JobID == jobID {
 			messages = append(messages, message)
+			continue
+		}
+		if message.JobID == "" && message.TaskID != "" {
+			if task, ok := g.GraphTask(message.TaskID); ok && task.JobID == jobID {
+				messages = append(messages, message)
+			}
 		}
 	}
 	return messages
@@ -88,7 +91,8 @@ func (g TaskGraph) validateJobMessages() error {
 				return graphError("Job message references an unknown Job")
 			}
 			if message.TaskID != "" {
-				if _, ok := tasks[message.TaskID]; !ok || !slices.Contains(jobs[message.JobID].TaskIDs, message.TaskID) {
+				task, ok := tasks[message.TaskID]
+				if !ok || task.JobID != message.JobID {
 					return graphError("Job message references a Task outside its Job")
 				}
 			}

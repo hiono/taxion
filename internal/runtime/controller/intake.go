@@ -142,57 +142,44 @@ func originalIntakeRequest(task core.GraphTask, fallback string) string {
 	return "Original request unavailable for legacy Task " + task.ID
 }
 
-// ensureIntakeJob binds an intake Task to a durable Job without modifying the
-// Task contract or its approval hash. Successors and child Tasks remain in the
-// same Job when their predecessor already belongs to one.
-func ensureIntakeJob(graph *core.TaskGraph, task core.GraphTask, request string) error {
-	if _, exists := graph.JobForTask(task.ID); exists {
+// ensureIntakeJob assigns the Task's canonical JobID before the Task is tracked.
+// Job ownership is stored on Task; Job never maintains a reverse Task ID list.
+func ensureIntakeJob(graph *core.TaskGraph, task *core.GraphTask, request string) error {
+	if graph == nil || task == nil {
+		return fmt.Errorf("taxion: Job assignment requires a graph and Task")
+	}
+	if task.JobID != "" {
+		if _, ok := graph.Job(task.JobID); !ok {
+			return fmt.Errorf("taxion: Task references an unknown Job")
+		}
 		return nil
 	}
 	anchorID := task.Supersedes
 	if anchorID == "" {
 		anchorID = task.ParentID
 	}
-	if anchorID != "" {
-		if job, exists := graph.JobForTask(anchorID); exists {
-			return graph.AttachTaskToJob(job.ID, task.ID)
+	seen := map[string]bool{}
+	for anchorID != "" {
+		if seen[anchorID] {
+			return fmt.Errorf("taxion: Task ancestry contains a cycle while assigning Job")
 		}
-		rootID := anchorID
-		seen := map[string]bool{}
-		for {
-			if seen[rootID] {
-				return fmt.Errorf("taxion: Task ancestry contains a cycle while assigning Job")
+		seen[anchorID] = true
+		parent, exists := graph.GraphTask(anchorID)
+		if !exists {
+			return fmt.Errorf("taxion: predecessor Task %s is unavailable for Job assignment", anchorID)
+		}
+		if parent.JobID != "" {
+			job, ok := graph.Job(parent.JobID)
+			if !ok || job.Status == core.JobCancelled {
+				return fmt.Errorf("taxion: predecessor Task has no usable Job")
 			}
-			seen[rootID] = true
-			parent, exists := graph.GraphTask(rootID)
-			if !exists {
-				return fmt.Errorf("taxion: predecessor Task %s is unavailable for Job assignment", rootID)
+			task.JobID = job.ID
+			if job.Status == core.JobCompleted || job.Status == core.JobFailed {
+				return graph.TransitionJob(job.ID, core.JobWaiting, "controller", "successor Task proposed", time.Now().UTC())
 			}
-			if parent.ParentID == "" {
-				break
-			}
-			rootID = parent.ParentID
+			return nil
 		}
-		if job, exists := graph.JobForTask(rootID); exists {
-			return graph.AttachTaskToJob(job.ID, task.ID)
-		}
-		root, _ := graph.GraphTask(rootID)
-		jobID, err := newIntakeJobID()
-		if err != nil {
-			return err
-		}
-		goal := root.Objective
-		if strings.TrimSpace(goal) == "" {
-			goal = root.Title
-		}
-		job := core.Job{
-			ID: jobID, Request: originalIntakeRequest(root, request), Goal: goal,
-			RootTaskID: root.ID, TaskIDs: []string{root.ID}, Status: core.JobActive,
-		}
-		if err := graph.CreateJob(job); err != nil {
-			return err
-		}
-		return graph.AttachTaskToJob(jobID, task.ID)
+		anchorID = parent.ParentID
 	}
 	jobID, err := newIntakeJobID()
 	if err != nil {
@@ -202,10 +189,16 @@ func ensureIntakeJob(graph *core.TaskGraph, task core.GraphTask, request string)
 	if strings.TrimSpace(goal) == "" {
 		goal = task.Title
 	}
-	return graph.CreateJob(core.Job{
-		ID: jobID, Request: request, Goal: goal, RootTaskID: task.ID,
-		TaskIDs: []string{task.ID}, Status: core.JobDraft,
-	})
+	status := core.JobDraft
+	if task.ParentID != "" || task.Supersedes != "" {
+		status = core.JobActive
+	}
+	job := core.Job{ID: jobID, Request: request, Goal: goal, Status: status}
+	if err := graph.CreateJob(job); err != nil {
+		return err
+	}
+	task.JobID = jobID
+	return nil
 }
 
 func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, error) {
@@ -327,8 +320,8 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 			if !reflect.DeepEqual(previous, task) {
 				return fmt.Errorf("taxion: intake Task ID already contains another proposal; use a new Task ID")
 			}
-			if err := ensureIntakeJob(&state.Graph, previous, request.Request); err != nil {
-				return err
+			if previous.JobID == "" {
+				return fmt.Errorf("taxion: existing Task requires explicit Job migration before reuse")
 			}
 			result = previous
 			return nil
@@ -338,10 +331,10 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 				return fmt.Errorf("taxion: intake Task ID already exists in the ledger; use a new Task ID")
 			}
 		}
-		if err := state.Graph.Track(task, request.Actor, "Propose explicit scope and acceptance for the original request"); err != nil {
+		if err := ensureIntakeJob(&state.Graph, &task, request.Request); err != nil {
 			return err
 		}
-		if err := ensureIntakeJob(&state.Graph, task, request.Request); err != nil {
+		if err := state.Graph.Track(task, request.Actor, "Propose explicit scope and acceptance for the original request"); err != nil {
 			return err
 		}
 		state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{ID: task.ID, Title: task.Title, Repo: task.Repo, CreatedAt: time.Now().UTC()})
@@ -634,11 +627,11 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		if err := state.Graph.Transition(task.ID, core.Ready, request.Actor, request.Reason, core.TransitionProof{}); err != nil {
 			return err
 		}
-		if err := ensureIntakeJob(&state.Graph, task, originalIntakeRequest(task, task.Objective)); err != nil {
-			return err
+		job, ok := state.Graph.JobForTask(task.ID)
+		if !ok {
+			return fmt.Errorf("taxion: approved Task is not associated with a Job")
 		}
-		if job, ok := state.Graph.JobForTask(task.ID); ok &&
-			(job.Status == core.JobDraft || job.Status == core.JobWaiting) {
+		if job.Status == core.JobDraft || job.Status == core.JobWaiting {
 			if err := state.Graph.TransitionJob(job.ID, core.JobActive, request.Actor, "intake approved", time.Now().UTC()); err != nil {
 				return err
 			}
