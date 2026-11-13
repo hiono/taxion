@@ -49,7 +49,7 @@ func TestJobMessageReplyBindsExactRoleExecutions(t *testing.T) {
 	now := time.Now().UTC()
 	graph := TaskGraph{
 		Version: 1,
-		Jobs:    []Job{{ID: "job-reply", Request: "request", Goal: "goal",
+		Jobs: []Job{{ID: "job-reply", Request: "request", Goal: "goal",
 			Status: JobActive, CreatedAt: now, UpdatedAt: now}},
 	}
 	for _, execution := range []RoleExecution{
