@@ -521,7 +521,16 @@ func appendConfirmedJobApproval(state *store.Workspace, task core.GraphTask, req
 		}
 	} else if !reflect.DeepEqual(*job.Contract, contract) {
 		if contract.Revision != job.Contract.Revision+1 {
-			return fmt.Errorf("taxion: changed Job contract requires the next revision (current=%d requested=%d equal=%t)", job.Contract.Revision, contract.Revision, reflect.DeepEqual(*job.Contract, contract))
+			return fmt.Errorf("taxion: changed Job contract requires the next revision (current=%d requested=%d equal=%t acceptance=%t evidence=%t operations=%t security=%t repositories=%t budget=%t deadline=%t configuration=%t)",
+				job.Contract.Revision, contract.Revision, reflect.DeepEqual(*job.Contract, contract),
+				reflect.DeepEqual(job.Contract.Acceptance, contract.Acceptance),
+				reflect.DeepEqual(job.Contract.RequiredEvidence, contract.RequiredEvidence),
+				reflect.DeepEqual(job.Contract.Operations, contract.Operations),
+				reflect.DeepEqual(job.Contract.SecurityRestrictions, contract.SecurityRestrictions),
+				reflect.DeepEqual(job.Contract.Repositories, contract.Repositories),
+				reflect.DeepEqual(job.Contract.Budget, contract.Budget),
+				job.Contract.Deadline.Equal(contract.Deadline),
+				reflect.DeepEqual(job.Contract.Configuration, contract.Configuration))
 		}
 	} else if contract.Revision != job.Contract.Revision {
 		return fmt.Errorf("taxion: unchanged Job contract must retain its revision")
