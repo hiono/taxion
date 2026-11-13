@@ -242,29 +242,38 @@ func (c *JobRoleController) RecordUsage(executionID string, usage core.DispatchU
 // PostMessage appends a natural-language request or reply addressed to one
 // concrete RoleExecution in the same Job. It does not start or authorize it.
 func (c *JobRoleController) PostMessage(executionID, targetExecutionID, messageID, body, replyTo string, at time.Time) error {
-	if c == nil || c.store == nil || strings.TrimSpace(messageID) == "" ||
+	if c == nil || c.store == nil || c.runtime == nil || strings.TrimSpace(messageID) == "" ||
 		strings.TrimSpace(body) == "" || at.IsZero() {
 		return fmt.Errorf("taxion: Job message requires controller, identity, body and timestamp")
 	}
-	state, err := c.store.LoadWorkspace()
-	if err != nil {
-		return err
-	}
-	source, ok := state.Graph.RoleExecution(executionID)
-	if !ok || source.Status != core.RoleExecutionRunning || source.Role != c.runtime.Role() {
-		return fmt.Errorf("taxion: Job message source must be this Runtime's running RoleExecution")
-	}
-	target, ok := state.Graph.RoleExecution(targetExecutionID)
-	if !ok || target.JobID != source.JobID || target.Role == source.Role {
-		return fmt.Errorf("taxion: Job message target must be another RoleExecution in the same Job")
-	}
-	message := core.JobMessage{
-		ID: messageID, JobID: source.JobID, FromRole: source.Role, ToRole: target.Role,
-		Body: body, Source: "role-execution:" + executionID,
-		SourceExecutionID: executionID, TargetExecutionID: targetExecutionID,
-		ReplyTo: replyTo, At: at,
-	}
 	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		if !state.HasGraph {
+			return fmt.Errorf("taxion: Job message requires a Task Graph")
+		}
+		source, ok := state.Graph.RoleExecution(executionID)
+		if !ok || source.Status != core.RoleExecutionRunning ||
+			source.Role != c.runtime.Role() || source.RuntimeSessionID == "" ||
+			source.RuntimeConfigHash != c.runtime.ConfigHash() {
+			return fmt.Errorf("taxion: Job message source is not bound to this running Runtime")
+		}
+		if err := state.Graph.CheckRoleExecutionTurn(executionID, at); err != nil {
+			return err
+		}
+		target, ok := state.Graph.RoleExecution(targetExecutionID)
+		if !ok || target.JobID != source.JobID || target.Role == source.Role {
+			return fmt.Errorf("taxion: Job message target must be another RoleExecution in the same Job")
+		}
+		switch target.Status {
+		case core.RoleExecutionCreated, core.RoleExecutionRunning, core.RoleExecutionWaiting, core.RoleExecutionSuspended:
+		default:
+			return fmt.Errorf("taxion: Job message target is not able to receive work")
+		}
+		message := core.JobMessage{
+			ID: messageID, JobID: source.JobID, FromRole: source.Role, ToRole: target.Role,
+			Body: body, Source: "role-execution:" + executionID,
+			SourceExecutionID: executionID, TargetExecutionID: targetExecutionID,
+			ReplyTo: replyTo, At: at,
+		}
 		return state.Graph.AppendJobMessage(message)
 	})
 }
