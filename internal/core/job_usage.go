@@ -2,8 +2,7 @@ package core
 
 import (
 	"math"
-	"slices"
-	"time"
+	"strconv"
 )
 
 // JobUsage is an immutable accounting observation attributed to one
@@ -90,7 +89,7 @@ func (g TaskGraph) validateJobUsage() error {
 		}
 		seen[item.ID] = true
 		accountingKey := usage.Accounting.SourceSessionID + ":" +
-			string(rune(usage.Accounting.Sequence)) + ":" + usage.Accounting.UsageID
+			strconv.FormatInt(usage.Accounting.Sequence, 10) + ":" + usage.Accounting.UsageID
 		if accountingIDs[accountingKey] {
 			return graphError("duplicate Job usage accounting identity")
 		}
@@ -119,5 +118,3 @@ func (g TaskGraph) JobUsageRecords(jobID string) []JobUsage {
 	return result
 }
 
-var _ = slices.Contains[[]string]
-var _ = time.Time{}
