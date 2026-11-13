@@ -2026,6 +2026,7 @@ func cloneGraph(g TaskGraph) TaskGraph {
 	copy.Jobs = slices.Clone(g.Jobs)
 	for i := range copy.Jobs {
 		copy.Jobs[i].Constraints = slices.Clone(g.Jobs[i].Constraints)
+		copy.Jobs[i].Contract = cloneJobContract(g.Jobs[i].Contract)
 	}
 	copy.RoleExecutions = slices.Clone(g.RoleExecutions)
 	copy.RoleExecutionHistory = slices.Clone(g.RoleExecutionHistory)
