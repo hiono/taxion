@@ -320,3 +320,30 @@ func TestJobRoleControllerStartsPlannerWithoutTaskAssignment(t *testing.T) {
 		t.Fatalf("Job-level Planner runtime binding = %q, want Job ID %q", worker.taskID, job.ID)
 	}
 }
+
+func TestJobRoleControllerDoesNotStartWithAuthenticationMismatch(t *testing.T) {
+	db, job, task, selection := jobRoleFixture(t, true)
+	now := time.Now().UTC()
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendRoleExecution(core.RoleExecution{
+			ID: "job-role-auth-failure", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker := &jobRoleRuntimeFake{
+		role: "CODER", configHash: "runtime-config-hash", selection: selection,
+		authErr: context.Canceled,
+	}
+	controller, err := NewJobRoleController(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Start(context.Background(), "job-role-auth-failure"); err == nil {
+		t.Fatal("Runtime authentication mismatch must block session creation")
+	}
+	if worker.startCount != 0 {
+		t.Fatalf("Runtime started %d times after authentication failure", worker.startCount)
+	}
+}
