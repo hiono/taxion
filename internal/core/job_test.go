@@ -279,10 +279,16 @@ func TestJobExistsWithoutTasksAndMultipleTasksShareIt(t *testing.T) {
 	if err := graph.CreateJob(Job{ID: "job-empty", Request: "Request", Goal: "Goal", Status: JobDraft, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("Job must exist independently of Tasks: %v", err)
 	}
-	if err := graph.Track(GraphTask{ID: "task-one", JobID: "job-empty", Status: Draft}, "test", "first Task"); err != nil {
+	first := graphTask("task-one")
+	first.JobID = "job-empty"
+	if err := graph.Track(first, "test", "first Task"); err != nil {
 		t.Fatalf("track first Task: %v", err)
 	}
-	if err := graph.Track(GraphTask{ID: "task-two", JobID: "job-empty", Status: Draft}, "test", "second Task"); err != nil {
+	second := graphTask("task-two")
+	second.JobID = "job-empty"
+	second.AuthorizationID = "decision:2"
+	second.Decisions[0].ID = "decision:2"
+	if err := graph.Track(second, "test", "second Task"); err != nil {
 		t.Fatalf("track second Task: %v", err)
 	}
 	if got, ok := graph.JobForTask("task-one"); !ok || got.ID != "job-empty" {
