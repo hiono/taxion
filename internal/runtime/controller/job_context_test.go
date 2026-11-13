@@ -118,7 +118,9 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := core.GraphTask{
-		ID: "task-authorized", JobID: job.ID, Repo: "example/repo",
+		ID: "task-authorized", JobID: job.ID, Title: "Authorized Task", Repo: "example/repo",
+		Type: "IMPLEMENTATION", Status: core.Draft, CreatedFrom: "test:job-context",
+		Issue: "NOT_REQUIRED: isolated Job context unit test",
 		FileAccess: &core.FileAccessPolicy{Level: core.FileAccessCommitted},
 	}
 	graph := core.TaskGraph{Version: 1, Jobs: []core.Job{job}, Tasks: []core.GraphTask{task}}
