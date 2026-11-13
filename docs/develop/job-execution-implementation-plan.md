@@ -37,6 +37,20 @@ Implementation: [PR #292](https://github.com/hiono/taxion/pull/292)
 - **Controller**: Job / RoleExecution の状態遷移、実行権限、承認、予算、期限、排他、出所、復旧を管理する。
 - **Runtime adapter**: 一つの RoleExecution に対する SDK 非依存の開始・送信・観測・停止を提供する。Job の工程順序は決めない。
 
+### 正規の所有関係（実装着手前に固定する）
+
+Job と Task の関連は **Task 側が `JobID` を保持する単方向参照**を正とする。Job 側に `TaskIDs` の逆引き配列を持たせてはならない。
+
+- Job は独立した継続単位として ID、依頼、目的、制約、状態、成果、協調履歴を所有する。
+- Task は独立した作業単位として ID と `JobID` を持つ。複数 Task が同じ JobID を参照できる。
+- Task の所属検索は Task 側の JobID から解決する。Job.TaskIDs や RootTaskID による所有関係の二重管理を導入しない。
+- RoleExecution は必須の JobID と、必要な場合だけ TaskID を持つ。TaskID がある場合は Task.JobID と一致しなければならない。
+- Job の生成と Task の生成は同一操作である必要はない。Job は Task が存在しなくても成立でき、Task は必ず既存 Job に属する。
+- 既存の Task approval hash、承認記録、履歴を変更しないことを理由に、この正規モデルを曲げてはならない。必要な場合は契約・hash・migration を新モデルに合わせて再設計する。
+- 旧 workspace の移行はデータ保全のために行うが、旧 protocol の互換性維持を新モデルの実行条件にしない。
+
+**現状の不整合:** PR #292 の `Job.TaskIDs` / `RootTaskID` / `JobForTask` / `AttachTaskToJob` はこの所有方向に反する。これらを前提に後続の実行経路を増築せず、Job と Task の正規モデルを先に修正する。
+
 既存 workspace の読み込みを壊さない移行を行う。旧データを暗黙に破棄したり、旧 protocol を新モデルの中心に残したりしない。
 
 ## 3. 実装フェーズ
@@ -45,7 +59,8 @@ Implementation: [PR #292](https://github.com/hiono/taxion/pull/292)
 
 - [x] ADR-0077 と Issue #283 の要求を実装受入れ条件へ展開する。
 - [x] 現行 Dispatch / Controller / Runtime の責務集中を確認する。
-- [ ] Job・Task・RoleExecution の永続化境界、識別子、状態遷移を確定する。
+- [x] Job・Task・RoleExecution の正規の所有方向を確定する（Task.JobID を正とし、Job.TaskIDs / RootTaskID は採用しない）。
+- [ ] Job・Task・RoleExecution の永続化境界、識別子、状態遷移をこの所有方向に基づいて確定する。
 - [ ] Workspace の既存データ移行と読み込み互換方針を確定する。
 - [ ] Runtime adapter の factory・設定・worktree・tool policy の結合点を特定する。
 - [ ] 承認、認証、budget、deadline、repository access の再検証位置を明示する。
@@ -55,14 +70,17 @@ Implementation: [PR #292](https://github.com/hiono/taxion/pull/292)
 ### Phase 1 — Job と RoleExecution の永続化モデル
 
 - [ ] Job を Task から独立した first-class entity として導入する。
-- [ ] Task に Job との明示的な関連を持たせる。
+- [ ] Task に JobID を持たせ、Job.TaskIDs による逆方向の重複管理を撤廃する。
+- [ ] Job を Task の有無に依存せず生成・永続化できるようにする。
+- [ ] intake を Job 生成と Task 生成の責務に分解し、Task は既存 Job に所属させる。
 - [ ] RoleExecution に Job、担当 Role、対象 Task（必要な場合）、親実行、状態、Runtime binding、開始・終了・停止理由、結果参照を保持する。
 - [ ] RoleExecution の状態遷移と重複実行防止を core で検証する。
 - [ ] JobMessage を Job に直接結び付け、送信元・宛先・依頼元実行・応答対象実行を追跡できるようにする。
 - [ ] 既存の JobMessage.TaskID 暫定モデルからの移行を行い、履歴を失わない。
+- [ ] 旧 Task approval hash / approval record の互換維持を理由に Task.JobID モデルを妥協しない。必要な hash・承認契約の変更と移行を設計する。
 - [ ] clone、validate、永続化、workspace backup/recovery を更新する。
 
-**Exit gate:** Job と Task の ID が独立し、複数 Task と複数 RoleExecution が一つの Job に属する状態を永続化・再読込できること。異常な cross-Job 参照や不正遷移を拒否できること。
+**Exit gate:** Job と Task の ID が独立し、Task.JobID を正規の所有参照として複数 Task と複数 RoleExecution が一つの Job に属する状態を永続化・再読込できること。Job 側の TaskIDs / RootTaskID による二重管理がなく、異常な cross-Job 参照や不正遷移を拒否できること。
 
 ### Phase 2 — RoleExecution 中心の Controller / Runtime 経路
 
