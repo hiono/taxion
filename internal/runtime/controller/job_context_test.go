@@ -49,7 +49,8 @@ func TestBuildJobExecutionContextIsJobScopedAndExcludesRuntimeBindings(t *testin
 		t.Fatal(err)
 	}
 	if context.Job.Request != "Implement within this contract." || len(context.Tasks) != 1 ||
-		len(context.Messages) != 1 || context.Current.Role != "PLANNER" {
+		len(context.Messages) != 1 || context.Messages[0].TargetExecutionID != "context-execution" ||
+		context.Current.Role != "PLANNER" {
 		t.Fatalf("incomplete Job context: %+v", context)
 	}
 	if len(hash) != 64 {
