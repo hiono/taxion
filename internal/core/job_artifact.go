@@ -9,17 +9,17 @@ import (
 // JobOutput is an append-only reference to an immutable result produced by a
 // RoleExecution. The underlying bytes remain in the repository or artifact store.
 type JobOutput struct {
-	ID                string    `json:"id"`
-	JobID             string    `json:"jobId"`
-	TaskID            string    `json:"taskId"`
-	RoleExecutionID   string    `json:"roleExecutionId"`
-	Repository        string    `json:"repository"`
-	Kind              string    `json:"kind"`
-	ContentSHA256     string    `json:"contentSha256"`
-	CommitSHA         string    `json:"commitSha,omitempty"`
-	TreeSHA           string    `json:"treeSha,omitempty"`
-	BlobSHA           string    `json:"blobSha,omitempty"`
-	CreatedAt         time.Time `json:"createdAt"`
+	ID              string    `json:"id"`
+	JobID           string    `json:"jobId"`
+	TaskID          string    `json:"taskId"`
+	RoleExecutionID string    `json:"roleExecutionId"`
+	Repository      string    `json:"repository"`
+	Kind            string    `json:"kind"`
+	ContentSHA256   string    `json:"contentSha256"`
+	CommitSHA       string    `json:"commitSha,omitempty"`
+	TreeSHA         string    `json:"treeSha,omitempty"`
+	BlobSHA         string    `json:"blobSha,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
 }
 
 // JobEvidence records a verification result for one Job acceptance condition.
