@@ -181,7 +181,7 @@ func TestRequestResumeWithoutMinimalPlanNeverSubstitutesRequestDigest(t *testing
 
 func TestRequestApprovalRejectsAuthoritativeRecordAndExecutionDrift(t *testing.T) {
 	_, args := requestFixture(t)
-	if err := requestCommand(append(args, "add search"), strings.NewReader("/plan\n/approve\n"), io.Discard,
+	if err := requestCommand(append(args, "add search"), strings.NewReader("/plan\n/approve\n/approve\n"), io.Discard,
 		fixturePlan(t, requestFixtureAnswer([]string{})), func(context.Context, []string, io.Writer) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
