@@ -213,3 +213,31 @@ func TestJobRoleControllerDoesNotStartUnapprovedJob(t *testing.T) {
 		t.Fatalf("Runtime started %d times for an unapproved Job", worker.startCount)
 	}
 }
+
+
+func TestJobRoleControllerStartsPlannerWithoutTaskAssignment(t *testing.T) {
+	db, job, _, selection := jobRoleFixture(t, true)
+	now := time.Now().UTC()
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendRoleExecution(core.RoleExecution{
+			ID: "job-level-planner", JobID: job.ID, Role: "PLANNER",
+			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker := &jobRoleRuntimeFake{
+		role: "PLANNER", configHash: "runtime-config-hash", selection: selection,
+		events: make(chan runtime.Event),
+	}
+	controller, err := NewJobRoleController(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Start(context.Background(), "job-level-planner"); err != nil {
+		t.Fatal(err)
+	}
+	if worker.taskID != job.ID {
+		t.Fatalf("Job-level Planner runtime binding = %q, want Job ID %q", worker.taskID, job.ID)
+	}
+}
