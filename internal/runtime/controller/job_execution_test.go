@@ -115,6 +115,11 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 						Repository: task.Repo, FileAccess: *task.FileAccess,
 					}},
 					Operations: []string{"repository.read", "repository.write", "process.exec", "test.run"},
+					RoleOperations: map[string][]string{
+						"PLANNER": {"repository.read"},
+						"CODER": {"repository.read", "repository.write", "process.exec", "test.run"},
+						"REVIEWER": {"repository.read"},
+					},
 					Budget:     core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
 					Deadline:   now.Add(time.Hour), Configuration: configuration,
 				}
@@ -236,6 +241,25 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 		})
 	}); err != nil {
 		t.Fatal(err)
+	}
+	reviewerRuntime := &jobRoleRuntimeFake{
+		role: "REVIEWER", configHash: "reviewer-config-hash", selection: selection,
+		events: make(chan runtime.Event),
+	}
+	reviewerController, err := NewJobRoleController(db, reviewerRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reviewerController.Start(context.Background(), "job-role-reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := reviewerController.AuthorizeOperation("job-role-reviewer", "repository.read", time.Now().UTC()); err != nil {
+		t.Fatalf("Reviewer read operation rejected: %v", err)
+	}
+	for _, operation := range []string{"repository.write", "process.exec", "test.run"} {
+		if err := reviewerController.AuthorizeOperation("job-role-reviewer", operation, time.Now().UTC()); err == nil {
+			t.Fatalf("Reviewer must not receive Coder operation %q", operation)
+		}
 	}
 	if err := controller.PostMessage("job-role-exec", "job-role-reviewer", "job-role-message",
 		"Please review the implementation and test evidence.", "", time.Now().UTC()); err != nil {

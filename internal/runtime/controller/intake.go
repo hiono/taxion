@@ -385,8 +385,15 @@ func BuildJobContractForIntake(task core.GraphTask, configuration core.ApprovalC
 		return core.JobContract{}, fmt.Errorf("taxion: Job contract requires repository access, acceptance criteria and evidence")
 	}
 	operations := []string{"repository.read", "repository.write", "process.exec"}
+	coderOperations := []string{"repository.read", "repository.write", "process.exec"}
 	if len(task.ValidationCommands) > 0 {
 		operations = append(operations, "test.run")
+		coderOperations = append(coderOperations, "test.run")
+	}
+	roleOperations := map[string][]string{
+		"PLANNER":  {"repository.read"},
+		"CODER":    coderOperations,
+		"REVIEWER": {"repository.read"},
 	}
 	contract := core.JobContract{
 		Revision:         1,
@@ -398,6 +405,7 @@ func BuildJobContractForIntake(task core.GraphTask, configuration core.ApprovalC
 			FileAccess: *task.FileAccess,
 		}},
 		Operations:           operations,
+		RoleOperations:       roleOperations,
 		Budget:               budget,
 		Deadline:             deadline,
 		SecurityRestrictions: []string{"no credential export", "no network access"},

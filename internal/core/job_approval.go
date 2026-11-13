@@ -17,6 +17,7 @@ type JobContract struct {
 	RequiredEvidence     []string              `json:"requiredEvidence"`
 	Repositories         []JobRepositoryScope  `json:"repositories"`
 	Operations           []string              `json:"operations"`
+	RoleOperations       map[string][]string   `json:"roleOperations,omitempty"`
 	Budget               JobBudget             `json:"budget"`
 	Deadline             time.Time             `json:"deadline"`
 	SecurityRestrictions []string              `json:"securityRestrictions,omitempty"`
@@ -54,6 +55,19 @@ func (c JobContract) Validate() error {
 		return graphError("Job contract requires revision, acceptance, evidence, scope, operations, budget, deadline and configuration")
 	}
 	repositories := map[string]bool{}
+	for role, operations := range c.RoleOperations {
+		if !slices.Contains(c.Roles, role) {
+			return graphError("Job contract contains role operations for an unapproved role %q", role)
+		}
+		if !validList(operations) {
+			return graphError("Job contract contains invalid operations for role %q", role)
+		}
+		for _, operation := range operations {
+			if !validJobOperation(operation) || !slices.Contains(c.Operations, operation) {
+				return graphError("Job role %q contains an operation outside the Job operation scope", role)
+			}
+		}
+	}
 	for _, operation := range c.Operations {
 		if !validJobOperation(operation) {
 			return graphError("Job contract contains an unknown operation %q", operation)
@@ -89,6 +103,12 @@ func cloneJobContract(contract *JobContract) *JobContract {
 	copy.Acceptance = slices.Clone(contract.Acceptance)
 	copy.RequiredEvidence = slices.Clone(contract.RequiredEvidence)
 	copy.Operations = slices.Clone(contract.Operations)
+	if contract.RoleOperations != nil {
+		copy.RoleOperations = make(map[string][]string, len(contract.RoleOperations))
+		for role, operations := range contract.RoleOperations {
+			copy.RoleOperations[role] = slices.Clone(operations)
+		}
+	}
 	copy.SecurityRestrictions = slices.Clone(contract.SecurityRestrictions)
 	copy.Repositories = slices.Clone(contract.Repositories)
 	for i := range copy.Repositories {
@@ -567,6 +587,10 @@ func (g TaskGraph) CheckRoleExecutionOperation(executionID, operation string, at
 	}
 	if !slices.Contains(job.Contract.Operations, operation) {
 		return graphError("Runtime operation is outside the approved Job operation scope")
+	}
+	roleOperations, roleGranted := job.Contract.RoleOperations[execution.Role]
+	if !roleGranted || !slices.Contains(roleOperations, operation) {
+		return graphError("Runtime operation is outside the approved Job role operation scope")
 	}
 	if execution.TaskID == "" {
 		return graphError("Runtime operation requires a Task-bound execution")
