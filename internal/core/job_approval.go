@@ -1,8 +1,8 @@
 package core
 
 import (
-	"math"
 	"maps"
+	"math"
 	"slices"
 	"time"
 )
@@ -11,15 +11,15 @@ import (
 // Task prose is not an authorization source; only these structured dimensions
 // can constrain repository and Runtime access.
 type JobContract struct {
-	Revision            int                    `json:"revision"`
-	Acceptance          []string               `json:"acceptance"`
-	RequiredEvidence    []string               `json:"requiredEvidence"`
-	Repositories        []JobRepositoryScope   `json:"repositories"`
-	Operations          []string               `json:"operations"`
-	Budget              JobBudget              `json:"budget"`
-	Deadline            time.Time              `json:"deadline"`
+	Revision             int                   `json:"revision"`
+	Acceptance           []string              `json:"acceptance"`
+	RequiredEvidence     []string              `json:"requiredEvidence"`
+	Repositories         []JobRepositoryScope  `json:"repositories"`
+	Operations           []string              `json:"operations"`
+	Budget               JobBudget             `json:"budget"`
+	Deadline             time.Time             `json:"deadline"`
 	SecurityRestrictions []string              `json:"securityRestrictions,omitempty"`
-	Configuration       ApprovalConfiguration  `json:"configuration"`
+	Configuration        ApprovalConfiguration `json:"configuration"`
 }
 
 type JobRepositoryScope struct {
@@ -79,13 +79,13 @@ func cloneJobContract(contract *JobContract) *JobContract {
 
 // JobApprovalProposal is the exact immutable value presented for approval.
 type JobApprovalProposal struct {
-	Version      int         `json:"version"`
-	JobID        string      `json:"jobId"`
-	Revision     int         `json:"revision"`
-	Request      string      `json:"request"`
-	Goal         string      `json:"goal"`
-	Constraints  []string    `json:"constraints"`
-	Contract     JobContract `json:"contract"`
+	Version     int         `json:"version"`
+	JobID       string      `json:"jobId"`
+	Revision    int         `json:"revision"`
+	Request     string      `json:"request"`
+	Goal        string      `json:"goal"`
+	Constraints []string    `json:"constraints"`
+	Contract    JobContract `json:"contract"`
 }
 
 func JobProposal(job Job) (JobApprovalProposal, error) {
@@ -120,14 +120,14 @@ func (p JobApprovalProposal) Hash() (string, error) {
 
 // JobApproval is an append-only human decision over one exact Job revision.
 type JobApproval struct {
-	ID           string             `json:"id"`
+	ID           string              `json:"id"`
 	Proposal     JobApprovalProposal `json:"proposal"`
-	ProposalHash string             `json:"proposalHash"`
-	RecordHash   string             `json:"recordHash"`
-	Actor        string             `json:"actor"`
-	Source       string             `json:"source"`
-	Reason       string             `json:"reason"`
-	At           time.Time          `json:"at"`
+	ProposalHash string              `json:"proposalHash"`
+	RecordHash   string              `json:"recordHash"`
+	Actor        string              `json:"actor"`
+	Source       string              `json:"source"`
+	Reason       string              `json:"reason"`
+	At           time.Time           `json:"at"`
 }
 
 func NewJobApproval(id, actor, source, reason string, proposal JobApprovalProposal, at time.Time) (JobApproval, error) {
@@ -136,7 +136,10 @@ func NewJobApproval(id, actor, source, reason string, proposal JobApprovalPropos
 		!nonempty(reason) || at.IsZero() {
 		return JobApproval{}, graphError("Job approval requires a valid proposal and explicit user decision")
 	}
-	approval := JobApproval{ID:id, Proposal:proposal, ProposalHash:hash, Actor:actor, Source:source, Reason:reason, At:at}
+	approval := JobApproval{
+		ID: id, Proposal: proposal, ProposalHash: hash,
+		Actor: actor, Source: source, Reason: reason, At: at,
+	}
 	approval.RecordHash, err = approval.computeRecordHash()
 	if err != nil {
 		return JobApproval{}, err
@@ -193,8 +196,7 @@ func (g *TaskGraph) AppendJobApproval(approval JobApproval) error {
 		return err
 	}
 	for _, existing := range next.JobApprovals {
-		if existing.ID == approval.ID || existing.Proposal.JobID == approval.Proposal.JobID &&
-			existing.Proposal.Revision == approval.Proposal.Revision {
+		if existing.ID == approval.ID || existing.Proposal.JobID }| existing.Proposal.Revision == approval.Proposal.Revision {
 			return graphError("Job revision already has an approval or approval ID is duplicated")
 		}
 	}
@@ -229,7 +231,7 @@ func (g TaskGraph) CurrentJobApproval(jobID string) (JobApproval, bool) {
 	if err != nil {
 		return JobApproval{}, false
 	}
-	for i := len(g.JobApprovals)-1; i >= 0; i-- {
+	for i := len(g.JobApprovals) - 1; i >= 0; i-- {
 		approval := g.JobApprovals[i]
 		if approval.Proposal.JobID == jobID && approval.ProposalHash == hash && approval.Verify() == nil {
 			return cloneJobApproval(approval), true
@@ -242,7 +244,9 @@ func (g TaskGraph) validateJobApprovals() error {
 	ids := map[string]bool{}
 	revisions := map[string]map[int]bool{}
 	jobs := map[string]Job{}
-	for _, job := range g.Jobs { jobs[job.ID] = job }
+	for _, job := range g.Jobs {
+		jobs[job.ID] = job
+	}
 	for _, approval := range g.JobApprovals {
 		job, ok := jobs[approval.Proposal.JobID]
 		if !ok || ids[approval.ID] || approval.Verify() != nil ||
@@ -250,7 +254,9 @@ func (g TaskGraph) validateJobApprovals() error {
 			return graphError("invalid or orphaned Job approval")
 		}
 		ids[approval.ID] = true
-		if revisions[approval.Proposal.JobID] == nil { revisions[approval.Proposal.JobID] = map[int]bool{} }
+		if revisions[approval.Proposal.JobID] == nil {
+			revisions[approval.Proposal.JobID] = map[int]bool{}
+		}
 		revision := approval.Proposal.Revision
 		if revisions[approval.Proposal.JobID][revision] {
 			return graphError("duplicate approval for a Job revision")
@@ -259,7 +265,9 @@ func (g TaskGraph) validateJobApprovals() error {
 	}
 	for _, job := range g.Jobs {
 		if job.Contract != nil {
-			if err := job.Contract.Validate(); err != nil { return err }
+			if err := job.Contract.Validate(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -275,19 +283,29 @@ func TaskWithinJobScope(task GraphTask, contract JobContract) bool {
 			break
 		}
 	}
-	if allowed == nil { return false }
+	if allowed == nil {
+		return false
+	}
 	taskAccess := task.FileAccess
-	if taskAccess == nil { taskAccess = DefaultFileAccessPolicy() }
-	if taskAccess.Validate() != nil { return false }
+	if taskAccess == nil {
+		taskAccess = DefaultFileAccessPolicy()
+	}
+	if taskAccess.Validate() != nil {
+		return false
+	}
 	switch allowed.FileAccess.Level {
 	case FileAccessAll:
 		return true
 	case FileAccessCommitted:
 		return taskAccess.Level == FileAccessCommitted || taskAccess.Level == FileAccessExact
 	case FileAccessExact:
-		if taskAccess.Level != FileAccessExact { return false }
+		if taskAccess.Level != FileAccessExact {
+			return false
+		}
 		for _, path := range taskAccess.Paths {
-			if !slices.Contains(allowed.FileAccess.Paths, path) { return false }
+			if !slices.Contains(allowed.FileAccess.Paths, path) {
+				return false
+			}
 		}
 		return true
 	default:
@@ -301,4 +319,3 @@ func (g TaskGraph) HasUnapprovedJob(jobID string) bool {
 	_, ok := g.CurrentJobApproval(jobID)
 	return !ok
 }
-

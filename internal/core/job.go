@@ -9,13 +9,13 @@ import (
 // Job is the durable unit of user intent and collaboration. Tasks are
 // independently identified work items within a Job.
 type Job struct {
-	ID          string    `json:"id"`
-	Request     string    `json:"request"`
-	Goal        string    `json:"goal"`
-	Constraints []string  `json:"constraints,omitempty"`
-	Status      JobStatus `json:"status"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          string       `json:"id"`
+	Request     string       `json:"request"`
+	Goal        string       `json:"goal"`
+	Constraints []string     `json:"constraints,omitempty"`
+	Status      JobStatus    `json:"status"`
+	CreatedAt   time.Time    `json:"createdAt"`
+	UpdatedAt   time.Time    `json:"updatedAt"`
 	Contract    *JobContract `json:"contract,omitempty"`
 }
 
