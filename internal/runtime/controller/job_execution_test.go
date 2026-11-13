@@ -21,7 +21,9 @@ type jobRoleRuntimeFake struct {
 	prompt     string
 	startCount int
 	events     chan runtime.Event
-	stopErr    error
+	stopErr        error
+	authErr        error
+	expectedAccount string
 }
 
 func (f *jobRoleRuntimeFake) Role() string       { return f.role }
@@ -59,15 +61,18 @@ func (f *jobRoleRuntimeFake) Events(_ context.Context, sessionID string) (<-chan
 	return f.events, nil
 }
 func (f *jobRoleRuntimeFake) ExecutionConfiguration() json.RawMessage { return f.selection }
-func (f *jobRoleRuntimeFake) CheckAuthentication(context.Context, string) error { return nil }
+func (f *jobRoleRuntimeFake) CheckAuthentication(_ context.Context, account string) error {
+	f.expectedAccount = account
+	return f.authErr
+}
 func (f *jobRoleRuntimeFake) CheckRepositoryAccess(context.Context) error { return nil }
 func (f *jobRoleRuntimeFake) CheckServiceAccess(context.Context, string) error { return nil }
 
 func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.GraphTask, json.RawMessage) {
 	t.Helper()
 	db, request := intakeApprovalFixture(t, false)
-	selection := json.RawMessage(`{"runtime":{"profile":"job-role-test"}}`)
-	sources := map[string]string{"runtime.profile": "project"}
+	selection := json.RawMessage(`{"runtime":{"profile":"job-role-test","account":"test-account"}}`)
+	sources := map[string]string{"runtime.profile": "project", "runtime.account": "project"}
 	configuration, err := core.SelectApprovalConfiguration(selection, sources)
 	if err != nil {
 		t.Fatal(err)
@@ -158,6 +163,9 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	}
 	if sessionID != worker.sessionID || worker.taskID != task.ID || worker.startCount != 1 {
 		t.Fatalf("unexpected Runtime binding: session=%q task=%q starts=%d", sessionID, worker.taskID, worker.startCount)
+	}
+	if worker.expectedAccount != "test-account" {
+		t.Fatalf("Runtime authentication expected account = %q, want test-account", worker.expectedAccount)
 	}
 	firstUsage := 40.0
 	if err := controller.RecordUsage("job-role-exec", core.DispatchUsage{
