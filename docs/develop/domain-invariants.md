@@ -35,7 +35,7 @@ Approved(j)
 | Job / Task の所有整合性 | Task.JobID から Job を一意に解決 | `validateJobModel`、Task の追加・更新経路 | Job/Task ownership tests | 経路の継続監査 |
 | RoleExecution の所属・履歴整合性 | JobID / TaskID / ParentExecutionID と履歴状態の整合性 | RoleExecution mutation と `validateJobModel` | RoleExecution lifecycle / cross-Job tests | 経路の継続監査 |
 | Job output / evidence provenance | 出所、Job、Task、Execution、content identity、verification の整合性 | `AppendJobOutput` / `AppendJobEvidence`、`validateJobArtifacts` | Job artifact / evidence tests | 経路の継続監査 |
-| Job approval scope | 承認済み Job 契約と Task / RoleExecution の scope 包含 | Controller の privileged operation 直前検査、Graph contract validation | approval / execution authorization tests | 経路の継続監査 |
+| Job approval scope | 承認済み Job 契約と Task / RoleExecution の scope 包含 | Start / Resume / Send の各 Role turn 境界での再検証、privileged Runtime operation 直前検査、Graph contract validation | approval / execution authorization / post-Resume stale-context tests | 経路の継続監査 |
 
 「経路の継続監査」は、判定ロジックや一部の gate が存在することを示すだけで、生成・更新・保存・復元・実行の全経路で不変条件が強制されると認定した状態ではない。監査完了の根拠を得るまで、実装完了として扱わない。
 

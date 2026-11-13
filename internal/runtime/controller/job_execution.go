@@ -211,20 +211,37 @@ func (c *JobRoleController) Send(ctx context.Context, executionID, prompt string
 		execution.RuntimeConfigHash != c.runtime.ConfigHash() {
 		return fmt.Errorf("taxion: RoleExecution is not bound to this Runtime")
 	}
-	context, contextHash, err := BuildJobExecutionContext(state.Graph, executionID)
-	if err != nil {
-		return err
-	}
-	rendered, err := RenderJobExecutionContext(context)
-	if err != nil {
-		return err
-	}
-	if err := c.store.UpdateWorkspace(func(state *store.Workspace) error {
-		return state.Graph.BindRoleExecutionContextHash(executionID, contextHash)
-	}); err != nil {
-		return err
-	}
+	// Resume may take time. Re-read and re-authorize after it returns so the
+	// prompt contains the latest Job state and cannot use a stale approval.
 	if err := c.runtime.Resume(ctx, execution.RuntimeSessionID); err != nil {
+		return err
+	}
+	var rendered string
+	err = c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		if !state.HasGraph {
+			return fmt.Errorf("taxion: Job Role send requires a Task Graph")
+		}
+		now := time.Now().UTC()
+		if err := state.Graph.CheckRoleExecutionTurn(executionID, now); err != nil {
+			return err
+		}
+		current, ok := state.Graph.RoleExecution(executionID)
+		if !ok || current.Status != core.RoleExecutionRunning ||
+			current.Role != c.runtime.Role() || current.RuntimeSessionID != execution.RuntimeSessionID ||
+			current.RuntimeConfigHash != c.runtime.ConfigHash() {
+			return fmt.Errorf("taxion: RoleExecution Runtime binding changed before sending the turn")
+		}
+		context, contextHash, err := BuildJobExecutionContext(state.Graph, executionID)
+		if err != nil {
+			return err
+		}
+		rendered, err = RenderJobExecutionContext(context)
+		if err != nil {
+			return err
+		}
+		return state.Graph.BindRoleExecutionContextHash(executionID, contextHash)
+	})
+	if err != nil {
 		return err
 	}
 	message := "Current Job context (authoritative snapshot):\n" + rendered +

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,8 @@ type jobRoleRuntimeFake struct {
 	prompt          string
 	startCount      int
 	resumeCount     int
+	sendCount       int
+	onResume        func()
 	stopCount       int
 	events          chan runtime.Event
 	stopErr         error
@@ -42,6 +45,7 @@ func (f *jobRoleRuntimeFake) Send(_ context.Context, sessionID, prompt string) e
 		return context.Canceled
 	}
 	f.prompt = prompt
+	f.sendCount++
 	return nil
 }
 func (f *jobRoleRuntimeFake) Resume(_ context.Context, sessionID string) error {
@@ -49,6 +53,9 @@ func (f *jobRoleRuntimeFake) Resume(_ context.Context, sessionID string) error {
 		return context.Canceled
 	}
 	f.resumeCount++
+	if f.onResume != nil {
+		f.onResume()
+	}
 	return nil
 }
 func (f *jobRoleRuntimeFake) Stop(_ context.Context, sessionID string) error {
@@ -284,6 +291,100 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if execution.Status != core.RoleExecutionSucceeded || execution.RuntimeSessionID != sessionID ||
 		len(execution.ContextHash) != 64 {
 		t.Fatalf("RoleExecution did not persist its terminal state and context binding: %+v", execution)
+	}
+}
+
+func TestJobRoleControllerSendRefreshesContextAfterRuntimeResume(t *testing.T) {
+	db, job, task, selection := jobRoleFixture(t, true)
+	now := time.Now().UTC()
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendRoleExecution(core.RoleExecution{
+			ID: "send-refresh-exec", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker := &jobRoleRuntimeFake{role: "CODER", configHash: "runtime-config-hash", selection: selection}
+	controller, err := NewJobRoleController(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Start(context.Background(), "send-refresh-exec"); err != nil {
+		t.Fatal(err)
+	}
+	worker.onResume = func() {
+		err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			return state.Graph.AppendJobMessage(core.JobMessage{
+				ID: "message-during-resume", JobID: job.ID, FromRole: "HUMAN", ToRole: "CODER",
+				Body: "Use the newly confirmed requirement.", Source: "human:test", At: time.Now().UTC(),
+			})
+		})
+		if err != nil {
+			t.Errorf("append concurrent Job message: %v", err)
+		}
+	}
+	if err := controller.Send(context.Background(), "send-refresh-exec", "Continue the work."); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(worker.prompt, "Use the newly confirmed requirement.") {
+		t.Fatalf("Send used a stale Job context: %s", worker.prompt)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, ok := state.Graph.RoleExecution("send-refresh-exec")
+	if !ok {
+		t.Fatal("RoleExecution disappeared")
+	}
+	_, expectedHash, err := BuildJobExecutionContext(state.Graph, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.ContextHash != expectedHash {
+		t.Fatalf("stored context hash = %q, want latest snapshot %q", execution.ContextHash, expectedHash)
+	}
+}
+
+func TestJobRoleControllerSendRejectsApprovalRevokedDuringResume(t *testing.T) {
+	db, job, task, selection := jobRoleFixture(t, true)
+	now := time.Now().UTC()
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendRoleExecution(core.RoleExecution{
+			ID: "send-revoked-exec", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker := &jobRoleRuntimeFake{role: "CODER", configHash: "runtime-config-hash", selection: selection}
+	controller, err := NewJobRoleController(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Start(context.Background(), "send-revoked-exec"); err != nil {
+		t.Fatal(err)
+	}
+	worker.onResume = func() {
+		err := db.UpdateWorkspace(func(state *store.Workspace) error {
+			for i := range state.Graph.Jobs {
+				if state.Graph.Jobs[i].ID == job.ID {
+					state.Graph.Jobs[i].Contract.Revision++
+					return nil
+				}
+			}
+			return fmt.Errorf("Job %s disappeared", job.ID)
+		})
+		if err != nil {
+			t.Errorf("revoke current Job approval: %v", err)
+		}
+	}
+	if err := controller.Send(context.Background(), "send-revoked-exec", "Continue the work."); err == nil {
+		t.Fatal("Send must revalidate the current Job approval after Runtime.Resume")
+	}
+	if worker.sendCount != 0 {
+		t.Fatalf("Runtime received %d turns after approval revocation", worker.sendCount)
 	}
 }
 
