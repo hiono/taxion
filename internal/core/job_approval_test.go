@@ -50,7 +50,17 @@ func TestTaskCannotWidenApprovedJobContract(t *testing.T) {
 	task := GraphTask{ID: "task-a", Repo: "example/repo", Acceptance: []string{"tests pass"},
 		RequiredEvidence: []string{"test-report"}, FileAccess: &FileAccessPolicy{Level: FileAccessCommitted}}
 	if !TaskWithinJobContract(task, contract) {
-		t.Fatal("in-scope Task should be accepted")
+		t.Fatal("in-scope Task without an assigned owner should be accepted")
+	}
+	assignedOwner := task
+	assignedOwner.Owner = "CODER"
+	if !TaskWithinJobContract(assignedOwner, contract) {
+		t.Fatal("Task assigned to an approved Job role should be accepted")
+	}
+	unapprovedOwner := task
+	unapprovedOwner.Owner = "DEPLOYER"
+	if TaskWithinJobContract(unapprovedOwner, contract) {
+		t.Fatal("Task assigned to a role outside the Job contract must be rejected")
 	}
 	widenedAcceptance := task
 	widenedAcceptance.Acceptance = []string{"deploy production"}
