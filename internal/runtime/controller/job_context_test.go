@@ -20,7 +20,7 @@ func TestBuildJobExecutionContextIsJobScopedAndExcludesRuntimeBindings(t *testin
 		}
 		now := time.Now().UTC()
 		if err := state.Graph.AppendRoleExecution(core.RoleExecution{
-			ID: "context-execution", JobID: job.ID, TaskID: request.TaskID, Role: "PLANNER",
+			ID    : "context-execution", JobID: job.ID, TaskID: request.TaskID, Role: "PLANNER",
 			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			return err
@@ -33,9 +33,9 @@ func TestBuildJobExecutionContextIsJobScopedAndExcludesRuntimeBindings(t *testin
 			return err
 		}
 		return state.Graph.AppendJobMessage(core.JobMessage{
-			ID: "context-message-1", JobID: job.ID, TaskID: request.TaskID,
+			ID      : "context-message-1", JobID: job.ID, TaskID: request.TaskID,
 			FromRole: "HUMAN", ToRole: "PLANNER", Body: "確認可能な前提から進めてください。",
-			Source: "human:request", TargetExecutionID: "context-execution", At: now.Add(2 * time.Second),
+			Source  : "human:request", TargetExecutionID: "context-execution", At: now.Add(2 * time.Second),
 		})
 	}); err != nil {
 		t.Fatal(err)
@@ -72,9 +72,9 @@ func TestBuildJobExecutionContextIsJobScopedAndExcludesRuntimeBindings(t *testin
 	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
 		job, _ := state.Graph.JobForTask(request.TaskID)
 		return state.Graph.AppendJobMessage(core.JobMessage{
-			ID: "context-message-2", JobID: job.ID, TaskID: request.TaskID,
+			ID      : "context-message-2", JobID: job.ID, TaskID: request.TaskID,
 			FromRole: "HUMAN", ToRole: "PLANNER", Body: "追加情報です。",
-			Source: "human:answer", TargetExecutionID: "context-execution", At: time.Now().UTC(),
+			Source  : "human:answer", TargetExecutionID: "context-execution", At: time.Now().UTC(),
 		})
 	}); err != nil {
 		t.Fatal(err)
@@ -99,14 +99,14 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	job := core.Job{
-		ID: "job-authorized", Request: "request", Goal: "goal", Status: core.JobActive,
+		ID       : "job-authorized", Request: "request", Goal: "goal", Status: core.JobActive,
 		CreatedAt: now, UpdatedAt: now,
-		Contract: &core.JobContract{
-			Revision: 1, Roles: []string{"PLANNER", "REVIEWER"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
+		Contract : &core.JobContract{
+			Revision    : 1, Roles: []string{"PLANNER", "REVIEWER"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
 			Repositories: []core.JobRepositoryScope{{Repository: "example/repo", FileAccess: core.FileAccessPolicy{Level: core.FileAccessCommitted}}},
-			Operations:   []string{"repository.read", "test.run"},
-			Budget:       core.JobBudget{MaxRoleExecutions: 4, MaxConcurrentExecutions: 2, MaxNanoAIU: 20},
-			Deadline:     now.Add(time.Hour), Configuration: configuration,
+			Operations  : []string{"repository.read", "test.run"},
+			Budget      : core.JobBudget{MaxRoleExecutions: 4, MaxConcurrentExecutions: 2, MaxNanoAIU: 20},
+			Deadline    : now.Add(time.Hour), Configuration: configuration,
 		},
 	}
 	proposal, err := core.JobProposal(job)
@@ -118,7 +118,7 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := core.GraphTask{
-		ID: "task-authorized", JobID: job.ID, Repo: "example/repo",
+		ID        : "task-authorized", JobID: job.ID, Repo: "example/repo",
 		FileAccess: &core.FileAccessPolicy{Level: core.FileAccessCommitted},
 	}
 	graph := core.TaskGraph{Version: 1, Jobs: []core.Job{job}, Tasks: []core.GraphTask{task}}
@@ -126,7 +126,7 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := graph.AppendRoleExecution(core.RoleExecution{
-		ID: "exec-authorized", JobID: job.ID, TaskID: task.ID, Role: "PLANNER",
+		ID    : "exec-authorized", JobID: job.ID, TaskID: task.ID, Role: "PLANNER",
 		Status: core.RoleExecutionCreated, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second),
 	}); err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := graph.AppendRoleExecution(core.RoleExecution{
-		ID: "exec-reviewer", JobID: job.ID, TaskID: task.ID, Role: "REVIEWER",
+		ID    : "exec-reviewer", JobID: job.ID, TaskID: task.ID, Role: "REVIEWER",
 		Status: core.RoleExecutionCreated, CreatedAt: now.Add(4 * time.Second), UpdatedAt: now.Add(4 * time.Second),
 	}); err != nil {
 		t.Fatal(err)
@@ -147,10 +147,10 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	output, err := core.NewJobOutput(core.JobOutput{
-		ID: "output-authorized", JobID: job.ID, TaskID: task.ID,
+		ID             : "output-authorized", JobID: job.ID, TaskID: task.ID,
 		RoleExecutionID: "exec-authorized", Repository: task.Repo, Kind: "test-report",
-		ContentSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		CreatedAt: now.Add(4 * time.Second),
+		ContentSHA256  : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		CreatedAt      : now.Add(4 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -159,11 +159,11 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidence, err := core.NewJobEvidence(core.JobEvidence{
-		ID: "evidence-authorized", JobID: job.ID, TaskID: task.ID,
+		ID                   : "evidence-authorized", JobID: job.ID, TaskID: task.ID,
 		ProducedByExecutionID: "exec-authorized", OutputID: output.ID,
-		Acceptance: "tests pass", Kind: "test-report", ContentSHA256: output.ContentSHA256,
-		Status: "passed", VerifiedBy: "REVIEWER", VerifiedByExecutionID: "exec-reviewer",
-		CreatedAt: now.Add(5 * time.Second), VerifiedAt: now.Add(6 * time.Second),
+		Acceptance           : "tests pass", Kind: "test-report", ContentSHA256: output.ContentSHA256,
+		Status               : "passed", VerifiedBy: "REVIEWER", VerifiedByExecutionID: "exec-reviewer",
+		CreatedAt            : now.Add(5 * time.Second), VerifiedAt: now.Add(6 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
