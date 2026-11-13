@@ -171,11 +171,12 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if worker.expectedAccount != "test-account" {
 		t.Fatalf("Runtime authentication expected account = %q, want test-account", worker.expectedAccount)
 	}
+	observedAt := time.Now().UTC()
 	firstUsage := 40.0
 	if err := controller.RecordUsage("job-role-exec", core.DispatchUsage{
 		Model: "test-model", TotalNanoAIU: &firstUsage,
 		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 1, UsageID: "usage-1"},
-		ObservedAt: time.Now().UTC(),
+		ObservedAt: observedAt,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +184,7 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if err := controller.RecordUsage("job-role-exec", core.DispatchUsage{
 		Model: "test-model", TotalNanoAIU: &firstUsage,
 		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 1, UsageID: "usage-1"},
-		ObservedAt: time.Now().UTC(),
+		ObservedAt: observedAt,
 	}); err != nil {
 		t.Fatalf("identical usage replay must be idempotent: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if err := controller.RecordUsage("job-role-exec", core.DispatchUsage{
 		Model: "test-model", TotalNanoAIU: &conflictingUsage,
 		Accounting: &core.UsageAccountingIdentity{SourceSessionID: sessionID, Sequence: 1, UsageID: "usage-1"},
-		ObservedAt: time.Now().UTC(),
+		ObservedAt: observedAt,
 	}); err == nil {
 		t.Fatal("same provider identity with different usage content must be rejected")
 	}
