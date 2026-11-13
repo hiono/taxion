@@ -147,7 +147,6 @@ func TestProposeJobContractRejectsExistingTaskOutsideRoleScope(t *testing.T) {
 	}
 }
 
-
 func TestProposeJobContractReturnsExactProposalAndHash(t *testing.T) {
 	db, confirmation := intakeApprovalFixture(t, false)
 	state, err := db.LoadWorkspace()
