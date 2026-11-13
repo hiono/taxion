@@ -25,6 +25,7 @@
 | 資料 | 読む目的 |
 |---|---|
 | [ADR](adr/) | 設計を選んだ理由と後続判断 |
+| [制約付き最適化による設計経路の導出](adr/0078-constrained-optimization-for-design-decisions.md) | 複数候補の責務対応・設計比較を有限の制約付き最適化問題として導く方法 |
 | [判断・Milestone 対応表](decision-traceability.md) | 過去の判断から実装 Issue と現在の仕様をたどる |
 | [要件と到達条件](orchestration-requirements.md) | 採択した要件と段階別の検証履歴 |
 | [ロードマップ](roadmap.md) | 現在の未達事項と、過去の開発段階の参照 |

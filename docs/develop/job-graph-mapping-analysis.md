@@ -2,7 +2,7 @@
 
 Status: Derived from source at `f69c3b579aefa2c322f491cee102541459055598`  
 Base: `c47c88d668effcd717d08ba2a3e1b5049d5417ea`  
-Related: [ADR-0077](adr/0077-job-centered-role-collaboration.md), [Issue #283](https://github.com/hiono/taxion/issues/283), [Job execution implementation plan](job-execution-implementation-plan.md)
+Related: [ADR-0077](adr/0077-job-centered-role-collaboration.md), [ADR-0078](adr/0078-constrained-optimization-for-design-decisions.md), [Issue #283](https://github.com/hiono/taxion/issues/283), [Job execution implementation plan](job-execution-implementation-plan.md)
 
 ## 1. 目的と判定原則
 
