@@ -71,7 +71,7 @@ type Adapter struct {
 	closed                bool
 	sessions              map[string]*managedSession
 	quotaOnly             bool
-	authorizeJobOperation func(context.Context, string, string) error
+	authorizeJobOperation func(context.Context, string, string, string) error
 }
 
 type managedSession struct {
@@ -405,13 +405,13 @@ func (a *Adapter) UsesBoundResultIdentity() bool {
 
 func (a *Adapter) Worktree() string { return a.config.WorkingDirectory }
 
-func (a *Adapter) SetJobOperationAuthorizer(authorizer func(context.Context, string, string) error) {
+func (a *Adapter) SetJobOperationAuthorizer(authorizer func(context.Context, string, string, string) error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.authorizeJobOperation = authorizer
 }
 
-func (a *Adapter) jobOperationAuthorizer() func(context.Context, string, string) error {
+func (a *Adapter) jobOperationAuthorizer() func(context.Context, string, string, string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.authorizeJobOperation
@@ -953,11 +953,11 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 			}
 		}
 		if authorize := a.jobOperationAuthorizer(); authorize != nil {
-			operation, allowed := jobOperationForPermission(request)
+			operation, detail, allowed := jobOperationForPermission(request)
 			if !allowed {
 				reason := "Tool has no Job operation mapping"
 				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
-			} else if err := authorize(context.Background(), invocation.SessionID, operation); err != nil {
+			} else if err := authorize(context.Background(), invocation.SessionID, operation, detail); err != nil {
 				reason := err.Error()
 				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
 			}

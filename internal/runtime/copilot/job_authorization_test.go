@@ -1,6 +1,18 @@
 package copilot
 
-import "testing"
+import (
+	"testing"
+
+	sdk "github.com/github/copilot-sdk/go"
+)
+
+func TestJobOperationForPermissionPreservesShellCommand(t *testing.T) {
+	request := &sdk.PermissionRequestShell{FullCommandText: "test -s README.md"}
+	operation, detail, ok := jobOperationForPermission(request)
+	if !ok || operation != "process.exec" || detail != request.FullCommandText {
+		t.Fatalf("jobOperationForPermission(shell) = (%q, %q, %t)", operation, detail, ok)
+	}
+}
 
 func TestJobOperationForTool(t *testing.T) {
 	tests := []struct {

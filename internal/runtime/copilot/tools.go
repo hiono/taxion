@@ -41,7 +41,7 @@ func (a *Adapter) checkToolPolicy(ctx context.Context, sessionID, operation stri
 		if operation == "" {
 			return fmt.Errorf("taxion: Job tool requires an operation mapping")
 		}
-		if err := authorize(ctx, sessionID, operation); err != nil {
+		if err := authorize(ctx, sessionID, operation, ""); err != nil {
 			return err
 		}
 	}

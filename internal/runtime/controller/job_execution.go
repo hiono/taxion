@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -31,8 +32,8 @@ func NewJobRoleController(db *store.Store, worker runtime.Identity) (*JobRoleCon
 		return nil, fmt.Errorf("taxion: Job Role runtime must support controller-installed operation preflight")
 	}
 	controller := &JobRoleController{store: db, runtime: worker}
-	authorizer.SetJobOperationAuthorizer(func(ctx context.Context, sessionID, operation string) error {
-		return controller.AuthorizeSessionOperation(ctx, sessionID, operation, time.Now().UTC())
+	authorizer.SetJobOperationAuthorizer(func(ctx context.Context, sessionID, operation, detail string) error {
+		return controller.AuthorizeSessionOperation(ctx, sessionID, operation, detail, time.Now().UTC())
 	})
 	return controller, nil
 }
@@ -483,10 +484,34 @@ func (c *JobRoleController) AuthorizeOperation(executionID, operation string, at
 	return c.authorizeOperation(state.Graph, executionID, "", operation, at)
 }
 
-// AuthorizeSessionOperation is the provider callback. It resolves the unique
-// active RoleExecution by the exact provider session and checks that binding
-// again before allowing the requested operation.
-func (c *JobRoleController) AuthorizeSessionOperation(ctx context.Context, sessionID, operation string, at time.Time) error {
+func (c *JobRoleController) roleExecutionForSession(graph core.TaskGraph, sessionID string) (core.RoleExecution, error) {
+	var matched core.RoleExecution
+	for _, execution := range graph.RoleExecutions {
+		if execution.RuntimeSessionID != sessionID || execution.Role != c.runtime.Role() {
+			continue
+		}
+		if matched.ID != "" {
+			return core.RoleExecution{}, fmt.Errorf("taxion: Runtime session is ambiguously bound to multiple RoleExecutions")
+		}
+		matched = execution
+	}
+	if matched.ID == "" {
+		return core.RoleExecution{}, fmt.Errorf("taxion: Runtime session is not bound to a Job RoleExecution")
+	}
+	return matched, nil
+}
+
+func validationCommandExecutable(command string) string {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToLower(fields[0])
+}
+
+// AuthorizeSessionOperation is the provider callback. Shell requests carry the
+// exact command text so validation commands cannot use the generic exec grant.
+func (c *JobRoleController) AuthorizeSessionOperation(ctx context.Context, sessionID, operation, detail string, at time.Time) error {
 	if c == nil || c.store == nil || c.runtime == nil || ctx == nil || strings.TrimSpace(sessionID) == "" {
 		return fmt.Errorf("taxion: Job session authorization requires an identified Runtime session")
 	}
@@ -500,20 +525,40 @@ func (c *JobRoleController) AuthorizeSessionOperation(ctx context.Context, sessi
 	if !state.HasGraph {
 		return fmt.Errorf("taxion: operation authorization requires a Task Graph")
 	}
-	var matched string
-	for _, execution := range state.Graph.RoleExecutions {
-		if execution.RuntimeSessionID != sessionID || execution.Role != c.runtime.Role() {
-			continue
-		}
-		if matched != "" {
-			return fmt.Errorf("taxion: Runtime session is ambiguously bound to multiple RoleExecutions")
-		}
-		matched = execution.ID
+	execution, err := c.roleExecutionForSession(state.Graph, sessionID)
+	if err != nil {
+		return err
 	}
-	if matched == "" {
-		return fmt.Errorf("taxion: Runtime session is not bound to a Job RoleExecution")
+	if operation == "process.exec" && detail != "" {
+		job, ok := state.Graph.Job(execution.JobID)
+		if !ok || job.Contract == nil {
+			return fmt.Errorf("taxion: shell operation requires an approved Job contract")
+		}
+		intent, exact := false, false
+		candidateExecutable := validationCommandExecutable(detail)
+		for _, approved := range job.Contract.ValidationCommands {
+			approvedExecutable := validationCommandExecutable(approved)
+			if candidateExecutable != "" && candidateExecutable == approvedExecutable {
+				intent = true
+			}
+			if detail == approved {
+				exact = true
+			}
+		}
+		if intent && !exact {
+			return fmt.Errorf("taxion: validation command differs from the exact Job-approved command")
+		}
+		if exact {
+			if !slices.Contains(job.Contract.RoleOperations[execution.Role], "test.run") {
+				return fmt.Errorf("taxion: Role has no approved test.run grant")
+			}
+			if err := c.authorizeOperation(state.Graph, execution.ID, sessionID, "process.exec", at); err != nil {
+				return err
+			}
+			return state.Graph.CheckRoleExecutionOperation(execution.ID, "test.run", at)
+		}
 	}
-	return c.authorizeOperation(state.Graph, matched, sessionID, operation, at)
+	return c.authorizeOperation(state.Graph, execution.ID, sessionID, operation, at)
 }
 
 // RecordUsage appends an immutable provider accounting observation to the Job ledger.

@@ -24,17 +24,18 @@ func jobOperationForTool(name string) (string, bool) {
 	}
 }
 
-func jobOperationForPermission(request sdk.PermissionRequest) (string, bool) {
+func jobOperationForPermission(request sdk.PermissionRequest) (string, string, bool) {
 	switch permission := request.(type) {
 	case *sdk.PermissionRequestRead:
-		return "repository.read", true
+		return "repository.read", "", true
 	case *sdk.PermissionRequestWrite:
-		return "repository.write", true
+		return "repository.write", "", true
 	case *sdk.PermissionRequestShell:
-		return "process.exec", true
+		return "process.exec", permission.FullCommandText, true
 	case *sdk.PermissionRequestCustomTool:
-		return jobOperationForTool(permission.ToolName)
+		operation, ok := jobOperationForTool(permission.ToolName)
+		return operation, "", ok
 	default:
-		return "", false
+		return "", "", false
 	}
 }

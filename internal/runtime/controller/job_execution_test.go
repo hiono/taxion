@@ -31,7 +31,7 @@ type jobRoleRuntimeFake struct {
 	authErr                error
 	expectedAccount        string
 	toolPolicy             *tools.Policy
-	jobOperationAuthorizer func(context.Context, string, string) error
+	jobOperationAuthorizer func(context.Context, string, string, string) error
 }
 
 func (f *jobRoleRuntimeFake) Role() string       { return f.role }
@@ -76,7 +76,7 @@ func (f *jobRoleRuntimeFake) Events(_ context.Context, sessionID string) (<-chan
 }
 func (f *jobRoleRuntimeFake) ExecutionConfiguration() json.RawMessage { return f.selection }
 func (f *jobRoleRuntimeFake) ToolPolicy() *tools.Policy               { return f.toolPolicy }
-func (f *jobRoleRuntimeFake) SetJobOperationAuthorizer(authorizer func(context.Context, string, string) error) {
+func (f *jobRoleRuntimeFake) SetJobOperationAuthorizer(authorizer func(context.Context, string, string, string) error) {
 	f.jobOperationAuthorizer = authorizer
 }
 func (f *jobRoleRuntimeFake) CheckAuthentication(_ context.Context, account string) error {
@@ -205,13 +205,21 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if worker.jobOperationAuthorizer == nil {
 		t.Fatal("Job controller did not install the provider operation preflight")
 	}
-	if err := worker.jobOperationAuthorizer(context.Background(), sessionID, "repository.write"); err != nil {
+	if err := worker.jobOperationAuthorizer(context.Background(), sessionID, "repository.write", ""); err != nil {
 		t.Fatalf("approved Coder write operation rejected: %v", err)
 	}
-	if err := worker.jobOperationAuthorizer(context.Background(), "different-session", "repository.write"); err == nil {
+	if len(task.ValidationCommands) > 0 {
+		if err := worker.jobOperationAuthorizer(context.Background(), sessionID, "process.exec", task.ValidationCommands[0]); err != nil {
+			t.Fatalf("exact approved validation command rejected: %v", err)
+		}
+		if err := worker.jobOperationAuthorizer(context.Background(), sessionID, "process.exec", "test -f README.md"); err == nil {
+			t.Fatal("modified validation command must not use the generic process.exec grant")
+		}
+	}
+	if err := worker.jobOperationAuthorizer(context.Background(), "different-session", "repository.write", ""); err == nil {
 		t.Fatal("operation preflight must reject a different provider session")
 	}
-	if err := worker.jobOperationAuthorizer(context.Background(), sessionID, "network.access"); err == nil {
+	if err := worker.jobOperationAuthorizer(context.Background(), sessionID, "network.access", ""); err == nil {
 		t.Fatal("operation preflight must reject an unapproved network operation")
 	}
 	if worker.expectedAccount != "test-account" {
@@ -290,7 +298,7 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if reviewerRuntime.jobOperationAuthorizer == nil {
 		t.Fatal("Reviewer Job controller did not install the provider operation preflight")
 	}
-	if err := reviewerRuntime.jobOperationAuthorizer(context.Background(), reviewerRuntime.sessionID, "process.exec"); err == nil {
+	if err := reviewerRuntime.jobOperationAuthorizer(context.Background(), reviewerRuntime.sessionID, "process.exec", ""); err == nil {
 		t.Fatal("Reviewer provider preflight must reject process execution")
 	}
 	if err := reviewerController.AuthorizeOperation("job-role-reviewer", "repository.read", time.Now().UTC()); err != nil {
