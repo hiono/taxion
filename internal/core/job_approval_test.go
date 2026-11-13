@@ -189,3 +189,43 @@ func TestCheckRoleExecutionOperationRequiresCurrentJobApprovalAndScope(t *testin
 		t.Fatal("new Job revision must require new approval")
 	}
 }
+
+
+func TestCheckRoleExecutionStartRequiresCurrentJobApproval(t *testing.T) {
+	now := time.Now().UTC()
+	job := Job{
+		ID: "job-start", Request: "request", Goal: "goal", Status: JobActive,
+		CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t),
+	}
+	task := GraphTask{
+		ID: "task-start", JobID: job.ID, Repo: "example/repo",
+		FileAccess: &FileAccessPolicy{Level: FileAccessExact, Paths: []string{"src/main.go"}},
+	}
+	graph := TaskGraph{Version: 1, Jobs: []Job{job}, Tasks: []GraphTask{task}}
+	if err := graph.AppendRoleExecution(RoleExecution{
+		ID: "exec-start", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+		Status: RoleExecutionCreated, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.CheckRoleExecutionStart("exec-start", now.Add(2*time.Second)); err == nil {
+		t.Fatal("unapproved Job must not start a RoleExecution")
+	}
+	proposal, err := JobProposal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval, err := NewJobApproval("approval-start", "human", "user", "approve", proposal, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendJobApproval(approval); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.CheckRoleExecutionStart("exec-start", now.Add(3*time.Second)); err != nil {
+		t.Fatalf("approved in-scope RoleExecution rejected: %v", err)
+	}
+	if err := graph.CheckRoleExecutionStart("exec-start", job.Contract.Deadline.Add(time.Second)); err == nil {
+		t.Fatal("expired Job must not start a RoleExecution")
+	}
+}
