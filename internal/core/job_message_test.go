@@ -30,8 +30,8 @@ func TestJobConversationAllowsNaturalLanguageWithoutQuestionSchema(t *testing.T)
 
 func TestJobConversationRejectsReplyToDifferentJobOrRole(t *testing.T) {
 	graph := TaskGraph{
-		Version:    1,
-		Tasks:      []GraphTask{{ID: "job-1"}, {ID: "job-2"}},
+		Version: 1,
+		Tasks:   []GraphTask{{ID: "job-1"}, {ID: "job-2"}},
 		Dispatches: []GraphDispatch{{ID: "d1", TaskID: "job-1", Recipient: "CODER"}},
 		JobMessages: []JobMessage{
 			{ID: "m1", TaskID: "job-1", FromRole: "CODER", ToRole: "PLANNER",
