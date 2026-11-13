@@ -8,8 +8,8 @@ import (
 func TestJobConversationAllowsNaturalLanguageWithoutQuestionSchema(t *testing.T) {
 	graph := TaskGraph{
 		Version:    1,
-		Jobs: []Job{{ID: "job-1", Request: "request", Goal: "goal", Status: JobActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}},
-		Tasks: []GraphTask{{ID: "task-1", JobID: "job-1"}},
+		Jobs:       []Job{{ID: "job-1", Request: "request", Goal: "goal", Status: JobActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}},
+		Tasks:      []GraphTask{{ID: "task-1", JobID: "job-1"}},
 		Dispatches: []GraphDispatch{{ID: "d1", TaskID: "task-1", Recipient: "CODER"}},
 		JobMessages: []JobMessage{
 			{ID: "m1", TaskID: "task-1", FromRole: "CODER", ToRole: "PLANNER",
@@ -30,8 +30,8 @@ func TestJobConversationAllowsNaturalLanguageWithoutQuestionSchema(t *testing.T)
 
 func TestJobConversationRejectsReplyToDifferentJobOrRole(t *testing.T) {
 	graph := TaskGraph{
-		Version: 1,
-		Tasks:   []GraphTask{{ID: "job-1"}, {ID: "job-2"}},
+		Version:    1,
+		Tasks:      []GraphTask{{ID: "job-1"}, {ID: "job-2"}},
 		Dispatches: []GraphDispatch{{ID: "d1", TaskID: "job-1", Recipient: "CODER"}},
 		JobMessages: []JobMessage{
 			{ID: "m1", TaskID: "job-1", FromRole: "CODER", ToRole: "PLANNER",
@@ -50,7 +50,7 @@ func TestJobMessageReplyBindsExactRoleExecutions(t *testing.T) {
 	now := time.Now().UTC()
 	graph := TaskGraph{
 		Version: 1,
-		Jobs: []Job{{ID: "job-reply", Request: "request", Goal: "goal",
+		Jobs:    []Job{{ID: "job-reply", Request: "request", Goal: "goal",
 			Status: JobActive, CreatedAt: now, UpdatedAt: now}},
 	}
 	for _, execution := range []RoleExecution{
