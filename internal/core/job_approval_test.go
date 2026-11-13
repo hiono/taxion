@@ -229,3 +229,33 @@ func TestCheckRoleExecutionStartRequiresCurrentJobApproval(t *testing.T) {
 		t.Fatal("expired Job must not start a RoleExecution")
 	}
 }
+
+
+func TestCheckRoleExecutionStartAllowsJobLevelPlannerBeforeTasksExist(t *testing.T) {
+	now := time.Now().UTC()
+	job := Job{
+		ID: "job-planning", Request: "request", Goal: "plan the work", Status: JobActive,
+		CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t),
+	}
+	graph := TaskGraph{Version: 1, Jobs: []Job{job}}
+	proposal, err := JobProposal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval, err := NewJobApproval("approval-planning", "human", "user", "approve planning", proposal, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendJobApproval(approval); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendRoleExecution(RoleExecution{
+		ID: "exec-planner", JobID: job.ID, Role: "PLANNER",
+		Status: RoleExecutionCreated, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.CheckRoleExecutionStart("exec-planner", now.Add(3*time.Second)); err != nil {
+		t.Fatalf("Job-level Planner must start before any Task exists: %v", err)
+	}
+}
