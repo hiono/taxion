@@ -78,13 +78,21 @@ func TestTaskCannotWidenApprovedJobContract(t *testing.T) {
 		t.Fatal("Task evidence must remain within approved Job criteria")
 	}
 	commands := task
+	commands.Owner = "CODER"
 	commands.ValidationCommands = []string{"go test ./..."}
 	if TaskWithinJobContract(commands, contract) {
-		t.Fatal("validation commands require approved process.exec and test.run")
+		t.Fatal("unbound validation commands must be rejected")
 	}
 	contract.Operations = append(contract.Operations, "process.exec")
+	contract.RoleOperations["CODER"] = append(contract.RoleOperations["CODER"], "process.exec")
+	contract.ValidationCommands = append([]string(nil), commands.ValidationCommands...)
 	if !TaskWithinJobContract(commands, contract) {
-		t.Fatal("approved validation operations should permit validation commands")
+		t.Fatal("exactly approved validation command and Coder operations should be accepted")
+	}
+	changedCommand := commands
+	changedCommand.ValidationCommands = []string{"go test ./... -race"}
+	if TaskWithinJobContract(changedCommand, contract) {
+		t.Fatal("Task must not replace the exact approved validation command")
 	}
 
 	readOnly := contract

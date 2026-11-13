@@ -21,6 +21,7 @@ type JobContract struct {
 	RequiredEvidence     []string                     `json:"requiredEvidence"`
 	Repositories         []JobRepositoryScope         `json:"repositories"`
 	Operations           []string                     `json:"operations"`
+	ValidationCommands   []string                     `json:"validationCommands,omitempty"`
 	RoleToolPolicies     map[string]JobRoleToolPolicy `json:"roleToolPolicies,omitempty"`
 	RoleOperations       map[string][]string          `json:"roleOperations,omitempty"`
 	Budget               JobBudget                    `json:"budget"`
@@ -80,7 +81,7 @@ func (c JobContract) Validate() error {
 	if c.Revision < 1 || !validList(c.Roles) || len(c.Roles) == 0 || !validList(c.Acceptance) || len(c.Acceptance) == 0 ||
 		!validList(c.RequiredEvidence) || len(c.RequiredEvidence) == 0 ||
 		len(c.Repositories) == 0 || !validList(c.Operations) ||
-		len(c.Operations) == 0 || !validList(c.SecurityRestrictions) ||
+		len(c.Operations) == 0 || !validList(c.ValidationCommands) || !validList(c.SecurityRestrictions) ||
 		c.Budget.MaxRoleExecutions < 1 || c.Budget.MaxConcurrentExecutions < 1 ||
 		c.Budget.MaxConcurrentExecutions > c.Budget.MaxRoleExecutions ||
 		math.IsNaN(c.Budget.MaxNanoAIU) || math.IsInf(c.Budget.MaxNanoAIU, 0) ||
@@ -106,6 +107,13 @@ func (c JobContract) Validate() error {
 		}
 		if err := policy.Validate(); err != nil {
 			return err
+		}
+	}
+	if len(c.ValidationCommands) > 0 {
+		coderOperations, ok := c.RoleOperations["CODER"]
+		if !slices.Contains(c.Operations, "process.exec") || !slices.Contains(c.Operations, "test.run") ||
+			!ok || !slices.Contains(coderOperations, "process.exec") || !slices.Contains(coderOperations, "test.run") {
+			return graphError("Job validation commands require explicit Coder process.exec and test.run grants")
 		}
 	}
 	for role, operations := range c.RoleOperations {
@@ -156,6 +164,7 @@ func cloneJobContract(contract *JobContract) *JobContract {
 	copy.Acceptance = slices.Clone(contract.Acceptance)
 	copy.RequiredEvidence = slices.Clone(contract.RequiredEvidence)
 	copy.Operations = slices.Clone(contract.Operations)
+copy.ValidationCommands = slices.Clone(contract.ValidationCommands)
 	if contract.RoleToolPolicies != nil {
 		copy.RoleToolPolicies = make(map[string]JobRoleToolPolicy, len(contract.RoleToolPolicies))
 		for role, policy := range contract.RoleToolPolicies {
@@ -410,9 +419,18 @@ func TaskWithinJobContract(task GraphTask, contract JobContract) bool {
 			return false
 		}
 	}
-	if len(task.ValidationCommands) > 0 &&
-		(!slices.Contains(contract.Operations, "process.exec") || !slices.Contains(contract.Operations, "test.run")) {
+	if !slices.Equal(task.ValidationCommands, contract.ValidationCommands) {
 		return false
+	}
+	if len(task.ValidationCommands) > 0 {
+		if task.Owner == "" || !slices.Contains(contract.Operations, "process.exec") ||
+			!slices.Contains(contract.Operations, "test.run") {
+			return false
+		}
+		coderOperations, ok := contract.RoleOperations[task.Owner]
+		if !ok || !slices.Contains(coderOperations, "process.exec") || !slices.Contains(coderOperations, "test.run") {
+			return false
+		}
 	}
 	return true
 }
