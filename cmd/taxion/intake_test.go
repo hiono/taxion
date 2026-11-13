@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/hiono/taxion/internal/config"
 	"github.com/hiono/taxion/internal/core"
@@ -18,46 +17,6 @@ import (
 	"github.com/hiono/taxion/internal/store"
 	"github.com/hiono/taxion/internal/tools"
 )
-
-func bindTestJobApproval(t *testing.T, db *store.Store, request *controller.IntakeConfirmation) {
-	t.Helper()
-	state, err := db.LoadWorkspace()
-	if err != nil {
-		t.Fatal(err)
-	}
-	task, ok := state.Graph.GraphTask(request.TaskID)
-	if !ok {
-		t.Fatalf("Task %s is missing", request.TaskID)
-	}
-	job, ok := state.Graph.JobForTask(task.ID)
-	if !ok {
-		t.Fatalf("Task %s has no owning Job", task.ID)
-	}
-	selection, err := json.Marshal(request.Selection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configuration, err := core.SelectApprovalConfiguration(selection, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	contract, err := controller.BuildJobContractForIntake(task, configuration,
-		core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 2, MaxNanoAIU: 1000},
-		time.Now().UTC().Add(24*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	job.Contract = &contract
-	proposal, err := core.JobProposal(job)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.JobContract = &contract
-	request.ExpectedJobContractHash, err = proposal.Hash()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
 
 func TestDocumentNavigationRoutesWithoutSDK(t *testing.T) {
 	for path, targets := range map[string][]string{
@@ -371,7 +330,6 @@ execution: {requester: human, worker: local, approvalRef: intake-config}
 	confirmation := controller.IntakeConfirmation{TaskID: task.ID, ExpectedHash: proposal.Hash,
 		Actor: "human", Source: "human:confirm", Reason: "Confirm this exact scope, acceptance and configuration",
 		Selection: resolved.Config, AdditionalTaskIDs: []string{"intake-flow-review-0"}}
-	bindTestJobApproval(t, db, &confirmation)
 	out.Reset()
 	if err := conversationCmd([]string{"confirm", "--file", write("confirm.json", confirmation)}, &out); err != nil {
 		t.Fatal(err)
