@@ -70,7 +70,8 @@ type Adapter struct {
 	started   bool
 	closed    bool
 	sessions  map[string]*managedSession
-	quotaOnly bool
+	quotaOnly             bool
+	authorizeJobOperation func(context.Context, string, string) error
 }
 
 type managedSession struct {
@@ -403,6 +404,22 @@ func (a *Adapter) UsesBoundResultIdentity() bool {
 }
 
 func (a *Adapter) Worktree() string { return a.config.WorkingDirectory }
+
+func (a *Adapter) SetJobOperationAuthorizer(authorizer func(context.Context, string, string) error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.authorizeJobOperation = authorizer
+}
+
+func (a *Adapter) jobOperationAuthorizer() func(context.Context, string, string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.authorizeJobOperation
+}
+
+func (a *Adapter) hasJobOperationAuthorizer() bool {
+	return a.jobOperationAuthorizer() != nil
+}
 
 func (a *Adapter) BudgetGuidancePolicy() *core.BudgetGuidancePolicy {
 	return core.CloneBudgetGuidance(a.config.BudgetGuidance)
@@ -813,6 +830,8 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 		config.EnableSkills = &enabled
 		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
 		config.Tools = append(config.Tools, a.mcpTools()...)
+	}
+	if a.config.ToolPolicy != nil || a.hasJobOperationAuthorizer() {
 		config.Hooks = a.toolHooks()
 	}
 	return config
@@ -879,7 +898,7 @@ func infiniteSessions() *sdk.InfiniteSessionConfig {
 
 func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 	if a.config.Role != "REVIEWER" && a.config.Role != "CODER" && a.config.ToolPolicy == nil &&
-		a.config.ManagedSearch == nil && !slices.Contains(a.config.AvailableTools, "skill") {
+		a.config.ManagedSearch == nil && !slices.Contains(a.config.AvailableTools, "skill") && !a.hasJobOperationAuthorizer() {
 		return nil
 	}
 	return func(request sdk.PermissionRequest, invocation sdk.PermissionInvocation) (rpc.PermissionDecision, error) {
@@ -928,6 +947,16 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 			}
 			if !allowed {
 				reason := "Credential broker roles permit only exact approved operations"
+				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
+			}
+		}
+		if authorize := a.jobOperationAuthorizer(); authorize != nil {
+			operation, allowed := jobOperationForPermission(request)
+			if !allowed {
+				reason := "Tool has no Job operation mapping"
+				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
+			} else if err := authorize(context.Background(), invocation.SessionID, operation); err != nil {
+				reason := err.Error()
 				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
 			}
 		}

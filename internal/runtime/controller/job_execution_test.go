@@ -31,6 +31,7 @@ type jobRoleRuntimeFake struct {
 	authErr         error
 	expectedAccount string
 	toolPolicy      *tools.Policy
+	jobOperationAuthorizer func(context.Context, string, string) error
 }
 
 func (f *jobRoleRuntimeFake) Role() string       { return f.role }
@@ -75,6 +76,9 @@ func (f *jobRoleRuntimeFake) Events(_ context.Context, sessionID string) (<-chan
 }
 func (f *jobRoleRuntimeFake) ExecutionConfiguration() json.RawMessage { return f.selection }
 func (f *jobRoleRuntimeFake) ToolPolicy() *tools.Policy               { return f.toolPolicy }
+func (f *jobRoleRuntimeFake) SetJobOperationAuthorizer(authorizer func(context.Context, string, string) error) {
+	f.jobOperationAuthorizer = authorizer
+}
 func (f *jobRoleRuntimeFake) CheckAuthentication(_ context.Context, account string) error {
 	f.expectedAccount = account
 	return f.authErr
@@ -197,6 +201,18 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if sessionID != worker.sessionID || worker.taskID != task.ID || worker.startCount != 1 {
 		t.Fatalf("unexpected Runtime binding: session=%q task=%q starts=%d", sessionID, worker.taskID, worker.startCount)
 	}
+	if worker.jobOperationAuthorizer == nil {
+		t.Fatal("Job controller did not install the provider operation preflight")
+	}
+	if err := worker.jobOperationAuthorizer(context.Background(), sessionID, "repository.write"); err != nil {
+		t.Fatalf("approved Coder write operation rejected: %v", err)
+	}
+	if err := worker.jobOperationAuthorizer(context.Background(), "different-session", "repository.write"); err == nil {
+		t.Fatal("operation preflight must reject a different provider session")
+	}
+	if err := worker.jobOperationAuthorizer(context.Background(), sessionID, "network.access"); err == nil {
+		t.Fatal("operation preflight must reject an unapproved network operation")
+	}
 	if worker.expectedAccount != "test-account" {
 		t.Fatalf("Runtime authentication expected account = %q, want test-account", worker.expectedAccount)
 	}
@@ -269,6 +285,12 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	}
 	if _, err := reviewerController.Start(context.Background(), "job-role-reviewer"); err != nil {
 		t.Fatal(err)
+	}
+	if reviewerRuntime.jobOperationAuthorizer == nil {
+		t.Fatal("Reviewer Job controller did not install the provider operation preflight")
+	}
+	if err := reviewerRuntime.jobOperationAuthorizer(context.Background(), reviewerRuntime.sessionID, "process.exec"); err == nil {
+		t.Fatal("Reviewer provider preflight must reject process execution")
 	}
 	if err := reviewerController.AuthorizeOperation("job-role-reviewer", "repository.read", time.Now().UTC()); err != nil {
 		t.Fatalf("Reviewer read operation rejected: %v", err)

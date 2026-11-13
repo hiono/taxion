@@ -93,6 +93,12 @@ type ToolPolicyIdentity interface {
 	ToolPolicy() *tools.Policy
 }
 
+// JobOperationAuthorizer lets the Job controller install a per-session
+// preflight that provider adapters invoke before each tool operation.
+type JobOperationAuthorizer interface {
+	SetJobOperationAuthorizer(func(context.Context, string, string) error)
+}
+
 // StopAttachment lets providers attach without loading executable extensions.
 type StopAttachment interface {
 	ResumeForStop(context.Context, string) error

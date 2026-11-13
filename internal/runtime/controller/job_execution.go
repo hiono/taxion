@@ -26,7 +26,15 @@ func NewJobRoleController(db *store.Store, worker runtime.Identity) (*JobRoleCon
 		strings.TrimSpace(worker.ConfigHash()) == "" {
 		return nil, fmt.Errorf("taxion: Job Role controller requires a store and identified runtime")
 	}
-	return &JobRoleController{store: db, runtime: worker}, nil
+	authorizer, ok := worker.(runtime.JobOperationAuthorizer)
+	if !ok {
+		return nil, fmt.Errorf("taxion: Job Role runtime must support controller-installed operation preflight")
+	}
+	controller := &JobRoleController{store: db, runtime: worker}
+	authorizer.SetJobOperationAuthorizer(func(ctx context.Context, sessionID, operation string) error {
+		return controller.AuthorizeSessionOperation(ctx, sessionID, operation, time.Now().UTC())
+	})
+	return controller, nil
 }
 
 func (c *JobRoleController) checkRoleToolPolicy(job core.Job) error {
@@ -440,6 +448,25 @@ func (c *JobRoleController) Events(ctx context.Context, executionID string) (<-c
 	return events, nil
 }
 
+func (c *JobRoleController) authorizeOperation(graph core.TaskGraph, executionID, sessionID, operation string, at time.Time) error {
+	execution, err := c.requireBoundExecution(graph, executionID)
+	if err != nil || execution.Status != core.RoleExecutionRunning ||
+		sessionID != "" && execution.RuntimeSessionID != sessionID {
+		return fmt.Errorf("taxion: operation requires a running execution bound to this Runtime session")
+	}
+	job, ok := graph.Job(execution.JobID)
+	if !ok || job.Contract == nil {
+		return fmt.Errorf("taxion: Runtime operation requires an approved Job contract")
+	}
+	if _, _, err := c.approvedRuntimeConfiguration(job); err != nil {
+		return err
+	}
+	if err := c.checkRoleToolPolicy(job); err != nil {
+		return err
+	}
+	return graph.CheckRoleExecutionOperation(executionID, operation, at)
+}
+
 // AuthorizeOperation is called by the Runtime tool adapter immediately before
 // each privileged operation; a Job message or Task approval is not sufficient.
 func (c *JobRoleController) AuthorizeOperation(executionID, operation string, at time.Time) error {
@@ -453,21 +480,40 @@ func (c *JobRoleController) AuthorizeOperation(executionID, operation string, at
 	if !state.HasGraph {
 		return fmt.Errorf("taxion: operation authorization requires a Task Graph")
 	}
-	execution, err := c.requireBoundExecution(state.Graph, executionID)
-	if err != nil || execution.Status != core.RoleExecutionRunning {
-		return fmt.Errorf("taxion: operation requires a running execution bound to this Runtime")
+	return c.authorizeOperation(state.Graph, executionID, "", operation, at)
+}
+
+// AuthorizeSessionOperation is the provider callback. It resolves the unique
+// active RoleExecution by the exact provider session and checks that binding
+// again before allowing the requested operation.
+func (c *JobRoleController) AuthorizeSessionOperation(ctx context.Context, sessionID, operation string, at time.Time) error {
+	if c == nil || c.store == nil || c.runtime == nil || strings.TrimSpace(sessionID) == "" {
+		return fmt.Errorf("taxion: Job session authorization requires an identified Runtime session")
 	}
-	job, ok := state.Graph.Job(execution.JobID)
-	if !ok || job.Contract == nil {
-		return fmt.Errorf("taxion: Runtime operation requires an approved Job contract")
-	}
-	if _, _, err := c.approvedRuntimeConfiguration(job); err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := c.checkRoleToolPolicy(job); err != nil {
+	state, err := c.store.LoadWorkspace()
+	if err != nil {
 		return err
 	}
-	return state.Graph.CheckRoleExecutionOperation(executionID, operation, at)
+	if !state.HasGraph {
+		return fmt.Errorf("taxion: operation authorization requires a Task Graph")
+	}
+	var matched string
+	for _, execution := range state.Graph.RoleExecutions {
+		if execution.RuntimeSessionID != sessionID || execution.Role != c.runtime.Role() {
+			continue
+		}
+		if matched != "" {
+			return fmt.Errorf("taxion: Runtime session is ambiguously bound to multiple RoleExecutions")
+		}
+		matched = execution.ID
+	}
+	if matched == "" {
+		return fmt.Errorf("taxion: Runtime session is not bound to a Job RoleExecution")
+	}
+	return c.authorizeOperation(state.Graph, matched, sessionID, operation, at)
 }
 
 // RecordUsage appends an immutable provider accounting observation to the Job ledger.
