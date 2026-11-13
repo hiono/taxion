@@ -317,6 +317,9 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 			}
 		}
 		if previous, ok := state.Graph.GraphTask(task.ID); ok {
+			// JobID is assigned by the first proposal. Reconstruct it before
+			// comparing an exact replay of the caller's original Task input.
+			task.JobID = previous.JobID
 			if !reflect.DeepEqual(previous, task) {
 				return fmt.Errorf("taxion: intake Task ID already contains another proposal; use a new Task ID")
 			}
