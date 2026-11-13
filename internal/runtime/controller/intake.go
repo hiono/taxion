@@ -827,7 +827,7 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 		}
 		if !modelFree {
 			approvalText, err := json.Marshal(config.Approval{
-				Kind:    config.ApprovalKind, TaskID: task.ID, Reason: request.Reason,
+				Kind: config.ApprovalKind, TaskID: task.ID, Reason: request.Reason,
 				Allowed: []config.Config{request.Selection}, AdditionalTaskIDs: request.AdditionalTaskIDs,
 			})
 			if err != nil {
