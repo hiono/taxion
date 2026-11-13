@@ -53,6 +53,7 @@ func (f *jobRoleRuntimeFake) Stop(_ context.Context, sessionID string) error {
 	if sessionID != f.sessionID {
 		return context.Canceled
 	}
+	f.stopCount++
 	return f.stopErr
 }
 func (f *jobRoleRuntimeFake) Events(_ context.Context, sessionID string) (<-chan runtime.Event, error) {
@@ -491,5 +492,63 @@ func TestJobRolesExchangeMessagesAndResumeWithinOneJob(t *testing.T) {
 	if len(messages) != 2 || messages[0].TargetExecutionID != "collab-reviewer" ||
 		messages[1].TargetExecutionID != "collab-coder" || messages[1].ReplyTo != "collab-request" {
 		t.Fatalf("Job conversation did not preserve addressed request/reply provenance: %+v", messages)
+	}
+}
+
+func TestJobRoleControlsRejectAnotherRuntimeIdentity(t *testing.T) {
+	db, job, task, selection := jobRoleFixture(t, true)
+	now := time.Now().UTC()
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendRoleExecution(core.RoleExecution{
+			ID: "identity-bound-exec", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	coderRuntime := &jobRoleRuntimeFake{
+		role: "CODER", configHash: "runtime-config-hash", selection: selection,
+		events: make(chan runtime.Event),
+	}
+	coder, err := NewJobRoleController(db, coderRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coder.Start(context.Background(), "identity-bound-exec"); err != nil {
+		t.Fatal(err)
+	}
+	reviewerRuntime := &jobRoleRuntimeFake{
+		role: "REVIEWER", configHash: "runtime-config-hash", selection: selection,
+		events: make(chan runtime.Event),
+	}
+	reviewer, err := NewJobRoleController(db, reviewerRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reviewer.AuthorizeOperation("identity-bound-exec", "repository.write", time.Now().UTC()); err == nil {
+		t.Fatal("another Role Runtime must not authorize this execution's operations")
+	}
+	if err := reviewer.Wait("identity-bound-exec", "wait from wrong Role", time.Now().UTC()); err == nil {
+		t.Fatal("another Role Runtime must not change this execution to WAITING")
+	}
+	if err := reviewer.Finish("identity-bound-exec", core.RoleExecutionSucceeded, "reviewer", "wrong owner", time.Now().UTC()); err == nil {
+		t.Fatal("another Role Runtime must not finish this execution")
+	}
+	if err := reviewer.Stop(context.Background(), "identity-bound-exec", "wrong owner"); err == nil {
+		t.Fatal("another Role Runtime must not stop this execution")
+	}
+	if _, err := reviewer.Events(context.Background(), "identity-bound-exec"); err == nil {
+		t.Fatal("another Role Runtime must not read this execution's events")
+	}
+	if coderRuntime.stopCount != 0 || reviewerRuntime.stopCount != 0 {
+		t.Fatal("wrong Runtime identity caused a session stop")
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, ok := state.Graph.RoleExecution("identity-bound-exec")
+	if !ok || execution.Status != core.RoleExecutionRunning {
+		t.Fatalf("wrong Runtime changed execution state: %+v", execution)
 	}
 }
