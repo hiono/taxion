@@ -447,6 +447,9 @@ func (g TaskGraph) validateJobModel() error {
 			(roleExecutionTerminal(execution.Status) != !execution.FinishedAt.IsZero()) {
 			return graphError("invalid RoleExecution %q", execution.ID)
 		}
+		if owner := jobs[execution.JobID]; owner.Contract != nil && !slices.Contains(owner.Contract.Roles, execution.Role) {
+			return graphError("RoleExecution %s uses a Role outside its Job contract", execution.ID)
+		}
 		if execution.TaskID != "" {
 			task, ok := tasks[execution.TaskID]
 			if !ok || task.JobID != execution.JobID {
