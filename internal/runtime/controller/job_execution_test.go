@@ -75,8 +75,8 @@ func (f *jobRoleRuntimeFake) CheckServiceAccess(context.Context, string) error {
 func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.GraphTask, json.RawMessage) {
 	t.Helper()
 	db, request := intakeApprovalFixture(t, false)
-	selection: = json.RawMessage(`{"runtime":{"profile":"job-role-test","account":"test-account"}}`)
-	sources:   = map[string]string{"runtime.profile": "project", "runtime.account": "project"}
+	selection := json.RawMessage(`{"runtime":{"profile":"job-role-test","account":"test-account"}}`)
+	sources := map[string]string{"runtime.profile": "project", "runtime.account": "project"}
 	configuration, err := core.SelectApprovalConfiguration(selection, sources)
 	if err != nil {
 		t.Fatal(err)
@@ -102,8 +102,8 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 		for i := range state.Graph.Jobs {
 			if state.Graph.Jobs[i].ID == job.ID {
 				state.Graph.Jobs[i].Contract = &core.JobContract{
-					Revision:     1, Roles: []string{"PLANNER", "CODER", "REVIEWER"},
-					Acceptance:   []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
+					Revision:   1, Roles: []string{"PLANNER", "CODER", "REVIEWER"},
+					Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
 					Repositories: []core.JobRepositoryScope{{
 						Repository: task.Repo, FileAccess: *task.FileAccess,
 					}},

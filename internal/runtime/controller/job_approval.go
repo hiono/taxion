@@ -20,10 +20,10 @@ type JobContractProposalRequest struct {
 
 // JobApprovalConfirmationRequest binds a human decision to the exact proposal hash.
 type JobApprovalConfirmationRequest struct {
-	JobID       string
+	JobID        string
 	ExpectedHash string
-	Actor       string
-	Reason      string
+	Actor        string
+	Reason       string
 }
 
 // ProposeJobContract stores a new Job contract revision and returns the exact
