@@ -674,9 +674,11 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				BudgetGuidance: core.CloneBudgetGuidance(guidance), Worktree: root, Branch: branch, BaselineSHA: baseline,
 			}
 			contract, err := controller.BuildJobContractForIntake(executionTaskProposal, approvalConfiguration, core.JobBudget{
-				MaxRoleExecutions: 2 + 2*(*repairs), MaxConcurrentExecutions: 1,
-				MaxNanoAIU: remainingNanoAIU, AccountQuotaOnly: operation.AccountQuotaOnly,
-				BudgetSource: operation.BudgetSource,
+				MaxRoleExecutions:       2 + 2*(*repairs),
+				MaxConcurrentExecutions: 1,
+				MaxNanoAIU:              remainingNanoAIU,
+				AccountQuotaOnly:        operation.AccountQuotaOnly,
+				BudgetSource:             operation.BudgetSource,
 			}, operation.Deadline)
 			if err != nil {
 				return err
@@ -824,7 +826,8 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 					Selection: selected, AdditionalTaskIDs: reviewers,
 					ConfigurationDecisionID: core.ConfigurationApprovalID(selected.Execution.ApprovalRef, id),
 					RequestOperationID:      id, RequestBasisHash: basis,
-					JobContract: &jobApprovalProposal.Contract, ExpectedJobContractHash: jobApprovalHash,
+					JobContract:             &jobApprovalProposal.Contract,
+					ExpectedJobContractHash: jobApprovalHash,
 				}); err != nil {
 					return err
 				}

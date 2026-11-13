@@ -19,29 +19,44 @@ import (
 	"github.com/hiono/taxion/internal/tools"
 )
 
-
 func bindTestJobApproval(t *testing.T, db *store.Store, request *controller.IntakeConfirmation) {
 	t.Helper()
 	state, err := db.LoadWorkspace()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	task, ok := state.Graph.GraphTask(request.TaskID)
-	if !ok { t.Fatalf("Task %s is missing", request.TaskID) }
+	if !ok {
+		t.Fatalf("Task %s is missing", request.TaskID)
+	}
 	job, ok := state.Graph.JobForTask(task.ID)
-	if !ok { t.Fatalf("Task %s has no owning Job", task.ID) }
+	if !ok {
+		t.Fatalf("Task %s has no owning Job", task.ID)
+	}
 	selection, err := json.Marshal(request.Selection)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	configuration, err := core.SelectApprovalConfiguration(selection, nil)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	contract, err := controller.BuildJobContractForIntake(task, configuration,
 		core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 2, MaxNanoAIU: 1000},
 		time.Now().UTC().Add(24*time.Hour))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	job.Contract = &contract
 	proposal, err := core.JobProposal(job)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	request.JobContract = &contract
 	request.ExpectedJobContractHash, err = proposal.Hash()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDocumentNavigationRoutesWithoutSDK(t *testing.T) {
@@ -234,7 +249,9 @@ func TestUserGuideColdStartExamplesWithoutSDK(t *testing.T) {
 	}
 	confirmation.ExpectedHash = proposal.Hash
 	approvalDB, err := openWorkspace()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	bindTestJobApproval(t, approvalDB, &confirmation)
 	if err := approvalDB.Close(); err != nil { t.Fatal(err) }
 	if err := os.MkdirAll(filepath.Join(dir, ".taxion"), 0700); err != nil {
