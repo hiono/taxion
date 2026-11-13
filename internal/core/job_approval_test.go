@@ -137,3 +137,53 @@ func TestTaskGraphRejectsTaskScopeOutsideApprovedJobContract(t *testing.T) {
 		t.Fatal("Task must not widen Job file access")
 	}
 }
+
+
+func TestCheckRoleExecutionOperationRequiresCurrentJobApprovalAndScope(t *testing.T) {
+	now := time.Now().UTC()
+	job := Job{
+		ID: "job-a", Request: "request", Goal: "goal", Status: JobActive,
+		CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t),
+	}
+	task := GraphTask{
+		ID: "task-a", JobID: job.ID, Repo: "example/repo",
+		FileAccess: &FileAccessPolicy{Level: FileAccessExact, Paths: []string{"src/main.go"}},
+	}
+	graph := TaskGraph{Version: 1, Jobs: []Job{job}, Tasks: []GraphTask{task}}
+	proposal, err := JobProposal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval, err := NewJobApproval("approval-a", "human", "user", "approve", proposal, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendJobApproval(approval); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendRoleExecution(RoleExecution{
+		ID: "exec-a", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+		Status: RoleExecutionCreated, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.TransitionRoleExecution("exec-a", RoleExecutionRunning, "controller", "start", now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.CheckRoleExecutionOperation("exec-a", "repository.read", now.Add(4*time.Second)); err != nil {
+		t.Fatalf("approved in-scope operation rejected: %v", err)
+	}
+	if err := graph.CheckRoleExecutionOperation("exec-a", "network.access", now.Add(4*time.Second)); err != nil {
+		t.Fatalf("explicitly approved operation rejected: %v", err)
+	}
+	if err := graph.CheckRoleExecutionOperation("exec-a", "unknown.operation", now.Add(4*time.Second)); err == nil {
+		t.Fatal("unknown operation must fail closed")
+	}
+	if err := graph.CheckRoleExecutionOperation("exec-a", "repository.read", job.Contract.Deadline.Add(time.Second)); err == nil {
+		t.Fatal("expired Job must not authorize Runtime operations")
+	}
+	graph.Jobs[0].Contract.Revision = 2
+	if err := graph.CheckRoleExecutionOperation("exec-a", "repository.read", now.Add(4*time.Second)); err == nil {
+		t.Fatal("new Job revision must require new approval")
+	}
+}

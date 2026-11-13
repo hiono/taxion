@@ -342,6 +342,54 @@ func TaskWithinJobScope(task GraphTask, contract JobContract) bool {
 	}
 }
 
+// CheckRoleExecutionOperation verifies Job-level authority immediately before a
+// privileged Runtime operation. Role-specific policy must be intersected by the
+// Controller; this check never grants permissions on its own.
+func (g TaskGraph) CheckRoleExecutionOperation(executionID, operation string, at time.Time) error {
+	if at.IsZero() || !validJobOperation(operation) {
+		return graphError("Runtime operation requires a timestamp and a supported operation")
+	}
+	execution, ok := g.RoleExecution(executionID)
+	if !ok || execution.Status != RoleExecutionRunning {
+		return graphError("Runtime operation requires a running RoleExecution")
+	}
+	job, ok := g.Job(execution.JobID)
+	if !ok || job.Status != JobActive || job.Contract == nil {
+		return graphError("Runtime operation requires an active Job contract")
+	}
+	if at.After(job.Contract.Deadline) {
+		return graphError("Job deadline has expired")
+	}
+	if _, ok := g.CurrentJobApproval(job.ID); !ok {
+		return graphError("Runtime operation requires explicit approval of the current Job revision")
+	}
+	if !slices.Contains(job.Contract.Operations, operation) {
+		return graphError("Runtime operation is outside the approved Job operation scope")
+	}
+	if execution.TaskID == "" {
+		return graphError("Runtime operation requires a Task-bound execution")
+	}
+	task, ok := g.GraphTask(execution.TaskID)
+	if !ok || task.JobID != job.ID || !TaskWithinJobScope(task, *job.Contract) {
+		return graphError("Runtime operation Task exceeds the approved Job scope")
+	}
+	executions := g.RoleExecutionsForJob(job.ID)
+	if len(executions) > job.Contract.Budget.MaxRoleExecutions {
+		return graphError("Job RoleExecution budget is exhausted")
+	}
+	concurrent := 0
+	for _, candidate := range executions {
+		switch candidate.Status {
+		case RoleExecutionCreated, RoleExecutionRunning, RoleExecutionWaiting, RoleExecutionCancelRequested:
+			concurrent++
+		}
+	}
+	if concurrent > job.Contract.Budget.MaxConcurrentExecutions {
+		return graphError("Job concurrent RoleExecution limit is exceeded")
+	}
+	return nil
+}
+
 // HasUnapprovedJob reports whether the current Job contract lacks a matching
 // explicit approval. A Task approval is never considered here.
 func (g TaskGraph) HasUnapprovedJob(jobID string) bool {
