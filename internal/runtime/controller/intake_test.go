@@ -1145,8 +1145,7 @@ func TestIntakeCreatesDistinctJobWithoutChangingTaskContract(t *testing.T) {
 		t.Fatal("intake Task was not saved")
 	}
 	job, ok := before.Graph.JobForTask(task.ID)
-	if !ok || job.ID == task.ID || job.RootTaskID != task.ID ||
-		!slices.Contains(job.TaskIDs, task.ID) || job.Status != core.JobDraft ||
+	if !ok || job.ID == task.ID || task.JobID != job.ID || job.Status != core.JobDraft ||
 		job.Request != "Implement within this contract." {
 		t.Fatalf("intake Job does not preserve a distinct Job identity and original request: %+v", job)
 	}
@@ -1155,7 +1154,13 @@ func TestIntakeCreatesDistinctJobWithoutChangingTaskContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	if hash != request.ExpectedHash {
-		t.Fatal("Job membership changed the Task contract hash")
+		t.Fatal("confirmed proposal hash does not include the assigned JobID")
+	}
+	withoutJob := task
+	withoutJob.JobID = ""
+	unboundHash, err := IntakeHash(withoutJob)
+	if err != nil || unboundHash == hash {
+		t.Fatal("Task approval hash must bind its Job ownership", err)
 	}
 	if _, err := ConfirmIntake(db, request); err != nil {
 		t.Fatal(err)

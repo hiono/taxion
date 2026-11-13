@@ -155,8 +155,8 @@ func (g TaskGraph) JobForTask(taskID string) (Job, bool) {
 	return g.Job(task.JobID)
 }
 
-// CreateJob binds an existing root Task to a new Job. Job membership is stored
-// on the Job so existing Task approval hashes and history remain unchanged.
+// CreateJob creates an independent collaboration unit. Tasks acquire membership
+// by storing this Job's ID on the Task itself.
 func (g *TaskGraph) CreateJob(job Job) error {
 	if g == nil {
 		return graphError("Job creation requires a Task Graph")

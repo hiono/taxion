@@ -202,10 +202,10 @@ func TestJobMessageRejectsCrossJobExecutionReply(t *testing.T) {
 	graph := newJobGraph()
 	now := time.Now().UTC()
 	graph.Jobs = append(graph.Jobs, Job{
-		ID: "job-b", Request: "Other request", Goal: "Other goal", RootTaskID: "task-b", TaskIDs: []string{"task-b"},
+		ID: "job-b", Request: "Other request", Goal: "Other goal",
 		Status: JobActive, CreatedAt: now, UpdatedAt: now,
 	})
-	graph.Tasks = append(graph.Tasks, GraphTask{ID: "task-b"})
+	graph.Tasks = append(graph.Tasks, GraphTask{ID: "task-b", JobID: "job-b"})
 	for _, execution := range []RoleExecution{
 		{ID: "exec-a", JobID: "job-a", Role: "CODER", Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
 		{ID: "exec-b", JobID: "job-b", Role: "PLANNER", Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
