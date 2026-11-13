@@ -221,8 +221,14 @@ func ensureIntakeJob(graph *core.TaskGraph, task *core.GraphTask, request string
 		return fmt.Errorf("taxion: Job assignment requires a graph and Task")
 	}
 	if task.JobID != "" {
-		if _, ok := graph.Job(task.JobID); !ok {
-			return fmt.Errorf("taxion: Task references an unknown Job")
+		job, ok := graph.Job(task.JobID)
+		if !ok || job.Status == core.JobCancelled {
+			return fmt.Errorf("taxion: Task references an unknown or cancelled Job")
+		}
+		if job.Contract != nil {
+			if err := taskCoveredByJobContract(*task, *job.Contract); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -246,6 +252,11 @@ func ensureIntakeJob(graph *core.TaskGraph, task *core.GraphTask, request string
 				return fmt.Errorf("taxion: predecessor Task has no usable Job")
 			}
 			task.JobID = job.ID
+			if job.Contract != nil {
+				if err := taskCoveredByJobContract(*task, *job.Contract); err != nil {
+					return err
+				}
+			}
 			if job.Status == core.JobCompleted || job.Status == core.JobFailed {
 				return graph.TransitionJob(job.ID, core.JobWaiting, "controller", "successor Task proposed", time.Now().UTC())
 			}
