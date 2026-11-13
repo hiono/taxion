@@ -459,9 +459,12 @@ func appendConfirmedJobApproval(state *store.Workspace, task core.GraphTask, req
 	// replayed confirmation must not mutate the caller's workspace.
 	graph := state.Graph
 	graph.Jobs = append([]core.Job(nil), state.Graph.Jobs...)
-	job, ok := graph.JobForTask(task.ID)
-	if !ok || request.JobContract == nil {
-		return fmt.Errorf("taxion: non-model-free intake requires an explicit Job contract")
+	if task.JobID == "" || request.JobContract == nil {
+		return fmt.Errorf("taxion: Job intake requires an explicit Job association and contract")
+	}
+	job, ok := graph.Job(task.JobID)
+	if !ok || job.Status == core.JobCancelled {
+		return fmt.Errorf("taxion: Job intake references no usable Job")
 	}
 	contract := *request.JobContract
 	if err := contract.Validate(); err != nil {
