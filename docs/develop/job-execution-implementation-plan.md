@@ -49,7 +49,7 @@ Job と Task の関連は **Task 側が `JobID` を保持する単方向参照**
 - 既存の Task approval hash、承認記録、履歴を変更しないことを理由に、この正規モデルを曲げてはならない。必要な場合は契約・hash・migration を新モデルに合わせて再設計する。
 - 旧 workspace の移行はデータ保全のために行うが、旧 protocol の互換性維持を新モデルの実行条件にしない。
 
-**現状の不整合:** PR #292 の `Job.TaskIDs` / `RootTaskID` / `JobForTask` / `AttachTaskToJob` はこの所有方向に反する。これらを前提に後続の実行経路を増築せず、Job と Task の正規モデルを先に修正する。
+**移行境界:** 現行モデルは `Task.JobID` を正規参照とし、`Job.TaskIDs` / `RootTaskID` をドメイン構造として保持しない。旧 workspace の読込み時に限り `TaskGraph.UnmarshalJSON` が旧フィールドを入力形式として受け取り、Task 側の `JobID` へ移行する。移行後の保存形式・検索・認可・実行経路では旧フィールドを参照しない。旧 Task の複数 Job 所属や既存 JobID との衝突は暗黙に解決せず、移行エラーとして扱う。
 
 既存 workspace の読み込みを壊さない移行を行う。旧データを暗黙に破棄したり、旧 protocol を新モデルの中心に残したりしない。
 
