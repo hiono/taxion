@@ -39,6 +39,11 @@ func TestRequestCheckpointRequiresFormalBoundApprovalBeforeResume(t *testing.T) 
 				t.Fatal(err)
 			}
 			defer db.Close()
+			if !approved {
+				if _, exists := state.Graph.Job(state.Records.Operation.ID + "-job"); exists {
+					t.Fatal("planning created the execution Job before formal user approval")
+				}
+			}
 			var checkpoint requestCheckpoint
 			if err := json.Unmarshal(state.Records.Operation.Checkpoint, &checkpoint); err != nil {
 				t.Fatal(err)
