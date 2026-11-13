@@ -669,7 +669,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				Owner: "CODER", Reviewer: "REVIEWER", Scope: answer.Proposal.Scope,
 				OutOfScope: answer.Proposal.OutOfScope, Acceptance: answer.Proposal.Acceptance,
 				ValidationCommands: answer.Proposal.ValidationCommands,
-				RequiredEvidence: []string{"work-report"}, ExitCondition: "Independent review approves all acceptance criteria",
+				RequiredEvidence:   []string{"work-report"}, ExitCondition: "Independent review approves all acceptance criteria",
 				OutputMode: core.OutputModeWorktreeTreeSnapshot, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessAll},
 				BudgetGuidance: core.CloneBudgetGuidance(guidance), Worktree: root, Branch: branch, BaselineSHA: baseline,
 			}
@@ -678,7 +678,7 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				MaxConcurrentExecutions: 1,
 				MaxNanoAIU:              remainingNanoAIU,
 				AccountQuotaOnly:        operation.AccountQuotaOnly,
-				BudgetSource:             operation.BudgetSource,
+				BudgetSource:            operation.BudgetSource,
 			}, operation.Deadline)
 			if err != nil {
 				return err
