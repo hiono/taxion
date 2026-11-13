@@ -335,7 +335,7 @@ func TestRequestOldDefaultCheckpointRetainsFlowPolicy(t *testing.T) {
 	db.Close()
 	called := false
 	stopped := errors.New("fixture stops before runtime")
-	err = requestCommand([]string{"--resume", operation.ID}, strings.NewReader("/approve\n"), &out, nil,
+	err = requestCommand([]string{"--resume", operation.ID}, strings.NewReader("/approve\n/approve\n"), &out, nil,
 		func(_ context.Context, _ []string, _ io.Writer) error {
 			called = true
 			db, state, err := loadWorkspace()
