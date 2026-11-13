@@ -6,8 +6,8 @@ import (
 )
 
 func TestJobCompletionReadyBlocksSuspendedRoleExecution(t *testing.T) {
-	now: = time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
-	job: = Job{
+	now := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
+	job := Job{
 		ID:     "job-completion", Request: "request", Goal: "goal",
 		Status: JobActive, CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t),
 	}
@@ -99,8 +99,8 @@ func TestJobCompletionReadyBlocksSuspendedRoleExecution(t *testing.T) {
 }
 
 func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
-	now: = time.Date(2026, 11, 13, 1, 0, 0, 0, time.UTC)
-	job: = Job{
+	now := time.Date(2026, 11, 13, 1, 0, 0, 0, time.UTC)
+	job := Job{
 		ID:     "job-without-task", Request: "request", Goal: "goal",
 		Status: JobActive, CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t),
 	}

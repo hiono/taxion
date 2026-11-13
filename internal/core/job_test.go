@@ -89,8 +89,8 @@ func TestJobAndTaskHaveDistinctIdentity(t *testing.T) {
 }
 
 func TestRoleExecutionsCollaborateAndResumeWithinOneJob(t *testing.T) {
-	graph: = newJobGraph()
-	now:   = time.Now().UTC()
+	graph := newJobGraph()
+	now := time.Now().UTC()
 	if err := graph.AppendRoleExecution(RoleExecution{
 		ID:        "exec-coder", JobID: "job-a", TaskID: "task-a", Role: "CODER", Status: RoleExecutionCreated,
 		CreatedAt: now, UpdatedAt: now,
@@ -146,8 +146,8 @@ func TestRoleExecutionsCollaborateAndResumeWithinOneJob(t *testing.T) {
 }
 
 func TestRoleExecutionRejectsCrossJobParentAndTask(t *testing.T) {
-	graph: = newJobGraph()
-	now:   = time.Now().UTC()
+	graph := newJobGraph()
+	now := time.Now().UTC()
 	graph.Jobs = append(graph.Jobs, Job{
 		ID:     "job-b", Request: "Other request", Goal: "Other goal",
 		Status: JobActive, CreatedAt: now, UpdatedAt: now,
@@ -169,8 +169,8 @@ func TestRoleExecutionRejectsCrossJobParentAndTask(t *testing.T) {
 }
 
 func TestRoleExecutionLifecycleAndSessionBinding(t *testing.T) {
-	graph: = newJobGraph()
-	now:   = time.Now().UTC()
+	graph := newJobGraph()
+	now := time.Now().UTC()
 	if err := graph.AppendRoleExecution(RoleExecution{
 		ID:     "exec-1", JobID: "job-a", TaskID: "task-a", Role: "CODER",
 		Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
@@ -201,8 +201,8 @@ func TestRoleExecutionLifecycleAndSessionBinding(t *testing.T) {
 }
 
 func TestJobMessagesDoNotRequireFixedRoleAllowlist(t *testing.T) {
-	graph: = newJobGraph()
-	now:   = time.Now().UTC()
+	graph := newJobGraph()
+	now := time.Now().UTC()
 	for _, execution := range []RoleExecution{
 		{ID: "exec-a", JobID: "job-a", Role: "ARCHITECT", Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
 		{ID: "exec-b", JobID: "job-a", Role: "DOMAIN_EXPERT", Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
@@ -221,8 +221,8 @@ func TestJobMessagesDoNotRequireFixedRoleAllowlist(t *testing.T) {
 }
 
 func TestJobMessageRejectsCrossJobExecutionReply(t *testing.T) {
-	graph: = newJobGraph()
-	now:   = time.Now().UTC()
+	graph := newJobGraph()
+	now := time.Now().UTC()
 	graph.Jobs = append(graph.Jobs, Job{
 		ID:     "job-b", Request: "Other request", Goal: "Other goal",
 		Status: JobActive, CreatedAt: now, UpdatedAt: now,
@@ -253,8 +253,8 @@ func TestJobMessageRejectsCrossJobExecutionReply(t *testing.T) {
 }
 
 func TestCloneGraphCopiesTaskOwnership(t *testing.T) {
-	graph:  = newJobGraph()
-	cloned: = cloneGraph(graph)
+	graph := newJobGraph()
+	cloned := cloneGraph(graph)
 	cloned.Tasks[0].JobID = "changed"
 	if graph.Tasks[0].JobID != "job-a" {
 		t.Fatal("cloneGraph shares Task ownership state")
@@ -262,8 +262,8 @@ func TestCloneGraphCopiesTaskOwnership(t *testing.T) {
 }
 
 func TestJobConversationUsesFirstClassJobID(t *testing.T) {
-	graph: = newJobGraph()
-	now:   = time.Now().UTC()
+	graph := newJobGraph()
+	now := time.Now().UTC()
 	graph.JobMessages = []JobMessage{{
 		ID:   "message-1", JobID: "job-a", FromRole: "HUMAN", ToRole: "PLANNER",
 		Body: "Please assess this assumption.", Source: "human:request", At: now,
@@ -274,8 +274,8 @@ func TestJobConversationUsesFirstClassJobID(t *testing.T) {
 }
 
 func TestJobExistsWithoutTasksAndMultipleTasksShareIt(t *testing.T) {
-	now:   = time.Now().UTC()
-	graph: = TaskGraph{Version: 1}
+	now := time.Now().UTC()
+	graph := TaskGraph{Version: 1}
 	if err := graph.CreateJob(Job{ID: "job-empty", Request: "Request", Goal: "Goal", Status: JobDraft, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("Job must exist independently of Tasks: %v", err)
 	}
@@ -300,8 +300,8 @@ func TestJobExistsWithoutTasksAndMultipleTasksShareIt(t *testing.T) {
 }
 
 func TestJobStateTransitionsAreAudited(t *testing.T) {
-	now:   = time.Now().UTC()
-	graph: = TaskGraph{Version: 1, Tasks: []GraphTask{{ID: "task-root"}}}
+	now := time.Now().UTC()
+	graph := TaskGraph{Version: 1, Tasks: []GraphTask{{ID: "task-root"}}}
 	if err := graph.CreateJob(Job{
 		ID:     "job-root", Request: "Original request", Goal: "Complete work",
 		Status: JobDraft, CreatedAt: now, UpdatedAt: now,
@@ -322,8 +322,8 @@ func TestJobStateTransitionsAreAudited(t *testing.T) {
 }
 
 func TestJobConversationIncludesLegacyTaskMessagesForJob(t *testing.T) {
-	graph: = newJobGraph()
-	now:   = time.Now().UTC()
+	graph := newJobGraph()
+	now := time.Now().UTC()
 	graph.JobMessages = []JobMessage{{
 		ID:   "legacy-message", TaskID: "task-a", FromRole: "HUMAN", ToRole: "PLANNER",
 		Body: "Legacy task-scoped message", Source: "human:legacy", At: now,

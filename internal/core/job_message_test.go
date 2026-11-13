@@ -7,10 +7,10 @@ import (
 
 func TestJobConversationAllowsNaturalLanguageWithoutQuestionSchema(t *testing.T) {
 	graph := TaskGraph{
-		Version:     1,
-		Jobs:        []Job{{ID: "job-1", Request: "request", Goal: "goal", Status: JobActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}},
-		Tasks:       []GraphTask{{ID: "task-1", JobID: "job-1"}},
-		Dispatches:  []GraphDispatch{{ID: "d1", TaskID: "task-1", Recipient: "CODER"}},
+		Version:    1,
+		Jobs:       []Job{{ID: "job-1", Request: "request", Goal: "goal", Status: JobActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}},
+		Tasks:      []GraphTask{{ID: "task-1", JobID: "job-1"}},
+		Dispatches: []GraphDispatch{{ID: "d1", TaskID: "task-1", Recipient: "CODER"}},
 		JobMessages: []JobMessage{
 			{ID: "m1", TaskID: "task-1", FromRole: "CODER", ToRole: "PLANNER",
 				Body:   "この仕様の意図を確認したい。現状の情報から実装できる部分は先に進める。",
@@ -30,9 +30,9 @@ func TestJobConversationAllowsNaturalLanguageWithoutQuestionSchema(t *testing.T)
 
 func TestJobConversationRejectsReplyToDifferentJobOrRole(t *testing.T) {
 	graph := TaskGraph{
-		Version:     1,
-		Tasks:       []GraphTask{{ID: "job-1"}, {ID: "job-2"}},
-		Dispatches:  []GraphDispatch{{ID: "d1", TaskID: "job-1", Recipient: "CODER"}},
+		Version:    1,
+		Tasks:      []GraphTask{{ID: "job-1"}, {ID: "job-2"}},
+		Dispatches: []GraphDispatch{{ID: "d1", TaskID: "job-1", Recipient: "CODER"}},
 		JobMessages: []JobMessage{
 			{ID: "m1", TaskID: "job-1", FromRole: "CODER", ToRole: "PLANNER",
 				Body: "質問", Source: "dispatch:d1", SourceDispatchID: "d1", At: time.Now().UTC()},
@@ -47,8 +47,8 @@ func TestJobConversationRejectsReplyToDifferentJobOrRole(t *testing.T) {
 
 
 func TestJobMessageReplyBindsExactRoleExecutions(t *testing.T) {
-	now:   = time.Now().UTC()
-	graph: = TaskGraph{
+	now := time.Now().UTC()
+	graph := TaskGraph{
 		Version: 1,
 		Jobs:    []Job{{ID: "job-reply", Request: "request", Goal: "goal",
 			Status: JobActive, CreatedAt: now, UpdatedAt: now}},

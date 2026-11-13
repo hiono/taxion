@@ -452,8 +452,8 @@ func TestReapprovalCreatesSuccessorWithoutRewritingIssuedContract(t *testing.T) 
 		Reason:       "Explicitly approve revised scope, acceptance and selected identity.", Selection: selected.Config,
 		ReplacesFlow: old.ID, Target: &planner.Target, AdditionalTaskIDs: []string{"successor-flow-review-0"}}
 	confirm = withExplicitJobContractForIntake(t, db, confirm)
-	stale:  = confirm
-	target: = *confirm.Target
+	stale := confirm
+	target := *confirm.Target
 	target.OutputSHA = old.Contract.BaselineSHA
 	stale.Target = &target
 	if _, err := ConfirmIntake(db, stale); err == nil {
@@ -499,8 +499,8 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatchID: = flow.DispatchIDs[0]
-	worker:     = &fakeRuntime{role: "CODER", hash: "budget-runtime", worktree: flow.Contract.Worktree}
+	dispatchID := flow.DispatchIDs[0]
+	worker := &fakeRuntime{role: "CODER", hash: "budget-runtime", worktree: flow.Contract.Worktree}
 	control, err := New(db, worker)
 	if err != nil {
 		t.Fatal(err)
@@ -539,8 +539,8 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 		gitTest(t, sourceWorktree, "add", "-A")
 		gitTest(t, sourceWorktree, "commit", "-m", "chore: checkpoint partial work")
 	}
-	targetSHA:         = gitTest(t, sourceWorktree, "rev-parse", "HEAD")
-	successorWorktree: = filepath.Join(t.TempDir(), "successor")
+	targetSHA := gitTest(t, sourceWorktree, "rev-parse", "HEAD")
+	successorWorktree := filepath.Join(t.TempDir(), "successor")
 	gitTest(t, sourceWorktree, "worktree", "add", "-b", "work/successor", successorWorktree, targetSHA)
 	task := flow.Contract
 	task.ID, task.Status, task.AuthorizationID, task.Decisions = "budget-successor", core.Draft, "", nil
@@ -938,9 +938,9 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	}
 	repairs := 0
 	successor, err := StartReviewFlow(db, ledger, ReviewFlowRequest{
-		ID:            "snapshot-review-successor-flow", TaskID: approved.ID, Repository: approved.Repo,
-		ReviewRoot:    flow.ReviewRoot, ContinueFromDispatchID: coder.ID,
-		MaxRepairs:    &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
+		ID:         "snapshot-review-successor-flow", TaskID: approved.ID, Repository: approved.Repo,
+		ReviewRoot: flow.ReviewRoot, ContinueFromDispatchID: coder.ID,
+		MaxRepairs: &repairs, TimeoutSeconds: 60, MaxNanoAIU: 1e12,
 		Authorization: core.TaskDecision{
 			ID:   "new-snapshot-review-budget", Source: "human:new-snapshot-review-budget",
 			Text: "Approve a separate review budget",
@@ -1071,8 +1071,8 @@ func TestModelFreeVerificationCanBeConfirmedAndCompletedWithoutRuntime(t *testin
 	}); err != nil {
 		t.Fatal(err)
 	}
-	sha:  = strings.Repeat("a", 40)
-	task: = core.GraphTask{
+	sha := strings.Repeat("a", 40)
+	task := core.GraphTask{
 		ID:                 "manual-verification", Title: "Verify saved acceptance evidence", Repo: "owner/repo",
 		Type:               "VERIFICATION", Issue: "Issue #203", CreatedFrom: "human:review-approval",
 		Owner:              "USER", Reviewer: "REVIEWER", Status: core.Draft, ModelFree: true,

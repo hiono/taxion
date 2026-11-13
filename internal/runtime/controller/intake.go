@@ -345,8 +345,8 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 		if strings.TrimSpace(request.PlanningReason) == "" || request.PlanningSelection.Repository.Path != task.Repo {
 			return core.GraphTask{}, fmt.Errorf("taxion: isolated intake planning requires explicit configuration reason and matching repository")
 		}
-		selection:  = *request.PlanningSelection
-		decisionID: = request.ConfigurationDecisionID
+		selection := *request.PlanningSelection
+		decisionID := request.ConfigurationDecisionID
 		if decisionID == "" {
 			decisionID = selection.Execution.ApprovalRef
 		}
