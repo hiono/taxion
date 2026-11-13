@@ -55,6 +55,7 @@ func TestJobMessageReplyBindsExactRoleExecutions(t *testing.T) {
 	}
 	for _, execution := range []RoleExecution{
 		{ID: "coder", JobID: "job-reply", Role: "CODER", Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
+		{ID: "coder-2", JobID: "job-reply", Role: "CODER", Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
 		{ID: "planner-1", JobID: "job-reply", Role: "PLANNER", Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
 		{ID: "planner-2", JobID: "job-reply", Role: "PLANNER", Status: RoleExecutionCreated, CreatedAt: now, UpdatedAt: now},
 	} {
@@ -83,7 +84,7 @@ func TestJobMessageReplyBindsExactRoleExecutions(t *testing.T) {
 	wrongTarget := wrongSender
 	wrongTarget.ID = "reply-wrong-target"
 	wrongTarget.SourceExecutionID = "planner-1"
-	wrongTarget.TargetExecutionID = "planner-2"
+	wrongTarget.TargetExecutionID = "coder-2"
 	if err := graph.AppendJobMessage(wrongTarget); err == nil {
 		t.Fatal("reply targeting a different originating execution must be rejected")
 	}
