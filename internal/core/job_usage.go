@@ -42,9 +42,33 @@ func (u JobUsage) Verify() error {
 }
 
 func cloneJobUsage(usage JobUsage) JobUsage {
+	if usage.Usage.IsAuto != nil {
+		value := *usage.Usage.IsAuto
+		usage.Usage.IsAuto = &value
+	}
+	if usage.Usage.InputTokens != nil {
+		value := *usage.Usage.InputTokens
+		usage.Usage.InputTokens = &value
+	}
+	if usage.Usage.OutputTokens != nil {
+		value := *usage.Usage.OutputTokens
+		usage.Usage.OutputTokens = &value
+	}
+	if usage.Usage.CacheReadTokens != nil {
+		value := *usage.Usage.CacheReadTokens
+		usage.Usage.CacheReadTokens = &value
+	}
+	if usage.Usage.CacheWriteTokens != nil {
+		value := *usage.Usage.CacheWriteTokens
+		usage.Usage.CacheWriteTokens = &value
+	}
 	if usage.Usage.TotalNanoAIU != nil {
 		value := *usage.Usage.TotalNanoAIU
 		usage.Usage.TotalNanoAIU = &value
+	}
+	if usage.Usage.AICreditsStatus != nil {
+		value := *usage.Usage.AICreditsStatus
+		usage.Usage.AICreditsStatus = &value
 	}
 	if usage.Usage.Accounting != nil {
 		accounting := *usage.Usage.Accounting
