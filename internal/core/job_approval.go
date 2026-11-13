@@ -389,6 +389,52 @@ func (g TaskGraph) CheckRoleExecutionStart(executionID string, at time.Time) err
 	return nil
 }
 
+// CheckRoleExecutionStart verifies Job authority before a Role session is created.
+func (g TaskGraph) CheckRoleExecutionStart(executionID string, at time.Time) error {
+	if at.IsZero() {
+		return graphError("RoleExecution start requires a timestamp")
+	}
+	execution, ok := g.RoleExecution(executionID)
+	if !ok || execution.Status != RoleExecutionCreated {
+		return graphError("RoleExecution must be created before it can start")
+	}
+	job, ok := g.Job(execution.JobID)
+	if !ok || job.Status != JobActive || job.Contract == nil {
+		return graphError("RoleExecution start requires an active Job contract")
+	}
+	if at.After(job.Contract.Deadline) {
+		return graphError("Job deadline has expired")
+	}
+	if !slices.Contains(job.Contract.Roles, execution.Role) {
+		return graphError("RoleExecution role is outside the approved Job role scope")
+	}
+	if _, ok := g.CurrentJobApproval(job.ID); !ok {
+		return graphError("RoleExecution start requires explicit approval of the current Job revision")
+	}
+	if execution.TaskID == "" {
+		return graphError("RoleExecution start requires a Task assignment")
+	}
+	task, ok := g.GraphTask(execution.TaskID)
+	if !ok || task.JobID != job.ID || !TaskWithinJobScope(task, *job.Contract) {
+		return graphError("RoleExecution Task exceeds the approved Job scope")
+	}
+	executions := g.RoleExecutionsForJob(job.ID)
+	if len(executions) > job.Contract.Budget.MaxRoleExecutions {
+		return graphError("Job RoleExecution budget is exhausted")
+	}
+	concurrent := 0
+	for _, candidate := range executions {
+		switch candidate.Status {
+		case RoleExecutionCreated, RoleExecutionRunning, RoleExecutionWaiting, RoleExecutionCancelRequested:
+			concurrent++
+		}
+	}
+	if concurrent > job.Contract.Budget.MaxConcurrentExecutions {
+		return graphError("Job concurrent RoleExecution limit is exceeded")
+	}
+	return nil
+}
+
 // CheckRoleExecutionOperation verifies Job-level authority immediately before a
 // privileged Runtime operation. Role-specific policy must be intersected by the
 // Controller; this check never grants permissions on its own.
