@@ -49,7 +49,7 @@ func (c *JobRoleController) checkRoleToolPolicy(job core.Job) error {
 		return fmt.Errorf("taxion: approved Job Role tool policy is invalid")
 	}
 	if policy != nil {
-		if err := policy.CheckShape(); err != nil {
+		if err := policy.Check(); err != nil {
 			return err
 		}
 	}
