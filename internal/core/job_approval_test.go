@@ -172,8 +172,11 @@ func TestCheckRoleExecutionOperationRequiresCurrentJobApprovalAndScope(t *testin
 	if err := graph.CheckRoleExecutionOperation("exec-a", "repository.read", now.Add(4*time.Second)); err != nil {
 		t.Fatalf("approved in-scope operation rejected: %v", err)
 	}
-	if err := graph.CheckRoleExecutionOperation("exec-a", "network.access", now.Add(4*time.Second)); err != nil {
+	if err := graph.CheckRoleExecutionOperation("exec-a", "test.run", now.Add(4*time.Second)); err != nil {
 		t.Fatalf("explicitly approved operation rejected: %v", err)
+	}
+	if err := graph.CheckRoleExecutionOperation("exec-a", "network.access", now.Add(4*time.Second)); err == nil {
+		t.Fatal("operation outside the approved Job scope must be rejected")
 	}
 	if err := graph.CheckRoleExecutionOperation("exec-a", "unknown.operation", now.Add(4*time.Second)); err == nil {
 		t.Fatal("unknown operation must fail closed")
