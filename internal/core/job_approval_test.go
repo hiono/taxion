@@ -88,7 +88,6 @@ func TestJobContractRejectsUnknownAndUnboundedScope(t *testing.T) {
 	}
 }
 
-
 func TestJobApprovalAppendAndRevisionInvalidation(t *testing.T) {
 	now := time.Now().UTC()
 	job := Job{
