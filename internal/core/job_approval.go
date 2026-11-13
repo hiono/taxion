@@ -46,6 +46,11 @@ func (c JobContract) Validate() error {
 		return graphError("Job contract requires revision, acceptance, evidence, scope, operations, budget, deadline and configuration")
 	}
 	repositories := map[string]bool{}
+	for _, operation := range c.Operations {
+		if !validJobOperation(operation) {
+			return graphError("Job contract contains an unknown operation %q", operation)
+		}
+	}
 	for _, scope := range c.Repositories {
 		if !nonempty(scope.Repository) || repositories[scope.Repository] || scope.FileAccess.Validate() != nil {
 			return graphError("Job contract contains an invalid or duplicate repository scope")
@@ -57,6 +62,15 @@ func (c JobContract) Validate() error {
 		return graphError("Job contract configuration digest is invalid")
 	}
 	return nil
+}
+
+func validJobOperation(operation string) bool {
+	switch operation {
+	case "repository.read", "repository.write", "process.exec", "test.run", "network.access":
+		return true
+	default:
+		return false
+	}
 }
 
 func cloneJobContract(contract *JobContract) *JobContract {

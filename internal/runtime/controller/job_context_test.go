@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -85,4 +86,69 @@ func TestBuildJobExecutionContextIsJobScopedAndExcludesRuntimeBindings(t *testin
 	if updatedHash == hash {
 		t.Fatal("new collaboration information must change the context hash")
 	}
+}
+
+
+func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
+	now := time.Now().UTC()
+	selection := json.RawMessage(`{"repository":{"path":"example/repo"},"execution":{"approvalRef":"config:v1"}}`)
+	configuration, err := core.SelectApprovalConfiguration(selection, map[string]string{
+		"repository.path": "project", "execution.approvalRef": "project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := core.Job{
+		ID: "job-authorized", Request: "request", Goal: "goal", Status: core.JobActive,
+		CreatedAt: now, UpdatedAt: now,
+		Contract: &core.JobContract{
+			Revision: 1, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
+			Repositories: []core.JobRepositoryScope{{Repository: "example/repo", FileAccess: core.FileAccessPolicy{Level: core.FileAccessCommitted}}},
+			Operations: []string{"repository.read", "test.run"},
+			Budget: core.JobBudget{MaxRoleExecutions: 4, MaxConcurrentExecutions: 2, MaxNanoAIU: 20},
+			Deadline: now.Add(time.Hour), Configuration: configuration,
+		},
+	}
+	proposal, err := core.JobProposal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval, err := core.NewJobApproval("approval-job", "human", "user", "approve bounded Job", proposal, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := core.TaskGraph{Version: 1, Jobs: []core.Job{job}}
+	if err := graph.AppendJobApproval(approval); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AppendRoleExecution(core.RoleExecution{
+		ID: "exec-authorized", JobID: job.ID, Role: "PLANNER",
+		Status: core.RoleExecutionCreated, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.TransitionRoleExecution("exec-authorized", core.RoleExecutionRunning, "controller", "start", now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	context, _, err := BuildJobExecutionContext(graph, "exec-authorized")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !context.Job.Approved || context.Job.ApprovalRevision != 1 ||
+		len(context.Job.Repositories) != 1 || len(context.Job.Operations) != 2 ||
+		context.Job.Budget.MaxRoleExecutions != 4 || len(context.Job.Acceptance) != 1 {
+		t.Fatalf("Job approval boundary missing from Role context: %+v", context.Job)
+	}
+	if strings.Contains(mustRenderContext(t, context), "approvalRef") {
+		t.Fatal("Role context must not expose configuration selection references")
+	}
+}
+
+func mustRenderContext(t *testing.T, context JobExecutionContext) string {
+	t.Helper()
+	rendered, err := RenderJobExecutionContext(context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rendered
 }

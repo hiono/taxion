@@ -23,11 +23,20 @@ type JobExecutionContext struct {
 }
 
 type JobContextSummary struct {
-	ID          string   `json:"id"`
-	Request     string   `json:"request"`
-	Goal        string   `json:"goal"`
-	Constraints []string `json:"constraints,omitempty"`
-	Status      string   `json:"status"`
+	ID                   string                   `json:"id"`
+	Request              string                   `json:"request"`
+	Goal                 string                   `json:"goal"`
+	Constraints          []string                 `json:"constraints,omitempty"`
+	Status               string                   `json:"status"`
+	ApprovalRevision     int                      `json:"approvalRevision,omitempty"`
+	Approved             bool                     `json:"approved"`
+	Acceptance           []string                 `json:"acceptance,omitempty"`
+	RequiredEvidence     []string                 `json:"requiredEvidence,omitempty"`
+	Repositories         []core.JobRepositoryScope `json:"repositories,omitempty"`
+	Operations           []string                 `json:"operations,omitempty"`
+	Budget               core.JobBudget           `json:"budget,omitempty"`
+	Deadline             time.Time                `json:"deadline,omitempty"`
+	SecurityRestrictions []string                 `json:"securityRestrictions,omitempty"`
 }
 
 type JobTaskContext struct {
@@ -99,11 +108,26 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 	if !ok {
 		return JobExecutionContext{}, "", fmt.Errorf("taxion: RoleExecution %s has no Job", executionID)
 	}
+	jobSummary := JobContextSummary{
+		ID: job.ID, Request: job.Request, Goal: job.Goal,
+		Constraints: append([]string(nil), job.Constraints...), Status: string(job.Status),
+	}
+	if job.Contract != nil {
+		jobSummary.ApprovalRevision = job.Contract.Revision
+		jobSummary.Acceptance = append([]string(nil), job.Contract.Acceptance...)
+		jobSummary.RequiredEvidence = append([]string(nil), job.Contract.RequiredEvidence...)
+		jobSummary.Repositories = append([]core.JobRepositoryScope(nil), job.Contract.Repositories...)
+		for i := range jobSummary.Repositories {
+			jobSummary.Repositories[i].FileAccess.Paths = append([]string(nil), job.Contract.Repositories[i].FileAccess.Paths...)
+		}
+		jobSummary.Operations = append([]string(nil), job.Contract.Operations...)
+		jobSummary.Budget = job.Contract.Budget
+		jobSummary.Deadline = job.Contract.Deadline
+		jobSummary.SecurityRestrictions = append([]string(nil), job.Contract.SecurityRestrictions...)
+		_, jobSummary.Approved = graph.CurrentJobApproval(job.ID)
+	}
 	result := JobExecutionContext{
-		Job: JobContextSummary{
-			ID: job.ID, Request: job.Request, Goal: job.Goal,
-			Constraints: append([]string(nil), job.Constraints...), Status: string(job.Status),
-		},
+		Job: jobSummary,
 		Current:    projectRoleExecution(execution),
 		Tasks:      make([]JobTaskContext, 0),
 		Executions: make([]RoleExecutionSummary, 0),
