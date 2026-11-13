@@ -808,6 +808,10 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 			return fmt.Errorf("taxion: a superseding contract requires explicit predecessor-flow reapproval")
 		}
 		if !modelFree {
+			// Legacy bridge: this Task-level configuration decision is still consumed by
+			// the current requestCommand/ReviewFlow execution path. It is not JobApproval
+			// and must never grant Job-level authority. Remove it after Job-native request
+			// execution no longer reads Task configuration decisions.
 			approvalText, err := json.Marshal(config.Approval{
 				Kind: config.ApprovalKind, TaskID: task.ID, Reason: request.Reason,
 				Allowed: []config.Config{request.Selection}, AdditionalTaskIDs: request.AdditionalTaskIDs,
@@ -899,8 +903,10 @@ func appendConfirmedIntakeApprovalCandidate(state *store.Workspace, task core.Gr
 		return nil
 	}
 	if task.JobID != "" {
-		// A first-class Job has one Job-level authority. Do not mint or reuse
-		// a legacy Task ApprovalBundle on this path.
+		// Job-native authority path: create only the immutable JobApproval.
+		// The Task-level configuration decision above remains a legacy execution
+		// bridge; it is not an approval source and is scheduled for removal after
+		// the CLI no longer enters the Task/ReviewFlow path.
 		return appendConfirmedJobApproval(state, task, request)
 	}
 	switch state.Graph.ApprovalRequirement() {
