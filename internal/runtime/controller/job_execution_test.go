@@ -134,7 +134,8 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 					Repositories: []core.JobRepositoryScope{{
 						Repository: task.Repo, FileAccess: *task.FileAccess,
 					}},
-					Operations: []string{"repository.read", "repository.write", "process.exec", "test.run"},
+					Operations:         []string{"repository.read", "repository.write", "process.exec", "test.run"},
+					ValidationCommands: append([]string(nil), task.ValidationCommands...),
 					RoleOperations: map[string][]string{
 						"PLANNER":  {"repository.read"},
 						"CODER":    {"repository.read", "repository.write", "process.exec", "test.run"},
