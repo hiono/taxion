@@ -18,6 +18,11 @@ mise exec -- go version
 mise exec -- go build ./...
 ```
 
+Go の整形は Commit 前に自動実行します。初回のみ [pre-commit](https://pre-commit.com/) を導入し、
+リポジトリのルートで `pre-commit install` を実行してください。
+Commit 対象の Go ファイルに `gofmt -w` を適用します。整形によってファイルが変更された場合は、
+変更を再 stage してから Commit してください。CI の `mise run check` でも整形漏れを検出します。
+
 Taxion CLI の動作確認では、[development mode の手順](docs/userguide/binary-provenance.md#明示-policy-と初回設定)に従って隔離 store を使います。
 
 修正中は変更した package のテストを実行し、PR 前に全体を確認します。
