@@ -20,6 +20,7 @@ type JobOutput struct {
 	TreeSHA         string    `json:"treeSha,omitempty"`
 	BlobSHA         string    `json:"blobSha,omitempty"`
 	CreatedAt       time.Time `json:"createdAt"`
+	RecordHash      string    `json:"recordHash"`
 }
 
 // JobEvidence records a verification result for one Job acceptance condition.
@@ -38,6 +39,60 @@ type JobEvidence struct {
 	VerifiedByExecutionID string    `json:"verifiedByExecutionId,omitempty"`
 	CreatedAt             time.Time `json:"createdAt"`
 	VerifiedAt            time.Time `json:"verifiedAt,omitempty"`
+	RecordHash            string    `json:"recordHash"`
+}
+
+
+func (o JobOutput) computeRecordHash() (string, error) {
+	copy := o
+	copy.RecordHash = ""
+	return CanonicalSHA256(copy)
+}
+
+func NewJobOutput(output JobOutput) (JobOutput, error) {
+	if output.RecordHash != "" {
+		return JobOutput{}, graphError("new Job output must not supply a record hash")
+	}
+	hash, err := output.computeRecordHash()
+	if err != nil {
+		return JobOutput{}, err
+	}
+	output.RecordHash = hash
+	return output, nil
+}
+
+func (o JobOutput) Verify() error {
+	hash, err := o.computeRecordHash()
+	if err != nil || hash != o.RecordHash {
+		return graphError("Job output record hash mismatch")
+	}
+	return nil
+}
+
+func (e JobEvidence) computeRecordHash() (string, error) {
+	copy := e
+	copy.RecordHash = ""
+	return CanonicalSHA256(copy)
+}
+
+func NewJobEvidence(evidence JobEvidence) (JobEvidence, error) {
+	if evidence.RecordHash != "" {
+		return JobEvidence{}, graphError("new Job evidence must not supply a record hash")
+	}
+	hash, err := evidence.computeRecordHash()
+	if err != nil {
+		return JobEvidence{}, err
+	}
+	evidence.RecordHash = hash
+	return evidence, nil
+}
+
+func (e JobEvidence) Verify() error {
+	hash, err := e.computeRecordHash()
+	if err != nil || hash != e.RecordHash {
+		return graphError("Job evidence record hash mismatch")
+	}
+	return nil
 }
 
 func validContentSHA256(value string) bool {
