@@ -253,7 +253,9 @@ func TestUserGuideColdStartExamplesWithoutSDK(t *testing.T) {
 		t.Fatal(err)
 	}
 	bindTestJobApproval(t, approvalDB, &confirmation)
-	if err := approvalDB.Close(); err != nil { t.Fatal(err) }
+	if err := approvalDB.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(dir, ".taxion"), 0700); err != nil {
 		t.Fatal(err)
 	}
