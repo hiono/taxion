@@ -135,6 +135,14 @@ func (g TaskGraph) validateJobMessages() error {
 				(message.JobID == "" && (prior.JobID != "" || prior.TaskID != message.TaskID)) {
 				return graphError("Job message reply does not answer an earlier exchange in the same Job and role pair")
 			}
+			// Bind replies to concrete executions when the original message
+			// addressed or originated from a specific execution.
+			if prior.TargetExecutionID != "" && message.SourceExecutionID != prior.TargetExecutionID {
+				return graphError("Job message reply came from a different execution than the addressed execution")
+			}
+			if prior.SourceExecutionID != "" && message.TargetExecutionID != prior.SourceExecutionID {
+				return graphError("Job message reply targets a different execution than the originating execution")
+			}
 		}
 		seen[message.ID] = message
 	}
