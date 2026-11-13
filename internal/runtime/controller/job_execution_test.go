@@ -165,12 +165,25 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if err := controller.AuthorizeOperation("job-role-exec", "network.access", time.Now().UTC()); err == nil {
 		t.Fatal("operation outside Job approval must be rejected")
 	}
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendRoleExecution(core.RoleExecution{
+			ID: "job-role-reviewer", JobID: job.ID, TaskID: task.ID, Role: "REVIEWER",
+			Status: core.RoleExecutionCreated, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.PostMessage("job-role-exec", "job-role-reviewer", "job-role-message",
+		"Please review the implementation and test evidence.", "", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
 	if err := controller.Send(context.Background(), "job-role-exec", "Implement the approved Task."); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(worker.prompt, "Current Job context") ||
 		!strings.Contains(worker.prompt, job.Request) ||
-		!strings.Contains(worker.prompt, "repository.write") {
+		!strings.Contains(worker.prompt, "repository.write") ||
+		!strings.Contains(worker.prompt, "Please review the implementation") {
 		t.Fatalf("Runtime did not receive the approved Job context: %s", worker.prompt)
 	}
 	if _, err := controller.Events(context.Background(), "job-role-exec"); err != nil {
