@@ -1349,3 +1349,47 @@ func TestProposeJobBeforeTasksAndAttachMultipleTasks(t *testing.T) {
 		}
 	}
 }
+
+func TestConfirmIntakeRequiresIndependentJobContractHash(t *testing.T) {
+	db, request := intakeApprovalFixture(t, false)
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingContract := request
+	missingContract.JobContract = nil
+	missingContract.ExpectedJobContractHash = ""
+	if _, err := ConfirmIntake(db, missingContract); err == nil {
+		t.Fatal("Task confirmation without a Job contract must not create Job authority")
+	}
+	wrongHash := request
+	wrongHash.ExpectedJobContractHash = "stale-job-contract-hash"
+	if _, err := ConfirmIntake(db, wrongHash); err == nil {
+		t.Fatal("Task confirmation with a mismatched Job contract hash must be rejected")
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("rejected Job contract confirmation partially changed Task or Job approval state")
+	}
+	if _, ok := after.Graph.CurrentJobApproval(request.TaskID); ok {
+		t.Fatal("invalid Task confirmation created a Job approval")
+	}
+	if _, err := ConfirmIntake(db, request); err != nil {
+		t.Fatalf("explicit Task and Job hashes should confirm: %v", err)
+	}
+	after, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok := after.Graph.JobForTask(request.TaskID)
+	if !ok {
+		t.Fatal("confirmed Task has no owning Job")
+	}
+	approval, ok := after.Graph.CurrentJobApproval(job.ID)
+	if !ok || approval.ProposalHash != request.ExpectedJobContractHash {
+		t.Fatal("Job approval does not match the separately confirmed Job contract hash")
+	}
+}
