@@ -1,0 +1,5 @@
+{
+  "name": "taxion-source-review",
+  "version": "1.0.0",
+  "description": "Synthetic read-only source review skill for local acceptance"
+}

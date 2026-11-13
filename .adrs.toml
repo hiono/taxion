@@ -1,0 +1,7 @@
+# Keep ADR settings in the repository so contributors use the same format.
+adr_dir = "docs/develop/adr"
+mode = "compatible"
+
+[templates]
+format = "nygard"
+variant = "full"

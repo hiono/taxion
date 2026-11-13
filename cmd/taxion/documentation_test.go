@@ -1,0 +1,345 @@
+package main
+
+import (
+	"fmt"
+	"io/fs"
+	"net/url"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"strings"
+	"testing"
+	"unicode"
+
+	"github.com/hiono/taxion/internal/config"
+)
+
+func documentationText(t *testing.T, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var visible []string
+	var fence byte
+	for _, line := range strings.Split(string(body), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			if fence == 0 {
+				fence = trimmed[0]
+			} else if fence == trimmed[0] {
+				fence = 0
+			}
+			continue
+		}
+		if fence == 0 {
+			visible = append(visible, line)
+		}
+	}
+	return strings.Join(visible, "\n")
+}
+
+func documentationAnchors(text string) map[string]bool {
+	anchors := map[string]bool{}
+	for _, match := range regexp.MustCompile(`<a\s+(?:id|name)="([^"]+)"`).FindAllStringSubmatch(text, -1) {
+		anchors[match[1]] = true
+	}
+	seen := map[string]int{}
+	for _, match := range regexp.MustCompile(`(?m)^#{1,6}\s+(.+?)\s*#*\s*$`).FindAllStringSubmatch(text, -1) {
+		title := regexp.MustCompile(`<[^>]*>`).ReplaceAllString(match[1], "")
+		var slug strings.Builder
+		for _, char := range strings.ToLower(title) {
+			if char == ' ' {
+				slug.WriteByte('-')
+			} else if unicode.IsLetter(char) || unicode.IsNumber(char) || char == '_' || char == '-' {
+				slug.WriteRune(char)
+			}
+		}
+		id := slug.String()
+		if seen[id] != 0 {
+			anchors[fmt.Sprintf("%s-%d", id, seen[id])] = true
+		} else {
+			anchors[id] = true
+		}
+		seen[id]++
+	}
+	return anchors
+}
+
+func TestDocumentationLocalLinksWithoutNetwork(t *testing.T) {
+	root := filepath.Join("..", "..")
+	documents := []string{"README.md", "CONTRIBUTING.md", "SECURITY.md", "web/README.md"}
+	if err := filepath.WalkDir(filepath.Join(root, "docs"), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && filepath.Ext(path) == ".md" {
+			relative, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			documents = append(documents, relative)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	links := regexp.MustCompile(`\]\(([^)\s]+)(?:\s+"[^"]*")?\)`)
+	for _, document := range documents {
+		source := filepath.Join(root, document)
+		for _, match := range links.FindAllStringSubmatch(documentationText(t, source), -1) {
+			target, err := url.Parse(match[1])
+			if err != nil {
+				t.Errorf("%s: invalid link %q: %v", document, match[1], err)
+				continue
+			}
+			if target.Scheme != "" || target.Host != "" {
+				continue
+			}
+			destination := source
+			if target.Path != "" {
+				destination = filepath.Join(filepath.Dir(source), target.Path)
+			}
+			if _, err := os.Stat(destination); err != nil {
+				t.Errorf("%s: link %q: %v", document, match[1], err)
+				continue
+			}
+			if target.Fragment != "" && filepath.Ext(destination) == ".md" &&
+				!documentationAnchors(documentationText(t, destination))[target.Fragment] {
+				t.Errorf("%s: link %q has no target heading or anchor", document, match[1])
+			}
+		}
+	}
+}
+
+func TestDocumentationAnchorsPreserveJapaneseAndDuplicateHeadings(t *testing.T) {
+	anchors := documentationAnchors("# 設定と実行前の確認\n## CLI `--json`\n## CLI `--json`\n<a id=\"custom\"></a>")
+	for _, id := range []string{"設定と実行前の確認", "cli---json", "cli---json-1", "custom"} {
+		if !anchors[id] {
+			t.Errorf("missing heading anchor %q", id)
+		}
+	}
+}
+
+func TestUserFacingTerminology(t *testing.T) {
+	roleLabel := regexp.MustCompile(`\bHuman\b`)
+	paths := []string{"../../CONTRIBUTING.md"}
+	if err := filepath.WalkDir("../../docs", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && filepath.Ext(path) == ".md" {
+			paths = append(paths, path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		text := regexp.MustCompile("`[^`]*`").ReplaceAllString(documentationText(t, path), "")
+		if roleLabel.MatchString(text) {
+			t.Errorf("%s: describe people by their role, not an internal role label", path)
+		}
+	}
+	for name, text := range map[string]string{"help": usage, "ready": readyPrompt, "skill": readySkillBody} {
+		if roleLabel.MatchString(text) {
+			t.Errorf("%s: use user-facing terminology", name)
+		}
+	}
+}
+
+func TestConfigurationGuideCoversEveryFieldAndOverride(t *testing.T) {
+	body, err := os.ReadFile("../../docs/userguide/configuration.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference, err := os.ReadFile("../../docs/userguide/cli-reference.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireRow := func(name string) {
+		t.Helper()
+		if !strings.Contains(string(body), "| `"+name+"` |") {
+			t.Errorf("configuration guide has no table row for %q", name)
+		}
+	}
+	typ := reflect.TypeOf(config.Config{})
+	for index := range typ.NumField() {
+		field := typ.Field(index)
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if field.Type.Kind() != reflect.Struct {
+			requireRow(name)
+			continue
+		}
+		for nested := range field.Type.NumField() {
+			requireRow(name + "." + strings.Split(field.Type.Field(nested).Tag.Get("json"), ",")[0])
+		}
+	}
+	if _, found, err := config.EnvironmentLayer(func(variable string) (string, bool) {
+		requireRow(variable)
+		if !strings.Contains(string(reference), "| `"+variable+"` |") {
+			t.Errorf("CLI reference has no configuration override table row for %q", variable)
+		}
+		return "", false
+	}); err != nil || found {
+		t.Fatal("documentation lookup unexpectedly resolved an environment layer", err)
+	}
+}
+
+func TestConfigurationGuideProvidesResolvableLoginDefaults(t *testing.T) {
+	body, err := os.ReadFile("../../docs/userguide/configuration.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	example := regexp.MustCompile("(?s)```yaml\\n(.*?)\\n```").FindSubmatch(body)
+	if len(example) != 2 {
+		t.Fatal("configuration guide has no complete YAML example")
+	}
+	selected, err := config.Load(example[1])
+	if err != nil {
+		t.Fatal("configuration example is invalid", err)
+	}
+	if selected.Repository.CredentialRef != "gh:active" || selected.Runtime.CredentialRef != "copilot:logged-in" {
+		t.Fatal("initial login example uses unresolved credential labels")
+	}
+	for _, command := range []string{"gh auth login", "gh auth status", "glab auth login --hostname", "glab auth status --hostname", "copilot login", "glab:active"} {
+		if !strings.Contains(string(body), command) {
+			t.Errorf("configuration guide omits login preparation %q", command)
+		}
+	}
+}
+
+func TestUserGuideIntroducesHarnessesAndOperatorResponsibilities(t *testing.T) {
+	body := documentationText(t, "../../docs/userguide/user-guide.md")
+	introduction, _, found := strings.Cut(body, "## 導入方法")
+	if !found {
+		t.Fatal("guide has no installation section")
+	}
+	for _, term := range []string{"Copilot CLI", "Copilot SDK", "OpenCode", "ACP", "実行ハーネス", "オーケストレータ", "GitHub", "GitLab", "作業条件"} {
+		if !strings.Contains(introduction, term) {
+			t.Errorf("guide introduces installation before explaining %q", term)
+		}
+	}
+	for _, explanation := range []string{"通常の利用者が JSON や prompt ファイルを書く手順ではありません", "JSON の作成者が agent でも、承認者は利用者です"} {
+		if !strings.Contains(body, explanation) {
+			t.Errorf("guide omits operator/approval boundary: %s", explanation)
+		}
+	}
+}
+
+func TestUserGuideInstallsReleaseBeforeSelectingIt(t *testing.T) {
+	body, err := os.ReadFile("../../docs/userguide/user-guide.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := regexp.MustCompile("(?s)```sh\\n(.*?)\\n```").FindAllStringSubmatch(string(body), -1)
+	checked := 0
+	for _, block := range blocks {
+		var installed string
+		for _, line := range strings.Split(block[1], "\n") {
+			if strings.HasPrefix(line, "mise install ") {
+				installed = strings.TrimPrefix(line, "mise install ")
+			}
+			if !strings.HasPrefix(line, "mise use ") || !strings.Contains(line, "github:hiono/taxion@") {
+				continue
+			}
+			if !strings.Contains(line, "--pin ") || installed == "" || !strings.HasSuffix(line, installed) {
+				t.Errorf("release selection must follow installation of the same version with --pin: %s", line)
+			}
+			if !strings.Contains(block[1], "\nmise exec -- taxion --version") {
+				t.Errorf("release selection must include version verification: %s", line)
+			}
+			checked++
+		}
+	}
+	if checked != 1 {
+		t.Errorf("expected one canonical install/select example, got %d", checked)
+	}
+}
+
+func TestUserGuideDistinguishesACPBuildAndSkillPaths(t *testing.T) {
+	body := documentationText(t, "../../docs/userguide/user-guide.md")
+	for _, detail := range []string{
+		"正式バイナリ",
+		"provenance verify",
+		"file read が許可された role に限り",
+		"`/config/opencode/skills/<skill-name>/`",
+		"未承認の外部 directory は拒否",
+		"`Rate limit exceeded`",
+		"同時実行や無条件の再送を重ねず",
+		"`filePath` へ直すと読取りに成功",
+		"行番号を本文へ含めない",
+		"Flow の期限とは別に12ステップの上限",
+		"要約を操作者が成功 JSON に書き換えず",
+		"成功 Coder を含む元 Flow を `replacesFlow` に指定",
+		"元 Task が既に `SUPERSEDED` でも",
+		"tools/skills も後続 Task の新しい承認から解決",
+	} {
+		if !strings.Contains(body, detail) {
+			t.Errorf("user guide omits ACP preparation constraint %q", detail)
+		}
+	}
+}
+
+func TestCLIReferenceCoversLiteralOptionNames(t *testing.T) {
+	reference, err := os.ReadFile("../../docs/userguide/cli-reference.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations := []*regexp.Regexp{
+		regexp.MustCompile(`\.(?:String|Bool|Int|Int64|Float64|Duration)\("([^"]+)"`),
+		regexp.MustCompile(`\.(?:StringVar|BoolVar|IntVar|Int64Var|Float64Var|DurationVar|Var)\([^,]+,\s*"([^"]+)"`),
+	}
+	options := map[string]string{}
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, declaration := range declarations {
+			for _, match := range declaration.FindAllSubmatch(body, -1) {
+				option := string(match[1])
+				options[option] = source
+			}
+		}
+	}
+	for option, source := range options {
+		if !regexp.MustCompile(`--` + regexp.QuoteMeta(option) + `(?:[^a-zA-Z0-9-]|$)`).Match(reference) {
+			t.Errorf("%s: CLI reference omits --%s", source, option)
+		}
+	}
+	for _, detail := range []string{
+		"Task Graph の初期化が必要",
+		"`INDEPENDENT` の関連先は別 Task の Dispatch",
+		"`--scanner PATH` は `runtime commit` または `--managed-commit`",
+		"`--base SHA`・`--head SHA` は40桁または64桁の完全な16進 SHA を指定する必須 option",
+		"Dispatch を終了する遷移では `--result-file JSON` が必須",
+		"実行する `/ask`・`/plan` には正の `--question-timeout DURATION`",
+		"非空で512 byte以内の検索語",
+		"`copilot`・`opencode` の runtime identity",
+		"`/interrupt`・`いま止める` は表示中の実行に停止を要求する",
+		"`--interactive-execution` では入力を受け付けたまま実行する",
+		"SDK 認証・provider 照会・session 接続・SDK tool・credit ceiling は Copilot 用",
+	} {
+		if !strings.Contains(string(reference), detail) {
+			t.Errorf("CLI reference omits option constraint %q", detail)
+		}
+	}
+	for _, line := range strings.Split(string(reference), "\n") {
+		if strings.HasPrefix(line, "| `conversation search` |") {
+			if !strings.Contains(line, "`--question TEXT`") || !strings.Contains(line, "`--query TEXT`") {
+				t.Fatal("CLI reference must document both conversation search query flags")
+			}
+			return
+		}
+	}
+	t.Fatal("CLI reference omits the conversation search command")
+}

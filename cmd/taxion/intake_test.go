@@ -1,0 +1,466 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/hiono/taxion/internal/config"
+	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/gitproof"
+	"github.com/hiono/taxion/internal/runtime/controller"
+	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/tools"
+)
+
+func TestDocumentNavigationRoutesWithoutSDK(t *testing.T) {
+	for path, targets := range map[string][]string{
+		"README.md": {
+			"docs/userguide/README.md#最初の依頼を進める",
+			"docs/userguide/README.md#止まった作業を続ける", "CONTRIBUTING.md",
+		},
+		"docs/userguide/README.md": {
+			"user-guide.md#導入方法", "user-guide.md#設定と実行前の確認",
+			"user-guide.md#今の-coding-agent-に操作を任せる",
+			"user-guide.md#人のことばで依頼して計画を相談する",
+			"user-guide.md#結果の確認と停止後の継続",
+			"user-guide.md#保存結果と停止後の継続", "execution-records.md#復旧時の照合",
+			"../develop/task-graph.md#停止した作業の継続",
+		},
+		"docs/develop/README.md": {
+			"../../CONTRIBUTING.md#開発環境", "task-graph.md", "runtime-contract.md",
+			"guardrails.md", "../../CONTRIBUTING.md#文書の配置と責務",
+			"../../CONTRIBUTING.md#リリース", "adr/", "decision-traceability.md",
+		},
+	} {
+		path = filepath.Join("../..", path)
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, target := range targets {
+			if !strings.Contains(string(body), "]("+target+")") {
+				t.Errorf("%s omits route %s", path, target)
+			}
+			location, fragment, _ := strings.Cut(target, "#")
+			destination := filepath.Join(filepath.Dir(path), location)
+			if _, err := os.Stat(destination); err != nil {
+				t.Errorf("%s route %s: %v", path, target, err)
+				continue
+			}
+			if fragment != "" {
+				content, err := os.ReadFile(destination)
+				if err != nil {
+					t.Fatal(err)
+				}
+				heading := regexp.MustCompile(`(?m)^#{1,6} ` + regexp.QuoteMeta(strings.ReplaceAll(fragment, "-", " ")) + `$`)
+				if !heading.Match(content) {
+					t.Errorf("%s route %s lacks its heading", path, target)
+				}
+			}
+		}
+	}
+	for _, directory := range []string{"../../docs/userguide", "../../docs/develop"} {
+		paths, err := filepath.Glob(filepath.Join(directory, "*.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range paths {
+			if regexp.MustCompile(`^\d+-`).MatchString(filepath.Base(path)) {
+				t.Errorf("general document implies a reading sequence: %s", path)
+			}
+		}
+	}
+}
+
+func TestUserGuideSkillApprovalExampleWithoutSDK(t *testing.T) {
+	guide, err := os.ReadFile("../../docs/userguide/user-guide.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, example := range regexp.MustCompile("(?s)```json\\n(.*?)\\n```").FindAllSubmatch(guide, -1) {
+		var header struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.Unmarshal(example[1], &header); err != nil {
+			t.Fatal(err)
+		}
+		if header.Kind != tools.ApprovalKind {
+			continue
+		}
+		found++
+		var approval tools.Approval
+		if err := core.DecodeGraphInput(bytes.NewReader(example[1]), &approval); err != nil {
+			t.Fatal("guide tools approval does not match schema", err)
+		}
+		directory := t.TempDir()
+		path := filepath.Join(directory, "SKILL.md")
+		if err := os.WriteFile(path, []byte("---\nname: fixture-guide\ndescription: Synthetic guide instructions.\n---\nCheck the document.\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		hash, err := tools.Hash(directory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for role, policy := range approval.Roles {
+			if len(policy.Skills) != 1 {
+				t.Fatal("guide must identify its skill asset")
+			}
+			policy.Skills[0] = tools.Asset{Path: directory, Hash: hash}
+			policy.EvidenceDirectory = filepath.Join(t.TempDir(), "private")
+			approval.Roles[role] = policy
+		}
+		body, err := json.Marshal(approval)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decisions := []core.TaskDecision{{ID: "tools", Source: "human:fixture", Text: string(body)}}
+		for _, role := range []string{"CODER", "REVIEWER"} {
+			policy, err := tools.Resolve(decisions, approval.TaskID, role)
+			if err != nil || policy == nil {
+				t.Fatal("guide role policy did not resolve", role, err)
+			}
+			if err := policy.Check(); err != nil {
+				t.Fatal("guide role asset did not pass free preflight", role, err)
+			}
+		}
+		if _, err := tools.Resolve(decisions, "unrelated-task", "CODER"); err == nil {
+			t.Fatal("guide approval transferred to unrelated Task")
+		}
+	}
+	if found != 1 {
+		t.Fatalf("expected one skill approval example, got %d", found)
+	}
+}
+
+func TestUserGuideColdStartExamplesWithoutSDK(t *testing.T) {
+	guide, err := os.ReadFile("../../docs/userguide/user-guide.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var examples [][][]byte
+	for _, example := range regexp.MustCompile("(?s)```json\\n(.*?)\\n```").FindAllSubmatch(guide, -1) {
+		var header struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.Unmarshal(example[1], &header); err != nil {
+			t.Fatal("guide JSON is invalid", err)
+		}
+		if header.Kind != tools.ApprovalKind {
+			examples = append(examples, example)
+		}
+	}
+	if len(examples) != 3 {
+		t.Fatalf("expected intake, confirmation and flow examples; got %d", len(examples))
+	}
+
+	var intake controller.IntakeRequest
+	var confirmation controller.IntakeConfirmation
+	var flowRequest controller.ReviewFlowRequest
+	for index, target := range []any{&intake, &confirmation, &flowRequest} {
+		if err := core.DecodeGraphInput(bytes.NewReader(examples[index][1]), target); err != nil {
+			t.Fatalf("decode guide example %d: %v", index+1, err)
+		}
+	}
+	if confirmation.Selection.Repository.CredentialRef != "gh:active" ||
+		confirmation.Selection.Runtime.CredentialRef != "copilot:logged-in" {
+		t.Fatal("guide confirmation must use the same resolvable login defaults as the configuration example")
+	}
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	old := storePath
+	storePath = filepath.Join(dir, "ledger.json")
+	t.Cleanup(func() { storePath = old })
+	root, baseline := createGitWorktree(t, intake.Task.Branch,
+		"https://github.com/"+intake.Task.Repo+".git")
+	intake.Task.Worktree, intake.Task.BaselineSHA = root, baseline
+	if err := initCmd(); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name string, value any) string {
+		t.Helper()
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	var out bytes.Buffer
+	if err := conversationCmd([]string{"intake", "--file", write("request.json", intake)}, &out); err != nil {
+		t.Fatalf("guide intake is not executable: %v", err)
+	}
+	var proposal struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &proposal); err != nil {
+		t.Fatal(err)
+	}
+	confirmation.ExpectedHash = proposal.Hash
+	if err := os.MkdirAll(filepath.Join(dir, ".taxion"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	configuration, err := json.Marshal(confirmation.Selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".taxion/config.yaml"), configuration, 0600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := conversationCmd([]string{"confirm", "--file", write("confirmation.json", confirmation)}, &out); err != nil {
+		t.Fatalf("guide confirmation is not executable: %v", err)
+	}
+	if err := checkConfig([]string{"check", "--task", intake.Task.ID}, &out); err != nil {
+		t.Fatal(err)
+	}
+	flowRequest.ReviewRoot = filepath.Join(dir, "reviews")
+	out.Reset()
+	if err := workflowCommand(t.Context(), []string{"plan", "--file", write("flow.json", flowRequest)}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var preview controller.StagePlanPreview
+	if err := json.Unmarshal(out.Bytes(), &preview); err != nil || preview.StateChanged || preview.Plan == nil {
+		t.Fatal("guide plan is not read-only", err)
+	}
+	flowRequest.StagePlanHash = preview.Plan.Hash
+	if err := workflowCmd([]string{"start", "--file", write("flow.json", flowRequest)}); err != nil {
+		t.Fatalf("guide flow is not executable: %v", err)
+	}
+	db, state, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	dispatch := state.Graph.Dispatches[0]
+	if _, err := selectDispatchConfiguration(db, dispatch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitproof.ObserveStart(dispatch); err != nil {
+		t.Fatalf("guide Coder cannot start: %v", err)
+	}
+	task, _ := state.Graph.GraphTask(intake.Task.ID)
+	for index := 0; index <= *flowRequest.MaxRepairs; index++ {
+		reviewID := fmt.Sprintf("%s-review-%d", flowRequest.ID, index)
+		approved := false
+		for _, decision := range task.Decisions {
+			if decision.ID == confirmation.Selection.Execution.ApprovalRef {
+				approved = config.CheckApproval(decision.Text, reviewID, decision.ID, confirmation.Selection) == nil
+			}
+		}
+		if !approved {
+			t.Fatalf("guide configuration approval does not cover Reviewer Task %s", reviewID)
+		}
+	}
+	if task.OutputMode != core.OutputModeWorktreeTreeSnapshot || dispatch.Instruction.CommitMessagePolicy != "" {
+		t.Fatal("guide file-only tool allowlist requires snapshot mode, not managed commit")
+	}
+	if len(state.Graph.Dispatches) != 1 || dispatch.ExecutionStarted || dispatch.RuntimeSessionID != "" {
+		t.Fatal("cold-start verification executed an SDK turn")
+	}
+}
+
+func TestConversationIntakeRequiresExactHumanConfirmationBeforeDispatch(t *testing.T) {
+	old := storePath
+	dir := t.TempDir()
+	storePath = filepath.Join(dir, "ledger.json")
+	t.Cleanup(func() { storePath = old })
+	db, err := store.Open(workspaceDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.InitializeWorkspace(store.Workspace{Ledger: core.Ledger{}}); err != nil {
+		t.Fatal(err)
+	}
+	task := core.GraphTask{
+		ID: "intake", Title: "Requested work", Repo: "owner/repo", Type: "IMPLEMENTATION",
+		Status: core.Draft, Issue: "Issue #54", CreatedFrom: "human:request",
+		Owner: "CODER", Reviewer: "REVIEWER", Objective: "Implement requested work",
+		Scope: []string{"src"}, Acceptance: []string{"approved behavior passes"},
+		RequiredEvidence: []string{"test-report"}, ValidationCommands: []string{"go test ./..."},
+		ExitCondition: "independently verified", Worktree: filepath.Join(dir, "repo"),
+		Branch: "work", BaselineSHA: strings.Repeat("a", 40),
+	}
+	write := func(name string, value any) string {
+		t.Helper()
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	var out bytes.Buffer
+	if err := conversationCmd([]string{"intake", "--file", write("intake.json", controller.IntakeRequest{
+		Request: "Please implement the approved behavior; ask if scope is unclear.",
+		Task:    task, Actor: "human", Source: "human:request",
+	})}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var proposal struct {
+		Task core.GraphTask `json:"task"`
+		Hash string         `json:"hash"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &proposal); err != nil || proposal.Task.Status != core.Draft || proposal.Hash == "" {
+		t.Fatal("intake did not expose an unapproved contract and exact hash", err)
+	}
+	resolved, err := config.Resolve([]config.Layer{{Source: "user", Input: []byte(`version: 1
+project: {id: demo}
+repository: {provider: github, host: github.com, path: owner/repo, account: scm-user, credentialRef: scm}
+runtime: {provider: copilot, account: ai-user, credentialRef: ai, contractRef: contract}
+execution: {requester: human, worker: local, approvalRef: intake-config}
+`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmation := controller.IntakeConfirmation{TaskID: task.ID, ExpectedHash: proposal.Hash,
+		Actor: "human", Source: "human:confirm", Reason: "Confirm this exact scope, acceptance and configuration",
+		Selection: resolved.Config, AdditionalTaskIDs: []string{"intake-flow-review-0"}}
+	out.Reset()
+	if err := conversationCmd([]string{"confirm", "--file", write("confirm.json", confirmation)}, &out); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := db.LoadWorkspace()
+	ready, _ := state.Graph.GraphTask(task.ID)
+	if ready.Status != core.Ready || len(state.Graph.Dispatches) != 0 {
+		t.Fatal("confirmation executed work or failed to authorize exact contract")
+	}
+	out.Reset()
+	if err := conversationCmd([]string{"proposal", "--task", task.ID}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out.Bytes(), &proposal); err != nil || proposal.Task.Status != core.Ready {
+		t.Fatal("proposal retrieval did not reconstruct saved state", err)
+	}
+}
+
+func TestModelFreeVerificationCompletesThroughCLIWithoutRuntime(t *testing.T) {
+	old := storePath
+	dir := t.TempDir()
+	storePath = filepath.Join(dir, "ledger.json")
+	t.Cleanup(func() { storePath = old })
+	db, err := store.Open(workspaceDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InitializeWorkspace(store.Workspace{
+		HasGraph: true, Graph: core.TaskGraph{Version: 1, ApprovalSchemaVersion: core.CurrentApprovalSchemaVersion},
+		Ledger: core.Ledger{},
+	}); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	sha := strings.Repeat("a", 40)
+	task := core.GraphTask{
+		ID: "manual-verification", Title: "Verify saved acceptance evidence", Repo: "owner/repo",
+		Type: "VERIFICATION", Issue: "NOT_REQUIRED: local verification", CreatedFrom: "human:request",
+		Owner: "USER", Reviewer: "REVIEWER", Status: core.Draft, ModelFree: true,
+		Objective:          "Verify the recorded acceptance evidence without model execution.",
+		Scope:              []string{"internal/runtime/controller/artifact_successor_test.go"},
+		OutOfScope:         []string{"source changes", "model execution"},
+		Acceptance:         []string{"focused test passes"},
+		RequiredEvidence:   []string{"focused-test-output"},
+		ValidationCommands: []string{"go test ./internal/runtime/controller -run TestFailedArtifactSuccessorBindsReceiptAndRunsCoderThenReview -count=1"},
+		Branch:             "review/issue-203", Worktree: dir, BaselineSHA: sha, TargetSHA: sha,
+		ExitCondition: "Independent evidence review is recorded",
+	}
+	write := func(name string, value any) string {
+		t.Helper()
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	var out bytes.Buffer
+	if err := conversationCmd([]string{"intake", "--file", write("intake.json", controller.IntakeRequest{
+		Request: "Record the approved model-free verification.", Task: task,
+		Actor: "human", Source: "human:request",
+	})}, &out); err != nil {
+		t.Fatal("model-free CLI intake required runtime configuration", err)
+	}
+	var proposal struct {
+		Task core.GraphTask `json:"task"`
+		Hash string         `json:"hash"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &proposal); err != nil ||
+		proposal.Task.Status != core.Draft || proposal.Hash == "" {
+		t.Fatal("intake did not return a DRAFT proposal and exact hash", err)
+	}
+	out.Reset()
+	if err := conversationCmd([]string{"proposal", "--task", task.ID}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out.Bytes(), &proposal); err != nil || proposal.Hash == "" {
+		t.Fatal("proposal command did not return the exact contract hash", err)
+	}
+	out.Reset()
+	if err := conversationCmd([]string{"confirm", "--file", write("confirm.json", controller.IntakeConfirmation{
+		TaskID: task.ID, ExpectedHash: proposal.Hash, Actor: "human", Source: "human:approval",
+		Reason: "Approve this exact model-free verification contract",
+	})}, &out); err != nil {
+		t.Fatal("exact-hash model-free confirmation failed", err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, _ := state.Graph.GraphTask(task.ID)
+	if ready.Status != core.Ready || len(state.Graph.Approvals) != 0 || len(state.Graph.Dispatches) != 0 {
+		t.Fatal("model-free confirmation created runtime approval or Dispatch", ready)
+	}
+
+	for _, status := range []core.TaskStatus{core.Active, core.WaitingForEvidence, core.WaitingForReview} {
+		if err := taskCmd([]string{"transition", "--file", write("transition.json", struct {
+			TaskID string          `json:"taskId"`
+			Status core.TaskStatus `json:"status"`
+			Actor  string          `json:"actor"`
+			Reason string          `json:"reason"`
+		}{task.ID, status, "human", "record model-free verification evidence"})}); err != nil {
+			t.Fatalf("transition to %s: %v", status, err)
+		}
+	}
+	proof := core.TransitionProof{
+		ActionPerformed: true, Evidence: task.RequiredEvidence, Acceptance: task.Acceptance,
+		ReviewedSHA: sha, Reviewer: task.Reviewer,
+	}
+	for _, status := range []core.TaskStatus{core.Approved, core.Completed} {
+		if err := taskCmd([]string{"transition", "--file", write("transition.json", struct {
+			TaskID string               `json:"taskId"`
+			Status core.TaskStatus      `json:"status"`
+			Actor  string               `json:"actor"`
+			Reason string               `json:"reason"`
+			Proof  core.TransitionProof `json:"proof"`
+		}{task.ID, status, "human", "record independently reviewed evidence", proof})}); err != nil {
+			t.Fatalf("transition to %s: %v", status, err)
+		}
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, _ := state.Graph.GraphTask(task.ID)
+	if completed.Status != core.Completed || len(state.Graph.Dispatches) != 0 {
+		t.Fatal("model-free CLI Task did not complete without Dispatch", completed)
+	}
+}

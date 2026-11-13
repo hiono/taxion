@@ -1,0 +1,474 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/hiono/taxion/internal/config"
+	"github.com/hiono/taxion/internal/core"
+	"github.com/hiono/taxion/internal/runtime/copilot"
+	"github.com/hiono/taxion/internal/store"
+)
+
+func TestConfigCheckFixedFilesAndTaskApproval(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	input := `version: 1
+project: {id: project-a}
+repository:
+  provider: github
+  host: github.com
+  path: owner/application
+  account: developer-a
+  credentialRef: scm-credential
+runtime:
+  provider: copilot
+  account: developer-b
+  credentialRef: ai-credential
+  contractRef: company-contract
+execution:
+  requester: developer-a
+  worker: local-worker
+  approvalRef: decision-1
+`
+	userDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(userDir, "taxion", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(input), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := checkConfig([]string{"check"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "have not been verified") ||
+		strings.Contains(output.String(), "ai-credential") {
+		t.Fatal("check claimed external authorization or printed credential references")
+	}
+	oldStore := storePath
+	storePath = filepath.Join(t.TempDir(), "ledger.json")
+	defer func() { storePath = oldStore }()
+	if err := initCmd(); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := config.Load([]byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := json.Marshal(config.Approval{
+		Kind: config.ApprovalKind, TaskID: "task", Reason: "approved selection", Allowed: []config.Config{candidate},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := updateWorkspace(func(state *store.Workspace) error {
+		state.HasGraph = true
+		state.Graph = core.TaskGraph{Version: 1}
+		task := core.GraphTask{
+			ID: "task", Title: "config", Repo: "owner/application", Type: "IMPLEMENTATION",
+			Issue: "Issue #69", Status: core.Draft, CreatedFrom: "human:request",
+			Owner: "CODER", Reviewer: "REVIEWER", Objective: "approved work", Scope: []string{"src"},
+			Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"report"}, ExitCondition: "tests pass",
+			ValidationCommands: []string{"go test ./..."}, Worktree: t.TempDir(), Branch: "work/task",
+			BaselineSHA: strings.Repeat("a", 40), AuthorizationID: "decision-1",
+			Decisions:  []core.TaskDecision{{ID: "decision-1", Source: "human:selection", Text: string(approved)}},
+			FileAccess: &core.FileAccessPolicy{Level: core.FileAccessAll},
+		}
+		state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{ID: task.ID, Title: task.Title, Repo: task.Repo})
+		return state.Graph.Track(task, "human", "record selection")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := checkConfig([]string{"check", "--task", "task"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "matches a sourced Task approval") ||
+		!strings.Contains(output.String(), "execution readiness have not been verified") {
+		t.Fatal("Task approval output overstated execution verification")
+	}
+	if err := updateWorkspace(func(state *store.Workspace) error {
+		if err := state.Graph.Transition("task", core.Ready, "human", "ready", core.TransitionProof{}); err != nil {
+			return err
+		}
+		dispatch, err := core.NewGraphDispatch(state.Graph, "dispatch", "task", candidate.Repository.Path, core.RelationshipNone, "", "")
+		if err != nil {
+			return err
+		}
+		if err := state.Graph.IssueDispatch(dispatch, "controller", "issue"); err != nil {
+			return err
+		}
+		state.Ledger.Dispatches = append(state.Ledger.Dispatches, core.Dispatch{
+			ID: dispatch.ID, TaskID: dispatch.TaskID, Repo: dispatch.Repository, Active: true, CreatedAt: dispatch.CreatedAt,
+		})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := checkConfig([]string{"check", "--dispatch", "dispatch", "--sources"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "saved Dispatch instruction") ||
+		!strings.Contains(output.String(), "runtime configuration binding have not been verified") ||
+		strings.Contains(output.String(), "ai-credential") {
+		t.Fatal("Dispatch approval check exposed references or claimed runtime verification")
+	}
+	output.Reset()
+	if err := checkConfig([]string{"bind", "--dispatch", "dispatch"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "selection and field origins saved") ||
+		!strings.Contains(output.String(), "runtime session binding remain unverified") ||
+		strings.Contains(output.String(), "ai-credential") {
+		t.Fatal("configuration binding output exposed values or overstated runtime verification")
+	}
+	db, beforeAuth, err := loadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	selectedDispatch, err := selectDispatchConfiguration(db, beforeAuth.Graph.Dispatches[0])
+	if err != nil || selectedDispatch.Configuration == nil {
+		t.Fatal("runtime did not select the approved fixed configuration", err)
+	}
+	workerConfig := copilot.Config{
+		Role: "CODER", SystemPrompt: "approved role", CLIPath: "/bin/true",
+		WorkingDirectory: selectedDispatch.Instruction.Worktree, BaseDirectory: t.TempDir(),
+	}
+	selectedWorker, err := newDispatchWorker(context.Background(), db, selectedDispatch, workerConfig, false, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer selectedWorker.Close()
+	if len(selectedWorker.ExecutionConfiguration()) == 0 {
+		t.Fatal("saved selection not supplied to the SDK identity")
+	}
+	legacyDispatch := selectedDispatch
+	legacyDispatch.Instruction.Version = core.StructuredResultInstructionVersion
+	legacyWorker, err := newDispatchWorker(context.Background(), db, legacyDispatch, workerConfig, false, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacyWorker.Close()
+	if legacyWorker.ConfigHash() == selectedWorker.ConfigHash() {
+		t.Fatal("common worker factory omitted the new Dispatch's source reader")
+	}
+	t.Setenv("HOME", t.TempDir())
+	output.Reset()
+	if err := doctorCmd([]string{"--dispatch", "dispatch", "--cli", doctorFixtureCLI(t),
+		"--base-directory", t.TempDir(), "--json"}, &output); err != nil {
+		t.Fatal("saved Dispatch diagnosis failed", err)
+	}
+	var diagnostic copilot.DiscoveryReport
+	if err := json.Unmarshal(output.Bytes(), &diagnostic); err != nil ||
+		diagnostic.Worktree != selectedDispatch.Instruction.Worktree {
+		t.Fatal("doctor did not use the saved execution worktree", err)
+	}
+	afterDoctor, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(beforeAuth, afterDoctor) {
+		t.Fatal("doctor changed saved Dispatch state", err)
+	}
+	authArgs := []string{"auth", "--dispatch", "dispatch", "--system-prompt-file", "missing-prompt", "--cli", "missing-copilot"}
+	output.Reset()
+	if err := runtimeQuotaCmd([]string{"--dispatch", "dispatch", "--cli", "missing-copilot"}, &output); err == nil ||
+		!strings.Contains(err.Error(), "approved account guidance") || output.Len() != 0 {
+		t.Fatal("quota probe reached the runtime without approved account guidance", err, output.String())
+	}
+	if err := runtimeCmd(authArgs); err == nil || !strings.Contains(err.Error(), "read system prompt") {
+		t.Fatal("approved auth probe did not reach local adapter inputs", err)
+	}
+	if err := os.Mkdir(".taxion", 0700); err != nil {
+		t.Fatal(err)
+	}
+	override := filepath.Join(".taxion", "config.yaml")
+	if err := os.WriteFile(override, []byte("version: 1\nruntime:\n  account: selected-account\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := checkConfig([]string{"check", "--sources"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "runtime.account: project") ||
+		!strings.Contains(output.String(), "runtime.contractRef: user") ||
+		strings.Contains(output.String(), "selected-account") {
+		t.Fatal("field origins missing or selected value exposed")
+	}
+	t.Setenv("TAXION_RUNTIME_ACCOUNT", "developer-b")
+	output.Reset()
+	if err := checkConfig([]string{"check", "--dispatch", "dispatch", "--sources"}, &output); err != nil {
+		t.Fatal("environment could not select the original approved tuple over the Project candidate", err)
+	}
+	if !strings.Contains(output.String(), "runtime.account: environment") ||
+		!strings.Contains(output.String(), "saved Dispatch instruction") ||
+		strings.Contains(output.String(), "developer-b") {
+		t.Fatal("approved environment selection lost provenance or exposed the account")
+	}
+	if _, err := selectDispatchConfiguration(db, selectedDispatch); err != nil {
+		t.Fatal("approved environment override could not reuse the saved selection", err)
+	}
+	unchanged, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(beforeAuth, unchanged) {
+		t.Fatal("same approved environment selection replaced stored origins or approval", err)
+	}
+	t.Setenv("TAXION_RUNTIME_ACCOUNT", "selected-account")
+	output.Reset()
+	if err := checkConfig([]string{"check", "--dispatch", "dispatch", "--sources"}, &output); err == nil ||
+		!strings.Contains(err.Error(), "outside the recorded approval") ||
+		strings.Contains(err.Error(), "selected-account") || output.Len() != 0 {
+		t.Fatal("environment precedence widened Dispatch approval or exposed rejected values", err)
+	}
+	if err := runtimeCmd(authArgs); err == nil ||
+		!strings.Contains(err.Error(), "outside the recorded approval") ||
+		strings.Contains(err.Error(), "selected-account") {
+		t.Fatal("unapproved auth probe reached adapter inputs or exposed configuration", err)
+	}
+	if _, err := selectDispatchConfiguration(db, selectedDispatch); err == nil {
+		t.Fatal("runtime accepted an unapproved configuration change")
+	}
+	for _, action := range []string{"start", "resume", "send", "events", "commit"} {
+		args := []string{action, "--dispatch", "dispatch", "--system-prompt-file", "missing-prompt", "--cli", "missing-copilot"}
+		if action == "send" {
+			args = append(args, "--prompt-file", "missing-input")
+		}
+		if action == "commit" {
+			args = append(args, "--message-file", "missing-message")
+		}
+		if err := runtimeCmd(args); err == nil || !strings.Contains(err.Error(), "outside the recorded approval") {
+			t.Fatal("execution action bypassed fixed configuration gate", action, err)
+		}
+	}
+	if err := runtimeCmd([]string{"stop", "--dispatch", "dispatch"}); err == nil ||
+		!strings.Contains(err.Error(), "saved execution session") {
+		t.Fatal("safe-stop attachment was blocked by current settings", err)
+	}
+	stopWorker, err := newDispatchWorker(context.Background(), db, selectedDispatch, workerConfig, false, false, "")
+	if err != nil || stopWorker.ConfigHash() != selectedWorker.ConfigHash() {
+		t.Fatal("saved identity cannot attach for safe stop after configuration changes", err)
+	}
+	defer stopWorker.Close()
+	afterAuth, err := db.LoadWorkspace()
+	if err != nil || !reflect.DeepEqual(beforeAuth, afterAuth) {
+		t.Fatal("auth preflight changed the workspace", err)
+	}
+	for _, args := range [][]string{
+		nil, {"show"}, {"check", "extra"},
+		{"check", "--task", "missing"},
+		{"check", "--task", "task"},
+		{"check", "--dispatch", "dispatch"},
+		{"check", "--dispatch", "missing"},
+		{"check", "--task", "task", "--dispatch", "dispatch"},
+		{"bind"}, {"bind", "--task", "task"},
+		{"bind", "--dispatch", "missing"}, {"bind", "--dispatch", "dispatch"},
+	} {
+		output.Reset()
+		if err := checkConfig(args, &output); err == nil || output.Len() != 0 {
+			t.Fatal("invalid invocation produced a successful configuration check")
+		}
+	}
+	if err := os.WriteFile(path, []byte(input+"token: private-secret\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := checkConfig([]string{"check"}, &output); err == nil ||
+		strings.Contains(err.Error(), "private-secret") || output.Len() != 0 {
+		t.Fatal("invalid input succeeded or leaked its value")
+	}
+}
+
+func TestBillingReportUsesSavedTaskAndDispatchPolicyWithoutMutation(t *testing.T) {
+	for _, test := range []struct {
+		name, provider, contract, mode string
+	}{
+		{"copilot-account", "copilot", "account-contract", "account"},
+		{"opencode-free", "opencode", "verified-free-route", "provider"},
+		{"opencode-go-account", "opencode", "go-contract", "account"},
+		{"opencode-go-provider", "opencode", "go-contract", "provider"},
+		{"legacy", "copilot", "legacy-contract", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root, _ := requestFixture(t)
+			t.Setenv("TAXION_EXECUTION_BUDGET_GUIDANCE", "provider")
+			t.Setenv("TAXION_RUNTIME_CONTRACT_REF", test.contract)
+			t.Setenv("TAXION_RUNTIME_PROVIDER", test.provider)
+			t.Setenv("TAXION_BILLING_CONTRACT", "provider-limit")
+			t.Setenv("TAXION_BILLING_OVERAGE", "denied")
+			t.Setenv("TAXION_BILLING_AUTO_RECHARGE", "disabled")
+			t.Setenv("TAXION_BILLING_PAID_FALLBACK", "disabled")
+			if test.provider == "opencode" {
+				t.Setenv("TAXION_RUNTIME_ACCOUNT", "opencode-managed")
+				t.Setenv("TAXION_RUNTIME_CREDENTIAL_REF", "opencode-managed")
+				t.Setenv("TAXION_RUNTIME_ACP_COMMAND", "/not-executed/opencode")
+				t.Setenv("TAXION_RUNTIME_ACP_CONFIG", "/not-read/opencode.json")
+				t.Setenv("TAXION_RUNTIME_ACP_CONFIG_HASH", "sha256:"+strings.Repeat("a", 64))
+			}
+			selected, err := resolveConfiguration()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var policy *core.BudgetGuidancePolicy
+			if test.mode != "" {
+				policy, err = core.NewBillingBudgetGuidance("", test.mode, selected.Config.Billing)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			approval, err := json.Marshal(config.Approval{
+				Kind: config.ApprovalKind, TaskID: "billing-task", Reason: "explicit Task billing choice",
+				Allowed: []config.Config{selected.Config},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := updateWorkspace(func(state *store.Workspace) error {
+				state.HasGraph, state.Graph = true, core.TaskGraph{Version: 1}
+				task := core.GraphTask{
+					ID: "billing-task", Title: "billing", Repo: selected.Config.Repository.Path,
+					Type: "IMPLEMENTATION", Issue: "Issue #234", Status: core.Draft,
+					Owner: "CODER", Reviewer: "REVIEWER", CreatedFrom: "human:billing",
+					Objective: "inspect approved billing", Scope: []string{"README.md"},
+					Acceptance: []string{"verified"}, RequiredEvidence: []string{"report"},
+					ValidationCommands: []string{"go test ./..."}, ExitCondition: "verified",
+					Worktree: root, Branch: "work/request", BaselineSHA: strings.Repeat("a", 40),
+					AuthorizationID: selected.Config.Execution.ApprovalRef,
+					Decisions: []core.TaskDecision{{ID: selected.Config.Execution.ApprovalRef,
+						Source: "human:billing", Text: string(approval)}},
+					BudgetGuidance: policy,
+				}
+				state.Ledger.Tasks = append(state.Ledger.Tasks, core.Task{ID: task.ID, Title: task.Title, Repo: task.Repo})
+				if err := state.Graph.Track(task, "human", "record billing choice"); err != nil {
+					return err
+				}
+				if err := state.Graph.Transition(task.ID, core.Ready, "human", "ready", core.TransitionProof{}); err != nil {
+					return err
+				}
+				dispatch, err := core.NewGraphDispatch(state.Graph, "billing-dispatch", task.ID, task.Repo, core.RelationshipNone, "", "")
+				if err != nil {
+					return err
+				}
+				state.Ledger.Dispatches = append(state.Ledger.Dispatches, core.Dispatch{
+					ID: dispatch.ID, TaskID: dispatch.TaskID, Repo: dispatch.Repository, Active: true, CreatedAt: dispatch.CreatedAt,
+				})
+				return state.Graph.IssueDispatch(dispatch, "controller", "issue")
+			}); err != nil {
+				t.Fatal(err)
+			}
+			db, err := openWorkspace()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			before := snapshotFiles(t, filepath.Dir(workspaceDBPath()))
+			for _, target := range []string{"task", "dispatch"} {
+				id := "billing-" + target
+				var output bytes.Buffer
+				err := checkConfig([]string{"check", "--billing", "--" + target, id}, &output)
+				if test.mode == "" {
+					if err == nil || !strings.Contains(err.Error(), "defaults were not applied") || output.Len() != 0 {
+						t.Fatal("legacy contract was silently upgraded", err, output.String())
+					}
+					continue
+				}
+				var report struct {
+					ContractBasis, Provider, ContractRef, Verification string
+					TaskID, DispatchID                                 string
+					Policy                                             *core.BudgetGuidancePolicy
+					Sources                                            map[string]string
+					ExecutionAuthorized                                bool
+				}
+				if err != nil || json.Unmarshal(output.Bytes(), &report) != nil ||
+					report.ContractBasis != "saved-"+target || report.Provider != test.provider ||
+					report.TaskID != "billing-task" || (report.DispatchID != "") != (target == "dispatch") ||
+					report.ContractRef != test.contract || !reflect.DeepEqual(report.Policy, policy) ||
+					len(report.Sources) != 0 || report.ExecutionAuthorized ||
+					report.Verification != "human-declaration-not-provider-verified" ||
+					strings.Contains(output.String(), "credentialRef") {
+					t.Fatal("saved Task policy was replaced by defaults or overstated verification", err, output.String())
+				}
+				t.Setenv("TAXION_BILLING_PAID_FALLBACK", "unknown")
+				output.Reset()
+				if err := checkConfig([]string{"check", "--billing", "--" + target, id}, &output); err == nil || output.Len() != 0 {
+					t.Fatal("changed billing reused saved authorization", err, output.String())
+				}
+				t.Setenv("TAXION_BILLING_PAID_FALLBACK", "disabled")
+			}
+			if !reflect.DeepEqual(before, snapshotFiles(t, filepath.Dir(workspaceDBPath()))) {
+				t.Fatal("billing report changed database, WAL, SHM or other workspace files")
+			}
+		})
+	}
+}
+
+func TestConfigCheckReportsExplicitEndpointIdentity(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	input := `version: 1
+project: {id: project-a}
+repository:
+  provider: gitlab
+  host: gitlab.example.com
+  path: group/subgroup/application
+  account: developer-a
+  credentialRef: scm-credential
+runtime:
+  provider: copilot
+  account: developer-b
+  credentialRef: ai-credential
+  contractRef: company-contract
+execution:
+  requester: developer-a
+  worker: local-worker
+  approvalRef: decision-1
+endpoints:
+  apiBase: https://gitlab.example.com/git/api/v4
+  webBase: https://gitlab.example.com/git
+  httpsCloneBase: https://gitlab.example.com/git
+  sshHost: gitlab.example.com
+  sshPort: "2222"
+  projectId: "191"
+`
+	userDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(userDir, "taxion", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(input), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := checkConfig([]string{"check", "--sources"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"repository.identityMode: explicit endpoints",
+		"endpoints.apiBase: user", "endpoints.sshPort: user", "endpoints.projectId: user"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatal("field origin or identity mode missing", want, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "git/api/v4") {
+		t.Fatal("sources output exposed endpoint values")
+	}
+	broken := strings.Replace(input, "https://gitlab.example.com/git", "https://other.example.com/git", 1)
+	if err := os.WriteFile(path, []byte(broken), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	err = checkConfig([]string{"check", "--sources"}, &output)
+	if err == nil || !strings.Contains(err.Error(), "REP-002") || output.Len() != 0 {
+		t.Fatal("inconsistent endpoint hosts were not refused as REP-002", err)
+	}
+}

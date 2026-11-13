@@ -1,0 +1,282 @@
+# 実行の復旧と承認済み外部記録
+
+Taxion は、実行結果と送信予定の外部記録を Task Graph と同じ SQLite transaction で保存する。
+controller が結果・Git・承認を照合し、GitHub adapter が承認された公開操作を実行する。
+CLI はローカルの信頼された管理者が操作する。`actor` と承認の出典は管理者が指定する参照であり、
+Taxion は参加者の本人認証を行わない。複数利用者の project 参加・権限、契約、session 所有権は
+[#71](https://github.com/hiono/taxion/issues/71)で追跡する未実装の範囲である。
+
+## 復旧時の照合
+
+別マシンへ正式状態と Git 成果を移す場合は、[利用者ガイドの一ファイル移送](user-guide.md#別マシンへの一ファイル移送)を使う。`workspace snapshot`・`inspect-snapshot`・`restore` は停止済みの状態を扱い、旧 session を自動再開しない。通常の workspace DB の単純コピーを、Memory・Git を含む復元の代用にしない。
+
+| 保存された状態 | 再起動後の処理 |
+| --- | --- |
+| 発行済み、実行開始前 | 現在の設定承認・主体・権限・worktree を確認して開始する。保存済み Session があれば同じ Session を使う |
+| Coder・Reviewer の実行中 | 同じ役割・設定の Session に接続して観測する。欠落・失効・不明な実行はエラーとして保持し、停止確認と後続契約の承認で処理する |
+| Coder の結果取得後 | 結果と利用量の receipt、現在の origin・branch・HEAD・親 SHA・変更範囲・検証記録を照合して独立レビューへ進む。snapshot mode は baseline commit SHA、保持 ref、output tree SHA と path を照合する |
+| Reviewer の結果取得後 | 解放済み worktree の不存在と Git registry、元 repository の対象 commit・親 SHA・origin、直前 Coder と同じ出力 SHA を照合する。snapshot mode は Coder と同じ output tree SHA も照合する |
+| 利用者の判断待ち・保留中 | 対象、保留、補足、指示案の版、質問・調査の出典、明示反映を復元する。続行は保存済みの保留解除・承認条件に従う |
+| 完了 checkpoint | receipt と最新の Coder・Reviewer の Git 証拠を再確認する。改変は明示的なエラーになる |
+
+snapshot mode では `outputSha` は baseline commit SHA のまま、`outputTreeSha` は Controller が Git tree から算出する成果物識別子である。両者は別の値として Task・Dispatch・Reviewer の証拠に保存する。Controller は tree object を `refs/taxion/snapshots/` に保持し、再起動後も ref と実 worktree の tree・変更 path を照合する。ref の保持はローカル Git metadata の変更であり、branch、commit、index、remote は変更しない。
+
+`workflow recover` は、観測した runner ID と旧 process の停止確認、判断者、理由、証拠を要求する。
+全 Dispatch の終了と証拠照合が済むと、旧 runner の所有権を解除して復旧記録を保存する。
+実行中の Dispatch は先に `runtime stop` または確認できた結果で処理する。
+失敗した照合では所有権と元の結果を保持する。
+
+実行開始は指示送信前に永続化する。開始済み Dispatch の再送はエラーになる。
+開始記録だけが残った場合も、Session の観測と停止確認で処理する。
+SQLite の破損、非互換の JSON、未知の公開状態は読み込みエラーとして扱う。
+
+## イベントと結果の receipt
+
+controller は output・usage・turn 終了・失敗・cancel のイベントについて、
+Dispatch、Session、stream ID、sequence、内容の hash、観測時刻を保存する。
+usage とその receipt は一緒に保存する。同じ stream・sequence の同一イベントは再利用し、
+異なる内容の再送と cancel 後のイベント・結果を拒否する。
+
+SDK adapter の sequence は接続した adapter 内の番号である。
+provider の永続 event ID として扱える範囲が限られるため、保存済み stream から
+別 stream へ再接続したイベントの採用は明示的な照合エラーにする。
+接続後の観測と、結果・利用量の確定は分けて扱う。
+
+### 利用量の単位と停止条件
+
+現在の Copilot SDK adapter が扱う `assistant.usage` はモデル呼出しごとの利用量であり、
+session の累積カウンターではない。Taxion は各呼出しの `inputTokens` と
+`outputTokens` を Dispatch に保存し、Flow に属する Dispatch 分を合計する。
+cache read/write の内訳は保存するが、この token 合計へ別途加算しない。
+`session.usage_info` の context window 使用量や、`session.usage.getMetrics` の
+session 累積コスト、account quota もこの合計に足さない。token から AI credits へは換算しない。
+
+SDK の accounting identity（`sourceSessionId`・`sequence`・`usageId`）が同じ利用量は
+一度だけ採用する。同じ identity で数値が異なる場合はエラーとする。
+identity がないイベントは保存した stream・sequence で再送を照合するため、
+別接続の観測を同一呼出しと推測して集計しない。
+input/output の欠落はゼロと区別し、利用量不明として先へ進めない。
+合計が整数の上限を超える場合は最大値で飽和させ、負数へ巻き戻さない。
+
+新しい Flow は token 数を閾値として停止しない。各 usage event で取得できた
+nano-AIU と `AICreditsStatus` を event 出力へ報告する。account quota の読取りが
+承認済みなら、`premium_interactions` の request 残数と使用率も別項目で表示する。
+これは AI Credit と異なる単位である。AI Credit の account 残高・使用率・残り率は
+同じ課金単位の allowance が確認できない限り unavailable とする。
+
+account quota の読取りが承認済みの場合、Controller は新しい Dispatch を送る前に、
+残り率で次の2つを判定する。どちらかに当たると、モデルへ送信せずに拒否し、
+`denialReason` を記録する。
+
+- `controller-reserve`：残り率が5%以下である。親の Controller の利用は Taxion の
+  記録に含まれないため、Controller が報告と引継ぎを続けられる量を残す。
+- `daily-allocation`：その UTC 日に記録した最初の残り率から、
+  （最初の残り率 − 5%）÷ リセットまでの UTC 日数（当日を含む）以上減っている。
+  次の UTC 日（日本時間9時）に判定し直す。
+
+リセット日時は Copilot の認証情報にある `quota_reset_date_utc` から取得する。
+取得できない場合は日割りの判定を行わず、5%の判定だけを行う。
+この固定5%方式は既存契約の動作として維持する。
+
+Task の承認対象である `budgetGuidance` に
+`"accountAllocation":"reset-daily"` を明示して承認すると、
+過去の固定5%方式の代わりに、
+リセットまで日割りで下がる残量下限を適用する。`accountReadApproved` と
+`account` の許可も必要である。既存 Task への追加は再承認を要する。
+通常の `--budget-guidance account` だけでは、この新方式へ切り替わらない。
+
+同じアカウント・資源・単位・範囲・リセット周期について、最初の観測時刻と残り率を
+保存し、以後の判定で再利用する。開始時からリセットまでの24時間区間数を
+`N = ceil((reset − start) / 24h)`、現在からの区間数を
+`M = ceil((reset − now) / 24h)` とすると、残量下限は
+`開始時の残り率 × (M − 1) / N` となる。下限以下では
+`reset-daily-floor` を記録して実行を拒否する。UTC 日付変更ではなく、
+提供元のリセット時刻から逆算した区間で配分する。
+
+開始時の残り率が90%、リセットまで30日の場合、最初の下限は87%、
+15日経過後は42%、リセット直前の24時間は0%となる。
+月末に固定の残量を余らせることを目的にしない。ただし、0%での追加送信は拒否する。
+残量が増えても開始時の配分を拡大せず、保存された基準の欠落・改変やリセット日時の取得不能は
+エラーとする。後続 Dispatch は保存済みの開始基準を使い、当日の消費枠を作り直さない。
+稼働中のリセット周期変更も引き続き停止する。
+
+この方式は親の報告用残量や厳密な請求上限を保証しない。最終24時間には親の残量も
+使い切る可能性がある。既存の時間制限と明示の `maxNanoAiu` 上限は維持する。
+
+`reset-daily` を承認した Task は、Flow 開始要求の
+`maxNanoAiu` を省略・0にできる。保存する予算と評価結果の
+`accountQuotaOnly: true` が、nano-AIU 上限の代わりに残量下限で制御することを示す。
+`maxNanoAiu`・`nanoAiuRemaining` の0を残量枯渇や無制限と解釈しない。
+使用量が不明なら `creditsStatus` は不明のまま保持し、この方式の停止条件には使わない。
+明示した正の上限は従来どおり追加の停止条件になる。
+この方式では送信時の `off`・`flow` 指定によって残量監視を無効化できない。
+旧 Task のモード変更や既存上限の削除には新たな承認が必要となる。
+新方式では、残量非対応の実行基盤も時間制限だけに切り替えず拒否する。
+無制限契約でも有限の残量基準を確定できないため、この方式は使用できない。
+新方式を理解しない旧版への切替は、稼働 session を停止し、新方式の契約を
+旧版で再利用しない条件で行う。
+
+枠を使い切った場合は、提供元が超過利用を許可していても拒否する。
+残り率は単位に依存しないため、request 数、AI Credit、nano-AIU の間で換算しない。
+OpenCode のように account quota を読めない runtime では、この判定は行われず、
+`account` 方式での実行を拒否する。他の方式で実行できる条件は[課金ガイド](billing.md)を参照する。
+
+Copilot の `account` mode は、送信前の残り率が取得不能・期限切れ・
+未対応の場合も送信を拒否する。`off`・`flow` mode と、account quota 非対応の
+OpenCode を quota 検証済みとは扱わない。
+
+Coder・Reviewer の event 監視では、無通信でも約1分ごとと、最終結果の採用前に
+account quota を再取得する。予約率・日割り枠への到達、残量の取得失敗、
+開始時に保存したリセット日時または resource の変更で、観測を receipt に保存して
+session の安全停止を要求する。Flow は `BUDGET_STOP` と handoff 保留を保存し、
+未コミット成果と取得できた partial Git evidence を保持する。停止要求の失敗は
+停止成功として記録しない。送信時の account 観測がない旧実行は続行しない。
+新しい承認で開始する Dispatch の日割り枠には、別の reset cycle の観測を使わない。
+
+独立した Planner・質問・SDK 検索の処理も、承認済みの `account` mode では
+無通信時に約1分ごとと最終結果の採用前に残量を再取得する。
+残量不足、不明・古い観測、開始時からの周期・資源の変更では
+`BUDGET_STOP` エラーを返して独立 session の停止を要求し、回答を採用しない。
+停止処理の失敗も返すため、エラーだけで停止済みとは判断しない。
+元の `budgetGuidance` は送信時の観測として保持し、
+以後の観測は結果の `quotaObservations` に含める。
+質問・計画では session と内容 hash を付けて計画記録に保存し、
+SDK 検索では既存の検索証跡へ保存する。主役割の指示・結果・承認は変更しない。
+この変更で質問結果の追加項目を含む保存データを読む場合は、
+対応版を使い、旧版の厳密な JSON 読取りとの互換性を前提にしない。
+
+この監視は定期観測であり、提供元の更新遅延、観測間の消費、停止要求が完了するまでの
+消費を防ぐ課金保証ではない。親 Controller だけの消費量の実測は行っていない。
+
+既存 workspace の `maxTokens` と `BUDGET_LIMIT` は履歴互換のため読み取るが、
+新規実行の入力・停止条件には使わない。停止済み Flow の結果は書き換えない。
+稼働中は時間と費用の不足見込みをまとめて判断し、正式な `workflow extend` で同じ実行を維持する。
+停止済みレビューは保存成果から後続を承認する。手順と適用条件は[復旧ガイド](failure-recovery.md)を参照する。
+
+OpenCode ACP の利用量は、取得元ごとに単位が異なる。ACP prompt response が返すのは最後の
+assistant message の usage であり、その turn の全 tool iteration の合計ではない。
+`usage_update` の `used` は context の使用量、`size` は context の上限を指し、
+`cost` は assistant message の cost を合算した session 累積の USD であって
+account quota ではない。これらはどれも Taxion の Flow 合計や課金保証へ読み替えない。
+未取得・未確認の利用量は、ゼロ・無料・無制限として扱わない。
+
+### 結果と履歴の照合
+
+結果の receipt は、保存した結果とその時点の利用量をまとめて照合する。
+`SUSPENDED` の後に安全停止して `CANCELLED` を保存する場合は、同じ Dispatch の
+結果 receipt に連続した sequence を付けて追記し、元の suspension receipt を保持する。
+照合時は最新結果との一致に加え、履歴の順序、過去の suspension の Dispatch・Session
+識別子、内容 hash、保存済み利用量との一致を検査する。
+旧版の成功結果も読み出せるが、receipt を持たない checkpoint の自動採用は
+証拠不足として停止する。履歴を確認し、停止・後続契約の明示承認で作業を進める。
+hash は保存内容の取り違え・個別改変の検出に使う。保存先全体の書換えに対する
+真正性は、管理者のアクセス制御と保管運用で確保する。
+
+## 外部記録の公開手順
+
+実装済みの操作は、GitHub の Issue 作成、Issue・PR のコメント、Issue の完了 close と、
+GitLab の Issue 作成・コメント・完了 close、merge request のコメントである。
+GitLab merge request の作成・承認・close は未対応である。
+追加の操作・host・添付形式は、能力エラーとして返し、対応する adapter の実装後に利用する。
+
+公開要求には、Task ID、provider・host・repository、外部種別・番号、操作、本文、
+作成時の件名、API account、credential 参照、判断者、承認の出典を指定する。
+repository と作業記録先が異なる場合は `taskRepository` にコード側の repository を指定する。
+利用者がこれらの接続先・主体・内容を承認した後、オーケストレータが対応する hash を `expectedHash` として承認要求に戻す。
+
+```sh
+taxion records proposal --file requested-publication.json > reviewed-publication.json
+# 利用者が公開内容を承認し、オーケストレータが対応する hash を照合する
+taxion records approve --file reviewed-publication.json --scanner /trusted/betterleaks
+taxion records send --id accepted-report --scanner /trusted/betterleaks
+taxion records show
+```
+
+入力は `{"update": {...}, "expectedHash": "..."}` という JSON object である。
+proposal の段階では `expectedHash` を省略できる。`status`・送信 claim・時刻などは controller が設定する。
+GitHub は `gh:active`、GitLab は `glab:active`、またはいずれも `env:NAME` を使う。
+各 API process には選択した provider credential だけを渡し、Copilot credential は runtime が扱う。
+
+Issue 作成は、`PENDING:<登録Task ID>` と登録 Task の完了依存を持つ DRAFT Task に対して行う。
+送信を確認すると、新しい Issue 番号を Task に保存する。
+登録 Task の証拠確認・完了と、対象 Task の READY への承認は既存の Task 遷移で行う。
+対象 Task の実行許可は、登録 Task の完了と READY への承認で確定する。
+既存 Issue の再利用は、その番号を登録した Task に対して行う。
+
+## 送信状態と再起動
+
+| 状態 | 意味と次の操作 |
+| --- | --- |
+| `PENDING` | 承認済みの送信待ち。本文の再検査と現在の権限・Task 条件の確認後に送信する |
+| `CLAIMED` | 一つの sender が所有する。別 process は同じ記録を送信できない |
+| `UNKNOWN` | 書込みを試みたが応答を確認できない。旧 sender の停止確認と送信先の照合を行う |
+| `SENT` | 外部 ID と確認した結果を保存済み。同じ要求は保存済み結果を返す |
+
+送信前の検査・権限確認の失敗は `PENDING`、書込み後の応答喪失は `UNKNOWN` に保存する。
+送信先では本文に付けた `<!-- taxion:<hash> -->` を検索し、
+本文・作成時の件名・作者・外部種別・ID を確認する。重複や一致しない marker は照合エラーになる。
+close は、対象 Issue の `closed`・`completed` という状態を照合する操作である。
+
+```sh
+taxion records reconcile --id accepted-report --claim <保存されたclaim> --sender-stopped
+```
+
+照合できると `SENT` を保存し、Issue 作成なら Task への関連づけも復元する。
+marker が見つからない場合は利用者が provider 側の処理・遅延・操作履歴を確認する。
+新しい承認は、その確認結果を出典にして別 ID で行う。
+外部 API の書込みと SQLite の保存には時間差があるため、
+不明な結果を保存して照合する方式で重複送信を防ぐ。
+
+## 失敗分析と close
+
+`records finding --file finding.json` は、失敗・レビュー指摘の結果 hash、
+原因、是正措置、lesson 候補、検証の参照、利用者の決定と出典を保存する。
+検証の参照には、その結果に保存された evidence、または `dispatch:<ID>:result` を使う。
+是正後の検証は、同じ Task／ReviewFlow の終了済み結果を
+`dispatch:<ID>:result:<結果JSONのSHA256>` で指定し、保存済み receipt と照合する。
+新しい分析 ID で是正の確認結果を追加し、最初の失敗判断も保持する。
+記録が指す結果の成否は元の結果から読む。是正措置の記載と、是正後の成功証拠は別々に確認する。
+同じ ID・同じ内容の判断は再利用し、異なる内容の上書きはエラーになる。
+lesson の強制ルール化は Memory の明示的な承認手順で行う。
+
+Issue の close は、Task・ReviewFlow の完了、acceptance と検証結果、
+Reviewer の対象 SHA、最新 Git、receipt、出典付き例外承認、依存状態、
+先行する外部記録の `SENT` を照合してから行う。
+claim 後にも、外部書込みの直前に現在の Task 条件を確認する。
+書込みとの時間差で契約が変わった場合は、保存失敗を表面化し、claim と送信先を照合する。
+
+## 公開前の秘密検査
+
+`records proposal` / `approve` / `send` は、本文・件名の公開方針と、`TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256` で指定した保護対象 token の digest 一覧を検査する。一覧は必須で、未設定・空・不正値・一致があれば hash の提示、承認、送信を停止する。設定方法と検出範囲は[設定ガイド](configuration.md#環境変数)を参照する。承認後に一覧が変わった場合も送信前に再検査し、本文を自動で変更しない。
+
+Betterleaks 1.9.0 の固定既定ルールで、承認時と送信時の本文・件名をローカル検査する。
+scanner の失敗・欠落・不正な結果は公開を停止し、エラーには秘密値を含めない。
+添付と追加の API 操作は、対応する公開形式の検査を実装した adapter で扱う。
+
+push 前は、確認済みの remote base と公開する head を full SHA で固定して全範囲を検査する。
+各 commit の tree と message を private index で読み、
+最新ファイルで削除済みの秘密も検出する。worktree と本来の index は保持する。
+
+```sh
+taxion git check-range --base <full-remote-base-SHA> --head <full-head-SHA> --scanner /trusted/betterleaks
+```
+
+公開者は検査した head を指定して push する。新規 branch では、公開先が既に持つ基点を確認する。
+scanner の検出範囲、submodule 内部、外部から取得する内容はそれぞれ確認が必要である。
+provider 側の受信時保護と CI の検出・merge gate は
+[開発基盤の対応評価](../develop/forge-capabilities.md) に整理する。
+
+## 再現できる障害ケース
+
+モデルや外部サービスを呼ばない回帰テストでは、SQLite 接続のクローズ・再接続、実 Git repository・worktree の照合、
+重複 process、結果・利用量の改変、イベント再送、cancel 後の結果、
+Issue 作成後の応答喪失と再関連づけを確認する。
+復旧→レビュー指摘の保存→修正 SHA のレビュー→公開応答喪失→照合→close も検証する。
+GitHub の応答障害は fixture、CLI 引数・credential 分離・pagination は gh 脚本で再現する。
+実モデルを使う SDK 受入れは、通常 CI と分離した明示承認・予算上限付きの検証として行う。
+
+GitHub 実受入れでは、利用者が接続先・主体・本文 hash を承認し、
+新しい CLI から [#56 のコメント](https://github.com/hiono/taxion/issues/56#issuecomment-6115563384) を公開した。
+`SENT` と外部 ID を保存した後、別 process から同じ ID を再送して同じ記録を取得し、
+GitHub 側の marker・作者・コメント件数が一件であることを照合した。
+この受入れの追加 SDK 推論は 0 件である。

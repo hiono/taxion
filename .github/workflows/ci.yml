@@ -1,0 +1,88 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  public-communication:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.2'
+      - name: Public policy, generated comments and false-positive regressions
+        run: go test -count=1 ./internal/publictext ./internal/forge ./scripts/publictext
+      - name: Public text, local paths, secrets and protected identifiers
+        env:
+          TAXION_PUBLIC_PRIVATE_IDENTIFIER_SHA256: ${{ secrets.PUBLIC_TEXT_PRIVATE_IDENTIFIER_SHA256 }}
+        run: go run ./scripts/publictext -repository
+      - name: Documentation and local links (no network)
+        run: go test -count=1 ./cmd/taxion -run '^(TestDocumentation|TestConfigurationGuide|TestUserGuide)'
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Go formatting
+        run: |
+          unformatted="$(gofmt -l cmd internal)"
+          if [ -n "$unformatted" ]; then
+            printf '%s\n' "$unformatted"
+            while IFS= read -r file; do gofmt -d "$file"; done <<< "$unformatted"
+            exit 1
+          fi
+      - run: go vet ./...
+      - run: TAXION_TEST_FAILED_REVIEW_CLI=build go test ./...
+      - run: go build ./...
+  core-purity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # SDK-001: internal/core must import stdlib only
+      - run: |
+          echo "=== imports of internal/core ==="
+          go list -f '{{ join .Imports "\n" }}' ./internal/core | sort -u
+          if go list -f '{{ join .Imports "\n" }}' ./internal/core | grep -vE '^([a-z0-9_/]+[.][a-z]+)?(errors|fmt|sort|strings|time|sync|context|encoding|os|io|net|regexp|strconv|testing)$' | grep -v '^$' | grep .; then
+            # Check dependency paths too so indirect external imports violate SDK-001.
+            if go list -f '{{ join .Deps "\n" }}' ./internal/core | grep '\.' | grep -v '^vendor' | grep -E 'github\.|golang\.|google\.'; then
+              echo "SDK-001 violation: external dep in internal/core"; exit 1
+            fi
+          fi
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # Full race can exceed Go's default 10m package timeout under instrumentation.
+      - run: TAXION_TEST_FAILED_REVIEW_CLI=build go test -race -timeout 30m ./...
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - run: npm test
+        working-directory: web
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          echo "=== secret / provenance hygiene (PRIV-001) ==="
+          # Full token shapes only (bare prefixes appear in docs legitimately).
+          ! grep -rEn --include='*.go' --include='*.mod' --include='*.sum' --include='*.toml' --include='*.yml' --include='*.yaml' --exclude='ci.yml' --exclude-dir=.git 'gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' . || (echo "secret pattern found"; exit 1)
+          echo OK
