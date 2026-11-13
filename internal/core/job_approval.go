@@ -196,7 +196,8 @@ func (g *TaskGraph) AppendJobApproval(approval JobApproval) error {
 		return err
 	}
 	for _, existing := range next.JobApprovals {
-		if existing.ID == approval.ID || existing.Proposal.JobID }| existing.Proposal.Revision == approval.Proposal.Revision {
+		if existing.ID == approval.ID || existing.Proposal.JobID == approval.Proposal.JobID &&
+			existing.Proposal.Revision == approval.Proposal.Revision {
 			return graphError("Job revision already has an approval or approval ID is duplicated")
 		}
 	}

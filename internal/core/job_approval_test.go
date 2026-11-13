@@ -8,7 +8,7 @@ import (
 
 func validJobContract(t *testing.T) *JobContract {
 	t.Helper()
-	selection := json.RawMessage({"repository":{"path":"example/repo"},"execution":{"approvalRef":"config:v1"}}}`)
+	selection := json.RawMessage(`{"repository":{"path":"example/repo"},"execution":{"approvalRef":"config:v1"}}`)
 	config, err := SelectApprovalConfiguration(selection, map[string]string{
 		"repository.path": "project", "execution.approvalRef": "project",
 	})
