@@ -80,6 +80,62 @@ func intakeApprovalFixture(t *testing.T, bundleRequired bool) (*store.Store, Int
 		Selection: resolved.Config, JobContract: &contract, ExpectedJobContractHash: jobHash}
 }
 
+func withExplicitJobContractForIntake(t *testing.T, db *store.Store, request IntakeConfirmation) IntakeConfirmation {
+	t.Helper()
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := state.Graph.GraphTask(request.TaskID)
+	if !ok {
+		t.Fatalf("Task %s is missing", request.TaskID)
+	}
+	if modelFreeVerification(task) {
+		return request
+	}
+	job, ok := state.Graph.JobForTask(task.ID)
+	if !ok {
+		t.Fatalf("Task %s has no owning Job", task.ID)
+	}
+	var contract core.JobContract
+	if request.JobContract != nil {
+		contract = *request.JobContract
+	} else {
+		encoded, err := json.Marshal(request.Selection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		configuration, err := core.SelectApprovalConfiguration(encoded, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contract, err = BuildJobContractForIntake(task, configuration,
+			core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 2, MaxNanoAIU: 1000},
+			time.Now().UTC().Add(24*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if job.Contract == nil {
+		contract.Revision = 1
+	} else if !reflect.DeepEqual(*job.Contract, contract) {
+		contract.Revision = job.Contract.Revision + 1
+	} else {
+		contract.Revision = job.Contract.Revision
+	}
+	job.Contract = &contract
+	proposal, err := core.JobProposal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.JobContract = &contract
+	request.ExpectedJobContractHash, err = proposal.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request
+}
+
 func TestIntakeConfirmationDerivesBundleWithoutSecondApproval(t *testing.T) {
 	db, request := intakeApprovalFixture(t, true)
 	before, _ := db.LoadWorkspace()
