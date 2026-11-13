@@ -438,8 +438,8 @@ func (g TaskGraph) validateJobModel() error {
 		if !ok || task.ID == task.JobID {
 			return graphError("Task %s references a missing or colliding Job", task.ID)
 		}
-		if owner.Contract != nil && !TaskWithinJobScope(task, *owner.Contract) {
-			return graphError("Task %s exceeds its Job repository or file-access scope", task.ID)
+		if owner.Contract != nil && !TaskWithinJobContract(task, *owner.Contract) {
+			return graphError("Task %s exceeds its approved Job contract", task.ID)
 		}
 	}
 	for _, job := range g.Jobs {

@@ -45,6 +45,35 @@ func TestJobApprovalBindsExactJobRevision(t *testing.T) {
 	}
 }
 
+func TestTaskCannotWidenApprovedJobContract(t *testing.T) {
+	contract := *validJobContract(t)
+	task := GraphTask{ID: "task-a", Repo: "example/repo", Acceptance: []string{"tests pass"},
+		RequiredEvidence: []string{"test-report"}, FileAccess: &FileAccessPolicy{Level: FileAccessCommitted}}
+	if !TaskWithinJobContract(task, contract) { t.Fatal("in-scope Task should be accepted") }
+	widenedAcceptance := task
+	widenedAcceptance.Acceptance = []string{"deploy production"}
+	if TaskWithinJobContract(widenedAcceptance, contract) { t.Fatal("Task acceptance must remain within approved Job criteria") }
+	widenedEvidence := task
+	widenedEvidence.RequiredEvidence = []string{"production credentials"}
+	if TaskWithinJobContract(widenedEvidence, contract) { t.Fatal("Task evidence must remain within approved Job criteria") }
+	commands := task
+	commands.ValidationCommands = []string{"go test ./..."}
+	if TaskWithinJobContract(commands, contract) { t.Fatal("validation commands require approved process.exec and test.run") }
+	contract.Operations = append(contract.Operations, "process.exec")
+	if !TaskWithinJobContract(commands, contract) { t.Fatal("approved validation operations should permit validation commands") }
+}
+
+func TestTaskGraphRejectsTaskContractOutsideApprovedJob(t *testing.T) {
+	now := time.Now().UTC()
+	job := Job{ID: "job-a", Request: "request", Goal: "goal", Status: JobActive,
+		CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t)}
+	task := GraphTask{ID: "task-a", JobID: job.ID, Repo: "example/repo",
+		Acceptance: []string{"unapproved acceptance"}, RequiredEvidence: []string{"test-report"},
+		FileAccess: &FileAccessPolicy{Level: FileAccessCommitted}}
+	graph := TaskGraph{Version: 1, Jobs: []Job{job}, Tasks: []GraphTask{task}}
+	if err := graph.validateJobModel(); err == nil { t.Fatal("Graph validation must reject Task acceptance outside the Job contract") }
+}
+
 func TestTaskScopeCannotWidenJobRepositoryScope(t *testing.T) {
 	contract := *validJobContract(t)
 	allowed := GraphTask{ID: "task-a", Repo: "example/repo", FileAccess: &FileAccessPolicy{Level: FileAccessExact, Paths: []string{"src/main.go"}}}

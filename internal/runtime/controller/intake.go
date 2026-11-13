@@ -425,24 +425,8 @@ func cloneIntakeJobContract(contract *core.JobContract) (*core.JobContract, erro
 }
 
 func taskCoveredByJobContract(task core.GraphTask, contract core.JobContract) error {
-	if !core.TaskWithinJobScope(task, contract) ||
-		!slices.Contains(contract.Operations, "repository.read") ||
-		!slices.Contains(contract.Operations, "repository.write") {
+	if !core.TaskWithinJobContract(task, contract) {
 		return fmt.Errorf("taxion: Task repository or file access exceeds the approved Job scope")
-	}
-	for _, acceptance := range task.Acceptance {
-		if !slices.Contains(contract.Acceptance, acceptance) {
-			return fmt.Errorf("taxion: Task acceptance criterion is outside the approved Job contract")
-		}
-	}
-	for _, evidence := range task.RequiredEvidence {
-		if !slices.Contains(contract.RequiredEvidence, evidence) {
-			return fmt.Errorf("taxion: Task evidence requirement is outside the approved Job contract")
-		}
-	}
-	if len(task.ValidationCommands) > 0 &&
-		(!slices.Contains(contract.Operations, "process.exec") || !slices.Contains(contract.Operations, "test.run")) {
-		return fmt.Errorf("taxion: Task validation commands are outside the approved Job operation scope")
 	}
 	return nil
 }

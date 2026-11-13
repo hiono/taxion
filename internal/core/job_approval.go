@@ -312,6 +312,32 @@ func (g TaskGraph) validateJobApprovals() error {
 
 // TaskWithinJobScope checks the enforceable repository and file-access
 // boundary. Natural-language Task scope is intentionally not treated as a grant.
+// TaskWithinJobContract verifies every structured Task boundary against the
+// approved Job contract. Task prose does not grant authority, but acceptance,
+// evidence and validation requirements must remain subsets of the approved Job.
+func TaskWithinJobContract(task GraphTask, contract JobContract) bool {
+	if !TaskWithinJobScope(task, contract) ||
+		!slices.Contains(contract.Operations, "repository.read") ||
+		!slices.Contains(contract.Operations, "repository.write") {
+		return false
+	}
+	for _, acceptance := range task.Acceptance {
+		if !slices.Contains(contract.Acceptance, acceptance) {
+			return false
+		}
+	}
+	for _, evidence := range task.RequiredEvidence {
+		if !slices.Contains(contract.RequiredEvidence, evidence) {
+			return false
+		}
+	}
+	if len(task.ValidationCommands) > 0 &&
+		(!slices.Contains(contract.Operations, "process.exec") || !slices.Contains(contract.Operations, "test.run")) {
+		return false
+	}
+	return true
+}
+
 func TaskWithinJobScope(task GraphTask, contract JobContract) bool {
 	var allowed *JobRepositoryScope
 	for i := range contract.Repositories {
@@ -374,7 +400,7 @@ func (g TaskGraph) CheckRoleExecutionStart(executionID string, at time.Time) err
 	}
 	if execution.TaskID != "" {
 		task, ok := g.GraphTask(execution.TaskID)
-		if !ok || task.JobID != job.ID || !TaskWithinJobScope(task, *job.Contract) {
+		if !ok || task.JobID != job.ID || !TaskWithinJobContract(task, *job.Contract) {
 			return graphError("RoleExecution Task exceeds the approved Job scope")
 		}
 	}
@@ -433,7 +459,7 @@ func (g TaskGraph) CheckRoleExecutionResume(executionID string, at time.Time) er
 	}
 	if execution.TaskID != "" {
 		task, ok := g.GraphTask(execution.TaskID)
-		if !ok || task.JobID != job.ID || !TaskWithinJobScope(task, *job.Contract) {
+		if !ok || task.JobID != job.ID || !TaskWithinJobContract(task, *job.Contract) {
 			return graphError("RoleExecution Task exceeds the approved Job scope")
 		}
 	}
@@ -483,7 +509,7 @@ func (g TaskGraph) CheckRoleExecutionTurn(executionID string, at time.Time) erro
 	}
 	if execution.TaskID != "" {
 		task, ok := g.GraphTask(execution.TaskID)
-		if !ok || task.JobID != job.ID || !TaskWithinJobScope(task, *job.Contract) {
+		if !ok || task.JobID != job.ID || !TaskWithinJobContract(task, *job.Contract) {
 			return graphError("RoleExecution Task exceeds the approved Job scope")
 		}
 	}
@@ -547,7 +573,7 @@ func (g TaskGraph) CheckRoleExecutionOperation(executionID, operation string, at
 		return graphError("Runtime operation requires a Task-bound execution")
 	}
 	task, ok := g.GraphTask(execution.TaskID)
-	if !ok || task.JobID != job.ID || !TaskWithinJobScope(task, *job.Contract) {
+	if !ok || task.JobID != job.ID || !TaskWithinJobContract(task, *job.Contract) {
 		return graphError("Runtime operation Task exceeds the approved Job scope")
 	}
 	executions := g.RoleExecutionsForJob(job.ID)
