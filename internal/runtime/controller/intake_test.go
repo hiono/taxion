@@ -1176,3 +1176,82 @@ func TestIntakeCreatesDistinctJobWithoutChangingTaskContract(t *testing.T) {
 		t.Fatalf("Job lifecycle history length = %d, want creation and approval events", len(after.Graph.JobHistory))
 	}
 }
+
+func TestProposeJobBeforeTasksAndAttachMultipleTasks(t *testing.T) {
+	db, _, _, _ := executionConfigurationFixture(t)
+	proposal := JobIntakeRequest{
+		JobID: "job-before-task", Request: "Implement the approved feature.",
+		Goal: "Deliver the requested behavior with independent review.",
+		Actor: "human", Source: "human:job-proposal",
+	}
+	job, err := ProposeJob(db, proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != core.JobDraft || job.ID != proposal.JobID {
+		t.Fatalf("unexpected independent Job proposal: %+v", job)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Graph.Tasks) != 1 {
+		t.Fatalf("ProposeJob created a Task; existing task count = %d", len(state.Graph.Tasks))
+	}
+	if len(state.Graph.Jobs) != 1 {
+		t.Fatalf("Job count = %d, want 1", len(state.Graph.Jobs))
+	}
+
+	// An exact retry returns the same Job without creating another history entry.
+	if _, err := ProposeJob(db, proposal); err != nil {
+		t.Fatalf("exact Job proposal replay failed: %v", err)
+	}
+	if _, err := ProposeJob(db, JobIntakeRequest{
+		JobID: proposal.JobID, Request: proposal.Request, Goal: "different goal",
+		Actor: proposal.Actor, Source: proposal.Source,
+	}); err == nil {
+		t.Fatal("Job ID reuse with a different goal must be rejected")
+	}
+
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := state.Graph.GraphTask("task")
+	if !ok {
+		t.Fatal("fixture Task is missing")
+	}
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "task-first", core.Draft, "", nil
+	task.JobID = job.ID
+	first, err := ProposeIntake(db, IntakeRequest{
+		Request: proposal.Request, Task: task, Actor: "human", Source: "human:task-proposal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondTask := task
+	secondTask.ID = "task-second"
+	secondTask.Title = "Independent follow-up task"
+	secondTask.Objective = "Complete the follow-up within the same approved Job scope."
+	second, err := ProposeIntake(db, IntakeRequest{
+		Request: proposal.Request, Task: secondTask, Actor: "human", Source: "human:task-proposal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.JobID != job.ID || second.JobID != job.ID {
+		t.Fatalf("Tasks do not share the pre-existing Job: first=%q second=%q job=%q", first.JobID, second.JobID, job.ID)
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Graph.Jobs) != 1 {
+		t.Fatalf("attaching Tasks created extra Jobs: %d", len(state.Graph.Jobs))
+	}
+	for _, taskID := range []string{first.ID, second.ID} {
+		if owner, ok := state.Graph.JobForTask(taskID); !ok || owner.ID != job.ID {
+			t.Fatalf("Task %s does not resolve to the original Job", taskID)
+		}
+	}
+}
