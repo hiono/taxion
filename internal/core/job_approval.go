@@ -44,7 +44,12 @@ func (c JobContract) Validate() error {
 		c.Budget.MaxRoleExecutions < 1 || c.Budget.MaxConcurrentExecutions < 1 ||
 		c.Budget.MaxConcurrentExecutions > c.Budget.MaxRoleExecutions ||
 		math.IsNaN(c.Budget.MaxNanoAIU) || math.IsInf(c.Budget.MaxNanoAIU, 0) ||
-		c.Budget.MaxNanoAIU <= 0 || c.Deadline.IsZero() ||
+		c.Budget.MaxNanoAIU < 0 ||
+		(c.Budget.MaxNanoAIU == 0 && !BillingExternalBudget(c.Budget.BudgetSource, c.Budget.AccountQuotaOnly)) ||
+		(c.Budget.MaxNanoAIU > 0 && BillingExternalBudget(c.Budget.BudgetSource, c.Budget.AccountQuotaOnly)) ||
+		(c.Budget.AccountQuotaOnly && c.Budget.BudgetSource != "") ||
+		(c.Budget.BudgetSource != "" && c.Budget.BudgetSource != ProviderStopBudgetSource) ||
+		c.Deadline.IsZero() ||
 		!nonempty(c.Configuration.Digest) || len(c.Configuration.Selection) == 0 {
 		return graphError("Job contract requires revision, acceptance, evidence, scope, operations, budget, deadline and configuration")
 	}
