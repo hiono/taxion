@@ -144,7 +144,7 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 		RoleExecutionID: "exec-without-task-producer", Repository: "example/repo",
 		Kind:          "test-report",
 		ContentSHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		CreatedAt: now.Add(5 * time.Second),
+		CreatedAt:     now.Add(5 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestJobArtifactsSupportRoleExecutionsWithoutTask(t *testing.T) {
 	outOfScope, err := NewJobOutput(JobOutput{
 		ID: "output-outside-job-scope", JobID: job.ID,
 		RoleExecutionID: "exec-without-task-producer", Repository: "unapproved/repo",
-		Kind: "test-report",
+		Kind:          "test-report",
 		ContentSHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 		CreatedAt:     now.Add(8 * time.Second),
 	})
