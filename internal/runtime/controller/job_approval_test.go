@@ -118,3 +118,30 @@ func TestJobContractProposalRequiresExactUserApproval(t *testing.T) {
 		t.Fatalf("reapproved Job state/history mismatch: status=%s approvals=%d", stored.Status, len(state.Graph.JobApprovals))
 	}
 }
+
+func TestProposeJobContractRejectsExistingTaskOutsideRoleScope(t *testing.T) {
+	db, job, task, _ := jobRoleFixture(t, true)
+	contract := *job.Contract
+	contract.Roles = []string{"PLANNER", "REVIEWER"}
+	if _, _, err := ProposeJobContract(db, JobContractProposalRequest{
+		JobID: job.ID, Contract: contract, Actor: "planner",
+		Source: "planner", Reason: "remove Coder authority",
+	}); err == nil {
+		t.Fatal("Job contract revision must not exclude an existing Task owner")
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := state.Graph.Job(job.ID)
+	if !ok || stored.Status != core.JobActive || stored.Contract == nil ||
+		!reflect.DeepEqual(stored.Contract.Roles, job.Contract.Roles) {
+		t.Fatalf("rejected Job contract proposal changed current authority: %+v", stored)
+	}
+	if _, ok := state.Graph.CurrentJobApproval(job.ID); !ok {
+		t.Fatal("rejected Job contract proposal invalidated the current approval")
+	}
+	if task.Owner == "" {
+		t.Fatal("fixture Task must identify an owner")
+	}
+}
