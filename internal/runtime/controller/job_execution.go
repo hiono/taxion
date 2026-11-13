@@ -160,10 +160,10 @@ func (c *JobRoleController) Resume(ctx context.Context, executionID string) erro
 	}
 	if identity, ok := c.runtime.(runtime.ConfigurationIdentity); ok {
 		if err := identity.CheckServiceAccess(ctx, execution.RuntimeSessionID); err != nil {
-			return err
+			return errors.Join(err, c.runtime.Stop(ctx, execution.RuntimeSessionID))
 		}
 	}
-	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+	err = c.store.UpdateWorkspace(func(state *store.Workspace) error {
 		current, ok := state.Graph.RoleExecution(executionID)
 		if !ok || current.RuntimeSessionID != execution.RuntimeSessionID ||
 			current.RuntimeConfigHash != c.runtime.ConfigHash() {
@@ -183,6 +183,10 @@ func (c *JobRoleController) Resume(ctx context.Context, executionID string) erro
 		}
 		return state.Graph.BindRoleExecutionContextHash(executionID, contextHash)
 	})
+	if err != nil {
+		return errors.Join(err, c.runtime.Stop(ctx, execution.RuntimeSessionID))
+	}
+	return nil
 }
 
 // Send refreshes the Job context before every Role turn. The Runtime receives
