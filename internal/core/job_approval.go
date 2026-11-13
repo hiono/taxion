@@ -316,7 +316,7 @@ func (g TaskGraph) validateJobApprovals() error {
 // approved Job contract. Task prose does not grant authority, but acceptance,
 // evidence and validation requirements must remain subsets of the approved Job.
 func TaskWithinJobContract(task GraphTask, contract JobContract) bool {
-	if !TaskWithinJobScope(task, contract) {
+	if !TaskWithinJobScope(task, contract) || !slices.Contains(contract.Roles, task.Owner) {
 		return false
 	}
 	for _, acceptance := range task.Acceptance {
