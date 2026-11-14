@@ -303,8 +303,10 @@ func (a *Adapter) prepare() error {
 		return err
 	}
 	permission := map[string]any{"*": "deny", "bash": "deny"}
-	// Retain read-only definitions for tool-free advisory sessions; every
-	// unapproved request is still cancelled by the ACP client.
+	// These provider permissions are transitional adapter controls, not the Job
+	// authorization model. Replace the string-operation callback with structured
+	// effect/resource observations under ADR-0080; do not preserve Role allowlists
+	// as a parallel authorization layer.
 	for _, name := range []string{"read", "glob", "grep"} {
 		permission[name] = "ask"
 	}
