@@ -38,8 +38,9 @@ func JobConversation(db *store.Store, jobID string) ([]core.JobMessage, error) {
 		return nil, fmt.Errorf("taxion: Job conversation requires a Task Graph")
 	}
 	if _, ok := state.Graph.Job(jobID); !ok {
-		// Legacy conversations are addressed by their former TaskID until
-		// the workspace is explicitly associated with a first-class Job.
+		// Transitional historical lookup: old Task-scoped messages may still be addressed
+		// by TaskID. This is not a second Job identity model; remove it when the
+		// explicit loss-aware history migration is complete.
 		if _, legacy := state.Graph.GraphTask(jobID); !legacy {
 			return nil, fmt.Errorf("taxion: Job conversation does not exist")
 		}
