@@ -303,10 +303,11 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if err := reviewerController.AuthorizeOperation("job-role-reviewer", "repository.read", time.Now().UTC()); err != nil {
 		t.Fatalf("Reviewer read operation rejected: %v", err)
 	}
-	for _, operation := range []string{"repository.write", "process.exec", "test.run"} {
-		if err := reviewerController.AuthorizeOperation("job-role-reviewer", operation, time.Now().UTC()); err == nil {
-			t.Fatalf("Reviewer must not receive Coder operation %q", operation)
-		}
+	if err := reviewerController.AuthorizeOperation("job-role-reviewer", "repository.write", time.Now().UTC()); err != nil {
+		t.Fatalf("in-scope reversible write must not be gated by a Role operation ACL: %v", err)
+	}
+	if err := reviewerController.AuthorizeOperation("job-role-reviewer", "test.run", time.Now().UTC()); err == nil {
+		t.Fatal("operation without inspectable effect metadata must fail closed")
 	}
 	if err := controller.PostMessage("job-role-exec", "job-role-reviewer", "job-role-message",
 		"Please review the implementation and test evidence.", "", time.Now().UTC()); err != nil {

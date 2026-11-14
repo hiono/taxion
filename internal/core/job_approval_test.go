@@ -126,6 +126,23 @@ func TestTaskScopeCannotWidenJobRepositoryScope(t *testing.T) {
 	}
 }
 
+func TestTaskRoleAssignmentsMustBelongToJobRoleScope(t *testing.T) {
+	contract := *validJobContract(t)
+	task := GraphTask{ID: "task-a", Repo: "example/repo", Owner: "CODER", Reviewer: "REVIEWER"}
+	if !TaskWithinJobContract(task, contract) {
+		t.Fatal("assigned Job Roles should be accepted")
+	}
+	task.Owner = "UNLISTED"
+	if TaskWithinJobContract(task, contract) {
+		t.Fatal("Task owner outside the approved Job Role set must be rejected")
+	}
+	task.Owner = "CODER"
+	task.Reviewer = "UNLISTED"
+	if TaskWithinJobContract(task, contract) {
+		t.Fatal("Task reviewer outside the approved Job Role set must be rejected")
+	}
+}
+
 func TestJobContractRequiresTypedSecurityEffects(t *testing.T) {
 	contract := validJobContract(t)
 	contract.ProhibitedEffects = contract.ProhibitedEffects[1:]
@@ -261,11 +278,13 @@ func TestCheckRoleExecutionRequiresCurrentJobApprovalAndScope(t *testing.T) {
 		t.Fatal("Runtime operation must reject a Task whose acceptance exceeds the approved Job contract")
 	}
 	graph.Tasks[0].Acceptance = nil
+	graph.Tasks[0].Repo = "other/repo"
 	if err := graph.CheckRoleExecution("exec-a", now.Add(4*time.Second)); err == nil {
-		t.Fatal("Task outside the approved Job scope must be rejected")
+		t.Fatal("Task outside the approved repository scope must be rejected")
 	}
-	if err := graph.CheckRoleExecution("exec-a", now.Add(4*time.Second)); err == nil {
-		t.Fatal("current Job approval must be revalidated independently of provider tool names")
+	graph.Tasks[0].Repo = "example/repo"
+	if err := graph.CheckRoleExecution("exec-a", now.Add(4*time.Second)); err != nil {
+		t.Fatalf("restored in-scope Task should remain authorized: %v", err)
 	}
 	if err := graph.CheckRoleExecution("exec-a", job.Contract.Deadline.Add(time.Second)); err == nil {
 		t.Fatal("expired Job must not authorize Runtime operations")

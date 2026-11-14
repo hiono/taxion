@@ -422,6 +422,12 @@ func TaskWithinJobContract(task GraphTask, contract JobContract) bool {
 	if !TaskWithinJobScope(task, contract) {
 		return false
 	}
+	if task.Owner != "" && !slices.Contains(contract.Roles, task.Owner) {
+		return false
+	}
+	if task.Reviewer != "" && !slices.Contains(contract.Roles, task.Reviewer) {
+		return false
+	}
 	for _, acceptance := range task.Acceptance {
 		if !slices.Contains(contract.Acceptance, acceptance) {
 			return false
