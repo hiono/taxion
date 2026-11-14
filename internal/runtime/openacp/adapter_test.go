@@ -408,6 +408,51 @@ func TestNativeToolDefinitionsNeverGrantUnapprovedOperations(t *testing.T) {
 	}
 }
 
+func TestJobEffectAuthorizerAllowsReviewerEditInsideJobBoundary(t *testing.T) {
+	config := testConfig(t, "REVIEWER")
+	config.AvailableTools = []string{"view", "edit"}
+	if err := os.WriteFile(filepath.Join(config.WorkingDirectory, "result.txt"), []byte("review result"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	var observed runtime.JobEffectRequest
+	adapter.SetJobEffectAuthorizer(func(_ context.Context, sessionID string, request runtime.JobEffectRequest) error {
+		if sessionID != "review-session" {
+			t.Errorf("authorization session = %q, want review-session", sessionID)
+		}
+		observed = request
+		return nil
+	})
+	if err := adapter.prepare(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(adapter.root, "config/opencode/opencode.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings struct {
+		Permission map[string]string `json:"permission"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatal(err)
+	}
+	if settings.Permission["edit"] != "ask" {
+		t.Fatalf("Job-authorized Reviewer edit permission = %q, want ask", settings.Permission["edit"])
+	}
+	params := json.RawMessage(`{"sessionId":"review-session","toolCall":{"kind":"edit","name":"edit","rawInput":{"path":"result.txt"}},"options":[{"optionId":"allow-edit","kind":"allow_once"}]}`)
+	result := adapter.permissionOutcome(params)
+	if result["outcome"] != "selected" || result["optionId"] != "allow-edit" {
+		t.Fatalf("in-bound Reviewer edit outcome = %#v", result)
+	}
+	if observed.Effect != core.JobEffectRepositoryWrite || observed.Target != "result.txt" {
+		t.Fatalf("Job authorization observation = %+v", observed)
+	}
+}
+
 func TestApprovedSkillReferencesHaveScopedNativeReadPermission(t *testing.T) {
 	for _, role := range []string{"CODER", "REVIEWER", "ORCHESTRATOR"} {
 		t.Run(role, func(t *testing.T) {
