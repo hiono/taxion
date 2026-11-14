@@ -511,14 +511,6 @@ func (c *JobRoleController) roleExecutionForSession(graph core.TaskGraph, sessio
 	return matched, nil
 }
 
-func validationCommandExecutable(command string) string {
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return ""
-	}
-	return strings.ToLower(fields[0])
-}
-
 // AuthorizeSessionOperation is the provider callback. Shell requests carry the
 // exact command text so validation commands cannot use the generic exec grant.
 func (c *JobRoleController) AuthorizeSessionOperation(ctx context.Context, sessionID, operation, detail string, at time.Time) error {
