@@ -732,6 +732,17 @@ func TestJobRoleControllerPersistsAndResumesExactEffectApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	approvedState, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobApproval, ok := approvedState.Graph.CurrentJobApproval(job.ID)
+	if !ok {
+		t.Fatal("Job approval is missing")
+	}
+	if wait := time.Until(jobApproval.At); wait > 0 {
+		time.Sleep(wait)
+	}
 	request := jobRoleEffectRequest(core.JobEffectNetworkAccess, "", false)
 	if err := worker.jobEffectAuthorizer(context.Background(), sessionID, request); err == nil {
 		t.Fatal("unapproved network effect must pause the Job and request human approval")
