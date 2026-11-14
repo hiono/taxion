@@ -975,7 +975,7 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 
 func coderPermissionDecision(worktree string, availableTools []string, fileAccess *core.FileAccessPolicy, trackedFiles []string, request sdk.PermissionRequest) rpc.PermissionDecision {
 	reject := func() rpc.PermissionDecision {
-		reason := "Coder permissions are limited to the assigned worktree, file-access policy, and explicitly allowlisted tools"
+		reason := "Coder permissions are limited to the assigned worktree and file-access policy; tool availability is a provider capability, while Job authorization is enforced separately"
 		return &rpc.PermissionDecisionReject{Feedback: &reason}
 	}
 	switch permission := request.(type) {
