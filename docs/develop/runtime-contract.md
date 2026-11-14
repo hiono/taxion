@@ -1,4 +1,4 @@
-# Runtime 契約
+# Runtime 契約\n\n> 規範: Job / RoleExecution が現行の目標実行モデルである。コードに残る ReviewFlow / Dispatch 経路は置換対象の残存実装であり、互換性要件ではない。Runtime の認可はJob承認境界・禁止副作用・実行基盤の封じ込めで行い、旧Role/operation allowlistを認可根拠として継承しない。
 
 Runtime は Controller が役割ごとの実行を開始・送信・観測・停止するための SDK 非依存の境界である。
 Copilot は SDK、OpenCode は ACP を adapter 内で扱い、core の型へ外部 SDK を持ち込まない。
