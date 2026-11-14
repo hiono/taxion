@@ -109,13 +109,8 @@ func (c JobContract) Validate() error {
 			return err
 		}
 	}
-	if len(c.ValidationCommands) > 0 {
-		coderOperations, ok := c.RoleOperations["CODER"]
-		if !slices.Contains(c.Operations, "process.exec") || !slices.Contains(c.Operations, "test.run") ||
-			!ok || !slices.Contains(coderOperations, "process.exec") || !slices.Contains(coderOperations, "test.run") {
-			return graphError("Job validation commands require explicit Coder process.exec and test.run grants")
-		}
-	}
+	// ValidationCommands are exact approved command values, not Role operation
+	// grants. Their execution boundary is enforced by the command runner.
 	for role, operations := range c.RoleOperations {
 		if !slices.Contains(c.Roles, role) {
 			return graphError("Job contract contains role operations for an unapproved role %q", role)
@@ -422,16 +417,9 @@ func TaskWithinJobContract(task GraphTask, contract JobContract) bool {
 	if !slices.Equal(task.ValidationCommands, contract.ValidationCommands) {
 		return false
 	}
-	if len(task.ValidationCommands) > 0 {
-		if task.Owner == "" || !slices.Contains(contract.Operations, "process.exec") ||
-			!slices.Contains(contract.Operations, "test.run") {
-			return false
-		}
-		coderOperations, ok := contract.RoleOperations[task.Owner]
-		if !ok || !slices.Contains(coderOperations, "process.exec") || !slices.Contains(coderOperations, "test.run") {
-			return false
-		}
-	}
+	// Exact command identity is part of the approved contract. Whether a
+	// command is executable is decided by the isolated validation runner, not
+	// by a static Role-to-operation allowlist.
 	return true
 }
 
