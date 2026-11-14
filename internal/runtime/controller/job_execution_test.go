@@ -14,23 +14,23 @@ import (
 )
 
 type jobRoleRuntimeFake struct {
-	role                   string
-	configHash             string
-	selection              json.RawMessage
-	taskID                 string
-	sessionID              string
-	prompt                 string
-	startCount             int
-	resumeCount            int
-	sendCount              int
-	onResume               func()
-	stopCount              int
-	events                 chan runtime.Event
-	stopErr                error
-	authErr                error
-	expectedAccount        string
-	repository             string
-	fileAccess             *core.FileAccessPolicy
+	role                string
+	configHash          string
+	selection           json.RawMessage
+	taskID              string
+	sessionID           string
+	prompt              string
+	startCount          int
+	resumeCount         int
+	sendCount            int
+	onResume             func()
+	stopCount            int
+	events               chan runtime.Event
+	stopErr              error
+	authErr              error
+	expectedAccount      string
+	repository           string
+	fileAccess           *core.FileAccessPolicy
 	jobEffectAuthorizer func(context.Context, string, runtime.JobEffectRequest) error
 }
 
