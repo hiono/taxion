@@ -24,10 +24,12 @@ type JobContract struct {
 }
 
 // JobEffect identifies a security-relevant effect independently of provider tool names.
-// JobEffect identifies a security-relevant effect independently of provider tool names.
 type JobEffect string
 
 const (
+	JobEffectRepositoryRead      JobEffect = "repository_read"
+	JobEffectRepositoryWrite     JobEffect = "repository_write"
+	JobEffectValidationExecution JobEffect = "validation_execution"
 	JobEffectCrossJobAccess      JobEffect = "cross_job_access"
 	JobEffectSecretDisclosure    JobEffect = "secret_disclosure"
 	JobEffectPrivilegeEscalation JobEffect = "privilege_escalation"
@@ -43,8 +45,6 @@ const (
 	JobEffectScopeChange         JobEffect = "scope_change"
 )
 
-// JobEffectRule optionally limits an effect rule to exact canonical targets.
-// An empty target list applies to every target.
 // JobEffectRule optionally limits an effect rule to exact canonical targets.
 // An empty target list applies to every target.
 type JobEffectRule struct {
@@ -135,7 +135,8 @@ func validJobEffectRules(rules []JobEffectRule) bool {
 
 func validJobEffect(effect JobEffect) bool {
 	switch effect {
-	case JobEffectCrossJobAccess, JobEffectSecretDisclosure, JobEffectPrivilegeEscalation,
+	case JobEffectRepositoryRead, JobEffectRepositoryWrite, JobEffectValidationExecution,
+		JobEffectCrossJobAccess, JobEffectSecretDisclosure, JobEffectPrivilegeEscalation,
 		JobEffectSandboxEscape, JobEffectIntegrityTampering, JobEffectDuplicateExecution,
 		JobEffectProductionMutation, JobEffectExternalMutation, JobEffectPublication,
 		JobEffectCredentialUse, JobEffectNetworkAccess, JobEffectDestructiveChange, JobEffectScopeChange:
@@ -162,6 +163,42 @@ func validateRequiredJobEffects(prohibited, approvalRequired []JobEffectRule) er
 		if !hasUnboundedJobEffect(approvalRequired, required.Effect) {
 			return graphError("Job contract must require approval for effect %q", required.Effect)
 		}
+	}
+	return nil
+}
+
+// CheckEffect applies the approved Job effect policy to a provider-observed effect.
+// Resource effects require an exact canonical target; validation execution requires
+// an exact command declared by the Job contract. Unknown or unbounded observations fail closed.
+func (c JobContract) CheckEffect(effect JobEffect, target string) error {
+	if !validJobEffect(effect) {
+		return graphError("unknown Job effect %q", effect)
+	}
+	if (effect == JobEffectRepositoryRead || effect == JobEffectRepositoryWrite) && !nonempty(target) {
+		return graphError("repository effect requires an exact canonical target")
+	}
+	if effect == JobEffectValidationExecution && !slices.Contains(c.ValidationCommands, target) {
+		return graphError("execution is not an exact approved Job validation command")
+	}
+	check := func(rules []JobEffectRule, reason string) error {
+		for _, rule := range rules {
+			if rule.Effect != effect {
+				continue
+			}
+			if len(rule.Targets) == 0 || target == "" {
+				return graphError("%s: %q", reason, effect)
+			}
+			if slices.Contains(rule.Targets, target) {
+				return graphError("%s: %q target %q", reason, effect, target)
+			}
+		}
+		return nil
+	}
+	if err := check(c.ProhibitedEffects, "Job effect is prohibited"); err != nil {
+		return err
+	}
+	if err := check(c.ApprovalRequiredEffects, "Job effect requires separate human approval"); err != nil {
+		return err
 	}
 	return nil
 }

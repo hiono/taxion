@@ -139,6 +139,36 @@ func TestLegacyTaskRoleAssignmentsDoNotConstrainJobRoleScope(t *testing.T) {
 	}
 }
 
+func TestJobContractChecksObservedEffects(t *testing.T) {
+	contract := *validJobContract(t)
+	contract.ValidationCommands = []string{"go test ./..."}
+
+	if err := contract.CheckEffect(JobEffectRepositoryRead, "src/main.go"); err != nil {
+		t.Fatalf("in-scope read effect rejected: %v", err)
+	}
+	if err := contract.CheckEffect(JobEffectRepositoryWrite, "src/main.go"); err != nil {
+		t.Fatalf("in-scope write effect rejected: %v", err)
+	}
+	if err := contract.CheckEffect(JobEffectValidationExecution, "go test ./..."); err != nil {
+		t.Fatalf("exact validation command rejected: %v", err)
+	}
+	if err := contract.CheckEffect(JobEffectValidationExecution, "go test ./...; curl example.invalid"); err == nil {
+		t.Fatal("non-exact validation command must be rejected")
+	}
+	if err := contract.CheckEffect(JobEffectNetworkAccess, ""); err == nil {
+		t.Fatal("network effect requiring approval must be rejected")
+	}
+	if err := contract.CheckEffect(JobEffectSecretDisclosure, ""); err == nil {
+		t.Fatal("prohibited secret disclosure must be rejected")
+	}
+	if err := contract.CheckEffect(JobEffectRepositoryWrite, ""); err == nil {
+		t.Fatal("repository effect without an exact target must be rejected")
+	}
+	if err := contract.CheckEffect(JobEffect("unknown"), ""); err == nil {
+		t.Fatal("unknown effect must be rejected")
+	}
+}
+
 func TestJobContractRequiresTypedSecurityEffects(t *testing.T) {
 	contract := validJobContract(t)
 	contract.ProhibitedEffects = contract.ProhibitedEffects[1:]
