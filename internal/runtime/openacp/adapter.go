@@ -628,6 +628,9 @@ func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
 		return cancelled
 	}
 	effect, ok := openACPJobEffect(request.ToolCall.Kind, request.ToolCall.Name, request.ToolCall.Input, available, approved, a.config.FileAccess.Level == core.FileAccessAll)
+	if ok {
+		effect.Tracked = slices.Contains(a.config.TrackedFiles, effect.Target)
+	}
 	if !ok || authorize(context.Background(), request.SessionID, effect) != nil {
 		for _, option := range request.Options {
 			if option.Kind == "reject_once" {

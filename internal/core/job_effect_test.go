@@ -118,15 +118,15 @@ func TestCheckEffectRejectsInvalidContractAndNonCanonicalTargets(t *testing.T) {
 	contract := *validJobContract(t)
 	contract.Repositories[0].FileAccess = FileAccessPolicy{Level: FileAccessAll}
 	for _, target := range []string{"", " ", "../secret", "src/../secret", ".git/config", ".env", "C:\\secrets\\key"} {
-		if err := contract.CheckEffect(JobEffectRepositoryRead, target); err == nil {
+		if err := contract.CheckEffect(JobEffectRepositoryRead, "example/repo", target, false); err == nil {
 			t.Errorf("non-canonical repository target %q must be rejected", target)
 		}
 	}
-	if err := contract.CheckEffect(JobEffectJobContextRead, "src/main.go"); err == nil {
+	if err := contract.CheckEffect(JobEffectJobContextRead, "", "src/main.go", false); err == nil {
 		t.Fatal("Job context read must not carry a filesystem target")
 	}
 	contract.ProhibitedEffects = nil
-	if err := contract.CheckEffect(JobEffectRepositoryRead, "src/main.go"); err == nil {
+	if err := contract.CheckEffect(JobEffectRepositoryRead, "example/repo", "src/main.go", false); err == nil {
 		t.Fatal("invalid Job contract must fail closed during effect evaluation")
 	}
 }

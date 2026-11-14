@@ -497,7 +497,7 @@ func (c *JobRoleController) AuthorizeEffect(executionID string, request runtime.
 		return err
 	}
 	if request.Preflight {
-		if request.Effect != "" || request.Target != "" {
+		if request.Effect != "" || request.Target != "" || request.Tracked {
 			return fmt.Errorf("taxion: preflight cannot carry an effect or target")
 		}
 		return nil
@@ -510,7 +510,11 @@ func (c *JobRoleController) AuthorizeEffect(executionID string, request runtime.
 	if !ok || job.Contract == nil {
 		return fmt.Errorf("taxion: effect authorization requires an approved Job contract")
 	}
-	return job.Contract.CheckEffect(request.Effect, request.Target)
+	identity, ok := c.runtime.(runtime.JobBoundaryIdentity)
+	if !ok {
+		return fmt.Errorf("taxion: Job Runtime does not expose its repository boundary")
+	}
+	return job.Contract.CheckEffect(request.Effect, identity.JobRepository(), request.Target, request.Tracked)
 }
 
 func (c *JobRoleController) roleExecutionForSession(graph core.TaskGraph, sessionID string) (core.RoleExecution, error) {

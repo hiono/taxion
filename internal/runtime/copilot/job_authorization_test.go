@@ -15,13 +15,13 @@ func TestJobEffectForPermissionPreservesObservedEffect(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(worktree, "src"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	effect, ok := jobEffectForPermission(worktree, request)
+	effect, ok := jobEffectForPermission(worktree, nil, request)
 	if !ok || effect.Effect != core.JobEffectValidationExecution || effect.Target != request.FullCommandText {
 		t.Fatalf("jobEffectForPermission(shell) = (%#v, %t)", effect, ok)
 	}
 	read := &sdk.PermissionRequestRead{Path: "src/main.go"}
-	effect, ok = jobEffectForPermission(worktree, read)
-	if !ok || effect.Effect != core.JobEffectRepositoryRead || effect.Target != "src/main.go" {
+	effect, ok = jobEffectForPermission(worktree, []string{"src/main.go"}, read)
+	if !ok || effect.Effect != core.JobEffectRepositoryRead || effect.Target != "src/main.go" || !effect.Tracked {
 		t.Fatalf("jobEffectForPermission(read) = (%#v, %t)", effect, ok)
 	}
 	unknown := &sdk.PermissionRequestCustomTool{ToolName: "unknown"}

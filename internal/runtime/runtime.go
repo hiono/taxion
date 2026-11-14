@@ -107,6 +107,7 @@ type ToolPolicyIdentity interface {
 type JobEffectRequest struct {
 	Effect    core.JobEffect
 	Target    string
+	Tracked   bool
 	Preflight bool
 }
 

@@ -5,6 +5,7 @@ package copilot
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	sdk "github.com/github/copilot-sdk/go"
@@ -13,7 +14,7 @@ import (
 	"github.com/hiono/taxion/internal/runtime"
 )
 
-func jobEffectForPermission(worktree string, request sdk.PermissionRequest) (runtime.JobEffectRequest, bool) {
+func jobEffectForPermission(worktree string, trackedFiles []string, request sdk.PermissionRequest) (runtime.JobEffectRequest, bool) {
 	switch permission := request.(type) {
 	case *sdk.PermissionRequestRead:
 		target := permission.Path
@@ -24,7 +25,7 @@ func jobEffectForPermission(worktree string, request sdk.PermissionRequest) (run
 			return runtime.JobEffectRequest{}, false
 		}
 		canonical, err := canonicalJobTarget(worktree, target)
-		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryRead, Target: canonical}, err == nil
+		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryRead, Target: canonical, Tracked: slices.Contains(trackedFiles, canonical)}, err == nil
 	case *sdk.PermissionRequestWrite:
 		target := permission.FileName
 		if permission.ResolvedPath != nil && *permission.ResolvedPath != "" {
@@ -34,7 +35,7 @@ func jobEffectForPermission(worktree string, request sdk.PermissionRequest) (run
 			return runtime.JobEffectRequest{}, false
 		}
 		canonical, err := canonicalJobTarget(worktree, target)
-		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: canonical}, err == nil
+		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: canonical, Tracked: slices.Contains(trackedFiles, canonical)}, err == nil
 	case *sdk.PermissionRequestShell:
 		return runtime.JobEffectRequest{Effect: core.JobEffectValidationExecution, Target: permission.FullCommandText}, permission.FullCommandText != ""
 	case *sdk.PermissionRequestCustomTool:

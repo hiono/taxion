@@ -172,7 +172,7 @@ func validateRequiredJobEffects(prohibited, approvalRequired []JobEffectRule) er
 // CheckEffect applies the approved Job effect policy to a provider-observed effect.
 // Resource effects require an exact canonical target; validation execution requires
 // an exact command declared by the Job contract. Unknown or unbounded observations fail closed.
-func (c JobContract) CheckEffect(effect JobEffect, target string) error {
+func (c JobContract) CheckEffect(effect JobEffect, repository, target string, tracked bool) error {
 	if err := c.Validate(); err != nil {
 		return graphError("Job effect evaluation requires a valid approved contract")
 	}
@@ -181,15 +181,30 @@ func (c JobContract) CheckEffect(effect JobEffect, target string) error {
 	}
 	switch effect {
 	case JobEffectRepositoryRead, JobEffectRepositoryWrite:
-		if !validCanonicalJobEffectPath(target) {
-			return graphError("repository effect requires an exact canonical in-scope target")
+		if !nonempty(repository) || !validCanonicalJobEffectPath(target) {
+			return graphError("repository effect requires an exact canonical repository target")
+		}
+		var boundary *JobRepositoryScope
+		for i := range c.Repositories {
+			if c.Repositories[i].Repository == repository {
+				boundary = &c.Repositories[i]
+				break
+			}
+		}
+		if boundary == nil {
+			return graphError("repository effect targets an unapproved Job repository")
+		}
+		candidate := FileAccessPolicy{Level: FileAccessExact, Paths: []string{target}}
+		if !FileAccessPolicyWithin(candidate, boundary.FileAccess) ||
+			boundary.FileAccess.Level == FileAccessCommitted && !tracked {
+			return graphError("repository effect target is outside the approved Job file-access boundary")
 		}
 	case JobEffectValidationExecution:
 		if !nonempty(target) || !slices.Contains(c.ValidationCommands, target) {
 			return graphError("execution is not an exact approved Job validation command")
 		}
 	case JobEffectJobContextRead:
-		if target != "" {
+		if target != "" || repository != "" || tracked {
 			return graphError("Job context read must not carry a resource target")
 		}
 	default:
@@ -197,15 +212,19 @@ func (c JobContract) CheckEffect(effect JobEffect, target string) error {
 			return graphError("Job effect target is not canonical")
 		}
 	}
+	ruleTarget := target
+	if effect == JobEffectRepositoryRead || effect == JobEffectRepositoryWrite {
+		ruleTarget = repository + ":" + target
+	}
 	check := func(rules []JobEffectRule, reason string) error {
 		for _, rule := range rules {
 			if rule.Effect != effect {
 				continue
 			}
-			if len(rule.Targets) == 0 || target == "" {
+			if len(rule.Targets) == 0 || ruleTarget == "" {
 				return graphError("%s: %q", reason, effect)
 			}
-			if slices.Contains(rule.Targets, target) {
+			if slices.Contains(rule.Targets, ruleTarget) {
 				return graphError("%s: %q target %q", reason, effect, target)
 			}
 		}

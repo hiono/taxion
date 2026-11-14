@@ -198,7 +198,7 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if worker.jobEffectAuthorizer == nil {
 		t.Fatal("Job controller did not install the provider operation preflight")
 	}
-	if err := worker.jobEffectAuthorizer(context.Background(), sessionID, runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: "src/main.go"}); err != nil {
+	if err := worker.jobEffectAuthorizer(context.Background(), sessionID, runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: "src/main.go", Tracked: true}); err != nil {
 		t.Fatalf("approved Coder write operation rejected: %v", err)
 	}
 	if len(task.ValidationCommands) > 0 {
@@ -269,7 +269,7 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if got := len(usageState.Graph.JobUsageRecords(job.ID)); got != 1 {
 		t.Fatalf("idempotent usage replay created %d records, want 1", got)
 	}
-	if err := controller.AuthorizeEffect("job-role-exec", runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: "src/main.go"}, time.Now().UTC()); err != nil {
+	if err := controller.AuthorizeEffect("job-role-exec", runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: "src/main.go", Tracked: true}, time.Now().UTC()); err != nil {
 		t.Fatalf("approved Job operation rejected: %v", err)
 	}
 	if err := controller.AuthorizeEffect("job-role-exec", runtime.JobEffectRequest{Effect: core.JobEffectNetworkAccess}, time.Now().UTC()); err == nil {
@@ -300,10 +300,10 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if err := reviewerRuntime.jobEffectAuthorizer(context.Background(), reviewerRuntime.sessionID, runtime.JobEffectRequest{Effect: core.JobEffectValidationExecution}); err == nil {
 		t.Fatal("Reviewer provider preflight must reject process execution")
 	}
-	if err := reviewerController.AuthorizeEffect("job-role-reviewer", runtime.JobEffectRequest{Effect: core.JobEffectRepositoryRead, Target: "README.md"}, time.Now().UTC()); err != nil {
+	if err := reviewerController.AuthorizeEffect("job-role-reviewer", runtime.JobEffectRequest{Effect: core.JobEffectRepositoryRead, Target: "README.md", Tracked: true}, time.Now().UTC()); err != nil {
 		t.Fatalf("Reviewer read operation rejected: %v", err)
 	}
-	if err := reviewerController.AuthorizeEffect("job-role-reviewer", runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: "README.md"}, time.Now().UTC()); err != nil {
+	if err := reviewerController.AuthorizeEffect("job-role-reviewer", runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: "README.md", Tracked: true}, time.Now().UTC()); err != nil {
 		t.Fatalf("in-scope reversible write must not be gated by a Role operation ACL: %v", err)
 	}
 	if err := reviewerController.AuthorizeEffect("job-role-reviewer", runtime.JobEffectRequest{Effect: core.JobEffectValidationExecution, Target: "go test ./..."}, time.Now().UTC()); err == nil {
@@ -346,7 +346,7 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if !usageEventObserved {
 		t.Fatal("Runtime usage event was not forwarded")
 	}
-	if err := controller.AuthorizeEffect("job-role-exec", runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: "src/main.go"}, time.Now().UTC()); err == nil {
+	if err := controller.AuthorizeEffect("job-role-exec", runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: "src/main.go", Tracked: true}, time.Now().UTC()); err == nil {
 		t.Fatal("Job AIU budget exhaustion must block further operations")
 	}
 	if err := controller.Send(context.Background(), "job-role-exec", "another turn"); err == nil {
@@ -660,7 +660,7 @@ func TestJobRoleControllerEnforcesApprovedResourceBoundary(t *testing.T) {
 				t.Fatalf("in-boundary Runtime did not start: starts=%d err=%v", worker.startCount, err)
 			}
 			worker.fileAccess = &core.FileAccessPolicy{Level: core.FileAccessAll}
-			if err := controller.AuthorizeEffect(executionID, runtime.JobEffectRequest{Effect: core.JobEffectRepositoryRead, Target: "README.md"}, now.Add(time.Second)); err == nil {
+			if err := controller.AuthorizeEffect(executionID, runtime.JobEffectRequest{Effect: core.JobEffectRepositoryRead, Target: "README.md", Tracked: true}, now.Add(time.Second)); err == nil {
 				t.Fatal("operation preflight accepted a Runtime boundary widened after start")
 			}
 		})
@@ -868,7 +868,7 @@ func TestJobRoleControlsRejectAnotherRuntimeIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := reviewer.AuthorizeEffect("identity-bound-exec", runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: "README.md"}, time.Now().UTC()); err == nil {
+	if err := reviewer.AuthorizeEffect("identity-bound-exec", runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: "README.md", Tracked: true}, time.Now().UTC()); err == nil {
 		t.Fatal("another Role Runtime must not authorize this execution's operations")
 	}
 	if err := reviewer.Wait("identity-bound-exec", "wait from wrong Role", time.Now().UTC()); err == nil {

@@ -958,7 +958,7 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 			}
 		}
 		if authorize := a.jobEffectAuthorizer(); authorize != nil {
-			effect, allowed := jobEffectForPermission(a.config.WorkingDirectory, request)
+			effect, allowed := jobEffectForPermission(a.config.WorkingDirectory, a.config.TrackedFiles, request)
 			if !allowed {
 				reason := "Tool effect is not observable or enforceably contained by the Job Runtime"
 				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
