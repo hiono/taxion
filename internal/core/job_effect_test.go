@@ -130,3 +130,38 @@ func TestCheckEffectRejectsInvalidContractAndNonCanonicalTargets(t *testing.T) {
 		t.Fatal("invalid Job contract must fail closed during effect evaluation")
 	}
 }
+
+func TestCheckEffectEnforcesRepositoryAndTrackedFileScope(t *testing.T) {
+	contract := *validJobContract(t)
+	contract.Repositories[0].Repository = "example/repo"
+	contract.Repositories[0].FileAccess = FileAccessPolicy{
+		Level: FileAccessExact, Paths: []string{"src/main.go"},
+	}
+	if err := contract.CheckEffect(JobEffectRepositoryRead, "example/repo", "src/main.go", false); err != nil {
+		t.Fatalf("approved exact repository read rejected: %v", err)
+	}
+	for _, request := range []struct {
+		repository, target string
+		tracked             bool
+	}{
+		{"other/repo", "src/main.go", true},
+		{"example/repo", "README.md", true},
+	} {
+		if err := contract.CheckEffect(JobEffectRepositoryRead, request.repository, request.target, request.tracked); err == nil {
+			t.Errorf("out-of-bound repository effect was accepted: %+v", request)
+		}
+	}
+	contract.Repositories[0].FileAccess = FileAccessPolicy{Level: FileAccessCommitted}
+	if err := contract.CheckEffect(JobEffectRepositoryWrite, "example/repo", "src/main.go", false); err == nil {
+		t.Fatal("untracked file must not be writable under committed-only scope")
+	}
+	if err := contract.CheckEffect(JobEffectRepositoryWrite, "example/repo", "src/main.go", true); err != nil {
+		t.Fatalf("tracked file inside committed-only scope rejected: %v", err)
+	}
+	contract.ApprovalRequiredEffects = append(contract.ApprovalRequiredEffects, JobEffectRule{
+		Effect: JobEffectRepositoryWrite, Targets: []string{"example/repo:src/main.go"},
+	})
+	if err := contract.CheckEffect(JobEffectRepositoryWrite, "example/repo", "src/main.go", true); err == nil {
+		t.Fatal("target-specific approval-required effect must not be allowed without approval")
+	}
+}
