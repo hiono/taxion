@@ -6,7 +6,8 @@ import (
 )
 
 // JobMessage is an append-only natural-language exchange attached to a Job.
-// TaskID and SourceDispatchID remain optional legacy provenance fields.
+// TaskID and SourceDispatchID remain only for historical-record migration.
+// They are not valid identity fields for new Job collaboration messages.
 type JobMessage struct {
 	ID                string    `json:"id"`
 	JobID             string    `json:"jobId,omitempty"`
@@ -23,7 +24,8 @@ type JobMessage struct {
 }
 
 // JobConversation returns a Job's collaboration history in append order.
-// Legacy Task-scoped records are resolved through Task.JobID.
+// Historical Task-scoped records can be located through Task.JobID during migration.
+// Remove this fallback when the explicit history migration is complete.
 func (g TaskGraph) JobConversation(jobID string) []JobMessage {
 	messages := make([]JobMessage, 0)
 	for _, message := range g.JobMessages {
