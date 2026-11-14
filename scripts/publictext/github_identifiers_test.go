@@ -106,7 +106,7 @@ func TestPullRequestCommitMessagesInventoriesMoreThan250(t *testing.T) {
 	headSHA := runGitTest(t, work, "rev-parse", "HEAD")
 	runGitTest(t, work, "push", "origin", "HEAD:refs/pull/42/head")
 
-	messages, err := pullRequestCommitMessages(context.Background(), "hiono/taxion",
+	messages, err := pullRequestCommitMessagesAt(context.Background(), work, "hiono/taxion",
 		42, baseSHA, headSHA, commitCount)
 	if err != nil {
 		t.Fatal("complete PR history rejected:", err)
@@ -114,11 +114,11 @@ func TestPullRequestCommitMessagesInventoriesMoreThan250(t *testing.T) {
 	if len(messages) != commitCount || !strings.Contains(strings.Join(messages, "\n"), "Public commit 315") {
 		t.Fatalf("expected all %d commit messages, got %d", commitCount, len(messages))
 	}
-	if _, err := pullRequestCommitMessages(context.Background(), "hiono/taxion",
+	if _, err := pullRequestCommitMessagesAt(context.Background(), work, "hiono/taxion",
 		42, baseSHA, headSHA, commitCount-1); err == nil {
 		t.Fatal("incomplete commit count accepted")
 	}
-	if _, err := pullRequestCommitMessages(context.Background(), "hiono/taxion",
+	if _, err := pullRequestCommitMessagesAt(context.Background(), work, "hiono/taxion",
 		42, baseSHA, strings.Repeat("a", 40), commitCount); err == nil {
 		t.Fatal("changed PR head accepted")
 	}

@@ -69,30 +69,38 @@ func validGitSHA(value string) bool {
 	return regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(value)
 }
 
+func gitOutputAt(ctx context.Context, directory string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, "git", append([]string{"-C", directory}, args...)...).Output()
+}
+
 func gitOutput(ctx context.Context, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, "git", args...).Output()
+	return gitOutputAt(ctx, ".", args...)
 }
 
 // pullRequestCommitMessages fetches the PR head as Git data only. It never
 // checks out or executes code from the pull request.
 func pullRequestCommitMessages(ctx context.Context, repository string, number int, baseSHA, headSHA string, expectedCount int) ([]string, error) {
+	return pullRequestCommitMessagesAt(ctx, ".", repository, number, baseSHA, headSHA, expectedCount)
+}
+
+func pullRequestCommitMessagesAt(ctx context.Context, directory, repository string, number int, baseSHA, headSHA string, expectedCount int) ([]string, error) {
 	if !regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(repository) ||
 		number <= 0 || !validGitSHA(baseSHA) || !validGitSHA(headSHA) || expectedCount < 1 {
 		return nil, fmt.Errorf("invalid GitHub pull request binding")
 	}
 	ref := fmt.Sprintf("refs/taxion/pull-request/%d", number)
 	fetchRef := fmt.Sprintf("+refs/pull/%d/head:%s", number, ref)
-	if _, err := gitOutput(ctx, "fetch", "--no-tags", "origin", fetchRef); err != nil {
+	if _, err := gitOutputAt(ctx, directory, "fetch", "--no-tags", "origin", fetchRef); err != nil {
 		return nil, fmt.Errorf("cannot fetch pull request head")
 	}
-	resolvedHead, err := gitOutput(ctx, "rev-parse", "--verify", ref+"^{commit}")
+	resolvedHead, err := gitOutputAt(ctx, directory, "rev-parse", "--verify", ref+"^{commit}")
 	if err != nil || strings.TrimSpace(string(resolvedHead)) != headSHA {
 		return nil, fmt.Errorf("pull request head changed during identifier check")
 	}
-	if _, err := gitOutput(ctx, "cat-file", "-e", baseSHA+"^{commit}"); err != nil {
+	if _, err := gitOutputAt(ctx, directory, "cat-file", "-e", baseSHA+"^{commit}"); err != nil {
 		return nil, fmt.Errorf("pull request base commit is unavailable")
 	}
-	countOutput, err := gitOutput(ctx, "rev-list", "--count", baseSHA+".."+headSHA)
+	countOutput, err := gitOutputAt(ctx, directory, "rev-list", "--count", baseSHA+".."+headSHA)
 	if err != nil {
 		return nil, fmt.Errorf("cannot inventory pull request commit range")
 	}
@@ -100,7 +108,7 @@ func pullRequestCommitMessages(ctx context.Context, repository string, number in
 	if err != nil || count != expectedCount {
 		return nil, fmt.Errorf("pull request commit inventory is incomplete or changed")
 	}
-	output, err := gitOutput(ctx, "log", "--format=%B%x00", baseSHA+".."+headSHA)
+	output, err := gitOutputAt(ctx, directory, "log", "--format=%B%x00", baseSHA+".."+headSHA)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read pull request commit messages")
 	}
