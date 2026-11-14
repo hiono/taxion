@@ -19,6 +19,7 @@ ADR は採択時の理由を残す資料であり、古い `Accepted` の記載�
 | 途中成果・保存済みレビュー | [復旧](../userguide/failure-recovery.md) | [ADR-0050](adr/0050-preserve-target-bound-review-progress.md)、[0052](adr/0052-accept-saved-review-without-restarting-execution.md)、[0054](adr/0054-reconcile-stopped-dispatch-input.md) |
 | 工程計画と停止前・停止後の継続 | [Runtime 契約](runtime-contract.md)、[CLI](../userguide/cli-reference.md) | [ADR-0053](adr/0053-enforce-approved-flow-stage-boundaries.md)の境界を、正式な追加承認に限って[0058](adr/0058-recover-unstarted-artifact-review.md)が補足する |
 | 目的に沿う判断・情報確認・持込み入力 | [Task Graph](task-graph.md)、[利用者ガイド](../userguide/user-guide.md) | [ADR-0055](adr/0055-adapt-within-approved-goals.md)、[0056](adr/0056-validate-supplied-artifacts-without-coder-success.md)、[0057](adr/0057-resolve-evidence-before-user-escalation.md) |
+| Job 中心の Role 協調 | [Job 中心の Role 協調](role-collaboration.md)、[アーキテクチャ](architecture.md) | [ADR-0077](adr/0077-job-centered-role-collaboration.md)。Issue #283 で実装・実モデル受入れを追跡 |
 
 未採択の提案と実装済み契約も区別する。たとえば実行基盤の追加評価は、現在の対応状況を Issue と仕様から確認する。
 以下の表は過去の開発段階と判断の出典であり、現在の作業順を指定するものではない。
@@ -118,3 +119,14 @@ ADR-0001〜0043 はすべて `Accepted` の判断を記録する。採択は選�
 | [0041](adr/0041-archive-retired-tasks-without-erasing-history.md) | 停止済みの不要な試行を通常一覧・計画から外し、承認・実行履歴と参照を残す | #103、`task-graph.md`、`cli-reference.md`、`user-guide.md`。v0.5.0 の archive は物理削除や Git cleanup を行わない |
 | [0042](adr/0042-gitlab-endpoint-binding-separates-api-clone-and-ssh-identities.md) | GitLab の subpath と標準外の SSH port を独立した endpoint として照合し、legacy 設定と version 1 snapshot の動作を変えない | #105、`configuration.md`、`guardrails.md`。v0.6.0 で公開する |
 | [0043](adr/0043-approval-gates-and-read-only-lanes.md) | #107–#114; PR #115–#121; [#131](https://github.com/hiono/taxion/issues/131) | Accepted. Current references: `gates.md`, `approval-bundle.md`, `drift-and-legacy.md`, `role-handoff-packets.md`, `task-graph.md`, `v0.7.0-known-limitations.md`。逐次 packet store、READY lifecycle 承認と同一契約 Reviewer 委譲は `runtime-contract.md` と `role_packets_test.go` でも検証する。 |
+| [0077](adr/0077-job-centered-role-collaboration.md) | Job を継続単位とし、固定工程や Clarification protocol に拘束されない Role 協調へ再設計する | `role-collaboration.md`、`architecture.md`、`runtime-contract.md`。実装と実モデル受入れは Issue #283 / PR #292 で追跡。現時点で E2E 完了は未確認。 |
+
+
+## ADR-0077: Job 中心の Role 協調
+
+[ADR-0077](adr/0077-job-centered-role-collaboration.md) は、既存の固定工程・Clarification protocol を前提とせず、Job を継続単位として Role が判断・相談・引継ぎを行う設計を採択する。設計の正本は [role-collaboration.md](role-collaboration.md)。Issue #283 は実装と実モデル受入れを追跡する。PR #289 の従来実装はこの判断の実装根拠として扱わず、置換対象として評価する。
+
+
+## ドメイン不変条件の全経路強制
+
+[ADR-0079](adr/0079-enforce-domain-invariants-across-state-paths.md) は、論理条件をドメインモデルの規範とし、状態変更・永続化・復元・外部入力の全該当経路で強制する決定を記録する。[ドメイン不変条件と実装・検証対応表](domain-invariants.md)で、Job completion readiness の判定・遷移 gate・Graph validation・回帰テストを対応付ける。ADR の採択は他の不変条件の実装完了を意味しない。

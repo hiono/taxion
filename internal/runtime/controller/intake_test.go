@@ -18,6 +18,14 @@ import (
 )
 
 func intakeApprovalFixture(t *testing.T, bundleRequired bool) (*store.Store, IntakeConfirmation) {
+	return intakeApprovalFixtureMode(t, bundleRequired, false)
+}
+
+func jobIntakeApprovalFixture(t *testing.T) (*store.Store, IntakeConfirmation) {
+	return intakeApprovalFixtureMode(t, false, true)
+}
+
+func intakeApprovalFixtureMode(t *testing.T, bundleRequired, jobMode bool) (*store.Store, IntakeConfirmation) {
 	t.Helper()
 	db, _, _, resolved := executionConfigurationFixture(t)
 	resolved.Config.Execution.ApprovalRef = "confirmed-intake-config"
@@ -35,6 +43,16 @@ func intakeApprovalFixture(t *testing.T, bundleRequired bool) (*store.Store, Int
 			t.Fatal(err)
 		}
 	}
+	if jobMode {
+		job, err := ProposeJob(db, JobIntakeRequest{
+			JobID: "job-confirmed-intake", Request: "Implement within this contract.",
+			Goal: "Implement the confirmed Task contract.", Actor: "human", Source: "human:job-proposal",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		task.JobID = job.ID
+	}
 	proposal, err := ProposeIntake(db, IntakeRequest{Task: task, Request: "Implement within this contract.",
 		Actor: "human", Source: "human:request"})
 	if err != nil {
@@ -44,8 +62,228 @@ func intakeApprovalFixture(t *testing.T, bundleRequired bool) (*store.Store, Int
 	if err != nil {
 		t.Fatal(err)
 	}
-	return db, IntakeConfirmation{TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirmed",
-		Reason: "Approve the displayed contract and selected configuration.", Selection: resolved.Config}
+	confirmation := IntakeConfirmation{TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirmed",
+		Reason: "Approve the displayed Task contract and selected configuration.", Selection: resolved.Config}
+	if jobMode {
+		configurationBytes, err := json.Marshal(resolved.Config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		approvalConfiguration, err := core.SelectApprovalConfiguration(configurationBytes, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contract, err := BuildJobContractForIntake(proposal, approvalConfiguration,
+			core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 2, MaxNanoAIU: 1000},
+			time.Now().UTC().Add(24*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err = db.LoadWorkspace()
+		if err != nil {
+			t.Fatal(err)
+		}
+		job, ok := state.Graph.Job(task.JobID)
+		if !ok {
+			t.Fatal("explicit Job is missing")
+		}
+		job.Contract = &contract
+		jobProposal, err := core.JobProposal(job)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jobHash, err := jobProposal.Hash()
+		if err != nil {
+			t.Fatal(err)
+		}
+		confirmation.JobContract = &contract
+		confirmation.ExpectedJobContractHash = jobHash
+	}
+	return db, confirmation
+}
+
+func withExplicitJobContractForIntake(t *testing.T, db *store.Store, request IntakeConfirmation) IntakeConfirmation {
+	t.Helper()
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := state.Graph.GraphTask(request.TaskID)
+	if !ok {
+		t.Fatalf("Task %s is missing", request.TaskID)
+	}
+	if modelFreeVerification(task) || task.JobID == "" {
+		// Legacy Task/ReviewFlow fixtures must not be upgraded to Job authority
+		// merely to satisfy a helper intended for first-class Job tests.
+		return request
+	}
+	job, ok := state.Graph.Job(task.JobID)
+	if !ok {
+		t.Fatalf("Task %s has no owning Job", task.ID)
+	}
+	var contract core.JobContract
+	if request.JobContract != nil {
+		contract = *request.JobContract
+	} else {
+		encoded, err := json.Marshal(request.Selection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		configuration, err := core.SelectApprovalConfiguration(encoded, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contract, err = BuildJobContractForIntake(task, configuration,
+			core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 2, MaxNanoAIU: 1000},
+			time.Now().UTC().Add(24*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if job.Contract == nil {
+		contract.Revision = 1
+	} else if !reflect.DeepEqual(*job.Contract, contract) {
+		contract.Revision = job.Contract.Revision + 1
+	} else {
+		contract.Revision = job.Contract.Revision
+	}
+	job.Contract = &contract
+	proposal, err := core.JobProposal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.JobContract = &contract
+	request.ExpectedJobContractHash, err = proposal.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request
+}
+
+func TestJobIntakeUsesOnlyJobApprovalOnBundleRequiredGraph(t *testing.T) {
+	db, request := intakeApprovalFixtureMode(t, true, true)
+	if _, err := ConfirmIntake(db, request); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := state.Graph.GraphTask(request.TaskID)
+	if !ok || task.JobID == "" {
+		t.Fatal("explicit Job Task was not retained")
+	}
+	if len(state.Graph.ApprovalsForTask(task.ID)) != 0 {
+		t.Fatal("Job intake minted a legacy Task ApprovalBundle")
+	}
+	approval, ok := state.Graph.CurrentJobApproval(task.JobID)
+	if !ok || approval.ProposalHash != request.ExpectedJobContractHash {
+		t.Fatal("Job intake did not persist the exact JobApproval")
+	}
+}
+
+func TestModelFreeVerificationCannotJoinJob(t *testing.T) {
+	db, _, _, _ := executionConfigurationFixture(t)
+	job, err := ProposeJob(db, JobIntakeRequest{
+		JobID: "job-model-free", Request: "Job request.", Goal: "Model-free evidence is separate.",
+		Actor: "human", Source: "human:job-proposal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ := state.Graph.GraphTask("task")
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "model-free-job-task", core.Draft, "", nil
+	task.Owner, task.Type, task.ModelFree, task.JobID = "USER", "VERIFICATION", true, job.ID
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: task, Request: "Record human verification evidence.", Actor: "human", Source: "human:model-free",
+	}); err == nil {
+		t.Fatal("model-free verification was attached to Job execution authority")
+	}
+}
+
+func TestIntakeReplayCannotChangeExplicitJobMembership(t *testing.T) {
+	db, _, _, _ := executionConfigurationFixture(t)
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ := state.Graph.GraphTask("task")
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "replay-membership", core.Draft, "", nil
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: task, Request: "Keep the original Task authorization mode.",
+		Actor: "human", Source: "human:legacy",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := ProposeJob(db, JobIntakeRequest{
+		JobID: "job-replay-membership", Request: "Separate Job.", Goal: "No retroactive membership changes.",
+		Actor: "human", Source: "human:job-proposal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := task
+	changed.JobID = job.ID
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: changed, Request: "Keep the original Task authorization mode.",
+		Actor: "human", Source: "human:legacy",
+	}); err == nil {
+		t.Fatal("exact Task replay silently changed legacy/Job authorization mode")
+	}
+}
+
+func TestIntakeRejectsCrossModeTaskAncestry(t *testing.T) {
+	db, _, _, _ := executionConfigurationFixture(t)
+	job, err := ProposeJob(db, JobIntakeRequest{
+		JobID: "job-cross-mode", Request: "A first-class Job request.",
+		Goal: "Keep all Tasks within one authorization mode.", Actor: "human", Source: "human:job-proposal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _ := state.Graph.GraphTask("task")
+	legacyParent := base
+	legacyParent.ID, legacyParent.Status, legacyParent.AuthorizationID, legacyParent.Decisions = "legacy-parent", core.Draft, "", nil
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: legacyParent, Request: "Legacy parent.", Actor: "human", Source: "human:legacy",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	jobChild := base
+	jobChild.ID, jobChild.Status, jobChild.AuthorizationID, jobChild.Decisions = "job-child", core.Draft, "", nil
+	jobChild.JobID, jobChild.ParentID = job.ID, legacyParent.ID
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: jobChild, Request: "Job child must not reference a legacy parent.",
+		Actor: "human", Source: "human:job-child",
+	}); err == nil {
+		t.Fatal("Job Task referencing a legacy Task was accepted")
+	}
+
+	jobParent := base
+	jobParent.ID, jobParent.Status, jobParent.AuthorizationID, jobParent.Decisions = "job-parent", core.Draft, "", nil
+	jobParent.JobID = job.ID
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: jobParent, Request: "Job parent.", Actor: "human", Source: "human:job-parent",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	legacyChild := base
+	legacyChild.ID, legacyChild.Status, legacyChild.AuthorizationID, legacyChild.Decisions = "legacy-child", core.Draft, "", nil
+	legacyChild.ParentID = jobParent.ID
+	if _, err := ProposeIntake(db, IntakeRequest{
+		Task: legacyChild, Request: "Legacy child must not reference a Job parent.",
+		Actor: "human", Source: "human:legacy-child",
+	}); err == nil {
+		t.Fatal("Legacy Task referencing a Job Task was accepted")
+	}
 }
 
 func TestIntakeConfirmationDerivesBundleWithoutSecondApproval(t *testing.T) {
@@ -233,6 +471,7 @@ func TestConfirmedFlowUsesAlreadyApprovedReviewerWithoutNewDelegation(t *testing
 	confirmation := IntakeConfirmation{TaskID: task.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirm",
 		Reason: "Approve this contract and both bounded review configurations.", Selection: resolved.Config,
 		AdditionalTaskIDs: []string{flowRequest.ID + "-review-0", flowRequest.ID + "-review-1"}}
+	confirmation = withExplicitJobContractForIntake(t, db, confirmation)
 	if _, err := ConfirmIntake(db, confirmation); err != nil {
 		t.Fatal(err)
 	}
@@ -303,6 +542,7 @@ func testIntakeRepositoryConfirmation(t *testing.T, repo string) {
 	confirmation := IntakeConfirmation{TaskID: saved.ID, ExpectedHash: hash, Actor: "human", Source: "human:confirm",
 		Reason: "Confirm this scope, acceptance, validation, actors and contract.", Selection: resolved.Config,
 		AdditionalTaskIDs: []string{"intake-flow-review-0", "intake-flow-review-1"}}
+	confirmation = withExplicitJobContractForIntake(t, db, confirmation)
 	before, _ := db.LoadWorkspace()
 	wrongRepository := confirmation
 	wrongRepository.Selection.Repository.Path = "other/" + repo
@@ -361,6 +601,7 @@ func TestReapprovalCreatesSuccessorWithoutRewritingIssuedContract(t *testing.T) 
 	confirm := IntakeConfirmation{TaskID: saved.ID, ExpectedHash: hash, Actor: "human", Source: "human:reapprove",
 		Reason: "Explicitly approve revised scope, acceptance and selected identity.", Selection: selected.Config,
 		ReplacesFlow: old.ID, Target: &planner.Target, AdditionalTaskIDs: []string{"successor-flow-review-0"}}
+	confirm = withExplicitJobContractForIntake(t, db, confirm)
 	stale := confirm
 	target := *confirm.Target
 	target.OutputSHA = old.Contract.BaselineSHA
@@ -483,11 +724,12 @@ func testStoppedFlowContinuesFromVerifiedPartialTree(t *testing.T, mode string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	approved, err := ConfirmIntake(db, IntakeConfirmation{
+	confirmation := withExplicitJobContractForIntake(t, db, IntakeConfirmation{
 		TaskID: proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:budget-successor",
 		Reason:    "Approve the exact partial tree and successor contract under a new execution budget.",
 		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
 	})
+	approved, err := ConfirmIntake(db, confirmation)
 	if err != nil || approved.Status != core.Ready {
 		t.Fatal("verified partial tree was not explicitly reapproved", err)
 	}
@@ -569,11 +811,12 @@ func TestBudgetStoppedCompletedCoderContinuesAtReviewerWithoutRerun(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	approved, err := ConfirmIntake(db, IntakeConfirmation{
+	confirmation := withExplicitJobContractForIntake(t, db, IntakeConfirmation{
 		TaskID: proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:review-successor",
 		Reason:    "Approve the exact saved Coder output and a new independent-review budget.",
 		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
 	})
+	approved, err := ConfirmIntake(db, confirmation)
 	if err != nil || approved.Status != core.Ready {
 		t.Fatal("completed Coder result was not explicitly approved for continuation", err)
 	}
@@ -824,13 +1067,14 @@ func testStoppedSnapshotCoderContinuesAtReviewerWithoutCommitOrRerun(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	approved, err := ConfirmIntake(db, IntakeConfirmation{
+	confirmation := withExplicitJobContractForIntake(t, db, IntakeConfirmation{
 		TaskID: proposal.ID, ExpectedHash: hash, Actor: "human", Source: "human:snapshot-review-successor",
 		Reason:    "Approve the exact saved tree and a separate independent-review budget.",
 		Selection: selection.Config, ReplacesFlow: flow.ID, Target: &target,
 		AdditionalTaskIDs:       []string{"snapshot-review-successor-flow-review-0"},
 		ConfigurationDecisionID: core.ConfigurationApprovalID(selection.Config.Execution.ApprovalRef, proposal.ID),
 	})
+	approved, err := ConfirmIntake(db, confirmation)
 	if err != nil || approved.Status != core.Ready {
 		t.Fatal("snapshot result was not explicitly approved for continuation", err)
 	}
@@ -1130,5 +1374,172 @@ func TestIntakeRejectsLedgerIDCollision(t *testing.T) {
 	after, _ := db.LoadWorkspace()
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("rejected collision changed the workspace")
+	}
+}
+
+func TestIntakeCreatesDistinctJobWithoutChangingTaskContract(t *testing.T) {
+	db, request := jobIntakeApprovalFixture(t)
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := before.Graph.GraphTask(request.TaskID)
+	if !ok {
+		t.Fatal("intake Task was not saved")
+	}
+	job, ok := before.Graph.JobForTask(task.ID)
+	if !ok || job.ID == task.ID || task.JobID != job.ID || job.Status != core.JobDraft ||
+		job.Request != "Implement within this contract." {
+		t.Fatalf("intake Job does not preserve a distinct Job identity and original request: %+v", job)
+	}
+	hash, err := IntakeHash(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hash != request.ExpectedHash {
+		t.Fatal("confirmed proposal hash does not include the assigned JobID")
+	}
+	withoutJob := task
+	withoutJob.JobID = ""
+	unboundHash, err := IntakeHash(withoutJob)
+	if err != nil || unboundHash == hash {
+		t.Fatal("Task approval hash must bind its Job ownership", err)
+	}
+	if _, err := ConfirmIntake(db, request); err != nil {
+		t.Fatal(err)
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok = after.Graph.JobForTask(task.ID)
+	if !ok || job.Status != core.JobActive {
+		t.Fatalf("confirmed intake did not activate its Job: %+v", job)
+	}
+	if len(after.Graph.JobHistory) != 2 {
+		t.Fatalf("Job lifecycle history length = %d, want creation and approval events", len(after.Graph.JobHistory))
+	}
+}
+
+func TestProposeJobBeforeTasksAndAttachMultipleTasks(t *testing.T) {
+	db, _, _, _ := executionConfigurationFixture(t)
+	proposal := JobIntakeRequest{
+		JobID: "job-before-task", Request: "Implement the approved feature.",
+		Goal:  "Deliver the requested behavior with independent review.",
+		Actor: "human", Source: "human:job-proposal",
+	}
+	job, err := ProposeJob(db, proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != core.JobDraft || job.ID != proposal.JobID {
+		t.Fatalf("unexpected independent Job proposal: %+v", job)
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Graph.Tasks) != 1 {
+		t.Fatalf("ProposeJob created a Task; existing task count = %d", len(state.Graph.Tasks))
+	}
+	if len(state.Graph.Jobs) != 1 {
+		t.Fatalf("Job count = %d, want 1", len(state.Graph.Jobs))
+	}
+
+	// An exact retry returns the same Job without creating another history entry.
+	if _, err := ProposeJob(db, proposal); err != nil {
+		t.Fatalf("exact Job proposal replay failed: %v", err)
+	}
+	if _, err := ProposeJob(db, JobIntakeRequest{
+		JobID: proposal.JobID, Request: proposal.Request, Goal: "different goal",
+		Actor: proposal.Actor, Source: proposal.Source,
+	}); err == nil {
+		t.Fatal("Job ID reuse with a different goal must be rejected")
+	}
+
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := state.Graph.GraphTask("task")
+	if !ok {
+		t.Fatal("fixture Task is missing")
+	}
+	task.ID, task.Status, task.AuthorizationID, task.Decisions = "task-first", core.Draft, "", nil
+	task.JobID = job.ID
+	first, err := ProposeIntake(db, IntakeRequest{
+		Request: proposal.Request, Task: task, Actor: "human", Source: "human:task-proposal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondTask := task
+	secondTask.ID = "task-second"
+	secondTask.Title = "Independent follow-up task"
+	secondTask.Objective = "Complete the follow-up within the same approved Job scope."
+	second, err := ProposeIntake(db, IntakeRequest{
+		Request: proposal.Request, Task: secondTask, Actor: "human", Source: "human:task-proposal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.JobID != job.ID || second.JobID != job.ID {
+		t.Fatalf("Tasks do not share the pre-existing Job: first=%q second=%q job=%q", first.JobID, second.JobID, job.ID)
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Graph.Jobs) != 1 {
+		t.Fatalf("attaching Tasks created extra Jobs: %d", len(state.Graph.Jobs))
+	}
+	for _, taskID := range []string{first.ID, second.ID} {
+		if owner, ok := state.Graph.JobForTask(taskID); !ok || owner.ID != job.ID {
+			t.Fatalf("Task %s does not resolve to the original Job", taskID)
+		}
+	}
+}
+
+func TestConfirmIntakeRequiresIndependentJobContractHash(t *testing.T) {
+	db, request := jobIntakeApprovalFixture(t)
+	before, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingContract := request
+	missingContract.JobContract = nil
+	missingContract.ExpectedJobContractHash = ""
+	if _, err := ConfirmIntake(db, missingContract); err == nil {
+		t.Fatal("Task confirmation without a Job contract must not create Job authority")
+	}
+	wrongHash := request
+	wrongHash.ExpectedJobContractHash = "stale-job-contract-hash"
+	if _, err := ConfirmIntake(db, wrongHash); err == nil {
+		t.Fatal("Task confirmation with a mismatched Job contract hash must be rejected")
+	}
+	after, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("rejected Job contract confirmation partially changed Task or Job approval state")
+	}
+	if _, ok := after.Graph.CurrentJobApproval(request.TaskID); ok {
+		t.Fatal("invalid Task confirmation created a Job approval")
+	}
+	if _, err := ConfirmIntake(db, request); err != nil {
+		t.Fatalf("explicit Task and Job hashes should confirm: %v", err)
+	}
+	after, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok := after.Graph.JobForTask(request.TaskID)
+	if !ok {
+		t.Fatal("confirmed Task has no owning Job")
+	}
+	approval, ok := after.Graph.CurrentJobApproval(job.ID)
+	if !ok || approval.ProposalHash != request.ExpectedJobContractHash {
+		t.Fatal("Job approval does not match the separately confirmed Job contract hash")
 	}
 }

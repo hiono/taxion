@@ -39,6 +39,7 @@ type Config struct {
 	Role                  string
 	SystemPrompt          string
 	WorkingDirectory      string
+	Repository            string
 	CLIPath               string
 	BaseDirectory         string
 	AvailableTools        []string
@@ -65,12 +66,13 @@ type Adapter struct {
 	stopSessionID  string
 	stopConfigHash string
 
-	opMu      sync.Mutex
-	mu        sync.Mutex
-	started   bool
-	closed    bool
-	sessions  map[string]*managedSession
-	quotaOnly bool
+	opMu               sync.Mutex
+	mu                 sync.Mutex
+	started            bool
+	closed             bool
+	sessions           map[string]*managedSession
+	quotaOnly          bool
+	authorizeJobEffect func(context.Context, string, runtime.JobEffectRequest) error
 }
 
 type managedSession struct {
@@ -402,7 +404,27 @@ func (a *Adapter) UsesBoundResultIdentity() bool {
 	return a.config.ResponseSchema["$id"] == "urn:taxion:dispatch-result:bound:v1"
 }
 
-func (a *Adapter) Worktree() string { return a.config.WorkingDirectory }
+func (a *Adapter) Worktree() string      { return a.config.WorkingDirectory }
+func (a *Adapter) JobRepository() string { return a.config.Repository }
+func (a *Adapter) JobFileAccessPolicy() *core.FileAccessPolicy {
+	return core.CloneFileAccessPolicy(a.config.FileAccess)
+}
+
+func (a *Adapter) SetJobEffectAuthorizer(authorizer func(context.Context, string, runtime.JobEffectRequest) error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.authorizeJobEffect = authorizer
+}
+
+func (a *Adapter) jobEffectAuthorizer() func(context.Context, string, runtime.JobEffectRequest) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.authorizeJobEffect
+}
+
+func (a *Adapter) hasJobEffectAuthorizer() bool {
+	return a.jobEffectAuthorizer() != nil
+}
 
 func (a *Adapter) BudgetGuidancePolicy() *core.BudgetGuidancePolicy {
 	return core.CloneBudgetGuidance(a.config.BudgetGuidance)
@@ -467,7 +489,7 @@ func (a *Adapter) Send(ctx context.Context, sessionID, prompt string) error {
 		return fmt.Errorf("taxion: prompt must not be empty")
 	}
 	if a.config.ToolPolicy != nil {
-		if err := a.checkToolPolicy(ctx, sessionID); err != nil {
+		if err := a.checkApprovedToolPolicy(ctx, sessionID); err != nil {
 			return err
 		}
 	}
@@ -813,6 +835,8 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 		config.EnableSkills = &enabled
 		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
 		config.Tools = append(config.Tools, a.mcpTools()...)
+	}
+	if a.config.ToolPolicy != nil || a.hasJobEffectAuthorizer() {
 		config.Hooks = a.toolHooks()
 	}
 	return config
@@ -844,6 +868,8 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		config.EnableSkills = &enabled
 		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
 		config.Tools = append(config.Tools, a.mcpTools()...)
+	}
+	if a.config.ToolPolicy != nil || a.hasJobEffectAuthorizer() {
 		config.Hooks = a.toolHooks()
 	}
 	return config
@@ -879,13 +905,13 @@ func infiniteSessions() *sdk.InfiniteSessionConfig {
 
 func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 	if a.config.Role != "REVIEWER" && a.config.Role != "CODER" && a.config.ToolPolicy == nil &&
-		a.config.ManagedSearch == nil && !slices.Contains(a.config.AvailableTools, "skill") {
+		a.config.ManagedSearch == nil && !slices.Contains(a.config.AvailableTools, "skill") && !a.hasJobEffectAuthorizer() {
 		return nil
 	}
 	return func(request sdk.PermissionRequest, invocation sdk.PermissionInvocation) (rpc.PermissionDecision, error) {
 		contextRead := false
 		decision := reviewerPermissionDecision(a.config.WorkingDirectory, a.config.FileAccess, a.config.TrackedFiles, request)
-		if a.config.Role == "CODER" {
+		if a.config.Role == "CODER" || a.hasJobEffectAuthorizer() {
 			decision = coderPermissionDecision(a.config.WorkingDirectory, a.config.AvailableTools,
 				a.config.FileAccess, a.config.TrackedFiles, request)
 		}
@@ -931,6 +957,18 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
 			}
 		}
+		if authorize := a.jobEffectAuthorizer(); authorize != nil {
+			effect, allowed := jobEffectForPermission(a.config.WorkingDirectory, a.config.TrackedFiles, request)
+			if !allowed {
+				reason := "Tool effect is not observable or enforceably contained by the Job Runtime"
+				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
+			} else if err := authorize(context.Background(), invocation.SessionID, effect); err != nil {
+				reason := err.Error()
+				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
+			} else if _, rejected := decision.(*rpc.PermissionDecisionReject); !rejected {
+				decision = &rpc.PermissionDecisionApproveOnce{}
+			}
+		}
 		if handle, err := a.lookup(invocation.SessionID); err == nil {
 			payload, _ := json.Marshal(struct {
 				RequestKind string `json:"requestKind"`
@@ -944,12 +982,12 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 
 func coderPermissionDecision(worktree string, availableTools []string, fileAccess *core.FileAccessPolicy, trackedFiles []string, request sdk.PermissionRequest) rpc.PermissionDecision {
 	reject := func() rpc.PermissionDecision {
-		reason := "Coder permissions are limited to the assigned worktree, file-access policy, and explicitly allowlisted tools"
+		reason := "Role permissions are limited to the assigned worktree and file-access policy; tool availability is a provider capability, while Job authorization is enforced separately"
 		return &rpc.PermissionDecisionReject{Feedback: &reason}
 	}
 	switch permission := request.(type) {
 	case *sdk.PermissionRequestRead:
-		return readPermissionDecision(worktree, fileAccess, trackedFiles, "Coder", permission)
+		return readPermissionDecision(worktree, fileAccess, trackedFiles, "Role", permission)
 	case *sdk.PermissionRequestWrite:
 		if permission.RequestSandboxBypass != nil && *permission.RequestSandboxBypass ||
 			permission.ManagedApprovalRequired != nil && *permission.ManagedApprovalRequired {

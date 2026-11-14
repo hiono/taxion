@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	sdk "github.com/github/copilot-sdk/go"
+	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/tools"
 )
@@ -21,10 +22,7 @@ func (a *Adapter) extensionDirectories() ([]string, []string) {
 	return skills, plugins
 }
 
-func (a *Adapter) checkToolPolicy(ctx context.Context, sessionID string) error {
-	if a.config.ToolPolicy == nil {
-		return fmt.Errorf("taxion: tools require an explicit role policy")
-	}
+func (a *Adapter) checkApprovedToolPolicy(ctx context.Context, sessionID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -33,7 +31,19 @@ func (a *Adapter) checkToolPolicy(ctx context.Context, sessionID string) error {
 			return err
 		}
 	}
-	return a.config.ToolPolicy.Check()
+	if a.config.ToolPolicy != nil {
+		return a.config.ToolPolicy.Check()
+	}
+	return nil
+}
+
+func (a *Adapter) checkToolPolicy(ctx context.Context, sessionID string, request runtime.JobEffectRequest) error {
+	if authorize := a.jobEffectAuthorizer(); authorize != nil {
+		if err := authorize(ctx, sessionID, request); err != nil {
+			return err
+		}
+	}
+	return a.checkApprovedToolPolicy(ctx, sessionID)
 }
 
 func (a *Adapter) mcpTools() []sdk.Tool {
@@ -57,7 +67,7 @@ func (a *Adapter) mcpTools() []sdk.Tool {
 				if !executing {
 					return sdk.ToolResult{}, fmt.Errorf("taxion: MCP requires an active approved role turn")
 				}
-				if err := a.checkToolPolicy(invocation.TraceContext, invocation.SessionID); err != nil {
+				if err := a.checkToolPolicy(invocation.TraceContext, invocation.SessionID, runtime.JobEffectRequest{Effect: core.JobEffectExternalMutation, Target: binding.Name}); err != nil {
 					return sdk.ToolResult{}, err
 				}
 				body, err := a.config.ToolPolicy.CallMCP(invocation.TraceContext, binding.Name, invocation.Arguments)
@@ -71,7 +81,7 @@ func (a *Adapter) mcpTools() []sdk.Tool {
 	return result
 }
 
-func (a *Adapter) checkHook(sessionID string, invocation sdk.HookInvocation) error {
+func (a *Adapter) checkHook(sessionID, toolName string, invocation sdk.HookInvocation) error {
 	if sessionID != invocation.SessionID {
 		return fmt.Errorf("taxion: tool hook session differs from its SDK invocation")
 	}
@@ -85,7 +95,7 @@ func (a *Adapter) checkHook(sessionID string, invocation sdk.HookInvocation) err
 	if !executing {
 		return fmt.Errorf("taxion: tool hooks require an active role turn")
 	}
-	return a.checkToolPolicy(context.Background(), sessionID)
+	return a.checkToolPolicy(context.Background(), sessionID, runtime.JobEffectRequest{Preflight: true})
 }
 
 func (a *Adapter) failToolEvidence(sessionID string, err error) error {
@@ -99,7 +109,7 @@ func (a *Adapter) toolHooks() *sdk.SessionHooks {
 	return &sdk.SessionHooks{
 		OnPreToolUse: func(input sdk.PreToolUseHookInput, invocation sdk.HookInvocation) (*sdk.PreToolUseHookOutput, error) {
 			reason := ""
-			if err := a.checkHook(input.SessionID, invocation); err != nil {
+			if err := a.checkHook(input.SessionID, input.ToolName, invocation); err != nil {
 				reason = err.Error()
 			} else if !slices.Contains(a.config.AvailableTools, input.ToolName) ||
 				slices.Contains([]string{"task", "run_subagent", "agent"}, input.ToolName) {
@@ -112,6 +122,9 @@ func (a *Adapter) toolHooks() *sdk.SessionHooks {
 			return nil, nil
 		},
 		OnPostToolUse: func(input sdk.PostToolUseHookInput, invocation sdk.HookInvocation) (*sdk.PostToolUseHookOutput, error) {
+			if a.config.ToolPolicy == nil {
+				return nil, nil
+			}
 			if input.SessionID != invocation.SessionID {
 				return nil, fmt.Errorf("taxion: tool evidence session identity differs")
 			}
@@ -128,6 +141,9 @@ func (a *Adapter) toolHooks() *sdk.SessionHooks {
 			return &sdk.PostToolUseHookOutput{ModifiedResult: changed, AdditionalContext: "Private original tool evidence: " + receipt}, nil
 		},
 		OnPostToolUseFailure: func(input sdk.PostToolUseFailureHookInput, invocation sdk.HookInvocation) (*sdk.PostToolUseFailureHookOutput, error) {
+			if a.config.ToolPolicy == nil {
+				return nil, nil
+			}
 			if input.SessionID != invocation.SessionID {
 				return nil, fmt.Errorf("taxion: failure evidence session identity differs")
 			}

@@ -26,7 +26,7 @@ func TestRequestCheckpointRequiresFormalBoundApprovalBeforeResume(t *testing.T) 
 			approved := mode != "approved-flag" && mode != "missing-approval"
 			input := "/plan\n"
 			if approved {
-				input += "/approve\n"
+				input += "/approve\n/approve\n"
 			}
 			runs := 0
 			runner := func(context.Context, []string, io.Writer) error { runs++; return nil }
@@ -39,6 +39,11 @@ func TestRequestCheckpointRequiresFormalBoundApprovalBeforeResume(t *testing.T) 
 				t.Fatal(err)
 			}
 			defer db.Close()
+			if !approved {
+				if _, exists := state.Graph.Job(state.Records.Operation.ID + "-job"); exists {
+					t.Fatal("planning created the execution Job before formal user approval")
+				}
+			}
 			var checkpoint requestCheckpoint
 			if err := json.Unmarshal(state.Records.Operation.Checkpoint, &checkpoint); err != nil {
 				t.Fatal(err)
@@ -109,7 +114,7 @@ func TestRequestMinimalPlanRejectsCredentialBeforeTaskCreation(t *testing.T) {
 	secret := "github_pat_" + strings.Repeat("z", 24)
 	answer := requestFixtureAnswer([]string{})
 	answer.Proposal.Objective = "invalid plan " + secret
-	if err := requestCommand(append(args, "add search"), strings.NewReader("/plan\n/approve\n"), io.Discard,
+	if err := requestCommand(append(args, "add search"), strings.NewReader("/plan\n/approve\n/approve\n"), io.Discard,
 		fixturePlan(t, answer), nil); err == nil {
 		t.Fatal("credential-like plan was accepted")
 	}
@@ -181,7 +186,7 @@ func TestRequestResumeWithoutMinimalPlanNeverSubstitutesRequestDigest(t *testing
 
 func TestRequestApprovalRejectsAuthoritativeRecordAndExecutionDrift(t *testing.T) {
 	_, args := requestFixture(t)
-	if err := requestCommand(append(args, "add search"), strings.NewReader("/plan\n/approve\n"), io.Discard,
+	if err := requestCommand(append(args, "add search"), strings.NewReader("/plan\n/approve\n/approve\n"), io.Discard,
 		fixturePlan(t, requestFixtureAnswer([]string{})), func(context.Context, []string, io.Writer) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +324,7 @@ func TestRequestKeepsCheckpointMinimalAndPreservesRedactedSources(t *testing.T) 
 	response := "public displayed assumption " + secret
 	answer := requestFixtureAnswer([]string{})
 	answer.Assumptions = []string{response}
-	if err := requestCommand(append(args, prompt), strings.NewReader("/plan\n/approve\n"), io.Discard,
+	if err := requestCommand(append(args, prompt), strings.NewReader("/plan\n/approve\n/approve\n"), io.Discard,
 		fixturePlan(t, answer), func(context.Context, []string, io.Writer) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +428,7 @@ func TestRequestCancellationPreservesTaskAndRefusesActiveWorkflow(t *testing.T) 
 			question := []string{"Which behavior?"}
 			input := "/plan\n"
 			if active {
-				question, input = []string{}, "/plan\n/approve\n"
+				question, input = []string{}, "/plan\n/approve\n/approve\n"
 			}
 			runner := func(context.Context, []string, io.Writer) error { return nil }
 			if err := requestCommand(append(args, "add search"), strings.NewReader(input), io.Discard,

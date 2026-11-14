@@ -30,6 +30,11 @@ func verifyValidatedArtifactContract(prior core.ReviewFlow, next core.GraphTask)
 	next.Supersedes, next.CreatedFrom = old.Supersedes, old.CreatedFrom
 	next.NextAction, next.DeferredReason, next.ResumeCondition = old.NextAction, old.DeferredReason, old.ResumeCondition
 	next.TargetSHA, next.TargetTreeSHA, next.TargetChangedFiles = old.TargetSHA, old.TargetTreeSHA, old.TargetChangedFiles
+	// JobID is the new collaboration ownership boundary, not part of the
+	// predecessor's artifact-validation contract. The successor receives its
+	// own Job approval; this comparison only proves the saved validation inputs
+	// and candidate are unchanged.
+	next.JobID = old.JobID
 	if !reflect.DeepEqual(old, next) {
 		return fmt.Errorf("taxion: validation reuse requires the unchanged contract, source worktree and validation commands")
 	}

@@ -183,6 +183,43 @@ func TestReviewerPermissionHandlerAllowsOnlyWorktreeReads(t *testing.T) {
 	}
 }
 
+func TestReviewerJobEffectAuthorizationAllowsInBoundaryWrite(t *testing.T) {
+	config := testConfig(t)
+	config.Role = "REVIEWER"
+	adapter, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inside := filepath.Join(config.WorkingDirectory, "review.md")
+	var observed runtime.JobEffectRequest
+	adapter.SetJobEffectAuthorizer(func(_ context.Context, sessionID string, request runtime.JobEffectRequest) error {
+		if sessionID != "review-session" {
+			t.Errorf("authorization session = %q, want review-session", sessionID)
+		}
+		observed = request
+		return nil
+	})
+	handler := adapter.permissionHandler()
+	decision, err := handler(&sdk.PermissionRequestWrite{FileName: inside}, sdk.PermissionInvocation{SessionID: "review-session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decision.(*rpc.PermissionDecisionApproveOnce); !ok {
+		t.Fatalf("in-bound Reviewer write decision = %T, want one-time approval", decision)
+	}
+	if observed.Effect != core.JobEffectRepositoryWrite || observed.Target != "review.md" {
+		t.Fatalf("Job authorization observation = %+v", observed)
+	}
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	decision, err = handler(&sdk.PermissionRequestWrite{FileName: outside}, sdk.PermissionInvocation{SessionID: "review-session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decision.(*rpc.PermissionDecisionReject); !ok {
+		t.Fatalf("out-of-bound Reviewer write decision = %T, want rejection", decision)
+	}
+}
+
 func TestCoderPermissionDecisionLimitsAccessToWorktreeAndAllowlist(t *testing.T) {
 	worktree := t.TempDir()
 	inside := filepath.Join(worktree, "new.go")

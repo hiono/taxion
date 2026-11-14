@@ -7,9 +7,9 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"github.com/hiono/taxion/internal/core"
 	"time"
 
+	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/tools"
 )
 
@@ -63,6 +63,14 @@ type Identity interface {
 	Worktree() string
 }
 
+// JobBoundaryIdentity exposes the resource boundary actually enforced by a
+// provider adapter. Job authorization compares it with the approved contract.
+type JobBoundaryIdentity interface {
+	Identity
+	JobRepository() string
+	JobFileAccessPolicy() *core.FileAccessPolicy
+}
+
 // ConfigurationIdentity exposes the selected tuple without provider SDK types.
 // Authentication, repository access and provider service state do not establish
 // AI contract eligibility or the contractual payer.
@@ -88,9 +96,30 @@ type EventCursor interface {
 	EventsAfter(ctx context.Context, sessionID string, cursor uint64) (<-chan Event, error)
 }
 
+// ToolPolicyIdentity exposes provider capabilities to the legacy Task Dispatch
+// path. Job-native authorization must not use this as an authority source.
 type ToolPolicyIdentity interface {
 	Identity
 	ToolPolicy() *tools.Policy
+}
+
+// JobEffectRequest describes an observed effect without relying on provider tool names.
+type JobEffectRequest struct {
+	Effect          core.JobEffect
+	Target          string
+	Resource        string
+	Tracked         bool
+	Capability      string
+	Action          string
+	Inspectable     bool
+	SandboxEnforced bool
+	SandboxBypass   bool
+	Preflight       bool
+}
+
+// JobEffectAuthorizer installs the Job-scoped effect evaluator in a Runtime adapter.
+type JobEffectAuthorizer interface {
+	SetJobEffectAuthorizer(func(context.Context, string, JobEffectRequest) error)
 }
 
 // StopAttachment lets providers attach without loading executable extensions.

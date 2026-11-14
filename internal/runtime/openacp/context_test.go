@@ -87,17 +87,31 @@ func readNativeContextChunks(data []byte) (string, error) {
 	return original.String(), nil
 }
 
-func TestLegacyOpenACPContextSurfaceAndHashUnchanged(t *testing.T) {
-	adapter := &Adapter{config: Config{Role: "REVIEWER", SystemPrompt: "contract", WorkingDirectory: "/workspace"}}
-	// Captured from the pre-context-access whole-Config encoding.
-	legacy := `{"adapter":"openacp-isolated-v14","Role":"REVIEWER","SystemPrompt":"contract","WorkingDirectory":"/workspace","CLIPath":"","CLIHash":"","ServerConfig":"","ServerConfigHash":"","Configuration":null,"FileAccess":null,"TrackedFiles":null,"ResponseSchema":null,"BudgetGuidance":null,"ToolPolicy":null,"AvailableTools":null}`
-	if adapter.ConfigHash() != hashBytes([]byte(legacy)) {
-		t.Fatal("legacy ACP configuration hash changed")
+func TestOpenACPConfigurationHashBindsJobBoundary(t *testing.T) {
+	base := Config{
+		Role: "REVIEWER", SystemPrompt: "contract", WorkingDirectory: "/workspace",
+		Repository: "owner/repo", FileAccess: &core.FileAccessPolicy{Level: core.FileAccessCommitted},
 	}
-	permission := map[string]any{"read": "ask"}
-	before := map[string]any{"read": "ask"}
-	prompt, err := adapter.prepareContext(permission)
-	if err != nil || prompt != "" || !reflect.DeepEqual(permission, before) {
-		t.Fatal("legacy ACP prompt or native permission surface changed", err)
+	baseline := (&Adapter{config: base}).ConfigHash()
+	if baseline == "" {
+		t.Fatal("configuration hash is empty")
+	}
+	changedRepository := base
+	changedRepository.Repository = "other/repo"
+	if got := (&Adapter{config: changedRepository}).ConfigHash(); got == baseline {
+		t.Fatal("configuration hash does not bind the approved repository")
+	}
+	changedFileAccess := base
+	changedFileAccess.FileAccess = &core.FileAccessPolicy{Level: core.FileAccessAll}
+	if got := (&Adapter{config: changedFileAccess}).ConfigHash(); got == baseline {
+		t.Fatal("configuration hash does not bind the approved file-access boundary")
+	}
+	changedContext := base
+	changedContext.ContextDocuments = []core.ContextDocument{{ID: "design", Kind: "design", Source: "human:design", Version: "1", Text: "approved context", Hash: "sha256:context"}}
+	if got := (&Adapter{config: changedContext}).ConfigHash(); got == baseline {
+		t.Fatal("configuration hash does not bind supplied Job context")
+	}
+	if got := (&Adapter{config: base}).ConfigHash(); got != baseline {
+		t.Fatal("identical runtime configuration produced a different hash")
 	}
 }

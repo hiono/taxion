@@ -703,7 +703,6 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 			if current.Config != selected {
 				return fmt.Errorf("request configuration changed; checkpoint retained and renewed authorization required")
 			}
-			operation.State, operation.Phase, operation.TaskID, operation.FlowID = "RUNNING", "PREFLIGHT", id, id+"-flow"
 			proposal := answer.Proposal
 			planHash, err := core.CanonicalSHA256(proposal)
 			if err != nil {
@@ -729,11 +728,17 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				if err != nil {
 					return err
 				}
+				if _, err := controller.ProposeJob(db, controller.JobIntakeRequest{
+					JobID: id + "-job", Request: string(executionRequest), Goal: proposal.Objective,
+					Actor: selected.Execution.Requester, Source: "planner:" + task.ID,
+				}); err != nil {
+					return err
+				}
 				executionTask, err = controller.ProposeIntake(db, controller.IntakeRequest{
 					Request: string(executionRequest), Actor: selected.Execution.Requester, Source: "planner:" + task.ID,
 					ContextSources: contextSources,
 					Task: core.GraphTask{
-						ID: id, Title: proposal.Title, Objective: proposal.Objective, Repo: *repo,
+						ID: id, JobID: id + "-job", Title: proposal.Title, Objective: proposal.Objective, Repo: *repo,
 						Type: "IMPLEMENTATION", Status: core.Draft, CreatedFrom: source,
 						Issue: "NOT_REQUIRED: user-approved local request",
 						Owner: "CODER", Reviewer: "REVIEWER", Scope: proposal.Scope, OutOfScope: proposal.OutOfScope,
@@ -748,6 +753,57 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 					return err
 				}
 			}
+			var jobApprovalProposal core.JobApprovalProposal
+			var jobApprovalHash string
+			if !resumeApproved {
+				approvalConfiguration, err := approvalConfigurationFor(selected, resolved.Sources)
+				if err != nil {
+					return err
+				}
+				remainingNanoAIU := operation.MaxNanoAIU - operation.PlanningNanoAIU
+				if operation.ExternalBudgetOnly() {
+					remainingNanoAIU = 0
+				}
+				contract, err := controller.BuildJobContractForIntake(executionTask, approvalConfiguration, core.JobBudget{
+					MaxRoleExecutions:       2 + 2*(*repairs),
+					MaxConcurrentExecutions: 1,
+					MaxNanoAIU:              remainingNanoAIU,
+					AccountQuotaOnly:        operation.AccountQuotaOnly,
+					BudgetSource:            operation.BudgetSource,
+				}, operation.Deadline)
+				if err != nil {
+					return err
+				}
+				jobApprovalProposal, jobApprovalHash, err = controller.ProposeJobContract(db, controller.JobContractProposalRequest{
+					JobID: id + "-job", Contract: contract, Actor: selected.Execution.Requester,
+					Source: "planner:" + task.ID, Reason: "propose the exact request execution boundary for human approval",
+				})
+				if err != nil {
+					return err
+				}
+				if err := displayRequestJobContract(output, jobApprovalProposal, jobApprovalHash); err != nil {
+					return err
+				}
+				if err := saveRequestCheckpoint(db, &operation, checkpoint); err != nil {
+					return err
+				}
+				line, err = read()
+				if errors.Is(err, io.EOF) {
+					operation.State = "WAITING_FOR_APPROVAL"
+					return saveRequestCheckpoint(db, &operation, checkpoint)
+				}
+				if err != nil {
+					return err
+				}
+				if line == "/quit" {
+					operation.State = "CANCELLED"
+					return saveRequestCheckpoint(db, &operation, checkpoint)
+				}
+				if line != "/approve" {
+					return fmt.Errorf("the Job execution contract was not approved; use /approve to authorize it or /quit to cancel")
+				}
+			}
+			operation.State, operation.Phase, operation.TaskID, operation.FlowID = "RUNNING", "PREFLIGHT", id, id+"-flow"
 			hash, err := controller.IntakeHash(executionTask)
 			if err != nil {
 				return err
@@ -768,6 +824,8 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 					Selection: selected, AdditionalTaskIDs: reviewers,
 					ConfigurationDecisionID: core.ConfigurationApprovalID(selected.Execution.ApprovalRef, id),
 					RequestOperationID:      id, RequestBasisHash: basis,
+					JobContract:             &jobApprovalProposal.Contract,
+					ExpectedJobContractHash: jobApprovalHash,
 				}); err != nil {
 					return err
 				}
@@ -811,6 +869,9 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				remainingNanoAIU = 0
 				budgetAuthorization = "the user selected /approve for the declared provider-stop-no-overage billing contract, goal, deadline and repair limit without a nano-AIU ceiling or automatic quota monitoring"
 			}
+			// Obsolete transitional path: this command still dispatches through Task/ReviewFlow
+			// even when a JobApproval exists. This is not valid Job-native execution and
+			// must be replaced by the Job/RoleExecution lifecycle, not retained as fallback.
 			if _, err := controller.StartReviewFlowContext(controller.WithOperation(ctx, operation), db, storePath, controller.ReviewFlowRequest{
 				Configuration: configuration,
 				ID:            flowID, TaskID: id, Repository: *repo, ReviewRoot: reviewRoot,
@@ -882,9 +943,26 @@ func displayRequestPlan(output io.Writer, answer controller.QuestionAnswer) erro
 		fmt.Fprintln(&text, question)
 	}
 	fmt.Fprintln(&text, "Execution permits new files within the worktree and creates no commit. The Reviewer is read-only.")
-	fmt.Fprintln(&text, "Enter revisions or answers in natural language. Use /approve to execute a plan with all questions resolved, or /quit to exit.")
+	fmt.Fprintln(&text, "Enter revisions or answers in natural language. Use /approve to review the exact Job execution contract; a second /approve is required to authorize it, or /quit to exit.")
 	_, err := output.Write(text.Bytes())
 	return err
+}
+
+func displayRequestJobContract(output io.Writer, proposal core.JobApprovalProposal, hash string) error {
+	data, err := json.MarshalIndent(proposal, "", "  ")
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(output, "\nJob execution contract (approval required):"); err != nil {
+		return err
+	}
+	if _, err := output.Write(data); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(output, "\nJob proposal hash: %s\nApprove only this exact Job contract with /approve.\n", hash); err != nil {
+		return err
+	}
+	return nil
 }
 
 func displayRequestUsage(output io.Writer, usage []core.DispatchUsage, sessionCeiling float64,

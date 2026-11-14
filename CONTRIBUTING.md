@@ -18,6 +18,11 @@ mise exec -- go version
 mise exec -- go build ./...
 ```
 
+Go の整形は Commit 前に自動実行します。初回のみ [pre-commit](https://pre-commit.com/) を導入し、
+リポジトリのルートで `pre-commit install` を実行してください。
+Commit 対象の Go ファイルに `gofmt -w` を適用します。整形によってファイルが変更された場合は、
+変更を再 stage してから Commit してください。CI の `mise run check` でも整形漏れを検出します。
+
 Taxion CLI の動作確認では、[development mode の手順](docs/userguide/binary-provenance.md#明示-policy-と初回設定)に従って隔離 store を使います。
 
 修正中は変更した package のテストを実行し、PR 前に全体を確認します。
@@ -38,7 +43,7 @@ CLI のコマンド・flag を変えた場合は `mise exec -- go generate ./cmd
 関連する仕様と呼出し元を確認し、目的を満たす最小の変更にしてください。
 `internal/core` は標準ライブラリだけに依存し、外部サービスとの接続は runtime などの adapter に置きます。
 
-動作を変える場合は、その変更がなければ失敗する回帰テストを追加します。
+動作を変える場合は、新しい不変条件と利用者シナリオに基づくテストを追加します。旧挙動を固定するテストが新設計を妨げる場合は、テスト自体を新しい受入条件へ置き換えます。
 承認、予算、成果保全に関わる変更では、正常時だけでなく拒否・中断時にも
 保存成果と履歴が失われないことを確認します。詳しい実行・保存仕様は
 [Runtime 契約](docs/develop/runtime-contract.md)と[Ledger](docs/develop/ledger-schema.md)を参照してください。

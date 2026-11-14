@@ -47,6 +47,31 @@ func (p FileAccessPolicy) Validate() error {
 	return nil
 }
 
+// FileAccessPolicyWithin reports whether candidate stays within the approved boundary.
+func FileAccessPolicyWithin(candidate, boundary FileAccessPolicy) bool {
+	if candidate.Validate() != nil || boundary.Validate() != nil {
+		return false
+	}
+	switch boundary.Level {
+	case FileAccessAll:
+		return true
+	case FileAccessCommitted:
+		return candidate.Level == FileAccessCommitted || candidate.Level == FileAccessExact
+	case FileAccessExact:
+		if candidate.Level != FileAccessExact {
+			return false
+		}
+		for _, path := range candidate.Paths {
+			if !slices.Contains(boundary.Paths, path) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 func CloneFileAccessPolicy(policy *FileAccessPolicy) *FileAccessPolicy {
 	if policy == nil {
 		return nil

@@ -16,15 +16,20 @@
 
 変更に関係する[ガードレール](guardrails.md)と回帰テストを確認し、
 [開発環境の検証手順](../../CONTRIBUTING.md#開発環境)を実行します。
-現在の使い方はガイド、現在の契約は仕様、理由は ADR、個別の結果は Issue・PR に書きます。
+現在の使い方はガイド、現在の契約は仕様、理由は ADR、個別の結果は Issue・PR に書きます。Taxion全体の再設計原則は [ADR-0081](adr/0081-rebuild-over-legacy-constraints.md) を正本とします。Job-native設計では [ADR-0077](adr/0077-job-centered-role-collaboration.md) と [ADR-0080](adr/0080-job-boundary-and-prohibited-effects.md) を併せて参照してください。旧Task / ReviewFlow / operation allowlist は現行設計の互換性要件ではなく、置換・削除対象です。履歴移行が必要な場合も、実行・認可を行わない明示的な境界に限定します。
 更新先は[文書の配置と責務](../../CONTRIBUTING.md#文書の配置と責務)を参照してください。
 全仕様の通読や、過去の障害経緯の暗記は変更の前提にしません。
+
+## ドメイン不変条件を変更する
+
+[ドメイン不変条件と実装・検証対応表](domain-invariants.md)で、論理条件・強制箇所・回帰検証の対応を確認します。判定関数の存在だけで完了とせず、状態変更・保存・復元・外部入力の各経路を確認します。原則は [ADR-0079](adr/0079-enforce-domain-invariants-across-state-paths.md) を参照してください。
 
 ## 判断・計画・検証履歴を調べる
 
 | 資料 | 読む目的 |
 |---|---|
 | [ADR](adr/) | 設計を選んだ理由と後続判断 |
+| [制約付き最適化による設計経路の導出](adr/0078-constrained-optimization-for-design-decisions.md) | 複数候補の責務対応・設計比較を有限の制約付き最適化問題として導く方法 |
 | [判断・Milestone 対応表](decision-traceability.md) | 過去の判断から実装 Issue と現在の仕様をたどる |
 | [要件と到達条件](orchestration-requirements.md) | 採択した要件と段階別の検証履歴 |
 | [ロードマップ](roadmap.md) | 現在の未達事項と、過去の開発段階の参照 |

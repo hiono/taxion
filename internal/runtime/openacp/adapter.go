@@ -3,6 +3,7 @@ package openacp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +29,7 @@ type Config struct {
 	Role             string
 	SystemPrompt     string
 	WorkingDirectory string
+	Repository       string
 	CLIPath          string
 	CLIHash          string
 	ServerConfig     string
@@ -58,35 +61,36 @@ type Adapter struct {
 	input  io.WriteCloser
 	done   chan struct{}
 
-	opMu            sync.Mutex
-	writeMu         sync.Mutex
-	mu              sync.Mutex
-	nextID          uint64
-	pending         map[string]chan response
-	toolCalls       map[string]core.ExecutionObservation
-	session         string
-	model           string
-	executableHash  string
-	connection      string
-	history         []runtime.Event
-	wake            chan struct{}
-	output          strings.Builder
-	outputMessageID string
-	busy            bool
-	stopped         bool
-	closed          bool
-	failure         error
-	stderr          diagnosticStderr
-	preservationErr error
-	turn            int64
-	turnDone        chan struct{}
+	opMu               sync.Mutex
+	writeMu            sync.Mutex
+	mu                 sync.Mutex
+	nextID             uint64
+	pending            map[string]chan response
+	toolCalls          map[string]core.ExecutionObservation
+	session            string
+	model              string
+	executableHash     string
+	connection         string
+	history            []runtime.Event
+	wake               chan struct{}
+	output             strings.Builder
+	outputMessageID    string
+	busy               bool
+	stopped            bool
+	closed             bool
+	failure            error
+	stderr             diagnosticStderr
+	preservationErr    error
+	authorizeJobEffect func(context.Context, string, runtime.JobEffectRequest) error
+	turn               int64
+	turnDone           chan struct{}
 
 	launch func(context.Context, string, string, bool) (*exec.Cmd, error)
 }
 
 var _ runtime.ConfigurationIdentity = (*Adapter)(nil)
 var _ runtime.EventCursor = (*Adapter)(nil)
-var _ runtime.ToolPolicyIdentity = (*Adapter)(nil)
+var _ runtime.JobEffectAuthorizer = (*Adapter)(nil)
 
 func hashBytes(data []byte) string {
 	sum := sha256.Sum256(data)
@@ -154,9 +158,6 @@ func New(config Config) (*Adapter, error) {
 		if !slices.Contains([]string{"view", "read", "glob", "grep", "create", "edit", "apply_patch", "skill"}, name) {
 			return nil, fmt.Errorf("openacp: unsupported tool %q; shell, MCP and executable extensions are not available", name)
 		}
-		if config.Role != "CODER" && slices.Contains([]string{"create", "edit", "apply_patch"}, name) {
-			return nil, fmt.Errorf("openacp: read-only role cannot enable editing tools")
-		}
 	}
 	config.AvailableTools = slices.Clone(config.AvailableTools)
 	config.FileAccess = core.CloneFileAccessPolicy(config.FileAccess)
@@ -173,9 +174,13 @@ func New(config Config) (*Adapter, error) {
 	return &Adapter{config: config, pending: map[string]chan response{}, wake: make(chan struct{}), launch: sandboxCommand}, nil
 }
 
-func (a *Adapter) Role() string     { return a.config.Role }
-func (a *Adapter) Provider() string { return "opencode" }
-func (a *Adapter) Worktree() string { return a.config.WorkingDirectory }
+func (a *Adapter) Role() string          { return a.config.Role }
+func (a *Adapter) Provider() string      { return "opencode" }
+func (a *Adapter) Worktree() string      { return a.config.WorkingDirectory }
+func (a *Adapter) JobRepository() string { return a.config.Repository }
+func (a *Adapter) JobFileAccessPolicy() *core.FileAccessPolicy {
+	return core.CloneFileAccessPolicy(a.config.FileAccess)
+}
 func (a *Adapter) UsesBoundResultIdentity() bool {
 	return a.config.ResponseSchema["$id"] == "urn:taxion:dispatch-result:bound:v1"
 }
@@ -199,6 +204,22 @@ func (a *Adapter) ToolPolicy() *tools.Policy {
 		return nil
 	}
 	return a.config.ToolPolicy.Clone()
+}
+
+func (a *Adapter) SetJobEffectAuthorizer(authorizer func(context.Context, string, runtime.JobEffectRequest) error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.authorizeJobEffect = authorizer
+}
+
+func (a *Adapter) jobEffectAuthorizer() func(context.Context, string, runtime.JobEffectRequest) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.authorizeJobEffect
+}
+
+func (a *Adapter) hasJobEffectAuthorizer() bool {
+	return a.jobEffectAuthorizer() != nil
 }
 func (a *Adapter) BudgetGuidancePolicy() *core.BudgetGuidancePolicy {
 	return core.CloneBudgetGuidance(a.config.BudgetGuidance)
@@ -285,20 +306,33 @@ func (a *Adapter) prepare() error {
 		return err
 	}
 	permission := map[string]any{"*": "deny", "bash": "deny"}
-	// Retain read-only definitions for tool-free advisory sessions; every
-	// unapproved request is still cancelled by the ACP client.
+	// These provider permissions are transitional adapter controls, not the Job
+	// authorization model. Replace the string-operation callback with structured
+	// effect/resource observations under ADR-0080; do not preserve Role allowlists
+	// as a parallel authorization layer.
 	for _, name := range []string{"read", "glob", "grep"} {
 		permission[name] = "ask"
 	}
 	if slices.Contains(a.config.AvailableTools, "view") || slices.Contains(a.config.AvailableTools, "read") {
-		permission["read"], permission["glob"], permission["grep"] = "allow", "allow", "allow"
+		readPermission := "allow"
+		if a.hasJobEffectAuthorizer() {
+			readPermission = "ask"
+		}
+		permission["read"], permission["glob"], permission["grep"] = readPermission, readPermission, readPermission
 	}
-	if a.config.Role == "CODER" && (slices.Contains(a.config.AvailableTools, "create") ||
-		slices.Contains(a.config.AvailableTools, "edit") || slices.Contains(a.config.AvailableTools, "apply_patch")) {
+	if (a.config.Role == "CODER" || a.hasJobEffectAuthorizer()) &&
+		(slices.Contains(a.config.AvailableTools, "create") || slices.Contains(a.config.AvailableTools, "edit") ||
+			slices.Contains(a.config.AvailableTools, "apply_patch")) {
 		permission["edit"] = "allow"
+		if a.hasJobEffectAuthorizer() {
+			permission["edit"] = "ask"
+		}
 	}
 	if a.config.ToolPolicy != nil && len(a.config.ToolPolicy.Skills) != 0 {
 		permission["skill"] = "allow"
+		if a.hasJobEffectAuthorizer() {
+			permission["skill"] = "ask"
+		}
 		external := map[string]string{"*": "deny"}
 		for _, asset := range a.config.ToolPolicy.Skills {
 			name := filepath.Base(asset.Path)
@@ -307,6 +341,8 @@ func (a *Adapter) prepare() error {
 			}
 			if permission["read"] == "allow" {
 				external["/config/opencode/skills/"+name+"/*"] = "allow"
+			} else if permission["read"] == "ask" && (slices.Contains(a.config.AvailableTools, "view") || slices.Contains(a.config.AvailableTools, "read")) {
+				external["/config/opencode/skills/"+name+"/*"] = "ask"
 			}
 		}
 		permission["external_directory"] = external
@@ -518,6 +554,217 @@ func (a *Adapter) write(message any) error {
 	return json.NewEncoder(a.input).Encode(message)
 }
 
+func validateUniqueJSONKeys(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if err := consumeUniqueJSONValue(decoder); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return fmt.Errorf("openacp: JSON input contains trailing data")
+	}
+	return nil
+}
+
+func consumeUniqueJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := map[string]struct{}{}
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return fmt.Errorf("openacp: JSON object key is not a string")
+			}
+			if _, exists := seen[key]; exists {
+				return fmt.Errorf("openacp: JSON object contains a duplicate key")
+			}
+			seen[key] = struct{}{}
+			if err := consumeUniqueJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil || end != json.Delim('}') {
+			return fmt.Errorf("openacp: malformed JSON object")
+		}
+	case '[':
+		for decoder.More() {
+			if err := consumeUniqueJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil || end != json.Delim(']') {
+			return fmt.Errorf("openacp: malformed JSON array")
+		}
+	default:
+		return fmt.Errorf("openacp: unexpected JSON delimiter")
+	}
+	return nil
+}
+
+func openACPResourcePath(value string) (string, error) {
+	if !strings.HasPrefix(strings.ToLower(value), "file:") {
+		return value, nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "file") ||
+		(parsed.Host != "" && !strings.EqualFold(parsed.Host, "localhost")) || parsed.User != nil ||
+		parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path == "" {
+		return "", fmt.Errorf("openacp: resource URI is not a local file URI")
+	}
+	return parsed.Path, nil
+}
+
+func canonicalOpenACPJobTarget(worktree, target string) (string, error) {
+	if strings.TrimSpace(target) == "" || strings.TrimSpace(target) != target {
+		return "", fmt.Errorf("openacp: resource target is empty or contains surrounding whitespace")
+	}
+	root, err := filepath.EvalSymlinks(worktree)
+	if err != nil {
+		return "", err
+	}
+	var absolute string
+	if filepath.IsAbs(target) {
+		if filepath.Clean(target) != target {
+			return "", fmt.Errorf("openacp: absolute resource target is not canonical")
+		}
+		absolute = target
+	} else {
+		if strings.ContainsAny(target, ":\\") || filepath.Clean(target) != target ||
+			target == "." || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("openacp: resource target is not a canonical relative path")
+		}
+		absolute = filepath.Join(root, target)
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if os.IsNotExist(err) {
+		if _, entryErr := os.Lstat(absolute); os.IsNotExist(entryErr) {
+			if parent, parentErr := filepath.EvalSymlinks(filepath.Dir(absolute)); parentErr == nil {
+				resolved, err = filepath.Join(parent, filepath.Base(absolute)), nil
+			}
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(root, resolved)
+	if err != nil || relative == "." || relative == ".." ||
+		strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return "", fmt.Errorf("openacp: resource target escapes the assigned worktree")
+	}
+	relative = filepath.ToSlash(relative)
+	if slices.Contains(strings.Split(relative, "/"), ".git") || core.ProhibitedArtifactPath(relative) {
+		return "", fmt.Errorf("openacp: resource target is protected")
+	}
+	return relative, nil
+}
+
+func openACPJobEffect(worktree, kind, name string, input json.RawMessage, available, approvedPaths []string, allowAll bool) (runtime.JobEffectRequest, bool) {
+	var args map[string]any
+	if len(input) == 0 || validateUniqueJSONKeys(input) != nil || json.Unmarshal(input, &args) != nil {
+		return runtime.JobEffectRequest{}, false
+	}
+	canonical := ""
+	for _, key := range []string{"path", "filePath", "file_path", "uri"} {
+		value, exists := args[key]
+		if !exists {
+			continue
+		}
+		text, ok := value.(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			return runtime.JobEffectRequest{}, false
+		}
+		target, err := openACPResourcePath(text)
+		if err != nil {
+			return runtime.JobEffectRequest{}, false
+		}
+		resolved, err := canonicalOpenACPJobTarget(worktree, target)
+		if err != nil || canonical != "" && canonical != resolved {
+			return runtime.JobEffectRequest{}, false
+		}
+		canonical = resolved
+	}
+	if canonical == "" || !allowAll && !slices.Contains(approvedPaths, canonical) ||
+		!slices.Contains(available, name) {
+		return runtime.JobEffectRequest{}, false
+	}
+	switch kind {
+	case "read":
+		return runtime.JobEffectRequest{
+			Effect: core.JobEffectRepositoryRead, Target: canonical, Capability: name, Action: "read",
+			Inspectable: true, SandboxEnforced: true,
+		}, true
+	case "edit":
+		return runtime.JobEffectRequest{
+			Effect: core.JobEffectRepositoryWrite, Target: canonical, Capability: name, Action: "write",
+			Inspectable: true, SandboxEnforced: true,
+		}, true
+	default:
+		return runtime.JobEffectRequest{}, false
+	}
+}
+
+func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
+	cancelled := map[string]any{"outcome": "cancelled"}
+	var request struct {
+		SessionID string `json:"sessionId"`
+		ToolCall  struct {
+			Kind  string          `json:"kind"`
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"rawInput"`
+		} `json:"toolCall"`
+		Options []struct {
+			OptionID string `json:"optionId"`
+			Kind     string `json:"kind"`
+		} `json:"options"`
+	}
+	if validateUniqueJSONKeys(params) != nil || json.Unmarshal(params, &request) != nil {
+		return cancelled
+	}
+	authorize := a.jobEffectAuthorizer()
+	if authorize == nil {
+		return cancelled
+	}
+	available := slices.Clone(a.config.AvailableTools)
+	if a.config.ToolPolicy != nil && len(a.config.ToolPolicy.Skills) != 0 && !slices.Contains(available, "skill") {
+		available = append(available, "skill")
+	}
+	approved, err := approvedPaths(a.config)
+	if err != nil {
+		return cancelled
+	}
+	effect, ok := openACPJobEffect(a.config.WorkingDirectory, request.ToolCall.Kind, request.ToolCall.Name, request.ToolCall.Input, available, approved, a.config.FileAccess.Level == core.FileAccessAll)
+	if ok {
+		effect.Tracked = slices.Contains(a.config.TrackedFiles, effect.Target)
+	}
+	if !ok || authorize(context.Background(), request.SessionID, effect) != nil {
+		for _, option := range request.Options {
+			if option.Kind == "reject_once" {
+				return map[string]any{"outcome": "selected", "optionId": option.OptionID}
+			}
+		}
+		return cancelled
+	}
+	for _, option := range request.Options {
+		if option.Kind == "allow_once" {
+			return map[string]any{"outcome": "selected", "optionId": option.OptionID}
+		}
+	}
+	return cancelled
+}
+
 func (a *Adapter) read(output io.Reader) {
 	scanner := bufio.NewScanner(output)
 	scanner.Buffer(make([]byte, 4096), 8*1024*1024)
@@ -538,7 +785,7 @@ func (a *Adapter) read(output io.Reader) {
 				// is offered. Native tools remain inside the sealed namespace.
 				var reply any
 				if message.Method == "session/request_permission" {
-					reply = map[string]any{"jsonrpc": "2.0", "id": message.ID, "result": map[string]any{"outcome": map[string]string{"outcome": "cancelled"}}}
+					reply = map[string]any{"jsonrpc": "2.0", "id": message.ID, "result": map[string]any{"outcome": a.permissionOutcome(message.Params)}}
 				} else {
 					reply = map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{"code": -32601, "message": "Client operation unsupported"}}
 				}

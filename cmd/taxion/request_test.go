@@ -335,7 +335,7 @@ func TestRequestOldDefaultCheckpointRetainsFlowPolicy(t *testing.T) {
 	db.Close()
 	called := false
 	stopped := errors.New("fixture stops before runtime")
-	err = requestCommand([]string{"--resume", operation.ID}, strings.NewReader("/approve\n"), &out, nil,
+	err = requestCommand([]string{"--resume", operation.ID}, strings.NewReader("/approve\n/approve\n"), &out, nil,
 		func(_ context.Context, _ []string, _ io.Writer) error {
 			called = true
 			db, state, err := loadWorkspace()
@@ -590,7 +590,7 @@ func TestSearch(t *testing.T) {
 		return err
 	}
 	var out bytes.Buffer
-	err := requestCommand(append(args, "検索機能をつけて"), strings.NewReader("/plan\n部分一致です。\n/approve\n"), &out, planner, runner)
+	err := requestCommand(append(args, "検索機能をつけて"), strings.NewReader("/plan\n部分一致です。\n/approve\n/approve\n"), &out, planner, runner)
 	if resume {
 		if err == nil || roles != 1 {
 			t.Fatal("fixture did not stop after exactly one Coder", err, roles)
@@ -647,7 +647,7 @@ func TestSearch(t *testing.T) {
 		}
 	}
 	coder, reviewer := state.Graph.Dispatches[0], state.Graph.Dispatches[1]
-	if strings.Count(out.String(), core.DocumentationAcceptance) != 1 ||
+	if strings.Count(out.String(), core.DocumentationAcceptance) != 2 ||
 		!slices.Contains(coder.Instruction.Acceptance, core.DocumentationAcceptance) ||
 		!slices.Equal(coder.Instruction.Acceptance, reviewer.Instruction.Acceptance) {
 		t.Fatal("displayed documentation acceptance did not reach the approved Coder and Reviewer contracts")
@@ -773,7 +773,7 @@ func TestRequestDoesNotInferApprovalOrRepeatAfterFailure(t *testing.T) {
 			case "eof":
 				input = "/plan\n"
 			case "unanswered":
-				input = "/plan\n/approve\n"
+				input = "/plan\n/approve\n/approve\n"
 			case "dirty":
 				if err := os.WriteFile(filepath.Join(root, "unexpected"), []byte("keep"), 0600); err != nil {
 					t.Fatal(err)

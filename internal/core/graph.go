@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -181,6 +182,7 @@ type HumanDecisionRequest struct {
 // Parent/children, siblings and blocks are derived from parentId and dependsOn.
 type GraphTask struct {
 	ID                 string                `json:"id"`
+	JobID              string                `json:"jobId,omitempty"`
 	Title              string                `json:"title"`
 	Repo               string                `json:"repo"`
 	Type               string                `json:"type"`
@@ -499,17 +501,126 @@ type TaskWaiver struct {
 	Children   []string `json:"children"`
 }
 
+// UnmarshalJSON migrates the former Job-owned Task list into Task.JobID.
+// The old fields are accepted only as an input migration format and are never
+// represented or emitted by the current domain model.
+func (g *TaskGraph) UnmarshalJSON(data []byte) error {
+	// Remove only the two explicitly supported legacy Job fields before
+	// strict decoding. All other unknown fields remain errors.
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return err
+	}
+	var legacy struct {
+		Jobs []struct {
+			ID         string   `json:"id"`
+			RootTaskID string   `json:"rootTaskId"`
+			TaskIDs    []string `json:"taskIds"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return err
+	}
+	if rawJobs, ok := envelope["jobs"]; ok {
+		var jobs []map[string]json.RawMessage
+		if err := json.Unmarshal(rawJobs, &jobs); err != nil {
+			return err
+		}
+		for _, oldJob := range jobs {
+			delete(oldJob, "rootTaskId")
+			delete(oldJob, "taskIds")
+		}
+		cleanJobs, err := json.Marshal(jobs)
+		if err != nil {
+			return err
+		}
+		envelope["jobs"] = cleanJobs
+	}
+	cleanData, err := json.Marshal(envelope)
+	if err != nil {
+		return err
+	}
+	type plain TaskGraph
+	var decoded plain
+	decoder := json.NewDecoder(bytes.NewReader(cleanData))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	*g = TaskGraph(decoded)
+	owners := make(map[string]string)
+	for _, oldJob := range legacy.Jobs {
+		ids := append([]string(nil), oldJob.TaskIDs...)
+		if oldJob.RootTaskID != "" && !slices.Contains(ids, oldJob.RootTaskID) {
+			ids = append(ids, oldJob.RootTaskID)
+		}
+		for _, taskID := range ids {
+			if previous := owners[taskID]; previous != "" && previous != oldJob.ID {
+				return fmt.Errorf("legacy Task %s belongs to multiple Jobs", taskID)
+			}
+			owners[taskID] = oldJob.ID
+		}
+	}
+	taskIDs := make(map[string]bool, len(g.Tasks))
+	for _, task := range g.Tasks {
+		taskIDs[task.ID] = true
+	}
+	for taskID := range owners {
+		if !taskIDs[taskID] {
+			return fmt.Errorf("legacy Job references missing Task %s", taskID)
+		}
+	}
+	for i := range g.Tasks {
+		if owner := owners[g.Tasks[i].ID]; owner != "" {
+			if g.Tasks[i].JobID != "" && g.Tasks[i].JobID != owner {
+				return fmt.Errorf("Task %s has conflicting Job ownership during migration", g.Tasks[i].ID)
+			}
+			g.Tasks[i].JobID = owner
+		}
+	}
+	for i := range g.History {
+		if owner := owners[g.History[i].TaskID]; owner != "" {
+			g.History[i].Task.JobID = owner
+		}
+	}
+	for i := range g.ReviewFlows {
+		if owner := owners[g.ReviewFlows[i].TaskID]; owner != "" {
+			g.ReviewFlows[i].Contract.JobID = owner
+		}
+	}
+	// A restored first-class Job must satisfy the current domain invariants.
+	// Historical Task-only graphs are accepted only at this explicit migration boundary.
+	// They are not an active execution mode and must not receive Job authority.
+	if len(g.Jobs) > 0 {
+		if err := g.validateJobModel(); err != nil {
+			return fmt.Errorf("validate restored Job model: %w", err)
+		}
+	}
+	return nil
+}
+
 type TaskGraph struct {
-	Version               int              `json:"version"`
-	Tasks                 []GraphTask      `json:"tasks"`
-	Concerns              []Concern        `json:"concerns"`
-	History               []GraphEvent     `json:"history"`
-	Dispatches            []GraphDispatch  `json:"dispatches"`
-	DispatchHistory       []DispatchEvent  `json:"dispatchHistory"`
-	ReviewFlows           []ReviewFlow     `json:"reviewFlows,omitempty"`
-	Archives              []TaskArchive    `json:"archives,omitempty"`
-	ApprovalSchemaVersion int              `json:"approvalSchemaVersion,omitempty"`
-	Approvals             []ApprovalBundle `json:"approvals,omitempty"`
+	Version                    int                         `json:"version"`
+	Jobs                       []Job                       `json:"jobs,omitempty"`
+	RoleExecutions             []RoleExecution             `json:"roleExecutions,omitempty"`
+	RoleExecutionHistory       []RoleExecutionEvent        `json:"roleExecutionHistory,omitempty"`
+	JobHistory                 []JobEvent                  `json:"jobHistory,omitempty"`
+	Tasks                      []GraphTask                 `json:"tasks"`
+	Concerns                   []Concern                   `json:"concerns"`
+	History                    []GraphEvent                `json:"history"`
+	Dispatches                 []GraphDispatch             `json:"dispatches"`
+	DispatchHistory            []DispatchEvent             `json:"dispatchHistory"`
+	ReviewFlows                []ReviewFlow                `json:"reviewFlows,omitempty"`
+	Archives                   []TaskArchive               `json:"archives,omitempty"`
+	ApprovalSchemaVersion      int                         `json:"approvalSchemaVersion,omitempty"`
+	Approvals                  []ApprovalBundle            `json:"approvals,omitempty"`
+	JobApprovals               []JobApproval               `json:"jobApprovals,omitempty"`
+	JobOutputs                 []JobOutput                 `json:"jobOutputs,omitempty"`
+	JobEvidence                []JobEvidence               `json:"jobEvidence,omitempty"`
+	JobUsage                   []JobUsage                  `json:"jobUsage,omitempty"`
+	JobMessages                []JobMessage                `json:"jobMessages,omitempty"`
+	JobEffectApprovalRequests  []JobEffectApprovalRequest  `json:"jobEffectApprovalRequests,omitempty"`
+	JobEffectApprovalDecisions []JobEffectApprovalDecision `json:"jobEffectApprovalDecisions,omitempty"`
 }
 
 func graphError(format string, args ...any) error {
@@ -1457,6 +1568,12 @@ func (g TaskGraph) Validate() error {
 	if g.Version != 1 {
 		return graphError("unsupported version %d", g.Version)
 	}
+	if err := g.validateJobModel(); err != nil {
+		return err
+	}
+	if err := g.validateJobMessages(); err != nil {
+		return err
+	}
 	ids := map[string]bool{}
 	decisionIDs := map[string]TaskDecision{}
 	for _, t := range g.Tasks {
@@ -1923,6 +2040,30 @@ func cloneGraph(g TaskGraph) TaskGraph {
 	}
 	copy.ReviewFlows = slices.Clone(g.ReviewFlows)
 	copy.Approvals = slices.Clone(g.Approvals)
+	copy.JobMessages = slices.Clone(g.JobMessages)
+	copy.JobEffectApprovalRequests = slices.Clone(g.JobEffectApprovalRequests)
+	for i := range copy.JobEffectApprovalRequests {
+		copy.JobEffectApprovalRequests[i] = cloneJobEffectApprovalRequest(g.JobEffectApprovalRequests[i])
+	}
+	copy.JobEffectApprovalDecisions = slices.Clone(g.JobEffectApprovalDecisions)
+	copy.JobApprovals = slices.Clone(g.JobApprovals)
+	copy.JobOutputs = slices.Clone(g.JobOutputs)
+	copy.JobEvidence = slices.Clone(g.JobEvidence)
+	copy.JobUsage = slices.Clone(g.JobUsage)
+	for i := range copy.JobUsage {
+		copy.JobUsage[i] = cloneJobUsage(g.JobUsage[i])
+	}
+	for i := range copy.JobApprovals {
+		copy.JobApprovals[i] = cloneJobApproval(g.JobApprovals[i])
+	}
+	copy.Jobs = slices.Clone(g.Jobs)
+	for i := range copy.Jobs {
+		copy.Jobs[i].Constraints = slices.Clone(g.Jobs[i].Constraints)
+		copy.Jobs[i].Contract = cloneJobContract(g.Jobs[i].Contract)
+	}
+	copy.RoleExecutions = slices.Clone(g.RoleExecutions)
+	copy.RoleExecutionHistory = slices.Clone(g.RoleExecutionHistory)
+	copy.JobHistory = slices.Clone(g.JobHistory)
 	for i := range copy.Approvals {
 		copy.Approvals[i].Configuration.Sources = maps.Clone(g.Approvals[i].Configuration.Sources)
 		copy.Approvals[i].Configuration.Selection = slices.Clone(g.Approvals[i].Configuration.Selection)
@@ -2204,7 +2345,7 @@ func (g *TaskGraph) trackInto(t GraphTask, actor, reason string) error {
 	next := cloneGraph(*g)
 	t = cloneTask(t)
 	if old, ok := next.task(t.ID); ok {
-		if terminal(old.Status) || old.Status != t.Status || old.Repo != t.Repo || old.CreatedFrom != t.CreatedFrom ||
+		if terminal(old.Status) || old.Status != t.Status || old.JobID != t.JobID || old.Repo != t.Repo || old.CreatedFrom != t.CreatedFrom ||
 			!slices.Contains([]TaskStatus{Draft, Blocked, HumanDecisionRequired}, old.Status) {
 			return graphError("task identity/status or running/terminal contract cannot be edited")
 		}
