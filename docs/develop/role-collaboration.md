@@ -1,14 +1,14 @@
 # Job 中心の Role 協調設計
 
 Status: Adopted design direction  
-Decision: [ADR-0077](adr/0077-job-centered-role-collaboration.md)  
+Decision: [ADR-0077](adr/0077-job-centered-role-collaboration.md), [ADR-0081](adr/0081-rebuild-over-legacy-constraints.md)  
 Tracking: [Issue #283](https://github.com/hiono/taxion/issues/283)
 
 ## 目的
 
 Taxion は、完全な依頼情報を要求する検証装置ではない。不完全な情報を受け取った担当者同士が、判断・相談・補完を行い、Job を完了へ進めるための協調環境である。
 
-既存実装の構造や protocol を維持することは目的としない。従来の開発フローが接続拒否により機能不全であった以上、既存実装を基準に不足箇所だけを継ぎ足す方法は採用しない。
+既存実装の構造や protocol を維持することは目的としない。旧モデルが新モデルの自由度・単純さ・正しさを損なう場合は、技術的に再利用できる部品だけを選び、不要な旧コード・API・データ構造・テストを削除して作り直す。互換性維持を目的にしない（[ADR-0081](adr/0081-rebuild-over-legacy-constraints.md)）。従来の開発フローが接続拒否により機能不全であった以上、既存実装を基準に不足箇所だけを継ぎ足す方法は採用しない。
 
 ## 中心概念
 
