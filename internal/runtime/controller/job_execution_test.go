@@ -233,8 +233,8 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if err := worker.jobEffectAuthorizer(context.Background(), "different-session", runtime.JobEffectRequest{Preflight: true}); err == nil {
 		t.Fatal("operation preflight must reject a different provider session")
 	}
-	if err := worker.jobEffectAuthorizer(context.Background(), sessionID, jobRoleEffectRequest(core.JobEffectNetworkAccess, "", false)); err == nil {
-		t.Fatal("operation preflight must reject an unapproved network operation")
+	if err := controller.AuthorizeEffect("job-role-exec", jobRoleEffectRequest(core.JobEffectNetworkAccess, "", false), time.Now().UTC()); err == nil {
+		t.Fatal("direct operation authorization must reject an unapproved network operation")
 	}
 	if worker.expectedAccount != "test-account" {
 		t.Fatalf("Runtime authentication expected account = %q, want test-account", worker.expectedAccount)
@@ -706,6 +706,79 @@ func TestJobRoleControllerDoesNotStartWithAuthenticationMismatch(t *testing.T) {
 	}
 	if worker.startCount != 0 {
 		t.Fatalf("Runtime started %d times after authentication failure", worker.startCount)
+	}
+}
+
+func TestJobRoleControllerPersistsAndResumesExactEffectApproval(t *testing.T) {
+	db, job, task, selection := jobRoleFixture(t, true)
+	now := time.Now().UTC()
+	if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+		return state.Graph.AppendRoleExecution(core.RoleExecution{
+			ID: "effect-approval-exec", JobID: job.ID, TaskID: task.ID, Role: "CODER",
+			Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker := &jobRoleRuntimeFake{
+		role: "CODER", configHash: "runtime-config-hash", selection: selection,
+		events: make(chan runtime.Event),
+	}
+	controller, err := NewJobRoleController(db, worker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := controller.Start(context.Background(), "effect-approval-exec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := jobRoleEffectRequest(core.JobEffectNetworkAccess, "", false)
+	if err := worker.jobEffectAuthorizer(context.Background(), sessionID, request); err == nil {
+		t.Fatal("unapproved network effect must pause the Job and request human approval")
+	}
+	state, err := db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitingJob, ok := state.Graph.Job(job.ID)
+	if !ok || waitingJob.Status != core.JobWaiting {
+		t.Fatalf("Job status after approval request = %+v, want WAITING", waitingJob)
+	}
+	execution, ok := state.Graph.RoleExecution("effect-approval-exec")
+	if !ok || execution.Status != core.RoleExecutionWaiting {
+		t.Fatalf("RoleExecution status after approval request = %+v, want WAITING", execution)
+	}
+	if len(state.Graph.JobEffectApprovalRequests) != 1 {
+		t.Fatalf("persisted effect approval requests = %d, want 1", len(state.Graph.JobEffectApprovalRequests))
+	}
+	approvalRequest := state.Graph.JobEffectApprovalRequests[0]
+	if approvalRequest.JobID != job.ID || approvalRequest.RoleExecutionID != execution.ID ||
+		approvalRequest.Observation.Effects[0] != core.JobEffectNetworkAccess {
+		t.Fatalf("effect approval request is not bound to this Job operation: %+v", approvalRequest)
+	}
+	if err := controller.DecideEffectApproval(context.Background(), approvalRequest.ID, true,
+		"human", "approve this exact network request", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	state, err = db.LoadWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumedJob, _ := state.Graph.Job(job.ID)
+	resumedExecution, _ := state.Graph.RoleExecution(execution.ID)
+	if resumedJob.Status != core.JobActive || resumedExecution.Status != core.RoleExecutionRunning {
+		t.Fatalf("Job/RoleExecution after approval = %s/%s, want ACTIVE/RUNNING", resumedJob.Status, resumedExecution.Status)
+	}
+	if worker.resumeCount != 1 {
+		t.Fatalf("Runtime resume count = %d, want 1", worker.resumeCount)
+	}
+	if err := worker.jobEffectAuthorizer(context.Background(), sessionID, request); err != nil {
+		t.Fatalf("exactly approved network effect was not authorized: %v", err)
+	}
+	changed := request
+	changed.Resource = "external:another-target"
+	if err := worker.jobEffectAuthorizer(context.Background(), sessionID, changed); err == nil {
+		t.Fatal("approval for one external target must not authorize another target")
 	}
 }
 

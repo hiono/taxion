@@ -565,8 +565,8 @@ func (c *JobRoleController) requestEffectApproval(executionID, sessionID string,
 			return fmt.Errorf("taxion: effect approval request is stale or no longer required")
 		}
 		identity, err := core.CanonicalSHA256(struct {
-			JobID string
-			Revision int
+			JobID       string
+			Revision    int
 			ExecutionID string
 			Observation core.JobEffectObservation
 		}{job.ID, job.Contract.Revision, executionID, observation})
