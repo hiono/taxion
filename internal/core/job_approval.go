@@ -422,12 +422,6 @@ func TaskWithinJobContract(task GraphTask, contract JobContract) bool {
 	if !TaskWithinJobScope(task, contract) {
 		return false
 	}
-	if task.Owner != "" && !slices.Contains(contract.Roles, task.Owner) {
-		return false
-	}
-	if task.Reviewer != "" && !slices.Contains(contract.Roles, task.Reviewer) {
-		return false
-	}
 	for _, acceptance := range task.Acceptance {
 		if !slices.Contains(contract.Acceptance, acceptance) {
 			return false
@@ -441,9 +435,11 @@ func TaskWithinJobContract(task GraphTask, contract JobContract) bool {
 	if !slices.Equal(task.ValidationCommands, contract.ValidationCommands) {
 		return false
 	}
-	// Exact command identity is part of the approved contract. Whether a
-	// command is executable is decided by the isolated validation runner, not
-	// by a static Role-to-operation allowlist.
+	// Task ownership and reviewer fields belong to the legacy Task assignment
+	// model. Job participation is represented by RoleExecution and is checked
+	// against the approved Job role scope at the execution boundary.
+	// Exact command identity is part of the approved contract; executability
+	// is decided by the isolated validation runner.
 	return true
 }
 

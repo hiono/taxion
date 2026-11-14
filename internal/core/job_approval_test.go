@@ -45,7 +45,7 @@ func TestJobApprovalBindsExactJobRevision(t *testing.T) {
 	}
 }
 
-func TestTaskCannotWidenApprovedJobContract(t *testing.T) {
+func TestTaskLegacyRoleAssignmentDoesNotConstrainJobContract(t *testing.T) {
 	contract := *validJobContract(t)
 	task := GraphTask{ID: "task-a", Repo: "example/repo", Acceptance: []string{"tests pass"},
 		RequiredEvidence: []string{"test-report"}, FileAccess: &FileAccessPolicy{Level: FileAccessCommitted}}
@@ -55,12 +55,17 @@ func TestTaskCannotWidenApprovedJobContract(t *testing.T) {
 	assignedOwner := task
 	assignedOwner.Owner = "CODER"
 	if !TaskWithinJobContract(assignedOwner, contract) {
-		t.Fatal("Task assigned to an approved Job role should be accepted")
+		t.Fatal("legacy Task.Owner must not constrain Job participation")
 	}
 	unapprovedOwner := task
 	unapprovedOwner.Owner = "DEPLOYER"
 	if !TaskWithinJobContract(unapprovedOwner, contract) {
-		t.Fatal("legacy Task.Owner must not restrict Job Role participation")
+		t.Fatal("legacy Task.Owner must not constrain Job participation")
+	}
+	legacyReviewer := task
+	legacyReviewer.Reviewer = "DEPLOYER"
+	if !TaskWithinJobContract(legacyReviewer, contract) {
+		t.Fatal("legacy Task.Reviewer must not constrain Job participation")
 	}
 	widenedAcceptance := task
 	widenedAcceptance.Acceptance = []string{"deploy production"}
