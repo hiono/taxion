@@ -215,6 +215,12 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 		if err := worker.jobOperationAuthorizer(context.Background(), sessionID, "process.exec", "test -f README.md"); err == nil {
 			t.Fatal("modified validation command must not use the generic process.exec grant")
 		}
+		if err := worker.jobOperationAuthorizer(context.Background(), sessionID, "process.exec", "printf unauthorized"); err == nil {
+			t.Fatal("unlisted shell command must not fall through to the generic process.exec grant")
+		}
+	}
+	if err := worker.jobOperationAuthorizer(context.Background(), sessionID, "process.exec", ""); err == nil {
+		t.Fatal("shell authorization must reject a missing command payload")
 	}
 	if err := worker.jobOperationAuthorizer(context.Background(), "different-session", "repository.write", ""); err == nil {
 		t.Fatal("operation preflight must reject a different provider session")
