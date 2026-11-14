@@ -5,7 +5,11 @@ Decision: [ADR-0077](adr/0077-job-centered-role-collaboration.md), [ADR-0079](ad
 Tracking: [Issue #283](https://github.com/hiono/taxion/issues/283)  
 Implementation: [PR #292](https://github.com/hiono/taxion/pull/292)
 
-## 規範方針\n\n本計画は旧 Task / Dispatch / ReviewFlow を温存する移行計画ではない。旧経路の責務を Job / Task / RoleExecution / Controller へ再配置し、Job-native経路が成立したら重複する旧実行・認可経路を削除する。旧経路のテストを通すために新モデルを曲げない。旧workspaceの履歴が必要な場合だけ、実行・認可を行わない明示的でloss-awareな移行境界を設ける。\n\n## 1. 完成条件
+## 規範方針
+
+本計画は旧 Task / Dispatch / ReviewFlow を温存する移行計画ではない。旧経路の責務を Job / Task / RoleExecution / Controller へ再配置し、Job-native経路が成立したら重複する旧実行・認可経路を削除する。旧経路のテストを通すために新モデルを曲げない。旧workspaceの履歴が必要な場合だけ、実行・認可を行わない明示的でloss-awareな移行境界を設ける。
+
+## 1. 完成条件
 
 本計画の完了は、データ型や協調履歴 API の追加ではなく、次の一連の動作が Controller・Runtime adapter・永続化を通して成立した状態とする。
 
