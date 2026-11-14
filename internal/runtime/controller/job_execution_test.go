@@ -22,15 +22,15 @@ type jobRoleRuntimeFake struct {
 	prompt              string
 	startCount          int
 	resumeCount         int
-	sendCount            int
-	onResume             func()
-	stopCount            int
-	events               chan runtime.Event
-	stopErr              error
-	authErr              error
-	expectedAccount      string
-	repository           string
-	fileAccess           *core.FileAccessPolicy
+	sendCount           int
+	onResume            func()
+	stopCount           int
+	events              chan runtime.Event
+	stopErr             error
+	authErr             error
+	expectedAccount     string
+	repository          string
+	fileAccess          *core.FileAccessPolicy
 	jobEffectAuthorizer func(context.Context, string, runtime.JobEffectRequest) error
 }
 

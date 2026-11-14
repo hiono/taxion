@@ -13,7 +13,7 @@ import (
 func TestOpenACPJobEffectRequiresTarget(t *testing.T) {
 	tests := []struct {
 		kind, name, input string
-		want core.JobEffect
+		want             core.JobEffect
 		ok bool
 	}{
 		{"read", "read", `{"path":"src/main.go"}`, core.JobEffectRepositoryRead, true},
@@ -35,7 +35,6 @@ func TestOpenACPJobEffectRequiresTarget(t *testing.T) {
 	if _, ok := openACPJobEffect("edit", "edit", json.RawMessage(`{"path":".git/config"}`), []string{"edit"}, nil, true); ok {
 		t.Fatal("FileAccessAll must not expose Git metadata")
 	}
-
 }
 
 func TestPermissionOutcomeUsesJobEffectAndAllowOnce(t *testing.T) {

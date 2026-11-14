@@ -572,7 +572,7 @@ func openACPJobEffect(kind, name string, input json.RawMessage, available, appro
 			return runtime.JobEffectRequest{}, false
 		}
 		target = filepath.Clean(target)
-		if filepath.IsAbs(target) || target == "." || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+		if filepath.IsAbs(target) || strings.ContainsAny(target, ":\\") || target == "." || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
 			return runtime.JobEffectRequest{}, false
 		}
 		target = filepath.ToSlash(target)
@@ -585,7 +585,7 @@ func openACPJobEffect(kind, name string, input json.RawMessage, available, appro
 			return runtime.JobEffectRequest{}, false
 		}
 		target = filepath.Clean(target)
-		if filepath.IsAbs(target) || target == "." || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+		if filepath.IsAbs(target) || strings.ContainsAny(target, ":\\") || target == "." || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
 			return runtime.JobEffectRequest{}, false
 		}
 		target = filepath.ToSlash(target)

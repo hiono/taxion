@@ -1,9 +1,9 @@
 package copilot
 
 import (
-	"testing"
 	"os"
 	"path/filepath"
+	"testing"
 
 	sdk "github.com/github/copilot-sdk/go"
 	"github.com/hiono/taxion/internal/core"
@@ -12,7 +12,9 @@ import (
 func TestJobEffectForPermissionPreservesObservedEffect(t *testing.T) {
 	request := &sdk.PermissionRequestShell{FullCommandText: "go test ./..."}
 	worktree := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(worktree, "src"), 0700); err != nil { t.Fatal(err) }
+	if err := os.MkdirAll(filepath.Join(worktree, "src"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	effect, ok := jobEffectForPermission(worktree, request)
 	if !ok || effect.Effect != core.JobEffectValidationExecution || effect.Target != request.FullCommandText {
 		t.Fatalf("jobEffectForPermission(shell) = (%#v, %t)", effect, ok)
