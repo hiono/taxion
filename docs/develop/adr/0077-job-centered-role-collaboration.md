@@ -4,7 +4,7 @@ Date: 2026-11-13
 
 ## Status
 
-Accepted. The former operation-allowlist provisions in this ADR are superseded by ADR-0080; all non-conflicting Job collaboration and approval decisions remain in force.
+Accepted. The former operation-allowlist provisions in this ADR were superseded by ADR-0080. This ADR defines the Job-centered collaboration and immutable approval model; ADR-0080 defines how the approved Job boundary is enforced. Neither ADR requires preservation of obsolete Task/ReviewFlow execution paths.
 
 ## Context
 
@@ -48,7 +48,7 @@ Controller は意味的な情報の完全性を判定して Role の判断を代
 
 Job approval is the sole source of authority for work performed under a first-class Job. It is distinct from Job conversation, Task planning, and RoleExecution records.
 
-- A Job approval binds an immutable Job revision: request, goal, constraints, acceptance conditions, repository/resource boundaries, worktree and file-access ceiling, budget ceilings, deadline, explicit prohibitions, approval-required side effects, and effective non-secret configuration references.
+- A Job approval binds an immutable Job revision: request, goal, constraints, acceptance conditions, repository/resource boundaries, worktree and file-access ceiling, budget ceilings, deadline, explicit prohibitions, approval-required side effects, and effective non-secret configuration references. Ordinary operation names and static Role-to-operation grants are not approval dimensions.
 - The approval record is keyed by JobID and records the approved revision/proposal hash, canonicalization version, approver identity/source/reason, and approval time. The record is append-only; a changed approval basis requires a new revision and explicit approval.
 - A Task is an implementation decomposition, not an authority source. Its effective target/resource scope, budget, and deadline must remain within the approved Job boundary. A Task may narrow these boundaries but may not widen them.
 - Each RoleExecution is independently checked against the current Job approval, Task's narrowed resource scope, runtime identity/configuration, and remaining budget immediately before privileged Runtime operations. A previously created RoleExecution or Job message is not a grant.
@@ -58,7 +58,7 @@ Job approval is the sole source of authority for work performed under a first-cl
 
 The canonical Job approval proposal is a versioned value, not a digest of mutable Task records. Its boundaries must be inspectable before confirmation. It must not contain resolved credentials; configuration is represented by approved selection and source references/digests.
 
-The governing operation-authorization decision is [ADR-0080](0080-job-boundary-and-prohibited-effects.md). This ADR-0077 section is retained as historical context only where it describes the Job approval record, immutable revision, Task containment, and legacy approval separation. The former requirement to enumerate ordinary operations, intersect static Role operation grants, or reject an operation merely because its identifier is unknown is superseded by ADR-0080.
+The governing authorization decision is [ADR-0080](0080-job-boundary-and-prohibited-effects.md). Ordinary in-bound operations are not enumerated as Job or Role allowlists. Authorization is derived from the immutable approved Job boundary, explicit prohibitions, approval-required effects, and enforceable runtime containment. Unknown operation names are not denied merely because they were not predeclared; uninspectable or uncontained effects are denied or routed to a concrete human approval. Task scope can narrow the Job boundary but cannot grant authority.
 
 The canonical Job approval proposal retains these dimensions:
 
@@ -68,7 +68,7 @@ The canonical Job approval proposal retains these dimensions:
 4. **Budget and time:** explicit Job ceilings for aggregate usage and concurrency plus an absolute deadline. Task and RoleExecution limits are subordinate ceilings. Existing advisory budget guidance is not itself an authorization ceiling.
 5. **Security and configuration:** explicit prohibitions, approval-required side effects, and selected non-secret configuration references/digests. Resolved credentials are never stored in the approval proposal.
 
-Task Scope and OutOfScope remain work-intent descriptions. They are not machine-readable permission grants. Enforceable containment is evaluated using repository/resource identity, FileAccessPolicy, worktree/sandbox boundaries, explicit prohibitions, budget, deadline, and security policy. A Task may narrow each dimension; it may not widen it. If a dimension cannot be compared safely, execution is denied pending an explicit Job revision and approval.
+Task Scope and OutOfScope remain work-intent descriptions. They are not machine-readable permission grants. Enforceable containment is evaluated using repository/resource identity, FileAccessPolicy, worktree/sandbox boundaries, explicit prohibitions, approval-required effects, budget, deadline, and security policy. Ordinary reversible operations within these enforced boundaries do not require predeclared operation names or Role grants. A Task may narrow each dimension; it may not widen it. If an effect cannot be inspected or contained, execution is denied or routed to a bounded human approval; uncertainty is never treated as permission.
 
 A proposal hash is computed from a versioned canonical encoding of all approval dimensions. The append-only approval record binds JobID + revision + proposal hash + approver/source/reason/time. Reusing an approval ID with different content, approving a stale revision, or changing any bound dimension invalidates authorization. Every privileged operation checks that the approval still matches the current Job revision and remaining Job budget.
 
