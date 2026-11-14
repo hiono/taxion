@@ -558,7 +558,7 @@ func (c *JobRoleController) AuthorizeSessionEffect(ctx context.Context, sessionI
 		return err
 	}
 	if request.Preflight {
-		if request.Effect != "" || request.Target != "" {
+		if request.Effect != "" || request.Target != "" || request.Tracked {
 			return fmt.Errorf("taxion: preflight cannot carry an effect or target")
 		}
 		return nil
@@ -567,7 +567,11 @@ func (c *JobRoleController) AuthorizeSessionEffect(ctx context.Context, sessionI
 	if !ok || job.Contract == nil {
 		return fmt.Errorf("taxion: effect authorization requires an approved Job contract")
 	}
-	return job.Contract.CheckEffect(request.Effect, request.Target)
+	identity, ok := c.runtime.(runtime.JobBoundaryIdentity)
+	if !ok {
+		return fmt.Errorf("taxion: Job Runtime does not expose its repository boundary")
+	}
+	return job.Contract.CheckEffect(request.Effect, identity.JobRepository(), request.Target, request.Tracked)
 }
 
 // RecordUsage appends an immutable provider accounting observation to the Job ledger.
