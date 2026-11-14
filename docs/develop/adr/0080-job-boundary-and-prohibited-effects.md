@@ -1,4 +1,4 @@
-# ADR-0080: Job 境界内の手段選択と禁止副作用の強制
+# ADR-0080: Job 境界内の手段選択と禁止副作用の強制\n\nProject-wide redesign principle: [ADR-0081](0081-rebuild-over-legacy-constraints.md). This authorization decision is one application of that principle; it does not authorize preserving obsolete authorization or execution models elsewhere.
 
 Date: 2026-11-14
 
@@ -120,7 +120,7 @@ Reviewer の独立性は実行環境・対象の固定・証拠の provenance �
 
 ## Compatibility
 
-本 ADR はJob-nativeモデルを唯一の現行実行・認可モデルとして規定する。旧 Task / ReviewFlow の承認・tool allowlist・permission handler を並行 runtime として温存しない。既存データの移行が必要な場合は、旧承認を新しい権限根拠へ暗黙変換せず、移行不能・情報欠落を明示して拒否するか、新しい Job revision と明示承認を要求する。履歴参照のための読取り処理は、実行や認可を発生させてはならない。
+本 ADR は [ADR-0081](0081-rebuild-over-legacy-constraints.md) の全体原則に従い、Job-nativeモデルを唯一の現行実行・認可モデルとして規定する。旧 Task / ReviewFlow の承認・tool allowlist・permission handler を並行 runtime として温存しない。既存データの移行が必要な場合は、旧承認を新しい権限根拠へ暗黙変換せず、移行不能・情報欠落を明示して拒否するか、新しい Job revision と明示承認を要求する。履歴参照のための読取り処理は、実行や認可を発生させてはならない。
 
 ## Status
 
