@@ -16,7 +16,7 @@
 
 変更に関係する[ガードレール](guardrails.md)と回帰テストを確認し、
 [開発環境の検証手順](../../CONTRIBUTING.md#開発環境)を実行します。
-現在の使い方はガイド、現在の契約は仕様、理由は ADR、個別の結果は Issue・PR に書きます。
+現在の使い方はガイド、現在の契約は仕様、理由は ADR、個別の結果は Issue・PR に書きます。Job-native設計では [ADR-0077](adr/0077-job-centered-role-collaboration.md) と [ADR-0080](adr/0080-job-boundary-and-prohibited-effects.md) を併せて参照してください。旧Task / ReviewFlow / operation allowlist は現行設計の互換性要件ではなく、置換・削除対象です。履歴移行が必要な場合も、実行・認可を行わない明示的な境界に限定します。
 更新先は[文書の配置と責務](../../CONTRIBUTING.md#文書の配置と責務)を参照してください。
 全仕様の通読や、過去の障害経緯の暗記は変更の前提にしません。
 
