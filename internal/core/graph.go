@@ -589,7 +589,8 @@ func (g *TaskGraph) UnmarshalJSON(data []byte) error {
 		}
 	}
 	// A restored first-class Job must satisfy the current domain invariants.
-	// Legacy Task-only graphs remain readable without entering the Job model.
+	// Historical Task-only graphs are accepted only at this explicit migration boundary.
+	// They are not an active execution mode and must not receive Job authority.
 	if len(g.Jobs) > 0 {
 		if err := g.validateJobModel(); err != nil {
 			return fmt.Errorf("validate restored Job model: %w", err)
