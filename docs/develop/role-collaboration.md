@@ -38,7 +38,7 @@ Job の承認は JobID に結び付く独立した権限記録とし、Task appr
 - Task は Job scope の内側で作業を分解する。Task の scope・budget・deadline は Job 承認範囲を狭めることはできるが、拡張できない。
 - RoleExecution の作成時だけでなく、各 privileged Runtime 操作の直前に Job approval、Task の絞り込み、Runtime capability/configuration、強制可能な resource boundary、禁止副作用、残予算を再検証する。Role 名や静的 Role ACL は通常操作の認可根拠にしない。
 - 旧 Task approval bundle、authorization decision、packet receipt、dispatch audit は旧 Task の履歴として保存する。新 Job の承認へ移行・継承しない。
-- Jobless legacy Task は変更しない。そこから派生する新 Job は独立して承認し、旧 Task は provenance として参照する。
+- JobID を持たない旧 Task は現行実行モデルとして維持しない。必要な履歴だけを明示的なloss-aware移行境界で扱い、旧TaskをJob権限や実行経路へ接続しない。
 
 Job approval の scope は構造化して保持する。repository/resource identity と file-access ceiling、worktree/sandbox の強制境界、禁止副作用、承認が必要な副作用、aggregate budget / concurrency ceiling、absolute deadline、安全制約、secret を含まない configuration reference を proposal hash に含める。通常操作の operation allowlist や Role-to-operation grant は作らない。Task の Scope / OutOfScope は作業意図の記述であり、権限として解釈しない。Task は repository・file access・budget・deadline を Job の許可範囲内に狭めることだけができる。未知の operation 名だけを理由に拒否せず、影響を検査・封じ込めできない場合は具体的な承認要求または拒否とする。
 
