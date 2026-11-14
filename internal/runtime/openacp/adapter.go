@@ -58,29 +58,29 @@ type Adapter struct {
 	input  io.WriteCloser
 	done   chan struct{}
 
-	opMu            sync.Mutex
-	writeMu         sync.Mutex
-	mu              sync.Mutex
-	nextID          uint64
-	pending         map[string]chan response
-	toolCalls       map[string]core.ExecutionObservation
-	session         string
-	model           string
-	executableHash  string
-	connection      string
-	history         []runtime.Event
-	wake            chan struct{}
-	output          strings.Builder
-	outputMessageID string
-	busy            bool
-	stopped         bool
-	closed          bool
-	failure         error
-	stderr          diagnosticStderr
-	preservationErr      error
+	opMu                  sync.Mutex
+	writeMu               sync.Mutex
+	mu                    sync.Mutex
+	nextID                uint64
+	pending               map[string]chan response
+	toolCalls             map[string]core.ExecutionObservation
+	session               string
+	model                 string
+	executableHash        string
+	connection            string
+	history               []runtime.Event
+	wake                  chan struct{}
+	output                strings.Builder
+	outputMessageID       string
+	busy                  bool
+	stopped               bool
+	closed                bool
+	failure               error
+	stderr                diagnosticStderr
+	preservationErr       error
 	authorizeJobOperation func(context.Context, string, string, string) error
-	turn                 int64
-	turnDone        chan struct{}
+	turn                  int64
+	turnDone              chan struct{}
 
 	launch func(context.Context, string, string, bool) (*exec.Cmd, error)
 }
@@ -574,8 +574,8 @@ func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
 	cancelled := map[string]any{"outcome": "cancelled"}
 	var request struct {
 		SessionID string `json:"sessionId"`
-		ToolCall struct {
-			Kind string `json:"kind"`
+		ToolCall  struct {
+			Kind     string `json:"kind"`
 			Name string `json:"name"`
 		} `json:"toolCall"`
 		Options []struct {
@@ -631,7 +631,7 @@ func (a *Adapter) read(output io.Reader) {
 				// is offered. Native tools remain inside the sealed namespace.
 				var reply any
 				if message.Method == "session/request_permission" {
-						reply = map[string]any{"jsonrpc": "2.0", "id": message.ID, "result": map[string]any{"outcome": a.permissionOutcome(message.Params)}}
+					reply = map[string]any{"jsonrpc": "2.0", "id": message.ID, "result": map[string]any{"outcome": a.permissionOutcome(message.Params)}}
 				} else {
 					reply = map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{"code": -32601, "message": "Client operation unsupported"}}
 				}
