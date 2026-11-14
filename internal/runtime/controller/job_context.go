@@ -53,22 +53,22 @@ type JobEvidenceContext struct {
 }
 
 type JobContextSummary struct {
-	ID                   string                    `json:"id"`
-	Request              string                    `json:"request"`
-	Goal                 string                    `json:"goal"`
-	Constraints          []string                  `json:"constraints,omitempty"`
-	Status               string                    `json:"status"`
-	ApprovalRevision     int                       `json:"approvalRevision,omitempty"`
-	Roles                []string                  `json:"roles,omitempty"`
-	Approved             bool                      `json:"approved"`
-	Acceptance           []string                  `json:"acceptance,omitempty"`
-	RequiredEvidence     []string                  `json:"requiredEvidence,omitempty"`
-	Repositories         []core.JobRepositoryScope `json:"repositories,omitempty"`
-	Budget               core.JobBudget            `json:"budget,omitempty"`
-	UsedNanoAIU          float64                   `json:"usedNanoAiu"`
-	Deadline             time.Time                 `json:"deadline,omitempty"`
-	ProhibitedEffects       []core.JobEffectRule    `json:"prohibitedEffects"`
-	ApprovalRequiredEffects []core.JobEffectRule    `json:"approvalRequiredEffects"`
+	ID                      string                    `json:"id"`
+	Request                 string                    `json:"request"`
+	Goal                    string                    `json:"goal"`
+	Constraints             []string                  `json:"constraints,omitempty"`
+	Status                  string                    `json:"status"`
+	ApprovalRevision        int                       `json:"approvalRevision,omitempty"`
+	Roles                   []string                  `json:"roles,omitempty"`
+	Approved                bool                      `json:"approved"`
+	Acceptance              []string                  `json:"acceptance,omitempty"`
+	RequiredEvidence        []string                  `json:"requiredEvidence,omitempty"`
+	Repositories            []core.JobRepositoryScope `json:"repositories,omitempty"`
+	Budget                  core.JobBudget            `json:"budget,omitempty"`
+	UsedNanoAIU             float64                   `json:"usedNanoAiu"`
+	Deadline                time.Time                 `json:"deadline,omitempty"`
+	ProhibitedEffects       []core.JobEffectRule      `json:"prohibitedEffects"`
+	ApprovalRequiredEffects []core.JobEffectRule      `json:"approvalRequiredEffects"`
 }
 
 type JobTaskContext struct {
