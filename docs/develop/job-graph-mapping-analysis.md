@@ -6,7 +6,7 @@ Related: [ADR-0077](adr/0077-job-centered-role-collaboration.md), [ADR-0078](adr
 
 ## 1. 目的と判定原則
 
-本書は旧Task/Dispatch/ReviewFlow経路とJob/RoleExecution経路の対応を、印象や型名の類似ではなく、責務単位の割当問題として定義する。
+本書は旧Task/Dispatch/ReviewFlow経路を責務単位に分解し、Job/RoleExecutionモデルへ置換すべき責務を特定した設計監査記録である。旧経路を維持するための互換性設計や、旧実装を残す根拠として使用しない。
 
 比較の対象はデータ型だけではない。状態遷移、Controllerの操作、永続化、認可境界、成果物の出所、再開・復旧を含める。
 
@@ -201,13 +201,13 @@ flowchart TD
 | 7. 再Reviewer | 次のReviewFlow/Dispatch | RoleExecutionを再作成する実行ループが未完成 |
 | 8. Job完了 | Taskの終端状態 | JobCompletionReadyの判定ロジックは存在。Controllerの完了遷移統合は未完成 |
 
-**結論:** 新モデルはデータ構造と単一RoleExecutionの実行基盤を持つが、旧ReviewFlowが提供した一連の自動実行ループをまだ置き換えていない。旧ReviewFlowを削除する前に、上記の必須ギャップを埋める必要がある。
+**結論:** 新モデルはデータ構造と単一RoleExecutionの実行基盤を持つが、旧ReviewFlowが提供した一連の自動実行ループをまだ置き換えていない。これらの必須ギャップはJob-nativeの責務として実装する。旧ReviewFlowを並行runtimeとして温存する条件ではない。Job-nativeで同じ利用者価値と安全境界を成立させた単位から旧責務・旧caller・旧テストを削除し、履歴データのみを必要に応じて明示的に移行する。
 
 ## 7. 次の実装順序（依存関係で固定）
 
 比較の再開・拡張を無制限に続けず、次の依存順序に固定する。
 
-1. **入口の権限分離:** Job intakeとLegacy Task intakeを識別し、Job intakeでApprovalBundleを新規生成しない。既存Legacy経路の回帰テストを維持する。
+1. **入口の権限分離:** Job intakeとLegacy Task intakeを識別し、Job intakeでApprovalBundleを新規生成しない。旧Task/ReviewFlow経路をJob-nativeへ置換し、旧挙動を固定する回帰テストは新しい受入条件へ置き換える。
 2. **Job completion契約:** JobCompletionReady、Job状態遷移、未解決RoleExecution、証跡・使用量の終端条件を統合する。
 3. **成果物・Reviewer契約:** JobOutput/JobEvidenceに不足するGit/validation証拠を定義し、独立Reviewerが検証できる統合経路を実装する。
 4. **Role Dispatcher:** JobMessageを起点にRoleExecutionを生成し、宛先Roleを実行し、回答後に同一Jobの元実行を再開する。
