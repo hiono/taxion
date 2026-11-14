@@ -17,7 +17,7 @@ Replace the transitional Job-native operation/Role allowlists with one approval-
 6. Exact approved ValidationCommands remain exact-value constraints. A generic shell/process capability never grants arbitrary command execution.
 7. Unknown tool names are not denied solely for being unknown. If actual effects and enforceable containment cannot be established, request human approval when a concrete bounded approval can be presented; otherwise deny with the missing evidence/boundary stated.
 8. Secret access/exfiltration, cross-Job access, privilege escalation, sandbox escape, out-of-bound resources, unapproved production/external mutation, unauthorized commit/push/release/publish, data/history tampering, and duplicate/ambiguous execution remain prohibited.
-9. High-risk, irreversible, external, or approval-scope-changing effects require an explicit human decision bound to the concrete target and impact. A Role message cannot grant that decision.
+9. High-risk, irreversible, external, or approval-scope-changing effects require an explicit human decision when they are not already covered by the current Job approval. The decision is bound to the concrete target and impact. A Role message cannot grant that decision.
 10. Provider adapters report only metadata they actually observe. Missing metadata is represented as unknown, never fabricated as a safe value.
 
 ## Replacement domain model
@@ -26,7 +26,7 @@ Replace JobContract.Operations, RoleOperations, RoleToolPolicies, and free-form 
 
 - ResourceScopes: canonical repository/resource identity, approved worktree/sandbox identity, FileAccessPolicy ceiling, and explicitly bounded network/service targets where required.
 - ProhibitedEffects: typed, validated effect identifiers and optional target constraints. Defaults include cross-job access, secret disclosure/exfiltration, privilege escalation, sandbox escape, unapproved production mutation, unauthorized publication, integrity/provenance tampering, and duplicate execution.
-- ApprovalRequiredEffects: typed effect classes for external mutation, irreversible/destructive changes, commit/push/release/publish, production changes, credential use beyond the selected Runtime binding, and scope changes.
+- ApprovalRequiredEffects: typed effect classes for effects not already covered by the approved Job intent and scope, including irreversible/destructive changes, external mutation, production changes, credential use beyond the selected Runtime binding, and scope changes. Commit/push/release/publish are checked against the explicitly approved target, repository, actor, and effect; they are not blanket-denied when already included in the approved scope.
 - ValidationCommands: exact approved command strings, preserved unchanged.
 - Existing budget, deadline, configuration, acceptance, evidence, revision, and repository file-access dimensions remain approval-bound.
 
@@ -53,7 +53,7 @@ Introduce a pure evaluator over the current Job approval, RoleExecution/session 
 - require approval: concrete high-risk/external/irreversible effect is identified and a bounded human approval can be presented;
 - deny: prohibited effect, invalid identity/boundary, or uninspectable/uncontained effect for which approval cannot safely define a bounded action.
 
-Start/Resume use the same evaluator for lifecycle capability checks and validate the full current Job boundary before opening/reactivating a provider session. Send revalidates immediately before a turn. Tool preflight invokes the evaluator immediately before each provider tool execution. Approval requests are persisted separately and do not mutate the base Job approval or implicitly approve later operations.
+Start/Resume use the same evaluator for lifecycle capability checks and validate the full current Job boundary before opening/reactivating a provider session. Send revalidates immediately before a turn. Tool preflight invokes the evaluator immediately before each provider tool execution. Approval requests are persisted separately and do not mutate the base Job approval or implicitly approve later operations. An already-approved effect may proceed only when its concrete target and actor remain within the exact approved intent and resource scope.
 
 ## Resource enforcement
 
