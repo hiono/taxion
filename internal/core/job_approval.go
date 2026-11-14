@@ -30,7 +30,7 @@ const (
 	JobEffectRepositoryRead      JobEffect = "repository_read"
 	JobEffectRepositoryWrite     JobEffect = "repository_write"
 	JobEffectValidationExecution JobEffect = "validation_execution"
-	JobEffectJobContextRead       JobEffect = "job_context_read"
+	JobEffectJobContextRead      JobEffect = "job_context_read"
 	JobEffectCrossJobAccess      JobEffect = "cross_job_access"
 	JobEffectSecretDisclosure    JobEffect = "secret_disclosure"
 	JobEffectPrivilegeEscalation JobEffect = "privilege_escalation"
