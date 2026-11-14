@@ -1,7 +1,7 @@
 # Job 中心の Role 実行モデル実装計画
 
 Status: In progress  
-Decision: [ADR-0077](adr/0077-job-centered-role-collaboration.md), [ADR-0079](adr/0079-enforce-domain-invariants-across-state-paths.md)  
+Decision: [ADR-0077](adr/0077-job-centered-role-collaboration.md), [ADR-0079](adr/0079-enforce-domain-invariants-across-state-paths.md), [ADR-0080](adr/0080-job-boundary-and-prohibited-effects.md)  
 Tracking: [Issue #283](https://github.com/hiono/taxion/issues/283)  
 Implementation: [PR #292](https://github.com/hiono/taxion/pull/292)
 
@@ -69,9 +69,9 @@ Job と Task の関連は **Task 側が `JobID` を保持する単方向参照**
 
 ### Phase 1A — Job authority / output / evidence の設計ゲート
 
-- [ ] Job の承認対象を immutable revision として定義する（request、goal、constraints、acceptance、scope、allowed operations、repository/resource、budget、deadline、security、configuration references）。
+- [ ] Job の承認対象を immutable revision として定義する（request、goal、constraints、acceptance、repository/resource/worktree boundary、file-access ceiling、budget、deadline、explicit prohibitions、approval-required side effects、configuration references）。通常操作の allowlist は承認対象にしない（ADR-0080）。
 - [ ] Job approval record の canonical proposal hash、record hash、version、approver/source/reason/time、append-only 更新規則を定義する。
-- [x] Job scope と Task scope の包含関係、および RoleExecution ごとの最小権限評価式を定義する。
+- [x] Job resource boundary と Task resource boundary の包含関係、および RoleExecution ごとの境界・禁止副作用評価を定義する。通常操作の Role別 allowlist は使用しない（ADR-0080）。
 - [ ] Job approval と既存 Task approval bundle の役割を分離する。旧 Task approval / packet / dispatch records を Job approval へ移行・継承しないことを migration test で固定する。
 - [x] Job output / evidence reference の provenance、immutability、verification state、acceptance condition との対応を定義する。
 - [x] Job completion の判定条件と unresolved execution / safety state による停止条件を定義する。論理条件・判定・遷移 gate・Graph validation・テストの対応は [domain-invariants.md](domain-invariants.md) に記録する。
@@ -107,6 +107,19 @@ Job と Task の関連は **Task 側が `JobID` を保持する単方向参照**
 - [ ] Runtime の開始前失敗と開始後の実行状態不明を区別し、安全な復旧を行う。
 
 **Exit gate:** RoleExecution が Dispatch / ReviewFlow の固定順序に依存せず開始・観測・停止・再接続できること。既存の権限・認証・tool policy・worktree 検査が弱まっていないこと。
+
+### Phase 2A — Job-native authorization migration (ADR-0080)
+
+- [ ] `JobContract.Operations` を通常操作の許可リストとして使用する検証・承認ハッシュ依存を置換する。
+- [ ] `RoleOperations` による Role-to-operation ACL と、`RoleToolPolicies` の完全一致を Job authority の条件から分離する。
+- [ ] Provider `AvailableTools` / `ToolPolicyIdentity` は Runtime が実際に提供する能力・構成の情報として扱い、Job approval の許可集合として扱わない。
+- [ ] Job approval の repository/resource/worktree/file-access boundary と明示的禁止事項を、Start / Resume / Send / privileged tool preflight で一貫して検査する。
+- [ ] ValidationCommands は承認済み command string との完全一致を維持し、generic な `process.exec` 能力だけで任意 command を承認しない。
+- [ ] Copilot / OpenACP の未知 Tool は、名前が事前列挙されていないことだけを理由に拒否せず、Tool の実際の副作用・実行基盤の隔離・Job境界から判定する。副作用を判定・封じ込めできない場合は承認要求または拒否とする。
+- [ ] 事前登録されていない通常の Job 内操作が通る正例と、Job境界外アクセス・秘密情報送信・承認外副作用・不明な危険副作用を拒否する負例を追加する。
+- [ ] 旧 Task / ReviewFlow の安全検査は、Job-native 経路で同等の強制境界がテストされるまで維持する。
+
+**Exit gate:** Role別操作許可リストを使わずに通常の Job 内操作が実行でき、対象境界・禁止副作用・人間承認・ValidationCommands完全一致・Job/Session/RoleExecution整合性が Copilot と OpenACP の両方で強制されること。ADR作成だけでは本Gateを通過したとみなさない。
 
 ### Phase 3 — Role 間依頼と元実行の再開
 
