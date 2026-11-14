@@ -439,27 +439,7 @@ func TaskWithinJobScope(task GraphTask, contract JobContract) bool {
 	if taskAccess == nil {
 		taskAccess = DefaultFileAccessPolicy()
 	}
-	if taskAccess.Validate() != nil {
-		return false
-	}
-	switch allowed.FileAccess.Level {
-	case FileAccessAll:
-		return true
-	case FileAccessCommitted:
-		return taskAccess.Level == FileAccessCommitted || taskAccess.Level == FileAccessExact
-	case FileAccessExact:
-		if taskAccess.Level != FileAccessExact {
-			return false
-		}
-		for _, path := range taskAccess.Paths {
-			if !slices.Contains(allowed.FileAccess.Paths, path) {
-				return false
-			}
-		}
-		return true
-	default:
-		return false
-	}
+	return FileAccessPolicyWithin(*taskAccess, allowed.FileAccess)
 }
 
 // CheckRoleExecutionStart verifies Job authority before a Role session is created.

@@ -83,3 +83,28 @@ func TestFileAccessChangeRequiresNewAuthorizationAndOmissionPreservesPolicy(t *t
 		t.Fatal(err)
 	}
 }
+
+func TestFileAccessPolicyWithinBoundary(t *testing.T) {
+	cases := []struct {
+		name      string
+		candidate FileAccessPolicy
+		boundary  FileAccessPolicy
+		want      bool
+	}{
+		{name: "exact subset", candidate: FileAccessPolicy{Level: FileAccessExact, Paths: []string{"src/a.go"}}, boundary: FileAccessPolicy{Level: FileAccessExact, Paths: []string{"src/a.go", "docs/readme.md"}}, want: true},
+		{name: "exact outside", candidate: FileAccessPolicy{Level: FileAccessExact, Paths: []string{"src/private.go"}}, boundary: FileAccessPolicy{Level: FileAccessExact, Paths: []string{"src/a.go"}}, want: false},
+		{name: "committed within committed", candidate: FileAccessPolicy{Level: FileAccessCommitted}, boundary: FileAccessPolicy{Level: FileAccessCommitted}, want: true},
+		{name: "exact within committed", candidate: FileAccessPolicy{Level: FileAccessExact, Paths: []string{"src/a.go"}}, boundary: FileAccessPolicy{Level: FileAccessCommitted}, want: true},
+		{name: "all exceeds committed", candidate: FileAccessPolicy{Level: FileAccessAll}, boundary: FileAccessPolicy{Level: FileAccessCommitted}, want: false},
+		{name: "committed exceeds exact", candidate: FileAccessPolicy{Level: FileAccessCommitted}, boundary: FileAccessPolicy{Level: FileAccessExact, Paths: []string{"src/a.go"}}, want: false},
+		{name: "all within all", candidate: FileAccessPolicy{Level: FileAccessAll}, boundary: FileAccessPolicy{Level: FileAccessAll}, want: true},
+		{name: "invalid candidate", candidate: FileAccessPolicy{Level: FileAccessExact}, boundary: FileAccessPolicy{Level: FileAccessAll}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := FileAccessPolicyWithin(tc.candidate, tc.boundary); got != tc.want {
+				t.Fatalf("FileAccessPolicyWithin(%+v, %+v) = %t, want %t", tc.candidate, tc.boundary, got, tc.want)
+			}
+		})
+	}
+}
