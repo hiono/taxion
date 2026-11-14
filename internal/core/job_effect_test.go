@@ -122,7 +122,7 @@ func TestCheckEffectRejectsInvalidContractAndNonCanonicalTargets(t *testing.T) {
 			t.Errorf("non-canonical repository target %q must be rejected", target)
 		}
 	}
-	if err := contract.CheckEffect(JobEffectJobContextRead, "", "src/main.go", false); err == nil {
+	if err := contract.CheckEffect(JobEffectJobContextRead, "example/repo", "src/main.go", false); err == nil {
 		t.Fatal("Job context read must not carry a filesystem target")
 	}
 	contract.ProhibitedEffects = nil

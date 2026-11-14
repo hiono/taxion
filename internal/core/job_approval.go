@@ -204,7 +204,7 @@ func (c JobContract) CheckEffect(effect JobEffect, repository, target string, tr
 			return graphError("execution is not an exact approved Job validation command")
 		}
 	case JobEffectJobContextRead:
-		if target != "" || repository != "" || tracked {
+		if target != "" || tracked {
 			return graphError("Job context read must not carry a resource target")
 		}
 	default:
