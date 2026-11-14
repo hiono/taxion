@@ -580,7 +580,7 @@ func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
 		} `json:"toolCall"`
 		Options []struct {
 			OptionID string `json:"optionId"`
-			Kind string `json:"kind"`
+			Kind     string `json:"kind"`
 		} `json:"options"`
 	}
 	if json.Unmarshal(params, &request) != nil {
