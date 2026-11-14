@@ -40,11 +40,15 @@ func (f *jobRoleRuntimeFake) Role() string       { return f.role }
 func (f *jobRoleRuntimeFake) ConfigHash() string { return f.configHash }
 func (f *jobRoleRuntimeFake) Worktree() string   { return "/tmp/job-role-worktree" }
 func (f *jobRoleRuntimeFake) JobRepository() string {
-	if f.repository != "" { return f.repository }
+	if f.repository != "" {
+		return f.repository
+	}
 	return "owner/repo"
 }
 func (f *jobRoleRuntimeFake) JobFileAccessPolicy() *core.FileAccessPolicy {
-	if f.fileAccess != nil { return core.CloneFileAccessPolicy(f.fileAccess) }
+	if f.fileAccess != nil {
+		return core.CloneFileAccessPolicy(f.fileAccess)
+	}
 	return &core.FileAccessPolicy{Level: core.FileAccessCommitted}
 }
 func (f *jobRoleRuntimeFake) Start(_ context.Context, taskID string) (string, error) {
@@ -627,6 +631,69 @@ func TestJobRoleControllerStartsPlannerWithoutTaskAssignment(t *testing.T) {
 	}
 	if worker.taskID != job.ID {
 		t.Fatalf("Job-level Planner runtime binding = %q, want Job ID %q", worker.taskID, job.ID)
+	}
+}
+
+func TestJobRoleControllerEnforcesApprovedResourceBoundary(t *testing.T) {
+	cases := []struct {
+		name       string
+		repository string
+		fileAccess *core.FileAccessPolicy
+		wantStart  bool
+	}{
+		{
+			name:       "repository outside Job",
+			repository: "other/repo",
+			fileAccess: &core.FileAccessPolicy{Level: core.FileAccessCommitted},
+		},
+		{
+			name:       "file access wider than Task",
+			repository: "owner/repo",
+			fileAccess: &core.FileAccessPolicy{Level: core.FileAccessAll},
+		},
+		{
+			name:       "file access narrower than Task",
+			repository: "owner/repo",
+			fileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"README.md"}},
+			wantStart:  true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, job, task, selection := jobRoleFixture(t, true)
+			now := time.Now().UTC()
+			const executionID = "job-boundary-execution"
+			if err := db.UpdateWorkspace(func(state *store.Workspace) error {
+				return state.Graph.AppendRoleExecution(core.RoleExecution{
+					ID: executionID, JobID: job.ID, TaskID: task.ID, Role: "CODER",
+					Status: core.RoleExecutionCreated, CreatedAt: now, UpdatedAt: now,
+				})
+			}); err != nil {
+				t.Fatal(err)
+			}
+			worker := &jobRoleRuntimeFake{
+				role: "CODER", configHash: "runtime-config-hash", selection: selection,
+				repository: tc.repository, fileAccess: tc.fileAccess, events: make(chan runtime.Event),
+			}
+			controller, err := NewJobRoleController(db, worker)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = controller.Start(context.Background(), executionID)
+			if !tc.wantStart {
+				if err == nil || worker.startCount != 0 {
+					t.Fatalf("out-of-boundary Runtime started: starts=%d err=%v", worker.startCount, err)
+				}
+				return
+			}
+			if err != nil || worker.startCount != 1 {
+				t.Fatalf("in-boundary Runtime did not start: starts=%d err=%v", worker.startCount, err)
+			}
+			worker.fileAccess = &core.FileAccessPolicy{Level: core.FileAccessAll}
+			if err := controller.AuthorizeOperation(executionID, "repository.read", now.Add(time.Second)); err == nil {
+				t.Fatal("operation preflight accepted a Runtime boundary widened after start")
+			}
+		})
 	}
 }
 

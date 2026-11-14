@@ -404,7 +404,7 @@ func (a *Adapter) UsesBoundResultIdentity() bool {
 	return a.config.ResponseSchema["$id"] == "urn:taxion:dispatch-result:bound:v1"
 }
 
-func (a *Adapter) Worktree() string { return a.config.WorkingDirectory }
+func (a *Adapter) Worktree() string      { return a.config.WorkingDirectory }
 func (a *Adapter) JobRepository() string { return a.config.Repository }
 func (a *Adapter) JobFileAccessPolicy() *core.FileAccessPolicy {
 	return core.CloneFileAccessPolicy(a.config.FileAccess)

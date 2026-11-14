@@ -176,9 +176,9 @@ func New(config Config) (*Adapter, error) {
 	return &Adapter{config: config, pending: map[string]chan response{}, wake: make(chan struct{}), launch: sandboxCommand}, nil
 }
 
-func (a *Adapter) Role() string     { return a.config.Role }
-func (a *Adapter) Provider() string { return "opencode" }
-func (a *Adapter) Worktree() string { return a.config.WorkingDirectory }
+func (a *Adapter) Role() string          { return a.config.Role }
+func (a *Adapter) Provider() string      { return "opencode" }
+func (a *Adapter) Worktree() string      { return a.config.WorkingDirectory }
 func (a *Adapter) JobRepository() string { return a.config.Repository }
 func (a *Adapter) JobFileAccessPolicy() *core.FileAccessPolicy {
 	return core.CloneFileAccessPolicy(a.config.FileAccess)
