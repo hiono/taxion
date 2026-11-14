@@ -167,42 +167,6 @@ func validateRequiredJobEffects(prohibited, approvalRequired []JobEffectRule) er
 	return nil
 }
 
-// CheckEffect applies the approved Job effect policy to a provider-observed effect.
-// Resource effects require an exact canonical target; validation execution requires
-// an exact command declared by the Job contract. Unknown or unbounded observations fail closed.
-func (c JobContract) CheckEffect(effect JobEffect, target string) error {
-	if !validJobEffect(effect) {
-		return graphError("unknown Job effect %q", effect)
-	}
-	if (effect == JobEffectRepositoryRead || effect == JobEffectRepositoryWrite) && !nonempty(target) {
-		return graphError("repository effect requires an exact canonical target")
-	}
-	if effect == JobEffectValidationExecution && !slices.Contains(c.ValidationCommands, target) {
-		return graphError("execution is not an exact approved Job validation command")
-	}
-	check := func(rules []JobEffectRule, reason string) error {
-		for _, rule := range rules {
-			if rule.Effect != effect {
-				continue
-			}
-			if len(rule.Targets) == 0 || target == "" {
-				return graphError("%s: %q", reason, effect)
-			}
-			if slices.Contains(rule.Targets, target) {
-				return graphError("%s: %q target %q", reason, effect, target)
-			}
-		}
-		return nil
-	}
-	if err := check(c.ProhibitedEffects, "Job effect is prohibited"); err != nil {
-		return err
-	}
-	if err := check(c.ApprovalRequiredEffects, "Job effect requires separate human approval"); err != nil {
-		return err
-	}
-	return nil
-}
-
 func hasUnboundedJobEffect(rules []JobEffectRule, effect JobEffect) bool {
 	for _, rule := range rules {
 		if rule.Effect == effect && len(rule.Targets) == 0 {
