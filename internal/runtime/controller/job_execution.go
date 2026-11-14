@@ -480,6 +480,45 @@ func (c *JobRoleController) authorizeExecution(graph core.TaskGraph, executionID
 	return graph.CheckRoleExecution(executionID, at)
 }
 
+func (c *JobRoleController) effectObservation(request runtime.JobEffectRequest) (core.JobEffectObservation, error) {
+	if request.Preflight {
+		return core.JobEffectObservation{}, fmt.Errorf("taxion: preflight cannot carry effect metadata")
+	}
+	identity, ok := c.runtime.(runtime.JobBoundaryIdentity)
+	if !ok {
+		return core.JobEffectObservation{}, fmt.Errorf("taxion: Job Runtime does not expose its repository boundary")
+	}
+	observation := core.JobEffectObservation{
+		Provider: runtime.ProviderName(c.runtime), Capability: request.Capability, Action: request.Action,
+		Effects: []core.JobEffect{request.Effect}, Inspectable: request.Inspectable,
+		SandboxEnforced: request.SandboxEnforced, SandboxBypass: request.SandboxBypass,
+	}
+	switch request.Effect {
+	case core.JobEffectRepositoryRead, core.JobEffectRepositoryWrite:
+		if request.Target == "" || request.Resource != "" {
+			return core.JobEffectObservation{}, fmt.Errorf("taxion: repository effect requires one canonical file target")
+		}
+		observation.Targets = []core.JobEffectTarget{{
+			Repository: identity.JobRepository(), Path: request.Target, Tracked: request.Tracked,
+		}}
+	case core.JobEffectValidationExecution:
+		if request.Target == "" || request.Resource != "" || request.Tracked {
+			return core.JobEffectObservation{}, fmt.Errorf("taxion: validation effect requires one exact command")
+		}
+		observation.Command = request.Target
+	case core.JobEffectJobContextRead:
+		if request.Target != "" || request.Resource != "" || request.Tracked {
+			return core.JobEffectObservation{}, fmt.Errorf("taxion: Job context read cannot carry an external target")
+		}
+	default:
+		if request.Target != "" || request.Resource == "" || request.Tracked {
+			return core.JobEffectObservation{}, fmt.Errorf("taxion: external effect requires one canonical resource target")
+		}
+		observation.Targets = []core.JobEffectTarget{{Resource: request.Resource}}
+	}
+	return observation, nil
+}
+
 func (c *JobRoleController) evaluateEffect(graph core.TaskGraph, executionID, sessionID string, request runtime.JobEffectRequest, at time.Time) error {
 	if err := c.authorizeExecution(graph, executionID, sessionID, at); err != nil {
 		return err
@@ -492,45 +531,9 @@ func (c *JobRoleController) evaluateEffect(graph core.TaskGraph, executionID, se
 		}
 		return nil
 	}
-	execution, ok := graph.RoleExecution(executionID)
-	if !ok {
-		return fmt.Errorf("taxion: effect authorization requires a bound RoleExecution")
-	}
-	job, ok := graph.Job(execution.JobID)
-	if !ok || job.Contract == nil {
-		return fmt.Errorf("taxion: effect authorization requires an approved Job contract")
-	}
-	identity, ok := c.runtime.(runtime.JobBoundaryIdentity)
-	if !ok {
-		return fmt.Errorf("taxion: Job Runtime does not expose its repository boundary")
-	}
-	observation := core.JobEffectObservation{
-		Provider: runtime.ProviderName(c.runtime), Capability: request.Capability, Action: request.Action,
-		Effects: []core.JobEffect{request.Effect}, Inspectable: request.Inspectable,
-		SandboxEnforced: request.SandboxEnforced, SandboxBypass: request.SandboxBypass,
-	}
-	switch request.Effect {
-	case core.JobEffectRepositoryRead, core.JobEffectRepositoryWrite:
-		if request.Target == "" || request.Resource != "" {
-			return fmt.Errorf("taxion: repository effect requires one canonical file target")
-		}
-		observation.Targets = []core.JobEffectTarget{{
-			Repository: identity.JobRepository(), Path: request.Target, Tracked: request.Tracked,
-		}}
-	case core.JobEffectValidationExecution:
-		if request.Target == "" || request.Resource != "" || request.Tracked {
-			return fmt.Errorf("taxion: validation effect requires one exact command")
-		}
-		observation.Command = request.Target
-	case core.JobEffectJobContextRead:
-		if request.Target != "" || request.Resource != "" || request.Tracked {
-			return fmt.Errorf("taxion: Job context read cannot carry an external target")
-		}
-	default:
-		if request.Target != "" || request.Resource == "" || request.Tracked {
-			return fmt.Errorf("taxion: external effect requires one canonical resource target")
-		}
-		observation.Targets = []core.JobEffectTarget{{Resource: request.Resource}}
+	observation, err := c.effectObservation(request)
+	if err != nil {
+		return err
 	}
 	switch graph.EvaluateJobEffect(executionID, observation) {
 	case core.JobEffectAllow:
@@ -540,6 +543,108 @@ func (c *JobRoleController) evaluateEffect(graph core.TaskGraph, executionID, se
 	default:
 		return fmt.Errorf("taxion: Job effect %q is not permitted by the approved Job contract", request.Effect)
 	}
+}
+
+func (c *JobRoleController) requestEffectApproval(executionID, sessionID string, observation core.JobEffectObservation, at time.Time) error {
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	return c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		if !state.HasGraph {
+			return fmt.Errorf("taxion: effect approval requires a Task Graph")
+		}
+		execution, ok := state.Graph.RoleExecution(executionID)
+		if !ok || execution.Status != core.RoleExecutionRunning ||
+			execution.RuntimeSessionID != sessionID || execution.Role != c.runtime.Role() ||
+			execution.RuntimeConfigHash != c.runtime.ConfigHash() {
+			return fmt.Errorf("taxion: effect approval request lost its running Runtime binding")
+		}
+		job, ok := state.Graph.Job(execution.JobID)
+		if !ok || job.Status != core.JobActive || job.Contract == nil ||
+			state.Graph.EvaluateJobEffect(executionID, observation) != core.JobEffectRequireApproval {
+			return fmt.Errorf("taxion: effect approval request is stale or no longer required")
+		}
+		identity, err := core.CanonicalSHA256(struct {
+			JobID string
+			Revision int
+			ExecutionID string
+			Observation core.JobEffectObservation
+		}{job.ID, job.Contract.Revision, executionID, observation})
+		if err != nil {
+			return err
+		}
+		request, err := core.NewJobEffectApprovalRequest(
+			"effect-approval-"+identity[:24], job.ID, job.Contract.Revision,
+			executionID, observation, at, *job.Contract,
+		)
+		if err != nil {
+			return err
+		}
+		if err := state.Graph.AppendJobEffectApprovalRequest(request); err != nil {
+			return err
+		}
+		if err := state.Graph.TransitionJob(job.ID, core.JobWaiting, "controller",
+			"waiting for approval of effect "+request.ID, at); err != nil {
+			return err
+		}
+		if err := state.Graph.TransitionRoleExecution(executionID, core.RoleExecutionWaiting,
+			"controller", "waiting for human approval of effect "+request.ID, at); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+// DecideEffectApproval records a sourced human decision for one exact observed
+// effect, then resumes the same RoleExecution. A denial resumes only so the Role
+// can choose another path; the denied effect remains denied by the evaluator.
+func (c *JobRoleController) DecideEffectApproval(ctx context.Context, requestID string, approved bool, actor, reason string, at time.Time) error {
+	if c == nil || c.store == nil || c.runtime == nil || ctx == nil ||
+		strings.TrimSpace(requestID) == "" || strings.TrimSpace(actor) == "" ||
+		strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("taxion: effect approval decision requires controller, request, actor and reason")
+	}
+	var executionID string
+	err := c.store.UpdateWorkspace(func(state *store.Workspace) error {
+		if !state.HasGraph {
+			return fmt.Errorf("taxion: effect approval decision requires a Task Graph")
+		}
+		request, ok := state.Graph.JobEffectApprovalRequest(requestID)
+		if !ok {
+			return fmt.Errorf("taxion: effect approval request not found")
+		}
+		execution, ok := state.Graph.RoleExecution(request.RoleExecutionID)
+		if !ok || execution.Role != c.runtime.Role() || execution.RuntimeSessionID == "" ||
+			execution.RuntimeConfigHash != c.runtime.ConfigHash() {
+			return fmt.Errorf("taxion: effect approval request is not bound to this Runtime")
+		}
+		if at.IsZero() {
+			at = time.Now().UTC()
+		}
+		decision, err := core.NewJobEffectApprovalDecision(
+			"effect-decision-"+request.ID, request, approved, actor, reason, at,
+		)
+		if err != nil {
+			return err
+		}
+		if err := state.Graph.AppendJobEffectApprovalDecision(decision); err != nil {
+			return err
+		}
+		job, ok := state.Graph.Job(request.JobID)
+		if !ok || job.Status != core.JobWaiting {
+			return fmt.Errorf("taxion: Job is no longer waiting for this effect decision")
+		}
+		if err := state.Graph.TransitionJob(job.ID, core.JobActive, actor,
+			"human decided effect approval "+request.ID, at); err != nil {
+			return err
+		}
+		executionID = execution.ID
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return c.Resume(ctx, executionID)
 }
 
 // AuthorizeEffect checks the current Job boundary and evaluates a typed
@@ -595,7 +700,27 @@ func (c *JobRoleController) AuthorizeSessionEffect(ctx context.Context, sessionI
 	if err != nil {
 		return err
 	}
-	return c.evaluateEffect(state.Graph, execution.ID, sessionID, request, at)
+	if err := c.authorizeExecution(state.Graph, execution.ID, sessionID, at); err != nil {
+		return err
+	}
+	if request.Preflight {
+		return c.evaluateEffect(state.Graph, execution.ID, sessionID, request, at)
+	}
+	observation, err := c.effectObservation(request)
+	if err != nil {
+		return err
+	}
+	switch state.Graph.EvaluateJobEffect(execution.ID, observation) {
+	case core.JobEffectAllow:
+		return nil
+	case core.JobEffectRequireApproval:
+		if err := c.requestEffectApproval(execution.ID, sessionID, observation, at); err != nil {
+			return err
+		}
+		return fmt.Errorf("taxion: Job is waiting for human approval of effect %q", request.Effect)
+	default:
+		return fmt.Errorf("taxion: Job effect %q is not permitted by the approved Job contract", request.Effect)
+	}
 }
 
 // RecordUsage appends an immutable provider accounting observation to the Job ledger.
