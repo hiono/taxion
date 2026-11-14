@@ -90,6 +90,7 @@ func (c JobContract) EvaluateJobEffect(observation JobEffectObservation) JobEffe
 func validCanonicalJobEffectPath(target string) bool {
 	path := filepath.FromSlash(target)
 	return strings.TrimSpace(target) != "" &&
+		!strings.ContainsAny(target, ":\\") &&
 		!filepath.IsAbs(path) &&
 		filepath.VolumeName(path) == "" &&
 		filepath.ToSlash(filepath.Clean(path)) == target &&
