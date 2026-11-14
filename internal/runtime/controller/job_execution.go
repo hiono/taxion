@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -29,13 +28,13 @@ func NewJobRoleController(db *store.Store, worker runtime.Identity) (*JobRoleCon
 	if _, ok := worker.(runtime.JobBoundaryIdentity); !ok {
 		return nil, fmt.Errorf("taxion: Job Role runtime must expose its enforced repository and file-access boundary")
 	}
-	authorizer, ok := worker.(runtime.JobOperationAuthorizer)
+	authorizer, ok := worker.(runtime.JobEffectAuthorizer)
 	if !ok {
-		return nil, fmt.Errorf("taxion: Job Role runtime must support controller-installed operation preflight")
+		return nil, fmt.Errorf("taxion: Job Role runtime must support controller-installed effect authorization")
 	}
 	controller := &JobRoleController{store: db, runtime: worker}
-	authorizer.SetJobOperationAuthorizer(func(ctx context.Context, sessionID, operation, detail string) error {
-		return controller.AuthorizeSessionOperation(ctx, sessionID, operation, detail, time.Now().UTC())
+	authorizer.SetJobEffectAuthorizer(func(ctx context.Context, sessionID string, request runtime.JobEffectRequest) error {
+		return controller.AuthorizeSessionEffect(ctx, sessionID, request, time.Now().UTC())
 	})
 	return controller, nil
 }
@@ -460,11 +459,9 @@ func (c *JobRoleController) Events(ctx context.Context, executionID string) (<-c
 	return events, nil
 }
 
-// authorizeOperation currently combines execution identity/configuration checks
-// with obsolete operation/tool allowlists. Those allowlists are known design debt,
-// not a permanent safety layer. Replace them with ADR-0080 resource-boundary and
-// prohibited-effect evaluation while preserving the independent identity checks.
-func (c *JobRoleController) authorizeOperation(graph core.TaskGraph, executionID, sessionID string, at time.Time) error {
+// authorizeExecution validates the active RoleExecution, Job boundary, approved
+// Runtime configuration, and Job budget before evaluating an individual effect.
+func (c *JobRoleController) authorizeExecution(graph core.TaskGraph, executionID, sessionID string, at time.Time) error {
 	execution, err := c.requireBoundExecution(graph, executionID)
 	if err != nil || execution.Status != core.RoleExecutionRunning ||
 		sessionID != "" && execution.RuntimeSessionID != sessionID {
@@ -483,9 +480,9 @@ func (c *JobRoleController) authorizeOperation(graph core.TaskGraph, executionID
 	return graph.CheckRoleExecution(executionID, at)
 }
 
-// AuthorizeOperation is called by the Runtime tool adapter immediately before
-// each privileged operation; a Job message or Task approval is not sufficient.
-func (c *JobRoleController) AuthorizeOperation(executionID, operation string, at time.Time) error {
+// AuthorizeEffect checks the current Job boundary and evaluates a typed
+// provider-observed effect. Provider tool names are not authorization inputs.
+func (c *JobRoleController) AuthorizeEffect(executionID string, request runtime.JobEffectRequest, at time.Time) error {
 	if c == nil || c.store == nil || c.runtime == nil {
 		return fmt.Errorf("taxion: Job Role controller is not initialized")
 	}
@@ -494,16 +491,26 @@ func (c *JobRoleController) AuthorizeOperation(executionID, operation string, at
 		return err
 	}
 	if !state.HasGraph {
-		return fmt.Errorf("taxion: operation authorization requires a Task Graph")
+		return fmt.Errorf("taxion: effect authorization requires a Task Graph")
 	}
-	switch operation {
-	case "repository.read", "repository.write":
-		return c.authorizeOperation(state.Graph, executionID, "", at)
-	case "process.exec":
-		return fmt.Errorf("taxion: shell execution requires the exact approved ValidationCommand")
-	default:
-		return fmt.Errorf("taxion: operation effects are not inspectable or enforceably contained")
+	if err := c.authorizeExecution(state.Graph, executionID, "", at); err != nil {
+		return err
 	}
+	if request.Preflight {
+		if request.Effect != "" || request.Target != "" {
+			return fmt.Errorf("taxion: preflight cannot carry an effect or target")
+		}
+		return nil
+	}
+	execution, ok := state.Graph.RoleExecution(executionID)
+	if !ok {
+		return fmt.Errorf("taxion: effect authorization requires a bound RoleExecution")
+	}
+	job, ok := state.Graph.Job(execution.JobID)
+	if !ok || job.Contract == nil {
+		return fmt.Errorf("taxion: effect authorization requires an approved Job contract")
+	}
+	return job.Contract.CheckEffect(request.Effect, request.Target)
 }
 
 func (c *JobRoleController) roleExecutionForSession(graph core.TaskGraph, sessionID string) (core.RoleExecution, error) {
@@ -523,9 +530,9 @@ func (c *JobRoleController) roleExecutionForSession(graph core.TaskGraph, sessio
 	return matched, nil
 }
 
-// AuthorizeSessionOperation is the provider callback. Shell requests carry the
-// exact command text so validation commands cannot use the generic exec grant.
-func (c *JobRoleController) AuthorizeSessionOperation(ctx context.Context, sessionID, operation, detail string, at time.Time) error {
+// AuthorizeSessionEffect is the provider callback. The Runtime supplies a
+// typed effect and canonical target, or a preflight request before tool execution.
+func (c *JobRoleController) AuthorizeSessionEffect(ctx context.Context, sessionID string, request runtime.JobEffectRequest, at time.Time) error {
 	if c == nil || c.store == nil || c.runtime == nil || ctx == nil || strings.TrimSpace(sessionID) == "" {
 		return fmt.Errorf("taxion: Job session authorization requires an identified Runtime session")
 	}
@@ -537,34 +544,26 @@ func (c *JobRoleController) AuthorizeSessionOperation(ctx context.Context, sessi
 		return err
 	}
 	if !state.HasGraph {
-		return fmt.Errorf("taxion: operation authorization requires a Task Graph")
+		return fmt.Errorf("taxion: effect authorization requires a Task Graph")
 	}
 	execution, err := c.roleExecutionForSession(state.Graph, sessionID)
 	if err != nil {
 		return err
 	}
-	switch operation {
-	case "process.exec":
-		if detail == "" {
-			return fmt.Errorf("taxion: shell execution requires the exact Job-approved ValidationCommand")
-		}
-		job, ok := state.Graph.Job(execution.JobID)
-		if !ok || job.Contract == nil {
-			return fmt.Errorf("taxion: shell operation requires an approved Job contract")
-		}
-		exact := slices.Contains(job.Contract.ValidationCommands, detail)
-		if !exact {
-			return fmt.Errorf("taxion: shell execution is not an exact Job-approved ValidationCommand")
-		}
-		if err := c.authorizeOperation(state.Graph, execution.ID, sessionID, at); err != nil {
-			return err
+	if err := c.authorizeExecution(state.Graph, execution.ID, sessionID, at); err != nil {
+		return err
+	}
+	if request.Preflight {
+		if request.Effect != "" || request.Target != "" {
+			return fmt.Errorf("taxion: preflight cannot carry an effect or target")
 		}
 		return nil
-	case "repository.read", "repository.write":
-		return c.authorizeOperation(state.Graph, execution.ID, sessionID, at)
-	default:
-		return fmt.Errorf("taxion: operation effects are not inspectable or enforceably contained")
 	}
+	job, ok := state.Graph.Job(execution.JobID)
+	if !ok || job.Contract == nil {
+		return fmt.Errorf("taxion: effect authorization requires an approved Job contract")
+	}
+	return job.Contract.CheckEffect(request.Effect, request.Target)
 }
 
 // RecordUsage appends an immutable provider accounting observation to the Job ledger.

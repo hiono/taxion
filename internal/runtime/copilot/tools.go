@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	sdk "github.com/github/copilot-sdk/go"
+	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/tools"
 )
@@ -36,12 +37,9 @@ func (a *Adapter) checkApprovedToolPolicy(ctx context.Context, sessionID string)
 	return nil
 }
 
-func (a *Adapter) checkToolPolicy(ctx context.Context, sessionID, operation string) error {
-	if authorize := a.jobOperationAuthorizer(); authorize != nil {
-		if operation == "" {
-			return fmt.Errorf("taxion: Job tool requires an operation mapping")
-		}
-		if err := authorize(ctx, sessionID, operation, ""); err != nil {
+func (a *Adapter) checkToolPolicy(ctx context.Context, sessionID string, request runtime.JobEffectRequest) error {
+	if authorize := a.jobEffectAuthorizer(); authorize != nil {
+		if err := authorize(ctx, sessionID, request); err != nil {
 			return err
 		}
 	}
@@ -69,7 +67,7 @@ func (a *Adapter) mcpTools() []sdk.Tool {
 				if !executing {
 					return sdk.ToolResult{}, fmt.Errorf("taxion: MCP requires an active approved role turn")
 				}
-				if err := a.checkToolPolicy(invocation.TraceContext, invocation.SessionID, "process.exec"); err != nil {
+				if err := a.checkToolPolicy(invocation.TraceContext, invocation.SessionID, runtime.JobEffectRequest{Effect: core.JobEffectExternalMutation, Target: binding.Name}); err != nil {
 					return sdk.ToolResult{}, err
 				}
 				body, err := a.config.ToolPolicy.CallMCP(invocation.TraceContext, binding.Name, invocation.Arguments)
@@ -97,15 +95,7 @@ func (a *Adapter) checkHook(sessionID, toolName string, invocation sdk.HookInvoc
 	if !executing {
 		return fmt.Errorf("taxion: tool hooks require an active role turn")
 	}
-	operation := ""
-	if a.jobOperationAuthorizer() != nil {
-		var ok bool
-		operation, ok = jobOperationForTool(toolName)
-		if !ok {
-			return fmt.Errorf("taxion: tool has no Job operation mapping")
-		}
-	}
-	return a.checkToolPolicy(context.Background(), sessionID, operation)
+	return a.checkToolPolicy(context.Background(), sessionID, runtime.JobEffectRequest{Preflight: true})
 }
 
 func (a *Adapter) failToolEvidence(sessionID string, err error) error {

@@ -103,10 +103,16 @@ type ToolPolicyIdentity interface {
 	ToolPolicy() *tools.Policy
 }
 
-// JobOperationAuthorizer lets the Job controller install a per-session
-// preflight that provider adapters invoke before each tool operation.
-type JobOperationAuthorizer interface {
-	SetJobOperationAuthorizer(func(context.Context, string, string, string) error)
+// JobEffectRequest describes an observed effect without relying on provider tool names.
+type JobEffectRequest struct {
+	Effect    core.JobEffect
+	Target    string
+	Preflight bool
+}
+
+// JobEffectAuthorizer installs the Job-scoped effect evaluator in a Runtime adapter.
+type JobEffectAuthorizer interface {
+	SetJobEffectAuthorizer(func(context.Context, string, JobEffectRequest) error)
 }
 
 // StopAttachment lets providers attach without loading executable extensions.

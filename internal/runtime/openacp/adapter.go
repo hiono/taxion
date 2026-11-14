@@ -79,7 +79,7 @@ type Adapter struct {
 	failure               error
 	stderr                diagnosticStderr
 	preservationErr       error
-	authorizeJobOperation func(context.Context, string, string, string) error
+	authorizeJobEffect    func(context.Context, string, runtime.JobEffectRequest) error
 	turn                  int64
 	turnDone              chan struct{}
 
@@ -88,7 +88,7 @@ type Adapter struct {
 
 var _ runtime.ConfigurationIdentity = (*Adapter)(nil)
 var _ runtime.EventCursor = (*Adapter)(nil)
-var _ runtime.JobOperationAuthorizer = (*Adapter)(nil)
+var _ runtime.JobEffectAuthorizer = (*Adapter)(nil)
 
 func hashBytes(data []byte) string {
 	sum := sha256.Sum256(data)
@@ -207,20 +207,20 @@ func (a *Adapter) ToolPolicy() *tools.Policy {
 	return a.config.ToolPolicy.Clone()
 }
 
-func (a *Adapter) SetJobOperationAuthorizer(authorizer func(context.Context, string, string, string) error) {
+func (a *Adapter) SetJobEffectAuthorizer(authorizer func(context.Context, string, runtime.JobEffectRequest) error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.authorizeJobOperation = authorizer
+	a.authorizeJobEffect = authorizer
 }
 
-func (a *Adapter) jobOperationAuthorizer() func(context.Context, string, string, string) error {
+func (a *Adapter) jobEffectAuthorizer() func(context.Context, string, runtime.JobEffectRequest) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.authorizeJobOperation
+	return a.authorizeJobEffect
 }
 
-func (a *Adapter) hasJobOperationAuthorizer() bool {
-	return a.jobOperationAuthorizer() != nil
+func (a *Adapter) hasJobEffectAuthorizer() bool {
+	return a.jobEffectAuthorizer() != nil
 }
 func (a *Adapter) BudgetGuidancePolicy() *core.BudgetGuidancePolicy {
 	return core.CloneBudgetGuidance(a.config.BudgetGuidance)
@@ -316,7 +316,7 @@ func (a *Adapter) prepare() error {
 	}
 	if slices.Contains(a.config.AvailableTools, "view") || slices.Contains(a.config.AvailableTools, "read") {
 		readPermission := "allow"
-		if a.hasJobOperationAuthorizer() {
+		if a.hasJobEffectAuthorizer() {
 			readPermission = "ask"
 		}
 		permission["read"], permission["glob"], permission["grep"] = readPermission, readPermission, readPermission
@@ -324,13 +324,13 @@ func (a *Adapter) prepare() error {
 	if a.config.Role == "CODER" && (slices.Contains(a.config.AvailableTools, "create") ||
 		slices.Contains(a.config.AvailableTools, "edit") || slices.Contains(a.config.AvailableTools, "apply_patch")) {
 		permission["edit"] = "allow"
-		if a.hasJobOperationAuthorizer() {
+		if a.hasJobEffectAuthorizer() {
 			permission["edit"] = "ask"
 		}
 	}
 	if a.config.ToolPolicy != nil && len(a.config.ToolPolicy.Skills) != 0 {
 		permission["skill"] = "allow"
-		if a.hasJobOperationAuthorizer() {
+		if a.hasJobEffectAuthorizer() {
 			permission["skill"] = "ask"
 		}
 		external := map[string]string{"*": "deny"}
@@ -554,25 +554,47 @@ func (a *Adapter) write(message any) error {
 	return json.NewEncoder(a.input).Encode(message)
 }
 
-func openACPJobOperation(kind, name string, available []string) (string, bool) {
-	readAvailable := slices.Contains(available, "view") || slices.Contains(available, "read") || slices.Contains(available, "skill")
-	writeAvailable := slices.Contains(available, "create") || slices.Contains(available, "edit") || slices.Contains(available, "apply_patch")
+func openACPJobEffect(kind, name string, input json.RawMessage, available, approvedPaths []string, allowAll bool) (runtime.JobEffectRequest, bool) {
+	var args map[string]any
+	if len(input) != 0 && json.Unmarshal(input, &args) != nil {
+		return runtime.JobEffectRequest{}, false
+	}
+	target := ""
+	for _, key := range []string{"path", "filePath", "file_path", "uri"} {
+		if value, ok := args[key].(string); ok && strings.TrimSpace(value) != "" {
+			target = value
+			break
+		}
+	}
 	switch kind {
-	case "read", "search":
-		allowedReadName := slices.Contains([]string{"read", "view", "glob", "grep"}, name) || name == "skill" && slices.Contains(available, "skill")
-		if !readAvailable || !(slices.Contains(available, name) || allowedReadName) {
-			return "", false
+	case "read":
+		if !slices.Contains(available, name) || target == "" {
+			return runtime.JobEffectRequest{}, false
 		}
-		return "repository.read", true
+		target = filepath.Clean(target)
+		if filepath.IsAbs(target) || target == "." || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+			return runtime.JobEffectRequest{}, false
+		}
+		target = filepath.ToSlash(target)
+		if slices.Contains(strings.Split(target, "/"), ".git") || !allowAll && !slices.Contains(approvedPaths, target) {
+			return runtime.JobEffectRequest{}, false
+		}
+		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryRead, Target: target}, true
 	case "edit":
-		if !writeAvailable || !slices.Contains([]string{"create", "edit", "apply_patch"}, name) {
-			return "", false
+		if !slices.Contains(available, name) || target == "" {
+			return runtime.JobEffectRequest{}, false
 		}
-		return "repository.write", true
+		target = filepath.Clean(target)
+		if filepath.IsAbs(target) || target == "." || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+			return runtime.JobEffectRequest{}, false
+		}
+		target = filepath.ToSlash(target)
+		if slices.Contains(strings.Split(target, "/"), ".git") || !allowAll && !slices.Contains(approvedPaths, target) {
+			return runtime.JobEffectRequest{}, false
+		}
+		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: target}, true
 	default:
-		// OpenACP deliberately exposes no shell, terminal, fetch, or executable
-		// extension tools. Unknown and future kinds remain denied.
-		return "", false
+		return runtime.JobEffectRequest{}, false
 	}
 }
 
@@ -580,19 +602,20 @@ func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
 	cancelled := map[string]any{"outcome": "cancelled"}
 	var request struct {
 		SessionID string `json:"sessionId"`
-		ToolCall  struct {
+		ToolCall struct {
 			Kind string `json:"kind"`
 			Name string `json:"name"`
+			Input json.RawMessage `json:"rawInput"`
 		} `json:"toolCall"`
 		Options []struct {
 			OptionID string `json:"optionId"`
-			Kind     string `json:"kind"`
+			Kind string `json:"kind"`
 		} `json:"options"`
 	}
 	if json.Unmarshal(params, &request) != nil {
 		return cancelled
 	}
-	authorize := a.jobOperationAuthorizer()
+	authorize := a.jobEffectAuthorizer()
 	if authorize == nil {
 		return cancelled
 	}
@@ -600,8 +623,12 @@ func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
 	if a.config.ToolPolicy != nil && len(a.config.ToolPolicy.Skills) != 0 && !slices.Contains(available, "skill") {
 		available = append(available, "skill")
 	}
-	operation, ok := openACPJobOperation(request.ToolCall.Kind, request.ToolCall.Name, available)
-	if !ok || authorize(context.Background(), request.SessionID, operation, "") != nil {
+	approved, err := approvedPaths(a.config)
+	if err != nil {
+		return cancelled
+	}
+	effect, ok := openACPJobEffect(request.ToolCall.Kind, request.ToolCall.Name, request.ToolCall.Input, available, approved, a.config.FileAccess.Level == core.FileAccessAll)
+	if !ok || authorize(context.Background(), request.SessionID, effect) != nil {
 		for _, option := range request.Options {
 			if option.Kind == "reject_once" {
 				return map[string]any{"outcome": "selected", "optionId": option.OptionID}

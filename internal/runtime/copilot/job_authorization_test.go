@@ -2,40 +2,28 @@ package copilot
 
 import (
 	"testing"
+	"os"
+	"path/filepath"
 
 	sdk "github.com/github/copilot-sdk/go"
+	"github.com/hiono/taxion/internal/core"
 )
 
-func TestJobOperationForPermissionPreservesShellCommand(t *testing.T) {
-	request := &sdk.PermissionRequestShell{FullCommandText: "test -s README.md"}
-	operation, detail, ok := jobOperationForPermission(request)
-	if !ok || operation != "process.exec" || detail != request.FullCommandText {
-		t.Fatalf("jobOperationForPermission(shell) = (%q, %q, %t)", operation, detail, ok)
+func TestJobEffectForPermissionPreservesObservedEffect(t *testing.T) {
+	request := &sdk.PermissionRequestShell{FullCommandText: "go test ./..."}
+	worktree := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(worktree, "src"), 0700); err != nil { t.Fatal(err) }
+	effect, ok := jobEffectForPermission(worktree, request)
+	if !ok || effect.Effect != core.JobEffectValidationExecution || effect.Target != request.FullCommandText {
+		t.Fatalf("jobEffectForPermission(shell) = (%#v, %t)", effect, ok)
 	}
-}
-
-func TestJobOperationForTool(t *testing.T) {
-	tests := []struct {
-		name string
-		want string
-		ok   bool
-	}{
-		{"view", "repository.read", true},
-		{"read", "repository.read", true},
-		{"glob", "repository.read", true},
-		{"edit", "repository.write", true},
-		{"apply_patch", "repository.write", true},
-		{"bash", "process.exec", true},
-		{"mcp_repository", "", false},
-		{"mcp_external_api", "", false},
-		{ManagedSearchToolName, "network.access", true},
-		{ReviewProgressToolName, "", false},
-		{"unknown_tool", "", false},
+	read := &sdk.PermissionRequestRead{Path: "src/main.go"}
+	effect, ok = jobEffectForPermission(worktree, read)
+	if !ok || effect.Effect != core.JobEffectRepositoryRead || effect.Target != "src/main.go" {
+		t.Fatalf("jobEffectForPermission(read) = (%#v, %t)", effect, ok)
 	}
-	for _, test := range tests {
-		got, ok := jobOperationForTool(test.name)
-		if got != test.want || ok != test.ok {
-			t.Errorf("jobOperationForTool(%q) = (%q, %t), want (%q, %t)", test.name, got, ok, test.want, test.ok)
-		}
+	unknown := &sdk.PermissionRequestCustomTool{ToolName: "unknown"}
+	if _, ok := jobEffectForPermission(worktree, unknown); ok {
+		t.Fatal("unknown custom tool must not receive an inferred effect")
 	}
 }

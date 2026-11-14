@@ -72,7 +72,7 @@ type Adapter struct {
 	closed                bool
 	sessions              map[string]*managedSession
 	quotaOnly             bool
-	authorizeJobOperation func(context.Context, string, string, string) error
+	authorizeJobEffect    func(context.Context, string, runtime.JobEffectRequest) error
 }
 
 type managedSession struct {
@@ -410,20 +410,20 @@ func (a *Adapter) JobFileAccessPolicy() *core.FileAccessPolicy {
 	return core.CloneFileAccessPolicy(a.config.FileAccess)
 }
 
-func (a *Adapter) SetJobOperationAuthorizer(authorizer func(context.Context, string, string, string) error) {
+func (a *Adapter) SetJobEffectAuthorizer(authorizer func(context.Context, string, runtime.JobEffectRequest) error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.authorizeJobOperation = authorizer
+	a.authorizeJobEffect = authorizer
 }
 
-func (a *Adapter) jobOperationAuthorizer() func(context.Context, string, string, string) error {
+func (a *Adapter) jobEffectAuthorizer() func(context.Context, string, runtime.JobEffectRequest) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.authorizeJobOperation
+	return a.authorizeJobEffect
 }
 
-func (a *Adapter) hasJobOperationAuthorizer() bool {
-	return a.jobOperationAuthorizer() != nil
+func (a *Adapter) hasJobEffectAuthorizer() bool {
+	return a.jobEffectAuthorizer() != nil
 }
 
 func (a *Adapter) BudgetGuidancePolicy() *core.BudgetGuidancePolicy {
@@ -836,7 +836,7 @@ func (a *Adapter) sessionConfig(onEvent sdk.SessionEventHandler) *sdk.SessionCon
 		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
 		config.Tools = append(config.Tools, a.mcpTools()...)
 	}
-	if a.config.ToolPolicy != nil || a.hasJobOperationAuthorizer() {
+	if a.config.ToolPolicy != nil || a.hasJobEffectAuthorizer() {
 		config.Hooks = a.toolHooks()
 	}
 	return config
@@ -869,7 +869,7 @@ func (a *Adapter) resumeConfig(onEvent sdk.SessionEventHandler) *sdk.ResumeSessi
 		config.SkillDirectories, config.PluginDirectories = a.extensionDirectories()
 		config.Tools = append(config.Tools, a.mcpTools()...)
 	}
-	if a.config.ToolPolicy != nil || a.hasJobOperationAuthorizer() {
+	if a.config.ToolPolicy != nil || a.hasJobEffectAuthorizer() {
 		config.Hooks = a.toolHooks()
 	}
 	return config
@@ -905,7 +905,7 @@ func infiniteSessions() *sdk.InfiniteSessionConfig {
 
 func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 	if a.config.Role != "REVIEWER" && a.config.Role != "CODER" && a.config.ToolPolicy == nil &&
-		a.config.ManagedSearch == nil && !slices.Contains(a.config.AvailableTools, "skill") && !a.hasJobOperationAuthorizer() {
+		a.config.ManagedSearch == nil && !slices.Contains(a.config.AvailableTools, "skill") && !a.hasJobEffectAuthorizer() {
 		return nil
 	}
 	return func(request sdk.PermissionRequest, invocation sdk.PermissionInvocation) (rpc.PermissionDecision, error) {
@@ -957,12 +957,12 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
 			}
 		}
-		if authorize := a.jobOperationAuthorizer(); authorize != nil {
-			operation, detail, allowed := jobOperationForPermission(request)
+		if authorize := a.jobEffectAuthorizer(); authorize != nil {
+			effect, allowed := jobEffectForPermission(a.config.WorkingDirectory, request)
 			if !allowed {
-				reason := "Tool has no Job operation mapping"
+				reason := "Tool effect is not observable or enforceably contained by the Job Runtime"
 				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
-			} else if err := authorize(context.Background(), invocation.SessionID, operation, detail); err != nil {
+			} else if err := authorize(context.Background(), invocation.SessionID, effect); err != nil {
 				reason := err.Error()
 				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
 			}
