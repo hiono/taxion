@@ -52,12 +52,12 @@ type response struct {
 }
 
 type Adapter struct {
-	config            Config
-	root              string
-	before            map[string]fileSnapshot
-	cmd               *exec.Cmd
-	input             io.WriteCloser
-	done              chan struct{}
+	config             Config
+	root               string
+	before             map[string]fileSnapshot
+	cmd                *exec.Cmd
+	input              io.WriteCloser
+	done               chan struct{}
 
 	opMu               sync.Mutex
 	writeMu            sync.Mutex
@@ -83,7 +83,7 @@ type Adapter struct {
 	turn               int64
 	turnDone           chan struct{}
 
-	launch func(context.Context, string, string, bool) (*exec.Cmd, error)
+	launch             func(context.Context, string, string, bool) (*exec.Cmd, error)
 }
 
 var _ runtime.ConfigurationIdentity = (*Adapter)(nil)
@@ -454,7 +454,7 @@ func (a *Adapter) Start(ctx context.Context, taskID string) (string, error) {
 	}
 	var session struct {
 		ID      string `json:"sessionId"`
-		Options []struct {
+		Options   []struct {
 			ID       string `json:"id"`
 			Category string `json:"category"`
 			Value    string `json:"currentValue"`
@@ -602,7 +602,7 @@ func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
 	cancelled := map[string]any{"outcome": "cancelled"}
 	var request struct {
 		SessionID string `json:"sessionId"`
-		ToolCall struct {
+		ToolCall  struct {
 			Kind  string          `json:"kind"`
 			Name  string          `json:"name"`
 			Input json.RawMessage `json:"rawInput"`

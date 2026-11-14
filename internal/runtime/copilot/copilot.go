@@ -59,12 +59,12 @@ type Config struct {
 }
 
 type Adapter struct {
-	config         Config
-	client         *sdk.Client
-	credentialErr  error
-	environment    []string
-	stopSessionID  string
-	stopConfigHash string
+	config             Config
+	client             *sdk.Client
+	credentialErr      error
+	environment        []string
+	stopSessionID      string
+	stopConfigHash     string
 
 	opMu               sync.Mutex
 	mu                 sync.Mutex

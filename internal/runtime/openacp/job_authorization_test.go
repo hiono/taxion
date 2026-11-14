@@ -40,7 +40,7 @@ func TestOpenACPJobEffectRequiresTarget(t *testing.T) {
 func TestPermissionOutcomeUsesJobEffectAndAllowOnce(t *testing.T) {
 	called := false
 	adapter := &Adapter{
-		config: Config{AvailableTools: []string{"read"}},
+		config: Config{AvailableTools: []string{"read"}, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"src/main.go"}}},
 		authorizeJobEffect: func(_ context.Context, sessionID string, request runtime.JobEffectRequest) error {
 			called = true
 			if sessionID != "session-1" || request.Effect != core.JobEffectRepositoryRead || request.Target != "src/main.go" {
@@ -61,7 +61,7 @@ func TestPermissionOutcomeUsesJobEffectAndAllowOnce(t *testing.T) {
 
 func TestPermissionOutcomeRejectsWhenJobEffectAuthorizationFails(t *testing.T) {
 	adapter := &Adapter{
-		config: Config{AvailableTools: []string{"edit"}},
+		config: Config{AvailableTools: []string{"edit"}, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"src/main.go"}}},
 		authorizeJobEffect: func(context.Context, string, runtime.JobEffectRequest) error {
 			return errors.New("effect denied")
 		},
