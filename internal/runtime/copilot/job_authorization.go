@@ -1,8 +1,6 @@
 package copilot
 
 import (
-	"strings"
-
 	sdk "github.com/github/copilot-sdk/go"
 )
 
@@ -17,9 +15,8 @@ func jobOperationForTool(name string) (string, bool) {
 	case ManagedSearchToolName:
 		return "network.access", true
 	default:
-		if strings.HasPrefix(name, "mcp_") && len(name) > len("mcp_") {
-			return "process.exec", true
-		}
+		// Custom tools have provider-defined effects. A name prefix is not
+		// evidence that a tool is a shell command or has bounded side effects.
 		return "", false
 	}
 }
