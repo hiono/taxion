@@ -1,6 +1,7 @@
 package core
 
 import (
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -9,8 +10,9 @@ import (
 // JobEffectTarget identifies one resource touched by an observed action.
 // Path is repository-relative and must already be canonical.
 type JobEffectTarget struct {
-	Repository string `json:"repository"`
-	Path       string `json:"path"`
+	Repository string `json:"repository,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Resource   string `json:"resource,omitempty"`
 	Tracked    bool   `json:"tracked,omitempty"`
 }
 
@@ -18,6 +20,9 @@ type JobEffectTarget struct {
 // Inspectable and SandboxEnforced are evidence supplied by the trusted adapter,
 // not claims inferred from tool names or natural-language descriptions.
 type JobEffectObservation struct {
+	Provider        string            `json:"provider"`
+	Capability      string            `json:"capability"`
+	Action          string            `json:"action"`
 	Effects         []JobEffect       `json:"effects"`
 	Targets         []JobEffectTarget `json:"targets,omitempty"`
 	Command         string            `json:"command,omitempty"`
@@ -39,14 +44,20 @@ const (
 // Unknown or incomplete effects fail closed. Ordinary resource access is
 // authorized by the Job repository/file boundary, not by operation names.
 func (c JobContract) EvaluateJobEffect(observation JobEffectObservation) JobEffectDecision {
-	if c.Validate() != nil || !observation.Inspectable || len(observation.Effects) == 0 ||
+	if c.Validate() != nil || !observation.Inspectable ||
+		strings.TrimSpace(observation.Provider) == "" || strings.TrimSpace(observation.Capability) == "" ||
+		strings.TrimSpace(observation.Action) == "" || len(observation.Effects) == 0 ||
 		!validJobEffectTargets(observation.Targets) || observation.SandboxBypass {
 		return JobEffectDeny
 	}
 
 	targetIDs := make([]string, 0, len(observation.Targets)+1)
 	for _, target := range observation.Targets {
-		targetIDs = append(targetIDs, target.Repository+":"+target.Path)
+		if target.Resource != "" {
+			targetIDs = append(targetIDs, target.Resource)
+		} else {
+			targetIDs = append(targetIDs, target.Repository+":"+target.Path)
+		}
 	}
 	if observation.Command != "" {
 		targetIDs = append(targetIDs, "command:"+observation.Command)
@@ -70,17 +81,27 @@ func (c JobContract) EvaluateJobEffect(observation JobEffectObservation) JobEffe
 			if len(observation.Targets) != 0 && !jobEffectTargetsWithinContract(c, observation.Targets) {
 				return JobEffectDeny
 			}
+		case JobEffectJobContextRead:
+			if !observation.SandboxEnforced || len(observation.Targets) != 0 || observation.Command != "" {
+				return JobEffectDeny
+			}
 		default:
 			// Every other recognized effect must be explicitly prohibited or
 			// approval-required. A newly added effect cannot become implicitly
 			// executable merely because its identifier is syntactically valid.
 			if jobEffectRuleMatches(c.ApprovalRequiredEffects, effect, targetIDs) {
+				if len(targetIDs) == 0 {
+					return JobEffectDeny
+				}
 				decision = JobEffectRequireApproval
 				continue
 			}
 			return JobEffectDeny
 		}
 		if jobEffectRuleMatches(c.ApprovalRequiredEffects, effect, targetIDs) {
+			if len(targetIDs) == 0 {
+				return JobEffectDeny
+			}
 			decision = JobEffectRequireApproval
 		}
 	}
@@ -102,10 +123,17 @@ func validCanonicalJobEffectPath(target string) bool {
 func validJobEffectTargets(targets []JobEffectTarget) bool {
 	seen := map[string]bool{}
 	for _, target := range targets {
-		if strings.TrimSpace(target.Repository) == "" || !validCanonicalJobEffectPath(target.Path) {
+		if target.Resource != "" {
+			if target.Repository != "" || target.Path != "" || target.Tracked || !validCanonicalJobEffectResource(target.Resource) {
+				return false
+			}
+		} else if strings.TrimSpace(target.Repository) == "" || !validCanonicalJobEffectPath(target.Path) {
 			return false
 		}
-		key := target.Repository + ":" + target.Path
+		key := target.Resource
+		if key == "" {
+			key = target.Repository + ":" + target.Path
+		}
 		if seen[key] {
 			return false
 		}
@@ -119,6 +147,9 @@ func jobEffectTargetsWithinContract(contract JobContract, targets []JobEffectTar
 		return false
 	}
 	for _, target := range targets {
+		if target.Resource != "" {
+			return false
+		}
 		var boundary *JobRepositoryScope
 		for i := range contract.Repositories {
 			if contract.Repositories[i].Repository == target.Repository {
@@ -138,6 +169,30 @@ func jobEffectTargetsWithinContract(contract JobContract, targets []JobEffectTar
 		}
 	}
 	return true
+}
+
+func validCanonicalJobEffectResource(resource string) bool {
+	if strings.TrimSpace(resource) != resource || strings.ContainsAny(resource, " \t\r\n") {
+		return false
+	}
+	scheme, value, ok := strings.Cut(resource, ":")
+	if !ok || value == "" {
+		return false
+	}
+	switch scheme {
+	case "network":
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" ||
+			parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" ||
+			parsed.Host != strings.ToLower(parsed.Host) || strings.Contains(parsed.Path, "..") {
+			return false
+		}
+		return true
+	case "credential", "external", "publication", "production":
+		return !strings.HasPrefix(value, "/") && !strings.Contains(value, "..")
+	default:
+		return false
+	}
 }
 
 func jobEffectRuleMatches(rules []JobEffectRule, effect JobEffect, targetIDs []string) bool {

@@ -407,6 +407,9 @@ func (g TaskGraph) validateJobModel() error {
 	if err := g.validateJobApprovals(); err != nil {
 		return err
 	}
+	if err := g.validateJobEffectApprovals(); err != nil {
+		return err
+	}
 	if err := g.validateJobArtifacts(); err != nil {
 		return err
 	}

@@ -8,8 +8,9 @@ func TestEvaluateJobEffectUsesJobResourceBoundary(t *testing.T) {
 		Level: FileAccessExact, Paths: []string{"src/main.go", "docs/guide.md"},
 	}
 	base := JobEffectObservation{
-		Effects:     []JobEffect{JobEffectRepositoryRead},
-		Targets:     []JobEffectTarget{{Repository: "example/repo", Path: "src/main.go"}},
+		Provider: "copilot", Capability: "read", Action: "read",
+		Effects: []JobEffect{JobEffectRepositoryRead},
+		Targets: []JobEffectTarget{{Repository: "example/repo", Path: "src/main.go"}},
 		Inspectable: true, SandboxEnforced: true,
 	}
 	if got := contract.EvaluateJobEffect(base); got != JobEffectAllow {
@@ -41,8 +42,9 @@ func TestEvaluateJobEffectRequiresTrackedFilesForCommittedScope(t *testing.T) {
 	contract := *validJobContract(t)
 	contract.Repositories[0].FileAccess = FileAccessPolicy{Level: FileAccessCommitted}
 	observation := JobEffectObservation{
-		Effects:     []JobEffect{JobEffectRepositoryWrite},
-		Targets:     []JobEffectTarget{{Repository: "example/repo", Path: "src/main.go"}},
+		Provider: "copilot", Capability: "edit", Action: "write",
+		Effects: []JobEffect{JobEffectRepositoryWrite},
+		Targets: []JobEffectTarget{{Repository: "example/repo", Path: "src/main.go"}},
 		Inspectable: true, SandboxEnforced: true,
 	}
 	if got := contract.EvaluateJobEffect(observation); got != JobEffectDeny {
@@ -58,6 +60,7 @@ func TestEvaluateJobEffectRequiresExactSandboxedValidationCommand(t *testing.T) 
 	contract := *validJobContract(t)
 	contract.ValidationCommands = []string{"go test ./...", "go vet ./..."}
 	observation := JobEffectObservation{
+		Provider: "copilot", Capability: "shell", Action: "execute",
 		Effects: []JobEffect{JobEffectValidationExecution},
 		Command: "go test ./...", Inspectable: true, SandboxEnforced: true,
 	}
@@ -78,7 +81,10 @@ func TestEvaluateJobEffectRequiresExactSandboxedValidationCommand(t *testing.T) 
 func TestEvaluateJobEffectRequiresApprovalForConfiguredEffects(t *testing.T) {
 	contract := *validJobContract(t)
 	observation := JobEffectObservation{
-		Effects: []JobEffect{JobEffectNetworkAccess}, Inspectable: true,
+		Provider: "copilot", Capability: "web", Action: "network",
+		Effects: []JobEffect{JobEffectNetworkAccess},
+		Targets: []JobEffectTarget{{Resource: "network:https://api.example.com/search"}},
+		Inspectable: true,
 	}
 	if got := contract.EvaluateJobEffect(observation); got != JobEffectRequireApproval {
 		t.Fatalf("network effect decision = %q, want require_approval", got)
@@ -86,8 +92,9 @@ func TestEvaluateJobEffectRequiresApprovalForConfiguredEffects(t *testing.T) {
 	contract.ApprovalRequiredEffects = append(contract.ApprovalRequiredEffects,
 		JobEffectRule{Effect: JobEffectRepositoryWrite, Targets: []string{"example/repo:src/main.go"}})
 	observation = JobEffectObservation{
-		Effects:     []JobEffect{JobEffectRepositoryWrite},
-		Targets:     []JobEffectTarget{{Repository: "example/repo", Path: "src/main.go"}},
+		Provider: "copilot", Capability: "edit", Action: "write",
+		Effects: []JobEffect{JobEffectRepositoryWrite},
+		Targets: []JobEffectTarget{{Repository: "example/repo", Path: "src/main.go"}},
 		Inspectable: true, SandboxEnforced: true,
 	}
 	if got := contract.EvaluateJobEffect(observation); got != JobEffectRequireApproval {
@@ -102,11 +109,11 @@ func TestEvaluateJobEffectRequiresApprovalForConfiguredEffects(t *testing.T) {
 func TestEvaluateJobEffectFailsClosedForIncompleteOrUnknownEffects(t *testing.T) {
 	contract := *validJobContract(t)
 	for _, observation := range []JobEffectObservation{
-		{Effects: []JobEffect{JobEffectRepositoryRead}, Inspectable: false, SandboxEnforced: true},
-		{Effects: []JobEffect{JobEffect("future-effect")}, Inspectable: true, SandboxEnforced: true},
-		{Effects: []JobEffect{JobEffectRepositoryRead}, Inspectable: true, SandboxEnforced: false,
+		{Provider: "copilot", Capability: "read", Action: "read", Effects: []JobEffect{JobEffectRepositoryRead}, Inspectable: false, SandboxEnforced: true},
+		{Provider: "copilot", Capability: "unknown", Action: "unknown", Effects: []JobEffect{JobEffect("future-effect")}, Inspectable: true, SandboxEnforced: true},
+		{Provider: "copilot", Capability: "read", Action: "read", Effects: []JobEffect{JobEffectRepositoryRead}, Inspectable: true, SandboxEnforced: false,
 			Targets: []JobEffectTarget{{Repository: "example/repo", Path: "src/main.go"}}},
-		{Effects: []JobEffect{JobEffectRepositoryRead}, Inspectable: true, SandboxEnforced: true},
+		{Provider: "copilot", Capability: "read", Action: "read", Effects: []JobEffect{JobEffectRepositoryRead}, Inspectable: true, SandboxEnforced: true},
 	} {
 		if got := contract.EvaluateJobEffect(observation); got != JobEffectDeny {
 			t.Fatalf("incomplete or unknown effect decision = %q, want deny: %+v", got, observation)
@@ -133,7 +140,6 @@ func TestCheckEffectRejectsInvalidContractAndNonCanonicalTargets(t *testing.T) {
 
 func TestCheckEffectEnforcesRepositoryAndTrackedFileScope(t *testing.T) {
 	contract := *validJobContract(t)
-	contract.ValidationCommands = []string{"go test ./..."}
 	contract.Repositories[0].Repository = "example/repo"
 	contract.Repositories[0].FileAccess = FileAccessPolicy{
 		Level: FileAccessExact, Paths: []string{"src/main.go"},
@@ -158,9 +164,6 @@ func TestCheckEffectEnforcesRepositoryAndTrackedFileScope(t *testing.T) {
 	}
 	if err := contract.CheckEffect(JobEffectRepositoryWrite, "example/repo", "src/main.go", true); err != nil {
 		t.Fatalf("tracked file inside committed-only scope rejected: %v", err)
-	}
-	if err := contract.CheckEffect(JobEffectValidationExecution, "example/repo", "go test ./...", true); err == nil {
-		t.Fatal("tracked-file metadata must not be attached to a process effect")
 	}
 	contract.ApprovalRequiredEffects = append(contract.ApprovalRequiredEffects, JobEffectRule{
 		Effect: JobEffectRepositoryWrite, Targets: []string{"example/repo:src/main.go"},

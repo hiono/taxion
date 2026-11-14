@@ -600,25 +600,27 @@ func (g *TaskGraph) UnmarshalJSON(data []byte) error {
 }
 
 type TaskGraph struct {
-	Version               int                  `json:"version"`
-	Jobs                  []Job                `json:"jobs,omitempty"`
-	RoleExecutions        []RoleExecution      `json:"roleExecutions,omitempty"`
-	RoleExecutionHistory  []RoleExecutionEvent `json:"roleExecutionHistory,omitempty"`
-	JobHistory            []JobEvent           `json:"jobHistory,omitempty"`
-	Tasks                 []GraphTask          `json:"tasks"`
-	Concerns              []Concern            `json:"concerns"`
-	History               []GraphEvent         `json:"history"`
-	Dispatches            []GraphDispatch      `json:"dispatches"`
-	DispatchHistory       []DispatchEvent      `json:"dispatchHistory"`
-	ReviewFlows           []ReviewFlow         `json:"reviewFlows,omitempty"`
-	Archives              []TaskArchive        `json:"archives,omitempty"`
-	ApprovalSchemaVersion int                  `json:"approvalSchemaVersion,omitempty"`
-	Approvals             []ApprovalBundle     `json:"approvals,omitempty"`
-	JobApprovals          []JobApproval        `json:"jobApprovals,omitempty"`
-	JobOutputs            []JobOutput          `json:"jobOutputs,omitempty"`
-	JobEvidence           []JobEvidence        `json:"jobEvidence,omitempty"`
-	JobUsage              []JobUsage           `json:"jobUsage,omitempty"`
-	JobMessages           []JobMessage         `json:"jobMessages,omitempty"`
+	Version                    int                  `json:"version"`
+	Jobs                       []Job                `json:"jobs,omitempty"`
+	RoleExecutions             []RoleExecution      `json:"roleExecutions,omitempty"`
+	RoleExecutionHistory       []RoleExecutionEvent `json:"roleExecutionHistory,omitempty"`
+	JobHistory                 []JobEvent           `json:"jobHistory,omitempty"`
+	Tasks                      []GraphTask          `json:"tasks"`
+	Concerns                   []Concern            `json:"concerns"`
+	History                    []GraphEvent         `json:"history"`
+	Dispatches                 []GraphDispatch      `json:"dispatches"`
+	DispatchHistory            []DispatchEvent      `json:"dispatchHistory"`
+	ReviewFlows                []ReviewFlow         `json:"reviewFlows,omitempty"`
+	Archives                   []TaskArchive        `json:"archives,omitempty"`
+	ApprovalSchemaVersion      int                  `json:"approvalSchemaVersion,omitempty"`
+	Approvals                  []ApprovalBundle     `json:"approvals,omitempty"`
+	JobApprovals               []JobApproval        `json:"jobApprovals,omitempty"`
+	JobOutputs                 []JobOutput          `json:"jobOutputs,omitempty"`
+	JobEvidence                []JobEvidence        `json:"jobEvidence,omitempty"`
+	JobUsage                   []JobUsage           `json:"jobUsage,omitempty"`
+	JobMessages                []JobMessage         `json:"jobMessages,omitempty"`
+	JobEffectApprovalRequests  []JobEffectApprovalRequest  `json:"jobEffectApprovalRequests,omitempty"`
+	JobEffectApprovalDecisions []JobEffectApprovalDecision `json:"jobEffectApprovalDecisions,omitempty"`
 }
 
 func graphError(format string, args ...any) error {
@@ -2039,6 +2041,11 @@ func cloneGraph(g TaskGraph) TaskGraph {
 	copy.ReviewFlows = slices.Clone(g.ReviewFlows)
 	copy.Approvals = slices.Clone(g.Approvals)
 	copy.JobMessages = slices.Clone(g.JobMessages)
+	copy.JobEffectApprovalRequests = slices.Clone(g.JobEffectApprovalRequests)
+	for i := range copy.JobEffectApprovalRequests {
+		copy.JobEffectApprovalRequests[i] = cloneJobEffectApprovalRequest(g.JobEffectApprovalRequests[i])
+	}
+	copy.JobEffectApprovalDecisions = slices.Clone(g.JobEffectApprovalDecisions)
 	copy.JobApprovals = slices.Clone(g.JobApprovals)
 	copy.JobOutputs = slices.Clone(g.JobOutputs)
 	copy.JobEvidence = slices.Clone(g.JobEvidence)
