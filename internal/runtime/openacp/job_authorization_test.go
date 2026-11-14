@@ -12,6 +12,12 @@ import (
 	"github.com/hiono/taxion/internal/runtime"
 )
 
+func openACPTestWorktree(t *testing.T) string {
+	t.Helper()
+	worktree := openACPTestWorktree(t)
+	return worktree
+}
+
 func TestOpenACPJobEffectRequiresTarget(t *testing.T) {
 	worktree := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(worktree, "src"), 0700); err != nil {
@@ -62,7 +68,7 @@ func TestOpenACPJobEffectRequiresTarget(t *testing.T) {
 func TestPermissionOutcomeUsesJobEffectAndAllowOnce(t *testing.T) {
 	called := false
 	adapter := &Adapter{
-		config: Config{WorkingDirectory: t.TempDir(), AvailableTools: []string{"read"}, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"src/main.go"}}},
+		config: Config{WorkingDirectory: openACPTestWorktree(t), AvailableTools: []string{"read"}, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"src/main.go"}}},
 		authorizeJobEffect: func(_ context.Context, sessionID string, request runtime.JobEffectRequest) error {
 			called = true
 			if sessionID != "session-1" || request.Effect != core.JobEffectRepositoryRead || request.Target != "src/main.go" {
@@ -83,7 +89,7 @@ func TestPermissionOutcomeUsesJobEffectAndAllowOnce(t *testing.T) {
 
 func TestPermissionOutcomeRejectsWhenJobEffectAuthorizationFails(t *testing.T) {
 	adapter := &Adapter{
-		config: Config{WorkingDirectory: t.TempDir(), AvailableTools: []string{"edit"}, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"src/main.go"}}},
+		config: Config{WorkingDirectory: openACPTestWorktree(t), AvailableTools: []string{"edit"}, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"src/main.go"}}},
 		authorizeJobEffect: func(context.Context, string, runtime.JobEffectRequest) error {
 			return errors.New("effect denied")
 		},
