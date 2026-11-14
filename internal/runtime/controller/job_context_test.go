@@ -60,7 +60,7 @@ func TestBuildJobExecutionContextIsJobScopedAndExcludesRuntimeBindings(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"private-session-id", "private-config-hash", "runtimeSessionId", "runtimeConfigHash", "authorizationId", "worktree", "roleOperations", "\"owner\"", "\"reviewer\""} {
+	for _, forbidden := range []string{"private-session-id", "private-config-hash", "runtimeSessionId", "runtimeConfigHash", "authorizationId", "worktree", "roleOperations", "\"operations\"", "\"owner\"", "\"reviewer\""} {
 		if strings.Contains(rendered, forbidden) {
 			t.Fatalf("Role context exposes controller-only field %q", forbidden)
 		}
@@ -181,7 +181,7 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !context.Job.Approved || context.Job.ApprovalRevision != 1 ||
-		len(context.Job.Repositories) != 1 || len(context.Job.Operations) != 2 ||
+		len(context.Job.Repositories) != 1 ||
 		context.Job.Budget.MaxRoleExecutions != 4 || len(context.Job.Acceptance) != 1 ||
 		len(context.Outputs) != 1 || len(context.Evidence) != 1 {
 		t.Fatalf("Job approval boundary missing from Role context: %+v", context.Job)
