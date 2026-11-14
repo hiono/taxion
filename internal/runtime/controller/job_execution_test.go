@@ -134,7 +134,8 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 						Repository: task.Repo, FileAccess: *task.FileAccess,
 					}},
 					ValidationCommands: append([]string(nil), task.ValidationCommands...),
-					ProhibitedEffects: core.DefaultJobProhibitedEffects(), ApprovalRequiredEffects: core.DefaultJobApprovalRequiredEffects(),
+					ProhibitedEffects:       core.DefaultJobProhibitedEffects(),
+					ApprovalRequiredEffects: core.DefaultJobApprovalRequiredEffects(),
 					Budget:           core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
 					Deadline:         now.Add(time.Hour), Configuration: configuration,
 				}

@@ -127,7 +127,9 @@ type JobMessageContext struct {
 
 func cloneJobEffectRules(rules []core.JobEffectRule) []core.JobEffectRule {
 	clone := append([]core.JobEffectRule(nil), rules...)
-	for i := range clone { clone[i].Targets = append([]string(nil), rules[i].Targets...) }
+	for i := range clone {
+		clone[i].Targets = append([]string(nil), rules[i].Targets...)
+	}
 	return clone
 }
 

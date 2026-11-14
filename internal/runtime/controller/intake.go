@@ -396,11 +396,11 @@ func BuildJobContractForIntake(task core.GraphTask, configuration core.ApprovalC
 			Repository: task.Repo,
 			FileAccess: *task.FileAccess,
 		}},
-		Budget:               budget,
-		Deadline:             deadline,
-		ProhibitedEffects: core.DefaultJobProhibitedEffects(),
+		Budget:                  budget,
+		Deadline:                deadline,
+		ProhibitedEffects:       core.DefaultJobProhibitedEffects(),
 		ApprovalRequiredEffects: core.DefaultJobApprovalRequiredEffects(),
-		Configuration:        configuration,
+		Configuration:           configuration,
 	}
 	if err := contract.Validate(); err != nil {
 		return core.JobContract{}, err

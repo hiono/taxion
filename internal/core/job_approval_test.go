@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 )
@@ -18,15 +19,9 @@ func validJobContract(t *testing.T) *JobContract {
 	return &JobContract{
 		Revision: 1, Roles: []string{"PLANNER", "CODER", "REVIEWER"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
 		Repositories: []JobRepositoryScope{{Repository: "example/repo", FileAccess: FileAccessPolicy{Level: FileAccessCommitted}}},
-		Operations:   []string{"repository.read", "repository.write", "test.run"},
-		RoleOperations: map[string][]string{
-			"PLANNER":  {"repository.read"},
-			"CODER":    {"repository.read", "repository.write", "test.run"},
-			"REVIEWER": {"repository.read"},
-		},
 		Budget:               JobBudget{MaxRoleExecutions: 10, MaxConcurrentExecutions: 2, MaxNanoAIU: 100},
 		Deadline:             time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC),
-		SecurityRestrictions: []string{"no-secret-export"}, Configuration: config,
+		ProhibitedEffects: DefaultJobProhibitedEffects(), ApprovalRequiredEffects: DefaultJobApprovalRequiredEffects(), Configuration: config,
 	}
 }
 
@@ -44,7 +39,7 @@ func TestJobApprovalBindsExactJobRevision(t *testing.T) {
 	if err := approval.Verify(); err != nil {
 		t.Fatalf("valid approval rejected: %v", err)
 	}
-	approval.Proposal.Contract.Operations = append(approval.Proposal.Contract.Operations, "network.access")
+	approval.Proposal.Contract.Acceptance = append(approval.Proposal.Contract.Acceptance, "changed")
 	if err := approval.Verify(); err == nil {
 		t.Fatal("modified approval proposal must invalidate its record")
 	}
@@ -82,11 +77,10 @@ func TestTaskCannotWidenApprovedJobContract(t *testing.T) {
 	if TaskWithinJobContract(commands, contract) {
 		t.Fatal("unbound validation commands must be rejected")
 	}
-	contract.Operations = append(contract.Operations, "process.exec")
-	contract.RoleOperations["CODER"] = append(contract.RoleOperations["CODER"], "process.exec")
 	contract.ValidationCommands = append([]string(nil), commands.ValidationCommands...)
+	contract.ValidationCommands = slices.Clone(commands.ValidationCommands)
 	if !TaskWithinJobContract(commands, contract) {
-		t.Fatal("exactly approved validation command and Coder operations should be accepted")
+		t.Fatal("exactly approved validation command should be accepted")
 	}
 	changedCommand := commands
 	changedCommand.ValidationCommands = []string{"go test ./... -race"}
@@ -95,7 +89,6 @@ func TestTaskCannotWidenApprovedJobContract(t *testing.T) {
 	}
 
 	readOnly := contract
-	readOnly.Operations = []string{"repository.read"}
 	readOnly.ValidationCommands = nil
 	if !TaskWithinJobContract(task, readOnly) {
 		t.Fatal("a Task must not be forced to receive repository.write when its Job contract grants read-only access")
@@ -133,7 +126,6 @@ func TestTaskScopeCannotWidenJobRepositoryScope(t *testing.T) {
 	}
 }
 
- 
 func TestJobContractRequiresTypedSecurityEffects(t *testing.T) {
 	contract := validJobContract(t)
 	contract.ProhibitedEffects = contract.ProhibitedEffects[1:]
@@ -198,7 +190,7 @@ func TestJobApprovalAppendAndRevisionInvalidation(t *testing.T) {
 	if _, ok := graph.CurrentJobApproval("job-a"); !ok {
 		t.Fatal("current Job approval was not found")
 	}
-	graph.Jobs[0].Contract.Operations = append(graph.Jobs[0].Contract.Operations, "network.access")
+	graph.Jobs[0].Contract.Acceptance = append(graph.Jobs[0].Contract.Acceptance, "changed")
 	if err := graph.validateJobModel(); err == nil {
 		t.Fatal("changing an approved contract without a new revision must be rejected")
 	}
@@ -227,7 +219,7 @@ func TestTaskGraphRejectsTaskScopeOutsideApprovedJobContract(t *testing.T) {
 	}
 }
 
-func TestCheckRoleExecutionOperationRequiresCurrentJobApprovalAndScope(t *testing.T) {
+func TestCheckRoleExecutionRequiresCurrentJobApprovalAndScope(t *testing.T) {
 	now := time.Now().UTC()
 	job := Job{
 		ID: "job-a", Request: "request", Goal: "goal", Status: JobActive,
@@ -258,28 +250,28 @@ func TestCheckRoleExecutionOperationRequiresCurrentJobApprovalAndScope(t *testin
 	if err := graph.TransitionRoleExecution("exec-a", RoleExecutionRunning, "controller", "start", now.Add(3*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if err := graph.CheckRoleExecutionOperation("exec-a", "repository.read", now.Add(4*time.Second)); err != nil {
-		t.Fatalf("approved in-scope operation rejected: %v", err)
+	if err := graph.CheckRoleExecution("exec-a", now.Add(4*time.Second)); err != nil {
+		t.Fatalf("approved RoleExecution rejected: %v", err)
 	}
-	if err := graph.CheckRoleExecutionOperation("exec-a", "test.run", now.Add(4*time.Second)); err != nil {
-		t.Fatalf("explicitly approved operation rejected: %v", err)
+	if err := graph.CheckRoleExecution("exec-a", now.Add(4*time.Second)); err != nil {
+		t.Fatalf("RoleExecution was incorrectly coupled to an operation name: %v", err)
 	}
 	graph.Tasks[0].Acceptance = []string{"unapproved acceptance"}
-	if err := graph.CheckRoleExecutionOperation("exec-a", "repository.read", now.Add(4*time.Second)); err == nil {
+	if err := graph.CheckRoleExecution("exec-a", now.Add(4*time.Second)); err == nil {
 		t.Fatal("Runtime operation must reject a Task whose acceptance exceeds the approved Job contract")
 	}
 	graph.Tasks[0].Acceptance = nil
-	if err := graph.CheckRoleExecutionOperation("exec-a", "network.access", now.Add(4*time.Second)); err == nil {
-		t.Fatal("operation outside the approved Job scope must be rejected")
+	if err := graph.CheckRoleExecution("exec-a", now.Add(4*time.Second)); err == nil {
+		t.Fatal("Task outside the approved Job scope must be rejected")
 	}
-	if err := graph.CheckRoleExecutionOperation("exec-a", "unknown.operation", now.Add(4*time.Second)); err == nil {
-		t.Fatal("unknown operation must fail closed")
+	if err := graph.CheckRoleExecution("exec-a", now.Add(4*time.Second)); err == nil {
+		t.Fatal("current Job approval must be revalidated independently of provider tool names")
 	}
-	if err := graph.CheckRoleExecutionOperation("exec-a", "repository.read", job.Contract.Deadline.Add(time.Second)); err == nil {
+	if err := graph.CheckRoleExecution("exec-a", job.Contract.Deadline.Add(time.Second)); err == nil {
 		t.Fatal("expired Job must not authorize Runtime operations")
 	}
 	graph.Jobs[0].Contract.Revision = 2
-	if err := graph.CheckRoleExecutionOperation("exec-a", "repository.read", now.Add(4*time.Second)); err == nil {
+	if err := graph.CheckRoleExecution("exec-a", now.Add(4*time.Second)); err == nil {
 		t.Fatal("new Job revision must require new approval")
 	}
 }

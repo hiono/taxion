@@ -24,6 +24,7 @@ type JobContract struct {
 }
 
 // JobEffect identifies a security-relevant effect independently of provider tool names.
+// JobEffect identifies a security-relevant effect independently of provider tool names.
 type JobEffect string
 
 const (
@@ -42,6 +43,8 @@ const (
 	JobEffectScopeChange         JobEffect = "scope_change"
 )
 
+// JobEffectRule optionally limits an effect rule to exact canonical targets.
+// An empty target list applies to every target.
 // JobEffectRule optionally limits an effect rule to exact canonical targets.
 // An empty target list applies to every target.
 type JobEffectRule struct {
@@ -70,7 +73,6 @@ type JobRepositoryScope struct {
 	Repository string           `json:"repository"`
 	FileAccess FileAccessPolicy `json:"fileAccess"`
 }
-
 
 type JobBudget struct {
 	MaxRoleExecutions       int     `json:"maxRoleExecutions"`
@@ -122,7 +124,9 @@ func validJobEffectRules(rules []JobEffectRule) bool {
 		seen[rule.Effect] = true
 		targets := map[string]bool{}
 		for _, target := range rule.Targets {
-			if !nonempty(target) || targets[target] { return false }
+			if !nonempty(target) || targets[target] {
+				return false
+			}
 			targets[target] = true
 		}
 	}
@@ -164,13 +168,17 @@ func validateRequiredJobEffects(prohibited, approvalRequired []JobEffectRule) er
 
 func hasUnboundedJobEffect(rules []JobEffectRule, effect JobEffect) bool {
 	for _, rule := range rules {
-		if rule.Effect == effect && len(rule.Targets) == 0 { return true }
+		if rule.Effect == effect && len(rule.Targets) == 0 {
+			return true
+		}
 	}
 	return false
 }
 
 func cloneJobContract(contract *JobContract) *JobContract {
-	if contract == nil { return nil }
+	if contract == nil {
+		return nil
+	}
 	copy := *contract
 	copy.Acceptance = slices.Clone(contract.Acceptance)
 	copy.RequiredEvidence = slices.Clone(contract.RequiredEvidence)
@@ -188,7 +196,9 @@ func cloneJobContract(contract *JobContract) *JobContract {
 
 func cloneJobEffectRules(rules []JobEffectRule) []JobEffectRule {
 	clone := slices.Clone(rules)
-	for i := range clone { clone[i].Targets = slices.Clone(rules[i].Targets) }
+	for i := range clone {
+		clone[i].Targets = slices.Clone(rules[i].Targets)
+	}
 	return clone
 }
 
@@ -612,7 +622,9 @@ func (g TaskGraph) CheckRoleExecutionTurn(executionID string, at time.Time) erro
 // CheckRoleExecution validates the current Job approval and execution budget.
 // Individual tool effects are evaluated by the Job-native Runtime evaluator.
 func (g TaskGraph) CheckRoleExecution(executionID string, at time.Time) error {
-	if at.IsZero() { return graphError("RoleExecution validation requires a timestamp") }
+	if at.IsZero() {
+		return graphError("RoleExecution validation requires a timestamp")
+	}
 	execution, ok := g.RoleExecution(executionID)
 	if !ok || execution.Status != RoleExecutionRunning {
 		return graphError("Runtime operation requires a running RoleExecution")
@@ -621,14 +633,18 @@ func (g TaskGraph) CheckRoleExecution(executionID string, at time.Time) error {
 	if !ok || job.Status != JobActive || job.Contract == nil {
 		return graphError("Runtime operation requires an active Job contract")
 	}
-	if at.After(job.Contract.Deadline) { return graphError("Job deadline has expired") }
+	if at.After(job.Contract.Deadline) {
+		return graphError("Job deadline has expired")
+	}
 	if _, ok := g.CurrentJobApproval(job.ID); !ok {
 		return graphError("Runtime operation requires explicit approval of the current Job revision")
 	}
 	if job.Contract.Budget.MaxNanoAIU <= 0 {
 		return graphError("Job Role runtime requires a native AIU ceiling; external-only budget monitoring is not available")
 	}
-	if g.JobUsageTotal(job.ID) >= job.Contract.Budget.MaxNanoAIU { return graphError("Job AIU budget is exhausted") }
+	if g.JobUsageTotal(job.ID) >= job.Contract.Budget.MaxNanoAIU {
+		return graphError("Job AIU budget is exhausted")
+	}
 	if !slices.Contains(job.Contract.Roles, execution.Role) {
 		return graphError("RoleExecution role is outside the approved Job role scope")
 	}
@@ -639,7 +655,9 @@ func (g TaskGraph) CheckRoleExecution(executionID string, at time.Time) error {
 		}
 	}
 	executions := g.RoleExecutionsForJob(job.ID)
-	if len(executions) > job.Contract.Budget.MaxRoleExecutions { return graphError("Job RoleExecution budget is exhausted") }
+	if len(executions) > job.Contract.Budget.MaxRoleExecutions {
+		return graphError("Job RoleExecution budget is exhausted")
+	}
 	concurrent := 0
 	for _, candidate := range executions {
 		switch candidate.Status {
