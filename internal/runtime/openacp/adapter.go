@@ -335,7 +335,7 @@ func (a *Adapter) prepare() error {
 			}
 			if permission["read"] == "allow" {
 				external["/config/opencode/skills/"+name+"/*"] = "allow"
-			} else if permission["read"] == "ask" {
+			} else if permission["read"] == "ask" && (slices.Contains(a.config.AvailableTools, "view") || slices.Contains(a.config.AvailableTools, "read")) {
 				external["/config/opencode/skills/"+name+"/*"] = "ask"
 			}
 		}
@@ -605,7 +605,7 @@ func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
 	}
 	for _, option := range request.Options {
 		if option.Kind == "allow_once" {
-			return map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": option.OptionID}}
+			return map[string]any{"outcome": "selected", "optionId": option.OptionID}
 		}
 	}
 	return cancelled
