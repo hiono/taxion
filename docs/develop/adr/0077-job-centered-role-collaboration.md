@@ -4,7 +4,7 @@ Date: 2026-11-13
 
 ## Status
 
-Accepted. The former operation-allowlist provisions in this ADR were superseded by ADR-0080. This ADR defines the Job-centered collaboration and immutable approval model; ADR-0080 defines how the approved Job boundary is enforced. Neither ADR requires preservation of obsolete Task/ReviewFlow execution paths.
+Accepted. The former operation-allowlist provisions in this ADR were superseded by ADR-0080. This ADR defines the Job-centered collaboration and immutable approval model; ADR-0080 defines how the approved Job boundary is enforced. Neither ADR requires preservation of obsolete Task/ReviewFlow execution paths. Project-wide redesign follows [ADR-0081](0081-rebuild-over-legacy-constraints.md): reuse suitable technical components, but rebuild and delete obsolete models, APIs, data structures, and tests when they constrain Job-native collaboration.
 
 ## Context
 
@@ -40,7 +40,7 @@ Controller は意味的な情報の完全性を判定して Role の判断を代
 
 ### 既存実装と protocol
 
-既存の ReviewFlow、Clarification、Dispatch、role packet、固定 schema は新設計の制約としない。新しい設計を満たす部分のみ再利用し、満たさない部分は変更または廃止する。互換性維持だけを理由に旧 protocol を残さない。
+既存の ReviewFlow、Clarification、Dispatch、role packet、固定 schema は新設計の制約としない。再設計全体の判断基準は [ADR-0081](0081-rebuild-over-legacy-constraints.md) とし、旧モデルの付け替えではなく新しい不変条件から作り直す。新しい設計を満たす部分のみ再利用し、満たさない部分は変更または廃止する。互換性維持だけを理由に旧 protocol を残さない。
 
 一方、必要性が実証されていない汎用 scheduler、常駐 Role、質問専用エンジンを先行導入しない。実際の Job 協調を成立させる最小の実行・保存モデルから構築する。
 
