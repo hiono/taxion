@@ -324,9 +324,9 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	}
 	if !strings.Contains(worker.prompt, "Current Job context") ||
 		!strings.Contains(worker.prompt, job.Request) ||
-		!strings.Contains(worker.prompt, "repository.write") ||
+		strings.Contains(worker.prompt, "repository.write") ||
 		!strings.Contains(worker.prompt, "Please review the implementation") {
-		t.Fatalf("Runtime did not receive the approved Job context: %s", worker.prompt)
+		t.Fatalf("Runtime did not receive the approved Job context without legacy operation ACLs: %s", worker.prompt)
 	}
 	go func() {
 		worker.events <- runtime.Event{
