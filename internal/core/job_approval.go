@@ -179,6 +179,7 @@ func (c JobContract) CheckEffect(effect JobEffect, repository, target string, tr
 	if !validJobEffect(effect) {
 		return graphError("unknown Job effect %q", effect)
 	}
+	executable := false
 	switch effect {
 	case JobEffectRepositoryRead, JobEffectRepositoryWrite:
 		if !nonempty(repository) || !validCanonicalJobEffectPath(target) {
@@ -199,14 +200,17 @@ func (c JobContract) CheckEffect(effect JobEffect, repository, target string, tr
 			boundary.FileAccess.Level == FileAccessCommitted && !tracked {
 			return graphError("repository effect target is outside the approved Job file-access boundary")
 		}
+		executable = true
 	case JobEffectValidationExecution:
 		if !nonempty(target) || !slices.Contains(c.ValidationCommands, target) {
 			return graphError("execution is not an exact approved Job validation command")
 		}
+		executable = true
 	case JobEffectJobContextRead:
 		if target != "" || tracked {
 			return graphError("Job context read must not carry a resource target")
 		}
+		executable = true
 	default:
 		if strings.TrimSpace(target) != target {
 			return graphError("Job effect target is not canonical")
@@ -235,6 +239,9 @@ func (c JobContract) CheckEffect(effect JobEffect, repository, target string, tr
 	}
 	if err := check(c.ApprovalRequiredEffects, "Job effect requires separate human approval"); err != nil {
 		return err
+	}
+	if !executable {
+		return graphError("Job effect %q has no explicit executable authorization policy", effect)
 	}
 	return nil
 }
