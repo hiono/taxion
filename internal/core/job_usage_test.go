@@ -57,7 +57,7 @@ func TestJobUsageAccumulatesAndBlocksFurtherOperationsAtBudget(t *testing.T) {
 	if graph.JobUsageTotal(job.ID) != 100 {
 		t.Fatalf("Job usage total = %v, want 100", graph.JobUsageTotal(job.ID))
 	}
-	if err := graph.CheckRoleExecutionOperation("exec-usage", "repository.read", now.Add(5*time.Second)); err == nil {
+	if err := graph.CheckRoleExecution("exec-usage", now.Add(5*time.Second)); err == nil {
 		t.Fatal("Role operation must be blocked when the Job AIU budget is exhausted")
 	}
 	usage.Usage.TotalNanoAIU = nil
