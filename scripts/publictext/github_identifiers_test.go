@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,9 +18,8 @@ func TestGitHubIdentifierTexts(t *testing.T) {
 	sum := sha256.Sum256([]byte("private-example-47"))
 	digests := []string{hex.EncodeToString(sum[:])}
 	pr := githubText{Title: "Public title", Body: "Public description", Number: 42, Commits: 1}
+	pr.Base.SHA = strings.Repeat("b", 40)
 	pr.Head.SHA = strings.Repeat("a", 40)
-	commit := githubCommitText{SHA: pr.Head.SHA}
-	commit.Commit.Message = "Public commit"
 	event := githubTextEvent{PullRequest: pr}
 	event.Issue = pr
 	event.Comment.Body, event.Review.Body = "Public comment", "Public review"
@@ -25,7 +27,8 @@ func TestGitHubIdentifierTexts(t *testing.T) {
 	for _, name := range []string{"pull_request_target", "issues", "issue_comment",
 		"pull_request_review", "pull_request_review_comment", "release"} {
 		t.Run(name, func(t *testing.T) {
-			texts, err := githubEventTexts(name, event, []githubCommitText{commit})
+			messages := []string{"Public commit"}
+			texts, err := githubEventTexts(name, event, messages)
 			if err != nil || checkIdentifierTexts(texts, digests) != nil {
 				t.Fatal("valid public text rejected", err)
 			}
@@ -35,7 +38,7 @@ func TestGitHubIdentifierTexts(t *testing.T) {
 			private.Comment.Body = "PRIVATE-EXAMPLE-47"
 			private.Review.Body = "PRIVATE-EXAMPLE-47"
 			private.Release.Body = "PRIVATE-EXAMPLE-47"
-			texts, err = githubEventTexts(name, private, []githubCommitText{commit})
+			texts, err = githubEventTexts(name, private, messages)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -44,20 +47,13 @@ func TestGitHubIdentifierTexts(t *testing.T) {
 			}
 		})
 	}
-	privateCommit := commit
-	privateCommit.Commit.Message = "Private-Example-47"
-	texts, err := githubEventTexts("pull_request_target", event, []githubCommitText{privateCommit})
+	if _, err := githubEventTexts("pull_request_target", event, nil); err == nil {
+		t.Fatal("missing commit messages accepted")
+	}
+	privateMessages := []string{"Private-Example-47"}
+	texts, err := githubEventTexts("pull_request_target", event, privateMessages)
 	if err != nil || checkIdentifierTexts(texts, digests) == nil {
 		t.Fatal("protected commit message accepted", err)
-	}
-	for _, inventory := range [][]githubCommitText{nil, {commit, commit}, {{SHA: "wrong"}}} {
-		if _, err := githubEventTexts("pull_request_target", event, inventory); err == nil {
-			t.Fatal("incomplete or changed commit inventory accepted")
-		}
-	}
-	event.PullRequest.Commits = 251
-	if _, err := githubEventTexts("pull_request_target", event, nil); err == nil {
-		t.Fatal("oversized pull request accepted")
 	}
 	if _, err := githubEventTexts("unknown", event, nil); err == nil {
 		t.Fatal("unknown event accepted")
@@ -66,6 +62,65 @@ func TestGitHubIdentifierTexts(t *testing.T) {
 		if checkIdentifierTexts([]string{"Public text"}, policy) == nil {
 			t.Fatal("unavailable or invalid policy accepted")
 		}
+	}
+}
+
+func runGitTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v: %s", args, err, output)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func TestPullRequestCommitMessagesInventoriesMoreThan250(t *testing.T) {
+	root := t.TempDir()
+	bare := filepath.Join(root, "remote.git")
+	work := filepath.Join(root, "work")
+	if err := os.MkdirAll(work, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("git", "init", "--bare", bare).CombinedOutput(); err != nil {
+		t.Fatalf("initialize bare repository: %v: %s", err, output)
+	}
+	if output, err := exec.Command("git", "init", work).CombinedOutput(); err != nil {
+		t.Fatalf("initialize work repository: %v: %s", err, output)
+	}
+	runGitTest(t, work, "config", "user.name", "Taxion Test")
+	runGitTest(t, work, "config", "user.email", "taxion-test@example.invalid")
+	runGitTest(t, work, "remote", "add", "origin", bare)
+	if err := os.WriteFile(filepath.Join(work, "base.txt"), []byte("base"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, work, "add", "base.txt")
+	runGitTest(t, work, "commit", "-m", "Base commit")
+	baseSHA := runGitTest(t, work, "rev-parse", "HEAD")
+	runGitTest(t, work, "push", "origin", "HEAD:refs/heads/main")
+
+	const commitCount = 315
+	for i := 0; i < commitCount; i++ {
+		runGitTest(t, work, "commit", "--allow-empty", "-m", fmt.Sprintf("Public commit %03d", i+1))
+	}
+	headSHA := runGitTest(t, work, "rev-parse", "HEAD")
+	runGitTest(t, work, "push", "origin", "HEAD:refs/pull/42/head")
+
+	messages, err := pullRequestCommitMessagesAt(context.Background(), work, "hiono/taxion",
+		42, baseSHA, headSHA, commitCount)
+	if err != nil {
+		t.Fatal("complete PR history rejected:", err)
+	}
+	if len(messages) != commitCount || !strings.Contains(strings.Join(messages, "\n"), "Public commit 315") {
+		t.Fatalf("expected all %d commit messages, got %d", commitCount, len(messages))
+	}
+	if _, err := pullRequestCommitMessagesAt(context.Background(), work, "hiono/taxion",
+		42, baseSHA, headSHA, commitCount-1); err == nil {
+		t.Fatal("incomplete commit count accepted")
+	}
+	if _, err := pullRequestCommitMessagesAt(context.Background(), work, "hiono/taxion",
+		42, baseSHA, strings.Repeat("a", 40), commitCount); err == nil {
+		t.Fatal("changed PR head accepted")
 	}
 }
 
