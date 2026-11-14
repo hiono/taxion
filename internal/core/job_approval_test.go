@@ -18,9 +18,9 @@ func validJobContract(t *testing.T) *JobContract {
 	}
 	return &JobContract{
 		Revision: 1, Roles: []string{"PLANNER", "CODER", "REVIEWER"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
-		Repositories: []JobRepositoryScope{{Repository: "example/repo", FileAccess: FileAccessPolicy{Level: FileAccessCommitted}}},
-		Budget:               JobBudget{MaxRoleExecutions: 10, MaxConcurrentExecutions: 2, MaxNanoAIU: 100},
-		Deadline:             time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC),
+		Repositories:      []JobRepositoryScope{{Repository: "example/repo", FileAccess: FileAccessPolicy{Level: FileAccessCommitted}}},
+		Budget:            JobBudget{MaxRoleExecutions: 10, MaxConcurrentExecutions: 2, MaxNanoAIU: 100},
+		Deadline:          time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC),
 		ProhibitedEffects: DefaultJobProhibitedEffects(), ApprovalRequiredEffects: DefaultJobApprovalRequiredEffects(), Configuration: config,
 	}
 }

@@ -128,16 +128,16 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 		for i := range state.Graph.Jobs {
 			if state.Graph.Jobs[i].ID == job.ID {
 				state.Graph.Jobs[i].Contract = &core.JobContract{
-					Revision: 1, Roles: []string{"PLANNER", "CODER", "REVIEWER"},
-					Acceptance: append([]string(nil), task.Acceptance...), RequiredEvidence: append([]string(nil), task.RequiredEvidence...),
-					Repositories: []core.JobRepositoryScope{{
-						Repository: task.Repo, FileAccess: *task.FileAccess,
+					Revision:                1, Roles: []string{"PLANNER", "CODER", "REVIEWER"},
+					Acceptance:              append([]string(nil), task.Acceptance...), RequiredEvidence: append([]string(nil), task.RequiredEvidence...),
+					Repositories:            []core.JobRepositoryScope{{
+						Repository:              task.Repo, FileAccess: *task.FileAccess,
 					}},
-					ValidationCommands: append([]string(nil), task.ValidationCommands...),
+					ValidationCommands:      append([]string(nil), task.ValidationCommands...),
 					ProhibitedEffects:       core.DefaultJobProhibitedEffects(),
 					ApprovalRequiredEffects: core.DefaultJobApprovalRequiredEffects(),
-					Budget:           core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
-					Deadline:         now.Add(time.Hour), Configuration: configuration,
+					Budget:                  core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
+					Deadline:                now.Add(time.Hour), Configuration: configuration,
 				}
 				job = state.Graph.Jobs[i]
 				break
