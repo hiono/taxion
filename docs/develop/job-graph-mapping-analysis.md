@@ -147,7 +147,7 @@ flowchart TD
 | R13 | 使用量の出所と重複排除 | JobUsage | FULL/PARTIAL | RoleExecutionとRuntime sessionに結び付け、usage record hashとaccounting identityを検証。旧Usageの全メトリクスを維持するかは運用要件で決定 |
 | R14 | 停止・再開・復旧・実行状態不明の解決 | RoleExecution状態 + JobRoleController | PARTIAL | Waiting/Suspended/CancelRequestedとResume/Stopはある。旧FlowのRecovery/HandoffChanges/停止後のrecontract相当の全シナリオは未確認 |
 | R15 | Jobの完了判定 | JobCompletionReady + JobEvidence + JobUsage | PARTIAL | acceptance・required evidence・未解決実行・usage accountingを検証。実際のController終端処理との統合は別途確認が必要 |
-| R16 | 旧ReviewFlow/Dispatchの履歴保全 | TaskGraph旧フィールド | MIGRATION/LEGACY | 現行TaskGraphに旧配列が残る。新Jobの実行権限として利用しないことを明示する必要がある |
+| R16 | 旧ReviewFlow/Dispatchの履歴保全 | TaskGraph旧フィールド | MIGRATION/LEGACY | 現行TaskGraphに旧配列は履歴移行対象であり、現行Jobの実行・認可から参照しない。 |
 
 ## 5. 最適化結果（現時点）
 
@@ -180,7 +180,7 @@ flowchart TD
 単純に旧処理を削除すると、旧Task中心の既存実行経路を壊す可能性がある。したがって、次の境界を先に実装する。
 
 - Job intake: JobApprovalのみを生成する。
-- Legacy Task intake/runtime: 旧protocolを使う既存workspaceに限定する。
+- Historical Task records: explicit, loss-aware, non-executable migration only; no legacy intake/runtime.
 - JobRoleController: JobApprovalのみで認可し、ApprovalBundleを参照しない。
 - Migration: 既存ApprovalBundleは履歴として保持し、新JobApprovalへ変換しない。
 
@@ -211,7 +211,7 @@ flowchart TD
 2. **Job completion契約:** JobCompletionReady、Job状態遷移、未解決RoleExecution、証跡・使用量の終端条件を統合する。
 3. **成果物・Reviewer契約:** JobOutput/JobEvidenceに不足するGit/validation証拠を定義し、独立Reviewerが検証できる統合経路を実装する。
 4. **Role Dispatcher:** JobMessageを起点にRoleExecutionを生成し、宛先Roleを実行し、回答後に同一Jobの元実行を再開する。
-5. **ReviewFlow責務の移行:** repair limit、Role別budget、deadline、stop/recovery/handoffをJob/RoleExecution/Controllerへ移す。
+5. **ReviewFlow責務の置換:** repair limit、budget、deadline、stop/recovery/handoffをJob/RoleExecution/Controllerへ実装し、旧ReviewFlow callerと実行制御を削除する。
 6. **旧経路の削除:** Job-nativeの各責務が成立した単位で旧ReviewFlow/Dispatchのcaller・認可・新規生成経路を削除する。旧workspaceの履歴は実行・認可から分離した明示的移行だけを許可する。
 
 各段階の受入れ条件が満たされれば次へ進む。比較を繰り返すのではなく、実装・テストの結果で判定を更新する。
