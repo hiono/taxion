@@ -44,6 +44,8 @@ func TestOpenACPJobEffectRequiresTarget(t *testing.T) {
 		{"read", "read", `{}`, "", false},
 		{"read", "read", `{"uri":"file:///etc/passwd"}`, "", false},
 		{"read", "read", `{"path":"src/../src/main.go"}`, "", false},
+		{"read", "read", `{"path":"src/main.go","uri":"file:///etc/passwd"}`, "", false},
+		{"read", "read", `{"path":42}`, "", false},
 		{"execute", "bash", `{}`, "", false},
 	}
 	for _, test := range tests {

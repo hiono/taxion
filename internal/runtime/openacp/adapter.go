@@ -614,34 +614,37 @@ func canonicalOpenACPJobTarget(worktree, target string) (string, error) {
 
 func openACPJobEffect(worktree, kind, name string, input json.RawMessage, available, approvedPaths []string, allowAll bool) (runtime.JobEffectRequest, bool) {
 	var args map[string]any
-	if len(input) != 0 && json.Unmarshal(input, &args) != nil {
+	if len(input) == 0 || json.Unmarshal(input, &args) != nil {
 		return runtime.JobEffectRequest{}, false
 	}
-	target := ""
+	canonical := ""
 	for _, key := range []string{"path", "filePath", "file_path", "uri"} {
-		if value, ok := args[key].(string); ok && strings.TrimSpace(value) != "" {
-			target, _ = openACPResourcePath(value)
-			break
+		value, exists := args[key]
+		if !exists {
+			continue
 		}
+		text, ok := value.(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			return runtime.JobEffectRequest{}, false
+		}
+		target, err := openACPResourcePath(text)
+		if err != nil {
+			return runtime.JobEffectRequest{}, false
+		}
+		resolved, err := canonicalOpenACPJobTarget(worktree, target)
+		if err != nil || canonical != "" && canonical != resolved {
+			return runtime.JobEffectRequest{}, false
+		}
+		canonical = resolved
+	}
+	if canonical == "" || !allowAll && !slices.Contains(approvedPaths, canonical) ||
+		!slices.Contains(available, name) {
+		return runtime.JobEffectRequest{}, false
 	}
 	switch kind {
 	case "read":
-		if !slices.Contains(available, name) {
-			return runtime.JobEffectRequest{}, false
-		}
-		canonical, err := canonicalOpenACPJobTarget(worktree, target)
-		if err != nil || !allowAll && !slices.Contains(approvedPaths, canonical) {
-			return runtime.JobEffectRequest{}, false
-		}
 		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryRead, Target: canonical}, true
 	case "edit":
-		if !slices.Contains(available, name) {
-			return runtime.JobEffectRequest{}, false
-		}
-		canonical, err := canonicalOpenACPJobTarget(worktree, target)
-		if err != nil || !allowAll && !slices.Contains(approvedPaths, canonical) {
-			return runtime.JobEffectRequest{}, false
-		}
 		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: canonical}, true
 	default:
 		return runtime.JobEffectRequest{}, false
