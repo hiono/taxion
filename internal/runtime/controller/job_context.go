@@ -67,7 +67,8 @@ type JobContextSummary struct {
 	Budget               core.JobBudget            `json:"budget,omitempty"`
 	UsedNanoAIU          float64                   `json:"usedNanoAiu"`
 	Deadline             time.Time                 `json:"deadline,omitempty"`
-	SecurityRestrictions []string                  `json:"securityRestrictions,omitempty"`
+	ProhibitedEffects       []core.JobEffectRule `json:"prohibitedEffects"`
+	ApprovalRequiredEffects []core.JobEffectRule `json:"approvalRequiredEffects"`
 }
 
 type JobTaskContext struct {
@@ -124,6 +125,12 @@ type JobMessageContext struct {
 	At                time.Time `json:"at"`
 }
 
+func cloneJobEffectRules(rules []core.JobEffectRule) []core.JobEffectRule {
+	clone := append([]core.JobEffectRule(nil), rules...)
+	for i := range clone { clone[i].Targets = append([]string(nil), rules[i].Targets...) }
+	return clone
+}
+
 // BuildJobExecutionContext assembles a deterministic, Job-scoped context.
 // The returned hash identifies exactly the projected information, not
 // controller-only credentials or Runtime session metadata.
@@ -155,7 +162,8 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 		jobSummary.Budget = job.Contract.Budget
 		jobSummary.UsedNanoAIU = graph.JobUsageTotal(job.ID)
 		jobSummary.Deadline = job.Contract.Deadline
-		jobSummary.SecurityRestrictions = append([]string(nil), job.Contract.SecurityRestrictions...)
+		jobSummary.ProhibitedEffects = cloneJobEffectRules(job.Contract.ProhibitedEffects)
+		jobSummary.ApprovalRequiredEffects = cloneJobEffectRules(job.Contract.ApprovalRequiredEffects)
 		_, jobSummary.Approved = graph.CurrentJobApproval(job.ID)
 	}
 	result := JobExecutionContext{

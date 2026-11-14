@@ -386,26 +386,6 @@ func BuildJobContractForIntake(task core.GraphTask, configuration core.ApprovalC
 		len(task.Acceptance) == 0 || len(task.RequiredEvidence) == 0 {
 		return core.JobContract{}, fmt.Errorf("taxion: Job contract requires repository access, acceptance criteria and evidence")
 	}
-	operations := []string{"repository.read", "repository.write", "process.exec"}
-	coderOperations := []string{"repository.read", "repository.write", "process.exec"}
-	if len(task.ValidationCommands) > 0 {
-		operations = append(operations, "test.run")
-		coderOperations = append(coderOperations, "test.run")
-	}
-	roleOperations := map[string][]string{
-		"PLANNER":  {"repository.read"},
-		"CODER":    coderOperations,
-		"REVIEWER": {"repository.read"},
-	}
-	noExtensions, err := core.NewJobRoleToolPolicy(nil)
-	if err != nil {
-		return core.JobContract{}, err
-	}
-	roleToolPolicies := map[string]core.JobRoleToolPolicy{
-		"PLANNER":  noExtensions,
-		"CODER":    noExtensions,
-		"REVIEWER": noExtensions,
-	}
 	contract := core.JobContract{
 		Revision:           1,
 		Roles:              []string{"PLANNER", "CODER", "REVIEWER"},
@@ -416,12 +396,10 @@ func BuildJobContractForIntake(task core.GraphTask, configuration core.ApprovalC
 			Repository: task.Repo,
 			FileAccess: *task.FileAccess,
 		}},
-		Operations:           operations,
-		RoleOperations:       roleOperations,
-		RoleToolPolicies:     roleToolPolicies,
 		Budget:               budget,
 		Deadline:             deadline,
-		SecurityRestrictions: []string{"no credential export", "no network access"},
+		ProhibitedEffects: core.DefaultJobProhibitedEffects(),
+		ApprovalRequiredEffects: core.DefaultJobApprovalRequiredEffects(),
 		Configuration:        configuration,
 	}
 	if err := contract.Validate(); err != nil {

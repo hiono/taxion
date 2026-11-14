@@ -1,34 +1,69 @@
 package core
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"maps"
 	"math"
 	"slices"
 	"time"
 )
 
-// JobContract is the versioned approval proposal for a Job. The current schema
-// still contains transitional operation/Role allowlist fields that conflict with
-// ADR-0080. Those fields are scheduled for removal; they must not be extended or
-// treated as the target authorization model. Task prose is not an authority grant.
+// JobContract is the immutable approval boundary for one Job revision.
+// It declares resource scope and effect policy, not operation or Role allowlists.
 type JobContract struct {
-	Revision             int                          `json:"revision"`
-	Roles                []string                     `json:"roles"`
-	Acceptance           []string                     `json:"acceptance"`
-	RequiredEvidence     []string                     `json:"requiredEvidence"`
-	Repositories         []JobRepositoryScope         `json:"repositories"`
-	Operations           []string                     `json:"operations"`
-	ValidationCommands   []string                     `json:"validationCommands,omitempty"`
-	RoleToolPolicies     map[string]JobRoleToolPolicy `json:"roleToolPolicies,omitempty"`
-	RoleOperations       map[string][]string          `json:"roleOperations,omitempty"`
-	Budget               JobBudget                    `json:"budget"`
-	Deadline             time.Time                    `json:"deadline"`
-	SecurityRestrictions []string                     `json:"securityRestrictions,omitempty"`
-	Configuration        ApprovalConfiguration        `json:"configuration"`
+	Revision                int                   `json:"revision"`
+	Roles                   []string              `json:"roles"`
+	Acceptance              []string              `json:"acceptance"`
+	RequiredEvidence        []string              `json:"requiredEvidence"`
+	Repositories            []JobRepositoryScope  `json:"repositories"`
+	ValidationCommands      []string              `json:"validationCommands,omitempty"`
+	ProhibitedEffects       []JobEffectRule       `json:"prohibitedEffects"`
+	ApprovalRequiredEffects []JobEffectRule       `json:"approvalRequiredEffects"`
+	Budget                  JobBudget             `json:"budget"`
+	Deadline                time.Time             `json:"deadline"`
+	Configuration           ApprovalConfiguration `json:"configuration"`
+}
+
+// JobEffect identifies a security-relevant effect independently of provider tool names.
+type JobEffect string
+
+const (
+	JobEffectCrossJobAccess      JobEffect = "cross_job_access"
+	JobEffectSecretDisclosure    JobEffect = "secret_disclosure"
+	JobEffectPrivilegeEscalation JobEffect = "privilege_escalation"
+	JobEffectSandboxEscape       JobEffect = "sandbox_escape"
+	JobEffectIntegrityTampering  JobEffect = "integrity_tampering"
+	JobEffectDuplicateExecution  JobEffect = "duplicate_execution"
+	JobEffectProductionMutation  JobEffect = "production_mutation"
+	JobEffectExternalMutation    JobEffect = "external_mutation"
+	JobEffectPublication         JobEffect = "publication"
+	JobEffectCredentialUse       JobEffect = "credential_use"
+	JobEffectNetworkAccess       JobEffect = "network_access"
+	JobEffectDestructiveChange   JobEffect = "destructive_change"
+	JobEffectScopeChange         JobEffect = "scope_change"
+)
+
+// JobEffectRule optionally limits an effect rule to exact canonical targets.
+// An empty target list applies to every target.
+type JobEffectRule struct {
+	Effect  JobEffect `json:"effect"`
+	Targets []string  `json:"targets,omitempty"`
+}
+
+func DefaultJobProhibitedEffects() []JobEffectRule {
+	return []JobEffectRule{
+		{Effect: JobEffectCrossJobAccess}, {Effect: JobEffectSecretDisclosure},
+		{Effect: JobEffectPrivilegeEscalation}, {Effect: JobEffectSandboxEscape},
+		{Effect: JobEffectIntegrityTampering}, {Effect: JobEffectDuplicateExecution},
+	}
+}
+
+func DefaultJobApprovalRequiredEffects() []JobEffectRule {
+	return []JobEffectRule{
+		{Effect: JobEffectProductionMutation}, {Effect: JobEffectExternalMutation},
+		{Effect: JobEffectPublication}, {Effect: JobEffectCredentialUse},
+		{Effect: JobEffectNetworkAccess}, {Effect: JobEffectDestructiveChange},
+		{Effect: JobEffectScopeChange},
+	}
 }
 
 type JobRepositoryScope struct {
@@ -36,40 +71,6 @@ type JobRepositoryScope struct {
 	FileAccess FileAccessPolicy `json:"fileAccess"`
 }
 
-type JobRoleToolPolicy struct {
-	Snapshot json.RawMessage `json:"snapshot"`
-	Digest   string          `json:"digest"`
-}
-
-// NewJobRoleToolPolicy stores a canonical snapshot for the transitional Role ACL.
-// ADR-0080 removes this as an authorization concept; do not use it as a template
-// for future Job authority or add new dependencies on this type.
-func NewJobRoleToolPolicy(snapshot json.RawMessage) (JobRoleToolPolicy, error) {
-	if len(snapshot) == 0 {
-		snapshot = json.RawMessage("null")
-	}
-	var value any
-	if !json.Valid(snapshot) || json.Unmarshal(snapshot, &value) != nil {
-		return JobRoleToolPolicy{}, graphError("Job Role tool policy must be valid JSON")
-	}
-	canonical, err := json.Marshal(value)
-	if err != nil {
-		return JobRoleToolPolicy{}, err
-	}
-	sum := sha256.Sum256(canonical)
-	return JobRoleToolPolicy{Snapshot: canonical, Digest: "sha256:" + hex.EncodeToString(sum[:])}, nil
-}
-
-func (p JobRoleToolPolicy) Validate() error {
-	if len(p.Snapshot) == 0 {
-		return graphError("Job Role tool policy requires an explicit snapshot")
-	}
-	canonical, err := NewJobRoleToolPolicy(p.Snapshot)
-	if err != nil || !bytes.Equal(canonical.Snapshot, p.Snapshot) || canonical.Digest != p.Digest {
-		return graphError("Job Role tool policy snapshot or digest is invalid")
-	}
-	return nil
-}
 
 type JobBudget struct {
 	MaxRoleExecutions       int     `json:"maxRoleExecutions"`
@@ -81,9 +82,9 @@ type JobBudget struct {
 
 func (c JobContract) Validate() error {
 	if c.Revision < 1 || !validList(c.Roles) || len(c.Roles) == 0 || !validList(c.Acceptance) || len(c.Acceptance) == 0 ||
-		!validList(c.RequiredEvidence) || len(c.RequiredEvidence) == 0 ||
-		len(c.Repositories) == 0 || !validList(c.Operations) ||
-		len(c.Operations) == 0 || !validList(c.ValidationCommands) || !validList(c.SecurityRestrictions) ||
+		!validList(c.RequiredEvidence) || len(c.RequiredEvidence) == 0 || len(c.Repositories) == 0 ||
+		!validList(c.ValidationCommands) || !validJobEffectRules(c.ProhibitedEffects) ||
+		!validJobEffectRules(c.ApprovalRequiredEffects) ||
 		c.Budget.MaxRoleExecutions < 1 || c.Budget.MaxConcurrentExecutions < 1 ||
 		c.Budget.MaxConcurrentExecutions > c.Budget.MaxRoleExecutions ||
 		math.IsNaN(c.Budget.MaxNanoAIU) || math.IsInf(c.Budget.MaxNanoAIU, 0) ||
@@ -92,50 +93,18 @@ func (c JobContract) Validate() error {
 		(c.Budget.MaxNanoAIU > 0 && BillingExternalBudget(c.Budget.BudgetSource, c.Budget.AccountQuotaOnly)) ||
 		(c.Budget.AccountQuotaOnly && c.Budget.BudgetSource != "") ||
 		(c.Budget.BudgetSource != "" && c.Budget.BudgetSource != ProviderStopBudgetSource) ||
-		c.Deadline.IsZero() ||
-		!nonempty(c.Configuration.Digest) || len(c.Configuration.Selection) == 0 {
-		return graphError("Job contract requires revision, acceptance, evidence, scope, operations, budget, deadline and configuration")
+		c.Deadline.IsZero() || !nonempty(c.Configuration.Digest) || len(c.Configuration.Selection) == 0 {
+		return graphError("Job contract requires revision, roles, acceptance, evidence, resource scope, effects, budget, deadline and configuration")
 	}
 	repositories := map[string]bool{}
-	if len(c.RoleToolPolicies) > 0 && len(c.RoleToolPolicies) != len(c.Roles) {
-		return graphError("Job contract must define an explicit tool policy for every Role")
-	}
-	if len(c.RoleOperations) > 0 && len(c.RoleOperations) != len(c.Roles) {
-		return graphError("Job contract must define an explicit operation grant for every Role")
-	}
-	for role, policy := range c.RoleToolPolicies {
-		if !slices.Contains(c.Roles, role) {
-			return graphError("Job contract contains tool policy for an unapproved role %q", role)
-		}
-		if err := policy.Validate(); err != nil {
-			return err
-		}
-	}
-	// ValidationCommands are exact approved command values, not general Role grants.
-	// Keep exact matching while replacing the surrounding operation allowlist model.
-	for role, operations := range c.RoleOperations {
-		if !slices.Contains(c.Roles, role) {
-			return graphError("Job contract contains role operations for an unapproved role %q", role)
-		}
-		if !validList(operations) {
-			return graphError("Job contract contains invalid operations for role %q", role)
-		}
-		for _, operation := range operations {
-			if !validJobOperation(operation) || !slices.Contains(c.Operations, operation) {
-				return graphError("Job role %q contains an operation outside the Job operation scope", role)
-			}
-		}
-	}
-	for _, operation := range c.Operations {
-		if !validJobOperation(operation) {
-			return graphError("Job contract contains an unknown operation %q", operation)
-		}
-	}
 	for _, scope := range c.Repositories {
 		if !nonempty(scope.Repository) || repositories[scope.Repository] || scope.FileAccess.Validate() != nil {
 			return graphError("Job contract contains an invalid or duplicate repository scope")
 		}
 		repositories[scope.Repository] = true
+	}
+	if err := validateRequiredJobEffects(c.ProhibitedEffects, c.ApprovalRequiredEffects); err != nil {
+		return err
 	}
 	selected, err := SelectApprovalConfiguration(c.Configuration.Selection, c.Configuration.Sources)
 	if err != nil || selected.Digest != c.Configuration.Digest {
@@ -144,38 +113,70 @@ func (c JobContract) Validate() error {
 	return nil
 }
 
-func validJobOperation(operation string) bool {
-	switch operation {
-	case "repository.read", "repository.write", "process.exec", "test.run", "network.access":
+func validJobEffectRules(rules []JobEffectRule) bool {
+	seen := map[JobEffect]bool{}
+	for _, rule := range rules {
+		if !validJobEffect(rule.Effect) || seen[rule.Effect] || !validList(rule.Targets) {
+			return false
+		}
+		seen[rule.Effect] = true
+		targets := map[string]bool{}
+		for _, target := range rule.Targets {
+			if !nonempty(target) || targets[target] { return false }
+			targets[target] = true
+		}
+	}
+	return true
+}
+
+func validJobEffect(effect JobEffect) bool {
+	switch effect {
+	case JobEffectCrossJobAccess, JobEffectSecretDisclosure, JobEffectPrivilegeEscalation,
+		JobEffectSandboxEscape, JobEffectIntegrityTampering, JobEffectDuplicateExecution,
+		JobEffectProductionMutation, JobEffectExternalMutation, JobEffectPublication,
+		JobEffectCredentialUse, JobEffectNetworkAccess, JobEffectDestructiveChange, JobEffectScopeChange:
 		return true
 	default:
 		return false
 	}
 }
 
-func cloneJobContract(contract *JobContract) *JobContract {
-	if contract == nil {
-		return nil
+func validateRequiredJobEffects(prohibited, approvalRequired []JobEffectRule) error {
+	for _, rule := range prohibited {
+		for _, other := range approvalRequired {
+			if rule.Effect == other.Effect {
+				return graphError("Job effect %q cannot be both prohibited and approval-required", rule.Effect)
+			}
+		}
 	}
+	for _, required := range DefaultJobProhibitedEffects() {
+		if !hasUnboundedJobEffect(prohibited, required.Effect) {
+			return graphError("Job contract must prohibit effect %q", required.Effect)
+		}
+	}
+	for _, required := range DefaultJobApprovalRequiredEffects() {
+		if !hasUnboundedJobEffect(approvalRequired, required.Effect) {
+			return graphError("Job contract must require approval for effect %q", required.Effect)
+		}
+	}
+	return nil
+}
+
+func hasUnboundedJobEffect(rules []JobEffectRule, effect JobEffect) bool {
+	for _, rule := range rules {
+		if rule.Effect == effect && len(rule.Targets) == 0 { return true }
+	}
+	return false
+}
+
+func cloneJobContract(contract *JobContract) *JobContract {
+	if contract == nil { return nil }
 	copy := *contract
 	copy.Acceptance = slices.Clone(contract.Acceptance)
 	copy.RequiredEvidence = slices.Clone(contract.RequiredEvidence)
-	copy.Operations = slices.Clone(contract.Operations)
 	copy.ValidationCommands = slices.Clone(contract.ValidationCommands)
-	if contract.RoleToolPolicies != nil {
-		copy.RoleToolPolicies = make(map[string]JobRoleToolPolicy, len(contract.RoleToolPolicies))
-		for role, policy := range contract.RoleToolPolicies {
-			policy.Snapshot = slices.Clone(policy.Snapshot)
-			copy.RoleToolPolicies[role] = policy
-		}
-	}
-	if contract.RoleOperations != nil {
-		copy.RoleOperations = make(map[string][]string, len(contract.RoleOperations))
-		for role, operations := range contract.RoleOperations {
-			copy.RoleOperations[role] = slices.Clone(operations)
-		}
-	}
-	copy.SecurityRestrictions = slices.Clone(contract.SecurityRestrictions)
+	copy.ProhibitedEffects = cloneJobEffectRules(contract.ProhibitedEffects)
+	copy.ApprovalRequiredEffects = cloneJobEffectRules(contract.ApprovalRequiredEffects)
 	copy.Repositories = slices.Clone(contract.Repositories)
 	for i := range copy.Repositories {
 		copy.Repositories[i].FileAccess.Paths = slices.Clone(contract.Repositories[i].FileAccess.Paths)
@@ -183,6 +184,12 @@ func cloneJobContract(contract *JobContract) *JobContract {
 	copy.Configuration.Selection = slices.Clone(contract.Configuration.Selection)
 	copy.Configuration.Sources = maps.Clone(contract.Configuration.Sources)
 	return &copy
+}
+
+func cloneJobEffectRules(rules []JobEffectRule) []JobEffectRule {
+	clone := slices.Clone(rules)
+	for i := range clone { clone[i].Targets = slices.Clone(rules[i].Targets) }
+	return clone
 }
 
 // JobApprovalProposal is the exact immutable value presented for approval.
@@ -204,7 +211,7 @@ func JobProposal(job Job) (JobApprovalProposal, error) {
 		return JobApprovalProposal{}, err
 	}
 	proposal := JobApprovalProposal{
-		Version: 1, JobID: job.ID, Revision: job.Contract.Revision,
+		Version: 2, JobID: job.ID, Revision: job.Contract.Revision,
 		Request: job.Request, Goal: job.Goal,
 		Constraints: slices.Clone(job.Constraints), Contract: *cloneJobContract(job.Contract),
 	}
@@ -216,7 +223,7 @@ func JobProposal(job Job) (JobApprovalProposal, error) {
 }
 
 func (p JobApprovalProposal) Hash() (string, error) {
-	if p.Version != 1 || !nonempty(p.JobID) || p.Revision < 1 ||
+	if p.Version != 2 || !nonempty(p.JobID) || p.Revision < 1 ||
 		!nonempty(p.Request) || !nonempty(p.Goal) || !validList(p.Constraints) {
 		return "", graphError("invalid Job approval proposal")
 	}
@@ -602,13 +609,10 @@ func (g TaskGraph) CheckRoleExecutionTurn(executionID string, at time.Time) erro
 	return nil
 }
 
-// CheckRoleExecutionOperation verifies Job-level authority immediately before a
-// privileged Runtime operation. Role-specific policy must be intersected by the
-// Controller; this check never grants permissions on its own.
-func (g TaskGraph) CheckRoleExecutionOperation(executionID, operation string, at time.Time) error {
-	if at.IsZero() || !validJobOperation(operation) {
-		return graphError("Runtime operation requires a timestamp and a supported operation")
-	}
+// CheckRoleExecution validates the current Job approval and execution budget.
+// Individual tool effects are evaluated by the Job-native Runtime evaluator.
+func (g TaskGraph) CheckRoleExecution(executionID string, at time.Time) error {
+	if at.IsZero() { return graphError("RoleExecution validation requires a timestamp") }
 	execution, ok := g.RoleExecution(executionID)
 	if !ok || execution.Status != RoleExecutionRunning {
 		return graphError("Runtime operation requires a running RoleExecution")
@@ -617,39 +621,25 @@ func (g TaskGraph) CheckRoleExecutionOperation(executionID, operation string, at
 	if !ok || job.Status != JobActive || job.Contract == nil {
 		return graphError("Runtime operation requires an active Job contract")
 	}
-	if at.After(job.Contract.Deadline) {
-		return graphError("Job deadline has expired")
-	}
+	if at.After(job.Contract.Deadline) { return graphError("Job deadline has expired") }
 	if _, ok := g.CurrentJobApproval(job.ID); !ok {
 		return graphError("Runtime operation requires explicit approval of the current Job revision")
 	}
 	if job.Contract.Budget.MaxNanoAIU <= 0 {
 		return graphError("Job Role runtime requires a native AIU ceiling; external-only budget monitoring is not available")
 	}
-	if g.JobUsageTotal(job.ID) >= job.Contract.Budget.MaxNanoAIU {
-		return graphError("Job AIU budget is exhausted")
-	}
+	if g.JobUsageTotal(job.ID) >= job.Contract.Budget.MaxNanoAIU { return graphError("Job AIU budget is exhausted") }
 	if !slices.Contains(job.Contract.Roles, execution.Role) {
 		return graphError("RoleExecution role is outside the approved Job role scope")
 	}
-	if !slices.Contains(job.Contract.Operations, operation) {
-		return graphError("Runtime operation is outside the approved Job operation scope")
-	}
-	roleOperations, roleGranted := job.Contract.RoleOperations[execution.Role]
-	if !roleGranted || !slices.Contains(roleOperations, operation) {
-		return graphError("Runtime operation is outside the approved Job role operation scope")
-	}
-	if execution.TaskID == "" {
-		return graphError("Runtime operation requires a Task-bound execution")
-	}
-	task, ok := g.GraphTask(execution.TaskID)
-	if !ok || task.JobID != job.ID || !TaskWithinJobContract(task, *job.Contract) {
-		return graphError("Runtime operation Task exceeds the approved Job scope")
+	if execution.TaskID != "" {
+		task, ok := g.GraphTask(execution.TaskID)
+		if !ok || task.JobID != job.ID || !TaskWithinJobContract(task, *job.Contract) {
+			return graphError("Runtime operation Task exceeds the approved Job scope")
+		}
 	}
 	executions := g.RoleExecutionsForJob(job.ID)
-	if len(executions) > job.Contract.Budget.MaxRoleExecutions {
-		return graphError("Job RoleExecution budget is exhausted")
-	}
+	if len(executions) > job.Contract.Budget.MaxRoleExecutions { return graphError("Job RoleExecution budget is exhausted") }
 	concurrent := 0
 	for _, candidate := range executions {
 		switch candidate.Status {

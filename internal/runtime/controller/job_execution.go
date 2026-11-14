@@ -12,7 +12,6 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"github.com/hiono/taxion/internal/runtime"
 	"github.com/hiono/taxion/internal/store"
-	"github.com/hiono/taxion/internal/tools"
 )
 
 // JobRoleController runs one RoleExecution against its approved Job contract.
@@ -39,40 +38,6 @@ func NewJobRoleController(db *store.Store, worker runtime.Identity) (*JobRoleCon
 		return controller.AuthorizeSessionOperation(ctx, sessionID, operation, detail, time.Now().UTC())
 	})
 	return controller, nil
-}
-
-// checkRoleToolPolicy is obsolete transitional authorization. ADR-0080 rejects
-// static Role tool allowlists as Job authority; this method and its callers must
-// be removed when the Job-boundary/effect evaluator replaces the current path.
-// Do not extend this compatibility guard or treat it as the target model.
-func (c *JobRoleController) checkRoleToolPolicy(job core.Job) error {
-	if job.Contract == nil {
-		return fmt.Errorf("taxion: Job Role tool policy requires an approved Job contract")
-	}
-	identity, ok := c.runtime.(runtime.ToolPolicyIdentity)
-	if !ok {
-		return fmt.Errorf("taxion: Job Role runtime must expose its selected tool policy")
-	}
-	approved, ok := job.Contract.RoleToolPolicies[c.runtime.Role()]
-	if !ok {
-		return fmt.Errorf("taxion: Job contract has no explicit tool policy for Role %s", c.runtime.Role())
-	}
-	if err := approved.Validate(); err != nil {
-		return err
-	}
-	var policy *tools.Policy
-	if err := json.Unmarshal(approved.Snapshot, &policy); err != nil {
-		return fmt.Errorf("taxion: approved Job Role tool policy is invalid")
-	}
-	if policy != nil {
-		if err := policy.Check(); err != nil {
-			return err
-		}
-	}
-	if !tools.Equal(identity.ToolPolicy(), policy) {
-		return fmt.Errorf("taxion: Runtime tool policy differs from the immutable Job Role approval")
-	}
-	return nil
 }
 
 func (c *JobRoleController) approvedRuntimeConfiguration(job core.Job) (runtime.ConfigurationIdentity, string, error) {
@@ -140,9 +105,6 @@ func (c *JobRoleController) checkJobBoundary(graph core.TaskGraph, execution cor
 
 func (c *JobRoleController) checkConfiguration(ctx context.Context, graph core.TaskGraph, execution core.RoleExecution, job core.Job) error {
 	if err := c.checkJobBoundary(graph, execution, job); err != nil {
-		return err
-	}
-	if err := c.checkRoleToolPolicy(job); err != nil {
 		return err
 	}
 	identity, account, err := c.approvedRuntimeConfiguration(job)
@@ -225,9 +187,6 @@ func (c *JobRoleController) Start(ctx context.Context, executionID string) (stri
 		if _, _, err := c.approvedRuntimeConfiguration(currentJob); err != nil {
 			return err
 		}
-		if err := c.checkRoleToolPolicy(currentJob); err != nil {
-			return err
-		}
 		if err := state.Graph.TransitionRoleExecution(executionID, core.RoleExecutionRunning,
 			"controller", "Job Role Runtime session started", now); err != nil {
 			return err
@@ -301,9 +260,6 @@ func (c *JobRoleController) Resume(ctx context.Context, executionID string) erro
 			return err
 		}
 		if _, _, err := c.approvedRuntimeConfiguration(currentJob); err != nil {
-			return err
-		}
-		if err := c.checkRoleToolPolicy(currentJob); err != nil {
 			return err
 		}
 		if err := state.Graph.TransitionRoleExecution(executionID, core.RoleExecutionRunning,
@@ -508,7 +464,7 @@ func (c *JobRoleController) Events(ctx context.Context, executionID string) (<-c
 // with obsolete operation/tool allowlists. Those allowlists are known design debt,
 // not a permanent safety layer. Replace them with ADR-0080 resource-boundary and
 // prohibited-effect evaluation while preserving the independent identity checks.
-func (c *JobRoleController) authorizeOperation(graph core.TaskGraph, executionID, sessionID, operation string, at time.Time) error {
+func (c *JobRoleController) authorizeOperation(graph core.TaskGraph, executionID, sessionID string, at time.Time) error {
 	execution, err := c.requireBoundExecution(graph, executionID)
 	if err != nil || execution.Status != core.RoleExecutionRunning ||
 		sessionID != "" && execution.RuntimeSessionID != sessionID {
@@ -524,10 +480,7 @@ func (c *JobRoleController) authorizeOperation(graph core.TaskGraph, executionID
 	if _, _, err := c.approvedRuntimeConfiguration(job); err != nil {
 		return err
 	}
-	if err := c.checkRoleToolPolicy(job); err != nil {
-		return err
-	}
-	return graph.CheckRoleExecutionOperation(executionID, operation, at)
+	return graph.CheckRoleExecution(executionID, at)
 }
 
 // AuthorizeOperation is called by the Runtime tool adapter immediately before
@@ -543,7 +496,14 @@ func (c *JobRoleController) AuthorizeOperation(executionID, operation string, at
 	if !state.HasGraph {
 		return fmt.Errorf("taxion: operation authorization requires a Task Graph")
 	}
-	return c.authorizeOperation(state.Graph, executionID, "", operation, at)
+	switch operation {
+	case "repository.read", "repository.write":
+		return c.authorizeOperation(state.Graph, executionID, "", at)
+	case "process.exec":
+		return fmt.Errorf("taxion: shell execution requires the exact approved ValidationCommand")
+	default:
+		return fmt.Errorf("taxion: operation effects are not inspectable or enforceably contained")
+	}
 }
 
 func (c *JobRoleController) roleExecutionForSession(graph core.TaskGraph, sessionID string) (core.RoleExecution, error) {
@@ -583,7 +543,8 @@ func (c *JobRoleController) AuthorizeSessionOperation(ctx context.Context, sessi
 	if err != nil {
 		return err
 	}
-	if operation == "process.exec" {
+	switch operation {
+	case "process.exec":
 		if detail == "" {
 			return fmt.Errorf("taxion: shell execution requires the exact Job-approved ValidationCommand")
 		}
@@ -595,15 +556,15 @@ func (c *JobRoleController) AuthorizeSessionOperation(ctx context.Context, sessi
 		if !exact {
 			return fmt.Errorf("taxion: shell execution is not an exact Job-approved ValidationCommand")
 		}
-		if !slices.Contains(job.Contract.RoleOperations[execution.Role], "test.run") {
-			return fmt.Errorf("taxion: Role has no approved test.run grant")
-		}
-		if err := c.authorizeOperation(state.Graph, execution.ID, sessionID, "process.exec", at); err != nil {
+		if err := c.authorizeOperation(state.Graph, execution.ID, sessionID, at); err != nil {
 			return err
 		}
-		return state.Graph.CheckRoleExecutionOperation(execution.ID, "test.run", at)
+		return nil
+	case "repository.read", "repository.write":
+		return c.authorizeOperation(state.Graph, execution.ID, sessionID, at)
+	default:
+		return fmt.Errorf("taxion: operation effects are not inspectable or enforceably contained")
 	}
-	return c.authorizeOperation(state.Graph, execution.ID, sessionID, operation, at)
 }
 
 // RecordUsage appends an immutable provider accounting observation to the Job ledger.

@@ -88,7 +88,6 @@ type Adapter struct {
 
 var _ runtime.ConfigurationIdentity = (*Adapter)(nil)
 var _ runtime.EventCursor = (*Adapter)(nil)
-var _ runtime.ToolPolicyIdentity = (*Adapter)(nil)
 var _ runtime.JobOperationAuthorizer = (*Adapter)(nil)
 
 func hashBytes(data []byte) string {

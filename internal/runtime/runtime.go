@@ -10,7 +10,6 @@ import (
 	"github.com/hiono/taxion/internal/core"
 	"time"
 
-	"github.com/hiono/taxion/internal/tools"
 )
 
 // Event is a plain, SDK-neutral runtime event.
@@ -96,10 +95,6 @@ type EventCursor interface {
 	EventsAfter(ctx context.Context, sessionID string, cursor uint64) (<-chan Event, error)
 }
 
-type ToolPolicyIdentity interface {
-	Identity
-	ToolPolicy() *tools.Policy
-}
 
 // JobOperationAuthorizer lets the Job controller install a per-session
 // preflight that provider adapters invoke before each tool operation.

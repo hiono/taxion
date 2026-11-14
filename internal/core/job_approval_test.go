@@ -133,6 +133,25 @@ func TestTaskScopeCannotWidenJobRepositoryScope(t *testing.T) {
 	}
 }
 
+ 
+func TestJobContractRequiresTypedSecurityEffects(t *testing.T) {
+	contract := validJobContract(t)
+	contract.ProhibitedEffects = contract.ProhibitedEffects[1:]
+	if err := contract.Validate(); err == nil {
+		t.Fatal("Job contract must retain non-overridable prohibited effects")
+	}
+	contract = validJobContract(t)
+	contract.ApprovalRequiredEffects[0].Effect = JobEffect("unknown-effect")
+	if err := contract.Validate(); err == nil {
+		t.Fatal("unknown effect identifiers must be rejected")
+	}
+	contract = validJobContract(t)
+	contract.ApprovalRequiredEffects[0].Effect = JobEffectExternalMutation
+	if err := contract.Validate(); err == nil {
+		t.Fatal("duplicate effect identifiers must be rejected")
+	}
+}
+
 func TestJobApprovalRequiresExplicitUserSource(t *testing.T) {
 	now := time.Now().UTC()
 	job := Job{ID: "job-a", Request: "request", Goal: "goal", Status: JobActive, CreatedAt: now, UpdatedAt: now, Contract: validJobContract(t)}
