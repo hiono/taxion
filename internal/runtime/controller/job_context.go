@@ -65,7 +65,7 @@ type JobContextSummary struct {
 	RequiredEvidence     []string                  `json:"requiredEvidence,omitempty"`
 	Repositories         []core.JobRepositoryScope `json:"repositories,omitempty"`
 	Operations           []string                  `json:"operations,omitempty"`
-	RoleOperations       []string                  `json:"roleOperations,omitempty"`
+	// Deprecated transitional field. Remove with JobContract.RoleOperations; it is not authority.\n	RoleOperations       []string                  `json:"roleOperations,omitempty"`
 	Budget               core.JobBudget            `json:"budget,omitempty"`
 	UsedNanoAIU          float64                   `json:"usedNanoAiu"`
 	Deadline             time.Time                 `json:"deadline,omitempty"`
