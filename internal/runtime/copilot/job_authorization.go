@@ -1,5 +1,9 @@
 package copilot
 
+// This file maps Copilot events into the transitional string-operation callback.
+// ADR-0080 replaces that contract with structured effect/resource observations.
+// Do not add custom-tool name heuristics or treat these mappings as Job authority.
+
 import (
 	sdk "github.com/github/copilot-sdk/go"
 )
