@@ -2,6 +2,7 @@ package core
 
 import (
 	"maps"
+	"strings"
 	"math"
 	"slices"
 	"time"
@@ -172,14 +173,29 @@ func validateRequiredJobEffects(prohibited, approvalRequired []JobEffectRule) er
 // Resource effects require an exact canonical target; validation execution requires
 // an exact command declared by the Job contract. Unknown or unbounded observations fail closed.
 func (c JobContract) CheckEffect(effect JobEffect, target string) error {
+	if err := c.Validate(); err != nil {
+		return graphError("Job effect evaluation requires a valid approved contract")
+	}
 	if !validJobEffect(effect) {
 		return graphError("unknown Job effect %q", effect)
 	}
-	if (effect == JobEffectRepositoryRead || effect == JobEffectRepositoryWrite) && !nonempty(target) {
-		return graphError("repository effect requires an exact canonical target")
-	}
-	if effect == JobEffectValidationExecution && !slices.Contains(c.ValidationCommands, target) {
-		return graphError("execution is not an exact approved Job validation command")
+	switch effect {
+	case JobEffectRepositoryRead, JobEffectRepositoryWrite:
+		if !validCanonicalJobEffectPath(target) {
+			return graphError("repository effect requires an exact canonical in-scope target")
+		}
+	case JobEffectValidationExecution:
+		if !nonempty(target) || !slices.Contains(c.ValidationCommands, target) {
+			return graphError("execution is not an exact approved Job validation command")
+		}
+	case JobEffectJobContextRead:
+		if target != "" {
+			return graphError("Job context read must not carry a resource target")
+		}
+	default:
+		if strings.TrimSpace(target) != target {
+			return graphError("Job effect target is not canonical")
+		}
 	}
 	check := func(rules []JobEffectRule, reason string) error {
 		for _, rule := range rules {

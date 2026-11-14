@@ -87,16 +87,21 @@ func (c JobContract) EvaluateJobEffect(observation JobEffectObservation) JobEffe
 	return decision
 }
 
+func validCanonicalJobEffectPath(target string) bool {
+	path := filepath.FromSlash(target)
+	return strings.TrimSpace(target) != "" &&
+		!filepath.IsAbs(path) &&
+		filepath.VolumeName(path) == "" &&
+		filepath.ToSlash(filepath.Clean(path)) == target &&
+		target != "." && target != ".." && !strings.HasPrefix(target, "../") &&
+		target != ".git" && !strings.HasPrefix(target, ".git/") &&
+		!ProhibitedArtifactPath(target)
+}
+
 func validJobEffectTargets(targets []JobEffectTarget) bool {
 	seen := map[string]bool{}
 	for _, target := range targets {
-		if strings.TrimSpace(target.Repository) == "" || strings.TrimSpace(target.Path) == "" ||
-			filepath.IsAbs(filepath.FromSlash(target.Path)) ||
-			filepath.VolumeName(filepath.FromSlash(target.Path)) != "" ||
-			filepath.ToSlash(filepath.Clean(filepath.FromSlash(target.Path))) != target.Path ||
-			target.Path == "." || target.Path == ".." || strings.HasPrefix(target.Path, "../") ||
-			target.Path == ".git" || strings.HasPrefix(target.Path, ".git/") ||
-			ProhibitedArtifactPath(target.Path) {
+		if strings.TrimSpace(target.Repository) == "" || !validCanonicalJobEffectPath(target.Path) {
 			return false
 		}
 		key := target.Repository + ":" + target.Path
