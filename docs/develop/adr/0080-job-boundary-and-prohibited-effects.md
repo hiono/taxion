@@ -96,7 +96,7 @@ Reviewer の独立性は実行環境・対象の固定・証拠の provenance �
 5. Provider adapter の実際の tool 能力と Job policy の照合を維持する。ただし、事前列挙されていない通常 tool を自動的に拒否する用途には使わない。
 6. ValidationCommands の完全一致、秘密情報保護、Job / Task / RoleExecution の同一性、budget / deadline、二重実行防止、不可逆操作の承認は維持する。
 7. 通常の新規操作を事前登録せず実行できるケース、Job 境界外アクセス、秘密情報送信、未知 tool、高リスク操作、承認外 command、競合・再送の回帰試験を追加する。
-8. 旧 Task / ReviewFlow 経路は、Job-native 経路で同等の安全境界が成立するまで既存の検査を維持する。旧経路の制約を新 Job の設計根拠にしない。
+8. 旧 Task / ReviewFlow の実行・認可経路を Job-native の並行 runtime として維持しない。Job-native の安全境界を成立させるために必要な domain model、runtime、adapter、test を置き換えたうえで、重複する旧経路と旧認可ロジックを削除する。旧データの保持・読取りが必要な場合は、実行・認可を行わない明示的かつ loss-aware な履歴移行境界に限定する。
 
 ## Relationship to existing ADRs
 
@@ -120,7 +120,7 @@ Reviewer の独立性は実行環境・対象の固定・証拠の provenance �
 
 ## Compatibility
 
-本 ADR は新しい Job-native 経路の設計を規定する。旧 Task / ReviewFlow の既存承認・tool allowlist・permission handler は、新経路の同等境界が検証されるまで変更しない。既存の Job approval record を新しい意味へ暗黙変換せず、権限根拠を変更する場合は新しい Job revision と明示承認を要求する。
+本 ADR はJob-nativeモデルを唯一の現行実行・認可モデルとして規定する。旧 Task / ReviewFlow の承認・tool allowlist・permission handler を並行 runtime として温存しない。既存データの移行が必要な場合は、旧承認を新しい権限根拠へ暗黙変換せず、移行不能・情報欠落を明示して拒否するか、新しい Job revision と明示承認を要求する。履歴参照のための読取り処理は、実行や認可を発生させてはならない。
 
 ## Status
 
