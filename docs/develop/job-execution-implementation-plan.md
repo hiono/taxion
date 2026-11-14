@@ -1,13 +1,13 @@
 # Job 中心の Role 実行モデル実装計画
 
 Status: In progress — replacement, not compatibility migration  
-Decision: [ADR-0077](adr/0077-job-centered-role-collaboration.md), [ADR-0079](adr/0079-enforce-domain-invariants-across-state-paths.md), [ADR-0080](adr/0080-job-boundary-and-prohibited-effects.md)  
+Decision: [ADR-0077](adr/0077-job-centered-role-collaboration.md), [ADR-0079](adr/0079-enforce-domain-invariants-across-state-paths.md), [ADR-0080](adr/0080-job-boundary-and-prohibited-effects.md), [ADR-0081](adr/0081-rebuild-over-legacy-constraints.md)  
 Tracking: [Issue #283](https://github.com/hiono/taxion/issues/283)  
 Implementation: [PR #292](https://github.com/hiono/taxion/pull/292)
 
 ## 規範方針
 
-本計画は旧 Task / Dispatch / ReviewFlow を温存する移行計画ではない。旧経路の責務を Job / Task / RoleExecution / Controller へ再配置し、Job-native経路が成立したら重複する旧実行・認可経路を削除する。旧経路のテストを通すために新モデルを曲げない。旧workspaceの履歴が必要な場合だけ、実行・認可を行わない明示的でloss-awareな移行境界を設ける。
+本計画は [ADR-0081](adr/0081-rebuild-over-legacy-constraints.md) に従い、旧 Task / Dispatch / ReviewFlow を温存する移行計画ではない。旧モデルの責務を付け替えるだけでなく、新しい不変条件と実際の協調シナリオから作り直す。旧経路の責務を Job / Task / RoleExecution / Controller へ再配置し、Job-native経路が成立したら重複する旧実行・認可経路を削除する。旧経路のテストを通すために新モデルを曲げない。旧workspaceの履歴が必要な場合だけ、実行・認可を行わない明示的でloss-awareな移行境界を設ける。
 
 ## 1. 完成条件
 
