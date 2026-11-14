@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/hiono/taxion/internal/core"
@@ -11,6 +13,13 @@ import (
 )
 
 func TestOpenACPJobEffectRequiresTarget(t *testing.T) {
+	worktree := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(worktree, "src"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "src", "main.go"), []byte("package main"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		kind, name, input string
 		want              core.JobEffect
@@ -20,27 +29,40 @@ func TestOpenACPJobEffectRequiresTarget(t *testing.T) {
 		{"edit", "edit", `{"filePath":"src/main.go"}`, core.JobEffectRepositoryWrite, true},
 		{"search", "grep", `{"query":"secret"}`, "", false},
 		{"read", "read", `{}`, "", false},
+		{"read", "read", `{"uri":"file:///etc/passwd"}`, "", false},
+		{"read", "read", `{"path":"src/../src/main.go"}`, "", false},
 		{"execute", "bash", `{}`, "", false},
 	}
 	for _, test := range tests {
-		got, ok := openACPJobEffect(test.kind, test.name, json.RawMessage(test.input), []string{"read", "edit", "grep"}, []string{"src/main.go"}, false)
+		got, ok := openACPJobEffect(worktree, test.kind, test.name, json.RawMessage(test.input), []string{"read", "edit", "grep"}, []string{"src/main.go"}, false)
 		if ok != test.ok || got.Effect != test.want {
 			t.Errorf("openACPJobEffect(%q,%q)=(%#v,%t), want (%q,%t)", test.kind, test.name, got, ok, test.want, test.ok)
 		}
 	}
-	allAccess, ok := openACPJobEffect("edit", "edit", json.RawMessage(`{"path":"new.go"}`), []string{"edit"}, nil, true)
+	allAccess, ok := openACPJobEffect(worktree, "edit", "edit", json.RawMessage(`{"path":"new.go"}`), []string{"edit"}, nil, true)
 	if !ok || allAccess.Target != "new.go" {
 		t.Fatalf("FileAccessAll must permit a new in-worktree target: %#v %t", allAccess, ok)
 	}
-	if _, ok := openACPJobEffect("edit", "edit", json.RawMessage(`{"path":".git/config"}`), []string{"edit"}, nil, true); ok {
+	if _, ok := openACPJobEffect(worktree, "edit", "edit", json.RawMessage(`{"path":".git/config"}`), []string{"edit"}, nil, true); ok {
 		t.Fatal("FileAccessAll must not expose Git metadata")
+	}
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(worktree, "src", "escape.go")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := openACPJobEffect(worktree, "read", "read", json.RawMessage(`{"path":"src/escape.go"}`), []string{"read"}, nil, true); ok {
+		t.Fatal("FileAccessAll must not follow a symlink outside the assigned worktree")
 	}
 }
 
 func TestPermissionOutcomeUsesJobEffectAndAllowOnce(t *testing.T) {
 	called := false
 	adapter := &Adapter{
-		config: Config{AvailableTools: []string{"read"}, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"src/main.go"}}},
+		config: Config{WorkingDirectory: t.TempDir(), AvailableTools: []string{"read"}, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"src/main.go"}}},
 		authorizeJobEffect: func(_ context.Context, sessionID string, request runtime.JobEffectRequest) error {
 			called = true
 			if sessionID != "session-1" || request.Effect != core.JobEffectRepositoryRead || request.Target != "src/main.go" {
@@ -61,7 +83,7 @@ func TestPermissionOutcomeUsesJobEffectAndAllowOnce(t *testing.T) {
 
 func TestPermissionOutcomeRejectsWhenJobEffectAuthorizationFails(t *testing.T) {
 	adapter := &Adapter{
-		config: Config{AvailableTools: []string{"edit"}, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"src/main.go"}}},
+		config: Config{WorkingDirectory: t.TempDir(), AvailableTools: []string{"edit"}, FileAccess: &core.FileAccessPolicy{Level: core.FileAccessExact, Paths: []string{"src/main.go"}}},
 		authorizeJobEffect: func(context.Context, string, runtime.JobEffectRequest) error {
 			return errors.New("effect denied")
 		},

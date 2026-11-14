@@ -554,13 +554,47 @@ func (a *Adapter) write(message any) error {
 	return json.NewEncoder(a.input).Encode(message)
 }
 
-func openACPJobEffect(kind, name string, input json.RawMessage, available, approvedPaths []string, allowAll bool) (runtime.JobEffectRequest, bool) {
+func canonicalOpenACPJobTarget(worktree, target string) (string, error) {
+	if strings.TrimSpace(target) == "" || filepath.IsAbs(target) ||
+		strings.ContainsAny(target, ":\\") || filepath.Clean(target) != target ||
+		target == "." || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("openacp: resource target is not a canonical relative path")
+	}
+	root, err := filepath.EvalSymlinks(worktree)
+	if err != nil {
+		return "", err
+	}
+	absolute := filepath.Join(root, target)
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if os.IsNotExist(err) {
+		if _, entryErr := os.Lstat(absolute); os.IsNotExist(entryErr) {
+			if parent, parentErr := filepath.EvalSymlinks(filepath.Dir(absolute)); parentErr == nil {
+				resolved, err = filepath.Join(parent, filepath.Base(absolute)), nil
+			}
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(root, resolved)
+	if err != nil || relative == "." || relative == ".." ||
+		strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return "", fmt.Errorf("openacp: resource target escapes the assigned worktree")
+	}
+	relative = filepath.ToSlash(relative)
+	if slices.Contains(strings.Split(relative, "/"), ".git") || core.ProhibitedArtifactPath(relative) {
+		return "", fmt.Errorf("openacp: resource target is protected")
+	}
+	return relative, nil
+}
+
+func openACPJobEffect(worktree, kind, name string, input json.RawMessage, available, approvedPaths []string, allowAll bool) (runtime.JobEffectRequest, bool) {
 	var args map[string]any
 	if len(input) != 0 && json.Unmarshal(input, &args) != nil {
 		return runtime.JobEffectRequest{}, false
 	}
 	target := ""
-	for _, key := range []string{"path", "filePath", "file_path", "uri"} {
+	for _, key := range []string{"path", "filePath", "file_path"} {
 		if value, ok := args[key].(string); ok && strings.TrimSpace(value) != "" {
 			target = value
 			break
@@ -568,31 +602,23 @@ func openACPJobEffect(kind, name string, input json.RawMessage, available, appro
 	}
 	switch kind {
 	case "read":
-		if !slices.Contains(available, name) || target == "" {
+		if !slices.Contains(available, name) {
 			return runtime.JobEffectRequest{}, false
 		}
-		target = filepath.Clean(target)
-		if filepath.IsAbs(target) || strings.ContainsAny(target, ":\\") || target == "." || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+		canonical, err := canonicalOpenACPJobTarget(worktree, target)
+		if err != nil || !allowAll && !slices.Contains(approvedPaths, canonical) {
 			return runtime.JobEffectRequest{}, false
 		}
-		target = filepath.ToSlash(target)
-		if slices.Contains(strings.Split(target, "/"), ".git") || !allowAll && !slices.Contains(approvedPaths, target) {
-			return runtime.JobEffectRequest{}, false
-		}
-		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryRead, Target: target}, true
+		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryRead, Target: canonical}, true
 	case "edit":
-		if !slices.Contains(available, name) || target == "" {
+		if !slices.Contains(available, name) {
 			return runtime.JobEffectRequest{}, false
 		}
-		target = filepath.Clean(target)
-		if filepath.IsAbs(target) || strings.ContainsAny(target, ":\\") || target == "." || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+		canonical, err := canonicalOpenACPJobTarget(worktree, target)
+		if err != nil || !allowAll && !slices.Contains(approvedPaths, canonical) {
 			return runtime.JobEffectRequest{}, false
 		}
-		target = filepath.ToSlash(target)
-		if slices.Contains(strings.Split(target, "/"), ".git") || !allowAll && !slices.Contains(approvedPaths, target) {
-			return runtime.JobEffectRequest{}, false
-		}
-		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: target}, true
+		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: canonical}, true
 	default:
 		return runtime.JobEffectRequest{}, false
 	}
@@ -627,7 +653,7 @@ func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
 	if err != nil {
 		return cancelled
 	}
-	effect, ok := openACPJobEffect(request.ToolCall.Kind, request.ToolCall.Name, request.ToolCall.Input, available, approved, a.config.FileAccess.Level == core.FileAccessAll)
+	effect, ok := openACPJobEffect(a.config.WorkingDirectory, request.ToolCall.Kind, request.ToolCall.Name, request.ToolCall.Input, available, approved, a.config.FileAccess.Level == core.FileAccessAll)
 	if ok {
 		effect.Tracked = slices.Contains(a.config.TrackedFiles, effect.Target)
 	}
