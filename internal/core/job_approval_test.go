@@ -64,8 +64,8 @@ func TestTaskCannotWidenApprovedJobContract(t *testing.T) {
 	}
 	unapprovedOwner := task
 	unapprovedOwner.Owner = "DEPLOYER"
-	if TaskWithinJobContract(unapprovedOwner, contract) {
-		t.Fatal("Task assigned to a role outside the Job contract must be rejected")
+	if !TaskWithinJobContract(unapprovedOwner, contract) {
+		t.Fatal("legacy Task.Owner must not restrict Job Role participation")
 	}
 	widenedAcceptance := task
 	widenedAcceptance.Acceptance = []string{"deploy production"}
@@ -78,7 +78,6 @@ func TestTaskCannotWidenApprovedJobContract(t *testing.T) {
 		t.Fatal("Task evidence must remain within approved Job criteria")
 	}
 	commands := task
-	commands.Owner = "CODER"
 	commands.ValidationCommands = []string{"go test ./..."}
 	if TaskWithinJobContract(commands, contract) {
 		t.Fatal("unbound validation commands must be rejected")
