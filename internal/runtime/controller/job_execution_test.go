@@ -321,7 +321,7 @@ func TestJobRoleControllerStartsSendsAndAuthorizesAgainstJob(t *testing.T) {
 	if err := reviewerController.AuthorizeEffect("job-role-reviewer", jobRoleEffectRequest(core.JobEffectRepositoryWrite, "README.md", true), time.Now().UTC()); err != nil {
 		t.Fatalf("in-scope reversible write must not be gated by a Role operation ACL: %v", err)
 	}
-	if err := reviewerController.AuthorizeEffect("job-role-reviewer", runtime.JobEffectRequest{Effect: core.JobEffectValidationExecution, Target: "go test ./..."}, time.Now().UTC()); err == nil {
+	if err := reviewerController.AuthorizeEffect("job-role-reviewer", jobRoleEffectRequest(core.JobEffectValidationExecution, "", false), time.Now().UTC()); err == nil {
 		t.Fatal("operation without inspectable effect metadata must fail closed")
 	}
 	if err := controller.PostMessage("job-role-exec", "job-role-reviewer", "job-role-message",

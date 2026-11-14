@@ -110,7 +110,7 @@ type JobEffectRequest struct {
 	Resource        string
 	Tracked         bool
 	Capability      string
-	Action           string
+	Action          string
 	Inspectable     bool
 	SandboxEnforced bool
 	SandboxBypass   bool
