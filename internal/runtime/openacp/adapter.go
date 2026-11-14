@@ -603,13 +603,13 @@ func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
 	var request struct {
 		SessionID string `json:"sessionId"`
 		ToolCall struct {
-			Kind string `json:"kind"`
-			Name string `json:"name"`
+			Kind  string          `json:"kind"`
+			Name  string          `json:"name"`
 			Input json.RawMessage `json:"rawInput"`
 		} `json:"toolCall"`
 		Options []struct {
 			OptionID string `json:"optionId"`
-			Kind string `json:"kind"`
+			Kind     string `json:"kind"`
 		} `json:"options"`
 	}
 	if json.Unmarshal(params, &request) != nil {

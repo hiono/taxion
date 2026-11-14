@@ -13,8 +13,8 @@ import (
 func TestOpenACPJobEffectRequiresTarget(t *testing.T) {
 	tests := []struct {
 		kind, name, input string
-		want             core.JobEffect
-		ok bool
+		want              core.JobEffect
+		ok                bool
 	}{
 		{"read", "read", `{"path":"src/main.go"}`, core.JobEffectRepositoryRead, true},
 		{"edit", "edit", `{"filePath":"src/main.go"}`, core.JobEffectRepositoryWrite, true},
