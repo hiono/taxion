@@ -110,6 +110,21 @@ Job と Task の関連は **Task 側が `JobID` を保持する単方向参照**
 
 ### Phase 2A — Job-native authorization migration (ADR-0080)
 
+**Implementation status (2026-11-14): migration is not complete.** The current
+Job-native path still enforces `RoleToolPolicies`, `RoleOperations`, and
+provider tool-policy equality in `internal/runtime/controller/job_execution.go`.
+Copilot and OpenACP also retain provider-specific tool availability checks.
+The comments in the controller now identify the Job ACL checks as transitional;
+this is documentation of current debt, not a replacement for enforcement.
+
+The first implementation unit must establish the domain-level boundary/effect
+model and its canonical approval representation before removing the transitional
+checks. Do not delete the checks independently: that would create an authorization
+gap. Preserve immutable Job revision, execution/session identity, Task containment,
+ValidationCommands exact binding, credential-specific controls, and legacy
+Task/ReviewFlow protections throughout the migration.
+
+
 - [ ] `JobContract.Operations` を通常操作の許可リストとして使用する検証・承認ハッシュ依存を置換する。
 - [ ] `RoleOperations` による Role-to-operation ACL と、`RoleToolPolicies` の完全一致を Job authority の条件から分離する。
 - [ ] Provider `AvailableTools` / `ToolPolicyIdentity` は Runtime が実際に提供する能力・構成の情報として扱い、Job approval の許可集合として扱わない。
