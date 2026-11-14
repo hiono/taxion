@@ -575,7 +575,7 @@ func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
 	var request struct {
 		SessionID string `json:"sessionId"`
 		ToolCall  struct {
-			Kind     string `json:"kind"`
+			Kind string `json:"kind"`
 			Name string `json:"name"`
 		} `json:"toolCall"`
 		Options []struct {
