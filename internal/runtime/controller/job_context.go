@@ -65,7 +65,8 @@ type JobContextSummary struct {
 	RequiredEvidence     []string                  `json:"requiredEvidence,omitempty"`
 	Repositories         []core.JobRepositoryScope `json:"repositories,omitempty"`
 	Operations           []string                  `json:"operations,omitempty"`
-	// Deprecated transitional field. Remove with JobContract.RoleOperations; it is not authority.
+	// Deprecated transitional projection. It exposes the obsolete Role ACL to the model;
+	// remove it with JobContract.RoleOperations rather than expanding its semantics.
 	RoleOperations       []string                  `json:"roleOperations,omitempty"`
 	Budget               core.JobBudget            `json:"budget,omitempty"`
 	UsedNanoAIU          float64                   `json:"usedNanoAiu"`
