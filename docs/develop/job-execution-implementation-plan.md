@@ -117,12 +117,7 @@ Copilot and OpenACP also retain provider-specific tool availability checks.
 The comments in the controller now identify the Job ACL checks as transitional;
 this is documentation of current debt, not a replacement for enforcement.
 
-The first implementation unit must establish the domain-level boundary/effect
-model and its canonical approval representation before removing the transitional
-checks. Do not delete the checks independently: that would create an authorization
-gap. Preserve immutable Job revision, execution/session identity, Task containment,
-ValidationCommands exact binding, credential-specific controls, and legacy
-Task/ReviewFlow protections throughout the migration.
+The replacement must establish the domain-level boundary/effect model and its canonical approval representation in the same cohesive change that removes the transitional checks. Do not delete checks before equivalent Job-boundary enforcement is active; do not preserve the old checks as a parallel authorization model. Preserve immutable Job revision, execution/session identity, Task containment, ValidationCommands exact binding, and credential-specific controls through Job-native enforcement. Retire the Task/ReviewFlow execution and authorization paths rather than carrying their protections forward as legacy runtime.
 
 
 - [ ] `JobContract.Operations` を通常操作の許可リストとして使用する検証・承認ハッシュ依存を置換する。
@@ -153,7 +148,7 @@ Task/ReviewFlow protections throughout the migration.
 - [ ] Role 間の受渡しで承認 scope を引き継ぐ場合も、宛先 Role・Task・操作を Controller が照合する。
 - [ ] Role の発言・回答・仮定を承認や権限として扱わない。
 - [ ] Job 全体と各 RoleExecution の予算・期限・同時実行上限を整合させる。
-- [ ] repository、file access、tool policy、secret、不可逆操作の制限を Role ごとに維持する。
+- [ ] repository / file access / sandbox / secret / 禁止副作用 / 不可逆操作をJob境界で強制し、Roleごとの静的Tool ACLを認可根拠にしない。
 - [ ] Reviewer に独立 worktree / context / session を与え、Coder の自己申告を受入れ根拠にしない。
 - [ ] 既存 ReviewFlow / Clarification / role packet のうち新モデルを阻害する経路を置換または削除する。
 - [ ] 既存 workspace の移行、バックアップ、復旧、CLI 表示を更新する。
