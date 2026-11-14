@@ -17,8 +17,9 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
-// IntakeRequest selects legacy Task intake when Task.JobID is empty and
-// first-class Job intake only when Task.JobID names an existing Job.
+// IntakeRequest currently contains a transitional mode split: an empty Task.JobID
+// still enters the obsolete Task/ReviewFlow path. This split is not the target
+// product contract and must be removed as Job-native intake replaces the old path.
 type IntakeRequest struct {
 	ContextSources          []core.ContextDocument `json:"contextSources,omitempty"`
 	ObservationHash         string                 `json:"observationHash,omitempty"`
@@ -336,8 +337,9 @@ func ProposeIntake(db *store.Store, request IntakeRequest) (core.GraphTask, erro
 				return fmt.Errorf("taxion: intake Task ID already exists in the ledger; use a new Task ID")
 			}
 		}
-		// Job membership is explicit. An unbound Task remains in the legacy
-		// Task/ReviewFlow authorization model; intake never creates or infers a Job.
+		// Transitional behavior: an unbound Task still falls into the obsolete
+		// Task/ReviewFlow authorization path. Remove this fallback when Job-native
+		// intake becomes the only active execution model.
 		if task.JobID != "" {
 			job, ok := state.Graph.Job(task.JobID)
 			if !ok || job.Status == core.JobCancelled {
@@ -811,10 +813,9 @@ func ConfirmIntake(db *store.Store, request IntakeConfirmation) (core.GraphTask,
 			return fmt.Errorf("taxion: a superseding contract requires explicit predecessor-flow reapproval")
 		}
 		if !modelFree {
-			// Legacy bridge: this Task-level configuration decision is still consumed by
-			// the current requestCommand/ReviewFlow execution path. It is not JobApproval
-			// and must never grant Job-level authority. Remove it after Job-native request
-			// execution no longer reads Task configuration decisions.
+			// Obsolete bridge: the current requestCommand still enters ReviewFlow and reads
+			// this Task-level decision. It is not JobApproval and must not be extended.
+			// Remove this write together with the old request/ReviewFlow execution path.
 			approvalText, err := json.Marshal(config.Approval{
 				Kind: config.ApprovalKind, TaskID: task.ID, Reason: request.Reason,
 				Allowed: []config.Config{request.Selection}, AdditionalTaskIDs: request.AdditionalTaskIDs,
