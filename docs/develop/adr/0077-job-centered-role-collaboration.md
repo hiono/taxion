@@ -54,7 +54,7 @@ Job approval is the sole source of authority for work performed under a first-cl
 - Each RoleExecution is independently checked against the current Job approval, Task's narrowed resource scope, runtime identity/configuration, and remaining budget immediately before privileged Runtime operations. A previously created RoleExecution or Job message is not a grant.
 - Task-level approvals may remain only as additional, narrower gates where a concrete operation requires them. They cannot replace, widen, or imply Job approval.
 - Legacy Task approval bundles, authorization decisions, packet receipts, and dispatch audit records remain historical evidence for the legacy Task. They are not migrated into Job approval and cannot authorize a new Job or a new RoleExecution.
-- A legacy Task without JobID remains unchanged. A new Job that supersedes work from that Task must receive its own approval; references to the legacy Task are provenance only.
+- Historical Task records without JobID are not an active execution mode. If retained, they are read or migrated only through an explicit, loss-aware, non-executable boundary. A new Job receives its own approval; historical references are provenance only.
 
 The canonical Job approval proposal is a versioned value, not a digest of mutable Task records. Its boundaries must be inspectable before confirmation. It must not contain resolved credentials; configuration is represented by approved selection and source references/digests.
 
