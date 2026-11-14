@@ -207,19 +207,19 @@ flowchart TD
 
 比較の再開・拡張を無制限に続けず、次の依存順序に固定する。
 
-1. **入口の権限分離:** Job intakeとLegacy Task intakeを識別し、Job intakeでApprovalBundleを新規生成しない。旧Task/ReviewFlow経路をJob-nativeへ置換し、旧挙動を固定する回帰テストは新しい受入条件へ置き換える。
+1. **入口の統合:** Job-native intakeを唯一の現行入口とする。JobApprovalを唯一のJob権限根拠とし、旧Task intake / ApprovalBundle runtimeを削除する。旧workspaceは履歴移行だけを行う。
 2. **Job completion契約:** JobCompletionReady、Job状態遷移、未解決RoleExecution、証跡・使用量の終端条件を統合する。
 3. **成果物・Reviewer契約:** JobOutput/JobEvidenceに不足するGit/validation証拠を定義し、独立Reviewerが検証できる統合経路を実装する。
 4. **Role Dispatcher:** JobMessageを起点にRoleExecutionを生成し、宛先Roleを実行し、回答後に同一Jobの元実行を再開する。
 5. **ReviewFlow責務の移行:** repair limit、Role別budget、deadline、stop/recovery/handoffをJob/RoleExecution/Controllerへ移す。
-6. **旧経路の退役:** 新経路の同一シナリオE2Eと移行テストが成立した後に限り、旧ReviewFlow/Dispatchの新規生成経路を削除する。旧workspace読込みは別途移行要件に従う。
+6. **旧経路の削除:** Job-nativeの各責務が成立した単位で旧ReviewFlow/Dispatchのcaller・認可・新規生成経路を削除する。旧workspaceの履歴は実行・認可から分離した明示的移行だけを許可する。
 
 各段階の受入れ条件が満たされれば次へ進む。比較を繰り返すのではなく、実装・テストの結果で判定を更新する。
 
 ## 8. 検証ゲート
 
 - [ ] Job intakeがJobApprovalのみを作り、ApprovalBundleを新規生成しない。
-- [ ] Legacy Task intakeは明示的なlegacy経路でのみ旧ApprovalBundleを利用する。
+- [ ] 旧Task intake / ReviewFlow runtimeは現行経路から削除され、旧承認は履歴移行以外で利用されない。
 - [ ] JobRoleControllerの認可がJobApproval/JobContractに限定される。
 - [ ] Role間の依頼が同一Jobの別RoleExecutionとして実行され、回答後に元実行が再開する。
 - [ ] ReviewerはCoderと異なるRoleExecutionであり、成果物のproducer自身ではない。
