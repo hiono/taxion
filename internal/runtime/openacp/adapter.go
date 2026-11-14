@@ -52,36 +52,36 @@ type response struct {
 }
 
 type Adapter struct {
-	config Config
-	root   string
-	before map[string]fileSnapshot
-	cmd    *exec.Cmd
-	input  io.WriteCloser
-	done   chan struct{}
+	config            Config
+	root              string
+	before            map[string]fileSnapshot
+	cmd               *exec.Cmd
+	input             io.WriteCloser
+	done              chan struct{}
 
-	opMu                  sync.Mutex
-	writeMu               sync.Mutex
-	mu                    sync.Mutex
-	nextID                uint64
-	pending               map[string]chan response
-	toolCalls             map[string]core.ExecutionObservation
-	session               string
-	model                 string
-	executableHash        string
-	connection            string
-	history               []runtime.Event
-	wake                  chan struct{}
-	output                strings.Builder
-	outputMessageID       string
-	busy                  bool
-	stopped               bool
-	closed                bool
-	failure               error
-	stderr                diagnosticStderr
-	preservationErr       error
-	authorizeJobEffect    func(context.Context, string, runtime.JobEffectRequest) error
-	turn                  int64
-	turnDone              chan struct{}
+	opMu               sync.Mutex
+	writeMu            sync.Mutex
+	mu                 sync.Mutex
+	nextID             uint64
+	pending            map[string]chan response
+	toolCalls          map[string]core.ExecutionObservation
+	session            string
+	model              string
+	executableHash     string
+	connection         string
+	history            []runtime.Event
+	wake               chan struct{}
+	output             strings.Builder
+	outputMessageID    string
+	busy               bool
+	stopped            bool
+	closed             bool
+	failure            error
+	stderr             diagnosticStderr
+	preservationErr    error
+	authorizeJobEffect func(context.Context, string, runtime.JobEffectRequest) error
+	turn               int64
+	turnDone           chan struct{}
 
 	launch func(context.Context, string, string, bool) (*exec.Cmd, error)
 }
