@@ -105,10 +105,16 @@ type ToolPolicyIdentity interface {
 
 // JobEffectRequest describes an observed effect without relying on provider tool names.
 type JobEffectRequest struct {
-	Effect    core.JobEffect
-	Target    string
-	Tracked   bool
-	Preflight bool
+	Effect          core.JobEffect
+	Target          string
+	Resource        string
+	Tracked         bool
+	Capability      string
+	Action           string
+	Inspectable     bool
+	SandboxEnforced bool
+	SandboxBypass   bool
+	Preflight       bool
 }
 
 // JobEffectAuthorizer installs the Job-scoped effect evaluator in a Runtime adapter.

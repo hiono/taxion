@@ -25,7 +25,10 @@ func jobEffectForPermission(worktree string, trackedFiles []string, request sdk.
 			return runtime.JobEffectRequest{}, false
 		}
 		canonical, err := canonicalJobTarget(worktree, target)
-		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryRead, Target: canonical, Tracked: slices.Contains(trackedFiles, canonical)}, err == nil
+		return runtime.JobEffectRequest{
+			Effect: core.JobEffectRepositoryRead, Target: canonical, Tracked: slices.Contains(trackedFiles, canonical),
+			Capability: "file.read", Action: "read", Inspectable: true, SandboxEnforced: true,
+		}, err == nil
 	case *sdk.PermissionRequestWrite:
 		target := permission.FileName
 		if permission.ResolvedPath != nil && *permission.ResolvedPath != "" {
@@ -35,15 +38,29 @@ func jobEffectForPermission(worktree string, trackedFiles []string, request sdk.
 			return runtime.JobEffectRequest{}, false
 		}
 		canonical, err := canonicalJobTarget(worktree, target)
-		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: canonical, Tracked: slices.Contains(trackedFiles, canonical)}, err == nil
+		return runtime.JobEffectRequest{
+			Effect: core.JobEffectRepositoryWrite, Target: canonical, Tracked: slices.Contains(trackedFiles, canonical),
+			Capability: "file.write", Action: "write", Inspectable: true,
+			SandboxEnforced: permission.RequestSandboxBypass == nil || !*permission.RequestSandboxBypass,
+			SandboxBypass:   permission.RequestSandboxBypass != nil && *permission.RequestSandboxBypass,
+		}, err == nil
 	case *sdk.PermissionRequestShell:
-		return runtime.JobEffectRequest{Effect: core.JobEffectValidationExecution, Target: permission.FullCommandText}, permission.FullCommandText != ""
+		bypass := permission.RequestSandboxBypass != nil && *permission.RequestSandboxBypass
+		managedApproval := permission.ManagedApprovalRequired != nil && *permission.ManagedApprovalRequired
+		return runtime.JobEffectRequest{
+			Effect: core.JobEffectValidationExecution, Target: permission.FullCommandText,
+			Capability: "shell", Action: "execute", Inspectable: true,
+			SandboxEnforced: !bypass && !managedApproval, SandboxBypass: bypass,
+		}, permission.FullCommandText != ""
 	case *sdk.PermissionRequestCustomTool:
 		switch permission.ToolName {
 		case ReadContextToolName:
-			return runtime.JobEffectRequest{Effect: core.JobEffectJobContextRead}, true
+			return runtime.JobEffectRequest{
+				Effect: core.JobEffectJobContextRead, Capability: "job-context", Action: "read",
+				Inspectable: true, SandboxEnforced: true,
+			}, true
 		case ManagedSearchToolName:
-			return runtime.JobEffectRequest{Effect: core.JobEffectNetworkAccess}, true
+			return runtime.JobEffectRequest{}, false
 		default:
 			return runtime.JobEffectRequest{}, false
 		}

@@ -480,6 +480,68 @@ func (c *JobRoleController) authorizeExecution(graph core.TaskGraph, executionID
 	return graph.CheckRoleExecution(executionID, at)
 }
 
+func (c *JobRoleController) evaluateEffect(graph core.TaskGraph, executionID, sessionID string, request runtime.JobEffectRequest, at time.Time) error {
+	if err := c.authorizeExecution(graph, executionID, sessionID, at); err != nil {
+		return err
+	}
+	if request.Preflight {
+		if request.Effect != "" || request.Target != "" || request.Resource != "" || request.Tracked ||
+			request.Capability != "" || request.Action != "" || request.Inspectable ||
+			request.SandboxEnforced || request.SandboxBypass {
+			return fmt.Errorf("taxion: preflight cannot carry effect metadata")
+		}
+		return nil
+	}
+	execution, ok := graph.RoleExecution(executionID)
+	if !ok {
+		return fmt.Errorf("taxion: effect authorization requires a bound RoleExecution")
+	}
+	job, ok := graph.Job(execution.JobID)
+	if !ok || job.Contract == nil {
+		return fmt.Errorf("taxion: effect authorization requires an approved Job contract")
+	}
+	identity, ok := c.runtime.(runtime.JobBoundaryIdentity)
+	if !ok {
+		return fmt.Errorf("taxion: Job Runtime does not expose its repository boundary")
+	}
+	observation := core.JobEffectObservation{
+		Provider: runtime.ProviderName(c.runtime), Capability: request.Capability, Action: request.Action,
+		Effects: []core.JobEffect{request.Effect}, Inspectable: request.Inspectable,
+		SandboxEnforced: request.SandboxEnforced, SandboxBypass: request.SandboxBypass,
+	}
+	switch request.Effect {
+	case core.JobEffectRepositoryRead, core.JobEffectRepositoryWrite:
+		if request.Target == "" || request.Resource != "" {
+			return fmt.Errorf("taxion: repository effect requires one canonical file target")
+		}
+		observation.Targets = []core.JobEffectTarget{{
+			Repository: identity.JobRepository(), Path: request.Target, Tracked: request.Tracked,
+		}}
+	case core.JobEffectValidationExecution:
+		if request.Target == "" || request.Resource != "" || request.Tracked {
+			return fmt.Errorf("taxion: validation effect requires one exact command")
+		}
+		observation.Command = request.Target
+	case core.JobEffectJobContextRead:
+		if request.Target != "" || request.Resource != "" || request.Tracked {
+			return fmt.Errorf("taxion: Job context read cannot carry an external target")
+		}
+	default:
+		if request.Target != "" || request.Resource == "" || request.Tracked {
+			return fmt.Errorf("taxion: external effect requires one canonical resource target")
+		}
+		observation.Targets = []core.JobEffectTarget{{Resource: request.Resource}}
+	}
+	switch graph.EvaluateJobEffect(executionID, observation) {
+	case core.JobEffectAllow:
+		return nil
+	case core.JobEffectRequireApproval:
+		return fmt.Errorf("taxion: Job effect %q requires explicit human approval", request.Effect)
+	default:
+		return fmt.Errorf("taxion: Job effect %q is not permitted by the approved Job contract", request.Effect)
+	}
+}
+
 // AuthorizeEffect checks the current Job boundary and evaluates a typed
 // provider-observed effect. Provider tool names are not authorization inputs.
 func (c *JobRoleController) AuthorizeEffect(executionID string, request runtime.JobEffectRequest, at time.Time) error {
@@ -493,28 +555,7 @@ func (c *JobRoleController) AuthorizeEffect(executionID string, request runtime.
 	if !state.HasGraph {
 		return fmt.Errorf("taxion: effect authorization requires a Task Graph")
 	}
-	if err := c.authorizeExecution(state.Graph, executionID, "", at); err != nil {
-		return err
-	}
-	if request.Preflight {
-		if request.Effect != "" || request.Target != "" || request.Tracked {
-			return fmt.Errorf("taxion: preflight cannot carry an effect or target")
-		}
-		return nil
-	}
-	execution, ok := state.Graph.RoleExecution(executionID)
-	if !ok {
-		return fmt.Errorf("taxion: effect authorization requires a bound RoleExecution")
-	}
-	job, ok := state.Graph.Job(execution.JobID)
-	if !ok || job.Contract == nil {
-		return fmt.Errorf("taxion: effect authorization requires an approved Job contract")
-	}
-	identity, ok := c.runtime.(runtime.JobBoundaryIdentity)
-	if !ok {
-		return fmt.Errorf("taxion: Job Runtime does not expose its repository boundary")
-	}
-	return job.Contract.CheckEffect(request.Effect, identity.JobRepository(), request.Target, request.Tracked)
+	return c.evaluateEffect(state.Graph, executionID, "", request, at)
 }
 
 func (c *JobRoleController) roleExecutionForSession(graph core.TaskGraph, sessionID string) (core.RoleExecution, error) {
@@ -554,24 +595,7 @@ func (c *JobRoleController) AuthorizeSessionEffect(ctx context.Context, sessionI
 	if err != nil {
 		return err
 	}
-	if err := c.authorizeExecution(state.Graph, execution.ID, sessionID, at); err != nil {
-		return err
-	}
-	if request.Preflight {
-		if request.Effect != "" || request.Target != "" || request.Tracked {
-			return fmt.Errorf("taxion: preflight cannot carry an effect or target")
-		}
-		return nil
-	}
-	job, ok := state.Graph.Job(execution.JobID)
-	if !ok || job.Contract == nil {
-		return fmt.Errorf("taxion: effect authorization requires an approved Job contract")
-	}
-	identity, ok := c.runtime.(runtime.JobBoundaryIdentity)
-	if !ok {
-		return fmt.Errorf("taxion: Job Runtime does not expose its repository boundary")
-	}
-	return job.Contract.CheckEffect(request.Effect, identity.JobRepository(), request.Target, request.Tracked)
+	return c.evaluateEffect(state.Graph, execution.ID, sessionID, request, at)
 }
 
 // RecordUsage appends an immutable provider accounting observation to the Job ledger.

@@ -704,9 +704,15 @@ func openACPJobEffect(worktree, kind, name string, input json.RawMessage, availa
 	}
 	switch kind {
 	case "read":
-		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryRead, Target: canonical}, true
+		return runtime.JobEffectRequest{
+			Effect: core.JobEffectRepositoryRead, Target: canonical, Capability: name, Action: "read",
+			Inspectable: true, SandboxEnforced: true,
+		}, true
 	case "edit":
-		return runtime.JobEffectRequest{Effect: core.JobEffectRepositoryWrite, Target: canonical}, true
+		return runtime.JobEffectRequest{
+			Effect: core.JobEffectRepositoryWrite, Target: canonical, Capability: name, Action: "write",
+			Inspectable: true, SandboxEnforced: true,
+		}, true
 	default:
 		return runtime.JobEffectRequest{}, false
 	}

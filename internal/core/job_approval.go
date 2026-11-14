@@ -4,7 +4,6 @@ import (
 	"maps"
 	"math"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -165,83 +164,6 @@ func validateRequiredJobEffects(prohibited, approvalRequired []JobEffectRule) er
 		if !hasUnboundedJobEffect(approvalRequired, required.Effect) {
 			return graphError("Job contract must require approval for effect %q", required.Effect)
 		}
-	}
-	return nil
-}
-
-// CheckEffect applies the approved Job effect policy to a provider-observed effect.
-// Resource effects require an exact canonical target; validation execution requires
-// an exact command declared by the Job contract. Unknown or unbounded observations fail closed.
-func (c JobContract) CheckEffect(effect JobEffect, repository, target string, tracked bool) error {
-	if err := c.Validate(); err != nil {
-		return graphError("Job effect evaluation requires a valid approved contract")
-	}
-	if !validJobEffect(effect) {
-		return graphError("unknown Job effect %q", effect)
-	}
-	executable := false
-	switch effect {
-	case JobEffectRepositoryRead, JobEffectRepositoryWrite:
-		if !nonempty(repository) || !validCanonicalJobEffectPath(target) {
-			return graphError("repository effect requires an exact canonical repository target")
-		}
-		var boundary *JobRepositoryScope
-		for i := range c.Repositories {
-			if c.Repositories[i].Repository == repository {
-				boundary = &c.Repositories[i]
-				break
-			}
-		}
-		if boundary == nil {
-			return graphError("repository effect targets an unapproved Job repository")
-		}
-		candidate := FileAccessPolicy{Level: FileAccessExact, Paths: []string{target}}
-		if !FileAccessPolicyWithin(candidate, boundary.FileAccess) ||
-			boundary.FileAccess.Level == FileAccessCommitted && !tracked {
-			return graphError("repository effect target is outside the approved Job file-access boundary")
-		}
-		executable = true
-	case JobEffectValidationExecution:
-		if tracked || !nonempty(target) || !slices.Contains(c.ValidationCommands, target) {
-			return graphError("execution is not an exact approved Job validation command")
-		}
-		executable = true
-	case JobEffectJobContextRead:
-		if target != "" || tracked {
-			return graphError("Job context read must not carry a resource target")
-		}
-		executable = true
-	default:
-		if tracked || strings.TrimSpace(target) != target {
-			return graphError("Job effect target is not canonical")
-		}
-	}
-	ruleTarget := target
-	if effect == JobEffectRepositoryRead || effect == JobEffectRepositoryWrite {
-		ruleTarget = repository + ":" + target
-	}
-	check := func(rules []JobEffectRule, reason string) error {
-		for _, rule := range rules {
-			if rule.Effect != effect {
-				continue
-			}
-			if len(rule.Targets) == 0 || ruleTarget == "" {
-				return graphError("%s: %q", reason, effect)
-			}
-			if slices.Contains(rule.Targets, ruleTarget) {
-				return graphError("%s: %q target %q", reason, effect, target)
-			}
-		}
-		return nil
-	}
-	if err := check(c.ProhibitedEffects, "Job effect is prohibited"); err != nil {
-		return err
-	}
-	if err := check(c.ApprovalRequiredEffects, "Job effect requires separate human approval"); err != nil {
-		return err
-	}
-	if !executable {
-		return graphError("Job effect %q has no explicit executable authorization policy", effect)
 	}
 	return nil
 }
