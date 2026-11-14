@@ -48,7 +48,7 @@ func TestPermissionOutcomeUsesJobAuthorizationAndAllowOnce(t *testing.T) {
 	if !called {
 		t.Fatal("Job authorization callback was not invoked")
 	}
-	if outcome["outcome"].(map[string]any)["optionId"] != "once" {
+	if outcome["optionId"] != "once" {
 		t.Fatalf("permission outcome = %#v, want allow-once", outcome)
 	}
 }
@@ -62,7 +62,7 @@ func TestPermissionOutcomeRejectsWhenJobAuthorizationFails(t *testing.T) {
 	}
 	params := json.RawMessage(`{"sessionId":"session-1","toolCall":{"kind":"edit","name":"edit"},"options":[{"optionId":"reject","kind":"reject_once"},{"optionId":"allow","kind":"allow_once"}]}`)
 	outcome := adapter.permissionOutcome(params)
-	if outcome["outcome"].(map[string]any)["optionId"] != "reject" {
+	if outcome["optionId"] != "reject" {
 		t.Fatalf("permission outcome = %#v, want reject-once", outcome)
 	}
 }

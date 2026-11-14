@@ -553,7 +553,8 @@ func openACPJobOperation(kind, name string, available []string) (string, bool) {
 	writeAvailable := slices.Contains(available, "create") || slices.Contains(available, "edit") || slices.Contains(available, "apply_patch")
 	switch kind {
 	case "read", "search":
-		if !readAvailable || !(slices.Contains(available, name) || slices.Contains([]string{"read", "view", "glob", "grep", "skill"}, name)) {
+		allowedReadName := slices.Contains([]string{"read", "view", "glob", "grep"}, name) || name == "skill" && slices.Contains(available, "skill")
+		if !readAvailable || !(slices.Contains(available, name) || allowedReadName) {
 			return "", false
 		}
 		return "repository.read", true
@@ -570,7 +571,7 @@ func openACPJobOperation(kind, name string, available []string) (string, bool) {
 }
 
 func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
-	cancelled := map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
+	cancelled := map[string]any{"outcome": "cancelled"}
 	var request struct {
 		SessionID string `json:"sessionId"`
 		ToolCall struct {
@@ -597,7 +598,7 @@ func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
 	if !ok || authorize(context.Background(), request.SessionID, operation, "") != nil {
 		for _, option := range request.Options {
 			if option.Kind == "reject_once" {
-				return map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": option.OptionID}}
+				return map[string]any{"outcome": "selected", "optionId": option.OptionID}
 			}
 		}
 		return cancelled
