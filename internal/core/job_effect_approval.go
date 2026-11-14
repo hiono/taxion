@@ -12,7 +12,7 @@ type JobEffectApprovalRequest struct {
 	JobID            string               `json:"jobId"`
 	ContractRevision int                  `json:"contractRevision"`
 	RoleExecutionID  string               `json:"roleExecutionId"`
-	Observation      JobEffectObservation  `json:"observation"`
+	Observation      JobEffectObservation `json:"observation"`
 	ObservationHash  string               `json:"observationHash"`
 	RequestedAt      time.Time            `json:"requestedAt"`
 }

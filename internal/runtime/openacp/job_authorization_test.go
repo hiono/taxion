@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"net/url"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -15,7 +15,14 @@ import (
 
 func openACPTestWorktree(t *testing.T) string {
 	t.Helper()
-	return t.TempDir()
+	worktree := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(worktree, "src"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "src", "main.go"), []byte("package main"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return worktree
 }
 
 func TestOpenACPJobEffectRequiresTarget(t *testing.T) {

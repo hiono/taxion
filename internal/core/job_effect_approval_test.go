@@ -35,8 +35,8 @@ func effectApprovalFixture(t *testing.T) (*TaskGraph, JobEffectObservation, time
 	}
 	observation := JobEffectObservation{
 		Provider: "copilot", Capability: "web-search", Action: "network",
-		Effects: []JobEffect{JobEffectNetworkAccess},
-		Targets: []JobEffectTarget{{Resource: "network:https://api.example.com/search"}},
+		Effects:     []JobEffect{JobEffectNetworkAccess},
+		Targets:     []JobEffectTarget{{Resource: "network:https://api.example.com/search"}},
 		Inspectable: true,
 	}
 	return graph, observation, now.Add(4 * time.Second)
