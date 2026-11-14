@@ -133,6 +133,7 @@ func TestCheckEffectRejectsInvalidContractAndNonCanonicalTargets(t *testing.T) {
 
 func TestCheckEffectEnforcesRepositoryAndTrackedFileScope(t *testing.T) {
 	contract := *validJobContract(t)
+	contract.ValidationCommands = []string{"go test ./..."}
 	contract.Repositories[0].Repository = "example/repo"
 	contract.Repositories[0].FileAccess = FileAccessPolicy{
 		Level: FileAccessExact, Paths: []string{"src/main.go"},
@@ -157,6 +158,9 @@ func TestCheckEffectEnforcesRepositoryAndTrackedFileScope(t *testing.T) {
 	}
 	if err := contract.CheckEffect(JobEffectRepositoryWrite, "example/repo", "src/main.go", true); err != nil {
 		t.Fatalf("tracked file inside committed-only scope rejected: %v", err)
+	}
+	if err := contract.CheckEffect(JobEffectValidationExecution, "example/repo", "go test ./...", true); err == nil {
+		t.Fatal("tracked-file metadata must not be attached to a process effect")
 	}
 	contract.ApprovalRequiredEffects = append(contract.ApprovalRequiredEffects, JobEffectRule{
 		Effect: JobEffectRepositoryWrite, Targets: []string{"example/repo:src/main.go"},

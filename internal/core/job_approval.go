@@ -202,7 +202,7 @@ func (c JobContract) CheckEffect(effect JobEffect, repository, target string, tr
 		}
 		executable = true
 	case JobEffectValidationExecution:
-		if !nonempty(target) || !slices.Contains(c.ValidationCommands, target) {
+		if tracked || !nonempty(target) || !slices.Contains(c.ValidationCommands, target) {
 			return graphError("execution is not an exact approved Job validation command")
 		}
 		executable = true
@@ -212,7 +212,7 @@ func (c JobContract) CheckEffect(effect JobEffect, repository, target string, tr
 		}
 		executable = true
 	default:
-		if strings.TrimSpace(target) != target {
+		if tracked || strings.TrimSpace(target) != target {
 			return graphError("Job effect target is not canonical")
 		}
 	}
