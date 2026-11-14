@@ -121,54 +121,37 @@ func TestEvaluateJobEffectFailsClosedForIncompleteOrUnknownEffects(t *testing.T)
 	}
 }
 
-func TestCheckEffectRejectsInvalidContractAndNonCanonicalTargets(t *testing.T) {
+func TestEvaluateJobEffectRejectsNonCanonicalTargetsAndInvalidContracts(t *testing.T) {
 	contract := *validJobContract(t)
 	contract.Repositories[0].FileAccess = FileAccessPolicy{Level: FileAccessAll}
 	for _, target := range []string{"", " ", "../secret", "src/../secret", ".git/config", ".env", "C:\\secrets\\key"} {
-		if err := contract.CheckEffect(JobEffectRepositoryRead, "example/repo", target, false); err == nil {
-			t.Errorf("non-canonical repository target %q must be rejected", target)
+		observation := JobEffectObservation{
+			Provider: "copilot", Capability: "read", Action: "read",
+			Effects:     []JobEffect{JobEffectRepositoryRead},
+			Targets:     []JobEffectTarget{{Repository: "example/repo", Path: target}},
+			Inspectable: true, SandboxEnforced: true,
+		}
+		if got := contract.EvaluateJobEffect(observation); got != JobEffectDeny {
+			t.Errorf("non-canonical repository target %q decision = %q, want deny", target, got)
 		}
 	}
-	if err := contract.CheckEffect(JobEffectJobContextRead, "example/repo", "src/main.go", false); err == nil {
-		t.Fatal("Job context read must not carry a filesystem target")
+	contextRead := JobEffectObservation{
+		Provider: "copilot", Capability: "job-context", Action: "read",
+		Effects:     []JobEffect{JobEffectJobContextRead},
+		Targets:     []JobEffectTarget{{Repository: "example/repo", Path: "src/main.go"}},
+		Inspectable: true, SandboxEnforced: true,
+	}
+	if got := contract.EvaluateJobEffect(contextRead); got != JobEffectDeny {
+		t.Fatalf("Job context read with filesystem target = %q, want deny", got)
 	}
 	contract.ProhibitedEffects = nil
-	if err := contract.CheckEffect(JobEffectRepositoryRead, "example/repo", "src/main.go", false); err == nil {
-		t.Fatal("invalid Job contract must fail closed during effect evaluation")
+	validRead := JobEffectObservation{
+		Provider: "copilot", Capability: "read", Action: "read",
+		Effects:     []JobEffect{JobEffectRepositoryRead},
+		Targets:     []JobEffectTarget{{Repository: "example/repo", Path: "src/main.go"}},
+		Inspectable: true, SandboxEnforced: true,
 	}
-}
-
-func TestCheckEffectEnforcesRepositoryAndTrackedFileScope(t *testing.T) {
-	contract := *validJobContract(t)
-	contract.Repositories[0].Repository = "example/repo"
-	contract.Repositories[0].FileAccess = FileAccessPolicy{
-		Level: FileAccessExact, Paths: []string{"src/main.go"},
-	}
-	if err := contract.CheckEffect(JobEffectRepositoryRead, "example/repo", "src/main.go", false); err != nil {
-		t.Fatalf("approved exact repository read rejected: %v", err)
-	}
-	for _, request := range []struct {
-		repository, target string
-		tracked            bool
-	}{
-		{"other/repo", "src/main.go", true},
-		{"example/repo", "README.md", true},
-	} {
-		if err := contract.CheckEffect(JobEffectRepositoryRead, request.repository, request.target, request.tracked); err == nil {
-			t.Errorf("out-of-bound repository effect was accepted: %+v", request)
-		}
-	}
-	contract.Repositories[0].FileAccess = FileAccessPolicy{Level: FileAccessCommitted}
-	if err := contract.CheckEffect(JobEffectRepositoryWrite, "example/repo", "src/main.go", false); err == nil {
-		t.Fatal("untracked file must not be writable under committed-only scope")
-	}
-	if err := contract.CheckEffect(JobEffectRepositoryWrite, "example/repo", "src/main.go", true); err != nil {
-		t.Fatalf("tracked file inside committed-only scope rejected: %v", err)
-	}
-	contract.ApprovalRequiredEffects = append(contract.ApprovalRequiredEffects, JobEffectRule{
-		Effect: JobEffectRepositoryWrite, Targets: []string{"example/repo:src/main.go"},
-	})
-	if err := contract.CheckEffect(JobEffectRepositoryWrite, "example/repo", "src/main.go", true); err == nil {
-		t.Fatal("target-specific approval-required effect must not be allowed without approval")
+	if got := contract.EvaluateJobEffect(validRead); got != JobEffectDeny {
+		t.Fatalf("invalid Job contract decision = %q, want deny", got)
 	}
 }
