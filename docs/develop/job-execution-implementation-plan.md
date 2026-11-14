@@ -1,11 +1,11 @@
 # Job 中心の Role 実行モデル実装計画
 
-Status: In progress  
+Status: In progress — replacement, not compatibility migration  
 Decision: [ADR-0077](adr/0077-job-centered-role-collaboration.md), [ADR-0079](adr/0079-enforce-domain-invariants-across-state-paths.md), [ADR-0080](adr/0080-job-boundary-and-prohibited-effects.md)  
 Tracking: [Issue #283](https://github.com/hiono/taxion/issues/283)  
 Implementation: [PR #292](https://github.com/hiono/taxion/pull/292)
 
-## 1. 完成条件
+## 規範方針\n\n本計画は旧 Task / Dispatch / ReviewFlow を温存する移行計画ではない。旧経路の責務を Job / Task / RoleExecution / Controller へ再配置し、Job-native経路が成立したら重複する旧実行・認可経路を削除する。旧経路のテストを通すために新モデルを曲げない。旧workspaceの履歴が必要な場合だけ、実行・認可を行わない明示的でloss-awareな移行境界を設ける。\n\n## 1. 完成条件
 
 本計画の完了は、データ型や協調履歴 API の追加ではなく、次の一連の動作が Controller・Runtime adapter・永続化を通して成立した状態とする。
 
@@ -106,7 +106,7 @@ Job と Task の関連は **Task 側が `JobID` を保持する単方向参照**
 - [ ] session の再利用・再接続は同一 RoleExecution に限定する。
 - [ ] Runtime の開始前失敗と開始後の実行状態不明を区別し、安全な復旧を行う。
 
-**Exit gate:** RoleExecution が Dispatch / ReviewFlow の固定順序に依存せず開始・観測・停止・再接続できること。既存の権限・認証・tool policy・worktree 検査が弱まっていないこと。
+**Exit gate:** RoleExecution が Dispatch / ReviewFlow の固定順序に依存せず開始・観測・停止・再接続できること。安全性は旧Tool allowlistの温存ではなく、Job境界・禁止副作用・実行基盤の強制境界で成立すること。
 
 ### Phase 2A — Job-native authorization migration (ADR-0080)
 
@@ -132,7 +132,7 @@ Task/ReviewFlow protections throughout the migration.
 - [ ] ValidationCommands は承認済み command string との完全一致を維持し、generic な `process.exec` 能力だけで任意 command を承認しない。
 - [ ] Copilot / OpenACP の未知 Tool は、名前が事前列挙されていないことだけを理由に拒否せず、Tool の実際の副作用・実行基盤の隔離・Job境界から判定する。副作用を判定・封じ込めできない場合は承認要求または拒否とする。
 - [ ] 事前登録されていない通常の Job 内操作が通る正例と、Job境界外アクセス・秘密情報送信・承認外副作用・不明な危険副作用を拒否する負例を追加する。
-- [ ] 旧 Task / ReviewFlow の安全検査は、Job-native 経路で同等の強制境界がテストされるまで維持する。
+- [ ] 旧 Task / ReviewFlow の実行・認可経路を並行runtimeとして維持せず、Job-nativeの同等以上の安全境界へ置換して削除する。
 
 **Exit gate:** Role別操作許可リストを使わずに通常の Job 内操作が実行でき、対象境界・禁止副作用・人間承認・ValidationCommands完全一致・Job/Session/RoleExecution整合性が Copilot と OpenACP の両方で強制されること。ADR作成だけでは本Gateを通過したとみなさない。
 
