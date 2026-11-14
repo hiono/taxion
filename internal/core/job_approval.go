@@ -11,9 +11,10 @@ import (
 	"time"
 )
 
-// JobContract is the versioned, machine-enforceable boundary for a Job.
-// Task prose is not an authorization source; only these structured dimensions
-// can constrain repository and Runtime access.
+// JobContract is the versioned approval proposal for a Job. The current schema
+// still contains transitional operation/Role allowlist fields that conflict with
+// ADR-0080. Those fields are scheduled for removal; they must not be extended or
+// treated as the target authorization model. Task prose is not an authority grant.
 type JobContract struct {
 	Revision             int                          `json:"revision"`
 	Roles                []string                     `json:"roles"`
@@ -40,8 +41,9 @@ type JobRoleToolPolicy struct {
 	Digest   string          `json:"digest"`
 }
 
-// NewJobRoleToolPolicy stores a canonical, reviewable snapshot. A nil snapshot
-// explicitly means that the Role has no approved extension tools.
+// NewJobRoleToolPolicy stores a canonical snapshot for the transitional Role ACL.
+// ADR-0080 removes this as an authorization concept; do not use it as a template
+// for future Job authority or add new dependencies on this type.
 func NewJobRoleToolPolicy(snapshot json.RawMessage) (JobRoleToolPolicy, error) {
 	if len(snapshot) == 0 {
 		snapshot = json.RawMessage("null")
@@ -109,8 +111,8 @@ func (c JobContract) Validate() error {
 			return err
 		}
 	}
-	// ValidationCommands are exact approved command values, not Role operation
-	// grants. Their execution boundary is enforced by the command runner.
+	// ValidationCommands are exact approved command values, not general Role grants.
+	// Keep exact matching while replacing the surrounding operation allowlist model.
 	for role, operations := range c.RoleOperations {
 		if !slices.Contains(c.Roles, role) {
 			return graphError("Job contract contains role operations for an unapproved role %q", role)
