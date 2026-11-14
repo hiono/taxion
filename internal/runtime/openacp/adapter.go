@@ -561,7 +561,7 @@ func openACPResourcePath(value string) (string, error) {
 	}
 	parsed, err := url.Parse(value)
 	if err != nil || !strings.EqualFold(parsed.Scheme, "file") ||
-		(parsed.Host != "" && !strings.EqualFold(parsed.Host, "localhost")) ||
+		(parsed.Host != "" && !strings.EqualFold(parsed.Host, "localhost")) || parsed.User != nil ||
 		parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path == "" {
 		return "", fmt.Errorf("openacp: resource URI is not a local file URI")
 	}
