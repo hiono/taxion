@@ -77,8 +77,9 @@ type Adapter struct {
 	closed          bool
 	failure         error
 	stderr          diagnosticStderr
-	preservationErr error
-	turn            int64
+	preservationErr      error
+	authorizeJobOperation func(context.Context, string, string, string) error
+	turn                 int64
 	turnDone        chan struct{}
 
 	launch func(context.Context, string, string, bool) (*exec.Cmd, error)
@@ -87,6 +88,7 @@ type Adapter struct {
 var _ runtime.ConfigurationIdentity = (*Adapter)(nil)
 var _ runtime.EventCursor = (*Adapter)(nil)
 var _ runtime.ToolPolicyIdentity = (*Adapter)(nil)
+var _ runtime.JobOperationAuthorizer = (*Adapter)(nil)
 
 func hashBytes(data []byte) string {
 	sum := sha256.Sum256(data)
@@ -200,6 +202,22 @@ func (a *Adapter) ToolPolicy() *tools.Policy {
 	}
 	return a.config.ToolPolicy.Clone()
 }
+
+func (a *Adapter) SetJobOperationAuthorizer(authorizer func(context.Context, string, string, string) error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.authorizeJobOperation = authorizer
+}
+
+func (a *Adapter) jobOperationAuthorizer() func(context.Context, string, string, string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.authorizeJobOperation
+}
+
+func (a *Adapter) hasJobOperationAuthorizer() bool {
+	return a.jobOperationAuthorizer() != nil
+}
 func (a *Adapter) BudgetGuidancePolicy() *core.BudgetGuidancePolicy {
 	return core.CloneBudgetGuidance(a.config.BudgetGuidance)
 }
@@ -291,14 +309,24 @@ func (a *Adapter) prepare() error {
 		permission[name] = "ask"
 	}
 	if slices.Contains(a.config.AvailableTools, "view") || slices.Contains(a.config.AvailableTools, "read") {
-		permission["read"], permission["glob"], permission["grep"] = "allow", "allow", "allow"
+		readPermission := "allow"
+		if a.hasJobOperationAuthorizer() {
+			readPermission = "ask"
+		}
+		permission["read"], permission["glob"], permission["grep"] = readPermission, readPermission, readPermission
 	}
 	if a.config.Role == "CODER" && (slices.Contains(a.config.AvailableTools, "create") ||
 		slices.Contains(a.config.AvailableTools, "edit") || slices.Contains(a.config.AvailableTools, "apply_patch")) {
 		permission["edit"] = "allow"
+		if a.hasJobOperationAuthorizer() {
+			permission["edit"] = "ask"
+		}
 	}
 	if a.config.ToolPolicy != nil && len(a.config.ToolPolicy.Skills) != 0 {
 		permission["skill"] = "allow"
+		if a.hasJobOperationAuthorizer() {
+			permission["skill"] = "ask"
+		}
 		external := map[string]string{"*": "deny"}
 		for _, asset := range a.config.ToolPolicy.Skills {
 			name := filepath.Base(asset.Path)
@@ -307,6 +335,8 @@ func (a *Adapter) prepare() error {
 			}
 			if permission["read"] == "allow" {
 				external["/config/opencode/skills/"+name+"/*"] = "allow"
+			} else if permission["read"] == "ask" {
+				external["/config/opencode/skills/"+name+"/*"] = "ask"
 			}
 		}
 		permission["external_directory"] = external
@@ -518,6 +548,68 @@ func (a *Adapter) write(message any) error {
 	return json.NewEncoder(a.input).Encode(message)
 }
 
+func openACPJobOperation(kind, name string, available []string) (string, bool) {
+	readAvailable := slices.Contains(available, "view") || slices.Contains(available, "read") || slices.Contains(available, "skill")
+	writeAvailable := slices.Contains(available, "create") || slices.Contains(available, "edit") || slices.Contains(available, "apply_patch")
+	switch kind {
+	case "read", "search":
+		if !readAvailable || !(slices.Contains(available, name) || slices.Contains([]string{"read", "view", "glob", "grep", "skill"}, name)) {
+			return "", false
+		}
+		return "repository.read", true
+	case "edit":
+		if !writeAvailable || !slices.Contains([]string{"create", "edit", "apply_patch"}, name) {
+			return "", false
+		}
+		return "repository.write", true
+	default:
+		// OpenACP deliberately exposes no shell, terminal, fetch, or executable
+		// extension tools. Unknown and future kinds remain denied.
+		return "", false
+	}
+}
+
+func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
+	cancelled := map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
+	var request struct {
+		SessionID string `json:"sessionId"`
+		ToolCall struct {
+			Kind string `json:"kind"`
+			Name string `json:"name"`
+		} `json:"toolCall"`
+		Options []struct {
+			OptionID string `json:"optionId"`
+			Kind string `json:"kind"`
+		} `json:"options"`
+	}
+	if json.Unmarshal(params, &request) != nil {
+		return cancelled
+	}
+	authorize := a.jobOperationAuthorizer()
+	if authorize == nil {
+		return cancelled
+	}
+	available := slices.Clone(a.config.AvailableTools)
+	if a.config.ToolPolicy != nil && len(a.config.ToolPolicy.Skills) != 0 && !slices.Contains(available, "skill") {
+		available = append(available, "skill")
+	}
+	operation, ok := openACPJobOperation(request.ToolCall.Kind, request.ToolCall.Name, available)
+	if !ok || authorize(context.Background(), request.SessionID, operation, "") != nil {
+		for _, option := range request.Options {
+			if option.Kind == "reject_once" {
+				return map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": option.OptionID}}
+			}
+		}
+		return cancelled
+	}
+	for _, option := range request.Options {
+		if option.Kind == "allow_once" {
+			return map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": option.OptionID}}
+		}
+	}
+	return cancelled
+}
+
 func (a *Adapter) read(output io.Reader) {
 	scanner := bufio.NewScanner(output)
 	scanner.Buffer(make([]byte, 4096), 8*1024*1024)
@@ -538,7 +630,7 @@ func (a *Adapter) read(output io.Reader) {
 				// is offered. Native tools remain inside the sealed namespace.
 				var reply any
 				if message.Method == "session/request_permission" {
-					reply = map[string]any{"jsonrpc": "2.0", "id": message.ID, "result": map[string]any{"outcome": map[string]string{"outcome": "cancelled"}}}
+						reply = map[string]any{"jsonrpc": "2.0", "id": message.ID, "result": map[string]any{"outcome": a.permissionOutcome(message.Params)}}
 				} else {
 					reply = map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{"code": -32601, "message": "Client operation unsupported"}}
 				}
