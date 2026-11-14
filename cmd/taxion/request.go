@@ -869,10 +869,9 @@ func requestCommand(args []string, input io.Reader, output io.Writer, planner re
 				remainingNanoAIU = 0
 				budgetAuthorization = "the user selected /approve for the declared provider-stop-no-overage billing contract, goal, deadline and repair limit without a nano-AIU ceiling or automatic quota monitoring"
 			}
-			// Legacy execution path: requestCommand still dispatches this approved work
-			// through Task/ReviewFlow. A JobApproval may already exist, but this call is
-			// not Job-native RoleExecution orchestration. Replace it after the Job-native
-			// request path can start, resume and verify the same Job without ReviewFlow.
+			// Obsolete transitional path: this command still dispatches through Task/ReviewFlow
+			// even when a JobApproval exists. This is not valid Job-native execution and
+			// must be replaced by the Job/RoleExecution lifecycle, not retained as fallback.
 			if _, err := controller.StartReviewFlowContext(controller.WithOperation(ctx, operation), db, storePath, controller.ReviewFlowRequest{
 				Configuration: configuration,
 				ID:            flowID, TaskID: id, Repository: *repo, ReviewRoot: reviewRoot,
