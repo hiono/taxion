@@ -432,7 +432,7 @@ func (g TaskGraph) validateJobModel() error {
 	}
 	for _, task := range g.Tasks {
 		if task.JobID == "" {
-			continue // Unassigned legacy Tasks remain readable; new intake always assigns a Job.
+			continue // Historical unassigned Task; not eligible for the active Job execution model.
 		}
 		owner, ok := jobs[task.JobID]
 		if !ok || task.ID == task.JobID {
