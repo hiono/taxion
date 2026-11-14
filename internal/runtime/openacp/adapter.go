@@ -3,6 +3,7 @@ package openacp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -555,6 +556,66 @@ func (a *Adapter) write(message any) error {
 	return json.NewEncoder(a.input).Encode(message)
 }
 
+func validateUniqueJSONKeys(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if err := consumeUniqueJSONValue(decoder); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return fmt.Errorf("openacp: JSON input contains trailing data")
+	}
+	return nil
+}
+
+func consumeUniqueJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := map[string]struct{}{}
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return fmt.Errorf("openacp: JSON object key is not a string")
+			}
+			if _, exists := seen[key]; exists {
+				return fmt.Errorf("openacp: JSON object contains a duplicate key")
+			}
+			seen[key] = struct{}{}
+			if err := consumeUniqueJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil || end != json.Delim('}') {
+			return fmt.Errorf("openacp: malformed JSON object")
+		}
+	case '[':
+		for decoder.More() {
+			if err := consumeUniqueJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil || end != json.Delim(']') {
+			return fmt.Errorf("openacp: malformed JSON array")
+		}
+	default:
+		return fmt.Errorf("openacp: unexpected JSON delimiter")
+	}
+	return nil
+}
+
 func openACPResourcePath(value string) (string, error) {
 	if !strings.HasPrefix(strings.ToLower(value), "file:") {
 		return value, nil
@@ -614,7 +675,7 @@ func canonicalOpenACPJobTarget(worktree, target string) (string, error) {
 
 func openACPJobEffect(worktree, kind, name string, input json.RawMessage, available, approvedPaths []string, allowAll bool) (runtime.JobEffectRequest, bool) {
 	var args map[string]any
-	if len(input) == 0 || json.Unmarshal(input, &args) != nil {
+	if len(input) == 0 || validateUniqueJSONKeys(input) != nil || json.Unmarshal(input, &args) != nil {
 		return runtime.JobEffectRequest{}, false
 	}
 	canonical := ""
@@ -665,7 +726,7 @@ func (a *Adapter) permissionOutcome(params json.RawMessage) map[string]any {
 			Kind     string `json:"kind"`
 		} `json:"options"`
 	}
-	if json.Unmarshal(params, &request) != nil {
+	if validateUniqueJSONKeys(params) != nil || json.Unmarshal(params, &request) != nil {
 		return cancelled
 	}
 	authorize := a.jobEffectAuthorizer()
