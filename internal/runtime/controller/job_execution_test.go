@@ -31,12 +31,22 @@ type jobRoleRuntimeFake struct {
 	authErr                error
 	expectedAccount        string
 	toolPolicy             *tools.Policy
+	repository             string
+	fileAccess             *core.FileAccessPolicy
 	jobOperationAuthorizer func(context.Context, string, string, string) error
 }
 
 func (f *jobRoleRuntimeFake) Role() string       { return f.role }
 func (f *jobRoleRuntimeFake) ConfigHash() string { return f.configHash }
 func (f *jobRoleRuntimeFake) Worktree() string   { return "/tmp/job-role-worktree" }
+func (f *jobRoleRuntimeFake) JobRepository() string {
+	if f.repository != "" { return f.repository }
+	return "owner/repo"
+}
+func (f *jobRoleRuntimeFake) JobFileAccessPolicy() *core.FileAccessPolicy {
+	if f.fileAccess != nil { return core.CloneFileAccessPolicy(f.fileAccess) }
+	return &core.FileAccessPolicy{Level: core.FileAccessCommitted}
+}
 func (f *jobRoleRuntimeFake) Start(_ context.Context, taskID string) (string, error) {
 	f.startCount++
 	f.taskID = taskID

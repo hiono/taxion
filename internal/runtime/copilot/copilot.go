@@ -39,6 +39,7 @@ type Config struct {
 	Role                  string
 	SystemPrompt          string
 	WorkingDirectory      string
+	Repository            string
 	CLIPath               string
 	BaseDirectory         string
 	AvailableTools        []string
@@ -404,6 +405,10 @@ func (a *Adapter) UsesBoundResultIdentity() bool {
 }
 
 func (a *Adapter) Worktree() string { return a.config.WorkingDirectory }
+func (a *Adapter) JobRepository() string { return a.config.Repository }
+func (a *Adapter) JobFileAccessPolicy() *core.FileAccessPolicy {
+	return core.CloneFileAccessPolicy(a.config.FileAccess)
+}
 
 func (a *Adapter) SetJobOperationAuthorizer(authorizer func(context.Context, string, string, string) error) {
 	a.mu.Lock()

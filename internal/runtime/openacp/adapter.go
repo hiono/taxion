@@ -27,6 +27,7 @@ type Config struct {
 	Role             string
 	SystemPrompt     string
 	WorkingDirectory string
+	Repository       string
 	CLIPath          string
 	CLIHash          string
 	ServerConfig     string
@@ -178,6 +179,10 @@ func New(config Config) (*Adapter, error) {
 func (a *Adapter) Role() string     { return a.config.Role }
 func (a *Adapter) Provider() string { return "opencode" }
 func (a *Adapter) Worktree() string { return a.config.WorkingDirectory }
+func (a *Adapter) JobRepository() string { return a.config.Repository }
+func (a *Adapter) JobFileAccessPolicy() *core.FileAccessPolicy {
+	return core.CloneFileAccessPolicy(a.config.FileAccess)
+}
 func (a *Adapter) UsesBoundResultIdentity() bool {
 	return a.config.ResponseSchema["$id"] == "urn:taxion:dispatch-result:bound:v1"
 }

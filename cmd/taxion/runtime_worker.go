@@ -62,7 +62,7 @@ func newRoleWorker(config copilot.Config) (configuredWorker, error) {
 	}
 	return openacp.New(openacp.Config{
 		Role: config.Role, SystemPrompt: config.SystemPrompt, WorkingDirectory: config.WorkingDirectory,
-		CLIPath: selected.Runtime.ACPCommand, CLIHash: selected.Runtime.ACPCommandHash,
+		Repository: config.Repository, CLIPath: selected.Runtime.ACPCommand, CLIHash: selected.Runtime.ACPCommandHash,
 		ServerConfig: selected.Runtime.ACPConfig, ServerConfigHash: selected.Runtime.ACPConfigHash,
 		Configuration: config.Configuration, FileAccess: config.FileAccess, TrackedFiles: config.TrackedFiles,
 		ResponseSchema: config.ResponseSchema, BudgetGuidance: config.BudgetGuidance,
@@ -77,6 +77,7 @@ func newDispatchWorker(hostContext context.Context, db *store.Store, dispatch co
 	}
 	var err error
 	config.Configuration = nil
+	config.Repository = dispatch.Repository
 	config.FileAccess = core.CloneFileAccessPolicy(dispatch.Instruction.FileAccess)
 	config.BudgetGuidance = core.CloneBudgetGuidance(dispatch.Instruction.BudgetGuidance)
 	config.TrackedFiles = nil

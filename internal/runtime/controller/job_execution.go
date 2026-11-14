@@ -27,6 +27,9 @@ func NewJobRoleController(db *store.Store, worker runtime.Identity) (*JobRoleCon
 		strings.TrimSpace(worker.ConfigHash()) == "" {
 		return nil, fmt.Errorf("taxion: Job Role controller requires a store and identified runtime")
 	}
+	if _, ok := worker.(runtime.JobBoundaryIdentity); !ok {
+		return nil, fmt.Errorf("taxion: Job Role runtime must expose its enforced repository and file-access boundary")
+	}
 	authorizer, ok := worker.(runtime.JobOperationAuthorizer)
 	if !ok {
 		return nil, fmt.Errorf("taxion: Job Role runtime must support controller-installed operation preflight")
@@ -98,7 +101,47 @@ func (c *JobRoleController) approvedRuntimeConfiguration(job core.Job) (runtime.
 	return identity, approvedSelection.Runtime.Account, nil
 }
 
-func (c *JobRoleController) checkConfiguration(ctx context.Context, job core.Job) error {
+func (c *JobRoleController) checkJobBoundary(graph core.TaskGraph, execution core.RoleExecution, job core.Job) error {
+	if job.Contract == nil {
+		return fmt.Errorf("taxion: Job boundary requires an approved contract")
+	}
+	identity, ok := c.runtime.(runtime.JobBoundaryIdentity)
+	if !ok {
+		return fmt.Errorf("taxion: Job Role runtime does not expose its enforced resource boundary")
+	}
+	repository := strings.TrimSpace(identity.JobRepository())
+	var boundary *core.FileAccessPolicy
+	for i := range job.Contract.Repositories {
+		if job.Contract.Repositories[i].Repository == repository {
+			boundary = &job.Contract.Repositories[i].FileAccess
+			break
+		}
+	}
+	if repository == "" || boundary == nil || strings.TrimSpace(identity.Worktree()) == "" {
+		return fmt.Errorf("taxion: Runtime repository and worktree must be inside the approved Job boundary")
+	}
+	if execution.TaskID != "" {
+		task, exists := graph.GraphTask(execution.TaskID)
+		if !exists || task.JobID != job.ID || !core.TaskWithinJobScope(task, *job.Contract) {
+			return fmt.Errorf("taxion: RoleExecution Task exceeds or differs from the approved Job resource boundary")
+		}
+		if task.FileAccess != nil {
+			boundary = task.FileAccess
+		} else {
+			boundary = core.DefaultFileAccessPolicy()
+		}
+	}
+	actual := identity.JobFileAccessPolicy()
+	if actual == nil || !core.FileAccessPolicyWithin(*actual, *boundary) {
+		return fmt.Errorf("taxion: Runtime file-access policy exceeds the approved Job or Task boundary")
+	}
+	return nil
+}
+
+func (c *JobRoleController) checkConfiguration(ctx context.Context, graph core.TaskGraph, execution core.RoleExecution, job core.Job) error {
+	if err := c.checkJobBoundary(graph, execution, job); err != nil {
+		return err
+	}
 	if err := c.checkRoleToolPolicy(job); err != nil {
 		return err
 	}
@@ -144,7 +187,7 @@ func (c *JobRoleController) Start(ctx context.Context, executionID string) (stri
 	if err := state.Graph.CheckRoleExecutionStart(executionID, time.Now().UTC()); err != nil {
 		return "", err
 	}
-	if err := c.checkConfiguration(ctx, job); err != nil {
+	if err := c.checkConfiguration(ctx, state.Graph, execution, job); err != nil {
 		return "", err
 	}
 	runtimeTaskID := execution.TaskID
@@ -175,6 +218,9 @@ func (c *JobRoleController) Start(ctx context.Context, executionID string) (stri
 		currentJob, ok := state.Graph.Job(currentExecution.JobID)
 		if !ok || currentJob.Contract == nil {
 			return fmt.Errorf("taxion: Job contract disappeared during Runtime start")
+		}
+		if err := c.checkJobBoundary(state.Graph, currentExecution, currentJob); err != nil {
+			return err
 		}
 		if _, _, err := c.approvedRuntimeConfiguration(currentJob); err != nil {
 			return err
@@ -226,7 +272,7 @@ func (c *JobRoleController) Resume(ctx context.Context, executionID string) erro
 	if err := state.Graph.CheckRoleExecutionResume(executionID, time.Now().UTC()); err != nil {
 		return err
 	}
-	if err := c.checkConfiguration(ctx, job); err != nil {
+	if err := c.checkConfiguration(ctx, state.Graph, execution, job); err != nil {
 		return err
 	}
 	if err := c.runtime.Resume(ctx, execution.RuntimeSessionID); err != nil {
@@ -250,6 +296,9 @@ func (c *JobRoleController) Resume(ctx context.Context, executionID string) erro
 		currentJob, ok := state.Graph.Job(current.JobID)
 		if !ok || currentJob.Contract == nil {
 			return fmt.Errorf("taxion: Job contract disappeared during Runtime resume")
+		}
+		if err := c.checkJobBoundary(state.Graph, current, currentJob); err != nil {
+			return err
 		}
 		if _, _, err := c.approvedRuntimeConfiguration(currentJob); err != nil {
 			return err
@@ -299,7 +348,7 @@ func (c *JobRoleController) Send(ctx context.Context, executionID, prompt string
 	if !ok || job.Contract == nil {
 		return fmt.Errorf("taxion: RoleExecution has no Job contract")
 	}
-	if err := c.checkConfiguration(ctx, job); err != nil {
+	if err := c.checkConfiguration(ctx, state.Graph, execution, job); err != nil {
 		return err
 	}
 	// Resume may take time. Re-read and re-authorize after it returns so the
@@ -326,7 +375,7 @@ func (c *JobRoleController) Send(ctx context.Context, executionID, prompt string
 		if !ok || currentJob.Contract == nil {
 			return fmt.Errorf("taxion: Job contract disappeared before sending the turn")
 		}
-		if err := c.checkConfiguration(ctx, currentJob); err != nil {
+		if err := c.checkConfiguration(ctx, state.Graph, current, currentJob); err != nil {
 			return err
 		}
 		context, contextHash, err := BuildJobExecutionContext(state.Graph, executionID)
@@ -468,6 +517,9 @@ func (c *JobRoleController) authorizeOperation(graph core.TaskGraph, executionID
 	job, ok := graph.Job(execution.JobID)
 	if !ok || job.Contract == nil {
 		return fmt.Errorf("taxion: Runtime operation requires an approved Job contract")
+	}
+	if err := c.checkJobBoundary(graph, execution, job); err != nil {
+		return err
 	}
 	if _, _, err := c.approvedRuntimeConfiguration(job); err != nil {
 		return err

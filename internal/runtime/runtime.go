@@ -63,6 +63,14 @@ type Identity interface {
 	Worktree() string
 }
 
+// JobBoundaryIdentity exposes the resource boundary actually enforced by a
+// provider adapter. Job authorization compares it with the approved contract.
+type JobBoundaryIdentity interface {
+	Identity
+	JobRepository() string
+	JobFileAccessPolicy() *core.FileAccessPolicy
+}
+
 // ConfigurationIdentity exposes the selected tuple without provider SDK types.
 // Authentication, repository access and provider service state do not establish
 // AI contract eligibility or the contractual payer.
