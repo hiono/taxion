@@ -911,7 +911,7 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 	return func(request sdk.PermissionRequest, invocation sdk.PermissionInvocation) (rpc.PermissionDecision, error) {
 		contextRead := false
 		decision := reviewerPermissionDecision(a.config.WorkingDirectory, a.config.FileAccess, a.config.TrackedFiles, request)
-		if a.config.Role == "CODER" {
+		if a.config.Role == "CODER" || a.hasJobEffectAuthorizer() {
 			decision = coderPermissionDecision(a.config.WorkingDirectory, a.config.AvailableTools,
 				a.config.FileAccess, a.config.TrackedFiles, request)
 		}
@@ -965,6 +965,8 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 			} else if err := authorize(context.Background(), invocation.SessionID, effect); err != nil {
 				reason := err.Error()
 				decision = &rpc.PermissionDecisionReject{Feedback: &reason}
+			} else if _, rejected := decision.(*rpc.PermissionDecisionReject); !rejected {
+				decision = &rpc.PermissionDecisionApproveOnce{}
 			}
 		}
 		if handle, err := a.lookup(invocation.SessionID); err == nil {
@@ -980,12 +982,12 @@ func (a *Adapter) permissionHandler() sdk.PermissionHandlerFunc {
 
 func coderPermissionDecision(worktree string, availableTools []string, fileAccess *core.FileAccessPolicy, trackedFiles []string, request sdk.PermissionRequest) rpc.PermissionDecision {
 	reject := func() rpc.PermissionDecision {
-		reason := "Coder permissions are limited to the assigned worktree and file-access policy; tool availability is a provider capability, while Job authorization is enforced separately"
+		reason := "Role permissions are limited to the assigned worktree and file-access policy; tool availability is a provider capability, while Job authorization is enforced separately"
 		return &rpc.PermissionDecisionReject{Feedback: &reason}
 	}
 	switch permission := request.(type) {
 	case *sdk.PermissionRequestRead:
-		return readPermissionDecision(worktree, fileAccess, trackedFiles, "Coder", permission)
+		return readPermissionDecision(worktree, fileAccess, trackedFiles, "Role", permission)
 	case *sdk.PermissionRequestWrite:
 		if permission.RequestSandboxBypass != nil && *permission.RequestSandboxBypass ||
 			permission.ManagedApprovalRequired != nil && *permission.ManagedApprovalRequired {

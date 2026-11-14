@@ -158,9 +158,6 @@ func New(config Config) (*Adapter, error) {
 		if !slices.Contains([]string{"view", "read", "glob", "grep", "create", "edit", "apply_patch", "skill"}, name) {
 			return nil, fmt.Errorf("openacp: unsupported tool %q; shell, MCP and executable extensions are not available", name)
 		}
-		if config.Role != "CODER" && slices.Contains([]string{"create", "edit", "apply_patch"}, name) {
-			return nil, fmt.Errorf("openacp: read-only role cannot enable editing tools")
-		}
 	}
 	config.AvailableTools = slices.Clone(config.AvailableTools)
 	config.FileAccess = core.CloneFileAccessPolicy(config.FileAccess)
@@ -323,8 +320,9 @@ func (a *Adapter) prepare() error {
 		}
 		permission["read"], permission["glob"], permission["grep"] = readPermission, readPermission, readPermission
 	}
-	if a.config.Role == "CODER" && (slices.Contains(a.config.AvailableTools, "create") ||
-		slices.Contains(a.config.AvailableTools, "edit") || slices.Contains(a.config.AvailableTools, "apply_patch")) {
+	if (a.config.Role == "CODER" || a.hasJobEffectAuthorizer()) &&
+		(slices.Contains(a.config.AvailableTools, "create") || slices.Contains(a.config.AvailableTools, "edit") ||
+			slices.Contains(a.config.AvailableTools, "apply_patch")) {
 		permission["edit"] = "allow"
 		if a.hasJobEffectAuthorizer() {
 			permission["edit"] = "ask"
