@@ -97,7 +97,6 @@ func (f *jobRoleRuntimeFake) CheckAuthentication(_ context.Context, account stri
 func (f *jobRoleRuntimeFake) CheckRepositoryAccess(context.Context) error      { return nil }
 func (f *jobRoleRuntimeFake) CheckServiceAccess(context.Context, string) error { return nil }
 
-
 func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.GraphTask, json.RawMessage) {
 	t.Helper()
 	db, request := jobIntakeApprovalFixture(t)
@@ -130,8 +129,8 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 				state.Graph.Jobs[i].Contract = &core.JobContract{
 					Revision: 1, Roles: []string{"PLANNER", "CODER", "REVIEWER"},
 					Acceptance: append([]string(nil), task.Acceptance...), RequiredEvidence: append([]string(nil), task.RequiredEvidence...),
-					Repositories:            []core.JobRepositoryScope{{
-						Repository:              task.Repo, FileAccess: *task.FileAccess,
+					Repositories: []core.JobRepositoryScope{{
+						Repository: task.Repo, FileAccess: *task.FileAccess,
 					}},
 					ValidationCommands:      append([]string(nil), task.ValidationCommands...),
 					ProhibitedEffects:       core.DefaultJobProhibitedEffects(),
