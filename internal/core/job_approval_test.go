@@ -131,20 +131,11 @@ func TestTaskScopeCannotWidenJobRepositoryScope(t *testing.T) {
 	}
 }
 
-func TestTaskRoleAssignmentsMustBelongToJobRoleScope(t *testing.T) {
+func TestLegacyTaskRoleAssignmentsDoNotConstrainJobRoleScope(t *testing.T) {
 	contract := *validJobContract(t)
-	task := GraphTask{ID: "task-a", Repo: "example/repo", Owner: "CODER", Reviewer: "REVIEWER"}
+	task := GraphTask{ID: "task-a", Repo: "example/repo", Owner: "UNLISTED", Reviewer: "ALSO_UNLISTED"}
 	if !TaskWithinJobContract(task, contract) {
-		t.Fatal("assigned Job Roles should be accepted")
-	}
-	task.Owner = "UNLISTED"
-	if TaskWithinJobContract(task, contract) {
-		t.Fatal("Task owner outside the approved Job Role set must be rejected")
-	}
-	task.Owner = "CODER"
-	task.Reviewer = "UNLISTED"
-	if TaskWithinJobContract(task, contract) {
-		t.Fatal("Task reviewer outside the approved Job Role set must be rejected")
+		t.Fatal("legacy Task role assignments must not constrain Job Role participation")
 	}
 }
 

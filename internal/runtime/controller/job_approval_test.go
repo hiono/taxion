@@ -122,30 +122,34 @@ func TestJobContractProposalRequiresExactUserApproval(t *testing.T) {
 	}
 }
 
-func TestProposeJobContractRejectsExistingTaskOutsideRoleScope(t *testing.T) {
+func TestProposeJobContractCanReplaceLegacyTaskRoleAssignments(t *testing.T) {
 	db, job, task, _ := jobRoleFixture(t, true)
+	if task.Owner != "CODER" {
+		t.Fatalf("fixture must retain legacy Task owner for regression coverage: %q", task.Owner)
+	}
 	contract := *job.Contract
 	contract.Roles = []string{"PLANNER", "REVIEWER"}
-	if _, _, err := ProposeJobContract(db, JobContractProposalRequest{
+	proposal, _, err := ProposeJobContract(db, JobContractProposalRequest{
 		JobID: job.ID, Contract: contract, Actor: "planner",
-		Source: "planner", Reason: "remove Coder authority",
-	}); err == nil {
-		t.Fatal("Job contract revision must not exclude an existing Task owner")
+		Source: "planner", Reason: "revise Job Role participation",
+	})
+	if err != nil {
+		t.Fatalf("legacy Task.Owner must not block a new Job Role contract: %v", err)
+	}
+	if !reflect.DeepEqual(proposal.Contract.Roles, contract.Roles) {
+		t.Fatalf("proposed Job Role scope differs: got %v want %v", proposal.Contract.Roles, contract.Roles)
 	}
 	state, err := db.LoadWorkspace()
 	if err != nil {
 		t.Fatal(err)
 	}
 	stored, ok := state.Graph.Job(job.ID)
-	if !ok || stored.Status != core.JobActive || stored.Contract == nil ||
-		!reflect.DeepEqual(stored.Contract.Roles, job.Contract.Roles) {
-		t.Fatalf("rejected Job contract proposal changed current authority: %+v", stored)
+	if !ok || stored.Status != core.JobWaiting || stored.Contract == nil ||
+		!reflect.DeepEqual(stored.Contract.Roles, contract.Roles) {
+		t.Fatalf("new Job contract was not persisted pending reapproval: %+v", stored)
 	}
-	if _, ok := state.Graph.CurrentJobApproval(job.ID); !ok {
-		t.Fatal("rejected Job contract proposal invalidated the current approval")
-	}
-	if task.Owner == "" {
-		t.Fatal("fixture Task must identify an owner")
+	if _, ok := state.Graph.CurrentJobApproval(job.ID); ok {
+		t.Fatal("old approval must not authorize the revised Job Role scope")
 	}
 }
 
