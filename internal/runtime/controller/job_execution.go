@@ -38,6 +38,10 @@ func NewJobRoleController(db *store.Store, worker runtime.Identity) (*JobRoleCon
 	return controller, nil
 }
 
+// checkRoleToolPolicy is a temporary migration guard. It preserves the existing
+// immutable tool-policy binding until ADR-0080's Job-boundary/effect evaluator is
+// wired through every lifecycle and tool preflight path. It is not the target
+// authorization model and must not be expanded as a Role ACL.
 func (c *JobRoleController) checkRoleToolPolicy(job core.Job) error {
 	if job.Contract == nil {
 		return fmt.Errorf("taxion: Job Role tool policy requires an approved Job contract")
@@ -112,7 +116,9 @@ func (c *JobRoleController) checkConfiguration(ctx context.Context, job core.Job
 }
 
 // Start creates and binds a Runtime session only after checking the current
-// Job approval, role allowlist, Task scope, deadline, and execution ceilings.
+// Job approval, Task scope, deadline, and execution ceilings. The current Role/tool
+// allowlist checks below are transitional legacy authorization and must be replaced
+// by ADR-0080 boundary/effect evaluation before this Job-native path is complete.
 func (c *JobRoleController) Start(ctx context.Context, executionID string) (string, error) {
 	if c == nil || c.store == nil || c.runtime == nil {
 		return "", fmt.Errorf("taxion: Job Role controller is not initialized")
@@ -449,6 +455,10 @@ func (c *JobRoleController) Events(ctx context.Context, executionID string) (<-c
 	return events, nil
 }
 
+// authorizeOperation currently combines execution identity/configuration checks
+// with the transitional operation/tool allowlists. The latter must be replaced by
+// ADR-0080's resource-boundary and prohibited-effect evaluation; retain the former
+// identity and immutable-approval checks during that migration.
 func (c *JobRoleController) authorizeOperation(graph core.TaskGraph, executionID, sessionID, operation string, at time.Time) error {
 	execution, err := c.requireBoundExecution(graph, executionID)
 	if err != nil || execution.Status != core.RoleExecutionRunning ||
