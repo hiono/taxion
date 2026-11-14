@@ -539,34 +539,25 @@ func (c *JobRoleController) AuthorizeSessionOperation(ctx context.Context, sessi
 	if err != nil {
 		return err
 	}
-	if operation == "process.exec" && detail != "" {
+	if operation == "process.exec" {
+		if detail == "" {
+			return fmt.Errorf("taxion: shell execution requires the exact Job-approved ValidationCommand")
+		}
 		job, ok := state.Graph.Job(execution.JobID)
 		if !ok || job.Contract == nil {
 			return fmt.Errorf("taxion: shell operation requires an approved Job contract")
 		}
-		intent, exact := false, false
-		candidateExecutable := validationCommandExecutable(detail)
-		for _, approved := range job.Contract.ValidationCommands {
-			approvedExecutable := validationCommandExecutable(approved)
-			if candidateExecutable != "" && candidateExecutable == approvedExecutable {
-				intent = true
-			}
-			if detail == approved {
-				exact = true
-			}
+		exact := slices.Contains(job.Contract.ValidationCommands, detail)
+		if !exact {
+			return fmt.Errorf("taxion: shell execution is not an exact Job-approved ValidationCommand")
 		}
-		if intent && !exact {
-			return fmt.Errorf("taxion: validation command differs from the exact Job-approved command")
+		if !slices.Contains(job.Contract.RoleOperations[execution.Role], "test.run") {
+			return fmt.Errorf("taxion: Role has no approved test.run grant")
 		}
-		if exact {
-			if !slices.Contains(job.Contract.RoleOperations[execution.Role], "test.run") {
-				return fmt.Errorf("taxion: Role has no approved test.run grant")
-			}
-			if err := c.authorizeOperation(state.Graph, execution.ID, sessionID, "process.exec", at); err != nil {
-				return err
-			}
-			return state.Graph.CheckRoleExecutionOperation(execution.ID, "test.run", at)
+		if err := c.authorizeOperation(state.Graph, execution.ID, sessionID, "process.exec", at); err != nil {
+			return err
 		}
+		return state.Graph.CheckRoleExecutionOperation(execution.ID, "test.run", at)
 	}
 	return c.authorizeOperation(state.Graph, execution.ID, sessionID, operation, at)
 }
