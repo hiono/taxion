@@ -25,7 +25,7 @@ func TestJobEffectForPermissionPreservesObservedEffect(t *testing.T) {
 		t.Fatalf("jobEffectForPermission(read) = (%#v, %t)", effect, ok)
 	}
 	unknown := &sdk.PermissionRequestCustomTool{ToolName: "unknown"}
-	if _, ok := jobEffectForPermission(worktree, unknown); ok {
+	if _, ok := jobEffectForPermission(worktree, nil, unknown); ok {
 		t.Fatal("unknown custom tool must not receive an inferred effect")
 	}
 }
