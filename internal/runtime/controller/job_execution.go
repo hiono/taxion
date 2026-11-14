@@ -456,9 +456,9 @@ func (c *JobRoleController) Events(ctx context.Context, executionID string) (<-c
 }
 
 // authorizeOperation currently combines execution identity/configuration checks
-// with the transitional operation/tool allowlists. The latter must be replaced by
-// ADR-0080's resource-boundary and prohibited-effect evaluation; retain the former
-// identity and immutable-approval checks during that migration.
+// with obsolete operation/tool allowlists. Those allowlists are known design debt,
+// not a permanent safety layer. Replace them with ADR-0080 resource-boundary and
+// prohibited-effect evaluation while preserving the independent identity checks.
 func (c *JobRoleController) authorizeOperation(graph core.TaskGraph, executionID, sessionID, operation string, at time.Time) error {
 	execution, err := c.requireBoundExecution(graph, executionID)
 	if err != nil || execution.Status != core.RoleExecutionRunning ||
