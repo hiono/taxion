@@ -137,7 +137,7 @@ func jobRoleFixture(t *testing.T, approve bool) (*store.Store, core.Job, core.Gr
 					ProhibitedEffects:       core.DefaultJobProhibitedEffects(),
 					ApprovalRequiredEffects: core.DefaultJobApprovalRequiredEffects(),
 					Budget:                  core.JobBudget{MaxRoleExecutions: 8, MaxConcurrentExecutions: 3, MaxNanoAIU: 100},
-					Deadline: now.Add(time.Hour), Configuration: configuration,
+					Deadline:                now.Add(time.Hour), Configuration: configuration,
 				}
 				job = state.Graph.Jobs[i]
 				break

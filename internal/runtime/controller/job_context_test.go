@@ -107,7 +107,7 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 			ProhibitedEffects:       core.DefaultJobProhibitedEffects(),
 			ApprovalRequiredEffects: core.DefaultJobApprovalRequiredEffects(),
 			Budget:                  core.JobBudget{MaxRoleExecutions: 4, MaxConcurrentExecutions: 2, MaxNanoAIU: 20},
-			Deadline: now.Add(time.Hour), Configuration: configuration,
+			Deadline:                now.Add(time.Hour), Configuration: configuration,
 		},
 	}
 	proposal, err := core.JobProposal(job)
