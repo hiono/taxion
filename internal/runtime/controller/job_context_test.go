@@ -102,12 +102,12 @@ func TestBuildJobExecutionContextIncludesApprovedJobBoundary(t *testing.T) {
 		ID: "job-authorized", Request: "request", Goal: "goal", Status: core.JobActive,
 		CreatedAt: now, UpdatedAt: now,
 		Contract: &core.JobContract{
-			Revision:                1, Roles: []string{"PLANNER", "REVIEWER"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
+			Revision: 1, Roles: []string{"PLANNER", "REVIEWER"}, Acceptance: []string{"tests pass"}, RequiredEvidence: []string{"test-report"},
 			Repositories:            []core.JobRepositoryScope{{Repository: "example/repo", FileAccess: core.FileAccessPolicy{Level: core.FileAccessCommitted}}},
 			ProhibitedEffects:       core.DefaultJobProhibitedEffects(),
 			ApprovalRequiredEffects: core.DefaultJobApprovalRequiredEffects(),
 			Budget:                  core.JobBudget{MaxRoleExecutions: 4, MaxConcurrentExecutions: 2, MaxNanoAIU: 20},
-			Deadline:                now.Add(time.Hour), Configuration: configuration,
+			Deadline: now.Add(time.Hour), Configuration: configuration,
 		},
 	}
 	proposal, err := core.JobProposal(job)
