@@ -60,7 +60,7 @@ func TestBuildJobExecutionContextIsJobScopedAndExcludesRuntimeBindings(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"private-session-id", "private-config-hash", "runtimeSessionId", "runtimeConfigHash", "authorizationId", "worktree"} {
+	for _, forbidden := range []string{"private-session-id", "private-config-hash", "runtimeSessionId", "runtimeConfigHash", "authorizationId", "worktree", "roleOperations", "\"owner\"", "\"reviewer\""} {
 		if strings.Contains(rendered, forbidden) {
 			t.Fatalf("Role context exposes controller-only field %q", forbidden)
 		}
