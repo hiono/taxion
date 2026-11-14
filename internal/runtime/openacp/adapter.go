@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -554,17 +555,40 @@ func (a *Adapter) write(message any) error {
 	return json.NewEncoder(a.input).Encode(message)
 }
 
+func openACPResourcePath(value string) (string, error) {
+	if !strings.HasPrefix(strings.ToLower(value), "file:") {
+		return value, nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "file") ||
+		(parsed.Host != "" && !strings.EqualFold(parsed.Host, "localhost")) ||
+		parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path == "" {
+		return "", fmt.Errorf("openacp: resource URI is not a local file URI")
+	}
+	return parsed.Path, nil
+}
+
 func canonicalOpenACPJobTarget(worktree, target string) (string, error) {
-	if strings.TrimSpace(target) == "" || filepath.IsAbs(target) ||
-		strings.ContainsAny(target, ":\\") || filepath.Clean(target) != target ||
-		target == "." || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("openacp: resource target is not a canonical relative path")
+	if strings.TrimSpace(target) == "" || strings.TrimSpace(target) != target {
+		return "", fmt.Errorf("openacp: resource target is empty or contains surrounding whitespace")
 	}
 	root, err := filepath.EvalSymlinks(worktree)
 	if err != nil {
 		return "", err
 	}
-	absolute := filepath.Join(root, target)
+	var absolute string
+	if filepath.IsAbs(target) {
+		if filepath.Clean(target) != target {
+			return "", fmt.Errorf("openacp: absolute resource target is not canonical")
+		}
+		absolute = target
+	} else {
+		if strings.ContainsAny(target, ":\\") || filepath.Clean(target) != target ||
+			target == "." || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("openacp: resource target is not a canonical relative path")
+		}
+		absolute = filepath.Join(root, target)
+	}
 	resolved, err := filepath.EvalSymlinks(absolute)
 	if os.IsNotExist(err) {
 		if _, entryErr := os.Lstat(absolute); os.IsNotExist(entryErr) {
@@ -594,9 +618,9 @@ func openACPJobEffect(worktree, kind, name string, input json.RawMessage, availa
 		return runtime.JobEffectRequest{}, false
 	}
 	target := ""
-	for _, key := range []string{"path", "filePath", "file_path"} {
+	for _, key := range []string{"path", "filePath", "file_path", "uri"} {
 		if value, ok := args[key].(string); ok && strings.TrimSpace(value) != "" {
-			target = value
+			target, _ = openACPResourcePath(value)
 			break
 		}
 	}

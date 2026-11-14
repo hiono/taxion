@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"net/url"
 	"path/filepath"
 	"testing"
 
@@ -44,6 +45,10 @@ func TestOpenACPJobEffectRequiresTarget(t *testing.T) {
 		if ok != test.ok || got.Effect != test.want {
 			t.Errorf("openACPJobEffect(%q,%q)=(%#v,%t), want (%q,%t)", test.kind, test.name, got, ok, test.want, test.ok)
 		}
+	}
+	localURI := (&url.URL{Scheme: "file", Path: filepath.Join(worktree, "src", "main.go")}).String()
+	if _, ok := openACPJobEffect(worktree, "read", "read", json.RawMessage(`{"uri":"`+localURI+`"}`), []string{"read"}, []string{"src/main.go"}, false); !ok {
+		t.Fatal("local file URI inside the assigned worktree must be accepted")
 	}
 	allAccess, ok := openACPJobEffect(worktree, "edit", "edit", json.RawMessage(`{"path":"new.go"}`), []string{"edit"}, nil, true)
 	if !ok || allAccess.Target != "new.go" {
