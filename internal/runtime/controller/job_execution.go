@@ -38,10 +38,10 @@ func NewJobRoleController(db *store.Store, worker runtime.Identity) (*JobRoleCon
 	return controller, nil
 }
 
-// checkRoleToolPolicy is a temporary migration guard. It preserves the existing
-// immutable tool-policy binding until ADR-0080's Job-boundary/effect evaluator is
-// wired through every lifecycle and tool preflight path. It is not the target
-// authorization model and must not be expanded as a Role ACL.
+// checkRoleToolPolicy is obsolete transitional authorization. ADR-0080 rejects
+// static Role tool allowlists as Job authority; this method and its callers must
+// be removed when the Job-boundary/effect evaluator replaces the current path.
+// Do not extend this compatibility guard or treat it as the target model.
 func (c *JobRoleController) checkRoleToolPolicy(job core.Job) error {
 	if job.Contract == nil {
 		return fmt.Errorf("taxion: Job Role tool policy requires an approved Job contract")
@@ -115,10 +115,10 @@ func (c *JobRoleController) checkConfiguration(ctx context.Context, job core.Job
 	return nil
 }
 
-// Start creates and binds a Runtime session only after checking the current
-// Job approval, Task scope, deadline, and execution ceilings. The current Role/tool
-// allowlist checks below are transitional legacy authorization and must be replaced
-// by ADR-0080 boundary/effect evaluation before this Job-native path is complete.
+// Start creates and binds a Runtime session after checking the current Job state.
+// The current Role/tool allowlist checks are obsolete transitional authorization,
+// not part of the target Job-native contract. Replace them with ADR-0080 boundary/
+// effect evaluation and remove the legacy checks; do not preserve them as fallback.
 func (c *JobRoleController) Start(ctx context.Context, executionID string) (string, error) {
 	if c == nil || c.store == nil || c.runtime == nil {
 		return "", fmt.Errorf("taxion: Job Role controller is not initialized")
