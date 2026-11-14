@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/url"
 	"os"
+	"net/url"
 	"path/filepath"
 	"testing"
 
@@ -15,8 +15,7 @@ import (
 
 func openACPTestWorktree(t *testing.T) string {
 	t.Helper()
-	worktree := openACPTestWorktree(t)
-	return worktree
+	return t.TempDir()
 }
 
 func TestOpenACPJobEffectRequiresTarget(t *testing.T) {
