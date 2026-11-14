@@ -94,7 +94,7 @@ func TestEvaluateJobEffectRequiresApprovalForConfiguredEffects(t *testing.T) {
 	observation = JobEffectObservation{
 		Provider: "copilot", Capability: "edit", Action: "write",
 		Effects:     []JobEffect{JobEffectRepositoryWrite},
-		Targets:     []JobEffectTarget{{Repository: "example/repo", Path: "src/main.go"}},
+		Targets:     []JobEffectTarget{{Repository: "example/repo", Path: "src/main.go", Tracked: true}},
 		Inspectable: true, SandboxEnforced: true,
 	}
 	if got := contract.EvaluateJobEffect(observation); got != JobEffectRequireApproval {
