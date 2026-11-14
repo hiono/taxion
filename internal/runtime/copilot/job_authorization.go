@@ -60,7 +60,10 @@ func jobEffectForPermission(worktree string, trackedFiles []string, request sdk.
 				Inspectable: true, SandboxEnforced: true,
 			}, true
 		case ManagedSearchToolName:
-			return runtime.JobEffectRequest{}, false
+			return runtime.JobEffectRequest{
+				Effect: core.JobEffectNetworkAccess, Resource: "external:managed-search",
+				Capability: "managed-search", Action: "search", Inspectable: true,
+			}, true
 		default:
 			return runtime.JobEffectRequest{}, false
 		}

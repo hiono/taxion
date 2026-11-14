@@ -26,6 +26,12 @@ func TestJobEffectForPermissionPreservesObservedEffect(t *testing.T) {
 		!effect.Inspectable || !effect.SandboxEnforced || effect.Capability != "file.read" {
 		t.Fatalf("jobEffectForPermission(read) = (%#v, %t)", effect, ok)
 	}
+	search := &sdk.PermissionRequestCustomTool{ToolName: ManagedSearchToolName}
+	effect, ok = jobEffectForPermission(worktree, nil, search)
+	if !ok || effect.Effect != core.JobEffectNetworkAccess || effect.Resource != "external:managed-search" ||
+		effect.Capability != "managed-search" || effect.Action != "search" || !effect.Inspectable {
+		t.Fatalf("jobEffectForPermission(managed search) = (%#v, %t)", effect, ok)
+	}
 	unknown := &sdk.PermissionRequestCustomTool{ToolName: "unknown"}
 	if _, ok := jobEffectForPermission(worktree, nil, unknown); ok {
 		t.Fatal("unknown custom tool must not receive an inferred effect")
