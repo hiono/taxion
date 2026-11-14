@@ -80,8 +80,6 @@ type JobTaskContext struct {
 	ChangeRef          string                `json:"changeRef,omitempty"`
 	ParentID           string                `json:"parentId,omitempty"`
 	DependsOn          []core.TaskDependency `json:"dependsOn,omitempty"`
-	Owner              string                `json:"owner"`
-	Reviewer           string                `json:"reviewer,omitempty"`
 	Status             string                `json:"status"`
 	Priority           string                `json:"priority,omitempty"`
 	Objective          string                `json:"objective"`
@@ -179,7 +177,7 @@ func BuildJobExecutionContext(graph core.TaskGraph, executionID string) (JobExec
 			ID: task.ID, Title: task.Title, Repository: task.Repo, Type: task.Type,
 			Issue: task.Issue, ChangeRef: task.ChangeRef, ParentID: task.ParentID,
 			DependsOn: append([]core.TaskDependency(nil), task.DependsOn...),
-			Owner:     task.Owner, Reviewer: task.Reviewer, Status: string(task.Status),
+			Status: string(task.Status),
 			Priority: task.Priority, Objective: task.Objective,
 			Scope: append([]string(nil), task.Scope...), OutOfScope: append([]string(nil), task.OutOfScope...),
 			Acceptance:         append([]string(nil), task.Acceptance...),
