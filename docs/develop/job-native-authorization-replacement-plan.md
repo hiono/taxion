@@ -5,7 +5,7 @@ Status: Implementation plan for ADR-0080
 
 ## Goal
 
-Replace the transitional Job-native operation/Role allowlists with one approval-boundary and prohibited-effect evaluator. The replacement is cohesive across the Job contract, controller, Runtime callback, provider adapters, tests, and documentation. No Job-to-Task/Role-ACL compatibility translation is introduced.
+Build the Job-native authorization model directly around immutable Job approval, enforceable resource boundaries, prohibited effects, approval-required effects, and runtime containment. Remove transitional operation/Role allowlists and obsolete Task/ReviewFlow authorization execution paths rather than preserving them as a parallel compatibility mode. Historical data may be handled only by explicit, loss-aware migration/read boundaries; it must never become active Job authority.
 
 ## Normative invariants
 
@@ -59,7 +59,7 @@ Start/Resume use the same evaluator for lifecycle capability checks and validate
 
 The evaluator is not a substitute for sandbox enforcement. File paths are normalized and checked against the approved repository and FileAccessPolicy; symlinks and path traversal must not escape the resolved worktree. Network and credentials require enforceable egress/credential broker boundaries. If the adapter/provider cannot expose or enforce a required boundary, the operation is not silently allowed. Runtime ToolPolicy and AvailableTools remain configuration/capability controls only.
 
-## Cohesive implementation sequence
+## Cohesive implementation sequence\n\nThe implementation sequence is not a compatibility migration. When an old domain concept conflicts with the Job model, replace the concept and its active callers; do not stage the old path as a permanent fallback. Test coverage must follow the new product contract, not preserve behavior that the design has rejected.
 
 1. Replace JobContract schema, validation, clone/hash/serialization behavior, fixtures, constructors, and approval tests. Remove active legacy authorization fields and all Job-native references to them.
 2. Define structured Runtime operation request/result and replace JobOperationAuthorizer callback without a string-operation compatibility overload.
@@ -76,5 +76,5 @@ The evaluator is not a substitute for sandbox enforcement. File paths are normal
 - One evaluator and one structured request contract govern lifecycle and tool preflight.
 - Job boundary enforcement is concrete and fail-closed for missing/uninspectable effects; ordinary in-bound reversible work is not blocked merely because a tool or operation name was not predeclared.
 - ValidationCommands retain exact matching.
-- Old Task/ReviewFlow path remains independently safe without being injected into Job-native authorization.
+- No obsolete Task/ReviewFlow execution path remains as a parallel active workflow. Any retained historical-data handling is explicit, loss-aware, non-executable, and cannot grant authority.
 - Tests demonstrate actual Job progress and collaboration, not only isolated authorization predicates.
