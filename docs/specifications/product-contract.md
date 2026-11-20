@@ -67,7 +67,7 @@ Roleは作業責務であり、Role名だけで認証済み実行主体やoperat
 ### 4.3.1 JobQuestionAuthorization
 
 承認済みJob内でRoleからTaskless PLANNERへ質問し、個別のbounded read-only executionが必要な場合は、immutable JobQuestionAuthorizationを発行できます。grantはJobApproval、Planner RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineへ束縛します。QUESTION本文やMessageKindだけから自動発行しません。DRAFT Jobの初期PlanningAuthorizationとは用途と適用条件を分離します。
-### 4.3.1 JobQuestionAuthorization
+
 
 承認済みJob内でRoleからTaskless PLANNERへ質問し、個別のbounded read-only executionが必要な場合は、immutable JobQuestionAuthorizationを発行できます。grantはJobApproval、Planner RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineへ束縛します。QUESTION本文やMessageKindだけから自動発行しません。DRAFT Jobの初期PlanningAuthorizationとは用途と適用条件を分離します。
 
