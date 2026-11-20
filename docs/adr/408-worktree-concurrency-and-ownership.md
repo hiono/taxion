@@ -29,4 +29,4 @@ Accepted
 
 ## Relationship to other ADRs
 
-ADR-201はWorktree ownershipのJobAggregate上の正本、ADR-500はJob権限、ADR-202は所有権と実行状態の不変条件を定義します。
+ADR-400はExecution & Runtimeの基本方針、ADR-201はWorktree ownershipのJobAggregate上の正本、ADR-500はJob権限、ADR-202は所有権と実行状態の不変条件を定義します。
