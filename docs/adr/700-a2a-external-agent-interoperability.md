@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み hiono/obsolete-taxion の redesign/job-centered-role-collaboration branch にある旧ADR-0108を原典とする（blob b0e5e3f070b55d73943a8386a8297dc83a51435a）。A2Aの必須外部protocol方針と、十分性が未実証の設計仮説であることを確認し、新しい履歴へ再確立した。
+アーカイブ済み hiono/obsolete-taxion の設計資料に記録されたA2Aの必須外部protocol方針と、十分性が未実証の設計仮説であることを確認し、新しい履歴へ再確立しました。
 
 ## Context
 
