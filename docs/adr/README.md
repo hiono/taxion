@@ -38,11 +38,11 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 - [ADR-0005: ドメイン不変条件を生成・変更・保存・復元の全経路で強制する](0005-domain-invariants-across-state-paths.md) — Accepted
 - [ADR-0006: Taxion内部の6 Actor通信をJobMessageへ統一する](0006-jobmessage-six-actor-communication.md) — Accepted
 - [ADR-0007: 外部Agent相互運用の必須protocolをA2Aに一本化する](0007-a2a-external-agent-interoperability.md) — Accepted
-- [ADR-0008: Worktree所有権とRoleExecutionの安全な移転](0008-worktree-ownership-and-concurrency.md) — Accepted
-- [ADR-0009: 検証証拠の水準とJob完遂の受入れ](0009-evidence-and-product-acceptance.md) — Accepted
+- [ADR-0008: Jobの開発作業をGit Worktree単位で分離し、Roleを逐次引き継ぐ](0008-worktree-concurrency-and-ownership.md) — Accepted
+- [ADR-0009: 現行仕様・開発計画・履歴・検証証拠の正本を分離する](0009-specification-plan-history-and-evidence.md) — Accepted
 
 ## 原典と来歴
 
-ADR-0001は旧ADR-0088、ADR-0002は旧ADR-0081、ADR-0003は旧ADR-0083と旧ADR-0077を原典として再構成しました。ADR-0004は旧ADR-0080、0073、0066、0067のAccepted decisionを確認して再確立しました。ADR-0005は旧ADR-0079、ADR-0006は旧ADR-0087、ADR-0007は旧ADR-0108を原典として再確立しました。ADR-0008は旧ADR-0082のWorktree ownership / concurrency decisionを、ADR-0009は旧ADR-0107とADR-0085の候補実装比較・証拠区分・品質ゲートを新Taxion向けに再構成しました。
+ADR-0001は旧ADR-0088、ADR-0002は旧ADR-0081、ADR-0003は旧ADR-0083と旧ADR-0077を原典として再構成しました。ADR-0004は旧ADR-0080、0073、0066、0067のAccepted decisionを確認して再確立しました。ADR-0005は旧ADR-0079、ADR-0006は旧ADR-0087、ADR-0007は旧ADR-0108を原典として再確立しました。ADR-0008は旧ADR-0082のWorktree ownership / concurrency decisionを、ADR-0009は旧ADR-0085の仕様・計画・履歴・検証証拠の分離を新Taxion向けに再構成しました。ADR-0010は旧ADR-0107の候補実装比較と現在の品質ゲートを製品受入れへ適用します。
 
 旧Taxionと旧Taxion-PoCのGit履歴、Commit、Issue / PR履歴は移植していません。旧リポジトリの原文は読み取り専用の根拠資料であり、旧番号は原典を識別する参照としてのみ使用します。旧Taxion-PoCの初期READMEは実験専用と記載していましたが、後続の旧Taxion ADR-0107が候補実装ベースラインとして位置付けを変更した経緯を保持します。旧コードの採用はADR-0000およびADR-0002のprovenance・設計適合性・安全性・受入れ条件に従って別途判断します。
