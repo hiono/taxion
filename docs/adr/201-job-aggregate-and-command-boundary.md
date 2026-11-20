@@ -111,6 +111,10 @@ Recoveryはdurable intentとobservationを先に照合します。snapshot / res
 - 汎用分散transaction coordinator、汎用lock graph、全Provider共通のsession manager、推測的retry、旧TaskGraphの再導入は行いません。
 - 旧Task / Dispatch / ReviewFlowの実行・認可経路やデータ形式を新しい実行経路へ持ち込みません。
 
+## Security and operational impact
+
+JobAggregateへの変更はexpected revisionとidempotency identityを持つCommand境界を通し、Job外の直接更新経路を設けません。JobApprovalとPlanningAuthorizationは異なるimmutable factsとして保持し、権限の意味と再検証はADR-500に従います。Provider operationの結果がUNKNOWNの場合は推測で再送せず、Worktree ownershipを安全な停止・結果照合まで保持します。Worktreeの排他と移転条件はADR-408に従います。
+
 ## Alternatives considered
 
 - **旧TaskGraphへJob情報を追加して維持する:** 異なる関係とmutation境界を混在させ、旧実行経路を温存するため採用しません。
