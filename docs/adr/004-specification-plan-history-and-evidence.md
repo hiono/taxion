@@ -60,6 +60,10 @@ GitHub Actions等の実行記録を実行結果の正本とします。Issue / P
 
 CI結果はそのRunが実際に検証したSHAにのみ有効です。後続commitでHEADが更新された場合、以前の成功結果を新しいHEADの検証結果として扱いません。未実施のテスト・Provider実行・配布検証を成功扱いしません。
 
+## Security and operational impact
+
+Dropboxの計画文書は既存のアクセス制御を維持し、既存フォルダー・文書名・保存先を指示なく変更しません。取得不能な計画内容を過去の会話やキャッシュから推測しません。Issue / PRには秘密情報を記録せず、CI証拠は対象HEAD SHAとRun IDを対応付けます。一時資料は専用の一時領域に分離し、恒久的なDropbox文書やRepository文書へ混在させません。
+
 ## Alternatives considered
 
 - **Dropboxの特定フォルダーや文書名を正本として固定する:** 保存先の変更を伴わず既存構成を維持する必要があるため、サービス内の具体的なパスや文書名はADRに固定しません。
