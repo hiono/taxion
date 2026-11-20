@@ -8,140 +8,51 @@ Accepted
 
 ## Context
 
-Job、Task、RoleExecution、Role間通信、Provider実行、Worktree所有権、成果、証拠を単一の汎用Graphや可変Workspaceへ混在させると、異なる関係の意味が曖昧になり、状態変更・認可・永続化の迂回路が生じます。
-
-Taxionでは、利用者の意図と成果を保持するJobを継続単位とし、作業分解、担当の実行、協調、外部Providerの事実、成果と証拠を明確な責務で関連付ける必要があります。
+Job、Task、RoleExecution、通信、Provider実行、Worktree、成果・証拠を別々の可変モデルへ分散すると、関係の意味と状態変更の責務が曖昧になります。Taxionには、利用者の意図からJob完了までを一貫して保持するドメイン正本が必要です。
 
 ## Decision
 
 **JobAggregateを、Jobの意図、承認、協調、実行事実、成果および証拠の唯一のドメイン正本とします。**
 
-### 1. JobとTaskとRoleExecution
+### Job model
 
-- Jobは利用者の依頼、目的、制約、承認、協調履歴、実行状態、成果および受入れ証拠を保持する永続的な作業単位です。
-- Jobは最初のPlanner呼出しより前に作成します。初期状態はDRAFTとし、利用者の原文依頼を保存します。Goalは未設定でもよく、Plannerが提案する契約revisionに含めます。
-- TaskはJob内の任意の作業分解です。Taskは必須のJobIDを持ちます。Job側にTaskIDsやRootTaskIDの逆方向所有indexを持たせません。
-- RoleExecutionはRoleによる個々の実行です。JobIDを必須とし、TaskIDは任意とします。Job全体のPlanningを行うTaskless PlannerはTaskIDを持ちません。
-- IntakeProvenance、JobContractRevision、JobApproval、PlanningAuthorization、JobQuestionAuthorization、JobProgressNote、JobMessage、Provider operation intent / observation、Worktree ownership、JobOutput、JobEvidence、JobUsageおよびEffect decisionはJobの責務に属します。
-- IntakeProvenanceは認証済みPrincipal、server-derived ingress source、受信時刻、request identity、原文依頼digestを保持するappend-only factです。認証の信頼源とPrincipal生成境界はADR-501に従います。
-- JobProgressNoteはJob内の進捗・継続に必要な要点を出所と時刻に結び付けて保持するappend-only factです。可変計画の正本や独立Memory storeの代替にはしません。
-- GoalはPlannerが提案するJobContractRevisionに含め、JobApprovalを作成する前に非空であることを検証します。Goal未設定のDRAFT Jobは、実装Taskや実装RoleExecutionを許可しません。
-- WorkspaceはJobAggregateの集合を保持する保存境界です。全Jobを一つの可変TaskGraphへ集約しません。
+- Jobは利用者の依頼、目的、制約、承認、協調履歴、実行状態、成果、証拠を保持する永続的な作業単位です。最初のPlanner呼出し前にDRAFTとして作成し、原文依頼を保存します。
+- TaskはJob内の任意の作業分解であり、必ずJobIDを持ちます。
+- RoleExecutionはRoleによる個々の実行であり、JobIDを持ちます。Taskless PlannerはTaskIDを持ちません。
+- Taskの親子包含、Task間の前提条件、Role間の協調は別の関係として扱います。Role間協調はappend-only JobMessageで記録します。
+- IntakeProvenance、JobContractRevision、JobApproval、PlanningAuthorization、JobQuestionAuthorization、JobProgressNote、JobMessage、Provider operation / observation、Worktree ownership、JobOutput、JobEvidence、JobUsage、Effect decisionはJobAggregateに属します。
+- IntakeProvenanceは認証済みPrincipal、server-derived ingress source、受信時刻、request identity、原文依頼digestを保持するappend-only factです。認証境界はADR-501に従います。
+- GoalはJobContractRevisionに含め、承認前に確定します。Goal未設定のDRAFT Jobは実装Taskを開始しません。
 
-### 2. Task依存関係とRole協調関係を分離する
+### Command boundary
 
-- Taskの親子包含とTask間の前提条件は別の関係として扱います。
-- Role間の協調はJob内のappend-onlyなJobMessageと実行事実で表します。
-- JobMessage、Reply、HandoffはTask依存関係を生成・解決しません。
-- RoleExecutionの親子・起動元を別々の重複edgeとして永続化せず、Handoff JobMessage / eventを因果関係のcanonical representationとし、recipient executionはTargetExecutionIDで関連付けます。ParentExecutionID等の参照ビューはcanonical messageから導出します。別indexを保持する場合はsource / target / messageの同一性と整合性を検証します。
-- Taskの親子包含と前提条件は別のtyped relationshipです。完了準備判定は両方を考慮し、Schedulerは明示的な前提条件だけを使います。
-- SchedulerはTaskの明示的な依存関係だけを用います。メッセージやRoleExecutionの親子関係をTask依存関係として解釈しません。
+- JobAggregateの変更はexpected revisionと安定したidempotency identityを持つ明示的Commandで実行します。
+- 一つのJobに属するCommandと関連factsは一つのtransactionで確定します。同じCommand ID・同じ内容の再送は同じreceiptへ収束させ、異なる内容の再利用は拒否します。
+- Job、Task、RoleExecution、Message、Provider operation、Worktree ownership、Output、Evidence、Usage、Effect decisionに独立したproduction write pathを設けません。
+- Coreはドメイン整合性を検証し、Controllerは認証・承認・Provider等の外部事実を検証します。
 
-### 3. Handoffは受信側のTask scopeを明示する
+### Authorization and collaboration
 
-- Handoffは受信Roleと受信Task scopeを明示します。
-- 送信元RoleExecutionのTaskIDを受信側へ暗黙継承しません。
-- Taskless PlannerへのJob-level相談と、同一Job内のTask-bound作業を区別します。
-- 受信Taskは同じJobに属し、Job承認範囲を拡張しません。
-- 情報不足や任意metadata欠落だけを理由に協調を拒否しません。identity、認可、scope、重複実行、禁止副作用の検査は維持します。
+- JobApproval、PlanningAuthorization、JobQuestionAuthorizationは異なるimmutable factsとして保持します。発行条件と権限はADR-500に従います。
+- Question / Answerは情報交換であり、Taskや実行責任を移転しません。Handoffは受信RoleとTask scopeを明示するJobAggregate Commandとします。
+- Handoffは送信側Providerの停止、terminal result / usage、成果identity、Worktree ownership releaseを確認してから受信側実行を許可します。
 
-### 4. Authorization facts
+### Provider operations
 
-- JobAggregateはJobContractRevision、JobApproval、PlanningAuthorization、JobQuestionAuthorizationをJobに属する永続的な事実として保持します。
-- JobApprovalとPlanningAuthorizationは別のimmutable recordとし、互いに代替・昇格しません。
-- 各grantの発行条件、束縛対象、許可effect、再検証、失効および禁止副作用はADR-500で定義します。
-- grantの作成・変更・失効はJobAggregateへの明示的Commandとして記録します。
+- 外部Provider呼出し前にTaxion生成のimmutable OperationIDとintentをJobAggregateへ保存します。
+- Provider observationsはOperationIDに束縛したappend-only factsとします。RoleExecutionの状態とProviderのsession、turn、stop、result、usageは別の事実として扱います。
+- operation結果がUNKNOWNの場合はそのまま保持し、Provider側の冪等性または照合可能性が確認できるまで再送しません。
+- Worktree予約を伴うStartは、予約とStart intentを同じJob transactionで確定してからProviderを呼び出します。
+- Provider停止証拠、最終結果、Usageが照合されるまでWorktreeを保持します。
 
-### 5. Providerの論理状態と外部事実を分離する
+### Outputs and completion
 
-- RoleExecution stateはTaxion内部の論理的な作業状態を表します。
-- Provider session / process state、turn completion、Provider stop、event / usage persistence、result capture、output identity、evidence verificationは別々の事実です。
-- 外部Provider operationは、呼出し前にTaxion生成のimmutable OperationIDとintentをJobAggregateへ永続化します。
-- Provider observationsはOperationIDに束縛したappend-only factsとします。
-- SQLite transactionの結果とProvider operationの結果を別の状態軸として扱います。
-- operationの結果が不明な場合はUNKNOWNとして保持し、Providerが同じOperationIDの冪等性または照合可能性を証明しない限りblind resendしません。
-
-#### Operation intentと必要なProvider observation
-
-外部呼出しの前に、Taxion生成のimmutable OperationIDとintentをJobAggregateへ永続化します。Worktree予約が必要なStartでは、Worktree予約とStart intentを同じJob transactionで確定します。Provider呼出しはtransactionのcommit確認後に行い、commit結果がUNKNOWNの場合はOperationIDと予約を読み戻してから判断します。
-
-| Operation | 呼出し前に固定するintent | 次へ進むために必要な観測 |
-|---|---|---|
-| Start | Job / RoleExecution / Provider / configuration identity、start request hash | Provider session identityと受理、または未解決Start |
-| Resume | 保存済みの同一session identityとRoleExecution binding | 同一sessionへの再接続確認。replacement sessionを旧Executionへ偽装しない |
-| Send | session、stable turn identity、prompt hash | Provider受理後のterminal turn observation。受理だけでは完了しない |
-| Stop | session、停止理由、terminal intent | Adapter固有のstop evidenceとassurance level。cancel通知だけでは停止証明にならない |
-| Effect | 承認済みJobEffect、canonical target/resource、originating turn | Provider / hostが実際のeffectと結果を観測した証拠 |
-
-Sendのterminal event、Usage、最終出力は別のfactsとして保存し、turn identityとsession bindingを照合します。Providerへ到達した可能性がありreceiptやterminal eventが未保存の場合、自動再送しません。Stop intentは呼出し前に保存し、RoleExecutionのterminal status、Stop APIの成功戻り値、cancel通知だけで停止を確定しません。Providerが書込みを継続できない証拠と最終結果・Usageの照合が永続化されるまでWorktreeを保持します。
-
-各Provider Adapterは、少なくとも次の能力を個別に宣言・検証します: OperationIDによるStart idempotency / lookup、process再起動後のsession reattachment、turn identityによるSend idempotency / lookup、event replay / cursor continuity、stop proof、lost event後のfinal output取得、Usage identity / completeness / deduplication。未対応能力は未対応として明示し、楽観的に補完しません。
-
-Model Call / Tool CallはRoleExecution、turn、Provider operationまたはEffect observationへ相関し、観測可能な呼出しの追跡をJob内に保持します。Providerが報告しない呼出しや欠落eventがある場合はcoverage gapを記録し、全呼出しを追跡済みと宣言しません。
-
-Recoveryはdurable intentとobservationを先に照合します。snapshot / restoreは、未解決Provider operation、稼働可能性のあるProvider writer、未照合turn result / Usage、保持中またはquarantine中のWorktree ownerがない場合に限ります。
-- RoleExecutionのWAITING、SUSPENDED、CANCEL_REQUESTEDまたはterminal stateをProvider停止の証拠とみなしません。
-
-### 6. Worktree ownership
-
-- WorktreeOwnershipはJobAggregateが保持するTask単位の永続的な所有事実です。
-- Worktreeの割当て、同一Worktreeの排他、Roleの逐次引継ぎ、Reviewerのread-only boundary、停止証拠、quarantine、独立Taskの並行性はADR-408で定義します。
-- Worktree ownershipの変更はJobAggregateへの明示的Commandとして確定し、Job外の独立した所有状態を正本にしません。
-
-### 7. すべてのJob変更を明示的Command境界へ集約する
-
-- Job、Task、RoleExecution、JobProgressNote、JobMessage、Provider operation、Worktree ownership、JobOutput、JobEvidence、JobUsage、Effect decisionの変更はJobAggregateへの明示的Commandとして実行します。
-- Commandはexpected aggregate revisionと安定したidempotency identityを持ちます。
-- 一つのJobに対するCommandと関連レコードは一つのtransactionで原子的に確定します。
-- 同じCommand IDと同じ内容の再送は同じreceiptへ収束させます。同じCommand IDで異なる内容を送信した場合は拒否します。
-- 任意のWorkspace callbackや直接slice変更を、productionの代替write APIとして残しません。
-- 旧GraphTask / TaskGraph、履歴projection、旧Task / Dispatch / ReviewFlow workspace format、decoders、validators、migration readers、fixturesをread-only archiveやcompatibility readerとして残しません。具体的な現行Job-native use caseが後から必要になった場合は、必要なfacts、consumer、retention、Job-native schemaを別ADRで定義します。旧approvalやexecution receiptを新Job authorityへ変換しません。
-- 旧Memory subsystemの独立DB / schema、CLI / API、migration、Snapshot / Inspect / Restore、旧Task / Dispatch参照を新Taxionへ持ち込みません。旧MemoryデータをJob権限、JobApproval、PlanningAuthorization、JobContract、RoleExecutionまたはGraph edgeへ自動変換・復元しません。必要なJobの目的、計画、質問・回答、判断、成果、証拠、利用量、Provider観測はJob-native recordsとしてJobAggregateに保持します。
-- Coreは不変条件と内部整合性を検証し、Controllerは認証・承認・Providerの外部事実を検証します。ドメイン検証を外部実行の証拠と取り違えません。
-
-### 8. 成果・証拠とJob完了
-
-- JobOutput、JobEvidence、JobUsageはJobAggregateが保持する永続的な事実です。
-- 成果・証拠はimmutable identityとJob / Task / producing RoleExecution / verifierのprovenanceへ束縛します。
-- Job完了は、必須条件の確認結果を伴う明示的なJobAggregate Commandとしてのみ成立します。
-- 証拠水準、製品受入れシナリオ、Job完了の受入条件はADR-800で定義します。
-
-## Implementation boundaries
-
-- SQLiteの物理schema、table名、codec、Command型名は実装判断とします。ただし、JobAggregate単位のatomic transaction、expected revision、idempotent command identityおよび本ADRの不変条件を弱めてはなりません。
-- 汎用分散transaction coordinator、汎用lock graph、全Provider共通のsession manager、推測的retry、旧TaskGraphの再導入は行いません。
-- 旧Task / Dispatch / ReviewFlowの実行・認可経路やデータ形式を新しい実行経路へ持ち込みません。
-
-## Security and operational impact
-
-JobAggregateへの変更はexpected revisionとidempotency identityを持つCommand境界を通し、Job外の直接更新経路を設けません。JobApprovalとPlanningAuthorizationは異なるimmutable factsとして保持し、権限の意味と再検証はADR-500に従います。Provider operationの結果がUNKNOWNの場合は推測で再送せず、Worktree ownershipを安全な停止・結果照合まで保持します。Worktreeの排他と移転条件はADR-408に従います。
-
-## Alternatives considered
-
-- **旧TaskGraphへJob情報を追加して維持する:** 異なる関係とmutation境界を混在させ、旧実行経路を温存するため採用しません。
-- **Task dependency、Role lineage、Message、Resource ownershipを一つの汎用Graph edgeへ統合する:** 関係の意味が異なり、Schedulerが誤ったedgeを解釈するため採用しません。
-- **JobQuestionAuthorizationをQUESTION種別から自動生成する:** 通信intentが実行権限を作成するため採用しません。
-- **RoleExecution statusをProvider stop/resultの証拠として扱う:** 論理状態と外部実行事実が異なるため採用しません。
-- **旧Task-era形式をread-only decoder / migration readerとして残す:** 新しい正本に旧モデルの責務と保守負担を残すため採用しません。
-
-## Acceptance criteria
-
-- Jobのすべての変更がexpected revisionとidempotency identityを持つJobAggregate Commandを通ります。
-- Task dependencyとRole collaborationが別の関係として保存・評価されます。
-- PlanningAuthorizationとJobQuestionAuthorizationが異なる用途・scopeで発行され、JobApprovalへ昇格しません。
-- Provider operation intentが外部副作用より前に永続化され、UNKNOWNを推測で解消しません。
-- Provider capabilityが明示され、stop proof / result / usage照合前にWorktreeを解放しません。
-- 旧TaskGraph等の実行・履歴projection・decoder・migration経路を新Taxionへ持ち込みません。
+成果と証拠はimmutable identityおよびJob / Task / producing RoleExecution / verifierのprovenanceへ束縛します。Job完了は、必須条件の確認結果を伴う明示的Commandとして成立させます。受入条件はADR-800に従います。
 
 ## Consequences
 
-- 実装・テストはJobAggregateと明示的Commandを正本として構築します。
-- PlannerからCoder、Reviewer、修正、人間の介入、Job完了までを同じJobで追跡します。
-- 合成テストはドメイン契約の証拠に限定し、実Provider・再起動復旧・実Job完遂の証拠と区別します。
-- 物理schemaや保存技術の詳細は、実際の製品要件を満たす最小の実装を選択します。
+Planner、Coder、Reviewer、修正、人間の介入、Job完了を同じJobで追跡できます。物理schema、table名、codec、Command型名は実装要件に応じて選択します。
 
 ## Relationship to other ADRs
 
-- ADR-100は製品目的を定義します。
-- ADR-101は旧設計の制約を温存せず再構築する原則を定義します。
-- 認可、全経路の不変条件、6 Actor通信、Worktree並行性、外部Agent protocol、仕様・履歴・証拠の保存先は下位ADRで具体化します。
+ADR-202は不変条件、ADR-300は内部通信、ADR-408はWorktree、ADR-500は権限、ADR-501はintake identity、ADR-800は証拠と完了条件を定義します。
