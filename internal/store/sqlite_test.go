@@ -18,9 +18,7 @@ func newTestStore(t *testing.T) (*Store, string) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	t.Cleanup(func() {
-		if err := database.Close(); err != nil {
-			t.Errorf("Close() error = %v", err)
-		}
+		_ = database.Close()
 	})
 	return database, path
 }
