@@ -8,6 +8,18 @@ Date: 2026-11-20
 
 | 旧ADR | 新Taxionの対応先 | 再確立した判断 | 引き継がないもの・明示した扱い |
 |---|---|---|---|
+| ADR-0040 | [ADR-800](800-evidence-levels-and-product-acceptance.md) | 効率・通信量・費用の改善は、成果品質、安全性、必須検証を維持したうえで評価する。 | 旧workflow evaluate、旧評価原稿、実験結果・進捗は移植しない。 |
+| ADR-0043 | [ADR-500](500-job-authority-and-prohibited-effects.md) | Job承認境界、read-onlyの強制、権限と観測の分離を維持する。 | 旧ApprovalBundle、旧Flow gate、旧Task専用認可は移植しない。 |
+| ADR-0050 | [ADR-201](201-job-aggregate-and-command-boundary.md) | 進捗・継続に必要な記録はJobへ出所付きappend-only factとして保持し、自己申告を検証済み証拠へ昇格させない。 | Copilot Reviewer専用progress tool、旧review continuation実装は移植しない。 |
+| ADR-0055 | [ADR-101](101-rebuild-over-legacy-constraints.md)、[ADR-500](500-job-authority-and-prohibited-effects.md) | 承認済みJobの目的・scope内で手段を適応させ、実質的な目的・scope・権限変更は再承認する。 | 旧Flow・旧repair枠・旧CLIの具体的な実装規則は移植しない。 |
+| ADR-0056 | [ADR-201](201-job-aggregate-and-command-boundary.md)、[ADR-800](800-evidence-levels-and-product-acceptance.md) | 入力Artifactのidentity、検証証拠、Coderの実行成功を別の事実として扱う。 | 旧ArtifactTarget型、旧workflow command、旧Dispatchの不存在を現行APIとして移植しない。 |
+| ADR-0057 | [ADR-500](500-job-authority-and-prohibited-effects.md) | 既存の承認・証拠で解決できる事項はControllerが照合し、新しい人間判断が必要な場合に限り差分をまとめてエスカレーションする。 | 旧Controller/Flowの差戻し経路、旧CLI、旧実装進捗は移植しない。 |
+| ADR-0061 | [ADR-800](800-evidence-levels-and-product-acceptance.md) | Modelを使わない決定的な検証も証拠として扱い、実行主体と検証範囲を明示する。 | 旧Model-free Task / Dispatch実装は移植しない。 |
+| ADR-0065 | [ADR-500](500-job-authority-and-prohibited-effects.md)、[ADR-800](800-evidence-levels-and-product-acceptance.md) | 診断目的の観測結果と品質検証の合格を分離し、診断の完了を品質PASSにしない。 | 旧review-input.v2、validationMode、旧workflowのstatus値は移植しない。 |
+| ADR-0070 | [ADR-500](500-job-authority-and-prohibited-effects.md) | Credentialを伴う外部操作は正確な対象・権限・実行境界に束縛し、Agentの自己申告で資格情報を扱わない。 | 旧credential operation registryや旧provider実装を移植しない。 |
+| ADR-0071 | [ADR-201](201-job-aggregate-and-command-boundary.md)、[ADR-800](800-evidence-levels-and-product-acceptance.md) | Coderの受理済み成果、immutable target identity、Reviewerの独立評価と証拠の来歴を分離して保持する。 | A/B/T/Pの旧Flow固有schema、reconcile-stopped、旧Reviewer再開経路は移植しない。 |
+| ADR-0072 | [ADR-201](201-job-aggregate-and-command-boundary.md)、[ADR-800](800-evidence-levels-and-product-acceptance.md) | Reviewerの正式な失敗結果を成功へ書き換えず、後から得た負の指摘は別のappend-only factとして扱う。 | 旧workflow record-failed-review、旧Dispatch / Session時刻判定は移植しない。 |
+| ADR-0078 | [ADR-106](106-constrained-design-decision-method.md) | 複数候補の責務割当を制約付き最適化で比較し、セキュリティ・認可・整合性等の必須条件をハード制約として維持する。 | 旧Task/Dispatch/ReviewFlowの責務マッピング表や旧分析ログは移植しない。 |
 | ADR-0062 | [ADR-811](811-agent-harness-eight-capabilities.md)、[Product Contract](../specifications/product-contract.md)、[Acceptance Tests](../test-specs/product-acceptance.md) | H1〜H8およびH1.1〜H8.3を採択済み製品能力要求として維持。実装委譲先・対応構成・実動作証拠を確認する。 | 旧コード上の充足評価、旧Issue番号、旧進捗・未達記録は移植しない。 |
 | ADR-0066 | [ADR-500](500-job-authority-and-prohibited-effects.md)、[ADR-202](202-domain-invariants-across-state-paths.md) | Observation / Conformance / Admission / Execution Permissionを分離し、判定・強制・検証を区別する。 | 旧CLI workflow、旧Task / Dispatch専用型、旧実装の完了状態は新Taxionの仕様にしない。 |
 | ADR-0067 | [ADR-500](500-job-authority-and-prohibited-effects.md) | 情報不足や任意metadata欠落だけでRole協調を拒否しない。必要な質問と仮定を用い、安全・identity・認可境界はfail-closedとする。 | 旧Clarification / Dispatch実装や固定質問schemaは再導入しない。 |
