@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み hiono/obsolete-taxion の redesign/job-centered-role-collaboration branch にある旧ADR-0082を原典とする（blob c122048abdd7f55a926baf18cf47e60c55433231）。Job-native concurrency、Worktree ownership、Reviewer handoffおよびRepository共通Git metadataの制約を確認し、新しい履歴へ再確立した。
+アーカイブ済み hiono/obsolete-taxion の設計資料に記録されたJob-native concurrency、Worktree ownership、Reviewer handoffおよびRepository共通Git metadataの制約を確認し、新しい履歴へ再確立しました。
 
 ## Context
 
