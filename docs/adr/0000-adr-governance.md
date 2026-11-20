@@ -30,20 +30,24 @@ ADRに記録しないもの:
 
 ### 2. ADRの必須構成
 
-各ADRは原則として次の構成を持つ。
+各ADRは次の規則に従う。
 
+必須項目:
 1. Title and number
 2. Date
 3. Status: Proposed / Accepted / Rejected / Superseded / Deprecated
 4. Context
 5. Decision
 6. Consequences
-7. Security and operational impact（該当する場合は必須）
-8. Alternatives considered
-9. Relationship to existing ADRs
-10. Acceptance criteria（実装・受入条件を規定する場合）
+7. Alternatives considered
+8. Relationship to other ADRs
 
-Decisionは採用する規則を肯定形で明示する。Contextは問題と制約を説明し、Consequencesは採用による影響を記述する。実装の時点依存状態は含めない。
+条件付き項目:
+- Source decision(s): 既存ADR・原典・外部判断を再確立する場合は必須とする。
+- Security and operational impact: セキュリティまたは運用への影響がある場合は必須とする。
+- Acceptance criteria: 実装・受入条件を規定する場合は必須とする。製品受入れシナリオの詳細はテスト仕様へ委ねる。
+
+Decisionは採用する規則を肯定形で明示する。Contextは問題と制約を説明し、Consequencesは採用による影響を記述する。Alternatives consideredには、判断に影響した実質的な代替案と不採用理由を記録する。比較対象がない場合も、その旨と理由を明記し、見出しを省略しない。Relationship to other ADRsには、依存・具体化・置換・非変更の関係を記録する。実装の時点依存状態は含めない。
 
 ### 3. 番号とファイル
 
