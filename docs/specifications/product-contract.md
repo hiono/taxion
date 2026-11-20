@@ -2,7 +2,7 @@
 
 Version: 1.0
 Date: 2026-11-20
-Normative decisions: ADR-100〜ADR-811
+Normative decisions: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-201, ADR-202, ADR-300, ADR-408, ADR-500, ADR-700, ADR-800, ADR-811
 
 ## 1. Purpose and scope
 
@@ -68,8 +68,6 @@ Roleは作業責務であり、Role名だけで認証済み実行主体やoperat
 
 承認済みJob内でRoleからTaskless PLANNERへ質問し、個別のbounded read-only executionが必要な場合は、immutable JobQuestionAuthorizationを発行できます。grantはJobApproval、Planner RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineへ束縛します。QUESTION本文やMessageKindだけから自動発行しません。DRAFT Jobの初期PlanningAuthorizationとは用途と適用条件を分離します。
 
-
-承認済みJob内でRoleからTaskless PLANNERへ質問し、個別のbounded read-only executionが必要な場合は、immutable JobQuestionAuthorizationを発行できます。grantはJobApproval、Planner RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineへ束縛します。QUESTION本文やMessageKindだけから自動発行しません。DRAFT Jobの初期PlanningAuthorizationとは用途と適用条件を分離します。
 
 ### 4.4 Execution and collaboration
 
