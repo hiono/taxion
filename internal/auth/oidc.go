@@ -56,10 +56,10 @@ func ConfigFromEnv() (OIDCConfig, error) {
 		Timeout:     5 * time.Minute,
 	}
 	if config.Issuer == "" {
-		return OIDCConfig{}, errors.New("TAXION_OIDC_ISSUER is required")
+		return OIDCConfig{}, errors.New("TAXION_OIDC_ISSUERを設定してください")
 	}
 	if config.ClientID == "" {
-		return OIDCConfig{}, errors.New("TAXION_OIDC_CLIENT_ID is required")
+		return OIDCConfig{}, errors.New("TAXION_OIDC_CLIENT_IDを設定してください")
 	}
 	if config.Audience == "" {
 		config.Audience = config.ClientID
@@ -89,28 +89,28 @@ func NewOIDCAuthenticator(config OIDCConfig) (*OIDCAuthenticator, error) {
 func (c OIDCConfig) Validate() error {
 	issuer, err := url.Parse(c.Issuer)
 	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
-		return errors.New("TAXION_OIDC_ISSUER must be an absolute HTTPS URL")
+		return errors.New("TAXION_OIDC_ISSUERにはHTTPSの絶対URLを設定してください")
 	}
 	if strings.TrimSpace(c.ClientID) == "" {
-		return errors.New("TAXION_OIDC_CLIENT_ID is required")
+		return errors.New("TAXION_OIDC_CLIENT_IDを設定してください")
 	}
 	if strings.TrimSpace(c.Audience) == "" {
-		return errors.New("TAXION_OIDC_AUDIENCE is required")
+		return errors.New("TAXION_OIDC_AUDIENCEを設定してください")
 	}
 	redirect, err := url.Parse(c.RedirectURI)
 	if err != nil || redirect.Scheme != "http" || redirect.User != nil || redirect.RawQuery != "" || redirect.Fragment != "" || redirect.Path != callbackPath {
-		return errors.New("TAXION_OIDC_REDIRECT_URI must be an HTTP loopback URL ending in /callback")
+		return errors.New("TAXION_OIDC_REDIRECT_URIには/callbackで終わるloopback URLを設定してください")
 	}
 	ip := net.ParseIP(redirect.Hostname())
 	if ip == nil || !ip.IsLoopback() {
-		return errors.New("TAXION_OIDC_REDIRECT_URI must use a loopback IP address")
+		return errors.New("TAXION_OIDC_REDIRECT_URIにはloopback IP addressを指定してください")
 	}
 	port, err := strconv.Atoi(redirect.Port())
 	if err != nil || port < 0 || port > 65535 {
-		return errors.New("TAXION_OIDC_REDIRECT_URI must include a valid loopback port")
+		return errors.New("TAXION_OIDC_REDIRECT_URIに有効なloopback portを指定してください")
 	}
 	if c.Timeout < 0 {
-		return errors.New("OIDC timeout must not be negative")
+		return errors.New("OIDC timeoutに負数は指定できません")
 	}
 	return nil
 }
@@ -188,19 +188,19 @@ func (a *OIDCAuthenticator) Authenticate(ctx context.Context, output io.Writer) 
 			return
 		}
 		if r.URL.Query().Get("error") != "" {
-			callbacks <- callbackResult{err: errors.New("OIDC authorization was rejected")}
+			callbacks <- callbackResult{err: errors.New("OIDC認証が拒否されました")}
 			http.Error(w, "Authentication was not completed.", http.StatusBadRequest)
 			return
 		}
 		code := r.URL.Query().Get("code")
 		if code == "" {
-			callbacks <- callbackResult{err: errors.New("OIDC callback did not contain an authorization code")}
+			callbacks <- callbackResult{err: errors.New("OIDC callbackにauthorization codeがありません")}
 			http.Error(w, "Authentication was not completed.", http.StatusBadRequest)
 			return
 		}
 		callbacks <- callbackResult{code: code}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = io.WriteString(w, "Authentication completed. Return to Taxion CLI.")
+		_, _ = io.WriteString(w, "認証が完了しました。Taxion CLIに戻ってください。")
 	})
 
 	server := &http.Server{
@@ -220,7 +220,7 @@ func (a *OIDCAuthenticator) Authenticate(ctx context.Context, output io.Writer) 
 	}()
 
 	if a.openAuthorizationURL == nil {
-		if _, err := fmt.Fprintf(output, "Open this URL to authenticate with the configured identity provider:\n%s\n", authorizationURL); err != nil {
+		if _, err := fmt.Fprintf(output, "次のURLをブラウザーで開き、認証を完了してください:\n%s\n", authorizationURL); err != nil {
 			return identity.AuthenticatedPrincipal{}, fmt.Errorf("write OIDC authorization URL: %w", err)
 		}
 	} else if err := a.openAuthorizationURL(authorizationURL); err != nil {
@@ -245,7 +245,7 @@ func (a *OIDCAuthenticator) Authenticate(ctx context.Context, output io.Writer) 
 	}
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok || rawIDToken == "" {
-		return identity.AuthenticatedPrincipal{}, errors.New("OIDC token response did not contain an ID Token")
+		return identity.AuthenticatedPrincipal{}, errors.New("OIDC token responseにID Tokenがありません")
 	}
 
 	idToken, err := provider.Verifier(&oidc.Config{ClientID: a.config.ClientID}).Verify(providerContext, rawIDToken)
@@ -253,16 +253,16 @@ func (a *OIDCAuthenticator) Authenticate(ctx context.Context, output io.Writer) 
 		return identity.AuthenticatedPrincipal{}, fmt.Errorf("verify OIDC ID Token: %w", err)
 	}
 	if !constantTimeEqual(idToken.Nonce, nonce) {
-		return identity.AuthenticatedPrincipal{}, errors.New("OIDC ID Token nonce mismatch")
+		return identity.AuthenticatedPrincipal{}, errors.New("OIDC ID Tokenのnonceが一致しません")
 	}
 	if idToken.Issuer != a.config.Issuer {
-		return identity.AuthenticatedPrincipal{}, errors.New("OIDC ID Token issuer mismatch")
+		return identity.AuthenticatedPrincipal{}, errors.New("OIDC ID Tokenのissuerが一致しません")
 	}
 	if !containsAudience(idToken.Audience, a.config.Audience) {
-		return identity.AuthenticatedPrincipal{}, errors.New("OIDC ID Token audience mismatch")
+		return identity.AuthenticatedPrincipal{}, errors.New("OIDC ID Tokenのaudienceが一致しません")
 	}
 	if strings.TrimSpace(idToken.Subject) == "" {
-		return identity.AuthenticatedPrincipal{}, errors.New("OIDC ID Token subject is required")
+		return identity.AuthenticatedPrincipal{}, errors.New("OIDC ID Tokenにsubjectがありません")
 	}
 
 	principal, err := identity.NewAuthenticatedPrincipal(idToken.Issuer, idToken.Subject, time.Now().UTC())

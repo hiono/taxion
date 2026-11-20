@@ -36,7 +36,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 	}
 	if args[0] == "auth" {
 		if len(args) != 2 || args[1] != "login" {
-			fmt.Fprintln(stderr, "expected: taxion auth login")
+			fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login")
 			return 2
 		}
 		return login(ctx, stdout, stderr)
@@ -49,20 +49,20 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 		return createLocalJob(ctx, args[3:], stdout, stderr)
 	}
 	if args[0] != "job" || len(args) < 2 {
-		fmt.Fprintln(stderr, "expected: taxion auth login, taxion dev job create, or taxion job <show|list>")
+		fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login、taxion dev job create、taxion job <show|list>")
 		return 2
 	}
 
 	switch args[1] {
 	case "create":
-		fmt.Fprintln(stderr, "trusted Job intake is not available yet; use taxion dev job create for an untrusted local DRAFT only")
+		fmt.Fprintln(stderr, "Trusted Job intakeは未実装です。ローカル専用の未認証DRAFTを作成する場合は taxion dev job create を使用してください")
 		return 2
 	case "show":
 		return showJob(ctx, args[2:], stdout, stderr)
 	case "list":
 		return listJobs(ctx, args[2:], stdout, stderr)
 	default:
-		fmt.Fprintln(stderr, "expected: taxion job <show|list>")
+		fmt.Fprintln(stderr, "コマンドを確認してください: taxion job <show|list>")
 		return 2
 	}
 }
@@ -80,7 +80,7 @@ func login(ctx context.Context, stdout, stderr io.Writer) int {
 	if err != nil {
 		return report(stderr, err)
 	}
-	fmt.Fprintf(stdout, "\nOIDC authentication verified.\nHUMAN Principal ID: %s\nNo token or login session was saved.\n", principal.PrincipalID())
+	fmt.Fprintf(stdout, "\nOIDC認証を検証しました。\nHUMAN Principal ID: %s\nTokenとログインSessionは保存していません。\n", principal.PrincipalID())
 	return 0
 }
 

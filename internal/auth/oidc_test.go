@@ -133,6 +133,32 @@ func TestValidateHTTPSURLRejectsDowngrade(t *testing.T) {
 	}
 }
 
+func TestConstantTimeEqual(t *testing.T) {
+	if !constantTimeEqual("expected-state", "expected-state") {
+		t.Fatal("constantTimeEqual() rejected equal state")
+	}
+	if constantTimeEqual("expected-state", "different-state") {
+		t.Fatal("constantTimeEqual() accepted different state")
+	}
+}
+
+func TestOIDCHTTPClientRejectsDowngrade(t *testing.T) {
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer downstream.Close()
+	redirector := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, downstream.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	client := newOIDCHTTPClient()
+	client.Transport = redirector.Client().Transport
+	if _, err := client.Get(redirector.URL); err == nil {
+		t.Fatal("OIDC HTTP client followed an HTTPS-to-HTTP downgrade")
+	}
+}
+
 func TestConfigFromEnvRequiresIssuerAndClientID(t *testing.T) {
 	t.Setenv("TAXION_OIDC_ISSUER", "")
 	t.Setenv("TAXION_OIDC_CLIENT_ID", "")
@@ -232,12 +258,16 @@ func runFakeOIDC(t *testing.T, options fakeOIDCOptions) (identity.AuthenticatedP
 
 	// The token endpoint needs the exact issuer configured by discovery.
 	issuer = server.URL
+	timeout := 5 * time.Second
+	if options.wrongState {
+		timeout = 2 * time.Second
+	}
 	config := OIDCConfig{
 		Issuer:      server.URL,
 		ClientID:    "taxion-cli",
 		Audience:    "taxion-cli",
 		RedirectURI: "http://127.0.0.1:0/callback",
-		Timeout:     250 * time.Millisecond,
+		Timeout:     timeout,
 	}
 	authenticator := &OIDCAuthenticator{
 		config:     config,
