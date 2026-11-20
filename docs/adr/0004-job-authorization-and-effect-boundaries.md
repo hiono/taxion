@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み `hiono/obsolete-taxion` の旧ADR-0080および旧ADR-0073の適用範囲を確認し、新TaxionのJobAggregateに適用する形で再構成した。旧ADRの操作allowlistに関する規定は採用しない。
+アーカイブ済み `hiono/obsolete-taxion` の旧ADR-0080および旧ADR-0073の適用範囲を確認し、旧ADR-0077のJobApproval proposal・append-only approval record・Task scope・RoleExecution再検証の決定を維持して、新TaxionのJobAggregateに適用する形で再構成した。旧ADR-0077の操作allowlistに関する規定だけは、旧ADR-0080による置換に従い採用しない。
 
 ## Context
 
