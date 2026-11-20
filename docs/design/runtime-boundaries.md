@@ -30,7 +30,7 @@ Acceptance contract: [Product Acceptance Test Specification](../test-specs/produ
 
 ### 3.1 Human ingress
 
-利用者principalは認証済み接続から確定する。自然言語Bodyは意図と情報の入力であり、本人性、承認、実行権限を含む信頼済みmetadataではない。UI / ControllerがJobID、MessageID、ThreadID、Recipient等のEnvelopeを生成・検証する。
+利用者principalは、管理者が明示設定したOIDC issuerによるAuthorization Code Flow with PKCEを検証したTrusted Ingressからのみ確定します。Principalはissuer / subjectに束縛し、email、body、query、任意headerから推定しません。Ingress adapterは検証済みAuthenticatedPrincipalとserver-derived sourceをControllerへ渡し、Controllerは原文依頼digest、request identity、受信時刻とともにIntakeProvenanceをJobAggregateへ保存します。生tokenやcookieは保存しません。自然言語Bodyは意図と情報の入力であり、本人性、承認、実行権限を含む信頼済みmetadataではありません。A2A Agentとservice identityはHUMAN Principalと分離します。認証の詳細はADR-501に従います。UI / ControllerがJobID、MessageID、ThreadID、Recipient等のEnvelopeを生成・検証します。
 
 ### 3.2 Role execution
 
@@ -139,4 +139,4 @@ Job完了CommandはControllerだけが実行する。必須受入条件、JobEvi
 
 ## 8. Traceability
 
-ADR-201 JobAggregate / Command、ADR-500 authorization、ADR-202 invariant enforcement、ADR-300 JobMessage、ADR-700 A2A、ADR-408 Worktree、ADR-800 Evidence / acceptanceを具体化する。
+ADR-201 JobAggregate / Command、ADR-500 authorization、ADR-501 Trusted Ingress / HUMAN Principal、ADR-202 invariant enforcement、ADR-300 JobMessage、ADR-700 A2A、ADR-408 Worktree、ADR-800 Evidence / acceptanceを具体化する。

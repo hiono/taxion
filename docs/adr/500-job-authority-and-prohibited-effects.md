@@ -69,6 +69,7 @@ TaskはJobの対象・作業範囲・資源上限を狭められますが、Job�
 
 PlanningAuthorizationは次を満たします。
 
+- 認証済みHUMAN PrincipalはADR-501で定義するOIDC issuer / subjectから確定し、client-supplied identityを使用しません。
 - JobIDと原文依頼hashに束縛する。
 - 認証済みhuman actor、intake source、時刻を記録する。
 - Provider / account identity、canonical configuration digest、repository identityを固定する。
@@ -157,5 +158,6 @@ JobApprovalはimmutable JobContract revisionの正確なhashに束縛し、scope
 
 - ADR-100は製品目的を定義します。
 - ADR-101は旧設計の制約を温存しない再構築原則を定義します。
-- ADR-201はJobAggregate、PlanningAuthorization、JobApproval、JobMessage、Provider / Worktree factsとCommand境界を定義します。
+- ADR-201はJobAggregate、IntakeProvenance、PlanningAuthorization、JobApproval、JobMessage、Provider / Worktree factsとCommand境界を定義します。
+- ADR-501はTrusted IngressによるHUMAN Principal認証とintake provenanceの信頼源を定義します。
 - 具体的な全状態変更経路の不変条件、6 Actor通信、Worktree並行性、外部Agent protocolは下位ADRで定義します。

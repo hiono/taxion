@@ -2,7 +2,7 @@
 
 Version: 1.0
 Date: 2026-11-20
-Normative decisions: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-201, ADR-202, ADR-300, ADR-408, ADR-500, ADR-700, ADR-800, ADR-811
+Normative decisions: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-201, ADR-202, ADR-300, ADR-408, ADR-500, ADR-501, ADR-700, ADR-800, ADR-811
 
 ## 1. Purpose and scope
 
@@ -35,14 +35,22 @@ Taxionは、人間の曖昧な思考を対話で整理し、実行可能な計�
 | CODER | 承認済みJob scope内で成果を作成・修正 | JobApproval、Task scope、budget、deadline、Effect境界に従う |
 | REVIEWER | 固定された成果と証拠の独立評価 | Coderと異なるRoleExecution / Contextを用い、read-only境界を強制する |
 
-Roleは作業責務であり、Role名だけで認証済み実行主体やoperation ACLを表現しない。Planner、Coder、Reviewerの実行回数・順序・session寿命をJobの寿命と同一視しない。
+Roleは作業責務であり、Role名だけで認証済み実行主体やoperation ACLを表現しない。Planner、Coder、Reviewerの実行回数・順序・session寿命をJobの寿命と同一視しません。
+
+### 3.1 HUMAN identity and authentication
+
+- HUMAN Principalは管理者が明示設定したOIDC issuerによるAuthorization Code Flow with PKCEの検証結果からTrusted Ingressが生成します。
+- Principalの外部identityはissuer / subjectの組で確定し、email、display name、request body、query、任意header、Role名から推定しません。
+- 認証検証とPrincipal生成の詳細はADR-501に従います。外部A2A Agentおよびservice identityはHUMAN Principalではなく、JobApprovalを行えません。
+- 認証成功はJobApprovalやExecution Permissionを付与しません。認証とJob authorityは別の判定です。
 
 ## 4. User journey and Job lifecycle
 
 ### 4.1 Intake
 
-- 利用者の原文依頼を受け付けた時点でJobを作成する。
-- 初期状態はDRAFTとし、原文依頼とintake provenanceを保存する。
+- Trusted IngressがOIDC認証済みHUMAN Principalを確定した後にJobを作成します。
+- 利用者の原文依頼を受け付けた時点でJobを作成します。
+- 初期状態はDRAFTとし、原文依頼とintake provenanceを保存します。IntakeProvenanceはPrincipal、server-derived source、受信時刻、request identity、原文依頼digestへ束縛します。
 - Goal、制約、受入条件は初期時点で未確定でもよい。
 - Job作成は実装権限やJobApprovalを付与しない。
 
@@ -137,6 +145,7 @@ A2A Task / Message / Artifact / Agent Card / stateはTaxionのJob、RoleExecutio
 | Fact / Model | 正本と責務 |
 | --- | --- |
 | Job / JobContractRevision | Job目的、原文依頼、制約、受入条件、revision |
+| IntakeProvenance | 認証済みPrincipal、Ingress source、受信時刻、request identity、原文依頼digest |
 | JobApproval | 承認者と正確なJobContract revisionの束縛 |
 | PlanningAuthorization | DRAFT planningの限定的read-only grant |
 | JobQuestionAuthorization | 承認済みJob内でTaskless PLANNERへ質問する個別のbounded read-only grant |

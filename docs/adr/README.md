@@ -12,6 +12,7 @@
 - **ADR-300 — Internal communication:** Taxion内部の6 Actor通信、JobMessage、Envelope、MessageKind、配信観測を定義します。
 - **ADR-408 — Execution & concurrency:** Git Worktree、Task単位の所有権、Roleの逐次引継ぎ、独立Taskの並行性を定義します。
 - **ADR-500 — Job authority:** Job承認境界、禁止副作用、PlanningAuthorization、Observation / Conformance / Admission / Execution Permissionの分離、不完全情報の協調を定義します。
+- **ADR-501 — Trusted Ingress:** OIDC issuerを信頼源とするHUMAN Principal認証、intake provenance、Ingress信頼境界を定義します。
 - **ADR-700 — External Agent protocol:** 外部Agent相互運用の必須protocolをA2Aに一本化し、内部JobMessageとの境界を定義します。
 - **ADR-800 — Quality & evidence:** 検証証拠の水準とJob完遂の製品受入れを定義します。
 - **ADR-811 — Agent Harness:** 製品能力として維持する8要素と、その検証条件を定義します。
@@ -54,6 +55,7 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 
 ### 500–599 Authorization & Security
 - [ADR-500: Job承認境界と禁止副作用を中心に実行権限を強制する](500-job-authority-and-prohibited-effects.md) — Accepted
+- [ADR-501: Trusted Ingressで認証済みHUMAN Principalを確定する](501-trusted-ingress-and-human-principal.md) — Accepted
 
 ### 600–699 Persistence & Recovery
 - 現時点で独立したADRはありません。永続化・復旧判断はJobAggregateと不変条件の責務に沿って必要時に追加します。

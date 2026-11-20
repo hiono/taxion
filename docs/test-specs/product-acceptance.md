@@ -3,7 +3,7 @@
 Version: 1.0
 Date: 2026-11-20
 Governing contract: [Product Contract](../specifications/product-contract.md)
-Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-201, ADR-202, ADR-300, ADR-408, ADR-500, ADR-700, ADR-800, ADR-811
+Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-201, ADR-202, ADR-300, ADR-408, ADR-500, ADR-501, ADR-700, ADR-800, ADR-811
 
 ## 1. Purpose
 
@@ -274,3 +274,17 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-201, ADR-202, A
 ## 5. Product acceptance rule
 
 Taxionの製品受入れはAT-013の実Job完遂を中心に判定する。AT-001〜AT-012は必要な下位契約であり、個別に合格してもAT-013の代替にはならない。
+
+### AT-022: Trusted HUMAN identity and intake provenance
+
+**Given** 利用者がWeb / CLI / APIからJob intakeまたはJobApprovalを要求する。
+**When** Trusted Ingressが認証し、Controllerへrequestを渡す。
+**Then**
+- 設定済みOIDC issuerのAuthorization Code Flow with PKCEだけを人間認証の標準経路とする。
+- 未登録issuer、署名不正、audience不一致、期限切れ、nonce / state / PKCE不一致を拒否し、JobやApproval等の副作用を発生させない。
+- PrincipalIDは検証済みissuer / subjectの組に安定して束縛され、email / display name変更や一致で自動統合しない。
+- request body、query、任意headerに含まれるprincipal identityを無視または拒否する。
+- A2A Agent identityとservice identityをHUMAN approverとして扱わない。
+- IntakeProvenanceはPrincipal、server-derived ingress source、認証時刻、受付時刻、request identity、原文依頼digestをJobAggregateと同じtransactionで保存する。
+- token、cookie、secretをJob、provenance、ログへ保存しない。
+- 未認証のローカルCLI DRAFT作成は製品trusted intakeとみなさず、productionのPlanningAuthorization / JobApprovalへ接続しない。
