@@ -44,8 +44,8 @@ func NewDraftJob(id, request string, now time.Time) (Job, error) {
 		Request:   request,
 		State:     JobDraft,
 		Revision:  1,
-		CreatedAt: now.UTC(),
-		UpdatedAt: now.UTC(),
+		CreatedAt: now.UTC().Round(0),
+		UpdatedAt: now.UTC().Round(0),
 	}
 	if err := job.Validate(); err != nil {
 		return Job{}, err
