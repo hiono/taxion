@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み `hiono/obsolete-taxion` のAccepted ADR-0087を根拠として、新TaxionのJobAggregate・認可・A2A境界と整合するように再構成した。
+アーカイブ済み `hiono/obsolete-taxion` のAccepted ADR-0087を根拠とし、情報不足だけを理由にRole協調を拒否しないAccepted ADR-0067の原則を適用して、新TaxionのJobAggregate・認可・A2A境界と整合するように再構成した。
 
 ## Context
 
