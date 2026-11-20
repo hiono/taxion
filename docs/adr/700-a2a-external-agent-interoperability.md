@@ -91,3 +91,4 @@ A2Aだけでは満たせない具体的な製品要件が確認された場合�
 - ADR-500はJob authority、禁止副作用および外部入力の検証を定義します。
 - ADR-202は全状態変更経路でのidentity、scope、provenance、idempotencyの強制を定義します。
 - ADR-300はTaxion内部の6 Actor通信をJobMessageで統一します。本ADRは外部Agentとの相互運用境界だけを定義します。
+- ADR-502は、人間起点の依頼を受け付けるIngress Clientと、Taxionが選択する外部Execution Agentの役割・identity分離を定義します。
