@@ -126,6 +126,10 @@ JobMessage、宛先別配信観測、回答・転送相関およびHandoff inten
 
 LLMは本文分類、要約、宛先候補、回答候補を提案できます。ただし曖昧な場合は確認し、LLM解釈だけで宛先、本人性、policy、承認、実行またはHandoffを確定しません。
 
+## Security and operational impact
+
+Sender / Recipient / Job / Task / RoleExecution identityは認証済みcontextとControllerが確定し、自然言語BodyやAgentの自己申告から推定しません。JobMessage、QUESTION、ANSWER、REQUEST、NOTIFICATION、HANDOFFはそれ自体でJobApproval、Execution Permission、Provider authorityを作成・拡張しません。外部入力はuntrusted inputとして検証し、配信結果UNKNOWNを未配信と推測してblind resendしません。Messageと配信観測のprovenanceをJobAggregateに保持します。
+
 ## Alternatives considered
 
 - **利用者にJSONや固定タグを入力させる:** 自然言語による利用要件に反するため採用しません。
