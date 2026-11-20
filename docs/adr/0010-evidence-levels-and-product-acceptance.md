@@ -59,6 +59,13 @@ Job完了には、次をすべて要求する。
 
 CI成功、Reviewerの自己申告、A2Aのterminal state、RoleExecutionのterminal statusだけでJob完了を宣言しない。
 
+## Acceptance criteria
+
+- 各証拠Levelの結果は対象SHA、環境、Provider / SDK version、条件と観測値に対応付けられます。
+- 下位Levelの成功だけで上位Levelの完了を推定しません。
+- Job完了には必須provenance-valid Evidence、Usage finality、Provider quiescence、Worktree releaseおよび未解決operationの不存在を要求します。
+- 実Job完遂を製品受入れの中心に置き、CI成功やAPI数だけで完成を宣言しません。
+
 ## Consequences
 
 実装済み、syntheticで確認済み、SDK互換性確認済み、実Provider確認済み、再起動復旧確認済み、実Job完遂確認済みを明確に区別できる。完成判定をAPI数、Actor数、テスト数、CI成功だけに置かない。
