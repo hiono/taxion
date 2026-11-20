@@ -21,7 +21,9 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 3. Job の同一性、承認、対象・資源境界、禁止副作用、認証・認可、データ整合性を強制する。
 4. 会話、提案、Role の判断だけで実行権限を拡張しない。
 5. ドメイン不変条件は生成・変更・保存・復元・外部入力の全経路で強制する。
-6. 合成テスト、SDK互換性、実Provider実行、実Job完遂の証拠を混同しない。
+6. Taxion内部6 Actor通信はJobMessage、外部Agent相互運用はA2Aとし、両者を混同しない。
+7. Observation、Conformance、Admission、Execution Permissionを分離し、観測や受入れから実行権限を推論しない。
+8. 合成テスト、SDK互換性、実Provider実行、実Job完遂の証拠を混同しない。
 
 ## 現在利用できる機能
 
