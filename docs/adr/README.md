@@ -11,9 +11,9 @@
 - **ADR-202 — Domain invariants:** 不変条件を生成・変更・保存・復元の全経路で強制する規範を定義します。
 - **ADR-300 — Internal communication:** Taxion内部の6 Actor通信、JobMessage、Envelope、MessageKind、配信観測を定義します。
 - **ADR-700 — External Agent protocol:** 外部Agent相互運用の必須protocolをA2Aに一本化し、内部JobMessageとの境界を定義します。
-- **ADR-408以降:** Worktree並行性、情報の正本、証拠管理、Agent Harness能力などの具体的な設計判断を定義します。ADR-100〜0007に適合させます。
+- **領域別ADR:** Domain Model、Collaboration、Execution、Authorization、Interface、Qualityの個別判断をカテゴリ番号で管理し、上位の製品目的・再構築原則・安全境界に適合させます。
 
-ADR-100は「何を実現するか」、ADR-101は「どの原則で作り直すか」、ADR-201は「Jobをどのようなドメイン正本として扱うか」、ADR-500は「誰がどの境界内で何を実行できるか」、ADR-202は「すべての状態変更経路でどう不変条件を守るか」、ADR-300は「Taxion内部でどう協調するか」、ADR-700は「外部Agentとどう相互運用するか」を定義します。下位ADRはこれらを上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
+ADR-100は「何を実現するか」、ADR-101は「どの原則で作り直すか」、ADR-201は「Jobをどのようなドメイン正本として扱うか」、ADR-202は「すべての状態変更経路でどう不変条件を守るか」、ADR-300は「Taxion内部でどう協調するか」、ADR-408は「開発作業をどう分離・並行させるか」、ADR-500は「誰がどの境界内で何を実行できるか」、ADR-700は「外部Agentとどう相互運用するか」、ADR-800とADR-811は「何をどの証拠で受け入れるか」を定義します。ADR-000とADR-004はADR統治と情報の正本を定めます。下位ADRはこれらを上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
 
 ## 状態
 
