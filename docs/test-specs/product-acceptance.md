@@ -77,6 +77,7 @@ Governing ADRs: ADR-0001〜ADR-0011
 - 全30の非自己宛てActor関係を表現できるが、共通policyが許可を制御する。
 - ANSWERは既存QUESTIONにReplyToで相関する。
 - Question / Answer / Request / Notificationは実行権限を移転しない。
+- 承認済みJob内のTaskless PLANNERへの個別質問実行はJobQuestionAuthorizationに束縛し、QUESTION本文やMessageKindだけでgrantを作成しない。
 - BatchIDはfan-out全体で不変であり、Delivery状態はRecipientごとに分離する。
 - UNKNOWNを未配信と推測せずblind resendしない。
 
