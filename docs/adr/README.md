@@ -7,7 +7,7 @@
 - **ADR-0001 — 製品目的:** 人間の曖昧な思考を対話で整理し、Job完遂を支援する製品価値を定義します。
 - **ADR-0002 — 再構築原則:** 旧設計の制約を温存せず、新しい不変条件から再構築する原則を定義します。
 - **ADR-0003 — JobAggregate:** Jobを作業・協調・成果の唯一のドメイン正本とし、Planning、Task、RoleExecution、JobMessage、Provider、Worktree、成果・証拠、Command境界を定義します。
-- **ADR-0004〜0009 — 実行ガードレール:** 認可、不変条件、内部通信、外部A2A、Worktree所有権、証拠と製品受入れを定義します。
+- **ADR-0004〜0010 — 実行ガードレール:** 認可、不変条件、内部通信、外部A2A、Worktree所有権、証拠と製品受入れを定義します。
 
 ADR-0001は「何を実現するか」、ADR-0002は「どの原則で作り直すか」、ADR-0003は「Jobをどのようなドメイン正本として扱うか」を定義します。ADR-0004以降はそれらを具体化し、上位の安全境界を弱めません。番号の大小は優先順位を意味しません。決定の変更は既存判断を暗黙に書き換えず、置換対象と維持する範囲を明示した後続ADRで記録します。
 
@@ -34,10 +34,11 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 - [ADR-0006: 内部6 Actor通信をJobMessageとして定義する](0006-internal-six-actor-jobmessage.md) — Accepted
 - [ADR-0007: 外部Agent相互運用の必須プロトコルをA2Aに一本化する](0007-external-agent-a2a.md) — Accepted
 - [ADR-0008: Worktree所有権とRoleExecutionの安全な移転](0008-worktree-ownership-and-concurrency.md) — Accepted
-- [ADR-0009: 検証証拠の水準とJob完遂の受入れ](0009-evidence-and-product-acceptance.md) — Accepted
+- [ADR-0009: 検証証拠の水準とJob完遂の受入れ
+- ADR-0010: Observation・Conformance・Admission・Execution Permissionの分離](0009-evidence-and-product-acceptance.md) — Accepted
 
 ## 原典と来歴
 
-ADR-0001〜0003は、アーカイブ済み旧Taxionの製品目的、再構築原則、JobAggregateのAccepted decisionを確認し、新しいリポジトリ向けに再構成しました。ADR-0004〜0008は、旧TaxionのJob認可、不変条件、Job中心協調、6 Actor通信、A2A、WorktreeのAccepted decisionを適用範囲ごとに確認して再構成しました。ADR-0009は旧PoCと旧Taxionの比較方針、検証証拠の区分、開発品質ゲートを新Taxion向けに再構成しました。
+ADR-0001〜0003は、アーカイブ済み旧Taxionの製品目的、再構築原則、JobAggregateのAccepted decisionを確認し、新しいリポジトリ向けに再構成しました。ADR-0004〜0008は、旧TaxionのJob認可、不変条件、Job中心協調、6 Actor通信、A2A、WorktreeのAccepted decisionを適用範囲ごとに確認して再構成しました。ADR-0009は旧PoCと旧Taxionの比較方針、検証証拠の区分、開発品質ゲートを新Taxion向けに再構成しました。ADR-0010は旧TaxionのObservation / Conformance / Admission / Execution Permissionの分離を新しいJobAggregateへ適用しました。
 
 旧Taxionと旧Taxion-PoCのGit履歴、Commit、Issue / PR履歴は移植していません。旧リポジトリの原文は読み取り専用の根拠資料であり、旧番号は原典を識別する参照としてのみ使用します。旧コードの採用はADR-0000およびADR-0002のprovenance・設計適合性・安全性・受入れ条件に従って別途判断します。
