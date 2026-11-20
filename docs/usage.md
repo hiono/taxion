@@ -1,8 +1,8 @@
 # CLI使用方法
 
-## HUMAN Principalの認証
+## OIDC認証
 
-Trusted CLI認証には、管理者が設定したOIDC issuerとAuthorization Code Flow with PKCEを使用します。Identity Providerにはloopback redirect URIを登録してください。
+Trusted Job作成では、管理者が設定したOIDC issuer / client ID / audienceを使用します。Identity Providerにはloopback redirect URIを登録してください。
 
 ```sh
 export TAXION_OIDC_ISSUER="https://identity.example"
@@ -13,17 +13,25 @@ export TAXION_OIDC_REDIRECT_URI="http://127.0.0.1:8765/callback"
 taxion auth login
 ```
 
-コマンドが認証URLを表示します。URLをブラウザーで開いて認証を完了してください。Taxionはloopback callbackでauthorization codeを受信し、state、PKCE、ID Token署名、issuer、audience、有効期限、nonceを検証します。検証成功後に内部HUMAN Principal IDを表示します。
+`taxion auth login` はAuthorization Code Flow with PKCEを実行し、state、PKCE、ID Token署名、issuer、audience、有効期限、nonceを検証します。認証URLをブラウザーで開いて認証を完了してください。検証成功後にHUMAN Principal IDを表示します。ID Token、access token、refresh token、cookie、ログインSessionは保存しません。このコマンド単独ではJobを作成しません。
 
-ID Token、access token、refresh token、cookie、ログインSessionは保存しません。このコマンドは認証結果の検証のみを行い、Job作成、JobApproval、Execution Permissionを付与しません。
+## Trusted Jobの作成
+
+```sh
+taxion job create --request "I have several ideas for a small product. Help me clarify the goal and build it."
+```
+
+このコマンドはOIDC認証成功後にDRAFT Jobを作成します。原文依頼、HUMAN Principal、issuer / subject、CLI ingress source、認証時刻、受付時刻、request identity、原文依頼SHA-256、provenance schema versionをIntakeProvenanceとして保持し、JobAggregateとCommand receiptを同一SQLite transactionで保存します。token、cookie、Authorization headerはJobやprovenanceへ保存しません。
+
+認証失敗、Principal検証失敗、provenance検証失敗、transaction失敗ではJobを作成しません。Job作成はDRAFT状態までであり、JobApproval、PlanningAuthorization、Planner実行、Agent実行を付与しません。
 
 ## ローカルDRAFT Jobの作成
 
 ```sh
-taxion dev job create --request "I have several ideas for a small product. Help me clarify the goal and build it."
+taxion dev job create --request "Local untrusted DRAFT for development."
 ```
 
-この明示的な`dev`コマンドは、開発および永続化テスト専用の未認証DRAFT Jobを作成します。Trusted Ingress、認証済みJob intake、IntakeProvenance、JobApprovalを表すものではありません。Trusted Job intakeとprovenance永続化が実装されるまで、production用の`taxion job create`は使用できません。
+この明示的な`dev`コマンドは、開発および永続化テスト専用の未認証DRAFT Jobを作成します。IntakeProvenanceを持たず、Trusted Ingress、認証済みJob intake、JobApprovalを表すものではありません。
 
 ## Jobの表示
 
@@ -47,12 +55,13 @@ taxion job list --limit 100
 既定のSQLite databaseはOSのユーザー設定ディレクトリ配下の`taxion/jobs.sqlite`に作成します。保存先を変更する場合は各コマンドに`--store`を指定します。
 
 ```sh
-taxion dev job create --store ./taxion-local.sqlite --request "..."
-taxion job list --store ./taxion-local.sqlite
+taxion job create --store ./taxion.sqlite --request "Trusted request."
+taxion dev job create --store ./taxion-local.sqlite --request "Local request."
+taxion job list --store ./taxion.sqlite
 ```
 
 SQLite databaseとWALファイルは秘密情報を含む可能性があるため、Gitへ追加しないでください。
 
 ## 現在の制限
 
-本段階ではOIDC認証とHUMAN Principal生成、および未認証のローカルDRAFT作成経路の分離までを提供します。AuthenticatedPrincipalとIntakeProvenanceのJobAggregateへの永続化、OIDC認証済みJob作成、HTTP ingress、Planner / Role / Provider実行は後続作業です。OIDC認証成功をJob作成や実行許可の証拠として扱いません。
+本段階ではOIDC認証済みCLIからのDRAFT Job作成とIntakeProvenanceの同一transaction保存までを提供します。HTTP ingress、JobApproval、PlanningAuthorization、Planner / Role / Provider実行、Job完了は未実装です。OIDC認証やDRAFT作成の成功をJob完遂の証拠として扱いません。

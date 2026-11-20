@@ -2,14 +2,18 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/hiono/taxion/internal/domain"
+	"github.com/hiono/taxion/internal/store"
 )
 
 func TestJobCreateShowAndList(t *testing.T) {
@@ -87,14 +91,91 @@ func TestJobCreateRequiresRequest(t *testing.T) {
 	}
 }
 
-func TestProductionJobCreateRequiresTrustedIngress(t *testing.T) {
+func TestProductionJobCreateRequiresOIDCConfigurationWithoutCreatingStore(t *testing.T) {
+	t.Setenv("TAXION_OIDC_ISSUER", "")
+	t.Setenv("TAXION_OIDC_CLIENT_ID", "")
+	t.Setenv("TAXION_OIDC_AUDIENCE", "")
+	t.Setenv("TAXION_OIDC_REDIRECT_URI", "")
+	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
 	var stdout, stderr bytes.Buffer
-	code := Run(context.Background(), []string{"job", "create", "--request", "untrusted"}, &stdout, &stderr, VersionInfo{})
-	if code != 2 {
-		t.Fatalf("exit code = %d, want 2; stderr = %s", code, stderr.String())
+	code := Run(context.Background(), []string{"job", "create", "--store", path, "--request", "trusted request"}, &stdout, &stderr, VersionInfo{})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1; stderr = %s", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "taxion dev job create") {
-		t.Fatalf("stderr = %q, want explicit local-only guidance", stderr.String())
+	if !strings.Contains(stderr.String(), "TAXION_OIDC_ISSUER") {
+		t.Fatalf("stderr = %q, want OIDC configuration guidance", stderr.String())
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("store path exists after authentication failure: stat err = %v", err)
+	}
+}
+
+type fakeAuthenticatedPrincipal struct {
+	id, issuer, subject string
+	authenticatedAt     time.Time
+	validationErr       error
+}
+
+func (p fakeAuthenticatedPrincipal) PrincipalID() string { return p.id }
+func (p fakeAuthenticatedPrincipal) Issuer() string { return p.issuer }
+func (p fakeAuthenticatedPrincipal) Subject() string { return p.subject }
+func (p fakeAuthenticatedPrincipal) AuthenticatedAt() time.Time { return p.authenticatedAt }
+func (p fakeAuthenticatedPrincipal) Validate() error { return p.validationErr }
+
+func TestTrustedJobCreatePersistsPrincipalAndProvenance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	receivedAt := time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
+	principal := fakeAuthenticatedPrincipal{
+		id: "human_test-principal", issuer: "https://identity.example",
+		subject: "subject-123", authenticatedAt: receivedAt.Add(time.Minute),
+	}
+	request := "  Preserve the exact request.\nIncluding whitespace.  "
+	var stdout, stderr bytes.Buffer
+	code := createTrustedJobWithPrincipal(context.Background(), request, path, "cmd_cli_trusted", receivedAt, principal, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("createTrustedJobWithPrincipal() code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "HUMAN Principal ID: human_test-principal") {
+		t.Fatalf("stdout = %q, want HUMAN Principal ID", stdout.String())
+	}
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("open created store: %v", err)
+	}
+	defer database.Close()
+	jobs, err := database.ListJobs(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListJobs() error = %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("stored Jobs = %d, want 1", len(jobs))
+	}
+	job := jobs[0]
+	if job.Request != request || job.State != domain.JobDraft || job.IntakeProvenance == nil {
+		t.Fatalf("stored trusted Job = %#v", job)
+	}
+	provenance := job.IntakeProvenance
+	if provenance.PrincipalID != principal.id || provenance.Issuer != principal.issuer ||
+		provenance.Subject != principal.subject || provenance.IngressSource != domain.IngressSourceCLI ||
+		provenance.RequestIdentity != "cmd_cli_trusted" ||
+		provenance.AuthenticatedAt != principal.authenticatedAt ||
+		!provenance.ReceivedAt.Equal(receivedAt) ||
+		provenance.OriginalRequestSHA256 == "" ||
+		provenance.SchemaVersion != domain.IntakeProvenanceSchemaVersion {
+		t.Fatalf("stored IntakeProvenance = %#v", provenance)
+	}
+}
+
+func TestTrustedJobCreateRejectsInvalidPrincipalBeforeOpeningStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
+	principal := fakeAuthenticatedPrincipal{validationErr: errors.New("invalid principal")}
+	var stdout, stderr bytes.Buffer
+	code := createTrustedJobWithPrincipal(context.Background(), "request", path, "cmd_invalid", time.Now().UTC(), principal, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("createTrustedJobWithPrincipal() code = %d, want 1", code)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("store path exists after invalid principal: stat err = %v", err)
 	}
 }
 
