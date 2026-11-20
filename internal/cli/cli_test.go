@@ -124,10 +124,11 @@ func (p fakeAuthenticatedPrincipal) Validate() error            { return p.valid
 
 func TestTrustedJobCreatePersistsPrincipalAndProvenance(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "jobs.sqlite")
-	receivedAt := time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
+	receivedAt := now.Add(-2 * time.Minute)
 	principal := fakeAuthenticatedPrincipal{
 		id: "human_test-principal", issuer: "https://identity.example",
-		subject: "subject-123", authenticatedAt: receivedAt.Add(time.Minute),
+		subject: "subject-123", authenticatedAt: now.Add(-time.Minute),
 	}
 	request := "  Preserve the exact request.\nIncluding whitespace.  "
 	var stdout, stderr bytes.Buffer
