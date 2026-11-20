@@ -17,6 +17,9 @@ Acceptance contract: [Product Acceptance Test Specification](../test-specs/produ
 | Controller | Job command、authorization、scope、Effect、Provider operation、recovery、Job completionを制御 | Roleの意味的判断や成果品質の代行 |
 | JobAggregate | Job、Task、RoleExecution、JobMessage、Approval、Provider facts、Worktree、Output、Evidence、Usageの正本 | 外部Providerの実行状態を推測したmutable status |
 | Role Runtime | Planner / Coder / Reviewerの個別実行とContextを提供 | JobApprovalやresource boundaryの発行 |
+| Computer Sandbox Manager | Task単位の独立Computer、filesystem / process / credential / network / host境界を強制 | Job authorityやJob scopeの発行 |
+| Context Manager | TurnごとのContext選択、Skill / Fileのon-demand load、履歴圧縮を実施 | Job facts、承認、provenanceの正本 |
+| Execution Telemetry | Model / Tool Callとturn / operationの相関、coverage gapと停滞兆候を記録 | 実行権限、budget、deadlineの拡張 |
 | Provider Adapter | Provider固有APIを呼び出し、receipt / event / result / stop observationを返す | TaxionのJob identity、承認、認可の正本 |
 | A2A Gateway | 外部AgentとのA2A discovery / task / message / artifact相互運用 | 内部JobMessage、JobAggregate、JobApprovalの置換 |
 | Persistence | JobAggregate Commandと関連factを原子的に保存・復元 | 別の独立したJob authority store |
@@ -44,6 +47,14 @@ A2A Gatewayは外部Agentとの唯一の必須相互運用protocolを実装す�
 ### 3.5 Persistence boundary
 
 保存データの読込み、復元、migration、recoveryはすべて信頼境界として扱う。schema version、identity、provenance、aggregate invariant、idempotency、revisionを検証する。未知・破損・矛盾したデータを現在のJobへ無条件に取り込まない。
+
+### 3.6 Computer isolation boundary
+
+Taskごとに独立したComputer Sandboxを割り当て、filesystem、process、credential、network、host accessを隔離します。Git Worktree、別Session、別ProcessだけをComputer isolationの証拠にしません。実行環境が必要な境界を強制できない場合は、対象Taskを開始せず未対応条件を明示します。JobApprovalとTask scopeはSandboxの外側でControllerが検証します。
+
+### 3.7 Context and observability boundary
+
+Context Managerは各turnで必要なContextだけを選択し、Skill / Fileをon-demandで読み込み、Context Window上限前に履歴を圧縮します。Job Contract、承認、重要な判断、未解決事項、UNKNOWN、provenanceを圧縮で失いません。Execution TelemetryはModel / Tool CallをJob / RoleExecution / turn / operationへ相関し、Providerが報告しない呼出しやevent欠落をcoverage gapとして残します。
 
 ## 4. Main execution paths
 
@@ -121,6 +132,8 @@ Job完了CommandはControllerだけが実行する。必須受入条件、JobEvi
 - 内部Actor通信をA2Aで実装しない。
 - MCP / ACP / Copilot SDK等を外部Agent連携の必須経路にしない。
 - 同一Worktreeのmutating Roleを並行実行しない。
+- Git Worktree / Session / Processの分離だけを独立Computer Sandboxの代替として扱わない。
+- Model / Tool Callの観測欠落を完全追跡済みとして扱わない。
 - Observation、Conformance、Admission、Execution Permissionを一つのbooleanへまとめない。
 - 旧Task / Dispatch / ReviewFlow runtime、旧権限モデル、旧fallbackを新しいJob-native経路として残さない。
 
