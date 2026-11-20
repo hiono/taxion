@@ -1,4 +1,4 @@
-# ADR-0000: Architecture Decision Records の管理規約
+# ADR-000: Architecture Decision Records の管理規約
 
 Date: 2026-11-20
 
@@ -49,12 +49,27 @@ ADR本文だけで判断を理解できるようにし、参照先が取得不�
 
 ### 3. 番号とファイル
 
-- ADRは `docs/adr/NNNN-kebab-case-title.md` に保存します。
-- 連番は本リポジトリ内で一意とします。
-- 番号は識別子であり、優先順位や規範性を意味しません。
-- ADRの一覧と関係は `docs/adr/README.md` に集約します。
-- 採番済みADRの番号を再利用しません。内容の変更は既存ADRの改訂、または明示的な置換ADRで記録します。
+新TaxionのADR番号は3桁とし、100の位をカテゴリ識別子とします。番号帯は分類を示し、優先順位・重要度・規範性を示しません。
 
+| 番号帯 | カテゴリ | 主な対象 |
+|---|---|---|
+| 000–099 | ADR Governance | ADR体系、採番、文書統治、来歴 |
+| 100–199 | Product & Governance | 製品目的、全体方針、製品統治 |
+| 200–299 | Domain Model | Job、Task、Aggregate、状態、不変条件 |
+| 300–399 | Collaboration | Actor間協調、JobMessage、質問・回答、Handoff |
+| 400–499 | Execution & Runtime | Runtime、Provider実行、Worktree、実行制御 |
+| 500–599 | Authorization & Security | Job authority、認証・認可、禁止副作用、秘密情報 |
+| 600–699 | Persistence & Recovery | 永続化、復旧、再開、データ移行 |
+| 700–799 | Interface & Integration | API、外部Agent、A2A、外部連携 |
+| 800–899 | Quality & Evidence | 品質、検証証拠、受入れ、能力評価 |
+| 900–999 | Infrastructure & Operations | 配布、運用基盤、環境、保守 |
+
+- ADRは `docs/adr/NNN-kebab-case-title.md` に保存します。
+- 番号は本リポジトリ内で一意とし、採番済み番号を再利用しません。
+- 旧リポジトリの番号は原典識別子としてのみ保持し、新Taxionの現行ADR番号には使用しません。
+- 新しい判断は、その主たる責務に対応するカテゴリの未使用番号を割り当てます。複数カテゴリに関係する場合は、規範となる主責務を基準に一つの番号を割り当てます。
+- ADR一覧とカテゴリ別索引は `docs/adr/README.md` に集約します。
+- 番号帯の分類はADR間の適用階層を変更しません。上位・下位関係は各ADRのRelationshipに明記します。
 ### 4. 適用階層と衝突解決
 
 - 製品目的を定めるADRが、個別の実装方式を暗黙に決めることはありません。
@@ -94,7 +109,7 @@ TODO、ロードマップ、開発計画、実験計画などの可変情報に�
 
 ### 8. 情報記録の責務
 
-各情報の具体的な保存・更新・証拠対応規則はADR-0009で定義します。本ADRは文書体系と統治原則を定め、ADR-0009は現行仕様、計画、変更履歴、Issue / PR、CI証拠の責務分離を具体化します。
+各情報の具体的な保存・更新・証拠対応規則はADR-004で定義します。本ADRは文書体系と統治原則を定め、ADR-004は現行仕様、計画、変更履歴、Issue / PR、CI証拠の責務分離を具体化します。
 
 ## Consequences
 

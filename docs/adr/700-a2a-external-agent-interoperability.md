@@ -1,4 +1,4 @@
-# ADR-0007: 外部Agent相互運用の必須protocolをA2Aに一本化する
+# ADR-700: 外部Agent相互運用の必須protocolをA2Aに一本化する
 
 Date: 2026-11-20
 
@@ -37,7 +37,7 @@ MCP、ACP系の接続方式、Copilot SDKその他のprotocol・SDK・Provider�
 
 ### 3. Taxion内部通信と外部A2A境界を分離する
 
-- Taxion内部のHUMAN / CONTROLLER / ORCHESTRATOR / PLANNER / CODER / REVIEWER間通信はADR-0006のJobMessage契約を維持します。
+- Taxion内部のHUMAN / CONTROLLER / ORCHESTRATOR / PLANNER / CODER / REVIEWER間通信はADR-300のJobMessage契約を維持します。
 - A2AはTaxionの外部に存在するAgentとの相互運用境界として使用します。内部JobMessageやJobAggregateをA2AのTask・Messageへ置き換えません。
 - A2AのTask state、Message、Artifact、Agent Card等をTaxionのJob、RoleExecution、認証済みActor identity、認可、承認またはJob完了状態と同一視しません。
 - 外部Agentとの通信結果をTaxionのJobへ反映する場合は、既存ControllerおよびJobAggregateの認証・認可・provenance・永続化・状態遷移を通します。
@@ -85,9 +85,9 @@ A2Aだけでは満たせない具体的な製品要件が確認された場合�
 - 任意protocolは具体的な不足要件と明示的判断なしに必須化しません。
 ## Relationship to other ADRs
 
-- ADR-0001は製品目的を定義します。
-- ADR-0002は旧設計の制約を温存しない再構築原則を定義します。
-- ADR-0003はJobAggregateとProvider / Worktree lifecycleの不変条件を定義します。
-- ADR-0004はJob authority、禁止副作用および外部入力の検証を定義します。
-- ADR-0005は全状態変更経路でのidentity、scope、provenance、idempotencyの強制を定義します。
-- ADR-0006はTaxion内部の6 Actor通信をJobMessageで統一します。本ADRは外部Agentとの相互運用境界だけを定義します。
+- ADR-100は製品目的を定義します。
+- ADR-101は旧設計の制約を温存しない再構築原則を定義します。
+- ADR-201はJobAggregateとProvider / Worktree lifecycleの不変条件を定義します。
+- ADR-500はJob authority、禁止副作用および外部入力の検証を定義します。
+- ADR-202は全状態変更経路でのidentity、scope、provenance、idempotencyの強制を定義します。
+- ADR-300はTaxion内部の6 Actor通信をJobMessageで統一します。本ADRは外部Agentとの相互運用境界だけを定義します。

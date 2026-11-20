@@ -1,4 +1,4 @@
-# ADR-0005: ドメイン不変条件を生成・変更・保存・復元の全経路で強制する
+# ADR-202: ドメイン不変条件を生成・変更・保存・復元の全経路で強制する
 
 Date: 2026-11-20
 
@@ -91,8 +91,8 @@ Job、承認、RoleExecution、Provider operation、Worktree ownership、成果�
 - 未調査経路を網羅済みと報告しません。
 ## Relationship to other ADRs
 
-- ADR-0001は製品目的を定義します。
-- ADR-0002は旧設計の制約を温存しない再構築原則を定義します。
-- ADR-0003はJobAggregateとCommand境界を定義します。
-- ADR-0004はJob authority、禁止副作用、Observation / Admission / Execution Permissionを定義します。
-- ADR-0005は上記の不変条件を全状態変更経路で強制する横断的な規範です。各下位ADRは固有の不変条件と強制経路を具体化します。
+- ADR-100は製品目的を定義します。
+- ADR-101は旧設計の制約を温存しない再構築原則を定義します。
+- ADR-201はJobAggregateとCommand境界を定義します。
+- ADR-500はJob authority、禁止副作用、Observation / Admission / Execution Permissionを定義します。
+- ADR-202は上記の不変条件を全状態変更経路で強制する横断的な規範です。各下位ADRは固有の不変条件と強制経路を具体化します。

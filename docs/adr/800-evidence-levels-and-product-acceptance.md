@@ -1,4 +1,4 @@
-# ADR-0010: 検証証拠の水準とJob完遂の受入れを分離する
+# ADR-800: 検証証拠の水準とJob完遂の受入れを分離する
 
 Date: 2026-11-20
 
@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み `hiono/obsolete-taxion` のADR-0107（Six-Actor PoCを候補実装ベースラインとして比較評価する判断）とADR-0085（仕様・履歴・検証証拠の分離）を参照する。候補実装の採用分類と比較条件はADR-0002で再確立し、本ADRは証拠水準とJob完遂の製品受入れを定義する。開発時のOS別品質ゲートやCommit前検査は製品受入れ条件とは分離し、開発・運用文書で管理する。
+アーカイブ済み `hiono/obsolete-taxion` のADR-0107（Six-Actor PoCを候補実装ベースラインとして比較評価する判断）とADR-0085（仕様・履歴・検証証拠の分離）を参照する。候補実装の採用分類と比較条件はADR-101で再確立し、本ADRは証拠水準とJob完遂の製品受入れを定義する。開発時のOS別品質ゲートやCommit前検査は製品受入れ条件とは分離し、開発・運用文書で管理する。
 
 ## Context
 
@@ -83,10 +83,10 @@ CI成功、Reviewerの自己申告、A2Aのterminal state、RoleExecutionのterm
 
 ## Relationship to other ADRs
 
-- ADR-0001は製品目的とJob完遂による価値を定義する。
-- ADR-0003はJobAggregate、成果、証拠、Provider operation、Job完了Commandの正本を定義する。
-- ADR-0004はJobApprovalとExecution Permissionを定義する。
-- ADR-0005は全状態変更経路での不変条件強制を定義する。
-- ADR-0006は内部6 Actor通信、ADR-0007は外部Agent A2A境界を定義する。
-- ADR-0008はWorktree所有権とRoleExecutionの安全な移転を定義する。
-- ADR-0009は現行仕様、計画、履歴、検証証拠の正本を分離する。
+- ADR-100は製品目的とJob完遂による価値を定義する。
+- ADR-201はJobAggregate、成果、証拠、Provider operation、Job完了Commandの正本を定義する。
+- ADR-500はJobApprovalとExecution Permissionを定義する。
+- ADR-202は全状態変更経路での不変条件強制を定義する。
+- ADR-300は内部6 Actor通信、ADR-700は外部Agent A2A境界を定義する。
+- ADR-408はWorktree所有権とRoleExecutionの安全な移転を定義する。
+- ADR-004は現行仕様、計画、履歴、検証証拠の正本を分離する。

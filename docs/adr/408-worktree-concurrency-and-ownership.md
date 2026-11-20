@@ -1,4 +1,4 @@
-# ADR-0008: Jobの開発作業をGit Worktree単位で分離し、Roleを逐次引き継ぐ
+# ADR-408: Jobの開発作業をGit Worktree単位で分離し、Roleを逐次引き継ぐ
 
 Date: 2026-11-20
 
@@ -106,8 +106,8 @@ Worktree分離、Task dependency、Role handoff、Skillの指示はJob権限を�
 
 ## Relationship to other ADRs
 
-- ADR-0001は製品目的を定義します。
-- ADR-0002は旧設計の制約を温存しない再構築原則を定義します。
-- ADR-0003はJob、Task、RoleExecution、Provider operation、Worktree ownershipのaggregate境界を定義します。
-- ADR-0004はJob approvalと禁止副作用を定義します。
-- ADR-0005はWorktree ownership、RoleExecution、artifact identityの不変条件を全状態変更経路で強制します。
+- ADR-100は製品目的を定義します。
+- ADR-101は旧設計の制約を温存しない再構築原則を定義します。
+- ADR-201はJob、Task、RoleExecution、Provider operation、Worktree ownershipのaggregate境界を定義します。
+- ADR-500はJob approvalと禁止副作用を定義します。
+- ADR-202はWorktree ownership、RoleExecution、artifact identityの不変条件を全状態変更経路で強制します。

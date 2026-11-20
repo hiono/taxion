@@ -1,4 +1,4 @@
-# ADR-0011: Agent Harnessの8要素を製品能力要求として維持する
+# ADR-811: Agent Harnessの8要素を製品能力要求として維持する
 
 Date: 2026-11-20
 
@@ -42,17 +42,17 @@ H1〜H8の各判定項目を採択済みの製品能力要求として保持し�
 
 H2.2の独立Computerは、別Session、Process、Git Worktreeだけでは満たしません。Task間とHostのfilesystem、process、credential、network、外部副作用の境界を明示し、隔離要件を満たす証拠を要求します。
 
-H2.1は全Taskへ全Toolを無条件に付与する要求ではありません。承認済みJob scopeで必要な能力を利用できることと、不要な能力を与えないことを両立します。Networkや接続Applicationの副作用はfilesystem隔離だけでは封じ込められないため、ADR-0004の権限・認証・操作承認と併せて判定します。
+H2.1は全Taskへ全Toolを無条件に付与する要求ではありません。承認済みJob scopeで必要な能力を利用できることと、不要な能力を与えないことを両立します。Networkや接続Applicationの副作用はfilesystem隔離だけでは封じ込められないため、ADR-500の権限・認証・操作承認と併せて判定します。
 
 ### 3. Sub-agentの独立性
 
-H3の並列委譲は、逐次Coder / ReviewerやModelを使わない並列Taskと区別します。独立したContext、Session、provenance、親子の総予算・期限、二重実行防止を維持します。Worktreeの並行性はADR-0008に従い、独立Taskのみ別Worktreeで実行します。
+H3の並列委譲は、逐次Coder / ReviewerやModelを使わない並列Taskと区別します。独立したContext、Session、provenance、親子の総予算・期限、二重実行防止を維持します。Worktreeの並行性はADR-408に従い、独立Taskのみ別Worktreeで実行します。
 
 ### 4. ContextとMemory
 
 Context選択、Skill / Fileのon-demand load、履歴圧縮は、現在のJob Contract、承認、必須制約、未解決事項、実行状態を失わないように行います。圧縮前後で重要な事実のprovenanceと参照可能性を検証します。
 
-Memoryと再開はJobAggregateを正本とし、独立した二重のJob / Memory正本を作りません。Progress Note、Git履歴、Skill等の保存形式と運用上の所在は、ADR-0000 / ADR-0009の文書・情報統治に従います。可変計画や作業進捗の保存先を特定の外部サービスへ恒久固定しません。
+Memoryと再開はJobAggregateを正本とし、独立した二重のJob / Memory正本を作りません。Progress Note、Git履歴、Skill等の保存形式と運用上の所在は、ADR-000 / ADR-004の文書・情報統治に従います。可変計画や作業進捗の保存先を特定の外部サービスへ恒久固定しません。
 
 ### 5. GuardrailsとVerification
 
@@ -99,11 +99,11 @@ Worktree分離、Computer Sandbox、Permission Callback、Credential Redaction�
 
 ## Relationship to other ADRs
 
-- ADR-0001は製品目的を定義します。
-- ADR-0003はJobAggregate、永続化、Job再開、成果・Evidenceの正本を定義します。
-- ADR-0004はJob authority、禁止副作用、Credential / Effect境界を定義します。
-- ADR-0005は各能力に関わる不変条件を全状態変更経路で強制します。
-- ADR-0006は内部6 Actor通信、ADR-0007は外部Agent A2A境界を定義します。
-- ADR-0008はTask / Worktreeの分離と並行性を定義します。
-- ADR-0009は現行仕様、計画、履歴、CI証拠の責務を分離します。
-- ADR-0010は検証証拠の水準とJob完遂の製品受入れを定義します。
+- ADR-100は製品目的を定義します。
+- ADR-201はJobAggregate、永続化、Job再開、成果・Evidenceの正本を定義します。
+- ADR-500はJob authority、禁止副作用、Credential / Effect境界を定義します。
+- ADR-202は各能力に関わる不変条件を全状態変更経路で強制します。
+- ADR-300は内部6 Actor通信、ADR-700は外部Agent A2A境界を定義します。
+- ADR-408はTask / Worktreeの分離と並行性を定義します。
+- ADR-004は現行仕様、計画、履歴、CI証拠の責務を分離します。
+- ADR-800は検証証拠の水準とJob完遂の製品受入れを定義します。

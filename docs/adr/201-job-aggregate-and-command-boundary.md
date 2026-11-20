@@ -1,4 +1,4 @@
-# ADR-0003: JobAggregateを作業・協調・成果の唯一のドメイン正本とする
+# ADR-201: JobAggregateを作業・協調・成果の唯一のドメイン正本とする
 
 Date: 2026-11-20
 
@@ -144,6 +144,6 @@ Recoveryはdurable intentとobservationを先に照合します。snapshot / res
 
 ## Relationship to other ADRs
 
-- ADR-0001は製品目的を定義します。
-- ADR-0002は旧設計の制約を温存せず再構築する原則を定義します。
+- ADR-100は製品目的を定義します。
+- ADR-101は旧設計の制約を温存せず再構築する原則を定義します。
 - 認可、全経路の不変条件、6 Actor通信、Worktree並行性、外部Agent protocol、仕様・履歴・証拠の保存先は下位ADRで具体化します。

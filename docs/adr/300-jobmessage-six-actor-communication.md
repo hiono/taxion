@@ -1,4 +1,4 @@
-# ADR-0006: Taxion内部の6 Actor通信をJobMessageへ統一する
+# ADR-300: Taxion内部の6 Actor通信をJobMessageへ統一する
 
 Date: 2026-11-20
 
@@ -93,7 +93,7 @@ HANDOFFはJobAggregate commandとして記録します。受信RoleとTask scope
 
 PlanningAuthorization、JobQuestionAuthorization、JobApproval、Task scope、Effect approvalおよびProvider operation authorityは通信によって作成・変更・拡張されません。
 
-承認済みJob内でRoleからTaskless PLANNERへ質問し、個別のbounded read-only executionが必要な場合は、ADR-0003 / ADR-0004のJobQuestionAuthorizationを別途検証します。これはJobMessageのEnvelopeやQUESTION種別とは独立したimmutable grantです。Question本文、QUESTIONの保存、ANSWERの受信だけではgrantを発行・拡張しません。
+承認済みJob内でRoleからTaskless PLANNERへ質問し、個別のbounded read-only executionが必要な場合は、ADR-201 / ADR-500のJobQuestionAuthorizationを別途検証します。これはJobMessageのEnvelopeやQUESTION種別とは独立したimmutable grantです。Question本文、QUESTIONの保存、ANSWERの受信だけではgrantを発行・拡張しません。
 
 ### 7. 配信・応答・再送・期限
 
@@ -155,9 +155,9 @@ LLMは本文分類、要約、宛先候補、回答候補を提案できます�
 
 ## Relationship to other ADRs
 
-- ADR-0001は製品目的を定義します。
-- ADR-0002は旧設計の制約を温存しない再構築原則を定義します。
-- ADR-0003はJobAggregate、JobMessageの保存境界、Provider / Worktree factsおよびCommand境界を定義します。
-- ADR-0004は通信によって認可・承認・禁止副作用を迂回できないことを定義します。
-- ADR-0005はActor identity、Job / Task scope、correlation、append-only、idempotencyを全mutation / recovery pathで強制することを定義します。
-- ADR-0007は外部Agent interoperabilityのA2A境界を定義します。
+- ADR-100は製品目的を定義します。
+- ADR-101は旧設計の制約を温存しない再構築原則を定義します。
+- ADR-201はJobAggregate、JobMessageの保存境界、Provider / Worktree factsおよびCommand境界を定義します。
+- ADR-500は通信によって認可・承認・禁止副作用を迂回できないことを定義します。
+- ADR-202はActor identity、Job / Task scope、correlation、append-only、idempotencyを全mutation / recovery pathで強制することを定義します。
+- ADR-700は外部Agent interoperabilityのA2A境界を定義します。

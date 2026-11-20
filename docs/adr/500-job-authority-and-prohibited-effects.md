@@ -1,4 +1,4 @@
-# ADR-0004: Job承認境界と禁止副作用を中心に実行権限を強制する
+# ADR-500: Job承認境界と禁止副作用を中心に実行権限を強制する
 
 Date: 2026-11-20
 
@@ -148,7 +148,7 @@ Admissionのacceptは、契約確認の入力にできるという意味であ�
 
 ## Relationship to other ADRs
 
-- ADR-0001は製品目的を定義します。
-- ADR-0002は旧設計の制約を温存しない再構築原則を定義します。
-- ADR-0003はJobAggregate、PlanningAuthorization、JobApproval、JobMessage、Provider / Worktree factsとCommand境界を定義します。
+- ADR-100は製品目的を定義します。
+- ADR-101は旧設計の制約を温存しない再構築原則を定義します。
+- ADR-201はJobAggregate、PlanningAuthorization、JobApproval、JobMessage、Provider / Worktree factsとCommand境界を定義します。
 - 具体的な全状態変更経路の不変条件、6 Actor通信、Worktree並行性、外部Agent protocolは下位ADRで定義します。
