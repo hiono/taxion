@@ -70,4 +70,4 @@ Provider停止が確認できないWorktreeを再利用しない。Worktree path
 
 ## Relationship to other ADRs
 
-ADR-0003のTaskとRoleExecution、ADR-0004の認可、ADR-0005の全経路不変条件、ADR-0006のHandoff、ADR-0007のProvider外部境界を前提とする。
+ADR-0003のTask、RoleExecution、Provider operationとstop observation、ADR-0004の認可、ADR-0005の全経路不変条件、ADR-0006のHandoff、ADR-0007の外部Agent A2A境界を前提とする。
