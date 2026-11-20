@@ -2,7 +2,7 @@
 
 Version: 1.0
 Date: 2026-11-20
-Normative decisions: ADR-0001〜ADR-0010
+Normative decisions: ADR-0001〜ADR-0011
 
 ## 1. Purpose and scope
 
@@ -21,6 +21,8 @@ Taxionは、人間の曖昧な思考を対話で整理し、実行可能な計�
 7. 状態変更はJobAggregateの明示的Commandを通し、全経路で不変条件を強制する。
 8. 実行状態不明を成功・失敗へ推測変換しない。安全な照合なしにblind resendしない。
 9. 製品受入れは検証可能な成果と実Job完遂で判断する。
+10. Agent Harnessの能力要求H1〜H8を満たす。能力をProvider / Runtimeへ委譲する場合も、対応構成と実動作の証拠を確認する。
+11. 承認済みJob内のTaskless PLANNERへの個別質問実行にはJobQuestionAuthorizationを使用できます。JobMessageやQUESTION種別だけでは認可を発行しません。
 
 ## 3. Actors and responsibilities
 
@@ -62,6 +64,9 @@ Roleは作業責務であり、Role名だけで認証済み実行主体やoperat
 - TaskはJobの対象・resource・budget・deadlineを狭められるが、拡張できない。
 - 会話、Planner proposal、Task、RoleExecution、Providerの自己申告はJobApprovalの代替にならない。
 
+### 4.3.1 JobQuestionAuthorization
+
+承認済みJob内でRoleからTaskless PLANNERへ質問し、個別のbounded read-only executionが必要な場合は、immutable JobQuestionAuthorizationを発行できます。grantはJobApproval、Planner RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineへ束縛します。QUESTION本文やMessageKindだけから自動発行しません。DRAFT Jobの初期PlanningAuthorizationとは用途と適用条件を分離します。
 ### 4.4 Execution and collaboration
 
 - JobはTaskを必須としない。TaskはJobに所属する任意の作業分解である。
@@ -156,6 +161,11 @@ Observation、Conformance、Admission、Execution Permissionは別の責務と�
 - Repository共通Git metadataの変更はRepository単位で直列化する。
 - Provider停止・結果・成果identityが不明なWorktreeは解放・再利用しない。
 
+## 8. Agent Harness capability contract
+
+Agent Harnessの必須能力H1〜H8と各判定項目は [ADR-0011](../adr/0011-agent-harness-eight-capabilities.md) に従います。製品実装はModel / Tool loop、Computer Sandbox、独立Sub-agent、Context選択・圧縮、Job再開、Credential / Effect guardrails、独立Verification、Model / Tool observabilityを満たします。
+
+Provider / Runtimeへの委譲は許容しますが、APIの存在やProviderの自己申告だけで能力充足と判定しません。対応構成、実行証拠、失敗時挙動を確認します。Worktree、Session、Processの分離だけをComputer Sandboxの証拠にしません。
 ## 8. Explicit non-goals
 
 - 内部6 Actor通信をA2Aへ置き換えること。
@@ -168,7 +178,7 @@ Observation、Conformance、Admission、Execution Permissionは別の責務と�
 - fake Provider / in-memory testの成功を実Provider・Job完遂の証拠と扱うこと。
 - 旧Task / Dispatch / ReviewFlow等の旧実行・認可経路を新Runtimeとして温存すること。
 
-## 9. Traceability
+## 10. Traceability
 
 | Contract area | Governing ADR |
 | --- | --- |
@@ -182,3 +192,4 @@ Observation、Conformance、Admission、Execution Permissionは別の責務と�
 | Git Worktree・並行性 | ADR-0008 |
 | 仕様・計画・履歴・CI証拠の正本 | ADR-0009 |
 | 検証水準・Job完遂受入れ | ADR-0010 |
+| Agent Harness H1〜H8 | ADR-0011 |
