@@ -1,17 +1,21 @@
 # Architecture Decision Records
 
-このディレクトリは、現在のTaxionで採用する設計判断の正本です。管理規約は [ADR-0000](0000-adr-governance.md) を参照してください。
+このディレクトリは、現在のTaxionで採用する設計判断の正本です。ADRの管理・改訂・来歴規約は [ADR-0000](0000-adr-governance.md) を参照してください。
 
 ## 決定の階層
 
-- **ADR-0001 — 製品目的:** 人間の曖昧な思考を対話で整理し、Job完遂を支援する製品価値を定義します。
-- **ADR-0002 — 再構築原則:** 旧設計の制約を温存せず、新しい不変条件から再構築する原則を定義します。
+- **ADR-0001 — 製品目的:** Taxionが利用者に提供する価値と完成評価の基準を定義します。
+- **ADR-0002 — 再構築原則:** 製品目的を実現するために、旧設計の制約を温存せず再構築する方法を定義します。
 - **ADR-0003 — JobAggregate:** Jobを作業・協調・成果の唯一のドメイン正本とし、Planning、Task、RoleExecution、JobMessage、Provider、Worktree、成果・証拠、Command境界を定義します。
-- **ADR-0004〜0010 — 実行ガードレール:** 認可、不変条件、内部通信、外部A2A、Worktree所有権、証拠と製品受入れを定義します。
+- **ADR-0004 — Job authority:** Job承認境界、禁止副作用、PlanningAuthorization、Observation / Conformance / Admission / Execution Permissionの分離、不完全情報の協調を定義します。
+- **ADR-0005 — Domain invariants:** 不変条件を生成・変更・保存・復元の全経路で強制する規範を定義します。
+- **ADR-0006 — Internal communication:** Taxion内部の6 Actor通信、JobMessage、Envelope、MessageKind、配信観測を定義します。
+- **ADR-0007 — External Agent protocol:** 外部Agent相互運用の必須protocolをA2Aに一本化し、内部JobMessageとの境界を定義します。
+- **ADR-0008以降:** Worktree並行性、証拠管理、その他の具体的な設計判断を定義します。ADR-0001〜0007に適合させます。
 
-ADR-0001は「何を実現するか」、ADR-0002は「どの原則で作り直すか」、ADR-0003は「Jobをどのようなドメイン正本として扱うか」を定義します。ADR-0004以降はそれらを具体化し、上位の安全境界を弱めません。番号の大小は優先順位を意味しません。決定の変更は既存判断を暗黙に書き換えず、置換対象と維持する範囲を明示した後続ADRで記録します。
+ADR-0001は「何を実現するか」、ADR-0002は「どの原則で作り直すか」、ADR-0003は「Jobをどのようなドメイン正本として扱うか」、ADR-0004は「誰がどの境界内で何を実行できるか」、ADR-0005は「すべての状態変更経路でどう不変条件を守るか」、ADR-0006は「Taxion内部でどう協調するか」、ADR-0007は「外部Agentとどう相互運用するか」を定義します。下位ADRはこれらを上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
 
-## Status
+## 状態
 
 | Status | 意味 |
 | --- | --- |
@@ -29,16 +33,15 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 - [ADR-0001: 製品目的 — 人間の曖昧な思考を継続可能な協調作業へ昇華する](0001-product-purpose.md) — Accepted
 - [ADR-0002: 旧設計の制約を温存せず、製品目的から再構築する](0002-rebuild-over-legacy-constraints.md) — Accepted
 - [ADR-0003: JobAggregateを作業・協調・成果の唯一のドメイン正本とする](0003-job-aggregate-and-command-boundary.md) — Accepted
-- [ADR-0004: Job承認境界と禁止副作用によって認可する](0004-job-authorization-and-effect-boundaries.md) — Accepted
-- [ADR-0005: ドメイン不変条件をすべての状態変更経路で強制する](0005-domain-invariants-all-state-paths.md) — Accepted
-- [ADR-0006: 内部6 Actor通信をJobMessageとして定義する](0006-internal-six-actor-jobmessage.md) — Accepted
-- [ADR-0007: 外部Agent相互運用の必須プロトコルをA2Aに一本化する](0007-external-agent-a2a.md) — Accepted
+- [ADR-0004: Job承認境界と禁止副作用を中心に実行権限を強制する](0004-job-authority-and-prohibited-effects.md) — Accepted
+- [ADR-0005: ドメイン不変条件を生成・変更・保存・復元の全経路で強制する](0005-domain-invariants-across-state-paths.md) — Accepted
+- [ADR-0006: Taxion内部の6 Actor通信をJobMessageへ統一する](0006-jobmessage-six-actor-communication.md) — Accepted
+- [ADR-0007: 外部Agent相互運用の必須protocolをA2Aに一本化する](0007-a2a-external-agent-interoperability.md) — Accepted
 - [ADR-0008: Worktree所有権とRoleExecutionの安全な移転](0008-worktree-ownership-and-concurrency.md) — Accepted
-- [ADR-0009: 検証証拠の水準とJob完遂の受入れ
-- ADR-0010: Observation・Conformance・Admission・Execution Permissionの分離](0009-evidence-and-product-acceptance.md) — Accepted
+- [ADR-0009: 検証証拠の水準とJob完遂の受入れ](0009-evidence-and-product-acceptance.md) — Accepted
 
 ## 原典と来歴
 
-ADR-0001〜0003は、アーカイブ済み旧Taxionの製品目的、再構築原則、JobAggregateのAccepted decisionを確認し、新しいリポジトリ向けに再構成しました。ADR-0004〜0008は、旧TaxionのJob認可、不変条件、Job中心協調、6 Actor通信、A2A、WorktreeのAccepted decisionを適用範囲ごとに確認して再構成しました。ADR-0009は旧PoCと旧Taxionの比較方針、検証証拠の区分、開発品質ゲートを新Taxion向けに再構成しました。ADR-0010は旧TaxionのObservation / Conformance / Admission / Execution Permissionの分離を新しいJobAggregateへ適用しました。
+ADR-0001は旧ADR-0088、ADR-0002は旧ADR-0081、ADR-0003は旧ADR-0083と旧ADR-0077を原典として再構成しました。ADR-0004は旧ADR-0080、0073、0066、0067のAccepted decisionを確認して再確立しました。ADR-0005は旧ADR-0079、ADR-0006は旧ADR-0087、ADR-0007は旧ADR-0108を原典として再確立しました。ADR-0008は旧ADR-0082のWorktree ownership / concurrency decisionを、ADR-0009は旧ADR-0107とADR-0085の候補実装比較・証拠区分・品質ゲートを新Taxion向けに再構成しました。
 
-旧Taxionと旧Taxion-PoCのGit履歴、Commit、Issue / PR履歴は移植していません。旧リポジトリの原文は読み取り専用の根拠資料であり、旧番号は原典を識別する参照としてのみ使用します。旧コードの採用はADR-0000およびADR-0002のprovenance・設計適合性・安全性・受入れ条件に従って別途判断します。
+旧Taxionと旧Taxion-PoCのGit履歴、Commit、Issue / PR履歴は移植していません。旧リポジトリの原文は読み取り専用の根拠資料であり、旧番号は原典を識別する参照としてのみ使用します。旧Taxion-PoCの初期READMEは実験専用と記載していましたが、後続の旧Taxion ADR-0107が候補実装ベースラインとして位置付けを変更した経緯を保持します。旧コードの採用はADR-0000およびADR-0002のprovenance・設計適合性・安全性・受入れ条件に従って別途判断します。
