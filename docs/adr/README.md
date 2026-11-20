@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-このディレクトリは、現在のTaxionで採用する設計判断の正本です。ADRの管理・改訂・来歴規約は [ADR-0000](0000-adr-governance.md) を参照してください。ADRの管理・改訂・来歴規約は [ADR-0000](0000-adr-governance.md) を参照してください。
+このディレクトリは、現在のTaxionで採用する設計判断の正本です。ADRの管理・改訂・来歴規約は [ADR-0000](0000-adr-governance.md) を参照してください。
 
 ## 決定の階層
 
@@ -11,7 +11,7 @@
 - **ADR-0005 — Domain invariants:** 不変条件を生成・変更・保存・復元の全経路で強制する規範を定義します。
 - **ADR-0006 — Internal communication:** Taxion内部の6 Actor通信、JobMessage、Envelope、MessageKind、配信観測を定義します。
 - **ADR-0007 — External Agent protocol:** 外部Agent相互運用の必須protocolをA2Aに一本化し、内部JobMessageとの境界を定義します。
-- **ADR-0008以降:** Worktree並行性、証拠管理、その他の具体的な設計判断を定義します。ADR-0001〜0007に適合させます。
+- **ADR-0008以降:** Worktree並行性、情報の正本、証拠管理、その他の具体的な設計判断を定義します。ADR-0001〜0007に適合させます。
 
 ADR-0001は「何を実現するか」、ADR-0002は「どの原則で作り直すか」、ADR-0003は「Jobをどのようなドメイン正本として扱うか」、ADR-0004は「誰がどの境界内で何を実行できるか」、ADR-0005は「すべての状態変更経路でどう不変条件を守るか」、ADR-0006は「Taxion内部でどう協調するか」、ADR-0007は「外部Agentとどう相互運用するか」を定義します。下位ADRはこれらを上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
 
@@ -29,7 +29,6 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 
 ## ADR一覧
 
-- [ADR-0000: Architecture Decision Recordsの管理規約](0000-adr-governance.md) — Accepted
 - [ADR-0000: Architecture Decision Recordsの管理規約](0000-adr-governance.md) — Accepted
 - [ADR-0001: 製品目的 — 人間の曖昧な思考を継続可能な協調作業へ昇華する](0001-product-purpose.md) — Accepted
 - [ADR-0002: 旧設計の制約を温存せず、製品目的から再構築する](0002-rebuild-over-legacy-constraints.md) — Accepted
