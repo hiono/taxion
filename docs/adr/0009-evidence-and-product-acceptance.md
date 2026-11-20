@@ -72,4 +72,4 @@ Job完了には、Jobの受入条件を満たす成果、対象digestへ結び�
 
 ## Relationship to other ADRs
 
-ADR-0001の利用者価値、ADR-0003のJob完了条件、ADR-0005の全経路不変条件、ADR-0007のdurable Provider facts、ADR-0008のWorktree ownershipを製品受入れの証拠へ結び付ける。
+ADR-0001の利用者価値、ADR-0003のJob完了条件とdurable Provider facts、ADR-0005の全経路不変条件、ADR-0008のWorktree ownershipを製品受入れの証拠へ結び付ける。
