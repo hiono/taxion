@@ -77,6 +77,13 @@ JobのDRAFT intakeとPlannerのbounded read-only context取得は、coding Workt
 
 Worktree分離、Task dependency、Role handoff、Skillの指示はJob権限を増やしません。JobApprovalのrepository / resource / file-access boundary、禁止副作用、承認が必要な副作用、budget、deadline、secret protection、duplicate execution preventionを維持します。実行状態が不明な場合は再送・所有権移転を行いません。
 
+## Alternatives considered
+
+- **同一Worktreeの複数mutating Roleを同時実行し、後からraceを検出する:** 実行前の逐次所有で防止できる競合を発生させるため採用しません。
+- **すべてのfile / resource accessを監視する汎用lock graphを作る:** Git WorktreeとTask dependencyで制御できる範囲を超える汎用基盤となるため採用しません。
+- **Job全体を一つのWorktreeで直列実行する:** 独立Taskの並行実行を失うため採用しません。
+- **RoleExecutionごとにWorktreeを作る:** Coder / Reviewer / 修正担当間の成果物引継ぎと統合が増えるため採用しません。
+- **Skillの指示やfencing tokenだけで物理書込み停止を保証する:** Provider / processの直接filesystem writeを防止できる証拠がないため採用しません。
 ## Consequences
 
 - 最初に対応するJob-native開発環境はGit repository + Git Worktreeです。
@@ -86,7 +93,7 @@ Worktree分離、Task dependency、Role handoff、Skillの指示はJob権限を�
 - Repository共通Git metadataの更新はrepository単位で直列化します。
 - Job-native Worktree ownership、Scheduler、read-only Reviewer boundary、停止・復旧は独立した実装・受入れ対象です。ADR採択は実装完了を意味しません。
 
-## Acceptance
+## Acceptance criteria
 
 - coding executionがGit repository外で開始されません。
 - 独立Taskは別Worktreeに割り当てられ、Graph dependencyとJob concurrency ceilingの範囲で並行実行できます。
