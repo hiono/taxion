@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み `hiono/obsolete-taxion` の旧ADR-0078「制約付き最適化による設計経路の導出」を原典とします。旧Task / Dispatch / ReviewFlowとJob / RoleExecutionの移行分析で用いた方法から、複数候補を比較する際に再利用できる判断規則を抽出し、新Taxionの設計方法として再確立します。旧分析表、旧実装状態、Issue / PR履歴は移植しません。
+アーカイブ済み `hiono/obsolete-taxion` の設計分析資料に記録された制約付き最適化の考え方を参照します。複数候補を比較する際に再利用できる判断規則を抽出し、新Taxionの設計方法として再確立します。旧分析表、旧実装状態、Issue / PR履歴は移植しません。
 
 ## Context
 
