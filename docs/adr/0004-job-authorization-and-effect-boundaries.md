@@ -21,16 +21,19 @@ Jobの明示承認で対象・資源・制約を固定し、その境界内で�
 ### 1. JobApproval
 
 - JobApprovalはimmutable JobContract revisionのcanonical hashに束縛する。
-- 承認対象にはJob目的、制約、受入条件、必要Evidence、対象repository/resource、file access、worktree/sandbox、budget、deadline、禁止事項、承認を要する副作用を含める。
+- 承認対象にはJobID、単調増加する承認revision、原文依頼、目的、制約、受入条件、必要Evidence、対象repository/resource、worktreeとfile-access上限、aggregate budget、concurrency ceiling、absolute deadline、禁止事項、承認を要する副作用、秘密を含まない有効なRuntime configuration参照を含める。通常操作名やRole別operation grantは承認対象にしない。
 - TaskはJob境界を狭められるが拡張できない。
 - 会話、Planner proposal、Task、RoleExecution、Providerの自己申告はJobApprovalの代替にならない。
+- JobApproval recordはJobIDをkeyとし、承認対象revision、canonicalization version、proposal hash、承認者identity、承認元、理由、承認時刻を保持するappend-only recordとする。
+- 承認proposal hashはversion付きcanonical encodingから算出する。古いrevisionへの承認、同じapproval IDへの異なる内容の再利用、承認済み項目の変更は認可を無効化する。
+- 各RoleExecutionのprivileged operation直前に、現在のJobApproval、Taskが狭めたresource scope、Runtime identity/configuration、残予算を再検証する。
 - 承認基準を変更した場合は新しいrevisionと明示的な承認を要求する。
 
 ### 2. PlanningAuthorization
 
 DRAFT Jobの初期Plannerに限り、明示的な利用者起動に基づく別個のimmutable PlanningAuthorizationを許可する。これはread-only context acquisitionとbounded planningだけを許可し、JobApproval、Job activation、実装Task作成、書込み、検証実行、commit、publish、credential使用、network、外部mutationを許可しない。
 
-PlanningAuthorizationはJob、原文依頼hash、認証済み利用者、Provider / account / configuration identity、repository identity、強制可能なread-only境界、予算、期限に束縛する。Plannerの発言や利用者の回答でgrant scopeを拡張しない。Provider側でread-onlyを強制できない場合はimmutable snapshotまたは明示文書だけを渡し、それも強制できなければrepository readを許可しない。
+PlanningAuthorizationはJobID、原文依頼hash、認証済み利用者principalとintake source / time、Provider account / configuration digest、repository identity、強制可能なread-only境界、許可effect、planning budget、deadline、grant record hashに束縛する。開始、各turn、各effect、resumeの前に再検証する。Plannerの発言や利用者の回答でgrant scopeを拡張しない。Provider側でread-onlyを強制できない場合はimmutable snapshotまたは明示文書だけを渡し、それも強制できなければrepository readを許可しない。
 
 ### 3. 通常操作と禁止副作用
 
@@ -52,7 +55,7 @@ PlanningAuthorizationはJob、原文依頼hash、認証済み利用者、Provide
 
 ### 5. 承認値の再検証
 
-ValidationCommands、repository/resource identity、対象commit/tree、worktree、configuration identity、承認revision、budget、deadline等、人間が承認した具体的な値は実行時に照合する。通常操作allowlistを認可の正本にしないことは、承認値の完全一致や安全境界の廃止を意味しない。
+ValidationCommandsは承認済みの完全なcommand stringと一致させる。genericなprocess.exec / test.run capabilityだけで任意commandを許可しない。repository/resource identity、対象commit/tree、worktree、configuration identity、承認revision、aggregate budget、concurrency ceiling、deadline等、人間が承認した具体的な値は実行時に照合する。通常操作allowlistを認可の正本にしないことは、承認値の完全一致や安全境界の廃止を意味しない。
 
 ### 6. 全経路での強制
 
