@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み hiono/obsolete-taxion の旧ADR-0083（blob f1250773ff5c8ddb650c9d8af79af3fe61ecaafd）と旧ADR-0077（blob fdca26027bcc69a530c7751e807a6f135514a300）を原典とする。旧ADR-0083のAccepted resolutionと2026-11-18 deletion boundary clarification、旧ADR-0077のADR-0080 / 0082による適用範囲の置換を確認し、新しいリポジトリ向けに再構成した。旧Git履歴や旧コードは移植しない。
+アーカイブ済み hiono/obsolete-taxion の旧ADR-0083（blob f1250773ff5c8ddb650c9d8af79af3fe61ecaafd）、旧ADR-0077（blob fdca26027bcc69a530c7751e807a6f135514a300）、旧ADR-0086（blob 41870b82399f169a04073ec625942bcaf18694b7）を原典とする。旧ADR-0083のAccepted resolutionと2026-11-18 deletion boundary clarification、旧ADR-0077のADR-0080 / 0082による適用範囲の置換、旧ADR-0086の独立Memory subsystem退役判断を確認し、新しいリポジトリ向けに再構成した。旧Git履歴や旧コードは移植しない。
 
 ## Context
 
@@ -105,6 +105,7 @@ Recoveryはdurable intentとobservationを先に照合します。snapshot / res
 - 同じCommand IDと同じ内容の再送は同じreceiptへ収束させます。同じCommand IDで異なる内容を送信した場合は拒否します。
 - 任意のWorkspace callbackや直接slice変更を、productionの代替write APIとして残しません。
 - 旧GraphTask / TaskGraph、履歴projection、旧Task / Dispatch / ReviewFlow workspace format、decoders、validators、migration readers、fixturesをread-only archiveやcompatibility readerとして残しません。具体的な現行Job-native use caseが後から必要になった場合は、必要なfacts、consumer、retention、Job-native schemaを別ADRで定義します。旧approvalやexecution receiptを新Job authorityへ変換しません。
+- 旧Memory subsystemの独立DB / schema、CLI / API、migration、Snapshot / Inspect / Restore、旧Task / Dispatch参照を新Taxionへ持ち込みません。旧MemoryデータをJob権限、JobApproval、PlanningAuthorization、JobContract、RoleExecutionまたはGraph edgeへ自動変換・復元しません。必要なJobの目的、計画、質問・回答、判断、成果、証拠、利用量、Provider観測はJob-native recordsとしてJobAggregateに保持します。
 - Coreは不変条件と内部整合性を検証し、Controllerは認証・承認・Providerの外部事実を検証します。ドメイン検証を外部実行の証拠と取り違えません。
 
 ### 8. 成果・証拠とJob完了
