@@ -40,4 +40,4 @@ SQLite databaseとWALファイルは秘密情報を含む可能性があるた�
 
 ## Current limitation
 
-このCLI sliceはDRAFT Jobの作成・読取りのみを提供します。Planner実行、PlanningAuthorization、JobContract提案・承認、Coder / Reviewer実行、Provider lifecycle、Handoff、成果・証拠の受入れ、Job完了はまだ実装していません。
+このCLI sliceはローカル環境でのDRAFT Job作成・読取りと、プロセス再起動後の永続データ読戻しを提供します。これは永続化の確認であり、RoleExecutionやProvider operationを含むJob実行の再開を意味しません。Trusted Ingress、認証済み利用者principal、intake provenance、Planner実行、PlanningAuthorization、JobContract提案・承認、Coder / Reviewer実行、Provider lifecycle、Handoff、成果・証拠の受入れ、Job完了はまだ実装していません。このCLI経路をProduct Contract全体のintake適合とみなしません。

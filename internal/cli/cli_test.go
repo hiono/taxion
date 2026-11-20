@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/hiono/taxion/internal/domain"
 )
@@ -50,6 +51,28 @@ func TestJobCreateShowAndList(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), jobID) {
 		t.Fatalf("list output = %q, want Job ID", stdout.String())
+	}
+}
+
+func TestJobListTruncatesLongUnicodeRequestWithoutBreakingUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	request := strings.Repeat("日本語", 30)
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"job", "create", "--store", path, "--request", request}, &stdout, &stderr, VersionInfo{})
+	if code != 0 {
+		t.Fatalf("create exit code = %d, stderr = %s", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Run(context.Background(), []string{"job", "list", "--store", path}, &stdout, &stderr, VersionInfo{})
+	if code != 0 {
+		t.Fatalf("list exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if !utf8.Valid(stdout.Bytes()) {
+		t.Fatalf("list output is not valid UTF-8: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "...") {
+		t.Fatalf("list output = %q, want truncated request marker", stdout.String())
 	}
 }
 

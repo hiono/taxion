@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -92,6 +93,124 @@ func TestCreateJobIsIdempotentForSameCommandAndPayload(t *testing.T) {
 	}
 	if len(jobs) != 1 {
 		t.Fatalf("stored Jobs = %d, want 1", len(jobs))
+	}
+}
+
+func TestCreateJobRequiresInitialRevision(t *testing.T) {
+	database, _ := newTestStore(t)
+	job := newTestJob(t, "job_later_revision", "A newly created Job must start at revision one.")
+	job.Revision = 2
+	if _, err := database.CreateJob(context.Background(), job, "cmd_later_revision"); !errors.Is(err, domain.ErrInvalidJob) {
+		t.Fatalf("CreateJob() error = %v, want domain.ErrInvalidJob", err)
+	}
+}
+
+func TestGetJobAcceptsLaterAggregateRevision(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx := context.Background()
+	job := newTestJob(t, "job_revision_two", "A persisted aggregate can advance revisions.")
+	if _, err := database.CreateJob(ctx, job, "cmd_revision_two"); err != nil {
+		t.Fatalf("CreateJob() error = %v", err)
+	}
+	job.Revision = 2
+	payload, err := json.Marshal(job)
+	if err != nil {
+		t.Fatalf("marshal updated Job: %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx,
+		"UPDATE job_aggregates SET revision = ?, payload_json = ?, integrity_sha256 = ? WHERE job_id = ?",
+		job.Revision, string(payload), digest(payload), job.ID,
+	); err != nil {
+		t.Fatalf("update aggregate fixture: %v", err)
+	}
+	got, err := database.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetJob() rejected revision 2: %v", err)
+	}
+	if got.Revision != 2 {
+		t.Fatalf("GetJob() revision = %d, want 2", got.Revision)
+	}
+}
+
+func TestGetJobDetectsAggregateMetadataTampering(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		args  []any
+	}{
+		{name: "revision", query: "UPDATE job_aggregates SET revision = revision + 1 WHERE job_id = ?", args: []any{"job_metadata"}},
+		{name: "created_at", query: "UPDATE job_aggregates SET created_at = ? WHERE job_id = ?", args: []any{"2026-11-20T13:00:00Z", "job_metadata"}},
+		{name: "updated_at", query: "UPDATE job_aggregates SET updated_at = ? WHERE job_id = ?", args: []any{"2026-11-20T13:00:00Z", "job_metadata"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			database, _ := newTestStore(t)
+			ctx := context.Background()
+			job := newTestJob(t, "job_metadata", "Detect duplicated metadata tampering.")
+			if _, err := database.CreateJob(ctx, job, "cmd_metadata"); err != nil {
+				t.Fatalf("CreateJob() error = %v", err)
+			}
+			if _, err := database.db.ExecContext(ctx, test.query, test.args...); err != nil {
+				t.Fatalf("tamper metadata: %v", err)
+			}
+			if _, err := database.GetJob(ctx, job.ID); !errors.Is(err, ErrIntegrity) {
+				t.Fatalf("GetJob() error = %v, want ErrIntegrity", err)
+			}
+		})
+	}
+}
+
+func TestListJobsDetectsAggregateMetadataTampering(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx := context.Background()
+	job := newTestJob(t, "job_list_metadata", "List must validate indexed metadata.")
+	if _, err := database.CreateJob(ctx, job, "cmd_list_metadata"); err != nil {
+		t.Fatalf("CreateJob() error = %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx,
+		"UPDATE job_aggregates SET updated_at = ? WHERE job_id = ?",
+		"2026-11-20T13:00:00Z", job.ID,
+	); err != nil {
+		t.Fatalf("tamper metadata: %v", err)
+	}
+	if _, err := database.ListJobs(ctx, 10); !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("ListJobs() error = %v, want ErrIntegrity", err)
+	}
+}
+
+func TestCreateJobRejectsCommandTypeMismatch(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx := context.Background()
+	job := newTestJob(t, "job_command_type", "Command type is part of idempotency identity.")
+	if _, err := database.CreateJob(ctx, job, "cmd_command_type"); err != nil {
+		t.Fatalf("CreateJob() error = %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx,
+		"UPDATE job_commands SET command_type = ? WHERE command_id = ?",
+		"DifferentCommand", "cmd_command_type",
+	); err != nil {
+		t.Fatalf("tamper command type: %v", err)
+	}
+	if _, err := database.CreateJob(ctx, job, "cmd_command_type"); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("replayed CreateJob() error = %v, want ErrIdempotencyConflict", err)
+	}
+}
+
+func TestCreateJobDetectsCommandReceiptMetadataTampering(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx := context.Background()
+	job := newTestJob(t, "job_command_receipt", "Command receipt metadata is integrity checked.")
+	if _, err := database.CreateJob(ctx, job, "cmd_command_receipt"); err != nil {
+		t.Fatalf("CreateJob() error = %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx,
+		"UPDATE job_commands SET created_at = ? WHERE command_id = ?",
+		"2026-11-20T13:00:00Z", "cmd_command_receipt",
+	); err != nil {
+		t.Fatalf("tamper command receipt: %v", err)
+	}
+	if _, err := database.CreateJob(ctx, job, "cmd_command_receipt"); !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("replayed CreateJob() error = %v, want ErrIntegrity", err)
 	}
 }
 

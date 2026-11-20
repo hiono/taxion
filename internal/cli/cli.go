@@ -159,16 +159,22 @@ func listJobs(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	writer := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(writer, "ID\tSTATE\tREVISION\tUPDATED\tREQUEST")
 	for _, job := range jobs {
-		request := strings.Join(strings.Fields(job.Request), " ")
-		if len(request) > 72 {
-			request = request[:69] + "..."
-		}
+		request := summarizeRequest(job.Request)
 		fmt.Fprintf(writer, "%s\t%s\t%d\t%s\t%s\n", job.ID, job.State, job.Revision, job.UpdatedAt.Format(time.RFC3339), request)
 	}
 	if err := writer.Flush(); err != nil {
 		return report(stderr, err)
 	}
 	return 0
+}
+
+func summarizeRequest(request string) string {
+	normalized := strings.Join(strings.Fields(request), " ")
+	runes := []rune(normalized)
+	if len(runes) > 72 {
+		return string(runes[:69]) + "..."
+	}
+	return normalized
 }
 
 func resolveStorePath(override string) (string, error) {

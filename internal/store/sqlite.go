@@ -27,6 +27,7 @@ var (
 )
 
 const schemaVersion = 1
+const createJobCommandType = "CreateJob"
 
 type Store struct {
 	db *sql.DB
@@ -155,6 +156,9 @@ func (s *Store) CreateJob(ctx context.Context, job domain.Job, commandID string)
 	if err := job.Validate(); err != nil {
 		return CommandReceipt{}, err
 	}
+	if job.Revision != 1 {
+		return CommandReceipt{}, fmt.Errorf("%w: a new Job must start at revision 1", domain.ErrInvalidJob)
+	}
 	if strings.TrimSpace(commandID) == "" {
 		return CommandReceipt{}, errors.New("command id is required")
 	}
@@ -183,18 +187,25 @@ func (s *Store) CreateJob(ctx context.Context, job domain.Job, commandID string)
 	}
 	defer tx.Rollback()
 
-	var existingHash, existingReceipt string
+	var existingType, existingJobID, existingHash, existingReceipt, existingCreatedAt string
+	var existingRevision int64
 	err = tx.QueryRowContext(ctx,
-		"SELECT payload_sha256, receipt_json FROM job_commands WHERE command_id = ?",
+		"SELECT command_type, job_id, resulting_revision, payload_sha256, receipt_json, created_at FROM job_commands WHERE command_id = ?",
 		commandID,
-	).Scan(&existingHash, &existingReceipt)
+	).Scan(&existingType, &existingJobID, &existingRevision, &existingHash, &existingReceipt, &existingCreatedAt)
 	if err == nil {
-		if existingHash != payloadHash {
+		if existingType != createJobCommandType || existingJobID != job.ID || existingRevision <= 0 ||
+			uint64(existingRevision) != job.Revision || existingHash != payloadHash {
 			return CommandReceipt{}, ErrIdempotencyConflict
 		}
 		var stored CommandReceipt
 		if err := json.Unmarshal([]byte(existingReceipt), &stored); err != nil {
-			return CommandReceipt{}, fmt.Errorf("decode existing command receipt: %w", err)
+			return CommandReceipt{}, fmt.Errorf("%w: decode existing command receipt: %v", ErrIntegrity, err)
+		}
+		if stored.CommandID != commandID || stored.JobID != job.ID || stored.Revision != job.Revision ||
+			stored.PayloadSHA256 != payloadHash || !stored.CreatedAt.Equal(job.CreatedAt.UTC()) ||
+			existingCreatedAt != createdAt {
+			return CommandReceipt{}, fmt.Errorf("%w: command receipt metadata mismatch", ErrIntegrity)
 		}
 		return stored, nil
 	}
@@ -224,8 +235,8 @@ func (s *Store) CreateJob(ctx context.Context, job domain.Job, commandID string)
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO job_commands
 			(command_id, job_id, command_type, payload_sha256, resulting_revision, receipt_json, created_at)
-			VALUES (?, ?, 'CreateJob', ?, ?, ?, ?)`,
-		commandID, job.ID, payloadHash, job.Revision, string(receiptJSON), createdAt,
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		commandID, job.ID, createJobCommandType, payloadHash, job.Revision, string(receiptJSON), createdAt,
 	)
 	if err != nil {
 		return CommandReceipt{}, fmt.Errorf("insert command receipt: %w", err)
@@ -237,31 +248,20 @@ func (s *Store) CreateJob(ctx context.Context, job domain.Job, commandID string)
 }
 
 func (s *Store) GetJob(ctx context.Context, id string) (domain.Job, error) {
-	var payload, expectedHash string
+	var revision int64
+	var payload, expectedHash, createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx,
-		"SELECT payload_json, integrity_sha256 FROM job_aggregates WHERE job_id = ?",
+		`SELECT revision, payload_json, integrity_sha256, created_at, updated_at
+			FROM job_aggregates WHERE job_id = ?`,
 		id,
-	).Scan(&payload, &expectedHash)
+	).Scan(&revision, &payload, &expectedHash, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Job{}, ErrNotFound
 	}
 	if err != nil {
 		return domain.Job{}, fmt.Errorf("read Job: %w", err)
 	}
-	if digest([]byte(payload)) != expectedHash {
-		return domain.Job{}, ErrIntegrity
-	}
-	var job domain.Job
-	if err := json.Unmarshal([]byte(payload), &job); err != nil {
-		return domain.Job{}, fmt.Errorf("%w: decode payload: %v", ErrIntegrity, err)
-	}
-	if err := job.Validate(); err != nil {
-		return domain.Job{}, fmt.Errorf("%w: validate payload: %v", ErrIntegrity, err)
-	}
-	if job.ID != id {
-		return domain.Job{}, fmt.Errorf("%w: aggregate identity mismatch", ErrIntegrity)
-	}
-	return job, nil
+	return decodeJobAggregate(id, revision, payload, expectedHash, createdAt, updatedAt)
 }
 
 func (s *Store) ListJobs(ctx context.Context, limit int) ([]domain.Job, error) {
@@ -269,7 +269,7 @@ func (s *Store) ListJobs(ctx context.Context, limit int) ([]domain.Job, error) {
 		return nil, errors.New("limit must be between 1 and 1000")
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT job_id, payload_json, integrity_sha256
+		`SELECT job_id, revision, payload_json, integrity_sha256, created_at, updated_at
 			FROM job_aggregates
 			ORDER BY updated_at DESC, job_id ASC
 			LIMIT ?`,
@@ -282,19 +282,14 @@ func (s *Store) ListJobs(ctx context.Context, limit int) ([]domain.Job, error) {
 
 	jobs := make([]domain.Job, 0)
 	for rows.Next() {
-		var id, payload, expectedHash string
-		if err := rows.Scan(&id, &payload, &expectedHash); err != nil {
+		var id, payload, expectedHash, createdAt, updatedAt string
+		var revision int64
+		if err := rows.Scan(&id, &revision, &payload, &expectedHash, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan Job: %w", err)
 		}
-		if digest([]byte(payload)) != expectedHash {
-			return nil, fmt.Errorf("%w: Job %s", ErrIntegrity, id)
-		}
-		var job domain.Job
-		if err := json.Unmarshal([]byte(payload), &job); err != nil {
-			return nil, fmt.Errorf("%w: Job %s: %v", ErrIntegrity, id, err)
-		}
-		if err := job.Validate(); err != nil || job.ID != id {
-			return nil, fmt.Errorf("%w: Job %s has invalid aggregate data", ErrIntegrity, id)
+		job, err := decodeJobAggregate(id, revision, payload, expectedHash, createdAt, updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("validate Job %s: %w", id, err)
 		}
 		jobs = append(jobs, job)
 	}
@@ -302,6 +297,30 @@ func (s *Store) ListJobs(ctx context.Context, limit int) ([]domain.Job, error) {
 		return nil, fmt.Errorf("iterate Jobs: %w", err)
 	}
 	return jobs, nil
+}
+
+func decodeJobAggregate(id string, revision int64, payload, expectedHash, createdAt, updatedAt string) (domain.Job, error) {
+	if revision <= 0 {
+		return domain.Job{}, fmt.Errorf("%w: Job %s has invalid stored revision", ErrIntegrity, id)
+	}
+	if digest([]byte(payload)) != expectedHash {
+		return domain.Job{}, fmt.Errorf("%w: Job %s payload digest mismatch", ErrIntegrity, id)
+	}
+	var job domain.Job
+	if err := json.Unmarshal([]byte(payload), &job); err != nil {
+		return domain.Job{}, fmt.Errorf("%w: decode Job %s payload: %v", ErrIntegrity, id, err)
+	}
+	if err := job.Validate(); err != nil {
+		return domain.Job{}, fmt.Errorf("%w: validate Job %s payload: %v", ErrIntegrity, id, err)
+	}
+	if job.ID != id || job.Revision != uint64(revision) {
+		return domain.Job{}, fmt.Errorf("%w: Job %s identity or revision mismatch", ErrIntegrity, id)
+	}
+	if job.CreatedAt.UTC().Format(time.RFC3339Nano) != createdAt ||
+		job.UpdatedAt.UTC().Format(time.RFC3339Nano) != updatedAt {
+		return domain.Job{}, fmt.Errorf("%w: Job %s timestamp metadata mismatch", ErrIntegrity, id)
+	}
+	return job, nil
 }
 
 func digest(payload []byte) string {

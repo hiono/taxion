@@ -63,8 +63,8 @@ func (j Job) Validate() error {
 	if j.State != JobDraft {
 		return fmt.Errorf("%w: unsupported initial state %q", ErrInvalidJob, j.State)
 	}
-	if j.Revision != 1 {
-		return fmt.Errorf("%w: a newly created job must have revision 1", ErrInvalidJob)
+	if j.Revision == 0 {
+		return fmt.Errorf("%w: revision must be positive", ErrInvalidJob)
 	}
 	if j.CreatedAt.IsZero() || j.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: timestamps are required", ErrInvalidJob)
