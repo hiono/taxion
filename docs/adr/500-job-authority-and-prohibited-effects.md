@@ -121,6 +121,10 @@ Admissionのacceptは、契約確認の入力にできるという意味であ�
 - Controllerは意味情報の完全性を一律審査してRoleの判断を代行せず、Job identity、進行、記録、権限、承認、安全性を管理します。
 - Reviewerの独立性は実行主体、Context / session、固定対象、provenanceおよびread-only execution boundaryで保証します。Role名だけのACLを独立性の代替にしません。
 
+## Security and operational impact
+
+JobApprovalはimmutable JobContract revisionの正確なhashに束縛し、scope、budget、deadline、configurationまたは禁止事項の変更で再承認を要求します。Controllerと実行基盤は対象境界、禁止副作用、credential隔離、sandbox境界を強制します。通常操作のallowlistを権限の正本にせず、影響を判定・封じ込めできない未知の操作は無条件に許可しません。PlanningAuthorizationとJobQuestionAuthorizationはread-onlyの限定grantとして扱い、会話やMessageKindで拡張しません。identity、provenance、実行状態が不明な場合はfail-closedとします。
+
 ## Alternatives considered
 
 - **通常操作をJob / Role単位の静的allowlistで認可する:** 承認範囲内の通常作業を不要に制限し、未知toolの意味を評価できないため採用しません。
