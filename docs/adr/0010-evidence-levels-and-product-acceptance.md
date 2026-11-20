@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み `hiono/obsolete-taxion` のADR-0107（Six-Actor PoCを候補実装ベースラインとして比較評価する判断）とADR-0085（仕様・履歴・検証証拠の分離）を参照し、新Taxionの製品受入れ条件として再構成した。開発時のOS別品質ゲートやCommit前検査は製品受入れ条件とは分離し、開発・運用文書で管理する。
+アーカイブ済み `hiono/obsolete-taxion` のADR-0107（Six-Actor PoCを候補実装ベースラインとして比較評価する判断）とADR-0085（仕様・履歴・検証証拠の分離）を参照する。候補実装の採用分類と比較条件はADR-0002で再確立し、本ADRは証拠水準とJob完遂の製品受入れを定義する。開発時のOS別品質ゲートやCommit前検査は製品受入れ条件とは分離し、開発・運用文書で管理する。
 
 ## Context
 
