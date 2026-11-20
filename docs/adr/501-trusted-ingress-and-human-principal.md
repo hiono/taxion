@@ -19,7 +19,7 @@ Job intakeとJobApprovalには認証済みhuman actorが必要です。自然言
 - 標準フローはOIDC Authorization Code Flow with PKCEとします。
 - 特定の商用Identity Providerには固定せず、管理者がissuer、client ID、audience等を設定します。
 - 信頼するissuerは事前設定されたものに限定し、未検証token claimや利用者入力から信頼先を選択しません。
-- ID Tokenの署名、issuer、audience、expiration、nonceを検証し、認証開始時のPKCE verifierとstateを照合します。
+- 設定済みissuerのmetadataとJWKSをTLSで取得し、ID Tokenの署名、issuer、audience、expiration、nonceを検証します。認証開始時のPKCE verifierとstateも照合します。
 - emailやdisplay name等の可変属性は表示用とし、Principal identityには使用しません。
 
 ### HUMAN Principal

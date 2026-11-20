@@ -27,7 +27,7 @@ Unit test、synthetic harness、SDK互換性、実Provider実行、再起動復�
 
 ### Job完了
 
-Job完了には、受入条件を満たす成果、provenance-valid Evidence、確定したUsageとProvider operation、未解決operationの不存在、Provider quiescence、Worktree release、安全・認可・データ整合性上の未解決問題がないことを要求します。これらはJobAggregateの明示的な完了Commandで確認します。
+Job完了には、受入条件を満たす成果、provenance-valid Evidence、確定したUsageとProvider operation、未解決operation・未完了RoleExecutionの不存在、Provider quiescence、Worktree release、安全・認可・データ整合性上の未解決問題がないことを要求します。これらはJobAggregateの明示的な完了Commandで確認します。
 
 ### 品質判断
 
