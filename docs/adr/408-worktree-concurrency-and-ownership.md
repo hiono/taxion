@@ -77,6 +77,10 @@ JobのDRAFT intakeとPlannerのbounded read-only context取得は、coding Workt
 
 Worktree分離、Task dependency、Role handoff、Skillの指示はJob権限を増やしません。JobApprovalのrepository / resource / file-access boundary、禁止副作用、承認が必要な副作用、budget、deadline、secret protection、duplicate execution preventionを維持します。実行状態が不明な場合は再送・所有権移転を行いません。
 
+## Security and operational impact
+
+Git Worktreeは作業ファイルの分離であり、Computer SandboxやHost filesystem / process / credential / networkの隔離を代替しません。同一Worktreeのmutating RoleExecutionは同時に一つとし、Provider停止・結果・成果identityが不明な場合は所有権を解放せずquarantineします。Repository共通Git metadataの変更はRepository単位で直列化し、Taskの並行性によってJobApprovalやresource boundaryを拡張しません。
+
 ## Alternatives considered
 
 - **同一Worktreeの複数mutating Roleを同時実行し、後からraceを検出する:** 実行前の逐次所有で防止できる競合を発生させるため採用しません。
