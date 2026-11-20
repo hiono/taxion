@@ -23,9 +23,15 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 5. ドメイン不変条件は生成・変更・保存・復元・外部入力の全経路で強制する。
 6. 合成テスト、SDK互換性、実Provider実行、実Job完遂の証拠を混同しない。
 
-## 現在の実装状態
+## 現在利用できる機能
 
-このリポジトリは新しい履歴で開始した。初期コミットでは製品目的と再構築原則のみを確立している。実行可能な製品機能はまだ実装されていない。機能の実装状態はコード、テスト、対象HEADのCIによって確認する。
+- `taxion job create --request "..."`：原文依頼を保持したDRAFT Jobを作成します。
+- `taxion job show <job-id>`：Jobの現在の内容をJSONで表示します。
+- `taxion job list`：保存済みJobを一覧表示します。
+
+JobはSQLiteへtransactionで保存し、Command receiptとpayload hashを照合します。既定の保存先はOSのユーザー設定ディレクトリ配下の taxion/jobs.sqlite です。`--store` で保存先を明示できます。
+
+Planner、PlanningAuthorization、JobContractの承認、Role実行、Provider連携、Handoff、Job完了は未実装です。DRAFT Jobの作成・読取りができることを、Job完遂機能の完成と扱いません。機能の実装状態はコード、テスト、対象HEADのCIによって確認します。
 
 ## 設計判断
 
