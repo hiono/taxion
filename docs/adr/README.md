@@ -6,9 +6,10 @@
 
 - **ADR-0001 — 製品目的:** Taxionが利用者に提供する価値と完成評価の基準を定義します。
 - **ADR-0002 — 再構築原則:** 製品目的を実現するために、旧設計の制約を温存せず再構築する方法を定義します。
-- **ADR-0003以降:** Job、Role、通信、認可、永続化、Provider、証拠、復旧などの具体的な設計判断を定義します。ADR-0001およびADR-0002に適合させます。
+- **ADR-0003 — JobAggregate:** Jobを作業・協調・成果の唯一のドメイン正本とし、Planning、Task、RoleExecution、JobMessage、Provider、Worktree、成果・証拠、Command境界を定義します。
+- **ADR-0004以降:** 認可、全経路の不変条件、6 Actor通信、Worktree並行性、外部Agent連携、証拠管理などの具体的な設計判断を定義します。ADR-0001〜0003に適合させます。
 
-ADR-0001は「何を実現するか」、ADR-0002は「どの原則で作り直すか」を定義します。下位ADRはこれらを上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
+ADR-0001は「何を実現するか」、ADR-0002は「どの原則で作り直すか」、ADR-0003は「Jobをどのようなドメイン正本として扱うか」を定義します。下位ADRはこれらを上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
 
 ## 状態
 
@@ -25,11 +26,14 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 
 - [ADR-0001: 製品目的 — 人間の曖昧な思考を継続可能な協調作業へ昇華する](0001-product-purpose.md)
 - [ADR-0002: 旧設計の制約を温存せず、製品目的から再構築する](0002-rebuild-over-legacy-constraints.md)
+- [ADR-0003: JobAggregateを作業・協調・成果の唯一のドメイン正本とする](0003-job-aggregate-and-command-boundary.md)
 
 ## 原典と来歴
 
 ADR-0001は、アーカイブ済み hiono/obsolete-taxion の redesign/job-centered-role-collaboration branch にある旧ADR-0088（blob c7b1dc8407994da033fd3bee380cb606bc199025）を原典として、製品目的を新しい履歴へ再確立しました。
 
 ADR-0002は、同じアーカイブ済みリポジトリの旧ADR-0081（blob e22b9f58a6828826ee692af0183a8c251a286f85）を原典として、再構築原則を新しい履歴へ再確立しました。
+
+ADR-0003は、同じアーカイブ済みリポジトリの旧ADR-0083（blob f1250773ff5c8ddb650c9d8af79af3fe61ecaafd）のAccepted resolutionと2026-11-18 deletion boundary clarificationを確認し、JobAggregateとProvider / Worktree lifecycleの不変条件を新しい履歴へ再確立しました。
 
 これらは旧Git履歴の移植ではありません。原典の判断内容を確認したうえで、新リポジトリの設計判断として新たに記録したものです。原典の後続改訂や関連ADRとの整合性を確認せず、原文を無条件に複製してはなりません。
