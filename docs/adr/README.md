@@ -6,6 +6,7 @@
 
 - **ADR-100 — 製品目的:** Taxionが利用者に提供する価値と完成評価の基準を定義します。
 - **ADR-101 — 再構築原則:** 製品目的を実現するために、旧設計の制約を温存せず再構築する方法を定義します。
+- **ADR-106 — 設計判断の比較方法:** 複数候補の責務・制約・証拠を比較し、必須条件をハード制約として維持する方法を定義します。
 - **ADR-201 — JobAggregate:** Jobを作業・協調・成果の唯一のドメイン正本とし、Planning、Task、RoleExecution、JobMessage、Provider、Worktree、成果・証拠、Command境界を定義します。
 - **ADR-500 — Job authority:** Job承認境界、禁止副作用、PlanningAuthorization、Observation / Conformance / Admission / Execution Permissionの分離、不完全情報の協調を定義します。
 - **ADR-202 — Domain invariants:** 不変条件を生成・変更・保存・復元の全経路で強制する規範を定義します。
@@ -13,7 +14,7 @@
 - **ADR-700 — External Agent protocol:** 外部Agent相互運用の必須protocolをA2Aに一本化し、内部JobMessageとの境界を定義します。
 - **領域別ADR:** Domain Model、Collaboration、Execution、Authorization、Interface、Qualityの個別判断をカテゴリ番号で管理し、上位の製品目的・再構築原則・安全境界に適合させます。
 
-ADR-100は「何を実現するか」、ADR-101は「どの原則で作り直すか」、ADR-201は「Jobをどのようなドメイン正本として扱うか」、ADR-202は「すべての状態変更経路でどう不変条件を守るか」、ADR-300は「Taxion内部でどう協調するか」、ADR-408は「開発作業をどう分離・並行させるか」、ADR-500は「誰がどの境界内で何を実行できるか」、ADR-700は「外部Agentとどう相互運用するか」、ADR-800とADR-811は「何をどの証拠で受け入れるか」を定義します。ADR-000とADR-004はADR統治と情報の正本を定めます。下位ADRはこれらを上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
+ADR-100は「何を実現するか」、ADR-101は「どの原則で作り直すか」、ADR-106は「複数の設計候補をどのように比較するか」、ADR-201は「Jobをどのようなドメイン正本として扱うか」、ADR-202は「すべての状態変更経路でどう不変条件を守るか」、ADR-300は「Taxion内部でどう協調するか」、ADR-408は「開発作業をどう分離・並行させるか」、ADR-500は「誰がどの境界内で何を実行できるか」、ADR-700は「外部Agentとどう相互運用するか」、ADR-800とADR-811は「何をどの証拠で受け入れるか」を定義します。ADR-000とADR-004はADR統治と情報の正本を定めます。下位ADRはこれらを上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
 
 ## 状態
 
@@ -36,6 +37,7 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 ### 100–199 Product & Governance
 - [ADR-100: 製品目的 — 人間の曖昧な思考を継続可能な協調作業へ昇華する](100-product-purpose.md) — Accepted
 - [ADR-101: 旧設計の制約を温存せず、製品目的から再構築する](101-rebuild-over-legacy-constraints.md) — Accepted
+- [ADR-106: 制約付き最適化による設計判断の比較方法](106-constrained-design-decision-method.md) — Accepted
 
 ### 200–299 Domain Model
 - [ADR-201: JobAggregateを作業・協調・成果の唯一のドメイン正本とする](201-job-aggregate-and-command-boundary.md) — Accepted
