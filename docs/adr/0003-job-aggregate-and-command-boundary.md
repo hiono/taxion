@@ -26,7 +26,8 @@ Taxionでは、利用者の意図と成果を保持するJobを継続単位と�
 - Jobは最初のPlanner呼出しより前に作成します。初期状態はDRAFTとし、利用者の原文依頼を保存します。Goalは未設定でもよく、Plannerが提案する契約revisionに含めます。
 - TaskはJob内の任意の作業分解です。Taskは必須のJobIDを持ちます。Job側にTaskIDsやRootTaskIDの逆方向所有indexを持たせません。
 - RoleExecutionはRoleによる個々の実行です。JobIDを必須とし、TaskIDは任意とします。Job全体のPlanningを行うTaskless PlannerはTaskIDを持ちません。
-- JobContractRevision、JobApproval、PlanningAuthorization、JobQuestionAuthorization、JobMessage、Provider operation intent / observation、Worktree ownership、JobOutput、JobEvidence、JobUsageおよびEffect decisionはJobの責務に属します。
+- JobContractRevision、JobApproval、PlanningAuthorization、JobQuestionAuthorization、JobProgressNote、JobMessage、Provider operation intent / observation、Worktree ownership、JobOutput、JobEvidence、JobUsageおよびEffect decisionはJobの責務に属します。
+- JobProgressNoteはJob内の進捗・継続に必要な要点を出所と時刻に結び付けて保持するappend-only factです。可変計画の正本や独立Memory storeの代替にはしません。
 - GoalはPlannerが提案するJobContractRevisionに含め、JobApprovalを作成する前に非空であることを検証します。Goal未設定のDRAFT Jobは、実装Taskや実装RoleExecutionを許可しません。
 - WorkspaceはJobAggregateの集合を保持する保存境界です。全Jobを一つの可変TaskGraphへ集約しません。
 
@@ -82,6 +83,8 @@ Sendのterminal event、Usage、最終出力は別のfactsとして保存し、t
 
 各Provider Adapterは、少なくとも次の能力を個別に宣言・検証します: OperationIDによるStart idempotency / lookup、process再起動後のsession reattachment、turn identityによるSend idempotency / lookup、event replay / cursor continuity、stop proof、lost event後のfinal output取得、Usage identity / completeness / deduplication。未対応能力は未対応として明示し、楽観的に補完しません。
 
+Model Call / Tool CallはRoleExecution、turn、Provider operationまたはEffect observationへ相関し、観測可能な呼出しの追跡をJob内に保持します。Providerが報告しない呼出しや欠落eventがある場合はcoverage gapを記録し、全呼出しを追跡済みと宣言しません。
+
 Recoveryはdurable intentとobservationを先に照合します。snapshot / restoreは、未解決Provider operation、稼働可能性のあるProvider writer、未照合turn result / Usage、保持中またはquarantine中のWorktree ownerがない場合に限ります。
 - RoleExecutionのWAITING、SUSPENDED、CANCEL_REQUESTEDまたはterminal stateをProvider停止の証拠とみなしません。
 
@@ -96,7 +99,7 @@ Recoveryはdurable intentとobservationを先に照合します。snapshot / res
 
 ### 7. すべてのJob変更を明示的Command境界へ集約する
 
-- Job、Task、RoleExecution、JobMessage、Provider operation、Worktree ownership、JobOutput、JobEvidence、JobUsage、Effect decisionの変更はJobAggregateへの明示的Commandとして実行します。
+- Job、Task、RoleExecution、JobProgressNote、JobMessage、Provider operation、Worktree ownership、JobOutput、JobEvidence、JobUsage、Effect decisionの変更はJobAggregateへの明示的Commandとして実行します。
 - Commandはexpected aggregate revisionと安定したidempotency identityを持ちます。
 - 一つのJobに対するCommandと関連レコードは一つのtransactionで原子的に確定します。
 - 同じCommand IDと同じ内容の再送は同じreceiptへ収束させます。同じCommand IDで異なる内容を送信した場合は拒否します。
@@ -135,7 +138,6 @@ Recoveryはdurable intentとobservationを先に照合します。snapshot / res
 - Provider capabilityが明示され、stop proof / result / usage照合前にWorktreeを解放しません。
 - 旧TaskGraph等の実行・履歴projection・decoder・migration経路を新Taxionへ持ち込みません。
 
-## Consequences
 ## Consequences
 
 - 実装・テストはJobAggregateと明示的Commandを正本として構築します。
