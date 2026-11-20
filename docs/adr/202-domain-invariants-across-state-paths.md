@@ -29,4 +29,4 @@ Accepted
 
 ## Relationship to other ADRs
 
-ADR-201はJobAggregateとCommand境界、ADR-300は通信、ADR-408はWorktree、ADR-500は権限と禁止副作用を定義します。各ADRは固有の不変条件と強制境界を具体化します。
+ADR-200はDomain Modelの基本方針、ADR-201はJobAggregateとCommand境界、ADR-300はCollaborationの基本方針、ADR-301は通信、ADR-400はExecution & Runtimeの基本方針、ADR-408はWorktree、ADR-500は権限と禁止副作用を定義します。各ADRは固有の不変条件と強制境界を具体化します。

@@ -59,4 +59,4 @@ Agentの作業上の自由と人間の承認境界を両立します。通常操
 
 ## Relationship to other ADRs
 
-ADR-201はJob内のauthority facts、ADR-202は全状態経路の不変条件、ADR-408はWorktree境界、ADR-501はHUMAN Principal、ADR-800は受入れ証拠を定義します。
+ADR-400はExecution & Runtimeの基本方針、ADR-201はJob内のauthority facts、ADR-202は全状態経路の不変条件、ADR-408はWorktree境界、ADR-501はHUMAN Principal、ADR-800は受入れ証拠を定義します。

@@ -29,4 +29,4 @@ Job、Role、協調、権限、永続化、成果・証拠の具体的な契約�
 
 ## Relationship to other ADRs
 
-ADR-101は再構築原則、ADR-201はJobAggregate、ADR-300は内部協調、ADR-500は権限、ADR-800は製品受入れ、ADR-811はAgent Harness能力を定義します。
+ADR-101は再構築原則、ADR-106は設計判断の比較方法、ADR-200はDomain Model、ADR-300はCollaboration、ADR-400はExecution & Runtime、ADR-500は権限、ADR-700はInterface & Integration、ADR-800はQuality & Evidenceの基本方針を定義します。個別判断はADR-201 / 202 / 301 / 408 / 501 / 502 / 701 / 811で具体化します。

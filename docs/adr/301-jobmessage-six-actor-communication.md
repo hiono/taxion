@@ -1,4 +1,4 @@
-# ADR-300: Taxion内部の6 Actor通信をJobMessageへ統一する
+# ADR-301: Taxion内部の6 Actor通信をJobMessageへ統一する
 
 Date: 2026-11-20
 
@@ -49,4 +49,4 @@ JobMessage、Question、Answer、Request、Notification、HandoffはJobApproval�
 
 ## Relationship to other ADRs
 
-ADR-201はJobMessageの保存境界、ADR-202はidentity・scope・idempotencyの不変条件、ADR-408はWorktree handoff、ADR-500は権限、ADR-700は外部AgentとのA2A境界を定義します。
+ADR-200はDomain Modelの基本方針、ADR-300はCollaborationの基本方針、ADR-201はJobMessageの保存境界、ADR-202はidentity・scope・idempotencyの不変条件、ADR-408はWorktree handoff、ADR-500は権限、ADR-701は外部AgentとのA2A境界を定義します。

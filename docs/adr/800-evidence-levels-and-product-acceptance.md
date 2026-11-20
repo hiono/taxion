@@ -39,4 +39,4 @@ Job完了には、受入条件を満たす成果、provenance-valid Evidence、�
 
 ## Relationship to other ADRs
 
-ADR-201は成果・証拠・Job完了の正本、ADR-202は不変条件、ADR-300とADR-700は通信境界、ADR-408はWorktree所有権、ADR-500は承認と実行権限を定義します。
+ADR-201は成果・証拠・Job完了の正本、ADR-202は不変条件、ADR-300はCollaborationの基本方針、ADR-301は内部通信、ADR-400はExecution & Runtimeの基本方針、ADR-408はWorktree所有権、ADR-500は承認と実行権限、ADR-700はInterface & Integrationの基本方針、ADR-701は外部Agent protocolを定義します。
