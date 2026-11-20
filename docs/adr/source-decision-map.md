@@ -49,6 +49,28 @@ Date: 2026-11-20
 | ADR-0107 | [ADR-101](101-rebuild-over-legacy-constraints.md)、[ADR-800](800-evidence-levels-and-product-acceptance.md) | Six-Actor PoCを候補実装ベースラインとして評価し、直接採用・部分採用・追加検証／修正・再実装を証拠に基づき判断する。 | 候補実装であることを理由に新Taxionへ自動採用・直接移植しない。旧PoC初期READMEの実験専用という当初の記述を遡及的に書き換えない。 |
 | ADR-0108 | [ADR-700](700-a2a-external-agent-interoperability.md) | 外部Agentの必須相互運用protocolをA2Aに一本化し、内部6 ActorのJobMessageと分離する。 | MCP / ACP / Copilot SDK / Provider固有protocolを初期必須化しない。A2Aの十分性は未検証の設計仮説として扱う。 |
 
+## 旧ADR全件の分類・移行範囲
+
+旧アーカイブで本文を確認できたADRは89件です。旧 `renumbering-map.md` の88件に、後続で追加された旧ADR-0108をInterface & Integrationへ分類して加えました。分類結果は次のとおりです。
+
+| 番号帯 | カテゴリ | 旧ADR件数 |
+|---|---|---:|
+| 000–099 | ADR Governance | 5 |
+| 100–199 | Product & Governance | 8 |
+| 200–299 | Domain Model | 4 |
+| 300–399 | Collaboration | 6 |
+| 400–499 | Execution & Runtime | 10 |
+| 500–599 | Authorization & Security | 16 |
+| 600–699 | Persistence & Recovery | 10 |
+| 700–799 | Interface & Integration | 10 |
+| 800–899 | Quality & Evidence | 12 |
+| 900–999 | Infrastructure & Operations | 8 |
+| **合計** |  | **89** |
+
+本書の対応表は、旧ADRから新Taxionへ引き継ぐ永続的な判断40項目を13件の新ADRへ対応付けています。残る49件は新Taxionの現行製品判断として一括移植していません。旧Task / Dispatch / ReviewFlow / Workspace / Memory、旧CLI / Runtime / ACP / Web UI、Provider固有の課金・quota、配布・公開手順など、旧実装・旧運用に結び付く判断は、現在の製品契約へ自動継承せず、必要になった時点で原典と適用範囲を再評価します。
+
+旧ADR-0074〜0076は本文・原本を確認できていないため、89件の分類数に含めず、番号も割り当てません。旧番号のカテゴリ分類と完全な題名索引は、読み取り専用の旧リポジトリにあるADR indexおよびrenumbering-mapを参照します。これらの旧文書は新Taxionへコピーしません。
+
 ## 適用上の注意
 
 - 新ADRが旧ADRの全文章を複製することを要求しません。引き継ぐのは、現在の製品目的に必要で、適用範囲と根拠を確認できた設計判断です。
