@@ -6,15 +6,6 @@ Date: 2026-11-20
 
 Accepted
 
-## Source decisions
-
-本ADRは、アーカイブ済み hiono/obsolete-taxion の以下のAccepted decisionを原典として、Job-native権限モデルに必要な意味を新しい履歴へ再確立します。
-
-- 旧ADR-0080（blob 255791201252542aecb09c485e072b0d2a4e7211）：Job境界と禁止副作用。
-- 旧ADR-0073（blob 27c8e9944168d028f62378be8f28f8f8cc351811）：承認範囲内の継続判断を操作の副作用で分ける。
-- 旧ADR-0066（blob 4832965254fdb72c5aeef0cf624417d4bc7c29b1）：観測・適合判定・受入れ・実行許可の分離。
-- 旧ADR-0067（blob 03d7d56cc48ec689da7ae356bd96ccad822decee）：情報不足だけを理由に協調を拒否しない。
-
 ## Context
 
 Agentに通常操作の許可リストを与え、事前列挙されていない操作を拒否する方式は、承認済みJobの境界内で必要となった通常作業まで停止させます。一方、Agentの判断や自然言語の回答に権限を委ねると、Jobの対象境界、禁止副作用、人間の承認、安全性を維持できません。
