@@ -174,17 +174,7 @@ Governing ADRs: ADR-0001〜ADR-0010
 - Evidence、Usage、Provider quiescence、Worktree release、未解決operationの不存在を確認してJobを完了する。
 - 中断・再起動後も同じJobを安全に再開できる。
 
-## 4. Cross-platform and release gates
-
-- Linux: format / vet / test / raceを実施する。
-- Windows: vet / testを実施する。
-- GoReleaser: macOS targetを含む全必須targetのcross-buildを実施する。
-- macOS native: 任意。
-- Commit前にSecret Scanを実施する。
-- Docs-only changeではbuildを必須としない。
-- CI Runは完全なHEAD SHAと対応付ける。
-
-## 5. Evidence recording
+## 4. Evidence recording
 
 各受入れ結果は次の情報を持つ。
 
@@ -199,6 +189,6 @@ Governing ADRs: ADR-0001〜ADR-0010
 
 未実施のシナリオをPASSにしない。synthetic evidenceをlive Provider evidenceとして扱わない。CI結果を後続HEADへ流用しない。
 
-## 6. Product acceptance rule
+## 5. Product acceptance rule
 
 Taxionの製品受入れはAT-013の実Job完遂を中心に判定する。AT-001〜AT-012は必要な下位契約であり、個別に合格してもAT-013の代替にはならない。
