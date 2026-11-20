@@ -41,6 +41,10 @@ Planner、PlanningAuthorization、JobContractの承認、Role実行、Provider�
 - [Runtime Boundaries](docs/design/runtime-boundaries.md): 論理コンポーネント、信頼境界、Command / Provider / A2A / Recoveryのデータフロー。
 - [Product Acceptance Test Specification](docs/test-specs/product-acceptance.md): 証拠水準とJob完遂を確認する受入れシナリオ。
 
+## 開発・運用
+
+開発時の品質ゲートとCommit前検査は[Development Quality Gates](docs/development/quality-gates.md)を参照してください。これらの開発運用条件は製品の受入れシナリオとは分離して管理します。
+
 ## 設計判断
 
 採用済み設計判断は [ADR index](docs/adr/README.md) を参照してください。製品目的と再構築原則の根拠となった旧設計判断は、アーカイブ済みリポジトリの原本を参照して再構成しています。旧Git履歴をこのリポジトリへ移植していません。
