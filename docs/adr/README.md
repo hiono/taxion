@@ -43,6 +43,6 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 
 ## 原典と来歴
 
-ADR-0001は旧ADR-0088、ADR-0002は旧ADR-0081、ADR-0003は旧ADR-0083と旧ADR-0077を原典として再構成しました。ADR-0004は旧ADR-0080、0073、0066、0067のAccepted decisionを確認して再確立しました。ADR-0005は旧ADR-0079、ADR-0006は旧ADR-0087、ADR-0007は旧ADR-0108を原典として再確立しました。ADR-0008は旧ADR-0082のWorktree ownership / concurrency decisionを、ADR-0009は旧ADR-0085の仕様・計画・履歴・検証証拠の分離を新Taxion向けに再構成しました。ADR-0010は旧ADR-0107の候補実装比較と現在の品質ゲートを製品受入れへ適用します。
+ADR-0001は旧ADR-0088、ADR-0002は旧ADR-0081、ADR-0003は旧ADR-0083と旧ADR-0077を原典として再構成しました。ADR-0004は旧ADR-0080、0073、0066、0067のAccepted decisionを確認して再確立しました。ADR-0005は旧ADR-0079、ADR-0006は旧ADR-0087、ADR-0007は旧ADR-0108を原典として再確立しました。ADR-0008は旧ADR-0082のWorktree ownership / concurrency decisionを、ADR-0009は旧ADR-0085の仕様・計画・履歴・検証証拠の分離を新Taxion向けに再構成しました。ADR-0010は旧ADR-0107の候補実装比較を踏まえ、証拠水準とJob完遂の製品受入れを定義します。開発時のOS別品質ゲートとCommit前検査は [Development Quality Gates](../development/quality-gates.md) で管理します。
 
 旧Taxionと旧Taxion-PoCのGit履歴、Commit、Issue / PR履歴は移植していません。旧リポジトリの原文は読み取り専用の根拠資料であり、旧番号は原典を識別する参照としてのみ使用します。旧Taxion-PoCの初期READMEは実験専用と記載していましたが、後続の旧Taxion ADR-0107が候補実装ベースラインとして位置付けを変更した経緯を保持します。旧コードの採用はADR-0000およびADR-0002のprovenance・設計適合性・安全性・受入れ条件に従って別途判断します。
