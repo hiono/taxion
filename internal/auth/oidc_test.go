@@ -274,8 +274,8 @@ func runFakeOIDC(t *testing.T, options fakeOIDCOptions) (AuthenticatedPrincipal,
 		Timeout:     timeout,
 	}
 	authenticator := &OIDCAuthenticator{
-		config:               config,
-		httpClient:           server.Client(),
+		config:     config,
+		httpClient: server.Client(),
 		openAuthorizationURL: func(authorizationURL string) error {
 			response, err := server.Client().Get(authorizationURL)
 			if err != nil {
