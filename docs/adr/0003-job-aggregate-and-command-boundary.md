@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み hiono/obsolete-taxion の redesign/job-centered-role-collaboration branch にある旧ADR-0083を原典とする（blob f1250773ff5c8ddb650c9d8af79af3fe61ecaafd）。旧ADR-0083のAccepted resolutionと2026-11-18 deletion boundary clarificationを含めて確認し、新しいリポジトリ向けに再構成した。旧Git履歴や旧コードは移植しない。
+アーカイブ済み hiono/obsolete-taxion の旧ADR-0083（JobAggregate / Command境界）と旧ADR-0077（Job中心協調、JobApproval、成果・証拠の所有関係）を原典とする。旧ADR-0083のAccepted resolutionと2026-11-18 deletion boundary clarification、旧ADR-0077のADR-0080 / 0082による適用範囲の置換を確認し、新しいリポジトリ向けに再構成した。旧Git履歴や旧コードは移植しない。
 
 ## Context
 
