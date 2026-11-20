@@ -37,4 +37,4 @@ H1〜H8の充足状況をProvider / Runtimeごとに評価し、未対応・未�
 
 ## Relationship to other ADRs
 
-ADR-201はJobと再開情報、ADR-300は内部協調、ADR-408はWorktree、ADR-500は権限・Guardrails、ADR-800は検証証拠と製品受入れを定義します。
+ADR-201はJobと再開情報、ADR-300はCollaborationの基本方針、ADR-301は内部通信、ADR-408はWorktree、ADR-500は権限・Guardrails、ADR-800は検証証拠と製品受入れを定義します。
