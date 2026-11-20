@@ -68,4 +68,4 @@ Planner、Coder、Reviewer、修正、人間の介入、Job完了を同じJobで
 
 ## Relationship to other ADRs
 
-ADR-202は不変条件、ADR-300は内部通信、ADR-408はWorktree、ADR-500は権限、ADR-501はintake identity、ADR-800は証拠と完了条件を定義します。
+ADR-200はDomain Modelの基本方針、ADR-202は不変条件、ADR-300はCollaborationの基本方針、ADR-301は内部通信、ADR-400はExecution & Runtimeの基本方針、ADR-408はWorktree、ADR-500は権限、ADR-501はintake identity、ADR-800は証拠と完了条件を定義します。
