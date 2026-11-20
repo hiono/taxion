@@ -41,9 +41,21 @@ Job、Task、RoleExecution、通信、Provider実行、Worktree、成果・証�
 
 - 外部Provider呼出し前にTaxion生成のimmutable OperationIDとintentをJobAggregateへ保存します。
 - Provider observationsはOperationIDに束縛したappend-only factsとします。RoleExecutionの状態とProviderのsession、turn、stop、result、usageは別の事実として扱います。
-- operation結果がUNKNOWNの場合はそのまま保持し、Provider側の冪等性または照合可能性が確認できるまで再送しません。
-- Worktree予約を伴うStartは、予約とStart intentを同じJob transactionで確定してからProviderを呼び出します。
-- Provider停止証拠、最終結果、Usageが照合されるまでWorktreeを保持します。
+- 各Provider AdapterはProvider / SDK versionとconfiguration identityに対応するcapabilityを明示し、対応する検証証拠を保持します。少なくとも次を個別に宣言します。
+  1. StartのOperationID単位のidempotencyまたはlookup
+  2. process restart後の、同一Provider Sessionへの再接続と必要なSession identity
+  3. Sendのturn identity単位のidempotencyまたはlookup
+  4. disconnect / restart後のevent replayとcursor continuity
+  5. Stop observationと、Provider processが書込みを継続しないことを示す証拠
+  6. event stream欠落時のfinal output retrieval
+  7. Usage identity、粒度、完全性、重複排除の意味
+- 未対応または未検証のcapabilityは利用可能と推定しません。capabilityの宣言はProviderの実行能力を示すものであり、Job authorityやEffect permissionを付与しません。
+- 同じRoleExecutionをprocess restart後に継続する場合、Controllerは保存済みの正確なSession identity、Provider / account identity、configuration digestを照合し、Adapterがその組合せでcross-process reattachmentを明示的にサポートするときだけ再接続します。
+- reattachmentが未対応・未検証の場合、同じRoleExecutionに新しいSessionを作成してResumeしたことにしません。元のoperationとWorktree ownershipを未解決として保持し、Stop proof、terminal result、Usageを照合します。新しいRoleExecutionによる継続は、旧Providerのquiescence、result / usage reconciliation、Worktree release後に限り、Controllerが現在のJobApproval、Task scope、budget、deadlineを再検証して別の実行として発行します。
+- Startの結果が不明な場合は同じOperationIDでlookupするか、当該OperationIDに対するidempotencyが実証された場合だけ再試行します。新しいOperationIDでStartを重複発行しません。
+- Sendは送信前にimmutable turn identityとprompt hashを保存します。Providerの受理応答はturn完了を意味しません。terminal eventまたは同一turn identityによるlookupで結果を照合し、結果不明のSendを自動再送しません。
+- Stopは先にintentを保存し、Adapter固有のstop evidenceをappend-onlyで記録します。cancel notificationやRoleExecutionのterminal statusだけではProvider停止を証明しません。停止証拠が不明なWorktreeは保持またはquarantineします。
+- final output、terminal turn、Usageをそれぞれのidentityへ束縛して照合します。event replay / final output retrievalが未対応の場合、欠落した結果を成功と推定しません。Provider停止証拠、最終結果、Usageが照合されるまでWorktreeを保持します。
 
 ### Outputs and completion
 

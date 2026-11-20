@@ -113,6 +113,10 @@ Job完了は明示的なJobAggregate Commandでのみ成立する。少なくと
 - UNKNOWNを成功・失敗・未送信へ推測変換しない。
 - 同じOperationIDでのProvider照会または実証されたidempotencyがない限りblind replayしない。
 - Provider停止・Worktree状態が不明な場合は所有権を保持し、Worktreeをquarantineする。
+- Provider AdapterはProvider / SDK versionとconfiguration identityに対応するcapabilityを宣言し、Start / Sendのidempotencyまたはlookup、cross-process Session reattachment、event replay / cursor continuity、Stop proof、final output retrieval、Usage identity / completenessを個別に検証します。未対応・未検証の能力を推定で補いません。
+- 同じRoleExecutionの再開では、保存済みの正確なProvider Session identity、Provider / account identity、configuration digestが一致し、Adapterがcross-process reattachmentを明示的にサポートする場合だけ再接続します。新しいSessionを同じRoleExecutionへ付け替えてResumeしたことにしません。
+- reattachmentできない場合は元のoperationをUNKNOWN / unresolvedのまま保持し、Stop proof、final result、Usageを照合します。新しいRoleExecutionによる継続は、旧Providerのquiescence、result / usage reconciliation、Worktree release後に限り、現在のJobApproval・Task scope・budget・deadlineを再検証して別実行として開始します。
+- Start / Sendの結果が不明な場合は、同じOperationID / turn identityによるlookup、またはそのidentityに対して実証されたidempotencyがある場合だけ再試行します。
 - 旧データや旧承認を現行Jobの権限へ暗黙変換しない。
 
 ## 5. Communication contract

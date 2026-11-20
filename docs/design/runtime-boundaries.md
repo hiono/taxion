@@ -116,8 +116,11 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 
 - JobAggregateをrevisionとschema versionを検証して復元する。
 - 未解決OperationIDをProviderへ照会し、観測結果をappend-onlyで追加する。
-- Worktree owner、Provider stop、result、usage、artifact identityを照合する。
+- AdapterがProvider / SDK versionとconfiguration identityに対応して宣言したcapabilityを確認する。Session reattachmentは保存済みの正確なSession / Provider / account / configuration identityに一致する場合だけ許可する。
+- Adapterがcross-process reattachmentをサポートしない場合、同じRoleExecutionへ新しいSessionを作成しない。旧operationの停止・result・usageを照合するまでWorktreeを保持またはquarantineする。
+- Worktree owner、Provider stop proof、result、usage、artifact identityを照合する。
 - 停止・結果が不明なWorktreeはquarantineし、所有権を解放しない。
+- 旧RoleExecutionを解決した後の継続は、新しいRoleExecutionとしてJobApproval、Task scope、budget、deadlineを再検証して開始する。
 - 復旧不能な破損・矛盾は隔離し、成功へ推測変換しない。
 
 ## 6. Completion boundary

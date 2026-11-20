@@ -114,6 +114,10 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-201, ADR-202, A
 - ambiguous resultはUNKNOWNとなる。
 - Provider照会または実証されたidempotencyがない限りblind replayしない。
 - restart後にin-process completionを復元したことにしない。
+- Adapter capabilityはProvider / SDK versionとconfiguration identityに対応付け、Start / Sendのidempotencyまたはlookup、cross-process Session reattachment、event replay / cursor continuity、Stop proof、final output retrieval、Usage identity / completenessを個別に宣言・検証する。
+- 同じRoleExecutionのSession再接続は、保存済みの正確なSession / Provider / account / configuration identityが一致し、Adapterがcross-process reattachmentを明示的にサポートする場合だけ成功する。
+- Start / SendのUNKNOWNを、新しいOperationID / turn identityで再送しない。照合または同じidentityに対する実証済みidempotencyを要求する。
+- Stop notificationだけでは停止を認定しない。Stop proof、terminal result、Usageを照合する。
 
 ### AT-009: Worktree ownership and concurrency
 
@@ -159,7 +163,10 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-201, ADR-202, A
 - 保存済みJob factsと現在のProvider / filesystem状態を照合する。
 - 破損、schema不明、provenance不一致、矛盾は安全側で隔離・拒否する。
 - 未確定のProvider resultやstop stateを成功・失敗へ推測変換しない。
-- Worktree ownershipはstop proofとresult reconciliation前に解放しない。
+- Worktree ownershipはstop proofとresult / usage reconciliation前に解放しない。
+- Adapterがcross-process reattachmentをサポートする場合だけ、同一RoleExecutionを保存済みの正確なProvider Sessionへ再接続する。
+- reattachmentが未対応・未検証の場合、同じRoleExecutionへ新しいSessionを作成しない。旧operationを未解決として保持し、Worktreeを保持またはquarantineする。
+- 新しいRoleExecutionによる継続は、旧Providerのquiescence、terminal result、Usage、Worktree releaseを確認した後に限り、現在のJob authorityを再検証して開始する。
 - 古いRoleExecutionやownerの遅延更新はrevision / fencingで拒否する。
 
 ### AT-013: End-to-end Job completion
