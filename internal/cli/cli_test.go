@@ -193,3 +193,20 @@ func TestAuthLoginRequiresOIDCConfiguration(t *testing.T) {
 		t.Fatalf("stderr = %q, want issuer configuration guidance", stderr.String())
 	}
 }
+
+func TestProductionJobCreateRejectsInvalidUTF8BeforeAuthentication(t *testing.T) {
+	t.Setenv("TAXION_OIDC_ISSUER", "")
+	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
+	invalidRequest := string([]byte{0xff, 0xfe})
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"job", "create", "--store", path, "--request", invalidRequest}, &stdout, &stderr, VersionInfo{})
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "valid UTF-8") {
+		t.Fatalf("stderr = %q, want UTF-8 validation error", stderr.String())
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("store path exists after invalid request: stat err = %v", err)
+	}
+}

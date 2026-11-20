@@ -149,3 +149,10 @@ func TestJobValidateRejectsChangedOriginalRequestDigest(t *testing.T) {
 		t.Fatal("Validate() accepted a mismatched original request digest")
 	}
 }
+
+func TestJobValidateRejectsInvalidUTF8Request(t *testing.T) {
+	request := string([]byte{0xff, 0xfe})
+	if _, err := NewDraftJob("job_invalid_utf8", request, time.Now().UTC()); err == nil {
+		t.Fatal("NewDraftJob() accepted an invalid UTF-8 request")
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
@@ -109,6 +110,10 @@ func createTrustedJob(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	if strings.TrimSpace(*request) == "" {
 		fmt.Fprintln(stderr, "job request is required; use --request")
+		return 2
+	}
+	if !utf8.ValidString(*request) {
+		fmt.Fprintln(stderr, "job request must be valid UTF-8")
 		return 2
 	}
 	dbPath, err := resolveStorePath(*path)

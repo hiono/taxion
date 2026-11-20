@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var ErrInvalidJob = errors.New("invalid job")
@@ -90,6 +91,10 @@ func NewDraftJobWithProvenance(id, request string, provenance IntakeProvenance, 
 }
 
 func (p IntakeProvenance) Validate(originalRequest string, jobCreatedAt time.Time) error {
+	if !utf8.ValidString(p.PrincipalID) || !utf8.ValidString(p.Issuer) || !utf8.ValidString(p.Subject) ||
+		!utf8.ValidString(p.IngressSource) || !utf8.ValidString(p.RequestIdentity) {
+		return errors.New("IntakeProvenance fields must be valid UTF-8")
+	}
 	if !strings.HasPrefix(strings.TrimSpace(p.PrincipalID), "human_") {
 		return errors.New("authenticated HUMAN Principal ID is required")
 	}
@@ -128,6 +133,9 @@ func originalRequestDigest(request string) string {
 }
 
 func (j Job) Validate() error {
+	if !utf8.ValidString(j.Request) {
+		return fmt.Errorf("%w: original request must be valid UTF-8", ErrInvalidJob)
+	}
 	if strings.TrimSpace(j.ID) == "" {
 		return fmt.Errorf("%w: id is required", ErrInvalidJob)
 	}
