@@ -192,7 +192,7 @@ func report(stderr io.Writer, err error) int {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintln(w, `Taxion — turn human intent into continuous collaborative work
+	fmt.Fprint(w, `Taxion — turn human intent into continuous collaborative work
 
 Usage:
   taxion job create --request "Describe the work you want to accomplish"
