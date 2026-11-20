@@ -24,29 +24,30 @@ ADRに記録しないもの:
 - 未検証の仮説を実証済みとする記述
 - コード・Issue・PR・検証証拠の代替となる詳細な作業ログ
 
-### 2. ADRの必須構成
+### 2. ADRの構成
 
-各ADRは次の規則に従います。
+各ADRには次を記載します。
 
-必須項目:
-1. Title and number
-2. Date
-3. Status: Proposed / Accepted / Rejected / Superseded / Deprecated
-4. Context
-5. Decision
-6. Consequences
-7. Alternatives considered
-8. Relationship to other ADRs
+- Title and number
+- Date
+- Status: Proposed / Accepted / Rejected / Superseded / Deprecated
+- Context
+- Decision
+- Consequences
 
-条件付き項目:
-- Decision basis: 外部の公開資料や標準仕様に依存する場合、その識別情報と判断に用いた要点を記載します。非公開で読者が取得できない資料を根拠として要求しません。
-- Source decision（任意）: 過去の判断の来歴を示す補助情報に限ります。非公開資料を参照しなければ判断を理解・検証できない構成にせず、採用する判断・理由・制約・適用範囲は現行ADRのContextとDecisionに自己完結して記載します。
-- Security and operational impact: セキュリティまたは運用への影響がある場合は必須とします。
-- Acceptance criteria: 実装・受入条件を規定する場合は必須とします。製品受入れシナリオの詳細はテスト仕様へ委ねます。
+次の項目は、判断を理解するために必要な場合だけ追加します。
 
-Decisionは採用する規則を肯定形で明示します。Contextは問題と制約を説明し、Consequencesは採用による影響を記述します。Alternatives consideredには、判断に影響した実質的な代替案と不採用理由を記録します。比較対象がない場合も、その旨と理由を明記し、見出しを省略しません。Relationship to other ADRsには、依存・具体化・置換・非変更の関係を記録します。実装の時点依存状態は含めません。
+- Alternatives considered
+- Relationship to other ADRs
+- Security and operational impact
+- Acceptance criteria
+- Decision basis
 
-ADR本文だけで判断を理解できるようにし、参照先が取得不能になった場合でも判断の意味が失われない記述にします。公開仕様への参照を記載する場合も、判断に必要な要件・制約を本文に要約します。
+Source decisionは来歴の説明が必要な場合に限り記載します。非公開資料や過去の会話を参照しなくても、判断自体を理解できる内容にします。
+
+**ADRは決定を記録する文書です。網羅的な規則集や例外一覧にはしません。** Decisionは採用する設計を簡潔な肯定形で記述します。判断に不可欠な制約だけを残し、同じ決定を否定形で言い換える説明、想定可能性だけを列挙する例外、実装詳細は記載しません。実質的な代替案が判断に影響した場合だけ、その理由を記録します。
+
+一つの判断を理解するために必要な情報を本文に含めます。公開仕様等への参照は、判断に必要な要点を補う場合に使用します。
 
 ### 3. 番号とファイル
 
