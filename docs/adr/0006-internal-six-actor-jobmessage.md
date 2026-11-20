@@ -51,6 +51,10 @@ Question / Answerは情報交換であり、実行責任、Task ownership、Prov
 
 認証済み利用者入力経路からの自然言語入力は、routing metadataが欠落・不完全でも受け付け、Controllerが信頼できるUI / conversation contextから補完する。一意に解決できない宛先・Job・Threadは推測せず確認する。Agent / Systemの認証済み入力経路でmetadataが欠落・矛盾する場合は、利用者入力へ変換せず拒否または隔離する。補完後も通常の認可・scope・MessageKind policyを適用する。
 
+情報不足、任意metadataの欠落、自然言語の表現差、未確定の実装詳細だけを理由に、受け渡しやJobを拒否しない。受信Roleは自然言語、既存Context、成果物、証拠から先に判断し、判断可能な範囲を進める。可逆で影響の小さい不足は、仮定と不確実性を明示して進めてよい。判断に不可欠な情報だけを適切な相手へ質問し、既存Contextから分かることを聞き直さない。回答と部分成果は元のJobに結び付けて継続する。Controllerは意味情報の完全性を一律審査してRoleの判断を代行しない。
+
+情報不足を理由に拒否しない原則は、認証・認可・秘密情報・禁止操作・人間承認・承認範囲変更・Job / Task / Artifact identity・provenance・データ整合性・二重実行・不可逆副作用・実行状態不明の安全境界を緩和しない。これらが不明または不正な場合はfail-closedとする。
+
 ### 6. ControllerとOrchestrator
 
 Controllerはtrusted ingress、Envelope生成、宛先検証、Actor policy、Job scope、永続化、冪等性、実行権限の境界を強制する。Orchestratorは独立ActorとしてJob内の調整・routing依頼・通知を行えるが、そのidentity自体はJobApproval、Provider operation、Task作成、Worktree ownershipを付与しない。
