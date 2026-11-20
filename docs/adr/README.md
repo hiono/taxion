@@ -39,6 +39,7 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 - [ADR-0007: 外部Agent相互運用の必須protocolをA2Aに一本化する](0007-a2a-external-agent-interoperability.md) — Accepted
 - [ADR-0008: Jobの開発作業をGit Worktree単位で分離し、Roleを逐次引き継ぐ](0008-worktree-concurrency-and-ownership.md) — Accepted
 - [ADR-0009: 現行仕様・開発計画・履歴・検証証拠の正本を分離する](0009-specification-plan-history-and-evidence.md) — Accepted
+- [ADR-0010: 検証証拠の水準とJob完遂の受入れを分離する](0010-evidence-levels-and-product-acceptance.md) — Accepted
 
 ## 原典と来歴
 
