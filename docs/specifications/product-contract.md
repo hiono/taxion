@@ -67,6 +67,10 @@ Roleは作業責務であり、Role名だけで認証済み実行主体やoperat
 ### 4.3.1 JobQuestionAuthorization
 
 承認済みJob内でRoleからTaskless PLANNERへ質問し、個別のbounded read-only executionが必要な場合は、immutable JobQuestionAuthorizationを発行できます。grantはJobApproval、Planner RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineへ束縛します。QUESTION本文やMessageKindだけから自動発行しません。DRAFT Jobの初期PlanningAuthorizationとは用途と適用条件を分離します。
+### 4.3.1 JobQuestionAuthorization
+
+承認済みJob内でRoleからTaskless PLANNERへ質問し、個別のbounded read-only executionが必要な場合は、immutable JobQuestionAuthorizationを発行できます。grantはJobApproval、Planner RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineへ束縛します。QUESTION本文やMessageKindだけから自動発行しません。DRAFT Jobの初期PlanningAuthorizationとは用途と適用条件を分離します。
+
 ### 4.4 Execution and collaboration
 
 - JobはTaskを必須としない。TaskはJobに所属する任意の作業分解である。
@@ -136,6 +140,8 @@ A2A Task / Message / Artifact / Agent Card / stateはTaxionのJob、RoleExecutio
 | Job / JobContractRevision | Job目的、原文依頼、制約、受入条件、revision |
 | JobApproval | 承認者と正確なJobContract revisionの束縛 |
 | PlanningAuthorization | DRAFT planningの限定的read-only grant |
+| JobQuestionAuthorization | 承認済みJob内でTaskless PLANNERへ質問する個別のbounded read-only grant |
+| JobProgressNote | Job内の進捗・再開に必要な要点とprovenance |
 | Task | Job内の作業分解と明示的dependency |
 | RoleExecution | Roleの個々の実行とprovenance |
 | JobMessage | Job内協調のappend-only facts |
@@ -166,7 +172,7 @@ Observation、Conformance、Admission、Execution Permissionは別の責務と�
 Agent Harnessの必須能力H1〜H8と各判定項目は [ADR-0011](../adr/0011-agent-harness-eight-capabilities.md) に従います。製品実装はModel / Tool loop、Computer Sandbox、独立Sub-agent、Context選択・圧縮、Job再開、Credential / Effect guardrails、独立Verification、Model / Tool observabilityを満たします。
 
 Provider / Runtimeへの委譲は許容しますが、APIの存在やProviderの自己申告だけで能力充足と判定しません。対応構成、実行証拠、失敗時挙動を確認します。Worktree、Session、Processの分離だけをComputer Sandboxの証拠にしません。
-## 8. Explicit non-goals
+## 9. Explicit non-goals
 
 - 内部6 Actor通信をA2Aへ置き換えること。
 - 複数の外部Agent protocol / SDKを初期必須化すること。
