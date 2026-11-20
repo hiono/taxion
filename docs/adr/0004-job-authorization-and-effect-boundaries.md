@@ -77,4 +77,4 @@ Roleは承認済みJob内で通常の手段を選択できる。Controllerはall
 
 ## Relationship to other ADRs
 
-ADR-0003のJobAggregateを唯一の認可対象とする。ADR-0005のJobMessageとADR-0007のA2Aメッセージは、それ自体で権限を付与しない。ADR-0005の不変条件強制とADR-0008のWorktree所有権は本ADRの境界を維持する。
+ADR-0003のJobAggregateを唯一の認可対象とする。ADR-0006のJobMessageとADR-0007のA2Aメッセージは、それ自体で権限を付与しない。ADR-0005の不変条件強制とADR-0008のWorktree所有権は本ADRの境界を維持する。
