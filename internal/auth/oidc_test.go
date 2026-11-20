@@ -76,7 +76,7 @@ func TestAuthenticateRejectsInvalidIDTokens(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			principal, _, err := runFakeOIDC(t, fakeOIDCOptions{
-				mutateClaims:  tc.mutateClaims,
+				mutateClaims:   tc.mutateClaims,
 				wrongSignature: tc.wrongSignature,
 			})
 			if err == nil {
