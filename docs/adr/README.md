@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-このディレクトリは、現在のTaxionで採用する設計判断の正本です。ADRの管理・改訂・来歴規約は [ADR-0000](0000-adr-governance.md) を参照してください。
+このディレクトリは、現在のTaxionで採用する設計判断の正本です。ADRの管理・改訂・来歴規約は [ADR-0000](0000-adr-governance.md) を参照してください。ADRの管理・改訂・来歴規約は [ADR-0000](0000-adr-governance.md) を参照してください。
 
 ## 決定の階層
 
@@ -29,6 +29,7 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 
 ## ADR一覧
 
+- [ADR-0000: Architecture Decision Recordsの管理規約](0000-adr-governance.md) — Accepted
 - [ADR-0000: Architecture Decision Recordsの管理規約](0000-adr-governance.md) — Accepted
 - [ADR-0001: 製品目的 — 人間の曖昧な思考を継続可能な協調作業へ昇華する](0001-product-purpose.md) — Accepted
 - [ADR-0002: 旧設計の制約を温存せず、製品目的から再構築する](0002-rebuild-over-legacy-constraints.md) — Accepted
