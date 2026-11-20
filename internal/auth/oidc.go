@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/hiono/taxion/internal/identity"
 	"golang.org/x/oauth2"
 )
 
@@ -115,7 +114,7 @@ func (c OIDCConfig) Validate() error {
 	return nil
 }
 
-func (a *OIDCAuthenticator) Authenticate(ctx context.Context, output io.Writer) (identity.AuthenticatedPrincipal, error) {
+func (a *OIDCAuthenticator) Authenticate(ctx context.Context, output io.Writer) (AuthenticatedPrincipal, error) {
 	if output == nil {
 		output = io.Discard
 	}
@@ -128,10 +127,10 @@ func (a *OIDCAuthenticator) Authenticate(ctx context.Context, output io.Writer) 
 	}
 	provider, err := oidc.NewProvider(providerContext, a.config.Issuer)
 	if err != nil {
-		return identity.AuthenticatedPrincipal{}, fmt.Errorf("discover configured OIDC issuer: %w", err)
+		return AuthenticatedPrincipal{}, fmt.Errorf("discover configured OIDC issuer: %w", err)
 	}
 	if err := validateProviderEndpoints(provider); err != nil {
-		return identity.AuthenticatedPrincipal{}, err
+		return AuthenticatedPrincipal{}, err
 	}
 
 	redirect, _ := url.Parse(a.config.RedirectURI)
@@ -141,7 +140,7 @@ func (a *OIDCAuthenticator) Authenticate(ctx context.Context, output io.Writer) 
 	}
 	listener, err := listen("tcp", net.JoinHostPort(redirect.Hostname(), redirect.Port()))
 	if err != nil {
-		return identity.AuthenticatedPrincipal{}, fmt.Errorf("listen on OIDC loopback callback: %w", err)
+		return AuthenticatedPrincipal{}, fmt.Errorf("listen on OIDC loopback callback: %w", err)
 	}
 	defer listener.Close()
 	redirect.Host = listener.Addr().String()
@@ -149,15 +148,15 @@ func (a *OIDCAuthenticator) Authenticate(ctx context.Context, output io.Writer) 
 
 	state, err := randomURLToken(32)
 	if err != nil {
-		return identity.AuthenticatedPrincipal{}, fmt.Errorf("generate OIDC state: %w", err)
+		return AuthenticatedPrincipal{}, fmt.Errorf("generate OIDC state: %w", err)
 	}
 	nonce, err := randomURLToken(32)
 	if err != nil {
-		return identity.AuthenticatedPrincipal{}, fmt.Errorf("generate OIDC nonce: %w", err)
+		return AuthenticatedPrincipal{}, fmt.Errorf("generate OIDC nonce: %w", err)
 	}
 	verifier, err := randomURLToken(32)
 	if err != nil {
-		return identity.AuthenticatedPrincipal{}, fmt.Errorf("generate PKCE verifier: %w", err)
+		return AuthenticatedPrincipal{}, fmt.Errorf("generate PKCE verifier: %w", err)
 	}
 
 	oauthConfig := oauth2.Config{
@@ -221,53 +220,53 @@ func (a *OIDCAuthenticator) Authenticate(ctx context.Context, output io.Writer) 
 
 	if a.openAuthorizationURL == nil {
 		if _, err := fmt.Fprintf(output, "次のURLをブラウザーで開き、認証を完了してください:\n%s\n", authorizationURL); err != nil {
-			return identity.AuthenticatedPrincipal{}, fmt.Errorf("write OIDC authorization URL: %w", err)
+			return AuthenticatedPrincipal{}, fmt.Errorf("write OIDC authorization URL: %w", err)
 		}
 	} else if err := a.openAuthorizationURL(authorizationURL); err != nil {
-		return identity.AuthenticatedPrincipal{}, fmt.Errorf("open OIDC authorization URL: %w", err)
+		return AuthenticatedPrincipal{}, fmt.Errorf("open OIDC authorization URL: %w", err)
 	}
 
 	var callback callbackResult
 	select {
 	case callback = <-callbacks:
 	case err := <-serveErrors:
-		return identity.AuthenticatedPrincipal{}, fmt.Errorf("serve OIDC callback: %w", err)
+		return AuthenticatedPrincipal{}, fmt.Errorf("serve OIDC callback: %w", err)
 	case <-ctx.Done():
-		return identity.AuthenticatedPrincipal{}, fmt.Errorf("wait for OIDC callback: %w", ctx.Err())
+		return AuthenticatedPrincipal{}, fmt.Errorf("wait for OIDC callback: %w", ctx.Err())
 	}
 	if callback.err != nil {
-		return identity.AuthenticatedPrincipal{}, callback.err
+		return AuthenticatedPrincipal{}, callback.err
 	}
 
 	token, err := oauthConfig.Exchange(providerContext, callback.code, oauth2.VerifierOption(verifier))
 	if err != nil {
-		return identity.AuthenticatedPrincipal{}, fmt.Errorf("exchange OIDC authorization code: %w", err)
+		return AuthenticatedPrincipal{}, fmt.Errorf("exchange OIDC authorization code: %w", err)
 	}
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok || rawIDToken == "" {
-		return identity.AuthenticatedPrincipal{}, errors.New("OIDC token responseにID Tokenがありません")
+		return AuthenticatedPrincipal{}, errors.New("OIDC token responseにID Tokenがありません")
 	}
 
 	idToken, err := provider.Verifier(&oidc.Config{ClientID: a.config.ClientID}).Verify(providerContext, rawIDToken)
 	if err != nil {
-		return identity.AuthenticatedPrincipal{}, fmt.Errorf("verify OIDC ID Token: %w", err)
+		return AuthenticatedPrincipal{}, fmt.Errorf("verify OIDC ID Token: %w", err)
 	}
 	if !constantTimeEqual(idToken.Nonce, nonce) {
-		return identity.AuthenticatedPrincipal{}, errors.New("OIDC ID Tokenのnonceが一致しません")
+		return AuthenticatedPrincipal{}, errors.New("OIDC ID Tokenのnonceが一致しません")
 	}
 	if idToken.Issuer != a.config.Issuer {
-		return identity.AuthenticatedPrincipal{}, errors.New("OIDC ID Tokenのissuerが一致しません")
+		return AuthenticatedPrincipal{}, errors.New("OIDC ID Tokenのissuerが一致しません")
 	}
 	if !containsAudience(idToken.Audience, a.config.Audience) {
-		return identity.AuthenticatedPrincipal{}, errors.New("OIDC ID Tokenのaudienceが一致しません")
+		return AuthenticatedPrincipal{}, errors.New("OIDC ID Tokenのaudienceが一致しません")
 	}
 	if strings.TrimSpace(idToken.Subject) == "" {
-		return identity.AuthenticatedPrincipal{}, errors.New("OIDC ID Tokenにsubjectがありません")
+		return AuthenticatedPrincipal{}, errors.New("OIDC ID Tokenにsubjectがありません")
 	}
 
-	principal, err := identity.NewAuthenticatedPrincipal(idToken.Issuer, idToken.Subject, time.Now().UTC())
+	principal, err := newAuthenticatedPrincipal(idToken.Issuer, idToken.Subject, time.Now().UTC())
 	if err != nil {
-		return identity.AuthenticatedPrincipal{}, fmt.Errorf("create authenticated principal: %w", err)
+		return AuthenticatedPrincipal{}, fmt.Errorf("create authenticated principal: %w", err)
 	}
 	return principal, nil
 }

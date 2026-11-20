@@ -16,7 +16,6 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/coreos/go-oidc/v3/oidc/oidctest"
-	"github.com/hiono/taxion/internal/identity"
 	"golang.org/x/oauth2"
 )
 
@@ -169,7 +168,7 @@ func TestConfigFromEnvRequiresIssuerAndClientID(t *testing.T) {
 	}
 }
 
-func runFakeOIDC(t *testing.T, options fakeOIDCOptions) (identity.AuthenticatedPrincipal, string, error) {
+func runFakeOIDC(t *testing.T, options fakeOIDCOptions) (AuthenticatedPrincipal, string, error) {
 	t.Helper()
 	trustedKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {

@@ -1,4 +1,4 @@
-package identity
+package auth
 
 import (
 	"strings"
@@ -6,25 +6,24 @@ import (
 	"time"
 )
 
-func TestNewAuthenticatedPrincipalUsesIssuerAndSubject(t *testing.T) {
+func TestAuthenticatedPrincipalUsesIssuerAndSubject(t *testing.T) {
 	at := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
-	first, err := NewAuthenticatedPrincipal("https://issuer.example", "subject-123", at)
+	first, err := newAuthenticatedPrincipal("https://issuer.example", "subject-123", at)
 	if err != nil {
-		t.Fatalf("NewAuthenticatedPrincipal() error = %v", err)
+		t.Fatalf("newAuthenticatedPrincipal() error = %v", err)
 	}
-	second, err := NewAuthenticatedPrincipal("https://issuer.example", "subject-123", at.Add(time.Minute))
+	second, err := newAuthenticatedPrincipal("https://issuer.example", "subject-123", at.Add(time.Minute))
 	if err != nil {
-		t.Fatalf("NewAuthenticatedPrincipal() error = %v", err)
+		t.Fatalf("newAuthenticatedPrincipal() error = %v", err)
 	}
-	otherIssuer, err := NewAuthenticatedPrincipal("https://other.example", "subject-123", at)
+	otherIssuer, err := newAuthenticatedPrincipal("https://other.example", "subject-123", at)
 	if err != nil {
-		t.Fatalf("NewAuthenticatedPrincipal() error = %v", err)
+		t.Fatalf("newAuthenticatedPrincipal() error = %v", err)
 	}
-	otherSubject, err := NewAuthenticatedPrincipal("https://issuer.example", "subject-456", at)
+	otherSubject, err := newAuthenticatedPrincipal("https://issuer.example", "subject-456", at)
 	if err != nil {
-		t.Fatalf("NewAuthenticatedPrincipal() error = %v", err)
+		t.Fatalf("newAuthenticatedPrincipal() error = %v", err)
 	}
-
 	if first.PrincipalID() != second.PrincipalID() {
 		t.Fatal("PrincipalID changed when authentication time changed")
 	}
@@ -53,8 +52,8 @@ func TestNewAuthenticatedPrincipalRejectsInvalidClaims(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := NewAuthenticatedPrincipal(tc.issuer, tc.subject, tc.at); err == nil {
-				t.Fatal("NewAuthenticatedPrincipal() succeeded with invalid claims")
+			if _, err := newAuthenticatedPrincipal(tc.issuer, tc.subject, tc.at); err == nil {
+				t.Fatal("newAuthenticatedPrincipal() succeeded with invalid claims")
 			}
 		})
 	}
