@@ -8,13 +8,16 @@
 - **ADR-101 — 再構築原則:** 製品目的を実現するために、旧設計の制約を温存せず再構築する方法を定義します。
 - **ADR-106 — 設計判断の比較方法:** 複数候補の責務・制約・証拠を比較し、必須条件をハード制約として維持する方法を定義します。
 - **ADR-201 — JobAggregate:** Jobを作業・協調・成果の唯一のドメイン正本とし、Planning、Task、RoleExecution、JobMessage、Provider、Worktree、成果・証拠、Command境界を定義します。
-- **ADR-500 — Job authority:** Job承認境界、禁止副作用、PlanningAuthorization、Observation / Conformance / Admission / Execution Permissionの分離、不完全情報の協調を定義します。
 - **ADR-202 — Domain invariants:** 不変条件を生成・変更・保存・復元の全経路で強制する規範を定義します。
 - **ADR-300 — Internal communication:** Taxion内部の6 Actor通信、JobMessage、Envelope、MessageKind、配信観測を定義します。
+- **ADR-408 — Execution & concurrency:** Git Worktree、Task単位の所有権、Roleの逐次引継ぎ、独立Taskの並行性を定義します。
+- **ADR-500 — Job authority:** Job承認境界、禁止副作用、PlanningAuthorization、Observation / Conformance / Admission / Execution Permissionの分離、不完全情報の協調を定義します。
 - **ADR-700 — External Agent protocol:** 外部Agent相互運用の必須protocolをA2Aに一本化し、内部JobMessageとの境界を定義します。
-- **領域別ADR:** Domain Model、Collaboration、Execution、Authorization、Interface、Qualityの個別判断をカテゴリ番号で管理し、上位の製品目的・再構築原則・安全境界に適合させます。
+- **ADR-800 — Quality & evidence:** 検証証拠の水準とJob完遂の製品受入れを定義します。
+- **ADR-811 — Agent Harness:** 製品能力として維持する8要素と、その検証条件を定義します。
+- **ADR-000 / ADR-004:** ADR統治と、仕様・計画・履歴・検証証拠の情報責務を定義します。
 
-ADR-100は「何を実現するか」、ADR-101は「どの原則で作り直すか」、ADR-106は「複数の設計候補をどのように比較するか」、ADR-201は「Jobをどのようなドメイン正本として扱うか」、ADR-202は「すべての状態変更経路でどう不変条件を守るか」、ADR-300は「Taxion内部でどう協調するか」、ADR-408は「開発作業をどう分離・並行させるか」、ADR-500は「誰がどの境界内で何を実行できるか」、ADR-700は「外部Agentとどう相互運用するか」、ADR-800とADR-811は「何をどの証拠で受け入れるか」を定義します。ADR-000とADR-004はADR統治と情報の正本を定めます。下位ADRはこれらを上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
+番号帯は分類であり、優先順位・重要度・規範性を表しません。下位ADRは上位の製品目的・安全境界を上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
 
 ## 状態
 
@@ -53,7 +56,7 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 - [ADR-500: Job承認境界と禁止副作用を中心に実行権限を強制する](500-job-authority-and-prohibited-effects.md) — Accepted
 
 ### 600–699 Persistence & Recovery
-- 現時点で新Taxionに独立したADRはありません。必要な永続化・復旧判断は、JobAggregateと不変条件の責務に沿って追加します。
+- 現時点で独立したADRはありません。永続化・復旧判断はJobAggregateと不変条件の責務に沿って必要時に追加します。
 
 ### 700–799 Interface & Integration
 - [ADR-700: 外部Agent相互運用の必須protocolをA2Aに一本化する](700-a2a-external-agent-interoperability.md) — Accepted
@@ -63,9 +66,10 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 - [ADR-811: Agent Harnessの8要素を製品能力要求として維持する](811-agent-harness-eight-capabilities.md) — Accepted
 
 ### 900–999 Infrastructure & Operations
-- 現時点で新Taxionに独立したADRはありません。運用手順は開発・運用文書で管理します。
+- 現時点で独立したADRはありません。運用手順は開発・運用文書で管理します。
+
 ## 原典と来歴
 
-ADR-100は旧ADR-0088、ADR-101は旧ADR-0081、ADR-201は旧ADR-0083と旧ADR-0077を原典として再構成しました。ADR-500は旧ADR-0080、0073、0066、0067のAccepted decisionを確認して再確立しました。ADR-202は旧ADR-0079、ADR-300は旧ADR-0087、ADR-700は旧ADR-0108を原典として再確立しました。ADR-408は旧ADR-0082のWorktree ownership / concurrency decisionを、ADR-004は旧ADR-0085の仕様・計画・履歴・検証証拠の分離を新Taxion向けに再構成しました。ADR-800は検証証拠の水準とJob完遂の製品受入れを定義します。旧PoC候補実装の採用評価はADR-101で扱います。ADR-811は旧ADR-0062のH1〜H8を製品能力要求として保持します。開発時のOS別品質ゲートとCommit前検査は [Development Quality Gates](../development/quality-gates.md) で管理します。
+各ADRは、アーカイブ済みリポジトリの設計資料から現行Taxionに必要な判断だけを確認し、新しい製品目的・安全境界に照らして再構成したものです。旧Git履歴、Issue / PR履歴、旧識別子の対応表は新リポジトリへ移植・保存しません。旧資料は読み取り専用の根拠資料として扱い、現在の判断を理解するために必要な理由・制約・適用範囲は各ADR本文に記載します。
 
-旧Taxionと旧Taxion-PoCのGit履歴、Commit、Issue / PR履歴は移植していません。旧リポジトリの原文は読み取り専用の根拠資料であり、旧番号は原典を識別する参照としてのみ使用します。旧ADRから新Taxionへの判断対応は [Historical ADR Source Decision Map](source-decision-map.md) で追跡します。旧Taxion-PoCの初期READMEは実験専用と記載していましたが、後続の旧Taxion ADR-0107が候補実装ベースラインとして位置付けを変更した経緯を保持します。旧コードの採用はADR-000およびADR-101のprovenance・設計適合性・安全性・受入れ条件に従って別途判断します。
+開発時のOS別品質ゲートとCommit前検査は [Development Quality Gates](../development/quality-gates.md) で管理します。
