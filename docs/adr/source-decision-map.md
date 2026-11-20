@@ -8,6 +8,16 @@ Date: 2026-11-20
 
 | 旧ADR | 新Taxionの対応先 | 再確立した判断 | 引き継がないもの・明示した扱い |
 |---|---|---|---|
+| 旧ADR-000 | [ADR-000](000-adr-governance.md) | ADR体系、採番、判断記録の統治を管理する。 | 旧リポジトリ固有の番号移行作業と履歴は移植しない。 |
+| ADR-0001 | [ADR-000](000-adr-governance.md) | アーキテクチャ判断をADRへ記録し、現行判断の正本とする。 | 旧ファイル形式・旧番号体系をそのまま採用しない。 |
+| ADR-0002 | [ADR-101](101-rebuild-over-legacy-constraints.md) | 旧コード・旧履歴を一括移植せず、製品目的と新しい不変条件から再構築する。 | 旧clean-room運用の進捗・milestone・手順は移植しない。 |
+| ADR-0007 | [ADR-004](004-specification-plan-history-and-evidence.md) | 設計判断、作業履歴、計画、CI証拠の責務を分離する。 | 旧Issue / PR / Milestoneの履歴は移植しない。 |
+| ADR-0008 | [ADR-000](000-adr-governance.md) | ADRの必須構成、判断理由、代替案、他ADRとの関係を統一する。 | 旧ADR本文の一括コピーや旧Nygardテンプレートの機械適用は行わない。 |
+| ADR-0015 | [ADR-500](500-job-authority-and-prohibited-effects.md) | 認証済み主体、権限境界、監査可能な認可判断を維持する。 | 旧Token API、旧HTTP認証実装、旧監査schemaは移植しない。 |
+| ADR-0026 | [ADR-500](500-job-authority-and-prohibited-effects.md) | ファイルアクセスはJob承認対象と実行境界に束縛し、Task単位でscopeを拡張しない。 | 旧TaskApproval / file access level型は移植しない。 |
+| ADR-0029 | [ADR-201](201-job-aggregate-and-command-boundary.md)、[ADR-500](500-job-authority-and-prohibited-effects.md) | Job budgetとProvider quota / usageを別の事実として記録し、残量を推測で権限へ変換しない。 | 旧quota provider、旧budget guidance、旧Flow計算式は移植しない。 |
+| ADR-0036 | [ADR-500](500-job-authority-and-prohibited-effects.md) | token thresholdや費用最適化で、承認済みJobの目的・受入条件を暗黙に弱めない。 | 旧token thresholdや旧実行回数制御は移植しない。 |
+| ADR-0047 | [ADR-500](500-job-authority-and-prohibited-effects.md) | 実行操作はJob scopeと強制可能なsandbox / OS境界内で許可し、外部副作用は明示承認へ分岐する。 | 旧Coder shell allowlistや旧CLI権限モデルは移植しない。 |
 | ADR-0040 | [ADR-800](800-evidence-levels-and-product-acceptance.md) | 効率・通信量・費用の改善は、成果品質、安全性、必須検証を維持したうえで評価する。 | 旧workflow evaluate、旧評価原稿、実験結果・進捗は移植しない。 |
 | ADR-0043 | [ADR-500](500-job-authority-and-prohibited-effects.md) | Job承認境界、read-onlyの強制、権限と観測の分離を維持する。 | 旧ApprovalBundle、旧Flow gate、旧Task専用認可は移植しない。 |
 | ADR-0050 | [ADR-201](201-job-aggregate-and-command-boundary.md) | 進捗・継続に必要な記録はJobへ出所付きappend-only factとして保持し、自己申告を検証済み証拠へ昇格させない。 | Copilot Reviewer専用progress tool、旧review continuation実装は移植しない。 |
