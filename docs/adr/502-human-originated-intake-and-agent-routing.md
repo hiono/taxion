@@ -26,5 +26,7 @@ Accepted
 ## Relationship to other ADRs
 
 - ADR-501: HUMAN Principalの認証とTrusted Ingress
-- ADR-700: 外部Execution AgentとのA2A連携
-- ADR-300: Taxion内部Actor間のJobMessage通信
+- ADR-700: Interface & Integrationの基本方針
+- ADR-701: 外部Execution AgentとのA2A連携
+- ADR-300: Collaborationの基本方針
+- ADR-301: Taxion内部Actor間のJobMessage通信
