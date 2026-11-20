@@ -37,7 +37,7 @@ type CommandReceipt struct {
 	JobID        string    `json:"job_id"`
 	Revision     uint64    `json:"revision"`
 	PayloadSHA256 string   `json:"payload_sha256"`
-	CreatedAt    time.Time `json:"created_at"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
