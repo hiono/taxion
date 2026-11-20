@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -189,14 +190,17 @@ func runFakeOIDC(t *testing.T, options fakeOIDCOptions) (AuthenticatedPrincipal,
 			Algorithm: oidc.RS256,
 		}},
 	}
-	var challenge, nonce, issuer string
+	var mu sync.Mutex
+	var challenge, nonce string
 	mux := http.NewServeMux()
 	mux.Handle("/.well-known/openid-configuration", provider)
 	mux.Handle("/keys", provider)
 	mux.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
+		mu.Lock()
 		challenge = query.Get("code_challenge")
 		nonce = query.Get("nonce")
+		mu.Unlock()
 		if query.Get("code_challenge_method") != "S256" || challenge == "" || nonce == "" || query.Get("state") == "" {
 			http.Error(w, "PKCE, nonce, and state are required", http.StatusBadRequest)
 			return
@@ -221,17 +225,20 @@ func runFakeOIDC(t *testing.T, options fakeOIDCOptions) (AuthenticatedPrincipal,
 			http.Error(w, "invalid token request", http.StatusBadRequest)
 			return
 		}
-		if r.Form.Get("code_verifier") == "" || oauth2.S256ChallengeFromVerifier(r.Form.Get("code_verifier")) != challenge {
+		mu.Lock()
+		expectedChallenge, expectedNonce := challenge, nonce
+		mu.Unlock()
+		if r.Form.Get("code_verifier") == "" || oauth2.S256ChallengeFromVerifier(r.Form.Get("code_verifier")) != expectedChallenge {
 			http.Error(w, "PKCE verification failed", http.StatusBadRequest)
 			return
 		}
 		claims := map[string]any{
-			"iss":   issuer,
+			"iss":   "https://" + r.Host,
 			"aud":   "taxion-cli",
 			"sub":   "subject-123",
 			"exp":   time.Now().Add(5 * time.Minute).Unix(),
 			"iat":   time.Now().Unix(),
-			"nonce": nonce,
+			"nonce": expectedNonce,
 		}
 		if options.mutateClaims != nil {
 			options.mutateClaims(claims)
@@ -255,8 +262,6 @@ func runFakeOIDC(t *testing.T, options fakeOIDCOptions) (AuthenticatedPrincipal,
 	defer server.Close()
 	provider.SetIssuer(server.URL)
 
-	// The token endpoint needs the exact issuer configured by discovery.
-	issuer = server.URL
 	timeout := 5 * time.Second
 	if options.wrongState {
 		timeout = 2 * time.Second
