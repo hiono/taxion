@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み `hiono/obsolete-taxion` のADR-0107（Six-Actor PoCを候補実装ベースラインとして比較評価する判断）とADR-0085（仕様・履歴・検証証拠の分離）を参照し、新Taxionの製品受入れ条件として再構成した。Linux / Windows、GoReleaser cross-build、Commit前Secret Scan等の品質ゲートは現在の開発行動規約に従う。
+アーカイブ済み `hiono/obsolete-taxion` のADR-0107（Six-Actor PoCを候補実装ベースラインとして比較評価する判断）とADR-0085（仕様・履歴・検証証拠の分離）を参照し、新Taxionの製品受入れ条件として再構成した。開発時のOS別品質ゲートやCommit前検査は製品受入れ条件とは分離し、開発・運用文書で管理する。
 
 ## Context
 
@@ -58,21 +58,6 @@ Job完了には、次をすべて要求する。
 - 未解決の安全・認可・データ整合性問題が存在しない。
 
 CI成功、Reviewerの自己申告、A2Aのterminal state、RoleExecutionのterminal statusだけでJob完了を宣言しない。
-
-### 4. 必須品質ゲート
-
-- LinuxとWindowsの検証を必須とする。
-- GoReleaserのcross-buildはmacOS targetを含めて必須とする。
-- macOS native検証は任意とし、通常開発の停止条件にしない。
-- すべてのCommit前に秘密情報検査を実施する。
-- CI結果は対象HEAD SHAとRun IDを照合する。
-- Docs-only changeではbuildを必須としない。
-- 未実施の実Provider / E2E検証を成功扱いしない。
-- 外部CLI・実Providerの検証は、実行主体、環境、Provider / SDK version、結果を証拠として記録し、未実施の場合は未確認と明記する。
-
-### 5. 旧候補実装の評価
-
-旧Taxion-PoCのテスト・実行結果は、その実行環境と検証境界の証拠として扱う。旧PoCが候補実装ベースラインであることは、実Provider、再起動復旧、製品E2Eの成功を意味しない。新Taxionへの直接採用・部分採用・改修・再実装は、provenance、設計適合性、安全性、保守性および新Taxionの受入れ証拠で個別に判断する。
 
 ## Consequences
 
