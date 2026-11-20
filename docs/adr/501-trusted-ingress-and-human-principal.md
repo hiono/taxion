@@ -106,4 +106,5 @@ issuerは管理者が明示設定し、未検証tokenのclaimから信頼先を�
 - ADR-201はPrincipalとIntakeProvenanceを含むJobAggregateの保存責務およびCommand境界を定義します。
 - ADR-202は認証・provenanceの不変条件を全状態経路で強制します。
 - ADR-500はJobApproval、PlanningAuthorization、禁止副作用および実行許可を定義し、本ADRはそれらが参照するHUMAN identityの信頼源を定義します。
+- ADR-502はIngress ClientとHUMAN Principal、およびTaxionが選択するExecution Agentの役割・identity分離を具体化します。
 - ADR-700は外部A2A Agentとの認証・相互運用境界を定義します。A2A Agent identityはHUMAN Principalではありません。
