@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み hiono/obsolete-taxion の旧ADR-0062「エージェントハーネスの8要素を判断基準として維持する」を原典とする。旧ADR-0088が製品能力の評価基準として明示的に引き継いだH1〜H8を、新Taxionの製品能力要求として再確立する。旧リポジトリのIssue、実装評価、進捗、未達記録は移植しない。
+アーカイブ済み hiono/obsolete-taxion の設計資料に記録された、エージェントハーネスの8要素を製品能力の評価基準として維持する判断を参照します。H1〜H8を新Taxionの製品能力要求として再確立します。旧リポジトリのIssue、実装評価、進捗、未達記録は移植しません。
 
 ## Context
 
@@ -52,7 +52,7 @@ H3の並列委譲は、逐次Coder / ReviewerやModelを使わない並列Task�
 
 Context選択、Skill / Fileのon-demand load、履歴圧縮は、現在のJob Contract、承認、必須制約、未解決事項、実行状態を失わないように行います。圧縮前後で重要な事実のprovenanceと参照可能性を検証します。
 
-Memoryと再開はJobAggregateを正本とし、独立した二重のJob / Memory正本を作りません。Progress Note、Git履歴、Skill等の保存形式と運用上の所在は、ADR-000 / ADR-004の文書・情報統治に従います。可変計画や作業進捗の保存先を特定の外部サービスへ恒久固定しません。
+Memoryと再開はJobAggregateを正本とし、独立した二重のJob / Memory正本を作りません。Progress Note、Git履歴、Skill等の保存形式と運用上の所在は、ADR-000 / ADR-004の文書・情報統治に従います。TODO・ロードマップ・開発計画・実験計画の正本は既存のDropbox文書とし、作業開始時に所在・アクセス可能性・更新時点を確認します。Dropboxの既存フォルダー、文書名、保存先は指示なく変更しません。Job内の進捗・再開情報はJobAggregateの責務に従って管理し、計画情報と混在させません。
 
 ### 5. GuardrailsとVerification
 
