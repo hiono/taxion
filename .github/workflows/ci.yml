@@ -25,7 +25,10 @@ jobs:
         run: |
           unformatted="$(gofmt -l cmd internal)"
           if [ -n "$unformatted" ]; then
-            printf 'Files require gofmt:\\n%s\\n' "$unformatted"
+            printf 'Files require gofmt:\n%s\n' "$unformatted"
+            while IFS= read -r file; do
+              gofmt -d "$file"
+            done <<< "$unformatted"
             exit 1
           fi
       - name: Vet
