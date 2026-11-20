@@ -91,7 +91,9 @@ Question / Answerは情報交換であり、それだけではRoleExecution、Ta
 
 HANDOFFはJobAggregate commandとして記録します。受信RoleとTask scopeを明示し、送信側Providerの独立した停止証明、terminal result / usageの照合、必要な成果物の固定、Worktree ownership releaseが永続化された後に限り、Controllerが受信側の実行を許可します。WAITING、SUSPENDEDまたはHandoff messageの存在を停止証明として扱いません。
 
-PlanningAuthorization、JobApproval、Task scope、Effect approvalおよびProvider operation authorityは通信によって作成・変更・拡張されません。
+PlanningAuthorization、JobQuestionAuthorization、JobApproval、Task scope、Effect approvalおよびProvider operation authorityは通信によって作成・変更・拡張されません。
+
+承認済みJob内でRoleからTaskless PLANNERへ質問し、個別のbounded read-only executionが必要な場合は、ADR-0003 / ADR-0004のJobQuestionAuthorizationを別途検証します。これはJobMessageのEnvelopeやQUESTION種別とは独立したimmutable grantです。Question本文、QUESTIONの保存、ANSWERの受信だけではgrantを発行・拡張しません。
 
 ### 7. 配信・応答・再送・期限
 
@@ -124,6 +126,14 @@ JobMessage、宛先別配信観測、回答・転送相関およびHandoff inten
 
 LLMは本文分類、要約、宛先候補、回答候補を提案できます。ただし曖昧な場合は確認し、LLM解釈だけで宛先、本人性、policy、承認、実行またはHandoffを確定しません。
 
+## Alternatives considered
+
+- **利用者にJSONや固定タグを入力させる:** 自然言語による利用要件に反するため採用しません。
+- **Actorごとに専用Message APIを作る:** 6 Actor間で共通の相関、監査、配信、policyを維持できないため採用しません。
+- **Role文字列だけをActor identityとして使う:** Controller / OrchestratorとRoleExecution provenanceを正しく識別できないため採用しません。
+- **Question / AnswerとHandoffを同一操作にする:** 情報交換が作業責任や実行可能性を暗黙に変更するため採用しません。
+- **Message本文やQUESTION種別から認可を推定する:** JobQuestionAuthorization等の明示的な権限境界を迂回するため採用しません。
+- **Exactly-once deliveryを保証するとする:** 配信基盤の実際の保証を超えるため採用しません。
 ## Consequences
 
 - 利用者 / Agentの本文形式を統一し、EnvelopeはUI・Controller・Runtimeが生成・検証します。
@@ -132,7 +142,7 @@ LLMは本文分類、要約、宛先候補、回答候補を提案できます�
 - 配信状態はappend-only observationから導出し、JobAggregateを唯一の正本とします。
 - 30の非自己宛てActor関係は表現可能にしつつ、Controller policyで許可を制御します。
 
-## Acceptance
+## Acceptance criteria
 
 - 6 Actor種別と実体identityを共通Envelopeで表現できます。
 - 全30の非自己宛てActor関係をモデル化でき、共通policyで許可を制御します。
