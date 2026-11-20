@@ -11,7 +11,7 @@
 - **ADR-0005 — Domain invariants:** 不変条件を生成・変更・保存・復元の全経路で強制する規範を定義します。
 - **ADR-0006 — Internal communication:** Taxion内部の6 Actor通信、JobMessage、Envelope、MessageKind、配信観測を定義します。
 - **ADR-0007 — External Agent protocol:** 外部Agent相互運用の必須protocolをA2Aに一本化し、内部JobMessageとの境界を定義します。
-- **ADR-0008以降:** Worktree並行性、情報の正本、証拠管理、その他の具体的な設計判断を定義します。ADR-0001〜0007に適合させます。
+- **ADR-0008以降:** Worktree並行性、情報の正本、証拠管理、Agent Harness能力などの具体的な設計判断を定義します。ADR-0001〜0007に適合させます。
 
 ADR-0001は「何を実現するか」、ADR-0002は「どの原則で作り直すか」、ADR-0003は「Jobをどのようなドメイン正本として扱うか」、ADR-0004は「誰がどの境界内で何を実行できるか」、ADR-0005は「すべての状態変更経路でどう不変条件を守るか」、ADR-0006は「Taxion内部でどう協調するか」、ADR-0007は「外部Agentとどう相互運用するか」を定義します。下位ADRはこれらを上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
 
@@ -40,9 +40,10 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 - [ADR-0008: Jobの開発作業をGit Worktree単位で分離し、Roleを逐次引き継ぐ](0008-worktree-concurrency-and-ownership.md) — Accepted
 - [ADR-0009: 現行仕様・開発計画・履歴・検証証拠の正本を分離する](0009-specification-plan-history-and-evidence.md) — Accepted
 - [ADR-0010: 検証証拠の水準とJob完遂の受入れを分離する](0010-evidence-levels-and-product-acceptance.md) — Accepted
+- [ADR-0011: Agent Harnessの8要素を製品能力要求として維持する](0011-agent-harness-eight-capabilities.md) — Accepted
 
 ## 原典と来歴
 
-ADR-0001は旧ADR-0088、ADR-0002は旧ADR-0081、ADR-0003は旧ADR-0083と旧ADR-0077を原典として再構成しました。ADR-0004は旧ADR-0080、0073、0066、0067のAccepted decisionを確認して再確立しました。ADR-0005は旧ADR-0079、ADR-0006は旧ADR-0087、ADR-0007は旧ADR-0108を原典として再確立しました。ADR-0008は旧ADR-0082のWorktree ownership / concurrency decisionを、ADR-0009は旧ADR-0085の仕様・計画・履歴・検証証拠の分離を新Taxion向けに再構成しました。ADR-0010は旧ADR-0107の候補実装比較を踏まえ、証拠水準とJob完遂の製品受入れを定義します。開発時のOS別品質ゲートとCommit前検査は [Development Quality Gates](../development/quality-gates.md) で管理します。
+ADR-0001は旧ADR-0088、ADR-0002は旧ADR-0081、ADR-0003は旧ADR-0083と旧ADR-0077を原典として再構成しました。ADR-0004は旧ADR-0080、0073、0066、0067のAccepted decisionを確認して再確立しました。ADR-0005は旧ADR-0079、ADR-0006は旧ADR-0087、ADR-0007は旧ADR-0108を原典として再確立しました。ADR-0008は旧ADR-0082のWorktree ownership / concurrency decisionを、ADR-0009は旧ADR-0085の仕様・計画・履歴・検証証拠の分離を新Taxion向けに再構成しました。ADR-0010は検証証拠の水準とJob完遂の製品受入れを定義します。旧PoC候補実装の採用評価はADR-0002で扱います。ADR-0011は旧ADR-0062のH1〜H8を製品能力要求として保持します。開発時のOS別品質ゲートとCommit前検査は [Development Quality Gates](../development/quality-gates.md) で管理します。
 
 旧Taxionと旧Taxion-PoCのGit履歴、Commit、Issue / PR履歴は移植していません。旧リポジトリの原文は読み取り専用の根拠資料であり、旧番号は原典を識別する参照としてのみ使用します。旧Taxion-PoCの初期READMEは実験専用と記載していましたが、後続の旧Taxion ADR-0107が候補実装ベースラインとして位置付けを変更した経緯を保持します。旧コードの採用はADR-0000およびADR-0002のprovenance・設計適合性・安全性・受入れ条件に従って別途判断します。
