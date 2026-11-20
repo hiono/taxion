@@ -6,10 +6,6 @@ Date: 2026-11-20
 
 Accepted
 
-## Source decision
-
-アーカイブ済み hiono/obsolete-taxion の redesign/job-centered-role-collaboration branch にある旧ADR-0079を原典とする（blob c6861579b56f16792fde503609fa386f2888f14d）。旧ADR-0079の規範・強制・検証の区別と全状態変更経路への適用を確認し、新しい履歴へ再確立した。
-
 ## Context
 
 ドメインの判定関数が存在することと、その条件がシステム全体で守られることは同じではありません。状態変更が判定関数を迂回できる場合、保存時や復元時だけの検証では、不正な状態や外部副作用との不整合が一度成立する余地があります。
