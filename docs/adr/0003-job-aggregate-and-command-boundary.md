@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み hiono/obsolete-taxion の旧ADR-0083（JobAggregate / Command境界）と旧ADR-0077（Job中心協調、JobApproval、成果・証拠の所有関係）を原典とする。旧ADR-0083のAccepted resolutionと2026-11-18 deletion boundary clarification、旧ADR-0077のADR-0080 / 0082による適用範囲の置換を確認し、新しいリポジトリ向けに再構成した。旧Git履歴や旧コードは移植しない。
+アーカイブ済み hiono/obsolete-taxion の旧ADR-0083（blob f1250773ff5c8ddb650c9d8af79af3fe61ecaafd）と旧ADR-0077（blob fdca26027bcc69a530c7751e807a6f135514a300）を原典とする。旧ADR-0083のAccepted resolutionと2026-11-18 deletion boundary clarification、旧ADR-0077のADR-0080 / 0082による適用範囲の置換を確認し、新しいリポジトリ向けに再構成した。旧Git履歴や旧コードは移植しない。
 
 ## Context
 
@@ -26,7 +26,8 @@ Taxionでは、利用者の意図と成果を保持するJobを継続単位と�
 - Jobは最初のPlanner呼出しより前に作成します。初期状態はDRAFTとし、利用者の原文依頼を保存します。Goalは未設定でもよく、Plannerが提案する契約revisionに含めます。
 - TaskはJob内の任意の作業分解です。Taskは必須のJobIDを持ちます。Job側にTaskIDsやRootTaskIDの逆方向所有indexを持たせません。
 - RoleExecutionはRoleによる個々の実行です。JobIDを必須とし、TaskIDは任意とします。Job全体のPlanningを行うTaskless PlannerはTaskIDを持ちません。
-- JobContractRevision、JobApproval、PlanningAuthorization、JobMessage、Provider operation intent / observation、Worktree ownership、JobOutput、JobEvidence、JobUsageおよびEffect decisionはJobの責務に属します。
+- JobContractRevision、JobApproval、PlanningAuthorization、JobQuestionAuthorization、JobMessage、Provider operation intent / observation、Worktree ownership、JobOutput、JobEvidence、JobUsageおよびEffect decisionはJobの責務に属します。
+- GoalはPlannerが提案するJobContractRevisionに含め、JobApprovalを作成する前に非空であることを検証します。Goal未設定のDRAFT Jobは、実装Taskや実装RoleExecutionを許可しません。
 - WorkspaceはJobAggregateの集合を保持する保存境界です。全Jobを一つの可変TaskGraphへ集約しません。
 
 ### 2. Task依存関係とRole協調関係を分離する
@@ -34,7 +35,8 @@ Taxionでは、利用者の意図と成果を保持するJobを継続単位と�
 - Taskの親子包含とTask間の前提条件は別の関係として扱います。
 - Role間の協調はJob内のappend-onlyなJobMessageと実行事実で表します。
 - JobMessage、Reply、HandoffはTask依存関係を生成・解決しません。
-- RoleExecutionの親子・起動元を別々の重複edgeとして永続化せず、必要な因果関係はcanonical JobMessage / eventから導出します。別indexを保持する場合は同一性と整合性を検証します。
+- RoleExecutionの親子・起動元を別々の重複edgeとして永続化せず、Handoff JobMessage / eventを因果関係のcanonical representationとし、recipient executionはTargetExecutionIDで関連付けます。ParentExecutionID等の参照ビューはcanonical messageから導出します。別indexを保持する場合はsource / target / messageの同一性と整合性を検証します。
+- Taskの親子包含と前提条件は別のtyped relationshipです。完了準備判定は両方を考慮し、Schedulerは明示的な前提条件だけを使います。
 - SchedulerはTaskの明示的な依存関係だけを用います。メッセージやRoleExecutionの親子関係をTask依存関係として解釈しません。
 
 ### 3. Handoffは受信側のTask scopeを明示する
@@ -51,6 +53,7 @@ Taxionでは、利用者の意図と成果を保持するJobを継続単位と�
 - PlanningAuthorizationはJobApprovalではなく、JobをACTIVEにせず、実装TaskやCoder / Reviewer RoleExecutionを作成・実行する権限を持ちません。
 - PlanningAuthorizationはJobID、原文依頼hash、認証済み利用者とintake provenance、Provider / account / configuration identity、repository identity、実際に強制できるread-only context境界、予算、期限、許可されたeffectおよびrecord hashに束縛します。
 - Plannerの提案や利用者の回答はgrantを拡張しません。開始、各turn、各effect、resumeの前に再検証します。
+- 承認済みJob内でRoleからTaskless PLANNERへ質問し、限定的なread-only context acquisitionを伴う個別回答実行が必要な場合は、別のimmutable JobQuestionAuthorizationを発行できます。このgrantはJobApproval、planning RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineに束縛します。QUESTION本文やMessageKindだけから自動発行せず、JobApprovalやPlanningAuthorizationを拡張しません。
 - Providerがread-onlyを強制できない場合は、immutable snapshotまたは明示的context文書だけを渡します。いずれも強制できない場合、repository readを許可しません。
 - 実装は完全なJobContractをimmutable revisionとして提案し、利用者がその正確なcanonical hashを明示承認したJobApprovalだけが実装権限を与えます。
 
@@ -62,6 +65,24 @@ Taxionでは、利用者の意図と成果を保持するJobを継続単位と�
 - Provider observationsはOperationIDに束縛したappend-only factsとします。
 - SQLite transactionの結果とProvider operationの結果を別の状態軸として扱います。
 - operationの結果が不明な場合はUNKNOWNとして保持し、Providerが同じOperationIDの冪等性または照合可能性を証明しない限りblind resendしません。
+
+#### Operation intentと必要なProvider observation
+
+外部呼出しの前に、Taxion生成のimmutable OperationIDとintentをJobAggregateへ永続化します。Worktree予約が必要なStartでは、Worktree予約とStart intentを同じJob transactionで確定します。Provider呼出しはtransactionのcommit確認後に行い、commit結果がUNKNOWNの場合はOperationIDと予約を読み戻してから判断します。
+
+| Operation | 呼出し前に固定するintent | 次へ進むために必要な観測 |
+|---|---|---|
+| Start | Job / RoleExecution / Provider / configuration identity、start request hash | Provider session identityと受理、または未解決Start |
+| Resume | 保存済みの同一session identityとRoleExecution binding | 同一sessionへの再接続確認。replacement sessionを旧Executionへ偽装しない |
+| Send | session、stable turn identity、prompt hash | Provider受理後のterminal turn observation。受理だけでは完了しない |
+| Stop | session、停止理由、terminal intent | Adapter固有のstop evidenceとassurance level。cancel通知だけでは停止証明にならない |
+| Effect | 承認済みJobEffect、canonical target/resource、originating turn | Provider / hostが実際のeffectと結果を観測した証拠 |
+
+Sendのterminal event、Usage、最終出力は別のfactsとして保存し、turn identityとsession bindingを照合します。Providerへ到達した可能性がありreceiptやterminal eventが未保存の場合、自動再送しません。Stop intentは呼出し前に保存し、RoleExecutionのterminal status、Stop APIの成功戻り値、cancel通知だけで停止を確定しません。Providerが書込みを継続できない証拠と最終結果・Usageの照合が永続化されるまでWorktreeを保持します。
+
+各Provider Adapterは、少なくとも次の能力を個別に宣言・検証します: OperationIDによるStart idempotency / lookup、process再起動後のsession reattachment、turn identityによるSend idempotency / lookup、event replay / cursor continuity、stop proof、lost event後のfinal output取得、Usage identity / completeness / deduplication。未対応能力は未対応として明示し、楽観的に補完しません。
+
+Recoveryはdurable intentとobservationを先に照合します。snapshot / restoreは、未解決Provider operation、稼働可能性のあるProvider writer、未照合turn result / Usage、保持中またはquarantine中のWorktree ownerがない場合に限ります。
 - RoleExecutionのWAITING、SUSPENDED、CANCEL_REQUESTEDまたはterminal stateをProvider停止の証拠とみなしません。
 
 ### 6. Worktree ownershipをTask単位で管理する
@@ -80,6 +101,7 @@ Taxionでは、利用者の意図と成果を保持するJobを継続単位と�
 - 一つのJobに対するCommandと関連レコードは一つのtransactionで原子的に確定します。
 - 同じCommand IDと同じ内容の再送は同じreceiptへ収束させます。同じCommand IDで異なる内容を送信した場合は拒否します。
 - 任意のWorkspace callbackや直接slice変更を、productionの代替write APIとして残しません。
+- 旧GraphTask / TaskGraph、履歴projection、旧Task / Dispatch / ReviewFlow workspace format、decoders、validators、migration readers、fixturesをread-only archiveやcompatibility readerとして残しません。具体的な現行Job-native use caseが後から必要になった場合は、必要なfacts、consumer、retention、Job-native schemaを別ADRで定義します。旧approvalやexecution receiptを新Job authorityへ変換しません。
 - Coreは不変条件と内部整合性を検証し、Controllerは認証・承認・Providerの外部事実を検証します。ドメイン検証を外部実行の証拠と取り違えません。
 
 ### 8. 成果・証拠とJob完了
@@ -96,6 +118,24 @@ Taxionでは、利用者の意図と成果を保持するJobを継続単位と�
 - 汎用分散transaction coordinator、汎用lock graph、全Provider共通のsession manager、推測的retry、旧TaskGraphの再導入は行いません。
 - 旧Task / Dispatch / ReviewFlowの実行・認可経路やデータ形式を新しい実行経路へ持ち込みません。
 
+## Alternatives considered
+
+- **旧TaskGraphへJob情報を追加して維持する:** 異なる関係とmutation境界を混在させ、旧実行経路を温存するため採用しません。
+- **Task dependency、Role lineage、Message、Resource ownershipを一つの汎用Graph edgeへ統合する:** 関係の意味が異なり、Schedulerが誤ったedgeを解釈するため採用しません。
+- **JobQuestionAuthorizationをQUESTION種別から自動生成する:** 通信intentが実行権限を作成するため採用しません。
+- **RoleExecution statusをProvider stop/resultの証拠として扱う:** 論理状態と外部実行事実が異なるため採用しません。
+- **旧Task-era形式をread-only decoder / migration readerとして残す:** 新しい正本に旧モデルの責務と保守負担を残すため採用しません。
+
+## Acceptance criteria
+
+- Jobのすべての変更がexpected revisionとidempotency identityを持つJobAggregate Commandを通ります。
+- Task dependencyとRole collaborationが別の関係として保存・評価されます。
+- PlanningAuthorizationとJobQuestionAuthorizationが異なる用途・scopeで発行され、JobApprovalへ昇格しません。
+- Provider operation intentが外部副作用より前に永続化され、UNKNOWNを推測で解消しません。
+- Provider capabilityが明示され、stop proof / result / usage照合前にWorktreeを解放しません。
+- 旧TaskGraph等の実行・履歴projection・decoder・migration経路を新Taxionへ持ち込みません。
+
+## Consequences
 ## Consequences
 
 - 実装・テストはJobAggregateと明示的Commandを正本として構築します。
