@@ -35,6 +35,12 @@ JobはSQLiteへtransactionで保存し、Command receiptとpayload hashを照合
 
 Planner、PlanningAuthorization、JobContractの承認、Role実行、Provider連携、Handoff、Job完了は未実装です。DRAFT Jobの作成・読取りができることを、Job完遂機能の完成と扱いません。機能の実装状態はコード、テスト、対象HEADのCIによって確認します。
 
+## 仕様・設計・受入れ
+
+- [Product Contract](docs/specifications/product-contract.md): 利用者シナリオ、Job lifecycle、権限、内部JobMessage、外部A2A、永続化、Worktreeの製品契約。
+- [Runtime Boundaries](docs/design/runtime-boundaries.md): 論理コンポーネント、信頼境界、Command / Provider / A2A / Recoveryのデータフロー。
+- [Product Acceptance Test Specification](docs/test-specs/product-acceptance.md): 証拠水準とJob完遂を確認する受入れシナリオ。
+
 ## 設計判断
 
 採用済み設計判断は [ADR index](docs/adr/README.md) を参照してください。製品目的と再構築原則の根拠となった旧設計判断は、アーカイブ済みリポジトリの原本を参照して再構成しています。旧Git履歴をこのリポジトリへ移植していません。
