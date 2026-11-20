@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/store"
 )
@@ -33,26 +34,58 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 		fmt.Fprintf(stdout, "taxion %s (%s, %s, %s)\n", valueOr(version.Version, "dev"), valueOr(version.Revision, "unknown"), valueOr(version.BuiltAt, "unknown"), valueOr(version.Channel, "development"))
 		return 0
 	}
+	if args[0] == "auth" {
+		if len(args) != 2 || args[1] != "login" {
+			fmt.Fprintln(stderr, "expected: taxion auth login")
+			return 2
+		}
+		return login(ctx, stdout, stderr)
+	}
+	if args[0] == "dev" {
+		if len(args) < 3 || args[1] != "job" || args[2] != "create" {
+			fmt.Fprintln(stderr, "expected: taxion dev job create --request \"...\"")
+			return 2
+		}
+		return createLocalJob(ctx, args[3:], stdout, stderr)
+	}
 	if args[0] != "job" || len(args) < 2 {
-		fmt.Fprintln(stderr, "expected: taxion job <create|show|list>")
+		fmt.Fprintln(stderr, "expected: taxion auth login, taxion dev job create, or taxion job <show|list>")
 		return 2
 	}
 
 	switch args[1] {
 	case "create":
-		return createJob(ctx, args[2:], stdout, stderr)
+		fmt.Fprintln(stderr, "trusted Job intake is not available yet; use taxion dev job create for an untrusted local DRAFT only")
+		return 2
 	case "show":
 		return showJob(ctx, args[2:], stdout, stderr)
 	case "list":
 		return listJobs(ctx, args[2:], stdout, stderr)
 	default:
-		fmt.Fprintln(stderr, "expected: taxion job <create|show|list>")
+		fmt.Fprintln(stderr, "expected: taxion job <show|list>")
 		return 2
 	}
 }
 
-func createJob(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("taxion job create", flag.ContinueOnError)
+func login(ctx context.Context, stdout, stderr io.Writer) int {
+	config, err := auth.ConfigFromEnv()
+	if err != nil {
+		return report(stderr, err)
+	}
+	authenticator, err := auth.NewOIDCAuthenticator(config)
+	if err != nil {
+		return report(stderr, err)
+	}
+	principal, err := authenticator.Authenticate(ctx, stdout)
+	if err != nil {
+		return report(stderr, err)
+	}
+	fmt.Fprintf(stdout, "\nOIDC authentication verified.\nHUMAN Principal ID: %s\nNo token or login session was saved.\n", principal.PrincipalID())
+	return 0
+}
+
+func createLocalJob(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("taxion dev job create", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	request := flags.String("request", "", "Original natural-language request")
 	path := flags.String("store", "", "Override the local Job database path")
@@ -201,7 +234,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, `Taxion — turn human intent into continuous collaborative work
 
 Usage:
-  taxion job create --request "Describe the work you want to accomplish"
+  taxion auth login
+  taxion dev job create --request "Local untrusted DRAFT only"
   taxion job show <job-id>
   taxion job list
   taxion version
@@ -209,6 +243,12 @@ Usage:
 Options:
   --store <path>   Override the local Job database path
   --limit <n>      Maximum Jobs to list (1-1000)
+
+OIDC environment:
+  TAXION_OIDC_ISSUER
+  TAXION_OIDC_CLIENT_ID
+  TAXION_OIDC_AUDIENCE       Defaults to client ID
+  TAXION_OIDC_REDIRECT_URI   Defaults to http://127.0.0.1:8765/callback
 `)
 }
 

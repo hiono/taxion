@@ -16,7 +16,7 @@ func TestJobCreateShowAndList(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "jobs.sqlite")
 	var stdout, stderr bytes.Buffer
 
-	code := Run(context.Background(), []string{"job", "create", "--store", path, "--request", "Help me turn these notes into a working plan."}, &stdout, &stderr, VersionInfo{Version: "test"})
+	code := Run(context.Background(), []string{"dev", "job", "create", "--store", path, "--request", "Help me turn these notes into a working plan."}, &stdout, &stderr, VersionInfo{Version: "test"})
 	if code != 0 {
 		t.Fatalf("create exit code = %d, stderr = %s", code, stderr.String())
 	}
@@ -58,7 +58,7 @@ func TestJobListTruncatesLongUnicodeRequestWithoutBreakingUTF8(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "jobs.sqlite")
 	request := strings.Repeat("日本語", 30)
 	var stdout, stderr bytes.Buffer
-	code := Run(context.Background(), []string{"job", "create", "--store", path, "--request", request}, &stdout, &stderr, VersionInfo{})
+	code := Run(context.Background(), []string{"dev", "job", "create", "--store", path, "--request", request}, &stdout, &stderr, VersionInfo{})
 	if code != 0 {
 		t.Fatalf("create exit code = %d, stderr = %s", code, stderr.String())
 	}
@@ -78,11 +78,37 @@ func TestJobListTruncatesLongUnicodeRequestWithoutBreakingUTF8(t *testing.T) {
 
 func TestJobCreateRequiresRequest(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run(context.Background(), []string{"job", "create"}, &stdout, &stderr, VersionInfo{})
+	code := Run(context.Background(), []string{"dev", "job", "create"}, &stdout, &stderr, VersionInfo{})
 	if code != 2 {
 		t.Fatalf("exit code = %d, want 2; stderr = %s", code, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "--request") {
 		t.Fatalf("stderr = %q, want request guidance", stderr.String())
+	}
+}
+
+func TestProductionJobCreateRequiresTrustedIngress(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"job", "create", "--request", "untrusted"}, &stdout, &stderr, VersionInfo{})
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "taxion dev job create") {
+		t.Fatalf("stderr = %q, want explicit local-only guidance", stderr.String())
+	}
+}
+
+func TestAuthLoginRequiresOIDCConfiguration(t *testing.T) {
+	t.Setenv("TAXION_OIDC_ISSUER", "")
+	t.Setenv("TAXION_OIDC_CLIENT_ID", "")
+	t.Setenv("TAXION_OIDC_AUDIENCE", "")
+	t.Setenv("TAXION_OIDC_REDIRECT_URI", "")
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"auth", "login"}, &stdout, &stderr, VersionInfo{})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "TAXION_OIDC_ISSUER") {
+		t.Fatalf("stderr = %q, want issuer configuration guidance", stderr.String())
 	}
 }
