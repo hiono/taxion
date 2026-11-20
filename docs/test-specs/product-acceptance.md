@@ -3,7 +3,7 @@
 Version: 1.0
 Date: 2026-11-20
 Governing contract: [Product Contract](../specifications/product-contract.md)
-Governing ADRs: ADR-0001〜ADR-0010
+Governing ADRs: ADR-0001〜ADR-0011
 
 ## 1. Purpose
 
@@ -173,6 +173,87 @@ Governing ADRs: ADR-0001〜ADR-0010
 - 必要な修正と再レビューを同じJobで継続できる。
 - Evidence、Usage、Provider quiescence、Worktree release、未解決operationの不存在を確認してJobを完了する。
 - 中断・再起動後も同じJobを安全に再開できる。
+
+### AT-014: Agent / Tool execution loop (H1)
+
+**Given** Job内のRoleExecutionがModel Contextと承認済みTool能力を持つ。
+**When** ModelがTool実行を要求し、Toolが結果を返す。
+**Then**
+- Contextが対象RoleExecutionとJob scopeに束縛されます。
+- Tool結果が次のModel turnへ返されます。
+- Task終了判定が必須条件と実行結果に基づきます。
+- Tool submission acknowledgementだけでTask完了にしません。
+
+### AT-015: Computer sandbox isolation (H2)
+
+**Given** 複数Taskが異なる実行環境で開始されます。
+**When** 各TaskがTerminal、File、Browser、接続Applicationを必要な範囲で利用します。
+**Then**
+- 各TaskのComputer isolationがfilesystem、process、credential、network、host accessの境界で検証されます。
+- Git Worktree、別Session、別Processだけを独立Computerの証拠にしません。
+- 不適切なCommandの影響がSandbox内に封じ込められます。
+- 承認されていないTool能力や外部副作用は拒否または承認待ちになります。
+
+### AT-016: Independent sub-agent delegation (H3)
+
+**Given** Main RoleExecutionが独立して実行可能なSide Taskを持ちます。
+**When** Sub-agentへ委譲し、並行実行します。
+**Then**
+- Sub-agentは独立Context / Sessionで開始されます。
+- 親Jobのbudget、deadline、scope、concurrency ceilingを超えません。
+- Sub-agentは短いSummaryと成果identityを親Jobへ返します。
+- 重複実行や依存Taskの先行実行を許可しません。
+
+### AT-017: Context selection and compaction (H4)
+
+**Given** RoleExecutionが複数turnを継続し、Context Windowの上限へ近づきます。
+**When** Contextを選択し、Skill / Fileを読み込み、履歴を圧縮します。
+**Then**
+- 各turnで必要なContextだけを選択します。
+- Skill / FileはTaskが必要とする場合にのみ読み込みます。
+- 圧縮前後でJob Contract、承認、重要な判断、未解決事項、実行UNKNOWN、provenanceを保持します。
+- Context不足や圧縮を理由に権限・承認を推定しません。
+
+### AT-018: Durable memory and same-Job resume (H5)
+
+**Given** Jobの途中でProcessまたはSessionが中断します。
+**When** 新しいSessionから同じJobを再開します。
+**Then**
+- Progress Note、Git履歴、Skill等の必要情報を再取得できます。
+- JobAggregateの確定済み事実と現在のProvider / filesystem状態を照合します。
+- 未確定情報やUNKNOWNを成功・失敗へ推測変換しません。
+- 独立したMemory storeをJobAggregateの代替正本にしません。
+
+### AT-019: Guardrails and credential isolation (H6)
+
+**Given** RoleExecutionがEmail、Payment、Delete等の高リスク操作や秘密情報へ接触し得ます。
+**When** Prompt Injectionを含むuntrusted inputを処理し、操作を要求します。
+**Then**
+- 高リスク操作は明示的なJob authorityと必要な人間承認を要求します。
+- 実認証情報はModel / Sandboxから分離し、必要な操作はController / Adapter経由で仲介します。
+- Prompt InjectionがCredential取得や外部送信を誘発しても実行境界で拒否します。
+- Skill / Promptの指示だけを安全境界としません。
+
+### AT-020: Verification before completion (H7)
+
+**Given** AgentがTaskの成功Summaryを返します。
+**When** ControllerがTask / Jobの完了可否を判定します。
+**Then**
+- Summaryだけでは完了を許可しません。
+- 必須Test、Browser Checkまたは独立評価の証拠を確認します。
+- 対象成果物のimmutable identityとEvidence provenanceを照合します。
+- 必須Checkが未実施・失敗・UNKNOWNの場合は完了を許可しません。
+
+### AT-021: Model / Tool observability and stagnation (H8)
+
+**Given** Model CallとTool Callが複数turnにわたって実行されます。
+**When** Callの追跡と失敗反復の検知を行います。
+**Then**
+- 観測可能なすべてのModel / Tool CallをJob、RoleExecution、Operation、Turnへ相関します。
+- Providerが報告しないCallや欠落eventは未観測として明示し、完全追跡済みと表示しません。
+- 同じ失敗した編集の反復を検知し、別Approachを提案できます。
+- 停滞検知は権限、budget、deadline、retry permissionを拡張しません。
+
 
 ## 4. Evidence recording
 
