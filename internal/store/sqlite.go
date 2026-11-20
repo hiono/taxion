@@ -33,10 +33,10 @@ type Store struct {
 }
 
 type CommandReceipt struct {
-	CommandID    string    `json:"command_id"`
-	JobID        string    `json:"job_id"`
-	Revision     uint64    `json:"revision"`
-	PayloadSHA256 string   `json:"payload_sha256"`
+	CommandID     string    `json:"command_id"`
+	JobID         string    `json:"job_id"`
+	Revision      uint64    `json:"revision"`
+	PayloadSHA256 string    `json:"payload_sha256"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
