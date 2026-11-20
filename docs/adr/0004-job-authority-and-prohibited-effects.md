@@ -27,7 +27,7 @@ Taxionは、承認されたJobの範囲内でAgentが手段を選択できるこ
 
 ### 1. JobApprovalは完全なJobContract revisionに束縛する
 
-JobApprovalはimmutable JobContract revisionのcanonical hashに束縛し、少なくとも次を保持します。
+JobApprovalはimmutable JobContract revisionのcanonical hashに束縛し、canonicalization version、approver identity / source / reason / timeをappend-onlyで記録します。少なくとも次を保持します。
 
 - Jobの目的、制約、受入条件、必要な証拠
 - 対象repository / resourceと作業領域の境界
@@ -36,7 +36,7 @@ JobApprovalはimmutable JobContract revisionのcanonical hashに束縛し、少�
 - セキュリティ制約、禁止事項、人間承認が必要な副作用
 - 秘密を含まないRuntime configurationの選択参照
 
-TaskはJobの対象・作業範囲・資源上限を狭められますが、Job境界を拡張できません。JobContractの対象境界、承認条件、予算、期限などを実質的に変更する場合は、新しいrevisionと明示的な人間承認を要求します。
+TaskはJobの対象・作業範囲・資源上限を狭められますが、Job境界を拡張できません。JobContractの対象境界、承認条件、予算、期限などを実質的に変更する場合は、新しいrevisionと明示的な人間承認を要求します。新revisionは新規operationに対する旧Approvalを無効化し、稼働中Provider sessionとWorktree ownershipを照合するまで再実行を許可しません。Task-level approvalを設ける場合も、具体的なoperationに対する追加の狭いgateに限り、JobApprovalを置換・拡張しません。
 
 ### 2. 通常操作のallowlistとRole-to-operation ACLを権限根拠にしない
 
@@ -91,6 +91,10 @@ PlanningAuthorizationはJobApprovalではなく、JobをACTIVEにしません。
 
 Providerがread-onlyを実際に強制できない場合はimmutable snapshotまたは明示的context documentsだけを渡します。いずれも強制できない場合、repository contextへのアクセスを許可しません。完全なJobContractの提案と、その正確なrevision hashに対する明示的なJobApprovalだけが実装権限を与えます。
 
+### 5.1 承認済みJob内のJobQuestionAuthorization
+
+承認済みJob内でRoleからTaskless PLANNERへ質問し、read-only context acquisitionを伴う個別回答実行が必要な場合は、immutable JobQuestionAuthorizationを発行できます。このgrantはJobApproval、Planner RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineへ束縛します。QUESTION本文やMessageKindだけから自動生成せず、JobApproval・PlanningAuthorization・Task scope・Effect authorityを拡張しません。発行、実行、失効、復旧はJobAggregate Commandで記録し、各turn / effect / resumeの前に再検証します。
+
 ### 6. Observation・Conformance・Admission・Execution Permissionを分離する
 
 - **Observation:** 対象が現在どの状態にあるかを、対象identity、provenance、取得時刻、read scope、元Jobへの参照とともに記録します。
@@ -126,6 +130,13 @@ Admissionのacceptは、契約確認の入力にできるという意味であ�
 - Controllerは意味情報の完全性を一律審査してRoleの判断を代行せず、Job identity、進行、記録、権限、承認、安全性を管理します。
 - Reviewerの独立性は実行主体、Context / session、固定対象、provenanceおよびread-only execution boundaryで保証します。Role名だけのACLを独立性の代替にしません。
 
+## Alternatives considered
+
+- **通常操作をJob / Role単位の静的allowlistで認可する:** 承認範囲内の通常作業を不要に制限し、未知toolの意味を評価できないため採用しません。
+- **未知のOperationを名称だけで一律拒否する:** 未知であることと危険な副作用であることは同一でないため採用しません。
+- **PlanningAuthorizationとJobApprovalを一つのgrantに統合する:** DRAFTのread-only planningが実装権限へ誤って拡張されるため採用しません。
+- **QUESTION / JobMessageからJobQuestionAuthorizationを自動発行する:** 通信本文やMessageKindが権限を作成するため採用しません。
+- **Observation / Conformance / Admission / Execution Permissionを一つの判定へまとめる:** 観測・適合・受入れ・実行許可の境界を失うため採用しません。
 ## Consequences
 
 - Roleは承認済みJobの範囲内で、事前に列挙されていない通常の作業手段を選択できます。
@@ -134,7 +145,7 @@ Admissionのacceptは、契約確認の入力にできるという意味であ�
 - 不完全情報の協調を許容しつつ、identity、認可、provenance、実行不明、データ整合性の境界はfail-closedで維持します。
 - 合成テストは型付き判定と安全境界の証拠に限定し、意味評価や実Providerの実行成功の証拠へ拡張しません。
 
-## Acceptance
+## Acceptance criteria
 
 - JobApprovalがimmutable JobContract revisionのexact hashに束縛されます。
 - 通常操作のallowlistやRole-to-operation ACLが実行権限の根拠になっていません。
