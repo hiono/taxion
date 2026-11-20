@@ -21,13 +21,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Verify formatting
-        run: |
-          files="$(gofmt -l cmd internal)"
-          if [ -n "$files" ]; then
-            printf '%s\\n' "$files"
-            gofmt -d $files
-            exit 1
-          fi
+        run: test -z "$(gofmt -l cmd internal)"
       - name: Vet
         run: go vet ./...
       - name: Test
