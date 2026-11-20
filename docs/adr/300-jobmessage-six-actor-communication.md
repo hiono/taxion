@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み hiono/obsolete-taxion の redesign/job-centered-role-collaboration branch にある旧ADR-0087を原典とする（blob 5ee15e1e2a3263f5a66243601c9d6e06c2b65a86）。JobMessage、6 Actor identity、Envelope / Body分離、Question / Answer / Handoff、配信観測の意味を確認し、新しい履歴へ再確立した。
+アーカイブ済み hiono/obsolete-taxion の設計資料に記録されたJobMessage、6 Actor identity、Envelope / Body分離、Question / Answer / Handoff、配信観測の意味を確認し、新しい履歴へ再確立しました。
 
 ## Context
 
