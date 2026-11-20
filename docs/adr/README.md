@@ -11,9 +11,10 @@
 - **ADR-0005 — Domain invariants:** 不変条件を生成・変更・保存・復元の全経路で強制する規範を定義します。
 - **ADR-0006 — Internal communication:** Taxion内部の6 Actor通信、JobMessage、Envelope、MessageKind、配信観測を定義します。
 - **ADR-0007 — External Agent protocol:** 外部Agent相互運用の必須protocolをA2Aに一本化し、内部JobMessageとの境界を定義します。
-- **ADR-0008以降:** Worktree並行性、証拠管理、その他の具体的な設計判断を定義します。ADR-0001〜0007に適合させます。
+- **ADR-0008 — Worktree concurrency:** Task単位のWorktree分離、同一Worktreeの逐次所有、独立Taskの並行性を定義します。
+- **ADR-0009 — Information provenance:** 現行仕様、Dropbox計画、GitHub履歴、Issue / PR、CI証拠の正本を分離します。
 
-ADR-0001は「何を実現するか」、ADR-0002は「どの原則で作り直すか」、ADR-0003は「Jobをどのようなドメイン正本として扱うか」、ADR-0004は「誰がどの境界内で何を実行できるか」、ADR-0005は「すべての状態変更経路でどう不変条件を守るか」、ADR-0006は「Taxion内部でどう協調するか」、ADR-0007は「外部Agentとどう相互運用するか」を定義します。下位ADRはこれらを上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
+ADR-0001は「何を実現するか」、ADR-0002は「どの原則で作り直すか」、ADR-0003は「Jobをどのようなドメイン正本として扱うか」、ADR-0004は「誰がどの境界内で何を実行できるか」、ADR-0005は「すべての状態変更経路でどう不変条件を守るか」、ADR-0006は「Taxion内部でどう協調するか」、ADR-0007は「外部Agentとどう相互運用するか」、ADR-0008は「開発作業をどう分離・並行させるか」、ADR-0009は「設計・計画・履歴・検証証拠をどこに保存するか」を定義します。下位ADRはこれらを上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
 
 ## 状態
 
@@ -35,11 +36,11 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 - [ADR-0005: ドメイン不変条件を生成・変更・保存・復元の全経路で強制する](0005-domain-invariants-across-state-paths.md)
 - [ADR-0006: Taxion内部の6 Actor通信をJobMessageへ統一する](0006-jobmessage-six-actor-communication.md)
 - [ADR-0007: 外部Agent相互運用の必須protocolをA2Aに一本化する](0007-a2a-external-agent-interoperability.md)
+- [ADR-0008: Jobの開発作業をGit Worktree単位で分離し、Roleを逐次引き継ぐ](0008-worktree-concurrency-and-ownership.md)
+- [ADR-0009: 現行仕様・開発計画・履歴・検証証拠の正本を分離する](0009-specification-plan-history-and-evidence.md)
 
 ## 原典と来歴
 
-ADR-0001は旧ADR-0088（blob c7b1dc8407994da033fd3bee380cb606bc199025）を、ADR-0002は旧ADR-0081（blob e22b9f58a6828826ee692af0183a8c251a286f85）を、ADR-0003は旧ADR-0083（blob f1250773ff5c8ddb650c9d8af79af3fe61ecaafd）を原典として再確立しました。
-
-ADR-0004は旧ADR-0080、0073、0066、0067のAccepted decisionを確認して再確立しました。ADR-0005は旧ADR-0079（blob c6861579b56f16792fde503609fa386f2888f14d）を、ADR-0006は旧ADR-0087（blob 5ee15e1e2a3263f5a66243601c9d6e06c2b65a86）を、ADR-0007は旧ADR-0108（blob b0e5e3f070b55d73943a8386a8297dc83a51435a）を原典として再確立しました。
+ADR-0001〜0008は、アーカイブ済みhiono/obsolete-taxionのAccepted decisionを原典として、必要な意味を確認し新しい履歴へ再確立しました。各ADRのSource decisionに原典のpathとblob SHAを記録しています。ADR-0009は旧ADR-0085（blob bd25f6aee937ecd3a61cf7a2298aceefec281055）を原典とし、Dropboxを計画正本とする現在のプロジェクト運用指示を追加しています。
 
 これらは旧Git履歴の移植ではありません。原典の判断内容を確認したうえで、新リポジトリの設計判断として新たに記録したものです。原典の後続改訂や関連ADRとの整合性を確認せず、原文を無条件に複製してはなりません。
