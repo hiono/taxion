@@ -8,7 +8,7 @@ Accepted
 
 ## Source decision
 
-アーカイブ済み `hiono/obsolete-taxion` のADR-0107（Six-Actor PoCを候補実装ベースラインとして比較評価する判断）とADR-0085（仕様・履歴・検証証拠の分離）を参照する。候補実装の採用分類と比較条件はADR-101で再確立し、本ADRは証拠水準とJob完遂の製品受入れを定義する。開発時のOS別品質ゲートやCommit前検査は製品受入れ条件とは分離し、開発・運用文書で管理する。
+アーカイブ済み `hiono/obsolete-taxion` の候補実装評価と、仕様・履歴・検証証拠の分離に関する設計資料を参照します。候補実装の採用分類と比較条件はADR-101で再確立し、本ADRは証拠水準とJob完遂の製品受入れを定義します。開発時のOS別品質ゲートやCommit前検査は製品受入れ条件とは分離し、開発・運用文書で管理します。
 
 ## Context
 
@@ -22,12 +22,12 @@ Unit test、synthetic harness、SDK型とのcompile、実Provider実行、永続
 
 ### 1. 証拠水準
 
-1. **Static / unit:** 局所ロジック、型、不変条件を検証する。
-2. **Synthetic integration:** fake Providerやin-memory harness内の契約、順序、異常系を検証する。
-3. **SDK compatibility:** 実SDKの型、API、protocol handshake等との互換性を検証する。
-4. **Live Provider:** 実Provider接続、実callback、identity / attribution、turn、usage、stop semanticsを検証する。
-5. **Durable recovery:** 実プロセス再起動・crash後にJob facts、Provider operations、成果、Usage、Worktree状態を安全に照合できることを検証する。
-6. **Product E2E:** 人間の曖昧な依頼から、計画、質問・回答、承認、複数Role実行、レビュー、修正、証拠確認、Job完了までを検証する。
+1. **E1 — Static / unit:** 局所ロジック、型、不変条件を検証する。
+2. **E2 — Synthetic integration:** fake Providerやin-memory harness内の契約、順序、異常系を検証する。
+3. **E3 — SDK compatibility:** 実SDKの型、API、protocol handshake等との互換性を検証する。
+4. **E4 — Live Provider:** 実Provider接続、実callback、identity / attribution、turn、usage、stop semanticsを検証する。
+5. **E5 — Durable recovery:** 実プロセス再起動・crash後にJob facts、Provider operations、成果、Usage、Worktree状態を安全に照合できることを検証する。
+6. **E6 — Product E2E:** 人間の曖昧な依頼から、計画、質問・回答、承認、複数Role実行、レビュー、修正、証拠確認、Job完了までを検証する。
 
 上位の証拠水準は下位の成功だけから推定しない。各結果は対象HEADの完全なSHA、実行環境、Provider / SDK version、条件、観測値と対応付ける。CI結果はそのRunが実際に検証したSHAにのみ有効とする。
 
