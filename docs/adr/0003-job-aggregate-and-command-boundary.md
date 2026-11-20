@@ -6,10 +6,6 @@ Date: 2026-11-20
 
 Accepted
 
-## Source decision
-
-アーカイブ済み hiono/obsolete-taxion の旧ADR-0083（blob f1250773ff5c8ddb650c9d8af79af3fe61ecaafd）、旧ADR-0077（blob fdca26027bcc69a530c7751e807a6f135514a300）、旧ADR-0086（blob 41870b82399f169a04073ec625942bcaf18694b7）を原典とする。旧ADR-0083のAccepted resolutionと2026-11-18 deletion boundary clarification、旧ADR-0077のADR-0080 / 0082による適用範囲の置換、旧ADR-0086の独立Memory subsystem退役判断を確認し、新しいリポジトリ向けに再構成した。旧Git履歴や旧コードは移植しない。
-
 ## Context
 
 Job、Task、RoleExecution、Role間通信、Provider実行、Worktree所有権、成果、証拠を単一の汎用Graphや可変Workspaceへ混在させると、異なる関係の意味が曖昧になり、状態変更・認可・永続化の迂回路が生じます。
