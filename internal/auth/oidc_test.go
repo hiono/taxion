@@ -44,8 +44,8 @@ func TestAuthenticateUsesAuthorizationCodePKCEAndNonce(t *testing.T) {
 
 func TestAuthenticateRejectsInvalidIDTokens(t *testing.T) {
 	cases := []struct {
-		name          string
-		mutateClaims  func(map[string]any)
+		name           string
+		mutateClaims   func(map[string]any)
 		wrongSignature bool
 	}{
 		{
