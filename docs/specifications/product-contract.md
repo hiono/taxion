@@ -2,7 +2,7 @@
 
 Version: 1.0
 Date: 2026-11-20
-Normative decisions: ADR-0001〜ADR-0011
+Normative decisions: ADR-100〜ADR-811
 
 ## 1. Purpose and scope
 
@@ -169,7 +169,7 @@ Observation、Conformance、Admission、Execution Permissionは別の責務と�
 
 ## 8. Agent Harness capability contract
 
-Agent Harnessの必須能力H1〜H8と各判定項目は [ADR-0011](../adr/0011-agent-harness-eight-capabilities.md) に従います。製品実装はModel / Tool loop、Computer Sandbox、独立Sub-agent、Context選択・圧縮、Job再開、Credential / Effect guardrails、独立Verification、Model / Tool observabilityを満たします。
+Agent Harnessの必須能力H1〜H8と各判定項目は [ADR-811](../adr/811-agent-harness-eight-capabilities.md) に従います。製品実装はModel / Tool loop、Computer Sandbox、独立Sub-agent、Context選択・圧縮、Job再開、Credential / Effect guardrails、独立Verification、Model / Tool observabilityを満たします。
 
 Provider / Runtimeへの委譲は許容しますが、APIの存在やProviderの自己申告だけで能力充足と判定しません。対応構成、実行証拠、失敗時挙動を確認します。Worktree、Session、Processの分離だけをComputer Sandboxの証拠にしません。
 ## 9. Explicit non-goals
@@ -188,14 +188,14 @@ Provider / Runtimeへの委譲は許容しますが、APIの存在やProviderの
 
 | Contract area | Governing ADR |
 | --- | --- |
-| 製品目的・利用者価値 | ADR-0001 |
-| 再構築・provenance | ADR-0002 |
-| JobAggregate・Command・Provider facts | ADR-0003 |
-| JobApproval・禁止副作用・PlanningAuthorization・Admission | ADR-0004 |
-| 全経路の不変条件 | ADR-0005 |
-| 内部6 Actor・JobMessage | ADR-0006 |
-| 外部Agent A2A | ADR-0007 |
-| Git Worktree・並行性 | ADR-0008 |
-| 仕様・計画・履歴・CI証拠の正本 | ADR-0009 |
-| 検証水準・Job完遂受入れ | ADR-0010 |
-| Agent Harness H1〜H8 | ADR-0011 |
+| 製品目的・利用者価値 | ADR-100 |
+| 再構築・provenance | ADR-101 |
+| JobAggregate・Command・Provider facts | ADR-201 |
+| JobApproval・禁止副作用・PlanningAuthorization・Admission | ADR-500 |
+| 全経路の不変条件 | ADR-202 |
+| 内部6 Actor・JobMessage | ADR-300 |
+| 外部Agent A2A | ADR-700 |
+| Git Worktree・並行性 | ADR-408 |
+| 仕様・計画・履歴・CI証拠の正本 | ADR-004 |
+| 検証水準・Job完遂受入れ | ADR-800 |
+| Agent Harness H1〜H8 | ADR-811 |

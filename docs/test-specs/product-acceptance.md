@@ -3,7 +3,7 @@
 Version: 1.0
 Date: 2026-11-20
 Governing contract: [Product Contract](../specifications/product-contract.md)
-Governing ADRs: ADR-0001〜ADR-0011
+Governing ADRs: ADR-100〜ADR-811
 
 ## 1. Purpose
 

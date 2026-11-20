@@ -139,4 +139,4 @@ Job完了CommandはControllerだけが実行する。必須受入条件、JobEvi
 
 ## 8. Traceability
 
-ADR-0003 JobAggregate / Command、ADR-0004 authorization、ADR-0005 invariant enforcement、ADR-0006 JobMessage、ADR-0007 A2A、ADR-0008 Worktree、ADR-0010 Evidence / acceptanceを具体化する。
+ADR-201 JobAggregate / Command、ADR-500 authorization、ADR-202 invariant enforcement、ADR-300 JobMessage、ADR-700 A2A、ADR-408 Worktree、ADR-800 Evidence / acceptanceを具体化する。
