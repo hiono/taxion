@@ -2,9 +2,9 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,11 +116,11 @@ type fakeAuthenticatedPrincipal struct {
 	validationErr       error
 }
 
-func (p fakeAuthenticatedPrincipal) PrincipalID() string { return p.id }
-func (p fakeAuthenticatedPrincipal) Issuer() string { return p.issuer }
-func (p fakeAuthenticatedPrincipal) Subject() string { return p.subject }
+func (p fakeAuthenticatedPrincipal) PrincipalID() string        { return p.id }
+func (p fakeAuthenticatedPrincipal) Issuer() string             { return p.issuer }
+func (p fakeAuthenticatedPrincipal) Subject() string            { return p.subject }
 func (p fakeAuthenticatedPrincipal) AuthenticatedAt() time.Time { return p.authenticatedAt }
-func (p fakeAuthenticatedPrincipal) Validate() error { return p.validationErr }
+func (p fakeAuthenticatedPrincipal) Validate() error            { return p.validationErr }
 
 func TestTrustedJobCreatePersistsPrincipalAndProvenance(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "jobs.sqlite")
