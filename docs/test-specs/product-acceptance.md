@@ -255,26 +255,6 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-201, ADR-202, A
 - 同じ失敗した編集の反復を検知し、別Approachを提案できます。
 - 停滞検知は権限、budget、deadline、retry permissionを拡張しません。
 
-
-## 4. Evidence recording
-
-各受入れ結果は次の情報を持つ。
-
-- 対象HEADの完全なSHA
-- test / scenario ID
-- OS / architecture / runtime
-- Provider / SDK / protocol version（該当時）
-- 実行条件とfixture / configuration identity
-- GitHub Actions Run IDまたは再現可能な実行記録
-- PASS / FAIL / INCONCLUSIVE / NOT RUN
-- 観測した事実、未確認事項、失敗理由
-
-未実施のシナリオをPASSにしない。synthetic evidenceをlive Provider evidenceとして扱わない。CI結果を後続HEADへ流用しない。
-
-## 5. Product acceptance rule
-
-Taxionの製品受入れはAT-013の実Job完遂を中心に判定する。AT-001〜AT-012は必要な下位契約であり、個別に合格してもAT-013の代替にはならない。
-
 ### AT-022: Trusted HUMAN identity and intake provenance
 
 **Given** 利用者がWeb / CLI / APIからJob intakeまたはJobApprovalを要求する。
