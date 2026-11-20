@@ -44,15 +44,12 @@ Taxionでは、利用者の意図と成果を保持するJobを継続単位と�
 - 受信Taskは同じJobに属し、Job承認範囲を拡張しません。
 - 情報不足や任意metadata欠落だけを理由に協調を拒否しません。identity、認可、scope、重複実行、禁止副作用の検査は維持します。
 
-### 4. PlanningAuthorizationとJobApprovalを分離する
+### 4. Authorization facts
 
-- 明示的な利用者起点のPlanningAuthorizationは、DRAFT JobにおけるTaskless Planner一回の限定的な計画・読取り専用実行を許可する独立したimmutable grantです。
-- PlanningAuthorizationはJobApprovalではなく、JobをACTIVEにせず、実装TaskやCoder / Reviewer RoleExecutionを作成・実行する権限を持ちません。
-- PlanningAuthorizationはJobID、原文依頼hash、認証済み利用者とintake provenance、Provider / account / configuration identity、repository identity、実際に強制できるread-only context境界、予算、期限、許可されたeffectおよびrecord hashに束縛します。
-- Plannerの提案や利用者の回答はgrantを拡張しません。開始、各turn、各effect、resumeの前に再検証します。
-- 承認済みJob内でRoleからTaskless PLANNERへ質問し、限定的なread-only context acquisitionを伴う個別回答実行が必要な場合は、別のimmutable JobQuestionAuthorizationを発行できます。このgrantはJobApproval、planning RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineに束縛します。QUESTION本文やMessageKindだけから自動発行せず、JobApprovalやPlanningAuthorizationを拡張しません。
-- Providerがread-onlyを強制できない場合は、immutable snapshotまたは明示的context文書だけを渡します。いずれも強制できない場合、repository readを許可しません。
-- 実装は完全なJobContractをimmutable revisionとして提案し、利用者がその正確なcanonical hashを明示承認したJobApprovalだけが実装権限を与えます。
+- JobAggregateはJobContractRevision、JobApproval、PlanningAuthorization、JobQuestionAuthorizationをJobに属する永続的な事実として保持します。
+- JobApprovalとPlanningAuthorizationは別のimmutable recordとし、互いに代替・昇格しません。
+- 各grantの発行条件、束縛対象、許可effect、再検証、失効および禁止副作用はADR-500で定義します。
+- grantの作成・変更・失効はJobAggregateへの明示的Commandとして記録します。
 
 ### 5. Providerの論理状態と外部事実を分離する
 
@@ -84,14 +81,11 @@ Model Call / Tool CallはRoleExecution、turn、Provider operationまたはEffec
 Recoveryはdurable intentとobservationを先に照合します。snapshot / restoreは、未解決Provider operation、稼働可能性のあるProvider writer、未照合turn result / Usage、保持中またはquarantine中のWorktree ownerがない場合に限ります。
 - RoleExecutionのWAITING、SUSPENDED、CANCEL_REQUESTEDまたはterminal stateをProvider停止の証拠とみなしません。
 
-### 6. Worktree ownershipをTask単位で管理する
+### 6. Worktree ownership
 
-- 開発TaskにはGit Worktreeを割り当てます。Taskless Job-level PlannerはWorktreeを持ちません。
-- 同一Taskのmutating RoleExecutionは同じWorktreeを逐次引き継ぎます。
-- Worktreeの所有権は永続化し、プロセス内mutexだけで排他を保証しません。
-- Provider停止の証拠、結果・利用量の照合、成果物identityの確定が永続化されるまで所有権を解放しません。
-- 停止状態または結果が不明なWorktreeはquarantineし、再利用しません。
-- 独立性が確認された別Taskだけを別Worktreeで並行実行します。詳細な並行性契約は下位ADRで定義します。
+- WorktreeOwnershipはJobAggregateが保持するTask単位の永続的な所有事実です。
+- Worktreeの割当て、同一Worktreeの排他、Roleの逐次引継ぎ、Reviewerのread-only boundary、停止証拠、quarantine、独立Taskの並行性はADR-408で定義します。
+- Worktree ownershipの変更はJobAggregateへの明示的Commandとして確定し、Job外の独立した所有状態を正本にしません。
 
 ### 7. すべてのJob変更を明示的Command境界へ集約する
 
@@ -106,11 +100,10 @@ Recoveryはdurable intentとobservationを先に照合します。snapshot / res
 
 ### 8. 成果・証拠とJob完了
 
-- JobOutputは成果物のimmutable identityとJob / Task / producing RoleExecutionのprovenanceを保持します。
-- JobEvidenceは受入条件、証拠identity、producer、独立したverifier、検証状態を保持します。
-- 成果の作成者自身の申告だけで成果を受入れ済みとしません。
-- JobUsageはProvider operation / turnと照合できるidentity、完全性および利用量を保持します。
-- Job完了は、必須受入条件を満たすprovenance-valid evidence、usage finality、Provider quiescence、Worktree releaseおよび未解決の安全・実行状態がないことを確認するCommandとしてのみ成立します。
+- JobOutput、JobEvidence、JobUsageはJobAggregateが保持する永続的な事実です。
+- 成果・証拠はimmutable identityとJob / Task / producing RoleExecution / verifierのprovenanceへ束縛します。
+- Job完了は、必須条件の確認結果を伴う明示的なJobAggregate Commandとしてのみ成立します。
+- 証拠水準、製品受入れシナリオ、Job完了の受入条件はADR-800で定義します。
 
 ## Implementation boundaries
 
