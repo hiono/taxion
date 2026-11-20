@@ -1,0 +1,8 @@
+/dist/
+/coverage.out
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
