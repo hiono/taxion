@@ -286,6 +286,6 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-201, ADR-202, A
 
 ## 5. Product acceptance rule
 
-Taxionの製品受入れはAT-013の実Job完遂を中心に判定する。AT-001〜AT-012は必要な下位契約であり、個別に合格してもAT-013の代替にはならない。
+Taxionの製品受入れはAT-013の実Job完遂を中心に判定する。AT-001〜AT-012およびAT-014〜AT-022は必要な下位契約・能力検証であり、個別に合格してもAT-013の代替にはならない。
 
 
