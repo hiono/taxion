@@ -38,7 +38,7 @@ Planner / Coder / Reviewerの実行主体はRoleExecutionIDに結び付ける。
 
 ### 3.3 Provider boundary
 
-Providerは外部実行主体である。Providerが返すevent、tool list、session state、usage、terminal statusはObservationであり、Taxionの承認・Job完了の正本ではない。ControllerはOperationIDとJob revisionで相関し、外部結果をJobAggregateへ明示的に記録する。
+Providerは外部実行主体である。Providerが返すevent、tool list、session state、usage、terminal statusはObservationであり、Taxionの承認・Job完了の正本ではない。Provider credentialはController / Provider Adapterが管理し、Model / Sandboxへ露出しません。Provider API通信はAdapterが仲介し、現在のgrantとProvider / account / configurationに束縛します。RoleのToolへ任意のnetwork accessやcredential accessを継承しません。ControllerはOperationIDとJob revisionで相関し、外部結果をJobAggregateへ明示的に記録します。
 
 ### 3.4 External Agent boundary
 

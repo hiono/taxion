@@ -51,7 +51,8 @@ Roleは作業責務であり、Role名だけで認証済み実行主体やoperat
 - 明示的な利用者起動に基づき、Taskless PLANNER RoleExecutionへimmutable PlanningAuthorizationを発行できる。
 - PlanningAuthorizationはJob、原文依頼hash、認証済み利用者、Provider / account / configuration、repository、read-only境界、permitted effects、budget、deadlineに束縛する。
 - 許可範囲はread-only context acquisitionとbounded planningに限定する。
-- JobをACTIVEにせず、実装Task、Coder / Reviewer、write、validation、commit、publish、credential、network、external mutationを許可しない。
+- JobをACTIVEにせず、実装Task、Coder / Reviewer、write、validation、commit、publish、Role / Model / Tool / Sandboxからのcredential access、任意宛先へのnetwork access、external mutationを許可しない。
+- Provider Start / Turn / Resumeに必要な認証情報と通信はController / Provider AdapterがModel / Sandboxから分離して仲介し、grantに束縛されたProvider / account / configurationに限定する。
 - Provider側でread-onlyを強制できない場合はimmutable snapshotまたは明示文書だけを渡す。それも強制できなければrepository readを許可しない。
 - Plannerの提案、回答、会話によってPlanningAuthorizationを拡張しない。
 
