@@ -82,6 +82,8 @@ PlanningAuthorizationはJobApprovalではなく、JobをACTIVEにしません。
 
 Providerがread-onlyを実際に強制できない場合はimmutable snapshotまたは明示的context documentsだけを渡します。いずれも強制できない場合、repository contextへのアクセスを許可しません。完全なJobContractの提案と、その正確なrevision hashに対する明示的なJobApprovalだけが実装権限を与えます。
 
+ここで禁止するcredential use / network accessは、Planner / Model / Tool / Sandboxからの直接的な認証情報取得・利用や任意宛先への通信を指します。Provider Start / Turn / Resumeに必要な認証情報と通信は、Controller / Provider AdapterがModel / Sandboxから分離して仲介し、grantに束縛されたProvider / account / configurationへの通信に限定します。これはPlannerへのcredential accessや任意のnetwork permissionの付与を意味しません。
+
 ### 5.1 承認済みJob内のJobQuestionAuthorization
 
 承認済みJob内でRoleからTaskless PLANNERへ質問し、read-only context acquisitionを伴う個別回答実行が必要な場合は、immutable JobQuestionAuthorizationを発行できます。このgrantはJobApproval、Planner RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineへ束縛します。QUESTION本文やMessageKindだけから自動生成せず、JobApproval・PlanningAuthorization・Task scope・Effect authorityを拡張しません。発行、実行、失効、復旧はJobAggregate Commandで記録し、各turn / effect / resumeの前に再検証します。
@@ -146,6 +148,7 @@ JobApprovalはimmutable JobContract revisionの正確なhashに束縛し、scope
 - 通常操作のallowlistやRole-to-operation ACLが実行権限の根拠になっていません。
 - 未知toolが、未知であるという理由だけで拒否されず、具体的な副作用・境界・封じ込め可能性で判定されます。
 - PlanningAuthorizationがTaskless Plannerのread-only planningに限定され、JobApprovalや実装権限へ昇格しません。
+- PlanningAuthorization下のProvider通信はController / Provider Adapterが仲介し、Provider credentialをModel / Sandboxへ露出せず、任意のnetwork accessをRoleへ許可しません。
 - Observation、Conformance、Admission、Execution Permissionが別の責務としてテストされています。
 - 情報不足だけで通常のRole協調を拒否せず、認証・権限・秘密情報・scope・実行不明は迂回できません。
 - Reviewerが固定された同一成果物を独立した実行主体とread-only境界で検証します。
