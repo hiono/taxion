@@ -38,9 +38,9 @@ func newAuthenticatedPrincipal(issuer, subject string, authenticatedAt time.Time
 	}, nil
 }
 
-func (p AuthenticatedPrincipal) PrincipalID() string { return p.id }
-func (p AuthenticatedPrincipal) Issuer() string { return p.issuer }
-func (p AuthenticatedPrincipal) Subject() string { return p.subject }
+func (p AuthenticatedPrincipal) PrincipalID() string        { return p.id }
+func (p AuthenticatedPrincipal) Issuer() string             { return p.issuer }
+func (p AuthenticatedPrincipal) Subject() string            { return p.subject }
 func (p AuthenticatedPrincipal) AuthenticatedAt() time.Time { return p.authenticatedAt }
 
 func (p AuthenticatedPrincipal) Validate() error {
