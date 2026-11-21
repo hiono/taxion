@@ -484,9 +484,23 @@ Load JobAggregate
   -> Re-evaluate terminality / usage / quiescence
 ```
 
-Start / Sendの照合能力がない場合はUNKNOWNを保持する。Sendは同じOperationID / TurnIDのLookupまたは実証済みidempotencyでのみ再実行する。Event replayはaccepted Start Sessionと保存済みcursor prefixへ束縛し、eventをappend-onlyで保存する。Result / UsageのControllerはaccepted Startとoptional Turnのidentityを検証し、E4 Capability確認後に取得結果を既存OperationID / TurnIDへappend-onlyで保存する。Complete=falseのUsageは途中値として残し、Complete=trueでのみ確定する。Resume Controller orchestrationは未実装であり、新identityを作って回避しない。
+Start / Sendの照合能力がない場合はUNKNOWNを保持する。Sendは同じOperationID / TurnIDのLookupまたは実証済みidempotencyでのみ再実行する。ResumeはE5 SessionReattach capabilityを確認し、intent-firstで同じOperationID / SessionIDを再利用する。曖昧なResume結果はUNKNOWNを保持し、同じOperationIDのATTACHED / FAILED evidenceだけで解消する。Event replayはaccepted Start Sessionと保存済みcursor prefixへ束縛し、eventをappend-onlyで保存する。Result / UsageのControllerはaccepted Startとoptional Turnのidentityを検証し、E4 Capability確認後に取得結果を既存OperationID / TurnIDへappend-onlyで保存する。Complete=falseのUsageは途中値として残し、Complete=trueでのみ確定する。Resume Controller orchestrationは未実装であり、新identityを作って回避しない。
 
 ### 8.5 Result / Usage sequence（Domain / Store / Controller実装済み）
+
+### 8.6 Resume sequence（Domain / Store実装済み、Controller未実装）
+
+```text
+Load Job
+  -> Validate Principal / grant / RoleExecution / accepted Start Session
+  -> Verify E5 SessionReattach capability evidence
+  -> Persist PlanningResumeIntent + CommandReceipt
+  -> Confirm commit / reload Job / revalidate authority
+  -> Runtime.Resume with the same OperationID / SessionID
+  -> Persist ATTACHED / FAILED / UNKNOWN observation
+```
+
+UNKNOWN解消は同じResume OperationIDのterminal evidenceだけを許可する。ATTACHED observationが保存されるまで次Turnを作成しない。ResumeはSessionを置き換えず、別Sessionへの付け替えを禁止する。
 
 ```text
 Load JobAggregate

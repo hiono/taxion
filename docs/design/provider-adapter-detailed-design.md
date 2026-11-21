@@ -236,10 +236,12 @@ Start observationが永続化されるとき、JobはProviderLifecycleEnforcedFr
 6. terminal responseはPlanningTurnObservationへ保存し、terminal resultとUsageは別々のObservationとして取得・保存する。
 7. UNKNOWN中は同じTurnIDで照合し、新しいTurnIDで再送しない。Lookupでterminal statusが見つかった場合もUsage Complete=trueを確認するまでturnを確定しない。
 
-### 8.3 Stop（実装済み） / Resume（未実装）
+### 8.3 Stop（実装済み） / Resume（Controller未実装）
 
 - Stop intentを先に保存し、Runtime.Stopの後にstop proof、quiescence、terminal result、Usageを照合する。
-- Resume intentを先に保存し、E5 reattachment capability、Session identity、configuration identityを検証してからRuntime.Resumeを呼び出す。
+- Resume intentとCommand receiptをRuntime.Resumeより先に保存する。
+- E5 SessionReattach capability evidence、Principal / grant / Provider identity、既存accepted Session、configuration identityを検証する。
+- Resumeは同一OperationID / SessionIDで再照合し、Attached=trueとevidenceを得た場合だけATTACHED observationを追加する。曖昧な結果はUNKNOWNとして保存し、UNKNOWN解消時は同じOperationIDのterminal evidenceだけを許可する。
 - Resume ATTACHED observationが確定するまで次Turnを許可しない。
 - Resume不能の場合、同じRoleExecutionに新Sessionを付け替えない。
 

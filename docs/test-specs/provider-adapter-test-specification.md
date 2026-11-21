@@ -211,6 +211,11 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-028 | Provider retrieval failure | Result / Usage取得時にRuntime error | 成功Observationを追加しない |
 | CTR-029 | Send recovery | UNKNOWN Turnに対して同じOperationID / TurnIDでLookup | 新しいTurnIDを発行せず、verified NOT_FOUND後だけ再送 |
 | CTR-030 | Send capability gate | Send idempotency / lookupのE4 evidence不足 | Turn intent作成・Runtime.Send前に拒否 |
+| CTR-031 | Resume intent ordering | E5 SessionReattach evidence / accepted Session一致 | Runtime.Resume前にResume intentとreceiptを永続化 |
+| CTR-032 | Resume ambiguity | Runtime.Resumeのambiguous failure | 同じOperationIDのUNKNOWN observationを保存 |
+| CTR-033 | Resume reconciliation | UNKNOWN Resumeへの同じOperationID / SessionIDのATTACHED evidence | ReconcilesUnknown=trueでappend-only解消 |
+| CTR-034 | Resume capability gate | E5 SessionReattach evidence不足 | Resume intent作成・Runtime.Resume前に拒否 |
+| CTR-035 | Resume session binding | accepted Session不一致、別Sessionへの付け替え | 拒否し、既存Sessionを維持 |
 
 ## 11. Regression tests
 
