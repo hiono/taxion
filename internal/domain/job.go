@@ -667,8 +667,11 @@ func (j Job) Validate() error {
 	for _, turn := range j.PlanningTurnIntents {
 		if previous, exists := previousTurnByExecution[turn.RoleExecutionID]; exists {
 			observations := observationsByTurn[previous.ID]
-			if len(observations) == 0 || observations[len(observations)-1].Status == PlanningTurnUnknown {
-				return fmt.Errorf("%w: a new turn follows an unresolved Provider operation", ErrInvalidJob)
+			if turn.CreatedRevision <= previous.CreatedRevision || turn.CreatedAt.Before(previous.CreatedAt) ||
+				len(observations) == 0 || observations[len(observations)-1].Status == PlanningTurnUnknown ||
+				observations[len(observations)-1].CreatedRevision >= turn.CreatedRevision ||
+				observations[len(observations)-1].CreatedAt.After(turn.CreatedAt) {
+				return fmt.Errorf("%w: a new turn does not follow a terminal Provider operation in append order", ErrInvalidJob)
 			}
 		}
 		previousTurnByExecution[turn.RoleExecutionID] = turn
@@ -683,7 +686,8 @@ func (j Job) Validate() error {
 			}
 			previous := observations[i-1]
 			if previous.Status != PlanningTurnUnknown || observation.Status == PlanningTurnUnknown ||
-				!observation.ReconcilesUnknown || observation.CreatedRevision <= previous.CreatedRevision {
+				!observation.ReconcilesUnknown || observation.CreatedRevision <= previous.CreatedRevision ||
+				observation.CreatedAt.Before(previous.CreatedAt) {
 				return fmt.Errorf("%w: invalid PlanningTurnObservation reconciliation sequence", ErrInvalidJob)
 			}
 		}
@@ -752,8 +756,10 @@ func (j Job) Validate() error {
 	for _, resume := range j.PlanningResumeIntents {
 		if previous, exists := previousResumeByExecution[resume.RoleExecutionID]; exists {
 			observations := resumeObservationsByID[previous.ID]
-			if len(observations) == 0 || observations[len(observations)-1].Status == PlanningResumeUnknown {
-				return fmt.Errorf("%w: a new resume follows an unresolved Provider resume operation", ErrInvalidJob)
+			if len(observations) == 0 || observations[len(observations)-1].Status == PlanningResumeUnknown ||
+				observations[len(observations)-1].CreatedRevision >= resume.CreatedRevision ||
+				observations[len(observations)-1].CreatedAt.After(resume.CreatedAt) {
+				return fmt.Errorf("%w: a new resume does not follow a terminal Provider resume operation in append order", ErrInvalidJob)
 			}
 		}
 		previousResumeByExecution[resume.RoleExecutionID] = resume

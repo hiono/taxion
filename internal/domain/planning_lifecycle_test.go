@@ -252,3 +252,82 @@ func TestPlanningResumeFactsRejectNonAppendOrderedHistory(t *testing.T) {
 		t.Fatal("Job.Validate accepted out-of-order resume observations")
 	}
 }
+
+func TestPlanningLifecycleRejectsObservationAfterNextIntent(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	firstTurn, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", strings.Repeat("a", 64), 100, now)
+	if err != nil {
+		t.Fatalf("first turn: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, firstTurn)
+	job.Revision++
+	job.UpdatedAt = firstTurn.CreatedAt
+	firstTurnResult, err := NewPlanningTurnObservation(job, firstTurn.ID, principal, "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", PlanningTurnCompleted, 10, strings.Repeat("b", 64), false, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("first turn result: %v", err)
+	}
+	job.PlanningTurnObservations = append(job.PlanningTurnObservations, firstTurnResult)
+	job.Revision++
+	job.UpdatedAt = firstTurnResult.CreatedAt
+	secondTurn, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_cccccccccccccccccccccccccccccccc", strings.Repeat("c", 64), 90, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("second turn: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, secondTurn)
+	job.Revision++
+	job.UpdatedAt = secondTurn.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("valid turn history: %v", err)
+	}
+
+	job.PlanningTurnObservations[0].CreatedRevision = secondTurn.CreatedRevision + 1
+	job.PlanningTurnObservations[0].CreatedAt = secondTurn.CreatedAt.Add(time.Second)
+	job.Revision++
+	job.UpdatedAt = job.PlanningTurnObservations[0].CreatedAt
+	if err := job.Validate(); err == nil {
+		t.Fatal("Job.Validate accepted a turn result appended after the next turn intent")
+	}
+
+	job, principal, executionID = planningLifecycleJob(t)
+	now = job.UpdatedAt.Add(time.Second)
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_dddddddddddddddddddddddddddddddd", strings.Repeat("d", 64), 100, now)
+	if err != nil {
+		t.Fatalf("resume prerequisite turn: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	firstResume, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("e", 64), true, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("first resume: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, firstResume)
+	job.Revision++
+	job.UpdatedAt = firstResume.CreatedAt
+	firstResumeResult, err := NewPlanningResumeObservation(job, firstResume.ID, principal, "cmd_ffffffffffffffffffffffffffffffff", PlanningResumeAttached, strings.Repeat("f", 64), false, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("first resume result: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, firstResumeResult)
+	job.Revision++
+	job.UpdatedAt = firstResumeResult.CreatedAt
+	secondResume, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_11111111111111111111111111111111", strings.Repeat("1", 64), true, now.Add(3*time.Second))
+	if err != nil {
+		t.Fatalf("second resume: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, secondResume)
+	job.Revision++
+	job.UpdatedAt = secondResume.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("valid resume history: %v", err)
+	}
+
+	job.PlanningResumeObservations[0].CreatedRevision = secondResume.CreatedRevision + 1
+	job.PlanningResumeObservations[0].CreatedAt = secondResume.CreatedAt.Add(time.Second)
+	job.Revision++
+	job.UpdatedAt = job.PlanningResumeObservations[0].CreatedAt
+	if err := job.Validate(); err == nil {
+		t.Fatal("Job.Validate accepted a resume result appended after the next resume intent")
+	}
+}
