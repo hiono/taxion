@@ -346,16 +346,27 @@ func (e *OperationError) Error() string {
 	return "Provider operation failed (" + e.Code + ")"
 }
 
+const (
+	OperationCodeUnauthorized   = "unauthorized"
+	OperationCodeRateLimited    = "rate_limited"
+	OperationCodeInvalidRequest = "invalid_request"
+	OperationCodeNotFound       = "not_found"
+	OperationCodeUnsupported    = "unsupported"
+	OperationCodeTimeout        = "timeout"
+	OperationCodeTransport      = "transport"
+	OperationCodeUnavailable    = "unavailable"
+	OperationCodeUnknown        = "unknown"
+)
+
 func validOperationCode(code string) bool {
-	if len(code) == 0 || len(code) > 64 {
+	switch code {
+	case OperationCodeUnauthorized, OperationCodeRateLimited, OperationCodeInvalidRequest,
+		OperationCodeNotFound, OperationCodeUnsupported, OperationCodeTimeout,
+		OperationCodeTransport, OperationCodeUnavailable, OperationCodeUnknown:
+		return true
+	default:
 		return false
 	}
-	for _, r := range code {
-		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_') {
-			return false
-		}
-	}
-	return true
 }
 
 func validSHA256(value string) bool {
