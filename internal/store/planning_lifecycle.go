@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	addProviderEventObservationCommandType = "AddProviderEventObservation"
 	addProviderStartObservationCommandType = "AddProviderStartObservation"
 	addPlanningTurnIntentCommandType       = "AddPlanningTurnIntent"
 	addPlanningTurnObservationCommandType  = "AddPlanningTurnObservation"
@@ -295,6 +296,49 @@ func (s *Store) AddPlanningResumeObservation(ctx context.Context, jobID string, 
 				}
 			}
 			return domain.PlanningResumeObservation{}, false
+		})
+}
+
+func (s *Store) AddProviderEventObservation(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	roleExecutionID, operationID, turnID, sessionID, eventID, kind,
+	previousCursor, cursor, evidenceSHA256 string,
+	observedAt time.Time,
+	principal auth.AuthenticatedPrincipal,
+) (CommandReceipt, domain.ProviderEventObservation, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, domain.ProviderEventObservation{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	commandID := domain.ProviderEventObservationCommandID(eventID)
+	request := struct {
+		JobID, RoleExecutionID, OperationID, TurnID, SessionID, EventID, Kind string
+		PreviousCursor, Cursor, EvidenceSHA256                              string
+		ObservedAt                                                           time.Time
+		PrincipalID                                                          string
+	}{
+		jobID, roleExecutionID, operationID, turnID, sessionID, eventID, kind,
+		previousCursor, cursor, evidenceSHA256, observedAt.UTC().Round(0), principal.PrincipalID(),
+	}
+	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addProviderEventObservationCommandType, request,
+		func(job domain.Job, _ time.Time) (domain.ProviderEventObservation, error) {
+			return domain.NewProviderEventObservation(
+				job, roleExecutionID, principal.PrincipalID(), operationID, turnID, sessionID,
+				eventID, domain.ProviderEventKind(kind), previousCursor, cursor, evidenceSHA256,
+				observedAt, commandID,
+			)
+		},
+		func(job *domain.Job, fact domain.ProviderEventObservation) {
+			job.ProviderEventObservations = append(job.ProviderEventObservations, fact)
+		},
+		func(job domain.Job) (domain.ProviderEventObservation, bool) {
+			for _, fact := range job.ProviderEventObservations {
+				if fact.CommandID == commandID {
+					return fact, true
+				}
+			}
+			return domain.ProviderEventObservation{}, false
 		})
 }
 

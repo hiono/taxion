@@ -40,6 +40,7 @@ type Job struct {
 	RoleExecutions                               []RoleExecution             `json:"role_executions,omitempty"`
 	ProviderStartIntents                         []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
 	ProviderStartObservations                    []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
+	ProviderEventObservations                    []ProviderEventObservation  `json:"provider_event_observations,omitempty"`
 	ProviderLifecycleEnforcedFromRevision uint64                              `json:"provider_lifecycle_enforced_from_revision,omitempty"`
 	PlanningTurnIntents                          []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
 	PlanningTurnObservations                     []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
@@ -562,7 +563,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
+	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
 	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
@@ -726,6 +727,48 @@ func (j Job) Validate() error {
 		}
 		previousTurnRevision[turn.RoleExecutionID] = turn.CreatedRevision
 		previousTurnCreatedAt[turn.RoleExecutionID] = turn.CreatedAt
+	}
+	seenProviderEventIDs := make(map[string]struct{}, len(j.ProviderEventObservations))
+	seenProviderEventCursors := make(map[string]struct{}, len(j.ProviderEventObservations))
+	seenProviderEventCommands := make(map[string]struct{}, len(j.ProviderEventObservations))
+	providerEventsBySession := make(map[string][]ProviderEventObservation)
+	for _, observation := range j.ProviderEventObservations {
+		if err := observation.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid ProviderEventObservation: %v", ErrInvalidJob, err)
+		}
+		if observation.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: ProviderEventObservation append revision exceeds Job revision", ErrInvalidJob)
+		}
+		eventIdentity := observation.SessionID + "\x00" + observation.EventID
+		cursorIdentity := observation.SessionID + "\x00" + observation.Cursor
+		if _, exists := seenProviderEventIDs[eventIdentity]; exists {
+			return fmt.Errorf("%w: duplicate Provider event identity", ErrInvalidJob)
+		}
+		if _, exists := seenProviderEventCursors[cursorIdentity]; exists {
+			return fmt.Errorf("%w: duplicate Provider event cursor", ErrInvalidJob)
+		}
+		if _, exists := seenProviderEventCommands[observation.CommandID]; exists {
+			return fmt.Errorf("%w: duplicate Provider event command identity", ErrInvalidJob)
+		}
+		seenProviderEventIDs[eventIdentity] = struct{}{}
+		seenProviderEventCursors[cursorIdentity] = struct{}{}
+		seenProviderEventCommands[observation.CommandID] = struct{}{}
+		providerEventsBySession[observation.SessionID] = append(providerEventsBySession[observation.SessionID], observation)
+	}
+	for sessionID, observations := range providerEventsBySession {
+		previousCursor := ""
+		var previousRevision uint64
+		var previousObservedAt time.Time
+		for _, observation := range observations {
+			if observation.CreatedRevision <= previousRevision ||
+				observation.PreviousCursor != previousCursor ||
+				observation.ObservedAt.Before(previousObservedAt) {
+				return fmt.Errorf("%w: Provider event cursor or observation order is discontinuous for Session %s", ErrInvalidJob, sessionID)
+			}
+			previousCursor = observation.Cursor
+			previousRevision = observation.CreatedRevision
+			previousObservedAt = observation.ObservedAt
+		}
 	}
 	observationsByTurn := make(map[string][]PlanningTurnObservation)
 	seenObservationIDs := make(map[string]struct{}, len(j.PlanningTurnObservations))
