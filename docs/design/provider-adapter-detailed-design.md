@@ -210,7 +210,7 @@ secret bufferのzeroizeはGo runtime / OSの複製まで保証するものでは
 
 ## 8. Controller実行フロー
 
-### 8.1 Start
+### 8.1 Start（実装済み：DRAFT Planningのみ）
 
 1. Controllerが現在のJobAggregateを取得する。
 2. Principal、PlanningAuthorization、Job state、Provider identity、budget、deadlineを検証する。
@@ -220,8 +220,12 @@ secret bufferのzeroizeはGo runtime / OSの複製まで保証するものでは
 6. RuntimeがCapabilityとcredential leaseを検証してAdapter.Startを呼び出す。
 7. receipt / Session identityを検証し、Provider operation observationを追加する。
 8. ambiguous errorはUNKNOWN observationとして追加する。
+9. 同一OperationIDの再実行ではStart idempotencyまたはLookupを必須とし、UNKNOWN後にblind replayしない。
+10. grant期限後は既存OperationIDのLookupによる照合だけを許可し、NOT_FOUND後の新規Startを拒否する。
 
-### 8.2 Send
+Start observationが永続化されるとき、JobはProviderStartObservationRequiredFromRevisionを記録する。既存Jobの読み取り互換性を維持し、このrevision以降のTurn / Resume intentにaccepted Start observationとSessionIDの一致を要求する。
+
+### 8.2 Send（未実装）
 
 1. 最新Job、grant、RoleExecution、Session、turn budget、deadlineを検証する。
 2. immutable Turn intentとCommand receiptを同一transactionで保存する。
@@ -230,14 +234,14 @@ secret bufferのzeroizeはGo runtime / OSの複製まで保証するものでは
 5. terminal resultとUsageを別々のObservationとして保存する。
 6. UNKNOWN中は同じTurnIDで照合し、新しいTurnIDで再送しない。
 
-### 8.3 Stop / Resume
+### 8.3 Stop / Resume（未実装）
 
 - Stop intentを先に保存し、Runtime.Stopの後にstop proof、quiescence、terminal result、Usageを照合する。
 - Resume intentを先に保存し、E5 reattachment capability、Session identity、configuration identityを検証してからRuntime.Resumeを呼び出す。
 - Resume ATTACHED observationが確定するまで次Turnを許可しない。
 - Resume不能の場合、同じRoleExecutionに新Sessionを付け替えない。
 
-### 8.4 Lookup / Result / Usage / ReplayEvents
+### 8.4 Lookup / Result / Usage / ReplayEvents（Start Lookup以外は未実装）
 
 これらは既存intentの照合操作であり、新しいProvider execution identityを生成しない。取得結果は元のOperationID / TurnIDへ束縛し、append-only Observationとして保存する。Lookup NOT_FOUNDはProviderが同一identityの不存在を証明した場合だけ記録する。
 
@@ -245,15 +249,15 @@ secret bufferのzeroizeはGo runtime / OSの複製まで保証するものでは
 
 ### 9.1 Domain facts
 
-Providerの外部事実をJobAggregateへappend-onlyで保持する。最低限、次の事実を分離する。
+Providerの外部事実をJobAggregateへappend-onlyで保持する。現時点で実装済みの事実と後続実装を分離する。
 
-- ProviderOperationObservation: receipt、受理状態、terminal operation status
-- ProviderEventObservation: EventID、cursor、event kind、OperationID / TurnID
-- ProviderResultObservation: result contentまたはimmutable content reference、content digest、terminality
-- ProviderUsageObservation: UsageID、token数、Complete、evidence
-- ProviderStopObservation: Stopped、Quiescent、evidence
+- ProviderStartObservation（実装済み）: StartのACCEPTED / FAILED / UNKNOWN、SessionID、receipt、evidence
+- ProviderEventObservation（未実装）: EventID、cursor、event kind、OperationID / TurnID
+- ProviderResultObservation（未実装）: result contentまたはimmutable content reference、content digest、terminality
+- ProviderUsageObservation（未実装）: UsageID、token数、Complete、evidence
+- ProviderStopObservation（未実装）: Stopped、Quiescent、evidence
 
-既存PlanningTurnObservation / PlanningResumeObservationはPlanning lifecycleの状態を表し、Provider固有のreceiptやraw eventを代替しない。両者はOperationID / TurnIDで相関する。
+既存PlanningTurnObservation / PlanningResumeObservationはPlanning lifecycleの状態を表す。Start observationはProviderStartIntentのOperationIDへ束縛し、accepted SessionIDなしに新しいTurn / Resume intentを作成できない。Provider固有のTurn receipt、raw event、final result、Usage、Stop proofは後続実装で追加する。
 
 ### 9.2 Append-only invariant
 
@@ -280,7 +284,26 @@ Providerの外部事実をJobAggregateへappend-onlyで保持する。最低限�
 
 Providerが操作を受理した可能性を排除できないerrorはAmbiguousとする。raw errorを保持しない。
 
-## 11. 実装順序
+## 11. 実装状況と残作業
+
+実装済み:
+- Adapter contract、Identity、Capability evidence、trusted registry verifier
+- CredentialLease、secret isolation、panic-safe close
+- Runtimeの全Adapter method、per-capability gate、response validation、error sanitization
+- ProviderStartObservation、Start / Turn / ResumeのSession binding
+- StoreのStart observation transaction
+- DRAFT Planning Startのintent-first ControllerとLookup recovery
+- 要求仕様、詳細設計、内部設計、テスト仕様
+
+未実装:
+- ProviderEvent / Result / Usage / Stop factsとStore transaction
+- Send / Stop / Resume / Result / Usage / ReplayEventsのController orchestration
+- JobApproval-backed execution path（JobApproval domain contract未実装のためfail-closed）
+- Live Provider Adapter、Live CredentialBroker、E4 / E5 evidence catalog backend
+- E2 Controller / Store / Runtime integrationの全操作網羅
+- CIの最終PASS、secret scan、独立レビュー
+
+## 12. 実装順序
 
 1. 要求仕様・本書・内部設計・テスト仕様の整合を確認する。
 2. Provider contract / identity / capability verificationを確定する。
@@ -293,7 +316,7 @@ Providerが操作を受理した可能性を排除できないerrorはAmbiguous�
 9. Secret scanとLinux必須CIを実行する。
 10. 独立レビュー後、PRをDraftで提出する。Mergeは行わない。
 
-## 12. 未決事項
+## 13. 未決事項
 
 - 初期Live ProviderとSDK / protocol version
 - Live credentialの保存・取得方式
