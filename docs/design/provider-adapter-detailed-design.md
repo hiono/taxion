@@ -223,7 +223,7 @@ secret bufferのzeroizeはGo runtime / OSの複製まで保証するものでは
 9. 同一OperationIDの再実行ではStart idempotencyまたはLookupを必須とし、UNKNOWN後にblind replayしない。
 10. grant期限後は既存OperationIDのLookupによる照合だけを許可し、NOT_FOUND後の新規Startを拒否する。
 
-Start observationが永続化されるとき、JobはProviderStartObservationRequiredFromRevisionを記録する。既存Jobの読み取り互換性を維持し、このrevision以降のTurn / Resume intentにaccepted Start observationとSessionIDの一致を要求する。
+Start observationが永続化されるとき、JobはProviderLifecycleEnforcedFromRevisionを記録する。既存Jobの読み取り互換性を維持し、このrevision以降のTurn / Resume intentにaccepted Start observationとSessionIDの一致を要求する。
 
 ### 8.2 Send（未実装）
 
