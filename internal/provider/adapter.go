@@ -348,6 +348,8 @@ func (r LookupRequest) Validate() error {
 	return nil
 }
 
+const LookupStatusNotFound = "NOT_FOUND"
+
 type LookupResult struct {
 	Found          bool
 	OperationID    string
@@ -358,6 +360,33 @@ type LookupResult struct {
 	ResultSHA256   string
 	UsageID        string
 	EvidenceSHA256 string
+}
+
+func (r LookupResult) Validate(request LookupRequest) error {
+	if r.OperationID != request.OperationID || !validSHA256(r.EvidenceSHA256) {
+		return errors.New("Provider Lookup result identity or evidence is invalid")
+	}
+	if !r.Found {
+		if r.Status != LookupStatusNotFound || r.SessionID != "" || r.TurnID != "" || r.ReceiptID != "" {
+			return errors.New("Provider Lookup absence result is inconsistent")
+		}
+		return nil
+	}
+	if !validLookupFoundStatus(r.Status) || !validIdentifier(r.SessionID) || !validIdentifier(r.ReceiptID) ||
+		(request.SessionID != "" && r.SessionID != request.SessionID) ||
+		(request.TurnID != "" && r.TurnID != request.TurnID) {
+		return errors.New("Provider Lookup found result does not match the requested operation")
+	}
+	return nil
+}
+
+func validLookupFoundStatus(status string) bool {
+	switch status {
+	case "ACCEPTED", "PENDING", "RUNNING", "COMPLETED", "FAILED", "STOPPED", "UNKNOWN", "ATTACHED", "DETACHED":
+		return true
+	default:
+		return false
+	}
 }
 
 type ResultRequest struct {
@@ -458,22 +487,30 @@ func (p EventPage) Validate(request ReplayEventsRequest) error {
 		p.FromCursor != request.AfterCursor || !validSHA256(p.EvidenceSHA256) {
 		return errors.New("Provider event page identity, cursor origin, or evidence is invalid")
 	}
+	if p.HasMore && len(p.Events) == 0 {
+		return errors.New("Provider event page claims more events without cursor progress")
+	}
 	expectedCursor := request.AfterCursor
 	previousObservedAt := time.Time{}
 	seen := make(map[string]struct{}, len(p.Events))
+	seenCursors := make(map[string]struct{}, len(p.Events))
 	for _, event := range p.Events {
 		if !validIdentifier(event.EventID) || !validIdentifier(event.SessionID) || event.SessionID != request.SessionID ||
 			!validIdentifier(event.OperationID) || (event.TurnID != "" && !validIdentifier(event.TurnID)) ||
 			!validEventKind(event.Kind) || event.PreviousCursor != expectedCursor ||
 			!validIdentifier(event.Cursor) || event.Cursor == event.PreviousCursor ||
 			event.ObservedAt.IsZero() || event.ObservedAt.Before(previousObservedAt) ||
-			!validSHA256(event.EvidenceSHA256) {
+			!validSHA256(event.EvidenceSHA256) || (requiresTurnID(event.Kind) && !validIdentifier(event.TurnID)) {
 			return errors.New("Provider event page contains an invalid or discontinuous event")
 		}
 		if _, exists := seen[event.EventID]; exists {
 			return errors.New("Provider event page contains duplicate event identities")
 		}
+		if _, exists := seenCursors[event.Cursor]; exists {
+			return errors.New("Provider event page contains duplicate cursors")
+		}
 		seen[event.EventID] = struct{}{}
+		seenCursors[event.Cursor] = struct{}{}
 		expectedCursor = event.Cursor
 		previousObservedAt = event.ObservedAt
 	}
@@ -481,6 +518,15 @@ func (p EventPage) Validate(request ReplayEventsRequest) error {
 		return errors.New("Provider event page next cursor does not match its event chain")
 	}
 	return nil
+}
+
+func requiresTurnID(kind EventKind) bool {
+	switch kind {
+	case EventTurnStarted, EventTurnCompleted, EventTurnFailed, EventTurnUnknown, EventUsageReported:
+		return true
+	default:
+		return false
+	}
 }
 
 func validEventKind(kind EventKind) bool {
