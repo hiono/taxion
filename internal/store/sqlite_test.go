@@ -672,6 +672,161 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestStartTasklessPlannerPersistsAndIsIdempotent(t *testing.T) {
+	database, path := newTestStore(t)
+	ctx := context.Background()
+	principal := newAuthenticatedTestPrincipal(t)
+	jobID := "job_planner_start"
+	createCommandID := "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	grantCommandID := "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	startCommandID := "cmd_cccccccccccccccccccccccccccccccc"
+	if _, err := database.CreateTrustedDraftJob(ctx, jobID, "Plan this request.", createCommandID, principal.AuthenticatedAt(), principal); err != nil {
+		t.Fatalf("CreateTrustedDraftJob() error = %v", err)
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob() error = %v", err)
+	}
+	issuedAt := time.Now().UTC()
+	request := domain.PlanningAuthorizationRequest{
+		ProviderID:          "provider.test",
+		AccountID:           "account.primary",
+		ConfigurationSHA256: strings.Repeat("a", 64),
+		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
+		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
+			Mode:      domain.PlanningReadOnlyBoundarySnapshot,
+			Reference: "snapshot_start",
+			SHA256:    strings.Repeat("c", 64),
+		},
+		Budget:   domain.PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+		Deadline: issuedAt.Add(time.Hour),
+	}
+	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), grantCommandID, request, issuedAt)
+	if err != nil {
+		t.Fatalf("NewPlanningAuthorization() error = %v", err)
+	}
+	grantReceipt, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, grantCommandID, grant, principal)
+	if err != nil {
+		t.Fatalf("AddPlanningAuthorization() error = %v", err)
+	}
+	if grantReceipt.Revision != 2 {
+		t.Fatalf("grant receipt revision = %d, want 2", grantReceipt.Revision)
+	}
+
+	first, execution, intent, err := database.StartTasklessPlanner(
+		ctx, jobID, grantReceipt.Revision, grant.ID, startCommandID, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartTasklessPlanner() error = %v", err)
+	}
+	if first.Revision != 3 || execution.Role != domain.RolePlanner || execution.TaskID != "" ||
+		execution.PlanningAuthorizationID != grant.ID || execution.JobID != jobID {
+		t.Fatalf("StartTasklessPlanner() result = receipt %#v, execution %#v", first, execution)
+	}
+	if intent.RoleExecutionID != execution.ID || intent.ID != execution.ProviderStartOperationID ||
+		intent.ProviderID != grant.ProviderID || intent.AccountID != grant.AccountID ||
+		intent.ConfigurationSHA256 != grant.ConfigurationSHA256 || intent.RequestSHA256 != first.PayloadSHA256 {
+		t.Fatalf("ProviderStartIntent = %#v", intent)
+	}
+	second, retriedExecution, retriedIntent, err := database.StartTasklessPlanner(
+		ctx, jobID, grantReceipt.Revision, grant.ID, startCommandID, principal,
+	)
+	if err != nil {
+		t.Fatalf("idempotent StartTasklessPlanner() error = %v", err)
+	}
+	if second != first || retriedExecution != execution || retriedIntent != intent {
+		t.Fatalf("idempotent retry = %#v / %#v / %#v, want original result", second, retriedExecution, retriedIntent)
+	}
+
+	got, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob() after start error = %v", err)
+	}
+	if got.State != domain.JobDraft || got.Revision != 3 ||
+		len(got.PlanningAuthorizations) != 1 || len(got.RoleExecutions) != 1 ||
+		len(got.ProviderStartIntents) != 1 {
+		t.Fatalf("persisted Job = %#v", got)
+	}
+	if _, err := database.StartTasklessPlanner(ctx, jobID, got.Revision, grant.ID,
+		"cmd_dddddddddddddddddddddddddddddddd", principal); err == nil {
+		t.Fatal("StartTasklessPlanner() reused a PlanningAuthorization")
+	}
+
+	if err := database.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen database: %v", err)
+	}
+	defer reopened.Close()
+	replayed, replayedExecution, replayedIntent, err := reopened.StartTasklessPlanner(
+		ctx, jobID, grantReceipt.Revision, grant.ID, startCommandID, principal,
+	)
+	if err != nil || replayed != first || replayedExecution != execution || replayedIntent != intent {
+		t.Fatalf("reopened retry = %#v / %#v / %#v, %v", replayed, replayedExecution, replayedIntent, err)
+	}
+}
+
+func TestStartTasklessPlannerRejectsWrongPrincipalAndRollsBack(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx := context.Background()
+	principal := newAuthenticatedTestPrincipal(t)
+	otherPrincipal := newAuthenticatedTestPrincipal(t)
+	jobID := "job_planner_start_atomic"
+	createCommandID := "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	grantCommandID := "cmd_ffffffffffffffffffffffffffffffff"
+	startCommandID := "cmd_11111111111111111111111111111111"
+	if _, err := database.CreateTrustedDraftJob(ctx, jobID, "Plan this request.", createCommandID, principal.AuthenticatedAt(), principal); err != nil {
+		t.Fatalf("CreateTrustedDraftJob() error = %v", err)
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob() error = %v", err)
+	}
+	issuedAt := time.Now().UTC()
+	request := domain.PlanningAuthorizationRequest{
+		ProviderID:          "provider.test",
+		AccountID:           "account.primary",
+		ConfigurationSHA256: strings.Repeat("a", 64),
+		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
+		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
+			Mode:      domain.PlanningReadOnlyBoundarySnapshot,
+			Reference: "snapshot_atomic",
+			SHA256:    strings.Repeat("c", 64),
+		},
+		Budget:   domain.PlanningBudget{MaxTurns: 4, MaxTokens: 50000},
+		Deadline: issuedAt.Add(time.Hour),
+	}
+	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), grantCommandID, request, issuedAt)
+	if err != nil {
+		t.Fatalf("NewPlanningAuthorization() error = %v", err)
+	}
+	grantReceipt, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, grantCommandID, grant, principal)
+	if err != nil {
+		t.Fatalf("AddPlanningAuthorization() error = %v", err)
+	}
+	if _, _, _, err := database.StartTasklessPlanner(ctx, jobID, grantReceipt.Revision, grant.ID, startCommandID, otherPrincipal); err == nil {
+		t.Fatal("StartTasklessPlanner() accepted a different HUMAN Principal")
+	}
+	if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_planner_start_receipt
+		BEFORE INSERT ON job_commands
+		WHEN NEW.command_type = 'StartTasklessPlanner'
+		BEGIN SELECT RAISE(ABORT, 'simulated receipt failure'); END;`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+	if _, _, _, err := database.StartTasklessPlanner(ctx, jobID, grantReceipt.Revision, grant.ID, startCommandID, principal); err == nil {
+		t.Fatal("StartTasklessPlanner() succeeded despite receipt insert failure")
+	}
+	got, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob() after rollback error = %v", err)
+	}
+	if got.Revision != 2 || len(got.RoleExecutions) != 0 || len(got.ProviderStartIntents) != 0 {
+		t.Fatalf("Job changed despite transaction rollback: %#v", got)
+	}
+}
+
 func TestAddPlanningAuthorizationRejectsWrongPrincipalAndRollsBack(t *testing.T) {
 	database, _ := newTestStore(t)
 	ctx := context.Background()

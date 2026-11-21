@@ -283,6 +283,104 @@ func TestPlanningAuthorizationRequiresDraftJob(t *testing.T) {
 	}
 }
 
+func TestTasklessPlannerStartBindsActiveGrantAndProviderIntent(t *testing.T) {
+	job := newPlanningTestJob(t)
+	grant := newValidPlanningAuthorization(t, job, job.CreatedAt.Add(time.Minute))
+	job.PlanningAuthorizations = []PlanningAuthorization{grant}
+	job.Revision = 2
+	job.UpdatedAt = grant.IssuedAt
+	startedAt := grant.IssuedAt.Add(time.Minute)
+	execution, intent, err := NewTasklessPlannerStart(
+		job, grant.ID, grant.PrincipalID, "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		strings.Repeat("d", 64), startedAt,
+	)
+	if err != nil {
+		t.Fatalf("NewTasklessPlannerStart() error = %v", err)
+	}
+	if execution.Role != RolePlanner || execution.TaskID != "" ||
+		execution.PlanningAuthorizationID != grant.ID || execution.JobID != job.ID ||
+		execution.CreatedRevision != 3 {
+		t.Fatalf("RoleExecution = %#v", execution)
+	}
+	if intent.RoleExecutionID != execution.ID || intent.PlanningAuthorizationID != grant.ID ||
+		intent.ProviderID != grant.ProviderID || intent.AccountID != grant.AccountID ||
+		intent.ConfigurationSHA256 != grant.ConfigurationSHA256 ||
+		intent.ReadOnlyBoundary != grant.ReadOnlyBoundary || intent.Budget != grant.Budget ||
+		!intent.Deadline.Equal(grant.Deadline) || intent.RequestSHA256 != strings.Repeat("d", 64) {
+		t.Fatalf("ProviderStartIntent = %#v", intent)
+	}
+	job.RoleExecutions = append(job.RoleExecutions, execution)
+	job.ProviderStartIntents = append(job.ProviderStartIntents, intent)
+	job.Revision = 3
+	job.UpdatedAt = startedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate() with Taskless PLANNER start = %v", err)
+	}
+	if job.State != JobDraft {
+		t.Fatalf("Job state = %s, want DRAFT", job.State)
+	}
+}
+
+func TestTasklessPlannerStartRejectsInactiveOrMismatchedGrant(t *testing.T) {
+	job := newPlanningTestJob(t)
+	grant := newValidPlanningAuthorization(t, job, job.CreatedAt.Add(time.Minute))
+	job.PlanningAuthorizations = []PlanningAuthorization{grant}
+	job.Revision = 2
+	job.UpdatedAt = grant.IssuedAt
+	tests := []struct {
+		name       string
+		principal  string
+		now        time.Time
+		grantID    string
+	}{
+		{name: "wrong principal", principal: "human_other", now: grant.IssuedAt.Add(time.Minute), grantID: grant.ID},
+		{name: "before issue", principal: grant.PrincipalID, now: grant.IssuedAt.Add(-time.Second), grantID: grant.ID},
+		{name: "expired", principal: grant.PrincipalID, now: grant.Deadline, grantID: grant.ID},
+		{name: "unknown grant", principal: grant.PrincipalID, now: grant.IssuedAt.Add(time.Minute), grantID: "plan_auth_missing"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, _, err := NewTasklessPlannerStart(job, test.grantID, test.principal,
+				"cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("e", 64), test.now); err == nil {
+				t.Fatal("NewTasklessPlannerStart() accepted invalid authorization")
+			}
+		})
+	}
+}
+
+func TestJobRejectsRoleExecutionScopeMutationAndGrantReuse(t *testing.T) {
+	job := newPlanningTestJob(t)
+	grant := newValidPlanningAuthorization(t, job, job.CreatedAt.Add(time.Minute))
+	job.PlanningAuthorizations = []PlanningAuthorization{grant}
+	job.Revision = 2
+	job.UpdatedAt = grant.IssuedAt
+	now := grant.IssuedAt.Add(time.Minute)
+	execution, intent, err := NewTasklessPlannerStart(job, grant.ID, grant.PrincipalID,
+		"cmd_cccccccccccccccccccccccccccccccc", strings.Repeat("f", 64), now)
+	if err != nil {
+		t.Fatalf("NewTasklessPlannerStart() error = %v", err)
+	}
+	job.RoleExecutions = []RoleExecution{execution}
+	job.ProviderStartIntents = []ProviderStartIntent{intent}
+	job.Revision = 3
+	job.UpdatedAt = now
+
+	mutatedExecution := execution
+	mutatedExecution.TaskID = "task_unapproved"
+	if err := mutatedExecution.Validate(job); err == nil {
+		t.Fatal("RoleExecution.Validate() accepted a TaskID")
+	}
+	mutatedIntent := intent
+	mutatedIntent.ProviderID = "provider.other"
+	if err := mutatedIntent.Validate(job, execution); err == nil {
+		t.Fatal("ProviderStartIntent.Validate() accepted a different Provider")
+	}
+	if _, _, err := NewTasklessPlannerStart(job, grant.ID, grant.PrincipalID,
+		"cmd_dddddddddddddddddddddddddddddddd", strings.Repeat("1", 64), now.Add(time.Minute)); err == nil {
+		t.Fatal("NewTasklessPlannerStart() reused an existing PlanningAuthorization")
+	}
+}
+
 func TestJobRejectsDuplicatePlanningAuthorizationIDs(t *testing.T) {
 	job := newPlanningTestJob(t)
 	issuedAt := job.CreatedAt.Add(time.Minute)
