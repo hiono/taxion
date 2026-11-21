@@ -368,6 +368,86 @@ func newProviderControllerFixture(t *testing.T, runtime *fakePlanningProviderRun
 	return controller, database, principal, jobID, grant.ID, documents
 }
 
+func TestProviderControllerRejectsInvalidResultAndUsageResponses(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	now := time.Now().UTC()
+	runtime.capabilities.FinalOutputRetrieval = true
+	runtime.capabilities.UsageIdentity = true
+	runtime.capabilities.UsageCompleteness = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_16161616161616161616161616161616", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Turn intent: %v", err)
+	}
+	_, turn, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision, execution.ID,
+		"session_1", "cmd_17171717171717171717171717171717", strings.Repeat("f", 64), 100, principal)
+	if err != nil {
+		t.Fatalf("AddPlanningTurnIntent: %v", err)
+	}
+	content := "final result"
+	validDigest := sha256String(content)
+	runtime.resultResult = provider.Result{
+		OperationID: "wrong_operation", SessionID: "session_1", TurnID: turn.ID,
+		Content: content, ResultSHA256: validDigest, Final: true, EvidenceSHA256: strings.Repeat("4", 64),
+	}
+	if _, _, err := controller.RetrieveProviderResult(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); !errors.Is(err, provider.ErrProviderInvalidResult) {
+		t.Fatalf("mismatched Result identity error = %v, want ErrProviderInvalidResult", err)
+	}
+	runtime.resultResult = provider.Result{
+		OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID,
+		Content: content, ResultSHA256: validDigest, Final: false, EvidenceSHA256: strings.Repeat("4", 64),
+	}
+	if _, _, err := controller.RetrieveProviderResult(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); err == nil {
+		t.Fatal("non-final Provider Result was accepted")
+	}
+	runtime.resultResult = provider.Result{
+		OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID,
+		Content: content, ResultSHA256: strings.Repeat("0", 64), Final: true, EvidenceSHA256: strings.Repeat("4", 64),
+	}
+	if _, _, err := controller.RetrieveProviderResult(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); err == nil {
+		t.Fatal("Provider Result with a mismatched content digest was accepted")
+	}
+	runtime.usageResult = provider.Usage{
+		OperationID: "wrong_operation", SessionID: "session_1", TurnID: turn.ID,
+		UsageID: "usage_invalid", Tokens: 3, Complete: true, EvidenceSHA256: strings.Repeat("5", 64),
+	}
+	if _, _, err := controller.RetrieveProviderUsage(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); !errors.Is(err, provider.ErrProviderInvalidResult) {
+		t.Fatalf("mismatched Usage identity error = %v, want ErrProviderInvalidResult", err)
+	}
+	runtime.usageResult = provider.Usage{
+		UsageID: "usage invalid", Tokens: 3, Complete: true, EvidenceSHA256: strings.Repeat("5", 64),
+	}
+	if _, _, err := controller.RetrieveProviderUsage(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); err == nil {
+		t.Fatal("Provider Usage with an invalid UsageID was accepted")
+	}
+	runtime.resultErr = errors.New("Provider Result retrieval failed")
+	if _, _, err := controller.RetrieveProviderResult(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); err == nil {
+		t.Fatal("Provider Result retrieval error was ignored")
+	}
+	runtime.usageErr = errors.New("Provider Usage retrieval failed")
+	if _, _, err := controller.RetrieveProviderUsage(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); err == nil {
+		t.Fatal("Provider Usage retrieval error was ignored")
+	}
+	after, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after invalid Provider responses: %v", err)
+	}
+	if len(after.ProviderResultObservations) != 0 || len(after.ProviderUsageObservations) != 0 {
+		t.Fatalf("invalid Provider responses created success facts: %#v %#v", after.ProviderResultObservations, after.ProviderUsageObservations)
+	}
+}
+
 func TestProviderControllerPersistsResultAndUsageForAcceptedTurn(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)

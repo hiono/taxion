@@ -208,7 +208,7 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-025 | Usage retrieval | E4 Usage identity / completeness、Complete=false | 途中Observationとして保存し、final usageにしない |
 | CTR-026 | Usage completion | 同一UsageIDのComplete=false後にComplete=true | 既存factを変更せず新Observationを追加 |
 | CTR-027 | Capability gate | Result / Usage capability不足 | credential / Adapter呼出し前に拒否 |
-| CTR-028 | Observation persistence | Result / Usage取得後にStore保存失敗 | 成功扱いせず、同一identityで再照合可能 |
+| CTR-028 | Provider retrieval failure | Result / Usage取得時にRuntime error | 成功Observationを追加しない |
 
 ## 11. Regression tests
 

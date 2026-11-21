@@ -211,3 +211,71 @@ func TestProviderResultAndUsageReceiptFailuresRollbackAggregate(t *testing.T) {
 		t.Fatalf("retry Usage after rollback: %v", err)
 	}
 }
+
+func TestProviderResultUsageRejectsInvalidPayloadAndIdentity(t *testing.T) {
+	database, _ := newTestStore(t)
+	defer database.Close()
+	ctx := context.Background()
+	jobID, roleExecutionID, sessionID, turn, principal := newProviderResultUsageFixture(t, database, ctx)
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	startOperationID := job.ProviderStartIntents[0].ID
+	evidence := strings.Repeat("7", 64)
+	content := "valid result"
+	contentSHA := resultDigest(content)
+	invalidResults := []struct {
+		name, operationID, turnID, sessionID, content, contentSHA string
+		final                                                     bool
+	}{
+		{name: "non-final", operationID: startOperationID, sessionID: sessionID, content: content, contentSHA: contentSHA, final: false},
+		{name: "digest mismatch", operationID: startOperationID, sessionID: sessionID, content: content, contentSHA: strings.Repeat("8", 64), final: true},
+		{name: "invalid UTF-8", operationID: startOperationID, sessionID: sessionID, content: string([]byte{0xff}), contentSHA: resultDigest(string([]byte{0xff})), final: true},
+		{name: "content too large", operationID: startOperationID, sessionID: sessionID,
+			content: strings.Repeat("x", domain.MaxProviderResultContentBytes+1),
+			contentSHA: resultDigest(strings.Repeat("x", domain.MaxProviderResultContentBytes+1)), final: true},
+		{name: "wrong Session", operationID: startOperationID, sessionID: "session_other", content: content, contentSHA: contentSHA, final: true},
+		{name: "Start operation with Turn identity", operationID: startOperationID, turnID: turn.ID, sessionID: sessionID, content: content, contentSHA: contentSHA, final: true},
+	}
+	for _, tc := range invalidResults {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := database.AddProviderResultObservation(ctx, jobID, job.Revision,
+				roleExecutionID, tc.operationID, tc.turnID, tc.sessionID, tc.content, tc.contentSHA,
+				tc.final, evidence, principal); err == nil {
+				t.Fatalf("invalid Provider Result was accepted: %s", tc.name)
+			}
+		})
+	}
+	invalidUsages := []struct {
+		name, operationID, turnID, sessionID, usageID string
+	}{
+		{name: "wrong operation", operationID: "provider_turn_unknown", turnID: turn.ID, sessionID: sessionID, usageID: "usage_invalid_1"},
+		{name: "wrong Session", operationID: turn.OperationID, turnID: turn.ID, sessionID: "session_other", usageID: "usage_invalid_2"},
+		{name: "invalid UsageID", operationID: turn.OperationID, turnID: turn.ID, sessionID: sessionID, usageID: "usage invalid"},
+	}
+	for _, tc := range invalidUsages {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
+				roleExecutionID, tc.operationID, tc.turnID, tc.sessionID, tc.usageID, 1, false, evidence, principal); err == nil {
+				t.Fatalf("invalid Provider Usage was accepted: %s", tc.name)
+			}
+		})
+	}
+	if _, _, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
+		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_rebind", 5, false, evidence, principal); err != nil {
+		t.Fatalf("persist initial Usage binding: %v", err)
+	}
+	current, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Usage rebind: %v", err)
+	}
+	if _, _, err := database.AddProviderUsageObservation(ctx, jobID, current.Revision,
+		roleExecutionID, startOperationID, "", sessionID, "usage_rebind", 6, true, evidence, principal); err == nil {
+		t.Fatal("Provider UsageID was rebound from a Turn to the Start operation")
+	}
+	after, err := database.GetJob(ctx, jobID)
+	if err != nil || len(after.ProviderResultObservations) != 0 || len(after.ProviderUsageObservations) != 1 {
+		t.Fatalf("invalid Result / Usage input changed Job facts: %#v %v", after, err)
+	}
+}
