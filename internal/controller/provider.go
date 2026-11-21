@@ -199,10 +199,16 @@ func (c *ProviderController) reconcileStart(
 					return receipt, execution, intent, provider.StartResult{}, err
 				}
 				return receipt, execution, intent, provider.StartResult{}, errors.New("Provider Start lookup does not confirm an attached Session")
-			}
-			if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartAccepted,
-				lookup.SessionID, lookup.ReceiptID, lookup.EvidenceSHA256, false, principal); err != nil {
-				return receipt, execution, intent, provider.StartResult{}, err
+			case "ACCEPTED", "RUNNING", "ATTACHED", "COMPLETED":
+				if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartAccepted,
+					lookup.SessionID, lookup.ReceiptID, lookup.EvidenceSHA256, false, principal); err != nil {
+					return receipt, execution, intent, provider.StartResult{}, err
+				}
+			default:
+				if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); err != nil {
+					return receipt, execution, intent, provider.StartResult{}, err
+				}
+				return receipt, execution, intent, provider.StartResult{}, errors.New("Provider Start lookup returned an unrecognized state")
 			}
 			return receipt, execution, intent, provider.StartResult{
 				OperationID: intent.ID, SessionID: lookup.SessionID,
