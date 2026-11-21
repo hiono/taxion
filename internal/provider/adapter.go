@@ -271,12 +271,13 @@ type TurnRequest struct {
 	PromptSHA256 string
 	Prompt       string
 	MaxTokens    uint64
+	Deadline     time.Time
 }
 
 func (r TurnRequest) Validate() error {
 	if !validIdentifier(r.OperationID) || !validIdentifier(r.TurnID) || !validIdentifier(r.SessionID) ||
 		!validSHA256(r.PromptSHA256) || r.Prompt == "" || sha256Hex(r.Prompt) != r.PromptSHA256 ||
-		r.MaxTokens == 0 {
+		r.MaxTokens == 0 || r.Deadline.IsZero() {
 		return errors.New("Provider Turn request identity, prompt digest, or token budget is invalid")
 	}
 	return nil
@@ -315,11 +316,12 @@ type StopResult struct {
 type ResumeRequest struct {
 	OperationID string
 	SessionID   string
+	Deadline    time.Time
 }
 
 func (r ResumeRequest) Validate() error {
-	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) {
-		return errors.New("Provider Resume request identity is invalid")
+	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) || r.Deadline.IsZero() {
+		return errors.New("Provider Resume request identity or deadline is invalid")
 	}
 	return nil
 }
@@ -365,7 +367,8 @@ type ResultRequest struct {
 }
 
 func (r ResultRequest) Validate() error {
-	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) || !validIdentifier(r.TurnID) {
+	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) ||
+		(r.TurnID != "" && !validIdentifier(r.TurnID)) {
 		return errors.New("Provider Result request identity is invalid")
 	}
 	return nil
@@ -387,7 +390,8 @@ type UsageRequest struct {
 }
 
 func (r UsageRequest) Validate() error {
-	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) || !validIdentifier(r.TurnID) {
+	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) ||
+		(r.TurnID != "" && !validIdentifier(r.TurnID)) {
 		return errors.New("Provider Usage request identity is invalid")
 	}
 	return nil
