@@ -580,13 +580,13 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 		AccountID:           "account.test",
 		ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
-		ReadOnlyBoundary:    domain.PlanningReadOnlyBoundary{
+		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode:      domain.PlanningReadOnlyBoundarySnapshot,
 			Reference: "snapshot_store",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:              domain.PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
-		Deadline:            issuedAt.Add(15 * time.Minute),
+		Budget:   domain.PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+		Deadline: issuedAt.Add(15 * time.Minute),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), "cmd_11111111111111111111111111111111", request, issuedAt)
 	if err != nil {
@@ -691,13 +691,13 @@ func TestAddPlanningAuthorizationRejectsWrongPrincipalAndRollsBack(t *testing.T)
 		AccountID:           "account.test",
 		ConfigurationSHA256: strings.Repeat("b", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
-		ReadOnlyBoundary:    domain.PlanningReadOnlyBoundary{
+		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode:      domain.PlanningReadOnlyBoundaryDocuments,
 			Reference: "documents_atomic",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:              domain.PlanningBudget{MaxTurns: 4, MaxTokens: 50000},
-		Deadline:            issuedAt.Add(10 * time.Minute),
+		Budget:   domain.PlanningBudget{MaxTurns: 4, MaxTokens: 50000},
+		Deadline: issuedAt.Add(10 * time.Minute),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), "cmd_22222222222222222222222222222222", request, issuedAt)
 	if err != nil {
@@ -741,13 +741,13 @@ func TestAddPlanningAuthorizationAppendsWithoutChangingExistingFacts(t *testing.
 		AccountID:           "account.test",
 		ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
-		ReadOnlyBoundary:    domain.PlanningReadOnlyBoundary{
+		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode:      domain.PlanningReadOnlyBoundarySnapshot,
 			Reference: "snapshot_first",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:              domain.PlanningBudget{MaxTurns: 4, MaxTokens: 50000},
-		Deadline:            firstIssuedAt.Add(time.Hour),
+		Budget:   domain.PlanningBudget{MaxTurns: 4, MaxTokens: 50000},
+		Deadline: firstIssuedAt.Add(time.Hour),
 	}
 	firstGrant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(),
 		"cmd_66666666666666666666666666666666", firstRequest, firstIssuedAt)

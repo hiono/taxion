@@ -184,13 +184,13 @@ func newValidPlanningAuthorization(t *testing.T, job Job, issuedAt time.Time) Pl
 		AccountID:           "account.test",
 		ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
-		ReadOnlyBoundary:    PlanningReadOnlyBoundary{
+		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode:      PlanningReadOnlyBoundarySnapshot,
 			Reference: "snapshot_1",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:              PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
-		Deadline:            issuedAt.Add(15 * time.Minute),
+		Budget:   PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+		Deadline: issuedAt.Add(15 * time.Minute),
 	}
 	grant, err := NewPlanningAuthorization(job, job.IntakeProvenance.PrincipalID,
 		"cmd_11111111111111111111111111111111", request, issuedAt)
@@ -305,13 +305,13 @@ func TestPlanningAuthorizationRequiresTrustedIntake(t *testing.T) {
 		AccountID:           "account.test",
 		ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
-		ReadOnlyBoundary:    PlanningReadOnlyBoundary{
+		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode:      PlanningReadOnlyBoundarySnapshot,
 			Reference: "snapshot_1",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:              PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
-		Deadline:            job.CreatedAt.Add(15 * time.Minute),
+		Budget:   PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+		Deadline: job.CreatedAt.Add(15 * time.Minute),
 	}
 	if _, err := NewPlanningAuthorization(job, "human_123",
 		"cmd_11111111111111111111111111111111", request, job.CreatedAt.Add(time.Minute)); err == nil {
