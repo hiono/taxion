@@ -11,11 +11,18 @@ import (
 func jobWithAcceptedPlanner(t *testing.T) (Job, RoleExecution, time.Time) {
 	t.Helper()
 	now := time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
-	job, err := NewDraftJob("job_contract_test", "Propose a bounded implementation.", now)
-	if err != nil {
-		t.Fatalf("NewDraftJob: %v", err)
+	issuer := "https://identity.example"
+	subject := "human-subject"
+	principalID := identity.PrincipalID(issuer, subject)
+	provenance := IntakeProvenance{
+		PrincipalID: principalID, Issuer: issuer, Subject: subject, IngressSource: IngressSourceCLI,
+		AuthenticatedAt: now, ReceivedAt: now, RequestIdentity: "request_job_contract_test",
+		SchemaVersion: IntakeProvenanceSchemaVersion,
 	}
-	principalID := identity.PrincipalID("https://identity.example", "human-subject")
+	job, err := NewDraftJobWithProvenance("job_contract_test", "Propose a bounded implementation.", provenance, now)
+	if err != nil {
+		t.Fatalf("NewDraftJobWithProvenance: %v", err)
+	}
 	request := PlanningAuthorizationRequest{
 		ProviderID: "provider.test", AccountID: "account.primary", ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:     "https://github.com/example/project@" + strings.Repeat("b", 40),
