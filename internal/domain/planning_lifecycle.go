@@ -84,6 +84,7 @@ type PlanningTurnIntent struct {
 	ProviderSessionID       string    `json:"provider_session_id"`
 	ProviderID              string    `json:"provider_id"`
 	AccountID               string    `json:"account_id"`
+	SDKVersion              string    `json:"sdk_version"`
 	ConfigurationSHA256     string    `json:"configuration_sha256"`
 	TurnNumber              uint32    `json:"turn_number"`
 	PromptSHA256            string    `json:"prompt_sha256"`
@@ -147,6 +148,7 @@ type PlanningResumeIntent struct {
 	ProviderSessionID                 string    `json:"provider_session_id"`
 	ProviderID                        string    `json:"provider_id"`
 	AccountID                         string    `json:"account_id"`
+	SDKVersion                        string    `json:"sdk_version"`
 	ConfigurationSHA256               string    `json:"configuration_sha256"`
 	CapabilityEvidenceSHA256          string    `json:"capability_evidence_sha256"`
 	CrossProcessReattachmentSupported bool      `json:"cross_process_reattachment_supported"`
@@ -370,7 +372,7 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 		!validPlanningIdentity(t.JobID) || !validPlanningIdentity(t.RoleExecutionID) ||
 		!validPlanningIdentity(t.PlanningAuthorizationID) || !validSHA256(t.RequestSHA256) || !validPlanningIdentity(t.ProviderSessionID) ||
 		!validPlanningIdentity(t.ProviderID) || !validPlanningIdentity(t.AccountID) ||
-		!validSHA256(t.ConfigurationSHA256) || !validSHA256(t.PromptSHA256) ||
+		!validPlanningIdentity(t.SDKVersion) || !validSHA256(t.ConfigurationSHA256) || !validSHA256(t.PromptSHA256) ||
 		t.TurnNumber == 0 || t.ReservedTokens == 0 || t.CreatedAt.IsZero() || t.CreatedRevision < 3 {
 		return errors.New("PlanningTurnIntent identity or metadata is invalid")
 	}
@@ -653,7 +655,7 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 		r.JobID != job.ID || !validPlanningIdentity(r.RoleExecutionID) ||
 		!validPlanningIdentity(r.PlanningAuthorizationID) || !validPlanningIdentity(r.ProviderSessionID) ||
 		!validPlanningIdentity(r.ProviderID) || !validPlanningIdentity(r.AccountID) ||
-		!validSHA256(r.ConfigurationSHA256) || !validSHA256(r.CapabilityEvidenceSHA256) || !r.CrossProcessReattachmentSupported ||
+		!validPlanningIdentity(r.SDKVersion) || !validSHA256(r.ConfigurationSHA256) || !validSHA256(r.CapabilityEvidenceSHA256) || !r.CrossProcessReattachmentSupported ||
 		r.CreatedAt.IsZero() || r.CreatedRevision < 3 {
 		return errors.New("PlanningResumeIntent identity or metadata is invalid")
 	}
