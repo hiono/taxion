@@ -108,7 +108,7 @@ func NewProviderStartObservation(
 		RoleExecutionID: start.RoleExecutionID, OperationID: start.ID,
 		ProviderID: start.ProviderID, AccountID: start.AccountID,
 		SDKVersion: start.SDKVersion, ConfigurationSHA256: start.ConfigurationSHA256,
-		Status:              status, ProviderSessionID: providerSessionID, ReceiptID: receiptID,
+		Status: status, ProviderSessionID: providerSessionID, ReceiptID: receiptID,
 		EvidenceSHA256: evidenceSHA256, ReconcilesUnknown: reconcilesUnknown,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
