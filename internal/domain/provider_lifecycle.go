@@ -36,7 +36,7 @@ func ProviderStartObservationID(commandID string) string {
 }
 
 func ProviderStartObservationCommandID(operationID, status, sessionID, receiptID, evidenceSHA256 string, reconcilesUnknown bool) string {
-	material := operationID + "\x00" + status + "\x00" + sessionID + "\x00" + receiptID + "\x00" + evidenceSHA256
+	material := operationID + ":" + status + ":" + sessionID + ":" + receiptID + ":" + evidenceSHA256
 	if reconcilesUnknown {
 		material += "\x00reconcile"
 	}
