@@ -195,7 +195,8 @@ func (c *ProviderController) reconcileStart(
 			}
 			switch lookup.Status {
 			case provider.LookupStatusUnknown, "PENDING", "DETACHED", "STOPPED":
-				if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); err != nil {
+				if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown,
+					lookup.SessionID, lookup.ReceiptID, lookup.EvidenceSHA256, false, principal); err != nil {
 					return receipt, execution, intent, provider.StartResult{}, err
 				}
 				return receipt, execution, intent, provider.StartResult{}, errors.New("Provider Start lookup does not confirm an attached Session")
@@ -205,7 +206,8 @@ func (c *ProviderController) reconcileStart(
 					return receipt, execution, intent, provider.StartResult{}, err
 				}
 			default:
-				if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); err != nil {
+				if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown,
+					lookup.SessionID, lookup.ReceiptID, lookup.EvidenceSHA256, false, principal); err != nil {
 					return receipt, execution, intent, provider.StartResult{}, err
 				}
 				return receipt, execution, intent, provider.StartResult{}, errors.New("Provider Start lookup returned an unrecognized state")
@@ -258,7 +260,9 @@ func (c *ProviderController) recordStartObservation(
 		return err
 	}
 	if previous, found := latestStartObservation(job, operationID); found {
-		if previous.Status == status && status == domain.ProviderStartUnknown {
+		if previous.Status == status && status == domain.ProviderStartUnknown &&
+			previous.ProviderSessionID == sessionID && previous.ReceiptID == receiptID &&
+			previous.EvidenceSHA256 == evidenceSHA256 {
 			return nil
 		}
 		if previous.Status == domain.ProviderStartUnknown && status != domain.ProviderStartUnknown {
