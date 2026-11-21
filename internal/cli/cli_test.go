@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -641,6 +643,42 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 	); err != nil {
 		t.Fatalf("AddProviderStartObservation: %v", err)
 	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Planner Turn: %v", err)
+	}
+	_, turn, err := database.AddPlanningTurnIntent(
+		ctx, jobID, job.Revision, execution.ID, "session_1",
+		"cmd_d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4", strings.Repeat("a", 64), 100, principal,
+	)
+	if err != nil {
+		t.Fatalf("AddPlanningTurnIntent: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Planner Turn observation: %v", err)
+	}
+	if _, _, err := database.AddPlanningTurnObservation(
+		ctx, jobID, job.Revision, turn.ID,
+		"cmd_e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+		domain.PlanningTurnCompleted, 10, strings.Repeat("b", 64), false, principal,
+	); err != nil {
+		t.Fatalf("AddPlanningTurnObservation: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Planner Result: %v", err)
+	}
+	resultContent := "Final Planner result"
+	resultSum := sha256.Sum256([]byte(resultContent))
+	resultDigest := hex.EncodeToString(resultSum[:])
+	_, sourceResult, err := database.AddProviderResultObservation(
+		ctx, jobID, job.Revision, execution.ID, turn.OperationID, turn.ID, "session_1",
+		resultContent, resultDigest, true, strings.Repeat("c", 64), principal,
+	)
+	if err != nil {
+		t.Fatalf("AddProviderResultObservation: %v", err)
+	}
 	contract := domain.JobContract{
 		Purpose:                 "Deliver the approved bounded feature",
 		Constraints:             []string{"Preserve the authorization boundary"},
@@ -660,7 +698,8 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 		t.Fatalf("GetJob before proposal: %v", err)
 	}
 	_, revision, err := database.AddJobContractRevision(
-		ctx, jobID, job.Revision, "cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2", execution.ID, contract,
+		ctx, jobID, job.Revision, "cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2", execution.ID,
+		sourceResult.ID, sourceResult.ContentSHA256, contract,
 	)
 	if err != nil {
 		t.Fatalf("AddJobContractRevision: %v", err)
