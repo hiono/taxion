@@ -1,0 +1,301 @@
+# Provider Adapter 詳細設計書
+
+Date: 2026-11-21
+Status: Draft
+対象Issue: #29
+要求仕様: [Provider Adapter 実行境界 要求仕様書](../specifications/provider-adapter-requirements.md)
+規範: ADR-201 / ADR-202 / ADR-400 / ADR-500 / ADR-800
+
+## 1. 設計方針
+
+1. Provider固有SDKをDomain Modelへ持ち込まない。
+2. JobAggregateとControllerを実行権限・実行状態の正本とする。
+3. Provider Adapterは外部APIの変換と実行事実の取得だけを担う。
+4. RuntimeはCapability gate、credential lease、request / response validation、error sanitizationを担う。
+5. Controllerはauthority再検証、intentの先行永続化、外部呼出し、Observation保存を順序制御する。
+6. Capabilityの証拠水準は能力ごとに評価する。無関係な能力の未検証を理由に、検証済み能力まで一律に停止しない。
+7. UNKNOWNを通常の失敗へ変換しない。
+
+## 2. コンポーネント構成
+
+| Component | Package | 責務 |
+|---|---|---|
+| Provider Adapter | internal/provider | Provider APIを共通契約へ変換 |
+| Capability Catalog / Verifier | internal/provider | identityとEvidence artifactを照合し、利用可能能力を確定 |
+| Credential Broker | internal/provider | Provider / accountに対応するsecretを解決 |
+| Credential Lease | internal/provider | secretの短時間参照、Close、best-effort zeroize |
+| Provider Runtime | internal/provider | Adapter呼出し、Capability gate、secret検査、応答検証 |
+| Provider Controller | internal/controller | Job authority、intent、Runtime呼出し、Observation保存を制御 |
+| Domain | internal/domain | Provider identity / intent / Observation / Usageの不変条件 |
+| Store | internal/store | JobAggregateとreceiptをexpected revisionで原子的に保存 |
+
+Provider SDKのClient、Session、Event型はAdapter package内に閉じ込める。
+
+## 3. 依存関係
+
+```text
+CLI / API
+   |
+   v
+Controller -----> Job Store -----> JobAggregate
+   |
+   +---- authority validation
+   |
+   v
+Provider Runtime
+   |        | 
+   |        +---- Capability Verifier / Catalog
+   |
+   +---- Credential Broker
+   |
+   v
+Provider Adapter
+   |
+   v
+External Provider
+```
+
+Role Runtime / Model / Tool / SandboxからCredentialBrokerまたはProvider SDKへ直接アクセスする経路を設けない。
+
+## 4. Provider identity
+
+`provider.Identity`は次の値を持つ。
+
+- ProviderID
+- AccountID
+- SDKVersionまたはProtocolVersion
+- ConfigurationSHA256
+
+identityの完全一致をCapability、credential、Session、operationに適用する。Provider名だけ、accountだけ、configurationだけによる流用を許可しない。
+
+Domainへ保存する場合はSDK固有型を使用せず、文字列identityとconfiguration digestを保存する。
+
+## 5. Capability設計
+
+### 5.1 DeclarationとVerificationの分離
+
+Adapterが返すCapability declarationは、Adapterが実装していると主張する能力の一覧である。Declaration自体を検証証拠として扱わない。
+
+Capability Verifierは次を照合する。
+
+- Provider identityの完全一致
+- Capability名
+- Evidence Level
+- TestID / verification profile
+- Evidence artifactのdigest
+- 検証日時と対象SDK / protocol version
+- Evidence artifactの信頼元と改ざん有無
+
+検証済みCapabilityだけをRuntimeへ渡す。Adapterが返した任意のEvidenceLevelやdigestをRuntimeがそのまま信頼する構造にしない。
+
+### 5.2 操作別gate
+
+| Runtime operation | 必須Capability | 最低Evidence |
+|---|---|---|
+| Start | Start idempotencyまたはStart lookup | E4 |
+| Send | Send idempotencyまたはSend lookup | E4 |
+| Stop | Stop proof | E4 |
+| Resume | Cross-process reattachment | E5 |
+| Lookup | 対象がStartかSendかに対応するlookup | E4 |
+| Result | Final output retrieval | E4 |
+| Usage | Usage identityとUsage completeness | E4 |
+| ReplayEvents | Event replay / cursor continuity | E5 |
+
+Capabilityの検証は操作単位で行う。たとえばEvent replayがE2の段階でも、Start idempotencyがE4であればStartは許可できる。Event replayは拒否する。
+
+### 5.3 Evidence Level
+
+- E2: fake Adapterによるsynthetic integration
+- E3: SDK / protocol compatibility
+- E4: 実Provider接続と実応答の検証
+- E5: process restart / crash後のdurable recovery検証
+
+E2テストでE4 / E5を模擬した証拠を生成しない。Runtimeの本番constructorはE4 / E5の信頼済みEvidenceだけを受け付ける。E2 integrationはRuntime interfaceを使ったtest-only構成で実行し、本番経路へ切替可能なフラグを公開しない。
+
+## 6. Adapter contract
+
+Adapterは次の操作を提供する。
+
+| Method | Request | Result | 意味 |
+|---|---|---|---|
+| Start | StartRequest | StartResult | Provider Sessionを開始 |
+| Send | TurnRequest | TurnResult | 指定SessionでTurnを送信 |
+| Stop | StopRequest | StopResult | Session / operationを停止 |
+| Resume | ResumeRequest | ResumeResult | 同一Sessionへ再接続 |
+| Lookup | LookupRequest | LookupResult | 同一OperationID / TurnIDを照会 |
+| Result | ResultRequest | Result | terminal outputを取得 |
+| Usage | UsageRequest | Usage | 確定利用量を取得 |
+| ReplayEvents | ReplayEventsRequest | EventPage | 保存cursor以降のeventを再取得 |
+
+### 6.1 Request共通条件
+
+- JobID / RoleExecutionID / OperationID / TurnID / SessionIDを必要な操作に含める。
+- request digestとprompt digestを検証する。
+- deadlineを必須とし、Controllerのgrant deadlineを超えない。
+- Provider / account / SDK / configuration identityはRuntimeが選択済みAdapter identityへ束縛する。
+- Context documentはID、content digest、実contentの一致を検証する。
+
+### 6.2 Result共通条件
+
+- Requestで指定したOperationID / TurnID / SessionIDとの一致を検証する。
+- Provider receipt、event ID、usage IDはProvider identityの範囲で一意とする。
+- terminal resultはcontent digestとevidence digestを持つ。
+- raw Provider errorは返さず、許可されたFailureClass / OperationCodeへ変換する。
+- credential検出または応答identity不一致は成功として採用せずUNKNOWNへ分類する。
+
+### 6.3 Usage
+
+Usage resultは次を持つ。
+
+- OperationID / SessionID / optional TurnID
+- UsageID
+- token数
+- Complete（確定値であることを示す）
+- EvidenceSHA256
+
+Complete=falseの値は最終UsageとしてJobへ確定しない。後続の照合で同一UsageIDの確定値へ更新する場合も、既存Observationを書き換えず新しいObservationを追加する。
+
+### 6.4 Stop
+
+Stop resultは次を持つ。
+
+- OperationID / SessionID
+- Stopped
+- Quiescent（Providerが後続書込みを継続しないことを確認済み）
+- EvidenceSHA256
+
+Stopped=trueだけではWorktree解放やJob完了を許可しない。Quiescent=trueとterminal result、Usageを照合する。
+
+### 6.5 Event replay
+
+EventPageはSessionID、FromCursor、NextCursor、Events、HasMore、EvidenceSHA256を持つ。各EventはEventID、OperationID、optional TurnID、Kind、PreviousCursor、Cursor、ObservedAt、EvidenceSHA256を持つ。
+
+- page内のcursor chainを検証する。
+- 保存済みcursorとFromCursorを一致させる。
+- page内およびJob内でEventID / cursorの重複を拒否する。
+- cursorの逆行、欠落、分岐を拒否する。
+- eventのOperationID / TurnIDがJob内のintentと一致することをController / Domainで検証する。
+
+## 7. Credential設計
+
+### 7.1 Broker
+
+CredentialBrokerはProvider identityを入力としてCredentialLeaseを返す。Brokerは認証情報の永続化先を隠蔽し、Adapter以外へraw secretを返さない。
+
+初期E2実装ではmemory-backed brokerをテスト専用に使用する。Live Provider向けのBrokerはProvider選定とsecret storage環境が確定するまで実装完了とみなさない。
+
+### 7.2 Lease
+
+CredentialLeaseは次を保証する。
+
+- Acquire時にsecretをコピーしてlease所有とする。
+- WithSecretはcallbackへ短命コピーを渡す。
+- callback終了時にコピーをbest-effort zeroizeする。
+- Closeは新規callbackを拒否し、lease所有secretをzeroizeする。
+- Closeは複数回呼び出しても安全とする。
+- in-flight callbackは独立コピーを使用し、Close後にcallbackが戻った時点でそのコピーをzeroizeする。
+- RuntimeはdeferでCloseを保証し、Adapter panic時もleaseを残さない。
+
+secret bufferのzeroizeはGo runtime / OSの複製まで保証するものではない。ログ・永続化・外部公開を防ぐことを主たる境界とする。
+
+### 7.3 Redaction
+
+- Adapter errorのraw messageを外側へ返さない。
+- Errorは固定されたcodeとclassだけを返す。
+- Adapter resultのidentity、content、evidence、event metadataにcredential bytesが含まれる場合は結果を破棄する。
+- secret検査用の一時bufferもbest-effort zeroizeする。
+- Provider responseをログへ出力しない。
+
+## 8. Controller実行フロー
+
+### 8.1 Start
+
+1. Controllerが現在のJobAggregateを取得する。
+2. Principal、PlanningAuthorization、Job state、Provider identity、budget、deadlineを検証する。
+3. immutable Start intentとCommand receiptを同一transactionで保存する。
+4. commit結果がUNKNOWNの場合はCommand IDとOperationIDをread-backする。確定できない場合はProviderを呼び出さない。
+5. 外部呼出し直前に最新revisionとauthorityを再検証する。
+6. RuntimeがCapabilityとcredential leaseを検証してAdapter.Startを呼び出す。
+7. receipt / Session identityを検証し、Provider operation observationを追加する。
+8. ambiguous errorはUNKNOWN observationとして追加する。
+
+### 8.2 Send
+
+1. 最新Job、grant、RoleExecution、Session、turn budget、deadlineを検証する。
+2. immutable Turn intentとCommand receiptを同一transactionで保存する。
+3. commit確認後にRuntime.Sendを呼び出す。
+4. terminal event / lookup / result retrievalを照合する。
+5. terminal resultとUsageを別々のObservationとして保存する。
+6. UNKNOWN中は同じTurnIDで照合し、新しいTurnIDで再送しない。
+
+### 8.3 Stop / Resume
+
+- Stop intentを先に保存し、Runtime.Stopの後にstop proof、quiescence、terminal result、Usageを照合する。
+- Resume intentを先に保存し、E5 reattachment capability、Session identity、configuration identityを検証してからRuntime.Resumeを呼び出す。
+- Resume ATTACHED observationが確定するまで次Turnを許可しない。
+- Resume不能の場合、同じRoleExecutionに新Sessionを付け替えない。
+
+### 8.4 Lookup / Result / Usage / ReplayEvents
+
+これらは既存intentの照合操作であり、新しいProvider execution identityを生成しない。取得結果は元のOperationID / TurnIDへ束縛し、append-only Observationとして保存する。Lookup NOT_FOUNDはProviderが同一identityの不存在を証明した場合だけ記録する。
+
+## 9. Domain / Store設計
+
+### 9.1 Domain facts
+
+Providerの外部事実をJobAggregateへappend-onlyで保持する。最低限、次の事実を分離する。
+
+- ProviderOperationObservation: receipt、受理状態、terminal operation status
+- ProviderEventObservation: EventID、cursor、event kind、OperationID / TurnID
+- ProviderResultObservation: result contentまたはimmutable content reference、content digest、terminality
+- ProviderUsageObservation: UsageID、token数、Complete、evidence
+- ProviderStopObservation: Stopped、Quiescent、evidence
+
+既存PlanningTurnObservation / PlanningResumeObservationはPlanning lifecycleの状態を表し、Provider固有のreceiptやraw eventを代替しない。両者はOperationID / TurnIDで相関する。
+
+### 9.2 Append-only invariant
+
+- Fact IDとCommand IDは一意とする。
+- 同じFact IDで異なる内容を保存しない。
+- 既存Observationを更新・削除しない。
+- UNKNOWNの解消は同一identityを参照する新Observationで記録する。
+- Fact CreatedRevisionはintentより後であり、Job revision順序と一致する。
+- Provider identityとRoleExecution / grant scopeが一致する。
+- Result / Usage / Stop evidenceは対応するOperationID / TurnIDへ束縛する。
+
+### 9.3 Store
+
+既存JobAggregate保存方式とCommand receipt transactionを再利用する。Provider factだけの独立した可変storeを追加しない。expected revision、idempotency、rollback、read-back recoveryを既存Store contractへ統合する。
+
+## 10. Error classification
+
+| Class | 例 | Controllerの扱い |
+|---|---|---|
+| Definitive | invalid request、unauthorized、unsupported capability | 外部操作未成立を確認できる場合だけ確定拒否 |
+| Ambiguous | timeout、connection reset、panic、receipt missing、response mismatch | UNKNOWNを記録し、同一identityで照合 |
+| Credential unavailable | Broker未取得、lease失効 | Providerを呼ばず拒否 |
+| Unsupported capability | Evidence不足、identity mismatch | Credential取得・Provider呼出し前に拒否 |
+
+Providerが操作を受理した可能性を排除できないerrorはAmbiguousとする。raw errorを保持しない。
+
+## 11. 実装順序
+
+1. 要求仕様・本書・内部設計・テスト仕様の整合を確認する。
+2. Provider contract / identity / capability verificationを確定する。
+3. CredentialLeaseのpanic-safe closeとredactionを確定する。
+4. Runtime request / result validationを確定する。
+5. Domain Provider factsと不変条件を追加する。
+6. Store transaction / idempotency / recoveryを追加する。
+7. Controllerのintent-first operation flowを追加する。
+8. fake AdapterによるE2 integrationを実行する。
+9. Secret scanとLinux必須CIを実行する。
+10. 独立レビュー後、PRをDraftで提出する。Mergeは行わない。
+
+## 12. 未決事項
+
+- 初期Live ProviderとSDK / protocol version
+- Live credentialの保存・取得方式
+- Capability Evidence artifactの信頼済みcatalogの配布・更新方法
+- ProviderごとのStop proof / Usage completenessの実証方法
+
+これらが未決の間はE4 / E5 capabilityを有効化しない。
