@@ -106,7 +106,7 @@ func TestPlanningTurnLifecycleRevalidatesBudgetAndUnknown(t *testing.T) {
 		t.Fatalf("Job.Validate after reconciliation: %v", err)
 	}
 
-	second, err := NewPlanningTurnIntent(job, executionID, principal, "session_1", "cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("2", 64), 99880, now.Add(3*time.Second))
+	second, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("2", 64), 99880, now.Add(3*time.Second))
 	if err != nil {
 		t.Fatalf("second turn: %v", err)
 	}
