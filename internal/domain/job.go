@@ -36,6 +36,7 @@ type Job struct {
 	CreatedAt        time.Time         `json:"created_at"`
 	UpdatedAt        time.Time         `json:"updated_at"`
 	IntakeProvenance *IntakeProvenance `json:"intake_provenance,omitempty"`
+	PlanningAuthorizations []PlanningAuthorization `json:"planning_authorizations,omitempty"`
 }
 
 type IntakeProvenance struct {
@@ -137,6 +138,125 @@ func originalRequestDigest(request string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+
+const (
+	PlanningReadOnlyBoundaryRepository = "repository.read-only"
+	PlanningEffectRepositoryRead       = "repository.read"
+)
+
+type PlanningBudget struct {
+	MaxTurns uint32 `json:"max_turns"`
+}
+
+type PlanningAuthorization struct {
+	ID                  string         `json:"id"`
+	JobID               string         `json:"job_id"`
+	RequestSHA256       string         `json:"request_sha256"`
+	PrincipalID         string         `json:"principal_id"`
+	ProviderID          string         `json:"provider_id"`
+	AccountID           string         `json:"account_id"`
+	ConfigurationSHA256 string         `json:"configuration_sha256"`
+	RepositoryID        string         `json:"repository_id"`
+	ReadOnlyBoundary    string         `json:"read_only_boundary"`
+	PermittedEffects    []string       `json:"permitted_effects"`
+	Budget              PlanningBudget `json:"budget"`
+	IssuedAt            time.Time      `json:"issued_at"`
+	Deadline            time.Time      `json:"deadline"`
+}
+
+func (j Job) IntakeProvenanceDigest() string {
+	if j.IntakeProvenance == nil {
+		return ""
+	}
+	return j.IntakeProvenance.OriginalRequestSHA256
+}
+
+func NewPlanningAuthorization(id string, job Job, principalID, providerID, accountID, configurationSHA256, repositoryID string, maxTurns uint32, issuedAt, deadline time.Time) (PlanningAuthorization, error) {
+	grant := PlanningAuthorization{
+		ID:                  id,
+		JobID:               job.ID,
+		RequestSHA256:       job.IntakeProvenanceDigest(),
+		PrincipalID:         principalID,
+		ProviderID:          providerID,
+		AccountID:           accountID,
+		ConfigurationSHA256: configurationSHA256,
+		RepositoryID:        repositoryID,
+		ReadOnlyBoundary:    PlanningReadOnlyBoundaryRepository,
+		PermittedEffects:    []string{PlanningEffectRepositoryRead},
+		Budget:              PlanningBudget{MaxTurns: maxTurns},
+		IssuedAt:            issuedAt.UTC().Round(0),
+		Deadline:            deadline.UTC().Round(0),
+	}
+	if err := grant.ValidateFor(job, principalID, issuedAt); err != nil {
+		return PlanningAuthorization{}, err
+	}
+	return grant, nil
+}
+
+func (a PlanningAuthorization) Validate(job Job) error {
+	for name, value := range map[string]string{
+		"id": a.ID, "job_id": a.JobID, "request_sha256": a.RequestSHA256,
+		"principal_id": a.PrincipalID, "provider_id": a.ProviderID,
+		"account_id": a.AccountID, "configuration_sha256": a.ConfigurationSHA256,
+		"repository_id": a.RepositoryID,
+	} {
+		if !utf8.ValidString(value) || strings.TrimSpace(value) == "" {
+			return fmt.Errorf("PlanningAuthorization %s is required", name)
+		}
+	}
+	if a.JobID != job.ID {
+		return errors.New("PlanningAuthorization Job identity mismatch")
+	}
+	if job.IntakeProvenance == nil {
+		return errors.New("PlanningAuthorization requires trusted IntakeProvenance")
+	}
+	if a.PrincipalID != job.IntakeProvenance.PrincipalID {
+		return errors.New("PlanningAuthorization HUMAN Principal mismatch")
+	}
+	if a.RequestSHA256 != job.IntakeProvenance.OriginalRequestSHA256 {
+		return errors.New("PlanningAuthorization original request digest mismatch")
+	}
+	configurationDigest, err := hex.DecodeString(a.ConfigurationSHA256)
+	if err != nil || len(configurationDigest) != sha256.Size || a.ConfigurationSHA256 != strings.ToLower(a.ConfigurationSHA256) {
+		return errors.New("PlanningAuthorization configuration SHA-256 is invalid")
+	}
+	if a.ReadOnlyBoundary != PlanningReadOnlyBoundaryRepository {
+		return errors.New("PlanningAuthorization read-only boundary is invalid")
+	}
+	if len(a.PermittedEffects) != 1 || a.PermittedEffects[0] != PlanningEffectRepositoryRead {
+		return errors.New("PlanningAuthorization permits an unsupported effect")
+	}
+	if a.Budget.MaxTurns == 0 {
+		return errors.New("PlanningAuthorization max turns must be positive")
+	}
+	if a.IssuedAt.IsZero() || a.Deadline.IsZero() || !a.Deadline.After(a.IssuedAt) {
+		return errors.New("PlanningAuthorization deadline must follow issue time")
+	}
+	if a.IssuedAt.Before(job.CreatedAt) {
+		return errors.New("PlanningAuthorization predates its Job")
+	}
+	return nil
+}
+
+func (a PlanningAuthorization) ValidateFor(job Job, principalID string, now time.Time) error {
+	if err := a.Validate(job); err != nil {
+		return err
+	}
+	if job.State != JobDraft {
+		return errors.New("PlanningAuthorization requires a DRAFT Job")
+	}
+	if principalID != a.PrincipalID {
+		return errors.New("PlanningAuthorization principal mismatch")
+	}
+	if now.IsZero() || now.Before(a.IssuedAt) {
+		return errors.New("PlanningAuthorization is not active yet")
+	}
+	if !now.Before(a.Deadline) {
+		return errors.New("PlanningAuthorization has expired")
+	}
+	return nil
+}
+
 func (j Job) Validate() error {
 	if !utf8.ValidString(j.Request) {
 		return fmt.Errorf("%w: original request must be valid UTF-8", ErrInvalidJob)
@@ -163,6 +283,16 @@ func (j Job) Validate() error {
 		if err := j.IntakeProvenance.Validate(j.Request, j.CreatedAt); err != nil {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
+	}
+	seenGrants := make(map[string]struct{}, len(j.PlanningAuthorizations))
+	for _, grant := range j.PlanningAuthorizations {
+		if err := grant.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid PlanningAuthorization: %v", ErrInvalidJob, err)
+		}
+		if _, exists := seenGrants[grant.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningAuthorization ID", ErrInvalidJob)
+		}
+		seenGrants[grant.ID] = struct{}{}
 	}
 	return nil
 }

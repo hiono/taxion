@@ -1,18 +1,30 @@
 package store
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/coreos/go-oidc/v3/oidc/oidctest"
 	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/identity"
+	"golang.org/x/oauth2"
 )
 
 func newTestStore(t *testing.T) (*Store, string) {
@@ -398,5 +410,274 @@ func TestGetJobRejectsProvenanceTamperingAfterPayloadHashRecomputed(t *testing.T
 	}
 	if _, err := database.GetJob(ctx, job.ID); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("GetJob() error = %v, want ErrIntegrity", err)
+	}
+}
+
+
+type synchronizedBuffer struct {
+	mu sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (b *synchronizedBuffer) Write(value []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(value)
+}
+
+func (b *synchronizedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
+}
+
+func newAuthenticatedTestPrincipal(t *testing.T) auth.AuthenticatedPrincipal {
+	t.Helper()
+	trustedKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate OIDC signing key: %v", err)
+	}
+	provider := &oidctest.Server{PublicKeys: []oidctest.PublicKey{{
+		PublicKey: trustedKey.Public(), KeyID: "taxion-store-test-key", Algorithm: oidc.RS256,
+	}}}
+	var mu sync.Mutex
+	var challenge, nonce string
+	mux := http.NewServeMux()
+	mux.Handle("/.well-known/openid-configuration", provider)
+	mux.Handle("/keys", provider)
+	mux.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		mu.Lock()
+		challenge, nonce = query.Get("code_challenge"), query.Get("nonce")
+		mu.Unlock()
+		if query.Get("code_challenge_method") != "S256" || challenge == "" || nonce == "" || query.Get("state") == "" {
+			http.Error(w, "invalid authorization request", http.StatusBadRequest)
+			return
+		}
+		callback, err := url.Parse(query.Get("redirect_uri"))
+		if err != nil {
+			http.Error(w, "invalid callback", http.StatusBadRequest)
+			return
+		}
+		values := callback.Query()
+		values.Set("code", "one-time-code")
+		values.Set("state", query.Get("state"))
+		callback.RawQuery = values.Encode()
+		http.Redirect(w, r, callback.String(), http.StatusFound)
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid token request", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		expectedChallenge, expectedNonce := challenge, nonce
+		mu.Unlock()
+		if r.Form.Get("code_verifier") == "" || oauth2.S256ChallengeFromVerifier(r.Form.Get("code_verifier")) != expectedChallenge {
+			http.Error(w, "PKCE verification failed", http.StatusBadRequest)
+			return
+		}
+		now := time.Now()
+		claims, err := json.Marshal(map[string]any{
+			"iss": "https://" + r.Host, "aud": "taxion-store-test", "sub": "subject-store-test",
+			"exp": now.Add(5 * time.Minute).Unix(), "iat": now.Unix(), "nonce": expectedNonce,
+		})
+		if err != nil {
+			http.Error(w, "encode claims", http.StatusInternalServerError)
+			return
+		}
+		token := oidctest.SignIDToken(trustedKey, "taxion-store-test-key", oidc.RS256, string(claims))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "test-access-token", "token_type": "Bearer",
+			"expires_in": 300, "id_token": token,
+		})
+	})
+
+	server := httptest.NewTLSServer(mux)
+	defer server.Close()
+	provider.SetIssuer(server.URL)
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	originalTransport := http.DefaultTransport
+	transport, ok := originalTransport.(*http.Transport)
+	if !ok {
+		t.Fatal("default HTTP transport has an unexpected type")
+	}
+	trustedTransport := transport.Clone()
+	trustedTransport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+	http.DefaultTransport = trustedTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = originalTransport
+		trustedTransport.CloseIdleConnections()
+	})
+
+	authenticator, err := auth.NewOIDCAuthenticator(auth.OIDCConfig{
+		Issuer: server.URL, ClientID: "taxion-store-test", Audience: "taxion-store-test",
+		RedirectURI: "http://127.0.0.1:0/callback", Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewOIDCAuthenticator() error = %v", err)
+	}
+	output := &synchronizedBuffer{}
+	type result struct {
+		principal auth.AuthenticatedPrincipal
+		err       error
+	}
+	done := make(chan result, 1)
+	go func() {
+		principal, err := authenticator.Authenticate(context.Background(), output)
+		done <- result{principal: principal, err: err}
+	}()
+	var authorizationURL string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, line := range strings.Split(output.String(), "\n") {
+			if strings.HasPrefix(line, server.URL+"/auth?") {
+				authorizationURL = strings.TrimSpace(line)
+				break
+			}
+		}
+		if authorizationURL != "" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if authorizationURL == "" {
+		t.Fatal("OIDC authorization URL was not produced")
+	}
+	response, err := server.Client().Get(authorizationURL)
+	if err != nil {
+		t.Fatalf("complete fake OIDC authorization: %v", err)
+	}
+	_ = response.Body.Close()
+	select {
+	case completed := <-done:
+		if completed.err != nil {
+			t.Fatalf("Authenticate() error = %v", completed.err)
+		}
+		return completed.principal
+	case <-time.After(5 * time.Second):
+		t.Fatal("OIDC authentication did not complete")
+		return auth.AuthenticatedPrincipal{}
+	}
+}
+
+func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
+	database, path := newTestStore(t)
+	ctx := context.Background()
+	principal := newAuthenticatedTestPrincipal(t)
+	receivedAt := principal.AuthenticatedAt().Add(time.Second)
+	if _, err := database.CreateTrustedDraftJob(ctx, "job_planning_store", "Plan this request.", "cmd_planning_create", receivedAt, principal); err != nil {
+		t.Fatalf("CreateTrustedDraftJob() error = %v", err)
+	}
+	job, err := database.GetJob(ctx, "job_planning_store")
+	if err != nil {
+		t.Fatalf("GetJob() error = %v", err)
+	}
+	issuedAt := job.UpdatedAt.Add(time.Minute)
+	grant, err := domain.NewPlanningAuthorization(
+		"plan_auth_store", job, principal.PrincipalID(), "provider.test", "account.test",
+		strings.Repeat("a", 64), "repo:test/project", 8, issuedAt, issuedAt.Add(15*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("NewPlanningAuthorization() error = %v", err)
+	}
+	first, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_auth", grant, principal, issuedAt)
+	if err != nil {
+		t.Fatalf("AddPlanningAuthorization() error = %v", err)
+	}
+	if first.Revision != 2 || first.PayloadSHA256 == "" {
+		t.Fatalf("receipt = %#v", first)
+	}
+	second, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_auth", grant, principal, issuedAt)
+	if err != nil {
+		t.Fatalf("idempotent AddPlanningAuthorization() error = %v", err)
+	}
+	if second != first {
+		t.Fatalf("retry receipt = %#v, want %#v", second, first)
+	}
+	changedGrant := grant
+	changedGrant.Budget.MaxTurns++
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_auth", changedGrant, principal, issuedAt); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("reused command ID error = %v, want ErrIdempotencyConflict", err)
+	}
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_other_grant", grant, principal, issuedAt); err == nil {
+		t.Fatal("AddPlanningAuthorization() accepted a duplicate grant ID")
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen database: %v", err)
+	}
+	defer reopened.Close()
+	got, err := reopened.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetJob() error = %v", err)
+	}
+	if got.Revision != 2 || len(got.PlanningAuthorizations) != 1 || got.PlanningAuthorizations[0].ID != grant.ID {
+		t.Fatalf("persisted PlanningAuthorization = %#v", got)
+	}
+	replayed, err := reopened.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_auth", grant, principal, issuedAt)
+	if err != nil || replayed != first {
+		t.Fatalf("reopened idempotent retry = %#v, %v; want %#v", replayed, err, first)
+	}
+	got.PlanningAuthorizations = nil
+	tamperedPayload, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal altered aggregate: %v", err)
+	}
+	if _, err := reopened.db.ExecContext(ctx,
+		"UPDATE job_aggregates SET payload_json = ?, integrity_sha256 = ? WHERE job_id = ?",
+		string(tamperedPayload), digest(tamperedPayload), job.ID,
+	); err != nil {
+		t.Fatalf("remove persisted grant fixture: %v", err)
+	}
+	if _, err := reopened.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_auth", grant, principal, issuedAt); !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("retry after removing persisted grant error = %v, want ErrIntegrity", err)
+	}
+}
+
+func TestAddPlanningAuthorizationRejectsWrongPrincipalAndRollsBack(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx := context.Background()
+	principal := newAuthenticatedTestPrincipal(t)
+	otherPrincipal := newAuthenticatedTestPrincipal(t)
+	receivedAt := principal.AuthenticatedAt().Add(time.Second)
+	if _, err := database.CreateTrustedDraftJob(ctx, "job_planning_atomic", "Plan this request.", "cmd_planning_atomic_create", receivedAt, principal); err != nil {
+		t.Fatalf("CreateTrustedDraftJob() error = %v", err)
+	}
+	job, err := database.GetJob(ctx, "job_planning_atomic")
+	if err != nil {
+		t.Fatalf("GetJob() error = %v", err)
+	}
+	issuedAt := job.UpdatedAt.Add(time.Minute)
+	grant, err := domain.NewPlanningAuthorization(
+		"plan_auth_atomic", job, principal.PrincipalID(), "provider.test", "account.test",
+		strings.Repeat("b", 64), "repo:test/project", 4, issuedAt, issuedAt.Add(10*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("NewPlanningAuthorization() error = %v", err)
+	}
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_wrong_planner", grant, otherPrincipal, issuedAt); err == nil {
+		t.Fatal("AddPlanningAuthorization() accepted a different HUMAN Principal")
+	}
+	if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_planning_receipt
+		BEFORE INSERT ON job_commands
+		WHEN NEW.command_type = 'AddPlanningAuthorization'
+		BEGIN SELECT RAISE(ABORT, 'simulated receipt failure'); END;`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_atomic", grant, principal, issuedAt); err == nil {
+		t.Fatal("AddPlanningAuthorization() succeeded despite receipt insert failure")
+	}
+	got, err := database.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetJob() after rollback error = %v", err)
+	}
+	if got.Revision != 1 || len(got.PlanningAuthorizations) != 0 {
+		t.Fatalf("Job changed despite transaction rollback: %#v", got)
 	}
 }

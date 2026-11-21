@@ -30,6 +30,7 @@ var (
 const schemaVersion = 1
 const createLocalDraftJobCommandType = "CreateJob"
 const createTrustedDraftJobCommandType = "CreateTrustedDraftJob"
+const addPlanningAuthorizationCommandType = "AddPlanningAuthorization"
 
 type Store struct {
 	db *sql.DB
@@ -277,6 +278,174 @@ func (s *Store) createJob(ctx context.Context, job domain.Job, commandID, comman
 	}
 	if err := tx.Commit(); err != nil {
 		return CommandReceipt{}, fmt.Errorf("commit Job command: %w", err)
+	}
+	return receipt, nil
+}
+
+
+func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID string, grant domain.PlanningAuthorization, principal auth.AuthenticatedPrincipal, issuedAt time.Time) (CommandReceipt, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	issuedAt = issuedAt.UTC().Round(0)
+	if !grant.IssuedAt.Equal(issuedAt) {
+		return CommandReceipt{}, errors.New("PlanningAuthorization issue time must be server-derived")
+	}
+	if grant.PrincipalID != principal.PrincipalID() {
+		return CommandReceipt{}, errors.New("PlanningAuthorization principal does not match authenticated HUMAN Principal")
+	}
+	if strings.TrimSpace(commandID) == "" {
+		return CommandReceipt{}, errors.New("command id is required")
+	}
+	if grant.JobID != jobID {
+		return CommandReceipt{}, errors.New("PlanningAuthorization Job identity mismatch")
+	}
+
+	grantPayload, err := json.Marshal(grant)
+	if err != nil {
+		return CommandReceipt{}, fmt.Errorf("encode PlanningAuthorization: %w", err)
+	}
+	grantHash := digest(grantPayload)
+	createdAt := issuedAt.Format(time.RFC3339Nano)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CommandReceipt{}, fmt.Errorf("begin PlanningAuthorization command: %w", err)
+	}
+	defer tx.Rollback()
+
+	var existingType, existingJobID, existingHash, existingReceipt, existingCreatedAt string
+	var existingRevision int64
+	err = tx.QueryRowContext(ctx,
+		"SELECT command_type, job_id, resulting_revision, payload_sha256, receipt_json, created_at FROM job_commands WHERE command_id = ?",
+		commandID,
+	).Scan(&existingType, &existingJobID, &existingRevision, &existingHash, &existingReceipt, &existingCreatedAt)
+	if err == nil {
+		if existingType != addPlanningAuthorizationCommandType || existingJobID != jobID ||
+			existingRevision <= 1 || existingHash != grantHash || existingCreatedAt != createdAt {
+			return CommandReceipt{}, ErrIdempotencyConflict
+		}
+		var stored CommandReceipt
+		if err := json.Unmarshal([]byte(existingReceipt), &stored); err != nil {
+			return CommandReceipt{}, fmt.Errorf("%w: decode existing command receipt: %v", ErrIntegrity, err)
+		}
+		if stored.CommandID != commandID || stored.JobID != jobID || stored.Revision != uint64(existingRevision) ||
+			stored.PayloadSHA256 != grantHash || !stored.CreatedAt.Equal(issuedAt) {
+			return CommandReceipt{}, fmt.Errorf("%w: PlanningAuthorization receipt metadata mismatch", ErrIntegrity)
+		}
+		var currentRevision int64
+		var currentPayload, currentHash, currentCreatedAt, currentUpdatedAt string
+		if err := tx.QueryRowContext(ctx,
+			"SELECT revision, payload_json, integrity_sha256, created_at, updated_at FROM job_aggregates WHERE job_id = ?",
+			jobID,
+		).Scan(&currentRevision, &currentPayload, &currentHash, &currentCreatedAt, &currentUpdatedAt); err != nil {
+			return CommandReceipt{}, fmt.Errorf("%w: read Job for PlanningAuthorization retry: %v", ErrIntegrity, err)
+		}
+		currentJob, err := decodeJobAggregate(jobID, currentRevision, currentPayload, currentHash, currentCreatedAt, currentUpdatedAt)
+		if err != nil {
+			return CommandReceipt{}, err
+		}
+		found := false
+		for _, currentGrant := range currentJob.PlanningAuthorizations {
+			if currentGrant.ID != grant.ID {
+				continue
+			}
+			currentGrantPayload, err := json.Marshal(currentGrant)
+			if err != nil || digest(currentGrantPayload) != grantHash {
+				return CommandReceipt{}, fmt.Errorf("%w: persisted PlanningAuthorization differs from command", ErrIntegrity)
+			}
+			if err := currentGrant.Validate(currentJob); err != nil {
+				return CommandReceipt{}, fmt.Errorf("%w: persisted PlanningAuthorization is invalid: %v", ErrIntegrity, err)
+			}
+			found = true
+			break
+		}
+		if !found {
+			return CommandReceipt{}, fmt.Errorf("%w: PlanningAuthorization fact is missing", ErrIntegrity)
+		}
+		return stored, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return CommandReceipt{}, fmt.Errorf("read PlanningAuthorization receipt: %w", err)
+	}
+
+	var revision int64
+	var payload, expectedHash, aggregateCreatedAt, aggregateUpdatedAt string
+	err = tx.QueryRowContext(ctx,
+		"SELECT revision, payload_json, integrity_sha256, created_at, updated_at FROM job_aggregates WHERE job_id = ?",
+		jobID,
+	).Scan(&revision, &payload, &expectedHash, &aggregateCreatedAt, &aggregateUpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CommandReceipt{}, ErrNotFound
+	}
+	if err != nil {
+		return CommandReceipt{}, fmt.Errorf("read Job for PlanningAuthorization: %w", err)
+	}
+	job, err := decodeJobAggregate(jobID, revision, payload, expectedHash, aggregateCreatedAt, aggregateUpdatedAt)
+	if err != nil {
+		return CommandReceipt{}, err
+	}
+	if issuedAt.Before(job.UpdatedAt) {
+		return CommandReceipt{}, errors.New("PlanningAuthorization issue time precedes current Job revision")
+	}
+	if err := grant.ValidateFor(job, principal.PrincipalID(), issuedAt); err != nil {
+		return CommandReceipt{}, err
+	}
+	for _, existing := range job.PlanningAuthorizations {
+		if existing.ID == grant.ID {
+			return CommandReceipt{}, errors.New("PlanningAuthorization ID already exists")
+		}
+	}
+	if job.Revision >= uint64(^uint64(0)>>1) {
+		return CommandReceipt{}, errors.New("Job revision exhausted")
+	}
+
+	job.PlanningAuthorizations = append(job.PlanningAuthorizations, grant)
+	job.Revision++
+	job.UpdatedAt = issuedAt
+	if err := job.Validate(); err != nil {
+		return CommandReceipt{}, fmt.Errorf("validate Job with PlanningAuthorization: %w", err)
+	}
+	updatedPayload, err := json.Marshal(job)
+	if err != nil {
+		return CommandReceipt{}, fmt.Errorf("encode updated Job: %w", err)
+	}
+	aggregateHash := digest(updatedPayload)
+	receipt := CommandReceipt{
+		CommandID:     commandID,
+		JobID:         jobID,
+		Revision:      job.Revision,
+		PayloadSHA256: grantHash,
+		CreatedAt:     issuedAt,
+	}
+	receiptJSON, err := json.Marshal(receipt)
+	if err != nil {
+		return CommandReceipt{}, fmt.Errorf("encode PlanningAuthorization receipt: %w", err)
+	}
+
+	result, err := tx.ExecContext(ctx,
+		"UPDATE job_aggregates SET revision = ?, payload_json = ?, integrity_sha256 = ?, updated_at = ? WHERE job_id = ? AND revision = ?",
+		job.Revision, string(updatedPayload), aggregateHash, issuedAt.Format(time.RFC3339Nano), jobID, revision,
+	)
+	if err != nil {
+		return CommandReceipt{}, fmt.Errorf("update Job with PlanningAuthorization: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return CommandReceipt{}, fmt.Errorf("check Job update result: %w", err)
+	}
+	if affected != 1 {
+		return CommandReceipt{}, ErrIdempotencyConflict
+	}
+	_, err = tx.ExecContext(ctx,
+		"INSERT INTO job_commands (command_id, job_id, command_type, payload_sha256, resulting_revision, receipt_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		commandID, jobID, addPlanningAuthorizationCommandType, grantHash, job.Revision, string(receiptJSON), createdAt,
+	)
+	if err != nil {
+		return CommandReceipt{}, fmt.Errorf("insert PlanningAuthorization receipt: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return CommandReceipt{}, fmt.Errorf("commit PlanningAuthorization: %w", err)
 	}
 	return receipt, nil
 }

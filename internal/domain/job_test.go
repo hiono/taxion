@@ -159,3 +159,121 @@ func TestJobValidateRejectsInvalidUTF8Request(t *testing.T) {
 		t.Fatal("NewDraftJob() accepted an invalid UTF-8 request")
 	}
 }
+
+
+func newPlanningTestJob(t *testing.T) Job {
+	t.Helper()
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	provenance := IntakeProvenance{
+		PrincipalID: identity.PrincipalID("https://identity.example", "subject-123"),
+		Issuer: "https://identity.example", Subject: "subject-123",
+		IngressSource: IngressSourceCLI, AuthenticatedAt: now.Add(-time.Minute),
+		ReceivedAt: now.Add(-2 * time.Minute), RequestIdentity: "cmd_planning_job",
+		SchemaVersion: IntakeProvenanceSchemaVersion,
+	}
+	job, err := NewDraftJobWithProvenance("job_planning", "Plan this request without modifying the repository.", provenance, now)
+	if err != nil {
+		t.Fatalf("NewDraftJobWithProvenance() error = %v", err)
+	}
+	return job
+}
+
+func newValidPlanningAuthorization(t *testing.T, job Job, issuedAt time.Time) PlanningAuthorization {
+	t.Helper()
+	grant, err := NewPlanningAuthorization(
+		"plan_auth_1", job, job.IntakeProvenance.PrincipalID,
+		"provider.test", "account.test", strings.Repeat("a", 64),
+		"repo:test/project", 8, issuedAt, issuedAt.Add(15*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("NewPlanningAuthorization() error = %v", err)
+	}
+	return grant
+}
+
+func TestPlanningAuthorizationBindsTrustedDraftJob(t *testing.T) {
+	job := newPlanningTestJob(t)
+	issuedAt := job.CreatedAt.Add(time.Minute)
+	grant := newValidPlanningAuthorization(t, job, issuedAt)
+	if err := grant.ValidateFor(job, job.IntakeProvenance.PrincipalID, issuedAt); err != nil {
+		t.Fatalf("ValidateFor() error = %v", err)
+	}
+	job.PlanningAuthorizations = []PlanningAuthorization{grant}
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate() error = %v", err)
+	}
+}
+
+func TestPlanningAuthorizationRejectsScopeAndIdentityChanges(t *testing.T) {
+	job := newPlanningTestJob(t)
+	issuedAt := job.CreatedAt.Add(time.Minute)
+	base := newValidPlanningAuthorization(t, job, issuedAt)
+	cases := []struct {
+		name   string
+		mutate func(*PlanningAuthorization)
+	}{
+		{name: "job identity", mutate: func(a *PlanningAuthorization) { a.JobID = "job_other" }},
+		{name: "request digest", mutate: func(a *PlanningAuthorization) { a.RequestSHA256 = strings.Repeat("0", 64) }},
+		{name: "principal", mutate: func(a *PlanningAuthorization) { a.PrincipalID = "human_other" }},
+		{name: "provider", mutate: func(a *PlanningAuthorization) { a.ProviderID = "" }},
+		{name: "account", mutate: func(a *PlanningAuthorization) { a.AccountID = "" }},
+		{name: "configuration digest", mutate: func(a *PlanningAuthorization) { a.ConfigurationSHA256 = "not-a-digest" }},
+		{name: "repository", mutate: func(a *PlanningAuthorization) { a.RepositoryID = "" }},
+		{name: "write boundary", mutate: func(a *PlanningAuthorization) { a.ReadOnlyBoundary = "repository.read-write" }},
+		{name: "additional effect", mutate: func(a *PlanningAuthorization) { a.PermittedEffects = append(a.PermittedEffects, "repository.write") }},
+		{name: "empty budget", mutate: func(a *PlanningAuthorization) { a.Budget.MaxTurns = 0 }},
+		{name: "deadline", mutate: func(a *PlanningAuthorization) { a.Deadline = a.IssuedAt }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			grant := base
+			grant.PermittedEffects = append([]string(nil), base.PermittedEffects...)
+			tc.mutate(&grant)
+			if err := grant.Validate(job); err == nil {
+				t.Fatal("Validate() accepted a changed PlanningAuthorization")
+			}
+		})
+	}
+}
+
+func TestPlanningAuthorizationRequiresMatchingPrincipalAndActiveDeadline(t *testing.T) {
+	job := newPlanningTestJob(t)
+	issuedAt := job.CreatedAt.Add(time.Minute)
+	grant := newValidPlanningAuthorization(t, job, issuedAt)
+	if err := grant.ValidateFor(job, "human_other", issuedAt); err == nil {
+		t.Fatal("ValidateFor() accepted a different principal")
+	}
+	if err := grant.ValidateFor(job, grant.PrincipalID, grant.Deadline); err == nil {
+		t.Fatal("ValidateFor() accepted an expired grant")
+	}
+	if err := grant.ValidateFor(job, grant.PrincipalID, issuedAt.Add(-time.Second)); err == nil {
+		t.Fatal("ValidateFor() accepted a grant before its issue time")
+	}
+	job.PlanningAuthorizations = []PlanningAuthorization{grant}
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate() rejected a structurally valid expired grant: %v", err)
+	}
+}
+
+func TestJobRejectsDuplicatePlanningAuthorizationIDs(t *testing.T) {
+	job := newPlanningTestJob(t)
+	grant := newValidPlanningAuthorization(t, job, job.CreatedAt.Add(time.Minute))
+	job.PlanningAuthorizations = []PlanningAuthorization{grant, grant}
+	if err := job.Validate(); err == nil {
+		t.Fatal("Job.Validate() accepted duplicate PlanningAuthorization IDs")
+	}
+}
+
+func TestPlanningAuthorizationRequiresTrustedIntake(t *testing.T) {
+	job, err := NewDraftJob("job_local_planning", "Untrusted local request.", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("NewDraftJob() error = %v", err)
+	}
+	if _, err := NewPlanningAuthorization(
+		"plan_auth_local", job, "human_123", "provider.test", "account.test",
+		strings.Repeat("a", 64), "repo:test/project", 8,
+		job.CreatedAt.Add(time.Minute), job.CreatedAt.Add(15*time.Minute),
+	); err == nil {
+		t.Fatal("NewPlanningAuthorization() accepted a local Job without trusted provenance")
+	}
+}
