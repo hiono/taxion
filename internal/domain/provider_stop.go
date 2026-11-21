@@ -254,7 +254,7 @@ func NewProviderStopObservation(
 	} else {
 		previousUnknown := !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
 		currentUnknown := !stopped && !quiescent && evidenceSHA256 == ""
-		if previous.Quiescent || now.Before(previous.CreatedAt) {
+		if previous.Quiescent || (previous.Stopped && !stopped) || now.Before(previous.CreatedAt) {
 			return ProviderStopObservation{}, errors.New("Provider Stop observation follows a terminal or later observation")
 		}
 		if previousUnknown {

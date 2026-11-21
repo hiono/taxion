@@ -185,6 +185,10 @@ type fakePlanningProviderRuntime struct {
 	replayPage   provider.EventPage
 	replayErr    error
 	replayCalls  int
+	stopResult   provider.StopResult
+	stopErr      error
+	stopCalls    int
+	stopHook     func(context.Context, provider.StopRequest) error
 	startHook    func(context.Context, provider.StartRequest) error
 }
 
@@ -227,6 +231,26 @@ func (f *fakePlanningProviderRuntime) Lookup(_ context.Context, request provider
 		result = provider.LookupResult{
 			Found: true, OperationID: request.OperationID, Status: "RUNNING",
 			ReceiptID: "receipt_1", SessionID: "session_1", EvidenceSHA256: strings.Repeat("e", 64),
+		}
+	}
+	return result, nil
+}
+
+func (f *fakePlanningProviderRuntime) Stop(ctx context.Context, request provider.StopRequest) (provider.StopResult, error) {
+	f.stopCalls++
+	if f.stopHook != nil {
+		if err := f.stopHook(ctx, request); err != nil {
+			return provider.StopResult{}, err
+		}
+	}
+	if f.stopErr != nil {
+		return provider.StopResult{}, f.stopErr
+	}
+	result := f.stopResult
+	if result.OperationID == "" {
+		result = provider.StopResult{
+			OperationID: request.OperationID, SessionID: request.SessionID,
+			Stopped: true, Quiescent: true, EvidenceSHA256: strings.Repeat("d", 64),
 		}
 	}
 	return result, nil

@@ -757,7 +757,8 @@ func (j Job) Validate() error {
 			previous := observations[i-1]
 			previousUnknown := !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
 			currentUnknown := !observation.Stopped && !observation.Quiescent && observation.EvidenceSHA256 == ""
-			if previous.Quiescent || observation.CreatedRevision <= previous.CreatedRevision ||
+			if previous.Quiescent || (previous.Stopped && !observation.Stopped) ||
+				observation.CreatedRevision <= previous.CreatedRevision ||
 				observation.CreatedAt.Before(previous.CreatedAt) {
 				return fmt.Errorf("%w: ProviderStopObservation order is invalid for Operation %s", ErrInvalidJob, operationID)
 			}

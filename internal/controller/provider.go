@@ -19,12 +19,15 @@ type ProviderExecutionStore interface {
 	PlanningLifecycleStore
 	StartTasklessPlanner(context.Context, string, uint64, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.RoleExecution, domain.ProviderStartIntent, error)
 	AddProviderEventObservation(context.Context, string, uint64, string, string, string, string, string, string, string, string, string, time.Time, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderEventObservation, error)
+	AddProviderStopIntent(context.Context, string, uint64, string, string, string, domain.ProviderStopReason, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopIntent, error)
+	AddProviderStopObservation(context.Context, string, uint64, string, string, bool, bool, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopObservation, error)
 }
 
 type PlanningProviderRuntime interface {
 	Identity() provider.Identity
 	Capabilities(context.Context) (provider.Capabilities, error)
 	Start(context.Context, provider.StartRequest) (provider.StartResult, error)
+	Stop(context.Context, provider.StopRequest) (provider.StopResult, error)
 	Lookup(context.Context, provider.LookupRequest) (provider.LookupResult, error)
 	ReplayEvents(context.Context, provider.ReplayEventsRequest) (provider.EventPage, error)
 }
@@ -177,6 +180,161 @@ type ProviderEventReplayResult struct {
 
 // ReplayProviderEvents appends Provider events to the JobAggregate. Replaying from
 // an earlier persisted cursor is allowed; deterministic event commands make it idempotent.
+// StopPlanning persists the immutable Stop intent before asking the Provider to stop the Session.
+func (c *ProviderController) StopPlanning(
+	ctx context.Context,
+	jobID, roleExecutionID, sessionID, commandID string,
+	reason domain.ProviderStopReason,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.ProviderStopIntent, domain.ProviderStopObservation, error) {
+	if ctx == nil {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, provider.ErrProviderInvalidRequest
+	}
+	if err := principal.Validate(); err != nil {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, err
+	}
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, err
+	}
+	if job.State != domain.JobDraft {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, errors.New("Provider Stop requires a DRAFT Job")
+	}
+	var execution domain.RoleExecution
+	foundExecution := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == roleExecutionID {
+			execution, foundExecution = candidate, true
+			break
+		}
+	}
+	if !foundExecution {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, errors.New("Provider Stop RoleExecution was not found")
+	}
+	var grant domain.PlanningAuthorization
+	foundGrant := false
+	for _, candidate := range job.PlanningAuthorizations {
+		if candidate.ID == execution.PlanningAuthorizationID {
+			grant, foundGrant = candidate, true
+			break
+		}
+	}
+	if !foundGrant || grant.PrincipalID != principal.PrincipalID() {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, errors.New("Provider Stop requires the authorized HUMAN Principal")
+	}
+	if err := grant.Validate(job); err != nil {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, err
+	}
+	if !providerIdentityMatches(c.runtime.Identity(), grant) {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, errors.New("Provider Runtime identity differs from PlanningAuthorization")
+	}
+	var startIntent domain.ProviderStartIntent
+	foundStart := false
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == execution.ID {
+			startIntent, foundStart = candidate, true
+			break
+		}
+	}
+	if !foundStart {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, errors.New("Provider Stop has no Start intent")
+	}
+	if err := startIntent.Validate(job, execution); err != nil {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, fmt.Errorf("validate Provider Start intent: %w", err)
+	}
+	startObservation, foundStartObservation := latestStartObservation(job, startIntent.ID)
+	if !foundStartObservation || startObservation.Status != domain.ProviderStartAccepted ||
+		startObservation.ProviderSessionID != sessionID {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, errors.New("Provider Stop requires the accepted Start Session")
+	}
+	intentReceipt, intent, err := c.store.AddProviderStopIntent(
+		ctx, jobID, job.Revision, roleExecutionID, sessionID, commandID, reason, principal,
+	)
+	if err != nil {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, err
+	}
+	currentJob, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return intentReceipt, intent, domain.ProviderStopObservation{}, err
+	}
+	previous, hasPrevious := latestProviderStopObservation(currentJob, intent.OperationID)
+	if hasPrevious && previous.Quiescent {
+		return intentReceipt, intent, previous, nil
+	}
+	stopResult, stopErr := c.runtime.Stop(ctx, provider.StopRequest{
+		OperationID: intent.OperationID,
+		SessionID:   sessionID,
+	})
+	if stopErr != nil {
+		if providerOperationMayHaveStarted(stopErr) {
+			if hasPrevious && (previous.Stopped || providerStopObservationUnknown(previous)) {
+				return intentReceipt, intent, previous, stopErr
+			}
+			observation, persistErr := c.persistProviderStopObservation(
+				ctx, currentJob, intent, principal, false, false, "", false,
+			)
+			if persistErr != nil {
+				return intentReceipt, intent, observation, errors.Join(stopErr, persistErr)
+			}
+			return intentReceipt, intent, observation, stopErr
+		}
+		if evidence, definitive := providerStopDefinitiveFailureEvidence(intent.OperationID, stopErr); definitive {
+			if hasPrevious && previous.Stopped {
+				return intentReceipt, intent, previous, stopErr
+			}
+			reconcilesUnknown := hasPrevious && providerStopObservationUnknown(previous)
+			observation, persistErr := c.persistProviderStopObservation(
+				ctx, currentJob, intent, principal, false, false, evidence, reconcilesUnknown,
+			)
+			if persistErr != nil {
+				return intentReceipt, intent, observation, errors.Join(stopErr, persistErr)
+			}
+			return intentReceipt, intent, observation, stopErr
+		}
+		return intentReceipt, intent, previous, stopErr
+	}
+	if stopResult.OperationID != intent.OperationID || stopResult.SessionID != sessionID ||
+		!stopResult.Stopped || !stopResult.Quiescent || !validProviderEvidenceSHA256(stopResult.EvidenceSHA256) {
+		stopErr = errors.Join(provider.ErrStopUnconfirmed, &provider.OperationError{
+			Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown,
+		})
+		if hasPrevious && (previous.Stopped || providerStopObservationUnknown(previous)) {
+			return intentReceipt, intent, previous, stopErr
+		}
+		observation, persistErr := c.persistProviderStopObservation(
+			ctx, currentJob, intent, principal, false, false, "", false,
+		)
+		if persistErr != nil {
+			return intentReceipt, intent, observation, errors.Join(stopErr, persistErr)
+		}
+		return intentReceipt, intent, observation, stopErr
+	}
+	reconcilesUnknown := hasPrevious && providerStopObservationUnknown(previous)
+	observation, err := c.persistProviderStopObservation(
+		ctx, currentJob, intent, principal, true, true, stopResult.EvidenceSHA256, reconcilesUnknown,
+	)
+	return intentReceipt, intent, observation, err
+}
+
+func (c *ProviderController) persistProviderStopObservation(
+	ctx context.Context,
+	job domain.Job,
+	intent domain.ProviderStopIntent,
+	principal auth.AuthenticatedPrincipal,
+	stopped, quiescent bool,
+	evidenceSHA256 string,
+	reconcilesUnknown bool,
+) (domain.ProviderStopObservation, error) {
+	commandID := domain.ProviderStopObservationCommandID(
+		intent.OperationID, stopped, quiescent, evidenceSHA256, reconcilesUnknown,
+	)
+	_, observation, err := c.store.AddProviderStopObservation(
+		ctx, job.ID, job.Revision, intent.ID, commandID,
+		stopped, quiescent, evidenceSHA256, reconcilesUnknown, principal,
+	)
+	return observation, err
+}
+
 func (c *ProviderController) ReplayProviderEvents(
 	ctx context.Context,
 	jobID, roleExecutionID, sessionID, afterCursor string,
@@ -462,6 +620,34 @@ func validatePlanningContext(grant domain.PlanningAuthorization, documents []pro
 func sha256String(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+func latestProviderStopObservation(job domain.Job, operationID string) (domain.ProviderStopObservation, bool) {
+	var latest domain.ProviderStopObservation
+	found := false
+	for _, observation := range job.ProviderStopObservations {
+		if observation.OperationID != operationID {
+			continue
+		}
+		if !found || observation.CreatedRevision > latest.CreatedRevision {
+			latest, found = observation, true
+		}
+	}
+	return latest, found
+}
+
+func providerStopObservationUnknown(observation domain.ProviderStopObservation) bool {
+	return !observation.Stopped && !observation.Quiescent && observation.EvidenceSHA256 == ""
+}
+
+func providerStopDefinitiveFailureEvidence(operationID string, err error) (string, bool) {
+	var operationError *provider.OperationError
+	if !errors.As(err, &operationError) || operationError == nil ||
+		operationError.Class != provider.FailureDefinitive {
+		return "", false
+	}
+	return sha256String("taxion:provider-stop-definitive-failure:" + operationID + ":" +
+		string(operationError.Class) + ":" + operationError.Code), true
 }
 
 func providerOperationMayHaveStarted(err error) bool {
