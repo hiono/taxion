@@ -121,6 +121,12 @@ func TestRegistryCapabilityVerifierRequiresExactTrustedEvidence(t *testing.T) {
 	if err != nil || !accepted {
 		t.Fatalf("trusted evidence was not accepted: accepted=%v err=%v", accepted, err)
 	}
+	sameInstant := item
+	sameInstant.VerifiedAt = item.VerifiedAt.In(time.FixedZone("equivalent-zero-offset", 0))
+	accepted, err = verifier.Verify(context.Background(), identity, sameInstant)
+	if err != nil || !accepted {
+		t.Fatalf("equivalent evidence timestamp was rejected: accepted=%v err=%v", accepted, err)
+	}
 	tampered := item
 	tampered.EvidenceSHA256 = strings.Repeat("c", 64)
 	accepted, err = verifier.Verify(context.Background(), identity, tampered)
