@@ -325,6 +325,9 @@ func (s *Store) AddProviderStartObservation(
 			)
 		},
 		func(job *domain.Job, fact domain.ProviderStartObservation) {
+			if job.ProviderStartObservationRequiredFromRevision == 0 {
+				job.ProviderStartObservationRequiredFromRevision = fact.CreatedRevision
+			}
 			job.ProviderStartObservations = append(job.ProviderStartObservations, fact)
 		},
 		func(job domain.Job) (domain.ProviderStartObservation, bool) {
