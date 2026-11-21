@@ -377,24 +377,24 @@ const (
 )
 
 type ProviderEvent struct {
-	EventID         string
-	SessionID       string
-	OperationID     string
-	TurnID           string
-	Kind             EventKind
-	PreviousCursor   string
-	Cursor           string
-	ObservedAt       time.Time
-	EvidenceSHA256   string
+	EventID        string
+	SessionID      string
+	OperationID    string
+	TurnID         string
+	Kind           EventKind
+	PreviousCursor string
+	Cursor         string
+	ObservedAt     time.Time
+	EvidenceSHA256 string
 }
 
 type EventPage struct {
-	SessionID       string
-	FromCursor      string
-	NextCursor      string
-	Events          []ProviderEvent
-	HasMore         bool
-	EvidenceSHA256  string
+	SessionID      string
+	FromCursor     string
+	NextCursor     string
+	Events         []ProviderEvent
+	HasMore        bool
+	EvidenceSHA256 string
 }
 
 func (p EventPage) Validate(request ReplayEventsRequest) error {
