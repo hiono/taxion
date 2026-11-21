@@ -575,3 +575,23 @@ func TestLegacyPlanningTurnFactsRemainReadableWithoutStartObservation(t *testing
 		t.Fatalf("legacy Job with historical Turn intent must remain readable: %v", err)
 	}
 }
+
+func TestNewPlanningResumeRequiresAcceptedStartObservation(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
+		"cmd_11111111111111111111111111111111", strings.Repeat("1", 64), 100, job.UpdatedAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("NewPlanningTurnIntent: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	job.ProviderStartObservations = nil
+	job.ProviderStartObservationRequiredFromRevision = 0
+	_, err = NewPlanningResumeIntent(job, executionID, principal, "session_1",
+		"cmd_22222222222222222222222222222222", strings.Repeat("2", 64), true, job.UpdatedAt.Add(time.Second))
+	var boundary *PlanningBoundaryError
+	if !errors.As(err, &boundary) || boundary.ReasonCode != "provider_start_unconfirmed" {
+		t.Fatalf("Resume without accepted Start observation error = %v, want provider_start_unconfirmed", err)
+	}
+}
