@@ -2,7 +2,7 @@
 
 Version: 1.0
 Date: 2026-11-20
-Normative decisions: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-500, ADR-501, ADR-700, ADR-701, ADR-800, ADR-811
+Normative decisions: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-500, ADR-501, ADR-502, ADR-700, ADR-701, ADR-800, ADR-811
 
 ## 1. Purpose and scope
 
@@ -23,6 +23,7 @@ Taxionは、人間の曖昧な思考を対話で整理し、実行可能な計�
 9. 製品受入れは検証可能な成果と実Job完遂で判断する。
 10. Agent Harnessの能力要求H1〜H8を満たす。能力をProvider / Runtimeへ委譲する場合も、対応構成と実動作の証拠を確認する。
 11. 承認済みJob内のTaskless PLANNERへの個別質問実行にはJobQuestionAuthorizationを使用できます。JobMessageやQUESTION種別だけでは認可を発行しません。
+12. Jobの依頼主体は認証済みHUMAN Principalとし、Ingress Clientは人間の依頼を伝達します。Execution AgentはJobの目的と要求能力に基づいてTaxionが選択します。
 
 ## 3. Actors and responsibilities
 
@@ -36,6 +37,13 @@ Taxionは、人間の曖昧な思考を対話で整理し、実行可能な計�
 | REVIEWER | 固定された成果と証拠の独立評価 | Coderと異なるRoleExecution / Contextを用い、read-only境界を強制する |
 
 Roleは作業責務であり、Role名だけで認証済み実行主体やoperation ACLを表現しない。Planner、Coder、Reviewerの実行回数・順序・session寿命をJobの寿命と同一視しません。
+
+### 3.2 Ingress Client and Execution Agent
+
+- Ingress Clientは、人間の依頼をTaxionへ伝達するクライアントです。Ingress Client自体をJobの依頼主体として扱いません。
+- Jobの依頼主体はADR-501に従って認証されたHUMAN Principalです。
+- Execution Agentは、Jobの目的と要求能力に基づいてTaxionが選択し、実行を委譲する外部Agentです。
+- Ingress ClientとExecution Agentは異なる役割です。同じ製品が両方を担う場合も、Jobごとに役割とidentityを区別し、Ingress Clientの自己申告や指定だけでExecution AgentやJob authorityを確定しません。
 
 ### 3.1 HUMAN identity and authentication
 
@@ -52,6 +60,7 @@ Roleは作業責務であり、Role名だけで認証済み実行主体やoperat
 - 利用者の原文依頼を受け付けた時点でJobを作成します。
 - 初期状態はDRAFTとし、原文依頼とintake provenanceを保存します。IntakeProvenanceはPrincipal、server-derived source、受信時刻、request identity、原文依頼digestへ束縛します。
 - Goal、制約、受入条件は初期時点で未確定でもよい。
+- Ingress Clientは依頼を伝達します。TaxionはJobの目的と要求能力に基づいてExecution Agentを選択します。同一製品が両方の役割を担う場合も、役割とidentityを区別します。
 - Job作成は実装権限やJobApprovalを付与しない。
 
 ### 4.2 Bounded planning
@@ -206,6 +215,7 @@ Provider / Runtimeへの委譲は許容しますが、APIの存在やProviderの
 | JobApproval・禁止副作用・PlanningAuthorization・Admission | ADR-500 |
 | 全経路の不変条件 | ADR-202 |
 | 内部6 Actor・JobMessage | ADR-300 / ADR-301 |
+| 人間起点の依頼、Ingress ClientとExecution Agentの分離 | ADR-502 |
 | 外部Agent A2A | ADR-700 / ADR-701 |
 | Git Worktree・並行性 | ADR-408 |
 | 仕様・計画・履歴・CI証拠の正本 | ADR-004 |
