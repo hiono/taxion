@@ -280,9 +280,9 @@ func (s *Store) AddPlanningResumeObservation(ctx context.Context, jobID string, 
 	}
 	request := struct {
 		JobID, ResumeID, CommandID, Status, EvidenceSHA256 string
-		ExpectedRevision uint64
-		ReconcilesUnknown bool
-		PrincipalID string
+		ExpectedRevision                                   uint64
+		ReconcilesUnknown                                  bool
+		PrincipalID                                        string
 	}{jobID, resumeID, commandID, status, evidenceSHA256, expectedRevision, reconcilesUnknown, principal.PrincipalID()}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, "AddPlanningResumeObservation", request,
 		func(job domain.Job, now time.Time) (domain.PlanningResumeObservation, error) {

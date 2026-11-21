@@ -128,7 +128,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	
+
 	job, err = database.GetJob(ctx, jobID)
 	if err != nil {
 		t.Fatalf("GetJob before resume UNKNOWN: %v", err)
@@ -148,7 +148,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil || !resumeResolved.ReconcilesUnknown {
 		t.Fatalf("reconcile resume UNKNOWN: %#v %v", resumeResolved, err)
 	}
-if resume.RoleExecutionID != executionID || resume.ProviderSessionID != "session_exact" {
+	if resume.RoleExecutionID != executionID || resume.ProviderSessionID != "session_exact" {
 		t.Fatalf("resume changed identity: %#v", resume)
 	}
 

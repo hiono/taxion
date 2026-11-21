@@ -112,9 +112,9 @@ func TestResumePersistsTypedBoundaryDenial(t *testing.T) {
 	fake := &fakePlanningLifecycleStore{
 		job: domain.Job{ID: "job_1", Revision: 5},
 		resumeErr: &domain.PlanningBoundaryError{
-			Boundary: domain.PlanningBoundaryResume,
+			Boundary:   domain.PlanningBoundaryResume,
 			ReasonCode: "provider_session_mismatch",
-			Cause: errors.New("Provider Session identity mismatch"),
+			Cause:      errors.New("Provider Session identity mismatch"),
 		},
 	}
 	controller, err := NewPlanningController(fake)
