@@ -75,6 +75,8 @@ Provider Adapterの実装要求は[Provider Adapter 実行境界 要求仕様書
 - TaskはJobの対象・resource・budget・deadlineを狭められるが、拡張できない。
 - 会話、Planner proposal、Task、RoleExecution、Providerの自己申告はJobApprovalの代替にならない。
 
+詳細なrevision、canonicalization、approval transactionの契約は [Job Contract Requirements](job-contract-requirements.md) と [Job Contract Detailed Design](../design/job-contract-detailed-design.md) を参照する。
+
 ### 4.3.1 JobQuestionAuthorization
 
 承認済みJob内でRoleからTaskless PLANNERへ質問し、個別のbounded read-only executionが必要な場合は、immutable JobQuestionAuthorizationを発行できます。grantはJobApproval、Planner RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineへ束縛します。QUESTION本文やMessageKindだけから自動発行しません。DRAFT Jobの初期PlanningAuthorizationとは用途と適用条件を分離します。

@@ -69,6 +69,8 @@ Detailed Provider Adapter tests: [Provider Adapter テスト仕様書](provider-
 - TaskはJob scopeを狭められるが拡張できない。
 - RoleExecutionのprivileged operation直前にApprovalと現在のscope / budget / deadlineを再検証する。
 
+Domain / Store検証ケースは [Job Contract Test Specification](job-contract-test-specification.md) に定義する。
+
 ### AT-005: JobMessage semantics and actor policy
 
 **Given** 6 Actorの認証済みendpoint間でJobMessageを送る。
