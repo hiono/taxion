@@ -2,10 +2,10 @@ package domain
 
 import (
 	"strings"
-
-	"github.com/hiono/taxion/internal/identity"
 	"testing"
 	"time"
+
+	"github.com/hiono/taxion/internal/identity"
 )
 
 func TestNewDraftJobPreservesOriginalRequest(t *testing.T) {

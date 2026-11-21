@@ -9,9 +9,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hiono/taxion/internal/identity"
-	"unicode/utf8"
 )
 
 var ErrInvalidJob = errors.New("invalid job")

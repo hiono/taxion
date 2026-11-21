@@ -112,7 +112,6 @@ func createTrustedJob(ctx context.Context, args []string, stdout, stderr io.Writ
 	if err != nil {
 		return report(stderr, err)
 	}
-	receivedAt := time.Now().UTC()
 	commandID, err := domain.NewID("cmd")
 	if err != nil {
 		return report(stderr, err)
@@ -121,6 +120,7 @@ func createTrustedJob(ctx context.Context, args []string, stdout, stderr io.Writ
 	if err != nil {
 		return report(stderr, err)
 	}
+	receivedAt := time.Now().UTC()
 	return createTrustedJobWithPrincipal(ctx, *request, dbPath, commandID, receivedAt, principal, stdout, stderr)
 }
 
@@ -144,7 +144,7 @@ func createTrustedJobWithPrincipal(ctx context.Context, request, dbPath, command
 	if err != nil {
 		return report(stderr, err)
 	}
-	fmt.Fprintf(stdout, "Trusted Job created\nID: %s\nState: %s\nRevision: %d\nHUMAN Principal ID: %s\n", receipt.JobID, job.State, receipt.Revision, principal.PrincipalID())
+	fmt.Fprintf(stdout, "Trusted Job created\nID: %s\nState: %s\nRevision: %d\nHUMAN Principal ID: %s\n", receipt.JobID, domain.JobDraft, receipt.Revision, principal.PrincipalID())
 	return 0
 }
 
