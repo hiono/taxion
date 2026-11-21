@@ -107,7 +107,12 @@ func (v *RegistryCapabilityVerifier) Verify(ctx context.Context, identity Identi
 	if !found {
 		return false, nil
 	}
-	return trusted == candidate, nil
+	return trusted.Capability == candidate.Capability &&
+		trusted.Identity == candidate.Identity &&
+		trusted.TestID == candidate.TestID &&
+		trusted.EvidenceSHA256 == candidate.EvidenceSHA256 &&
+		trusted.EvidenceLevel == candidate.EvidenceLevel &&
+		trusted.VerifiedAt.Equal(candidate.VerifiedAt), nil
 }
 
 func (c Capabilities) Has(capability Capability) bool {
