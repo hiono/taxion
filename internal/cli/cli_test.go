@@ -153,3 +153,83 @@ func TestProductionJobCreateRejectsInvalidUTF8BeforeAuthentication(t *testing.T)
 		t.Fatalf("store path exists after invalid request: stat err = %v", err)
 	}
 }
+
+func TestAuthorizePlanningRequiresScopeBeforeAuthentication(t *testing.T) {
+	t.Setenv("TAXION_OIDC_ISSUER", "")
+	t.Setenv("TAXION_OIDC_CLIENT_ID", "")
+	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"job", "authorize-planning", "--store", path, "job_missing"},
+		&stdout, &stderr, VersionInfo{})
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Provider") {
+		t.Fatalf("stderr = %q, want required scope guidance", stderr.String())
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("store path exists after invalid scope: stat err = %v", err)
+	}
+}
+
+func TestAuthorizePlanningRequiresOIDCBeforeOpeningStore(t *testing.T) {
+	t.Setenv("TAXION_OIDC_ISSUER", "")
+	t.Setenv("TAXION_OIDC_CLIENT_ID", "")
+	t.Setenv("TAXION_OIDC_AUDIENCE", "")
+	t.Setenv("TAXION_OIDC_REDIRECT_URI", "")
+	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
+	args := []string{
+		"job", "authorize-planning",
+		"--provider", "provider.test",
+		"--account", "account.test",
+		"--configuration-sha256", strings.Repeat("a", 64),
+		"--repository", "https://github.com/example/project",
+		"--commit", strings.Repeat("b", 40),
+		"--read-only-mode", "snapshot",
+		"--read-only-reference", "snapshot_1",
+		"--read-only-sha256", strings.Repeat("c", 64),
+		"--max-turns", "8",
+		"--max-tokens", "100000",
+		"--deadline", time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+		"--store", path,
+		"job_missing",
+	}
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "TAXION_OIDC_ISSUER") {
+		t.Fatalf("stderr = %q, want OIDC configuration guidance", stderr.String())
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("store path exists after authentication failure: stat err = %v", err)
+	}
+}
+
+func TestAuthorizePlanningWithPrincipalRejectsEmptyPrincipalBeforeOpeningStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
+	request := domain.PlanningAuthorizationRequest{
+		ProviderID: "provider.test",
+		AccountID: "account.test",
+		ConfigurationSHA256: strings.Repeat("a", 64),
+		RepositoryID: "https://github.com/example/project@" + strings.Repeat("b", 40),
+		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
+			Mode: domain.PlanningReadOnlyBoundarySnapshot,
+			Reference: "snapshot_1",
+			SHA256: strings.Repeat("c", 64),
+		},
+		Budget: domain.PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+		Deadline: time.Now().UTC().Add(time.Hour),
+	}
+	var stdout, stderr bytes.Buffer
+	code := authorizePlanningWithPrincipal(context.Background(), "job_missing", request,
+		"cmd_11111111111111111111111111111111", path, auth.AuthenticatedPrincipal{},
+		&stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1; stderr = %s", code, stderr.String())
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("store path exists after invalid principal: stat err = %v", err)
+	}
+}

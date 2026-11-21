@@ -289,6 +289,9 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID string, expe
 	if grant.PrincipalID != principal.PrincipalID() {
 		return CommandReceipt{}, errors.New("PlanningAuthorization principal does not match authenticated HUMAN Principal")
 	}
+	if commandID != grant.CommandID || grant.ID != domain.PlanningAuthorizationID(commandID) {
+		return CommandReceipt{}, errors.New("PlanningAuthorization identity does not match command ID")
+	}
 	if strings.TrimSpace(commandID) == "" {
 		return CommandReceipt{}, errors.New("command id is required")
 	}
@@ -300,9 +303,8 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID string, expe
 	}
 
 	request := struct {
-		ExpectedRevision uint64                       `json:"expected_revision"`
-		Authorization    domain.PlanningAuthorization `json:"authorization"`
-	}{ExpectedRevision: expectedRevision, Authorization: grant}
+		Authorization domain.PlanningAuthorization `json:"authorization"`
+	}{Authorization: grant}
 	request.Authorization.IssuedAt = time.Time{}
 	requestPayload, err := json.Marshal(request)
 	if err != nil {
@@ -357,9 +359,8 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID string, expe
 				continue
 			}
 			persistedRequest := struct {
-				ExpectedRevision uint64                       `json:"expected_revision"`
-				Authorization    domain.PlanningAuthorization `json:"authorization"`
-			}{ExpectedRevision: expectedRevision, Authorization: currentGrant}
+				Authorization domain.PlanningAuthorization `json:"authorization"`
+			}{Authorization: currentGrant}
 			persistedRequest.Authorization.IssuedAt = time.Time{}
 			currentGrantPayload, err := json.Marshal(persistedRequest)
 			if err != nil || digest(currentGrantPayload) != requestHash {
@@ -367,6 +368,9 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID string, expe
 			}
 			if err := currentGrant.Validate(currentJob); err != nil {
 				return CommandReceipt{}, fmt.Errorf("%w: persisted PlanningAuthorization is invalid: %v", ErrIntegrity, err)
+			}
+			if !currentGrant.IssuedAt.Equal(existingTime) {
+				return CommandReceipt{}, fmt.Errorf("%w: PlanningAuthorization issue time differs from receipt", ErrIntegrity)
 			}
 			found = true
 			break

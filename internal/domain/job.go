@@ -139,28 +139,47 @@ func originalRequestDigest(request string) string {
 }
 
 const (
-	PlanningReadOnlyBoundaryRepository = "repository.read-only"
-	PlanningEffectRepositoryRead       = "repository.read"
+	PlanningReadOnlyBoundarySnapshot  = "snapshot"
+	PlanningReadOnlyBoundaryDocuments = "documents"
+	PlanningEffectRepositoryRead      = "repository.read"
 )
 
 type PlanningBudget struct {
-	MaxTurns uint32 `json:"max_turns"`
+	MaxTurns  uint32 `json:"max_turns"`
+	MaxTokens uint64 `json:"max_tokens"`
+}
+
+type PlanningReadOnlyBoundary struct {
+	Mode      string `json:"mode"`
+	Reference string `json:"reference"`
+	SHA256    string `json:"sha256"`
+}
+
+type PlanningAuthorizationRequest struct {
+	ProviderID          string                   `json:"provider_id"`
+	AccountID           string                   `json:"account_id"`
+	ConfigurationSHA256 string                   `json:"configuration_sha256"`
+	RepositoryID        string                   `json:"repository_id"`
+	ReadOnlyBoundary    PlanningReadOnlyBoundary `json:"read_only_boundary"`
+	Budget              PlanningBudget           `json:"budget"`
+	Deadline            time.Time                `json:"deadline"`
 }
 
 type PlanningAuthorization struct {
-	ID                  string         `json:"id"`
-	JobID               string         `json:"job_id"`
-	RequestSHA256       string         `json:"request_sha256"`
-	PrincipalID         string         `json:"principal_id"`
-	ProviderID          string         `json:"provider_id"`
-	AccountID           string         `json:"account_id"`
-	ConfigurationSHA256 string         `json:"configuration_sha256"`
-	RepositoryID        string         `json:"repository_id"`
-	ReadOnlyBoundary    string         `json:"read_only_boundary"`
-	PermittedEffects    []string       `json:"permitted_effects"`
-	Budget              PlanningBudget `json:"budget"`
-	IssuedAt            time.Time      `json:"issued_at"`
-	Deadline            time.Time      `json:"deadline"`
+	ID                  string                   `json:"id"`
+	CommandID           string                   `json:"command_id"`
+	JobID               string                   `json:"job_id"`
+	RequestSHA256       string                   `json:"request_sha256"`
+	PrincipalID         string                   `json:"principal_id"`
+	ProviderID          string                   `json:"provider_id"`
+	AccountID           string                   `json:"account_id"`
+	ConfigurationSHA256 string                   `json:"configuration_sha256"`
+	RepositoryID        string                   `json:"repository_id"`
+	ReadOnlyBoundary    PlanningReadOnlyBoundary `json:"read_only_boundary"`
+	PermittedEffects    []string                 `json:"permitted_effects"`
+	Budget              PlanningBudget           `json:"budget"`
+	IssuedAt            time.Time                `json:"issued_at"`
+	Deadline            time.Time                `json:"deadline"`
 }
 
 func (j Job) IntakeProvenanceDigest() string {
@@ -170,21 +189,27 @@ func (j Job) IntakeProvenanceDigest() string {
 	return j.IntakeProvenance.OriginalRequestSHA256
 }
 
-func NewPlanningAuthorization(id string, job Job, principalID, providerID, accountID, configurationSHA256, repositoryID string, maxTurns uint32, issuedAt, deadline time.Time) (PlanningAuthorization, error) {
+func PlanningAuthorizationID(commandID string) string {
+	sum := sha256.Sum256([]byte(commandID))
+	return "plan_auth_" + hex.EncodeToString(sum[:])
+}
+
+func NewPlanningAuthorization(job Job, principalID, commandID string, request PlanningAuthorizationRequest, issuedAt time.Time) (PlanningAuthorization, error) {
 	grant := PlanningAuthorization{
-		ID:                  id,
+		ID:                  PlanningAuthorizationID(commandID),
+		CommandID:           commandID,
 		JobID:               job.ID,
 		RequestSHA256:       job.IntakeProvenanceDigest(),
 		PrincipalID:         principalID,
-		ProviderID:          providerID,
-		AccountID:           accountID,
-		ConfigurationSHA256: configurationSHA256,
-		RepositoryID:        repositoryID,
-		ReadOnlyBoundary:    PlanningReadOnlyBoundaryRepository,
+		ProviderID:          request.ProviderID,
+		AccountID:           request.AccountID,
+		ConfigurationSHA256: request.ConfigurationSHA256,
+		RepositoryID:        request.RepositoryID,
+		ReadOnlyBoundary:    request.ReadOnlyBoundary,
 		PermittedEffects:    []string{PlanningEffectRepositoryRead},
-		Budget:              PlanningBudget{MaxTurns: maxTurns},
+		Budget:              request.Budget,
 		IssuedAt:            issuedAt.UTC().Round(0),
-		Deadline:            deadline.UTC().Round(0),
+		Deadline:            request.Deadline.UTC().Round(0),
 	}
 	if err := grant.ValidateFor(job, principalID, issuedAt); err != nil {
 		return PlanningAuthorization{}, err
@@ -192,16 +217,61 @@ func NewPlanningAuthorization(id string, job Job, principalID, providerID, accou
 	return grant, nil
 }
 
+func validPlanningIdentity(value string) bool {
+	if !utf8.ValidString(value) || len(value) == 0 || len(value) > 128 || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, r := range value {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || strings.ContainsRune("._:/-", r)) {
+			return false
+		}
+	}
+	return true
+}
+
+func validSHA256(value string) bool {
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size && value == strings.ToLower(value)
+}
+
+func validRepositoryIdentity(value string) bool {
+	at := strings.LastIndex(value, "@")
+	if at <= 0 {
+		return false
+	}
+	repositoryURL, err := url.Parse(value[:at])
+	if err != nil || repositoryURL.Scheme != "https" || repositoryURL.Host == "" ||
+		repositoryURL.User != nil || repositoryURL.RawQuery != "" || repositoryURL.Fragment != "" ||
+		repositoryURL.Path == "" {
+		return false
+	}
+	commit := value[at+1:]
+	if len(commit) != 40 && len(commit) != 64 {
+		return false
+	}
+	decoded, err := hex.DecodeString(commit)
+	return err == nil && commit == strings.ToLower(commit) && (len(decoded) == 20 || len(decoded) == 32)
+}
+
 func (a PlanningAuthorization) Validate(job Job) error {
 	for name, value := range map[string]string{
-		"id": a.ID, "job_id": a.JobID, "request_sha256": a.RequestSHA256,
-		"principal_id": a.PrincipalID, "provider_id": a.ProviderID,
-		"account_id": a.AccountID, "configuration_sha256": a.ConfigurationSHA256,
-		"repository_id": a.RepositoryID,
+		"id": a.ID, "command_id": a.CommandID, "job_id": a.JobID, "request_sha256": a.RequestSHA256,
+		"principal_id": a.PrincipalID, "provider_id": a.ProviderID, "account_id": a.AccountID,
+		"configuration_sha256": a.ConfigurationSHA256,
 	} {
-		if !utf8.ValidString(value) || strings.TrimSpace(value) == "" {
-			return fmt.Errorf("PlanningAuthorization %s is required", name)
+		if !validPlanningIdentity(value) {
+			return fmt.Errorf("PlanningAuthorization %s is invalid", name)
 		}
+	}
+	if !strings.HasPrefix(a.CommandID, "cmd_") || len(a.CommandID) != len("cmd_")+32 {
+		return errors.New("PlanningAuthorization command identity is invalid")
+	}
+	if commandBytes, err := hex.DecodeString(strings.TrimPrefix(a.CommandID, "cmd_")); err != nil || len(commandBytes) != 16 {
+		return errors.New("PlanningAuthorization command identity is invalid")
+	}
+	if a.ID != PlanningAuthorizationID(a.CommandID) {
+		return errors.New("PlanningAuthorization ID does not match command identity")
 	}
 	if a.JobID != job.ID {
 		return errors.New("PlanningAuthorization Job identity mismatch")
@@ -215,18 +285,24 @@ func (a PlanningAuthorization) Validate(job Job) error {
 	if a.RequestSHA256 != job.IntakeProvenance.OriginalRequestSHA256 {
 		return errors.New("PlanningAuthorization original request digest mismatch")
 	}
-	configurationDigest, err := hex.DecodeString(a.ConfigurationSHA256)
-	if err != nil || len(configurationDigest) != sha256.Size || a.ConfigurationSHA256 != strings.ToLower(a.ConfigurationSHA256) {
+	if !validSHA256(a.ConfigurationSHA256) {
 		return errors.New("PlanningAuthorization configuration SHA-256 is invalid")
 	}
-	if a.ReadOnlyBoundary != PlanningReadOnlyBoundaryRepository {
-		return errors.New("PlanningAuthorization read-only boundary is invalid")
+	if !validRepositoryIdentity(a.RepositoryID) {
+		return errors.New("PlanningAuthorization repository identity is invalid")
+	}
+	if !validPlanningIdentity(a.ReadOnlyBoundary.Reference) || !validSHA256(a.ReadOnlyBoundary.SHA256) {
+		return errors.New("PlanningAuthorization read-only boundary identity is invalid")
+	}
+	if a.ReadOnlyBoundary.Mode != PlanningReadOnlyBoundarySnapshot &&
+		a.ReadOnlyBoundary.Mode != PlanningReadOnlyBoundaryDocuments {
+		return errors.New("PlanningAuthorization read-only boundary mode is invalid")
 	}
 	if len(a.PermittedEffects) != 1 || a.PermittedEffects[0] != PlanningEffectRepositoryRead {
 		return errors.New("PlanningAuthorization permits an unsupported effect")
 	}
-	if a.Budget.MaxTurns == 0 {
-		return errors.New("PlanningAuthorization max turns must be positive")
+	if a.Budget.MaxTurns == 0 || a.Budget.MaxTokens == 0 {
+		return errors.New("PlanningAuthorization budget must set positive turn and token limits")
 	}
 	if a.IssuedAt.IsZero() || a.Deadline.IsZero() || !a.Deadline.After(a.IssuedAt) {
 		return errors.New("PlanningAuthorization deadline must follow issue time")
@@ -283,15 +359,23 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
+	if uint64(len(j.PlanningAuthorizations)) > j.Revision-1 {
+		return fmt.Errorf("%w: PlanningAuthorization count exceeds aggregate revisions", ErrInvalidJob)
+	}
 	seenGrants := make(map[string]struct{}, len(j.PlanningAuthorizations))
+	var previousIssue time.Time
 	for _, grant := range j.PlanningAuthorizations {
 		if err := grant.Validate(j); err != nil {
 			return fmt.Errorf("%w: invalid PlanningAuthorization: %v", ErrInvalidJob, err)
+		}
+		if grant.IssuedAt.After(j.UpdatedAt) || (!previousIssue.IsZero() && grant.IssuedAt.Before(previousIssue)) {
+			return fmt.Errorf("%w: PlanningAuthorization append order is invalid", ErrInvalidJob)
 		}
 		if _, exists := seenGrants[grant.ID]; exists {
 			return fmt.Errorf("%w: duplicate PlanningAuthorization ID", ErrInvalidJob)
 		}
 		seenGrants[grant.ID] = struct{}{}
+		previousIssue = grant.IssuedAt
 	}
 	return nil
 }

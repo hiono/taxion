@@ -50,19 +50,21 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 		return createLocalJob(ctx, args[3:], stdout, stderr)
 	}
 	if args[0] != "job" || len(args) < 2 {
-		fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login、taxion dev job create、taxion job <show|list>")
+		fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login、taxion dev job create、taxion job <create|authorize-planning|show|list>")
 		return 2
 	}
 
 	switch args[1] {
 	case "create":
 		return createTrustedJob(ctx, args[2:], stdout, stderr)
+	case "authorize-planning":
+		return authorizePlanning(ctx, args[2:], stdout, stderr)
 	case "show":
 		return showJob(ctx, args[2:], stdout, stderr)
 	case "list":
 		return listJobs(ctx, args[2:], stdout, stderr)
 	default:
-		fmt.Fprintln(stderr, "コマンドを確認してください: taxion job <show|list>")
+		fmt.Fprintln(stderr, "コマンドを確認してください: taxion job <authorize-planning|show|list>")
 		return 2
 	}
 }
@@ -191,6 +193,105 @@ func createLocalJob(ctx context.Context, args []string, stdout, stderr io.Writer
 	return 0
 }
 
+func authorizePlanning(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("taxion job authorize-planning", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	provider := flags.String("provider", "", "Stable Provider identity")
+	account := flags.String("account", "", "Stable Provider account identity")
+	configurationSHA256 := flags.String("configuration-sha256", "", "SHA-256 of the non-secret Provider configuration")
+	repository := flags.String("repository", "", "HTTPS repository URL")
+	commit := flags.String("commit", "", "Immutable repository commit SHA")
+	readOnlyMode := flags.String("read-only-mode", "", "Read-only context mode: snapshot or documents")
+	readOnlyReference := flags.String("read-only-reference", "", "Immutable snapshot or document-set identity")
+	readOnlySHA256 := flags.String("read-only-sha256", "", "SHA-256 of the immutable read-only context")
+	maxTurns := flags.Uint("max-turns", 0, "Maximum planning turns")
+	maxTokens := flags.Uint64("max-tokens", 0, "Maximum planning tokens")
+	deadlineText := flags.String("deadline", "", "Grant deadline in RFC3339 format")
+	commandID := flags.String("command-id", "", "Command ID for idempotent retry")
+	path := flags.String("store", "", "Override the local Job database path")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 1 {
+		fmt.Fprintln(stderr, "usage: taxion job authorize-planning --provider id --account id --configuration-sha256 sha256 --repository https-url --commit sha --read-only-mode snapshot|documents --read-only-reference id --read-only-sha256 sha256 --max-turns n --max-tokens n --deadline RFC3339 <job-id>")
+		return 2
+	}
+	if strings.TrimSpace(*provider) == "" || strings.TrimSpace(*account) == "" ||
+		strings.TrimSpace(*configurationSHA256) == "" || strings.TrimSpace(*repository) == "" ||
+		strings.TrimSpace(*commit) == "" || strings.TrimSpace(*readOnlyReference) == "" ||
+		strings.TrimSpace(*readOnlySHA256) == "" || *maxTurns == 0 ||
+		*maxTurns > uint(^uint32(0)) || *maxTokens == 0 || strings.TrimSpace(*deadlineText) == "" {
+		fmt.Fprintln(stderr, "Provider、account、configuration、repository、read-only boundary、budget、deadlineは必須です")
+		return 2
+	}
+	if *readOnlyMode != domain.PlanningReadOnlyBoundarySnapshot &&
+		*readOnlyMode != domain.PlanningReadOnlyBoundaryDocuments {
+		fmt.Fprintln(stderr, "read-only-modeはsnapshotまたはdocumentsを指定してください")
+		return 2
+	}
+	deadline, err := time.Parse(time.RFC3339, *deadlineText)
+	if err != nil || !deadline.After(time.Now().UTC()) {
+		fmt.Fprintln(stderr, "deadlineは現在時刻より後のRFC3339日時を指定してください")
+		return 2
+	}
+	dbPath, err := resolveStorePath(*path)
+	if err != nil {
+		return report(stderr, err)
+	}
+	request := domain.PlanningAuthorizationRequest{
+		ProviderID: *provider,
+		AccountID: *account,
+		ConfigurationSHA256: *configurationSHA256,
+		RepositoryID: strings.TrimRight(*repository, "/") + "@" + *commit,
+		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
+			Mode: *readOnlyMode,
+			Reference: *readOnlyReference,
+			SHA256: *readOnlySHA256,
+		},
+		Budget: domain.PlanningBudget{MaxTurns: uint32(*maxTurns), MaxTokens: *maxTokens},
+		Deadline: deadline,
+	}
+	resolvedCommandID := strings.TrimSpace(*commandID)
+	if resolvedCommandID == "" {
+		resolvedCommandID, err = domain.NewID("cmd")
+		if err != nil {
+			return report(stderr, err)
+		}
+	}
+	principal, err := authenticate(ctx, stdout)
+	if err != nil {
+		return report(stderr, err)
+	}
+	return authorizePlanningWithPrincipal(ctx, flags.Arg(0), request, resolvedCommandID, dbPath, principal, stdout, stderr)
+}
+
+func authorizePlanningWithPrincipal(ctx context.Context, jobID string, request domain.PlanningAuthorizationRequest, commandID, dbPath string, principal auth.AuthenticatedPrincipal, stdout, stderr io.Writer) int {
+	if err := principal.Validate(); err != nil {
+		return report(stderr, err)
+	}
+	database, err := store.Open(ctx, dbPath)
+	if err != nil {
+		return report(stderr, err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		return report(stderr, err)
+	}
+	issuedAt := time.Now().UTC()
+	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), commandID, request, issuedAt)
+	if err != nil {
+		return report(stderr, err)
+	}
+	receipt, err := database.AddPlanningAuthorization(ctx, jobID, job.Revision, commandID, grant, principal)
+	if err != nil {
+		return report(stderr, err)
+	}
+	fmt.Fprintf(stdout, "PlanningAuthorization issued\nID: %s\nCommand ID: %s\nJob ID: %s\nState: %s\nRevision: %d\nDeadline: %s\n",
+		grant.ID, receipt.CommandID, receipt.JobID, job.State, receipt.Revision, grant.Deadline.Format(time.RFC3339))
+	return 0
+}
+
 func showJob(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("taxion job show", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -297,6 +398,7 @@ func printUsage(w io.Writer) {
 Usage:
   taxion auth login
   taxion job create --request "Trusted OIDC-authenticated DRAFT"
+  taxion job authorize-planning [scope and budget options] <job-id>
   taxion dev job create --request "Local untrusted DRAFT only"
   taxion job show <job-id>
   taxion job list

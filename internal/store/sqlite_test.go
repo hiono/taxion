@@ -575,21 +575,31 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 		t.Fatalf("GetJob() error = %v", err)
 	}
 	issuedAt := job.UpdatedAt.Add(time.Minute)
-	grant, err := domain.NewPlanningAuthorization(
-		"plan_auth_store", job, principal.PrincipalID(), "provider.test", "account.test",
-		strings.Repeat("a", 64), "repo:test/project", 8, issuedAt, issuedAt.Add(15*time.Minute),
-	)
+	request := domain.PlanningAuthorizationRequest{
+		ProviderID: "provider.test",
+		AccountID: "account.test",
+		ConfigurationSHA256: strings.Repeat("a", 64),
+		RepositoryID: "https://github.com/example/project@" + strings.Repeat("b", 40),
+		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
+			Mode: domain.PlanningReadOnlyBoundarySnapshot,
+			Reference: "snapshot_store",
+			SHA256: strings.Repeat("c", 64),
+		},
+		Budget: domain.PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+		Deadline: issuedAt.Add(15 * time.Minute),
+	}
+	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), "cmd_11111111111111111111111111111111", request, issuedAt)
 	if err != nil {
 		t.Fatalf("NewPlanningAuthorization() error = %v", err)
 	}
-	first, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_auth", grant, principal)
+	first, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_11111111111111111111111111111111", grant, principal)
 	if err != nil {
 		t.Fatalf("AddPlanningAuthorization() error = %v", err)
 	}
 	if first.Revision != 2 || first.PayloadSHA256 == "" {
 		t.Fatalf("receipt = %#v", first)
 	}
-	second, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_auth", grant, principal)
+	second, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_11111111111111111111111111111111", grant, principal)
 	if err != nil {
 		t.Fatalf("idempotent AddPlanningAuthorization() error = %v", err)
 	}
@@ -598,24 +608,30 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 	}
 	futureTimestampGrant := grant
 	futureTimestampGrant.IssuedAt = time.Now().Add(24 * time.Hour)
-	retried, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_auth", futureTimestampGrant, principal)
+	retried, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_11111111111111111111111111111111", futureTimestampGrant, principal)
 	if err != nil || retried != first {
 		t.Fatalf("retry with caller-supplied timestamp = %#v, %v; want %#v", retried, err, first)
 	}
 	changedGrant := grant
 	changedGrant.Budget.MaxTurns++
-	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_auth", changedGrant, principal); !errors.Is(err, ErrIdempotencyConflict) {
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_11111111111111111111111111111111", changedGrant, principal); !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("reused command ID error = %v, want ErrIdempotencyConflict", err)
 	}
-	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision+1, "cmd_planning_auth", grant, principal); !errors.Is(err, ErrIdempotencyConflict) {
-		t.Fatalf("reused command ID with a different expected revision error = %v, want ErrIdempotencyConflict", err)
+	retriedWithNewRevision, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision+1, "cmd_11111111111111111111111111111111", grant, principal)
+	if err != nil || retriedWithNewRevision != first {
+		t.Fatalf("idempotent retry with current expected revision = %#v, %v; want %#v", retriedWithNewRevision, err, first)
 	}
-	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision+1, "cmd_other_grant", grant, principal); err == nil {
-		t.Fatal("AddPlanningAuthorization() accepted a duplicate grant ID")
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision+1, "cmd_44444444444444444444444444444444", grant, principal); err == nil {
+		t.Fatal("AddPlanningAuthorization() accepted a command ID that differs from the grant")
 	}
-	staleGrant := grant
-	staleGrant.ID = "plan_auth_stale_revision"
-	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_stale_revision", staleGrant, principal); !errors.Is(err, ErrIdempotencyConflict) {
+	staleRequest := request
+	staleRequest.Deadline = issuedAt.Add(20 * time.Minute)
+	staleGrant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(),
+		"cmd_33333333333333333333333333333333", staleRequest, issuedAt)
+	if err != nil {
+		t.Fatalf("NewPlanningAuthorization() for stale revision error = %v", err)
+	}
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_33333333333333333333333333333333", staleGrant, principal); !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("stale expected revision error = %v, want ErrIdempotencyConflict", err)
 	}
 	if err := database.Close(); err != nil {
@@ -630,13 +646,13 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob() error = %v", err)
 	}
-	if got.Revision != 2 || len(got.PlanningAuthorizations) != 1 || got.PlanningAuthorizations[0].ID != grant.ID {
+	if got.Revision != 2 || got.State != domain.JobDraft || len(got.PlanningAuthorizations) != 1 || got.PlanningAuthorizations[0].ID != grant.ID {
 		t.Fatalf("persisted PlanningAuthorization = %#v", got)
 	}
 	if !got.PlanningAuthorizations[0].IssuedAt.Equal(first.CreatedAt) {
 		t.Fatalf("persisted issue time = %s, receipt time = %s", got.PlanningAuthorizations[0].IssuedAt, first.CreatedAt)
 	}
-	replayed, err := reopened.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_auth", grant, principal)
+	replayed, err := reopened.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_11111111111111111111111111111111", grant, principal)
 	if err != nil || replayed != first {
 		t.Fatalf("reopened idempotent retry = %#v, %v; want %#v", replayed, err, first)
 	}
@@ -651,7 +667,7 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 	); err != nil {
 		t.Fatalf("remove persisted grant fixture: %v", err)
 	}
-	if _, err := reopened.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_auth", grant, principal); !errors.Is(err, ErrIntegrity) {
+	if _, err := reopened.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_11111111111111111111111111111111", grant, principal); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("retry after removing persisted grant error = %v, want ErrIntegrity", err)
 	}
 }
@@ -670,14 +686,24 @@ func TestAddPlanningAuthorizationRejectsWrongPrincipalAndRollsBack(t *testing.T)
 		t.Fatalf("GetJob() error = %v", err)
 	}
 	issuedAt := job.UpdatedAt.Add(time.Minute)
-	grant, err := domain.NewPlanningAuthorization(
-		"plan_auth_atomic", job, principal.PrincipalID(), "provider.test", "account.test",
-		strings.Repeat("b", 64), "repo:test/project", 4, issuedAt, issuedAt.Add(10*time.Minute),
-	)
+	request := domain.PlanningAuthorizationRequest{
+		ProviderID: "provider.test",
+		AccountID: "account.test",
+		ConfigurationSHA256: strings.Repeat("b", 64),
+		RepositoryID: "https://github.com/example/project@" + strings.Repeat("b", 40),
+		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
+			Mode: domain.PlanningReadOnlyBoundaryDocuments,
+			Reference: "documents_atomic",
+			SHA256: strings.Repeat("c", 64),
+		},
+		Budget: domain.PlanningBudget{MaxTurns: 4, MaxTokens: 50000},
+		Deadline: issuedAt.Add(10 * time.Minute),
+	}
+	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), "cmd_22222222222222222222222222222222", request, issuedAt)
 	if err != nil {
 		t.Fatalf("NewPlanningAuthorization() error = %v", err)
 	}
-	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_wrong_planner", grant, otherPrincipal); err == nil {
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_55555555555555555555555555555555", grant, otherPrincipal); err == nil {
 		t.Fatal("AddPlanningAuthorization() accepted a different HUMAN Principal")
 	}
 	if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_planning_receipt
@@ -686,7 +712,7 @@ func TestAddPlanningAuthorizationRejectsWrongPrincipalAndRollsBack(t *testing.T)
 		BEGIN SELECT RAISE(ABORT, 'simulated receipt failure'); END;`); err != nil {
 		t.Fatalf("create failure trigger: %v", err)
 	}
-	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_atomic", grant, principal); err == nil {
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_22222222222222222222222222222222", grant, principal); err == nil {
 		t.Fatal("AddPlanningAuthorization() succeeded despite receipt insert failure")
 	}
 	got, err := database.GetJob(ctx, job.ID)
@@ -695,5 +721,76 @@ func TestAddPlanningAuthorizationRejectsWrongPrincipalAndRollsBack(t *testing.T)
 	}
 	if got.Revision != 1 || len(got.PlanningAuthorizations) != 0 {
 		t.Fatalf("Job changed despite transaction rollback: %#v", got)
+	}
+}
+
+func TestAddPlanningAuthorizationAppendsWithoutChangingExistingFacts(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx := context.Background()
+	principal := newAuthenticatedTestPrincipal(t)
+	if _, err := database.CreateTrustedDraftJob(ctx, "job_planning_append", "Plan this request.", "cmd_planning_append_create", principal.AuthenticatedAt(), principal); err != nil {
+		t.Fatalf("CreateTrustedDraftJob() error = %v", err)
+	}
+	job, err := database.GetJob(ctx, "job_planning_append")
+	if err != nil {
+		t.Fatalf("GetJob() error = %v", err)
+	}
+	firstIssuedAt := time.Now().UTC()
+	firstRequest := domain.PlanningAuthorizationRequest{
+		ProviderID: "provider.test",
+		AccountID: "account.test",
+		ConfigurationSHA256: strings.Repeat("a", 64),
+		RepositoryID: "https://github.com/example/project@" + strings.Repeat("b", 40),
+		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
+			Mode: domain.PlanningReadOnlyBoundarySnapshot,
+			Reference: "snapshot_first",
+			SHA256: strings.Repeat("c", 64),
+		},
+		Budget: domain.PlanningBudget{MaxTurns: 4, MaxTokens: 50000},
+		Deadline: firstIssuedAt.Add(time.Hour),
+	}
+	firstGrant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(),
+		"cmd_66666666666666666666666666666666", firstRequest, firstIssuedAt)
+	if err != nil {
+		t.Fatalf("NewPlanningAuthorization() first error = %v", err)
+	}
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision,
+		firstGrant.CommandID, firstGrant, principal); err != nil {
+		t.Fatalf("AddPlanningAuthorization() first error = %v", err)
+	}
+	afterFirst, err := database.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetJob() after first grant error = %v", err)
+	}
+	originalFirst := afterFirst.PlanningAuthorizations[0]
+
+	secondIssuedAt := time.Now().UTC()
+	secondRequest := firstRequest
+	secondRequest.ConfigurationSHA256 = strings.Repeat("d", 64)
+	secondRequest.ReadOnlyBoundary = domain.PlanningReadOnlyBoundary{
+		Mode: domain.PlanningReadOnlyBoundaryDocuments,
+		Reference: "documents_second",
+		SHA256: strings.Repeat("e", 64),
+	}
+	secondRequest.Budget = domain.PlanningBudget{MaxTurns: 6, MaxTokens: 75000}
+	secondRequest.Deadline = secondIssuedAt.Add(2 * time.Hour)
+	secondGrant, err := domain.NewPlanningAuthorization(afterFirst, principal.PrincipalID(),
+		"cmd_77777777777777777777777777777777", secondRequest, secondIssuedAt)
+	if err != nil {
+		t.Fatalf("NewPlanningAuthorization() second error = %v", err)
+	}
+	if _, err := database.AddPlanningAuthorization(ctx, afterFirst.ID, afterFirst.Revision,
+		secondGrant.CommandID, secondGrant, principal); err != nil {
+		t.Fatalf("AddPlanningAuthorization() second error = %v", err)
+	}
+	finalJob, err := database.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetJob() final error = %v", err)
+	}
+	if finalJob.State != domain.JobDraft || finalJob.Revision != 3 || len(finalJob.PlanningAuthorizations) != 2 {
+		t.Fatalf("final Job = %#v", finalJob)
+	}
+	if !reflect.DeepEqual(finalJob.PlanningAuthorizations[0], originalFirst) {
+		t.Fatalf("first PlanningAuthorization changed: got %#v, want %#v", finalJob.PlanningAuthorizations[0], originalFirst)
 	}
 }
