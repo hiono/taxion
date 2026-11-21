@@ -705,6 +705,8 @@ func (j Job) Validate() error {
 		seenEffects[decision.ID] = struct{}{}
 	}
 	seenResumes := make(map[string]struct{}, len(j.PlanningResumeIntents))
+	previousResumeRevision := make(map[string]uint64)
+	previousResumeCreatedAt := make(map[string]time.Time)
 	for _, resume := range j.PlanningResumeIntents {
 		if err := resume.Validate(j); err != nil {
 			return fmt.Errorf("%w: invalid PlanningResumeIntent: %v", ErrInvalidJob, err)
@@ -712,10 +714,16 @@ func (j Job) Validate() error {
 		if resume.CreatedAt.After(j.UpdatedAt) || resume.CreatedRevision > j.Revision {
 			return fmt.Errorf("%w: PlanningResumeIntent append order is invalid", ErrInvalidJob)
 		}
+		if previousRevision := previousResumeRevision[resume.RoleExecutionID]; previousRevision != 0 &&
+			(resume.CreatedRevision <= previousRevision || resume.CreatedAt.Before(previousResumeCreatedAt[resume.RoleExecutionID])) {
+			return fmt.Errorf("%w: PlanningResumeIntent sequence is not append ordered", ErrInvalidJob)
+		}
 		if _, exists := seenResumes[resume.ID]; exists {
 			return fmt.Errorf("%w: duplicate PlanningResumeIntent ID", ErrInvalidJob)
 		}
 		seenResumes[resume.ID] = struct{}{}
+		previousResumeRevision[resume.RoleExecutionID] = resume.CreatedRevision
+		previousResumeCreatedAt[resume.RoleExecutionID] = resume.CreatedAt
 	}
 	resumeByID := make(map[string]PlanningResumeIntent, len(j.PlanningResumeIntents))
 	for _, resume := range j.PlanningResumeIntents {
@@ -760,7 +768,8 @@ func (j Job) Validate() error {
 			}
 			previous := observations[i-1]
 			if previous.Status != PlanningResumeUnknown || observation.Status == PlanningResumeUnknown ||
-				!observation.ReconcilesUnknown || observation.CreatedRevision <= previous.CreatedRevision {
+				!observation.ReconcilesUnknown || observation.CreatedRevision <= previous.CreatedRevision ||
+				observation.CreatedAt.Before(previous.CreatedAt) {
 				return fmt.Errorf("%w: invalid PlanningResumeObservation reconciliation sequence for %s", ErrInvalidJob, resumeID)
 			}
 		}

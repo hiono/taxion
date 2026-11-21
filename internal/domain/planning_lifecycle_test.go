@@ -185,3 +185,70 @@ func TestPlanningResumeUnknownRequiresSameOperationReconciliation(t *testing.T) 
 		t.Fatalf("Job.Validate after resume reconciliation: %v", err)
 	}
 }
+
+func TestPlanningResumeFactsRejectNonAppendOrderedHistory(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", strings.Repeat("a", 64), 100, now)
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+
+	first, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("b", 64), true, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("first resume: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, first)
+	job.Revision++
+	job.UpdatedAt = first.CreatedAt
+	attached, err := NewPlanningResumeObservation(job, first.ID, principal, "cmd_cccccccccccccccccccccccccccccccc", PlanningResumeAttached, strings.Repeat("c", 64), false, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("first resume observation: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, attached)
+	job.Revision++
+	job.UpdatedAt = attached.CreatedAt
+
+	second, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_dddddddddddddddddddddddddddddddd", strings.Repeat("d", 64), true, now.Add(3*time.Second))
+	if err != nil {
+		t.Fatalf("second resume: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, second)
+	job.Revision++
+	job.UpdatedAt = second.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("valid resume history: %v", err)
+	}
+
+	job.PlanningResumeIntents[1].CreatedRevision = first.CreatedRevision
+	if err := job.Validate(); err == nil {
+		t.Fatal("Job.Validate accepted non-monotonic resume intent revisions")
+	}
+	job.PlanningResumeIntents[1] = second
+
+	unknown, err := NewPlanningResumeObservation(job, second.ID, principal, "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", PlanningResumeUnknown, "", false, now.Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("second resume UNKNOWN: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, unknown)
+	job.Revision++
+	job.UpdatedAt = unknown.CreatedAt
+	resolved, err := NewPlanningResumeObservation(job, second.ID, principal, "cmd_ffffffffffffffffffffffffffffffff", PlanningResumeAttached, strings.Repeat("e", 64), true, now.Add(5*time.Second))
+	if err != nil {
+		t.Fatalf("second resume reconciliation: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, resolved)
+	job.Revision++
+	job.UpdatedAt = resolved.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("valid resume observation history: %v", err)
+	}
+
+	job.PlanningResumeObservations[len(job.PlanningResumeObservations)-1].CreatedAt = unknown.CreatedAt.Add(-time.Second)
+	if err := job.Validate(); err == nil {
+		t.Fatal("Job.Validate accepted out-of-order resume observations")
+	}
+}
