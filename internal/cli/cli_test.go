@@ -698,7 +698,7 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 		t.Fatalf("GetJob before proposal: %v", err)
 	}
 	_, revision, err := database.AddJobContractRevision(
-		ctx, jobID, job.Revision, "cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2", execution.ID,
+		ctx, jobID, job.Revision, "cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2", execution.ID,
 		sourceResult.ID, sourceResult.ContentSHA256, contract,
 	)
 	if err != nil {
