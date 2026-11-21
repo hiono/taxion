@@ -297,6 +297,9 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 	if !foundStart {
 		return PlanningTurnIntent{}, errors.New("Provider Start intent was not found")
 	}
+	if err := validateProviderStartSession(job, start, providerSessionID, job.Revision+1, now); err != nil {
+		return PlanningTurnIntent{}, err
+	}
 	var count uint32
 	var tokensUsed uint64
 	for _, previous := range job.PlanningTurnIntents {
@@ -390,6 +393,9 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 		if start.RoleExecutionID == execution.ID {
 			if t.CreatedRevision <= start.CreatedRevision || t.CreatedAt.Before(start.CreatedAt) {
 				return errors.New("PlanningTurnIntent precedes Provider Start intent")
+			}
+			if err := validateProviderStartSession(job, start, t.ProviderSessionID, t.CreatedRevision, t.CreatedAt); err != nil {
+				return err
 			}
 			foundStart = true
 			break
