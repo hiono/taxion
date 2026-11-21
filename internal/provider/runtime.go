@@ -203,6 +203,29 @@ func (r *Runtime) Usage(ctx context.Context, request UsageRequest) (Usage, error
 	return result, nil
 }
 
+func (r *Runtime) ReplayEvents(ctx context.Context, request ReplayEventsRequest) (EventPage, error) {
+	if err := request.Validate(); err != nil {
+		return EventPage{}, ErrProviderInvalidRequest
+	}
+	capabilities, err := r.liveCapabilities(ctx)
+	if err != nil {
+		return EventPage{}, err
+	}
+	if !capabilities.SupportsEventReplay() {
+		return EventPage{}, ErrUnsupportedCapability
+	}
+	page, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (EventPage, error) {
+		return r.adapter.ReplayEvents(ctx, request, lease)
+	})
+	if err != nil {
+		return EventPage{}, safeAdapterError(err)
+	}
+	if err := page.Validate(request); err != nil {
+		return EventPage{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
+	return page, nil
+}
+
 func (r *Runtime) liveCapabilities(ctx context.Context) (Capabilities, error) {
 	if r.adapter.Identity() != r.identity {
 		return Capabilities{}, ErrUnsupportedCapability
