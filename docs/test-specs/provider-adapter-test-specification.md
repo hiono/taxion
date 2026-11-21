@@ -56,6 +56,8 @@ Provider Adapterの契約、Capability gate、Credential isolation、Controller 
 | DOM-012 | Result finality | Final=falseをterminal resultとして採用 | 拒否 |
 | DOM-013 | Event identity | 重複EventID / cursor | 同一内容のみ再送収束、異なる内容は拒否 |
 | DOM-014 | Event cursor | cursor欠落・逆行・分岐 | 拒否 |
+| DOM-015 | Start binding | accepted Start observationなしでTurn intent作成 | 拒否 |
+| DOM-016 | Session binding | accepted Start observationと異なるSessionIDでTurn intent作成 | 拒否 |
 
 ## 5. Adapter contract tests
 
@@ -179,6 +181,9 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-014 | Usage未確定 | budget finalization / completionを拒否 |
 | CTR-015 | credential leak | resultを保存せずUNKNOWN |
 | CTR-016 | Observation保存失敗 | Provider結果を成功扱いせずUNKNOWN / recovery対象 |
+| CTR-017 | Start intent ordering | Start intent commit前にAdapterを呼び出す | テスト失敗 |
+| CTR-018 | Ambiguous Start | UNKNOWN後に同じOperationIDでLookup | 新しいStartを発行せずObservationを追記 |
+| CTR-019 | Expired grant recovery | 期限後に既存Startを照合 | Lookupは許可し、NOT_FOUND後の新規Startは拒否 |
 
 ## 11. Regression tests
 
