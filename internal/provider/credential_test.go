@@ -52,3 +52,21 @@ func TestCredentialLeaseRejectsEmptySecretAndNilCallback(t *testing.T) {
 		t.Fatal("nil callback was accepted")
 	}
 }
+
+func TestCredentialLeaseCanCloseFromCallback(t *testing.T) {
+	lease, err := NewCredentialLease([]byte("test-only-provider-secret"))
+	if err != nil {
+		t.Fatalf("NewCredentialLease: %v", err)
+	}
+	if err := lease.WithSecret(func(value []byte) error {
+		if string(value) != "test-only-provider-secret" {
+			t.Fatalf("credential copy = %q", value)
+		}
+		return lease.Close()
+	}); err != nil {
+		t.Fatalf("WithSecret callback Close: %v", err)
+	}
+	if err := lease.WithSecret(func([]byte) error { return nil }); !errors.Is(err, ErrCredentialLeaseClosed) {
+		t.Fatalf("WithSecret after callback Close = %v", err)
+	}
+}
