@@ -173,21 +173,32 @@ func (o ProviderEventObservation) Validate(job Job) error {
 		}
 		if o.OperationID == start.ID {
 			if o.Kind == ProviderEventOperationAccepted || o.Kind == ProviderEventSessionAttached ||
-				o.Kind == ProviderEventSessionDetached || o.Kind == ProviderEventSessionStopped {
+				o.Kind == ProviderEventSessionDetached {
 				return nil
 			}
 			return errors.New("Provider event kind is not valid for a Start operation")
 		}
-		if o.Kind != ProviderEventSessionAttached && o.Kind != ProviderEventSessionDetached {
-			return errors.New("Provider event operation does not match the Start intent")
+		for _, stop := range job.ProviderStopIntents {
+			if stop.OperationID == o.OperationID && stop.RoleExecutionID == o.RoleExecutionID &&
+				stop.SessionID == o.SessionID && o.CreatedRevision > stop.CreatedRevision {
+				if o.Kind == ProviderEventOperationAccepted || o.Kind == ProviderEventSessionDetached ||
+					o.Kind == ProviderEventSessionStopped {
+					return nil
+				}
+				return errors.New("Provider event kind is not valid for a Stop operation")
+			}
 		}
 		for _, resume := range job.PlanningResumeIntents {
 			if resume.OperationID == o.OperationID && resume.RoleExecutionID == o.RoleExecutionID &&
 				resume.ProviderSessionID == o.SessionID && o.CreatedRevision > resume.CreatedRevision {
-				return nil
+				if o.Kind == ProviderEventOperationAccepted || o.Kind == ProviderEventSessionAttached ||
+					o.Kind == ProviderEventSessionDetached {
+					return nil
+				}
+				return errors.New("Provider event kind is not valid for a Resume operation")
 			}
 		}
-		return errors.New("Provider event observation Resume intent was not found")
+		return errors.New("Provider event observation operation intent was not found")
 	}
 	return nil
 }

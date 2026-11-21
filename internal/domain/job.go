@@ -41,6 +41,8 @@ type Job struct {
 	ProviderStartIntents                  []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
 	ProviderStartObservations             []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
 	ProviderEventObservations             []ProviderEventObservation  `json:"provider_event_observations,omitempty"`
+	ProviderStopIntents                           []ProviderStopIntent         `json:"provider_stop_intents,omitempty"`
+	ProviderStopObservations                      []ProviderStopObservation    `json:"provider_stop_observations,omitempty"`
 	ProviderLifecycleEnforcedFromRevision uint64                      `json:"provider_lifecycle_enforced_from_revision,omitempty"`
 	PlanningTurnIntents                   []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
 	PlanningTurnObservations              []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
@@ -563,7 +565,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
+	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
 	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
@@ -692,6 +694,79 @@ func (j Job) Validate() error {
 			}
 			if observation.Status != ProviderStartUnknown && !observation.ReconcilesUnknown {
 				return fmt.Errorf("%w: terminal Provider Start observation must reconcile UNKNOWN", ErrInvalidJob)
+			}
+		}
+	}
+	seenStopIntentIDs := make(map[string]struct{}, len(j.ProviderStopIntents))
+	seenStopIntentCommands := make(map[string]struct{}, len(j.ProviderStopIntents))
+	seenStopSessions := make(map[string]struct{}, len(j.ProviderStopIntents))
+	stopIntentsByOperation := make(map[string]ProviderStopIntent, len(j.ProviderStopIntents))
+	for _, intent := range j.ProviderStopIntents {
+		if err := intent.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid ProviderStopIntent: %v", ErrInvalidJob, err)
+		}
+		if intent.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: ProviderStopIntent append revision exceeds Job revision", ErrInvalidJob)
+		}
+		if _, exists := seenStopIntentIDs[intent.ID]; exists {
+			return fmt.Errorf("%w: duplicate ProviderStopIntent identity", ErrInvalidJob)
+		}
+		if _, exists := seenStopIntentCommands[intent.CommandID]; exists {
+			return fmt.Errorf("%w: duplicate ProviderStopIntent command identity", ErrInvalidJob)
+		}
+		sessionIdentity := intent.RoleExecutionID + "\x00" + intent.SessionID
+		if _, exists := seenStopSessions[sessionIdentity]; exists {
+			return fmt.Errorf("%w: duplicate ProviderStopIntent for Session", ErrInvalidJob)
+		}
+		seenStopIntentIDs[intent.ID] = struct{}{}
+		seenStopIntentCommands[intent.CommandID] = struct{}{}
+		seenStopSessions[sessionIdentity] = struct{}{}
+		stopIntentsByOperation[intent.OperationID] = intent
+	}
+	seenStopObservationIDs := make(map[string]struct{}, len(j.ProviderStopObservations))
+	seenStopObservationCommands := make(map[string]struct{}, len(j.ProviderStopObservations))
+	stopObservationsByOperation := make(map[string][]ProviderStopObservation)
+	for _, observation := range j.ProviderStopObservations {
+		if err := observation.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid ProviderStopObservation: %v", ErrInvalidJob, err)
+		}
+		if observation.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: ProviderStopObservation append revision exceeds Job revision", ErrInvalidJob)
+		}
+		if _, exists := seenStopObservationIDs[observation.ID]; exists {
+			return fmt.Errorf("%w: duplicate ProviderStopObservation identity", ErrInvalidJob)
+		}
+		if _, exists := seenStopObservationCommands[observation.CommandID]; exists {
+			return fmt.Errorf("%w: duplicate ProviderStopObservation command identity", ErrInvalidJob)
+		}
+		if _, exists := stopIntentsByOperation[observation.OperationID]; !exists {
+			return fmt.Errorf("%w: ProviderStopObservation has no Stop intent", ErrInvalidJob)
+		}
+		seenStopObservationIDs[observation.ID] = struct{}{}
+		seenStopObservationCommands[observation.CommandID] = struct{}{}
+		stopObservationsByOperation[observation.OperationID] = append(stopObservationsByOperation[observation.OperationID], observation)
+	}
+	for operationID, observations := range stopObservationsByOperation {
+		for i, observation := range observations {
+			if i == 0 {
+				if observation.ReconcilesUnknown {
+					return fmt.Errorf("%w: first ProviderStopObservation cannot reconcile UNKNOWN", ErrInvalidJob)
+				}
+				continue
+			}
+			previous := observations[i-1]
+			previousUnknown := !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
+			currentUnknown := !observation.Stopped && !observation.Quiescent && observation.EvidenceSHA256 == ""
+			if previous.Quiescent || observation.CreatedRevision <= previous.CreatedRevision ||
+				observation.CreatedAt.Before(previous.CreatedAt) {
+				return fmt.Errorf("%w: ProviderStopObservation order is invalid for Operation %s", ErrInvalidJob, operationID)
+			}
+			if previousUnknown {
+				if currentUnknown || !observation.ReconcilesUnknown {
+					return fmt.Errorf("%w: ProviderStopObservation must resolve prior UNKNOWN", ErrInvalidJob)
+				}
+			} else if observation.ReconcilesUnknown {
+				return fmt.Errorf("%w: ProviderStopObservation unexpectedly reconciles UNKNOWN", ErrInvalidJob)
 			}
 		}
 	}

@@ -407,6 +407,9 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 	if !foundStart {
 		return errors.New("PlanningTurnIntent Provider Start intent was not found")
 	}
+	if providerStopIntentExists(job, t.RoleExecutionID, t.ProviderSessionID, t.CreatedRevision) {
+		return errors.New("Planning Turn cannot be created after a Provider Stop intent")
+	}
 	if status, found := latestPlanningResumeStatus(job, t.RoleExecutionID, t.CreatedRevision); found && status != PlanningResumeAttached {
 		return errors.New("PlanningTurnIntent follows a resume without an attached Provider Session")
 	}
@@ -696,6 +699,9 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 	}
 	if latestPriorSessionTurn == nil || r.CreatedAt.Before(latestPriorSessionTurn.CreatedAt) {
 		return errors.New("PlanningResumeIntent does not follow the latest persisted turn for the same Provider Session")
+	}
+	if providerStopIntentExists(job, r.RoleExecutionID, r.ProviderSessionID, r.CreatedRevision) {
+		return errors.New("Planning Resume cannot be created after a Provider Stop intent")
 	}
 	if job.ProviderLifecycleEnforcedFromRevision > 0 &&
 		r.CreatedRevision >= job.ProviderLifecycleEnforcedFromRevision {
