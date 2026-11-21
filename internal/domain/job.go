@@ -195,6 +195,14 @@ func PlanningAuthorizationID(commandID string) string {
 }
 
 func NewPlanningAuthorization(job Job, principalID, commandID string, request PlanningAuthorizationRequest, issuedAt time.Time) (PlanningAuthorization, error) {
+	issuedAt = issuedAt.UTC().Round(0)
+	deadline := request.Deadline.UTC().Round(0)
+	if !deadline.After(issuedAt) {
+		if !deadline.After(job.CreatedAt) {
+			return PlanningAuthorization{}, errors.New("PlanningAuthorization deadline predates the Job")
+		}
+		issuedAt = deadline.Add(-time.Nanosecond)
+	}
 	grant := PlanningAuthorization{
 		ID:                  PlanningAuthorizationID(commandID),
 		CommandID:           commandID,
@@ -208,10 +216,16 @@ func NewPlanningAuthorization(job Job, principalID, commandID string, request Pl
 		ReadOnlyBoundary:    request.ReadOnlyBoundary,
 		PermittedEffects:    []string{PlanningEffectRepositoryRead},
 		Budget:              request.Budget,
-		IssuedAt:            issuedAt.UTC().Round(0),
-		Deadline:            request.Deadline.UTC().Round(0),
+		IssuedAt:            issuedAt,
+		Deadline:            deadline,
 	}
-	if err := grant.ValidateFor(job, principalID, issuedAt); err != nil {
+	if err := job.Validate(); err != nil {
+		return PlanningAuthorization{}, fmt.Errorf("validate PlanningAuthorization Job: %w", err)
+	}
+	if job.State != JobDraft || principalID != grant.PrincipalID {
+		return PlanningAuthorization{}, errors.New("PlanningAuthorization requires the authenticated HUMAN Principal and a DRAFT Job")
+	}
+	if err := grant.Validate(job); err != nil {
 		return PlanningAuthorization{}, err
 	}
 	return grant, nil

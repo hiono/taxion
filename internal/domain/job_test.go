@@ -318,3 +318,33 @@ func TestPlanningAuthorizationRequiresTrustedIntake(t *testing.T) {
 		t.Fatal("NewPlanningAuthorization() accepted a local Job without trusted provenance")
 	}
 }
+
+func TestPlanningAuthorizationCanReconstructExpiredIdempotentRetry(t *testing.T) {
+	job := newPlanningTestJob(t)
+	issuedAt := job.CreatedAt.Add(time.Minute)
+	request := PlanningAuthorizationRequest{
+		ProviderID:          "provider.test",
+		AccountID:           "account.test",
+		ConfigurationSHA256: strings.Repeat("a", 64),
+		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
+		ReadOnlyBoundary: PlanningReadOnlyBoundary{
+			Mode:      PlanningReadOnlyBoundarySnapshot,
+			Reference: "snapshot_1",
+			SHA256:    strings.Repeat("c", 64),
+		},
+		Budget:   PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+		Deadline: issuedAt.Add(time.Minute),
+	}
+	retryAt := request.Deadline.Add(time.Minute)
+	grant, err := NewPlanningAuthorization(job, job.IntakeProvenance.PrincipalID,
+		"cmd_88888888888888888888888888888888", request, retryAt)
+	if err != nil {
+		t.Fatalf("NewPlanningAuthorization() retry error = %v", err)
+	}
+	if !grant.IssuedAt.Before(grant.Deadline) {
+		t.Fatalf("reconstructed issue time %s does not precede deadline %s", grant.IssuedAt, grant.Deadline)
+	}
+	if err := grant.ValidateFor(job, grant.PrincipalID, retryAt); err == nil {
+		t.Fatal("ValidateFor() accepted an expired grant")
+	}
+}

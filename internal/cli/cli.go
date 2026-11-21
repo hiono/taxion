@@ -230,8 +230,8 @@ func authorizePlanning(ctx context.Context, args []string, stdout, stderr io.Wri
 		return 2
 	}
 	deadline, err := time.Parse(time.RFC3339, *deadlineText)
-	if err != nil || !deadline.After(time.Now().UTC()) {
-		fmt.Fprintln(stderr, "deadlineは現在時刻より後のRFC3339日時を指定してください")
+	if err != nil {
+		fmt.Fprintln(stderr, "deadlineはRFC3339形式で指定してください")
 		return 2
 	}
 	dbPath, err := resolveStorePath(*path)
