@@ -182,6 +182,9 @@ type fakePlanningProviderRuntime struct {
 	lookupCalls  int
 	lookupResult provider.LookupResult
 	lookupErr    error
+	replayPage   provider.EventPage
+	replayErr    error
+	replayCalls  int
 	startHook    func(context.Context, provider.StartRequest) error
 }
 
@@ -227,6 +230,14 @@ func (f *fakePlanningProviderRuntime) Lookup(_ context.Context, request provider
 		}
 	}
 	return result, nil
+}
+
+func (f *fakePlanningProviderRuntime) ReplayEvents(_ context.Context, _ provider.ReplayEventsRequest) (provider.EventPage, error) {
+	f.replayCalls++
+	if f.replayErr != nil {
+		return provider.EventPage{}, f.replayErr
+	}
+	return f.replayPage, nil
 }
 
 func newProviderControllerFixture(t *testing.T, runtime *fakePlanningProviderRuntime) (*ProviderController, *store.Store, auth.AuthenticatedPrincipal, string, string, []provider.ContextDocument) {

@@ -18,6 +18,7 @@ import (
 type ProviderExecutionStore interface {
 	PlanningLifecycleStore
 	StartTasklessPlanner(context.Context, string, uint64, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.RoleExecution, domain.ProviderStartIntent, error)
+	AddProviderEventObservation(context.Context, string, uint64, string, string, string, string, string, string, string, string, string, time.Time, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderEventObservation, error)
 }
 
 type PlanningProviderRuntime interface {
@@ -25,6 +26,7 @@ type PlanningProviderRuntime interface {
 	Capabilities(context.Context) (provider.Capabilities, error)
 	Start(context.Context, provider.StartRequest) (provider.StartResult, error)
 	Lookup(context.Context, provider.LookupRequest) (provider.LookupResult, error)
+	ReplayEvents(context.Context, provider.ReplayEventsRequest) (provider.EventPage, error)
 }
 
 type ProviderController struct {
@@ -165,6 +167,116 @@ func (c *ProviderController) StartPlanning(
 		return receipt, execution, intent, provider.StartResult{}, fmt.Errorf("persist Provider Start observation: %w", err)
 	}
 	return receipt, execution, intent, result, nil
+}
+
+type ProviderEventReplayResult struct {
+	Observations []domain.ProviderEventObservation
+	NextCursor   string
+	HasMore      bool
+}
+
+// ReplayProviderEvents appends Provider events to the JobAggregate. Replaying from
+// an earlier persisted cursor is allowed; deterministic event commands make it idempotent.
+func (c *ProviderController) ReplayProviderEvents(
+	ctx context.Context,
+	jobID, roleExecutionID, sessionID, afterCursor string,
+	principal auth.AuthenticatedPrincipal,
+) (ProviderEventReplayResult, error) {
+	result := ProviderEventReplayResult{NextCursor: afterCursor}
+	if ctx == nil {
+		return result, provider.ErrProviderInvalidRequest
+	}
+	if err := principal.Validate(); err != nil {
+		return result, err
+	}
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return result, err
+	}
+	if job.State != domain.JobDraft {
+		return result, errors.New("Provider event replay requires a DRAFT Job")
+	}
+	var execution domain.RoleExecution
+	foundExecution := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == roleExecutionID {
+			execution, foundExecution = candidate, true
+			break
+		}
+	}
+	if !foundExecution {
+		return result, errors.New("Provider event replay RoleExecution was not found")
+	}
+	grant, found := planningAuthorization(job, execution.PlanningAuthorizationID)
+	if !found || grant.PrincipalID != principal.PrincipalID() {
+		return result, errors.New("Provider event replay requires the authorized HUMAN Principal")
+	}
+	if err := grant.Validate(job); err != nil {
+		return result, err
+	}
+	if !providerIdentityMatches(c.runtime.Identity(), grant) {
+		return result, errors.New("Provider Runtime identity differs from PlanningAuthorization")
+	}
+	var startIntent domain.ProviderStartIntent
+	foundStart := false
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == execution.ID {
+			startIntent, foundStart = candidate, true
+			break
+		}
+	}
+	if !foundStart {
+		return result, errors.New("Provider event replay has no Start intent")
+	}
+	if err := startIntent.Validate(job, execution); err != nil {
+		return result, fmt.Errorf("validate Provider Start intent: %w", err)
+	}
+	startObservation, found := latestStartObservation(job, startIntent.ID)
+	if !found || startObservation.Status != domain.ProviderStartAccepted ||
+		startObservation.ProviderSessionID != sessionID {
+		return result, errors.New("Provider event replay requires the accepted Start Session")
+	}
+	request := provider.ReplayEventsRequest{SessionID: sessionID, AfterCursor: afterCursor}
+	if err := request.Validate(); err != nil {
+		return result, provider.ErrProviderInvalidRequest
+	}
+	cursorKnown := afterCursor == ""
+	for _, observation := range job.ProviderEventObservations {
+		if observation.SessionID == sessionID && observation.Cursor == afterCursor {
+			cursorKnown = true
+			break
+		}
+	}
+	if !cursorKnown {
+		return result, errors.New("Provider event replay cursor is not part of the persisted Session history")
+	}
+	page, err := c.runtime.ReplayEvents(ctx, request)
+	if err != nil {
+		return result, err
+	}
+	if err := page.Validate(request); err != nil {
+		return result, fmt.Errorf("validate Provider event page: %w", err)
+	}
+	currentJob := job
+	for _, event := range page.Events {
+		_, observation, err := c.store.AddProviderEventObservation(
+			ctx, jobID, currentJob.Revision, roleExecutionID, event.OperationID, event.TurnID,
+			sessionID, event.EventID, string(event.Kind), event.PreviousCursor, event.Cursor,
+			event.EvidenceSHA256, event.ObservedAt, principal,
+		)
+		if err != nil {
+			return result, fmt.Errorf("persist Provider event observation: %w", err)
+		}
+		result.Observations = append(result.Observations, observation)
+		result.NextCursor = observation.Cursor
+		currentJob, err = c.store.GetJob(ctx, jobID)
+		if err != nil {
+			return result, err
+		}
+	}
+	result.NextCursor = page.NextCursor
+	result.HasMore = page.HasMore
+	return result, nil
 }
 
 func (c *ProviderController) reconcileStart(
