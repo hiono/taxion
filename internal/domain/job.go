@@ -167,6 +167,7 @@ type PlanningReadOnlyBoundary struct {
 type PlanningAuthorizationRequest struct {
 	ProviderID          string                   `json:"provider_id"`
 	AccountID           string                   `json:"account_id"`
+	SDKVersion          string                   `json:"sdk_version"`
 	ConfigurationSHA256 string                   `json:"configuration_sha256"`
 	RepositoryID        string                   `json:"repository_id"`
 	ReadOnlyBoundary    PlanningReadOnlyBoundary `json:"read_only_boundary"`
@@ -182,6 +183,7 @@ type PlanningAuthorization struct {
 	PrincipalID         string                   `json:"principal_id"`
 	ProviderID          string                   `json:"provider_id"`
 	AccountID           string                   `json:"account_id"`
+	SDKVersion          string                   `json:"sdk_version"`
 	ConfigurationSHA256 string                   `json:"configuration_sha256"`
 	RepositoryID        string                   `json:"repository_id"`
 	ReadOnlyBoundary    PlanningReadOnlyBoundary `json:"read_only_boundary"`
@@ -215,6 +217,7 @@ type ProviderStartIntent struct {
 	PlanningAuthorizationID string                   `json:"planning_authorization_id"`
 	ProviderID              string                   `json:"provider_id"`
 	AccountID               string                   `json:"account_id"`
+	SDKVersion              string                   `json:"sdk_version"`
 	ConfigurationSHA256     string                   `json:"configuration_sha256"`
 	ReadOnlyBoundary        PlanningReadOnlyBoundary `json:"read_only_boundary"`
 	Budget                  PlanningBudget           `json:"budget"`
@@ -292,6 +295,7 @@ func NewTasklessPlannerStart(job Job, authorizationID, principalID, commandID, r
 		PlanningAuthorizationID: grant.ID,
 		ProviderID:              grant.ProviderID,
 		AccountID:               grant.AccountID,
+		SDKVersion:              grant.SDKVersion,
 		ConfigurationSHA256:     grant.ConfigurationSHA256,
 		ReadOnlyBoundary:        grant.ReadOnlyBoundary,
 		Budget:                  grant.Budget,
@@ -343,7 +347,7 @@ func (p ProviderStartIntent) Validate(job Job, execution RoleExecution) error {
 	if !validPlanningIdentity(p.ID) || !validCommandID(p.CommandID) ||
 		!validPlanningIdentity(p.JobID) || !validPlanningIdentity(p.RoleExecutionID) ||
 		!validPlanningIdentity(p.PlanningAuthorizationID) || !validPlanningIdentity(p.ProviderID) ||
-		!validPlanningIdentity(p.AccountID) || !validSHA256(p.ConfigurationSHA256) ||
+		!validPlanningIdentity(p.AccountID) || !validPlanningIdentity(p.SDKVersion) || !validSHA256(p.ConfigurationSHA256) ||
 		!validSHA256(p.RequestSHA256) {
 		return errors.New("Provider Start intent identity or digest is invalid")
 	}
@@ -360,7 +364,7 @@ func (p ProviderStartIntent) Validate(job Job, execution RoleExecution) error {
 			continue
 		}
 		if p.ProviderID != grant.ProviderID || p.AccountID != grant.AccountID ||
-			p.ConfigurationSHA256 != grant.ConfigurationSHA256 ||
+			p.SDKVersion != grant.SDKVersion || p.ConfigurationSHA256 != grant.ConfigurationSHA256 ||
 			p.ReadOnlyBoundary != grant.ReadOnlyBoundary || p.Budget != grant.Budget ||
 			!p.Deadline.Equal(grant.Deadline) {
 			return errors.New("Provider Start intent exceeds PlanningAuthorization scope")
@@ -399,6 +403,7 @@ func NewPlanningAuthorization(job Job, principalID, commandID string, request Pl
 		PrincipalID:         principalID,
 		ProviderID:          request.ProviderID,
 		AccountID:           request.AccountID,
+		SDKVersion:          request.SDKVersion,
 		ConfigurationSHA256: request.ConfigurationSHA256,
 		RepositoryID:        request.RepositoryID,
 		ReadOnlyBoundary:    request.ReadOnlyBoundary,
@@ -460,7 +465,7 @@ func (a PlanningAuthorization) Validate(job Job) error {
 	for name, value := range map[string]string{
 		"id": a.ID, "command_id": a.CommandID, "job_id": a.JobID, "request_sha256": a.RequestSHA256,
 		"principal_id": a.PrincipalID, "provider_id": a.ProviderID, "account_id": a.AccountID,
-		"configuration_sha256": a.ConfigurationSHA256,
+		"sdk_version": a.SDKVersion, "configuration_sha256": a.ConfigurationSHA256,
 	} {
 		if !validPlanningIdentity(value) {
 			return fmt.Errorf("PlanningAuthorization %s is invalid", name)
