@@ -554,9 +554,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	if uint64(len(j.PlanningAuthorizations)) > j.Revision-1 ||
-		uint64(len(j.RoleExecutions)) > j.Revision-1 ||
-		uint64(len(j.ProviderStartIntents)) > j.Revision-1 ||
+	if uint64(len(j.PlanningAuthorizations))+uint64(len(j.RoleExecutions)) > j.Revision-1 ||
 		len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}

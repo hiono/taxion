@@ -365,6 +365,16 @@ func TestJobRejectsRoleExecutionScopeMutationAndGrantReuse(t *testing.T) {
 	job.Revision = 3
 	job.UpdatedAt = now
 
+	underRevision := job
+	underRevision.Revision = 2
+	underRevision.RoleExecutions = append([]RoleExecution(nil), job.RoleExecutions...)
+	underRevision.RoleExecutions[0].CreatedRevision = 2
+	underRevision.ProviderStartIntents = append([]ProviderStartIntent(nil), job.ProviderStartIntents...)
+	underRevision.ProviderStartIntents[0].CreatedRevision = 2
+	if err := underRevision.Validate(); err == nil {
+		t.Fatal("Job.Validate() accepted more append-only facts than aggregate revisions")
+	}
+
 	mutatedExecution := execution
 	mutatedExecution.TaskID = "task_unapproved"
 	if err := mutatedExecution.Validate(job); err == nil {
