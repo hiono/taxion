@@ -39,6 +39,7 @@ type Job struct {
 	PlanningAuthorizations     []PlanningAuthorization     `json:"planning_authorizations,omitempty"`
 	RoleExecutions             []RoleExecution             `json:"role_executions,omitempty"`
 	ProviderStartIntents       []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
+	ProviderStartObservations  []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
 	PlanningTurnIntents        []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
 	PlanningTurnObservations   []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
 	PlanningEffectDecisions    []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
@@ -560,7 +561,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
+	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
 	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
@@ -623,6 +624,46 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: duplicate Provider Start operation ID", ErrInvalidJob)
 		}
 		seenOperations[intent.ID] = struct{}{}
+	}
+	seenStartObservations := make(map[string][]ProviderStartObservation)
+	seenStartObservationIDs := make(map[string]struct{}, len(j.ProviderStartObservations))
+	var previousStartObservationRevision uint64
+	var previousStartObservationAt time.Time
+	for _, observation := range j.ProviderStartObservations {
+		var start ProviderStartIntent
+		found := false
+		for _, candidate := range j.ProviderStartIntents {
+			if candidate.ID == observation.StartID {
+				start, found = candidate, true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("%w: Provider Start observation has no Start intent", ErrInvalidJob)
+		}
+		if err := observation.Validate(j, start); err != nil {
+			return fmt.Errorf("%w: invalid Provider Start observation: %v", ErrInvalidJob, err)
+		}
+		if observation.CreatedAt.After(j.UpdatedAt) ||
+			observation.CreatedRevision <= previousStartObservationRevision ||
+			(!previousStartObservationAt.IsZero() && observation.CreatedAt.Before(previousStartObservationAt)) {
+			return fmt.Errorf("%w: Provider Start observation append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenStartObservationIDs[observation.ID]; exists {
+			return fmt.Errorf("%w: duplicate Provider Start observation ID", ErrInvalidJob)
+		}
+		seenStartObservationIDs[observation.ID] = struct{}{}
+		seenStartObservations[observation.StartID] = append(seenStartObservations[observation.StartID], observation)
+		previousStartObservationRevision = observation.CreatedRevision
+		previousStartObservationAt = observation.CreatedAt
+	}
+	for startID, observations := range seenStartObservations {
+		if len(observations) > 2 || (len(observations) == 2 && observations[0].Status != ProviderStartUnknown) {
+			return fmt.Errorf("%w: invalid Provider Start observation history for %s", ErrInvalidJob, startID)
+		}
+		if len(observations) == 2 && (!observations[1].ReconcilesUnknown || observations[1].Status == ProviderStartUnknown) {
+			return fmt.Errorf("%w: invalid Provider Start observation reconciliation for %s", ErrInvalidJob, startID)
+		}
 	}
 	seenTurns := make(map[string]struct{}, len(j.PlanningTurnIntents))
 	turnByID := make(map[string]PlanningTurnIntent, len(j.PlanningTurnIntents))
