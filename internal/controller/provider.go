@@ -304,7 +304,6 @@ func latestStartObservation(job domain.Job, operationID string) (domain.Provider
 func providerIdentityMatches(identity provider.Identity, grant domain.PlanningAuthorization) bool {
 	return identity.ProviderID == grant.ProviderID &&
 		identity.AccountID == grant.AccountID &&
-		identity.SDKVersion == grant.SDKVersion &&
 		identity.ConfigurationSHA256 == grant.ConfigurationSHA256
 }
 
