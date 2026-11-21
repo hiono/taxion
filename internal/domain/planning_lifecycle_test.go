@@ -401,4 +401,3 @@ func TestPlanningLifecycleFactsFollowTheirPredecessorRevisions(t *testing.T) {
 		t.Fatal("PlanningBoundaryDecision accepted a revision before RoleExecution")
 	}
 }
-
