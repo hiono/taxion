@@ -388,6 +388,44 @@ func TestProviderControllerPersistsDefinitiveStartFailureWithoutLookupOrReplay(t
 	}
 }
 
+func TestProviderControllerReconcilesUnknownToFailedAfterDefinitiveRetry(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
+	}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	commandID := "cmd_cccccccccccccccccccccccccccccccc"
+	_, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err == nil {
+		t.Fatal("ambiguous Start error was not returned")
+	}
+	runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: domain.ProviderStartOperationID(commandID),
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	runtime.startErr = &provider.OperationError{Class: provider.FailureDefinitive, Code: provider.OperationCodeInvalidRequest}
+	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err == nil {
+		t.Fatal("definitive retry failure was not returned")
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after definitive retry failure: %v", err)
+	}
+	if len(job.ProviderStartObservations) != 2 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartUnknown ||
+		job.ProviderStartObservations[1].Status != domain.ProviderStartFailed ||
+		!job.ProviderStartObservations[1].ReconcilesUnknown {
+		t.Fatalf("UNKNOWN was not terminally reconciled as FAILED: %#v", job.ProviderStartObservations)
+	}
+	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err == nil || !strings.Contains(err.Error(), "definitively rejected") {
+		t.Fatalf("retry after terminal FAILED observation = %v", err)
+	}
+	if runtime.startCalls != 2 || runtime.lookupCalls != 1 {
+		t.Fatalf("terminal failure was replayed: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
+	}
+}
+
 func TestProviderControllerDoesNotStartAfterGrantDeadlineButAllowsLookupRecovery(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{
 		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
