@@ -252,7 +252,7 @@ func newProviderControllerFixture(t *testing.T, runtime *fakePlanningProviderRun
 	now := time.Now().UTC()
 	grantCommand := "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	request := domain.PlanningAuthorizationRequest{
-		ProviderID: "provider.test", AccountID: "account.primary", SDKVersion: "test-sdk/1",
+		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
@@ -270,7 +270,7 @@ func newProviderControllerFixture(t *testing.T, runtime *fakePlanningProviderRun
 	}
 	runtime.identity = provider.Identity{
 		ProviderID: grant.ProviderID, AccountID: grant.AccountID,
-		SDKVersion: grant.SDKVersion, ConfigurationSHA256: grant.ConfigurationSHA256,
+		SDKVersion: "test-sdk/1", ConfigurationSHA256: grant.ConfigurationSHA256,
 	}
 	runtime.capabilities = provider.Capabilities{
 		Identity: runtime.identity, StartIdempotency: true, StartLookup: true,
