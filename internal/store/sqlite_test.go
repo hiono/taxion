@@ -768,9 +768,9 @@ func TestAddPlanningAuthorizationAppendsWithoutChangingExistingFacts(t *testing.
 	secondRequest := firstRequest
 	secondRequest.ConfigurationSHA256 = strings.Repeat("d", 64)
 	secondRequest.ReadOnlyBoundary = domain.PlanningReadOnlyBoundary{
-		Mode: domain.PlanningReadOnlyBoundaryDocuments,
+		Mode:      domain.PlanningReadOnlyBoundaryDocuments,
 		Reference: "documents_second",
-		SHA256: strings.Repeat("e", 64),
+		SHA256:    strings.Repeat("e", 64),
 	}
 	secondRequest.Budget = domain.PlanningBudget{MaxTurns: 6, MaxTokens: 75000}
 	secondRequest.Deadline = secondIssuedAt.Add(2 * time.Hour)
