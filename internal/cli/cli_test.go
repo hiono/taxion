@@ -635,7 +635,8 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 		t.Fatalf("GetJob after Start intent: %v", err)
 	}
 	if _, _, err := database.AddProviderStartObservation(
-		ctx, jobID, job.Revision, intent.ID, "cmd_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+		ctx, jobID, job.Revision, intent.ID,
+		domain.ProviderStartObservationCommandID(intent.ID, domain.ProviderStartAccepted, "session_1", "receipt_1", strings.Repeat("d", 64), false),
 		domain.ProviderStartAccepted, "session_1", "receipt_1", strings.Repeat("d", 64), false, principal,
 	); err != nil {
 		t.Fatalf("AddProviderStartObservation: %v", err)
