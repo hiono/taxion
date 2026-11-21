@@ -1,0 +1,71 @@
+# ADR-000: Architecture Decision Records の管理規約
+
+Date: 2026-11-20
+
+## Status
+
+Accepted
+
+## Context
+
+設計判断、現行仕様、開発計画、変更履歴、検証証拠を混在させると、過去の状態を現行の正本と誤認します。ADRは設計判断を記録し、判断の根拠と適用範囲を読者が理解できる文書とします。
+
+## Decision
+
+### 1. ADRの役割と文書作成原則
+
+ADRは設計上の決定を記録する文書です。決定の背景と採用理由を簡潔に記述し、判断に不可欠な制約だけを明示します。網羅的な規則集や例外一覧にはせず、実装詳細や将来の可能性を記述しません。
+
+各ADRにはTitle and number、Date、Status、Context、Decision、Consequencesを記載します。Alternatives considered、Relationship to other ADRs、Security and operational impact、Acceptance criteria、Decision basis、Source decisionは、判断の理解に必要な場合だけ追加します。
+
+Decisionは採用する設計を肯定形で記述します。セキュリティ境界、認証・認可、不変条件、データ整合性など、判断の成立に不可欠な制約は明示します。否定形による重複説明や、実質的な判断に影響しない仮定上の例外は記載しません。
+
+### 2. 番号とファイル
+
+ADR番号は3桁とし、100の位をカテゴリ識別子とします。番号帯は分類であり、優先順位・重要度・規範性を表しません。
+
+| 番号帯 | カテゴリ |
+|---|---|
+| 000–099 | ADR Governance |
+| 100–199 | Product & Governance |
+| 200–299 | Domain Model |
+| 300–399 | Collaboration |
+| 400–499 | Execution & Runtime |
+| 500–599 | Authorization & Security |
+| 600–699 | Persistence & Recovery |
+| 700–799 | Interface & Integration |
+| 800–899 | Quality & Evidence |
+| 900–999 | Infrastructure & Operations |
+
+ADRは `docs/adr/NNN-kebab-case-title.md` に保存し、番号は一意とします。新しい判断は主たる責務のカテゴリへ採番します。索引は `docs/adr/README.md` に集約します。
+
+### 3. 適用階層
+
+製品目的を定めるADRは個別の実装方式を暗黙に決めません。具体的なADRは上位の目的と安全境界に適合する設計を定めます。判断を置き換える場合は、後続ADRで対象と範囲を明示します。
+
+### 4. 情報源と再現可能性
+
+現行設計判断はAccepted ADR、現在の製品動作は製品仕様、再現可能な受入条件はテスト仕様を正本とします。非公開資料や過去の会話を参照しなくても、判断自体を理解できる内容にします。公開仕様・標準への参照は、判断に必要な要点を補う場合に使用します。
+
+既存実装を再利用する場合は、出所、利用条件、設計適合性、安全性、保守性および受入れ証拠を確認します。
+
+### 5. 文書体系
+
+| 文書 | 役割 |
+|---|---|
+| ADR | 採用したアーキテクチャ判断 |
+| 製品仕様 | 現在の製品動作と利用者との契約 |
+| テスト仕様 | 再現可能な検証・受入条件 |
+| 開発・運用文書 | 作業手順、品質ゲート、調査・復旧手順 |
+| 計画情報 | TODO、ロードマップ、開発・実験計画 |
+| GitHub Issue / PR / Actions | 作業履歴、差分・レビュー、対象SHAに結び付く実行証拠 |
+
+ADRには将来も有効な設計判断を記録します。仕様、テスト条件、手順、可変計画、作業履歴を複製しません。
+
+## Consequences
+
+ADRは判断の根拠と適用範囲を理解するための文書となり、詳細な仕様・手順・履歴との責務が分離されます。各ADRの内容は本原則に従って簡潔に保ちます。
+
+## Relationship to other ADRs
+
+ADR-004は、本ADRの文書統治原則に従って情報の正本と記録先を定義します。各領域のADRは製品・ドメイン・実行・安全に関する具体的な決定を定義します。

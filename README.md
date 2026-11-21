@@ -21,7 +21,9 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 3. Job の同一性、承認、対象・資源境界、禁止副作用、認証・認可、データ整合性を強制する。
 4. 会話、提案、Role の判断だけで実行権限を拡張しない。
 5. ドメイン不変条件は生成・変更・保存・復元・外部入力の全経路で強制する。
-6. 合成テスト、SDK互換性、実Provider実行、実Job完遂の証拠を混同しない。
+6. Taxion内部6 Actor通信はJobMessage、外部Agent相互運用はA2Aとし、両者を混同しない。
+7. Observation、Conformance、Admission、Execution Permissionを分離し、観測や受入れから実行権限を推論しない。
+8. 合成テスト、SDK互換性、実Provider実行、実Job完遂の証拠を混同しない。
 
 ## 現在利用できる機能
 
@@ -32,6 +34,16 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 JobはSQLiteへtransactionで保存し、Command receiptとpayload hashを照合します。既定の保存先はOSのユーザー設定ディレクトリ配下の taxion/jobs.sqlite です。`--store` で保存先を明示できます。
 
 Planner、PlanningAuthorization、JobContractの承認、Role実行、Provider連携、Handoff、Job完了は未実装です。DRAFT Jobの作成・読取りができることを、Job完遂機能の完成と扱いません。機能の実装状態はコード、テスト、対象HEADのCIによって確認します。
+
+## 仕様・設計・受入れ
+
+- [Product Contract](docs/specifications/product-contract.md): 利用者シナリオ、Job lifecycle、権限、内部JobMessage、外部A2A、永続化、Worktreeの製品契約。
+- [Runtime Boundaries](docs/design/runtime-boundaries.md): 論理コンポーネント、信頼境界、Command / Provider / A2A / Recoveryのデータフロー。
+- [Product Acceptance Test Specification](docs/test-specs/product-acceptance.md): 証拠水準とJob完遂を確認する受入れシナリオ。
+
+## 開発・運用
+
+開発ループは[Development Agent Workflow](docs/development/agent-workflow.md)、品質ゲートは[Development Quality Gates](docs/development/quality-gates.md)、Actions調査とFixup手順は[GitHub Actions and Fixup Runbook](docs/development/github-actions-and-fixup.md)を参照してください。これらの開発運用条件は製品の受入れシナリオとは分離して管理します。
 
 ## 設計判断
 
