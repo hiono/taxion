@@ -44,7 +44,7 @@ type Job struct {
 	ProviderStopIntents                   []ProviderStopIntent        `json:"provider_stop_intents,omitempty"`
 	ProviderStopObservations              []ProviderStopObservation   `json:"provider_stop_observations,omitempty"`
 	ProviderResultObservations            []ProviderResultObservation `json:"provider_result_observations,omitempty"`
-	ProviderUsageObservations              []ProviderUsageObservation  `json:"provider_usage_observations,omitempty"`
+	ProviderUsageObservations             []ProviderUsageObservation  `json:"provider_usage_observations,omitempty"`
 	ProviderLifecycleEnforcedFromRevision uint64                      `json:"provider_lifecycle_enforced_from_revision,omitempty"`
 	PlanningTurnIntents                   []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
 	PlanningTurnObservations              []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`

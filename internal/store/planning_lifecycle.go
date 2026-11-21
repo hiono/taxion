@@ -515,9 +515,9 @@ func (s *Store) AddProviderUsageObservation(
 	commandID := domain.ProviderUsageObservationCommandID(operationID, turnID, sessionID, usageID, tokens, complete, evidenceSHA256)
 	request := struct {
 		JobID, RoleExecutionID, OperationID, TurnID, SessionID, UsageID string
-		Tokens                                                        uint64
-		Complete                                                      bool
-		EvidenceSHA256, PrincipalID                                   string
+		Tokens                                                          uint64
+		Complete                                                        bool
+		EvidenceSHA256, PrincipalID                                     string
 	}{
 		jobID, roleExecutionID, operationID, turnID, sessionID, usageID,
 		tokens, complete, evidenceSHA256, principal.PrincipalID(),
