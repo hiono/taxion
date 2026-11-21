@@ -224,7 +224,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if _, _, err := database.AddPlanningResumeIntent(ctx, jobID, job.Revision, executionID, "session_1", "cmd_88888888888888888888888888888888", strings.Repeat("2", 64), true, principal); err == nil {
 		t.Fatal("new resume was allowed while previous resume remained UNKNOWN")
 	}
-	_, resumeResolved, err := database.AddPlanningResumeObservation(ctx, jobID, job.Revision, resume.ID, "cmd_99999999999999999999999999999999", domain.PlanningResumeAttached, strings.Repeat("3", 64), true, principal)
+	_, resumeResolved, err := database.AddPlanningResumeObservation(ctx, jobID, job.Revision, resume.ID, "cmd_abcdefabcdefabcdefabcdefabcdefab", domain.PlanningResumeAttached, strings.Repeat("3", 64), true, principal)
 	if err != nil || !resumeResolved.ReconcilesUnknown {
 		t.Fatalf("reconcile resume UNKNOWN: %#v %v", resumeResolved, err)
 	}
