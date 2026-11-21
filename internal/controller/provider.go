@@ -68,8 +68,23 @@ func (c *ProviderController) StartPlanning(
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, provider.StartResult{}, errors.New("PlanningAuthorization was not found")
 	}
 	now := c.now()
-	if err := grant.ValidateFor(job, principal.PrincipalID(), now); err != nil {
+	if job.State != domain.JobDraft || grant.PrincipalID != principal.PrincipalID() {
+		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, provider.StartResult{}, errors.New("Provider Start requires the authorized HUMAN Principal and a DRAFT Job")
+	}
+	if err := grant.Validate(job); err != nil {
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, provider.StartResult{}, err
+	}
+	existingIntent := false
+	for _, existing := range job.ProviderStartIntents {
+		if existing.CommandID == commandID && existing.PlanningAuthorizationID == authorizationID {
+			existingIntent = true
+			break
+		}
+	}
+	if !existingIntent {
+		if err := grant.ValidateFor(job, principal.PrincipalID(), now); err != nil {
+			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, provider.StartResult{}, err
+		}
 	}
 	if !providerIdentityMatches(c.runtime.Identity(), grant) {
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, provider.StartResult{}, errors.New("Provider Runtime identity differs from PlanningAuthorization")
