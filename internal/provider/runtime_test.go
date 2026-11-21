@@ -25,6 +25,28 @@ type trackingLease struct {
 	onClose func()
 }
 
+type failingAcquireBroker struct {
+	lease CredentialLease
+}
+
+func (b failingAcquireBroker) Acquire(context.Context, Identity) (CredentialLease, error) {
+	return b.lease, errors.New("credential broker unavailable")
+}
+
+type failingCloseLease struct {
+	closeCalls int
+}
+
+func (l *failingCloseLease) WithSecret(use func([]byte) error) error {
+	return use([]byte("temporary"))
+}
+
+func (l *failingCloseLease) Close() error {
+	l.closeCalls++
+	return errors.New("raw lease cleanup detail")
+}
+
+
 func (l *trackingLease) WithSecret(use func([]byte) error) error {
 	if l.closed {
 		return ErrCredentialLeaseClosed
@@ -530,5 +552,24 @@ func TestRuntimePreservesIncompleteUsageWithoutFinalizingIt(t *testing.T) {
 	}
 	if usage.Complete {
 		t.Fatal("partial Usage was treated as complete")
+	}
+}
+
+func TestWithCredentialReportsAcquireAndLeaseCleanupFailureWithoutCallingProvider(t *testing.T) {
+	lease := &failingCloseLease{}
+	called := false
+	_, err := withCredential(context.Background(), failingAcquireBroker{lease: lease}, testIdentity(),
+		func(CredentialLease) (struct{}, error) {
+			called = true
+			return struct{}{}, nil
+		})
+	if !errors.Is(err, ErrCredentialUnavailable) || !errors.Is(err, ErrCredentialLeaseCleanupFailed) {
+		t.Fatalf("credential cleanup failure = %v", err)
+	}
+	if called || lease.closeCalls != 1 {
+		t.Fatalf("Provider callback or lease cleanup count is wrong: called=%v closeCalls=%d", called, lease.closeCalls)
+	}
+	if strings.Contains(err.Error(), "raw lease cleanup detail") {
+		t.Fatal("raw credential cleanup error escaped")
 	}
 }
