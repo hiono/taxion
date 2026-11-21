@@ -1,0 +1,53 @@
+name: Temporary Windows and GoReleaser verification
+
+on:
+  push:
+    branches:
+      - feat/planning-authorization-lifecycle
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3394d0ea007a1b32af2ed073591ec300be72f8bf
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify target SHA
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne "3394d0ea007a1b32af2ed073591ec300be72f8bf") { throw "Unexpected checkout SHA: $actual" }
+          Write-Output "Target SHA: $actual"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      - name: Build
+        run: go build ./...
+
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3394d0ea007a1b32af2ed073591ec300be72f8bf
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify target SHA
+        run: |
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "3394d0ea007a1b32af2ed073591ec300be72f8bf"
+          echo "Target SHA: $actual"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --snapshot --clean
