@@ -12,6 +12,7 @@ import (
 
 type PlanningLifecycleStore interface {
 	GetJob(context.Context, string) (domain.Job, error)
+	AddProviderStartObservation(context.Context, string, uint64, string, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStartObservation, error)
 	AddPlanningTurnIntent(context.Context, string, uint64, string, string, string, string, uint64, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnIntent, error)
 	AddPlanningTurnObservation(context.Context, string, uint64, string, string, string, uint64, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnObservation, error)
 	AddPlanningEffectDecision(context.Context, string, uint64, string, string, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningEffectDecision, error)
@@ -29,6 +30,14 @@ func NewPlanningController(lifecycleStore PlanningLifecycleStore) (*PlanningCont
 		return nil, errors.New("PlanningLifecycleStore is required")
 	}
 	return &PlanningController{store: lifecycleStore}, nil
+}
+
+func (c *PlanningController) RecordProviderStartObservation(ctx context.Context, jobID, startID, commandID, status, providerSessionID, evidenceSHA256 string, reconcilesUnknown bool, principal auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStartObservation, error) {
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return store.CommandReceipt{}, domain.ProviderStartObservation{}, err
+	}
+	return c.store.AddProviderStartObservation(ctx, jobID, job.Revision, startID, commandID, status, providerSessionID, evidenceSHA256, reconcilesUnknown, principal)
 }
 
 func (c *PlanningController) BeginTurn(ctx context.Context, jobID, roleExecutionID, providerSessionID, commandID, promptSHA256 string, reservedTokens uint64, principal auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnIntent, error) {
