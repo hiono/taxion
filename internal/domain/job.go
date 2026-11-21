@@ -28,17 +28,23 @@ const (
 )
 
 type Job struct {
-	ID                     string                  `json:"id"`
-	Request                string                  `json:"request"`
-	Goal                   string                  `json:"goal,omitempty"`
-	State                  JobState                `json:"state"`
-	Revision               uint64                  `json:"revision"`
-	CreatedAt              time.Time               `json:"created_at"`
-	UpdatedAt              time.Time               `json:"updated_at"`
-	IntakeProvenance       *IntakeProvenance       `json:"intake_provenance,omitempty"`
-	PlanningAuthorizations []PlanningAuthorization `json:"planning_authorizations,omitempty"`
-	RoleExecutions         []RoleExecution         `json:"role_executions,omitempty"`
-	ProviderStartIntents   []ProviderStartIntent   `json:"provider_start_intents,omitempty"`
+	ID                         string                      `json:"id"`
+	Request                    string                      `json:"request"`
+	Goal                       string                      `json:"goal,omitempty"`
+	State                      JobState                    `json:"state"`
+	Revision                   uint64                      `json:"revision"`
+	CreatedAt                  time.Time                   `json:"created_at"`
+	UpdatedAt                  time.Time                   `json:"updated_at"`
+	IntakeProvenance           *IntakeProvenance           `json:"intake_provenance,omitempty"`
+	PlanningAuthorizations     []PlanningAuthorization     `json:"planning_authorizations,omitempty"`
+	RoleExecutions             []RoleExecution             `json:"role_executions,omitempty"`
+	ProviderStartIntents       []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
+	PlanningTurnIntents        []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
+	PlanningTurnObservations   []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
+	PlanningEffectDecisions    []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
+	PlanningResumeIntents      []PlanningResumeIntent      `json:"planning_resume_intents,omitempty"`
+	PlanningResumeObservations []PlanningResumeObservation `json:"planning_resume_observations,omitempty"`
+	PlanningBoundaryDecisions  []PlanningBoundaryDecision  `json:"planning_boundary_decisions,omitempty"`
 }
 
 type IntakeProvenance struct {
@@ -554,8 +560,8 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	if uint64(len(j.PlanningAuthorizations))+uint64(len(j.RoleExecutions)) > j.Revision-1 ||
-		len(j.RoleExecutions) != len(j.ProviderStartIntents) {
+	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
+	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
 	seenGrants := make(map[string]struct{}, len(j.PlanningAuthorizations))
@@ -617,6 +623,211 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: duplicate Provider Start operation ID", ErrInvalidJob)
 		}
 		seenOperations[intent.ID] = struct{}{}
+	}
+	seenTurns := make(map[string]struct{}, len(j.PlanningTurnIntents))
+	turnByID := make(map[string]PlanningTurnIntent, len(j.PlanningTurnIntents))
+	turnCounts := make(map[string]uint32)
+	previousTurnRevision := make(map[string]uint64)
+	previousTurnCreatedAt := make(map[string]time.Time)
+	sessionByExecution := make(map[string]string)
+	for _, turn := range j.PlanningTurnIntents {
+		if err := turn.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid PlanningTurnIntent: %v", ErrInvalidJob, err)
+		}
+		if turn.CreatedAt.After(j.UpdatedAt) || turn.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: PlanningTurnIntent append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenTurns[turn.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningTurnIntent ID", ErrInvalidJob)
+		}
+		seenTurns[turn.ID] = struct{}{}
+		turnByID[turn.ID] = turn
+		if session, exists := sessionByExecution[turn.RoleExecutionID]; exists && session != turn.ProviderSessionID {
+			return fmt.Errorf("%w: Provider Session identity changed within a RoleExecution", ErrInvalidJob)
+		}
+		sessionByExecution[turn.RoleExecutionID] = turn.ProviderSessionID
+		turnCounts[turn.RoleExecutionID]++
+		if turn.TurnNumber != turnCounts[turn.RoleExecutionID] {
+			return fmt.Errorf("%w: planning turn sequence is not contiguous", ErrInvalidJob)
+		}
+		if previousRevision := previousTurnRevision[turn.RoleExecutionID]; previousRevision != 0 &&
+			(turn.CreatedRevision <= previousRevision || turn.CreatedAt.Before(previousTurnCreatedAt[turn.RoleExecutionID])) {
+			return fmt.Errorf("%w: PlanningTurnIntent sequence is not append ordered", ErrInvalidJob)
+		}
+		previousTurnRevision[turn.RoleExecutionID] = turn.CreatedRevision
+		previousTurnCreatedAt[turn.RoleExecutionID] = turn.CreatedAt
+	}
+	observationsByTurn := make(map[string][]PlanningTurnObservation)
+	seenObservationIDs := make(map[string]struct{}, len(j.PlanningTurnObservations))
+	for _, observation := range j.PlanningTurnObservations {
+		turn, exists := turnByID[observation.TurnID]
+		if !exists {
+			return fmt.Errorf("%w: PlanningTurnObservation has no turn intent", ErrInvalidJob)
+		}
+		if err := observation.Validate(j, turn); err != nil {
+			return fmt.Errorf("%w: invalid PlanningTurnObservation: %v", ErrInvalidJob, err)
+		}
+		if observation.CreatedAt.After(j.UpdatedAt) || observation.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: PlanningTurnObservation append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenObservationIDs[observation.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningTurnObservation ID", ErrInvalidJob)
+		}
+		seenObservationIDs[observation.ID] = struct{}{}
+		observationsByTurn[observation.TurnID] = append(observationsByTurn[observation.TurnID], observation)
+	}
+	previousTurnByExecution := make(map[string]PlanningTurnIntent)
+	for _, turn := range j.PlanningTurnIntents {
+		if previous, exists := previousTurnByExecution[turn.RoleExecutionID]; exists {
+			observations := observationsByTurn[previous.ID]
+			if turn.CreatedRevision <= previous.CreatedRevision || turn.CreatedAt.Before(previous.CreatedAt) ||
+				turn.ProviderSessionID != previous.ProviderSessionID ||
+				len(observations) == 0 || observations[len(observations)-1].Status == PlanningTurnUnknown ||
+				observations[len(observations)-1].CreatedRevision >= turn.CreatedRevision ||
+				observations[len(observations)-1].CreatedAt.After(turn.CreatedAt) {
+				return fmt.Errorf("%w: a new turn does not follow a terminal Provider operation in append order", ErrInvalidJob)
+			}
+		}
+		previousTurnByExecution[turn.RoleExecutionID] = turn
+	}
+	for turnID, observations := range observationsByTurn {
+		for i, observation := range observations {
+			if i == 0 {
+				if observation.ReconcilesUnknown {
+					return fmt.Errorf("%w: first turn observation cannot reconcile UNKNOWN", ErrInvalidJob)
+				}
+				continue
+			}
+			previous := observations[i-1]
+			if previous.Status != PlanningTurnUnknown || observation.Status == PlanningTurnUnknown ||
+				!observation.ReconcilesUnknown || observation.CreatedRevision <= previous.CreatedRevision ||
+				observation.CreatedAt.Before(previous.CreatedAt) {
+				return fmt.Errorf("%w: invalid PlanningTurnObservation reconciliation sequence", ErrInvalidJob)
+			}
+		}
+		if len(observations) > 2 || (len(observations) == 2 && observations[0].Status != PlanningTurnUnknown) {
+			return fmt.Errorf("%w: invalid PlanningTurnObservation history for %s", ErrInvalidJob, turnID)
+		}
+	}
+	seenEffects := make(map[string]struct{}, len(j.PlanningEffectDecisions))
+	for _, decision := range j.PlanningEffectDecisions {
+		if err := decision.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid PlanningEffectDecision: %v", ErrInvalidJob, err)
+		}
+		if decision.CreatedAt.After(j.UpdatedAt) || decision.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: PlanningEffectDecision append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenEffects[decision.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningEffectDecision ID", ErrInvalidJob)
+		}
+		seenEffects[decision.ID] = struct{}{}
+	}
+	seenResumes := make(map[string]struct{}, len(j.PlanningResumeIntents))
+	previousResumeRevision := make(map[string]uint64)
+	previousResumeCreatedAt := make(map[string]time.Time)
+	for _, resume := range j.PlanningResumeIntents {
+		if err := resume.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid PlanningResumeIntent: %v", ErrInvalidJob, err)
+		}
+		if resume.CreatedAt.After(j.UpdatedAt) || resume.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: PlanningResumeIntent append order is invalid", ErrInvalidJob)
+		}
+		if previousRevision := previousResumeRevision[resume.RoleExecutionID]; previousRevision != 0 &&
+			(resume.CreatedRevision <= previousRevision || resume.CreatedAt.Before(previousResumeCreatedAt[resume.RoleExecutionID])) {
+			return fmt.Errorf("%w: PlanningResumeIntent sequence is not append ordered", ErrInvalidJob)
+		}
+		if _, exists := seenResumes[resume.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningResumeIntent ID", ErrInvalidJob)
+		}
+		seenResumes[resume.ID] = struct{}{}
+		previousResumeRevision[resume.RoleExecutionID] = resume.CreatedRevision
+		previousResumeCreatedAt[resume.RoleExecutionID] = resume.CreatedAt
+	}
+	resumeByID := make(map[string]PlanningResumeIntent, len(j.PlanningResumeIntents))
+	for _, resume := range j.PlanningResumeIntents {
+		resumeByID[resume.ID] = resume
+	}
+	resumeObservationsByID := make(map[string][]PlanningResumeObservation)
+	seenResumeObservationIDs := make(map[string]struct{}, len(j.PlanningResumeObservations))
+	for _, observation := range j.PlanningResumeObservations {
+		resume, exists := resumeByID[observation.ResumeID]
+		if !exists {
+			return fmt.Errorf("%w: PlanningResumeObservation has no resume intent", ErrInvalidJob)
+		}
+		if err := observation.Validate(j, resume); err != nil {
+			return fmt.Errorf("%w: invalid PlanningResumeObservation: %v", ErrInvalidJob, err)
+		}
+		if observation.CreatedAt.After(j.UpdatedAt) || observation.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: PlanningResumeObservation append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenResumeObservationIDs[observation.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningResumeObservation ID", ErrInvalidJob)
+		}
+		seenResumeObservationIDs[observation.ID] = struct{}{}
+		resumeObservationsByID[observation.ResumeID] = append(resumeObservationsByID[observation.ResumeID], observation)
+	}
+	previousResumeByExecution := make(map[string]PlanningResumeIntent)
+	for _, resume := range j.PlanningResumeIntents {
+		if previous, exists := previousResumeByExecution[resume.RoleExecutionID]; exists {
+			observations := resumeObservationsByID[previous.ID]
+			if len(observations) == 0 || observations[len(observations)-1].Status == PlanningResumeUnknown ||
+				observations[len(observations)-1].CreatedRevision >= resume.CreatedRevision ||
+				observations[len(observations)-1].CreatedAt.After(resume.CreatedAt) {
+				return fmt.Errorf("%w: a new resume does not follow a terminal Provider resume operation in append order", ErrInvalidJob)
+			}
+		}
+		previousResumeByExecution[resume.RoleExecutionID] = resume
+	}
+	for resumeID, observations := range resumeObservationsByID {
+		for i, observation := range observations {
+			if i == 0 {
+				if observation.ReconcilesUnknown {
+					return fmt.Errorf("%w: first resume observation cannot reconcile UNKNOWN", ErrInvalidJob)
+				}
+				continue
+			}
+			previous := observations[i-1]
+			if previous.Status != PlanningResumeUnknown || observation.Status == PlanningResumeUnknown ||
+				!observation.ReconcilesUnknown || observation.CreatedRevision <= previous.CreatedRevision ||
+				observation.CreatedAt.Before(previous.CreatedAt) {
+				return fmt.Errorf("%w: invalid PlanningResumeObservation reconciliation sequence for %s", ErrInvalidJob, resumeID)
+			}
+		}
+		if len(observations) > 2 || (len(observations) == 2 && observations[0].Status != PlanningResumeUnknown) {
+			return fmt.Errorf("%w: invalid PlanningResumeObservation history for %s", ErrInvalidJob, resumeID)
+		}
+	}
+	seenBoundaryDecisions := make(map[string]struct{}, len(j.PlanningBoundaryDecisions))
+	for _, decision := range j.PlanningBoundaryDecisions {
+		if err := decision.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid PlanningBoundaryDecision: %v", ErrInvalidJob, err)
+		}
+		if decision.CreatedAt.After(j.UpdatedAt) || decision.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: PlanningBoundaryDecision append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenBoundaryDecisions[decision.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningBoundaryDecision ID", ErrInvalidJob)
+		}
+		seenBoundaryDecisions[decision.ID] = struct{}{}
+	}
+	budgetUsed := make(map[string]uint64)
+	for _, turn := range j.PlanningTurnIntents {
+		amount := turn.ReservedTokens
+		observations := observationsByTurn[turn.ID]
+		if len(observations) > 0 && observations[len(observations)-1].Status != PlanningTurnUnknown {
+			amount = observations[len(observations)-1].TokensUsed
+		}
+		if ^uint64(0)-budgetUsed[turn.PlanningAuthorizationID] < amount {
+			return fmt.Errorf("%w: planning token usage overflow", ErrInvalidJob)
+		}
+		budgetUsed[turn.PlanningAuthorizationID] += amount
+	}
+	for grantID, used := range budgetUsed {
+		for _, grant := range j.PlanningAuthorizations {
+			if grant.ID == grantID && used > grant.Budget.MaxTokens {
+				return fmt.Errorf("%w: planning token usage exceeds authorization budget", ErrInvalidJob)
+			}
+		}
 	}
 	return nil
 }
