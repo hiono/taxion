@@ -40,7 +40,7 @@ type Job struct {
 	RoleExecutions                               []RoleExecution             `json:"role_executions,omitempty"`
 	ProviderStartIntents                         []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
 	ProviderStartObservations                    []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
-	ProviderLifecycleEnforcedFromRevision uint64                      `json:"provider_lifecycle_enforced_from_revision,omitempty"`
+	ProviderLifecycleEnforcedFromRevision uint64                              `json:"provider_lifecycle_enforced_from_revision,omitempty"`
 	PlanningTurnIntents                          []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
 	PlanningTurnObservations                     []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
 	PlanningEffectDecisions                      []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
