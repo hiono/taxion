@@ -175,7 +175,11 @@ func (s *Store) CreateTrustedDraftJob(ctx context.Context, jobID, request, comma
 		RequestIdentity: commandID,
 		SchemaVersion:   domain.IntakeProvenanceSchemaVersion,
 	}
-	job, err := domain.NewDraftJobWithProvenance(jobID, request, provenance, receivedAt)
+	jobCreatedAt := receivedAt
+	if principal.AuthenticatedAt().After(jobCreatedAt) {
+		jobCreatedAt = principal.AuthenticatedAt()
+	}
+	job, err := domain.NewDraftJobWithProvenance(jobID, request, provenance, jobCreatedAt)
 	if err != nil {
 		return CommandReceipt{}, err
 	}
