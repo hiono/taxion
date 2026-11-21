@@ -30,6 +30,28 @@ func TestNewDraftJobPreservesOriginalRequest(t *testing.T) {
 	}
 }
 
+func TestJobValidateAcceptsLaterRevision(t *testing.T) {
+	job, err := NewDraftJob("job_revision", "Persisted Job revision.", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("NewDraftJob() error = %v", err)
+	}
+	job.Revision = 2
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Validate() rejected a later aggregate revision: %v", err)
+	}
+}
+
+func TestJobValidateRejectsZeroRevision(t *testing.T) {
+	job, err := NewDraftJob("job_zero_revision", "Persisted Job revision.", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("NewDraftJob() error = %v", err)
+	}
+	job.Revision = 0
+	if err := job.Validate(); err == nil {
+		t.Fatal("Validate() accepted revision zero")
+	}
+}
+
 func TestNewDraftJobRejectsEmptyRequest(t *testing.T) {
 	_, err := NewDraftJob("job_test", " \n\t ", time.Now())
 	if err == nil {
