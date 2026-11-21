@@ -565,7 +565,7 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_mismatch", Cause: errors.New("resume Provider Session does not match a persisted turn")}
 	}
 	if now.Before(latestTurnAt) {
-		return PlanningResumeIntent{}, errors.New("resume intent precedes the latest Provider turn")
+		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "resume_before_latest_turn", Cause: errors.New("resume intent precedes the latest Provider turn")}
 	}
 	for _, previous := range job.PlanningResumeIntents {
 		if previous.RoleExecutionID != execution.ID {
