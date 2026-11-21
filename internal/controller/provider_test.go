@@ -360,6 +360,34 @@ func TestProviderControllerReconcilesAmbiguousStartWithoutBlindReplay(t *testing
 	}
 }
 
+func TestProviderControllerPersistsDefinitiveStartFailureWithoutLookupOrReplay(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		startErr: &provider.OperationError{Class: provider.FailureDefinitive, Code: provider.OperationCodeInvalidRequest},
+	}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	commandID := "cmd_cccccccccccccccccccccccccccccccc"
+	_, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err == nil {
+		t.Fatal("definitive Start failure was not returned")
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after definitive Start failure: %v", err)
+	}
+	if len(job.ProviderStartObservations) != 1 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartFailed ||
+		job.ProviderStartObservations[0].EvidenceSHA256 == "" {
+		t.Fatalf("definitive Start failure was not persisted as FAILED: %#v", job.ProviderStartObservations)
+	}
+	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err == nil || !strings.Contains(err.Error(), "definitively rejected") {
+		t.Fatalf("retry after definitive Start failure = %v", err)
+	}
+	if runtime.startCalls != 1 || runtime.lookupCalls != 0 {
+		t.Fatalf("definitive failure was retried or looked up: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
+	}
+}
+
 func TestProviderControllerDoesNotStartAfterGrantDeadlineButAllowsLookupRecovery(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{
 		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
