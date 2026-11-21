@@ -25,13 +25,52 @@ func planningLifecycleJob(t *testing.T) (Job, string, string) {
 	job.ProviderStartIntents = append(job.ProviderStartIntents, start)
 	job.Revision++
 	job.UpdatedAt = now.Add(time.Second)
+	startObservation, err := NewProviderStartObservation(job, start.ID, principal, "cmd_99999999999999999999999999999999", ProviderStartAccepted, "session_exact", strings.Repeat("a", 64), false, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("NewProviderStartObservation: %v", err)
+	}
+	job.ProviderStartObservations = append(job.ProviderStartObservations, startObservation)
+	job.Revision++
+	job.UpdatedAt = startObservation.CreatedAt
 	return job, principal, execution.ID
+}
+
+func TestPlanningTurnRequiresAcceptedProviderStartObservation(t *testing.T) {
+	t.Run("missing", func(t *testing.T) {
+		job, principal, executionID := planningLifecycleJob(t)
+		job.ProviderStartObservations = nil
+		if _, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("e", 64), 100, job.UpdatedAt.Add(time.Second)); err == nil || !strings.Contains(err.Error(), "provider_start_unconfirmed") {
+			t.Fatalf("turn without Start observation error = %v", err)
+		}
+	})
+	t.Run("unknown", func(t *testing.T) {
+		job, principal, executionID := planningLifecycleJob(t)
+		job.ProviderStartObservations = nil
+		job.Revision--
+		job.UpdatedAt = job.ProviderStartIntents[0].CreatedAt
+		unknown, err := NewProviderStartObservation(job, job.ProviderStartIntents[0].ID, principal, "cmd_88888888888888888888888888888888", ProviderStartUnknown, "", "", false, job.UpdatedAt.Add(time.Second))
+		if err != nil {
+			t.Fatalf("record UNKNOWN Start: %v", err)
+		}
+		job.ProviderStartObservations = append(job.ProviderStartObservations, unknown)
+		job.Revision++
+		job.UpdatedAt = unknown.CreatedAt
+		if _, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("e", 64), 100, job.UpdatedAt.Add(time.Second)); err == nil || !strings.Contains(err.Error(), "provider_start_unknown") {
+			t.Fatalf("turn after UNKNOWN Start error = %v", err)
+		}
+	})
+	t.Run("session mismatch", func(t *testing.T) {
+		job, principal, executionID := planningLifecycleJob(t)
+		if _, err := NewPlanningTurnIntent(job, executionID, principal, "session_other", "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("e", 64), 100, job.UpdatedAt.Add(time.Second)); err == nil || !strings.Contains(err.Error(), "provider_session_mismatch") {
+			t.Fatalf("turn with mismatched Session error = %v", err)
+		}
+	})
 }
 
 func TestPlanningTurnLifecycleRevalidatesBudgetAndUnknown(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	now := job.UpdatedAt.Add(time.Second)
-	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_1", "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("e", 64), 600, now)
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("e", 64), 600, now)
 	if err != nil {
 		t.Fatalf("NewPlanningTurnIntent: %v", err)
 	}
