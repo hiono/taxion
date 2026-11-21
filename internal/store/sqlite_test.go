@@ -75,7 +75,7 @@ func TestCreateJobPersistsAggregateAndCommandReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob() error = %v", err)
 	}
-	if got != job {
+	if !reflect.DeepEqual(got, job) {
 		t.Fatalf("GetJob() = %#v, want %#v", got, job)
 	}
 	jobs, err := reopened.ListJobs(ctx, 10)
@@ -412,7 +412,6 @@ func TestGetJobRejectsProvenanceTamperingAfterPayloadHashRecomputed(t *testing.T
 		t.Fatalf("GetJob() error = %v, want ErrIntegrity", err)
 	}
 }
-
 
 type synchronizedBuffer struct {
 	mu sync.Mutex

@@ -28,14 +28,14 @@ const (
 )
 
 type Job struct {
-	ID               string            `json:"id"`
-	Request          string            `json:"request"`
-	Goal             string            `json:"goal,omitempty"`
-	State            JobState          `json:"state"`
-	Revision         uint64            `json:"revision"`
-	CreatedAt        time.Time         `json:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at"`
-	IntakeProvenance *IntakeProvenance `json:"intake_provenance,omitempty"`
+	ID                     string                  `json:"id"`
+	Request                string                  `json:"request"`
+	Goal                   string                  `json:"goal,omitempty"`
+	State                  JobState                `json:"state"`
+	Revision               uint64                  `json:"revision"`
+	CreatedAt              time.Time               `json:"created_at"`
+	UpdatedAt              time.Time               `json:"updated_at"`
+	IntakeProvenance       *IntakeProvenance       `json:"intake_provenance,omitempty"`
 	PlanningAuthorizations []PlanningAuthorization `json:"planning_authorizations,omitempty"`
 }
 
@@ -137,7 +137,6 @@ func originalRequestDigest(request string) string {
 	sum := sha256.Sum256([]byte(request))
 	return hex.EncodeToString(sum[:])
 }
-
 
 const (
 	PlanningReadOnlyBoundaryRepository = "repository.read-only"

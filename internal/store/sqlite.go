@@ -282,7 +282,6 @@ func (s *Store) createJob(ctx context.Context, job domain.Job, commandID, comman
 	return receipt, nil
 }
 
-
 func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID string, grant domain.PlanningAuthorization, principal auth.AuthenticatedPrincipal, issuedAt time.Time) (CommandReceipt, error) {
 	if err := principal.Validate(); err != nil {
 		return CommandReceipt{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)

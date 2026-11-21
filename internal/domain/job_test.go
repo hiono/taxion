@@ -160,7 +160,6 @@ func TestJobValidateRejectsInvalidUTF8Request(t *testing.T) {
 	}
 }
 
-
 func newPlanningTestJob(t *testing.T) Job {
 	t.Helper()
 	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
