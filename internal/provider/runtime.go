@@ -18,20 +18,35 @@ var (
 )
 
 type Runtime struct {
-	adapter  Adapter
-	broker   CredentialBroker
-	identity Identity
+	adapter         Adapter
+	broker          CredentialBroker
+	verifier        CapabilityVerifier
+	identity        Identity
+	minimumEvidence EvidenceLevel
+	durableEvidence EvidenceLevel
 }
 
-func NewRuntime(adapter Adapter, broker CredentialBroker) (*Runtime, error) {
-	if adapter == nil || broker == nil {
-		return nil, errors.New("Provider Adapter and CredentialBroker are required")
+func NewRuntime(adapter Adapter, broker CredentialBroker, verifier CapabilityVerifier) (*Runtime, error) {
+	return newRuntimeWithEvidence(adapter, broker, verifier, EvidenceLive, EvidenceDurable)
+}
+
+// newRuntimeWithEvidence is kept package-private so synthetic evidence policies
+// cannot be selected by production callers.
+func newRuntimeWithEvidence(adapter Adapter, broker CredentialBroker, verifier CapabilityVerifier, minimum, durable EvidenceLevel) (*Runtime, error) {
+	if adapter == nil || broker == nil || verifier == nil {
+		return nil, errors.New("Provider Adapter, CredentialBroker, and CapabilityVerifier are required")
+	}
+	if evidenceRank(minimum) == 0 || evidenceRank(durable) < evidenceRank(minimum) {
+		return nil, errors.New("Provider Runtime evidence policy is invalid")
 	}
 	identity := adapter.Identity()
 	if err := identity.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid Provider Adapter identity: %w", err)
 	}
-	return &Runtime{adapter: adapter, broker: broker, identity: identity}, nil
+	return &Runtime{
+		adapter: adapter, broker: broker, verifier: verifier, identity: identity,
+		minimumEvidence: minimum, durableEvidence: durable,
+	}, nil
 }
 
 func (r *Runtime) Identity() Identity {
@@ -39,26 +54,19 @@ func (r *Runtime) Identity() Identity {
 }
 
 func (r *Runtime) Capabilities(ctx context.Context) (Capabilities, error) {
-	capabilities, err := r.adapter.Capabilities(ctx)
-	if err != nil {
-		return Capabilities{}, ErrUnsupportedCapability
-	}
-	capabilities = capabilities.Clone()
-	if err := capabilities.Validate(r.identity); err != nil {
-		return Capabilities{}, ErrUnsupportedCapability
-	}
-	return capabilities, nil
+	return r.verifiedCapabilities(ctx)
 }
 
 func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult, error) {
 	if err := request.Validate(); err != nil {
 		return StartResult{}, ErrProviderInvalidRequest
 	}
-	capabilities, err := r.liveCapabilities(ctx)
+	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
 		return StartResult{}, err
 	}
-	if !capabilities.SupportsSafeStart() {
+	if !capabilities.HasEvidenceAtLeast(CapabilityStartIdempotency, r.minimumEvidence) &&
+		!capabilities.HasEvidenceAtLeast(CapabilityStartLookup, r.minimumEvidence) {
 		return StartResult{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (StartResult, error) {
@@ -93,7 +101,8 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 	if err != nil {
 		return TurnResult{}, err
 	}
-	if !capabilities.SupportsSafeSend() {
+	if !capabilities.HasEvidenceAtLeast(CapabilitySendIdempotency, r.minimumEvidence) &&
+		!capabilities.HasEvidenceAtLeast(CapabilitySendLookup, r.minimumEvidence) {
 		return TurnResult{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (TurnResult, error) {
@@ -140,7 +149,7 @@ func (r *Runtime) Stop(ctx context.Context, request StopRequest) (StopResult, er
 	if err != nil {
 		return StopResult{}, err
 	}
-	if !capabilities.HasEvidenceAtLeast(CapabilityStopProof, EvidenceLive) {
+	if !capabilities.HasEvidenceAtLeast(CapabilityStopProof, r.minimumEvidence) {
 		return StopResult{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (StopResult, error) {
@@ -161,7 +170,7 @@ func (r *Runtime) Stop(ctx context.Context, request StopRequest) (StopResult, er
 		return StopResult{}, safeAdapterError(err)
 	}
 	if result.OperationID != request.OperationID || result.SessionID != request.SessionID ||
-		!result.Stopped || !validSHA256(result.EvidenceSHA256) {
+		!result.Stopped || !result.Quiescent || !validSHA256(result.EvidenceSHA256) {
 		return StopResult{}, errors.Join(ErrStopUnconfirmed, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	return result, nil
@@ -175,7 +184,7 @@ func (r *Runtime) Resume(ctx context.Context, request ResumeRequest) (ResumeResu
 	if err != nil {
 		return ResumeResult{}, err
 	}
-	if !capabilities.SupportsCrossProcessReattachment() {
+	if !capabilities.HasEvidenceAtLeast(CapabilitySessionReattach, r.durableEvidence) {
 		return ResumeResult{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (ResumeResult, error) {
@@ -214,7 +223,7 @@ func (r *Runtime) Lookup(ctx context.Context, request LookupRequest) (LookupResu
 	if request.TurnID != "" {
 		capability = CapabilitySendLookup
 	}
-	if !capabilities.HasEvidenceAtLeast(capability, EvidenceLive) {
+	if !capabilities.HasEvidenceAtLeast(capability, r.minimumEvidence) {
 		return LookupResult{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (LookupResult, error) {
@@ -249,7 +258,7 @@ func (r *Runtime) Result(ctx context.Context, request ResultRequest) (Result, er
 	if err != nil {
 		return Result{}, err
 	}
-	if !capabilities.HasEvidenceAtLeast(CapabilityFinalOutput, EvidenceLive) {
+	if !capabilities.HasEvidenceAtLeast(CapabilityFinalOutput, r.minimumEvidence) {
 		return Result{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (Result, error) {
@@ -271,7 +280,7 @@ func (r *Runtime) Result(ctx context.Context, request ResultRequest) (Result, er
 		return Result{}, safeAdapterError(err)
 	}
 	if result.OperationID != request.OperationID || result.SessionID != request.SessionID ||
-		result.TurnID != request.TurnID || sha256Hex(result.Content) != result.ResultSHA256 ||
+		result.TurnID != request.TurnID || !result.Final || sha256Hex(result.Content) != result.ResultSHA256 ||
 		!validSHA256(result.EvidenceSHA256) {
 		return Result{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
@@ -286,8 +295,8 @@ func (r *Runtime) Usage(ctx context.Context, request UsageRequest) (Usage, error
 	if err != nil {
 		return Usage{}, err
 	}
-	if !capabilities.HasEvidenceAtLeast(CapabilityUsageIdentity, EvidenceLive) ||
-		!capabilities.HasEvidenceAtLeast(CapabilityUsageCompleteness, EvidenceLive) {
+	if !capabilities.HasEvidenceAtLeast(CapabilityUsageIdentity, r.minimumEvidence) ||
+		!capabilities.HasEvidenceAtLeast(CapabilityUsageCompleteness, r.minimumEvidence) {
 		return Usage{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (Usage, error) {
@@ -323,7 +332,7 @@ func (r *Runtime) ReplayEvents(ctx context.Context, request ReplayEventsRequest)
 	if err != nil {
 		return EventPage{}, err
 	}
-	if !capabilities.SupportsEventReplay() {
+	if !capabilities.HasEvidenceAtLeast(CapabilityEventReplay, r.durableEvidence) {
 		return EventPage{}, ErrUnsupportedCapability
 	}
 	page, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (EventPage, error) {
@@ -354,19 +363,19 @@ func (r *Runtime) ReplayEvents(ctx context.Context, request ReplayEventsRequest)
 	return page, nil
 }
 
-func (r *Runtime) liveCapabilities(ctx context.Context) (Capabilities, error) {
+func (r *Runtime) verifiedCapabilities(ctx context.Context) (Capabilities, error) {
 	if r.adapter.Identity() != r.identity {
 		return Capabilities{}, ErrUnsupportedCapability
 	}
-	capabilities, err := r.adapter.Capabilities(ctx)
+	declaration, err := r.adapter.Capabilities(ctx)
 	if err != nil {
 		return Capabilities{}, ErrUnsupportedCapability
 	}
-	capabilities = capabilities.Clone()
-	if err := capabilities.ValidateForLiveExecution(r.identity); err != nil {
+	verified, err := declaration.Clone().Verified(ctx, r.identity, r.verifier)
+	if err != nil {
 		return Capabilities{}, ErrUnsupportedCapability
 	}
-	return capabilities, nil
+	return verified, nil
 }
 
 func containsCredential(lease CredentialLease, values ...string) (bool, error) {
@@ -396,16 +405,29 @@ func withCredential[T any](ctx context.Context, broker CredentialBroker, identit
 	lease, acquireErr := broker.Acquire(ctx, identity)
 	if acquireErr != nil || lease == nil {
 		if lease != nil {
-			_ = lease.Close()
+			_ = closeCredentialLease(lease)
 		}
 		return result, ErrCredentialUnavailable
 	}
-	result, callErr := call(lease)
-	if closeErr := lease.Close(); closeErr != nil {
-		var zero T
-		return zero, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
-	}
-	return result, callErr
+	defer func() {
+		panicked := recover() != nil
+		closeErr := closeCredentialLease(lease)
+		if panicked || closeErr != nil {
+			var zero T
+			result = zero
+			err = &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+		}
+	}()
+	return call(lease)
+}
+
+func closeCredentialLease(lease CredentialLease) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errors.New("Provider credential lease close failed")
+		}
+	}()
+	return lease.Close()
 }
 
 func safeAdapterError(err error) error {
