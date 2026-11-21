@@ -5,22 +5,19 @@ on:
     branches:
       - feat/planning-authorization-lifecycle
 
-permissions:
-  contents: write
-
 jobs:
   format:
-    if: github.event.head_commit.message != 'chore: gofmt planning lifecycle'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
           fetch-depth: 0
-      - name: Format Go sources and push a fixup
+      - name: Format and push
         shell: bash
         run: |
-          files="$(gofmt -l $(git ls-files '*.go'))"
+          files="$(gofmt -l cmd internal)"
           if [ -z "$files" ]; then
             exit 0
           fi
