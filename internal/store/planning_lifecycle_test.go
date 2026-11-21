@@ -84,7 +84,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
 	}
-	retryReceipt, retryTurn, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_exact", turnCommand, strings.Repeat("d", 64), 500, principal)
+	retryReceipt, retryTurn, err := database.AddPlanningTurnIntent(ctx, jobID, turnReceipt.Revision, executionID, "session_exact", turnCommand, strings.Repeat("d", 64), 500, principal)
 	if err != nil || retryReceipt != turnReceipt || retryTurn != turn {
 		t.Fatalf("idempotent turn retry: %#v %#v %v", retryReceipt, retryTurn, err)
 	}
@@ -185,7 +185,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil || resumeUnknown.Status != domain.PlanningResumeUnknown {
 		t.Fatalf("record resume UNKNOWN: %#v %v", resumeUnknown, err)
 	}
-	retryReceipt, retryResumeUnknown, err := database.AddPlanningResumeObservation(ctx, jobID, unknownResumeRevision, resume.ID, "cmd_77777777777777777777777777777777", domain.PlanningResumeUnknown, "", false, principal)
+	retryReceipt, retryResumeUnknown, err := database.AddPlanningResumeObservation(ctx, jobID, unknownReceipt.Revision, resume.ID, "cmd_77777777777777777777777777777777", domain.PlanningResumeUnknown, "", false, principal)
 	if err != nil || retryReceipt != unknownReceipt || retryResumeUnknown != resumeUnknown {
 		t.Fatalf("idempotent resume observation retry: %#v %#v %v", retryReceipt, retryResumeUnknown, err)
 	}
