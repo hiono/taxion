@@ -104,14 +104,24 @@ func (a *testAdapter) Resume(_ context.Context, request ResumeRequest, _ Credent
 }
 func (a *testAdapter) Lookup(_ context.Context, request LookupRequest, _ CredentialLease) (LookupResult, error) {
 	a.lookupCalls++
+	if a.lookupResult.Status != "" {
+		result := a.lookupResult
+		result.OperationID = request.OperationID
+		if request.SessionID != "" {
+			result.SessionID = request.SessionID
+		}
+		if request.TurnID != "" {
+			result.TurnID = request.TurnID
+		}
+		return result, nil
+	}
 	sessionID := request.SessionID
 	if sessionID == "" {
 		sessionID = "session_1"
 	}
-	turnID := request.TurnID
 	return LookupResult{
 		Found: true, OperationID: request.OperationID, Status: "COMPLETED", ReceiptID: "receipt_lookup",
-		SessionID: sessionID, TurnID: turnID, EvidenceSHA256: strings.Repeat("e", 64),
+		SessionID: sessionID, TurnID: request.TurnID, EvidenceSHA256: strings.Repeat("e", 64),
 	}, nil
 }
 func (a *testAdapter) Result(_ context.Context, request ResultRequest, _ CredentialLease) (Result, error) {
@@ -392,5 +402,31 @@ func TestRuntimeRejectsCredentialInProviderSessionIdentity(t *testing.T) {
 	if !errors.As(err, &operationError) || operationError.Class != FailureAmbiguous ||
 		strings.Contains(err.Error(), "runtime-test-secret") {
 		t.Fatalf("credential-bearing session identity was not rejected safely: %v", err)
+	}
+}
+
+func TestRuntimeLookupRequiresEvidenceBackedNotFoundResult(t *testing.T) {
+	adapter := newTestAdapter(CapabilityStartLookup)
+	adapter.lookupResult = LookupResult{
+		Status: LookupStatusNotFound, EvidenceSHA256: strings.Repeat("e", 64),
+	}
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := NewRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	result, err := runtime.Lookup(context.Background(), LookupRequest{OperationID: "provider_start_1"})
+	if err != nil {
+		t.Fatalf("Lookup not found: %v", err)
+	}
+	if result.Found || result.Status != LookupStatusNotFound || adapter.lookupCalls != 1 || broker.closed != 1 {
+		t.Fatalf("Lookup absence result / calls: %#v adapter=%d closed=%d", result, adapter.lookupCalls, broker.closed)
+	}
+
+	adapter.lookupResult.Status = "COMPLETED"
+	_, err = runtime.Lookup(context.Background(), LookupRequest{OperationID: "provider_start_2"})
+	var operationError *OperationError
+	if !errors.As(err, &operationError) || operationError.Class != FailureAmbiguous {
+		t.Fatalf("inconsistent Lookup absence was not treated as UNKNOWN: %v", err)
 	}
 }
