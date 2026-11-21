@@ -198,6 +198,10 @@ type fakePlanningProviderRuntime struct {
 	usageResult  provider.Usage
 	usageErr     error
 	usageCalls   int
+	resumeResult provider.ResumeResult
+	resumeErr    error
+	resumeCalls  int
+	resumeHook   func(context.Context, provider.ResumeRequest) error
 	stopHook     func(context.Context, provider.StopRequest) error
 	startHook    func(context.Context, provider.StartRequest) error
 }
@@ -262,6 +266,26 @@ func (f *fakePlanningProviderRuntime) Send(ctx context.Context, request provider
 			OperationID: request.OperationID, TurnID: request.TurnID, SessionID: request.SessionID,
 			ReceiptID: "receipt_turn_1", Status: domain.PlanningTurnCompleted, TokensUsed: 10,
 			Output: "turn output", EvidenceSHA256: strings.Repeat("f", 64),
+		}
+	}
+	return result, nil
+}
+
+func (f *fakePlanningProviderRuntime) Resume(ctx context.Context, request provider.ResumeRequest) (provider.ResumeResult, error) {
+	f.resumeCalls++
+	if f.resumeHook != nil {
+		if err := f.resumeHook(ctx, request); err != nil {
+			return provider.ResumeResult{}, err
+		}
+	}
+	if f.resumeErr != nil {
+		return provider.ResumeResult{}, f.resumeErr
+	}
+	result := f.resumeResult
+	if result.OperationID == "" {
+		result = provider.ResumeResult{
+			OperationID: request.OperationID, SessionID: request.SessionID,
+			Attached: true, EvidenceSHA256: strings.Repeat("a", 64),
 		}
 	}
 	return result, nil
@@ -470,6 +494,138 @@ func TestProviderControllerRejectsInvalidResultAndUsageResponses(t *testing.T) {
 	}
 	if len(after.ProviderResultObservations) != 0 || len(after.ProviderUsageObservations) != 0 {
 		t.Fatalf("invalid Provider responses created success facts: %#v %#v", after.ProviderResultObservations, after.ProviderUsageObservations)
+	}
+}
+
+func TestProviderControllerPersistsResumeIntentBeforeRuntime(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	now := time.Now().UTC()
+	runtime.capabilities.CrossProcessSessionReattach = true
+	resumeEvidence := strings.Repeat("a", 64)
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySessionReattach, Identity: runtime.identity, TestID: "resume-test", EvidenceSHA256: resumeEvidence, EvidenceLevel: provider.EvidenceDurable, VerifiedAt: now},
+	)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_24242424242424242424242424242424", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Turn intent: %v", err)
+	}
+	if _, _, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision, execution.ID,
+		"session_1", "cmd_25252525252525252525252525252525", strings.Repeat("f", 64), 100, principal); err != nil {
+		t.Fatalf("AddPlanningTurnIntent: %v", err)
+	}
+	intentSeen := false
+	runtime.resumeHook = func(ctx context.Context, request provider.ResumeRequest) error {
+		current, err := database.GetJob(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		for _, intent := range current.PlanningResumeIntents {
+			if intent.OperationID == request.OperationID && intent.ProviderSessionID == request.SessionID {
+				intentSeen = true
+				if len(current.PlanningResumeObservations) != 0 {
+					return errors.New("Resume observation was written before Runtime.Resume")
+				}
+				return nil
+			}
+		}
+		return errors.New("Resume intent was not persisted before Runtime.Resume")
+	}
+	receipt, intent, observation, result, err := controller.ResumePlanning(
+		context.Background(), jobID, execution.ID, "session_1",
+		"cmd_26262626262626262626262626262626", principal,
+	)
+	if err != nil || !intentSeen || runtime.resumeCalls != 1 || !result.Attached ||
+		observation.Status != domain.PlanningResumeAttached || observation.CreatedRevision <= receipt.Revision ||
+		intent.CapabilityEvidenceSHA256 != resumeEvidence || intent.OperationID != result.OperationID {
+		t.Fatalf("ResumePlanning: receipt=%#v intent=%#v observation=%#v result=%#v seen=%v calls=%d err=%v",
+			receipt, intent, observation, result, intentSeen, runtime.resumeCalls, err)
+	}
+}
+
+func TestProviderControllerReconcilesUnknownResumeWithSameOperationID(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	runtime.capabilities.CrossProcessSessionReattach = true
+	resumeEvidence := strings.Repeat("b", 64)
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySessionReattach, Identity: runtime.identity, TestID: "resume-test", EvidenceSHA256: resumeEvidence, EvidenceLevel: provider.EvidenceDurable, VerifiedAt: time.Now().UTC()},
+	)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_27272727272727272727272727272727", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Turn intent: %v", err)
+	}
+	if _, _, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision, execution.ID,
+		"session_1", "cmd_28282828282828282828282828282828", strings.Repeat("f", 64), 100, principal); err != nil {
+		t.Fatalf("AddPlanningTurnIntent: %v", err)
+	}
+	commandID := "cmd_29292929292929292929292929292929"
+	runtime.resumeErr = &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown}
+	receipt, intent, unknown, _, err := controller.ResumePlanning(
+		context.Background(), jobID, execution.ID, "session_1", commandID, principal,
+	)
+	if err == nil || unknown.Status != domain.PlanningResumeUnknown || receipt.Revision == 0 || runtime.resumeCalls != 1 {
+		t.Fatalf("ambiguous Resume did not persist UNKNOWN: %#v %#v calls=%d err=%v", intent, unknown, runtime.resumeCalls, err)
+	}
+	runtime.resumeErr = nil
+	runtime.resumeResult = provider.ResumeResult{
+		OperationID: intent.OperationID, SessionID: "session_1", Attached: true, EvidenceSHA256: strings.Repeat("c", 64),
+	}
+	receipt, resumedIntent, attached, result, err := controller.ResumePlanning(
+		context.Background(), jobID, execution.ID, "session_1", commandID, principal,
+	)
+	if err != nil || receipt.Revision == 0 || resumedIntent.ID != intent.ID ||
+		attached.Status != domain.PlanningResumeAttached || !attached.ReconcilesUnknown ||
+		!result.Attached || runtime.resumeCalls != 2 {
+		t.Fatalf("Resume UNKNOWN reconciliation failed: %#v %#v %#v calls=%d err=%v",
+			receipt, resumedIntent, attached, runtime.resumeCalls, err)
+	}
+	job, err = database.GetJob(context.Background(), jobID)
+	if err != nil || len(job.PlanningResumeIntents) != 1 || len(job.PlanningResumeObservations) != 2 ||
+		job.PlanningResumeObservations[0].Status != domain.PlanningResumeUnknown ||
+		!job.PlanningResumeObservations[1].ReconcilesUnknown {
+		t.Fatalf("Resume reconciliation facts are inconsistent: %#v %v", job.PlanningResumeObservations, err)
+	}
+}
+
+func TestProviderControllerRejectsResumeWithoutE5Capability(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_30303030303030303030303030303030", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Turn intent: %v", err)
+	}
+	if _, _, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision, execution.ID,
+		"session_1", "cmd_31313131313131313131313131313131", strings.Repeat("f", 64), 100, principal); err != nil {
+		t.Fatalf("AddPlanningTurnIntent: %v", err)
+	}
+	if _, _, _, _, err := controller.ResumePlanning(
+		context.Background(), jobID, execution.ID, "session_1",
+		"cmd_32323232323232323232323232323232", principal,
+	); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("ResumePlanning error = %v, want ErrUnsupportedCapability", err)
+	}
+	after, err := database.GetJob(context.Background(), jobID)
+	if err != nil || len(after.PlanningResumeIntents) != 0 || runtime.resumeCalls != 0 {
+		t.Fatalf("unsupported Resume created intent or called Runtime: %#v calls=%d err=%v", after.PlanningResumeIntents, runtime.resumeCalls, err)
 	}
 }
 

@@ -30,6 +30,7 @@ type PlanningProviderRuntime interface {
 	Capabilities(context.Context) (provider.Capabilities, error)
 	Start(context.Context, provider.StartRequest) (provider.StartResult, error)
 	Send(context.Context, provider.TurnRequest) (provider.TurnResult, error)
+	Resume(context.Context, provider.ResumeRequest) (provider.ResumeResult, error)
 	Stop(context.Context, provider.StopRequest) (provider.StopResult, error)
 	Lookup(context.Context, provider.LookupRequest) (provider.LookupResult, error)
 	ReplayEvents(context.Context, provider.ReplayEventsRequest) (provider.EventPage, error)
@@ -1154,4 +1155,229 @@ func turnResultFromObservation(observation domain.PlanningTurnObservation) provi
 		OperationID: observation.OperationID, TurnID: observation.TurnID, SessionID: observation.ProviderSessionID,
 		Status: observation.Status, TokensUsed: observation.TokensUsed, EvidenceSHA256: observation.EvidenceSHA256,
 	}
+}
+
+func (c *ProviderController) ResumePlanning(
+	ctx context.Context,
+	jobID, roleExecutionID, sessionID, commandID string,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.PlanningResumeIntent, domain.PlanningResumeObservation, provider.ResumeResult, error) {
+	job, execution, grant, _, err := c.providerObservationTarget(
+		ctx, jobID, roleExecutionID, sessionID, "", principal,
+	)
+	if err != nil {
+		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	var existing *domain.PlanningResumeIntent
+	for i := range job.PlanningResumeIntents {
+		candidate := &job.PlanningResumeIntents[i]
+		if candidate.CommandID == commandID && candidate.RoleExecutionID == execution.ID {
+			existing = candidate
+			break
+		}
+	}
+	if existing != nil {
+		if previous, found := latestProviderResumeObservation(job, existing.ID); found && previous.Status != domain.PlanningResumeUnknown {
+			receipt, intent, err := c.store.AddPlanningResumeIntent(
+				ctx, job.ID, job.Revision, execution.ID, sessionID, commandID,
+				existing.CapabilityEvidenceSHA256, true, principal,
+			)
+			if err != nil {
+				return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+			}
+			return receipt, intent, previous, resumeResultFromObservation(previous), nil
+		}
+	}
+	capabilities, err := c.runtime.Capabilities(ctx)
+	if err != nil {
+		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	if capabilities.Identity != c.runtime.Identity() || !capabilities.SupportsCrossProcessReattachment() {
+		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrUnsupportedCapability
+	}
+	evidenceSHA256 := ""
+	if existing != nil {
+		evidenceSHA256 = existing.CapabilityEvidenceSHA256
+		if !hasCapabilityEvidenceDigest(capabilities, provider.CapabilitySessionReattach, provider.EvidenceDurable, evidenceSHA256) {
+			return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrUnsupportedCapability
+		}
+	} else {
+		evidenceSHA256, err = capabilityEvidenceDigest(
+			capabilities, provider.CapabilitySessionReattach, provider.EvidenceDurable,
+		)
+		if err != nil {
+			return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+		}
+		if err := grant.ValidateFor(job, principal.PrincipalID(), c.now()); err != nil {
+			return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+		}
+	}
+	receipt, intent, err := c.store.AddPlanningResumeIntent(
+		ctx, job.ID, job.Revision, execution.ID, sessionID, commandID, evidenceSHA256, true, principal,
+	)
+	if err != nil {
+		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	current, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	for _, candidate := range current.PlanningResumeIntents {
+		if candidate.CommandID == commandID {
+			intent = candidate
+			break
+		}
+	}
+	if err := intent.Validate(current); err != nil {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	if previous, found := latestProviderResumeObservation(current, intent.ID); found && previous.Status != domain.PlanningResumeUnknown {
+		return receipt, intent, previous, resumeResultFromObservation(previous), nil
+	}
+	request := provider.ResumeRequest{
+		OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, Deadline: grant.Deadline,
+	}
+	if err := request.Validate(); err != nil {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrProviderInvalidRequest
+	}
+	latest, _, currentGrant, _, err := c.providerObservationTarget(
+		ctx, jobID, roleExecutionID, sessionID, "", principal,
+	)
+	if err != nil {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	if err := currentGrant.ValidateFor(latest, principal.PrincipalID(), c.now()); err != nil {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	result, err := c.runtime.Resume(ctx, request)
+	if err != nil {
+		if providerOperationMayHaveStarted(err) || errors.Is(err, provider.ErrResumeUnconfirmed) {
+			observation, persistErr := c.recordResumeObservation(
+				ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", principal,
+			)
+			if persistErr != nil {
+				return receipt, intent, observation, provider.ResumeResult{}, errors.Join(err, persistErr)
+			}
+			return receipt, intent, observation, provider.ResumeResult{}, err
+		}
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	if result.OperationID != intent.OperationID || result.SessionID != intent.ProviderSessionID ||
+		!result.Attached || !validProviderSHA256(result.EvidenceSHA256) {
+		observation, persistErr := c.recordResumeObservation(
+			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", principal,
+		)
+		if persistErr != nil {
+			return receipt, intent, observation, provider.ResumeResult{}, errors.Join(provider.ErrResumeUnconfirmed, persistErr)
+		}
+		return receipt, intent, observation, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
+	}
+	observation, err := c.recordResumeObservation(
+		ctx, jobID, intent.ID, domain.PlanningResumeAttached, result.EvidenceSHA256, principal,
+	)
+	if err != nil {
+		unknown, persistErr := c.recordResumeObservation(
+			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", principal,
+		)
+		if persistErr != nil {
+			return receipt, intent, unknown, provider.ResumeResult{}, errors.Join(err, persistErr)
+		}
+		return receipt, intent, unknown, provider.ResumeResult{}, err
+	}
+	return receipt, intent, observation, result, nil
+}
+
+func (c *ProviderController) recordResumeObservation(
+	ctx context.Context,
+	jobID, resumeID, status, evidenceSHA256 string,
+	principal auth.AuthenticatedPrincipal,
+) (domain.PlanningResumeObservation, error) {
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return domain.PlanningResumeObservation{}, err
+	}
+	previous, found := latestProviderResumeObservation(job, resumeID)
+	if found {
+		if previous.Status == domain.PlanningResumeUnknown {
+			if status == domain.PlanningResumeUnknown {
+				return previous, nil
+			}
+		} else if previous.Status == status && previous.EvidenceSHA256 == evidenceSHA256 {
+			return previous, nil
+		} else {
+			return domain.PlanningResumeObservation{}, errors.New("Provider Resume already has a terminal observation")
+		}
+	}
+	reconcilesUnknown := found && previous.Status == domain.PlanningResumeUnknown && status != domain.PlanningResumeUnknown
+	commandID := providerResumeObservationCommandID(resumeID, status, evidenceSHA256, reconcilesUnknown)
+	_, observation, err := c.store.AddPlanningResumeObservation(
+		ctx, job.ID, job.Revision, resumeID, commandID, status, evidenceSHA256, reconcilesUnknown, principal,
+	)
+	return observation, err
+}
+
+func latestProviderResumeObservation(job domain.Job, resumeID string) (domain.PlanningResumeObservation, bool) {
+	var latest domain.PlanningResumeObservation
+	found := false
+	for _, observation := range job.PlanningResumeObservations {
+		if observation.ResumeID == resumeID && (!found || observation.CreatedRevision > latest.CreatedRevision) {
+			latest, found = observation, true
+		}
+	}
+	return latest, found
+}
+
+func providerResumeObservationCommandID(resumeID, status, evidenceSHA256 string, reconcilesUnknown bool) string {
+	material := fmt.Sprintf("taxion:planning-resume-observation:%s:%s:%s:%t", resumeID, status, evidenceSHA256, reconcilesUnknown)
+	sum := sha256.Sum256([]byte(material))
+	return "cmd_" + hex.EncodeToString(sum[:16])
+}
+
+func resumeResultFromObservation(observation domain.PlanningResumeObservation) provider.ResumeResult {
+	return provider.ResumeResult{
+		OperationID: observation.OperationID, SessionID: observation.ProviderSessionID,
+		Attached: observation.Status == domain.PlanningResumeAttached, EvidenceSHA256: observation.EvidenceSHA256,
+	}
+}
+
+func capabilityEvidenceDigest(capabilities provider.Capabilities, capability provider.Capability, minimum provider.EvidenceLevel) (string, error) {
+	if !capabilities.HasEvidenceAtLeast(capability, minimum) {
+		return "", provider.ErrUnsupportedCapability
+	}
+	var digest string
+	var verifiedAt time.Time
+	for _, evidence := range capabilities.Evidence {
+		if evidence.Capability != capability || evidence.Identity != capabilities.Identity ||
+			evidence.EvidenceLevel != minimum || evidence.VerifiedAt.IsZero() || !validProviderSHA256(evidence.EvidenceSHA256) {
+			continue
+		}
+		if digest == "" || evidence.VerifiedAt.After(verifiedAt) {
+			digest, verifiedAt = evidence.EvidenceSHA256, evidence.VerifiedAt
+		}
+	}
+	if digest == "" {
+		return "", provider.ErrUnsupportedCapability
+	}
+	return digest, nil
+}
+
+func hasCapabilityEvidenceDigest(capabilities provider.Capabilities, capability provider.Capability, minimum provider.EvidenceLevel, digest string) bool {
+	if !capabilities.HasEvidenceAtLeast(capability, minimum) || !validProviderSHA256(digest) {
+		return false
+	}
+	for _, evidence := range capabilities.Evidence {
+		if evidence.Capability == capability && evidence.Identity == capabilities.Identity &&
+			evidence.EvidenceLevel == minimum && evidence.EvidenceSHA256 == digest && !evidence.VerifiedAt.IsZero() {
+			return true
+		}
+	}
+	return false
+}
+
+func validProviderSHA256(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
