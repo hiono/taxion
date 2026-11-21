@@ -8,14 +8,14 @@ import (
 )
 
 var (
-	ErrUnsupportedCapability   = errors.New("Provider capability is not verified for this configuration")
-	ErrCredentialUnavailable   = errors.New("Provider credential is unavailable")
+	ErrUnsupportedCapability        = errors.New("Provider capability is not verified for this configuration")
+	ErrCredentialUnavailable        = errors.New("Provider credential is unavailable")
 	ErrCredentialLeaseCleanupFailed = errors.New("Provider credential lease cleanup failed")
-	ErrProviderOperationFailed = errors.New("Provider operation failed")
-	ErrProviderInvalidResult   = errors.New("Provider returned an invalid result")
-	ErrProviderInvalidRequest  = errors.New("Provider request is invalid")
-	ErrStopUnconfirmed         = errors.New("Provider stop is not confirmed")
-	ErrResumeUnconfirmed       = errors.New("Provider Session reattachment is not confirmed")
+	ErrProviderOperationFailed      = errors.New("Provider operation failed")
+	ErrProviderInvalidResult        = errors.New("Provider returned an invalid result")
+	ErrProviderInvalidRequest       = errors.New("Provider request is invalid")
+	ErrStopUnconfirmed              = errors.New("Provider stop is not confirmed")
+	ErrResumeUnconfirmed            = errors.New("Provider Session reattachment is not confirmed")
 )
 
 type Runtime struct {
