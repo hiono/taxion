@@ -518,9 +518,9 @@ type Usage struct {
 	OperationID    string
 	SessionID      string
 	TurnID         string
-	UsageID         string
-	Tokens          uint64
-	Complete        bool
+	UsageID        string
+	Tokens         uint64
+	Complete       bool
 	EvidenceSHA256 string
 }
 
