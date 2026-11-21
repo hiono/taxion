@@ -39,6 +39,10 @@ type Job struct {
 	PlanningAuthorizations []PlanningAuthorization `json:"planning_authorizations,omitempty"`
 	RoleExecutions         []RoleExecution         `json:"role_executions,omitempty"`
 	ProviderStartIntents   []ProviderStartIntent   `json:"provider_start_intents,omitempty"`
+	PlanningTurnIntents []PlanningTurnIntent `json:"planning_turn_intents,omitempty"`
+	PlanningTurnObservations []PlanningTurnObservation `json:"planning_turn_observations,omitempty"`
+	PlanningEffectDecisions []PlanningEffectDecision `json:"planning_effect_decisions,omitempty"`
+	PlanningResumeIntents []PlanningResumeIntent `json:"planning_resume_intents,omitempty"`
 }
 
 type IntakeProvenance struct {
@@ -554,8 +558,8 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	if uint64(len(j.PlanningAuthorizations))+uint64(len(j.RoleExecutions)) > j.Revision-1 ||
-		len(j.RoleExecutions) != len(j.ProviderStartIntents) {
+	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents))
+	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
 	seenGrants := make(map[string]struct{}, len(j.PlanningAuthorizations))
@@ -617,6 +621,101 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: duplicate Provider Start operation ID", ErrInvalidJob)
 		}
 		seenOperations[intent.ID] = struct{}{}
+	}
+	seenTurns := make(map[string]struct{}, len(j.PlanningTurnIntents))
+	turnByID := make(map[string]PlanningTurnIntent, len(j.PlanningTurnIntents))
+	turnCounts := make(map[string]uint32)
+	turnReserved := make(map[string]uint64)
+	for _, turn := range j.PlanningTurnIntents {
+		if err := turn.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid PlanningTurnIntent: %v", ErrInvalidJob, err)
+		}
+		if turn.CreatedAt.After(j.UpdatedAt) || turn.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: PlanningTurnIntent append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenTurns[turn.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningTurnIntent ID", ErrInvalidJob)
+		}
+		seenTurns[turn.ID] = struct{}{}
+		turnByID[turn.ID] = turn
+		turnCounts[turn.RoleExecutionID]++
+		if turn.TurnNumber != turnCounts[turn.RoleExecutionID] {
+			return fmt.Errorf("%w: planning turn sequence is not contiguous", ErrInvalidJob)
+		}
+		if ^uint64(0)-turnReserved[turn.PlanningAuthorizationID] < turn.ReservedTokens {
+			return fmt.Errorf("%w: planning token reservation overflow", ErrInvalidJob)
+		}
+		turnReserved[turn.PlanningAuthorizationID] += turn.ReservedTokens
+	}
+	observationsByTurn := make(map[string][]PlanningTurnObservation)
+	seenObservationIDs := make(map[string]struct{}, len(j.PlanningTurnObservations))
+	for _, observation := range j.PlanningTurnObservations {
+		turn, exists := turnByID[observation.TurnID]
+		if !exists {
+			return fmt.Errorf("%w: PlanningTurnObservation has no turn intent", ErrInvalidJob)
+		}
+		if err := observation.Validate(j, turn); err != nil {
+			return fmt.Errorf("%w: invalid PlanningTurnObservation: %v", ErrInvalidJob, err)
+		}
+		if observation.CreatedAt.After(j.UpdatedAt) || observation.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: PlanningTurnObservation append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenObservationIDs[observation.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningTurnObservation ID", ErrInvalidJob)
+		}
+		seenObservationIDs[observation.ID] = struct{}{}
+		observationsByTurn[observation.TurnID] = append(observationsByTurn[observation.TurnID], observation)
+	}
+	for turnID, observations := range observationsByTurn {
+		for i, observation := range observations {
+			if i == 0 {
+				if observation.ReconcilesUnknown {
+					return fmt.Errorf("%w: first turn observation cannot reconcile UNKNOWN", ErrInvalidJob)
+				}
+				continue
+			}
+			previous := observations[i-1]
+			if previous.Status != PlanningTurnUnknown || observation.Status == PlanningTurnUnknown ||
+				!observation.ReconcilesUnknown || observation.CreatedRevision <= previous.CreatedRevision {
+				return fmt.Errorf("%w: invalid PlanningTurnObservation reconciliation sequence", ErrInvalidJob)
+			}
+		}
+		if len(observations) > 2 || (len(observations) == 2 && observations[0].Status != PlanningTurnUnknown) {
+			return fmt.Errorf("%w: invalid PlanningTurnObservation history for %s", ErrInvalidJob, turnID)
+		}
+	}
+	seenEffects := make(map[string]struct{}, len(j.PlanningEffectDecisions))
+	for _, decision := range j.PlanningEffectDecisions {
+		if err := decision.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid PlanningEffectDecision: %v", ErrInvalidJob, err)
+		}
+		if decision.CreatedAt.After(j.UpdatedAt) || decision.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: PlanningEffectDecision append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenEffects[decision.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningEffectDecision ID", ErrInvalidJob)
+		}
+		seenEffects[decision.ID] = struct{}{}
+	}
+	seenResumes := make(map[string]struct{}, len(j.PlanningResumeIntents))
+	for _, resume := range j.PlanningResumeIntents {
+		if err := resume.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid PlanningResumeIntent: %v", ErrInvalidJob, err)
+		}
+		if resume.CreatedAt.After(j.UpdatedAt) || resume.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: PlanningResumeIntent append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenResumes[resume.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningResumeIntent ID", ErrInvalidJob)
+		}
+		seenResumes[resume.ID] = struct{}{}
+	}
+	for grantID, reserved := range turnReserved {
+		for _, grant := range j.PlanningAuthorizations {
+			if grant.ID == grantID && reserved > grant.Budget.MaxTokens {
+				return fmt.Errorf("%w: planning token reservations exceed authorization budget", ErrInvalidJob)
+			}
+		}
 	}
 	return nil
 }
