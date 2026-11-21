@@ -13,9 +13,9 @@ Status: Draft
 | `internal/provider/adapter.go` | Identity、Capability、Evidence、Request / Result、Adapter interface、OperationError |
 | `internal/provider/credential.go` | CredentialBroker、CredentialLease、memory lease |
 | `internal/provider/runtime.go` | Runtime、Capability gate、Adapter invocation、応答検証、error sanitization |
-| `internal/domain/provider_lifecycle.go` | Provider observation / result / usage / stop factsとinvariant |
-| `internal/store/provider_lifecycle.go` | Provider factのexpected revision / idempotency / transaction保存 |
-| `internal/controller/provider.go` | authority再検証、intent-first実行、Observation保存 |
+| `internal/domain/provider_lifecycle.go` | ProviderStartObservation、Start状態遷移、Session binding |
+| `internal/store/planning_lifecycle.go` | Provider Start observationのexpected revision / idempotency / transaction保存 |
+| `internal/controller/provider.go` | DRAFT Planning Startのauthority再検証、intent-first実行、Lookup recovery、Observation保存 |
 | `internal/provider/*_test.go` | Adapter contract、Runtime、CredentialLeaseのunit / E2 tests |
 | `internal/controller/provider_test.go` | Controller / Runtime / StoreのE2 integration tests |
 | `internal/store/provider_lifecycle_test.go` | transaction、replay、rollback、recovery tests |
@@ -110,13 +110,15 @@ type CapabilityEvidence struct {
 }
 
 type CapabilityVerifier interface {
-    Verify(context.Context, Identity, CapabilityDeclaration) (VerifiedCapabilities, error)
+    Verify(context.Context, Identity, CapabilityEvidence) (bool, error)
+}
+
+type CapabilityEvidenceRegistry interface {
+    Find(context.Context, Identity, Capability) (CapabilityEvidence, bool, error)
 }
 ```
 
-`VerifiedCapabilities`はprivate fieldを持つ値型とし、CapabilityVerifierだけが生成する。Adapterが返す任意のEvidenceLevelを直接Runtimeへ渡さない。
-
-Evidence catalogはTestIDとEvidenceSHA256を既知の検証artifactへ照合する。検証artifactの信頼元が未設定の場合はE4 / E5を有効化しない。
+`RegistryCapabilityVerifier`はtrusted registryから取得したCapabilityEvidenceとAdapter宣言を完全一致で照合する。IdentityにはSDKVersionを含む。Adapterが返すEvidenceLevelだけで能力を有効化しない。Registry backendとartifact署名検証方式は未確定であり、未設定の環境ではE4 / E5を有効化しない。
 
 ### 3.3 Per-operation gate
 
@@ -251,28 +253,22 @@ OperationCodeは固定allowlistとする。Adapter raw error、URL、request bod
 
 ## 6. Domain facts
 
-### 6.1 ProviderOperationObservation
+### 6.1 ProviderStartObservation（実装済み）
 
 ```go
-type ProviderOperationObservation struct {
-    ID              string
-    CommandID       string
-    JobID           string
-    RoleExecutionID string
-    OperationID     string
-    TurnID          string
-    SessionID       string
-    Provider        ProviderIdentity
-    Kind            ProviderOperationKind
-    Status          ProviderOperationStatus
-    ReceiptID       string
-    EvidenceSHA256  string
-    CreatedAt       time.Time
+type ProviderStartObservation struct {
+    ID, CommandID, JobID, RoleExecutionID, OperationID string
+    ProviderID, AccountID, ConfigurationSHA256         string
+    Status, ProviderSessionID, ReceiptID, EvidenceSHA256 string
+    ReconcilesUnknown bool
+    CreatedAt time.Time
     CreatedRevision uint64
 }
 ```
 
-### 6.2 ProviderEventObservation
+UNKNOWNは同一OperationIDの照合Observationで追記できる。terminal ACCEPTED / FAILEDは先行UNKNOWNだけを解消できる。ACCEPTED observationのSessionIDと一致しないTurn / Resume intentは新規作成できない。既存Jobの読み取り互換性を維持するため、最初のProviderStartObservationのCreatedRevisionをJobに記録し、そのrevision以降のTurn / Resumeに厳密なSession bindingを適用する。
+
+### 6.2 ProviderEventObservation（設計済み・未実装）
 
 ```go
 type ProviderEventObservation struct {
@@ -293,7 +289,7 @@ type ProviderEventObservation struct {
 }
 ```
 
-### 6.3 ProviderResultObservation
+### 6.3 ProviderResultObservation（設計済み・未実装）
 
 ```go
 type ProviderResultObservation struct {
@@ -315,7 +311,7 @@ type ProviderResultObservation struct {
 
 初期planningではResult contentをJobAggregateへ保持する。上限を超える結果は受理せず、別のcontent storage設計を要求する。Raw credentialを含む結果は保存しない。
 
-### 6.4 ProviderUsageObservation
+### 6.4 ProviderUsageObservation（設計済み・未実装）
 
 ```go
 type ProviderUsageObservation struct {
@@ -337,7 +333,7 @@ type ProviderUsageObservation struct {
 
 Complete=falseは途中値として記録可能だが、budget finalizationには使用しない。Complete=trueの新しいObservationを追加して確定する。
 
-### 6.5 ProviderStopObservation
+### 6.5 ProviderStopObservation（設計済み・未実装）
 
 ```go
 type ProviderStopObservation struct {
@@ -376,7 +372,7 @@ Job.Validateは次を検証する。
 
 既存SQLite JobAggregate JSONとCommand receiptを利用する。Provider専用の独立した可変状態テーブルを追加しない。
 
-Provider factの追加は共通のpersist fact transaction patternへ統合する。
+Provider Start observationは既存のplanning lifecycle fact transactionへ統合済み。Event / Result / Usage / Stop factのStore transactionは未実装であり、共通persist fact patternへ追加する。
 
 1. BeginTx
 2. JobAggregateを読む
@@ -397,15 +393,16 @@ aggregate updateとreceipt insertのいずれかが失敗した場合は両方ro
 
 ```go
 type ProviderController struct {
-    store   ProviderLifecycleStore
-    runtime ProviderRuntime
-    clock   Clock
+    store    ProviderExecutionStore
+    runtime  PlanningProviderRuntime
+    planning *PlanningController
+    now      func() time.Time
 }
 ```
 
 ProviderRuntime interfaceはRuntimeの操作を抽象化し、Controller testsではfake implementationを注入する。
 
-### 8.2 Start sequence
+### 8.2 Start sequence（実装済み）
 
 ```text
 Load Job
@@ -418,9 +415,9 @@ Load Job
   -> Persist ProviderOperationObservation
 ```
 
-Start intentが保存された後にauthorityが失効した場合、Providerを呼び出さない。intentは未解決として残し、後続の照合で実行有無を確認する。
+Start intentが保存された後にauthorityが失効した場合、新規Startを呼び出さない。既存OperationIDのLookupによる照合は許可し、NOT_FOUND後の新規Startは期限内の場合だけ許可する。
 
-### 8.3 Send sequence
+### 8.3 Send sequence（未実装）
 
 ```text
 Load Job
@@ -434,7 +431,7 @@ Load Job
 
 Sendの結果がAmbiguousの場合は同じTurnIDのUNKNOWNを追加し、新しいTurnIDを生成しない。
 
-### 8.4 Recovery sequence
+### 8.4 Recovery sequence（Startのみ実装済み）
 
 ```text
 Load JobAggregate
@@ -447,7 +444,7 @@ Load JobAggregate
   -> Re-evaluate terminality / usage / quiescence
 ```
 
-照合能力がない場合はUNKNOWNを保持する。新identityを作って回避しない。
+Startの照合能力がない場合はUNKNOWNを保持する。Send / Resume / Stop / Result / Usage / Event replayのController recoveryは未実装である。新identityを作って回避しない。
 
 ## 9. Transaction / external side effect boundary
 
