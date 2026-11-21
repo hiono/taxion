@@ -13,7 +13,7 @@ import (
 
 type JobContractProposalStore interface {
 	GetJob(context.Context, string) (domain.Job, error)
-	AddJobContractRevision(context.Context, string, uint64, string, string, domain.JobContract) (store.CommandReceipt, domain.JobContractRevision, error)
+	AddJobContractRevision(context.Context, string, uint64, string, string, string, string, domain.JobContract) (store.CommandReceipt, domain.JobContractRevision, error)
 	AddJobApproval(context.Context, string, uint64, string, uint64, string, uint32, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.JobApproval, error)
 }
 
@@ -36,7 +36,7 @@ func NewJobContractController(proposalStore JobContractProposalStore) (*JobContr
 // It never grants ExecutionPermission or starts a Provider operation.
 func (c *JobContractController) Propose(
 	ctx context.Context,
-	jobID, roleExecutionID, commandID string,
+	jobID, roleExecutionID, sourceResultObservationID, sourceResultContentSHA256, commandID string,
 	contract domain.JobContract,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.JobContractRevision, error) {
@@ -78,12 +78,30 @@ func (c *JobContractController) Propose(
 	if grant.PrincipalID != principal.PrincipalID() {
 		return store.CommandReceipt{}, domain.JobContractRevision{}, errors.New("JobContract proposal HUMAN Principal differs from PlanningAuthorization")
 	}
+	var sourceResult *domain.ProviderResultObservation
+	for i := range job.ProviderResultObservations {
+		candidate := &job.ProviderResultObservations[i]
+		if candidate.ID == sourceResultObservationID {
+			sourceResult = candidate
+			break
+		}
+	}
+	if sourceResult == nil || sourceResult.JobID != job.ID ||
+		sourceResult.RoleExecutionID != roleExecutionID || !sourceResult.Final ||
+		sourceResult.ContentSHA256 != sourceResultContentSHA256 || sourceResult.TurnID == "" {
+		return store.CommandReceipt{}, domain.JobContractRevision{}, errors.New("JobContract proposal requires the exact final Result from the same Planner RoleExecution")
+	}
+	if err := sourceResult.Validate(job); err != nil {
+		return store.CommandReceipt{}, domain.JobContractRevision{}, fmt.Errorf("validate Planner source Result: %w", err)
+	}
 
 	// A committed proposal may be replayed after its grant expires. The Store
 	// verifies the original CommandID and canonical request hash before returning
 	// the original receipt; no new revision is created on that path.
 	for _, existing := range job.JobContractRevisions {
-		if existing.CommandID == commandID && existing.ProposedByRoleExecutionID != roleExecutionID {
+		if existing.CommandID == commandID && (existing.ProposedByRoleExecutionID != roleExecutionID ||
+			existing.SourceResultObservationID != sourceResultObservationID ||
+			existing.SourceResultContentSHA256 != sourceResultContentSHA256) {
 			return store.CommandReceipt{}, domain.JobContractRevision{}, store.ErrIdempotencyConflict
 		}
 	}
@@ -116,7 +134,8 @@ func (c *JobContractController) Propose(
 	}
 
 	return c.store.AddJobContractRevision(
-		ctx, jobID, job.Revision, commandID, roleExecutionID, contract,
+		ctx, jobID, job.Revision, commandID, roleExecutionID,
+		sourceResultObservationID, sourceResultContentSHA256, contract,
 	)
 }
 
