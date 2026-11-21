@@ -147,3 +147,38 @@ func latestProviderStartObservation(job Job, operationID string) (ProviderStartO
 	}
 	return latest, found
 }
+
+func validateProviderStartSession(job Job, start ProviderStartIntent, sessionID string, beforeRevision uint64, beforeTime time.Time) error {
+	observation, found := latestProviderStartObservation(job, start.ID)
+	if !found {
+		return &PlanningBoundaryError{
+			Boundary: PlanningBoundaryTurn, ReasonCode: "provider_start_unconfirmed",
+			Cause: errors.New("Provider Start has no accepted observation"),
+		}
+	}
+	if observation.CreatedRevision >= beforeRevision || observation.CreatedAt.After(beforeTime) {
+		return errors.New("Provider Start observation does not precede the planning turn")
+	}
+	switch observation.Status {
+	case ProviderStartUnknown:
+		return &PlanningBoundaryError{
+			Boundary: PlanningBoundaryTurn, ReasonCode: "provider_start_unknown",
+			Cause: errors.New("Provider Start is unresolved; reconcile the same OperationID before starting a turn"),
+		}
+	case ProviderStartFailed:
+		return &PlanningBoundaryError{
+			Boundary: PlanningBoundaryTurn, ReasonCode: "provider_start_failed",
+			Cause: errors.New("Provider Start failed; a turn cannot use this Session"),
+		}
+	case ProviderStartAccepted:
+		if observation.ProviderSessionID != sessionID {
+			return &PlanningBoundaryError{
+				Boundary: PlanningBoundaryTurn, ReasonCode: "provider_session_mismatch",
+				Cause: errors.New("planning turn Session differs from the accepted Provider Start Session"),
+			}
+		}
+	default:
+		return errors.New("Provider Start observation status is invalid")
+	}
+	return nil
+}
