@@ -182,8 +182,7 @@ func newValidPlanningAuthorization(t *testing.T, job Job, issuedAt time.Time) Pl
 	request := PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.test",
-		SDKVersion:          "test-sdk/1",
-		ConfigurationSHA256: strings.Repeat("a", 64),
+				ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode:      PlanningReadOnlyBoundarySnapshot,
@@ -412,8 +411,7 @@ func TestPlanningAuthorizationRequiresTrustedIntake(t *testing.T) {
 	request := PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.test",
-		SDKVersion:          "test-sdk/1",
-		ConfigurationSHA256: strings.Repeat("a", 64),
+				ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode:      PlanningReadOnlyBoundarySnapshot,
@@ -435,8 +433,7 @@ func TestPlanningAuthorizationCanReconstructExpiredIdempotentRetry(t *testing.T)
 	request := PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.test",
-		SDKVersion:          "test-sdk/1",
-		ConfigurationSHA256: strings.Repeat("a", 64),
+				ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode:      PlanningReadOnlyBoundarySnapshot,
