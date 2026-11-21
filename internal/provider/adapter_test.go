@@ -33,8 +33,17 @@ func TestCapabilitiesRequireIdentityBoundEvidence(t *testing.T) {
 	if err := capabilities.Validate(identity); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
+	if capabilities.SupportsSafeStart() || capabilities.SupportsSafeSend() {
+		t.Fatal("synthetic evidence was treated as live Provider capability")
+	}
+	for i := range capabilities.Evidence {
+		capabilities.Evidence[i].EvidenceLevel = EvidenceLive
+	}
+	if err := capabilities.ValidateForLiveExecution(identity); err != nil {
+		t.Fatalf("ValidateForLiveExecution: %v", err)
+	}
 	if !capabilities.SupportsSafeStart() || !capabilities.SupportsSafeSend() {
-		t.Fatal("idempotency / lookup capability was not recognized")
+		t.Fatal("live idempotency / lookup capability was not recognized")
 	}
 }
 
@@ -83,5 +92,55 @@ func TestCapabilitiesDoNotInferUnsupportedOperations(t *testing.T) {
 	if capabilities.SupportsSafeStart() || capabilities.SupportsSafeSend() ||
 		capabilities.Has(CapabilitySessionReattach) || capabilities.Has(CapabilityStopProof) {
 		t.Fatal("unsupported capability was inferred")
+	}
+}
+
+func TestLiveExecutionRejectsSDKOnlyAndSyntheticCapabilities(t *testing.T) {
+	identity := testIdentity()
+	capabilities := Capabilities{
+		Identity: identity, StartIdempotency: true,
+		Evidence: []CapabilityEvidence{evidence(identity, CapabilityStartIdempotency)},
+	}
+	capabilities.Evidence[0].EvidenceLevel = EvidenceSDK
+	if err := capabilities.ValidateForLiveExecution(identity); err == nil {
+		t.Fatal("SDK-only evidence was accepted for live execution")
+	}
+	capabilities.Evidence[0].EvidenceLevel = EvidenceLive
+	if err := capabilities.ValidateForLiveExecution(identity); err != nil {
+		t.Fatalf("live evidence was rejected: %v", err)
+	}
+}
+
+func TestCrossProcessReattachmentRequiresDurableEvidence(t *testing.T) {
+	identity := testIdentity()
+	item := evidence(identity, CapabilitySessionReattach)
+	item.EvidenceLevel = EvidenceLive
+	capabilities := Capabilities{Identity: identity, CrossProcessSessionReattach: true, Evidence: []CapabilityEvidence{item}}
+	if err := capabilities.ValidateForLiveExecution(identity); err == nil {
+		t.Fatal("live-only evidence was accepted for durable reattachment")
+	}
+	capabilities.Evidence[0].EvidenceLevel = EvidenceDurable
+	if err := capabilities.ValidateForLiveExecution(identity); err != nil {
+		t.Fatalf("durable evidence was rejected: %v", err)
+	}
+	if !capabilities.SupportsCrossProcessReattachment() {
+		t.Fatal("durable reattachment capability was not recognized")
+	}
+}
+
+func TestOperationErrorNeverIncludesUnconstrainedMessage(t *testing.T) {
+	err, createErr := NewOperationError(FailureAmbiguous, "provider_timeout")
+	if createErr != nil {
+		t.Fatalf("NewOperationError: %v", createErr)
+	}
+	if err.Error() != "Provider operation failed (provider_timeout)" {
+		t.Fatalf("safe operation error = %q", err.Error())
+	}
+	unsafe := &OperationError{Class: FailureAmbiguous, Code: "sk-secret-token"}
+	if strings.Contains(unsafe.Error(), "sk-secret-token") {
+		t.Fatal("unsafe operation code leaked through Error")
+	}
+	if _, createErr := NewOperationError(FailureAmbiguous, "Bearer-secret-token"); createErr == nil {
+		t.Fatal("unsafe operation error code was accepted")
 	}
 }
