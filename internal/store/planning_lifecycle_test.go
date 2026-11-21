@@ -47,6 +47,18 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil {
 		t.Fatalf("GetJob after start: %v", err)
 	}
+	_, startObservation, err := database.AddProviderStartObservation(
+		ctx, jobID, job.Revision, job.ProviderStartIntents[0].ID,
+		"cmd_99999999999999999999999999999999", domain.ProviderStartAccepted,
+		"session_1", "receipt_1", strings.Repeat("e", 64), false, principal,
+	)
+	if err != nil || startObservation.Status != domain.ProviderStartAccepted {
+		t.Fatalf("AddProviderStartObservation: %#v %v", startObservation, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Provider Start observation: %v", err)
+	}
 	executionID := job.RoleExecutions[0].ID
 	contextDigest := job.PlanningAuthorizations[0].ReadOnlyBoundary.SHA256
 
@@ -60,7 +72,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil {
 		t.Fatalf("create rollback trigger: %v", err)
 	}
-	if _, _, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_exact", turnCommand, strings.Repeat("d", 64), 500, principal); err == nil {
+	if _, _, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_1", turnCommand, strings.Repeat("d", 64), 500, principal); err == nil {
 		t.Fatal("planning turn succeeded despite forced receipt insertion failure")
 	}
 	afterRollback, err := database.GetJob(ctx, jobID)
@@ -80,11 +92,11 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if _, err := database.db.ExecContext(ctx, "DROP TRIGGER fail_planning_lifecycle_receipt"); err != nil {
 		t.Fatalf("drop rollback trigger: %v", err)
 	}
-	turnReceipt, turn, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_exact", turnCommand, strings.Repeat("d", 64), 500, principal)
+	turnReceipt, turn, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_1", turnCommand, strings.Repeat("d", 64), 500, principal)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
 	}
-	retryReceipt, retryTurn, err := database.AddPlanningTurnIntent(ctx, jobID, turnReceipt.Revision, executionID, "session_exact", turnCommand, strings.Repeat("d", 64), 500, principal)
+	retryReceipt, retryTurn, err := database.AddPlanningTurnIntent(ctx, jobID, turnReceipt.Revision, executionID, "session_1", turnCommand, strings.Repeat("d", 64), 500, principal)
 	if err != nil || retryReceipt != turnReceipt || retryTurn != turn {
 		t.Fatalf("idempotent turn retry: %#v %#v %v", retryReceipt, retryTurn, err)
 	}
@@ -105,7 +117,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil {
 		t.Fatalf("GetJob after UNKNOWN: %v", err)
 	}
-	if _, _, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_exact", "cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("e", 64), 100, principal); err == nil {
+	if _, _, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_1", "cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("e", 64), 100, principal); err == nil {
 		t.Fatal("new turn was allowed while prior turn remained UNKNOWN")
 	}
 	reconcileCommand := "cmd_11111111111111111111111111111111"
@@ -161,7 +173,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if _, _, err := database.AddPlanningResumeIntent(ctx, jobID, job.Revision, executionID, "session_other", "cmd_44444444444444444444444444444444", strings.Repeat("1", 64), true, principal); err == nil {
 		t.Fatal("resume accepted a different Provider Session")
 	}
-	_, resume, err := database.AddPlanningResumeIntent(ctx, jobID, job.Revision, executionID, "session_exact", "cmd_55555555555555555555555555555555", strings.Repeat("1", 64), true, principal)
+	_, resume, err := database.AddPlanningResumeIntent(ctx, jobID, job.Revision, executionID, "session_1", "cmd_55555555555555555555555555555555", strings.Repeat("1", 64), true, principal)
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
@@ -195,7 +207,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	}
 	turnsBeforeBlockedResume := len(job.PlanningTurnIntents)
 	revisionBeforeBlockedResume := job.Revision
-	if _, _, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_exact", "cmd_00000000000000000000000000000001", strings.Repeat("4", 64), 100, principal); err == nil || !strings.Contains(err.Error(), "previous_resume_unknown") {
+	if _, _, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_1", "cmd_00000000000000000000000000000001", strings.Repeat("4", 64), 100, principal); err == nil || !strings.Contains(err.Error(), "previous_resume_unknown") {
 		t.Fatalf("new turn during UNKNOWN resume = %v, want previous_resume_unknown", err)
 	}
 	job, err = database.GetJob(ctx, jobID)
@@ -205,7 +217,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if job.Revision != revisionBeforeBlockedResume || len(job.PlanningTurnIntents) != turnsBeforeBlockedResume {
 		t.Fatalf("blocked turn partially changed Job: revision=%d turns=%d", job.Revision, len(job.PlanningTurnIntents))
 	}
-	if _, _, err := database.AddPlanningResumeIntent(ctx, jobID, job.Revision, executionID, "session_exact", "cmd_88888888888888888888888888888888", strings.Repeat("2", 64), true, principal); err == nil {
+	if _, _, err := database.AddPlanningResumeIntent(ctx, jobID, job.Revision, executionID, "session_1", "cmd_88888888888888888888888888888888", strings.Repeat("2", 64), true, principal); err == nil {
 		t.Fatal("new resume was allowed while previous resume remained UNKNOWN")
 	}
 	_, resumeResolved, err := database.AddPlanningResumeObservation(ctx, jobID, job.Revision, resume.ID, "cmd_99999999999999999999999999999999", domain.PlanningResumeAttached, strings.Repeat("3", 64), true, principal)
@@ -216,11 +228,11 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil {
 		t.Fatalf("GetJob after resume reconciliation: %v", err)
 	}
-	_, nextTurn, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_exact", "cmd_00000000000000000000000000000002", strings.Repeat("5", 64), 100, principal)
+	_, nextTurn, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_1", "cmd_00000000000000000000000000000002", strings.Repeat("5", 64), 100, principal)
 	if err != nil || nextTurn.TurnNumber != 2 {
 		t.Fatalf("turn after successful resume: %#v %v", nextTurn, err)
 	}
-	if resume.RoleExecutionID != executionID || resume.ProviderSessionID != "session_exact" {
+	if resume.RoleExecutionID != executionID || resume.ProviderSessionID != "session_1" {
 		t.Fatalf("resume changed identity: %#v", resume)
 	}
 
