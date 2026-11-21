@@ -403,6 +403,18 @@ aggregate updateとreceipt insertのいずれかが失敗した場合は両方ro
 ### 8.1 Dependencies
 
 ```go
+type ProviderExecutionStore interface {
+    PlanningLifecycleStore
+    StartTasklessPlanner(...)
+}
+
+type PlanningProviderRuntime interface {
+    Identity() provider.Identity
+    Capabilities(context.Context) (provider.Capabilities, error)
+    Start(context.Context, provider.StartRequest) (provider.StartResult, error)
+    Lookup(context.Context, provider.LookupRequest) (provider.LookupResult, error)
+}
+
 type ProviderController struct {
     store    ProviderExecutionStore
     runtime  PlanningProviderRuntime
@@ -411,7 +423,7 @@ type ProviderController struct {
 }
 ```
 
-ProviderRuntime interfaceはRuntimeの操作を抽象化し、Controller testsではfake implementationを注入する。
+現時点のController interfaceはDRAFT Planning StartとLookup recoveryに限定する。Send / Stop / Resume / Result / Usage / ReplayEventsのController接続は未実装である。Controller testsではfake implementationを注入する。
 
 ### 8.2 Start sequence（実装済み）
 
