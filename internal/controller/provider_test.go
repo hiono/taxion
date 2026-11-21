@@ -182,6 +182,10 @@ type fakePlanningProviderRuntime struct {
 	lookupCalls  int
 	lookupResult provider.LookupResult
 	lookupErr    error
+	sendResult   provider.TurnResult
+	sendErr      error
+	sendCalls    int
+	sendHook     func(context.Context, provider.TurnRequest) error
 	replayPage   provider.EventPage
 	replayErr    error
 	replayCalls  int
@@ -237,6 +241,27 @@ func (f *fakePlanningProviderRuntime) Lookup(_ context.Context, request provider
 		result = provider.LookupResult{
 			Found: true, OperationID: request.OperationID, Status: "RUNNING",
 			ReceiptID: "receipt_1", SessionID: "session_1", EvidenceSHA256: strings.Repeat("e", 64),
+		}
+	}
+	return result, nil
+}
+
+func (f *fakePlanningProviderRuntime) Send(ctx context.Context, request provider.TurnRequest) (provider.TurnResult, error) {
+	f.sendCalls++
+	if f.sendHook != nil {
+		if err := f.sendHook(ctx, request); err != nil {
+			return provider.TurnResult{}, err
+		}
+	}
+	if f.sendErr != nil {
+		return provider.TurnResult{}, f.sendErr
+	}
+	result := f.sendResult
+	if result.OperationID == "" {
+		result = provider.TurnResult{
+			OperationID: request.OperationID, TurnID: request.TurnID, SessionID: request.SessionID,
+			ReceiptID: "receipt_turn_1", Status: domain.PlanningTurnCompleted, TokensUsed: 10,
+			Output: "turn output", EvidenceSHA256: strings.Repeat("f", 64),
 		}
 	}
 	return result, nil
@@ -448,7 +473,582 @@ func TestProviderControllerRejectsInvalidResultAndUsageResponses(t *testing.T) {
 	}
 }
 
+func TestProviderControllerPersistsTurnIntentBeforeSend(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	runtime.capabilities.SendIdempotency = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendIdempotency, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: time.Now().UTC()},
+	)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_18181818181818181818181818181818", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	intentSeen := false
+	runtime.sendHook = func(ctx context.Context, request provider.TurnRequest) error {
+		job, err := database.GetJob(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		for _, intent := range job.PlanningTurnIntents {
+			if intent.ID == request.TurnID && intent.OperationID == request.OperationID {
+				intentSeen = true
+				if len(job.PlanningTurnObservations) != 0 {
+					return errors.New("Turn observation was written before Runtime.Send")
+				}
+				return nil
+			}
+		}
+		return errors.New("Turn intent was not persisted before Runtime.Send")
+	}
+	receipt, turn, observation, result, err := controller.SendPlanning(
+		context.Background(), jobID, execution.ID, "session_1",
+		"cmd_19191919191919191919191919191919", "inspect the accepted repository snapshot", 100, principal,
+	)
+	if err != nil || !intentSeen || runtime.sendCalls != 1 ||
+		turn.OperationID != result.OperationID || turn.ID != result.TurnID ||
+		observation.Status != domain.PlanningTurnCompleted || observation.CreatedRevision <= receipt.Revision ||
+		result.Status != domain.PlanningTurnCompleted {
+		t.Fatalf("SendPlanning: receipt=%#v turn=%#v observation=%#v result=%#v intentSeen=%v calls=%d err=%v",
+			receipt, turn, observation, result, intentSeen, runtime.sendCalls, err)
+	}
+}
+
+func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	now := time.Now().UTC()
+	runtime.capabilities.SendLookup = true
+	runtime.capabilities.UsageIdentity = true
+	runtime.capabilities.UsageCompleteness = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_20202020202020202020202020202020", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	commandID := "cmd_21212121212121212121212121212121"
+	operationID := domain.PlanningTurnOperationID(commandID)
+	turnID := domain.PlanningTurnIntentID(commandID)
+	runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: operationID, Status: provider.LookupStatusNotFound,
+		SessionID: "session_1", TurnID: turnID, EvidenceSHA256: strings.Repeat("d", 64),
+	}
+	runtime.sendErr = &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown}
+	receipt, turn, unknown, _, err := controller.SendPlanning(
+		context.Background(), jobID, execution.ID, "session_1", commandID,
+		"inspect the accepted repository snapshot", 100, principal,
+	)
+	if err == nil || unknown.Status != domain.PlanningTurnUnknown || runtime.sendCalls != 1 || receipt.Revision == 0 {
+		t.Fatalf("ambiguous Send did not persist UNKNOWN: %#v %#v calls=%d err=%v", turn, unknown, runtime.sendCalls, err)
+	}
+	runtime.lookupResult = provider.LookupResult{
+		Found: true, OperationID: operationID, Status: domain.PlanningTurnCompleted,
+		ReceiptID: "receipt_turn_1", SessionID: "session_1", TurnID: turnID,
+		UsageID: "usage_turn_reconcile", EvidenceSHA256: strings.Repeat("e", 64),
+	}
+	runtime.usageResult = provider.Usage{
+		UsageID: "usage_turn_reconcile", Tokens: 18, Complete: true, EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	receipt, reconciledTurn, completed, result, err := controller.SendPlanning(
+		context.Background(), jobID, execution.ID, "session_1", commandID,
+		"inspect the accepted repository snapshot", 100, principal,
+	)
+	if err != nil || receipt.Revision == 0 || reconciledTurn.ID != turn.ID ||
+		completed.Status != domain.PlanningTurnCompleted || !completed.ReconcilesUnknown ||
+		result.Status != domain.PlanningTurnCompleted || result.TokensUsed != 18 ||
+		runtime.sendCalls != 1 || runtime.lookupCalls != 2 || runtime.usageCalls != 1 {
+		t.Fatalf("same-Turn reconciliation failed: %#v %#v %#v calls(send=%d lookup=%d usage=%d) err=%v",
+			receipt, reconciledTurn, completed, runtime.sendCalls, runtime.lookupCalls, runtime.usageCalls, err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil || len(job.PlanningTurnIntents) != 1 || len(job.PlanningTurnObservations) != 2 ||
+		job.PlanningTurnObservations[0].Status != domain.PlanningTurnUnknown ||
+		!job.PlanningTurnObservations[1].ReconcilesUnknown ||
+		len(job.ProviderUsageObservations) != 1 || !job.ProviderUsageObservations[0].Complete {
+		t.Fatalf("reconciled Turn facts are inconsistent: %#v %v", job, err)
+	}
+}
+
+func TestProviderControllerRejectsSendWithoutSafeCapability(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_22222222222222222222222222222222", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	if _, _, _, _, err := controller.SendPlanning(
+		context.Background(), jobID, execution.ID, "session_1",
+		"cmd_23232323232323232323232323232323", "inspect the accepted repository snapshot", 100, principal,
+	); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("SendPlanning error = %v, want ErrUnsupportedCapability", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil || len(job.PlanningTurnIntents) != 0 || runtime.sendCalls != 0 {
+		t.Fatalf("unsupported Send created intent or called Runtime: %#v calls=%d err=%v", job.PlanningTurnIntents, runtime.sendCalls, err)
+	}
+}
+
 func TestProviderControllerPersistsResultAndUsageForAcceptedTurn(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	now := time.Now().UTC()
+	runtime.capabilities.FinalOutputRetrieval = true
+	runtime.capabilities.UsageIdentity = true
+	runtime.capabilities.UsageCompleteness = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	_, execution, startIntent, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_12121212121212121212121212121212", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Turn intent: %v", err)
+	}
+	_, turn, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision, execution.ID,
+		"session_1", "cmd_13131313131313131313131313131313", strings.Repeat("f", 64), 100, principal)
+	if err != nil {
+		t.Fatalf("AddPlanningTurnIntent: %v", err)
+	}
+	content := "final result for the accepted turn"
+	runtime.resultResult = provider.Result{
+		OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID,
+		Content: content, ResultSHA256: sha256String(content), Final: true, EvidenceSHA256: strings.Repeat("4", 64),
+	}
+	resultReceipt, result, err := controller.RetrieveProviderResult(
+		context.Background(), jobID, execution.ID, "session_1", turn.ID, principal,
+	)
+	if err != nil || !result.Final || result.OperationID != turn.OperationID ||
+		result.CreatedRevision != resultReceipt.Revision || runtime.resultCalls != 1 {
+		t.Fatalf("RetrieveProviderResult: %#v %#v calls=%d err=%v", resultReceipt, result, runtime.resultCalls, err)
+	}
+	runtime.usageResult = provider.Usage{
+		UsageID: "usage_turn_1", Tokens: 11, Complete: false, EvidenceSHA256: strings.Repeat("5", 64),
+	}
+	partialReceipt, partial, err := controller.RetrieveProviderUsage(
+		context.Background(), jobID, execution.ID, "session_1", turn.ID, principal,
+	)
+	if err != nil || partial.Complete || partial.Tokens != 11 || partial.CreatedRevision != partialReceipt.Revision {
+		t.Fatalf("RetrieveProviderUsage partial: %#v %#v %v", partialReceipt, partial, err)
+	}
+	runtime.usageResult = provider.Usage{
+		UsageID: "usage_turn_1", Tokens: 19, Complete: true, EvidenceSHA256: strings.Repeat("6", 64),
+	}
+	completeReceipt, complete, err := controller.RetrieveProviderUsage(
+		context.Background(), jobID, execution.ID, "session_1", turn.ID, principal,
+	)
+	if err != nil || !complete.Complete || complete.Tokens != 19 || complete.CreatedRevision != completeReceipt.Revision {
+		t.Fatalf("RetrieveProviderUsage complete: %#v %#v %v", completeReceipt, complete, err)
+	}
+	resultRetryReceipt, resultRetry, err := controller.RetrieveProviderResult(
+		context.Background(), jobID, execution.ID, "session_1", turn.ID, principal,
+	)
+	if err != nil || resultRetryReceipt != resultReceipt || resultRetry != result {
+		t.Fatalf("idempotent Result retrieval: %#v %#v %v", resultRetryReceipt, resultRetry, err)
+	}
+	usageRetryReceipt, usageRetry, err := controller.RetrieveProviderUsage(
+		context.Background(), jobID, execution.ID, "session_1", turn.ID, principal,
+	)
+	if err != nil || usageRetryReceipt != completeReceipt || usageRetry != complete {
+		t.Fatalf("idempotent Usage retrieval: %#v %#v %v", usageRetryReceipt, usageRetry, err)
+	}
+	restored, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Result / Usage: %v", err)
+	}
+	if len(restored.ProviderResultObservations) != 1 || len(restored.ProviderUsageObservations) != 2 ||
+		restored.ProviderUsageObservations[1].UsageID != "usage_turn_1" || !restored.ProviderUsageObservations[1].Complete ||
+		startIntent.ID != restored.ProviderStartIntents[0].ID {
+		t.Fatalf("Provider Result / Usage facts were not preserved: %#v %#v", restored.ProviderResultObservations, restored.ProviderUsageObservations)
+	}
+}
+
+func TestProviderControllerRejectsResultAndUsageWithoutVerifiedCapabilities(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_14141414141414141414141414141414", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Turn intent: %v", err)
+	}
+	_, turn, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision, execution.ID,
+		"session_1", "cmd_15151515151515151515151515151515", strings.Repeat("f", 64), 100, principal)
+	if err != nil {
+		t.Fatalf("AddPlanningTurnIntent: %v", err)
+	}
+	if _, _, err := controller.RetrieveProviderResult(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("RetrieveProviderResult error = %v, want ErrUnsupportedCapability", err)
+	}
+	if _, _, err := controller.RetrieveProviderUsage(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("RetrieveProviderUsage error = %v, want ErrUnsupportedCapability", err)
+	}
+	if runtime.resultCalls != 0 || runtime.usageCalls != 0 {
+		t.Fatalf("unsupported capability invoked Provider methods: result=%d usage=%d", runtime.resultCalls, runtime.usageCalls)
+	}
+}
+func TestProviderControllerPersistsStartIntentBeforeCallingRuntime(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	runtime.startHook = func(ctx context.Context, request provider.StartRequest) error {
+		job, err := database.GetJob(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		if len(job.ProviderStartIntents) != 1 || job.ProviderStartIntents[0].ID != request.OperationID {
+			return errors.New("Provider Start was called before intent commit")
+		}
+		if len(job.ProviderStartObservations) != 0 {
+			return errors.New("Provider Start observation exists before the external call")
+		}
+		if job.ProviderLifecycleEnforcedFromRevision != job.ProviderStartIntents[0].CreatedRevision {
+			return errors.New("Provider lifecycle enforcement was not activated with the Start intent")
+		}
+		return nil
+	}
+	receipt, execution, intent, result, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_cccccccccccccccccccccccccccccccc", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	if receipt.Revision == 0 || execution.ID == "" || intent.ID != result.OperationID || result.SessionID != "session_1" {
+		t.Fatalf("unexpected Start result: receipt=%#v execution=%#v intent=%#v result=%#v", receipt, execution, intent, result)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if len(job.ProviderStartObservations) != 1 || job.ProviderStartObservations[0].Status != domain.ProviderStartAccepted {
+		t.Fatalf("Provider Start acceptance was not persisted: %#v", job.ProviderStartObservations)
+	}
+}
+
+func TestProviderControllerReconcilesAmbiguousStartWithoutBlindReplay(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
+	}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	commandID := "cmd_cccccccccccccccccccccccccccccccc"
+	_, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err == nil {
+		t.Fatal("ambiguous Start error was not returned")
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after ambiguous Start: %v", err)
+	}
+	if len(job.ProviderStartObservations) != 1 || job.ProviderStartObservations[0].Status != domain.ProviderStartUnknown {
+		t.Fatalf("ambiguous Start was not persisted as UNKNOWN: %#v", job.ProviderStartObservations)
+	}
+	runtime.startErr = nil
+	_, _, _, result, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err != nil {
+		t.Fatalf("StartPlanning recovery: %v", err)
+	}
+	if runtime.startCalls != 1 || runtime.lookupCalls != 1 || result.SessionID != "session_1" {
+		t.Fatalf("recovery replayed Start or failed lookup: starts=%d lookups=%d result=%#v", runtime.startCalls, runtime.lookupCalls, result)
+	}
+	job, err = database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after recovery: %v", err)
+	}
+	if len(job.ProviderStartObservations) != 2 ||
+		job.ProviderStartObservations[1].Status != domain.ProviderStartAccepted ||
+		!job.ProviderStartObservations[1].ReconcilesUnknown {
+		t.Fatalf("UNKNOWN was not reconciled by same OperationID: %#v", job.ProviderStartObservations)
+	}
+}
+
+func TestProviderControllerPersistsDefinitiveStartFailureWithoutLookupOrReplay(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		startErr: &provider.OperationError{Class: provider.FailureDefinitive, Code: provider.OperationCodeInvalidRequest},
+	}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	commandID := "cmd_cccccccccccccccccccccccccccccccc"
+	_, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err == nil {
+		t.Fatal("definitive Start failure was not returned")
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after definitive Start failure: %v", err)
+	}
+	if len(job.ProviderStartObservations) != 1 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartFailed ||
+		job.ProviderStartObservations[0].EvidenceSHA256 == "" {
+		t.Fatalf("definitive Start failure was not persisted as FAILED: %#v", job.ProviderStartObservations)
+	}
+	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err == nil || !strings.Contains(err.Error(), "definitively rejected") {
+		t.Fatalf("retry after definitive Start failure = %v", err)
+	}
+	if runtime.startCalls != 1 || runtime.lookupCalls != 0 {
+		t.Fatalf("definitive failure was retried or looked up: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
+	}
+}
+
+func TestProviderControllerReconcilesUnknownToFailedAfterDefinitiveRetry(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
+	}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	commandID := "cmd_cccccccccccccccccccccccccccccccc"
+	_, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err == nil {
+		t.Fatal("ambiguous Start error was not returned")
+	}
+	runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: domain.ProviderStartOperationID(commandID),
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	runtime.startErr = &provider.OperationError{Class: provider.FailureDefinitive, Code: provider.OperationCodeInvalidRequest}
+	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err == nil {
+		t.Fatal("definitive retry failure was not returned")
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after definitive retry failure: %v", err)
+	}
+	if len(job.ProviderStartObservations) != 2 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartUnknown ||
+		job.ProviderStartObservations[1].Status != domain.ProviderStartFailed ||
+		!job.ProviderStartObservations[1].ReconcilesUnknown {
+		t.Fatalf("UNKNOWN was not terminally reconciled as FAILED: %#v", job.ProviderStartObservations)
+	}
+	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err == nil || !strings.Contains(err.Error(), "definitively rejected") {
+		t.Fatalf("retry after terminal FAILED observation = %v", err)
+	}
+	if runtime.startCalls != 2 || runtime.lookupCalls != 1 {
+		t.Fatalf("terminal failure was replayed: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
+	}
+}
+
+func TestProviderControllerDoesNotStartAfterGrantDeadlineButAllowsLookupRecovery(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
+	}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	commandID := "cmd_cccccccccccccccccccccccccccccccc"
+	_, _, _, _, _ = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	controller.now = func() time.Time { return time.Now().UTC().Add(2 * time.Hour) }
+	_, _, _, result, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if err != nil {
+		t.Fatalf("lookup recovery after deadline: %v", err)
+	}
+	if runtime.startCalls != 1 || runtime.lookupCalls != 1 || result.SessionID != "session_1" {
+		t.Fatalf("deadline recovery issued a new Start: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if len(job.ProviderStartObservations) != 2 || !job.ProviderStartObservations[1].ReconcilesUnknown {
+		t.Fatalf("deadline recovery did not append reconciliation: %#v", job.ProviderStartObservations)
+	}
+}
+
+func TestProviderControllerRejectsProviderIdentityAndContextMismatchBeforeIntent(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	runtime.identity.ProviderID = "provider.other"
+	if _, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, "cmd_dddddddddddddddddddddddddddddddd", documents, principal); err == nil {
+		t.Fatal("Provider identity mismatch was accepted")
+	}
+	runtime.identity.ProviderID = "provider.test"
+	documents[0].Content = "tampered snapshot"
+	if _, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", documents, principal); err == nil {
+		t.Fatal("tampered context was accepted")
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if len(job.ProviderStartIntents) != 0 || runtime.startCalls != 0 {
+		t.Fatalf("preflight mismatch caused a Provider intent or call: intents=%d calls=%d", len(job.ProviderStartIntents), runtime.startCalls)
+	}
+}
+
+func TestProviderControllerRejectsUnverifiedSDKBeforeProviderSideEffect(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	runtime.identity.SDKVersion = "other-sdk/2"
+	commandID := "cmd_dddddddddddddddddddddddddddddddd"
+	if _, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("unverified SDK version error = %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if len(job.ProviderStartIntents) != 1 || len(job.ProviderStartObservations) != 0 || runtime.startCalls != 0 {
+		t.Fatalf("unverified SDK version caused external execution: intents=%d observations=%d starts=%d",
+			len(job.ProviderStartIntents), len(job.ProviderStartObservations), runtime.startCalls)
+	}
+	runtime.identity.SDKVersion = "test-sdk/1"
+	runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: domain.ProviderStartOperationID(commandID),
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	if _, _, _, result, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal); err != nil {
+		t.Fatalf("retry after trusted SDK verification: %v", err)
+	} else if result.SessionID != "session_1" {
+		t.Fatalf("unexpected Start result: %#v", result)
+	}
+	if runtime.startCalls != 1 || runtime.lookupCalls != 1 {
+		t.Fatalf("SDK retry did not use lookup-before-start: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
+	}
+}
+
+func TestProviderControllerDoesNotBlindlyRetryWhenNoSafeStartCapabilityExists(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
+	}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	commandID := "cmd_cccccccccccccccccccccccccccccccc"
+	_, _, _, _, _ = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	runtime.capabilities = provider.Capabilities{Identity: runtime.identity}
+	if _, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("retry without safe capability error = %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if runtime.startCalls != 1 || runtime.lookupCalls != 0 ||
+		len(job.ProviderStartObservations) != 1 || job.ProviderStartObservations[0].Status != domain.ProviderStartUnknown {
+		t.Fatalf("unsafe retry occurred: starts=%d lookups=%d observations=%#v", runtime.startCalls, runtime.lookupCalls, job.ProviderStartObservations)
+	}
+}
+
+func TestProviderControllerStopsPlanningIntentOnlyAfterPersistingStopIntent(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_cccccccccccccccccccccccccccccccc", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	runtime.stopHook = func(ctx context.Context, request provider.StopRequest) error {
+		job, err := database.GetJob(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		if len(job.ProviderStopIntents) != 1 || job.ProviderStopIntents[0].OperationID != request.OperationID ||
+			job.ProviderStopIntents[0].SessionID != request.SessionID {
+			return errors.New("Provider Stop was called before its intent was committed")
+		}
+		if len(job.ProviderStopObservations) != 0 {
+			return errors.New("Stop observation exists before the Provider call")
+		}
+		return nil
+	}
+	receipt, intent, observation, err := controller.StopPlanning(
+		context.Background(), jobID, execution.ID, "session_1",
+		"cmd_ffffffffffffffffffffffffffffffff", domain.ProviderStopReasonPlanningComplete, principal,
+	)
+	if err != nil {
+		t.Fatalf("StopPlanning: %v", err)
+	}
+	if receipt.Revision == 0 || intent.OperationID == "" || !observation.Stopped || !observation.Quiescent ||
+		observation.EvidenceSHA256 != strings.Repeat("d", 64) || runtime.stopCalls != 1 {
+		t.Fatalf("unexpected Stop result: receipt=%#v intent=%#v observation=%#v calls=%d",
+			receipt, intent, observation, runtime.stopCalls)
+	}
+}
+
+func TestProviderControllerDoesNotReplayAmbiguousStop(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		stopErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
+	}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_cccccccccccccccccccccccccccccccc", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	stopCommandID := "cmd_ffffffffffffffffffffffffffffffff"
+	_, intent, firstObservation, err := controller.StopPlanning(
+		context.Background(), jobID, execution.ID, "session_1", stopCommandID,
+		domain.ProviderStopReasonPlanningComplete, principal,
+	)
+	if err == nil || !providerStopObservationUnknown(firstObservation) || runtime.stopCalls != 1 {
+		t.Fatalf("ambiguous Stop was not retained as UNKNOWN: observation=%#v calls=%d err=%v",
+			firstObservation, runtime.stopCalls, err)
+	}
+	runtime.stopErr = nil
+	_, retryIntent, retryObservation, err := controller.StopPlanning(
+		context.Background(), jobID, execution.ID, "session_1", stopCommandID,
+		domain.ProviderStopReasonPlanningComplete, principal,
+	)
+	if !errors.Is(err, provider.ErrStopUnconfirmed) || retryIntent.ID != intent.ID ||
+		retryObservation.ID != firstObservation.ID || runtime.stopCalls != 1 {
+		t.Fatalf("ambiguous Stop was replayed: intent=%#v observation=%#v calls=%d err=%v",
+			retryIntent, retryObservation, runtime.stopCalls, err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if len(job.ProviderStopIntents) != 1 || len(job.ProviderStopObservations) != 1 {
+		t.Fatalf("Stop retry changed immutable facts: intents=%d observations=%d",
+			len(job.ProviderStopIntents), len(job.ProviderStopObservations))
+	}
+}
+
+func TestProviderControllerTreatsExistingStopIntentWithoutObservationAsUnknown(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_cccccccccccccccccccccccccccccccc", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	stopCommandID := "cmd_ffffffffffffffffffffffffffffffff"
+	if _, _, err := database.AddProviderStopIntent(
+		context.Background(), jobID, job.Revision, execution.ID, "session_1", stopCommandID,
+		domain.ProviderStopReasonPlanningComplete, principal,
+	); err != nil {
+		t.Fatalf("pre-create Stop intent: %v", err)
+	}
+	_, _, observation, err := controller.StopPlanning(
+		context.Background(), jobID, execution.ID, "session_1", stopCommandID,
+		domain.ProviderStopReasonPlanningComplete, principal,
+	)
+	if !errors.Is(err, provider.ErrStopUnconfirmed) || !providerStopObservationUnknown(observation) || runtime.stopCalls != 0 {
+		t.Fatalf("existing intent was blindly dispatched: observation=%#v calls=%d err=%v",
+			observation, runtime.stopCalls, err)
+	}
+}
+
 	runtime := &fakePlanningProviderRuntime{}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
 	now := time.Now().UTC()

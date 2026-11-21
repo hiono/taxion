@@ -29,6 +29,7 @@ type PlanningProviderRuntime interface {
 	Identity() provider.Identity
 	Capabilities(context.Context) (provider.Capabilities, error)
 	Start(context.Context, provider.StartRequest) (provider.StartResult, error)
+	Send(context.Context, provider.TurnRequest) (provider.TurnResult, error)
 	Stop(context.Context, provider.StopRequest) (provider.StopResult, error)
 	Lookup(context.Context, provider.LookupRequest) (provider.LookupResult, error)
 	ReplayEvents(context.Context, provider.ReplayEventsRequest) (provider.EventPage, error)
@@ -753,6 +754,14 @@ func (c *ProviderController) RetrieveProviderUsage(
 	jobID, roleExecutionID, sessionID, turnID string,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.ProviderUsageObservation, error) {
+	return c.retrieveProviderUsage(ctx, jobID, roleExecutionID, sessionID, turnID, "", principal)
+}
+
+func (c *ProviderController) retrieveProviderUsage(
+	ctx context.Context,
+	jobID, roleExecutionID, sessionID, turnID, expectedUsageID string,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.ProviderUsageObservation, error) {
 	_, _, _, operationID, err := c.providerObservationTarget(
 		ctx, jobID, roleExecutionID, sessionID, turnID, principal,
 	)
@@ -776,7 +785,8 @@ func (c *ProviderController) RetrieveProviderUsage(
 	if err != nil {
 		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, err
 	}
-	if result.OperationID != operationID || result.SessionID != sessionID || result.TurnID != turnID {
+	if result.OperationID != operationID || result.SessionID != sessionID || result.TurnID != turnID ||
+		(expectedUsageID != "" && result.UsageID != expectedUsageID) {
 		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, provider.ErrProviderInvalidResult
 	}
 	current, _, _, currentOperationID, err := c.providerObservationTarget(
@@ -868,4 +878,274 @@ func (c *ProviderController) providerObservationTarget(
 		return job, execution, grant, turn.OperationID, nil
 	}
 	return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", errors.New("Provider Result / Usage Turn intent was not found")
+}
+
+func (c *ProviderController) SendPlanning(
+	ctx context.Context,
+	jobID, roleExecutionID, sessionID, commandID, prompt string,
+	reservedTokens uint64,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.PlanningTurnIntent, domain.PlanningTurnObservation, provider.TurnResult, error) {
+	if ctx == nil || prompt == "" || reservedTokens == 0 {
+		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, provider.ErrProviderInvalidRequest
+	}
+	job, execution, grant, _, err := c.providerObservationTarget(
+		ctx, jobID, roleExecutionID, sessionID, "", principal,
+	)
+	if err != nil {
+		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+	}
+	existingIntent := false
+	for _, existing := range job.PlanningTurnIntents {
+		if existing.CommandID == commandID && existing.RoleExecutionID == execution.ID {
+			existingIntent = true
+			break
+		}
+	}
+	if !existingIntent {
+		if err := grant.ValidateFor(job, principal.PrincipalID(), c.now()); err != nil {
+			return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+		}
+	}
+	capabilities, err := c.runtime.Capabilities(ctx)
+	if err != nil {
+		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+	}
+	if capabilities.Identity != c.runtime.Identity() || !capabilities.SupportsSafeSend() {
+		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
+	}
+	promptSHA256 := sha256String(prompt)
+	request := provider.TurnRequest{
+		OperationID: domain.PlanningTurnOperationID(commandID), TurnID: domain.PlanningTurnIntentID(commandID),
+		SessionID: sessionID, PromptSHA256: promptSHA256, Prompt: prompt,
+		MaxTokens: reservedTokens, Deadline: grant.Deadline,
+	}
+	if err := request.Validate(); err != nil {
+		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, provider.ErrProviderInvalidRequest
+	}
+	receipt, turn, err := c.store.AddPlanningTurnIntent(
+		ctx, jobID, job.Revision, execution.ID, sessionID, commandID, promptSHA256, reservedTokens, principal,
+	)
+	if err != nil {
+		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+	}
+	current, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+	}
+	for _, candidate := range current.PlanningTurnIntents {
+		if candidate.CommandID == commandID {
+			turn = candidate
+			break
+		}
+	}
+	if err := turn.Validate(current); err != nil {
+		return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+	}
+	request.OperationID, request.TurnID = turn.OperationID, turn.ID
+	if previous, found := latestProviderTurnObservation(current, turn.ID); found && previous.Status != domain.PlanningTurnUnknown {
+		return receipt, turn, previous, turnResultFromObservation(previous), nil
+	}
+	return c.reconcileTurn(ctx, receipt, current, turn, request, principal)
+}
+
+func (c *ProviderController) reconcileTurn(
+	ctx context.Context,
+	receipt store.CommandReceipt,
+	job domain.Job,
+	turn domain.PlanningTurnIntent,
+	request provider.TurnRequest,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.PlanningTurnIntent, domain.PlanningTurnObservation, provider.TurnResult, error) {
+	capabilities, err := c.runtime.Capabilities(ctx)
+	if err != nil {
+		return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+	}
+	if capabilities.Identity != c.runtime.Identity() {
+		return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
+	}
+	canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, provider.EvidenceLive)
+	canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive)
+	if canLookup {
+		lookup, lookupErr := c.runtime.Lookup(ctx, provider.LookupRequest{
+			OperationID: turn.OperationID, SessionID: turn.ProviderSessionID, TurnID: turn.ID,
+		})
+		if lookupErr != nil {
+			observation, persistErr := c.recordTurnObservation(
+				ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+			)
+			if persistErr != nil {
+				return receipt, turn, observation, provider.TurnResult{}, errors.Join(lookupErr, persistErr)
+			}
+			return receipt, turn, observation, provider.TurnResult{}, lookupErr
+		}
+		if lookup.Found {
+			if lookup.Status == domain.PlanningTurnCompleted || lookup.Status == domain.PlanningTurnFailed {
+				_, usage, usageErr := c.retrieveProviderUsage(
+					ctx, job.ID, turn.RoleExecutionID, turn.ProviderSessionID, turn.ID, lookup.UsageID, principal,
+				)
+				if usageErr != nil {
+					observation, persistErr := c.recordTurnObservation(
+						ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+					)
+					if persistErr != nil {
+						return receipt, turn, observation, provider.TurnResult{}, errors.Join(usageErr, persistErr)
+					}
+					return receipt, turn, observation, provider.TurnResult{}, usageErr
+				}
+				if !usage.Complete {
+					observation, persistErr := c.recordTurnObservation(
+						ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+					)
+					if persistErr != nil {
+						return receipt, turn, observation, provider.TurnResult{}, persistErr
+					}
+					return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Turn terminal state awaits complete Usage evidence")
+				}
+				observation, err := c.recordTurnObservation(
+					ctx, job.ID, turn.ID, lookup.Status, usage.Tokens, usage.EvidenceSHA256, principal,
+				)
+				if err != nil {
+					return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+				}
+				return receipt, turn, observation, provider.TurnResult{
+					OperationID: turn.OperationID, TurnID: turn.ID, SessionID: turn.ProviderSessionID,
+					ReceiptID: lookup.ReceiptID, Status: lookup.Status, TokensUsed: usage.Tokens,
+					EvidenceSHA256: usage.EvidenceSHA256,
+				}, nil
+			}
+			observation, persistErr := c.recordTurnObservation(
+				ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+			)
+			if persistErr != nil {
+				return receipt, turn, observation, provider.TurnResult{}, persistErr
+			}
+			return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Turn lookup has not confirmed a terminal result")
+		}
+	} else if !canRetry {
+		observation, persistErr := c.recordTurnObservation(
+			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+		)
+		if persistErr != nil {
+			return receipt, turn, observation, provider.TurnResult{}, persistErr
+		}
+		return receipt, turn, observation, provider.TurnResult{}, provider.ErrUnsupportedCapability
+	}
+	current, _, grant, _, err := c.providerObservationTarget(
+		ctx, job.ID, turn.RoleExecutionID, turn.ProviderSessionID, turn.ID, principal,
+	)
+	if err != nil {
+		return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+	}
+	if err := grant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
+		return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+	}
+	result, err := c.runtime.Send(ctx, request)
+	if err != nil {
+		if providerOperationMayHaveStarted(err) {
+			observation, persistErr := c.recordTurnObservation(
+				ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+			)
+			if persistErr != nil {
+				return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, persistErr)
+			}
+			return receipt, turn, observation, provider.TurnResult{}, err
+		}
+		return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+	}
+	if result.OperationID != turn.OperationID || result.TurnID != turn.ID || result.SessionID != turn.ProviderSessionID {
+		observation, persistErr := c.recordTurnObservation(
+			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+		)
+		if persistErr != nil {
+			return receipt, turn, observation, provider.TurnResult{}, errors.Join(provider.ErrProviderInvalidResult, persistErr)
+		}
+		return receipt, turn, observation, provider.TurnResult{}, provider.ErrProviderInvalidResult
+	}
+	if result.Status == domain.PlanningTurnUnknown {
+		observation, persistErr := c.recordTurnObservation(
+			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+		)
+		if persistErr != nil {
+			return receipt, turn, observation, provider.TurnResult{}, persistErr
+		}
+		return receipt, turn, observation, result, errors.New("Provider Turn remains UNKNOWN")
+	}
+	if result.Status != domain.PlanningTurnCompleted && result.Status != domain.PlanningTurnFailed {
+		observation, persistErr := c.recordTurnObservation(
+			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+		)
+		if persistErr != nil {
+			return receipt, turn, observation, provider.TurnResult{}, persistErr
+		}
+		return receipt, turn, observation, provider.TurnResult{}, provider.ErrProviderInvalidResult
+	}
+	observation, err := c.recordTurnObservation(
+		ctx, job.ID, turn.ID, result.Status, result.TokensUsed, result.EvidenceSHA256, principal,
+	)
+	if err != nil {
+		observation, persistErr := c.recordTurnObservation(
+			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+		)
+		if persistErr != nil {
+			return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, persistErr)
+		}
+		return receipt, turn, observation, provider.TurnResult{}, err
+	}
+	return receipt, turn, observation, result, nil
+}
+
+func (c *ProviderController) recordTurnObservation(
+	ctx context.Context,
+	jobID, turnID, status string,
+	tokensUsed uint64,
+	evidenceSHA256 string,
+	principal auth.AuthenticatedPrincipal,
+) (domain.PlanningTurnObservation, error) {
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return domain.PlanningTurnObservation{}, err
+	}
+	previous, found := latestProviderTurnObservation(job, turnID)
+	if found {
+		if previous.Status == domain.PlanningTurnUnknown {
+			if status == domain.PlanningTurnUnknown {
+				return previous, nil
+			}
+		} else if previous.Status == status && previous.TokensUsed == tokensUsed && previous.EvidenceSHA256 == evidenceSHA256 {
+			return previous, nil
+		} else {
+			return domain.PlanningTurnObservation{}, errors.New("Provider Turn already has a terminal observation")
+		}
+	}
+	reconcilesUnknown := found && previous.Status == domain.PlanningTurnUnknown && status != domain.PlanningTurnUnknown
+	commandID := providerTurnObservationCommandID(turnID, status, tokensUsed, evidenceSHA256, reconcilesUnknown)
+	_, observation, err := c.store.AddPlanningTurnObservation(
+		ctx, job.ID, job.Revision, turnID, commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown, principal,
+	)
+	return observation, err
+}
+
+func latestProviderTurnObservation(job domain.Job, turnID string) (domain.PlanningTurnObservation, bool) {
+	var latest domain.PlanningTurnObservation
+	found := false
+	for _, observation := range job.PlanningTurnObservations {
+		if observation.TurnID == turnID && (!found || observation.CreatedRevision > latest.CreatedRevision) {
+			latest, found = observation, true
+		}
+	}
+	return latest, found
+}
+
+func providerTurnObservationCommandID(turnID, status string, tokensUsed uint64, evidenceSHA256 string, reconcilesUnknown bool) string {
+	material := fmt.Sprintf("taxion:planning-turn-observation:%s:%s:%d:%s:%t", turnID, status, tokensUsed, evidenceSHA256, reconcilesUnknown)
+	sum := sha256.Sum256([]byte(material))
+	return "cmd_" + hex.EncodeToString(sum[:16])
+}
+
+func turnResultFromObservation(observation domain.PlanningTurnObservation) provider.TurnResult {
+	return provider.TurnResult{
+		OperationID: observation.OperationID, TurnID: observation.TurnID, SessionID: observation.ProviderSessionID,
+		Status: observation.Status, TokensUsed: observation.TokensUsed, EvidenceSHA256: observation.EvidenceSHA256,
+	}
 }
