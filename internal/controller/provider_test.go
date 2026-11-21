@@ -192,7 +192,6 @@ func (f *fakePlanningProviderRuntime) Capabilities(context.Context) (provider.Ca
 }
 
 func (f *fakePlanningProviderRuntime) Start(ctx context.Context, request provider.StartRequest) (provider.StartResult, error) {
-	f.startCalls++
 	if f.startHook != nil {
 		if err := f.startHook(ctx, request); err != nil {
 			return provider.StartResult{}, err
@@ -381,11 +380,11 @@ func TestProviderControllerDoesNotStartAfterGrantDeadlineButAllowsLookupRecovery
 func TestProviderControllerRejectsProviderIdentityAndContextMismatchBeforeIntent(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
-	runtime.identity.SDKVersion = "other-sdk/2"
+	runtime.identity.ProviderID = "provider.other"
 	if _, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, "cmd_dddddddddddddddddddddddddddddddd", documents, principal); err == nil {
-		t.Fatal("SDK identity mismatch was accepted")
+		t.Fatal("Provider identity mismatch was accepted")
 	}
-	runtime.identity.SDKVersion = "test-sdk/1"
+	runtime.identity.ProviderID = "provider.test"
 	documents[0].Content = "tampered snapshot"
 	if _, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", documents, principal); err == nil {
 		t.Fatal("tampered context was accepted")
