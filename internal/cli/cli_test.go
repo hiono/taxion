@@ -247,7 +247,7 @@ func TestAuthorizePlanningWithPrincipalRejectsEmptyPrincipalBeforeOpeningStore(t
 }
 
 type cliSynchronizedBuffer struct {
-	mu sync.Mutex
+	mu     sync.Mutex
 	buffer bytes.Buffer
 }
 
