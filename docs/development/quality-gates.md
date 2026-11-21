@@ -1,7 +1,7 @@
 # Development Quality Gates
 
-Version: 1.0
-Date: 2026-11-20
+Version: 1.1
+Date: 2026-11-21
 
 本書はTaxionの開発作業に適用する品質ゲートを定義します。これらは製品機能の規範やProduct Acceptance Test Specificationの受入れシナリオではなく、開発・変更を安全に進めるための運用条件です。
 
@@ -20,10 +20,24 @@ Date: 2026-11-20
 | Windows | vet / testを実施し、失敗を修正します。 |
 | GoReleaser cross-build | macOS targetを含む必須targetを検証します。 |
 | macOS native | 任意です。未実施・実行中・失敗を理由に通常開発を停止しません。 |
-| Secret scan | すべてのCommit前に秘密情報検査を実施します。疑いが未解決の場合はCommitしません。 |
+| Secret scan | Commit前に秘密情報検査を実施します。Push / Pull RequestのCIではGitleaksで取得可能な全branch・tag・Pull Request headのGit履歴を検査します。疑いが未解決の場合はCommitしません。 |
 | Docs-only | 文書のみの変更ではbuildを必須としません。 |
 
 macOS固有の問題は記録して保留し、まとまったタイミングで検証・修正します。macOS native検証自体は廃止しません。
+
+### 2.1 Secret scan
+
+ローカルではGitleaksを使用し、Commit前に次のコマンドで現在のGit refsが到達可能な履歴を検査します。
+
+```sh
+gitleaks git --redact --exit-code 1 --log-opts="--all" .
+```
+
+GitHub Actionsでも同じGit履歴スキャンを実行します。CIはshallow cloneを使用せず、remote branch・tag・Pull Request head refsを取得してからスキャンします。Gitleaksのバージョンを固定し、配布アーカイブのSHA-256を検証してから実行します。
+
+検出結果はredactされた出力だけを扱います。秘密値をIssue、PRコメント、ログ、artifactへ転記しません。検出された値が実Credentialの場合は発行元で失効・ローテーションします。Git履歴の書き換えは明示的な承認なしに実施しません。
+
+スキャン対象は実行時点でGitHubから取得可能なrefsと、それらから到達可能なcommitです。削除済みrefsのみから到達可能なcommit、外部fork側だけに存在するcommit、GitHubから取得できないオブジェクトは対象外です。GitHub Secret Scanningも併用し、Security alertsを確認します。
 
 ## 3. CI証拠
 
