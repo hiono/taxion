@@ -8,19 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
 )
 
-type providerResultUsageFixture struct {
-	jobID          string
-	roleExecution  string
-	sessionID      string
-	turnID         string
-	turnOperation  string
-	principal      interface{ }
-}
-
-func newProviderResultUsageFixture(t *testing.T, database *Store, ctx context.Context) (string, string, string, domain.PlanningTurnIntent, interface{ PrincipalID() string }) {
+func newProviderResultUsageFixture(t *testing.T, database *Store, ctx context.Context) (string, string, string, domain.PlanningTurnIntent, auth.AuthenticatedPrincipal) {
 	t.Helper()
 	principal := newAuthenticatedTestPrincipal(t)
 	jobID := "job_provider_result_usage"
