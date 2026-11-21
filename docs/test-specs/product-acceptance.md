@@ -4,6 +4,7 @@ Version: 1.0
 Date: 2026-11-20
 Governing contract: [Product Contract](../specifications/product-contract.md)
 Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-500, ADR-501, ADR-700, ADR-701, ADR-800, ADR-811
+Detailed Provider Adapter tests: [Provider Adapter テスト仕様書](provider-adapter-test-specification.md)
 
 ## 1. Purpose
 
@@ -46,6 +47,7 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, A
 - Provider側read-onlyを強制できない場合はsnapshot / explicit documentsだけを使用し、それもできない場合はrepository readを拒否する。
 - grant scopeの変更は既存grantの変更ではなく新しいgrantとして記録される。
 - start、各turn、各effect、resumeの前に再検証される。
+- Provider identityとCapability evidenceは操作単位で検証され、未検証能力の利用を拒否する。
 
 ### AT-003: Incomplete-information collaboration
 
@@ -66,6 +68,8 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, A
 - 対象、scope、budget、deadline、禁止事項、configuration referenceの変更で旧Approvalは無効になる。
 - TaskはJob scopeを狭められるが拡張できない。
 - RoleExecutionのprivileged operation直前にApprovalと現在のscope / budget / deadlineを再検証する。
+
+Domain / Store検証ケースは [Job Contract Test Specification](job-contract-test-specification.md) に定義する。
 
 ### AT-005: JobMessage semantics and actor policy
 
@@ -118,6 +122,7 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, A
 - 同じRoleExecutionのSession再接続は、保存済みの正確なSession / Provider / account / configuration identityが一致し、Adapterがcross-process reattachmentを明示的にサポートする場合だけ成功する。
 - Start / SendのUNKNOWNを、新しいOperationID / turn identityで再送しない。照合または同じidentityに対する実証済みidempotencyを要求する。
 - Stop notificationだけでは停止を認定しない。Stop proof、terminal result、Usageを照合する。
+- Usageのidentityとcompletenessを別々に検証し、確定していない利用量をfinalとして扱わない。
 
 ### AT-009: Worktree ownership and concurrency
 
@@ -168,6 +173,7 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, A
 - reattachmentが未対応・未検証の場合、同じRoleExecutionへ新しいSessionを作成しない。旧operationを未解決として保持し、Worktreeを保持またはquarantineする。
 - 新しいRoleExecutionによる継続は、旧Providerのquiescence、terminal result、Usage、Worktree releaseを確認した後に限り、現在のJob authorityを再検証して開始する。
 - 古いRoleExecutionやownerの遅延更新はrevision / fencingで拒否する。
+- Provider AdapterのE2 recovery testsはE5 Durable Recoveryの証拠として扱わない。
 
 ### AT-013: End-to-end Job completion
 
@@ -241,6 +247,7 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, A
 - 実認証情報はModel / Sandboxから分離し、必要な操作はController / Adapter経由で仲介します。
 - Prompt InjectionがCredential取得や外部送信を誘発しても実行境界で拒否します。
 - Skill / Promptの指示だけを安全境界としません。
+- CredentialLeaseは正常終了、error、panic、cancellationのすべての経路でCloseされ、raw Provider errorとcredentialを外部へ返しません。
 
 ### AT-020: Verification before completion (H7)
 
@@ -277,6 +284,8 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, A
 - 未認証のローカルCLI DRAFT作成は製品trusted intakeとみなさず、productionのPlanningAuthorization / JobApprovalへ接続しない。
 
 ## 4. Evidence recording
+
+Provider Adapter固有のDomain / Store / Controller / Runtime判定は[Provider Adapter テスト仕様書](provider-adapter-test-specification.md)に従う。既存Jobの読み取り互換性を維持し、Provider Start observationの導入revision以降に作成されたTurn / Resumeだけにaccepted Start observationの厳密なSession bindingを適用する。
 
 各受入れ結果は次の情報を持つ。
 

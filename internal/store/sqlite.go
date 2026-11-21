@@ -32,6 +32,8 @@ const createLocalDraftJobCommandType = "CreateJob"
 const createTrustedDraftJobCommandType = "CreateTrustedDraftJob"
 const addPlanningAuthorizationCommandType = "AddPlanningAuthorization"
 const startTasklessPlannerCommandType = "StartTasklessPlanner"
+const addProviderResultObservationCommandType = "AddProviderResultObservation"
+const addProviderUsageObservationCommandType = "AddProviderUsageObservation"
 
 type Store struct {
 	db *sql.DB
@@ -601,6 +603,9 @@ func (s *Store) StartTasklessPlanner(ctx context.Context, jobID string, expected
 	}
 	job.RoleExecutions = append(job.RoleExecutions, execution)
 	job.ProviderStartIntents = append(job.ProviderStartIntents, intent)
+	if job.ProviderLifecycleEnforcedFromRevision == 0 {
+		job.ProviderLifecycleEnforcedFromRevision = intent.CreatedRevision
+	}
 	job.Revision++
 	job.UpdatedAt = createdAt
 	if err := job.Validate(); err != nil {

@@ -24,6 +24,10 @@ func (f *fakePlanningLifecycleStore) GetJob(context.Context, string) (domain.Job
 	return f.job, nil
 }
 
+func (f *fakePlanningLifecycleStore) AddProviderStartObservation(context.Context, string, uint64, string, string, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStartObservation, error) {
+	return store.CommandReceipt{}, domain.ProviderStartObservation{}, nil
+}
+
 func (f *fakePlanningLifecycleStore) AddPlanningTurnIntent(context.Context, string, uint64, string, string, string, string, uint64, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnIntent, error) {
 	return store.CommandReceipt{}, domain.PlanningTurnIntent{}, f.turnErr
 }
