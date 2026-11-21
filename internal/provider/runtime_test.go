@@ -44,21 +44,21 @@ func (l *trackingLease) Close() error {
 }
 
 type testAdapter struct {
-	identity     Identity
-	capabilities Capabilities
-	startCalls   int
-	sendCalls    int
-	stopCalls    int
-	resumeCalls  int
-	lookupCalls  int
-	resultCalls  int
-	usageCalls   int
-	eventCalls   int
-	startErr        error
-	startSessionID  string
-	sendOutput      string
-	sendResult      TurnResult
-	resultContent   string
+	identity       Identity
+	capabilities   Capabilities
+	startCalls     int
+	sendCalls      int
+	stopCalls      int
+	resumeCalls    int
+	lookupCalls    int
+	resultCalls    int
+	usageCalls     int
+	eventCalls     int
+	startErr       error
+	startSessionID string
+	sendOutput     string
+	sendResult     TurnResult
+	resultContent  string
 }
 
 func (a *testAdapter) Identity() Identity                                 { return a.identity }
@@ -166,7 +166,6 @@ func newTestAdapter(capabilities ...Capability) *testAdapter {
 	}
 	return &testAdapter{identity: identity, capabilities: declaration}
 }
-
 
 func validStartRequest() StartRequest {
 	prompt := "Create a safe plan"
