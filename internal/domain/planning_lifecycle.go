@@ -76,6 +76,7 @@ type PlanningResumeIntent struct {
 	AccountID                string    `json:"account_id"`
 	ConfigurationSHA256      string    `json:"configuration_sha256"`
 	CapabilityEvidenceSHA256 string    `json:"capability_evidence_sha256"`
+	CrossProcessReattachmentSupported bool `json:"cross_process_reattachment_supported"`
 	CreatedAt                time.Time `json:"created_at"`
 	CreatedRevision          uint64    `json:"created_revision"`
 }
