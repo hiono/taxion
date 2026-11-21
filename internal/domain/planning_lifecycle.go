@@ -609,6 +609,20 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 	if !foundSession {
 		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_mismatch", Cause: errors.New("resume Provider Session does not match a persisted turn")}
 	}
+	var startIntent ProviderStartIntent
+	foundStart := false
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == execution.ID {
+			startIntent, foundStart = candidate, true
+			break
+		}
+	}
+	if !foundStart {
+		return PlanningResumeIntent{}, errors.New("Provider Start intent was not found for Resume")
+	}
+	if err := validateProviderStartSession(job, startIntent, providerSessionID, job.Revision+1, now); err != nil {
+		return PlanningResumeIntent{}, err
+	}
 	if now.Before(latestTurnAt) {
 		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "resume_before_latest_turn", Cause: errors.New("resume intent precedes the latest Provider turn")}
 	}
@@ -682,6 +696,23 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 	}
 	if latestPriorSessionTurn == nil || r.CreatedAt.Before(latestPriorSessionTurn.CreatedAt) {
 		return errors.New("PlanningResumeIntent does not follow the latest persisted turn for the same Provider Session")
+	}
+	if job.ProviderStartObservationRequiredFromRevision > 0 &&
+		r.CreatedRevision >= job.ProviderStartObservationRequiredFromRevision {
+		var startIntent ProviderStartIntent
+		foundStart := false
+		for _, candidate := range job.ProviderStartIntents {
+			if candidate.RoleExecutionID == r.RoleExecutionID {
+				startIntent, foundStart = candidate, true
+				break
+			}
+		}
+		if !foundStart {
+			return errors.New("PlanningResumeIntent has no Provider Start intent")
+		}
+		if err := validateProviderStartSession(job, startIntent, r.ProviderSessionID, r.CreatedRevision, r.CreatedAt); err != nil {
+			return err
+		}
 	}
 	for _, grant := range job.PlanningAuthorizations {
 		if grant.ID != r.PlanningAuthorizationID {
