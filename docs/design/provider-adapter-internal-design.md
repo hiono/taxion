@@ -279,7 +279,7 @@ type ProviderStartObservation struct {
 
 UNKNOWNは同一OperationIDの照合Observationで追記できる。terminal ACCEPTED / FAILEDは先行UNKNOWNだけを解消できる。ACCEPTED observationのSessionIDと一致しないTurn / Resume intentは新規作成できない。既存Jobの読み取り互換性を維持するため、Job.ProviderLifecycleEnforcedFromRevisionを使用する。新規StartIntent作成時はそのCreatedRevisionを記録する。旧Jobにこの値がない場合は、最初のProviderStartObservationのCreatedRevisionを記録する。そのrevisionより前の既存Turn / Resumeは読み取り可能とし、そのrevision以降の新しいTurn / Resumeにはaccepted Start observationとSessionIDの一致を要求する。
 
-### 6.2 ProviderEventObservation（設計済み・未実装）
+### 6.2 ProviderEventObservation（Domain / Store / Controller実装済み）
 
 ```go
 type ProviderEventObservation struct {
@@ -406,6 +406,7 @@ aggregate updateとreceipt insertのいずれかが失敗した場合は両方ro
 type ProviderExecutionStore interface {
     PlanningLifecycleStore
     StartTasklessPlanner(...)
+    AddProviderEventObservation(...)
 }
 
 type PlanningProviderRuntime interface {
@@ -413,6 +414,7 @@ type PlanningProviderRuntime interface {
     Capabilities(context.Context) (provider.Capabilities, error)
     Start(context.Context, provider.StartRequest) (provider.StartResult, error)
     Lookup(context.Context, provider.LookupRequest) (provider.LookupResult, error)
+    ReplayEvents(context.Context, provider.ReplayEventsRequest) (provider.EventPage, error)
 }
 
 type ProviderController struct {
@@ -423,7 +425,7 @@ type ProviderController struct {
 }
 ```
 
-現時点のController interfaceはDRAFT Planning StartとLookup recoveryに限定する。Send / Stop / Resume / Result / Usage / ReplayEventsのController接続は未実装である。Controller testsではfake implementationを注入する。
+現時点のController interfaceはDRAFT Planning Start、Lookup recovery、accepted Sessionに束縛したEvent replayに対応する。Send / Stop / Resume / Result / UsageのController接続は未実装である。Controller testsではfake implementationを注入する。
 
 ### 8.2 Start sequence（実装済み）
 
@@ -454,7 +456,7 @@ Load Job
 
 Sendの結果がAmbiguousの場合は同じTurnIDのUNKNOWNを追加し、新しいTurnIDを生成しない。
 
-### 8.4 Recovery sequence（Startのみ実装済み）
+### 8.4 Recovery sequence（Start / Event replay実装済み）
 
 ```text
 Load JobAggregate
@@ -467,7 +469,7 @@ Load JobAggregate
   -> Re-evaluate terminality / usage / quiescence
 ```
 
-Startの照合能力がない場合はUNKNOWNを保持する。Send / Resume / Stop / Result / Usage / Event replayのController recoveryは未実装である。新identityを作って回避しない。
+Startの照合能力がない場合はUNKNOWNを保持する。Event replayはaccepted Start Sessionと保存済みcursor prefixへ束縛し、eventをappend-onlyで保存する。Send / Resume / Stop / Result / UsageのController recoveryは未実装である。新identityを作って回避しない。
 
 ## 9. Transaction / external side effect boundary
 

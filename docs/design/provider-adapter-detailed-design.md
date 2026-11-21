@@ -241,7 +241,7 @@ Start observationが永続化されるとき、JobはProviderLifecycleEnforcedFr
 - Resume ATTACHED observationが確定するまで次Turnを許可しない。
 - Resume不能の場合、同じRoleExecutionに新Sessionを付け替えない。
 
-### 8.4 Lookup / Result / Usage / ReplayEvents（Start Lookup以外は未実装）
+### 8.4 Lookup / Result / Usage / ReplayEvents（Start Lookup / Event replay実装済み）
 
 これらは既存intentの照合操作であり、新しいProvider execution identityを生成しない。取得結果は元のOperationID / TurnIDへ束縛し、append-only Observationとして保存する。Lookup NOT_FOUNDはProviderが同一identityの不存在を証明した場合だけ記録する。
 
@@ -252,12 +252,12 @@ Start observationが永続化されるとき、JobはProviderLifecycleEnforcedFr
 Providerの外部事実をJobAggregateへappend-onlyで保持する。現時点で実装済みの事実と後続実装を分離する。
 
 - ProviderStartObservation（実装済み）: StartのACCEPTED / FAILED / UNKNOWN、SessionID、receipt、evidence
-- ProviderEventObservation（未実装）: EventID、cursor、event kind、OperationID / TurnID
+- ProviderEventObservation（実装済み）: EventID、Session-scoped Command ID、cursor、event kind、OperationID / TurnID
 - ProviderResultObservation（未実装）: result contentまたはimmutable content reference、content digest、terminality
 - ProviderUsageObservation（未実装）: UsageID、token数、Complete、evidence
 - ProviderStopObservation（未実装）: Stopped、Quiescent、evidence
 
-既存PlanningTurnObservation / PlanningResumeObservationはPlanning lifecycleの状態を表す。Start observationはProviderStartIntentのOperationIDへ束縛し、accepted SessionIDなしに新しいTurn / Resume intentを作成できない。Provider固有のTurn receipt、raw event、final result、Usage、Stop proofは後続実装で追加する。
+既存PlanningTurnObservation / PlanningResumeObservationはPlanning lifecycleの状態を表す。Start observationはProviderStartIntentのOperationIDへ束縛し、accepted SessionIDなしに新しいTurn / Resume intentを作成できない。Provider eventはaccepted SessionとOperationID / TurnIDへ束縛し、cursor chainを検証してJobAggregateへappend-onlyで保存する。Provider固有のTurn receipt、final result、Usage、Stop proofは後続実装で追加する。
 
 ### 9.2 Append-only invariant
 
@@ -291,13 +291,14 @@ Providerが操作を受理した可能性を排除できないerrorはAmbiguous�
 - CredentialLease、secret isolation、panic-safe close
 - Runtimeの全Adapter method、per-capability gate、response validation、error sanitization
 - ProviderStartObservation、Start / Turn / ResumeのSession binding
-- StoreのStart observation transaction
+- StoreのStart / Event observation transaction
 - DRAFT Planning Startのintent-first ControllerとLookup recovery
+- accepted Sessionに束縛したEvent replay Controllerとcursor/idempotency検証
 - 要求仕様、詳細設計、内部設計、テスト仕様
 
 未実装:
-- ProviderEvent / Result / Usage / Stop factsとStore transaction
-- Send / Stop / Resume / Result / Usage / ReplayEventsのController orchestration
+- ProviderResult / Usage / Stop factsとStore transaction
+- Send / Stop / Resume / Result / UsageのController orchestration
 - JobApproval-backed execution path（JobApproval domain contract未実装のためfail-closed）
 - Live Provider Adapter、Live CredentialBroker、E4 / E5 evidence catalog backend
 - E2 Controller / Store / Runtime integrationの全操作網羅

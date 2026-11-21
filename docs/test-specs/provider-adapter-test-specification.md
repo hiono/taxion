@@ -188,6 +188,7 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-019 | Expired grant recovery | 期限後に既存Startを照合 | Lookupは許可し、NOT_FOUND後の新規Startは拒否 |
 | CTR-020 | Unsafe retry | UNKNOWN後にLookup / idempotency capabilityがない | blind replayを拒否しUNKNOWNを保持 |
 | CTR-021 | Documents context | ID重複、content digest不一致、aggregate digest不一致 | Start intent作成前に拒否 |
+| CTR-022 | Event replay | accepted Session、cursor prefix、event / turn identityが一致 | append-only Observationとして保存し、同一page再送は冪等 |
 
 ## 11. Regression tests
 
@@ -212,6 +213,6 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 - Link/reference sync
 - Independent review completion
 
-Windows native testおよびGoReleaser Windows / macOS targetは、Repositoryがpublicでtag releaseを行う段階で実行する。
+Windows vet / test / buildおよびGoReleaser snapshot cross-build（macOS target含む）をPull Requestごとに必須実行する。
 
 CI成功はE2の証拠である。E4 / E5 / E6の完了を意味しない。
