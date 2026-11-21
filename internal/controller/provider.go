@@ -1006,7 +1006,13 @@ func (c *ProviderController) reconcileTurn(
 					ctx, job.ID, turn.ID, lookup.Status, usage.Tokens, usage.EvidenceSHA256, principal,
 				)
 				if err != nil {
-					return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+					unknown, persistErr := c.recordTurnObservation(
+						ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+					)
+					if persistErr != nil {
+						return receipt, turn, unknown, provider.TurnResult{}, errors.Join(err, persistErr)
+					}
+					return receipt, turn, unknown, provider.TurnResult{}, err
 				}
 				return receipt, turn, observation, provider.TurnResult{
 					OperationID: turn.OperationID, TurnID: turn.ID, SessionID: turn.ProviderSessionID,
