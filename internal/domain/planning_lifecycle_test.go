@@ -543,6 +543,7 @@ func TestPlanningTurnValidationUsesOnlyPriorResumeObservations(t *testing.T) {
 func TestPlanningTurnRequiresAcceptedStartObservationAndExactSession(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	job.ProviderStartObservations = nil
+	job.ProviderStartObservationRequiredFromRevision = 0
 	_, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
 		"cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", strings.Repeat("a", 64), 100, job.UpdatedAt.Add(time.Second))
 	var boundary *PlanningBoundaryError
