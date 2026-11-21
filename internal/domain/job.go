@@ -43,6 +43,8 @@ type Job struct {
 	ProviderEventObservations             []ProviderEventObservation  `json:"provider_event_observations,omitempty"`
 	ProviderStopIntents                   []ProviderStopIntent        `json:"provider_stop_intents,omitempty"`
 	ProviderStopObservations              []ProviderStopObservation   `json:"provider_stop_observations,omitempty"`
+	ProviderResultObservations            []ProviderResultObservation `json:"provider_result_observations,omitempty"`
+	ProviderUsageObservations              []ProviderUsageObservation  `json:"provider_usage_observations,omitempty"`
 	ProviderLifecycleEnforcedFromRevision uint64                      `json:"provider_lifecycle_enforced_from_revision,omitempty"`
 	PlanningTurnIntents                   []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
 	PlanningTurnObservations              []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
@@ -565,7 +567,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
+	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.ProviderResultObservations) + len(j.ProviderUsageObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
 	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
@@ -1015,6 +1017,69 @@ func (j Job) Validate() error {
 		for _, grant := range j.PlanningAuthorizations {
 			if grant.ID == grantID && used > grant.Budget.MaxTokens {
 				return fmt.Errorf("%w: planning token usage exceeds authorization budget", ErrInvalidJob)
+			}
+		}
+	}
+	seenResultIDs := make(map[string]struct{}, len(j.ProviderResultObservations))
+	seenResultCommands := make(map[string]struct{}, len(j.ProviderResultObservations))
+	seenTerminalResults := make(map[string]struct{}, len(j.ProviderResultObservations))
+	for _, observation := range j.ProviderResultObservations {
+		if err := observation.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid ProviderResultObservation: %v", ErrInvalidJob, err)
+		}
+		if observation.CreatedAt.After(j.UpdatedAt) || observation.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: ProviderResultObservation append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenResultIDs[observation.ID]; exists {
+			return fmt.Errorf("%w: duplicate ProviderResultObservation ID", ErrInvalidJob)
+		}
+		if _, exists := seenResultCommands[observation.CommandID]; exists {
+			return fmt.Errorf("%w: duplicate ProviderResultObservation command identity", ErrInvalidJob)
+		}
+		resultIdentity := observation.OperationID + "\x00" + observation.TurnID
+		if _, exists := seenTerminalResults[resultIdentity]; exists {
+			return fmt.Errorf("%w: duplicate terminal Provider Result for operation", ErrInvalidJob)
+		}
+		seenResultIDs[observation.ID] = struct{}{}
+		seenResultCommands[observation.CommandID] = struct{}{}
+		seenTerminalResults[resultIdentity] = struct{}{}
+	}
+	seenUsageIDs := make(map[string]struct{}, len(j.ProviderUsageObservations))
+	seenUsageCommands := make(map[string]struct{}, len(j.ProviderUsageObservations))
+	usageHistory := make(map[string][]ProviderUsageObservation)
+	usageBindings := make(map[string]string)
+	for _, observation := range j.ProviderUsageObservations {
+		if err := observation.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid ProviderUsageObservation: %v", ErrInvalidJob, err)
+		}
+		if observation.CreatedAt.After(j.UpdatedAt) || observation.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: ProviderUsageObservation append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenUsageIDs[observation.ID]; exists {
+			return fmt.Errorf("%w: duplicate ProviderUsageObservation ID", ErrInvalidJob)
+		}
+		if _, exists := seenUsageCommands[observation.CommandID]; exists {
+			return fmt.Errorf("%w: duplicate ProviderUsageObservation command identity", ErrInvalidJob)
+		}
+		usageIdentity := observation.SessionID + "\x00" + observation.UsageID
+		binding := observation.OperationID + "\x00" + observation.TurnID
+		if existing, exists := usageBindings[usageIdentity]; exists && existing != binding {
+			return fmt.Errorf("%w: Provider Usage identity was rebound to another operation", ErrInvalidJob)
+		}
+		usageBindings[usageIdentity] = binding
+		seenUsageIDs[observation.ID] = struct{}{}
+		seenUsageCommands[observation.CommandID] = struct{}{}
+		usageHistory[usageIdentity] = append(usageHistory[usageIdentity], observation)
+	}
+	for usageIdentity, observations := range usageHistory {
+		for i, observation := range observations {
+			if i == 0 {
+				continue
+			}
+			previous := observations[i-1]
+			if previous.Complete || observation.CreatedRevision <= previous.CreatedRevision ||
+				observation.CreatedAt.Before(previous.CreatedAt) {
+				return fmt.Errorf("%w: Provider Usage history is invalid for %s", ErrInvalidJob, usageIdentity)
 			}
 		}
 	}

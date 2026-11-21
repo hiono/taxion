@@ -456,3 +456,88 @@ func (s *Store) AddProviderStartObservation(
 			return domain.ProviderStartObservation{}, false
 		})
 }
+
+func (s *Store) AddProviderResultObservation(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	roleExecutionID, operationID, turnID, sessionID, content, contentSHA256 string,
+	final bool,
+	evidenceSHA256 string,
+	principal auth.AuthenticatedPrincipal,
+) (CommandReceipt, domain.ProviderResultObservation, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, domain.ProviderResultObservation{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	commandID := domain.ProviderResultObservationCommandID(operationID, turnID, contentSHA256, evidenceSHA256)
+	request := struct {
+		JobID, RoleExecutionID, OperationID, TurnID, SessionID string
+		Content, ContentSHA256                                 string
+		Final                                                  bool
+		EvidenceSHA256, PrincipalID                            string
+	}{
+		jobID, roleExecutionID, operationID, turnID, sessionID,
+		content, contentSHA256, final, evidenceSHA256, principal.PrincipalID(),
+	}
+	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addProviderResultObservationCommandType, request,
+		func(job domain.Job, now time.Time) (domain.ProviderResultObservation, error) {
+			return domain.NewProviderResultObservation(
+				job, roleExecutionID, principal.PrincipalID(), operationID, turnID, sessionID,
+				content, contentSHA256, final, evidenceSHA256, now,
+			)
+		},
+		func(job *domain.Job, fact domain.ProviderResultObservation) {
+			job.ProviderResultObservations = append(job.ProviderResultObservations, fact)
+		},
+		func(job domain.Job) (domain.ProviderResultObservation, bool) {
+			for _, fact := range job.ProviderResultObservations {
+				if fact.CommandID == commandID {
+					return fact, true
+				}
+			}
+			return domain.ProviderResultObservation{}, false
+		})
+}
+
+func (s *Store) AddProviderUsageObservation(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	roleExecutionID, operationID, turnID, sessionID, usageID string,
+	tokens uint64,
+	complete bool,
+	evidenceSHA256 string,
+	principal auth.AuthenticatedPrincipal,
+) (CommandReceipt, domain.ProviderUsageObservation, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, domain.ProviderUsageObservation{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	commandID := domain.ProviderUsageObservationCommandID(operationID, turnID, sessionID, usageID, tokens, complete, evidenceSHA256)
+	request := struct {
+		JobID, RoleExecutionID, OperationID, TurnID, SessionID, UsageID string
+		Tokens                                                        uint64
+		Complete                                                      bool
+		EvidenceSHA256, PrincipalID                                   string
+	}{
+		jobID, roleExecutionID, operationID, turnID, sessionID, usageID,
+		tokens, complete, evidenceSHA256, principal.PrincipalID(),
+	}
+	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addProviderUsageObservationCommandType, request,
+		func(job domain.Job, now time.Time) (domain.ProviderUsageObservation, error) {
+			return domain.NewProviderUsageObservation(
+				job, roleExecutionID, principal.PrincipalID(), operationID, turnID, sessionID,
+				usageID, tokens, complete, evidenceSHA256, now,
+			)
+		},
+		func(job *domain.Job, fact domain.ProviderUsageObservation) {
+			job.ProviderUsageObservations = append(job.ProviderUsageObservations, fact)
+		},
+		func(job domain.Job) (domain.ProviderUsageObservation, bool) {
+			for _, fact := range job.ProviderUsageObservations {
+				if fact.CommandID == commandID {
+					return fact, true
+				}
+			}
+			return domain.ProviderUsageObservation{}, false
+		})
+}

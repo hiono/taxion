@@ -32,6 +32,8 @@ const createLocalDraftJobCommandType = "CreateJob"
 const createTrustedDraftJobCommandType = "CreateTrustedDraftJob"
 const addPlanningAuthorizationCommandType = "AddPlanningAuthorization"
 const startTasklessPlannerCommandType = "StartTasklessPlanner"
+const addProviderResultObservationCommandType = "AddProviderResultObservation"
+const addProviderUsageObservationCommandType = "AddProviderUsageObservation"
 
 type Store struct {
 	db *sql.DB
