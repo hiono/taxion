@@ -246,3 +246,30 @@ func readJobAggregateTx(ctx context.Context, tx *sql.Tx, jobID string) (domain.J
 	}
 	return decodeJobAggregate(jobID, revision, payload, expectedHash, createdAt, updatedAt)
 }
+
+func (s *Store) AddPlanningBoundaryDecision(ctx context.Context, jobID string, expectedRevision uint64, roleExecutionID, sourceCommandID, boundary, reasonCode string, principal auth.AuthenticatedPrincipal) (CommandReceipt, domain.PlanningBoundaryDecision, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, domain.PlanningBoundaryDecision{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	commandID := domain.PlanningBoundaryDecisionCommandID(sourceCommandID, boundary)
+	request := struct {
+		JobID, RoleExecutionID, SourceCommandID, Boundary, ReasonCode string
+		ExpectedRevision uint64
+		PrincipalID string
+	}{jobID, roleExecutionID, sourceCommandID, boundary, reasonCode, expectedRevision, principal.PrincipalID()}
+	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, "AddPlanningBoundaryDecision", request,
+		func(job domain.Job, now time.Time) (domain.PlanningBoundaryDecision, error) {
+			return domain.NewPlanningBoundaryDecision(job, roleExecutionID, principal.PrincipalID(), sourceCommandID, boundary, reasonCode, now)
+		},
+		func(job *domain.Job, fact domain.PlanningBoundaryDecision) {
+			job.PlanningBoundaryDecisions = append(job.PlanningBoundaryDecisions, fact)
+		},
+		func(job domain.Job) (domain.PlanningBoundaryDecision, bool) {
+			for _, fact := range job.PlanningBoundaryDecisions {
+				if fact.CommandID == commandID {
+					return fact, true
+				}
+			}
+			return domain.PlanningBoundaryDecision{}, false
+		})
+}

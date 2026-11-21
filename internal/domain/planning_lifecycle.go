@@ -50,11 +50,24 @@ type PlanningBoundaryDecision struct {
 }
 
 func PlanningBoundaryDecisionCommandID(sourceCommandID, boundary string) string {
-	return planningOperationID("planning_boundary_command", boundary+":"+sourceCommandID)
+	sum := sha256.Sum256([]byte("taxion:planning_boundary_command:" + boundary + ":" + sourceCommandID))
+	return "cmd_" + hex.EncodeToString(sum[:16])
 }
 
 func PlanningBoundaryDecisionID(commandID string) string {
 	return planningOperationID("planning_boundary_decision", commandID)
+}
+
+func validPlanningBoundaryReason(reasonCode string) bool {
+	switch reasonCode {
+	case "authorization_invalid_or_expired", "principal_mismatch", "provider_session_mismatch",
+		"previous_operation_unknown", "turn_budget_exhausted", "token_budget_exhausted",
+		"provider_configuration_mismatch", "reattachment_not_supported",
+		"read_only_context_mismatch", "effect_not_permitted":
+		return true
+	default:
+		return false
+	}
 }
 
 type PlanningTurnIntent struct {
@@ -583,23 +596,14 @@ func NewPlanningBoundaryDecision(job Job, roleExecutionID, principalID, sourceCo
 		(boundary != PlanningBoundaryTurn && boundary != PlanningBoundaryEffect && boundary != PlanningBoundaryResume) {
 		return PlanningBoundaryDecision{}, errors.New("planning boundary decision identity is invalid")
 	}
-	allowedReasons := map[string]struct{}{
-		"authorization_invalid_or_expired": {},
-		"principal_mismatch": {},
-		"provider_session_mismatch": {},
-		"previous_operation_unknown": {},
-		"turn_budget_exhausted": {},
-		"token_budget_exhausted": {},
-		"provider_configuration_mismatch": {},
-		"reattachment_not_supported": {},
-		"read_only_context_mismatch": {},
-		"effect_not_permitted": {},
-	}
-	if _, ok := allowedReasons[reasonCode]; !ok {
+	if !validPlanningBoundaryReason(reasonCode) {
 		return PlanningBoundaryDecision{}, errors.New("planning boundary decision reason code is unsupported")
 	}
 	if err := job.Validate(); err != nil {
 		return PlanningBoundaryDecision{}, err
+	}
+	if job.Revision >= uint64(^uint64(0)>>1) {
+		return PlanningBoundaryDecision{}, errors.New("Job revision exhausted")
 	}
 	var execution RoleExecution
 	foundExecution := false
@@ -645,7 +649,7 @@ func (d PlanningBoundaryDecision) Validate(job Job) error {
 		!validPlanningIdentity(d.RoleExecutionID) || !validPlanningIdentity(d.PlanningAuthorizationID) ||
 		!validPlanningIdentity(d.PrincipalID) || !validSHA256(d.RequestSHA256) ||
 		(d.Boundary != PlanningBoundaryTurn && d.Boundary != PlanningBoundaryEffect && d.Boundary != PlanningBoundaryResume) ||
-		d.Decision != PlanningEffectDeny || d.ReasonCode == "" || d.CreatedAt.IsZero() || d.CreatedRevision < 3 {
+		d.Decision != PlanningEffectDeny || !validPlanningBoundaryReason(d.ReasonCode) || d.CreatedAt.IsZero() || d.CreatedRevision < 3 {
 		return errors.New("PlanningBoundaryDecision identity or metadata is invalid")
 	}
 	for _, execution := range job.RoleExecutions {
