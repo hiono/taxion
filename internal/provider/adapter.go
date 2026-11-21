@@ -3,10 +3,13 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type Identity struct {
@@ -210,16 +213,44 @@ type ContextDocument struct {
 	Content string
 }
 
+func (d ContextDocument) Validate() error {
+	if !validIdentifier(d.ID) || !validSHA256(d.SHA256) || sha256Hex(d.Content) != d.SHA256 {
+		return errors.New("Provider context document identity or content digest is invalid")
+	}
+	return nil
+}
+
 type StartRequest struct {
 	OperationID     string
 	JobID           string
 	RoleExecutionID string
 	RequestSHA256   string
+	PromptSHA256    string
 	Prompt          string
 	Context         []ContextDocument
 	MaxTurns        uint32
 	MaxTokens       uint64
 	Deadline        time.Time
+}
+
+func (r StartRequest) Validate() error {
+	if !validIdentifier(r.OperationID) || !validIdentifier(r.JobID) || !validIdentifier(r.RoleExecutionID) ||
+		!validSHA256(r.RequestSHA256) || !validSHA256(r.PromptSHA256) ||
+		r.Prompt == "" || sha256Hex(r.Prompt) != r.PromptSHA256 ||
+		r.MaxTurns == 0 || r.MaxTokens == 0 || r.Deadline.IsZero() {
+		return errors.New("Provider Start request identity, prompt, budget, or deadline is invalid")
+	}
+	seen := make(map[string]struct{}, len(r.Context))
+	for _, document := range r.Context {
+		if err := document.Validate(); err != nil {
+			return err
+		}
+		if _, exists := seen[document.ID]; exists {
+			return errors.New("Provider Start request contains duplicate context document IDs")
+		}
+		seen[document.ID] = struct{}{}
+	}
+	return nil
 }
 
 type StartResult struct {
@@ -235,6 +266,15 @@ type TurnRequest struct {
 	PromptSHA256 string
 	Prompt       string
 	MaxTokens    uint64
+}
+
+func (r TurnRequest) Validate() error {
+	if !validIdentifier(r.OperationID) || !validIdentifier(r.TurnID) || !validIdentifier(r.SessionID) ||
+		!validSHA256(r.PromptSHA256) || r.Prompt == "" || sha256Hex(r.Prompt) != r.PromptSHA256 ||
+		r.MaxTokens == 0 {
+		return errors.New("Provider Turn request identity, prompt digest, or token budget is invalid")
+	}
+	return nil
 }
 
 type TurnResult struct {
@@ -367,6 +407,23 @@ func validOperationCode(code string) bool {
 	default:
 		return false
 	}
+}
+
+func validIdentifier(value string) bool {
+	if value == "" || len(value) > 256 || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func sha256Hex(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 func validSHA256(value string) bool {
