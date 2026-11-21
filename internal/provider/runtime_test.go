@@ -265,6 +265,25 @@ func TestRuntimeStartUsesVerifiedCapabilityAndClosesCredential(t *testing.T) {
 	}
 }
 
+func TestRuntimeClosesCredentialAndReturnsUnknownWhenAdapterPanics(t *testing.T) {
+	adapter := newTestAdapter(CapabilityStartIdempotency)
+	adapter.startPanic = true
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	_, err = runtime.Start(context.Background(), validStartRequest())
+	var operationError *OperationError
+	if !errors.As(err, &operationError) || operationError.Class != FailureAmbiguous ||
+		strings.Contains(err.Error(), "runtime-test-secret") {
+		t.Fatalf("Adapter panic was not sanitized as UNKNOWN: %v", err)
+	}
+	if broker.closed != 1 {
+		t.Fatalf("credential lease was not closed after panic: closed=%d", broker.closed)
+	}
+}
+
 func TestRuntimeRejectsSyntheticCapabilityBeforeCredentialAcquisition(t *testing.T) {
 	adapter := newTestAdapter(CapabilityStartIdempotency)
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
@@ -283,7 +302,7 @@ func TestRuntimeRejectsSyntheticCapabilityBeforeCredentialAcquisition(t *testing
 func TestRuntimeRequiresDurableEvidenceForResume(t *testing.T) {
 	adapter := newTestAdapter(CapabilitySessionReattach)
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := newTestRuntime(adapter, broker)
+	runtime, err := NewRuntime(adapter, broker, runtimeTestVerifier{})
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -324,7 +343,7 @@ func TestRuntimeStopRequiresStopProof(t *testing.T) {
 	}
 }
 
-func TestRuntimeEventReplayRequiresDurableCapabilityAndValidCursorChain(t *testing.T) {
+func TestRuntimeSyntheticEventReplayContract(t *testing.T) {
 	adapter := newTestAdapter(CapabilityEventReplay)
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
 	runtime, err := newTestRuntime(adapter, broker)
@@ -463,5 +482,53 @@ func TestRuntimeCapabilitiesReturnsDetachedEvidenceSlice(t *testing.T) {
 	capabilities.Evidence[0].EvidenceLevel = EvidenceSynthetic
 	if _, err := runtime.Start(context.Background(), validStartRequest()); err != nil {
 		t.Fatalf("mutating returned capability evidence changed runtime authorization: %v", err)
+	}
+}
+
+func TestRuntimeDoesNotTreatStoppedWithoutQuiescenceAsConfirmed(t *testing.T) {
+	adapter := newTestAdapter(CapabilityStopProof)
+	adapter.stopQuiescent = false
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if _, err := runtime.Stop(context.Background(), validStopRequest()); !errors.Is(err, ErrStopUnconfirmed) {
+		t.Fatalf("Stop without quiescence error = %v", err)
+	}
+	if adapter.stopCalls != 1 || broker.closed != 1 {
+		t.Fatalf("Stop calls / lease close: calls=%d closed=%d", adapter.stopCalls, broker.closed)
+	}
+}
+
+func TestRuntimeRejectsNonFinalResult(t *testing.T) {
+	adapter := newTestAdapter(CapabilityFinalOutput)
+	adapter.resultFinal = false
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	_, err = runtime.Result(context.Background(), validResultRequest())
+	var operationError *OperationError
+	if !errors.As(err, &operationError) || operationError.Class != FailureAmbiguous {
+		t.Fatalf("non-final result was not treated as UNKNOWN: %v", err)
+	}
+}
+
+func TestRuntimePreservesIncompleteUsageWithoutFinalizingIt(t *testing.T) {
+	adapter := newTestAdapter(CapabilityUsageIdentity, CapabilityUsageCompleteness)
+	adapter.usageComplete = false
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	usage, err := runtime.Usage(context.Background(), UsageRequest{OperationID: "provider_op_1", SessionID: "session_1"})
+	if err != nil {
+		t.Fatalf("Usage: %v", err)
+	}
+	if usage.Complete {
+		t.Fatal("partial Usage was treated as complete")
 	}
 }
