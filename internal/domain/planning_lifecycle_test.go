@@ -34,7 +34,7 @@ func planningLifecycleJob(t *testing.T) (Job, string, string) {
 		t.Fatalf("NewProviderStartObservation: %v", err)
 	}
 	job.ProviderStartObservations = append(job.ProviderStartObservations, startObservation)
-	job.ProviderStartObservationRequiredFromRevision = startObservation.CreatedRevision
+	job.ProviderLifecycleEnforcedFromRevision = startObservation.CreatedRevision
 	job.Revision++
 	job.UpdatedAt = startObservation.CreatedAt
 	return job, principal, execution.ID
@@ -543,7 +543,7 @@ func TestPlanningTurnValidationUsesOnlyPriorResumeObservations(t *testing.T) {
 func TestPlanningTurnRequiresAcceptedStartObservationAndExactSession(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	job.ProviderStartObservations = nil
-	job.ProviderStartObservationRequiredFromRevision = 0
+	job.ProviderLifecycleEnforcedFromRevision = 0
 	_, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
 		"cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", strings.Repeat("a", 64), 100, job.UpdatedAt.Add(time.Second))
 	var boundary *PlanningBoundaryError
@@ -570,7 +570,7 @@ func TestLegacyPlanningTurnFactsRemainReadableWithoutStartObservation(t *testing
 	job.Revision++
 	job.UpdatedAt = turn.CreatedAt
 	job.ProviderStartObservations = nil
-	job.ProviderStartObservationRequiredFromRevision = 0
+	job.ProviderLifecycleEnforcedFromRevision = 0
 	if err := job.Validate(); err != nil {
 		t.Fatalf("legacy Job with historical Turn intent must remain readable: %v", err)
 	}
@@ -587,7 +587,7 @@ func TestNewPlanningResumeRequiresAcceptedStartObservation(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = turn.CreatedAt
 	job.ProviderStartObservations = nil
-	job.ProviderStartObservationRequiredFromRevision = 0
+	job.ProviderLifecycleEnforcedFromRevision = 0
 	_, err = NewPlanningResumeIntent(job, executionID, principal, "session_1",
 		"cmd_22222222222222222222222222222222", strings.Repeat("2", 64), true, job.UpdatedAt.Add(time.Second))
 	var boundary *PlanningBoundaryError
@@ -600,7 +600,7 @@ func TestProviderStartUnknownEvidenceIsAppendOnlyUntilTerminalResolution(t *test
 	job, principal, executionID := planningLifecycleJob(t)
 	startID := job.ProviderStartIntents[0].ID
 	job.ProviderStartObservations = nil
-	job.ProviderStartObservationRequiredFromRevision = 0
+	job.ProviderLifecycleEnforcedFromRevision = 0
 
 	first, err := NewProviderStartObservation(job, startID, principal,
 		"cmd_33333333333333333333333333333333", ProviderStartUnknown, "", "", "", false,
@@ -609,7 +609,7 @@ func TestProviderStartUnknownEvidenceIsAppendOnlyUntilTerminalResolution(t *test
 		t.Fatalf("first UNKNOWN observation: %v", err)
 	}
 	job.ProviderStartObservations = append(job.ProviderStartObservations, first)
-	job.ProviderStartObservationRequiredFromRevision = first.CreatedRevision
+	job.ProviderLifecycleEnforcedFromRevision = first.CreatedRevision
 	job.Revision++
 	job.UpdatedAt = first.CreatedAt
 
