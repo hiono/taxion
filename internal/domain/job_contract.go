@@ -49,6 +49,8 @@ type JobContractRevision struct {
 	CanonicalHash             string      `json:"canonical_hash"`
 	Contract                  JobContract `json:"contract"`
 	ProposedByRoleExecutionID string      `json:"proposed_by_role_execution_id"`
+	SourceResultObservationID string      `json:"source_result_observation_id"`
+	SourceResultContentSHA256 string      `json:"source_result_content_sha256"`
 	CreatedAt                 time.Time   `json:"created_at"`
 	CreatedRevision           uint64      `json:"created_revision"`
 }
@@ -163,7 +165,7 @@ func canonicalContractSet(name string, values []string, required bool) ([]string
 	return normalized, nil
 }
 
-func NewJobContractRevision(job Job, commandID, roleExecutionID string, contract JobContract, now time.Time) (JobContractRevision, error) {
+func NewJobContractRevision(job Job, commandID, roleExecutionID, sourceResultObservationID, sourceResultContentSHA256 string, contract JobContract, now time.Time) (JobContractRevision, error) {
 	if err := job.Validate(); err != nil {
 		return JobContractRevision{}, fmt.Errorf("validate Job before contract proposal: %w", err)
 	}
@@ -194,13 +196,35 @@ func NewJobContractRevision(job Job, commandID, roleExecutionID string, contract
 		!foundGrant || grant.Validate(job) != nil {
 		return JobContractRevision{}, errors.New("JobContract proposal requires an accepted Taskless PLANNER execution with its PlanningAuthorization")
 	}
+	if !validPlanningIdentity(sourceResultObservationID) || !validSHA256(sourceResultContentSHA256) {
+		return JobContractRevision{}, errors.New("JobContract proposal requires an exact Provider Result observation identity and digest")
+	}
+	var sourceResult *ProviderResultObservation
+	for i := range job.ProviderResultObservations {
+		candidate := &job.ProviderResultObservations[i]
+		if candidate.ID == sourceResultObservationID {
+			sourceResult = candidate
+			break
+		}
+	}
+	if sourceResult == nil || sourceResult.JobID != job.ID ||
+		sourceResult.RoleExecutionID != roleExecutionID || !sourceResult.Final ||
+		sourceResult.ContentSHA256 != sourceResultContentSHA256 {
+		return JobContractRevision{}, errors.New("JobContract source Result must be final and belong to the same Job and Planner RoleExecution")
+	}
+	if err := sourceResult.Validate(job); err != nil {
+		return JobContractRevision{}, fmt.Errorf("validate JobContract source Result: %w", err)
+	}
+	if sourceResult.TurnID == "" {
+		return JobContractRevision{}, errors.New("JobContract source Result must be bound to a Planner Turn")
+	}
 	canonical, hash, err := CanonicalizeJobContract(contract, JobContractCanonicalizationVersion)
 	if err != nil {
 		return JobContractRevision{}, err
 	}
 	now = now.UTC().Round(0)
 	if now.Before(startObservation.CreatedAt) || now.Before(grant.IssuedAt) ||
-		!now.Before(grant.Deadline) || !now.Before(canonical.Deadline) {
+		now.Before(sourceResult.CreatedAt) || !now.Before(grant.Deadline) || !now.Before(canonical.Deadline) {
 		return JobContractRevision{}, errors.New("JobContract proposal time is outside the accepted Planner Session, PlanningAuthorization, or contract deadline")
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
@@ -211,6 +235,7 @@ func NewJobContractRevision(job Job, commandID, roleExecutionID string, contract
 		Revision:                uint64(len(job.JobContractRevisions) + 1),
 		CanonicalizationVersion: JobContractCanonicalizationVersion, CanonicalHash: hash,
 		Contract: canonical, ProposedByRoleExecutionID: roleExecutionID,
+		SourceResultObservationID: sourceResult.ID, SourceResultContentSHA256: sourceResult.ContentSHA256,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}, nil
 }
@@ -219,6 +244,7 @@ func (r JobContractRevision) Validate(job Job) error {
 	if !validCommandID(r.CommandID) || r.ID != JobContractRevisionID(r.CommandID) ||
 		r.JobID != job.ID || r.Revision == 0 || r.CanonicalizationVersion != JobContractCanonicalizationVersion ||
 		!validSHA256(r.CanonicalHash) || !validPlanningIdentity(r.ProposedByRoleExecutionID) ||
+		!validPlanningIdentity(r.SourceResultObservationID) || !validSHA256(r.SourceResultContentSHA256) ||
 		r.CreatedAt.IsZero() || r.CreatedRevision < 2 || r.CreatedRevision > job.Revision ||
 		r.CreatedAt.After(job.UpdatedAt) {
 		return errors.New("JobContractRevision identity or metadata is invalid")
@@ -245,6 +271,26 @@ func (r JobContractRevision) Validate(job Job) error {
 		r.CreatedAt.Before(startObservation.CreatedAt) || r.CreatedAt.Before(execution.CreatedAt) ||
 		r.CreatedAt.Before(grant.IssuedAt) || !r.CreatedAt.Before(grant.Deadline) {
 		return errors.New("JobContractRevision proposer is not an accepted Taskless PLANNER execution within its PlanningAuthorization")
+	}
+	var sourceResult *ProviderResultObservation
+	for i := range job.ProviderResultObservations {
+		candidate := &job.ProviderResultObservations[i]
+		if candidate.ID == r.SourceResultObservationID {
+			sourceResult = candidate
+			break
+		}
+	}
+	if sourceResult == nil || sourceResult.JobID != job.ID ||
+		sourceResult.RoleExecutionID != r.ProposedByRoleExecutionID || !sourceResult.Final ||
+		sourceResult.ContentSHA256 != r.SourceResultContentSHA256 ||
+		r.CreatedRevision <= sourceResult.CreatedRevision || r.CreatedAt.Before(sourceResult.CreatedAt) {
+		return errors.New("JobContractRevision source Result identity, digest, or append order is invalid")
+	}
+	if err := sourceResult.Validate(job); err != nil {
+		return fmt.Errorf("JobContractRevision source Result is invalid: %w", err)
+	}
+	if sourceResult.TurnID == "" {
+		return errors.New("JobContractRevision source Result is not bound to a Planner Turn")
 	}
 	canonical, hash, err := CanonicalizeJobContract(r.Contract, r.CanonicalizationVersion)
 	if err != nil {
