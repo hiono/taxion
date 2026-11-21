@@ -578,8 +578,7 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.test",
-		SDKVersion:          "test-sdk/1",
-		ConfigurationSHA256: strings.Repeat("a", 64),
+				ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode:      domain.PlanningReadOnlyBoundarySnapshot,
@@ -692,8 +691,7 @@ func TestStartTasklessPlannerPersistsAndIsIdempotent(t *testing.T) {
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.primary",
-		SDKVersion:          "test-sdk/1",
-		ConfigurationSHA256: strings.Repeat("a", 64),
+				ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode:      domain.PlanningReadOnlyBoundarySnapshot,
@@ -794,8 +792,7 @@ func TestStartTasklessPlannerRejectsWrongPrincipalAndRollsBack(t *testing.T) {
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.primary",
-		SDKVersion:          "test-sdk/1",
-		ConfigurationSHA256: strings.Repeat("a", 64),
+				ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode:      domain.PlanningReadOnlyBoundarySnapshot,
@@ -855,8 +852,7 @@ func TestAddPlanningAuthorizationRejectsWrongPrincipalAndRollsBack(t *testing.T)
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.test",
-		SDKVersion:          "test-sdk/1",
-		ConfigurationSHA256: strings.Repeat("b", 64),
+				ConfigurationSHA256: strings.Repeat("b", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode:      domain.PlanningReadOnlyBoundaryDocuments,
@@ -906,8 +902,7 @@ func TestAddPlanningAuthorizationAppendsWithoutChangingExistingFacts(t *testing.
 	firstRequest := domain.PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.test",
-		SDKVersion:          "test-sdk/1",
-		ConfigurationSHA256: strings.Repeat("a", 64),
+				ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode:      domain.PlanningReadOnlyBoundarySnapshot,
