@@ -110,3 +110,11 @@ Both commands use the shared aggregate transaction: expected-revision check, ide
 ## 5. Execution boundary
 
 This change establishes the JobContract / JobApproval domain and Store facts only. Provider execution must remain blocked until a later controller verifies the current approval and creates an explicit ExecutionPermission bound to the approved contract. Do not add a placeholder approval boolean or infer authority from Job state alone.
+
+## 6. Planner proposal Controller
+
+The Controller accepts a proposal only from a validated AuthenticatedPrincipal whose identity matches the PlanningAuthorization bound to the referenced RoleExecution. The RoleExecution must be a Taskless PLANNER in the same Job, the Job must be DRAFT, and an ACCEPTED Provider Start observation must exist for that execution.
+
+For a new proposal, the Controller revalidates the current PlanningAuthorization and its deadline immediately before calling the Store. The Store remains the authoritative mutation boundary: it validates the accepted Start, canonical contract, deadline, expected Job revision, idempotency identity, and aggregate invariants in one transaction.
+
+The Controller does not call the Provider, change Job authority, issue JobApproval, or create ExecutionPermission. A committed proposal may be retried after the PlanningAuthorization deadline only with the same CommandID and identical canonical request; the Store returns the original receipt and fact. A different payload or proposer with the same CommandID is rejected as an idempotency conflict.

@@ -35,3 +35,16 @@
 | JC-108 | Restart restoration | Close and reopen Store after revision and approval | Facts, hash, state, and receipts preserved |
 | JC-109 | Revision after approval | Add a new revision to ACTIVE Job | State changes to DRAFT in same transaction |
 | JC-110 | Rollback | Inject failure before aggregate commit | No partial contract / approval fact or receipt |
+
+## Controller tests
+
+| ID | Scenario | Input / setup | Expected result |
+|---|---|---|---|
+| JC-201 | Authorized proposal | Matching HUMAN Principal, DRAFT Job, current grant, Taskless PLANNER, accepted Start | Append one revision through Store |
+| JC-202 | Principal mismatch | Different HUMAN Principal from the grant owner | Reject without mutation |
+| JC-203 | Missing accepted Start | PLANNER execution without ACCEPTED observation | Reject without mutation |
+| JC-204 | Expired grant | New proposal after PlanningAuthorization deadline | Reject without mutation |
+| JC-205 | ACTIVE Job | New proposal after approval | Reject without mutation |
+| JC-206 | Exact replay after expiry | Same CommandID and canonical request for an existing revision | Return original receipt and revision |
+| JC-207 | Idempotency conflict | Reuse CommandID with changed contract or proposer | Reject without mutation |
+| JC-208 | Authority separation | Successful proposal | Job remains DRAFT; no JobApproval or ExecutionPermission is created |

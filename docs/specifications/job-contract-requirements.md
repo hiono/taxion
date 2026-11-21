@@ -52,7 +52,13 @@ Approving the latest revision transitions the Job from DRAFT to ACTIVE. ACTIVE r
 
 JobApproval is distinct from PlanningAuthorization and from ExecutionPermission. Approval records human acceptance of a contract; it does not by itself grant a provider capability, credential access, or permission for a prohibited / approval-required effect. Execution controllers must later verify the current JobApproval, scope, budget, deadline, Provider identity, and effect boundary.
 
-## 6. References
+## 6. Planner proposal Controller requirements
+
+The Controller must require a validated AuthenticatedPrincipal matching the PlanningAuthorization owner, a DRAFT Job, and the Taskless PLANNER RoleExecution bound to that grant. The referenced execution must have an ACCEPTED Provider Start observation. New proposals must revalidate the grant deadline immediately before persistence.
+
+The Controller must persist the proposal only through the JobAggregate Store command using the current expected revision. It must not call the Provider or create JobApproval / ExecutionPermission. Exact idempotent replay of an already committed proposal is allowed after grant expiry only when the same CommandID and canonical request are supplied; changed payload or proposer must be rejected.
+
+## 7. References
 
 - ADR-201: Job aggregate and command boundary
 - ADR-202: Domain invariants across state paths
