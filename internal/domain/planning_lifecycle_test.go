@@ -538,3 +538,21 @@ func TestPlanningTurnValidationUsesOnlyPriorResumeObservations(t *testing.T) {
 		t.Fatal("Job.Validate accepted a turn whose resume attachment observation was appended after that turn")
 	}
 }
+
+func TestPlanningTurnRequiresAcceptedStartObservationAndExactSession(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	job.ProviderStartObservations = nil
+	_, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
+		"cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", strings.Repeat("a", 64), 100, job.UpdatedAt.Add(time.Second))
+	var boundary *PlanningBoundaryError
+	if !errors.As(err, &boundary) || boundary.ReasonCode != "provider_start_unconfirmed" {
+		t.Fatalf("turn without Start observation error = %v, want provider_start_unconfirmed", err)
+	}
+
+	job, principal, executionID = planningLifecycleJob(t)
+	_, err = NewPlanningTurnIntent(job, executionID, principal, "session_other",
+		"cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("b", 64), 100, job.UpdatedAt.Add(time.Second))
+	if !errors.As(err, &boundary) || boundary.ReasonCode != "provider_session_mismatch" {
+		t.Fatalf("turn with unbound Session error = %v, want provider_session_mismatch", err)
+	}
+}
