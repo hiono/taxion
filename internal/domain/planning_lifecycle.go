@@ -249,6 +249,33 @@ func planningGrantAndExecutionForObservation(job Job, roleExecutionID, principal
 	return PlanningAuthorization{}, RoleExecution{}, errors.New("PlanningAuthorization was not found")
 }
 
+func latestPlanningResumeStatus(job Job, roleExecutionID string, beforeRevision uint64) (string, bool) {
+	var latest PlanningResumeIntent
+	found := false
+	for _, resume := range job.PlanningResumeIntents {
+		if resume.RoleExecutionID == roleExecutionID && resume.CreatedRevision < beforeRevision &&
+			(!found || resume.CreatedRevision > latest.CreatedRevision) {
+			latest = resume
+			found = true
+		}
+	}
+	if !found {
+		return "", false
+	}
+	var latestObservation *PlanningResumeObservation
+	for i := range job.PlanningResumeObservations {
+		observation := &job.PlanningResumeObservations[i]
+		if observation.ResumeID == latest.ID &&
+			(latestObservation == nil || observation.CreatedRevision > latestObservation.CreatedRevision) {
+			latestObservation = observation
+		}
+	}
+	if latestObservation == nil {
+		return "", true
+	}
+	return latestObservation.Status, true
+}
+
 func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessionID, commandID, promptSHA256 string, reservedTokens uint64, now time.Time) (PlanningTurnIntent, error) {
 	now = now.UTC().Round(0)
 	if !validCommandID(commandID) || !validPlanningIdentity(providerSessionID) ||
@@ -297,6 +324,12 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 			return PlanningTurnIntent{}, errors.New("planning token usage overflow")
 		}
 		tokensUsed += lastTokensUsed
+	}
+	if status, found := latestPlanningResumeStatus(job, execution.ID, job.Revision+1); found && status != PlanningResumeAttached {
+		if status == "" || status == PlanningResumeUnknown {
+			return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "previous_resume_unknown", Cause: errors.New("previous Provider resume is unresolved; reconcile the same OperationID before another turn")}
+		}
+		return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "provider_session_not_attached", Cause: errors.New("Provider Session is not attached after the latest resume")}
 	}
 	if count >= grant.Budget.MaxTurns || reservedTokens > grant.Budget.MaxTokens-tokensUsed {
 		reasonCode := "turn_budget_exhausted"
@@ -364,6 +397,9 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 	}
 	if !foundStart {
 		return errors.New("PlanningTurnIntent Provider Start intent was not found")
+	}
+	if status, found := latestPlanningResumeStatus(job, t.RoleExecutionID, t.CreatedRevision); found && status != PlanningResumeAttached {
+		return errors.New("PlanningTurnIntent follows a resume without an attached Provider Session")
 	}
 	for _, grant := range job.PlanningAuthorizations {
 		if grant.ID != t.PlanningAuthorizationID {

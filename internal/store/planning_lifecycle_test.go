@@ -193,12 +193,32 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil {
 		t.Fatalf("GetJob before resume reconciliation: %v", err)
 	}
+	turnsBeforeBlockedResume := len(job.PlanningTurnIntents)
+	revisionBeforeBlockedResume := job.Revision
+	if _, _, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_exact", "cmd_00000000000000000000000000000001", strings.Repeat("4", 64), 100, principal); err == nil || !strings.Contains(err.Error(), "previous_resume_unknown") {
+		t.Fatalf("new turn during UNKNOWN resume = %v, want previous_resume_unknown", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after blocked turn: %v", err)
+	}
+	if job.Revision != revisionBeforeBlockedResume || len(job.PlanningTurnIntents) != turnsBeforeBlockedResume {
+		t.Fatalf("blocked turn partially changed Job: revision=%d turns=%d", job.Revision, len(job.PlanningTurnIntents))
+	}
 	if _, _, err := database.AddPlanningResumeIntent(ctx, jobID, job.Revision, executionID, "session_exact", "cmd_88888888888888888888888888888888", strings.Repeat("2", 64), true, principal); err == nil {
 		t.Fatal("new resume was allowed while previous resume remained UNKNOWN")
 	}
 	_, resumeResolved, err := database.AddPlanningResumeObservation(ctx, jobID, job.Revision, resume.ID, "cmd_99999999999999999999999999999999", domain.PlanningResumeAttached, strings.Repeat("3", 64), true, principal)
 	if err != nil || !resumeResolved.ReconcilesUnknown {
 		t.Fatalf("reconcile resume UNKNOWN: %#v %v", resumeResolved, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after resume reconciliation: %v", err)
+	}
+	_, nextTurn, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_exact", "cmd_00000000000000000000000000000002", strings.Repeat("5", 64), 100, principal)
+	if err != nil || nextTurn.TurnNumber != 2 {
+		t.Fatalf("turn after successful resume: %#v %v", nextTurn, err)
 	}
 	if resume.RoleExecutionID != executionID || resume.ProviderSessionID != "session_exact" {
 		t.Fatalf("resume changed identity: %#v", resume)
@@ -216,7 +236,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil {
 		t.Fatalf("GetJob after restart: %v", err)
 	}
-	if job.State != domain.JobDraft || len(job.PlanningTurnIntents) != 1 || len(job.PlanningTurnObservations) != 2 ||
+	if job.State != domain.JobDraft || len(job.PlanningTurnIntents) != 2 || len(job.PlanningTurnObservations) != 2 ||
 		len(job.PlanningEffectDecisions) != 2 || len(job.PlanningResumeIntents) != 1 || len(job.PlanningResumeObservations) != 2 || len(job.PlanningBoundaryDecisions) != 1 || len(job.RoleExecutions) != 1 {
 		t.Fatalf("restored Job lifecycle facts: %#v", job)
 	}

@@ -158,8 +158,15 @@ func TestPlanningResumeUnknownRequiresSameOperationReconciliation(t *testing.T) 
 	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
 	job.Revision++
 	job.UpdatedAt = now
+	turnObservation, err := NewPlanningTurnObservation(job, turn.ID, principal, "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", PlanningTurnCompleted, 10, strings.Repeat("e", 64), false, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("turn observation: %v", err)
+	}
+	job.PlanningTurnObservations = append(job.PlanningTurnObservations, turnObservation)
+	job.Revision++
+	job.UpdatedAt = turnObservation.CreatedAt
 
-	resume, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_cccccccccccccccccccccccccccccccc", strings.Repeat("b", 64), true, now.Add(time.Second))
+	resume, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_cccccccccccccccccccccccccccccccc", strings.Repeat("b", 64), true, now.Add(2*time.Second))
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
@@ -167,7 +174,7 @@ func TestPlanningResumeUnknownRequiresSameOperationReconciliation(t *testing.T) 
 	job.Revision++
 	job.UpdatedAt = resume.CreatedAt
 
-	unknown, err := NewPlanningResumeObservation(job, resume.ID, principal, "cmd_dddddddddddddddddddddddddddddddd", PlanningResumeUnknown, "", false, now.Add(2*time.Second))
+	unknown, err := NewPlanningResumeObservation(job, resume.ID, principal, "cmd_dddddddddddddddddddddddddddddddd", PlanningResumeUnknown, "", false, now.Add(3*time.Second))
 	if err != nil {
 		t.Fatalf("UNKNOWN observation: %v", err)
 	}
@@ -175,11 +182,14 @@ func TestPlanningResumeUnknownRequiresSameOperationReconciliation(t *testing.T) 
 	job.Revision++
 	job.UpdatedAt = unknown.CreatedAt
 
-	if _, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("c", 64), true, now.Add(3*time.Second)); err == nil || !strings.Contains(err.Error(), "previous_resume_unknown") {
+	if _, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("c", 64), 100, now.Add(4*time.Second)); err == nil || !strings.Contains(err.Error(), "previous_resume_unknown") {
+		t.Fatalf("new turn error = %v, want previous_resume_unknown", err)
+	}
+	if _, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("d", 64), true, now.Add(4*time.Second)); err == nil || !strings.Contains(err.Error(), "previous_resume_unknown") {
 		t.Fatalf("new resume error = %v, want previous_resume_unknown", err)
 	}
 
-	resolved, err := NewPlanningResumeObservation(job, resume.ID, principal, "cmd_ffffffffffffffffffffffffffffffff", PlanningResumeAttached, strings.Repeat("d", 64), true, now.Add(4*time.Second))
+	resolved, err := NewPlanningResumeObservation(job, resume.ID, principal, "cmd_11111111111111111111111111111111", PlanningResumeAttached, strings.Repeat("f", 64), true, now.Add(5*time.Second))
 	if err != nil {
 		t.Fatalf("reconcile UNKNOWN resume: %v", err)
 	}
@@ -189,8 +199,14 @@ func TestPlanningResumeUnknownRequiresSameOperationReconciliation(t *testing.T) 
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job.Validate after resume reconciliation: %v", err)
 	}
+	nextTurn, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_22222222222222222222222222222222", strings.Repeat("2", 64), 100, now.Add(6*time.Second))
+	if err != nil {
+		t.Fatalf("turn after successful resume: %v", err)
+	}
+	if nextTurn.TurnNumber != 2 {
+		t.Fatalf("turn number after resume = %d, want 2", nextTurn.TurnNumber)
+	}
 }
-
 func TestPlanningResumeFactsRejectNonAppendOrderedHistory(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	now := job.UpdatedAt.Add(time.Second)
