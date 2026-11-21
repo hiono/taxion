@@ -142,3 +142,47 @@ func TestPlanningResumeRequiresExactSessionAndCapabilityEvidence(t *testing.T) {
 		t.Fatalf("resume changed execution/session identity: %#v", resume)
 	}
 }
+
+func TestPlanningResumeUnknownRequiresSameOperationReconciliation(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("a", 64), 100, now)
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = now
+
+	resume, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_cccccccccccccccccccccccccccccccc", strings.Repeat("b", 64), true, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, resume)
+	job.Revision++
+	job.UpdatedAt = resume.CreatedAt
+
+	unknown, err := NewPlanningResumeObservation(job, resume.ID, principal, "cmd_dddddddddddddddddddddddddddddddd", PlanningResumeUnknown, "", false, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("UNKNOWN observation: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, unknown)
+	job.Revision++
+	job.UpdatedAt = unknown.CreatedAt
+
+	if _, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("c", 64), true, now.Add(3*time.Second)); err == nil || !strings.Contains(err.Error(), "previous_resume_unknown") {
+		t.Fatalf("new resume error = %v, want previous_resume_unknown", err)
+	}
+
+	resolved, err := NewPlanningResumeObservation(job, resume.ID, principal, "cmd_ffffffffffffffffffffffffffffffff", PlanningResumeAttached, strings.Repeat("d", 64), true, now.Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("reconcile UNKNOWN resume: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, resolved)
+	job.Revision++
+	job.UpdatedAt = resolved.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate after resume reconciliation: %v", err)
+	}
+}
+

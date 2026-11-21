@@ -133,9 +133,14 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil {
 		t.Fatalf("GetJob before resume UNKNOWN: %v", err)
 	}
-	_, resumeUnknown, err := database.AddPlanningResumeObservation(ctx, jobID, job.Revision, resume.ID, "cmd_77777777777777777777777777777777", domain.PlanningResumeUnknown, "", false, principal)
+	unknownResumeRevision := job.Revision
+	unknownReceipt, resumeUnknown, err := database.AddPlanningResumeObservation(ctx, jobID, unknownResumeRevision, resume.ID, "cmd_77777777777777777777777777777777", domain.PlanningResumeUnknown, "", false, principal)
 	if err != nil || resumeUnknown.Status != domain.PlanningResumeUnknown {
 		t.Fatalf("record resume UNKNOWN: %#v %v", resumeUnknown, err)
+	}
+	retryReceipt, retryResumeUnknown, err := database.AddPlanningResumeObservation(ctx, jobID, unknownResumeRevision, resume.ID, "cmd_77777777777777777777777777777777", domain.PlanningResumeUnknown, "", false, principal)
+	if err != nil || retryReceipt != unknownReceipt || retryResumeUnknown != resumeUnknown {
+		t.Fatalf("idempotent resume observation retry: %#v %#v %v", retryReceipt, retryResumeUnknown, err)
 	}
 	job, err = database.GetJob(ctx, jobID)
 	if err != nil {
