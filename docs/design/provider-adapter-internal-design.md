@@ -33,6 +33,8 @@ type Identity struct {
     SDKVersion          string
     ConfigurationSHA256 string
 }
+
+PlanningAuthorizationはProvider ID / account / configuration digestを固定する。ConfigurationSHA256はSDKVersionを含む正規化済みProvider configurationから生成する。CapabilityEvidenceRegistryはSDKVersionを含むIdentity全体を照合する。
 ```
 
 Validateは全項目を必須とする。ConfigurationSHA256はlowercase SHA-256 hexとする。Identityはimmutable valueとして扱う。
