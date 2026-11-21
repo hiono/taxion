@@ -82,9 +82,17 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 	if err != nil {
 		return TurnResult{}, safeAdapterError(err)
 	}
-	if strings.TrimSpace(result.ReceiptID) == "" || !validSHA256(result.EvidenceSHA256) ||
-		(result.Status != "COMPLETED" && result.Status != "FAILED" && result.Status != "UNKNOWN") ||
+	if (result.Status != "COMPLETED" && result.Status != "FAILED" && result.Status != "UNKNOWN") ||
 		result.TokensUsed > request.MaxTokens {
+		return TurnResult{}, ErrProviderInvalidResult
+	}
+	if result.Status == "UNKNOWN" {
+		if result.TokensUsed != 0 {
+			return TurnResult{}, ErrProviderInvalidResult
+		}
+		return result, nil
+	}
+	if strings.TrimSpace(result.ReceiptID) == "" || !validSHA256(result.EvidenceSHA256) {
 		return TurnResult{}, ErrProviderInvalidResult
 	}
 	return result, nil
