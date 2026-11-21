@@ -43,6 +43,7 @@ func (r *Runtime) Capabilities(ctx context.Context) (Capabilities, error) {
 	if err != nil {
 		return Capabilities{}, ErrUnsupportedCapability
 	}
+	capabilities = capabilities.Clone()
 	if err := capabilities.Validate(r.identity); err != nil {
 		return Capabilities{}, ErrUnsupportedCapability
 	}
@@ -361,6 +362,7 @@ func (r *Runtime) liveCapabilities(ctx context.Context) (Capabilities, error) {
 	if err != nil {
 		return Capabilities{}, ErrUnsupportedCapability
 	}
+	capabilities = capabilities.Clone()
 	if err := capabilities.ValidateForLiveExecution(r.identity); err != nil {
 		return Capabilities{}, ErrUnsupportedCapability
 	}
@@ -382,7 +384,7 @@ func containsCredential(lease CredentialLease, values ...string) (bool, error) {
 		return nil
 	})
 	if err != nil {
-		return false, ErrCredentialUnavailable
+		return false, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	return found, nil
 }
