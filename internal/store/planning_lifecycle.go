@@ -13,6 +13,8 @@ import (
 )
 
 const (
+	addProviderStopIntentCommandType = "AddProviderStopIntent"
+	addProviderStopObservationCommandType = "AddProviderStopObservation"
 	addProviderEventObservationCommandType = "AddProviderEventObservation"
 	addProviderStartObservationCommandType = "AddProviderStartObservation"
 	addPlanningTurnIntentCommandType       = "AddPlanningTurnIntent"
@@ -296,6 +298,77 @@ func (s *Store) AddPlanningResumeObservation(ctx context.Context, jobID string, 
 				}
 			}
 			return domain.PlanningResumeObservation{}, false
+		})
+}
+
+func (s *Store) AddProviderStopIntent(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	roleExecutionID, sessionID, commandID string,
+	reason domain.ProviderStopReason,
+	principal auth.AuthenticatedPrincipal,
+) (CommandReceipt, domain.ProviderStopIntent, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, domain.ProviderStopIntent{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	request := struct {
+		JobID, RoleExecutionID, SessionID, CommandID string
+		Reason                                      domain.ProviderStopReason
+		PrincipalID                                 string
+	}{jobID, roleExecutionID, sessionID, commandID, reason, principal.PrincipalID()}
+	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addProviderStopIntentCommandType, request,
+		func(job domain.Job, now time.Time) (domain.ProviderStopIntent, error) {
+			return domain.NewProviderStopIntent(job, roleExecutionID, principal.PrincipalID(), sessionID, commandID, reason, now)
+		},
+		func(job *domain.Job, fact domain.ProviderStopIntent) {
+			job.ProviderStopIntents = append(job.ProviderStopIntents, fact)
+		},
+		func(job domain.Job) (domain.ProviderStopIntent, bool) {
+			for _, fact := range job.ProviderStopIntents {
+				if fact.CommandID == commandID {
+					return fact, true
+				}
+			}
+			return domain.ProviderStopIntent{}, false
+		})
+}
+
+func (s *Store) AddProviderStopObservation(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	stopIntentID, commandID string,
+	stopped, quiescent bool,
+	evidenceSHA256 string,
+	reconcilesUnknown bool,
+	principal auth.AuthenticatedPrincipal,
+) (CommandReceipt, domain.ProviderStopObservation, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, domain.ProviderStopObservation{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	request := struct {
+		JobID, StopIntentID, CommandID string
+		Stopped, Quiescent             bool
+		EvidenceSHA256                 string
+		ReconcilesUnknown              bool
+		PrincipalID                    string
+	}{jobID, stopIntentID, commandID, stopped, quiescent, evidenceSHA256, reconcilesUnknown, principal.PrincipalID()}
+	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addProviderStopObservationCommandType, request,
+		func(job domain.Job, now time.Time) (domain.ProviderStopObservation, error) {
+			return domain.NewProviderStopObservation(job, stopIntentID, principal.PrincipalID(), commandID,
+				stopped, quiescent, evidenceSHA256, reconcilesUnknown, now)
+		},
+		func(job *domain.Job, fact domain.ProviderStopObservation) {
+			job.ProviderStopObservations = append(job.ProviderStopObservations, fact)
+		},
+		func(job domain.Job) (domain.ProviderStopObservation, bool) {
+			for _, fact := range job.ProviderStopObservations {
+				if fact.CommandID == commandID {
+					return fact, true
+				}
+			}
+			return domain.ProviderStopObservation{}, false
 		})
 }
 
