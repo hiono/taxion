@@ -9,19 +9,21 @@ import (
 	"github.com/hiono/taxion/internal/domain"
 )
 
-func (s *Store) AddJobContractRevision(ctx context.Context, jobID string, expectedRevision uint64, commandID, roleExecutionID string, contract domain.JobContract) (CommandReceipt, domain.JobContractRevision, error) {
+func (s *Store) AddJobContractRevision(ctx context.Context, jobID string, expectedRevision uint64, commandID, roleExecutionID, sourceResultObservationID, sourceResultContentSHA256 string, contract domain.JobContract) (CommandReceipt, domain.JobContractRevision, error) {
 	canonical, _, err := domain.CanonicalizeJobContract(contract, domain.JobContractCanonicalizationVersion)
 	if err != nil {
 		return CommandReceipt{}, domain.JobContractRevision{}, err
 	}
 	request := struct {
-		RoleExecutionID string             `json:"role_execution_id"`
-		Contract        domain.JobContract `json:"contract"`
-	}{RoleExecutionID: roleExecutionID, Contract: canonical}
+		RoleExecutionID          string             `json:"role_execution_id"`
+		SourceResultObservationID string             `json:"source_result_observation_id"`
+		SourceResultContentSHA256 string             `json:"source_result_content_sha256"`
+		Contract                 domain.JobContract `json:"contract"`
+	}{RoleExecutionID: roleExecutionID, SourceResultObservationID: sourceResultObservationID, SourceResultContentSHA256: sourceResultContentSHA256, Contract: canonical}
 	return persistPlanningFact(
 		ctx, s, jobID, expectedRevision, commandID, "JOB_CONTRACT_REVISION", request,
 		func(job domain.Job, now time.Time) (domain.JobContractRevision, error) {
-			return domain.NewJobContractRevision(job, commandID, roleExecutionID, canonical, now)
+			return domain.NewJobContractRevision(job, commandID, roleExecutionID, sourceResultObservationID, sourceResultContentSHA256, canonical, now)
 		},
 		func(job *domain.Job, revision domain.JobContractRevision) {
 			job.JobContractRevisions = append(job.JobContractRevisions, revision)
