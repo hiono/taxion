@@ -129,6 +129,10 @@ func (c Capabilities) SupportsCrossProcessReattachment() bool {
 	return c.HasEvidenceAtLeast(CapabilitySessionReattach, EvidenceDurable)
 }
 
+func (c Capabilities) SupportsEventReplay() bool {
+	return c.HasEvidenceAtLeast(CapabilityEventReplay, EvidenceDurable)
+}
+
 func (c Capabilities) ValidateForLiveExecution(expected Identity) error {
 	if err := c.Validate(expected); err != nil {
 		return err
@@ -346,6 +350,91 @@ type Usage struct {
 	EvidenceSHA256 string
 }
 
+type ReplayEventsRequest struct {
+	SessionID   string
+	AfterCursor string
+}
+
+func (r ReplayEventsRequest) Validate() error {
+	if !validIdentifier(r.SessionID) || (r.AfterCursor != "" && !validIdentifier(r.AfterCursor)) {
+		return errors.New("Provider event replay request identity or cursor is invalid")
+	}
+	return nil
+}
+
+type EventKind string
+
+const (
+	EventOperationAccepted EventKind = "operation.accepted"
+	EventTurnStarted       EventKind = "turn.started"
+	EventTurnCompleted     EventKind = "turn.completed"
+	EventTurnFailed        EventKind = "turn.failed"
+	EventTurnUnknown       EventKind = "turn.unknown"
+	EventSessionAttached   EventKind = "session.attached"
+	EventSessionDetached   EventKind = "session.detached"
+	EventSessionStopped    EventKind = "session.stopped"
+	EventUsageReported     EventKind = "usage.reported"
+)
+
+type ProviderEvent struct {
+	EventID         string
+	SessionID       string
+	OperationID     string
+	TurnID           string
+	Kind             EventKind
+	PreviousCursor   string
+	Cursor           string
+	ObservedAt       time.Time
+	EvidenceSHA256   string
+}
+
+type EventPage struct {
+	SessionID       string
+	FromCursor      string
+	NextCursor      string
+	Events          []ProviderEvent
+	HasMore         bool
+	EvidenceSHA256  string
+}
+
+func (p EventPage) Validate(request ReplayEventsRequest) error {
+	if !validIdentifier(p.SessionID) || p.SessionID != request.SessionID ||
+		p.FromCursor != request.AfterCursor || !validSHA256(p.EvidenceSHA256) {
+		return errors.New("Provider event page identity, cursor origin, or evidence is invalid")
+	}
+	expectedCursor := request.AfterCursor
+	seen := make(map[string]struct{}, len(p.Events))
+	for _, event := range p.Events {
+		if !validIdentifier(event.EventID) || !validIdentifier(event.SessionID) || event.SessionID != request.SessionID ||
+			!validIdentifier(event.OperationID) || (event.TurnID != "" && !validIdentifier(event.TurnID)) ||
+			!validEventKind(event.Kind) || event.PreviousCursor != expectedCursor ||
+			!validIdentifier(event.Cursor) || event.Cursor == event.PreviousCursor ||
+			event.ObservedAt.IsZero() || !validSHA256(event.EvidenceSHA256) {
+			return errors.New("Provider event page contains an invalid or discontinuous event")
+		}
+		if _, exists := seen[event.EventID]; exists {
+			return errors.New("Provider event page contains duplicate event identities")
+		}
+		seen[event.EventID] = struct{}{}
+		expectedCursor = event.Cursor
+	}
+	if p.NextCursor != expectedCursor {
+		return errors.New("Provider event page next cursor does not match its event chain")
+	}
+	return nil
+}
+
+func validEventKind(kind EventKind) bool {
+	switch kind {
+	case EventOperationAccepted, EventTurnStarted, EventTurnCompleted, EventTurnFailed,
+		EventTurnUnknown, EventSessionAttached, EventSessionDetached, EventSessionStopped,
+		EventUsageReported:
+		return true
+	default:
+		return false
+	}
+}
+
 type Adapter interface {
 	Identity() Identity
 	Capabilities(context.Context) (Capabilities, error)
@@ -356,6 +445,7 @@ type Adapter interface {
 	Lookup(context.Context, LookupRequest, CredentialLease) (LookupResult, error)
 	Result(context.Context, ResultRequest, CredentialLease) (Result, error)
 	Usage(context.Context, UsageRequest, CredentialLease) (Usage, error)
+	ReplayEvents(context.Context, ReplayEventsRequest, CredentialLease) (EventPage, error)
 }
 
 type FailureClass string
