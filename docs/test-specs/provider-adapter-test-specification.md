@@ -62,6 +62,12 @@ Provider Adapterの契約、Capability gate、Credential isolation、Controller 
 | DOM-018 | UNKNOWN history | 同一OperationIDでUNKNOWNを追記しterminal evidenceで解消 | 既存factを変更せずappend-onlyで解消 |
 | DOM-019 | Stop intent | accepted Sessionなし、同一Sessionへの二重Stop、Stop後のTurn / Resume | 拒否 |
 | DOM-020 | Stop observation | UNKNOWN解消のOperationID不一致、Quiescent=trueかつStopped=false、evidence欠落 | 拒否 |
+| DOM-021 | Result finality | Final=false | terminal resultとして拒否 |
+| DOM-022 | Result content | UTF-8不正、1 MiB超過、ContentSHA256不一致 | 拒否 |
+| DOM-023 | Result binding | accepted Start / Turn intentとOperationID・TurnID・SessionID不一致 | 拒否 |
+| DOM-024 | Result append-only | 同じOperationID / TurnIDにterminal resultを二重追加 | 拒否 |
+| DOM-025 | Usage completeness | Complete=falseの後に同一UsageIDのComplete=trueを追加 | append-onlyで受理 |
+| DOM-026 | Usage finality | Complete=true後の同一UsageID追加、別Operation / TurnへのUsageID再束縛 | 拒否 |
 
 ## 5. Adapter contract tests
 
@@ -165,6 +171,9 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | STO-011 | Corruption | identity / revision / digest破損 | fail-closed |
 | STO-012 | Secret scan | aggregate / receipt / serialized JSON | credential候補0件 |
 | STO-013 | Stop facts | intent / observationのaggregate更新またはreceipt INSERT失敗 | 両方rollbackし、同一Command IDで再試行可能 |
+| STO-014 | Result / Usage facts | aggregate更新またはreceipt INSERT失敗 | 両方rollbackし、同一Command IDで再試行可能 |
+| STO-015 | Result / Usage idempotency | 同じCommand ID / payloadの再送、異なるpayloadでの再利用 | 同じfact / receiptへ収束、異なるpayloadは拒否 |
+| STO-016 | Result / Usage restore | restart後のResult / Usage facts | identity、append順序、digest、Complete finalityを再検証 |
 
 ## 10. Controller E2 integration tests
 

@@ -141,6 +141,7 @@ Adapterは次の操作を提供する。
 
 - Requestで指定したOperationID / TurnID / SessionIDとの一致を検証する。
 - Provider receipt、event ID、usage IDはProvider identityの範囲で一意とする。
+- ResultはFinal=trueを必須とし、contentは有効なUTF-8で1 MiB以下とする。
 - terminal resultはcontent digestとevidence digestを持つ。
 - raw Provider errorは返さず、許可されたFailureClass / OperationCodeへ変換する。
 - credential検出または応答identity不一致は成功として採用せずUNKNOWNへ分類する。
@@ -155,7 +156,7 @@ Usage resultは次を持つ。
 - Complete（確定値であることを示す）
 - EvidenceSHA256
 
-Complete=falseの値は最終UsageとしてJobへ確定しない。後続の照合で同一UsageIDの確定値へ更新する場合も、既存Observationを書き換えず新しいObservationを追加する。
+Complete=falseの値は途中ObservationとしてJobへ保存できるが、最終Usageとして確定しない。後続の照合で同一UsageIDの確定値へ更新する場合は、既存Observationを書き換えずComplete=trueの新しいObservationを追加する。Complete=trueの後に同じUsageIDのObservationを追加しない。EvidenceSHA256は途中値・確定値の両方で必須とする。
 
 ### 6.4 Stop
 
@@ -253,8 +254,8 @@ Providerの外部事実をJobAggregateへappend-onlyで保持する。現時点�
 
 - ProviderStartObservation（実装済み）: StartのACCEPTED / FAILED / UNKNOWN、SessionID、receipt、evidence
 - ProviderEventObservation（実装済み）: EventID、Session-scoped Command ID、cursor、event kind、OperationID / TurnID
-- ProviderResultObservation（未実装）: result contentまたはimmutable content reference、content digest、terminality
-- ProviderUsageObservation（未実装）: UsageID、token数、Complete、evidence
+- ProviderResultObservation（未実装）: OperationID / optional TurnID / SessionIDへ束縛したFinal=trueのUTF-8 result content（最大1 MiB）、content digest、evidence digest
+- ProviderUsageObservation（未実装）: OperationID / optional TurnID / SessionIDへ束縛したUsageID、token数、Complete、evidence digest。Complete=falseからComplete=trueへの更新は新しいObservationを追加する
 - ProviderStopIntent（Domain / Store実装済み）: OperationID、SessionID、Provider identity、Reason。Stop前に保存し、後続Turn / Resumeを禁止
 - ProviderStopObservation（Domain / Store実装済み）: Stopped、Quiescent、evidence、UNKNOWN reconciliation
 
@@ -271,10 +272,12 @@ Providerの外部事実をJobAggregateへappend-onlyで保持する。現時点�
 - Stop intent以降の同一Sessionに対するTurn / Resume intentを拒否する。
 - Stop UNKNOWNは同一OperationIDの新しいObservationでのみ解消し、Quiescent proofなしにreleaseしない。
 - Result / Usage / Stop evidenceは対応するOperationID / TurnIDへ束縛する。
+- Resultはaccepted Startまたは既存Turn intentに一致し、同じOperationID / TurnIDでFinal=trueを一度だけ記録する。
+- Usageはaccepted Startまたは既存Turn intentに一致し、同一Session内のUsageIDを一つのOperationID / optional TurnIDへ束縛する。Complete=true後の追加を拒否する。
 
 ### 9.3 Store
 
-既存JobAggregate保存方式とCommand receipt transactionを再利用する。Provider factだけの独立した可変storeを追加しない。Start / Event / Stop intent・observationは同一transactionでappendする。expected revision、idempotency、rollback、read-back recoveryを既存Store contractへ統合する。
+既存JobAggregate保存方式とCommand receipt transactionを再利用する。Provider factだけの独立した可変storeを追加しない。Start / Event / Stop intent・observationは同一transactionでappendする。Result / Usage observationも同じexpected revision、idempotency、rollback、read-back recoveryの共通transactionで保存する。
 
 ## 10. Error classification
 

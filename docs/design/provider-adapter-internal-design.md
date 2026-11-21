@@ -320,7 +320,7 @@ type ProviderResultObservation struct {
 }
 ```
 
-初期planningではResult contentをJobAggregateへ保持する。上限を超える結果は受理せず、別のcontent storage設計を要求する。Raw credentialを含む結果は保存しない。
+Result contentはJobAggregateへ保持する。contentは有効なUTF-8で1 MiB以下とし、上限を超える結果は受理しない。ContentSHA256はcontentのSHA-256と一致しなければならない。Final=falseはterminal resultとして保存しない。Runtimeによるcredential検査を通過していない結果は保存しない。
 
 ### 6.4 ProviderUsageObservation（設計済み・未実装）
 
@@ -342,7 +342,7 @@ type ProviderUsageObservation struct {
 }
 ```
 
-Complete=falseは途中値として記録可能だが、budget finalizationには使用しない。Complete=trueの新しいObservationを追加して確定する。
+Complete=falseは途中値として記録可能だが、budget finalizationには使用しない。同じUsageIDのComplete=true observationを後続に追加して確定する。Complete=trueはUsageIDごとに一度だけ許可し、その後の追加Observationを拒否する。EvidenceSHA256はCompleteの値にかかわらず必須とする。
 
 ### 6.5 ProviderStopIntent / ProviderStopObservation（Domain / Store実装済み）
 
@@ -373,8 +373,10 @@ Stop intentをRuntime.Stopより先にappend-onlyで保存する。同一Session
 
 Job.Validateは次を検証する。
 
-- Fact / Command / Event / Usage identityの一意性
+- Fact / Command / Event identityの一意性。UsageIDはSession内で一意とし、同一UsageIDの途中値から確定値への履歴だけを許可する
 - Job / RoleExecution / grant / Provider identityの一致
+- Resultはaccepted Startまたは同一SessionのTurn intentへ束縛し、Final=true、content UTF-8 / 1 MiB上限 / digest一致を検証する
+- Usageはaccepted Startまたは同一SessionのTurn intentへ束縛し、Complete=true後の追加を拒否する
 - OperationID / TurnID / SessionIDの相関
 - Intentより後のCreatedRevision
 - append-only順序と時刻の単調性
@@ -388,7 +390,7 @@ Job.Validateは次を検証する。
 
 既存SQLite JobAggregate JSONとCommand receiptを利用する。Provider専用の独立した可変状態テーブルを追加しない。
 
-Provider Start / Event / Stop intent・observationは既存のplanning lifecycle fact transactionへ統合済み。Result / Usage factのStore transactionは未実装であり、共通persist fact patternへ追加する。
+Provider Start / Event / Stop intent・observationは既存のplanning lifecycle fact transactionへ統合済み。Result / Usage factも共通persist fact patternを使用し、JobAggregate更新とCommand receiptを同一transactionで確定する。
 
 1. BeginTx
 2. JobAggregateを読む
@@ -401,7 +403,7 @@ Provider Start / Event / Stop intent・observationは既存のplanning lifecycle
 9. Commit
 10. commit outcomeが不明な場合はCommand ID / Fact IDでread-back
 
-aggregate updateとreceipt insertのいずれかが失敗した場合は両方rollbackする。EventIDの重複は同じpayloadなら同じfactへ収束し、異なるpayloadなら拒否する。
+aggregate updateとreceipt insertのいずれかが失敗した場合は両方rollbackする。EventIDの重複は同じpayloadなら同じfactへ収束し、異なるpayloadなら拒否する。Result / Usageは同じCommand ID・同じpayloadで同じfactへ収束し、異なるpayloadでの再利用を拒否する。UsageIDのComplete=true後に新しいfactを追加しない。
 
 ## 8. Controller設計
 

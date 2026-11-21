@@ -104,6 +104,8 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 1. Start / Send / Stop / Resumeは、呼出し前にTaxion生成OperationIDとimmutable intentを保存する。
 2. Provider receiptの受理は、turn完了・停止・Usage確定を意味しない。
 3. terminal result、usage、stop proofはそれぞれ別のObservationとして保存する。
+   - ResultはFinal=trueのUTF-8 contentとし、contentは1 MiB以下、ContentSHA256とEvidenceSHA256を検証する。ResultをJobAggregateへ保存する前にcredential漏えいを検査する。
+   - UsageはUsageID単位でappend-onlyに保存する。Complete=falseは途中Observationとして記録でき、同一UsageIDのComplete=trueを後続Observationとして追加する。Complete=trueの後に同じUsageIDのObservationを追加しない。
 4. timeout、connection loss、process crash、receipt欠落、応答検証失敗はUNKNOWNとして扱う。
 5. UNKNOWNは同じOperationID / TurnIDに対するlookup、event replay、final result retrieval等の証拠でのみ解消する。
 6. 同じidentityに対するidempotencyが実証されていない場合はblind replayしない。
@@ -141,8 +143,10 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 | PA-REQ-006 | Stopは停止証拠とProvider quiescenceを確認する。 |
 | PA-REQ-007 | Resumeは同一SessionのE5 reattachment capabilityを要求する。 |
 | PA-REQ-008 | Lookupは要求したOperationID / SessionID / TurnIDとの一致を検証する。 |
-| PA-REQ-009 | ResultはOperationID / SessionID / TurnIDとcontent digestを検証する。 |
-| PA-REQ-010 | UsageはUsageID、operation / turn identity、確定性、完全性を検証する。 |
+| PA-REQ-009 | ResultはOperationID / SessionID / TurnID、Final=true、UTF-8 content（1 MiB以下）、content digest、evidence digestを検証する。 |
+| PA-REQ-015 | Result factsはJobAggregateへappend-onlyで保存し、同じOperationID / TurnIDのterminal resultを重複確定しない。 |
+| PA-REQ-010 | UsageはUsageID、operation / turn identity、token数、Complete、evidence digestを検証し、同一UsageIDの途中値から確定値への遷移をappend-onlyで保存する。 |
+| PA-REQ-016 | Usage factsは同一UsageIDのComplete=true後に追加・変更せず、Complete=falseを確定利用量として扱わない。 |
 | PA-REQ-011 | Event replayはsession identity、cursor continuity、event identity、重複を検証する。 |
 | PA-REQ-012 | Providerのraw credentialとraw errorを永続化・ログ出力しない。 |
 | PA-REQ-013 | UNKNOWNを推測変換せず、同じidentityで照合する。 |
