@@ -243,13 +243,13 @@ func authorizePlanning(ctx context.Context, args []string, stdout, stderr io.Wri
 		AccountID:           *account,
 		ConfigurationSHA256: *configurationSHA256,
 		RepositoryID:        strings.TrimRight(*repository, "/") + "@" + *commit,
-		ReadOnlyBoundary:    domain.PlanningReadOnlyBoundary{
+		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode:      *readOnlyMode,
 			Reference: *readOnlyReference,
 			SHA256:    *readOnlySHA256,
 		},
-		Budget:              domain.PlanningBudget{MaxTurns: uint32(*maxTurns), MaxTokens: *maxTokens},
-		Deadline:            deadline,
+		Budget:   domain.PlanningBudget{MaxTurns: uint32(*maxTurns), MaxTokens: *maxTokens},
+		Deadline: deadline,
 	}
 	resolvedCommandID := strings.TrimSpace(*commandID)
 	if resolvedCommandID == "" {
