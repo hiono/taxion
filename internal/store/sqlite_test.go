@@ -414,7 +414,7 @@ func TestGetJobRejectsProvenanceTamperingAfterPayloadHashRecomputed(t *testing.T
 }
 
 type synchronizedBuffer struct {
-	mu sync.Mutex
+	mu     sync.Mutex
 	buffer bytes.Buffer
 }
 
