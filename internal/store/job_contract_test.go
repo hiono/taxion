@@ -10,7 +10,7 @@ import (
 	"github.com/hiono/taxion/internal/domain"
 )
 
-func createJobContractPlanner(t *testing.T, database *Store, jobID string, principal auth.AuthenticatedPrincipal) (domain.RoleExecution, uint64) {
+func createJobContractPlanner(t *testing.T, database *Store, jobID string, principal auth.AuthenticatedPrincipal) (domain.RoleExecution, uint64, domain.ProviderResultObservation) {
 	t.Helper()
 	ctx := context.Background()
 	createCommand := "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -57,7 +57,34 @@ func createJobContractPlanner(t *testing.T, database *Store, jobID string, princ
 	if err != nil {
 		t.Fatalf("GetJob after accepted Start: %v", err)
 	}
-	return execution, job.Revision
+	_, turn, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, execution.ID, "session_1",
+		"cmd_11111111111111111111111111111111", strings.Repeat("a", 64), 100, principal)
+	if err != nil {
+		t.Fatalf("AddPlanningTurnIntent: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Planner Turn observation: %v", err)
+	}
+	if _, _, err := database.AddPlanningTurnObservation(ctx, jobID, job.Revision, turn.ID,
+		"cmd_22222222222222222222222222222222", domain.PlanningTurnCompleted, 10, strings.Repeat("b", 64), false, principal); err != nil {
+		t.Fatalf("AddPlanningTurnObservation: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Planner Result: %v", err)
+	}
+	content := "Final Planner result"
+	_, sourceResult, err := database.AddProviderResultObservation(ctx, jobID, job.Revision, execution.ID,
+		turn.OperationID, turn.ID, "session_1", content, resultDigest(content), true, strings.Repeat("c", 64), principal)
+	if err != nil {
+		t.Fatalf("AddProviderResultObservation: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Planner Result: %v", err)
+	}
+	return execution, job.Revision, sourceResult
 }
 
 func validStoreJobContract() domain.JobContract {
@@ -79,17 +106,17 @@ func TestJobContractAndApprovalStoreTransactions(t *testing.T) {
 	database, _ := newTestStore(t)
 	ctx := context.Background()
 	principal := newAuthenticatedTestPrincipal(t)
-	execution, revision := createJobContractPlanner(t, database, "job_contract_store", principal)
+	execution, revision, sourceResult := createJobContractPlanner(t, database, "job_contract_store", principal)
 	commandID := "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	contract := validStoreJobContract()
 	receipt, contractRevision, err := database.AddJobContractRevision(
-		ctx, "job_contract_store", revision, commandID, execution.ID, contract,
+		ctx, "job_contract_store", revision, commandID, execution.ID, sourceResult.ID, sourceResult.ContentSHA256, contract,
 	)
 	if err != nil || contractRevision.Revision != 1 || receipt.Revision != revision+1 {
 		t.Fatalf("AddJobContractRevision: %#v %#v %v", receipt, contractRevision, err)
 	}
 	retryReceipt, retryRevision, err := database.AddJobContractRevision(
-		ctx, "job_contract_store", receipt.Revision, commandID, execution.ID, contract,
+		ctx, "job_contract_store", receipt.Revision, commandID, execution.ID, sourceResult.ID, sourceResult.ContentSHA256, contract,
 	)
 	if err != nil || retryReceipt.CommandID != receipt.CommandID || retryReceipt.Revision != receipt.Revision || retryRevision.ID != contractRevision.ID || retryRevision.CanonicalHash != contractRevision.CanonicalHash {
 		t.Fatalf("contract revision idempotency: %#v %#v %v", retryReceipt, retryRevision, err)
@@ -122,7 +149,7 @@ func TestJobContractAndApprovalStoreTransactions(t *testing.T) {
 	newContract := validStoreJobContract()
 	newContract.Purpose = "Deliver the revised feature"
 	if _, _, err := database.AddJobContractRevision(
-		ctx, job.ID, job.Revision, "cmd_12121212121212121212121212121212", execution.ID, newContract,
+		ctx, job.ID, job.Revision, "cmd_12121212121212121212121212121212", execution.ID, sourceResult.ID, sourceResult.ContentSHA256, newContract,
 	); err == nil {
 		t.Fatal("ACTIVE Job accepted a contract amendment through the DRAFT Planner authority")
 	}
@@ -150,7 +177,7 @@ func TestJobContractStoreRollbackLeavesNoFactOrReceipt(t *testing.T) {
 	database, _ := newTestStore(t)
 	ctx := context.Background()
 	principal := newAuthenticatedTestPrincipal(t)
-	execution, revision := createJobContractPlanner(t, database, "job_contract_rollback", principal)
+	execution, revision, sourceResult := createJobContractPlanner(t, database, "job_contract_rollback", principal)
 	commandID := "cmd_15151515151515151515151515151515"
 	if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_job_contract_receipt
 		BEFORE INSERT ON job_commands
