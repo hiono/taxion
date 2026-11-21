@@ -40,7 +40,7 @@ type Job struct {
 	RoleExecutions                               []RoleExecution             `json:"role_executions,omitempty"`
 	ProviderStartIntents                         []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
 	ProviderStartObservations                    []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
-	ProviderStartObservationRequiredFromRevision uint64                      `json:"provider_start_observation_required_from_revision,omitempty"`
+	ProviderLifecycleEnforcedFromRevision uint64                      `json:"provider_lifecycle_enforced_from_revision,omitempty"`
 	PlanningTurnIntents                          []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
 	PlanningTurnObservations                     []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
 	PlanningEffectDecisions                      []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
@@ -649,13 +649,13 @@ func (j Job) Validate() error {
 		seenStartObservationIDs[observation.ID] = struct{}{}
 		startObservationsByOperation[observation.OperationID] = append(startObservationsByOperation[observation.OperationID], observation)
 	}
-	if j.ProviderStartObservationRequiredFromRevision > j.Revision {
+	if j.ProviderLifecycleEnforcedFromRevision > j.Revision {
 		return fmt.Errorf("%w: Provider Start observation activation revision exceeds Job revision", ErrInvalidJob)
 	}
-	if j.ProviderStartObservationRequiredFromRevision > 0 {
+	if j.ProviderLifecycleEnforcedFromRevision > 0 {
 		foundActivationObservation := false
 		for _, observation := range j.ProviderStartObservations {
-			if observation.CreatedRevision == j.ProviderStartObservationRequiredFromRevision {
+			if observation.CreatedRevision == j.ProviderLifecycleEnforcedFromRevision {
 				foundActivationObservation = true
 				break
 			}
