@@ -213,8 +213,8 @@ func TestJobContractRevisionRejectsExpiredPlanningAuthorization(t *testing.T) {
 func TestJobApprovalRejectsMismatchedHumanIdentity(t *testing.T) {
 	job, execution, sourceResult, now := jobWithAcceptedPlanner(t)
 	revision, err := NewJobContractRevision(
-		job, "cmd_12121212121212121212121212121212", execution.ID,
-		validJobContract(now.Add(2*time.Minute)), now.Add(3*time.Minute),
+		job, "cmd_12121212121212121212121212121212", execution.ID, sourceResult.ID, sourceResult.ContentSHA256,
+		validJobContract(now.Add(2*time.Minute)), now.Add(6*time.Minute),
 	)
 	if err != nil {
 		t.Fatalf("NewJobContractRevision: %v", err)
