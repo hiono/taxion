@@ -8,20 +8,20 @@ import (
 )
 
 const (
-	PlanningTurnUnknown   = "UNKNOWN"
-	PlanningTurnCompleted = "COMPLETED"
-	PlanningTurnFailed    = "FAILED"
-	PlanningEffectAllow   = "ALLOW"
-	PlanningEffectDeny    = "DENY"
+	PlanningTurnUnknown    = "UNKNOWN"
+	PlanningTurnCompleted  = "COMPLETED"
+	PlanningTurnFailed     = "FAILED"
+	PlanningEffectAllow    = "ALLOW"
+	PlanningEffectDeny     = "DENY"
 	PlanningBoundaryTurn   = "turn"
 	PlanningBoundaryEffect = "effect"
 	PlanningBoundaryResume = "resume"
 )
 
 type PlanningBoundaryError struct {
-	Boundary  string
+	Boundary   string
 	ReasonCode string
-	Cause error
+	Cause      error
 }
 
 func (e *PlanningBoundaryError) Error() string {
@@ -34,19 +34,19 @@ func (e *PlanningBoundaryError) Error() string {
 func (e *PlanningBoundaryError) Unwrap() error { return e.Cause }
 
 type PlanningBoundaryDecision struct {
-	ID string `json:"id"`
-	CommandID string `json:"command_id"`
-	SourceCommandID string `json:"source_command_id"`
-	JobID string `json:"job_id"`
-	RoleExecutionID string `json:"role_execution_id"`
-	PlanningAuthorizationID string `json:"planning_authorization_id"`
-	PrincipalID string `json:"principal_id"`
-	Boundary string `json:"boundary"`
-	Decision string `json:"decision"`
-	ReasonCode string `json:"reason_code"`
-	RequestSHA256 string `json:"request_sha256"`
-	CreatedAt time.Time `json:"created_at"`
-	CreatedRevision uint64 `json:"created_revision"`
+	ID                      string    `json:"id"`
+	CommandID               string    `json:"command_id"`
+	SourceCommandID         string    `json:"source_command_id"`
+	JobID                   string    `json:"job_id"`
+	RoleExecutionID         string    `json:"role_execution_id"`
+	PlanningAuthorizationID string    `json:"planning_authorization_id"`
+	PrincipalID             string    `json:"principal_id"`
+	Boundary                string    `json:"boundary"`
+	Decision                string    `json:"decision"`
+	ReasonCode              string    `json:"reason_code"`
+	RequestSHA256           string    `json:"request_sha256"`
+	CreatedAt               time.Time `json:"created_at"`
+	CreatedRevision         uint64    `json:"created_revision"`
 }
 
 func PlanningBoundaryDecisionCommandID(sourceCommandID, boundary string) string {

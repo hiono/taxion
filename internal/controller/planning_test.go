@@ -12,10 +12,10 @@ import (
 )
 
 type fakePlanningLifecycleStore struct {
-	job domain.Job
-	turnErr error
-	effect domain.PlanningEffectDecision
-	resumeErr error
+	job               domain.Job
+	turnErr           error
+	effect            domain.PlanningEffectDecision
+	resumeErr         error
 	boundaryDecisions []domain.PlanningBoundaryDecision
 }
 
@@ -49,9 +49,9 @@ func TestBeginTurnPersistsTypedBoundaryDenial(t *testing.T) {
 	fake := &fakePlanningLifecycleStore{
 		job: domain.Job{ID: "job_1", Revision: 5},
 		turnErr: &domain.PlanningBoundaryError{
-			Boundary: domain.PlanningBoundaryTurn,
+			Boundary:   domain.PlanningBoundaryTurn,
 			ReasonCode: "token_budget_exhausted",
-			Cause: errors.New("token reservation exceeds remaining budget"),
+			Cause:      errors.New("token reservation exceeds remaining budget"),
 		},
 	}
 	controller, err := NewPlanningController(fake)
@@ -72,7 +72,7 @@ func TestBeginTurnPersistsTypedBoundaryDenial(t *testing.T) {
 
 func TestBeginTurnDoesNotRecordStaleRevisionAsAuthorizationDenial(t *testing.T) {
 	fake := &fakePlanningLifecycleStore{
-		job: domain.Job{ID: "job_1", Revision: 5},
+		job:     domain.Job{ID: "job_1", Revision: 5},
 		turnErr: store.ErrIdempotencyConflict,
 	}
 	controller, err := NewPlanningController(fake)
@@ -90,7 +90,7 @@ func TestBeginTurnDoesNotRecordStaleRevisionAsAuthorizationDenial(t *testing.T) 
 
 func TestAuthorizeEffectFailsClosedOnDeniedDecision(t *testing.T) {
 	fake := &fakePlanningLifecycleStore{
-		job: domain.Job{ID: "job_1", Revision: 5},
+		job:    domain.Job{ID: "job_1", Revision: 5},
 		effect: domain.PlanningEffectDecision{Decision: domain.PlanningEffectDeny, Reason: "outside_planning_authorization_scope"},
 	}
 	controller, err := NewPlanningController(fake)

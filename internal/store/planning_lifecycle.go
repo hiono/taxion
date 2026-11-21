@@ -254,8 +254,8 @@ func (s *Store) AddPlanningBoundaryDecision(ctx context.Context, jobID string, e
 	commandID := domain.PlanningBoundaryDecisionCommandID(sourceCommandID, boundary)
 	request := struct {
 		JobID, RoleExecutionID, SourceCommandID, Boundary, ReasonCode string
-		ExpectedRevision uint64
-		PrincipalID string
+		ExpectedRevision                                              uint64
+		PrincipalID                                                   string
 	}{jobID, roleExecutionID, sourceCommandID, boundary, reasonCode, expectedRevision, principal.PrincipalID()}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, "AddPlanningBoundaryDecision", request,
 		func(job domain.Job, now time.Time) (domain.PlanningBoundaryDecision, error) {
