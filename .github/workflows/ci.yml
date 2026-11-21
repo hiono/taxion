@@ -28,7 +28,7 @@ jobs:
           if [ -n "$unformatted" ]; then
             printf 'Files require gofmt:\n%s\n' "$unformatted"
             while IFS= read -r file; do
-              gofmt -d "$file"
+              gofmt -d "$file" || true
             done <<< "$unformatted"
             exit 1
           fi
