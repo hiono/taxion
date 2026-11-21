@@ -165,7 +165,7 @@ func newPlanningTestJob(t *testing.T) Job {
 	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
 	provenance := IntakeProvenance{
 		PrincipalID: identity.PrincipalID("https://identity.example", "subject-123"),
-		Issuer: "https://identity.example", Subject: "subject-123",
+		Issuer:      "https://identity.example", Subject: "subject-123",
 		IngressSource: IngressSourceCLI, AuthenticatedAt: now.Add(-time.Minute),
 		ReceivedAt: now.Add(-2 * time.Minute), RequestIdentity: "cmd_planning_job",
 		SchemaVersion: IntakeProvenanceSchemaVersion,
@@ -220,7 +220,7 @@ func TestPlanningAuthorizationRejectsScopeAndIdentityChanges(t *testing.T) {
 	issuedAt := job.CreatedAt.Add(time.Minute)
 	base := newValidPlanningAuthorization(t, job, issuedAt)
 	cases := []struct {
-		name string
+		name   string
 		mutate func(*PlanningAuthorization)
 	}{
 		{name: "job identity", mutate: func(a *PlanningAuthorization) { a.JobID = "job_other" }},
