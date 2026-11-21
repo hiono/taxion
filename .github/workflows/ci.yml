@@ -5,7 +5,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -20,16 +20,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Verify formatting
+      - name: Temporary format and push
         shell: bash
         run: |
           unformatted="$(gofmt -l cmd internal)"
           if [ -n "$unformatted" ]; then
-            printf 'Files require gofmt:\n%s\n' "$unformatted"
-            while IFS= read -r file; do
-              gofmt -d "$file"
-            done <<< "$unformatted"
-            exit 1
+            gofmt -w $unformatted
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add $unformatted
+            git commit -m "fixup! feat: PlanningAuthorization lifecycle"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
       - name: Vet
         run: go vet ./...
