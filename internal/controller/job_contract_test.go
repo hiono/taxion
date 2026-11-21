@@ -201,7 +201,6 @@ func TestJobContractControllerRejectsCommandIDReuseByDifferentPlanner(t *testing
 	}
 }
 
-
 func TestJobContractControllerApprovesExactRevisionAndReplaysAfterActivation(t *testing.T) {
 	controller, database, principal, jobID, _ := startContractPlanner(t)
 	ctx := context.Background()

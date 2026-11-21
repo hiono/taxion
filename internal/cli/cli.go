@@ -358,7 +358,6 @@ func startPlanningWithPrincipal(ctx context.Context, jobID, authorizationID, com
 	return 0
 }
 
-
 func approveJob(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("taxion job approve", flag.ContinueOnError)
 	flags.SetOutput(stderr)

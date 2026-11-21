@@ -224,7 +224,7 @@ func TestAuthorizePlanningWithPrincipalRejectsEmptyPrincipalBeforeOpeningStore(t
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.test",
-		ConfigurationSHA256: strings.Repeat("a", 64),
+		ConfigurationSHA256:     strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode:      domain.PlanningReadOnlyBoundarySnapshot,
@@ -607,12 +607,12 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 		domain.PlanningAuthorizationRequest{
 			ProviderID: "provider.test", AccountID: "account.primary",
 			ConfigurationSHA256: strings.Repeat("a", 64),
-			RepositoryID: "https://github.com/example/project@" + strings.Repeat("b", 40),
+			RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 			ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 				Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1",
 				SHA256: strings.Repeat("c", 64),
 			},
-			Budget: domain.PlanningBudget{MaxTurns: 5, MaxTokens: 5000},
+			Budget:   domain.PlanningBudget{MaxTurns: 5, MaxTokens: 5000},
 			Deadline: now.Add(time.Hour),
 		}, now)
 	if err != nil {
@@ -641,16 +641,16 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 		t.Fatalf("AddProviderStartObservation: %v", err)
 	}
 	contract := domain.JobContract{
-		Purpose: "Deliver the approved bounded feature",
-		Constraints: []string{"Preserve the authorization boundary"},
-		TargetRepositories: []string{"https://github.com/example/project"},
-		Workspaces: []string{"workspace/main"},
-		AcceptanceCriteria: []string{"Linux tests pass"},
-		RequiredEvidence: []string{"Linux CI"},
-		Budget: domain.JobContractBudget{MaxTurns: 5, MaxTokens: 5000},
-		ConcurrencyCeiling: 1,
-		Deadline: now.Add(45 * time.Minute),
-		ProhibitedEffects: []string{"publish"},
+		Purpose:                 "Deliver the approved bounded feature",
+		Constraints:             []string{"Preserve the authorization boundary"},
+		TargetRepositories:      []string{"https://github.com/example/project"},
+		Workspaces:              []string{"workspace/main"},
+		AcceptanceCriteria:      []string{"Linux tests pass"},
+		RequiredEvidence:        []string{"Linux CI"},
+		Budget:                  domain.JobContractBudget{MaxTurns: 5, MaxTokens: 5000},
+		ConcurrencyCeiling:      1,
+		Deadline:                now.Add(45 * time.Minute),
+		ProhibitedEffects:       []string{"publish"},
 		ApprovalRequiredEffects: []string{"external.delete"},
 		ConfigurationSHA256: strings.Repeat("a", 64),
 	}
