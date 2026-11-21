@@ -30,7 +30,7 @@ type ProviderStartObservation struct {
 }
 
 func ProviderStartObservationID(commandID string) string {
-	return planningFactID("provider-start-observation", commandID)
+	return planningOperationID("provider_start_observation", commandID)
 }
 
 func NewProviderStartObservation(
