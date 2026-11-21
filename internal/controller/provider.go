@@ -79,10 +79,10 @@ func (c *ProviderController) StartPlanning(
 
 	request := provider.StartRequest{
 		OperationID: domain.ProviderStartOperationID(commandID),
-		JobID: job.ID, RoleExecutionID: domain.RoleExecutionID(commandID),
+		JobID:       job.ID, RoleExecutionID: domain.RoleExecutionID(commandID),
 		RequestSHA256: grant.RequestSHA256,
-		Prompt: job.Request, PromptSHA256: sha256String(job.Request),
-		Context: append([]provider.ContextDocument(nil), contextDocuments...),
+		Prompt:        job.Request, PromptSHA256: sha256String(job.Request),
+		Context:  append([]provider.ContextDocument(nil), contextDocuments...),
 		MaxTurns: grant.Budget.MaxTurns, MaxTokens: grant.Budget.MaxTokens,
 		Deadline: grant.Deadline,
 	}
