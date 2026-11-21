@@ -185,4 +185,3 @@ func TestPlanningResumeUnknownRequiresSameOperationReconciliation(t *testing.T) 
 		t.Fatalf("Job.Validate after resume reconciliation: %v", err)
 	}
 }
-
