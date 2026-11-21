@@ -43,11 +43,11 @@ type Job struct {
 	ProviderEventObservations             []ProviderEventObservation  `json:"provider_event_observations,omitempty"`
 	ProviderLifecycleEnforcedFromRevision uint64                      `json:"provider_lifecycle_enforced_from_revision,omitempty"`
 	PlanningTurnIntents                   []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
-	PlanningTurnObservations               []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
-	PlanningEffectDecisions                []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
-	PlanningResumeIntents                  []PlanningResumeIntent      `json:"planning_resume_intents,omitempty"`
-	PlanningResumeObservations             []PlanningResumeObservation `json:"planning_resume_observations,omitempty"`
-	PlanningBoundaryDecisions              []PlanningBoundaryDecision  `json:"planning_boundary_decisions,omitempty"`
+	PlanningTurnObservations              []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
+	PlanningEffectDecisions               []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
+	PlanningResumeIntents                 []PlanningResumeIntent      `json:"planning_resume_intents,omitempty"`
+	PlanningResumeObservations            []PlanningResumeObservation `json:"planning_resume_observations,omitempty"`
+	PlanningBoundaryDecisions             []PlanningBoundaryDecision  `json:"planning_boundary_decisions,omitempty"`
 }
 
 type IntakeProvenance struct {
