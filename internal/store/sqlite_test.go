@@ -338,7 +338,6 @@ func TestCreateLocalDraftJobRejectsProvenance(t *testing.T) {
 	}
 }
 
-
 func TestCreateTrustedDraftJobRejectsCrossPathCommandIDReuse(t *testing.T) {
 	database, _ := newTestStore(t)
 	ctx := context.Background()
