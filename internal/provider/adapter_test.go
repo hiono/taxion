@@ -127,6 +127,12 @@ func TestRegistryCapabilityVerifierRequiresExactTrustedEvidence(t *testing.T) {
 	if err != nil || accepted {
 		t.Fatalf("tampered evidence was accepted: accepted=%v err=%v", accepted, err)
 	}
+	tampered = item
+	tampered.Identity.SDKVersion = "other-sdk/2"
+	accepted, err = verifier.Verify(context.Background(), identity, tampered)
+	if err != nil || accepted {
+		t.Fatalf("evidence from another SDK version was accepted: accepted=%v err=%v", accepted, err)
+	}
 }
 
 func TestRegistryCapabilityVerifierFailsClosedWhenCatalogUnavailable(t *testing.T) {
