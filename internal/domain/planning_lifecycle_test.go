@@ -228,6 +228,11 @@ func TestPlanningResumeFactsRejectNonAppendOrderedHistory(t *testing.T) {
 		t.Fatalf("valid resume history: %v", err)
 	}
 
+	invalidResumeTime := second
+	invalidResumeTime.CreatedAt = turn.CreatedAt.Add(-time.Second)
+	if err := invalidResumeTime.Validate(job); err == nil {
+		t.Fatal("PlanningResumeIntent accepted a timestamp before its latest turn")
+	}
 	job.PlanningResumeIntents[1].CreatedRevision = first.CreatedRevision
 	if err := job.Validate(); err == nil {
 		t.Fatal("Job.Validate accepted non-monotonic resume intent revisions")

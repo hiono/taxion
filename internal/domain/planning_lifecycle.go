@@ -626,15 +626,17 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 	if !foundExecution || execution.PlanningAuthorizationID != r.PlanningAuthorizationID {
 		return errors.New("PlanningResumeIntent RoleExecution or grant mismatch")
 	}
-	foundPriorSessionTurn := false
-	for _, turn := range job.PlanningTurnIntents {
+	var latestPriorSessionTurn *PlanningTurnIntent
+	for i := range job.PlanningTurnIntents {
+		turn := &job.PlanningTurnIntents[i]
 		if turn.RoleExecutionID == r.RoleExecutionID && turn.ProviderSessionID == r.ProviderSessionID &&
-			turn.CreatedRevision < r.CreatedRevision && !turn.CreatedAt.After(r.CreatedAt) {
-			foundPriorSessionTurn = true
+			turn.CreatedRevision < r.CreatedRevision &&
+			(latestPriorSessionTurn == nil || turn.CreatedRevision > latestPriorSessionTurn.CreatedRevision) {
+			latestPriorSessionTurn = turn
 		}
 	}
-	if !foundPriorSessionTurn {
-		return errors.New("PlanningResumeIntent does not follow a persisted turn for the same Provider Session")
+	if latestPriorSessionTurn == nil || r.CreatedAt.Before(latestPriorSessionTurn.CreatedAt) {
+		return errors.New("PlanningResumeIntent does not follow the latest persisted turn for the same Provider Session")
 	}
 	for _, grant := range job.PlanningAuthorizations {
 		if grant.ID != r.PlanningAuthorizationID {
