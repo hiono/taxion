@@ -174,15 +174,15 @@ func newProviderTestPrincipal(t *testing.T) auth.AuthenticatedPrincipal {
 }
 
 type fakePlanningProviderRuntime struct {
-	identity       provider.Identity
-	capabilities   provider.Capabilities
-	startResult    provider.StartResult
-	startErr       error
-	startCalls     int
-	lookupCalls    int
-	lookupResult   provider.LookupResult
-	lookupErr      error
-	startHook      func(context.Context, provider.StartRequest) error
+	identity     provider.Identity
+	capabilities provider.Capabilities
+	startResult  provider.StartResult
+	startErr     error
+	startCalls   int
+	lookupCalls  int
+	lookupResult provider.LookupResult
+	lookupErr    error
+	startHook    func(context.Context, provider.StartRequest) error
 }
 
 func (f *fakePlanningProviderRuntime) Identity() provider.Identity { return f.identity }
@@ -251,11 +251,11 @@ func newProviderControllerFixture(t *testing.T, runtime *fakePlanningProviderRun
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID: "provider.test", AccountID: "account.primary", SDKVersion: "test-sdk/1",
 		ConfigurationSHA256: strings.Repeat("a", 64),
-		RepositoryID: "https://github.com/example/project@" + strings.Repeat("b", 40),
+		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: digest,
 		},
-		Budget: domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000},
+		Budget:   domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000},
 		Deadline: now.Add(time.Hour),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), grantCommand, request, now)
