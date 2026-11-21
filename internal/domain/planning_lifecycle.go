@@ -8,6 +8,9 @@ import (
 )
 
 const (
+	ProviderStartUnknown   = "UNKNOWN"
+	ProviderStartAccepted  = "ACCEPTED"
+	ProviderStartFailed    = "FAILED"
 	PlanningTurnUnknown    = "UNKNOWN"
 	PlanningTurnCompleted  = "COMPLETED"
 	PlanningTurnFailed     = "FAILED"
@@ -64,6 +67,7 @@ func PlanningBoundaryDecisionID(commandID string) string {
 func validPlanningBoundaryReason(reasonCode string) bool {
 	switch reasonCode {
 	case "authorization_invalid_or_expired", "principal_mismatch", "provider_session_mismatch",
+		"provider_start_unconfirmed", "provider_start_unknown", "provider_start_failed",
 		"previous_operation_unknown", "previous_resume_unknown", "turn_budget_exhausted", "token_budget_exhausted",
 		"provider_configuration_mismatch", "reattachment_not_supported", "resume_before_latest_turn",
 		"provider_session_not_attached", "read_only_context_mismatch", "effect_not_permitted":
@@ -71,6 +75,24 @@ func validPlanningBoundaryReason(reasonCode string) bool {
 	default:
 		return false
 	}
+}
+
+type ProviderStartObservation struct {
+	ID                  string    `json:"id"`
+	CommandID           string    `json:"command_id"`
+	JobID                string    `json:"job_id"`
+	StartID              string    `json:"start_id"`
+	OperationID          string    `json:"operation_id"`
+	RoleExecutionID      string    `json:"role_execution_id"`
+	ProviderID           string    `json:"provider_id"`
+	AccountID            string    `json:"account_id"`
+	ConfigurationSHA256  string    `json:"configuration_sha256"`
+	ProviderSessionID    string    `json:"provider_session_id,omitempty"`
+	Status               string    `json:"status"`
+	EvidenceSHA256       string    `json:"evidence_sha256,omitempty"`
+	ReconcilesUnknown    bool      `json:"reconciles_unknown,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+	CreatedRevision      uint64    `json:"created_revision"`
 }
 
 type PlanningTurnIntent struct {
@@ -161,6 +183,135 @@ func planningOperationID(kind, commandID string) string {
 
 func PlanningTurnOperationID(commandID string) string {
 	return planningOperationID("provider_turn", commandID)
+}
+
+func ProviderStartObservationID(commandID string) string {
+	return planningOperationID("provider_start_observation", commandID)
+}
+
+func latestProviderStartObservation(job Job, startID string, beforeRevision uint64) (ProviderStartObservation, bool) {
+	var latest ProviderStartObservation
+	found := false
+	for _, observation := range job.ProviderStartObservations {
+		if observation.StartID == startID && observation.CreatedRevision < beforeRevision {
+			latest, found = observation, true
+		}
+	}
+	return latest, found
+}
+
+func NewProviderStartObservation(job Job, startID, principalID, commandID, status, providerSessionID, evidenceSHA256 string, reconcilesUnknown bool, now time.Time) (ProviderStartObservation, error) {
+	now = now.UTC().Round(0)
+	if !validCommandID(commandID) || now.IsZero() {
+		return ProviderStartObservation{}, errors.New("Provider Start observation command and timestamp are required")
+	}
+	if err := job.Validate(); err != nil {
+		return ProviderStartObservation{}, err
+	}
+	var start ProviderStartIntent
+	found := false
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.ID == startID {
+			start, found = candidate, true
+			break
+		}
+	}
+	if !found {
+		return ProviderStartObservation{}, errors.New("Provider Start intent was not found")
+	}
+	var execution RoleExecution
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == start.RoleExecutionID {
+			execution = candidate
+			break
+		}
+	}
+	if execution.ID == "" || execution.PlanningAuthorizationID != start.PlanningAuthorizationID {
+		return ProviderStartObservation{}, errors.New("Provider Start observation RoleExecution mismatch")
+	}
+	authorizedPrincipal := false
+	for _, grant := range job.PlanningAuthorizations {
+		if grant.ID == start.PlanningAuthorizationID && grant.PrincipalID == principalID {
+			authorizedPrincipal = true
+			break
+		}
+	}
+	if !authorizedPrincipal {
+		return ProviderStartObservation{}, errors.New("Provider Start observation requires the grant's authenticated HUMAN Principal")
+	}
+	switch status {
+	case ProviderStartUnknown:
+		if providerSessionID != "" || evidenceSHA256 != "" || reconcilesUnknown {
+			return ProviderStartObservation{}, errors.New("UNKNOWN Provider Start observation cannot claim a Session or evidence")
+		}
+	case ProviderStartAccepted:
+		if !validPlanningIdentity(providerSessionID) || !validSHA256(evidenceSHA256) {
+			return ProviderStartObservation{}, errors.New("ACCEPTED Provider Start observation requires Session identity and evidence")
+		}
+	case ProviderStartFailed:
+		if providerSessionID != "" || !validSHA256(evidenceSHA256) {
+			return ProviderStartObservation{}, errors.New("FAILED Provider Start observation requires evidence and no Session identity")
+		}
+	default:
+		return ProviderStartObservation{}, errors.New("unsupported Provider Start observation status")
+	}
+	var previous *ProviderStartObservation
+	for i := range job.ProviderStartObservations {
+		candidate := &job.ProviderStartObservations[i]
+		if candidate.StartID == startID {
+			previous = candidate
+		}
+	}
+	if previous == nil {
+		if reconcilesUnknown {
+			return ProviderStartObservation{}, errors.New("first Provider Start observation cannot reconcile UNKNOWN")
+		}
+	} else if previous.Status != ProviderStartUnknown || status == ProviderStartUnknown || !reconcilesUnknown {
+		return ProviderStartObservation{}, errors.New("only UNKNOWN Provider Start may be reconciled by terminal evidence")
+	}
+	if job.Revision >= uint64(^uint64(0)>>1) {
+		return ProviderStartObservation{}, errors.New("Job revision exhausted")
+	}
+	observation := ProviderStartObservation{
+		ID: ProviderStartObservationID(commandID), CommandID: commandID, JobID: job.ID,
+		StartID: start.ID, OperationID: start.ID, RoleExecutionID: execution.ID,
+		ProviderID: start.ProviderID, AccountID: start.AccountID,
+		ConfigurationSHA256: start.ConfigurationSHA256, ProviderSessionID: providerSessionID,
+		Status: status, EvidenceSHA256: evidenceSHA256, ReconcilesUnknown: reconcilesUnknown,
+		CreatedAt: now, CreatedRevision: job.Revision + 1,
+	}
+	if err := observation.Validate(job, start); err != nil {
+		return ProviderStartObservation{}, err
+	}
+	return observation, nil
+}
+
+func (o ProviderStartObservation) Validate(job Job, start ProviderStartIntent) error {
+	if !validPlanningIdentity(o.ID) || !validCommandID(o.CommandID) ||
+		o.ID != ProviderStartObservationID(o.CommandID) || o.JobID != job.ID ||
+		o.StartID != start.ID || o.OperationID != start.ID ||
+		o.RoleExecutionID != start.RoleExecutionID || o.ProviderID != start.ProviderID ||
+		o.AccountID != start.AccountID || o.ConfigurationSHA256 != start.ConfigurationSHA256 ||
+		o.CreatedAt.IsZero() || o.CreatedAt.Before(start.CreatedAt) || o.CreatedRevision <= start.CreatedRevision {
+		return errors.New("Provider Start observation identity or metadata mismatch")
+	}
+	switch o.Status {
+	case ProviderStartUnknown:
+		if o.ProviderSessionID != "" || o.EvidenceSHA256 != "" || o.ReconcilesUnknown {
+			return errors.New("UNKNOWN Provider Start observation contains terminal evidence")
+		}
+	case ProviderStartAccepted:
+		if !validPlanningIdentity(o.ProviderSessionID) || !validSHA256(o.EvidenceSHA256) {
+			return errors.New("ACCEPTED Provider Start observation lacks Session identity or evidence")
+		}
+	case ProviderStartFailed:
+		if o.ProviderSessionID != "" || !validSHA256(o.EvidenceSHA256) {
+			return errors.New("FAILED Provider Start observation has invalid Session or evidence")
+		}
+	default:
+		return errors.New("Provider Start observation status is invalid")
+	}
+	return nil
 }
 
 func PlanningTurnIntentID(commandID string) string {
@@ -297,6 +448,19 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 	if !foundStart {
 		return PlanningTurnIntent{}, errors.New("Provider Start intent was not found")
 	}
+	startObservation, foundStartObservation := latestProviderStartObservation(job, start.ID, job.Revision+1)
+	if !foundStartObservation {
+		return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "provider_start_unconfirmed", Cause: errors.New("Provider Start has no accepted observation")}
+	}
+	if startObservation.Status == ProviderStartUnknown {
+		return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "provider_start_unknown", Cause: errors.New("Provider Start result is unresolved")}
+	}
+	if startObservation.Status != ProviderStartAccepted {
+		return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "provider_start_failed", Cause: errors.New("Provider Start was not accepted")}
+	}
+	if startObservation.ProviderSessionID != providerSessionID {
+		return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "provider_session_mismatch", Cause: errors.New("turn Provider Session does not match the accepted Provider Start Session")}
+	}
 	var count uint32
 	var tokensUsed uint64
 	for _, previous := range job.PlanningTurnIntents {
@@ -397,6 +561,11 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 	}
 	if !foundStart {
 		return errors.New("PlanningTurnIntent Provider Start intent was not found")
+	}
+	startObservation, foundStartObservation := latestProviderStartObservation(job, start.ID, t.CreatedRevision)
+	if !foundStartObservation || startObservation.Status != ProviderStartAccepted ||
+		startObservation.ProviderSessionID != t.ProviderSessionID || startObservation.CreatedRevision >= t.CreatedRevision {
+		return errors.New("PlanningTurnIntent does not follow an accepted Provider Start observation for the same Session")
 	}
 	if status, found := latestPlanningResumeStatus(job, t.RoleExecutionID, t.CreatedRevision); found && status != PlanningResumeAttached {
 		return errors.New("PlanningTurnIntent follows a resume without an attached Provider Session")
