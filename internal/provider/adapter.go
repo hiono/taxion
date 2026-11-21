@@ -429,7 +429,11 @@ func (r LookupRequest) Validate() error {
 	return nil
 }
 
-const LookupStatusNotFound = "NOT_FOUND"
+const (
+	LookupStatusNotFound = "NOT_FOUND"
+	LookupStatusFailed   = "FAILED"
+	LookupStatusUnknown  = "UNKNOWN"
+)
 
 type LookupResult struct {
 	Found          bool
