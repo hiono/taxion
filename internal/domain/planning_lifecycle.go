@@ -265,7 +265,7 @@ func latestPlanningResumeStatus(job Job, roleExecutionID string, beforeRevision 
 	var latestObservation *PlanningResumeObservation
 	for i := range job.PlanningResumeObservations {
 		observation := &job.PlanningResumeObservations[i]
-		if observation.ResumeID == latest.ID &&
+		if observation.ResumeID == latest.ID && observation.CreatedRevision < beforeRevision &&
 			(latestObservation == nil || observation.CreatedRevision > latestObservation.CreatedRevision) {
 			latestObservation = observation
 		}
