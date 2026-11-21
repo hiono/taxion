@@ -247,6 +247,13 @@ func (c *ProviderController) StopPlanning(
 		startObservation.ProviderSessionID != sessionID {
 		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, errors.New("Provider Stop requires the accepted Start Session")
 	}
+	existingStopIntent := false
+	for _, existing := range job.ProviderStopIntents {
+		if existing.CommandID == commandID {
+			existingStopIntent = true
+			break
+		}
+	}
 	intentReceipt, intent, err := c.store.AddProviderStopIntent(
 		ctx, jobID, job.Revision, roleExecutionID, sessionID, commandID, reason, principal,
 	)
@@ -260,6 +267,18 @@ func (c *ProviderController) StopPlanning(
 	previous, hasPrevious := latestProviderStopObservation(currentJob, intent.OperationID)
 	if hasPrevious && previous.Quiescent {
 		return intentReceipt, intent, previous, nil
+	}
+	if existingStopIntent {
+		if hasPrevious {
+			return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+		}
+		observation, persistErr := c.persistProviderStopObservation(
+			ctx, currentJob, intent, principal, false, false, "", false,
+		)
+		if persistErr != nil {
+			return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
+		}
+		return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
 	}
 	stopResult, stopErr := c.runtime.Stop(ctx, provider.StopRequest{
 		OperationID: intent.OperationID,
