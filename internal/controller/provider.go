@@ -617,6 +617,14 @@ func validatePlanningContext(grant domain.PlanningAuthorization, documents []pro
 	}
 }
 
+func validProviderEvidenceSHA256(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size
+}
+
 func sha256String(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
