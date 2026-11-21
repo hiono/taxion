@@ -66,7 +66,21 @@ The Controller must verify that the supplied identity matches the latest immutab
 
 An exact retry of an already committed approval may return its original receipt after the Job becomes ACTIVE. JobApproval records human acceptance only; it does not create ExecutionPermission, authorize Provider execution, or bypass effect / resource checks.
 
-## 8. References
+## 8. Planner Result provenance requirements
+
+A Planner proposal must identify the exact final Provider Result from which its contract was derived. The revision must append the Result observation ID, Result content SHA-256, and producing RoleExecution ID as immutable provenance.
+
+The Controller must accept only a Result observation already persisted in the same JobAggregate that:
+- is final and passes the Result observation's digest and identity validation;
+- belongs to the same Taskless PLANNER RoleExecution supplied for the proposal;
+- belongs to that execution's accepted Provider Start / Session and exact Turn identity;
+- is not an observation from another Job, RoleExecution, Session, or Turn.
+
+The Store / Domain mutation boundary must revalidate the exact Result observation ID and digest against the current aggregate in the same transaction that appends the JobContractRevision. A caller-supplied digest without a matching persisted Result observation is insufficient. The canonical JobContract hash remains distinct from the source Result content digest.
+
+Exact proposal replay must preserve the original Result provenance. Reuse of the CommandID with a different Result ID, Result digest, RoleExecution, or contract must fail without mutation. A later Result observation must not silently replace the source of an existing revision.
+
+## 9. References
 
 - ADR-201: Job aggregate and command boundary
 - ADR-202: Domain invariants across state paths
