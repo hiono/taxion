@@ -81,6 +81,35 @@ type CapabilityVerifier interface {
 	Verify(context.Context, Identity, CapabilityEvidence) (bool, error)
 }
 
+type CapabilityEvidenceRegistry interface {
+	Find(context.Context, Identity, Capability) (CapabilityEvidence, bool, error)
+}
+
+type RegistryCapabilityVerifier struct {
+	registry CapabilityEvidenceRegistry
+}
+
+func NewRegistryCapabilityVerifier(registry CapabilityEvidenceRegistry) (*RegistryCapabilityVerifier, error) {
+	if registry == nil {
+		return nil, errors.New("Provider capability evidence registry is required")
+	}
+	return &RegistryCapabilityVerifier{registry: registry}, nil
+}
+
+func (v *RegistryCapabilityVerifier) Verify(ctx context.Context, identity Identity, candidate CapabilityEvidence) (bool, error) {
+	if v == nil || v.registry == nil {
+		return false, errors.New("Provider capability evidence registry is unavailable")
+	}
+	trusted, found, err := v.registry.Find(ctx, identity, candidate.Capability)
+	if err != nil {
+		return false, errors.New("Provider capability evidence lookup failed")
+	}
+	if !found {
+		return false, nil
+	}
+	return trusted == candidate, nil
+}
+
 func (c Capabilities) Has(capability Capability) bool {
 	switch capability {
 	case CapabilityStartIdempotency:
