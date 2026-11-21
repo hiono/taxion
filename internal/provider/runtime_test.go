@@ -214,6 +214,7 @@ func validTurnRequest() TurnRequest {
 	return TurnRequest{
 		OperationID: "provider_turn_1", TurnID: "turn_1", SessionID: "session_1",
 		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 20,
+		Deadline: time.Now().UTC().Add(time.Hour),
 	}
 }
 
@@ -222,7 +223,7 @@ func validStopRequest() StopRequest {
 }
 
 func validResumeRequest() ResumeRequest {
-	return ResumeRequest{OperationID: "provider_resume_1", SessionID: "session_1"}
+	return ResumeRequest{OperationID: "provider_resume_1", SessionID: "session_1", Deadline: time.Now().UTC().Add(time.Hour)}
 }
 
 func validResultRequest() ResultRequest {
