@@ -60,6 +60,8 @@ Provider Adapterの契約、Capability gate、Credential isolation、Controller 
 | DOM-016 | Session binding | accepted Start observationと異なるSessionIDでTurn intent作成 | 拒否 |
 | DOM-017 | Legacy aggregate | Start observation導入前のJobに既存Turn factsがある | 読み取り可能。新規Turn / Resumeはaccepted Start observationなしに作成不可 |
 | DOM-018 | UNKNOWN history | 同一OperationIDでUNKNOWNを追記しterminal evidenceで解消 | 既存factを変更せずappend-onlyで解消 |
+| DOM-019 | Stop intent | accepted Sessionなし、同一Sessionへの二重Stop、Stop後のTurn / Resume | 拒否 |
+| DOM-020 | Stop observation | UNKNOWN解消のOperationID不一致、Quiescent=trueかつStopped=false、evidence欠落 | 拒否 |
 
 ## 5. Adapter contract tests
 
@@ -162,6 +164,7 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | STO-010 | Restore | 再起動後のJob読み戻し | invariantを再検証 |
 | STO-011 | Corruption | identity / revision / digest破損 | fail-closed |
 | STO-012 | Secret scan | aggregate / receipt / serialized JSON | credential候補0件 |
+| STO-013 | Stop facts | intent / observationのaggregate更新またはreceipt INSERT失敗 | 両方rollbackし、同一Command IDで再試行可能 |
 
 ## 10. Controller E2 integration tests
 

@@ -344,25 +344,30 @@ type ProviderUsageObservation struct {
 
 Complete=falseは途中値として記録可能だが、budget finalizationには使用しない。Complete=trueの新しいObservationを追加して確定する。
 
-### 6.5 ProviderStopObservation（設計済み・未実装）
+### 6.5 ProviderStopIntent / ProviderStopObservation（Domain / Store実装済み）
 
 ```go
+type ProviderStopIntent struct {
+    ID, CommandID, JobID, RoleExecutionID string
+    OperationID, SessionID                string
+    ProviderID, AccountID                 string
+    ConfigurationSHA256, Reason           string
+    CreatedAt                             time.Time
+    CreatedRevision                       uint64
+}
+
 type ProviderStopObservation struct {
-    ID              string
-    CommandID       string
-    JobID           string
-    RoleExecutionID string
-    OperationID     string
-    SessionID       string
-    Stopped         bool
-    Quiescent       bool
-    EvidenceSHA256  string
-    CreatedAt       time.Time
-    CreatedRevision uint64
+    ID, CommandID, JobID, RoleExecutionID string
+    OperationID, SessionID                string
+    Stopped, Quiescent                    bool
+    EvidenceSHA256                        string
+    ReconcilesUnknown                     bool
+    CreatedAt                             time.Time
+    CreatedRevision                       uint64
 }
 ```
 
-StoppedとQuiescentを区別する。両方の証拠が揃わない限りProvider停止済みと判定しない。
+Stop intentをRuntime.Stopより先にappend-onlyで保存する。同一Sessionに複数のStop intentを作成せず、Stop intent以降のTurn / Resume intentを拒否する。Stop observationはUNKNOWNを同一OperationIDの新しい証拠で解消する。Quiescent=trueはStopped=trueと有効なevidenceを必須とする。
 
 ### 6.6 Job invariant
 
@@ -383,7 +388,7 @@ Job.Validateは次を検証する。
 
 既存SQLite JobAggregate JSONとCommand receiptを利用する。Provider専用の独立した可変状態テーブルを追加しない。
 
-Provider Start observationは既存のplanning lifecycle fact transactionへ統合済み。Event / Result / Usage / Stop factのStore transactionは未実装であり、共通persist fact patternへ追加する。
+Provider Start / Event / Stop intent・observationは既存のplanning lifecycle fact transactionへ統合済み。Result / Usage factのStore transactionは未実装であり、共通persist fact patternへ追加する。
 
 1. BeginTx
 2. JobAggregateを読む
