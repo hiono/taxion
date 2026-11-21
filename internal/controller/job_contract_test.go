@@ -81,6 +81,19 @@ func TestJobContractControllerProposesForAuthorizedPlanner(t *testing.T) {
 	ctx := context.Background()
 	commandID := "cmd_dddddddddddddddddddddddddddddddd"
 	contract := validControllerJobContract(time.Now().UTC().Add(2 * time.Hour))
+	roleExecutionID := domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc")
+	if _, _, err := controller.Propose(ctx, jobID, roleExecutionID,
+		"provider_result_missing", sourceResult.ContentSHA256, "cmd_91919191919191919191919191919191", contract, principal); err == nil {
+		t.Fatal("Controller accepted an unknown source Result")
+	}
+	if _, _, err := controller.Propose(ctx, jobID, roleExecutionID,
+		sourceResult.ID, strings.Repeat("0", 64), "cmd_92929292929292929292929292929292", contract, principal); err == nil {
+		t.Fatal("Controller accepted a mismatched source Result digest")
+	}
+	before, err := database.GetJob(ctx, jobID)
+	if err != nil || len(before.JobContractRevisions) != 0 {
+		t.Fatalf("rejected Result provenance changed Job: %#v %v", before.JobContractRevisions, err)
+	}
 	receipt, revision, err := controller.Propose(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, sourceResult.ContentSHA256, commandID, contract, principal,
