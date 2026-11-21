@@ -194,6 +194,9 @@ func (s *Store) createJob(ctx context.Context, job domain.Job, commandID, comman
 	if job.Revision != 1 {
 		return CommandReceipt{}, fmt.Errorf("%w: a new Job must start at revision 1", domain.ErrInvalidJob)
 	}
+	if expectedRevision == 0 {
+		return CommandReceipt{}, errors.New("expected Job revision is required")
+	}
 	if strings.TrimSpace(commandID) == "" {
 		return CommandReceipt{}, errors.New("command id is required")
 	}
@@ -282,7 +285,7 @@ func (s *Store) createJob(ctx context.Context, job domain.Job, commandID, comman
 	return receipt, nil
 }
 
-func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID string, grant domain.PlanningAuthorization, principal auth.AuthenticatedPrincipal) (CommandReceipt, error) {
+func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID string, expectedRevision uint64, commandID string, grant domain.PlanningAuthorization, principal auth.AuthenticatedPrincipal) (CommandReceipt, error) {
 	if err := principal.Validate(); err != nil {
 		return CommandReceipt{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
 	}
@@ -296,8 +299,11 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID s
 		return CommandReceipt{}, errors.New("PlanningAuthorization Job identity mismatch")
 	}
 
-	request := grant
-	request.IssuedAt = time.Time{}
+	request := struct {
+		ExpectedRevision uint64                      `json:"expected_revision"`
+		Authorization    domain.PlanningAuthorization `json:"authorization"`
+	}{ExpectedRevision: expectedRevision, Authorization: grant}
+	request.Authorization.IssuedAt = time.Time{}
 	requestPayload, err := json.Marshal(request)
 	if err != nil {
 		return CommandReceipt{}, fmt.Errorf("encode PlanningAuthorization request: %w", err)
@@ -350,8 +356,11 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID s
 			if currentGrant.ID != grant.ID {
 				continue
 			}
-			persistedRequest := currentGrant
-			persistedRequest.IssuedAt = time.Time{}
+			persistedRequest := struct {
+				ExpectedRevision uint64                      `json:"expected_revision"`
+				Authorization    domain.PlanningAuthorization `json:"authorization"`
+			}{ExpectedRevision: expectedRevision, Authorization: currentGrant}
+			persistedRequest.Authorization.IssuedAt = time.Time{}
 			currentGrantPayload, err := json.Marshal(persistedRequest)
 			if err != nil || digest(currentGrantPayload) != requestHash {
 				return CommandReceipt{}, fmt.Errorf("%w: persisted PlanningAuthorization differs from command", ErrIntegrity)
@@ -386,6 +395,9 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID s
 	job, err := decodeJobAggregate(jobID, revision, payload, expectedHash, aggregateCreatedAt, aggregateUpdatedAt)
 	if err != nil {
 		return CommandReceipt{}, err
+	}
+	if job.Revision != expectedRevision {
+		return CommandReceipt{}, ErrIdempotencyConflict
 	}
 	issuedAt := time.Now().UTC().Round(0)
 	if issuedAt.Before(job.UpdatedAt) {

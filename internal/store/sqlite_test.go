@@ -582,14 +582,14 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPlanningAuthorization() error = %v", err)
 	}
-	first, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_auth", grant, principal)
+	first, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_auth", grant, principal)
 	if err != nil {
 		t.Fatalf("AddPlanningAuthorization() error = %v", err)
 	}
 	if first.Revision != 2 || first.PayloadSHA256 == "" {
 		t.Fatalf("receipt = %#v", first)
 	}
-	second, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_auth", grant, principal)
+	second, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_auth", grant, principal)
 	if err != nil {
 		t.Fatalf("idempotent AddPlanningAuthorization() error = %v", err)
 	}
@@ -598,17 +598,25 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 	}
 	futureTimestampGrant := grant
 	futureTimestampGrant.IssuedAt = time.Now().Add(24 * time.Hour)
-	retried, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_auth", futureTimestampGrant, principal)
+	retried, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_auth", futureTimestampGrant, principal)
 	if err != nil || retried != first {
 		t.Fatalf("retry with caller-supplied timestamp = %#v, %v; want %#v", retried, err, first)
 	}
 	changedGrant := grant
 	changedGrant.Budget.MaxTurns++
-	if _, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_auth", changedGrant, principal); !errors.Is(err, ErrIdempotencyConflict) {
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_auth", changedGrant, principal); !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("reused command ID error = %v, want ErrIdempotencyConflict", err)
 	}
-	if _, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_other_grant", grant, principal); err == nil {
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision+1, "cmd_planning_auth", grant, principal); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("reused command ID with a different expected revision error = %v, want ErrIdempotencyConflict", err)
+	}
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision+1, "cmd_other_grant", grant, principal); err == nil {
 		t.Fatal("AddPlanningAuthorization() accepted a duplicate grant ID")
+	}
+	staleGrant := grant
+	staleGrant.ID = "plan_auth_stale_revision"
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_stale_revision", staleGrant, principal); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("stale expected revision error = %v, want ErrIdempotencyConflict", err)
 	}
 	if err := database.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -628,7 +636,7 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 	if !got.PlanningAuthorizations[0].IssuedAt.Equal(first.CreatedAt) {
 		t.Fatalf("persisted issue time = %s, receipt time = %s", got.PlanningAuthorizations[0].IssuedAt, first.CreatedAt)
 	}
-	replayed, err := reopened.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_auth", grant, principal)
+	replayed, err := reopened.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_auth", grant, principal)
 	if err != nil || replayed != first {
 		t.Fatalf("reopened idempotent retry = %#v, %v; want %#v", replayed, err, first)
 	}
@@ -643,7 +651,7 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 	); err != nil {
 		t.Fatalf("remove persisted grant fixture: %v", err)
 	}
-	if _, err := reopened.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_auth", grant, principal); !errors.Is(err, ErrIntegrity) {
+	if _, err := reopened.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_auth", grant, principal); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("retry after removing persisted grant error = %v, want ErrIntegrity", err)
 	}
 }
@@ -669,7 +677,7 @@ func TestAddPlanningAuthorizationRejectsWrongPrincipalAndRollsBack(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewPlanningAuthorization() error = %v", err)
 	}
-	if _, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_wrong_planner", grant, otherPrincipal); err == nil {
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_wrong_planner", grant, otherPrincipal); err == nil {
 		t.Fatal("AddPlanningAuthorization() accepted a different HUMAN Principal")
 	}
 	if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_planning_receipt
@@ -678,7 +686,7 @@ func TestAddPlanningAuthorizationRejectsWrongPrincipalAndRollsBack(t *testing.T)
 		BEGIN SELECT RAISE(ABORT, 'simulated receipt failure'); END;`); err != nil {
 		t.Fatalf("create failure trigger: %v", err)
 	}
-	if _, err := database.AddPlanningAuthorization(ctx, job.ID, "cmd_planning_atomic", grant, principal); err == nil {
+	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_planning_atomic", grant, principal); err == nil {
 		t.Fatal("AddPlanningAuthorization() succeeded despite receipt insert failure")
 	}
 	got, err := database.GetJob(ctx, job.ID)
