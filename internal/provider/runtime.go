@@ -376,7 +376,10 @@ func containsCredential(lease CredentialLease, values ...string) (bool, error) {
 			return nil
 		}
 		for _, value := range values {
-			if bytes.Contains([]byte(value), secret) {
+			valueBytes := []byte(value)
+			matched := bytes.Contains(valueBytes, secret)
+			zero(valueBytes)
+			if matched {
 				found = true
 				break
 			}
