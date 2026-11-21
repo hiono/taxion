@@ -18,9 +18,9 @@ func jobWithAcceptedPlanner(t *testing.T) (Job, RoleExecution, time.Time) {
 	principalID := identity.PrincipalID("https://identity.example", "human-subject")
 	request := PlanningAuthorizationRequest{
 		ProviderID: "provider.test", AccountID: "account.primary", ConfigurationSHA256: strings.Repeat("a", 64),
-		RepositoryID: "https://github.com/example/project@" + strings.Repeat("b", 40),
+		RepositoryID:     "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{Mode: PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: strings.Repeat("c", 64)},
-		Budget: PlanningBudget{MaxTurns: 3, MaxTokens: 1000}, Deadline: now.Add(2 * time.Hour),
+		Budget:           PlanningBudget{MaxTurns: 3, MaxTokens: 1000}, Deadline: now.Add(2 * time.Hour),
 	}
 	grant, err := NewPlanningAuthorization(job, principalID, "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", request, now)
 	if err != nil {
@@ -58,18 +58,18 @@ func jobWithAcceptedPlanner(t *testing.T) (Job, RoleExecution, time.Time) {
 
 func validJobContract(now time.Time) JobContract {
 	return JobContract{
-		Purpose: "Deliver the approved feature",
-		Constraints: []string{" no network writes ", "Linux only"},
+		Purpose:            "Deliver the approved feature",
+		Constraints:        []string{" no network writes ", "Linux only"},
 		TargetRepositories: []string{"repo_taxion"},
-		TargetResources: []string{"resource_ci"},
-		Workspaces: []string{"workspace_taxion"},
+		TargetResources:    []string{"resource_ci"},
+		Workspaces:         []string{"workspace_taxion"},
 		AcceptanceCriteria: []string{"Tests pass", "No secret leakage"},
-		RequiredEvidence: []string{"Linux CI", "Secret scan"},
-		Budget: JobContractBudget{MaxTurns: 3, MaxTokens: 1000},
+		RequiredEvidence:   []string{"Linux CI", "Secret scan"},
+		Budget:             JobContractBudget{MaxTurns: 3, MaxTokens: 1000},
 		ConcurrencyCeiling: 1, Deadline: now.Add(time.Hour),
-		ProhibitedEffects: []string{"production deployment"},
+		ProhibitedEffects:       []string{"production deployment"},
 		ApprovalRequiredEffects: []string{"publish release"},
-		ConfigurationSHA256: strings.Repeat("f", 64),
+		ConfigurationSHA256:     strings.Repeat("f", 64),
 	}
 }
 
@@ -141,12 +141,12 @@ func TestJobContractRevisionAndApprovalBindExactImmutableRevision(t *testing.T) 
 	}
 	principalID := identity.PrincipalID("https://identity.example", "human-subject")
 	approval := JobApproval{
-		ID: JobApprovalID("cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
+		ID:        JobApprovalID("cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
 		CommandID: "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", JobID: job.ID,
 		ContractRevision: revision.Revision, CanonicalizationVersion: revision.CanonicalizationVersion,
 		CanonicalHash: revision.CanonicalHash, ApproverPrincipalID: principalID,
 		ApproverSource: "https://identity.example", ApproverSubject: "human-subject",
-		Reason: "Approved the exact bounded scope", ApprovedAt: now.Add(4*time.Minute), CreatedRevision: job.Revision + 1,
+		Reason: "Approved the exact bounded scope", ApprovedAt: now.Add(4 * time.Minute), CreatedRevision: job.Revision + 1,
 	}
 	job.JobApprovals = append(job.JobApprovals, approval)
 	job.State = JobActive
@@ -190,7 +190,7 @@ func TestJobApprovalRejectsMismatchedHumanIdentity(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = revision.CreatedAt
 	approval := JobApproval{
-		ID: JobApprovalID("cmd_13131313131313131313131313131313"),
+		ID:        JobApprovalID("cmd_13131313131313131313131313131313"),
 		CommandID: "cmd_13131313131313131313131313131313", JobID: job.ID,
 		ContractRevision: revision.Revision, CanonicalizationVersion: revision.CanonicalizationVersion,
 		CanonicalHash: revision.CanonicalHash, ApproverPrincipalID: "agent_123",

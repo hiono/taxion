@@ -198,7 +198,7 @@ func NewJobContractRevision(job Job, commandID, roleExecutionID string, contract
 	}
 	return JobContractRevision{
 		ID: JobContractRevisionID(commandID), CommandID: commandID, JobID: job.ID,
-		Revision: uint64(len(job.JobContractRevisions) + 1),
+		Revision:                uint64(len(job.JobContractRevisions) + 1),
 		CanonicalizationVersion: JobContractCanonicalizationVersion, CanonicalHash: hash,
 		Contract: canonical, ProposedByRoleExecutionID: roleExecutionID,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,

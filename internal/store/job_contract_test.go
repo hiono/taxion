@@ -26,9 +26,9 @@ func createJobContractPlanner(t *testing.T, database *Store, jobID string, princ
 	now := time.Now().UTC()
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID: "provider.test", AccountID: "account.primary", ConfigurationSHA256: strings.Repeat("a", 64),
-		RepositoryID: "https://github.com/example/project@" + strings.Repeat("b", 40),
+		RepositoryID:     "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: strings.Repeat("c", 64)},
-		Budget: domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000}, Deadline: now.Add(2 * time.Hour),
+		Budget:           domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000}, Deadline: now.Add(2 * time.Hour),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), grantCommand, request, now)
 	if err != nil {
@@ -62,14 +62,14 @@ func createJobContractPlanner(t *testing.T, database *Store, jobID string, princ
 
 func validStoreJobContract() domain.JobContract {
 	return domain.JobContract{
-		Purpose: "Deliver the approved feature",
-		Constraints: []string{"Linux only", "no network writes"},
+		Purpose:            "Deliver the approved feature",
+		Constraints:        []string{"Linux only", "no network writes"},
 		TargetRepositories: []string{"repo_taxion"},
-		TargetResources: []string{"resource_ci"},
-		Workspaces: []string{"workspace_taxion"},
+		TargetResources:    []string{"resource_ci"},
+		Workspaces:         []string{"workspace_taxion"},
 		AcceptanceCriteria: []string{"Tests pass", "No secret leakage"},
-		RequiredEvidence: []string{"Linux CI", "Secret scan"},
-		Budget: domain.JobContractBudget{MaxTurns: 3, MaxTokens: 1000},
+		RequiredEvidence:   []string{"Linux CI", "Secret scan"},
+		Budget:             domain.JobContractBudget{MaxTurns: 3, MaxTokens: 1000},
 		ConcurrencyCeiling: 1, Deadline: time.Now().UTC().Add(time.Hour),
 		ConfigurationSHA256: strings.Repeat("f", 64),
 	}
@@ -91,7 +91,7 @@ func TestJobContractAndApprovalStoreTransactions(t *testing.T) {
 	retryReceipt, retryRevision, err := database.AddJobContractRevision(
 		ctx, "job_contract_store", receipt.Revision, commandID, execution.ID, contract,
 	)
-	if err != nil || retryReceipt != receipt || retryRevision != contractRevision {
+	if err != nil || retryReceipt.CommandID != receipt.CommandID || retryReceipt.Revision != receipt.Revision || retryRevision.ID != contractRevision.ID || retryRevision.CanonicalHash != contractRevision.CanonicalHash {
 		t.Fatalf("contract revision idempotency: %#v %#v %v", retryReceipt, retryRevision, err)
 	}
 	job, err := database.GetJob(ctx, "job_contract_store")
@@ -116,7 +116,7 @@ func TestJobContractAndApprovalStoreTransactions(t *testing.T) {
 		contractRevision.CanonicalHash, contractRevision.CanonicalizationVersion,
 		"Approved the exact bounded scope", principal,
 	)
-	if err != nil || retryApprovalReceipt != approvalReceipt || retryApproval != approval {
+	if err != nil || retryApprovalReceipt.CommandID != approvalReceipt.CommandID || retryApprovalReceipt.Revision != approvalReceipt.Revision || retryApproval.ID != approval.ID || retryApproval.CanonicalHash != approval.CanonicalHash {
 		t.Fatalf("approval idempotency: %#v %#v %v", retryApprovalReceipt, retryApproval, err)
 	}
 	newContract := validStoreJobContract()

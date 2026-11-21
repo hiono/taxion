@@ -38,8 +38,8 @@ type Job struct {
 	UpdatedAt                             time.Time                   `json:"updated_at"`
 	IntakeProvenance                      *IntakeProvenance           `json:"intake_provenance,omitempty"`
 	PlanningAuthorizations                []PlanningAuthorization     `json:"planning_authorizations,omitempty"`
-	JobContractRevisions                   []JobContractRevision         `json:"job_contract_revisions,omitempty"`
-	JobApprovals                           []JobApproval                 `json:"job_approvals,omitempty"`
+	JobContractRevisions                  []JobContractRevision       `json:"job_contract_revisions,omitempty"`
+	JobApprovals                          []JobApproval               `json:"job_approvals,omitempty"`
 	RoleExecutions                        []RoleExecution             `json:"role_executions,omitempty"`
 	ProviderStartIntents                  []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
 	ProviderStartObservations             []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
