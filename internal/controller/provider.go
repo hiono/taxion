@@ -175,6 +175,12 @@ func (c *ProviderController) reconcileStart(
 				}
 				return receipt, execution, intent, provider.StartResult{}, errors.New("Provider Start lookup confirmed failure")
 			}
+			if lookup.Status == provider.LookupStatusUnknown {
+				if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); err != nil {
+					return receipt, execution, intent, provider.StartResult{}, err
+				}
+				return receipt, execution, intent, provider.StartResult{}, errors.New("Provider Start lookup remains UNKNOWN")
+			}
 			if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartAccepted,
 				lookup.SessionID, lookup.ReceiptID, lookup.EvidenceSHA256, false, principal); err != nil {
 				return receipt, execution, intent, provider.StartResult{}, err
@@ -223,6 +229,16 @@ func (c *ProviderController) recordStartObservation(
 	job, err := c.store.GetJob(ctx, jobID)
 	if err != nil {
 		return err
+	}
+	if previous, found := latestStartObservation(job, operationID); found {
+		if previous.Status == status && status == domain.ProviderStartUnknown {
+			return nil
+		}
+		if previous.Status == domain.ProviderStartUnknown && status != domain.ProviderStartUnknown {
+			reconcilesUnknown = true
+		} else if previous.Status != domain.ProviderStartUnknown {
+			return errors.New("Provider Start observation is already terminal")
+		}
 	}
 	commandID := domain.ProviderStartObservationCommandID(
 		operationID, status, sessionID, receiptID, evidenceSHA256, reconcilesUnknown,
