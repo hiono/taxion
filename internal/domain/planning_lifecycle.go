@@ -278,7 +278,7 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 	}
 	if count >= grant.Budget.MaxTurns || reservedTokens > grant.Budget.MaxTokens-tokensUsed {
 		reasonCode := "turn_budget_exhausted"
-		if reservedTokens > grant.Budget.MaxTokens-reserved {
+		if reservedTokens > grant.Budget.MaxTokens-tokensUsed {
 			reasonCode = "token_budget_exhausted"
 		}
 		return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: reasonCode, Cause: errors.New("PlanningAuthorization turn or token budget is exhausted")}
