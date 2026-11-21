@@ -58,6 +58,8 @@ Provider Adapterの契約、Capability gate、Credential isolation、Controller 
 | DOM-014 | Event cursor | cursor欠落・逆行・分岐 | 拒否 |
 | DOM-015 | Start binding | accepted Start observationなしでTurn intent作成 | 拒否 |
 | DOM-016 | Session binding | accepted Start observationと異なるSessionIDでTurn intent作成 | 拒否 |
+| DOM-017 | Legacy aggregate | Start observation導入前のJobに既存Turn factsがある | 読み取り可能。新規Turn / Resumeはaccepted Start observationなしに作成不可 |
+| DOM-018 | UNKNOWN history | 同一OperationIDでUNKNOWNを追記しterminal evidenceで解消 | 既存factを変更せずappend-onlyで解消 |
 
 ## 5. Adapter contract tests
 
@@ -184,6 +186,8 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-017 | Start intent ordering | Start intent commit前にAdapterを呼び出す | テスト失敗 |
 | CTR-018 | Ambiguous Start | UNKNOWN後に同じOperationIDでLookup | 新しいStartを発行せずObservationを追記 |
 | CTR-019 | Expired grant recovery | 期限後に既存Startを照合 | Lookupは許可し、NOT_FOUND後の新規Startは拒否 |
+| CTR-020 | Unsafe retry | UNKNOWN後にLookup / idempotency capabilityがない | blind replayを拒否しUNKNOWNを保持 |
+| CTR-021 | Documents context | ID重複、content digest不一致、aggregate digest不一致 | Start intent作成前に拒否 |
 
 ## 11. Regression tests
 
