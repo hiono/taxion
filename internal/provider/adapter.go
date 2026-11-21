@@ -45,6 +45,7 @@ const (
 	EvidenceSynthetic EvidenceLevel = "E2"
 	EvidenceSDK       EvidenceLevel = "E3"
 	EvidenceLive      EvidenceLevel = "E4"
+	EvidenceDurable   EvidenceLevel = "E5"
 )
 
 type CapabilityEvidence struct {
@@ -98,12 +99,65 @@ func (c Capabilities) Has(capability Capability) bool {
 	}
 }
 
+func (c Capabilities) HasEvidenceAtLeast(capability Capability, minimum EvidenceLevel) bool {
+	if !c.Has(capability) {
+		return false
+	}
+	minimumRank := evidenceRank(minimum)
+	for _, evidence := range c.Evidence {
+		if evidence.Capability == capability && evidenceRank(evidence.EvidenceLevel) >= minimumRank && minimumRank > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (c Capabilities) SupportsSafeStart() bool {
-	return c.StartIdempotency || c.StartLookup
+	return c.HasEvidenceAtLeast(CapabilityStartIdempotency, EvidenceLive) ||
+		c.HasEvidenceAtLeast(CapabilityStartLookup, EvidenceLive)
 }
 
 func (c Capabilities) SupportsSafeSend() bool {
-	return c.SendIdempotency || c.SendLookup
+	return c.HasEvidenceAtLeast(CapabilitySendIdempotency, EvidenceLive) ||
+		c.HasEvidenceAtLeast(CapabilitySendLookup, EvidenceLive)
+}
+
+func (c Capabilities) SupportsCrossProcessReattachment() bool {
+	return c.HasEvidenceAtLeast(CapabilitySessionReattach, EvidenceDurable)
+}
+
+func (c Capabilities) ValidateForLiveExecution(expected Identity) error {
+	if err := c.Validate(expected); err != nil {
+		return err
+	}
+	for _, capability := range allCapabilities {
+		if !c.Has(capability) {
+			continue
+		}
+		minimum := EvidenceLive
+		if capability == CapabilitySessionReattach || capability == CapabilityEventReplay {
+			minimum = EvidenceDurable
+		}
+		if !c.HasEvidenceAtLeast(capability, minimum) {
+			return fmt.Errorf("capability %q does not meet minimum evidence level %s", capability, minimum)
+		}
+	}
+	return nil
+}
+
+func evidenceRank(level EvidenceLevel) int {
+	switch level {
+	case EvidenceSynthetic:
+		return 2
+	case EvidenceSDK:
+		return 3
+	case EvidenceLive:
+		return 4
+	case EvidenceDurable:
+		return 5
+	default:
+		return 0
+	}
 }
 
 func (c Capabilities) Validate(expected Identity) error {
@@ -128,7 +182,7 @@ func (c Capabilities) Validate(expected Identity) error {
 		seen[evidence.Capability] = struct{}{}
 		if evidence.Identity != c.Identity || strings.TrimSpace(evidence.TestID) == "" ||
 			!validSHA256(evidence.EvidenceSHA256) || evidence.VerifiedAt.IsZero() ||
-			(evidence.EvidenceLevel != EvidenceSynthetic && evidence.EvidenceLevel != EvidenceSDK && evidence.EvidenceLevel != EvidenceLive) {
+			(evidenceRank(evidence.EvidenceLevel) == 0) {
 			return fmt.Errorf("capability evidence for %q is incomplete or bound to another Provider configuration", evidence.Capability)
 		}
 	}
@@ -271,22 +325,37 @@ const (
 	FailureAmbiguous  FailureClass = "ambiguous"
 )
 
-// OperationError contains only a redacted code and safe message. Adapter implementations
-// must not include credentials, request bodies, or provider response bodies in either field.
+// OperationError carries only a constrained code. Raw Provider errors and response bodies
+// must remain inside the Adapter and must never be wrapped or copied into this value.
 type OperationError struct {
-	Class   FailureClass
-	Code    string
-	Message string
+	Class FailureClass
+	Code  string
+}
+
+func NewOperationError(class FailureClass, code string) (*OperationError, error) {
+	if (class != FailureDefinitive && class != FailureAmbiguous) || !validOperationCode(code) {
+		return nil, errors.New("Provider operation error requires a valid class and safe code")
+	}
+	return &OperationError{Class: class, Code: code}, nil
 }
 
 func (e *OperationError) Error() string {
-	if e == nil {
+	if e == nil || !validOperationCode(e.Code) {
 		return "Provider operation failed"
 	}
-	if e.Message == "" {
-		return "Provider operation failed (" + e.Code + ")"
+	return "Provider operation failed (" + e.Code + ")"
+}
+
+func validOperationCode(code string) bool {
+	if len(code) == 0 || len(code) > 64 {
+		return false
 	}
-	return "Provider operation failed (" + e.Code + "): " + e.Message
+	for _, r := range code {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func validSHA256(value string) bool {
