@@ -8,20 +8,20 @@ import (
 )
 
 const (
-	ProviderStartUnknown   = "UNKNOWN"
-	ProviderStartAccepted  = "ACCEPTED"
-	ProviderStartFailed    = "FAILED"
-	PlanningTurnUnknown    = "UNKNOWN"
-	PlanningTurnCompleted  = "COMPLETED"
-	PlanningTurnFailed     = "FAILED"
-	PlanningEffectAllow    = "ALLOW"
-	PlanningEffectDeny     = "DENY"
-	PlanningBoundaryTurn   = "turn"
-	PlanningBoundaryEffect = "effect"
-	PlanningBoundaryResume = "resume"
-	PlanningResumeUnknown  = "UNKNOWN"
-	PlanningResumeAttached = "ATTACHED"
-	PlanningResumeFailed   = "FAILED"
+	ProviderStartUnknown    = "UNKNOWN"
+	ProviderStartAccepted   = "ACCEPTED"
+	ProviderStartFailed     = "FAILED"
+	PlanningTurnUnknown     = "UNKNOWN"
+	PlanningTurnCompleted   = "COMPLETED"
+	PlanningTurnFailed      = "FAILED"
+	PlanningEffectAllow     = "ALLOW"
+	PlanningEffectDeny      = "DENY"
+	PlanningBoundaryTurn    = "turn"
+	PlanningBoundaryEffect  = "effect"
+	PlanningBoundaryResume  = "resume"
+	PlanningResumeUnknown   = "UNKNOWN"
+	PlanningResumeAttached  = "ATTACHED"
+	PlanningResumeFailed    = "FAILED"
 )
 
 type PlanningBoundaryError struct {
@@ -78,8 +78,8 @@ func validPlanningBoundaryReason(reasonCode string) bool {
 }
 
 type ProviderStartObservation struct {
-	ID                  string    `json:"id"`
-	CommandID           string    `json:"command_id"`
+	ID                   string    `json:"id"`
+	CommandID            string    `json:"command_id"`
 	JobID                string    `json:"job_id"`
 	StartID              string    `json:"start_id"`
 	OperationID          string    `json:"operation_id"`
