@@ -629,6 +629,7 @@ func (j Job) Validate() error {
 	turnCounts := make(map[string]uint32)
 	previousTurnRevision := make(map[string]uint64)
 	previousTurnCreatedAt := make(map[string]time.Time)
+	sessionByExecution := make(map[string]string)
 	for _, turn := range j.PlanningTurnIntents {
 		if err := turn.Validate(j); err != nil {
 			return fmt.Errorf("%w: invalid PlanningTurnIntent: %v", ErrInvalidJob, err)
@@ -641,6 +642,10 @@ func (j Job) Validate() error {
 		}
 		seenTurns[turn.ID] = struct{}{}
 		turnByID[turn.ID] = turn
+		if session, exists := sessionByExecution[turn.RoleExecutionID]; exists && session != turn.ProviderSessionID {
+			return fmt.Errorf("%w: Provider Session identity changed within a RoleExecution", ErrInvalidJob)
+		}
+		sessionByExecution[turn.RoleExecutionID] = turn.ProviderSessionID
 		turnCounts[turn.RoleExecutionID]++
 		if turn.TurnNumber != turnCounts[turn.RoleExecutionID] {
 			return fmt.Errorf("%w: planning turn sequence is not contiguous", ErrInvalidJob)
