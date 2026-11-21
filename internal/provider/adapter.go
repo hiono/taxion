@@ -258,6 +258,7 @@ func (r StartRequest) Validate() error {
 }
 
 type StartResult struct {
+	OperationID    string
 	SessionID      string
 	ReceiptID      string
 	EvidenceSHA256 string
@@ -282,6 +283,9 @@ func (r TurnRequest) Validate() error {
 }
 
 type TurnResult struct {
+	OperationID    string
+	TurnID         string
+	SessionID      string
 	ReceiptID      string
 	Status         string
 	TokensUsed     uint64
@@ -294,7 +298,16 @@ type StopRequest struct {
 	SessionID   string
 }
 
+func (r StopRequest) Validate() error {
+	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) {
+		return errors.New("Provider Stop request identity is invalid")
+	}
+	return nil
+}
+
 type StopResult struct {
+	OperationID    string
+	SessionID      string
 	Stopped        bool
 	EvidenceSHA256 string
 }
@@ -304,7 +317,16 @@ type ResumeRequest struct {
 	SessionID   string
 }
 
+func (r ResumeRequest) Validate() error {
+	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) {
+		return errors.New("Provider Resume request identity is invalid")
+	}
+	return nil
+}
+
 type ResumeResult struct {
+	OperationID    string
+	SessionID      string
 	Attached       bool
 	EvidenceSHA256 string
 }
@@ -315,8 +337,18 @@ type LookupRequest struct {
 	TurnID      string
 }
 
+func (r LookupRequest) Validate() error {
+	if !validIdentifier(r.OperationID) ||
+		(r.SessionID != "" && !validIdentifier(r.SessionID)) ||
+		(r.TurnID != "" && (!validIdentifier(r.TurnID) || !validIdentifier(r.SessionID))) {
+		return errors.New("Provider Lookup request identity is invalid")
+	}
+	return nil
+}
+
 type LookupResult struct {
 	Found          bool
+	OperationID    string
 	Status         string
 	ReceiptID      string
 	SessionID      string
@@ -332,7 +364,17 @@ type ResultRequest struct {
 	TurnID      string
 }
 
+func (r ResultRequest) Validate() error {
+	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) || !validIdentifier(r.TurnID) {
+		return errors.New("Provider Result request identity is invalid")
+	}
+	return nil
+}
+
 type Result struct {
+	OperationID    string
+	SessionID      string
+	TurnID         string
 	Content        string
 	ResultSHA256   string
 	EvidenceSHA256 string
@@ -344,7 +386,17 @@ type UsageRequest struct {
 	TurnID      string
 }
 
+func (r UsageRequest) Validate() error {
+	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) || !validIdentifier(r.TurnID) {
+		return errors.New("Provider Usage request identity is invalid")
+	}
+	return nil
+}
+
 type Usage struct {
+	OperationID    string
+	SessionID      string
+	TurnID         string
 	UsageID        string
 	Tokens         uint64
 	EvidenceSHA256 string
