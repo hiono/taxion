@@ -653,15 +653,23 @@ func (j Job) Validate() error {
 		return fmt.Errorf("%w: Provider Start observation activation revision exceeds Job revision", ErrInvalidJob)
 	}
 	if j.ProviderLifecycleEnforcedFromRevision > 0 {
-		foundActivationObservation := false
-		for _, observation := range j.ProviderStartObservations {
-			if observation.CreatedRevision == j.ProviderLifecycleEnforcedFromRevision {
-				foundActivationObservation = true
+		foundActivationFact := false
+		for _, intent := range j.ProviderStartIntents {
+			if intent.CreatedRevision == j.ProviderLifecycleEnforcedFromRevision {
+				foundActivationFact = true
 				break
 			}
 		}
-		if !foundActivationObservation {
-			return fmt.Errorf("%w: Provider Start observation activation revision has no matching fact", ErrInvalidJob)
+		if !foundActivationFact {
+			for _, observation := range j.ProviderStartObservations {
+				if observation.CreatedRevision == j.ProviderLifecycleEnforcedFromRevision {
+					foundActivationFact = true
+					break
+				}
+			}
+		}
+		if !foundActivationFact {
+			return fmt.Errorf("%w: Provider lifecycle activation revision has no matching Start fact", ErrInvalidJob)
 		}
 	}
 	for operationID, observations := range startObservationsByOperation {
