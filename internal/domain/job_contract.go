@@ -170,8 +170,8 @@ func NewJobContractRevision(job Job, commandID, roleExecutionID string, contract
 	if !validCommandID(commandID) || now.IsZero() || !validPlanningIdentity(roleExecutionID) {
 		return JobContractRevision{}, errors.New("JobContract revision command, Planner RoleExecution, and timestamp are required")
 	}
-	if job.State != JobDraft && job.State != JobActive {
-		return JobContractRevision{}, errors.New("JobContract revision requires a DRAFT or ACTIVE Job")
+	if job.State != JobDraft {
+		return JobContractRevision{}, errors.New("JobContract revision requires a DRAFT Job; ACTIVE amendments require a separate authorized revision command")
 	}
 	var execution RoleExecution
 	foundExecution := false
@@ -182,16 +182,26 @@ func NewJobContractRevision(job Job, commandID, roleExecutionID string, contract
 		}
 	}
 	startObservation, foundStart := acceptedStartForExecution(job, roleExecutionID)
-	if !foundExecution || execution.Role != RolePlanner || execution.TaskID != "" || !foundStart {
-		return JobContractRevision{}, errors.New("JobContract proposal requires an accepted Taskless PLANNER execution")
+	var grant PlanningAuthorization
+	foundGrant := false
+	for _, candidate := range job.PlanningAuthorizations {
+		if foundExecution && candidate.ID == execution.PlanningAuthorizationID {
+			grant, foundGrant = candidate, true
+			break
+		}
+	}
+	if !foundExecution || execution.Role != RolePlanner || execution.TaskID != "" || !foundStart ||
+		!foundGrant || grant.Validate(job) != nil {
+		return JobContractRevision{}, errors.New("JobContract proposal requires an accepted Taskless PLANNER execution with its PlanningAuthorization")
 	}
 	canonical, hash, err := CanonicalizeJobContract(contract, JobContractCanonicalizationVersion)
 	if err != nil {
 		return JobContractRevision{}, err
 	}
 	now = now.UTC().Round(0)
-	if now.Before(startObservation.CreatedAt) || !now.Before(canonical.Deadline) {
-		return JobContractRevision{}, errors.New("JobContract proposal time is outside the accepted Planner Session or contract deadline")
+	if now.Before(startObservation.CreatedAt) || now.Before(grant.IssuedAt) ||
+		!now.Before(grant.Deadline) || !now.Before(canonical.Deadline) {
+		return JobContractRevision{}, errors.New("JobContract proposal time is outside the accepted Planner Session, PlanningAuthorization, or contract deadline")
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return JobContractRevision{}, errors.New("Job revision exhausted")
@@ -222,10 +232,19 @@ func (r JobContractRevision) Validate(job Job) error {
 		}
 	}
 	startObservation, foundStart := acceptedStartForExecution(job, r.ProposedByRoleExecutionID)
+	var grant PlanningAuthorization
+	foundGrant := false
+	for _, candidate := range job.PlanningAuthorizations {
+		if foundExecution && candidate.ID == execution.PlanningAuthorizationID {
+			grant, foundGrant = candidate, true
+			break
+		}
+	}
 	if !foundExecution || execution.Role != RolePlanner || execution.TaskID != "" || !foundStart ||
-		r.CreatedRevision <= execution.CreatedRevision || r.CreatedAt.Before(startObservation.CreatedAt) ||
-		r.CreatedAt.Before(execution.CreatedAt) {
-		return errors.New("JobContractRevision proposer is not an accepted Taskless PLANNER execution")
+		!foundGrant || grant.Validate(job) != nil || r.CreatedRevision <= execution.CreatedRevision ||
+		r.CreatedAt.Before(startObservation.CreatedAt) || r.CreatedAt.Before(execution.CreatedAt) ||
+		r.CreatedAt.Before(grant.IssuedAt) || !r.CreatedAt.Before(grant.Deadline) {
+		return errors.New("JobContractRevision proposer is not an accepted Taskless PLANNER execution within its PlanningAuthorization")
 	}
 	canonical, hash, err := CanonicalizeJobContract(r.Contract, r.CanonicalizationVersion)
 	if err != nil {

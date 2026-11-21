@@ -28,7 +28,8 @@ The configuration reference is represented by a SHA-256 digest. Secret values, c
 - Canonicalization version 1 trims text fields, sorts set-valued string collections, rejects duplicates, normalizes the deadline to UTC, and serializes a fixed struct with deterministic JSON field order.
 - The canonical hash is SHA-256 over the canonicalization version and canonical contract content.
 - A revision stores both the canonicalization version and canonical hash.
-- A new revision on an ACTIVE Job returns the Job to DRAFT. Older approvals remain historical and do not authorize the new revision.
+- A DRAFT Planner proposal requires an accepted Start and a still-valid PlanningAuthorization.
+- ACTIVE Job amendments are rejected by the DRAFT proposal command. A future amendment command must carry separate authority, append a new revision, return the Job to DRAFT, and require a new JobApproval. Until that authority path exists, do not reuse an old Planner execution to amend an ACTIVE Job.
 
 ## 4. JobApproval
 

@@ -7,7 +7,7 @@
 - `JobContractRevisions []JobContractRevision`
 - `JobApprovals []JobApproval`
 
-`JobState` supports `DRAFT` and `ACTIVE`. A new draft Job starts in DRAFT. Approval of the latest contract revision changes the state to ACTIVE. Appending a new revision to an ACTIVE Job changes it back to DRAFT in the same transaction.
+`JobState` supports `DRAFT` and `ACTIVE`. A new draft Job starts in DRAFT. Approval of the latest contract revision changes the state to ACTIVE. Contract proposals require a DRAFT Job, an accepted Taskless PLANNER Start, and a PlanningAuthorization that is still within its deadline. ACTIVE amendments are rejected until a separate authorized revision command is implemented; that future command must return the Job to DRAFT and require reapproval.
 
 ### 1.1 JobContract
 
@@ -49,7 +49,7 @@ Fields:
 - ProposedByRoleExecutionID
 - CreatedAt and CreatedRevision
 
-The proposer must be a PLANNER RoleExecution belonging to the same Job. The revision is immutable after append.
+The proposer must be a Taskless PLANNER RoleExecution belonging to the same Job, with an accepted Provider Start and a PlanningAuthorization valid at CreatedAt. The revision is immutable after append.
 
 ### 1.3 JobApproval
 
@@ -97,7 +97,7 @@ The version is part of the hash preimage. Any canonicalization rule change requi
 
 Input: Job ID, expected Job revision, CommandID, Planner RoleExecution ID, JobContract.
 
-The Store creates the next immutable contract revision. If the Job was ACTIVE, the same aggregate transaction returns it to DRAFT. The command is idempotent by CommandID and canonical request hash.
+The Store creates the next immutable contract revision only for a DRAFT Job while the referenced PlanningAuthorization remains valid. The command is idempotent by CommandID and canonical request hash. ACTIVE amendments are rejected until a separate authorized revision command exists.
 
 ### 4.2 AddJobApproval
 

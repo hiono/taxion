@@ -17,7 +17,8 @@
 | JC-011 | Approval provenance | Principal ID does not match issuer and subject | Reject |
 | JC-012 | Approval reason | Empty, invalid UTF-8, or over 2,000 bytes | Reject |
 | JC-013 | Active invariant | ACTIVE Job without approval for latest revision | Reject Job validation |
-| JC-014 | Revision invalidates approval | Append a new revision to ACTIVE Job | Job returns to DRAFT; old approval remains historical |
+| JC-014 | ACTIVE amendment gate | Attempt a revision with the prior DRAFT Planner authority after approval | Reject; ACTIVE state and prior approval remain unchanged |
+| JC-016 | Planning grant deadline | Propose after the referenced PlanningAuthorization deadline | Reject before appending a revision |
 | JC-015 | Append-only | Mutate or remove a stored revision / approval | Reject Job validation |
 
 ## Store tests

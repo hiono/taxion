@@ -164,22 +164,24 @@ func TestJobContractRevisionAndApprovalBindExactImmutableRevision(t *testing.T) 
 	}
 	newContract := validJobContract(now.Add(5 * time.Minute))
 	newContract.Purpose = "Deliver the revised approved feature"
-	next, err := NewJobContractRevision(
+	if _, err := NewJobContractRevision(
 		job, "cmd_ffffffffffffffffffffffffffffffff", execution.ID, newContract, now.Add(6*time.Minute),
-	)
-	if err != nil {
-		t.Fatalf("NewJobContractRevision after approval: %v", err)
+	); err == nil {
+		t.Fatal("ACTIVE Job accepted a contract amendment through the DRAFT Planner authority")
 	}
-	job.JobContractRevisions = append(job.JobContractRevisions, next)
-	job.Goal = next.Contract.Purpose
-	job.State = JobDraft
-	job.Revision++
-	job.UpdatedAt = next.CreatedAt
-	if err := job.Validate(); err != nil {
-		t.Fatalf("Job.Validate after revision invalidated approval: %v", err)
+	if len(job.JobApprovals) != 1 || job.State != JobActive {
+		t.Fatalf("rejected amendment changed approved Job: %#v state=%s", job.JobApprovals, job.State)
 	}
-	if len(job.JobApprovals) != 1 || job.State != JobDraft {
-		t.Fatalf("previous approval was not preserved as historical: %#v state=%s", job.JobApprovals, job.State)
+}
+
+func TestJobContractRevisionRejectsExpiredPlanningAuthorization(t *testing.T) {
+	job, execution, now := jobWithAcceptedPlanner(t)
+	expiredAt := now.Add(3 * time.Hour)
+	contract := validJobContract(expiredAt)
+	if _, err := NewJobContractRevision(
+		job, "cmd_17171717171717171717171717171717", execution.ID, contract, expiredAt,
+	); err == nil {
+		t.Fatal("JobContract proposal succeeded after PlanningAuthorization deadline")
 	}
 }
 

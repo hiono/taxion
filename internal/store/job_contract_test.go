@@ -121,29 +121,28 @@ func TestJobContractAndApprovalStoreTransactions(t *testing.T) {
 	}
 	newContract := validStoreJobContract()
 	newContract.Purpose = "Deliver the revised feature"
-	nextReceipt, nextRevision, err := database.AddJobContractRevision(
+	if _, _, err := database.AddJobContractRevision(
 		ctx, job.ID, job.Revision, "cmd_12121212121212121212121212121212", execution.ID, newContract,
-	)
-	if err != nil || nextRevision.Revision != 2 {
-		t.Fatalf("new contract revision: %#v %#v %v", nextReceipt, nextRevision, err)
+	); err == nil {
+		t.Fatal("ACTIVE Job accepted a contract amendment through the DRAFT Planner authority")
 	}
 	job, err = database.GetJob(ctx, job.ID)
-	if err != nil || job.State != domain.JobDraft || len(job.JobApprovals) != 1 || len(job.JobContractRevisions) != 2 {
-		t.Fatalf("new revision did not invalidate current approval: %#v %v", job, err)
+	if err != nil || job.State != domain.JobActive || len(job.JobApprovals) != 1 || len(job.JobContractRevisions) != 1 {
+		t.Fatalf("rejected amendment changed approved Job: %#v %v", job, err)
 	}
 	if _, _, err := database.AddJobApproval(
 		ctx, job.ID, job.Revision, "cmd_13131313131313131313131313131313",
-		contractRevision.Revision, contractRevision.CanonicalHash, contractRevision.CanonicalizationVersion,
-		"Stale approval", principal,
-	); err == nil {
-		t.Fatal("stale JobApproval was accepted")
-	}
-	if _, _, err := database.AddJobApproval(
-		ctx, job.ID, job.Revision, "cmd_14141414141414141414141414141414",
-		nextRevision.Revision, strings.Repeat("0", 64), nextRevision.CanonicalizationVersion,
+		contractRevision.Revision, strings.Repeat("0", 64), contractRevision.CanonicalizationVersion,
 		"Wrong hash", principal,
 	); err == nil {
 		t.Fatal("JobApproval with wrong canonical hash was accepted")
+	}
+	if _, _, err := database.AddJobApproval(
+		ctx, job.ID, job.Revision, "cmd_14141414141414141414141414141414",
+		contractRevision.Revision, contractRevision.CanonicalHash, contractRevision.CanonicalizationVersion,
+		"Duplicate approval", principal,
+	); err == nil {
+		t.Fatal("second JobApproval for the same revision was accepted")
 	}
 }
 
