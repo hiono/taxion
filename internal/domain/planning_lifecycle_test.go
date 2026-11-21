@@ -134,6 +134,9 @@ func TestPlanningResumeRequiresExactSessionAndCapabilityEvidence(t *testing.T) {
 	if _, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_dddddddddddddddddddddddddddddddd", strings.Repeat("b", 64), false, now.Add(time.Second)); err == nil {
 		t.Fatal("resume accepted an unsupported reattachment capability")
 	}
+	if _, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("b", 64), true, now.Add(-time.Second)); err == nil {
+		t.Fatal("resume was accepted before the latest Provider turn")
+	}
 	resume, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("b", 64), true, now.Add(time.Second))
 	if err != nil {
 		t.Fatalf("resume: %v", err)
@@ -280,6 +283,12 @@ func TestPlanningLifecycleRejectsObservationAfterNextIntent(t *testing.T) {
 	if err := job.Validate(); err != nil {
 		t.Fatalf("valid turn history: %v", err)
 	}
+
+	job.PlanningTurnIntents[1].ProviderSessionID = "session_other"
+	if err := job.Validate(); err == nil {
+		t.Fatal("Job.Validate accepted a changed Provider Session within one RoleExecution")
+	}
+	job.PlanningTurnIntents[1] = secondTurn
 
 	job.PlanningTurnObservations[0].CreatedRevision = secondTurn.CreatedRevision + 1
 	job.PlanningTurnObservations[0].CreatedAt = secondTurn.CreatedAt.Add(time.Second)
