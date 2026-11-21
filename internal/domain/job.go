@@ -43,6 +43,7 @@ type Job struct {
 	PlanningTurnObservations  []PlanningTurnObservation  `json:"planning_turn_observations,omitempty"`
 	PlanningEffectDecisions   []PlanningEffectDecision   `json:"planning_effect_decisions,omitempty"`
 	PlanningResumeIntents     []PlanningResumeIntent     `json:"planning_resume_intents,omitempty"`
+	PlanningResumeObservations []PlanningResumeObservation `json:"planning_resume_observations,omitempty"`
 	PlanningBoundaryDecisions []PlanningBoundaryDecision `json:"planning_boundary_decisions,omitempty"`
 }
 
@@ -559,7 +560,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningBoundaryDecisions))
+	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
 	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
@@ -715,6 +716,57 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: duplicate PlanningResumeIntent ID", ErrInvalidJob)
 		}
 		seenResumes[resume.ID] = struct{}{}
+	}
+	resumeByID := make(map[string]PlanningResumeIntent, len(j.PlanningResumeIntents))
+	for _, resume := range j.PlanningResumeIntents {
+		resumeByID[resume.ID] = resume
+	}
+	resumeObservationsByID := make(map[string][]PlanningResumeObservation)
+	seenResumeObservationIDs := make(map[string]struct{}, len(j.PlanningResumeObservations))
+	for _, observation := range j.PlanningResumeObservations {
+		resume, exists := resumeByID[observation.ResumeID]
+		if !exists {
+			return fmt.Errorf("%w: PlanningResumeObservation has no resume intent", ErrInvalidJob)
+		}
+		if err := observation.Validate(j, resume); err != nil {
+			return fmt.Errorf("%w: invalid PlanningResumeObservation: %v", ErrInvalidJob, err)
+		}
+		if observation.CreatedAt.After(j.UpdatedAt) || observation.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: PlanningResumeObservation append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenResumeObservationIDs[observation.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningResumeObservation ID", ErrInvalidJob)
+		}
+		seenResumeObservationIDs[observation.ID] = struct{}{}
+		resumeObservationsByID[observation.ResumeID] = append(resumeObservationsByID[observation.ResumeID], observation)
+	}
+	previousResumeByExecution := make(map[string]PlanningResumeIntent)
+	for _, resume := range j.PlanningResumeIntents {
+		if previous, exists := previousResumeByExecution[resume.RoleExecutionID]; exists {
+			observations := resumeObservationsByID[previous.ID]
+			if len(observations) == 0 || observations[len(observations)-1].Status == PlanningResumeUnknown {
+				return fmt.Errorf("%w: a new resume follows an unresolved Provider resume operation", ErrInvalidJob)
+			}
+		}
+		previousResumeByExecution[resume.RoleExecutionID] = resume
+	}
+	for resumeID, observations := range resumeObservationsByID {
+		for i, observation := range observations {
+			if i == 0 {
+				if observation.ReconcilesUnknown {
+					return fmt.Errorf("%w: first resume observation cannot reconcile UNKNOWN", ErrInvalidJob)
+				}
+				continue
+			}
+			previous := observations[i-1]
+			if previous.Status != PlanningResumeUnknown || observation.Status == PlanningResumeUnknown ||
+				!observation.ReconcilesUnknown || observation.CreatedRevision <= previous.CreatedRevision {
+				return fmt.Errorf("%w: invalid PlanningResumeObservation reconciliation sequence for %s", ErrInvalidJob, resumeID)
+			}
+		}
+		if len(observations) > 2 || (len(observations) == 2 && observations[0].Status != PlanningResumeUnknown) {
+			return fmt.Errorf("%w: invalid PlanningResumeObservation history for %s", ErrInvalidJob, resumeID)
+		}
 	}
 	seenBoundaryDecisions := make(map[string]struct{}, len(j.PlanningBoundaryDecisions))
 	for _, decision := range j.PlanningBoundaryDecisions {
