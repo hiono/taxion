@@ -66,7 +66,7 @@ Role Runtime / Model / Tool / SandboxからCredentialBrokerまたはProvider SDK
 - SDKVersionまたはProtocolVersion
 - ConfigurationSHA256
 
-identityの完全一致をCapability、credential、Session、operationに適用する。Provider名だけ、accountだけ、configurationだけによる流用を許可しない。
+identityの完全一致をCapability、credential、Session、operationに適用する。PlanningAuthorizationはProvider ID、account、configuration digestを固定し、configuration digestにはSDK / protocol versionを含める。trusted Capability Evidence catalogはSDK / protocol versionを含むIdentity全体を照合する。Provider名だけ、accountだけ、configurationだけによる流用を許可しない。
 
 Domainへ保存する場合はSDK固有型を使用せず、文字列identityとconfiguration digestを保存する。
 
@@ -134,6 +134,8 @@ Adapterは次の操作を提供する。
 - deadlineを必須とし、Controllerのgrant deadlineを超えない。
 - Provider / account / SDK / configuration identityはRuntimeが選択済みAdapter identityへ束縛する。
 - Context documentはID、content digest、実contentの一致を検証する。
+- Snapshot modeはReferenceと一致する単一documentを要求する。
+- Documents modeはID昇順で「ID + LF + SHA256 + LF」を連結したSHA-256を境界digestと照合する。
 
 ### 6.2 Result共通条件
 
