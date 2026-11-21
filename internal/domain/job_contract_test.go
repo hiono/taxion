@@ -178,7 +178,7 @@ func TestJobContractRevisionAndApprovalBindExactImmutableRevision(t *testing.T) 
 		ContractRevision: revision.Revision, CanonicalizationVersion: revision.CanonicalizationVersion,
 		CanonicalHash: revision.CanonicalHash, ApproverPrincipalID: principalID,
 		ApproverSource: "https://identity.example", ApproverSubject: "human-subject",
-		Reason: "Approved the exact bounded scope", ApprovedAt: now.Add(4 * time.Minute), CreatedRevision: job.Revision + 1,
+		Reason: "Approved the exact bounded scope", ApprovedAt: now.Add(7 * time.Minute), CreatedRevision: job.Revision + 1,
 	}
 	job.JobApprovals = append(job.JobApprovals, approval)
 	job.State = JobActive
@@ -229,7 +229,7 @@ func TestJobApprovalRejectsMismatchedHumanIdentity(t *testing.T) {
 		ContractRevision: revision.Revision, CanonicalizationVersion: revision.CanonicalizationVersion,
 		CanonicalHash: revision.CanonicalHash, ApproverPrincipalID: "agent_123",
 		ApproverSource: "https://identity.example", ApproverSubject: "human-subject",
-		Reason: "Approved", ApprovedAt: now.Add(4 * time.Minute), CreatedRevision: job.Revision + 1,
+		Reason: "Approved", ApprovedAt: now.Add(7 * time.Minute), CreatedRevision: job.Revision + 1,
 	}
 	job.Revision++
 	job.UpdatedAt = approval.ApprovedAt
