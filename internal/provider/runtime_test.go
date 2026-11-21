@@ -82,6 +82,7 @@ type testAdapter struct {
 	resultFinal    bool
 	usageComplete  bool
 	startSessionID string
+	startDeadline  time.Time
 	sendOutput     string
 	sendResult     TurnResult
 	resultContent  string
@@ -92,8 +93,9 @@ func (a *testAdapter) Identity() Identity { return a.identity }
 func (a *testAdapter) Capabilities(context.Context) (Capabilities, error) {
 	return a.capabilities.Clone(), nil
 }
-func (a *testAdapter) Start(_ context.Context, request StartRequest, lease CredentialLease) (StartResult, error) {
+func (a *testAdapter) Start(ctx context.Context, request StartRequest, lease CredentialLease) (StartResult, error) {
 	a.startCalls++
+	a.startDeadline, _ = ctx.Deadline()
 	if err := lease.WithSecret(func(secret []byte) error {
 		if string(secret) != "runtime-test-secret" {
 			return errors.New("credential mismatch")
@@ -269,6 +271,60 @@ func validResumeRequest() ResumeRequest {
 
 func validResultRequest() ResultRequest {
 	return ResultRequest{OperationID: "provider_turn_1", SessionID: "session_1", TurnID: "turn_1"}
+}
+
+func TestRuntimeRejectsExpiredStartDeadlineBeforeCredentialAcquisition(t *testing.T) {
+	adapter := newTestAdapter(CapabilityStartIdempotency)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("newTestRuntime: %v", err)
+	}
+	request := validStartRequest()
+	request.Deadline = time.Now().UTC().Add(-time.Second)
+	if _, err := runtime.Start(context.Background(), request); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expired Start deadline error = %v", err)
+	}
+	if broker.acquires != 0 || adapter.startCalls != 0 {
+		t.Fatalf("expired request acquired credential or called Adapter: acquires=%d starts=%d", broker.acquires, adapter.startCalls)
+	}
+}
+
+func TestRuntimeUsesEarlierContextAndRequestDeadline(t *testing.T) {
+	adapter := newTestAdapter(CapabilityStartIdempotency)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("newTestRuntime: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	contextDeadline, _ := ctx.Deadline()
+	request := validStartRequest()
+	request.Deadline = contextDeadline.Add(time.Hour)
+	if _, err := runtime.Start(ctx, request); err != nil {
+		t.Fatalf("Runtime.Start: %v", err)
+	}
+	if !adapter.startDeadline.Equal(contextDeadline) {
+		t.Fatalf("Adapter deadline = %v, want earlier context deadline %v", adapter.startDeadline, contextDeadline)
+	}
+}
+
+func TestRuntimeRejectsCanceledContextBeforeCredentialAcquisition(t *testing.T) {
+	adapter := newTestAdapter(CapabilityStartIdempotency)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("newTestRuntime: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := runtime.Start(ctx, validStartRequest()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled Start context error = %v", err)
+	}
+	if broker.acquires != 0 || adapter.startCalls != 0 {
+		t.Fatalf("canceled request acquired credential or called Adapter: acquires=%d starts=%d", broker.acquires, adapter.startCalls)
+	}
 }
 
 func TestRuntimeStartUsesVerifiedCapabilityAndClosesCredential(t *testing.T) {
