@@ -195,7 +195,7 @@ func TestJobApprovalRejectsMismatchedHumanIdentity(t *testing.T) {
 		ContractRevision: revision.Revision, CanonicalizationVersion: revision.CanonicalizationVersion,
 		CanonicalHash: revision.CanonicalHash, ApproverPrincipalID: "agent_123",
 		ApproverSource: "https://identity.example", ApproverSubject: "human-subject",
-		Reason: "Approved", ApprovedAt: now.Add(4*time.Minute), CreatedRevision: job.Revision + 1,
+		Reason: "Approved", ApprovedAt: now.Add(4 * time.Minute), CreatedRevision: job.Revision + 1,
 	}
 	job.Revision++
 	job.UpdatedAt = approval.ApprovedAt
