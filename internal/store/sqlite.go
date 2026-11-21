@@ -300,7 +300,7 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID string, expe
 	}
 
 	request := struct {
-		ExpectedRevision uint64                      `json:"expected_revision"`
+		ExpectedRevision uint64                       `json:"expected_revision"`
 		Authorization    domain.PlanningAuthorization `json:"authorization"`
 	}{ExpectedRevision: expectedRevision, Authorization: grant}
 	request.Authorization.IssuedAt = time.Time{}
@@ -357,7 +357,7 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID string, expe
 				continue
 			}
 			persistedRequest := struct {
-				ExpectedRevision uint64                      `json:"expected_revision"`
+				ExpectedRevision uint64                       `json:"expected_revision"`
 				Authorization    domain.PlanningAuthorization `json:"authorization"`
 			}{ExpectedRevision: expectedRevision, Authorization: currentGrant}
 			persistedRequest.Authorization.IssuedAt = time.Time{}
