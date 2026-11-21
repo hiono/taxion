@@ -382,6 +382,8 @@ func (r LookupResult) Validate(request LookupRequest) error {
 		return nil
 	}
 	if !validLookupFoundStatus(r.Status) || !validIdentifier(r.SessionID) || !validIdentifier(r.ReceiptID) ||
+		(r.ResultSHA256 != "" && !validSHA256(r.ResultSHA256)) ||
+		(r.UsageID != "" && !validIdentifier(r.UsageID)) ||
 		(request.SessionID != "" && r.SessionID != request.SessionID) ||
 		r.TurnID != request.TurnID {
 		return errors.New("Provider Lookup found result does not match the requested operation")
