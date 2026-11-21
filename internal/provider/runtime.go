@@ -8,18 +8,18 @@ import (
 )
 
 var (
-	ErrUnsupportedCapability  = errors.New("Provider capability is not verified for this configuration")
+	ErrUnsupportedCapability   = errors.New("Provider capability is not verified for this configuration")
 	ErrCredentialUnavailable   = errors.New("Provider credential is unavailable")
 	ErrProviderOperationFailed = errors.New("Provider operation failed")
-	ErrProviderInvalidResult  = errors.New("Provider returned an invalid result")
+	ErrProviderInvalidResult   = errors.New("Provider returned an invalid result")
 	ErrStopUnconfirmed         = errors.New("Provider stop is not confirmed")
 	ErrResumeUnconfirmed       = errors.New("Provider Session reattachment is not confirmed")
 )
 
 type Runtime struct {
-	adapter   Adapter
-	broker    CredentialBroker
-	identity  Identity
+	adapter  Adapter
+	broker   CredentialBroker
+	identity Identity
 }
 
 func NewRuntime(adapter Adapter, broker CredentialBroker) (*Runtime, error) {

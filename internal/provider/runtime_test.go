@@ -9,9 +9,9 @@ import (
 )
 
 type testBroker struct {
-	secret []byte
+	secret   []byte
 	acquires int
-	closed int
+	closed   int
 }
 
 func (b *testBroker) Acquire(_ context.Context, _ Identity) (CredentialLease, error) {
@@ -20,8 +20,8 @@ func (b *testBroker) Acquire(_ context.Context, _ Identity) (CredentialLease, er
 }
 
 type trackingLease struct {
-	secret []byte
-	closed bool
+	secret  []byte
+	closed  bool
 	onClose func()
 }
 
@@ -44,19 +44,19 @@ func (l *trackingLease) Close() error {
 }
 
 type testAdapter struct {
-	identity Identity
+	identity     Identity
 	capabilities Capabilities
-	startCalls int
-	sendCalls int
-	stopCalls int
-	resumeCalls int
-	lookupCalls int
-	resultCalls int
-	usageCalls int
-	startErr error
+	startCalls   int
+	sendCalls    int
+	stopCalls    int
+	resumeCalls  int
+	lookupCalls  int
+	resultCalls  int
+	usageCalls   int
+	startErr     error
 }
 
-func (a *testAdapter) Identity() Identity { return a.identity }
+func (a *testAdapter) Identity() Identity                                 { return a.identity }
 func (a *testAdapter) Capabilities(context.Context) (Capabilities, error) { return a.capabilities, nil }
 func (a *testAdapter) Start(_ context.Context, _ StartRequest, lease CredentialLease) (StartResult, error) {
 	a.startCalls++
