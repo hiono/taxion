@@ -121,7 +121,7 @@ Job完了は明示的なJobAggregate Commandでのみ成立する。少なくと
 - Start / Sendの結果が不明な場合は、同じOperationID / turn identityによるlookup、またはそのidentityに対して実証されたidempotencyがある場合だけ再試行します。
 - 旧データや旧承認を現行Jobの権限へ暗黙変換しない。
 
-Provider Adapterのoperation・credential・recovery検証項目は[Provider Adapter 実行境界 要求仕様書](provider-adapter-requirements.md)と[Provider Adapter テスト仕様書](../test-specs/provider-adapter-test-specification.md)に従う。
+Provider Adapterのoperation・credential・recovery検証項目は[Provider Adapter 実行境界 要求仕様書](provider-adapter-requirements.md)、[詳細設計書](../design/provider-adapter-detailed-design.md)、[内部設計書](../design/provider-adapter-internal-design.md)、[テスト仕様書](../test-specs/provider-adapter-test-specification.md)に従う。PlanningAuthorizationは既存JSON schemaを維持し、SDK / protocol versionはConfigurationSHA256とtrusted Capability Evidence identityの組合せで固定する。
 
 ## 5. Communication contract
 
