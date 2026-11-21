@@ -63,7 +63,7 @@ type testAdapter struct {
 
 func (a *testAdapter) Identity() Identity                                 { return a.identity }
 func (a *testAdapter) Capabilities(context.Context) (Capabilities, error) { return a.capabilities, nil }
-func (a *testAdapter) Start(_ context.Context, _ StartRequest, lease CredentialLease) (StartResult, error) {
+func (a *testAdapter) Start(_ context.Context, request StartRequest, lease CredentialLease) (StartResult, error) {
 	a.startCalls++
 	if err := lease.WithSecret(func(secret []byte) error {
 		if string(secret) != "runtime-test-secret" {
@@ -77,38 +77,60 @@ func (a *testAdapter) Start(_ context.Context, _ StartRequest, lease CredentialL
 	if sessionID == "" {
 		sessionID = "session_1"
 	}
-	return StartResult{SessionID: sessionID, ReceiptID: "receipt_1", EvidenceSHA256: strings.Repeat("a", 64)}, a.startErr
+	return StartResult{OperationID: request.OperationID, SessionID: sessionID, ReceiptID: "receipt_1", EvidenceSHA256: strings.Repeat("a", 64)}, a.startErr
 }
-func (a *testAdapter) Send(context.Context, TurnRequest, CredentialLease) (TurnResult, error) {
+func (a *testAdapter) Send(_ context.Context, request TurnRequest, _ CredentialLease) (TurnResult, error) {
 	a.sendCalls++
 	if a.sendResult.Status != "" {
-		return a.sendResult, nil
+		result := a.sendResult
+		result.OperationID = request.OperationID
+		result.TurnID = request.TurnID
+		result.SessionID = request.SessionID
+		return result, nil
 	}
-	return TurnResult{ReceiptID: "receipt_2", Status: "COMPLETED", TokensUsed: 10, Output: a.sendOutput, EvidenceSHA256: strings.Repeat("b", 64)}, nil
+	return TurnResult{
+		OperationID: request.OperationID, TurnID: request.TurnID, SessionID: request.SessionID,
+		ReceiptID: "receipt_2", Status: "COMPLETED", TokensUsed: 10,
+		Output: a.sendOutput, EvidenceSHA256: strings.Repeat("b", 64),
+	}, nil
 }
-func (a *testAdapter) Stop(context.Context, StopRequest, CredentialLease) (StopResult, error) {
+func (a *testAdapter) Stop(_ context.Context, request StopRequest, _ CredentialLease) (StopResult, error) {
 	a.stopCalls++
-	return StopResult{Stopped: true, EvidenceSHA256: strings.Repeat("c", 64)}, nil
+	return StopResult{OperationID: request.OperationID, SessionID: request.SessionID, Stopped: true, EvidenceSHA256: strings.Repeat("c", 64)}, nil
 }
-func (a *testAdapter) Resume(context.Context, ResumeRequest, CredentialLease) (ResumeResult, error) {
+func (a *testAdapter) Resume(_ context.Context, request ResumeRequest, _ CredentialLease) (ResumeResult, error) {
 	a.resumeCalls++
-	return ResumeResult{Attached: true, EvidenceSHA256: strings.Repeat("d", 64)}, nil
+	return ResumeResult{OperationID: request.OperationID, SessionID: request.SessionID, Attached: true, EvidenceSHA256: strings.Repeat("d", 64)}, nil
 }
-func (a *testAdapter) Lookup(context.Context, LookupRequest, CredentialLease) (LookupResult, error) {
+func (a *testAdapter) Lookup(_ context.Context, request LookupRequest, _ CredentialLease) (LookupResult, error) {
 	a.lookupCalls++
-	return LookupResult{Found: true, Status: "COMPLETED", EvidenceSHA256: strings.Repeat("e", 64)}, nil
+	sessionID := request.SessionID
+	if sessionID == "" {
+		sessionID = "session_1"
+	}
+	turnID := request.TurnID
+	return LookupResult{
+		Found: true, OperationID: request.OperationID, Status: "COMPLETED", ReceiptID: "receipt_lookup",
+		SessionID: sessionID, TurnID: turnID, EvidenceSHA256: strings.Repeat("e", 64),
+	}, nil
 }
-func (a *testAdapter) Result(context.Context, ResultRequest, CredentialLease) (Result, error) {
+func (a *testAdapter) Result(_ context.Context, request ResultRequest, _ CredentialLease) (Result, error) {
 	a.resultCalls++
 	content := a.resultContent
 	if content == "" {
 		content = "result"
 	}
-	return Result{Content: content, ResultSHA256: strings.Repeat("f", 64), EvidenceSHA256: strings.Repeat("1", 64)}, nil
+	return Result{
+		OperationID: request.OperationID, SessionID: request.SessionID, TurnID: request.TurnID,
+		Content: content, ResultSHA256: sha256Hex(content), EvidenceSHA256: strings.Repeat("1", 64),
+	}, nil
 }
-func (a *testAdapter) Usage(context.Context, UsageRequest, CredentialLease) (Usage, error) {
+func (a *testAdapter) Usage(_ context.Context, request UsageRequest, _ CredentialLease) (Usage, error) {
 	a.usageCalls++
-	return Usage{UsageID: "usage_1", Tokens: 10, EvidenceSHA256: strings.Repeat("2", 64)}, nil
+	return Usage{
+		OperationID: request.OperationID, SessionID: request.SessionID, TurnID: request.TurnID,
+		UsageID: "usage_1", Tokens: 10, EvidenceSHA256: strings.Repeat("2", 64),
+	}, nil
 }
 func (a *testAdapter) ReplayEvents(_ context.Context, request ReplayEventsRequest, _ CredentialLease) (EventPage, error) {
 	a.eventCalls++
@@ -252,7 +274,7 @@ func TestRuntimeSanitizesAdapterErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	_, err = runtime.Start(context.Background(), StartRequest{})
+	_, err = runtime.Start(context.Background(), validStartRequest())
 	if err == nil || strings.Contains(err.Error(), "secret-value") {
 		t.Fatalf("Adapter error was not safely sanitized: %v", err)
 	}
@@ -312,7 +334,7 @@ func TestRuntimeRejectsEventReplayWithoutDurableEvidenceBeforeCredentialAcquisit
 	}
 }
 
-func TestRuntimeSendPreservesUnknownAndRedactsCredentialFromOutput(t *testing.T) {
+func TestRuntimeSendPreservesUnknownAndRejectsCredentialBearingOutput(t *testing.T) {
 	adapter := newTestAdapter(CapabilitySendIdempotency)
 	adapter.sendResult = TurnResult{Status: "UNKNOWN"}
 	adapter.sendOutput = "Provider echoed runtime-test-secret"
@@ -328,21 +350,20 @@ func TestRuntimeSendPreservesUnknownAndRedactsCredentialFromOutput(t *testing.T)
 	if result.Status != "UNKNOWN" || result.ReceiptID != "" || result.EvidenceSHA256 != "" {
 		t.Fatalf("UNKNOWN result was rewritten: %#v", result)
 	}
-	if adapter.sendCalls != 1 || broker.closed != 1 {
-		t.Fatalf("Send calls / credential lease: adapter=%d closed=%d", adapter.sendCalls, broker.closed)
-	}
 
 	adapter.sendResult = TurnResult{}
-	result, err = runtime.Send(context.Background(), validTurnRequest())
-	if err != nil {
-		t.Fatalf("Send terminal: %v", err)
+	_, err = runtime.Send(context.Background(), validTurnRequest())
+	var operationError *OperationError
+	if !errors.As(err, &operationError) || operationError.Class != FailureAmbiguous ||
+		strings.Contains(err.Error(), "runtime-test-secret") {
+		t.Fatalf("credential-bearing Provider output was not rejected as UNKNOWN: %v", err)
 	}
-	if strings.Contains(result.Output, "runtime-test-secret") || !strings.Contains(result.Output, "[REDACTED]") {
-		t.Fatalf("Provider output credential was not redacted: %q", result.Output)
+	if adapter.sendCalls != 2 || broker.closed != 2 {
+		t.Fatalf("Send calls / credential lease: adapter=%d closed=%d", adapter.sendCalls, broker.closed)
 	}
 }
 
-func TestRuntimeRedactsCredentialFromFinalResult(t *testing.T) {
+func TestRuntimeRejectsCredentialInFinalResultAsUnknown(t *testing.T) {
 	adapter := newTestAdapter(CapabilityFinalOutput)
 	adapter.resultContent = "final result included runtime-test-secret"
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
@@ -350,12 +371,11 @@ func TestRuntimeRedactsCredentialFromFinalResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	result, err := runtime.Result(context.Background(), validResultRequest())
-	if err != nil {
-		t.Fatalf("Result: %v", err)
-	}
-	if strings.Contains(result.Content, "runtime-test-secret") || !strings.Contains(result.Content, "[REDACTED]") {
-		t.Fatalf("final result credential was not redacted: %q", result.Content)
+	_, err = runtime.Result(context.Background(), validResultRequest())
+	var operationError *OperationError
+	if !errors.As(err, &operationError) || operationError.Class != FailureAmbiguous ||
+		strings.Contains(err.Error(), "runtime-test-secret") {
+		t.Fatalf("credential-bearing final result was not rejected as UNKNOWN: %v", err)
 	}
 }
 
@@ -368,7 +388,9 @@ func TestRuntimeRejectsCredentialInProviderSessionIdentity(t *testing.T) {
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	_, err = runtime.Start(context.Background(), validStartRequest())
-	if !errors.Is(err, ErrProviderInvalidResult) || strings.Contains(err.Error(), "runtime-test-secret") {
+	var operationError *OperationError
+	if !errors.As(err, &operationError) || operationError.Class != FailureAmbiguous ||
+		strings.Contains(err.Error(), "runtime-test-secret") {
 		t.Fatalf("credential-bearing session identity was not rejected safely: %v", err)
 	}
 }
