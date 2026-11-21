@@ -644,7 +644,7 @@ func (j Job) Validate() error {
 		if err := observation.Validate(j, start); err != nil {
 			return fmt.Errorf("%w: invalid Provider Start observation: %v", ErrInvalidJob, err)
 		}
-		if observation.CreatedAt.After(j.UpdatedAt) ||
+		if observation.CreatedAt.After(j.UpdatedAt) || observation.CreatedRevision > j.Revision ||
 			observation.CreatedRevision <= previousStartObservationRevision ||
 			(!previousStartObservationAt.IsZero() && observation.CreatedAt.Before(previousStartObservationAt)) {
 			return fmt.Errorf("%w: Provider Start observation append order is invalid", ErrInvalidJob)
