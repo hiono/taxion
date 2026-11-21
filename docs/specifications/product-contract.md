@@ -2,7 +2,7 @@
 
 Version: 1.0
 Date: 2026-11-20
-Normative decisions: ADR-100, ADR-101, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-500, ADR-501, ADR-700, ADR-701, ADR-800, ADR-811
+Normative decisions: ADR-001, ADR-100, ADR-101, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-500, ADR-501, ADR-700, ADR-701, ADR-800, ADR-811
 
 ## 1. Purpose and scope
 
@@ -200,6 +200,7 @@ Provider / Runtimeへの委譲は許容しますが、APIの存在やProviderの
 
 | Contract area | Governing ADR |
 | --- | --- |
+| 仕様・計画・履歴・CI証拠の正本 | ADR-001 |
 | 製品目的・利用者価値 | ADR-100 |
 | 再構築・provenance | ADR-101 |
 | JobAggregate・Command・Provider facts | ADR-201 |

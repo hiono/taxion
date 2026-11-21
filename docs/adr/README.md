@@ -34,6 +34,7 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 
 ### 000–099 ADR Governance
 - [ADR-000: Architecture Decision Recordsの管理規約](000-adr-governance.md) — Accepted
+- [ADR-001: 現行仕様・開発計画・履歴・検証証拠の正本を分離する](001-specification-plan-history-and-evidence.md) — Accepted
 
 ### 100–199 Product & Governance
 - [ADR-100: 製品目的 — 人間の曖昧な思考を継続可能な協調作業へ昇華する](100-product-purpose.md) — Accepted
