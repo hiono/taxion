@@ -394,8 +394,11 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 			if t.CreatedRevision <= start.CreatedRevision || t.CreatedAt.Before(start.CreatedAt) {
 				return errors.New("PlanningTurnIntent precedes Provider Start intent")
 			}
-			if err := validateProviderStartSession(job, start, t.ProviderSessionID, t.CreatedRevision, t.CreatedAt); err != nil {
-				return err
+			if job.ProviderStartObservationRequiredFromRevision > 0 &&
+				t.CreatedRevision >= job.ProviderStartObservationRequiredFromRevision {
+				if err := validateProviderStartSession(job, start, t.ProviderSessionID, t.CreatedRevision, t.CreatedAt); err != nil {
+					return err
+				}
 			}
 			foundStart = true
 			break
