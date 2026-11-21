@@ -59,6 +59,10 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil {
 		t.Fatalf("GetJob after Provider Start observation: %v", err)
 	}
+	if job.ProviderLifecycleEnforcedFromRevision != job.ProviderStartIntents[0].CreatedRevision {
+		t.Fatalf("Provider lifecycle activation revision = %d, want Start intent revision %d",
+			job.ProviderLifecycleEnforcedFromRevision, job.ProviderStartIntents[0].CreatedRevision)
+	}
 	executionID := job.RoleExecutions[0].ID
 	contextDigest := job.PlanningAuthorizations[0].ReadOnlyBoundary.SHA256
 
