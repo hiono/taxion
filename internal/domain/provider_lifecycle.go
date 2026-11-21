@@ -71,8 +71,10 @@ func NewProviderStartObservation(
 	}
 	switch status {
 	case ProviderStartUnknown:
-		if providerSessionID != "" || receiptID != "" || evidenceSHA256 != "" || reconcilesUnknown {
-			return ProviderStartObservation{}, errors.New("UNKNOWN Provider Start observation cannot claim receipt, Session, or terminal evidence")
+		if (providerSessionID != "" && !validPlanningIdentity(providerSessionID)) ||
+			(receiptID != "" && !validPlanningIdentity(receiptID)) ||
+			(evidenceSHA256 != "" && !validSHA256(evidenceSHA256)) || reconcilesUnknown {
+			return ProviderStartObservation{}, errors.New("UNKNOWN Provider Start observation contains invalid or terminal claims")
 		}
 	case ProviderStartAccepted:
 		if !validPlanningIdentity(providerSessionID) || !validPlanningIdentity(receiptID) || !validSHA256(evidenceSHA256) {
@@ -96,9 +98,14 @@ func NewProviderStartObservation(
 		if reconcilesUnknown {
 			return ProviderStartObservation{}, errors.New("first Provider Start observation cannot reconcile UNKNOWN")
 		}
-	} else if previous.Status != ProviderStartUnknown || status == ProviderStartUnknown ||
-		!reconcilesUnknown || previous.ReconcilesUnknown {
-		return ProviderStartObservation{}, errors.New("only UNKNOWN Provider Start may be reconciled by same-operation terminal evidence")
+	} else if previous.Status != ProviderStartUnknown {
+		return ProviderStartObservation{}, errors.New("terminal Provider Start observation cannot be replaced")
+	} else if status == ProviderStartUnknown {
+		if reconcilesUnknown {
+			return ProviderStartObservation{}, errors.New("UNKNOWN Provider Start observation cannot claim terminal reconciliation")
+		}
+	} else if !reconcilesUnknown {
+		return ProviderStartObservation{}, errors.New("terminal Provider Start observation must reconcile prior UNKNOWN")
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return ProviderStartObservation{}, errors.New("Job revision exhausted")
@@ -131,8 +138,10 @@ func (o ProviderStartObservation) Validate(job Job, start ProviderStartIntent) e
 	}
 	switch o.Status {
 	case ProviderStartUnknown:
-		if o.ProviderSessionID != "" || o.ReceiptID != "" || o.EvidenceSHA256 != "" || o.ReconcilesUnknown {
-			return errors.New("UNKNOWN Provider Start observation contains terminal claims")
+		if (o.ProviderSessionID != "" && !validPlanningIdentity(o.ProviderSessionID)) ||
+			(o.ReceiptID != "" && !validPlanningIdentity(o.ReceiptID)) ||
+			(o.EvidenceSHA256 != "" && !validSHA256(o.EvidenceSHA256)) || o.ReconcilesUnknown {
+			return errors.New("UNKNOWN Provider Start observation contains invalid or terminal claims")
 		}
 	case ProviderStartAccepted:
 		if !validPlanningIdentity(o.ProviderSessionID) || !validPlanningIdentity(o.ReceiptID) ||
