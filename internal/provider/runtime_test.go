@@ -55,6 +55,10 @@ type testAdapter struct {
 	usageCalls     int
 	eventCalls     int
 	startErr       error
+	startPanic     bool
+	stopQuiescent  bool
+	resultFinal    bool
+	usageComplete  bool
 	startSessionID string
 	sendOutput     string
 	sendResult     TurnResult
@@ -62,8 +66,10 @@ type testAdapter struct {
 	lookupResult   LookupResult
 }
 
-func (a *testAdapter) Identity() Identity                                 { return a.identity }
-func (a *testAdapter) Capabilities(context.Context) (Capabilities, error) { return a.capabilities, nil }
+func (a *testAdapter) Identity() Identity { return a.identity }
+func (a *testAdapter) Capabilities(context.Context) (Capabilities, error) {
+	return a.capabilities.Clone(), nil
+}
 func (a *testAdapter) Start(_ context.Context, request StartRequest, lease CredentialLease) (StartResult, error) {
 	a.startCalls++
 	if err := lease.WithSecret(func(secret []byte) error {
@@ -73,6 +79,9 @@ func (a *testAdapter) Start(_ context.Context, request StartRequest, lease Crede
 		return nil
 	}); err != nil {
 		return StartResult{}, err
+	}
+	if a.startPanic {
+		panic("raw Provider panic containing runtime-test-secret")
 	}
 	sessionID := a.startSessionID
 	if sessionID == "" {
@@ -97,7 +106,7 @@ func (a *testAdapter) Send(_ context.Context, request TurnRequest, _ CredentialL
 }
 func (a *testAdapter) Stop(_ context.Context, request StopRequest, _ CredentialLease) (StopResult, error) {
 	a.stopCalls++
-	return StopResult{OperationID: request.OperationID, SessionID: request.SessionID, Stopped: true, EvidenceSHA256: strings.Repeat("c", 64)}, nil
+	return StopResult{OperationID: request.OperationID, SessionID: request.SessionID, Stopped: true, Quiescent: a.stopQuiescent, EvidenceSHA256: strings.Repeat("c", 64)}, nil
 }
 func (a *testAdapter) Resume(_ context.Context, request ResumeRequest, _ CredentialLease) (ResumeResult, error) {
 	a.resumeCalls++
@@ -133,14 +142,14 @@ func (a *testAdapter) Result(_ context.Context, request ResultRequest, _ Credent
 	}
 	return Result{
 		OperationID: request.OperationID, SessionID: request.SessionID, TurnID: request.TurnID,
-		Content: content, ResultSHA256: sha256Hex(content), EvidenceSHA256: strings.Repeat("1", 64),
+		Content: content, ResultSHA256: sha256Hex(content), Final: a.resultFinal, EvidenceSHA256: strings.Repeat("1", 64),
 	}, nil
 }
 func (a *testAdapter) Usage(_ context.Context, request UsageRequest, _ CredentialLease) (Usage, error) {
 	a.usageCalls++
 	return Usage{
 		OperationID: request.OperationID, SessionID: request.SessionID, TurnID: request.TurnID,
-		UsageID: "usage_1", Tokens: 10, EvidenceSHA256: strings.Repeat("2", 64),
+		UsageID: "usage_1", Tokens: 10, Complete: a.usageComplete, EvidenceSHA256: strings.Repeat("2", 64),
 	}, nil
 }
 func (a *testAdapter) ReplayEvents(_ context.Context, request ReplayEventsRequest, _ CredentialLease) (EventPage, error) {
@@ -157,12 +166,23 @@ func (a *testAdapter) ReplayEvents(_ context.Context, request ReplayEventsReques
 	}, nil
 }
 
-func liveEvidence(identity Identity, capability Capability, level EvidenceLevel) CapabilityEvidence {
+func liveEvidence(identity Identity, capability Capability) CapabilityEvidence {
 	return CapabilityEvidence{
 		Capability: capability, Identity: identity, TestID: "runtime-test",
-		EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: level,
+		EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: EvidenceSynthetic,
 		VerifiedAt: time.Now().UTC(),
 	}
+}
+
+type runtimeTestVerifier struct{}
+
+func (runtimeTestVerifier) Verify(_ context.Context, identity Identity, evidence CapabilityEvidence) (bool, error) {
+	return evidence.Identity == identity && evidence.TestID == "runtime-test" &&
+		evidence.EvidenceLevel == EvidenceSynthetic, nil
+}
+
+func newTestRuntime(adapter Adapter, broker CredentialBroker) (*Runtime, error) {
+	return newRuntimeWithEvidence(adapter, broker, runtimeTestVerifier{}, EvidenceSynthetic, EvidenceSynthetic)
 }
 
 func newTestAdapter(capabilities ...Capability) *testAdapter {
@@ -191,13 +211,12 @@ func newTestAdapter(capabilities ...Capability) *testAdapter {
 		case CapabilityUsageCompleteness:
 			declaration.UsageCompleteness = true
 		}
-		level := EvidenceLive
-		if capability == CapabilitySessionReattach || capability == CapabilityEventReplay {
-			level = EvidenceDurable
-		}
-		declaration.Evidence = append(declaration.Evidence, liveEvidence(identity, capability, level))
+		declaration.Evidence = append(declaration.Evidence, liveEvidence(identity, capability))
 	}
-	return &testAdapter{identity: identity, capabilities: declaration}
+	return &testAdapter{
+		identity: identity, capabilities: declaration,
+		stopQuiescent: true, resultFinal: true, usageComplete: true,
+	}
 }
 
 func validStartRequest() StartRequest {
@@ -230,10 +249,10 @@ func validResultRequest() ResultRequest {
 	return ResultRequest{OperationID: "provider_turn_1", SessionID: "session_1", TurnID: "turn_1"}
 }
 
-func TestRuntimeStartRequiresLiveSafeCapabilityAndClosesCredential(t *testing.T) {
+func TestRuntimeStartUsesVerifiedCapabilityAndClosesCredential(t *testing.T) {
 	adapter := newTestAdapter(CapabilityStartIdempotency)
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker)
+	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -248,9 +267,8 @@ func TestRuntimeStartRequiresLiveSafeCapabilityAndClosesCredential(t *testing.T)
 
 func TestRuntimeRejectsSyntheticCapabilityBeforeCredentialAcquisition(t *testing.T) {
 	adapter := newTestAdapter(CapabilityStartIdempotency)
-	adapter.capabilities.Evidence[0].EvidenceLevel = EvidenceSynthetic
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker)
+	runtime, err := NewRuntime(adapter, broker, runtimeTestVerifier{})
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -264,9 +282,8 @@ func TestRuntimeRejectsSyntheticCapabilityBeforeCredentialAcquisition(t *testing
 
 func TestRuntimeRequiresDurableEvidenceForResume(t *testing.T) {
 	adapter := newTestAdapter(CapabilitySessionReattach)
-	adapter.capabilities.Evidence[0].EvidenceLevel = EvidenceLive
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker)
+	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -282,7 +299,7 @@ func TestRuntimeSanitizesAdapterErrors(t *testing.T) {
 	adapter := newTestAdapter(CapabilityStartIdempotency)
 	adapter.startErr = errors.New("request failed with Bearer secret-value")
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker)
+	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -295,7 +312,7 @@ func TestRuntimeSanitizesAdapterErrors(t *testing.T) {
 func TestRuntimeStopRequiresStopProof(t *testing.T) {
 	adapter := newTestAdapter()
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker)
+	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -310,7 +327,7 @@ func TestRuntimeStopRequiresStopProof(t *testing.T) {
 func TestRuntimeEventReplayRequiresDurableCapabilityAndValidCursorChain(t *testing.T) {
 	adapter := newTestAdapter(CapabilityEventReplay)
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker)
+	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -332,9 +349,8 @@ func TestRuntimeEventReplayRequiresDurableCapabilityAndValidCursorChain(t *testi
 
 func TestRuntimeRejectsEventReplayWithoutDurableEvidenceBeforeCredentialAcquisition(t *testing.T) {
 	adapter := newTestAdapter(CapabilityEventReplay)
-	adapter.capabilities.Evidence[0].EvidenceLevel = EvidenceLive
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker)
+	runtime, err := NewRuntime(adapter, broker, runtimeTestVerifier{})
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -351,7 +367,7 @@ func TestRuntimeSendPreservesUnknownAndRejectsCredentialBearingOutput(t *testing
 	adapter.sendResult = TurnResult{Status: "UNKNOWN"}
 	adapter.sendOutput = "Provider echoed runtime-test-secret"
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker)
+	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -379,7 +395,7 @@ func TestRuntimeRejectsCredentialInFinalResultAsUnknown(t *testing.T) {
 	adapter := newTestAdapter(CapabilityFinalOutput)
 	adapter.resultContent = "final result included runtime-test-secret"
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker)
+	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -395,7 +411,7 @@ func TestRuntimeRejectsCredentialInProviderSessionIdentity(t *testing.T) {
 	adapter := newTestAdapter(CapabilityStartIdempotency)
 	adapter.startSessionID = "runtime-test-secret"
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker)
+	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -413,7 +429,7 @@ func TestRuntimeLookupRequiresEvidenceBackedNotFoundResult(t *testing.T) {
 		Status: LookupStatusNotFound, EvidenceSHA256: strings.Repeat("e", 64),
 	}
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker)
+	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -436,7 +452,7 @@ func TestRuntimeLookupRequiresEvidenceBackedNotFoundResult(t *testing.T) {
 func TestRuntimeCapabilitiesReturnsDetachedEvidenceSlice(t *testing.T) {
 	adapter := newTestAdapter(CapabilityStartIdempotency)
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker)
+	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
