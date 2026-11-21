@@ -146,10 +146,20 @@ func (i ProviderStopIntent) Validate(job Job) error {
 	if !foundExecution {
 		return errors.New("Provider Stop intent RoleExecution was not found")
 	}
-	grant, foundGrant := planningAuthorization(job, execution.PlanningAuthorizationID)
+	var grant PlanningAuthorization
+	foundGrant := false
+	for _, candidate := range job.PlanningAuthorizations {
+		if candidate.ID == execution.PlanningAuthorizationID {
+			grant, foundGrant = candidate, true
+			break
+		}
+	}
 	if !foundGrant || grant.ProviderID != i.ProviderID || grant.AccountID != i.AccountID ||
 		grant.ConfigurationSHA256 != i.ConfigurationSHA256 {
 		return errors.New("Provider Stop intent Provider identity differs from PlanningAuthorization")
+	}
+	if err := grant.Validate(job); err != nil {
+		return err
 	}
 	var start ProviderStartIntent
 	foundStart := false
