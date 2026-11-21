@@ -59,7 +59,7 @@ type testAdapter struct {
 	sendOutput     string
 	sendResult     TurnResult
 	resultContent  string
-	lookupResult  LookupResult
+	lookupResult   LookupResult
 }
 
 func (a *testAdapter) Identity() Identity                                 { return a.identity }
