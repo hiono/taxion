@@ -26,7 +26,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	}
 	now := time.Now().UTC()
 	request := domain.PlanningAuthorizationRequest{
-		ProviderID: "provider.test", AccountID: "account.primary", ConfigurationSHA256: strings.Repeat("a", 64),
+		ProviderID: "provider.test", AccountID: "account.primary", SDKVersion: "test-sdk/1", ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:     "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: strings.Repeat("c", 64)},
 		Budget:           domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000}, Deadline: now.Add(time.Hour),
