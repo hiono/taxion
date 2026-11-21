@@ -134,7 +134,9 @@ func (c *ProviderController) StartPlanning(
 	result, err := c.runtime.Start(ctx, request)
 	if err != nil {
 		if providerOperationMayHaveStarted(err) {
-			_ = c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal)
+			if persistErr := c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
+				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
+			}
 		}
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
@@ -163,8 +165,8 @@ func (c *ProviderController) reconcileStart(
 	if canLookup {
 		lookup, lookupErr := c.runtime.Lookup(ctx, provider.LookupRequest{OperationID: intent.ID})
 		if lookupErr != nil {
-			if providerOperationMayHaveStarted(lookupErr) {
-				_ = c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal)
+			if persistErr := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
+				return receipt, execution, intent, provider.StartResult{}, errors.Join(lookupErr, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
 			}
 			return receipt, execution, intent, provider.StartResult{}, lookupErr
 		}
@@ -192,7 +194,9 @@ func (c *ProviderController) reconcileStart(
 			}, nil
 		}
 	} else if !canRetry {
-		_ = c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal)
+		if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); err != nil {
+			return receipt, execution, intent, provider.StartResult{}, fmt.Errorf("persist unresolved Provider Start: %w", err)
+		}
 		return receipt, execution, intent, provider.StartResult{}, provider.ErrUnsupportedCapability
 	}
 
@@ -209,8 +213,8 @@ func (c *ProviderController) reconcileStart(
 	}
 	result, err := c.runtime.Start(ctx, request)
 	if err != nil {
-		if providerOperationMayHaveStarted(err) {
-			_ = c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal)
+		if persistErr := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
+			return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
 		}
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
