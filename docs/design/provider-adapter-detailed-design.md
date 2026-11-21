@@ -242,9 +242,9 @@ Start observationが永続化されるとき、JobはProviderLifecycleEnforcedFr
 - Resume ATTACHED observationが確定するまで次Turnを許可しない。
 - Resume不能の場合、同じRoleExecutionに新Sessionを付け替えない。
 
-### 8.4 Lookup / Result / Usage / ReplayEvents（Start Lookup / Event replay実装済み）
+### 8.4 Lookup / Result / Usage / ReplayEvents（Start Lookup / Event replay / Result・Usage Domain・Store実装済み）
 
-これらは既存intentの照合操作であり、新しいProvider execution identityを生成しない。取得結果は元のOperationID / TurnIDへ束縛し、append-only Observationとして保存する。Lookup NOT_FOUNDはProviderが同一identityの不存在を証明した場合だけ記録する。
+これらは既存intentの照合操作であり、新しいProvider execution identityを生成しない。Controllerはaccepted Start Sessionとoptional Turn intentを検証し、操作に対応するE4 Capabilityを確認してRuntimeへ照会する。取得結果は元のOperationID / TurnIDへ束縛し、append-only Observationとして保存する。Usage Complete=falseは途中Observationとして保存し、Complete=trueだけを確定利用量として扱う。Lookup NOT_FOUNDはProviderが同一identityの不存在を証明した場合だけ記録する。Result / UsageのController orchestrationは未実装。
 
 ## 9. Domain / Store設計
 
@@ -254,8 +254,8 @@ Providerの外部事実をJobAggregateへappend-onlyで保持する。現時点�
 
 - ProviderStartObservation（実装済み）: StartのACCEPTED / FAILED / UNKNOWN、SessionID、receipt、evidence
 - ProviderEventObservation（実装済み）: EventID、Session-scoped Command ID、cursor、event kind、OperationID / TurnID
-- ProviderResultObservation（未実装）: OperationID / optional TurnID / SessionIDへ束縛したFinal=trueのUTF-8 result content（最大1 MiB）、content digest、evidence digest
-- ProviderUsageObservation（未実装）: OperationID / optional TurnID / SessionIDへ束縛したUsageID、token数、Complete、evidence digest。Complete=falseからComplete=trueへの更新は新しいObservationを追加する
+- ProviderResultObservation（Domain / Store実装済み）: OperationID / optional TurnID / SessionIDへ束縛したFinal=trueのUTF-8 result content（最大1 MiB）、content digest、evidence digest
+- ProviderUsageObservation（Domain / Store実装済み）: OperationID / optional TurnID / SessionIDへ束縛したUsageID、token数、Complete、evidence digest。Complete=falseからComplete=trueへの更新は新しいObservationを追加する
 - ProviderStopIntent（Domain / Store実装済み）: OperationID、SessionID、Provider identity、Reason。Stop前に保存し、後続Turn / Resumeを禁止
 - ProviderStopObservation（Domain / Store実装済み）: Stopped、Quiescent、evidence、UNKNOWN reconciliation
 

@@ -300,7 +300,7 @@ type ProviderEventObservation struct {
 }
 ```
 
-### 6.3 ProviderResultObservation（設計済み・未実装）
+### 6.3 ProviderResultObservation（Domain / Store実装済み）
 
 ```go
 type ProviderResultObservation struct {
@@ -322,7 +322,7 @@ type ProviderResultObservation struct {
 
 Result contentはJobAggregateへ保持する。contentは有効なUTF-8で1 MiB以下とし、上限を超える結果は受理しない。ContentSHA256はcontentのSHA-256と一致しなければならない。Final=falseはterminal resultとして保存しない。Runtimeによるcredential検査を通過していない結果は保存しない。
 
-### 6.4 ProviderUsageObservation（設計済み・未実装）
+### 6.4 ProviderUsageObservation（Domain / Store実装済み）
 
 ```go
 type ProviderUsageObservation struct {
@@ -390,7 +390,7 @@ Job.Validateは次を検証する。
 
 既存SQLite JobAggregate JSONとCommand receiptを利用する。Provider専用の独立した可変状態テーブルを追加しない。
 
-Provider Start / Event / Stop intent・observationは既存のplanning lifecycle fact transactionへ統合済み。Result / Usage factも共通persist fact patternを使用し、JobAggregate更新とCommand receiptを同一transactionで確定する。
+Provider Start / Event / Stop / Result / Usage intent・observationは既存のplanning lifecycle fact transactionへ統合済み。Result / Usage factも共通persist fact patternを使用し、JobAggregate更新とCommand receiptを同一transactionで確定する。
 
 1. BeginTx
 2. JobAggregateを読む
@@ -414,6 +414,8 @@ type ProviderExecutionStore interface {
     PlanningLifecycleStore
     StartTasklessPlanner(...)
     AddProviderEventObservation(...)
+    AddProviderResultObservation(...)
+    AddProviderUsageObservation(...)
 }
 
 type PlanningProviderRuntime interface {
@@ -422,6 +424,8 @@ type PlanningProviderRuntime interface {
     Start(context.Context, provider.StartRequest) (provider.StartResult, error)
     Lookup(context.Context, provider.LookupRequest) (provider.LookupResult, error)
     ReplayEvents(context.Context, provider.ReplayEventsRequest) (provider.EventPage, error)
+    Result(context.Context, provider.ResultRequest) (provider.Result, error)
+    Usage(context.Context, provider.UsageRequest) (provider.Usage, error)
 }
 
 type ProviderController struct {
@@ -432,7 +436,7 @@ type ProviderController struct {
 }
 ```
 
-現時点のController interfaceはDRAFT Planning Start、Lookup recovery、accepted Sessionに束縛したEvent replayに対応する。Send / Stop / Resume / Result / UsageのController接続は未実装である。Controller testsではfake implementationを注入する。
+現時点のController interfaceはDRAFT Planning Start、Stop、accepted Sessionに束縛したEvent replayに対応する。Result / UsageのDomain / Store factsは実装済みであり、Controller接続は未実装である。Send / Resumeも未実装である。Controller testsではfake implementationを注入する。
 
 ### 8.2 Start sequence（実装済み）
 
@@ -476,7 +480,21 @@ Load JobAggregate
   -> Re-evaluate terminality / usage / quiescence
 ```
 
-Startの照合能力がない場合はUNKNOWNを保持する。Event replayはaccepted Start Sessionと保存済みcursor prefixへ束縛し、eventをappend-onlyで保存する。Send / Resume / Stop / Result / UsageのController recoveryは未実装である。新identityを作って回避しない。
+Startの照合能力がない場合はUNKNOWNを保持する。Event replayはaccepted Start Sessionと保存済みcursor prefixへ束縛し、eventをappend-onlyで保存する。Result / UsageのControllerはaccepted Startとoptional Turnのidentityを検証し、E4 Capability確認後に取得結果を既存OperationID / TurnIDへappend-onlyで保存する。Complete=falseのUsageは途中値として残し、Complete=trueでのみ確定する。Send / Resume / Result / UsageのController orchestrationは未実装であり、新identityを作って回避しない。
+
+### 8.5 Result / Usage sequence（Domain / Store実装済み、Controller未実装）
+
+```text
+Load JobAggregate
+  -> Validate Principal / DRAFT Job / PlanningAuthorization / Provider identity
+  -> Find accepted Start Session and optional Turn intent
+  -> Verify Result E4 or Usage identity + completeness E4 capabilities
+  -> Runtime.Result / Runtime.Usage
+  -> Reload JobAggregate / revalidate target binding
+  -> Append Result / Usage observation + CommandReceipt atomically
+```
+
+ResultはFinal=trueとcontent digestを検証して保存する。Usage Complete=falseは途中Observationとして保存し、同じUsageIDのComplete=trueを後続追加する。取得失敗・identity mismatch・保存失敗を成功として扱わず、既存OperationID / TurnIDで再照合する。
 
 ## 9. Transaction / external side effect boundary
 

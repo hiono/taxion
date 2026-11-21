@@ -68,6 +68,8 @@ Provider Adapterの契約、Capability gate、Credential isolation、Controller 
 | DOM-024 | Result append-only | 同じOperationID / TurnIDにterminal resultを二重追加 | 拒否 |
 | DOM-025 | Usage completeness | Complete=falseの後に同一UsageIDのComplete=trueを追加 | append-onlyで受理 |
 | DOM-026 | Usage finality | Complete=true後の同一UsageID追加、別Operation / TurnへのUsageID再束縛 | 拒否 |
+| DOM-027 | Result identity | Start operationとTurnIDの組合せ不一致、accepted Session以外 | 拒否 |
+| DOM-028 | Usage identity | accepted Session以外、存在しないOperation / Turn | 拒否 |
 
 ## 5. Adapter contract tests
 
@@ -201,6 +203,12 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-020 | Unsafe retry | UNKNOWN後にLookup / idempotency capabilityがない | blind replayを拒否しUNKNOWNを保持 |
 | CTR-021 | Documents context | ID重複、content digest不一致、aggregate digest不一致 | Start intent作成前に拒否 |
 | CTR-022 | Event replay | accepted Session、cursor prefix、event / turn identityが一致 | append-only Observationとして保存し、同一page再送は冪等 |
+| CTR-023 | Result retrieval | accepted Start / Turn、E4 Final Output capability、identity一致 | Result observationをappend-only保存 |
+| CTR-024 | Result validation | Final=false、identity mismatch、digest mismatch | 保存せず拒否 |
+| CTR-025 | Usage retrieval | E4 Usage identity / completeness、Complete=false | 途中Observationとして保存し、final usageにしない |
+| CTR-026 | Usage completion | 同一UsageIDのComplete=false後にComplete=true | 既存factを変更せず新Observationを追加 |
+| CTR-027 | Capability gate | Result / Usage capability不足 | credential / Adapter呼出し前に拒否 |
+| CTR-028 | Observation persistence | Result / Usage取得後にStore保存失敗 | 成功扱いせず、同一identityで再照合可能 |
 
 ## 11. Regression tests
 
