@@ -38,8 +38,8 @@ type ProviderEventObservation struct {
 	CreatedRevision uint64            `json:"created_revision"`
 }
 
-func ProviderEventObservationCommandID(eventID string) string {
-	sum := sha256.Sum256([]byte("taxion:provider-event-observation-command:" + eventID))
+func ProviderEventObservationCommandID(sessionID, eventID string) string {
+	sum := sha256.Sum256([]byte("taxion:provider-event-observation-command:" + sessionID + "\x00" + eventID))
 	return "cmd_" + hex.EncodeToString(sum[:16])
 }
 
@@ -62,7 +62,7 @@ func NewProviderEventObservation(
 		return ProviderEventObservation{}, err
 	}
 	observedAt = observedAt.UTC().Round(0)
-	if !validCommandID(commandID) || commandID != ProviderEventObservationCommandID(eventID) ||
+	if !validCommandID(commandID) || commandID != ProviderEventObservationCommandID(sessionID, eventID) ||
 		observedAt.IsZero() || job.Revision >= uint64(^uint64(0)>>1) {
 		return ProviderEventObservation{}, errors.New("Provider event command, identity, timestamp, or Job revision is invalid")
 	}
@@ -103,7 +103,7 @@ func NewProviderEventObservation(
 func (o ProviderEventObservation) Validate(job Job) error {
 	if !validPlanningIdentity(o.ID) || !validCommandID(o.CommandID) ||
 		o.ID != ProviderEventObservationID(o.CommandID) ||
-		o.CommandID != ProviderEventObservationCommandID(o.EventID) ||
+		o.CommandID != ProviderEventObservationCommandID(o.SessionID, o.EventID) ||
 		o.JobID != job.ID || !validPlanningIdentity(o.RoleExecutionID) ||
 		!validPlanningIdentity(o.OperationID) || !validPlanningIdentity(o.SessionID) ||
 		!validPlanningIdentity(o.EventID) || !validPlanningIdentity(o.Cursor) ||

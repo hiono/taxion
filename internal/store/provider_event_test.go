@@ -122,7 +122,7 @@ func TestProviderEventObservationsPersistAtomicallyAndPreserveCursor(t *testing.
 		t.Fatalf("GetJob before forced rollback: %v", err)
 	}
 	rollbackEventID := "event_3"
-	rollbackCommandID := domain.ProviderEventObservationCommandID(rollbackEventID)
+	rollbackCommandID := domain.ProviderEventObservationCommandID("session_1", rollbackEventID)
 	if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_provider_event_receipt
 		BEFORE INSERT ON job_commands
 		WHEN NEW.command_id = '`+rollbackCommandID+`'

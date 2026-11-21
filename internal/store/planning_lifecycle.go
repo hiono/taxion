@@ -311,7 +311,7 @@ func (s *Store) AddProviderEventObservation(
 	if err := principal.Validate(); err != nil {
 		return CommandReceipt{}, domain.ProviderEventObservation{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
 	}
-	commandID := domain.ProviderEventObservationCommandID(eventID)
+	commandID := domain.ProviderEventObservationCommandID(sessionID, eventID)
 	request := struct {
 		JobID, RoleExecutionID, OperationID, TurnID, SessionID, EventID, Kind string
 		PreviousCursor, Cursor, EvidenceSHA256                                string
