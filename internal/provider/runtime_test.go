@@ -46,7 +46,6 @@ func (l *failingCloseLease) Close() error {
 	return errors.New("raw lease cleanup detail")
 }
 
-
 func (l *trackingLease) WithSecret(use func([]byte) error) error {
 	if l.closed {
 		return ErrCredentialLeaseClosed

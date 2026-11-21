@@ -224,7 +224,7 @@ func TestAuthorizePlanningWithPrincipalRejectsEmptyPrincipalBeforeOpeningStore(t
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.test",
-				ConfigurationSHA256: strings.Repeat("a", 64),
+		ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode:      domain.PlanningReadOnlyBoundarySnapshot,

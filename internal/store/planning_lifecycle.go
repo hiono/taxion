@@ -314,9 +314,9 @@ func (s *Store) AddProviderEventObservation(
 	commandID := domain.ProviderEventObservationCommandID(eventID)
 	request := struct {
 		JobID, RoleExecutionID, OperationID, TurnID, SessionID, EventID, Kind string
-		PreviousCursor, Cursor, EvidenceSHA256                              string
-		ObservedAt                                                           time.Time
-		PrincipalID                                                          string
+		PreviousCursor, Cursor, EvidenceSHA256                                string
+		ObservedAt                                                            time.Time
+		PrincipalID                                                           string
 	}{
 		jobID, roleExecutionID, operationID, turnID, sessionID, eventID, kind,
 		previousCursor, cursor, evidenceSHA256, observedAt.UTC().Round(0), principal.PrincipalID(),
