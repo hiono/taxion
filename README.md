@@ -27,7 +27,9 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 
 ## 現在利用できる機能
 
-- `taxion job create --request "..."`：原文依頼を保持したDRAFT Jobを作成します。
+- `taxion auth login`：OIDC Authorization Code Flow with PKCEでHUMAN Principalを検証します。ログインSessionやtokenは保存しません。
+- `taxion job create --request "..."`：OIDC認証後、原文依頼とIntakeProvenanceを同一Job transactionで保存したDRAFT Jobを作成します。
+- `taxion dev job create --request "..."`：開発・永続化テスト専用の未認証ローカルDRAFT Jobを作成します。
 - `taxion job show <job-id>`：Jobの現在の内容をJSONで表示します。
 - `taxion job list`：保存済みJobを一覧表示します。
 

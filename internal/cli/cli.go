@@ -12,6 +12,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
@@ -55,8 +56,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 
 	switch args[1] {
 	case "create":
-		fmt.Fprintln(stderr, "Trusted Job intakeは未実装です。ローカル専用の未認証DRAFTを作成する場合は taxion dev job create を使用してください")
-		return 2
+		return createTrustedJob(ctx, args[2:], stdout, stderr)
 	case "show":
 		return showJob(ctx, args[2:], stdout, stderr)
 	case "list":
@@ -68,19 +68,80 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 }
 
 func login(ctx context.Context, stdout, stderr io.Writer) int {
-	config, err := auth.ConfigFromEnv()
-	if err != nil {
-		return report(stderr, err)
-	}
-	authenticator, err := auth.NewOIDCAuthenticator(config)
-	if err != nil {
-		return report(stderr, err)
-	}
-	principal, err := authenticator.Authenticate(ctx, stdout)
+	principal, err := authenticate(ctx, stdout)
 	if err != nil {
 		return report(stderr, err)
 	}
 	fmt.Fprintf(stdout, "\nOIDC認証を検証しました。\nHUMAN Principal ID: %s\nTokenとログインSessionは保存していません。\n", principal.PrincipalID())
+	return 0
+}
+
+func authenticate(ctx context.Context, output io.Writer) (auth.AuthenticatedPrincipal, error) {
+	config, err := auth.ConfigFromEnv()
+	if err != nil {
+		return auth.AuthenticatedPrincipal{}, err
+	}
+	authenticator, err := auth.NewOIDCAuthenticator(config)
+	if err != nil {
+		return auth.AuthenticatedPrincipal{}, err
+	}
+	return authenticator.Authenticate(ctx, output)
+}
+
+func createTrustedJob(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("taxion job create", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	request := flags.String("request", "", "Original natural-language request")
+	path := flags.String("store", "", "Override the local Job database path")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "unexpected positional arguments")
+		return 2
+	}
+	if strings.TrimSpace(*request) == "" {
+		fmt.Fprintln(stderr, "job request is required; use --request")
+		return 2
+	}
+	if !utf8.ValidString(*request) {
+		fmt.Fprintln(stderr, "job request must be valid UTF-8")
+		return 2
+	}
+	dbPath, err := resolveStorePath(*path)
+	if err != nil {
+		return report(stderr, err)
+	}
+	receivedAt := time.Now().UTC()
+	commandID, err := domain.NewID("cmd")
+	if err != nil {
+		return report(stderr, err)
+	}
+	principal, err := authenticate(ctx, stdout)
+	if err != nil {
+		return report(stderr, err)
+	}
+	return createTrustedJobWithPrincipal(ctx, *request, dbPath, commandID, receivedAt, principal, stdout, stderr)
+}
+
+func createTrustedJobWithPrincipal(ctx context.Context, request, dbPath, commandID string, receivedAt time.Time, principal auth.AuthenticatedPrincipal, stdout, stderr io.Writer) int {
+	if err := principal.Validate(); err != nil {
+		return report(stderr, err)
+	}
+	jobID, err := domain.NewID("job")
+	if err != nil {
+		return report(stderr, err)
+	}
+	database, err := store.Open(ctx, dbPath)
+	if err != nil {
+		return report(stderr, err)
+	}
+	defer database.Close()
+	receipt, err := database.CreateTrustedDraftJob(ctx, jobID, request, commandID, receivedAt, principal)
+	if err != nil {
+		return report(stderr, err)
+	}
+	fmt.Fprintf(stdout, "Trusted Job created\nID: %s\nState: %s\nRevision: %d\nHUMAN Principal ID: %s\n", receipt.JobID, domain.JobDraft, receipt.Revision, principal.PrincipalID())
 	return 0
 }
 
@@ -122,7 +183,7 @@ func createLocalJob(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err != nil {
 		return report(stderr, err)
 	}
-	receipt, err := database.CreateJob(ctx, job, commandID)
+	receipt, err := database.CreateLocalDraftJob(ctx, job, commandID)
 	if err != nil {
 		return report(stderr, err)
 	}
@@ -235,6 +296,7 @@ func printUsage(w io.Writer) {
 
 Usage:
   taxion auth login
+  taxion job create --request "Trusted OIDC-authenticated DRAFT"
   taxion dev job create --request "Local untrusted DRAFT only"
   taxion job show <job-id>
   taxion job list

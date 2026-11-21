@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
+	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
 )
 
@@ -87,14 +91,34 @@ func TestJobCreateRequiresRequest(t *testing.T) {
 	}
 }
 
-func TestProductionJobCreateRequiresTrustedIngress(t *testing.T) {
+func TestProductionJobCreateRequiresOIDCConfigurationWithoutCreatingStore(t *testing.T) {
+	t.Setenv("TAXION_OIDC_ISSUER", "")
+	t.Setenv("TAXION_OIDC_CLIENT_ID", "")
+	t.Setenv("TAXION_OIDC_AUDIENCE", "")
+	t.Setenv("TAXION_OIDC_REDIRECT_URI", "")
+	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
 	var stdout, stderr bytes.Buffer
-	code := Run(context.Background(), []string{"job", "create", "--request", "untrusted"}, &stdout, &stderr, VersionInfo{})
-	if code != 2 {
-		t.Fatalf("exit code = %d, want 2; stderr = %s", code, stderr.String())
+	code := Run(context.Background(), []string{"job", "create", "--store", path, "--request", "trusted request"}, &stdout, &stderr, VersionInfo{})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1; stderr = %s", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "taxion dev job create") {
-		t.Fatalf("stderr = %q, want explicit local-only guidance", stderr.String())
+	if !strings.Contains(stderr.String(), "TAXION_OIDC_ISSUER") {
+		t.Fatalf("stderr = %q, want OIDC configuration guidance", stderr.String())
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("store path exists after authentication failure: stat err = %v", err)
+	}
+}
+
+func TestTrustedJobCreateRejectsEmptyAuthenticatedPrincipalBeforeOpeningStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	code := createTrustedJobWithPrincipal(context.Background(), "request", path, "cmd_invalid", time.Now().UTC(), auth.AuthenticatedPrincipal{}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("createTrustedJobWithPrincipal() code = %d, want 1", code)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("store path exists after invalid principal: stat err = %v", err)
 	}
 }
 
@@ -110,5 +134,22 @@ func TestAuthLoginRequiresOIDCConfiguration(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "TAXION_OIDC_ISSUER") {
 		t.Fatalf("stderr = %q, want issuer configuration guidance", stderr.String())
+	}
+}
+
+func TestProductionJobCreateRejectsInvalidUTF8BeforeAuthentication(t *testing.T) {
+	t.Setenv("TAXION_OIDC_ISSUER", "")
+	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
+	invalidRequest := string([]byte{0xff, 0xfe})
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"job", "create", "--store", path, "--request", invalidRequest}, &stdout, &stderr, VersionInfo{})
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "valid UTF-8") {
+		t.Fatalf("stderr = %q, want UTF-8 validation error", stderr.String())
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("store path exists after invalid request: stat err = %v", err)
 	}
 }

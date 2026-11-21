@@ -1,12 +1,12 @@
 package auth
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/hiono/taxion/internal/identity"
 )
 
 // AuthenticatedPrincipal is created only by the OIDC authentication boundary.
@@ -29,9 +29,8 @@ func newAuthenticatedPrincipal(issuer, subject string, authenticatedAt time.Time
 	if authenticatedAt.IsZero() {
 		return AuthenticatedPrincipal{}, errors.New("authentication time is required")
 	}
-	sum := sha256.Sum256([]byte(issuer + "\x00" + subject))
 	return AuthenticatedPrincipal{
-		id:              "human_" + hex.EncodeToString(sum[:]),
+		id:              identity.PrincipalID(issuer, subject),
 		issuer:          issuer,
 		subject:         subject,
 		authenticatedAt: authenticatedAt.UTC().Round(0),

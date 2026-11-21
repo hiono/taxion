@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
 	_ "modernc.org/sqlite"
 )
@@ -27,7 +28,8 @@ var (
 )
 
 const schemaVersion = 1
-const createJobCommandType = "CreateJob"
+const createLocalDraftJobCommandType = "CreateJob"
+const createTrustedDraftJobCommandType = "CreateTrustedDraftJob"
 
 type Store struct {
 	db *sql.DB
@@ -152,7 +154,39 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func (s *Store) CreateJob(ctx context.Context, job domain.Job, commandID string) (CommandReceipt, error) {
+func (s *Store) CreateLocalDraftJob(ctx context.Context, job domain.Job, commandID string) (CommandReceipt, error) {
+	if job.IntakeProvenance != nil {
+		return CommandReceipt{}, errors.New("local DRAFT Job must not contain IntakeProvenance")
+	}
+	return s.createJob(ctx, job, commandID, createLocalDraftJobCommandType)
+}
+
+func (s *Store) CreateTrustedDraftJob(ctx context.Context, jobID, request, commandID string, receivedAt time.Time, principal auth.AuthenticatedPrincipal) (CommandReceipt, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	provenance := domain.IntakeProvenance{
+		PrincipalID:     principal.PrincipalID(),
+		Issuer:          principal.Issuer(),
+		Subject:         principal.Subject(),
+		IngressSource:   domain.IngressSourceCLI,
+		AuthenticatedAt: principal.AuthenticatedAt(),
+		ReceivedAt:      receivedAt,
+		RequestIdentity: commandID,
+		SchemaVersion:   domain.IntakeProvenanceSchemaVersion,
+	}
+	jobCreatedAt := receivedAt
+	if principal.AuthenticatedAt().After(jobCreatedAt) {
+		jobCreatedAt = principal.AuthenticatedAt()
+	}
+	job, err := domain.NewDraftJobWithProvenance(jobID, request, provenance, jobCreatedAt)
+	if err != nil {
+		return CommandReceipt{}, err
+	}
+	return s.createJob(ctx, job, commandID, createTrustedDraftJobCommandType)
+}
+
+func (s *Store) createJob(ctx context.Context, job domain.Job, commandID, commandType string) (CommandReceipt, error) {
 	if err := job.Validate(); err != nil {
 		return CommandReceipt{}, err
 	}
@@ -194,7 +228,7 @@ func (s *Store) CreateJob(ctx context.Context, job domain.Job, commandID string)
 		commandID,
 	).Scan(&existingType, &existingJobID, &existingRevision, &existingHash, &existingReceipt, &existingCreatedAt)
 	if err == nil {
-		if existingType != createJobCommandType || existingJobID != job.ID || existingRevision <= 0 ||
+		if existingType != commandType || existingJobID != job.ID || existingRevision <= 0 ||
 			uint64(existingRevision) != job.Revision || existingHash != payloadHash {
 			return CommandReceipt{}, ErrIdempotencyConflict
 		}
@@ -236,7 +270,7 @@ func (s *Store) CreateJob(ctx context.Context, job domain.Job, commandID string)
 		`INSERT INTO job_commands
 			(command_id, job_id, command_type, payload_sha256, resulting_revision, receipt_json, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		commandID, job.ID, createJobCommandType, payloadHash, job.Revision, string(receiptJSON), createdAt,
+		commandID, job.ID, commandType, payloadHash, job.Revision, string(receiptJSON), createdAt,
 	)
 	if err != nil {
 		return CommandReceipt{}, fmt.Errorf("insert command receipt: %w", err)
