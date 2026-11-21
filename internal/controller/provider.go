@@ -153,6 +153,10 @@ func (c *ProviderController) StartPlanning(
 			if persistErr := c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
 				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
 			}
+		} else if evidence, definitive := providerDefinitiveFailureEvidence(intent.ID, err); definitive {
+			if persistErr := c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartFailed, "", "", evidence, false, principal); persistErr != nil {
+				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist FAILED Provider Start observation: %w", persistErr))
+			}
 		}
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
@@ -237,8 +241,14 @@ func (c *ProviderController) reconcileStart(
 	}
 	result, err := c.runtime.Start(ctx, request)
 	if err != nil {
-		if persistErr := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
-			return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
+		if providerOperationMayHaveStarted(err) {
+			if persistErr := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
+				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
+			}
+		} else if evidence, definitive := providerDefinitiveFailureEvidence(intent.ID, err); definitive {
+			if persistErr := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartFailed, "", "", evidence, false, principal); persistErr != nil {
+				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist FAILED Provider Start observation: %w", persistErr))
+			}
 		}
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
@@ -343,16 +353,18 @@ func sha256String(value string) string {
 }
 
 func providerOperationMayHaveStarted(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, provider.ErrUnsupportedCapability) ||
-		errors.Is(err, provider.ErrCredentialUnavailable) ||
-		errors.Is(err, provider.ErrProviderInvalidRequest) {
-		return false
-	}
 	var operationError *provider.OperationError
-	return errors.As(err, &operationError)
+	return errors.As(err, &operationError) && operationError != nil &&
+		operationError.Class == provider.FailureAmbiguous
+}
+
+func providerDefinitiveFailureEvidence(operationID string, err error) (string, bool) {
+	var operationError *provider.OperationError
+	if !errors.As(err, &operationError) || operationError == nil ||
+		operationError.Class != provider.FailureDefinitive {
+		return "", false
+	}
+	return sha256String("taxion:provider-start-definitive-failure:" + operationID + ":" + string(operationError.Class) + ":" + operationError.Code), true
 }
 
 func startResultFromObservation(observation domain.ProviderStartObservation) provider.StartResult {
