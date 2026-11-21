@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -65,20 +66,21 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 		if err != nil {
 			return StartResult{}, err
 		}
-		result.SessionID, err = redactCredential(lease, result.SessionID)
+		leaked, err := containsCredential(lease, result.SessionID, result.ReceiptID)
 		if err != nil {
 			return StartResult{}, err
 		}
-		result.ReceiptID, err = redactCredential(lease, result.ReceiptID)
-		return result, err
+		if leaked {
+			return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+		}
+		return result, nil
 	})
 	if err != nil {
 		return StartResult{}, safeAdapterError(err)
 	}
-	if strings.TrimSpace(result.SessionID) == "" || strings.TrimSpace(result.ReceiptID) == "" ||
-		strings.Contains(result.SessionID, "[REDACTED]") || strings.Contains(result.ReceiptID, "[REDACTED]") ||
-		!validSHA256(result.EvidenceSHA256) {
-		return StartResult{}, ErrProviderInvalidResult
+	if result.OperationID != request.OperationID || !validIdentifier(result.SessionID) ||
+		!validIdentifier(result.ReceiptID) || !validSHA256(result.EvidenceSHA256) {
+		return StartResult{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	return result, nil
 }
@@ -99,24 +101,32 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 		if err != nil {
 			return TurnResult{}, err
 		}
-		result.Output, err = redactCredential(lease, result.Output)
-		return result, err
+		leaked, err := containsCredential(lease, result.ReceiptID, result.Output)
+		if err != nil {
+			return TurnResult{}, err
+		}
+		if leaked {
+			return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+		}
+		return result, nil
 	})
 	if err != nil {
 		return TurnResult{}, safeAdapterError(err)
 	}
-	if (result.Status != "COMPLETED" && result.Status != "FAILED" && result.Status != "UNKNOWN") ||
+	if result.OperationID != request.OperationID || result.TurnID != request.TurnID ||
+		result.SessionID != request.SessionID ||
+		(result.Status != "COMPLETED" && result.Status != "FAILED" && result.Status != "UNKNOWN") ||
 		result.TokensUsed > request.MaxTokens {
-		return TurnResult{}, ErrProviderInvalidResult
+		return TurnResult{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	if result.Status == "UNKNOWN" {
-		if result.TokensUsed != 0 {
-			return TurnResult{}, ErrProviderInvalidResult
+		if result.TokensUsed != 0 || result.Output != "" {
+			return TurnResult{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 		}
 		return result, nil
 	}
-	if strings.TrimSpace(result.ReceiptID) == "" || !validSHA256(result.EvidenceSHA256) {
-		return TurnResult{}, ErrProviderInvalidResult
+	if !validIdentifier(result.ReceiptID) || !validSHA256(result.EvidenceSHA256) {
+		return TurnResult{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	return result, nil
 }
@@ -138,8 +148,9 @@ func (r *Runtime) Stop(ctx context.Context, request StopRequest) (StopResult, er
 	if err != nil {
 		return StopResult{}, safeAdapterError(err)
 	}
-	if !result.Stopped || !validSHA256(result.EvidenceSHA256) {
-		return StopResult{}, ErrStopUnconfirmed
+	if result.OperationID != request.OperationID || result.SessionID != request.SessionID ||
+		!result.Stopped || !validSHA256(result.EvidenceSHA256) {
+		return StopResult{}, errors.Join(ErrStopUnconfirmed, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	return result, nil
 }
@@ -161,15 +172,15 @@ func (r *Runtime) Resume(ctx context.Context, request ResumeRequest) (ResumeResu
 	if err != nil {
 		return ResumeResult{}, safeAdapterError(err)
 	}
-	if !result.Attached || !validSHA256(result.EvidenceSHA256) {
-		return ResumeResult{}, ErrResumeUnconfirmed
+	if result.OperationID != request.OperationID || result.SessionID != request.SessionID ||
+		!result.Attached || !validSHA256(result.EvidenceSHA256) {
+		return ResumeResult{}, errors.Join(ErrResumeUnconfirmed, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	return result, nil
 }
 
 func (r *Runtime) Lookup(ctx context.Context, request LookupRequest) (LookupResult, error) {
-	if !validIdentifier(request.OperationID) || !validIdentifier(request.SessionID) ||
-		(request.TurnID != "" && !validIdentifier(request.TurnID)) {
+	if err := request.Validate(); err != nil {
 		return LookupResult{}, ErrProviderInvalidRequest
 	}
 	capabilities, err := r.liveCapabilities(ctx)
@@ -189,8 +200,12 @@ func (r *Runtime) Lookup(ctx context.Context, request LookupRequest) (LookupResu
 	if err != nil {
 		return LookupResult{}, safeAdapterError(err)
 	}
-	if result.Found && (strings.TrimSpace(result.Status) == "" || !validSHA256(result.EvidenceSHA256)) {
-		return LookupResult{}, ErrProviderInvalidResult
+	if result.OperationID != request.OperationID || !validIdentifier(result.Status) ||
+		!validSHA256(result.EvidenceSHA256) ||
+		(request.SessionID != "" && result.SessionID != request.SessionID) ||
+		(request.TurnID != "" && result.TurnID != request.TurnID) ||
+		(result.Found && (!validIdentifier(result.SessionID) || !validIdentifier(result.ReceiptID))) {
+		return LookupResult{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	return result, nil
 }
@@ -212,21 +227,28 @@ func (r *Runtime) Result(ctx context.Context, request ResultRequest) (Result, er
 		if err != nil {
 			return Result{}, err
 		}
-		result.Content, err = redactCredential(lease, result.Content)
-		return result, err
+		leaked, err := containsCredential(lease, result.Content)
+		if err != nil {
+			return Result{}, err
+		}
+		if leaked {
+			return Result{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+		}
+		return result, nil
 	})
 	if err != nil {
 		return Result{}, safeAdapterError(err)
 	}
-	if !validSHA256(result.ResultSHA256) || !validSHA256(result.EvidenceSHA256) {
-		return Result{}, ErrProviderInvalidResult
+	if result.OperationID != request.OperationID || result.SessionID != request.SessionID ||
+		result.TurnID != request.TurnID || sha256Hex(result.Content) != result.ResultSHA256 ||
+		!validSHA256(result.EvidenceSHA256) {
+		return Result{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	return result, nil
 }
 
 func (r *Runtime) Usage(ctx context.Context, request UsageRequest) (Usage, error) {
-	if !validIdentifier(request.OperationID) || !validIdentifier(request.SessionID) ||
-		(request.TurnID != "" && !validIdentifier(request.TurnID)) {
+	if err := request.Validate(); err != nil {
 		return Usage{}, ErrProviderInvalidRequest
 	}
 	capabilities, err := r.liveCapabilities(ctx)
@@ -243,8 +265,10 @@ func (r *Runtime) Usage(ctx context.Context, request UsageRequest) (Usage, error
 	if err != nil {
 		return Usage{}, safeAdapterError(err)
 	}
-	if strings.TrimSpace(result.UsageID) == "" || !validSHA256(result.EvidenceSHA256) {
-		return Usage{}, ErrProviderInvalidResult
+	if result.OperationID != request.OperationID || result.SessionID != request.SessionID ||
+		result.TurnID != request.TurnID || !validIdentifier(result.UsageID) ||
+		!validSHA256(result.EvidenceSHA256) {
+		return Usage{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	return result, nil
 }
@@ -286,32 +310,40 @@ func (r *Runtime) liveCapabilities(ctx context.Context) (Capabilities, error) {
 	return capabilities, nil
 }
 
-func redactCredential(lease CredentialLease, value string) (string, error) {
-	var redacted string
+func containsCredential(lease CredentialLease, values ...string) (bool, error) {
+	found := false
 	err := lease.WithSecret(func(secret []byte) error {
-		redacted = value
-		if len(secret) > 0 {
-			redacted = strings.ReplaceAll(redacted, string(secret), "[REDACTED]")
+		if len(secret) == 0 {
+			return nil
+		}
+		for _, value := range values {
+			if bytes.Contains([]byte(value), secret) {
+				found = true
+				break
+			}
 		}
 		return nil
 	})
 	if err != nil {
-		return "", ErrCredentialUnavailable
+		return false, ErrCredentialUnavailable
 	}
-	return redacted, nil
+	return found, nil
 }
 
 func withCredential[T any](ctx context.Context, broker CredentialBroker, identity Identity, call func(CredentialLease) (T, error)) (result T, err error) {
-	lease, err := broker.Acquire(ctx, identity)
-	if err != nil || lease == nil {
+	lease, acquireErr := broker.Acquire(ctx, identity)
+	if acquireErr != nil || lease == nil {
+		if lease != nil {
+			_ = lease.Close()
+		}
 		return result, ErrCredentialUnavailable
 	}
-	defer func() {
-		if closeErr := lease.Close(); closeErr != nil {
-			err = errors.Join(err, ErrCredentialUnavailable)
-		}
-	}()
-	return call(lease)
+	result, callErr := call(lease)
+	if closeErr := lease.Close(); closeErr != nil {
+		var zero T
+		return zero, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
+	return result, callErr
 }
 
 func safeAdapterError(err error) error {
@@ -327,5 +359,5 @@ func safeAdapterError(err error) error {
 		validOperationCode(operationError.Code) {
 		return &OperationError{Class: operationError.Class, Code: operationError.Code}
 	}
-	return ErrProviderOperationFailed
+	return &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 }
