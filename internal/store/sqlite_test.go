@@ -578,6 +578,7 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.test",
+		SDKVersion:          "test-sdk/1",
 		ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
@@ -691,6 +692,7 @@ func TestStartTasklessPlannerPersistsAndIsIdempotent(t *testing.T) {
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.primary",
+		SDKVersion:          "test-sdk/1",
 		ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
@@ -792,6 +794,7 @@ func TestStartTasklessPlannerRejectsWrongPrincipalAndRollsBack(t *testing.T) {
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.primary",
+		SDKVersion:          "test-sdk/1",
 		ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
@@ -852,6 +855,7 @@ func TestAddPlanningAuthorizationRejectsWrongPrincipalAndRollsBack(t *testing.T)
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.test",
+		SDKVersion:          "test-sdk/1",
 		ConfigurationSHA256: strings.Repeat("b", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
@@ -902,6 +906,7 @@ func TestAddPlanningAuthorizationAppendsWithoutChangingExistingFacts(t *testing.
 	firstRequest := domain.PlanningAuthorizationRequest{
 		ProviderID:          "provider.test",
 		AccountID:           "account.test",
+		SDKVersion:          "test-sdk/1",
 		ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
