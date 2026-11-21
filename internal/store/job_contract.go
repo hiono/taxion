@@ -15,10 +15,10 @@ func (s *Store) AddJobContractRevision(ctx context.Context, jobID string, expect
 		return CommandReceipt{}, domain.JobContractRevision{}, err
 	}
 	request := struct {
-		RoleExecutionID          string             `json:"role_execution_id"`
+		RoleExecutionID           string             `json:"role_execution_id"`
 		SourceResultObservationID string             `json:"source_result_observation_id"`
 		SourceResultContentSHA256 string             `json:"source_result_content_sha256"`
-		Contract                 domain.JobContract `json:"contract"`
+		Contract                  domain.JobContract `json:"contract"`
 	}{RoleExecutionID: roleExecutionID, SourceResultObservationID: sourceResultObservationID, SourceResultContentSHA256: sourceResultContentSHA256, Contract: canonical}
 	return persistPlanningFact(
 		ctx, s, jobID, expectedRevision, commandID, "JOB_CONTRACT_REVISION", request,
