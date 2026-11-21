@@ -109,12 +109,20 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil {
 		t.Fatalf("GetJob before boundary denial: %v", err)
 	}
-	_, boundaryDecision, err := database.AddPlanningBoundaryDecision(ctx, jobID, job.Revision, executionID, "cmd_66666666666666666666666666666666", domain.PlanningBoundaryTurn, "token_budget_exhausted", principal)
+	boundaryReceipt, boundaryDecision, err := database.AddPlanningBoundaryDecision(ctx, jobID, job.Revision, executionID, "cmd_66666666666666666666666666666666", domain.PlanningBoundaryTurn, "token_budget_exhausted", principal)
 	if err != nil {
 		t.Fatalf("AddPlanningBoundaryDecision: %v", err)
 	}
 	if boundaryDecision.Decision != domain.PlanningEffectDeny || boundaryDecision.ReasonCode != "token_budget_exhausted" {
 		t.Fatalf("boundary denial fact: %#v", boundaryDecision)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before boundary retry: %v", err)
+	}
+	retryBoundaryReceipt, retryBoundaryDecision, err := database.AddPlanningBoundaryDecision(ctx, jobID, job.Revision, executionID, "cmd_66666666666666666666666666666666", domain.PlanningBoundaryTurn, "token_budget_exhausted", principal)
+	if err != nil || retryBoundaryReceipt != boundaryReceipt || retryBoundaryDecision != boundaryDecision {
+		t.Fatalf("idempotent boundary decision retry: %#v %#v %v", retryBoundaryReceipt, retryBoundaryDecision, err)
 	}
 
 	job, err = database.GetJob(ctx, jobID)
@@ -134,6 +142,16 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 		t.Fatalf("GetJob before resume UNKNOWN: %v", err)
 	}
 	unknownResumeRevision := job.Revision
+	if _, _, err := database.AddPlanningResumeObservation(ctx, jobID, unknownResumeRevision, resume.ID, "cmd_77777777777777777777777777777777", "INVALID", "", false, principal); err == nil {
+		t.Fatal("invalid resume observation was persisted")
+	}
+	afterRejectedObservation, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after rejected resume observation: %v", err)
+	}
+	if afterRejectedObservation.Revision != unknownResumeRevision {
+		t.Fatalf("rejected resume observation changed Job revision: got %d, want %d", afterRejectedObservation.Revision, unknownResumeRevision)
+	}
 	unknownReceipt, resumeUnknown, err := database.AddPlanningResumeObservation(ctx, jobID, unknownResumeRevision, resume.ID, "cmd_77777777777777777777777777777777", domain.PlanningResumeUnknown, "", false, principal)
 	if err != nil || resumeUnknown.Status != domain.PlanningResumeUnknown {
 		t.Fatalf("record resume UNKNOWN: %#v %v", resumeUnknown, err)
