@@ -24,7 +24,8 @@ const (
 type JobState string
 
 const (
-	JobDraft JobState = "DRAFT"
+	JobDraft  JobState = "DRAFT"
+	JobActive JobState = "ACTIVE"
 )
 
 type Job struct {
@@ -37,6 +38,8 @@ type Job struct {
 	UpdatedAt                             time.Time                   `json:"updated_at"`
 	IntakeProvenance                      *IntakeProvenance           `json:"intake_provenance,omitempty"`
 	PlanningAuthorizations                []PlanningAuthorization     `json:"planning_authorizations,omitempty"`
+	JobContractRevisions                   []JobContractRevision         `json:"job_contract_revisions,omitempty"`
+	JobApprovals                           []JobApproval                 `json:"job_approvals,omitempty"`
 	RoleExecutions                        []RoleExecution             `json:"role_executions,omitempty"`
 	ProviderStartIntents                  []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
 	ProviderStartObservations             []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
@@ -550,8 +553,8 @@ func (j Job) Validate() error {
 	if strings.TrimSpace(j.Request) == "" {
 		return fmt.Errorf("%w: original request is required", ErrInvalidJob)
 	}
-	if j.State != JobDraft {
-		return fmt.Errorf("%w: unsupported initial state %q", ErrInvalidJob, j.State)
+	if j.State != JobDraft && j.State != JobActive {
+		return fmt.Errorf("%w: unsupported Job state %q", ErrInvalidJob, j.State)
 	}
 	if j.Revision == 0 {
 		return fmt.Errorf("%w: revision must be positive", ErrInvalidJob)
@@ -567,7 +570,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.ProviderResultObservations) + len(j.ProviderUsageObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
+	appendOnlyFacts := uint64(len(j.JobContractRevisions) + len(j.JobApprovals) + len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.ProviderResultObservations) + len(j.ProviderUsageObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
 	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
@@ -1083,5 +1086,5 @@ func (j Job) Validate() error {
 			}
 		}
 	}
-	return nil
+	return validateJobContractFacts(j)
 }
