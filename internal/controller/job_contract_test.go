@@ -237,7 +237,7 @@ func TestJobContractControllerApprovesExactRevisionAndReplaysAfterActivation(t *
 	contract := validControllerJobContract(time.Now().UTC().Add(2 * time.Hour))
 	_, revision, err := controller.Propose(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
-		"cmd_45454545454545454545454545454545", contract, principal,
+		sourceResult.ID, sourceResult.ContentSHA256, "cmd_45454545454545454545454545454545", contract, principal,
 	)
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
