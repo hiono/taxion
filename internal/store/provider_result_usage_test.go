@@ -233,7 +233,7 @@ func TestProviderResultUsageRejectsInvalidPayloadAndIdentity(t *testing.T) {
 		{name: "digest mismatch", operationID: startOperationID, sessionID: sessionID, content: content, contentSHA: strings.Repeat("8", 64), final: true},
 		{name: "invalid UTF-8", operationID: startOperationID, sessionID: sessionID, content: string([]byte{0xff}), contentSHA: resultDigest(string([]byte{0xff})), final: true},
 		{name: "content too large", operationID: startOperationID, sessionID: sessionID,
-			content: strings.Repeat("x", domain.MaxProviderResultContentBytes+1),
+			content:    strings.Repeat("x", domain.MaxProviderResultContentBytes+1),
 			contentSHA: resultDigest(strings.Repeat("x", domain.MaxProviderResultContentBytes+1)), final: true},
 		{name: "wrong Session", operationID: startOperationID, sessionID: "session_other", content: content, contentSHA: contentSHA, final: true},
 		{name: "Start operation with Turn identity", operationID: startOperationID, turnID: turn.ID, sessionID: sessionID, content: content, contentSHA: contentSHA, final: true},
