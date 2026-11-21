@@ -12,21 +12,21 @@ const (
 )
 
 type ProviderStartObservation struct {
-	ID                 string    `json:"id"`
-	CommandID          string    `json:"command_id"`
-	JobID              string    `json:"job_id"`
-	RoleExecutionID    string    `json:"role_execution_id"`
-	OperationID        string    `json:"operation_id"`
-	ProviderID         string    `json:"provider_id"`
-	AccountID          string    `json:"account_id"`
-	ConfigurationSHA256 string   `json:"configuration_sha256"`
-	Status             string    `json:"status"`
-	ProviderSessionID  string    `json:"provider_session_id,omitempty"`
-	ReceiptID          string    `json:"receipt_id,omitempty"`
-	EvidenceSHA256     string    `json:"evidence_sha256,omitempty"`
-	ReconcilesUnknown  bool      `json:"reconciles_unknown,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	CreatedRevision    uint64    `json:"created_revision"`
+	ID                  string    `json:"id"`
+	CommandID           string    `json:"command_id"`
+	JobID               string    `json:"job_id"`
+	RoleExecutionID     string    `json:"role_execution_id"`
+	OperationID         string    `json:"operation_id"`
+	ProviderID          string    `json:"provider_id"`
+	AccountID           string    `json:"account_id"`
+	ConfigurationSHA256 string    `json:"configuration_sha256"`
+	Status              string    `json:"status"`
+	ProviderSessionID   string    `json:"provider_session_id,omitempty"`
+	ReceiptID           string    `json:"receipt_id,omitempty"`
+	EvidenceSHA256      string    `json:"evidence_sha256,omitempty"`
+	ReconcilesUnknown   bool      `json:"reconciles_unknown,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	CreatedRevision     uint64    `json:"created_revision"`
 }
 
 func ProviderStartObservationID(commandID string) string {
@@ -96,7 +96,7 @@ func NewProviderStartObservation(
 		RoleExecutionID: start.RoleExecutionID, OperationID: start.ID,
 		ProviderID: start.ProviderID, AccountID: start.AccountID,
 		ConfigurationSHA256: start.ConfigurationSHA256,
-		Status: status, ProviderSessionID: providerSessionID, ReceiptID: receiptID,
+		Status:              status, ProviderSessionID: providerSessionID, ReceiptID: receiptID,
 		EvidenceSHA256: evidenceSHA256, ReconcilesUnknown: reconcilesUnknown,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
