@@ -557,3 +557,111 @@ func TestProviderControllerDoesNotBlindlyRetryWhenNoSafeStartCapabilityExists(t 
 		t.Fatalf("unsafe retry occurred: starts=%d lookups=%d observations=%#v", runtime.startCalls, runtime.lookupCalls, job.ProviderStartObservations)
 	}
 }
+
+
+func TestProviderControllerStopsPlanningIntentOnlyAfterPersistingStopIntent(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_cccccccccccccccccccccccccccccccc", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	runtime.stopHook = func(ctx context.Context, request provider.StopRequest) error {
+		job, err := database.GetJob(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		if len(job.ProviderStopIntents) != 1 || job.ProviderStopIntents[0].OperationID != request.OperationID ||
+			job.ProviderStopIntents[0].SessionID != request.SessionID {
+			return errors.New("Provider Stop was called before its intent was committed")
+		}
+		if len(job.ProviderStopObservations) != 0 {
+			return errors.New("Stop observation exists before the Provider call")
+		}
+		return nil
+	}
+	receipt, intent, observation, err := controller.StopPlanning(
+		context.Background(), jobID, execution.ID, "session_1",
+		"cmd_ffffffffffffffffffffffffffffffff", domain.ProviderStopReasonPlanningComplete, principal,
+	)
+	if err != nil {
+		t.Fatalf("StopPlanning: %v", err)
+	}
+	if receipt.Revision == 0 || intent.OperationID == "" || !observation.Stopped || !observation.Quiescent ||
+		observation.EvidenceSHA256 != strings.Repeat("d", 64) || runtime.stopCalls != 1 {
+		t.Fatalf("unexpected Stop result: receipt=%#v intent=%#v observation=%#v calls=%d",
+			receipt, intent, observation, runtime.stopCalls)
+	}
+}
+
+func TestProviderControllerDoesNotReplayAmbiguousStop(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		stopErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
+	}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_cccccccccccccccccccccccccccccccc", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	stopCommandID := "cmd_ffffffffffffffffffffffffffffffff"
+	_, intent, firstObservation, err := controller.StopPlanning(
+		context.Background(), jobID, execution.ID, "session_1", stopCommandID,
+		domain.ProviderStopReasonPlanningComplete, principal,
+	)
+	if err == nil || !providerStopObservationUnknown(firstObservation) || runtime.stopCalls != 1 {
+		t.Fatalf("ambiguous Stop was not retained as UNKNOWN: observation=%#v calls=%d err=%v",
+			firstObservation, runtime.stopCalls, err)
+	}
+	runtime.stopErr = nil
+	_, retryIntent, retryObservation, err := controller.StopPlanning(
+		context.Background(), jobID, execution.ID, "session_1", stopCommandID,
+		domain.ProviderStopReasonPlanningComplete, principal,
+	)
+	if !errors.Is(err, provider.ErrStopUnconfirmed) || retryIntent.ID != intent.ID ||
+		retryObservation.ID != firstObservation.ID || runtime.stopCalls != 1 {
+		t.Fatalf("ambiguous Stop was replayed: intent=%#v observation=%#v calls=%d err=%v",
+			retryIntent, retryObservation, runtime.stopCalls, err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if len(job.ProviderStopIntents) != 1 || len(job.ProviderStopObservations) != 1 {
+		t.Fatalf("Stop retry changed immutable facts: intents=%d observations=%d",
+			len(job.ProviderStopIntents), len(job.ProviderStopObservations))
+	}
+}
+
+func TestProviderControllerTreatsExistingStopIntentWithoutObservationAsUnknown(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_cccccccccccccccccccccccccccccccc", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	stopCommandID := "cmd_ffffffffffffffffffffffffffffffff"
+	if _, _, err := database.AddProviderStopIntent(
+		context.Background(), jobID, job.Revision, execution.ID, "session_1", stopCommandID,
+		domain.ProviderStopReasonPlanningComplete, principal,
+	); err != nil {
+		t.Fatalf("pre-create Stop intent: %v", err)
+	}
+	_, _, observation, err := controller.StopPlanning(
+		context.Background(), jobID, execution.ID, "session_1", stopCommandID,
+		domain.ProviderStopReasonPlanningComplete, principal,
+	)
+	if !errors.Is(err, provider.ErrStopUnconfirmed) || !providerStopObservationUnknown(observation) || runtime.stopCalls != 0 {
+		t.Fatalf("existing intent was blindly dispatched: observation=%#v calls=%d err=%v",
+			observation, runtime.stopCalls, err)
+	}
+}
