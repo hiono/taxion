@@ -37,8 +37,8 @@ type Job struct {
 	UpdatedAt              time.Time               `json:"updated_at"`
 	IntakeProvenance       *IntakeProvenance       `json:"intake_provenance,omitempty"`
 	PlanningAuthorizations []PlanningAuthorization `json:"planning_authorizations,omitempty"`
-	RoleExecutions        []RoleExecution        `json:"role_executions,omitempty"`
-	ProviderStartIntents  []ProviderStartIntent  `json:"provider_start_intents,omitempty"`
+	RoleExecutions         []RoleExecution         `json:"role_executions,omitempty"`
+	ProviderStartIntents   []ProviderStartIntent   `json:"provider_start_intents,omitempty"`
 }
 
 type IntakeProvenance struct {
@@ -201,20 +201,20 @@ type RoleExecution struct {
 }
 
 type ProviderStartIntent struct {
-	ID                       string                   `json:"id"`
-	CommandID                string                   `json:"command_id"`
-	JobID                    string                   `json:"job_id"`
-	RoleExecutionID          string                   `json:"role_execution_id"`
-	PlanningAuthorizationID  string                   `json:"planning_authorization_id"`
-	ProviderID               string                   `json:"provider_id"`
-	AccountID                string                   `json:"account_id"`
-	ConfigurationSHA256      string                   `json:"configuration_sha256"`
-	ReadOnlyBoundary         PlanningReadOnlyBoundary `json:"read_only_boundary"`
-	Budget                   PlanningBudget           `json:"budget"`
-	Deadline                 time.Time                `json:"deadline"`
-	RequestSHA256            string                   `json:"request_sha256"`
-	CreatedAt                time.Time                `json:"created_at"`
-	CreatedRevision          uint64                   `json:"created_revision"`
+	ID                      string                   `json:"id"`
+	CommandID               string                   `json:"command_id"`
+	JobID                   string                   `json:"job_id"`
+	RoleExecutionID         string                   `json:"role_execution_id"`
+	PlanningAuthorizationID string                   `json:"planning_authorization_id"`
+	ProviderID              string                   `json:"provider_id"`
+	AccountID               string                   `json:"account_id"`
+	ConfigurationSHA256     string                   `json:"configuration_sha256"`
+	ReadOnlyBoundary        PlanningReadOnlyBoundary `json:"read_only_boundary"`
+	Budget                  PlanningBudget           `json:"budget"`
+	Deadline                time.Time                `json:"deadline"`
+	RequestSHA256           string                   `json:"request_sha256"`
+	CreatedAt               time.Time                `json:"created_at"`
+	CreatedRevision         uint64                   `json:"created_revision"`
 }
 
 func RoleExecutionID(commandID string) string {

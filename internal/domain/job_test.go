@@ -328,10 +328,10 @@ func TestTasklessPlannerStartRejectsInactiveOrMismatchedGrant(t *testing.T) {
 	job.Revision = 2
 	job.UpdatedAt = grant.IssuedAt
 	tests := []struct {
-		name       string
-		principal  string
-		now        time.Time
-		grantID    string
+		name      string
+		principal string
+		now       time.Time
+		grantID   string
 	}{
 		{name: "wrong principal", principal: "human_other", now: grant.IssuedAt.Add(time.Minute), grantID: grant.ID},
 		{name: "before issue", principal: grant.PrincipalID, now: grant.IssuedAt.Add(-time.Second), grantID: grant.ID},
