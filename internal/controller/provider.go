@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/hiono/taxion/internal/auth"
@@ -283,14 +284,33 @@ func providerIdentityMatches(identity provider.Identity, grant domain.PlanningAu
 }
 
 func validatePlanningContext(grant domain.PlanningAuthorization, documents []provider.ContextDocument) error {
-	if len(documents) != 1 {
-		return errors.New("DRAFT planning requires exactly one immutable read-only context snapshot")
+	if len(documents) == 0 {
+		return errors.New("DRAFT planning requires an immutable read-only context")
 	}
-	document := documents[0]
-	if document.ID != grant.ReadOnlyBoundary.Reference || document.SHA256 != grant.ReadOnlyBoundary.SHA256 {
-		return errors.New("Provider context snapshot differs from PlanningAuthorization read-only boundary")
+	switch grant.ReadOnlyBoundary.Mode {
+	case domain.PlanningReadOnlyBoundarySnapshot:
+		if len(documents) != 1 || documents[0].ID != grant.ReadOnlyBoundary.Reference ||
+			documents[0].SHA256 != grant.ReadOnlyBoundary.SHA256 {
+			return errors.New("Provider context snapshot differs from PlanningAuthorization read-only boundary")
+		}
+		return nil
+	case domain.PlanningReadOnlyBoundaryDocuments:
+		ordered := append([]provider.ContextDocument(nil), documents...)
+		sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+		var material string
+		for i, document := range ordered {
+			if i > 0 && ordered[i-1].ID == document.ID {
+				return errors.New("Provider context contains duplicate document identity")
+			}
+			material += document.ID + "\n" + document.SHA256 + "\n"
+		}
+		if sha256String(material) != grant.ReadOnlyBoundary.SHA256 {
+			return errors.New("Provider document set differs from PlanningAuthorization read-only boundary")
+		}
+		return nil
+	default:
+		return errors.New("unsupported PlanningAuthorization read-only boundary mode")
 	}
-	return nil
 }
 
 func sha256String(value string) string {
