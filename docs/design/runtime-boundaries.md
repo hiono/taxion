@@ -3,6 +3,8 @@
 Date: 2026-11-20
 Normative contract: [Product Contract](../specifications/product-contract.md)
 Acceptance contract: [Product Acceptance Test Specification](../test-specs/product-acceptance.md)
+Provider Adapter requirements: [Provider Adapter 実行境界 要求仕様書](../specifications/provider-adapter-requirements.md)
+Provider Adapter design: [Provider Adapter 詳細設計書](provider-adapter-detailed-design.md) / [内部設計書](provider-adapter-internal-design.md)
 
 ## 1. Purpose
 
@@ -39,6 +41,8 @@ Planner / Coder / Reviewerの実行主体はRoleExecutionIDに結び付ける。
 ### 3.3 Provider boundary
 
 Providerは外部実行主体である。Providerが返すevent、tool list、session state、usage、terminal statusはObservationであり、Taxionの承認・Job完了の正本ではない。Provider credentialはController / Provider Adapterが管理し、Model / Sandboxへ露出しません。Provider API通信はAdapterが仲介し、現在のgrantとProvider / account / configurationに束縛します。RoleのToolへ任意のnetwork accessやcredential accessを継承しません。ControllerはOperationIDとJob revisionで相関し、外部結果をJobAggregateへ明示的に記録します。
+
+Provider AdapterのCapabilityはProvider / account / SDK・protocol version / configuration identityへ束縛し、証拠水準を操作単位で検証します。CredentialBroker / CredentialLeaseはAdapter境界内でsecretを仲介し、Runtimeはraw error・responseへのsecret混入を検査してsafe errorへ変換します。詳細はProvider Adapter要求仕様・詳細設計・内部設計を参照します。
 
 ### 3.4 External Agent boundary
 
@@ -108,6 +112,7 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 ### 5.2 After external side effect
 
 - Provider receipt、event、terminal result、usage、stop evidenceをappend-only observationとして保存する。
+- Usage completenessとProvider quiescenceが確定するまで、完了・資源解放を許可しない。
 - DB commitとProvider operation resultを同一の成功状態へまとめない。
 - timeout、connection loss、receipt欠落はUNKNOWNとして保持する。
 - 同じOperationIDで照会できない、またはProvider idempotencyを証明できない場合はblind replayしない。
