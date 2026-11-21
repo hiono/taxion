@@ -367,14 +367,18 @@ func (r LookupResult) Validate(request LookupRequest) error {
 		return errors.New("Provider Lookup result identity or evidence is invalid")
 	}
 	if !r.Found {
-		if r.Status != LookupStatusNotFound || r.SessionID != "" || r.TurnID != "" || r.ReceiptID != "" {
+		if r.Status != LookupStatusNotFound || r.ReceiptID != "" || r.ResultSHA256 != "" || r.UsageID != "" ||
+			(request.SessionID == "" && r.SessionID != "") ||
+			(request.SessionID != "" && r.SessionID != request.SessionID) ||
+			(request.TurnID == "" && r.TurnID != "") ||
+			(request.TurnID != "" && r.TurnID != request.TurnID) {
 			return errors.New("Provider Lookup absence result is inconsistent")
 		}
 		return nil
 	}
 	if !validLookupFoundStatus(r.Status) || !validIdentifier(r.SessionID) || !validIdentifier(r.ReceiptID) ||
 		(request.SessionID != "" && r.SessionID != request.SessionID) ||
-		(request.TurnID != "" && r.TurnID != request.TurnID) {
+		r.TurnID != request.TurnID {
 		return errors.New("Provider Lookup found result does not match the requested operation")
 	}
 	return nil
