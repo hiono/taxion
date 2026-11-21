@@ -65,6 +65,12 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 	if err := request.Validate(); err != nil {
 		return StartResult{}, ErrProviderInvalidRequest
 	}
+	boundedContext, cancel, err := withRequestDeadline(ctx, request.Deadline)
+	if err != nil {
+		return StartResult{}, err
+	}
+	defer cancel()
+	ctx = boundedContext
 	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
 		return StartResult{}, err
@@ -101,6 +107,12 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 	if err := request.Validate(); err != nil {
 		return TurnResult{}, ErrProviderInvalidRequest
 	}
+	boundedContext, cancel, err := withRequestDeadline(ctx, request.Deadline)
+	if err != nil {
+		return TurnResult{}, err
+	}
+	defer cancel()
+	ctx = boundedContext
 	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
 		return TurnResult{}, err
@@ -184,6 +196,12 @@ func (r *Runtime) Resume(ctx context.Context, request ResumeRequest) (ResumeResu
 	if err := request.Validate(); err != nil {
 		return ResumeResult{}, ErrProviderInvalidRequest
 	}
+	boundedContext, cancel, err := withRequestDeadline(ctx, request.Deadline)
+	if err != nil {
+		return ResumeResult{}, err
+	}
+	defer cancel()
+	ctx = boundedContext
 	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
 		return ResumeResult{}, err
@@ -367,7 +385,31 @@ func (r *Runtime) ReplayEvents(ctx context.Context, request ReplayEventsRequest)
 	return page, nil
 }
 
+func withRequestDeadline(ctx context.Context, deadline time.Time) (context.Context, context.CancelFunc, error) {
+	if ctx == nil || deadline.IsZero() {
+		return nil, nil, ErrProviderInvalidRequest
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	if !time.Now().Before(deadline) {
+		return nil, nil, context.DeadlineExceeded
+	}
+	bounded, cancel := context.WithDeadline(ctx, deadline)
+	if err := bounded.Err(); err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	return bounded, cancel, nil
+}
+
 func (r *Runtime) verifiedCapabilities(ctx context.Context) (Capabilities, error) {
+	if ctx == nil {
+		return Capabilities{}, ErrProviderInvalidRequest
+	}
+	if err := ctx.Err(); err != nil {
+		return Capabilities{}, err
+	}
 	if r.adapter.Identity() != r.identity {
 		return Capabilities{}, ErrUnsupportedCapability
 	}
@@ -406,6 +448,12 @@ func containsCredential(lease CredentialLease, values ...string) (bool, error) {
 }
 
 func withCredential[T any](ctx context.Context, broker CredentialBroker, identity Identity, call func(CredentialLease) (T, error)) (result T, err error) {
+	if ctx == nil {
+		return result, ErrProviderInvalidRequest
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	lease, acquireErr := broker.Acquire(ctx, identity)
 	if acquireErr != nil || lease == nil {
 		if lease != nil {
