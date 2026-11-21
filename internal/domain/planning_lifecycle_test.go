@@ -136,6 +136,8 @@ func TestPlanningResumeRequiresExactSessionAndCapabilityEvidence(t *testing.T) {
 	}
 	if _, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("b", 64), true, now.Add(-time.Second)); err == nil {
 		t.Fatal("resume was accepted before the latest Provider turn")
+	} else if boundary, ok := err.(*PlanningBoundaryError); !ok || boundary.ReasonCode != "resume_before_latest_turn" {
+		t.Fatalf("resume-before-turn error = %v, want typed resume_before_latest_turn boundary", err)
 	}
 	resume, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("b", 64), true, now.Add(time.Second))
 	if err != nil {
