@@ -13,18 +13,18 @@ import (
 
 func validControllerJobContract(deadline time.Time) domain.JobContract {
 	return domain.JobContract{
-		Purpose: "Deliver the approved feature",
-		Constraints: []string{"Preserve authentication boundaries"},
-		TargetRepositories: []string{"https://github.com/example/project"},
-		Workspaces: []string{"workspace/main"},
-		AcceptanceCriteria: []string{"All required Linux checks pass"},
-		RequiredEvidence: []string{"Linux CI result"},
-		Budget: domain.JobContractBudget{MaxTurns: 5, MaxTokens: 5000},
-		ConcurrencyCeiling: 1,
-		Deadline: deadline,
-		ProhibitedEffects: []string{"publish"},
+		Purpose:                 "Deliver the approved feature",
+		Constraints:             []string{"Preserve authentication boundaries"},
+		TargetRepositories:      []string{"https://github.com/example/project"},
+		Workspaces:              []string{"workspace/main"},
+		AcceptanceCriteria:      []string{"All required Linux checks pass"},
+		RequiredEvidence:        []string{"Linux CI result"},
+		Budget:                  domain.JobContractBudget{MaxTurns: 5, MaxTokens: 5000},
+		ConcurrencyCeiling:      1,
+		Deadline:                deadline,
+		ProhibitedEffects:       []string{"publish"},
 		ApprovalRequiredEffects: []string{"external.delete"},
-		ConfigurationSHA256: strings.Repeat("a", 64),
+		ConfigurationSHA256:     strings.Repeat("a", 64),
 	}
 }
 
