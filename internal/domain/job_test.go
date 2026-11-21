@@ -165,7 +165,7 @@ func newPlanningTestJob(t *testing.T) Job {
 	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
 	provenance := IntakeProvenance{
 		PrincipalID: identity.PrincipalID("https://identity.example", "subject-123"),
-		Issuer: "https://identity.example", Subject: "subject-123",
+		Issuer:      "https://identity.example", Subject: "subject-123",
 		IngressSource: IngressSourceCLI, AuthenticatedAt: now.Add(-time.Minute),
 		ReceivedAt: now.Add(-2 * time.Minute), RequestIdentity: "cmd_planning_job",
 		SchemaVersion: IntakeProvenanceSchemaVersion,
