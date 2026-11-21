@@ -39,6 +39,7 @@ type Job struct {
 	PlanningAuthorizations     []PlanningAuthorization     `json:"planning_authorizations,omitempty"`
 	RoleExecutions             []RoleExecution             `json:"role_executions,omitempty"`
 	ProviderStartIntents       []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
+	ProviderStartObservations  []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
 	PlanningTurnIntents        []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
 	PlanningTurnObservations   []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
 	PlanningEffectDecisions    []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
@@ -560,7 +561,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
+	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
 	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
@@ -623,6 +624,48 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: duplicate Provider Start operation ID", ErrInvalidJob)
 		}
 		seenOperations[intent.ID] = struct{}{}
+	}
+	startIntentsByID := make(map[string]ProviderStartIntent, len(j.ProviderStartIntents))
+	for _, intent := range j.ProviderStartIntents {
+		startIntentsByID[intent.ID] = intent
+	}
+	startObservationsByOperation := make(map[string][]ProviderStartObservation)
+	seenStartObservationIDs := make(map[string]struct{}, len(j.ProviderStartObservations))
+	for _, observation := range j.ProviderStartObservations {
+		start, exists := startIntentsByID[observation.OperationID]
+		if !exists {
+			return fmt.Errorf("%w: Provider Start observation has no Start intent", ErrInvalidJob)
+		}
+		if err := observation.Validate(j, start); err != nil {
+			return fmt.Errorf("%w: invalid Provider Start observation: %v", ErrInvalidJob, err)
+		}
+		if observation.CreatedAt.After(j.UpdatedAt) || observation.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: Provider Start observation append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenStartObservationIDs[observation.ID]; exists {
+			return fmt.Errorf("%w: duplicate Provider Start observation ID", ErrInvalidJob)
+		}
+		seenStartObservationIDs[observation.ID] = struct{}{}
+		startObservationsByOperation[observation.OperationID] = append(startObservationsByOperation[observation.OperationID], observation)
+	}
+	for operationID, observations := range startObservationsByOperation {
+		for i, observation := range observations {
+			if i == 0 {
+				if observation.ReconcilesUnknown {
+					return fmt.Errorf("%w: first Provider Start observation cannot reconcile UNKNOWN", ErrInvalidJob)
+				}
+				continue
+			}
+			previous := observations[i-1]
+			if previous.Status != ProviderStartUnknown || observation.Status == ProviderStartUnknown ||
+				!observation.ReconcilesUnknown || observation.CreatedRevision <= previous.CreatedRevision ||
+				observation.CreatedAt.Before(previous.CreatedAt) {
+				return fmt.Errorf("%w: invalid Provider Start observation reconciliation sequence for %s", ErrInvalidJob, operationID)
+			}
+		}
+		if len(observations) > 2 || (len(observations) == 2 && observations[0].Status != ProviderStartUnknown) {
+			return fmt.Errorf("%w: invalid Provider Start observation history for %s", ErrInvalidJob, operationID)
+		}
 	}
 	seenTurns := make(map[string]struct{}, len(j.PlanningTurnIntents))
 	turnByID := make(map[string]PlanningTurnIntent, len(j.PlanningTurnIntents))
