@@ -277,7 +277,7 @@ type ProviderStartObservation struct {
 }
 ```
 
-UNKNOWNは同一OperationIDの照合Observationで追記できる。terminal ACCEPTED / FAILEDは先行UNKNOWNだけを解消できる。ACCEPTED observationのSessionIDと一致しないTurn / Resume intentは新規作成できない。既存Jobの読み取り互換性を維持するため、最初のProviderStartObservationのCreatedRevisionをJobに記録し、そのrevision以降のTurn / Resumeに厳密なSession bindingを適用する。
+UNKNOWNは同一OperationIDの照合Observationで追記できる。terminal ACCEPTED / FAILEDは先行UNKNOWNだけを解消できる。ACCEPTED observationのSessionIDと一致しないTurn / Resume intentは新規作成できない。既存Jobの読み取り互換性を維持するため、Job.ProviderLifecycleEnforcedFromRevisionを使用する。新規StartIntent作成時はそのCreatedRevisionを記録する。旧Jobにこの値がない場合は、最初のProviderStartObservationのCreatedRevisionを記録する。そのrevisionより前の既存Turn / Resumeは読み取り可能とし、そのrevision以降の新しいTurn / Resumeにはaccepted Start observationとSessionIDの一致を要求する。
 
 ### 6.2 ProviderEventObservation（設計済み・未実装）
 
