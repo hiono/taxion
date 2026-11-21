@@ -13,7 +13,49 @@ const (
 	PlanningTurnFailed    = "FAILED"
 	PlanningEffectAllow   = "ALLOW"
 	PlanningEffectDeny    = "DENY"
+	PlanningBoundaryTurn   = "turn"
+	PlanningBoundaryEffect = "effect"
+	PlanningBoundaryResume = "resume"
 )
+
+type PlanningBoundaryError struct {
+	Boundary  string
+	ReasonCode string
+	Cause error
+}
+
+func (e *PlanningBoundaryError) Error() string {
+	if e.Cause == nil {
+		return "PlanningAuthorization boundary rejected: " + e.ReasonCode
+	}
+	return "PlanningAuthorization boundary rejected: " + e.ReasonCode + ": " + e.Cause.Error()
+}
+
+func (e *PlanningBoundaryError) Unwrap() error { return e.Cause }
+
+type PlanningBoundaryDecision struct {
+	ID string `json:"id"`
+	CommandID string `json:"command_id"`
+	SourceCommandID string `json:"source_command_id"`
+	JobID string `json:"job_id"`
+	RoleExecutionID string `json:"role_execution_id"`
+	PlanningAuthorizationID string `json:"planning_authorization_id"`
+	PrincipalID string `json:"principal_id"`
+	Boundary string `json:"boundary"`
+	Decision string `json:"decision"`
+	ReasonCode string `json:"reason_code"`
+	RequestSHA256 string `json:"request_sha256"`
+	CreatedAt time.Time `json:"created_at"`
+	CreatedRevision uint64 `json:"created_revision"`
+}
+
+func PlanningBoundaryDecisionCommandID(sourceCommandID, boundary string) string {
+	return planningOperationID("planning_boundary_command", boundary+":"+sourceCommandID)
+}
+
+func PlanningBoundaryDecisionID(commandID string) string {
+	return planningOperationID("planning_boundary_decision", commandID)
+}
 
 type PlanningTurnIntent struct {
 	ID                      string    `json:"id"`
@@ -110,7 +152,7 @@ func PlanningResumeIntentID(commandID string) string {
 	return planningOperationID("planning_resume", commandID)
 }
 
-func planningGrantAndExecution(job Job, roleExecutionID, principalID string, now time.Time) (PlanningAuthorization, RoleExecution, error) {
+func planningGrantAndExecution(job Job, roleExecutionID, principalID string, now time.Time, boundary string) (PlanningAuthorization, RoleExecution, error) {
 	if err := job.Validate(); err != nil {
 		return PlanningAuthorization{}, RoleExecution{}, err
 	}
@@ -137,7 +179,7 @@ func planningGrantAndExecution(job Job, roleExecutionID, principalID string, now
 		return PlanningAuthorization{}, RoleExecution{}, errors.New("PlanningAuthorization was not found")
 	}
 	if err := grant.ValidateFor(job, principalID, now); err != nil {
-		return PlanningAuthorization{}, RoleExecution{}, err
+		return PlanningAuthorization{}, RoleExecution{}, &PlanningBoundaryError{Boundary: boundary, ReasonCode: "authorization_invalid_or_expired", Cause: err}
 	}
 	return grant, execution, nil
 }
@@ -178,7 +220,7 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 		!validSHA256(promptSHA256) || reservedTokens == 0 || now.IsZero() {
 		return PlanningTurnIntent{}, errors.New("planning turn command, session, prompt digest, token reservation, and timestamp are required")
 	}
-	grant, execution, err := planningGrantAndExecution(job, roleExecutionID, principalID, now)
+	grant, execution, err := planningGrantAndExecution(job, roleExecutionID, principalID, now, PlanningBoundaryTurn)
 	if err != nil {
 		return PlanningTurnIntent{}, err
 	}
@@ -200,7 +242,7 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 			continue
 		}
 		if previous.ProviderSessionID != providerSessionID {
-			return PlanningTurnIntent{}, errors.New("planning turn cannot change Provider Session identity")
+			return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "provider_session_mismatch", Cause: errors.New("planning turn cannot change Provider Session identity")}
 		}
 		count++
 		if ^uint64(0)-reserved < previous.ReservedTokens {
@@ -216,15 +258,19 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 			}
 		}
 		if observations == 0 || lastStatus == PlanningTurnUnknown {
-			return PlanningTurnIntent{}, errors.New("previous Provider turn is unresolved; reconcile the same OperationID before another turn")
+			return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "previous_operation_unknown", Cause: errors.New("previous Provider turn is unresolved; reconcile the same OperationID before another turn")}
 		}
 	}
 	if count >= grant.Budget.MaxTurns || reservedTokens > grant.Budget.MaxTokens-reserved {
-		return PlanningTurnIntent{}, errors.New("PlanningAuthorization turn or token budget is exhausted")
+		reasonCode := "turn_budget_exhausted"
+		if reservedTokens > grant.Budget.MaxTokens-reserved {
+			reasonCode = "token_budget_exhausted"
+		}
+		return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: reasonCode, Cause: errors.New("PlanningAuthorization turn or token budget is exhausted")}
 	}
 	if start.ProviderID != grant.ProviderID || start.AccountID != grant.AccountID ||
 		start.ConfigurationSHA256 != grant.ConfigurationSHA256 {
-		return PlanningTurnIntent{}, errors.New("Provider Start intent identity differs from PlanningAuthorization")
+		return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "provider_configuration_mismatch", Cause: errors.New("Provider Start intent identity differs from PlanningAuthorization")}
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return PlanningTurnIntent{}, errors.New("Job revision exhausted")
@@ -376,7 +422,7 @@ func NewPlanningEffectDecision(job Job, roleExecutionID, principalID, commandID,
 	if !validCommandID(commandID) || !validPlanningIdentity(effect) || !validSHA256(contextSHA256) || now.IsZero() {
 		return PlanningEffectDecision{}, errors.New("planning effect command, identity, context digest, and timestamp are required")
 	}
-	grant, execution, err := planningGrantAndExecution(job, roleExecutionID, principalID, now)
+	grant, execution, err := planningGrantAndExecution(job, roleExecutionID, principalID, now, PlanningBoundaryEffect)
 	if err != nil {
 		return PlanningEffectDecision{}, err
 	}
@@ -442,9 +488,9 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 	now = now.UTC().Round(0)
 	if !validCommandID(commandID) || !validPlanningIdentity(providerSessionID) ||
 		!validSHA256(capabilityEvidenceSHA256) || !reattachmentSupported || now.IsZero() {
-		return PlanningResumeIntent{}, errors.New("resume requires the same Provider Session and verified cross-process reattachment capability")
+		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "reattachment_not_supported", Cause: errors.New("resume requires the same Provider Session and verified cross-process reattachment capability")}
 	}
-	grant, execution, err := planningGrantAndExecution(job, roleExecutionID, principalID, now)
+	grant, execution, err := planningGrantAndExecution(job, roleExecutionID, principalID, now, PlanningBoundaryResume)
 	if err != nil {
 		return PlanningResumeIntent{}, err
 	}
@@ -456,11 +502,11 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 		}
 	}
 	if !foundSession {
-		return PlanningResumeIntent{}, errors.New("resume Provider Session does not match a persisted turn")
+		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_mismatch", Cause: errors.New("resume Provider Session does not match a persisted turn")}
 	}
 	for _, previous := range job.PlanningResumeIntents {
 		if previous.RoleExecutionID == execution.ID && previous.ProviderSessionID != providerSessionID {
-			return PlanningResumeIntent{}, errors.New("resume cannot replace the Provider Session identity")
+			return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_mismatch", Cause: errors.New("resume cannot replace the Provider Session identity")}
 		}
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
@@ -528,4 +574,97 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 		return nil
 	}
 	return errors.New("PlanningResumeIntent PlanningAuthorization was not found")
+}
+
+func NewPlanningBoundaryDecision(job Job, roleExecutionID, principalID, sourceCommandID, boundary, reasonCode string, now time.Time) (PlanningBoundaryDecision, error) {
+	now = now.UTC().Round(0)
+	commandID := PlanningBoundaryDecisionCommandID(sourceCommandID, boundary)
+	if !validCommandID(sourceCommandID) || !validCommandID(commandID) || now.IsZero() ||
+		(boundary != PlanningBoundaryTurn && boundary != PlanningBoundaryEffect && boundary != PlanningBoundaryResume) {
+		return PlanningBoundaryDecision{}, errors.New("planning boundary decision identity is invalid")
+	}
+	allowedReasons := map[string]struct{}{
+		"authorization_invalid_or_expired": {},
+		"principal_mismatch": {},
+		"provider_session_mismatch": {},
+		"previous_operation_unknown": {},
+		"turn_budget_exhausted": {},
+		"token_budget_exhausted": {},
+		"provider_configuration_mismatch": {},
+		"reattachment_not_supported": {},
+		"read_only_context_mismatch": {},
+		"effect_not_permitted": {},
+	}
+	if _, ok := allowedReasons[reasonCode]; !ok {
+		return PlanningBoundaryDecision{}, errors.New("planning boundary decision reason code is unsupported")
+	}
+	if err := job.Validate(); err != nil {
+		return PlanningBoundaryDecision{}, err
+	}
+	var execution RoleExecution
+	foundExecution := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == roleExecutionID {
+			execution, foundExecution = candidate, true
+			break
+		}
+	}
+	if !foundExecution {
+		return PlanningBoundaryDecision{}, errors.New("Taskless PLANNER RoleExecution was not found")
+	}
+	for _, grant := range job.PlanningAuthorizations {
+		if grant.ID != execution.PlanningAuthorizationID {
+			continue
+		}
+		if err := grant.Validate(job); err != nil {
+			return PlanningBoundaryDecision{}, err
+		}
+		if grant.PrincipalID != principalID {
+			return PlanningBoundaryDecision{}, errors.New("PlanningAuthorization principal mismatch")
+		}
+		decision := PlanningBoundaryDecision{
+			ID: PlanningBoundaryDecisionID(commandID), CommandID: commandID,
+			SourceCommandID: sourceCommandID, JobID: job.ID, RoleExecutionID: execution.ID,
+			PlanningAuthorizationID: grant.ID, PrincipalID: principalID,
+			Boundary: boundary, Decision: PlanningEffectDeny, ReasonCode: reasonCode,
+			RequestSHA256: grant.RequestSHA256, CreatedAt: now, CreatedRevision: job.Revision + 1,
+		}
+		if err := decision.Validate(job); err != nil {
+			return PlanningBoundaryDecision{}, err
+		}
+		return decision, nil
+	}
+	return PlanningBoundaryDecision{}, errors.New("PlanningAuthorization was not found")
+}
+
+func (d PlanningBoundaryDecision) Validate(job Job) error {
+	if !validPlanningIdentity(d.ID) || !validCommandID(d.CommandID) ||
+		d.ID != PlanningBoundaryDecisionID(d.CommandID) ||
+		d.CommandID != PlanningBoundaryDecisionCommandID(d.SourceCommandID, d.Boundary) ||
+		!validCommandID(d.SourceCommandID) || d.JobID != job.ID ||
+		!validPlanningIdentity(d.RoleExecutionID) || !validPlanningIdentity(d.PlanningAuthorizationID) ||
+		!validPlanningIdentity(d.PrincipalID) || !validSHA256(d.RequestSHA256) ||
+		(d.Boundary != PlanningBoundaryTurn && d.Boundary != PlanningBoundaryEffect && d.Boundary != PlanningBoundaryResume) ||
+		d.Decision != PlanningEffectDeny || d.ReasonCode == "" || d.CreatedAt.IsZero() || d.CreatedRevision < 3 {
+		return errors.New("PlanningBoundaryDecision identity or metadata is invalid")
+	}
+	for _, execution := range job.RoleExecutions {
+		if execution.ID != d.RoleExecutionID || execution.PlanningAuthorizationID != d.PlanningAuthorizationID {
+			continue
+		}
+		for _, grant := range job.PlanningAuthorizations {
+			if grant.ID != d.PlanningAuthorizationID {
+				continue
+			}
+			if err := grant.Validate(job); err != nil {
+				return err
+			}
+			if grant.PrincipalID != d.PrincipalID || grant.RequestSHA256 != d.RequestSHA256 ||
+				d.CreatedAt.Before(execution.CreatedAt) {
+				return errors.New("PlanningBoundaryDecision does not match its authorization")
+			}
+			return nil
+		}
+	}
+	return errors.New("PlanningBoundaryDecision RoleExecution or PlanningAuthorization was not found")
 }

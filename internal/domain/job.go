@@ -43,6 +43,7 @@ type Job struct {
 	PlanningTurnObservations []PlanningTurnObservation `json:"planning_turn_observations,omitempty"`
 	PlanningEffectDecisions  []PlanningEffectDecision  `json:"planning_effect_decisions,omitempty"`
 	PlanningResumeIntents    []PlanningResumeIntent    `json:"planning_resume_intents,omitempty"`
+	PlanningBoundaryDecisions []PlanningBoundaryDecision `json:"planning_boundary_decisions,omitempty"`
 }
 
 type IntakeProvenance struct {
@@ -558,7 +559,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents))
+	appendOnlyFacts := uint64(len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningBoundaryDecisions))
 	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
@@ -719,6 +720,19 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: duplicate PlanningResumeIntent ID", ErrInvalidJob)
 		}
 		seenResumes[resume.ID] = struct{}{}
+	}
+	seenBoundaryDecisions := make(map[string]struct{}, len(j.PlanningBoundaryDecisions))
+	for _, decision := range j.PlanningBoundaryDecisions {
+		if err := decision.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid PlanningBoundaryDecision: %v", ErrInvalidJob, err)
+		}
+		if decision.CreatedAt.After(j.UpdatedAt) || decision.CreatedRevision > j.Revision {
+			return fmt.Errorf("%w: PlanningBoundaryDecision append order is invalid", ErrInvalidJob)
+		}
+		if _, exists := seenBoundaryDecisions[decision.ID]; exists {
+			return fmt.Errorf("%w: duplicate PlanningBoundaryDecision ID", ErrInvalidJob)
+		}
+		seenBoundaryDecisions[decision.ID] = struct{}{}
 	}
 	for grantID, reserved := range turnReserved {
 		for _, grant := range j.PlanningAuthorizations {

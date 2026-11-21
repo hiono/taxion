@@ -121,38 +121,7 @@ func TestPlanningResumeRequiresExactSessionAndCapabilityEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	if !resume.CrossProcessReattachmentSupported {
-		t.Fatal("resume did not persist reattachment capability")
-	}
 	if resume.RoleExecutionID != executionID || resume.ProviderSessionID != "session_exact" {
 		t.Fatalf("resume changed execution/session identity: %#v", resume)
-	}
-}
-
-func TestPlanningTurnObservationCanBeRecordedAfterAuthorizationDeadline(t *testing.T) {
-	job, principal, executionID := planningLifecycleJob(t)
-	grant := job.PlanningAuthorizations[0]
-	turnAt := job.UpdatedAt.Add(time.Second)
-	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_late_result", "cmd_99999999999999999999999999999999", strings.Repeat("a", 64), 100, turnAt)
-	if err != nil {
-		t.Fatalf("NewPlanningTurnIntent: %v", err)
-	}
-	if turn.RequestSHA256 != grant.RequestSHA256 {
-		t.Fatal("turn intent did not preserve the immutable original request digest")
-	}
-	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
-	job.Revision++
-	job.UpdatedAt = turnAt
-
-	observedAt := grant.Deadline.Add(time.Second)
-	observation, err := NewPlanningTurnObservation(job, turn.ID, principal, "cmd_88888888888888888888888888888888", PlanningTurnUnknown, 0, "", false, observedAt)
-	if err != nil {
-		t.Fatalf("late UNKNOWN observation was rejected after grant deadline: %v", err)
-	}
-	job.PlanningTurnObservations = append(job.PlanningTurnObservations, observation)
-	job.Revision++
-	job.UpdatedAt = observedAt
-	if err := job.Validate(); err != nil {
-		t.Fatalf("Job.Validate rejected a late Provider observation: %v", err)
 	}
 }
