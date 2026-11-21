@@ -16,6 +16,7 @@ type PlanningLifecycleStore interface {
 	AddPlanningTurnObservation(context.Context, string, uint64, string, string, string, uint64, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnObservation, error)
 	AddPlanningEffectDecision(context.Context, string, uint64, string, string, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningEffectDecision, error)
 	AddPlanningResumeIntent(context.Context, string, uint64, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningResumeIntent, error)
+	AddPlanningResumeObservation(context.Context, string, uint64, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningResumeObservation, error)
 	AddPlanningBoundaryDecision(context.Context, string, uint64, string, string, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningBoundaryDecision, error)
 }
 
@@ -75,6 +76,14 @@ func (c *PlanningController) Resume(ctx context.Context, jobID, roleExecutionID,
 		return receipt, resume, c.recordBoundaryDenial(ctx, jobID, roleExecutionID, commandID, err, principal)
 	}
 	return receipt, resume, nil
+}
+
+func (c *PlanningController) RecordResumeObservation(ctx context.Context, jobID, resumeID, commandID, status, evidenceSHA256 string, reconcilesUnknown bool, principal auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningResumeObservation, error) {
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return store.CommandReceipt{}, domain.PlanningResumeObservation{}, err
+	}
+	return c.store.AddPlanningResumeObservation(ctx, jobID, job.Revision, resumeID, commandID, status, evidenceSHA256, reconcilesUnknown, principal)
 }
 
 func (c *PlanningController) recordBoundaryDenial(ctx context.Context, jobID, roleExecutionID, sourceCommandID string, cause error, principal auth.AuthenticatedPrincipal) error {

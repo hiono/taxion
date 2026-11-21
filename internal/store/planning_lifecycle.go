@@ -273,3 +273,30 @@ func (s *Store) AddPlanningBoundaryDecision(ctx context.Context, jobID string, e
 			return domain.PlanningBoundaryDecision{}, false
 		})
 }
+
+func (s *Store) AddPlanningResumeObservation(ctx context.Context, jobID string, expectedRevision uint64, resumeID, commandID, status, evidenceSHA256 string, reconcilesUnknown bool, principal auth.AuthenticatedPrincipal) (CommandReceipt, domain.PlanningResumeObservation, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, domain.PlanningResumeObservation{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	request := struct {
+		JobID, ResumeID, CommandID, Status, EvidenceSHA256 string
+		ExpectedRevision uint64
+		ReconcilesUnknown bool
+		PrincipalID string
+	}{jobID, resumeID, commandID, status, evidenceSHA256, expectedRevision, reconcilesUnknown, principal.PrincipalID()}
+	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, "AddPlanningResumeObservation", request,
+		func(job domain.Job, now time.Time) (domain.PlanningResumeObservation, error) {
+			return domain.NewPlanningResumeObservation(job, resumeID, principal.PrincipalID(), commandID, status, evidenceSHA256, reconcilesUnknown, now)
+		},
+		func(job *domain.Job, fact domain.PlanningResumeObservation) {
+			job.PlanningResumeObservations = append(job.PlanningResumeObservations, fact)
+		},
+		func(job domain.Job) (domain.PlanningResumeObservation, bool) {
+			for _, fact := range job.PlanningResumeObservations {
+				if fact.CommandID == commandID {
+					return fact, true
+				}
+			}
+			return domain.PlanningResumeObservation{}, false
+		})
+}

@@ -128,7 +128,27 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	if resume.RoleExecutionID != executionID || resume.ProviderSessionID != "session_exact" {
+	
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before resume UNKNOWN: %v", err)
+	}
+	_, resumeUnknown, err := database.AddPlanningResumeObservation(ctx, jobID, job.Revision, resume.ID, "cmd_77777777777777777777777777777777", domain.PlanningResumeUnknown, "", false, principal)
+	if err != nil || resumeUnknown.Status != domain.PlanningResumeUnknown {
+		t.Fatalf("record resume UNKNOWN: %#v %v", resumeUnknown, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before resume reconciliation: %v", err)
+	}
+	if _, _, err := database.AddPlanningResumeIntent(ctx, jobID, job.Revision, executionID, "session_exact", "cmd_88888888888888888888888888888888", strings.Repeat("2", 64), true, principal); err == nil {
+		t.Fatal("new resume was allowed while previous resume remained UNKNOWN")
+	}
+	_, resumeResolved, err := database.AddPlanningResumeObservation(ctx, jobID, job.Revision, resume.ID, "cmd_99999999999999999999999999999999", domain.PlanningResumeAttached, strings.Repeat("3", 64), true, principal)
+	if err != nil || !resumeResolved.ReconcilesUnknown {
+		t.Fatalf("reconcile resume UNKNOWN: %#v %v", resumeResolved, err)
+	}
+if resume.RoleExecutionID != executionID || resume.ProviderSessionID != "session_exact" {
 		t.Fatalf("resume changed identity: %#v", resume)
 	}
 
@@ -145,7 +165,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 		t.Fatalf("GetJob after restart: %v", err)
 	}
 	if job.State != domain.JobDraft || len(job.PlanningTurnIntents) != 1 || len(job.PlanningTurnObservations) != 2 ||
-		len(job.PlanningEffectDecisions) != 2 || len(job.PlanningResumeIntents) != 1 || len(job.PlanningBoundaryDecisions) != 1 || len(job.RoleExecutions) != 1 {
+		len(job.PlanningEffectDecisions) != 2 || len(job.PlanningResumeIntents) != 1 || len(job.PlanningResumeObservations) != 2 || len(job.PlanningBoundaryDecisions) != 1 || len(job.RoleExecutions) != 1 {
 		t.Fatalf("restored Job lifecycle facts: %#v", job)
 	}
 }
