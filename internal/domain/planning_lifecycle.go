@@ -394,8 +394,8 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 			if t.CreatedRevision <= start.CreatedRevision || t.CreatedAt.Before(start.CreatedAt) {
 				return errors.New("PlanningTurnIntent precedes Provider Start intent")
 			}
-			if job.ProviderStartObservationRequiredFromRevision > 0 &&
-				t.CreatedRevision >= job.ProviderStartObservationRequiredFromRevision {
+			if job.ProviderLifecycleEnforcedFromRevision > 0 &&
+				t.CreatedRevision >= job.ProviderLifecycleEnforcedFromRevision {
 				if err := validateProviderStartSession(job, start, t.ProviderSessionID, t.CreatedRevision, t.CreatedAt); err != nil {
 					return err
 				}
@@ -697,8 +697,8 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 	if latestPriorSessionTurn == nil || r.CreatedAt.Before(latestPriorSessionTurn.CreatedAt) {
 		return errors.New("PlanningResumeIntent does not follow the latest persisted turn for the same Provider Session")
 	}
-	if job.ProviderStartObservationRequiredFromRevision > 0 &&
-		r.CreatedRevision >= job.ProviderStartObservationRequiredFromRevision {
+	if job.ProviderLifecycleEnforcedFromRevision > 0 &&
+		r.CreatedRevision >= job.ProviderLifecycleEnforcedFromRevision {
 		var startIntent ProviderStartIntent
 		foundStart := false
 		for _, candidate := range job.ProviderStartIntents {
