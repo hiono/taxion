@@ -424,3 +424,44 @@ func TestPlanningLifecycleFactsFollowTheirPredecessorRevisions(t *testing.T) {
 		t.Fatal("PlanningBoundaryDecision accepted a revision before RoleExecution")
 	}
 }
+
+func TestPlanningTurnRequiresAttachedSessionAfterFailedResume(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("a", 64), 100, now)
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	turnObservation, err := NewPlanningTurnObservation(job, turn.ID, principal, "cmd_cccccccccccccccccccccccccccccccc", PlanningTurnCompleted, 10, strings.Repeat("b", 64), false, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("turn observation: %v", err)
+	}
+	job.PlanningTurnObservations = append(job.PlanningTurnObservations, turnObservation)
+	job.Revision++
+	job.UpdatedAt = turnObservation.CreatedAt
+
+	resume, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_dddddddddddddddddddddddddddddddd", strings.Repeat("c", 64), true, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, resume)
+	job.Revision++
+	job.UpdatedAt = resume.CreatedAt
+	failed, err := NewPlanningResumeObservation(job, resume.ID, principal, "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", PlanningResumeFailed, strings.Repeat("d", 64), false, now.Add(3*time.Second))
+	if err != nil {
+		t.Fatalf("failed resume observation: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, failed)
+	job.Revision++
+	job.UpdatedAt = failed.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate after failed resume: %v", err)
+	}
+
+	if _, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("e", 64), 100, now.Add(4*time.Second)); err == nil || !strings.Contains(err.Error(), "provider_session_not_attached") {
+		t.Fatalf("turn after FAILED resume = %v, want provider_session_not_attached", err)
+	}
+}
