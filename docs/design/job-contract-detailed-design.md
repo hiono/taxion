@@ -47,9 +47,11 @@ Fields:
 - CanonicalHash
 - canonical JobContract
 - ProposedByRoleExecutionID
+- SourceResultObservationID
+- SourceResultContentSHA256
 - CreatedAt and CreatedRevision
 
-The proposer must be a Taskless PLANNER RoleExecution belonging to the same Job, with an accepted Provider Start and a PlanningAuthorization valid at CreatedAt. The revision is immutable after append.
+The proposer must be a Taskless PLANNER RoleExecution belonging to the same Job, with an accepted Provider Start and a PlanningAuthorization valid at CreatedAt. The source Result must be a persisted final ProviderResultObservation in the same Job, produced by that exact RoleExecution, and its ID and ContentSHA256 must match the revision provenance. The Result observation's own validation must bind it to the accepted Start / Session and exact Turn. The canonical contract hash and source Result content digest are separate identities and must never be substituted for one another.
 
 ### 1.3 JobApproval
 
@@ -83,6 +85,8 @@ The version is part of the hash preimage. Any canonicalization rule change requi
 - Contract revision numbers are contiguous, unique, and append-only.
 - Every revision hash recomputes exactly from its stored canonical content and version.
 - Every revision references a PLANNER RoleExecution in the same Job.
+- Every revision references an existing final ProviderResultObservation in the same Job and same RoleExecution; the stored Result ID and content digest must match exactly.
+- The source Result must validate against the accepted Provider Start / Session and exact Turn identity.
 - At most one JobApproval exists per contract revision.
 - Every approval binds the exact revision, canonicalization version, and canonical hash.
 - Approver identity is a validated HUMAN Principal and source is its authenticated issuer.
@@ -95,9 +99,9 @@ The version is part of the hash preimage. Any canonicalization rule change requi
 
 ### 4.1 AddJobContractRevision
 
-Input: Job ID, expected Job revision, CommandID, Planner RoleExecution ID, JobContract.
+Input: Job ID, expected Job revision, CommandID, Planner RoleExecution ID, exact source Result observation ID, source Result content SHA-256, and JobContract.
 
-The Store creates the next immutable contract revision only for a DRAFT Job while the referenced PlanningAuthorization remains valid. The command is idempotent by CommandID and canonical request hash. ACTIVE amendments are rejected until a separate authorized revision command exists.
+The Store creates the next immutable contract revision only for a DRAFT Job while the referenced PlanningAuthorization remains valid. In the same aggregate transaction, it resolves the source Result observation by ID and verifies its JobID, RoleExecutionID, Final flag, ContentSHA256, accepted Start / Session / Turn binding, and full Domain validity. A missing or mismatched Result fails closed. The command is idempotent by CommandID and canonical request hash, including all source provenance fields. ACTIVE amendments are rejected until a separate authorized revision command exists.
 
 ### 4.2 AddJobApproval
 
@@ -115,10 +119,11 @@ This design establishes JobContract / JobApproval Domain and Store facts plus pr
 
 The Controller accepts a proposal only from a validated AuthenticatedPrincipal whose identity matches the PlanningAuthorization bound to the referenced RoleExecution. The RoleExecution must be a Taskless PLANNER in the same Job, the Job must be DRAFT, and an ACCEPTED Provider Start observation must exist for that execution.
 
-For a new proposal, the Controller revalidates the current PlanningAuthorization and its deadline immediately before calling the Store. The Store remains the authoritative mutation boundary: it validates the accepted Start, canonical contract, deadline, expected Job revision, idempotency identity, and aggregate invariants in one transaction.
+The Controller requires the exact persisted final Result observation ID. It verifies that the observation belongs to the same Job and RoleExecution, and that its accepted Session / Turn provenance is valid. The Controller passes the Result ID and content digest to the Store command. The Store repeats these checks inside the aggregate transaction; Controller preflight alone is not the integrity boundary.
 
-The Controller does not call the Provider, change Job authority, issue JobApproval, or create ExecutionPermission. A committed proposal may be retried after the PlanningAuthorization deadline only with the same CommandID and identical canonical request; the Store returns the original receipt and fact. A different payload or proposer with the same CommandID is rejected as an idempotency conflict.
+For a new proposal, the Controller revalidates the current PlanningAuthorization and its deadline immediately before calling the Store. The Store remains the authoritative mutation boundary: it validates the accepted Start, source Result provenance, canonical contract, deadline, expected Job revision, idempotency identity, and aggregate invariants in one transaction.
 
+The Controller does not call the Provider, change Job authority, issue JobApproval, or create ExecutionPermission. A committed proposal may be retried after the PlanningAuthorization deadline only with the same CommandID, identical canonical request, and identical source Result provenance; the Store returns the original receipt and fact. A different Result ID / digest, payload, or proposer with the same CommandID is rejected as an idempotency conflict.
 
 ## 7. Human approval Controller and CLI ingress
 
