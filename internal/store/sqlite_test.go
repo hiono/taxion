@@ -747,7 +747,7 @@ func TestStartTasklessPlannerPersistsAndIsIdempotent(t *testing.T) {
 		len(got.ProviderStartIntents) != 1 {
 		t.Fatalf("persisted Job = %#v", got)
 	}
-	if _, err := database.StartTasklessPlanner(ctx, jobID, got.Revision, grant.ID,
+	if _, _, _, err := database.StartTasklessPlanner(ctx, jobID, got.Revision, grant.ID,
 		"cmd_dddddddddddddddddddddddddddddddd", principal); err == nil {
 		t.Fatal("StartTasklessPlanner() reused a PlanningAuthorization")
 	}
