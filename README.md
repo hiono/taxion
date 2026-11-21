@@ -45,7 +45,7 @@ Planner、PlanningAuthorization、JobContractの承認、Role実行、Provider�
 
 ## 開発・運用
 
-開発時の品質基準は[Development Quality Gates](docs/development/quality-gates.md)を参照してください。作業時の一時的な調査手順やエージェント固有の行動規則は、製品仕様としてRepositoryへ固定しません。
+開発時の品質基準は[Development Quality Gates](docs/development/quality-gates.md)を参照してください。
 
 ## 設計判断
 
