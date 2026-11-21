@@ -115,7 +115,7 @@ func (a *testAdapter) ReplayEvents(_ context.Context, request ReplayEventsReques
 	event := ProviderEvent{
 		EventID: "event_1", SessionID: request.SessionID, OperationID: "provider_op_1",
 		Kind: EventOperationAccepted, PreviousCursor: request.AfterCursor, Cursor: "cursor_1",
-		ObservedAt: time.Date(2026, 11, 21, 1, 0, 0, 0, time.UTC),
+		ObservedAt:     time.Date(2026, 11, 21, 1, 0, 0, 0, time.UTC),
 		EvidenceSHA256: strings.Repeat("3", 64),
 	}
 	return EventPage{
