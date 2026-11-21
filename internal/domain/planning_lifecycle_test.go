@@ -340,3 +340,65 @@ func TestPlanningLifecycleRejectsObservationAfterNextIntent(t *testing.T) {
 		t.Fatal("Job.Validate accepted a resume result appended after the next resume intent")
 	}
 }
+
+func TestPlanningLifecycleFactsFollowTheirPredecessorRevisions(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	var execution RoleExecution
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == executionID {
+			execution = candidate
+			break
+		}
+	}
+
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", strings.Repeat("a", 64), 100, now)
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	invalidTurn := turn
+	invalidTurn.CreatedRevision = execution.CreatedRevision
+	if err := invalidTurn.Validate(job); err == nil {
+		t.Fatal("PlanningTurnIntent accepted a revision before Provider Start")
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+
+	effect, err := NewPlanningEffectDecision(job, executionID, principal, "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", PlanningEffectRepositoryRead, job.PlanningAuthorizations[0].ReadOnlyBoundary.SHA256, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("effect: %v", err)
+	}
+	invalidEffect := effect
+	invalidEffect.CreatedRevision = execution.CreatedRevision
+	if err := invalidEffect.Validate(job); err == nil {
+		t.Fatal("PlanningEffectDecision accepted a revision before RoleExecution")
+	}
+	job.PlanningEffectDecisions = append(job.PlanningEffectDecisions, effect)
+	job.Revision++
+	job.UpdatedAt = effect.CreatedAt
+
+	resume, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_cccccccccccccccccccccccccccccccc", strings.Repeat("c", 64), true, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	invalidResume := resume
+	invalidResume.CreatedRevision = turn.CreatedRevision
+	if err := invalidResume.Validate(job); err == nil {
+		t.Fatal("PlanningResumeIntent accepted a revision before its turn")
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, resume)
+	job.Revision++
+	job.UpdatedAt = resume.CreatedAt
+
+	boundary, err := NewPlanningBoundaryDecision(job, executionID, principal, "cmd_dddddddddddddddddddddddddddddddd", PlanningBoundaryTurn, "token_budget_exhausted", now.Add(3*time.Second))
+	if err != nil {
+		t.Fatalf("boundary: %v", err)
+	}
+	invalidBoundary := boundary
+	invalidBoundary.CreatedRevision = execution.CreatedRevision
+	if err := invalidBoundary.Validate(job); err == nil {
+		t.Fatal("PlanningBoundaryDecision accepted a revision before RoleExecution")
+	}
+}
+

@@ -627,6 +627,8 @@ func (j Job) Validate() error {
 	seenTurns := make(map[string]struct{}, len(j.PlanningTurnIntents))
 	turnByID := make(map[string]PlanningTurnIntent, len(j.PlanningTurnIntents))
 	turnCounts := make(map[string]uint32)
+	previousTurnRevision := make(map[string]uint64)
+	previousTurnCreatedAt := make(map[string]time.Time)
 	for _, turn := range j.PlanningTurnIntents {
 		if err := turn.Validate(j); err != nil {
 			return fmt.Errorf("%w: invalid PlanningTurnIntent: %v", ErrInvalidJob, err)
@@ -643,6 +645,12 @@ func (j Job) Validate() error {
 		if turn.TurnNumber != turnCounts[turn.RoleExecutionID] {
 			return fmt.Errorf("%w: planning turn sequence is not contiguous", ErrInvalidJob)
 		}
+		if previousRevision := previousTurnRevision[turn.RoleExecutionID]; previousRevision != 0 &&
+			(turn.CreatedRevision <= previousRevision || turn.CreatedAt.Before(previousTurnCreatedAt[turn.RoleExecutionID])) {
+			return fmt.Errorf("%w: PlanningTurnIntent sequence is not append ordered", ErrInvalidJob)
+		}
+		previousTurnRevision[turn.RoleExecutionID] = turn.CreatedRevision
+		previousTurnCreatedAt[turn.RoleExecutionID] = turn.CreatedAt
 	}
 	observationsByTurn := make(map[string][]PlanningTurnObservation)
 	seenObservationIDs := make(map[string]struct{}, len(j.PlanningTurnObservations))

@@ -352,6 +352,19 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 	if !foundExecution || execution.PlanningAuthorizationID != t.PlanningAuthorizationID {
 		return errors.New("PlanningTurnIntent RoleExecution or grant mismatch")
 	}
+	foundStart := false
+	for _, start := range job.ProviderStartIntents {
+		if start.RoleExecutionID == execution.ID {
+			if t.CreatedRevision <= start.CreatedRevision || t.CreatedAt.Before(start.CreatedAt) {
+				return errors.New("PlanningTurnIntent precedes Provider Start intent")
+			}
+			foundStart = true
+			break
+		}
+	}
+	if !foundStart {
+		return errors.New("PlanningTurnIntent Provider Start intent was not found")
+	}
 	for _, grant := range job.PlanningAuthorizations {
 		if grant.ID != t.PlanningAuthorizationID {
 			continue
@@ -501,6 +514,9 @@ func (d PlanningEffectDecision) Validate(job Job) error {
 	if !foundExecution || execution.PlanningAuthorizationID != d.PlanningAuthorizationID {
 		return errors.New("PlanningEffectDecision RoleExecution or grant mismatch")
 	}
+	if d.CreatedRevision <= execution.CreatedRevision {
+		return errors.New("PlanningEffectDecision precedes RoleExecution")
+	}
 	for _, grant := range job.PlanningAuthorizations {
 		if grant.ID != d.PlanningAuthorizationID {
 			continue
@@ -610,22 +626,15 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 	if !foundExecution || execution.PlanningAuthorizationID != r.PlanningAuthorizationID {
 		return errors.New("PlanningResumeIntent RoleExecution or grant mismatch")
 	}
-	foundSession := false
-	var latestTurnAt time.Time
+	foundPriorSessionTurn := false
 	for _, turn := range job.PlanningTurnIntents {
-		if turn.RoleExecutionID != r.RoleExecutionID {
-			continue
-		}
-		if turn.ProviderSessionID != r.ProviderSessionID {
-			return errors.New("PlanningResumeIntent Provider Session differs from the RoleExecution's turns")
-		}
-		foundSession = true
-		if turn.CreatedAt.After(latestTurnAt) {
-			latestTurnAt = turn.CreatedAt
+		if turn.RoleExecutionID == r.RoleExecutionID && turn.ProviderSessionID == r.ProviderSessionID &&
+			turn.CreatedRevision < r.CreatedRevision && !turn.CreatedAt.After(r.CreatedAt) {
+			foundPriorSessionTurn = true
 		}
 	}
-	if !foundSession || r.CreatedAt.Before(latestTurnAt) {
-		return errors.New("PlanningResumeIntent does not follow the persisted Provider Session's latest turn")
+	if !foundPriorSessionTurn {
+		return errors.New("PlanningResumeIntent does not follow a persisted turn for the same Provider Session")
 	}
 	for _, grant := range job.PlanningAuthorizations {
 		if grant.ID != r.PlanningAuthorizationID {
@@ -670,6 +679,9 @@ func NewPlanningBoundaryDecision(job Job, roleExecutionID, principalID, sourceCo
 	}
 	if !foundExecution {
 		return PlanningBoundaryDecision{}, errors.New("Taskless PLANNER RoleExecution was not found")
+	}
+	if job.Revision+1 <= execution.CreatedRevision {
+		return PlanningBoundaryDecision{}, errors.New("PlanningBoundaryDecision precedes RoleExecution")
 	}
 	for _, grant := range job.PlanningAuthorizations {
 		if grant.ID != execution.PlanningAuthorizationID {
@@ -719,7 +731,7 @@ func (d PlanningBoundaryDecision) Validate(job Job) error {
 				return err
 			}
 			if grant.PrincipalID != d.PrincipalID || grant.RequestSHA256 != d.RequestSHA256 ||
-				d.CreatedAt.Before(execution.CreatedAt) {
+				d.CreatedAt.Before(execution.CreatedAt) || d.CreatedRevision <= execution.CreatedRevision {
 				return errors.New("PlanningBoundaryDecision does not match its authorization")
 			}
 			return nil
