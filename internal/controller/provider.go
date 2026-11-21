@@ -175,11 +175,12 @@ func (c *ProviderController) reconcileStart(
 				}
 				return receipt, execution, intent, provider.StartResult{}, errors.New("Provider Start lookup confirmed failure")
 			}
-			if lookup.Status == provider.LookupStatusUnknown {
+			switch lookup.Status {
+			case provider.LookupStatusUnknown, "PENDING", "DETACHED", "STOPPED":
 				if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); err != nil {
 					return receipt, execution, intent, provider.StartResult{}, err
 				}
-				return receipt, execution, intent, provider.StartResult{}, errors.New("Provider Start lookup remains UNKNOWN")
+				return receipt, execution, intent, provider.StartResult{}, errors.New("Provider Start lookup does not confirm an attached Session")
 			}
 			if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartAccepted,
 				lookup.SessionID, lookup.ReceiptID, lookup.EvidenceSHA256, false, principal); err != nil {
