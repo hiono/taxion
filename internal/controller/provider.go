@@ -21,6 +21,8 @@ type ProviderExecutionStore interface {
 	AddProviderEventObservation(context.Context, string, uint64, string, string, string, string, string, string, string, string, string, time.Time, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderEventObservation, error)
 	AddProviderStopIntent(context.Context, string, uint64, string, string, string, domain.ProviderStopReason, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopIntent, error)
 	AddProviderStopObservation(context.Context, string, uint64, string, string, bool, bool, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopObservation, error)
+	AddProviderResultObservation(context.Context, string, uint64, string, string, string, string, string, string, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderResultObservation, error)
+	AddProviderUsageObservation(context.Context, string, uint64, string, string, string, string, string, string, uint64, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderUsageObservation, error)
 }
 
 type PlanningProviderRuntime interface {
@@ -30,6 +32,8 @@ type PlanningProviderRuntime interface {
 	Stop(context.Context, provider.StopRequest) (provider.StopResult, error)
 	Lookup(context.Context, provider.LookupRequest) (provider.LookupResult, error)
 	ReplayEvents(context.Context, provider.ReplayEventsRequest) (provider.EventPage, error)
+	Result(context.Context, provider.ResultRequest) (provider.Result, error)
+	Usage(context.Context, provider.UsageRequest) (provider.Usage, error)
 }
 
 type ProviderController struct {
@@ -697,4 +701,171 @@ func startResultFromObservation(observation domain.ProviderStartObservation) pro
 		OperationID: observation.OperationID, SessionID: observation.ProviderSessionID,
 		ReceiptID: observation.ReceiptID, EvidenceSHA256: observation.EvidenceSHA256,
 	}
+}
+
+func (c *ProviderController) RetrieveProviderResult(
+	ctx context.Context,
+	jobID, roleExecutionID, sessionID, turnID string,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.ProviderResultObservation, error) {
+	job, _, _, operationID, err := c.providerObservationTarget(
+		ctx, jobID, roleExecutionID, sessionID, turnID, principal,
+	)
+	if err != nil {
+		return store.CommandReceipt{}, domain.ProviderResultObservation{}, err
+	}
+	capabilities, err := c.runtime.Capabilities(ctx)
+	if err != nil {
+		return store.CommandReceipt{}, domain.ProviderResultObservation{}, err
+	}
+	if capabilities.Identity != c.runtime.Identity() ||
+		!capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, provider.EvidenceLive) {
+		return store.CommandReceipt{}, domain.ProviderResultObservation{}, provider.ErrUnsupportedCapability
+	}
+	request := provider.ResultRequest{OperationID: operationID, SessionID: sessionID, TurnID: turnID}
+	if err := request.Validate(); err != nil {
+		return store.CommandReceipt{}, domain.ProviderResultObservation{}, provider.ErrProviderInvalidRequest
+	}
+	result, err := c.runtime.Result(ctx, request)
+	if err != nil {
+		return store.CommandReceipt{}, domain.ProviderResultObservation{}, err
+	}
+	if result.OperationID != operationID || result.SessionID != sessionID || result.TurnID != turnID {
+		return store.CommandReceipt{}, domain.ProviderResultObservation{}, provider.ErrProviderInvalidResult
+	}
+	current, _, _, currentOperationID, err := c.providerObservationTarget(
+		ctx, jobID, roleExecutionID, sessionID, turnID, principal,
+	)
+	if err != nil {
+		return store.CommandReceipt{}, domain.ProviderResultObservation{}, err
+	}
+	if currentOperationID != operationID {
+		return store.CommandReceipt{}, domain.ProviderResultObservation{}, provider.ErrProviderInvalidResult
+	}
+	return c.store.AddProviderResultObservation(
+		ctx, current.ID, current.Revision, roleExecutionID, operationID, turnID, sessionID,
+		result.Content, result.ResultSHA256, result.Final, result.EvidenceSHA256, principal,
+	)
+}
+
+func (c *ProviderController) RetrieveProviderUsage(
+	ctx context.Context,
+	jobID, roleExecutionID, sessionID, turnID string,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.ProviderUsageObservation, error) {
+	_, _, _, operationID, err := c.providerObservationTarget(
+		ctx, jobID, roleExecutionID, sessionID, turnID, principal,
+	)
+	if err != nil {
+		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, err
+	}
+	capabilities, err := c.runtime.Capabilities(ctx)
+	if err != nil {
+		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, err
+	}
+	if capabilities.Identity != c.runtime.Identity() ||
+		!capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, provider.EvidenceLive) ||
+		!capabilities.HasEvidenceAtLeast(provider.CapabilityUsageCompleteness, provider.EvidenceLive) {
+		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, provider.ErrUnsupportedCapability
+	}
+	request := provider.UsageRequest{OperationID: operationID, SessionID: sessionID, TurnID: turnID}
+	if err := request.Validate(); err != nil {
+		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, provider.ErrProviderInvalidRequest
+	}
+	result, err := c.runtime.Usage(ctx, request)
+	if err != nil {
+		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, err
+	}
+	if result.OperationID != operationID || result.SessionID != sessionID || result.TurnID != turnID {
+		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, provider.ErrProviderInvalidResult
+	}
+	current, _, _, currentOperationID, err := c.providerObservationTarget(
+		ctx, jobID, roleExecutionID, sessionID, turnID, principal,
+	)
+	if err != nil {
+		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, err
+	}
+	if currentOperationID != operationID {
+		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, provider.ErrProviderInvalidResult
+	}
+	return c.store.AddProviderUsageObservation(
+		ctx, current.ID, current.Revision, roleExecutionID, operationID, turnID, sessionID,
+		result.UsageID, result.Tokens, result.Complete, result.EvidenceSHA256, principal,
+	)
+}
+
+func (c *ProviderController) providerObservationTarget(
+	ctx context.Context,
+	jobID, roleExecutionID, sessionID, turnID string,
+	principal auth.AuthenticatedPrincipal,
+) (domain.Job, domain.RoleExecution, domain.PlanningAuthorization, string, error) {
+	if ctx == nil {
+		return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", provider.ErrProviderInvalidRequest
+	}
+	if err := principal.Validate(); err != nil {
+		return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", err
+	}
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", err
+	}
+	if job.State != domain.JobDraft {
+		return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", errors.New("Provider Result / Usage requires a DRAFT Job")
+	}
+	var execution domain.RoleExecution
+	foundExecution := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == roleExecutionID {
+			execution, foundExecution = candidate, true
+			break
+		}
+	}
+	if !foundExecution {
+		return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", errors.New("Provider observation RoleExecution was not found")
+	}
+	grant, foundGrant := planningAuthorization(job, execution.PlanningAuthorizationID)
+	if !foundGrant || grant.PrincipalID != principal.PrincipalID() {
+		return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", errors.New("Provider Result / Usage requires the authorized HUMAN Principal")
+	}
+	if err := grant.Validate(job); err != nil {
+		return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", err
+	}
+	if !providerIdentityMatches(c.runtime.Identity(), grant) {
+		return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", errors.New("Provider Runtime identity differs from PlanningAuthorization")
+	}
+	var startIntent domain.ProviderStartIntent
+	foundStart := false
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == execution.ID {
+			startIntent, foundStart = candidate, true
+			break
+		}
+	}
+	if !foundStart {
+		return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", errors.New("Provider Result / Usage has no Start intent")
+	}
+	if err := startIntent.Validate(job, execution); err != nil {
+		return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", fmt.Errorf("validate Provider Start intent: %w", err)
+	}
+	startObservation, foundObservation := latestStartObservation(job, startIntent.ID)
+	if !foundObservation || startObservation.Status != domain.ProviderStartAccepted ||
+		startObservation.ProviderSessionID != sessionID {
+		return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", errors.New("Provider Result / Usage requires the accepted Start Session")
+	}
+	if turnID == "" {
+		return job, execution, grant, startIntent.ID, nil
+	}
+	for _, turn := range job.PlanningTurnIntents {
+		if turn.ID != turnID {
+			continue
+		}
+		if err := turn.Validate(job); err != nil {
+			return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", err
+		}
+		if turn.RoleExecutionID != execution.ID || turn.ProviderSessionID != sessionID {
+			return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", errors.New("Provider Result / Usage Turn identity mismatch")
+		}
+		return job, execution, grant, turn.OperationID, nil
+	}
+	return domain.Job{}, domain.RoleExecution{}, domain.PlanningAuthorization{}, "", errors.New("Provider Result / Usage Turn intent was not found")
 }
