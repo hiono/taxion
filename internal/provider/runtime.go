@@ -10,6 +10,7 @@ import (
 var (
 	ErrUnsupportedCapability   = errors.New("Provider capability is not verified for this configuration")
 	ErrCredentialUnavailable   = errors.New("Provider credential is unavailable")
+	ErrCredentialLeaseCleanupFailed = errors.New("Provider credential lease cleanup failed")
 	ErrProviderOperationFailed = errors.New("Provider operation failed")
 	ErrProviderInvalidResult   = errors.New("Provider returned an invalid result")
 	ErrProviderInvalidRequest  = errors.New("Provider request is invalid")
@@ -412,7 +413,9 @@ func withCredential[T any](ctx context.Context, broker CredentialBroker, identit
 	lease, acquireErr := broker.Acquire(ctx, identity)
 	if acquireErr != nil || lease == nil {
 		if lease != nil {
-			_ = closeCredentialLease(lease)
+			if closeErr := closeCredentialLease(lease); closeErr != nil {
+				return result, errors.Join(ErrCredentialUnavailable, ErrCredentialLeaseCleanupFailed)
+			}
 		}
 		return result, ErrCredentialUnavailable
 	}
@@ -442,6 +445,9 @@ func safeAdapterError(err error) error {
 		return nil
 	}
 	if errors.Is(err, ErrCredentialUnavailable) {
+		if errors.Is(err, ErrCredentialLeaseCleanupFailed) {
+			return errors.Join(ErrCredentialUnavailable, ErrCredentialLeaseCleanupFailed)
+		}
 		return ErrCredentialUnavailable
 	}
 	var operationError *OperationError
