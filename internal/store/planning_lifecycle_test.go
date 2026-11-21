@@ -51,6 +51,35 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	contextDigest := job.PlanningAuthorizations[0].ReadOnlyBoundary.SHA256
 
 	turnCommand := "cmd_dddddddddddddddddddddddddddddddd"
+	_, err = database.db.ExecContext(ctx, `CREATE TRIGGER fail_planning_lifecycle_receipt
+		BEFORE INSERT ON job_commands
+		WHEN NEW.command_id = '`+turnCommand+`'
+		BEGIN
+			SELECT RAISE(ABORT, 'forced planning lifecycle receipt failure');
+		END;`)
+	if err != nil {
+		t.Fatalf("create rollback trigger: %v", err)
+	}
+	if _, _, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_exact", turnCommand, strings.Repeat("d", 64), 500, principal); err == nil {
+		t.Fatal("planning turn succeeded despite forced receipt insertion failure")
+	}
+	afterRollback, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after forced rollback: %v", err)
+	}
+	if afterRollback.Revision != job.Revision || len(afterRollback.PlanningTurnIntents) != 0 {
+		t.Fatalf("failed command partially changed Job: revision=%d turns=%d", afterRollback.Revision, len(afterRollback.PlanningTurnIntents))
+	}
+	var receiptCount int
+	if err := database.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM job_commands WHERE command_id = ?", turnCommand).Scan(&receiptCount); err != nil {
+		t.Fatalf("count failed command receipts: %v", err)
+	}
+	if receiptCount != 0 {
+		t.Fatalf("failed command left %d receipts", receiptCount)
+	}
+	if _, err := database.db.ExecContext(ctx, "DROP TRIGGER fail_planning_lifecycle_receipt"); err != nil {
+		t.Fatalf("drop rollback trigger: %v", err)
+	}
 	turnReceipt, turn, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_exact", turnCommand, strings.Repeat("d", 64), 500, principal)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
