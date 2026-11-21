@@ -479,3 +479,51 @@ func TestPlanningTurnRequiresAttachedSessionAfterFailedResume(t *testing.T) {
 		t.Fatalf("Job.Validate after boundary denial: %v", err)
 	}
 }
+
+func TestPlanningTurnValidationUsesOnlyPriorResumeObservations(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	firstTurn, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("a", 64), 100, now)
+	if err != nil {
+		t.Fatalf("first turn: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, firstTurn)
+	job.Revision++
+	job.UpdatedAt = firstTurn.CreatedAt
+	firstObservation, err := NewPlanningTurnObservation(job, firstTurn.ID, principal, "cmd_cccccccccccccccccccccccccccccccc", PlanningTurnCompleted, 10, strings.Repeat("b", 64), false, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("first turn observation: %v", err)
+	}
+	job.PlanningTurnObservations = append(job.PlanningTurnObservations, firstObservation)
+	job.Revision++
+	job.UpdatedAt = firstObservation.CreatedAt
+	resume, err := NewPlanningResumeIntent(job, executionID, principal, "session_exact", "cmd_dddddddddddddddddddddddddddddddd", strings.Repeat("c", 64), true, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, resume)
+	job.Revision++
+	job.UpdatedAt = resume.CreatedAt
+	attached, err := NewPlanningResumeObservation(job, resume.ID, principal, "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", PlanningResumeAttached, strings.Repeat("d", 64), false, now.Add(3*time.Second))
+	if err != nil {
+		t.Fatalf("attached observation: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, attached)
+	job.Revision++
+	job.UpdatedAt = attached.CreatedAt
+	secondTurn, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("e", 64), 100, now.Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("second turn: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, secondTurn)
+	job.Revision++
+	job.UpdatedAt = secondTurn.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("valid history: %v", err)
+	}
+
+	job.PlanningTurnIntents[1].CreatedRevision = attached.CreatedRevision
+	if err := job.Validate(); err == nil {
+		t.Fatal("Job.Validate accepted a turn whose resume attachment observation was appended after that turn")
+	}
+}
