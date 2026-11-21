@@ -283,6 +283,8 @@ Detailed Provider Adapter tests: [Provider Adapter テスト仕様書](provider-
 
 ## 4. Evidence recording
 
+Provider Adapter固有のDomain / Store / Controller / Runtime判定は[Provider Adapter テスト仕様書](provider-adapter-test-specification.md)に従う。既存Jobの読み取り互換性を維持し、Provider Start observationの導入revision以降に作成されたTurn / Resumeだけにaccepted Start observationの厳密なSession bindingを適用する。
+
 各受入れ結果は次の情報を持つ。
 
 - 対象HEADの完全なSHA
