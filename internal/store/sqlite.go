@@ -194,9 +194,6 @@ func (s *Store) createJob(ctx context.Context, job domain.Job, commandID, comman
 	if job.Revision != 1 {
 		return CommandReceipt{}, fmt.Errorf("%w: a new Job must start at revision 1", domain.ErrInvalidJob)
 	}
-	if expectedRevision == 0 {
-		return CommandReceipt{}, errors.New("expected Job revision is required")
-	}
 	if strings.TrimSpace(commandID) == "" {
 		return CommandReceipt{}, errors.New("command id is required")
 	}
@@ -297,6 +294,9 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID string, expe
 	}
 	if grant.JobID != jobID {
 		return CommandReceipt{}, errors.New("PlanningAuthorization Job identity mismatch")
+	}
+	if expectedRevision == 0 {
+		return CommandReceipt{}, errors.New("expected Job revision is required")
 	}
 
 	request := struct {
