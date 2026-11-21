@@ -1,16 +1,31 @@
-# CLI usage
+# CLI使用方法
 
-## Create a Job
+## HUMAN Principalの認証
 
-原文の依頼をそのまま保存してDRAFT Jobを作成します。Planner呼出しより前にJob identityと依頼を永続化するための最初の入口です。
+Trusted CLI認証には、管理者が設定したOIDC issuerとAuthorization Code Flow with PKCEを使用します。Identity Providerにはloopback redirect URIを登録してください。
 
 ```sh
-taxion job create --request "I have several ideas for a small product. Help me clarify the goal and build it."
+export TAXION_OIDC_ISSUER="https://identity.example"
+export TAXION_OIDC_CLIENT_ID="taxion-cli"
+export TAXION_OIDC_AUDIENCE="taxion-cli"
+export TAXION_OIDC_REDIRECT_URI="http://127.0.0.1:8765/callback"
+
+taxion auth login
 ```
 
-成功時はJob ID、DRAFT state、aggregate revisionを表示します。
+コマンドが認証URLを表示します。URLをブラウザーで開いて認証を完了してください。Taxionはloopback callbackでauthorization codeを受信し、state、PKCE、ID Token署名、issuer、audience、有効期限、nonceを検証します。検証成功後に内部HUMAN Principal IDを表示します。
 
-## Show a Job
+ID Token、access token、refresh token、cookie、ログインSessionは保存しません。このコマンドは認証結果の検証のみを行い、Job作成、JobApproval、Execution Permissionを付与しません。
+
+## ローカルDRAFT Jobの作成
+
+```sh
+taxion dev job create --request "I have several ideas for a small product. Help me clarify the goal and build it."
+```
+
+この明示的な`dev`コマンドは、開発および永続化テスト専用の未認証DRAFT Jobを作成します。Trusted Ingress、認証済みJob intake、IntakeProvenance、JobApprovalを表すものではありません。Trusted Job intakeとprovenance永続化が実装されるまで、production用の`taxion job create`は使用できません。
+
+## Jobの表示
 
 ```sh
 taxion job show job_<id>
@@ -18,7 +33,7 @@ taxion job show job_<id>
 
 Jobの保存内容をJSONで表示します。payload hashとdomain validationに失敗した場合は読み取りを拒否します。
 
-## List Jobs
+## Jobの一覧表示
 
 ```sh
 taxion job list
@@ -27,17 +42,17 @@ taxion job list --limit 100
 
 更新日時の降順でJobを一覧表示します。
 
-## Store location
+## 保存先
 
-既定のSQLite databaseはOSのユーザー設定ディレクトリ配下の taxion/jobs.sqlite に作成します。保存先を変更する場合は各コマンドに --store を指定します。
+既定のSQLite databaseはOSのユーザー設定ディレクトリ配下の`taxion/jobs.sqlite`に作成します。保存先を変更する場合は各コマンドに`--store`を指定します。
 
 ```sh
-taxion job create --store ./taxion-local.sqlite --request "..."
+taxion dev job create --store ./taxion-local.sqlite --request "..."
 taxion job list --store ./taxion-local.sqlite
 ```
 
 SQLite databaseとWALファイルは秘密情報を含む可能性があるため、Gitへ追加しないでください。
 
-## Current limitation
+## 現在の制限
 
-このCLI sliceはローカル環境でのDRAFT Job作成・読取りと、プロセス再起動後の永続データ読戻しを提供します。これは永続化の確認であり、RoleExecutionやProvider operationを含むJob実行の再開を意味しません。Trusted Ingress、認証済み利用者principal、intake provenance、Planner実行、PlanningAuthorization、JobContract提案・承認、Coder / Reviewer実行、Provider lifecycle、Handoff、成果・証拠の受入れ、Job完了はまだ実装していません。このCLI経路をProduct Contract全体のintake適合とみなしません。
+本段階ではOIDC認証とHUMAN Principal生成、および未認証のローカルDRAFT作成経路の分離までを提供します。AuthenticatedPrincipalとIntakeProvenanceのJobAggregateへの永続化、OIDC認証済みJob作成、HTTP ingress、Planner / Role / Provider実行は後続作業です。OIDC認証成功をJob作成や実行許可の証拠として扱いません。
