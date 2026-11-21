@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -13,12 +14,31 @@ func testIdentity() Identity {
 	}
 }
 
-func evidence(identity Identity, capability Capability) CapabilityEvidence {
+func evidence(identity Identity, capability Capability, level EvidenceLevel) CapabilityEvidence {
 	return CapabilityEvidence{
 		Capability: capability, Identity: identity, TestID: "adapter-contract",
-		EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: EvidenceSynthetic,
+		EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: level,
 		VerifiedAt: time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC),
 	}
+}
+
+type syntheticCapabilityVerifier struct{}
+
+func (syntheticCapabilityVerifier) Verify(_ context.Context, identity Identity, item CapabilityEvidence) (bool, error) {
+	return item.Identity == identity && item.TestID != "" &&
+		item.EvidenceLevel == EvidenceSynthetic, nil
+}
+
+type minimumCapabilityVerifier struct {
+	minimum map[Capability]EvidenceLevel
+}
+
+func (v minimumCapabilityVerifier) Verify(_ context.Context, identity Identity, item CapabilityEvidence) (bool, error) {
+	minimum, ok := v.minimum[item.Capability]
+	if !ok || item.Identity != identity {
+		return false, nil
+	}
+	return evidenceRank(item.EvidenceLevel) >= evidenceRank(minimum), nil
 }
 
 func TestCapabilitiesRequireIdentityBoundEvidence(t *testing.T) {
@@ -26,8 +46,8 @@ func TestCapabilitiesRequireIdentityBoundEvidence(t *testing.T) {
 	capabilities := Capabilities{
 		Identity: identity, StartIdempotency: true, SendLookup: true,
 		Evidence: []CapabilityEvidence{
-			evidence(identity, CapabilityStartIdempotency),
-			evidence(identity, CapabilitySendLookup),
+			evidence(identity, CapabilityStartIdempotency, EvidenceSynthetic),
+			evidence(identity, CapabilitySendLookup, EvidenceSynthetic),
 		},
 	}
 	if err := capabilities.Validate(identity); err != nil {
@@ -36,14 +56,41 @@ func TestCapabilitiesRequireIdentityBoundEvidence(t *testing.T) {
 	if capabilities.SupportsSafeStart() || capabilities.SupportsSafeSend() {
 		t.Fatal("synthetic evidence was treated as live Provider capability")
 	}
-	for i := range capabilities.Evidence {
-		capabilities.Evidence[i].EvidenceLevel = EvidenceLive
+	verified, err := capabilities.Verified(context.Background(), identity, syntheticCapabilityVerifier{})
+	if err != nil {
+		t.Fatalf("Verified: %v", err)
 	}
-	if err := capabilities.ValidateForLiveExecution(identity); err != nil {
-		t.Fatalf("ValidateForLiveExecution: %v", err)
+	if !verified.Has(CapabilityStartIdempotency) || !verified.Has(CapabilitySendLookup) {
+		t.Fatal("trusted E2 test verifier did not preserve declared synthetic capabilities")
 	}
-	if !capabilities.SupportsSafeStart() || !capabilities.SupportsSafeSend() {
-		t.Fatal("live idempotency / lookup capability was not recognized")
+	if verified.HasEvidenceAtLeast(CapabilityStartIdempotency, EvidenceLive) {
+		t.Fatal("synthetic evidence was promoted to live capability")
+	}
+}
+
+func TestCapabilityVerificationIsPerCapability(t *testing.T) {
+	identity := testIdentity()
+	capabilities := Capabilities{
+		Identity: identity, StartIdempotency: true, EventReplay: true,
+		Evidence: []CapabilityEvidence{
+			evidence(identity, CapabilityStartIdempotency, EvidenceLive),
+			evidence(identity, CapabilityEventReplay, EvidenceSynthetic),
+		},
+	}
+	verified, err := capabilities.Verified(context.Background(), identity, minimumCapabilityVerifier{
+		minimum: map[Capability]EvidenceLevel{
+			CapabilityStartIdempotency: EvidenceLive,
+			CapabilityEventReplay:      EvidenceDurable,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Verified: %v", err)
+	}
+	if !verified.HasEvidenceAtLeast(CapabilityStartIdempotency, EvidenceLive) {
+		t.Fatal("verified Start capability was disabled by unrelated EventReplay evidence")
+	}
+	if verified.Has(CapabilityEventReplay) {
+		t.Fatal("unverified EventReplay capability remained enabled")
 	}
 }
 
@@ -58,7 +105,7 @@ func TestCapabilitiesRejectMissingOrMismatchedEvidence(t *testing.T) {
 	other.ConfigurationSHA256 = strings.Repeat("c", 64)
 	mismatched := Capabilities{
 		Identity: identity, StartIdempotency: true,
-		Evidence: []CapabilityEvidence{evidence(other, CapabilityStartIdempotency)},
+		Evidence: []CapabilityEvidence{evidence(other, CapabilityStartIdempotency, EvidenceSynthetic)},
 	}
 	if err := mismatched.Validate(identity); err == nil {
 		t.Fatal("evidence from another configuration was accepted")
@@ -67,13 +114,12 @@ func TestCapabilitiesRejectMissingOrMismatchedEvidence(t *testing.T) {
 
 func TestCapabilitiesRejectUnverifiableAndDuplicateEvidence(t *testing.T) {
 	identity := testIdentity()
-	unverifiable := evidence(identity, CapabilityStartIdempotency)
-	unverifiable.EvidenceLevel = "E1"
+	unverifiable := evidence(identity, CapabilityStartIdempotency, "E1")
 	if err := (Capabilities{Identity: identity, StartIdempotency: true, Evidence: []CapabilityEvidence{unverifiable}}).Validate(identity); err == nil {
 		t.Fatal("E1 evidence was accepted as Provider capability verification")
 	}
 
-	item := evidence(identity, CapabilityStartIdempotency)
+	item := evidence(identity, CapabilityStartIdempotency, EvidenceSynthetic)
 	duplicate := Capabilities{
 		Identity: identity, StartIdempotency: true,
 		Evidence: []CapabilityEvidence{item, item},
@@ -95,35 +141,15 @@ func TestCapabilitiesDoNotInferUnsupportedOperations(t *testing.T) {
 	}
 }
 
-func TestLiveExecutionRejectsSDKOnlyAndSyntheticCapabilities(t *testing.T) {
-	identity := testIdentity()
-	capabilities := Capabilities{
-		Identity: identity, StartIdempotency: true,
-		Evidence: []CapabilityEvidence{evidence(identity, CapabilityStartIdempotency)},
-	}
-	capabilities.Evidence[0].EvidenceLevel = EvidenceSDK
-	if err := capabilities.ValidateForLiveExecution(identity); err == nil {
-		t.Fatal("SDK-only evidence was accepted for live execution")
-	}
-	capabilities.Evidence[0].EvidenceLevel = EvidenceLive
-	if err := capabilities.ValidateForLiveExecution(identity); err != nil {
-		t.Fatalf("live evidence was rejected: %v", err)
-	}
-}
-
 func TestCrossProcessReattachmentRequiresDurableEvidence(t *testing.T) {
 	identity := testIdentity()
-	item := evidence(identity, CapabilitySessionReattach)
-	item.EvidenceLevel = EvidenceLive
+	item := evidence(identity, CapabilitySessionReattach, EvidenceLive)
 	capabilities := Capabilities{Identity: identity, CrossProcessSessionReattach: true, Evidence: []CapabilityEvidence{item}}
-	if err := capabilities.ValidateForLiveExecution(identity); err == nil {
+	if capabilities.HasEvidenceAtLeast(CapabilitySessionReattach, EvidenceDurable) {
 		t.Fatal("live-only evidence was accepted for durable reattachment")
 	}
 	capabilities.Evidence[0].EvidenceLevel = EvidenceDurable
-	if err := capabilities.ValidateForLiveExecution(identity); err != nil {
-		t.Fatalf("durable evidence was rejected: %v", err)
-	}
-	if !capabilities.SupportsCrossProcessReattachment() {
+	if !capabilities.HasEvidenceAtLeast(CapabilitySessionReattach, EvidenceDurable) {
 		t.Fatal("durable reattachment capability was not recognized")
 	}
 }
