@@ -430,3 +430,20 @@ func TestRuntimeLookupRequiresEvidenceBackedNotFoundResult(t *testing.T) {
 		t.Fatalf("inconsistent Lookup absence was not treated as UNKNOWN: %v", err)
 	}
 }
+
+func TestRuntimeCapabilitiesReturnsDetachedEvidenceSlice(t *testing.T) {
+	adapter := newTestAdapter(CapabilityStartIdempotency)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := NewRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	capabilities, err := runtime.Capabilities(context.Background())
+	if err != nil {
+		t.Fatalf("Capabilities: %v", err)
+	}
+	capabilities.Evidence[0].EvidenceLevel = EvidenceSynthetic
+	if _, err := runtime.Start(context.Background(), validStartRequest()); err != nil {
+		t.Fatalf("mutating returned capability evidence changed runtime authorization: %v", err)
+	}
+}
