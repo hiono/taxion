@@ -595,3 +595,54 @@ func TestNewPlanningResumeRequiresAcceptedStartObservation(t *testing.T) {
 		t.Fatalf("Resume without accepted Start observation error = %v, want provider_start_unconfirmed", err)
 	}
 }
+
+func TestProviderStartUnknownEvidenceIsAppendOnlyUntilTerminalResolution(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	startID := job.ProviderStartIntents[0].ID
+	job.ProviderStartObservations = nil
+	job.ProviderStartObservationRequiredFromRevision = 0
+
+	first, err := NewProviderStartObservation(job, startID, principal,
+		"cmd_33333333333333333333333333333333", ProviderStartUnknown, "", "", "", false,
+		job.UpdatedAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("first UNKNOWN observation: %v", err)
+	}
+	job.ProviderStartObservations = append(job.ProviderStartObservations, first)
+	job.ProviderStartObservationRequiredFromRevision = first.CreatedRevision
+	job.Revision++
+	job.UpdatedAt = first.CreatedAt
+
+	second, err := NewProviderStartObservation(job, startID, principal,
+		"cmd_44444444444444444444444444444444", ProviderStartUnknown, "session_1", "receipt_1", strings.Repeat("4", 64), false,
+		job.UpdatedAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("second UNKNOWN observation: %v", err)
+	}
+	job.ProviderStartObservations = append(job.ProviderStartObservations, second)
+	job.Revision++
+	job.UpdatedAt = second.CreatedAt
+
+	terminal, err := NewProviderStartObservation(job, startID, principal,
+		"cmd_55555555555555555555555555555555", ProviderStartAccepted, "session_1", "receipt_1", strings.Repeat("5", 64), true,
+		job.UpdatedAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("terminal reconciliation: %v", err)
+	}
+	job.ProviderStartObservations = append(job.ProviderStartObservations, terminal)
+	job.Revision++
+	job.UpdatedAt = terminal.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("append-only UNKNOWN reconciliation Job.Validate: %v", err)
+	}
+	if len(job.ProviderStartObservations) != 3 ||
+		job.ProviderStartObservations[0].Status != ProviderStartUnknown ||
+		job.ProviderStartObservations[1].EvidenceSHA256 != strings.Repeat("4", 64) ||
+		!job.ProviderStartObservations[2].ReconcilesUnknown {
+		t.Fatalf("unexpected Start observation history: %#v", job.ProviderStartObservations)
+	}
+	if _, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
+		"cmd_66666666666666666666666666666666", strings.Repeat("6", 64), 100, job.UpdatedAt.Add(time.Second)); err != nil {
+		t.Fatalf("accepted Start Session did not unlock Turn: %v", err)
+	}
+}
