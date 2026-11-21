@@ -131,7 +131,7 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 }
 
 func (r *Runtime) Stop(ctx context.Context, request StopRequest) (StopResult, error) {
-	if !validIdentifier(request.OperationID) || !validIdentifier(request.SessionID) {
+	if err := request.Validate(); err != nil {
 		return StopResult{}, ErrProviderInvalidRequest
 	}
 	capabilities, err := r.liveCapabilities(ctx)
@@ -142,7 +142,18 @@ func (r *Runtime) Stop(ctx context.Context, request StopRequest) (StopResult, er
 		return StopResult{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (StopResult, error) {
-		return r.adapter.Stop(ctx, request, lease)
+		result, err := r.adapter.Stop(ctx, request, lease)
+		if err != nil {
+			return StopResult{}, err
+		}
+		leaked, err := containsCredential(lease, result.OperationID, result.SessionID, result.EvidenceSHA256)
+		if err != nil {
+			return StopResult{}, err
+		}
+		if leaked {
+			return StopResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+		}
+		return result, nil
 	})
 	if err != nil {
 		return StopResult{}, safeAdapterError(err)
@@ -155,7 +166,7 @@ func (r *Runtime) Stop(ctx context.Context, request StopRequest) (StopResult, er
 }
 
 func (r *Runtime) Resume(ctx context.Context, request ResumeRequest) (ResumeResult, error) {
-	if !validIdentifier(request.OperationID) || !validIdentifier(request.SessionID) {
+	if err := request.Validate(); err != nil {
 		return ResumeResult{}, ErrProviderInvalidRequest
 	}
 	capabilities, err := r.liveCapabilities(ctx)
@@ -166,7 +177,18 @@ func (r *Runtime) Resume(ctx context.Context, request ResumeRequest) (ResumeResu
 		return ResumeResult{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (ResumeResult, error) {
-		return r.adapter.Resume(ctx, request, lease)
+		result, err := r.adapter.Resume(ctx, request, lease)
+		if err != nil {
+			return ResumeResult{}, err
+		}
+		leaked, err := containsCredential(lease, result.OperationID, result.SessionID, result.EvidenceSHA256)
+		if err != nil {
+			return ResumeResult{}, err
+		}
+		if leaked {
+			return ResumeResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+		}
+		return result, nil
 	})
 	if err != nil {
 		return ResumeResult{}, safeAdapterError(err)
@@ -194,7 +216,19 @@ func (r *Runtime) Lookup(ctx context.Context, request LookupRequest) (LookupResu
 		return LookupResult{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (LookupResult, error) {
-		return r.adapter.Lookup(ctx, request, lease)
+		result, err := r.adapter.Lookup(ctx, request, lease)
+		if err != nil {
+			return LookupResult{}, err
+		}
+		leaked, err := containsCredential(lease, result.OperationID, result.Status, result.ReceiptID,
+			result.SessionID, result.TurnID, result.ResultSHA256, result.UsageID, result.EvidenceSHA256)
+		if err != nil {
+			return LookupResult{}, err
+		}
+		if leaked {
+			return LookupResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+		}
+		return result, nil
 	})
 	if err != nil {
 		return LookupResult{}, safeAdapterError(err)
@@ -210,8 +244,7 @@ func (r *Runtime) Lookup(ctx context.Context, request LookupRequest) (LookupResu
 }
 
 func (r *Runtime) Result(ctx context.Context, request ResultRequest) (Result, error) {
-	if !validIdentifier(request.OperationID) || !validIdentifier(request.SessionID) ||
-		(request.TurnID != "" && !validIdentifier(request.TurnID)) {
+	if err := request.Validate(); err != nil {
 		return Result{}, ErrProviderInvalidRequest
 	}
 	capabilities, err := r.liveCapabilities(ctx)
@@ -226,7 +259,8 @@ func (r *Runtime) Result(ctx context.Context, request ResultRequest) (Result, er
 		if err != nil {
 			return Result{}, err
 		}
-		leaked, err := containsCredential(lease, result.Content)
+		leaked, err := containsCredential(lease, result.OperationID, result.SessionID, result.TurnID,
+			result.Content, result.ResultSHA256, result.EvidenceSHA256)
 		if err != nil {
 			return Result{}, err
 		}
@@ -259,7 +293,18 @@ func (r *Runtime) Usage(ctx context.Context, request UsageRequest) (Usage, error
 		return Usage{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (Usage, error) {
-		return r.adapter.Usage(ctx, request, lease)
+		result, err := r.adapter.Usage(ctx, request, lease)
+		if err != nil {
+			return Usage{}, err
+		}
+		leaked, err := containsCredential(lease, result.OperationID, result.SessionID, result.TurnID, result.UsageID, result.EvidenceSHA256)
+		if err != nil {
+			return Usage{}, err
+		}
+		if leaked {
+			return Usage{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+		}
+		return result, nil
 	})
 	if err != nil {
 		return Usage{}, safeAdapterError(err)
@@ -284,7 +329,23 @@ func (r *Runtime) ReplayEvents(ctx context.Context, request ReplayEventsRequest)
 		return EventPage{}, ErrUnsupportedCapability
 	}
 	page, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (EventPage, error) {
-		return r.adapter.ReplayEvents(ctx, request, lease)
+		page, err := r.adapter.ReplayEvents(ctx, request, lease)
+		if err != nil {
+			return EventPage{}, err
+		}
+		values := []string{page.SessionID, page.FromCursor, page.NextCursor, page.EvidenceSHA256}
+		for _, event := range page.Events {
+			values = append(values, event.EventID, event.SessionID, event.OperationID, event.TurnID,
+				string(event.Kind), event.PreviousCursor, event.Cursor, event.EvidenceSHA256)
+		}
+		leaked, err := containsCredential(lease, values...)
+		if err != nil {
+			return EventPage{}, err
+		}
+		if leaked {
+			return EventPage{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+		}
+		return page, nil
 	})
 	if err != nil {
 		return EventPage{}, safeAdapterError(err)
