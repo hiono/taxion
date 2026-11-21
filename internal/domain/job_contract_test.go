@@ -237,3 +237,32 @@ func TestJobApprovalRejectsMismatchedHumanIdentity(t *testing.T) {
 		t.Fatal("JobApproval.Validate accepted an agent Principal")
 	}
 }
+
+
+func TestJobContractRevisionRequiresExactFinalPlannerResultProvenance(t *testing.T) {
+	job, execution, sourceResult, now := jobWithAcceptedPlanner(t)
+	contract := validJobContract(now.Add(2 * time.Hour))
+	if _, err := NewJobContractRevision(
+		job, "cmd_30303030303030303030303030303030", execution.ID,
+		"provider_result_missing", sourceResult.ContentSHA256, contract, now.Add(6*time.Minute),
+	); err == nil {
+		t.Fatal("JobContract accepted an unknown source Result ID")
+	}
+	if _, err := NewJobContractRevision(
+		job, "cmd_31313131313131313131313131313131", execution.ID,
+		sourceResult.ID, strings.Repeat("0", 64), contract, now.Add(6*time.Minute),
+	); err == nil {
+		t.Fatal("JobContract accepted a mismatched source Result digest")
+	}
+	revision, err := NewJobContractRevision(
+		job, "cmd_32323232323232323232323232323232", execution.ID,
+		sourceResult.ID, sourceResult.ContentSHA256, contract, now.Add(6*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("NewJobContractRevision: %v", err)
+	}
+	revision.SourceResultContentSHA256 = strings.Repeat("0", 64)
+	if err := revision.Validate(job); err == nil {
+		t.Fatal("JobContractRevision.Validate accepted altered source Result provenance")
+	}
+}
