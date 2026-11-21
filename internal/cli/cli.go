@@ -125,9 +125,6 @@ func createTrustedJob(ctx context.Context, args []string, stdout, stderr io.Writ
 }
 
 func createTrustedJobWithPrincipal(ctx context.Context, request, dbPath, commandID string, receivedAt time.Time, principal auth.AuthenticatedPrincipal, stdout, stderr io.Writer) int {
-	if principal == nil {
-		return report(stderr, errors.New("authenticated HUMAN Principal is required"))
-	}
 	if err := principal.Validate(); err != nil {
 		return report(stderr, err)
 	}

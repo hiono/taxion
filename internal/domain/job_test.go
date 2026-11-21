@@ -116,6 +116,7 @@ func TestJobValidateRejectsInvalidIntakeProvenance(t *testing.T) {
 		mutate func(*IntakeProvenance)
 	}{
 		{name: "non-HUMAN principal", mutate: func(p *IntakeProvenance) { p.PrincipalID = "agent_123" }},
+		{name: "issuer-subject mismatch", mutate: func(p *IntakeProvenance) { p.PrincipalID = identity.PrincipalID("https://other.example", p.Subject) }},
 		{name: "insecure issuer", mutate: func(p *IntakeProvenance) { p.Issuer = "http://identity.example" }},
 		{name: "missing subject", mutate: func(p *IntakeProvenance) { p.Subject = "" }},
 		{name: "missing ingress source", mutate: func(p *IntakeProvenance) { p.IngressSource = "" }},

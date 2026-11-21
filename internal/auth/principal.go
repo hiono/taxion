@@ -29,7 +29,7 @@ func newAuthenticatedPrincipal(issuer, subject string, authenticatedAt time.Time
 	if authenticatedAt.IsZero() {
 		return AuthenticatedPrincipal{}, errors.New("authentication time is required")
 	}
- 	return AuthenticatedPrincipal{
+	return AuthenticatedPrincipal{
 		id:              identity.PrincipalID(issuer, subject),
 		issuer:          issuer,
 		subject:         subject,
