@@ -69,6 +69,7 @@ Status: Draft
 - DRAFT planningの場合はPlanningAuthorizationの有効性、Job / request digest、Provider / account / configuration、read-only context、budget、deadline
 - 承認済み実行の場合はJobApprovalの正確なContract revision、Task scope、resource scope、budget、deadline
 - 操作対象のProvider / account / SDK・protocol version / configuration identity
+- Context documentはID、content digest、実contentの一致を検証する。Snapshot modeはReferenceと一致する単一documentを要求する。Documents modeはID昇順で各documentの「ID + LF + SHA256 + LF」を連結したUTF-8 bytesのSHA-256をReadOnlyBoundary.SHA256と照合する。
 - 当該操作に必要なCapabilityとその証拠水準
 - 前回operationのUNKNOWN、terminal result、usage、stop状態
 
@@ -76,7 +77,7 @@ Status: Draft
 
 ### 4.3 Capability
 
-CapabilityはProvider ID、account identity、SDK / protocol version、configuration digestの完全一致に束縛する。次の能力を個別に宣言・検証する。
+CapabilityはProvider ID、account identity、SDK / protocol version、configuration digestの完全一致に束縛する。PlanningAuthorizationはProvider ID、account ID、configuration digestを固定する。configuration digestはSDK / protocol versionを含む正規化済みProvider configurationから生成し、trusted Capability Evidence catalogはSDK / protocol versionを含む完全なAdapter identityを照合する。次の能力を個別に宣言・検証する。
 
 | Capability | 意味 |
 |---|---|
