@@ -8,7 +8,7 @@ import (
 	"github.com/hiono/taxion/internal/identity"
 )
 
-func jobWithAcceptedPlanner(t *testing.T) (Job, RoleExecution, time.Time) {
+func jobWithAcceptedPlanner(t *testing.T) (Job, RoleExecution, ProviderResultObservation, time.Time) {
 	t.Helper()
 	now := time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
 	issuer := "https://identity.example"
@@ -57,10 +57,35 @@ func jobWithAcceptedPlanner(t *testing.T) (Job, RoleExecution, time.Time) {
 	job.ProviderLifecycleEnforcedFromRevision = observation.CreatedRevision
 	job.Revision++
 	job.UpdatedAt = now.Add(2 * time.Minute)
+	turn, err := NewPlanningTurnIntent(job, execution.ID, principalID, "session_1",
+		"cmd_11111111111111111111111111111111", strings.Repeat("a", 64), 100, now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatalf("NewPlanningTurnIntent: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	turnObservation, err := NewPlanningTurnObservation(job, turn.ID, principalID,
+		"cmd_22222222222222222222222222222222", PlanningTurnCompleted, 10, strings.Repeat("b", 64), false, now.Add(4*time.Minute))
+	if err != nil {
+		t.Fatalf("NewPlanningTurnObservation: %v", err)
+	}
+	job.PlanningTurnObservations = append(job.PlanningTurnObservations, turnObservation)
+	job.Revision++
+	job.UpdatedAt = turnObservation.CreatedAt
+	content := "Final Planner result"
+	result, err := NewProviderResultObservation(job, execution.ID, principalID, turn.OperationID, turn.ID,
+		"session_1", content, sha256HexDomain(content), true, strings.Repeat("c", 64), now.Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("NewProviderResultObservation: %v", err)
+	}
+	job.ProviderResultObservations = append(job.ProviderResultObservations, result)
+	job.Revision++
+	job.UpdatedAt = result.CreatedAt
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job.Validate fixture: %v", err)
 	}
-	return job, execution, now
+	return job, execution, result, now
 }
 
 func validJobContract(now time.Time) JobContract {
@@ -131,10 +156,10 @@ func TestCanonicalizeJobContractRejectsIncompleteAndDuplicateFields(t *testing.T
 }
 
 func TestJobContractRevisionAndApprovalBindExactImmutableRevision(t *testing.T) {
-	job, execution, now := jobWithAcceptedPlanner(t)
+	job, execution, sourceResult, now := jobWithAcceptedPlanner(t)
 	revision, err := NewJobContractRevision(
-		job, "cmd_dddddddddddddddddddddddddddddddd", execution.ID,
-		validJobContract(now.Add(2*time.Minute)), now.Add(3*time.Minute),
+		job, "cmd_dddddddddddddddddddddddddddddddd", execution.ID, sourceResult.ID, sourceResult.ContentSHA256,
+		validJobContract(now.Add(2*time.Minute)), now.Add(6*time.Minute),
 	)
 	if err != nil {
 		t.Fatalf("NewJobContractRevision: %v", err)
@@ -165,7 +190,7 @@ func TestJobContractRevisionAndApprovalBindExactImmutableRevision(t *testing.T) 
 	newContract := validJobContract(now.Add(5 * time.Minute))
 	newContract.Purpose = "Deliver the revised approved feature"
 	if _, err := NewJobContractRevision(
-		job, "cmd_ffffffffffffffffffffffffffffffff", execution.ID, newContract, now.Add(6*time.Minute),
+		job, "cmd_ffffffffffffffffffffffffffffffff", execution.ID, sourceResult.ID, sourceResult.ContentSHA256, newContract, now.Add(7*time.Minute),
 	); err == nil {
 		t.Fatal("ACTIVE Job accepted a contract amendment through the DRAFT Planner authority")
 	}
@@ -175,18 +200,18 @@ func TestJobContractRevisionAndApprovalBindExactImmutableRevision(t *testing.T) 
 }
 
 func TestJobContractRevisionRejectsExpiredPlanningAuthorization(t *testing.T) {
-	job, execution, now := jobWithAcceptedPlanner(t)
+	job, execution, sourceResult, now := jobWithAcceptedPlanner(t)
 	expiredAt := now.Add(3 * time.Hour)
 	contract := validJobContract(expiredAt)
 	if _, err := NewJobContractRevision(
-		job, "cmd_17171717171717171717171717171717", execution.ID, contract, expiredAt,
+		job, "cmd_17171717171717171717171717171717", execution.ID, sourceResult.ID, sourceResult.ContentSHA256, contract, expiredAt,
 	); err == nil {
 		t.Fatal("JobContract proposal succeeded after PlanningAuthorization deadline")
 	}
 }
 
 func TestJobApprovalRejectsMismatchedHumanIdentity(t *testing.T) {
-	job, execution, now := jobWithAcceptedPlanner(t)
+	job, execution, sourceResult, now := jobWithAcceptedPlanner(t)
 	revision, err := NewJobContractRevision(
 		job, "cmd_12121212121212121212121212121212", execution.ID,
 		validJobContract(now.Add(2*time.Minute)), now.Add(3*time.Minute),
