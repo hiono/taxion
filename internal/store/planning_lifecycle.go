@@ -13,11 +13,38 @@ import (
 )
 
 const (
+	addProviderStartObservationCommandType = "AddProviderStartObservation"
 	addPlanningTurnIntentCommandType      = "AddPlanningTurnIntent"
 	addPlanningTurnObservationCommandType = "AddPlanningTurnObservation"
 	addPlanningEffectDecisionCommandType  = "AddPlanningEffectDecision"
 	addPlanningResumeIntentCommandType    = "AddPlanningResumeIntent"
 )
+
+func (s *Store) AddProviderStartObservation(ctx context.Context, jobID string, expectedRevision uint64, startID, commandID, status, providerSessionID, evidenceSHA256 string, reconcilesUnknown bool, principal auth.AuthenticatedPrincipal) (CommandReceipt, domain.ProviderStartObservation, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, domain.ProviderStartObservation{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	request := struct {
+		JobID, StartID, CommandID, Status, ProviderSessionID, EvidenceSHA256 string
+		ReconcilesUnknown bool
+		PrincipalID string
+	}{jobID, startID, commandID, status, providerSessionID, evidenceSHA256, reconcilesUnknown, principal.PrincipalID()}
+	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addProviderStartObservationCommandType, request,
+		func(job domain.Job, now time.Time) (domain.ProviderStartObservation, error) {
+			return domain.NewProviderStartObservation(job, startID, principal.PrincipalID(), commandID, status, providerSessionID, evidenceSHA256, reconcilesUnknown, now)
+		},
+		func(job *domain.Job, fact domain.ProviderStartObservation) {
+			job.ProviderStartObservations = append(job.ProviderStartObservations, fact)
+		},
+		func(job domain.Job) (domain.ProviderStartObservation, bool) {
+			for _, fact := range job.ProviderStartObservations {
+				if fact.CommandID == commandID {
+					return fact, true
+				}
+			}
+			return domain.ProviderStartObservation{}, false
+		})
+}
 
 func (s *Store) AddPlanningTurnIntent(ctx context.Context, jobID string, expectedRevision uint64, roleExecutionID, providerSessionID, commandID, promptSHA256 string, reservedTokens uint64, principal auth.AuthenticatedPrincipal) (CommandReceipt, domain.PlanningTurnIntent, error) {
 	if err := principal.Validate(); err != nil {
