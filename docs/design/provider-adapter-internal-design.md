@@ -78,9 +78,19 @@ Runtimeはcontext deadlineとrequest deadlineの早い方を有効deadlineとす
 Adapterは実装能力を宣言する。宣言は検証済み能力ではない。
 
 ```go
-type CapabilityDeclaration struct {
-    Identity Identity
-    Enabled  []Capability
+type Capabilities struct {
+    Identity                    Identity
+    StartIdempotency            bool
+    StartLookup                 bool
+    SendIdempotency             bool
+    SendLookup                  bool
+    CrossProcessSessionReattach bool
+    EventReplay                 bool
+    StopProof                   bool
+    FinalOutputRetrieval        bool
+    UsageIdentity               bool
+    UsageCompleteness           bool
+    Evidence                    []CapabilityEvidence
 }
 ```
 
@@ -198,11 +208,12 @@ Closeはdeferで保証する。Adapter panicは上位のoperation boundaryでAmb
 
 ```go
 type Runtime struct {
-    adapter  Adapter
-    broker   CredentialBroker
-    verifier CapabilityVerifier
-    identity Identity
-    clock    Clock
+    adapter         Adapter
+    broker          CredentialBroker
+    verifier        CapabilityVerifier
+    identity        Identity
+    minimumEvidence EvidenceLevel
+    durableEvidence EvidenceLevel
 }
 ```
 
@@ -235,7 +246,7 @@ const (
 
 type OperationError struct {
     Class FailureClass
-    Code  OperationCode
+    Code  string
 }
 ```
 
