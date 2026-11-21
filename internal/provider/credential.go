@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 )
 
@@ -13,8 +14,10 @@ var (
 
 type CredentialLease interface {
 	// WithSecret exposes a short-lived copy only to the trusted Adapter callback.
-	// The copy is zeroed after the callback returns and must not be retained.
+	// The copy is best-effort zeroed after the callback returns and must not be retained.
 	WithSecret(func([]byte) error) error
+	// Close prevents new callbacks and zeroes the lease-owned secret. An in-flight
+	// callback finishes with its own copy, which is zeroed when that callback returns.
 	Close() error
 }
 
@@ -28,6 +31,8 @@ type memoryCredentialLease struct {
 	closed bool
 }
 
+// NewCredentialLease copies secret. The caller retains ownership of the input and
+// should zero its copy after this function returns. In-memory zeroing is best-effort.
 func NewCredentialLease(secret []byte) (CredentialLease, error) {
 	if len(secret) == 0 {
 		return nil, ErrEmptyCredential
@@ -45,7 +50,7 @@ func (l *memoryCredentialLease) WithSecret(use func([]byte) error) error {
 		return ErrCredentialLeaseClosed
 	}
 	copyOfSecret := append([]byte(nil), l.secret...)
-	defer l.mu.RUnlock()
+	l.mu.RUnlock()
 	defer zero(copyOfSecret)
 	return use(copyOfSecret)
 }
@@ -66,4 +71,5 @@ func zero(value []byte) {
 	for i := range value {
 		value[i] = 0
 	}
+	runtime.KeepAlive(value)
 }
