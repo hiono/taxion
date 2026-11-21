@@ -532,14 +532,24 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 		return PlanningResumeIntent{}, err
 	}
 	foundSession := false
+	var latestTurnAt time.Time
 	for _, turn := range job.PlanningTurnIntents {
-		if turn.RoleExecutionID == execution.ID && turn.ProviderSessionID == providerSessionID {
-			foundSession = true
-			break
+		if turn.RoleExecutionID != execution.ID {
+			continue
+		}
+		if turn.ProviderSessionID != providerSessionID {
+			return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_mismatch", Cause: errors.New("resume Provider Session does not match the RoleExecution's persisted turns")}
+		}
+		foundSession = true
+		if turn.CreatedAt.After(latestTurnAt) {
+			latestTurnAt = turn.CreatedAt
 		}
 	}
 	if !foundSession {
 		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_mismatch", Cause: errors.New("resume Provider Session does not match a persisted turn")}
+	}
+	if now.Before(latestTurnAt) {
+		return PlanningResumeIntent{}, errors.New("resume intent precedes the latest Provider turn")
 	}
 	for _, previous := range job.PlanningResumeIntents {
 		if previous.RoleExecutionID != execution.ID {
@@ -601,14 +611,21 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 		return errors.New("PlanningResumeIntent RoleExecution or grant mismatch")
 	}
 	foundSession := false
+	var latestTurnAt time.Time
 	for _, turn := range job.PlanningTurnIntents {
-		if turn.RoleExecutionID == r.RoleExecutionID && turn.ProviderSessionID == r.ProviderSessionID {
-			foundSession = true
-			break
+		if turn.RoleExecutionID != r.RoleExecutionID {
+			continue
+		}
+		if turn.ProviderSessionID != r.ProviderSessionID {
+			return errors.New("PlanningResumeIntent Provider Session differs from the RoleExecution's turns")
+		}
+		foundSession = true
+		if turn.CreatedAt.After(latestTurnAt) {
+			latestTurnAt = turn.CreatedAt
 		}
 	}
-	if !foundSession {
-		return errors.New("PlanningResumeIntent does not reference the persisted Provider Session")
+	if !foundSession || r.CreatedAt.Before(latestTurnAt) {
+		return errors.New("PlanningResumeIntent does not follow the persisted Provider Session's latest turn")
 	}
 	for _, grant := range job.PlanningAuthorizations {
 		if grant.ID != r.PlanningAuthorizationID {

@@ -668,6 +668,7 @@ func (j Job) Validate() error {
 		if previous, exists := previousTurnByExecution[turn.RoleExecutionID]; exists {
 			observations := observationsByTurn[previous.ID]
 			if turn.CreatedRevision <= previous.CreatedRevision || turn.CreatedAt.Before(previous.CreatedAt) ||
+				turn.ProviderSessionID != previous.ProviderSessionID ||
 				len(observations) == 0 || observations[len(observations)-1].Status == PlanningTurnUnknown ||
 				observations[len(observations)-1].CreatedRevision >= turn.CreatedRevision ||
 				observations[len(observations)-1].CreatedAt.After(turn.CreatedAt) {
