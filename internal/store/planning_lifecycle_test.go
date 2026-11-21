@@ -48,6 +48,14 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 		t.Fatalf("GetJob after start: %v", err)
 	}
 	executionID := job.RoleExecutions[0].ID
+	_, _, err = database.AddProviderStartObservation(ctx, jobID, job.Revision, job.ProviderStartIntents[0].ID, "cmd_99999999999999999999999999999999", domain.ProviderStartAccepted, "session_exact", strings.Repeat("e", 64), false, principal)
+	if err != nil {
+		t.Fatalf("AddProviderStartObservation: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Provider Start observation: %v", err)
+	}
 	contextDigest := job.PlanningAuthorizations[0].ReadOnlyBoundary.SHA256
 
 	turnCommand := "cmd_dddddddddddddddddddddddddddddddd"
