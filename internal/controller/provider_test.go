@@ -192,6 +192,10 @@ func (f *fakePlanningProviderRuntime) Capabilities(context.Context) (provider.Ca
 }
 
 func (f *fakePlanningProviderRuntime) Start(ctx context.Context, request provider.StartRequest) (provider.StartResult, error) {
+	if f.identity.SDKVersion != "test-sdk/1" {
+		return provider.StartResult{}, provider.ErrUnsupportedCapability
+	}
+	f.startCalls++
 	if f.startHook != nil {
 		if err := f.startHook(ctx, request); err != nil {
 			return provider.StartResult{}, err
@@ -395,6 +399,37 @@ func TestProviderControllerRejectsProviderIdentityAndContextMismatchBeforeIntent
 	}
 	if len(job.ProviderStartIntents) != 0 || runtime.startCalls != 0 {
 		t.Fatalf("preflight mismatch caused a Provider intent or call: intents=%d calls=%d", len(job.ProviderStartIntents), runtime.startCalls)
+	}
+}
+
+func TestProviderControllerRejectsUnverifiedSDKBeforeProviderSideEffect(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	runtime.identity.SDKVersion = "other-sdk/2"
+	commandID := "cmd_dddddddddddddddddddddddddddddddd"
+	if _, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("unverified SDK version error = %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if len(job.ProviderStartIntents) != 1 || len(job.ProviderStartObservations) != 0 || runtime.startCalls != 0 {
+		t.Fatalf("unverified SDK version caused external execution: intents=%d observations=%d starts=%d",
+			len(job.ProviderStartIntents), len(job.ProviderStartObservations), runtime.startCalls)
+	}
+	runtime.identity.SDKVersion = "test-sdk/1"
+	runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: domain.ProviderStartOperationID(commandID),
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	if _, _, _, result, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal); err != nil {
+		t.Fatalf("retry after trusted SDK verification: %v", err)
+	} else if result.SessionID != "session_1" {
+		t.Fatalf("unexpected Start result: %#v", result)
+	}
+	if runtime.startCalls != 1 || runtime.lookupCalls != 1 {
+		t.Fatalf("SDK retry did not use lookup-before-start: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
 	}
 }
 
