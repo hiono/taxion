@@ -200,6 +200,7 @@ func authorizePlanning(ctx context.Context, args []string, stdout, stderr io.Wri
 	flags.SetOutput(stderr)
 	provider := flags.String("provider", "", "Stable Provider identity")
 	account := flags.String("account", "", "Stable Provider account identity")
+	sdkVersion := flags.String("sdk-version", "", "Exact Provider SDK or protocol version")
 	configurationSHA256 := flags.String("configuration-sha256", "", "SHA-256 of the non-secret Provider configuration")
 	repository := flags.String("repository", "", "HTTPS repository URL")
 	commit := flags.String("commit", "", "Immutable repository commit SHA")
@@ -215,15 +216,15 @@ func authorizePlanning(ctx context.Context, args []string, stdout, stderr io.Wri
 		return 2
 	}
 	if flags.NArg() != 1 {
-		fmt.Fprintln(stderr, "usage: taxion job authorize-planning --provider id --account id --configuration-sha256 sha256 --repository https-url --commit sha --read-only-mode snapshot|documents --read-only-reference id --read-only-sha256 sha256 --max-turns n --max-tokens n --deadline RFC3339 <job-id>")
+		fmt.Fprintln(stderr, "usage: taxion job authorize-planning --provider id --account id --sdk-version version --configuration-sha256 sha256 --repository https-url --commit sha --read-only-mode snapshot|documents --read-only-reference id --read-only-sha256 sha256 --max-turns n --max-tokens n --deadline RFC3339 <job-id>")
 		return 2
 	}
 	if strings.TrimSpace(*provider) == "" || strings.TrimSpace(*account) == "" ||
-		strings.TrimSpace(*configurationSHA256) == "" || strings.TrimSpace(*repository) == "" ||
+		strings.TrimSpace(*sdkVersion) == "" || strings.TrimSpace(*configurationSHA256) == "" || strings.TrimSpace(*repository) == "" ||
 		strings.TrimSpace(*commit) == "" || strings.TrimSpace(*readOnlyReference) == "" ||
 		strings.TrimSpace(*readOnlySHA256) == "" || *maxTurns == 0 ||
 		*maxTurns > uint(^uint32(0)) || *maxTokens == 0 || strings.TrimSpace(*deadlineText) == "" {
-		fmt.Fprintln(stderr, "Provider、account、configuration、repository、read-only boundary、budget、deadlineは必須です")
+		fmt.Fprintln(stderr, "Provider、account、SDK version、configuration、repository、read-only boundary、budget、deadlineは必須です")
 		return 2
 	}
 	if *readOnlyMode != domain.PlanningReadOnlyBoundarySnapshot &&
@@ -243,6 +244,7 @@ func authorizePlanning(ctx context.Context, args []string, stdout, stderr io.Wri
 	request := domain.PlanningAuthorizationRequest{
 		ProviderID:          *provider,
 		AccountID:           *account,
+		SDKVersion:          *sdkVersion,
 		ConfigurationSHA256: *configurationSHA256,
 		RepositoryID:        strings.TrimRight(*repository, "/") + "@" + *commit,
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
@@ -347,9 +349,9 @@ func startPlanningWithPrincipal(ctx context.Context, jobID, authorizationID, com
 		return report(stderr, err)
 	}
 	fmt.Fprintf(stdout,
-		"Taskless PLANNER Start intent persisted\nRoleExecution ID: %s\nOperation ID: %s\nPlanningAuthorization ID: %s\nCommand ID: %s\nJob ID: %s\nState: %s\nRevision: %d\nProvider: %s\nAccount: %s\n",
+		"Taskless PLANNER Start intent persisted\nRoleExecution ID: %s\nOperation ID: %s\nPlanningAuthorization ID: %s\nCommand ID: %s\nJob ID: %s\nState: %s\nRevision: %d\nProvider: %s\nAccount: %s\nSDK version: %s\n",
 		execution.ID, intent.ID, execution.PlanningAuthorizationID, receipt.CommandID, receipt.JobID,
-		job.State, receipt.Revision, intent.ProviderID, intent.AccountID,
+		job.State, receipt.Revision, intent.ProviderID, intent.AccountID, intent.SDKVersion,
 	)
 	return 0
 }
