@@ -9,11 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 
+	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
-	"github.com/hiono/taxion/internal/store"
 )
 
 func TestJobCreateShowAndList(t *testing.T) {
@@ -110,68 +109,10 @@ func TestProductionJobCreateRequiresOIDCConfigurationWithoutCreatingStore(t *tes
 	}
 }
 
-type fakeAuthenticatedPrincipal struct {
-	id, issuer, subject string
-	authenticatedAt     time.Time
-	validationErr       error
-}
-
-func (p fakeAuthenticatedPrincipal) PrincipalID() string        { return p.id }
-func (p fakeAuthenticatedPrincipal) Issuer() string             { return p.issuer }
-func (p fakeAuthenticatedPrincipal) Subject() string            { return p.subject }
-func (p fakeAuthenticatedPrincipal) AuthenticatedAt() time.Time { return p.authenticatedAt }
-func (p fakeAuthenticatedPrincipal) Validate() error            { return p.validationErr }
-
-func TestTrustedJobCreatePersistsPrincipalAndProvenance(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "jobs.sqlite")
-	now := time.Now().UTC()
-	receivedAt := now.Add(-2 * time.Minute)
-	principal := fakeAuthenticatedPrincipal{
-		id: "human_test-principal", issuer: "https://identity.example",
-		subject: "subject-123", authenticatedAt: now.Add(-time.Minute),
-	}
-	request := "  Preserve the exact request.\nIncluding whitespace.  "
-	var stdout, stderr bytes.Buffer
-	code := createTrustedJobWithPrincipal(context.Background(), request, path, "cmd_cli_trusted", receivedAt, principal, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("createTrustedJobWithPrincipal() code = %d, stderr = %s", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "HUMAN Principal ID: human_test-principal") {
-		t.Fatalf("stdout = %q, want HUMAN Principal ID", stdout.String())
-	}
-	database, err := store.Open(context.Background(), path)
-	if err != nil {
-		t.Fatalf("open created store: %v", err)
-	}
-	defer database.Close()
-	jobs, err := database.ListJobs(context.Background(), 10)
-	if err != nil {
-		t.Fatalf("ListJobs() error = %v", err)
-	}
-	if len(jobs) != 1 {
-		t.Fatalf("stored Jobs = %d, want 1", len(jobs))
-	}
-	job := jobs[0]
-	if job.Request != request || job.State != domain.JobDraft || job.IntakeProvenance == nil {
-		t.Fatalf("stored trusted Job = %#v", job)
-	}
-	provenance := job.IntakeProvenance
-	if provenance.PrincipalID != principal.id || provenance.Issuer != principal.issuer ||
-		provenance.Subject != principal.subject || provenance.IngressSource != domain.IngressSourceCLI ||
-		provenance.RequestIdentity != "cmd_cli_trusted" ||
-		provenance.AuthenticatedAt != principal.authenticatedAt ||
-		!provenance.ReceivedAt.Equal(receivedAt) ||
-		provenance.OriginalRequestSHA256 == "" ||
-		provenance.SchemaVersion != domain.IntakeProvenanceSchemaVersion {
-		t.Fatalf("stored IntakeProvenance = %#v", provenance)
-	}
-}
-
-func TestTrustedJobCreateRejectsInvalidPrincipalBeforeOpeningStore(t *testing.T) {
+func TestTrustedJobCreateRejectsEmptyAuthenticatedPrincipalBeforeOpeningStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
-	principal := fakeAuthenticatedPrincipal{validationErr: errors.New("invalid principal")}
 	var stdout, stderr bytes.Buffer
-	code := createTrustedJobWithPrincipal(context.Background(), "request", path, "cmd_invalid", time.Now().UTC(), principal, &stdout, &stderr)
+	code := createTrustedJobWithPrincipal(context.Background(), "request", path, "cmd_invalid", time.Now().UTC(), auth.AuthenticatedPrincipal{}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("createTrustedJobWithPrincipal() code = %d, want 1", code)
 	}

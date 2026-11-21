@@ -76,14 +76,6 @@ func login(ctx context.Context, stdout, stderr io.Writer) int {
 	return 0
 }
 
-type authenticatedPrincipal interface {
-	PrincipalID() string
-	Issuer() string
-	Subject() string
-	AuthenticatedAt() time.Time
-	Validate() error
-}
-
 func authenticate(ctx context.Context, output io.Writer) (auth.AuthenticatedPrincipal, error) {
 	config, err := auth.ConfigFromEnv()
 	if err != nil {
@@ -132,7 +124,7 @@ func createTrustedJob(ctx context.Context, args []string, stdout, stderr io.Writ
 	return createTrustedJobWithPrincipal(ctx, *request, dbPath, commandID, receivedAt, principal, stdout, stderr)
 }
 
-func createTrustedJobWithPrincipal(ctx context.Context, request, dbPath, commandID string, receivedAt time.Time, principal authenticatedPrincipal, stdout, stderr io.Writer) int {
+func createTrustedJobWithPrincipal(ctx context.Context, request, dbPath, commandID string, receivedAt time.Time, principal auth.AuthenticatedPrincipal, stdout, stderr io.Writer) int {
 	if principal == nil {
 		return report(stderr, errors.New("authenticated HUMAN Principal is required"))
 	}
@@ -143,26 +135,12 @@ func createTrustedJobWithPrincipal(ctx context.Context, request, dbPath, command
 	if err != nil {
 		return report(stderr, err)
 	}
-	provenance := domain.IntakeProvenance{
-		PrincipalID:     principal.PrincipalID(),
-		Issuer:          principal.Issuer(),
-		Subject:         principal.Subject(),
-		IngressSource:   domain.IngressSourceCLI,
-		AuthenticatedAt: principal.AuthenticatedAt(),
-		ReceivedAt:      receivedAt,
-		RequestIdentity: commandID,
-		SchemaVersion:   domain.IntakeProvenanceSchemaVersion,
-	}
-	job, err := domain.NewDraftJobWithProvenance(jobID, request, provenance, time.Now().UTC())
-	if err != nil {
-		return report(stderr, err)
-	}
 	database, err := store.Open(ctx, dbPath)
 	if err != nil {
 		return report(stderr, err)
 	}
 	defer database.Close()
-	receipt, err := database.CreateTrustedDraftJob(ctx, job, commandID)
+	receipt, err := database.CreateTrustedDraftJob(ctx, jobID, request, commandID, receivedAt, principal)
 	if err != nil {
 		return report(stderr, err)
 	}

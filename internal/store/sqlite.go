@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
 	_ "modernc.org/sqlite"
 )
@@ -160,12 +161,23 @@ func (s *Store) CreateLocalDraftJob(ctx context.Context, job domain.Job, command
 	return s.createJob(ctx, job, commandID, createLocalDraftJobCommandType)
 }
 
-func (s *Store) CreateTrustedDraftJob(ctx context.Context, job domain.Job, commandID string) (CommandReceipt, error) {
-	if job.IntakeProvenance == nil {
-		return CommandReceipt{}, errors.New("trusted DRAFT Job requires IntakeProvenance")
+func (s *Store) CreateTrustedDraftJob(ctx context.Context, jobID, request, commandID string, receivedAt time.Time, principal auth.AuthenticatedPrincipal) (CommandReceipt, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
 	}
-	if job.IntakeProvenance.RequestIdentity != commandID {
-		return CommandReceipt{}, errors.New("IntakeProvenance request identity must match command ID")
+	provenance := domain.IntakeProvenance{
+		PrincipalID:     principal.PrincipalID(),
+		Issuer:          principal.Issuer(),
+		Subject:         principal.Subject(),
+		IngressSource:   domain.IngressSourceCLI,
+		AuthenticatedAt: principal.AuthenticatedAt(),
+		ReceivedAt:      receivedAt,
+		RequestIdentity: commandID,
+		SchemaVersion:   domain.IntakeProvenanceSchemaVersion,
+	}
+	job, err := domain.NewDraftJobWithProvenance(jobID, request, provenance, time.Now().UTC())
+	if err != nil {
+		return CommandReceipt{}, err
 	}
 	return s.createJob(ctx, job, commandID, createTrustedDraftJobCommandType)
 }

@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
+	"github.com/hiono/taxion/internal/identity"
 )
 
 func newTestStore(t *testing.T) (*Store, string) {
@@ -260,7 +262,7 @@ func newTrustedTestJob(t *testing.T, id, request, commandID string) domain.Job {
 	t.Helper()
 	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
 	provenance := domain.IntakeProvenance{
-		PrincipalID: "human_test-principal", Issuer: "https://identity.example",
+		PrincipalID: identity.PrincipalID("https://identity.example", "subject-123"), Issuer: "https://identity.example",
 		Subject: "subject-123", IngressSource: domain.IngressSourceCLI,
 		AuthenticatedAt: now.Add(-time.Minute), ReceivedAt: now.Add(-2 * time.Minute),
 		RequestIdentity: commandID, SchemaVersion: domain.IntakeProvenanceSchemaVersion,
@@ -276,7 +278,7 @@ func TestCreateTrustedDraftJobPersistsProvenanceAndReceipt(t *testing.T) {
 	database, path := newTestStore(t)
 	ctx := context.Background()
 	job := newTrustedTestJob(t, "job_trusted", "  Preserve this original request.\n  ", "cmd_trusted")
-	first, err := database.CreateTrustedDraftJob(ctx, job, "cmd_trusted")
+	first, err := database.createJob(ctx, job, "cmd_trusted", createTrustedDraftJobCommandType)
 	if err != nil {
 		t.Fatalf("CreateTrustedDraftJob() error = %v", err)
 	}
@@ -305,7 +307,7 @@ func TestCreateTrustedDraftJobPersistsProvenanceAndReceipt(t *testing.T) {
 		provenance.SchemaVersion != domain.IntakeProvenanceSchemaVersion {
 		t.Fatalf("persisted IntakeProvenance = %#v", provenance)
 	}
-	retry, err := reopened.CreateTrustedDraftJob(ctx, job, "cmd_trusted")
+	retry, err := reopened.createJob(ctx, job, "cmd_trusted", createTrustedDraftJobCommandType)
 	if err != nil {
 		t.Fatalf("idempotent CreateTrustedDraftJob() error = %v", err)
 	}
@@ -314,11 +316,17 @@ func TestCreateTrustedDraftJobPersistsProvenanceAndReceipt(t *testing.T) {
 	}
 }
 
-func TestCreateTrustedDraftJobRequiresProvenance(t *testing.T) {
+func TestCreateTrustedDraftJobRequiresAuthenticatedPrincipal(t *testing.T) {
 	database, _ := newTestStore(t)
-	job := newTestJob(t, "job_missing_provenance", "Trusted intake requires provenance.")
-	if _, err := database.CreateTrustedDraftJob(context.Background(), job, "cmd_missing_provenance"); err == nil {
-		t.Fatal("CreateTrustedDraftJob() accepted a Job without IntakeProvenance")
+	if _, err := database.CreateTrustedDraftJob(context.Background(), "job_missing_principal", "Trusted request.", "cmd_missing_principal", time.Now().UTC(), auth.AuthenticatedPrincipal{}); err == nil {
+		t.Fatal("CreateTrustedDraftJob() accepted an empty AuthenticatedPrincipal")
+	}
+	jobs, err := database.ListJobs(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListJobs() error = %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Fatalf("stored Jobs = %d, want 0", len(jobs))
 	}
 }
 
@@ -330,13 +338,6 @@ func TestCreateLocalDraftJobRejectsProvenance(t *testing.T) {
 	}
 }
 
-func TestCreateTrustedDraftJobRequiresMatchingRequestIdentity(t *testing.T) {
-	database, _ := newTestStore(t)
-	job := newTrustedTestJob(t, "job_identity_mismatch", "Request identity must match command.", "cmd_in_provenance")
-	if _, err := database.CreateTrustedDraftJob(context.Background(), job, "cmd_different"); err == nil {
-		t.Fatal("CreateTrustedDraftJob() accepted a mismatched request identity")
-	}
-}
 
 func TestCreateTrustedDraftJobRejectsCrossPathCommandIDReuse(t *testing.T) {
 	database, _ := newTestStore(t)
@@ -346,7 +347,7 @@ func TestCreateTrustedDraftJobRejectsCrossPathCommandIDReuse(t *testing.T) {
 		t.Fatalf("CreateLocalDraftJob() error = %v", err)
 	}
 	trusted := newTrustedTestJob(t, "job_trusted_command", "Trusted DRAFT command.", "cmd_shared")
-	if _, err := database.CreateTrustedDraftJob(ctx, trusted, "cmd_shared"); !errors.Is(err, ErrIdempotencyConflict) {
+	if _, err := database.createJob(ctx, trusted, "cmd_shared", createTrustedDraftJobCommandType); !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("CreateTrustedDraftJob() error = %v, want ErrIdempotencyConflict", err)
 	}
 	if _, err := database.GetJob(ctx, trusted.ID); !errors.Is(err, ErrNotFound) {
@@ -363,7 +364,7 @@ func TestTrustedJobAggregateAndReceiptCommitAtomically(t *testing.T) {
 		BEGIN SELECT RAISE(ABORT, 'simulated receipt failure'); END;`); err != nil {
 		t.Fatalf("create failure trigger: %v", err)
 	}
-	if _, err := database.CreateTrustedDraftJob(ctx, job, "cmd_atomic"); err == nil {
+	if _, err := database.createJob(ctx, job, "cmd_atomic", createTrustedDraftJobCommandType); err == nil {
 		t.Fatal("CreateTrustedDraftJob() succeeded despite receipt insert failure")
 	}
 	if _, err := database.GetJob(ctx, job.ID); !errors.Is(err, ErrNotFound) {
@@ -382,7 +383,7 @@ func TestGetJobRejectsProvenanceTamperingAfterPayloadHashRecomputed(t *testing.T
 	database, _ := newTestStore(t)
 	ctx := context.Background()
 	job := newTrustedTestJob(t, "job_provenance_tamper", "Detect provenance tampering.", "cmd_provenance_tamper")
-	if _, err := database.CreateTrustedDraftJob(ctx, job, "cmd_provenance_tamper"); err != nil {
+	if _, err := database.createJob(ctx, job, "cmd_provenance_tamper", createTrustedDraftJobCommandType); err != nil {
 		t.Fatalf("CreateTrustedDraftJob() error = %v", err)
 	}
 	job.IntakeProvenance.OriginalRequestSHA256 = strings.Repeat("0", 64)

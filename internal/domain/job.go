@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/hiono/taxion/internal/identity"
 	"unicode/utf8"
 )
 
@@ -97,6 +99,9 @@ func (p IntakeProvenance) Validate(originalRequest string, jobCreatedAt time.Tim
 	}
 	if !strings.HasPrefix(strings.TrimSpace(p.PrincipalID), "human_") {
 		return errors.New("authenticated HUMAN Principal ID is required")
+	}
+	if p.PrincipalID != identity.PrincipalID(p.Issuer, p.Subject) {
+		return errors.New("HUMAN Principal ID does not match OIDC issuer and subject")
 	}
 	issuer, err := url.Parse(p.Issuer)
 	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {

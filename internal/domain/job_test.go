@@ -2,6 +2,8 @@ package domain
 
 import (
 	"strings"
+
+	"github.com/hiono/taxion/internal/identity"
 	"testing"
 	"time"
 )
@@ -81,7 +83,7 @@ func TestNewDraftJobWithProvenancePreservesOriginalRequest(t *testing.T) {
 	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
 	request := "  Create a product from these notes.\nKeep the exact original text.  "
 	provenance := IntakeProvenance{
-		PrincipalID: "human_test-principal", Issuer: "https://identity.example",
+		PrincipalID: identity.PrincipalID("https://identity.example", "subject-123"), Issuer: "https://identity.example",
 		Subject: "subject-123", IngressSource: IngressSourceCLI,
 		AuthenticatedAt: now.Add(-time.Minute), ReceivedAt: now.Add(-2 * time.Minute),
 		RequestIdentity: "cmd_test", SchemaVersion: IntakeProvenanceSchemaVersion,
@@ -104,7 +106,7 @@ func TestNewDraftJobWithProvenancePreservesOriginalRequest(t *testing.T) {
 func TestJobValidateRejectsInvalidIntakeProvenance(t *testing.T) {
 	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
 	base := IntakeProvenance{
-		PrincipalID: "human_test-principal", Issuer: "https://identity.example",
+		PrincipalID: identity.PrincipalID("https://identity.example", "subject-123"), Issuer: "https://identity.example",
 		Subject: "subject-123", IngressSource: IngressSourceCLI,
 		AuthenticatedAt: now.Add(-time.Minute), ReceivedAt: now.Add(-2 * time.Minute),
 		RequestIdentity: "cmd_test", SchemaVersion: IntakeProvenanceSchemaVersion,
@@ -135,7 +137,7 @@ func TestJobValidateRejectsInvalidIntakeProvenance(t *testing.T) {
 func TestJobValidateRejectsChangedOriginalRequestDigest(t *testing.T) {
 	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
 	provenance := IntakeProvenance{
-		PrincipalID: "human_test-principal", Issuer: "https://identity.example",
+		PrincipalID: identity.PrincipalID("https://identity.example", "subject-123"), Issuer: "https://identity.example",
 		Subject: "subject-123", IngressSource: IngressSourceCLI,
 		AuthenticatedAt: now.Add(-time.Minute), ReceivedAt: now.Add(-2 * time.Minute),
 		RequestIdentity: "cmd_test", SchemaVersion: IntakeProvenanceSchemaVersion,
