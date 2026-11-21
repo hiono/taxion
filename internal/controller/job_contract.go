@@ -14,6 +14,7 @@ import (
 type JobContractProposalStore interface {
 	GetJob(context.Context, string) (domain.Job, error)
 	AddJobContractRevision(context.Context, string, uint64, string, string, domain.JobContract) (store.CommandReceipt, domain.JobContractRevision, error)
+	AddJobApproval(context.Context, string, uint64, string, uint64, string, uint32, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.JobApproval, error)
 }
 
 type JobContractController struct {
@@ -116,5 +117,61 @@ func (c *JobContractController) Propose(
 
 	return c.store.AddJobContractRevision(
 		ctx, jobID, job.Revision, commandID, roleExecutionID, contract,
+	)
+}
+
+// Approve records an authenticated human decision for one exact JobContract revision.
+// It does not create ExecutionPermission or authorize Provider execution.
+func (c *JobContractController) Approve(
+	ctx context.Context,
+	jobID, commandID string,
+	contractRevision uint64,
+	canonicalHash string,
+	canonicalizationVersion uint32,
+	reason string,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.JobApproval, error) {
+	if err := principal.Validate(); err != nil {
+		return store.CommandReceipt{}, domain.JobApproval{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return store.CommandReceipt{}, domain.JobApproval{}, err
+	}
+
+	// Exact retries remain readable after ACTIVE or a later revision. The Store
+	// checks the full command payload and returns the original receipt or conflict.
+	for _, existing := range job.JobApprovals {
+		if existing.CommandID == commandID {
+			if existing.ApproverPrincipalID != principal.PrincipalID() {
+				return store.CommandReceipt{}, domain.JobApproval{}, store.ErrIdempotencyConflict
+			}
+			return c.store.AddJobApproval(
+				ctx, jobID, job.Revision, commandID, contractRevision,
+				canonicalHash, canonicalizationVersion, reason, principal,
+			)
+		}
+	}
+
+	if len(job.JobContractRevisions) == 0 {
+		return store.CommandReceipt{}, domain.JobApproval{}, errors.New("JobApproval requires a JobContract revision")
+	}
+	latest := job.JobContractRevisions[len(job.JobContractRevisions)-1]
+	if contractRevision != latest.Revision || canonicalHash != latest.CanonicalHash ||
+		canonicalizationVersion != latest.CanonicalizationVersion {
+		return store.CommandReceipt{}, domain.JobApproval{}, errors.New("approval must identify the exact latest JobContract revision and canonical hash")
+	}
+	if job.State != domain.JobDraft {
+		return store.CommandReceipt{}, domain.JobApproval{}, errors.New("new JobApproval requires a DRAFT Job")
+	}
+	for _, existing := range job.JobApprovals {
+		if existing.ContractRevision == contractRevision {
+			return store.CommandReceipt{}, domain.JobApproval{}, errors.New("JobContract revision already has a JobApproval")
+		}
+	}
+
+	return c.store.AddJobApproval(
+		ctx, jobID, job.Revision, commandID, contractRevision,
+		canonicalHash, canonicalizationVersion, reason, principal,
 	)
 }

@@ -109,7 +109,7 @@ Both commands use the shared aggregate transaction: expected-revision check, ide
 
 ## 5. Execution boundary
 
-This change establishes the JobContract / JobApproval domain and Store facts only. Provider execution must remain blocked until a later controller verifies the current approval and creates an explicit ExecutionPermission bound to the approved contract. Do not add a placeholder approval boolean or infer authority from Job state alone.
+This design establishes JobContract / JobApproval Domain and Store facts plus proposal / approval Controllers. Provider execution remains blocked until a separate execution Controller verifies the current approval and creates an explicit ExecutionPermission bound to the approved contract. Do not add a placeholder approval boolean or infer authority from Job state alone.
 
 ## 6. Planner proposal Controller
 
@@ -118,3 +118,14 @@ The Controller accepts a proposal only from a validated AuthenticatedPrincipal w
 For a new proposal, the Controller revalidates the current PlanningAuthorization and its deadline immediately before calling the Store. The Store remains the authoritative mutation boundary: it validates the accepted Start, canonical contract, deadline, expected Job revision, idempotency identity, and aggregate invariants in one transaction.
 
 The Controller does not call the Provider, change Job authority, issue JobApproval, or create ExecutionPermission. A committed proposal may be retried after the PlanningAuthorization deadline only with the same CommandID and identical canonical request; the Store returns the original receipt and fact. A different payload or proposer with the same CommandID is rejected as an idempotency conflict.
+
+
+## 7. Human approval Controller and CLI ingress
+
+The approval command is an explicit human action. The CLI displays the persisted JobContract through the existing Job read command; the caller then supplies the exact Job ID, revision number, canonical hash, canonicalization version, and reason. The CLI must not infer the revision or hash, approve a proposal from Planner output alone, or treat a natural-language confirmation outside the authenticated command as approval.
+
+The CLI authenticates through the existing OIDC Authorization Code Flow with PKCE before opening the Job Store. It passes only the resulting AuthenticatedPrincipal to JobContractController. The Controller verifies the exact latest revision binding and calls AddJobApproval with the current expected Job revision. The Store generates ApprovedAt and atomically appends JobApproval and transitions DRAFT to ACTIVE.
+
+The same CommandID and identical approval request may be retried after the transition to ACTIVE and must return the original receipt. Reusing the CommandID with a different Principal or payload is an idempotency conflict. A new approval command for an already approved revision is rejected.
+
+The approval path does not create ExecutionPermission or start a Provider operation. Execution remains blocked until a separate Controller verifies current JobApproval, approved scope, budget, deadline, Provider identity, resource boundary, and prohibited effects.

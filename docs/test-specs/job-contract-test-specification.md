@@ -48,3 +48,18 @@
 | JC-206 | Exact replay after expiry | Same CommandID and canonical request for an existing revision | Return original receipt and revision |
 | JC-207 | Idempotency conflict | Reuse CommandID with changed contract or proposer | Reject without mutation |
 | JC-208 | Authority separation | Successful proposal | Job remains DRAFT; no JobApproval or ExecutionPermission is created |
+
+
+## Approval Controller and CLI tests
+
+| ID | Scenario | Input / setup | Expected result |
+|---|---|---|---|
+| JC-209 | Exact approval | Authenticated HUMAN Principal and exact latest revision / hash / version | Append JobApproval and transition DRAFT to ACTIVE |
+| JC-210 | Stale or altered proposal | Wrong revision, hash, or canonicalization version | Reject without mutation |
+| JC-211 | Approval reason | Empty or invalid reason | Reject without mutation |
+| JC-212 | Exact approval replay | Same CommandID and identical payload after ACTIVE transition | Return original receipt and approval |
+| JC-213 | Approval CommandID conflict | Reuse CommandID with different Principal or payload | Reject without mutation |
+| JC-214 | Duplicate approval | New CommandID for an already approved revision | Reject without mutation |
+| JC-215 | Authority separation | Successful approval | No ExecutionPermission or Provider operation is created |
+| JC-216 | CLI authentication | Missing / invalid OIDC Principal | Reject before opening or mutating the Store |
+| JC-217 | Explicit revision confirmation | CLI request omits revision, hash, version, or reason | Reject; do not auto-approve latest |

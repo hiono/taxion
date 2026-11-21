@@ -58,7 +58,15 @@ The Controller must require a validated AuthenticatedPrincipal matching the Plan
 
 The Controller must persist the proposal only through the JobAggregate Store command using the current expected revision. It must not call the Provider or create JobApproval / ExecutionPermission. Exact idempotent replay of an already committed proposal is allowed after grant expiry only when the same CommandID and canonical request are supplied; changed payload or proposer must be rejected.
 
-## 7. References
+## 7. Human approval ingress requirements
+
+The approval ingress must use the existing OIDC Trusted Ingress and accept only a validated AuthenticatedPrincipal. It must require the caller to provide the exact Job ID, contract revision, canonical hash, canonicalization version, and a non-empty human reason. It must not silently select or approve the latest revision.
+
+The Controller must verify that the supplied identity matches the latest immutable revision and persist approval only through the JobAggregate Store command. The Store generates the approval timestamp and atomically appends JobApproval while transitioning DRAFT to ACTIVE. A different hash, version, revision, duplicate approval, invalid Principal, or changed payload under a reused CommandID must be rejected without mutation.
+
+An exact retry of an already committed approval may return its original receipt after the Job becomes ACTIVE. JobApproval records human acceptance only; it does not create ExecutionPermission, authorize Provider execution, or bypass effect / resource checks.
+
+## 8. References
 
 - ADR-201: Job aggregate and command boundary
 - ADR-202: Domain invariants across state paths

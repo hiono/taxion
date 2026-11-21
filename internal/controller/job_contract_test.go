@@ -200,3 +200,58 @@ func TestJobContractControllerRejectsCommandIDReuseByDifferentPlanner(t *testing
 		t.Fatalf("CommandID conflict changed Job: revisions=%d err=%v", len(job.JobContractRevisions), err)
 	}
 }
+
+
+func TestJobContractControllerApprovesExactRevisionAndReplaysAfterActivation(t *testing.T) {
+	controller, database, principal, jobID, _ := startContractPlanner(t)
+	ctx := context.Background()
+	contract := validControllerJobContract(time.Now().UTC().Add(2 * time.Hour))
+	_, revision, err := controller.Propose(
+		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
+		"cmd_45454545454545454545454545454545", contract, principal,
+	)
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	approvalCommandID := "cmd_56565656565656565656565656565656"
+	firstReceipt, firstApproval, err := controller.Approve(
+		ctx, jobID, approvalCommandID, revision.Revision,
+		revision.CanonicalHash, revision.CanonicalizationVersion,
+		"Reviewed and approved the exact bounded scope", principal,
+	)
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil || job.State != domain.JobActive || len(job.JobApprovals) != 1 ||
+		firstApproval.ContractRevision != revision.Revision ||
+		firstApproval.CanonicalHash != revision.CanonicalHash ||
+		firstApproval.ApproverPrincipalID != principal.PrincipalID() {
+		t.Fatalf("approval did not activate exact revision: job=%#v approval=%#v err=%v", job, firstApproval, err)
+	}
+	retryReceipt, retryApproval, err := controller.Approve(
+		ctx, jobID, approvalCommandID, revision.Revision,
+		revision.CanonicalHash, revision.CanonicalizationVersion,
+		"Reviewed and approved the exact bounded scope", principal,
+	)
+	if err != nil {
+		t.Fatalf("exact approval replay: %v", err)
+	}
+	if retryReceipt.CommandID != firstReceipt.CommandID ||
+		retryReceipt.Revision != firstReceipt.Revision ||
+		retryApproval.ID != firstApproval.ID {
+		t.Fatalf("approval replay changed receipt or fact: first=%#v/%#v retry=%#v/%#v",
+			firstReceipt, firstApproval, retryReceipt, retryApproval)
+	}
+	if _, _, err := controller.Approve(
+		ctx, jobID, "cmd_67676767676767676767676767676767",
+		revision.Revision, strings.Repeat("0", 64),
+		revision.CanonicalizationVersion, "Wrong hash", principal,
+	); err == nil {
+		t.Fatal("approval with a different canonical hash was accepted")
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || job.State != domain.JobActive || len(job.JobApprovals) != 1 {
+		t.Fatalf("rejected approval changed Job: %#v err=%v", job, err)
+	}
+}
