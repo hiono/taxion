@@ -11,10 +11,10 @@ type ProviderStopReason string
 
 const (
 	ProviderStopReasonPlanningComplete ProviderStopReason = "planning_complete"
-	ProviderStopReasonCancelled         ProviderStopReason = "cancelled"
-	ProviderStopReasonBudgetExhausted   ProviderStopReason = "budget_exhausted"
-	ProviderStopReasonDeadline          ProviderStopReason = "deadline"
-	ProviderStopReasonFailure           ProviderStopReason = "failure"
+	ProviderStopReasonCancelled        ProviderStopReason = "cancelled"
+	ProviderStopReasonBudgetExhausted  ProviderStopReason = "budget_exhausted"
+	ProviderStopReasonDeadline         ProviderStopReason = "deadline"
+	ProviderStopReasonFailure          ProviderStopReason = "failure"
 )
 
 type ProviderStopIntent struct {

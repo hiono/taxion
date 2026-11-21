@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	addProviderStopIntentCommandType = "AddProviderStopIntent"
-	addProviderStopObservationCommandType = "AddProviderStopObservation"
+	addProviderStopIntentCommandType       = "AddProviderStopIntent"
+	addProviderStopObservationCommandType  = "AddProviderStopObservation"
 	addProviderEventObservationCommandType = "AddProviderEventObservation"
 	addProviderStartObservationCommandType = "AddProviderStartObservation"
 	addPlanningTurnIntentCommandType       = "AddPlanningTurnIntent"
@@ -314,8 +314,8 @@ func (s *Store) AddProviderStopIntent(
 	}
 	request := struct {
 		JobID, RoleExecutionID, SessionID, CommandID string
-		Reason                                      domain.ProviderStopReason
-		PrincipalID                                 string
+		Reason                                       domain.ProviderStopReason
+		PrincipalID                                  string
 	}{jobID, roleExecutionID, sessionID, commandID, reason, principal.PrincipalID()}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addProviderStopIntentCommandType, request,
 		func(job domain.Job, now time.Time) (domain.ProviderStopIntent, error) {
