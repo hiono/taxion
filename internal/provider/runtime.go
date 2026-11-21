@@ -57,10 +57,6 @@ func newRuntimeWithEvidence(adapter Adapter, broker CredentialBroker, verifier C
 	}, nil
 }
 
-func (r *Runtime) Identity() Identity {
-	return r.identity
-}
-
 func (r *Runtime) Capabilities(ctx context.Context) (Capabilities, error) {
 	return r.verifiedCapabilities(ctx)
 }
