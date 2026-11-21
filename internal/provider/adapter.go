@@ -20,8 +20,8 @@ type Identity struct {
 }
 
 func (i Identity) Validate() error {
-	if strings.TrimSpace(i.ProviderID) == "" || strings.TrimSpace(i.AccountID) == "" ||
-		strings.TrimSpace(i.SDKVersion) == "" || !validSHA256(i.ConfigurationSHA256) {
+	if !validIdentifier(i.ProviderID) || !validIdentifier(i.AccountID) ||
+		!validIdentifier(i.SDKVersion) || !validSHA256(i.ConfigurationSHA256) {
 		return errors.New("Provider identity requires provider, account, SDK version, and configuration digest")
 	}
 	return nil
@@ -187,7 +187,7 @@ func (c Capabilities) Validate(expected Identity) error {
 			return fmt.Errorf("duplicate capability evidence for %q", evidence.Capability)
 		}
 		seen[evidence.Capability] = struct{}{}
-		if evidence.Identity != c.Identity || strings.TrimSpace(evidence.TestID) == "" ||
+		if evidence.Identity != c.Identity || !validIdentifier(evidence.TestID) ||
 			!validSHA256(evidence.EvidenceSHA256) || evidence.VerifiedAt.IsZero() ||
 			(evidenceRank(evidence.EvidenceLevel) == 0) {
 			return fmt.Errorf("capability evidence for %q is incomplete or bound to another Provider configuration", evidence.Capability)
@@ -455,13 +455,15 @@ func (p EventPage) Validate(request ReplayEventsRequest) error {
 		return errors.New("Provider event page identity, cursor origin, or evidence is invalid")
 	}
 	expectedCursor := request.AfterCursor
+	previousObservedAt := time.Time{}
 	seen := make(map[string]struct{}, len(p.Events))
 	for _, event := range p.Events {
 		if !validIdentifier(event.EventID) || !validIdentifier(event.SessionID) || event.SessionID != request.SessionID ||
 			!validIdentifier(event.OperationID) || (event.TurnID != "" && !validIdentifier(event.TurnID)) ||
 			!validEventKind(event.Kind) || event.PreviousCursor != expectedCursor ||
 			!validIdentifier(event.Cursor) || event.Cursor == event.PreviousCursor ||
-			event.ObservedAt.IsZero() || !validSHA256(event.EvidenceSHA256) {
+			event.ObservedAt.IsZero() || event.ObservedAt.Before(previousObservedAt) ||
+			!validSHA256(event.EvidenceSHA256) {
 			return errors.New("Provider event page contains an invalid or discontinuous event")
 		}
 		if _, exists := seen[event.EventID]; exists {
@@ -469,6 +471,7 @@ func (p EventPage) Validate(request ReplayEventsRequest) error {
 		}
 		seen[event.EventID] = struct{}{}
 		expectedCursor = event.Cursor
+		previousObservedAt = event.ObservedAt
 	}
 	if p.NextCursor != expectedCursor {
 		return errors.New("Provider event page next cursor does not match its event chain")
