@@ -65,7 +65,7 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 		if err != nil {
 			return StartResult{}, err
 		}
-		leaked, err := containsCredential(lease, result.SessionID, result.ReceiptID)
+		leaked, err := containsCredential(lease, result.OperationID, result.SessionID, result.ReceiptID, result.EvidenceSHA256)
 		if err != nil {
 			return StartResult{}, err
 		}
@@ -100,7 +100,8 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 		if err != nil {
 			return TurnResult{}, err
 		}
-		leaked, err := containsCredential(lease, result.ReceiptID, result.Output)
+		leaked, err := containsCredential(lease, result.OperationID, result.TurnID, result.SessionID,
+			result.ReceiptID, result.Output, result.EvidenceSHA256)
 		if err != nil {
 			return TurnResult{}, err
 		}
@@ -233,11 +234,7 @@ func (r *Runtime) Lookup(ctx context.Context, request LookupRequest) (LookupResu
 	if err != nil {
 		return LookupResult{}, safeAdapterError(err)
 	}
-	if result.OperationID != request.OperationID || !validIdentifier(result.Status) ||
-		!validSHA256(result.EvidenceSHA256) ||
-		(request.SessionID != "" && result.SessionID != request.SessionID) ||
-		(request.TurnID != "" && result.TurnID != request.TurnID) ||
-		(result.Found && (!validIdentifier(result.SessionID) || !validIdentifier(result.ReceiptID))) {
+	if err := result.Validate(request); err != nil {
 		return LookupResult{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	return result, nil
