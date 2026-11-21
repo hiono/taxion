@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var (
@@ -42,7 +43,7 @@ func (r *Runtime) Capabilities(ctx context.Context) (Capabilities, error) {
 		return Capabilities{}, ErrUnsupportedCapability
 	}
 	if err := capabilities.Validate(r.identity); err != nil {
-		return Capabilities{}, fmt.Errorf("%w: %v", ErrUnsupportedCapability, err)
+		return Capabilities{}, ErrUnsupportedCapability
 	}
 	return capabilities, nil
 }
@@ -195,12 +196,15 @@ func (r *Runtime) Usage(ctx context.Context, request UsageRequest) (Usage, error
 }
 
 func (r *Runtime) liveCapabilities(ctx context.Context) (Capabilities, error) {
+	if r.adapter.Identity() != r.identity {
+		return Capabilities{}, ErrUnsupportedCapability
+	}
 	capabilities, err := r.adapter.Capabilities(ctx)
 	if err != nil {
 		return Capabilities{}, ErrUnsupportedCapability
 	}
 	if err := capabilities.ValidateForLiveExecution(r.identity); err != nil {
-		return Capabilities{}, fmt.Errorf("%w: %v", ErrUnsupportedCapability, err)
+		return Capabilities{}, ErrUnsupportedCapability
 	}
 	return capabilities, nil
 }
@@ -221,6 +225,9 @@ func withCredential[T any](ctx context.Context, broker CredentialBroker, identit
 func safeAdapterError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, ErrCredentialUnavailable) {
+		return ErrCredentialUnavailable
 	}
 	var operationError *OperationError
 	if errors.As(err, &operationError) && operationError != nil &&
