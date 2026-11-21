@@ -21,6 +21,7 @@ type ProviderStartObservation struct {
 	OperationID         string    `json:"operation_id"`
 	ProviderID          string    `json:"provider_id"`
 	AccountID           string    `json:"account_id"`
+	SDKVersion          string    `json:"sdk_version"`
 	ConfigurationSHA256 string    `json:"configuration_sha256"`
 	Status              string    `json:"status"`
 	ProviderSessionID   string    `json:"provider_session_id,omitempty"`
@@ -106,7 +107,7 @@ func NewProviderStartObservation(
 		ID: ProviderStartObservationID(commandID), CommandID: commandID, JobID: job.ID,
 		RoleExecutionID: start.RoleExecutionID, OperationID: start.ID,
 		ProviderID: start.ProviderID, AccountID: start.AccountID,
-		ConfigurationSHA256: start.ConfigurationSHA256,
+		SDKVersion: start.SDKVersion, ConfigurationSHA256: start.ConfigurationSHA256,
 		Status:              status, ProviderSessionID: providerSessionID, ReceiptID: receiptID,
 		EvidenceSHA256: evidenceSHA256, ReconcilesUnknown: reconcilesUnknown,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
@@ -122,7 +123,8 @@ func (o ProviderStartObservation) Validate(job Job, start ProviderStartIntent) e
 		o.ID != ProviderStartObservationID(o.CommandID) ||
 		o.JobID != job.ID || o.RoleExecutionID != start.RoleExecutionID ||
 		o.OperationID != start.ID || o.ProviderID != start.ProviderID ||
-		o.AccountID != start.AccountID || o.ConfigurationSHA256 != start.ConfigurationSHA256 ||
+		o.AccountID != start.AccountID || o.SDKVersion != start.SDKVersion ||
+		o.ConfigurationSHA256 != start.ConfigurationSHA256 ||
 		o.CreatedAt.IsZero() || o.CreatedAt.Before(start.CreatedAt) ||
 		o.CreatedRevision <= start.CreatedRevision {
 		return errors.New("Provider Start observation identity or metadata mismatch")
