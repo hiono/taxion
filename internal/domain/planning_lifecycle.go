@@ -65,7 +65,7 @@ func validPlanningBoundaryReason(reasonCode string) bool {
 	switch reasonCode {
 	case "authorization_invalid_or_expired", "principal_mismatch", "provider_session_mismatch",
 		"previous_operation_unknown", "previous_resume_unknown", "turn_budget_exhausted", "token_budget_exhausted",
-		"provider_configuration_mismatch", "reattachment_not_supported",
+		"provider_configuration_mismatch", "reattachment_not_supported", "resume_before_latest_turn",
 		"read_only_context_mismatch", "effect_not_permitted":
 		return true
 	default:
