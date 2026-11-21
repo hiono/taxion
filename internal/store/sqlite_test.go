@@ -751,6 +751,10 @@ func TestStartTasklessPlannerPersistsAndIsIdempotent(t *testing.T) {
 		"cmd_dddddddddddddddddddddddddddddddd", principal); err == nil {
 		t.Fatal("StartTasklessPlanner() reused a PlanningAuthorization")
 	}
+	if _, _, _, err := database.StartTasklessPlanner(ctx, jobID, got.Revision,
+		"plan_auth_other", startCommandID, principal); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("StartTasklessPlanner() changed grant for existing Command ID: %v", err)
+	}
 
 	if err := database.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -808,6 +812,10 @@ func TestStartTasklessPlannerRejectsWrongPrincipalAndRollsBack(t *testing.T) {
 	}
 	if _, _, _, err := database.StartTasklessPlanner(ctx, jobID, grantReceipt.Revision, grant.ID, startCommandID, otherPrincipal); err == nil {
 		t.Fatal("StartTasklessPlanner() accepted a different HUMAN Principal")
+	}
+	if _, _, _, err := database.StartTasklessPlanner(ctx, jobID, grantReceipt.Revision+1, grant.ID,
+		"cmd_22222222222222222222222222222222", principal); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("StartTasklessPlanner() accepted a stale expected revision: %v", err)
 	}
 	if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_planner_start_receipt
 		BEFORE INSERT ON job_commands
