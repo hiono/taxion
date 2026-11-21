@@ -167,6 +167,11 @@ func evidenceRank(level EvidenceLevel) int {
 	}
 }
 
+func (c Capabilities) Clone() Capabilities {
+	c.Evidence = append([]CapabilityEvidence(nil), c.Evidence...)
+	return c
+}
+
 func (c Capabilities) Validate(expected Identity) error {
 	if err := c.Identity.Validate(); err != nil {
 		return fmt.Errorf("invalid capability identity: %w", err)
