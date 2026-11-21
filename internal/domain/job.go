@@ -28,21 +28,21 @@ const (
 )
 
 type Job struct {
-	ID                     string                  `json:"id"`
-	Request                string                  `json:"request"`
-	Goal                   string                  `json:"goal,omitempty"`
-	State                  JobState                `json:"state"`
-	Revision               uint64                  `json:"revision"`
-	CreatedAt              time.Time               `json:"created_at"`
-	UpdatedAt              time.Time               `json:"updated_at"`
-	IntakeProvenance       *IntakeProvenance       `json:"intake_provenance,omitempty"`
-	PlanningAuthorizations []PlanningAuthorization `json:"planning_authorizations,omitempty"`
-	RoleExecutions         []RoleExecution         `json:"role_executions,omitempty"`
-	ProviderStartIntents   []ProviderStartIntent   `json:"provider_start_intents,omitempty"`
-	PlanningTurnIntents []PlanningTurnIntent `json:"planning_turn_intents,omitempty"`
+	ID                       string                    `json:"id"`
+	Request                  string                    `json:"request"`
+	Goal                     string                    `json:"goal,omitempty"`
+	State                    JobState                  `json:"state"`
+	Revision                 uint64                    `json:"revision"`
+	CreatedAt                time.Time                 `json:"created_at"`
+	UpdatedAt                time.Time                 `json:"updated_at"`
+	IntakeProvenance         *IntakeProvenance         `json:"intake_provenance,omitempty"`
+	PlanningAuthorizations   []PlanningAuthorization   `json:"planning_authorizations,omitempty"`
+	RoleExecutions           []RoleExecution           `json:"role_executions,omitempty"`
+	ProviderStartIntents     []ProviderStartIntent     `json:"provider_start_intents,omitempty"`
+	PlanningTurnIntents      []PlanningTurnIntent      `json:"planning_turn_intents,omitempty"`
 	PlanningTurnObservations []PlanningTurnObservation `json:"planning_turn_observations,omitempty"`
-	PlanningEffectDecisions []PlanningEffectDecision `json:"planning_effect_decisions,omitempty"`
-	PlanningResumeIntents []PlanningResumeIntent `json:"planning_resume_intents,omitempty"`
+	PlanningEffectDecisions  []PlanningEffectDecision  `json:"planning_effect_decisions,omitempty"`
+	PlanningResumeIntents    []PlanningResumeIntent    `json:"planning_resume_intents,omitempty"`
 }
 
 type IntakeProvenance struct {

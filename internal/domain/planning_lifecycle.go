@@ -65,19 +65,19 @@ type PlanningEffectDecision struct {
 }
 
 type PlanningResumeIntent struct {
-	ID                          string    `json:"id"`
-	OperationID                 string    `json:"operation_id"`
-	CommandID                   string    `json:"command_id"`
-	JobID                       string    `json:"job_id"`
-	RoleExecutionID             string    `json:"role_execution_id"`
-	PlanningAuthorizationID     string    `json:"planning_authorization_id"`
-	ProviderSessionID           string    `json:"provider_session_id"`
-	ProviderID                  string    `json:"provider_id"`
-	AccountID                   string    `json:"account_id"`
-	ConfigurationSHA256         string    `json:"configuration_sha256"`
-	CapabilityEvidenceSHA256     string    `json:"capability_evidence_sha256"`
-	CreatedAt                   time.Time `json:"created_at"`
-	CreatedRevision             uint64    `json:"created_revision"`
+	ID                       string    `json:"id"`
+	OperationID              string    `json:"operation_id"`
+	CommandID                string    `json:"command_id"`
+	JobID                    string    `json:"job_id"`
+	RoleExecutionID          string    `json:"role_execution_id"`
+	PlanningAuthorizationID  string    `json:"planning_authorization_id"`
+	ProviderSessionID        string    `json:"provider_session_id"`
+	ProviderID               string    `json:"provider_id"`
+	AccountID                string    `json:"account_id"`
+	ConfigurationSHA256      string    `json:"configuration_sha256"`
+	CapabilityEvidenceSHA256 string    `json:"capability_evidence_sha256"`
+	CreatedAt                time.Time `json:"created_at"`
+	CreatedRevision          uint64    `json:"created_revision"`
 }
 
 func planningOperationID(kind, commandID string) string {
@@ -442,9 +442,9 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 		CommandID: commandID, JobID: job.ID, RoleExecutionID: execution.ID,
 		PlanningAuthorizationID: grant.ID, ProviderSessionID: providerSessionID,
 		ProviderID: grant.ProviderID, AccountID: grant.AccountID,
-		ConfigurationSHA256: grant.ConfigurationSHA256,
+		ConfigurationSHA256:      grant.ConfigurationSHA256,
 		CapabilityEvidenceSHA256: capabilityEvidenceSHA256,
-		CreatedAt: now, CreatedRevision: job.Revision + 1,
+		CreatedAt:                now, CreatedRevision: job.Revision + 1,
 	}
 	if err := resume.Validate(job); err != nil {
 		return PlanningResumeIntent{}, err
