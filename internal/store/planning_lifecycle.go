@@ -25,7 +25,7 @@ func (s *Store) AddPlanningTurnIntent(ctx context.Context, jobID string, expecte
 	}
 	request := struct {
 		JobID, RoleExecutionID, ProviderSessionID, CommandID, PromptSHA256 string
-		ReservedTokens uint64
+		ReservedTokens                                                     uint64
 		PrincipalID                                                        string
 	}{jobID, roleExecutionID, providerSessionID, commandID, promptSHA256, reservedTokens, principal.PrincipalID()}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addPlanningTurnIntentCommandType, request,
@@ -51,7 +51,7 @@ func (s *Store) AddPlanningTurnObservation(ctx context.Context, jobID string, ex
 	}
 	request := struct {
 		JobID, TurnID, CommandID, Status, EvidenceSHA256 string
-		TokensUsed uint64
+		TokensUsed                                       uint64
 		ReconcilesUnknown                                bool
 		PrincipalID                                      string
 	}{jobID, turnID, commandID, status, evidenceSHA256, tokensUsed, reconcilesUnknown, principal.PrincipalID()}
