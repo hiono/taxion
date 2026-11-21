@@ -66,12 +66,29 @@ func TestPlanningTurnLifecycleRevalidatesBudgetAndUnknown(t *testing.T) {
 		t.Fatalf("Job.Validate after reconciliation: %v", err)
 	}
 
-	second, err := NewPlanningTurnIntent(job, executionID, principal, "session_1", "cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("2", 64), 100, now.Add(3*time.Second))
+	second, err := NewPlanningTurnIntent(job, executionID, principal, "session_1", "cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("2", 64), 99880, now.Add(3*time.Second))
 	if err != nil {
 		t.Fatalf("second turn: %v", err)
 	}
 	if second.TurnNumber != 2 {
 		t.Fatalf("turn number = %d, want 2", second.TurnNumber)
+	}
+
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, second)
+	job.Revision++
+	job.UpdatedAt = second.CreatedAt
+	secondObservation, err := NewPlanningTurnObservation(job, second.ID, principal, "cmd_77777777777777777777777777777777", PlanningTurnFailed, 99880, strings.Repeat("3", 64), false, now.Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("second turn observation: %v", err)
+	}
+	job.PlanningTurnObservations = append(job.PlanningTurnObservations, secondObservation)
+	job.Revision++
+	job.UpdatedAt = secondObservation.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate after token usage: %v", err)
+	}
+	if _, err := NewPlanningTurnIntent(job, executionID, principal, "session_1", "cmd_66666666666666666666666666666666", strings.Repeat("4", 64), 1, now.Add(5*time.Second)); err == nil {
+		t.Fatal("turn exceeded the remaining token budget after actual usage was applied")
 	}
 }
 

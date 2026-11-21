@@ -626,7 +626,6 @@ func (j Job) Validate() error {
 	seenTurns := make(map[string]struct{}, len(j.PlanningTurnIntents))
 	turnByID := make(map[string]PlanningTurnIntent, len(j.PlanningTurnIntents))
 	turnCounts := make(map[string]uint32)
-	turnReserved := make(map[string]uint64)
 	for _, turn := range j.PlanningTurnIntents {
 		if err := turn.Validate(j); err != nil {
 			return fmt.Errorf("%w: invalid PlanningTurnIntent: %v", ErrInvalidJob, err)
@@ -643,10 +642,6 @@ func (j Job) Validate() error {
 		if turn.TurnNumber != turnCounts[turn.RoleExecutionID] {
 			return fmt.Errorf("%w: planning turn sequence is not contiguous", ErrInvalidJob)
 		}
-		if ^uint64(0)-turnReserved[turn.PlanningAuthorizationID] < turn.ReservedTokens {
-			return fmt.Errorf("%w: planning token reservation overflow", ErrInvalidJob)
-		}
-		turnReserved[turn.PlanningAuthorizationID] += turn.ReservedTokens
 	}
 	observationsByTurn := make(map[string][]PlanningTurnObservation)
 	seenObservationIDs := make(map[string]struct{}, len(j.PlanningTurnObservations))
@@ -734,10 +729,22 @@ func (j Job) Validate() error {
 		}
 		seenBoundaryDecisions[decision.ID] = struct{}{}
 	}
-	for grantID, reserved := range turnReserved {
+	budgetUsed := make(map[string]uint64)
+	for _, turn := range j.PlanningTurnIntents {
+		amount := turn.ReservedTokens
+		observations := observationsByTurn[turn.ID]
+		if len(observations) > 0 && observations[len(observations)-1].Status != PlanningTurnUnknown {
+			amount = observations[len(observations)-1].TokensUsed
+		}
+		if ^uint64(0)-budgetUsed[turn.PlanningAuthorizationID] < amount {
+			return fmt.Errorf("%w: planning token usage overflow", ErrInvalidJob)
+		}
+		budgetUsed[turn.PlanningAuthorizationID] += amount
+	}
+	for grantID, used := range budgetUsed {
 		for _, grant := range j.PlanningAuthorizations {
-			if grant.ID == grantID && reserved > grant.Budget.MaxTokens {
-				return fmt.Errorf("%w: planning token reservations exceed authorization budget", ErrInvalidJob)
+			if grant.ID == grantID && used > grant.Budget.MaxTokens {
+				return fmt.Errorf("%w: planning token usage exceeds authorization budget", ErrInvalidJob)
 			}
 		}
 	}

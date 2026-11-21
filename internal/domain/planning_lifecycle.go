@@ -249,7 +249,7 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 		return PlanningTurnIntent{}, errors.New("Provider Start intent was not found")
 	}
 	var count uint32
-	var reserved uint64
+	var tokensUsed uint64
 	for _, previous := range job.PlanningTurnIntents {
 		if previous.RoleExecutionID != execution.ID {
 			continue
@@ -258,23 +258,25 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 			return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "provider_session_mismatch", Cause: errors.New("planning turn cannot change Provider Session identity")}
 		}
 		count++
-		if ^uint64(0)-reserved < previous.ReservedTokens {
-			return PlanningTurnIntent{}, errors.New("planning token reservation overflow")
-		}
-		reserved += previous.ReservedTokens
 		observations := 0
 		lastStatus := ""
+		lastTokensUsed := uint64(0)
 		for _, observation := range job.PlanningTurnObservations {
 			if observation.TurnID == previous.ID {
 				observations++
 				lastStatus = observation.Status
+				lastTokensUsed = observation.TokensUsed
 			}
 		}
 		if observations == 0 || lastStatus == PlanningTurnUnknown {
 			return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "previous_operation_unknown", Cause: errors.New("previous Provider turn is unresolved; reconcile the same OperationID before another turn")}
 		}
+		if ^uint64(0)-tokensUsed < lastTokensUsed {
+			return PlanningTurnIntent{}, errors.New("planning token usage overflow")
+		}
+		tokensUsed += lastTokensUsed
 	}
-	if count >= grant.Budget.MaxTurns || reservedTokens > grant.Budget.MaxTokens-reserved {
+	if count >= grant.Budget.MaxTurns || reservedTokens > grant.Budget.MaxTokens-tokensUsed {
 		reasonCode := "turn_budget_exhausted"
 		if reservedTokens > grant.Budget.MaxTokens-reserved {
 			reasonCode = "token_budget_exhausted"

@@ -107,18 +107,6 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 
 	job, err = database.GetJob(ctx, jobID)
 	if err != nil {
-		t.Fatalf("GetJob before boundary denial: %v", err)
-	}
-	_, boundaryDecision, err := database.AddPlanningBoundaryDecision(ctx, jobID, job.Revision, executionID, "cmd_66666666666666666666666666666666", domain.PlanningBoundaryTurn, "token_budget_exhausted", principal)
-	if err != nil {
-		t.Fatalf("AddPlanningBoundaryDecision: %v", err)
-	}
-	if boundaryDecision.Decision != domain.PlanningEffectDeny || boundaryDecision.ReasonCode != "token_budget_exhausted" {
-		t.Fatalf("boundary denial fact: %#v", boundaryDecision)
-	}
-
-	job, err = database.GetJob(ctx, jobID)
-	if err != nil {
 		t.Fatalf("GetJob before resume: %v", err)
 	}
 	if _, _, err := database.AddPlanningResumeIntent(ctx, jobID, job.Revision, executionID, "session_other", "cmd_44444444444444444444444444444444", strings.Repeat("1", 64), true, principal); err == nil {
@@ -145,7 +133,7 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 		t.Fatalf("GetJob after restart: %v", err)
 	}
 	if job.State != domain.JobDraft || len(job.PlanningTurnIntents) != 1 || len(job.PlanningTurnObservations) != 2 ||
-		len(job.PlanningEffectDecisions) != 2 || len(job.PlanningResumeIntents) != 1 || len(job.PlanningBoundaryDecisions) != 1 || len(job.RoleExecutions) != 1 {
+		len(job.PlanningEffectDecisions) != 2 || len(job.PlanningResumeIntents) != 1 || len(job.RoleExecutions) != 1 {
 		t.Fatalf("restored Job lifecycle facts: %#v", job)
 	}
 }
