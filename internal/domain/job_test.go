@@ -254,6 +254,16 @@ func TestPlanningAuthorizationRequiresMatchingPrincipalAndActiveDeadline(t *test
 	}
 }
 
+func TestPlanningAuthorizationRequiresDraftJob(t *testing.T) {
+	job := newPlanningTestJob(t)
+	issuedAt := job.CreatedAt.Add(time.Minute)
+	grant := newValidPlanningAuthorization(t, job, issuedAt)
+	job.State = JobState("ACTIVE")
+	if err := grant.ValidateFor(job, grant.PrincipalID, issuedAt); err == nil {
+		t.Fatal("ValidateFor() accepted a non-DRAFT Job")
+	}
+}
+
 func TestJobRejectsDuplicatePlanningAuthorizationIDs(t *testing.T) {
 	job := newPlanningTestJob(t)
 	grant := newValidPlanningAuthorization(t, job, job.CreatedAt.Add(time.Minute))
