@@ -53,6 +53,7 @@ type testAdapter struct {
 	lookupCalls  int
 	resultCalls  int
 	usageCalls   int
+	eventCalls   int
 	startErr     error
 }
 
@@ -93,6 +94,19 @@ func (a *testAdapter) Result(context.Context, ResultRequest, CredentialLease) (R
 func (a *testAdapter) Usage(context.Context, UsageRequest, CredentialLease) (Usage, error) {
 	a.usageCalls++
 	return Usage{UsageID: "usage_1", Tokens: 10, EvidenceSHA256: strings.Repeat("2", 64)}, nil
+}
+func (a *testAdapter) ReplayEvents(_ context.Context, request ReplayEventsRequest, _ CredentialLease) (EventPage, error) {
+	a.eventCalls++
+	event := ProviderEvent{
+		EventID: "event_1", SessionID: request.SessionID, OperationID: "provider_op_1",
+		Kind: EventOperationAccepted, PreviousCursor: request.AfterCursor, Cursor: "cursor_1",
+		ObservedAt: time.Date(2026, 11, 21, 1, 0, 0, 0, time.UTC),
+		EvidenceSHA256: strings.Repeat("3", 64),
+	}
+	return EventPage{
+		SessionID: request.SessionID, FromCursor: request.AfterCursor, NextCursor: event.Cursor,
+		Events: []ProviderEvent{event}, EvidenceSHA256: strings.Repeat("4", 64),
+	}, nil
 }
 
 func liveEvidence(identity Identity, capability Capability, level EvidenceLevel) CapabilityEvidence {
@@ -212,5 +226,44 @@ func TestRuntimeStopRequiresStopProof(t *testing.T) {
 	}
 	if adapter.stopCalls != 0 || broker.acquires != 0 {
 		t.Fatalf("unverified stop caused side effects: adapter=%d broker=%d", adapter.stopCalls, broker.acquires)
+	}
+}
+
+func TestRuntimeEventReplayRequiresDurableCapabilityAndValidCursorChain(t *testing.T) {
+	adapter := newTestAdapter(CapabilityEventReplay)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := NewRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	page, err := runtime.ReplayEvents(context.Background(), ReplayEventsRequest{SessionID: "session_1"})
+	if err != nil {
+		t.Fatalf("ReplayEvents: %v", err)
+	}
+	if len(page.Events) != 1 || page.NextCursor != "cursor_1" || adapter.eventCalls != 1 || broker.acquires != 1 || broker.closed != 1 {
+		t.Fatalf("ReplayEvents result / calls: %#v adapter=%d acquired=%d closed=%d", page, adapter.eventCalls, broker.acquires, broker.closed)
+	}
+
+	broken := page
+	broken.Events = append([]ProviderEvent(nil), page.Events...)
+	broken.Events[0].PreviousCursor = "cursor_gap"
+	if err := broken.Validate(ReplayEventsRequest{SessionID: "session_1"}); err == nil {
+		t.Fatal("event page with a cursor gap was accepted")
+	}
+}
+
+func TestRuntimeRejectsEventReplayWithoutDurableEvidenceBeforeCredentialAcquisition(t *testing.T) {
+	adapter := newTestAdapter(CapabilityEventReplay)
+	adapter.capabilities.Evidence[0].EvidenceLevel = EvidenceLive
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := NewRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if _, err := runtime.ReplayEvents(context.Background(), ReplayEventsRequest{SessionID: "session_1"}); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("ReplayEvents error = %v", err)
+	}
+	if adapter.eventCalls != 0 || broker.acquires != 0 {
+		t.Fatalf("unverified event replay caused side effects: adapter=%d broker=%d", adapter.eventCalls, broker.acquires)
 	}
 }
