@@ -144,3 +144,40 @@ func TestOperationErrorNeverIncludesUnconstrainedMessage(t *testing.T) {
 		t.Fatal("unsafe operation error code was accepted")
 	}
 }
+
+func TestStartAndTurnRequestsValidateImmutablePromptAndContextDigests(t *testing.T) {
+	prompt := "Create a bounded plan"
+	contextContent := "read-only source"
+	document := ContextDocument{ID: "docs/README.md", SHA256: sha256Hex(contextContent), Content: contextContent}
+	start := StartRequest{
+		OperationID: "provider_start_123", JobID: "job_123", RoleExecutionID: "role_exec_123",
+		RequestSHA256: strings.Repeat("a", 64), PromptSHA256: sha256Hex(prompt), Prompt: prompt,
+		Context: []ContextDocument{document}, MaxTurns: 3, MaxTokens: 1000,
+		Deadline: time.Date(2026, 11, 22, 0, 0, 0, 0, time.UTC),
+	}
+	if err := start.Validate(); err != nil {
+		t.Fatalf("valid Start request: %v", err)
+	}
+	start.Context[0].Content = "tampered source"
+	if err := start.Validate(); err == nil {
+		t.Fatal("Start request accepted context content that differs from its immutable digest")
+	}
+
+	start.Context[0] = document
+	start.Context = append(start.Context, document)
+	if err := start.Validate(); err == nil {
+		t.Fatal("Start request accepted duplicate context document identity")
+	}
+
+	turn := TurnRequest{
+		OperationID: "provider_turn_123", TurnID: "planning_turn_123", SessionID: "session_123",
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 500,
+	}
+	if err := turn.Validate(); err != nil {
+		t.Fatalf("valid Turn request: %v", err)
+	}
+	turn.Prompt = "changed prompt"
+	if err := turn.Validate(); err == nil {
+		t.Fatal("Turn request accepted prompt content that differs from its immutable digest")
+	}
+}
