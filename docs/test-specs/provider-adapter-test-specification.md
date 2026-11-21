@@ -209,6 +209,8 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-026 | Usage completion | 同一UsageIDのComplete=false後にComplete=true | 既存factを変更せず新Observationを追加 |
 | CTR-027 | Capability gate | Result / Usage capability不足 | credential / Adapter呼出し前に拒否 |
 | CTR-028 | Provider retrieval failure | Result / Usage取得時にRuntime error | 成功Observationを追加しない |
+| CTR-029 | Send recovery | UNKNOWN Turnに対して同じOperationID / TurnIDでLookup | 新しいTurnIDを発行せず、verified NOT_FOUND後だけ再送 |
+| CTR-030 | Send capability gate | Send idempotency / lookupのE4 evidence不足 | Turn intent作成・Runtime.Send前に拒否 |
 
 ## 11. Regression tests
 

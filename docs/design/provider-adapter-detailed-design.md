@@ -228,12 +228,13 @@ Start observationが永続化されるとき、JobはProviderLifecycleEnforcedFr
 
 ### 8.2 Send（未実装）
 
-1. 最新Job、grant、RoleExecution、Session、turn budget、deadlineを検証する。
-2. immutable Turn intentとCommand receiptを同一transactionで保存する。
-3. commit確認後にRuntime.Sendを呼び出す。
-4. terminal event / lookup / result retrievalを照合する。
-5. terminal resultとUsageを別々のObservationとして保存する。
-6. UNKNOWN中は同じTurnIDで照合し、新しいTurnIDで再送しない。
+1. 最新Job、grant、RoleExecution、accepted Session、turn budget、deadlineを検証する。
+2. E4 Send idempotencyまたはSend lookup capabilityを確認する。
+3. immutable Turn intentとCommand receiptを同一transactionで保存する。
+4. commit確認後に最新Jobとauthorityを再検証する。
+5. 同一OperationID / TurnIDを使い、Lookupで未実行を確認した場合またはSend idempotencyが検証済みの場合だけ送信する。
+6. terminal responseはPlanningTurnObservationへ保存し、terminal resultとUsageは別々のObservationとして取得・保存する。
+7. UNKNOWN中は同じTurnIDで照合し、新しいTurnIDで再送しない。Lookupでterminal statusが見つかった場合もUsage Complete=trueを確認するまでturnを確定しない。
 
 ### 8.3 Stop / Resume（未実装）
 

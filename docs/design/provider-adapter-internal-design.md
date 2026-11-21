@@ -422,6 +422,7 @@ type PlanningProviderRuntime interface {
     Identity() provider.Identity
     Capabilities(context.Context) (provider.Capabilities, error)
     Start(context.Context, provider.StartRequest) (provider.StartResult, error)
+    Send(context.Context, provider.TurnRequest) (provider.TurnResult, error)
     Lookup(context.Context, provider.LookupRequest) (provider.LookupResult, error)
     ReplayEvents(context.Context, provider.ReplayEventsRequest) (provider.EventPage, error)
     Result(context.Context, provider.ResultRequest) (provider.Result, error)
@@ -457,15 +458,18 @@ Start intentが保存された後にauthorityが失効した場合、新規Start
 
 ```text
 Load Job
-  -> Validate grant / RoleExecution / Session / budget / deadline
+  -> Validate Principal / grant / RoleExecution / accepted Session / budget / deadline
+  -> Verify E4 Send idempotency or Send lookup capability
   -> Persist TurnIntent + CommandReceipt
-  -> Confirm commit
-  -> Reload current Job / revalidate authority
-  -> Runtime.Send
-  -> Persist Turn / Event / Result / Usage observations
+  -> Confirm commit / reload Job / revalidate authority
+  -> Lookup same OperationID / TurnID when recovery is required
+  -> Runtime.Send only for a new intent, verified NOT_FOUND, or verified Send idempotency
+  -> Persist terminal or UNKNOWN PlanningTurnObservation
+  -> Retrieve Usage and require Complete=true before reconciling a terminal Lookup result
+  -> Retrieve Result / Usage as separate append-only facts
 ```
 
-Sendの結果がAmbiguousの場合は同じTurnIDのUNKNOWNを追加し、新しいTurnIDを生成しない。
+Sendの結果がAmbiguousの場合は同じTurnIDのUNKNOWNを追加し、新しいTurnIDを生成しない。既存UNKNOWNはLookupまたは実証済みSend idempotencyでのみ照合し、Lookupがterminal statusを返してもUsage Complete=trueを得るまでterminal TurnObservationへ遷移させない。
 
 ### 8.4 Recovery sequence（Start / Event replay実装済み）
 
@@ -480,7 +484,7 @@ Load JobAggregate
   -> Re-evaluate terminality / usage / quiescence
 ```
 
-Startの照合能力がない場合はUNKNOWNを保持する。Event replayはaccepted Start Sessionと保存済みcursor prefixへ束縛し、eventをappend-onlyで保存する。Result / UsageのControllerはaccepted Startとoptional Turnのidentityを検証し、E4 Capability確認後に取得結果を既存OperationID / TurnIDへappend-onlyで保存する。Complete=falseのUsageは途中値として残し、Complete=trueでのみ確定する。Send / Resume / Result / UsageのController orchestrationは未実装であり、新identityを作って回避しない。
+Start / Sendの照合能力がない場合はUNKNOWNを保持する。Sendは同じOperationID / TurnIDのLookupまたは実証済みidempotencyでのみ再実行する。Event replayはaccepted Start Sessionと保存済みcursor prefixへ束縛し、eventをappend-onlyで保存する。Result / UsageのControllerはaccepted Startとoptional Turnのidentityを検証し、E4 Capability確認後に取得結果を既存OperationID / TurnIDへappend-onlyで保存する。Complete=falseのUsageは途中値として残し、Complete=trueでのみ確定する。Resume Controller orchestrationは未実装であり、新identityを作って回避しない。
 
 ### 8.5 Result / Usage sequence（Domain / Store実装済み、Controller未実装）
 
