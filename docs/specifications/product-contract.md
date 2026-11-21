@@ -38,19 +38,19 @@ Taxionは、人間の曖昧な思考を対話で整理し、実行可能な計�
 
 Roleは作業責務であり、Role名だけで認証済み実行主体やoperation ACLを表現しない。Planner、Coder、Reviewerの実行回数・順序・session寿命をJobの寿命と同一視しません。
 
-### 3.2 Ingress Client and Execution Agent
-
-- Ingress Clientは、人間の依頼をTaxionへ伝達するクライアントです。Ingress Client自体をJobの依頼主体として扱いません。
-- Jobの依頼主体はADR-501に従って認証されたHUMAN Principalです。
-- Execution Agentは、Jobの目的と要求能力に基づいてTaxionが選択し、実行を委譲する外部Agentです。
-- Ingress ClientとExecution Agentは異なる役割です。同じ製品が両方を担う場合も、Jobごとに役割とidentityを区別し、Ingress Clientの自己申告や指定だけでExecution AgentやJob authorityを確定しません。
-
 ### 3.1 HUMAN identity and authentication
 
 - HUMAN Principalは管理者が明示設定したOIDC issuerによるAuthorization Code Flow with PKCEの検証結果からTrusted Ingressが生成します。
 - Principalの外部identityはissuer / subjectの組で確定し、email、display name、request body、query、任意header、Role名から推定しません。
 - 認証検証とPrincipal生成の詳細はADR-501に従います。外部A2A Agentおよびservice identityはHUMAN Principalではなく、JobApprovalを行えません。
 - 認証成功はJobApprovalやExecution Permissionを付与しません。認証とJob authorityは別の判定です。
+
+### 3.2 Ingress Client and Execution Agent
+
+- Ingress Clientは、人間の依頼をTaxionへ伝達するクライアントです。Ingress Client自体をJobの依頼主体として扱いません。
+- Jobの依頼主体はADR-501に従って認証されたHUMAN Principalです。
+- Execution Agentは、Jobの目的と要求能力に基づいてTaxionが選択し、実行を委譲する外部Agentです。
+- Ingress ClientとExecution Agentは異なる役割です。同じ製品が両方を担う場合も、Jobごとに役割とidentityを区別し、Ingress Clientの自己申告や指定だけでExecution AgentやJob authorityを確定しません。
 
 ## 4. User journey and Job lifecycle
 

@@ -262,17 +262,6 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, A
 - 同じ失敗した編集の反復を検知し、別Approachを提案できます。
 - 停滞検知は権限、budget、deadline、retry permissionを拡張しません。
 
-### AT-023: Ingress Client and Execution Agent separation
-
-**Given** 人間がIngress Clientを介してTaxionへJobを依頼し、実行候補となる外部Agentが存在する。
-**When** TaxionがJobを受け付け、Execution Agentへ実行を委譲する。
-**Then**
-- Jobの依頼主体はTrusted Ingressが確定した認証済みHUMAN Principalであり、Ingress Client自体ではない。
-- Ingress Clientは人間の依頼をTaxionへ伝達する。
-- Execution AgentはJobの目的と要求能力に基づいてTaxionが選択する。
-- Ingress Clientの自己申告や指定だけでExecution Agent、Jobの依頼主体、Job authorityを確定しない。
-- 同じ製品がIngress ClientとExecution Agentの両方を担う場合も、Jobごとの役割とidentityを区別する。
-
 ### AT-022: Trusted HUMAN identity and intake provenance
 
 **Given** 利用者がWeb / CLI / APIからJob intakeまたはJobApprovalを要求する。
@@ -286,6 +275,17 @@ Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, A
 - IntakeProvenanceはPrincipal、server-derived ingress source、認証時刻、受付時刻、request identity、原文依頼digestをJobAggregateと同じtransactionで保存する。
 - token、cookie、secretをJob、provenance、ログへ保存しない。
 - 未認証のローカルCLI DRAFT作成は製品trusted intakeとみなさず、productionのPlanningAuthorization / JobApprovalへ接続しない。
+
+### AT-023: Ingress Client and Execution Agent separation
+
+**Given** 人間がIngress Clientを介してTaxionへJobを依頼し、実行候補となる外部Agentが存在する。
+**When** TaxionがJobを受け付け、Execution Agentへ実行を委譲する。
+**Then**
+- Jobの依頼主体はTrusted Ingressが確定した認証済みHUMAN Principalであり、Ingress Client自体ではない。
+- Ingress Clientは人間の依頼をTaxionへ伝達する。
+- Execution AgentはJobの目的と要求能力に基づいてTaxionが選択する。
+- Ingress Clientの自己申告や指定だけでExecution Agent、Jobの依頼主体、Job authorityを確定しない。
+- 同じ製品がIngress ClientとExecution Agentの両方を担う場合も、Jobごとの役割とidentityを区別する。
 
 ## 4. Evidence recording
 
