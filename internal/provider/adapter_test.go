@@ -129,11 +129,11 @@ func TestCrossProcessReattachmentRequiresDurableEvidence(t *testing.T) {
 }
 
 func TestOperationErrorNeverIncludesUnconstrainedMessage(t *testing.T) {
-	err, createErr := NewOperationError(FailureAmbiguous, "provider_timeout")
+	err, createErr := NewOperationError(FailureAmbiguous, OperationCodeTimeout)
 	if createErr != nil {
 		t.Fatalf("NewOperationError: %v", createErr)
 	}
-	if err.Error() != "Provider operation failed (provider_timeout)" {
+	if err.Error() != "Provider operation failed (timeout)" {
 		t.Fatalf("safe operation error = %q", err.Error())
 	}
 	unsafe := &OperationError{Class: FailureAmbiguous, Code: "sk-secret-token"}
