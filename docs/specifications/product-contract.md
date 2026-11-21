@@ -2,7 +2,7 @@
 
 Version: 1.0
 Date: 2026-11-20
-Normative decisions: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-500, ADR-501, ADR-700, ADR-701, ADR-800, ADR-811
+Normative decisions: ADR-000, ADR-001, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-500, ADR-501, ADR-700, ADR-701, ADR-800, ADR-811
 
 ## 1. Purpose and scope
 
@@ -208,6 +208,6 @@ Provider / Runtimeへの委譲は許容しますが、APIの存在やProviderの
 | 内部6 Actor・JobMessage | ADR-300 / ADR-301 |
 | 外部Agent A2A | ADR-700 / ADR-701 |
 | Git Worktree・並行性 | ADR-408 |
-| 仕様・計画・履歴・CI証拠の正本 | ADR-004 |
+| 仕様・計画・履歴・CI証拠の正本 | ADR-001 |
 | 検証水準・Job完遂受入れ | ADR-800 |
 | Agent Harness H1〜H8 | ADR-811 |
