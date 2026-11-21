@@ -558,7 +558,6 @@ func TestProviderControllerDoesNotBlindlyRetryWhenNoSafeStartCapabilityExists(t 
 	}
 }
 
-
 func TestProviderControllerStopsPlanningIntentOnlyAfterPersistingStopIntent(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
