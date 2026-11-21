@@ -34,6 +34,7 @@ func planningLifecycleJob(t *testing.T) (Job, string, string) {
 		t.Fatalf("NewProviderStartObservation: %v", err)
 	}
 	job.ProviderStartObservations = append(job.ProviderStartObservations, startObservation)
+	job.ProviderStartObservationRequiredFromRevision = startObservation.CreatedRevision
 	job.Revision++
 	job.UpdatedAt = startObservation.CreatedAt
 	return job, principal, execution.ID
@@ -554,5 +555,22 @@ func TestPlanningTurnRequiresAcceptedStartObservationAndExactSession(t *testing.
 		"cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("b", 64), 100, job.UpdatedAt.Add(time.Second))
 	if !errors.As(err, &boundary) || boundary.ReasonCode != "provider_session_mismatch" {
 		t.Fatalf("turn with unbound Session error = %v, want provider_session_mismatch", err)
+	}
+}
+
+func TestLegacyPlanningTurnFactsRemainReadableWithoutStartObservation(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
+		"cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("f", 64), 100, job.UpdatedAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("NewPlanningTurnIntent: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	job.ProviderStartObservations = nil
+	job.ProviderStartObservationRequiredFromRevision = 0
+	if err := job.Validate(); err != nil {
+		t.Fatalf("legacy Job with historical Turn intent must remain readable: %v", err)
 	}
 }
