@@ -461,7 +461,20 @@ func TestPlanningTurnRequiresAttachedSessionAfterFailedResume(t *testing.T) {
 		t.Fatalf("Job.Validate after failed resume: %v", err)
 	}
 
-	if _, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("e", 64), 100, now.Add(4*time.Second)); err == nil || !strings.Contains(err.Error(), "provider_session_not_attached") {
+	sourceCommandID := "cmd_ffffffffffffffffffffffffffffffff"
+	_, err = NewPlanningTurnIntent(job, executionID, principal, "session_exact", sourceCommandID, strings.Repeat("e", 64), 100, now.Add(4*time.Second))
+	var boundary *PlanningBoundaryError
+	if !errors.As(err, &boundary) || boundary.ReasonCode != "provider_session_not_attached" {
 		t.Fatalf("turn after FAILED resume = %v, want provider_session_not_attached", err)
+	}
+	decision, err := NewPlanningBoundaryDecision(job, executionID, principal, sourceCommandID, PlanningBoundaryTurn, boundary.ReasonCode, now.Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("persist provider_session_not_attached decision: %v", err)
+	}
+	job.PlanningBoundaryDecisions = append(job.PlanningBoundaryDecisions, decision)
+	job.Revision++
+	job.UpdatedAt = decision.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate after boundary denial: %v", err)
 	}
 }
