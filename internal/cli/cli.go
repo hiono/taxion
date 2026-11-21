@@ -50,7 +50,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 		return createLocalJob(ctx, args[3:], stdout, stderr)
 	}
 	if args[0] != "job" || len(args) < 2 {
-		fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login、taxion dev job create、taxion job <create|authorize-planning|show|list>")
+		fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login、taxion dev job create、taxion job <create|authorize-planning|start-planning|show|list>")
 		return 2
 	}
 
@@ -59,12 +59,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 		return createTrustedJob(ctx, args[2:], stdout, stderr)
 	case "authorize-planning":
 		return authorizePlanning(ctx, args[2:], stdout, stderr)
+	case "start-planning":
+		return startPlanning(ctx, args[2:], stdout, stderr)
 	case "show":
 		return showJob(ctx, args[2:], stdout, stderr)
 	case "list":
 		return listJobs(ctx, args[2:], stdout, stderr)
 	default:
-		fmt.Fprintln(stderr, "コマンドを確認してください: taxion job <authorize-planning|show|list>")
+		fmt.Fprintln(stderr, "コマンドを確認してください: taxion job <authorize-planning|start-planning|show|list>")
 		return 2
 	}
 }
@@ -230,8 +232,8 @@ func authorizePlanning(ctx context.Context, args []string, stdout, stderr io.Wri
 		return 2
 	}
 	deadline, err := time.Parse(time.RFC3339, *deadlineText)
-	if err != nil {
-		fmt.Fprintln(stderr, "deadlineはRFC3339形式で指定してください")
+	if err != nil || !deadline.After(time.Now().UTC()) {
+		fmt.Fprintln(stderr, "deadlineは現在時刻より後のRFC3339日時を指定してください")
 		return 2
 	}
 	dbPath, err := resolveStorePath(*path)
@@ -289,6 +291,66 @@ func authorizePlanningWithPrincipal(ctx context.Context, jobID string, request d
 	}
 	fmt.Fprintf(stdout, "PlanningAuthorization issued\nID: %s\nCommand ID: %s\nJob ID: %s\nState: %s\nRevision: %d\nDeadline: %s\n",
 		grant.ID, receipt.CommandID, receipt.JobID, job.State, receipt.Revision, grant.Deadline.Format(time.RFC3339))
+	return 0
+}
+
+func startPlanning(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("taxion job start-planning", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	authorizationID := flags.String("authorization-id", "", "PlanningAuthorization ID")
+	commandID := flags.String("command-id", "", "Command ID for idempotent retry")
+	path := flags.String("store", "", "Override the local Job database path")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 1 || strings.TrimSpace(*authorizationID) == "" {
+		fmt.Fprintln(stderr, "usage: taxion job start-planning --authorization-id <grant-id> [--command-id <id>] [--store path] <job-id>")
+		return 2
+	}
+	dbPath, err := resolveStorePath(*path)
+	if err != nil {
+		return report(stderr, err)
+	}
+	resolvedCommandID := strings.TrimSpace(*commandID)
+	if resolvedCommandID == "" {
+		resolvedCommandID, err = domain.NewID("cmd")
+		if err != nil {
+			return report(stderr, err)
+		}
+	}
+	principal, err := authenticate(ctx, stdout)
+	if err != nil {
+		return report(stderr, err)
+	}
+	return startPlanningWithPrincipal(ctx, flags.Arg(0), strings.TrimSpace(*authorizationID),
+		resolvedCommandID, dbPath, principal, stdout, stderr)
+}
+
+func startPlanningWithPrincipal(ctx context.Context, jobID, authorizationID, commandID, dbPath string,
+	principal auth.AuthenticatedPrincipal, stdout, stderr io.Writer) int {
+	if err := principal.Validate(); err != nil {
+		return report(stderr, err)
+	}
+	database, err := store.Open(ctx, dbPath)
+	if err != nil {
+		return report(stderr, err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		return report(stderr, err)
+	}
+	receipt, execution, intent, err := database.StartTasklessPlanner(
+		ctx, jobID, job.Revision, authorizationID, commandID, principal,
+	)
+	if err != nil {
+		return report(stderr, err)
+	}
+	fmt.Fprintf(stdout,
+		"Taskless PLANNER Start intent persisted\nRoleExecution ID: %s\nOperation ID: %s\nPlanningAuthorization ID: %s\nCommand ID: %s\nJob ID: %s\nState: %s\nRevision: %d\nProvider: %s\nAccount: %s\n",
+		execution.ID, intent.ID, execution.PlanningAuthorizationID, receipt.CommandID, receipt.JobID,
+		job.State, receipt.Revision, intent.ProviderID, intent.AccountID,
+	)
 	return 0
 }
 
@@ -399,6 +461,7 @@ Usage:
   taxion auth login
   taxion job create --request "Trusted OIDC-authenticated DRAFT"
   taxion job authorize-planning [scope and budget options] <job-id>
+  taxion job start-planning --authorization-id <grant-id> <job-id>
   taxion dev job create --request "Local untrusted DRAFT only"
   taxion job show <job-id>
   taxion job list
@@ -407,6 +470,14 @@ Usage:
 Options:
   --store <path>   Override the local Job database path
   --limit <n>      Maximum Jobs to list (1-1000)
+
+Planning authorization options:
+  --provider <id> --account <id> --configuration-sha256 <hex>
+  --repository <https-url> --commit <40-or-64-hex>
+  --read-only-mode <snapshot|documents>
+  --read-only-reference <id> --read-only-sha256 <hex>
+  --max-turns <n> --max-tokens <n> --deadline <RFC3339>
+  --command-id <id>  Reuse the same ID to retry an identical request
 
 OIDC environment:
   TAXION_OIDC_ISSUER

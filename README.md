@@ -30,13 +30,14 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 - `taxion auth login`：OIDC Authorization Code Flow with PKCEでHUMAN Principalを検証します。ログインSessionやtokenは保存しません。
 - `taxion job create --request "..."`：OIDC認証後、原文依頼とIntakeProvenanceを同一Job transactionで保存したDRAFT Jobを作成します。
 - `taxion job authorize-planning ... <job-id>`：OIDC再認証後、DRAFT Jobに束縛したbounded read-only PlanningAuthorizationを発行・永続化します。
+- `taxion job start-planning --authorization-id <grant-id> <job-id>`：OIDC再認証後、grantを再検証し、Taskless PLANNER RoleExecutionとProvider Start intentを永続化します。Providerは起動しません。
 - `taxion dev job create --request "..."`：開発・永続化テスト専用の未認証ローカルDRAFT Jobを作成します。
 - `taxion job show <job-id>`：Jobの現在の内容をJSONで表示します。
 - `taxion job list`：保存済みJobを一覧表示します。
 
 JobはSQLiteへtransactionで保存し、Command receiptとpayload hashを照合します。既定の保存先はOSのユーザー設定ディレクトリ配下の taxion/jobs.sqlite です。`--store` で保存先を明示できます。
 
-PlanningAuthorizationの発行・永続化基盤は利用できますが、Taskless PLANNERの実行、JobContractの承認、Role実行、Provider連携、Handoff、Job完了は未実装です。Grant発行やDRAFT Jobの作成・読取りをplanning実行やJob完遂機能の完成と扱いません。機能の実装状態はコード、テスト、対象HEADのCIによって確認します。
+PlanningAuthorizationの発行・永続化と、Taskless PLANNERのRoleExecution / Provider Start intentの記録まで利用できます。Provider Adapterによる実起動、turn / effect / resume、JobContractの承認、Coder / Reviewer実行、Handoff、Job完了は未実装です。Start intentの記録をProvider実行やplanning完了の証拠として扱いません。機能の実装状態はコード、テスト、対象HEADのCIによって確認します。
 
 ## 仕様・設計・受入れ
 

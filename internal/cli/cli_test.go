@@ -448,6 +448,16 @@ func TestAuthorizePlanningIssuesBoundedGrantAndSupportsIdempotentRetry(t *testin
 	if commandID == "" {
 		t.Fatalf("Command ID missing from output: %q", output)
 	}
+	var authorizationID string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "ID: plan_auth_") {
+			authorizationID = strings.TrimPrefix(line, "ID: ")
+			break
+		}
+	}
+	if authorizationID == "" {
+		t.Fatalf("PlanningAuthorization ID missing from output: %q", output)
+	}
 
 	retryArgs := append(append([]string(nil), args[:len(args)-1]...), "--command-id", commandID, jobID)
 	code, retryOutput, stderr := runCLIWithFakeOIDC(t, server, retryArgs)
@@ -456,6 +466,35 @@ func TestAuthorizePlanningIssuesBoundedGrantAndSupportsIdempotentRetry(t *testin
 	}
 	if !strings.Contains(retryOutput, "Revision: 2") {
 		t.Fatalf("retry output = %q, want original revision 2", retryOutput)
+	}
+
+	startArgs := []string{"job", "start-planning", "--store", path, "--authorization-id", authorizationID, jobID}
+	code, startOutput, stderr := runCLIWithFakeOIDC(t, server, startArgs)
+	if code != 0 {
+		t.Fatalf("start-planning exit code = %d, stderr=%q", code, stderr)
+	}
+	if !strings.Contains(startOutput, "Taskless PLANNER Start intent persisted") ||
+		!strings.Contains(startOutput, "State: DRAFT") || !strings.Contains(startOutput, "Operation ID: provider_op_") {
+		t.Fatalf("start-planning output = %q", startOutput)
+	}
+	var startCommandID string
+	for _, line := range strings.Split(startOutput, "\n") {
+		if strings.HasPrefix(line, "Command ID: ") {
+			startCommandID = strings.TrimPrefix(line, "Command ID: ")
+			break
+		}
+	}
+	if startCommandID == "" {
+		t.Fatalf("start Command ID missing from output: %q", startOutput)
+	}
+	startRetryArgs := []string{"job", "start-planning", "--store", path,
+		"--authorization-id", authorizationID, "--command-id", startCommandID, jobID}
+	code, startRetryOutput, stderr := runCLIWithFakeOIDC(t, server, startRetryArgs)
+	if code != 0 {
+		t.Fatalf("idempotent start-planning retry exit code = %d, stderr=%q", code, stderr)
+	}
+	if !strings.Contains(startRetryOutput, "Revision: 3") {
+		t.Fatalf("start retry output = %q, want original revision 3", startRetryOutput)
 	}
 
 	database, err := store.Open(context.Background(), path)
@@ -467,7 +506,8 @@ func TestAuthorizePlanningIssuesBoundedGrantAndSupportsIdempotentRetry(t *testin
 	if err != nil {
 		t.Fatalf("GetJob() error = %v", err)
 	}
-	if job.State != domain.JobDraft || job.Revision != 2 || len(job.PlanningAuthorizations) != 1 {
+	if job.State != domain.JobDraft || job.Revision != 3 || len(job.PlanningAuthorizations) != 1 ||
+		len(job.RoleExecutions) != 1 || len(job.ProviderStartIntents) != 1 {
 		t.Fatalf("persisted Job = %#v", job)
 	}
 	grant := job.PlanningAuthorizations[0]
