@@ -25,9 +25,9 @@ func (s *Store) AddPlanningTurnIntent(ctx context.Context, jobID string, expecte
 	}
 	request := struct {
 		JobID, RoleExecutionID, ProviderSessionID, CommandID, PromptSHA256 string
-		ExpectedRevision, ReservedTokens                                   uint64
+		ReservedTokens uint64
 		PrincipalID                                                        string
-	}{jobID, roleExecutionID, providerSessionID, commandID, promptSHA256, expectedRevision, reservedTokens, principal.PrincipalID()}
+	}{jobID, roleExecutionID, providerSessionID, commandID, promptSHA256, reservedTokens, principal.PrincipalID()}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addPlanningTurnIntentCommandType, request,
 		func(job domain.Job, now time.Time) (domain.PlanningTurnIntent, error) {
 			return domain.NewPlanningTurnIntent(job, roleExecutionID, principal.PrincipalID(), providerSessionID, commandID, promptSHA256, reservedTokens, now)
@@ -51,10 +51,10 @@ func (s *Store) AddPlanningTurnObservation(ctx context.Context, jobID string, ex
 	}
 	request := struct {
 		JobID, TurnID, CommandID, Status, EvidenceSHA256 string
-		ExpectedRevision, TokensUsed                     uint64
+		TokensUsed uint64
 		ReconcilesUnknown                                bool
 		PrincipalID                                      string
-	}{jobID, turnID, commandID, status, evidenceSHA256, expectedRevision, tokensUsed, reconcilesUnknown, principal.PrincipalID()}
+	}{jobID, turnID, commandID, status, evidenceSHA256, tokensUsed, reconcilesUnknown, principal.PrincipalID()}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addPlanningTurnObservationCommandType, request,
 		func(job domain.Job, now time.Time) (domain.PlanningTurnObservation, error) {
 			return domain.NewPlanningTurnObservation(job, turnID, principal.PrincipalID(), commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown, now)
@@ -78,9 +78,9 @@ func (s *Store) AddPlanningEffectDecision(ctx context.Context, jobID string, exp
 	}
 	request := struct {
 		JobID, RoleExecutionID, CommandID, Effect, ContextSHA256 string
-		ExpectedRevision                                         uint64
+
 		PrincipalID                                              string
-	}{jobID, roleExecutionID, commandID, effect, contextSHA256, expectedRevision, principal.PrincipalID()}
+	}{jobID, roleExecutionID, commandID, effect, contextSHA256, principal.PrincipalID()}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addPlanningEffectDecisionCommandType, request,
 		func(job domain.Job, now time.Time) (domain.PlanningEffectDecision, error) {
 			return domain.NewPlanningEffectDecision(job, roleExecutionID, principal.PrincipalID(), commandID, effect, contextSHA256, now)
@@ -104,10 +104,10 @@ func (s *Store) AddPlanningResumeIntent(ctx context.Context, jobID string, expec
 	}
 	request := struct {
 		JobID, RoleExecutionID, ProviderSessionID, CommandID, CapabilityEvidenceSHA256 string
-		ExpectedRevision                                                               uint64
+
 		ReattachmentSupported                                                          bool
 		PrincipalID                                                                    string
-	}{jobID, roleExecutionID, providerSessionID, commandID, capabilityEvidenceSHA256, expectedRevision, reattachmentSupported, principal.PrincipalID()}
+	}{jobID, roleExecutionID, providerSessionID, commandID, capabilityEvidenceSHA256, reattachmentSupported, principal.PrincipalID()}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addPlanningResumeIntentCommandType, request,
 		func(job domain.Job, now time.Time) (domain.PlanningResumeIntent, error) {
 			return domain.NewPlanningResumeIntent(job, roleExecutionID, principal.PrincipalID(), providerSessionID, commandID, capabilityEvidenceSHA256, reattachmentSupported, now)
@@ -254,9 +254,9 @@ func (s *Store) AddPlanningBoundaryDecision(ctx context.Context, jobID string, e
 	commandID := domain.PlanningBoundaryDecisionCommandID(sourceCommandID, boundary)
 	request := struct {
 		JobID, RoleExecutionID, SourceCommandID, Boundary, ReasonCode string
-		ExpectedRevision                                              uint64
+
 		PrincipalID                                                   string
-	}{jobID, roleExecutionID, sourceCommandID, boundary, reasonCode, expectedRevision, principal.PrincipalID()}
+	}{jobID, roleExecutionID, sourceCommandID, boundary, reasonCode, principal.PrincipalID()}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, "AddPlanningBoundaryDecision", request,
 		func(job domain.Job, now time.Time) (domain.PlanningBoundaryDecision, error) {
 			return domain.NewPlanningBoundaryDecision(job, roleExecutionID, principal.PrincipalID(), sourceCommandID, boundary, reasonCode, now)
@@ -280,10 +280,10 @@ func (s *Store) AddPlanningResumeObservation(ctx context.Context, jobID string, 
 	}
 	request := struct {
 		JobID, ResumeID, CommandID, Status, EvidenceSHA256 string
-		ExpectedRevision                                   uint64
+
 		ReconcilesUnknown                                  bool
 		PrincipalID                                        string
-	}{jobID, resumeID, commandID, status, evidenceSHA256, expectedRevision, reconcilesUnknown, principal.PrincipalID()}
+	}{jobID, resumeID, commandID, status, evidenceSHA256, reconcilesUnknown, principal.PrincipalID()}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, "AddPlanningResumeObservation", request,
 		func(job domain.Job, now time.Time) (domain.PlanningResumeObservation, error) {
 			return domain.NewPlanningResumeObservation(job, resumeID, principal.PrincipalID(), commandID, status, evidenceSHA256, reconcilesUnknown, now)
