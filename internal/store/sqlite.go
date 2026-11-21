@@ -282,13 +282,9 @@ func (s *Store) createJob(ctx context.Context, job domain.Job, commandID, comman
 	return receipt, nil
 }
 
-func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID string, grant domain.PlanningAuthorization, principal auth.AuthenticatedPrincipal, issuedAt time.Time) (CommandReceipt, error) {
+func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID string, grant domain.PlanningAuthorization, principal auth.AuthenticatedPrincipal) (CommandReceipt, error) {
 	if err := principal.Validate(); err != nil {
 		return CommandReceipt{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
-	}
-	issuedAt = issuedAt.UTC().Round(0)
-	if !grant.IssuedAt.Equal(issuedAt) {
-		return CommandReceipt{}, errors.New("PlanningAuthorization issue time must be server-derived")
 	}
 	if grant.PrincipalID != principal.PrincipalID() {
 		return CommandReceipt{}, errors.New("PlanningAuthorization principal does not match authenticated HUMAN Principal")
@@ -300,12 +296,13 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID s
 		return CommandReceipt{}, errors.New("PlanningAuthorization Job identity mismatch")
 	}
 
-	grantPayload, err := json.Marshal(grant)
+	request := grant
+	request.IssuedAt = time.Time{}
+	requestPayload, err := json.Marshal(request)
 	if err != nil {
-		return CommandReceipt{}, fmt.Errorf("encode PlanningAuthorization: %w", err)
+		return CommandReceipt{}, fmt.Errorf("encode PlanningAuthorization request: %w", err)
 	}
-	grantHash := digest(grantPayload)
-	createdAt := issuedAt.Format(time.RFC3339Nano)
+	requestHash := digest(requestPayload)
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -321,15 +318,19 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID s
 	).Scan(&existingType, &existingJobID, &existingRevision, &existingHash, &existingReceipt, &existingCreatedAt)
 	if err == nil {
 		if existingType != addPlanningAuthorizationCommandType || existingJobID != jobID ||
-			existingRevision <= 1 || existingHash != grantHash || existingCreatedAt != createdAt {
+			existingRevision <= 1 || existingHash != requestHash {
 			return CommandReceipt{}, ErrIdempotencyConflict
 		}
 		var stored CommandReceipt
 		if err := json.Unmarshal([]byte(existingReceipt), &stored); err != nil {
 			return CommandReceipt{}, fmt.Errorf("%w: decode existing command receipt: %v", ErrIntegrity, err)
 		}
+		existingTime, err := time.Parse(time.RFC3339Nano, existingCreatedAt)
+		if err != nil {
+			return CommandReceipt{}, fmt.Errorf("%w: invalid PlanningAuthorization receipt timestamp: %v", ErrIntegrity, err)
+		}
 		if stored.CommandID != commandID || stored.JobID != jobID || stored.Revision != uint64(existingRevision) ||
-			stored.PayloadSHA256 != grantHash || !stored.CreatedAt.Equal(issuedAt) {
+			stored.PayloadSHA256 != requestHash || !stored.CreatedAt.Equal(existingTime) {
 			return CommandReceipt{}, fmt.Errorf("%w: PlanningAuthorization receipt metadata mismatch", ErrIntegrity)
 		}
 		var currentRevision int64
@@ -349,8 +350,10 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID s
 			if currentGrant.ID != grant.ID {
 				continue
 			}
-			currentGrantPayload, err := json.Marshal(currentGrant)
-			if err != nil || digest(currentGrantPayload) != grantHash {
+			persistedRequest := currentGrant
+			persistedRequest.IssuedAt = time.Time{}
+			currentGrantPayload, err := json.Marshal(persistedRequest)
+			if err != nil || digest(currentGrantPayload) != requestHash {
 				return CommandReceipt{}, fmt.Errorf("%w: persisted PlanningAuthorization differs from command", ErrIntegrity)
 			}
 			if err := currentGrant.Validate(currentJob); err != nil {
@@ -384,9 +387,11 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID s
 	if err != nil {
 		return CommandReceipt{}, err
 	}
+	issuedAt := time.Now().UTC().Round(0)
 	if issuedAt.Before(job.UpdatedAt) {
 		return CommandReceipt{}, errors.New("PlanningAuthorization issue time precedes current Job revision")
 	}
+	grant.IssuedAt = issuedAt
 	if err := grant.ValidateFor(job, principal.PrincipalID(), issuedAt); err != nil {
 		return CommandReceipt{}, err
 	}
@@ -414,7 +419,7 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID s
 		CommandID:     commandID,
 		JobID:         jobID,
 		Revision:      job.Revision,
-		PayloadSHA256: grantHash,
+		PayloadSHA256: requestHash,
 		CreatedAt:     issuedAt,
 	}
 	receiptJSON, err := json.Marshal(receipt)
@@ -436,9 +441,10 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID, commandID s
 	if affected != 1 {
 		return CommandReceipt{}, ErrIdempotencyConflict
 	}
+	createdAt := issuedAt.Format(time.RFC3339Nano)
 	_, err = tx.ExecContext(ctx,
 		"INSERT INTO job_commands (command_id, job_id, command_type, payload_sha256, resulting_revision, receipt_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		commandID, jobID, addPlanningAuthorizationCommandType, grantHash, job.Revision, string(receiptJSON), createdAt,
+		commandID, jobID, addPlanningAuthorizationCommandType, requestHash, job.Revision, string(receiptJSON), createdAt,
 	)
 	if err != nil {
 		return CommandReceipt{}, fmt.Errorf("insert PlanningAuthorization receipt: %w", err)
