@@ -145,6 +145,8 @@ Job完了CommandはControllerだけが実行する。必須受入条件、JobEvi
 - Observation、Conformance、Admission、Execution Permissionを一つのbooleanへまとめない。
 - 旧Task / Dispatch / ReviewFlow runtime、旧権限モデル、旧fallbackを新しいJob-native経路として残さない。
 
+Provider SDK / credential / capability / operation / recoveryの境界実装は[Provider Adapter 詳細設計書](provider-adapter-detailed-design.md)と[Provider Adapter 内部設計書](provider-adapter-internal-design.md)に従う。要求と受入れ条件は[Provider Adapter 要求仕様書](../specifications/provider-adapter-requirements.md)および[Provider Adapter テスト仕様書](../test-specs/provider-adapter-test-specification.md)を正本とする。
+
 ## 8. Traceability
 
 ADR-200 Domain Model、ADR-201 JobAggregate / Command、ADR-202 invariant enforcement、ADR-300 Collaboration、ADR-301 JobMessage、ADR-400 Execution & Runtime、ADR-408 Worktree、ADR-500 authorization、ADR-501 Trusted Ingress / HUMAN Principal、ADR-700 Interface & Integration、ADR-701 A2A、ADR-800 Evidence / acceptanceを具体化する。
