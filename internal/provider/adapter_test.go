@@ -29,6 +29,19 @@ func (syntheticCapabilityVerifier) Verify(_ context.Context, identity Identity, 
 		item.EvidenceLevel == EvidenceSynthetic, nil
 }
 
+type testEvidenceRegistry struct {
+	items map[Capability]CapabilityEvidence
+	err   error
+}
+
+func (r testEvidenceRegistry) Find(_ context.Context, _ Identity, capability Capability) (CapabilityEvidence, bool, error) {
+	if r.err != nil {
+		return CapabilityEvidence{}, false, r.err
+	}
+	item, ok := r.items[capability]
+	return item, ok, nil
+}
+
 type minimumCapabilityVerifier struct {
 	minimum map[Capability]EvidenceLevel
 }
@@ -91,6 +104,42 @@ func TestCapabilityVerificationIsPerCapability(t *testing.T) {
 	}
 	if verified.Has(CapabilityEventReplay) {
 		t.Fatal("unverified EventReplay capability remained enabled")
+	}
+}
+
+func TestRegistryCapabilityVerifierRequiresExactTrustedEvidence(t *testing.T) {
+	identity := testIdentity()
+	item := evidence(identity, CapabilityStartIdempotency, EvidenceSynthetic)
+	verifier, err := NewRegistryCapabilityVerifier(testEvidenceRegistry{
+		items: map[Capability]CapabilityEvidence{CapabilityStartIdempotency: item},
+	})
+	if err != nil {
+		t.Fatalf("NewRegistryCapabilityVerifier: %v", err)
+	}
+	accepted, err := verifier.Verify(context.Background(), identity, item)
+	if err != nil || !accepted {
+		t.Fatalf("trusted evidence was not accepted: accepted=%v err=%v", accepted, err)
+	}
+	tampered := item
+	tampered.EvidenceSHA256 = strings.Repeat("c", 64)
+	accepted, err = verifier.Verify(context.Background(), identity, tampered)
+	if err != nil || accepted {
+		t.Fatalf("tampered evidence was accepted: accepted=%v err=%v", accepted, err)
+	}
+}
+
+func TestRegistryCapabilityVerifierFailsClosedWhenCatalogUnavailable(t *testing.T) {
+	identity := testIdentity()
+	item := evidence(identity, CapabilityStartIdempotency, EvidenceSynthetic)
+	verifier, err := NewRegistryCapabilityVerifier(testEvidenceRegistry{err: errors.New("catalog unavailable")})
+	if err != nil {
+		t.Fatalf("NewRegistryCapabilityVerifier: %v", err)
+	}
+	if _, err := verifier.Verify(context.Background(), identity, item); err == nil {
+		t.Fatal("unavailable evidence catalog was treated as verified")
+	}
+	if _, err := NewRegistryCapabilityVerifier(nil); err == nil {
+		t.Fatal("nil evidence registry was accepted")
 	}
 }
 
