@@ -58,6 +58,9 @@ func NewProviderEventObservation(
 	if err := job.Validate(); err != nil {
 		return ProviderEventObservation{}, err
 	}
+	if _, _, err := planningGrantAndExecutionForObservation(job, roleExecutionID, principalID); err != nil {
+		return ProviderEventObservation{}, err
+	}
 	observedAt = observedAt.UTC().Round(0)
 	if !validCommandID(commandID) || commandID != ProviderEventObservationCommandID(eventID) ||
 		observedAt.IsZero() || job.Revision >= uint64(^uint64(0)>>1) {
