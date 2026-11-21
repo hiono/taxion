@@ -210,17 +210,17 @@ func TestAuthorizePlanningRequiresOIDCBeforeOpeningStore(t *testing.T) {
 func TestAuthorizePlanningWithPrincipalRejectsEmptyPrincipalBeforeOpeningStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
 	request := domain.PlanningAuthorizationRequest{
-		ProviderID: "provider.test",
-		AccountID: "account.test",
+		ProviderID:          "provider.test",
+		AccountID:           "account.test",
 		ConfigurationSHA256: strings.Repeat("a", 64),
-		RepositoryID: "https://github.com/example/project@" + strings.Repeat("b", 40),
-		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
-			Mode: domain.PlanningReadOnlyBoundarySnapshot,
+		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
+		ReadOnlyBoundary:    domain.PlanningReadOnlyBoundary{
+			Mode:      domain.PlanningReadOnlyBoundarySnapshot,
 			Reference: "snapshot_1",
-			SHA256: strings.Repeat("c", 64),
+			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget: domain.PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
-		Deadline: time.Now().UTC().Add(time.Hour),
+		Budget:              domain.PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+		Deadline:            time.Now().UTC().Add(time.Hour),
 	}
 	var stdout, stderr bytes.Buffer
 	code := authorizePlanningWithPrincipal(context.Background(), "job_missing", request,
