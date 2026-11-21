@@ -109,6 +109,16 @@ func TestJobContractAndApprovalStoreTransactions(t *testing.T) {
 	execution, revision, sourceResult := createJobContractPlanner(t, database, "job_contract_store", principal)
 	commandID := "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	contract := validStoreJobContract()
+	if _, _, err := database.AddJobContractRevision(
+		ctx, "job_contract_store", revision, commandID, execution.ID, "provider_result_missing", sourceResult.ContentSHA256, contract,
+	); err == nil {
+		t.Fatal("JobContract Store accepted an unknown source Result")
+	}
+	if _, _, err := database.AddJobContractRevision(
+		ctx, "job_contract_store", revision, commandID, execution.ID, sourceResult.ID, strings.Repeat("0", 64), contract,
+	); err == nil {
+		t.Fatal("JobContract Store accepted a mismatched source Result digest")
+	}
 	receipt, contractRevision, err := database.AddJobContractRevision(
 		ctx, "job_contract_store", revision, commandID, execution.ID, sourceResult.ID, sourceResult.ContentSHA256, contract,
 	)
@@ -120,6 +130,15 @@ func TestJobContractAndApprovalStoreTransactions(t *testing.T) {
 	)
 	if err != nil || retryReceipt.CommandID != receipt.CommandID || retryReceipt.Revision != receipt.Revision || retryRevision.ID != contractRevision.ID || retryRevision.CanonicalHash != contractRevision.CanonicalHash {
 		t.Fatalf("contract revision idempotency: %#v %#v %v", retryReceipt, retryRevision, err)
+	}
+	if _, _, err := database.AddJobContractRevision(
+		ctx, "job_contract_store", receipt.Revision, commandID, execution.ID, "provider_result_other", sourceResult.ContentSHA256, contract,
+	); err != ErrIdempotencyConflict {
+		t.Fatalf("same CommandID with different Result provenance returned %v, want ErrIdempotencyConflict", err)
+	}
+	if contractRevision.SourceResultObservationID != sourceResult.ID ||
+		contractRevision.SourceResultContentSHA256 != sourceResult.ContentSHA256 {
+		t.Fatalf("JobContract revision did not persist source Result provenance: %#v", contractRevision)
 	}
 	job, err := database.GetJob(ctx, "job_contract_store")
 	if err != nil || job.State != domain.JobDraft || job.Goal != contractRevision.Contract.Purpose {
@@ -188,7 +207,7 @@ func TestJobContractStoreRollbackLeavesNoFactOrReceipt(t *testing.T) {
 		t.Fatalf("create rollback trigger: %v", err)
 	}
 	if _, _, err := database.AddJobContractRevision(
-		ctx, "job_contract_rollback", revision, commandID, execution.ID, validStoreJobContract(),
+		ctx, "job_contract_rollback", revision, commandID, execution.ID, sourceResult.ID, sourceResult.ContentSHA256, validStoreJobContract(),
 	); err == nil {
 		t.Fatal("JobContract revision succeeded despite forced receipt failure")
 	}
