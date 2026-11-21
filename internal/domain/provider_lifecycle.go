@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"time"
 )
@@ -31,6 +33,15 @@ type ProviderStartObservation struct {
 
 func ProviderStartObservationID(commandID string) string {
 	return planningOperationID("provider_start_observation", commandID)
+}
+
+func ProviderStartObservationCommandID(operationID, status, sessionID, receiptID, evidenceSHA256 string, reconcilesUnknown bool) string {
+	material := operationID + "\x00" + status + "\x00" + sessionID + "\x00" + receiptID + "\x00" + evidenceSHA256
+	if reconcilesUnknown {
+		material += "\x00reconcile"
+	}
+	sum := sha256.Sum256([]byte("taxion:provider-start-observation-command:" + material))
+	return "cmd_" + hex.EncodeToString(sum[:16])
 }
 
 func NewProviderStartObservation(
