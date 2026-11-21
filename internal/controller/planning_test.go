@@ -39,6 +39,10 @@ func (f *fakePlanningLifecycleStore) AddPlanningResumeIntent(context.Context, st
 	return store.CommandReceipt{}, domain.PlanningResumeIntent{}, f.resumeErr
 }
 
+func (f *fakePlanningLifecycleStore) AddPlanningResumeObservation(context.Context, string, uint64, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningResumeObservation, error) {
+	return store.CommandReceipt{}, domain.PlanningResumeObservation{}, nil
+}
+
 func (f *fakePlanningLifecycleStore) AddPlanningBoundaryDecision(_ context.Context, _ string, _ uint64, _ string, sourceCommandID, boundary, reasonCode string, _ auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningBoundaryDecision, error) {
 	decision := domain.PlanningBoundaryDecision{SourceCommandID: sourceCommandID, Boundary: boundary, ReasonCode: reasonCode, CreatedAt: time.Now().UTC()}
 	f.boundaryDecisions = append(f.boundaryDecisions, decision)
@@ -101,5 +105,27 @@ func TestAuthorizeEffectFailsClosedOnDeniedDecision(t *testing.T) {
 	var denied *PlanningEffectDeniedError
 	if !errors.As(err, &denied) || decision.Decision != domain.PlanningEffectDeny {
 		t.Fatalf("effect decision was not rejected: %#v %v", decision, err)
+	}
+}
+
+func TestResumePersistsTypedBoundaryDenial(t *testing.T) {
+	fake := &fakePlanningLifecycleStore{
+		job: domain.Job{ID: "job_1", Revision: 5},
+		resumeErr: &domain.PlanningBoundaryError{
+			Boundary: domain.PlanningBoundaryResume,
+			ReasonCode: "provider_session_mismatch",
+			Cause: errors.New("Provider Session identity mismatch"),
+		},
+	}
+	controller, err := NewPlanningController(fake)
+	if err != nil {
+		t.Fatalf("NewPlanningController: %v", err)
+	}
+	_, _, err = controller.Resume(context.Background(), "job_1", "role_1", "session_other", "cmd_dddddddddddddddddddddddddddddddd", strings.Repeat("a", 64), true, auth.AuthenticatedPrincipal{})
+	if err == nil {
+		t.Fatal("Resume did not return the boundary rejection")
+	}
+	if len(fake.boundaryDecisions) != 1 || fake.boundaryDecisions[0].ReasonCode != "provider_session_mismatch" {
+		t.Fatalf("resume denial was not persisted: %#v", fake.boundaryDecisions)
 	}
 }
