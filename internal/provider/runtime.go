@@ -97,7 +97,7 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 	if err := request.Validate(); err != nil {
 		return TurnResult{}, ErrProviderInvalidRequest
 	}
-	capabilities, err := r.liveCapabilities(ctx)
+	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
 		return TurnResult{}, err
 	}
@@ -145,7 +145,7 @@ func (r *Runtime) Stop(ctx context.Context, request StopRequest) (StopResult, er
 	if err := request.Validate(); err != nil {
 		return StopResult{}, ErrProviderInvalidRequest
 	}
-	capabilities, err := r.liveCapabilities(ctx)
+	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
 		return StopResult{}, err
 	}
@@ -180,7 +180,7 @@ func (r *Runtime) Resume(ctx context.Context, request ResumeRequest) (ResumeResu
 	if err := request.Validate(); err != nil {
 		return ResumeResult{}, ErrProviderInvalidRequest
 	}
-	capabilities, err := r.liveCapabilities(ctx)
+	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
 		return ResumeResult{}, err
 	}
@@ -215,7 +215,7 @@ func (r *Runtime) Lookup(ctx context.Context, request LookupRequest) (LookupResu
 	if err := request.Validate(); err != nil {
 		return LookupResult{}, ErrProviderInvalidRequest
 	}
-	capabilities, err := r.liveCapabilities(ctx)
+	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
 		return LookupResult{}, err
 	}
@@ -254,7 +254,7 @@ func (r *Runtime) Result(ctx context.Context, request ResultRequest) (Result, er
 	if err := request.Validate(); err != nil {
 		return Result{}, ErrProviderInvalidRequest
 	}
-	capabilities, err := r.liveCapabilities(ctx)
+	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
 		return Result{}, err
 	}
@@ -291,7 +291,7 @@ func (r *Runtime) Usage(ctx context.Context, request UsageRequest) (Usage, error
 	if err := request.Validate(); err != nil {
 		return Usage{}, ErrProviderInvalidRequest
 	}
-	capabilities, err := r.liveCapabilities(ctx)
+	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
 		return Usage{}, err
 	}
@@ -328,7 +328,7 @@ func (r *Runtime) ReplayEvents(ctx context.Context, request ReplayEventsRequest)
 	if err := request.Validate(); err != nil {
 		return EventPage{}, ErrProviderInvalidRequest
 	}
-	capabilities, err := r.liveCapabilities(ctx)
+	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
 		return EventPage{}, err
 	}
