@@ -14,10 +14,10 @@ import (
 
 const (
 	addProviderStartObservationCommandType = "AddProviderStartObservation"
-	addPlanningTurnIntentCommandType      = "AddPlanningTurnIntent"
-	addPlanningTurnObservationCommandType = "AddPlanningTurnObservation"
-	addPlanningEffectDecisionCommandType  = "AddPlanningEffectDecision"
-	addPlanningResumeIntentCommandType    = "AddPlanningResumeIntent"
+	addPlanningTurnIntentCommandType       = "AddPlanningTurnIntent"
+	addPlanningTurnObservationCommandType  = "AddPlanningTurnObservation"
+	addPlanningEffectDecisionCommandType   = "AddPlanningEffectDecision"
+	addPlanningResumeIntentCommandType     = "AddPlanningResumeIntent"
 )
 
 func (s *Store) AddPlanningTurnIntent(ctx context.Context, jobID string, expectedRevision uint64, roleExecutionID, providerSessionID, commandID, promptSHA256 string, reservedTokens uint64, principal auth.AuthenticatedPrincipal) (CommandReceipt, domain.PlanningTurnIntent, error) {
@@ -311,8 +311,8 @@ func (s *Store) AddProviderStartObservation(
 	}
 	request := struct {
 		JobID, OperationID, CommandID, Status, ProviderSessionID, ReceiptID, EvidenceSHA256 string
-		ReconcilesUnknown                                                                  bool
-		PrincipalID                                                                        string
+		ReconcilesUnknown                                                                   bool
+		PrincipalID                                                                         string
 	}{
 		jobID, operationID, commandID, status, providerSessionID, receiptID, evidenceSHA256,
 		reconcilesUnknown, principal.PrincipalID(),
