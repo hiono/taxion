@@ -669,10 +669,6 @@ func (j Job) Validate() error {
 				return fmt.Errorf("%w: terminal Provider Start observation must reconcile UNKNOWN", ErrInvalidJob)
 			}
 		}
-		if len(observations) > 0 && observations[len(observations)-1].Status != ProviderStartUnknown &&
-			len(observations) > 1 {
-			return fmt.Errorf("%w: terminal Provider Start observation has later history for %s", ErrInvalidJob, operationID)
-		}
 	}
 	seenTurns := make(map[string]struct{}, len(j.PlanningTurnIntents))
 	turnByID := make(map[string]PlanningTurnIntent, len(j.PlanningTurnIntents))
