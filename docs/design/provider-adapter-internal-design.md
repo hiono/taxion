@@ -437,7 +437,7 @@ type ProviderController struct {
 }
 ```
 
-現時点のController interfaceはDRAFT Planning Start、Stop、accepted Sessionに束縛したEvent replayに対応する。Result / UsageのDomain / Store factsは実装済みであり、Controller接続は未実装である。Send / Resumeも未実装である。Controller testsではfake implementationを注入する。
+現時点のController interfaceはDRAFT Planning Start / Send / Stop、accepted Sessionに束縛したEvent replay、Result / Usage retrievalに対応する。Sendはintent-first、E4 Send idempotency / lookup gate、同一OperationID / TurnIDのLookup recovery、Usage Complete=true確認を実装済み。Resume Controllerは未実装。Controller testsではfake implementationを注入する。
 
 ### 8.2 Start sequence（実装済み）
 
@@ -454,7 +454,7 @@ Load Job
 
 Start intentが保存された後にauthorityが失効した場合、新規Startを呼び出さない。既存OperationIDのLookupによる照合は許可し、NOT_FOUND後の新規Startは期限内の場合だけ許可する。
 
-### 8.3 Send sequence（未実装）
+### 8.3 Send sequence（実装済み）
 
 ```text
 Load Job
@@ -471,7 +471,7 @@ Load Job
 
 Sendの結果がAmbiguousの場合は同じTurnIDのUNKNOWNを追加し、新しいTurnIDを生成しない。既存UNKNOWNはLookupまたは実証済みSend idempotencyでのみ照合し、Lookupがterminal statusを返してもUsage Complete=trueを得るまでterminal TurnObservationへ遷移させない。
 
-### 8.4 Recovery sequence（Start / Event replay実装済み）
+### 8.4 Recovery sequence（Start / Send / Event replay実装済み）
 
 ```text
 Load JobAggregate
@@ -486,7 +486,7 @@ Load JobAggregate
 
 Start / Sendの照合能力がない場合はUNKNOWNを保持する。Sendは同じOperationID / TurnIDのLookupまたは実証済みidempotencyでのみ再実行する。Event replayはaccepted Start Sessionと保存済みcursor prefixへ束縛し、eventをappend-onlyで保存する。Result / UsageのControllerはaccepted Startとoptional Turnのidentityを検証し、E4 Capability確認後に取得結果を既存OperationID / TurnIDへappend-onlyで保存する。Complete=falseのUsageは途中値として残し、Complete=trueでのみ確定する。Resume Controller orchestrationは未実装であり、新identityを作って回避しない。
 
-### 8.5 Result / Usage sequence（Domain / Store実装済み、Controller未実装）
+### 8.5 Result / Usage sequence（Domain / Store / Controller実装済み）
 
 ```text
 Load JobAggregate
