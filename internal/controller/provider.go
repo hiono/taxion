@@ -708,7 +708,7 @@ func (c *ProviderController) RetrieveProviderResult(
 	jobID, roleExecutionID, sessionID, turnID string,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.ProviderResultObservation, error) {
-	job, _, _, operationID, err := c.providerObservationTarget(
+	_, _, _, operationID, err := c.providerObservationTarget(
 		ctx, jobID, roleExecutionID, sessionID, turnID, principal,
 	)
 	if err != nil {
