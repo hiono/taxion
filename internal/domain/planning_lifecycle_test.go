@@ -58,6 +58,16 @@ func TestPlanningTurnRequiresAcceptedProviderStartObservation(t *testing.T) {
 		if _, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("e", 64), 100, job.UpdatedAt.Add(time.Second)); err == nil || !strings.Contains(err.Error(), "provider_start_unknown") {
 			t.Fatalf("turn after UNKNOWN Start error = %v", err)
 		}
+		accepted, err := NewProviderStartObservation(job, job.ProviderStartIntents[0].ID, principal, "cmd_77777777777777777777777777777777", ProviderStartAccepted, "session_exact", strings.Repeat("b", 64), true, job.UpdatedAt.Add(time.Second))
+		if err != nil {
+			t.Fatalf("reconcile UNKNOWN Start: %v", err)
+		}
+		job.ProviderStartObservations = append(job.ProviderStartObservations, accepted)
+		job.Revision++
+		job.UpdatedAt = accepted.CreatedAt
+		if _, err := NewPlanningTurnIntent(job, executionID, principal, "session_exact", "cmd_66666666666666666666666666666666", strings.Repeat("c", 64), 100, job.UpdatedAt.Add(time.Second)); err != nil {
+			t.Fatalf("turn after accepted Start reconciliation: %v", err)
+		}
 	})
 	t.Run("session mismatch", func(t *testing.T) {
 		job, principal, executionID := planningLifecycleJob(t)
