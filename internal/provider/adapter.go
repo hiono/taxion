@@ -75,6 +75,12 @@ type Capabilities struct {
 	Evidence                    []CapabilityEvidence
 }
 
+// CapabilityVerifier checks evidence against a trusted catalog. Adapter declarations
+// and their embedded evidence are not trusted until this verifier accepts them.
+type CapabilityVerifier interface {
+	Verify(context.Context, Identity, CapabilityEvidence) (bool, error)
+}
+
 func (c Capabilities) Has(capability Capability) bool {
 	switch capability {
 	case CapabilityStartIdempotency:
@@ -133,23 +139,63 @@ func (c Capabilities) SupportsEventReplay() bool {
 	return c.HasEvidenceAtLeast(CapabilityEventReplay, EvidenceDurable)
 }
 
-func (c Capabilities) ValidateForLiveExecution(expected Identity) error {
-	if err := c.Validate(expected); err != nil {
-		return err
+// Verified filters declarations through a trusted evidence verifier. An unverified
+// optional capability is omitted without disabling unrelated verified capabilities.
+func (c Capabilities) Verified(ctx context.Context, expected Identity, verifier CapabilityVerifier) (Capabilities, error) {
+	if verifier == nil {
+		return Capabilities{}, errors.New("Provider capability verifier is required")
 	}
+	if err := c.Validate(expected); err != nil {
+		return Capabilities{}, err
+	}
+	verified := Capabilities{Identity: expected}
 	for _, capability := range allCapabilities {
 		if !c.Has(capability) {
 			continue
 		}
-		minimum := EvidenceLive
-		if capability == CapabilitySessionReattach || capability == CapabilityEventReplay {
-			minimum = EvidenceDurable
+		var item CapabilityEvidence
+		for _, evidence := range c.Evidence {
+			if evidence.Capability == capability {
+				item = evidence
+				break
+			}
 		}
-		if !c.HasEvidenceAtLeast(capability, minimum) {
-			return fmt.Errorf("capability %q does not meet minimum evidence level %s", capability, minimum)
+		accepted, err := verifier.Verify(ctx, expected, item)
+		if err != nil {
+			return Capabilities{}, errors.New("Provider capability evidence verification is unavailable")
 		}
+		if !accepted {
+			continue
+		}
+		setCapability(&verified, capability)
+		verified.Evidence = append(verified.Evidence, item)
 	}
-	return nil
+	return verified, nil
+}
+
+func setCapability(capabilities *Capabilities, capability Capability) {
+	switch capability {
+	case CapabilityStartIdempotency:
+		capabilities.StartIdempotency = true
+	case CapabilityStartLookup:
+		capabilities.StartLookup = true
+	case CapabilitySendIdempotency:
+		capabilities.SendIdempotency = true
+	case CapabilitySendLookup:
+		capabilities.SendLookup = true
+	case CapabilitySessionReattach:
+		capabilities.CrossProcessSessionReattach = true
+	case CapabilityEventReplay:
+		capabilities.EventReplay = true
+	case CapabilityStopProof:
+		capabilities.StopProof = true
+	case CapabilityFinalOutput:
+		capabilities.FinalOutputRetrieval = true
+	case CapabilityUsageIdentity:
+		capabilities.UsageIdentity = true
+	case CapabilityUsageCompleteness:
+		capabilities.UsageCompleteness = true
+	}
 }
 
 func evidenceRank(level EvidenceLevel) int {
@@ -315,6 +361,7 @@ type StopResult struct {
 	OperationID    string
 	SessionID      string
 	Stopped        bool
+	Quiescent      bool
 	EvidenceSHA256 string
 }
 
@@ -420,6 +467,7 @@ type Result struct {
 	TurnID         string
 	Content        string
 	ResultSHA256   string
+	Final          bool
 	EvidenceSHA256 string
 }
 
@@ -441,8 +489,9 @@ type Usage struct {
 	OperationID    string
 	SessionID      string
 	TurnID         string
-	UsageID        string
-	Tokens         uint64
+	UsageID         string
+	Tokens          uint64
+	Complete        bool
 	EvidenceSHA256 string
 }
 
