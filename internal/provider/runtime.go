@@ -12,6 +12,7 @@ var (
 	ErrCredentialUnavailable   = errors.New("Provider credential is unavailable")
 	ErrProviderOperationFailed = errors.New("Provider operation failed")
 	ErrProviderInvalidResult   = errors.New("Provider returned an invalid result")
+	ErrProviderInvalidRequest  = errors.New("Provider request is invalid")
 	ErrStopUnconfirmed         = errors.New("Provider stop is not confirmed")
 	ErrResumeUnconfirmed       = errors.New("Provider Session reattachment is not confirmed")
 )
@@ -49,6 +50,9 @@ func (r *Runtime) Capabilities(ctx context.Context) (Capabilities, error) {
 }
 
 func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult, error) {
+	if err := request.Validate(); err != nil {
+		return StartResult{}, ErrProviderInvalidRequest
+	}
 	capabilities, err := r.liveCapabilities(ctx)
 	if err != nil {
 		return StartResult{}, err
@@ -57,18 +61,32 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 		return StartResult{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (StartResult, error) {
-		return r.adapter.Start(ctx, request, lease)
+		result, err := r.adapter.Start(ctx, request, lease)
+		if err != nil {
+			return StartResult{}, err
+		}
+		result.SessionID, err = redactCredential(lease, result.SessionID)
+		if err != nil {
+			return StartResult{}, err
+		}
+		result.ReceiptID, err = redactCredential(lease, result.ReceiptID)
+		return result, err
 	})
 	if err != nil {
 		return StartResult{}, safeAdapterError(err)
 	}
-	if strings.TrimSpace(result.SessionID) == "" || strings.TrimSpace(result.ReceiptID) == "" || !validSHA256(result.EvidenceSHA256) {
+	if strings.TrimSpace(result.SessionID) == "" || strings.TrimSpace(result.ReceiptID) == "" ||
+		strings.Contains(result.SessionID, "[REDACTED]") || strings.Contains(result.ReceiptID, "[REDACTED]") ||
+		!validSHA256(result.EvidenceSHA256) {
 		return StartResult{}, ErrProviderInvalidResult
 	}
 	return result, nil
 }
 
 func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, error) {
+	if err := request.Validate(); err != nil {
+		return TurnResult{}, ErrProviderInvalidRequest
+	}
 	capabilities, err := r.liveCapabilities(ctx)
 	if err != nil {
 		return TurnResult{}, err
@@ -77,7 +95,12 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 		return TurnResult{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (TurnResult, error) {
-		return r.adapter.Send(ctx, request, lease)
+		result, err := r.adapter.Send(ctx, request, lease)
+		if err != nil {
+			return TurnResult{}, err
+		}
+		result.Output, err = redactCredential(lease, result.Output)
+		return result, err
 	})
 	if err != nil {
 		return TurnResult{}, safeAdapterError(err)
@@ -99,6 +122,9 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 }
 
 func (r *Runtime) Stop(ctx context.Context, request StopRequest) (StopResult, error) {
+	if !validIdentifier(request.OperationID) || !validIdentifier(request.SessionID) {
+		return StopResult{}, ErrProviderInvalidRequest
+	}
 	capabilities, err := r.liveCapabilities(ctx)
 	if err != nil {
 		return StopResult{}, err
@@ -119,6 +145,9 @@ func (r *Runtime) Stop(ctx context.Context, request StopRequest) (StopResult, er
 }
 
 func (r *Runtime) Resume(ctx context.Context, request ResumeRequest) (ResumeResult, error) {
+	if !validIdentifier(request.OperationID) || !validIdentifier(request.SessionID) {
+		return ResumeResult{}, ErrProviderInvalidRequest
+	}
 	capabilities, err := r.liveCapabilities(ctx)
 	if err != nil {
 		return ResumeResult{}, err
@@ -139,6 +168,10 @@ func (r *Runtime) Resume(ctx context.Context, request ResumeRequest) (ResumeResu
 }
 
 func (r *Runtime) Lookup(ctx context.Context, request LookupRequest) (LookupResult, error) {
+	if !validIdentifier(request.OperationID) || !validIdentifier(request.SessionID) ||
+		(request.TurnID != "" && !validIdentifier(request.TurnID)) {
+		return LookupResult{}, ErrProviderInvalidRequest
+	}
 	capabilities, err := r.liveCapabilities(ctx)
 	if err != nil {
 		return LookupResult{}, err
@@ -163,6 +196,10 @@ func (r *Runtime) Lookup(ctx context.Context, request LookupRequest) (LookupResu
 }
 
 func (r *Runtime) Result(ctx context.Context, request ResultRequest) (Result, error) {
+	if !validIdentifier(request.OperationID) || !validIdentifier(request.SessionID) ||
+		(request.TurnID != "" && !validIdentifier(request.TurnID)) {
+		return Result{}, ErrProviderInvalidRequest
+	}
 	capabilities, err := r.liveCapabilities(ctx)
 	if err != nil {
 		return Result{}, err
@@ -171,7 +208,12 @@ func (r *Runtime) Result(ctx context.Context, request ResultRequest) (Result, er
 		return Result{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (Result, error) {
-		return r.adapter.Result(ctx, request, lease)
+		result, err := r.adapter.Result(ctx, request, lease)
+		if err != nil {
+			return Result{}, err
+		}
+		result.Content, err = redactCredential(lease, result.Content)
+		return result, err
 	})
 	if err != nil {
 		return Result{}, safeAdapterError(err)
@@ -183,6 +225,10 @@ func (r *Runtime) Result(ctx context.Context, request ResultRequest) (Result, er
 }
 
 func (r *Runtime) Usage(ctx context.Context, request UsageRequest) (Usage, error) {
+	if !validIdentifier(request.OperationID) || !validIdentifier(request.SessionID) ||
+		(request.TurnID != "" && !validIdentifier(request.TurnID)) {
+		return Usage{}, ErrProviderInvalidRequest
+	}
 	capabilities, err := r.liveCapabilities(ctx)
 	if err != nil {
 		return Usage{}, err
@@ -238,6 +284,21 @@ func (r *Runtime) liveCapabilities(ctx context.Context) (Capabilities, error) {
 		return Capabilities{}, ErrUnsupportedCapability
 	}
 	return capabilities, nil
+}
+
+func redactCredential(lease CredentialLease, value string) (string, error) {
+	var redacted string
+	err := lease.WithSecret(func(secret []byte) error {
+		redacted = value
+		if len(secret) > 0 {
+			redacted = strings.ReplaceAll(redacted, string(secret), "[REDACTED]")
+		}
+		return nil
+	})
+	if err != nil {
+		return "", ErrCredentialUnavailable
+	}
+	return redacted, nil
 }
 
 func withCredential[T any](ctx context.Context, broker CredentialBroker, identity Identity, call func(CredentialLease) (T, error)) (result T, err error) {
