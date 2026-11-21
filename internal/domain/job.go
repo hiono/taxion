@@ -666,6 +666,16 @@ func (j Job) Validate() error {
 		seenObservationIDs[observation.ID] = struct{}{}
 		observationsByTurn[observation.TurnID] = append(observationsByTurn[observation.TurnID], observation)
 	}
+	previousTurnByExecution := make(map[string]PlanningTurnIntent)
+	for _, turn := range j.PlanningTurnIntents {
+		if previous, exists := previousTurnByExecution[turn.RoleExecutionID]; exists {
+			observations := observationsByTurn[previous.ID]
+			if len(observations) == 0 || observations[len(observations)-1].Status == PlanningTurnUnknown {
+				return fmt.Errorf("%w: a new turn follows an unresolved Provider operation", ErrInvalidJob)
+			}
+		}
+		previousTurnByExecution[turn.RoleExecutionID] = turn
+	}
 	for turnID, observations := range observationsByTurn {
 		for i, observation := range observations {
 			if i == 0 {

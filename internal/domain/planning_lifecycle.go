@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"time"
 )
 
@@ -23,6 +22,7 @@ type PlanningTurnIntent struct {
 	JobID                   string    `json:"job_id"`
 	RoleExecutionID         string    `json:"role_execution_id"`
 	PlanningAuthorizationID string    `json:"planning_authorization_id"`
+	RequestSHA256           string    `json:"request_sha256"`
 	ProviderSessionID       string    `json:"provider_session_id"`
 	ProviderID              string    `json:"provider_id"`
 	AccountID               string    `json:"account_id"`
@@ -141,6 +141,36 @@ func planningGrantAndExecution(job Job, roleExecutionID, principalID string, now
 	return grant, execution, nil
 }
 
+func planningGrantAndExecutionForObservation(job Job, roleExecutionID, principalID string) (PlanningAuthorization, RoleExecution, error) {
+	if err := job.Validate(); err != nil {
+		return PlanningAuthorization{}, RoleExecution{}, err
+	}
+	var execution RoleExecution
+	foundExecution := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == roleExecutionID {
+			execution, foundExecution = candidate, true
+			break
+		}
+	}
+	if !foundExecution {
+		return PlanningAuthorization{}, RoleExecution{}, errors.New("Taskless PLANNER RoleExecution was not found")
+	}
+	for _, grant := range job.PlanningAuthorizations {
+		if grant.ID != execution.PlanningAuthorizationID {
+			continue
+		}
+		if err := grant.Validate(job); err != nil {
+			return PlanningAuthorization{}, RoleExecution{}, err
+		}
+		if grant.PrincipalID != principalID {
+			return PlanningAuthorization{}, RoleExecution{}, errors.New("PlanningAuthorization principal mismatch")
+		}
+		return grant, execution, nil
+	}
+	return PlanningAuthorization{}, RoleExecution{}, errors.New("PlanningAuthorization was not found")
+}
+
 func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessionID, commandID, promptSHA256 string, reservedTokens uint64, now time.Time) (PlanningTurnIntent, error) {
 	now = now.UTC().Round(0)
 	if !validCommandID(commandID) || !validPlanningIdentity(providerSessionID) ||
@@ -201,7 +231,7 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 	turn := PlanningTurnIntent{
 		ID: PlanningTurnIntentID(commandID), OperationID: PlanningTurnOperationID(commandID),
 		CommandID: commandID, JobID: job.ID, RoleExecutionID: execution.ID,
-		PlanningAuthorizationID: grant.ID, ProviderSessionID: providerSessionID,
+		PlanningAuthorizationID: grant.ID, RequestSHA256: grant.RequestSHA256, ProviderSessionID: providerSessionID,
 		ProviderID: grant.ProviderID, AccountID: grant.AccountID,
 		ConfigurationSHA256: grant.ConfigurationSHA256, TurnNumber: count + 1,
 		PromptSHA256: promptSHA256, ReservedTokens: reservedTokens,
@@ -218,7 +248,7 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 		!validCommandID(t.CommandID) || t.ID != PlanningTurnIntentID(t.CommandID) ||
 		t.OperationID != PlanningTurnOperationID(t.CommandID) ||
 		!validPlanningIdentity(t.JobID) || !validPlanningIdentity(t.RoleExecutionID) ||
-		!validPlanningIdentity(t.PlanningAuthorizationID) || !validPlanningIdentity(t.ProviderSessionID) ||
+		!validPlanningIdentity(t.PlanningAuthorizationID) || !validSHA256(t.RequestSHA256) || !validPlanningIdentity(t.ProviderSessionID) ||
 		!validPlanningIdentity(t.ProviderID) || !validPlanningIdentity(t.AccountID) ||
 		!validSHA256(t.ConfigurationSHA256) || !validSHA256(t.PromptSHA256) ||
 		t.TurnNumber == 0 || t.ReservedTokens == 0 || t.CreatedAt.IsZero() || t.CreatedRevision < 3 {
@@ -245,7 +275,7 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 		if err := grant.Validate(job); err != nil {
 			return err
 		}
-		if t.ProviderID != grant.ProviderID || t.AccountID != grant.AccountID ||
+		if t.RequestSHA256 != grant.RequestSHA256 || t.ProviderID != grant.ProviderID || t.AccountID != grant.AccountID ||
 			t.ConfigurationSHA256 != grant.ConfigurationSHA256 ||
 			t.CreatedAt.Before(execution.CreatedAt) || !t.CreatedAt.Before(grant.Deadline) ||
 			t.TurnNumber > grant.Budget.MaxTurns || t.ReservedTokens > grant.Budget.MaxTokens {
@@ -272,12 +302,10 @@ func NewPlanningTurnObservation(job Job, turnID, principalID, commandID, status 
 	if !found {
 		return PlanningTurnObservation{}, errors.New("PlanningTurnIntent was not found")
 	}
-	grant, execution, err := planningGrantAndExecution(job, turn.RoleExecutionID, principalID, now)
+	_, _, err := planningGrantAndExecutionForObservation(job, turn.RoleExecutionID, principalID)
 	if err != nil {
 		return PlanningTurnObservation{}, err
 	}
-	_ = grant
-	_ = execution
 	if status != PlanningTurnUnknown && status != PlanningTurnCompleted && status != PlanningTurnFailed {
 		return PlanningTurnObservation{}, errors.New("unsupported Provider turn observation status")
 	}
@@ -324,7 +352,7 @@ func (o PlanningTurnObservation) Validate(job Job, turn PlanningTurnIntent) erro
 		o.ID != PlanningTurnObservationID(o.CommandID) || o.JobID != job.ID ||
 		o.TurnID != turn.ID || o.OperationID != turn.OperationID ||
 		o.RoleExecutionID != turn.RoleExecutionID || o.ProviderSessionID != turn.ProviderSessionID ||
-		o.CreatedAt.IsZero() || o.CreatedRevision < turn.CreatedRevision+1 {
+		o.CreatedAt.IsZero() || o.CreatedAt.Before(turn.CreatedAt) || o.CreatedRevision < turn.CreatedRevision+1 {
 		return errors.New("PlanningTurnObservation identity or metadata mismatch")
 	}
 	if o.Status == PlanningTurnUnknown {
@@ -443,7 +471,7 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 		PlanningAuthorizationID: grant.ID, ProviderSessionID: providerSessionID,
 		ProviderID: grant.ProviderID, AccountID: grant.AccountID,
 		ConfigurationSHA256:      grant.ConfigurationSHA256,
-		CapabilityEvidenceSHA256: capabilityEvidenceSHA256,
+		CapabilityEvidenceSHA256: capabilityEvidenceSHA256, CrossProcessReattachmentSupported: reattachmentSupported,
 		CreatedAt:                now, CreatedRevision: job.Revision + 1,
 	}
 	if err := resume.Validate(job); err != nil {
@@ -459,7 +487,7 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 		r.JobID != job.ID || !validPlanningIdentity(r.RoleExecutionID) ||
 		!validPlanningIdentity(r.PlanningAuthorizationID) || !validPlanningIdentity(r.ProviderSessionID) ||
 		!validPlanningIdentity(r.ProviderID) || !validPlanningIdentity(r.AccountID) ||
-		!validSHA256(r.ConfigurationSHA256) || !validSHA256(r.CapabilityEvidenceSHA256) ||
+		!validSHA256(r.ConfigurationSHA256) || !validSHA256(r.CapabilityEvidenceSHA256) || !r.CrossProcessReattachmentSupported ||
 		r.CreatedAt.IsZero() || r.CreatedRevision < 3 {
 		return errors.New("PlanningResumeIntent identity or metadata is invalid")
 	}

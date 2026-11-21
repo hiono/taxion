@@ -121,6 +121,7 @@ func TestPlanningResumeRequiresExactSessionAndCapabilityEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
+	if !resume.CrossProcessReattachmentSupported { t.Fatal("resume did not persist reattachment capability") }
 	if resume.RoleExecutionID != executionID || resume.ProviderSessionID != "session_exact" {
 		t.Fatalf("resume changed execution/session identity: %#v", resume)
 	}
