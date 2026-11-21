@@ -1,0 +1,32 @@
+name: Temporary Go formatting
+
+on:
+  push:
+    branches:
+      - feat/planning-authorization-lifecycle
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.event.head_commit.message != 'chore: gofmt planning lifecycle'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - name: Format Go sources and push a fixup
+        shell: bash
+        run: |
+          files="$(gofmt -l $(git ls-files '*.go'))"
+          if [ -z "$files" ]; then
+            exit 0
+          fi
+          gofmt -w $files
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add $files
+          git commit -m "chore: gofmt planning lifecycle"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
