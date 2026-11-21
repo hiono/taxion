@@ -30,6 +30,13 @@ func NewRuntime(adapter Adapter, broker CredentialBroker, verifier CapabilityVer
 	return newRuntimeWithEvidence(adapter, broker, verifier, EvidenceLive, EvidenceDurable)
 }
 
+func (r *Runtime) Identity() Identity {
+	if r == nil {
+		return Identity{}
+	}
+	return r.identity
+}
+
 // newRuntimeWithEvidence is kept package-private so synthetic evidence policies
 // cannot be selected by production callers.
 func newRuntimeWithEvidence(adapter Adapter, broker CredentialBroker, verifier CapabilityVerifier, minimum, durable EvidenceLevel) (*Runtime, error) {
