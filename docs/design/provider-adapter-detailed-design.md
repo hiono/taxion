@@ -236,7 +236,7 @@ Start observationが永続化されるとき、JobはProviderLifecycleEnforcedFr
 6. terminal responseはPlanningTurnObservationへ保存し、terminal resultとUsageは別々のObservationとして取得・保存する。
 7. UNKNOWN中は同じTurnIDで照合し、新しいTurnIDで再送しない。Lookupでterminal statusが見つかった場合もUsage Complete=trueを確認するまでturnを確定しない。
 
-### 8.3 Stop（実装済み） / Resume（Controller未実装）
+### 8.3 Stop / Resume（Controller実装済み）
 
 - Stop intentを先に保存し、Runtime.Stopの後にstop proof、quiescence、terminal result、Usageを照合する。
 - Resume intentとCommand receiptをRuntime.Resumeより先に保存する。
@@ -261,6 +261,7 @@ Providerの外部事実をJobAggregateへappend-onlyで保持する。現時点�
 - ProviderUsageObservation（Domain / Store実装済み）: OperationID / optional TurnID / SessionIDへ束縛したUsageID、token数、Complete、evidence digest。Complete=falseからComplete=trueへの更新は新しいObservationを追加する
 - ProviderStopIntent（Domain / Store / Controller実装済み）: OperationID、SessionID、Provider identity、Reason。Stop前に保存し、後続Turn / Resumeを禁止
 - ProviderStopObservation（Domain / Store / Controller実装済み）: Stopped、Quiescent、evidence、UNKNOWN reconciliation
+- PlanningResumeIntent / PlanningResumeObservation（Domain / Store / Controller実装済み）: E5 SessionReattach evidence、同一OperationID / SessionID、ATTACHED / FAILED / UNKNOWN、UNKNOWN reconciliation
 
 既存PlanningTurnObservation / PlanningResumeObservationはPlanning lifecycleの状態を表す。Start observationはProviderStartIntentのOperationIDへ束縛し、accepted SessionIDなしに新しいTurn / Resume intentを作成できない。Provider eventはaccepted SessionとOperationID / TurnIDへ束縛し、cursor chainを検証してJobAggregateへappend-onlyで保存する。Stop intentはRuntime.Stopより先に保存し、Stop observationは同一OperationIDの証拠でUNKNOWNを解消する。SendはTurn intentを先行保存し、同じOperationID / TurnIDでLookupまたは実証済みidempotencyを使って照合する。Provider固有のResult / Usageはaccepted Start / Turnへ束縛したappend-only factsとして保存し、Complete=trueのUsageだけを確定利用量として扱う。
 
@@ -280,7 +281,7 @@ Providerの外部事実をJobAggregateへappend-onlyで保持する。現時点�
 
 ### 9.3 Store
 
-既存JobAggregate保存方式とCommand receipt transactionを再利用する。Provider factだけの独立した可変storeを追加しない。Start / Event / Stop intent・observationは同一transactionでappendする。Result / Usage observationも同じexpected revision、idempotency、rollback、read-back recoveryの共通transactionで保存する。
+既存JobAggregate保存方式とCommand receipt transactionを再利用する。Provider factだけの独立した可変storeを追加しない。Start / Event / Stop / Resume intent・observationは同一transactionでappendする。Result / Usage observationも同じexpected revision、idempotency、rollback、read-back recoveryの共通transactionで保存する。
 
 ## 10. Error classification
 
@@ -303,16 +304,16 @@ Providerが操作を受理した可能性を排除できないerrorはAmbiguous�
 - StoreのStart / Event / Stop / Result / Usage intent・observation transaction
 - DRAFT Planning Start / Sendのintent-first Controllerと同一identity Lookup recovery
 - Stop Controllerのintent-first永続化、UNKNOWN保持、blind replay防止
+- Resume ControllerのE5 capability gate、intent-first永続化、同一OperationID / SessionIDのUNKNOWN reconciliation
 - accepted Sessionに束縛したEvent replay Controllerとcursor/idempotency検証
 - Result / Usage ControllerのE4 capability gate、identity再検証、append-only保存
 - 要求仕様、詳細設計、内部設計、テスト仕様
 
 未実装:
-- Resume Controller orchestration
 - JobApproval-backed execution path（JobApproval domain contract未実装のためfail-closed）
 - Live Provider Adapter、Live CredentialBroker、E4 / E5 evidence catalog backend
 - E2 Controller / Store / Runtime integrationの全操作網羅
-- CIの最終PASS、secret scan、独立レビュー
+- Linux CIはコードHEADでformat / vet / test / race / build PASS。専用secret scanと独立レビューは未完了。
 
 ## 12. 実装順序
 
