@@ -111,3 +111,29 @@
 | JC-215 | Authority separation | Successful approval | No ExecutionPermission or Provider operation is created |
 | JC-216 | CLI authentication | Missing / invalid OIDC Principal | Reject before opening or mutating the Store |
 | JC-217 | Explicit revision confirmation | CLI request omits revision, hash, version, or reason | Reject; do not auto-approve latest |
+
+## ExecutionPermission tests
+
+| ID | Scenario | Input / setup | Expected result |
+|---|---|---|---|
+| JC-248 | Exact approved scope | ACTIVE Job, exact latest approval, target resource, assessable reversible effect | Append one permission bound to approval / revision / OperationID / request digest |
+| JC-249 | Missing or stale approval | DRAFT Job, missing approval, older approval, or mismatched canonical hash | Reject without mutation |
+| JC-250 | Stale contract revision | Contract revision changes after permission issuance | Permission revalidation rejects before effect |
+| JC-251 | Expired permission | Current time is at or after ExpiresAt or contract deadline | Reject without effect |
+| JC-252 | Foreign resource | Resource is not an exact target repository / target resource / workspace | Reject without mutation |
+| JC-253 | Resource prefix confusion | Resource shares a prefix or host with an approved resource but is not equal | Reject without mutation |
+| JC-254 | Prohibited effect | Effect appears in ProhibitedEffects | Reject without mutation |
+| JC-255 | Approval-required effect | Effect appears in ApprovalRequiredEffects or assessor requires human approval | Reject without mutation |
+| JC-256 | Unknown but contained effect | Unknown effect name with trusted assessment proving reversibility or containment and no approval requirement | Allow only the exact operation |
+| JC-257 | Unassessable effect | Missing / invalid assessment or impact is neither reversible nor contained | Reject without mutation |
+| JC-258 | Provider identity mismatch | Configuration digest differs from approved configuration reference | Reject without mutation |
+| JC-259 | Budget upper boundary | Reservation exactly reaches MaxTurns / MaxTokens | Accept |
+| JC-260 | Budget overflow | Reservation exceeds either approved limit | Reject without mutation |
+| JC-261 | Usage reconciliation | Completed Usage replaces reservation; partial / missing Usage retains reservation | Recompute budget without double-counting |
+| JC-262 | Exact permission replay | Same CommandID and identical request | Return original receipt and permission |
+| JC-263 | Permission idempotency conflict | Same CommandID with changed effect / resource / provider / digest | Reject without mutation |
+| JC-264 | Permission operation binding | Reuse permission with another OperationID or request digest | Reject before effect |
+| JC-265 | Store rollback | Inject failure while appending permission / receipt | No partial permission or receipt |
+| JC-266 | Restart restoration | Reopen Store after permission append | Permission and approval provenance remain valid |
+| JC-267 | Concurrent budget race | Two requests reserve the last budget concurrently | At most one commits; loser sees current revision / budget and is rejected |
+| JC-268 | Permission authority separation | Successful permission issuance | No Provider call, JobApproval mutation, or JobContract revision |
