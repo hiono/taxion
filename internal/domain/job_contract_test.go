@@ -265,3 +265,53 @@ func TestJobContractRevisionRequiresExactFinalPlannerResultProvenance(t *testing
 		t.Fatal("JobContractRevision.Validate accepted altered source Result provenance")
 	}
 }
+
+
+func TestJobContractRejectsInvalidSourceResultBoundaries(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*Job)
+	}{
+		{name: "foreign Job", mutate: func(job *Job) {
+			job.ProviderResultObservations[0].JobID = "job_foreign"
+		}},
+		{name: "different RoleExecution", mutate: func(job *Job) {
+			job.ProviderResultObservations[0].RoleExecutionID = "role_execution_other"
+		}},
+		{name: "non-final Result", mutate: func(job *Job) {
+			job.ProviderResultObservations[0].Final = false
+		}},
+		{name: "different Session", mutate: func(job *Job) {
+			job.ProviderResultObservations[0].SessionID = "session_other"
+		}},
+		{name: "different Turn", mutate: func(job *Job) {
+			job.ProviderResultObservations[0].TurnID = "turn_other"
+		}},
+		{name: "content digest tampering", mutate: func(job *Job) {
+			job.ProviderResultObservations[0].Content = "tampered Planner output"
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			job, execution, sourceResult, now := jobWithAcceptedPlanner(t)
+			job.ProviderResultObservations = append([]ProviderResultObservation(nil), job.ProviderResultObservations...)
+			tc.mutate(&job)
+			beforeRevision := job.Revision
+			_, err := NewJobContractRevision(
+				job,
+				"cmd_41414141414141414141414141414141",
+				execution.ID,
+				sourceResult.ID,
+				sourceResult.ContentSHA256,
+				validJobContract(now.Add(2*time.Hour)),
+				now.Add(6*time.Minute),
+			)
+			if err == nil {
+				t.Fatal("JobContract accepted an invalid source Result boundary")
+			}
+			if job.Revision != beforeRevision || len(job.JobContractRevisions) != 0 {
+				t.Fatalf("rejected proposal mutated Job: revision=%d contracts=%d", job.Revision, len(job.JobContractRevisions))
+			}
+		})
+	}
+}
