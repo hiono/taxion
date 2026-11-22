@@ -86,6 +86,8 @@ Provider Adapterの実装要求は[Provider Adapter 実行境界 要求仕様書
 
 ### 4.4 Execution and collaboration
 
+Taskの作成・scope narrowing・parent / dependency・budget / deadlineの要件は[Task Requirements](task-requirements.md)、Domain / Storeの設計は[Task Detailed Design](../design/task-detailed-design.md)、境界テストは[Task Test Specification](../test-specs/task-test-specification.md)を参照します。
+
 - JobはTaskを必須としない。TaskはJobに所属する任意の作業分解である。
 - RoleExecutionはJobに所属し、TaskIDは任意とする。Taskless Plannerを許容する。
 - Taskの親子包含、Task dependency、Role間協調を別の関係として扱う。
