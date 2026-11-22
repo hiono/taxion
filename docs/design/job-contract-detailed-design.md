@@ -129,7 +129,7 @@ The Controller does not call the Provider, change Job authority, issue JobApprov
 
 The Planner's final Result content is exactly one JSON object representing `JobContract`. JSON keys use the struct's lower_snake_case tags; `budget` is a nested object with `max_turns` and `max_tokens`. The object contains no wrapper, Markdown fence, explanatory prose, or trailing value.
 
-The proposal Controller receives only the persisted Result observation ID. It loads the JobAggregate, resolves the exact final Result, validates its Job / RoleExecution / accepted Start / Session / Turn provenance, and decodes the Result content into JobContract. It does not accept a parallel caller-supplied JobContract value.
+The proposal Controller receives only the persisted Result observation ID. It loads the JobAggregate, resolves the exact final Result, validates its Job / RoleExecution / accepted Start / Session / Turn provenance, and decodes the Result content into JobContract. It does not accept a parallel caller-supplied JobContract value. The Planner workflow entrypoint is `PlanningController.ProposeJobContract`, which delegates to `JobContractController.Propose` and accepts only the Job / RoleExecution / Result observation / Command identities plus the authenticated Principal.
 
 Decoding rejects:
 - non-object roots and malformed JSON;
