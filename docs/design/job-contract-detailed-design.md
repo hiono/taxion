@@ -137,7 +137,7 @@ Fields:
 - JobApprovalID, ContractRevision, CanonicalizationVersion, CanonicalHash
 - ProviderID, AccountID, ConfigurationSHA256
 - RequestSHA256 and trusted AssessmentSHA256
-- ReservedTokens, ExpiresAt, CreatedAt, CreatedRevision
+- ReservedTurns, ReservedTokens, ExpiresAt, CreatedAt, CreatedRevision
 
 OperationID is deterministically derived from CommandID. A new permission requires a new CommandID. Exact replay returns the original fact; changed request fields under the same CommandID conflict.
 
@@ -150,7 +150,7 @@ OperationID is deterministically derived from CommandID. A new permission requir
 - Resource equals one canonical target repository, target resource, or workspace entry. Prefix, substring, host-only, or path-prefix matches do not grant access.
 - Effects listed in ProhibitedEffects or ApprovalRequiredEffects are not granted by this Controller.
 - A trusted `ExecutionEffectAssessor` evaluates the exact Role / Effect / Resource / Provider / Request digest and returns an evidence digest plus reversibility, containment, and approval-required classification. Unknown effect names are not rejected by name alone; they require an assessable and contained impact. Missing, mismatched, or insufficient assessment fails closed.
-- Each permission reserves one turn and ReservedTokens at issuance. Reservations are cumulative and are not refunded in this unit; aggregate permission count and reserved tokens for the same contract revision must not exceed the approved MaxTurns / MaxTokens. Actual Usage reconciliation is a later execution-lifecycle integration.
+- Each permission reserves explicit ReservedTurns and ReservedTokens at issuance. Reservations are cumulative and are not refunded in this unit; aggregate reserved turns and tokens for the same contract revision must not exceed the approved MaxTurns / MaxTokens. Actual Usage reconciliation is a later execution-lifecycle integration.
 - A permission is valid only for its exact OperationID and RequestSHA256. A newer contract revision, missing / stale approval, Job state change, or expiry invalidates it.
 - Permission creation is a JobAggregate command. Controller preflight is not the integrity boundary; Store revalidates the current approval, scope, resource, budget, deadline, and idempotency in the append transaction.
 - Permission issuance has no Provider side effect. A Provider execution path must reference and revalidate the exact permission before dispatch. This unit does not claim a Live Provider or OS-level Sandbox implementation.
