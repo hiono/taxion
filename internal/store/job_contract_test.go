@@ -267,7 +267,6 @@ func TestJobContractAmendmentStoreRequiresNewApproval(t *testing.T) {
 	amendmentCommand := "cmd_18181818181818181818181818181818"
 	amendmentReason := "Adjust the approved target after human review"
 	if _, _, err := database.AmendJobContract(
-	if _, _, err := database.AmendJobContract(
 		ctx, job.ID, job.Revision, "cmd_22222222222222222222222222222222",
 		proposed.Revision, strings.Repeat("0", 64), amendmentReason, amendedContract, principal,
 	); err == nil {
