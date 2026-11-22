@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,18 @@ type plannerWorkflowFixture struct {
 	executionID string
 	sessionID   string
 	turnID      string
+}
+
+
+type failingJobContractProposalStore struct {
+	JobContractProposalStore
+	failure error
+}
+
+func (s *failingJobContractProposalStore) AddJobContractRevision(
+	context.Context, string, uint64, string, string, string, string, domain.JobContract,
+) (store.CommandReceipt, domain.JobContractRevision, error) {
+	return store.CommandReceipt{}, domain.JobContractRevision{}, s.failure
 }
 
 func newPlannerWorkflowFixture(t *testing.T, turnStatus string, addUsage, usageComplete bool) plannerWorkflowFixture {
@@ -224,6 +237,55 @@ func TestPlannerWorkflowRejectsIncompleteTurnOrUsageBeforeResultRetrieval(t *tes
 					job.ProviderResultObservations, job.JobContractRevisions)
 			}
 		})
+	}
+}
+
+
+func TestPlannerWorkflowRetainsPersistedResultWhenProposalStoreFails(t *testing.T) {
+	fixture := newPlannerWorkflowFixture(t, domain.PlanningTurnCompleted, true, true)
+	workflow := fixture.workflow(t)
+	originalStore := fixture.controller.planning.jobContract.store
+	fixture.controller.planning.jobContract.store = &failingJobContractProposalStore{
+		JobContractProposalStore: originalStore,
+		failure: errors.New("injected JobContract persistence failure"),
+	}
+	outcome, err := workflow.ProposeJobContract(
+		context.Background(), fixture.jobID, fixture.executionID, fixture.sessionID, fixture.turnID,
+		"cmd_38383838383838383838383838383838", fixture.principal,
+	)
+	if err == nil || outcome.ResultReceipt == nil || outcome.Result.ID == "" {
+		t.Fatalf("proposal failure did not preserve the persisted Result outcome: %#v err=%v", outcome, err)
+	}
+	job, readErr := fixture.database.GetJob(context.Background(), fixture.jobID)
+	if readErr != nil {
+		t.Fatalf("GetJob after injected proposal failure: %v", readErr)
+	}
+	if len(job.ProviderResultObservations) != 1 || len(job.JobContractRevisions) != 0 {
+		t.Fatalf("proposal failure left inconsistent facts: results=%#v revisions=%#v",
+			job.ProviderResultObservations, job.JobContractRevisions)
+	}
+
+	fixture.controller.planning.jobContract.store = originalStore
+	retried, err := workflow.ProposeJobContract(
+		context.Background(), fixture.jobID, fixture.executionID, fixture.sessionID, fixture.turnID,
+		"cmd_38383838383838383838383838383838", fixture.principal,
+	)
+	if err != nil {
+		t.Fatalf("retry after proposal persistence failure: %v", err)
+	}
+	if !retried.ResultReused || retried.ResultReceipt != nil ||
+		retried.Result.ID != outcome.Result.ID || fixture.runtime.resultCalls != 1 {
+		t.Fatalf("retry did not reuse the original persisted Result: first=%#v retry=%#v calls=%d",
+			outcome, retried, fixture.runtime.resultCalls)
+	}
+	job, readErr = fixture.database.GetJob(context.Background(), fixture.jobID)
+	if readErr != nil {
+		t.Fatalf("GetJob after successful retry: %v", readErr)
+	}
+	if len(job.ProviderResultObservations) != 1 || len(job.JobContractRevisions) != 1 ||
+		job.JobContractRevisions[0].SourceResultObservationID != outcome.Result.ID {
+		t.Fatalf("retry did not append exactly one provenance-bound revision: results=%#v revisions=%#v",
+			job.ProviderResultObservations, job.JobContractRevisions)
 	}
 }
 
