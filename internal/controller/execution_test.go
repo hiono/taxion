@@ -107,6 +107,11 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 	if validated.ID != permission.ID {
 		t.Fatalf("validated permission = %q, want %q", validated.ID, permission.ID)
 	}
+	changedResource := request
+	changedResource.Resource = revision.Contract.Workspaces[0]
+	if _, err := controller.ValidatePermission(context.Background(), permission.ID, changedResource); err == nil {
+		t.Fatal("permission accepted a different resource under the original OperationID")
+	}
 	if _, err := controller.ValidatePermission(
 		context.Background(), permission.ID, func() domain.ExecutionPermissionRequest {
 			foreign := request
