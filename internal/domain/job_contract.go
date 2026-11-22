@@ -468,8 +468,14 @@ func (r JobContractRevision) validateHumanAmendmentProvenance(job Job) error {
 	if approval == nil {
 		return errors.New("JobContract amendment has no prior approval")
 	}
-	if err := approval.Validate(job, previous); err != nil {
-		return fmt.Errorf("JobContract amendment prior approval is invalid: %w", err)
+	if approval.JobID != job.ID || approval.ContractRevision != previous.Revision ||
+		approval.CanonicalHash != previous.CanonicalHash ||
+		approval.CanonicalizationVersion != previous.CanonicalizationVersion ||
+		approval.ApprovedAt.IsZero() || approval.ApprovedAt.Before(previous.CreatedAt) ||
+		!approval.ApprovedAt.Before(previous.Contract.Deadline) ||
+		approval.CreatedRevision <= previous.CreatedRevision || approval.CreatedRevision > job.Revision ||
+		approval.ApprovedAt.After(job.UpdatedAt) {
+		return errors.New("JobContract amendment prior approval does not bind the superseded revision")
 	}
 	if r.CreatedRevision <= approval.CreatedRevision || r.CreatedAt.Before(approval.ApprovedAt) {
 		return errors.New("JobContract amendment precedes its prior approval")
