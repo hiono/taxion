@@ -84,6 +84,20 @@
 | JC-237 | Amendment CLI retry | Same CommandID / request retried after OIDC reauthentication and later reapproval | Return original amendment fact without duplicate revision |
 | JC-238 | Fresh amendment authentication | HUMAN Principal authenticated before the current JobApproval | Reject without mutation |
 
+## Upper-level Planner workflow tests
+
+| ID | Scenario | Input / setup | Expected result |
+|---|---|---|---|
+| JC-239 | Completed Planner workflow | Exact Taskless PLANNER Turn is COMPLETED, Usage is complete, and no Result is persisted | Persist final Result first, then append JobContractRevision bound to that Result |
+| JC-240 | Existing final Result | Exact final Result observation already exists for the same Job / RoleExecution / Session / Turn | Reuse the persisted Result; do not call Provider Result again |
+| JC-241 | Turn not completed | Turn observation is missing, UNKNOWN, or FAILED | Reject before Provider Result retrieval; no JobContract mutation |
+| JC-242 | Usage incomplete | Usage is missing or latest observation has Complete=false | Reject before Provider Result retrieval; no JobContract mutation |
+| JC-243 | Turn identity mismatch | Turn, RoleExecution, Session, or operation differs | Reject without Provider call or JobContract mutation |
+| JC-244 | Proposal persistence failure | Final Result append succeeds but JobContract Store command fails | Keep the Result observation; no partial JobContract revision |
+| JC-245 | Retry after proposal failure | Retry with the same CommandID after Result persistence | Reuse the exact Result observation and append at most one revision |
+| JC-246 | Exact proposal replay | Retry after successful proposal with the same CommandID and identities | Return the original receipt and revision without Provider Result retrieval |
+| JC-247 | Changed Result on retry | Reuse CommandID with a different Result observation identity | Reject with idempotency conflict; preserve original provenance |
+
 ## Approval Controller and CLI tests
 
 | ID | Scenario | Input / setup | Expected result |
