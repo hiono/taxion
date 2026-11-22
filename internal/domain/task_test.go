@@ -176,7 +176,6 @@ func TestNewTaskRejectsMissingAcceptanceCriteria(t *testing.T) {
 	}
 }
 
-
 func TestChildTaskCannotExpandParentScope(t *testing.T) {
 	job, now := approvedJobForExecutionPermission(t)
 	parentRequest := taskTestRequest(job, now, "cmd_c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3")
