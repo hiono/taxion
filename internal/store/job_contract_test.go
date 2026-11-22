@@ -259,6 +259,24 @@ func TestJobContractAmendmentStoreRequiresNewApproval(t *testing.T) {
 	amendedContract.Deadline = time.Now().UTC().Add(2 * time.Hour)
 	amendmentCommand := "cmd_18181818181818181818181818181818"
 	amendmentReason := "Adjust the approved target after human review"
+	if _, _, err := database.AmendJobContract(
+		ctx, job.ID, job.Revision, "cmd_22222222222222222222222222222222",
+		proposed.Revision, strings.Repeat("0", 64), amendmentReason, amendedContract, principal,
+	); err == nil {
+		t.Fatal("amendment accepted a mismatched current canonical hash")
+	}
+	if _, _, err := database.AmendJobContract(
+		ctx, job.ID, job.Revision, "cmd_23232323232323232323232323232323",
+		proposed.Revision, proposed.CanonicalHash, " ", amendedContract, principal,
+	); err == nil {
+		t.Fatal("amendment accepted an empty reason")
+	}
+	if _, _, err := database.AmendJobContract(
+		ctx, job.ID, job.Revision, "cmd_24242424242424242424242424242424",
+		proposed.Revision, proposed.CanonicalHash, amendmentReason, amendedContract, auth.AuthenticatedPrincipal{},
+	); err == nil {
+		t.Fatal("amendment accepted an unauthenticated Principal")
+	}
 	amendmentReceipt, amendedRevision, err := database.AmendJobContract(
 		ctx, job.ID, job.Revision, amendmentCommand, proposed.Revision, proposed.CanonicalHash,
 		amendmentReason, amendedContract, principal,
@@ -329,5 +347,63 @@ func TestJobContractAmendmentStoreRequiresNewApproval(t *testing.T) {
 	}
 	if priorApproval.ContractRevision != proposed.Revision {
 		t.Fatalf("prior approval was not retained for its original revision: %#v", priorApproval)
+	}
+}
+
+
+func TestJobContractAmendmentStoreRollbackLeavesActiveJobUntouched(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx := context.Background()
+	principal := newAuthenticatedTestPrincipal(t)
+	execution, revision, sourceResult := createJobContractPlanner(t, database, "job_contract_amendment_rollback", principal)
+	contract := validStoreJobContract()
+	_, proposed, err := database.AddJobContractRevision(
+		ctx, "job_contract_amendment_rollback", revision, "cmd_25252525252525252525252525252525",
+		execution.ID, sourceResult.ID, sourceResult.ContentSHA256, contract,
+	)
+	if err != nil {
+		t.Fatalf("AddJobContractRevision: %v", err)
+	}
+	job, err := database.GetJob(ctx, "job_contract_amendment_rollback")
+	if err != nil {
+		t.Fatalf("GetJob before approval: %v", err)
+	}
+	if _, _, err := database.AddJobApproval(
+		ctx, job.ID, job.Revision, "cmd_26262626262626262626262626262626",
+		proposed.Revision, proposed.CanonicalHash, proposed.CanonicalizationVersion,
+		"Approve rollback fixture", principal,
+	); err != nil {
+		t.Fatalf("AddJobApproval: %v", err)
+	}
+	job, err = database.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetJob before amendment: %v", err)
+	}
+	commandID := "cmd_27272727272727272727272727272727"
+	if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_job_contract_amendment_receipt
+		BEFORE INSERT ON job_commands
+		WHEN NEW.command_id = '`+commandID+`'
+		BEGIN
+			SELECT RAISE(ABORT, 'forced JobContract amendment receipt failure');
+		END;`); err != nil {
+		t.Fatalf("create amendment rollback trigger: %v", err)
+	}
+	amended := contract
+	amended.Purpose = "Must not persist after rollback"
+	amended.Deadline = time.Now().UTC().Add(2 * time.Hour)
+	if _, _, err := database.AmendJobContract(
+		ctx, job.ID, job.Revision, commandID, proposed.Revision, proposed.CanonicalHash,
+		"Rollback amendment", amended, principal,
+	); err == nil {
+		t.Fatal("JobContract amendment succeeded despite forced receipt failure")
+	}
+	after, err := database.GetJob(ctx, job.ID)
+	if err != nil || after.State != domain.JobActive || after.Revision != job.Revision ||
+		len(after.JobContractRevisions) != 1 || len(after.JobApprovals) != 1 {
+		t.Fatalf("failed amendment partially changed Job: %#v err=%v", after, err)
+	}
+	var count int
+	if err := database.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM job_commands WHERE command_id = ?", commandID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("failed amendment left receipt count=%d err=%v", count, err)
 	}
 }
