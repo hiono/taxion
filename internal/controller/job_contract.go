@@ -18,6 +18,7 @@ type JobContractProposalStore interface {
 	GetJob(context.Context, string) (domain.Job, error)
 	AddJobContractRevision(context.Context, string, uint64, string, string, string, string, domain.JobContract) (store.CommandReceipt, domain.JobContractRevision, error)
 	AddJobApproval(context.Context, string, uint64, string, uint64, string, uint32, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.JobApproval, error)
+	AmendJobContract(context.Context, string, uint64, string, uint64, string, string, domain.JobContract, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.JobContractRevision, error)
 }
 
 type JobContractController struct {
@@ -257,6 +258,26 @@ func consumePlannerJobContractValue(decoder *json.Decoder, objectFields map[stri
 
 // Approve records an authenticated human decision for one exact JobContract revision.
 // It does not create ExecutionPermission or authorize Provider execution.
+// Amend requires a fresh HUMAN command because the DRAFT Planner proposal authority cannot change ACTIVE scope.
+func (c *JobContractController) Amend(
+	ctx context.Context,
+	jobID string,
+	expectedJobRevision uint64,
+	commandID string,
+	basedOnRevision uint64,
+	basedOnCanonicalHash, reason string,
+	contract domain.JobContract,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.JobContractRevision, error) {
+	if err := principal.Validate(); err != nil {
+		return store.CommandReceipt{}, domain.JobContractRevision{}, fmt.Errorf("validate amending Principal: %w", err)
+	}
+	if !strings.HasPrefix(principal.PrincipalID(), "human_") {
+		return store.CommandReceipt{}, domain.JobContractRevision{}, errors.New("JobContract amendment requires a HUMAN Principal")
+	}
+	return c.store.AmendJobContract(ctx, jobID, expectedJobRevision, commandID, basedOnRevision, basedOnCanonicalHash, reason, contract, principal)
+}
+
 func (c *JobContractController) Approve(
 	ctx context.Context,
 	jobID, commandID string,
