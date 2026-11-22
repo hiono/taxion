@@ -2,8 +2,11 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
 	"github.com/hiono/taxion/internal/auth"
@@ -36,8 +39,7 @@ func NewJobContractController(proposalStore JobContractProposalStore) (*JobContr
 // It never grants ExecutionPermission or starts a Provider operation.
 func (c *JobContractController) Propose(
 	ctx context.Context,
-	jobID, roleExecutionID, sourceResultObservationID, sourceResultContentSHA256, commandID string,
-	contract domain.JobContract,
+	jobID, roleExecutionID, sourceResultObservationID, commandID string,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.JobContractRevision, error) {
 	if err := principal.Validate(); err != nil {
@@ -87,12 +89,15 @@ func (c *JobContractController) Propose(
 		}
 	}
 	if sourceResult == nil || sourceResult.JobID != job.ID ||
-		sourceResult.RoleExecutionID != roleExecutionID || !sourceResult.Final ||
-		sourceResult.ContentSHA256 != sourceResultContentSHA256 || sourceResult.TurnID == "" {
+		sourceResult.RoleExecutionID != roleExecutionID || !sourceResult.Final || sourceResult.TurnID == "" {
 		return store.CommandReceipt{}, domain.JobContractRevision{}, errors.New("JobContract proposal requires the exact final Result from the same Planner RoleExecution")
 	}
 	if err := sourceResult.Validate(job); err != nil {
 		return store.CommandReceipt{}, domain.JobContractRevision{}, fmt.Errorf("validate Planner source Result: %w", err)
+	}
+	contract, err := decodePlannerJobContractResult(sourceResult.Content)
+	if err != nil {
+		return store.CommandReceipt{}, domain.JobContractRevision{}, fmt.Errorf("decode Planner JobContract Result: %w", err)
 	}
 
 	// A committed proposal may be replayed after its grant expires. The Store
@@ -101,7 +106,7 @@ func (c *JobContractController) Propose(
 	for _, existing := range job.JobContractRevisions {
 		if existing.CommandID == commandID && (existing.ProposedByRoleExecutionID != roleExecutionID ||
 			existing.SourceResultObservationID != sourceResultObservationID ||
-			existing.SourceResultContentSHA256 != sourceResultContentSHA256) {
+			existing.SourceResultContentSHA256 != sourceResult.ContentSHA256) {
 			return store.CommandReceipt{}, domain.JobContractRevision{}, store.ErrIdempotencyConflict
 		}
 	}
@@ -135,8 +140,121 @@ func (c *JobContractController) Propose(
 
 	return c.store.AddJobContractRevision(
 		ctx, jobID, job.Revision, commandID, roleExecutionID,
-		sourceResultObservationID, sourceResultContentSHA256, contract,
+		sourceResultObservationID, sourceResult.ContentSHA256, contract,
 	)
+}
+
+
+var plannerJobContractJSONFields = map[string]struct{}{
+	"purpose": {}, "constraints": {}, "target_repositories": {}, "target_resources": {},
+	"workspaces": {}, "acceptance_criteria": {}, "required_evidence": {}, "budget": {},
+	"concurrency_ceiling": {}, "deadline": {}, "prohibited_effects": {},
+	"approval_required_effects": {}, "configuration_sha256": {},
+}
+
+var plannerJobContractBudgetJSONFields = map[string]struct{}{
+	"max_turns": {}, "max_tokens": {},
+}
+
+func decodePlannerJobContractResult(content string) (domain.JobContract, error) {
+	decoder := json.NewDecoder(strings.NewReader(content))
+	root, err := decoder.Token()
+	if err != nil {
+		return domain.JobContract{}, fmt.Errorf("read JSON root: %w", err)
+	}
+	if delimiter, ok := root.(json.Delim); !ok || delimiter != '{' {
+		return domain.JobContract{}, errors.New("Planner Result must be one JSON object")
+	}
+	if err := consumePlannerJobContractObject(decoder, plannerJobContractJSONFields); err != nil {
+		return domain.JobContract{}, err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		if err == nil {
+			return domain.JobContract{}, errors.New("Planner Result contains trailing JSON")
+		}
+		return domain.JobContract{}, fmt.Errorf("read trailing JSON: %w", err)
+	}
+
+	decoder = json.NewDecoder(strings.NewReader(content))
+	decoder.DisallowUnknownFields()
+	var contract domain.JobContract
+	if err := decoder.Decode(&contract); err != nil {
+		return domain.JobContract{}, fmt.Errorf("decode JobContract object: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return domain.JobContract{}, errors.New("Planner Result contains more than one JSON value")
+		}
+		return domain.JobContract{}, fmt.Errorf("read trailing JSON: %w", err)
+	}
+	return contract, nil
+}
+
+func consumePlannerJobContractObject(decoder *json.Decoder, allowed map[string]struct{}) error {
+	seen := make(map[string]struct{})
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return fmt.Errorf("read JSON object key: %w", err)
+		}
+		key, ok := token.(string)
+		if !ok {
+			return errors.New("Planner Result JSON object key is not a string")
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("Planner Result contains unknown or non-canonical JSON key %q", key)
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("Planner Result contains duplicate JSON key %q", key)
+		}
+		seen[key] = struct{}{}
+		var nested map[string]struct{}
+		if key == "budget" {
+			nested = plannerJobContractBudgetJSONFields
+		}
+		if err := consumePlannerJobContractValue(decoder, nested); err != nil {
+			return err
+		}
+	}
+	closing, err := decoder.Token()
+	if err != nil {
+		return fmt.Errorf("close JSON object: %w", err)
+	}
+	if delimiter, ok := closing.(json.Delim); !ok || delimiter != '}' {
+		return errors.New("Planner Result JSON object is not closed")
+	}
+	return nil
+}
+
+func consumePlannerJobContractValue(decoder *json.Decoder, objectFields map[string]struct{}) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return fmt.Errorf("read JSON value: %w", err)
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		return consumePlannerJobContractObject(decoder, objectFields)
+	case '[':
+		for decoder.More() {
+			if err := consumePlannerJobContractValue(decoder, nil); err != nil {
+				return err
+			}
+		}
+		closing, err := decoder.Token()
+		if err != nil {
+			return fmt.Errorf("close JSON array: %w", err)
+		}
+		if closing != json.Delim(']') {
+			return errors.New("Planner Result JSON array is not closed")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q", delimiter)
+	}
 }
 
 // Approve records an authenticated human decision for one exact JobContract revision.
