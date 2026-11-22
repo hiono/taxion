@@ -56,7 +56,34 @@ Approving the latest revision transitions the Job from DRAFT to ACTIVE. ACTIVE r
 
 JobApproval is distinct from PlanningAuthorization and from ExecutionPermission. Approval records human acceptance of a contract; it does not by itself grant a provider capability, credential access, or permission for a prohibited / approval-required effect. Execution controllers must later verify the current JobApproval, scope, budget, deadline, Provider identity, and effect boundary.
 
-## 6. Planner proposal Controller requirements
+## 6. ExecutionPermission requirements
+
+An ExecutionPermission is an immutable, one-operation authorization fact. It is not a reusable Job-wide grant and is not implied by JobApproval, ACTIVE state, Observation, Conformance, or Admission.
+
+The execution request identifies:
+- Job ID and a stable CommandID / OperationID
+- execution Role (`CODER` or `REVIEWER`)
+- exact effect and resource identity
+- Provider ID, account ID, and configuration SHA-256
+- requested token reservation and requested expiry
+- a canonical request digest
+
+The Controller must:
+- require an ACTIVE Job and the exact latest JobContractRevision / JobApproval pair;
+- verify the approval's Job ID, revision, canonicalization version, canonical hash, and deadline;
+- bind the permission to the exact JobApproval ID, revision, canonical hash, OperationID, effect, resource, Role, Provider / account / configuration, request digest, token reservation, and expiry;
+- require the configuration digest to equal the approved JobContract configuration reference;
+- require the resource identity to exactly match one approved target repository, target resource, or workspace;
+- reject effects listed in prohibited effects or approval-required effects;
+- use a trusted effect assessor to evaluate reversibility, containment, and approval requirement. An unknown effect name is not rejected solely because it is unknown; it is denied when its impact cannot be assessed or contained;
+- reserve one turn and the requested token amount against the approved MaxTurns / MaxTokens budget, counting existing permissions and their observed Usage without double-counting reservations;
+- fail closed when approval, scope, provider identity, assessment evidence, deadline, or budget cannot be verified.
+
+The Store must repeat all JobAggregate-dependent checks in the same transaction that appends the permission. Exact CommandID replay returns the original permission; changed request identity or digest is an idempotency conflict. A permission is valid only for its exact OperationID and request digest. A later contract revision or expired deadline invalidates its use.
+
+A permission does not itself call a Provider or prove that an effect occurred. Provider execution must consume the exact permission before the external side effect; the execution integration and runtime containment remain separate gates.
+
+## 7. Planner proposal Controller requirements
 
 The Controller must require a validated AuthenticatedPrincipal matching the PlanningAuthorization owner, a DRAFT Job, and the Taskless PLANNER RoleExecution bound to that grant. The referenced execution must have an ACCEPTED Provider Start observation. New proposals must revalidate the grant deadline immediately before persistence.
 
