@@ -19,6 +19,11 @@ import (
 
 const JobContractCanonicalizationVersion uint32 = 1
 
+const (
+	JobContractRevisionOriginPlanner        = "PLANNER"
+	JobContractRevisionOriginHumanAmendment = "HUMAN_AMENDMENT"
+)
+
 type JobContractBudget struct {
 	MaxTurns  uint32 `json:"max_turns"`
 	MaxTokens uint64 `json:"max_tokens"`
@@ -48,9 +53,17 @@ type JobContractRevision struct {
 	CanonicalizationVersion   uint32      `json:"canonicalization_version"`
 	CanonicalHash             string      `json:"canonical_hash"`
 	Contract                  JobContract `json:"contract"`
+	Origin                    string      `json:"origin"`
 	ProposedByRoleExecutionID string      `json:"proposed_by_role_execution_id"`
 	SourceResultObservationID string      `json:"source_result_observation_id"`
 	SourceResultContentSHA256 string      `json:"source_result_content_sha256"`
+	AmendedByPrincipalID      string      `json:"amended_by_principal_id"`
+	AmendedByIssuer           string      `json:"amended_by_issuer"`
+	AmendedBySubject          string      `json:"amended_by_subject"`
+	AmendedAuthenticatedAt    time.Time   `json:"amended_authenticated_at"`
+	AmendmentReason           string      `json:"amendment_reason"`
+	SupersedesRevision        uint64      `json:"supersedes_revision"`
+	SupersedesCanonicalHash   string      `json:"supersedes_canonical_hash"`
 	CreatedAt                 time.Time   `json:"created_at"`
 	CreatedRevision           uint64      `json:"created_revision"`
 }
@@ -234,8 +247,88 @@ func NewJobContractRevision(job Job, commandID, roleExecutionID, sourceResultObs
 		ID: JobContractRevisionID(commandID), CommandID: commandID, JobID: job.ID,
 		Revision:                uint64(len(job.JobContractRevisions) + 1),
 		CanonicalizationVersion: JobContractCanonicalizationVersion, CanonicalHash: hash,
-		Contract: canonical, ProposedByRoleExecutionID: roleExecutionID,
+		Contract: canonical, Origin: JobContractRevisionOriginPlanner,
+		ProposedByRoleExecutionID: roleExecutionID,
 		SourceResultObservationID: sourceResult.ID, SourceResultContentSHA256: sourceResult.ContentSHA256,
+		CreatedAt: now, CreatedRevision: job.Revision + 1,
+	}, nil
+}
+
+func NewJobContractAmendmentRevision(
+	job Job,
+	commandID string,
+	basedOnRevision uint64,
+	basedOnCanonicalHash, reason string,
+	principal auth.AuthenticatedPrincipal,
+	contract JobContract,
+	now time.Time,
+) (JobContractRevision, error) {
+	if err := job.Validate(); err != nil {
+		return JobContractRevision{}, fmt.Errorf("validate Job before contract amendment: %w", err)
+	}
+	if job.State != JobActive {
+		return JobContractRevision{}, errors.New("JobContract amendment requires an ACTIVE Job")
+	}
+	if !validCommandID(commandID) || now.IsZero() {
+		return JobContractRevision{}, errors.New("JobContract amendment command identity and timestamp are required")
+	}
+	if err := principal.Validate(); err != nil {
+		return JobContractRevision{}, fmt.Errorf("validate amending Principal: %w", err)
+	}
+	if !strings.HasPrefix(principal.PrincipalID(), "human_") {
+		return JobContractRevision{}, errors.New("JobContract amendment requires a HUMAN Principal")
+	}
+	if now.Before(principal.AuthenticatedAt()) {
+		return JobContractRevision{}, errors.New("JobContract amendment time precedes Principal authentication")
+	}
+	if len(job.JobContractRevisions) == 0 {
+		return JobContractRevision{}, errors.New("JobContract amendment requires an existing approved revision")
+	}
+	latest := job.JobContractRevisions[len(job.JobContractRevisions)-1]
+	if basedOnRevision != latest.Revision || basedOnCanonicalHash != latest.CanonicalHash ||
+		!validSHA256(basedOnCanonicalHash) {
+		return JobContractRevision{}, errors.New("JobContract amendment must identify the exact latest approved revision and hash")
+	}
+	var approval *JobApproval
+	for i := range job.JobApprovals {
+		candidate := &job.JobApprovals[i]
+		if candidate.ContractRevision == latest.Revision {
+			approval = candidate
+			break
+		}
+	}
+	if approval == nil {
+		return JobContractRevision{}, errors.New("JobContract amendment requires a matching JobApproval for the latest revision")
+	}
+	if err := approval.Validate(job, latest); err != nil {
+		return JobContractRevision{}, fmt.Errorf("validate prior JobApproval: %w", err)
+	}
+	reason = strings.TrimSpace(reason)
+	if !utf8.ValidString(reason) || reason == "" || len(reason) > 2000 {
+		return JobContractRevision{}, errors.New("JobContract amendment reason is required and must not exceed 2,000 bytes")
+	}
+	canonical, hash, err := CanonicalizeJobContract(contract, JobContractCanonicalizationVersion)
+	if err != nil {
+		return JobContractRevision{}, err
+	}
+	if hash == latest.CanonicalHash {
+		return JobContractRevision{}, errors.New("JobContract amendment must change the canonical contract")
+	}
+	now = now.UTC().Round(0)
+	if now.Before(latest.CreatedAt) || now.Before(approval.ApprovedAt) || !now.Before(canonical.Deadline) {
+		return JobContractRevision{}, errors.New("JobContract amendment time is outside the prior approval or new contract deadline")
+	}
+	if job.Revision >= uint64(^uint64(0)>>1) {
+		return JobContractRevision{}, errors.New("Job revision exhausted")
+	}
+	return JobContractRevision{
+		ID: JobContractRevisionID(commandID), CommandID: commandID, JobID: job.ID,
+		Revision:                uint64(len(job.JobContractRevisions) + 1),
+		CanonicalizationVersion: JobContractCanonicalizationVersion, CanonicalHash: hash,
+		Contract: canonical, Origin: JobContractRevisionOriginHumanAmendment,
+		AmendedByPrincipalID: principal.PrincipalID(), AmendedByIssuer: principal.Issuer(),
+		AmendedBySubject: principal.Subject(), AmendedAuthenticatedAt: principal.AuthenticatedAt().UTC().Round(0),
+		AmendmentReason: reason, SupersedesRevision: latest.Revision, SupersedesCanonicalHash: latest.CanonicalHash,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}, nil
 }
@@ -243,11 +336,53 @@ func NewJobContractRevision(job Job, commandID, roleExecutionID, sourceResultObs
 func (r JobContractRevision) Validate(job Job) error {
 	if !validCommandID(r.CommandID) || r.ID != JobContractRevisionID(r.CommandID) ||
 		r.JobID != job.ID || r.Revision == 0 || r.CanonicalizationVersion != JobContractCanonicalizationVersion ||
-		!validSHA256(r.CanonicalHash) || !validPlanningIdentity(r.ProposedByRoleExecutionID) ||
-		!validPlanningIdentity(r.SourceResultObservationID) || !validSHA256(r.SourceResultContentSHA256) ||
-		r.CreatedAt.IsZero() || r.CreatedRevision < 2 || r.CreatedRevision > job.Revision ||
-		r.CreatedAt.After(job.UpdatedAt) {
+		!validSHA256(r.CanonicalHash) || r.CreatedAt.IsZero() || r.CreatedRevision < 2 ||
+		r.CreatedRevision > job.Revision || r.CreatedAt.After(job.UpdatedAt) {
 		return errors.New("JobContractRevision identity or metadata is invalid")
+	}
+	switch r.Origin {
+	case JobContractRevisionOriginPlanner:
+		if r.AmendedByPrincipalID != "" || r.AmendedByIssuer != "" || r.AmendedBySubject != "" ||
+			!r.AmendedAuthenticatedAt.IsZero() || r.AmendmentReason != "" ||
+			r.SupersedesRevision != 0 || r.SupersedesCanonicalHash != "" {
+			return errors.New("Planner JobContractRevision contains human amendment provenance")
+		}
+		if err := r.validatePlannerProvenance(job); err != nil {
+			return err
+		}
+	case JobContractRevisionOriginHumanAmendment:
+		if r.ProposedByRoleExecutionID != "" || r.SourceResultObservationID != "" ||
+			r.SourceResultContentSHA256 != "" {
+			return errors.New("HUMAN_AMENDMENT JobContractRevision contains Planner provenance")
+		}
+		if err := r.validateHumanAmendmentProvenance(job); err != nil {
+			return err
+		}
+	default:
+		return errors.New("JobContractRevision origin is invalid")
+	}
+	canonical, hash, err := CanonicalizeJobContract(r.Contract, r.CanonicalizationVersion)
+	if err != nil {
+		return err
+	}
+	canonicalJSON, err := json.Marshal(canonical)
+	if err != nil {
+		return err
+	}
+	storedJSON, err := json.Marshal(r.Contract)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(canonicalJSON, storedJSON) || hash != r.CanonicalHash || !r.CreatedAt.Before(canonical.Deadline) {
+		return errors.New("JobContractRevision canonical content or hash mismatch")
+	}
+	return nil
+}
+
+func (r JobContractRevision) validatePlannerProvenance(job Job) error {
+	if !validPlanningIdentity(r.ProposedByRoleExecutionID) ||
+		!validPlanningIdentity(r.SourceResultObservationID) || !validSHA256(r.SourceResultContentSHA256) {
+		return errors.New("Planner JobContractRevision requires RoleExecution and Result provenance")
 	}
 	var execution RoleExecution
 	foundExecution := false
@@ -292,20 +427,52 @@ func (r JobContractRevision) Validate(job Job) error {
 	if sourceResult.TurnID == "" {
 		return errors.New("JobContractRevision source Result is not bound to a Planner Turn")
 	}
-	canonical, hash, err := CanonicalizeJobContract(r.Contract, r.CanonicalizationVersion)
-	if err != nil {
-		return err
+	return nil
+}
+
+func (r JobContractRevision) validateHumanAmendmentProvenance(job Job) error {
+	if !strings.HasPrefix(r.AmendedByPrincipalID, "human_") ||
+		!utf8.ValidString(r.AmendedByIssuer) || !utf8.ValidString(r.AmendedBySubject) ||
+		strings.TrimSpace(r.AmendedBySubject) == "" || r.AmendedAuthenticatedAt.IsZero() ||
+		r.AmendedAuthenticatedAt.After(r.CreatedAt) || !utf8.ValidString(r.AmendmentReason) ||
+		strings.TrimSpace(r.AmendmentReason) == "" || len(r.AmendmentReason) > 2000 ||
+		r.AmendmentReason != strings.TrimSpace(r.AmendmentReason) ||
+		r.Revision < 2 || r.SupersedesRevision != r.Revision-1 ||
+		!validSHA256(r.SupersedesCanonicalHash) {
+		return errors.New("HUMAN_AMENDMENT JobContractRevision provenance is invalid")
 	}
-	canonicalJSON, err := json.Marshal(canonical)
-	if err != nil {
-		return err
+	issuer, err := url.Parse(r.AmendedByIssuer)
+	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil ||
+		issuer.RawQuery != "" || issuer.Fragment != "" {
+		return errors.New("JobContract amendment source must be an authenticated HTTPS OIDC issuer")
 	}
-	storedJSON, err := json.Marshal(r.Contract)
-	if err != nil {
-		return err
+	if r.AmendedByPrincipalID != identity.PrincipalID(r.AmendedByIssuer, r.AmendedBySubject) {
+		return errors.New("JobContract amendment Principal does not match its issuer and subject")
 	}
-	if !bytes.Equal(canonicalJSON, storedJSON) || hash != r.CanonicalHash || !r.CreatedAt.Before(canonical.Deadline) {
-		return errors.New("JobContractRevision canonical content or hash mismatch")
+	if r.SupersedesRevision > uint64(len(job.JobContractRevisions))-1 {
+		return errors.New("JobContract amendment supersedes a missing revision")
+	}
+	previous := job.JobContractRevisions[r.SupersedesRevision-1]
+	if previous.Revision != r.SupersedesRevision || previous.CanonicalHash != r.SupersedesCanonicalHash ||
+		r.CreatedRevision <= previous.CreatedRevision || r.CreatedAt.Before(previous.CreatedAt) {
+		return errors.New("JobContract amendment does not bind the exact prior revision")
+	}
+	var approval *JobApproval
+	for i := range job.JobApprovals {
+		candidate := &job.JobApprovals[i]
+		if candidate.ContractRevision == previous.Revision {
+			approval = candidate
+			break
+		}
+	}
+	if approval == nil {
+		return errors.New("JobContract amendment has no prior approval")
+	}
+	if err := approval.Validate(job, previous); err != nil {
+		return fmt.Errorf("JobContract amendment prior approval is invalid: %w", err)
+	}
+	if r.CreatedRevision <= approval.CreatedRevision || r.CreatedAt.Before(approval.ApprovedAt) {
+		return errors.New("JobContract amendment precedes its prior approval")
 	}
 	return nil
 }
