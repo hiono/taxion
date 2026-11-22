@@ -130,7 +130,6 @@ func TestExecutionPermissionStoreRollbackReplayAndRestart(t *testing.T) {
 	}
 }
 
-
 func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T) {
 	for _, role := range []string{domain.RoleCoder, domain.RoleReviewer} {
 		t.Run(role, func(t *testing.T) {
@@ -140,40 +139,54 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 			jobID := "job_task_execution_" + strings.ToLower(role)
 			execution, _, sourceResult := createJobContractPlanner(t, database, jobID, principal)
 			job, err := database.GetJob(ctx, jobID)
-			if err != nil { t.Fatalf("GetJob before contract: %v", err) }
+			if err != nil {
+				t.Fatalf("GetJob before contract: %v", err)
+			}
 			contract := validStoreJobContract()
 			_, revision, err := database.AddJobContractRevision(
 				ctx, jobID, job.Revision, "cmd_a1010101010101010101010101010101",
 				execution.ID, sourceResult.ID, sourceResult.ContentSHA256, contract,
 			)
-			if err != nil { t.Fatalf("AddJobContractRevision: %v", err) }
+			if err != nil {
+				t.Fatalf("AddJobContractRevision: %v", err)
+			}
 			job, err = database.GetJob(ctx, jobID)
-			if err != nil { t.Fatalf("GetJob before approval: %v", err) }
+			if err != nil {
+				t.Fatalf("GetJob before approval: %v", err)
+			}
 			if _, _, err := database.AddJobApproval(
 				ctx, jobID, job.Revision, "cmd_a2020202020202020202020202020202",
 				revision.Revision, revision.CanonicalHash, revision.CanonicalizationVersion,
 				"Approve the bounded Task execution", principal,
 			); err != nil { t.Fatalf("AddJobApproval: %v", err) }
 			job, err = database.GetJob(ctx, jobID)
-			if err != nil { t.Fatalf("GetJob before Task: %v", err) }
+			if err != nil {
+				t.Fatalf("GetJob before Task: %v", err)
+			}
 			_, task, err := database.AddTask(ctx, job.Revision, domain.TaskRequest{
 				JobID: jobID, CommandID: "cmd_a3030303030303030303030303030303",
 				Title: "Execute the approved task", Purpose: "Start one bounded provider operation",
 				AcceptanceCriteria: []string{"The exact Task operation is started"},
 			})
-			if err != nil { t.Fatalf("AddTask: %v", err) }
+			if err != nil {
+				t.Fatalf("AddTask: %v", err)
+			}
 			job, err = database.GetJob(ctx, jobID)
-			if err != nil { t.Fatalf("GetJob before permission: %v", err) }
+			if err != nil {
+				t.Fatalf("GetJob before permission: %v", err)
+			}
 			now := time.Now().UTC().Round(0)
 			request := domain.ExecutionPermissionRequest{
 				JobID: jobID, TaskID: task.ID, CommandID: "cmd_a4040404040404040404040404040404",
 				Role: role, Effect: "repository.write", Resource: contract.TargetRepositories[0],
 				ProviderID: "provider.test", AccountID: "account.primary",
 				ConfigurationSHA256: contract.ConfigurationSHA256,
-				ReservedTurns: 2, ReservedTokens: 500, ExpiresAt: now.Add(30 * time.Minute),
+				ReservedTurns:       2, ReservedTokens: 500, ExpiresAt: now.Add(30 * time.Minute),
 			}
 			requestSHA, err := domain.ExecutionPermissionRequestSHA256(request)
-			if err != nil { t.Fatalf("ExecutionPermissionRequestSHA256: %v", err) }
+			if err != nil {
+				t.Fatalf("ExecutionPermissionRequestSHA256: %v", err)
+			}
 			assessment := domain.ExecutionEffectAssessment{
 				Role: role, Effect: request.Effect, Resource: request.Resource,
 				ProviderID: request.ProviderID, AccountID: request.AccountID,
@@ -182,9 +195,13 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 				ValidUntil: request.ExpiresAt.Add(time.Minute), EvidenceSHA256: strings.Repeat("e", 64),
 			}
 			_, permission, err := database.AddExecutionPermission(ctx, job.Revision, request, requestSHA, assessment)
-			if err != nil { t.Fatalf("AddExecutionPermission: %v", err) }
+			if err != nil {
+				t.Fatalf("AddExecutionPermission: %v", err)
+			}
 			job, err = database.GetJob(ctx, jobID)
-			if err != nil { t.Fatalf("GetJob before Task execution start: %v", err) }
+			if err != nil {
+				t.Fatalf("GetJob before Task execution start: %v", err)
+			}
 			startRevision := job.Revision
 			startCommandID := "cmd_a5050505050505050505050505050505"
 
@@ -195,7 +212,9 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 				ctx, startRevision, jobID, task.ID, permission.ID, startCommandID, requestSHA,
 			); err == nil { t.Fatal("injected receipt failure did not abort Task execution start") }
 			afterFailure, err := database.GetJob(ctx, jobID)
-			if err != nil { t.Fatalf("GetJob after rollback: %v", err) }
+			if err != nil {
+				t.Fatalf("GetJob after rollback: %v", err)
+			}
 			if afterFailure.Revision != startRevision ||
 				len(afterFailure.RoleExecutions) != len(job.RoleExecutions) ||
 				len(afterFailure.ProviderStartIntents) != len(job.ProviderStartIntents) {
@@ -208,7 +227,9 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 			receipt, started, err := database.StartTaskExecution(
 				ctx, startRevision, jobID, task.ID, permission.ID, startCommandID, requestSHA,
 			)
-			if err != nil { t.Fatalf("StartTaskExecution: %v", err) }
+			if err != nil {
+				t.Fatalf("StartTaskExecution: %v", err)
+			}
 			if receipt.Revision != startRevision+1 ||
 				started.RoleExecution.Role != role ||
 				started.RoleExecution.TaskID != task.ID ||
@@ -219,12 +240,20 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 				t.Fatalf("Task execution facts are not atomically bound to permission: receipt=%#v started=%#v", receipt, started)
 			}
 
-			if err := database.Close(); err != nil { t.Fatalf("Close before restart: %v", err) }
+			if err := database.Close(); err != nil {
+
+				t.Fatalf("Close before restart: %v", err)
+
+			}
 			reopened, err := Open(ctx, path)
-			if err != nil { t.Fatalf("reopen Store: %v", err) }
+			if err != nil {
+				t.Fatalf("reopen Store: %v", err)
+			}
 			defer reopened.Close()
 			restored, err := reopened.GetJob(ctx, jobID)
-			if err != nil { t.Fatalf("GetJob after restart: %v", err) }
+			if err != nil {
+				t.Fatalf("GetJob after restart: %v", err)
+			}
 			if len(restored.RoleExecutions) != len(job.RoleExecutions)+1 ||
 				len(restored.ProviderStartIntents) != len(job.ProviderStartIntents)+1 {
 				t.Fatalf("Task execution pair was not restored: %#v", restored)
@@ -232,7 +261,9 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 			replay, replayed, err := reopened.StartTaskExecution(
 				ctx, startRevision, jobID, task.ID, permission.ID, startCommandID, requestSHA,
 			)
-			if err != nil { t.Fatalf("exact StartTaskExecution replay after restart: %v", err) }
+			if err != nil {
+				t.Fatalf("exact StartTaskExecution replay after restart: %v", err)
+			}
 			if replay != receipt || replayed.RoleExecution.ID != started.RoleExecution.ID ||
 				replayed.ProviderStartIntent.ID != started.ProviderStartIntent.ID {
 				t.Fatalf("replay changed Task execution facts: receipt=%#v replay=%#v", receipt, replayed)
@@ -247,7 +278,9 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 				"cmd_a6060606060606060606060606060606", requestSHA,
 			); err == nil { t.Fatal("a second Start command consumed the same single-use ExecutionPermission") }
 			afterReject, err := reopened.GetJob(ctx, jobID)
-			if err != nil { t.Fatalf("GetJob after single-use rejection: %v", err) }
+			if err != nil {
+				t.Fatalf("GetJob after single-use rejection: %v", err)
+			}
 			if afterReject.Revision != restored.Revision ||
 				len(afterReject.RoleExecutions) != len(restored.RoleExecutions) ||
 				len(afterReject.ProviderStartIntents) != len(restored.ProviderStartIntents) {

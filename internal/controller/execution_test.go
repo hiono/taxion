@@ -139,7 +139,9 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 			startReceipt, startedExecution, startIntent)
 	}
 	jobAfterStart, err := database.GetJob(context.Background(), jobID)
-	if err != nil { t.Fatalf("GetJob after Task execution start: %v", err) }
+	if err != nil {
+		t.Fatalf("GetJob after Task execution start: %v", err)
+	}
 	revisionAfterStart := jobAfterStart.Revision
 	if _, _, _, err := controller.StartTaskExecution(
 		context.Background(), permission.ID, "cmd_a8080808080808080808080808080808", request,
@@ -147,7 +149,9 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 		t.Fatal("a second Start command consumed the same ExecutionPermission")
 	}
 	jobAfterSecondStart, err := database.GetJob(context.Background(), jobID)
-	if err != nil { t.Fatalf("GetJob after rejected second Start: %v", err) }
+	if err != nil {
+		t.Fatalf("GetJob after rejected second Start: %v", err)
+	}
 	if jobAfterSecondStart.Revision != revisionAfterStart ||
 		len(jobAfterSecondStart.RoleExecutions) != len(jobAfterStart.RoleExecutions) ||
 		len(jobAfterSecondStart.ProviderStartIntents) != len(jobAfterStart.ProviderStartIntents) {
