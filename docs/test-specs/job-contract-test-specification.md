@@ -72,6 +72,13 @@
 | JC-225 | Invalid JSON shape | Malformed JSON, non-object root, or field type mismatch | Reject without mutation |
 | JC-226 | Separate caller contract | Caller attempts to submit a JobContract independently of the persisted Result | No such Controller input is accepted |
 | JC-227 | Planning Controller entrypoint | Planner calls `PlanningController.ProposeJobContract` with the persisted final Result ID | Delegate to strict Result decoding and append the bound revision |
+| JC-228 | Active Job amendment | ACTIVE Job, exact latest approved revision / hash, authenticated HUMAN Principal, and non-empty reason | Append HUMAN_AMENDMENT revision and transition atomically to DRAFT |
+| JC-229 | Amendment base mismatch | Supplied revision or canonical hash differs from the latest approved revision | Reject without mutation |
+| JC-230 | Amendment authority | DRAFT Job, non-HUMAN Principal, or missing / invalid reason | Reject without mutation |
+| JC-231 | Reapproval after amendment | HUMAN_AMENDMENT revision appended | Prior approval remains historical; new revision is DRAFT and requires a new JobApproval |
+| JC-232 | Amendment idempotency | Same CommandID and identical base / contract / reason / Principal | Return original receipt and revision |
+| JC-233 | Amendment idempotency conflict | Same CommandID with changed base / contract / reason / Principal | Reject with idempotency conflict |
+| JC-234 | Amendment side-effect boundary | Human amendment command is accepted | No ExecutionPermission or Provider operation is created |
 
 ## Approval Controller and CLI tests
 
