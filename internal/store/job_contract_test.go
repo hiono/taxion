@@ -221,7 +221,6 @@ func TestJobContractStoreRollbackLeavesNoFactOrReceipt(t *testing.T) {
 	}
 }
 
-
 func TestJobContractAmendmentStoreRequiresNewApproval(t *testing.T) {
 	database, _ := newTestStore(t)
 	ctx := context.Background()
@@ -356,7 +355,6 @@ func TestJobContractAmendmentStoreRequiresNewApproval(t *testing.T) {
 		t.Fatalf("prior approval was not retained for its original revision: %#v", priorApproval)
 	}
 }
-
 
 func TestJobContractAmendmentStoreRollbackLeavesActiveJobUntouched(t *testing.T) {
 	database, _ := newTestStore(t)
