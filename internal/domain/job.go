@@ -203,8 +203,8 @@ type PlanningAuthorization struct {
 }
 
 const (
-	RolePlanner = "PLANNER"
-	RoleCoder = "CODER"
+	RolePlanner  = "PLANNER"
+	RoleCoder    = "CODER"
 	RoleReviewer = "REVIEWER"
 )
 
@@ -215,7 +215,7 @@ type RoleExecution struct {
 	Role                     string    `json:"role"`
 	TaskID                   string    `json:"task_id,omitempty"`
 	PlanningAuthorizationID  string    `json:"planning_authorization_id"`
-	ExecutionPermissionID   string    `json:"execution_permission_id,omitempty"`
+	ExecutionPermissionID    string    `json:"execution_permission_id,omitempty"`
 	ProviderStartOperationID string    `json:"provider_start_operation_id"`
 	CreatedAt                time.Time `json:"created_at"`
 	CreatedRevision          uint64    `json:"created_revision"`
