@@ -35,8 +35,7 @@ func NewJobContractController(proposalStore JobContractProposalStore) (*JobContr
 	}, nil
 }
 
-// Propose appends a JobContract revision from the currently authorized Taskless PLANNER.
-// It never grants ExecutionPermission or starts a Provider operation.
+// Keeping the proposal bound to the persisted Result prevents callers from substituting an unrelated contract payload.
 func (c *JobContractController) Propose(
 	ctx context.Context,
 	jobID, roleExecutionID, sourceResultObservationID, commandID string,
@@ -143,7 +142,6 @@ func (c *JobContractController) Propose(
 		sourceResultObservationID, sourceResult.ContentSHA256, contract,
 	)
 }
-
 
 var plannerJobContractJSONFields = map[string]struct{}{
 	"purpose": {}, "constraints": {}, "target_repositories": {}, "target_resources": {},
