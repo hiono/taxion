@@ -158,7 +158,9 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 				ctx, jobID, job.Revision, "cmd_a2020202020202020202020202020202",
 				revision.Revision, revision.CanonicalHash, revision.CanonicalizationVersion,
 				"Approve the bounded Task execution", principal,
-			); err != nil { t.Fatalf("AddJobApproval: %v", err) }
+			); err != nil {
+				t.Fatalf("AddJobApproval: %v", err)
+			}
 			job, err = database.GetJob(ctx, jobID)
 			if err != nil {
 				t.Fatalf("GetJob before Task: %v", err)
@@ -210,7 +212,9 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 			}
 			if _, _, err := database.StartTaskExecution(
 				ctx, startRevision, jobID, task.ID, permission.ID, startCommandID, requestSHA,
-			); err == nil { t.Fatal("injected receipt failure did not abort Task execution start") }
+			); err == nil {
+				t.Fatal("injected receipt failure did not abort Task execution start")
+			}
 			afterFailure, err := database.GetJob(ctx, jobID)
 			if err != nil {
 				t.Fatalf("GetJob after rollback: %v", err)
@@ -276,7 +280,9 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 			if _, _, err := reopened.StartTaskExecution(
 				ctx, restored.Revision, jobID, task.ID, permission.ID,
 				"cmd_a6060606060606060606060606060606", requestSHA,
-			); err == nil { t.Fatal("a second Start command consumed the same single-use ExecutionPermission") }
+			); err == nil {
+				t.Fatal("a second Start command consumed the same single-use ExecutionPermission")
+			}
 			afterReject, err := reopened.GetJob(ctx, jobID)
 			if err != nil {
 				t.Fatalf("GetJob after single-use rejection: %v", err)
