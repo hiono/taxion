@@ -178,9 +178,13 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 				t.Fatalf("GetJob before permission: %v", err)
 			}
 			now := time.Now().UTC().Round(0)
+			effect := "repository.write"
+			if role == domain.RoleReviewer {
+				effect = "repository.read"
+			}
 			request := domain.ExecutionPermissionRequest{
 				JobID: jobID, TaskID: task.ID, CommandID: "cmd_a4040404040404040404040404040404",
-				Role: role, Effect: "repository.write", Resource: contract.TargetRepositories[0],
+				Role: role, Effect: effect, Resource: contract.TargetRepositories[0],
 				ProviderID: "provider.test", AccountID: "account.primary",
 				ConfigurationSHA256: contract.ConfigurationSHA256,
 				ReservedTurns:       2, ReservedTokens: 500, ExpiresAt: now.Add(30 * time.Minute),
