@@ -212,7 +212,7 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 			startCommandID := "cmd_a5050505050505050505050505050505"
 			snapshot := domain.WorktreeSnapshot{
 				RepositoryID: contract.TargetRepositories[0], RepositoryPath: "/trusted/taxion-repository",
-				WorktreePath: "/tmp/taxion-worktrees/" + domain.WorktreeID(jobID, task.ID),
+				WorktreePath:   "/tmp/taxion-worktrees/" + domain.WorktreeID(jobID, task.ID),
 				BaselineCommit: strings.Repeat("a", 40),
 			}
 
