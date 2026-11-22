@@ -292,3 +292,46 @@ func TestJobContractControllerApprovesExactRevisionAndReplaysAfterActivation(t *
 		t.Fatalf("rejected approval changed Job: %#v err=%v", job, err)
 	}
 }
+
+
+func TestDecodePlannerJobContractResultStrictJSON(t *testing.T) {
+	expected := validControllerJobContract(time.Now().UTC().Add(2 * time.Hour))
+	encoded, err := json.Marshal(expected)
+	if err != nil {
+		t.Fatalf("Marshal JobContract: %v", err)
+	}
+	valid := string(encoded)
+	decoded, err := decodePlannerJobContractResult(valid)
+	if err != nil {
+		t.Fatalf("decode valid Planner Result: %v", err)
+	}
+	if decoded.Purpose != expected.Purpose || decoded.Budget != expected.Budget ||
+		!decoded.Deadline.Equal(expected.Deadline) ||
+		len(decoded.TargetRepositories) != len(expected.TargetRepositories) ||
+		decoded.TargetRepositories[0] != expected.TargetRepositories[0] {
+		t.Fatalf("decoded JobContract differs: got=%#v want=%#v", decoded, expected)
+	}
+
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{name: "unknown root key", content: strings.Replace(valid, "{", "{\"unknown\":true,", 1)},
+		{name: "non-canonical key casing", content: strings.Replace(valid, "\"purpose\"", "\"Purpose\"", 1)},
+		{name: "duplicate root key", content: strings.Replace(valid, "{", "{\"purpose\":\"duplicate\",", 1)},
+		{name: "duplicate nested budget key", content: strings.Replace(valid, "\"budget\":{", "\"budget\":{\"max_turns\":5,", 1)},
+		{name: "unknown nested key", content: strings.Replace(valid, "\"budget\":{", "\"budget\":{\"extra\":1,", 1)},
+		{name: "trailing JSON value", content: valid + " {}"},
+		{name: "fenced Markdown", content: "```json\n" + valid + "\n```"},
+		{name: "non-object root", content: "[]"},
+		{name: "malformed JSON", content: "{\"purpose\":"},
+		{name: "type mismatch", content: strings.Replace(valid, "\"budget\":{", "\"budget\":\"invalid\",", 1)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := decodePlannerJobContractResult(tc.content); err == nil {
+				t.Fatal("invalid Planner Result JSON was accepted")
+			}
+		})
+	}
+}
