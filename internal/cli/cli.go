@@ -372,7 +372,7 @@ func amendJob(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	if flags.NArg() != 1 || *revision == 0 || strings.TrimSpace(*reason) == "" || strings.TrimSpace(*contractFile) == "" {
+	if flags.NArg() != 1 || *revision == 0 || !utf8.ValidString(*reason) || strings.TrimSpace(*reason) == "" || len(strings.TrimSpace(*reason)) > 2000 || strings.TrimSpace(*contractFile) == "" {
 		fmt.Fprintln(stderr, "usage: taxion job amend --revision <n> --canonical-hash <sha256> --reason <text> --contract-file <path> [--command-id <id>] [--store path] <job-id>")
 		return 2
 	}
