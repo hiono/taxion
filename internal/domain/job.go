@@ -42,6 +42,7 @@ type Job struct {
 	JobApprovals                          []JobApproval               `json:"job_approvals,omitempty"`
 	Tasks                                 []Task                      `json:"tasks,omitempty"`
 	WorktreeAssignments                   []WorktreeAssignment        `json:"worktree_assignments,omitempty"`
+	WorktreeLifecycleEnforcedFromRevision  uint64                      `json:"worktree_lifecycle_enforced_from_revision,omitempty"`
 	ExecutionPermissions                  []ExecutionPermission       `json:"execution_permissions,omitempty"`
 	RoleExecutions                        []RoleExecution             `json:"role_executions,omitempty"`
 	ProviderStartIntents                  []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
@@ -358,7 +359,9 @@ func (e RoleExecution) Validate(job Job) error {
 		return errors.New("RoleExecution PlanningAuthorization was not found")
 	case RoleCoder, RoleReviewer:
 		if e.PlanningAuthorizationID != "" || !validPlanningIdentity(e.TaskID) ||
-			!validPlanningIdentity(e.WorktreeID) || !validPlanningIdentity(e.ExecutionPermissionID) {
+			(e.WorktreeID != "" && !validPlanningIdentity(e.WorktreeID)) ||
+			(job.WorktreeLifecycleEnforcedFromRevision > 0 && e.CreatedRevision >= job.WorktreeLifecycleEnforcedFromRevision && e.WorktreeID == "") ||
+			!validPlanningIdentity(e.ExecutionPermissionID) {
 			return errors.New("Task RoleExecution requires TaskID, WorktreeID, and ExecutionPermissionID")
 		}
 		task, taskFound := taskByID(job, e.TaskID)

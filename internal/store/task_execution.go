@@ -11,23 +11,29 @@ func (s *Store) StartTaskExecution(
 	ctx context.Context,
 	expectedRevision uint64,
 	jobID, taskID, permissionID, commandID, requestSHA256 string,
+	snapshot domain.WorktreeSnapshot,
 ) (CommandReceipt, domain.TaskExecutionStart, error) {
 	request := struct {
-		JobID        string `json:"job_id"`
-		TaskID       string `json:"task_id"`
-		PermissionID string `json:"permission_id"`
-		CommandID    string `json:"command_id"`
-		RequestSHA   string `json:"request_sha256"`
+		JobID        string                  `json:"job_id"`
+		TaskID       string                  `json:"task_id"`
+		PermissionID string                  `json:"permission_id"`
+		CommandID    string                  `json:"command_id"`
+		RequestSHA   string                  `json:"request_sha256"`
+		Worktree     domain.WorktreeSnapshot `json:"worktree_snapshot"`
 	}{
 		JobID: jobID, TaskID: taskID, PermissionID: permissionID,
-		CommandID: commandID, RequestSHA: requestSHA256,
+		CommandID: commandID, RequestSHA: requestSHA256, Worktree: snapshot,
 	}
 	return persistPlanningFact(
 		ctx, s, jobID, expectedRevision, commandID, "TASK_EXECUTION_START", request,
 		func(job domain.Job, now time.Time) (domain.TaskExecutionStart, error) {
-			return domain.NewTaskRoleExecutionStart(job, taskID, permissionID, commandID, requestSHA256, now)
+			return domain.NewTaskRoleExecutionStart(job, taskID, permissionID, commandID, requestSHA256, snapshot, now)
 		},
 		func(job *domain.Job, start domain.TaskExecutionStart) {
+			job.WorktreeAssignments = append(job.WorktreeAssignments, start.WorktreeAssignment)
+			if job.WorktreeLifecycleEnforcedFromRevision == 0 {
+				job.WorktreeLifecycleEnforcedFromRevision = start.WorktreeAssignment.CreatedRevision
+			}
 			job.RoleExecutions = append(job.RoleExecutions, start.RoleExecution)
 			job.ProviderStartIntents = append(job.ProviderStartIntents, start.ProviderStartIntent)
 			if job.ProviderLifecycleEnforcedFromRevision == 0 {

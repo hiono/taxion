@@ -26,10 +26,10 @@ type ExecutionEffectAssessor interface {
 }
 
 type ExecutionController struct {
-	store    ExecutionPermissionStore
-	assessor ExecutionEffectAssessor
+	store     ExecutionPermissionStore
+	assessor  ExecutionEffectAssessor
 	worktrees TaskWorktreeManager
-	now      func() time.Time
+	now       func() time.Time
 }
 
 func NewExecutionController(permissionStore ExecutionPermissionStore, assessor ExecutionEffectAssessor) (*ExecutionController, error) {
