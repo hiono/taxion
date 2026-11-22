@@ -210,12 +210,17 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 			}
 			startRevision := job.Revision
 			startCommandID := "cmd_a5050505050505050505050505050505"
+			snapshot := domain.WorktreeSnapshot{
+				RepositoryID: contract.TargetRepositories[0], RepositoryPath: "/trusted/taxion-repository",
+				WorktreePath: "/tmp/taxion-worktrees/" + domain.WorktreeID(jobID, task.ID),
+				BaselineCommit: strings.Repeat("a", 40),
+			}
 
 			if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_task_execution_receipt BEFORE INSERT ON job_commands WHEN NEW.command_type = 'TASK_EXECUTION_START' BEGIN SELECT RAISE(ABORT, 'injected Task execution receipt failure'); END`); err != nil {
 				t.Fatalf("create rollback trigger: %v", err)
 			}
 			if _, _, err := database.StartTaskExecution(
-				ctx, startRevision, jobID, task.ID, permission.ID, startCommandID, requestSHA,
+				ctx, startRevision, jobID, task.ID, permission.ID, startCommandID, requestSHA, snapshot,
 			); err == nil {
 				t.Fatal("injected receipt failure did not abort Task execution start")
 			}
@@ -225,7 +230,8 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 			}
 			if afterFailure.Revision != startRevision ||
 				len(afterFailure.RoleExecutions) != len(job.RoleExecutions) ||
-				len(afterFailure.ProviderStartIntents) != len(job.ProviderStartIntents) {
+				len(afterFailure.ProviderStartIntents) != len(job.ProviderStartIntents) ||
+				len(afterFailure.WorktreeAssignments) != len(job.WorktreeAssignments) {
 				t.Fatalf("failed Task execution start partially mutated Job: before revision=%d after=%#v", startRevision, afterFailure)
 			}
 			if _, err := database.db.ExecContext(ctx, "DROP TRIGGER fail_task_execution_receipt"); err != nil {
@@ -233,7 +239,7 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 			}
 
 			receipt, started, err := database.StartTaskExecution(
-				ctx, startRevision, jobID, task.ID, permission.ID, startCommandID, requestSHA,
+				ctx, startRevision, jobID, task.ID, permission.ID, startCommandID, requestSHA, snapshot,
 			)
 			if err != nil {
 				t.Fatalf("StartTaskExecution: %v", err)
@@ -263,27 +269,29 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 				t.Fatalf("GetJob after restart: %v", err)
 			}
 			if len(restored.RoleExecutions) != len(job.RoleExecutions)+1 ||
-				len(restored.ProviderStartIntents) != len(job.ProviderStartIntents)+1 {
+				len(restored.ProviderStartIntents) != len(job.ProviderStartIntents)+1 ||
+				len(restored.WorktreeAssignments) != len(job.WorktreeAssignments)+1 {
 				t.Fatalf("Task execution pair was not restored: %#v", restored)
 			}
 			replay, replayed, err := reopened.StartTaskExecution(
-				ctx, startRevision, jobID, task.ID, permission.ID, startCommandID, requestSHA,
+				ctx, startRevision, jobID, task.ID, permission.ID, startCommandID, requestSHA, snapshot,
 			)
 			if err != nil {
 				t.Fatalf("exact StartTaskExecution replay after restart: %v", err)
 			}
 			if replay != receipt || replayed.RoleExecution.ID != started.RoleExecution.ID ||
-				replayed.ProviderStartIntent.ID != started.ProviderStartIntent.ID {
+				replayed.ProviderStartIntent.ID != started.ProviderStartIntent.ID ||
+				replayed.WorktreeAssignment != started.WorktreeAssignment {
 				t.Fatalf("replay changed Task execution facts: receipt=%#v replay=%#v", receipt, replayed)
 			}
 			if _, _, err := reopened.StartTaskExecution(
-				ctx, restored.Revision, jobID, task.ID, permission.ID, startCommandID, strings.Repeat("0", 64),
+				ctx, restored.Revision, jobID, task.ID, permission.ID, startCommandID, strings.Repeat("0", 64), snapshot,
 			); !errors.Is(err, ErrIdempotencyConflict) {
 				t.Fatalf("changed Start payload error = %v, want idempotency conflict", err)
 			}
 			if _, _, err := reopened.StartTaskExecution(
 				ctx, restored.Revision, jobID, task.ID, permission.ID,
-				"cmd_a6060606060606060606060606060606", requestSHA,
+				"cmd_a6060606060606060606060606060606", requestSHA, snapshot,
 			); err == nil {
 				t.Fatal("a second Start command consumed the same single-use ExecutionPermission")
 			}
@@ -293,7 +301,8 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 			}
 			if afterReject.Revision != restored.Revision ||
 				len(afterReject.RoleExecutions) != len(restored.RoleExecutions) ||
-				len(afterReject.ProviderStartIntents) != len(restored.ProviderStartIntents) {
+				len(afterReject.ProviderStartIntents) != len(restored.ProviderStartIntents) ||
+				len(afterReject.WorktreeAssignments) != len(restored.WorktreeAssignments) {
 				t.Fatalf("rejected second consumption mutated Job: %#v", afterReject)
 			}
 		})
