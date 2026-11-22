@@ -638,7 +638,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	appendOnlyFacts := uint64(len(j.JobContractRevisions) + len(j.JobApprovals) + len(j.Tasks) + len(j.WorktreeAssignments) + len(j.ExecutionPermissions) + len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.ProviderResultObservations) + len(j.ProviderUsageObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
+	appendOnlyFacts := uint64(len(j.JobContractRevisions) + len(j.JobApprovals) + len(j.Tasks) + len(j.ExecutionPermissions) + len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.ProviderResultObservations) + len(j.ProviderUsageObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
 	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
