@@ -58,28 +58,28 @@ type executionEffectAssessmentDigest struct {
 }
 
 type ExecutionPermission struct {
-	ID                      string    `json:"id"`
-	CommandID               string    `json:"command_id"`
-	JobID                   string    `json:"job_id"`
-	OperationID             string    `json:"operation_id"`
-	Role                    string    `json:"role"`
-	Effect                  string    `json:"effect"`
-	Resource                string    `json:"resource"`
-	JobApprovalID           string    `json:"job_approval_id"`
-	ContractRevision        uint64    `json:"contract_revision"`
-	CanonicalizationVersion uint32    `json:"canonicalization_version"`
-	CanonicalHash           string    `json:"canonical_hash"`
-	ProviderID              string    `json:"provider_id"`
-	AccountID               string    `json:"account_id"`
-	ConfigurationSHA256     string    `json:"configuration_sha256"`
-	RequestSHA256           string    `json:"request_sha256"`
-	AssessmentSHA256        string    `json:"assessment_sha256"`
+	ID                      string                    `json:"id"`
+	CommandID               string                    `json:"command_id"`
+	JobID                   string                    `json:"job_id"`
+	OperationID             string                    `json:"operation_id"`
+	Role                    string                    `json:"role"`
+	Effect                  string                    `json:"effect"`
+	Resource                string                    `json:"resource"`
+	JobApprovalID           string                    `json:"job_approval_id"`
+	ContractRevision        uint64                    `json:"contract_revision"`
+	CanonicalizationVersion uint32                    `json:"canonicalization_version"`
+	CanonicalHash           string                    `json:"canonical_hash"`
+	ProviderID              string                    `json:"provider_id"`
+	AccountID               string                    `json:"account_id"`
+	ConfigurationSHA256     string                    `json:"configuration_sha256"`
+	RequestSHA256           string                    `json:"request_sha256"`
+	AssessmentSHA256        string                    `json:"assessment_sha256"`
 	Assessment              ExecutionEffectAssessment `json:"assessment"`
-	ReservedTurns           uint32    `json:"reserved_turns"`
-	ReservedTokens          uint64    `json:"reserved_tokens"`
-	ExpiresAt               time.Time `json:"expires_at"`
-	CreatedAt               time.Time `json:"created_at"`
-	CreatedRevision         uint64    `json:"created_revision"`
+	ReservedTurns           uint32                    `json:"reserved_turns"`
+	ReservedTokens          uint64                    `json:"reserved_tokens"`
+	ExpiresAt               time.Time                 `json:"expires_at"`
+	CreatedAt               time.Time                 `json:"created_at"`
+	CreatedRevision         uint64                    `json:"created_revision"`
 }
 
 func ExecutionPermissionID(commandID string) string {
