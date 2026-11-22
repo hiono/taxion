@@ -259,6 +259,22 @@ func consumePlannerJobContractValue(decoder *json.Decoder, objectFields map[stri
 // Approve records an authenticated human decision for one exact JobContract revision.
 // It does not create ExecutionPermission or authorize Provider execution.
 // Amend requires a fresh HUMAN command because the DRAFT Planner proposal authority cannot change ACTIVE scope.
+func (c *JobContractController) AmendJSON(
+	ctx context.Context,
+	jobID string,
+	expectedJobRevision uint64,
+	commandID string,
+	basedOnRevision uint64,
+	basedOnCanonicalHash, reason, contractJSON string,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.JobContractRevision, error) {
+	contract, err := decodePlannerJobContractResult(contractJSON)
+	if err != nil {
+		return store.CommandReceipt{}, domain.JobContractRevision{}, fmt.Errorf("decode human JobContract amendment: %w", err)
+	}
+	return c.Amend(ctx, jobID, expectedJobRevision, commandID, basedOnRevision, basedOnCanonicalHash, reason, contract, principal)
+}
+
 func (c *JobContractController) Amend(
 	ctx context.Context,
 	jobID string,
