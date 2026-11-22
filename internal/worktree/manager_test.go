@@ -1,0 +1,125 @@
+package worktree
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/hiono/taxion/internal/domain"
+)
+
+func TestManagerPreparesDetachedTaskWorktreeAtImmutableBaseline(t *testing.T) {
+	repository := initRepository(t)
+	workspace := filepath.Join(t.TempDir(), "worktrees")
+	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_0123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	before := gitTestOutput(t, repository, "rev-parse", "HEAD")
+	snapshot, err := manager.Prepare(context.Background(), "job_0123456789abcdef", task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if snapshot.BaselineCommit != before || snapshot.RepositoryID != "repo.primary" {
+		t.Fatalf("unexpected Worktree snapshot: %#v", snapshot)
+	}
+	if err := manager.Verify(context.Background(), "job_0123456789abcdef", task, snapshot); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if got := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", "HEAD"); got != before {
+		t.Fatalf("Worktree HEAD = %s, want %s", got, before)
+	}
+	if _, err := exec.Command("git", "-C", snapshot.WorktreePath, "symbolic-ref", "-q", "HEAD").Output(); err == nil {
+		t.Fatal("Task Worktree is not detached")
+	}
+	if got := gitTestOutput(t, repository, "rev-parse", "HEAD"); got != before {
+		t.Fatalf("source repository HEAD changed: got %s, want %s", got, before)
+	}
+	replayed, err := manager.Prepare(context.Background(), "job_0123456789abcdef", task)
+	if err != nil {
+		t.Fatalf("idempotent Prepare: %v", err)
+	}
+	if replayed != snapshot {
+		t.Fatalf("Prepare replay changed snapshot: got %#v want %#v", replayed, snapshot)
+	}
+}
+
+func TestManagerRejectsOutOfScopeRepositoryAndChangedBaseline(t *testing.T) {
+	repository := initRepository(t)
+	manager, err := NewManager(filepath.Join(t.TempDir(), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	jobID := "job_0123456789abcdef"
+	task := domain.Task{ID: "task_0123456789abcdef", TargetRepositories: []string{"repo.other"}}
+	if _, err := manager.Prepare(context.Background(), jobID, task); err == nil {
+		t.Fatal("out-of-scope repository was accepted")
+	}
+	task.TargetRepositories = []string{"repo.primary"}
+	snapshot, err := manager.Prepare(context.Background(), jobID, task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "config", "user.name", "Taxion Test")
+	gitTestRun(t, snapshot.WorktreePath, "config", "user.email", "taxion-test@example.invalid")
+	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "change.txt"), []byte("changed\n"), 0o600); err != nil {
+		t.Fatalf("write Worktree: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "add", "change.txt")
+	gitTestRun(t, snapshot.WorktreePath, "commit", "-m", "advance Worktree HEAD")
+	if err := manager.Verify(context.Background(), jobID, task, snapshot); err == nil ||
+		!strings.Contains(err.Error(), "immutable baseline") {
+		t.Fatalf("changed Worktree baseline error = %v", err)
+	}
+}
+
+func TestManagerRejectsMultipleRepositoriesAndUnsafeWorkspaceRoot(t *testing.T) {
+	repository := initRepository(t)
+	if _, err := NewManager(filepath.Join(repository, "nested-worktrees"), []Repository{{ID: "repo.primary", Path: repository}}); err == nil {
+		t.Fatal("workspace nested in repository was accepted")
+	}
+	manager, err := NewManager(filepath.Join(t.TempDir(), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_0123456789abcdef", TargetRepositories: []string{"repo.primary", "repo.secondary"}}
+	if _, err := manager.Prepare(context.Background(), "job_0123456789abcdef", task); err == nil {
+		t.Fatal("multi-repository Task was accepted without an explicit integration Worktree")
+	}
+}
+
+func initRepository(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	gitTestRun(t, root, "init")
+	gitTestRun(t, root, "config", "user.name", "Taxion Test")
+	gitTestRun(t, root, "config", "user.email", "taxion-test@example.invalid")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("baseline\n"), 0o600); err != nil {
+		t.Fatalf("write repository file: %v", err)
+	}
+	gitTestRun(t, root, "add", "README.md")
+	gitTestRun(t, root, "commit", "-m", "initial commit")
+	return root
+}
+
+func gitTestRun(t *testing.T, directory string, args ...string) {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", directory}, args...)...)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, output)
+	}
+}
+
+func gitTestOutput(t *testing.T, directory string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", directory}, args...)...)
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return strings.TrimSpace(string(output))
+}
