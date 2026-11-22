@@ -379,7 +379,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 		t.Fatalf("GetJob before approval: %v", err)
 	}
 	if _, _, err := controller.jobContract.Approve(
-		ctx, jobID, job.Revision, "cmd_72727272727272727272727272727272",
+		ctx, jobID, "cmd_72727272727272727272727272727272",
 		proposed.Revision, proposed.CanonicalHash, proposed.CanonicalizationVersion,
 		"Approve initial contract", principal,
 	); err != nil {
@@ -430,7 +430,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 		t.Fatal("Controller accepted an unauthenticated amendment Principal")
 	}
 	if _, _, err := controller.jobContract.Approve(
-		ctx, jobID, job.Revision, "cmd_76767676767676767676767676767676",
+		ctx, jobID, "cmd_76767676767676767676767676767676",
 		amendedRevision.Revision, amendedRevision.CanonicalHash, amendedRevision.CanonicalizationVersion,
 		"Approve amended contract", amendPrincipal,
 	); err != nil {
