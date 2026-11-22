@@ -1336,7 +1336,7 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
 		}},
 	}
-	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
+	controller, err := NewProviderControllerWithExecutionAndWorktree(database, runtime, executionController, &fakeTaskWorktreeVerifier{})
 	if err != nil {
 		t.Fatalf("NewProviderControllerWithExecution: %v", err)
 	}
