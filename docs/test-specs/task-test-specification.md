@@ -31,3 +31,15 @@
 | TK-027 | Restart restoration | Reopen Store after Task append | Task and approval provenance remain valid |
 | TK-028 | Authority separation | Successful Task creation | No RoleExecution, ExecutionPermission, Provider operation, or Worktree is created |
 | TK-029 | Explicit empty scope dimension | Request includes an explicit empty target list while another target dimension remains in scope | Persist the empty dimension; do not inherit access from the parent |
+| TK-030 | Trusted Worktree registry | Task targets a registered repository and a canonical workspace root | Create a detached Worktree at the source HEAD without changing source HEAD |
+| TK-031 | Worktree replay and concurrency | Same Job / Task is provisioned concurrently or retried | Resolve to one deterministic Worktree path and the same baseline |
+| TK-032 | Repository scope rejection | Task repository is unregistered, outside approved scope, or multiple repositories are requested | Reject without Provider dispatch |
+| TK-033 | Worktree path isolation | Workspace root overlaps source repository, or expected Worktree path is a symlink | Reject before Provider dispatch |
+| TK-034 | Worktree baseline integrity | HEAD descends from baseline; then switch to unrelated history or attach a branch | Accept descendant commits; reject unrelated history and non-detached Worktree |
+| TK-035 | Atomic Worktree assignment | StartTaskExecution persists WorktreeAssignment, RoleExecution, ProviderStartIntent | All facts commit in one Job revision or none commit |
+| TK-036 | Worktree assignment replay | Exact Start command is replayed before and after SQLite restart | Return original assignment, RoleExecution, ProviderStartIntent, and receipt |
+| TK-037 | Worktree owner exclusion | Another command attempts to start a different RoleExecution for the same Task | Reject until an explicit safe handoff exists; preserve assignment |
+| TK-038 | Missing Worktree manager / verifier | ExecutionController or ProviderController lacks trusted Worktree integration | Fail closed before Provider side effects |
+| TK-039 | Provider Worktree binding | Task StartRequest is built from persisted WorktreeAssignment | Pass exact RepositoryID, WorktreePath, and baseline commit to Adapter |
+| TK-040 | Worktree capability evidence | Provider lacks Task Worktree capability or evidence is below E4 | Reject before credential acquisition / Provider Start |
+| TK-041 | Reviewer isolation | Reviewer Start is requested without immutable read-only snapshot enforcement | Reject before Lookup or Provider Start |

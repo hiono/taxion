@@ -1,7 +1,7 @@
 # Task Requirements
 
-Version: 1.0
-Date: 2026-11-22
+Version: 1.1
+Date: 2026-11-23
 Governing ADRs: ADR-200, ADR-201, ADR-202, ADR-400, ADR-408, ADR-500
 Governing contract: [Product Contract](product-contract.md)
 
@@ -54,7 +54,22 @@ AcceptanceCriteriaとRequiredEvidenceはTask固有の追加条件です。Task c
 - Task creation後もJobApprovalとJobContractRevisionがauthorityの正本です。TaskはJob scopeを拡張できません。
 - Task state / progressはこのTask definition unitでは定義しません。RoleExecution、Provider observations、Output、Evidence等の事実と混同しません。
 
-## 6. References
+## 6. Task execution and Worktree
+
+Task creationはWorktree、ExecutionPermission、RoleExecution、Provider operationを作成しません。実行開始は別Commandとします。
+
+- Task-bound executionはExecutionPermissionをTaskID、effective resource scope、budget、deadline、Provider identityへ束縛します。
+- TaskExecutionStartはtrusted TaskWorktreeManagerを必須とします。Managerはtrusted Repository registryからTaskのapproved target repositoryを解決し、Job / Taskごとのdetached Git Worktreeを作成または再検証します。
+- 現在の実装は単一repository Taskだけを許可します。複数repository Task、未登録Repository、canonical pathでないWorktreeは拒否します。
+- WorktreeAssignmentはrepository identity / path、Worktree path、baseline commit、owner RoleExecutionを保持します。WorktreeAssignment、RoleExecution、ProviderStartIntentは同一JobAggregate transactionで保存します。
+- RoleExecution.WorktreeIDとProviderStartIntent.WorktreeIDは同じWorktreeAssignmentを参照します。exact replayでは保存済みWorktreeを再検証し、同一Taskへの別RoleExecutionによる再取得はhandoffが成立するまで拒否します。
+- Provider dispatchはtrusted Worktree verifierでassignment owner、Repository identity、Worktree path、baseline ancestry、detached stateを再検証します。
+- Provider StartRequestにはRepositoryID、WorktreePath、baseline commitを含めます。Worktree付きStartはTask Worktree capabilityの証拠がE4以上の場合だけ許可します。Start idempotency / lookup capabilityは別途検証します。
+- Worktree lifecycle enforcement開始前に作成された既存RoleExecutionは読み戻せます。ただしWorktree assignmentを持たない既存ExecutionからProvider dispatchは許可しません。
+- Reviewer dispatchはimmutable commit / tree snapshotとread-only enforcementが成立するまで拒否します。
+- Provider停止、event、final result、Usage、review target identityを照合できないWorktreeは保持します。handoff、quarantine、release、orphan cleanupは別の実装単位とし、未解決Worktreeを自動削除しません。
+
+## 7. References
 
 - ADR-201: JobAggregate / Task / RoleExecution boundary
 - ADR-202: invariants across create / persist / restore

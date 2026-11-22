@@ -37,12 +37,23 @@ Storeは同一transaction内でJobAggregateを再読込し、Domain.NewTaskとJo
 
 ## 5. Execution boundary
 
-Task creationは実行開始ではありません。ExecutionPermissionはTaskIDとeffective scope / budgetへ束縛します。TaskExecutionStart CommandはPermissionをsingle-useで消費し、Coder / Reviewer RoleExecutionとProviderStartIntentを同一JobAggregate transactionでappendします。ProviderStartIntentのBudgetはTask全体のBudgetではなく、PermissionのReservedTurns / ReservedTokensを使用します。Provider dispatchは別のController境界で行います。
+Task creationは実行開始ではありません。ExecutionPermissionはTaskIDとeffective scope / budgetへ束縛します。
+
+TaskExecutionStartはtrusted TaskWorktreeManagerを必須とします。ControllerはTaskのapproved target repositoryを照合し、WorktreeManagerが信頼済みRepository registryからdetached Git Worktreeを作成します。Worktree pathはJob / Taskから決定的に導出し、repository identity、canonical path、baseline commit、linked Worktree metadataを検証します。現在の実装は単一repository Taskだけを許可し、複数repository Taskはfail closedとします。
+
+WorktreeAssignment、Coder / Reviewer RoleExecution、ProviderStartIntentは同一JobAggregate transactionでappendします。WorktreeAssignmentはrepository identity / path、Worktree path、baseline commit、owner RoleExecutionを保持します。RoleExecution.WorktreeIDとProviderStartIntent.WorktreeIDを同じassignmentへ束縛します。Worktree lifecycle enforcement開始前の既存RoleExecutionは復元できますが、assignmentを持たない既存ExecutionからProvider dispatchは許可しません。
+
+ExecutionControllerは同一Taskの別RoleExecutionによるWorktree再取得を拒否します。exact replayでは保存済みassignmentを再検証します。handoffはProvider停止、event、final result、Usage、review target identityを照合する別Commandが成立するまで許可しません。
+
+ProviderControllerはtrusted Worktree verifierでassignment ownerと物理Worktreeを再検証します。Task-bound Provider StartRequestにはRepositoryID、WorktreePath、baseline commitを含めます。Provider runtimeはTask Worktree capabilityの検証証拠がruntime minimum以上の場合だけWorktree付きStartを許可します。Task dispatchではE4以上のTask Worktree evidenceを要求します。Startのidempotency / lookup capabilityも別途検証します。
+
+Reviewer dispatchはread-only snapshot境界が未実装のためfail closedとします。Worktreeの解放、quarantine、owner handoff、orphan reconciliationも未実装であり、未解決Worktreeを自動削除しません。
 
 ## 6. Non-goals
 
 - Task status / progress state machine
-- RoleExecution / Provider operation creation
-- Worktree allocation / release
+- Worktree ownership handoff / quarantine / release
+- Reviewer用immutable commit / tree snapshotとread-only enforcement
+- Worktree orphan reconciliation / cleanup
 - Task editing / supersession
-- Scheduler implementation
+- Schedulerによる独立Task並列化
