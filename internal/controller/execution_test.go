@@ -125,6 +125,34 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 	if validated.ID != permission.ID {
 		t.Fatalf("validated permission = %q, want %q", validated.ID, permission.ID)
 	}
+	startReceipt, startedExecution, startIntent, err := controller.StartTaskExecution(
+		context.Background(), permission.ID, "cmd_a7070707070707070707070707070707", request,
+	)
+	if err != nil {
+		t.Fatalf("StartTaskExecution: %v", err)
+	}
+	if startReceipt.Revision == 0 || startedExecution.TaskID != task.ID ||
+		startedExecution.ExecutionPermissionID != permission.ID ||
+		startIntent.ExecutionPermissionID != permission.ID ||
+		startIntent.ID != permission.OperationID {
+		t.Fatalf("Task execution start lost its permission binding: receipt=%#v execution=%#v intent=%#v",
+			startReceipt, startedExecution, startIntent)
+	}
+	jobAfterStart, err := database.GetJob(context.Background(), jobID)
+	if err != nil { t.Fatalf("GetJob after Task execution start: %v", err) }
+	revisionAfterStart := jobAfterStart.Revision
+	if _, _, _, err := controller.StartTaskExecution(
+		context.Background(), permission.ID, "cmd_a8080808080808080808080808080808", request,
+	); err == nil {
+		t.Fatal("a second Start command consumed the same ExecutionPermission")
+	}
+	jobAfterSecondStart, err := database.GetJob(context.Background(), jobID)
+	if err != nil { t.Fatalf("GetJob after rejected second Start: %v", err) }
+	if jobAfterSecondStart.Revision != revisionAfterStart ||
+		len(jobAfterSecondStart.RoleExecutions) != len(jobAfterStart.RoleExecutions) ||
+		len(jobAfterSecondStart.ProviderStartIntents) != len(jobAfterStart.ProviderStartIntents) {
+		t.Fatalf("rejected second Start mutated Job: %#v", jobAfterSecondStart)
+	}
 	changedResource := request
 	changedResource.Resource = revision.Contract.Workspaces[0]
 	if _, err := controller.ValidatePermission(context.Background(), permission.ID, changedResource); err == nil {
