@@ -782,7 +782,7 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 	}
 	code, amendOutput, stderr := runCLIWithFakeOIDC(t, server, amendArgs)
 	if code != 0 || !strings.Contains(amendOutput, "Origin: HUMAN_AMENDMENT") ||
-		!strings.Contains(amendOutput, "State: DRAFT") {
+		!strings.Contains(amendOutput, "State at amendment: DRAFT") || !strings.Contains(amendOutput, "Current Job State: DRAFT") {
 		t.Fatalf("job amend: code=%d output=%q stderr=%q", code, amendOutput, stderr)
 	}
 	database, err = store.Open(ctx, path)
