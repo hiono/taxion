@@ -1305,7 +1305,7 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 		Role: domain.RoleCoder, Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 2, ReservedTokens: 500, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       2, ReservedTokens: 500, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	_, permission, err := executionController.Authorize(ctx, request)
 	if err != nil {
