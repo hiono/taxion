@@ -156,6 +156,10 @@ var plannerJobContractBudgetJSONFields = map[string]struct{}{
 	"max_turns": {}, "max_tokens": {},
 }
 
+func DecodeJobContractJSON(content string) (domain.JobContract, error) {
+	return decodeJobContractJSON(content)
+}
+
 func decodeJobContractJSON(content string) (domain.JobContract, error) {
 	if len(content) > 1<<20 || !utf8.ValidString(content) {
 		return domain.JobContract{}, errors.New("JobContract JSON must be valid UTF-8 and not exceed 1 MiB")
