@@ -101,35 +101,33 @@ func TestExecutionPermissionBindsExactApprovedOperation(t *testing.T) {
 
 func TestExecutionPermissionRejectsApprovalScopeAndEffectBoundaries(t *testing.T) {
 	tests := []struct {
-		name       string
-		mutate     func(*ExecutionPermissionRequest, *ExecutionEffectAssessment)
-		wantCreate bool
+		name                string
+		mutateRequest       func(*ExecutionPermissionRequest)
+		mutateAssessment   func(*ExecutionEffectAssessment)
 	}{
-		{name: "foreign resource", mutate: func(r *ExecutionPermissionRequest, _ *ExecutionEffectAssessment) { r.Resource += "/outside" }},
-		{name: "prohibited effect", mutate: func(r *ExecutionPermissionRequest, _ *ExecutionEffectAssessment) { r.Effect = "production deployment" }},
-		{name: "approval required effect", mutate: func(r *ExecutionPermissionRequest, _ *ExecutionEffectAssessment) { r.Effect = "publish release" }},
-		{name: "configuration mismatch", mutate: func(r *ExecutionPermissionRequest, _ *ExecutionEffectAssessment) { r.ConfigurationSHA256 = strings.Repeat("0", 64) }},
-		{name: "assessor approval required", mutate: func(_ *ExecutionPermissionRequest, a *ExecutionEffectAssessment) { a.ApprovalRequired = true }},
-		{name: "uncontained and irreversible", mutate: func(_ *ExecutionPermissionRequest, a *ExecutionEffectAssessment) { a.Contained = false; a.Reversible = false }},
-		{name: "assessment expired", mutate: func(_ *ExecutionPermissionRequest, a *ExecutionEffectAssessment) { a.ValidUntil = a.ValidUntil.Add(-30 * time.Minute) }},
+		{name: "foreign resource", mutateRequest: func(r *ExecutionPermissionRequest) { r.Resource += "/outside" }},
+		{name: "prohibited effect", mutateRequest: func(r *ExecutionPermissionRequest) { r.Effect = "production deployment" }},
+		{name: "approval required effect", mutateRequest: func(r *ExecutionPermissionRequest) { r.Effect = "publish release" }},
+		{name: "configuration mismatch", mutateRequest: func(r *ExecutionPermissionRequest) { r.ConfigurationSHA256 = strings.Repeat("0", 64) }},
+		{name: "assessor approval required", mutateAssessment: func(a *ExecutionEffectAssessment) { a.ApprovalRequired = true }},
+		{name: "uncontained and irreversible", mutateAssessment: func(a *ExecutionEffectAssessment) { a.Contained = false; a.Reversible = false }},
+		{name: "assessment expired", mutateAssessment: func(a *ExecutionEffectAssessment) { a.ValidUntil = a.ValidUntil.Add(-30 * time.Minute) }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			job, now := approvedJobForExecutionPermission(t)
 			request := executionPermissionTestRequest(job, now)
-			test.mutate(&request, nil)
+			if test.mutateRequest != nil {
+				test.mutateRequest(&request)
+			}
 			requestSHA, err := ExecutionPermissionRequestSHA256(request)
 			if err != nil {
 				t.Fatalf("request digest: %v", err)
 			}
 			assessment := executionPermissionTestAssessment(request, requestSHA, now)
-			// Apply assessor-only mutations after deriving the exact request identity.
-			test.mutate(&request, &assessment)
-			requestSHA, err = ExecutionPermissionRequestSHA256(request)
-			if err != nil {
-				t.Fatalf("mutated request digest: %v", err)
+			if test.mutateAssessment != nil {
+				test.mutateAssessment(&assessment)
 			}
-			assessment.RequestSHA256 = requestSHA
 			if _, err := NewExecutionPermission(job, request, requestSHA, assessment, now); err == nil {
 				t.Fatal("invalid execution permission request was accepted")
 			}
