@@ -204,6 +204,8 @@ type PlanningAuthorization struct {
 
 const (
 	RolePlanner = "PLANNER"
+	RoleCoder = "CODER"
+	RoleReviewer = "REVIEWER"
 )
 
 type RoleExecution struct {
@@ -213,6 +215,7 @@ type RoleExecution struct {
 	Role                     string    `json:"role"`
 	TaskID                   string    `json:"task_id,omitempty"`
 	PlanningAuthorizationID  string    `json:"planning_authorization_id"`
+	ExecutionPermissionID   string    `json:"execution_permission_id,omitempty"`
 	ProviderStartOperationID string    `json:"provider_start_operation_id"`
 	CreatedAt                time.Time `json:"created_at"`
 	CreatedRevision          uint64    `json:"created_revision"`
@@ -224,6 +227,8 @@ type ProviderStartIntent struct {
 	JobID                   string                   `json:"job_id"`
 	RoleExecutionID         string                   `json:"role_execution_id"`
 	PlanningAuthorizationID string                   `json:"planning_authorization_id"`
+	TaskID                  string                   `json:"task_id,omitempty"`
+	ExecutionPermissionID   string                   `json:"execution_permission_id,omitempty"`
 	ProviderID              string                   `json:"provider_id"`
 	AccountID               string                   `json:"account_id"`
 	ConfigurationSHA256     string                   `json:"configuration_sha256"`
@@ -322,63 +327,118 @@ func NewTasklessPlannerStart(job Job, authorizationID, principalID, commandID, r
 
 func (e RoleExecution) Validate(job Job) error {
 	if !validPlanningIdentity(e.ID) || !validCommandID(e.CommandID) ||
-		!validPlanningIdentity(e.JobID) || !validPlanningIdentity(e.PlanningAuthorizationID) ||
-		!validPlanningIdentity(e.ProviderStartOperationID) {
+		!validPlanningIdentity(e.JobID) || !validPlanningIdentity(e.ProviderStartOperationID) {
 		return errors.New("RoleExecution identity is invalid")
 	}
-	if e.ID != RoleExecutionID(e.CommandID) || e.ProviderStartOperationID != ProviderStartOperationID(e.CommandID) {
-		return errors.New("RoleExecution command identity mismatch")
+	if e.ID != RoleExecutionID(e.CommandID) || e.JobID != job.ID ||
+		e.CreatedAt.IsZero() || e.CreatedRevision < 2 {
+		return errors.New("RoleExecution command identity or creation metadata mismatch")
 	}
-	if e.JobID != job.ID || e.Role != RolePlanner || e.TaskID != "" {
-		return errors.New("DRAFT planning RoleExecution must be a Taskless PLANNER for the target Job")
-	}
-	if e.CreatedAt.IsZero() || e.CreatedRevision < 2 {
-		return errors.New("RoleExecution creation metadata is invalid")
-	}
-	for _, grant := range job.PlanningAuthorizations {
-		if grant.ID != e.PlanningAuthorizationID {
-			continue
+	switch e.Role {
+	case RolePlanner:
+		if !validPlanningIdentity(e.PlanningAuthorizationID) || e.TaskID != "" || e.ExecutionPermissionID != "" ||
+			e.ProviderStartOperationID != ProviderStartOperationID(e.CommandID) {
+			return errors.New("DRAFT planning RoleExecution must be a Taskless PLANNER")
 		}
-		if err := grant.Validate(job); err != nil {
+		for _, grant := range job.PlanningAuthorizations {
+			if grant.ID != e.PlanningAuthorizationID {
+				continue
+			}
+			if err := grant.Validate(job); err != nil {
+				return err
+			}
+			if e.CreatedAt.Before(grant.IssuedAt) || !e.CreatedAt.Before(grant.Deadline) {
+				return errors.New("RoleExecution creation time is outside PlanningAuthorization")
+			}
+			return nil
+		}
+		return errors.New("RoleExecution PlanningAuthorization was not found")
+	case RoleCoder, RoleReviewer:
+		if e.PlanningAuthorizationID != "" || !validPlanningIdentity(e.TaskID) ||
+			!validPlanningIdentity(e.ExecutionPermissionID) {
+			return errors.New("Task RoleExecution requires TaskID and ExecutionPermissionID only")
+		}
+		task, taskFound := taskByID(job, e.TaskID)
+		permission, permissionFound := executionPermissionByID(job, e.ExecutionPermissionID)
+		if !taskFound || !permissionFound || task.ContractRevision != permission.ContractRevision ||
+			task.JobApprovalID != permission.JobApprovalID || permission.TaskID != task.ID ||
+			permission.Role != e.Role || permission.OperationID != e.ProviderStartOperationID {
+			return errors.New("RoleExecution does not match its Task and ExecutionPermission")
+		}
+		if err := permission.Validate(job); err != nil {
 			return err
 		}
-		if e.CreatedAt.Before(grant.IssuedAt) || !e.CreatedAt.Before(grant.Deadline) {
-			return errors.New("RoleExecution creation time is outside PlanningAuthorization")
+		if e.CreatedRevision <= permission.CreatedRevision ||
+			e.CreatedAt.Before(permission.CreatedAt) || !e.CreatedAt.Before(permission.ExpiresAt) {
+			return errors.New("RoleExecution creation time is outside ExecutionPermission")
 		}
 		return nil
+	default:
+		return errors.New("RoleExecution role is unsupported")
 	}
-	return errors.New("RoleExecution PlanningAuthorization was not found")
 }
 
 func (p ProviderStartIntent) Validate(job Job, execution RoleExecution) error {
 	if !validPlanningIdentity(p.ID) || !validCommandID(p.CommandID) ||
 		!validPlanningIdentity(p.JobID) || !validPlanningIdentity(p.RoleExecutionID) ||
-		!validPlanningIdentity(p.PlanningAuthorizationID) || !validPlanningIdentity(p.ProviderID) ||
-		!validPlanningIdentity(p.AccountID) || !validSHA256(p.ConfigurationSHA256) ||
-		!validSHA256(p.RequestSHA256) {
+		!validPlanningIdentity(p.ProviderID) || !validPlanningIdentity(p.AccountID) ||
+		!validSHA256(p.ConfigurationSHA256) || !validSHA256(p.RequestSHA256) {
 		return errors.New("Provider Start intent identity or digest is invalid")
 	}
-	if p.ID != ProviderStartOperationID(p.CommandID) || p.CommandID != execution.CommandID ||
-		p.JobID != job.ID || p.RoleExecutionID != execution.ID ||
+	if p.CommandID != execution.CommandID || p.JobID != job.ID ||
+		p.RoleExecutionID != execution.ID || p.TaskID != execution.TaskID ||
+		p.ExecutionPermissionID != execution.ExecutionPermissionID ||
 		p.PlanningAuthorizationID != execution.PlanningAuthorizationID ||
-		p.ID != execution.ProviderStartOperationID ||
 		p.CreatedAt.IsZero() || !p.CreatedAt.Equal(execution.CreatedAt) ||
 		p.CreatedRevision != execution.CreatedRevision {
 		return errors.New("Provider Start intent does not match RoleExecution")
 	}
-	for _, grant := range job.PlanningAuthorizations {
-		if grant.ID != p.PlanningAuthorizationID {
-			continue
+	switch execution.Role {
+	case RolePlanner:
+		if p.ID != ProviderStartOperationID(p.CommandID) ||
+			p.ID != execution.ProviderStartOperationID ||
+			p.TaskID != "" || p.ExecutionPermissionID != "" {
+			return errors.New("Planner Provider Start intent identity mismatch")
 		}
-		if p.ProviderID != grant.ProviderID || p.AccountID != grant.AccountID ||
-			p.ConfigurationSHA256 != grant.ConfigurationSHA256 ||
-			p.ReadOnlyBoundary != grant.ReadOnlyBoundary || p.Budget != grant.Budget ||
-			!p.Deadline.Equal(grant.Deadline) {
-			return errors.New("Provider Start intent exceeds PlanningAuthorization scope")
+		for _, grant := range job.PlanningAuthorizations {
+			if grant.ID != p.PlanningAuthorizationID {
+				continue
+			}
+			if p.ProviderID != grant.ProviderID || p.AccountID != grant.AccountID ||
+				p.ConfigurationSHA256 != grant.ConfigurationSHA256 ||
+				p.ReadOnlyBoundary != grant.ReadOnlyBoundary || p.Budget != grant.Budget ||
+				!p.Deadline.Equal(grant.Deadline) {
+				return errors.New("Provider Start intent exceeds PlanningAuthorization scope")
+			}
+			return nil
+		}
+		return errors.New("Provider Start intent PlanningAuthorization was not found")
+	case RoleCoder, RoleReviewer:
+		if p.PlanningAuthorizationID != "" || !validPlanningIdentity(p.TaskID) ||
+			!validPlanningIdentity(p.ExecutionPermissionID) {
+			return errors.New("Task Provider Start intent requires TaskID and ExecutionPermissionID")
+		}
+		permission, found := executionPermissionByID(job, p.ExecutionPermissionID)
+		task, taskFound := taskByID(job, p.TaskID)
+		if !found || !taskFound || p.ID != permission.OperationID ||
+			p.ID != execution.ProviderStartOperationID ||
+			permission.TaskID != task.ID || permission.Role != execution.Role ||
+			permission.RequestSHA256 != p.RequestSHA256 ||
+			permission.ProviderID != p.ProviderID || permission.AccountID != p.AccountID ||
+			permission.ConfigurationSHA256 != p.ConfigurationSHA256 ||
+			p.Budget != (PlanningBudget{MaxTurns: permission.ReservedTurns, MaxTokens: permission.ReservedTokens}) ||
+			p.Deadline.After(task.Deadline) || p.Deadline.After(permission.ExpiresAt) ||
+			!p.Deadline.Equal(permission.ExpiresAt) ||
+			p.ReadOnlyBoundary != (PlanningReadOnlyBoundary{}) {
+			return errors.New("Provider Start intent exceeds Task ExecutionPermission scope")
+		}
+		if err := permission.Validate(job); err != nil {
+			return err
 		}
 		return nil
+	default:
+		return errors.New("Provider Start intent role is unsupported")
 	}
-	return errors.New("Provider Start intent PlanningAuthorization was not found")
 }
 
 func (j Job) IntakeProvenanceDigest() string {
@@ -593,6 +653,7 @@ func (j Job) Validate() error {
 	}
 	seenExecutions := make(map[string]struct{}, len(j.RoleExecutions))
 	usedGrants := make(map[string]struct{}, len(j.RoleExecutions))
+	usedPermissions := make(map[string]struct{}, len(j.RoleExecutions))
 	previousExecution := time.Time{}
 	for _, execution := range j.RoleExecutions {
 		if err := execution.Validate(j); err != nil {
@@ -604,11 +665,18 @@ func (j Job) Validate() error {
 		if _, exists := seenExecutions[execution.ID]; exists {
 			return fmt.Errorf("%w: duplicate RoleExecution ID", ErrInvalidJob)
 		}
-		if _, exists := usedGrants[execution.PlanningAuthorizationID]; exists {
-			return fmt.Errorf("%w: PlanningAuthorization has multiple RoleExecutions", ErrInvalidJob)
+		if execution.Role == RolePlanner {
+			if _, exists := usedGrants[execution.PlanningAuthorizationID]; exists {
+				return fmt.Errorf("%w: PlanningAuthorization has multiple RoleExecutions", ErrInvalidJob)
+			}
+			usedGrants[execution.PlanningAuthorizationID] = struct{}{}
+		} else {
+			if _, exists := usedPermissions[execution.ExecutionPermissionID]; exists {
+				return fmt.Errorf("%w: ExecutionPermission has multiple RoleExecutions", ErrInvalidJob)
+			}
+			usedPermissions[execution.ExecutionPermissionID] = struct{}{}
 		}
 		seenExecutions[execution.ID] = struct{}{}
-		usedGrants[execution.PlanningAuthorizationID] = struct{}{}
 		previousExecution = execution.CreatedAt
 	}
 	seenOperations := make(map[string]struct{}, len(j.ProviderStartIntents))
