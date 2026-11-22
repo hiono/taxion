@@ -82,6 +82,7 @@
 | JC-235 | Amendment CLI ingress | OIDC-authenticated `taxion job amend` with exact revision / hash / reason and strict JSON contract file | Append HUMAN_AMENDMENT and return DRAFT |
 | JC-236 | Amendment CLI validation | Missing flags, invalid digest, invalid UTF-8, oversized file, or malformed JSON | Reject without opening / mutating Job Store |
 | JC-237 | Amendment CLI retry | Same CommandID / request retried after OIDC reauthentication and later reapproval | Return original amendment fact without duplicate revision |
+| JC-238 | Fresh amendment authentication | HUMAN Principal authenticated before the current JobApproval | Reject without mutation |
 
 ## Approval Controller and CLI tests
 
