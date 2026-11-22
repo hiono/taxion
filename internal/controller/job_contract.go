@@ -96,7 +96,7 @@ func (c *JobContractController) Propose(
 	if err := sourceResult.Validate(job); err != nil {
 		return store.CommandReceipt{}, domain.JobContractRevision{}, fmt.Errorf("validate Planner source Result: %w", err)
 	}
-	contract, err := decodePlannerJobContractResult(sourceResult.Content)
+	contract, err := decodeJobContractJSON(sourceResult.Content)
 	if err != nil {
 		return store.CommandReceipt{}, domain.JobContractRevision{}, fmt.Errorf("decode Planner JobContract Result: %w", err)
 	}
@@ -156,9 +156,9 @@ var plannerJobContractBudgetJSONFields = map[string]struct{}{
 	"max_turns": {}, "max_tokens": {},
 }
 
-func decodePlannerJobContractResult(content string) (domain.JobContract, error) {
+func decodeJobContractJSON(content string) (domain.JobContract, error) {
 	if len(content) > 1<<20 || !utf8.ValidString(content) {
-		return domain.JobContract{}, errors.New("Planner JobContract JSON must be valid UTF-8 and not exceed 1 MiB")
+		return domain.JobContract{}, errors.New("JobContract JSON must be valid UTF-8 and not exceed 1 MiB")
 	}
 	decoder := json.NewDecoder(strings.NewReader(content))
 	root, err := decoder.Token()
@@ -166,14 +166,14 @@ func decodePlannerJobContractResult(content string) (domain.JobContract, error) 
 		return domain.JobContract{}, fmt.Errorf("read JSON root: %w", err)
 	}
 	if delimiter, ok := root.(json.Delim); !ok || delimiter != '{' {
-		return domain.JobContract{}, errors.New("Planner Result must be one JSON object")
+		return domain.JobContract{}, errors.New("JobContract JSON must be one object")
 	}
 	if err := consumePlannerJobContractObject(decoder, plannerJobContractJSONFields); err != nil {
 		return domain.JobContract{}, err
 	}
 	if _, err := decoder.Token(); err != io.EOF {
 		if err == nil {
-			return domain.JobContract{}, errors.New("Planner Result contains trailing JSON")
+			return domain.JobContract{}, errors.New("JobContract JSON contains trailing JSON")
 		}
 		return domain.JobContract{}, fmt.Errorf("read trailing JSON: %w", err)
 	}
@@ -186,7 +186,7 @@ func decodePlannerJobContractResult(content string) (domain.JobContract, error) 
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		if err == nil {
-			return domain.JobContract{}, errors.New("Planner Result contains more than one JSON value")
+			return domain.JobContract{}, errors.New("JobContract JSON contains more than one JSON value")
 		}
 		return domain.JobContract{}, fmt.Errorf("read trailing JSON: %w", err)
 	}
@@ -202,13 +202,13 @@ func consumePlannerJobContractObject(decoder *json.Decoder, allowed map[string]s
 		}
 		key, ok := token.(string)
 		if !ok {
-			return errors.New("Planner Result JSON object key is not a string")
+			return errors.New("JobContract JSON object key is not a string")
 		}
 		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("Planner Result contains unknown or non-canonical JSON key %q", key)
+			return fmt.Errorf("JobContract JSON contains unknown or non-canonical JSON key %q", key)
 		}
 		if _, duplicate := seen[key]; duplicate {
-			return fmt.Errorf("Planner Result contains duplicate JSON key %q", key)
+			return fmt.Errorf("JobContract JSON contains duplicate JSON key %q", key)
 		}
 		seen[key] = struct{}{}
 		var nested map[string]struct{}
@@ -224,7 +224,7 @@ func consumePlannerJobContractObject(decoder *json.Decoder, allowed map[string]s
 		return fmt.Errorf("close JSON object: %w", err)
 	}
 	if delimiter, ok := closing.(json.Delim); !ok || delimiter != '}' {
-		return errors.New("Planner Result JSON object is not closed")
+		return errors.New("JobContract JSON object is not closed")
 	}
 	return nil
 }
@@ -252,7 +252,7 @@ func consumePlannerJobContractValue(decoder *json.Decoder, objectFields map[stri
 			return fmt.Errorf("close JSON array: %w", err)
 		}
 		if closing != json.Delim(']') {
-			return errors.New("Planner Result JSON array is not closed")
+			return errors.New("JobContract JSON array is not closed")
 		}
 		return nil
 	default:
@@ -272,7 +272,7 @@ func (c *JobContractController) AmendJSON(
 	basedOnCanonicalHash, reason, contractJSON string,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.JobContractRevision, error) {
-	contract, err := decodePlannerJobContractResult(contractJSON)
+	contract, err := decodeJobContractJSON(contractJSON)
 	if err != nil {
 		return store.CommandReceipt{}, domain.JobContractRevision{}, fmt.Errorf("decode human JobContract amendment: %w", err)
 	}
