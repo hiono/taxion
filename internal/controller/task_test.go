@@ -21,8 +21,8 @@ func TestTaskControllerCreatesImmutableTaskWithoutStartingExecution(t *testing.T
 	}
 	request := domain.TaskRequest{
 		JobID: jobID, CommandID: "cmd_c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
-		Title: "Implement approved repository change",
-		Purpose: "Create the bounded implementation output",
+		Title:              "Implement approved repository change",
+		Purpose:            "Create the bounded implementation output",
 		AcceptanceCriteria: []string{"The requested change is implemented"},
 	}
 	receipt, task, err := controller.Create(context.Background(), request)
@@ -75,8 +75,8 @@ func TestTaskControllerRejectsDRAFTJobWithoutMutation(t *testing.T) {
 	}
 	request := domain.TaskRequest{
 		JobID: jobID, CommandID: "cmd_c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
-		Title: "Premature implementation",
-		Purpose: "Must remain blocked until JobApproval",
+		Title:              "Premature implementation",
+		Purpose:            "Must remain blocked until JobApproval",
 		AcceptanceCriteria: []string{"No Task is created"},
 	}
 	if _, _, err := controller.Create(context.Background(), request); err == nil {

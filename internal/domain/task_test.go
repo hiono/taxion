@@ -8,8 +8,8 @@ import (
 func taskTestRequest(job Job, now time.Time, commandID string) TaskRequest {
 	return TaskRequest{
 		JobID: job.ID, CommandID: commandID,
-		Title: "Implement bounded runtime capability",
-		Purpose: "Deliver the approved execution slice",
+		Title:              "Implement bounded runtime capability",
+		Purpose:            "Deliver the approved execution slice",
 		AcceptanceCriteria: []string{"The requested behavior is implemented"},
 	}
 }
