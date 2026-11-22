@@ -73,14 +73,20 @@ Roleは作業責務であり、Role名だけで認証済み実行主体やoperat
 - Provider側でread-onlyを強制できない場合はimmutable snapshotまたは明示文書だけを渡す。それも強制できなければrepository readを許可しない。
 - Plannerの提案、回答、会話によってPlanningAuthorizationを拡張しない。
 
+Provider Adapterの実装要求は[Provider Adapter 実行境界 要求仕様書](provider-adapter-requirements.md)、詳細な内部設計は[Provider Adapter 詳細設計書](../design/provider-adapter-detailed-design.md)に従う。
+
 ### 4.3 Contract proposal and approval
 
 - Plannerは目的、制約、対象、受入条件、必要Evidence、resource boundary、budget、deadline、禁止事項、承認が必要な副作用、秘密を含まないconfiguration referenceを含むJobContract revisionを提案する。
+- Planner proposal Controllerは同一Jobに永続化された最終Provider ResultからJobContractを厳密なJSON形式で生成し、別入力の契約データとの不一致を許可しない。
 - 利用者はその正確なimmutable revision / canonical hashを確認して承認する。
 - JobApprovalはJobID、revision、proposal hash、canonicalization version、approver identity / source / reason / timeを持つappend-only factとする。
 - 承認対象が変わる場合は新revisionと明示的な再承認を要求する。
+- ACTIVE Jobの契約変更は、最新の承認済みRevision / CanonicalHashを指定した認証済みHUMANの明示的な `taxion job amend` 命令に限定する。変更時は新Revisionを追加してJobをDRAFTへ戻し、旧Approvalを再利用せず、新Revisionへの再承認を要求する。
 - TaskはJobの対象・resource・budget・deadlineを狭められるが、拡張できない。
 - 会話、Planner proposal、Task、RoleExecution、Providerの自己申告はJobApprovalの代替にならない。
+
+詳細なrevision、canonicalization、approval transactionの契約は [Job Contract Requirements](job-contract-requirements.md) と [Job Contract Detailed Design](../design/job-contract-detailed-design.md) を参照する。
 
 ### 4.3.1 JobQuestionAuthorization
 
@@ -89,12 +95,16 @@ Roleは作業責務であり、Role名だけで認証済み実行主体やoperat
 
 ### 4.4 Execution and collaboration
 
+Taskの作成・scope narrowing・parent / dependency・budget / deadlineの要件は[Task Requirements](task-requirements.md)、Domain / Storeの設計は[Task Detailed Design](../design/task-detailed-design.md)、境界テストは[Task Test Specification](../test-specs/task-test-specification.md)を参照します。
+
 - JobはTaskを必須としない。TaskはJobに所属する任意の作業分解である。
 - RoleExecutionはJobに所属し、TaskIDは任意とする。Taskless Plannerを許容する。
 - Taskの親子包含、Task dependency、Role間協調を別の関係として扱う。
 - SchedulerはTaskの明示的dependencyだけを使う。JobMessageやRoleExecutionの親子関係をTask dependencyとして解釈しない。
 - Roleは承認済みJob scope内の通常操作を選択できる。通常操作名の静的allowlistやRole-to-operation ACLを権限根拠にしない。
 - ControllerはJobApproval、Task scope、resource identity、禁止副作用、実行基盤のcontainment、budget、deadline、現在のProvider / Runtime状態を検証する。
+- Execution Permissionは現在のJobApprovalと最新JobContractへ束縛した単一Operationの許可判定とする。effect、resource、Provider identity、request digest、budget reservation、expiryを固定し、外部副作用の直前に同じPermissionを再検証する。
+- ProhibitedEffectsおよびApprovalRequiredEffectsに該当する操作は通常のExecution Permissionで許可しない。未知のeffectは名称だけで拒否せず、信頼された評価で可逆性またはcontainmentを確認できない場合に拒否する。
 - 可逆で影響の小さい不足情報は仮定と不確実性を明示して進めてよい。不可欠な情報だけを質問する。
 
 ### 4.5 Review and correction
@@ -127,6 +137,8 @@ Job完了は明示的なJobAggregate Commandでのみ成立する。少なくと
 - reattachmentできない場合は元のoperationをUNKNOWN / unresolvedのまま保持し、Stop proof、final result、Usageを照合します。新しいRoleExecutionによる継続は、旧Providerのquiescence、result / usage reconciliation、Worktree release後に限り、現在のJobApproval・Task scope・budget・deadlineを再検証して別実行として開始します。
 - Start / Sendの結果が不明な場合は、同じOperationID / turn identityによるlookup、またはそのidentityに対して実証されたidempotencyがある場合だけ再試行します。
 - 旧データや旧承認を現行Jobの権限へ暗黙変換しない。
+
+Provider Adapterのoperation・credential・recovery検証項目は[Provider Adapter 実行境界 要求仕様書](provider-adapter-requirements.md)、[詳細設計書](../design/provider-adapter-detailed-design.md)、[内部設計書](../design/provider-adapter-internal-design.md)、[テスト仕様書](../test-specs/provider-adapter-test-specification.md)に従う。PlanningAuthorizationは既存JSON schemaを維持し、SDK / protocol versionはConfigurationSHA256とtrusted Capability Evidence identityの組合せで固定する。
 
 ## 5. Communication contract
 
