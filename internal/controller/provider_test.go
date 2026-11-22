@@ -1205,7 +1205,6 @@ func TestProviderControllerTreatsExistingStopIntentWithoutObservationAsUnknown(t
 	}
 }
 
-
 func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcilesUnknown(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	ctx := context.Background()
@@ -1330,6 +1329,9 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 	runtime.lookupResult = provider.LookupResult{Found:true, OperationID:intent.ID, Status:"RUNNING",
 		ReceiptID:"receipt_1", SessionID:"session_1", EvidenceSHA256:strings.Repeat("e",64)}
 	runtime.startErr = nil
+	// An expired permission cannot authorize a new Start, but it must not prevent
+	// reconciliation of the already-issued OperationID.
+	executionController.now = func() time.Time { return request.ExpiresAt.Add(time.Second) }
 	accepted, result, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
 	if err != nil || accepted.Status != domain.ProviderStartAccepted || !accepted.ReconcilesUnknown ||
 		result.OperationID != intent.ID || runtime.startCalls != 1 || runtime.lookupCalls != 2 {

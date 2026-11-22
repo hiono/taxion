@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -123,7 +124,6 @@ func NewProviderStartObservation(
 	}
 	return observation, nil
 }
-
 
 func validateProviderStartObservationAuthority(job Job, start ProviderStartIntent, principalID string) error {
 	if err := job.Validate(); err != nil {

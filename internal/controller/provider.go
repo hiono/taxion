@@ -41,8 +41,8 @@ type PlanningProviderRuntime interface {
 }
 
 type ProviderController struct {
-	store    ProviderExecutionStore
-	runtime  PlanningProviderRuntime
+	store     ProviderExecutionStore
+	runtime   PlanningProviderRuntime
 	planning  *PlanningController
 	execution *ExecutionController
 	now       func() time.Time
@@ -62,7 +62,6 @@ func NewProviderController(lifecycleStore ProviderExecutionStore, runtime Planni
 	}, nil
 }
 
-
 func NewProviderControllerWithExecution(
 	lifecycleStore ProviderExecutionStore,
 	runtime PlanningProviderRuntime,
@@ -79,8 +78,8 @@ func NewProviderControllerWithExecution(
 	return controller, nil
 }
 
-// StartPlanning starts the DRAFT planning Provider operation. JobApproval-backed
-// execution is intentionally unavailable until the JobApproval domain contract exists.
+// StartPlanning starts the DRAFT planning Provider operation. Task-bound execution
+// uses DispatchTaskExecution and requires a trusted ExecutionController.
 func (c *ProviderController) StartPlanning(
 	ctx context.Context,
 	jobID, authorizationID, commandID string,
@@ -200,18 +199,18 @@ func (c *ProviderController) StartPlanning(
 
 
 type taskProviderStartPrompt struct {
-	Protocol             string   `json:"protocol"`
-	Role                 string   `json:"role"`
-	JobRequest           string   `json:"job_request"`
-	ContractPurpose      string   `json:"contract_purpose"`
-	ContractConstraints  []string `json:"contract_constraints"`
-	TaskTitle            string   `json:"task_title"`
-	TaskPurpose          string   `json:"task_purpose"`
-	AcceptanceCriteria   []string `json:"acceptance_criteria"`
-	RequiredEvidence     []string `json:"required_evidence"`
-	TargetRepositories   []string `json:"target_repositories"`
-	TargetResources      []string `json:"target_resources"`
-	Workspaces           []string `json:"workspaces"`
+	Protocol            string   `json:"protocol"`
+	Role                string   `json:"role"`
+	JobRequest          string   `json:"job_request"`
+	ContractPurpose     string   `json:"contract_purpose"`
+	ContractConstraints []string `json:"contract_constraints"`
+	TaskTitle           string   `json:"task_title"`
+	TaskPurpose         string   `json:"task_purpose"`
+	AcceptanceCriteria  []string `json:"acceptance_criteria"`
+	RequiredEvidence    []string `json:"required_evidence"`
+	TargetRepositories  []string `json:"target_repositories"`
+	TargetResources     []string `json:"target_resources"`
+	Workspaces          []string `json:"workspaces"`
 }
 
 // DispatchTaskExecution dispatches only a Coder RoleExecution whose durable Start
@@ -454,10 +453,10 @@ func buildTaskProviderStartPrompt(job domain.Job, task domain.Task, contract dom
 		ContractPurpose: contract.Purpose, ContractConstraints: append([]string(nil), contract.Constraints...),
 		TaskTitle: task.Title, TaskPurpose: task.Purpose,
 		AcceptanceCriteria: append([]string(nil), task.AcceptanceCriteria...),
-		RequiredEvidence: append([]string(nil), task.RequiredEvidence...),
+		RequiredEvidence:   append([]string(nil), task.RequiredEvidence...),
 		TargetRepositories: append([]string(nil), task.TargetRepositories...),
-		TargetResources: append([]string(nil), task.TargetResources...),
-		Workspaces: append([]string(nil), task.Workspaces...),
+		TargetResources:    append([]string(nil), task.TargetResources...),
+		Workspaces:         append([]string(nil), task.Workspaces...),
 	})
 	if err != nil {
 		return "", fmt.Errorf("encode immutable Task Provider prompt: %w", err)

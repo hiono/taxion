@@ -457,7 +457,6 @@ func (s *Store) AddProviderStartObservation(
 		})
 }
 
-
 func (s *Store) AddTaskProviderStartObservation(
 	ctx context.Context,
 	jobID string,
@@ -466,11 +465,18 @@ func (s *Store) AddTaskProviderStartObservation(
 	reconcilesUnknown bool,
 ) (CommandReceipt, domain.ProviderStartObservation, error) {
 	request := struct {
-		JobID, OperationID, CommandID, Status, ProviderSessionID, ReceiptID, EvidenceSHA256 string
-		ReconcilesUnknown bool
+		JobID              string
+		OperationID        string
+		CommandID          string
+		Status             string
+		ProviderSessionID  string
+		ReceiptID          string
+		EvidenceSHA256     string
+		ReconcilesUnknown  bool
 	}{
-		jobID, operationID, commandID, status, providerSessionID, receiptID, evidenceSHA256,
-		reconcilesUnknown,
+		JobID: jobID, OperationID: operationID, CommandID: commandID, Status: status,
+		ProviderSessionID: providerSessionID, ReceiptID: receiptID, EvidenceSHA256: evidenceSHA256,
+		ReconcilesUnknown: reconcilesUnknown,
 	}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addProviderStartObservationCommandType, request,
 		func(job domain.Job, now time.Time) (domain.ProviderStartObservation, error) {
