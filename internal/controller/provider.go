@@ -259,9 +259,22 @@ func (c *ProviderController) DispatchTaskExecution(
 	if err := intent.Validate(job, execution); err != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, fmt.Errorf("validate Task Provider Start intent: %w", err)
 	}
-	permission, err := c.execution.ValidatePermission(ctx, permissionID, permissionRequest)
+	requestSHA256, err := domain.ExecutionPermissionRequestSHA256(permissionRequest)
 	if err != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, err
+	}
+	var permission domain.ExecutionPermission
+	permissionFound := false
+	for _, candidate := range job.ExecutionPermissions {
+		if candidate.ID == permissionID {
+			permission, permissionFound = candidate, true
+			break
+		}
+	}
+	if !permissionFound || permission.Validate(job) != nil ||
+		requestSHA256 != permission.RequestSHA256 || permissionRequest.JobID != job.ID ||
+		permissionRequest.TaskID != execution.TaskID || permissionRequest.Role != execution.Role {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch permission does not match the persisted immutable request")
 	}
 	if permission.TaskID != execution.TaskID || permission.Role != execution.Role ||
 		permission.OperationID != intent.ID || permission.RequestSHA256 != intent.RequestSHA256 ||
