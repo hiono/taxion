@@ -126,3 +126,34 @@ func (s *Store) AddJobApproval(ctx context.Context, jobID string, expectedRevisi
 		},
 	)
 }
+
+func (s *Store) AddExecutionPermission(
+	ctx context.Context,
+	expectedRevision uint64,
+	request domain.ExecutionPermissionRequest,
+	requestSHA256 string,
+	assessment domain.ExecutionEffectAssessment,
+) (CommandReceipt, domain.ExecutionPermission, error) {
+	command := struct {
+		Request       domain.ExecutionPermissionRequest `json:"request"`
+		RequestSHA256 string                            `json:"request_sha256"`
+		Assessment    domain.ExecutionEffectAssessment  `json:"assessment"`
+	}{Request: request, RequestSHA256: requestSHA256, Assessment: assessment}
+	return persistPlanningFact(
+		ctx, s, request.JobID, expectedRevision, request.CommandID, "EXECUTION_PERMISSION", command,
+		func(job domain.Job, now time.Time) (domain.ExecutionPermission, error) {
+			return domain.NewExecutionPermission(job, request, requestSHA256, assessment, now)
+		},
+		func(job *domain.Job, permission domain.ExecutionPermission) {
+			job.ExecutionPermissions = append(job.ExecutionPermissions, permission)
+		},
+		func(job domain.Job) (domain.ExecutionPermission, bool) {
+			for _, permission := range job.ExecutionPermissions {
+				if permission.CommandID == request.CommandID {
+					return permission, true
+				}
+			}
+			return domain.ExecutionPermission{}, false
+		},
+	)
+}
