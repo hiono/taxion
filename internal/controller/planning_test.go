@@ -28,6 +28,10 @@ func (f *fakePlanningLifecycleStore) AddJobContractRevision(context.Context, str
 	return store.CommandReceipt{}, domain.JobContractRevision{}, errors.New("not implemented")
 }
 
+func (f *fakePlanningLifecycleStore) AmendJobContract(context.Context, string, uint64, string, uint64, string, string, domain.JobContract, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.JobContractRevision, error) {
+	return store.CommandReceipt{}, domain.JobContractRevision{}, errors.New("not implemented")
+}
+
 func (f *fakePlanningLifecycleStore) AddJobApproval(context.Context, string, uint64, string, uint64, string, uint32, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.JobApproval, error) {
 	return store.CommandReceipt{}, domain.JobApproval{}, errors.New("not implemented")
 }
