@@ -45,7 +45,7 @@ func (a *fakeExecutionEffectAssessor) Assess(
 
 func approvedExecutionControllerFixture(t *testing.T) (*store.Store, string, domain.JobContractRevision) {
 	t.Helper()
-	_, database, principal, jobID, _, sourceResult, contract := startContractPlanner(t)
+	_, database, principal, jobID, _, sourceResult, _ := startContractPlanner(t)
 	ctx := context.Background()
 	jobContractController, err := NewJobContractController(database)
 	if err != nil {

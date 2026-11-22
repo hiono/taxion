@@ -74,6 +74,7 @@ type ExecutionPermission struct {
 	ConfigurationSHA256     string    `json:"configuration_sha256"`
 	RequestSHA256           string    `json:"request_sha256"`
 	AssessmentSHA256        string    `json:"assessment_sha256"`
+	Assessment              ExecutionEffectAssessment `json:"assessment"`
 	ReservedTurns           uint32    `json:"reserved_turns"`
 	ReservedTokens          uint64    `json:"reserved_tokens"`
 	ExpiresAt               time.Time `json:"expires_at"`
@@ -221,7 +222,8 @@ func NewExecutionPermission(
 		CanonicalizationVersion: revision.CanonicalizationVersion, CanonicalHash: revision.CanonicalHash,
 		ProviderID: request.ProviderID, AccountID: request.AccountID,
 		ConfigurationSHA256: request.ConfigurationSHA256, RequestSHA256: requestSHA256,
-		AssessmentSHA256: assessmentSHA, ReservedTurns: request.ReservedTurns, ReservedTokens: request.ReservedTokens,
+		AssessmentSHA256: assessmentSHA, Assessment: assessment,
+		ReservedTurns: request.ReservedTurns, ReservedTokens: request.ReservedTokens,
 		ExpiresAt: request.ExpiresAt.UTC().Round(0), CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
 	if err := permission.Validate(job); err != nil {
@@ -269,6 +271,19 @@ func (p ExecutionPermission) Validate(job Job) error {
 		containsExact(revision.Contract.ProhibitedEffects, p.Effect) ||
 		containsExact(revision.Contract.ApprovalRequiredEffects, p.Effect) {
 		return errors.New("ExecutionPermission exceeds its approved JobContract boundary")
+	}
+	assessmentSHA, assessmentErr := p.Assessment.SHA256()
+	if assessmentErr != nil || assessmentSHA != p.AssessmentSHA256 ||
+		p.Assessment.Role != p.Role || p.Assessment.Effect != p.Effect ||
+		p.Assessment.Resource != p.Resource || p.Assessment.ProviderID != p.ProviderID ||
+		p.Assessment.AccountID != p.AccountID ||
+		p.Assessment.ConfigurationSHA256 != p.ConfigurationSHA256 ||
+		p.Assessment.RequestSHA256 != p.RequestSHA256 ||
+		!validSHA256(p.Assessment.EvidenceSHA256) ||
+		p.Assessment.ValidUntil.Before(p.ExpiresAt) || p.Assessment.ApprovalRequired ||
+		(!p.Assessment.Reversible && !p.Assessment.Contained) ||
+		(p.Role == "REVIEWER" && p.Assessment.Mutating) {
+		return errors.New("ExecutionPermission assessment evidence or safety classification is invalid")
 	}
 	expectedRequest := ExecutionPermissionRequest{
 		JobID: p.JobID, CommandID: p.CommandID, Role: p.Role, Effect: p.Effect,
