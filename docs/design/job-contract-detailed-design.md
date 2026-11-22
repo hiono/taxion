@@ -125,7 +125,43 @@ All commands use the shared aggregate transaction: expected-revision check, idem
 
 This design establishes JobContract / JobApproval Domain and Store facts plus proposal / approval Controllers. Provider execution remains blocked until a separate execution Controller verifies the current approval and creates an explicit ExecutionPermission bound to the approved contract. Do not add a placeholder approval boolean or infer authority from Job state alone.
 
-## 6. Planner proposal Controller
+## 6. ExecutionPermission domain and Controller
+
+### 6.1 Domain fact
+
+`ExecutionPermission` is an append-only JobAggregate fact representing one allow decision for one exact operation. It is not a bearer token and cannot authorize a different operation.
+
+Fields:
+- ID derived from CommandID, CommandID, JobID, OperationID
+- Role (`CODER` or `REVIEWER`), exact Effect, exact Resource
+- JobApprovalID, ContractRevision, CanonicalizationVersion, CanonicalHash
+- ProviderID, AccountID, ConfigurationSHA256
+- RequestSHA256 and trusted AssessmentSHA256
+- ReservedTokens, ExpiresAt, CreatedAt, CreatedRevision
+
+OperationID is deterministically derived from CommandID. A new permission requires a new CommandID. Exact replay returns the original fact; changed request fields under the same CommandID conflict.
+
+### 6.2 Permission invariants
+
+- Job is ACTIVE and the latest JobContractRevision has exactly one matching JobApproval.
+- Permission binds the exact current JobApproval and JobContract revision / canonical hash / version.
+- Permission creation and use are before both the JobContract deadline and ExpiresAt; ExpiresAt cannot exceed the approved deadline.
+- ConfigurationSHA256 equals the approved JobContract configuration digest.
+- Resource equals one canonical target repository, target resource, or workspace entry. Prefix, substring, host-only, or path-prefix matches do not grant access.
+- Effects listed in ProhibitedEffects or ApprovalRequiredEffects are not granted by this Controller.
+- A trusted `ExecutionEffectAssessor` evaluates the exact Role / Effect / Resource / Provider / Request digest and returns an evidence digest plus reversibility, containment, and approval-required classification. Unknown effect names are not rejected by name alone; they require an assessable and contained impact. Missing, mismatched, or insufficient assessment fails closed.
+- Each permission reserves one turn and ReservedTokens. Across permissions, completed Usage replaces the reservation for that OperationID; partial / missing Usage retains at least the reservation and any larger observed amount. Aggregate reserved / consumed turns and tokens must not exceed the approved MaxTurns / MaxTokens.
+- A permission is valid only for its exact OperationID and RequestSHA256. A newer contract revision, missing / stale approval, Job state change, or expiry invalidates it.
+- Permission creation is a JobAggregate command. Controller preflight is not the integrity boundary; Store revalidates the current approval, scope, resource, budget, deadline, and idempotency in the append transaction.
+- Permission issuance has no Provider side effect. A Provider execution path must reference and revalidate the exact permission before dispatch. This unit does not claim a Live Provider or OS-level Sandbox implementation.
+
+### 6.3 Execution Controller
+
+`ExecutionController.Authorize` accepts an explicit request and validated effect assessment. It loads the Job, verifies the exact latest approval, checks the contract boundary and current budget, then calls the Store command with the expected Job revision. The Store repeats aggregate-dependent checks and appends the permission atomically.
+
+`ExecutionController.ValidatePermission` reloads the JobAggregate and revalidates the exact permission against current JobApproval, contract revision, OperationID, request digest, and expiry immediately before the external side effect. It never infers permission from JobState alone.
+
+## 7. Planner proposal Controller
 
 The Controller accepts a proposal only from a validated AuthenticatedPrincipal whose identity matches the PlanningAuthorization bound to the referenced RoleExecution. The RoleExecution must be a Taskless PLANNER in the same Job, the Job must be DRAFT, and an ACCEPTED Provider Start observation must exist for that execution.
 
@@ -135,7 +171,7 @@ For a new proposal, the Controller revalidates the current PlanningAuthorization
 
 The Controller does not call the Provider, change Job authority, issue JobApproval, or create ExecutionPermission. A committed proposal may be retried after the PlanningAuthorization deadline only with the same CommandID, identical canonical request, and identical source Result provenance; the Store returns the original receipt and fact. A different Result ID / digest, payload, or proposer with the same CommandID is rejected as an idempotency conflict.
 
-### 6.1 Planner Result payload decoding
+### 7.1 Planner Result payload decoding
 
 The Planner's final Result content is exactly one JSON object representing `JobContract`. JSON keys use the struct's lower_snake_case tags; `budget` is a nested object with `max_turns` and `max_tokens`. The object contains no wrapper, Markdown fence, explanatory prose, or trailing value.
 
@@ -150,7 +186,7 @@ Decoding rejects:
 
 Duplicate-key detection runs before struct decoding because the standard Go JSON decoder otherwise accepts duplicate object keys. The decoded contract then passes the existing canonicalization v1 and Domain validation. The source Result digest remains separate from the canonical JobContract hash.
 
-### 6.2 Upper-level Planner workflow
+### 7.2 Upper-level Planner workflow
 
 The upper-level workflow is responsible for sequencing Provider completion, Result persistence, and JobContract proposal. It does not reconstruct contract data or bypass the proposal Controller.
 
