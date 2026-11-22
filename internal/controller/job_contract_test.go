@@ -30,6 +30,10 @@ func validControllerJobContract(deadline time.Time) domain.JobContract {
 }
 
 func startContractPlanner(t *testing.T) (*PlanningController, *store.Store, auth.AuthenticatedPrincipal, string, string, domain.ProviderResultObservation, domain.JobContract) {
+	return startContractPlannerWithResultContent(t, "")
+}
+
+func startContractPlannerWithResultContent(t *testing.T, resultContent string) (*PlanningController, *store.Store, auth.AuthenticatedPrincipal, string, string, domain.ProviderResultObservation, domain.JobContract) {
 	t.Helper()
 	runtime := &fakePlanningProviderRuntime{}
 	providerController, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
@@ -64,11 +68,14 @@ func startContractPlanner(t *testing.T) (*PlanningController, *store.Store, auth
 		t.Fatalf("GetJob before Planner Result: %v", err)
 	}
 	contract := validControllerJobContract(time.Now().UTC().Add(2 * time.Hour))
-	contentBytes, err := json.Marshal(contract)
-	if err != nil {
-		t.Fatalf("Marshal Planner JobContract: %v", err)
+	content := resultContent
+	if content == "" {
+		contentBytes, err := json.Marshal(contract)
+		if err != nil {
+			t.Fatalf("Marshal Planner JobContract: %v", err)
+		}
+		content = string(contentBytes)
 	}
-	content := string(contentBytes)
 	_, sourceResult, err := database.AddProviderResultObservation(context.Background(), jobID, job.Revision,
 		domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"), turn.OperationID, turn.ID,
 		"session_1", content, sha256String(content), true, strings.Repeat("c", 64), principal)
@@ -339,5 +346,21 @@ func TestDecodePlannerJobContractResultStrictJSON(t *testing.T) {
 				t.Fatal("invalid Planner Result JSON was accepted")
 			}
 		})
+	}
+}
+
+
+func TestPlanningControllerRejectsMalformedFinalResultWithoutMutation(t *testing.T) {
+	controller, database, principal, jobID, _, sourceResult, _ := startContractPlannerWithResultContent(t, "not JSON")
+	_, _, err := controller.ProposeJobContract(
+		context.Background(), jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
+		sourceResult.ID, "cmd_98989898989898989898989898989898", principal,
+	)
+	if err == nil {
+		t.Fatal("PlanningController accepted malformed Planner Result JSON")
+	}
+	job, readErr := database.GetJob(context.Background(), jobID)
+	if readErr != nil || len(job.JobContractRevisions) != 0 {
+		t.Fatalf("malformed Planner Result changed Job: revisions=%d err=%v", len(job.JobContractRevisions), readErr)
 	}
 }
