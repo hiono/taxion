@@ -86,7 +86,7 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 		Resource: revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	receipt, permission, err := controller.Authorize(context.Background(), request)
 	if err != nil {
