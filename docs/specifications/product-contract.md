@@ -92,6 +92,8 @@ Provider Adapterの実装要求は[Provider Adapter 実行境界 要求仕様書
 - SchedulerはTaskの明示的dependencyだけを使う。JobMessageやRoleExecutionの親子関係をTask dependencyとして解釈しない。
 - Roleは承認済みJob scope内の通常操作を選択できる。通常操作名の静的allowlistやRole-to-operation ACLを権限根拠にしない。
 - ControllerはJobApproval、Task scope、resource identity、禁止副作用、実行基盤のcontainment、budget、deadline、現在のProvider / Runtime状態を検証する。
+- Execution Permissionは現在のJobApprovalと最新JobContractへ束縛した単一Operationの許可判定とする。effect、resource、Provider identity、request digest、budget reservation、expiryを固定し、外部副作用の直前に同じPermissionを再検証する。
+- ProhibitedEffectsおよびApprovalRequiredEffectsに該当する操作は通常のExecution Permissionで許可しない。未知のeffectは名称だけで拒否せず、信頼された評価で可逆性またはcontainmentを確認できない場合に拒否する。
 - 可逆で影響の小さい不足情報は仮定と不確実性を明示して進めてよい。不可欠な情報だけを質問する。
 
 ### 4.5 Review and correction
