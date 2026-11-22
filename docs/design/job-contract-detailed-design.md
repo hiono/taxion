@@ -46,12 +46,14 @@ Fields:
 - CanonicalizationVersion
 - CanonicalHash
 - canonical JobContract
-- ProposedByRoleExecutionID
-- SourceResultObservationID
-- SourceResultContentSHA256
+- Origin: `PLANNER` or `HUMAN_AMENDMENT`
+- Planner origin: ProposedByRoleExecutionID, SourceResultObservationID, SourceResultContentSHA256
+- Human amendment origin: AmendedByPrincipalID, AmendedByIssuer, AmendedBySubject, AmendmentReason, SupersedesRevision, SupersedesCanonicalHash
 - CreatedAt and CreatedRevision
 
-The proposer must be a Taskless PLANNER RoleExecution belonging to the same Job, with an accepted Provider Start and a PlanningAuthorization valid at CreatedAt. The source Result must be a persisted final ProviderResultObservation in the same Job, produced by that exact RoleExecution, and its ID and ContentSHA256 must match the revision provenance. The Result observation's own validation must bind it to the accepted Start / Session and exact Turn. The canonical contract hash and source Result content digest are separate identities and must never be substituted for one another.
+For `PLANNER` origin, the proposer must be a Taskless PLANNER RoleExecution belonging to the same Job, with an accepted Provider Start and a PlanningAuthorization valid at CreatedAt. The source Result must be a persisted final ProviderResultObservation in the same Job, produced by that exact RoleExecution, and its ID and ContentSHA256 must match the revision provenance. The Result observation's own validation must bind it to the accepted Start / Session and exact Turn. Human amendment fields must be empty.
+
+For `HUMAN_AMENDMENT` origin, Planner RoleExecution / Result provenance fields must be empty. The revision records the authenticated HUMAN Principal's ID / issuer / subject, a non-empty reason, and the exact prior approved revision / canonical hash. The prior revision must be the latest JobContractRevision and have a matching JobApproval. The new revision is appended while the Job transitions from ACTIVE to DRAFT; prior approvals remain historical. The canonical contract hash and source Result content digest are separate identities and must never be substituted for one another.
 
 ### 1.3 JobApproval
 
@@ -109,7 +111,15 @@ Input: Job ID, expected Job revision, CommandID, exact contract revision / hash 
 
 The Store verifies that the target is the latest revision, creates the approval fact, and transitions the Job to ACTIVE atomically. Duplicate approval of the same revision is rejected; replay of the same CommandID returns the original receipt and fact.
 
-Both commands use the shared aggregate transaction: expected-revision check, idempotency receipt, append-only fact, aggregate validation, atomic update, and read-back on retry.
+### 4.3 AmendJobContract
+
+Input: Job ID, expected Job revision, CommandID, exact current approved contract revision / canonical hash, reason, replacement JobContract, and authenticated HUMAN Principal.
+
+The Store accepts this command only for an ACTIVE Job whose latest revision has a matching JobApproval and whose revision / hash equal the supplied base. It appends a new immutable `HUMAN_AMENDMENT` revision, updates the Job goal, and transitions the Job to DRAFT in the same aggregate transaction. The prior JobApproval remains historical and does not authorize the new revision. The new revision must receive a new JobApproval before activation. A replay with the same CommandID and identical base / reason / contract / Principal returns the original receipt; changed input conflicts.
+
+The amendment command does not create ExecutionPermission, start a Provider operation, or authorize any agent execution.
+
+All commands use the shared aggregate transaction: expected-revision check, idempotency receipt, append-only fact, aggregate validation, atomic update, and read-back on retry.
 
 ## 5. Execution boundary
 
