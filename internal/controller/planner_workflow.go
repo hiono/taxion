@@ -11,7 +11,7 @@ import (
 )
 
 type PlannerProposalOutcome struct {
-	ResultReceipt  *store.CommandReceipt
+	ResultReceipt   *store.CommandReceipt
 	Result          domain.ProviderResultObservation
 	ResultReused    bool
 	ProposalReceipt store.CommandReceipt
