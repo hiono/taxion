@@ -11,11 +11,11 @@ import (
 )
 
 type PlannerProposalOutcome struct {
-	ResultReceipt   *store.CommandReceipt
-	Result           domain.ProviderResultObservation
-	ResultReused     bool
-	ProposalReceipt  store.CommandReceipt
-	Revision         domain.JobContractRevision
+	ResultReceipt  *store.CommandReceipt
+	Result          domain.ProviderResultObservation
+	ResultReused    bool
+	ProposalReceipt store.CommandReceipt
+	Revision        domain.JobContractRevision
 }
 
 type PlannerWorkflowController struct {
