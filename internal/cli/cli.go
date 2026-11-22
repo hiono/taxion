@@ -52,7 +52,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 		return createLocalJob(ctx, args[3:], stdout, stderr)
 	}
 	if args[0] != "job" || len(args) < 2 {
-		fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login、taxion dev job create、taxion job <create|authorize-planning|start-planning|approve|show|list>")
+		fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login、taxion dev job create、taxion job <create|authorize-planning|start-planning|approve|amend|show|list>")
 		return 2
 	}
 
@@ -65,12 +65,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 		return startPlanning(ctx, args[2:], stdout, stderr)
 	case "approve":
 		return approveJob(ctx, args[2:], stdout, stderr)
+	case "amend":
+		return amendJob(ctx, args[2:], stdout, stderr)
 	case "show":
 		return showJob(ctx, args[2:], stdout, stderr)
 	case "list":
 		return listJobs(ctx, args[2:], stdout, stderr)
 	default:
-		fmt.Fprintln(stderr, "コマンドを確認してください: taxion job <authorize-planning|start-planning|approve|show|list>")
+		fmt.Fprintln(stderr, "コマンドを確認してください: taxion job <authorize-planning|start-planning|approve|amend|show|list>")
 		return 2
 	}
 }
@@ -354,6 +356,101 @@ func startPlanningWithPrincipal(ctx context.Context, jobID, authorizationID, com
 		"Taskless PLANNER Start intent persisted\nRoleExecution ID: %s\nOperation ID: %s\nPlanningAuthorization ID: %s\nCommand ID: %s\nJob ID: %s\nState: %s\nRevision: %d\nProvider: %s\nAccount: %s\n",
 		execution.ID, intent.ID, execution.PlanningAuthorizationID, receipt.CommandID, receipt.JobID,
 		job.State, receipt.Revision, intent.ProviderID, intent.AccountID,
+	)
+	return 0
+}
+
+func amendJob(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("taxion job amend", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	revision := flags.Uint64("revision", 0, "Exact current approved JobContract revision to amend")
+	canonicalHash := flags.String("canonical-hash", "", "Exact current JobContract canonical SHA-256")
+	reason := flags.String("reason", "", "Human amendment reason")
+	contractFile := flags.String("contract-file", "", "Path to the replacement JobContract JSON file")
+	commandID := flags.String("command-id", "", "Command ID for idempotent retry")
+	path := flags.String("store", "", "Override the local Job database path")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 1 || *revision == 0 || strings.TrimSpace(*reason) == "" || strings.TrimSpace(*contractFile) == "" {
+		fmt.Fprintln(stderr, "usage: taxion job amend --revision <n> --canonical-hash <sha256> --reason <text> --contract-file <path> [--command-id <id>] [--store path] <job-id>")
+		return 2
+	}
+	decodedHash, err := hex.DecodeString(*canonicalHash)
+	if err != nil || len(decodedHash) != 32 || *canonicalHash != strings.ToLower(*canonicalHash) {
+		fmt.Fprintln(stderr, "--canonical-hash must be a lowercase SHA-256 digest")
+		return 2
+	}
+	file, err := os.Open(*contractFile)
+	if err != nil {
+		return report(stderr, err)
+	}
+	contractJSON, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return report(stderr, readErr)
+	}
+	if closeErr != nil {
+		return report(stderr, closeErr)
+	}
+	if len(contractJSON) > 1<<20 {
+		fmt.Fprintln(stderr, "JobContract JSON must not exceed 1 MiB")
+		return 2
+	}
+	if !utf8.Valid(contractJSON) {
+		fmt.Fprintln(stderr, "JobContract JSON must be valid UTF-8")
+		return 2
+	}
+	dbPath, err := resolveStorePath(*path)
+	if err != nil {
+		return report(stderr, err)
+	}
+	resolvedCommandID := strings.TrimSpace(*commandID)
+	if resolvedCommandID == "" {
+		resolvedCommandID, err = domain.NewID("cmd")
+		if err != nil {
+			return report(stderr, err)
+		}
+	}
+	principal, err := authenticate(ctx, stdout)
+	if err != nil {
+		return report(stderr, err)
+	}
+	return amendJobWithPrincipal(
+		ctx, flags.Arg(0), *revision, *canonicalHash, *reason, string(contractJSON),
+		resolvedCommandID, dbPath, principal, stdout, stderr,
+	)
+}
+
+func amendJobWithPrincipal(
+	ctx context.Context, jobID string, basedOnRevision uint64, basedOnCanonicalHash, reason, contractJSON,
+	commandID, dbPath string, principal auth.AuthenticatedPrincipal, stdout, stderr io.Writer,
+) int {
+	if err := principal.Validate(); err != nil {
+		return report(stderr, err)
+	}
+	database, err := store.Open(ctx, dbPath)
+	if err != nil {
+		return report(stderr, err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		return report(stderr, err)
+	}
+	contractController, err := controller.NewJobContractController(database)
+	if err != nil {
+		return report(stderr, err)
+	}
+	receipt, revision, err := contractController.AmendJSON(
+		ctx, jobID, job.Revision, commandID, basedOnRevision, basedOnCanonicalHash, reason, contractJSON, principal,
+	)
+	if err != nil {
+		return report(stderr, err)
+	}
+	fmt.Fprintf(stdout,
+		"JobContract amendment recorded\\nID: %s\\nCommand ID: %s\\nJob ID: %s\\nRevision: %d\\nCanonical Hash: %s\\nOrigin: HUMAN_AMENDMENT\\nState: DRAFT\\nJob Revision: %d\\n",
+		revision.ID, receipt.CommandID, receipt.JobID, revision.Revision, revision.CanonicalHash, receipt.Revision,
 	)
 	return 0
 }
