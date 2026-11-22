@@ -58,6 +58,7 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 - [ADR-500: Job承認境界と禁止副作用を中心に実行権限を強制する](500-job-authority-and-prohibited-effects.md) — Accepted
 - [ADR-501: Trusted Ingressで認証済みHUMAN Principalを確定する](501-trusted-ingress-and-human-principal.md) — Accepted
 - [ADR-502: 人間起点の依頼とAgent実行先を分離する](502-human-originated-intake-and-agent-routing.md) — Accepted
+- [ADR-503: ACTIVE Jobの契約変更は独立したHUMAN authorityで行う](503-active-job-contract-amendment-authority.md) — Accepted
 
 ### 600–699 Persistence & Recovery
 - 現時点で独立したADRはありません。永続化・復旧に関する判断はDomain ModelおよびExecution & Runtimeの責務と整合させ、必要時に追加します。
