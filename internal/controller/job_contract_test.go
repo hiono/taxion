@@ -307,14 +307,14 @@ func TestJobContractControllerApprovesExactRevisionAndReplaysAfterActivation(t *
 	}
 }
 
-func TestDecodePlannerJobContractResultStrictJSON(t *testing.T) {
+func TestDecodeJobContractJSONStrict(t *testing.T) {
 	expected := validControllerJobContract(time.Now().UTC().Add(2 * time.Hour))
 	encoded, err := json.Marshal(expected)
 	if err != nil {
 		t.Fatalf("Marshal JobContract: %v", err)
 	}
 	valid := string(encoded)
-	decoded, err := decodePlannerJobContractResult(valid)
+	decoded, err := decodeJobContractJSON(valid)
 	if err != nil {
 		t.Fatalf("decode valid Planner Result: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestDecodePlannerJobContractResultStrictJSON(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := decodePlannerJobContractResult(tc.content); err == nil {
+			if _, err := decodeJobContractJSON(tc.content); err == nil {
 				t.Fatal("invalid Planner Result JSON was accepted")
 			}
 		})
