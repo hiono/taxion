@@ -64,16 +64,18 @@ func TestManagerRejectsOutOfScopeRepositoryAndChangedBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	gitTestRun(t, snapshot.WorktreePath, "config", "user.name", "Taxion Test")
-	gitTestRun(t, snapshot.WorktreePath, "config", "user.email", "taxion-test@example.invalid")
-	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "change.txt"), []byte("changed\n"), 0o600); err != nil {
-		t.Fatalf("write Worktree: %v", err)
+	gitTestRun(t, repository, "checkout", "--orphan", "unrelated")
+	gitTestRun(t, repository, "rm", "-rf", ".")
+	if err := os.WriteFile(filepath.Join(repository, "unrelated.txt"), []byte("unrelated\n"), 0o600); err != nil {
+		t.Fatalf("write unrelated repository commit: %v", err)
 	}
-	gitTestRun(t, snapshot.WorktreePath, "add", "change.txt")
-	gitTestRun(t, snapshot.WorktreePath, "commit", "-m", "advance Worktree HEAD")
+	gitTestRun(t, repository, "add", "unrelated.txt")
+	gitTestRun(t, repository, "commit", "-m", "unrelated root")
+	unrelated := gitTestOutput(t, repository, "rev-parse", "HEAD")
+	gitTestRun(t, snapshot.WorktreePath, "checkout", "--detach", unrelated)
 	if err := manager.Verify(context.Background(), jobID, task, snapshot); err == nil ||
-		!strings.Contains(err.Error(), "immutable baseline") {
-		t.Fatalf("changed Worktree baseline error = %v", err)
+		!strings.Contains(err.Error(), "no longer descends") {
+		t.Fatalf("unrelated Worktree history error = %v", err)
 	}
 }
 

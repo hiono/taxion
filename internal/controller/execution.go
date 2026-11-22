@@ -16,6 +16,11 @@ type ExecutionPermissionStore interface {
 	StartTaskExecution(context.Context, uint64, string, string, string, string, string, domain.WorktreeSnapshot) (store.CommandReceipt, domain.TaskExecutionStart, error)
 }
 
+type TaskWorktreeManager interface {
+	Prepare(context.Context, string, domain.Task) (domain.WorktreeSnapshot, error)
+	Verify(context.Context, string, domain.Task, domain.WorktreeSnapshot) error
+}
+
 type ExecutionEffectAssessor interface {
 	Assess(context.Context, domain.ExecutionPermissionRequest, string) (domain.ExecutionEffectAssessment, error)
 }
@@ -23,6 +28,7 @@ type ExecutionEffectAssessor interface {
 type ExecutionController struct {
 	store    ExecutionPermissionStore
 	assessor ExecutionEffectAssessor
+	worktrees TaskWorktreeManager
 	now      func() time.Time
 }
 
@@ -34,6 +40,22 @@ func NewExecutionController(permissionStore ExecutionPermissionStore, assessor E
 		store: permissionStore, assessor: assessor,
 		now: func() time.Time { return time.Now().UTC().Round(0) },
 	}, nil
+}
+
+func NewExecutionControllerWithWorktree(
+	permissionStore ExecutionPermissionStore,
+	assessor ExecutionEffectAssessor,
+	worktrees TaskWorktreeManager,
+) (*ExecutionController, error) {
+	if worktrees == nil {
+		return nil, errors.New("trusted Task Worktree manager is required")
+	}
+	controller, err := NewExecutionController(permissionStore, assessor)
+	if err != nil {
+		return nil, err
+	}
+	controller.worktrees = worktrees
+	return controller, nil
 }
 
 // Authorize issues a one-operation permission only after current JobApproval and trusted effect assessment checks.
@@ -100,8 +122,10 @@ func (c *ExecutionController) StartTaskExecution(
 	ctx context.Context,
 	permissionID, commandID string,
 	request domain.ExecutionPermissionRequest,
-	snapshot domain.WorktreeSnapshot,
 ) (store.CommandReceipt, domain.RoleExecution, domain.ProviderStartIntent, error) {
+	if c.worktrees == nil {
+		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, errors.New("Task execution start requires a trusted Worktree manager")
+	}
 	permission, err := c.ValidatePermission(ctx, permissionID, request)
 	if err != nil {
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, err
@@ -109,6 +133,45 @@ func (c *ExecutionController) StartTaskExecution(
 	job, err := c.store.GetJob(ctx, request.JobID)
 	if err != nil {
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, err
+	}
+	var task domain.Task
+	taskFound := false
+	for _, candidate := range job.Tasks {
+		if candidate.ID == request.TaskID {
+			task, taskFound = candidate, true
+			break
+		}
+	}
+	if !taskFound {
+		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, errors.New("Task execution start Task was not found")
+	}
+	for _, existing := range job.RoleExecutions {
+		if existing.TaskID == task.ID && existing.CommandID != commandID {
+			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, errors.New("Task Worktree is already owned; an explicit safe handoff is required")
+		}
+	}
+	var snapshot domain.WorktreeSnapshot
+	assignmentFound := false
+	for _, assignment := range job.WorktreeAssignments {
+		if assignment.TaskID != task.ID {
+			continue
+		}
+		if assignment.OwnerRoleExecutionID != domain.RoleExecutionID(commandID) {
+			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, errors.New("Task Worktree is already assigned to another RoleExecution")
+		}
+		snapshot = assignment.Snapshot()
+		assignmentFound = true
+		break
+	}
+	if assignmentFound {
+		if err := c.worktrees.Verify(ctx, job.ID, task, snapshot); err != nil {
+			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("verify existing Task Worktree before exact Start replay: %w", err)
+		}
+	} else {
+		snapshot, err = c.worktrees.Prepare(ctx, job.ID, task)
+		if err != nil {
+			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("prepare Task Worktree before Start intent: %w", err)
+		}
 	}
 	receipt, start, err := c.store.StartTaskExecution(
 		ctx, job.Revision, request.JobID, request.TaskID, permissionID, commandID, permission.RequestSHA256, snapshot,

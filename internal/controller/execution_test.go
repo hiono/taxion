@@ -96,12 +96,21 @@ func testWorktreeSnapshot(jobID string, task domain.Task) domain.WorktreeSnapsho
 }
 
 type fakeTaskWorktreeVerifier struct {
-	err   error
-	calls int
+	err          error
+	prepareCalls int
+	verifyCalls  int
+}
+
+func (v *fakeTaskWorktreeVerifier) Prepare(_ context.Context, jobID string, task domain.Task) (domain.WorktreeSnapshot, error) {
+	v.prepareCalls++
+	if v.err != nil {
+		return domain.WorktreeSnapshot{}, v.err
+	}
+	return testWorktreeSnapshot(jobID, task), nil
 }
 
 func (v *fakeTaskWorktreeVerifier) Verify(context.Context, string, domain.Task, domain.WorktreeSnapshot) error {
-	v.calls++
+	v.verifyCalls++
 	return v.err
 }
 
@@ -111,7 +120,7 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
 		Reversible: true, Mutating: true, ValidUntil: now.Add(45 * time.Minute),
 	}}
-	controller, err := NewExecutionController(database, assessor)
+	controller, err := NewExecutionControllerWithWorktree(database, assessor, &fakeTaskWorktreeVerifier{})
 	if err != nil {
 		t.Fatalf("NewExecutionController: %v", err)
 	}
@@ -144,7 +153,7 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 		t.Fatalf("validated permission = %q, want %q", validated.ID, permission.ID)
 	}
 	startReceipt, startedExecution, startIntent, err := controller.StartTaskExecution(
-		context.Background(), permission.ID, "cmd_a7070707070707070707070707070707", request, testWorktreeSnapshot(jobID, task),
+		context.Background(), permission.ID, "cmd_a7070707070707070707070707070707", request,
 	)
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
@@ -174,7 +183,7 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 		t.Fatalf("Worktree assignment does not match its owner or snapshot: %#v", assignment)
 	}
 	replayedReceipt, replayedExecution, replayedIntent, err := controller.StartTaskExecution(
-		context.Background(), permission.ID, "cmd_a7070707070707070707070707070707", request, snapshot,
+		context.Background(), permission.ID, "cmd_a7070707070707070707070707070707", request,
 	)
 	if err != nil || replayedReceipt != startReceipt || replayedExecution != startedExecution ||
 		replayedIntent != startIntent {

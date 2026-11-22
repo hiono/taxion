@@ -1212,7 +1212,7 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
 		Reversible: true, Mutating: true, ValidUntil: now.Add(45 * time.Minute),
 	}}
-	executionController, err := NewExecutionController(database, assessor)
+	executionController, err := NewExecutionControllerWithWorktree(database, assessor, &fakeTaskWorktreeVerifier{})
 	if err != nil {
 		t.Fatalf("NewExecutionController: %v", err)
 	}
@@ -1229,7 +1229,7 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 		t.Fatalf("Authorize: %v", err)
 	}
 	_, execution, intent, err := executionController.StartTaskExecution(
-		ctx, permission.ID, "cmd_b2222222222222222222222222222222", permissionRequest, testWorktreeSnapshot(jobID, task),
+		ctx, permission.ID, "cmd_b2222222222222222222222222222222", permissionRequest,
 	)
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
@@ -1295,7 +1295,7 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
 		Reversible: true, Mutating: true, ValidUntil: now.Add(45 * time.Minute),
 	}}
-	executionController, err := NewExecutionController(database, assessor)
+	executionController, err := NewExecutionControllerWithWorktree(database, assessor, &fakeTaskWorktreeVerifier{})
 	if err != nil {
 		t.Fatalf("NewExecutionController: %v", err)
 	}
@@ -1312,7 +1312,7 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 		t.Fatalf("Authorize: %v", err)
 	}
 	_, execution, intent, err := executionController.StartTaskExecution(
-		ctx, permission.ID, "cmd_b4444444444444444444444444444444", request, testWorktreeSnapshot(jobID, task),
+		ctx, permission.ID, "cmd_b4444444444444444444444444444444", request,
 	)
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
@@ -1367,7 +1367,7 @@ func TestProviderControllerRejectsTaskReviewerStartWithoutReadOnlyWorktreeBounda
 	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
 		Reversible: true, Mutating: false, ValidUntil: now.Add(45 * time.Minute),
 	}}
-	executionController, err := NewExecutionController(database, assessor)
+	executionController, err := NewExecutionControllerWithWorktree(database, assessor, &fakeTaskWorktreeVerifier{})
 	if err != nil {
 		t.Fatalf("NewExecutionController: %v", err)
 	}
@@ -1384,7 +1384,7 @@ func TestProviderControllerRejectsTaskReviewerStartWithoutReadOnlyWorktreeBounda
 		t.Fatalf("Authorize Reviewer: %v", err)
 	}
 	_, execution, _, err := executionController.StartTaskExecution(
-		ctx, permission.ID, "cmd_b6666666666666666666666666666666", request, testWorktreeSnapshot(jobID, task),
+		ctx, permission.ID, "cmd_b6666666666666666666666666666666", request,
 	)
 	if err != nil {
 		t.Fatalf("StartTaskExecution Reviewer: %v", err)

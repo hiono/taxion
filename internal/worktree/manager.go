@@ -130,8 +130,14 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 		return errors.New("Task path is not the expected Git Worktree")
 	}
 	head, err := gitOutput(ctx, expectedPath, "rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil || head != snapshot.BaselineCommit {
-		return errors.New("Task Worktree HEAD differs from its immutable baseline")
+	if err != nil || !validCommit(head) {
+		return errors.New("Task Worktree HEAD is not a verifiable commit")
+	}
+	if err := runGit(ctx, expectedPath, "merge-base", "--is-ancestor", snapshot.BaselineCommit, head); err != nil {
+		return errors.New("Task Worktree HEAD no longer descends from its immutable baseline")
+	}
+	if _, err := gitOutput(ctx, expectedPath, "symbolic-ref", "-q", "HEAD"); err == nil {
+		return errors.New("Task Worktree must remain detached")
 	}
 	gitDir, err := gitOutput(ctx, expectedPath, "rev-parse", "--absolute-git-dir")
 	if err != nil {
