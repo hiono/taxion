@@ -851,4 +851,22 @@ func TestJobApproveCLIRejectsMissingExactRevisionFieldsBeforeAuthentication(t *t
 	if _, err := os.Stat(amendPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Store path exists after invalid amendment request: %v", err)
 	}
+
+	invalidContractPath := filepath.Join(t.TempDir(), "invalid-contract.json")
+	if err := os.WriteFile(invalidContractPath, []byte("not JSON"), 0o600); err != nil {
+		t.Fatalf("write invalid contract: %v", err)
+	}
+	invalidStorePath := filepath.Join(t.TempDir(), "must-not-open", "invalid.sqlite")
+	var amendStdout, amendStderr bytes.Buffer
+	code = Run(context.Background(), []string{
+		"job", "amend", "--store", invalidStorePath, "--revision", "1",
+		"--canonical-hash", strings.Repeat("0", 64), "--reason", "test invalid JSON",
+		"--contract-file", invalidContractPath, "job_missing",
+	}, &amendStdout, &amendStderr, VersionInfo{})
+	if code != 1 || !strings.Contains(amendStderr.String(), "JSON") {
+		t.Fatalf("invalid amendment JSON exit code = %d, stderr=%q", code, amendStderr.String())
+	}
+	if _, err := os.Stat(invalidStorePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Store path exists after invalid amendment JSON: %v", err)
+	}
 }
