@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
@@ -172,8 +171,5 @@ func TestNewTaskRejectsMissingAcceptanceCriteria(t *testing.T) {
 	request.AcceptanceCriteria = nil
 	if _, err := NewTask(job, request, now); err == nil {
 		t.Fatal("Task without acceptance criteria was accepted")
-	}
-	if !strings.Contains(request.Title, "bounded") {
-		t.Fatal("fixture title unexpectedly changed")
 	}
 }
