@@ -151,7 +151,7 @@ func TestJobContractControllerRejectsPrincipalMismatchAndExpiredGrant(t *testing
 	if grant.ID == "" || grant.PrincipalID != principal.PrincipalID() {
 		t.Fatalf("expected PlanningAuthorization was not found: %#v", grant)
 	}
-	controller.now = func() time.Time { return grant.Deadline.Add(time.Second) }
+	controller.jobContract.now = func() time.Time { return grant.Deadline.Add(time.Second) }
 	if _, _, err := controller.ProposeJobContract(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, "cmd_ffffffffffffffffffffffffffffffff", principal,
@@ -184,7 +184,7 @@ func TestJobContractControllerAllowsExactReplayAfterGrantExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initial Propose: %v", err)
 	}
-	controller.now = func() time.Time { return grant.Deadline.Add(time.Second) }
+	controller.jobContract.now = func() time.Time { return grant.Deadline.Add(time.Second) }
 	retryReceipt, retryRevision, err := controller.ProposeJobContract(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal)
 	if err != nil {
 		t.Fatalf("idempotent replay after expiry: %v", err)
