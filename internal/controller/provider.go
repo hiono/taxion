@@ -197,7 +197,6 @@ func (c *ProviderController) StartPlanning(
 	return receipt, execution, intent, result, nil
 }
 
-
 type taskProviderStartPrompt struct {
 	Protocol            string   `json:"protocol"`
 	Role                string   `json:"role"`
@@ -328,8 +327,8 @@ func (c *ProviderController) DispatchTaskExecution(
 	if capabilities.Identity != identity {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, provider.ErrUnsupportedCapability
 	}
-	canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilityStartLookup, provider.EvidenceLive)
-	canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilityStartIdempotency, provider.EvidenceLive)
+	canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilityStartLookup, provider.EvidenceSynthetic)
+	canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilityStartIdempotency, provider.EvidenceSynthetic)
 	if !canLookup && !canRetry {
 		observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
 		if persistErr != nil {

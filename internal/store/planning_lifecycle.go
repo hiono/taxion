@@ -472,7 +472,7 @@ func (s *Store) AddTaskProviderStartObservation(
 		ProviderSessionID  string
 		ReceiptID          string
 		EvidenceSHA256     string
-		ReconcilesUnknown  bool
+		ReconcilesUnknown bool
 	}{
 		JobID: jobID, OperationID: operationID, CommandID: commandID, Status: status,
 		ProviderSessionID: providerSessionID, ReceiptID: receiptID, EvidenceSHA256: evidenceSHA256,

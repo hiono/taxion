@@ -1220,8 +1220,7 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 	permissionRequest := domain.ExecutionPermissionRequest{
 		JobID: jobID, TaskID: task.ID, CommandID: "cmd_b1111111111111111111111111111111",
 		Role: domain.RoleCoder, Effect: "repository.write",
-		Resource: revision.Contract.TargetRepositories[0],
-		ProviderID: "provider.test", AccountID: "account.primary",
+		Resource: revision.Contract.TargetRepositories[0], ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
 		ReservedTurns: 2, ReservedTokens: 500, ExpiresAt: now.Add(30 * time.Minute),
 	}
@@ -1248,8 +1247,10 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 	runtime.capabilities = provider.Capabilities{
 		Identity: runtime.identity, StartLookup: true, StartIdempotency: true,
 		Evidence: []provider.CapabilityEvidence{
-			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-start-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-start-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-start-test",
+				EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-start-test",
+				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
 		},
 	}
 	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
@@ -1307,27 +1308,46 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 		ReservedTurns: 2, ReservedTokens: 500, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	_, permission, err := executionController.Authorize(ctx, request)
-	if err != nil { t.Fatalf("Authorize: %v", err) }
-	_, execution, intent, err := executionController.StartTaskExecution(ctx, permission.ID,
-		"cmd_b4444444444444444444444444444444", request)
-	if err != nil { t.Fatalf("StartTaskExecution: %v", err) }
-	runtime := &fakePlanningProviderRuntime{
-		identity: provider.Identity{ProviderID: permission.ProviderID, AccountID: permission.AccountID,
-			SDKVersion: "test-sdk/1", ConfigurationSHA256: permission.ConfigurationSHA256},
-		lookupResult: provider.LookupResult{Found:false, OperationID:intent.ID, Status:provider.LookupStatusNotFound, EvidenceSHA256:strings.Repeat("c",64)},
-		startErr: &provider.OperationError{Class:provider.FailureAmbiguous, Code:provider.OperationCodeTimeout},
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
 	}
-	runtime.capabilities = provider.Capabilities{Identity:runtime.identity, StartLookup:true,
-		Evidence:[]provider.CapabilityEvidence{{Capability:provider.CapabilityStartLookup, Identity:runtime.identity,
-			TestID:"task-start-test", EvidenceSHA256:strings.Repeat("d",64), EvidenceLevel:provider.EvidenceLive, VerifiedAt:now}}}
+	_, execution, intent, err := executionController.StartTaskExecution(
+		ctx, permission.ID, "cmd_b4444444444444444444444444444444", request,
+	)
+	if err != nil {
+		t.Fatalf("StartTaskExecution: %v", err)
+	}
+	runtime := &fakePlanningProviderRuntime{
+		identity: provider.Identity{
+			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
+			SDKVersion: "test-sdk/1", ConfigurationSHA256: permission.ConfigurationSHA256,
+		},
+		lookupResult: provider.LookupResult{
+			Found: false, OperationID: intent.ID, Status: provider.LookupStatusNotFound,
+			EvidenceSHA256: strings.Repeat("c", 64),
+		},
+		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
+	}
+	runtime.capabilities = provider.Capabilities{
+		Identity: runtime.identity, StartLookup: true,
+		Evidence: []provider.CapabilityEvidence{{
+			Capability: provider.CapabilityStartLookup, Identity: runtime.identity,
+			TestID: "task-start-test", EvidenceSHA256: strings.Repeat("d", 64),
+			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
+		}},
+	}
 	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
-	if err != nil { t.Fatalf("NewProviderControllerWithExecution: %v", err) }
+	if err != nil {
+		t.Fatalf("NewProviderControllerWithExecution: %v", err)
+	}
 	unknown, _, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
 	if err == nil || unknown.Status != domain.ProviderStartUnknown || runtime.startCalls != 1 {
 		t.Fatalf("ambiguous Task Start was not retained as UNKNOWN: %#v starts=%d err=%v", unknown, runtime.startCalls, err)
 	}
-	runtime.lookupResult = provider.LookupResult{Found:true, OperationID:intent.ID, Status:"RUNNING",
-		ReceiptID:"receipt_1", SessionID:"session_1", EvidenceSHA256:strings.Repeat("e",64)}
+	runtime.lookupResult = provider.LookupResult{
+		Found: true, OperationID: intent.ID, Status: "RUNNING",
+		ReceiptID: "receipt_1", SessionID: "session_1", EvidenceSHA256: strings.Repeat("e", 64),
+	}
 	runtime.startErr = nil
 	// An expired permission cannot authorize a new Start, but it must not prevent
 	// reconciliation of the already-issued OperationID.
@@ -1348,23 +1368,32 @@ func TestProviderControllerRejectsTaskReviewerStartWithoutReadOnlyWorktreeBounda
 		Reversible: true, Mutating: false, ValidUntil: now.Add(45 * time.Minute),
 	}}
 	executionController, err := NewExecutionController(database, assessor)
-	if err != nil { t.Fatalf("NewExecutionController: %v", err) }
+	if err != nil {
+		t.Fatalf("NewExecutionController: %v", err)
+	}
 	executionController.now = func() time.Time { return now }
 	request := domain.ExecutionPermissionRequest{
 		JobID: jobID, TaskID: task.ID, CommandID: "cmd_b5555555555555555555555555555555",
 		Role: domain.RoleReviewer, Effect: "repository.read", Resource: revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 200, ExpiresAt: now.Add(30*time.Minute),
+		ReservedTurns: 1, ReservedTokens: 200, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	_, permission, err := executionController.Authorize(ctx, request)
-	if err != nil { t.Fatalf("Authorize Reviewer: %v", err) }
-	_, execution, _, err := executionController.StartTaskExecution(ctx, permission.ID,
-		"cmd_b6666666666666666666666666666666", request)
-	if err != nil { t.Fatalf("StartTaskExecution Reviewer: %v", err) }
+	if err != nil {
+		t.Fatalf("Authorize Reviewer: %v", err)
+	}
+	_, execution, _, err := executionController.StartTaskExecution(
+		ctx, permission.ID, "cmd_b6666666666666666666666666666666", request,
+	)
+	if err != nil {
+		t.Fatalf("StartTaskExecution Reviewer: %v", err)
+	}
 	runtime := &fakePlanningProviderRuntime{}
 	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
-	if err != nil { t.Fatalf("NewProviderControllerWithExecution: %v", err) }
+	if err != nil {
+		t.Fatalf("NewProviderControllerWithExecution: %v", err)
+	}
 	if _, _, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request); err == nil ||
 		!strings.Contains(err.Error(), "immutable Worktree snapshot") {
 		t.Fatalf("Reviewer Start without enforced read-only boundary = %v", err)
