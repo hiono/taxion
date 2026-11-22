@@ -12,7 +12,6 @@ import (
 
 type PlanningLifecycleStore interface {
 	JobContractProposalStore
-	GetJob(context.Context, string) (domain.Job, error)
 	AddProviderStartObservation(context.Context, string, uint64, string, string, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStartObservation, error)
 	AddPlanningTurnIntent(context.Context, string, uint64, string, string, string, string, uint64, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnIntent, error)
 	AddPlanningTurnObservation(context.Context, string, uint64, string, string, string, uint64, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnObservation, error)
