@@ -68,9 +68,18 @@ func approvedJobWithTaskForExecutionPermission(t *testing.T) (Job, Task, time.Ti
 
 func executionPermissionTestRequest(job Job, now time.Time) ExecutionPermissionRequest {
 	revision := job.JobContractRevisions[len(job.JobContractRevisions)-1]
+	task := job.Tasks[len(job.Tasks)-1]
+	resource := ""
+	if len(task.TargetRepositories) > 0 {
+		resource = task.TargetRepositories[0]
+	} else if len(task.TargetResources) > 0 {
+		resource = task.TargetResources[0]
+	} else {
+		resource = task.Workspaces[0]
+	}
 	return ExecutionPermissionRequest{
-		JobID: job.ID, TaskID: job.Tasks[0].ID, CommandID: "cmd_66666666666666666666666666666666",
-		Role: "CODER", Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
+		JobID: job.ID, TaskID: task.ID, CommandID: "cmd_66666666666666666666666666666666",
+		Role: "CODER", Effect: "repository.write", Resource: resource,
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
 		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(20 * time.Minute),
@@ -136,7 +145,7 @@ func TestExecutionPermissionRejectsApprovalScopeAndEffectBoundaries(t *testing.T
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			job, now := approvedJobForExecutionPermission(t)
+			job, _, now := approvedJobWithTaskForExecutionPermission(t)
 			request := executionPermissionTestRequest(job, now)
 			if test.mutateRequest != nil {
 				test.mutateRequest(&request)
@@ -160,7 +169,7 @@ func TestExecutionPermissionRejectsApprovalScopeAndEffectBoundaries(t *testing.T
 }
 
 func TestExecutionPermissionBudgetUsesCumulativeReservations(t *testing.T) {
-	job, now := approvedJobForExecutionPermission(t)
+	job, _, now := approvedJobWithTaskForExecutionPermission(t)
 	request := executionPermissionTestRequest(job, now)
 	request.ReservedTurns = job.JobContractRevisions[0].Contract.Budget.MaxTurns
 	request.ReservedTokens = job.JobContractRevisions[0].Contract.Budget.MaxTokens
@@ -188,8 +197,52 @@ func TestExecutionPermissionBudgetUsesCumulativeReservations(t *testing.T) {
 	}
 }
 
-func TestExecutionPermissionRejectsMutatingReviewerAndAllowsContainedUnknownEffect(t *testing.T) {
+
+func TestExecutionPermissionCannotExpandTaskScopeOrBudget(t *testing.T) {
 	job, now := approvedJobForExecutionPermission(t)
+	taskRequest := TaskRequest{
+		JobID: job.ID, CommandID: "cmd_82828282828282828282828282828282",
+		Title: "Narrow Task", Purpose: "Restrict execution to one resource",
+		TargetRepositories: []string{}, TargetResources: []string{"resource_ci"},
+		Budget: JobContractBudget{MaxTurns: 1, MaxTokens: 100},
+		Deadline: now.Add(15 * time.Minute),
+		AcceptanceCriteria: []string{"Only the selected resource is changed"},
+	}
+	task, err := NewTask(job, taskRequest, now)
+	if err != nil {
+		t.Fatalf("NewTask with narrowed execution scope: %v", err)
+	}
+	job.Tasks = append(job.Tasks, task)
+	job.Revision++
+	job.UpdatedAt = task.CreatedAt
+
+	request := executionPermissionTestRequest(job, now.Add(time.Minute))
+	if request.TaskID != task.ID || request.Resource != "resource_ci" {
+		t.Fatalf("permission request did not resolve the narrowed Task: %#v", request)
+	}
+	request.Resource = "repo_taxion"
+	requestSHA, _ := ExecutionPermissionRequestSHA256(request)
+	assessment := executionPermissionTestAssessment(request, requestSHA, now.Add(time.Minute))
+	if _, err := NewExecutionPermission(job, request, requestSHA, assessment, now.Add(time.Minute)); err == nil {
+		t.Fatal("Job-approved resource outside Task scope was accepted")
+	}
+
+	request.Resource = "resource_ci"
+	request.ReservedTurns = 2
+	request.ReservedTokens = 101
+	request.ExpiresAt = task.Deadline.Add(time.Minute)
+	requestSHA, _ = ExecutionPermissionRequestSHA256(request)
+	assessment = executionPermissionTestAssessment(request, requestSHA, now.Add(time.Minute))
+	if _, err := NewExecutionPermission(job, request, requestSHA, assessment, now.Add(time.Minute)); err == nil {
+		t.Fatal("permission exceeding Task budget or deadline was accepted")
+	}
+	if err := job.Validate(); err != nil {
+		t.Fatalf("rejected Task-bound permission mutated Job: %v", err)
+	}
+}
+
+func TestExecutionPermissionRejectsMutatingReviewerAndAllowsContainedUnknownEffect(t *testing.T) {
+	job, _, now := approvedJobWithTaskForExecutionPermission(t)
 	request := executionPermissionTestRequest(job, now)
 	request.Effect = "vendor.unknown.operation"
 	requestSHA, _ := ExecutionPermissionRequestSHA256(request)

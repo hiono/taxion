@@ -77,7 +77,7 @@ func approvedExecutionPermissionControllerFixture(t *testing.T) (*store.Store, s
 		t.Fatalf("NewTaskController: %v", err)
 	}
 	_, task, err := taskController.Create(context.Background(), domain.TaskRequest{
-		JobID: jobID, TaskID: task.ID, CommandID: "cmd_81818181818181818181818181818181",
+		JobID: jobID, CommandID: "cmd_81818181818181818181818181818181",
 		Title: "Bounded execution task", Purpose: "Provide a task-scoped permission boundary",
 		AcceptanceCriteria: []string{"The task-scoped operation is valid"},
 	})
@@ -99,7 +99,7 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 	}
 	controller.now = func() time.Time { return now }
 	request := domain.ExecutionPermissionRequest{
-		JobID: jobID, CommandID: "cmd_92929292929292929292929292929292",
+		JobID: jobID, TaskID: task.ID, CommandID: "cmd_92929292929292929292929292929292",
 		Role: "CODER", Effect: "repository.write",
 		Resource:   revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
@@ -180,7 +180,7 @@ func TestExecutionControllerRejectsScopeAndAssessmentFailuresWithoutMutation(t *
 			}
 			controller.now = func() time.Time { return now }
 			request := domain.ExecutionPermissionRequest{
-				JobID: jobID, CommandID: "cmd_93939393939393939393939393939393",
+				JobID: jobID, TaskID: task.ID, CommandID: "cmd_93939393939393939393939393939393",
 				Role: "CODER", Effect: "repository.write",
 				Resource:   revision.Contract.TargetRepositories[0],
 				ProviderID: "provider.test", AccountID: "account.primary",
@@ -214,7 +214,7 @@ func TestExecutionControllerExactReplayAndCommandConflict(t *testing.T) {
 	}
 	controller.now = func() time.Time { return now }
 	request := domain.ExecutionPermissionRequest{
-		JobID: jobID, CommandID: "cmd_94949494949494949494949494949494",
+		JobID: jobID, TaskID: task.ID, CommandID: "cmd_94949494949494949494949494949494",
 		Role: "CODER", Effect: "repository.write",
 		Resource:   revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
