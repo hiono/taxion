@@ -46,7 +46,7 @@ PlanningAuthorizationの発行・永続化基盤は利用できますが、Taskl
 
 ## 開発・運用
 
-開発ループは[Development Agent Workflow](docs/development/agent-workflow.md)、品質ゲートは[Development Quality Gates](docs/development/quality-gates.md)、Actions調査とFixup手順は[GitHub Actions and Fixup Runbook](docs/development/github-actions-and-fixup.md)を参照してください。これらの開発運用条件は製品の受入れシナリオとは分離して管理します。
+開発時の品質基準は[Development Quality Gates](docs/development/quality-gates.md)を参照してください。
 
 ## 設計判断
 
