@@ -52,7 +52,7 @@ func executionPermissionTestRequest(job Job, now time.Time) ExecutionPermissionR
 		Role: "CODER", Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTokens: 100, ExpiresAt: now.Add(20 * time.Minute),
+		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(20 * time.Minute),
 	}
 }
 
@@ -141,6 +141,7 @@ func TestExecutionPermissionRejectsApprovalScopeAndEffectBoundaries(t *testing.T
 func TestExecutionPermissionBudgetUsesCumulativeReservations(t *testing.T) {
 	job, now := approvedJobForExecutionPermission(t)
 	request := executionPermissionTestRequest(job, now)
+	request.ReservedTurns = job.JobContractRevisions[0].Contract.Budget.MaxTurns
 	request.ReservedTokens = job.JobContractRevisions[0].Contract.Budget.MaxTokens
 	requestSHA, _ := ExecutionPermissionRequestSHA256(request)
 	assessment := executionPermissionTestAssessment(request, requestSHA, now)
@@ -157,6 +158,7 @@ func TestExecutionPermissionBudgetUsesCumulativeReservations(t *testing.T) {
 
 	next := request
 	next.CommandID = "cmd_77777777777777777777777777777777"
+	next.ReservedTurns = 1
 	next.ReservedTokens = 1
 	nextSHA, _ := ExecutionPermissionRequestSHA256(next)
 	nextAssessment := executionPermissionTestAssessment(next, nextSHA, now.Add(time.Minute))
