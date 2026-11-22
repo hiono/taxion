@@ -197,15 +197,14 @@ func TestExecutionPermissionBudgetUsesCumulativeReservations(t *testing.T) {
 	}
 }
 
-
 func TestExecutionPermissionCannotExpandTaskScopeOrBudget(t *testing.T) {
 	job, now := approvedJobForExecutionPermission(t)
 	taskRequest := TaskRequest{
 		JobID: job.ID, CommandID: "cmd_82828282828282828282828282828282",
 		Title: "Narrow Task", Purpose: "Restrict execution to one resource",
 		TargetRepositories: []string{}, TargetResources: []string{"resource_ci"},
-		Budget: JobContractBudget{MaxTurns: 1, MaxTokens: 100},
-		Deadline: now.Add(15 * time.Minute),
+		Budget:             JobContractBudget{MaxTurns: 1, MaxTokens: 100},
+		Deadline:           now.Add(15 * time.Minute),
 		AcceptanceCriteria: []string{"Only the selected resource is changed"},
 	}
 	task, err := NewTask(job, taskRequest, now)
