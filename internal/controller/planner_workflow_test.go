@@ -29,7 +29,6 @@ type plannerWorkflowFixture struct {
 	turnID      string
 }
 
-
 type failingJobContractProposalStore struct {
 	JobContractProposalStore
 	failure error
@@ -240,14 +239,13 @@ func TestPlannerWorkflowRejectsIncompleteTurnOrUsageBeforeResultRetrieval(t *tes
 	}
 }
 
-
 func TestPlannerWorkflowRetainsPersistedResultWhenProposalStoreFails(t *testing.T) {
 	fixture := newPlannerWorkflowFixture(t, domain.PlanningTurnCompleted, true, true)
 	workflow := fixture.workflow(t)
 	originalStore := fixture.controller.planning.jobContract.store
 	fixture.controller.planning.jobContract.store = &failingJobContractProposalStore{
 		JobContractProposalStore: originalStore,
-		failure: errors.New("injected JobContract persistence failure"),
+		failure:                  errors.New("injected JobContract persistence failure"),
 	}
 	outcome, err := workflow.ProposeJobContract(
 		context.Background(), fixture.jobID, fixture.executionID, fixture.sessionID, fixture.turnID,
