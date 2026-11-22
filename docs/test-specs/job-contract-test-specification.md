@@ -71,6 +71,7 @@
 | JC-224 | Trailing content | Result contains a second JSON value, prose, or Markdown fence | Reject without mutation |
 | JC-225 | Invalid JSON shape | Malformed JSON, non-object root, or field type mismatch | Reject without mutation |
 | JC-226 | Separate caller contract | Caller attempts to submit a JobContract independently of the persisted Result | No such Controller input is accepted |
+| JC-227 | Planning Controller entrypoint | Planner calls `PlanningController.ProposeJobContract` with the persisted final Result ID | Delegate to strict Result decoding and append the bound revision |
 
 ## Approval Controller and CLI tests
 
