@@ -457,6 +457,44 @@ func (s *Store) AddProviderStartObservation(
 		})
 }
 
+
+func (s *Store) AddTaskProviderStartObservation(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	operationID, commandID, status, providerSessionID, receiptID, evidenceSHA256 string,
+	reconcilesUnknown bool,
+) (CommandReceipt, domain.ProviderStartObservation, error) {
+	request := struct {
+		JobID, OperationID, CommandID, Status, ProviderSessionID, ReceiptID, EvidenceSHA256 string
+		ReconcilesUnknown bool
+	}{
+		jobID, operationID, commandID, status, providerSessionID, receiptID, evidenceSHA256,
+		reconcilesUnknown,
+	}
+	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addProviderStartObservationCommandType, request,
+		func(job domain.Job, now time.Time) (domain.ProviderStartObservation, error) {
+			return domain.NewProviderStartObservation(
+				job, operationID, "", commandID, status,
+				providerSessionID, receiptID, evidenceSHA256, reconcilesUnknown, now,
+			)
+		},
+		func(job *domain.Job, fact domain.ProviderStartObservation) {
+			if job.ProviderLifecycleEnforcedFromRevision == 0 {
+				job.ProviderLifecycleEnforcedFromRevision = fact.CreatedRevision
+			}
+			job.ProviderStartObservations = append(job.ProviderStartObservations, fact)
+		},
+		func(job domain.Job) (domain.ProviderStartObservation, bool) {
+			for _, fact := range job.ProviderStartObservations {
+				if fact.CommandID == commandID {
+					return fact, true
+				}
+			}
+			return domain.ProviderStartObservation{}, false
+		})
+}
+
 func (s *Store) AddProviderResultObservation(
 	ctx context.Context,
 	jobID string,

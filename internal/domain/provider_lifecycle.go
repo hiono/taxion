@@ -65,7 +65,7 @@ func NewProviderStartObservation(
 	if !found {
 		return ProviderStartObservation{}, errors.New("Provider Start intent was not found")
 	}
-	if _, _, err := planningGrantAndExecutionForObservation(job, start.RoleExecutionID, principalID); err != nil {
+	if err := validateProviderStartObservationAuthority(job, start, principalID); err != nil {
 		return ProviderStartObservation{}, err
 	}
 	switch status {
@@ -122,6 +122,49 @@ func NewProviderStartObservation(
 		return ProviderStartObservation{}, err
 	}
 	return observation, nil
+}
+
+
+func validateProviderStartObservationAuthority(job Job, start ProviderStartIntent, principalID string) error {
+	if err := job.Validate(); err != nil {
+		return fmt.Errorf("validate Job before Provider Start observation: %w", err)
+	}
+	var execution RoleExecution
+	found := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == start.RoleExecutionID {
+			execution, found = candidate, true
+			break
+		}
+	}
+	if !found {
+		return errors.New("Provider Start observation RoleExecution was not found")
+	}
+	if err := start.Validate(job, execution); err != nil {
+		return fmt.Errorf("validate Provider Start observation intent: %w", err)
+	}
+	switch execution.Role {
+	case RolePlanner:
+		if principalID == "" {
+			return errors.New("Planner Provider Start observation requires its authenticated HUMAN Principal")
+		}
+		_, _, err := planningGrantAndExecutionForObservation(job, execution.ID, principalID)
+		return err
+	case RoleCoder, RoleReviewer:
+		if principalID != "" {
+			return errors.New("Task-bound Provider Start observation must not attribute dispatch to a HUMAN Principal")
+		}
+		permission, permissionFound := executionPermissionByID(job, execution.ExecutionPermissionID)
+		task, taskFound := taskByID(job, execution.TaskID)
+		if !permissionFound || !taskFound || permission.Validate(job) != nil ||
+			permission.TaskID != task.ID || permission.Role != execution.Role ||
+			permission.OperationID != start.ID || permission.JobApprovalID != task.JobApprovalID {
+			return errors.New("Task-bound Provider Start observation requires the exact Task and JobApproval-backed ExecutionPermission")
+		}
+		return nil
+	default:
+		return errors.New("Provider Start observation RoleExecution role is unsupported")
+	}
 }
 
 func (o ProviderStartObservation) Validate(job Job, start ProviderStartIntent) error {

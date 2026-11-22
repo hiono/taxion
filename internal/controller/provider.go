@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -23,6 +24,7 @@ type ProviderExecutionStore interface {
 	AddProviderStopObservation(context.Context, string, uint64, string, string, bool, bool, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopObservation, error)
 	AddProviderResultObservation(context.Context, string, uint64, string, string, string, string, string, string, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderResultObservation, error)
 	AddProviderUsageObservation(context.Context, string, uint64, string, string, string, string, string, uint64, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderUsageObservation, error)
+	AddTaskProviderStartObservation(context.Context, string, uint64, string, string, string, string, string, string, bool) (store.CommandReceipt, domain.ProviderStartObservation, error)
 }
 
 type PlanningProviderRuntime interface {
@@ -41,8 +43,9 @@ type PlanningProviderRuntime interface {
 type ProviderController struct {
 	store    ProviderExecutionStore
 	runtime  PlanningProviderRuntime
-	planning *PlanningController
-	now      func() time.Time
+	planning  *PlanningController
+	execution *ExecutionController
+	now       func() time.Time
 }
 
 func NewProviderController(lifecycleStore ProviderExecutionStore, runtime PlanningProviderRuntime) (*ProviderController, error) {
@@ -57,6 +60,23 @@ func NewProviderController(lifecycleStore ProviderExecutionStore, runtime Planni
 		store: lifecycleStore, runtime: runtime, planning: planning,
 		now: func() time.Time { return time.Now().UTC().Round(0) },
 	}, nil
+}
+
+
+func NewProviderControllerWithExecution(
+	lifecycleStore ProviderExecutionStore,
+	runtime PlanningProviderRuntime,
+	execution *ExecutionController,
+) (*ProviderController, error) {
+	if execution == nil {
+		return nil, errors.New("trusted ExecutionController is required for Task-bound Provider dispatch")
+	}
+	controller, err := NewProviderController(lifecycleStore, runtime)
+	if err != nil {
+		return nil, err
+	}
+	controller.execution = execution
+	return controller, nil
 }
 
 // StartPlanning starts the DRAFT planning Provider operation. JobApproval-backed
@@ -176,6 +196,291 @@ func (c *ProviderController) StartPlanning(
 		return receipt, execution, intent, provider.StartResult{}, fmt.Errorf("persist Provider Start observation: %w", err)
 	}
 	return receipt, execution, intent, result, nil
+}
+
+
+type taskProviderStartPrompt struct {
+	Protocol             string   `json:"protocol"`
+	Role                 string   `json:"role"`
+	JobRequest           string   `json:"job_request"`
+	ContractPurpose      string   `json:"contract_purpose"`
+	ContractConstraints  []string `json:"contract_constraints"`
+	TaskTitle            string   `json:"task_title"`
+	TaskPurpose          string   `json:"task_purpose"`
+	AcceptanceCriteria   []string `json:"acceptance_criteria"`
+	RequiredEvidence     []string `json:"required_evidence"`
+	TargetRepositories   []string `json:"target_repositories"`
+	TargetResources      []string `json:"target_resources"`
+	Workspaces           []string `json:"workspaces"`
+}
+
+// DispatchTaskExecution dispatches only a Coder RoleExecution whose durable Start
+// intent and current one-operation permission are revalidated immediately before Start.
+func (c *ProviderController) DispatchTaskExecution(
+	ctx context.Context,
+	jobID, roleExecutionID, permissionID string,
+	permissionRequest domain.ExecutionPermissionRequest,
+) (domain.ProviderStartObservation, provider.StartResult, error) {
+	if ctx == nil || c.execution == nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch requires context and a trusted ExecutionController")
+	}
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, err
+	}
+	var execution domain.RoleExecution
+	executionFound := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == roleExecutionID {
+			execution, executionFound = candidate, true
+			break
+		}
+	}
+	if !executionFound || execution.JobID != job.ID {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch RoleExecution was not found")
+	}
+	if execution.Role != domain.RoleCoder {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Reviewer Provider dispatch requires an immutable Worktree snapshot and enforced read-only boundary")
+	}
+	if execution.ExecutionPermissionID != permissionID || execution.TaskID == "" {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch permission or Task binding mismatch")
+	}
+	var intent domain.ProviderStartIntent
+	intentFound := false
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == execution.ID {
+			intent, intentFound = candidate, true
+			break
+		}
+	}
+	if !intentFound || intent.ExecutionPermissionID != permissionID {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch requires the persisted matching ProviderStartIntent")
+	}
+	if err := intent.Validate(job, execution); err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, fmt.Errorf("validate Task Provider Start intent: %w", err)
+	}
+	permission, err := c.execution.ValidatePermission(ctx, permissionID, permissionRequest)
+	if err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, err
+	}
+	if permission.TaskID != execution.TaskID || permission.Role != execution.Role ||
+		permission.OperationID != intent.ID || permission.RequestSHA256 != intent.RequestSHA256 ||
+		permission.ProviderID != intent.ProviderID || permission.AccountID != intent.AccountID ||
+		permission.ConfigurationSHA256 != intent.ConfigurationSHA256 {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch does not match its current ExecutionPermission")
+	}
+	identity := c.runtime.Identity()
+	if identity.ProviderID != permission.ProviderID || identity.AccountID != permission.AccountID ||
+		identity.ConfigurationSHA256 != permission.ConfigurationSHA256 {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Provider Runtime identity differs from ExecutionPermission")
+	}
+	task, taskFound := findTask(job, execution.TaskID)
+	if !taskFound {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch Task was not found")
+	}
+	var contract domain.JobContract
+	contractFound := false
+	for _, revision := range job.JobContractRevisions {
+		if revision.Revision == task.ContractRevision {
+			contract, contractFound = revision.Contract, true
+			break
+		}
+	}
+	if !contractFound {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch contract revision was not found")
+	}
+	prompt, err := buildTaskProviderStartPrompt(job, task, contract, execution.Role)
+	if err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, err
+	}
+	request := provider.StartRequest{
+		OperationID: intent.ID, JobID: job.ID, RoleExecutionID: execution.ID,
+		RequestSHA256: permission.RequestSHA256, Prompt: prompt, PromptSHA256: sha256String(prompt),
+		MaxTurns: permission.ReservedTurns, MaxTokens: permission.ReservedTokens, Deadline: intent.Deadline,
+	}
+	if err := request.Validate(); err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, err
+	}
+	if previous, found := latestStartObservation(job, intent.ID); found {
+		switch previous.Status {
+		case domain.ProviderStartAccepted:
+			return previous, startResultFromObservation(previous), nil
+		case domain.ProviderStartFailed:
+			return previous, provider.StartResult{}, errors.New("Task Provider Start was definitively rejected")
+		}
+	}
+	capabilities, err := c.runtime.Capabilities(ctx)
+	if err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, err
+	}
+	if capabilities.Identity != identity {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, provider.ErrUnsupportedCapability
+	}
+	canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilityStartLookup, provider.EvidenceLive)
+	canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilityStartIdempotency, provider.EvidenceLive)
+	if !canLookup && !canRetry {
+		observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
+		if persistErr != nil {
+			return observation, provider.StartResult{}, errors.Join(provider.ErrUnsupportedCapability, persistErr)
+		}
+		return observation, provider.StartResult{}, provider.ErrUnsupportedCapability
+	}
+	if canLookup {
+		lookupRequest := provider.LookupRequest{OperationID: intent.ID}
+		lookup, lookupErr := c.runtime.Lookup(ctx, lookupRequest)
+		if lookupErr != nil {
+			observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
+			if persistErr != nil {
+				return observation, provider.StartResult{}, errors.Join(lookupErr, persistErr)
+			}
+			return observation, provider.StartResult{}, lookupErr
+		}
+		if err := lookup.Validate(lookupRequest); err != nil {
+			observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
+			if persistErr != nil {
+				return observation, provider.StartResult{}, errors.Join(provider.ErrProviderInvalidResult, persistErr)
+			}
+			return observation, provider.StartResult{}, provider.ErrProviderInvalidResult
+		}
+		if lookup.Found {
+			switch lookup.Status {
+			case provider.LookupStatusFailed:
+				observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartFailed, "", lookup.ReceiptID, lookup.EvidenceSHA256, false)
+				if persistErr != nil {
+					return observation, provider.StartResult{}, persistErr
+				}
+				return observation, provider.StartResult{}, errors.New("Task Provider Start lookup confirmed failure")
+			case "ACCEPTED", "RUNNING", "ATTACHED", "COMPLETED":
+				observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartAccepted,
+					lookup.SessionID, lookup.ReceiptID, lookup.EvidenceSHA256, false)
+				if persistErr != nil {
+					return observation, provider.StartResult{}, persistErr
+				}
+				return observation, startResultFromObservation(observation), nil
+			default:
+				observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown,
+					lookup.SessionID, lookup.ReceiptID, lookup.EvidenceSHA256, false)
+				if persistErr != nil {
+					return observation, provider.StartResult{}, persistErr
+				}
+				return observation, provider.StartResult{}, errors.New("Task Provider Start lookup did not confirm a terminally classifiable state")
+			}
+		}
+	}
+	// Lookup NOT_FOUND, or a verified Start idempotency capability, permits only
+	// the same immutable OperationID. Revalidate authority after the external lookup.
+	if _, err := c.execution.ValidatePermission(ctx, permissionID, permissionRequest); err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, err
+	}
+	current, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, err
+	}
+	var currentExecution domain.RoleExecution
+	var currentIntent domain.ProviderStartIntent
+	for _, candidate := range current.RoleExecutions {
+		if candidate.ID == roleExecutionID {
+			currentExecution = candidate
+			break
+		}
+	}
+	for _, candidate := range current.ProviderStartIntents {
+		if candidate.RoleExecutionID == roleExecutionID {
+			currentIntent = candidate
+			break
+		}
+	}
+	if currentExecution.ID == "" || currentIntent.ID != intent.ID ||
+		currentExecution.ExecutionPermissionID != permissionID || currentIntent.ExecutionPermissionID != permissionID ||
+		currentIntent.Validate(current, currentExecution) != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider Start intent changed before dispatch")
+	}
+	if c.runtime.Identity() != identity {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Provider Runtime identity changed before dispatch")
+	}
+	result, startErr := c.runtime.Start(ctx, request)
+	if startErr != nil {
+		status, evidence := domain.ProviderStartUnknown, ""
+		if failureEvidence, definitive := providerDefinitiveFailureEvidence(intent.ID, startErr); definitive {
+			status, evidence = domain.ProviderStartFailed, failureEvidence
+		}
+		observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, status, "", "", evidence, false)
+		if persistErr != nil {
+			return observation, provider.StartResult{}, errors.Join(startErr, persistErr)
+		}
+		return observation, provider.StartResult{}, startErr
+	}
+	if result.OperationID != intent.ID || result.SessionID == "" || result.ReceiptID == "" ||
+		!validProviderEvidenceSHA256(result.EvidenceSHA256) {
+		observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
+		if persistErr != nil {
+			return observation, provider.StartResult{}, errors.Join(provider.ErrProviderInvalidResult, persistErr)
+		}
+		return observation, provider.StartResult{}, provider.ErrProviderInvalidResult
+	}
+	observation, err := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartAccepted,
+		result.SessionID, result.ReceiptID, result.EvidenceSHA256, false)
+	if err != nil {
+		return observation, provider.StartResult{}, fmt.Errorf("persist Task Provider Start observation: %w", err)
+	}
+	return observation, result, nil
+}
+
+func findTask(job domain.Job, taskID string) (domain.Task, bool) {
+	for _, task := range job.Tasks {
+		if task.ID == taskID {
+			return task, true
+		}
+	}
+	return domain.Task{}, false
+}
+
+func buildTaskProviderStartPrompt(job domain.Job, task domain.Task, contract domain.JobContract, role string) (string, error) {
+	prompt, err := json.Marshal(taskProviderStartPrompt{
+		Protocol: "taxion.task-start.v1", Role: role, JobRequest: job.Request,
+		ContractPurpose: contract.Purpose, ContractConstraints: append([]string(nil), contract.Constraints...),
+		TaskTitle: task.Title, TaskPurpose: task.Purpose,
+		AcceptanceCriteria: append([]string(nil), task.AcceptanceCriteria...),
+		RequiredEvidence: append([]string(nil), task.RequiredEvidence...),
+		TargetRepositories: append([]string(nil), task.TargetRepositories...),
+		TargetResources: append([]string(nil), task.TargetResources...),
+		Workspaces: append([]string(nil), task.Workspaces...),
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode immutable Task Provider prompt: %w", err)
+	}
+	return string(prompt), nil
+}
+
+func (c *ProviderController) recordTaskStartObservation(
+	ctx context.Context,
+	jobID, operationID, status, sessionID, receiptID, evidenceSHA256 string,
+	reconcilesUnknown bool,
+) (domain.ProviderStartObservation, error) {
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return domain.ProviderStartObservation{}, err
+	}
+	if previous, found := latestStartObservation(job, operationID); found {
+		if previous.Status == status && status == domain.ProviderStartUnknown &&
+			previous.ProviderSessionID == sessionID && previous.ReceiptID == receiptID &&
+			previous.EvidenceSHA256 == evidenceSHA256 {
+			return previous, nil
+		}
+		if previous.Status == domain.ProviderStartUnknown && status != domain.ProviderStartUnknown {
+			reconcilesUnknown = true
+		} else if previous.Status != domain.ProviderStartUnknown {
+			return domain.ProviderStartObservation{}, errors.New("Task Provider Start observation is already terminal")
+		}
+	}
+	commandID := domain.ProviderStartObservationCommandID(
+		operationID, status, sessionID, receiptID, evidenceSHA256, reconcilesUnknown,
+	)
+	_, observation, err := c.store.AddTaskProviderStartObservation(
+		ctx, jobID, job.Revision, operationID, commandID, status,
+		sessionID, receiptID, evidenceSHA256, reconcilesUnknown,
+	)
+	return observation, err
 }
 
 type ProviderEventReplayResult struct {
