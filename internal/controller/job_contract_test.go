@@ -364,7 +364,6 @@ func TestPlanningControllerRejectsMalformedFinalResultWithoutMutation(t *testing
 	}
 }
 
-
 func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testing.T) {
 	ctx := context.Background()
 	controller, database, principal, jobID, _, sourceResult, contract := startContractPlanner(t)
