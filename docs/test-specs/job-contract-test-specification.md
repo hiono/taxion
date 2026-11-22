@@ -65,6 +65,12 @@
 | JC-218 | Planner Result binding | Result is final and belongs to exact Planner execution | Proposal records exact Result ID and digest |
 | JC-219 | Foreign Result | Result belongs to another Job or RoleExecution | Reject without mutation |
 | JC-220 | Invalid Result evidence | Result is non-final or digest / Start / Session / Turn binding is invalid | Reject without mutation |
+| JC-221 | Strict Planner Result JSON | Final Result contains exactly one valid JobContract JSON object | Decode and persist the exact contract with Result provenance |
+| JC-222 | Unknown / non-canonical key | Result JSON contains unknown key or incorrect key casing | Reject without mutation |
+| JC-223 | Duplicate JSON key | Duplicate root or nested budget key | Reject without mutation |
+| JC-224 | Trailing content | Result contains a second JSON value, prose, or Markdown fence | Reject without mutation |
+| JC-225 | Invalid JSON shape | Malformed JSON, non-object root, or field type mismatch | Reject without mutation |
+| JC-226 | Separate caller contract | Caller attempts to submit a JobContract independently of the persisted Result | No such Controller input is accepted |
 
 ## Approval Controller and CLI tests
 
