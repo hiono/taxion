@@ -73,6 +73,7 @@ Provider Adapterの実装要求は[Provider Adapter 実行境界 要求仕様書
 - 利用者はその正確なimmutable revision / canonical hashを確認して承認する。
 - JobApprovalはJobID、revision、proposal hash、canonicalization version、approver identity / source / reason / timeを持つappend-only factとする。
 - 承認対象が変わる場合は新revisionと明示的な再承認を要求する。
+- ACTIVE Jobの契約変更は、最新の承認済みRevision / CanonicalHashを指定した認証済みHUMANの明示的なamend命令に限定する。変更時は新Revisionを追加してJobをDRAFTへ戻し、旧Approvalを再利用せず、新Revisionへの再承認を要求する。
 - TaskはJobの対象・resource・budget・deadlineを狭められるが、拡張できない。
 - 会話、Planner proposal、Task、RoleExecution、Providerの自己申告はJobApprovalの代替にならない。
 
