@@ -54,13 +54,13 @@ func approvedExecutionControllerFixture(t *testing.T) (*store.Store, string, dom
 	executionID := domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc")
 	_, revision, err := jobContractController.Propose(
 		ctx, jobID, executionID, sourceResult.ID,
-		"cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", principal,
+		"cmd_90909090909090909090909090909090", principal,
 	)
 	if err != nil {
 		t.Fatalf("Propose JobContract: %v", err)
 	}
 	if _, _, err := jobContractController.Approve(
-		ctx, jobID, "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		ctx, jobID, "cmd_91919191919191919191919191919191",
 		revision.Revision, revision.CanonicalHash, revision.CanonicalizationVersion,
 		"Approve the bounded implementation", principal,
 	); err != nil {
@@ -81,7 +81,7 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 	}
 	controller.now = func() time.Time { return now }
 	request := domain.ExecutionPermissionRequest{
-		JobID: jobID, CommandID: "cmd_cccccccccccccccccccccccccccccccc",
+		JobID: jobID, CommandID: "cmd_92929292929292929292929292929292",
 		Role: "CODER", Effect: "repository.write",
 		Resource:   revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
@@ -153,7 +153,7 @@ func TestExecutionControllerRejectsScopeAndAssessmentFailuresWithoutMutation(t *
 			}
 			controller.now = func() time.Time { return now }
 			request := domain.ExecutionPermissionRequest{
-				JobID: jobID, CommandID: "cmd_dddddddddddddddddddddddddddddddd",
+				JobID: jobID, CommandID: "cmd_93939393939393939393939393939393",
 				Role: "CODER", Effect: "repository.write",
 				Resource:   revision.Contract.TargetRepositories[0],
 				ProviderID: "provider.test", AccountID: "account.primary",
@@ -187,7 +187,7 @@ func TestExecutionControllerExactReplayAndCommandConflict(t *testing.T) {
 	}
 	controller.now = func() time.Time { return now }
 	request := domain.ExecutionPermissionRequest{
-		JobID: jobID, CommandID: "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		JobID: jobID, CommandID: "cmd_94949494949494949494949494949494",
 		Role: "CODER", Effect: "repository.write",
 		Resource:   revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
