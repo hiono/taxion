@@ -9,33 +9,33 @@ import (
 )
 
 type TaskRequest struct {
-	JobID                   string                `json:"job_id"
-	CommandID               string                `json:"command_id"
-	ParentTaskID            string                `json:"parent_task_id,omitempty"
-	DependsOnTaskIDs        []string              `json:"depends_on_task_ids,omitempty"
-	Title                   string                `json:"title"
-	Purpose                 string                `json:"purpose"
+	JobID                   string            `json:"job_id"`
+	CommandID               string            `json:"command_id"`
+	ParentTaskID            string            `json:"parent_task_id,omitempty"`
+	DependsOnTaskIDs        []string          `json:"depends_on_task_ids,omitempty"`
+	Title                   string            `json:"title"`
+	Purpose                 string            `json:"purpose"`
 	TargetRepositories      []string          `json:"target_repositories,omitempty"`
 	TargetResources         []string          `json:"target_resources,omitempty"`
 	Workspaces              []string          `json:"workspaces,omitempty"`
 	AcceptanceCriteria      []string          `json:"acceptance_criteria"`
-	RequiredEvidence        []string              `json:"required_evidence,omitempty"
-	ProhibitedEffects       []string              `json:"prohibited_effects,omitempty"
-	ApprovalRequiredEffects []string              `json:"approval_required_effects,omitempty"
+	RequiredEvidence        []string          `json:"required_evidence,omitempty"`
+	ProhibitedEffects       []string          `json:"prohibited_effects,omitempty"`
+	ApprovalRequiredEffects []string          `json:"approval_required_effects,omitempty"`
 	Budget                  JobContractBudget `json:"budget,omitempty"`
-	ConcurrencyCeiling      uint32                `json:"concurrency_ceiling,omitempty"
+	ConcurrencyCeiling      uint32            `json:"concurrency_ceiling,omitempty"`
 	Deadline                time.Time         `json:"deadline,omitempty"`
 }
 
 type Task struct {
 	ID                      string            `json:"id"`
-	CommandID               string           `json:"command_id"`
-	JobID                   string           `json:"job_id"`
-	ParentTaskID            string           `json:"parent_task_id,omitempty"`
-	DependsOnTaskIDs        []string         `json:"depends_on_task_ids,omitempty"`
-	Title                   string           `json:"title"`
-	Purpose                 string           `json:"purpose"`
-	JobApprovalID           string                `json:"job_approval_id"
+	CommandID               string            `json:"command_id"`
+	JobID                   string            `json:"job_id"`
+	ParentTaskID            string            `json:"parent_task_id,omitempty"`
+	DependsOnTaskIDs        []string          `json:"depends_on_task_ids,omitempty"`
+	Title                   string            `json:"title"`
+	Purpose                 string            `json:"purpose"`
+	JobApprovalID           string            `json:"job_approval_id"`
 	ContractRevision        uint64            `json:"contract_revision"`
 	CanonicalizationVersion uint32            `json:"canonicalization_version"`
 	CanonicalHash           string            `json:"canonical_hash"`
@@ -43,11 +43,11 @@ type Task struct {
 	TargetResources         []string          `json:"target_resources"`
 	Workspaces              []string          `json:"workspaces"`
 	AcceptanceCriteria      []string          `json:"acceptance_criteria"`
-	RequiredEvidence        []string         `json:"required_evidence,omitempty"`
-	ProhibitedEffects       []string         `json:"prohibited_effects,omitempty"`
-	ApprovalRequiredEffects []string         `json:"approval_required_effects,omitempty"`
+	RequiredEvidence        []string          `json:"required_evidence,omitempty"`
+	ProhibitedEffects       []string          `json:"prohibited_effects,omitempty"`
+	ApprovalRequiredEffects []string          `json:"approval_required_effects,omitempty"`
 	Budget                  JobContractBudget `json:"budget"`
-	ConcurrencyCeiling      uint32           `json:"concurrency_ceiling"`
+	ConcurrencyCeiling      uint32            `json:"concurrency_ceiling"`
 	Deadline                time.Time         `json:"deadline"`
 	CreatedAt               time.Time         `json:"created_at"`
 	CreatedRevision         uint64            `json:"created_revision"`
@@ -63,7 +63,6 @@ type taskScope struct {
 	prohibited   []string
 	approval     []string
 }
-
 func TaskID(commandID string) string {
 	return planningOperationID("task", commandID)
 }
