@@ -65,12 +65,11 @@ func (s *Store) AmendJobContract(
 		PrincipalID            string             `json:"principal_id"`
 		PrincipalIssuer        string             `json:"principal_issuer"`
 		PrincipalSubject       string             `json:"principal_subject"`
-		PrincipalAuthenticated time.Time          `json:"principal_authenticated_at"`
 	}{
 		BasedOnRevision: basedOnRevision, BasedOnCanonicalHash: basedOnCanonicalHash,
 		Reason: reason, Contract: canonical,
 		PrincipalID: principal.PrincipalID(), PrincipalIssuer: principal.Issuer(),
-		PrincipalSubject: principal.Subject(), PrincipalAuthenticated: principal.AuthenticatedAt(),
+		PrincipalSubject: principal.Subject(),
 	}
 	return persistPlanningFact(
 		ctx, s, jobID, expectedRevision, commandID, "JOB_CONTRACT_AMENDMENT", request,
