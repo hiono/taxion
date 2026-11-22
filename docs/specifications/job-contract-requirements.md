@@ -70,6 +70,8 @@ An exact retry of an already committed approval may return its original receipt 
 
 A Planner proposal must identify the exact final Provider Result from which its contract was derived. The revision must append the Result observation ID, Result content SHA-256, and producing RoleExecution ID as immutable provenance.
 
+The Planner's final Result content must be exactly one UTF-8 JSON object representing JobContract, using the defined lower_snake_case JSON field names and nested `budget` object. The Controller derives the contract from this persisted Result; callers must not submit a separate contract payload. Reject malformed JSON, non-object roots, unknown or duplicate keys (including nested keys), trailing JSON values, and fenced Markdown / surrounding prose. Apply the normal JobContract canonicalization and validation after decoding.
+
 The Controller must accept only a Result observation already persisted in the same JobAggregate that:
 - is final and passes the Result observation's digest and identity validation;
 - belongs to the same Taskless PLANNER RoleExecution supplied for the proposal;
