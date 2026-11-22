@@ -25,15 +25,15 @@ func approvedJobForExecutionPermission(t *testing.T) (Job, time.Time) {
 	job.UpdatedAt = revision.CreatedAt
 	issuer, subject := job.IntakeProvenance.Issuer, job.IntakeProvenance.Subject
 	approval := JobApproval{
-		ID: JobApprovalID("cmd_55555555555555555555555555555555"),
+		ID:        JobApprovalID("cmd_55555555555555555555555555555555"),
 		CommandID: "cmd_55555555555555555555555555555555",
-		JobID: job.ID, ContractRevision: revision.Revision,
+		JobID:     job.ID, ContractRevision: revision.Revision,
 		CanonicalizationVersion: revision.CanonicalizationVersion,
-		CanonicalHash: revision.CanonicalHash,
-		ApproverPrincipalID: identity.PrincipalID(issuer, subject),
-		ApproverSource: issuer, ApproverSubject: subject,
-		Reason: "Approve the bounded implementation",
-		ApprovedAt: baseTime.Add(7*time.Minute), CreatedRevision: job.Revision + 1,
+		CanonicalHash:           revision.CanonicalHash,
+		ApproverPrincipalID:     identity.PrincipalID(issuer, subject),
+		ApproverSource:          issuer, ApproverSubject: subject,
+		Reason:     "Approve the bounded implementation",
+		ApprovedAt: baseTime.Add(7 * time.Minute), CreatedRevision: job.Revision + 1,
 	}
 	job.JobApprovals = append(job.JobApprovals, approval)
 	job.State = JobActive
@@ -52,7 +52,7 @@ func executionPermissionTestRequest(job Job, now time.Time) ExecutionPermissionR
 		Role: "CODER", Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(20 * time.Minute),
+		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(20 * time.Minute),
 	}
 }
 
@@ -62,7 +62,7 @@ func executionPermissionTestAssessment(request ExecutionPermissionRequest, reque
 		ProviderID: request.ProviderID, AccountID: request.AccountID,
 		ConfigurationSHA256: request.ConfigurationSHA256, RequestSHA256: requestSHA,
 		Contained: true, Mutating: request.Role == "CODER",
-		ValidUntil: request.ExpiresAt.Add(5 * time.Minute),
+		ValidUntil:     request.ExpiresAt.Add(5 * time.Minute),
 		EvidenceSHA256: strings.Repeat("e", 64),
 	}
 }
@@ -101,9 +101,9 @@ func TestExecutionPermissionBindsExactApprovedOperation(t *testing.T) {
 
 func TestExecutionPermissionRejectsApprovalScopeAndEffectBoundaries(t *testing.T) {
 	tests := []struct {
-		name                string
-		mutateRequest       func(*ExecutionPermissionRequest)
-		mutateAssessment   func(*ExecutionEffectAssessment)
+		name             string
+		mutateRequest    func(*ExecutionPermissionRequest)
+		mutateAssessment func(*ExecutionEffectAssessment)
 	}{
 		{name: "foreign resource", mutateRequest: func(r *ExecutionPermissionRequest) { r.Resource += "/outside" }},
 		{name: "prohibited effect", mutateRequest: func(r *ExecutionPermissionRequest) { r.Effect = "production deployment" }},
