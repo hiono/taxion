@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -32,6 +33,7 @@ type Capability string
 const (
 	CapabilityStartIdempotency  Capability = "start.idempotency"
 	CapabilityStartLookup       Capability = "start.lookup"
+	CapabilityTaskWorktree      Capability = "task.worktree"
 	CapabilitySendIdempotency   Capability = "send.idempotency"
 	CapabilitySendLookup        Capability = "send.lookup"
 	CapabilitySessionReattach   Capability = "session.cross_process_reattachment"
@@ -64,6 +66,7 @@ type Capabilities struct {
 	Identity                    Identity
 	StartIdempotency            bool
 	StartLookup                 bool
+	TaskWorktree                bool
 	SendIdempotency             bool
 	SendLookup                  bool
 	CrossProcessSessionReattach bool
@@ -121,6 +124,8 @@ func (c Capabilities) Has(capability Capability) bool {
 		return c.StartIdempotency
 	case CapabilityStartLookup:
 		return c.StartLookup
+	case CapabilityTaskWorktree:
+		return c.TaskWorktree
 	case CapabilitySendIdempotency:
 		return c.SendIdempotency
 	case CapabilitySendLookup:
@@ -213,6 +218,8 @@ func setCapability(capabilities *Capabilities, capability Capability) {
 		capabilities.StartIdempotency = true
 	case CapabilityStartLookup:
 		capabilities.StartLookup = true
+	case CapabilityTaskWorktree:
+		capabilities.TaskWorktree = true
 	case CapabilitySendIdempotency:
 		capabilities.SendIdempotency = true
 	case CapabilitySendLookup:
@@ -289,7 +296,7 @@ func (c Capabilities) Validate(expected Identity) error {
 }
 
 var allCapabilities = []Capability{
-	CapabilityStartIdempotency, CapabilityStartLookup,
+	CapabilityStartIdempotency, CapabilityStartLookup, CapabilityTaskWorktree,
 	CapabilitySendIdempotency, CapabilitySendLookup,
 	CapabilitySessionReattach, CapabilityEventReplay,
 	CapabilityStopProof, CapabilityFinalOutput,
@@ -320,6 +327,9 @@ type StartRequest struct {
 	MaxTurns        uint32
 	MaxTokens       uint64
 	Deadline        time.Time
+	RepositoryID    string
+	WorktreePath    string
+	BaselineCommit  string
 }
 
 func (r StartRequest) Validate() error {
@@ -328,6 +338,11 @@ func (r StartRequest) Validate() error {
 		r.Prompt == "" || sha256Hex(r.Prompt) != r.PromptSHA256 ||
 		r.MaxTurns == 0 || r.MaxTokens == 0 || r.Deadline.IsZero() {
 		return errors.New("Provider Start request identity, prompt, budget, or deadline is invalid")
+	}
+	hasWorktree := r.RepositoryID != "" || r.WorktreePath != "" || r.BaselineCommit != ""
+	if hasWorktree && (!validIdentifier(r.RepositoryID) || !filepath.IsAbs(r.WorktreePath) ||
+		filepath.Clean(r.WorktreePath) != r.WorktreePath || !validGitCommit(r.BaselineCommit)) {
+		return errors.New("Provider Start request Worktree binding is incomplete or non-canonical")
 	}
 	seen := make(map[string]struct{}, len(r.Context))
 	for _, document := range r.Context {
@@ -641,6 +656,7 @@ func validEventKind(kind EventKind) bool {
 type Adapter interface {
 	Identity() Identity
 	Capabilities(context.Context) (Capabilities, error)
+	// Start must use a supplied WorktreePath as the Task working directory and must not substitute another repository snapshot.
 	Start(context.Context, StartRequest, CredentialLease) (StartResult, error)
 	Send(context.Context, TurnRequest, CredentialLease) (TurnResult, error)
 	Stop(context.Context, StopRequest, CredentialLease) (StopResult, error)
@@ -721,6 +737,18 @@ func sha256Hex(value string) string {
 
 func validSHA256(value string) bool {
 	if len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+func validGitCommit(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
 		return false
 	}
 	for _, r := range value {

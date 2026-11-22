@@ -1245,12 +1245,14 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 		},
 	}
 	runtime.capabilities = provider.Capabilities{
-		Identity: runtime.identity, StartLookup: true, StartIdempotency: true,
+		Identity: runtime.identity, StartLookup: true, StartIdempotency: true, TaskWorktree: true,
 		Evidence: []provider.CapabilityEvidence{
 			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-start-test",
 				EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
 			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-start-test",
 				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilityTaskWorktree, Identity: runtime.identity, TestID: "task-worktree-test",
+				EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		},
 	}
 	controller, err := NewProviderControllerWithExecutionAndWorktree(database, runtime, executionController, &fakeTaskWorktreeVerifier{})
@@ -1265,6 +1267,14 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 		if len(persisted.ProviderStartIntents) == 0 ||
 			persisted.ProviderStartIntents[len(persisted.ProviderStartIntents)-1].ID != request.OperationID {
 			return errors.New("Task Provider Start was called before intent persistence")
+		}
+		if len(persisted.WorktreeAssignments) != 1 {
+			return errors.New("Task Provider Start was called without a persisted Worktree assignment")
+		}
+		assignment := persisted.WorktreeAssignments[0]
+		if request.RepositoryID != assignment.RepositoryID || request.WorktreePath != assignment.WorktreePath ||
+			request.BaselineCommit != assignment.BaselineCommit {
+			return errors.New("Task Provider Start request is not bound to its persisted Worktree")
 		}
 		if request.RoleExecutionID != execution.ID || request.RequestSHA256 != permission.RequestSHA256 ||
 			request.PromptSHA256 != sha256String(request.Prompt) || !strings.Contains(request.Prompt, task.Title) {
@@ -1329,11 +1339,15 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
 	}
 	runtime.capabilities = provider.Capabilities{
-		Identity: runtime.identity, StartLookup: true,
+		Identity: runtime.identity, StartLookup: true, TaskWorktree: true,
 		Evidence: []provider.CapabilityEvidence{{
 			Capability: provider.CapabilityStartLookup, Identity: runtime.identity,
 			TestID: "task-start-test", EvidenceSHA256: strings.Repeat("d", 64),
 			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
+		}, {
+			Capability: provider.CapabilityTaskWorktree, Identity: runtime.identity,
+			TestID: "task-worktree-test", EvidenceSHA256: strings.Repeat("b", 64),
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
 		}},
 	}
 	controller, err := NewProviderControllerWithExecutionAndWorktree(database, runtime, executionController, &fakeTaskWorktreeVerifier{})

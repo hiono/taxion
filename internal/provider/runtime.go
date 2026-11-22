@@ -80,6 +80,10 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 		!capabilities.HasEvidenceAtLeast(CapabilityStartLookup, r.minimumEvidence) {
 		return StartResult{}, ErrUnsupportedCapability
 	}
+	if request.WorktreePath != "" &&
+		!capabilities.HasEvidenceAtLeast(CapabilityTaskWorktree, r.minimumEvidence) {
+		return StartResult{}, ErrUnsupportedCapability
+	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (StartResult, error) {
 		result, err := r.adapter.Start(ctx, request, lease)
 		if err != nil {

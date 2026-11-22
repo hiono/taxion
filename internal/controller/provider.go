@@ -348,6 +348,7 @@ func (c *ProviderController) DispatchTaskExecution(
 		OperationID: intent.ID, JobID: job.ID, RoleExecutionID: execution.ID,
 		RequestSHA256: permission.RequestSHA256, Prompt: prompt, PromptSHA256: sha256String(prompt),
 		MaxTurns: permission.ReservedTurns, MaxTokens: permission.ReservedTokens, Deadline: intent.Deadline,
+		RepositoryID: assignment.RepositoryID, WorktreePath: assignment.WorktreePath, BaselineCommit: assignment.BaselineCommit,
 	}
 	if err := request.Validate(); err != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, err
@@ -364,7 +365,8 @@ func (c *ProviderController) DispatchTaskExecution(
 	if err != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, err
 	}
-	if capabilities.Identity != identity {
+	if capabilities.Identity != identity ||
+		!capabilities.HasEvidenceAtLeast(provider.CapabilityTaskWorktree, provider.EvidenceLive) {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, provider.ErrUnsupportedCapability
 	}
 	canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilityStartLookup, provider.EvidenceSynthetic)

@@ -68,6 +68,7 @@ type testAdapter struct {
 	identity       Identity
 	capabilities   Capabilities
 	startCalls     int
+	startRequest   StartRequest
 	sendCalls      int
 	stopCalls      int
 	resumeCalls    int
@@ -94,6 +95,7 @@ func (a *testAdapter) Capabilities(context.Context) (Capabilities, error) {
 }
 func (a *testAdapter) Start(ctx context.Context, request StartRequest, lease CredentialLease) (StartResult, error) {
 	a.startCalls++
+	a.startRequest = request
 	a.startDeadline, _ = ctx.Deadline()
 	if err := lease.WithSecret(func(secret []byte) error {
 		if string(secret) != "runtime-test-secret" {
@@ -217,6 +219,8 @@ func newTestAdapter(capabilities ...Capability) *testAdapter {
 			declaration.StartIdempotency = true
 		case CapabilityStartLookup:
 			declaration.StartLookup = true
+		case CapabilityTaskWorktree:
+			declaration.TaskWorktree = true
 		case CapabilitySendIdempotency:
 			declaration.SendIdempotency = true
 		case CapabilitySendLookup:
@@ -270,6 +274,55 @@ func validResumeRequest() ResumeRequest {
 
 func validResultRequest() ResultRequest {
 	return ResultRequest{OperationID: "provider_turn_1", SessionID: "session_1", TurnID: "turn_1"}
+}
+
+func TestRuntimeRequiresVerifiedTaskWorktreeCapabilityAndPassesBinding(t *testing.T) {
+	request := validStartRequest()
+	request.RepositoryID = "repo.primary"
+	request.WorktreePath = "/tmp/taxion-worktrees/task-1"
+	request.BaselineCommit = strings.Repeat("a", 40)
+
+	adapter := newTestAdapter(CapabilityStartIdempotency)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("newTestRuntime: %v", err)
+	}
+	if _, err := runtime.Start(context.Background(), request); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("Task Worktree Start without verified capability error = %v", err)
+	}
+	if broker.acquires != 0 || adapter.startCalls != 0 {
+		t.Fatalf("unsupported Task Worktree Start acquired credentials or called Adapter: acquires=%d starts=%d", broker.acquires, adapter.startCalls)
+	}
+
+	adapter = newTestAdapter(CapabilityStartIdempotency, CapabilityTaskWorktree)
+	broker = &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err = newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("newTestRuntime with Task Worktree capability: %v", err)
+	}
+	if _, err := runtime.Start(context.Background(), request); err != nil {
+		t.Fatalf("Task Worktree Start: %v", err)
+	}
+	if adapter.startRequest.RepositoryID != request.RepositoryID ||
+		adapter.startRequest.WorktreePath != request.WorktreePath ||
+		adapter.startRequest.BaselineCommit != request.BaselineCommit {
+		t.Fatalf("Adapter Start did not receive the immutable Worktree binding: %#v", adapter.startRequest)
+	}
+}
+
+func TestStartRequestRejectsPartialOrNonCanonicalWorktreeBinding(t *testing.T) {
+	request := validStartRequest()
+	request.WorktreePath = "/tmp/taxion-worktrees/task-1"
+	if err := request.Validate(); err == nil {
+		t.Fatal("partial Worktree binding was accepted")
+	}
+	request.RepositoryID = "repo.primary"
+	request.BaselineCommit = strings.Repeat("a", 40)
+	request.WorktreePath = "/tmp/../outside"
+	if err := request.Validate(); err == nil {
+		t.Fatal("non-canonical Worktree path was accepted")
+	}
 }
 
 func TestRuntimeRejectsExpiredStartDeadlineBeforeCredentialAcquisition(t *testing.T) {
