@@ -829,7 +829,7 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 	}
 }
 
-func TestJobApproveCLIRejectsMissingExactRevisionFieldsBeforeAuthentication(t *testing.T) {
+func TestJobContractCLIRejectsIncompleteInputsBeforeAuthentication(t *testing.T) {
 	t.Setenv("TAXION_OIDC_ISSUER", "")
 	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
 	var stdout, stderr bytes.Buffer
