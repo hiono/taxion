@@ -414,7 +414,6 @@ func TestJobContractAmendmentStoreRollbackLeavesActiveJobUntouched(t *testing.T)
 	}
 }
 
-
 func TestJobContractStoreRejectsMismatchedPlannerExecutionWithoutMutation(t *testing.T) {
 	database, _ := newTestStore(t)
 	ctx := context.Background()
