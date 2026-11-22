@@ -750,10 +750,82 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen Store after retry: %v", err)
 	}
-	defer database.Close()
 	job, err = database.GetJob(ctx, jobID)
 	if err != nil || job.State != domain.JobActive || len(job.JobApprovals) != 1 {
 		t.Fatalf("approval retry appended another fact: approvals=%d state=%s err=%v", len(job.JobApprovals), job.State, err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close Store after approval retry: %v", err)
+	}
+
+	amendedContract := contract
+	amendedContract.Purpose = "Deliver the explicitly amended bounded feature"
+	amendedContract.Budget.MaxTokens++
+	amendedContract.Deadline = time.Now().UTC().Add(2 * time.Hour)
+	contractJSON, err := json.Marshal(amendedContract)
+	if err != nil {
+		t.Fatalf("Marshal amended JobContract: %v", err)
+	}
+	contractPath := filepath.Join(t.TempDir(), "amended-job-contract.json")
+	if err := os.WriteFile(contractPath, contractJSON, 0o600); err != nil {
+		t.Fatalf("write amended JobContract: %v", err)
+	}
+	amendmentCommandID := "cmd_d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1"
+	amendArgs := []string{
+		"job", "amend", "--store", path,
+		"--revision", "1",
+		"--canonical-hash", revision.CanonicalHash,
+		"--reason", "Human-reviewed change to the approved target",
+		"--contract-file", contractPath,
+		"--command-id", amendmentCommandID,
+		jobID,
+	}
+	code, amendOutput, stderr := runCLIWithFakeOIDC(t, server, amendArgs)
+	if code != 0 || !strings.Contains(amendOutput, "Origin: HUMAN_AMENDMENT") ||
+		!strings.Contains(amendOutput, "State: DRAFT") {
+		t.Fatalf("job amend: code=%d output=%q stderr=%q", code, amendOutput, stderr)
+	}
+	database, err = store.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen Store after amendment: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || job.State != domain.JobDraft || len(job.JobContractRevisions) != 2 ||
+		len(job.JobApprovals) != 1 || job.JobContractRevisions[1].Origin != domain.JobContractRevisionOriginHumanAmendment {
+		t.Fatalf("Job after amendment = %#v err=%v", job, err)
+	}
+	amendedRevision := job.JobContractRevisions[1]
+	if err := database.Close(); err != nil {
+		t.Fatalf("close Store after amendment: %v", err)
+	}
+
+	code, amendRetryOutput, stderr := runCLIWithFakeOIDC(t, server, amendArgs)
+	if code != 0 || !strings.Contains(amendRetryOutput, "Origin: HUMAN_AMENDMENT") {
+		t.Fatalf("idempotent job amend retry: code=%d output=%q stderr=%q", code, amendRetryOutput, stderr)
+	}
+	approvalAmendedArgs := []string{
+		"job", "approve", "--store", path,
+		"--revision", "2",
+		"--canonical-hash", amendedRevision.CanonicalHash,
+		"--canonicalization-version", "1",
+		"--reason", "Approved the amended exact scope",
+		"--command-id", "cmd_d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2",
+		jobID,
+	}
+	code, amendedApprovalOutput, stderr := runCLIWithFakeOIDC(t, server, approvalAmendedArgs)
+	if code != 0 || !strings.Contains(amendedApprovalOutput, "State: ACTIVE") {
+		t.Fatalf("approve amended revision: code=%d output=%q stderr=%q", code, amendedApprovalOutput, stderr)
+	}
+	database, err = store.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen Store after amended approval: %v", err)
+	}
+	defer database.Close()
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || job.State != domain.JobActive || len(job.JobContractRevisions) != 2 ||
+		len(job.JobApprovals) != 2 || job.JobApprovals[0].ContractRevision != 1 ||
+		job.JobApprovals[1].ContractRevision != 2 {
+		t.Fatalf("Job after amendment reapproval = %#v err=%v", job, err)
 	}
 }
 
