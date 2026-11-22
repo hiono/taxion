@@ -14,8 +14,8 @@ import (
 )
 
 type plannerWorkflowFixture struct {
-	controller  *ProviderController
-	database    interface {
+	controller *ProviderController
+	database   interface {
 		GetJob(context.Context, string) (domain.Job, error)
 		AddPlanningTurnIntent(context.Context, string, uint64, string, string, string, string, uint64, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnIntent, error)
 		AddPlanningTurnObservation(context.Context, string, uint64, string, string, string, uint64, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnObservation, error)
@@ -87,14 +87,14 @@ func newPlannerWorkflowFixture(t *testing.T, turnStatus string, addUsage, usageC
 		}
 	}
 	contract := domain.JobContract{
-		Purpose: "Complete the requested planning task",
-		TargetRepositories: []string{"https://github.com/example/project"},
-		Workspaces: []string{"workspace-main"},
-		AcceptanceCriteria: []string{"The requested outcome is produced"},
-		RequiredEvidence: []string{"A final verified result is available"},
-		Budget: domain.JobContractBudget{MaxTurns: 3, MaxTokens: 1000},
-		ConcurrencyCeiling: 1,
-		Deadline: time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second),
+		Purpose:             "Complete the requested planning task",
+		TargetRepositories:  []string{"https://github.com/example/project"},
+		Workspaces:          []string{"workspace-main"},
+		AcceptanceCriteria:  []string{"The requested outcome is produced"},
+		RequiredEvidence:    []string{"A final verified result is available"},
+		Budget:              domain.JobContractBudget{MaxTurns: 3, MaxTokens: 1000},
+		ConcurrencyCeiling:  1,
+		Deadline:            time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second),
 		ConfigurationSHA256: strings.Repeat("a", 64),
 	}
 	content, err := json.Marshal(contract)
@@ -191,9 +191,9 @@ func TestPlannerWorkflowReusesExistingFinalResult(t *testing.T) {
 
 func TestPlannerWorkflowRejectsIncompleteTurnOrUsageBeforeResultRetrieval(t *testing.T) {
 	tests := []struct {
-		name         string
-		turnStatus   string
-		addUsage     bool
+		name          string
+		turnStatus    string
+		addUsage      bool
 		usageComplete bool
 	}{
 		{name: "missing turn observation", turnStatus: "", addUsage: true, usageComplete: true},
