@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
@@ -156,6 +157,9 @@ var plannerJobContractBudgetJSONFields = map[string]struct{}{
 }
 
 func decodePlannerJobContractResult(content string) (domain.JobContract, error) {
+	if len(content) > 1<<20 || !utf8.ValidString(content) {
+		return domain.JobContract{}, errors.New("Planner JobContract JSON must be valid UTF-8 and not exceed 1 MiB")
+	}
 	decoder := json.NewDecoder(strings.NewReader(content))
 	root, err := decoder.Token()
 	if err != nil {
