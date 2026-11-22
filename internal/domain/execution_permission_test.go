@@ -217,6 +217,7 @@ func TestExecutionPermissionCannotExpandTaskScopeOrBudget(t *testing.T) {
 	job.UpdatedAt = task.CreatedAt
 
 	request := executionPermissionTestRequest(job, now.Add(time.Minute))
+	request.ExpiresAt = task.Deadline.Add(-time.Minute)
 	if request.TaskID != task.ID || request.Resource != "resource_ci" {
 		t.Fatalf("permission request did not resolve the narrowed Task: %#v", request)
 	}
@@ -230,11 +231,18 @@ func TestExecutionPermissionCannotExpandTaskScopeOrBudget(t *testing.T) {
 	request.Resource = "resource_ci"
 	request.ReservedTurns = 2
 	request.ReservedTokens = 101
+	requestSHA, _ = ExecutionPermissionRequestSHA256(request)
+	assessment = executionPermissionTestAssessment(request, requestSHA, now.Add(time.Minute))
+	if _, err := NewExecutionPermission(job, request, requestSHA, assessment, now.Add(time.Minute)); err == nil {
+		t.Fatal("permission exceeding Task budget was accepted")
+	}
+	request.ReservedTurns = 1
+	request.ReservedTokens = 100
 	request.ExpiresAt = task.Deadline.Add(time.Minute)
 	requestSHA, _ = ExecutionPermissionRequestSHA256(request)
 	assessment = executionPermissionTestAssessment(request, requestSHA, now.Add(time.Minute))
 	if _, err := NewExecutionPermission(job, request, requestSHA, assessment, now.Add(time.Minute)); err == nil {
-		t.Fatal("permission exceeding Task budget or deadline was accepted")
+		t.Fatal("permission exceeding Task deadline was accepted")
 	}
 	if err := job.Validate(); err != nil {
 		t.Fatalf("rejected Task-bound permission mutated Job: %v", err)

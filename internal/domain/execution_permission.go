@@ -236,6 +236,7 @@ func NewExecutionPermission(
 	}
 	revision := job.JobContractRevisions[len(job.JobContractRevisions)-1]
 	approval, _ := jobApprovalForRevision(job, revision.Revision)
+	task, _ := taskByID(job, request.TaskID)
 	now = now.UTC().Round(0)
 	permission := ExecutionPermission{
 		ID: ExecutionPermissionID(request.CommandID), CommandID: request.CommandID,
