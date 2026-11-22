@@ -25,6 +25,34 @@ taxion job create --request "I have several ideas for a small product. Help me c
 
 認証失敗、Principal検証失敗、provenance検証失敗、transaction失敗ではJobを作成しません。Job作成はDRAFT状態までであり、JobApproval、PlanningAuthorization、Planner実行、Agent実行を付与しません。
 
+## PlanningAuthorizationの発行
+
+Trusted DRAFT Jobに対して、明示的にbounded planning grantを発行します。
+
+```sh
+taxion job authorize-planning \
+  --provider openai \
+  --account primary \
+  --configuration-sha256 <64-hex> \
+  --repository https://github.com/example/project \
+  --commit <40-hex> \
+  --read-only-mode snapshot \
+  --read-only-reference snapshot_<id> \
+  --read-only-sha256 <64-hex> \
+  --max-turns 8 \
+  --max-tokens 100000 \
+  --deadline <RFC3339> \
+  job_<id>
+```
+
+OIDCで再認証し、認証済みHUMAN PrincipalがJobのIntakeProvenanceと一致することを検証します。grantはJob ID、原文依頼digest、Provider / account / configuration、repository URLとimmutable commit、read-only snapshotまたは明示文書のidentityとdigest、turn / token budget、deadlineへ束縛します。Provider configurationの秘密情報は入力・保存しません。
+
+許可effectはrepository readに限定します。JobはDRAFTのままであり、JobApproval、実装Task、write、validation、commit、publish、任意network access、external mutation、Planner実行を許可しません。このコマンドはgrantを永続化するだけで、Providerを起動しません。
+
+成功時に表示されるCommand IDは、同じ要求を再送するときに`--command-id`へ指定します。同一Command ID・同一要求は同じreceiptへ収束し、異なる要求での再利用は拒否します。
+
+read-only boundaryには、内容digestを持つimmutable snapshotまたは明示文書セットを指定します。参照先の実体検証とProvider側のread-only強制は、後続のProvider実行機能で行います。
+
 ## ローカルDRAFT Jobの作成
 
 ```sh
@@ -64,4 +92,4 @@ SQLite databaseとWALファイルは秘密情報を含む可能性があるた�
 
 ## 現在の制限
 
-本段階ではOIDC認証済みCLIからのDRAFT Job作成とIntakeProvenanceの同一transaction保存までを提供します。HTTP ingress、JobApproval、PlanningAuthorization、Planner / Role / Provider実行、Job完了は未実装です。OIDC認証やDRAFT作成の成功をJob完遂の証拠として扱いません。
+本段階ではOIDC認証済みCLIからのDRAFT Job作成とPlanningAuthorizationの発行・永続化までを提供します。HTTP ingress、JobApproval、Taskless PLANNER RoleExecution、Provider実行、Job完了は未実装です。grant発行の成功をplanning実行やJob完遂の証拠として扱いません。
