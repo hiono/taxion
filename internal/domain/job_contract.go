@@ -449,7 +449,7 @@ func (r JobContractRevision) validateHumanAmendmentProvenance(job Job) error {
 	if r.AmendedByPrincipalID != identity.PrincipalID(r.AmendedByIssuer, r.AmendedBySubject) {
 		return errors.New("JobContract amendment Principal does not match its issuer and subject")
 	}
-	if r.SupersedesRevision > uint64(len(job.JobContractRevisions))-1 {
+	if len(job.JobContractRevisions) < 2 || r.SupersedesRevision > uint64(len(job.JobContractRevisions)-1) {
 		return errors.New("JobContract amendment supersedes a missing revision")
 	}
 	previous := job.JobContractRevisions[r.SupersedesRevision-1]
