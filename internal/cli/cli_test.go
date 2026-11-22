@@ -869,4 +869,32 @@ func TestJobContractCLIRejectsIncompleteInputsBeforeAuthentication(t *testing.T)
 	if _, err := os.Stat(invalidStorePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Store path exists after invalid amendment JSON: %v", err)
 	}
+
+	for _, tc := range []struct {
+		name string
+		data []byte
+	}{
+		{name: "invalid UTF-8", data: []byte{0xff}},
+		{name: "oversized", data: bytes.Repeat([]byte(" "), (1<<20)+1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			contractPath := filepath.Join(t.TempDir(), "contract.json")
+			if err := os.WriteFile(contractPath, tc.data, 0o600); err != nil {
+				t.Fatalf("write contract file: %v", err)
+			}
+			storePath := filepath.Join(t.TempDir(), "must-not-open", "jobs.sqlite")
+			var out, errOut bytes.Buffer
+			code := Run(context.Background(), []string{
+				"job", "amend", "--store", storePath, "--revision", "1",
+				"--canonical-hash", strings.Repeat("0", 64), "--reason", "test invalid file",
+				"--contract-file", contractPath, "job_missing",
+			}, &out, &errOut, VersionInfo{})
+			if code != 2 {
+				t.Fatalf("amend exit code = %d, want 2; stderr=%q", code, errOut.String())
+			}
+			if _, err := os.Stat(storePath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("Store path exists after invalid contract file: %v", err)
+			}
+		})
+	}
 }
