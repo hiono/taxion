@@ -12,9 +12,9 @@ import (
 )
 
 type fakeExecutionEffectAssessor struct {
-	err       error
+	err        error
 	assessment domain.ExecutionEffectAssessment
-	calls     int
+	calls      int
 }
 
 func (a *fakeExecutionEffectAssessor) Assess(
@@ -83,10 +83,10 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 	request := domain.ExecutionPermissionRequest{
 		JobID: jobID, CommandID: "cmd_cccccccccccccccccccccccccccccccc",
 		Role: "CODER", Effect: "repository.write",
-		Resource: revision.Contract.TargetRepositories[0],
+		Resource:   revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       1, ReservedTokens:      100, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	receipt, permission, err := controller.Authorize(context.Background(), request)
 	if err != nil {
@@ -122,14 +122,23 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 
 func TestExecutionControllerRejectsScopeAndAssessmentFailuresWithoutMutation(t *testing.T) {
 	tests := []struct {
-		name       string
-		mutate     func(*domain.ExecutionPermissionRequest, *fakeExecutionEffectAssessor)
+		name   string
+		mutate func(*domain.ExecutionPermissionRequest, *fakeExecutionEffectAssessor)
 	}{
 		{name: "foreign resource", mutate: func(r *domain.ExecutionPermissionRequest, _ *fakeExecutionEffectAssessor) { r.Resource += "/outside" }},
 		{name: "prohibited effect", mutate: func(r *domain.ExecutionPermissionRequest, _ *fakeExecutionEffectAssessor) { r.Effect = "publish" }},
-		{name: "assessor failure", mutate: func(_ *domain.ExecutionPermissionRequest, a *fakeExecutionEffectAssessor) { a.err = errors.New("assessment unavailable") }},
-		{name: "uncontained effect", mutate: func(_ *domain.ExecutionPermissionRequest, a *fakeExecutionEffectAssessor) { a.assessment.Reversible = false; a.assessment.Contained = false }},
-		{name: "reviewer mutation", mutate: func(r *domain.ExecutionPermissionRequest, a *fakeExecutionEffectAssessor) { r.Role = "REVIEWER"; a.assessment.Mutating = true; a.assessment.Reversible = true }},
+		{name: "assessor failure", mutate: func(_ *domain.ExecutionPermissionRequest, a *fakeExecutionEffectAssessor) {
+			a.err = errors.New("assessment unavailable")
+		}},
+		{name: "uncontained effect", mutate: func(_ *domain.ExecutionPermissionRequest, a *fakeExecutionEffectAssessor) {
+			a.assessment.Reversible = false
+			a.assessment.Contained = false
+		}},
+		{name: "reviewer mutation", mutate: func(r *domain.ExecutionPermissionRequest, a *fakeExecutionEffectAssessor) {
+			r.Role = "REVIEWER"
+			a.assessment.Mutating = true
+			a.assessment.Reversible = true
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
