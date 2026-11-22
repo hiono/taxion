@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -448,6 +450,16 @@ func TestAuthorizePlanningIssuesBoundedGrantAndSupportsIdempotentRetry(t *testin
 	if commandID == "" {
 		t.Fatalf("Command ID missing from output: %q", output)
 	}
+	var authorizationID string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "ID: plan_auth_") {
+			authorizationID = strings.TrimPrefix(line, "ID: ")
+			break
+		}
+	}
+	if authorizationID == "" {
+		t.Fatalf("PlanningAuthorization ID missing from output: %q", output)
+	}
 
 	retryArgs := append(append([]string(nil), args[:len(args)-1]...), "--command-id", commandID, jobID)
 	code, retryOutput, stderr := runCLIWithFakeOIDC(t, server, retryArgs)
@@ -456,6 +468,35 @@ func TestAuthorizePlanningIssuesBoundedGrantAndSupportsIdempotentRetry(t *testin
 	}
 	if !strings.Contains(retryOutput, "Revision: 2") {
 		t.Fatalf("retry output = %q, want original revision 2", retryOutput)
+	}
+
+	startArgs := []string{"job", "start-planning", "--store", path, "--authorization-id", authorizationID, jobID}
+	code, startOutput, stderr := runCLIWithFakeOIDC(t, server, startArgs)
+	if code != 0 {
+		t.Fatalf("start-planning exit code = %d, stderr=%q", code, stderr)
+	}
+	if !strings.Contains(startOutput, "Taskless PLANNER Start intent persisted") ||
+		!strings.Contains(startOutput, "State: DRAFT") || !strings.Contains(startOutput, "Operation ID: provider_op_") {
+		t.Fatalf("start-planning output = %q", startOutput)
+	}
+	var startCommandID string
+	for _, line := range strings.Split(startOutput, "\n") {
+		if strings.HasPrefix(line, "Command ID: ") {
+			startCommandID = strings.TrimPrefix(line, "Command ID: ")
+			break
+		}
+	}
+	if startCommandID == "" {
+		t.Fatalf("start Command ID missing from output: %q", startOutput)
+	}
+	startRetryArgs := []string{"job", "start-planning", "--store", path,
+		"--authorization-id", authorizationID, "--command-id", startCommandID, jobID}
+	code, startRetryOutput, stderr := runCLIWithFakeOIDC(t, server, startRetryArgs)
+	if code != 0 {
+		t.Fatalf("idempotent start-planning retry exit code = %d, stderr=%q", code, stderr)
+	}
+	if !strings.Contains(startRetryOutput, "Revision: 3") {
+		t.Fatalf("start retry output = %q, want original revision 3", startRetryOutput)
 	}
 
 	database, err := store.Open(context.Background(), path)
@@ -467,7 +508,8 @@ func TestAuthorizePlanningIssuesBoundedGrantAndSupportsIdempotentRetry(t *testin
 	if err != nil {
 		t.Fatalf("GetJob() error = %v", err)
 	}
-	if job.State != domain.JobDraft || job.Revision != 2 || len(job.PlanningAuthorizations) != 1 {
+	if job.State != domain.JobDraft || job.Revision != 3 || len(job.PlanningAuthorizations) != 1 ||
+		len(job.RoleExecutions) != 1 || len(job.ProviderStartIntents) != 1 {
 		t.Fatalf("persisted Job = %#v", job)
 	}
 	grant := job.PlanningAuthorizations[0]
@@ -501,5 +543,358 @@ func TestAuthorizePlanningRejectsInvalidArgumentsBeforeAuthentication(t *testing
 	}
 	if strings.Contains(stderr.String(), "TAXION_OIDC_ISSUER") {
 		t.Fatalf("invalid arguments reached OIDC authentication: %q", stderr.String())
+	}
+}
+
+func authenticateCLIPrincipal(t *testing.T, server *httptest.Server) auth.AuthenticatedPrincipal {
+	t.Helper()
+	authenticator, err := auth.NewOIDCAuthenticator(auth.OIDCConfig{
+		Issuer: server.URL, ClientID: "taxion-cli-test", Audience: "taxion-cli-test",
+		RedirectURI: "http://127.0.0.1:0/callback", Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewOIDCAuthenticator: %v", err)
+	}
+	output := &cliSynchronizedBuffer{}
+	type result struct {
+		principal auth.AuthenticatedPrincipal
+		err       error
+	}
+	done := make(chan result, 1)
+	go func() {
+		principal, err := authenticator.Authenticate(context.Background(), output)
+		done <- result{principal: principal, err: err}
+	}()
+	completeCLIAuth(t, server, output)
+	select {
+	case completed := <-done:
+		if completed.err != nil {
+			t.Fatalf("Authenticate: %v", completed.err)
+		}
+		return completed.principal
+	case <-time.After(10 * time.Second):
+		t.Fatal("OIDC authentication did not complete")
+		return auth.AuthenticatedPrincipal{}
+	}
+}
+
+func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
+	server := newCLIAuthServer(t)
+	t.Setenv("TAXION_OIDC_ISSUER", server.URL)
+	t.Setenv("TAXION_OIDC_CLIENT_ID", "taxion-cli-test")
+	t.Setenv("TAXION_OIDC_AUDIENCE", "taxion-cli-test")
+	t.Setenv("TAXION_OIDC_REDIRECT_URI", "http://127.0.0.1:0/callback")
+	principal := authenticateCLIPrincipal(t, server)
+
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	database, err := store.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	jobID := "job_cli_approval"
+	if _, err := database.CreateTrustedDraftJob(
+		ctx, jobID, "Deliver the approved bounded feature.",
+		"cmd_78787878787878787878787878787878", principal.AuthenticatedAt(), principal,
+	); err != nil {
+		t.Fatalf("CreateTrustedDraftJob: %v", err)
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	now := time.Now().UTC()
+	grantCommandID := "cmd_89898989898989898989898989898989"
+	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), grantCommandID,
+		domain.PlanningAuthorizationRequest{
+			ProviderID: "provider.test", AccountID: "account.primary",
+			ConfigurationSHA256: strings.Repeat("a", 64),
+			RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
+			ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
+				Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1",
+				SHA256: strings.Repeat("c", 64),
+			},
+			Budget:   domain.PlanningBudget{MaxTurns: 5, MaxTokens: 5000},
+			Deadline: now.Add(time.Hour),
+		}, now)
+	if err != nil {
+		t.Fatalf("NewPlanningAuthorization: %v", err)
+	}
+	if _, err := database.AddPlanningAuthorization(ctx, jobID, job.Revision, grantCommandID, grant, principal); err != nil {
+		t.Fatalf("AddPlanningAuthorization: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after grant: %v", err)
+	}
+	startCommandID := "cmd_90909090909090909090909090909090"
+	_, execution, intent, err := database.StartTasklessPlanner(ctx, jobID, job.Revision, grant.ID, startCommandID, principal)
+	if err != nil {
+		t.Fatalf("StartTasklessPlanner: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Start intent: %v", err)
+	}
+	if _, _, err := database.AddProviderStartObservation(
+		ctx, jobID, job.Revision, intent.ID,
+		domain.ProviderStartObservationCommandID(intent.ID, domain.ProviderStartAccepted, "session_1", "receipt_1", strings.Repeat("d", 64), false),
+		domain.ProviderStartAccepted, "session_1", "receipt_1", strings.Repeat("d", 64), false, principal,
+	); err != nil {
+		t.Fatalf("AddProviderStartObservation: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Planner Turn: %v", err)
+	}
+	_, turn, err := database.AddPlanningTurnIntent(
+		ctx, jobID, job.Revision, execution.ID, "session_1",
+		"cmd_d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4", strings.Repeat("a", 64), 100, principal,
+	)
+	if err != nil {
+		t.Fatalf("AddPlanningTurnIntent: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Planner Turn observation: %v", err)
+	}
+	if _, _, err := database.AddPlanningTurnObservation(
+		ctx, jobID, job.Revision, turn.ID,
+		"cmd_e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+		domain.PlanningTurnCompleted, 10, strings.Repeat("b", 64), false, principal,
+	); err != nil {
+		t.Fatalf("AddPlanningTurnObservation: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Planner Result: %v", err)
+	}
+	resultContent := "Final Planner result"
+	resultSum := sha256.Sum256([]byte(resultContent))
+	resultDigest := hex.EncodeToString(resultSum[:])
+	_, sourceResult, err := database.AddProviderResultObservation(
+		ctx, jobID, job.Revision, execution.ID, turn.OperationID, turn.ID, "session_1",
+		resultContent, resultDigest, true, strings.Repeat("c", 64), principal,
+	)
+	if err != nil {
+		t.Fatalf("AddProviderResultObservation: %v", err)
+	}
+	contract := domain.JobContract{
+		Purpose:                 "Deliver the approved bounded feature",
+		Constraints:             []string{"Preserve the authorization boundary"},
+		TargetRepositories:      []string{"https://github.com/example/project"},
+		Workspaces:              []string{"workspace/main"},
+		AcceptanceCriteria:      []string{"Linux tests pass"},
+		RequiredEvidence:        []string{"Linux CI"},
+		Budget:                  domain.JobContractBudget{MaxTurns: 5, MaxTokens: 5000},
+		ConcurrencyCeiling:      1,
+		Deadline:                now.Add(45 * time.Minute),
+		ProhibitedEffects:       []string{"publish"},
+		ApprovalRequiredEffects: []string{"external.delete"},
+		ConfigurationSHA256:     strings.Repeat("a", 64),
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before proposal: %v", err)
+	}
+	_, revision, err := database.AddJobContractRevision(
+		ctx, jobID, job.Revision, "cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2", execution.ID,
+		sourceResult.ID, sourceResult.ContentSHA256, contract,
+	)
+	if err != nil {
+		t.Fatalf("AddJobContractRevision: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close setup Store: %v", err)
+	}
+
+	approvalCommandID := "cmd_c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+	args := []string{
+		"job", "approve", "--store", path,
+		"--revision", "1",
+		"--canonical-hash", revision.CanonicalHash,
+		"--canonicalization-version", "1",
+		"--reason", "Reviewed and approved the exact bounded scope",
+		"--command-id", approvalCommandID,
+		jobID,
+	}
+	code, output, stderr := runCLIWithFakeOIDC(t, server, args)
+	if code != 0 {
+		t.Fatalf("job approve exit code = %d, stderr=%q", code, stderr)
+	}
+	if !strings.Contains(output, "JobApproval recorded") ||
+		!strings.Contains(output, "Canonical Hash: "+revision.CanonicalHash) ||
+		!strings.Contains(output, "State: ACTIVE") {
+		t.Fatalf("job approve output = %q", output)
+	}
+
+	database, err = store.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen Store: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || job.State != domain.JobActive || len(job.JobApprovals) != 1 ||
+		job.JobApprovals[0].CanonicalHash != revision.CanonicalHash ||
+		job.JobApprovals[0].ApproverPrincipalID != principal.PrincipalID() {
+		t.Fatalf("Job after approval = %#v err=%v", job, err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close Store: %v", err)
+	}
+
+	code, retryOutput, stderr := runCLIWithFakeOIDC(t, server, args)
+	if code != 0 || !strings.Contains(retryOutput, "JobApproval recorded") {
+		t.Fatalf("idempotent job approve retry: code=%d output=%q stderr=%q", code, retryOutput, stderr)
+	}
+	database, err = store.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen Store after retry: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || job.State != domain.JobActive || len(job.JobApprovals) != 1 {
+		t.Fatalf("approval retry appended another fact: approvals=%d state=%s err=%v", len(job.JobApprovals), job.State, err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close Store after approval retry: %v", err)
+	}
+
+	amendedContract := contract
+	amendedContract.Purpose = "Deliver the explicitly amended bounded feature"
+	amendedContract.Budget.MaxTokens++
+	amendedContract.Deadline = time.Now().UTC().Add(2 * time.Hour)
+	contractJSON, err := json.Marshal(amendedContract)
+	if err != nil {
+		t.Fatalf("Marshal amended JobContract: %v", err)
+	}
+	contractPath := filepath.Join(t.TempDir(), "amended-job-contract.json")
+	if err := os.WriteFile(contractPath, contractJSON, 0o600); err != nil {
+		t.Fatalf("write amended JobContract: %v", err)
+	}
+	amendmentCommandID := "cmd_d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1"
+	amendArgs := []string{
+		"job", "amend", "--store", path,
+		"--revision", "1",
+		"--canonical-hash", revision.CanonicalHash,
+		"--reason", "Human-reviewed change to the approved target",
+		"--contract-file", contractPath,
+		"--command-id", amendmentCommandID,
+		jobID,
+	}
+	code, amendOutput, stderr := runCLIWithFakeOIDC(t, server, amendArgs)
+	if code != 0 || !strings.Contains(amendOutput, "Origin: HUMAN_AMENDMENT") ||
+		!strings.Contains(amendOutput, "State at amendment: DRAFT") || !strings.Contains(amendOutput, "Current Job State: DRAFT") {
+		t.Fatalf("job amend: code=%d output=%q stderr=%q", code, amendOutput, stderr)
+	}
+	database, err = store.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen Store after amendment: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || job.State != domain.JobDraft || len(job.JobContractRevisions) != 2 ||
+		len(job.JobApprovals) != 1 || job.JobContractRevisions[1].Origin != domain.JobContractRevisionOriginHumanAmendment {
+		t.Fatalf("Job after amendment = %#v err=%v", job, err)
+	}
+	amendedRevision := job.JobContractRevisions[1]
+	if err := database.Close(); err != nil {
+		t.Fatalf("close Store after amendment: %v", err)
+	}
+
+	code, amendRetryOutput, stderr := runCLIWithFakeOIDC(t, server, amendArgs)
+	if code != 0 || !strings.Contains(amendRetryOutput, "Origin: HUMAN_AMENDMENT") {
+		t.Fatalf("idempotent job amend retry: code=%d output=%q stderr=%q", code, amendRetryOutput, stderr)
+	}
+	approvalAmendedArgs := []string{
+		"job", "approve", "--store", path,
+		"--revision", "2",
+		"--canonical-hash", amendedRevision.CanonicalHash,
+		"--canonicalization-version", "1",
+		"--reason", "Approved the amended exact scope",
+		"--command-id", "cmd_d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2",
+		jobID,
+	}
+	code, amendedApprovalOutput, stderr := runCLIWithFakeOIDC(t, server, approvalAmendedArgs)
+	if code != 0 || !strings.Contains(amendedApprovalOutput, "State: ACTIVE") {
+		t.Fatalf("approve amended revision: code=%d output=%q stderr=%q", code, amendedApprovalOutput, stderr)
+	}
+	database, err = store.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen Store after amended approval: %v", err)
+	}
+	defer database.Close()
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || job.State != domain.JobActive || len(job.JobContractRevisions) != 2 ||
+		len(job.JobApprovals) != 2 || job.JobApprovals[0].ContractRevision != 1 ||
+		job.JobApprovals[1].ContractRevision != 2 {
+		t.Fatalf("Job after amendment reapproval = %#v err=%v", job, err)
+	}
+}
+
+func TestJobContractCLIRejectsIncompleteInputsBeforeAuthentication(t *testing.T) {
+	t.Setenv("TAXION_OIDC_ISSUER", "")
+	path := filepath.Join(t.TempDir(), "must-not-exist", "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"job", "approve", "--store", path, "job_missing"},
+		&stdout, &stderr, VersionInfo{})
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stderr=%q", code, stderr.String())
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Store path exists after invalid approval request: %v", err)
+	}
+
+	amendPath := filepath.Join(t.TempDir(), "must-not-exist", "amend.sqlite")
+	code = Run(context.Background(), []string{"job", "amend", "--store", amendPath, "job_missing"},
+		&stdout, &stderr, VersionInfo{})
+	if code != 2 {
+		t.Fatalf("amend exit code = %d, want 2; stderr=%q", code, stderr.String())
+	}
+	if _, err := os.Stat(amendPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Store path exists after invalid amendment request: %v", err)
+	}
+
+	invalidContractPath := filepath.Join(t.TempDir(), "invalid-contract.json")
+	if err := os.WriteFile(invalidContractPath, []byte("not JSON"), 0o600); err != nil {
+		t.Fatalf("write invalid contract: %v", err)
+	}
+	invalidStorePath := filepath.Join(t.TempDir(), "must-not-open", "invalid.sqlite")
+	var amendStdout, amendStderr bytes.Buffer
+	code = Run(context.Background(), []string{
+		"job", "amend", "--store", invalidStorePath, "--revision", "1",
+		"--canonical-hash", strings.Repeat("0", 64), "--reason", "test invalid JSON",
+		"--contract-file", invalidContractPath, "job_missing",
+	}, &amendStdout, &amendStderr, VersionInfo{})
+	if code != 1 || !strings.Contains(amendStderr.String(), "JSON") {
+		t.Fatalf("invalid amendment JSON exit code = %d, stderr=%q", code, amendStderr.String())
+	}
+	if _, err := os.Stat(invalidStorePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Store path exists after invalid amendment JSON: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		data []byte
+	}{
+		{name: "invalid UTF-8", data: []byte{0xff}},
+		{name: "oversized", data: bytes.Repeat([]byte(" "), (1<<20)+1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			contractPath := filepath.Join(t.TempDir(), "contract.json")
+			if err := os.WriteFile(contractPath, tc.data, 0o600); err != nil {
+				t.Fatalf("write contract file: %v", err)
+			}
+			storePath := filepath.Join(t.TempDir(), "must-not-open", "jobs.sqlite")
+			var out, errOut bytes.Buffer
+			code := Run(context.Background(), []string{
+				"job", "amend", "--store", storePath, "--revision", "1",
+				"--canonical-hash", strings.Repeat("0", 64), "--reason", "test invalid file",
+				"--contract-file", contractPath, "job_missing",
+			}, &out, &errOut, VersionInfo{})
+			if code != 2 {
+				t.Fatalf("amend exit code = %d, want 2; stderr=%q", code, errOut.String())
+			}
+			if _, err := os.Stat(storePath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("Store path exists after invalid contract file: %v", err)
+			}
+		})
 	}
 }

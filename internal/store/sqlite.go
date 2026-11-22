@@ -31,6 +31,9 @@ const schemaVersion = 1
 const createLocalDraftJobCommandType = "CreateJob"
 const createTrustedDraftJobCommandType = "CreateTrustedDraftJob"
 const addPlanningAuthorizationCommandType = "AddPlanningAuthorization"
+const startTasklessPlannerCommandType = "StartTasklessPlanner"
+const addProviderResultObservationCommandType = "AddProviderResultObservation"
+const addProviderUsageObservationCommandType = "AddProviderUsageObservation"
 
 type Store struct {
 	db *sql.DB
@@ -469,6 +472,183 @@ func (s *Store) AddPlanningAuthorization(ctx context.Context, jobID string, expe
 		return CommandReceipt{}, fmt.Errorf("commit PlanningAuthorization: %w", err)
 	}
 	return receipt, nil
+}
+
+func (s *Store) StartTasklessPlanner(ctx context.Context, jobID string, expectedRevision uint64, authorizationID, commandID string, principal auth.AuthenticatedPrincipal) (CommandReceipt, domain.RoleExecution, domain.ProviderStartIntent, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	if strings.TrimSpace(jobID) == "" || strings.TrimSpace(authorizationID) == "" ||
+		!strings.HasPrefix(commandID, "cmd_") || len(commandID) != len("cmd_")+32 ||
+		expectedRevision == 0 || expectedRevision >= uint64(^uint64(0)>>1) {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, errors.New("Job, PlanningAuthorization, expected revision, and command identity are required")
+	}
+	request := struct {
+		JobID           string `json:"job_id"`
+		AuthorizationID string `json:"authorization_id"`
+		PrincipalID     string `json:"principal_id"`
+	}{
+		JobID: jobID, AuthorizationID: authorizationID,
+		PrincipalID: principal.PrincipalID(),
+	}
+	requestPayload, err := json.Marshal(request)
+	if err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("encode Taskless PLANNER start request: %w", err)
+	}
+	requestHash := digest(requestPayload)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("begin Taskless PLANNER start: %w", err)
+	}
+	defer tx.Rollback()
+
+	var existingType, existingJobID, existingHash, existingReceipt, existingCreatedAt string
+	var existingRevision int64
+	err = tx.QueryRowContext(ctx,
+		"SELECT command_type, job_id, resulting_revision, payload_sha256, receipt_json, created_at FROM job_commands WHERE command_id = ?",
+		commandID,
+	).Scan(&existingType, &existingJobID, &existingRevision, &existingHash, &existingReceipt, &existingCreatedAt)
+	if err == nil {
+		if existingType != startTasklessPlannerCommandType || existingJobID != jobID ||
+			existingRevision <= 1 || existingHash != requestHash {
+			return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, ErrIdempotencyConflict
+		}
+		var stored CommandReceipt
+		if err := json.Unmarshal([]byte(existingReceipt), &stored); err != nil {
+			return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("%w: decode existing Taskless PLANNER receipt: %v", ErrIntegrity, err)
+		}
+		existingTime, err := time.Parse(time.RFC3339Nano, existingCreatedAt)
+		if err != nil {
+			return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("%w: invalid Taskless PLANNER receipt timestamp: %v", ErrIntegrity, err)
+		}
+		if stored.CommandID != commandID || stored.JobID != jobID ||
+			stored.Revision != uint64(existingRevision) || stored.PayloadSHA256 != requestHash ||
+			!stored.CreatedAt.Equal(existingTime) {
+			return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("%w: Taskless PLANNER receipt metadata mismatch", ErrIntegrity)
+		}
+		var currentRevision int64
+		var currentPayload, currentHash, currentCreatedAt, currentUpdatedAt string
+		if err := tx.QueryRowContext(ctx,
+			"SELECT revision, payload_json, integrity_sha256, created_at, updated_at FROM job_aggregates WHERE job_id = ?",
+			jobID,
+		).Scan(&currentRevision, &currentPayload, &currentHash, &currentCreatedAt, &currentUpdatedAt); err != nil {
+			return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("%w: read Job for Taskless PLANNER retry: %v", ErrIntegrity, err)
+		}
+		currentJob, err := decodeJobAggregate(jobID, currentRevision, currentPayload, currentHash, currentCreatedAt, currentUpdatedAt)
+		if err != nil {
+			return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, err
+		}
+		var execution domain.RoleExecution
+		foundExecution := false
+		for _, candidate := range currentJob.RoleExecutions {
+			if candidate.CommandID == commandID {
+				execution = candidate
+				foundExecution = true
+				break
+			}
+		}
+		if !foundExecution || execution.PlanningAuthorizationID != authorizationID ||
+			execution.CreatedRevision != uint64(existingRevision) || !execution.CreatedAt.Equal(existingTime) {
+			return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("%w: persisted RoleExecution differs from command receipt", ErrIntegrity)
+		}
+		var intent domain.ProviderStartIntent
+		foundIntent := false
+		for _, candidate := range currentJob.ProviderStartIntents {
+			if candidate.RoleExecutionID == execution.ID {
+				intent = candidate
+				foundIntent = true
+				break
+			}
+		}
+		if !foundIntent || intent.RequestSHA256 != requestHash ||
+			intent.CreatedRevision != uint64(existingRevision) || !intent.CreatedAt.Equal(existingTime) {
+			return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("%w: persisted Provider Start intent differs from command receipt", ErrIntegrity)
+		}
+		return stored, execution, intent, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("read Taskless PLANNER receipt: %w", err)
+	}
+
+	var revision int64
+	var payload, expectedHash, aggregateCreatedAt, aggregateUpdatedAt string
+	err = tx.QueryRowContext(ctx,
+		"SELECT revision, payload_json, integrity_sha256, created_at, updated_at FROM job_aggregates WHERE job_id = ?",
+		jobID,
+	).Scan(&revision, &payload, &expectedHash, &aggregateCreatedAt, &aggregateUpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, ErrNotFound
+	}
+	if err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("read Job for Taskless PLANNER start: %w", err)
+	}
+	job, err := decodeJobAggregate(jobID, revision, payload, expectedHash, aggregateCreatedAt, aggregateUpdatedAt)
+	if err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, err
+	}
+	if job.Revision != expectedRevision {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, ErrIdempotencyConflict
+	}
+	createdAt := time.Now().UTC().Round(0)
+	if createdAt.Before(job.UpdatedAt) {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, errors.New("Taskless PLANNER start time precedes current Job revision")
+	}
+	execution, intent, err := domain.NewTasklessPlannerStart(job, authorizationID, principal.PrincipalID(), commandID, requestHash, createdAt)
+	if err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, err
+	}
+	if job.Revision >= uint64(^uint64(0)>>1) {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, errors.New("Job revision exhausted")
+	}
+	job.RoleExecutions = append(job.RoleExecutions, execution)
+	job.ProviderStartIntents = append(job.ProviderStartIntents, intent)
+	if job.ProviderLifecycleEnforcedFromRevision == 0 {
+		job.ProviderLifecycleEnforcedFromRevision = intent.CreatedRevision
+	}
+	job.Revision++
+	job.UpdatedAt = createdAt
+	if err := job.Validate(); err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("validate Job with Taskless PLANNER start: %w", err)
+	}
+	updatedPayload, err := json.Marshal(job)
+	if err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("encode Job with Taskless PLANNER start: %w", err)
+	}
+	aggregateHash := digest(updatedPayload)
+	receipt := CommandReceipt{
+		CommandID: commandID, JobID: jobID, Revision: job.Revision,
+		PayloadSHA256: requestHash, CreatedAt: createdAt,
+	}
+	receiptJSON, err := json.Marshal(receipt)
+	if err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("encode Taskless PLANNER receipt: %w", err)
+	}
+	result, err := tx.ExecContext(ctx,
+		"UPDATE job_aggregates SET revision = ?, payload_json = ?, integrity_sha256 = ?, updated_at = ? WHERE job_id = ? AND revision = ?",
+		job.Revision, string(updatedPayload), aggregateHash, createdAt.Format(time.RFC3339Nano), jobID, revision,
+	)
+	if err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("update Job with Taskless PLANNER start: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("check Taskless PLANNER Job update: %w", err)
+	}
+	if affected != 1 {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, ErrIdempotencyConflict
+	}
+	_, err = tx.ExecContext(ctx,
+		"INSERT INTO job_commands (command_id, job_id, command_type, payload_sha256, resulting_revision, receipt_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		commandID, jobID, startTasklessPlannerCommandType, requestHash, job.Revision, string(receiptJSON), createdAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("insert Taskless PLANNER receipt: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("commit Taskless PLANNER start: %w", err)
+	}
+	return receipt, execution, intent, nil
 }
 
 func (s *Store) GetJob(ctx context.Context, id string) (domain.Job, error) {

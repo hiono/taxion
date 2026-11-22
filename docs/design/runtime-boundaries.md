@@ -3,6 +3,8 @@
 Date: 2026-11-20
 Normative contract: [Product Contract](../specifications/product-contract.md)
 Acceptance contract: [Product Acceptance Test Specification](../test-specs/product-acceptance.md)
+Provider Adapter requirements: [Provider Adapter 実行境界 要求仕様書](../specifications/provider-adapter-requirements.md)
+Provider Adapter design: [Provider Adapter 詳細設計書](provider-adapter-detailed-design.md) / [内部設計書](provider-adapter-internal-design.md)
 
 ## 1. Purpose
 
@@ -40,6 +42,8 @@ Planner / Coder / Reviewerの実行主体はRoleExecutionIDに結び付ける。
 
 Providerは外部実行主体である。Providerが返すevent、tool list、session state、usage、terminal statusはObservationであり、Taxionの承認・Job完了の正本ではない。Provider credentialはController / Provider Adapterが管理し、Model / Sandboxへ露出しません。Provider API通信はAdapterが仲介し、現在のgrantとProvider / account / configurationに束縛します。RoleのToolへ任意のnetwork accessやcredential accessを継承しません。ControllerはOperationIDとJob revisionで相関し、外部結果をJobAggregateへ明示的に記録します。
 
+Provider AdapterのCapabilityはProvider / account / SDK・protocol version / configuration identityへ束縛し、証拠水準を操作単位で検証します。CredentialBroker / CredentialLeaseはAdapter境界内でsecretを仲介し、Runtimeはraw error・responseへのsecret混入を検査してsafe errorへ変換します。詳細はProvider Adapter要求仕様・詳細設計・内部設計を参照します。
+
 ### 3.4 External Agent boundary
 
 A2A Gatewayは外部Agentとの唯一の必須相互運用protocolを実装する。外部Agent identity、Agent Card、Message、Artifactは信頼境界を越える入力であり、内部Actor identityや権限へ自動変換しない。A2AのTask stateをJob stateとして直接保存しない。
@@ -70,13 +74,14 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 ### 4.2 Approved implementation
 
 1. Controllerが現在のJobApproval、Task scope、budget、deadline、Runtime configurationを検証する。
-2. 必要なTaskとRoleExecutionをJobAggregate Commandで作成する。
-3. Coding TaskにWorktreeを割り当て、repository identity、Worktree path、baseline commit、ownerを永続化する。
-4. Provider呼出し前にOperationIDとimmutable operation intentをJobAggregateへ保存する。
-5. ControllerがEffect permissionを実行直前に再検証する。
-6. Provider Adapterが外部呼出しを行い、受理・event・result・usage・stop observationをOperationIDへ返す。
-7. ControllerがObservationを記録し、Conformance / Admissionを別々に判定する。
-8. JobOutputとJobEvidenceをimmutable content identityとproducer / verifierへ結び付ける。
+2. ExecutionControllerがeffect / resource / Provider identity / request digestを評価し、JobApprovalと最新JobContractに束縛した単一OperationのExecutionPermissionをJobAggregateへ保存する。
+3. TaskIDに束縛されたExecutionPermissionをsingle-useで消費し、Coder / Reviewer RoleExecutionとProviderStartIntentをJobAggregate Commandで同時にappendする。ProviderStartIntentは同じPermission ID / OperationIDを参照する。
+4. Coding TaskにWorktreeを割り当て、repository identity、Worktree path、baseline commit、ownerを永続化する。
+5. Provider呼出し前にOperationIDとimmutable operation intentをJobAggregateへ保存する。
+6. Controllerが同じExecutionPermissionを外部副作用の直前に再検証する。
+7. Provider Adapterが外部呼出しを行い、受理・event・result・usage・stop observationをOperationIDへ返す。
+8. ControllerがObservationを記録し、Conformance / Admissionを別々に判定する。
+9. JobOutputとJobEvidenceをimmutable content identityとproducer / verifierへ結び付ける。
 
 ### 4.3 Internal communication
 
@@ -108,6 +113,7 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 ### 5.2 After external side effect
 
 - Provider receipt、event、terminal result、usage、stop evidenceをappend-only observationとして保存する。
+- Usage completenessとProvider quiescenceが確定するまで、完了・資源解放を許可しない。
 - DB commitとProvider operation resultを同一の成功状態へまとめない。
 - timeout、connection loss、receipt欠落はUNKNOWNとして保持する。
 - 同じOperationIDで照会できない、またはProvider idempotencyを証明できない場合はblind replayしない。
@@ -139,6 +145,8 @@ Job完了CommandはControllerだけが実行する。必須受入条件、JobEvi
 - Model / Tool Callの観測欠落を完全追跡済みとして扱わない。
 - Observation、Conformance、Admission、Execution Permissionを一つのbooleanへまとめない。
 - 旧Task / Dispatch / ReviewFlow runtime、旧権限モデル、旧fallbackを新しいJob-native経路として残さない。
+
+Provider SDK / credential / capability / operation / recoveryの境界実装は[Provider Adapter 詳細設計書](provider-adapter-detailed-design.md)と[Provider Adapter 内部設計書](provider-adapter-internal-design.md)に従う。要求と受入れ条件は[Provider Adapter 要求仕様書](../specifications/provider-adapter-requirements.md)および[Provider Adapter テスト仕様書](../test-specs/provider-adapter-test-specification.md)を正本とする。
 
 ## 8. Traceability
 
