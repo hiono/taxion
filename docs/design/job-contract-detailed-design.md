@@ -48,7 +48,7 @@ Fields:
 - canonical JobContract
 - Origin: `PLANNER` or `HUMAN_AMENDMENT`
 - Planner origin: ProposedByRoleExecutionID, SourceResultObservationID, SourceResultContentSHA256
-- Human amendment origin: AmendedByPrincipalID, AmendedByIssuer, AmendedBySubject, AmendmentReason, SupersedesRevision, SupersedesCanonicalHash
+- Human amendment origin: AmendedByPrincipalID, AmendedByIssuer, AmendedBySubject, AmendedAuthenticatedAt, AmendmentReason, SupersedesRevision, SupersedesCanonicalHash
 - CreatedAt and CreatedRevision
 
 For `PLANNER` origin, the proposer must be a Taskless PLANNER RoleExecution belonging to the same Job, with an accepted Provider Start and a PlanningAuthorization valid at CreatedAt. The source Result must be a persisted final ProviderResultObservation in the same Job, produced by that exact RoleExecution, and its ID and ContentSHA256 must match the revision provenance. The Result observation's own validation must bind it to the accepted Start / Session and exact Turn. Human amendment fields must be empty.
