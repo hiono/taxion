@@ -55,7 +55,7 @@ func NewManager(workspaceRoot string, repositories []Repository) (*Manager, erro
 		if err != nil || filepath.Clean(top) != path {
 			return nil, fmt.Errorf("trusted repository %q is not a Git working tree", repository.ID)
 		}
-		if pathWithin(path, root) || pathWithin(root, path) {
+		if path == root || pathWithin(path, root) || pathWithin(root, path) {
 			return nil, errors.New("Worktree workspace root and trusted repository must not contain one another")
 		}
 		known[repository.ID] = path
@@ -146,7 +146,18 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 	if err != nil {
 		return errors.New("Task Worktree metadata cannot be resolved")
 	}
-	expectedGitDir := filepath.Join(repositoryPath, ".git", "worktrees")
+	commonGitDir, err := gitOutput(ctx, repositoryPath, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return errors.New("trusted repository common Git metadata cannot be resolved")
+	}
+	if !filepath.IsAbs(commonGitDir) {
+		commonGitDir = filepath.Join(repositoryPath, commonGitDir)
+	}
+	commonGitDir, err = filepath.EvalSymlinks(commonGitDir)
+	if err != nil {
+		return errors.New("trusted repository common Git metadata path cannot be resolved")
+	}
+	expectedGitDir := filepath.Join(commonGitDir, "worktrees")
 	if !pathWithin(expectedGitDir, resolvedGitDir) {
 		return errors.New("Task path is not registered as a linked Worktree of the trusted repository")
 	}
