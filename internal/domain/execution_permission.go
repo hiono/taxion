@@ -20,6 +20,7 @@ type ExecutionPermissionRequest struct {
 	ProviderID           string    `json:"provider_id"`
 	AccountID            string    `json:"account_id"`
 	ConfigurationSHA256  string    `json:"configuration_sha256"`
+	ReservedTurns         uint32    `json:"reserved_turns"`
 	ReservedTokens        uint64    `json:"reserved_tokens"`
 	ExpiresAt             time.Time `json:"expires_at"`
 }
@@ -73,6 +74,7 @@ type ExecutionPermission struct {
 	ConfigurationSHA256     string    `json:"configuration_sha256"`
 	RequestSHA256           string    `json:"request_sha256"`
 	AssessmentSHA256        string    `json:"assessment_sha256"`
+	ReservedTurns            uint32    `json:"reserved_turns"`
 	ReservedTokens           uint64    `json:"reserved_tokens"`
 	ExpiresAt                time.Time `json:"expires_at"`
 	CreatedAt                time.Time `json:"created_at"`
@@ -126,7 +128,7 @@ func ValidateExecutionPermissionRequest(job Job, request ExecutionPermissionRequ
 		(request.Role != "CODER" && request.Role != "REVIEWER") ||
 		!validExecutionText(request.Effect, 512) || !validExecutionText(request.Resource, 4096) ||
 		!validPlanningIdentity(request.ProviderID) || !validPlanningIdentity(request.AccountID) ||
-		!validSHA256(request.ConfigurationSHA256) || request.ReservedTokens == 0 ||
+		!validSHA256(request.ConfigurationSHA256) || request.ReservedTurns == 0 || request.ReservedTokens == 0 ||
 		request.ExpiresAt.IsZero() || now.IsZero() {
 		return errors.New("ExecutionPermission request identity or bounds are invalid")
 	}
@@ -163,7 +165,7 @@ func ValidateExecutionPermissionRequest(job Job, request ExecutionPermissionRequ
 	if err != nil {
 		return err
 	}
-	if turns >= uint64(revision.Contract.Budget.MaxTurns) {
+	if turns > uint64(revision.Contract.Budget.MaxTurns) || uint64(request.ReservedTurns) > uint64(revision.Contract.Budget.MaxTurns)-turns {
 		return errors.New("ExecutionPermission turn reservation exceeds the approved budget")
 	}
 	if ^uint64(0)-tokens < request.ReservedTokens ||
@@ -219,7 +221,7 @@ func NewExecutionPermission(
 		CanonicalizationVersion: revision.CanonicalizationVersion, CanonicalHash: revision.CanonicalHash,
 		ProviderID: request.ProviderID, AccountID: request.AccountID,
 		ConfigurationSHA256: request.ConfigurationSHA256, RequestSHA256: requestSHA256,
-		AssessmentSHA256: assessmentSHA, ReservedTokens: request.ReservedTokens,
+		AssessmentSHA256: assessmentSHA, ReservedTurns: request.ReservedTurns, ReservedTokens: request.ReservedTokens,
 		ExpiresAt: request.ExpiresAt.UTC().Round(0), CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
 	if err := permission.Validate(job); err != nil {
@@ -238,7 +240,7 @@ func (p ExecutionPermission) Validate(job Job) error {
 		!validSHA256(p.CanonicalHash) || !validPlanningIdentity(p.ProviderID) ||
 		!validPlanningIdentity(p.AccountID) || !validSHA256(p.ConfigurationSHA256) ||
 		!validSHA256(p.RequestSHA256) || !validSHA256(p.AssessmentSHA256) ||
-		p.ReservedTokens == 0 || p.ExpiresAt.IsZero() || p.CreatedAt.IsZero() ||
+		p.ReservedTurns == 0 || p.ReservedTokens == 0 || p.ExpiresAt.IsZero() || p.CreatedAt.IsZero() ||
 		p.CreatedRevision == 0 {
 		return errors.New("ExecutionPermission identity or metadata is invalid")
 	}
@@ -271,7 +273,7 @@ func (p ExecutionPermission) Validate(job Job) error {
 	expectedRequest := ExecutionPermissionRequest{
 		JobID: p.JobID, CommandID: p.CommandID, Role: p.Role, Effect: p.Effect,
 		Resource: p.Resource, ProviderID: p.ProviderID, AccountID: p.AccountID,
-		ConfigurationSHA256: p.ConfigurationSHA256, ReservedTokens: p.ReservedTokens,
+		ConfigurationSHA256: p.ConfigurationSHA256, ReservedTurns: p.ReservedTurns, ReservedTokens: p.ReservedTokens,
 		ExpiresAt: p.ExpiresAt,
 	}
 	expectedDigest, err := ExecutionPermissionRequestSHA256(expectedRequest)
@@ -347,10 +349,10 @@ func executionPermissionBudgetUsed(job Job, revision uint64) (uint64, uint64, er
 		if permission.ContractRevision != revision {
 			continue
 		}
-		if turns == ^uint64(0) || ^uint64(0)-tokens < permission.ReservedTokens {
+		if ^uint64(0)-turns < uint64(permission.ReservedTurns) || ^uint64(0)-tokens < permission.ReservedTokens {
 			return 0, 0, fmt.Errorf("%w: ExecutionPermission budget overflow", ErrInvalidJob)
 		}
-		turns++
+		turns += uint64(permission.ReservedTurns)
 		tokens += permission.ReservedTokens
 	}
 	return turns, tokens, nil
