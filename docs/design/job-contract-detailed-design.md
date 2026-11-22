@@ -7,7 +7,7 @@
 - `JobContractRevisions []JobContractRevision`
 - `JobApprovals []JobApproval`
 
-`JobState` supports `DRAFT` and `ACTIVE`. A new draft Job starts in DRAFT. Approval of the latest contract revision changes the state to ACTIVE. Contract proposals require a DRAFT Job, an accepted Taskless PLANNER Start, and a PlanningAuthorization that is still within its deadline. ACTIVE amendments are rejected until a separate authorized revision command is implemented; that future command must return the Job to DRAFT and require reapproval.
+`JobState` supports `DRAFT` and `ACTIVE`. A new draft Job starts in DRAFT. Approval of the latest contract revision changes the state to ACTIVE. Contract proposals require a DRAFT Job, an accepted Taskless PLANNER Start, and a PlanningAuthorization that is still within its deadline. ACTIVE amendments use the separate authenticated HUMAN amendment command and atomically return the Job to DRAFT; the new revision requires reapproval.
 
 ### 1.1 JobContract
 
@@ -149,6 +149,21 @@ Decoding rejects:
 - type mismatches and values that fail JobContract canonicalization.
 
 Duplicate-key detection runs before struct decoding because the standard Go JSON decoder otherwise accepts duplicate object keys. The decoded contract then passes the existing canonicalization v1 and Domain validation. The source Result digest remains separate from the canonical JobContract hash.
+
+### 6.2 Upper-level Planner workflow
+
+The upper-level workflow is responsible for sequencing Provider completion, Result persistence, and JobContract proposal. It does not reconstruct contract data or bypass the proposal Controller.
+
+For the exact Job / Taskless PLANNER RoleExecution / Session / Turn tuple, the workflow:
+
+1. Loads the JobAggregate and validates the RoleExecution, accepted Start Session, and exact Turn intent.
+2. Resolves the latest Turn observation for that Turn. Only COMPLETED is eligible; UNKNOWN, FAILED, or missing observations stop the workflow.
+3. Resolves the latest Usage observation for the same operation / Session / Turn. Only Complete=true is eligible. A partial or missing Usage observation stops the workflow.
+4. Reuses an already persisted final Result observation for the exact tuple when present. Otherwise it calls ProviderController.RetrieveProviderResult, which validates Provider identity / capability and appends the final Result observation.
+5. Re-reads the JobAggregate and validates the persisted Result observation before calling PlanningController.ProposeJobContract with its exact observation ID.
+6. Returns both the Result receipt / observation and proposal receipt / revision so callers can distinguish Result persistence from proposal persistence.
+
+If Result persistence succeeds but proposal persistence fails, the Result remains immutable. A retry resolves and reuses that same Result observation; it does not retrieve or substitute a later Result. The proposal Store command remains the authoritative atomic mutation and idempotency boundary. An exact retry uses the same proposal CommandID. The workflow creates no JobApproval, ExecutionPermission, or additional Provider operation.
 
 ## 7. Human approval Controller and CLI ingress
 
