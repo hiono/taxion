@@ -125,6 +125,21 @@ For a new proposal, the Controller revalidates the current PlanningAuthorization
 
 The Controller does not call the Provider, change Job authority, issue JobApproval, or create ExecutionPermission. A committed proposal may be retried after the PlanningAuthorization deadline only with the same CommandID, identical canonical request, and identical source Result provenance; the Store returns the original receipt and fact. A different Result ID / digest, payload, or proposer with the same CommandID is rejected as an idempotency conflict.
 
+### 6.1 Planner Result payload decoding
+
+The Planner's final Result content is exactly one JSON object representing `JobContract`. JSON keys use the struct's lower_snake_case tags; `budget` is a nested object with `max_turns` and `max_tokens`. The object contains no wrapper, Markdown fence, explanatory prose, or trailing value.
+
+The proposal Controller receives only the persisted Result observation ID. It loads the JobAggregate, resolves the exact final Result, validates its Job / RoleExecution / accepted Start / Session / Turn provenance, and decodes the Result content into JobContract. It does not accept a parallel caller-supplied JobContract value.
+
+Decoding rejects:
+- non-object roots and malformed JSON;
+- unknown keys or keys with non-canonical casing;
+- duplicate keys at the root or nested `budget` object;
+- non-JSON prefixes / suffixes, Markdown fences, or multiple JSON values;
+- type mismatches and values that fail JobContract canonicalization.
+
+Duplicate-key detection runs before struct decoding because the standard Go JSON decoder otherwise accepts duplicate object keys. The decoded contract then passes the existing canonicalization v1 and Domain validation. The source Result digest remains separate from the canonical JobContract hash.
+
 ## 7. Human approval Controller and CLI ingress
 
 The approval command is an explicit human action. The CLI displays the persisted JobContract through the existing Job read command; the caller then supplies the exact Job ID, revision number, canonical hash, canonicalization version, and reason. The CLI must not infer the revision or hash, approve a proposal from Planner output alone, or treat a natural-language confirmation outside the authenticated command as approval.
