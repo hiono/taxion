@@ -38,7 +38,7 @@ ParentTaskIDおよびDependsOnTaskIDsは同一Job・同一ContractRevisionの既
 
 ## 4. Scope narrowing
 
-TaskのscopeはJobContractまたはParentTaskのeffective scopeを継承します。requestでtarget repository / resource / workspaceを省略（nil）した場合は親scopeを継承します。明示した値は親scopeの完全一致subsetでなければなりません。明示的な空配列はそのresource dimensionへのアクセスを許可しない指定として扱います。prefix / substring / host-only matchは認めません。
+TaskのscopeはJobContractまたはParentTaskのeffective scopeを継承します。requestでtarget repository / resource / workspaceを省略（nil）した場合は親scopeを継承します。明示した値は親scopeの完全一致subsetでなければなりません。明示的な空配列はそのresource dimensionへのアクセスを許可しない指定として扱います。TargetRepositories / TargetResources / Workspacesの全てを空にするTaskは拒否します。prefix / substring / host-only matchは認めません。
 
 TaskのBudget、ConcurrencyCeiling、Deadlineはrequestで省略した次元を親から継承します。明示値は親の上限以下でなければなりません。BudgetはMaxTurns / MaxTokensともに正数とします。Deadlineは現在時刻より後で、JobContract / ParentTaskのdeadline以下とします。
 

@@ -49,6 +49,7 @@ func TestNewTaskNarrowsScopeAndAddsConstraints(t *testing.T) {
 	request := taskTestRequest(job, now, "cmd_a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2")
 	request.TargetRepositories = []string{}
 	request.TargetResources = []string{"resource_ci"}
+	request.Workspaces = []string{}
 	request.Budget = JobContractBudget{MaxTurns: 2, MaxTokens: 500}
 	request.ConcurrencyCeiling = 1
 	request.Deadline = now.Add(20 * time.Minute)
@@ -58,7 +59,7 @@ func TestNewTaskNarrowsScopeAndAddsConstraints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTask with narrower scope: %v", err)
 	}
-	if len(task.TargetRepositories) != 0 ||
+	if len(task.TargetRepositories) != 0 || len(task.Workspaces) != 0 ||
 		!equalTaskStrings(task.TargetResources, []string{"resource_ci"}) ||
 		task.Budget.MaxTurns != 2 || task.Budget.MaxTokens != 500 ||
 		!task.Deadline.Equal(request.Deadline) ||

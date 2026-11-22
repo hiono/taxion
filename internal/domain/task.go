@@ -221,8 +221,7 @@ func validateTaskContent(job Job, task Task) error {
 		"TargetResources":    task.TargetResources,
 		"Workspaces":         task.Workspaces,
 	} {
-		required := name == "Workspaces"
-		canonical, canonicalErr := canonicalContractSet("Task "+name, values, required)
+		canonical, canonicalErr := canonicalContractSet("Task "+name, values, false)
 		if canonicalErr != nil || !equalTaskStrings(canonical, values) {
 			return fmt.Errorf("Task %s is not canonical", name)
 		}
