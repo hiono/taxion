@@ -464,19 +464,10 @@ func (s *Store) AddTaskProviderStartObservation(
 	operationID, commandID, status, providerSessionID, receiptID, evidenceSHA256 string,
 	reconcilesUnknown bool,
 ) (CommandReceipt, domain.ProviderStartObservation, error) {
-	request := struct {
-		JobID              string
-		OperationID        string
-		CommandID          string
-		Status             string
-		ProviderSessionID  string
-		ReceiptID          string
-		EvidenceSHA256     string
-		ReconcilesUnknown bool
-	}{
-		JobID: jobID, OperationID: operationID, CommandID: commandID, Status: status,
-		ProviderSessionID: providerSessionID, ReceiptID: receiptID, EvidenceSHA256: evidenceSHA256,
-		ReconcilesUnknown: reconcilesUnknown,
+	request := map[string]any{
+		"job_id": jobID, "operation_id": operationID, "command_id": commandID,
+		"status": status, "provider_session_id": providerSessionID, "receipt_id": receiptID,
+		"evidence_sha256": evidenceSHA256, "reconciles_unknown": reconcilesUnknown,
 	}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addProviderStartObservationCommandType, request,
 		func(job domain.Job, now time.Time) (domain.ProviderStartObservation, error) {
