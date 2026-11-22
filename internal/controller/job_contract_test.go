@@ -63,6 +63,7 @@ func startContractPlanner(t *testing.T) (*JobContractController, *store.Store, a
 	if err != nil {
 		t.Fatalf("GetJob before Planner Result: %v", err)
 	}
+	contract := validControllerJobContract(time.Now().UTC().Add(2 * time.Hour))
 	contentBytes, err := json.Marshal(contract)
 	if err != nil {
 		t.Fatalf("Marshal Planner JobContract: %v", err)
@@ -192,7 +193,7 @@ func TestJobContractControllerRejectsNewProposalAfterApproval(t *testing.T) {
 	ctx := context.Background()
 	roleExecutionID := domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc")
 	_, revision, err := controller.Propose(
-		ctx, jobID, roleExecutionID, sourceResult.ID, sourceResult.ContentSHA256, "cmd_23232323232323232323232323232323", contract, principal,
+		ctx, jobID, roleExecutionID, sourceResult.ID, "cmd_23232323232323232323232323232323", principal,
 	)
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
@@ -244,7 +245,7 @@ func TestJobContractControllerApprovesExactRevisionAndReplaysAfterActivation(t *
 	ctx := context.Background()
 	_, revision, err := controller.Propose(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
-		sourceResult.ID, sourceResult.ContentSHA256, "cmd_45454545454545454545454545454545", contract, principal,
+		sourceResult.ID, "cmd_45454545454545454545454545454545", principal,
 	)
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
