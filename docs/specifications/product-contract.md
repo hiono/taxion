@@ -69,6 +69,7 @@ Provider Adapterの実装要求は[Provider Adapter 実行境界 要求仕様書
 ### 4.3 Contract proposal and approval
 
 - Plannerは目的、制約、対象、受入条件、必要Evidence、resource boundary、budget、deadline、禁止事項、承認が必要な副作用、秘密を含まないconfiguration referenceを含むJobContract revisionを提案する。
+- Planner proposal Controllerは同一Jobに永続化された最終Provider ResultからJobContractを厳密なJSON形式で生成し、別入力の契約データとの不一致を許可しない。
 - 利用者はその正確なimmutable revision / canonical hashを確認して承認する。
 - JobApprovalはJobID、revision、proposal hash、canonicalization version、approver identity / source / reason / timeを持つappend-only factとする。
 - 承認対象が変わる場合は新revisionと明示的な再承認を要求する。
