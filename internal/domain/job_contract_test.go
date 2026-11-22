@@ -266,7 +266,6 @@ func TestJobContractRevisionRequiresExactFinalPlannerResultProvenance(t *testing
 	}
 }
 
-
 func TestJobContractRejectsInvalidSourceResultBoundaries(t *testing.T) {
 	cases := []struct {
 		name   string
