@@ -41,6 +41,58 @@ func (s *Store) AddJobContractRevision(ctx context.Context, jobID string, expect
 	)
 }
 
+
+func (s *Store) AmendJobContract(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	commandID string,
+	basedOnRevision uint64,
+	basedOnCanonicalHash, reason string,
+	contract domain.JobContract,
+	principal auth.AuthenticatedPrincipal,
+) (CommandReceipt, domain.JobContractRevision, error) {
+	reason = strings.TrimSpace(reason)
+	canonical, _, err := domain.CanonicalizeJobContract(contract, domain.JobContractCanonicalizationVersion)
+	if err != nil {
+		return CommandReceipt{}, domain.JobContractRevision{}, err
+	}
+	request := struct {
+		BasedOnRevision        uint64             `json:"based_on_revision"`
+		BasedOnCanonicalHash   string             `json:"based_on_canonical_hash"`
+		Reason                 string             `json:"reason"`
+		Contract               domain.JobContract `json:"contract"`
+		PrincipalID            string             `json:"principal_id"`
+		PrincipalIssuer        string             `json:"principal_issuer"`
+		PrincipalSubject       string             `json:"principal_subject"`
+		PrincipalAuthenticated time.Time          `json:"principal_authenticated_at"`
+	}{
+		BasedOnRevision: basedOnRevision, BasedOnCanonicalHash: basedOnCanonicalHash,
+		Reason: reason, Contract: canonical,
+		PrincipalID: principal.PrincipalID(), PrincipalIssuer: principal.Issuer(),
+		PrincipalSubject: principal.Subject(), PrincipalAuthenticated: principal.AuthenticatedAt(),
+	}
+	return persistPlanningFact(
+		ctx, s, jobID, expectedRevision, commandID, "JOB_CONTRACT_AMENDMENT", request,
+		func(job domain.Job, now time.Time) (domain.JobContractRevision, error) {
+			return domain.NewJobContractAmendmentRevision(job, commandID, basedOnRevision, basedOnCanonicalHash, reason, principal, canonical, now)
+		},
+		func(job *domain.Job, revision domain.JobContractRevision) {
+			job.JobContractRevisions = append(job.JobContractRevisions, revision)
+			job.Goal = revision.Contract.Purpose
+			job.State = domain.JobDraft
+		},
+		func(job domain.Job) (domain.JobContractRevision, bool) {
+			for _, revision := range job.JobContractRevisions {
+				if revision.CommandID == commandID {
+					return revision, true
+				}
+			}
+			return domain.JobContractRevision{}, false
+		},
+	)
+}
+
 func (s *Store) AddJobApproval(ctx context.Context, jobID string, expectedRevision uint64, commandID string, contractRevision uint64, canonicalHash string, canonicalizationVersion uint32, reason string, principal auth.AuthenticatedPrincipal) (CommandReceipt, domain.JobApproval, error) {
 	reason = strings.TrimSpace(reason)
 	request := struct {
