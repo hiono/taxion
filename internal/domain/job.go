@@ -42,7 +42,7 @@ type Job struct {
 	JobApprovals                          []JobApproval               `json:"job_approvals,omitempty"`
 	Tasks                                 []Task                      `json:"tasks,omitempty"`
 	WorktreeAssignments                   []WorktreeAssignment        `json:"worktree_assignments,omitempty"`
-	WorktreeLifecycleEnforcedFromRevision  uint64                      `json:"worktree_lifecycle_enforced_from_revision,omitempty"`
+	WorktreeLifecycleEnforcedFromRevision uint64                      `json:"worktree_lifecycle_enforced_from_revision,omitempty"`
 	ExecutionPermissions                  []ExecutionPermission       `json:"execution_permissions,omitempty"`
 	RoleExecutions                        []RoleExecution             `json:"role_executions,omitempty"`
 	ProviderStartIntents                  []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
