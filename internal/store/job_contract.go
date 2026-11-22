@@ -41,7 +41,6 @@ func (s *Store) AddJobContractRevision(ctx context.Context, jobID string, expect
 	)
 }
 
-
 func (s *Store) AmendJobContract(
 	ctx context.Context,
 	jobID string,
@@ -58,13 +57,13 @@ func (s *Store) AmendJobContract(
 		return CommandReceipt{}, domain.JobContractRevision{}, err
 	}
 	request := struct {
-		BasedOnRevision        uint64             `json:"based_on_revision"`
-		BasedOnCanonicalHash   string             `json:"based_on_canonical_hash"`
-		Reason                 string             `json:"reason"`
-		Contract               domain.JobContract `json:"contract"`
-		PrincipalID            string             `json:"principal_id"`
-		PrincipalIssuer        string             `json:"principal_issuer"`
-		PrincipalSubject       string             `json:"principal_subject"`
+		BasedOnRevision      uint64             `json:"based_on_revision"`
+		BasedOnCanonicalHash string             `json:"based_on_canonical_hash"`
+		Reason               string             `json:"reason"`
+		Contract             domain.JobContract `json:"contract"`
+		PrincipalID          string             `json:"principal_id"`
+		PrincipalIssuer      string             `json:"principal_issuer"`
+		PrincipalSubject     string             `json:"principal_subject"`
 	}{
 		BasedOnRevision: basedOnRevision, BasedOnCanonicalHash: basedOnCanonicalHash,
 		Reason: reason, Contract: canonical,
