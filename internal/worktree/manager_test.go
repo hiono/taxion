@@ -64,6 +64,16 @@ func TestManagerRejectsOutOfScopeRepositoryAndChangedBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
+	gitTestRun(t, snapshot.WorktreePath, "config", "user.name", "Taxion Test")
+	gitTestRun(t, snapshot.WorktreePath, "config", "user.email", "taxion-test@example.invalid")
+	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "change.txt"), []byte("changed\n"), 0o600); err != nil {
+		t.Fatalf("write Worktree: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "add", "change.txt")
+	gitTestRun(t, snapshot.WorktreePath, "commit", "-m", "advance Worktree HEAD")
+	if err := manager.Verify(context.Background(), jobID, task, snapshot); err != nil {
+		t.Fatalf("descendant Worktree commit was rejected: %v", err)
+	}
 	gitTestRun(t, repository, "checkout", "--orphan", "unrelated")
 	gitTestRun(t, repository, "rm", "-rf", ".")
 	if err := os.WriteFile(filepath.Join(repository, "unrelated.txt"), []byte("unrelated\n"), 0o600); err != nil {

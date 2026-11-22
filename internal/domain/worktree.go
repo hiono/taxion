@@ -148,7 +148,7 @@ func validateWorktreeAssignments(job Job) error {
 		if execution.Role != RoleCoder && execution.Role != RoleReviewer {
 			continue
 		}
-		if execution.WorktreeID == "" && execution.CreatedRevision < job.WorktreeLifecycleEnforcedFromRevision {
+		if execution.WorktreeID == "" && (job.WorktreeLifecycleEnforcedFromRevision == 0 || execution.CreatedRevision < job.WorktreeLifecycleEnforcedFromRevision) {
 			continue
 		}
 		assignment, found := byTask[execution.TaskID]
@@ -164,7 +164,7 @@ func validGitCommit(value string) bool {
 		return false
 	}
 	_, err := hex.DecodeString(value)
-	return err == nil
+	return err == nil && value == strings.ToLower(value)
 }
 
 func worktreePathWithin(parent, child string) bool {
