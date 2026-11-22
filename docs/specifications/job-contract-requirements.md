@@ -65,7 +65,7 @@ The execution request identifies:
 - execution Role (`CODER` or `REVIEWER`)
 - exact effect and resource identity
 - Provider ID, account ID, and configuration SHA-256
-- requested token reservation and requested expiry
+- explicit turn / token reservations and requested expiry
 - a canonical request digest
 
 The Controller must:
