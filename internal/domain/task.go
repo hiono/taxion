@@ -63,6 +63,7 @@ type taskScope struct {
 	prohibited   []string
 	approval     []string
 }
+
 func TaskID(commandID string) string {
 	return planningOperationID("task", commandID)
 }
