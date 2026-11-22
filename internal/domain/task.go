@@ -15,9 +15,9 @@ type TaskRequest struct {
 	DependsOnTaskIDs        []string          `json:"depends_on_task_ids,omitempty"`
 	Title                   string            `json:"title"`
 	Purpose                 string            `json:"purpose"`
-	TargetRepositories      []string          `json:"target_repositories,omitempty"`
-	TargetResources         []string          `json:"target_resources,omitempty"`
-	Workspaces              []string          `json:"workspaces,omitempty"`
+	TargetRepositories      []string          `json:"target_repositories"`
+	TargetResources         []string          `json:"target_resources"`
+	Workspaces              []string          `json:"workspaces"`
 	AcceptanceCriteria      []string          `json:"acceptance_criteria"`
 	RequiredEvidence        []string          `json:"required_evidence,omitempty"`
 	ProhibitedEffects       []string          `json:"prohibited_effects,omitempty"`
@@ -306,8 +306,11 @@ func taskParentScope(job Job, revision JobContractRevision, parentTaskID string)
 }
 
 func resolveTaskScope(name string, requested, inherited []string) ([]string, error) {
-	if len(requested) == 0 {
+	if requested == nil {
 		return append([]string(nil), inherited...), nil
+	}
+	if len(requested) == 0 {
+		return []string{}, nil
 	}
 	values, err := canonicalContractSet("Task "+name, requested, true)
 	if err != nil {

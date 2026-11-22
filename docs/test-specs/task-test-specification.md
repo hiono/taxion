@@ -30,3 +30,4 @@
 | TK-026 | Store rollback | Inject failure while appending Task / receipt | No partial Task or receipt |
 | TK-027 | Restart restoration | Reopen Store after Task append | Task and approval provenance remain valid |
 | TK-028 | Authority separation | Successful Task creation | No RoleExecution, ExecutionPermission, Provider operation, or Worktree is created |
+| TK-029 | Explicit empty scope dimension | Request includes an explicit empty target list while another target dimension remains in scope | Persist the empty dimension; do not inherit access from the parent |
