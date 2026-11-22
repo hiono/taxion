@@ -136,7 +136,7 @@ Fields:
 - Role (`CODER` or `REVIEWER`), exact Effect, exact Resource
 - JobApprovalID, ContractRevision, CanonicalizationVersion, CanonicalHash
 - ProviderID, AccountID, ConfigurationSHA256
-- RequestSHA256 and trusted AssessmentSHA256
+- RequestSHA256 and the complete trusted effect assessment, including its evidence digest, reversibility, containment, mutability, approval requirement, validity, and canonical AssessmentSHA256
 - ReservedTurns, ReservedTokens, ExpiresAt, CreatedAt, CreatedRevision
 
 OperationID is deterministically derived from CommandID. A new permission requires a new CommandID. Exact replay returns the original fact; changed request fields under the same CommandID conflict.
