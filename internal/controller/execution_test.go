@@ -90,7 +90,7 @@ func approvedExecutionPermissionControllerFixture(t *testing.T) (*store.Store, s
 func testWorktreeSnapshot(jobID string, task domain.Task) domain.WorktreeSnapshot {
 	return domain.WorktreeSnapshot{
 		RepositoryID: task.TargetRepositories[0], RepositoryPath: "/tmp/taxion-test-repository",
-		WorktreePath: "/tmp/taxion-test-worktrees/" + domain.WorktreeID(jobID, task.ID),
+		WorktreePath:   "/tmp/taxion-test-worktrees/" + domain.WorktreeID(jobID, task.ID),
 		BaselineCommit: strings.Repeat("a", 40),
 	}
 }
