@@ -38,6 +38,8 @@ Provider Adapterの契約、Capability gate、Credential isolation、Controller 
 
 テストfixtureにE4 / E5の自己申告値を設定しない。
 
+Task-bound Coder Start fixtureはACTIVE Job、最新JobApproval、Task、JobApproval-bound ExecutionPermission、Task-bound Coder RoleExecution / ProviderStartIntentを使用する。ExecutionPermission assessmentはテスト用trusted assessorで発行し、Provider capabilityはE2 evidenceとして扱う。Reviewerはimmutable Worktree snapshotとread-only enforcement evidenceがない限りdispatch拒否を検証する。
+
 ## 4. Domain / invariant tests
 
 | ID | 観点 | 入力・操作 | 期待結果 |
@@ -70,6 +72,9 @@ Provider Adapterの契約、Capability gate、Credential isolation、Controller 
 | DOM-026 | Usage finality | Complete=true後の同一UsageID追加、別Operation / TurnへのUsageID再束縛 | 拒否 |
 | DOM-027 | Result identity | Start operationとTurnIDの組合せ不一致、accepted Session以外 | 拒否 |
 | DOM-028 | Usage identity | accepted Session以外、存在しないOperation / Turn | 拒否 |
+| DOM-029 | Task Start observation | Task / ExecutionPermission / RoleExecution / ProviderStartIntentのidentity不一致、または異なるJobApproval | 拒否 |
+| DOM-030 | Task Start observation authority | Task-bound observationへPlanner Principalを流用、またはPlanner observationにPrincipalなし | 拒否 |
+| DOM-031 | Task Start observation history | Job amendment後の既存Task operation evidence復元 | historical permission / approval provenanceを維持して復元 |
 
 ## 5. Adapter contract tests
 
@@ -216,6 +221,15 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-033 | Resume reconciliation | UNKNOWN Resumeへの同じOperationID / SessionIDのATTACHED evidence | ReconcilesUnknown=trueでappend-only解消 |
 | CTR-034 | Resume capability gate | E5 SessionReattach evidence不足 | Resume intent作成・Runtime.Resume前に拒否 |
 | CTR-035 | Resume session binding | accepted Session不一致、別Sessionへの付け替え | 拒否し、既存Sessionを維持 |
+| CTR-036 | Task Coder Start | exact current approval / Task / permission / RoleExecution / intent / Provider identity | intent永続化後、同一OperationIDでStartしACCEPTEDを保存 |
+| CTR-037 | Task Start permission stale | approval / revision / scope / expiry / budgetがdispatch直前に不一致 | Provider呼出し0回、Job facts不変 |
+| CTR-038 | Task Start Provider mismatch | Provider / account / configuration digest mismatch | Lookup / credential / Adapter呼出し前に拒否 |
+| CTR-039 | Task Start retry | 既存intent、observationなし、Start LookupでNOT_FOUND | permission再検証後、同じOperationIDでのみStart |
+| CTR-040 | Task Start ambiguous | StartまたはLookupがambiguous / unclassified error | UNKNOWNをappendし、新しいOperationIDで再送しない |
+| CTR-041 | Task Start reconciliation | UNKNOWNに対する同一OperationIDのaccepted / failed Lookup evidence | ReconcilesUnknown=trueでappend-only解消 |
+| CTR-042 | Task Start unsafe capability | Start Lookup / idempotency evidenceなし | Startを呼ばずUNKNOWN / unresolvedを保持 |
+| CTR-043 | Reviewer Start boundary | immutable Worktree snapshot / read-only enforcement evidenceなし | Provider dispatch 0回 |
+| CTR-044 | Task prompt integrity | caller-supplied prompt / context injection、Task immutable fieldsの改変 | 任意promptを受け付けず、deterministic prompt digestのみ使用 |
 
 ## 11. Regression tests
 

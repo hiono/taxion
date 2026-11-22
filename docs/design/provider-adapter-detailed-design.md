@@ -211,7 +211,7 @@ secret bufferのzeroizeはGo runtime / OSの複製まで保証するものでは
 
 ## 8. Controller実行フロー
 
-### 8.1 Start（実装済み：DRAFT Planningのみ）
+### 8.1 Start（DRAFT Planning実装済み）
 
 1. Controllerが現在のJobAggregateを取得する。
 2. Principal、PlanningAuthorization、Job state、Provider identity、budget、deadlineを検証する。
@@ -225,6 +225,24 @@ secret bufferのzeroizeはGo runtime / OSの複製まで保証するものでは
 10. grant期限後は既存OperationIDのLookupによる照合だけを許可し、NOT_FOUND後の新規Startを拒否する。
 
 Start observationが永続化されるとき、JobはProviderLifecycleEnforcedFromRevisionを記録する。既存Jobの読み取り互換性を維持し、このrevision以降のTurn / Resume intentにaccepted Start observationとSessionIDの一致を要求する。
+
+
+### 8.1.1 Task-bound Coder Start（Controller統合対象）
+
+Task-bound StartはDRAFT Planning Startと別のauthority pathとする。Planner用PlanningAuthorizationを流用せず、現在のJobApproval・Task・ExecutionPermission・RoleExecution・ProviderStartIntentを検証する。
+
+1. ProviderControllerは、trusted ExecutionControllerが注入されていない場合、Task-bound dispatchを拒否する。
+2. JobAggregateから対象Task、Coder RoleExecution、ProviderStartIntent、ExecutionPermissionを解決し、各IDとTask / Role / Operation / request digestの一致を検証する。
+3. ExecutionController.ValidatePermissionへ実際のExecutionPermissionRequestを渡し、最新JobApproval、Contract revision / hash、Task scope、Resource、Effect、Provider configuration、budget、deadline、trusted assessment、permission expiryをdispatch直前に再検証する。
+4. Runtime.IdentityはExecutionPermissionのProviderID / AccountID / ConfigurationSHA256と完全一致しなければならない。
+5. PromptとContextは呼出し側から受け取らない。Jobの原文依頼とimmutable TaskのTitle / Purpose / AcceptanceCriteria / RequiredEvidence / target scopeから決定的に構築し、PromptSHA256を計算する。OperationID、RoleExecutionID、request digest、budget、deadlineは保存済みProviderStartIntent / ExecutionPermissionから取得する。
+6. Start intentは既にJobAggregateへ永続化されていることを必須とする。Start呼出し前にCapabilityを確認し、同一OperationIDのStart LookupまたはStart idempotencyのE4 evidenceがない場合はdispatchしない。
+7. Lookup capabilityがある場合は同一OperationIDを先に照会する。既存operationが見つかった場合はその証拠を観測し、NOT_FOUNDが検証された場合だけ、permissionを再検証して同じOperationIDでStartする。Lookupが失敗・不明の場合はUNKNOWNを保存し、Startを呼び出さない。Lookupがない場合は実証済みStart idempotencyがある場合だけ同一OperationIDでStartする。
+8. Start成功、definitive failure、ambiguous / unclassified failureをそれぞれACCEPTED、FAILED、UNKNOWNとしてJobAggregateへappend-onlyで保存する。Observation保存に失敗した場合は成功扱いせず、次回はLookup / idempotencyで同一OperationIDを照合する。
+9. UNKNOWNは同じOperationIDのLookupまたは実証済みidempotencyでのみ解消する。新しいOperationIDで再送しない。permission失効後は新規Startを禁止し、既存OperationIDのLookupだけを許可する。
+10. Task-bound Observationの作成はJobApprovalに紐付くExecutionPermissionとTaskをDomainで検証する。Planner Observationは従来どおりPlanningAuthorization ownerのPrincipalを検証する。Execution AgentをHUMAN Principalとして偽装しない。
+
+Reviewer Startは、ADR-500 / ADR-408に従うimmutable Worktree snapshotとread-only boundaryを実行環境で強制できるまで拒否する。TaskのRoleがREVIEWERであること、またはEffect assessmentのMutating=falseだけではread-only executionの証明にならない。Worktree / Reviewer handoffはPhase 7で扱う。
 
 ### 8.2 Send（実装済み）
 

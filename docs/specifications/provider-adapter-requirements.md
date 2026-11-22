@@ -24,6 +24,7 @@ Status: Draft
 - timeout、disconnect、receipt欠落、process restart時のUNKNOWN保持と照合
 - CredentialBroker / CredentialLeaseによるcredential仲介とsecret redaction
 - fake Adapter、Domain / Store / Controller / Adapterの自動テスト
+- Task-bound Coder Startに対するJobApproval / Task / ExecutionPermission / RoleExecution / ProviderStartIntentの再検証と、Start observation / UNKNOWN reconciliation
 
 ### 2.2 対象外
 
@@ -31,7 +32,8 @@ Status: Draft
 - 実Providerの認証情報・アカウントの準備
 - OS-level filesystem / process / network / host Sandboxの完全な強制
 - Git Worktreeの作成、排他、Handoff
-- Coder / Reviewerによる実装Jobの実行
+- Task-bound Coder Provider Start dispatchとStart observation / UNKNOWN reconciliation（CoderのTurn / Result / Worktree lifecycleは後続段階）
+- ReviewerのProvider Startはimmutable Worktree snapshotとread-only boundaryの強制が成立するまで拒否する。Reviewerの実行・HandoffはPhase 7で扱う。
 
 対象外の能力を本Issueの完了証拠として扱わない。
 
@@ -67,7 +69,7 @@ Status: Draft
 - JobID、Job revision、RoleExecutionID
 - 認証済みHUMAN PrincipalとIntakeProvenance
 - DRAFT planningの場合はPlanningAuthorizationの有効性、Job / request digest、Provider / account / configuration、read-only context、budget、deadline
-- 承認済み実行の場合はJobApprovalの正確なContract revision、Task scope、resource scope、budget、deadline
+- 承認済み実行の場合はJobApprovalの正確なContract revision、Task scope、resource scope、budget、deadline。Task-bound StartではExecutionPermissionをdispatch直前に再検証し、Task・RoleExecution・ProviderStartIntent・Provider identityを完全一致させる
 - 操作対象のProvider / account / SDK・protocol version / configuration identity
 - Context documentはID、content digest、実contentの一致を検証する。Snapshot modeはReferenceと一致する単一documentを要求する。Documents modeはID昇順で各documentの「ID + LF + SHA256 + LF」を連結したUTF-8 bytesのSHA-256をReadOnlyBoundary.SHA256と照合する。
 - 当該操作に必要なCapabilityとその証拠水準
