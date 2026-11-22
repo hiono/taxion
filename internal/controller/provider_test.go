@@ -1229,7 +1229,7 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 		t.Fatalf("Authorize: %v", err)
 	}
 	_, execution, intent, err := executionController.StartTaskExecution(
-		ctx, permission.ID, "cmd_b2222222222222222222222222222222", permissionRequest,
+		ctx, permission.ID, "cmd_b2222222222222222222222222222222", permissionRequest, testWorktreeSnapshot(jobID, task),
 	)
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
@@ -1253,7 +1253,7 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
 		},
 	}
-	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
+	controller, err := NewProviderControllerWithExecutionAndWorktree(database, runtime, executionController, &fakeTaskWorktreeVerifier{})
 	if err != nil {
 		t.Fatalf("NewProviderControllerWithExecution: %v", err)
 	}
@@ -1312,7 +1312,7 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 		t.Fatalf("Authorize: %v", err)
 	}
 	_, execution, intent, err := executionController.StartTaskExecution(
-		ctx, permission.ID, "cmd_b4444444444444444444444444444444", request,
+		ctx, permission.ID, "cmd_b4444444444444444444444444444444", request, testWorktreeSnapshot(jobID, task),
 	)
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
@@ -1384,7 +1384,7 @@ func TestProviderControllerRejectsTaskReviewerStartWithoutReadOnlyWorktreeBounda
 		t.Fatalf("Authorize Reviewer: %v", err)
 	}
 	_, execution, _, err := executionController.StartTaskExecution(
-		ctx, permission.ID, "cmd_b6666666666666666666666666666666", request,
+		ctx, permission.ID, "cmd_b6666666666666666666666666666666", request, testWorktreeSnapshot(jobID, task),
 	)
 	if err != nil {
 		t.Fatalf("StartTaskExecution Reviewer: %v", err)

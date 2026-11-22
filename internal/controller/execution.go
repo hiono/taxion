@@ -13,7 +13,7 @@ import (
 type ExecutionPermissionStore interface {
 	GetJob(context.Context, string) (domain.Job, error)
 	AddExecutionPermission(context.Context, uint64, domain.ExecutionPermissionRequest, string, domain.ExecutionEffectAssessment) (store.CommandReceipt, domain.ExecutionPermission, error)
-	StartTaskExecution(context.Context, uint64, string, string, string, string, string) (store.CommandReceipt, domain.TaskExecutionStart, error)
+	StartTaskExecution(context.Context, uint64, string, string, string, string, string, domain.WorktreeSnapshot) (store.CommandReceipt, domain.TaskExecutionStart, error)
 }
 
 type ExecutionEffectAssessor interface {
@@ -100,6 +100,7 @@ func (c *ExecutionController) StartTaskExecution(
 	ctx context.Context,
 	permissionID, commandID string,
 	request domain.ExecutionPermissionRequest,
+	snapshot domain.WorktreeSnapshot,
 ) (store.CommandReceipt, domain.RoleExecution, domain.ProviderStartIntent, error) {
 	permission, err := c.ValidatePermission(ctx, permissionID, request)
 	if err != nil {
@@ -110,7 +111,7 @@ func (c *ExecutionController) StartTaskExecution(
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, err
 	}
 	receipt, start, err := c.store.StartTaskExecution(
-		ctx, job.Revision, request.JobID, request.TaskID, permissionID, commandID, permission.RequestSHA256,
+		ctx, job.Revision, request.JobID, request.TaskID, permissionID, commandID, permission.RequestSHA256, snapshot,
 	)
 	if err != nil {
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, err

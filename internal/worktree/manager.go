@@ -19,12 +19,7 @@ type Repository struct {
 	Path string
 }
 
-type Snapshot struct {
-	RepositoryID   string
-	RepositoryPath string
-	WorktreePath   string
-	BaselineCommit string
-}
+type Snapshot = domain.WorktreeSnapshot
 
 type Manager struct {
 	root         string

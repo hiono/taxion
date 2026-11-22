@@ -87,6 +87,24 @@ func approvedExecutionPermissionControllerFixture(t *testing.T) (*store.Store, s
 	return database, jobID, revision, task
 }
 
+func testWorktreeSnapshot(jobID string, task domain.Task) domain.WorktreeSnapshot {
+	return domain.WorktreeSnapshot{
+		RepositoryID: task.TargetRepositories[0], RepositoryPath: "/tmp/taxion-test-repository",
+		WorktreePath: "/tmp/taxion-test-worktrees/" + domain.WorktreeID(jobID, task.ID),
+		BaselineCommit: strings.Repeat("a", 40),
+	}
+}
+
+type fakeTaskWorktreeVerifier struct {
+	err   error
+	calls int
+}
+
+func (v *fakeTaskWorktreeVerifier) Verify(context.Context, string, domain.Task, domain.WorktreeSnapshot) error {
+	v.calls++
+	return v.err
+}
+
 func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	now := time.Now().UTC().Round(0)
@@ -126,7 +144,7 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 		t.Fatalf("validated permission = %q, want %q", validated.ID, permission.ID)
 	}
 	startReceipt, startedExecution, startIntent, err := controller.StartTaskExecution(
-		context.Background(), permission.ID, "cmd_a7070707070707070707070707070707", request,
+		context.Background(), permission.ID, "cmd_a7070707070707070707070707070707", request, testWorktreeSnapshot(jobID, task),
 	)
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
@@ -137,6 +155,31 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 		startIntent.ID != permission.OperationID {
 		t.Fatalf("Task execution start lost its permission binding: receipt=%#v execution=%#v intent=%#v",
 			startReceipt, startedExecution, startIntent)
+	}
+	snapshot := testWorktreeSnapshot(jobID, task)
+	if startedExecution.WorktreeID != domain.WorktreeID(jobID, task.ID) ||
+		startIntent.WorktreeID != startedExecution.WorktreeID {
+		t.Fatalf("Task execution start lost its Worktree binding: execution=%#v intent=%#v", startedExecution, startIntent)
+	}
+	jobWithWorktree, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Task execution start: %v", err)
+	}
+	if len(jobWithWorktree.WorktreeAssignments) != 1 {
+		t.Fatalf("Worktree assignment count = %d, want 1", len(jobWithWorktree.WorktreeAssignments))
+	}
+	assignment := jobWithWorktree.WorktreeAssignments[0]
+	if assignment.OwnerRoleExecutionID != startedExecution.ID ||
+		assignment.ID != startedExecution.WorktreeID || assignment.Snapshot() != snapshot {
+		t.Fatalf("Worktree assignment does not match its owner or snapshot: %#v", assignment)
+	}
+	replayedReceipt, replayedExecution, replayedIntent, err := controller.StartTaskExecution(
+		context.Background(), permission.ID, "cmd_a7070707070707070707070707070707", request, snapshot,
+	)
+	if err != nil || replayedReceipt != startReceipt || replayedExecution != startedExecution ||
+		replayedIntent != startIntent {
+		t.Fatalf("exact Task execution replay changed persisted facts: receipt=%#v execution=%#v intent=%#v err=%v",
+			replayedReceipt, replayedExecution, replayedIntent, err)
 	}
 	jobAfterStart, err := database.GetJob(context.Background(), jobID)
 	if err != nil {

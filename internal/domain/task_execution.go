@@ -9,11 +9,13 @@ import (
 type TaskExecutionStart struct {
 	RoleExecution       RoleExecution       `json:"role_execution"`
 	ProviderStartIntent ProviderStartIntent `json:"provider_start_intent"`
+	WorktreeAssignment  WorktreeAssignment  `json:"worktree_assignment"`
 }
 
 func NewTaskRoleExecutionStart(
 	job Job,
 	taskID, permissionID, commandID, requestSHA256 string,
+	snapshot WorktreeSnapshot,
 	now time.Time,
 ) (TaskExecutionStart, error) {
 	if err := job.Validate(); err != nil {
@@ -55,18 +57,22 @@ func NewTaskRoleExecutionStart(
 	createdRevision := job.Revision + 1
 	execution := RoleExecution{
 		ID: RoleExecutionID(commandID), CommandID: commandID, JobID: job.ID,
-		Role: permission.Role, TaskID: task.ID, ExecutionPermissionID: permission.ID,
+		Role: permission.Role, TaskID: task.ID, WorktreeID: WorktreeID(job.ID, task.ID), ExecutionPermissionID: permission.ID,
 		ProviderStartOperationID: permission.OperationID,
 		CreatedAt:                now, CreatedRevision: createdRevision,
 	}
 	intent := ProviderStartIntent{
 		ID: permission.OperationID, CommandID: commandID, JobID: job.ID,
-		RoleExecutionID: execution.ID, TaskID: task.ID, ExecutionPermissionID: permission.ID,
+		RoleExecutionID: execution.ID, TaskID: task.ID, WorktreeID: execution.WorktreeID, ExecutionPermissionID: permission.ID,
 		ProviderID: permission.ProviderID, AccountID: permission.AccountID,
 		ConfigurationSHA256: permission.ConfigurationSHA256,
 		Budget:              PlanningBudget{MaxTurns: permission.ReservedTurns, MaxTokens: permission.ReservedTokens},
 		Deadline:            permission.ExpiresAt, RequestSHA256: permission.RequestSHA256,
 		CreatedAt: now, CreatedRevision: createdRevision,
+	}
+	assignment, err := NewWorktreeAssignment(job, task, execution, snapshot, now)
+	if err != nil {
+		return TaskExecutionStart{}, err
 	}
 	if err := execution.Validate(job); err != nil {
 		return TaskExecutionStart{}, err
@@ -74,5 +80,5 @@ func NewTaskRoleExecutionStart(
 	if err := intent.Validate(job, execution); err != nil {
 		return TaskExecutionStart{}, err
 	}
-	return TaskExecutionStart{RoleExecution: execution, ProviderStartIntent: intent}, nil
+	return TaskExecutionStart{RoleExecution: execution, ProviderStartIntent: intent, WorktreeAssignment: assignment}, nil
 }

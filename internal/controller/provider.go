@@ -40,12 +40,17 @@ type PlanningProviderRuntime interface {
 	Usage(context.Context, provider.UsageRequest) (provider.Usage, error)
 }
 
+type TaskWorktreeVerifier interface {
+	Verify(context.Context, string, domain.Task, domain.WorktreeSnapshot) error
+}
+
 type ProviderController struct {
-	store     ProviderExecutionStore
-	runtime   PlanningProviderRuntime
-	planning  *PlanningController
-	execution *ExecutionController
-	now       func() time.Time
+	store            ProviderExecutionStore
+	runtime          PlanningProviderRuntime
+	planning         *PlanningController
+	execution        *ExecutionController
+	worktreeVerifier TaskWorktreeVerifier
+	now              func() time.Time
 }
 
 func NewProviderController(lifecycleStore ProviderExecutionStore, runtime PlanningProviderRuntime) (*ProviderController, error) {
@@ -75,6 +80,23 @@ func NewProviderControllerWithExecution(
 		return nil, err
 	}
 	controller.execution = execution
+	return controller, nil
+}
+
+func NewProviderControllerWithExecutionAndWorktree(
+	lifecycleStore ProviderExecutionStore,
+	runtime PlanningProviderRuntime,
+	execution *ExecutionController,
+	verifier TaskWorktreeVerifier,
+) (*ProviderController, error) {
+	if verifier == nil {
+		return nil, errors.New("trusted Task Worktree verifier is required for Task-bound Provider dispatch")
+	}
+	controller, err := NewProviderControllerWithExecution(lifecycleStore, runtime, execution)
+	if err != nil {
+		return nil, err
+	}
+	controller.worktreeVerifier = verifier
 	return controller, nil
 }
 
@@ -288,6 +310,24 @@ func (c *ProviderController) DispatchTaskExecution(
 	task, taskFound := findTask(job, execution.TaskID)
 	if !taskFound {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch Task was not found")
+	}
+	if c.worktreeVerifier == nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch requires a trusted Worktree verifier")
+	}
+	var assignment domain.WorktreeAssignment
+	assignmentFound := false
+	for _, candidate := range job.WorktreeAssignments {
+		if candidate.ID == execution.WorktreeID {
+			assignment, assignmentFound = candidate, true
+			break
+		}
+	}
+	if !assignmentFound || assignment.OwnerRoleExecutionID != execution.ID ||
+		assignment.TaskID != task.ID || assignment.JobID != job.ID {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch requires the matching persisted Worktree assignment")
+	}
+	if err := c.worktreeVerifier.Verify(ctx, job.ID, task, assignment.Snapshot()); err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, fmt.Errorf("verify Task Worktree before Provider dispatch: %w", err)
 	}
 	var contract domain.JobContract
 	contractFound := false

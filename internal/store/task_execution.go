@@ -40,10 +40,16 @@ func (s *Store) StartTaskExecution(
 					continue
 				}
 				for _, intent := range job.ProviderStartIntents {
-					if intent.RoleExecutionID == execution.ID {
-						return domain.TaskExecutionStart{
-							RoleExecution: execution, ProviderStartIntent: intent,
-						}, true
+					if intent.RoleExecutionID != execution.ID {
+						continue
+					}
+					for _, assignment := range job.WorktreeAssignments {
+						if assignment.ID == execution.WorktreeID {
+							return domain.TaskExecutionStart{
+								RoleExecution: execution, ProviderStartIntent: intent,
+								WorktreeAssignment: assignment,
+							}, true
+						}
 					}
 				}
 			}

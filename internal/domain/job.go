@@ -41,6 +41,7 @@ type Job struct {
 	JobContractRevisions                  []JobContractRevision       `json:"job_contract_revisions,omitempty"`
 	JobApprovals                          []JobApproval               `json:"job_approvals,omitempty"`
 	Tasks                                 []Task                      `json:"tasks,omitempty"`
+	WorktreeAssignments                   []WorktreeAssignment        `json:"worktree_assignments,omitempty"`
 	ExecutionPermissions                  []ExecutionPermission       `json:"execution_permissions,omitempty"`
 	RoleExecutions                        []RoleExecution             `json:"role_executions,omitempty"`
 	ProviderStartIntents                  []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
@@ -214,6 +215,7 @@ type RoleExecution struct {
 	JobID                    string    `json:"job_id"`
 	Role                     string    `json:"role"`
 	TaskID                   string    `json:"task_id,omitempty"`
+	WorktreeID               string    `json:"worktree_id,omitempty"`
 	PlanningAuthorizationID  string    `json:"planning_authorization_id"`
 	ExecutionPermissionID    string    `json:"execution_permission_id,omitempty"`
 	ProviderStartOperationID string    `json:"provider_start_operation_id"`
@@ -228,6 +230,7 @@ type ProviderStartIntent struct {
 	RoleExecutionID         string                   `json:"role_execution_id"`
 	PlanningAuthorizationID string                   `json:"planning_authorization_id"`
 	TaskID                  string                   `json:"task_id,omitempty"`
+	WorktreeID              string                   `json:"worktree_id,omitempty"`
 	ExecutionPermissionID   string                   `json:"execution_permission_id,omitempty"`
 	ProviderID              string                   `json:"provider_id"`
 	AccountID               string                   `json:"account_id"`
@@ -336,7 +339,7 @@ func (e RoleExecution) Validate(job Job) error {
 	}
 	switch e.Role {
 	case RolePlanner:
-		if !validPlanningIdentity(e.PlanningAuthorizationID) || e.TaskID != "" || e.ExecutionPermissionID != "" ||
+		if !validPlanningIdentity(e.PlanningAuthorizationID) || e.TaskID != "" || e.WorktreeID != "" || e.ExecutionPermissionID != "" ||
 			e.ProviderStartOperationID != ProviderStartOperationID(e.CommandID) {
 			return errors.New("DRAFT planning RoleExecution must be a Taskless PLANNER")
 		}
@@ -355,8 +358,8 @@ func (e RoleExecution) Validate(job Job) error {
 		return errors.New("RoleExecution PlanningAuthorization was not found")
 	case RoleCoder, RoleReviewer:
 		if e.PlanningAuthorizationID != "" || !validPlanningIdentity(e.TaskID) ||
-			!validPlanningIdentity(e.ExecutionPermissionID) {
-			return errors.New("Task RoleExecution requires TaskID and ExecutionPermissionID only")
+			!validPlanningIdentity(e.WorktreeID) || !validPlanningIdentity(e.ExecutionPermissionID) {
+			return errors.New("Task RoleExecution requires TaskID, WorktreeID, and ExecutionPermissionID")
 		}
 		task, taskFound := taskByID(job, e.TaskID)
 		permission, permissionFound := executionPermissionByID(job, e.ExecutionPermissionID)
@@ -386,7 +389,7 @@ func (p ProviderStartIntent) Validate(job Job, execution RoleExecution) error {
 		return errors.New("Provider Start intent identity or digest is invalid")
 	}
 	if p.CommandID != execution.CommandID || p.JobID != job.ID ||
-		p.RoleExecutionID != execution.ID || p.TaskID != execution.TaskID ||
+		p.RoleExecutionID != execution.ID || p.TaskID != execution.TaskID || p.WorktreeID != execution.WorktreeID ||
 		p.ExecutionPermissionID != execution.ExecutionPermissionID ||
 		p.PlanningAuthorizationID != execution.PlanningAuthorizationID ||
 		p.CreatedAt.IsZero() || !p.CreatedAt.Equal(execution.CreatedAt) ||
@@ -632,7 +635,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	appendOnlyFacts := uint64(len(j.JobContractRevisions) + len(j.JobApprovals) + len(j.Tasks) + len(j.ExecutionPermissions) + len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.ProviderResultObservations) + len(j.ProviderUsageObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
+	appendOnlyFacts := uint64(len(j.JobContractRevisions) + len(j.JobApprovals) + len(j.Tasks) + len(j.WorktreeAssignments) + len(j.ExecutionPermissions) + len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.ProviderResultObservations) + len(j.ProviderUsageObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
 	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
@@ -1162,5 +1165,8 @@ func (j Job) Validate() error {
 	if err := validateExecutionPermissionFacts(j); err != nil {
 		return err
 	}
-	return validateTaskFacts(j)
+	if err := validateTaskFacts(j); err != nil {
+		return err
+	}
+	return validateWorktreeAssignments(j)
 }
