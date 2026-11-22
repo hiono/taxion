@@ -61,7 +61,7 @@ JobApproval is distinct from PlanningAuthorization and from ExecutionPermission.
 An ExecutionPermission is an immutable, one-operation authorization fact. It is not a reusable Job-wide grant and is not implied by JobApproval, ACTIVE state, Observation, Conformance, or Admission.
 
 The execution request identifies:
-- Job ID and a stable CommandID / OperationID
+- Job ID, Task ID, and a stable CommandID / OperationID
 - execution Role (`CODER` or `REVIEWER`)
 - exact effect and resource identity
 - Provider ID, account ID, and configuration SHA-256
@@ -71,17 +71,20 @@ The execution request identifies:
 The Controller must:
 - require an ACTIVE Job and the exact latest JobContractRevision / JobApproval pair;
 - verify the approval's Job ID, revision, canonicalization version, canonical hash, and deadline;
-- bind the permission to the exact JobApproval ID, revision, canonical hash, OperationID, effect, resource, Role, Provider / account / configuration, request digest, token reservation, and expiry;
+- bind the permission to the exact JobApproval ID, revision, canonical hash, Task ID, OperationID, effect, resource, Role, Provider / account / configuration, request digest, turn / token reservations, and expiry;
+- require the referenced Task to belong to the same Job and latest approved contract revision;
+- require the resource to be inside both the approved JobContract and the Task's effective exact scope;
+- require ReservedTurns / ReservedTokens not to exceed either the JobContract budget or the Task budget;
 - require the configuration digest to equal the approved JobContract configuration reference;
 - require the resource identity to exactly match one approved target repository, target resource, or workspace;
 - reject effects listed in prohibited effects or approval-required effects;
 - use a trusted effect assessor to evaluate reversibility, containment, and approval requirement. An unknown effect name is not rejected solely because it is unknown; it is denied when its impact cannot be assessed or contained;
-- reserve one turn and the requested token amount against the approved MaxTurns / MaxTokens budget, counting existing permissions and their observed Usage without double-counting reservations;
+- reserve the explicit turn / token amounts against both JobContract and Task MaxTurns / MaxTokens budgets. Reservations are cumulative in this unit; Usage reconciliation and reservation release are separate lifecycle work;
 - fail closed when approval, scope, provider identity, assessment evidence, deadline, or budget cannot be verified.
 
 The Store must repeat all JobAggregate-dependent checks in the same transaction that appends the permission. Exact CommandID replay returns the original permission; changed request identity or digest is an idempotency conflict. A permission is valid only for its exact OperationID and request digest. A later contract revision or expired deadline invalidates its use.
 
-A permission does not itself call a Provider or prove that an effect occurred. Provider execution must consume the exact permission before the external side effect; the execution integration and runtime containment remain separate gates.
+A permission does not itself call a Provider or prove that an effect occurred. A single Task-bound Coder / Reviewer RoleExecution and ProviderStartIntent may consume it atomically. Provider execution must revalidate the actual request and exact permission immediately before the external side effect; runtime containment remains a separate gate.
 
 ## 7. Planner proposal Controller requirements
 
@@ -89,7 +92,7 @@ The Controller must require a validated AuthenticatedPrincipal matching the Plan
 
 The Controller must persist the proposal only through the JobAggregate Store command using the current expected revision. It must not call the Provider or create JobApproval / ExecutionPermission. Exact idempotent replay of an already committed proposal is allowed after grant expiry only when the same CommandID and canonical request are supplied; changed payload or proposer must be rejected.
 
-## 7. Human approval ingress requirements
+## 8. Human approval ingress requirements
 
 The approval ingress must use the existing OIDC Trusted Ingress and accept only a validated AuthenticatedPrincipal. It must require the caller to provide the exact Job ID, contract revision, canonical hash, canonicalization version, and a non-empty human reason. It must not silently select or approve the latest revision.
 
@@ -97,7 +100,7 @@ The Controller must verify that the supplied identity matches the latest immutab
 
 An exact retry of an already committed approval may return its original receipt after the Job becomes ACTIVE. JobApproval records human acceptance only; it does not create ExecutionPermission, authorize Provider execution, or bypass effect / resource checks.
 
-## 8. Planner Result provenance requirements
+## 9. Planner Result provenance requirements
 
 A Planner proposal must identify the exact final Provider Result from which its contract was derived. The revision must append the Result observation ID, Result content SHA-256, and producing RoleExecution ID as immutable provenance.
 
@@ -113,7 +116,7 @@ The Store / Domain mutation boundary must revalidate the exact Result observatio
 
 Exact proposal replay must preserve the original Result provenance. Reuse of the CommandID with a different Result ID, Result digest, RoleExecution, or contract must fail without mutation. A later Result observation must not silently replace the source of an existing revision.
 
-## 9. Planner workflow orchestration
+## 10. Planner workflow orchestration
 
 The upper-level Planner workflow must invoke the JobContract proposal only after the exact planning Turn is terminal and its final Provider Result has been persisted.
 
@@ -123,7 +126,7 @@ The workflow must retrieve and persist the final Provider Result when no matchin
 
 The workflow must not issue JobApproval, ExecutionPermission, or start another Provider operation. Proposal retries must use the same CommandID and exact Result provenance; changed identities or payloads must be rejected by the existing idempotency boundary.
 
-## 10. References
+## 11. References
 
 - ADR-201: Job aggregate and command boundary
 - ADR-202: Domain invariants across state paths

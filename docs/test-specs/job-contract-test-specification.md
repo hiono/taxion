@@ -137,3 +137,9 @@
 | JC-266 | Restart restoration | Reopen Store after permission append | Permission and approval provenance remain valid |
 | JC-267 | Concurrent budget race | Two requests reserve the last budget concurrently | At most one commits; loser sees current revision / budget and is rejected |
 | JC-268 | Permission authority separation | Successful permission issuance | No Provider call, JobApproval mutation, or JobContract revision |
+| JC-269 | Task binding | Permission request references missing / foreign / stale Task or a resource outside Task scope | Reject without mutation |
+| JC-270 | Task budget | ReservedTurns / ReservedTokens exceed Task budget but fit Job budget | Reject without mutation |
+| JC-271 | Single-use permission | Same permission is referenced by a second RoleExecution / ProviderStartIntent | Reject; first binding remains unchanged |
+| JC-272 | Atomic Task execution start | Valid Task / Permission / Start Command | Append exactly one Coder / Reviewer RoleExecution and paired ProviderStartIntent in one revision |
+| JC-273 | Start intent replay | Same Start Command and exact Task / Permission | Return original RoleExecution and ProviderStartIntent |
+| JC-274 | Start intent conflict | Same CommandID with changed Task / Permission / request digest | Reject without mutation |
