@@ -841,4 +841,14 @@ func TestJobApproveCLIRejectsMissingExactRevisionFieldsBeforeAuthentication(t *t
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Store path exists after invalid approval request: %v", err)
 	}
+
+	amendPath := filepath.Join(t.TempDir(), "must-not-exist", "amend.sqlite")
+	code = Run(context.Background(), []string{"job", "amend", "--store", amendPath, "job_missing"},
+		&stdout, &stderr, VersionInfo{})
+	if code != 2 {
+		t.Fatalf("amend exit code = %d, want 2; stderr=%q", code, stderr.String())
+	}
+	if _, err := os.Stat(amendPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Store path exists after invalid amendment request: %v", err)
+	}
 }
