@@ -3,7 +3,7 @@
 Version: 1.0
 Date: 2026-11-20
 Governing contract: [Product Contract](../specifications/product-contract.md)
-Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-500, ADR-501, ADR-700, ADR-701, ADR-800, ADR-811
+Governing ADRs: ADR-000, ADR-004, ADR-100, ADR-101, ADR-106, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-500, ADR-501, ADR-502, ADR-700, ADR-701, ADR-800, ADR-811
 Detailed Provider Adapter tests: [Provider Adapter テスト仕様書](provider-adapter-test-specification.md)
 
 ## 1. Purpose
@@ -283,6 +283,17 @@ Domain / Store検証ケースは [Job Contract Test Specification](job-contract-
 - token、cookie、secretをJob、provenance、ログへ保存しない。
 - 未認証のローカルCLI DRAFT作成は製品trusted intakeとみなさず、productionのPlanningAuthorization / JobApprovalへ接続しない。
 
+### AT-023: Ingress Client and Execution Agent separation
+
+**Given** 人間がIngress Clientを介してTaxionへJobを依頼し、実行候補となる外部Agentが存在する。
+**When** TaxionがJobを受け付け、Execution Agentへ実行を委譲する。
+**Then**
+- Jobの依頼主体はTrusted Ingressが確定した認証済みHUMAN Principalであり、Ingress Client自体ではない。
+- Ingress Clientは人間の依頼をTaxionへ伝達する。
+- Execution AgentはJobの目的と要求能力に基づいてTaxionが選択する。
+- Ingress Clientの自己申告や指定だけでExecution Agent、Jobの依頼主体、Job authorityを確定しない。
+- 同じ製品がIngress ClientとExecution Agentの両方を担う場合も、Jobごとの役割とidentityを区別する。
+
 ## 4. Evidence recording
 
 Provider Adapter固有のDomain / Store / Controller / Runtime判定は[Provider Adapter テスト仕様書](provider-adapter-test-specification.md)に従う。既存Jobの読み取り互換性を維持し、Provider Start observationの導入revision以降に作成されたTurn / Resumeだけにaccepted Start observationの厳密なSession bindingを適用する。
@@ -302,6 +313,6 @@ Provider Adapter固有のDomain / Store / Controller / Runtime判定は[Provider
 
 ## 5. Product acceptance rule
 
-Taxionの製品受入れはAT-013の実Job完遂を中心に判定する。AT-001〜AT-012およびAT-014〜AT-022は必要な下位契約・能力検証であり、個別に合格してもAT-013の代替にはならない。
+Taxionの製品受入れはAT-013の実Job完遂を中心に判定する。AT-001〜AT-012およびAT-014〜AT-023は必要な下位契約・能力検証であり、個別に合格してもAT-013の代替にはならない。
 
 
