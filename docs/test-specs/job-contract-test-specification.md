@@ -129,7 +129,7 @@
 | JC-258 | Provider identity mismatch | Configuration digest differs from approved configuration reference | Reject without mutation |
 | JC-259 | Budget upper boundary | Reservation exactly reaches MaxTurns / MaxTokens | Accept |
 | JC-260 | Budget overflow | Reservation exceeds either approved limit | Reject without mutation |
-| JC-261 | Cumulative reservation | Each permission reserves one turn and its token amount | Cumulative reservations never exceed the approved budget; no refund is inferred from missing Usage |
+| JC-261 | Cumulative reservation | Each permission reserves its explicit ReservedTurns and ReservedTokens | Cumulative reservations never exceed the approved budget; no refund is inferred from missing Usage |
 | JC-262 | Exact permission replay | Same CommandID and identical request | Return original receipt and permission |
 | JC-263 | Permission idempotency conflict | Same CommandID with changed effect / resource / provider / digest | Reject without mutation |
 | JC-264 | Permission operation binding | Reuse permission with another OperationID or request digest | Reject before effect |

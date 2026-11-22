@@ -129,5 +129,5 @@ The workflow must not issue JobApproval, ExecutionPermission, or start another P
 - ADR-202: Domain invariants across state paths
 - ADR-500: Job authority and prohibited effects
 - ADR-501: Trusted ingress and human Principal
-- Product Contract §4.3
-- Product Acceptance AT-004
+- Product Contract §4.3 / §4.4
+- Product Acceptance AT-004 / AT-010

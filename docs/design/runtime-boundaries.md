@@ -76,8 +76,8 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 1. Controllerが現在のJobApproval、Task scope、budget、deadline、Runtime configurationを検証する。
 2. ExecutionControllerがeffect / resource / Provider identity / request digestを評価し、JobApprovalと最新JobContractに束縛した単一OperationのExecutionPermissionをJobAggregateへ保存する。
 3. 必要なTaskとRoleExecutionをJobAggregate Commandで作成し、Provider operationはそのPermission IDを参照する。
-3. Coding TaskにWorktreeを割り当て、repository identity、Worktree path、baseline commit、ownerを永続化する。
-4. Provider呼出し前にOperationIDとimmutable operation intentをJobAggregateへ保存する。
+4. Coding TaskにWorktreeを割り当て、repository identity、Worktree path、baseline commit、ownerを永続化する。
+5. Provider呼出し前にOperationIDとimmutable operation intentをJobAggregateへ保存する。
 6. Controllerが同じExecutionPermissionを外部副作用の直前に再検証する。
 7. Provider Adapterが外部呼出しを行い、受理・event・result・usage・stop observationをOperationIDへ返す。
 8. ControllerがObservationを記録し、Conformance / Admissionを別々に判定する。

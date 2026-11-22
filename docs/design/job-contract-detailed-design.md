@@ -201,7 +201,7 @@ For the exact Job / Taskless PLANNER RoleExecution / Session / Turn tuple, the w
 
 If Result persistence succeeds but proposal persistence fails, the Result remains immutable. A retry resolves and reuses that same Result observation; it does not retrieve or substitute a later Result. The proposal Store command remains the authoritative atomic mutation and idempotency boundary. An exact retry uses the same proposal CommandID. The workflow creates no JobApproval, ExecutionPermission, or additional Provider operation.
 
-## 7. Human approval Controller and CLI ingress
+## 8. Human approval Controller and CLI ingress
 
 The approval command is an explicit human action. The CLI displays the persisted JobContract through the existing Job read command; the caller then supplies the exact Job ID, revision number, canonical hash, canonicalization version, and reason. The CLI must not infer the revision or hash, approve a proposal from Planner output alone, or treat a natural-language confirmation outside the authenticated command as approval.
 
@@ -211,7 +211,7 @@ The same CommandID and identical approval request may be retried after the trans
 
 The approval path does not create ExecutionPermission or start a Provider operation. Execution remains blocked until a separate Controller verifies current JobApproval, approved scope, budget, deadline, Provider identity, resource boundary, and prohibited effects.
 
-### 7.1 ACTIVE Job amendment CLI ingress
+### 8.1 ACTIVE Job amendment CLI ingress
 
 `taxion job amend` requires explicit `--revision`, `--canonical-hash`, `--reason`, and `--contract-file` values. The contract file is limited to 1 MiB of UTF-8 and must contain exactly one strict JobContract JSON object. The CLI authenticates through OIDC Authorization Code Flow with PKCE before opening the Job Store, then calls JobContractController.AmendJSON with the current expected Job revision.
 
