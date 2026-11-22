@@ -448,9 +448,14 @@ func amendJobWithPrincipal(
 	if err != nil {
 		return report(stderr, err)
 	}
+	currentJob, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		return report(stderr, err)
+	}
 	fmt.Fprintf(stdout,
-		"JobContract amendment recorded\\nID: %s\\nCommand ID: %s\\nJob ID: %s\\nRevision: %d\\nCanonical Hash: %s\\nOrigin: HUMAN_AMENDMENT\\nState: DRAFT\\nJob Revision: %d\\n",
-		revision.ID, receipt.CommandID, receipt.JobID, revision.Revision, revision.CanonicalHash, receipt.Revision,
+		"JobContract amendment recorded\\nID: %s\\nCommand ID: %s\\nJob ID: %s\\nRevision: %d\\nCanonical Hash: %s\\nOrigin: HUMAN_AMENDMENT\\nState at amendment: DRAFT\\nAmendment Job Revision: %d\\nCurrent Job State: %s\\nCurrent Job Revision: %d\\n",
+		revision.ID, receipt.CommandID, receipt.JobID, revision.Revision, revision.CanonicalHash,
+		receipt.Revision, currentJob.State, currentJob.Revision,
 	)
 	return 0
 }
