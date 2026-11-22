@@ -419,7 +419,6 @@ func executionPermissionBudgetUsed(job Job, revision uint64) (uint64, uint64, er
 	return turns, tokens, nil
 }
 
-
 func executionPermissionByID(job Job, id string) (ExecutionPermission, bool) {
 	for _, permission := range job.ExecutionPermissions {
 		if permission.ID == id {
