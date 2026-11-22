@@ -167,7 +167,7 @@ OperationID is deterministically derived from CommandID. A new permission requir
 
 - `NewTaskRoleExecutionStart` requires the current ACTIVE JobApproval, exact current Task, and an unexpired ExecutionPermission whose TaskID / Role / request digest match.
 - A Coder / Reviewer RoleExecution stores TaskID and ExecutionPermissionID; PlanningAuthorizationID remains empty. The permission can be consumed by at most one RoleExecution.
-- The paired ProviderStartIntent stores the same TaskID / ExecutionPermissionID and uses the permission OperationID as its intent ID. Provider / account / configuration / request digest come from the permission; Budget comes from the Task; Deadline is the earlier of Task deadline and Permission expiry.
+- The paired ProviderStartIntent stores the same TaskID / ExecutionPermissionID and uses the permission OperationID as its intent ID. Provider / account / configuration / request digest come from the permission; Budget is the exact ReservedTurns / ReservedTokens grant (bounded by Task budget); Deadline is the earlier of Task deadline and Permission expiry.
 - Store command appends RoleExecution and ProviderStartIntent atomically. Exact replay returns the original pair; a different Start command cannot reuse the consumed permission.
 - This command creates only the immutable Start intent. Provider dispatch and Start observation remain a separate integration step.
 

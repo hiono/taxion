@@ -37,7 +37,7 @@ Storeは同一transaction内でJobAggregateを再読込し、Domain.NewTaskとJo
 
 ## 5. Execution boundary
 
-Task creationは実行開始ではありません。ExecutionPermissionはTaskIDとeffective scope / budgetへ束縛します。TaskExecutionStart CommandはPermissionをsingle-useで消費し、Coder / Reviewer RoleExecutionとProviderStartIntentを同一JobAggregate transactionでappendします。Provider dispatchは別のController境界で行います。
+Task creationは実行開始ではありません。ExecutionPermissionはTaskIDとeffective scope / budgetへ束縛します。TaskExecutionStart CommandはPermissionをsingle-useで消費し、Coder / Reviewer RoleExecutionとProviderStartIntentを同一JobAggregate transactionでappendします。ProviderStartIntentのBudgetはTask全体のBudgetではなく、PermissionのReservedTurns / ReservedTokensを使用します。Provider dispatchは別のController境界で行います。
 
 ## 6. Non-goals
 
