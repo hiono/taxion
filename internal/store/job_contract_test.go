@@ -252,13 +252,21 @@ func TestJobContractAmendmentStoreRequiresNewApproval(t *testing.T) {
 	if err != nil || job.State != domain.JobActive {
 		t.Fatalf("Job did not become ACTIVE: state=%s err=%v", job.State, err)
 	}
-
 	amendedContract := initialContract
 	amendedContract.Purpose = "Deliver the amended approved feature"
 	amendedContract.Budget.MaxTokens++
 	amendedContract.Deadline = time.Now().UTC().Add(2 * time.Hour)
+	if _, _, err := database.AmendJobContract(
+		ctx, job.ID, job.Revision, "cmd_15151515151515151515151515151515",
+		proposed.Revision, proposed.CanonicalHash, "Stale authentication", amendedContract, principal,
+	); err == nil {
+		t.Fatal("amendment accepted a Principal authenticated before the current approval")
+	}
+	principal = newAuthenticatedTestPrincipal(t)
+
 	amendmentCommand := "cmd_18181818181818181818181818181818"
 	amendmentReason := "Adjust the approved target after human review"
+	if _, _, err := database.AmendJobContract(
 	if _, _, err := database.AmendJobContract(
 		ctx, job.ID, job.Revision, "cmd_22222222222222222222222222222222",
 		proposed.Revision, strings.Repeat("0", 64), amendmentReason, amendedContract, principal,
@@ -379,6 +387,7 @@ func TestJobContractAmendmentStoreRollbackLeavesActiveJobUntouched(t *testing.T)
 	if err != nil {
 		t.Fatalf("GetJob before amendment: %v", err)
 	}
+	principal = newAuthenticatedTestPrincipal(t)
 	commandID := "cmd_27272727272727272727272727272727"
 	if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_job_contract_amendment_receipt
 		BEFORE INSERT ON job_commands
