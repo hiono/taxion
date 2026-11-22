@@ -175,3 +175,30 @@ func TestNewTaskRejectsMissingAcceptanceCriteria(t *testing.T) {
 		t.Fatal("Task without acceptance criteria was accepted")
 	}
 }
+
+
+func TestChildTaskCannotExpandParentScope(t *testing.T) {
+	job, now := approvedJobForExecutionPermission(t)
+	parentRequest := taskTestRequest(job, now, "cmd_c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3")
+	parentRequest.TargetRepositories = []string{}
+	parentRequest.TargetResources = []string{"resource_ci"}
+	parentRequest.Budget = JobContractBudget{MaxTurns: 2, MaxTokens: 500}
+	parentRequest.Deadline = now.Add(30 * time.Minute)
+	parent, err := NewTask(job, parentRequest, now)
+	if err != nil {
+		t.Fatalf("NewTask parent: %v", err)
+	}
+	appendTaskForTest(&job, parent)
+
+	childRequest := taskTestRequest(job, now.Add(time.Minute), "cmd_c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4")
+	childRequest.ParentTaskID = parent.ID
+	childRequest.TargetRepositories = []string{"repo_taxion"}
+	childRequest.Budget = JobContractBudget{MaxTurns: 1, MaxTokens: 200}
+	childRequest.Deadline = now.Add(20 * time.Minute)
+	if _, err := NewTask(job, childRequest, now.Add(time.Minute)); err == nil {
+		t.Fatal("child Task expanded its parent's empty repository scope")
+	}
+	if err := job.Validate(); err != nil {
+		t.Fatalf("rejected child request mutated Job: %v", err)
+	}
+}
