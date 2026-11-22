@@ -220,3 +220,114 @@ func TestJobContractStoreRollbackLeavesNoFactOrReceipt(t *testing.T) {
 		t.Fatalf("failed command left receipt count=%d err=%v", count, err)
 	}
 }
+
+
+func TestJobContractAmendmentStoreRequiresNewApproval(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx := context.Background()
+	principal := newAuthenticatedTestPrincipal(t)
+	execution, revision, sourceResult := createJobContractPlanner(t, database, "job_contract_amendment", principal)
+	initialContract := validStoreJobContract()
+	proposalCommand := "cmd_16161616161616161616161616161616"
+	_, proposed, err := database.AddJobContractRevision(
+		ctx, "job_contract_amendment", revision, proposalCommand, execution.ID,
+		sourceResult.ID, sourceResult.ContentSHA256, initialContract,
+	)
+	if err != nil {
+		t.Fatalf("AddJobContractRevision: %v", err)
+	}
+	job, err := database.GetJob(ctx, "job_contract_amendment")
+	if err != nil {
+		t.Fatalf("GetJob before initial approval: %v", err)
+	}
+	_, priorApproval, err := database.AddJobApproval(
+		ctx, job.ID, job.Revision, "cmd_17171717171717171717171717171717",
+		proposed.Revision, proposed.CanonicalHash, proposed.CanonicalizationVersion,
+		"Approved initial scope", principal,
+	)
+	if err != nil {
+		t.Fatalf("AddJobApproval initial: %v", err)
+	}
+	job, err = database.GetJob(ctx, job.ID)
+	if err != nil || job.State != domain.JobActive {
+		t.Fatalf("Job did not become ACTIVE: state=%s err=%v", job.State, err)
+	}
+
+	amendedContract := initialContract
+	amendedContract.Purpose = "Deliver the amended approved feature"
+	amendedContract.Budget.MaxTokens++
+	amendedContract.Deadline = time.Now().UTC().Add(2 * time.Hour)
+	amendmentCommand := "cmd_18181818181818181818181818181818"
+	amendmentReason := "Adjust the approved target after human review"
+	amendmentReceipt, amendedRevision, err := database.AmendJobContract(
+		ctx, job.ID, job.Revision, amendmentCommand, proposed.Revision, proposed.CanonicalHash,
+		amendmentReason, amendedContract, principal,
+	)
+	if err != nil {
+		t.Fatalf("AmendJobContract: %v", err)
+	}
+	job, err = database.GetJob(ctx, job.ID)
+	if err != nil || job.State != domain.JobDraft || job.Goal != amendedContract.Purpose ||
+		len(job.JobContractRevisions) != 2 || len(job.JobApprovals) != 1 {
+		t.Fatalf("amendment did not return Job to DRAFT with historical approval: state=%s goal=%q revisions=%d approvals=%d err=%v",
+			job.State, job.Goal, len(job.JobContractRevisions), len(job.JobApprovals), err)
+	}
+	if amendedRevision.Origin != domain.JobContractRevisionOriginHumanAmendment ||
+		amendedRevision.AmendedByPrincipalID != principal.PrincipalID() ||
+		amendedRevision.AmendedByIssuer != principal.Issuer() ||
+		amendedRevision.AmendedBySubject != principal.Subject() ||
+		amendedRevision.AmendmentReason != amendmentReason ||
+		amendedRevision.SupersedesRevision != proposed.Revision ||
+		amendedRevision.SupersedesCanonicalHash != proposed.CanonicalHash ||
+		amendedRevision.ProposedByRoleExecutionID != "" ||
+		amendedRevision.SourceResultObservationID != "" ||
+		amendedRevision.SourceResultContentSHA256 != "" {
+		t.Fatalf("HUMAN_AMENDMENT provenance is invalid: %#v", amendedRevision)
+	}
+	if len(job.ProviderStartIntents) != 1 {
+		t.Fatalf("amendment created an unexpected Provider operation: %d", len(job.ProviderStartIntents))
+	}
+	if _, _, err := database.AmendJobContract(
+		ctx, job.ID, job.Revision, "cmd_19191919191919191919191919191919",
+		amendedRevision.Revision, amendedRevision.CanonicalHash, "Another amendment while DRAFT",
+		initialContract, principal,
+	); err == nil {
+		t.Fatal("DRAFT Job accepted the ACTIVE amendment command")
+	}
+	if _, _, err := database.AmendJobContract(
+		ctx, job.ID, job.Revision, "cmd_20202020202020202020202020202020",
+		proposed.Revision, proposed.CanonicalHash, amendmentReason, amendedContract, principal,
+	); err == nil {
+		t.Fatal("amendment accepted a stale base revision")
+	}
+
+	_, amendedApproval, err := database.AddJobApproval(
+		ctx, job.ID, job.Revision, "cmd_21212121212121212121212121212121",
+		amendedRevision.Revision, amendedRevision.CanonicalHash, amendedRevision.CanonicalizationVersion,
+		"Approved the amended scope", principal,
+	)
+	if err != nil || amendedApproval.ContractRevision != amendedRevision.Revision {
+		t.Fatalf("AddJobApproval amended revision: %#v %v", amendedApproval, err)
+	}
+	job, err = database.GetJob(ctx, job.ID)
+	if err != nil || job.State != domain.JobActive || len(job.JobApprovals) != 2 {
+		t.Fatalf("amended revision was not independently approved: state=%s approvals=%d err=%v", job.State, len(job.JobApprovals), err)
+	}
+	retryReceipt, retryRevision, err := database.AmendJobContract(
+		ctx, job.ID, job.Revision, amendmentCommand, proposed.Revision, proposed.CanonicalHash,
+		amendmentReason, amendedContract, principal,
+	)
+	if err != nil || retryReceipt.CommandID != amendmentReceipt.CommandID ||
+		retryReceipt.Revision != amendmentReceipt.Revision || retryRevision.ID != amendedRevision.ID {
+		t.Fatalf("amendment idempotency: %#v %#v %v", retryReceipt, retryRevision, err)
+	}
+	if _, _, err := database.AmendJobContract(
+		ctx, job.ID, job.Revision, amendmentCommand, proposed.Revision, proposed.CanonicalHash,
+		"Changed reason", amendedContract, principal,
+	); err != ErrIdempotencyConflict {
+		t.Fatalf("same amendment CommandID with changed reason returned %v, want ErrIdempotencyConflict", err)
+	}
+	if priorApproval.ContractRevision != proposed.Revision {
+		t.Fatalf("prior approval was not retained for its original revision: %#v", priorApproval)
+	}
+}
