@@ -13,6 +13,7 @@ import (
 
 type ExecutionPermissionRequest struct {
 	JobID               string    `json:"job_id"`
+	TaskID              string    `json:"task_id"`
 	CommandID           string    `json:"command_id"`
 	Role                string    `json:"role"`
 	Effect              string    `json:"effect"`
@@ -61,6 +62,7 @@ type ExecutionPermission struct {
 	ID                      string                    `json:"id"`
 	CommandID               string                    `json:"command_id"`
 	JobID                   string                    `json:"job_id"`
+	TaskID                  string                    `json:"task_id"`
 	OperationID             string                    `json:"operation_id"`
 	Role                    string                    `json:"role"`
 	Effect                  string                    `json:"effect"`
@@ -126,6 +128,7 @@ func ValidateExecutionPermissionRequest(job Job, request ExecutionPermissionRequ
 		return fmt.Errorf("validate Job before ExecutionPermission: %w", err)
 	}
 	if !validCommandID(request.CommandID) || request.JobID != job.ID ||
+		!validPlanningIdentity(request.TaskID) ||
 		(request.Role != "CODER" && request.Role != "REVIEWER") ||
 		!validExecutionText(request.Effect, 512) || !validExecutionText(request.Resource, 4096) ||
 		!validPlanningIdentity(request.ProviderID) || !validPlanningIdentity(request.AccountID) ||
@@ -144,22 +147,32 @@ func ValidateExecutionPermissionRequest(job Job, request ExecutionPermissionRequ
 	if err := approval.Validate(job, revision); err != nil {
 		return fmt.Errorf("validate current JobApproval: %w", err)
 	}
+	task, taskFound := taskByID(job, request.TaskID)
+	if !taskFound || task.ContractRevision != revision.Revision || task.JobApprovalID != approval.ID {
+		return errors.New("ExecutionPermission requires a Task bound to the current JobApproval and contract revision")
+	}
 	now = now.UTC().Round(0)
 	expiresAt := request.ExpiresAt.UTC().Round(0)
 	if now.Before(approval.ApprovedAt) || !now.Before(revision.Contract.Deadline) ||
-		!expiresAt.After(now) || expiresAt.After(revision.Contract.Deadline) {
+		!expiresAt.After(now) || expiresAt.After(revision.Contract.Deadline) ||
+		expiresAt.After(task.Deadline) {
 		return errors.New("ExecutionPermission request is outside the current approval or contract deadline")
 	}
 	if request.ConfigurationSHA256 != revision.Contract.ConfigurationSHA256 {
 		return errors.New("ExecutionPermission Provider configuration differs from the approved contract")
 	}
-	if !contractContainsResource(revision.Contract, request.Resource) {
-		return errors.New("ExecutionPermission resource is outside the approved JobContract scope")
+	if !contractContainsResource(revision.Contract, request.Resource) ||
+		(!containsExact(task.TargetRepositories, request.Resource) &&
+			!containsExact(task.TargetResources, request.Resource) &&
+			!containsExact(task.Workspaces, request.Resource)) {
+		return errors.New("ExecutionPermission resource is outside the approved JobContract or Task scope")
 	}
-	if containsExact(revision.Contract.ProhibitedEffects, request.Effect) {
+	if containsExact(task.ProhibitedEffects, request.Effect) ||
+		containsExact(revision.Contract.ProhibitedEffects, request.Effect) {
 		return errors.New("ExecutionPermission effect is prohibited by the approved JobContract")
 	}
-	if containsExact(revision.Contract.ApprovalRequiredEffects, request.Effect) {
+	if containsExact(task.ApprovalRequiredEffects, request.Effect) ||
+		containsExact(revision.Contract.ApprovalRequiredEffects, request.Effect) {
 		return errors.New("ExecutionPermission effect requires a separate human approval")
 	}
 	turns, tokens, err := executionPermissionBudgetUsed(job, revision.Revision)
@@ -172,6 +185,16 @@ func ValidateExecutionPermissionRequest(job Job, request ExecutionPermissionRequ
 	if ^uint64(0)-tokens < request.ReservedTokens ||
 		tokens+request.ReservedTokens > revision.Contract.Budget.MaxTokens {
 		return errors.New("ExecutionPermission token reservation exceeds the approved budget")
+	}
+	taskTurns, taskTokens, err := executionPermissionTaskBudgetUsed(job, task.ID)
+	if err != nil {
+		return err
+	}
+	if taskTurns > uint64(task.Budget.MaxTurns) ||
+		uint64(request.ReservedTurns) > uint64(task.Budget.MaxTurns)-taskTurns ||
+		^uint64(0)-taskTokens < request.ReservedTokens ||
+		taskTokens+request.ReservedTokens > task.Budget.MaxTokens {
+		return errors.New("ExecutionPermission reservation exceeds the Task budget")
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return errors.New("Job revision exhausted")
@@ -216,7 +239,7 @@ func NewExecutionPermission(
 	now = now.UTC().Round(0)
 	permission := ExecutionPermission{
 		ID: ExecutionPermissionID(request.CommandID), CommandID: request.CommandID,
-		JobID: job.ID, OperationID: ExecutionPermissionOperationID(request.CommandID),
+		JobID: job.ID, TaskID: task.ID, OperationID: ExecutionPermissionOperationID(request.CommandID),
 		Role: request.Role, Effect: request.Effect, Resource: request.Resource,
 		JobApprovalID: approval.ID, ContractRevision: revision.Revision,
 		CanonicalizationVersion: revision.CanonicalizationVersion, CanonicalHash: revision.CanonicalHash,
@@ -237,7 +260,7 @@ func (p ExecutionPermission) Validate(job Job) error {
 		p.JobID != job.ID || p.OperationID != ExecutionPermissionOperationID(p.CommandID) ||
 		(p.Role != "CODER" && p.Role != "REVIEWER") ||
 		!validExecutionText(p.Effect, 512) || !validExecutionText(p.Resource, 4096) ||
-		!validPlanningIdentity(p.JobApprovalID) || p.ContractRevision == 0 ||
+		!validPlanningIdentity(p.TaskID) || !validPlanningIdentity(p.JobApprovalID) || p.ContractRevision == 0 ||
 		p.CanonicalizationVersion != JobContractCanonicalizationVersion ||
 		!validSHA256(p.CanonicalHash) || !validPlanningIdentity(p.ProviderID) ||
 		!validPlanningIdentity(p.AccountID) || !validSHA256(p.ConfigurationSHA256) ||
@@ -264,12 +287,23 @@ func (p ExecutionPermission) Validate(job Job) error {
 	if err := approval.Validate(job, *revision); err != nil {
 		return err
 	}
+	task, taskFound := taskByID(job, p.TaskID)
+	if !taskFound || task.ContractRevision != p.ContractRevision || task.JobApprovalID != p.JobApprovalID {
+		return errors.New("ExecutionPermission Task does not match its approved contract revision")
+	}
 	if p.CreatedRevision <= approval.CreatedRevision || p.CreatedAt.Before(approval.ApprovedAt) ||
 		!p.CreatedAt.Before(revision.Contract.Deadline) || !p.ExpiresAt.After(p.CreatedAt) ||
-		p.ExpiresAt.After(revision.Contract.Deadline) || p.ConfigurationSHA256 != revision.Contract.ConfigurationSHA256 ||
+		p.ExpiresAt.After(revision.Contract.Deadline) || p.ExpiresAt.After(task.Deadline) ||
+		p.ConfigurationSHA256 != revision.Contract.ConfigurationSHA256 ||
 		!contractContainsResource(revision.Contract, p.Resource) ||
+		(!containsExact(task.TargetRepositories, p.Resource) &&
+			!containsExact(task.TargetResources, p.Resource) &&
+			!containsExact(task.Workspaces, p.Resource)) ||
+		containsExact(task.ProhibitedEffects, p.Effect) ||
+		containsExact(task.ApprovalRequiredEffects, p.Effect) ||
 		containsExact(revision.Contract.ProhibitedEffects, p.Effect) ||
-		containsExact(revision.Contract.ApprovalRequiredEffects, p.Effect) {
+		containsExact(revision.Contract.ApprovalRequiredEffects, p.Effect) ||
+		p.ReservedTurns > task.Budget.MaxTurns || p.ReservedTokens > task.Budget.MaxTokens {
 		return errors.New("ExecutionPermission exceeds its approved JobContract boundary")
 	}
 	assessmentSHA, assessmentErr := p.Assessment.SHA256()
@@ -286,7 +320,7 @@ func (p ExecutionPermission) Validate(job Job) error {
 		return errors.New("ExecutionPermission assessment evidence or safety classification is invalid")
 	}
 	expectedRequest := ExecutionPermissionRequest{
-		JobID: p.JobID, CommandID: p.CommandID, Role: p.Role, Effect: p.Effect,
+		JobID: p.JobID, TaskID: p.TaskID, CommandID: p.CommandID, Role: p.Role, Effect: p.Effect,
 		Resource: p.Resource, ProviderID: p.ProviderID, AccountID: p.AccountID,
 		ConfigurationSHA256: p.ConfigurationSHA256, ReservedTurns: p.ReservedTurns, ReservedTokens: p.ReservedTokens,
 		ExpiresAt: p.ExpiresAt,
@@ -306,8 +340,10 @@ func (p ExecutionPermission) ValidateFor(job Job, operationID, requestSHA256 str
 		return errors.New("ExecutionPermission is not valid for an inactive Job")
 	}
 	latest := job.JobContractRevisions[len(job.JobContractRevisions)-1]
+	task, taskFound := taskByID(job, p.TaskID)
 	approval, found := jobApprovalForRevision(job, latest.Revision)
-	if !found || latest.Revision != p.ContractRevision || latest.CanonicalHash != p.CanonicalHash ||
+	if !taskFound || task.ContractRevision != latest.Revision ||
+		!found || latest.Revision != p.ContractRevision || latest.CanonicalHash != p.CanonicalHash ||
 		approval.ID != p.JobApprovalID || operationID != p.OperationID ||
 		requestSHA256 != p.RequestSHA256 || now.IsZero() ||
 		!now.UTC().Before(p.ExpiresAt) || !now.UTC().Before(latest.Contract.Deadline) {
@@ -355,6 +391,15 @@ func validateExecutionPermissionFacts(job Job) error {
 			return fmt.Errorf("%w: ExecutionPermission reservations exceed contract revision %d budget", ErrInvalidJob, revision.Revision)
 		}
 	}
+	for _, task := range job.Tasks {
+		turns, tokens, err := executionPermissionTaskBudgetUsed(job, task.ID)
+		if err != nil {
+			return err
+		}
+		if turns > uint64(task.Budget.MaxTurns) || tokens > task.Budget.MaxTokens {
+			return fmt.Errorf("%w: ExecutionPermission reservations exceed Task %s budget", ErrInvalidJob, task.ID)
+		}
+	}
 	return nil
 }
 
@@ -366,6 +411,23 @@ func executionPermissionBudgetUsed(job Job, revision uint64) (uint64, uint64, er
 		}
 		if ^uint64(0)-turns < uint64(permission.ReservedTurns) || ^uint64(0)-tokens < permission.ReservedTokens {
 			return 0, 0, fmt.Errorf("%w: ExecutionPermission budget overflow", ErrInvalidJob)
+		}
+		turns += uint64(permission.ReservedTurns)
+		tokens += permission.ReservedTokens
+	}
+	return turns, tokens, nil
+}
+
+
+func executionPermissionTaskBudgetUsed(job Job, taskID string) (uint64, uint64, error) {
+	var turns, tokens uint64
+	for _, permission := range job.ExecutionPermissions {
+		if permission.TaskID != taskID {
+			continue
+		}
+		if ^uint64(0)-turns < uint64(permission.ReservedTurns) ||
+			^uint64(0)-tokens < permission.ReservedTokens {
+			return 0, 0, fmt.Errorf("%w: Task ExecutionPermission budget overflow", ErrInvalidJob)
 		}
 		turns += uint64(permission.ReservedTurns)
 		tokens += permission.ReservedTokens

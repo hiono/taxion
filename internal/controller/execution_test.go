@@ -69,8 +69,26 @@ func approvedExecutionControllerFixture(t *testing.T) (*store.Store, string, dom
 	return database, jobID, revision
 }
 
-func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T) {
+func approvedExecutionPermissionControllerFixture(t *testing.T) (*store.Store, string, domain.JobContractRevision, domain.Task) {
+	t.Helper()
 	database, jobID, revision := approvedExecutionControllerFixture(t)
+	taskController, err := NewTaskController(database)
+	if err != nil {
+		t.Fatalf("NewTaskController: %v", err)
+	}
+	_, task, err := taskController.Create(context.Background(), domain.TaskRequest{
+		JobID: jobID, TaskID: task.ID, CommandID: "cmd_81818181818181818181818181818181",
+		Title: "Bounded execution task", Purpose: "Provide a task-scoped permission boundary",
+		AcceptanceCriteria: []string{"The task-scoped operation is valid"},
+	})
+	if err != nil {
+		t.Fatalf("create Task for ExecutionPermission: %v", err)
+	}
+	return database, jobID, revision, task
+}
+
+func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T) {
+	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	now := time.Now().UTC().Round(0)
 	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
 		Reversible: true, Mutating: true, ValidUntil: now.Add(45 * time.Minute),
@@ -151,7 +169,7 @@ func TestExecutionControllerRejectsScopeAndAssessmentFailuresWithoutMutation(t *
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			database, jobID, revision := approvedExecutionControllerFixture(t)
+			database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 			now := time.Now().UTC().Round(0)
 			assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
 				Reversible: true, ValidUntil: now.Add(time.Hour),
@@ -185,7 +203,7 @@ func TestExecutionControllerRejectsScopeAndAssessmentFailuresWithoutMutation(t *
 }
 
 func TestExecutionControllerExactReplayAndCommandConflict(t *testing.T) {
-	database, jobID, revision := approvedExecutionControllerFixture(t)
+	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	now := time.Now().UTC().Round(0)
 	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
 		Reversible: true, ValidUntil: now.Add(time.Hour),

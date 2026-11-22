@@ -40,11 +40,23 @@ func TestExecutionPermissionStoreRollbackReplayAndRestart(t *testing.T) {
 	}
 	job, err = database.GetJob(ctx, jobID)
 	if err != nil {
+		t.Fatalf("GetJob before Task: %v", err)
+	}
+	_, task, err := database.AddTask(ctx, job.Revision, domain.TaskRequest{
+		JobID: jobID, CommandID: "cmd_92929292929292929292929292929292",
+		Title: "Bounded execution task", Purpose: "Provide a task-scoped permission boundary",
+		AcceptanceCriteria: []string{"The task-scoped operation is valid"},
+	})
+	if err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
 		t.Fatalf("GetJob before ExecutionPermission: %v", err)
 	}
 	now := time.Now().UTC().Round(0)
 	request := domain.ExecutionPermissionRequest{
-		JobID: jobID, CommandID: "cmd_92929292929292929292929292929292",
+		JobID: jobID, TaskID: task.ID, CommandID: "cmd_93939393939393939393939393939393",
 		Role: "CODER", Effect: "repository.write", Resource: contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: contract.ConfigurationSHA256,

@@ -45,10 +45,31 @@ func approvedJobForExecutionPermission(t *testing.T) (Job, time.Time) {
 	return job, baseTime.Add(8 * time.Minute)
 }
 
+func approvedJobWithTaskForExecutionPermission(t *testing.T) (Job, Task, time.Time) {
+	t.Helper()
+	job, now := approvedJobForExecutionPermission(t)
+	request := TaskRequest{
+		JobID: job.ID, CommandID: "cmd_81818181818181818181818181818181",
+		Title: "Bounded execution task", Purpose: "Provide a task-scoped permission boundary",
+		AcceptanceCriteria: []string{"The task-scoped operation is valid"},
+	}
+	task, err := NewTask(job, request, now)
+	if err != nil {
+		t.Fatalf("NewTask for ExecutionPermission: %v", err)
+	}
+	job.Tasks = append(job.Tasks, task)
+	job.Revision++
+	job.UpdatedAt = task.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job with Task fixture: %v", err)
+	}
+	return job, task, now.Add(time.Minute)
+}
+
 func executionPermissionTestRequest(job Job, now time.Time) ExecutionPermissionRequest {
 	revision := job.JobContractRevisions[len(job.JobContractRevisions)-1]
 	return ExecutionPermissionRequest{
-		JobID: job.ID, CommandID: "cmd_66666666666666666666666666666666",
+		JobID: job.ID, TaskID: job.Tasks[0].ID, CommandID: "cmd_66666666666666666666666666666666",
 		Role: "CODER", Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
@@ -68,7 +89,7 @@ func executionPermissionTestAssessment(request ExecutionPermissionRequest, reque
 }
 
 func TestExecutionPermissionBindsExactApprovedOperation(t *testing.T) {
-	job, now := approvedJobForExecutionPermission(t)
+	job, _, now := approvedJobWithTaskForExecutionPermission(t)
 	request := executionPermissionTestRequest(job, now)
 	requestSHA, err := ExecutionPermissionRequestSHA256(request)
 	if err != nil {
