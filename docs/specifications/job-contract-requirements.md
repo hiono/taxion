@@ -29,7 +29,11 @@ The configuration reference is represented by a SHA-256 digest. Secret values, c
 - The canonical hash is SHA-256 over the canonicalization version and canonical contract content.
 - A revision stores both the canonicalization version and canonical hash.
 - A DRAFT Planner proposal requires an accepted Start and a still-valid PlanningAuthorization.
-- ACTIVE Job amendments are rejected by the DRAFT proposal command. A future amendment command must carry separate authority, append a new revision, return the Job to DRAFT, and require a new JobApproval. Until that authority path exists, do not reuse an old Planner execution to amend an ACTIVE Job.
+- The DRAFT Planner proposal command rejects ACTIVE Jobs and cannot reuse a prior Planner execution to amend one.
+- An ACTIVE Job amendment is a separate authenticated HUMAN command. It must identify the exact current contract revision and canonical hash, include a non-empty reason, and use a validated HUMAN Principal.
+- The amendment command is accepted only when the Job is ACTIVE and the exact latest revision has a matching JobApproval. It appends a new immutable JobContractRevision with origin `HUMAN_AMENDMENT`, authenticated issuer / subject / Principal ID, reason, and the superseded revision / hash.
+- The amendment command atomically transitions the Job to DRAFT. Previous JobApproval facts remain historical and never authorize the new revision. A new JobApproval is required before the Job returns to ACTIVE.
+- A human amendment does not create ExecutionPermission, start a Provider operation, or grant Planner / Coder / Reviewer execution authority.
 
 ## 4. JobApproval
 
@@ -78,7 +82,7 @@ The Controller must accept only a Result observation already persisted in the sa
 - belongs to that execution's accepted Provider Start / Session and exact Turn identity;
 - is not an observation from another Job, RoleExecution, Session, or Turn.
 
-The Store / Domain mutation boundary must revalidate the exact Result observation ID and digest against the current aggregate in the same transaction that appends the JobContractRevision. A caller-supplied digest without a matching persisted Result observation is insufficient. The canonical JobContract hash remains distinct from the source Result content digest.
+The Store / Domain mutation boundary must revalidate the exact Result observation ID and digest against the current aggregate in the same transaction that appends the JobContractRevision. A caller-supplied digest without a matching persisted Result observation is insufficient. The canonical JobContract hash remains distinct from the source Result content digest. A human amendment is a distinct revision origin and records authenticated HUMAN provenance plus the exact prior approved revision / hash; it does not pretend to have a Planner Result source.
 
 Exact proposal replay must preserve the original Result provenance. Reuse of the CommandID with a different Result ID, Result digest, RoleExecution, or contract must fail without mutation. A later Result observation must not silently replace the source of an existing revision.
 
