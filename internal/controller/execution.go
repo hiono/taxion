@@ -95,7 +95,6 @@ func (c *ExecutionController) ValidatePermission(
 	return domain.ExecutionPermission{}, store.ErrNotFound
 }
 
- 
 // StartTaskExecution atomically consumes a Task-bound permission into a Coder / Reviewer RoleExecution and ProviderStartIntent.
 func (c *ExecutionController) StartTaskExecution(
 	ctx context.Context,
