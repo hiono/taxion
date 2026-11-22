@@ -57,15 +57,15 @@ func NewTaskRoleExecutionStart(
 		ID: RoleExecutionID(commandID), CommandID: commandID, JobID: job.ID,
 		Role: permission.Role, TaskID: task.ID, ExecutionPermissionID: permission.ID,
 		ProviderStartOperationID: permission.OperationID,
-		CreatedAt: now, CreatedRevision: createdRevision,
+		CreatedAt:                now, CreatedRevision: createdRevision,
 	}
 	intent := ProviderStartIntent{
 		ID: permission.OperationID, CommandID: commandID, JobID: job.ID,
 		RoleExecutionID: execution.ID, TaskID: task.ID, ExecutionPermissionID: permission.ID,
 		ProviderID: permission.ProviderID, AccountID: permission.AccountID,
 		ConfigurationSHA256: permission.ConfigurationSHA256,
-		Budget: PlanningBudget{MaxTurns: permission.ReservedTurns, MaxTokens: permission.ReservedTokens},
-		Deadline: permission.ExpiresAt, RequestSHA256: permission.RequestSHA256,
+		Budget:              PlanningBudget{MaxTurns: permission.ReservedTurns, MaxTokens: permission.ReservedTokens},
+		Deadline:            permission.ExpiresAt, RequestSHA256: permission.RequestSHA256,
 		CreatedAt: now, CreatedRevision: createdRevision,
 	}
 	if err := execution.Validate(job); err != nil {
