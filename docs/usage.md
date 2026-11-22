@@ -53,6 +53,22 @@ OIDCで再認証し、認証済みHUMAN PrincipalがJobのIntakeProvenanceと一
 
 read-only boundaryには、内容digestを持つimmutable snapshotまたは明示文書セットを指定します。参照先の実体検証とProvider側のread-only強制は、後続のProvider実行機能で行います。
 
+## Taskless PLANNERの開始要求
+
+有効なPlanningAuthorizationを指定し、Taskless PLANNER RoleExecutionとProvider Start intentをJobAggregateへ記録します。
+
+```sh
+taxion job start-planning \
+  --authorization-id plan_auth_<id> \
+  job_<id>
+```
+
+OIDCで再認証し、認証済みHUMAN Principal、DRAFT Job、grantの有効期間、Job / request digest、Provider / account / configuration、read-only context、permitted effects、budget、deadlineを再検証します。RoleExecutionはPLANNERとして作成し、TaskIDは持ちません。RoleExecution、Provider Start intent、Command receiptは同一SQLite transactionで保存します。
+
+このコマンドはProviderを起動しません。Provider呼出しはStart intentのcommit確認後にProvider Adapterが行う後続機能です。JobはDRAFTのままであり、Task、JobApproval、write、commit、publish、external mutationを許可しません。
+
+成功時に表示されるCommand IDは、同じ要求を再送するときに`--command-id`へ指定します。同一Command ID・同一要求は同じreceiptへ収束し、異なる要求での再利用は拒否します。
+
 ## ローカルDRAFT Jobの作成
 
 ```sh
@@ -92,4 +108,4 @@ SQLite databaseとWALファイルは秘密情報を含む可能性があるた�
 
 ## 現在の制限
 
-本段階ではOIDC認証済みCLIからのDRAFT Job作成とPlanningAuthorizationの発行・永続化までを提供します。HTTP ingress、JobApproval、Taskless PLANNER RoleExecution、Provider実行、Job完了は未実装です。grant発行の成功をplanning実行やJob完遂の証拠として扱いません。
+本段階ではOIDC認証済みCLIからのDRAFT Job作成、PlanningAuthorizationの発行・永続化、Taskless PLANNER RoleExecutionとProvider Start intentの永続化までを提供します。HTTP ingress、Provider Adapterによる実起動、turn / effect / resume、JobApproval、Job完了は未実装です。grant発行の成功をplanning実行やJob完遂の証拠として扱いません。
