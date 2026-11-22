@@ -390,6 +390,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 	if err != nil || job.State != domain.JobActive {
 		t.Fatalf("Job did not become ACTIVE: state=%s err=%v", job.State, err)
 	}
+	amendPrincipal := newProviderTestPrincipal(t)
 
 	amendedContract := contract
 	amendedContract.Purpose = "Deliver the explicitly amended feature"
@@ -399,7 +400,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 	reason := "Human-approved change to the target scope"
 	receipt, amendedRevision, err := controller.jobContract.Amend(
 		ctx, jobID, job.Revision, amendmentCommand, proposed.Revision, proposed.CanonicalHash,
-		reason, amendedContract, principal,
+		reason, amendedContract, amendPrincipal,
 	)
 	if err != nil {
 		t.Fatalf("Amend: %v", err)
@@ -413,7 +414,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 	if amendedRevision.Origin != domain.JobContractRevisionOriginHumanAmendment ||
 		amendedRevision.SupersedesRevision != proposed.Revision ||
 		amendedRevision.SupersedesCanonicalHash != proposed.CanonicalHash ||
-		amendedRevision.AmendedByPrincipalID != principal.PrincipalID() ||
+		amendedRevision.AmendedByPrincipalID != amendPrincipal.PrincipalID() ||
 		amendedRevision.AmendmentReason != reason {
 		t.Fatalf("human amendment provenance mismatch: %#v", amendedRevision)
 	}
@@ -432,7 +433,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 	if _, _, err := controller.jobContract.Approve(
 		ctx, jobID, job.Revision, "cmd_76767676767676767676767676767676",
 		amendedRevision.Revision, amendedRevision.CanonicalHash, amendedRevision.CanonicalizationVersion,
-		"Approve amended contract", principal,
+		"Approve amended contract", amendPrincipal,
 	); err != nil {
 		t.Fatalf("Approve amended contract: %v", err)
 	}
@@ -442,7 +443,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 	}
 	retryReceipt, retryRevision, err := controller.jobContract.Amend(
 		ctx, jobID, job.Revision, amendmentCommand, proposed.Revision, proposed.CanonicalHash,
-		reason, amendedContract, principal,
+		reason, amendedContract, amendPrincipal,
 	)
 	if err != nil || retryReceipt.CommandID != receipt.CommandID ||
 		retryReceipt.Revision != receipt.Revision || retryRevision.ID != amendedRevision.ID {
@@ -450,7 +451,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 	}
 	if _, _, err := controller.jobContract.Amend(
 		ctx, jobID, job.Revision, amendmentCommand, proposed.Revision, proposed.CanonicalHash,
-		"Changed reason", amendedContract, principal,
+		"Changed reason", amendedContract, amendPrincipal,
 	); err != store.ErrIdempotencyConflict {
 		t.Fatalf("changed amendment request returned %v, want ErrIdempotencyConflict", err)
 	}
