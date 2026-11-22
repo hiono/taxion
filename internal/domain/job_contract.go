@@ -303,6 +303,9 @@ func NewJobContractAmendmentRevision(
 	if err := approval.Validate(job, latest); err != nil {
 		return JobContractRevision{}, fmt.Errorf("validate prior JobApproval: %w", err)
 	}
+	if principal.AuthenticatedAt().Before(approval.ApprovedAt) {
+		return JobContractRevision{}, errors.New("JobContract amendment Principal must authenticate after the current JobApproval")
+	}
 	reason = strings.TrimSpace(reason)
 	if !utf8.ValidString(reason) || reason == "" || len(reason) > 2000 {
 		return JobContractRevision{}, errors.New("JobContract amendment reason is required and must not exceed 2,000 bytes")
@@ -477,8 +480,9 @@ func (r JobContractRevision) validateHumanAmendmentProvenance(job Job) error {
 		approval.ApprovedAt.After(job.UpdatedAt) {
 		return errors.New("JobContract amendment prior approval does not bind the superseded revision")
 	}
-	if r.CreatedRevision <= approval.CreatedRevision || r.CreatedAt.Before(approval.ApprovedAt) {
-		return errors.New("JobContract amendment precedes its prior approval")
+	if r.AmendedAuthenticatedAt.Before(approval.ApprovedAt) ||
+		r.CreatedRevision <= approval.CreatedRevision || r.CreatedAt.Before(approval.ApprovedAt) {
+		return errors.New("JobContract amendment Principal or command predates its prior approval")
 	}
 	return nil
 }
