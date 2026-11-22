@@ -221,10 +221,14 @@ func validateTaskContent(job Job, task Task) error {
 		"TargetResources": task.TargetResources,
 		"Workspaces": task.Workspaces,
 	} {
-		canonical, canonicalErr := canonicalContractSet("Task "+name, values, true)
+		required := name == "Workspaces"
+		canonical, canonicalErr := canonicalContractSet("Task "+name, values, required)
 		if canonicalErr != nil || !equalTaskStrings(canonical, values) {
 			return fmt.Errorf("Task %s is not canonical", name)
 		}
+	}
+	if len(task.TargetRepositories) == 0 && len(task.TargetResources) == 0 {
+		return errors.New("Task requires at least one target repository or resource")
 	}
 	if !taskSubset(task.TargetRepositories, parentScope.repositories) ||
 		!taskSubset(task.TargetResources, parentScope.resources) ||
