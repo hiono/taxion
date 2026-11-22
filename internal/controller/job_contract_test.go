@@ -106,6 +106,13 @@ func TestJobContractControllerProposesForAuthorizedPlanner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
+	_, expectedHash, err := domain.CanonicalizeJobContract(contract, domain.JobContractCanonicalizationVersion)
+	if err != nil {
+		t.Fatalf("Canonicalize expected Planner JobContract: %v", err)
+	}
+	if revision.CanonicalHash != expectedHash {
+		t.Fatalf("proposal contract was not derived from the final Result: got hash %s want %s", revision.CanonicalHash, expectedHash)
+	}
 	if receipt.Revision != job.Revision || revision.Revision != 1 ||
 		job.State != domain.JobDraft || len(job.JobContractRevisions) != 1 ||
 		len(job.JobApprovals) != 0 || job.Goal != revision.Contract.Purpose {
@@ -293,7 +300,6 @@ func TestJobContractControllerApprovesExactRevisionAndReplaysAfterActivation(t *
 	}
 }
 
-
 func TestDecodePlannerJobContractResultStrictJSON(t *testing.T) {
 	expected := validControllerJobContract(time.Now().UTC().Add(2 * time.Hour))
 	encoded, err := json.Marshal(expected)
@@ -325,7 +331,7 @@ func TestDecodePlannerJobContractResultStrictJSON(t *testing.T) {
 		{name: "fenced Markdown", content: "```json\n" + valid + "\n```"},
 		{name: "non-object root", content: "[]"},
 		{name: "malformed JSON", content: "{\"purpose\":"},
-		{name: "type mismatch", content: strings.Replace(valid, "\"budget\":{", "\"budget\":\"invalid\",", 1)},
+		{name: "type mismatch", content: strings.Replace(valid, "\"max_turns\":5", "\"max_turns\":\"five\"", 1)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
