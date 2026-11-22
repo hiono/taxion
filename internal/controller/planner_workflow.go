@@ -80,7 +80,7 @@ func (c *PlannerWorkflowController) ProposeJobContract(
 	if !foundTurnObservation {
 		return outcome, errors.New("Planner proposal requires a persisted terminal Turn observation")
 	}
-	if err := latestTurnObservation.Validate(job); err != nil {
+	if err := latestTurnObservation.Validate(job, turn); err != nil {
 		return outcome, fmt.Errorf("validate Planner Turn observation: %w", err)
 	}
 	if latestTurnObservation.Status != domain.PlanningTurnCompleted ||
