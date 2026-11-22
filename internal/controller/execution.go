@@ -68,12 +68,17 @@ func (c *ExecutionController) Authorize(
 // ValidatePermission rechecks current approval, revision, exact operation identity, and expiry before dispatch.
 func (c *ExecutionController) ValidatePermission(
 	ctx context.Context,
-	jobID, permissionID, operationID, requestSHA256 string,
+	permissionID string,
+	request domain.ExecutionPermissionRequest,
 ) (domain.ExecutionPermission, error) {
-	if ctx == nil || jobID == "" || permissionID == "" || operationID == "" || requestSHA256 == "" {
+	if ctx == nil || permissionID == "" || request.JobID == "" {
 		return domain.ExecutionPermission{}, errors.New("ExecutionPermission validation requires complete identities")
 	}
-	job, err := c.store.GetJob(ctx, jobID)
+	requestSHA256, err := domain.ExecutionPermissionRequestSHA256(request)
+	if err != nil {
+		return domain.ExecutionPermission{}, err
+	}
+	job, err := c.store.GetJob(ctx, request.JobID)
 	if err != nil {
 		return domain.ExecutionPermission{}, err
 	}
@@ -81,7 +86,7 @@ func (c *ExecutionController) ValidatePermission(
 		if permission.ID != permissionID {
 			continue
 		}
-		if err := permission.ValidateFor(job, operationID, requestSHA256, c.now()); err != nil {
+		if err := permission.ValidateFor(job, domain.ExecutionPermissionOperationID(request.CommandID), requestSHA256, c.now()); err != nil {
 			return domain.ExecutionPermission{}, fmt.Errorf("ExecutionPermission is not current: %w", err)
 		}
 		return permission, nil

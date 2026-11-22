@@ -99,7 +99,7 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 			receipt, permission, assessor.calls)
 	}
 	validated, err := controller.ValidatePermission(
-		context.Background(), jobID, permission.ID, permission.OperationID, permission.RequestSHA256,
+		context.Background(), permission.ID, request,
 	)
 	if err != nil {
 		t.Fatalf("ValidatePermission: %v", err)
@@ -108,13 +108,17 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 		t.Fatalf("validated permission = %q, want %q", validated.ID, permission.ID)
 	}
 	if _, err := controller.ValidatePermission(
-		context.Background(), jobID, permission.ID, "provider_op_foreign", permission.RequestSHA256,
+		context.Background(), permission.ID, func() domain.ExecutionPermissionRequest {
+			foreign := request
+			foreign.CommandID = "cmd_f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+			return foreign
+		}(),
 	); err == nil {
 		t.Fatal("permission was reused for another operation")
 	}
 	controller.now = func() time.Time { return request.ExpiresAt }
 	if _, err := controller.ValidatePermission(
-		context.Background(), jobID, permission.ID, permission.OperationID, permission.RequestSHA256,
+		context.Background(), permission.ID, request,
 	); err == nil {
 		t.Fatal("expired permission was accepted")
 	}
@@ -158,7 +162,7 @@ func TestExecutionControllerRejectsScopeAndAssessmentFailuresWithoutMutation(t *
 				Resource:   revision.Contract.TargetRepositories[0],
 				ProviderID: "provider.test", AccountID: "account.primary",
 				ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-				ReservedTokens:      100, ExpiresAt: now.Add(30 * time.Minute),
+				ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
 			}
 			test.mutate(&request, assessor)
 			if _, _, err := controller.Authorize(context.Background(), request); err == nil {

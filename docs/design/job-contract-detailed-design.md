@@ -159,7 +159,7 @@ OperationID is deterministically derived from CommandID. A new permission requir
 
 `ExecutionController.Authorize` accepts an explicit request and validated effect assessment. It loads the Job, verifies the exact latest approval, checks the contract boundary and current budget, then calls the Store command with the expected Job revision. The Store repeats aggregate-dependent checks and appends the permission atomically.
 
-`ExecutionController.ValidatePermission` reloads the JobAggregate and revalidates the exact permission against current JobApproval, contract revision, OperationID, request digest, and expiry immediately before the external side effect. It never infers permission from JobState alone.
+`ExecutionController.ValidatePermission` receives the actual execution request, recomputes its canonical digest, reloads the JobAggregate, and revalidates the exact permission against current JobApproval, contract revision, derived OperationID, request digest, and expiry immediately before the external side effect. Callers cannot substitute a stored digest while changing the actual effect or resource. It never infers permission from JobState alone.
 
 ## 7. Planner proposal Controller
 
