@@ -349,7 +349,6 @@ func TestDecodePlannerJobContractResultStrictJSON(t *testing.T) {
 	}
 }
 
-
 func TestPlanningControllerRejectsMalformedFinalResultWithoutMutation(t *testing.T) {
 	controller, database, principal, jobID, _, sourceResult, _ := startContractPlannerWithResultContent(t, "not JSON")
 	_, _, err := controller.ProposeJobContract(
