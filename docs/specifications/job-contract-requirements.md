@@ -86,7 +86,17 @@ The Store / Domain mutation boundary must revalidate the exact Result observatio
 
 Exact proposal replay must preserve the original Result provenance. Reuse of the CommandID with a different Result ID, Result digest, RoleExecution, or contract must fail without mutation. A later Result observation must not silently replace the source of an existing revision.
 
-## 9. References
+## 9. Planner workflow orchestration
+
+The upper-level Planner workflow must invoke the JobContract proposal only after the exact planning Turn is terminal and its final Provider Result has been persisted.
+
+Before proposing, the workflow must verify that the Turn belongs to the same Job, Taskless PLANNER RoleExecution, accepted Provider Start Session, and Provider operation. The latest Turn observation must be COMPLETED, and the latest Usage observation for that same operation / Session / Turn must be Complete=true. UNKNOWN, FAILED, missing, mismatched, or incomplete observations must stop the proposal without creating a JobContract revision.
+
+The workflow must retrieve and persist the final Provider Result when no matching Result observation exists, then call PlanningController.ProposeJobContract with that exact persisted Result observation ID. If Result persistence succeeds but proposal persistence fails, retain the Result observation. A retry must reuse the same persisted Result identity and must not fetch or substitute a different Result.
+
+The workflow must not issue JobApproval, ExecutionPermission, or start another Provider operation. Proposal retries must use the same CommandID and exact Result provenance; changed identities or payloads must be rejected by the existing idempotency boundary.
+
+## 10. References
 
 - ADR-201: Job aggregate and command boundary
 - ADR-202: Domain invariants across state paths
