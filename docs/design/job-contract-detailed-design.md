@@ -159,3 +159,11 @@ The CLI authenticates through the existing OIDC Authorization Code Flow with PKC
 The same CommandID and identical approval request may be retried after the transition to ACTIVE and must return the original receipt. Reusing the CommandID with a different Principal or payload is an idempotency conflict. A new approval command for an already approved revision is rejected.
 
 The approval path does not create ExecutionPermission or start a Provider operation. Execution remains blocked until a separate Controller verifies current JobApproval, approved scope, budget, deadline, Provider identity, resource boundary, and prohibited effects.
+
+### 7.1 ACTIVE Job amendment CLI ingress
+
+`taxion job amend` requires explicit `--revision`, `--canonical-hash`, `--reason`, and `--contract-file` values. The contract file is limited to 1 MiB of UTF-8 and must contain exactly one strict JobContract JSON object. The CLI authenticates through OIDC Authorization Code Flow with PKCE before opening the Job Store, then calls JobContractController.AmendJSON with the current expected Job revision.
+
+The command appends a `HUMAN_AMENDMENT` revision and returns the Job to DRAFT. It does not approve the new revision; a separate `taxion job approve` command must approve its exact revision / canonical hash. The same CommandID and identical base revision / hash, reason, contract, and Principal identity may be retried after the Job transitions or is reapproved. Authentication timestamp is retained in the original revision but is not part of the idempotency payload, allowing the same human to reauthenticate for a retry.
+
+The amendment path does not create ExecutionPermission or start a Provider operation.
