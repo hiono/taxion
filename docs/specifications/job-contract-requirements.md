@@ -30,7 +30,7 @@ The configuration reference is represented by a SHA-256 digest. Secret values, c
 - A revision stores both the canonicalization version and canonical hash.
 - A DRAFT Planner proposal requires an accepted Start and a still-valid PlanningAuthorization.
 - The DRAFT Planner proposal command rejects ACTIVE Jobs and cannot reuse a prior Planner execution to amend one.
-- An ACTIVE Job amendment is a separate authenticated HUMAN command. It must identify the exact current contract revision and canonical hash, include a non-empty reason, and use a validated HUMAN Principal.
+- An ACTIVE Job amendment is a separate authenticated HUMAN command. It must identify the exact current contract revision and canonical hash, include a non-empty reason, and use a validated HUMAN Principal. The Principal authentication timestamp must be at or after the current JobApproval time; an older authenticated context cannot amend the approved scope.
 - The amendment command is accepted only when the Job is ACTIVE and the exact latest revision has a matching JobApproval. It appends a new immutable JobContractRevision with origin `HUMAN_AMENDMENT`, authenticated issuer / subject / Principal ID, reason, and the superseded revision / hash.
 - The amendment command atomically transitions the Job to DRAFT. Previous JobApproval facts remain historical and never authorize the new revision. A new JobApproval is required before the Job returns to ACTIVE.
 - A human amendment does not create ExecutionPermission, start a Provider operation, or grant Planner / Coder / Reviewer execution authority.
