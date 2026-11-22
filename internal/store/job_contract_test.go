@@ -413,3 +413,28 @@ func TestJobContractAmendmentStoreRollbackLeavesActiveJobUntouched(t *testing.T)
 		t.Fatalf("failed amendment left receipt count=%d err=%v", count, err)
 	}
 }
+
+
+func TestJobContractStoreRejectsMismatchedPlannerExecutionWithoutMutation(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx := context.Background()
+	principal := newAuthenticatedTestPrincipal(t)
+	execution, revision, sourceResult := createJobContractPlanner(t, database, "job_contract_wrong_execution", principal)
+
+	job, err := database.GetJob(ctx, "job_contract_wrong_execution")
+	if err != nil {
+		t.Fatalf("GetJob before invalid proposal: %v", err)
+	}
+	_, _, err = database.AddJobContractRevision(
+		ctx, job.ID, revision, "cmd_41414141414141414141414141414141",
+		execution.ID+"_other", sourceResult.ID, sourceResult.ContentSHA256, validStoreJobContract(),
+	)
+	if err == nil {
+		t.Fatal("JobContract Store accepted a Result from a different Planner RoleExecution")
+	}
+	after, err := database.GetJob(ctx, job.ID)
+	if err != nil || after.Revision != job.Revision || len(after.JobContractRevisions) != 0 {
+		t.Fatalf("rejected provenance mismatch mutated Job: revision=%d contracts=%d err=%v",
+			after.Revision, len(after.JobContractRevisions), err)
+	}
+}
