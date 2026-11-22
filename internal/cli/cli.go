@@ -401,6 +401,10 @@ func amendJob(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		fmt.Fprintln(stderr, "JobContract JSON must be valid UTF-8")
 		return 2
 	}
+	contract, err := controller.DecodeJobContractJSON(string(contractJSON))
+	if err != nil {
+		return report(stderr, err)
+	}
 	dbPath, err := resolveStorePath(*path)
 	if err != nil {
 		return report(stderr, err)
@@ -417,14 +421,14 @@ func amendJob(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return report(stderr, err)
 	}
 	return amendJobWithPrincipal(
-		ctx, flags.Arg(0), *revision, *canonicalHash, *reason, string(contractJSON),
+		ctx, flags.Arg(0), *revision, *canonicalHash, *reason, contract,
 		resolvedCommandID, dbPath, principal, stdout, stderr,
 	)
 }
 
 func amendJobWithPrincipal(
-	ctx context.Context, jobID string, basedOnRevision uint64, basedOnCanonicalHash, reason, contractJSON,
-	commandID, dbPath string, principal auth.AuthenticatedPrincipal, stdout, stderr io.Writer,
+	ctx context.Context, jobID string, basedOnRevision uint64, basedOnCanonicalHash, reason string,
+	contract domain.JobContract, commandID, dbPath string, principal auth.AuthenticatedPrincipal, stdout, stderr io.Writer,
 ) int {
 	if err := principal.Validate(); err != nil {
 		return report(stderr, err)
@@ -442,8 +446,8 @@ func amendJobWithPrincipal(
 	if err != nil {
 		return report(stderr, err)
 	}
-	receipt, revision, err := contractController.AmendJSON(
-		ctx, jobID, job.Revision, commandID, basedOnRevision, basedOnCanonicalHash, reason, contractJSON, principal,
+	receipt, revision, err := contractController.Amend(
+		ctx, jobID, job.Revision, commandID, basedOnRevision, basedOnCanonicalHash, reason, contract, principal,
 	)
 	if err != nil {
 		return report(stderr, err)
