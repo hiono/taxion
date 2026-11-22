@@ -29,7 +29,7 @@ func validControllerJobContract(deadline time.Time) domain.JobContract {
 	}
 }
 
-func startContractPlanner(t *testing.T) (*JobContractController, *store.Store, auth.AuthenticatedPrincipal, string, string, domain.ProviderResultObservation, domain.JobContract) {
+func startContractPlanner(t *testing.T) (*PlanningController, *store.Store, auth.AuthenticatedPrincipal, string, string, domain.ProviderResultObservation, domain.JobContract) {
 	t.Helper()
 	runtime := &fakePlanningProviderRuntime{}
 	providerController, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
@@ -75,9 +75,9 @@ func startContractPlanner(t *testing.T) (*JobContractController, *store.Store, a
 	if err != nil {
 		t.Fatalf("AddProviderResultObservation: %v", err)
 	}
-	contractController, err := NewJobContractController(database)
+	contractController, err := NewPlanningController(database)
 	if err != nil {
-		t.Fatalf("NewJobContractController: %v", err)
+		t.Fatalf("NewPlanningController: %v", err)
 	}
 	return contractController, database, principal, jobID, grantID, sourceResult, contract
 }
@@ -87,7 +87,7 @@ func TestJobContractControllerProposesForAuthorizedPlanner(t *testing.T) {
 	ctx := context.Background()
 	commandID := "cmd_dddddddddddddddddddddddddddddddd"
 	roleExecutionID := domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc")
-	if _, _, err := controller.Propose(ctx, jobID, roleExecutionID,
+	if _, _, err := controller.ProposeJobContract(ctx, jobID, roleExecutionID,
 		"provider_result_missing", "cmd_91919191919191919191919191919191", principal); err == nil {
 		t.Fatal("Controller accepted an unknown source Result")
 	}
@@ -95,7 +95,7 @@ func TestJobContractControllerProposesForAuthorizedPlanner(t *testing.T) {
 	if err != nil || len(before.JobContractRevisions) != 0 {
 		t.Fatalf("rejected Result provenance changed Job: %#v %v", before.JobContractRevisions, err)
 	}
-	receipt, revision, err := controller.Propose(
+	receipt, revision, err := controller.ProposeJobContract(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, commandID, principal,
 	)
@@ -124,7 +124,7 @@ func TestJobContractControllerRejectsPrincipalMismatchAndExpiredGrant(t *testing
 	controller, database, principal, jobID, grantID, sourceResult, _ := startContractPlanner(t)
 	ctx := context.Background()
 	otherPrincipal := newProviderTestPrincipal(t)
-	if _, _, err := controller.Propose(
+	if _, _, err := controller.ProposeJobContract(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", otherPrincipal,
 	); err == nil {
@@ -145,7 +145,7 @@ func TestJobContractControllerRejectsPrincipalMismatchAndExpiredGrant(t *testing
 		t.Fatalf("expected PlanningAuthorization was not found: %#v", grant)
 	}
 	controller.now = func() time.Time { return grant.Deadline.Add(time.Second) }
-	if _, _, err := controller.Propose(
+	if _, _, err := controller.ProposeJobContract(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, "cmd_ffffffffffffffffffffffffffffffff", principal,
 	); err == nil {
@@ -173,12 +173,12 @@ func TestJobContractControllerAllowsExactReplayAfterGrantExpiry(t *testing.T) {
 	}
 	commandID := "cmd_12121212121212121212121212121212"
 	roleExecutionID := domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc")
-	firstReceipt, firstRevision, err := controller.Propose(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal)
+	firstReceipt, firstRevision, err := controller.ProposeJobContract(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal)
 	if err != nil {
 		t.Fatalf("initial Propose: %v", err)
 	}
 	controller.now = func() time.Time { return grant.Deadline.Add(time.Second) }
-	retryReceipt, retryRevision, err := controller.Propose(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal)
+	retryReceipt, retryRevision, err := controller.ProposeJobContract(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal)
 	if err != nil {
 		t.Fatalf("idempotent replay after expiry: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestJobContractControllerRejectsNewProposalAfterApproval(t *testing.T) {
 	controller, database, principal, jobID, _, sourceResult, _ := startContractPlanner(t)
 	ctx := context.Background()
 	roleExecutionID := domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc")
-	_, revision, err := controller.Propose(
+	_, revision, err := controller.ProposeJobContract(
 		ctx, jobID, roleExecutionID, sourceResult.ID, "cmd_23232323232323232323232323232323", principal,
 	)
 	if err != nil {
@@ -216,7 +216,7 @@ func TestJobContractControllerRejectsNewProposalAfterApproval(t *testing.T) {
 	); err != nil {
 		t.Fatalf("AddJobApproval: %v", err)
 	}
-	if _, _, err := controller.Propose(
+	if _, _, err := controller.ProposeJobContract(
 		ctx, jobID, roleExecutionID, sourceResult.ID, "cmd_25252525252525252525252525252525", principal,
 	); err == nil {
 		t.Fatal("new proposal through the DRAFT Planner authority was accepted after approval")
@@ -232,10 +232,10 @@ func TestJobContractControllerRejectsCommandIDReuseByDifferentPlanner(t *testing
 	ctx := context.Background()
 	commandID := "cmd_34343434343434343434343434343434"
 	roleExecutionID := domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc")
-	if _, _, err := controller.Propose(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal); err != nil {
+	if _, _, err := controller.ProposeJobContract(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal); err != nil {
 		t.Fatalf("initial Propose: %v", err)
 	}
-	if _, _, err := controller.Propose(
+	if _, _, err := controller.ProposeJobContract(
 		ctx, jobID, "role_exec_00000000000000000000000000000000",
 		sourceResult.ID, commandID, principal,
 	); err == nil {
@@ -250,7 +250,7 @@ func TestJobContractControllerRejectsCommandIDReuseByDifferentPlanner(t *testing
 func TestJobContractControllerApprovesExactRevisionAndReplaysAfterActivation(t *testing.T) {
 	controller, database, principal, jobID, _, sourceResult, _ := startContractPlanner(t)
 	ctx := context.Background()
-	_, revision, err := controller.Propose(
+	_, revision, err := controller.ProposeJobContract(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, "cmd_45454545454545454545454545454545", principal,
 	)
