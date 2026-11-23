@@ -163,7 +163,7 @@ func NewTaskTurnIntent(
 		ProviderStartID: start.ID, ProviderSessionID: sessionID,
 		ProviderID: permission.ProviderID, AccountID: permission.AccountID,
 		ConfigurationSHA256: permission.ConfigurationSHA256,
-		TurnNumber: count + 1, PromptSHA256: promptSHA256, ReservedTokens: reservedTokens,
+		TurnNumber:          count + 1, PromptSHA256: promptSHA256, ReservedTokens: reservedTokens,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
 	if err := turn.Validate(job); err != nil {
