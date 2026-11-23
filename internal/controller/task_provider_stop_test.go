@@ -32,17 +32,17 @@ func (v *taskStopWorktreeVerifier) Verify(context.Context, string, domain.Task, 
 }
 
 type taskProviderStopFixture struct {
-	ctx              context.Context
-	database         *store.Store
-	principal        auth.AuthenticatedPrincipal
-	jobID            string
-	task             domain.Task
-	execution        domain.RoleExecution
-	permission       domain.ExecutionPermission
+	ctx               context.Context
+	database          *store.Store
+	principal         auth.AuthenticatedPrincipal
+	jobID             string
+	task              domain.Task
+	execution         domain.RoleExecution
+	permission        domain.ExecutionPermission
 	permissionRequest domain.ExecutionPermissionRequest
-	runtime          *fakePlanningProviderRuntime
-	worktree         *taskStopWorktreeVerifier
-	controller       *ProviderController
+	runtime           *fakePlanningProviderRuntime
+	worktree          *taskStopWorktreeVerifier
+	controller        *ProviderController
 }
 
 func newTaskProviderStopFixture(t *testing.T) taskProviderStopFixture {
@@ -95,7 +95,7 @@ func newTaskProviderStopFixture(t *testing.T) taskProviderStopFixture {
 		Role: "CODER", Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 2, ReservedTokens: 200, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       2, ReservedTokens: 200, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	_, permission, err := executionController.Authorize(ctx, permissionRequest)
 	if err != nil {
