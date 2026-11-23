@@ -99,8 +99,9 @@ func (c *ProviderController) StopTaskExecution(
 		}
 		if lookup.Found {
 			if lookup.Status == "STOPPED" && lookup.Stopped && lookup.Quiescent {
+				reconcilesUnknown := hasPrevious && !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
 				observation, persistErr := c.persistProviderStopObservation(
-					ctx, currentJob, intent, principal, true, true, lookup.EvidenceSHA256, hasPrevious,
+					ctx, currentJob, intent, principal, true, true, lookup.EvidenceSHA256, reconcilesUnknown,
 				)
 				if persistErr != nil {
 					return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
