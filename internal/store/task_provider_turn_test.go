@@ -249,7 +249,7 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob after restart: %v", err)
 	}
-	if len(restored.TaskTurnIntents) != 1 || len(restored.TaskTurnObservations) != 2 || len(restored.ProviderResultObservations) != 1 || len(restored.ProviderUsageObservations) != 1 || len(restored.JobOutputs) != 1 ||
+	if len(restored.TaskTurnIntents) != 1 || len(restored.TaskTurnObservations) != 2 || len(restored.ProviderResultObservations) != 2 || len(restored.ProviderUsageObservations) != 1 || len(restored.JobOutputs) != 1 ||
 		len(restored.PlanningResumeIntents) != 1 || len(restored.PlanningResumeObservations) != 2 ||
 		len(restored.ProviderStopIntents) != 1 || len(restored.ProviderStopObservations) != 2 ||
 		restored.TaskTurnIntents[0].ID != turn.ID ||

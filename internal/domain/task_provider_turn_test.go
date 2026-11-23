@@ -146,7 +146,7 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.UpdatedAt = completed.CreatedAt
 	principalID = job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
 	stopIntent, err := NewProviderStopIntent(job, execution.ID, principalID, turn.ProviderSessionID,
-		"cmd_dd1010101010101010101010101010101", ProviderStopReasonTaskComplete, now.Add(5*time.Minute))
+		"cmd_d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1", ProviderStopReasonTaskComplete, now.Add(5*time.Minute))
 	if err != nil {
 		t.Fatalf("create Provider Stop intent: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = stopIntent.CreatedAt
 	stopObservation, err := NewProviderStopObservation(job, stopIntent.ID, principalID,
-		"cmd_dd2020202020202020202020202020202", true, true, strings.Repeat("8", 64), false, now.Add(6*time.Minute))
+		"cmd_d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2", true, true, strings.Repeat("8", 64), false, now.Add(6*time.Minute))
 	if err != nil {
 		t.Fatalf("create Provider Stop observation: %v", err)
 	}
