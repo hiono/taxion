@@ -37,6 +37,9 @@ func JobOutputID(commandID string) string {
 }
 
 func NewJobOutput(job Job, taskID, roleExecutionID, turnID, commitSHA, treeSHA string, now time.Time) (JobOutput, error) {
+	if job.State != JobActive {
+		return JobOutput{}, errors.New("JobOutput can only be appended while the Job is ACTIVE")
+	}
 	if err := job.Validate(); err != nil {
 		return JobOutput{}, err
 	}

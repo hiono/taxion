@@ -75,6 +75,8 @@ Task-bound Coder Start fixtureはACTIVE Job、最新JobApproval、Task、JobAppr
 | DOM-029 | Task Start observation | Task / ExecutionPermission / RoleExecution / ProviderStartIntentのidentity不一致、または異なるJobApproval | 拒否 |
 | DOM-030 | Task Start observation authority | Task-bound observationへPlanner Principalを流用、またはPlanner observationにPrincipalなし | 拒否 |
 | DOM-031 | Task Start observation history | Job amendment後の既存Task operation evidence復元 | historical permission / approval provenanceを維持して復元 |
+| DOM-032 | JobOutput provenance | completed Coder Turn、final Result、complete Usage、Stopped / Quiescent、Worktree Assignmentとcommit / tree identity | append-only JobOutputへ束縛 |
+| DOM-033 | JobOutput tampering | Stop evidence変更、invalid Git commit identity | 拒否 |
 
 ## 5. Adapter contract tests
 
@@ -181,6 +183,7 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | STO-014 | Result / Usage facts | aggregate更新またはreceipt INSERT失敗 | 両方rollbackし、同一Command IDで再試行可能 |
 | STO-015 | Result / Usage idempotency | 同じCommand ID / payloadの再送、異なるpayloadでの再利用 | 同じfact / receiptへ収束、異なるpayloadは拒否 |
 | STO-016 | Result / Usage restore | restart後のResult / Usage facts | identity、append順序、digest、Complete finalityを再検証 |
+| STO-017 | JobOutput persistence | completed Coder Turnとfinal Result / Usage、Stop proofに束縛した出力 | exact replayとrestart後のrestore |
 
 ## 10. Controller E2 integration tests
 

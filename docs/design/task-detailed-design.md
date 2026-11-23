@@ -47,7 +47,9 @@ ExecutionControllerは同一Taskの別RoleExecutionによるWorktree再取得を
 
 ProviderControllerはtrusted Worktree verifierでassignment ownerと物理Worktreeを再検証します。Task-bound Provider StartRequestにはRepositoryID、WorktreePath、baseline commitを含めます。Provider runtimeはTask Worktree capabilityの検証証拠がruntime minimum以上の場合だけWorktree付きStartを許可します。Task dispatchではE4以上のTask Worktree evidenceを要求します。Startのidempotency / lookup capabilityも別途検証します。
 
-Reviewer dispatchはread-only snapshot境界が未実装のためfail closedとします。Worktreeの解放、quarantine、owner handoff、orphan reconciliationも未実装であり、未解決Worktreeを自動削除しません。
+Coder成果identityはJobOutputとしてJobAggregateへappendします。WorktreeManager.CaptureOutputはassignmentと物理Worktreeを再検証し、staged / unstaged / untracked変更がない場合だけHEADのcommit SHAとtree SHAを返します。ExecutionController.CaptureTaskOutputはこのidentityを、Task、Coder RoleExecution、Worktree Assignment、完了済みTask Turn、final Provider Result、complete Usage、Stopped / Quiescent evidenceへ束縛してStoreへ保存します。JobOutputはexact replayとrestart後の復元をサポートします。
+
+JobOutputの保存はWorktree releaseやReviewer handoffを意味しません。Reviewer dispatchはread-only snapshot境界が未実装のためfail closedとします。Worktreeの解放、quarantine、owner handoff、orphan reconciliationも未実装であり、未解決Worktreeを自動削除しません。
 
 ## 6. Task-bound Coder Turn
 

@@ -174,6 +174,16 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create immutable JobOutput: %v", err)
 	}
+	tampered := output
+	tampered.ProviderStopEvidenceSHA256 = strings.Repeat("f", 64)
+	if err := tampered.Validate(job); err == nil {
+		t.Fatal("JobOutput accepted changed Provider Stop evidence")
+	}
+	tampered = output
+	tampered.CommitSHA = "invalid"
+	if err := tampered.Validate(job); err == nil {
+		t.Fatal("JobOutput accepted an invalid Git commit identity")
+	}
 	job.JobOutputs = append(job.JobOutputs, output)
 	job.Revision++
 	job.UpdatedAt = output.CreatedAt

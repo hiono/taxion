@@ -279,6 +279,7 @@ Providerの外部事実をJobAggregateへappend-onlyで保持する。現時点�
 - ProviderUsageObservation（Domain / Store実装済み）: OperationID / optional TurnID / SessionIDへ束縛したUsageID、token数、Complete、evidence digest。Complete=falseからComplete=trueへの更新は新しいObservationを追加する
 - ProviderStopIntent（Domain / Store / Controller実装済み）: OperationID、SessionID、Provider identity、Reason。Stop前に保存し、後続Turn / Resumeを禁止
 - ProviderStopObservation（Domain / Store / Controller実装済み）: Stopped、Quiescent、evidence、UNKNOWN reconciliation
+- JobOutput（Domain / Store / ExecutionController / Worktree Manager実装済み）: Coderのcompleted Turn、final Result、complete Usage、Stopped / Quiescent evidenceに束縛したGit commit SHA / tree SHAをappend-only保存
 - PlanningResumeIntent / PlanningResumeObservation（Domain / Store / Controller実装済み）: E5 SessionReattach evidence、同一OperationID / SessionID、ATTACHED / FAILED / UNKNOWN、UNKNOWN reconciliation
 
 既存PlanningTurnObservation / PlanningResumeObservationはPlanning lifecycleの状態を表す。Start observationはProviderStartIntentのOperationIDへ束縛し、accepted SessionIDなしに新しいTurn / Resume intentを作成できない。Provider eventはaccepted SessionとOperationID / TurnIDへ束縛し、cursor chainを検証してJobAggregateへappend-onlyで保存する。Stop intentはRuntime.Stopより先に保存し、Stop observationは同一OperationIDの証拠でUNKNOWNを解消する。SendはTurn intentを先行保存し、同じOperationID / TurnIDでLookupまたは実証済みidempotencyを使って照合する。Provider固有のResult / Usageはaccepted Start / Turnへ束縛したappend-only factsとして保存し、Complete=trueのUsageだけを確定利用量として扱う。
