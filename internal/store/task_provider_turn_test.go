@@ -96,7 +96,7 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	}
 	if _, _, err := database.AddTaskProviderStartObservation(ctx, jobID, job.Revision,
 		start.ProviderStartIntent.ID, "cmd_e6060606060606060606060606060606",
-		domain.ProviderStartAccepted, "session_task_store", "receipt_task_store",
+		domain.ProviderStartAccepted, "session_1", "receipt_task_store",
 		strings.Repeat("b", 64), false); err != nil {
 		t.Fatalf("AddTaskProviderStartObservation: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	}
 	turnCommand := "cmd_e7070707070707070707070707070707"
 	receipt, turn, err := database.AddTaskTurnIntent(ctx, jobID, job.Revision,
-		start.RoleExecution.ID, permission.ID, "session_task_store",
+		start.RoleExecution.ID, permission.ID, "session_1",
 		turnCommand, strings.Repeat("c", 64), 80)
 	if err != nil {
 		t.Fatalf("AddTaskTurnIntent: %v", err)
@@ -133,7 +133,7 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, resume, err := database.AddPlanningResumeIntent(ctx, jobID, job.Revision,
-		start.RoleExecution.ID, "session_task_store", "cmd_e9090909090909090909090909090909",
+		start.RoleExecution.ID, "session_1", "cmd_e9090909090909090909090909090909",
 		strings.Repeat("f", 64), true, principal)
 	if err != nil {
 		t.Fatalf("AddPlanningResumeIntent for Task Coder: %v", err)
@@ -163,7 +163,7 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, stopIntent, err := database.AddProviderStopIntent(ctx, jobID, job.Revision,
-		start.RoleExecution.ID, "session_task_store", "cmd_ec0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+		start.RoleExecution.ID, "session_1", "cmd_ec0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
 		domain.ProviderStopReasonTaskComplete, principal)
 	if err != nil {
 		t.Fatalf("AddProviderStopIntent for Task Coder: %v", err)
