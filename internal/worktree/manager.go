@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -75,26 +76,62 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 	if !trusted {
 		return Snapshot{}, errors.New("Task repository is not in the trusted repository registry")
 	}
-	baseline, err := gitOutput(ctx, repositoryPath, "rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil || !validCommit(baseline) {
-		return Snapshot{}, errors.New("trusted repository HEAD is not a verifiable commit")
-	}
 	key := sha256.Sum256([]byte(jobID + "\x00" + task.ID))
 	worktreePath := filepath.Join(m.root, hex.EncodeToString(key[:]))
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
+		return Snapshot{}, fmt.Errorf("create Worktree workspace root: %w", err)
+	}
+	_, worktreeErr := os.Lstat(worktreePath)
+	worktreeExists := worktreeErr == nil
+	if worktreeErr != nil && !errors.Is(worktreeErr, os.ErrNotExist) {
+		return Snapshot{}, fmt.Errorf("inspect Task Worktree path: %w", worktreeErr)
+	}
+	baselinePath := worktreePath + ".baseline.json"
+	record, recordErr := readBaselineRecord(baselinePath)
+	var baseline string
+	if recordErr == nil {
+		if err := validateBaselineRecord(record, jobID, task.ID, repositoryID, repositoryPath); err != nil {
+			return Snapshot{}, err
+		}
+		baseline = record.BaselineCommit
+	} else if errors.Is(recordErr, os.ErrNotExist) {
+		if worktreeExists {
+			return Snapshot{}, errors.New("existing Task Worktree has no persisted immutable baseline")
+		}
+		baseline, err = gitOutput(ctx, repositoryPath, "rev-parse", "--verify", "HEAD^{commit}")
+		if err != nil || !validCommit(baseline) {
+			return Snapshot{}, errors.New("trusted repository HEAD is not a verifiable commit")
+		}
+		record = baselineRecord{
+			Version: 1, JobID: jobID, TaskID: task.ID,
+			RepositoryID: repositoryID, RepositoryPath: repositoryPath,
+			BaselineCommit: baseline,
+		}
+		if err := writeBaselineRecord(baselinePath, record); err != nil {
+			if !errors.Is(err, os.ErrExist) {
+				return Snapshot{}, fmt.Errorf("persist immutable Task Worktree baseline: %w", err)
+			}
+			record, err = readBaselineRecord(baselinePath)
+			if err != nil {
+				return Snapshot{}, fmt.Errorf("read concurrently persisted Task Worktree baseline: %w", err)
+			}
+			if err := validateBaselineRecord(record, jobID, task.ID, repositoryID, repositoryPath); err != nil {
+				return Snapshot{}, err
+			}
+			baseline = record.BaselineCommit
+		}
+	} else {
+		return Snapshot{}, fmt.Errorf("read immutable Task Worktree baseline: %w", recordErr)
+	}
 	snapshot := Snapshot{
 		RepositoryID: repositoryID, RepositoryPath: repositoryPath,
 		WorktreePath: worktreePath, BaselineCommit: baseline,
 	}
-	if _, err := os.Lstat(worktreePath); err == nil {
+	if worktreeExists {
 		if err := m.Verify(ctx, jobID, task, snapshot); err != nil {
 			return Snapshot{}, fmt.Errorf("existing Task Worktree does not match its immutable baseline: %w", err)
 		}
 		return snapshot, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return Snapshot{}, fmt.Errorf("inspect Task Worktree path: %w", err)
-	}
-	if err := os.MkdirAll(m.root, 0o700); err != nil {
-		return Snapshot{}, fmt.Errorf("create Worktree workspace root: %w", err)
 	}
 	if err := runGit(ctx, repositoryPath, "worktree", "add", "--detach", worktreePath, baseline); err != nil {
 		// Git serializes updates to the shared repository metadata. A concurrent
@@ -125,6 +162,16 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 	expectedPath := filepath.Join(m.root, hex.EncodeToString(key[:]))
 	if filepath.Clean(snapshot.WorktreePath) != expectedPath || !validCommit(snapshot.BaselineCommit) {
 		return errors.New("Worktree path or baseline commit is invalid")
+	}
+	record, err := readBaselineRecord(expectedPath + ".baseline.json")
+	if err != nil {
+		return fmt.Errorf("read immutable Task Worktree baseline: %w", err)
+	}
+	if err := validateBaselineRecord(record, jobID, task.ID, snapshot.RepositoryID, repositoryPath); err != nil {
+		return err
+	}
+	if record.BaselineCommit != snapshot.BaselineCommit {
+		return errors.New("Worktree snapshot baseline differs from its persisted immutable baseline")
 	}
 	resolved, err := filepath.EvalSymlinks(snapshot.WorktreePath)
 	if err != nil || filepath.Clean(resolved) != expectedPath {
@@ -192,6 +239,63 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 		return OutputSnapshot{}, errors.New("Task output tree identity is invalid")
 	}
 	return OutputSnapshot{CommitSHA: commit, TreeSHA: tree}, nil
+}
+
+type baselineRecord struct {
+	Version        int    `json:"version"`
+	JobID          string `json:"job_id"`
+	TaskID         string `json:"task_id"`
+	RepositoryID   string `json:"repository_id"`
+	RepositoryPath string `json:"repository_path"`
+	BaselineCommit string `json:"baseline_commit"`
+}
+
+func readBaselineRecord(path string) (baselineRecord, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return baselineRecord{}, err
+	}
+	var record baselineRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return baselineRecord{}, fmt.Errorf("decode baseline record: %w", err)
+	}
+	if record.Version != 1 || !validPathIdentity(record.JobID) || !validPathIdentity(record.TaskID) ||
+		strings.TrimSpace(record.RepositoryID) == "" || strings.TrimSpace(record.RepositoryPath) == "" ||
+		!validCommit(record.BaselineCommit) {
+		return baselineRecord{}, errors.New("immutable Task Worktree baseline record is invalid")
+	}
+	return record, nil
+}
+
+func validateBaselineRecord(record baselineRecord, jobID, taskID, repositoryID, repositoryPath string) error {
+	if record.JobID != jobID || record.TaskID != taskID ||
+		record.RepositoryID != repositoryID || record.RepositoryPath != repositoryPath {
+		return errors.New("immutable Task Worktree baseline record belongs to another Job, Task, or repository")
+	}
+	return nil
+}
+
+func writeBaselineRecord(path string, record baselineRecord) error {
+	data, err := json.Marshal(record)
+	if err != nil {
+		return fmt.Errorf("encode baseline record: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write baseline record: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("sync baseline record: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close baseline record: %w", err)
+	}
+	return nil
 }
 
 func canonicalDirectory(path string, create bool) (string, error) {

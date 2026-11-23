@@ -55,6 +55,73 @@ func TestManagerPreparesDetachedTaskWorktreeAtImmutableBaseline(t *testing.T) {
 	}
 }
 
+
+func TestManagerRetryRestoresPersistedBaselineAfterSourceHEADChanges(t *testing.T) {
+	repository := initRepository(t)
+	workspace := filepath.Join(t.TempDir(), "worktrees")
+	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	jobID := "job_0123456789abcdef"
+	task := domain.Task{ID: "task_0123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	baseline := gitTestOutput(t, repository, "rev-parse", "HEAD")
+	snapshot, err := manager.Prepare(context.Background(), jobID, task)
+	if err != nil {
+		t.Fatalf("initial Prepare: %v", err)
+	}
+	if snapshot.BaselineCommit != baseline {
+		t.Fatalf("initial baseline = %s, want %s", snapshot.BaselineCommit, baseline)
+	}
+
+	// Simulate interruption after the immutable baseline was persisted but before
+	// the Worktree assignment was durably recorded.
+	gitTestRun(t, repository, "worktree", "remove", "--force", snapshot.WorktreePath)
+	if err := os.WriteFile(filepath.Join(repository, "source-update.txt"), []byte("advanced source HEAD\n"), 0o600); err != nil {
+		t.Fatalf("advance source repository: %v", err)
+	}
+	gitTestRun(t, repository, "add", "source-update.txt")
+	gitTestRun(t, repository, "commit", "-m", "advance source repository")
+	if got := gitTestOutput(t, repository, "rev-parse", "HEAD"); got == baseline {
+		t.Fatal("source repository HEAD did not advance")
+	}
+
+	retried, err := manager.Prepare(context.Background(), jobID, task)
+	if err != nil {
+		t.Fatalf("retry Prepare: %v", err)
+	}
+	if retried.BaselineCommit != baseline {
+		t.Fatalf("retry baseline = %s, want original %s", retried.BaselineCommit, baseline)
+	}
+	if got := gitTestOutput(t, retried.WorktreePath, "rev-parse", "HEAD"); got != baseline {
+		t.Fatalf("retry Worktree HEAD = %s, want original baseline %s", got, baseline)
+	}
+	if err := manager.Verify(context.Background(), jobID, task, retried); err != nil {
+		t.Fatalf("Verify retried Worktree: %v", err)
+	}
+}
+
+func TestManagerRejectsExistingWorktreeWithoutPersistedBaseline(t *testing.T) {
+	repository := initRepository(t)
+	manager, err := NewManager(filepath.Join(t.TempDir(), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	jobID := "job_0123456789abcdef"
+	task := domain.Task{ID: "task_0123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := manager.Prepare(context.Background(), jobID, task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := os.Remove(snapshot.WorktreePath + ".baseline.json"); err != nil {
+		t.Fatalf("remove baseline record: %v", err)
+	}
+	if _, err := manager.Prepare(context.Background(), jobID, task); err == nil ||
+		!strings.Contains(err.Error(), "no persisted immutable baseline") {
+		t.Fatalf("Prepare without baseline record error = %v", err)
+	}
+}
+
 func TestManagerRejectsOutOfScopeRepositoryAndChangedBaseline(t *testing.T) {
 	repository := initRepository(t)
 	manager, err := NewManager(filepath.Join(t.TempDir(), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
