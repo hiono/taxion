@@ -85,7 +85,7 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 		return StartResult{}, ErrUnsupportedCapability
 	}
 	if request.ReadOnlySnapshot != nil &&
-		!capabilities.HasEvidenceAtLeast(CapabilityReviewerReadOnlySnapshot, EvidenceLive) {
+		!capabilities.HasEvidenceAtLeast(CapabilityReviewerReadOnlySnapshot, r.minimumEvidence) {
 		return StartResult{}, ErrUnsupportedCapability
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (StartResult, error) {
