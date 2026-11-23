@@ -93,7 +93,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 			{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("2", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		},
 	}
-	runtime.lookupResult = provider.LookupResult{Found: false, OperationID: permission.OperationID}
+	runtime.lookupResult = provider.LookupResult{Found: false, OperationID: permission.OperationID, Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("3", 64)}
 	providerController, err := NewProviderControllerWithExecutionAndWorktree(database, runtime, executionController, worktree)
 	if err != nil {
 		t.Fatalf("NewProviderControllerWithExecutionAndWorktree: %v", err)
