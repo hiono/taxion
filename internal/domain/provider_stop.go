@@ -13,7 +13,7 @@ type ProviderStopReason string
 const (
 	ProviderStopReasonPlanningComplete ProviderStopReason = "planning_complete"
 	ProviderStopReasonTaskComplete     ProviderStopReason = "task_complete"
-	ProviderStopReasonCancelled       ProviderStopReason = "cancelled"
+	ProviderStopReasonCancelled        ProviderStopReason = "cancelled"
 	ProviderStopReasonBudgetExhausted  ProviderStopReason = "budget_exhausted"
 	ProviderStopReasonDeadline         ProviderStopReason = "deadline"
 	ProviderStopReasonFailure          ProviderStopReason = "failure"
