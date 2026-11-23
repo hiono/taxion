@@ -59,7 +59,7 @@
 | TK-055 | Task Coder Stop authority and evidence | ACTIVE Job、accepted Coder Session、matching JobApproval / ExecutionPermission、E4 StopProof | Persist Stop intent before Runtime.Stop and append only matching Stopped / Quiescent evidence |
 | TK-056 | Task Coder Stop revalidation | Principal、permission、Session、Worktree ownerまたは物理Worktreeが不一致 | Reject before Provider Stop; do not append a terminal observation |
 | TK-057 | Stop capability evidence | StopProof capability missing or below E4 | Reject before Provider Stop |
-| TK-058 | UNKNOWN Stop replay | Existing Stop intent has UNKNOWN or no observation | Reuse the same intent, persist / retain UNKNOWN, and do not call Runtime.Stop again |
+| TK-058 | UNKNOWN Stop replay | Existing Stop intent has UNKNOWN or no observation | Reuse the same intent and retain UNKNOWN. Do not call Runtime.Stop again unless verified E4 Stop Lookup returns NOT_FOUND; then retry only with the same OperationID / SessionID |
 | TK-059 | Turn after Stop | TaskTurnIntent is created after the same Coder Session Stop intent | Reject without Job mutation |
 | TK-060 | Task Coder Resume authority | ACTIVE Job、matching JobApproval / ExecutionPermission、accepted Task Coder Session | Append Task-bound Resume intent with TaskID / ExecutionPermissionID and same Session |
 | TK-061 | Session identity preservation | Resume request supplies another Session or mismatched Start identity | Reject; never replace the RoleExecution's persisted Session |
@@ -70,7 +70,7 @@
 | TK-066 | Expired or stale authority | JobApproval, ExecutionPermission, JobContract revision, or deadline is no longer current | Reject before Resume side effect |
 | TK-067 | Resume after Stop | Same RoleExecution / Session has a ProviderStopIntent | Reject without Runtime.Resume or new Session |
 | TK-068 | Stop / Resume concurrency | Same Session has a Resume intent with no observation or UNKNOWN | Reject Stop intent and do not call Runtime.Stop until Resume is terminal |
-| TK-069 | Ambiguous Task Coder Stop | Runtime.Stop returns an ambiguous timeout after Stop intent commit | Persist UNKNOWN; same CommandID replay reuses the intent and does not call Runtime.Stop again; a new Stop identity is rejected |
+| TK-069 | Ambiguous Task Coder Stop | Runtime.Stop returns an ambiguous timeout after Stop intent commit | Persist UNKNOWN; same CommandID replay reuses the intent and does not call Runtime.Stop again unless verified E4 Stop Lookup returns NOT_FOUND; a new Stop identity is rejected |
 | TK-070 | Stop response identity and evidence | Stop response has wrong OperationID / SessionID, Stopped=false, Quiescent=false, missing or invalid evidence digest | Persist UNKNOWN; never report Stopped / Quiescent success |
 | TK-071 | Stop preconditions | StopProof is absent or mismatched, Provider identity differs, or Worktree verification fails before intent | Reject without Stop intent, observation, or Provider side effect |
 | TK-072 | Final Worktree revalidation after Stop intent | Worktree verification fails after Stop intent commit but immediately before Runtime.Stop | Preserve intent; do not call Provider; retry remains conservative UNKNOWN and never blindly repeats Stop |
