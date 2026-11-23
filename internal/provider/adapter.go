@@ -39,6 +39,7 @@ const (
 	CapabilitySessionReattach   Capability = "session.cross_process_reattachment"
 	CapabilityEventReplay       Capability = "event.replay"
 	CapabilityStopProof         Capability = "stop.proof"
+	CapabilityStopLookup        Capability = "stop.lookup"
 	CapabilityFinalOutput       Capability = "result.final_output_retrieval"
 	CapabilityUsageIdentity     Capability = "usage.identity"
 	CapabilityUsageCompleteness Capability = "usage.completeness"
@@ -72,6 +73,7 @@ type Capabilities struct {
 	CrossProcessSessionReattach bool
 	EventReplay                 bool
 	StopProof                   bool
+	StopLookup                  bool
 	FinalOutputRetrieval        bool
 	UsageIdentity               bool
 	UsageCompleteness           bool
@@ -136,6 +138,8 @@ func (c Capabilities) Has(capability Capability) bool {
 		return c.EventReplay
 	case CapabilityStopProof:
 		return c.StopProof
+	case CapabilityStopLookup:
+		return c.StopLookup
 	case CapabilityFinalOutput:
 		return c.FinalOutputRetrieval
 	case CapabilityUsageIdentity:
@@ -299,7 +303,7 @@ var allCapabilities = []Capability{
 	CapabilityStartIdempotency, CapabilityStartLookup, CapabilityTaskWorktree,
 	CapabilitySendIdempotency, CapabilitySendLookup,
 	CapabilitySessionReattach, CapabilityEventReplay,
-	CapabilityStopProof, CapabilityFinalOutput,
+	CapabilityStopProof, CapabilityStopLookup, CapabilityFinalOutput,
 	CapabilityUsageIdentity, CapabilityUsageCompleteness,
 }
 
@@ -457,6 +461,8 @@ const (
 
 type LookupResult struct {
 	Found          bool
+	Stopped        bool
+	Quiescent      bool
 	OperationID    string
 	Status         string
 	ReceiptID      string
@@ -473,6 +479,7 @@ func (r LookupResult) Validate(request LookupRequest) error {
 	}
 	if !r.Found {
 		if r.Status != LookupStatusNotFound || r.ReceiptID != "" || r.ResultSHA256 != "" || r.UsageID != "" ||
+			r.Stopped || r.Quiescent ||
 			(request.SessionID == "" && r.SessionID != "") ||
 			(request.SessionID != "" && r.SessionID != request.SessionID) ||
 			(request.TurnID == "" && r.TurnID != "") ||
@@ -482,6 +489,8 @@ func (r LookupResult) Validate(request LookupRequest) error {
 		return nil
 	}
 	if !validLookupFoundStatus(r.Status) || !validIdentifier(r.SessionID) || !validIdentifier(r.ReceiptID) ||
+		(r.Status == "STOPPED" && (!r.Stopped || !r.Quiescent)) ||
+		(r.Status != "STOPPED" && (r.Stopped || r.Quiescent)) ||
 		(r.ResultSHA256 != "" && !validSHA256(r.ResultSHA256)) ||
 		(r.UsageID != "" && !validIdentifier(r.UsageID)) ||
 		(request.SessionID != "" && r.SessionID != request.SessionID) ||

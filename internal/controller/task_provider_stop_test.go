@@ -289,3 +289,96 @@ func TestTaskProviderStopConflictingReplayDoesNotRepeatProviderCall(t *testing.T
 		t.Fatalf("conflicting replay repeated Provider Stop: calls=%d", f.runtime.stopCalls)
 	}
 }
+func enableTaskStopLookup(f *taskProviderStopFixture) {
+	f.runtime.capabilities.StopLookup = true
+	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence, provider.CapabilityEvidence{
+		Capability: provider.CapabilityStopLookup, Identity: f.runtime.identity,
+		TestID: "task-stop-lookup-test", EvidenceSHA256: strings.Repeat("f", 64),
+		EvidenceLevel: provider.EvidenceLive, VerifiedAt: f.controller.now(),
+	})
+}
+
+func restartTaskProviderController(t *testing.T, f taskProviderStopFixture) *ProviderController {
+	t.Helper()
+	controller, err := NewProviderControllerWithExecutionAndWorktree(
+		f.database, f.runtime, f.controller.execution, f.worktree,
+	)
+	if err != nil {
+		t.Fatalf("restart ProviderController: %v", err)
+	}
+	controller.now = f.controller.now
+	return controller
+}
+
+func TestTaskProviderStopReconcilesProviderSideEffectAfterControllerRestart(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	enableTaskStopLookup(&f)
+	commandID := "cmd_f3030303030303030303030303030303"
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Stop intent: %v", err)
+	}
+	_, intent, err := f.database.AddProviderStopIntent(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, "session_1",
+		commandID, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if err != nil {
+		t.Fatalf("persist Stop intent before simulated crash: %v", err)
+	}
+	// Simulate the Provider completing Stop after the intent commit but before
+	// Taxion persists its terminal observation.
+	if _, err := f.runtime.Stop(f.ctx, provider.StopRequest{
+		OperationID: intent.OperationID, SessionID: "session_1",
+	}); err != nil {
+		t.Fatalf("simulate Provider Stop side effect: %v", err)
+	}
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: true, Stopped: true, Quiescent: true,
+		OperationID: intent.OperationID, Status: "STOPPED",
+		ReceiptID: "receipt_stop", SessionID: "session_1",
+		EvidenceSHA256: strings.Repeat("9", 64),
+	}
+	restarted := restartTaskProviderController(t, f)
+	_, replayedIntent, observation, err := restarted.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if err != nil || replayedIntent.ID != intent.ID || !observation.Stopped ||
+		!observation.Quiescent || !observation.ReconcilesUnknown && observation.CreatedRevision == 0 ||
+		f.runtime.stopCalls != 1 || f.runtime.lookupCalls != 2 {
+		t.Fatalf("restart did not reconcile the existing Provider Stop: intent=%#v observation=%#v stopCalls=%d lookupCalls=%d err=%v",
+			replayedIntent, observation, f.runtime.stopCalls, f.runtime.lookupCalls, err)
+	}
+}
+
+func TestTaskProviderStopRetriesOnlyAfterRestartLookupConfirmsNotFound(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	enableTaskStopLookup(&f)
+	commandID := "cmd_f4040404040404040404040404040404"
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Stop intent: %v", err)
+	}
+	_, intent, err := f.database.AddProviderStopIntent(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, "session_1",
+		commandID, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if err != nil {
+		t.Fatalf("persist Stop intent before simulated crash: %v", err)
+	}
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: intent.OperationID, Status: provider.LookupStatusNotFound,
+		SessionID: "session_1", EvidenceSHA256: strings.Repeat("8", 64),
+	}
+	restarted := restartTaskProviderController(t, f)
+	_, replayedIntent, observation, err := restarted.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if err != nil || replayedIntent.ID != intent.ID || !observation.Stopped ||
+		!observation.Quiescent || f.runtime.stopCalls != 1 || f.runtime.lookupCalls != 2 {
+		t.Fatalf("restart did not retry the original Stop after confirmed NOT_FOUND: intent=%#v observation=%#v stopCalls=%d lookupCalls=%d err=%v",
+			replayedIntent, observation, f.runtime.stopCalls, f.runtime.lookupCalls, err)
+	}
+}
+

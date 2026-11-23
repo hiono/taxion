@@ -70,16 +70,56 @@ func (c *ProviderController) StopTaskExecution(
 		return intentReceipt, intent, previous, nil
 	}
 	if existingStopIntent {
-		if hasPrevious {
-			return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+		if !capabilities.HasEvidenceAtLeast(provider.CapabilityStopLookup, provider.EvidenceLive) {
+			if hasPrevious {
+				return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+			}
+			observation, persistErr := c.persistProviderStopObservation(
+				ctx, currentJob, intent, principal, false, false, "", false,
+			)
+			if persistErr != nil {
+				return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
+			}
+			return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
 		}
-		observation, persistErr := c.persistProviderStopObservation(
-			ctx, currentJob, intent, principal, false, false, "", false,
-		)
-		if persistErr != nil {
-			return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
+
+		lookupRequest := provider.LookupRequest{OperationID: intent.OperationID, SessionID: sessionID}
+		lookup, lookupErr := c.runtime.Lookup(ctx, lookupRequest)
+		if lookupErr != nil || lookup.Validate(lookupRequest) != nil {
+			if hasPrevious {
+				return intentReceipt, intent, previous, errors.Join(provider.ErrStopUnconfirmed, lookupErr)
+			}
+			observation, persistErr := c.persistProviderStopObservation(
+				ctx, currentJob, intent, principal, false, false, "", false,
+			)
+			if persistErr != nil {
+				return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, lookupErr, persistErr)
+			}
+			return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, lookupErr)
 		}
-		return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
+		if lookup.Found {
+			if lookup.Status == "STOPPED" && lookup.Stopped && lookup.Quiescent {
+				observation, persistErr := c.persistProviderStopObservation(
+					ctx, currentJob, intent, principal, true, true, lookup.EvidenceSHA256, hasPrevious,
+				)
+				if persistErr != nil {
+					return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
+				}
+				return intentReceipt, intent, observation, nil
+			}
+			if hasPrevious {
+				return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+			}
+			observation, persistErr := c.persistProviderStopObservation(
+				ctx, currentJob, intent, principal, false, false, "", false,
+			)
+			if persistErr != nil {
+				return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
+			}
+			return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
+		}
+		// A trusted NOT_FOUND result is the only condition that permits retrying
+		// Stop with the original OperationID after a process restart.
 	}
 
 	latest, currentExecution, currentPermission, currentTask, currentAssignment, _, currentSession, err :=
