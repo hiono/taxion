@@ -32,7 +32,6 @@ func (c *ProviderController) SendTaskExecution(
 	if permission.Role != domain.RoleCoder || execution.Role != domain.RoleCoder || task.ID != execution.TaskID {
 		return store.CommandReceipt{}, domain.TaskTurnIntent{}, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.New("Task Provider Send requires the matching Coder execution")
 	}
-	requestSHA := permissionRequestDigest(permissionRequest)
 	identity := c.runtime.Identity()
 	if identity.ProviderID != permission.ProviderID || identity.AccountID != permission.AccountID ||
 		identity.ConfigurationSHA256 != permission.ConfigurationSHA256 {
