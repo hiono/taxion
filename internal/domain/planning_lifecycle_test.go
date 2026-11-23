@@ -650,9 +650,31 @@ func TestProviderStartUnknownEvidenceIsAppendOnlyUntilTerminalResolution(t *test
 func TestPlanningResumeAfterStopRecordsBoundaryDenial(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	now := job.UpdatedAt.Add(time.Second)
+	turn, err := NewPlanningTurnIntent(
+		job, executionID, principal, "session_1",
+		"cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("a", 64), 100, now,
+	)
+	if err != nil {
+		t.Fatalf("Planning Turn intent: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+
+	turnObservation, err := NewPlanningTurnObservation(
+		job, turn.ID, principal, "cmd_cccccccccccccccccccccccccccccccc",
+		PlanningTurnCompleted, 10, strings.Repeat("b", 64), false, now.Add(time.Second),
+	)
+	if err != nil {
+		t.Fatalf("Planning Turn observation: %v", err)
+	}
+	job.PlanningTurnObservations = append(job.PlanningTurnObservations, turnObservation)
+	job.Revision++
+	job.UpdatedAt = turnObservation.CreatedAt
+
 	stop, err := NewProviderStopIntent(
 		job, executionID, principal, "session_1",
-		"cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", ProviderStopReasonCancelled, now,
+		"cmd_dddddddddddddddddddddddddddddddd", ProviderStopReasonCancelled, now.Add(2*time.Second),
 	)
 	if err != nil {
 		t.Fatalf("Provider Stop intent: %v", err)
@@ -661,10 +683,10 @@ func TestPlanningResumeAfterStopRecordsBoundaryDenial(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = stop.CreatedAt
 
-	sourceCommandID := "cmd_cccccccccccccccccccccccccccccccc"
+	sourceCommandID := "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	_, err = NewPlanningResumeIntent(
 		job, executionID, principal, "session_1", sourceCommandID,
-		strings.Repeat("b", 64), true, now.Add(time.Second),
+		strings.Repeat("c", 64), true, now.Add(3*time.Second),
 	)
 	var boundary *PlanningBoundaryError
 	if !errors.As(err, &boundary) || boundary.ReasonCode != "provider_session_stopped" {
@@ -672,7 +694,7 @@ func TestPlanningResumeAfterStopRecordsBoundaryDenial(t *testing.T) {
 	}
 	decision, err := NewPlanningBoundaryDecision(
 		job, executionID, principal, sourceCommandID,
-		PlanningBoundaryResume, boundary.ReasonCode, now.Add(time.Second),
+		PlanningBoundaryResume, boundary.ReasonCode, now.Add(3*time.Second),
 	)
 	if err != nil {
 		t.Fatalf("persist stopped-session boundary decision: %v", err)
