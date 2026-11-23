@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,8 +34,14 @@ func TestManagerPreparesDetachedTaskWorktreeAtImmutableBaseline(t *testing.T) {
 	if got := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", "HEAD"); got != before {
 		t.Fatalf("Worktree HEAD = %s, want %s", got, before)
 	}
-	if _, err := exec.Command("git", "-C", snapshot.WorktreePath, "symbolic-ref", "-q", "HEAD").Output(); err == nil {
+	command := exec.Command("git", "-C", snapshot.WorktreePath, "symbolic-ref", "-q", "HEAD")
+	output, err := command.CombinedOutput()
+	if err == nil {
 		t.Fatal("Task Worktree is not detached")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Fatalf("detached HEAD check returned unexpected error: %v: %s", err, output)
 	}
 	if got := gitTestOutput(t, repository, "rev-parse", "HEAD"); got != before {
 		t.Fatalf("source repository HEAD changed: got %s, want %s", got, before)
@@ -157,6 +164,10 @@ func initRepository(t *testing.T) string {
 	gitTestRun(t, root, "init")
 	gitTestRun(t, root, "config", "user.name", "Taxion Test")
 	gitTestRun(t, root, "config", "user.email", "taxion-test@example.invalid")
+	gitTestRun(t, root, "config", "commit.gpgSign", "false")
+	if got := gitTestOutput(t, root, "config", "--bool", "commit.gpgSign"); got != "false" {
+		t.Fatalf("repository-local commit.gpgSign = %q, want false", got)
+	}
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("baseline\n"), 0o600); err != nil {
 		t.Fatalf("write repository file: %v", err)
 	}
