@@ -68,7 +68,7 @@ Provider Stopは既存のJobAggregate ProviderStopIntent / ProviderStopObservati
 
 ControllerはACTIVE Job、Coder RoleExecution、Task、ExecutionPermission、JobApproval、accepted Start Sessionを照合し、trusted Worktree verifierでassignment ownerと物理Worktreeを検証します。Stop proof capabilityはProvider identityに束縛されたE4以上の証拠を要求します。
 
-Stop intentとreceiptを保存した後、Job authority / Worktreeを再読込してからRuntime.Stopを呼び出します。Stop intentの再送時は既存Observationを返し、Observationがない場合はUNKNOWNを記録して外部Stopを再呼出ししません。Provider固有のStopped / Quiescent証拠が揃った場合だけterminal observationを追加します。
+Stop intentとreceiptを保存した後、Job authority / Worktreeを再読込してからRuntime.Stopを呼び出します。既存Stop intentの再送時はE4 Stop Lookupで同一OperationID / SessionIDを照合します。STOPPEDかつStopped / Quiescent証拠が揃った場合はterminal observationを追加し、NOT_FOUNDを確認した場合だけ同じOperationID / SessionIDでStopを再試行します。Lookup capability不足、UNKNOWN、応答不整合ではStopを再実行せず、既存UNKNOWNを保持します。
 
 Stop intentより後のTaskTurnIntentをJob validationで拒否します。先行Resumeがある場合はlatest Resume observationがATTACHED / FAILEDになるまでStop intentを拒否し、Resume / Stopの外部副作用を競合させません。Stop observationはTaskTurnのfinal Result / complete Usageを生成せず、Worktree releaseやRole handoffも許可しません。停止と成果照合が別々に完了するまでWorktreeを保持します。
 

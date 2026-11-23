@@ -81,3 +81,5 @@
 | TK-077 | Resume Worktree revalidation | Worktree changes before intent or immediately before Runtime.Resume | Reject before Provider side effect; preserve intent if already committed and retry only the same Session / OperationID |
 | TK-078 | ATTACHED Resume replay | Same Resume CommandID is replayed after ATTACHED observation | Return the same intent / observation without another Runtime.Resume call |
 | TK-079 | Task Coder Resume / Stop durable recovery | Task Coder Turn, Resume UNKNOWN → ATTACHED, Stop UNKNOWN → Stopped / Quiescent, then SQLite restart | Restore exact Task / permission / Session-bound intents and append-only observations; aggregate validation succeeds |
+| TK-080 | Stop side-effect recovery after restart | Stop intent committed, Provider completed Stop, process crashed before terminal Observation | E4 Stop Lookup confirms STOPPED / Stopped / Quiescent; append terminal Observation without another Stop call |
+| TK-081 | Stop retry after restart | Stop intent committed, process crashed before Provider Stop; E4 Stop Lookup returns NOT_FOUND | Retry Runtime.Stop only with the original OperationID / SessionID |

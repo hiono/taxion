@@ -95,6 +95,7 @@ Capability Verifierは次を照合する。
 | Start | Start idempotencyまたはStart lookup | E4 |
 | Send | Send idempotencyまたはSend lookup | E4 |
 | Stop | Stop proof | E4 |
+| Stop recovery lookup | Stop lookup（同一OperationID / SessionID） | E4 |
 | Resume | Cross-process reattachment | E5 |
 | Lookup | 対象がStartかSendかに対応するlookup | E4 |
 | Result | Final output retrieval | E4 |
@@ -257,6 +258,8 @@ Reviewer Startは、ADR-500 / ADR-408に従うimmutable Worktree snapshotとread
 ### 8.3 Stop / Resume（Controller実装済み）
 
 - Stop intentを先に保存し、Runtime.Stopの後にstop proof、quiescence、terminal result、Usageを照合する。
+- 既存Stop intentの再送ではE4 Stop lookupを先に実行する。STOPPEDかつStopped / Quiescent=trueなら同じintentのObservationを追加し、NOT_FOUNDなら同じOperationID / SessionIDでのみRuntime.Stopを再試行する。
+- Stop lookupが利用できない、または応答がUNKNOWN / 不整合の場合はRuntime.Stopを再実行せず、既存UNKNOWNを保持する。
 - Resume intentとCommand receiptをRuntime.Resumeより先に保存する。
 - E5 SessionReattach capability evidence、Principal / grant / Provider identity、既存accepted Session、configuration identityを検証する。
 - Resumeは同一OperationID / SessionIDで再照合し、Attached=trueとevidenceを得た場合だけATTACHED observationを追加する。曖昧な結果はUNKNOWNとして保存し、UNKNOWN解消時は同じOperationIDのterminal evidenceだけを許可する。

@@ -101,6 +101,8 @@ Task-bound Coder Start fixtureはACTIVE Job、最新JobApproval、Task、JobAppr
 | ADP-017 | Event replay | duplicate EventID / cursor | 拒否 |
 | ADP-018 | Event replay | HasMore=trueかつeventなし | 拒否 |
 | ADP-019 | Event replay | FromCursorが要求cursorと不一致 | 拒否 |
+| ADP-020 | Stop Lookup | STOPPED / Stopped=true / Quiescent=trueの同一OperationID / SessionID | 受理 |
+| ADP-021 | Stop Lookup | STOPPEDでQuiescent欠落、NOT_FOUNDでterminal flagsあり、またはidentity不一致 | 拒否 |
 
 ## 6. Capability verification tests
 
@@ -119,6 +121,7 @@ Task-bound Coder Start fixtureはACTIVE Job、最新JobApproval、Task、JobAppr
 | CAP-011 | Duplicate evidence | 同一Capabilityに複数Evidence | 拒否 |
 | CAP-012 | Declaration mismatch | 未宣言CapabilityにEvidenceあり | 拒否 |
 | CAP-013 | SDK drift | Runtime初期化後にAdapter identity変更 | 次操作前に拒否 |
+| CAP-014 | Stop recovery lookup | Stop Lookup capabilityまたはE4 evidence不足 | 既存Stop intentを保持し、Stopを再実行しない |
 
 CAP-007 / CAP-008の拒否ではCredentialBroker.AcquireとAdapter methodの呼出し回数が0であることを検証する。
 
@@ -233,6 +236,8 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-042 | Task Start unsafe capability | Start Lookup / idempotency evidenceなし | Startを呼ばずUNKNOWN / unresolvedを保持 |
 | CTR-043 | Reviewer Start boundary | immutable Worktree snapshot / read-only enforcement evidenceなし | Provider dispatch 0回 |
 | CTR-044 | Task prompt integrity | caller-supplied prompt / context injection、Task immutable fieldsの改変 | 任意promptを受け付けず、deterministic prompt digestのみ使用 |
+| CTR-045 | Stop restart reconciliation | Stop intent commit後、Provider Stop成功・Observation保存前にprocess crash | E4 Stop Lookupで同一OperationID / SessionIDのSTOPPED / Quiescentを確認し、terminal Observationをappend |
+| CTR-046 | Stop restart retry | Stop intent commit後、Provider Stop前にprocess crash | E4 Stop LookupのNOT_FOUNDを確認した場合だけ、同じOperationID / SessionIDでStopを再試行 |
 
 ## 11. Regression tests
 
