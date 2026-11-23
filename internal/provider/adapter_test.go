@@ -270,6 +270,21 @@ func TestStartAndTurnRequestsValidateImmutablePromptAndContextDigests(t *testing
 		t.Fatal("Turn request accepted prompt content that differs from its immutable digest")
 	}
 }
+func TestStopLookupRequiresLiveCapabilityEvidence(t *testing.T) {
+	identity := testIdentity()
+	synthetic := evidence(identity, CapabilityStopLookup, EvidenceSynthetic)
+	capabilities := Capabilities{
+		Identity: identity, StopLookup: true, Evidence: []CapabilityEvidence{synthetic},
+	}
+	if capabilities.HasEvidenceAtLeast(CapabilityStopLookup, EvidenceLive) {
+		t.Fatal("synthetic Stop Lookup evidence was accepted as live capability")
+	}
+	capabilities.Evidence[0].EvidenceLevel = EvidenceLive
+	if !capabilities.HasEvidenceAtLeast(CapabilityStopLookup, EvidenceLive) {
+		t.Fatal("live Stop Lookup evidence was not recognized")
+	}
+}
+
 func TestLookupResultRequiresQuiescentEvidenceForStoppedStatus(t *testing.T) {
 	request := LookupRequest{OperationID: "provider_stop_123", SessionID: "session_123"}
 	base := LookupResult{

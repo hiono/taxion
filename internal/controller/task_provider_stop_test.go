@@ -289,6 +289,7 @@ func TestTaskProviderStopConflictingReplayDoesNotRepeatProviderCall(t *testing.T
 		t.Fatalf("conflicting replay repeated Provider Stop: calls=%d", f.runtime.stopCalls)
 	}
 }
+
 func enableTaskStopLookup(f *taskProviderStopFixture) {
 	f.runtime.capabilities.StopLookup = true
 	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence, provider.CapabilityEvidence{
