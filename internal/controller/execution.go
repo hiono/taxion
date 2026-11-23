@@ -8,6 +8,7 @@ import (
 
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/store"
+	"github.com/hiono/taxion/internal/worktree"
 )
 
 type ExecutionPermissionStore interface {
@@ -180,4 +181,68 @@ func (c *ExecutionController) StartTaskExecution(
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, err
 	}
 	return receipt, start.RoleExecution, start.ProviderStartIntent, nil
+}
+
+
+// CaptureTaskOutput records the exact committed Worktree tree after the Coder
+// Turn, final Result / Usage, and Provider quiescence have been confirmed.
+func (c *ExecutionController) CaptureTaskOutput(
+	ctx context.Context,
+	jobID, roleExecutionID, turnID string,
+) (store.CommandReceipt, domain.JobOutput, error) {
+	if ctx == nil || jobID == "" || roleExecutionID == "" || turnID == "" {
+		return store.CommandReceipt{}, domain.JobOutput{}, errors.New("Task output capture requires complete identities")
+	}
+	outputStore, ok := c.store.(interface {
+		AddJobOutput(context.Context, string, uint64, string, string, string, string, string) (store.CommandReceipt, domain.JobOutput, error)
+	})
+	if !ok {
+		return store.CommandReceipt{}, domain.JobOutput{}, errors.New("ExecutionPermissionStore does not support JobOutput persistence")
+	}
+	outputManager, ok := c.worktrees.(interface {
+		CaptureOutput(context.Context, string, domain.Task, domain.WorktreeSnapshot) (worktree.OutputSnapshot, error)
+	})
+	if !ok {
+		return store.CommandReceipt{}, domain.JobOutput{}, errors.New("Task Worktree manager does not support immutable output capture")
+	}
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return store.CommandReceipt{}, domain.JobOutput{}, err
+	}
+	var task domain.Task
+	taskFound := false
+	for _, candidate := range job.Tasks {
+		if candidate.ID == roleExecutionTaskID(job, roleExecutionID) {
+			task, taskFound = candidate, true
+			break
+		}
+	}
+	if !taskFound {
+		return store.CommandReceipt{}, domain.JobOutput{}, errors.New("Task output producer Task was not found")
+	}
+	var assignment domain.WorktreeAssignment
+	assignmentFound := false
+	for _, candidate := range job.WorktreeAssignments {
+		if candidate.TaskID == task.ID && candidate.OwnerRoleExecutionID == roleExecutionID {
+			assignment, assignmentFound = candidate, true
+			break
+		}
+	}
+	if !assignmentFound {
+		return store.CommandReceipt{}, domain.JobOutput{}, errors.New("Task output producer does not own its Worktree assignment")
+	}
+	snapshot, err := outputManager.CaptureOutput(ctx, jobID, task, assignment.Snapshot())
+	if err != nil {
+		return store.CommandReceipt{}, domain.JobOutput{}, err
+	}
+	return outputStore.AddJobOutput(ctx, jobID, job.Revision, task.ID, roleExecutionID, turnID, snapshot.CommitSHA, snapshot.TreeSHA)
+}
+
+func roleExecutionTaskID(job domain.Job, roleExecutionID string) string {
+	for _, execution := range job.RoleExecutions {
+		if execution.ID == roleExecutionID {
+			return execution.TaskID
+		}
+	}
+	return ""
 }

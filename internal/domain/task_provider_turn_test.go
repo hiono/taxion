@@ -144,6 +144,31 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.TaskTurnObservations = append(job.TaskTurnObservations, completed)
 	job.Revision++
 	job.UpdatedAt = completed.CreatedAt
+	principalID = job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	stopIntent, err := NewProviderStopIntent(job, execution.ID, principalID, turn.ProviderSessionID,
+		"cmd_dd1010101010101010101010101010101", ProviderStopReasonTaskComplete, now.Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("create Provider Stop intent: %v", err)
+	}
+	job.ProviderStopIntents = append(job.ProviderStopIntents, stopIntent)
+	job.Revision++
+	job.UpdatedAt = stopIntent.CreatedAt
+	stopObservation, err := NewProviderStopObservation(job, stopIntent.ID, principalID,
+		"cmd_dd2020202020202020202020202020202", true, true, strings.Repeat("8", 64), false, now.Add(6*time.Minute))
+	if err != nil {
+		t.Fatalf("create Provider Stop observation: %v", err)
+	}
+	job.ProviderStopObservations = append(job.ProviderStopObservations, stopObservation)
+	job.Revision++
+	job.UpdatedAt = stopObservation.CreatedAt
+	output, err := NewJobOutput(job, execution.TaskID, execution.ID, turn.ID,
+		strings.Repeat("9", 40), strings.Repeat("8", 40), now.Add(7*time.Minute))
+	if err != nil {
+		t.Fatalf("create immutable JobOutput: %v", err)
+	}
+	job.JobOutputs = append(job.JobOutputs, output)
+	job.Revision++
+	job.UpdatedAt = output.CreatedAt
 	if err := job.Validate(); err != nil {
 		t.Fatal(err)
 	}

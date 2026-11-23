@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
@@ -162,6 +164,37 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	content := "completed Task Coder result"
+	contentSum := sha256.Sum256([]byte(content))
+	contentSHA := hex.EncodeToString(contentSum[:])
+	_, result, err := database.AddProviderResultObservation(ctx, jobID, job.Revision,
+		start.RoleExecution.ID, turn.OperationID, turn.ID, "session_1", content, contentSHA, true, strings.Repeat("6", 64), principal)
+	if err != nil || !result.Final {
+		t.Fatalf("persist Task Coder final Result: %#v %v", result, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, usage, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
+		start.RoleExecution.ID, turn.OperationID, turn.ID, "session_1", "usage_turn_1", 12, true, strings.Repeat("7", 64), principal)
+	if err != nil || !usage.Complete {
+		t.Fatalf("persist Task Coder complete Usage: %#v %v", usage, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, completedTurn, err := database.AddTaskTurnObservation(ctx, jobID, job.Revision,
+		turn.ID, "cmd_ec0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+		domain.TaskTurnCompleted, 12, strings.Repeat("6", 64), true)
+	if err != nil || completedTurn.Status != domain.TaskTurnCompleted {
+		t.Fatalf("reconcile Task Turn with final Result / Usage: %#v %v", completedTurn, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, stopIntent, err := database.AddProviderStopIntent(ctx, jobID, job.Revision,
 		start.RoleExecution.ID, "session_1", "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		domain.ProviderStopReasonTaskComplete, principal)
@@ -188,6 +221,21 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	if err != nil || !stopConfirmed.Stopped || !stopConfirmed.Quiescent || !stopConfirmed.ReconcilesUnknown {
 		t.Fatalf("reconcile Task Coder Stop: %#v %v", stopConfirmed, err)
 	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputReceipt, output, err := database.AddJobOutput(ctx, jobID, job.Revision, task.ID,
+		start.RoleExecution.ID, turn.ID, strings.Repeat("9", 40), strings.Repeat("8", 40))
+	if err != nil || outputReceipt.Revision != job.Revision+1 ||
+		output.CommitSHA != strings.Repeat("9", 40) || output.TreeSHA != strings.Repeat("8", 40) {
+		t.Fatalf("persist immutable JobOutput: %#v %#v %v", outputReceipt, output, err)
+	}
+	replayReceipt, replayOutput, err := database.AddJobOutput(ctx, jobID, job.Revision, task.ID,
+		start.RoleExecution.ID, turn.ID, strings.Repeat("9", 40), strings.Repeat("8", 40))
+	if err != nil || replayReceipt != outputReceipt || replayOutput != output {
+		t.Fatalf("exact JobOutput replay changed immutable fact: %#v %#v %v", replayReceipt, replayOutput, err)
+	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -201,11 +249,11 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob after restart: %v", err)
 	}
-	if len(restored.TaskTurnIntents) != 1 || len(restored.TaskTurnObservations) != 1 ||
+	if len(restored.TaskTurnIntents) != 1 || len(restored.TaskTurnObservations) != 2 || len(restored.ProviderResultObservations) != 1 || len(restored.ProviderUsageObservations) != 1 || len(restored.JobOutputs) != 1 ||
 		len(restored.PlanningResumeIntents) != 1 || len(restored.PlanningResumeObservations) != 2 ||
 		len(restored.ProviderStopIntents) != 1 || len(restored.ProviderStopObservations) != 2 ||
 		restored.TaskTurnIntents[0].ID != turn.ID ||
-		restored.TaskTurnObservations[0].Status != domain.TaskTurnUnknown ||
+		restored.TaskTurnObservations[0].Status != domain.TaskTurnUnknown || restored.TaskTurnObservations[1].Status != domain.TaskTurnCompleted || restored.JobOutputs[0].CommitSHA != strings.Repeat("9", 40) ||
 		restored.PlanningResumeIntents[0].ID != resume.ID ||
 		restored.PlanningResumeObservations[1].Status != domain.PlanningResumeAttached ||
 		!restored.PlanningResumeObservations[1].ReconcilesUnknown ||
