@@ -70,3 +70,8 @@
 | TK-066 | Expired or stale authority | JobApproval, ExecutionPermission, JobContract revision, or deadline is no longer current | Reject before Resume side effect |
 | TK-067 | Resume after Stop | Same RoleExecution / Session has a ProviderStopIntent | Reject without Runtime.Resume or new Session |
 | TK-068 | Stop / Resume concurrency | Same Session has a Resume intent with no observation or UNKNOWN | Reject Stop intent and do not call Runtime.Stop until Resume is terminal |
+| TK-069 | Ambiguous Task Coder Stop | Runtime.Stop returns an ambiguous timeout after Stop intent commit | Persist UNKNOWN; same CommandID replay reuses the intent and does not call Runtime.Stop again; a new Stop identity is rejected |
+| TK-070 | Stop response identity and evidence | Stop response has wrong OperationID / SessionID, Stopped=false, Quiescent=false, missing or invalid evidence digest | Persist UNKNOWN; never report Stopped / Quiescent success |
+| TK-071 | Stop preconditions | StopProof is absent or mismatched, Provider identity differs, or Worktree verification fails before intent | Reject without Stop intent, observation, or Provider side effect |
+| TK-072 | Final Worktree revalidation after Stop intent | Worktree verification fails after Stop intent commit but immediately before Runtime.Stop | Preserve intent; do not call Provider; retry remains conservative UNKNOWN and never blindly repeats Stop |
+| TK-073 | Conflicting Stop replay | Reuse Stop CommandID with a different Stop reason or payload after initial request | Reject with idempotency conflict; preserve original intent / observation and do not repeat Runtime.Stop |
