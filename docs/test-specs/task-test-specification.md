@@ -75,3 +75,8 @@
 | TK-071 | Stop preconditions | StopProof is absent or mismatched, Provider identity differs, or Worktree verification fails before intent | Reject without Stop intent, observation, or Provider side effect |
 | TK-072 | Final Worktree revalidation after Stop intent | Worktree verification fails after Stop intent commit but immediately before Runtime.Stop | Preserve intent; do not call Provider; retry remains conservative UNKNOWN and never blindly repeats Stop |
 | TK-073 | Conflicting Stop replay | Reuse Stop CommandID with a different Stop reason or payload after initial request | Reject with idempotency conflict; preserve original intent / observation and do not repeat Runtime.Stop |
+| TK-074 | Task Coder Resume response validation | Provider Resume returns mismatched OperationID / SessionID, Attached=false, or missing / invalid evidence | Persist UNKNOWN; retry the same OperationID only and accept ATTACHED only with matching Session evidence |
+| TK-075 | E5 reattachment capability | CrossProcessSessionReattach absent, Provider identity mismatch, E5 evidence missing or below E5 | Reject before Resume intent and Provider side effect |
+| TK-076 | Resume intent-first ordering | Runtime.Resume inspects JobAggregate at invocation | Exact Resume intent and receipt are already persisted; no observation is claimed before Provider response |
+| TK-077 | Resume Worktree revalidation | Worktree changes before intent or immediately before Runtime.Resume | Reject before Provider side effect; preserve intent if already committed and retry only the same Session / OperationID |
+| TK-078 | ATTACHED Resume replay | Same Resume CommandID is replayed after ATTACHED observation | Return the same intent / observation without another Runtime.Resume call |
