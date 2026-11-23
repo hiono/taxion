@@ -163,7 +163,7 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, stopIntent, err := database.AddProviderStopIntent(ctx, jobID, job.Revision,
-		start.RoleExecution.ID, permission.ID, "cmd_ec0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+		start.RoleExecution.ID, "session_task_store", "cmd_ec0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
 		domain.ProviderStopReasonTaskComplete, principal)
 	if err != nil {
 		t.Fatalf("AddProviderStopIntent for Task Coder: %v", err)
