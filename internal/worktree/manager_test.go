@@ -55,7 +55,6 @@ func TestManagerPreparesDetachedTaskWorktreeAtImmutableBaseline(t *testing.T) {
 	}
 }
 
-
 func TestManagerRetryRestoresPersistedBaselineAfterSourceHEADChanges(t *testing.T) {
 	repository := initRepository(t)
 	workspace := filepath.Join(t.TempDir(), "worktrees")
