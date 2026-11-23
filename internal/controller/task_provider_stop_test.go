@@ -384,7 +384,6 @@ func TestTaskProviderStopRetriesOnlyAfterRestartLookupConfirmsNotFound(t *testin
 	}
 }
 
-
 func TestTaskProviderStopLookupRecoveryDoesNotRequireStopProof(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	commandID := "cmd_12121212121212121212121212121212"

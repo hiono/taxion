@@ -745,7 +745,6 @@ func TestWithCredentialReportsAcquireAndLeaseCleanupFailureWithoutCallingProvide
 	}
 }
 
-
 func TestRuntimeStopLookupUsesDedicatedCapability(t *testing.T) {
 	adapter := newTestAdapter(CapabilityStopLookup)
 	adapter.lookupResult = LookupResult{
