@@ -80,3 +80,4 @@
 | TK-076 | Resume intent-first ordering | Runtime.Resume inspects JobAggregate at invocation | Exact Resume intent and receipt are already persisted; no observation is claimed before Provider response |
 | TK-077 | Resume Worktree revalidation | Worktree changes before intent or immediately before Runtime.Resume | Reject before Provider side effect; preserve intent if already committed and retry only the same Session / OperationID |
 | TK-078 | ATTACHED Resume replay | Same Resume CommandID is replayed after ATTACHED observation | Return the same intent / observation without another Runtime.Resume call |
+| TK-079 | Task Coder Resume / Stop durable recovery | Task Coder Turn, Resume UNKNOWN → ATTACHED, Stop UNKNOWN → Stopped / Quiescent, then SQLite restart | Restore exact Task / permission / Session-bound intents and append-only observations; aggregate validation succeeds |

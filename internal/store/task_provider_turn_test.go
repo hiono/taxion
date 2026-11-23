@@ -9,7 +9,7 @@ import (
 	"github.com/hiono/taxion/internal/domain"
 )
 
-func TestTaskTurnIntentAndObservationPersistAcrossRestart(t *testing.T) {
+func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	database, path := newTestStore(t)
 	ctx := context.Background()
 	principal := newAuthenticatedTestPrincipal(t)
@@ -127,6 +127,67 @@ func TestTaskTurnIntentAndObservationPersistAcrossRestart(t *testing.T) {
 	if observationReceipt.Revision != job.Revision+1 || unknown.Status != domain.TaskTurnUnknown {
 		t.Fatalf("invalid UNKNOWN observation receipt: %#v %#v", observationReceipt, unknown)
 	}
+
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, resume, err := database.AddPlanningResumeIntent(ctx, jobID, job.Revision,
+		start.RoleExecution.ID, "session_task_store", "cmd_e9090909090909090909090909090909",
+		strings.Repeat("f", 64), true, principal)
+	if err != nil {
+		t.Fatalf("AddPlanningResumeIntent for Task Coder: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, resumeUnknown, err := database.AddPlanningResumeObservation(ctx, jobID, job.Revision,
+		resume.ID, "cmd_ea0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+		domain.PlanningResumeUnknown, "", false, principal)
+	if err != nil || resumeUnknown.Status != domain.PlanningResumeUnknown {
+		t.Fatalf("persist Task Coder Resume UNKNOWN: %#v %v", resumeUnknown, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, resumeAttached, err := database.AddPlanningResumeObservation(ctx, jobID, job.Revision,
+		resume.ID, "cmd_eb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+		domain.PlanningResumeAttached, strings.Repeat("1", 64), true, principal)
+	if err != nil || resumeAttached.Status != domain.PlanningResumeAttached || !resumeAttached.ReconcilesUnknown {
+		t.Fatalf("reconcile Task Coder Resume: %#v %v", resumeAttached, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, stopIntent, err := database.AddProviderStopIntent(ctx, jobID, job.Revision,
+		start.RoleExecution.ID, permission.ID, "cmd_ec0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+		domain.ProviderStopReasonTaskComplete, principal)
+	if err != nil {
+		t.Fatalf("AddProviderStopIntent for Task Coder: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, stopUnknown, err := database.AddProviderStopObservation(ctx, jobID, job.Revision,
+		stopIntent.ID, "cmd_ed0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
+		false, false, "", false, principal)
+	if err != nil || stopUnknown.Stopped || stopUnknown.Quiescent {
+		t.Fatalf("persist Task Coder Stop UNKNOWN: %#v %v", stopUnknown, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, stopConfirmed, err := database.AddProviderStopObservation(ctx, jobID, job.Revision,
+		stopIntent.ID, "cmd_ee0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+		true, true, strings.Repeat("2", 64), true, principal)
+	if err != nil || !stopConfirmed.Stopped || !stopConfirmed.Quiescent || !stopConfirmed.ReconcilesUnknown {
+		t.Fatalf("reconcile Task Coder Stop: %#v %v", stopConfirmed, err)
+	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -141,9 +202,17 @@ func TestTaskTurnIntentAndObservationPersistAcrossRestart(t *testing.T) {
 		t.Fatalf("GetJob after restart: %v", err)
 	}
 	if len(restored.TaskTurnIntents) != 1 || len(restored.TaskTurnObservations) != 1 ||
+		len(restored.PlanningResumeIntents) != 1 || len(restored.PlanningResumeObservations) != 2 ||
+		len(restored.ProviderStopIntents) != 1 || len(restored.ProviderStopObservations) != 2 ||
 		restored.TaskTurnIntents[0].ID != turn.ID ||
-		restored.TaskTurnObservations[0].Status != domain.TaskTurnUnknown {
-		t.Fatalf("Task Turn facts were not restored: %#v", restored)
+		restored.TaskTurnObservations[0].Status != domain.TaskTurnUnknown ||
+		restored.PlanningResumeIntents[0].ID != resume.ID ||
+		restored.PlanningResumeObservations[1].Status != domain.PlanningResumeAttached ||
+		!restored.PlanningResumeObservations[1].ReconcilesUnknown ||
+		restored.ProviderStopIntents[0].ID != stopIntent.ID ||
+		!restored.ProviderStopObservations[1].Stopped || !restored.ProviderStopObservations[1].Quiescent ||
+		!restored.ProviderStopObservations[1].ReconcilesUnknown {
+		t.Fatalf("Task Coder Turn / Resume / Stop facts were not restored: %#v", restored)
 	}
 	if err := restored.Validate(); err != nil {
 		t.Fatalf("restored aggregate validation: %v", err)
