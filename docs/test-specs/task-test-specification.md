@@ -43,3 +43,4 @@
 | TK-039 | Provider Worktree binding | Task StartRequest is built from persisted WorktreeAssignment | Pass exact RepositoryID, WorktreePath, and baseline commit to Adapter |
 | TK-040 | Worktree capability evidence | Provider lacks Task Worktree capability or evidence is below E4 | Reject before credential acquisition / Provider Start |
 | TK-041 | Reviewer isolation | Reviewer Start is requested without immutable read-only snapshot enforcement | Reject before Lookup or Provider Start |
+| TK-042 | Worktree revalidation after lookup | Provider Start lookup runs before dispatch and the Worktree changes before Start | Revalidate the exact persisted assignment and physical Worktree immediately before Start; reject without Provider Start or observation |

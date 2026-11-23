@@ -448,6 +448,26 @@ func (c *ProviderController) DispatchTaskExecution(
 		currentIntent.Validate(current, currentExecution) != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider Start intent changed before dispatch")
 	}
+	currentTask, currentTaskFound := findTask(current, currentExecution.TaskID)
+	if !currentTaskFound {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task disappeared before Provider Start")
+	}
+	var currentAssignment domain.WorktreeAssignment
+	currentAssignmentFound := false
+	for _, candidate := range current.WorktreeAssignments {
+		if candidate.ID == currentExecution.WorktreeID {
+			currentAssignment, currentAssignmentFound = candidate, true
+			break
+		}
+	}
+	if !currentAssignmentFound || currentAssignment != assignment ||
+		currentAssignment.OwnerRoleExecutionID != currentExecution.ID ||
+		currentAssignment.TaskID != currentTask.ID || currentAssignment.JobID != current.ID {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Worktree assignment changed before Provider Start")
+	}
+	if err := c.worktreeVerifier.Verify(ctx, current.ID, currentTask, currentAssignment.Snapshot()); err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, fmt.Errorf("verify Task Worktree immediately before Provider Start: %w", err)
+	}
 	if c.runtime.Identity() != identity {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Provider Runtime identity changed before dispatch")
 	}

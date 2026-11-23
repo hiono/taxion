@@ -1416,3 +1416,88 @@ func TestProviderControllerRejectsTaskReviewerStartWithoutReadOnlyWorktreeBounda
 		t.Fatalf("Reviewer dispatch invoked Provider: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
 	}
 }
+
+
+type failOnSecondTaskWorktreeVerification struct {
+	verifyCalls int
+}
+
+func (v *failOnSecondTaskWorktreeVerification) Verify(context.Context, string, domain.Task, domain.WorktreeSnapshot) error {
+	v.verifyCalls++
+	if v.verifyCalls == 2 {
+		return errors.New("Worktree changed after Provider lookup")
+	}
+	return nil
+}
+
+func TestProviderControllerRevalidatesTaskWorktreeAfterLookupBeforeStart(t *testing.T) {
+	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Round(0)
+	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
+		Reversible: true, Mutating: true, ValidUntil: now.Add(45 * time.Minute),
+	}}
+	executionController, err := NewExecutionControllerWithWorktree(database, assessor, &fakeTaskWorktreeVerifier{})
+	if err != nil {
+		t.Fatalf("NewExecutionController: %v", err)
+	}
+	executionController.now = func() time.Time { return now }
+	permissionRequest := domain.ExecutionPermissionRequest{
+		JobID: jobID, TaskID: task.ID, CommandID: "cmd_c1111111111111111111111111111111",
+		Role: domain.RoleCoder, Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
+		ProviderID: "provider.test", AccountID: "account.primary",
+		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
+		ReservedTurns: 2, ReservedTokens: 500, ExpiresAt: now.Add(30 * time.Minute),
+	}
+	_, permission, err := executionController.Authorize(ctx, permissionRequest)
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	_, execution, intent, err := executionController.StartTaskExecution(
+		ctx, permission.ID, "cmd_c2222222222222222222222222222222", permissionRequest,
+	)
+	if err != nil {
+		t.Fatalf("StartTaskExecution: %v", err)
+	}
+	runtime := &fakePlanningProviderRuntime{
+		identity: provider.Identity{
+			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
+			SDKVersion: "test-sdk/1", ConfigurationSHA256: permission.ConfigurationSHA256,
+		},
+		lookupResult: provider.LookupResult{
+			Found: false, OperationID: intent.ID, Status: provider.LookupStatusNotFound,
+			EvidenceSHA256: strings.Repeat("f", 64),
+		},
+	}
+	runtime.capabilities = provider.Capabilities{
+		Identity: runtime.identity, StartLookup: true, StartIdempotency: true, TaskWorktree: true,
+		Evidence: []provider.CapabilityEvidence{
+			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-start-test",
+				EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-start-test",
+				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilityTaskWorktree, Identity: runtime.identity, TestID: "task-worktree-test",
+				EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		},
+	}
+	verifier := &failOnSecondTaskWorktreeVerification{}
+	controller, err := NewProviderControllerWithExecutionAndWorktree(database, runtime, executionController, verifier)
+	if err != nil {
+		t.Fatalf("NewProviderControllerWithExecutionAndWorktree: %v", err)
+	}
+	_, _, err = controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, permissionRequest)
+	if err == nil || !strings.Contains(err.Error(), "immediately before Provider Start") {
+		t.Fatalf("changed Worktree was not rejected before Provider Start: %v", err)
+	}
+	if verifier.verifyCalls != 2 || runtime.lookupCalls != 1 || runtime.startCalls != 0 {
+		t.Fatalf("Worktree revalidation / Provider calls = verifies:%d lookups:%d starts:%d",
+			verifier.verifyCalls, runtime.lookupCalls, runtime.startCalls)
+	}
+	persisted, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if _, found := latestStartObservation(persisted, intent.ID); found {
+		t.Fatal("failed pre-dispatch Worktree revalidation appended a Provider Start observation")
+	}
+}
