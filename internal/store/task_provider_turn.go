@@ -7,7 +7,8 @@ import (
 	"github.com/hiono/taxion/internal/domain"
 )
 
-func (s *Store) AddTaskTurnIntent(ctx context.Context, jobID string, expectedRevision uint64,
+func (s *Store) AddTaskTurnIntent(
+	ctx context.Context, jobID string, expectedRevision uint64,
 	roleExecutionID, permissionID, sessionID, commandID, promptSHA256 string, reservedTokens uint64,
 ) (CommandReceipt, domain.TaskTurnIntent, error) {
 	request := struct {
@@ -18,14 +19,22 @@ func (s *Store) AddTaskTurnIntent(ctx context.Context, jobID string, expectedRev
 		func(job domain.Job, now time.Time) (domain.TaskTurnIntent, error) {
 			return domain.NewTaskTurnIntent(job, roleExecutionID, permissionID, sessionID, commandID, promptSHA256, reservedTokens, now)
 		},
-		func(job *domain.Job, fact domain.TaskTurnIntent) { job.TaskTurnIntents = append(job.TaskTurnIntents, fact) },
+		func(job *domain.Job, fact domain.TaskTurnIntent) {
+			job.TaskTurnIntents = append(job.TaskTurnIntents, fact)
+		},
 		func(job domain.Job) (domain.TaskTurnIntent, bool) {
-			for _, fact := range job.TaskTurnIntents { if fact.CommandID == commandID { return fact, true } }
+			for _, fact := range job.TaskTurnIntents {
+				if fact.CommandID == commandID {
+					return fact, true
+				}
+			}
 			return domain.TaskTurnIntent{}, false
-		})
+		},
+	)
 }
 
-func (s *Store) AddTaskTurnObservation(ctx context.Context, jobID string, expectedRevision uint64,
+func (s *Store) AddTaskTurnObservation(
+	ctx context.Context, jobID string, expectedRevision uint64,
 	turnID, commandID, status string, tokensUsed uint64, evidenceSHA256 string, reconcilesUnknown bool,
 ) (CommandReceipt, domain.TaskTurnObservation, error) {
 	request := struct {
@@ -37,9 +46,16 @@ func (s *Store) AddTaskTurnObservation(ctx context.Context, jobID string, expect
 		func(job domain.Job, now time.Time) (domain.TaskTurnObservation, error) {
 			return domain.NewTaskTurnObservation(job, turnID, commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown, now)
 		},
-		func(job *domain.Job, fact domain.TaskTurnObservation) { job.TaskTurnObservations = append(job.TaskTurnObservations, fact) },
+		func(job *domain.Job, fact domain.TaskTurnObservation) {
+			job.TaskTurnObservations = append(job.TaskTurnObservations, fact)
+		},
 		func(job domain.Job) (domain.TaskTurnObservation, bool) {
-			for _, fact := range job.TaskTurnObservations { if fact.CommandID == commandID { return fact, true } }
+			for _, fact := range job.TaskTurnObservations {
+				if fact.CommandID == commandID {
+					return fact, true
+				}
+			}
 			return domain.TaskTurnObservation{}, false
-		})
+		},
+	)
 }

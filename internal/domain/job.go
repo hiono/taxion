@@ -1173,6 +1173,8 @@ func (j Job) Validate() error {
 	if err := validateTaskFacts(j); err != nil {
 		return err
 	}
-	if err := validateTaskProviderTurnFacts(j); err != nil { return err }
+	if err := validateTaskProviderTurnFacts(j); err != nil {
+		return err
+	}
 	return validateWorktreeAssignments(j)
 }
