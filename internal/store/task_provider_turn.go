@@ -11,6 +11,14 @@ func (s *Store) AddTaskTurnIntent(
 	ctx context.Context, jobID string, expectedRevision uint64,
 	roleExecutionID, permissionID, sessionID, commandID, promptSHA256 string, reservedTokens uint64,
 ) (CommandReceipt, domain.TaskTurnIntent, error) {
+	receipt, intent, _, err := s.AddTaskTurnIntentWithStatus(ctx, jobID, expectedRevision, roleExecutionID, permissionID, sessionID, commandID, promptSHA256, reservedTokens)
+	return receipt, intent, err
+}
+
+func (s *Store) AddTaskTurnIntentWithStatus(
+	ctx context.Context, jobID string, expectedRevision uint64,
+	roleExecutionID, permissionID, sessionID, commandID, promptSHA256 string, reservedTokens uint64,
+) (CommandReceipt, domain.TaskTurnIntent, bool, error) {
 	request := struct {
 		JobID           string
 		RoleExecutionID string
@@ -20,7 +28,7 @@ func (s *Store) AddTaskTurnIntent(
 		PromptSHA256    string
 		ReservedTokens  uint64
 	}{jobID, roleExecutionID, permissionID, sessionID, commandID, promptSHA256, reservedTokens}
-	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, "TASK_PROVIDER_TURN_INTENT", request,
+	return persistPlanningFactWithStatus(ctx, s, jobID, expectedRevision, commandID, "TASK_PROVIDER_TURN_INTENT", request,
 		func(job domain.Job, now time.Time) (domain.TaskTurnIntent, error) {
 			return domain.NewTaskTurnIntent(job, roleExecutionID, permissionID, sessionID, commandID, promptSHA256, reservedTokens, now)
 		},

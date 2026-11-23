@@ -33,9 +33,6 @@ func (c *ProviderController) SendTaskExecution(
 		return store.CommandReceipt{}, domain.TaskTurnIntent{}, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.New("Task Provider Send requires the matching Coder execution")
 	}
 	requestSHA := permissionRequestDigest(permissionRequest)
-	if err := permission.ValidateFor(job, permission.OperationID, requestSHA, c.now()); err != nil {
-		return store.CommandReceipt{}, domain.TaskTurnIntent{}, domain.TaskTurnObservation{}, provider.TurnResult{}, err
-	}
 	identity := c.runtime.Identity()
 	if identity.ProviderID != permission.ProviderID || identity.AccountID != permission.AccountID ||
 		identity.ConfigurationSHA256 != permission.ConfigurationSHA256 {
@@ -57,14 +54,7 @@ func (c *ProviderController) SendTaskExecution(
 	if err := request.Validate(); err != nil {
 		return store.CommandReceipt{}, domain.TaskTurnIntent{}, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrProviderInvalidRequest
 	}
-	existingIntent := false
-	for _, candidate := range job.TaskTurnIntents {
-		if candidate.CommandID == commandID && candidate.RoleExecutionID == execution.ID {
-			existingIntent = true
-			break
-		}
-	}
-	receipt, turn, err := c.store.AddTaskTurnIntent(
+	receipt, turn, created, err := c.store.AddTaskTurnIntentWithStatus(
 		ctx, jobID, job.Revision, execution.ID, permission.ID, sessionID, commandID, promptSHA, reservedTokens,
 	)
 	if err != nil {
@@ -89,7 +79,7 @@ func (c *ProviderController) SendTaskExecution(
 	}
 	// A repeated call may follow a process crash after Send. Reconcile the same
 	// OperationID / TurnID before any idempotent retry.
-	if existingIntent || receipt.Revision != job.Revision+1 {
+	if !created {
 		return c.reconcileTaskTurn(ctx, receipt, current, turn, request, permissionRequest, principal, capabilities)
 	}
 	return c.dispatchTaskTurn(ctx, receipt, current, turn, request, permissionRequest, principal, capabilities)
@@ -334,6 +324,18 @@ func (c *ProviderController) reconcileTaskTurn(
 	return c.dispatchTaskTurn(ctx, receipt, job, turn, request, permissionRequest, principal, capabilities)
 }
 
+func taskProviderResultObservation(job domain.Job, turn domain.TaskTurnIntent) (domain.ProviderResultObservation, bool) {
+	for _, observation := range job.ProviderResultObservations {
+		if observation.RoleExecutionID == turn.RoleExecutionID &&
+			observation.OperationID == turn.OperationID &&
+			observation.SessionID == turn.ProviderSessionID &&
+			observation.TurnID == turn.ID && observation.Final {
+			return observation, true
+		}
+	}
+	return domain.ProviderResultObservation{}, false
+}
+
 func (c *ProviderController) finalizeTaskTurn(
 	ctx context.Context,
 	receipt store.CommandReceipt,
@@ -348,10 +350,13 @@ func (c *ProviderController) finalizeTaskTurn(
 		observation, err := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
 		return receipt, turn, observation, provider.TurnResult{}, errors.Join(errors.New("Provider Turn is not terminal"), err)
 	}
-	_, resultObservation, resultErr := c.RetrieveTaskProviderResult(ctx, job.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, turn.ProviderSessionID, turn.ID, principal)
-	if resultErr != nil {
-		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
-		return receipt, turn, observation, provider.TurnResult{}, errors.Join(resultErr, persistErr)
+	resultObservation, resultFound := taskProviderResultObservation(job, turn)
+	if !resultFound {
+		_, resultObservation, err = c.RetrieveTaskProviderResult(ctx, job.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, turn.ProviderSessionID, turn.ID, principal)
+		if err != nil {
+			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+			return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, persistErr)
+		}
 	}
 	_, usage, usageErr := c.RetrieveTaskProviderUsage(ctx, job.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, turn.ProviderSessionID, turn.ID, expectedUsageID, principal)
 	if usageErr != nil || !usage.Complete {
