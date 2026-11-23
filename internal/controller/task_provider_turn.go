@@ -352,10 +352,11 @@ func (c *ProviderController) finalizeTaskTurn(
 	}
 	resultObservation, resultFound := taskProviderResultObservation(job, turn)
 	if !resultFound {
-		_, resultObservation, err = c.RetrieveTaskProviderResult(ctx, job.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, turn.ProviderSessionID, turn.ID, principal)
-		if err != nil {
+		var resultErr error
+		_, resultObservation, resultErr = c.RetrieveTaskProviderResult(ctx, job.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, turn.ProviderSessionID, turn.ID, principal)
+		if resultErr != nil {
 			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
-			return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, persistErr)
+			return receipt, turn, observation, provider.TurnResult{}, errors.Join(resultErr, persistErr)
 		}
 	}
 	_, usage, usageErr := c.RetrieveTaskProviderUsage(ctx, job.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, turn.ProviderSessionID, turn.ID, expectedUsageID, principal)
