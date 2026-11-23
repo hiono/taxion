@@ -9,21 +9,21 @@ import (
 )
 
 type JobOutput struct {
-	ID                         string    `json:"id"`
-	CommandID                  string    `json:"command_id"`
-	JobID                      string    `json:"job_id"`
-	TaskID                     string    `json:"task_id"`
-	RoleExecutionID            string    `json:"role_execution_id"`
-	WorktreeAssignmentID       string    `json:"worktree_assignment_id"`
-	RepositoryID               string    `json:"repository_id"`
-	CommitSHA                  string    `json:"commit_sha"`
-	TreeSHA                    string    `json:"tree_sha"`
-	TurnID                     string    `json:"turn_id"`
+	ID                          string    `json:"id"`
+	CommandID                   string    `json:"command_id"`
+	JobID                       string    `json:"job_id"`
+	TaskID                      string    `json:"task_id"`
+	RoleExecutionID             string    `json:"role_execution_id"`
+	WorktreeAssignmentID        string    `json:"worktree_assignment_id"`
+	RepositoryID                string    `json:"repository_id"`
+	CommitSHA                   string    `json:"commit_sha"`
+	TreeSHA                     string    `json:"tree_sha"`
+	TurnID                      string    `json:"turn_id"`
 	ProviderResultObservationID string    `json:"provider_result_observation_id"`
-	ProviderStopIntentID       string    `json:"provider_stop_intent_id"`
-	ProviderStopEvidenceSHA256 string    `json:"provider_stop_evidence_sha256"`
-	CreatedAt                  time.Time `json:"created_at"`
-	CreatedRevision            uint64    `json:"created_revision"`
+	ProviderStopIntentID        string    `json:"provider_stop_intent_id"`
+	ProviderStopEvidenceSHA256  string    `json:"provider_stop_evidence_sha256"`
+	CreatedAt                   time.Time `json:"created_at"`
+	CreatedRevision             uint64    `json:"created_revision"`
 }
 
 func JobOutputCommandID(taskID, roleExecutionID, turnID, commitSHA, treeSHA string) string {
@@ -109,7 +109,7 @@ func (o *JobOutput) bindSources(job Job) error {
 		}
 	}
 	turnObservation, observed := latestTaskTurnObservation(job, o.TurnID)
-	if !taskFound || !executionFound || !assignmentFound || !turnFound ||
+	if !taskFound || !executionFound || !assignmentFound || !turnFound || len(task.TargetRepositories) != 1 ||
 		execution.Role != RoleCoder || execution.TaskID != task.ID ||
 		execution.WorktreeID != assignment.ID || assignment.ID != WorktreeID(job.ID, task.ID) ||
 		assignment.RepositoryID != task.TargetRepositories[0] ||

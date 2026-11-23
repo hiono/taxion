@@ -183,7 +183,6 @@ func (c *ExecutionController) StartTaskExecution(
 	return receipt, start.RoleExecution, start.ProviderStartIntent, nil
 }
 
-
 // CaptureTaskOutput records the exact committed Worktree tree after the Coder
 // Turn, final Result / Usage, and Provider quiescence have been confirmed.
 func (c *ExecutionController) CaptureTaskOutput(
