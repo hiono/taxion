@@ -60,7 +60,7 @@ func TestTaskTurnIntentAndObservationPersistAcrossRestart(t *testing.T) {
 		Role: domain.RoleCoder, Effect: "repository.write", Resource: contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: contract.ConfigurationSHA256,
-		ReservedTurns: 2, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       2, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	requestSHA, err := domain.ExecutionPermissionRequestSHA256(request)
 	if err != nil {
