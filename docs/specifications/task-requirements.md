@@ -88,6 +88,7 @@ Task creationはWorktree、ExecutionPermission、RoleExecution、Provider operat
 - Provider / SDK / configuration identityに束縛されたStop proof capabilityのE4以上の証拠を要求します。
 - UNKNOWNまたはObservation欠落後は同じStop operationをblind replayしません。既存intentを照合し、未確定状態をUNKNOWNとして保持します。
 - terminal Stop observationはProvider固有の証拠がStoppedかつQuiescentを示す場合だけ記録します。Stop intent後の追加Coder Turnを拒否します。
+- 同じSessionに先行Resume intentがある場合、latest Resume observationがATTACHED / FAILEDになるまでStop intentを拒否します。
 - StopはTaskTurnのResult / Usageを代替しません。Stopが確定しても未解決TurnやWorktreeを解放しません。
 
 ## 9. Task-bound Coder Provider Resume
