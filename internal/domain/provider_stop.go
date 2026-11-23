@@ -108,9 +108,20 @@ func NewProviderStopIntent(
 		return ProviderStopIntent{}, errors.New("Provider Stop requires the execution Role's active Job state")
 	}
 	now = now.UTC().Round(0)
-	if !validCommandID(commandID) || !validPlanningIdentity(sessionID) ||
-		!validProviderStopReason(reason) || now.IsZero() || job.Revision >= uint64(^uint64(0)>>1) {
-		return ProviderStopIntent{}, errors.New("Provider Stop intent requires a valid Job execution, identity, reason, and timestamp")
+	if !validCommandID(commandID) {
+		return ProviderStopIntent{}, errors.New("Provider Stop intent requires a valid CommandID")
+	}
+	if !validPlanningIdentity(sessionID) {
+		return ProviderStopIntent{}, errors.New("Provider Stop intent requires a valid SessionID")
+	}
+	if !validProviderStopReason(reason) {
+		return ProviderStopIntent{}, errors.New("Provider Stop intent requires a valid Stop reason")
+	}
+	if now.IsZero() {
+		return ProviderStopIntent{}, errors.New("Provider Stop intent requires a timestamp")
+	}
+	if job.Revision >= uint64(^uint64(0)>>1) {
+		return ProviderStopIntent{}, errors.New("Job revision exhausted")
 	}
 	var start ProviderStartIntent
 	foundStart := false
