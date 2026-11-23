@@ -44,4 +44,4 @@ HUMAN identityの信頼源とPrincipal生成箇所を明確にします。OIDC�
 
 ## Relationship to other ADRs
 
-ADR-201はPrincipalとIntakeProvenanceの保存、ADR-202は不変条件、ADR-500はJobApprovalとExecution Permission、ADR-502はIngress ClientとExecution Agentの役割を定義します。
+ADR-201はPrincipalとIntakeProvenanceの保存、ADR-202は不変条件、ADR-504はJobApproval、ADR-507はExecution Permission、ADR-502はIngress ClientとExecution Agentの役割を定義します。

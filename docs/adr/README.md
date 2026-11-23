@@ -56,7 +56,7 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 - [ADR-409: Provider operationの意図と観測をJob内で分離して管理する](409-provider-operation-intent-and-observation.md) — Accepted
 
 ### 500–599 Authorization & Security
-- [ADR-500: Job承認境界と禁止副作用を中心に実行権限を強制する](500-job-authority-and-prohibited-effects.md) — Accepted
+- [ADR-500: Jobの承認範囲と禁止副作用を中心に権限を強制する](500-job-authority-and-prohibited-effects.md) — Accepted
 - [ADR-501: Trusted Ingressで認証済みHUMAN Principalを確定する](501-trusted-ingress-and-human-principal.md) — Accepted
 - [ADR-502: 人間起点の依頼とAgent実行先を分離する](502-human-originated-intake-and-agent-routing.md) — Accepted
 - [ADR-503: ACTIVE Jobの契約変更は独立したHUMAN authorityで行う](503-active-job-contract-amendment-authority.md) — Accepted
@@ -73,7 +73,7 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 - [ADR-701: 外部Agent相互運用の必須protocolをA2Aに一本化する](701-a2a-external-agent-interoperability.md) — Accepted
 
 ### 800–899 Quality & Evidence
-- [ADR-800: 検証証拠の水準とJob完遂の受入れを分離する](800-evidence-levels-and-product-acceptance.md) — Accepted
+- [ADR-800: 検証証拠と製品受入れを区別する](800-evidence-levels-and-product-acceptance.md) — Accepted
 - [ADR-801: 検証証拠の主張を実証済みの境界に限定する](801-verification-evidence-boundaries.md) — Accepted
 - [ADR-802: Job完了を証拠に基づく明示的なAggregate判断とする](802-job-completion-acceptance.md) — Accepted
 - [ADR-811: Agent Harnessの能力要求を製品契約として維持する](811-agent-harness-eight-capabilities.md) — Accepted
