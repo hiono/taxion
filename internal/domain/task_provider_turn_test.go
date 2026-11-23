@@ -191,3 +191,44 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTaskTurnMustFollowPreviousTerminalObservationTime(t *testing.T) {
+	job, execution, permission, now := taskTurnFixture(t)
+	first, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_dddddddddddddddddddddddddddddddd", strings.Repeat("d", 64), 40, now)
+	if err != nil {
+		t.Fatalf("first Task Turn: %v", err)
+	}
+	job.TaskTurnIntents = append(job.TaskTurnIntents, first)
+	job.Revision++
+	job.UpdatedAt = first.CreatedAt
+	terminal, err := NewTaskTurnObservation(job, first.ID,
+		"cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", TaskTurnCompleted, 10,
+		strings.Repeat("e", 64), false, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("terminal observation: %v", err)
+	}
+	job.TaskTurnObservations = append(job.TaskTurnObservations, terminal)
+	job.Revision++
+	job.UpdatedAt = terminal.CreatedAt
+
+	if _, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("f", 64), 20,
+		now.Add(30*time.Second)); err == nil {
+		t.Fatal("new Task Turn was accepted before the previous terminal observation")
+	}
+	next, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_11111111111111111111111111111111", strings.Repeat("1", 64), 20,
+		now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("Task Turn after terminal observation: %v", err)
+	}
+	job.TaskTurnIntents = append(job.TaskTurnIntents, next)
+	job.Revision++
+	job.UpdatedAt = next.CreatedAt
+
+	job.TaskTurnIntents[1].CreatedAt = now.Add(30 * time.Second)
+	if err := job.Validate(); err == nil {
+		t.Fatal("Job.Validate accepted a Task Turn timestamp before the previous terminal observation")
+	}
+}

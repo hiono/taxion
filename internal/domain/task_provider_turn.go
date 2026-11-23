@@ -142,6 +142,9 @@ func NewTaskTurnIntent(
 		if !observed || last.Status == TaskTurnUnknown {
 			return TaskTurnIntent{}, errors.New("previous Task Turn is unresolved")
 		}
+		if now.Before(last.CreatedAt) {
+			return TaskTurnIntent{}, errors.New("new Task Turn must follow the previous terminal observation")
+		}
 		if ^uint64(0)-tokensUsed < last.TokensUsed {
 			return TaskTurnIntent{}, errors.New("Task Turn token usage overflow")
 		}
@@ -412,7 +415,8 @@ func validateTaskProviderTurnFacts(job Job) error {
 				previous := turns[index-1]
 				observations := observationsByTurn[previous.ID]
 				if len(observations) == 0 || observations[len(observations)-1].Status == TaskTurnUnknown ||
-					observations[len(observations)-1].CreatedRevision >= turn.CreatedRevision {
+					observations[len(observations)-1].CreatedRevision >= turn.CreatedRevision ||
+					turn.CreatedAt.Before(observations[len(observations)-1].CreatedAt) {
 					return fmt.Errorf("%w: Task Turn starts before previous Turn is terminal for %s", ErrInvalidJob, executionID)
 				}
 				if ^uint64(0)-tokensUsed < observations[len(observations)-1].TokensUsed {
