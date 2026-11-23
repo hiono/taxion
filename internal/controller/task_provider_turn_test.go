@@ -61,7 +61,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		Role: "CODER", Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	_, permission, err := executionController.Authorize(ctx, permissionRequest)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		SDKVersion: "test-sdk/1", ConfigurationSHA256: permission.ConfigurationSHA256,
 	}}
 	runtime.capabilities = provider.Capabilities{
-		Identity: runtime.identity,
+		Identity:    runtime.identity,
 		StartLookup: true, StartIdempotency: true, TaskWorktree: true,
 		SendLookup: true, SendIdempotency: true, FinalOutputRetrieval: true,
 		UsageIdentity: true, UsageCompleteness: true,
