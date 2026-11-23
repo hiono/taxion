@@ -811,6 +811,9 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 		if err := permission.Validate(job); err != nil {
 			return err
 		}
+		if r.CreatedAt.Before(permission.CreatedAt) {
+			return errors.New("Task Coder Resume precedes its ExecutionPermission")
+		}
 		deadline = permission.ExpiresAt
 	default:
 		return errors.New("PlanningResumeIntent supports only Planner and Task-bound Coder executions")
