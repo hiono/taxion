@@ -334,8 +334,8 @@ func TestRuntimeRequiresVerifiedReviewerReadOnlySnapshotBeforeCredentialAcquisit
 	request.BaselineCommit = strings.Repeat("a", 40)
 	request.ReadOnlySnapshot = &ReadOnlySnapshot{
 		JobOutputID: "job_output_1",
-		CommitSHA: request.BaselineCommit,
-		TreeSHA: strings.Repeat("b", 40),
+		CommitSHA:   request.BaselineCommit,
+		TreeSHA:     strings.Repeat("b", 40),
 	}
 
 	adapter := newTestAdapter(CapabilityStartIdempotency, CapabilityTaskWorktree)
@@ -373,8 +373,8 @@ func TestStartRequestRejectsInvalidReadOnlySnapshotIdentity(t *testing.T) {
 	request.BaselineCommit = strings.Repeat("a", 40)
 	request.ReadOnlySnapshot = &ReadOnlySnapshot{
 		JobOutputID: "job_output_1",
-		CommitSHA: strings.Repeat("c", 40),
-		TreeSHA: strings.Repeat("b", 40),
+		CommitSHA:   strings.Repeat("c", 40),
+		TreeSHA:     strings.Repeat("b", 40),
 	}
 	if err := request.Validate(); err == nil {
 		t.Fatal("snapshot commit different from Worktree baseline was accepted")

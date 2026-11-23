@@ -31,19 +31,19 @@ func (i Identity) Validate() error {
 type Capability string
 
 const (
-	CapabilityStartIdempotency  Capability = "start.idempotency"
-	CapabilityStartLookup       Capability = "start.lookup"
-	CapabilityTaskWorktree      Capability = "task.worktree"
-	CapabilitySendIdempotency   Capability = "send.idempotency"
-	CapabilitySendLookup        Capability = "send.lookup"
-	CapabilitySessionReattach   Capability = "session.cross_process_reattachment"
-	CapabilityEventReplay       Capability = "event.replay"
-	CapabilityStopProof         Capability = "stop.proof"
-	CapabilityStopLookup        Capability = "stop.lookup"
+	CapabilityStartIdempotency         Capability = "start.idempotency"
+	CapabilityStartLookup              Capability = "start.lookup"
+	CapabilityTaskWorktree             Capability = "task.worktree"
+	CapabilitySendIdempotency          Capability = "send.idempotency"
+	CapabilitySendLookup               Capability = "send.lookup"
+	CapabilitySessionReattach          Capability = "session.cross_process_reattachment"
+	CapabilityEventReplay              Capability = "event.replay"
+	CapabilityStopProof                Capability = "stop.proof"
+	CapabilityStopLookup               Capability = "stop.lookup"
 	CapabilityReviewerReadOnlySnapshot Capability = "reviewer.read_only_snapshot"
-	CapabilityFinalOutput       Capability = "result.final_output_retrieval"
-	CapabilityUsageIdentity     Capability = "usage.identity"
-	CapabilityUsageCompleteness Capability = "usage.completeness"
+	CapabilityFinalOutput              Capability = "result.final_output_retrieval"
+	CapabilityUsageIdentity            Capability = "usage.identity"
+	CapabilityUsageCompleteness        Capability = "usage.completeness"
 )
 
 type EvidenceLevel string
@@ -335,19 +335,19 @@ type ReadOnlySnapshot struct {
 }
 
 type StartRequest struct {
-	OperationID     string
-	JobID           string
-	RoleExecutionID string
-	RequestSHA256   string
-	PromptSHA256    string
-	Prompt          string
-	Context         []ContextDocument
-	MaxTurns        uint32
-	MaxTokens       uint64
-	Deadline        time.Time
-	RepositoryID    string
-	WorktreePath    string
-	BaselineCommit  string
+	OperationID      string
+	JobID            string
+	RoleExecutionID  string
+	RequestSHA256    string
+	PromptSHA256     string
+	Prompt           string
+	Context          []ContextDocument
+	MaxTurns         uint32
+	MaxTokens        uint64
+	Deadline         time.Time
+	RepositoryID     string
+	WorktreePath     string
+	BaselineCommit   string
 	ReadOnlySnapshot *ReadOnlySnapshot
 }
 
