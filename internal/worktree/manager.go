@@ -98,10 +98,11 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 		if worktreeExists {
 			return Snapshot{}, errors.New("existing Task Worktree has no persisted immutable baseline")
 		}
-		baseline, err = gitOutput(ctx, repositoryPath, "rev-parse", "--verify", "HEAD^{commit}")
-		if err != nil || !validCommit(baseline) {
+		resolvedBaseline, err := gitOutput(ctx, repositoryPath, "rev-parse", "--verify", "HEAD^{commit}")
+		if err != nil || !validCommit(resolvedBaseline) {
 			return Snapshot{}, errors.New("trusted repository HEAD is not a verifiable commit")
 		}
+		baseline = resolvedBaseline
 		record = baselineRecord{
 			Version: 1, JobID: jobID, TaskID: task.ID,
 			RepositoryID: repositoryID, RepositoryPath: repositoryPath,
