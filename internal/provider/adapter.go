@@ -236,8 +236,6 @@ func setCapability(capabilities *Capabilities, capability Capability) {
 		capabilities.StopProof = true
 	case CapabilityStopLookup:
 		capabilities.StopLookup = true
-	case CapabilityStopLookup:
-		capabilities.StopLookup = true
 	case CapabilityFinalOutput:
 		capabilities.FinalOutputRetrieval = true
 	case CapabilityUsageIdentity:
