@@ -69,3 +69,4 @@
 | TK-065 | Turn gate after Resume | Latest Resume observation is absent, UNKNOWN, or FAILED | Reject a new TaskTurnIntent; allow only after ATTACHED |
 | TK-066 | Expired or stale authority | JobApproval, ExecutionPermission, JobContract revision, or deadline is no longer current | Reject before Resume side effect |
 | TK-067 | Resume after Stop | Same RoleExecution / Session has a ProviderStopIntent | Reject without Runtime.Resume or new Session |
+| TK-068 | Stop / Resume concurrency | Same Session has a Resume intent with no observation or UNKNOWN | Reject Stop intent and do not call Runtime.Stop until Resume is terminal |

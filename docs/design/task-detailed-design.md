@@ -68,7 +68,7 @@ ControllerはACTIVE Job、Coder RoleExecution、Task、ExecutionPermission、Job
 
 Stop intentとreceiptを保存した後、Job authority / Worktreeを再読込してからRuntime.Stopを呼び出します。Stop intentの再送時は既存Observationを返し、Observationがない場合はUNKNOWNを記録して外部Stopを再呼出ししません。Provider固有のStopped / Quiescent証拠が揃った場合だけterminal observationを追加します。
 
-Stop intentより後のTaskTurnIntentをJob validationで拒否します。Stop observationはTaskTurnのfinal Result / complete Usageを生成せず、Worktree releaseやRole handoffも許可しません。停止と成果照合が別々に完了するまでWorktreeを保持します。
+Stop intentより後のTaskTurnIntentをJob validationで拒否します。先行Resumeがある場合はlatest Resume observationがATTACHED / FAILEDになるまでStop intentを拒否し、Resume / Stopの外部副作用を競合させません。Stop observationはTaskTurnのfinal Result / complete Usageを生成せず、Worktree releaseやRole handoffも許可しません。停止と成果照合が別々に完了するまでWorktreeを保持します。
 
 ## 8. Task-bound Coder Provider Resume
 
