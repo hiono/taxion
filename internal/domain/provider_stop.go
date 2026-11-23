@@ -142,6 +142,19 @@ func NewProviderStopIntent(
 		startObservation.ProviderSessionID != sessionID {
 		return ProviderStopIntent{}, errors.New("Provider Stop intent requires the accepted Start Session")
 	}
+	hasPriorResume := false
+	for _, resume := range job.PlanningResumeIntents {
+		if resume.RoleExecutionID == roleExecutionID && resume.ProviderSessionID == sessionID {
+			hasPriorResume = true
+			break
+		}
+	}
+	if hasPriorResume {
+		status, found := latestPlanningResumeStatus(job, roleExecutionID, job.Revision+1)
+		if !found || status == "" || status == PlanningResumeUnknown {
+			return ProviderStopIntent{}, errors.New("Provider Stop cannot race an unresolved Resume for the same Session")
+		}
+	}
 	for _, existing := range job.ProviderStopIntents {
 		if existing.RoleExecutionID == roleExecutionID && existing.SessionID == sessionID {
 			return ProviderStopIntent{}, errors.New("Provider Session already has a Stop intent")
@@ -218,10 +231,6 @@ func (i ProviderStopIntent) Validate(job Job) error {
 		}
 		if resume.CreatedRevision >= i.CreatedRevision {
 			return errors.New("Planning Resume intent was created after Provider Stop intent")
-		}
-		status, found := latestPlanningResumeStatus(job, i.RoleExecutionID, i.CreatedRevision)
-		if !found || status == "" || status == PlanningResumeUnknown {
-			return errors.New("Provider Stop cannot race an unresolved Resume for the same Session")
 		}
 	}
 	for _, turn := range job.TaskTurnIntents {

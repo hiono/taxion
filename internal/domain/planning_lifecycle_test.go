@@ -706,3 +706,57 @@ func TestPlanningResumeAfterStopRecordsBoundaryDenial(t *testing.T) {
 		t.Fatalf("Job.Validate after stopped-session denial: %v", err)
 	}
 }
+
+func TestProviderStopPreservesLegacyUnknownResumeHistory(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
+		"cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", strings.Repeat("a", 64), 100, now)
+	if err != nil {
+		t.Fatalf("Planning Turn intent: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+
+	resume, err := NewPlanningResumeIntent(job, executionID, principal, "session_1",
+		"cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("b", 64), true, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("Planning Resume intent: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, resume)
+	job.Revision++
+	job.UpdatedAt = resume.CreatedAt
+	unknown, err := NewPlanningResumeObservation(job, resume.ID, principal,
+		"cmd_cccccccccccccccccccccccccccccccc", PlanningResumeUnknown, "", false, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("Planning Resume UNKNOWN observation: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, unknown)
+	job.Revision++
+	job.UpdatedAt = unknown.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("legacy Job before Stop: %v", err)
+	}
+
+	if _, err := NewProviderStopIntent(job, executionID, principal, "session_1",
+		"cmd_dddddddddddddddddddddddddddddddd", ProviderStopReasonCancelled, now.Add(3*time.Second)); err == nil {
+		t.Fatal("new Provider Stop intent was accepted while the latest Resume is UNKNOWN")
+	}
+
+	start := job.ProviderStartIntents[0]
+	commandID := "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	legacyStop := ProviderStopIntent{
+		ID: ProviderStopIntentID(commandID), CommandID: commandID, JobID: job.ID,
+		RoleExecutionID: executionID, OperationID: ProviderStopOperationID(commandID),
+		SessionID: "session_1", ProviderID: start.ProviderID, AccountID: start.AccountID,
+		ConfigurationSHA256: start.ConfigurationSHA256, Reason: ProviderStopReasonCancelled,
+		CreatedAt: now.Add(3 * time.Second), CreatedRevision: job.Revision + 1,
+	}
+	job.ProviderStopIntents = append(job.ProviderStopIntents, legacyStop)
+	job.Revision++
+	job.UpdatedAt = legacyStop.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("legacy Provider Stop after UNKNOWN Resume must remain readable: %v", err)
+	}
+}
