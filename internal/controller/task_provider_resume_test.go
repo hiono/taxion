@@ -10,7 +10,6 @@ import (
 	"github.com/hiono/taxion/internal/provider"
 )
 
-
 func prepareTaskResumeTurn(t *testing.T, f *taskProviderStopFixture) {
 	t.Helper()
 	now := f.controller.now()
