@@ -646,3 +646,41 @@ func TestProviderStartUnknownEvidenceIsAppendOnlyUntilTerminalResolution(t *test
 		t.Fatalf("accepted Start Session did not unlock Turn: %v", err)
 	}
 }
+
+func TestPlanningResumeAfterStopRecordsBoundaryDenial(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	stop, err := NewProviderStopIntent(
+		job, executionID, principal, "session_1",
+		"cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", ProviderStopReasonCancelled, now,
+	)
+	if err != nil {
+		t.Fatalf("Provider Stop intent: %v", err)
+	}
+	job.ProviderStopIntents = append(job.ProviderStopIntents, stop)
+	job.Revision++
+	job.UpdatedAt = stop.CreatedAt
+
+	sourceCommandID := "cmd_cccccccccccccccccccccccccccccccc"
+	_, err = NewPlanningResumeIntent(
+		job, executionID, principal, "session_1", sourceCommandID,
+		strings.Repeat("b", 64), true, now.Add(time.Second),
+	)
+	var boundary *PlanningBoundaryError
+	if !errors.As(err, &boundary) || boundary.ReasonCode != "provider_session_stopped" {
+		t.Fatalf("resume after Stop = %v, want provider_session_stopped boundary", err)
+	}
+	decision, err := NewPlanningBoundaryDecision(
+		job, executionID, principal, sourceCommandID,
+		PlanningBoundaryResume, boundary.ReasonCode, now.Add(time.Second),
+	)
+	if err != nil {
+		t.Fatalf("persist stopped-session boundary decision: %v", err)
+	}
+	job.PlanningBoundaryDecisions = append(job.PlanningBoundaryDecisions, decision)
+	job.Revision++
+	job.UpdatedAt = decision.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate after stopped-session denial: %v", err)
+	}
+}
