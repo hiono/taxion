@@ -365,9 +365,14 @@ func validateTaskProviderTurnFacts(job Job) error {
 
 	for executionID, turns := range turnsByExecution {
 		var tokensUsed uint64
+		var previousRevision uint64
+		var previousAt time.Time
+		var previousSession string
 		for index, turn := range turns {
-			if turn.TurnNumber != uint32(index+1) {
-				return fmt.Errorf("%w: Task Turn numbering is not contiguous", ErrInvalidJob)
+			if turn.TurnNumber != uint32(index+1) ||
+				(previousRevision != 0 && (turn.CreatedRevision <= previousRevision ||
+					turn.CreatedAt.Before(previousAt) || turn.ProviderSessionID != previousSession)) {
+				return fmt.Errorf("%w: Task Turn sequence or Session binding is invalid for %s", ErrInvalidJob, executionID)
 			}
 			permission, found := executionPermissionByID(job, turn.ExecutionPermissionID)
 			if !found {
@@ -388,6 +393,7 @@ func validateTaskProviderTurnFacts(job Job) error {
 			if tokensUsed > permission.ReservedTokens || turn.ReservedTokens > permission.ReservedTokens-tokensUsed {
 				return fmt.Errorf("%w: Task Turn exceeds cumulative token reservation", ErrInvalidJob)
 			}
+			previousRevision, previousAt, previousSession = turn.CreatedRevision, turn.CreatedAt, turn.ProviderSessionID
 		}
 	}
 
