@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -61,7 +62,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		Role: "CODER", Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       2, ReservedTokens: 200, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	_, permission, err := executionController.Authorize(ctx, permissionRequest)
 	if err != nil {
@@ -81,7 +82,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		Identity:    runtime.identity,
 		StartLookup: true, StartIdempotency: true, TaskWorktree: true,
 		SendLookup: true, SendIdempotency: true, FinalOutputRetrieval: true,
-		UsageIdentity: true, UsageCompleteness: true,
+		UsageIdentity: true, UsageCompleteness: true, StopProof: true,
 		Evidence: []provider.CapabilityEvidence{
 			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
@@ -91,6 +92,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 			{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("f", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("1", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("2", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilityStopProof, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("3", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		},
 	}
 	runtime.lookupResult = provider.LookupResult{Found: false, OperationID: permission.OperationID, Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("3", 64)}
@@ -132,5 +134,55 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		t.Fatalf("Task Turn facts or Provider calls are incomplete: taskResult=%v results=%d usage=%d observations=%d calls=%d/%d/%d",
 			taskResultFound, len(job.ProviderResultObservations), len(job.ProviderUsageObservations), len(job.TaskTurnObservations),
 			runtime.sendCalls, runtime.resultCalls, runtime.usageCalls)
+	}
+	runtime.capabilities.StopProof = false
+	if _, _, _, err := providerController.StopTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_e4040404040404040404040404040404",
+		permissionRequest, domain.ProviderStopReasonTaskComplete, principal,
+	); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("Stop without E4 StopProof was not rejected: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || len(job.ProviderStopIntents) != 0 {
+		t.Fatalf("unsupported Stop capability created a Stop intent: intents=%d err=%v", len(job.ProviderStopIntents), err)
+	}
+	runtime.capabilities.StopProof = true
+	_, stopIntent, stopObservation, err := providerController.StopTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_e4040404040404040404040404040404",
+		permissionRequest, domain.ProviderStopReasonTaskComplete, principal,
+	)
+	if err != nil {
+		t.Fatalf("StopTaskExecution: %v", err)
+	}
+	if stopIntent.RoleExecutionID != execution.ID || stopIntent.SessionID != turn.ProviderSessionID ||
+		!stopObservation.Stopped || !stopObservation.Quiescent || runtime.stopCalls != 1 {
+		t.Fatalf("Task Provider Stop was not confirmed: intent=%#v observation=%#v stopCalls=%d",
+			stopIntent, stopObservation, runtime.stopCalls)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Stop: %v", err)
+	}
+	if len(job.ProviderStopIntents) != 1 || len(job.ProviderStopObservations) != 1 {
+		t.Fatalf("Task Provider Stop facts were not persisted: intents=%d observations=%d",
+			len(job.ProviderStopIntents), len(job.ProviderStopObservations))
+	}
+	_, _, replayedStop, err := providerController.StopTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_e4040404040404040404040404040404",
+		permissionRequest, domain.ProviderStopReasonTaskComplete, principal,
+	)
+	if err != nil || replayedStop.ID != stopObservation.ID || runtime.stopCalls != 1 {
+		t.Fatalf("exact Stop replay repeated or changed the Provider side effect: observation=%#v calls=%d err=%v",
+			replayedStop, runtime.stopCalls, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before post-Stop Turn: %v", err)
+	}
+	if _, _, err := database.AddTaskTurnIntent(
+		ctx, jobID, job.Revision, execution.ID, permission.ID, turn.ProviderSessionID,
+		"cmd_f5050505050505050505050505050505", strings.Repeat("4", 64), 100,
+	); err == nil {
+		t.Fatal("Task Turn was accepted after Provider Stop intent")
 	}
 }

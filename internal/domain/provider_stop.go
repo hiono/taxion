@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -11,6 +12,7 @@ type ProviderStopReason string
 
 const (
 	ProviderStopReasonPlanningComplete ProviderStopReason = "planning_complete"
+	ProviderStopReasonTaskComplete    ProviderStopReason = "task_complete"
 	ProviderStopReasonCancelled        ProviderStopReason = "cancelled"
 	ProviderStopReasonBudgetExhausted  ProviderStopReason = "budget_exhausted"
 	ProviderStopReasonDeadline         ProviderStopReason = "deadline"
@@ -83,14 +85,32 @@ func NewProviderStopIntent(
 	if err := job.Validate(); err != nil {
 		return ProviderStopIntent{}, err
 	}
-	grant, _, err := planningGrantAndExecutionForObservation(job, roleExecutionID, principalID)
+	var execution RoleExecution
+	foundExecution := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == roleExecutionID {
+			execution, foundExecution = candidate, true
+			break
+		}
+	}
+	if !foundExecution {
+		return ProviderStopIntent{}, errors.New("Provider Stop RoleExecution was not found")
+	}
+	authorizedPrincipalID, providerID, accountID, configurationSHA256, err := providerStopExecutionAuthority(job, execution)
 	if err != nil {
 		return ProviderStopIntent{}, err
 	}
+	if authorizedPrincipalID != principalID {
+		return ProviderStopIntent{}, errors.New("Provider Stop requires the HUMAN Principal bound to the execution authority")
+	}
+	if (execution.Role == RolePlanner && job.State != JobDraft) ||
+		(execution.Role == RoleCoder && job.State != JobActive) {
+		return ProviderStopIntent{}, errors.New("Provider Stop requires the execution Role's active Job state")
+	}
 	now = now.UTC().Round(0)
-	if job.State != JobDraft || !validCommandID(commandID) || !validPlanningIdentity(sessionID) ||
+	if !validCommandID(commandID) || !validPlanningIdentity(sessionID) ||
 		!validProviderStopReason(reason) || now.IsZero() || job.Revision >= uint64(^uint64(0)>>1) {
-		return ProviderStopIntent{}, errors.New("Provider Stop intent requires a DRAFT Job, valid identity, reason, and timestamp")
+		return ProviderStopIntent{}, errors.New("Provider Stop intent requires a valid Job execution, identity, reason, and timestamp")
 	}
 	var start ProviderStartIntent
 	foundStart := false
@@ -102,6 +122,9 @@ func NewProviderStopIntent(
 	}
 	if !foundStart {
 		return ProviderStopIntent{}, errors.New("Provider Stop intent has no Start intent")
+	}
+	if err := start.Validate(job, execution); err != nil {
+		return ProviderStopIntent{}, fmt.Errorf("validate Provider Start intent before Stop: %w", err)
 	}
 	startObservation, foundObservation := latestProviderStartObservation(job, start.ID)
 	if !foundObservation || startObservation.Status != ProviderStartAccepted ||
@@ -116,8 +139,8 @@ func NewProviderStopIntent(
 	intent := ProviderStopIntent{
 		ID: ProviderStopIntentID(commandID), CommandID: commandID, JobID: job.ID,
 		RoleExecutionID: roleExecutionID, OperationID: ProviderStopOperationID(commandID),
-		SessionID: sessionID, ProviderID: grant.ProviderID, AccountID: grant.AccountID,
-		ConfigurationSHA256: grant.ConfigurationSHA256, Reason: reason,
+		SessionID: sessionID, ProviderID: providerID, AccountID: accountID,
+		ConfigurationSHA256: configurationSHA256, Reason: reason,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
 	if err := intent.Validate(job); err != nil {
@@ -146,20 +169,13 @@ func (i ProviderStopIntent) Validate(job Job) error {
 	if !foundExecution {
 		return errors.New("Provider Stop intent RoleExecution was not found")
 	}
-	var grant PlanningAuthorization
-	foundGrant := false
-	for _, candidate := range job.PlanningAuthorizations {
-		if candidate.ID == execution.PlanningAuthorizationID {
-			grant, foundGrant = candidate, true
-			break
-		}
-	}
-	if !foundGrant || grant.ProviderID != i.ProviderID || grant.AccountID != i.AccountID ||
-		grant.ConfigurationSHA256 != i.ConfigurationSHA256 {
-		return errors.New("Provider Stop intent Provider identity differs from PlanningAuthorization")
-	}
-	if err := grant.Validate(job); err != nil {
+	_, providerID, accountID, configurationSHA256, err := providerStopExecutionAuthority(job, execution)
+	if err != nil {
 		return err
+	}
+	if providerID != i.ProviderID || accountID != i.AccountID ||
+		configurationSHA256 != i.ConfigurationSHA256 {
+		return errors.New("Provider Stop intent Provider identity differs from the approved execution authority")
 	}
 	var start ProviderStartIntent
 	foundStart := false
@@ -189,6 +205,12 @@ func (i ProviderStopIntent) Validate(job Job) error {
 		if resume.RoleExecutionID == i.RoleExecutionID && resume.ProviderSessionID == i.SessionID &&
 			resume.CreatedRevision >= i.CreatedRevision {
 			return errors.New("Planning Resume intent was created after Provider Stop intent")
+		}
+	}
+	for _, turn := range job.TaskTurnIntents {
+		if turn.RoleExecutionID == i.RoleExecutionID && turn.ProviderSessionID == i.SessionID &&
+			turn.CreatedRevision >= i.CreatedRevision {
+			return errors.New("Task Turn intent was created after Provider Stop intent")
 		}
 	}
 	for _, existing := range job.ProviderStopIntents {
@@ -221,8 +243,23 @@ func NewProviderStopObservation(
 	if !found {
 		return ProviderStopObservation{}, errors.New("Provider Stop intent was not found")
 	}
-	if _, _, err := planningGrantAndExecutionForObservation(job, intent.RoleExecutionID, principalID); err != nil {
+	var execution RoleExecution
+	foundExecution := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == intent.RoleExecutionID {
+			execution, foundExecution = candidate, true
+			break
+		}
+	}
+	if !foundExecution {
+		return ProviderStopObservation{}, errors.New("Provider Stop observation RoleExecution was not found")
+	}
+	authorizedPrincipalID, _, _, _, err := providerStopExecutionAuthority(job, execution)
+	if err != nil {
 		return ProviderStopObservation{}, err
+	}
+	if authorizedPrincipalID != principalID {
+		return ProviderStopObservation{}, errors.New("Provider Stop observation Principal does not match the execution authority")
 	}
 	now = now.UTC().Round(0)
 	if !validCommandID(commandID) || now.IsZero() || job.Revision >= uint64(^uint64(0)>>1) {
@@ -294,6 +331,44 @@ func (o ProviderStopObservation) Validate(job Job) error {
 	return nil
 }
 
+func providerStopExecutionAuthority(job Job, execution RoleExecution) (string, string, string, string, error) {
+	principalID, authorizedExecution, err := providerResultUsageExecution(job, execution.ID)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	if authorizedExecution != execution {
+		return "", "", "", "", errors.New("Provider Stop RoleExecution changed during authority validation")
+	}
+	switch execution.Role {
+	case RolePlanner:
+		if execution.TaskID != "" {
+			return "", "", "", "", errors.New("Planner Provider Stop requires a Taskless PLANNER execution")
+		}
+		for _, grant := range job.PlanningAuthorizations {
+			if grant.ID != execution.PlanningAuthorizationID {
+				continue
+			}
+			if err := grant.Validate(job); err != nil {
+				return "", "", "", "", err
+			}
+			return principalID, grant.ProviderID, grant.AccountID, grant.ConfigurationSHA256, nil
+		}
+		return "", "", "", "", errors.New("Provider Stop PlanningAuthorization was not found")
+	case RoleCoder:
+		if execution.TaskID == "" || execution.ExecutionPermissionID == "" {
+			return "", "", "", "", errors.New("Coder Provider Stop requires a Task-bound Coder execution")
+		}
+		permission, found := executionPermissionByID(job, execution.ExecutionPermissionID)
+		if !found || permission.Role != RoleCoder || permission.TaskID != execution.TaskID ||
+			permission.Validate(job) != nil {
+			return "", "", "", "", errors.New("Coder Provider Stop ExecutionPermission is invalid")
+		}
+		return principalID, permission.ProviderID, permission.AccountID, permission.ConfigurationSHA256, nil
+	default:
+		return "", "", "", "", errors.New("Provider Stop supports only Planner and Task-bound Coder executions")
+	}
+}
+
 func providerStopIntentExists(job Job, roleExecutionID, sessionID string, beforeRevision uint64) bool {
 	for _, intent := range job.ProviderStopIntents {
 		if intent.RoleExecutionID == roleExecutionID && intent.SessionID == sessionID &&
@@ -306,7 +381,7 @@ func providerStopIntentExists(job Job, roleExecutionID, sessionID string, before
 
 func validProviderStopReason(reason ProviderStopReason) bool {
 	switch reason {
-	case ProviderStopReasonPlanningComplete, ProviderStopReasonCancelled,
+	case ProviderStopReasonPlanningComplete, ProviderStopReasonTaskComplete, ProviderStopReasonCancelled,
 		ProviderStopReasonBudgetExhausted, ProviderStopReasonDeadline, ProviderStopReasonFailure:
 		return true
 	default:
