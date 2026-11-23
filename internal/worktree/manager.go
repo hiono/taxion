@@ -21,6 +21,11 @@ type Repository struct {
 
 type Snapshot = domain.WorktreeSnapshot
 
+type OutputSnapshot struct {
+	CommitSHA string
+	TreeSHA   string
+}
+
 type Manager struct {
 	root         string
 	repositories map[string]string
@@ -163,6 +168,30 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 		return errors.New("Task path is not registered as a linked Worktree of the trusted repository")
 	}
 	return nil
+}
+
+// CaptureOutput fixes the exact committed Git tree produced in a Task Worktree.
+// It refuses snapshots while staged, unstaged, or untracked changes remain.
+func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.Task, snapshot Snapshot) (OutputSnapshot, error) {
+	if err := m.Verify(ctx, jobID, task, snapshot); err != nil {
+		return OutputSnapshot{}, fmt.Errorf("verify Task Worktree before output capture: %w", err)
+	}
+	status, err := gitOutput(ctx, snapshot.WorktreePath, "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		return OutputSnapshot{}, errors.New("inspect Task Worktree state before output capture")
+	}
+	if status != "" {
+		return OutputSnapshot{}, errors.New("Task Worktree must be clean before output capture")
+	}
+	commit, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil || !validCommit(commit) {
+		return OutputSnapshot{}, errors.New("Task output commit identity is invalid")
+	}
+	tree, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", "HEAD^{tree}")
+	if err != nil || !validCommit(tree) {
+		return OutputSnapshot{}, errors.New("Task output tree identity is invalid")
+	}
+	return OutputSnapshot{CommitSHA: commit, TreeSHA: tree}, nil
 }
 
 func canonicalDirectory(path string, create bool) (string, error) {

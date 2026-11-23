@@ -89,6 +89,53 @@ func TestManagerRejectsOutOfScopeRepositoryAndChangedBaseline(t *testing.T) {
 	}
 }
 
+func TestManagerCapturesImmutableOutputSnapshotOnlyForCleanWorktree(t *testing.T) {
+	repository := initRepository(t)
+	manager, err := NewManager(filepath.Join(t.TempDir(), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	jobID := "job_0123456789abcdef"
+	task := domain.Task{ID: "task_0123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := manager.Prepare(context.Background(), jobID, task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "config", "user.name", "Taxion Test")
+	gitTestRun(t, snapshot.WorktreePath, "config", "user.email", "taxion-test@example.invalid")
+	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "output.txt"), []byte("completed output\\n"), 0o600); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "add", "output.txt")
+	gitTestRun(t, snapshot.WorktreePath, "commit", "-m", "capture completed output")
+
+	first, err := manager.CaptureOutput(context.Background(), jobID, task, snapshot)
+	if err != nil {
+		t.Fatalf("CaptureOutput: %v", err)
+	}
+	second, err := manager.CaptureOutput(context.Background(), jobID, task, snapshot)
+	if err != nil {
+		t.Fatalf("repeat CaptureOutput: %v", err)
+	}
+	if first != second {
+		t.Fatalf("output identity changed for the same commit: first=%#v second=%#v", first, second)
+	}
+	if got := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", "HEAD"); first.CommitSHA != got {
+		t.Fatalf("captured commit = %s, want %s", first.CommitSHA, got)
+	}
+	if got := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", "HEAD^{tree}"); first.TreeSHA != got {
+		t.Fatalf("captured tree = %s, want %s", first.TreeSHA, got)
+	}
+
+	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "uncommitted.txt"), []byte("not committed\\n"), 0o600); err != nil {
+		t.Fatalf("write uncommitted output: %v", err)
+	}
+	if _, err := manager.CaptureOutput(context.Background(), jobID, task, snapshot); err == nil ||
+		!strings.Contains(err.Error(), "must be clean") {
+		t.Fatalf("dirty Worktree capture error = %v", err)
+	}
+}
+
 func TestManagerRejectsMultipleRepositoriesAndUnsafeWorkspaceRoot(t *testing.T) {
 	repository := initRepository(t)
 	if _, err := NewManager(filepath.Join(repository, "nested-worktrees"), []Repository{{ID: "repo.primary", Path: repository}}); err == nil {
