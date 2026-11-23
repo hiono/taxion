@@ -41,7 +41,7 @@ REQUESTED、ACCEPTED、FAILED、UNKNOWNを区別します。MessageID / BatchID�
 
 ### Authority boundary
 
-JobMessage、Question、Answer、Request、Notification、HandoffはJobApproval、PlanningAuthorization、JobQuestionAuthorization、Task scope、Effect approval、Provider authorityを作成・拡張しません。必要なJobQuestionAuthorizationはADR-500に従い別途発行します。
+JobMessage、Question、Answer、Request、Notification、HandoffはJobApproval、PlanningAuthorization、JobQuestionAuthorization、Task scope、Effect approval、Provider authorityを作成・拡張しません。必要なJobQuestionAuthorizationはADR-506に従い別途発行します。
 
 ## Consequences
 
@@ -49,4 +49,4 @@ JobMessage、Question、Answer、Request、Notification、HandoffはJobApproval�
 
 ## Relationship to other ADRs
 
-ADR-200はDomain Modelの基本方針、ADR-300はCollaborationの基本方針、ADR-201はJobMessageの保存境界、ADR-202はidentity・scope・idempotencyの不変条件、ADR-408はWorktree handoff、ADR-500は権限、ADR-701は外部AgentとのA2A境界を定義します。
+ADR-200はDomain Modelの基本方針、ADR-300はCollaborationの基本方針、ADR-201はJobMessageの保存境界、ADR-202はidentity・scope・idempotencyの不変条件、ADR-408はWorktree handoff、ADR-506は質問実行権限、ADR-507はoperation単位の実行権限、ADR-701は外部AgentとのA2A境界を定義します。

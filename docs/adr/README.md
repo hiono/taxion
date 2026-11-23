@@ -11,9 +11,9 @@
 - **ADR-200 — Domain Model:** Jobを中心とするドメインモデルの基本方針を定義します。
 - **ADR-300 — Collaboration:** Jobを中心とする協調と、情報交換・実行責任移転の区別を定義します。
 - **ADR-400 — Execution & Runtime:** Controllerが管理する実行ライフサイクルと、外部実行事実の扱いを定義します。
-- **ADR-500 — Authorization & Security:** Job承認境界、禁止副作用、認証・認可の基本方針を定義します。
+- **ADR-500 — Authorization & Security:** Jobの承認範囲と禁止副作用を中心に権限を強制する基本方針を定義します。
 - **ADR-700 — Interface & Integration:** 外部連携のAdapter境界と内部Job契約との関係を定義します。
-- **ADR-800 — Quality & Evidence:** 検証証拠の水準とJob完遂の製品受入れを定義します。
+- **ADR-800 — Quality & Evidence:** 検証証拠と製品受入れを区別する基本方針を定義します。
 - 個別の設計判断は各カテゴリの下位ADRに記録します。カテゴリ00番ADRは一覧や下位ADRの要約ではなく、カテゴリに共通する基本設計方針を定義します。
 
 番号帯は分類であり、優先順位・重要度・規範性を表しません。下位ADRは上位の製品目的・安全境界を上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
@@ -53,12 +53,17 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 ### 400–499 Execution & Runtime
 - [ADR-400: Execution & Runtimeの基本設計方針](400-execution-runtime-principles.md) — Accepted
 - [ADR-408: Jobの開発作業をGit Worktree単位で分離し、Roleを逐次引き継ぐ](408-worktree-concurrency-and-ownership.md) — Accepted
+- [ADR-409: Provider operationの意図と観測をJob内で分離して管理する](409-provider-operation-intent-and-observation.md) — Accepted
 
 ### 500–599 Authorization & Security
 - [ADR-500: Job承認境界と禁止副作用を中心に実行権限を強制する](500-job-authority-and-prohibited-effects.md) — Accepted
 - [ADR-501: Trusted Ingressで認証済みHUMAN Principalを確定する](501-trusted-ingress-and-human-principal.md) — Accepted
 - [ADR-502: 人間起点の依頼とAgent実行先を分離する](502-human-originated-intake-and-agent-routing.md) — Accepted
 - [ADR-503: ACTIVE Jobの契約変更は独立したHUMAN authorityで行う](503-active-job-contract-amendment-authority.md) — Accepted
+- [ADR-504: JobApprovalを承認済みJobContract revisionへ束縛する](504-job-approval-contract-binding.md) — Accepted
+- [ADR-505: DRAFT planningを限定的なread-only authorityとして分離する](505-draft-planning-authorization.md) — Accepted
+- [ADR-506: Job内の質問実行権限を独立したgrantとして扱う](506-job-question-authorization.md) — Accepted
+- [ADR-507: 実行権限をoperation単位に限定し、観測・適合・登録と分離する](507-operation-scoped-execution-permission.md) — Accepted
 
 ### 600–699 Persistence & Recovery
 - 現時点で独立したADRはありません。永続化・復旧に関する判断はDomain ModelおよびExecution & Runtimeの責務と整合させ、必要時に追加します。
@@ -69,7 +74,9 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 
 ### 800–899 Quality & Evidence
 - [ADR-800: 検証証拠の水準とJob完遂の受入れを分離する](800-evidence-levels-and-product-acceptance.md) — Accepted
-- [ADR-811: Agent Harnessの8要素を製品能力要求として維持する](811-agent-harness-eight-capabilities.md) — Accepted
+- [ADR-801: 検証証拠の主張を実証済みの境界に限定する](801-verification-evidence-boundaries.md) — Accepted
+- [ADR-802: Job完了を証拠に基づく明示的なAggregate判断とする](802-job-completion-acceptance.md) — Accepted
+- [ADR-811: Agent Harnessの能力要求を製品契約として維持する](811-agent-harness-eight-capabilities.md) — Accepted
 
 ### 900–999 Infrastructure & Operations
 - 現時点で独立したADRはありません。共通方針または個別の設計判断が必要になった時点で追加します。

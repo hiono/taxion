@@ -33,34 +33,19 @@ Job、Task、RoleExecution、通信、Provider実行、Worktree、成果・証�
 
 ### Authorization and collaboration
 
-- JobApproval、PlanningAuthorization、JobQuestionAuthorizationは異なるimmutable factsとして保持します。発行条件と権限はADR-500に従います。
+- JobApproval、PlanningAuthorization、JobQuestionAuthorizationは異なるimmutable factsとして保持します。発行条件と権限はADR-504〜506に従います。
 - Question / Answerは情報交換であり、Taskや実行責任を移転しません。Handoffは受信RoleとTask scopeを明示するJobAggregate Commandとします。
 - Handoffは送信側Providerの停止、terminal result / usage、成果identity、Worktree ownership releaseを確認してから受信側実行を許可します。
 
 ### Provider operations
 
-- 外部Provider呼出し前にTaxion生成のimmutable OperationIDとintentをJobAggregateへ保存します。
-- Provider observationsはOperationIDに束縛したappend-only factsとします。RoleExecutionの状態とProviderのsession、turn、stop、result、usageは別の事実として扱います。
-- 各Provider AdapterはProvider / SDK versionとconfiguration identityに対応するcapabilityを明示し、対応する検証証拠を保持します。少なくとも次を個別に宣言します。
-  1. StartのOperationID単位のidempotencyまたはlookup
-  2. process restart後の、同一Provider Sessionへの再接続と必要なSession identity
-  3. Sendのturn identity単位のidempotencyまたはlookup
-  4. disconnect / restart後のevent replayとcursor continuity
-  5. Stop observationと、Provider processが書込みを継続しないことを示す証拠
-  6. event stream欠落時のfinal output retrieval
-  7. Usage identity、粒度、完全性、重複排除の意味
-- 未対応または未検証のcapabilityは利用可能と推定しません。capabilityの宣言はProviderの実行能力を示すものであり、Job authorityやEffect permissionを付与しません。
-- 同じRoleExecutionをprocess restart後に継続する場合、Controllerは保存済みの正確なSession identity、Provider / account identity、configuration digestを照合し、Adapterがその組合せでcross-process reattachmentを明示的にサポートするときだけ再接続します。
-- reattachmentが未対応・未検証の場合、同じRoleExecutionに新しいSessionを作成してResumeしたことにしません。元のoperationとWorktree ownershipを未解決として保持し、Stop proof、terminal result、Usageを照合します。新しいRoleExecutionによる継続は、旧Providerのquiescence、result / usage reconciliation、Worktree release後に限り、Controllerが現在のJobApproval、Task scope、budget、deadlineを再検証して別の実行として発行します。
-- Startの結果が不明な場合は同じOperationIDでlookupするか、当該OperationIDに対するidempotencyが実証された場合だけ再試行します。新しいOperationIDでStartを重複発行しません。
-- Worktree予約を伴うStartは、予約とStart intentを同じJob transactionで確定してからProviderを呼び出します。transactionのcommit結果がUNKNOWNの場合は、OperationIDとWorktree reservationをread-backしてcommitを確認するまでProviderを呼び出しません。
-- Sendは送信前にimmutable turn identityとprompt hashを保存します。Providerの受理応答はturn完了を意味しません。terminal eventまたは同一turn identityによるlookupで結果を照合し、結果不明のSendを自動再送しません。
-- Stopは先にintentを保存し、Adapter固有のstop evidenceをappend-onlyで記録します。cancel notificationやRoleExecutionのterminal statusだけではProvider停止を証明しません。停止証拠が不明なWorktreeは保持またはquarantineします。
-- final output、terminal turn、Usageをそれぞれのidentityへ束縛して照合します。event replay / final output retrievalが未対応の場合、欠落した結果を成功と推定しません。Provider停止証拠、最終結果、Usageが照合されるまでWorktreeを保持します。
+- Provider operationのintentと観測事実はJobAggregateに属し、RoleExecutionの状態とは区別します。
+- 外部呼出し前にintentを確定し、Provider result、usage、stop等の観測を対応するoperation identityへ束縛します。
+- 不明な結果を成功・失敗と推定せず、照合されるまで実行資源の所有権を維持します。Provider operationの設計判断はADR-409に従います。
 
 ### Outputs and completion
 
-成果と証拠はimmutable identityおよびJob / Task / producing RoleExecution / verifierのprovenanceへ束縛します。Job完了は、必須条件の確認結果を伴う明示的Commandとして成立させます。受入条件はADR-800に従います。
+成果と証拠はimmutable identityおよびJob / Task / producing RoleExecution / verifierのprovenanceへ束縛します。Job完了は、必須条件の確認結果を伴う明示的Commandとして成立させます。受入条件はADR-802に従います。
 
 ## Consequences
 
@@ -68,4 +53,4 @@ Planner、Coder、Reviewer、修正、人間の介入、Job完了を同じJobで
 
 ## Relationship to other ADRs
 
-ADR-200はDomain Modelの基本方針、ADR-202は不変条件、ADR-300はCollaborationの基本方針、ADR-301は内部通信、ADR-400はExecution & Runtimeの基本方針、ADR-408はWorktree、ADR-500は権限、ADR-501はintake identity、ADR-800は証拠と完了条件を定義します。
+ADR-200はDomain Modelの基本方針、ADR-202は不変条件、ADR-300はCollaborationの基本方針、ADR-301は内部通信、ADR-400はExecution & Runtimeの基本方針、ADR-408はWorktree、ADR-409はProvider operation、ADR-501はintake identity、ADR-504〜507は権限、ADR-801は証拠水準、ADR-802はJob完了を定義します。
