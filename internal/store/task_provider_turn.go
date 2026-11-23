@@ -12,8 +12,13 @@ func (s *Store) AddTaskTurnIntent(
 	roleExecutionID, permissionID, sessionID, commandID, promptSHA256 string, reservedTokens uint64,
 ) (CommandReceipt, domain.TaskTurnIntent, error) {
 	request := struct {
-		JobID, RoleExecutionID, PermissionID, SessionID, CommandID, PromptSHA256 string
-		ReservedTokens                                                            uint64
+		JobID           string
+		RoleExecutionID string
+		PermissionID    string
+		SessionID       string
+		CommandID       string
+		PromptSHA256    string
+		ReservedTokens  uint64
 	}{jobID, roleExecutionID, permissionID, sessionID, commandID, promptSHA256, reservedTokens}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, "TASK_PROVIDER_TURN_INTENT", request,
 		func(job domain.Job, now time.Time) (domain.TaskTurnIntent, error) {
@@ -38,9 +43,13 @@ func (s *Store) AddTaskTurnObservation(
 	turnID, commandID, status string, tokensUsed uint64, evidenceSHA256 string, reconcilesUnknown bool,
 ) (CommandReceipt, domain.TaskTurnObservation, error) {
 	request := struct {
-		JobID, TurnID, CommandID, Status, EvidenceSHA256 string
-		TokensUsed                                             uint64
-		ReconcilesUnknown                                      bool
+		JobID             string
+		TurnID            string
+		CommandID         string
+		Status            string
+		EvidenceSHA256    string
+		TokensUsed        uint64
+		ReconcilesUnknown bool
 	}{jobID, turnID, commandID, status, evidenceSHA256, tokensUsed, reconcilesUnknown}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, "TASK_PROVIDER_TURN_OBSERVATION", request,
 		func(job domain.Job, now time.Time) (domain.TaskTurnObservation, error) {
