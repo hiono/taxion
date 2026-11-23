@@ -69,7 +69,18 @@ Task creationはWorktree、ExecutionPermission、RoleExecution、Provider operat
 - Reviewer dispatchはimmutable commit / tree snapshotとread-only enforcementが成立するまで拒否します。
 - Provider停止、event、final result、Usage、review target identityを照合できないWorktreeは保持します。handoff、quarantine、release、orphan cleanupは別の実装単位とし、未解決Worktreeを自動削除しません。
 
-## 7. References
+## 7. Task-bound Coder Turn
+
+- Task CoderのTurn intent / observationはPlanningTurn factsと分離し、PlanningAuthorizationを権限根拠として使用しません。
+- Turn intentはTask、Coder RoleExecution、ExecutionPermission、accepted Start Session、Provider identity、prompt digest、turn number、token reservationへ束縛します。
+- intentとreceiptは同一JobAggregate transactionで保存し、Provider Sendより前にcommitします。
+- 現在のJobApproval、ExecutionPermission、scope、budget、deadlineをTurn開始前に再検証します。
+- Session identityをRoleExecution内で固定し、先行Turnが未解決の場合は次Turnを拒否します。
+- UNKNOWNは同一OperationID / TurnIDで照合し、新しいTurn identityによるblind replayを禁止します。
+- COMPLETED / FAILED observationはfinal ResultとComplete Usageの保存後にのみ追加します。Result欠落、partial Usage、identity mismatchではUNKNOWNを維持します。
+- Reviewer Turnはimmutable read-only snapshot境界が成立するまで拒否します。
+
+## 8. References
 
 - ADR-201: JobAggregate / Task / RoleExecution boundary
 - ADR-202: invariants across create / persist / restore

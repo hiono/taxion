@@ -49,7 +49,18 @@ ProviderControllerはtrusted Worktree verifierでassignment ownerと物理Worktr
 
 Reviewer dispatchはread-only snapshot境界が未実装のためfail closedとします。Worktreeの解放、quarantine、owner handoff、orphan reconciliationも未実装であり、未解決Worktreeを自動削除しません。
 
-## 6. Non-goals
+## 6. Task-bound Coder Turn
+
+Task CoderのTurnはPlanningTurnと別のappend-only factsとして管理します。権限正本はTaskに束縛されたExecutionPermissionとし、DRAFT PlannerのPlanningAuthorizationを流用しません。
+
+- TaskTurnIntentはJob / Task / Coder RoleExecution / ExecutionPermission / Provider Start / accepted Session / Provider identity / prompt digest / turn number / token reservationへ束縛します。
+- intentとCommand receiptは同一JobAggregate transactionで保存し、Provider Sendより先にcommitします。
+- 作成時に現在のJobApproval、ExecutionPermission、scope、deadline、accepted Start Session、累積turn / token budgetを再検証します。
+- 同一RoleExecution内のSession identityを固定します。先行Turnが未観測またはUNKNOWNの場合、同じTurnの照合が完了するまで次Turnを拒否します。
+- TaskTurnObservationはUNKNOWN / COMPLETED / FAILEDをappend-onlyで記録します。UNKNOWNは同一Turnのterminal evidenceだけで解消します。
+- Terminal observationはfinal ResultとComplete Usageの保存後にのみ追加します。Provider Sendの受理だけでTurn完了としません。
+
+## 7. Non-goals
 
 - Task status / progress state machine
 - Worktree ownership handoff / quarantine / release

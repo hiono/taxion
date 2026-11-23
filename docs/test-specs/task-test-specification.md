@@ -44,3 +44,10 @@
 | TK-040 | Worktree capability evidence | Provider lacks Task Worktree capability or evidence is below E4 | Reject before credential acquisition / Provider Start |
 | TK-041 | Reviewer isolation | Reviewer Start is requested without immutable read-only snapshot enforcement | Reject before Lookup or Provider Start |
 | TK-042 | Worktree revalidation after lookup | Provider Start lookup runs before dispatch and the Worktree changes before Start | Revalidate the exact persisted assignment and physical Worktree immediately before Start; reject without Provider Start or observation |
+| TK-043 | Task Coder Turn authority | ACTIVE Job、accepted Task Coder Start、matching ExecutionPermission | Append TaskTurnIntent bound to the exact Task / RoleExecution / permission / Session |
+| TK-044 | Planner authority separation | Task Coder execution has no PlanningAuthorization | TaskTurnIntent uses the matching ExecutionPermission, not a Planner grant |
+| TK-045 | Turn Session identity | Existing TaskTurn uses another Provider Session | Reject without Job mutation |
+| TK-046 | Unresolved previous Turn | Previous Turn has no observation or latest UNKNOWN | Reject new Turn until same-Turn reconciliation |
+| TK-047 | Turn budget | Cumulative observed tokens plus new reservation exceeds permission | Reject without mutation |
+| TK-048 | UNKNOWN reconciliation | First observation UNKNOWN, then terminal evidence for same Turn | Append terminal observation with ReconcilesUnknown; reject blind replay |
+| TK-049 | Restart restoration | TaskTurn facts are persisted and Store is reopened | Restore exact facts and preserve aggregate validation |

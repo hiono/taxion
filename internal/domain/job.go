@@ -55,6 +55,8 @@ type Job struct {
 	ProviderLifecycleEnforcedFromRevision uint64                      `json:"provider_lifecycle_enforced_from_revision,omitempty"`
 	PlanningTurnIntents                   []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
 	PlanningTurnObservations              []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
+	TaskTurnIntents                       []TaskTurnIntent            `json:"task_turn_intents,omitempty"`
+	TaskTurnObservations                  []TaskTurnObservation       `json:"task_turn_observations,omitempty"`
 	PlanningEffectDecisions               []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
 	PlanningResumeIntents                 []PlanningResumeIntent      `json:"planning_resume_intents,omitempty"`
 	PlanningResumeObservations            []PlanningResumeObservation `json:"planning_resume_observations,omitempty"`
@@ -1171,5 +1173,6 @@ func (j Job) Validate() error {
 	if err := validateTaskFacts(j); err != nil {
 		return err
 	}
+	if err := validateTaskProviderTurnFacts(j); err != nil { return err }
 	return validateWorktreeAssignments(j)
 }
