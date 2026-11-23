@@ -143,7 +143,9 @@ type PlanningResumeIntent struct {
 	CommandID                         string    `json:"command_id"`
 	JobID                             string    `json:"job_id"`
 	RoleExecutionID                   string    `json:"role_execution_id"`
-	PlanningAuthorizationID           string    `json:"planning_authorization_id"`
+	PlanningAuthorizationID           string    `json:"planning_authorization_id,omitempty"`
+	TaskID                            string    `json:"task_id,omitempty"`
+	ExecutionPermissionID             string    `json:"execution_permission_id,omitempty"`
 	ProviderSessionID                 string    `json:"provider_session_id"`
 	ProviderID                        string    `json:"provider_id"`
 	AccountID                         string    `json:"account_id"`
@@ -591,23 +593,57 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 		!validSHA256(capabilityEvidenceSHA256) || !reattachmentSupported || now.IsZero() {
 		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "reattachment_not_supported", Cause: errors.New("resume requires the same Provider Session and verified cross-process reattachment capability")}
 	}
-	grant, execution, err := planningGrantAndExecution(job, roleExecutionID, principalID, now, PlanningBoundaryResume)
+	if err := job.Validate(); err != nil {
+		return PlanningResumeIntent{}, fmt.Errorf("validate Job before Provider Resume: %w", err)
+	}
+	var execution RoleExecution
+	foundExecution := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == roleExecutionID {
+			execution, foundExecution = candidate, true
+			break
+		}
+	}
+	if !foundExecution {
+		return PlanningResumeIntent{}, errors.New("Provider Resume RoleExecution was not found")
+	}
+	planningAuthorizationID, taskID, executionPermissionID, providerID, accountID, configurationSHA256, deadline, err :=
+		planningResumeExecutionAuthority(job, execution, principalID, now)
 	if err != nil {
 		return PlanningResumeIntent{}, err
 	}
+
 	foundSession := false
 	var latestTurnAt time.Time
-	for _, turn := range job.PlanningTurnIntents {
-		if turn.RoleExecutionID != execution.ID {
-			continue
+	switch execution.Role {
+	case RolePlanner:
+		for _, turn := range job.PlanningTurnIntents {
+			if turn.RoleExecutionID != execution.ID {
+				continue
+			}
+			if turn.ProviderSessionID != providerSessionID {
+				return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_mismatch", Cause: errors.New("resume Provider Session does not match the RoleExecution's persisted turns")}
+			}
+			foundSession = true
+			if turn.CreatedAt.After(latestTurnAt) {
+				latestTurnAt = turn.CreatedAt
+			}
 		}
-		if turn.ProviderSessionID != providerSessionID {
-			return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_mismatch", Cause: errors.New("resume Provider Session does not match the RoleExecution's persisted turns")}
+	case RoleCoder:
+		for _, turn := range job.TaskTurnIntents {
+			if turn.RoleExecutionID != execution.ID {
+				continue
+			}
+			if turn.ProviderSessionID != providerSessionID {
+				return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_mismatch", Cause: errors.New("resume Provider Session does not match the Task Coder's persisted turns")}
+			}
+			foundSession = true
+			if turn.CreatedAt.After(latestTurnAt) {
+				latestTurnAt = turn.CreatedAt
+			}
 		}
-		foundSession = true
-		if turn.CreatedAt.After(latestTurnAt) {
-			latestTurnAt = turn.CreatedAt
-		}
+	default:
+		return PlanningResumeIntent{}, errors.New("Provider Resume supports only Planner and Task-bound Coder executions")
 	}
 	if !foundSession {
 		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_mismatch", Cause: errors.New("resume Provider Session does not match a persisted turn")}
@@ -623,11 +659,17 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 	if !foundStart {
 		return PlanningResumeIntent{}, errors.New("Provider Start intent was not found for Resume")
 	}
+	if err := startIntent.Validate(job, execution); err != nil {
+		return PlanningResumeIntent{}, fmt.Errorf("validate Provider Start intent before Resume: %w", err)
+	}
 	if err := validateProviderStartSession(job, startIntent, providerSessionID, job.Revision+1, now); err != nil {
 		return PlanningResumeIntent{}, err
 	}
-	if now.Before(latestTurnAt) {
-		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "resume_before_latest_turn", Cause: errors.New("resume intent precedes the latest Provider turn")}
+	if now.Before(latestTurnAt) || !now.Before(deadline) {
+		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "resume_before_latest_turn", Cause: errors.New("resume intent must follow the latest Provider turn and remain within its authority deadline")}
+	}
+	if providerStopIntentExists(job, execution.ID, providerSessionID, job.Revision+1) {
+		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_stopped", Cause: errors.New("Provider Session cannot be resumed after a Stop intent")}
 	}
 	for _, previous := range job.PlanningResumeIntents {
 		if previous.RoleExecutionID != execution.ID {
@@ -654,9 +696,9 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 	resume := PlanningResumeIntent{
 		ID: PlanningResumeIntentID(commandID), OperationID: PlanningResumeOperationID(commandID),
 		CommandID: commandID, JobID: job.ID, RoleExecutionID: execution.ID,
-		PlanningAuthorizationID: grant.ID, ProviderSessionID: providerSessionID,
-		ProviderID: grant.ProviderID, AccountID: grant.AccountID,
-		ConfigurationSHA256:      grant.ConfigurationSHA256,
+		PlanningAuthorizationID: planningAuthorizationID, TaskID: taskID,
+		ExecutionPermissionID: executionPermissionID, ProviderSessionID: providerSessionID,
+		ProviderID: providerID, AccountID: accountID, ConfigurationSHA256: configurationSHA256,
 		CapabilityEvidenceSHA256: capabilityEvidenceSHA256, CrossProcessReattachmentSupported: reattachmentSupported,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
@@ -666,14 +708,57 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 	return resume, nil
 }
 
+func planningResumeExecutionAuthority(
+	job Job, execution RoleExecution, principalID string, now time.Time,
+) (string, string, string, string, string, string, time.Time, error) {
+	authorizedPrincipalID, providerID, accountID, configurationSHA256, err :=
+		providerStopExecutionAuthority(job, execution)
+	if err != nil {
+		return "", "", "", "", "", "", time.Time{}, err
+	}
+	if authorizedPrincipalID != principalID {
+		return "", "", "", "", "", "", time.Time{}, errors.New("Provider Resume requires the HUMAN Principal bound to its execution authority")
+	}
+	switch execution.Role {
+	case RolePlanner:
+		if job.State != JobDraft || execution.TaskID != "" {
+			return "", "", "", "", "", "", time.Time{}, errors.New("Planner Resume requires its DRAFT Taskless execution")
+		}
+		for _, grant := range job.PlanningAuthorizations {
+			if grant.ID != execution.PlanningAuthorizationID {
+				continue
+			}
+			if err := grant.ValidateFor(job, principalID, now); err != nil {
+				return "", "", "", "", "", "", time.Time{}, err
+			}
+			return grant.ID, "", "", providerID, accountID, configurationSHA256, grant.Deadline, nil
+		}
+		return "", "", "", "", "", "", time.Time{}, errors.New("Provider Resume PlanningAuthorization was not found")
+	case RoleCoder:
+		if job.State != JobActive || execution.TaskID == "" || execution.ExecutionPermissionID == "" {
+			return "", "", "", "", "", "", time.Time{}, errors.New("Coder Resume requires its ACTIVE Task-bound execution")
+		}
+		permission, found := executionPermissionByID(job, execution.ExecutionPermissionID)
+		if !found || permission.Role != RoleCoder || permission.TaskID != execution.TaskID {
+			return "", "", "", "", "", "", time.Time{}, errors.New("Coder Resume ExecutionPermission is invalid")
+		}
+		if err := permission.ValidateFor(job, permission.OperationID, permission.RequestSHA256, now); err != nil {
+			return "", "", "", "", "", "", time.Time{}, err
+		}
+		return "", execution.TaskID, permission.ID, providerID, accountID, configurationSHA256, permission.ExpiresAt, nil
+	default:
+		return "", "", "", "", "", "", time.Time{}, errors.New("Provider Resume supports only Planner and Task-bound Coder executions")
+	}
+}
+
 func (r PlanningResumeIntent) Validate(job Job) error {
 	if !validPlanningIdentity(r.ID) || !validPlanningIdentity(r.OperationID) ||
 		!validCommandID(r.CommandID) || r.ID != PlanningResumeIntentID(r.CommandID) ||
 		r.OperationID != PlanningResumeOperationID(r.CommandID) ||
 		r.JobID != job.ID || !validPlanningIdentity(r.RoleExecutionID) ||
-		!validPlanningIdentity(r.PlanningAuthorizationID) || !validPlanningIdentity(r.ProviderSessionID) ||
-		!validPlanningIdentity(r.ProviderID) || !validPlanningIdentity(r.AccountID) ||
-		!validSHA256(r.ConfigurationSHA256) || !validSHA256(r.CapabilityEvidenceSHA256) || !r.CrossProcessReattachmentSupported ||
+		!validPlanningIdentity(r.ProviderSessionID) || !validPlanningIdentity(r.ProviderID) ||
+		!validPlanningIdentity(r.AccountID) || !validSHA256(r.ConfigurationSHA256) ||
+		!validSHA256(r.CapabilityEvidenceSHA256) || !r.CrossProcessReattachmentSupported ||
 		r.CreatedAt.IsZero() || r.CreatedRevision < 3 {
 		return errors.New("PlanningResumeIntent identity or metadata is invalid")
 	}
@@ -685,23 +770,98 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 			break
 		}
 	}
-	if !foundExecution || execution.PlanningAuthorizationID != r.PlanningAuthorizationID {
-		return errors.New("PlanningResumeIntent RoleExecution or grant mismatch")
+	if !foundExecution {
+		return errors.New("PlanningResumeIntent RoleExecution was not found")
 	}
-	var latestPriorSessionTurn *PlanningTurnIntent
-	for i := range job.PlanningTurnIntents {
-		turn := &job.PlanningTurnIntents[i]
-		if turn.RoleExecutionID == r.RoleExecutionID && turn.ProviderSessionID == r.ProviderSessionID &&
-			turn.CreatedRevision < r.CreatedRevision &&
-			(latestPriorSessionTurn == nil || turn.CreatedRevision > latestPriorSessionTurn.CreatedRevision) {
-			latestPriorSessionTurn = turn
+	_, providerID, accountID, configurationSHA256, err := providerStopExecutionAuthority(job, execution)
+	if err != nil {
+		return err
+	}
+	var deadline time.Time
+	switch execution.Role {
+	case RolePlanner:
+		if !validPlanningIdentity(r.PlanningAuthorizationID) || r.TaskID != "" ||
+			r.ExecutionPermissionID != "" || execution.TaskID != "" ||
+			execution.PlanningAuthorizationID != r.PlanningAuthorizationID {
+			return errors.New("Planner Resume authority binding is invalid")
+		}
+		for _, grant := range job.PlanningAuthorizations {
+			if grant.ID != r.PlanningAuthorizationID {
+				continue
+			}
+			if err := grant.Validate(job); err != nil {
+				return err
+			}
+			deadline = grant.Deadline
+			break
+		}
+		if deadline.IsZero() {
+			return errors.New("PlanningResumeIntent PlanningAuthorization was not found")
+		}
+	case RoleCoder:
+		if r.PlanningAuthorizationID != "" || !validPlanningIdentity(r.TaskID) ||
+			!validPlanningIdentity(r.ExecutionPermissionID) || r.TaskID != execution.TaskID ||
+			r.ExecutionPermissionID != execution.ExecutionPermissionID {
+			return errors.New("Task Coder Resume authority binding is invalid")
+		}
+		permission, found := executionPermissionByID(job, r.ExecutionPermissionID)
+		if !found || permission.Role != RoleCoder || permission.TaskID != r.TaskID {
+			return errors.New("Task Coder Resume ExecutionPermission was not found")
+		}
+		if err := permission.Validate(job); err != nil {
+			return err
+		}
+		deadline = permission.ExpiresAt
+	default:
+		return errors.New("PlanningResumeIntent supports only Planner and Task-bound Coder executions")
+	}
+	if r.ProviderID != providerID || r.AccountID != accountID ||
+		r.ConfigurationSHA256 != configurationSHA256 || r.CreatedAt.Before(execution.CreatedAt) ||
+		!r.CreatedAt.Before(deadline) || r.CreatedRevision <= execution.CreatedRevision {
+		return errors.New("PlanningResumeIntent exceeds its execution authority")
+	}
+
+	foundSessionTurn := false
+	var latestPriorTurnAt time.Time
+	switch execution.Role {
+	case RolePlanner:
+		for _, turn := range job.PlanningTurnIntents {
+			if turn.RoleExecutionID != r.RoleExecutionID || turn.ProviderSessionID != r.ProviderSessionID ||
+				turn.CreatedRevision >= r.CreatedRevision {
+				continue
+			}
+			foundSessionTurn = true
+			if turn.CreatedAt.After(latestPriorTurnAt) {
+				latestPriorTurnAt = turn.CreatedAt
+			}
+		}
+	case RoleCoder:
+		for _, turn := range job.TaskTurnIntents {
+			if turn.RoleExecutionID != r.RoleExecutionID || turn.ProviderSessionID != r.ProviderSessionID ||
+				turn.CreatedRevision >= r.CreatedRevision {
+				continue
+			}
+			foundSessionTurn = true
+			if turn.CreatedAt.After(latestPriorTurnAt) {
+				latestPriorTurnAt = turn.CreatedAt
+			}
 		}
 	}
-	if latestPriorSessionTurn == nil || r.CreatedAt.Before(latestPriorSessionTurn.CreatedAt) {
-		return errors.New("PlanningResumeIntent does not follow the latest persisted turn for the same Provider Session")
+	if !foundSessionTurn || r.CreatedAt.Before(latestPriorTurnAt) {
+		return errors.New("PlanningResumeIntent does not follow a persisted turn for the same Provider Session")
+	}
+	for _, previous := range job.PlanningResumeIntents {
+		if previous.RoleExecutionID != r.RoleExecutionID || previous.ProviderSessionID != r.ProviderSessionID ||
+			previous.CreatedRevision >= r.CreatedRevision {
+			continue
+		}
+		status, found := latestPlanningResumeStatus(job, r.RoleExecutionID, r.CreatedRevision)
+		if !found || status == "" || status == PlanningResumeUnknown {
+			return errors.New("a new Provider Resume cannot follow an unresolved Resume; reconcile the same OperationID first")
+		}
 	}
 	if providerStopIntentExists(job, r.RoleExecutionID, r.ProviderSessionID, r.CreatedRevision) {
-		return errors.New("Planning Resume cannot be created after a Provider Stop intent")
+		return errors.New("Provider Resume cannot be created after a Provider Stop intent")
 	}
 	if job.ProviderLifecycleEnforcedFromRevision > 0 &&
 		r.CreatedRevision >= job.ProviderLifecycleEnforcedFromRevision {
@@ -720,21 +880,7 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 			return err
 		}
 	}
-	for _, grant := range job.PlanningAuthorizations {
-		if grant.ID != r.PlanningAuthorizationID {
-			continue
-		}
-		if err := grant.Validate(job); err != nil {
-			return err
-		}
-		if r.ProviderID != grant.ProviderID || r.AccountID != grant.AccountID ||
-			r.ConfigurationSHA256 != grant.ConfigurationSHA256 ||
-			r.CreatedAt.Before(execution.CreatedAt) || !r.CreatedAt.Before(grant.Deadline) {
-			return errors.New("PlanningResumeIntent exceeds PlanningAuthorization scope")
-		}
-		return nil
-	}
-	return errors.New("PlanningResumeIntent PlanningAuthorization was not found")
+	return nil
 }
 
 func NewPlanningBoundaryDecision(job Job, roleExecutionID, principalID, sourceCommandID, boundary, reasonCode string, now time.Time) (PlanningBoundaryDecision, error) {
@@ -840,8 +986,12 @@ func NewPlanningResumeObservation(job Job, resumeID, principalID, commandID, sta
 	if !found {
 		return PlanningResumeObservation{}, errors.New("PlanningResumeIntent was not found")
 	}
-	if _, _, err := planningGrantAndExecutionForObservation(job, resume.RoleExecutionID, principalID); err != nil {
+	authorizedPrincipalID, _, err := providerResultUsageExecution(job, resume.RoleExecutionID)
+	if err != nil {
 		return PlanningResumeObservation{}, err
+	}
+	if authorizedPrincipalID != principalID {
+		return PlanningResumeObservation{}, errors.New("Provider Resume observation Principal does not match its execution authority")
 	}
 	if status != PlanningResumeUnknown && status != PlanningResumeAttached && status != PlanningResumeFailed {
 		return PlanningResumeObservation{}, errors.New("unsupported Provider resume observation status")

@@ -82,7 +82,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		Identity:    runtime.identity,
 		StartLookup: true, StartIdempotency: true, TaskWorktree: true,
 		SendLookup: true, SendIdempotency: true, FinalOutputRetrieval: true,
-		UsageIdentity: true, UsageCompleteness: true, StopProof: true,
+		UsageIdentity: true, UsageCompleteness: true, StopProof: true, CrossProcessSessionReattach: true,
 		Evidence: []provider.CapabilityEvidence{
 			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
@@ -93,6 +93,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 			{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("1", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("2", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityStopProof, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("3", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilitySessionReattach, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceDurable, VerifiedAt: now},
 		},
 	}
 	runtime.lookupResult = provider.LookupResult{Found: false, OperationID: permission.OperationID, Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("3", 64)}
@@ -135,6 +136,64 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 			taskResultFound, len(job.ProviderResultObservations), len(job.ProviderUsageObservations), len(job.TaskTurnObservations),
 			runtime.sendCalls, runtime.resultCalls, runtime.usageCalls)
 	}
+	runtime.capabilities.CrossProcessSessionReattach = false
+	if _, _, _, _, err := providerController.ResumeTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_b8080808080808080808080808080808",
+		permissionRequest, principal,
+	); !errors.Is(err, provider.ErrUnsupportedCapability) || runtime.resumeCalls != 0 {
+		t.Fatalf("Resume without E5 reattachment evidence was not rejected: calls=%d err=%v", runtime.resumeCalls, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || len(job.PlanningResumeIntents) != 0 {
+		t.Fatalf("unsupported Resume capability created an intent: intents=%d err=%v", len(job.PlanningResumeIntents), err)
+	}
+	runtime.capabilities.CrossProcessSessionReattach = true
+	runtime.resumeErr = &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown}
+	_, resumeIntent, unknownResume, _, resumeErr := providerController.ResumeTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_b8080808080808080808080808080808",
+		permissionRequest, principal,
+	)
+	if resumeErr == nil || unknownResume.Status != domain.PlanningResumeUnknown || runtime.resumeCalls != 1 {
+		t.Fatalf("ambiguous Task Resume was not retained as UNKNOWN: intent=%#v observation=%#v calls=%d err=%v",
+			resumeIntent, unknownResume, runtime.resumeCalls, resumeErr)
+	}
+	if _, _, _, _, err := providerController.ResumeTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_c9090909090909090909090909090909",
+		permissionRequest, principal,
+	); err == nil || runtime.resumeCalls != 1 {
+		t.Fatalf("a new Resume OperationID bypassed UNKNOWN reconciliation: calls=%d err=%v", runtime.resumeCalls, err)
+	}
+	if _, _, _, err := providerController.StopTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_e4040404040404040404040404040404",
+		permissionRequest, domain.ProviderStopReasonTaskComplete, principal,
+	); err == nil || runtime.stopCalls != 0 {
+		t.Fatalf("Stop raced an unresolved Resume: stopCalls=%d err=%v", runtime.stopCalls, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || len(job.ProviderStopIntents) != 0 {
+		t.Fatalf("unresolved Resume created a Stop intent: intents=%d err=%v", len(job.ProviderStopIntents), err)
+	}
+	runtime.resumeErr = nil
+	_, resumedIntent, attachedResume, resumeResult, err := providerController.ResumeTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_b8080808080808080808080808080808",
+		permissionRequest, principal,
+	)
+	if err != nil || resumedIntent.ID != resumeIntent.ID || resumedIntent.OperationID != resumeIntent.OperationID ||
+		resumedIntent.ProviderSessionID != turn.ProviderSessionID || attachedResume.Status != domain.PlanningResumeAttached ||
+		!resumeResult.Attached || resumeResult.SessionID != turn.ProviderSessionID || runtime.resumeCalls != 2 {
+		t.Fatalf("same-Session Task Resume did not reconcile to ATTACHED: intent=%#v observation=%#v result=%#v calls=%d err=%v",
+			resumedIntent, attachedResume, resumeResult, runtime.resumeCalls, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Resume: %v", err)
+	}
+	if _, err := domain.NewTaskTurnIntent(
+		job, execution.ID, permission.ID, turn.ProviderSessionID,
+		"cmd_f5050505050505050505050505050505", strings.Repeat("4", 64), 100, now.Add(time.Second),
+	); err != nil {
+		t.Fatalf("Task Turn was not allowed after ATTACHED Resume: %v", err)
+	}
 	runtime.capabilities.StopProof = false
 	if _, _, _, err := providerController.StopTaskExecution(
 		ctx, jobID, execution.ID, permission.ID, "cmd_e4040404040404040404040404040404",
@@ -174,6 +233,12 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	if err != nil || replayedStop.ID != stopObservation.ID || runtime.stopCalls != 1 {
 		t.Fatalf("exact Stop replay repeated or changed the Provider side effect: observation=%#v calls=%d err=%v",
 			replayedStop, runtime.stopCalls, err)
+	}
+	if _, _, _, _, err := providerController.ResumeTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_a6060606060606060606060606060606",
+		permissionRequest, principal,
+	); err == nil || runtime.resumeCalls != 2 {
+		t.Fatalf("Resume was accepted after Provider Stop: resumeCalls=%d err=%v", runtime.resumeCalls, err)
 	}
 	job, err = database.GetJob(ctx, jobID)
 	if err != nil {

@@ -202,9 +202,15 @@ func (i ProviderStopIntent) Validate(job Job) error {
 		}
 	}
 	for _, resume := range job.PlanningResumeIntents {
-		if resume.RoleExecutionID == i.RoleExecutionID && resume.ProviderSessionID == i.SessionID &&
-			resume.CreatedRevision >= i.CreatedRevision {
+		if resume.RoleExecutionID != i.RoleExecutionID || resume.ProviderSessionID != i.SessionID {
+			continue
+		}
+		if resume.CreatedRevision >= i.CreatedRevision {
 			return errors.New("Planning Resume intent was created after Provider Stop intent")
+		}
+		status, found := latestPlanningResumeStatus(job, i.RoleExecutionID, i.CreatedRevision)
+		if !found || status == "" || status == PlanningResumeUnknown {
+			return errors.New("Provider Stop cannot race an unresolved Resume for the same Session")
 		}
 	}
 	for _, turn := range job.TaskTurnIntents {

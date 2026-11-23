@@ -124,6 +124,9 @@ func NewTaskTurnIntent(
 	if providerStopIntentExists(job, execution.ID, sessionID, job.Revision+1) {
 		return TaskTurnIntent{}, errors.New("Task Turn cannot start after Provider Stop intent")
 	}
+	if status, found := latestPlanningResumeStatus(job, execution.ID, job.Revision+1); found && status != PlanningResumeAttached {
+		return TaskTurnIntent{}, errors.New("Task Turn requires the latest Provider Resume to be ATTACHED")
+	}
 
 	var count uint32
 	var tokensUsed uint64
@@ -220,6 +223,9 @@ func (t TaskTurnIntent) Validate(job Job) error {
 		!t.CreatedAt.Before(start.Deadline) || t.TurnNumber > permission.ReservedTurns ||
 		t.ReservedTokens > permission.ReservedTokens {
 		return errors.New("TaskTurnIntent does not follow accepted Start or exceeds permission bounds")
+	}
+	if status, found := latestPlanningResumeStatus(job, execution.ID, t.CreatedRevision); found && status != PlanningResumeAttached {
+		return errors.New("TaskTurnIntent was created before the latest Provider Resume was ATTACHED")
 	}
 	return nil
 }
