@@ -54,7 +54,7 @@ func newTaskProviderStopFixture(t *testing.T) taskProviderStopFixture {
 		t.Fatalf("NewJobContractController: %v", err)
 	}
 	plannerExecutionID := domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc")
-	revision, err := jobContracts.Propose(
+	_, revision, err := jobContracts.Propose(
 		ctx, jobID, plannerExecutionID, sourceResult.ID,
 		"cmd_90909090909090909090909090909090", principal,
 	)
