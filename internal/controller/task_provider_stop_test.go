@@ -382,4 +382,3 @@ func TestTaskProviderStopRetriesOnlyAfterRestartLookupConfirmsNotFound(t *testin
 			replayedIntent, observation, f.runtime.stopCalls, f.runtime.lookupCalls, err)
 	}
 }
-
