@@ -80,12 +80,12 @@ func NewProviderResultObservation(
 	if err := job.Validate(); err != nil {
 		return ProviderResultObservation{}, err
 	}
-	grant, _, err := providerResultUsageExecution(job, roleExecutionID)
+	authorizedPrincipalID, _, err := providerResultUsageExecution(job, roleExecutionID)
 	if err != nil {
 		return ProviderResultObservation{}, err
 	}
-	if grant.PrincipalID != principalID {
-		return ProviderResultObservation{}, errors.New("Provider Result Principal does not match PlanningAuthorization")
+	if authorizedPrincipalID != principalID {
+		return ProviderResultObservation{}, errors.New("Provider Result Principal does not match the approved execution authority")
 	}
 	now = now.UTC().Round(0)
 	if now.IsZero() || job.Revision >= uint64(^uint64(0)>>1) {
@@ -144,12 +144,12 @@ func NewProviderUsageObservation(
 	if err := job.Validate(); err != nil {
 		return ProviderUsageObservation{}, err
 	}
-	grant, _, err := providerResultUsageExecution(job, roleExecutionID)
+	authorizedPrincipalID, _, err := providerResultUsageExecution(job, roleExecutionID)
 	if err != nil {
 		return ProviderUsageObservation{}, err
 	}
-	if grant.PrincipalID != principalID {
-		return ProviderUsageObservation{}, errors.New("Provider Usage Principal does not match PlanningAuthorization")
+	if authorizedPrincipalID != principalID {
+		return ProviderUsageObservation{}, errors.New("Provider Usage Principal does not match the approved execution authority")
 	}
 	now = now.UTC().Round(0)
 	if now.IsZero() || job.Revision >= uint64(^uint64(0)>>1) {
@@ -201,7 +201,7 @@ func (o ProviderUsageObservation) Validate(job Job) error {
 	return nil
 }
 
-func providerResultUsageExecution(job Job, roleExecutionID string) (PlanningAuthorization, RoleExecution, error) {
+func providerResultUsageExecution(job Job, roleExecutionID string) (string, RoleExecution, error) {
 	var execution RoleExecution
 	foundExecution := false
 	for _, candidate := range job.RoleExecutions {
@@ -211,18 +211,42 @@ func providerResultUsageExecution(job Job, roleExecutionID string) (PlanningAuth
 		}
 	}
 	if !foundExecution {
-		return PlanningAuthorization{}, RoleExecution{}, errors.New("Provider observation RoleExecution was not found")
+		return "", RoleExecution{}, errors.New("Provider observation RoleExecution was not found")
 	}
-	for _, grant := range job.PlanningAuthorizations {
-		if grant.ID != execution.PlanningAuthorizationID {
-			continue
+	if execution.Role == RolePlanner && execution.TaskID == "" {
+		for _, grant := range job.PlanningAuthorizations {
+			if grant.ID != execution.PlanningAuthorizationID {
+				continue
+			}
+			if err := grant.Validate(job); err != nil {
+				return "", RoleExecution{}, err
+			}
+			return grant.PrincipalID, execution, nil
 		}
-		if err := grant.Validate(job); err != nil {
-			return PlanningAuthorization{}, RoleExecution{}, err
-		}
-		return grant, execution, nil
+		return "", RoleExecution{}, errors.New("Provider observation PlanningAuthorization was not found")
 	}
-	return PlanningAuthorization{}, RoleExecution{}, errors.New("Provider observation PlanningAuthorization was not found")
+	if execution.Role != RoleCoder || execution.TaskID == "" || execution.ExecutionPermissionID == "" {
+		return "", RoleExecution{}, errors.New("Provider Result / Usage requires a Planner or Task-bound Coder execution")
+	}
+	permission, found := executionPermissionByID(job, execution.ExecutionPermissionID)
+	if !found || permission.Role != RoleCoder || permission.TaskID != execution.TaskID || permission.Validate(job) != nil {
+		return "", RoleExecution{}, errors.New("Provider observation ExecutionPermission is invalid")
+	}
+	var revision *JobContractRevision
+	for i := range job.JobContractRevisions {
+		if job.JobContractRevisions[i].Revision == permission.ContractRevision {
+			revision = &job.JobContractRevisions[i]
+			break
+		}
+	}
+	approval, found := jobApprovalForRevision(job, permission.ContractRevision)
+	if revision == nil || !found || approval.ID != permission.JobApprovalID {
+		return "", RoleExecution{}, errors.New("Provider observation JobApproval is missing")
+	}
+	if err := approval.Validate(job, *revision); err != nil {
+		return "", RoleExecution{}, err
+	}
+	return approval.ApproverPrincipalID, execution, nil
 }
 
 func providerResultUsageBinding(job Job, roleExecutionID, operationID, turnID, sessionID string) (ProviderStartIntent, *ProviderStartObservation, uint64, time.Time, error) {
@@ -265,6 +289,21 @@ func providerResultUsageBinding(job Job, roleExecutionID, operationID, turnID, s
 		if turn.OperationID != operationID || turn.RoleExecutionID != roleExecutionID ||
 			turn.ProviderSessionID != sessionID || turn.CreatedRevision <= accepted.CreatedRevision {
 			return ProviderStartIntent{}, nil, 0, time.Time{}, errors.New("Provider observation does not match its Turn intent")
+		}
+		if turn.CreatedRevision > minimumRevision {
+			minimumRevision = turn.CreatedRevision
+			minimumTime = turn.CreatedAt
+		}
+		return start, accepted, minimumRevision, minimumTime, nil
+	}
+	for _, turn := range job.TaskTurnIntents {
+		if turn.ID != turnID {
+			continue
+		}
+		if turn.OperationID != operationID || turn.RoleExecutionID != roleExecutionID ||
+			turn.ProviderSessionID != sessionID || turn.CreatedRevision <= accepted.CreatedRevision ||
+			turn.Validate(job) != nil {
+			return ProviderStartIntent{}, nil, 0, time.Time{}, errors.New("Provider observation does not match its Task Turn intent")
 		}
 		if turn.CreatedRevision > minimumRevision {
 			minimumRevision = turn.CreatedRevision

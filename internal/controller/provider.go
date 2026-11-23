@@ -25,6 +25,8 @@ type ProviderExecutionStore interface {
 	AddProviderResultObservation(context.Context, string, uint64, string, string, string, string, string, string, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderResultObservation, error)
 	AddProviderUsageObservation(context.Context, string, uint64, string, string, string, string, string, uint64, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderUsageObservation, error)
 	AddTaskProviderStartObservation(context.Context, string, uint64, string, string, string, string, string, string, bool) (store.CommandReceipt, domain.ProviderStartObservation, error)
+	AddTaskTurnIntent(context.Context, string, uint64, string, string, string, string, string, uint64) (store.CommandReceipt, domain.TaskTurnIntent, error)
+	AddTaskTurnObservation(context.Context, string, uint64, string, string, string, uint64, string, bool) (store.CommandReceipt, domain.TaskTurnObservation, error)
 }
 
 type PlanningProviderRuntime interface {

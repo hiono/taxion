@@ -295,6 +295,30 @@ func (o TaskTurnObservation) Validate(job Job, turn TaskTurnIntent) error {
 		o.TokensUsed > turn.ReservedTokens || !validSHA256(o.EvidenceSHA256) {
 		return errors.New("terminal TaskTurnObservation status, usage, or evidence is invalid")
 	}
+	var finalResult *ProviderResultObservation
+	for i := range job.ProviderResultObservations {
+		result := &job.ProviderResultObservations[i]
+		if result.RoleExecutionID == turn.RoleExecutionID && result.OperationID == turn.OperationID &&
+			result.TurnID == turn.ID && result.SessionID == turn.ProviderSessionID && result.Final &&
+			(finalResult == nil || result.CreatedRevision > finalResult.CreatedRevision) {
+			finalResult = result
+		}
+	}
+	var completeUsage *ProviderUsageObservation
+	for i := range job.ProviderUsageObservations {
+		usage := &job.ProviderUsageObservations[i]
+		if usage.RoleExecutionID == turn.RoleExecutionID && usage.OperationID == turn.OperationID &&
+			usage.TurnID == turn.ID && usage.SessionID == turn.ProviderSessionID &&
+			(completeUsage == nil || usage.CreatedRevision > completeUsage.CreatedRevision) {
+			completeUsage = usage
+		}
+	}
+	if finalResult == nil || completeUsage == nil || !completeUsage.Complete ||
+		completeUsage.Tokens != o.TokensUsed || o.CreatedRevision <= finalResult.CreatedRevision ||
+		o.CreatedRevision <= completeUsage.CreatedRevision || o.CreatedAt.Before(finalResult.CreatedAt) ||
+		o.CreatedAt.Before(completeUsage.CreatedAt) {
+		return errors.New("terminal TaskTurnObservation requires prior final Result and matching complete Usage")
+	}
 	return nil
 }
 

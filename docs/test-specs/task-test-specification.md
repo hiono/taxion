@@ -51,3 +51,8 @@
 | TK-047 | Turn budget | Cumulative observed tokens plus new reservation exceeds permission | Reject without mutation |
 | TK-048 | UNKNOWN reconciliation | First observation UNKNOWN, then terminal evidence for same Turn | Append terminal observation with ReconcilesUnknown; reject blind replay |
 | TK-049 | Restart restoration | TaskTurn facts are persisted and Store is reopened | Restore exact facts and preserve aggregate validation |
+| TK-050 | Task Provider Send intent-first | ACTIVE Job、accepted Coder Start、current ExecutionPermission、safe Send capability | Persist one TaskTurnIntent and receipt before calling Provider Send |
+| TK-051 | UNKNOWN Send reconciliation | Existing TaskTurn is UNKNOWN after timeout or process interruption | Lookup the same OperationID / TurnID first; retry only with verified Send idempotency and the exact same identity |
+| TK-052 | Terminal Result and Usage ordering | Provider reports COMPLETED / FAILED | Persist final Result and matching complete Usage before terminal TaskTurnObservation; keep UNKNOWN if either is absent, partial, or mismatched |
+| TK-053 | Task Provider authority | Caller supplies another Task, permission, JobApproval, Session, or Provider identity | Reject before Provider side effect or observation mutation |
+| TK-054 | Worktree revalidation before Send | Worktree assignment or physical Worktree changes during pre-dispatch checks | Re-read authority and assignment, reverify the exact Worktree immediately before Send, and reject without Provider Send |

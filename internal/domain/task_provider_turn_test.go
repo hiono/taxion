@@ -113,8 +113,31 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 		"cmd_d9090909090909090909090909090909", strings.Repeat("2", 64), 1, now.Add(2*time.Minute)); err == nil {
 		t.Fatal("new Turn started while prior Turn UNKNOWN")
 	}
+	if _, err := NewTaskTurnObservation(job, turn.ID, "cmd_da0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+		TaskTurnCompleted, 75, strings.Repeat("3", 64), true, now.Add(2*time.Minute)); err == nil {
+		t.Fatal("terminal Task Turn was accepted without final Result and complete Usage")
+	}
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	content := "completed Task Coder output"
+	contentSHA := sha256HexDomain(content)
+	result, err := NewProviderResultObservation(job, execution.ID, principalID, turn.OperationID, turn.ID,
+		turn.ProviderSessionID, content, contentSHA, true, strings.Repeat("6", 64), now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("create final Task Result: %v", err)
+	}
+	job.ProviderResultObservations = append(job.ProviderResultObservations, result)
+	job.Revision++
+	job.UpdatedAt = result.CreatedAt
+	usage, err := NewProviderUsageObservation(job, execution.ID, principalID, turn.OperationID, turn.ID,
+		turn.ProviderSessionID, "usage_task_turn", 75, true, strings.Repeat("7", 64), now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatalf("create complete Task Usage: %v", err)
+	}
+	job.ProviderUsageObservations = append(job.ProviderUsageObservations, usage)
+	job.Revision++
+	job.UpdatedAt = usage.CreatedAt
 	completed, err := NewTaskTurnObservation(job, turn.ID, "cmd_da0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
-		TaskTurnCompleted, 75, strings.Repeat("3", 64), true, now.Add(2*time.Minute))
+		TaskTurnCompleted, 75, strings.Repeat("3", 64), true, now.Add(4*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
