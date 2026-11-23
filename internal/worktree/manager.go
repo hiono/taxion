@@ -187,7 +187,7 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 	if err != nil || !validCommit(commit) {
 		return OutputSnapshot{}, errors.New("Task output commit identity is invalid")
 	}
-	tree, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", "HEAD^{tree}")
+	tree, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", commit+"^{tree}")
 	if err != nil || !validCommit(tree) {
 		return OutputSnapshot{}, errors.New("Task output tree identity is invalid")
 	}

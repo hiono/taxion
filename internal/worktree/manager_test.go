@@ -123,7 +123,7 @@ func TestManagerCapturesImmutableOutputSnapshotOnlyForCleanWorktree(t *testing.T
 	if got := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", "HEAD"); first.CommitSHA != got {
 		t.Fatalf("captured commit = %s, want %s", first.CommitSHA, got)
 	}
-	if got := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", "HEAD^{tree}"); first.TreeSHA != got {
+	if got := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", first.CommitSHA+"^{tree}"); first.TreeSHA != got {
 		t.Fatalf("captured tree = %s, want %s", first.TreeSHA, got)
 	}
 
