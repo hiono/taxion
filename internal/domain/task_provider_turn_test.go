@@ -144,6 +144,14 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.TaskTurnObservations = append(job.TaskTurnObservations, completed)
 	job.Revision++
 	job.UpdatedAt = completed.CreatedAt
+	if _, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_db0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", strings.Repeat("4", 64), 26, now.Add(3*time.Minute)); err == nil {
+		t.Fatal("Turn exceeded remaining token budget")
+	}
+	if _, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_dc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c", strings.Repeat("5", 64), 25, now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("Turn at remaining budget rejected: %v", err)
+	}
 	principalID = job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
 	stopIntent, err := NewProviderStopIntent(job, execution.ID, principalID, turn.ProviderSessionID,
 		"cmd_d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1", ProviderStopReasonTaskComplete, now.Add(5*time.Minute))
@@ -171,13 +179,5 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.UpdatedAt = output.CreatedAt
 	if err := job.Validate(); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
-		"cmd_db0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", strings.Repeat("4", 64), 26, now.Add(3*time.Minute)); err == nil {
-		t.Fatal("Turn exceeded remaining token budget")
-	}
-	if _, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
-		"cmd_dc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c", strings.Repeat("5", 64), 25, now.Add(3*time.Minute)); err != nil {
-		t.Fatalf("Turn at remaining budget rejected: %v", err)
 	}
 }
