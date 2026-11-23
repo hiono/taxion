@@ -396,7 +396,7 @@ func TestTaskProviderStopLookupRecoveryDoesNotRequireStopProof(t *testing.T) {
 	f.runtime.capabilities.StopProof = false
 	f.runtime.lookupResult = provider.LookupResult{
 		Found: true, OperationID: intent.OperationID, SessionID: intent.SessionID,
-		Status: "STOPPED", Stopped: true, Quiescent: true, EvidenceSHA256: strings.Repeat("9", 64),
+		Status: "STOPPED", ReceiptID: "receipt_stop", Stopped: true, Quiescent: true, EvidenceSHA256: strings.Repeat("9", 64),
 	}
 	_, replayedIntent, stopped, err := f.stop(commandID, domain.ProviderStopReasonTaskComplete)
 	if err != nil || replayedIntent.ID != intent.ID || !stopped.Stopped || !stopped.Quiescent || f.runtime.stopCalls != 1 {
