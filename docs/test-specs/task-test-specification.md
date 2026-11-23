@@ -56,3 +56,8 @@
 | TK-052 | Terminal Result and Usage ordering | Provider reports COMPLETED / FAILED | Persist final Result and matching complete Usage before terminal TaskTurnObservation; keep UNKNOWN if either is absent, partial, or mismatched |
 | TK-053 | Task Provider authority | Caller supplies another Task, permission, JobApproval, Session, or Provider identity | Reject before Provider side effect or observation mutation |
 | TK-054 | Worktree revalidation before Send | Worktree assignment or physical Worktree changes during pre-dispatch checks | Re-read authority and assignment, reverify the exact Worktree immediately before Send, and reject without Provider Send |
+| TK-055 | Task Coder Stop authority and evidence | ACTIVE Job、accepted Coder Session、matching JobApproval / ExecutionPermission、E4 StopProof | Persist Stop intent before Runtime.Stop and append only matching Stopped / Quiescent evidence |
+| TK-056 | Task Coder Stop revalidation | Principal、permission、Session、Worktree ownerまたは物理Worktreeが不一致 | Reject before Provider Stop; do not append a terminal observation |
+| TK-057 | Stop capability evidence | StopProof capability missing or below E4 | Reject before Provider Stop |
+| TK-058 | UNKNOWN Stop replay | Existing Stop intent has UNKNOWN or no observation | Reuse the same intent, persist / retain UNKNOWN, and do not call Runtime.Stop again |
+| TK-059 | Turn after Stop | TaskTurnIntent is created after the same Coder Session Stop intent | Reject without Job mutation |

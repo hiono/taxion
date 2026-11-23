@@ -1,6 +1,6 @@
 # Task Requirements
 
-Version: 1.1
+Version: 1.2
 Date: 2026-11-23
 Governing ADRs: ADR-200, ADR-201, ADR-202, ADR-400, ADR-408, ADR-500
 Governing contract: [Product Contract](product-contract.md)
@@ -80,7 +80,17 @@ Task creationはWorktree、ExecutionPermission、RoleExecution、Provider operat
 - COMPLETED / FAILED observationはfinal ResultとComplete Usageの保存後にのみ追加します。Result欠落、partial Usage、identity mismatchではUNKNOWNを維持します。
 - Reviewer Turnはimmutable read-only snapshot境界が成立するまで拒否します。
 
-## 8. References
+## 8. Task-bound Coder Provider Stop
+
+- Stopは同一ACTIVE JobのTask-bound Coder RoleExecutionとaccepted Provider Sessionに限定します。権限根拠は当該ExecutionPermissionとJobApprovalです。
+- Stop intentとCommand receiptを外部Provider呼出しより先にJobAggregateへappendします。
+- Stop直前にPrincipal、JobApproval、Task、ExecutionPermission、Provider identity、accepted Session、Worktree assignment owner、および物理Worktreeを再検証します。
+- Provider / SDK / configuration identityに束縛されたStop proof capabilityのE4以上の証拠を要求します。
+- UNKNOWNまたはObservation欠落後は同じStop operationをblind replayしません。既存intentを照合し、未確定状態をUNKNOWNとして保持します。
+- terminal Stop observationはProvider固有の証拠がStoppedかつQuiescentを示す場合だけ記録します。Stop intent後の追加Coder Turnを拒否します。
+- StopはTaskTurnのResult / Usageを代替しません。Stopが確定しても未解決TurnやWorktreeを解放しません。
+
+## 9. References
 
 - ADR-201: JobAggregate / Task / RoleExecution boundary
 - ADR-202: invariants across create / persist / restore

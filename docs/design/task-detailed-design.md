@@ -60,7 +60,17 @@ Task CoderのTurnはPlanningTurnと別のappend-only factsとして管理しま�
 - TaskTurnObservationはUNKNOWN / COMPLETED / FAILEDをappend-onlyで記録します。UNKNOWNは同一Turnのterminal evidenceだけで解消します。
 - Terminal observationはfinal ResultとComplete Usageの保存後にのみ追加します。Provider Sendの受理だけでTurn完了としません。
 
-## 7. Non-goals
+## 7. Task-bound Coder Provider Stop
+
+Provider Stopは既存のJobAggregate ProviderStopIntent / ProviderStopObservationをTask Coderにも適用します。PlannerのPlanningAuthorizationをCoderへ流用せず、TaskのExecutionPermissionと対応するJobApprovalからPrincipal / Provider identityを導出します。
+
+ControllerはACTIVE Job、Coder RoleExecution、Task、ExecutionPermission、JobApproval、accepted Start Sessionを照合し、trusted Worktree verifierでassignment ownerと物理Worktreeを検証します。Stop proof capabilityはProvider identityに束縛されたE4以上の証拠を要求します。
+
+Stop intentとreceiptを保存した後、Job authority / Worktreeを再読込してからRuntime.Stopを呼び出します。Stop intentの再送時は既存Observationを返し、Observationがない場合はUNKNOWNを記録して外部Stopを再呼出ししません。Provider固有のStopped / Quiescent証拠が揃った場合だけterminal observationを追加します。
+
+Stop intentより後のTaskTurnIntentをJob validationで拒否します。Stop observationはTaskTurnのfinal Result / complete Usageを生成せず、Worktree releaseやRole handoffも許可しません。停止と成果照合が別々に完了するまでWorktreeを保持します。
+
+## 8. Non-goals
 
 - Task status / progress state machine
 - Worktree ownership handoff / quarantine / release
