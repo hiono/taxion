@@ -179,8 +179,10 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		permissionRequest, principal,
 	)
 	if err != nil || resumedIntent.ID != resumeIntent.ID || resumedIntent.OperationID != resumeIntent.OperationID ||
+		resumedIntent.TaskID != task.ID || resumedIntent.ExecutionPermissionID != permission.ID ||
 		resumedIntent.ProviderSessionID != turn.ProviderSessionID || attachedResume.Status != domain.PlanningResumeAttached ||
-		!resumeResult.Attached || resumeResult.SessionID != turn.ProviderSessionID || runtime.resumeCalls != 2 {
+		!resumeResult.Attached || resumeResult.OperationID != resumedIntent.OperationID ||
+		resumeResult.SessionID != turn.ProviderSessionID || runtime.resumeCalls != 2 {
 		t.Fatalf("same-Session Task Resume did not reconcile to ATTACHED: intent=%#v observation=%#v result=%#v calls=%d err=%v",
 			resumedIntent, attachedResume, resumeResult, runtime.resumeCalls, err)
 	}
