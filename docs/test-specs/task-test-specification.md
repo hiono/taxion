@@ -61,3 +61,11 @@
 | TK-057 | Stop capability evidence | StopProof capability missing or below E4 | Reject before Provider Stop |
 | TK-058 | UNKNOWN Stop replay | Existing Stop intent has UNKNOWN or no observation | Reuse the same intent, persist / retain UNKNOWN, and do not call Runtime.Stop again |
 | TK-059 | Turn after Stop | TaskTurnIntent is created after the same Coder Session Stop intent | Reject without Job mutation |
+| TK-060 | Task Coder Resume authority | ACTIVE Job、matching JobApproval / ExecutionPermission、accepted Task Coder Session | Append Task-bound Resume intent with TaskID / ExecutionPermissionID and same Session |
+| TK-061 | Session identity preservation | Resume request supplies another Session or mismatched Start identity | Reject; never replace the RoleExecution's persisted Session |
+| TK-062 | Durable reattachment evidence | SessionReattach capability missing, wrong identity, or below E5 | Reject before Runtime.Resume |
+| TK-063 | Intent-first Resume and Worktree | Resume is requested after process interruption | Persist intent / receipt first; revalidate permission and physical Worktree immediately before Runtime.Resume |
+| TK-064 | UNKNOWN Resume reconciliation | Runtime.Resume times out or process stops after intent commit | Retry / reconcile the same Resume OperationID and Session; append terminal evidence only for that intent |
+| TK-065 | Turn gate after Resume | Latest Resume observation is absent, UNKNOWN, or FAILED | Reject a new TaskTurnIntent; allow only after ATTACHED |
+| TK-066 | Expired or stale authority | JobApproval, ExecutionPermission, JobContract revision, or deadline is no longer current | Reject before Resume side effect |
+| TK-067 | Resume after Stop | Same RoleExecution / Session has a ProviderStopIntent | Reject without Runtime.Resume or new Session |

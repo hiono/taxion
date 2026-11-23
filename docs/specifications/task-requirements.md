@@ -1,6 +1,6 @@
 # Task Requirements
 
-Version: 1.2
+Version: 1.3
 Date: 2026-11-23
 Governing ADRs: ADR-200, ADR-201, ADR-202, ADR-400, ADR-408, ADR-500
 Governing contract: [Product Contract](product-contract.md)
@@ -90,7 +90,17 @@ Task creationはWorktree、ExecutionPermission、RoleExecution、Provider operat
 - terminal Stop observationはProvider固有の証拠がStoppedかつQuiescentを示す場合だけ記録します。Stop intent後の追加Coder Turnを拒否します。
 - StopはTaskTurnのResult / Usageを代替しません。Stopが確定しても未解決TurnやWorktreeを解放しません。
 
-## 9. References
+## 9. Task-bound Coder Provider Resume
+
+- Resumeは同じACTIVE JobのTask-bound Coder RoleExecution、同じExecutionPermission / JobApproval、同じaccepted Provider Sessionに限定します。新しいSessionを同じRoleExecutionへ付け替えません。
+- Resume intent / Command receiptをRuntime.Resumeより先にJobAggregateへappendします。Resume intentはTaskID / ExecutionPermissionID / Provider identity / Session / capability evidenceへ束縛します。
+- Provider / SDK / configuration identityに束縛されたcross-process Session reattachment capabilityのE5証拠を要求します。未対応・未検証の場合はResumeを拒否します。
+- Runtime.Resume直前にJobApproval、ExecutionPermission、Task、Provider identity、accepted Session、Worktree assignment owner、物理Worktreeを再検証します。
+- UNKNOWNまたはObservation欠落時は同じResume OperationID / Sessionを照合し、別OperationIDや新Sessionによるblind retryを禁止します。
+- latest Resume observationがATTACHEDでない場合、次のTaskTurnを拒否します。UNKNOWN / FAILEDを成功へ推測変換しません。
+- Provider Stop intentが存在するSessionはResumeできません。Stop proof、final Result、Usage、Worktree ownershipを照合するまで同じJobの安全な継続を許可しません。
+
+## 10. References
 
 - ADR-201: JobAggregate / Task / RoleExecution boundary
 - ADR-202: invariants across create / persist / restore

@@ -102,7 +102,7 @@ func (c *ProviderController) StopTaskExecution(
 	if stopErr != nil {
 		if providerOperationMayHaveStarted(stopErr) {
 			observation, persistErr := c.persistProviderStopObservation(
-				ctx, latest, intent, principal, false, false, "", false,
+				ctx, jobID, intent, principal, false, false, "", false,
 			)
 			if persistErr != nil {
 				return intentReceipt, intent, observation, errors.Join(stopErr, persistErr)
@@ -111,7 +111,7 @@ func (c *ProviderController) StopTaskExecution(
 		}
 		if evidence, definitive := providerStopDefinitiveFailureEvidence(intent.OperationID, stopErr); definitive {
 			observation, persistErr := c.persistProviderStopObservation(
-				ctx, latest, intent, principal, false, false, evidence, false,
+				ctx, jobID, intent, principal, false, false, evidence, false,
 			)
 			if persistErr != nil {
 				return intentReceipt, intent, observation, errors.Join(stopErr, persistErr)
@@ -123,7 +123,7 @@ func (c *ProviderController) StopTaskExecution(
 	if stopResult.OperationID != intent.OperationID || stopResult.SessionID != sessionID ||
 		!stopResult.Stopped || !stopResult.Quiescent || !validProviderEvidenceSHA256(stopResult.EvidenceSHA256) {
 		observation, persistErr := c.persistProviderStopObservation(
-			ctx, latest, intent, principal, false, false, "", false,
+			ctx, jobID, intent, principal, false, false, "", false,
 		)
 		if persistErr != nil {
 			return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
@@ -131,7 +131,7 @@ func (c *ProviderController) StopTaskExecution(
 		return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
 	}
 	observation, err := c.persistProviderStopObservation(
-		ctx, latest, intent, principal, true, true, stopResult.EvidenceSHA256, false,
+		ctx, jobID, intent, principal, true, true, stopResult.EvidenceSHA256, false,
 	)
 	return intentReceipt, intent, observation, err
 }

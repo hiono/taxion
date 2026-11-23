@@ -70,7 +70,17 @@ Stop intentとreceiptを保存した後、Job authority / Worktreeを再読込�
 
 Stop intentより後のTaskTurnIntentをJob validationで拒否します。Stop observationはTaskTurnのfinal Result / complete Usageを生成せず、Worktree releaseやRole handoffも許可しません。停止と成果照合が別々に完了するまでWorktreeを保持します。
 
-## 8. Non-goals
+## 8. Task-bound Coder Provider Resume
+
+PlanningResumeIntent / PlanningResumeObservationをPlannerとTask Coderの共通Provider Resume factsとして使用します。Task Coder intentにはTaskID / ExecutionPermissionIDを保存し、PlanningAuthorizationを権限根拠として使用しません。
+
+ControllerはtaskProviderExecutionTargetでACTIVE Job、JobApproval、ExecutionPermission、Coder RoleExecution、Task、accepted Start Session、Provider identityを照合します。Resume intent / receiptをcommitした後、同じauthorityとWorktree assignmentを再読込し、trusted verifierで物理Worktreeを再検証してからRuntime.Resumeを呼び出します。
+
+Resume capabilityはProvider / SDK / configuration identityに束縛されたE5 SessionReattach evidenceを要求します。Resume requestはpersisted Session IDと同じOperationIDを使用します。UNKNOWN / Observation欠落後は同一intentを再利用し、別Sessionを作成しません。terminal Attached observationが保存されるまでTaskTurnの新規作成を拒否します。
+
+TaskTurnIntentの作成・復元検証は、同一RoleExecutionのlatest PlanningResume statusを参照します。Resume intentが存在しObservation未着、UNKNOWN、FAILEDの場合はTurnを拒否し、ATTACHEDだけを許可します。Provider Stop intentが先行するSessionはResumeできません。
+
+## 9. Non-goals
 
 - Task status / progress state machine
 - Worktree ownership handoff / quarantine / release
