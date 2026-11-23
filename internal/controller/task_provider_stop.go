@@ -44,8 +44,7 @@ func (c *ProviderController) StopTaskExecution(
 	if err != nil {
 		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, err
 	}
-	if capabilities.Identity != identity ||
-		!capabilities.HasEvidenceAtLeast(provider.CapabilityStopProof, provider.EvidenceLive) {
+	if capabilities.Identity != identity {
 		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, provider.ErrUnsupportedCapability
 	}
 	existingStopIntent := false
@@ -54,6 +53,9 @@ func (c *ProviderController) StopTaskExecution(
 			existingStopIntent = true
 			break
 		}
+	}
+	if !existingStopIntent && !capabilities.HasEvidenceAtLeast(provider.CapabilityStopProof, provider.EvidenceLive) {
+		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, provider.ErrUnsupportedCapability
 	}
 	intentReceipt, intent, err := c.store.AddProviderStopIntent(
 		ctx, jobID, job.Revision, roleExecutionID, sessionID, commandID, reason, principal,
@@ -64,6 +66,13 @@ func (c *ProviderController) StopTaskExecution(
 	currentJob, err := c.store.GetJob(ctx, jobID)
 	if err != nil {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, err
+	}
+	existingStopIntent = false
+	for _, existing := range currentJob.ProviderStopIntents {
+		if existing.CommandID == commandID && existing.RoleExecutionID == execution.ID {
+			existingStopIntent = true
+			break
+		}
 	}
 	previous, hasPrevious := latestProviderStopObservation(currentJob, intent.OperationID)
 	if hasPrevious && previous.Quiescent {
@@ -83,7 +92,7 @@ func (c *ProviderController) StopTaskExecution(
 			return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
 		}
 
-		lookupRequest := provider.LookupRequest{OperationID: intent.OperationID, SessionID: sessionID}
+		lookupRequest := provider.LookupRequest{Purpose: provider.LookupPurposeStop, OperationID: intent.OperationID, SessionID: sessionID}
 		lookup, lookupErr := c.runtime.Lookup(ctx, lookupRequest)
 		if lookupErr != nil || lookup.Validate(lookupRequest) != nil {
 			if hasPrevious {
@@ -134,6 +143,9 @@ func (c *ProviderController) StopTaskExecution(
 	}
 	if err := c.worktreeVerifier.Verify(ctx, latest.ID, currentTask, currentAssignment.Snapshot()); err != nil {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, fmt.Errorf("reverify owned Task Worktree immediately before Stop: %w", err)
+	}
+	if !capabilities.HasEvidenceAtLeast(provider.CapabilityStopProof, provider.EvidenceLive) {
+		return intentReceipt, intent, domain.ProviderStopObservation{}, provider.ErrUnsupportedCapability
 	}
 
 	stopResult, stopErr := c.runtime.Stop(ctx, provider.StopRequest{

@@ -251,8 +251,15 @@ func (r *Runtime) Lookup(ctx context.Context, request LookupRequest) (LookupResu
 		return LookupResult{}, err
 	}
 	capability := CapabilityStartLookup
-	if request.TurnID != "" {
+	switch request.Purpose {
+	case LookupPurposeStop:
+		capability = CapabilityStopLookup
+	case LookupPurposeTurn:
 		capability = CapabilitySendLookup
+	default:
+		if request.TurnID != "" {
+			capability = CapabilitySendLookup
+		}
 	}
 	if !capabilities.HasEvidenceAtLeast(capability, r.minimumEvidence) {
 		return LookupResult{}, ErrUnsupportedCapability

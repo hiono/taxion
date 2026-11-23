@@ -231,6 +231,8 @@ func newTestAdapter(capabilities ...Capability) *testAdapter {
 			declaration.EventReplay = true
 		case CapabilityStopProof:
 			declaration.StopProof = true
+		case CapabilityStopLookup:
+			declaration.StopLookup = true
 		case CapabilityReviewerReadOnlySnapshot:
 			declaration.ReviewerReadOnlySnapshot = true
 		case CapabilityFinalOutput:
@@ -740,5 +742,27 @@ func TestWithCredentialReportsAcquireAndLeaseCleanupFailureWithoutCallingProvide
 	}
 	if strings.Contains(err.Error(), "raw lease cleanup detail") {
 		t.Fatal("raw credential cleanup error escaped")
+	}
+}
+
+
+func TestRuntimeStopLookupUsesDedicatedCapability(t *testing.T) {
+	adapter := newTestAdapter(CapabilityStopLookup)
+	adapter.lookupResult = LookupResult{
+		Status: LookupStatusNotFound, EvidenceSHA256: strings.Repeat("e", 64),
+	}
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	result, err := runtime.Lookup(context.Background(), LookupRequest{
+		Purpose: LookupPurposeStop, OperationID: "provider_stop_1", SessionID: "session_1",
+	})
+	if err != nil {
+		t.Fatalf("Stop Lookup without StartLookup: %v", err)
+	}
+	if result.Found || result.Status != LookupStatusNotFound || adapter.lookupCalls != 1 || broker.closed != 1 {
+		t.Fatalf("Stop Lookup result / calls: %#v adapter=%d closed=%d", result, adapter.lookupCalls, broker.closed)
 	}
 }

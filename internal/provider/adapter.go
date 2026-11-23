@@ -458,7 +458,16 @@ type ResumeResult struct {
 	EvidenceSHA256 string
 }
 
+type LookupPurpose string
+
+const (
+	LookupPurposeStart LookupPurpose = "START"
+	LookupPurposeTurn  LookupPurpose = "TURN"
+	LookupPurposeStop  LookupPurpose = "STOP"
+)
+
 type LookupRequest struct {
+	Purpose     LookupPurpose
 	OperationID string
 	SessionID   string
 	TurnID      string
@@ -469,6 +478,23 @@ func (r LookupRequest) Validate() error {
 		(r.SessionID != "" && !validIdentifier(r.SessionID)) ||
 		(r.TurnID != "" && (!validIdentifier(r.TurnID) || !validIdentifier(r.SessionID))) {
 		return errors.New("Provider Lookup request identity is invalid")
+	}
+	switch r.Purpose {
+	case "":
+	case LookupPurposeStart:
+		if r.TurnID != "" {
+			return errors.New("Provider Start Lookup cannot include a Turn identity")
+		}
+	case LookupPurposeTurn:
+		if r.SessionID == "" || r.TurnID == "" {
+			return errors.New("Provider Turn Lookup requires Session and Turn identities")
+		}
+	case LookupPurposeStop:
+		if r.SessionID == "" || r.TurnID != "" {
+			return errors.New("Provider Stop Lookup requires a Session identity and no Turn identity")
+		}
+	default:
+		return errors.New("Provider Lookup purpose is invalid")
 	}
 	return nil
 }

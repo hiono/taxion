@@ -114,12 +114,13 @@ func newTaskProviderStopFixture(t *testing.T) taskProviderStopFixture {
 	runtime := &fakePlanningProviderRuntime{identity: identity}
 	runtime.capabilities = provider.Capabilities{
 		Identity: identity, StartLookup: true, StartIdempotency: true,
-		TaskWorktree: true, StopProof: true,
+		TaskWorktree: true, StopProof: true, StopLookup: true,
 		Evidence: []provider.CapabilityEvidence{
 			{Capability: provider.CapabilityStartLookup, Identity: identity, TestID: "task-stop-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityStartIdempotency, Identity: identity, TestID: "task-stop-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityTaskWorktree, Identity: identity, TestID: "task-stop-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityStopProof, Identity: identity, TestID: "task-stop-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilityStopLookup, Identity: identity, TestID: "task-stop-test", EvidenceSHA256: strings.Repeat("f", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		},
 	}
 	runtime.lookupResult = provider.LookupResult{
@@ -380,5 +381,27 @@ func TestTaskProviderStopRetriesOnlyAfterRestartLookupConfirmsNotFound(t *testin
 		!observation.Quiescent || f.runtime.stopCalls != 1 || f.runtime.lookupCalls != 2 {
 		t.Fatalf("restart did not retry the original Stop after confirmed NOT_FOUND: intent=%#v observation=%#v stopCalls=%d lookupCalls=%d err=%v",
 			replayedIntent, observation, f.runtime.stopCalls, f.runtime.lookupCalls, err)
+	}
+}
+
+
+func TestTaskProviderStopLookupRecoveryDoesNotRequireStopProof(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	commandID := "cmd_12121212121212121212121212121212"
+	f.runtime.stopErr = &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout}
+	_, intent, unknown, err := f.stop(commandID, domain.ProviderStopReasonTaskComplete)
+	if err == nil || !providerStopObservationUnknown(unknown) || f.runtime.stopCalls != 1 {
+		t.Fatalf("initial ambiguous Stop was not retained: observation=%#v calls=%d err=%v", unknown, f.runtime.stopCalls, err)
+	}
+	f.runtime.stopErr = nil
+	f.runtime.capabilities.StopProof = false
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: true, OperationID: intent.OperationID, SessionID: intent.SessionID,
+		Status: "STOPPED", Stopped: true, Quiescent: true, EvidenceSHA256: strings.Repeat("9", 64),
+	}
+	_, replayedIntent, stopped, err := f.stop(commandID, domain.ProviderStopReasonTaskComplete)
+	if err != nil || replayedIntent.ID != intent.ID || !stopped.Stopped || !stopped.Quiescent || f.runtime.stopCalls != 1 {
+		t.Fatalf("Stop Lookup recovery incorrectly required StopProof or repeated Stop: intent=%#v observation=%#v calls=%d err=%v",
+			replayedIntent, stopped, f.runtime.stopCalls, err)
 	}
 }
