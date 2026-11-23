@@ -150,4 +150,4 @@ Provider SDK / credential / capability / operation / recoveryの境界実装は[
 
 ## 8. Traceability
 
-ADR-200 Domain Model、ADR-201 JobAggregate / Command、ADR-202 invariant enforcement、ADR-300 Collaboration、ADR-301 JobMessage、ADR-400 Execution & Runtime、ADR-408 Worktree、ADR-500 authorization、ADR-501 Trusted Ingress / HUMAN Principal、ADR-700 Interface & Integration、ADR-701 A2A、ADR-800 Evidence / acceptanceを具体化する。
+ADR-200 Domain Model、ADR-201 JobAggregate / Command、ADR-202 invariant enforcement、ADR-300 Collaboration、ADR-301 JobMessage、ADR-400 Execution & Runtime、ADR-408 Worktree、ADR-409 Provider operation、ADR-501 Trusted Ingress / HUMAN Principal、ADR-504 JobApproval、ADR-505 PlanningAuthorization、ADR-506 JobQuestionAuthorization、ADR-507 Execution Permission、ADR-700 Interface & Integration、ADR-701 A2A、ADR-801 Evidence、ADR-802 Job completionを具体化する。

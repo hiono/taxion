@@ -3,7 +3,7 @@
 Version: 1.0
 Date: 2026-11-20
 Governing contract: [Product Contract](../specifications/product-contract.md)
-Governing ADRs: ADR-001, ADR-100, ADR-101, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-500, ADR-501, ADR-502, ADR-700, ADR-701, ADR-800, ADR-811
+Governing ADRs: ADR-001, ADR-100, ADR-101, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-409, ADR-500, ADR-501, ADR-502, ADR-503, ADR-504, ADR-505, ADR-506, ADR-507, ADR-700, ADR-701, ADR-800, ADR-801, ADR-802, ADR-811
 Detailed Provider Adapter tests: [Provider Adapter テスト仕様書](provider-adapter-test-specification.md)
 
 ## 1. Purpose

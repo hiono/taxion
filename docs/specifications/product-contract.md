@@ -2,7 +2,7 @@
 
 Version: 1.0
 Date: 2026-11-20
-Normative decisions: ADR-001, ADR-100, ADR-101, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-500, ADR-501, ADR-502, ADR-700, ADR-701, ADR-800, ADR-811
+Normative decisions: ADR-001, ADR-100, ADR-101, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-409, ADR-500, ADR-501, ADR-502, ADR-503, ADR-504, ADR-505, ADR-506, ADR-507, ADR-700, ADR-701, ADR-800, ADR-801, ADR-802, ADR-811
 
 ## 1. Purpose and scope
 
@@ -202,7 +202,7 @@ Observation、Conformance、Admission、Execution Permissionは別の責務と�
 
 ## 8. Agent Harness capability contract
 
-Agent Harnessの必須能力H1〜H8と各判定項目は [ADR-811](../adr/811-agent-harness-eight-capabilities.md) に従います。製品実装はModel / Tool loop、Computer Sandbox、独立Sub-agent、Context選択・圧縮、Job再開、Credential / Effect guardrails、独立Verification、Model / Tool observabilityを満たします。
+Agent Harnessの必須能力H1〜H8と各判定項目は本節およびProduct Acceptanceで定義します。ADR-811は、これらの能力要求を製品契約として維持する判断を記録します。製品実装はModel / Tool loop、Computer Sandbox、独立Sub-agent、Context選択・圧縮、Job再開、Credential / Effect guardrails、独立Verification、Model / Tool observabilityを満たします。
 
 Provider / Runtimeへの委譲は許容しますが、APIの存在やProviderの自己申告だけで能力充足と判定しません。対応構成、実行証拠、失敗時挙動を確認します。Worktree、Session、Processの分離だけをComputer Sandboxの証拠にしません。
 ## 9. Explicit non-goals
@@ -224,12 +224,19 @@ Provider / Runtimeへの委譲は許容しますが、APIの存在やProviderの
 | 製品目的・利用者価値 | ADR-100 |
 | 再構築・provenance | ADR-101 |
 | JobAggregate・Command・Provider facts | ADR-201 |
-| JobApproval・禁止副作用・PlanningAuthorization・Admission | ADR-500 |
+| Job authorityの基本方針 | ADR-500 |
+| JobApproval | ADR-504 |
+| DRAFT PlanningAuthorization | ADR-505 |
+| JobQuestionAuthorization | ADR-506 |
+| Operation-scoped Execution Permission / Admission separation | ADR-507 |
+| Provider operation lifecycle | ADR-409 |
 | 全経路の不変条件 | ADR-202 |
 | 内部6 Actor・JobMessage | ADR-300 / ADR-301 |
 | 人間起点の依頼、Ingress ClientとExecution Agentの分離 | ADR-502 |
 | 外部Agent A2A | ADR-700 / ADR-701 |
 | Git Worktree・並行性 | ADR-408 |
 | 仕様・計画・履歴・CI証拠の正本 | ADR-001 |
-| 検証水準・Job完遂受入れ | ADR-800 |
+| Quality & Evidenceの基本方針 | ADR-800 |
+| 検証証拠水準 | ADR-801 |
+| Job完了の受入れ | ADR-802 |
 | Agent Harness H1〜H8 | ADR-811 |
