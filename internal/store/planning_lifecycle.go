@@ -129,18 +129,24 @@ func (s *Store) AddPlanningResumeIntent(ctx context.Context, jobID string, expec
 
 func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, expectedRevision uint64, commandID, commandType string, request any,
 	create func(domain.Job, time.Time) (T, error), appendFact func(*domain.Job, T), findFact func(domain.Job) (T, bool)) (CommandReceipt, T, error) {
+	receipt, fact, _, err := persistPlanningFactWithStatus(ctx, s, jobID, expectedRevision, commandID, commandType, request, create, appendFact, findFact)
+	return receipt, fact, err
+}
+
+func persistPlanningFactWithStatus[T any](ctx context.Context, s *Store, jobID string, expectedRevision uint64, commandID, commandType string, request any,
+	create func(domain.Job, time.Time) (T, error), appendFact func(*domain.Job, T), findFact func(domain.Job) (T, bool)) (CommandReceipt, T, bool, error) {
 	var zero T
 	if jobID == "" || expectedRevision == 0 || commandID == "" {
-		return CommandReceipt{}, zero, errors.New("Job, expected revision, and command identity are required")
+		return CommandReceipt{}, zero, false, errors.New("Job, expected revision, and command identity are required")
 	}
 	requestJSON, err := json.Marshal(request)
 	if err != nil {
-		return CommandReceipt{}, zero, fmt.Errorf("encode planning lifecycle command: %w", err)
+		return CommandReceipt{}, zero, false, fmt.Errorf("encode planning lifecycle command: %w", err)
 	}
 	requestHash := digest(requestJSON)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return CommandReceipt{}, zero, fmt.Errorf("begin planning lifecycle command: %w", err)
+		return CommandReceipt{}, zero, false, fmt.Errorf("begin planning lifecycle command: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -150,89 +156,89 @@ func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, exp
 		Scan(&existingType, &existingJobID, &existingHash, &receiptJSON, &createdAtText, &resultingRevision)
 	if err == nil {
 		if existingType != commandType || existingJobID != jobID || existingHash != requestHash {
-			return CommandReceipt{}, zero, ErrIdempotencyConflict
+			return CommandReceipt{}, zero, false, ErrIdempotencyConflict
 		}
 		var receipt CommandReceipt
 		if err := json.Unmarshal([]byte(receiptJSON), &receipt); err != nil {
-			return CommandReceipt{}, zero, fmt.Errorf("%w: decode planning lifecycle receipt: %v", ErrIntegrity, err)
+			return CommandReceipt{}, zero, false, fmt.Errorf("%w: decode planning lifecycle receipt: %v", ErrIntegrity, err)
 		}
 		createdAt, err := time.Parse(time.RFC3339Nano, createdAtText)
 		if err != nil {
-			return CommandReceipt{}, zero, fmt.Errorf("%w: invalid planning lifecycle receipt time: %v", ErrIntegrity, err)
+			return CommandReceipt{}, zero, false, fmt.Errorf("%w: invalid planning lifecycle receipt time: %v", ErrIntegrity, err)
 		}
 		if receipt.CommandID != commandID || receipt.JobID != jobID || receipt.Revision != uint64(resultingRevision) || receipt.PayloadSHA256 != requestHash || !receipt.CreatedAt.Equal(createdAt) {
-			return CommandReceipt{}, zero, fmt.Errorf("%w: planning lifecycle receipt metadata mismatch", ErrIntegrity)
+			return CommandReceipt{}, zero, false, fmt.Errorf("%w: planning lifecycle receipt metadata mismatch", ErrIntegrity)
 		}
 		job, err := readJobAggregateTx(ctx, tx, jobID)
 		if err != nil {
-			return CommandReceipt{}, zero, err
+			return CommandReceipt{}, zero, false, err
 		}
 		fact, found := findFact(job)
 		if !found {
-			return CommandReceipt{}, zero, fmt.Errorf("%w: persisted planning lifecycle fact is missing", ErrIntegrity)
+			return CommandReceipt{}, zero, false, fmt.Errorf("%w: persisted planning lifecycle fact is missing", ErrIntegrity)
 		}
 		if err := tx.Commit(); err != nil {
-			return CommandReceipt{}, zero, fmt.Errorf("commit planning lifecycle retry: %w", err)
+			return CommandReceipt{}, zero, false, fmt.Errorf("commit planning lifecycle retry: %w", err)
 		}
-		return receipt, fact, nil
+		return receipt, fact, false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return CommandReceipt{}, zero, fmt.Errorf("read planning lifecycle receipt: %w", err)
+		return CommandReceipt{}, zero, false, fmt.Errorf("read planning lifecycle receipt: %w", err)
 	}
 
 	job, err := readJobAggregateTx(ctx, tx, jobID)
 	if err != nil {
-		return CommandReceipt{}, zero, err
+		return CommandReceipt{}, zero, false, err
 	}
 	if job.Revision != expectedRevision {
-		return CommandReceipt{}, zero, ErrIdempotencyConflict
+		return CommandReceipt{}, zero, false, ErrIdempotencyConflict
 	}
 	now := time.Now().UTC().Round(0)
 	if now.Before(job.UpdatedAt) {
-		return CommandReceipt{}, zero, errors.New("planning lifecycle command time precedes current Job revision")
+		return CommandReceipt{}, zero, false, errors.New("planning lifecycle command time precedes current Job revision")
 	}
 	fact, err := create(job, now)
 	if err != nil {
-		return CommandReceipt{}, zero, err
+		return CommandReceipt{}, zero, false, err
 	}
 	appendFact(&job, fact)
 	if job.Revision >= uint64(^uint64(0)>>1) {
-		return CommandReceipt{}, zero, errors.New("Job revision exhausted")
+		return CommandReceipt{}, zero, false, errors.New("Job revision exhausted")
 	}
 	job.Revision++
 	job.UpdatedAt = now
 	if err := job.Validate(); err != nil {
-		return CommandReceipt{}, zero, fmt.Errorf("validate Job with planning lifecycle fact: %w", err)
+		return CommandReceipt{}, zero, false, fmt.Errorf("validate Job with planning lifecycle fact: %w", err)
 	}
 	payload, err := json.Marshal(job)
 	if err != nil {
-		return CommandReceipt{}, zero, fmt.Errorf("encode Job with planning lifecycle fact: %w", err)
+		return CommandReceipt{}, zero, false, fmt.Errorf("encode Job with planning lifecycle fact: %w", err)
 	}
 	aggregateHash := digest(payload)
 	receipt := CommandReceipt{CommandID: commandID, JobID: jobID, Revision: job.Revision, PayloadSHA256: requestHash, CreatedAt: now}
 	encodedReceipt, err := json.Marshal(receipt)
 	if err != nil {
-		return CommandReceipt{}, zero, fmt.Errorf("encode planning lifecycle receipt: %w", err)
+		return CommandReceipt{}, zero, false, fmt.Errorf("encode planning lifecycle receipt: %w", err)
 	}
 	result, err := tx.ExecContext(ctx, "UPDATE job_aggregates SET revision = ?, payload_json = ?, integrity_sha256 = ?, updated_at = ? WHERE job_id = ? AND revision = ?", job.Revision, string(payload), aggregateHash, now.Format(time.RFC3339Nano), jobID, expectedRevision)
 	if err != nil {
-		return CommandReceipt{}, zero, fmt.Errorf("update Job with planning lifecycle fact: %w", err)
+		return CommandReceipt{}, zero, false, fmt.Errorf("update Job with planning lifecycle fact: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return CommandReceipt{}, zero, fmt.Errorf("check planning lifecycle Job update: %w", err)
+		return CommandReceipt{}, zero, false, fmt.Errorf("check planning lifecycle Job update: %w", err)
 	}
 	if affected != 1 {
-		return CommandReceipt{}, zero, ErrIdempotencyConflict
+		return CommandReceipt{}, zero, false, ErrIdempotencyConflict
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO job_commands (command_id, job_id, command_type, payload_sha256, resulting_revision, receipt_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", commandID, jobID, commandType, requestHash, job.Revision, string(encodedReceipt), now.Format(time.RFC3339Nano))
 	if err != nil {
-		return CommandReceipt{}, zero, fmt.Errorf("insert planning lifecycle receipt: %w", err)
+		return CommandReceipt{}, zero, false, fmt.Errorf("insert planning lifecycle receipt: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return CommandReceipt{}, zero, fmt.Errorf("commit planning lifecycle fact: %w", err)
+		return CommandReceipt{}, zero, false, fmt.Errorf("commit planning lifecycle fact: %w", err)
 	}
-	return receipt, fact, nil
+	return receipt, fact, true, nil
 }
 
 func readJobAggregateTx(ctx context.Context, tx *sql.Tx, jobID string) (domain.Job, error) {
@@ -309,15 +315,27 @@ func (s *Store) AddProviderStopIntent(
 	reason domain.ProviderStopReason,
 	principal auth.AuthenticatedPrincipal,
 ) (CommandReceipt, domain.ProviderStopIntent, error) {
+	receipt, intent, _, err := s.AddProviderStopIntentWithStatus(ctx, jobID, expectedRevision, roleExecutionID, sessionID, commandID, reason, principal)
+	return receipt, intent, err
+}
+
+func (s *Store) AddProviderStopIntentWithStatus(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	roleExecutionID, sessionID, commandID string,
+	reason domain.ProviderStopReason,
+	principal auth.AuthenticatedPrincipal,
+) (CommandReceipt, domain.ProviderStopIntent, bool, error) {
 	if err := principal.Validate(); err != nil {
-		return CommandReceipt{}, domain.ProviderStopIntent{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+		return CommandReceipt{}, domain.ProviderStopIntent{}, false, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
 	}
 	request := struct {
 		JobID, RoleExecutionID, SessionID, CommandID string
 		Reason                                       domain.ProviderStopReason
 		PrincipalID                                  string
 	}{jobID, roleExecutionID, sessionID, commandID, reason, principal.PrincipalID()}
-	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addProviderStopIntentCommandType, request,
+	return persistPlanningFactWithStatus(ctx, s, jobID, expectedRevision, commandID, addProviderStopIntentCommandType, request,
 		func(job domain.Job, now time.Time) (domain.ProviderStopIntent, error) {
 			return domain.NewProviderStopIntent(job, roleExecutionID, principal.PrincipalID(), sessionID, commandID, reason, now)
 		},

@@ -57,7 +57,7 @@ func (c *ProviderController) StopTaskExecution(
 	if !existingStopIntent && !capabilities.HasEvidenceAtLeast(provider.CapabilityStopProof, provider.EvidenceLive) {
 		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, provider.ErrUnsupportedCapability
 	}
-	intentReceipt, intent, err := c.store.AddProviderStopIntent(
+	intentReceipt, intent, created, err := c.store.AddProviderStopIntentWithStatus(
 		ctx, jobID, job.Revision, roleExecutionID, sessionID, commandID, reason, principal,
 	)
 	if err != nil {
@@ -67,13 +67,7 @@ func (c *ProviderController) StopTaskExecution(
 	if err != nil {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, err
 	}
-	existingStopIntent = false
-	for _, existing := range currentJob.ProviderStopIntents {
-		if existing.CommandID == commandID && existing.RoleExecutionID == execution.ID {
-			existingStopIntent = true
-			break
-		}
-	}
+	existingStopIntent = !created
 	previous, hasPrevious := latestProviderStopObservation(currentJob, intent.OperationID)
 	if hasPrevious && previous.Quiescent {
 		return intentReceipt, intent, previous, nil
