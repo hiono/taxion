@@ -369,6 +369,21 @@ func providerStopExecutionAuthority(job Job, execution RoleExecution) (string, s
 			permission.Validate(job) != nil {
 			return "", "", "", "", errors.New("Coder Provider Stop ExecutionPermission is invalid")
 		}
+		foundAssignment := false
+		for _, assignment := range job.WorktreeAssignments {
+			if assignment.ID != execution.WorktreeID {
+				continue
+			}
+			if assignment.JobID != job.ID || assignment.TaskID != execution.TaskID ||
+				assignment.OwnerRoleExecutionID != execution.ID {
+				return "", "", "", "", errors.New("Coder Provider Stop Worktree ownership is invalid")
+			}
+			foundAssignment = true
+			break
+		}
+		if !foundAssignment {
+			return "", "", "", "", errors.New("Coder Provider Stop Worktree assignment was not found")
+		}
 		return principalID, permission.ProviderID, permission.AccountID, permission.ConfigurationSHA256, nil
 	default:
 		return "", "", "", "", errors.New("Provider Stop supports only Planner and Task-bound Coder executions")
