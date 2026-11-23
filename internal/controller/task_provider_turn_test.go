@@ -119,11 +119,18 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
-	if len(job.ProviderResultObservations) != 1 || len(job.ProviderUsageObservations) != 1 ||
+	taskResultFound := false
+	for _, result := range job.ProviderResultObservations {
+		if result.OperationID == turn.OperationID && result.TurnID == turn.ID && result.Final {
+			taskResultFound = true
+			break
+		}
+	}
+	if !taskResultFound || len(job.ProviderUsageObservations) != 1 ||
 		!job.ProviderUsageObservations[0].Complete || len(job.TaskTurnObservations) != 1 ||
 		runtime.sendCalls != 1 || runtime.resultCalls != 1 || runtime.usageCalls != 1 {
-		t.Fatalf("Task Turn facts or Provider calls are incomplete: results=%d usage=%d observations=%d calls=%d/%d/%d",
-			len(job.ProviderResultObservations), len(job.ProviderUsageObservations), len(job.TaskTurnObservations),
+		t.Fatalf("Task Turn facts or Provider calls are incomplete: taskResult=%v results=%d usage=%d observations=%d calls=%d/%d/%d",
+			taskResultFound, len(job.ProviderResultObservations), len(job.ProviderUsageObservations), len(job.TaskTurnObservations),
 			runtime.sendCalls, runtime.resultCalls, runtime.usageCalls)
 	}
 }
