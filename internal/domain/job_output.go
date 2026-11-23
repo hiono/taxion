@@ -125,14 +125,16 @@ func (o *JobOutput) bindSources(job Job) error {
 	var result ProviderResultObservation
 	resultFound := false
 	for _, candidate := range job.ProviderResultObservations {
-		if candidate.ID == o.ProviderResultObservationID {
+		if (o.ProviderResultObservationID == "" && candidate.RoleExecutionID == execution.ID &&
+			candidate.OperationID == turn.OperationID && candidate.TurnID == turn.ID &&
+			candidate.SessionID == turn.ProviderSessionID) || candidate.ID == o.ProviderResultObservationID {
 			result, resultFound = candidate, true
 			break
 		}
 	}
 	if !resultFound || !result.Final || result.RoleExecutionID != execution.ID ||
 		result.OperationID != turn.OperationID || result.TurnID != turn.ID ||
-		result.SessionID != turn.ProviderSessionID {
+		result.SessionID != turn.ProviderSessionID || result.EvidenceSHA256 != turnObservation.EvidenceSHA256 {
 		return errors.New("JobOutput must bind to the final Provider Result of its Coder Turn")
 	}
 	var usage ProviderUsageObservation
@@ -150,7 +152,8 @@ func (o *JobOutput) bindSources(job Job) error {
 	var stopIntent ProviderStopIntent
 	stopIntentFound := false
 	for _, candidate := range job.ProviderStopIntents {
-		if candidate.RoleExecutionID == execution.ID && candidate.SessionID == turn.ProviderSessionID {
+		if candidate.RoleExecutionID == execution.ID && candidate.SessionID == turn.ProviderSessionID &&
+			(o.ProviderStopIntentID == "" || candidate.ID == o.ProviderStopIntentID) {
 			stopIntent, stopIntentFound = candidate, true
 			break
 		}

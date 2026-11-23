@@ -137,7 +137,7 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = usage.CreatedAt
 	completed, err := NewTaskTurnObservation(job, turn.ID, "cmd_da0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
-		TaskTurnCompleted, 75, strings.Repeat("3", 64), true, now.Add(4*time.Minute))
+		TaskTurnCompleted, 75, strings.Repeat("6", 64), true, now.Add(4*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
