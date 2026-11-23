@@ -231,6 +231,8 @@ func newTestAdapter(capabilities ...Capability) *testAdapter {
 			declaration.EventReplay = true
 		case CapabilityStopProof:
 			declaration.StopProof = true
+		case CapabilityReviewerReadOnlySnapshot:
+			declaration.ReviewerReadOnlySnapshot = true
 		case CapabilityFinalOutput:
 			declaration.FinalOutputRetrieval = true
 		case CapabilityUsageIdentity:
@@ -322,6 +324,65 @@ func TestStartRequestRejectsPartialOrNonCanonicalWorktreeBinding(t *testing.T) {
 	request.WorktreePath = "/tmp/../outside"
 	if err := request.Validate(); err == nil {
 		t.Fatal("non-canonical Worktree path was accepted")
+	}
+}
+
+func TestRuntimeRequiresVerifiedReviewerReadOnlySnapshotBeforeCredentialAcquisition(t *testing.T) {
+	request := validStartRequest()
+	request.RepositoryID = "repo.primary"
+	request.WorktreePath = "/tmp/taxion-worktrees/reviewer-1"
+	request.BaselineCommit = strings.Repeat("a", 40)
+	request.ReadOnlySnapshot = &ReadOnlySnapshot{
+		JobOutputID: "job_output_1",
+		CommitSHA: request.BaselineCommit,
+		TreeSHA: strings.Repeat("b", 40),
+	}
+
+	adapter := newTestAdapter(CapabilityStartIdempotency, CapabilityTaskWorktree)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("newTestRuntime: %v", err)
+	}
+	if _, err := runtime.Start(context.Background(), request); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("Reviewer Start without read-only capability error = %v", err)
+	}
+	if broker.acquires != 0 || adapter.startCalls != 0 {
+		t.Fatalf("unsupported Reviewer Start acquired credentials or called Adapter: acquires=%d starts=%d", broker.acquires, adapter.startCalls)
+	}
+
+	adapter = newTestAdapter(CapabilityStartIdempotency, CapabilityTaskWorktree, CapabilityReviewerReadOnlySnapshot)
+	broker = &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err = newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("newTestRuntime with read-only capability: %v", err)
+	}
+	if _, err := runtime.Start(context.Background(), request); err != nil {
+		t.Fatalf("Reviewer Start with verified read-only capability: %v", err)
+	}
+	if adapter.startRequest.ReadOnlySnapshot == nil ||
+		*adapter.startRequest.ReadOnlySnapshot != *request.ReadOnlySnapshot {
+		t.Fatalf("Adapter did not receive exact immutable read-only snapshot identity: %#v", adapter.startRequest.ReadOnlySnapshot)
+	}
+}
+
+func TestStartRequestRejectsInvalidReadOnlySnapshotIdentity(t *testing.T) {
+	request := validStartRequest()
+	request.RepositoryID = "repo.primary"
+	request.WorktreePath = "/tmp/taxion-worktrees/reviewer-1"
+	request.BaselineCommit = strings.Repeat("a", 40)
+	request.ReadOnlySnapshot = &ReadOnlySnapshot{
+		JobOutputID: "job_output_1",
+		CommitSHA: strings.Repeat("c", 40),
+		TreeSHA: strings.Repeat("b", 40),
+	}
+	if err := request.Validate(); err == nil {
+		t.Fatal("snapshot commit different from Worktree baseline was accepted")
+	}
+	request.ReadOnlySnapshot.CommitSHA = request.BaselineCommit
+	request.ReadOnlySnapshot.TreeSHA = "not-a-tree"
+	if err := request.Validate(); err == nil {
+		t.Fatal("invalid snapshot tree identity was accepted")
 	}
 }
 

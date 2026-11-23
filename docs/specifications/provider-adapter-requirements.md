@@ -89,6 +89,7 @@ CapabilityはProvider ID、account identity、SDK / protocol version、configura
 | Event replay | event cursorの連続性を保った再取得 |
 | Stop proof | Providerが処理を停止し、後続書込みを継続しないことの証拠 |
 | Stop lookup | 同一Stop OperationID / SessionIDの状態を照会し、STOPPED / QuiescentまたはNOT_FOUNDを検証する能力 |
+| Reviewer read-only snapshot | immutable JobOutput snapshotをProvider execution environmentでread-onlyとして強制する能力 |
 | Final output retrieval | event欠落時を含む最終結果の取得 |
 | Usage identity | 利用量をoperation / turnへ一意に束縛する能力 |
 | Usage completeness | 利用量が確定値であり、欠落・重複・部分値でないことを判定する能力 |
@@ -99,6 +100,7 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 
 最低水準:
 - Start / Send / Stop / Lookup / Result / Usage: E4
+- Reviewer read-only snapshot: E4（能力証拠がない場合はReviewer Startを拒否）
 - Cross-process reattachment / Event replay: E5
 - fake Adapterによる契約・異常系試験: E2
 

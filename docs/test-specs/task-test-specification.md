@@ -83,3 +83,5 @@
 | TK-079 | Task Coder Resume / Stop durable recovery | Task Coder Turn, Resume UNKNOWN → ATTACHED, Stop UNKNOWN → Stopped / Quiescent, then SQLite restart | Restore exact Task / permission / Session-bound intents and append-only observations; aggregate validation succeeds |
 | TK-080 | Stop side-effect recovery after restart | Stop intent committed, Provider completed Stop, process crashed before terminal Observation | E4 Stop Lookup confirms STOPPED / Stopped / Quiescent; append terminal Observation without another Stop call |
 | TK-081 | Stop retry after restart | Stop intent committed, process crashed before Provider Stop; E4 Stop Lookup returns NOT_FOUND | Retry Runtime.Stop only with the original OperationID / SessionID |
+| TK-082 | Reviewer read-only capability gate | Reviewer StartRequest binds JobOutput / commit / tree but Provider lacks E4 reviewer.read_only_snapshot evidence | Reject before credential acquisition and Adapter.Start |
+| TK-083 | Reviewer snapshot identity binding | Reviewer StartRequest has a mismatched commit / tree / JobOutput identity | Reject as invalid request before capability lookup or credential acquisition |

@@ -40,6 +40,7 @@ const (
 	CapabilityEventReplay       Capability = "event.replay"
 	CapabilityStopProof         Capability = "stop.proof"
 	CapabilityStopLookup        Capability = "stop.lookup"
+	CapabilityReviewerReadOnlySnapshot Capability = "reviewer.read_only_snapshot"
 	CapabilityFinalOutput       Capability = "result.final_output_retrieval"
 	CapabilityUsageIdentity     Capability = "usage.identity"
 	CapabilityUsageCompleteness Capability = "usage.completeness"
@@ -74,6 +75,7 @@ type Capabilities struct {
 	EventReplay                 bool
 	StopProof                   bool
 	StopLookup                  bool
+	ReviewerReadOnlySnapshot    bool
 	FinalOutputRetrieval        bool
 	UsageIdentity               bool
 	UsageCompleteness           bool
@@ -140,6 +142,8 @@ func (c Capabilities) Has(capability Capability) bool {
 		return c.StopProof
 	case CapabilityStopLookup:
 		return c.StopLookup
+	case CapabilityReviewerReadOnlySnapshot:
+		return c.ReviewerReadOnlySnapshot
 	case CapabilityFinalOutput:
 		return c.FinalOutputRetrieval
 	case CapabilityUsageIdentity:
@@ -236,6 +240,8 @@ func setCapability(capabilities *Capabilities, capability Capability) {
 		capabilities.StopProof = true
 	case CapabilityStopLookup:
 		capabilities.StopLookup = true
+	case CapabilityReviewerReadOnlySnapshot:
+		capabilities.ReviewerReadOnlySnapshot = true
 	case CapabilityFinalOutput:
 		capabilities.FinalOutputRetrieval = true
 	case CapabilityUsageIdentity:
@@ -305,7 +311,7 @@ var allCapabilities = []Capability{
 	CapabilityStartIdempotency, CapabilityStartLookup, CapabilityTaskWorktree,
 	CapabilitySendIdempotency, CapabilitySendLookup,
 	CapabilitySessionReattach, CapabilityEventReplay,
-	CapabilityStopProof, CapabilityStopLookup, CapabilityFinalOutput,
+	CapabilityStopProof, CapabilityStopLookup, CapabilityReviewerReadOnlySnapshot, CapabilityFinalOutput,
 	CapabilityUsageIdentity, CapabilityUsageCompleteness,
 }
 
@@ -322,6 +328,12 @@ func (d ContextDocument) Validate() error {
 	return nil
 }
 
+type ReadOnlySnapshot struct {
+	JobOutputID string
+	CommitSHA   string
+	TreeSHA     string
+}
+
 type StartRequest struct {
 	OperationID     string
 	JobID           string
@@ -336,6 +348,7 @@ type StartRequest struct {
 	RepositoryID    string
 	WorktreePath    string
 	BaselineCommit  string
+	ReadOnlySnapshot *ReadOnlySnapshot
 }
 
 func (r StartRequest) Validate() error {
@@ -349,6 +362,11 @@ func (r StartRequest) Validate() error {
 	if hasWorktree && (!validIdentifier(r.RepositoryID) || !filepath.IsAbs(r.WorktreePath) ||
 		filepath.Clean(r.WorktreePath) != r.WorktreePath || !validGitCommit(r.BaselineCommit)) {
 		return errors.New("Provider Start request Worktree binding is incomplete or non-canonical")
+	}
+	if r.ReadOnlySnapshot != nil && (!hasWorktree || !validIdentifier(r.ReadOnlySnapshot.JobOutputID) ||
+		!validGitCommit(r.ReadOnlySnapshot.CommitSHA) || !validGitCommit(r.ReadOnlySnapshot.TreeSHA) ||
+		r.BaselineCommit != r.ReadOnlySnapshot.CommitSHA) {
+		return errors.New("Provider Start request read-only snapshot identity is incomplete or mismatched")
 	}
 	seen := make(map[string]struct{}, len(r.Context))
 	for _, document := range r.Context {

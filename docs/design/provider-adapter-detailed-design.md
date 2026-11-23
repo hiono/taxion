@@ -93,6 +93,7 @@ Capability Verifierは次を照合する。
 | Runtime operation | 必須Capability | 最低Evidence |
 |---|---|---|
 | Start | Start idempotencyまたはStart lookup | E4 |
+| Reviewer Start | Reviewer read-only snapshot enforcement | E4 |
 | Send | Send idempotencyまたはSend lookup | E4 |
 | Stop | Stop proof | E4 |
 | Stop recovery lookup | Stop lookup（同一OperationID / SessionID） | E4 |
@@ -243,7 +244,7 @@ Task-bound StartはDRAFT Planning Startと別のauthority pathとする。Planne
 9. UNKNOWNは同じOperationIDのLookupまたは実証済みidempotencyでのみ解消する。新しいOperationIDで再送しない。permission失効後は新規Startを禁止し、既存OperationIDのLookupだけを許可する。
 10. Task-bound Observationの作成はJobApprovalに紐付くExecutionPermissionとTaskをDomainで検証する。Planner Observationは従来どおりPlanningAuthorization ownerのPrincipalを検証する。Execution AgentをHUMAN Principalとして偽装しない。
 
-Reviewer Startは、ADR-500 / ADR-408に従うimmutable Worktree snapshotとread-only boundaryを実行環境で強制できるまで拒否する。TaskのRoleがREVIEWERであること、またはEffect assessmentのMutating=falseだけではread-only executionの証明にならない。Worktree / Reviewer handoffはPhase 7で扱う。
+Reviewer Startは、ADR-500 / ADR-408に従うimmutable Worktree snapshotとread-only boundaryを実行環境で強制できるまで拒否する。StartRequestにはJobOutput identity、commit SHA、tree SHAを束縛する。RuntimeはProvider / SDK / configuration identityに結び付いたE4 `reviewer.read_only_snapshot` capabilityをcredential取得前に検証する。TaskのRoleがREVIEWERであること、Worktreeがdetachedであること、またはEffect assessmentのMutating=falseだけではread-only executionの証明にならない。能力証拠がない場合はProvider呼出しを拒否する。Worktree / Reviewer handoffはPhase 7で扱う。
 
 ### 8.2 Send（実装済み）
 
