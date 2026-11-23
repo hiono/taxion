@@ -123,7 +123,7 @@ func (c *ProviderController) StopTaskExecution(
 	if stopResult.OperationID != intent.OperationID || stopResult.SessionID != sessionID ||
 		!stopResult.Stopped || !stopResult.Quiescent || !validProviderEvidenceSHA256(stopResult.EvidenceSHA256) {
 		observation, persistErr := c.persistProviderStopObservation(
-			ctx, jobID, intent, principal, false, false, "", false,
+			ctx, latest, intent, principal, false, false, "", false,
 		)
 		if persistErr != nil {
 			return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
