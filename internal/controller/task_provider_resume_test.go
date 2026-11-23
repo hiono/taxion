@@ -13,12 +13,12 @@ import (
 func enableTaskResumeE5(f *taskProviderStopFixture) {
 	f.runtime.capabilities.CrossProcessSessionReattach = true
 	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence, provider.CapabilityEvidence{
-		Capability: provider.CapabilitySessionReattach,
-		Identity: f.runtime.identity,
-		TestID: "task-resume-e5",
+		Capability:     provider.CapabilitySessionReattach,
+		Identity:       f.runtime.identity,
+		TestID:         "task-resume-e5",
 		EvidenceSHA256: strings.Repeat("f", 64),
-		EvidenceLevel: provider.EvidenceDurable,
-		VerifiedAt: f.controller.now(),
+		EvidenceLevel:  provider.EvidenceDurable,
+		VerifiedAt:     f.controller.now(),
 	})
 }
 
