@@ -145,16 +145,16 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = completed.CreatedAt
 	if _, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
-		"cmd_db0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", strings.Repeat("4", 64), 26, now.Add(3*time.Minute)); err == nil {
+		"cmd_db0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", strings.Repeat("4", 64), 26, now.Add(5*time.Minute)); err == nil {
 		t.Fatal("Turn exceeded remaining token budget")
 	}
 	if _, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
-		"cmd_dc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c", strings.Repeat("5", 64), 25, now.Add(3*time.Minute)); err != nil {
+		"cmd_dc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c", strings.Repeat("5", 64), 25, now.Add(6*time.Minute)); err != nil {
 		t.Fatalf("Turn at remaining budget rejected: %v", err)
 	}
 	principalID = job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
 	stopIntent, err := NewProviderStopIntent(job, execution.ID, principalID, turn.ProviderSessionID,
-		"cmd_d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1", ProviderStopReasonTaskComplete, now.Add(5*time.Minute))
+		"cmd_d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1", ProviderStopReasonTaskComplete, now.Add(7*time.Minute))
 	if err != nil {
 		t.Fatalf("create Provider Stop intent: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = stopIntent.CreatedAt
 	stopObservation, err := NewProviderStopObservation(job, stopIntent.ID, principalID,
-		"cmd_d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2", true, true, strings.Repeat("8", 64), false, now.Add(6*time.Minute))
+		"cmd_d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2", true, true, strings.Repeat("8", 64), false, now.Add(8*time.Minute))
 	if err != nil {
 		t.Fatalf("create Provider Stop observation: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = stopObservation.CreatedAt
 	output, err := NewJobOutput(job, execution.TaskID, execution.ID, turn.ID,
-		strings.Repeat("9", 40), strings.Repeat("8", 40), now.Add(7*time.Minute))
+		strings.Repeat("9", 40), strings.Repeat("8", 40), now.Add(9*time.Minute))
 	if err != nil {
 		t.Fatalf("create immutable JobOutput: %v", err)
 	}
@@ -202,9 +202,32 @@ func TestTaskTurnMustFollowPreviousTerminalObservationTime(t *testing.T) {
 	job.TaskTurnIntents = append(job.TaskTurnIntents, first)
 	job.Revision++
 	job.UpdatedAt = first.CreatedAt
+
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	resultContent := "completed Task Coder output"
+	result, err := NewProviderResultObservation(job, execution.ID, principalID,
+		first.OperationID, first.ID, first.ProviderSessionID, resultContent,
+		sha256HexDomain(resultContent), true, strings.Repeat("e", 64), now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("final Provider Result: %v", err)
+	}
+	job.ProviderResultObservations = append(job.ProviderResultObservations, result)
+	job.Revision++
+	job.UpdatedAt = result.CreatedAt
+
+	usage, err := NewProviderUsageObservation(job, execution.ID, principalID,
+		first.OperationID, first.ID, first.ProviderSessionID, "usage_task_turn",
+		10, true, strings.Repeat("f", 64), now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("complete Provider Usage: %v", err)
+	}
+	job.ProviderUsageObservations = append(job.ProviderUsageObservations, usage)
+	job.Revision++
+	job.UpdatedAt = usage.CreatedAt
+
 	terminal, err := NewTaskTurnObservation(job, first.ID,
 		"cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", TaskTurnCompleted, 10,
-		strings.Repeat("e", 64), false, now.Add(time.Minute))
+		strings.Repeat("e", 64), false, now.Add(3*time.Minute))
 	if err != nil {
 		t.Fatalf("terminal observation: %v", err)
 	}
@@ -219,7 +242,7 @@ func TestTaskTurnMustFollowPreviousTerminalObservationTime(t *testing.T) {
 	}
 	next, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
 		"cmd_11111111111111111111111111111111", strings.Repeat("1", 64), 20,
-		now.Add(2*time.Minute))
+		now.Add(5*time.Minute))
 	if err != nil {
 		t.Fatalf("Task Turn after terminal observation: %v", err)
 	}
