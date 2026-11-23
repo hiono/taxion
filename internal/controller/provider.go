@@ -21,6 +21,7 @@ type ProviderExecutionStore interface {
 	StartTasklessPlanner(context.Context, string, uint64, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.RoleExecution, domain.ProviderStartIntent, error)
 	AddProviderEventObservation(context.Context, string, uint64, string, string, string, string, string, string, string, string, string, time.Time, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderEventObservation, error)
 	AddProviderStopIntent(context.Context, string, uint64, string, string, string, domain.ProviderStopReason, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopIntent, error)
+	AddProviderStopIntentWithStatus(context.Context, string, uint64, string, string, string, domain.ProviderStopReason, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopIntent, bool, error)
 	AddProviderStopObservation(context.Context, string, uint64, string, string, bool, bool, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopObservation, error)
 	AddProviderResultObservation(context.Context, string, uint64, string, string, string, string, string, string, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderResultObservation, error)
 	AddProviderUsageObservation(context.Context, string, uint64, string, string, string, string, string, uint64, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderUsageObservation, error)
