@@ -246,17 +246,20 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 
 ## 12. CI / 完了判定
 
+リリース準備段階に入るまではLinuxのみを自動実行対象とする。
+
 必須:
 - gofmt
 - go vet
 - go test ./...
 - go test -race ./...
 - go build ./...
+- Linux CI
 - Secret scan（差分とcredential関連実装を目視確認）
 - Category sync
 - Link/reference sync
 - Independent review completion
 
-Windows vet / test / buildおよびGoReleaser snapshot cross-build（macOS target含む）をPull Requestごとに必須実行する。
+Windows buildとGoReleaser cross-build（macOS targetを含む）は、リリース準備段階で検証を再開する。macOS native検証は任意とする。
 
 CI成功はE2の証拠である。E4 / E5 / E6の完了を意味しない。
