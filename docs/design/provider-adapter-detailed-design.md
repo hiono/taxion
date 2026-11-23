@@ -4,7 +4,7 @@ Date: 2026-11-21
 Status: Draft
 対象Issue: #29
 要求仕様: [Provider Adapter 実行境界 要求仕様書](../specifications/provider-adapter-requirements.md)
-規範: ADR-201 / ADR-202 / ADR-400 / ADR-500 / ADR-800
+規範: ADR-201 / ADR-202 / ADR-400 / ADR-408 / ADR-409 / ADR-500 / ADR-507 / ADR-801
 
 ## 1. 設計方針
 
@@ -242,7 +242,7 @@ Task-bound StartはDRAFT Planning Startと別のauthority pathとする。Planne
 9. UNKNOWNは同じOperationIDのLookupまたは実証済みidempotencyでのみ解消する。新しいOperationIDで再送しない。permission失効後は新規Startを禁止し、既存OperationIDのLookupだけを許可する。
 10. Task-bound Observationの作成はJobApprovalに紐付くExecutionPermissionとTaskをDomainで検証する。Planner Observationは従来どおりPlanningAuthorization ownerのPrincipalを検証する。Execution AgentをHUMAN Principalとして偽装しない。
 
-Reviewer Startは、ADR-500 / ADR-408に従うimmutable Worktree snapshotとread-only boundaryを実行環境で強制できるまで拒否する。TaskのRoleがREVIEWERであること、またはEffect assessmentのMutating=falseだけではread-only executionの証明にならない。Worktree / Reviewer handoffはPhase 7で扱う。
+Reviewer Startは、ADR-408 / ADR-507に従うimmutable Worktree snapshotとread-only boundaryを実行環境で強制できるまで拒否する。TaskのRoleがREVIEWERであること、またはEffect assessmentのMutating=falseだけではread-only executionの証明にならない。Worktree / Reviewer handoffはPhase 7で扱う。
 
 ### 8.2 Send（実装済み）
 
