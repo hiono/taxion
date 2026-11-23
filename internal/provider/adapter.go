@@ -234,6 +234,8 @@ func setCapability(capabilities *Capabilities, capability Capability) {
 		capabilities.EventReplay = true
 	case CapabilityStopProof:
 		capabilities.StopProof = true
+	case CapabilityStopLookup:
+		capabilities.StopLookup = true
 	case CapabilityFinalOutput:
 		capabilities.FinalOutputRetrieval = true
 	case CapabilityUsageIdentity:

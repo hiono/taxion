@@ -270,3 +270,28 @@ func TestStartAndTurnRequestsValidateImmutablePromptAndContextDigests(t *testing
 		t.Fatal("Turn request accepted prompt content that differs from its immutable digest")
 	}
 }
+func TestLookupResultRequiresQuiescentEvidenceForStoppedStatus(t *testing.T) {
+	request := LookupRequest{OperationID: "provider_stop_123", SessionID: "session_123"}
+	base := LookupResult{
+		Found: true, OperationID: request.OperationID, Status: "STOPPED",
+		ReceiptID: "receipt_stop", SessionID: request.SessionID,
+		EvidenceSHA256: strings.Repeat("a", 64),
+	}
+	if err := base.Validate(request); err == nil {
+		t.Fatal("STOPPED lookup without Stopped / Quiescent evidence was accepted")
+	}
+	stopped := base
+	stopped.Stopped = true
+	stopped.Quiescent = true
+	if err := stopped.Validate(request); err != nil {
+		t.Fatalf("valid STOPPED / Quiescent lookup: %v", err)
+	}
+	notFound := LookupResult{
+		OperationID: request.OperationID, Status: LookupStatusNotFound,
+		SessionID: request.SessionID, EvidenceSHA256: strings.Repeat("b", 64),
+		Stopped: true,
+	}
+	if err := notFound.Validate(request); err == nil {
+		t.Fatal("NOT_FOUND lookup with terminal Stop flags was accepted")
+	}
+}

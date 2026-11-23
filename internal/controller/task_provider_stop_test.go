@@ -344,7 +344,7 @@ func TestTaskProviderStopReconcilesProviderSideEffectAfterControllerRestart(t *t
 		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
 	)
 	if err != nil || replayedIntent.ID != intent.ID || !observation.Stopped ||
-		!observation.Quiescent || !observation.ReconcilesUnknown && observation.CreatedRevision == 0 ||
+		!observation.Quiescent || observation.ReconcilesUnknown || observation.CreatedRevision == 0 ||
 		f.runtime.stopCalls != 1 || f.runtime.lookupCalls != 2 {
 		t.Fatalf("restart did not reconcile the existing Provider Stop: intent=%#v observation=%#v stopCalls=%d lookupCalls=%d err=%v",
 			replayedIntent, observation, f.runtime.stopCalls, f.runtime.lookupCalls, err)
