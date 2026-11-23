@@ -10,6 +10,31 @@ import (
 	"github.com/hiono/taxion/internal/provider"
 )
 
+
+func prepareTaskResumeTurn(t *testing.T, f *taskProviderStopFixture) {
+	t.Helper()
+	now := f.controller.now()
+	f.runtime.capabilities.SendLookup = true
+	f.runtime.capabilities.SendIdempotency = true
+	f.runtime.capabilities.FinalOutputRetrieval = true
+	f.runtime.capabilities.UsageIdentity = true
+	f.runtime.capabilities.UsageCompleteness = true
+	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "task-resume-send", EvidenceSHA256: strings.Repeat("1", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity, TestID: "task-resume-send", EvidenceSHA256: strings.Repeat("2", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: f.runtime.identity, TestID: "task-resume-send", EvidenceSHA256: strings.Repeat("3", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "task-resume-send", EvidenceSHA256: strings.Repeat("4", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "task-resume-send", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	if _, _, _, _, err := f.controller.SendTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID,
+		"cmd_67676767676767676767676767676767",
+		"Persist a completed Task turn before Resume.", f.permissionRequest, 100, f.principal,
+	); err != nil {
+		t.Fatalf("SendTaskExecution fixture: %v", err)
+	}
+}
+
 func enableTaskResumeE5(f *taskProviderStopFixture) {
 	f.runtime.capabilities.CrossProcessSessionReattach = true
 	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence, provider.CapabilityEvidence{
@@ -44,6 +69,7 @@ func TestTaskProviderResumeRejectsUnconfirmedResponsesAndReconcilesSameIdentity(
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			f := newTaskProviderStopFixture(t)
+			prepareTaskResumeTurn(t, &f)
 			enableTaskResumeE5(&f)
 			commandID := "cmd_12121212121212121212121212121212"
 			result := test.result
@@ -109,6 +135,7 @@ func TestTaskProviderResumeRequiresMatchingE5CapabilityEvidence(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			f := newTaskProviderStopFixture(t)
+			prepareTaskResumeTurn(t, &f)
 			enableTaskResumeE5(&f)
 			test.mutate(&f)
 			_, _, _, err := f.resume("cmd_23232323232323232323232323232323")
@@ -130,6 +157,7 @@ func TestTaskProviderResumeRequiresMatchingE5CapabilityEvidence(t *testing.T) {
 func TestTaskProviderResumeWorktreeGatesAndIntentFirstOrdering(t *testing.T) {
 	t.Run("pre-intent Worktree failure", func(t *testing.T) {
 		f := newTaskProviderStopFixture(t)
+		prepareTaskResumeTurn(t, &f)
 		enableTaskResumeE5(&f)
 		f.worktree.failAt = f.worktree.verifyCalls + 1
 		f.worktree.verifyErr = errors.New("Worktree changed before Resume intent")
@@ -145,6 +173,7 @@ func TestTaskProviderResumeWorktreeGatesAndIntentFirstOrdering(t *testing.T) {
 	})
 	t.Run("intent committed before Provider call", func(t *testing.T) {
 		f := newTaskProviderStopFixture(t)
+		prepareTaskResumeTurn(t, &f)
 		enableTaskResumeE5(&f)
 		f.runtime.resumeHook = func(_ context.Context, request provider.ResumeRequest) error {
 			job, err := f.database.GetJob(f.ctx, f.jobID)
@@ -166,6 +195,7 @@ func TestTaskProviderResumeWorktreeGatesAndIntentFirstOrdering(t *testing.T) {
 	})
 	t.Run("final Worktree failure after intent", func(t *testing.T) {
 		f := newTaskProviderStopFixture(t)
+		prepareTaskResumeTurn(t, &f)
 		enableTaskResumeE5(&f)
 		f.worktree.failAt = f.worktree.verifyCalls + 2
 		f.worktree.verifyErr = errors.New("Worktree changed immediately before Runtime.Resume")
