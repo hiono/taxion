@@ -137,7 +137,8 @@ func (o *JobOutput) bindSources(job Job) error {
 	}
 	if !resultFound || !result.Final || result.RoleExecutionID != execution.ID ||
 		result.OperationID != turn.OperationID || result.TurnID != turn.ID ||
-		result.SessionID != turn.ProviderSessionID || result.EvidenceSHA256 != turnObservation.EvidenceSHA256 {
+		result.SessionID != turn.ProviderSessionID || !validSHA256(result.EvidenceSHA256) ||
+		!validSHA256(turnObservation.EvidenceSHA256) {
 		return errors.New("JobOutput must bind to the final Provider Result of its Coder Turn")
 	}
 	var usage ProviderUsageObservation

@@ -121,7 +121,7 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	content := "completed Task Coder output"
 	contentSHA := sha256HexDomain(content)
 	result, err := NewProviderResultObservation(job, execution.ID, principalID, turn.OperationID, turn.ID,
-		turn.ProviderSessionID, content, contentSHA, true, strings.Repeat("6", 64), now.Add(2*time.Minute))
+		turn.ProviderSessionID, content, contentSHA, true, strings.Repeat("a", 64), now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("create final Task Result: %v", err)
 	}
