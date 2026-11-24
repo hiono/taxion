@@ -73,7 +73,7 @@ func (c *ProviderController) StopTaskExecution(
 	previousUnknown := hasPrevious && !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
 	activeClaim, activeClaimFound := domain.ActiveProviderStopDispatchClaim(currentJob, intent.OperationID)
 	fencingRequired := providerStopDispatchRequiresFencing(currentJob, intent.OperationID)
-	if hasPrevious && previous.Quiescent {
+	if hasPrevious && previous.Stopped && previous.Quiescent {
 		if activeClaimFound {
 			if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
 				ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedStopped, "",

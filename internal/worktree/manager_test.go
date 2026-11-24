@@ -492,6 +492,7 @@ func TestManagerCaptureOutputRejectsDirtySubmodule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
+	gitTestRun(t, snapshot.WorktreePath, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
 	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "nested", "untracked.txt"), []byte("dirty submodule\n"), 0o600); err != nil {
 		t.Fatalf("write dirty submodule file: %v", err)
 	}
