@@ -1075,6 +1075,9 @@ func providerTurnDefinitiveFailureEvidence(operationID string, err error) (strin
 }
 
 func providerStopDefinitiveFailureEvidence(operationID string, err error) (string, bool) {
+	if errors.Is(err, provider.ErrUnsupportedCapability) {
+		return sha256String("taxion:provider-stop-definitive-failure:" + operationID + ":runtime:unsupported_capability"), true
+	}
 	var operationError *provider.OperationError
 	if !errors.As(err, &operationError) || operationError == nil ||
 		operationError.Class != provider.FailureDefinitive {
@@ -1082,6 +1085,14 @@ func providerStopDefinitiveFailureEvidence(operationID string, err error) (strin
 	}
 	return sha256String("taxion:provider-stop-definitive-failure:" + operationID + ":" +
 		string(operationError.Class) + ":" + operationError.Code), true
+}
+
+func providerStopDefinitiveFailureEvidenceForClaim(operationID, claimID string, err error) (string, bool) {
+	evidence, definitive := providerStopDefinitiveFailureEvidence(operationID, err)
+	if !definitive {
+		return "", false
+	}
+	return sha256String("taxion:provider-stop-dispatch-claim-failure:" + claimID + ":" + evidence), true
 }
 
 func providerResumeDefinitiveFailureEvidence(operationID string, err error) (string, bool) {
