@@ -307,7 +307,6 @@ func (s *Store) AddPlanningResumeObservation(ctx context.Context, jobID string, 
 		})
 }
 
-
 func (s *Store) AddTaskProviderResumeObservation(
 	ctx context.Context,
 	jobID string,
