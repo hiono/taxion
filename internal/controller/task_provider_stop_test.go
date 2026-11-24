@@ -173,8 +173,8 @@ func TestTaskProviderStopDispatchClaimPreventsConcurrentDuplicate(t *testing.T) 
 	f := newTaskProviderStopFixture(t)
 	blocking := &blockingTaskStopRuntime{
 		fakePlanningProviderRuntime: f.runtime,
-		entered: make(chan struct{}, 1),
-		release: make(chan struct{}),
+		entered:                     make(chan struct{}, 1),
+		release:                     make(chan struct{}),
 	}
 	controller, err := NewProviderControllerWithExecutionAndWorktree(
 		f.database, blocking, f.controller.execution, f.worktree,
