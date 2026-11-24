@@ -29,43 +29,43 @@ const (
 )
 
 type Job struct {
-	ID                           string                        `json:"id"`
-	Request                      string                        `json:"request"`
-	Goal                         string                        `json:"goal,omitempty"`
-	State                        JobState                      `json:"state"`
-	Revision                     uint64                        `json:"revision"`
-	CreatedAt                    time.Time                     `json:"created_at"`
-	UpdatedAt                    time.Time                     `json:"updated_at"`
-	IntakeProvenance             *IntakeProvenance             `json:"intake_provenance,omitempty"`
-	PlanningAuthorizations       []PlanningAuthorization       `json:"planning_authorizations,omitempty"`
-	JobContractRevisions         []JobContractRevision         `json:"job_contract_revisions,omitempty"`
-	JobApprovals                 []JobApproval                 `json:"job_approvals,omitempty"`
-	Tasks                        []Task                        `json:"tasks,omitempty"`
-	WorktreeAssignments                  []WorktreeAssignment          `json:"worktree_assignments,omitempty"`
+	ID                                    string                        `json:"id"`
+	Request                               string                        `json:"request"`
+	Goal                                  string                        `json:"goal,omitempty"`
+	State                                 JobState                      `json:"state"`
+	Revision                              uint64                        `json:"revision"`
+	CreatedAt                             time.Time                     `json:"created_at"`
+	UpdatedAt                             time.Time                     `json:"updated_at"`
+	IntakeProvenance                      *IntakeProvenance             `json:"intake_provenance,omitempty"`
+	PlanningAuthorizations                []PlanningAuthorization       `json:"planning_authorizations,omitempty"`
+	JobContractRevisions                  []JobContractRevision         `json:"job_contract_revisions,omitempty"`
+	JobApprovals                          []JobApproval                 `json:"job_approvals,omitempty"`
+	Tasks                                 []Task                        `json:"tasks,omitempty"`
+	WorktreeAssignments                   []WorktreeAssignment          `json:"worktree_assignments,omitempty"`
 	WorktreeLifecycleEnforcedFromRevision uint64                        `json:"worktree_lifecycle_enforced_from_revision,omitempty"`
 	JobOutputs                            []JobOutput                   `json:"job_outputs,omitempty"`
-	ExecutionPermissions         []ExecutionPermission         `json:"execution_permissions,omitempty"`
-	RoleExecutions               []RoleExecution               `json:"role_executions,omitempty"`
-	ProviderStartIntents         []ProviderStartIntent         `json:"provider_start_intents,omitempty"`
-	ProviderStartObservations    []ProviderStartObservation    `json:"provider_start_observations,omitempty"`
-	ProviderEventObservations    []ProviderEventObservation    `json:"provider_event_observations,omitempty"`
-	ProviderStopIntents          []ProviderStopIntent          `json:"provider_stop_intents,omitempty"`
-	ProviderStopObservations     []ProviderStopObservation     `json:"provider_stop_observations,omitempty"`
-	ProviderStopDispatchClaims   []ProviderStopDispatchClaim   `json:"provider_stop_dispatch_claims,omitempty"`
-	ProviderStopDispatchStarts   []ProviderStopDispatchStart   `json:"provider_stop_dispatch_starts,omitempty"`
-	ProviderStopDispatchReleases []ProviderStopDispatchRelease `json:"provider_stop_dispatch_releases,omitempty"`
-	ProviderResultObservations   []ProviderResultObservation   `json:"provider_result_observations,omitempty"`
-	ProviderUsageObservations    []ProviderUsageObservation    `json:"provider_usage_observations,omitempty"`
-	PlanningTurnIntents          []PlanningTurnIntent          `json:"planning_turn_intents,omitempty"`
-	PlanningTurnObservations     []PlanningTurnObservation     `json:"planning_turn_observations,omitempty"`
-	TaskTurnIntents              []TaskTurnIntent              `json:"task_turn_intents,omitempty"`
-	TaskTurnObservations         []TaskTurnObservation         `json:"task_turn_observations,omitempty"`
-	TaskTurnDispatchClaims       []TaskTurnDispatchClaim       `json:"task_turn_dispatch_claims,omitempty"`
-	TaskTurnDispatchReleases     []TaskTurnDispatchRelease     `json:"task_turn_dispatch_releases,omitempty"`
-	PlanningEffectDecisions      []PlanningEffectDecision      `json:"planning_effect_decisions,omitempty"`
-	PlanningResumeIntents        []PlanningResumeIntent        `json:"planning_resume_intents,omitempty"`
-	PlanningResumeObservations   []PlanningResumeObservation   `json:"planning_resume_observations,omitempty"`
-	PlanningBoundaryDecisions    []PlanningBoundaryDecision    `json:"planning_boundary_decisions,omitempty"`
+	ExecutionPermissions                  []ExecutionPermission         `json:"execution_permissions,omitempty"`
+	RoleExecutions                        []RoleExecution               `json:"role_executions,omitempty"`
+	ProviderStartIntents                  []ProviderStartIntent         `json:"provider_start_intents,omitempty"`
+	ProviderStartObservations             []ProviderStartObservation    `json:"provider_start_observations,omitempty"`
+	ProviderEventObservations             []ProviderEventObservation    `json:"provider_event_observations,omitempty"`
+	ProviderStopIntents                   []ProviderStopIntent          `json:"provider_stop_intents,omitempty"`
+	ProviderStopObservations              []ProviderStopObservation     `json:"provider_stop_observations,omitempty"`
+	ProviderStopDispatchClaims            []ProviderStopDispatchClaim   `json:"provider_stop_dispatch_claims,omitempty"`
+	ProviderStopDispatchStarts            []ProviderStopDispatchStart   `json:"provider_stop_dispatch_starts,omitempty"`
+	ProviderStopDispatchReleases          []ProviderStopDispatchRelease `json:"provider_stop_dispatch_releases,omitempty"`
+	ProviderResultObservations            []ProviderResultObservation   `json:"provider_result_observations,omitempty"`
+	ProviderUsageObservations             []ProviderUsageObservation    `json:"provider_usage_observations,omitempty"`
+	PlanningTurnIntents                   []PlanningTurnIntent          `json:"planning_turn_intents,omitempty"`
+	PlanningTurnObservations              []PlanningTurnObservation     `json:"planning_turn_observations,omitempty"`
+	TaskTurnIntents                       []TaskTurnIntent              `json:"task_turn_intents,omitempty"`
+	TaskTurnObservations                  []TaskTurnObservation         `json:"task_turn_observations,omitempty"`
+	TaskTurnDispatchClaims                []TaskTurnDispatchClaim       `json:"task_turn_dispatch_claims,omitempty"`
+	TaskTurnDispatchReleases              []TaskTurnDispatchRelease     `json:"task_turn_dispatch_releases,omitempty"`
+	PlanningEffectDecisions               []PlanningEffectDecision      `json:"planning_effect_decisions,omitempty"`
+	PlanningResumeIntents                 []PlanningResumeIntent        `json:"planning_resume_intents,omitempty"`
+	PlanningResumeObservations            []PlanningResumeObservation   `json:"planning_resume_observations,omitempty"`
+	PlanningBoundaryDecisions             []PlanningBoundaryDecision    `json:"planning_boundary_decisions,omitempty"`
 }
 
 type IntakeProvenance struct {
@@ -1049,15 +1049,17 @@ func (j Job) Validate() error {
 			validTransition := (previous.Status == PlanningResumeUnknown &&
 				observation.Status != PlanningResumeUnknown && observation.ReconcilesUnknown) ||
 				(previous.Status == PlanningResumeNotDispatched &&
-					observation.Status != PlanningResumeUnknown && !observation.ReconcilesUnknown)
+					observation.Status != PlanningResumeNotDispatched && !observation.ReconcilesUnknown)
 			if !validTransition || observation.CreatedRevision <= previous.CreatedRevision ||
 				observation.CreatedAt.Before(previous.CreatedAt) {
 				return fmt.Errorf("%w: invalid PlanningResumeObservation reconciliation sequence for %s", ErrInvalidJob, resumeID)
 			}
 		}
-		if len(observations) > 2 || (len(observations) == 2 &&
-			(observations[0].Status != PlanningResumeUnknown &&
-				observations[0].Status != PlanningResumeNotDispatched)) {
+		if len(observations) > 3 ||
+			(len(observations) == 2 && observations[0].Status != PlanningResumeUnknown &&
+				observations[0].Status != PlanningResumeNotDispatched) ||
+			(len(observations) == 3 && (observations[0].Status != PlanningResumeNotDispatched ||
+				observations[1].Status != PlanningResumeUnknown)) {
 			return fmt.Errorf("%w: invalid PlanningResumeObservation history for %s", ErrInvalidJob, resumeID)
 		}
 	}

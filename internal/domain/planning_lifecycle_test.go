@@ -321,10 +321,19 @@ func TestPlanningResumeNotDispatchedMayBeFollowedByAttached(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = notDispatched.CreatedAt
 
-	attached, err := NewPlanningResumeObservation(job, resume.ID, principal,
-		"cmd_dddddddddddddddddddddddddddddddd", PlanningResumeAttached, strings.Repeat("d", 64), false, now.Add(3*time.Second))
+	unknown, err := NewPlanningResumeObservation(job, resume.ID, principal,
+		"cmd_dddddddddddddddddddddddddddddddd", PlanningResumeUnknown, "", false, now.Add(3*time.Second))
 	if err != nil {
-		t.Fatalf("ATTACHED observation after NOT_DISPATCHED: %v", err)
+		t.Fatalf("UNKNOWN observation after NOT_DISPATCHED: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, unknown)
+	job.Revision++
+	job.UpdatedAt = unknown.CreatedAt
+
+	attached, err := NewPlanningResumeObservation(job, resume.ID, principal,
+		"cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", PlanningResumeAttached, strings.Repeat("e", 64), true, now.Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("ATTACHED observation after UNKNOWN: %v", err)
 	}
 	job.PlanningResumeObservations = append(job.PlanningResumeObservations, attached)
 	job.Revision++

@@ -163,6 +163,20 @@ func validateWorktreeAssignments(job Job) error {
 		byPath[assignment.WorktreePath] = assignment.ID
 		byExecution[assignment.OwnerRoleExecutionID] = struct{}{}
 	}
+	if job.WorktreeLifecycleEnforcedFromRevision != 0 {
+		enforcementFound := false
+		for _, execution := range job.RoleExecutions {
+			if (execution.Role == RoleCoder || execution.Role == RoleReviewer) &&
+				execution.CreatedRevision == job.WorktreeLifecycleEnforcedFromRevision &&
+				execution.WorktreeID != "" {
+				enforcementFound = true
+				break
+			}
+		}
+		if !enforcementFound {
+			return errors.New("Worktree lifecycle enforcement revision has no matching Task RoleExecution")
+		}
+	}
 	for _, execution := range job.RoleExecutions {
 		if execution.Role != RoleCoder && execution.Role != RoleReviewer {
 			continue
