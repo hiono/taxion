@@ -337,7 +337,6 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	}
 }
 
-
 func TestProviderCapabilityEvidenceSHA256AcceptsEvidenceAtLeastLive(t *testing.T) {
 	identity := provider.Identity{
 		ProviderID: "provider.test", AccountID: "account.primary",
