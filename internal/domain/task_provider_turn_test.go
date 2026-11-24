@@ -454,4 +454,11 @@ func TestTaskCoderResumeObservationRequiresProviderResponsePath(t *testing.T) {
 		observation.ProviderResponse.SessionID != resume.ProviderSessionID {
 		t.Fatalf("Provider Resume response was not bound to observation: %#v", observation)
 	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, observation)
+	job.Revision++
+	job.UpdatedAt = observation.CreatedAt
+	if _, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task",
+		"cmd_f5050505050505050505050505050505", strings.Repeat("f", 64), true, now.Add(3*time.Second)); err == nil {
+		t.Fatal("a later Resume intent was accepted while the previous Session dispatch claim remained active")
+	}
 }

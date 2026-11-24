@@ -122,7 +122,7 @@ func TestLegacyTaskRoleExecutionWithoutWorktreeRemainsReadable(t *testing.T) {
 	}
 	start, err := NewTaskRoleExecutionStart(
 		job, task.ID, permission.ID, "cmd_88888888888888888888888888888888",
-		strings.Repeat("c", 64), snapshot, now.Add(time.Minute),
+		requestSHA, snapshot, now.Add(time.Minute),
 	)
 	if err != nil {
 		t.Fatalf("NewTaskRoleExecutionStart fixture: %v", err)
