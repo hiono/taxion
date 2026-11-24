@@ -103,6 +103,18 @@ func TestProviderResultAndUsageFactsPersistAtomicallyAndRestore(t *testing.T) {
 	}
 	job, err = database.GetJob(ctx, jobID)
 	if err != nil {
+		t.Fatalf("GetJob before over-budget Usage: %v", err)
+	}
+	if _, _, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
+		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_over_budget", 101, true, strings.Repeat("9", 64), principal); err == nil {
+		t.Fatal("Task Turn accepted a complete Provider Usage above its reserved token budget")
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || len(job.ProviderUsageObservations) != 1 || job.ProviderUsageObservations[0] != partial {
+		t.Fatalf("rejected over-budget Usage changed the Job: %#v %v", job.ProviderUsageObservations, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
 		t.Fatalf("GetJob before complete Usage: %v", err)
 	}
 	completeReceipt, complete, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
