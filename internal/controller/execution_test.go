@@ -121,7 +121,6 @@ func (a *fakeTaskWorktreeAdopter) Adopt(
 	return a.snapshot, nil
 }
 
-
 func (v *fakeTaskWorktreeVerifier) Prepare(_ context.Context, jobID string, task domain.Task) (domain.WorktreeSnapshot, error) {
 	v.prepareCalls++
 	if v.err != nil {
@@ -410,19 +409,19 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 	}
 	now := time.Now().UTC().Round(0)
 	contract := domain.JobContract{
-		Purpose: "Continue work in the approved existing Worktree",
-		Constraints: []string{"Do not discard existing changes"},
-		TargetRepositories: []string{"repo_taxion"},
-		TargetResources: []string{worktreePath},
-		Workspaces: []string{"workspace_taxion"},
-		AcceptanceCriteria: []string{"Existing changes remain available"},
-		RequiredEvidence: []string{"Linux tests"},
-		Budget: domain.JobContractBudget{MaxTurns: 3, MaxTokens: 1000},
-		ConcurrencyCeiling: 1,
-		Deadline: now.Add(time.Hour),
-		ProhibitedEffects: []string{"production deployment"},
+		Purpose:                 "Continue work in the approved existing Worktree",
+		Constraints:             []string{"Do not discard existing changes"},
+		TargetRepositories:      []string{"repo_taxion"},
+		TargetResources:         []string{worktreePath},
+		Workspaces:              []string{"workspace_taxion"},
+		AcceptanceCriteria:      []string{"Existing changes remain available"},
+		RequiredEvidence:        []string{"Linux tests"},
+		Budget:                  domain.JobContractBudget{MaxTurns: 3, MaxTokens: 1000},
+		ConcurrencyCeiling:      1,
+		Deadline:                now.Add(time.Hour),
+		ProhibitedEffects:       []string{"production deployment"},
 		ApprovalRequiredEffects: []string{"publish release"},
-		ConfigurationSHA256: strings.Repeat("f", 64),
+		ConfigurationSHA256:     strings.Repeat("f", 64),
 	}
 	_, revision, err := database.AddJobContractRevision(
 		ctx, jobID, job.Revision, "cmd_93939393939393939393939393939393",
