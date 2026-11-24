@@ -101,6 +101,27 @@ type fakeTaskWorktreeVerifier struct {
 	verifyCalls  int
 }
 
+type fakeTaskWorktreeAdopter struct {
+	*fakeTaskWorktreeVerifier
+	snapshot   domain.WorktreeSnapshot
+	adoptErr   error
+	adoptCalls int
+}
+
+func (a *fakeTaskWorktreeAdopter) Adopt(
+	_ context.Context, _ string, _ domain.Task, path string,
+) (domain.WorktreeSnapshot, error) {
+	a.adoptCalls++
+	if a.adoptErr != nil {
+		return domain.WorktreeSnapshot{}, a.adoptErr
+	}
+	if path != a.snapshot.WorktreePath {
+		return domain.WorktreeSnapshot{}, errors.New("unexpected adopted Worktree path")
+	}
+	return a.snapshot, nil
+}
+
+
 func (v *fakeTaskWorktreeVerifier) Prepare(_ context.Context, jobID string, task domain.Task) (domain.WorktreeSnapshot, error) {
 	v.prepareCalls++
 	if v.err != nil {
@@ -376,5 +397,123 @@ func TestExecutionControllerExactReplayAndCommandConflict(t *testing.T) {
 	}
 	if len(job.ExecutionPermissions) != 1 {
 		t.Fatalf("permission count = %d, want exactly one", len(job.ExecutionPermissions))
+	}
+}
+
+func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
+	ctx := context.Background()
+	_, database, principal, jobID, _, sourceResult, _ := startContractPlanner(t)
+	worktreePath := "/tmp/taxion-approved-existing-worktree"
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before JobContract proposal: %v", err)
+	}
+	now := time.Now().UTC().Round(0)
+	contract := domain.JobContract{
+		Purpose: "Continue work in the approved existing Worktree",
+		Constraints: []string{"Do not discard existing changes"},
+		TargetRepositories: []string{"repo_taxion"},
+		TargetResources: []string{worktreePath},
+		Workspaces: []string{"workspace_taxion"},
+		AcceptanceCriteria: []string{"Existing changes remain available"},
+		RequiredEvidence: []string{"Linux tests"},
+		Budget: domain.JobContractBudget{MaxTurns: 3, MaxTokens: 1000},
+		ConcurrencyCeiling: 1,
+		Deadline: now.Add(time.Hour),
+		ProhibitedEffects: []string{"production deployment"},
+		ApprovalRequiredEffects: []string{"publish release"},
+		ConfigurationSHA256: strings.Repeat("f", 64),
+	}
+	_, revision, err := database.AddJobContractRevision(
+		ctx, jobID, job.Revision, "cmd_93939393939393939393939393939393",
+		sourceResult.RoleExecutionID, sourceResult.ID, sourceResult.ContentSHA256, contract,
+	)
+	if err != nil {
+		t.Fatalf("AddJobContractRevision: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before JobApproval: %v", err)
+	}
+	if _, _, err := database.AddJobApproval(
+		ctx, jobID, job.Revision, "cmd_94949494949494949494949494949494",
+		revision.Revision, revision.CanonicalHash, revision.CanonicalizationVersion,
+		"Approve the exact existing Worktree resource", principal,
+	); err != nil {
+		t.Fatalf("AddJobApproval: %v", err)
+	}
+	taskController, err := NewTaskController(database)
+	if err != nil {
+		t.Fatalf("NewTaskController: %v", err)
+	}
+	_, task, err := taskController.Create(ctx, domain.TaskRequest{
+		JobID: jobID, CommandID: "cmd_95959595959595959595959595959595",
+		Title: "Adopt existing Worktree", Purpose: "Continue the approved working state",
+		TargetRepositories: []string{"repo_taxion"}, TargetResources: []string{worktreePath},
+		AcceptanceCriteria: []string{"Existing changes are preserved"},
+	})
+	if err != nil {
+		t.Fatalf("Create Task: %v", err)
+	}
+	now = time.Now().UTC().Round(0)
+	adopter := &fakeTaskWorktreeAdopter{
+		fakeTaskWorktreeVerifier: &fakeTaskWorktreeVerifier{},
+		snapshot: domain.WorktreeSnapshot{
+			RepositoryID: "repo_taxion", RepositoryPath: "/tmp/taxion-test-repository",
+			WorktreePath: worktreePath, BaselineCommit: strings.Repeat("a", 40),
+			Origin: domain.WorktreeOriginAdopted, InitialStateSHA256: strings.Repeat("b", 64),
+			HeadMode: domain.WorktreeHeadDetached,
+		},
+	}
+	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
+		Reversible: true, Mutating: true, ValidUntil: now.Add(45 * time.Minute),
+	}}
+	controller, err := NewExecutionControllerWithWorktree(database, assessor, adopter)
+	if err != nil {
+		t.Fatalf("NewExecutionControllerWithWorktree: %v", err)
+	}
+	controller.now = func() time.Time { return now }
+	request := domain.ExecutionPermissionRequest{
+		JobID: jobID, TaskID: task.ID, CommandID: "cmd_96969696969696969696969696969696",
+		Role: domain.RoleCoder, Effect: "repository.write", Resource: worktreePath,
+		ProviderID: "provider.test", AccountID: "account.primary",
+		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
+		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		WorktreePath: worktreePath,
+	}
+	_, permission, err := controller.Authorize(ctx, request)
+	if err != nil {
+		t.Fatalf("Authorize adopted Worktree: %v", err)
+	}
+	startCommand := "cmd_97979797979797979797979797979797"
+	receipt, execution, intent, err := controller.StartTaskExecution(ctx, permission.ID, startCommand, request)
+	if err != nil {
+		t.Fatalf("StartTaskExecution with adopted Worktree: %v", err)
+	}
+	if receipt.Revision == 0 || execution.TaskID != task.ID || intent.WorktreeID != execution.WorktreeID ||
+		adopter.adoptCalls != 1 || adopter.prepareCalls != 0 {
+		t.Fatalf("adopted Worktree was not used for the exact Task start: receipt=%#v execution=%#v intent=%#v adopter=%#v",
+			receipt, execution, intent, adopter)
+	}
+	persisted, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after adopted Worktree start: %v", err)
+	}
+	if len(persisted.WorktreeAssignments) != 1 {
+		t.Fatalf("Worktree assignment count = %d, want 1", len(persisted.WorktreeAssignments))
+	}
+	assignment := persisted.WorktreeAssignments[0]
+	if assignment.Origin != domain.WorktreeOriginAdopted ||
+		assignment.InitialStateSHA256 != adopter.snapshot.InitialStateSHA256 ||
+		assignment.HeadMode != adopter.snapshot.HeadMode ||
+		assignment.WorktreePath != worktreePath ||
+		assignment.OwnerRoleExecutionID != execution.ID {
+		t.Fatalf("JobAggregate did not persist adopted Worktree identity: %#v", assignment)
+	}
+	if _, _, _, err := controller.StartTaskExecution(ctx, permission.ID, startCommand, request); err != nil {
+		t.Fatalf("exact adopted Worktree Start replay: %v", err)
+	}
+	if adopter.adoptCalls != 1 || adopter.verifyCalls != 1 {
+		t.Fatalf("exact replay re-adopted Worktree: adopt=%d verify=%d", adopter.adoptCalls, adopter.verifyCalls)
 	}
 }
