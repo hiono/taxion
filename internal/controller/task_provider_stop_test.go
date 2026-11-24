@@ -1347,6 +1347,81 @@ func TestTaskProviderStopRetriesDefinitiveFailureClaimRelease(t *testing.T) {
 	}
 }
 
+func TestTaskProviderStopDefinitiveFailureObservationIsClaimScoped(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	f.runtime.stopErr = &provider.OperationError{Class: provider.FailureDefinitive, Code: provider.OperationCodeInvalidRequest}
+	commandID := "cmd_93939393939393939393939393939393"
+	_, intent, firstObservation, firstErr := f.controller.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if firstErr == nil || firstObservation.EvidenceSHA256 == "" || f.runtime.stopCalls != 1 {
+		t.Fatalf("first definitive Stop failure was not persisted: observation=%#v calls=%d err=%v",
+			firstObservation, f.runtime.stopCalls, firstErr)
+	}
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: intent.OperationID, SessionID: "session_1",
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("a", 64),
+	}
+	_, retryIntent, secondObservation, secondErr := f.controller.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if secondErr == nil || retryIntent.ID != intent.ID || secondObservation.ID == firstObservation.ID ||
+		secondObservation.EvidenceSHA256 == firstObservation.EvidenceSHA256 || f.runtime.stopCalls != 2 {
+		t.Fatalf("second definitive failure reused the first claim observation: first=%#v second=%#v calls=%d err=%v",
+			firstObservation, secondObservation, f.runtime.stopCalls, secondErr)
+	}
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after repeated definitive failures: %v", err)
+	}
+	if len(job.ProviderStopDispatchClaims) != 2 || len(job.ProviderStopDispatchStarts) != 2 ||
+		len(job.ProviderStopDispatchReleases) != 2 || len(job.ProviderStopObservations) != 2 {
+		t.Fatalf("claim-scoped Stop facts are incomplete: claims=%d starts=%d releases=%d observations=%d",
+			len(job.ProviderStopDispatchClaims), len(job.ProviderStopDispatchStarts),
+			len(job.ProviderStopDispatchReleases), len(job.ProviderStopObservations))
+	}
+	if _, active := domain.ActiveProviderStopDispatchClaim(job, intent.OperationID); active {
+		t.Fatal("definitive Stop failures retained an active dispatch claim")
+	}
+}
+
+func TestTaskProviderStopRecoversAfterRuntimeCapabilityRecheckRejectsBeforeAdapter(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	f.runtime.stopErr = provider.ErrUnsupportedCapability
+	commandID := "cmd_a4141414141414141414141414141414"
+	_, intent, firstObservation, firstErr := f.controller.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if !errors.Is(firstErr, provider.ErrUnsupportedCapability) || firstObservation.EvidenceSHA256 == "" ||
+		f.runtime.stopCalls != 1 {
+		t.Fatalf("runtime pre-Adapter capability rejection was not recorded as definitive: observation=%#v calls=%d err=%v",
+			firstObservation, f.runtime.stopCalls, firstErr)
+	}
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: intent.OperationID, SessionID: "session_1",
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("b", 64),
+	}
+	f.runtime.stopErr = nil
+	_, retryIntent, stopped, retryErr := f.controller.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if retryErr != nil || retryIntent.ID != intent.ID || !stopped.Stopped || !stopped.Quiescent ||
+		f.runtime.stopCalls != 2 {
+		t.Fatalf("same Stop intent did not recover after capability revalidation: intent=%#v observation=%#v calls=%d err=%v",
+			retryIntent, stopped, f.runtime.stopCalls, retryErr)
+	}
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil || len(job.ProviderStopObservations) != 2 || job.ProviderStopObservations[0].ID != firstObservation.ID ||
+		job.ProviderStopObservations[1].Status != domain.ProviderStopStopped {
+		t.Fatalf("Stop recovery did not preserve definitive failure and final proof: observations=%#v err=%v",
+			job.ProviderStopObservations, err)
+	}
+}
+
 func TestTaskProviderStopDispatchStartUsesVerifiedJobRevision(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	f.worktree.onVerifyAt = f.worktree.verifyCalls + 3
