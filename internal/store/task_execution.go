@@ -30,6 +30,9 @@ func (s *Store) StartTaskExecution(
 			return domain.NewTaskRoleExecutionStart(job, taskID, permissionID, commandID, requestSHA256, snapshot, now)
 		},
 		func(job *domain.Job, start domain.TaskExecutionStart) {
+			if job.WorktreeLifecycleEnforcedFromRevision == 0 {
+				job.WorktreeLifecycleEnforcedFromRevision = start.RoleExecution.CreatedRevision
+			}
 			job.WorktreeAssignments = append(job.WorktreeAssignments, start.WorktreeAssignment)
 			job.RoleExecutions = append(job.RoleExecutions, start.RoleExecution)
 			job.ProviderStartIntents = append(job.ProviderStartIntents, start.ProviderStartIntent)

@@ -167,6 +167,11 @@ func validateWorktreeAssignments(job Job) error {
 		if execution.Role != RoleCoder && execution.Role != RoleReviewer {
 			continue
 		}
+		if execution.WorktreeID == "" &&
+			(job.WorktreeLifecycleEnforcedFromRevision == 0 ||
+				execution.CreatedRevision < job.WorktreeLifecycleEnforcedFromRevision) {
+			continue
+		}
 		assignment, found := byTask[execution.TaskID]
 		if !found || assignment.ID != execution.WorktreeID || assignment.OwnerRoleExecutionID != execution.ID {
 			return errors.New("Task RoleExecution has no matching Worktree assignment")

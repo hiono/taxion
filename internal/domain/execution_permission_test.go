@@ -98,6 +98,55 @@ func executionPermissionTestAssessment(request ExecutionPermissionRequest, reque
 	}
 }
 
+func TestLegacyTaskRoleExecutionWithoutWorktreeRemainsReadable(t *testing.T) {
+	job, task, now := approvedJobWithTaskForExecutionPermission(t)
+	request := executionPermissionTestRequest(job, now)
+	requestSHA, err := ExecutionPermissionRequestSHA256(request)
+	if err != nil {
+		t.Fatalf("ExecutionPermissionRequestSHA256: %v", err)
+	}
+	assessment := executionPermissionTestAssessment(request, requestSHA, now)
+	permission, err := NewExecutionPermission(job, request, requestSHA, assessment, now)
+	if err != nil {
+		t.Fatalf("NewExecutionPermission: %v", err)
+	}
+	job.ExecutionPermissions = append(job.ExecutionPermissions, permission)
+	job.Revision++
+	job.UpdatedAt = permission.CreatedAt
+
+	snapshot := WorktreeSnapshot{
+		RepositoryID: task.TargetRepositories[0], RepositoryPath: "/repositories/project",
+		WorktreePath: "/worktrees/legacy-task", BaselineCommit: strings.Repeat("a", 40),
+		Origin: WorktreeOriginTaxionCreated, InitialStateSHA256: strings.Repeat("b", 64),
+		HeadMode: WorktreeHeadDetached,
+	}
+	start, err := NewTaskRoleExecutionStart(
+		job, task.ID, permission.ID, "cmd_88888888888888888888888888888888",
+		strings.Repeat("c", 64), snapshot, now.Add(time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("NewTaskRoleExecutionStart fixture: %v", err)
+	}
+	start.RoleExecution.WorktreeID = ""
+	start.ProviderStartIntent.WorktreeID = ""
+	job.RoleExecutions = append(job.RoleExecutions, start.RoleExecution)
+	job.ProviderStartIntents = append(job.ProviderStartIntents, start.ProviderStartIntent)
+	job.Revision++
+	job.UpdatedAt = start.RoleExecution.CreatedAt
+
+	if err := job.Validate(); err != nil {
+		t.Fatalf("legacy Task RoleExecution without WorktreeID was not readable: %v", err)
+	}
+	if job.WorktreeLifecycleEnforcedFromRevision != 0 {
+		t.Fatal("reading a legacy RoleExecution unexpectedly enabled Worktree lifecycle enforcement")
+	}
+
+	job.WorktreeLifecycleEnforcedFromRevision = start.RoleExecution.CreatedRevision
+	if err := job.Validate(); err == nil {
+		t.Fatal("Task RoleExecution without WorktreeID passed after Worktree lifecycle enforcement")
+	}
+}
+
 func TestExecutionPermissionBindsExactApprovedOperation(t *testing.T) {
 	job, _, now := approvedJobWithTaskForExecutionPermission(t)
 	request := executionPermissionTestRequest(job, now)

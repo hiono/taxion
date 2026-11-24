@@ -41,8 +41,9 @@ type Job struct {
 	JobContractRevisions         []JobContractRevision         `json:"job_contract_revisions,omitempty"`
 	JobApprovals                 []JobApproval                 `json:"job_approvals,omitempty"`
 	Tasks                        []Task                        `json:"tasks,omitempty"`
-	WorktreeAssignments          []WorktreeAssignment          `json:"worktree_assignments,omitempty"`
-	JobOutputs                   []JobOutput                   `json:"job_outputs,omitempty"`
+	WorktreeAssignments                  []WorktreeAssignment          `json:"worktree_assignments,omitempty"`
+	WorktreeLifecycleEnforcedFromRevision uint64                        `json:"worktree_lifecycle_enforced_from_revision,omitempty"`
+	JobOutputs                            []JobOutput                   `json:"job_outputs,omitempty"`
 	ExecutionPermissions         []ExecutionPermission         `json:"execution_permissions,omitempty"`
 	RoleExecutions               []RoleExecution               `json:"role_executions,omitempty"`
 	ProviderStartIntents         []ProviderStartIntent         `json:"provider_start_intents,omitempty"`
@@ -364,10 +365,13 @@ func (e RoleExecution) Validate(job Job) error {
 		}
 		return errors.New("RoleExecution PlanningAuthorization was not found")
 	case RoleCoder, RoleReviewer:
+		worktreeRequired := job.WorktreeLifecycleEnforcedFromRevision != 0 &&
+			e.CreatedRevision >= job.WorktreeLifecycleEnforcedFromRevision
 		if e.PlanningAuthorizationID != "" || !validPlanningIdentity(e.TaskID) ||
-			!validPlanningIdentity(e.WorktreeID) ||
+			(e.WorktreeID != "" && !validPlanningIdentity(e.WorktreeID)) ||
+			(worktreeRequired && e.WorktreeID == "") ||
 			!validPlanningIdentity(e.ExecutionPermissionID) {
-			return errors.New("Task RoleExecution requires TaskID, WorktreeID, and ExecutionPermissionID")
+			return errors.New("Task RoleExecution requires TaskID, WorktreeID, and ExecutionPermissionID after Worktree lifecycle enforcement")
 		}
 		task, taskFound := taskByID(job, e.TaskID)
 		permission, permissionFound := executionPermissionByID(job, e.ExecutionPermissionID)
@@ -631,6 +635,9 @@ func (j Job) Validate() error {
 	}
 	if j.Revision == 0 {
 		return fmt.Errorf("%w: revision must be positive", ErrInvalidJob)
+	}
+	if j.WorktreeLifecycleEnforcedFromRevision > j.Revision {
+		return fmt.Errorf("%w: Worktree lifecycle enforcement revision exceeds Job revision", ErrInvalidJob)
 	}
 	if j.CreatedAt.IsZero() || j.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: timestamps are required", ErrInvalidJob)
