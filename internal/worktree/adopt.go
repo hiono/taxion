@@ -424,15 +424,15 @@ func initialWorktreeStateSHA256(
 	if err := verifyWorktreeIndexFlags(ctx, path); err != nil {
 		return "", err
 	}
-	status, err := gitBytes(ctx, path, "--no-optional-locks", "status", "--porcelain=v2", "--untracked-files=all", "--ignore-submodules=none", "-z")
+	status, err := gitBytes(ctx, path, "-c", "core.quotePath=true", "-c", "status.relativePaths=false", "-c", "status.renames=false", "--no-optional-locks", "status", "--porcelain=v2", "--untracked-files=all", "--ignore-submodules=none", "-z")
 	if err != nil {
 		return "", err
 	}
-	staged, err := gitBytes(ctx, path, "--no-optional-locks", "diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", head, "--")
+	staged, err := gitBytes(ctx, path, "-c", "core.quotePath=true", "-c", "diff.algorithm=myers", "-c", "diff.renames=false", "-c", "color.ui=false", "--no-optional-locks", "diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv", "--no-renames", "--no-color", "--ignore-submodules=none", head, "--")
 	if err != nil {
 		return "", err
 	}
-	working, err := gitBytes(ctx, path, "--no-optional-locks", "diff", "--binary", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none")
+	working, err := gitBytes(ctx, path, "-c", "core.quotePath=true", "-c", "diff.algorithm=myers", "-c", "diff.renames=false", "-c", "color.ui=false", "--no-optional-locks", "diff", "--binary", "--no-ext-diff", "--no-textconv", "--no-renames", "--no-color", "--ignore-submodules=none")
 	if err != nil {
 		return "", err
 	}
@@ -466,6 +466,9 @@ func initialWorktreeStateSHA256(
 	} {
 		writeDigestPart(hash, part)
 	}
+	if err := hashTrackedWorktreeFiles(ctx, path, hash); err != nil {
+		return "", err
+	}
 	for _, relative := range strings.Split(string(untracked), "\x00") {
 		if relative == "" {
 			continue
@@ -481,9 +484,9 @@ func initialWorktreeStateSHA256(
 		if !info.Mode().IsRegular() {
 			return "", errors.New("untracked Worktree contains a symlink or non-regular file")
 		}
-		file, err := os.Open(filePath)
+		file, err := openRegularWorktreeFile(filePath, info)
 		if err != nil {
-			return "", fmt.Errorf("open untracked Worktree file: %w", err)
+			return "", fmt.Errorf("open untracked Worktree file without following replacements: %w", err)
 		}
 		openedInfo, statErr := file.Stat()
 		if statErr != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) || openedInfo.Size() != info.Size() {
@@ -509,6 +512,81 @@ func initialWorktreeStateSHA256(
 		}
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func hashTrackedWorktreeFiles(ctx context.Context, path string, hash interface{ Write([]byte) (int, error) }) error {
+	entries, err := gitBytes(ctx, path, "--no-optional-locks", "ls-files", "--stage", "-z")
+	if err != nil {
+		return fmt.Errorf("list tracked Worktree files for raw-state digest: %w", err)
+	}
+	for _, entry := range strings.Split(string(entries), "\x00") {
+		if entry == "" {
+			continue
+		}
+		separator := strings.IndexByte(entry, '\t')
+		if separator <= 0 || separator == len(entry)-1 {
+			return errors.New("tracked Worktree index entry is malformed")
+		}
+		fields := strings.Fields(entry[:separator])
+		if len(fields) != 3 {
+			return errors.New("tracked Worktree index metadata is malformed")
+		}
+		mode, relative := fields[0], entry[separator+1:]
+		if mode == "160000" {
+			continue
+		}
+		filePath := filepath.Clean(filepath.Join(path, filepath.FromSlash(relative)))
+		if !pathWithin(path, filePath) {
+			return errors.New("tracked Worktree path escapes its root")
+		}
+		info, err := os.Lstat(filePath)
+		if err != nil {
+			return fmt.Errorf("inspect tracked Worktree file %q: %w", relative, err)
+		}
+		writeDigestPart(hash, []byte(relative))
+		writeDigestPart(hash, []byte(mode))
+		writeDigestPart(hash, []byte(fmt.Sprintf("%o", uint32(info.Mode()))))
+		switch mode {
+		case "120000":
+			if info.Mode()&os.ModeSymlink == 0 {
+				return errors.New("tracked symlink changed file type during adoption")
+			}
+			target, err := os.Readlink(filePath)
+			if err != nil {
+				return fmt.Errorf("read tracked Worktree symlink %q: %w", relative, err)
+			}
+			after, err := os.Lstat(filePath)
+			if err != nil || !os.SameFile(info, after) || after.Mode()&os.ModeSymlink == 0 {
+				return errors.New("tracked Worktree symlink changed while its state was captured")
+			}
+			writeDigestPart(hash, []byte(target))
+		case "100644", "100755":
+			if !info.Mode().IsRegular() {
+				return errors.New("tracked Worktree file is not a regular file")
+			}
+			file, err := openRegularWorktreeFile(filePath, info)
+			if err != nil {
+				return fmt.Errorf("open tracked Worktree file %q: %w", relative, err)
+			}
+			if _, err := fmt.Fprintf(hash, "%d:", info.Size()); err != nil {
+				_ = file.Close()
+				return err
+			}
+			written, copyErr := io.CopyBuffer(hash, file, make([]byte, 64*1024))
+			after, statErr := file.Stat()
+			closeErr := file.Close()
+			if copyErr != nil {
+				return fmt.Errorf("hash tracked Worktree file %q: %w", relative, copyErr)
+			}
+			if statErr != nil || closeErr != nil || written != info.Size() ||
+				!os.SameFile(info, after) || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) {
+				return errors.New("tracked Worktree file changed while its state was captured")
+			}
+		default:
+			return fmt.Errorf("unsupported tracked Worktree file mode %q", mode)
+		}
+	}
+	return nil
 }
 
 func gitBytes(ctx context.Context, directory string, args ...string) ([]byte, error) {
