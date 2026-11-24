@@ -1090,17 +1090,23 @@ func TestTaskProviderSendRevalidatesWorktreeAfterClaimBeforeDispatch(t *testing.
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
+	commandID := "cmd_78787878787878787878787878787878"
 	_, _, created, err := f.database.AddTaskTurnIntentWithStatus(
 		f.ctx, f.jobID, job.Revision, f.execution.ID, f.permission.ID, "session_1",
-		"cmd_78787878787878787878787878787878", hex.EncodeToString(digest[:]), 50,
+		commandID, hex.EncodeToString(digest[:]), 50,
 	)
 	if err != nil || !created {
 		t.Fatalf("AddTaskTurnIntent: created=%v err=%v", created, err)
 	}
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: domain.TaskTurnOperationID(commandID),
+		Status: provider.LookupStatusNotFound, SessionID: "session_1",
+		TurnID: domain.TaskTurnIntentID(commandID), EvidenceSHA256: strings.Repeat("b", 64),
+	}
 	f.worktree.failAt = f.worktree.verifyCalls + 3
 	f.worktree.verifyErr = errors.New("Worktree changed after Send claim acquisition")
 	_, turn, _, _, sendErr := f.controller.SendTaskExecution(
-		f.ctx, f.jobID, f.execution.ID, f.permission.ID, "cmd_78787878787878787878787878787878",
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
 		prompt, f.permissionRequest, 50, f.principal,
 	)
 	if sendErr == nil || turn.ID == "" || f.runtime.sendCalls != 0 {
