@@ -108,6 +108,21 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	); err != nil {
 		t.Fatalf("DispatchTaskExecution: %v", err)
 	}
+	worktree.failAt = worktree.verifyCalls + 1
+	worktree.failErr = errors.New("temporary pre-dispatch Worktree verification failure")
+	if _, _, _, _, err := providerController.SendTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_d3030303030303030303030303030303",
+		"Implement the approved Task changes.", permissionRequest, 100, principal,
+	); err == nil {
+		t.Fatal("initial pre-dispatch Worktree failure was not returned")
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil || len(job.TaskTurnIntents) != 1 || len(job.TaskTurnDispatchClaims) != 0 ||
+		len(job.TaskTurnObservations) != 0 || runtime.sendCalls != 0 {
+		t.Fatalf("pre-dispatch failure left unexpected dispatch facts: intents=%d claims=%d observations=%d sends=%d err=%v",
+			len(job.TaskTurnIntents), len(job.TaskTurnDispatchClaims), len(job.TaskTurnObservations), runtime.sendCalls, err)
+	}
+	worktree.failAt = 0
 	_, turn, observation, result, err := providerController.SendTaskExecution(
 		ctx, jobID, execution.ID, permission.ID, "cmd_d3030303030303030303030303030303",
 		"Implement the approved Task changes.", permissionRequest, 100, principal,
