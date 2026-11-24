@@ -516,4 +516,3 @@ func TestWriteExclusiveAtomicDoesNotOverwriteExistingRecord(t *testing.T) {
 		t.Fatalf("atomic record was overwritten or incomplete: data=%q err=%v", actual, err)
 	}
 }
-
