@@ -257,7 +257,7 @@ func (c *ProviderController) dispatchTaskTurn(
 	if err != nil {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
 	}
-	_, claim, createdClaim, err := c.store.AddTaskTurnDispatchClaim(
+	_, _, createdClaim, err := c.store.AddTaskTurnDispatchClaim(
 		ctx, latest.ID, latest.Revision, turn.ID, claimCommandID, principal,
 	)
 	if err != nil {
