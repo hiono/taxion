@@ -307,6 +307,43 @@ func (s *Store) AddPlanningResumeObservation(ctx context.Context, jobID string, 
 		})
 }
 
+
+func (s *Store) AddTaskProviderResumeObservation(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	resumeID, commandID, status, evidenceSHA256 string,
+	response domain.ProviderResumeResponse,
+	reconcilesUnknown bool,
+) (CommandReceipt, domain.PlanningResumeObservation, error) {
+	request := struct {
+		JobID, ResumeID, CommandID, Status, EvidenceSHA256 string
+		Response                                           domain.ProviderResumeResponse
+		ReconcilesUnknown                                  bool
+	}{
+		JobID: jobID, ResumeID: resumeID, CommandID: commandID,
+		Status: status, EvidenceSHA256: evidenceSHA256,
+		Response: response, ReconcilesUnknown: reconcilesUnknown,
+	}
+	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, "AddTaskProviderResumeObservation", request,
+		func(job domain.Job, now time.Time) (domain.PlanningResumeObservation, error) {
+			return domain.NewTaskProviderResumeObservation(
+				job, resumeID, commandID, status, evidenceSHA256, response, reconcilesUnknown, now,
+			)
+		},
+		func(job *domain.Job, fact domain.PlanningResumeObservation) {
+			job.PlanningResumeObservations = append(job.PlanningResumeObservations, fact)
+		},
+		func(job domain.Job) (domain.PlanningResumeObservation, bool) {
+			for _, fact := range job.PlanningResumeObservations {
+				if fact.CommandID == commandID {
+					return fact, true
+				}
+			}
+			return domain.PlanningResumeObservation{}, false
+		})
+}
+
 func (s *Store) AddProviderStopIntent(
 	ctx context.Context,
 	jobID string,
