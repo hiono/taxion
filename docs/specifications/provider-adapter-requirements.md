@@ -85,7 +85,8 @@ CapabilityはProvider ID、account identity、SDK / protocol version、configura
 |---|---|
 | Start idempotency / lookup | Start Idempotencyは同一OperationIDの重複実行を防止する。Task-bound StartのdispatchにはE4 Start Idempotencyを必須とし、Start Lookup単独は既存operationの照合にのみ使用する |
 | Send idempotency / lookup | Sendの重複実行防止または同一TurnIDによる照合 |
-| Cross-process reattachment | 保存済みの同一Sessionへのprocess restart後の再接続 |
+| Cross-process reattachment | 保存済みの同一Sessionへのprocess restart後の再接続。Task-bound ResumeにはE5証拠を必須とする |
+| Resume idempotency | 同一OperationID / SessionIDの並行Resume要求を一つのProvider reattachmentへ収束させる。Task-bound ResumeにはE4証拠を必須とする |
 | Event replay | event cursorの連続性を保った再取得 |
 | Stop proof | Providerが処理を停止し、後続書込みを継続しないことの証拠 |
 | Stop lookup | 同一Stop OperationID / SessionIDの状態を照会し、STOPPED / QuiescentまたはNOT_FOUNDを検証する能力 |
