@@ -225,21 +225,26 @@ func (m *Manager) cleanupFailedPrepare(
 	baselineCreated bool, reservation *adoptionReservation,
 ) error {
 	var cleanupErr error
+	worktreeRemoved := true
 	if _, err := os.Lstat(worktreePath); err == nil {
-		cleanupErr = runGit(ctx, repositoryPath, "worktree", "remove", "--force", worktreePath)
-		if cleanupErr != nil {
-			cleanupErr = fmt.Errorf("remove failed Task Worktree: %w", cleanupErr)
+		if err := runGit(ctx, repositoryPath, "worktree", "remove", "--force", worktreePath); err != nil {
+			worktreeRemoved = false
+			cleanupErr = fmt.Errorf("remove failed Task Worktree: %w", err)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
+		worktreeRemoved = false
 		cleanupErr = fmt.Errorf("inspect failed Task Worktree before cleanup: %w", err)
 	}
 	if baselineCreated {
+		baselineRemoved := false
 		if err := os.Remove(baselinePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove failed Task Worktree baseline: %w", err))
 		} else if err := syncDirectory(filepath.Dir(baselinePath)); err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("sync failed Task Worktree baseline cleanup: %w", err))
+		} else {
+			baselineRemoved = true
 		}
-		if reservation != nil {
+		if reservation != nil && worktreeRemoved && baselineRemoved {
 			cleanupErr = errors.Join(cleanupErr, m.removeOrphanedAdoptionReservation(*reservation))
 		}
 	}
