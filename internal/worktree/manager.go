@@ -214,6 +214,11 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 			pathWithin(worktreePath, repositoryPath)) {
 		return errors.New("adopted Worktree path overlaps the managed workspace or source repository")
 	}
+	if origin == domain.WorktreeOriginAdopted {
+		if err := m.verifyAdoptionReservation(jobID, task.ID, snapshot.RepositoryID, worktreePath); err != nil {
+			return err
+		}
+	}
 	resolved, err := filepath.EvalSymlinks(worktreePath)
 	if err != nil || filepath.Clean(resolved) != worktreePath {
 		return errors.New("Worktree path is missing or traverses a symbolic link")
