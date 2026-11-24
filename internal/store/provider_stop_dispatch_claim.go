@@ -32,16 +32,14 @@ func (s *Store) GetProviderStopDispatchClaim(
 	return claimID, true, nil
 }
 
-// ClaimProviderStopDispatch acquires or compare-and-swaps a durable Stop
-// dispatch claim. An empty previousClaimID permits only first insertion. A
-// non-empty previousClaimID permits takeover only of the exact claim observed
-// before a verified Provider NOT_FOUND lookup.
+// ClaimProviderStopDispatch inserts a durable, exclusive Stop dispatch
+// claim. Existing claims are never replaced automatically: a lookup can race
+// an in-flight call, so uncertainty must remain fail-closed.
 func (s *Store) ClaimProviderStopDispatch(
 	ctx context.Context,
-	jobID, roleExecutionID, sessionID, operationID, previousClaimID, claimID string,
+	jobID, roleExecutionID, sessionID, operationID, claimID string,
 ) (bool, error) {
-	if jobID == "" || roleExecutionID == "" || sessionID == "" ||
-		operationID == "" || claimID == "" || claimID == previousClaimID {
+	if jobID == "" || roleExecutionID == "" || sessionID == "" || operationID == "" || claimID == "" {
 		return false, errors.New("Provider Stop dispatch claim identity is required")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -50,24 +48,13 @@ func (s *Store) ClaimProviderStopDispatch(
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC().Round(0).Format(time.RFC3339Nano)
-	var result sql.Result
-	if previousClaimID == "" {
-		result, err = tx.ExecContext(ctx,
-			`INSERT INTO provider_stop_dispatch_claims
-				(operation_id, job_id, role_execution_id, session_id, claim_id, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?)
-				ON CONFLICT(operation_id) DO NOTHING`,
-			jobID, roleExecutionID, sessionID, operationID, claimID, now,
-		)
-	} else {
-		result, err = tx.ExecContext(ctx,
-			`UPDATE provider_stop_dispatch_claims
-				SET claim_id = ?, updated_at = ?
-				WHERE operation_id = ? AND job_id = ? AND role_execution_id = ?
-				AND session_id = ? AND claim_id = ?`,
-			claimID, now, operationID, jobID, roleExecutionID, sessionID, previousClaimID,
-		)
-	}
+	result, err := tx.ExecContext(ctx,
+		`INSERT INTO provider_stop_dispatch_claims
+			(operation_id, job_id, role_execution_id, session_id, claim_id, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(operation_id) DO NOTHING`,
+		jobID, roleExecutionID, sessionID, operationID, claimID, now,
+	)
 	if err != nil {
 		return false, fmt.Errorf("write Provider Stop dispatch claim: %w", err)
 	}
