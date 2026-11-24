@@ -290,6 +290,194 @@ func TestManagerRejectsMultipleRepositoriesAndUnsafeWorkspaceRoot(t *testing.T) 
 	}
 }
 
+func TestManagerPrepareRejectsAndCleansDirtyPostCheckoutHook(t *testing.T) {
+	repository := initRepository(t)
+	hookPath := filepath.Join(repository, ".git", "hooks", "post-checkout")
+	hook := "#!/bin/sh\nprintf 'modified by checkout hook\\n' > README.md\nexit 1\n"
+	if err := os.WriteFile(hookPath, []byte(hook), 0o700); err != nil {
+		t.Fatalf("write post-checkout hook: %v", err)
+	}
+	workspace := filepath.Join(canonicalTempDir(t), "managed-worktrees")
+	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	jobID := "job_1023456789abcdef"
+	task := domain.Task{ID: "task_1023456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	key := sha256.Sum256([]byte(jobID + "\x00" + task.ID))
+	worktreePath := filepath.Join(workspace, hex.EncodeToString(key[:]))
+	if _, err := manager.Prepare(context.Background(), jobID, task); err == nil {
+		t.Fatal("Prepare accepted a Worktree modified by a failing post-checkout hook")
+	}
+	if _, err := os.Lstat(worktreePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed Worktree was left behind: path=%s err=%v", worktreePath, err)
+	}
+	if _, err := os.Stat(worktreePath + ".baseline.json"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("baseline created by failed Prepare was not rolled back: err=%v", err)
+	}
+	if got := gitTestOutput(t, repository, "worktree", "list", "--porcelain"); strings.Contains(got, worktreePath) {
+		t.Fatalf("failed Worktree remains registered: %s", got)
+	}
+}
+
+func TestManagerPrepareRecoversOrphanedAdoptionReservation(t *testing.T) {
+	repository := initRepository(t)
+	external := filepath.Join(canonicalTempDir(t), "external-worktree")
+	gitTestRun(t, repository, "worktree", "add", "--detach", external, "HEAD")
+	workspace := filepath.Join(canonicalTempDir(t), "managed-worktrees")
+	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	jobID := "job_2023456789abcdef"
+	taskA := domain.Task{ID: "task_2023456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	gitDir := gitTestOutput(t, external, "rev-parse", "--absolute-git-dir")
+	gitDir, err = filepath.EvalSymlinks(gitDir)
+	if err != nil {
+		t.Fatalf("resolve external Git admin directory: %v", err)
+	}
+	if err := manager.reserveAdoption(jobID, taskA.ID, "repo.primary", external, gitDir); err != nil {
+		t.Fatalf("persist interrupted adoption reservation: %v", err)
+	}
+	prepared, err := manager.Prepare(context.Background(), jobID, taskA)
+	if err != nil {
+		t.Fatalf("Prepare did not recover orphaned adoption reservation: %v", err)
+	}
+	if prepared.WorktreePath == external {
+		t.Fatal("Prepare reused the external Worktree instead of creating its managed Worktree")
+	}
+	taskB := domain.Task{ID: "task_3023456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	adopted, err := manager.Adopt(context.Background(), "job_3023456789abcdef", taskB, external)
+	if err != nil {
+		t.Fatalf("Task B could not adopt Worktree after orphan reservation recovery: %v", err)
+	}
+	if adopted.WorktreePath != external || adopted.Origin != domain.WorktreeOriginAdopted {
+		t.Fatalf("unexpected adopted Worktree identity: %#v", adopted)
+	}
+}
+
+func TestManagerPreparedWorktreeGitDirCannotBeAdoptedByAnotherTask(t *testing.T) {
+	repository := initRepository(t)
+	workspace := filepath.Join(canonicalTempDir(t), "managed-worktrees")
+	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	taskA := domain.Task{ID: "task_4023456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	prepared, err := manager.Prepare(context.Background(), "job_4023456789abcdef", taskA)
+	if err != nil {
+		t.Fatalf("Prepare Task A: %v", err)
+	}
+	moved := filepath.Join(canonicalTempDir(t), "moved-worktree")
+	gitTestRun(t, repository, "worktree", "move", prepared.WorktreePath, moved)
+	taskB := domain.Task{ID: "task_5023456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	if _, err := manager.Adopt(context.Background(), "job_5023456789abcdef", taskB, moved); err == nil ||
+		!strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("Task B adopted Task A's moved Git admin directory: %v", err)
+	}
+}
+
+func TestManagerAdoptRejectsSubmoduleAssumeUnchangedIndex(t *testing.T) {
+	submoduleRepository := initRepository(t)
+	repository := initRepository(t)
+	gitTestRun(t, repository, "-c", "protocol.file.allow=always", "submodule", "add", submoduleRepository, "modules/example")
+	gitTestRun(t, repository, "add", ".gitmodules", "modules/example")
+	gitTestRun(t, repository, "commit", "-m", "add submodule")
+	worktreePath := filepath.Join(canonicalTempDir(t), "submodule-worktree")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, "HEAD")
+	gitTestRun(t, worktreePath, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive")
+	submodulePath := filepath.Join(worktreePath, "modules", "example")
+	gitTestRun(t, submodulePath, "update-index", "--assume-unchanged", "README.md")
+	if err := os.WriteFile(filepath.Join(submodulePath, "README.md"), []byte("hidden submodule change\n"), 0o600); err != nil {
+		t.Fatalf("modify assume-unchanged submodule file: %v", err)
+	}
+	manager, err := NewManager(
+		filepath.Join(canonicalTempDir(t), "managed-worktrees"),
+		[]Repository{{ID: "repo.primary", Path: repository}},
+	)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_6023456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	if _, err := manager.Adopt(context.Background(), "job_6023456789abcdef", task, worktreePath); err == nil ||
+		!strings.Contains(err.Error(), "assume-unchanged") {
+		t.Fatalf("Adopt accepted a submodule assume-unchanged index entry: %v", err)
+	}
+}
+
+func TestManagerAdoptionDigestIgnoresSubmoduleTagLabels(t *testing.T) {
+	submoduleRepository := initRepository(t)
+	repository := initRepository(t)
+	gitTestRun(t, repository, "-c", "protocol.file.allow=always", "submodule", "add", submoduleRepository, "modules/example")
+	gitTestRun(t, repository, "add", ".gitmodules", "modules/example")
+	gitTestRun(t, repository, "commit", "-m", "add submodule")
+	worktreePath := filepath.Join(canonicalTempDir(t), "tagged-submodule-worktree")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, "HEAD")
+	gitTestRun(t, worktreePath, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive")
+	manager, err := NewManager(
+		filepath.Join(canonicalTempDir(t), "managed-worktrees"),
+		[]Repository{{ID: "repo.primary", Path: repository}},
+	)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_7023456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	jobID := "job_7023456789abcdef"
+	first, err := manager.Adopt(context.Background(), jobID, task, worktreePath)
+	if err != nil {
+		t.Fatalf("initial Adopt: %v", err)
+	}
+	gitTestRun(t, filepath.Join(worktreePath, "modules", "example"), "tag", "-a", "state-label", "-m", "state label")
+	replayed, err := manager.Adopt(context.Background(), jobID, task, worktreePath)
+	if err != nil || replayed != first {
+		t.Fatalf("submodule tag label changed the adoption digest: first=%#v replayed=%#v err=%v", first, replayed, err)
+	}
+}
+
+func TestManagerCaptureOutputRejectsSubmoduleAssumeUnchangedIndex(t *testing.T) {
+	submoduleRepository := initRepository(t)
+	repository := initRepository(t)
+	gitTestRun(t, repository, "-c", "protocol.file.allow=always", "submodule", "add", submoduleRepository, "modules/example")
+	gitTestRun(t, repository, "add", ".gitmodules", "modules/example")
+	gitTestRun(t, repository, "commit", "-m", "add submodule")
+	manager, err := NewManager(
+		filepath.Join(canonicalTempDir(t), "managed-worktrees"),
+		[]Repository{{ID: "repo.primary", Path: repository}},
+	)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_8023456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := manager.Prepare(context.Background(), "job_8023456789abcdef", task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive")
+	submodulePath := filepath.Join(snapshot.WorktreePath, "modules", "example")
+	gitTestRun(t, submodulePath, "update-index", "--assume-unchanged", "README.md")
+	if err := os.WriteFile(filepath.Join(submodulePath, "README.md"), []byte("hidden output change\n"), 0o600); err != nil {
+		t.Fatalf("modify assume-unchanged submodule file: %v", err)
+	}
+	if _, err := manager.CaptureOutput(context.Background(), "job_8023456789abcdef", task, snapshot); err == nil ||
+		!strings.Contains(err.Error(), "assume-unchanged") {
+		t.Fatalf("CaptureOutput accepted a submodule assume-unchanged index entry: %v", err)
+	}
+}
+
+func TestParseWorktreeStatusHeadBindsCleanStateToObservedCommit(t *testing.T) {
+	commit := strings.Repeat("a", 40)
+	status := "# branch.oid " + commit + "\n# branch.head (detached)\n"
+	head, dirty, err := parseWorktreeStatusHead(status)
+	if err != nil || head != commit || dirty {
+		t.Fatalf("clean status did not report its exact commit: head=%q dirty=%v err=%v", head, dirty, err)
+	}
+	dirtyStatus := status + "1 .M N... 100644 100644 100644 " + strings.Repeat("b", 40) + " " + strings.Repeat("b", 40) + " README.md\n"
+	head, dirty, err = parseWorktreeStatusHead(dirtyStatus)
+	if err != nil || head != commit || !dirty {
+		t.Fatalf("dirty status was not detected: head=%q dirty=%v err=%v", head, dirty, err)
+	}
+}
+
 func canonicalTempDir(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
