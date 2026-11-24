@@ -37,6 +37,8 @@ type ProviderExecutionStore interface {
 	AddTaskTurnIntent(context.Context, string, uint64, string, string, string, string, string, uint64) (store.CommandReceipt, domain.TaskTurnIntent, error)
 	AddTaskTurnIntentWithStatus(context.Context, string, uint64, string, string, string, string, string, uint64) (store.CommandReceipt, domain.TaskTurnIntent, bool, error)
 	AddTaskTurnObservation(context.Context, string, uint64, string, string, string, uint64, string, bool) (store.CommandReceipt, domain.TaskTurnObservation, error)
+	AddTaskTurnObservationForClaim(context.Context, string, uint64, string, string, string, string, uint64, string, bool) (store.CommandReceipt, domain.TaskTurnObservation, error)
+	AddTaskTurnDispatchObservation(context.Context, string, uint64, string, string, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.TaskTurnDispatchObservation, bool, error)
 	AddTaskTurnDispatchClaim(context.Context, string, uint64, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.TaskTurnDispatchClaim, bool, error)
 	ReleaseTaskTurnDispatchClaim(context.Context, string, string, auth.AuthenticatedPrincipal, string, string) (store.CommandReceipt, domain.TaskTurnDispatchRelease, error)
 }
