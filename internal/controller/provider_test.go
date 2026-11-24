@@ -174,39 +174,39 @@ func newProviderTestPrincipal(t *testing.T) auth.AuthenticatedPrincipal {
 }
 
 type fakePlanningProviderRuntime struct {
-	identity         provider.Identity
-	capabilities     provider.Capabilities
-	startResult      provider.StartResult
-	startErr         error
-	startCalls       int
-	lookupCalls      int
-	lookupResult     provider.LookupResult
-	lookupErr        error
-	sendResult       provider.TurnResult
-	sendErr          error
-	sendCalls        int
-	sendHook         func(context.Context, provider.TurnRequest) error
-	replayPage       provider.EventPage
-	replayErr        error
-	replayCalls      int
-	stopResult       provider.StopResult
-	stopErr          error
-	stopCalls        int
-	stopRequests     []provider.StopRequest
+	identity          provider.Identity
+	capabilities      provider.Capabilities
+	startResult       provider.StartResult
+	startErr          error
+	startCalls        int
+	lookupCalls       int
+	lookupResult      provider.LookupResult
+	lookupErr         error
+	sendResult        provider.TurnResult
+	sendErr           error
+	sendCalls         int
+	sendHook          func(context.Context, provider.TurnRequest) error
+	replayPage        provider.EventPage
+	replayErr         error
+	replayCalls       int
+	stopResult        provider.StopResult
+	stopErr           error
+	stopCalls         int
+	stopRequests      []provider.StopRequest
 	stopFencingTokens map[string]uint64
-	stopOperations   map[string]provider.StopResult
-	resultResult     provider.Result
-	resultErr        error
-	resultCalls      int
-	usageResult      provider.Usage
-	usageErr         error
-	usageCalls       int
-	resumeResult     provider.ResumeResult
-	resumeErr        error
-	resumeCalls      int
-	resumeHook       func(context.Context, provider.ResumeRequest) error
-	stopHook         func(context.Context, provider.StopRequest) error
-	startHook        func(context.Context, provider.StartRequest) error
+	stopOperations    map[string]provider.StopResult
+	resultResult      provider.Result
+	resultErr         error
+	resultCalls       int
+	usageResult       provider.Usage
+	usageErr          error
+	usageCalls        int
+	resumeResult      provider.ResumeResult
+	resumeErr         error
+	resumeCalls       int
+	resumeHook        func(context.Context, provider.ResumeRequest) error
+	stopHook          func(context.Context, provider.StopRequest) error
+	startHook         func(context.Context, provider.StartRequest) error
 }
 
 func (f *fakePlanningProviderRuntime) Identity() provider.Identity { return f.identity }
