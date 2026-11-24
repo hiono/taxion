@@ -140,16 +140,22 @@ func (c *ProviderController) ResumeTaskExecution(
 
 	result, err := c.runtime.Resume(ctx, request)
 	if err != nil {
-		if providerOperationMayHaveStarted(err) || errors.Is(err, provider.ErrResumeUnconfirmed) {
+		if evidence, definitive := providerResumeDefinitiveFailureEvidence(intent.OperationID, err); definitive {
 			observation, persistErr := c.recordResumeObservation(
-				ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", principal,
+				ctx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, principal,
 			)
 			if persistErr != nil {
 				return receipt, intent, observation, provider.ResumeResult{}, errors.Join(err, persistErr)
 			}
 			return receipt, intent, observation, provider.ResumeResult{}, err
 		}
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+		observation, persistErr := c.recordResumeObservation(
+			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", principal,
+		)
+		if persistErr != nil {
+			return receipt, intent, observation, provider.ResumeResult{}, errors.Join(provider.ErrResumeUnconfirmed, err, persistErr)
+		}
+		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(provider.ErrResumeUnconfirmed, err)
 	}
 	if result.OperationID != intent.OperationID || result.SessionID != intent.ProviderSessionID ||
 		!result.Attached || !validProviderSHA256(result.EvidenceSHA256) {

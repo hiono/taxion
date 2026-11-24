@@ -1070,6 +1070,16 @@ func providerStopDefinitiveFailureEvidence(operationID string, err error) (strin
 		string(operationError.Class) + ":" + operationError.Code), true
 }
 
+func providerResumeDefinitiveFailureEvidence(operationID string, err error) (string, bool) {
+	var operationError *provider.OperationError
+	if !errors.As(err, &operationError) || operationError == nil ||
+		operationError.Class != provider.FailureDefinitive {
+		return "", false
+	}
+	return sha256String("taxion:provider-resume-definitive-failure:" + operationID + ":" +
+		string(operationError.Class) + ":" + operationError.Code), true
+}
+
 func providerOperationMayHaveStarted(err error) bool {
 	var operationError *provider.OperationError
 	return errors.As(err, &operationError) && operationError != nil &&

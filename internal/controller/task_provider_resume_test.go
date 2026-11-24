@@ -216,3 +216,39 @@ func TestTaskProviderResumeWorktreeGatesAndIntentFirstOrdering(t *testing.T) {
 		}
 	})
 }
+
+func TestTaskProviderResumePersistsDefinitiveFailureAndAllowsStop(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	prepareTaskResumeTurn(t, &f)
+	enableTaskResumeE5(&f)
+	failure, err := provider.NewOperationError(provider.FailureDefinitive, provider.OperationCodeInvalidRequest)
+	if err != nil {
+		t.Fatalf("NewOperationError: %v", err)
+	}
+	f.runtime.resumeErr = failure
+	commandID := "cmd_34343434343434343434343434343434"
+	_, intent, observation, _, resumeErr := f.resume(commandID)
+	if !errors.Is(resumeErr, failure) || observation.Status != domain.PlanningResumeFailed ||
+		observation.ResumeID != intent.ID || f.runtime.resumeCalls != 1 {
+		t.Fatalf("definitive Resume failure was not persisted: intent=%#v observation=%#v calls=%d err=%v",
+			intent, observation, f.runtime.resumeCalls, resumeErr)
+	}
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after definitive Resume failure: %v", err)
+	}
+	if len(job.PlanningResumeObservations) != 1 || job.PlanningResumeObservations[0].Status != domain.PlanningResumeFailed {
+		t.Fatalf("definitive Resume failure is missing from Job history: %#v", job.PlanningResumeObservations)
+	}
+	_, stopIntent, _, stopErr := f.stop("cmd_45454545454545454545454545454545", domain.ProviderStopReasonFailure)
+	if stopIntent.ID == "" {
+		t.Fatalf("Stop did not proceed after definitive Resume failure: %v", stopErr)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Stop intent: %v", err)
+	}
+	if len(job.ProviderStopIntents) != 1 || job.ProviderStopIntents[0].ID != stopIntent.ID {
+		t.Fatalf("Stop intent was not persisted after definitive Resume failure: %#v", job.ProviderStopIntents)
+	}
+}
