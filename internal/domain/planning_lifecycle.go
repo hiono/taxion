@@ -253,6 +253,14 @@ func planningGrantAndExecutionForObservation(job Job, roleExecutionID, principal
 	return PlanningAuthorization{}, RoleExecution{}, errors.New("PlanningAuthorization was not found")
 }
 
+// LatestPlanningResumeStatus returns the latest Resume observation for a RoleExecution.
+func LatestPlanningResumeStatus(job Job, roleExecutionID string) (string, bool) {
+	if job.Revision == ^uint64(0) {
+		return latestPlanningResumeStatus(job, roleExecutionID, job.Revision)
+	}
+	return latestPlanningResumeStatus(job, roleExecutionID, job.Revision+1)
+}
+
 func latestPlanningResumeStatus(job Job, roleExecutionID string, beforeRevision uint64) (string, bool) {
 	var latest PlanningResumeIntent
 	found := false
