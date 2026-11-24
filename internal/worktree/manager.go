@@ -107,9 +107,9 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 			Version: 2, JobID: jobID, TaskID: task.ID,
 			RepositoryID: repositoryID, RepositoryPath: repositoryPath,
 			WorktreePath: worktreePath, BaselineCommit: baseline,
-			Origin: domain.WorktreeOriginTaxionCreated,
+			Origin:             domain.WorktreeOriginTaxionCreated,
 			InitialStateSHA256: cleanWorktreeStateSHA256(),
-			HeadMode: domain.WorktreeHeadDetached,
+			HeadMode:           domain.WorktreeHeadDetached,
 		}
 		if err := writeBaselineRecord(baselinePath, record); err != nil {
 			if !errors.Is(err, os.ErrExist) {
@@ -182,8 +182,12 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 		return errors.New("Worktree snapshot baseline differs from its persisted immutable baseline")
 	}
 	origin := snapshot.Origin
-	if origin == "" { origin = record.Origin }
-	if origin == "" { origin = domain.WorktreeOriginTaxionCreated }
+	if origin == "" {
+		origin = record.Origin
+	}
+	if origin == "" {
+		origin = domain.WorktreeOriginTaxionCreated
+	}
 	if record.WorktreePath != "" && record.WorktreePath != worktreePath {
 		return errors.New("Worktree path differs from its persisted registration")
 	}
