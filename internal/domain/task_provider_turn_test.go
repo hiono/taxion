@@ -297,3 +297,37 @@ func TestWorktreeInitialStateSHA256Requires64HexCharacters(t *testing.T) {
 		t.Fatal("Worktree assignment was accepted for a non-owner RoleExecution")
 	}
 }
+
+func TestTaskTurnDispatchCannotReleaseClaimAfterUnknownObservationAsDefinitiveFailure(t *testing.T) {
+	job, execution, permission, now := taskTurnFixture(t)
+	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_13131313131313131313131313131313", strings.Repeat("1", 64), 40, now)
+	if err != nil {
+		t.Fatalf("NewTaskTurnIntent: %v", err)
+	}
+	job.TaskTurnIntents = append(job.TaskTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	claim, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_14141414141414141414141414141414", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("NewTaskTurnDispatchClaim: %v", err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, claim)
+	job.Revision++
+	job.UpdatedAt = claim.CreatedAt
+	unknown, err := NewTaskTurnObservation(job, turn.ID,
+		"cmd_15151515151515151515151515151515", TaskTurnUnknown, 0, "", false, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("NewTaskTurnObservation UNKNOWN: %v", err)
+	}
+	job.TaskTurnObservations = append(job.TaskTurnObservations, unknown)
+	job.Revision++
+	job.UpdatedAt = unknown.CreatedAt
+	commandID := TaskTurnDispatchReleaseCommandID(claim.ID, TaskTurnDispatchReleasedDefinitiveFailure)
+	if _, err := NewTaskTurnDispatchRelease(job, claim.ID, principalID, commandID,
+		TaskTurnDispatchReleasedDefinitiveFailure, "", now.Add(3*time.Minute)); err == nil {
+		t.Fatal("UNKNOWN Task Turn claim was released as definitive_failure without reconciliation evidence")
+	}
+}

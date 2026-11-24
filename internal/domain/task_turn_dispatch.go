@@ -216,6 +216,13 @@ func (r TaskTurnDispatchRelease) Validate(job Job) error {
 		r.CreatedRevision <= claim.CreatedRevision || r.CreatedAt.Before(claim.CreatedAt) {
 		return errors.New("Task Turn dispatch release does not match its claim")
 	}
+	if r.Outcome == TaskTurnDispatchReleasedDefinitiveFailure {
+		for _, observation := range job.TaskTurnObservations {
+			if observation.TurnID == claim.TurnID && observation.CreatedRevision < r.CreatedRevision {
+				return errors.New("definitive-failure dispatch release cannot follow a Task Turn observation")
+			}
+		}
+	}
 	if r.Outcome == TaskTurnDispatchReleasedIdempotentRetry {
 		if !validSHA256(r.EvidenceSHA256) {
 			return errors.New("idempotent Task Turn retry requires verified Send idempotency evidence")

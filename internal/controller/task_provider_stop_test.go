@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -1064,4 +1066,59 @@ func TestTaskProviderStopDispatchFactsRequireQuiescentAndDefinitiveEvidence(t *t
 			t.Fatalf("matching definitive-failure evidence did not release Stop claim: %v", err)
 		}
 	})
+}
+
+func TestTaskProviderSendRevalidatesWorktreeAfterClaimBeforeDispatch(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	f.runtime.capabilities.SendLookup = true
+	f.runtime.capabilities.SendIdempotency = true
+	f.runtime.capabilities.FinalOutputRetrieval = true
+	f.runtime.capabilities.UsageIdentity = true
+	f.runtime.capabilities.UsageCompleteness = true
+	for _, capability := range []provider.Capability{
+		provider.CapabilitySendLookup, provider.CapabilitySendIdempotency,
+		provider.CapabilityFinalOutput, provider.CapabilityUsageIdentity, provider.CapabilityUsageCompleteness,
+	} {
+		f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence, provider.CapabilityEvidence{
+			Capability: capability, Identity: f.runtime.identity, TestID: "task-send-post-claim-test",
+			EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: f.controller.now(),
+		})
+	}
+	prompt := "Exercise the approved Task Send boundary."
+	digest := sha256.Sum256([]byte(prompt))
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	_, _, created, err := f.database.AddTaskTurnIntentWithStatus(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, f.permission.ID, "session_1",
+		"cmd_78787878787878787878787878787878", hex.EncodeToString(digest[:]), 50,
+	)
+	if err != nil || !created {
+		t.Fatalf("AddTaskTurnIntent: created=%v err=%v", created, err)
+	}
+	f.worktree.failAt = f.worktree.verifyCalls + 3
+	f.worktree.verifyErr = errors.New("Worktree changed after Send claim acquisition")
+	_, turn, _, _, sendErr := f.controller.SendTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, "cmd_78787878787878787878787878787878",
+		prompt, f.permissionRequest, 50, f.principal,
+	)
+	if sendErr == nil || turn.ID == "" || f.runtime.sendCalls != 0 {
+		t.Fatalf("Send reached Provider after post-claim Worktree verification failed: turn=%#v calls=%d err=%v",
+			turn, f.runtime.sendCalls, sendErr)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after rejected Send: %v", err)
+	}
+	if len(job.TaskTurnDispatchClaims) != 1 || len(job.TaskTurnDispatchReleases) != 1 {
+		t.Fatalf("post-claim Send failure did not release its claim: claims=%d releases=%d",
+			len(job.TaskTurnDispatchClaims), len(job.TaskTurnDispatchReleases))
+	}
+	if _, active := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID); active {
+		t.Fatal("pre-dispatch Task Turn claim remained active after Worktree verification failure")
+	}
+	if job.TaskTurnDispatchReleases[0].Outcome != domain.TaskTurnDispatchReleasedDefinitiveFailure {
+		t.Fatalf("pre-dispatch verification failure release outcome = %q", job.TaskTurnDispatchReleases[0].Outcome)
+	}
 }

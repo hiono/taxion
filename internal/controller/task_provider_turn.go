@@ -257,7 +257,7 @@ func (c *ProviderController) dispatchTaskTurn(
 	if err != nil {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
 	}
-	_, _, createdClaim, err := c.store.AddTaskTurnDispatchClaim(
+	_, claim, createdClaim, err := c.store.AddTaskTurnDispatchClaim(
 		ctx, latest.ID, latest.Revision, turn.ID, claimCommandID, principal,
 	)
 	if err != nil {
@@ -266,11 +266,32 @@ func (c *ProviderController) dispatchTaskTurn(
 	if !createdClaim {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
 	}
-	latest, err = c.store.GetJob(ctx, latest.ID)
-	if err != nil {
-		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+	postClaimJob, postExecution, postPermission, postTask, postAssignment, _, postSession, postErr :=
+		c.taskProviderExecutionTarget(ctx, latest.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, principal)
+	if postErr != nil || postClaimJob.ID != latest.ID || postExecution.ID != execution.ID ||
+		postPermission.ID != permission.ID || postTask.ID != task.ID || postAssignment.ID != assignment.ID || postSession != turn.ProviderSessionID {
+		releaseErr := c.releaseTaskTurnDispatchClaim(ctx, latest.ID, turn, principal, domain.TaskTurnDispatchReleasedDefinitiveFailure)
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(errors.New("Task Send authority or Worktree changed after dispatch claim acquisition"), postErr, releaseErr)
 	}
-	current = latest
+	if err := postPermission.ValidateFor(postClaimJob, postPermission.OperationID, postPermission.RequestSHA256, c.now()); err != nil {
+		releaseErr := c.releaseTaskTurnDispatchClaim(ctx, latest.ID, turn, principal, domain.TaskTurnDispatchReleasedDefinitiveFailure)
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, releaseErr)
+	}
+	if err := c.worktreeVerifier.Verify(ctx, postClaimJob.ID, postTask, postAssignment.Snapshot()); err != nil {
+		releaseErr := c.releaseTaskTurnDispatchClaim(ctx, latest.ID, turn, principal, domain.TaskTurnDispatchReleasedDefinitiveFailure)
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(fmt.Errorf("reverify Task Worktree after Send claim acquisition: %w", err), releaseErr)
+	}
+	for _, stopIntent := range postClaimJob.ProviderStopIntents {
+		if stopIntent.RoleExecutionID == turn.RoleExecutionID && stopIntent.SessionID == turn.ProviderSessionID {
+			releaseErr := c.releaseTaskTurnDispatchClaim(ctx, latest.ID, turn, principal, domain.TaskTurnDispatchReleasedDefinitiveFailure)
+			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(errors.New("Task Provider Send is blocked by a Stop intent saved after claim acquisition"), releaseErr)
+		}
+	}
+	activeClaim, active := domain.ActiveTaskTurnDispatchClaim(postClaimJob, turn.OperationID)
+	if !active || activeClaim.ID != claim.ID {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
+	}
+	current = postClaimJob
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
 		observation, persistErr := c.recordTaskTurnObservation(ctx, current.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
@@ -575,8 +596,7 @@ func (c *ProviderController) RetrieveTaskProviderUsage(
 			existingUsage = observation
 		}
 	}
-	if existingUsage != nil && (expectedUsageID != "" ||
-		(latestTurnObservation != nil && latestTurnObservation.Status != domain.TaskTurnUnknown && existingUsage.Complete)) {
+	if existingUsage != nil && existingUsage.Complete {
 		return c.store.AddProviderUsageObservation(
 			ctx, job.ID, job.Revision, existingUsage.RoleExecutionID, existingUsage.OperationID,
 			existingUsage.TurnID, existingUsage.SessionID, existingUsage.UsageID,

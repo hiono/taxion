@@ -97,6 +97,8 @@ func testWorktreeSnapshot(jobID string, task domain.Task) domain.WorktreeSnapsho
 
 type fakeTaskWorktreeVerifier struct {
 	err          error
+	failErr      error
+	failAt       int
 	prepareCalls int
 	verifyCalls  int
 }
@@ -136,6 +138,9 @@ func (v *fakeTaskWorktreeVerifier) Prepare(_ context.Context, jobID string, task
 
 func (v *fakeTaskWorktreeVerifier) Verify(context.Context, string, domain.Task, domain.WorktreeSnapshot) error {
 	v.verifyCalls++
+	if v.failAt != 0 && v.verifyCalls == v.failAt {
+		return v.failErr
+	}
 	return v.err
 }
 
