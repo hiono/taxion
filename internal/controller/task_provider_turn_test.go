@@ -314,19 +314,19 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	if err != nil {
 		t.Fatalf("GetJob after Task Turn dispatch recovery: %v", err)
 	}
-	idempotentReleaseFound := false
+	preDispatchReleaseFound := false
 	for _, release := range job.TaskTurnDispatchReleases {
 		if release.ClaimID == oldClaim.ID &&
-			release.Outcome == domain.TaskTurnDispatchReleasedIdempotentRetry &&
-			release.EvidenceSHA256 == strings.Repeat("e", 64) {
-			idempotentReleaseFound = true
+			release.Outcome == domain.TaskTurnDispatchReleasedDefinitiveFailure &&
+			validProviderEvidenceSHA256(release.EvidenceSHA256) {
+			preDispatchReleaseFound = true
 		}
 	}
-	if !idempotentReleaseFound || len(job.TaskTurnDispatchClaims) != 3 ||
+	if !preDispatchReleaseFound || len(job.TaskTurnDispatchClaims) != 3 ||
 		len(job.TaskTurnDispatchReleases) != 3 || len(job.TaskTurnObservations) != 2 ||
 		runtime.sendCalls != 2 || runtime.resultCalls != 2 || runtime.usageCalls != 2 {
-		t.Fatalf("Task Turn idempotent recovery facts are incomplete: released=%v claims=%d releases=%d observations=%d calls=%d/%d/%d",
-			idempotentReleaseFound, len(job.TaskTurnDispatchClaims), len(job.TaskTurnDispatchReleases),
+		t.Fatalf("Task Turn pre-dispatch recovery facts are incomplete: released=%v claims=%d releases=%d observations=%d calls=%d/%d/%d",
+			preDispatchReleaseFound, len(job.TaskTurnDispatchClaims), len(job.TaskTurnDispatchReleases),
 			len(job.TaskTurnObservations), runtime.sendCalls, runtime.resultCalls, runtime.usageCalls)
 	}
 	runtime.capabilities.StopProof = false
@@ -425,11 +425,17 @@ func TestTaskProviderTurnRejectsLookupResultDigestMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob before dispatch claim: %v", err)
 	}
-	if _, _, created, err := f.database.AddTaskTurnDispatchClaim(
+	_, dispatchClaim, created, err := f.database.AddTaskTurnDispatchClaim(
 		f.ctx, f.jobID, job.Revision, turn.ID,
 		"cmd_82828282828282828282828282828282", f.principal,
-	); err != nil || !created {
+	)
+	if err != nil || !created {
 		t.Fatalf("AddTaskTurnDispatchClaim: created=%v err=%v", created, err)
+	}
+	if _, created, err := f.controller.recordTaskTurnDispatchObservation(
+		f.ctx, f.jobID, dispatchClaim.ID, domain.TaskTurnDispatchObservationStarted, "", f.principal,
+	); err != nil || !created {
+		t.Fatalf("record Task Turn dispatch start: created=%v err=%v", created, err)
 	}
 	f.runtime.lookupResult = provider.LookupResult{
 		Found: true, OperationID: turn.OperationID, Status: domain.TaskTurnCompleted,
@@ -498,11 +504,13 @@ func TestTaskProviderTurnReleasesDefinitiveSendFailureAndRetriesSameIntent(t *te
 	f := newTaskProviderStopFixture(t)
 	now := time.Now().UTC()
 	f.runtime.capabilities.SendLookup = true
+	f.runtime.capabilities.SendIdempotency = true
 	f.runtime.capabilities.FinalOutputRetrieval = true
 	f.runtime.capabilities.UsageIdentity = true
 	f.runtime.capabilities.UsageCompleteness = true
 	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence,
 		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "turn-definitive-failure", EvidenceSHA256: strings.Repeat("1", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity, TestID: "turn-definitive-failure", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: f.runtime.identity, TestID: "turn-definitive-failure", EvidenceSHA256: strings.Repeat("2", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "turn-definitive-failure", EvidenceSHA256: strings.Repeat("3", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "turn-definitive-failure", EvidenceSHA256: strings.Repeat("4", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},

@@ -233,9 +233,10 @@ func TestTaskProviderResumeWorktreeGatesAndIntentFirstOrdering(t *testing.T) {
 			t.Fatalf("Resume crossed failed final Worktree check: calls=%d err=%v", f.runtime.resumeCalls, err)
 		}
 		job, readErr := f.database.GetJob(f.ctx, f.jobID)
-		if readErr != nil || len(job.PlanningResumeIntents) != 1 || len(job.PlanningResumeObservations) != 0 ||
-			len(job.PlanningResumeDispatchClaims) != 0 {
-			t.Fatalf("final pre-dispatch Worktree failure created dispatch facts: intents=%d observations=%#v claims=%#v err=%v",
+		if readErr != nil || len(job.PlanningResumeIntents) != 1 || len(job.PlanningResumeObservations) != 1 ||
+			job.PlanningResumeObservations[0].Status != domain.PlanningResumeNotDispatched ||
+			job.PlanningResumeObservations[0].DispatchClaimID != "" || len(job.PlanningResumeDispatchClaims) != 0 {
+			t.Fatalf("final pre-dispatch Worktree failure was not recorded as NOT_DISPATCHED: intents=%d observations=%#v claims=%#v err=%v",
 				len(job.PlanningResumeIntents), job.PlanningResumeObservations, job.PlanningResumeDispatchClaims, readErr)
 		}
 		replayedIntent, observation, result, err := f.resume(commandID)
@@ -245,10 +246,11 @@ func TestTaskProviderResumeWorktreeGatesAndIntentFirstOrdering(t *testing.T) {
 				replayedIntent, observation, result, f.runtime.resumeCalls, err)
 		}
 		job, readErr = f.database.GetJob(f.ctx, f.jobID)
-		if readErr != nil || len(job.PlanningResumeObservations) != 1 ||
-			job.PlanningResumeObservations[0].Status != domain.PlanningResumeAttached ||
+		if readErr != nil || len(job.PlanningResumeObservations) != 2 ||
+			job.PlanningResumeObservations[0].Status != domain.PlanningResumeNotDispatched ||
+			job.PlanningResumeObservations[1].Status != domain.PlanningResumeAttached ||
 			len(job.PlanningResumeDispatchClaims) != 1 || len(job.PlanningResumeDispatchReleases) != 1 {
-			t.Fatalf("Resume retry did not persist one claim and terminal ATTACHED release: observations=%#v claims=%#v releases=%#v err=%v",
+			t.Fatalf("Resume retry did not preserve NOT_DISPATCHED and terminal ATTACHED facts: observations=%#v claims=%#v releases=%#v err=%v",
 				job.PlanningResumeObservations, job.PlanningResumeDispatchClaims, job.PlanningResumeDispatchReleases, readErr)
 		}
 	})
