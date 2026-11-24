@@ -228,7 +228,7 @@ func (c *ProviderController) ResumeTaskExecution(
 	if err != nil {
 		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
 	}
-	activeClaim, active := domain.ActivePlanningResumeDispatchClaim(latestClaimedJob, intent.OperationID)
+	activeClaim, active = domain.ActivePlanningResumeDispatchClaim(latestClaimedJob, intent.OperationID)
 	if !active || activeClaim.ID != claim.ID {
 		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
 	}
