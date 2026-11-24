@@ -104,9 +104,12 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 		}
 		baseline = resolvedBaseline
 		record = baselineRecord{
-			Version: 1, JobID: jobID, TaskID: task.ID,
+			Version: 2, JobID: jobID, TaskID: task.ID,
 			RepositoryID: repositoryID, RepositoryPath: repositoryPath,
-			BaselineCommit: baseline,
+			WorktreePath: worktreePath, BaselineCommit: baseline,
+			Origin: domain.WorktreeOriginTaxionCreated,
+			InitialStateSHA256: cleanWorktreeStateSHA256(),
+			HeadMode: domain.WorktreeHeadDetached,
 		}
 		if err := writeBaselineRecord(baselinePath, record); err != nil {
 			if !errors.Is(err, os.ErrExist) {
@@ -127,6 +130,8 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 	snapshot := Snapshot{
 		RepositoryID: repositoryID, RepositoryPath: repositoryPath,
 		WorktreePath: worktreePath, BaselineCommit: baseline,
+		Origin: record.Origin, InitialStateSHA256: record.InitialStateSHA256,
+		HeadMode: record.HeadMode, HeadRef: record.HeadRef,
 	}
 	if worktreeExists {
 		if err := m.Verify(ctx, jobID, task, snapshot); err != nil {
@@ -160,11 +165,13 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 		return errors.New("Worktree repository identity or trusted path mismatch")
 	}
 	key := sha256.Sum256([]byte(jobID + "\x00" + task.ID))
-	expectedPath := filepath.Join(m.root, hex.EncodeToString(key[:]))
-	if filepath.Clean(snapshot.WorktreePath) != expectedPath || !validCommit(snapshot.BaselineCommit) {
+	registrationPath := filepath.Join(m.root, hex.EncodeToString(key[:]))
+	worktreePath := snapshot.WorktreePath
+	if worktreePath == "" || !filepath.IsAbs(worktreePath) || filepath.Clean(worktreePath) != worktreePath ||
+		!validCommit(snapshot.BaselineCommit) {
 		return errors.New("Worktree path or baseline commit is invalid")
 	}
-	record, err := readBaselineRecord(expectedPath + ".baseline.json")
+	record, err := readBaselineRecord(registrationPath + ".baseline.json")
 	if err != nil {
 		return fmt.Errorf("read immutable Task Worktree baseline: %w", err)
 	}
@@ -174,27 +181,47 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 	if record.BaselineCommit != snapshot.BaselineCommit {
 		return errors.New("Worktree snapshot baseline differs from its persisted immutable baseline")
 	}
-	resolved, err := filepath.EvalSymlinks(snapshot.WorktreePath)
-	if err != nil || filepath.Clean(resolved) != expectedPath {
+	origin := snapshot.Origin
+	if origin == "" { origin = record.Origin }
+	if origin == "" { origin = domain.WorktreeOriginTaxionCreated }
+	if record.WorktreePath != "" && record.WorktreePath != worktreePath {
+		return errors.New("Worktree path differs from its persisted registration")
+	}
+	if record.Origin != "" && record.Origin != origin {
+		return errors.New("Worktree provenance differs from its persisted registration")
+	}
+	if origin != domain.WorktreeOriginTaxionCreated && origin != domain.WorktreeOriginAdopted {
+		return errors.New("Worktree provenance is invalid")
+	}
+	if origin == domain.WorktreeOriginTaxionCreated && worktreePath != registrationPath {
+		return errors.New("Taxion-created Worktree path differs from its deterministic registration path")
+	}
+	if origin == domain.WorktreeOriginAdopted &&
+		(worktreePath == registrationPath || pathWithin(m.root, worktreePath) ||
+			pathWithin(repositoryPath, worktreePath) || pathWithin(worktreePath, repositoryPath)) {
+		return errors.New("adopted Worktree path overlaps the managed workspace or source repository")
+	}
+	resolved, err := filepath.EvalSymlinks(worktreePath)
+	if err != nil || filepath.Clean(resolved) != worktreePath {
 		return errors.New("Worktree path is missing or traverses a symbolic link")
 	}
-	top, err := gitOutput(ctx, expectedPath, "rev-parse", "--show-toplevel")
-	if err != nil || filepath.Clean(top) != expectedPath {
-		return errors.New("Task path is not the expected Git Worktree")
+	top, err := gitOutput(ctx, worktreePath, "rev-parse", "--show-toplevel")
+	if err != nil || filepath.Clean(top) != worktreePath {
+		return errors.New("Task path is not the registered Git Worktree")
 	}
-	head, err := gitOutput(ctx, expectedPath, "rev-parse", "--verify", "HEAD^{commit}")
+	head, err := gitOutput(ctx, worktreePath, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil || !validCommit(head) {
 		return errors.New("Task Worktree HEAD is not a verifiable commit")
 	}
-	if err := runGit(ctx, expectedPath, "merge-base", "--is-ancestor", snapshot.BaselineCommit, head); err != nil {
+	if err := runGit(ctx, worktreePath, "merge-base", "--is-ancestor", snapshot.BaselineCommit, head); err != nil {
 		return errors.New("Task Worktree HEAD no longer descends from its immutable baseline")
 	}
-	if _, err := gitOutput(ctx, expectedPath, "symbolic-ref", "-q", "HEAD"); err == nil {
+	if _, err := gitOutput(ctx, worktreePath, "symbolic-ref", "-q", "HEAD"); err == nil {
 		return errors.New("Task Worktree must remain detached")
 	} else if !isDetachedHeadProbeError(err) {
 		return fmt.Errorf("verify Task Worktree detached HEAD: %w", err)
 	}
-	gitDir, err := gitOutput(ctx, expectedPath, "rev-parse", "--absolute-git-dir")
+	gitDir, err := gitOutput(ctx, worktreePath, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		return errors.New("Task path has no linked Git Worktree metadata")
 	}
@@ -245,12 +272,17 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 }
 
 type baselineRecord struct {
-	Version        int    `json:"version"`
-	JobID          string `json:"job_id"`
-	TaskID         string `json:"task_id"`
-	RepositoryID   string `json:"repository_id"`
-	RepositoryPath string `json:"repository_path"`
-	BaselineCommit string `json:"baseline_commit"`
+	Version            int    `json:"version"`
+	JobID              string `json:"job_id"`
+	TaskID             string `json:"task_id"`
+	RepositoryID       string `json:"repository_id"`
+	RepositoryPath     string `json:"repository_path"`
+	WorktreePath       string `json:"worktree_path,omitempty"`
+	BaselineCommit     string `json:"baseline_commit"`
+	Origin             string `json:"origin,omitempty"`
+	InitialStateSHA256 string `json:"initial_state_sha256,omitempty"`
+	HeadMode           string `json:"head_mode,omitempty"`
+	HeadRef            string `json:"head_ref,omitempty"`
 }
 
 func readBaselineRecord(path string) (baselineRecord, error) {
@@ -262,10 +294,19 @@ func readBaselineRecord(path string) (baselineRecord, error) {
 	if err := json.Unmarshal(data, &record); err != nil {
 		return baselineRecord{}, fmt.Errorf("decode baseline record: %w", err)
 	}
-	if record.Version != 1 || !validPathIdentity(record.JobID) || !validPathIdentity(record.TaskID) ||
+	if (record.Version != 1 && record.Version != 2) || !validPathIdentity(record.JobID) || !validPathIdentity(record.TaskID) ||
 		strings.TrimSpace(record.RepositoryID) == "" || strings.TrimSpace(record.RepositoryPath) == "" ||
 		!validCommit(record.BaselineCommit) {
 		return baselineRecord{}, errors.New("immutable Task Worktree baseline record is invalid")
+	}
+	if record.Version == 2 &&
+		(!filepath.IsAbs(record.WorktreePath) || filepath.Clean(record.WorktreePath) != record.WorktreePath ||
+			(record.Origin != domain.WorktreeOriginTaxionCreated && record.Origin != domain.WorktreeOriginAdopted) ||
+			!validCommit(record.InitialStateSHA256) ||
+			(record.HeadMode != domain.WorktreeHeadDetached && record.HeadMode != domain.WorktreeHeadBranchAttached) ||
+			(record.HeadMode == domain.WorktreeHeadBranchAttached && strings.TrimSpace(record.HeadRef) == "") ||
+			(record.HeadMode == domain.WorktreeHeadDetached && record.HeadRef != "")) {
+		return baselineRecord{}, errors.New("immutable Task Worktree registration identity is invalid")
 	}
 	return record, nil
 }
