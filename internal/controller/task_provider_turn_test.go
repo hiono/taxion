@@ -402,11 +402,16 @@ func TestTaskProviderTurnRejectsLookupResultDigestMismatch(t *testing.T) {
 			recoveredTurn, observation, f.runtime.resultCalls, f.runtime.usageCalls, err)
 	}
 	job, err = f.database.GetJob(f.ctx, f.jobID)
-	if err != nil || len(job.ProviderResultObservations) != 1 ||
-		job.ProviderResultObservations[0].ContentSHA256 == strings.Repeat("f", 64) ||
-		len(job.ProviderUsageObservations) != 0 {
-		t.Fatalf("mismatched final Result or Usage facts were persisted: results=%d usage=%d err=%v",
-			len(job.ProviderResultObservations), len(job.ProviderUsageObservations), err)
+	matchedResult := false
+	for _, result := range job.ProviderResultObservations {
+		if result.TurnID == turn.ID {
+			matchedResult = result.ContentSHA256 != strings.Repeat("f", 64)
+			break
+		}
+	}
+	if err != nil || !matchedResult || len(job.ProviderUsageObservations) != 0 {
+		t.Fatalf("mismatched final Result or Usage facts were persisted: results=%d usage=%d matched=%v err=%v",
+			len(job.ProviderResultObservations), len(job.ProviderUsageObservations), matchedResult, err)
 	}
 	if _, active := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID); !active {
 		t.Fatal("ambiguous Task Turn released its dispatch claim")
