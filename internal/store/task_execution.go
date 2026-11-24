@@ -67,7 +67,7 @@ func (s *Store) StartTaskExecution(
 		if job, readErr := s.GetJob(ctx, jobID); readErr == nil &&
 			legacyTaskExecutionStartWithoutWorktreeAssignment(job, commandID) {
 			return CommandReceipt{}, domain.TaskExecutionStart{}, errors.New(
-				"legacy TASK_EXECUTION_START has no WorktreeAssignment and cannot be replayed; issue a new approved Start command",
+				"legacy TASK_EXECUTION_START has no WorktreeAssignment and cannot be replayed; re-authorize the Task and issue a new Start command",
 			)
 		}
 	}
