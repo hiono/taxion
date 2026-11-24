@@ -57,7 +57,7 @@ func (o TaskTurnDispatchObservation) Validate(job Job) error {
 	start, started := taskTurnDispatchObservationForClaim(job, claim.ID, TaskTurnDispatchObservationStarted)
 	switch o.Status {
 	case TaskTurnDispatchObservationStarted:
-		if started || o.EvidenceSHA256 != "" {
+		if (started && start.ID != o.ID) || o.EvidenceSHA256 != "" {
 			return errors.New("Task Turn dispatch start must be the first claim observation and contain no failure evidence")
 		}
 	case TaskTurnDispatchObservationPreDispatchFailure:
