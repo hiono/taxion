@@ -34,7 +34,7 @@ func TestManagerPreparesDetachedTaskWorktreeAtImmutableBaseline(t *testing.T) {
 	if got := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", "HEAD"); got != before {
 		t.Fatalf("Worktree HEAD = %s, want %s", got, before)
 	}
-	command := exec.Command("git", "-C", snapshot.WorktreePath, "symbolic-ref", "-q", "HEAD")
+	command := exec.CommandContext(context.Background(), "git", "-C", snapshot.WorktreePath, "symbolic-ref", "-q", "HEAD")
 	output, err := command.CombinedOutput()
 	if err == nil {
 		t.Fatal("Task Worktree is not detached")
@@ -60,7 +60,7 @@ func TestManagerPreparesDetachedTaskWorktreeAtImmutableBaseline(t *testing.T) {
 
 func TestDetachedHeadProbeRejectsUnexpectedGitErrors(t *testing.T) {
 	missingRepository := filepath.Join(t.TempDir(), "missing-repository")
-	command := exec.Command("git", "-C", missingRepository, "symbolic-ref", "-q", "HEAD")
+	command := exec.CommandContext(context.Background(), "git", "-C", missingRepository, "symbolic-ref", "-q", "HEAD")
 	_, err := command.Output()
 	if err == nil {
 		t.Fatal("symbolic-ref unexpectedly succeeded for a missing repository")
@@ -233,10 +233,14 @@ func TestManagerCapturesImmutableOutputSnapshotOnlyForCleanWorktree(t *testing.T
 
 func TestManagerRejectsMultipleRepositoriesAndUnsafeWorkspaceRoot(t *testing.T) {
 	repository := initRepository(t)
+	secondaryRepository := initRepository(t)
 	if _, err := NewManager(filepath.Join(repository, "nested-worktrees"), []Repository{{ID: "repo.primary", Path: repository}}); err == nil {
 		t.Fatal("workspace nested in repository was accepted")
 	}
-	manager, err := NewManager(filepath.Join(t.TempDir(), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	manager, err := NewManager(filepath.Join(t.TempDir(), "worktrees"), []Repository{
+		{ID: "repo.primary", Path: repository},
+		{ID: "repo.secondary", Path: secondaryRepository},
+	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -266,7 +270,7 @@ func initRepository(t *testing.T) string {
 
 func gitTestRun(t *testing.T, directory string, args ...string) {
 	t.Helper()
-	command := exec.Command("git", append([]string{"-C", directory}, args...)...)
+	command := exec.CommandContext(context.Background(), "git", append([]string{"-C", directory}, args...)...)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, output)
 	}
@@ -274,7 +278,7 @@ func gitTestRun(t *testing.T, directory string, args ...string) {
 
 func gitTestOutput(t *testing.T, directory string, args ...string) string {
 	t.Helper()
-	command := exec.Command("git", append([]string{"-C", directory}, args...)...)
+	command := exec.CommandContext(context.Background(), "git", append([]string{"-C", directory}, args...)...)
 	output, err := command.Output()
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)
