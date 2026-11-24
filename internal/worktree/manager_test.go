@@ -222,6 +222,32 @@ func TestManagerCapturesImmutableOutputSnapshotOnlyForCleanWorktree(t *testing.T
 		t.Fatalf("captured tree = %s, want %s", first.TreeSHA, got)
 	}
 
+	gitTestRun(t, snapshot.WorktreePath, "checkout", "--detach", snapshot.BaselineCommit)
+	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "replacement.txt"), []byte("replacement tree\\n"), 0o600); err != nil {
+		t.Fatalf("write replacement tree: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "add", "replacement.txt")
+	gitTestRun(t, snapshot.WorktreePath, "commit", "-m", "replacement tree")
+	replacementCommit := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", "HEAD")
+	gitTestRun(t, snapshot.WorktreePath, "checkout", "--detach", first.CommitSHA)
+	gitTestRun(t, snapshot.WorktreePath, "replace", first.CommitSHA, replacementCommit)
+	wantTree := gitTestOutput(t, snapshot.WorktreePath, "--no-replace-objects", "rev-parse", first.CommitSHA+"^{tree}")
+	replaced, err := manager.CaptureOutput(context.Background(), jobID, task, snapshot)
+	if err != nil || replaced.CommitSHA != first.CommitSHA || replaced.TreeSHA != wantTree {
+		t.Fatalf("CaptureOutput trusted a replacement ref: output=%#v wantTree=%s err=%v", replaced, wantTree, err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "replace", "-d", first.CommitSHA)
+
+	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "output.txt"), []byte("tampered\\n"), 0o600); err != nil {
+		t.Fatalf("write assume-unchanged content: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "update-index", "--assume-unchanged", "output.txt")
+	if _, err := manager.CaptureOutput(context.Background(), jobID, task, snapshot); err == nil || !strings.Contains(err.Error(), "assume-unchanged") {
+		t.Fatalf("CaptureOutput accepted an assume-unchanged modification: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "update-index", "--no-assume-unchanged", "output.txt")
+	gitTestRun(t, snapshot.WorktreePath, "checkout", "--", "output.txt")
+
 	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "uncommitted.txt"), []byte("not committed\\n"), 0o600); err != nil {
 		t.Fatalf("write uncommitted output: %v", err)
 	}
@@ -434,9 +460,14 @@ func TestManagerAdoptionReservationsAreUniqueByTaskAndGitAdminDirectory(t *testi
 	worktreeB := filepath.Join(t.TempDir(), "adoption-b")
 	gitTestRun(t, repository, "worktree", "add", "--detach", worktreeA, "HEAD")
 	gitTestRun(t, repository, "worktree", "add", "--detach", worktreeB, "HEAD")
-	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	workspace := filepath.Join(t.TempDir(), "managed-worktrees")
+	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
+	}
+	managerB, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager second instance: %v", err)
 	}
 	task := domain.Task{ID: "task_1111111111111111", TargetRepositories: []string{"repo.primary"}}
 	jobID := "job_1111111111111111"
@@ -450,7 +481,7 @@ func TestManagerAdoptionReservationsAreUniqueByTaskAndGitAdminDirectory(t *testi
 		results <- adoptResult{snapshot: snapshot, err: err}
 	}()
 	go func() {
-		snapshot, err := manager.Adopt(context.Background(), jobID, task, worktreeB)
+		snapshot, err := managerB.Adopt(context.Background(), jobID, task, worktreeB)
 		results <- adoptResult{snapshot: snapshot, err: err}
 	}()
 	first, second := <-results, <-results
@@ -514,5 +545,29 @@ func TestWriteExclusiveAtomicDoesNotOverwriteExistingRecord(t *testing.T) {
 	actual, err := os.ReadFile(path)
 	if err != nil || string(actual) != string(first) {
 		t.Fatalf("atomic record was overwritten or incomplete: data=%q err=%v", actual, err)
+	}
+}
+
+func TestManagerAdoptRejectsDirtySubmoduleState(t *testing.T) {
+	repository := initRepository(t)
+	submodule := initRepository(t)
+	gitTestRun(t, repository, "-c", "protocol.file.allow=always", "submodule", "add", submodule, "nested")
+	gitTestRun(t, repository, "commit", "-m", "add submodule")
+	worktreePath := filepath.Join(t.TempDir(), "adopted-with-submodule")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, "HEAD")
+	gitTestRun(t, worktreePath, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_4444444444444444", TargetRepositories: []string{"repo.primary"}}
+	if _, err := manager.Adopt(context.Background(), "job_4444444444444444", task, worktreePath); err != nil {
+		t.Fatalf("Adopt clean submodule: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "nested", "untracked.txt"), []byte("dirty submodule\\n"), 0o600); err != nil {
+		t.Fatalf("write dirty submodule file: %v", err)
+	}
+	if _, err := manager.Adopt(context.Background(), "job_4444444444444444", task, worktreePath); err == nil || !strings.Contains(err.Error(), "dirty submodule") {
+		t.Fatalf("Adopt accepted changed submodule contents: %v", err)
 	}
 }

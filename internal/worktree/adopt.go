@@ -22,6 +22,11 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 	if m == nil || ctx == nil || !validPathIdentity(jobID) || !validPathIdentity(task.ID) {
 		return Snapshot{}, errors.New("Worktree manager, context, Job ID, and Task ID are required")
 	}
+	unlock, err := m.lock(ctx)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer unlock()
 	if len(task.TargetRepositories) != 1 {
 		return Snapshot{}, errors.New("Worktree adoption requires exactly one approved target repository")
 	}
@@ -142,7 +147,7 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 		Origin: record.Origin, InitialStateSHA256: record.InitialStateSHA256,
 		HeadMode: record.HeadMode, HeadRef: record.HeadRef,
 	}
-	if err := m.Verify(ctx, jobID, task, snapshot); err != nil {
+	if err := m.verify(ctx, jobID, task, snapshot); err != nil {
 		return Snapshot{}, fmt.Errorf("verify adopted Worktree: %w", err)
 	}
 	return snapshot, nil
@@ -240,21 +245,10 @@ func writeExclusiveAtomic(path string, data []byte, mode os.FileMode) error {
 	}
 	cleanup := func(cause error) error {
 		_ = os.Remove(path)
-		if directoryFile, openErr := os.Open(directory); openErr == nil {
-			_ = directoryFile.Sync()
-			_ = directoryFile.Close()
-		}
+		_ = syncDirectory(directory)
 		return cause
 	}
-	dir, err := os.Open(directory)
-	if err != nil {
-		return cleanup(err)
-	}
-	if err := dir.Sync(); err != nil {
-		_ = dir.Close()
-		return cleanup(err)
-	}
-	if err := dir.Close(); err != nil {
+	if err := syncDirectory(directory); err != nil {
 		return cleanup(err)
 	}
 	return nil
@@ -281,11 +275,11 @@ func initialWorktreeStateSHA256(
 	if err != nil {
 		return "", err
 	}
-	staged, err := gitBytes(ctx, path, "--no-optional-locks", "diff", "--cached", "--binary", "--ignore-submodules=none", "HEAD")
+	staged, err := gitBytes(ctx, path, "--no-optional-locks", "diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", "HEAD")
 	if err != nil {
 		return "", err
 	}
-	working, err := gitBytes(ctx, path, "--no-optional-locks", "diff", "--binary", "--ignore-submodules=none")
+	working, err := gitBytes(ctx, path, "--no-optional-locks", "diff", "--binary", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none")
 	if err != nil {
 		return "", err
 	}
@@ -293,9 +287,25 @@ func initialWorktreeStateSHA256(
 	if err != nil {
 		return "", err
 	}
+	submoduleStatus, err := gitBytes(ctx, path, "--no-optional-locks", "submodule", "status", "--recursive")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(submoduleStatus), "\n") {
+		if strings.HasPrefix(line, "-") || strings.HasPrefix(line, "U") {
+			return "", errors.New("Worktree contains an uninitialized or conflicted submodule")
+		}
+	}
+	dirtySubmodules, err := gitBytes(ctx, path, "--no-optional-locks", "submodule", "foreach", "--quiet", "--recursive", "git status --porcelain=v2 --untracked-files=all --ignore-submodules=none")
+	if err != nil {
+		return "", err
+	}
+	if len(dirtySubmodules) > 0 {
+		return "", errors.New("Worktree contains a dirty submodule")
+	}
 	hash := sha256.New()
 	for _, part := range [][]byte{
-		[]byte(head), []byte(tree), []byte(headMode), []byte(headRef), status, staged, working,
+		[]byte(head), []byte(tree), []byte(headMode), []byte(headRef), status, staged, working, submoduleStatus,
 	} {
 		writeDigestPart(hash, part)
 	}
@@ -326,7 +336,7 @@ func initialWorktreeStateSHA256(
 }
 
 func gitBytes(ctx context.Context, directory string, args ...string) ([]byte, error) {
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", directory}, args...)...)
+	command := exec.CommandContext(ctx, "git", append([]string{"--no-replace-objects", "-C", directory}, args...)...)
 	output, err := command.Output()
 	if err != nil {
 		return nil, err

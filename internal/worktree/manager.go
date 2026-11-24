@@ -64,10 +64,23 @@ func NewManager(workspaceRoot string, repositories []Repository) (*Manager, erro
 	return &Manager{root: root, repositories: known}, nil
 }
 
+func (m *Manager) lock(ctx context.Context) (func(), error) {
+	lock, err := acquireAdoptionFileLock(ctx, filepath.Join(m.root, ".adoptions.lock"))
+	if err != nil {
+		return nil, fmt.Errorf("lock Worktree registry: %w", err)
+	}
+	return lock.release, nil
+}
+
 func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (Snapshot, error) {
 	if m == nil || ctx == nil || !validPathIdentity(jobID) || !validPathIdentity(task.ID) {
 		return Snapshot{}, errors.New("Worktree manager, context, Job ID, and Task ID are required")
 	}
+	unlock, err := m.lock(ctx)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer unlock()
 	if len(task.TargetRepositories) != 1 {
 		return Snapshot{}, errors.New("Worktree provisioning requires exactly one approved target repository")
 	}
@@ -137,7 +150,7 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 		HeadMode: record.HeadMode, HeadRef: record.HeadRef,
 	}
 	if worktreeExists {
-		if err := m.Verify(ctx, jobID, task, snapshot); err != nil {
+		if err := m.verify(ctx, jobID, task, snapshot); err != nil {
 			return Snapshot{}, fmt.Errorf("existing Task Worktree does not match its immutable baseline: %w", err)
 		}
 		return snapshot, nil
@@ -157,6 +170,18 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 }
 
 func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, snapshot Snapshot) error {
+	if m == nil || ctx == nil {
+		return errors.New("Worktree manager and context are required")
+	}
+	unlock, err := m.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return m.verify(ctx, jobID, task, snapshot)
+}
+
+func (m *Manager) verify(ctx context.Context, jobID string, task domain.Task, snapshot Snapshot) error {
 	if m == nil || ctx == nil || !validPathIdentity(jobID) || !validPathIdentity(task.ID) {
 		return errors.New("Worktree manager, context, Job ID, and Task ID are required")
 	}
@@ -284,8 +309,25 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 // CaptureOutput fixes the exact committed Git tree produced in a Task Worktree.
 // It refuses snapshots while staged, unstaged, or untracked changes remain.
 func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.Task, snapshot Snapshot) (OutputSnapshot, error) {
-	if err := m.Verify(ctx, jobID, task, snapshot); err != nil {
+	if m == nil || ctx == nil {
+		return OutputSnapshot{}, errors.New("Worktree manager and context are required")
+	}
+	unlock, err := m.lock(ctx)
+	if err != nil {
+		return OutputSnapshot{}, err
+	}
+	defer unlock()
+	if err := m.verify(ctx, jobID, task, snapshot); err != nil {
 		return OutputSnapshot{}, fmt.Errorf("verify Task Worktree before output capture: %w", err)
+	}
+	indexEntries, err := gitOutput(ctx, snapshot.WorktreePath, "--no-optional-locks", "ls-files", "-v", "-z")
+	if err != nil {
+		return OutputSnapshot{}, errors.New("inspect Task Worktree index flags before output capture")
+	}
+	for _, entry := range strings.Split(indexEntries, "\x00") {
+		if len(entry) > 0 && entry[0] == 'h' {
+			return OutputSnapshot{}, errors.New("Task Worktree index contains assume-unchanged entries")
+		}
 	}
 	status, err := gitOutput(ctx, snapshot.WorktreePath, "--no-optional-locks", "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
 	if err != nil {
@@ -298,9 +340,20 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 	if err != nil || !validCommit(commit) {
 		return OutputSnapshot{}, errors.New("Task output commit identity is invalid")
 	}
+	if err := runGit(ctx, snapshot.WorktreePath, "merge-base", "--is-ancestor", snapshot.BaselineCommit, commit); err != nil {
+		return OutputSnapshot{}, errors.New("Task output commit does not descend from the approved Task baseline")
+	}
 	tree, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", commit+"^{tree}")
 	if err != nil || !validCommit(tree) {
 		return OutputSnapshot{}, errors.New("Task output tree identity is invalid")
+	}
+	headAfter, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil || headAfter != commit {
+		return OutputSnapshot{}, errors.New("Task Worktree HEAD changed during output capture")
+	}
+	statusAfter, err := gitOutput(ctx, snapshot.WorktreePath, "--no-optional-locks", "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
+	if err != nil || statusAfter != "" {
+		return OutputSnapshot{}, errors.New("Task Worktree changed during output capture")
 	}
 	return OutputSnapshot{CommitSHA: commit, TreeSHA: tree}, nil
 }
@@ -392,7 +445,7 @@ func canonicalDirectory(path string, create bool) (string, error) {
 }
 
 func gitOutput(ctx context.Context, directory string, args ...string) (string, error) {
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", directory}, args...)...)
+	command := exec.CommandContext(ctx, "git", append([]string{"--no-replace-objects", "-C", directory}, args...)...)
 	output, err := command.Output()
 	if err != nil {
 		return "", err
