@@ -2,8 +2,6 @@ package controller
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -71,18 +69,18 @@ func (c *ProviderController) StopTaskExecution(
 	}
 	existingStopIntent = !created
 	previous, hasPrevious := latestProviderStopObservation(currentJob, intent.OperationID)
+	activeClaim, activeClaimFound := domain.ActiveProviderStopDispatchClaim(currentJob, intent.OperationID)
 	if hasPrevious && previous.Quiescent {
+		if activeClaimFound {
+			if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+				ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedStopped,
+			); releaseErr != nil {
+				return intentReceipt, intent, previous, releaseErr
+			}
+		}
 		return intentReceipt, intent, previous, nil
 	}
-	var previousClaimID string
-	var previousClaimFound bool
 	if existingStopIntent {
-		previousClaimID, previousClaimFound, err = c.store.GetProviderStopDispatchClaim(
-			ctx, jobID, execution.ID, sessionID, intent.OperationID,
-		)
-		if err != nil {
-			return intentReceipt, intent, domain.ProviderStopObservation{}, err
-		}
 		if !capabilities.HasEvidenceAtLeast(provider.CapabilityStopLookup, provider.EvidenceLive) {
 			if hasPrevious {
 				return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
@@ -119,9 +117,9 @@ func (c *ProviderController) StopTaskExecution(
 				if persistErr != nil {
 					return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
 				}
-				if previousClaimFound {
-					if releaseErr := c.store.ReleaseProviderStopDispatchClaim(
-						ctx, jobID, execution.ID, sessionID, intent.OperationID, previousClaimID,
+				if activeClaimFound {
+					if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+						ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedStopped,
 					); releaseErr != nil {
 						return intentReceipt, intent, observation, releaseErr
 					}
@@ -142,7 +140,7 @@ func (c *ProviderController) StopTaskExecution(
 		// A trusted NOT_FOUND result permits retry only when no dispatch claim
 		// is already held. An existing claim may belong to a call still in flight;
 		// never replace it based on a lookup that can race that call.
-		if previousClaimFound {
+		if activeClaimFound {
 			return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
 		}
 	}
@@ -163,17 +161,17 @@ func (c *ProviderController) StopTaskExecution(
 		return intentReceipt, intent, domain.ProviderStopObservation{}, provider.ErrUnsupportedCapability
 	}
 
-	claimID, err := newProviderStopDispatchClaimID()
+	claimCommandID, err := domain.NewID("cmd")
 	if err != nil {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, err
 	}
-	claimed, err := c.store.ClaimProviderStopDispatch(
-		ctx, jobID, execution.ID, sessionID, intent.OperationID, claimID,
+	_, claim, createdClaim, err := c.store.AddProviderStopDispatchClaim(
+		ctx, jobID, latest.Revision, intent.ID, claimCommandID, principal,
 	)
 	if err != nil {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, err
 	}
-	if !claimed {
+	if !createdClaim {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, provider.ErrStopUnconfirmed
 	}
 
@@ -198,14 +196,14 @@ func (c *ProviderController) StopTaskExecution(
 			if persistErr != nil {
 				return intentReceipt, intent, observation, errors.Join(stopErr, persistErr)
 			}
-			releaseErr := c.store.ReleaseProviderStopDispatchClaim(
-				ctx, jobID, execution.ID, sessionID, intent.OperationID, claimID,
+			_, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+				ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedDefinitiveFailure,
 			)
 			return intentReceipt, intent, observation, errors.Join(stopErr, releaseErr)
 		}
 		if !providerOperationMayHaveStarted(stopErr) {
-			releaseErr := c.store.ReleaseProviderStopDispatchClaim(
-				ctx, jobID, execution.ID, sessionID, intent.OperationID, claimID,
+			_, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+				ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedDefinitiveFailure,
 			)
 			return intentReceipt, intent, domain.ProviderStopObservation{}, errors.Join(stopErr, releaseErr)
 		}
@@ -228,18 +226,10 @@ func (c *ProviderController) StopTaskExecution(
 	if err != nil {
 		return intentReceipt, intent, observation, err
 	}
-	if err := c.store.ReleaseProviderStopDispatchClaim(
-		ctx, jobID, execution.ID, sessionID, intent.OperationID, claimID,
+	if _, _, err := c.store.ReleaseProviderStopDispatchClaim(
+		ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedStopped,
 	); err != nil {
 		return intentReceipt, intent, observation, err
 	}
 	return intentReceipt, intent, observation, nil
-}
-
-func newProviderStopDispatchClaimID() (string, error) {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		return "", fmt.Errorf("generate Provider Stop dispatch claim: %w", err)
-	}
-	return "claim_" + hex.EncodeToString(value[:]), nil
 }
