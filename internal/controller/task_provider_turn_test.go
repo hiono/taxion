@@ -357,7 +357,7 @@ func TestProviderCapabilityEvidenceSHA256AcceptsEvidenceAtLeastLive(t *testing.T
 				Identity: identity, StopDispatchFencing: true,
 				Evidence: []provider.CapabilityEvidence{{
 					Capability: provider.CapabilityStopDispatchFencing,
-					Identity: identity, TestID: "stop-fencing-evidence",
+					Identity:   identity, TestID: "stop-fencing-evidence",
 					EvidenceSHA256: digest, EvidenceLevel: test.level,
 					VerifiedAt: time.Now().UTC(),
 				}},
