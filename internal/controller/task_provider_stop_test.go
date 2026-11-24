@@ -179,6 +179,31 @@ func TestTaskProviderStopAmbiguousOutcomeIsNotReplayed(t *testing.T) {
 	}
 }
 
+func TestTaskProviderStopRejectsUnresolvedTaskTurn(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before pending Turn: %v", err)
+	}
+	if _, _, err := f.database.AddTaskTurnIntent(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, f.permission.ID, "session_1",
+		"cmd_abababababababababababababababab", strings.Repeat("a", 64), 100,
+	); err != nil {
+		t.Fatalf("persist pending Task Turn: %v", err)
+	}
+	if _, _, _, err := f.stop("cmd_acacacacacacacacacacacacacacacac", domain.ProviderStopReasonTaskComplete); err == nil {
+		t.Fatal("Provider Stop was accepted while the same Session had an unresolved Task Turn")
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after rejected Stop: %v", err)
+	}
+	if len(job.ProviderStopIntents) != 0 || f.runtime.stopCalls != 0 {
+		t.Fatalf("rejected Stop created an intent or reached Provider: intents=%d stopCalls=%d",
+			len(job.ProviderStopIntents), f.runtime.stopCalls)
+	}
+}
+
 func TestTaskProviderStopRejectsUnconfirmedProviderResponses(t *testing.T) {
 	tests := []struct {
 		name   string
