@@ -1,22 +1,3 @@
-func (c *ProviderController) releasePlanningResumeDispatchClaim(
-	ctx context.Context,
-	jobID string,
-	intent domain.PlanningResumeIntent,
-	outcome string,
-	principal auth.AuthenticatedPrincipal,
-) error {
-	job, err := c.store.GetJob(ctx, jobID)
-	if err != nil {
-		return err
-	}
-	claim, active := domain.ActivePlanningResumeDispatchClaim(job, intent.OperationID)
-	if !active || claim.ResumeID != intent.ID {
-		return nil
-	}
-	_, _, err = c.store.ReleasePlanningResumeDispatchClaim(ctx, jobID, claim.ID, principal, outcome)
-	return err
-}
-
 package controller
 
 import (
@@ -256,4 +237,23 @@ func (c *ProviderController) ResumeTaskExecution(
 		ctx, jobID, intent, domain.PlanningResumeDispatchReleasedAttached, principal,
 	)
 	return receipt, intent, observation, result, releaseErr
+}
+
+func (c *ProviderController) releasePlanningResumeDispatchClaim(
+	ctx context.Context,
+	jobID string,
+	intent domain.PlanningResumeIntent,
+	outcome string,
+	principal auth.AuthenticatedPrincipal,
+) error {
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	claim, active := domain.ActivePlanningResumeDispatchClaim(job, intent.OperationID)
+	if !active || claim.ResumeID != intent.ID {
+		return nil
+	}
+	_, _, err = c.store.ReleasePlanningResumeDispatchClaim(ctx, jobID, claim.ID, principal, outcome)
+	return err
 }

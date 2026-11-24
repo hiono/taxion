@@ -428,6 +428,10 @@ func TestTaskCoderResumeObservationRequiresProviderResponsePath(t *testing.T) {
 	job.PlanningResumeDispatchClaims = append(job.PlanningResumeDispatchClaims, claim)
 	job.Revision++
 	job.UpdatedAt = claim.CreatedAt
+	if _, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task",
+		"cmd_f5050505050505050505050505050505", strings.Repeat("f", 64), true, now.Add(1600*time.Millisecond)); err == nil {
+		t.Fatal("a later Resume intent was accepted while the Session dispatch claim was active")
+	}
 
 	evidence := strings.Repeat("e", 64)
 	if _, err := NewPlanningResumeObservation(job, resume.ID, principalID,

@@ -341,6 +341,12 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		t.Fatalf("unsupported Stop capability created a Stop intent: intents=%d err=%v", len(job.ProviderStopIntents), err)
 	}
 	runtime.capabilities.StopProof = true
+	runtime.capabilities.StopLookup = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence, provider.CapabilityEvidence{
+		Capability: provider.CapabilityStopLookup, Identity: runtime.identity,
+		TestID: "task-stop-lookup-test", EvidenceSHA256: strings.Repeat("f", 64),
+		EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
+	})
 	_, stopIntent, stopObservation, err := providerController.StopTaskExecution(
 		ctx, jobID, execution.ID, permission.ID, "cmd_e4040404040404040404040404040404",
 		permissionRequest, domain.ProviderStopReasonTaskComplete, principal,
@@ -430,6 +436,11 @@ func TestTaskProviderTurnRejectsLookupResultDigestMismatch(t *testing.T) {
 		ReceiptID: "receipt_1", SessionID: "session_1", TurnID: turn.ID,
 		ResultSHA256: strings.Repeat("f", 64), UsageID: "usage_mismatch",
 		EvidenceSHA256: strings.Repeat("e", 64),
+	}
+	f.runtime.resultResult = provider.Result{
+		OperationID: turn.OperationID, SessionID: turn.ProviderSessionID, TurnID: turn.ID,
+		Content: "mismatched final provider result", ResultSHA256: sha256String("mismatched final provider result"),
+		Final: true, EvidenceSHA256: strings.Repeat("d", 64),
 	}
 	f.runtime.resultResult = provider.Result{
 		OperationID: turn.OperationID, SessionID: turn.ProviderSessionID, TurnID: turn.ID,
