@@ -1089,10 +1089,18 @@ func NewTaskProviderResumeObservation(
 		return PlanningResumeObservation{}, errors.New("non-ATTACHED Task Resume observation cannot contain a Provider response")
 	}
 	claim, active := ActivePlanningResumeDispatchClaim(job, resume.OperationID)
-	if !active || claim.ResumeID != resume.ID {
-		return PlanningResumeObservation{}, errors.New("Task Provider Resume observation requires its active dispatch claim")
+	dispatchClaimID := ""
+	if status == PlanningResumeNotDispatched {
+		if active {
+			return PlanningResumeObservation{}, errors.New("NOT_DISPATCHED Task Provider Resume observation cannot overlap an active dispatch claim")
+		}
+	} else {
+		if !active || claim.ResumeID != resume.ID {
+			return PlanningResumeObservation{}, errors.New("Task Provider Resume observation requires its active dispatch claim")
+		}
+		dispatchClaimID = claim.ID
 	}
-	return newPlanningResumeObservation(job, resume, commandID, status, evidenceSHA256, providerResponse, claim.ID, reconcilesUnknown, now)
+	return newPlanningResumeObservation(job, resume, commandID, status, evidenceSHA256, providerResponse, dispatchClaimID, reconcilesUnknown, now)
 }
 
 func newPlanningResumeObservation(
