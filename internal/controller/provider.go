@@ -1738,14 +1738,6 @@ func providerResumeObservationCommandID(resumeID, status, evidenceSHA256 string,
 	return "cmd_" + hex.EncodeToString(sum[:16])
 }
 
-func providerResumeNotDispatchedEvidence(resumeID string, cause error) string {
-	material := "taxion:provider-resume-not-dispatched:" + resumeID
-	if cause != nil {
-		material += ":" + cause.Error()
-	}
-	sum := sha256.Sum256([]byte(material))
-	return hex.EncodeToString(sum[:])
-}
 
 func resumeResultFromObservation(observation domain.PlanningResumeObservation) provider.ResumeResult {
 	return provider.ResumeResult{
