@@ -232,7 +232,7 @@ Start observationが永続化されるとき、JobはProviderLifecycleEnforcedFr
 
 ### 8.1.1 Task-bound Coder Start（Controller統合対象）
 
-Task-bound StartはDRAFT Planning Startと別のauthority pathとする。Planner用PlanningAuthorizationを流用せず、現在のJobApproval・Task・ExecutionPermission・RoleExecution・ProviderStartIntentを検証する。
+Task-bound StartはDRAFT Planning Startと別のauthority pathとする。Task-bound ResumeはE5 Session ReattachmentとE4 Resume Idempotencyの両方を必須とし、同じOperationID / SessionIDの重複要求をProvider側で一つの再接続へ収束させる。Planner用PlanningAuthorizationを流用せず、現在のJobApproval・Task・ExecutionPermission・RoleExecution・ProviderStartIntentを検証する。
 
 1. ProviderControllerは、trusted ExecutionControllerが注入されていない場合、Task-bound dispatchを拒否する。
 2. JobAggregateから対象Task、Coder RoleExecution、ProviderStartIntent、ExecutionPermissionを解決し、各IDとTask / Role / Operation / request digestの一致を検証する。
