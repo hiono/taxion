@@ -34,7 +34,6 @@ func planningLifecycleJob(t *testing.T) (Job, string, string) {
 		t.Fatalf("NewProviderStartObservation: %v", err)
 	}
 	job.ProviderStartObservations = append(job.ProviderStartObservations, startObservation)
-	job.ProviderLifecycleEnforcedFromRevision = startObservation.CreatedRevision
 	job.Revision++
 	job.UpdatedAt = startObservation.CreatedAt
 	return job, principal, execution.ID
@@ -593,7 +592,6 @@ func TestPlanningTurnValidationUsesOnlyPriorResumeObservations(t *testing.T) {
 func TestPlanningTurnRequiresAcceptedStartObservationAndExactSession(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	job.ProviderStartObservations = nil
-	job.ProviderLifecycleEnforcedFromRevision = 0
 	_, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
 		"cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", strings.Repeat("a", 64), 100, job.UpdatedAt.Add(time.Second))
 	var boundary *PlanningBoundaryError
@@ -609,23 +607,6 @@ func TestPlanningTurnRequiresAcceptedStartObservationAndExactSession(t *testing.
 	}
 }
 
-func TestLegacyPlanningTurnFactsRemainReadableWithoutStartObservation(t *testing.T) {
-	job, principal, executionID := planningLifecycleJob(t)
-	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
-		"cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("f", 64), 100, job.UpdatedAt.Add(time.Second))
-	if err != nil {
-		t.Fatalf("NewPlanningTurnIntent: %v", err)
-	}
-	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
-	job.Revision++
-	job.UpdatedAt = turn.CreatedAt
-	job.ProviderStartObservations = nil
-	job.ProviderLifecycleEnforcedFromRevision = 0
-	if err := job.Validate(); err != nil {
-		t.Fatalf("legacy Job with historical Turn intent must remain readable: %v", err)
-	}
-}
-
 func TestNewPlanningResumeRequiresAcceptedStartObservation(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
@@ -637,7 +618,6 @@ func TestNewPlanningResumeRequiresAcceptedStartObservation(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = turn.CreatedAt
 	job.ProviderStartObservations = nil
-	job.ProviderLifecycleEnforcedFromRevision = 0
 	_, err = NewPlanningResumeIntent(job, executionID, principal, "session_1",
 		"cmd_22222222222222222222222222222222", strings.Repeat("2", 64), true, job.UpdatedAt.Add(time.Second))
 	var boundary *PlanningBoundaryError
@@ -650,7 +630,6 @@ func TestProviderStartUnknownEvidenceIsAppendOnlyUntilTerminalResolution(t *test
 	job, principal, executionID := planningLifecycleJob(t)
 	startID := job.ProviderStartIntents[0].ID
 	job.ProviderStartObservations = nil
-	job.ProviderLifecycleEnforcedFromRevision = 0
 
 	first, err := NewProviderStartObservation(job, startID, principal,
 		"cmd_33333333333333333333333333333333", ProviderStartUnknown, "", "", "", false,
@@ -659,7 +638,6 @@ func TestProviderStartUnknownEvidenceIsAppendOnlyUntilTerminalResolution(t *test
 		t.Fatalf("first UNKNOWN observation: %v", err)
 	}
 	job.ProviderStartObservations = append(job.ProviderStartObservations, first)
-	job.ProviderLifecycleEnforcedFromRevision = first.CreatedRevision
 	job.Revision++
 	job.UpdatedAt = first.CreatedAt
 
@@ -757,7 +735,7 @@ func TestPlanningResumeAfterStopRecordsBoundaryDenial(t *testing.T) {
 	}
 }
 
-func TestProviderStopPreservesLegacyUnknownResumeHistory(t *testing.T) {
+func TestProviderStopPreservesUnknownResumeHistory(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	now := job.UpdatedAt.Add(time.Second)
 	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
@@ -786,7 +764,7 @@ func TestProviderStopPreservesLegacyUnknownResumeHistory(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = unknown.CreatedAt
 	if err := job.Validate(); err != nil {
-		t.Fatalf("legacy Job before Stop: %v", err)
+		t.Fatalf("Job before Stop: %v", err)
 	}
 
 	if _, err := NewProviderStopIntent(job, executionID, principal, "session_1",
@@ -796,17 +774,17 @@ func TestProviderStopPreservesLegacyUnknownResumeHistory(t *testing.T) {
 
 	start := job.ProviderStartIntents[0]
 	commandID := "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-	legacyStop := ProviderStopIntent{
+	stopIntent := ProviderStopIntent{
 		ID: ProviderStopIntentID(commandID), CommandID: commandID, JobID: job.ID,
 		RoleExecutionID: executionID, OperationID: ProviderStopOperationID(commandID),
 		SessionID: "session_1", ProviderID: start.ProviderID, AccountID: start.AccountID,
 		ConfigurationSHA256: start.ConfigurationSHA256, Reason: ProviderStopReasonCancelled,
 		CreatedAt: now.Add(3 * time.Second), CreatedRevision: job.Revision + 1,
 	}
-	job.ProviderStopIntents = append(job.ProviderStopIntents, legacyStop)
+	job.ProviderStopIntents = append(job.ProviderStopIntents, stopIntent)
 	job.Revision++
-	job.UpdatedAt = legacyStop.CreatedAt
+	job.UpdatedAt = stopIntent.CreatedAt
 	if err := job.Validate(); err != nil {
-		t.Fatalf("legacy Provider Stop after UNKNOWN Resume must remain readable: %v", err)
+		t.Fatalf("Provider Stop after UNKNOWN Resume: %v", err)
 	}
 }
