@@ -58,6 +58,9 @@ func (c *ProviderController) ResumeTaskExecution(
 			if err != nil {
 				return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
 			}
+			if previous.Status == domain.PlanningResumeFailed {
+				return receipt, intent, previous, resumeResultFromObservation(previous), errors.New("Task Provider Resume previously failed")
+			}
 			return receipt, intent, previous, resumeResultFromObservation(previous), nil
 		}
 	}

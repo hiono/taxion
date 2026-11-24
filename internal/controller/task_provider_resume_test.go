@@ -244,6 +244,11 @@ func TestTaskProviderResumePersistsDefinitiveFailureAndAllowsStop(t *testing.T) 
 		t.Fatalf("definitive Resume failure was not persisted: intent=%#v observation=%#v returned=%#v calls=%d err=%v",
 			intent, observation, returnedObservation, f.runtime.resumeCalls, resumeErr)
 	}
+	_, replayedFailure, _, replayErr := f.resume(commandID)
+	if replayErr == nil || replayedFailure.Status != domain.PlanningResumeFailed || f.runtime.resumeCalls != 1 {
+		t.Fatalf("definitive Resume replay did not preserve failure without another Provider call: observation=%#v calls=%d err=%v",
+			replayedFailure, f.runtime.resumeCalls, replayErr)
+	}
 	_, stopIntent, _, stopErr := f.stop("cmd_45454545454545454545454545454545", domain.ProviderStopReasonFailure)
 	if stopIntent.ID == "" {
 		t.Fatalf("Stop did not proceed after definitive Resume failure: %v", stopErr)
