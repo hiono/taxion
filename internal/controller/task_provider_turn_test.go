@@ -607,9 +607,20 @@ func TestReleaseTaskTurnDispatchClaimBeforeSendDoesNotReleaseReplacementClaim(t 
 	if err != nil {
 		t.Fatalf("Add first dispatch claim: %v", err)
 	}
+	if _, created, err := f.controller.recordTaskTurnDispatchObservation(
+		f.ctx, f.jobID, firstClaim.ID, domain.TaskTurnDispatchObservationStarted, "", f.principal,
+	); err != nil || !created {
+		t.Fatalf("persist first dispatch start: created=%v err=%v", created, err)
+	}
+	lookupEvidence := strings.Repeat("a", 64)
+	if _, created, err := f.controller.recordTaskTurnDispatchObservation(
+		f.ctx, f.jobID, firstClaim.ID, domain.TaskTurnDispatchObservationLookupNotFound, lookupEvidence, f.principal,
+	); err != nil || !created {
+		t.Fatalf("persist first lookup NOT_FOUND: created=%v err=%v", created, err)
+	}
 	if _, _, err := f.database.ReleaseTaskTurnDispatchClaim(
 		f.ctx, f.jobID, firstClaim.ID, f.principal,
-		domain.TaskTurnDispatchReleasedIdempotentRetry, strings.Repeat("a", 64),
+		domain.TaskTurnDispatchReleasedIdempotentRetry, lookupEvidence,
 	); err != nil {
 		t.Fatalf("release first dispatch claim: %v", err)
 	}
@@ -745,13 +756,24 @@ func TestReleaseTaskTurnDispatchClaimForIdempotentRetryDoesNotReleaseReplacement
 	if err != nil {
 		t.Fatalf("Add first dispatch claim: %v", err)
 	}
+	if _, created, err := f.controller.recordTaskTurnDispatchObservation(
+		f.ctx, f.jobID, firstClaim.ID, domain.TaskTurnDispatchObservationStarted, "", f.principal,
+	); err != nil || !created {
+		t.Fatalf("persist first dispatch start: created=%v err=%v", created, err)
+	}
 	staleLookupJob, err := f.database.GetJob(f.ctx, f.jobID)
 	if err != nil {
 		t.Fatalf("GetJob before simulated Lookup: %v", err)
 	}
+	lookupEvidence := strings.Repeat("a", 64)
+	if _, created, err := f.controller.recordTaskTurnDispatchObservation(
+		f.ctx, f.jobID, firstClaim.ID, domain.TaskTurnDispatchObservationLookupNotFound, lookupEvidence, f.principal,
+	); err != nil || !created {
+		t.Fatalf("persist first lookup NOT_FOUND: created=%v err=%v", created, err)
+	}
 	if _, _, err := f.database.ReleaseTaskTurnDispatchClaim(
 		f.ctx, f.jobID, firstClaim.ID, f.principal,
-		domain.TaskTurnDispatchReleasedIdempotentRetry, strings.Repeat("a", 64),
+		domain.TaskTurnDispatchReleasedIdempotentRetry, lookupEvidence,
 	); err != nil {
 		t.Fatalf("release first dispatch claim: %v", err)
 	}

@@ -122,8 +122,30 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observationReceipt, unknown, err := database.AddTaskTurnObservation(ctx, jobID, job.Revision,
-		turn.ID, "cmd_e8080808080808080808080808080808",
+	_, turnClaim, _, err := database.AddTaskTurnDispatchClaim(
+		ctx, jobID, job.Revision, turn.ID, "cmd_e8181818181818181818181818181818", principal,
+	)
+	if err != nil {
+		t.Fatalf("AddTaskTurnDispatchClaim: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err = database.AddTaskTurnDispatchObservation(
+		ctx, jobID, job.Revision, turnClaim.ID,
+		domain.TaskTurnDispatchObservationCommandID(turnClaim.ID, domain.TaskTurnDispatchObservationStarted),
+		domain.TaskTurnDispatchObservationStarted, "", principal,
+	)
+	if err != nil {
+		t.Fatalf("AddTaskTurnDispatchObservation: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observationReceipt, unknown, err := database.AddTaskTurnObservationForClaim(ctx, jobID, job.Revision,
+		turn.ID, turnClaim.ID, "cmd_e8080808080808080808080808080808",
 		domain.TaskTurnUnknown, 0, "", false)
 	if err != nil {
 		t.Fatalf("AddTaskTurnObservation: %v", err)
