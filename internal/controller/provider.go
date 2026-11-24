@@ -1069,6 +1069,15 @@ func providerStopObservationUnknown(observation domain.ProviderStopObservation) 
 	return !observation.Stopped && !observation.Quiescent && observation.EvidenceSHA256 == ""
 }
 
+func providerTurnPreAdapterRejectionEvidence(operationID string, err error) (string, bool) {
+	var preDispatch *provider.PreDispatchError
+	if !errors.As(err, &preDispatch) || preDispatch == nil ||
+		preDispatch.OperationID != operationID || !validProviderEvidenceSHA256(preDispatch.EvidenceSHA256) {
+		return "", false
+	}
+	return preDispatch.EvidenceSHA256, true
+}
+
 func providerTurnDefinitiveFailureEvidence(operationID string, err error) (string, bool) {
 	var operationError *provider.OperationError
 	if !errors.As(err, &operationError) || operationError == nil ||

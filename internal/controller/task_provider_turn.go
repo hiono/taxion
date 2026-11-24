@@ -403,6 +403,18 @@ func (c *ProviderController) dispatchTaskTurn(
 	current = postClaimJob
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
+		if evidenceSHA256, rejected := providerTurnPreAdapterRejectionEvidence(turn.OperationID, err); rejected {
+			_, _, dispatchErr := c.recordTaskTurnDispatchObservation(ctx, current.ID, claim.ID,
+				domain.TaskTurnDispatchObservationPreAdapterRejection, evidenceSHA256, principal)
+			if dispatchErr != nil {
+				return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, dispatchErr)
+			}
+			_, _, releaseErr := c.store.ReleaseTaskTurnDispatchClaim(
+				ctx, current.ID, claim.ID, principal,
+				domain.TaskTurnDispatchReleasedDefinitiveFailure, evidenceSHA256,
+			)
+			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, releaseErr)
+		}
 		if evidenceSHA256, definitive := providerTurnDefinitiveFailureEvidence(turn.OperationID, err); definitive {
 			_, _, dispatchErr := c.recordTaskTurnDispatchObservation(ctx, current.ID, claim.ID,
 				domain.TaskTurnDispatchObservationDefinitiveFailure, evidenceSHA256, principal)
