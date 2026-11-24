@@ -467,12 +467,13 @@ func TestTaskProviderTurnRejectsLookupResultDigestMismatch(t *testing.T) {
 		t.Fatal("ambiguous Task Turn released its dispatch claim")
 	}
 
-	correctedSHA := strings.Repeat("7", 64)
+	correctedContent := "corrected final provider result"
+	correctedSHA := sha256String(correctedContent)
 	f.runtime.lookupResult.ResultSHA256 = correctedSHA
 	f.runtime.lookupResult.UsageID = "usage_corrected"
 	f.runtime.resultResult = provider.Result{
 		OperationID: turn.OperationID, SessionID: turn.ProviderSessionID, TurnID: turn.ID,
-		Content: "corrected final provider result", ResultSHA256: correctedSHA,
+		Content: correctedContent, ResultSHA256: correctedSHA,
 		Final: true, EvidenceSHA256: strings.Repeat("8", 64),
 	}
 	f.runtime.capabilities.UsageIdentity = true
