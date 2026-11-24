@@ -116,9 +116,9 @@ func (c *ProviderController) ResumeTaskExecution(
 	}
 
 	request := provider.ResumeRequest{
-		OperationID: intent.OperationID,
-		SessionID:   intent.ProviderSessionID,
-		Deadline:    permission.ExpiresAt,
+		OperationID:        intent.OperationID,
+		SessionID:          intent.ProviderSessionID,
+		Deadline:           permission.ExpiresAt,
 		RequireIdempotency: true,
 	}
 	if err := request.Validate(); err != nil {
