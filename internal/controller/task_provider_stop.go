@@ -110,6 +110,14 @@ func (c *ProviderController) StopTaskExecution(
 		}
 
 		lookupRequest := provider.LookupRequest{Purpose: provider.LookupPurposeStop, OperationID: intent.OperationID, SessionID: sessionID}
+		lookupClaimID, lookupStartID := "", ""
+		if activeClaimFound {
+			lookupClaimID = activeClaim.ID
+			if start, started := domain.ProviderStopDispatchStartedForClaim(currentJob, activeClaim.ID); started {
+				lookupStartID = start.ID
+			}
+		}
+		lookupFencingRequired := fencingRequired
 		lookup, lookupErr := c.runtime.Lookup(ctx, lookupRequest)
 		lookupObservedAt := time.Now().UTC().Round(0)
 		currentJob, err = c.store.GetJob(ctx, jobID)
@@ -120,6 +128,16 @@ func (c *ProviderController) StopTaskExecution(
 		previousUnknown = hasPrevious && !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
 		activeClaim, activeClaimFound = domain.ActiveProviderStopDispatchClaim(currentJob, intent.OperationID)
 		fencingRequired = providerStopDispatchRequiresFencing(currentJob, intent.OperationID)
+		currentClaimID, currentStartID := "", ""
+		if activeClaimFound {
+			currentClaimID = activeClaim.ID
+			if start, started := domain.ProviderStopDispatchStartedForClaim(currentJob, activeClaim.ID); started {
+				currentStartID = start.ID
+			}
+		}
+		if currentClaimID != lookupClaimID || currentStartID != lookupStartID || fencingRequired != lookupFencingRequired {
+			return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+		}
 		if hasPrevious && previous.Stopped && previous.Quiescent {
 			if activeClaimFound {
 				if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(

@@ -1378,3 +1378,71 @@ func TestTaskProviderStopDispatchStartUsesVerifiedJobRevision(t *testing.T) {
 			len(job.ProviderStopDispatchReleases), f.runtime.stopCalls)
 	}
 }
+
+func TestTaskProviderStopLookupDoesNotReleaseClaimStartedDuringLookup(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	commandID := "cmd_80808080808080808080808080808080"
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Stop intent: %v", err)
+	}
+	_, intent, err := f.database.AddProviderStopIntent(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, "session_1", commandID,
+		domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if err != nil {
+		t.Fatalf("AddProviderStopIntent: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Stop claim: %v", err)
+	}
+	_, claim, _, err := f.database.AddProviderStopDispatchClaim(
+		f.ctx, f.jobID, job.Revision, intent.ID,
+		"cmd_81818181818181818181818181818181", f.principal,
+	)
+	if err != nil {
+		t.Fatalf("AddProviderStopDispatchClaim: %v", err)
+	}
+
+	fencingEvidence := strings.Repeat("a", 64)
+	f.runtime.capabilities.StopDispatchFencing = true
+	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence, provider.CapabilityEvidence{
+		Capability: provider.CapabilityStopDispatchFencing, Identity: f.runtime.identity,
+		TestID: "stop-dispatch-fencing-test", EvidenceSHA256: fencingEvidence,
+		EvidenceLevel: provider.EvidenceLive, VerifiedAt: f.controller.now(),
+	})
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: intent.OperationID, SessionID: "session_1",
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("b", 64),
+	}
+	f.runtime.lookupHook = func(ctx context.Context, request provider.LookupRequest) error {
+		if request.Purpose != provider.LookupPurposeStop || request.OperationID != intent.OperationID {
+			return errors.New("unexpected Provider Lookup request")
+		}
+		_, _, _, err := f.database.StartProviderStopDispatchClaim(
+			ctx, f.jobID, claim.ID, fencingEvidence, f.principal,
+		)
+		return err
+	}
+
+	_, _, _, err = f.stop(commandID, domain.ProviderStopReasonTaskComplete)
+	if !errors.Is(err, provider.ErrStopUnconfirmed) {
+		t.Fatalf("stale Lookup result released a claim started during Lookup: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Lookup: %v", err)
+	}
+	activeClaim, active := domain.ActiveProviderStopDispatchClaim(job, intent.OperationID)
+	if !active || activeClaim.ID != claim.ID {
+		t.Fatalf("Lookup race changed the active Stop claim: active=%v claim=%#v want=%#v",
+			active, activeClaim, claim)
+	}
+	if _, started := domain.ProviderStopDispatchStartedForClaim(job, claim.ID); !started {
+		t.Fatal("concurrent Stop dispatch start was not retained")
+	}
+	if len(job.ProviderStopDispatchReleases) != 0 {
+		t.Fatalf("stale Lookup created a Stop dispatch release: %#v", job.ProviderStopDispatchReleases)
+	}
+}
