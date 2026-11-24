@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,9 +23,10 @@ func taskTurnFixture(t *testing.T) (Job, RoleExecution, ExecutionPermission, tim
 	job.ExecutionPermissions = append(job.ExecutionPermissions, permission)
 	job.Revision++
 	job.UpdatedAt = permission.CreatedAt
+	tempRoot := t.TempDir()
 	snapshot := WorktreeSnapshot{
-		RepositoryID: task.TargetRepositories[0], RepositoryPath: "/tmp/taxion-src",
-		WorktreePath: "/tmp/taxion-wt", BaselineCommit: strings.Repeat("a", 40),
+		RepositoryID: task.TargetRepositories[0], RepositoryPath: filepath.Join(tempRoot, "source"),
+		WorktreePath: filepath.Join(tempRoot, "worktree"), BaselineCommit: strings.Repeat("a", 40),
 	}
 	start, err := NewTaskRoleExecutionStart(job, task.ID, permission.ID,
 		"cmd_d1010101010101010101010101010101", digest, snapshot, now.Add(time.Minute))
@@ -136,6 +138,10 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.ProviderUsageObservations = append(job.ProviderUsageObservations, usage)
 	job.Revision++
 	job.UpdatedAt = usage.CreatedAt
+	if _, err := NewProviderUsageObservation(job, execution.ID, principalID, turn.OperationID, turn.ID,
+		turn.ProviderSessionID, "usage_task_turn_duplicate", 76, true, strings.Repeat("9", 64), now.Add(3*time.Minute+30*time.Second)); err == nil {
+		t.Fatal("a second complete Provider Usage with a different UsageID was accepted for the same Turn")
+	}
 	completed, err := NewTaskTurnObservation(job, turn.ID, "cmd_da0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
 		TaskTurnCompleted, 75, strings.Repeat("6", 64), true, now.Add(4*time.Minute))
 	if err != nil {
@@ -282,5 +288,12 @@ func TestWorktreeInitialStateSHA256Requires64HexCharacters(t *testing.T) {
 	job.WorktreeAssignments[0].InitialStateSHA256 = strings.Repeat("c", 40)
 	if err := job.Validate(); err == nil {
 		t.Fatal("persisted 40-character Git commit ID was accepted as an InitialStateSHA256")
+	}
+
+	duplicateOwner := job
+	duplicateOwner.RoleExecutions = append(append([]RoleExecution(nil), job.RoleExecutions...), execution)
+	duplicateOwner.RoleExecutions[len(duplicateOwner.RoleExecutions)-1].ID = "role_execution_other"
+	if err := validateWorktreeAssignments(duplicateOwner); err == nil {
+		t.Fatal("Worktree assignment was accepted for a non-owner RoleExecution")
 	}
 }

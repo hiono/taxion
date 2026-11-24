@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"path/filepath"
 	"encoding/hex"
 	"strings"
 	"testing"
@@ -83,9 +84,10 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tempRoot := t.TempDir()
 	snapshot := domain.WorktreeSnapshot{
-		RepositoryID: task.TargetRepositories[0], RepositoryPath: "/tmp/taxion-store-source",
-		WorktreePath: "/tmp/taxion-store-worktree", BaselineCommit: strings.Repeat("a", 40),
+		RepositoryID: task.TargetRepositories[0], RepositoryPath: filepath.Join(tempRoot, "source"),
+		WorktreePath: filepath.Join(tempRoot, "worktree"), BaselineCommit: strings.Repeat("a", 40),
 	}
 	_, start, err := database.StartTaskExecution(ctx, job.Revision, jobID, task.ID,
 		permission.ID, "cmd_e5050505050505050505050505050505", requestSHA, snapshot)
