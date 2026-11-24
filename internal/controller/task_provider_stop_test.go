@@ -196,6 +196,13 @@ func TestTaskProviderStopDispatchClaimPreventsConcurrentDuplicate(t *testing.T) 
 	case <-time.After(5 * time.Second):
 		t.Fatal("first Stop did not reach the Provider")
 	}
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob while Stop is in flight: %v", err)
+	}
+	if _, active := domain.ActiveProviderStopDispatchClaim(job, domain.ProviderStopOperationID(commandID)); !active {
+		t.Fatal("Stop dispatch claim was not persisted in the JobAggregate before Provider dispatch")
+	}
 
 	f.runtime.lookupResult = provider.LookupResult{
 		Found: false, OperationID: domain.ProviderStopOperationID(commandID), SessionID: "session_1",
@@ -219,6 +226,17 @@ func TestTaskProviderStopDispatchClaimPreventsConcurrentDuplicate(t *testing.T) 
 	}
 	if f.runtime.stopCalls != 1 {
 		t.Fatalf("same OperationID dispatched Stop %d times, want 1", f.runtime.stopCalls)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Stop completion: %v", err)
+	}
+	if len(job.ProviderStopDispatchClaims) != 1 || len(job.ProviderStopDispatchReleases) != 1 {
+		t.Fatalf("Stop dispatch claim lifecycle was not persisted: claims=%d releases=%d",
+			len(job.ProviderStopDispatchClaims), len(job.ProviderStopDispatchReleases))
+	}
+	if _, active := domain.ActiveProviderStopDispatchClaim(job, domain.ProviderStopOperationID(commandID)); active {
+		t.Fatal("completed Stop retained an active dispatch claim")
 	}
 }
 
