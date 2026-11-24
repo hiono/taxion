@@ -216,10 +216,23 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 	if err := runGit(ctx, worktreePath, "merge-base", "--is-ancestor", snapshot.BaselineCommit, head); err != nil {
 		return errors.New("Task Worktree HEAD no longer descends from its immutable baseline")
 	}
-	if _, err := gitOutput(ctx, worktreePath, "symbolic-ref", "-q", "HEAD"); err == nil {
-		return errors.New("Task Worktree must remain detached")
-	} else if !isDetachedHeadProbeError(err) {
-		return fmt.Errorf("verify Task Worktree detached HEAD: %w", err)
+	if snapshot.HeadMode == domain.WorktreeHeadBranchAttached || record.HeadMode == domain.WorktreeHeadBranchAttached {
+		expectedRef := snapshot.HeadRef
+		if expectedRef == "" {
+			expectedRef = record.HeadRef
+		}
+		actualRef, err := gitOutput(ctx, worktreePath, "symbolic-ref", "-q", "HEAD")
+		if err != nil || actualRef != expectedRef || strings.TrimSpace(expectedRef) == "" {
+			return errors.New("Task Worktree branch reference changed after registration")
+		}
+	} else {
+		_, detachedErr := gitOutput(ctx, worktreePath, "symbolic-ref", "-q", "HEAD")
+		if detachedErr == nil {
+			return errors.New("Task Worktree must remain detached")
+		}
+		if !isDetachedHeadProbeError(detachedErr) {
+			return fmt.Errorf("verify Task Worktree detached HEAD: %w", detachedErr)
+		}
 	}
 	gitDir, err := gitOutput(ctx, worktreePath, "rev-parse", "--absolute-git-dir")
 	if err != nil {
