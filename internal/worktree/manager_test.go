@@ -421,7 +421,7 @@ func TestManagerCleanupFailedPreparePreservesBaselineWhenWorktreeRemovalFails(t 
 	}
 }
 
-func TestManagerCaptureOutputRejectsReplacedCreatedWorktreeGitDir(t *testing.T) {
+func TestManagerCaptureOutputRequiresPersistentReservationForCreatedWorktree(t *testing.T) {
 	repository := initRepository(t)
 	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
@@ -433,12 +433,17 @@ func TestManagerCaptureOutputRejectsReplacedCreatedWorktreeGitDir(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	gitTestRun(t, repository, "worktree", "remove", "--force", snapshot.WorktreePath)
-	gitTestRun(t, repository, "worktree", "prune")
-	gitTestRun(t, repository, "worktree", "add", "--detach", snapshot.WorktreePath, snapshot.BaselineCommit)
+	reservationDirectory := filepath.Join(manager.root, ".adoptions")
+	entries, err := os.ReadDir(reservationDirectory)
+	if err != nil || len(entries) != 3 {
+		t.Fatalf("read Worktree reservations: entries=%d err=%v", len(entries), err)
+	}
+	if err := os.Remove(filepath.Join(reservationDirectory, entries[0].Name())); err != nil {
+		t.Fatalf("remove Worktree reservation: %v", err)
+	}
 	if _, err := manager.CaptureOutput(context.Background(), jobID, task, snapshot); err == nil ||
-		!strings.Contains(err.Error(), "reservation identity") {
-		t.Fatalf("CaptureOutput accepted a replacement Worktree Git admin directory: %v", err)
+		!strings.Contains(err.Error(), "Worktree adoption reservation") {
+		t.Fatalf("CaptureOutput accepted a Worktree without its persistent reservation: %v", err)
 	}
 }
 
