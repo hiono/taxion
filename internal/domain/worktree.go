@@ -103,23 +103,6 @@ func (a WorktreeAssignment) Snapshot() WorktreeSnapshot {
 }
 
 func validateWorktreeAssignments(job Job) error {
-	if job.WorktreeLifecycleEnforcedFromRevision > job.Revision {
-		return errors.New("Worktree lifecycle activation revision exceeds Job revision")
-	}
-	if job.WorktreeLifecycleEnforcedFromRevision > 0 {
-		activationFound := false
-		for _, assignment := range job.WorktreeAssignments {
-			if assignment.CreatedRevision == job.WorktreeLifecycleEnforcedFromRevision {
-				activationFound = true
-				break
-			}
-		}
-		if !activationFound {
-			return errors.New("Worktree lifecycle activation revision has no matching assignment")
-		}
-	} else if len(job.WorktreeAssignments) > 0 {
-		return errors.New("Worktree assignments require lifecycle activation metadata")
-	}
 	byTask := make(map[string]WorktreeAssignment, len(job.WorktreeAssignments))
 	byPath := make(map[string]string, len(job.WorktreeAssignments))
 	byExecution := make(map[string]struct{}, len(job.WorktreeAssignments))
@@ -182,9 +165,6 @@ func validateWorktreeAssignments(job Job) error {
 	}
 	for _, execution := range job.RoleExecutions {
 		if execution.Role != RoleCoder && execution.Role != RoleReviewer {
-			continue
-		}
-		if execution.WorktreeID == "" && (job.WorktreeLifecycleEnforcedFromRevision == 0 || execution.CreatedRevision < job.WorktreeLifecycleEnforcedFromRevision) {
 			continue
 		}
 		assignment, found := byTask[execution.TaskID]
