@@ -413,12 +413,19 @@ func (c *ProviderController) releaseTaskTurnDispatchClaimForIdempotentRetry(
 	if err != nil {
 		return domain.Job{}, err
 	}
+	expectedClaim, expectedActive := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID)
+	if !expectedActive {
+		return latest, nil
+	}
 	claim, active := domain.ActiveTaskTurnDispatchClaim(latest, turn.OperationID)
 	if !active {
 		return latest, nil
 	}
+	if claim.ID != expectedClaim.ID || claim.CreatedRevision != expectedClaim.CreatedRevision {
+		return domain.Job{}, provider.ErrStopUnconfirmed
+	}
 	_, _, err = c.store.ReleaseTaskTurnDispatchClaim(
-		ctx, latest.ID, claim.ID, principal,
+		ctx, latest.ID, expectedClaim.ID, principal,
 		domain.TaskTurnDispatchReleasedIdempotentRetry, evidenceSHA256,
 	)
 	if err != nil {

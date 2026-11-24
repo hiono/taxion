@@ -428,3 +428,66 @@ func TestReleaseTaskTurnDispatchClaimBeforeSendDoesNotReleaseReplacementClaim(t 
 			active, activeClaim, replacementClaim)
 	}
 }
+
+func TestReleaseTaskTurnDispatchClaimForIdempotentRetryDoesNotReleaseReplacementClaim(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before creating Turn: %v", err)
+	}
+	promptDigest := sha256.Sum256([]byte("Idempotent retry claim identity regression"))
+	_, turn, err := f.database.AddTaskTurnIntent(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, f.permission.ID, "session_1",
+		"cmd_85858585858585858585858585858585", hex.EncodeToString(promptDigest[:]), 100,
+	)
+	if err != nil {
+		t.Fatalf("Add Task Turn intent: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before first claim: %v", err)
+	}
+	_, firstClaim, _, err := f.database.AddTaskTurnDispatchClaim(
+		f.ctx, f.jobID, job.Revision, turn.ID,
+		"cmd_86868686868686868686868686868686", f.principal,
+	)
+	if err != nil {
+		t.Fatalf("Add first dispatch claim: %v", err)
+	}
+	staleLookupJob, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before simulated Lookup: %v", err)
+	}
+	if _, _, err := f.database.ReleaseTaskTurnDispatchClaim(
+		f.ctx, f.jobID, firstClaim.ID, f.principal,
+		domain.TaskTurnDispatchReleasedIdempotentRetry, strings.Repeat("a", 64),
+	); err != nil {
+		t.Fatalf("release first dispatch claim: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before replacement claim: %v", err)
+	}
+	_, replacementClaim, _, err := f.database.AddTaskTurnDispatchClaim(
+		f.ctx, f.jobID, job.Revision, turn.ID,
+		"cmd_87878787878787878787878787878787", f.principal,
+	)
+	if err != nil {
+		t.Fatalf("Add replacement dispatch claim: %v", err)
+	}
+
+	if _, err := f.controller.releaseTaskTurnDispatchClaimForIdempotentRetry(
+		f.ctx, staleLookupJob, turn, f.principal, strings.Repeat("b", 64),
+	); !errors.Is(err, provider.ErrStopUnconfirmed) {
+		t.Fatalf("stale Lookup released a replacement claim: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after stale Lookup: %v", err)
+	}
+	activeClaim, active := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID)
+	if !active || activeClaim.ID != replacementClaim.ID {
+		t.Fatalf("stale Lookup changed replacement claim: active=%v claim=%#v want=%#v",
+			active, activeClaim, replacementClaim)
+	}
+}
