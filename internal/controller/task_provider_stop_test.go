@@ -1336,7 +1336,7 @@ func TestTaskProviderStopDispatchStartUsesVerifiedJobRevision(t *testing.T) {
 		}
 		intent := job.ProviderStopIntents[len(job.ProviderStopIntents)-1]
 		if _, _, err := f.database.AddProviderStopObservation(
-			f.ctx, f.jobID, job.Revision, intent.ID, "cmd_86868686868686868686868686868686",
+			f.ctx, f.jobID, job.Revision, intent.OperationID, "cmd_86868686868686868686868686868686",
 			false, false, "", false, f.principal,
 		); err != nil {
 			t.Fatalf("persist concurrent Stop observation: %v", err)

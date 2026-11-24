@@ -398,11 +398,8 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 			r.CreatedRevision <= start.CreatedRevision || !r.CreatedAt.After(start.CreatedAt) {
 			return errors.New("fenced NOT_FOUND release requires a later started claim with fencing evidence and verified lookup evidence")
 		}
-		lookupObservedAt := r.LookupObservedAt
-		if lookupObservedAt.IsZero() {
-			lookupObservedAt = r.CreatedAt
-		}
-		if !lookupObservedAt.After(start.CreatedAt) || lookupObservedAt.After(r.CreatedAt) {
+		if !r.LookupObservedAt.IsZero() &&
+			(!r.LookupObservedAt.After(start.CreatedAt) || r.LookupObservedAt.After(r.CreatedAt)) {
 			return errors.New("fenced NOT_FOUND lookup observation must be recorded after DispatchStart and before release")
 		}
 	} else if r.Outcome == ProviderStopDispatchReleasedDefinitiveFailure {
