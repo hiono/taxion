@@ -145,7 +145,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	); err == nil {
 		t.Fatal("initial pre-dispatch Worktree failure was not returned")
 	}
-	job, err := database.GetJob(ctx, jobID)
+	job, err = database.GetJob(ctx, jobID)
 	if err != nil || len(job.TaskTurnIntents) != 1 || len(job.TaskTurnDispatchClaims) != 0 ||
 		len(job.TaskTurnObservations) != 0 || runtime.sendCalls != 0 {
 		t.Fatalf("pre-dispatch failure left unexpected dispatch facts: intents=%d claims=%d observations=%d sends=%d err=%v",

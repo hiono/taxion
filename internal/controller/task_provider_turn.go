@@ -305,7 +305,7 @@ func (c *ProviderController) dispatchTaskTurn(
 	if err := c.worktreeVerifier.Verify(ctx, latest.ID, latestTask, latestAssignment.Snapshot()); err != nil {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, fmt.Errorf("reverify Task Worktree immediately before Provider Send: %w", err)
 	}
-	if capabilities.Identity != c.runtime.Identity() || !capabilities.SupportsSafeSend() {
+	if capabilities.Identity != c.runtime.Identity() || !taskTurnCapabilitiesVerified(capabilities) {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
 	}
 	if _, active := domain.ActiveTaskTurnDispatchClaim(latest, turn.OperationID); active {
