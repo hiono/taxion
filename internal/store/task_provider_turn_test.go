@@ -146,9 +146,9 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, resumeUnknown, err := database.AddPlanningResumeObservation(ctx, jobID, job.Revision,
+	_, resumeUnknown, err := database.AddTaskProviderResumeObservation(ctx, jobID, job.Revision,
 		resume.ID, "cmd_ea0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
-		domain.PlanningResumeUnknown, "", false, principal)
+		domain.PlanningResumeUnknown, "", domain.ProviderResumeResponse{}, false)
 	if err != nil || resumeUnknown.Status != domain.PlanningResumeUnknown {
 		t.Fatalf("persist Task Coder Resume UNKNOWN: %#v %v", resumeUnknown, err)
 	}
