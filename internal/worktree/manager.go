@@ -89,6 +89,9 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 	if !trusted {
 		return Snapshot{}, errors.New("Task repository is not in the trusted repository registry")
 	}
+	if err := m.recoverOrphanedAdoptionReservations(adoptionReservation{JobID: jobID, TaskID: task.ID}); err != nil {
+		return Snapshot{}, fmt.Errorf("recover interrupted Task Worktree ownership reservation: %w", err)
+	}
 	key := sha256.Sum256([]byte(jobID + "\x00" + task.ID))
 	worktreePath := filepath.Join(m.root, hex.EncodeToString(key[:]))
 	if err := os.MkdirAll(m.root, 0o700); err != nil {
