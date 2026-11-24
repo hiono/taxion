@@ -53,6 +53,27 @@ func taskTurnFixture(t *testing.T) (Job, RoleExecution, ExecutionPermission, tim
 	return job, start.RoleExecution, permission, observation.CreatedAt.Add(time.Minute)
 }
 
+func appendTaskTurnDispatchObservationForTest(
+	t *testing.T,
+	job *Job,
+	claim TaskTurnDispatchClaim,
+	status, evidenceSHA256 string,
+	createdAt time.Time,
+) TaskTurnDispatchObservation {
+	t.Helper()
+	commandID := TaskTurnDispatchObservationCommandID(claim.ID, status)
+	observation, err := NewTaskTurnDispatchObservation(
+		*job, claim.ID, claim.PrincipalID, commandID, status, evidenceSHA256, createdAt,
+	)
+	if err != nil {
+		t.Fatalf("NewTaskTurnDispatchObservation(%s): %v", status, err)
+	}
+	job.TaskTurnDispatchObservations = append(job.TaskTurnDispatchObservations, observation)
+	job.Revision++
+	job.UpdatedAt = observation.CreatedAt
+	return observation
+}
+
 func TestTaskTurnIntentUsesExecutionPermissionAndAcceptedSession(t *testing.T) {
 	job, execution, permission, now := taskTurnFixture(t)
 	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
@@ -101,7 +122,17 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.TaskTurnIntents = append(job.TaskTurnIntents, turn)
 	job.Revision++
 	job.UpdatedAt = turn.CreatedAt
-	unknown, err := NewTaskTurnObservation(job, turn.ID, "cmd_d8080808080808080808080808080808",
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	claim, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_d8181818181818181818181818181818", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("NewTaskTurnDispatchClaim: %v", err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, claim)
+	job.Revision++
+	job.UpdatedAt = claim.CreatedAt
+	appendTaskTurnDispatchObservationForTest(t, &job, claim, TaskTurnDispatchObservationStarted, "", now.Add(70*time.Second))
+	unknown, err := NewTaskTurnObservationForClaim(job, turn.ID, claim.ID, "cmd_d8080808080808080808080808080808",
 		TaskTurnUnknown, 0, "", false, now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
@@ -113,11 +144,10 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 		"cmd_d9090909090909090909090909090909", strings.Repeat("2", 64), 1, now.Add(2*time.Minute)); err == nil {
 		t.Fatal("new Turn started while prior Turn UNKNOWN")
 	}
-	if _, err := NewTaskTurnObservation(job, turn.ID, "cmd_da0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+	if _, err := NewTaskTurnObservationForClaim(job, turn.ID, claim.ID, "cmd_da0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
 		TaskTurnCompleted, 75, strings.Repeat("3", 64), true, now.Add(2*time.Minute)); err == nil {
 		t.Fatal("terminal Task Turn was accepted without final Result and complete Usage")
 	}
-	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
 	content := "completed Task Coder output"
 	contentSHA := sha256HexDomain(content)
 	result, err := NewProviderResultObservation(job, execution.ID, principalID, turn.OperationID, turn.ID,
@@ -144,7 +174,7 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 		turn.ProviderSessionID, "usage_task_turn_duplicate", 76, true, strings.Repeat("9", 64), now.Add(3*time.Minute+30*time.Second)); err == nil {
 		t.Fatal("a second complete Provider Usage with a different UsageID was accepted for the same Turn")
 	}
-	completed, err := NewTaskTurnObservation(job, turn.ID, "cmd_da0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+	completed, err := NewTaskTurnObservationForClaim(job, turn.ID, claim.ID, "cmd_da0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
 		TaskTurnCompleted, 75, strings.Repeat("6", 64), true, now.Add(4*time.Minute))
 	if err != nil {
 		t.Fatal(err)
@@ -152,6 +182,15 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.TaskTurnObservations = append(job.TaskTurnObservations, completed)
 	job.Revision++
 	job.UpdatedAt = completed.CreatedAt
+	releaseCommand := TaskTurnDispatchReleaseCommandID(claim.ID, TaskTurnDispatchReleasedCompleted)
+	release, err := NewTaskTurnDispatchRelease(job, claim.ID, principalID, releaseCommand,
+		TaskTurnDispatchReleasedCompleted, "", now.Add(4*time.Minute+30*time.Second))
+	if err != nil {
+		t.Fatalf("release completed Task Turn dispatch claim: %v", err)
+	}
+	job.TaskTurnDispatchReleases = append(job.TaskTurnDispatchReleases, release)
+	job.Revision++
+	job.UpdatedAt = release.CreatedAt
 	if _, err := NewProviderUsageObservation(job, execution.ID, principalID, turn.OperationID, turn.ID,
 		turn.ProviderSessionID, "usage_after_terminal", 1, true, strings.Repeat("b", 64), now.Add(4*time.Minute+30*time.Second)); err == nil {
 		t.Fatal("Provider Usage was accepted after terminal Task Turn observation")
@@ -216,6 +255,15 @@ func TestTaskTurnMustFollowPreviousTerminalObservationTime(t *testing.T) {
 	job.UpdatedAt = first.CreatedAt
 
 	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	claim, err := NewTaskTurnDispatchClaim(job, first.ID, principalID,
+		"cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", now.Add(30*time.Second))
+	if err != nil {
+		t.Fatalf("dispatch claim: %v", err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, claim)
+	job.Revision++
+	job.UpdatedAt = claim.CreatedAt
+	appendTaskTurnDispatchObservationForTest(t, &job, claim, TaskTurnDispatchObservationStarted, "", now.Add(45*time.Second))
 	resultContent := "completed Task Coder output"
 	result, err := NewProviderResultObservation(job, execution.ID, principalID,
 		first.OperationID, first.ID, first.ProviderSessionID, resultContent,
@@ -237,7 +285,7 @@ func TestTaskTurnMustFollowPreviousTerminalObservationTime(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = usage.CreatedAt
 
-	terminal, err := NewTaskTurnObservation(job, first.ID,
+	terminal, err := NewTaskTurnObservationForClaim(job, first.ID, claim.ID,
 		"cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", TaskTurnCompleted, 10,
 		strings.Repeat("e", 64), false, now.Add(3*time.Minute))
 	if err != nil {
@@ -246,6 +294,15 @@ func TestTaskTurnMustFollowPreviousTerminalObservationTime(t *testing.T) {
 	job.TaskTurnObservations = append(job.TaskTurnObservations, terminal)
 	job.Revision++
 	job.UpdatedAt = terminal.CreatedAt
+	releaseCommand := TaskTurnDispatchReleaseCommandID(claim.ID, TaskTurnDispatchReleasedCompleted)
+	release, err := NewTaskTurnDispatchRelease(job, claim.ID, principalID, releaseCommand,
+		TaskTurnDispatchReleasedCompleted, "", now.Add(4*time.Minute))
+	if err != nil {
+		t.Fatalf("release completed dispatch claim: %v", err)
+	}
+	job.TaskTurnDispatchReleases = append(job.TaskTurnDispatchReleases, release)
+	job.Revision++
+	job.UpdatedAt = release.CreatedAt
 
 	if _, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
 		"cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("f", 64), 20,
@@ -319,7 +376,8 @@ func TestTaskTurnDispatchCannotReleaseClaimAfterUnknownObservationAsDefinitiveFa
 	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, claim)
 	job.Revision++
 	job.UpdatedAt = claim.CreatedAt
-	unknown, err := NewTaskTurnObservation(job, turn.ID,
+	appendTaskTurnDispatchObservationForTest(t, &job, claim, TaskTurnDispatchObservationStarted, "", now.Add(90*time.Second))
+	unknown, err := NewTaskTurnObservationForClaim(job, turn.ID, claim.ID,
 		"cmd_15151515151515151515151515151515", TaskTurnUnknown, 0, "", false, now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("NewTaskTurnObservation UNKNOWN: %v", err)
@@ -353,7 +411,8 @@ func TestTaskTurnDispatchDefinitiveFailureIsScopedToReplacementClaim(t *testing.
 	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, firstClaim)
 	job.Revision++
 	job.UpdatedAt = firstClaim.CreatedAt
-	unknown, err := NewTaskTurnObservation(job, turn.ID,
+	appendTaskTurnDispatchObservationForTest(t, &job, firstClaim, TaskTurnDispatchObservationStarted, "", now.Add(90*time.Second))
+	unknown, err := NewTaskTurnObservationForClaim(job, turn.ID, firstClaim.ID,
 		"cmd_20202020202020202020202020202020", TaskTurnUnknown, 0, "", false, now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("New Task Turn UNKNOWN: %v", err)
@@ -361,9 +420,11 @@ func TestTaskTurnDispatchDefinitiveFailureIsScopedToReplacementClaim(t *testing.
 	job.TaskTurnObservations = append(job.TaskTurnObservations, unknown)
 	job.Revision++
 	job.UpdatedAt = unknown.CreatedAt
+	lookupEvidence := strings.Repeat("a", 64)
+	appendTaskTurnDispatchObservationForTest(t, &job, firstClaim, TaskTurnDispatchObservationLookupNotFound, lookupEvidence, now.Add(3*time.Minute))
 	retryCommand := TaskTurnDispatchReleaseCommandID(firstClaim.ID, TaskTurnDispatchReleasedIdempotentRetry)
 	firstRelease, err := NewTaskTurnDispatchRelease(job, firstClaim.ID, principalID, retryCommand,
-		TaskTurnDispatchReleasedIdempotentRetry, strings.Repeat("a", 64), now.Add(3*time.Minute))
+		TaskTurnDispatchReleasedIdempotentRetry, lookupEvidence, now.Add(3*time.Minute+30*time.Second))
 	if err != nil {
 		t.Fatalf("release first claim for idempotent retry: %v", err)
 	}
@@ -378,9 +439,11 @@ func TestTaskTurnDispatchDefinitiveFailureIsScopedToReplacementClaim(t *testing.
 	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, secondClaim)
 	job.Revision++
 	job.UpdatedAt = secondClaim.CreatedAt
+	failureEvidence := strings.Repeat("b", 64)
+	appendTaskTurnDispatchObservationForTest(t, &job, secondClaim, TaskTurnDispatchObservationPreDispatchFailure, failureEvidence, now.Add(4*time.Minute+30*time.Second))
 	failureCommand := TaskTurnDispatchReleaseCommandID(secondClaim.ID, TaskTurnDispatchReleasedDefinitiveFailure)
 	if _, err := NewTaskTurnDispatchRelease(job, secondClaim.ID, principalID, failureCommand,
-		TaskTurnDispatchReleasedDefinitiveFailure, "", now.Add(5*time.Minute)); err != nil {
+		TaskTurnDispatchReleasedDefinitiveFailure, failureEvidence, now.Add(5*time.Minute)); err != nil {
 		t.Fatalf("definitive pre-send failure of replacement claim was blocked by older UNKNOWN: %v", err)
 	}
 }
