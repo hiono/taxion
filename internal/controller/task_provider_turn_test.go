@@ -135,7 +135,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		t.Fatalf("Task Turn did not complete with persisted Usage: turn=%#v observation=%#v result=%#v",
 			turn, observation, result)
 	}
-	job, err := database.GetJob(ctx, jobID)
+	job, err = database.GetJob(ctx, jobID)
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
