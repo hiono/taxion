@@ -73,7 +73,7 @@ func NewProviderStopDispatchClaim(
 	if !found {
 		return ProviderStopDispatchClaim{}, errors.New("Provider Stop dispatch claim requires a persisted Stop intent")
 	}
-	expectedPrincipal, _, _, _, err := providerStopExecutionAuthority(job, roleExecutionByID(job, intent.RoleExecutionID))
+	expectedPrincipal, _, _, _, err := providerStopExecutionAuthority(job, providerStopDispatchRoleExecutionByID(job, intent.RoleExecutionID))
 	if err != nil {
 		return ProviderStopDispatchClaim{}, err
 	}
@@ -121,7 +121,7 @@ func (c ProviderStopDispatchClaim) Validate(job Job) error {
 		c.CreatedAt.Before(intent.CreatedAt) {
 		return errors.New("Provider Stop dispatch claim does not match its Stop intent")
 	}
-	expectedPrincipal, _, _, _, err := providerStopExecutionAuthority(job, roleExecutionByID(job, c.RoleExecutionID))
+	expectedPrincipal, _, _, _, err := providerStopExecutionAuthority(job, providerStopDispatchRoleExecutionByID(job, c.RoleExecutionID))
 	if err != nil || expectedPrincipal != c.PrincipalID {
 		return errors.New("Provider Stop dispatch claim Principal does not match execution authority")
 	}
@@ -295,7 +295,7 @@ func validateProviderStopDispatchFacts(job Job) error {
 	return nil
 }
 
-func roleExecutionByID(job Job, executionID string) RoleExecution {
+func providerStopDispatchRoleExecutionByID(job Job, executionID string) RoleExecution {
 	for _, execution := range job.RoleExecutions {
 		if execution.ID == executionID {
 			return execution
