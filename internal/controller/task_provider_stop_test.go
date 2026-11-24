@@ -269,6 +269,47 @@ func TestTaskProviderStopAmbiguousOutcomeIsNotReplayed(t *testing.T) {
 	}
 }
 
+func TestTaskProviderStopRetainsUnknownWhenNotFoundRetryIsAmbiguous(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	enableTaskStopLookup(&f)
+	enableTaskStopFencing(&f)
+	commandID := "cmd_19191919191919191919191919191919"
+	f.runtime.stopErr = &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout}
+	_, intent, first, err := f.stop(commandID, domain.ProviderStopReasonTaskComplete)
+	if err == nil || !providerStopObservationUnknown(first) || f.runtime.stopCalls != 1 {
+		t.Fatalf("initial ambiguous Stop was not retained: intent=%#v observation=%#v calls=%d err=%v",
+			intent, first, f.runtime.stopCalls, err)
+	}
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: intent.OperationID, SessionID: intent.SessionID,
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("8", 64),
+	}
+	restarted := restartTaskProviderController(t, f)
+	_, replayedIntent, replay, err := restarted.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if !errors.Is(err, provider.ErrStopUnconfirmed) || replayedIntent.ID != intent.ID ||
+		replay.ID != first.ID || f.runtime.stopCalls != 2 {
+		t.Fatalf("ambiguous NOT_FOUND retry did not preserve prior UNKNOWN: intent=%#v observation=%#v calls=%d err=%v",
+			replayedIntent, replay, f.runtime.stopCalls, err)
+	}
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after ambiguous NOT_FOUND retry: %v", err)
+	}
+	if len(job.ProviderStopObservations) != 1 || len(job.ProviderStopDispatchClaims) != 2 ||
+		len(job.ProviderStopDispatchStarts) != 2 || len(job.ProviderStopDispatchReleases) != 1 {
+		t.Fatalf("ambiguous retry changed durable Stop facts: observations=%d claims=%d starts=%d releases=%d",
+			len(job.ProviderStopObservations), len(job.ProviderStopDispatchClaims),
+			len(job.ProviderStopDispatchStarts), len(job.ProviderStopDispatchReleases))
+	}
+	if active, ok := domain.ActiveProviderStopDispatchClaim(job, intent.OperationID); !ok ||
+		active.ID != job.ProviderStopDispatchClaims[1].ID {
+		t.Fatalf("ambiguous retry did not retain the replacement claim: claim=%#v active=%v", active, ok)
+	}
+}
+
 func TestTaskProviderStopCannotCommitWhileSendDispatchIsActive(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	now := time.Now().UTC().Round(0)

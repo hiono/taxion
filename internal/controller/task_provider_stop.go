@@ -69,6 +69,7 @@ func (c *ProviderController) StopTaskExecution(
 	}
 	existingStopIntent = !created
 	previous, hasPrevious := latestProviderStopObservation(currentJob, intent.OperationID)
+	previousUnknown := hasPrevious && !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
 	activeClaim, activeClaimFound := domain.ActiveProviderStopDispatchClaim(currentJob, intent.OperationID)
 	if hasPrevious && previous.Quiescent {
 		if activeClaimFound {
@@ -110,7 +111,7 @@ func (c *ProviderController) StopTaskExecution(
 		}
 		if lookup.Found {
 			if lookup.Status == "STOPPED" && lookup.Stopped && lookup.Quiescent {
-				reconcilesUnknown := hasPrevious && !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
+				reconcilesUnknown := previousUnknown
 				observation, persistErr := c.persistProviderStopObservation(
 					ctx, currentJob, intent, principal, true, true, lookup.EvidenceSHA256, reconcilesUnknown,
 				)
@@ -208,6 +209,9 @@ func (c *ProviderController) StopTaskExecution(
 	})
 	if stopErr != nil {
 		if providerOperationMayHaveStarted(stopErr) {
+			if previousUnknown {
+				return intentReceipt, intent, previous, errors.Join(provider.ErrStopUnconfirmed, stopErr)
+			}
 			observation, persistErr := c.persistProviderStopObservation(
 				ctx, latest, intent, principal, false, false, "", false,
 			)
@@ -218,7 +222,7 @@ func (c *ProviderController) StopTaskExecution(
 		}
 		if evidence, definitive := providerStopDefinitiveFailureEvidence(intent.OperationID, stopErr); definitive {
 			observation, persistErr := c.persistProviderStopObservation(
-				ctx, latest, intent, principal, false, false, evidence, false,
+				ctx, latest, intent, principal, false, false, evidence, previousUnknown,
 			)
 			if persistErr != nil {
 				return intentReceipt, intent, observation, errors.Join(stopErr, persistErr)
@@ -238,6 +242,9 @@ func (c *ProviderController) StopTaskExecution(
 	}
 	if stopResult.OperationID != intent.OperationID || stopResult.SessionID != sessionID ||
 		!stopResult.Stopped || !stopResult.Quiescent || !validProviderEvidenceSHA256(stopResult.EvidenceSHA256) {
+		if previousUnknown {
+			return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+		}
 		observation, persistErr := c.persistProviderStopObservation(
 			ctx, latest, intent, principal, false, false, "", false,
 		)
@@ -246,7 +253,7 @@ func (c *ProviderController) StopTaskExecution(
 		}
 		return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
 	}
-	reconcilesUnknown := hasPrevious && !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
+	reconcilesUnknown := previousUnknown
 	observation, err := c.persistProviderStopObservation(
 		ctx, latest, intent, principal, true, true, stopResult.EvidenceSHA256, reconcilesUnknown,
 	)
