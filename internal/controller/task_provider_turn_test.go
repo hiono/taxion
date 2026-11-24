@@ -171,6 +171,12 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		t.Fatalf("unsupported Resume capability created an intent: intents=%d err=%v", len(job.PlanningResumeIntents), err)
 	}
 	runtime.capabilities.CrossProcessSessionReattach = true
+	runtime.resumeHook = func(_ context.Context, request provider.ResumeRequest) error {
+		if !request.RequireIdempotency {
+			t.Error("Task Resume did not require Provider-side idempotency")
+		}
+		return nil
+	}
 	runtime.resumeErr = &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown}
 	_, resumeIntent, unknownResume, _, resumeErr := providerController.ResumeTaskExecution(
 		ctx, jobID, execution.ID, permission.ID, "cmd_b8080808080808080808080808080808",
