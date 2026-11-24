@@ -285,3 +285,77 @@ func TestExecutionPermissionRejectsUnapprovedAdoptedWorktreePath(t *testing.T) {
 		t.Fatalf("rejected adopted Worktree path mutated Job: %v", err)
 	}
 }
+
+func TestExecutionPermissionBindsAdoptedWorktreeToApprovedTaskResource(t *testing.T) {
+	worktreePath := "/tmp/taxion-approved-existing-worktree"
+	job, execution, result, baseTime := jobWithAcceptedPlanner(t)
+	contract := validJobContract(baseTime)
+	contract.TargetResources = []string{worktreePath}
+	revision, err := NewJobContractRevision(
+		job, "cmd_44444444444444444444444444444444", execution.ID,
+		result.ID, result.ContentSHA256, contract, baseTime.Add(6*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("NewJobContractRevision: %v", err)
+	}
+	job.JobContractRevisions = append(job.JobContractRevisions, revision)
+	job.Goal = revision.Contract.Purpose
+	job.Revision++
+	job.UpdatedAt = revision.CreatedAt
+	issuer, subject := job.IntakeProvenance.Issuer, job.IntakeProvenance.Subject
+	approval := JobApproval{
+		ID: JobApprovalID("cmd_55555555555555555555555555555555"),
+		CommandID: "cmd_55555555555555555555555555555555",
+		JobID: job.ID, ContractRevision: revision.Revision,
+		CanonicalizationVersion: revision.CanonicalizationVersion,
+		CanonicalHash: revision.CanonicalHash,
+		ApproverPrincipalID: identity.PrincipalID(issuer, subject),
+		ApproverSource: issuer, ApproverSubject: subject,
+		Reason: "Approve the existing Worktree resource",
+		ApprovedAt: baseTime.Add(7*time.Minute), CreatedRevision: job.Revision + 1,
+	}
+	job.JobApprovals = append(job.JobApprovals, approval)
+	job.State = JobActive
+	job.Revision++
+	job.UpdatedAt = approval.ApprovedAt
+
+	task, err := NewTask(job, TaskRequest{
+		JobID: job.ID, CommandID: "cmd_81818181818181818181818181818181",
+		Title: "Adopt existing Worktree", Purpose: "Continue the approved working state",
+		TargetRepositories: []string{"repo_taxion"}, TargetResources: []string{worktreePath},
+		AcceptanceCriteria: []string{"The existing Worktree is preserved"},
+	}, baseTime.Add(8*time.Minute))
+	if err != nil {
+		t.Fatalf("NewTask: %v", err)
+	}
+	job.Tasks = append(job.Tasks, task)
+	job.Revision++
+	job.UpdatedAt = task.CreatedAt
+
+	request := ExecutionPermissionRequest{
+		JobID: job.ID, TaskID: task.ID, CommandID: "cmd_66666666666666666666666666666666",
+		Role: "CODER", Effect: "repository.write", Resource: worktreePath,
+		ProviderID: "provider.test", AccountID: "account.primary",
+		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
+		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: task.CreatedAt.Add(20*time.Minute),
+		WorktreePath: worktreePath,
+	}
+	requestSHA, err := ExecutionPermissionRequestSHA256(request)
+	if err != nil {
+		t.Fatalf("ExecutionPermissionRequestSHA256: %v", err)
+	}
+	assessment := executionPermissionTestAssessment(request, requestSHA, task.CreatedAt)
+	if _, err := NewExecutionPermission(job, request, requestSHA, assessment, task.CreatedAt); err != nil {
+		t.Fatalf("approved adopted Worktree path was rejected: %v", err)
+	}
+	changed := request
+	changed.WorktreePath = worktreePath + "/../other"
+	changedSHA, err := ExecutionPermissionRequestSHA256(changed)
+	if err != nil {
+		t.Fatalf("changed request digest: %v", err)
+	}
+	changedAssessment := executionPermissionTestAssessment(changed, changedSHA, task.CreatedAt)
+	if _, err := NewExecutionPermission(job, changed, changedSHA, changedAssessment, task.CreatedAt); err == nil {
+		t.Fatal("Worktree path outside the exact approved resource was accepted")
+	}
+}
