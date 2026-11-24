@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/hiono/taxion/internal/domain"
@@ -24,7 +25,7 @@ func (s *Store) StartTaskExecution(
 		JobID: jobID, TaskID: taskID, PermissionID: permissionID,
 		CommandID: commandID, RequestSHA: requestSHA256, Worktree: snapshot,
 	}
-	return persistPlanningFact(
+	receipt, start, err := persistPlanningFact(
 		ctx, s, jobID, expectedRevision, commandID, "TASK_EXECUTION_START", request,
 		func(job domain.Job, now time.Time) (domain.TaskExecutionStart, error) {
 			return domain.NewTaskRoleExecutionStart(job, taskID, permissionID, commandID, requestSHA256, snapshot, now)
@@ -62,4 +63,38 @@ func (s *Store) StartTaskExecution(
 			return domain.TaskExecutionStart{}, false
 		},
 	)
+	if err != nil {
+		if job, readErr := s.GetJob(ctx, jobID); readErr == nil &&
+			legacyTaskExecutionStartWithoutWorktreeAssignment(job, commandID) {
+			return CommandReceipt{}, domain.TaskExecutionStart{}, errors.New(
+				"legacy TASK_EXECUTION_START has no WorktreeAssignment and cannot be replayed; issue a new approved Start command",
+			)
+		}
+	}
+	return receipt, start, err
+}
+
+func legacyTaskExecutionStartWithoutWorktreeAssignment(job domain.Job, commandID string) bool {
+	for _, execution := range job.RoleExecutions {
+		if execution.CommandID != commandID {
+			continue
+		}
+		hasStartIntent := false
+		for _, intent := range job.ProviderStartIntents {
+			if intent.RoleExecutionID == execution.ID {
+				hasStartIntent = true
+				break
+			}
+		}
+		if !hasStartIntent {
+			continue
+		}
+		for _, assignment := range job.WorktreeAssignments {
+			if assignment.OwnerRoleExecutionID == execution.ID {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
