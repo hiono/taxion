@@ -54,7 +54,6 @@ func jobWithAcceptedPlanner(t *testing.T) (Job, RoleExecution, ProviderResultObs
 		t.Fatalf("NewProviderStartObservation: %v", err)
 	}
 	job.ProviderStartObservations = append(job.ProviderStartObservations, observation)
-	job.ProviderLifecycleEnforcedFromRevision = observation.CreatedRevision
 	job.Revision++
 	job.UpdatedAt = now.Add(2 * time.Minute)
 	turn, err := NewPlanningTurnIntent(job, execution.ID, principalID, "session_1",
