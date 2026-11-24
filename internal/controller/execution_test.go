@@ -246,10 +246,10 @@ func TestExecutionControllerRejectsReviewerBeforePreparingMutableWorktree(t *tes
 	request := domain.ExecutionPermissionRequest{
 		JobID: jobID, TaskID: task.ID, CommandID: "cmd_b7070707070707070707070707070707",
 		Role: "REVIEWER", Effect: "repository.read",
-		Resource: revision.Contract.TargetRepositories[0],
+		Resource:   revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	_, permission, err := controller.Authorize(context.Background(), request)
 	if err != nil {
