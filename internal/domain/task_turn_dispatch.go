@@ -218,8 +218,10 @@ func (r TaskTurnDispatchRelease) Validate(job Job) error {
 	}
 	if r.Outcome == TaskTurnDispatchReleasedDefinitiveFailure {
 		for _, observation := range job.TaskTurnObservations {
-			if observation.TurnID == claim.TurnID && observation.CreatedRevision < r.CreatedRevision {
-				return errors.New("definitive-failure dispatch release cannot follow a Task Turn observation")
+			if observation.TurnID == claim.TurnID &&
+				observation.CreatedRevision > claim.CreatedRevision &&
+				observation.CreatedRevision < r.CreatedRevision {
+				return errors.New("definitive-failure dispatch release cannot follow an observation for the same claim")
 			}
 		}
 	}

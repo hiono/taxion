@@ -56,6 +56,7 @@ type Job struct {
 	ProviderStopDispatchReleases          []ProviderStopDispatchRelease `json:"provider_stop_dispatch_releases,omitempty"`
 	ProviderResultObservations            []ProviderResultObservation   `json:"provider_result_observations,omitempty"`
 	ProviderUsageObservations             []ProviderUsageObservation    `json:"provider_usage_observations,omitempty"`
+	ProviderUsageEnforcedFromRevision     uint64                        `json:"provider_usage_enforced_from_revision,omitempty"`
 	ProviderLifecycleEnforcedFromRevision uint64                        `json:"provider_lifecycle_enforced_from_revision,omitempty"`
 	PlanningTurnIntents                   []PlanningTurnIntent          `json:"planning_turn_intents,omitempty"`
 	PlanningTurnObservations              []PlanningTurnObservation     `json:"planning_turn_observations,omitempty"`
@@ -740,6 +741,21 @@ func (j Job) Validate() error {
 		}
 		seenStartObservationIDs[observation.ID] = struct{}{}
 		startObservationsByOperation[observation.OperationID] = append(startObservationsByOperation[observation.OperationID], observation)
+	}
+	if j.ProviderUsageEnforcedFromRevision > j.Revision {
+		return fmt.Errorf("%w: Provider Usage validation activation revision exceeds Job revision", ErrInvalidJob)
+	}
+	if j.ProviderUsageEnforcedFromRevision > 0 {
+		foundActivationFact := false
+		for _, observation := range j.ProviderUsageObservations {
+			if observation.CreatedRevision == j.ProviderUsageEnforcedFromRevision {
+				foundActivationFact = true
+				break
+			}
+		}
+		if !foundActivationFact {
+			return fmt.Errorf("%w: Provider Usage validation activation revision has no matching observation", ErrInvalidJob)
+		}
 	}
 	if j.ProviderLifecycleEnforcedFromRevision > j.Revision {
 		return fmt.Errorf("%w: Provider Start observation activation revision exceeds Job revision", ErrInvalidJob)

@@ -335,3 +335,66 @@ func TestTaskTurnDispatchCannotReleaseClaimAfterUnknownObservationAsDefinitiveFa
 		t.Fatal("UNKNOWN Task Turn claim was released as definitive_failure without reconciliation evidence")
 	}
 }
+
+func TestTaskTurnDispatchDefinitiveFailureIsScopedToReplacementClaim(t *testing.T) {
+	job, execution, permission, now := taskTurnFixture(t)
+	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_18181818181818181818181818181818", strings.Repeat("1", 64), 40, now)
+	if err != nil {
+		t.Fatalf("NewTaskTurnIntent: %v", err)
+	}
+	job.TaskTurnIntents = append(job.TaskTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	firstClaim, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_19191919191919191919191919191919", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("New first dispatch claim: %v", err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, firstClaim)
+	job.Revision++
+	job.UpdatedAt = firstClaim.CreatedAt
+	unknown, err := NewTaskTurnObservation(job, turn.ID,
+		"cmd_20202020202020202020202020202020", TaskTurnUnknown, 0, "", false, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("New Task Turn UNKNOWN: %v", err)
+	}
+	job.TaskTurnObservations = append(job.TaskTurnObservations, unknown)
+	job.Revision++
+	job.UpdatedAt = unknown.CreatedAt
+	retryCommand := TaskTurnDispatchReleaseCommandID(firstClaim.ID, TaskTurnDispatchReleasedIdempotentRetry)
+	firstRelease, err := NewTaskTurnDispatchRelease(job, firstClaim.ID, principalID, retryCommand,
+		TaskTurnDispatchReleasedIdempotentRetry, strings.Repeat("a", 64), now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatalf("release first claim for idempotent retry: %v", err)
+	}
+	job.TaskTurnDispatchReleases = append(job.TaskTurnDispatchReleases, firstRelease)
+	job.Revision++
+	job.UpdatedAt = firstRelease.CreatedAt
+	secondClaim, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_21212121212121212121212121212121", now.Add(4*time.Minute))
+	if err != nil {
+		t.Fatalf("New replacement dispatch claim: %v", err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, secondClaim)
+	job.Revision++
+	job.UpdatedAt = secondClaim.CreatedAt
+	failureCommand := TaskTurnDispatchReleaseCommandID(secondClaim.ID, TaskTurnDispatchReleasedDefinitiveFailure)
+	if _, err := NewTaskTurnDispatchRelease(job, secondClaim.ID, principalID, failureCommand,
+		TaskTurnDispatchReleasedDefinitiveFailure, "", now.Add(5*time.Minute)); err != nil {
+		t.Fatalf("definitive pre-send failure of replacement claim was blocked by older UNKNOWN: %v", err)
+	}
+}
+
+func TestTaskCoderResumeCanUseAcceptedStartBeforeFirstTurn(t *testing.T) {
+	job, execution, _, now := taskTurnFixture(t)
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	if len(job.TaskTurnIntents) != 0 {
+		t.Fatalf("fixture unexpectedly contains Task Turns: %d", len(job.TaskTurnIntents))
+	}
+	if _, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task",
+		"cmd_22222222222222222222222222222222", strings.Repeat("c", 64), true, now.Add(time.Minute)); err != nil {
+		t.Fatalf("accepted Task Coder Start should be resumable before the first Turn: %v", err)
+	}
+}

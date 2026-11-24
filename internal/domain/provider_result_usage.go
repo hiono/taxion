@@ -162,7 +162,11 @@ func NewProviderUsageObservation(
 		UsageID: usageID, Tokens: tokens, Complete: complete, EvidenceSHA256: evidenceSHA256,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
-	if err := observation.Validate(job); err != nil {
+	validationJob := job
+	if validationJob.ProviderUsageEnforcedFromRevision == 0 {
+		validationJob.ProviderUsageEnforcedFromRevision = observation.CreatedRevision
+	}
+	if err := observation.Validate(validationJob); err != nil {
 		return ProviderUsageObservation{}, err
 	}
 	for _, existing := range job.ProviderUsageObservations {
@@ -198,13 +202,15 @@ func (o ProviderUsageObservation) Validate(job Job) error {
 	if o.CreatedRevision <= minimumRevision || o.CreatedAt.Before(minimumTime) {
 		return errors.New("Provider Usage observation does not follow its accepted Provider operation")
 	}
-	if o.TurnID != "" {
+	usageRulesEnforced := job.ProviderUsageEnforcedFromRevision > 0 &&
+		o.CreatedRevision >= job.ProviderUsageEnforcedFromRevision
+	if o.TurnID != "" && usageRulesEnforced {
 		reservedTokens, found := providerTurnReservedTokens(job, o.TurnID)
 		if !found || o.Tokens > reservedTokens {
 			return errors.New("Provider Usage exceeds its reserved Turn token budget")
 		}
 	}
-	if o.TurnID != "" {
+	if o.TurnID != "" && usageRulesEnforced {
 		for _, existing := range job.ProviderUsageObservations {
 			if existing.OperationID == o.OperationID && existing.TurnID == o.TurnID &&
 				existing.Complete && existing.CreatedRevision < o.CreatedRevision {

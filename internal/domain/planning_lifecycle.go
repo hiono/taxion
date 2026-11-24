@@ -646,7 +646,7 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 	default:
 		return PlanningResumeIntent{}, errors.New("Provider Resume supports only Planner and Task-bound Coder executions")
 	}
-	if !foundSession {
+	if !foundSession && execution.Role != RoleCoder {
 		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_mismatch", Cause: errors.New("resume Provider Session does not match a persisted turn")}
 	}
 	var startIntent ProviderStartIntent

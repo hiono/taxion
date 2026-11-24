@@ -584,6 +584,9 @@ func (s *Store) AddProviderUsageObservation(
 		},
 		func(job *domain.Job, fact domain.ProviderUsageObservation) {
 			job.ProviderUsageObservations = append(job.ProviderUsageObservations, fact)
+			if job.ProviderUsageEnforcedFromRevision == 0 {
+				job.ProviderUsageEnforcedFromRevision = fact.CreatedRevision
+			}
 		},
 		func(job domain.Job) (domain.ProviderUsageObservation, bool) {
 			for _, fact := range job.ProviderUsageObservations {

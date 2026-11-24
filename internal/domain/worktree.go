@@ -161,6 +161,12 @@ func validateWorktreeAssignments(job Job) error {
 			owner.CreatedRevision != assignment.CreatedRevision || !owner.CreatedAt.Equal(assignment.CreatedAt) {
 			return errors.New("Worktree assignment owner or creation revision is inconsistent")
 		}
+		if owner.ExecutionPermissionID != "" {
+			permission, found := executionPermissionByID(job, owner.ExecutionPermissionID)
+			if !found || (permission.WorktreePath != "" && permission.WorktreePath != assignment.WorktreePath) {
+				return errors.New("Worktree assignment path differs from its approved ExecutionPermission")
+			}
+		}
 		if _, exists := byTask[assignment.TaskID]; exists {
 			return errors.New("Task has more than one Worktree assignment")
 		}
