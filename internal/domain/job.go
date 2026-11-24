@@ -60,6 +60,8 @@ type Job struct {
 	PlanningTurnObservations              []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
 	TaskTurnIntents                       []TaskTurnIntent            `json:"task_turn_intents,omitempty"`
 	TaskTurnObservations                  []TaskTurnObservation       `json:"task_turn_observations,omitempty"`
+	TaskTurnDispatchClaims                []TaskTurnDispatchClaim     `json:"task_turn_dispatch_claims,omitempty"`
+	TaskTurnDispatchReleases              []TaskTurnDispatchRelease   `json:"task_turn_dispatch_releases,omitempty"`
 	PlanningEffectDecisions               []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
 	PlanningResumeIntents                 []PlanningResumeIntent      `json:"planning_resume_intents,omitempty"`
 	PlanningResumeObservations            []PlanningResumeObservation `json:"planning_resume_observations,omitempty"`
@@ -643,7 +645,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	appendOnlyFacts := uint64(len(j.JobContractRevisions) + len(j.JobApprovals) + len(j.Tasks) + len(j.ExecutionPermissions) + len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.ProviderStopDispatchClaims) + len(j.ProviderStopDispatchReleases) + len(j.ProviderResultObservations) + len(j.ProviderUsageObservations) + len(j.JobOutputs) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
+	appendOnlyFacts := uint64(len(j.JobContractRevisions) + len(j.JobApprovals) + len(j.Tasks) + len(j.ExecutionPermissions) + len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.ProviderStopDispatchClaims) + len(j.ProviderStopDispatchReleases) + len(j.ProviderResultObservations) + len(j.ProviderUsageObservations) + len(j.JobOutputs) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.TaskTurnIntents) + len(j.TaskTurnObservations) + len(j.TaskTurnDispatchClaims) + len(j.TaskTurnDispatchReleases) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions))
 	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
@@ -1180,6 +1182,9 @@ func (j Job) Validate() error {
 		return err
 	}
 	if err := validateTaskProviderTurnFacts(j); err != nil {
+		return err
+	}
+	if err := validateTaskTurnDispatchFacts(j); err != nil {
 		return err
 	}
 	if err := validateJobOutputs(j); err != nil {
