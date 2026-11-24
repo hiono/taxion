@@ -404,7 +404,7 @@ func (c *ProviderController) dispatchTaskTurn(
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
 		if evidenceSHA256, definitive := providerTurnDefinitiveFailureEvidence(turn.OperationID, err); definitive {
-			_, dispatchErr := c.recordTaskTurnDispatchObservation(ctx, current.ID, claim.ID,
+			_, _, dispatchErr := c.recordTaskTurnDispatchObservation(ctx, current.ID, claim.ID,
 				domain.TaskTurnDispatchObservationDefinitiveFailure, evidenceSHA256, principal)
 			if dispatchErr != nil {
 				return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, dispatchErr)
@@ -513,7 +513,7 @@ func (c *ProviderController) reconcileTaskTurn(
 	}
 	if canLookup {
 		if _, found := taskTurnDispatchObservation(job, claimID, domain.TaskTurnDispatchObservationLookupNotFound); !found {
-			if _, persistErr := c.recordTaskTurnDispatchObservation(ctx, job.ID, claimID,
+			if _, _, persistErr := c.recordTaskTurnDispatchObservation(ctx, job.ID, claimID,
 				domain.TaskTurnDispatchObservationLookupNotFound, lookupEvidence, principal); persistErr != nil {
 				return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, persistErr
 			}
@@ -597,7 +597,7 @@ func (c *ProviderController) releaseTaskTurnDispatchClaimBeforeSend(
 		return nil
 	}
 	evidenceSHA256 := sha256String("taxion:task-turn-pre-dispatch-failure:" + claimID)
-	_, dispatchErr := c.recordTaskTurnDispatchObservation(ctx, jobID, claimID,
+	_, _, dispatchErr := c.recordTaskTurnDispatchObservation(ctx, jobID, claimID,
 		domain.TaskTurnDispatchObservationPreDispatchFailure, evidenceSHA256, principal)
 	if dispatchErr != nil {
 		return dispatchErr
