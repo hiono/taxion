@@ -47,6 +47,7 @@ func (c *ProviderController) StopTaskExecution(
 	if capabilities.Identity != identity {
 		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, provider.ErrUnsupportedCapability
 	}
+	fencingEvidenceSHA256 := providerCapabilityEvidenceSHA256(capabilities, provider.CapabilityStopDispatchFencing)
 	existingStopIntent := false
 	for _, existing := range job.ProviderStopIntents {
 		if existing.CommandID == commandID && existing.RoleExecutionID == execution.ID {
@@ -71,6 +72,7 @@ func (c *ProviderController) StopTaskExecution(
 	previous, hasPrevious := latestProviderStopObservation(currentJob, intent.OperationID)
 	previousUnknown := hasPrevious && !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
 	activeClaim, activeClaimFound := domain.ActiveProviderStopDispatchClaim(currentJob, intent.OperationID)
+	fencingRequired := providerStopDispatchRequiresFencing(currentJob, intent.OperationID)
 	if hasPrevious && previous.Quiescent {
 		if activeClaimFound {
 			if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
@@ -97,9 +99,28 @@ func (c *ProviderController) StopTaskExecution(
 
 		lookupRequest := provider.LookupRequest{Purpose: provider.LookupPurposeStop, OperationID: intent.OperationID, SessionID: sessionID}
 		lookup, lookupErr := c.runtime.Lookup(ctx, lookupRequest)
-		if lookupErr != nil || lookup.Validate(lookupRequest) != nil {
+		currentJob, err = c.store.GetJob(ctx, jobID)
+		if err != nil {
+			return intentReceipt, intent, domain.ProviderStopObservation{}, err
+		}
+		previous, hasPrevious = latestProviderStopObservation(currentJob, intent.OperationID)
+		previousUnknown = hasPrevious && !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
+		activeClaim, activeClaimFound = domain.ActiveProviderStopDispatchClaim(currentJob, intent.OperationID)
+		fencingRequired = providerStopDispatchRequiresFencing(currentJob, intent.OperationID)
+		if hasPrevious && previous.Stopped && previous.Quiescent {
+			if activeClaimFound {
+				if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+					ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedStopped, "",
+				); releaseErr != nil {
+					return intentReceipt, intent, previous, releaseErr
+				}
+			}
+			return intentReceipt, intent, previous, nil
+		}
+		lookupValidationErr := lookup.Validate(lookupRequest)
+		if lookupErr != nil || lookupValidationErr != nil {
 			if hasPrevious {
-				return intentReceipt, intent, previous, errors.Join(provider.ErrStopUnconfirmed, lookupErr)
+				return intentReceipt, intent, previous, errors.Join(provider.ErrStopUnconfirmed, lookupErr, lookupValidationErr)
 			}
 			observation, persistErr := c.persistProviderStopObservation(
 				ctx, currentJob, intent, principal, false, false, "", false,
@@ -141,10 +162,18 @@ func (c *ProviderController) StopTaskExecution(
 		// A pre-start claim can be reclaimed directly. A started claim requires
 		// Provider-enforced fencing so a paused caller's older token is rejected.
 		if activeClaimFound {
-			if _, started := domain.ProviderStopDispatchStartedForClaim(currentJob, activeClaim.ID); started {
-				if !capabilities.HasEvidenceAtLeast(provider.CapabilityStopDispatchFencing, provider.EvidenceLive) {
-					return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+			if startFact, started := domain.ProviderStopDispatchStartedForClaim(currentJob, activeClaim.ID); started {
+				if !validProviderEvidenceSHA256(startFact.FencingEvidenceSHA256) ||
+					!validProviderEvidenceSHA256(fencingEvidenceSHA256) {
+					if hasPrevious {
+						return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+					}
+					observation, persistErr := c.persistProviderStopObservation(
+						ctx, currentJob, intent, principal, false, false, "", false,
+					)
+					return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
 				}
+				fencingRequired = true
 				if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
 					ctx, jobID, activeClaim.ID, principal,
 					domain.ProviderStopDispatchReleasedFencedNotFound, lookup.EvidenceSHA256,
@@ -159,6 +188,15 @@ func (c *ProviderController) StopTaskExecution(
 				}
 			}
 		}
+	}
+	if fencingRequired && !validProviderEvidenceSHA256(fencingEvidenceSHA256) {
+		if hasPrevious {
+			return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+		}
+		observation, persistErr := c.persistProviderStopObservation(
+			ctx, currentJob, intent, principal, false, false, "", false,
+		)
+		return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
 	}
 
 	latest, currentExecution, currentPermission, currentTask, currentAssignment, _, currentSession, err :=
@@ -190,7 +228,7 @@ func (c *ProviderController) StopTaskExecution(
 	if !createdClaim {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, provider.ErrStopUnconfirmed
 	}
-	_, _, started, err := c.store.StartProviderStopDispatchClaim(ctx, jobID, claim.ID, principal)
+	_, _, started, err := c.store.StartProviderStopDispatchClaim(ctx, jobID, claim.ID, fencingEvidenceSHA256, principal)
 	if err != nil {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, err
 	}
@@ -203,14 +241,24 @@ func (c *ProviderController) StopTaskExecution(
 	}
 
 	stopResult, stopErr := c.runtime.Stop(ctx, provider.StopRequest{
-		OperationID:  intent.OperationID,
-		SessionID:    sessionID,
-		FencingToken: claim.CreatedRevision,
+		OperationID:    intent.OperationID,
+		SessionID:      sessionID,
+		FencingToken:   claim.CreatedRevision,
+		RequireFencing: fencingEvidenceSHA256 != "",
 	})
+	latest, err = c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return intentReceipt, intent, domain.ProviderStopObservation{}, err
+	}
+	latestPrevious, latestHasPrevious := latestProviderStopObservation(latest, intent.OperationID)
+	latestPreviousUnknown := latestHasPrevious && !latestPrevious.Stopped && !latestPrevious.Quiescent && latestPrevious.EvidenceSHA256 == ""
+	if latestHasPrevious && latestPrevious.Stopped && latestPrevious.Quiescent {
+		return intentReceipt, intent, latestPrevious, nil
+	}
 	if stopErr != nil {
 		if providerOperationMayHaveStarted(stopErr) {
-			if previousUnknown {
-				return intentReceipt, intent, previous, errors.Join(provider.ErrStopUnconfirmed, stopErr)
+			if latestPreviousUnknown {
+				return intentReceipt, intent, latestPrevious, errors.Join(provider.ErrStopUnconfirmed, stopErr)
 			}
 			observation, persistErr := c.persistProviderStopObservation(
 				ctx, latest, intent, principal, false, false, "", false,
@@ -222,7 +270,7 @@ func (c *ProviderController) StopTaskExecution(
 		}
 		if evidence, definitive := providerStopDefinitiveFailureEvidence(intent.OperationID, stopErr); definitive {
 			observation, persistErr := c.persistProviderStopObservation(
-				ctx, latest, intent, principal, false, false, evidence, previousUnknown,
+				ctx, latest, intent, principal, false, false, evidence, latestPreviousUnknown,
 			)
 			if persistErr != nil {
 				return intentReceipt, intent, observation, errors.Join(stopErr, persistErr)
@@ -242,8 +290,8 @@ func (c *ProviderController) StopTaskExecution(
 	}
 	if stopResult.OperationID != intent.OperationID || stopResult.SessionID != sessionID ||
 		!stopResult.Stopped || !stopResult.Quiescent || !validProviderEvidenceSHA256(stopResult.EvidenceSHA256) {
-		if previousUnknown {
-			return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+		if latestPreviousUnknown {
+			return intentReceipt, intent, latestPrevious, provider.ErrStopUnconfirmed
 		}
 		observation, persistErr := c.persistProviderStopObservation(
 			ctx, latest, intent, principal, false, false, "", false,
@@ -253,7 +301,7 @@ func (c *ProviderController) StopTaskExecution(
 		}
 		return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
 	}
-	reconcilesUnknown := previousUnknown
+	reconcilesUnknown := latestPreviousUnknown
 	observation, err := c.persistProviderStopObservation(
 		ctx, latest, intent, principal, true, true, stopResult.EvidenceSHA256, reconcilesUnknown,
 	)
@@ -267,3 +315,13 @@ func (c *ProviderController) StopTaskExecution(
 	}
 	return intentReceipt, intent, observation, nil
 }
+
+func providerStopDispatchRequiresFencing(job domain.Job, operationID string) bool {
+	for _, release := range job.ProviderStopDispatchReleases {
+		if release.OperationID == operationID && release.Outcome == domain.ProviderStopDispatchReleasedFencedNotFound {
+			return true
+		}
+	}
+	return false
+}
+
