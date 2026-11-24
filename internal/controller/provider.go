@@ -31,6 +31,7 @@ type ProviderExecutionStore interface {
 	AddProviderResultObservation(context.Context, string, uint64, string, string, string, string, string, string, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderResultObservation, error)
 	AddProviderUsageObservation(context.Context, string, uint64, string, string, string, string, string, uint64, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderUsageObservation, error)
 	AddTaskProviderStartObservation(context.Context, string, uint64, string, string, string, string, string, string, bool) (store.CommandReceipt, domain.ProviderStartObservation, error)
+	AddTaskProviderResumeObservation(context.Context, string, uint64, string, string, string, string, domain.ProviderResumeResponse, bool) (store.CommandReceipt, domain.PlanningResumeObservation, error)
 	AddTaskTurnIntent(context.Context, string, uint64, string, string, string, string, string, uint64) (store.CommandReceipt, domain.TaskTurnIntent, error)
 	AddTaskTurnIntentWithStatus(context.Context, string, uint64, string, string, string, string, string, uint64) (store.CommandReceipt, domain.TaskTurnIntent, bool, error)
 	AddTaskTurnObservation(context.Context, string, uint64, string, string, string, uint64, string, bool) (store.CommandReceipt, domain.TaskTurnObservation, error)
@@ -1675,7 +1676,7 @@ func (c *ProviderController) ResumePlanning(
 	if err != nil {
 		if providerOperationMayHaveStarted(err) || errors.Is(err, provider.ErrResumeUnconfirmed) {
 			observation, persistErr := c.recordResumeObservation(
-				ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", principal,
+				ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", provider.ResumeResult{}, principal,
 			)
 			if persistErr != nil {
 				return receipt, intent, observation, provider.ResumeResult{}, errors.Join(err, persistErr)
@@ -1687,7 +1688,7 @@ func (c *ProviderController) ResumePlanning(
 	if result.OperationID != intent.OperationID || result.SessionID != intent.ProviderSessionID ||
 		!result.Attached || !validProviderSHA256(result.EvidenceSHA256) {
 		observation, persistErr := c.recordResumeObservation(
-			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", principal,
+			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", provider.ResumeResult{}, principal,
 		)
 		if persistErr != nil {
 			return receipt, intent, observation, provider.ResumeResult{}, errors.Join(provider.ErrResumeUnconfirmed, persistErr)
@@ -1695,11 +1696,11 @@ func (c *ProviderController) ResumePlanning(
 		return receipt, intent, observation, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
 	}
 	observation, err := c.recordResumeObservation(
-		ctx, jobID, intent.ID, domain.PlanningResumeAttached, result.EvidenceSHA256, principal,
+		ctx, jobID, intent.ID, domain.PlanningResumeAttached, result.EvidenceSHA256, result, principal,
 	)
 	if err != nil {
 		unknown, persistErr := c.recordResumeObservation(
-			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", principal,
+			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", provider.ResumeResult{}, principal,
 		)
 		if persistErr != nil {
 			return receipt, intent, unknown, provider.ResumeResult{}, errors.Join(err, persistErr)
@@ -1712,6 +1713,7 @@ func (c *ProviderController) ResumePlanning(
 func (c *ProviderController) recordResumeObservation(
 	ctx context.Context,
 	jobID, resumeID, status, evidenceSHA256 string,
+	response provider.ResumeResult,
 	principal auth.AuthenticatedPrincipal,
 ) (domain.PlanningResumeObservation, error) {
 	// Provider side effects may complete after the caller cancels. Persist their
@@ -1743,6 +1745,45 @@ func (c *ProviderController) recordResumeObservation(
 	}
 	reconcilesUnknown := found && previous.Status == domain.PlanningResumeUnknown && status != domain.PlanningResumeUnknown
 	commandID := providerResumeObservationCommandID(resumeID, status, evidenceSHA256, reconcilesUnknown)
+	var resume domain.PlanningResumeIntent
+	foundResume := false
+	for _, candidate := range job.PlanningResumeIntents {
+		if candidate.ID == resumeID {
+			resume, foundResume = candidate, true
+			break
+		}
+	}
+	if !foundResume {
+		return domain.PlanningResumeObservation{}, errors.New("PlanningResumeIntent was not found")
+	}
+	var execution domain.RoleExecution
+	foundExecution := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == resume.RoleExecutionID {
+			execution, foundExecution = candidate, true
+			break
+		}
+	}
+	if !foundExecution {
+		return domain.PlanningResumeObservation{}, errors.New("Provider Resume RoleExecution was not found")
+	}
+	if execution.Role == domain.RoleCoder {
+		providerResponse := domain.ProviderResumeResponse{}
+		if status == domain.PlanningResumeAttached {
+			providerResponse = domain.ProviderResumeResponse{
+				OperationID: response.OperationID, SessionID: response.SessionID,
+				Attached: response.Attached, EvidenceSHA256: response.EvidenceSHA256,
+			}
+		}
+		_, observation, err := c.store.AddTaskProviderResumeObservation(
+			persistCtx, job.ID, job.Revision, resumeID, commandID, status, evidenceSHA256,
+			providerResponse, reconcilesUnknown,
+		)
+		return observation, err
+	}
+	if execution.Role != domain.RolePlanner {
+		return domain.PlanningResumeObservation{}, errors.New("Provider Resume observation role is unsupported")
+	}
 	_, observation, err := c.store.AddPlanningResumeObservation(
 		persistCtx, job.ID, job.Revision, resumeID, commandID, status, evidenceSHA256, reconcilesUnknown, principal,
 	)
