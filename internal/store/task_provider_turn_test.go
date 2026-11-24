@@ -3,8 +3,8 @@ package store
 import (
 	"context"
 	"crypto/sha256"
-	"path/filepath"
 	"encoding/hex"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
