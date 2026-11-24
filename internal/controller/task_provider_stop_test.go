@@ -198,6 +198,10 @@ func TestTaskProviderStopDispatchClaimPreventsConcurrentDuplicate(t *testing.T) 
 	}
 
 	_, _, _, secondErr := f.stop(commandID, domain.ProviderStopReasonTaskComplete)
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: domain.ProviderStopOperationID(commandID), SessionID: "session_1",
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("a", 64),
+	}
 	if !errors.Is(secondErr, provider.ErrStopUnconfirmed) {
 		t.Fatalf("concurrent duplicate Stop was not rejected: %v", secondErr)
 	}
