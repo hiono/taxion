@@ -90,9 +90,10 @@ type TaskTurnDispatchRelease struct {
 	ClaimID         string    `json:"claim_id"`
 	OperationID     string    `json:"operation_id"`
 	PrincipalID     string    `json:"principal_id"`
-	Outcome         string    `json:"outcome"`
-	EvidenceSHA256  string    `json:"evidence_sha256,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
+	Outcome              string    `json:"outcome"`
+	EvidenceSHA256       string    `json:"evidence_sha256,omitempty"`
+	LookupEvidenceSHA256 string    `json:"lookup_evidence_sha256,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
 	CreatedRevision uint64    `json:"created_revision"`
 }
 
@@ -201,7 +202,7 @@ func (c TaskTurnDispatchClaim) Validate(job Job) error {
 }
 
 func NewTaskTurnDispatchRelease(
-	job Job, claimID, principalID, commandID, outcome, evidenceSHA256 string, now time.Time,
+	job Job, claimID, principalID, commandID, outcome, evidenceSHA256, lookupEvidenceSHA256 string, now time.Time,
 ) (TaskTurnDispatchRelease, error) {
 	now = now.UTC().Round(0)
 	if err := job.Validate(); err != nil {
@@ -227,11 +228,15 @@ func NewTaskTurnDispatchRelease(
 		outcome != TaskTurnDispatchReleasedIdempotentRetry {
 		return TaskTurnDispatchRelease{}, errors.New("unsupported Task Turn dispatch release outcome")
 	}
-	if outcome == TaskTurnDispatchReleasedIdempotentRetry && !validSHA256(evidenceSHA256) {
-		return TaskTurnDispatchRelease{}, errors.New("idempotent Task Turn retry requires verified Send idempotency evidence")
+	if outcome == TaskTurnDispatchReleasedIdempotentRetry &&
+		(!validSHA256(evidenceSHA256) || !validSHA256(lookupEvidenceSHA256)) {
+		return TaskTurnDispatchRelease{}, errors.New("idempotent Task Turn retry requires Send idempotency and Lookup NOT_FOUND evidence")
 	}
 	if outcome == TaskTurnDispatchReleasedDefinitiveFailure && !validSHA256(evidenceSHA256) {
 		return TaskTurnDispatchRelease{}, errors.New("definitive Task Turn failure evidence must be a SHA-256 digest")
+	}
+	if outcome != TaskTurnDispatchReleasedIdempotentRetry && lookupEvidenceSHA256 != "" {
+		return TaskTurnDispatchRelease{}, errors.New("Task Turn Lookup evidence is not valid for this release outcome")
 	}
 	if outcome != TaskTurnDispatchReleasedIdempotentRetry &&
 		outcome != TaskTurnDispatchReleasedDefinitiveFailure && evidenceSHA256 != "" {
@@ -244,6 +249,7 @@ func NewTaskTurnDispatchRelease(
 		ID: TaskTurnDispatchReleaseID(commandID), CommandID: commandID,
 		JobID: job.ID, ClaimID: claim.ID, OperationID: claim.OperationID,
 		PrincipalID: principalID, Outcome: outcome, EvidenceSHA256: evidenceSHA256,
+		LookupEvidenceSHA256: lookupEvidenceSHA256,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
 	if err := release.Validate(job); err != nil {
@@ -274,6 +280,13 @@ func (r TaskTurnDispatchRelease) Validate(job Job) error {
 		r.CreatedRevision <= claim.CreatedRevision || r.CreatedAt.Before(claim.CreatedAt) {
 		return errors.New("Task Turn dispatch release does not match its claim")
 	}
+	if r.Outcome == TaskTurnDispatchReleasedIdempotentRetry {
+		if !validSHA256(r.EvidenceSHA256) || !validSHA256(r.LookupEvidenceSHA256) {
+			return errors.New("idempotent Task Turn retry requires Send idempotency and Lookup evidence digests")
+		}
+	} else if r.LookupEvidenceSHA256 != "" {
+		return errors.New("Task Turn Lookup evidence is not valid for this release outcome")
+	}
 	if r.Outcome == TaskTurnDispatchReleasedDefinitiveFailure {
 		var failure *TaskTurnDispatchObservation
 		for i := range job.TaskTurnDispatchObservations {
@@ -301,7 +314,8 @@ func (r TaskTurnDispatchRelease) Validate(job Job) error {
 			return errors.New("idempotent Task Turn retry requires verified Send idempotency evidence")
 		}
 		lookup, foundLookup := taskTurnDispatchObservationForClaim(job, claim.ID, TaskTurnDispatchObservationLookupNotFound)
-		if !foundLookup || lookup.CreatedRevision >= r.CreatedRevision || lookup.EvidenceSHA256 != r.EvidenceSHA256 {
+		if !foundLookup || lookup.CreatedRevision >= r.CreatedRevision ||
+			lookup.EvidenceSHA256 != r.LookupEvidenceSHA256 {
 			return errors.New("idempotent Task Turn retry requires claim-specific Lookup NOT_FOUND evidence")
 		}
 		var previous *TaskTurnObservation
