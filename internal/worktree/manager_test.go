@@ -2,6 +2,8 @@ package worktree
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
@@ -627,5 +629,96 @@ func TestManagerAdoptRejectsIndexFlagsAndStreamsLargeUntrackedFiles(t *testing.T
 	}
 	if err := manager.Verify(context.Background(), jobID, task, snapshot); err != nil {
 		t.Fatalf("Verify adopted Worktree with large untracked file: %v", err)
+	}
+}
+
+func TestManagerAdoptRecoversOrphanedTaskReservationAfterGitDirConflict(t *testing.T) {
+	repository := initRepository(t)
+	worktreeA := filepath.Join(t.TempDir(), "orphaned-task-worktree")
+	worktreeB := filepath.Join(t.TempDir(), "reserved-worktree")
+	worktreeC := filepath.Join(t.TempDir(), "replacement-worktree")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreeA, "HEAD")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreeB, "HEAD")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreeC, "HEAD")
+	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	taskB := domain.Task{ID: "task_bbbbbbbbbbbbbbbb", TargetRepositories: []string{"repo.primary"}}
+	if _, err := manager.Adopt(context.Background(), "job_bbbbbbbbbbbbbbbb", taskB, worktreeB); err != nil {
+		t.Fatalf("Adopt reserved Worktree B: %v", err)
+	}
+	gitDirA, err := gitOutput(context.Background(), worktreeA, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Fatalf("resolve orphaned Worktree Git directory: %v", err)
+	}
+	gitDirA, err = filepath.EvalSymlinks(gitDirA)
+	if err != nil {
+		t.Fatalf("resolve orphaned Worktree Git directory symlinks: %v", err)
+	}
+	taskA := domain.Task{ID: "task_aaaaaaaaaaaaaaaa", TargetRepositories: []string{"repo.primary"}}
+	jobA := "job_aaaaaaaaaaaaaaaa"
+	orphan := adoptionReservation{
+		JobID: jobA, TaskID: taskA.ID, RepositoryID: "repo.primary",
+		WorktreePath: worktreeA, GitDir: gitDirA,
+	}
+	reservationDirectory := filepath.Join(manager.root, ".adoptions")
+	taskKey := sha256.Sum256([]byte(jobA + "\x00" + taskA.ID))
+	taskReservationPath := filepath.Join(reservationDirectory, "task-"+hex.EncodeToString(taskKey[:])+".json")
+	if _, err := writeAdoptionReservation(taskReservationPath, orphan); err != nil {
+		t.Fatalf("write interrupted Task reservation: %v", err)
+	}
+
+	if _, err := manager.Adopt(context.Background(), jobA, taskA, worktreeB); err == nil ||
+		!strings.Contains(err.Error(), "already reserved") {
+		t.Fatalf("Adopt accepted another Task's reserved Git directory: %v", err)
+	}
+	if _, err := os.Stat(taskReservationPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("orphaned Task reservation remained after conflict: stat err=%v", err)
+	}
+	if _, err := manager.Adopt(context.Background(), jobA, taskA, worktreeC); err != nil {
+		t.Fatalf("Adopt retry with a different Worktree after orphan recovery: %v", err)
+	}
+}
+
+func TestManagerOrphanedReservationCleanupPreservesCommittedAdoption(t *testing.T) {
+	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	reservation := adoptionReservation{
+		JobID: "job_cccccccccccccccc", TaskID: "task_cccccccccccccccc",
+		RepositoryID: "repo.primary", WorktreePath: filepath.Join(t.TempDir(), "worktree"),
+		GitDir: filepath.Join(t.TempDir(), "git", "worktrees", "task"),
+	}
+	directory := filepath.Join(manager.root, ".adoptions")
+	taskKey := sha256.Sum256([]byte(reservation.JobID + "\x00" + reservation.TaskID))
+	gitDirKey := sha256.Sum256([]byte(reservation.GitDir))
+	taskPath := filepath.Join(directory, "task-"+hex.EncodeToString(taskKey[:])+".json")
+	gitDirPath := filepath.Join(directory, "gitdir-"+hex.EncodeToString(gitDirKey[:])+".json")
+	if _, err := writeAdoptionReservation(taskPath, reservation); err != nil {
+		t.Fatalf("write Task reservation: %v", err)
+	}
+	if _, err := writeAdoptionReservation(gitDirPath, reservation); err != nil {
+		t.Fatalf("write Git directory reservation: %v", err)
+	}
+	record := baselineRecord{
+		Version: 2, JobID: reservation.JobID, TaskID: reservation.TaskID,
+		RepositoryID: reservation.RepositoryID, RepositoryPath: filepath.Join(t.TempDir(), "source"),
+		WorktreePath: reservation.WorktreePath, BaselineCommit: strings.Repeat("a", 40),
+		Origin: domain.WorktreeOriginAdopted, InitialStateSHA256: strings.Repeat("b", 64),
+		HeadMode: domain.WorktreeHeadDetached,
+	}
+	if err := writeBaselineRecord(adoptionRegistrationPath(manager.root, reservation.JobID, reservation.TaskID)+".baseline.json", record); err != nil {
+		t.Fatalf("write committed baseline record: %v", err)
+	}
+	if err := manager.removeOrphanedAdoptionReservation(reservation); err != nil {
+		t.Fatalf("cleanup committed reservation: %v", err)
+	}
+	for _, path := range []string{taskPath, gitDirPath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("committed reservation %s was removed: %v", path, err)
+		}
 	}
 }

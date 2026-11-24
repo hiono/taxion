@@ -102,8 +102,7 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 	if err != nil || stateDigestAfter != stateDigest {
 		return Snapshot{}, errors.New("adopted Worktree changed while its initial state was captured")
 	}
-	key := sha256.Sum256([]byte(jobID + "\x00" + task.ID))
-	registrationPath := filepath.Join(m.root, hex.EncodeToString(key[:]))
+	registrationPath := adoptionRegistrationPath(m.root, jobID, task.ID)
 	baselinePath := registrationPath + ".baseline.json"
 	record, readErr := readBaselineRecord(baselinePath)
 	if readErr == nil {
@@ -116,6 +115,13 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 			return Snapshot{}, err
 		}
 	} else if errors.Is(readErr, os.ErrNotExist) {
+		reservation := adoptionReservation{
+			JobID: jobID, TaskID: task.ID, RepositoryID: repositoryID,
+			WorktreePath: worktreePath, GitDir: resolvedGitDir,
+		}
+		if err := m.recoverOrphanedAdoptionReservations(reservation); err != nil {
+			return Snapshot{}, fmt.Errorf("recover interrupted Worktree adoption reservation: %w", err)
+		}
 		if err := m.reserveAdoption(jobID, task.ID, repositoryID, worktreePath, resolvedGitDir); err != nil {
 			return Snapshot{}, err
 		}
@@ -127,15 +133,24 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 			HeadMode: headMode, HeadRef: headRef,
 		}
 		if err := writeBaselineRecord(baselinePath, record); err != nil {
-			if !errors.Is(err, os.ErrExist) {
-				return Snapshot{}, fmt.Errorf("persist adopted Worktree registration: %w", err)
-			}
-			record, err = readBaselineRecord(baselinePath)
-			if err != nil || record.Origin != domain.WorktreeOriginAdopted ||
-				record.WorktreePath != worktreePath || record.BaselineCommit != head ||
-				record.InitialStateSHA256 != stateDigest || record.HeadMode != headMode ||
-				record.HeadRef != headRef {
-				return Snapshot{}, errors.New("concurrent Worktree adoption registered a different identity")
+			if errors.Is(err, os.ErrExist) {
+				existing, readErr := readBaselineRecord(baselinePath)
+				if readErr == nil && existing.Origin == domain.WorktreeOriginAdopted &&
+					existing.WorktreePath == worktreePath && existing.BaselineCommit == head &&
+					existing.InitialStateSHA256 == stateDigest && existing.HeadMode == headMode &&
+					existing.HeadRef == headRef {
+					record = existing
+				} else {
+					cleanupErr := m.removeOrphanedAdoptionReservation(reservation)
+					return Snapshot{}, errors.Join(
+						errors.New("concurrent Worktree adoption registered a different identity"), cleanupErr,
+					)
+				}
+			} else {
+				cleanupErr := m.removeOrphanedAdoptionReservation(reservation)
+				return Snapshot{}, errors.Join(
+					fmt.Errorf("persist adopted Worktree registration: %w", err), cleanupErr,
+				)
 			}
 		}
 	} else {
@@ -151,6 +166,83 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 		return Snapshot{}, fmt.Errorf("verify adopted Worktree: %w", err)
 	}
 	return snapshot, nil
+}
+
+
+func adoptionRegistrationPath(root, jobID, taskID string) string {
+	key := sha256.Sum256([]byte(jobID + "\x00" + taskID))
+	return filepath.Join(root, hex.EncodeToString(key[:]))
+}
+
+func (m *Manager) recoverOrphanedAdoptionReservations(reservation adoptionReservation) error {
+	directory := filepath.Join(m.root, ".adoptions")
+	taskKey := sha256.Sum256([]byte(reservation.JobID + "\x00" + reservation.TaskID))
+	gitDirKey := sha256.Sum256([]byte(reservation.GitDir))
+	paths := []string{
+		filepath.Join(directory, "task-"+hex.EncodeToString(taskKey[:])+".json"),
+		filepath.Join(directory, "gitdir-"+hex.EncodeToString(gitDirKey[:])+".json"),
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read existing Worktree adoption reservation: %w", err)
+		}
+		var existing adoptionReservation
+		if err := json.Unmarshal(data, &existing); err != nil {
+			return errors.New("existing Worktree adoption reservation is invalid")
+		}
+		if err := m.removeOrphanedAdoptionReservation(existing); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Manager) removeOrphanedAdoptionReservation(reservation adoptionReservation) error {
+	baselinePath := adoptionRegistrationPath(m.root, reservation.JobID, reservation.TaskID) + ".baseline.json"
+	if _, err := os.Stat(baselinePath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect Worktree adoption baseline before reservation cleanup: %w", err)
+	}
+
+	directory := filepath.Join(m.root, ".adoptions")
+	taskKey := sha256.Sum256([]byte(reservation.JobID + "\x00" + reservation.TaskID))
+	gitDirKey := sha256.Sum256([]byte(reservation.GitDir))
+	paths := []string{
+		filepath.Join(directory, "task-"+hex.EncodeToString(taskKey[:])+".json"),
+		filepath.Join(directory, "gitdir-"+hex.EncodeToString(gitDirKey[:])+".json"),
+	}
+	removed := false
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read Worktree adoption reservation before cleanup: %w", err)
+		}
+		var existing adoptionReservation
+		if err := json.Unmarshal(data, &existing); err != nil {
+			return errors.New("Worktree adoption reservation is invalid; refusing cleanup")
+		}
+		if existing != reservation {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove interrupted Worktree adoption reservation: %w", err)
+		}
+		removed = true
+	}
+	if removed {
+		if err := syncDirectory(directory); err != nil {
+			return fmt.Errorf("sync Worktree adoption reservation cleanup: %w", err)
+		}
+	}
+	return nil
 }
 
 type adoptionReservation struct {
@@ -181,6 +273,7 @@ func (m *Manager) reserveAdoption(jobID, taskID, repositoryID, worktreePath, git
 	if _, err := writeAdoptionReservation(gitDirPath, reservation); err != nil {
 		if taskCreated {
 			_ = os.Remove(taskPath)
+			_ = syncDirectory(directory)
 		}
 		return err
 	}
