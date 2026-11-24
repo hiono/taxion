@@ -1187,3 +1187,67 @@ func TestTaskProviderUsageCompletesPersistedPartialUsage(t *testing.T) {
 		t.Fatalf("complete Usage count for Turn = %d, want 1", completeCount)
 	}
 }
+
+func TestProviderStopFencedRecoveryRequiresFencingOnSubsequentDispatchAndRecordsLookupTime(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Stop intent: %v", err)
+	}
+	_, intent, err := f.database.AddProviderStopIntent(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, "session_1",
+		"cmd_81818181818181818181818181818181", domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if err != nil {
+		t.Fatalf("persist Stop intent: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before first dispatch claim: %v", err)
+	}
+	_, firstClaim, created, err := f.database.AddProviderStopDispatchClaim(
+		f.ctx, f.jobID, job.Revision, intent.ID, "cmd_82828282828282828282828282828282", f.principal,
+	)
+	if err != nil || !created {
+		t.Fatalf("persist first dispatch claim: claim=%#v created=%v err=%v", firstClaim, created, err)
+	}
+	_, firstStart, started, err := f.database.StartProviderStopDispatchClaim(
+		f.ctx, f.jobID, firstClaim.ID, strings.Repeat("9", 64), f.principal,
+	)
+	if err != nil || !started {
+		t.Fatalf("persist first dispatch start: started=%v err=%v", started, err)
+	}
+	_, release, err := f.database.ReleaseProviderStopDispatchClaim(
+		f.ctx, f.jobID, firstClaim.ID, f.principal,
+		domain.ProviderStopDispatchReleasedFencedNotFound, strings.Repeat("8", 64),
+	)
+	if err != nil {
+		t.Fatalf("release first started claim: %v", err)
+	}
+	if release.LookupObservedAt.IsZero() || !release.LookupObservedAt.After(firstStart.CreatedAt) ||
+		release.LookupObservedAt.After(release.CreatedAt) {
+		t.Fatalf("fenced NOT_FOUND lookup chronology was not persisted: start=%s lookup=%s release=%s",
+			firstStart.CreatedAt, release.LookupObservedAt, release.CreatedAt)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before replacement dispatch claim: %v", err)
+	}
+	_, nextClaim, created, err := f.database.AddProviderStopDispatchClaim(
+		f.ctx, f.jobID, job.Revision, intent.ID, "cmd_83838383838383838383838383838383", f.principal,
+	)
+	if err != nil || !created {
+		t.Fatalf("persist replacement dispatch claim: claim=%#v created=%v err=%v", nextClaim, created, err)
+	}
+	if _, _, started, err := f.database.StartProviderStopDispatchClaim(
+		f.ctx, f.jobID, nextClaim.ID, "", f.principal,
+	); err == nil || started {
+		t.Fatal("replacement DispatchStart did not require fencing evidence after fenced NOT_FOUND")
+	}
+	_, nextStart, started, err := f.database.StartProviderStopDispatchClaim(
+		f.ctx, f.jobID, nextClaim.ID, strings.Repeat("9", 64), f.principal,
+	)
+	if err != nil || !started || nextStart.FencingEvidenceSHA256 != strings.Repeat("9", 64) {
+		t.Fatalf("replacement DispatchStart with fencing evidence failed: start=%#v started=%v err=%v", nextStart, started, err)
+	}
+}

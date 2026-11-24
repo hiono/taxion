@@ -50,6 +50,7 @@ type ProviderStopDispatchRelease struct {
 	PrincipalID     string    `json:"principal_id"`
 	Outcome         string    `json:"outcome"`
 	EvidenceSHA256  string    `json:"evidence_sha256,omitempty"`
+	LookupObservedAt time.Time `json:"lookup_observed_at,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	CreatedRevision uint64    `json:"created_revision"`
 }
@@ -198,6 +199,9 @@ func NewProviderStopDispatchStart(
 	if providerStopQuiescentBefore(job, claim.OperationID, job.Revision+1) {
 		return ProviderStopDispatchStart{}, errors.New("Provider Stop dispatch cannot start after quiescence was confirmed")
 	}
+	if providerStopFencingRequiredBefore(job, claim.OperationID, job.Revision+1) && !validSHA256(fencingEvidenceSHA256) {
+		return ProviderStopDispatchStart{}, errors.New("Provider Stop dispatch after fenced NOT_FOUND requires verified fencing evidence")
+	}
 	if fencingEvidenceSHA256 != "" && !validSHA256(fencingEvidenceSHA256) {
 		return ProviderStopDispatchStart{}, errors.New("Provider Stop dispatch fencing evidence digest is invalid")
 	}
@@ -238,6 +242,9 @@ func (s ProviderStopDispatchStart) Validate(job Job) error {
 	if providerStopQuiescentBefore(job, s.OperationID, s.CreatedRevision) {
 		return errors.New("Provider Stop dispatch start follows confirmed quiescence")
 	}
+	if providerStopFencingRequiredBefore(job, s.OperationID, s.CreatedRevision) && !validSHA256(s.FencingEvidenceSHA256) {
+		return errors.New("Provider Stop dispatch after fenced NOT_FOUND lacks verified fencing evidence")
+	}
 	return nil
 }
 
@@ -254,6 +261,16 @@ func providerStopQuiescentBefore(job Job, operationID string, beforeRevision uin
 	for _, observation := range job.ProviderStopObservations {
 		if observation.OperationID == operationID && observation.Quiescent &&
 			observation.CreatedRevision < beforeRevision {
+			return true
+		}
+	}
+	return false
+}
+
+func providerStopFencingRequiredBefore(job Job, operationID string, beforeRevision uint64) bool {
+	for _, release := range job.ProviderStopDispatchReleases {
+		if release.OperationID == operationID && release.Outcome == ProviderStopDispatchReleasedFencedNotFound &&
+			release.CreatedRevision < beforeRevision {
 			return true
 		}
 	}
@@ -317,6 +334,9 @@ func NewProviderStopDispatchRelease(
 		if !started || !validSHA256(start.FencingEvidenceSHA256) {
 			return ProviderStopDispatchRelease{}, errors.New("fenced NOT_FOUND release requires a started dispatch with verified fencing evidence")
 		}
+		if !now.After(start.CreatedAt) {
+			now = start.CreatedAt.Add(time.Nanosecond)
+		}
 		if !validSHA256(evidenceSHA256) {
 			return ProviderStopDispatchRelease{}, errors.New("fenced NOT_FOUND release requires verified lookup evidence")
 		}
@@ -331,6 +351,12 @@ func NewProviderStopDispatchRelease(
 		JobID: job.ID, ClaimID: claim.ID, OperationID: claim.OperationID,
 		PrincipalID: principalID, Outcome: outcome, EvidenceSHA256: evidenceSHA256,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
+		LookupObservedAt: func() time.Time {
+			if outcome == ProviderStopDispatchReleasedFencedNotFound {
+				return now
+			}
+			return time.Time{}
+		}(),
 	}
 	if err := release.Validate(job); err != nil {
 		return ProviderStopDispatchRelease{}, err
@@ -368,8 +394,16 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 		}
 	} else if r.Outcome == ProviderStopDispatchReleasedFencedNotFound {
 		start, started := ProviderStopDispatchStartedForClaim(job, claim.ID)
-		if !started || !validSHA256(start.FencingEvidenceSHA256) || !validSHA256(r.EvidenceSHA256) {
-			return errors.New("fenced NOT_FOUND release requires a started claim with fencing evidence and verified lookup evidence")
+		if !started || !validSHA256(start.FencingEvidenceSHA256) || !validSHA256(r.EvidenceSHA256) ||
+			r.CreatedRevision <= start.CreatedRevision || !r.CreatedAt.After(start.CreatedAt) {
+			return errors.New("fenced NOT_FOUND release requires a later started claim with fencing evidence and verified lookup evidence")
+		}
+		lookupObservedAt := r.LookupObservedAt
+		if lookupObservedAt.IsZero() {
+			lookupObservedAt = r.CreatedAt
+		}
+		if !lookupObservedAt.After(start.CreatedAt) || lookupObservedAt.After(r.CreatedAt) {
+			return errors.New("fenced NOT_FOUND lookup observation must be recorded after DispatchStart and before release")
 		}
 	} else if r.Outcome == ProviderStopDispatchReleasedDefinitiveFailure {
 		if start, started := ProviderStopDispatchStartedForClaim(job, claim.ID); started &&
