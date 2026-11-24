@@ -227,19 +227,22 @@ func TestTaskProviderResumePersistsDefinitiveFailureAndAllowsStop(t *testing.T) 
 	}
 	f.runtime.resumeErr = failure
 	commandID := "cmd_34343434343434343434343434343434"
-	_, intent, _, resumeErr := f.resume(commandID)
+	_, returnedObservation, _, resumeErr := f.resume(commandID)
 	job, err := f.database.GetJob(f.ctx, f.jobID)
 	if err != nil {
 		t.Fatalf("GetJob after definitive Resume failure: %v", err)
 	}
-	if len(job.PlanningResumeObservations) != 1 {
-		t.Fatalf("definitive Resume failure observation count = %d", len(job.PlanningResumeObservations))
+	if len(job.PlanningResumeIntents) != 1 || len(job.PlanningResumeObservations) != 1 {
+		t.Fatalf("definitive Resume failure facts = intents:%d observations:%d",
+			len(job.PlanningResumeIntents), len(job.PlanningResumeObservations))
 	}
+	intent := job.PlanningResumeIntents[0]
 	observation := job.PlanningResumeObservations[0]
 	if !errors.Is(resumeErr, failure) || observation.Status != domain.PlanningResumeFailed ||
-		observation.ResumeID != intent.ID || f.runtime.resumeCalls != 1 {
-		t.Fatalf("definitive Resume failure was not persisted: intent=%#v observation=%#v calls=%d err=%v",
-			intent, observation, f.runtime.resumeCalls, resumeErr)
+		observation.ResumeID != intent.ID || returnedObservation.ID != observation.ID ||
+		f.runtime.resumeCalls != 1 {
+		t.Fatalf("definitive Resume failure was not persisted: intent=%#v observation=%#v returned=%#v calls=%d err=%v",
+			intent, observation, returnedObservation, f.runtime.resumeCalls, resumeErr)
 	}
 	_, stopIntent, _, stopErr := f.stop("cmd_45454545454545454545454545454545", domain.ProviderStopReasonFailure)
 	if stopIntent.ID == "" {
