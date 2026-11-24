@@ -460,9 +460,6 @@ func (s *Store) AddProviderStartObservation(
 			)
 		},
 		func(job *domain.Job, fact domain.ProviderStartObservation) {
-			if job.ProviderLifecycleEnforcedFromRevision == 0 {
-				job.ProviderLifecycleEnforcedFromRevision = fact.CreatedRevision
-			}
 			job.ProviderStartObservations = append(job.ProviderStartObservations, fact)
 		},
 		func(job domain.Job) (domain.ProviderStartObservation, bool) {
@@ -495,9 +492,6 @@ func (s *Store) AddTaskProviderStartObservation(
 			)
 		},
 		func(job *domain.Job, fact domain.ProviderStartObservation) {
-			if job.ProviderLifecycleEnforcedFromRevision == 0 {
-				job.ProviderLifecycleEnforcedFromRevision = fact.CreatedRevision
-			}
 			job.ProviderStartObservations = append(job.ProviderStartObservations, fact)
 		},
 		func(job domain.Job) (domain.ProviderStartObservation, bool) {
@@ -584,9 +578,6 @@ func (s *Store) AddProviderUsageObservation(
 		},
 		func(job *domain.Job, fact domain.ProviderUsageObservation) {
 			job.ProviderUsageObservations = append(job.ProviderUsageObservations, fact)
-			if job.ProviderUsageEnforcedFromRevision == 0 {
-				job.ProviderUsageEnforcedFromRevision = fact.CreatedRevision
-			}
 		},
 		func(job domain.Job) (domain.ProviderUsageObservation, bool) {
 			for _, fact := range job.ProviderUsageObservations {
