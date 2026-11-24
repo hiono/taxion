@@ -102,6 +102,17 @@ func TestTaskProviderResumeRejectsUnconfirmedResponsesAndReconcilesSameIdentity(
 				t.Fatalf("same Resume identity did not reconcile to ATTACHED: intent=%#v observation=%#v result=%#v calls=%d err=%v",
 					replayedIntent, attached, result, f.runtime.resumeCalls, err)
 			}
+			job, readErr = f.database.GetJob(f.ctx, f.jobID)
+			if readErr != nil {
+				t.Fatalf("GetJob after Resume reconciliation: %v", readErr)
+			}
+			if len(job.PlanningResumeObservations) != 2 ||
+				job.PlanningResumeObservations[0].Status != domain.PlanningResumeUnknown ||
+				job.PlanningResumeObservations[1].Status != domain.PlanningResumeAttached ||
+				!job.PlanningResumeObservations[1].ReconcilesUnknown {
+				t.Fatalf("Resume reconciliation did not append ATTACHED while preserving UNKNOWN: %#v",
+					job.PlanningResumeObservations)
+			}
 			replayedIntent, replayed, _, err := f.resume(commandID)
 			if err != nil || replayedIntent.ID != intent.ID || replayed.ID != attached.ID || f.runtime.resumeCalls != 2 {
 				t.Fatalf("terminal Resume replay repeated Provider side effect: intent=%#v observation=%#v calls=%d err=%v",
