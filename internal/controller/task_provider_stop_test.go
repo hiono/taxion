@@ -150,6 +150,74 @@ func (f taskProviderStopFixture) stop(commandID string, reason domain.ProviderSt
 	)
 }
 
+type blockingTaskStopRuntime struct {
+	*fakePlanningProviderRuntime
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingTaskStopRuntime) Stop(ctx context.Context, request provider.StopRequest) (provider.StopResult, error) {
+	select {
+	case r.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return provider.StopResult{}, ctx.Err()
+	}
+	return r.fakePlanningProviderRuntime.Stop(ctx, request)
+}
+
+func TestTaskProviderStopDispatchClaimPreventsConcurrentDuplicate(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	blocking := &blockingTaskStopRuntime{
+		fakePlanningProviderRuntime: f.runtime,
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	controller, err := NewProviderControllerWithExecutionAndWorktree(
+		f.database, blocking, f.controller.execution, f.worktree,
+	)
+	if err != nil {
+		t.Fatalf("NewProviderControllerWithExecutionAndWorktree: %v", err)
+	}
+	controller.now = f.controller.now
+	f.controller = controller
+
+	commandID := "cmd_adadadadadadadadadadadadadadadad"
+	firstResult := make(chan error, 1)
+	go func() {
+		_, _, _, stopErr := f.stop(commandID, domain.ProviderStopReasonTaskComplete)
+		firstResult <- stopErr
+	}()
+	select {
+	case <-blocking.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first Stop did not reach the Provider")
+	}
+
+	_, _, _, secondErr := f.stop(commandID, domain.ProviderStopReasonTaskComplete)
+	if !errors.Is(secondErr, provider.ErrStopUnconfirmed) {
+		t.Fatalf("concurrent duplicate Stop was not rejected: %v", secondErr)
+	}
+	if f.runtime.stopCalls != 0 {
+		t.Fatalf("second call reached Provider while first dispatch was in flight: calls=%d", f.runtime.stopCalls)
+	}
+	close(blocking.release)
+	select {
+	case firstErr := <-firstResult:
+		if firstErr != nil {
+			t.Fatalf("first Stop failed: %v", firstErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("first Stop did not complete")
+	}
+	if f.runtime.stopCalls != 1 {
+		t.Fatalf("same OperationID dispatched Stop %d times, want 1", f.runtime.stopCalls)
+	}
+}
+
 func TestTaskProviderStopAmbiguousOutcomeIsNotReplayed(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	commandID := "cmd_b8080808080808080808080808080808"
