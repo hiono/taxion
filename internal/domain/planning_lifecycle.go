@@ -9,14 +9,14 @@ import (
 )
 
 const (
-	PlanningTurnUnknown    = "UNKNOWN"
-	PlanningTurnCompleted  = "COMPLETED"
-	PlanningTurnFailed     = "FAILED"
-	PlanningEffectAllow    = "ALLOW"
-	PlanningEffectDeny     = "DENY"
-	PlanningBoundaryTurn   = "turn"
-	PlanningBoundaryEffect = "effect"
-	PlanningBoundaryResume = "resume"
+	PlanningTurnUnknown         = "UNKNOWN"
+	PlanningTurnCompleted       = "COMPLETED"
+	PlanningTurnFailed          = "FAILED"
+	PlanningEffectAllow         = "ALLOW"
+	PlanningEffectDeny          = "DENY"
+	PlanningBoundaryTurn        = "turn"
+	PlanningBoundaryEffect      = "effect"
+	PlanningBoundaryResume      = "resume"
 	PlanningResumeUnknown       = "UNKNOWN"
 	PlanningResumeNotDispatched = "NOT_DISPATCHED"
 	PlanningResumeAttached      = "ATTACHED"
