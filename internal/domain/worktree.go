@@ -9,11 +9,22 @@ import (
 	"time"
 )
 
+const (
+	WorktreeOriginTaxionCreated = "TAXION_CREATED"
+	WorktreeOriginAdopted       = "ADOPTED_EXISTING"
+	WorktreeHeadDetached        = "DETACHED"
+	WorktreeHeadBranchAttached  = "BRANCH_ATTACHED"
+)
+
 type WorktreeSnapshot struct {
-	RepositoryID   string `json:"repository_id"`
-	RepositoryPath string `json:"repository_path"`
-	WorktreePath   string `json:"worktree_path"`
-	BaselineCommit string `json:"baseline_commit"`
+	RepositoryID       string `json:"repository_id"`
+	RepositoryPath     string `json:"repository_path"`
+	WorktreePath       string `json:"worktree_path"`
+	BaselineCommit     string `json:"baseline_commit"`
+	Origin             string `json:"origin,omitempty"`
+	InitialStateSHA256 string `json:"initial_state_sha256,omitempty"`
+	HeadMode           string `json:"head_mode,omitempty"`
+	HeadRef            string `json:"head_ref,omitempty"`
 }
 
 type WorktreeAssignment struct {
@@ -24,6 +35,10 @@ type WorktreeAssignment struct {
 	RepositoryPath       string    `json:"repository_path"`
 	WorktreePath         string    `json:"worktree_path"`
 	BaselineCommit       string    `json:"baseline_commit"`
+	Origin               string    `json:"origin,omitempty"`
+	InitialStateSHA256   string    `json:"initial_state_sha256,omitempty"`
+	HeadMode             string    `json:"head_mode,omitempty"`
+	HeadRef              string    `json:"head_ref,omitempty"`
 	OwnerRoleExecutionID string    `json:"owner_role_execution_id"`
 	CreatedAt            time.Time `json:"created_at"`
 	CreatedRevision      uint64    `json:"created_revision"`
@@ -57,6 +72,13 @@ func NewWorktreeAssignment(job Job, task Task, execution RoleExecution, snapshot
 		worktreePathWithin(snapshot.WorktreePath, snapshot.RepositoryPath) {
 		return WorktreeAssignment{}, errors.New("Worktree and source repository paths must be separate")
 	}
+	if (snapshot.Origin != "" && snapshot.Origin != WorktreeOriginTaxionCreated && snapshot.Origin != WorktreeOriginAdopted) ||
+		(snapshot.InitialStateSHA256 != "" && !validGitCommit(snapshot.InitialStateSHA256)) ||
+		(snapshot.HeadMode != "" && snapshot.HeadMode != WorktreeHeadDetached && snapshot.HeadMode != WorktreeHeadBranchAttached) ||
+		(snapshot.HeadMode == WorktreeHeadBranchAttached && strings.TrimSpace(snapshot.HeadRef) == "") ||
+		(snapshot.HeadMode == WorktreeHeadDetached && snapshot.HeadRef != "") {
+		return WorktreeAssignment{}, errors.New("Worktree provenance or initial Git state identity is invalid")
+	}
 	if now.IsZero() || job.Revision >= uint64(^uint64(0)>>1) {
 		return WorktreeAssignment{}, errors.New("Worktree assignment timestamp or Job revision is invalid")
 	}
@@ -65,6 +87,8 @@ func NewWorktreeAssignment(job Job, task Task, execution RoleExecution, snapshot
 		ID: WorktreeID(job.ID, task.ID), JobID: job.ID, TaskID: task.ID,
 		RepositoryID: snapshot.RepositoryID, RepositoryPath: snapshot.RepositoryPath,
 		WorktreePath: snapshot.WorktreePath, BaselineCommit: snapshot.BaselineCommit,
+		Origin: snapshot.Origin, InitialStateSHA256: snapshot.InitialStateSHA256,
+		HeadMode: snapshot.HeadMode, HeadRef: snapshot.HeadRef,
 		OwnerRoleExecutionID: execution.ID, CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}, nil
 }
@@ -73,6 +97,8 @@ func (a WorktreeAssignment) Snapshot() WorktreeSnapshot {
 	return WorktreeSnapshot{
 		RepositoryID: a.RepositoryID, RepositoryPath: a.RepositoryPath,
 		WorktreePath: a.WorktreePath, BaselineCommit: a.BaselineCommit,
+		Origin: a.Origin, InitialStateSHA256: a.InitialStateSHA256,
+		HeadMode: a.HeadMode, HeadRef: a.HeadRef,
 	}
 }
 
@@ -104,7 +130,11 @@ func validateWorktreeAssignments(job Job) error {
 			strings.TrimSpace(assignment.RepositoryID) == "" ||
 			!filepath.IsAbs(assignment.RepositoryPath) || filepath.Clean(assignment.RepositoryPath) != assignment.RepositoryPath ||
 			!filepath.IsAbs(assignment.WorktreePath) || filepath.Clean(assignment.WorktreePath) != assignment.WorktreePath ||
-			!validGitCommit(assignment.BaselineCommit) ||
+			(assignment.Origin != "" && assignment.Origin != WorktreeOriginTaxionCreated && assignment.Origin != WorktreeOriginAdopted) ||
+			(assignment.InitialStateSHA256 != "" && !validGitCommit(assignment.InitialStateSHA256)) ||
+			(assignment.HeadMode != "" && assignment.HeadMode != WorktreeHeadDetached && assignment.HeadMode != WorktreeHeadBranchAttached) ||
+			(assignment.HeadMode == WorktreeHeadBranchAttached && strings.TrimSpace(assignment.HeadRef) == "") ||
+			(assignment.HeadMode == WorktreeHeadDetached && assignment.HeadRef != "") ||
 			assignment.CreatedAt.IsZero() || assignment.CreatedAt.After(job.UpdatedAt) ||
 			assignment.CreatedRevision == 0 || assignment.CreatedRevision > job.Revision {
 			return errors.New("Worktree assignment identity, path, baseline, or creation metadata is invalid")
