@@ -36,8 +36,6 @@ func taskTurnFixture(t *testing.T) (Job, RoleExecution, ExecutionPermission, tim
 	job.WorktreeAssignments = append(job.WorktreeAssignments, start.WorktreeAssignment)
 	job.RoleExecutions = append(job.RoleExecutions, start.RoleExecution)
 	job.ProviderStartIntents = append(job.ProviderStartIntents, start.ProviderStartIntent)
-	job.WorktreeLifecycleEnforcedFromRevision = start.WorktreeAssignment.CreatedRevision
-	job.ProviderLifecycleEnforcedFromRevision = start.ProviderStartIntent.CreatedRevision
 	job.Revision++
 	job.UpdatedAt = start.ProviderStartIntent.CreatedAt
 	observation, err := NewProviderStartObservation(job, start.ProviderStartIntent.ID, "",
