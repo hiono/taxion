@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -99,7 +100,7 @@ func (c ProviderStopDispatchClaim) Validate(job Job) error {
 		c.ID != ProviderStopDispatchClaimID(c.CommandID) || c.JobID != job.ID ||
 		!validPlanningIdentity(c.StopIntentID) || !validPlanningIdentity(c.RoleExecutionID) ||
 		!validPlanningIdentity(c.OperationID) || !validPlanningIdentity(c.SessionID) ||
-		!stringsHasPrefixHuman(c.PrincipalID) || c.CreatedAt.IsZero() || c.CreatedRevision == 0 {
+		!strings.HasPrefix(c.PrincipalID, "human_") || c.CreatedAt.IsZero() || c.CreatedRevision == 0 {
 		return errors.New("Provider Stop dispatch claim identity or metadata is invalid")
 	}
 	var intent ProviderStopIntent
@@ -168,7 +169,7 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 	if !validPlanningIdentity(r.ID) || !validCommandID(r.CommandID) ||
 		r.ID != ProviderStopDispatchReleaseID(r.CommandID) || r.JobID != job.ID ||
 		!validPlanningIdentity(r.ClaimID) || !validPlanningIdentity(r.OperationID) ||
-		!stringsHasPrefixHuman(r.PrincipalID) || r.CreatedAt.IsZero() || r.CreatedRevision == 0 ||
+		!strings.HasPrefix(r.PrincipalID, "human_") || r.CreatedAt.IsZero() || r.CreatedRevision == 0 ||
 		(r.Outcome != ProviderStopDispatchReleasedStopped && r.Outcome != ProviderStopDispatchReleasedDefinitiveFailure) {
 		return errors.New("Provider Stop dispatch release identity or metadata is invalid")
 	}
