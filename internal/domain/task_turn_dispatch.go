@@ -16,6 +16,60 @@ const (
 	TaskTurnDispatchReleasedIdempotentRetry   = "idempotent_retry"
 )
 
+const (
+	TaskTurnDispatchObservationStarted             = "started"
+	TaskTurnDispatchObservationPreDispatchFailure  = "pre_dispatch_failure"
+	TaskTurnDispatchObservationPreAdapterRejection = "pre_adapter_rejection"
+	TaskTurnDispatchObservationDefinitiveFailure   = "definitive_failure"
+	TaskTurnDispatchObservationLookupNotFound      = "lookup_not_found"
+)
+
+type TaskTurnDispatchObservation struct {
+	ID              string    `json:"id"`
+	CommandID       string    `json:"command_id"`
+	JobID           string    `json:"job_id"`
+	ClaimID         string    `json:"claim_id"`
+	TurnID          string    `json:"turn_id"`
+	OperationID     string    `json:"operation_id"`
+	PrincipalID     string    `json:"principal_id"`
+	Status          string    `json:"status"`
+	EvidenceSHA256  string    `json:"evidence_sha256,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	CreatedRevision uint64    `json:"created_revision"`
+}
+
+func TaskTurnDispatchObservationID(commandID string) string {
+	return planningOperationID("task_turn_dispatch_observation", commandID)
+}
+
+func TaskTurnDispatchObservationCommandID(claimID, status string) string {
+	sum := sha256.Sum256([]byte("taxion:task-turn-dispatch-observation:" + claimID + ":" + status))
+	return "cmd_" + hex.EncodeToString(sum[:16])
+}
+
+func taskTurnDispatchClaimByID(job Job, claimID string) (TaskTurnDispatchClaim, bool) {
+	for _, claim := range job.TaskTurnDispatchClaims {
+		if claim.ID == claimID {
+			return claim, true
+		}
+	}
+	return TaskTurnDispatchClaim{}, false
+}
+
+func taskTurnDispatchObservationForClaim(
+	job Job, claimID, status string,
+) (TaskTurnDispatchObservation, bool) {
+	var latest TaskTurnDispatchObservation
+	found := false
+	for _, observation := range job.TaskTurnDispatchObservations {
+		if observation.ClaimID == claimID && observation.Status == status &&
+			(!found || observation.CreatedRevision > latest.CreatedRevision) {
+			latest, found = observation, true
+		}
+	}
+	return latest, found
+}
+
 type TaskTurnDispatchClaim struct {
 	ID              string    `json:"id"`
 	CommandID       string    `json:"command_id"`
@@ -176,7 +230,7 @@ func NewTaskTurnDispatchRelease(
 	if outcome == TaskTurnDispatchReleasedIdempotentRetry && !validSHA256(evidenceSHA256) {
 		return TaskTurnDispatchRelease{}, errors.New("idempotent Task Turn retry requires verified Send idempotency evidence")
 	}
-	if outcome == TaskTurnDispatchReleasedDefinitiveFailure && evidenceSHA256 != "" && !validSHA256(evidenceSHA256) {
+	if outcome == TaskTurnDispatchReleasedDefinitiveFailure && !validSHA256(evidenceSHA256) {
 		return TaskTurnDispatchRelease{}, errors.New("definitive Task Turn failure evidence must be a SHA-256 digest")
 	}
 	if outcome != TaskTurnDispatchReleasedIdempotentRetry &&
@@ -221,17 +275,34 @@ func (r TaskTurnDispatchRelease) Validate(job Job) error {
 		return errors.New("Task Turn dispatch release does not match its claim")
 	}
 	if r.Outcome == TaskTurnDispatchReleasedDefinitiveFailure {
+		var failure *TaskTurnDispatchObservation
+		for i := range job.TaskTurnDispatchObservations {
+			observation := &job.TaskTurnDispatchObservations[i]
+			if observation.ClaimID == claim.ID &&
+				(observation.Status == TaskTurnDispatchObservationPreDispatchFailure ||
+					observation.Status == TaskTurnDispatchObservationPreAdapterRejection ||
+					observation.Status == TaskTurnDispatchObservationDefinitiveFailure) &&
+				observation.CreatedRevision < r.CreatedRevision &&
+				(failure == nil || observation.CreatedRevision > failure.CreatedRevision) {
+				failure = observation
+			}
+		}
+		if failure == nil || !validSHA256(r.EvidenceSHA256) || failure.EvidenceSHA256 != r.EvidenceSHA256 {
+			return errors.New("definitive-failure dispatch release requires claim-specific persisted failure evidence")
+		}
 		for _, observation := range job.TaskTurnObservations {
-			if observation.TurnID == claim.TurnID &&
-				observation.CreatedRevision > claim.CreatedRevision &&
-				observation.CreatedRevision < r.CreatedRevision {
-				return errors.New("definitive-failure dispatch release cannot follow an observation for the same claim")
+			if observation.DispatchClaimID == claim.ID && observation.CreatedRevision < r.CreatedRevision {
+				return errors.New("definitive-failure dispatch release cannot follow an observation from the same claim")
 			}
 		}
 	}
 	if r.Outcome == TaskTurnDispatchReleasedIdempotentRetry {
 		if !validSHA256(r.EvidenceSHA256) {
 			return errors.New("idempotent Task Turn retry requires verified Send idempotency evidence")
+		}
+		lookup, foundLookup := taskTurnDispatchObservationForClaim(job, claim.ID, TaskTurnDispatchObservationLookupNotFound)
+		if !foundLookup || lookup.CreatedRevision >= r.CreatedRevision || lookup.EvidenceSHA256 != r.EvidenceSHA256 {
+			return errors.New("idempotent Task Turn retry requires claim-specific Lookup NOT_FOUND evidence")
 		}
 		var previous *TaskTurnObservation
 		for i := range job.TaskTurnObservations {
@@ -245,7 +316,7 @@ func (r TaskTurnDispatchRelease) Validate(job Job) error {
 			return errors.New("idempotent Task Turn retry cannot release a claim after a terminal observation")
 		}
 	} else if r.Outcome == TaskTurnDispatchReleasedDefinitiveFailure {
-		if r.EvidenceSHA256 != "" && !validSHA256(r.EvidenceSHA256) {
+		if !validSHA256(r.EvidenceSHA256) {
 			return errors.New("definitive Task Turn failure evidence is invalid")
 		}
 	} else if r.EvidenceSHA256 != "" {
@@ -264,8 +335,11 @@ func (r TaskTurnDispatchRelease) Validate(job Job) error {
 		if r.Outcome == TaskTurnDispatchReleasedFailed {
 			expected = TaskTurnFailed
 		}
-		if latest == nil || latest.Status != expected || latest.CreatedRevision >= r.CreatedRevision {
-			return errors.New("terminal Task Turn dispatch release requires prior matching observation")
+		start, started := taskTurnDispatchObservationForClaim(job, claim.ID, TaskTurnDispatchObservationStarted)
+		if latest == nil || latest.Status != expected || latest.DispatchClaimID != claim.ID ||
+			latest.CreatedRevision >= r.CreatedRevision || !started ||
+			latest.CreatedRevision <= start.CreatedRevision {
+			return errors.New("terminal Task Turn dispatch release requires prior matching observation from the same started claim")
 		}
 	}
 	return nil
@@ -291,6 +365,9 @@ func ActiveTaskTurnDispatchClaim(job Job, operationID string) (TaskTurnDispatchC
 }
 
 func validateTaskTurnDispatchFacts(job Job) error {
+	if err := validateTaskTurnDispatchObservations(job); err != nil {
+		return err
+	}
 	claimsByOperation := make(map[string][]TaskTurnDispatchClaim)
 	seenClaimIDs := make(map[string]struct{}, len(job.TaskTurnDispatchClaims))
 	seenClaimCommands := make(map[string]struct{}, len(job.TaskTurnDispatchClaims))

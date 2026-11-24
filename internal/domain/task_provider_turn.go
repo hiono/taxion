@@ -42,6 +42,7 @@ type TaskTurnObservation struct {
 	OperationID       string    `json:"operation_id"`
 	RoleExecutionID   string    `json:"role_execution_id"`
 	ProviderSessionID string    `json:"provider_session_id"`
+	DispatchClaimID   string    `json:"dispatch_claim_id"`
 	Status            string    `json:"status"`
 	TokensUsed        uint64    `json:"tokens_used"`
 	EvidenceSHA256    string    `json:"evidence_sha256,omitempty"`
@@ -237,6 +238,20 @@ func NewTaskTurnObservation(
 	job Job, turnID, commandID, status string, tokensUsed uint64, evidenceSHA256 string,
 	reconcilesUnknown bool, now time.Time,
 ) (TaskTurnObservation, error) {
+	return newTaskTurnObservation(job, turnID, "", commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown, now)
+}
+
+func NewTaskTurnObservationForClaim(
+	job Job, turnID, claimID, commandID, status string, tokensUsed uint64, evidenceSHA256 string,
+	reconcilesUnknown bool, now time.Time,
+) (TaskTurnObservation, error) {
+	return newTaskTurnObservation(job, turnID, claimID, commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown, now)
+}
+
+func newTaskTurnObservation(
+	job Job, turnID, claimID, commandID, status string, tokensUsed uint64, evidenceSHA256 string,
+	reconcilesUnknown bool, now time.Time,
+) (TaskTurnObservation, error) {
 	now = now.UTC().Round(0)
 	if !validCommandID(commandID) || now.IsZero() {
 		return TaskTurnObservation{}, errors.New("Task Turn observation command and timestamp are required")
@@ -276,9 +291,9 @@ func NewTaskTurnObservation(
 	observation := TaskTurnObservation{
 		ID: TaskTurnObservationID(commandID), CommandID: commandID, JobID: job.ID,
 		TurnID: turn.ID, OperationID: turn.OperationID, RoleExecutionID: turn.RoleExecutionID,
-		ProviderSessionID: turn.ProviderSessionID, Status: status, TokensUsed: tokensUsed,
-		EvidenceSHA256: evidenceSHA256, ReconcilesUnknown: reconcilesUnknown,
-		CreatedAt: now, CreatedRevision: job.Revision + 1,
+		ProviderSessionID: turn.ProviderSessionID, DispatchClaimID: claimID,
+		Status: status, TokensUsed: tokensUsed, EvidenceSHA256: evidenceSHA256,
+		ReconcilesUnknown: reconcilesUnknown, CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
 	if err := observation.Validate(job, turn); err != nil {
 		return TaskTurnObservation{}, err
@@ -291,8 +306,22 @@ func (o TaskTurnObservation) Validate(job Job, turn TaskTurnIntent) error {
 		o.JobID != job.ID || o.TurnID != turn.ID || o.OperationID != turn.OperationID ||
 		o.RoleExecutionID != turn.RoleExecutionID || o.ProviderSessionID != turn.ProviderSessionID ||
 		o.CreatedAt.IsZero() || o.CreatedAt.Before(turn.CreatedAt) ||
-		o.CreatedRevision <= turn.CreatedRevision {
+		o.CreatedRevision <= turn.CreatedRevision || !validPlanningIdentity(o.DispatchClaimID) {
 		return errors.New("TaskTurnObservation identity or metadata mismatch")
+	}
+	claim, claimFound := taskTurnDispatchClaimByID(job, o.DispatchClaimID)
+	if !claimFound || claim.TurnID != turn.ID || claim.OperationID != turn.OperationID ||
+		o.CreatedRevision <= claim.CreatedRevision {
+		return errors.New("TaskTurnObservation does not match its dispatch claim")
+	}
+	for _, release := range job.TaskTurnDispatchReleases {
+		if release.ClaimID == claim.ID && release.CreatedRevision < o.CreatedRevision {
+			return errors.New("TaskTurnObservation was appended after its dispatch claim was released")
+		}
+	}
+	start, started := taskTurnDispatchObservationForClaim(job, claim.ID, TaskTurnDispatchObservationStarted)
+	if !started || o.CreatedRevision <= start.CreatedRevision {
+		return errors.New("TaskTurnObservation requires a prior dispatch-start fact for the same claim")
 	}
 	if o.Status == TaskTurnUnknown {
 		if o.TokensUsed != 0 || o.EvidenceSHA256 != "" || o.ReconcilesUnknown {
