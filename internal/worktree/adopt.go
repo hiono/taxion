@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,7 +69,7 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 	if err != nil || !validCommit(head) {
 		return Snapshot{}, errors.New("adopted Worktree HEAD is not a verifiable commit")
 	}
-	tree, err := gitOutput(ctx, worktreePath, "rev-parse", "--verify", "HEAD^{tree}")
+	tree, err := gitOutput(ctx, worktreePath, "rev-parse", "--verify", head+"^{tree}")
 	if err != nil || !validCommit(tree) {
 		return Snapshot{}, errors.New("adopted Worktree tree identity is invalid")
 	}
@@ -80,6 +81,22 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("capture adopted Worktree initial state: %w", err)
 	}
+	headAfter, err := gitOutput(ctx, worktreePath, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil || headAfter != head {
+		return Snapshot{}, errors.New("adopted Worktree HEAD changed while its initial state was captured")
+	}
+	treeAfter, err := gitOutput(ctx, worktreePath, "rev-parse", "--verify", headAfter+"^{tree}")
+	if err != nil || treeAfter != tree {
+		return Snapshot{}, errors.New("adopted Worktree tree changed while its initial state was captured")
+	}
+	headModeAfter, headRefAfter, err := readWorktreeHeadMode(ctx, worktreePath)
+	if err != nil || headModeAfter != headMode || headRefAfter != headRef {
+		return Snapshot{}, errors.New("adopted Worktree HEAD mode changed while its initial state was captured")
+	}
+	stateDigestAfter, err := initialWorktreeStateSHA256(ctx, worktreePath, headAfter, treeAfter, headModeAfter, headRefAfter)
+	if err != nil || stateDigestAfter != stateDigest {
+		return Snapshot{}, errors.New("adopted Worktree changed while its initial state was captured")
+	}
 	key := sha256.Sum256([]byte(jobID + "\x00" + task.ID))
 	registrationPath := filepath.Join(m.root, hex.EncodeToString(key[:]))
 	baselinePath := registrationPath + ".baseline.json"
@@ -90,11 +107,11 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 			record.HeadMode != headMode || record.HeadRef != headRef {
 			return Snapshot{}, errors.New("existing Worktree adoption retry does not match its original state")
 		}
-		if err := m.reserveAdoption(jobID, task.ID, repositoryID, worktreePath); err != nil {
+		if err := m.reserveAdoption(jobID, task.ID, repositoryID, worktreePath, resolvedGitDir); err != nil {
 			return Snapshot{}, err
 		}
 	} else if errors.Is(readErr, os.ErrNotExist) {
-		if err := m.reserveAdoption(jobID, task.ID, repositoryID, worktreePath); err != nil {
+		if err := m.reserveAdoption(jobID, task.ID, repositoryID, worktreePath, resolvedGitDir); err != nil {
 			return Snapshot{}, err
 		}
 		record = baselineRecord{
@@ -136,49 +153,100 @@ type adoptionReservation struct {
 	TaskID       string `json:"task_id"`
 	RepositoryID string `json:"repository_id"`
 	WorktreePath string `json:"worktree_path"`
+	GitDir       string `json:"git_dir"`
 }
 
-func (m *Manager) reserveAdoption(jobID, taskID, repositoryID, worktreePath string) error {
-	key := sha256.Sum256([]byte(worktreePath))
+func (m *Manager) reserveAdoption(jobID, taskID, repositoryID, worktreePath, gitDir string) error {
 	directory := filepath.Join(m.root, ".adoptions")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("create Worktree adoption registry: %w", err)
 	}
-	path := filepath.Join(directory, hex.EncodeToString(key[:])+".json")
 	reservation := adoptionReservation{
-		JobID: jobID, TaskID: taskID, RepositoryID: repositoryID, WorktreePath: worktreePath,
+		JobID: jobID, TaskID: taskID, RepositoryID: repositoryID,
+		WorktreePath: worktreePath, GitDir: gitDir,
 	}
+	taskKey := sha256.Sum256([]byte(jobID + "\x00" + taskID))
+	gitDirKey := sha256.Sum256([]byte(gitDir))
+	taskPath := filepath.Join(directory, "task-"+hex.EncodeToString(taskKey[:])+".json")
+	gitDirPath := filepath.Join(directory, "gitdir-"+hex.EncodeToString(gitDirKey[:])+".json")
+	taskCreated, err := writeAdoptionReservation(taskPath, reservation)
+	if err != nil {
+		return err
+	}
+	if _, err := writeAdoptionReservation(gitDirPath, reservation); err != nil {
+		if taskCreated {
+			_ = os.Remove(taskPath)
+		}
+		return err
+	}
+	return nil
+}
+
+func writeAdoptionReservation(path string, reservation adoptionReservation) (bool, error) {
 	data, err := json.Marshal(reservation)
 	if err != nil {
-		return fmt.Errorf("encode Worktree adoption reservation: %w", err)
+		return false, fmt.Errorf("encode Worktree adoption reservation: %w", err)
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
+	if err := writeExclusiveAtomic(path, data, 0o600); err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			return false, fmt.Errorf("reserve adopted Worktree: %w", err)
+		}
 		existing, readErr := os.ReadFile(path)
 		if readErr != nil {
-			return fmt.Errorf("read existing Worktree adoption reservation: %w", readErr)
+			return false, fmt.Errorf("read existing Worktree adoption reservation: %w", readErr)
 		}
 		var previous adoptionReservation
 		if json.Unmarshal(existing, &previous) != nil || previous != reservation {
-			return errors.New("physical Worktree is already reserved by another Job or Task")
+			return false, errors.New("Task or Git Worktree admin directory is already reserved by another Job or Task")
 		}
-		return nil
+		return false, nil
 	}
+	return true, nil
+}
+
+func writeExclusiveAtomic(path string, data []byte, mode os.FileMode) error {
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return fmt.Errorf("create atomic record directory: %w", err)
+	}
+	file, err := os.CreateTemp(directory, ".taxion-atomic-*")
 	if err != nil {
-		return fmt.Errorf("reserve adopted Worktree: %w", err)
+		return err
 	}
-	if _, err := file.Write(data); err != nil {
+	temporaryPath := file.Name()
+	defer os.Remove(temporaryPath)
+	if err := file.Chmod(mode); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("write Worktree adoption reservation: %w", err)
+		return err
+	}
+	written, err := file.Write(data)
+	if err != nil {
+		_ = file.Close()
+		return err
+	}
+	if written != len(data) {
+		_ = file.Close()
+		return io.ErrShortWrite
 	}
 	if err := file.Sync(); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("sync Worktree adoption reservation: %w", err)
+		return err
 	}
 	if err := file.Close(); err != nil {
-		return fmt.Errorf("close Worktree adoption reservation: %w", err)
+		return err
 	}
-	return nil
+	if err := os.Link(temporaryPath, path); err != nil {
+		return err
+	}
+	dir, err := os.Open(directory)
+	if err != nil {
+		return err
+	}
+	if err := dir.Sync(); err != nil {
+		_ = dir.Close()
+		return err
+	}
+	return dir.Close()
 }
 
 func readWorktreeHeadMode(ctx context.Context, path string) (string, string, error) {
@@ -198,19 +266,19 @@ func readWorktreeHeadMode(ctx context.Context, path string) (string, string, err
 func initialWorktreeStateSHA256(
 	ctx context.Context, path, head, tree, headMode, headRef string,
 ) (string, error) {
-	status, err := gitBytes(ctx, path, "status", "--porcelain=v2", "--untracked-files=all", "-z")
+	status, err := gitBytes(ctx, path, "--no-optional-locks", "status", "--porcelain=v2", "--untracked-files=all", "--ignore-submodules=none", "-z")
 	if err != nil {
 		return "", err
 	}
-	staged, err := gitBytes(ctx, path, "diff", "--cached", "--binary", "HEAD")
+	staged, err := gitBytes(ctx, path, "--no-optional-locks", "diff", "--cached", "--binary", "--ignore-submodules=none", "HEAD")
 	if err != nil {
 		return "", err
 	}
-	working, err := gitBytes(ctx, path, "diff", "--binary")
+	working, err := gitBytes(ctx, path, "--no-optional-locks", "diff", "--binary", "--ignore-submodules=none")
 	if err != nil {
 		return "", err
 	}
-	untracked, err := gitBytes(ctx, path, "ls-files", "--others", "--exclude-standard", "-z")
+	untracked, err := gitBytes(ctx, path, "--no-optional-locks", "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return "", err
 	}
@@ -265,17 +333,26 @@ func cleanWorktreeStateSHA256() string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (m *Manager) verifyAdoptionReservation(jobID, taskID, repositoryID, worktreePath string) error {
-	key := sha256.Sum256([]byte(worktreePath))
-	path := filepath.Join(m.root, ".adoptions", hex.EncodeToString(key[:])+".json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read Worktree adoption reservation: %w", err)
+func (m *Manager) verifyAdoptionReservation(jobID, taskID, repositoryID, worktreePath, gitDir string) error {
+	directory := filepath.Join(m.root, ".adoptions")
+	reservation := adoptionReservation{
+		JobID: jobID, TaskID: taskID, RepositoryID: repositoryID,
+		WorktreePath: worktreePath, GitDir: gitDir,
 	}
-	var reservation adoptionReservation
-	if err := json.Unmarshal(data, &reservation); err != nil ||
-		reservation != (adoptionReservation{JobID: jobID, TaskID: taskID, RepositoryID: repositoryID, WorktreePath: worktreePath}) {
-		return errors.New("Worktree adoption reservation identity is invalid")
+	taskKey := sha256.Sum256([]byte(jobID + "\x00" + taskID))
+	gitDirKey := sha256.Sum256([]byte(gitDir))
+	for _, path := range []string{
+		filepath.Join(directory, "task-"+hex.EncodeToString(taskKey[:])+".json"),
+		filepath.Join(directory, "gitdir-"+hex.EncodeToString(gitDirKey[:])+".json"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read Worktree adoption reservation: %w", err)
+		}
+		var actual adoptionReservation
+		if err := json.Unmarshal(data, &actual); err != nil || actual != reservation {
+			return errors.New("Worktree adoption reservation identity is invalid")
+		}
 	}
 	return nil
 }

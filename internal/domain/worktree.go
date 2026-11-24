@@ -127,7 +127,7 @@ func validateWorktreeAssignments(job Job) error {
 		if assignment.ID != WorktreeID(job.ID, assignment.TaskID) ||
 			assignment.JobID != job.ID || !validPlanningIdentity(assignment.TaskID) ||
 			!validPlanningIdentity(assignment.OwnerRoleExecutionID) ||
-			strings.TrimSpace(assignment.RepositoryID) == "" ||
+			strings.TrimSpace(assignment.RepositoryID) == "" || !validGitCommit(assignment.BaselineCommit) ||
 			!filepath.IsAbs(assignment.RepositoryPath) || filepath.Clean(assignment.RepositoryPath) != assignment.RepositoryPath ||
 			!filepath.IsAbs(assignment.WorktreePath) || filepath.Clean(assignment.WorktreePath) != assignment.WorktreePath ||
 			(assignment.Origin != "" && assignment.Origin != WorktreeOriginTaxionCreated && assignment.Origin != WorktreeOriginAdopted) ||

@@ -218,12 +218,6 @@ func (c *ExecutionController) CaptureTaskOutput(
 	if !ok {
 		return store.CommandReceipt{}, domain.JobOutput{}, errors.New("ExecutionPermissionStore does not support JobOutput persistence")
 	}
-	outputManager, ok := c.worktrees.(interface {
-		CaptureOutput(context.Context, string, domain.Task, domain.WorktreeSnapshot) (worktree.OutputSnapshot, error)
-	})
-	if !ok {
-		return store.CommandReceipt{}, domain.JobOutput{}, errors.New("Task Worktree manager does not support immutable output capture")
-	}
 	job, err := c.store.GetJob(ctx, jobID)
 	if err != nil {
 		return store.CommandReceipt{}, domain.JobOutput{}, err
@@ -238,6 +232,20 @@ func (c *ExecutionController) CaptureTaskOutput(
 	}
 	if !taskFound {
 		return store.CommandReceipt{}, domain.JobOutput{}, errors.New("Task output producer Task was not found")
+	}
+	for _, existing := range job.JobOutputs {
+		if existing.TaskID == task.ID && existing.RoleExecutionID == roleExecutionID && existing.TurnID == turnID {
+			return outputStore.AddJobOutput(
+				ctx, jobID, job.Revision, existing.TaskID, existing.RoleExecutionID,
+				existing.TurnID, existing.CommitSHA, existing.TreeSHA,
+			)
+		}
+	}
+	outputManager, ok := c.worktrees.(interface {
+		CaptureOutput(context.Context, string, domain.Task, domain.WorktreeSnapshot) (worktree.OutputSnapshot, error)
+	})
+	if !ok {
+		return store.CommandReceipt{}, domain.JobOutput{}, errors.New("Task Worktree manager does not support immutable output capture")
 	}
 	var assignment domain.WorktreeAssignment
 	assignmentFound := false

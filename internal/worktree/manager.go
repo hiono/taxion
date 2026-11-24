@@ -93,6 +93,9 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 		if err := validateBaselineRecord(record, jobID, task.ID, repositoryID, repositoryPath); err != nil {
 			return Snapshot{}, err
 		}
+		if record.Origin == domain.WorktreeOriginAdopted {
+			return Snapshot{}, errors.New("adopted Worktree must be reopened through Adopt; Prepare cannot provision a second managed Worktree")
+		}
 		baseline = record.BaselineCommit
 	} else if errors.Is(recordErr, os.ErrNotExist) {
 		if worktreeExists {
@@ -214,12 +217,7 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 			pathWithin(worktreePath, repositoryPath)) {
 		return errors.New("adopted Worktree path overlaps the managed workspace or source repository")
 	}
-	if origin == domain.WorktreeOriginAdopted {
-		if err := m.verifyAdoptionReservation(jobID, task.ID, snapshot.RepositoryID, worktreePath); err != nil {
-			return err
-		}
-	}
-	resolved, err := filepath.EvalSymlinks(worktreePath)
+		resolved, err := filepath.EvalSymlinks(worktreePath)
 	if err != nil || filepath.Clean(resolved) != worktreePath {
 		return errors.New("Worktree path is missing or traverses a symbolic link")
 	}
@@ -275,6 +273,11 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 	if !pathWithin(expectedGitDir, resolvedGitDir) {
 		return errors.New("Task path is not registered as a linked Worktree of the trusted repository")
 	}
+	if origin == domain.WorktreeOriginAdopted {
+		if err := m.verifyAdoptionReservation(jobID, task.ID, snapshot.RepositoryID, worktreePath, resolvedGitDir); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -284,7 +287,7 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 	if err := m.Verify(ctx, jobID, task, snapshot); err != nil {
 		return OutputSnapshot{}, fmt.Errorf("verify Task Worktree before output capture: %w", err)
 	}
-	status, err := gitOutput(ctx, snapshot.WorktreePath, "status", "--porcelain", "--untracked-files=all")
+	status, err := gitOutput(ctx, snapshot.WorktreePath, "--no-optional-locks", "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
 	if err != nil {
 		return OutputSnapshot{}, errors.New("inspect Task Worktree state before output capture")
 	}
@@ -355,20 +358,8 @@ func writeBaselineRecord(path string, record baselineRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode baseline record: %w", err)
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("write baseline record: %w", err)
-	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("sync baseline record: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close baseline record: %w", err)
+	if err := writeExclusiveAtomic(path, data, 0o600); err != nil {
+		return fmt.Errorf("persist baseline record atomically: %w", err)
 	}
 	return nil
 }

@@ -45,6 +45,9 @@ func NewTaskRoleExecutionStart(
 	if err := permission.ValidateFor(job, permission.OperationID, requestSHA256, now); err != nil {
 		return TaskExecutionStart{}, fmt.Errorf("ExecutionPermission is not valid for Task execution start: %w", err)
 	}
+	if permission.WorktreePath != "" && permission.WorktreePath != snapshot.WorktreePath {
+		return TaskExecutionStart{}, errors.New("Task execution Worktree snapshot differs from the approved ExecutionPermission path")
+	}
 	for _, existing := range job.RoleExecutions {
 		if existing.ExecutionPermissionID == permission.ID {
 			return TaskExecutionStart{}, errors.New("ExecutionPermission has already been consumed by a RoleExecution")
