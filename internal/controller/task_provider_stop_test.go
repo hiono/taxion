@@ -919,6 +919,11 @@ func TestTaskProviderStopDoesNotReclaimClaimAfterDispatchStart(t *testing.T) {
 	); err == nil {
 		t.Fatal("started claim was released as not dispatched")
 	}
+	if _, _, err := f.database.ReleaseProviderStopDispatchClaim(
+		f.ctx, f.jobID, claim.ID, f.principal, domain.ProviderStopDispatchReleasedFencedNotFound, strings.Repeat("8", 64),
+	); err == nil {
+		t.Fatal("started claim without dispatch fencing evidence was released as fenced NOT_FOUND")
+	}
 	f.runtime.lookupResult = provider.LookupResult{
 		Found: false, OperationID: intent.OperationID, SessionID: "session_1",
 		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("8", 64),
