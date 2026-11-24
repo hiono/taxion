@@ -139,8 +139,12 @@ func (c *ProviderController) StopTaskExecution(
 			}
 			return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
 		}
-		// A trusted NOT_FOUND result is the only condition that permits retrying
-		// Stop with the original OperationID after a process restart.
+		// A trusted NOT_FOUND result permits retry only when no dispatch claim
+		// is already held. An existing claim may belong to a call still in flight;
+		// never replace it based on a lookup that can race that call.
+		if previousClaimFound {
+			return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+		}
 	}
 
 	latest, currentExecution, currentPermission, currentTask, currentAssignment, _, currentSession, err :=
@@ -164,8 +168,7 @@ func (c *ProviderController) StopTaskExecution(
 		return intentReceipt, intent, domain.ProviderStopObservation{}, err
 	}
 	claimed, err := c.store.ClaimProviderStopDispatch(
-		ctx, jobID, execution.ID, sessionID, intent.OperationID,
-		claimPreviousValue(previousClaimID, previousClaimFound), claimID,
+		ctx, jobID, execution.ID, sessionID, intent.OperationID, claimID,
 	)
 	if err != nil {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, err
@@ -218,8 +221,9 @@ func (c *ProviderController) StopTaskExecution(
 		}
 		return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
 	}
+	reconcilesUnknown := hasPrevious && !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
 	observation, err := c.persistProviderStopObservation(
-		ctx, latest, intent, principal, true, true, stopResult.EvidenceSHA256, false,
+		ctx, latest, intent, principal, true, true, stopResult.EvidenceSHA256, reconcilesUnknown,
 	)
 	if err != nil {
 		return intentReceipt, intent, observation, err
@@ -230,13 +234,6 @@ func (c *ProviderController) StopTaskExecution(
 		return intentReceipt, intent, observation, err
 	}
 	return intentReceipt, intent, observation, nil
-}
-
-func claimPreviousValue(claimID string, found bool) string {
-	if !found {
-		return ""
-	}
-	return claimID
 }
 
 func newProviderStopDispatchClaimID() (string, error) {
