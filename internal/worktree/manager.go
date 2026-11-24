@@ -454,7 +454,7 @@ func gitOutput(ctx context.Context, directory string, args ...string) (string, e
 }
 
 func runGit(ctx context.Context, directory string, args ...string) error {
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", directory}, args...)...)
+	command := exec.CommandContext(ctx, "git", append([]string{"--no-replace-objects", "-C", directory}, args...)...)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}

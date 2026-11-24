@@ -222,7 +222,8 @@ func TestManagerCapturesImmutableOutputSnapshotOnlyForCleanWorktree(t *testing.T
 		t.Fatalf("captured tree = %s, want %s", first.TreeSHA, got)
 	}
 
-	gitTestRun(t, snapshot.WorktreePath, "checkout", "--detach", snapshot.BaselineCommit)
+	gitTestRun(t, snapshot.WorktreePath, "checkout", "--orphan", "replacement")
+	gitTestRun(t, snapshot.WorktreePath, "rm", "-rf", ".")
 	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "replacement.txt"), []byte("replacement tree\\n"), 0o600); err != nil {
 		t.Fatalf("write replacement tree: %v", err)
 	}
