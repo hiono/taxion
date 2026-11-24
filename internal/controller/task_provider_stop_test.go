@@ -269,6 +269,89 @@ func TestTaskProviderStopAmbiguousOutcomeIsNotReplayed(t *testing.T) {
 	}
 }
 
+func TestTaskProviderStopCannotCommitWhileSendDispatchIsActive(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	now := time.Now().UTC().Round(0)
+	f.runtime.capabilities.SendLookup = true
+	f.runtime.capabilities.SendIdempotency = true
+	f.runtime.capabilities.FinalOutputRetrieval = true
+	f.runtime.capabilities.UsageIdentity = true
+	f.runtime.capabilities.UsageCompleteness = true
+	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "stop-send-race", EvidenceSHA256: strings.Repeat("1", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity, TestID: "stop-send-race", EvidenceSHA256: strings.Repeat("2", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: f.runtime.identity, TestID: "stop-send-race", EvidenceSHA256: strings.Repeat("3", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "stop-send-race", EvidenceSHA256: strings.Repeat("4", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "stop-send-race", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	f.runtime.sendHook = func(ctx context.Context, _ provider.TurnRequest) error {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	sendResult := make(chan error, 1)
+	go func() {
+		_, _, _, _, sendErr := f.controller.SendTaskExecution(
+			f.ctx, f.jobID, f.execution.ID, f.permission.ID,
+			"cmd_abababababababababababababababab", "Implement the approved Task changes.",
+			f.permissionRequest, 100, f.principal,
+		)
+		sendResult <- sendErr
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Task Provider Send did not reach the dispatch boundary")
+	}
+
+	_, _, _, stopErr := f.stop("cmd_acacacacacacacacacacacacacacacac", domain.ProviderStopReasonTaskComplete)
+	if stopErr == nil || f.runtime.stopCalls != 0 {
+		t.Fatalf("Stop intent was committed or Provider Stop dispatched while Send claim was active: stopCalls=%d err=%v",
+			f.runtime.stopCalls, stopErr)
+	}
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob during Send: %v", err)
+	}
+	if len(job.ProviderStopIntents) != 0 {
+		t.Fatalf("Stop intent was persisted during active Send: %d", len(job.ProviderStopIntents))
+	}
+	if _, active := domain.ActiveTaskTurnDispatchClaim(job, domain.TaskTurnOperationID("cmd_abababababababababababababababab")); !active {
+		t.Fatal("Task Turn dispatch claim was not active while Send was in flight")
+	}
+
+	close(release)
+	select {
+	case sendErr := <-sendResult:
+		if sendErr != nil {
+			t.Fatalf("Task Provider Send failed: %v", sendErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Task Provider Send did not complete")
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Send: %v", err)
+	}
+	if _, active := domain.ActiveTaskTurnDispatchClaim(job, domain.TaskTurnOperationID("cmd_abababababababababababababababab")); active {
+		t.Fatal("terminal Send retained an active dispatch claim")
+	}
+	_, _, stopObservation, stopErr := f.stop("cmd_adadadadadadadadadadadadadadadad", domain.ProviderStopReasonTaskComplete)
+	if stopErr != nil || !stopObservation.Quiescent || f.runtime.stopCalls != 1 {
+		t.Fatalf("Stop did not proceed after Send became terminal: observation=%#v calls=%d err=%v",
+			stopObservation, f.runtime.stopCalls, stopErr)
+	}
+}
+
 func TestTaskProviderStopRejectsUnresolvedTaskTurn(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	job, err := f.database.GetJob(f.ctx, f.jobID)
