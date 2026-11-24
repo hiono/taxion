@@ -97,7 +97,7 @@ Capability Verifierは次を照合する。
 | Send | Send idempotencyまたはSend lookup | E4 |
 | Stop | Stop proof | E4 |
 | Stop recovery lookup | Stop lookup（同一OperationID / SessionID） | E4 |
-| Stop recovery after DispatchStart | Stop dispatch fencing | E4 |
+| Stop recovery after DispatchStart + NOT_FOUND Claim reacquisition | Stop dispatch fencing | E4 |
 | Resume | Cross-process reattachment | E5 |
 | Lookup | 対象がStartかSendかに対応するlookup | E4 |
 | Result | Final output retrieval | E4 |
