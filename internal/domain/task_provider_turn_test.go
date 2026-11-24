@@ -418,6 +418,17 @@ func TestTaskCoderResumeObservationRequiresProviderResponsePath(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = resume.CreatedAt
 
+	claimCommandID := PlanningResumeDispatchClaimCommandID(resume.ID)
+	claim, err := NewPlanningResumeDispatchClaim(
+		job, resume.ID, principalID, claimCommandID, now.Add(1500*time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("NewPlanningResumeDispatchClaim: %v", err)
+	}
+	job.PlanningResumeDispatchClaims = append(job.PlanningResumeDispatchClaims, claim)
+	job.Revision++
+	job.UpdatedAt = claim.CreatedAt
+
 	evidence := strings.Repeat("e", 64)
 	if _, err := NewPlanningResumeObservation(job, resume.ID, principalID,
 		"cmd_e3030303030303030303030303030303", PlanningResumeAttached, evidence, false, now.Add(2*time.Second)); err == nil {

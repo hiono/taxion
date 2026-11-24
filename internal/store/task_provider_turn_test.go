@@ -146,6 +146,17 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	resumeClaimCommand := domain.PlanningResumeDispatchClaimCommandID(resume.ID)
+	_, resumeClaim, _, err := database.AddPlanningResumeDispatchClaim(
+		ctx, jobID, job.Revision, resume.ID, resumeClaimCommand, principal,
+	)
+	if err != nil {
+		t.Fatalf("AddPlanningResumeDispatchClaim: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, resumeUnknown, err := database.AddTaskProviderResumeObservation(ctx, jobID, job.Revision,
 		resume.ID, "cmd_ea0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
 		domain.PlanningResumeUnknown, "", domain.ProviderResumeResponse{}, false)
@@ -166,6 +177,11 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 		domain.PlanningResumeAttached, resumeEvidence, resumeResponse, true)
 	if err != nil || resumeAttached.Status != domain.PlanningResumeAttached || !resumeAttached.ReconcilesUnknown {
 		t.Fatalf("reconcile Task Coder Resume: %#v %v", resumeAttached, err)
+	}
+	if _, _, err := database.ReleasePlanningResumeDispatchClaim(
+		ctx, jobID, resumeClaim.ID, principal, domain.PlanningResumeDispatchReleasedAttached,
+	); err != nil {
+		t.Fatalf("ReleasePlanningResumeDispatchClaim: %v", err)
 	}
 	job, err = database.GetJob(ctx, jobID)
 	if err != nil {

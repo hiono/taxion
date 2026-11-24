@@ -192,9 +192,17 @@ func (c PlanningResumeDispatchClaim) Validate(job Job) error {
 		c.CreatedAt.Before(resume.CreatedAt) {
 		return errors.New("PlanningResumeDispatchClaim does not match its Resume intent")
 	}
-	latest := latestPlanningResumeForSession(job, c.RoleExecutionID, c.SessionID)
-	if latest == nil || latest.ID != c.ResumeID {
-		return errors.New("PlanningResumeDispatchClaim is not for the latest Resume intent")
+	var latestBeforeClaim *PlanningResumeIntent
+	for i := range job.PlanningResumeIntents {
+		candidate := &job.PlanningResumeIntents[i]
+		if candidate.RoleExecutionID == c.RoleExecutionID && candidate.ProviderSessionID == c.SessionID &&
+			candidate.CreatedRevision < c.CreatedRevision &&
+			(latestBeforeClaim == nil || candidate.CreatedRevision > latestBeforeClaim.CreatedRevision) {
+			latestBeforeClaim = candidate
+		}
+	}
+	if latestBeforeClaim == nil || latestBeforeClaim.ID != c.ResumeID {
+		return errors.New("PlanningResumeDispatchClaim was not acquired for the latest Resume intent")
 	}
 	execution := roleExecutionByID(job, c.RoleExecutionID)
 	principalIDFromAuthority, _, _, _, err := providerStopExecutionAuthority(job, execution)
@@ -317,11 +325,23 @@ func validatePlanningResumeDispatchFacts(job Job) error {
 		releasesByClaim[release.ClaimID] = release
 	}
 	for key, claims := range claimsBySession {
-		for i := 1; i < len(claims); i++ {
-			previous := claims[i-1]
-			release, ok := releasesByClaim[previous.ID]
-			if !ok || release.CreatedRevision >= claims[i].CreatedRevision {
-				return fmt.Errorf("%w: Resume dispatch claims overlap for Session %s", ErrInvalidJob, key)
+		for i := 0; i < len(claims); i++ {
+			claim := claims[i]
+			release, released := releasesByClaim[claim.ID]
+			for _, intent := range job.PlanningResumeIntents {
+				if intent.RoleExecutionID == claim.RoleExecutionID &&
+					intent.ProviderSessionID == claim.SessionID &&
+					intent.CreatedRevision > claim.CreatedRevision &&
+					(!released || release.CreatedRevision >= intent.CreatedRevision) {
+					return fmt.Errorf("%w: a later Resume intent overlaps dispatch claim for Session %s", ErrInvalidJob, key)
+				}
+			}
+			if i > 0 {
+				previous := claims[i-1]
+				previousRelease, ok := releasesByClaim[previous.ID]
+				if !ok || previousRelease.CreatedRevision >= claim.CreatedRevision {
+					return fmt.Errorf("%w: Resume dispatch claims overlap for Session %s", ErrInvalidJob, key)
+				}
 			}
 		}
 	}
