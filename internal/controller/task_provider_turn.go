@@ -158,7 +158,7 @@ func taskTurnRetryAuthorized(job domain.Job, turnID string) bool {
 				continue
 			}
 			observation, exists := taskTurnDispatchObservation(job, claim.ID, domain.TaskTurnDispatchObservationLookupNotFound)
-			if exists && observation.EvidenceSHA256 == release.EvidenceSHA256 {
+			if exists && observation.EvidenceSHA256 == release.LookupEvidenceSHA256 && validProviderEvidenceSHA256(release.EvidenceSHA256) {
 				return true
 			}
 		}
@@ -440,7 +440,7 @@ func (c *ProviderController) dispatchTaskTurn(
 			}
 			_, _, releaseErr := c.store.ReleaseTaskTurnDispatchClaim(
 				ctx, current.ID, claim.ID, principal,
-				domain.TaskTurnDispatchReleasedDefinitiveFailure, evidenceSHA256,
+				domain.TaskTurnDispatchReleasedDefinitiveFailure, evidenceSHA256, "",
 			)
 			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, releaseErr)
 		}
@@ -501,7 +501,7 @@ func (c *ProviderController) reconcileTaskTurn(
 		if failure, found := taskTurnDispatchObservation(job, claimID, failureStatus); found {
 			_, _, releaseErr := c.store.ReleaseTaskTurnDispatchClaim(
 				ctx, job.ID, claimID, principal,
-				domain.TaskTurnDispatchReleasedDefinitiveFailure, failure.EvidenceSHA256,
+				domain.TaskTurnDispatchReleasedDefinitiveFailure, failure.EvidenceSHA256, "",
 			)
 			if releaseErr != nil {
 				return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, releaseErr
@@ -590,7 +590,7 @@ func (c *ProviderController) reconcileTaskTurn(
 	if !validProviderEvidenceSHA256(idempotencyEvidence) || !validProviderEvidenceSHA256(lookupEvidence) {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
 	}
-	job, err := c.releaseTaskTurnDispatchClaimForIdempotentRetry(ctx, job, turn, principal, lookupEvidence)
+	job, err := c.releaseTaskTurnDispatchClaimForIdempotentRetry(ctx, job, turn, principal, idempotencyEvidence, lookupEvidence)
 	if err != nil {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
 	}
@@ -614,7 +614,7 @@ func (c *ProviderController) releaseTaskTurnDispatchClaimForIdempotentRetry(
 	job domain.Job,
 	turn domain.TaskTurnIntent,
 	principal auth.AuthenticatedPrincipal,
-	evidenceSHA256 string,
+	idempotencyEvidenceSHA256, lookupEvidenceSHA256 string,
 ) (domain.Job, error) {
 	latest, err := c.store.GetJob(ctx, job.ID)
 	if err != nil {
@@ -633,7 +633,7 @@ func (c *ProviderController) releaseTaskTurnDispatchClaimForIdempotentRetry(
 	}
 	_, _, err = c.store.ReleaseTaskTurnDispatchClaim(
 		ctx, latest.ID, expectedClaim.ID, principal,
-		domain.TaskTurnDispatchReleasedIdempotentRetry, evidenceSHA256,
+		domain.TaskTurnDispatchReleasedIdempotentRetry, idempotencyEvidenceSHA256, lookupEvidenceSHA256,
 	)
 	if err != nil {
 		return domain.Job{}, err
@@ -663,7 +663,7 @@ func (c *ProviderController) releaseTaskTurnDispatchClaimBeforeSend(
 		return dispatchErr
 	}
 	_, _, err = c.store.ReleaseTaskTurnDispatchClaim(
-		ctx, jobID, claimID, principal, domain.TaskTurnDispatchReleasedDefinitiveFailure, evidenceSHA256,
+		ctx, jobID, claimID, principal, domain.TaskTurnDispatchReleasedDefinitiveFailure, evidenceSHA256, "",
 	)
 	return err
 }
@@ -692,7 +692,7 @@ func (c *ProviderController) releaseTaskTurnDispatchClaim(
 	if !active {
 		return nil
 	}
-	_, _, err = c.store.ReleaseTaskTurnDispatchClaim(ctx, jobID, claim.ID, principal, outcome, "")
+	_, _, err = c.store.ReleaseTaskTurnDispatchClaim(ctx, jobID, claim.ID, principal, outcome, "", "")
 	return err
 }
 

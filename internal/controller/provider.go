@@ -40,7 +40,7 @@ type ProviderExecutionStore interface {
 	AddTaskTurnObservationForClaim(context.Context, string, uint64, string, string, string, string, uint64, string, bool) (store.CommandReceipt, domain.TaskTurnObservation, error)
 	AddTaskTurnDispatchObservation(context.Context, string, uint64, string, string, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.TaskTurnDispatchObservation, bool, error)
 	AddTaskTurnDispatchClaim(context.Context, string, uint64, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.TaskTurnDispatchClaim, bool, error)
-	ReleaseTaskTurnDispatchClaim(context.Context, string, string, auth.AuthenticatedPrincipal, string, string) (store.CommandReceipt, domain.TaskTurnDispatchRelease, error)
+	ReleaseTaskTurnDispatchClaim(context.Context, string, string, auth.AuthenticatedPrincipal, string, string, string) (store.CommandReceipt, domain.TaskTurnDispatchRelease, error)
 }
 
 type PlanningProviderRuntime interface {
