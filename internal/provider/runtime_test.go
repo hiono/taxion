@@ -580,6 +580,23 @@ func TestRuntimeRejectsEventReplayWithoutDurableEvidenceBeforeCredentialAcquisit
 	}
 }
 
+func TestRuntimeStartRequiresVerifiedIdempotencyForTaskDispatch(t *testing.T) {
+	adapter := newTestAdapter(CapabilityStartLookup)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	request := validStartRequest()
+	request.RequireIdempotency = true
+	if _, err := runtime.Start(context.Background(), request); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("Task Start without idempotency evidence = %v, want ErrUnsupportedCapability", err)
+	}
+	if adapter.startCalls != 0 || broker.closed != 0 {
+		t.Fatalf("unsupported Task Start crossed credential or Adapter boundary: starts=%d closed=%d", adapter.startCalls, broker.closed)
+	}
+}
+
 func TestRuntimeSendRequiresVerifiedIdempotencyForRetry(t *testing.T) {
 	adapter := newTestAdapter(CapabilitySendLookup)
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
