@@ -292,6 +292,56 @@ func TestPlanningResumeFactsRejectNonAppendOrderedHistory(t *testing.T) {
 	}
 }
 
+func TestPlanningResumeNotDispatchedMayBeFollowedByAttached(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
+		"cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", strings.Repeat("a", 64), 100, now)
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+
+	resume, err := NewPlanningResumeIntent(job, executionID, principal, "session_1",
+		"cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("b", 64), true, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("resume intent: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, resume)
+	job.Revision++
+	job.UpdatedAt = resume.CreatedAt
+
+	notDispatched, err := NewPlanningResumeObservation(job, resume.ID, principal,
+		"cmd_cccccccccccccccccccccccccccccccc", PlanningResumeNotDispatched, strings.Repeat("c", 64), false, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("NOT_DISPATCHED observation: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, notDispatched)
+	job.Revision++
+	job.UpdatedAt = notDispatched.CreatedAt
+
+	attached, err := NewPlanningResumeObservation(job, resume.ID, principal,
+		"cmd_dddddddddddddddddddddddddddddddd", PlanningResumeAttached, strings.Repeat("d", 64), false, now.Add(3*time.Second))
+	if err != nil {
+		t.Fatalf("ATTACHED observation after NOT_DISPATCHED: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, attached)
+	job.Revision++
+	job.UpdatedAt = attached.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate after NOT_DISPATCHED -> ATTACHED: %v", err)
+	}
+
+	invalid := job
+	invalid.PlanningResumeObservations = append([]PlanningResumeObservation(nil), job.PlanningResumeObservations...)
+	invalid.PlanningResumeObservations[1].ReconcilesUnknown = true
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("Job.Validate accepted NOT_DISPATCHED as reconciliation of an UNKNOWN Provider outcome")
+	}
+}
+
 func TestPlanningLifecycleRejectsObservationAfterNextIntent(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	now := job.UpdatedAt.Add(time.Second)
