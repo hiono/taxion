@@ -132,6 +132,9 @@ func (c *PlanningController) RecordResumeObservation(ctx context.Context, jobID,
 	if !found || execution.Role != domain.RolePlanner {
 		return store.CommandReceipt{}, domain.PlanningResumeObservation{}, errors.New("PlanningController cannot record Provider Resume observations for Task Coder executions")
 	}
+	if status == domain.PlanningResumeNotDispatched {
+		return store.CommandReceipt{}, domain.PlanningResumeObservation{}, errors.New("NOT_DISPATCHED is reserved for the ProviderController dispatch boundary")
+	}
 	return c.store.AddPlanningResumeObservation(ctx, jobID, job.Revision, resumeID, commandID, status, evidenceSHA256, reconcilesUnknown, principal)
 }
 
