@@ -73,6 +73,17 @@ func (c *ProviderController) StopTaskExecution(
 	previousUnknown := hasPrevious && !previous.Stopped && !previous.Quiescent && previous.EvidenceSHA256 == ""
 	activeClaim, activeClaimFound := domain.ActiveProviderStopDispatchClaim(currentJob, intent.OperationID)
 	fencingRequired := providerStopDispatchRequiresFencing(currentJob, intent.OperationID)
+	if activeClaimFound && hasPrevious && !previous.Stopped && !previous.Quiescent &&
+		validProviderEvidenceSHA256(previous.EvidenceSHA256) {
+		if _, started := domain.ProviderStopDispatchStartedForClaim(currentJob, activeClaim.ID); started {
+			if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+				ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedDefinitiveFailure, previous.EvidenceSHA256,
+			); releaseErr != nil {
+				return intentReceipt, intent, previous, releaseErr
+			}
+			return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+		}
+	}
 	if hasPrevious && previous.Stopped && previous.Quiescent {
 		if activeClaimFound {
 			if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
@@ -249,7 +260,10 @@ func (c *ProviderController) StopTaskExecution(
 		)
 		return intentReceipt, intent, domain.ProviderStopObservation{}, errors.Join(fmt.Errorf("reverify owned Task Worktree after Stop claim acquisition: %w", err), releaseErr)
 	}
-	_, _, started, err := c.store.StartProviderStopDispatchClaim(ctx, jobID, claim.ID, fencingEvidenceSHA256, principal)
+	startCommandID := domain.ProviderStopDispatchStartCommandID(claim.ID)
+	_, _, started, err := c.store.AddProviderStopDispatchStart(
+		ctx, jobID, postClaimJob.Revision, claim.ID, startCommandID, fencingEvidenceSHA256, principal,
+	)
 	if err != nil {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, err
 	}

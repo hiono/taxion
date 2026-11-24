@@ -19,6 +19,8 @@ type taskStopWorktreeVerifier struct {
 	verifyCalls int
 	failAt      int
 	verifyErr   error
+	onVerifyAt  int
+	onVerify    func()
 }
 
 func (v *taskStopWorktreeVerifier) Prepare(_ context.Context, jobID string, task domain.Task) (domain.WorktreeSnapshot, error) {
@@ -30,7 +32,26 @@ func (v *taskStopWorktreeVerifier) Verify(context.Context, string, domain.Task, 
 	if v.failAt != 0 && v.verifyCalls == v.failAt {
 		return v.verifyErr
 	}
+	if v.onVerify != nil && v.onVerifyAt == v.verifyCalls {
+		v.onVerify()
+	}
 	return nil
+}
+
+
+type failOnceProviderStopReleaseStore struct {
+	ProviderExecutionStore
+	failed bool
+}
+
+func (s *failOnceProviderStopReleaseStore) ReleaseProviderStopDispatchClaim(
+	ctx context.Context, jobID, claimID string, principal auth.AuthenticatedPrincipal, outcome, evidenceSHA256 string,
+) (store.CommandReceipt, domain.ProviderStopDispatchRelease, error) {
+	if !s.failed {
+		s.failed = true
+		return store.CommandReceipt{}, domain.ProviderStopDispatchRelease{}, errors.New("injected Provider Stop claim release failure")
+	}
+	return s.ProviderExecutionStore.ReleaseProviderStopDispatchClaim(ctx, jobID, claimID, principal, outcome, evidenceSHA256)
 }
 
 type taskProviderStopFixture struct {
@@ -1249,5 +1270,93 @@ func TestProviderStopFencedRecoveryRequiresFencingOnSubsequentDispatchAndRecords
 	)
 	if err != nil || !started || nextStart.FencingEvidenceSHA256 != strings.Repeat("9", 64) {
 		t.Fatalf("replacement DispatchStart with fencing evidence failed: start=%#v started=%v err=%v", nextStart, started, err)
+	}
+}
+
+func TestTaskProviderStopRetriesDefinitiveFailureClaimRelease(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	wrapped := &failOnceProviderStopReleaseStore{ProviderExecutionStore: f.database}
+	controller, err := NewProviderControllerWithExecutionAndWorktree(wrapped, f.runtime, f.controller.execution, f.worktree)
+	if err != nil {
+		t.Fatalf("NewProviderControllerWithExecutionAndWorktree: %v", err)
+	}
+	f.controller = controller
+	f.runtime.stopErr = &provider.OperationError{Class: provider.FailureDefinitive, Code: provider.OperationCodeInvalidRequest}
+	commandID := "cmd_85858585858585858585858585858585"
+	_, intent, observation, firstErr := f.controller.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if firstErr == nil || observation.EvidenceSHA256 == "" || f.runtime.stopCalls != 1 {
+		t.Fatalf("definitive Stop failure was not persisted before failed release: observation=%#v calls=%d err=%v",
+			observation, f.runtime.stopCalls, firstErr)
+	}
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after failed release: %v", err)
+	}
+	if len(job.ProviderStopDispatchClaims) != 1 || len(job.ProviderStopDispatchStarts) != 1 ||
+		len(job.ProviderStopDispatchReleases) != 0 || len(job.ProviderStopObservations) != 1 {
+		t.Fatalf("unexpected facts after injected release failure: claims=%d starts=%d releases=%d observations=%d",
+			len(job.ProviderStopDispatchClaims), len(job.ProviderStopDispatchStarts),
+			len(job.ProviderStopDispatchReleases), len(job.ProviderStopObservations))
+	}
+	_, retryIntent, retryObservation, retryErr := f.controller.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if !errors.Is(retryErr, provider.ErrStopUnconfirmed) || retryIntent.ID != intent.ID ||
+		retryObservation.ID != observation.ID || f.runtime.stopCalls != 1 || f.runtime.lookupCalls != 0 {
+		t.Fatalf("retry did not release persisted definitive-failure claim without redispatch: intent=%#v observation=%#v stopCalls=%d lookupCalls=%d err=%v",
+			retryIntent, retryObservation, f.runtime.stopCalls, f.runtime.lookupCalls, retryErr)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after release retry: %v", err)
+	}
+	active, activeFound := domain.ActiveProviderStopDispatchClaim(job, intent.OperationID)
+	if len(job.ProviderStopDispatchReleases) != 1 ||
+		job.ProviderStopDispatchReleases[0].Outcome != domain.ProviderStopDispatchReleasedDefinitiveFailure ||
+		activeFound {
+		t.Fatalf("definitive-failure claim was not released: releases=%#v active=%#v found=%v",
+			job.ProviderStopDispatchReleases, active, activeFound)
+	}
+}
+
+func TestTaskProviderStopDispatchStartUsesVerifiedJobRevision(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	f.worktree.onVerifyAt = f.worktree.verifyCalls + 2
+	f.worktree.onVerify = func() {
+		job, err := f.database.GetJob(f.ctx, f.jobID)
+		if err != nil {
+			t.Fatalf("GetJob during post-claim verification: %v", err)
+		}
+		if len(job.ProviderStopIntents) == 0 {
+			t.Fatal("Stop intent was not persisted before post-claim verification")
+		}
+		intent := job.ProviderStopIntents[len(job.ProviderStopIntents)-1]
+		if _, _, err := f.database.AddProviderStopObservation(
+			f.ctx, f.jobID, job.Revision, intent.ID, "cmd_86868686868686868686868686868686",
+			false, false, "", false, f.principal,
+		); err != nil {
+			t.Fatalf("persist concurrent Stop observation: %v", err)
+		}
+	}
+	_, _, _, err := f.controller.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, "cmd_87878787878787878787878787878787",
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if err == nil {
+		t.Fatal("Stop dispatch started after the verified Job revision became stale")
+	}
+	job, getErr := f.database.GetJob(f.ctx, f.jobID)
+	if getErr != nil {
+		t.Fatalf("GetJob after stale dispatch start: %v", getErr)
+	}
+	if len(job.ProviderStopDispatchClaims) != 1 || len(job.ProviderStopDispatchStarts) != 0 ||
+		len(job.ProviderStopDispatchReleases) != 0 || f.runtime.stopCalls != 0 {
+		t.Fatalf("stale verification did not fail closed: claims=%d starts=%d releases=%d stopCalls=%d",
+			len(job.ProviderStopDispatchClaims), len(job.ProviderStopDispatchStarts),
+			len(job.ProviderStopDispatchReleases), f.runtime.stopCalls)
 	}
 }

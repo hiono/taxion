@@ -25,6 +25,7 @@ type ProviderExecutionStore interface {
 	AddProviderStopObservation(context.Context, string, uint64, string, string, bool, bool, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopObservation, error)
 	AddProviderStopDispatchClaim(context.Context, string, uint64, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopDispatchClaim, bool, error)
 	StartProviderStopDispatchClaim(context.Context, string, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopDispatchStart, bool, error)
+	AddProviderStopDispatchStart(context.Context, string, uint64, string, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopDispatchStart, bool, error)
 	ReleaseProviderStopDispatchClaim(context.Context, string, string, auth.AuthenticatedPrincipal, string, string) (store.CommandReceipt, domain.ProviderStopDispatchRelease, error)
 	AddProviderResultObservation(context.Context, string, uint64, string, string, string, string, string, string, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderResultObservation, error)
 	AddProviderUsageObservation(context.Context, string, uint64, string, string, string, string, string, uint64, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderUsageObservation, error)

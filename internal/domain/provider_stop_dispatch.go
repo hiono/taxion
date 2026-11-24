@@ -49,7 +49,7 @@ type ProviderStopDispatchRelease struct {
 	OperationID     string    `json:"operation_id"`
 	PrincipalID     string    `json:"principal_id"`
 	Outcome         string    `json:"outcome"`
-	EvidenceSHA256  string    `json:"evidence_sha256,omitempty"`
+	EvidenceSHA256   string    `json:"evidence_sha256,omitempty"`
 	LookupObservedAt time.Time `json:"lookup_observed_at,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	CreatedRevision uint64    `json:"created_revision"`
