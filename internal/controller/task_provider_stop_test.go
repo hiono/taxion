@@ -1325,7 +1325,7 @@ func TestTaskProviderStopRetriesDefinitiveFailureClaimRelease(t *testing.T) {
 
 func TestTaskProviderStopDispatchStartUsesVerifiedJobRevision(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
-	f.worktree.onVerifyAt = f.worktree.verifyCalls + 2
+	f.worktree.onVerifyAt = f.worktree.verifyCalls + 3
 	f.worktree.onVerify = func() {
 		job, err := f.database.GetJob(f.ctx, f.jobID)
 		if err != nil {
