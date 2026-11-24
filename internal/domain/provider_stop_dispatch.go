@@ -294,6 +294,13 @@ func providerStopDefinitiveFailureObserved(job Job, operationID string, startRev
 func NewProviderStopDispatchRelease(
 	job Job, claimID, principalID, commandID, outcome, evidenceSHA256 string, now time.Time,
 ) (ProviderStopDispatchRelease, error) {
+	return NewProviderStopDispatchReleaseAt(job, claimID, principalID, commandID, outcome, evidenceSHA256, time.Time{}, now)
+}
+
+func NewProviderStopDispatchReleaseAt(
+	job Job, claimID, principalID, commandID, outcome, evidenceSHA256 string, lookupObservedAt, now time.Time,
+) (ProviderStopDispatchRelease, error) {
+	lookupObservedAt = lookupObservedAt.UTC().Round(0)
 	now = now.UTC().Round(0)
 	if err := job.Validate(); err != nil {
 		return ProviderStopDispatchRelease{}, fmt.Errorf("validate Job before Provider Stop dispatch release: %w", err)
@@ -337,6 +344,12 @@ func NewProviderStopDispatchRelease(
 		if !now.After(start.CreatedAt) {
 			now = start.CreatedAt.Add(time.Nanosecond)
 		}
+		if lookupObservedAt.IsZero() {
+			lookupObservedAt = now
+		}
+		if !lookupObservedAt.After(start.CreatedAt) || lookupObservedAt.After(now) {
+			return ProviderStopDispatchRelease{}, errors.New("fenced NOT_FOUND lookup observation must occur after DispatchStart and before release")
+		}
 		if !validSHA256(evidenceSHA256) {
 			return ProviderStopDispatchRelease{}, errors.New("fenced NOT_FOUND release requires verified lookup evidence")
 		}
@@ -351,12 +364,7 @@ func NewProviderStopDispatchRelease(
 		JobID: job.ID, ClaimID: claim.ID, OperationID: claim.OperationID,
 		PrincipalID: principalID, Outcome: outcome, EvidenceSHA256: evidenceSHA256,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
-		LookupObservedAt: func() time.Time {
-			if outcome == ProviderStopDispatchReleasedFencedNotFound {
-				return now
-			}
-			return time.Time{}
-		}(),
+		LookupObservedAt: lookupObservedAt,
 	}
 	if err := release.Validate(job); err != nil {
 		return ProviderStopDispatchRelease{}, err

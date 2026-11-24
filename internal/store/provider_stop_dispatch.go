@@ -103,16 +103,28 @@ func (s *Store) AddProviderStopDispatchRelease(
 	claimID, commandID, outcome, evidenceSHA256 string,
 	principal auth.AuthenticatedPrincipal,
 ) (CommandReceipt, domain.ProviderStopDispatchRelease, bool, error) {
+	return s.AddProviderStopDispatchReleaseAt(ctx, jobID, expectedRevision, claimID, commandID, outcome, evidenceSHA256, principal, time.Time{})
+}
+
+func (s *Store) AddProviderStopDispatchReleaseAt(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	claimID, commandID, outcome, evidenceSHA256 string,
+	principal auth.AuthenticatedPrincipal,
+	lookupObservedAt time.Time,
+) (CommandReceipt, domain.ProviderStopDispatchRelease, bool, error) {
 	if err := principal.Validate(); err != nil {
 		return CommandReceipt{}, domain.ProviderStopDispatchRelease{}, false, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
 	}
 	request := struct {
 		JobID, ClaimID, CommandID, Outcome, EvidenceSHA256, PrincipalID string
-	}{jobID, claimID, commandID, outcome, evidenceSHA256, principal.PrincipalID()}
+		LookupObservedAt time.Time
+	}{jobID, claimID, commandID, outcome, evidenceSHA256, principal.PrincipalID(), lookupObservedAt}
 	return persistPlanningFactWithStatus(
 		ctx, s, jobID, expectedRevision, commandID, addProviderStopDispatchReleaseCommandType, request,
 		func(job domain.Job, now time.Time) (domain.ProviderStopDispatchRelease, error) {
-			return domain.NewProviderStopDispatchRelease(job, claimID, principal.PrincipalID(), commandID, outcome, evidenceSHA256, now)
+			return domain.NewProviderStopDispatchReleaseAt(job, claimID, principal.PrincipalID(), commandID, outcome, evidenceSHA256, lookupObservedAt, now)
 		},
 		func(job *domain.Job, release domain.ProviderStopDispatchRelease) {
 			job.ProviderStopDispatchReleases = append(job.ProviderStopDispatchReleases, release)
@@ -135,6 +147,17 @@ func (s *Store) ReleaseProviderStopDispatchClaim(
 	principal auth.AuthenticatedPrincipal,
 	outcome, evidenceSHA256 string,
 ) (CommandReceipt, domain.ProviderStopDispatchRelease, error) {
+	return s.ReleaseProviderStopDispatchClaimAt(ctx, jobID, claimID, principal, outcome, evidenceSHA256, time.Time{})
+}
+
+func (s *Store) ReleaseProviderStopDispatchClaimAt(
+	ctx context.Context,
+	jobID string,
+	claimID string,
+	principal auth.AuthenticatedPrincipal,
+	outcome, evidenceSHA256 string,
+	lookupObservedAt time.Time,
+) (CommandReceipt, domain.ProviderStopDispatchRelease, error) {
 	if claimID == "" || outcome == "" {
 		return CommandReceipt{}, domain.ProviderStopDispatchRelease{}, errors.New("Provider Stop dispatch claim and outcome are required")
 	}
@@ -143,8 +166,8 @@ func (s *Store) ReleaseProviderStopDispatchClaim(
 	if err != nil {
 		return CommandReceipt{}, domain.ProviderStopDispatchRelease{}, err
 	}
-	receipt, release, _, err := s.AddProviderStopDispatchRelease(
-		ctx, jobID, job.Revision, claimID, commandID, outcome, evidenceSHA256, principal,
+	receipt, release, _, err := s.AddProviderStopDispatchReleaseAt(
+		ctx, jobID, job.Revision, claimID, commandID, outcome, evidenceSHA256, principal, lookupObservedAt,
 	)
 	return receipt, release, err
 }

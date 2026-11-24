@@ -879,8 +879,10 @@ func TestTaskProviderStopReclaimsStartedClaimWithProviderFencing(t *testing.T) {
 			len(job.ProviderStopDispatchClaims), len(job.ProviderStopDispatchStarts), len(job.ProviderStopDispatchReleases))
 	}
 	release := job.ProviderStopDispatchReleases[0]
+	oldStart := job.ProviderStopDispatchStarts[0]
 	if release.ClaimID != oldClaim.ID || release.Outcome != domain.ProviderStopDispatchReleasedFencedNotFound ||
-		release.EvidenceSHA256 != strings.Repeat("8", 64) {
+		release.EvidenceSHA256 != strings.Repeat("8", 64) || !release.LookupObservedAt.After(oldStart.CreatedAt) ||
+		release.LookupObservedAt.After(release.CreatedAt) {
 		t.Fatalf("old started claim was not released with verified NOT_FOUND evidence: %#v", release)
 	}
 	newClaim := job.ProviderStopDispatchClaims[1]
@@ -1237,14 +1239,30 @@ func TestProviderStopFencedRecoveryRequiresFencingOnSubsequentDispatchAndRecords
 	if err != nil || !started {
 		t.Fatalf("persist first dispatch start: started=%v err=%v", started, err)
 	}
-	_, release, err := f.database.ReleaseProviderStopDispatchClaim(
+	lookupObservedAt := time.Now().UTC().Round(0)
+	if !lookupObservedAt.After(firstStart.CreatedAt) {
+		t.Fatalf("test lookup time did not follow DispatchStart: start=%s lookup=%s", firstStart.CreatedAt, lookupObservedAt)
+	}
+	if _, _, err := f.database.ReleaseProviderStopDispatchClaimAt(
 		f.ctx, f.jobID, firstClaim.ID, f.principal,
-		domain.ProviderStopDispatchReleasedFencedNotFound, strings.Repeat("8", 64),
+		domain.ProviderStopDispatchReleasedFencedNotFound, strings.Repeat("8", 64), firstStart.CreatedAt,
+	); err == nil {
+		t.Fatal("fenced release accepted a NOT_FOUND observation at DispatchStart")
+	}
+	if _, _, err := f.database.ReleaseProviderStopDispatchClaimAt(
+		f.ctx, f.jobID, firstClaim.ID, f.principal,
+		domain.ProviderStopDispatchReleasedFencedNotFound, strings.Repeat("8", 64), time.Now().Add(time.Hour),
+	); err == nil {
+		t.Fatal("fenced release accepted a NOT_FOUND observation after release time")
+	}
+	_, release, err := f.database.ReleaseProviderStopDispatchClaimAt(
+		f.ctx, f.jobID, firstClaim.ID, f.principal,
+		domain.ProviderStopDispatchReleasedFencedNotFound, strings.Repeat("8", 64), lookupObservedAt,
 	)
 	if err != nil {
 		t.Fatalf("release first started claim: %v", err)
 	}
-	if release.LookupObservedAt.IsZero() || !release.LookupObservedAt.After(firstStart.CreatedAt) ||
+	if !release.LookupObservedAt.Equal(lookupObservedAt) || !release.LookupObservedAt.After(firstStart.CreatedAt) ||
 		release.LookupObservedAt.After(release.CreatedAt) {
 		t.Fatalf("fenced NOT_FOUND lookup chronology was not persisted: start=%s lookup=%s release=%s",
 			firstStart.CreatedAt, release.LookupObservedAt, release.CreatedAt)

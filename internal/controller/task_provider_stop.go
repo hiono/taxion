@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
@@ -110,6 +111,7 @@ func (c *ProviderController) StopTaskExecution(
 
 		lookupRequest := provider.LookupRequest{Purpose: provider.LookupPurposeStop, OperationID: intent.OperationID, SessionID: sessionID}
 		lookup, lookupErr := c.runtime.Lookup(ctx, lookupRequest)
+		lookupObservedAt := time.Now().UTC().Round(0)
 		currentJob, err = c.store.GetJob(ctx, jobID)
 		if err != nil {
 			return intentReceipt, intent, domain.ProviderStopObservation{}, err
@@ -185,9 +187,9 @@ func (c *ProviderController) StopTaskExecution(
 					return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
 				}
 				fencingRequired = true
-				if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+				if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaimAt(
 					ctx, jobID, activeClaim.ID, principal,
-					domain.ProviderStopDispatchReleasedFencedNotFound, lookup.EvidenceSHA256,
+					domain.ProviderStopDispatchReleasedFencedNotFound, lookup.EvidenceSHA256, lookupObservedAt,
 				); releaseErr != nil {
 					return intentReceipt, intent, previous, releaseErr
 				}
