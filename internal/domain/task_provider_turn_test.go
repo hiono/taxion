@@ -396,3 +396,48 @@ func TestTaskCoderResumeCanUseAcceptedStartBeforeFirstTurn(t *testing.T) {
 		t.Fatalf("accepted Task Coder Start should be resumable before the first Turn: %v", err)
 	}
 }
+
+
+func TestTaskCoderResumeObservationRequiresProviderResponsePath(t *testing.T) {
+	job, execution, permission, now := taskTurnFixture(t)
+	principalID := job.IntakeProvenance.PrincipalID
+	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_e1010101010101010101010101010101", strings.Repeat("c", 64), 50, now)
+	if err != nil {
+		t.Fatalf("NewTaskTurnIntent: %v", err)
+	}
+	job.TaskTurnIntents = append(job.TaskTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+
+	resume, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task",
+		"cmd_e2020202020202020202020202020202", strings.Repeat("d", 64), true, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("NewPlanningResumeIntent: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, resume)
+	job.Revision++
+	job.UpdatedAt = resume.CreatedAt
+
+	evidence := strings.Repeat("e", 64)
+	if _, err := NewPlanningResumeObservation(job, resume.ID, principalID,
+		"cmd_e3030303030303030303030303030303", PlanningResumeAttached, evidence, false, now.Add(2*time.Second)); err == nil {
+		t.Fatal("generic Planning Resume path accepted caller-supplied Coder ATTACHED evidence")
+	}
+
+	response := ProviderResumeResponse{
+		OperationID: resume.OperationID, SessionID: resume.ProviderSessionID,
+		Attached: true, EvidenceSHA256: evidence,
+	}
+	observation, err := NewTaskProviderResumeObservation(job, resume.ID,
+		"cmd_e4040404040404040404040404040404", PlanningResumeAttached, evidence,
+		response, false, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("NewTaskProviderResumeObservation: %v", err)
+	}
+	if observation.ProviderResponse == nil || !observation.ProviderResponse.Attached ||
+		observation.ProviderResponse.OperationID != resume.OperationID ||
+		observation.ProviderResponse.SessionID != resume.ProviderSessionID {
+		t.Fatalf("Provider Resume response was not bound to observation: %#v", observation)
+	}
+}
