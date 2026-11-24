@@ -432,6 +432,28 @@ func (m *Manager) verify(ctx context.Context, jobID string, task domain.Task, sn
 
 // CaptureOutput fixes the exact committed Git tree produced in a Task Worktree.
 // It refuses snapshots while staged, unstaged, or untracked changes remain.
+func parseWorktreeStatusHead(status string) (string, bool, error) {
+	head := ""
+	dirty := false
+	for _, line := range strings.Split(status, "\n") {
+		if strings.HasPrefix(line, "# branch.oid ") {
+			if head != "" {
+				return "", false, errors.New("Git status contains duplicate branch.oid headers")
+			}
+			head = strings.TrimSpace(strings.TrimPrefix(line, "# branch.oid "))
+			continue
+		}
+		if line == "" || strings.HasPrefix(line, "# ") {
+			continue
+		}
+		dirty = true
+	}
+	if !validCommit(head) {
+		return "", false, errors.New("Git status does not report a valid observed HEAD")
+	}
+	return head, dirty, nil
+}
+
 func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.Task, snapshot Snapshot) (OutputSnapshot, error) {
 	if m == nil || ctx == nil {
 		return OutputSnapshot{}, errors.New("Worktree manager and context are required")
@@ -463,14 +485,15 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 		return OutputSnapshot{}, errors.New("Task Worktree HEAD changed before clean-state verification")
 	}
 	status, err := gitOutput(
-		ctx, snapshot.WorktreePath, "--no-optional-locks", "status", "--porcelain=v2",
+		ctx, snapshot.WorktreePath, "--no-optional-locks", "status", "--porcelain=v2", "--branch",
 		"--untracked-files=all", "--ignore-submodules=none",
 	)
 	if err != nil {
 		return OutputSnapshot{}, errors.New("inspect Task Worktree state before output capture")
 	}
-	if status != "" {
-		return OutputSnapshot{}, errors.New("Task Worktree must be clean before output capture")
+	statusHead, dirty, err := parseWorktreeStatusHead(status)
+	if err != nil || statusHead != commit || dirty {
+		return OutputSnapshot{}, errors.New("Task Worktree clean-state observation does not match the captured commit")
 	}
 	headAfterStatus, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil || headAfterStatus != commit {
@@ -484,10 +507,14 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 		return OutputSnapshot{}, err
 	}
 	statusAfter, err := gitOutput(
-		ctx, snapshot.WorktreePath, "--no-optional-locks", "status", "--porcelain=v2",
+		ctx, snapshot.WorktreePath, "--no-optional-locks", "status", "--porcelain=v2", "--branch",
 		"--untracked-files=all", "--ignore-submodules=none",
 	)
-	if err != nil || statusAfter != "" {
+	if err != nil {
+		return OutputSnapshot{}, errors.New("recheck Task Worktree state before output capture")
+	}
+	statusAfterHead, dirtyAfter, err := parseWorktreeStatusHead(statusAfter)
+	if err != nil || statusAfterHead != commit || dirtyAfter {
 		return OutputSnapshot{}, errors.New("Task Worktree changed during output capture")
 	}
 	headFinal, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", "HEAD^{commit}")
