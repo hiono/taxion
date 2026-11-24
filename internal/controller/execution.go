@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/hiono/taxion/internal/domain"
@@ -20,6 +21,10 @@ type ExecutionPermissionStore interface {
 type TaskWorktreeManager interface {
 	Prepare(context.Context, string, domain.Task) (domain.WorktreeSnapshot, error)
 	Verify(context.Context, string, domain.Task, domain.WorktreeSnapshot) error
+}
+
+type TaskWorktreeAdopter interface {
+	Adopt(context.Context, string, domain.Task, string) (domain.WorktreeSnapshot, error)
 }
 
 type ExecutionEffectAssessor interface {
@@ -168,8 +173,20 @@ func (c *ExecutionController) StartTaskExecution(
 		break
 	}
 	if assignmentFound {
+		if request.WorktreePath != "" && filepath.Clean(request.WorktreePath) != snapshot.WorktreePath {
+			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, errors.New("exact Task Start replay supplied a different adopted Worktree path")
+		}
 		if err := c.worktrees.Verify(ctx, job.ID, task, snapshot); err != nil {
 			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("verify existing Task Worktree before exact Start replay: %w", err)
+		}
+	} else if request.WorktreePath != "" {
+		adopter, ok := c.worktrees.(TaskWorktreeAdopter)
+		if !ok {
+			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, errors.New("Task Worktree manager does not support safe adoption")
+		}
+		snapshot, err = adopter.Adopt(ctx, job.ID, task, request.WorktreePath)
+		if err != nil {
+			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("adopt existing Task Worktree before Start intent: %w", err)
 		}
 	} else {
 		snapshot, err = c.worktrees.Prepare(ctx, job.ID, task)
