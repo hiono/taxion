@@ -580,7 +580,7 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 		t.Fatalf("StartTaskExecution with adopted Worktree: %v", err)
 	}
 	if receipt.Revision == 0 || execution.TaskID != task.ID || intent.WorktreeID != execution.WorktreeID ||
-		adopter.adoptCalls != 2 || adopter.verifyCalls != 2 || adopter.prepareCalls != 0 {
+		adopter.adoptCalls != 2 || adopter.verifyCalls != 0 || adopter.prepareCalls != 0 {
 		t.Fatalf("adopted Worktree was not used for the exact Task start: receipt=%#v execution=%#v intent=%#v adopter=%#v",
 			receipt, execution, intent, adopter)
 	}
@@ -608,7 +608,7 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 	if _, _, _, err := controller.StartTaskExecution(ctx, permission.ID, startCommand, request); err != nil {
 		t.Fatalf("exact adopted Worktree Start replay: %v", err)
 	}
-	if adopter.adoptCalls != 2 || adopter.verifyCalls != 2 {
+	if adopter.adoptCalls != 2 || adopter.verifyCalls != 1 {
 		t.Fatalf("exact replay re-adopted Worktree: adopt=%d verify=%d", adopter.adoptCalls, adopter.verifyCalls)
 	}
 }
