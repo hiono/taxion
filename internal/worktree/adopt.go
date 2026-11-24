@@ -238,15 +238,26 @@ func writeExclusiveAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := os.Link(temporaryPath, path); err != nil {
 		return err
 	}
+	cleanup := func(cause error) error {
+		_ = os.Remove(path)
+		if directoryFile, openErr := os.Open(directory); openErr == nil {
+			_ = directoryFile.Sync()
+			_ = directoryFile.Close()
+		}
+		return cause
+	}
 	dir, err := os.Open(directory)
 	if err != nil {
-		return err
+		return cleanup(err)
 	}
 	if err := dir.Sync(); err != nil {
 		_ = dir.Close()
-		return err
+		return cleanup(err)
 	}
-	return dir.Close()
+	if err := dir.Close(); err != nil {
+		return cleanup(err)
+	}
+	return nil
 }
 
 func readWorktreeHeadMode(ctx context.Context, path string) (string, string, error) {
