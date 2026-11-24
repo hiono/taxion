@@ -148,22 +148,19 @@ func taskTurnNeverDispatched(job domain.Job, turnID string) bool {
 }
 
 func taskTurnRetryAuthorized(job domain.Job, turnID string) bool {
-	var latest domain.TaskTurnDispatchClaim
-	found := false
 	for _, claim := range job.TaskTurnDispatchClaims {
-		if claim.TurnID == turnID && (!found || claim.CreatedRevision > latest.CreatedRevision) {
-			latest, found = claim, true
-		}
-	}
-	if !found {
-		return false
-	}
-	for _, release := range job.TaskTurnDispatchReleases {
-		if release.ClaimID != latest.ID || release.Outcome != domain.TaskTurnDispatchReleasedIdempotentRetry {
+		if claim.TurnID != turnID {
 			continue
 		}
-		observation, exists := taskTurnDispatchObservation(job, latest.ID, domain.TaskTurnDispatchObservationLookupNotFound)
-		return exists && observation.EvidenceSHA256 == release.EvidenceSHA256
+		for _, release := range job.TaskTurnDispatchReleases {
+			if release.ClaimID != claim.ID || release.Outcome != domain.TaskTurnDispatchReleasedIdempotentRetry {
+				continue
+			}
+			observation, exists := taskTurnDispatchObservation(job, claim.ID, domain.TaskTurnDispatchObservationLookupNotFound)
+			if exists && observation.EvidenceSHA256 == release.EvidenceSHA256 {
+				return true
+			}
+		}
 	}
 	return false
 }
