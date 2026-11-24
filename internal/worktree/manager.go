@@ -206,7 +206,8 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 	}
 	if origin == domain.WorktreeOriginAdopted &&
 		(worktreePath == registrationPath || pathWithin(m.root, worktreePath) ||
-			pathWithin(repositoryPath, worktreePath) || pathWithin(worktreePath, repositoryPath)) {
+			pathWithin(worktreePath, m.root) || pathWithin(repositoryPath, worktreePath) ||
+			pathWithin(worktreePath, repositoryPath)) {
 		return errors.New("adopted Worktree path overlaps the managed workspace or source repository")
 	}
 	resolved, err := filepath.EvalSymlinks(worktreePath)
