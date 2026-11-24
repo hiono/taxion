@@ -1,0 +1,105 @@
+# Task Detailed Design
+
+## 1. Domain fact
+
+TaskはJobAggregate内のappend-only factとします。TaskIDはCommandIDから決定的に導出します。Task stateやRoleExecutionをTaskへ埋め込まず、実行・成果・証拠は別factとして保持します。
+
+主要フィールド:
+- ID / CommandID / JobID
+- ParentTaskID / DependsOnTaskIDs
+- Title / Purpose
+- JobApprovalID / ContractRevision / CanonicalizationVersion / CanonicalHash
+- effective TargetRepositories / TargetResources / Workspaces
+- additional AcceptanceCriteria / RequiredEvidence
+- effective ProhibitedEffects / ApprovalRequiredEffects
+- effective Budget / ConcurrencyCeiling / Deadline
+- CreatedAt / CreatedRevision
+
+## 2. Effective scope
+
+Task作成時に最新JobContractまたはParentTaskからeffective scopeを解決してTaskへ保存します。nil / omittedのtarget listは親scopeの継承を意味します。明示listはcanonicalized exact subsetとして保存します。明示的な空配列はそのdimensionを空に固定し、親scopeの値を継承しません。TargetRepositories / TargetResources / Workspacesの全てが空になるTaskは拒否します。
+
+BudgetのMaxTurns / MaxTokens、ConcurrencyCeiling、Deadlineは各次元で0 / zero timeをinherit sentinelとし、保存時には親から解決したeffective valueを記録します。明示値が親の上限を超える場合は拒否します。
+
+ProhibitedEffects / ApprovalRequiredEffectsは親のeffective valuesとrequestの追加valuesをcanonicalized unionとして保存します。AcceptanceCriteria / RequiredEvidenceはTask固有の追加条件として保存します。
+
+## 3. Parent and dependency validation
+
+ParentTaskIDは同一Job・同一ContractRevisionの既存Taskを参照します。ParentTaskが存在する場合、子Taskのeffective target / budget / concurrency / deadlineは親の範囲内でなければなりません。
+
+DependsOnTaskIDsは同一Job・同一ContractRevisionの既存Taskを参照します。ParentTaskIDとdependency edgesは別フィールドです。Job validationではdependency graphを構築し、DFSでcycleを拒否します。Task作成は既存Taskだけを参照するため、新規edgeは既存nodeから新nodeへ逆向きに戻れませんが、restore / tamper検査としてcycle detectionを維持します。
+
+## 4. Command and Store
+
+TaskController.CreateはJobを読み込み、ACTIVE / latest JobApproval / deadlineをpreflightで検証します。Domain.NewTaskでeffective scopeとimmutable factを構築し、Store.AddTaskへexpected Job revisionを渡します。
+
+Storeは同一transaction内でJobAggregateを再読込し、Domain.NewTaskとJob.Validateを再実行してTaskとCommandReceiptをappendします。Expected revision mismatch、idempotency conflict、validation failureでは部分変更を残しません。
+
+## 5. Execution boundary
+
+Task creationは実行開始ではありません。ExecutionPermissionはTaskIDとeffective scope / budgetへ束縛します。
+
+TaskExecutionStartはtrusted TaskWorktreeManagerを必須とします。ControllerはTaskのapproved target repositoryを照合し、WorktreeManagerが信頼済みRepository registryからdetached Git Worktreeを作成します。Worktree pathはJob / Taskから決定的に導出し、repository identity、canonical path、baseline commit、linked Worktree metadataを検証します。現在の実装は単一repository Taskだけを許可し、複数repository Taskはfail closedとします。
+
+現在のTaskExecutionStartはCoder専用とし、WorktreeAssignment、Coder RoleExecution、ProviderStartIntentを同一JobAggregate transactionでappendします。WorktreeAssignmentはrepository identity / path、Worktree path、baseline commit、owner RoleExecutionを保持します。RoleExecution.WorktreeIDとProviderStartIntent.WorktreeIDを同じassignmentへ束縛します。Reviewerをこのmutable Worktreeへ割り当ててはなりません。ReviewerはCoderのJobOutputを固定した専用snapshotを用いる別のStart Commandで起動し、独立RoleExecution / Context / SessionとProvider側read-only enforcementを同時に満たす必要があります。Worktree lifecycle enforcement開始前の既存RoleExecutionは復元できますが、assignmentを持たない既存ExecutionからProvider dispatchは許可しません。
+
+ExecutionControllerは同一Taskの別RoleExecutionによるWorktree再取得を拒否します。exact replayでは保存済みassignmentを再検証します。handoffはProvider停止、event、final result、Usage、review target identityを照合する別Commandが成立するまで許可しません。
+
+ProviderControllerはtrusted Worktree verifierでassignment ownerと物理Worktreeを再検証します。Task-bound Provider StartRequestにはRepositoryID、WorktreePath、baseline commitを含めます。Provider runtimeはTask Worktree capabilityの検証証拠がruntime minimum以上の場合だけWorktree付きStartを許可します。Task dispatchではE4以上のTask Worktree evidenceを要求します。Startのidempotency / lookup capabilityも別途検証します。
+
+Coder成果identityはJobOutputとしてJobAggregateへappendします。WorktreeManager.CaptureOutputはassignmentと物理Worktreeを再検証し、staged / unstaged / untracked変更がない場合だけHEADのcommit SHAとtree SHAを返します。ExecutionController.CaptureTaskOutputはこのidentityを、Task、Coder RoleExecution、Worktree Assignment、完了済みTask Turn、final Provider Result、complete Usage、Stopped / Quiescent evidenceへ束縛してStoreへ保存します。JobOutputはexact replayとrestart後の復元をサポートします。
+
+JobOutputの保存はWorktree releaseやReviewer handoffを意味しません。専用Reviewer Start Commandとimmutable snapshotの実装が完了するまでは、汎用TaskExecutionStartによるReviewer RoleExecutionの作成を拒否し、Reviewer dispatchもfail closedとします。Worktreeの解放、quarantine、owner handoff、orphan reconciliationも未実装であり、未解決Worktreeを自動削除しません。
+
+### Worktree Create / Adoptとownership transfer
+
+CreateはTaxion管理領域にdetached Worktreeを生成して登録します。Adoptは利用者または外部ツールが事前に生成したlinked Worktreeを、Job / Taskの管理対象へ登録します。生成元は監査用provenanceとして保持し、信頼性・権限の根拠には使用しません。登録後は同じWorktree identity、Provider検証、ownership、停止・成果Evidenceの契約を適用します。
+
+Adoptでは、Taskのapproved target repositoryとtrusted Repository registryを照合します。採用pathはExecutionPermissionのResourceおよびTaskのapproved TargetResourcesに同一のcanonical absolute pathとして含まれ、request digestへ束縛される必要があります。対象はtrusted Repositoryに属するlinked Git Worktreeとし、canonical repository / Worktree path、Git common directoryとlinked-worktree metadata、HEAD commit / tree、HEAD mode（detachedまたはbranch-attachedとsymbolic ref）、baseline commitとの履歴関係を検証します。symlink、path alias、別Repositoryへの接続、scope外、Git状態の取得不能、identity不一致は拒否します。Worktreeは同時に一つのJob / Taskだけへ登録できます。
+
+採用時の初期状態は、HEAD commit / treeに加え、index、tracked working-tree差分、untracked filesのpathとcontent digestを含めて識別します。Adoptは既存ファイル、index、HEAD、branch refを変更してはなりません。reset、checkout、clean、stashを実行せず、利用者の変更をそのまま保持します。初期状態を完全に識別できない場合は登録を拒否します。Adoption factとWorktreeAssignmentはJobAggregateの同一revision-conditional transactionで保存し、永続化前にProviderを起動しません。
+
+WorktreeAssignmentは初回登録時のidentityとownerを保持するimmutable factとします。ownerの変更はAssignmentの上書きではなく、旧owner、新owner、Worktree identity、停止・Quiescent、event、final Result、complete Usage、対象commit / treeを束縛したappend-only WorktreeOwnershipTransfer factで表します。移転CommandはJob revisionを条件として直列化し、exact replayを識別します。UNKNOWNまたはEvidence欠落時は移転せず、Worktreeを旧ownerのまま保持またはquarantineします。
+
+Reviewerはmutable Worktreeを取得しません。Coderの確定JobOutputから専用immutable snapshotを生成し、独立RoleExecution / Context / SessionとProvider側read-only enforcementで評価します。Reviewer完了後にCoderが修正を継続する場合は、Reviewerの停止・結果・Usageを照合したHandoff factを追加してからCoderへmutable ownershipを戻します。Release、quarantine、orphan reconciliation / recoveryもJobAggregateのappend-only lifecycle factとController管理Commandで扱い、未解決Worktreeを自動削除しません。
+
+**現行実装の状態**: Managerはtrusted Repositoryに属する既存linked WorktreeのAdoptを実装済みです。TaskExecutionStart requestにWorktreePathを指定する場合、ExecutionPermissionのResourceとTask approved TargetResourcesへ同一のcanonical pathを含める必要があります。ManagerはHEAD commit / tree、HEAD mode / branch ref、Git common metadata、baseline、staged / unstaged / untracked state digestを検証し、Manager管理領域へ登録情報と物理Worktree予約を保存します。既存Worktreeのファイル、index、HEAD、branch refは変更しません。Assignmentはprovenanceと初期state digestを保持し、RoleExecution / ProviderStartIntentと同一JobAggregate transactionで永続化します。Adoptの再試行は初期状態identityが一致する場合だけ許可します。
+
+現行のAdoptはTask-bound Coder Startに統合されており、独立した事前登録Commandではありません。TaskごとのAssignment ownerは固定され、ownership transfer、release、quarantine、orphan recoveryは未実装です。Adoption reservationはManager管理領域に保持され、Release実装まで再利用・解放できません。Reviewer独立snapshot / read-only executionも未実装のため、Reviewerへのmutable Worktree移管は許可しません。
+
+## 6. Task-bound Coder Turn
+
+Task CoderのTurnはPlanningTurnと別のappend-only factsとして管理します。権限正本はTaskに束縛されたExecutionPermissionとし、DRAFT PlannerのPlanningAuthorizationを流用しません。
+
+- TaskTurnIntentはJob / Task / Coder RoleExecution / ExecutionPermission / Provider Start / accepted Session / Provider identity / prompt digest / turn number / token reservationへ束縛します。
+- intentとCommand receiptは同一JobAggregate transactionで保存し、Provider Sendより先にcommitします。
+- 作成時に現在のJobApproval、ExecutionPermission、scope、deadline、accepted Start Session、累積turn / token budgetを再検証します。
+- 同一RoleExecution内のSession identityを固定します。先行Turnが未観測またはUNKNOWNの場合、同じTurnの照合が完了するまで次Turnを拒否します。
+- TaskTurnObservationはUNKNOWN / COMPLETED / FAILEDをappend-onlyで記録します。UNKNOWNは同一Turnのterminal evidenceだけで解消します。
+- Terminal observationはfinal ResultとComplete Usageの保存後にのみ追加します。Provider Sendの受理だけでTurn完了としません。
+
+## 7. Task-bound Coder Provider Stop
+
+Provider Stopは既存のJobAggregate ProviderStopIntent / ProviderStopObservationをTask Coderにも適用します。PlannerのPlanningAuthorizationをCoderへ流用せず、TaskのExecutionPermissionと対応するJobApprovalからPrincipal / Provider identityを導出します。
+
+ControllerはACTIVE Job、Coder RoleExecution、Task、ExecutionPermission、JobApproval、accepted Start Sessionを照合し、trusted Worktree verifierでassignment ownerと物理Worktreeを検証します。Stop proof capabilityはProvider identityに束縛されたE4以上の証拠を要求します。
+
+Stop intentとreceiptを保存した後、Job authority / Worktreeを再読込してからdispatch claimをJobAggregateへ保存します。Runtime.Stopの直前にclaimへ束縛したProviderStopDispatchStart factをexpected revision付きtransactionで追記し、このfactを外部副作用開始のfencing boundaryとします。開始factの保存に失敗した呼出しはRuntime.Stopを実行しません。既存Stop intentの再送時はE4 Stop Lookupで同一OperationID / SessionIDを照合します。STOPPEDかつStopped / Quiescent証拠が揃った場合はterminal observationを追加します。NOT_FOUNDかつactive claimにdispatch-start factがない場合だけ、NOT_FOUND LookupのEvidenceSHA256を保持するReleasedNotDispatched factで旧claimを解放してから同じOperationID / SessionIDで新しいclaimを取得します。dispatch-start factにFencingEvidenceSHA256が記録されており、その元要求がRequireFencing=trueで送信された場合に限り、E4 Stop Lookup NOT_FOUNDと現在のE4 Stop Dispatch Fencing capabilityの両方が検証済みであれば、旧claimをfenced_not_foundとして解放し、Claim.CreatedRevisionを進めたtokenで同じOperationID / SessionIDを再dispatchします。Providerは古いtokenの遅延要求を副作用前に拒否し、同一operationの重複要求を一つへ収束させます。元要求がfencingなしで開始された場合、後からcapabilityが追加されても安全な再dispatchの根拠にはならないため、claimを保持してUNKNOWNとします。
+
+Stop intentより後のTaskTurnIntentをJob validationで拒否します。先行Resumeがある場合はlatest Resume observationがATTACHED / FAILEDになるまでStop intentを拒否し、Resume / Stopの外部副作用を競合させません。Stop observationはTaskTurnのfinal Result / complete Usageを生成せず、Worktree releaseやRole handoffも許可しません。停止と成果照合が別々に完了するまでWorktreeを保持します。
+
+## 8. Task-bound Coder Provider Resume
+
+PlanningResumeIntent / PlanningResumeObservationをPlannerとTask Coderの共通Provider Resume factsとして使用します。Task Coder intentにはTaskID / ExecutionPermissionIDを保存し、PlanningAuthorizationを権限根拠として使用しません。
+
+ControllerはtaskProviderExecutionTargetでACTIVE Job、JobApproval、ExecutionPermission、Coder RoleExecution、Task、accepted Start Session、Provider identityを照合します。Resume intent / receiptをcommitした後、同じauthorityとWorktree assignmentを再読込し、trusted verifierで物理Worktreeを再検証してからRuntime.Resumeを呼び出します。
+
+Resume capabilityはProvider / SDK / configuration identityに束縛されたE5 SessionReattach evidenceを要求します。Resume requestはpersisted Session IDと同じOperationIDを使用します。UNKNOWN / Observation欠落後は同一intentを再利用し、別Sessionを作成しません。terminal Attached observationが保存されるまでTaskTurnの新規作成を拒否します。
+
+TaskTurnIntentの作成・復元検証は、同一RoleExecutionのlatest PlanningResume statusを参照します。Resume intentが存在しObservation未着、UNKNOWN、FAILEDの場合はTurnを拒否し、ATTACHEDだけを許可します。Provider Stop intentが先行するSessionはResumeできません。
+
+## 9. Non-goals
+
+- Task status / progress state machine
+- Task editing / supersession
+- Schedulerによる独立Task並列化
