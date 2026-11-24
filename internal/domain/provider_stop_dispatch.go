@@ -42,13 +42,14 @@ type ProviderStopDispatchStart struct {
 type ProviderStopDispatchRelease struct {
 	ID              string    `json:"id"`
 	CommandID       string    `json:"command_id"`
-	JobID           string    `json:"job_id"`
-	ClaimID         string    `json:"claim_id"`
-	OperationID     string    `json:"operation_id"`
-	PrincipalID     string    `json:"principal_id"`
-	Outcome         string    `json:"outcome"`
-	CreatedAt       time.Time `json:"created_at"`
-	CreatedRevision uint64    `json:"created_revision"`
+	JobID            string    `json:"job_id"`
+	ClaimID          string    `json:"claim_id"`
+	OperationID      string    `json:"operation_id"`
+	PrincipalID      string    `json:"principal_id"`
+	Outcome          string    `json:"outcome"`
+	EvidenceSHA256   string    `json:"evidence_sha256,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	CreatedRevision  uint64    `json:"created_revision"`
 }
 
 func ProviderStopDispatchClaimID(commandID string) string {
@@ -237,7 +238,7 @@ func ProviderStopDispatchStartedForClaim(job Job, claimID string) (ProviderStopD
 }
 
 func NewProviderStopDispatchRelease(
-	job Job, claimID, principalID, commandID, outcome string, now time.Time,
+	job Job, claimID, principalID, commandID, outcome, evidenceSHA256 string, now time.Time,
 ) (ProviderStopDispatchRelease, error) {
 	now = now.UTC().Round(0)
 	if err := job.Validate(); err != nil {
@@ -271,11 +272,14 @@ func NewProviderStopDispatchRelease(
 		if _, started := ProviderStopDispatchStartedForClaim(job, claim.ID); started {
 			return ProviderStopDispatchRelease{}, errors.New("started Provider Stop dispatch cannot be released as not dispatched")
 		}
+		if !validSHA256(evidenceSHA256) {
+			return ProviderStopDispatchRelease{}, errors.New("not-dispatched release requires verified lookup evidence")
+		}
 	}
 	release := ProviderStopDispatchRelease{
 		ID: ProviderStopDispatchReleaseID(commandID), CommandID: commandID,
 		JobID: job.ID, ClaimID: claim.ID, OperationID: claim.OperationID,
-		PrincipalID: principalID, Outcome: outcome,
+		PrincipalID: principalID, Outcome: outcome, EvidenceSHA256: evidenceSHA256,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
 	if err := release.Validate(job); err != nil {
@@ -308,6 +312,9 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 	if r.Outcome == ProviderStopDispatchReleasedNotDispatched {
 		if _, started := ProviderStopDispatchStartedForClaim(job, claim.ID); started {
 			return errors.New("not-dispatched release conflicts with a Provider Stop dispatch start")
+		}
+		if !validSHA256(r.EvidenceSHA256) {
+			return errors.New("not-dispatched release requires verified lookup evidence")
 		}
 	}
 	if r.Outcome == ProviderStopDispatchReleasedStopped {

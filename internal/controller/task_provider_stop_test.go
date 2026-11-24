@@ -705,7 +705,8 @@ func TestTaskProviderStopRecoversClaimCommittedBeforeDispatchAfterRestart(t *tes
 			len(job.ProviderStopDispatchClaims), len(job.ProviderStopDispatchStarts), len(job.ProviderStopDispatchReleases))
 	}
 	if job.ProviderStopDispatchReleases[0].ClaimID != claim.ID ||
-		job.ProviderStopDispatchReleases[0].Outcome != domain.ProviderStopDispatchReleasedNotDispatched {
+		job.ProviderStopDispatchReleases[0].Outcome != domain.ProviderStopDispatchReleasedNotDispatched ||
+		job.ProviderStopDispatchReleases[0].EvidenceSHA256 != strings.Repeat("8", 64) {
 		t.Fatalf("old claim was not released as not dispatched: %#v", job.ProviderStopDispatchReleases[0])
 	}
 	if _, started := domain.ProviderStopDispatchStartedForClaim(job, job.ProviderStopDispatchClaims[1].ID); !started {
@@ -746,7 +747,7 @@ func TestTaskProviderStopDoesNotReclaimClaimAfterDispatchStart(t *testing.T) {
 		t.Fatalf("persist dispatch-start fact: started=%v err=%v", started, err)
 	}
 	if _, _, err := f.database.ReleaseProviderStopDispatchClaim(
-		f.ctx, f.jobID, claim.ID, f.principal, domain.ProviderStopDispatchReleasedNotDispatched,
+		f.ctx, f.jobID, claim.ID, f.principal, domain.ProviderStopDispatchReleasedNotDispatched, strings.Repeat("8", 64),
 	); err == nil {
 		t.Fatal("started claim was released as not dispatched")
 	}

@@ -73,7 +73,7 @@ func (c *ProviderController) StopTaskExecution(
 	if hasPrevious && previous.Quiescent {
 		if activeClaimFound {
 			if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
-				ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedStopped,
+				ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedStopped, "",
 			); releaseErr != nil {
 				return intentReceipt, intent, previous, releaseErr
 			}
@@ -119,7 +119,7 @@ func (c *ProviderController) StopTaskExecution(
 				}
 				if activeClaimFound {
 					if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
-						ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedStopped,
+						ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedStopped, "",
 					); releaseErr != nil {
 						return intentReceipt, intent, observation, releaseErr
 					}
@@ -145,7 +145,7 @@ func (c *ProviderController) StopTaskExecution(
 				return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
 			}
 			if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
-				ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedNotDispatched,
+				ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedNotDispatched, lookup.EvidenceSHA256,
 			); releaseErr != nil {
 				return intentReceipt, intent, previous, releaseErr
 			}
@@ -215,13 +215,13 @@ func (c *ProviderController) StopTaskExecution(
 				return intentReceipt, intent, observation, errors.Join(stopErr, persistErr)
 			}
 			_, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
-				ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedDefinitiveFailure,
+				ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedDefinitiveFailure, evidence,
 			)
 			return intentReceipt, intent, observation, errors.Join(stopErr, releaseErr)
 		}
 		if !providerOperationMayHaveStarted(stopErr) {
 			_, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
-				ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedDefinitiveFailure,
+				ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedDefinitiveFailure, "",
 			)
 			return intentReceipt, intent, domain.ProviderStopObservation{}, errors.Join(stopErr, releaseErr)
 		}
@@ -245,7 +245,7 @@ func (c *ProviderController) StopTaskExecution(
 		return intentReceipt, intent, observation, err
 	}
 	if _, _, err := c.store.ReleaseProviderStopDispatchClaim(
-		ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedStopped,
+		ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedStopped, "",
 	); err != nil {
 		return intentReceipt, intent, observation, err
 	}
