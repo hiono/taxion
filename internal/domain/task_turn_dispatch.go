@@ -13,6 +13,7 @@ const (
 	TaskTurnDispatchReleasedCompleted         = "completed"
 	TaskTurnDispatchReleasedFailed            = "failed"
 	TaskTurnDispatchReleasedDefinitiveFailure = "definitive_failure"
+	TaskTurnDispatchReleasedIdempotentRetry = "idempotent_retry"
 )
 
 type TaskTurnDispatchClaim struct {
@@ -36,6 +37,7 @@ type TaskTurnDispatchRelease struct {
 	OperationID     string    `json:"operation_id"`
 	PrincipalID     string    `json:"principal_id"`
 	Outcome         string    `json:"outcome"`
+	EvidenceSHA256  string    `json:"evidence_sha256,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	CreatedRevision uint64    `json:"created_revision"`
 }
@@ -145,7 +147,7 @@ func (c TaskTurnDispatchClaim) Validate(job Job) error {
 }
 
 func NewTaskTurnDispatchRelease(
-	job Job, claimID, principalID, commandID, outcome string, now time.Time,
+	job Job, claimID, principalID, commandID, outcome, evidenceSHA256 string, now time.Time,
 ) (TaskTurnDispatchRelease, error) {
 	now = now.UTC().Round(0)
 	if err := job.Validate(); err != nil {
@@ -167,8 +169,15 @@ func NewTaskTurnDispatchRelease(
 	}
 	if outcome != TaskTurnDispatchReleasedCompleted &&
 		outcome != TaskTurnDispatchReleasedFailed &&
-		outcome != TaskTurnDispatchReleasedDefinitiveFailure {
+		outcome != TaskTurnDispatchReleasedDefinitiveFailure &&
+		outcome != TaskTurnDispatchReleasedIdempotentRetry {
 		return TaskTurnDispatchRelease{}, errors.New("unsupported Task Turn dispatch release outcome")
+	}
+	if outcome == TaskTurnDispatchReleasedIdempotentRetry && !validSHA256(evidenceSHA256) {
+		return TaskTurnDispatchRelease{}, errors.New("idempotent Task Turn retry requires verified Send idempotency evidence")
+	}
+	if outcome != TaskTurnDispatchReleasedIdempotentRetry && evidenceSHA256 != "" {
+		return TaskTurnDispatchRelease{}, errors.New("Task Turn dispatch release evidence is only valid for idempotent retry")
 	}
 	if _, active := ActiveTaskTurnDispatchClaim(job, claim.OperationID); !active {
 		return TaskTurnDispatchRelease{}, errors.New("Task Turn dispatch claim is already released")
@@ -176,7 +185,7 @@ func NewTaskTurnDispatchRelease(
 	release := TaskTurnDispatchRelease{
 		ID: TaskTurnDispatchReleaseID(commandID), CommandID: commandID,
 		JobID: job.ID, ClaimID: claim.ID, OperationID: claim.OperationID,
-		PrincipalID: principalID, Outcome: outcome,
+		PrincipalID: principalID, Outcome: outcome, EvidenceSHA256: evidenceSHA256,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
 	if err := release.Validate(job); err != nil {
@@ -191,7 +200,8 @@ func (r TaskTurnDispatchRelease) Validate(job Job) error {
 		!validPlanningIdentity(r.ClaimID) || !validPlanningIdentity(r.OperationID) ||
 		!strings.HasPrefix(r.PrincipalID, "human_") || r.CreatedAt.IsZero() || r.CreatedRevision == 0 ||
 		(r.Outcome != TaskTurnDispatchReleasedCompleted && r.Outcome != TaskTurnDispatchReleasedFailed &&
-			r.Outcome != TaskTurnDispatchReleasedDefinitiveFailure) {
+			r.Outcome != TaskTurnDispatchReleasedDefinitiveFailure &&
+			r.Outcome != TaskTurnDispatchReleasedIdempotentRetry) {
 		return errors.New("Task Turn dispatch release identity or metadata is invalid")
 	}
 	var claim TaskTurnDispatchClaim
@@ -205,6 +215,24 @@ func (r TaskTurnDispatchRelease) Validate(job Job) error {
 	if !found || claim.OperationID != r.OperationID || claim.PrincipalID != r.PrincipalID ||
 		r.CreatedRevision <= claim.CreatedRevision || r.CreatedAt.Before(claim.CreatedAt) {
 		return errors.New("Task Turn dispatch release does not match its claim")
+	}
+	if r.Outcome == TaskTurnDispatchReleasedIdempotentRetry {
+		if !validSHA256(r.EvidenceSHA256) {
+			return errors.New("idempotent Task Turn retry requires verified Send idempotency evidence")
+		}
+		var previous *TaskTurnObservation
+		for i := range job.TaskTurnObservations {
+			observation := &job.TaskTurnObservations[i]
+			if observation.TurnID == claim.TurnID && observation.CreatedRevision < r.CreatedRevision &&
+				(previous == nil || observation.CreatedRevision > previous.CreatedRevision) {
+				previous = observation
+			}
+		}
+		if previous != nil && previous.Status != TaskTurnUnknown {
+			return errors.New("idempotent Task Turn retry cannot release a claim after a terminal observation")
+		}
+	} else if r.EvidenceSHA256 != "" {
+		return errors.New("Task Turn dispatch release has unexpected evidence")
 	}
 	if r.Outcome == TaskTurnDispatchReleasedCompleted || r.Outcome == TaskTurnDispatchReleasedFailed {
 		var latest *TaskTurnObservation
