@@ -74,7 +74,7 @@ type Capabilities struct {
 	SendIdempotency             bool
 	SendLookup                  bool
 	CrossProcessSessionReattach bool
-	ResumeIdempotency            bool
+	ResumeIdempotency           bool
 	EventReplay                 bool
 	StopProof                   bool
 	StopLookup                  bool
