@@ -51,6 +51,20 @@ Coder成果identityはJobOutputとしてJobAggregateへappendします。Worktre
 
 JobOutputの保存はWorktree releaseやReviewer handoffを意味しません。専用Reviewer Start Commandとimmutable snapshotの実装が完了するまでは、汎用TaskExecutionStartによるReviewer RoleExecutionの作成を拒否し、Reviewer dispatchもfail closedとします。Worktreeの解放、quarantine、owner handoff、orphan reconciliationも未実装であり、未解決Worktreeを自動削除しません。
 
+### Worktree Create / Adoptとownership transfer
+
+CreateはTaxion管理領域にdetached Worktreeを生成して登録します。Adoptは利用者または外部ツールが事前に生成したlinked Worktreeを、Job / Taskの管理対象へ登録します。生成元は監査用provenanceとして保持し、信頼性・権限の根拠には使用しません。登録後は同じWorktree identity、Provider検証、ownership、停止・成果Evidenceの契約を適用します。
+
+Adoptでは、Taskのapproved target repositoryとtrusted Repository registryを照合し、canonical repository / Worktree path、Git common directoryとlinked-worktree metadata、HEAD commit / tree、HEAD mode（detachedまたはbranch-attachedとsymbolic ref）、baseline commitとの履歴関係を検証します。symlink、path alias、別Repositoryへの接続、scope外、Git状態の取得不能、identity不一致は拒否します。Worktreeは同時に一つのJob / Taskだけへ登録できます。
+
+採用時の初期状態は、HEAD commit / treeに加え、index、tracked working-tree差分、untracked filesのpathとcontent digestを含めて識別します。Adoptは既存ファイル、index、HEAD、branch refを変更してはなりません。reset、checkout、clean、stashを実行せず、利用者の変更をそのまま保持します。初期状態を完全に識別できない場合は登録を拒否します。Adoption factとWorktreeAssignmentはJobAggregateの同一revision-conditional transactionで保存し、永続化前にProviderを起動しません。
+
+WorktreeAssignmentは初回登録時のidentityとownerを保持するimmutable factとします。ownerの変更はAssignmentの上書きではなく、旧owner、新owner、Worktree identity、停止・Quiescent、event、final Result、complete Usage、対象commit / treeを束縛したappend-only WorktreeOwnershipTransfer factで表します。移転CommandはJob revisionを条件として直列化し、exact replayを識別します。UNKNOWNまたはEvidence欠落時は移転せず、Worktreeを旧ownerのまま保持またはquarantineします。
+
+Reviewerはmutable Worktreeを取得しません。Coderの確定JobOutputから専用immutable snapshotを生成し、独立RoleExecution / Context / SessionとProvider側read-only enforcementで評価します。Reviewer完了後にCoderが修正を継続する場合は、Reviewerの停止・結果・Usageを照合したHandoff factを追加してからCoderへmutable ownershipを戻します。Release、quarantine、orphan reconciliation / recoveryもJobAggregateのappend-only lifecycle factとController管理Commandで扱い、未解決Worktreeを自動削除しません。
+
+**現行実装の制約**: 現在のManagerは決定的な管理領域pathとsidecar baseline recordを要求するため、既存linked WorktreeのAdoptには対応していません。WorktreeAssignmentはTaskごとに一つでowner RoleExecutionを固定し、ownership transfer、release、quarantine、orphan recoveryも未実装です。これらの経路が実装されるまでは、既存Worktreeの登録・再割当てを許可しません。
+
 ## 6. Task-bound Coder Turn
 
 Task CoderのTurnはPlanningTurnと別のappend-only factsとして管理します。権限正本はTaskに束縛されたExecutionPermissionとし、DRAFT PlannerのPlanningAuthorizationを流用しません。
