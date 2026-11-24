@@ -101,6 +101,7 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 	}
 	baselinePath := worktreePath + ".baseline.json"
 	record, recordErr := readBaselineRecord(baselinePath)
+	baselineCreated := false
 	var baseline string
 	if recordErr == nil {
 		if err := validateBaselineRecord(record, jobID, task.ID, repositoryID, repositoryPath); err != nil {
@@ -139,6 +140,8 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 				return Snapshot{}, err
 			}
 			baseline = record.BaselineCommit
+		} else {
+			baselineCreated = true
 		}
 	} else {
 		return Snapshot{}, fmt.Errorf("read immutable Task Worktree baseline: %w", recordErr)
@@ -150,23 +153,134 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 		HeadMode: record.HeadMode, HeadRef: record.HeadRef,
 	}
 	if worktreeExists {
+		if _, err := m.reserveWorktreeOwnership(ctx, jobID, task.ID, repositoryID, worktreePath); err != nil {
+			return Snapshot{}, fmt.Errorf("reserve existing Task Worktree ownership: %w", err)
+		}
 		if err := m.verify(ctx, jobID, task, snapshot); err != nil {
 			return Snapshot{}, fmt.Errorf("existing Task Worktree does not match its immutable baseline: %w", err)
 		}
 		return snapshot, nil
 	}
 	if err := runGit(ctx, repositoryPath, "worktree", "add", "--detach", worktreePath, baseline); err != nil {
-		// Git serializes updates to the shared repository metadata. A concurrent
-		// provisioner may have completed this exact deterministic Worktree first.
-		if verifyErr := m.verify(ctx, jobID, task, snapshot); verifyErr == nil {
-			return snapshot, nil
-		}
-		return Snapshot{}, fmt.Errorf("create detached Task Worktree: %w", err)
+		cleanupErr := m.cleanupFailedPrepare(ctx, repositoryPath, worktreePath, baselinePath, baselineCreated, nil)
+		return Snapshot{}, errors.Join(fmt.Errorf("create detached Task Worktree: %w", err), cleanupErr)
+	}
+	reservation, err := m.reserveWorktreeOwnership(ctx, jobID, task.ID, repositoryID, worktreePath)
+	if err != nil {
+		cleanupErr := m.cleanupFailedPrepare(ctx, repositoryPath, worktreePath, baselinePath, baselineCreated, nil)
+		return Snapshot{}, errors.Join(fmt.Errorf("reserve new Task Worktree ownership: %w", err), cleanupErr)
 	}
 	if err := m.verify(ctx, jobID, task, snapshot); err != nil {
-		return Snapshot{}, fmt.Errorf("verify newly created Task Worktree: %w", err)
+		cleanupErr := m.cleanupFailedPrepare(ctx, repositoryPath, worktreePath, baselinePath, baselineCreated, &reservation)
+		return Snapshot{}, errors.Join(fmt.Errorf("verify newly created Task Worktree: %w", err), cleanupErr)
+	}
+	if err := verifyCleanInitialWorktree(ctx, worktreePath, baseline); err != nil {
+		cleanupErr := m.cleanupFailedPrepare(ctx, repositoryPath, worktreePath, baselinePath, baselineCreated, &reservation)
+		return Snapshot{}, errors.Join(fmt.Errorf("new Task Worktree is not clean after checkout hooks: %w", err), cleanupErr)
 	}
 	return snapshot, nil
+}
+
+func (m *Manager) reserveWorktreeOwnership(
+	ctx context.Context, jobID, taskID, repositoryID, worktreePath string,
+) (adoptionReservation, error) {
+	gitDir, err := gitOutput(ctx, worktreePath, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return adoptionReservation{}, errors.New("Task Worktree has no linked Git admin directory")
+	}
+	resolvedGitDir, err := filepath.EvalSymlinks(gitDir)
+	if err != nil {
+		return adoptionReservation{}, errors.New("Task Worktree Git admin directory cannot be resolved")
+	}
+	repositoryPath, trusted := m.repositories[repositoryID]
+	if !trusted {
+		return adoptionReservation{}, errors.New("Task Worktree repository is not trusted")
+	}
+	commonGitDir, err := gitOutput(ctx, repositoryPath, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return adoptionReservation{}, errors.New("trusted repository common Git metadata cannot be resolved")
+	}
+	if !filepath.IsAbs(commonGitDir) {
+		commonGitDir = filepath.Join(repositoryPath, commonGitDir)
+	}
+	commonGitDir, err = filepath.EvalSymlinks(commonGitDir)
+	if err != nil || !pathWithin(filepath.Join(commonGitDir, "worktrees"), resolvedGitDir) {
+		return adoptionReservation{}, errors.New("Task Worktree Git admin directory is outside the trusted repository")
+	}
+	reservation := adoptionReservation{
+		JobID: jobID, TaskID: taskID, RepositoryID: repositoryID,
+		WorktreePath: worktreePath, GitDir: resolvedGitDir,
+	}
+	if err := m.reserveAdoption(jobID, taskID, repositoryID, worktreePath, resolvedGitDir); err != nil {
+		return adoptionReservation{}, err
+	}
+	return reservation, nil
+}
+
+func (m *Manager) cleanupFailedPrepare(
+	ctx context.Context, repositoryPath, worktreePath, baselinePath string,
+	baselineCreated bool, reservation *adoptionReservation,
+) error {
+	var cleanupErr error
+	if _, err := os.Lstat(worktreePath); err == nil {
+		cleanupErr = runGit(ctx, repositoryPath, "worktree", "remove", "--force", worktreePath)
+		if cleanupErr != nil {
+			cleanupErr = fmt.Errorf("remove failed Task Worktree: %w", cleanupErr)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		cleanupErr = fmt.Errorf("inspect failed Task Worktree before cleanup: %w", err)
+	}
+	if baselineCreated {
+		if err := os.Remove(baselinePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove failed Task Worktree baseline: %w", err))
+		} else if err := syncDirectory(filepath.Dir(baselinePath)); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("sync failed Task Worktree baseline cleanup: %w", err))
+		}
+		if reservation != nil {
+			cleanupErr = errors.Join(cleanupErr, m.removeOrphanedAdoptionReservation(*reservation))
+		}
+	}
+	return cleanupErr
+}
+
+func verifyCleanInitialWorktree(ctx context.Context, worktreePath, baseline string) error {
+	head, err := gitOutput(ctx, worktreePath, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil || head != baseline {
+		return errors.New("new Task Worktree HEAD differs from its immutable baseline")
+	}
+	if err := verifyWorktreeIndexFlags(ctx, worktreePath); err != nil {
+		return err
+	}
+	status, err := gitOutput(
+		ctx, worktreePath, "--no-optional-locks", "status", "--porcelain=v2",
+		"--untracked-files=all", "--ignore-submodules=none",
+	)
+	if err != nil {
+		return fmt.Errorf("inspect new Task Worktree after checkout hooks: %w", err)
+	}
+	if status != "" {
+		return errors.New("new Task Worktree contains checkout-hook modifications")
+	}
+	submoduleStatus, err := gitOutput(ctx, worktreePath, "--no-optional-locks", "submodule", "status", "--recursive")
+	if err != nil {
+		return fmt.Errorf("inspect new Task Worktree submodules: %w", err)
+	}
+	for _, line := range strings.Split(submoduleStatus, "\n") {
+		if strings.HasPrefix(line, "-") || strings.HasPrefix(line, "U") {
+			return errors.New("new Task Worktree contains an uninitialized or conflicted submodule")
+		}
+	}
+	dirtySubmodules, err := gitBytes(
+		ctx, worktreePath, "--no-optional-locks", "submodule", "foreach", "--quiet", "--recursive",
+		"git status --porcelain=v2 --untracked-files=all --ignore-submodules=none",
+	)
+	if err != nil {
+		return fmt.Errorf("inspect new Task Worktree submodule state: %w", err)
+	}
+	if len(dirtySubmodules) != 0 {
+		return errors.New("new Task Worktree contains checkout-hook modifications in a submodule")
+	}
+	return nil
 }
 
 func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, snapshot Snapshot) error {
@@ -178,6 +292,13 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 		return err
 	}
 	defer unlock()
+	if snapshot.Origin == domain.WorktreeOriginTaxionCreated {
+		if _, err := m.reserveWorktreeOwnership(
+			ctx, jobID, task.ID, snapshot.RepositoryID, snapshot.WorktreePath,
+		); err != nil {
+			return fmt.Errorf("reserve verified Task Worktree ownership: %w", err)
+		}
+	}
 	return m.verify(ctx, jobID, task, snapshot)
 }
 
