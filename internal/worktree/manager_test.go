@@ -411,6 +411,13 @@ func TestManagerAdoptsExistingLinkedWorktreeWithoutChangingItsState(t *testing.T
 	if err != nil || replayed != snapshot {
 		t.Fatalf("exact adoption replay changed identity: got=%#v want=%#v err=%v", replayed, snapshot, err)
 	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "new-file.txt"), []byte("changed after failed Start\\n"), 0o600); err != nil {
+		t.Fatalf("change Worktree before same-Start retry: %v", err)
+	}
+	if _, err := manager.Adopt(context.Background(), jobID, task, worktreePath); err == nil ||
+		!strings.Contains(err.Error(), "original state") {
+		t.Fatalf("same-Start retry accepted a changed Worktree: %v", err)
+	}
 	if _, err := manager.Adopt(context.Background(), "job_abcdef0123456789", task, worktreePath); err == nil {
 		t.Fatal("the same physical Worktree was adopted by a second Job")
 	}

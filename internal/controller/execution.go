@@ -180,6 +180,9 @@ func (c *ExecutionController) StartTaskExecution(
 			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, fmt.Errorf("verify existing Task Worktree before exact Start replay: %w", err)
 		}
 	} else if request.WorktreePath != "" {
+		// Keep the immutable adoption baseline if Start persistence fails. It is the
+		// retry binding for this Job/Task: an unchanged Worktree can be rebound, while
+		// changed contents and competing Job/Task owners are rejected by Adopt.
 		adopter, ok := c.worktrees.(TaskWorktreeAdopter)
 		if !ok {
 			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, errors.New("Task Worktree manager does not support safe adoption")
