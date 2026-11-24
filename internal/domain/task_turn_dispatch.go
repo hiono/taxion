@@ -13,7 +13,7 @@ const (
 	TaskTurnDispatchReleasedCompleted         = "completed"
 	TaskTurnDispatchReleasedFailed            = "failed"
 	TaskTurnDispatchReleasedDefinitiveFailure = "definitive_failure"
-	TaskTurnDispatchReleasedIdempotentRetry = "idempotent_retry"
+	TaskTurnDispatchReleasedIdempotentRetry   = "idempotent_retry"
 )
 
 type TaskTurnDispatchClaim struct {

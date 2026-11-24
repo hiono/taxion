@@ -444,7 +444,7 @@ func TestExecutionControllerReplaysExistingJobOutputWithoutRecapturingWorktree(t
 		job: domain.Job{
 			ID: jobID, Revision: 17, Tasks: []domain.Task{task},
 			RoleExecutions: []domain.RoleExecution{execution},
-			JobOutputs: []domain.JobOutput{output},
+			JobOutputs:     []domain.JobOutput{output},
 		},
 		output: output,
 	}
