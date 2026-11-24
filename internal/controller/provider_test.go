@@ -910,8 +910,9 @@ func TestProviderControllerPersistsStartIntentBeforeCallingRuntime(t *testing.T)
 		if len(job.ProviderStartObservations) != 0 {
 			return errors.New("Provider Start observation exists before the external call")
 		}
-		if job.ProviderLifecycleEnforcedFromRevision != job.ProviderStartIntents[0].CreatedRevision {
-			return errors.New("Provider lifecycle enforcement was not activated with the Start intent")
+		intent := job.ProviderStartIntents[0]
+		if job.Revision != intent.CreatedRevision || intent.RoleExecutionID != request.RoleExecutionID {
+			return errors.New("Provider Start intent was not committed with its authorized RoleExecution")
 		}
 		return nil
 	}
