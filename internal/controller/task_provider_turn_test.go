@@ -352,6 +352,67 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	}
 }
 
+func TestTaskProviderTurnRejectsLookupResultDigestMismatch(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	now := time.Now().UTC()
+	f.runtime.capabilities.SendLookup = true
+	f.runtime.capabilities.SendIdempotency = true
+	f.runtime.capabilities.FinalOutputRetrieval = true
+	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "turn-result-digest", EvidenceSHA256: strings.Repeat("1", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity, TestID: "turn-result-digest", EvidenceSHA256: strings.Repeat("2", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: f.runtime.identity, TestID: "turn-result-digest", EvidenceSHA256: strings.Repeat("3", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Turn intent: %v", err)
+	}
+	prompt := "Verify the Lookup final Result digest."
+	commandID := "cmd_81818181818181818181818181818182"
+	_, turn, created, err := f.database.AddTaskTurnIntentWithStatus(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, f.permission.ID, "session_1",
+		commandID, sha256String(prompt), 100,
+	)
+	if err != nil || !created {
+		t.Fatalf("AddTaskTurnIntentWithStatus: created=%v err=%v", created, err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before dispatch claim: %v", err)
+	}
+	if _, _, created, err := f.database.AddTaskTurnDispatchClaim(
+		f.ctx, f.jobID, job.Revision, turn.ID,
+		"cmd_82828282828282828282828282828282", f.principal,
+	); err != nil || !created {
+		t.Fatalf("AddTaskTurnDispatchClaim: created=%v err=%v", created, err)
+	}
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: true, OperationID: turn.OperationID, Status: domain.TaskTurnCompleted,
+		ReceiptID: "receipt_1", SessionID: "session_1", TurnID: turn.ID,
+		ResultSHA256: strings.Repeat("f", 64), UsageID: "usage_mismatch",
+		EvidenceSHA256: strings.Repeat("e", 64),
+	}
+	_, recoveredTurn, observation, _, err := f.controller.SendTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		prompt, f.permissionRequest, 100, f.principal,
+	)
+	if !errors.Is(err, provider.ErrProviderInvalidResult) || recoveredTurn.ID != turn.ID ||
+		observation.Status != domain.TaskTurnUnknown || f.runtime.resultCalls != 1 || f.runtime.usageCalls != 0 {
+		t.Fatalf("Lookup Result digest mismatch was not retained as UNKNOWN: turn=%#v observation=%#v resultCalls=%d usageCalls=%d err=%v",
+			recoveredTurn, observation, f.runtime.resultCalls, f.runtime.usageCalls, err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil || len(job.ProviderResultObservations) != 1 ||
+		job.ProviderResultObservations[0].ContentSHA256 == strings.Repeat("f", 64) ||
+		len(job.ProviderUsageObservations) != 0 {
+		t.Fatalf("mismatched final Result or Usage facts were persisted: results=%d usage=%d err=%v",
+			len(job.ProviderResultObservations), len(job.ProviderUsageObservations), err)
+	}
+	if _, active := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID); !active {
+		t.Fatal("ambiguous Task Turn released its dispatch claim")
+	}
+}
+
 func TestProviderCapabilityEvidenceSHA256AcceptsEvidenceAtLeastLive(t *testing.T) {
 	identity := provider.Identity{
 		ProviderID: "provider.test", AccountID: "account.primary",
