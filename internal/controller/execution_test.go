@@ -103,9 +103,10 @@ type fakeTaskWorktreeVerifier struct {
 
 type fakeTaskWorktreeAdopter struct {
 	*fakeTaskWorktreeVerifier
-	snapshot   domain.WorktreeSnapshot
-	adoptErr   error
-	adoptCalls int
+	snapshot     domain.WorktreeSnapshot
+	expectedPath string
+	adoptErr     error
+	adoptCalls   int
 }
 
 func (a *fakeTaskWorktreeAdopter) Adopt(
@@ -115,7 +116,11 @@ func (a *fakeTaskWorktreeAdopter) Adopt(
 	if a.adoptErr != nil {
 		return domain.WorktreeSnapshot{}, a.adoptErr
 	}
-	if path != a.snapshot.WorktreePath {
+	expectedPath := a.expectedPath
+	if expectedPath == "" {
+		expectedPath = a.snapshot.WorktreePath
+	}
+	if path != expectedPath {
 		return domain.WorktreeSnapshot{}, errors.New("unexpected adopted Worktree path")
 	}
 	return a.snapshot, nil
@@ -399,6 +404,67 @@ func TestExecutionControllerExactReplayAndCommandConflict(t *testing.T) {
 	}
 }
 
+type fakeJobOutputReplayStore struct {
+	*store.Store
+	job      domain.Job
+	output   domain.JobOutput
+	addCalls int
+}
+
+func (s *fakeJobOutputReplayStore) GetJob(_ context.Context, jobID string) (domain.Job, error) {
+	if jobID != s.job.ID {
+		return domain.Job{}, errors.New("unexpected Job ID")
+	}
+	return s.job, nil
+}
+
+func (s *fakeJobOutputReplayStore) AddJobOutput(
+	_ context.Context, jobID string, expectedRevision uint64,
+	taskID, roleExecutionID, turnID, commitSHA, treeSHA string,
+) (store.CommandReceipt, domain.JobOutput, error) {
+	s.addCalls++
+	if jobID != s.job.ID || expectedRevision != s.job.Revision ||
+		taskID != s.output.TaskID || roleExecutionID != s.output.RoleExecutionID ||
+		turnID != s.output.TurnID || commitSHA != s.output.CommitSHA || treeSHA != s.output.TreeSHA {
+		return store.CommandReceipt{}, domain.JobOutput{}, errors.New("JobOutput replay identity changed")
+	}
+	return store.CommandReceipt{CommandID: "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Revision: expectedRevision}, s.output, nil
+}
+
+func TestExecutionControllerReplaysExistingJobOutputWithoutRecapturingWorktree(t *testing.T) {
+	_, database, _, jobID, _, _, _ := startContractPlanner(t)
+	task := domain.Task{ID: "task_1111111111111111"}
+	execution := domain.RoleExecution{ID: "role_exec_1111111111111111", TaskID: task.ID}
+	output := domain.JobOutput{
+		TaskID: task.ID, RoleExecutionID: execution.ID, TurnID: "turn_1111111111111111",
+		CommitSHA: strings.Repeat("c", 40), TreeSHA: strings.Repeat("d", 40),
+	}
+	fakeStore := &fakeJobOutputReplayStore{
+		Store: database,
+		job: domain.Job{
+			ID: jobID, Revision: 17, Tasks: []domain.Task{task},
+			RoleExecutions: []domain.RoleExecution{execution},
+			JobOutputs: []domain.JobOutput{output},
+		},
+		output: output,
+	}
+	worktrees := &fakeTaskWorktreeVerifier{}
+	controller, err := NewExecutionControllerWithWorktree(
+		fakeStore, &fakeExecutionEffectAssessor{}, worktrees,
+	)
+	if err != nil {
+		t.Fatalf("NewExecutionControllerWithWorktree: %v", err)
+	}
+	receipt, replayed, err := controller.CaptureTaskOutput(
+		context.Background(), jobID, execution.ID, output.TurnID,
+	)
+	if err != nil || replayed != output || receipt.Revision != fakeStore.job.Revision ||
+		fakeStore.addCalls != 1 || worktrees.verifyCalls != 0 {
+		t.Fatalf("existing JobOutput was recaptured instead of replayed: receipt=%#v output=%#v addCalls=%d verifyCalls=%d err=%v",
+			receipt, replayed, fakeStore.addCalls, worktrees.verifyCalls, err)
+	}
+}
+
 func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 	ctx := context.Background()
 	_, database, principal, jobID, _, sourceResult, _ := startContractPlanner(t)
@@ -472,6 +538,7 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 		t.Fatalf("NewExecutionControllerWithWorktree: %v", err)
 	}
 	controller.now = func() time.Time { return now }
+	adopter.expectedPath = worktreePath
 	request := domain.ExecutionPermissionRequest{
 		JobID: jobID, TaskID: task.ID, CommandID: "cmd_96969696969696969696969696969696",
 		Role: domain.RoleCoder, Effect: "repository.write", Resource: worktreePath,
@@ -490,12 +557,30 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 		t.Fatalf("ExecutionPermission WorktreePath = %q, want %q", permission.WorktreePath, worktreePath)
 	}
 	startCommand := "cmd_97979797979797979797979797979797"
+	beforeRejectedStart, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before mismatched Worktree Start: %v", err)
+	}
+	adopter.snapshot.WorktreePath = worktreePath + "-mismatch"
+	if _, _, _, err := controller.StartTaskExecution(ctx, permission.ID, startCommand, request); err == nil {
+		t.Fatal("Task execution accepted a Worktree snapshot outside the approved ExecutionPermission path")
+	}
+	afterRejectedStart, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after mismatched Worktree Start: %v", err)
+	}
+	if afterRejectedStart.Revision != beforeRejectedStart.Revision ||
+		len(afterRejectedStart.RoleExecutions) != len(beforeRejectedStart.RoleExecutions) ||
+		len(afterRejectedStart.WorktreeAssignments) != len(beforeRejectedStart.WorktreeAssignments) {
+		t.Fatal("mismatched Worktree snapshot mutated Job state")
+	}
+	adopter.snapshot.WorktreePath = worktreePath
 	receipt, execution, intent, err := controller.StartTaskExecution(ctx, permission.ID, startCommand, request)
 	if err != nil {
 		t.Fatalf("StartTaskExecution with adopted Worktree: %v", err)
 	}
 	if receipt.Revision == 0 || execution.TaskID != task.ID || intent.WorktreeID != execution.WorktreeID ||
-		adopter.adoptCalls != 1 || adopter.prepareCalls != 0 {
+		adopter.adoptCalls != 2 || adopter.verifyCalls != 2 || adopter.prepareCalls != 0 {
 		t.Fatalf("adopted Worktree was not used for the exact Task start: receipt=%#v execution=%#v intent=%#v adopter=%#v",
 			receipt, execution, intent, adopter)
 	}
@@ -514,10 +599,16 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 		assignment.OwnerRoleExecutionID != execution.ID {
 		t.Fatalf("JobAggregate did not persist adopted Worktree identity: %#v", assignment)
 	}
+	invalidBaseline := persisted
+	invalidBaseline.WorktreeAssignments = append([]domain.WorktreeAssignment(nil), persisted.WorktreeAssignments...)
+	invalidBaseline.WorktreeAssignments[0].BaselineCommit = "not-a-git-commit"
+	if err := invalidBaseline.Validate(); err == nil {
+		t.Fatal("Job accepted a Worktree assignment with an invalid BaselineCommit")
+	}
 	if _, _, _, err := controller.StartTaskExecution(ctx, permission.ID, startCommand, request); err != nil {
 		t.Fatalf("exact adopted Worktree Start replay: %v", err)
 	}
-	if adopter.adoptCalls != 1 || adopter.verifyCalls != 1 {
+	if adopter.adoptCalls != 2 || adopter.verifyCalls != 2 {
 		t.Fatalf("exact replay re-adopted Worktree: adopt=%d verify=%d", adopter.adoptCalls, adopter.verifyCalls)
 	}
 }
