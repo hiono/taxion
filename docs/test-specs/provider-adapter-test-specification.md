@@ -123,6 +123,7 @@ Task-bound Coder Start fixtureはACTIVE Job、最新JobApproval、Task、JobAppr
 | CAP-013 | SDK drift | Runtime初期化後にAdapter identity変更 | 次操作前に拒否 |
 | CAP-014 | Stop recovery lookup | Stop Lookup capabilityまたはE4 evidence不足 | 既存Stop intentを保持し、Stopを再実行しない |
 | CAP-015 | Stop dispatch fencing | DispatchStart済みClaimの再取得でStop Dispatch Fencing capabilityまたはE4 evidence不足 | Claimを保持し、Stopを再実行しない |
+| CAP-016 | Task idempotency evidence | Start / Send / ResumeのRequireIdempotency要求でCapability flagは宣言済みだがE4 evidenceなし | CredentialBroker / Adapterを呼ばず拒否 |
 
 CAP-007 / CAP-008の拒否ではCredentialBroker.AcquireとAdapter methodの呼出し回数が0であることを検証する。
 
