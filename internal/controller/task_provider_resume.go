@@ -70,7 +70,8 @@ func (c *ProviderController) ResumeTaskExecution(
 		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
 	}
 	identity := c.runtime.Identity()
-	if capabilities.Identity != identity || !capabilities.SupportsCrossProcessReattachment() {
+	if capabilities.Identity != identity || !capabilities.SupportsCrossProcessReattachment() ||
+		!capabilities.HasEvidenceAtLeast(provider.CapabilityResumeIdempotency, provider.EvidenceLive) {
 		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrUnsupportedCapability
 	}
 	evidenceSHA256 := ""
@@ -118,6 +119,7 @@ func (c *ProviderController) ResumeTaskExecution(
 		OperationID: intent.OperationID,
 		SessionID:   intent.ProviderSessionID,
 		Deadline:    permission.ExpiresAt,
+		RequireIdempotency: true,
 	}
 	if err := request.Validate(); err != nil {
 		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrProviderInvalidRequest
