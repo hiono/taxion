@@ -363,6 +363,34 @@ func (c *ProviderController) dispatchTaskTurn(
 		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(fmt.Errorf("reverify Task Worktree after Send claim acquisition: %w", err), releaseErr)
 	}
+	// Re-read the Job after Worktree verification. A concurrent recovery may
+	// have released or replaced this claim while the verifier was running.
+	finalJob, finalExecution, finalPermission, finalTask, finalAssignment, _, finalSession, finalErr :=
+		c.taskProviderExecutionTarget(ctx, latest.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, principal)
+	if finalErr != nil || finalJob.ID != postClaimJob.ID || finalExecution.ID != postExecution.ID ||
+		finalPermission.ID != postPermission.ID || finalTask.ID != postTask.ID ||
+		finalAssignment != postAssignment || finalSession != postSession {
+		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{},
+			errors.Join(errors.New("Task Send authority or Worktree changed during final verification"), finalErr, releaseErr)
+	}
+	finalClaim, finalClaimActive := domain.ActiveTaskTurnDispatchClaim(finalJob, turn.OperationID)
+	if !finalClaimActive || finalClaim.ID != claim.ID {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
+	}
+	if err := finalPermission.ValidateFor(finalJob, finalPermission.OperationID, finalPermission.RequestSHA256, c.now()); err != nil {
+		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, releaseErr)
+	}
+	for _, stopIntent := range finalJob.ProviderStopIntents {
+		if stopIntent.RoleExecutionID == turn.RoleExecutionID && stopIntent.SessionID == turn.ProviderSessionID {
+			releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
+			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{},
+				errors.Join(errors.New("Task Provider Send is blocked by a Stop intent saved during final verification"), releaseErr)
+		}
+	}
+	postClaimJob, postExecution, postPermission, postTask, postAssignment, postSession =
+		finalJob, finalExecution, finalPermission, finalTask, finalAssignment, finalSession
 	// ExecutionPermission is operation-scoped and must still be valid after the
 	// final Worktree verification, immediately before the Provider side effect.
 	if err := postPermission.ValidateFor(postClaimJob, postPermission.OperationID, postPermission.RequestSHA256, c.now()); err != nil {
