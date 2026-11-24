@@ -131,6 +131,12 @@ func (c TaskTurnDispatchClaim) Validate(job Job) error {
 		c.CreatedAt.Before(turn.CreatedAt) {
 		return errors.New("Task Turn dispatch claim does not match its Turn intent")
 	}
+	for _, stopIntent := range job.ProviderStopIntents {
+		if stopIntent.RoleExecutionID == c.RoleExecutionID && stopIntent.SessionID == c.SessionID &&
+			stopIntent.CreatedRevision < c.CreatedRevision {
+			return errors.New("Task Turn dispatch claim follows an existing Stop intent")
+		}
+	}
 	principalIDFromAuthority, _, err := providerResultUsageExecution(job, c.RoleExecutionID)
 	if err != nil || principalIDFromAuthority != c.PrincipalID {
 		return errors.New("Task Turn dispatch claim Principal does not match execution authority")
@@ -301,6 +307,18 @@ func validateTaskTurnDispatchFacts(job Job) error {
 			if !exists || release.CreatedRevision >= claim.CreatedRevision ||
 				claim.CreatedRevision <= previous.CreatedRevision || claim.CreatedAt.Before(previous.CreatedAt) {
 				return fmt.Errorf("%w: Task Turn dispatch claims overlap for Operation %s", ErrInvalidJob, operationID)
+			}
+		}
+	}
+	for _, claim := range job.TaskTurnDispatchClaims {
+		for _, stopIntent := range job.ProviderStopIntents {
+			if stopIntent.RoleExecutionID != claim.RoleExecutionID || stopIntent.SessionID != claim.SessionID ||
+				stopIntent.CreatedRevision <= claim.CreatedRevision {
+				continue
+			}
+			release, released := releasesByClaim[claim.ID]
+			if !released || release.CreatedRevision >= stopIntent.CreatedRevision {
+				return fmt.Errorf("%w: Stop intent overlaps an active Task Turn dispatch claim", ErrInvalidJob)
 			}
 		}
 	}
