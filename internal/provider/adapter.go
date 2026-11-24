@@ -395,13 +395,14 @@ type StartResult struct {
 }
 
 type TurnRequest struct {
-	OperationID  string
-	TurnID       string
-	SessionID    string
-	PromptSHA256 string
-	Prompt       string
-	MaxTokens    uint64
-	Deadline     time.Time
+	OperationID       string
+	TurnID            string
+	SessionID         string
+	PromptSHA256      string
+	Prompt            string
+	MaxTokens         uint64
+	Deadline          time.Time
+	RequireIdempotency bool
 }
 
 func (r TurnRequest) Validate() error {
@@ -724,6 +725,7 @@ type Adapter interface {
 	Capabilities(context.Context) (Capabilities, error)
 	// Start must use a supplied WorktreePath as the Task working directory and must not substitute another repository snapshot.
 	Start(context.Context, StartRequest, CredentialLease) (StartResult, error)
+	// Send must deduplicate when RequireIdempotency is true; Runtime verifies the matching capability before credential acquisition.
 	Send(context.Context, TurnRequest, CredentialLease) (TurnResult, error)
 	Stop(context.Context, StopRequest, CredentialLease) (StopResult, error)
 	Resume(context.Context, ResumeRequest, CredentialLease) (ResumeResult, error)
