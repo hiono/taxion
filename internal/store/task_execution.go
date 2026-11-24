@@ -31,9 +31,6 @@ func (s *Store) StartTaskExecution(
 		},
 		func(job *domain.Job, start domain.TaskExecutionStart) {
 			job.WorktreeAssignments = append(job.WorktreeAssignments, start.WorktreeAssignment)
-			if job.WorktreeLifecycleEnforcedFromRevision == 0 {
-				job.WorktreeLifecycleEnforcedFromRevision = start.WorktreeAssignment.CreatedRevision
-			}
 			job.RoleExecutions = append(job.RoleExecutions, start.RoleExecution)
 			job.ProviderStartIntents = append(job.ProviderStartIntents, start.ProviderStartIntent)
 			if job.ProviderLifecycleEnforcedFromRevision == 0 {
@@ -64,29 +61,4 @@ func (s *Store) StartTaskExecution(
 	)
 
 	return receipt, start, err
-}
-
-func legacyTaskExecutionStartWithoutWorktreeAssignment(job domain.Job, commandID string) bool {
-	for _, execution := range job.RoleExecutions {
-		if execution.CommandID != commandID {
-			continue
-		}
-		hasStartIntent := false
-		for _, intent := range job.ProviderStartIntents {
-			if intent.RoleExecutionID == execution.ID {
-				hasStartIntent = true
-				break
-			}
-		}
-		if !hasStartIntent {
-			continue
-		}
-		for _, assignment := range job.WorktreeAssignments {
-			if assignment.OwnerRoleExecutionID == execution.ID {
-				return false
-			}
-		}
-		return true
-	}
-	return false
 }
