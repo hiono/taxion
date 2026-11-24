@@ -465,6 +465,25 @@ func (c *ProviderController) reconcileTaskTurn(
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
 	}
 	claimID := claim.ID
+	for _, failureStatus := range []string{
+		domain.TaskTurnDispatchObservationPreAdapterRejection,
+		domain.TaskTurnDispatchObservationDefinitiveFailure,
+	} {
+		if failure, found := taskTurnDispatchObservation(job, claimID, failureStatus); found {
+			_, _, releaseErr := c.store.ReleaseTaskTurnDispatchClaim(
+				ctx, job.ID, claimID, principal,
+				domain.TaskTurnDispatchReleasedDefinitiveFailure, failure.EvidenceSHA256,
+			)
+			if releaseErr != nil {
+				return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, releaseErr
+			}
+			latest, err := c.store.GetJob(ctx, job.ID)
+			if err != nil {
+				return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+			}
+			return c.dispatchTaskTurn(ctx, receipt, latest, turn, request, permissionRequest, principal, capabilities)
+		}
+	}
 	if _, started := taskTurnDispatchObservation(job, claimID, domain.TaskTurnDispatchObservationStarted); !started {
 		if err := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, job.ID, turn, claimID, principal); err != nil {
 			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
