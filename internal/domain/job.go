@@ -1091,8 +1091,8 @@ func (j Job) Validate() error {
 			}
 		}
 		if len(observations) > 2 || (len(observations) == 2 &&
-			observations[0].Status != PlanningResumeUnknown &&
-				observations[0].Status != PlanningResumeNotDispatched) {
+			(observations[0].Status != PlanningResumeUnknown &&
+				observations[0].Status != PlanningResumeNotDispatched)) {
 			return fmt.Errorf("%w: invalid PlanningResumeObservation history for %s", ErrInvalidJob, resumeID)
 		}
 	}
