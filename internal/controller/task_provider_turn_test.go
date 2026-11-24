@@ -371,13 +371,22 @@ func TestProviderCapabilityEvidenceSHA256AcceptsEvidenceAtLeastLive(t *testing.T
 
 func TestReleaseTaskTurnDispatchClaimBeforeSendDoesNotReleaseReplacementClaim(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
-	prepareTaskResumeTurn(t, &f)
-
 	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before creating Turn: %v", err)
+	}
+	promptDigest := sha256.Sum256([]byte("Claim replacement regression test"))
+	_, turn, err := f.database.AddTaskTurnIntent(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, f.permission.ID, "session_1",
+		"cmd_75757575757575757575757575757575", hex.EncodeToString(promptDigest[:]), 100,
+	)
+	if err != nil {
+		t.Fatalf("Add Task Turn intent: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
 	if err != nil {
 		t.Fatalf("GetJob before first claim: %v", err)
 	}
-	turn := job.TaskTurnIntents[0]
 	_, firstClaim, _, err := f.database.AddTaskTurnDispatchClaim(
 		f.ctx, f.jobID, job.Revision, turn.ID,
 		"cmd_78787878787878787878787878787878", f.principal,
