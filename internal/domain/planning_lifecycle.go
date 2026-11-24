@@ -715,10 +715,15 @@ func planningResumeExecutionAuthority(
 	authorizedPrincipalID, providerID, accountID, configurationSHA256, err :=
 		providerStopExecutionAuthority(job, execution)
 	if err != nil {
-		return "", "", "", "", "", "", time.Time{}, err
+		return "", "", "", "", "", "", time.Time{}, &PlanningBoundaryError{
+			Boundary: PlanningBoundaryResume, ReasonCode: "authorization_invalid_or_expired", Cause: err,
+		}
 	}
 	if authorizedPrincipalID != principalID {
-		return "", "", "", "", "", "", time.Time{}, errors.New("Provider Resume requires the HUMAN Principal bound to its execution authority")
+		return "", "", "", "", "", "", time.Time{}, &PlanningBoundaryError{
+			Boundary: PlanningBoundaryResume, ReasonCode: "authorization_invalid_or_expired",
+			Cause: errors.New("Provider Resume requires the HUMAN Principal bound to its execution authority"),
+		}
 	}
 	switch execution.Role {
 	case RolePlanner:
@@ -730,7 +735,9 @@ func planningResumeExecutionAuthority(
 				continue
 			}
 			if err := grant.ValidateFor(job, principalID, now); err != nil {
-				return "", "", "", "", "", "", time.Time{}, err
+				return "", "", "", "", "", "", time.Time{}, &PlanningBoundaryError{
+					Boundary: PlanningBoundaryResume, ReasonCode: "authorization_invalid_or_expired", Cause: err,
+				}
 			}
 			return grant.ID, "", "", providerID, accountID, configurationSHA256, grant.Deadline, nil
 		}
@@ -744,7 +751,9 @@ func planningResumeExecutionAuthority(
 			return "", "", "", "", "", "", time.Time{}, errors.New("Coder Resume ExecutionPermission is invalid")
 		}
 		if err := permission.ValidateFor(job, permission.OperationID, permission.RequestSHA256, now); err != nil {
-			return "", "", "", "", "", "", time.Time{}, err
+			return "", "", "", "", "", "", time.Time{}, &PlanningBoundaryError{
+				Boundary: PlanningBoundaryResume, ReasonCode: "authorization_invalid_or_expired", Cause: err,
+			}
 		}
 		return "", execution.TaskID, permission.ID, providerID, accountID, configurationSHA256, permission.ExpiresAt, nil
 	default:
@@ -776,6 +785,23 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 	}
 	_, providerID, accountID, configurationSHA256, err := providerStopExecutionAuthority(job, execution)
 	if err != nil {
+		return err
+	}
+	var startIntent ProviderStartIntent
+	foundStart := false
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == execution.ID {
+			startIntent, foundStart = candidate, true
+			break
+		}
+	}
+	if !foundStart {
+		return errors.New("PlanningResumeIntent requires its accepted Provider Start")
+	}
+	if err := startIntent.Validate(job, execution); err != nil {
+		return fmt.Errorf("validate Provider Start before Resume: %w", err)
+	}
+	if err := validateProviderStartSession(job, startIntent, r.ProviderSessionID, r.CreatedRevision, r.CreatedAt); err != nil {
 		return err
 	}
 	var deadline time.Time
@@ -830,20 +856,27 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 	switch execution.Role {
 	case RolePlanner:
 		for _, turn := range job.PlanningTurnIntents {
-			if turn.RoleExecutionID != r.RoleExecutionID || turn.ProviderSessionID != r.ProviderSessionID ||
-				turn.CreatedRevision >= r.CreatedRevision {
+			if turn.RoleExecutionID != r.RoleExecutionID || turn.CreatedRevision >= r.CreatedRevision {
 				continue
+			}
+			if turn.ProviderSessionID != r.ProviderSessionID {
+				return errors.New("PlanningResumeIntent Provider Session differs from its Planner turns")
 			}
 			foundSessionTurn = true
 			if turn.CreatedAt.After(latestPriorTurnAt) {
 				latestPriorTurnAt = turn.CreatedAt
 			}
 		}
+		if !foundSessionTurn {
+			return errors.New("Planner Resume requires a persisted turn for the accepted Provider Session")
+		}
 	case RoleCoder:
 		for _, turn := range job.TaskTurnIntents {
-			if turn.RoleExecutionID != r.RoleExecutionID || turn.ProviderSessionID != r.ProviderSessionID ||
-				turn.CreatedRevision >= r.CreatedRevision {
+			if turn.RoleExecutionID != r.RoleExecutionID || turn.CreatedRevision >= r.CreatedRevision {
 				continue
+			}
+			if turn.ProviderSessionID != r.ProviderSessionID {
+				return errors.New("PlanningResumeIntent Provider Session differs from its Task Coder turns")
 			}
 			foundSessionTurn = true
 			if turn.CreatedAt.After(latestPriorTurnAt) {
@@ -851,8 +884,8 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 			}
 		}
 	}
-	if !foundSessionTurn || r.CreatedAt.Before(latestPriorTurnAt) {
-		return errors.New("PlanningResumeIntent does not follow a persisted turn for the same Provider Session")
+	if foundSessionTurn && r.CreatedAt.Before(latestPriorTurnAt) {
+		return errors.New("PlanningResumeIntent must follow the latest prior turn for its Provider Session")
 	}
 	for _, previous := range job.PlanningResumeIntents {
 		if previous.RoleExecutionID != r.RoleExecutionID || previous.ProviderSessionID != r.ProviderSessionID ||
