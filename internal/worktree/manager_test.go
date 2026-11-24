@@ -16,7 +16,7 @@ import (
 
 func TestManagerPreparesDetachedTaskWorktreeAtImmutableBaseline(t *testing.T) {
 	repository := initRepository(t)
-	workspace := filepath.Join(t.TempDir(), "worktrees")
+	workspace := filepath.Join(canonicalTempDir(t), "worktrees")
 	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -61,7 +61,7 @@ func TestManagerPreparesDetachedTaskWorktreeAtImmutableBaseline(t *testing.T) {
 }
 
 func TestDetachedHeadProbeRejectsUnexpectedGitErrors(t *testing.T) {
-	missingRepository := filepath.Join(t.TempDir(), "missing-repository")
+	missingRepository := filepath.Join(canonicalTempDir(t), "missing-repository")
 	command := exec.CommandContext(context.Background(), "git", "-C", missingRepository, "symbolic-ref", "-q", "HEAD")
 	_, err := command.Output()
 	if err == nil {
@@ -81,7 +81,7 @@ func TestDetachedHeadProbeRejectsUnexpectedGitErrors(t *testing.T) {
 
 func TestManagerRetryRestoresPersistedBaselineAfterSourceHEADChanges(t *testing.T) {
 	repository := initRepository(t)
-	workspace := filepath.Join(t.TempDir(), "worktrees")
+	workspace := filepath.Join(canonicalTempDir(t), "worktrees")
 	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -126,7 +126,7 @@ func TestManagerRetryRestoresPersistedBaselineAfterSourceHEADChanges(t *testing.
 
 func TestManagerRejectsExistingWorktreeWithoutPersistedBaseline(t *testing.T) {
 	repository := initRepository(t)
-	manager, err := NewManager(filepath.Join(t.TempDir(), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestManagerRejectsExistingWorktreeWithoutPersistedBaseline(t *testing.T) {
 
 func TestManagerRejectsOutOfScopeRepositoryAndChangedBaseline(t *testing.T) {
 	repository := initRepository(t)
-	manager, err := NewManager(filepath.Join(t.TempDir(), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestManagerRejectsOutOfScopeRepositoryAndChangedBaseline(t *testing.T) {
 
 func TestManagerCapturesImmutableOutputSnapshotOnlyForCleanWorktree(t *testing.T) {
 	repository := initRepository(t)
-	manager, err := NewManager(filepath.Join(t.TempDir(), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestManagerRejectsMultipleRepositoriesAndUnsafeWorkspaceRoot(t *testing.T) 
 	if _, err := NewManager(filepath.Join(repository, "nested-worktrees"), []Repository{{ID: "repo.primary", Path: repository}}); err == nil {
 		t.Fatal("workspace nested in repository was accepted")
 	}
-	manager, err := NewManager(filepath.Join(t.TempDir(), "worktrees"), []Repository{
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "worktrees"), []Repository{
 		{ID: "repo.primary", Path: repository},
 		{ID: "repo.secondary", Path: secondaryRepository},
 	})
@@ -290,10 +290,20 @@ func TestManagerRejectsMultipleRepositoriesAndUnsafeWorkspaceRoot(t *testing.T) 
 	}
 }
 
-func initRepository(t *testing.T) string {
+func canonicalTempDir(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	gitTestRun(t, root, "init")
+	canonical, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("resolve temporary test directory: %v", err)
+	}
+	return canonical
+}
+
+func initRepository(t *testing.T) string {
+	t.Helper()
+	root := canonicalTempDir(t)
+	gitTestRun(t, root, "init", "--initial-branch=taxion-test-base")
 	gitTestRun(t, root, "config", "user.name", "Taxion Test")
 	gitTestRun(t, root, "config", "user.email", "taxion-test@example.invalid")
 	gitTestRun(t, root, "config", "commit.gpgSign", "false")
@@ -336,7 +346,7 @@ func gitTestOutput(t *testing.T, directory string, args ...string) string {
 
 func TestManagerAdoptsExistingLinkedWorktreeWithoutChangingItsState(t *testing.T) {
 	repository := initRepository(t)
-	worktreePath := filepath.Join(t.TempDir(), "existing-worktree")
+	worktreePath := filepath.Join(canonicalTempDir(t), "existing-worktree")
 	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, "HEAD")
 	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("staged change\n"), 0o600); err != nil {
 		t.Fatalf("write staged change: %v", err)
@@ -368,7 +378,7 @@ func TestManagerAdoptsExistingLinkedWorktreeWithoutChangingItsState(t *testing.T
 		t.Fatalf("read untracked file before adoption: %v", err)
 	}
 
-	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -433,9 +443,9 @@ func TestManagerAdoptsExistingLinkedWorktreeWithoutChangingItsState(t *testing.T
 
 func TestManagerAdoptsBranchAttachedWorktreeAndPreservesBranchIdentity(t *testing.T) {
 	repository := initRepository(t)
-	worktreePath := filepath.Join(t.TempDir(), "branch-worktree")
+	worktreePath := filepath.Join(canonicalTempDir(t), "branch-worktree")
 	gitTestRun(t, repository, "worktree", "add", worktreePath, "-b", "adopted-feature")
-	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -458,9 +468,9 @@ func TestManagerAdoptsBranchAttachedWorktreeAndPreservesBranchIdentity(t *testin
 
 func TestManagerRequiresPersistentReservationForAdoptedWorktree(t *testing.T) {
 	repository := initRepository(t)
-	worktreePath := filepath.Join(t.TempDir(), "reserved-worktree")
+	worktreePath := filepath.Join(canonicalTempDir(t), "reserved-worktree")
 	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, "HEAD")
-	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -485,11 +495,11 @@ func TestManagerRequiresPersistentReservationForAdoptedWorktree(t *testing.T) {
 
 func TestManagerAdoptionReservationsAreUniqueByTaskAndGitAdminDirectory(t *testing.T) {
 	repository := initRepository(t)
-	worktreeA := filepath.Join(t.TempDir(), "adoption-a")
-	worktreeB := filepath.Join(t.TempDir(), "adoption-b")
+	worktreeA := filepath.Join(canonicalTempDir(t), "adoption-a")
+	worktreeB := filepath.Join(canonicalTempDir(t), "adoption-b")
 	gitTestRun(t, repository, "worktree", "add", "--detach", worktreeA, "HEAD")
 	gitTestRun(t, repository, "worktree", "add", "--detach", worktreeB, "HEAD")
-	workspace := filepath.Join(t.TempDir(), "managed-worktrees")
+	workspace := filepath.Join(canonicalTempDir(t), "managed-worktrees")
 	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -526,7 +536,7 @@ func TestManagerAdoptionReservationsAreUniqueByTaskAndGitAdminDirectory(t *testi
 	if err != nil || len(entries) != 2 {
 		t.Fatalf("losing Task reservation was not cleaned up: entries=%d err=%v", len(entries), err)
 	}
-	movedPath := filepath.Join(t.TempDir(), "adoption-moved")
+	movedPath := filepath.Join(canonicalTempDir(t), "adoption-moved")
 	gitTestRun(t, repository, "worktree", "move", winner.snapshot.WorktreePath, movedPath)
 	otherTask := domain.Task{ID: "task_2222222222222222", TargetRepositories: []string{"repo.primary"}}
 	if _, err := manager.Adopt(context.Background(), "job_2222222222222222", otherTask, movedPath); err == nil {
@@ -543,7 +553,7 @@ func TestManagerCaptureOutputRejectsDirtySubmodule(t *testing.T) {
 	submodule := initRepository(t)
 	gitTestRun(t, repository, "-c", "protocol.file.allow=always", "submodule", "add", submodule, "nested")
 	gitTestRun(t, repository, "commit", "-m", "add submodule")
-	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -563,7 +573,7 @@ func TestManagerCaptureOutputRejectsDirtySubmodule(t *testing.T) {
 }
 
 func TestWriteExclusiveAtomicDoesNotOverwriteExistingRecord(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nested", "record.json")
+	path := filepath.Join(canonicalTempDir(t), "nested", "record.json")
 	first := []byte("{\"state\":\"complete\"}")
 	if err := writeExclusiveAtomic(path, first, 0o600); err != nil {
 		t.Fatalf("write first atomic record: %v", err)
@@ -582,10 +592,10 @@ func TestManagerAdoptRejectsDirtySubmoduleState(t *testing.T) {
 	submodule := initRepository(t)
 	gitTestRun(t, repository, "-c", "protocol.file.allow=always", "submodule", "add", submodule, "nested")
 	gitTestRun(t, repository, "commit", "-m", "add submodule")
-	worktreePath := filepath.Join(t.TempDir(), "adopted-with-submodule")
+	worktreePath := filepath.Join(canonicalTempDir(t), "adopted-with-submodule")
 	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, "HEAD")
 	gitTestRun(t, worktreePath, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
-	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -603,9 +613,9 @@ func TestManagerAdoptRejectsDirtySubmoduleState(t *testing.T) {
 
 func TestManagerAdoptRejectsIndexFlagsAndStreamsLargeUntrackedFiles(t *testing.T) {
 	repository := initRepository(t)
-	worktreePath := filepath.Join(t.TempDir(), "adopt-index-flags")
+	worktreePath := filepath.Join(canonicalTempDir(t), "adopt-index-flags")
 	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, "HEAD")
-	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -649,13 +659,13 @@ func TestManagerAdoptRejectsIndexFlagsAndStreamsLargeUntrackedFiles(t *testing.T
 
 func TestManagerAdoptRecoversOrphanedTaskReservationAfterGitDirConflict(t *testing.T) {
 	repository := initRepository(t)
-	worktreeA := filepath.Join(t.TempDir(), "orphaned-task-worktree")
-	worktreeB := filepath.Join(t.TempDir(), "reserved-worktree")
-	worktreeC := filepath.Join(t.TempDir(), "replacement-worktree")
+	worktreeA := filepath.Join(canonicalTempDir(t), "orphaned-task-worktree")
+	worktreeB := filepath.Join(canonicalTempDir(t), "reserved-worktree")
+	worktreeC := filepath.Join(canonicalTempDir(t), "replacement-worktree")
 	gitTestRun(t, repository, "worktree", "add", "--detach", worktreeA, "HEAD")
 	gitTestRun(t, repository, "worktree", "add", "--detach", worktreeB, "HEAD")
 	gitTestRun(t, repository, "worktree", "add", "--detach", worktreeC, "HEAD")
-	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -706,14 +716,14 @@ func TestManagerAdoptRecoversOrphanedTaskReservationAfterGitDirConflict(t *testi
 
 func TestManagerOrphanedReservationCleanupPreservesCommittedAdoption(t *testing.T) {
 	repository := initRepository(t)
-	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
 	reservation := adoptionReservation{
 		JobID: "job_cccccccccccccccc", TaskID: "task_cccccccccccccccc",
-		RepositoryID: "repo.primary", WorktreePath: filepath.Join(t.TempDir(), "worktree"),
-		GitDir: filepath.Join(t.TempDir(), "git", "worktrees", "task"),
+		RepositoryID: "repo.primary", WorktreePath: filepath.Join(canonicalTempDir(t), "worktree"),
+		GitDir: filepath.Join(canonicalTempDir(t), "git", "worktrees", "task"),
 	}
 	directory := filepath.Join(manager.root, ".adoptions")
 	taskKey := sha256.Sum256([]byte(reservation.JobID + "\x00" + reservation.TaskID))
@@ -728,7 +738,7 @@ func TestManagerOrphanedReservationCleanupPreservesCommittedAdoption(t *testing.
 	}
 	record := baselineRecord{
 		Version: 2, JobID: reservation.JobID, TaskID: reservation.TaskID,
-		RepositoryID: reservation.RepositoryID, RepositoryPath: filepath.Join(t.TempDir(), "source"),
+		RepositoryID: reservation.RepositoryID, RepositoryPath: filepath.Join(canonicalTempDir(t), "source"),
 		WorktreePath: reservation.WorktreePath, BaselineCommit: strings.Repeat("a", 40),
 		Origin: domain.WorktreeOriginAdopted, InitialStateSHA256: strings.Repeat("b", 64),
 		HeadMode: domain.WorktreeHeadDetached,
