@@ -297,6 +297,14 @@ func initRepository(t *testing.T) string {
 	gitTestRun(t, root, "config", "user.name", "Taxion Test")
 	gitTestRun(t, root, "config", "user.email", "taxion-test@example.invalid")
 	gitTestRun(t, root, "config", "commit.gpgSign", "false")
+	excludesFile := filepath.Join(root, "empty-global-excludes")
+	if err := os.WriteFile(excludesFile, nil, 0o600); err != nil {
+		t.Fatalf("write empty global excludes file: %v", err)
+	}
+	gitTestRun(t, root, "config", "core.excludesFile", excludesFile)
+	if got := gitTestOutput(t, root, "config", "--path", "core.excludesFile"); got != excludesFile {
+		t.Fatalf("repository-local core.excludesFile = %q, want %q", got, excludesFile)
+	}
 	if got := gitTestOutput(t, root, "config", "--bool", "commit.gpgSign"); got != "false" {
 		t.Fatalf("repository-local commit.gpgSign = %q, want false", got)
 	}

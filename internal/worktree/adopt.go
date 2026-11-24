@@ -384,7 +384,7 @@ func initialWorktreeStateSHA256(
 	if err != nil {
 		return "", err
 	}
-	staged, err := gitBytes(ctx, path, "--no-optional-locks", "diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", "HEAD")
+	staged, err := gitBytes(ctx, path, "--no-optional-locks", "diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", head, "--")
 	if err != nil {
 		return "", err
 	}
