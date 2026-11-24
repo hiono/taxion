@@ -216,6 +216,25 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 				BaselineCommit: strings.Repeat("a", 40),
 			}
 
+			if role == domain.RoleReviewer {
+				if _, _, err := database.StartTaskExecution(
+					ctx, startRevision, jobID, task.ID, permission.ID, startCommandID, requestSHA, snapshot,
+				); err == nil {
+					t.Fatal("Reviewer was started through the mutable Task Worktree command")
+				}
+				afterReviewerRejection, err := database.GetJob(ctx, jobID)
+				if err != nil {
+					t.Fatalf("GetJob after rejected Reviewer start: %v", err)
+				}
+				if afterReviewerRejection.Revision != startRevision ||
+					len(afterReviewerRejection.RoleExecutions) != len(job.RoleExecutions) ||
+					len(afterReviewerRejection.ProviderStartIntents) != len(job.ProviderStartIntents) ||
+					len(afterReviewerRejection.WorktreeAssignments) != len(job.WorktreeAssignments) {
+					t.Fatalf("rejected Reviewer start mutated Job: %#v", afterReviewerRejection)
+				}
+				return
+			}
+
 			if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_task_execution_receipt BEFORE INSERT ON job_commands WHEN NEW.command_type = 'TASK_EXECUTION_START' BEGIN SELECT RAISE(ABORT, 'injected Task execution receipt failure'); END`); err != nil {
 				t.Fatalf("create rollback trigger: %v", err)
 			}

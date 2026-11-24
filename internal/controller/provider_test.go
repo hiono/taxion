@@ -1374,16 +1374,17 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 	}
 }
 
-func TestProviderControllerRejectsTaskReviewerStartWithoutReadOnlyWorktreeBoundary(t *testing.T) {
+func TestProviderControllerRejectsReviewerBeforeMutableWorktreePreparation(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Round(0)
+	worktrees := &fakeTaskWorktreeVerifier{}
 	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
 		Reversible: true, Mutating: false, ValidUntil: now.Add(45 * time.Minute),
 	}}
-	executionController, err := NewExecutionControllerWithWorktree(database, assessor, &fakeTaskWorktreeVerifier{})
+	executionController, err := NewExecutionControllerWithWorktree(database, assessor, worktrees)
 	if err != nil {
-		t.Fatalf("NewExecutionController: %v", err)
+		t.Fatalf("NewExecutionControllerWithWorktree: %v", err)
 	}
 	executionController.now = func() time.Time { return now }
 	request := domain.ExecutionPermissionRequest{
@@ -1397,23 +1398,25 @@ func TestProviderControllerRejectsTaskReviewerStartWithoutReadOnlyWorktreeBounda
 	if err != nil {
 		t.Fatalf("Authorize Reviewer: %v", err)
 	}
-	_, execution, _, err := executionController.StartTaskExecution(
+	before, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Reviewer start: %v", err)
+	}
+	if _, _, _, err := executionController.StartTaskExecution(
 		ctx, permission.ID, "cmd_b6666666666666666666666666666666", request,
-	)
+	); err == nil || !strings.Contains(err.Error(), "immutable JobOutput snapshot") {
+		t.Fatalf("Reviewer Start without immutable snapshot boundary = %v", err)
+	}
+	after, err := database.GetJob(ctx, jobID)
 	if err != nil {
-		t.Fatalf("StartTaskExecution Reviewer: %v", err)
+		t.Fatalf("GetJob after Reviewer start: %v", err)
 	}
-	runtime := &fakePlanningProviderRuntime{}
-	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
-	if err != nil {
-		t.Fatalf("NewProviderControllerWithExecution: %v", err)
-	}
-	if _, _, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request); err == nil ||
-		!strings.Contains(err.Error(), "immutable Worktree snapshot") {
-		t.Fatalf("Reviewer Start without enforced read-only boundary = %v", err)
-	}
-	if runtime.startCalls != 0 || runtime.lookupCalls != 0 {
-		t.Fatalf("Reviewer dispatch invoked Provider: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
+	if worktrees.prepareCalls != 0 || worktrees.verifyCalls != 0 ||
+		after.Revision != before.Revision || len(after.RoleExecutions) != len(before.RoleExecutions) ||
+		len(after.ProviderStartIntents) != len(before.ProviderStartIntents) ||
+		len(after.WorktreeAssignments) != len(before.WorktreeAssignments) {
+		t.Fatalf("Reviewer start crossed mutable Worktree boundary: prepare=%d verify=%d before=%#v after=%#v",
+			worktrees.prepareCalls, worktrees.verifyCalls, before, after)
 	}
 }
 
