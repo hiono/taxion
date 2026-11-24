@@ -467,7 +467,7 @@ func TestRoleExecutionRequiresWorktreeID(t *testing.T) {
 		JobID:                    job.ID,
 		Role:                     RoleCoder,
 		TaskID:                   "task_aaaaaaaaaaaaaaaa",
-		ExecutionPermissionID:    "execperm_aaaaaaaaaaaaaaaa",
+		ExecutionPermissionID:    ExecutionPermissionID(commandID),
 		ProviderStartOperationID: ProviderStartOperationID(commandID),
 		CreatedAt:                time.Unix(1, 0).UTC(),
 		CreatedRevision:          2,
