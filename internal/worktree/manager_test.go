@@ -421,6 +421,26 @@ func TestManagerCleanupFailedPreparePreservesBaselineWhenWorktreeRemovalFails(t 
 	}
 }
 
+func TestManagerCaptureOutputRejectsReplacedCreatedWorktreeGitDir(t *testing.T) {
+	repository := initRepository(t)
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	jobID := "job_b123456789abcdef"
+	task := domain.Task{ID: "task_b123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := manager.Prepare(context.Background(), jobID, task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	gitTestRun(t, repository, "worktree", "remove", "--force", snapshot.WorktreePath)
+	gitTestRun(t, repository, "worktree", "add", "--detach", snapshot.WorktreePath, snapshot.BaselineCommit)
+	if _, err := manager.CaptureOutput(context.Background(), jobID, task, snapshot); err == nil ||
+		!strings.Contains(err.Error(), "reservation identity") {
+		t.Fatalf("CaptureOutput accepted a replacement Worktree Git admin directory: %v", err)
+	}
+}
+
 func TestManagerAdoptRejectsSubmoduleAssumeUnchangedIndex(t *testing.T) {
 	submoduleRepository := initRepository(t)
 	repository := initRepository(t)

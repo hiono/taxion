@@ -427,10 +427,8 @@ func (m *Manager) verify(ctx context.Context, jobID string, task domain.Task, sn
 	if !pathWithin(expectedGitDir, resolvedGitDir) {
 		return errors.New("Task path is not registered as a linked Worktree of the trusted repository")
 	}
-	if origin == domain.WorktreeOriginAdopted {
-		if err := m.verifyAdoptionReservation(jobID, task.ID, snapshot.RepositoryID, worktreePath, resolvedGitDir); err != nil {
-			return err
-		}
+	if err := m.verifyAdoptionReservation(jobID, task.ID, snapshot.RepositoryID, worktreePath, resolvedGitDir); err != nil {
+		return err
 	}
 	return nil
 }
