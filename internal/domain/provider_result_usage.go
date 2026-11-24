@@ -198,7 +198,7 @@ func (o ProviderUsageObservation) Validate(job Job) error {
 	if o.CreatedRevision <= minimumRevision || o.CreatedAt.Before(minimumTime) {
 		return errors.New("Provider Usage observation does not follow its accepted Provider operation")
 	}
-	if o.Complete && o.TurnID != "" {
+	if o.TurnID != "" {
 		for _, existing := range job.ProviderUsageObservations {
 			if existing.OperationID == o.OperationID && existing.TurnID == o.TurnID &&
 				existing.Complete && existing.CreatedRevision < o.CreatedRevision {
