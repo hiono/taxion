@@ -256,7 +256,7 @@ func verifyCleanInitialWorktree(ctx context.Context, worktreePath, baseline stri
 	}
 	status, err := gitOutput(
 		ctx, worktreePath, "--no-optional-locks", "status", "--porcelain=v2",
-		"--untracked-files=all", "--ignore-submodules=none",
+		"--untracked-files=all", "--ignore-submodules=all",
 	)
 	if err != nil {
 		return fmt.Errorf("inspect new Task Worktree after checkout hooks: %w", err)
@@ -269,8 +269,8 @@ func verifyCleanInitialWorktree(ctx context.Context, worktreePath, baseline stri
 		return fmt.Errorf("inspect new Task Worktree submodules: %w", err)
 	}
 	for _, line := range strings.Split(submoduleStatus, "\n") {
-		if strings.HasPrefix(line, "-") || strings.HasPrefix(line, "U") {
-			return errors.New("new Task Worktree contains an uninitialized or conflicted submodule")
+		if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "U") {
+			return errors.New("new Task Worktree contains a mismatched or conflicted submodule")
 		}
 	}
 	dirtySubmodules, err := gitBytes(
