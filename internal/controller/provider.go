@@ -1707,6 +1707,12 @@ func (c *ProviderController) recordResumeObservation(
 			if status == domain.PlanningResumeUnknown {
 				return previous, nil
 			}
+		} else if previous.Status == domain.PlanningResumeNotDispatched {
+			if status == domain.PlanningResumeNotDispatched {
+				return previous, nil
+			}
+			// A durable NOT_DISPATCHED fact proves this OperationID never reached
+			// the Provider, so a later attempt may append its own result.
 		} else if previous.Status == status && previous.EvidenceSHA256 == evidenceSHA256 {
 			return previous, nil
 		} else {
@@ -1736,6 +1742,15 @@ func providerResumeObservationCommandID(resumeID, status, evidenceSHA256 string,
 	material := fmt.Sprintf("taxion:planning-resume-observation:%s:%s:%s:%t", resumeID, status, evidenceSHA256, reconcilesUnknown)
 	sum := sha256.Sum256([]byte(material))
 	return "cmd_" + hex.EncodeToString(sum[:16])
+}
+
+func providerResumeNotDispatchedEvidence(resumeID string, cause error) string {
+	material := "taxion:provider-resume-not-dispatched:" + resumeID
+	if cause != nil {
+		material += ":" + cause.Error()
+	}
+	sum := sha256.Sum256([]byte(material))
+	return hex.EncodeToString(sum[:])
 }
 
 func resumeResultFromObservation(observation domain.PlanningResumeObservation) provider.ResumeResult {
