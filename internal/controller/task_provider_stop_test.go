@@ -644,7 +644,6 @@ func TestTaskProviderStopLookupRecoveryDoesNotRequireStopProof(t *testing.T) {
 	}
 }
 
-
 func TestTaskProviderStopRecoversClaimCommittedBeforeDispatchAfterRestart(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	enableTaskStopLookup(&f)

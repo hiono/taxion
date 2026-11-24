@@ -12,7 +12,7 @@ import (
 const (
 	ProviderStopDispatchReleasedStopped           = "stopped"
 	ProviderStopDispatchReleasedDefinitiveFailure = "definitive_failure"
-	ProviderStopDispatchReleasedNotDispatched      = "not_dispatched"
+	ProviderStopDispatchReleasedNotDispatched     = "not_dispatched"
 )
 
 type ProviderStopDispatchClaim struct {
