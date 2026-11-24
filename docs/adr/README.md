@@ -16,7 +16,7 @@
 - **ADR-800 — Quality & Evidence:** 検証証拠と製品受入れを区別する基本方針を定義します。
 - 個別の設計判断は各カテゴリの下位ADRに記録します。カテゴリ00番ADRは一覧や下位ADRの要約ではなく、カテゴリに共通する基本設計方針を定義します。
 
-番号帯は分類であり、優先順位・重要度・規範性を表しません。下位ADRは上位の製品目的・安全境界を上書きせず、具体化します。決定の変更は既存判断を暗黙に書き換えず、新しいADRと明示的なSupersedes関係で記録します。
+番号帯は分類であり、優先順位・重要度・規範性を表しません。下位ADRは上位の製品目的・安全境界を上書きせず、具体化します。Accepted ADRは現在有効な判断を示し、方針変更時は同じ設計課題を扱う既存ADRを直接改訂します。独立した設計課題を扱う場合に限り、新しいADRを作成します。
 
 ## 状態
 
@@ -35,7 +35,6 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 ### 000–099 ADR Governance
 - [ADR-000: Architecture Decision Recordsの管理規約](000-adr-governance.md) — Accepted
 - [ADR-001: 現行仕様・開発計画・履歴・検証証拠の正本を分離する](001-specification-plan-history-and-evidence.md) — Accepted
-- [ADR-002: 誤誘導を生む既存コメントの是正を限定的に認める](002-correction-of-misleading-history-comments.md) — Accepted
 
 ### 100–199 Product & Governance
 - [ADR-100: 製品目的 — 人間の曖昧な思考を継続可能な協調作業へ昇華する](100-product-purpose.md) — Accepted
