@@ -22,6 +22,13 @@ Accepted
 - Reviewerは独立したRoleExecution / Contextで固定commit・tree・snapshotをread-onlyで評価します。
 - Repository共通Git metadataの変更はRepository単位で直列化し、Worktree間の競合は統合Taskで明示的に解決します。
 - Worktree分離はJobApproval、resource boundary、Computer Sandboxを代替しません。
+- Worktreeの生成元は信頼性や利用可否を決める条件にしません。Taxionが生成したWorktreeと、利用者・外部ツールが事前に生成したWorktreeは、同じ検証・登録手続きを通過した後は同一のJob / Task管理対象として扱います。生成元は監査用のprovenanceとして保持します。
+- 既存Worktreeの採用（Adopt）はController管理の明示的なCommandとします。Taskの承認済みRepository scope、trusted Repository identity、canonical repository / Worktree path、Git linked-worktree metadata、baseline commit、HEAD commit / tree、index・working tree・untracked filesを含む初期状態のidentityを検証し、採用事実をJobAggregateへ永続化します。検証不能、scope外、identity不一致、symlink経由、baselineとの履歴関係不明の場合はfail closedとします。
+- Adoptは既存ファイルを変更しません。reset、checkout、clean、stashなどにより利用者の変更を破棄・移動してはなりません。staged / unstaged / untrackedの状態を完全に識別・保全できない場合は採用を拒否します。
+- CreateとAdoptは登録方法だけを分け、登録後は同じWorktree lifecycle、Job / Task ownership、Provider検証、停止・成果Evidenceの契約を適用します。Worktreeは同時に一つのJob / Taskだけへ割り当てます。
+- WorktreeAssignmentのownerを上書きしてRoleを切り替えてはなりません。Role間のmutable Worktree ownership移転は、旧ownerのProvider停止・Quiescent、event / final result / complete Usage、移転対象identityを照合した明示的Handoff Commandとappend-only transfer factで確定します。未確定・UNKNOWNの場合は旧ownerとWorktreeを保持またはquarantineします。
+- Reviewerにはmutable Worktreeを渡しません。Coderの確定したcommit / treeから独立したimmutable snapshotを作成し、別RoleExecution / Context / SessionとProvider側read-only enforcementで評価します。Reviewer終了後にCoderが修正を続ける場合も、Reviewerの停止・結果・Usageを照合した後、明示的なHandoffでmutable ownershipを再取得します。
+- Release、quarantine、orphan reconciliation / recoveryはControllerが管理します。停止・所有者・実行結果が不明なWorktreeを自動削除または別Roleへ再割当てしません。
 
 ## Consequences
 
