@@ -1064,6 +1064,16 @@ func providerStopObservationUnknown(observation domain.ProviderStopObservation) 
 	return !observation.Stopped && !observation.Quiescent && observation.EvidenceSHA256 == ""
 }
 
+func providerTurnDefinitiveFailureEvidence(operationID string, err error) (string, bool) {
+	var operationError *provider.OperationError
+	if !errors.As(err, &operationError) || operationError == nil ||
+		operationError.Class != provider.FailureDefinitive {
+		return "", false
+	}
+	return sha256String("taxion:provider-turn-definitive-failure:" + operationID + ":" +
+		string(operationError.Class) + ":" + operationError.Code), true
+}
+
 func providerStopDefinitiveFailureEvidence(operationID string, err error) (string, bool) {
 	var operationError *provider.OperationError
 	if !errors.As(err, &operationError) || operationError == nil ||
