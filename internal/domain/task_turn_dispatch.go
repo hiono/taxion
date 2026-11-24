@@ -176,8 +176,12 @@ func NewTaskTurnDispatchRelease(
 	if outcome == TaskTurnDispatchReleasedIdempotentRetry && !validSHA256(evidenceSHA256) {
 		return TaskTurnDispatchRelease{}, errors.New("idempotent Task Turn retry requires verified Send idempotency evidence")
 	}
-	if outcome != TaskTurnDispatchReleasedIdempotentRetry && evidenceSHA256 != "" {
-		return TaskTurnDispatchRelease{}, errors.New("Task Turn dispatch release evidence is only valid for idempotent retry")
+	if outcome == TaskTurnDispatchReleasedDefinitiveFailure && evidenceSHA256 != "" && !validSHA256(evidenceSHA256) {
+		return TaskTurnDispatchRelease{}, errors.New("definitive Task Turn failure evidence must be a SHA-256 digest")
+	}
+	if outcome != TaskTurnDispatchReleasedIdempotentRetry &&
+		outcome != TaskTurnDispatchReleasedDefinitiveFailure && evidenceSHA256 != "" {
+		return TaskTurnDispatchRelease{}, errors.New("Task Turn dispatch release evidence is not valid for this outcome")
 	}
 	if _, active := ActiveTaskTurnDispatchClaim(job, claim.OperationID); !active {
 		return TaskTurnDispatchRelease{}, errors.New("Task Turn dispatch claim is already released")
@@ -239,6 +243,10 @@ func (r TaskTurnDispatchRelease) Validate(job Job) error {
 		}
 		if previous != nil && previous.Status != TaskTurnUnknown {
 			return errors.New("idempotent Task Turn retry cannot release a claim after a terminal observation")
+		}
+	} else if r.Outcome == TaskTurnDispatchReleasedDefinitiveFailure {
+		if r.EvidenceSHA256 != "" && !validSHA256(r.EvidenceSHA256) {
+			return errors.New("definitive Task Turn failure evidence is invalid")
 		}
 	} else if r.EvidenceSHA256 != "" {
 		return errors.New("Task Turn dispatch release has unexpected evidence")
