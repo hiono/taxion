@@ -215,15 +215,23 @@ func TestTaskProviderResumeWorktreeGatesAndIntentFirstOrdering(t *testing.T) {
 			t.Fatalf("Resume crossed failed final Worktree check: calls=%d err=%v", f.runtime.resumeCalls, err)
 		}
 		job, readErr := f.database.GetJob(f.ctx, f.jobID)
-		if readErr != nil || len(job.PlanningResumeIntents) != 1 || len(job.PlanningResumeObservations) != 0 {
-			t.Fatalf("intent-first Resume facts were not preserved: intents=%d observations=%d err=%v",
-				len(job.PlanningResumeIntents), len(job.PlanningResumeObservations), readErr)
+		if readErr != nil || len(job.PlanningResumeIntents) != 1 || len(job.PlanningResumeObservations) != 1 ||
+			job.PlanningResumeObservations[0].Status != domain.PlanningResumeNotDispatched {
+			t.Fatalf("final pre-dispatch Worktree failure was not durably recorded: intents=%d observations=%#v err=%v",
+				len(job.PlanningResumeIntents), job.PlanningResumeObservations, readErr)
 		}
 		replayedIntent, observation, result, err := f.resume(commandID)
 		if err != nil || replayedIntent.ID != intent.ID || replayedIntent.OperationID != intent.OperationID ||
 			observation.Status != domain.PlanningResumeAttached || !result.Attached || f.runtime.resumeCalls != 1 {
 			t.Fatalf("retry did not reattach the same Session / OperationID: intent=%#v observation=%#v result=%#v calls=%d err=%v",
 				replayedIntent, observation, result, f.runtime.resumeCalls, err)
+		}
+		job, readErr = f.database.GetJob(f.ctx, f.jobID)
+		if readErr != nil || len(job.PlanningResumeObservations) != 2 ||
+			job.PlanningResumeObservations[0].Status != domain.PlanningResumeNotDispatched ||
+			job.PlanningResumeObservations[1].Status != domain.PlanningResumeAttached {
+			t.Fatalf("Resume retry did not preserve NOT_DISPATCHED and append ATTACHED: %#v err=%v",
+				job.PlanningResumeObservations, readErr)
 		}
 	})
 }
