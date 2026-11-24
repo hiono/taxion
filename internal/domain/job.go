@@ -1081,13 +1081,18 @@ func (j Job) Validate() error {
 				continue
 			}
 			previous := observations[i-1]
-			if previous.Status != PlanningResumeUnknown || observation.Status == PlanningResumeUnknown ||
-				!observation.ReconcilesUnknown || observation.CreatedRevision <= previous.CreatedRevision ||
+			validTransition := (previous.Status == PlanningResumeUnknown &&
+				observation.Status != PlanningResumeUnknown && observation.ReconcilesUnknown) ||
+				(previous.Status == PlanningResumeNotDispatched &&
+					observation.Status != PlanningResumeUnknown && !observation.ReconcilesUnknown)
+			if !validTransition || observation.CreatedRevision <= previous.CreatedRevision ||
 				observation.CreatedAt.Before(previous.CreatedAt) {
 				return fmt.Errorf("%w: invalid PlanningResumeObservation reconciliation sequence for %s", ErrInvalidJob, resumeID)
 			}
 		}
-		if len(observations) > 2 || (len(observations) == 2 && observations[0].Status != PlanningResumeUnknown) {
+		if len(observations) > 2 || (len(observations) == 2 &&
+			observations[0].Status != PlanningResumeUnknown &&
+				observations[0].Status != PlanningResumeNotDispatched) {
 			return fmt.Errorf("%w: invalid PlanningResumeObservation history for %s", ErrInvalidJob, resumeID)
 		}
 	}
