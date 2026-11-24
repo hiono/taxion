@@ -77,7 +77,6 @@ func (s *Store) AddTaskTurnObservation(
 	)
 }
 
-
 // AddTaskTurnObservationForClaim persists a Task Turn observation against the exact dispatch claim.
 func (s *Store) AddTaskTurnObservationForClaim(
 	ctx context.Context, jobID string, expectedRevision uint64,

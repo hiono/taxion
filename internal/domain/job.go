@@ -60,9 +60,9 @@ type Job struct {
 	PlanningTurnObservations              []PlanningTurnObservation       `json:"planning_turn_observations,omitempty"`
 	TaskTurnIntents                       []TaskTurnIntent                `json:"task_turn_intents,omitempty"`
 	TaskTurnObservations                  []TaskTurnObservation           `json:"task_turn_observations,omitempty"`
-	TaskTurnDispatchClaims                []TaskTurnDispatchClaim            `json:"task_turn_dispatch_claims,omitempty"`
-	TaskTurnDispatchObservations          []TaskTurnDispatchObservation      `json:"task_turn_dispatch_observations,omitempty"`
-	TaskTurnDispatchReleases              []TaskTurnDispatchRelease          `json:"task_turn_dispatch_releases,omitempty"`
+	TaskTurnDispatchClaims                []TaskTurnDispatchClaim         `json:"task_turn_dispatch_claims,omitempty"`
+	TaskTurnDispatchObservations          []TaskTurnDispatchObservation   `json:"task_turn_dispatch_observations,omitempty"`
+	TaskTurnDispatchReleases              []TaskTurnDispatchRelease       `json:"task_turn_dispatch_releases,omitempty"`
 	PlanningEffectDecisions               []PlanningEffectDecision        `json:"planning_effect_decisions,omitempty"`
 	PlanningResumeIntents                 []PlanningResumeIntent          `json:"planning_resume_intents,omitempty"`
 	PlanningResumeObservations            []PlanningResumeObservation     `json:"planning_resume_observations,omitempty"`
