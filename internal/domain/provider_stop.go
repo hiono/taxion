@@ -142,6 +142,9 @@ func NewProviderStopIntent(
 		startObservation.ProviderSessionID != sessionID {
 		return ProviderStopIntent{}, errors.New("Provider Stop intent requires the accepted Start Session")
 	}
+	if err := validateNoUnresolvedTaskTurnBeforeStop(job, roleExecutionID, sessionID); err != nil {
+		return ProviderStopIntent{}, err
+	}
 	hasPriorResume := false
 	for _, resume := range job.PlanningResumeIntents {
 		if resume.RoleExecutionID == roleExecutionID && resume.ProviderSessionID == sessionID {
@@ -218,6 +221,9 @@ func (i ProviderStopIntent) Validate(job Job) error {
 		i.CreatedRevision <= start.CreatedRevision || i.CreatedRevision <= startObservation.CreatedRevision ||
 		i.CreatedAt.Before(start.CreatedAt) || i.CreatedAt.Before(startObservation.CreatedAt) {
 		return errors.New("Provider Stop intent does not follow the accepted Start Session")
+	}
+	if err := validateNoUnresolvedTaskTurnBeforeStop(job, i.RoleExecutionID, i.SessionID); err != nil {
+		return err
 	}
 	for _, turn := range job.PlanningTurnIntents {
 		if turn.RoleExecutionID == i.RoleExecutionID && turn.ProviderSessionID == i.SessionID &&
@@ -428,4 +434,18 @@ func validProviderStopReason(reason ProviderStopReason) bool {
 	default:
 		return false
 	}
+}
+
+func validateNoUnresolvedTaskTurnBeforeStop(job Job, roleExecutionID, sessionID string) error {
+	for _, turn := range job.TaskTurnIntents {
+		if turn.RoleExecutionID != roleExecutionID || turn.ProviderSessionID != sessionID {
+			continue
+		}
+		observation, found := latestTaskTurnObservation(job, turn.ID)
+		if !found || observation.Status == TaskTurnUnknown ||
+			observation.CreatedRevision <= turn.CreatedRevision {
+			return errors.New("Provider Stop requires every prior Task Turn in the Session to be terminal")
+		}
+	}
+	return nil
 }
