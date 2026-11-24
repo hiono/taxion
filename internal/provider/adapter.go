@@ -341,20 +341,21 @@ type ReadOnlySnapshot struct {
 }
 
 type StartRequest struct {
-	OperationID      string
-	JobID            string
-	RoleExecutionID  string
-	RequestSHA256    string
-	PromptSHA256     string
-	Prompt           string
-	Context          []ContextDocument
-	MaxTurns         uint32
-	MaxTokens        uint64
-	Deadline         time.Time
-	RepositoryID     string
-	WorktreePath     string
-	BaselineCommit   string
-	ReadOnlySnapshot *ReadOnlySnapshot
+	OperationID        string
+	JobID              string
+	RoleExecutionID    string
+	RequestSHA256      string
+	PromptSHA256       string
+	Prompt             string
+	Context            []ContextDocument
+	MaxTurns           uint32
+	MaxTokens          uint64
+	Deadline           time.Time
+	RepositoryID       string
+	WorktreePath       string
+	BaselineCommit     string
+	ReadOnlySnapshot   *ReadOnlySnapshot
+	RequireIdempotency bool
 }
 
 func (r StartRequest) Validate() error {
@@ -724,6 +725,7 @@ type Adapter interface {
 	Identity() Identity
 	Capabilities(context.Context) (Capabilities, error)
 	// Start must use a supplied WorktreePath as the Task working directory and must not substitute another repository snapshot.
+	// Start must deduplicate when RequireIdempotency is true; Runtime verifies the matching capability before credential acquisition.
 	Start(context.Context, StartRequest, CredentialLease) (StartResult, error)
 	// Send must deduplicate when RequireIdempotency is true; Runtime verifies the matching capability before credential acquisition.
 	Send(context.Context, TurnRequest, CredentialLease) (TurnResult, error)
