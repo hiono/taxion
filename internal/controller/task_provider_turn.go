@@ -37,13 +37,6 @@ func (c *ProviderController) SendTaskExecution(
 		identity.ConfigurationSHA256 != permission.ConfigurationSHA256 {
 		return store.CommandReceipt{}, domain.TaskTurnIntent{}, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.New("Provider Runtime identity differs from ExecutionPermission")
 	}
-	capabilities, err := c.runtime.Capabilities(ctx)
-	if err != nil {
-		return store.CommandReceipt{}, domain.TaskTurnIntent{}, domain.TaskTurnObservation{}, provider.TurnResult{}, err
-	}
-	if capabilities.Identity != identity || !capabilities.SupportsSafeSend() {
-		return store.CommandReceipt{}, domain.TaskTurnIntent{}, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
-	}
 	promptSHA := sha256String(prompt)
 	request := provider.TurnRequest{
 		OperationID: domain.TaskTurnOperationID(commandID), TurnID: domain.TaskTurnIntentID(commandID),
@@ -79,12 +72,38 @@ func (c *ProviderController) SendTaskExecution(
 		}
 		return receipt, turn, previous, taskTurnResultFromObservation(previous), nil
 	}
+	capabilities, err := c.runtime.Capabilities(ctx)
+	if err != nil {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+	}
+	if capabilities.Identity != identity || !capabilities.SupportsSafeSend() {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
+	}
+	// No claim or observation means no call could have crossed the dispatch
+	// boundary. Recover that pre-dispatch case without relying on Provider Lookup.
+	if !created && taskTurnNeverDispatched(current, turn.ID) {
+		return c.dispatchTaskTurn(ctx, receipt, current, turn, request, permissionRequest, principal, capabilities)
+	}
 	// A repeated call may follow a process crash after Send. Reconcile the same
 	// OperationID / TurnID before any idempotent retry.
 	if !created {
 		return c.reconcileTaskTurn(ctx, receipt, current, turn, request, permissionRequest, principal, capabilities)
 	}
 	return c.dispatchTaskTurn(ctx, receipt, current, turn, request, permissionRequest, principal, capabilities)
+}
+
+func taskTurnNeverDispatched(job domain.Job, turnID string) bool {
+	for _, claim := range job.TaskTurnDispatchClaims {
+		if claim.TurnID == turnID {
+			return false
+		}
+	}
+	for _, observation := range job.TaskTurnObservations {
+		if observation.TurnID == turnID {
+			return false
+		}
+	}
+	return true
 }
 
 func permissionRequestDigest(request domain.ExecutionPermissionRequest) string {
@@ -297,6 +316,12 @@ func (c *ProviderController) dispatchTaskTurn(
 	if !active || activeClaim.ID != claim.ID {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
 	}
+	if resumeStatus, found := domain.LatestPlanningResumeStatus(postClaimJob, turn.RoleExecutionID); found &&
+		resumeStatus != domain.PlanningResumeAttached {
+		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{},
+			errors.Join(errors.New("Task Provider Send requires the latest Resume to be ATTACHED"), releaseErr)
+	}
 	current = postClaimJob
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
@@ -315,7 +340,7 @@ func (c *ProviderController) dispatchTaskTurn(
 		return receipt, turn, observation, provider.TurnResult{}, provider.ErrProviderInvalidResult
 	}
 	receipt, turn, observation, result, finalizeErr := c.finalizeTaskTurn(
-		ctx, receipt, current, turn, result, "", permissionRequest, principal,
+		ctx, receipt, current, turn, result, "", "", permissionRequest, principal,
 	)
 	if observation.Status == domain.TaskTurnCompleted || observation.Status == domain.TaskTurnFailed {
 		finalizeErr = errors.Join(finalizeErr, c.releaseTaskTurnDispatchClaim(ctx, current.ID, turn, observation, principal))
@@ -365,7 +390,7 @@ func (c *ProviderController) reconcileTaskTurn(
 					ReceiptID: lookup.ReceiptID, Status: lookup.Status, EvidenceSHA256: lookup.EvidenceSHA256,
 				}
 				receipt, turn, observation, result, finalizeErr := c.finalizeTaskTurn(
-					ctx, receipt, job, turn, result, lookup.UsageID, permissionRequest, principal,
+					ctx, receipt, job, turn, result, lookup.UsageID, lookup.ResultSHA256, permissionRequest, principal,
 				)
 				if observation.Status == domain.TaskTurnCompleted || observation.Status == domain.TaskTurnFailed {
 					finalizeErr = errors.Join(finalizeErr, c.releaseTaskTurnDispatchClaim(ctx, job.ID, turn, observation, principal))
@@ -394,6 +419,7 @@ func (c *ProviderController) reconcileTaskTurn(
 	if err != nil {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
 	}
+	request.RequireIdempotency = true
 	return c.dispatchTaskTurn(ctx, receipt, job, turn, request, permissionRequest, principal, capabilities)
 }
 
@@ -507,7 +533,7 @@ func (c *ProviderController) finalizeTaskTurn(
 	job domain.Job,
 	turn domain.TaskTurnIntent,
 	result provider.TurnResult,
-	expectedUsageID string,
+	expectedUsageID, expectedResultSHA256 string,
 	permissionRequest domain.ExecutionPermissionRequest,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.TaskTurnIntent, domain.TaskTurnObservation, provider.TurnResult, error) {
@@ -523,6 +549,11 @@ func (c *ProviderController) finalizeTaskTurn(
 			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
 			return receipt, turn, observation, provider.TurnResult{}, errors.Join(resultErr, persistErr)
 		}
+	}
+	if expectedResultSHA256 != "" && resultObservation.ResultSHA256 != expectedResultSHA256 {
+		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+		return receipt, turn, observation, provider.TurnResult{},
+			errors.Join(provider.ErrProviderInvalidResult, errors.New("Provider Lookup Result digest differs from final Result"), persistErr)
 	}
 	_, usage, usageErr := c.RetrieveTaskProviderUsage(ctx, job.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, turn.ProviderSessionID, turn.ID, expectedUsageID, principal)
 	if usageErr != nil || !usage.Complete {
