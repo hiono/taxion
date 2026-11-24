@@ -352,6 +352,47 @@ func TestTaskProviderStopCannotCommitWhileSendDispatchIsActive(t *testing.T) {
 	}
 }
 
+func TestTaskProviderSendCannotDispatchAfterStopIntent(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	now := f.controller.now()
+	f.runtime.capabilities.SendIdempotency = true
+	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence, provider.CapabilityEvidence{
+		Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity,
+		TestID: "task-stop-send-race", EvidenceSHA256: strings.Repeat("1", 64),
+		EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
+	})
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Stop intent: %v", err)
+	}
+	if _, _, err := f.database.AddProviderStopIntent(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, "session_1",
+		"cmd_aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae",
+		domain.ProviderStopReasonTaskComplete, f.principal,
+	); err != nil {
+		t.Fatalf("persist Stop intent: %v", err)
+	}
+
+	_, _, _, _, err = f.controller.SendTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID,
+		"cmd_afafafafafafafafafafafafafafafaf",
+		"Implement the approved Task changes.",
+		f.permissionRequest, 100, f.principal,
+	)
+	if err == nil || f.runtime.sendCalls != 0 {
+		t.Fatalf("Send crossed an existing Stop intent: sendCalls=%d err=%v", f.runtime.sendCalls, err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after rejected Send: %v", err)
+	}
+	if len(job.ProviderStopIntents) != 1 || len(job.TaskTurnIntents) != 0 ||
+		len(job.TaskTurnDispatchClaims) != 0 || f.runtime.sendCalls != 0 {
+		t.Fatalf("rejected Send changed execution state: stopIntents=%d turnIntents=%d claims=%d sendCalls=%d",
+			len(job.ProviderStopIntents), len(job.TaskTurnIntents), len(job.TaskTurnDispatchClaims), f.runtime.sendCalls)
+	}
+}
+
 func TestTaskProviderStopRejectsUnresolvedTaskTurn(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	job, err := f.database.GetJob(f.ctx, f.jobID)
