@@ -168,7 +168,6 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 	return snapshot, nil
 }
 
-
 func adoptionRegistrationPath(root, jobID, taskID string) string {
 	key := sha256.Sum256([]byte(jobID + "\x00" + taskID))
 	return filepath.Join(root, hex.EncodeToString(key[:]))
