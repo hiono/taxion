@@ -342,13 +342,7 @@ func (c *ProviderController) reconcileTaskTurn(
 			}
 			return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Send lookup has not confirmed a terminal Turn")
 		}
-	} else if !canRetry {
-		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
-		if persistErr != nil {
-			return receipt, turn, observation, provider.TurnResult{}, persistErr
-		}
-		return receipt, turn, observation, provider.TurnResult{}, provider.ErrUnsupportedCapability
-	}
+	} 
 	if !canRetry {
 		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
 		if persistErr != nil {
@@ -356,7 +350,51 @@ func (c *ProviderController) reconcileTaskTurn(
 		}
 		return receipt, turn, observation, provider.TurnResult{}, provider.ErrUnsupportedCapability
 	}
+	evidenceSHA256 := providerCapabilityEvidenceSHA256(capabilities, provider.CapabilitySendIdempotency)
+	if !validProviderEvidenceSHA256(evidenceSHA256) {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
+	}
+	job, err := c.releaseTaskTurnDispatchClaimForIdempotentRetry(ctx, job, turn, principal, evidenceSHA256)
+	if err != nil {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+	}
 	return c.dispatchTaskTurn(ctx, receipt, job, turn, request, permissionRequest, principal, capabilities)
+}
+
+func providerCapabilityEvidenceSHA256(capabilities provider.Capabilities, capability provider.Capability) string {
+	for _, evidence := range capabilities.Evidence {
+		if evidence.Capability == capability &&
+			evidence.EvidenceLevel == provider.EvidenceLive &&
+			validProviderEvidenceSHA256(evidence.EvidenceSHA256) {
+			return evidence.EvidenceSHA256
+		}
+	}
+	return ""
+}
+
+func (c *ProviderController) releaseTaskTurnDispatchClaimForIdempotentRetry(
+	ctx context.Context,
+	job domain.Job,
+	turn domain.TaskTurnIntent,
+	principal auth.AuthenticatedPrincipal,
+	evidenceSHA256 string,
+) (domain.Job, error) {
+	latest, err := c.store.GetJob(ctx, job.ID)
+	if err != nil {
+		return domain.Job{}, err
+	}
+	claim, active := domain.ActiveTaskTurnDispatchClaim(latest, turn.OperationID)
+	if !active {
+		return latest, nil
+	}
+	_, _, err = c.store.ReleaseTaskTurnDispatchClaim(
+		ctx, latest.ID, claim.ID, principal,
+		domain.TaskTurnDispatchReleasedIdempotentRetry, evidenceSHA256,
+	)
+	if err != nil {
+		return domain.Job{}, err
+	}
+	return c.store.GetJob(ctx, latest.ID)
 }
 
 func (c *ProviderController) releaseTaskTurnDispatchClaim(
@@ -383,7 +421,7 @@ func (c *ProviderController) releaseTaskTurnDispatchClaim(
 	if !active {
 		return nil
 	}
-	_, _, err = c.store.ReleaseTaskTurnDispatchClaim(ctx, jobID, claim.ID, principal, outcome)
+	_, _, err = c.store.ReleaseTaskTurnDispatchClaim(ctx, jobID, claim.ID, principal, outcome, "")
 	return err
 }
 
@@ -516,6 +554,37 @@ func (c *ProviderController) RetrieveTaskProviderUsage(
 	if !found || turn.RoleExecutionID != execution.ID || turn.ProviderStartID != start.ID ||
 		turn.ProviderSessionID != sessionID || turn.Validate(job) != nil {
 		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, errors.New("Task Provider Usage requires the matching TaskTurnIntent")
+	}
+	var latestTurnObservation *domain.TaskTurnObservation
+	for i := range job.TaskTurnObservations {
+		observation := &job.TaskTurnObservations[i]
+		if observation.TurnID == turn.ID &&
+			(latestTurnObservation == nil || observation.CreatedRevision > latestTurnObservation.CreatedRevision) {
+			latestTurnObservation = observation
+		}
+	}
+	var existingUsage *domain.ProviderUsageObservation
+	for i := range job.ProviderUsageObservations {
+		observation := &job.ProviderUsageObservations[i]
+		if observation.OperationID != turn.OperationID || observation.TurnID != turn.ID ||
+			observation.SessionID != sessionID ||
+			(expectedUsageID != "" && observation.UsageID != expectedUsageID) {
+			continue
+		}
+		if existingUsage == nil || observation.CreatedRevision > existingUsage.CreatedRevision {
+			existingUsage = observation
+		}
+	}
+	if existingUsage != nil && (expectedUsageID != "" ||
+		(latestTurnObservation != nil && latestTurnObservation.Status != domain.TaskTurnUnknown && existingUsage.Complete)) {
+		return c.store.AddProviderUsageObservation(
+			ctx, job.ID, job.Revision, existingUsage.RoleExecutionID, existingUsage.OperationID,
+			existingUsage.TurnID, existingUsage.SessionID, existingUsage.UsageID,
+			existingUsage.Tokens, existingUsage.Complete, existingUsage.EvidenceSHA256, principal,
+		)
+	}
+	if latestTurnObservation != nil && latestTurnObservation.Status != domain.TaskTurnUnknown {
+		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, errors.New("Provider Usage cannot be added after a terminal Task Turn observation")
 	}
 	capabilities, err := c.runtime.Capabilities(ctx)
 	if err != nil {

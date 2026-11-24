@@ -198,6 +198,14 @@ func (o ProviderUsageObservation) Validate(job Job) error {
 	if o.CreatedRevision <= minimumRevision || o.CreatedAt.Before(minimumTime) {
 		return errors.New("Provider Usage observation does not follow its accepted Provider operation")
 	}
+	if o.TurnID != "" {
+		for _, observation := range job.TaskTurnObservations {
+			if observation.TurnID == o.TurnID && observation.Status != TaskTurnUnknown &&
+				o.CreatedRevision > observation.CreatedRevision {
+				return errors.New("Provider Usage cannot be appended after a terminal Task Turn observation")
+			}
+		}
+	}
 	return nil
 }
 
