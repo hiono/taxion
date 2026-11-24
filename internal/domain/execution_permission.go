@@ -77,6 +77,7 @@ type ExecutionPermission struct {
 	AccountID               string                    `json:"account_id"`
 	ConfigurationSHA256     string                    `json:"configuration_sha256"`
 	RequestSHA256           string                    `json:"request_sha256"`
+	WorktreePath            string                    `json:"worktree_path,omitempty"`
 	AssessmentSHA256        string                    `json:"assessment_sha256"`
 	Assessment              ExecutionEffectAssessment `json:"assessment"`
 	ReservedTurns           uint32                    `json:"reserved_turns"`
@@ -255,6 +256,7 @@ func NewExecutionPermission(
 		CanonicalizationVersion: revision.CanonicalizationVersion, CanonicalHash: revision.CanonicalHash,
 		ProviderID: request.ProviderID, AccountID: request.AccountID,
 		ConfigurationSHA256: request.ConfigurationSHA256, RequestSHA256: requestSHA256,
+		WorktreePath: request.WorktreePath,
 		AssessmentSHA256: assessmentSHA, Assessment: assessment,
 		ReservedTurns: request.ReservedTurns, ReservedTokens: request.ReservedTokens,
 		ExpiresAt: request.ExpiresAt.UTC().Round(0), CreatedAt: now, CreatedRevision: job.Revision + 1,
@@ -301,6 +303,10 @@ func (p ExecutionPermission) Validate(job Job) error {
 	if !taskFound || task.ContractRevision != p.ContractRevision || task.JobApprovalID != p.JobApprovalID {
 		return errors.New("ExecutionPermission Task does not match its approved contract revision")
 	}
+	if p.WorktreePath != "" && (!filepath.IsAbs(p.WorktreePath) || filepath.Clean(p.WorktreePath) != p.WorktreePath ||
+		p.Resource != p.WorktreePath || !containsExact(task.TargetResources, p.WorktreePath)) {
+		return errors.New("ExecutionPermission adopted Worktree path is invalid or outside the approved Task resource")
+	}
 	if p.CreatedRevision <= approval.CreatedRevision || p.CreatedAt.Before(approval.ApprovedAt) ||
 		!p.CreatedAt.Before(revision.Contract.Deadline) || !p.ExpiresAt.After(p.CreatedAt) ||
 		p.ExpiresAt.After(revision.Contract.Deadline) || p.ExpiresAt.After(task.Deadline) ||
@@ -333,7 +339,7 @@ func (p ExecutionPermission) Validate(job Job) error {
 		JobID: p.JobID, TaskID: p.TaskID, CommandID: p.CommandID, Role: p.Role, Effect: p.Effect,
 		Resource: p.Resource, ProviderID: p.ProviderID, AccountID: p.AccountID,
 		ConfigurationSHA256: p.ConfigurationSHA256, ReservedTurns: p.ReservedTurns, ReservedTokens: p.ReservedTokens,
-		ExpiresAt: p.ExpiresAt,
+		ExpiresAt: p.ExpiresAt, WorktreePath: p.WorktreePath,
 	}
 	expectedDigest, err := ExecutionPermissionRequestSHA256(expectedRequest)
 	if err != nil || expectedDigest != p.RequestSHA256 {
