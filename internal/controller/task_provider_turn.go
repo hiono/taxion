@@ -550,7 +550,7 @@ func (c *ProviderController) finalizeTaskTurn(
 			return receipt, turn, observation, provider.TurnResult{}, errors.Join(resultErr, persistErr)
 		}
 	}
-	if expectedResultSHA256 != "" && resultObservation.ResultSHA256 != expectedResultSHA256 {
+	if expectedResultSHA256 != "" && resultObservation.ContentSHA256 != expectedResultSHA256 {
 		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
 		return receipt, turn, observation, provider.TurnResult{},
 			errors.Join(provider.ErrProviderInvalidResult, errors.New("Provider Lookup Result digest differs from final Result"), persistErr)
