@@ -231,7 +231,7 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-036 | Task Coder Start — exact current approval / Task / permission / RoleExecution / intent / Provider identity | intent永続化後、同一OperationIDでStartしACCEPTEDを保存 |
 | CTR-037 | Task Start permission stale — approval / revision / scope / expiry / budgetがdispatch直前に不一致 | Provider呼出し0回、Job facts不変 |
 | CTR-038 | Task Start Provider mismatch — Provider / account / configuration digest mismatch | Lookup / credential / Adapter呼出し前に拒否 |
-| CTR-039 | Task Start retry — 既存intent、observationなし、Start LookupでNOT_FOUND | permission再検証後、同じOperationIDでのみStart |
+| CTR-039 | Task Start retry — 既存intent、observationなし、Start LookupでNOT_FOUND、E4 Start Idempotencyあり | permission再検証後、RequireIdempotency付きで同じOperationIDのStartのみ許可 |
 | CTR-040 | Task Start ambiguous — StartまたはLookupがambiguous / unclassified error | UNKNOWNをappendし、新しいOperationIDで再送しない |
 | CTR-041 | Task Start reconciliation — UNKNOWNに対する同一OperationIDのaccepted / failed Lookup evidence | ReconcilesUnknown=trueでappend-only解消 |
 | CTR-042 | Task Start unsafe capability — Start Lookup / idempotency evidenceなし | Startを呼ばずUNKNOWN / unresolvedを保持 |
