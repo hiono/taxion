@@ -51,8 +51,8 @@ type Job struct {
 	ProviderEventObservations             []ProviderEventObservation  `json:"provider_event_observations,omitempty"`
 	ProviderStopIntents                   []ProviderStopIntent        `json:"provider_stop_intents,omitempty"`
 	ProviderStopObservations              []ProviderStopObservation   `json:"provider_stop_observations,omitempty"`
-	ProviderStopDispatchClaims            []ProviderStopDispatchClaim `json:"provider_stop_dispatch_claims,omitempty"`
-	ProviderStopDispatchReleases          []ProviderStopDispatchRelease `json:"provider_stop_dispatch_releases,omitempty"`
+	ProviderStopDispatchClaims            []ProviderStopDispatchClaim    `json:"provider_stop_dispatch_claims,omitempty"`
+	ProviderStopDispatchReleases          []ProviderStopDispatchRelease  `json:"provider_stop_dispatch_releases,omitempty"`
 	ProviderResultObservations            []ProviderResultObservation `json:"provider_result_observations,omitempty"`
 	ProviderUsageObservations             []ProviderUsageObservation  `json:"provider_usage_observations,omitempty"`
 	ProviderLifecycleEnforcedFromRevision uint64                      `json:"provider_lifecycle_enforced_from_revision,omitempty"`
@@ -60,8 +60,8 @@ type Job struct {
 	PlanningTurnObservations              []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
 	TaskTurnIntents                       []TaskTurnIntent            `json:"task_turn_intents,omitempty"`
 	TaskTurnObservations                  []TaskTurnObservation       `json:"task_turn_observations,omitempty"`
-	TaskTurnDispatchClaims                []TaskTurnDispatchClaim     `json:"task_turn_dispatch_claims,omitempty"`
-	TaskTurnDispatchReleases              []TaskTurnDispatchRelease   `json:"task_turn_dispatch_releases,omitempty"`
+	TaskTurnDispatchClaims                []TaskTurnDispatchClaim        `json:"task_turn_dispatch_claims,omitempty"`
+	TaskTurnDispatchReleases              []TaskTurnDispatchRelease      `json:"task_turn_dispatch_releases,omitempty"`
 	PlanningEffectDecisions               []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
 	PlanningResumeIntents                 []PlanningResumeIntent      `json:"planning_resume_intents,omitempty"`
 	PlanningResumeObservations            []PlanningResumeObservation `json:"planning_resume_observations,omitempty"`
