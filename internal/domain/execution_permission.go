@@ -256,7 +256,7 @@ func NewExecutionPermission(
 		CanonicalizationVersion: revision.CanonicalizationVersion, CanonicalHash: revision.CanonicalHash,
 		ProviderID: request.ProviderID, AccountID: request.AccountID,
 		ConfigurationSHA256: request.ConfigurationSHA256, RequestSHA256: requestSHA256,
-		WorktreePath: request.WorktreePath,
+		WorktreePath:     request.WorktreePath,
 		AssessmentSHA256: assessmentSHA, Assessment: assessment,
 		ReservedTurns: request.ReservedTurns, ReservedTokens: request.ReservedTokens,
 		ExpiresAt: request.ExpiresAt.UTC().Round(0), CreatedAt: now, CreatedRevision: job.Revision + 1,
