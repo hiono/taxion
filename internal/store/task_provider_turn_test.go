@@ -231,7 +231,7 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, completedTurn, err := database.AddTaskTurnObservationForClaim(ctx, jobID, job.Revision,
-		turn.ID, turnClaim.ID, "cmd_ec0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+		turn.ID, turnClaim.ID, "cmd_ec0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
 		domain.TaskTurnCompleted, 12, strings.Repeat("6", 64), true)
 	if err != nil || completedTurn.Status != domain.TaskTurnCompleted {
 		t.Fatalf("reconcile Task Turn with final Result / Usage: %#v %v", completedTurn, err)
