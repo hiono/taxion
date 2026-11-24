@@ -30,14 +30,15 @@ type ProviderStopDispatchClaim struct {
 }
 
 type ProviderStopDispatchStart struct {
-	ID              string    `json:"id"`
-	CommandID       string    `json:"command_id"`
-	JobID           string    `json:"job_id"`
-	ClaimID         string    `json:"claim_id"`
-	OperationID     string    `json:"operation_id"`
-	PrincipalID     string    `json:"principal_id"`
-	CreatedAt       time.Time `json:"created_at"`
-	CreatedRevision uint64    `json:"created_revision"`
+	ID                    string    `json:"id"`
+	CommandID             string    `json:"command_id"`
+	JobID                 string    `json:"job_id"`
+	ClaimID               string    `json:"claim_id"`
+	OperationID           string    `json:"operation_id"`
+	PrincipalID           string    `json:"principal_id"`
+	FencingEvidenceSHA256 string    `json:"fencing_evidence_sha256,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	CreatedRevision       uint64    `json:"created_revision"`
 }
 
 type ProviderStopDispatchRelease struct {
@@ -166,7 +167,7 @@ func (c ProviderStopDispatchClaim) Validate(job Job) error {
 }
 
 func NewProviderStopDispatchStart(
-	job Job, claimID, principalID, commandID string, now time.Time,
+	job Job, claimID, principalID, commandID, fencingEvidenceSHA256 string, now time.Time,
 ) (ProviderStopDispatchStart, error) {
 	now = now.UTC().Round(0)
 	if err := job.Validate(); err != nil {
@@ -194,10 +195,14 @@ func NewProviderStopDispatchStart(
 	if _, started := ProviderStopDispatchStartedForClaim(job, claim.ID); started {
 		return ProviderStopDispatchStart{}, errors.New("Provider Stop dispatch claim has already started")
 	}
+	if fencingEvidenceSHA256 != "" && !validSHA256(fencingEvidenceSHA256) {
+		return ProviderStopDispatchStart{}, errors.New("Provider Stop dispatch fencing evidence digest is invalid")
+	}
 	start := ProviderStopDispatchStart{
 		ID: ProviderStopDispatchStartID(commandID), CommandID: commandID,
 		JobID: job.ID, ClaimID: claim.ID, OperationID: claim.OperationID,
-		PrincipalID: principalID, CreatedAt: now, CreatedRevision: job.Revision + 1,
+		PrincipalID: principalID, FencingEvidenceSHA256: fencingEvidenceSHA256,
+		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
 	if err := start.Validate(job); err != nil {
 		return ProviderStopDispatchStart{}, err
@@ -211,7 +216,8 @@ func (s ProviderStopDispatchStart) Validate(job Job) error {
 		s.CommandID != ProviderStopDispatchStartCommandID(s.ClaimID) ||
 		s.JobID != job.ID || !validPlanningIdentity(s.ClaimID) ||
 		!validPlanningIdentity(s.OperationID) || !strings.HasPrefix(s.PrincipalID, "human_") ||
-		s.CreatedAt.IsZero() || s.CreatedRevision == 0 {
+		s.CreatedAt.IsZero() || s.CreatedRevision == 0 ||
+		(s.FencingEvidenceSHA256 != "" && !validSHA256(s.FencingEvidenceSHA256)) {
 		return errors.New("Provider Stop dispatch start identity or metadata is invalid")
 	}
 	var claim ProviderStopDispatchClaim
@@ -277,8 +283,9 @@ func NewProviderStopDispatchRelease(
 			return ProviderStopDispatchRelease{}, errors.New("not-dispatched release requires verified lookup evidence")
 		}
 	} else if outcome == ProviderStopDispatchReleasedFencedNotFound {
-		if _, started := ProviderStopDispatchStartedForClaim(job, claim.ID); !started {
-			return ProviderStopDispatchRelease{}, errors.New("fenced NOT_FOUND release requires a started Provider Stop dispatch")
+		start, started := ProviderStopDispatchStartedForClaim(job, claim.ID)
+		if !started || !validSHA256(start.FencingEvidenceSHA256) {
+			return ProviderStopDispatchRelease{}, errors.New("fenced NOT_FOUND release requires a started dispatch with verified fencing evidence")
 		}
 		if !validSHA256(evidenceSHA256) {
 			return ProviderStopDispatchRelease{}, errors.New("fenced NOT_FOUND release requires verified lookup evidence")
@@ -325,8 +332,9 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 			return errors.New("not-dispatched release requires verified lookup evidence")
 		}
 	} else if r.Outcome == ProviderStopDispatchReleasedFencedNotFound {
-		if _, started := ProviderStopDispatchStartedForClaim(job, claim.ID); !started || !validSHA256(r.EvidenceSHA256) {
-			return errors.New("fenced NOT_FOUND release requires a started claim and verified lookup evidence")
+		start, started := ProviderStopDispatchStartedForClaim(job, claim.ID)
+		if !started || !validSHA256(start.FencingEvidenceSHA256) || !validSHA256(r.EvidenceSHA256) {
+			return errors.New("fenced NOT_FOUND release requires a started claim with fencing evidence and verified lookup evidence")
 		}
 	}
 	if r.Outcome == ProviderStopDispatchReleasedStopped {

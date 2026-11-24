@@ -52,19 +52,19 @@ func (s *Store) AddProviderStopDispatchStart(
 	ctx context.Context,
 	jobID string,
 	expectedRevision uint64,
-	claimID, commandID string,
+	claimID, commandID, fencingEvidenceSHA256 string,
 	principal auth.AuthenticatedPrincipal,
 ) (CommandReceipt, domain.ProviderStopDispatchStart, bool, error) {
 	if err := principal.Validate(); err != nil {
 		return CommandReceipt{}, domain.ProviderStopDispatchStart{}, false, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
 	}
 	request := struct {
-		JobID, ClaimID, CommandID, PrincipalID string
-	}{jobID, claimID, commandID, principal.PrincipalID()}
+		JobID, ClaimID, CommandID, FencingEvidenceSHA256, PrincipalID string
+	}{jobID, claimID, commandID, fencingEvidenceSHA256, principal.PrincipalID()}
 	return persistPlanningFactWithStatus(
 		ctx, s, jobID, expectedRevision, commandID, addProviderStopDispatchStartCommandType, request,
 		func(job domain.Job, now time.Time) (domain.ProviderStopDispatchStart, error) {
-			return domain.NewProviderStopDispatchStart(job, claimID, principal.PrincipalID(), commandID, now)
+			return domain.NewProviderStopDispatchStart(job, claimID, principal.PrincipalID(), commandID, fencingEvidenceSHA256, now)
 		},
 		func(job *domain.Job, start domain.ProviderStopDispatchStart) {
 			job.ProviderStopDispatchStarts = append(job.ProviderStopDispatchStarts, start)
@@ -82,7 +82,7 @@ func (s *Store) AddProviderStopDispatchStart(
 
 func (s *Store) StartProviderStopDispatchClaim(
 	ctx context.Context,
-	jobID, claimID string,
+	jobID, claimID, fencingEvidenceSHA256 string,
 	principal auth.AuthenticatedPrincipal,
 ) (CommandReceipt, domain.ProviderStopDispatchStart, bool, error) {
 	if claimID == "" {
@@ -93,7 +93,7 @@ func (s *Store) StartProviderStopDispatchClaim(
 		return CommandReceipt{}, domain.ProviderStopDispatchStart{}, false, err
 	}
 	commandID := domain.ProviderStopDispatchStartCommandID(claimID)
-	return s.AddProviderStopDispatchStart(ctx, jobID, job.Revision, claimID, commandID, principal)
+	return s.AddProviderStopDispatchStart(ctx, jobID, job.Revision, claimID, commandID, fencingEvidenceSHA256, principal)
 }
 
 func (s *Store) AddProviderStopDispatchRelease(
