@@ -174,6 +174,10 @@ func (c *ProviderController) StopTaskExecution(
 	if !createdClaim {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, provider.ErrStopUnconfirmed
 	}
+	latest, err = c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return intentReceipt, intent, domain.ProviderStopObservation{}, err
+	}
 
 	stopResult, stopErr := c.runtime.Stop(ctx, provider.StopRequest{
 		OperationID: intent.OperationID,
