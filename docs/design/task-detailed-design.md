@@ -55,7 +55,7 @@ JobOutputの保存はWorktree releaseやReviewer handoffを意味しません。
 
 CreateはTaxion管理領域にdetached Worktreeを生成して登録します。Adoptは利用者または外部ツールが事前に生成したlinked Worktreeを、Job / Taskの管理対象へ登録します。生成元は監査用provenanceとして保持し、信頼性・権限の根拠には使用しません。登録後は同じWorktree identity、Provider検証、ownership、停止・成果Evidenceの契約を適用します。
 
-Adoptでは、Taskのapproved target repositoryとtrusted Repository registryを照合し、canonical repository / Worktree path、Git common directoryとlinked-worktree metadata、HEAD commit / tree、HEAD mode（detachedまたはbranch-attachedとsymbolic ref）、baseline commitとの履歴関係を検証します。symlink、path alias、別Repositoryへの接続、scope外、Git状態の取得不能、identity不一致は拒否します。Worktreeは同時に一つのJob / Taskだけへ登録できます。
+Adoptでは、Taskのapproved target repositoryとtrusted Repository registryを照合します。採用pathはExecutionPermissionのResourceおよびTaskのapproved TargetResourcesに同一のcanonical absolute pathとして含まれ、request digestへ束縛される必要があります。対象はtrusted Repositoryに属するlinked Git Worktreeとし、canonical repository / Worktree path、Git common directoryとlinked-worktree metadata、HEAD commit / tree、HEAD mode（detachedまたはbranch-attachedとsymbolic ref）、baseline commitとの履歴関係を検証します。symlink、path alias、別Repositoryへの接続、scope外、Git状態の取得不能、identity不一致は拒否します。Worktreeは同時に一つのJob / Taskだけへ登録できます。
 
 採用時の初期状態は、HEAD commit / treeに加え、index、tracked working-tree差分、untracked filesのpathとcontent digestを含めて識別します。Adoptは既存ファイル、index、HEAD、branch refを変更してはなりません。reset、checkout、clean、stashを実行せず、利用者の変更をそのまま保持します。初期状態を完全に識別できない場合は登録を拒否します。Adoption factとWorktreeAssignmentはJobAggregateの同一revision-conditional transactionで保存し、永続化前にProviderを起動しません。
 
