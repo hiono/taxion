@@ -348,8 +348,17 @@ func TestExecutionPermissionBindsAdoptedWorktreeToApprovedTaskResource(t *testin
 		t.Fatalf("ExecutionPermissionRequestSHA256: %v", err)
 	}
 	assessment := executionPermissionTestAssessment(request, requestSHA, task.CreatedAt)
-	if _, err := NewExecutionPermission(job, request, requestSHA, assessment, task.CreatedAt); err != nil {
+	permission, err := NewExecutionPermission(job, request, requestSHA, assessment, task.CreatedAt)
+	if err != nil {
 		t.Fatalf("approved adopted Worktree path was rejected: %v", err)
+	}
+	if permission.WorktreePath != worktreePath {
+		t.Fatalf("ExecutionPermission WorktreePath = %q, want %q", permission.WorktreePath, worktreePath)
+	}
+	tampered := permission
+	tampered.WorktreePath = worktreePath + "/tampered"
+	if err := tampered.Validate(job); err == nil {
+		t.Fatal("ExecutionPermission accepted a Worktree path different from its immutable request digest")
 	}
 	changed := request
 	changed.WorktreePath = worktreePath + "/../other"
