@@ -355,6 +355,9 @@ func TestExecutionPermissionBindsAdoptedWorktreeToApprovedTaskResource(t *testin
 	if permission.WorktreePath != worktreePath {
 		t.Fatalf("ExecutionPermission WorktreePath = %q, want %q", permission.WorktreePath, worktreePath)
 	}
+	job.ExecutionPermissions = append(job.ExecutionPermissions, permission)
+	job.Revision++
+	job.UpdatedAt = permission.CreatedAt
 	tampered := permission
 	tampered.WorktreePath = worktreePath + "/tampered"
 	if err := tampered.Validate(job); err == nil {
