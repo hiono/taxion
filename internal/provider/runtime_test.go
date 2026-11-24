@@ -580,6 +580,23 @@ func TestRuntimeRejectsEventReplayWithoutDurableEvidenceBeforeCredentialAcquisit
 	}
 }
 
+func TestRuntimeSendRequiresVerifiedIdempotencyForRetry(t *testing.T) {
+	adapter := newTestAdapter(CapabilitySendLookup)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	request := validTurnRequest()
+	request.RequireIdempotency = true
+	if _, err := runtime.Send(context.Background(), request); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("Send retry without idempotency evidence = %v, want ErrUnsupportedCapability", err)
+	}
+	if adapter.sendCalls != 0 || broker.closed != 0 {
+		t.Fatalf("unsupported retry crossed credential or Adapter boundary: sends=%d closed=%d", adapter.sendCalls, broker.closed)
+	}
+}
+
 func TestRuntimeSendPreservesUnknownAndRejectsCredentialBearingOutput(t *testing.T) {
 	adapter := newTestAdapter(CapabilitySendIdempotency)
 	adapter.sendResult = TurnResult{Status: "UNKNOWN"}
