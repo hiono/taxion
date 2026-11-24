@@ -50,7 +50,7 @@ func (c *ProviderController) ResumeTaskExecution(
 			existing.ExecutionPermissionID != permission.ID {
 			return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, errors.New("existing Task Resume intent is bound to another Task authority or Session")
 		}
-		if previous, found := latestProviderResumeObservation(job, existing.ID); found && previous.Status != domain.PlanningResumeUnknown {
+		if previous, found := latestProviderResumeObservation(job, existing.ID); found && previous.Status != domain.PlanningResumeUnknown && previous.Status != domain.PlanningResumeNotDispatched {
 			receipt, intent, err := c.store.AddPlanningResumeIntent(
 				ctx, job.ID, job.Revision, execution.ID, sessionID, commandID,
 				existing.CapabilityEvidenceSHA256, true, principal,
@@ -141,7 +141,12 @@ func (c *ProviderController) ResumeTaskExecution(
 		}
 	}
 	if err := c.worktreeVerifier.Verify(ctx, latest.ID, currentTask, currentAssignment.Snapshot()); err != nil {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, fmt.Errorf("reverify owned Task Worktree immediately before Resume: %w", err)
+		verifyErr := fmt.Errorf("reverify owned Task Worktree immediately before Resume: %w", err)
+		observation, persistErr := c.recordResumeObservation(
+			ctx, jobID, intent.ID, domain.PlanningResumeNotDispatched,
+			providerResumeNotDispatchedEvidence(intent.ID, verifyErr), principal,
+		)
+		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(verifyErr, persistErr)
 	}
 
 	result, err := c.runtime.Resume(ctx, request)
