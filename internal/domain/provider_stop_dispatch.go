@@ -25,8 +25,8 @@ type ProviderStopDispatchClaim struct {
 	OperationID     string    `json:"operation_id"`
 	SessionID       string    `json:"session_id"`
 	PrincipalID     string    `json:"principal_id"`
-	CreatedAt       time.Time `json:"created_at"`
-	CreatedRevision uint64    `json:"created_revision"`
+	CreatedAt        time.Time `json:"created_at"`
+	CreatedRevision  uint64    `json:"created_revision"`
 }
 
 type ProviderStopDispatchStart struct {

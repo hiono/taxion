@@ -38,7 +38,6 @@ func (v *taskStopWorktreeVerifier) Verify(context.Context, string, domain.Task, 
 	return nil
 }
 
-
 type failOnceProviderStopReleaseStore struct {
 	ProviderExecutionStore
 	failed bool
