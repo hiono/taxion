@@ -74,6 +74,9 @@ func (c *ProviderController) SendTaskExecution(
 	}
 	request.OperationID, request.TurnID = turn.OperationID, turn.ID
 	if previous, found := latestTaskTurnObservation(current, turn.ID); found && previous.Status != domain.TaskTurnUnknown {
+		if releaseErr := c.releaseTaskTurnDispatchClaim(ctx, jobID, turn, previous, principal); releaseErr != nil {
+			return receipt, turn, previous, provider.TurnResult{}, releaseErr
+		}
 		return receipt, turn, previous, taskTurnResultFromObservation(previous), nil
 	}
 	// A repeated call may follow a process crash after Send. Reconcile the same
@@ -247,6 +250,27 @@ func (c *ProviderController) dispatchTaskTurn(
 	if capabilities.Identity != c.runtime.Identity() || !capabilities.SupportsSafeSend() {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
 	}
+	if _, active := domain.ActiveTaskTurnDispatchClaim(latest, turn.OperationID); active {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
+	}
+	claimCommandID, err := domain.NewID("cmd")
+	if err != nil {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+	}
+	_, claim, createdClaim, err := c.store.AddTaskTurnDispatchClaim(
+		ctx, latest.ID, latest.Revision, turn.ID, claimCommandID, principal,
+	)
+	if err != nil {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+	}
+	if !createdClaim {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
+	}
+	latest, err = c.store.GetJob(ctx, latest.ID)
+	if err != nil {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+	}
+	current = latest
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
 		observation, persistErr := c.recordTaskTurnObservation(ctx, current.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
@@ -263,7 +287,13 @@ func (c *ProviderController) dispatchTaskTurn(
 		}
 		return receipt, turn, observation, provider.TurnResult{}, provider.ErrProviderInvalidResult
 	}
-	return c.finalizeTaskTurn(ctx, receipt, current, turn, result, "", permissionRequest, principal)
+	receipt, turn, observation, result, finalizeErr := c.finalizeTaskTurn(
+		ctx, receipt, current, turn, result, "", permissionRequest, principal,
+	)
+	if observation.Status == domain.TaskTurnCompleted || observation.Status == domain.TaskTurnFailed {
+		finalizeErr = errors.Join(finalizeErr, c.releaseTaskTurnDispatchClaim(ctx, current.ID, turn, observation, principal))
+	}
+	return receipt, turn, observation, result, finalizeErr
 }
 
 func (c *ProviderController) reconcileTaskTurn(
@@ -298,7 +328,13 @@ func (c *ProviderController) reconcileTaskTurn(
 					OperationID: turn.OperationID, TurnID: turn.ID, SessionID: turn.ProviderSessionID,
 					ReceiptID: lookup.ReceiptID, Status: lookup.Status, EvidenceSHA256: lookup.EvidenceSHA256,
 				}
-				return c.finalizeTaskTurn(ctx, receipt, job, turn, result, lookup.UsageID, permissionRequest, principal)
+				receipt, turn, observation, result, finalizeErr := c.finalizeTaskTurn(
+					ctx, receipt, job, turn, result, lookup.UsageID, permissionRequest, principal,
+				)
+				if observation.Status == domain.TaskTurnCompleted || observation.Status == domain.TaskTurnFailed {
+					finalizeErr = errors.Join(finalizeErr, c.releaseTaskTurnDispatchClaim(ctx, job.ID, turn, observation, principal))
+				}
+				return receipt, turn, observation, result, finalizeErr
 			}
 			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
 			if persistErr != nil {
@@ -321,6 +357,35 @@ func (c *ProviderController) reconcileTaskTurn(
 		return receipt, turn, observation, provider.TurnResult{}, provider.ErrUnsupportedCapability
 	}
 	return c.dispatchTaskTurn(ctx, receipt, job, turn, request, permissionRequest, principal, capabilities)
+}
+
+
+func (c *ProviderController) releaseTaskTurnDispatchClaim(
+	ctx context.Context,
+	jobID string,
+	turn domain.TaskTurnIntent,
+	observation domain.TaskTurnObservation,
+	principal auth.AuthenticatedPrincipal,
+) error {
+	outcome := ""
+	switch observation.Status {
+	case domain.TaskTurnCompleted:
+		outcome = domain.TaskTurnDispatchReleasedCompleted
+	case domain.TaskTurnFailed:
+		outcome = domain.TaskTurnDispatchReleasedFailed
+	default:
+		return nil
+	}
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	claim, active := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID)
+	if !active {
+		return nil
+	}
+	_, _, err = c.store.ReleaseTaskTurnDispatchClaim(ctx, jobID, claim.ID, principal, outcome)
+	return err
 }
 
 func taskProviderResultObservation(job domain.Job, turn domain.TaskTurnIntent) (domain.ProviderResultObservation, bool) {
