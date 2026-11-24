@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -72,7 +74,15 @@ func (c *ProviderController) StopTaskExecution(
 	if hasPrevious && previous.Quiescent {
 		return intentReceipt, intent, previous, nil
 	}
+	var previousClaimID string
+	var previousClaimFound bool
 	if existingStopIntent {
+		previousClaimID, previousClaimFound, err = c.store.GetProviderStopDispatchClaim(
+			ctx, jobID, execution.ID, sessionID, intent.OperationID,
+		)
+		if err != nil {
+			return intentReceipt, intent, domain.ProviderStopObservation{}, err
+		}
 		if !capabilities.HasEvidenceAtLeast(provider.CapabilityStopLookup, provider.EvidenceLive) {
 			if hasPrevious {
 				return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
@@ -109,6 +119,13 @@ func (c *ProviderController) StopTaskExecution(
 				if persistErr != nil {
 					return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, persistErr)
 				}
+				if previousClaimFound {
+					if releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+						ctx, jobID, execution.ID, sessionID, intent.OperationID, previousClaimID,
+					); releaseErr != nil {
+						return intentReceipt, intent, observation, releaseErr
+					}
+				}
 				return intentReceipt, intent, observation, nil
 			}
 			if hasPrevious {
@@ -142,6 +159,21 @@ func (c *ProviderController) StopTaskExecution(
 		return intentReceipt, intent, domain.ProviderStopObservation{}, provider.ErrUnsupportedCapability
 	}
 
+	claimID, err := newProviderStopDispatchClaimID()
+	if err != nil {
+		return intentReceipt, intent, domain.ProviderStopObservation{}, err
+	}
+	claimed, err := c.store.ClaimProviderStopDispatch(
+		ctx, jobID, execution.ID, sessionID, intent.OperationID,
+		claimPreviousValue(previousClaimID, previousClaimFound), claimID,
+	)
+	if err != nil {
+		return intentReceipt, intent, domain.ProviderStopObservation{}, err
+	}
+	if !claimed {
+		return intentReceipt, intent, domain.ProviderStopObservation{}, provider.ErrStopUnconfirmed
+	}
+
 	stopResult, stopErr := c.runtime.Stop(ctx, provider.StopRequest{
 		OperationID: intent.OperationID,
 		SessionID:   sessionID,
@@ -163,7 +195,16 @@ func (c *ProviderController) StopTaskExecution(
 			if persistErr != nil {
 				return intentReceipt, intent, observation, errors.Join(stopErr, persistErr)
 			}
-			return intentReceipt, intent, observation, stopErr
+			releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+				ctx, jobID, execution.ID, sessionID, intent.OperationID, claimID,
+			)
+			return intentReceipt, intent, observation, errors.Join(stopErr, releaseErr)
+		}
+		if !providerOperationMayHaveStarted(stopErr) {
+			releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+				ctx, jobID, execution.ID, sessionID, intent.OperationID, claimID,
+			)
+			return intentReceipt, intent, domain.ProviderStopObservation{}, errors.Join(stopErr, releaseErr)
 		}
 		return intentReceipt, intent, domain.ProviderStopObservation{}, stopErr
 	}
@@ -180,5 +221,28 @@ func (c *ProviderController) StopTaskExecution(
 	observation, err := c.persistProviderStopObservation(
 		ctx, latest, intent, principal, true, true, stopResult.EvidenceSHA256, false,
 	)
-	return intentReceipt, intent, observation, err
+	if err != nil {
+		return intentReceipt, intent, observation, err
+	}
+	if err := c.store.ReleaseProviderStopDispatchClaim(
+		ctx, jobID, execution.ID, sessionID, intent.OperationID, claimID,
+	); err != nil {
+		return intentReceipt, intent, observation, err
+	}
+	return intentReceipt, intent, observation, nil
+}
+
+func claimPreviousValue(claimID string, found bool) string {
+	if !found {
+		return ""
+	}
+	return claimID
+}
+
+func newProviderStopDispatchClaimID() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", fmt.Errorf("generate Provider Stop dispatch claim: %w", err)
+	}
+	return "claim_" + hex.EncodeToString(value[:]), nil
 }
