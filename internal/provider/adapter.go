@@ -395,13 +395,13 @@ type StartResult struct {
 }
 
 type TurnRequest struct {
-	OperationID       string
-	TurnID            string
-	SessionID         string
-	PromptSHA256      string
-	Prompt            string
-	MaxTokens         uint64
-	Deadline          time.Time
+	OperationID        string
+	TurnID             string
+	SessionID          string
+	PromptSHA256       string
+	Prompt             string
+	MaxTokens          uint64
+	Deadline           time.Time
 	RequireIdempotency bool
 }
 
