@@ -441,29 +441,8 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 	if err := m.verify(ctx, jobID, task, snapshot); err != nil {
 		return OutputSnapshot{}, fmt.Errorf("verify Task Worktree before output capture: %w", err)
 	}
-	indexEntries, err := gitOutput(ctx, snapshot.WorktreePath, "--no-optional-locks", "ls-files", "-v", "-z")
-	if err != nil {
-		return OutputSnapshot{}, errors.New("inspect Task Worktree index flags before output capture")
-	}
-	for _, entry := range strings.Split(indexEntries, "\x00") {
-		if len(entry) == 0 {
-			continue
-		}
-		switch entry[0] {
-		case 'h':
-			return OutputSnapshot{}, errors.New("Task Worktree index contains assume-unchanged entries")
-		case 'S':
-			return OutputSnapshot{}, errors.New("Task Worktree index contains skip-worktree entries")
-		case 's':
-			return OutputSnapshot{}, errors.New("Task Worktree index contains skip-worktree and assume-unchanged entries")
-		}
-	}
-	status, err := gitOutput(ctx, snapshot.WorktreePath, "--no-optional-locks", "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
-	if err != nil {
-		return OutputSnapshot{}, errors.New("inspect Task Worktree state before output capture")
-	}
-	if status != "" {
-		return OutputSnapshot{}, errors.New("Task Worktree must be clean before output capture")
+	if err := verifyWorktreeIndexFlags(ctx, snapshot.WorktreePath); err != nil {
+		return OutputSnapshot{}, err
 	}
 	commit, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil || !validCommit(commit) {
@@ -476,13 +455,45 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 	if err != nil || !validCommit(tree) {
 		return OutputSnapshot{}, errors.New("Task output tree identity is invalid")
 	}
-	headAfter, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil || headAfter != commit {
-		return OutputSnapshot{}, errors.New("Task Worktree HEAD changed during output capture")
+	headBeforeStatus, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil || headBeforeStatus != commit {
+		return OutputSnapshot{}, errors.New("Task Worktree HEAD changed before clean-state verification")
 	}
-	statusAfter, err := gitOutput(ctx, snapshot.WorktreePath, "--no-optional-locks", "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
+	status, err := gitOutput(
+		ctx, snapshot.WorktreePath, "--no-optional-locks", "status", "--porcelain=v2",
+		"--untracked-files=all", "--ignore-submodules=none",
+	)
+	if err != nil {
+		return OutputSnapshot{}, errors.New("inspect Task Worktree state before output capture")
+	}
+	if status != "" {
+		return OutputSnapshot{}, errors.New("Task Worktree must be clean before output capture")
+	}
+	headAfterStatus, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil || headAfterStatus != commit {
+		return OutputSnapshot{}, errors.New("Task Worktree HEAD changed during clean-state verification")
+	}
+	treeAfterStatus, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", headAfterStatus+"^{tree}")
+	if err != nil || treeAfterStatus != tree {
+		return OutputSnapshot{}, errors.New("Task Worktree tree changed during clean-state verification")
+	}
+	if err := verifyWorktreeIndexFlags(ctx, snapshot.WorktreePath); err != nil {
+		return OutputSnapshot{}, err
+	}
+	statusAfter, err := gitOutput(
+		ctx, snapshot.WorktreePath, "--no-optional-locks", "status", "--porcelain=v2",
+		"--untracked-files=all", "--ignore-submodules=none",
+	)
 	if err != nil || statusAfter != "" {
 		return OutputSnapshot{}, errors.New("Task Worktree changed during output capture")
+	}
+	headFinal, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil || headFinal != commit {
+		return OutputSnapshot{}, errors.New("Task Worktree HEAD changed before output capture completed")
+	}
+	treeFinal, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", headFinal+"^{tree}")
+	if err != nil || treeFinal != tree {
+		return OutputSnapshot{}, errors.New("Task Worktree tree changed before output capture completed")
 	}
 	return OutputSnapshot{CommitSHA: commit, TreeSHA: tree}, nil
 }
