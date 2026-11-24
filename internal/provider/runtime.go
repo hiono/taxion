@@ -229,6 +229,10 @@ func (r *Runtime) Resume(ctx context.Context, request ResumeRequest) (ResumeResu
 	if !capabilities.HasEvidenceAtLeast(CapabilitySessionReattach, r.durableEvidence) {
 		return ResumeResult{}, ErrUnsupportedCapability
 	}
+	if request.RequireIdempotency &&
+		!capabilities.HasEvidenceAtLeast(CapabilityResumeIdempotency, EvidenceLive) {
+		return ResumeResult{}, ErrUnsupportedCapability
+	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (ResumeResult, error) {
 		result, err := r.adapter.Resume(ctx, request, lease)
 		if err != nil {
