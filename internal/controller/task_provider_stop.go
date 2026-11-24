@@ -228,6 +228,27 @@ func (c *ProviderController) StopTaskExecution(
 	if !createdClaim {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, provider.ErrStopUnconfirmed
 	}
+	postClaimJob, postExecution, postPermission, postTask, postAssignment, _, postSession, verifyErr :=
+		c.taskProviderExecutionTarget(ctx, jobID, roleExecutionID, permissionID, permissionRequest, principal)
+	if verifyErr != nil || postClaimJob.ID != latest.ID || postExecution.ID != execution.ID ||
+		postPermission.ID != permission.ID || postTask.ID != task.ID || postAssignment.ID != assignment.ID || postSession != sessionID {
+		_, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+			ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedDefinitiveFailure, "",
+		)
+		return intentReceipt, intent, domain.ProviderStopObservation{}, errors.Join(errors.New("Task Provider Stop authority changed after claim acquisition"), verifyErr, releaseErr)
+	}
+	if err := postPermission.ValidateFor(postClaimJob, postPermission.OperationID, postPermission.RequestSHA256, c.now()); err != nil {
+		_, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+			ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedDefinitiveFailure, "",
+		)
+		return intentReceipt, intent, domain.ProviderStopObservation{}, errors.Join(err, releaseErr)
+	}
+	if err := c.worktreeVerifier.Verify(ctx, postClaimJob.ID, postTask, postAssignment.Snapshot()); err != nil {
+		_, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+			ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedDefinitiveFailure, "",
+		)
+		return intentReceipt, intent, domain.ProviderStopObservation{}, errors.Join(fmt.Errorf("reverify owned Task Worktree after Stop claim acquisition: %w", err), releaseErr)
+	}
 	_, _, started, err := c.store.StartProviderStopDispatchClaim(ctx, jobID, claim.ID, fencingEvidenceSHA256, principal)
 	if err != nil {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, err
@@ -235,11 +256,6 @@ func (c *ProviderController) StopTaskExecution(
 	if !started {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, provider.ErrStopUnconfirmed
 	}
-	latest, err = c.store.GetJob(ctx, jobID)
-	if err != nil {
-		return intentReceipt, intent, domain.ProviderStopObservation{}, err
-	}
-
 	stopResult, stopErr := c.runtime.Stop(ctx, provider.StopRequest{
 		OperationID:    intent.OperationID,
 		SessionID:      sessionID,
@@ -280,13 +296,10 @@ func (c *ProviderController) StopTaskExecution(
 			)
 			return intentReceipt, intent, observation, errors.Join(stopErr, releaseErr)
 		}
-		if !providerOperationMayHaveStarted(stopErr) {
-			_, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
-				ctx, jobID, claim.ID, principal, domain.ProviderStopDispatchReleasedDefinitiveFailure, "",
-			)
-			return intentReceipt, intent, domain.ProviderStopObservation{}, errors.Join(stopErr, releaseErr)
-		}
-		return intentReceipt, intent, domain.ProviderStopObservation{}, stopErr
+		observation, persistErr := c.persistProviderStopObservation(
+			ctx, latest, intent, principal, false, false, "", latestPreviousUnknown,
+		)
+		return intentReceipt, intent, observation, errors.Join(provider.ErrStopUnconfirmed, stopErr, persistErr)
 	}
 	if stopResult.OperationID != intent.OperationID || stopResult.SessionID != sessionID ||
 		!stopResult.Stopped || !stopResult.Quiescent || !validProviderEvidenceSHA256(stopResult.EvidenceSHA256) {

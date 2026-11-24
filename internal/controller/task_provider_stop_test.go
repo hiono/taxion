@@ -952,3 +952,116 @@ func TestTaskProviderStopDoesNotReclaimClaimAfterDispatchStart(t *testing.T) {
 		t.Fatal("started claim was released after NOT_FOUND")
 	}
 }
+
+func TestTaskProviderStopRevalidatesWorktreeAfterClaimBeforeDispatch(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	f.worktree.failAt = 3
+	f.worktree.verifyErr = errors.New("Worktree changed after claim")
+	_, intent, _, err := f.stop("cmd_56565656565656565656565656565656", domain.ProviderStopReasonTaskComplete)
+	if intent.ID == "" || err == nil || f.runtime.stopCalls != 0 {
+		t.Fatalf("Stop dispatched after post-claim Worktree verification failed: intent=%#v calls=%d err=%v",
+			intent, f.runtime.stopCalls, err)
+	}
+	job, readErr := f.database.GetJob(f.ctx, f.jobID)
+	if readErr != nil {
+		t.Fatalf("GetJob: %v", readErr)
+	}
+	if len(job.ProviderStopDispatchStarts) != 0 {
+		t.Fatalf("Stop dispatch started despite failed post-claim verification: %#v", job.ProviderStopDispatchStarts)
+	}
+	if _, active := domain.ActiveProviderStopDispatchClaim(job, domain.ProviderStopOperationID(intent.CommandID)); active {
+		t.Fatal("pre-dispatch Stop claim was not released after verification failure")
+	}
+}
+
+func TestTaskProviderStopDispatchFactsRequireQuiescentAndDefinitiveEvidence(t *testing.T) {
+	t.Run("reject start after quiescence", func(t *testing.T) {
+		f := newTaskProviderStopFixture(t)
+		job, err := f.database.GetJob(f.ctx, f.jobID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+		now := f.controller.now()
+		intent, err := domain.NewProviderStopIntent(job, f.execution.ID, principalID, "session_1",
+			"cmd_57575757575757575757575757575757", domain.ProviderStopReasonTaskComplete, now.Add(time.Second))
+		if err != nil {
+			t.Fatalf("NewProviderStopIntent: %v", err)
+		}
+		job.ProviderStopIntents = append(job.ProviderStopIntents, intent)
+		job.Revision++
+		job.UpdatedAt = intent.CreatedAt
+		claim, err := domain.NewProviderStopDispatchClaim(job, intent.ID, principalID,
+			"cmd_58585858585858585858585858585858", now.Add(2*time.Second))
+		if err != nil {
+			t.Fatalf("NewProviderStopDispatchClaim: %v", err)
+		}
+		job.ProviderStopDispatchClaims = append(job.ProviderStopDispatchClaims, claim)
+		job.Revision++
+		job.UpdatedAt = claim.CreatedAt
+		quiescent, err := domain.NewProviderStopObservation(job, intent.ID, principalID,
+			"cmd_59595959595959595959595959595959", true, true, strings.Repeat("a", 64), false, now.Add(3*time.Second))
+		if err != nil {
+			t.Fatalf("NewProviderStopObservation: %v", err)
+		}
+		job.ProviderStopObservations = append(job.ProviderStopObservations, quiescent)
+		job.Revision++
+		job.UpdatedAt = quiescent.CreatedAt
+		if _, err := domain.NewProviderStopDispatchStart(job, claim.ID, principalID,
+			domain.ProviderStopDispatchStartCommandID(claim.ID), "", now.Add(4*time.Second)); err == nil {
+			t.Fatal("Stop dispatch started after a quiescent observation")
+		}
+	})
+
+	t.Run("started definitive failure requires matching observation", func(t *testing.T) {
+		f := newTaskProviderStopFixture(t)
+		job, err := f.database.GetJob(f.ctx, f.jobID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+		now := f.controller.now()
+		intent, err := domain.NewProviderStopIntent(job, f.execution.ID, principalID, "session_1",
+			"cmd_67676767676767676767676767676767", domain.ProviderStopReasonTaskComplete, now.Add(time.Second))
+		if err != nil {
+			t.Fatalf("NewProviderStopIntent: %v", err)
+		}
+		job.ProviderStopIntents = append(job.ProviderStopIntents, intent)
+		job.Revision++
+		job.UpdatedAt = intent.CreatedAt
+		claim, err := domain.NewProviderStopDispatchClaim(job, intent.ID, principalID,
+			"cmd_68686868686868686868686868686868", now.Add(2*time.Second))
+		if err != nil {
+			t.Fatalf("NewProviderStopDispatchClaim: %v", err)
+		}
+		job.ProviderStopDispatchClaims = append(job.ProviderStopDispatchClaims, claim)
+		job.Revision++
+		job.UpdatedAt = claim.CreatedAt
+		start, err := domain.NewProviderStopDispatchStart(job, claim.ID, principalID,
+			domain.ProviderStopDispatchStartCommandID(claim.ID), "", now.Add(3*time.Second))
+		if err != nil {
+			t.Fatalf("NewProviderStopDispatchStart: %v", err)
+		}
+		job.ProviderStopDispatchStarts = append(job.ProviderStopDispatchStarts, start)
+		job.Revision++
+		job.UpdatedAt = start.CreatedAt
+		releaseCommand := domain.ProviderStopDispatchReleaseCommandID(claim.ID, domain.ProviderStopDispatchReleasedDefinitiveFailure)
+		if _, err := domain.NewProviderStopDispatchRelease(job, claim.ID, principalID, releaseCommand,
+			domain.ProviderStopDispatchReleasedDefinitiveFailure, "", now.Add(4*time.Second)); err == nil {
+			t.Fatal("started Stop claim was released without persisted definitive-failure evidence")
+		}
+		evidence := strings.Repeat("b", 64)
+		failureObservation, err := domain.NewProviderStopObservation(job, intent.ID, principalID,
+			"cmd_69696969696969696969696969696969", false, false, evidence, false, now.Add(4*time.Second))
+		if err != nil {
+			t.Fatalf("NewProviderStopObservation: %v", err)
+		}
+		job.ProviderStopObservations = append(job.ProviderStopObservations, failureObservation)
+		job.Revision++
+		job.UpdatedAt = failureObservation.CreatedAt
+		if _, err := domain.NewProviderStopDispatchRelease(job, claim.ID, principalID, releaseCommand,
+			domain.ProviderStopDispatchReleasedDefinitiveFailure, evidence, now.Add(5*time.Second)); err != nil {
+			t.Fatalf("matching definitive-failure evidence did not release Stop claim: %v", err)
+		}
+	})
+}

@@ -195,6 +195,9 @@ func NewProviderStopDispatchStart(
 	if _, started := ProviderStopDispatchStartedForClaim(job, claim.ID); started {
 		return ProviderStopDispatchStart{}, errors.New("Provider Stop dispatch claim has already started")
 	}
+	if providerStopQuiescentBefore(job, claim.OperationID, job.Revision+1) {
+		return ProviderStopDispatchStart{}, errors.New("Provider Stop dispatch cannot start after quiescence was confirmed")
+	}
 	if fencingEvidenceSHA256 != "" && !validSHA256(fencingEvidenceSHA256) {
 		return ProviderStopDispatchStart{}, errors.New("Provider Stop dispatch fencing evidence digest is invalid")
 	}
@@ -232,6 +235,9 @@ func (s ProviderStopDispatchStart) Validate(job Job) error {
 		s.CreatedRevision <= claim.CreatedRevision || s.CreatedAt.Before(claim.CreatedAt) {
 		return errors.New("Provider Stop dispatch start does not match its claim")
 	}
+	if providerStopQuiescentBefore(job, s.OperationID, s.CreatedRevision) {
+		return errors.New("Provider Stop dispatch start follows confirmed quiescence")
+	}
 	return nil
 }
 
@@ -242,6 +248,30 @@ func ProviderStopDispatchStartedForClaim(job Job, claimID string) (ProviderStopD
 		}
 	}
 	return ProviderStopDispatchStart{}, false
+}
+
+func providerStopQuiescentBefore(job Job, operationID string, beforeRevision uint64) bool {
+	for _, observation := range job.ProviderStopObservations {
+		if observation.OperationID == operationID && observation.Quiescent &&
+			observation.CreatedRevision < beforeRevision {
+			return true
+		}
+	}
+	return false
+}
+
+func providerStopDefinitiveFailureObserved(job Job, operationID string, startRevision, beforeRevision uint64, evidenceSHA256 string) bool {
+	if !validSHA256(evidenceSHA256) {
+		return false
+	}
+	for _, observation := range job.ProviderStopObservations {
+		if observation.OperationID == operationID && observation.CreatedRevision > startRevision &&
+			observation.CreatedRevision < beforeRevision && observation.EvidenceSHA256 == evidenceSHA256 &&
+			!observation.Stopped && !observation.Quiescent {
+			return true
+		}
+	}
+	return false
 }
 
 func NewProviderStopDispatchRelease(
@@ -290,6 +320,11 @@ func NewProviderStopDispatchRelease(
 		if !validSHA256(evidenceSHA256) {
 			return ProviderStopDispatchRelease{}, errors.New("fenced NOT_FOUND release requires verified lookup evidence")
 		}
+	} else if outcome == ProviderStopDispatchReleasedDefinitiveFailure {
+		if start, started := ProviderStopDispatchStartedForClaim(job, claim.ID); started &&
+			!providerStopDefinitiveFailureObserved(job, claim.OperationID, start.CreatedRevision, job.Revision+1, evidenceSHA256) {
+			return ProviderStopDispatchRelease{}, errors.New("started Provider Stop dispatch definitive failure requires matching persisted evidence")
+		}
 	}
 	release := ProviderStopDispatchRelease{
 		ID: ProviderStopDispatchReleaseID(commandID), CommandID: commandID,
@@ -335,6 +370,11 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 		start, started := ProviderStopDispatchStartedForClaim(job, claim.ID)
 		if !started || !validSHA256(start.FencingEvidenceSHA256) || !validSHA256(r.EvidenceSHA256) {
 			return errors.New("fenced NOT_FOUND release requires a started claim with fencing evidence and verified lookup evidence")
+		}
+	} else if r.Outcome == ProviderStopDispatchReleasedDefinitiveFailure {
+		if start, started := ProviderStopDispatchStartedForClaim(job, claim.ID); started &&
+			!providerStopDefinitiveFailureObserved(job, claim.OperationID, start.CreatedRevision, r.CreatedRevision, r.EvidenceSHA256) {
+			return errors.New("started Provider Stop dispatch definitive failure lacks matching persisted evidence")
 		}
 	}
 	if r.Outcome == ProviderStopDispatchReleasedStopped {
