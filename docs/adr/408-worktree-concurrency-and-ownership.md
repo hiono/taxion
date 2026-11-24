@@ -1,6 +1,6 @@
 # ADR-408: Jobの開発作業をGit Worktree単位で分離し、Roleを逐次引き継ぐ
 
-Date: 2026-11-20
+Date: 2026-11-24
 
 ## Status
 
@@ -32,7 +32,7 @@ Accepted
 
 ## Consequences
 
-同一WorktreeのRoleは逐次実行し、独立Taskの並行性はWorktreeとJob Graphで制御します。停止状態が不明なWorktreeを推測で再利用しません。
+Worktreeの生成元に依存せず、検証済みの既存作業状態をJobへ取り込めます。採用時に既存ファイルを変更しないため、利用者の作業を保持したままTaxion管理へ移行できます。mutable ownershipはappend-only Handoffで追跡し、Reviewerは独立snapshotだけを読み取るため、作業継続とレビューの隔離を両立します。停止・結果・所有者が不明なWorktreeを推測で再利用・削除しません。
 
 ## Relationship to other ADRs
 
