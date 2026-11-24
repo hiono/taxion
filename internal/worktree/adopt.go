@@ -264,3 +264,18 @@ func cleanWorktreeStateSHA256() string {
 	sum := sha256.Sum256(nil)
 	return hex.EncodeToString(sum[:])
 }
+
+func (m *Manager) verifyAdoptionReservation(jobID, taskID, repositoryID, worktreePath string) error {
+	key := sha256.Sum256([]byte(worktreePath))
+	path := filepath.Join(m.root, ".adoptions", hex.EncodeToString(key[:])+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read Worktree adoption reservation: %w", err)
+	}
+	var reservation adoptionReservation
+	if err := json.Unmarshal(data, &reservation); err != nil ||
+		reservation != (adoptionReservation{JobID: jobID, TaskID: taskID, RepositoryID: repositoryID, WorktreePath: worktreePath}) {
+		return errors.New("Worktree adoption reservation identity is invalid")
+	}
+	return nil
+}
