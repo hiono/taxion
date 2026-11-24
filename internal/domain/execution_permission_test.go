@@ -268,3 +268,20 @@ func TestExecutionPermissionRejectsMutatingReviewerAndAllowsContainedUnknownEffe
 		t.Fatal("mutating Reviewer effect was accepted")
 	}
 }
+
+func TestExecutionPermissionRejectsUnapprovedAdoptedWorktreePath(t *testing.T) {
+	job, _, now := approvedJobWithTaskForExecutionPermission(t)
+	request := executionPermissionTestRequest(job, now)
+	request.WorktreePath = "/tmp/external-worktree"
+	requestSHA, err := ExecutionPermissionRequestSHA256(request)
+	if err != nil {
+		t.Fatalf("ExecutionPermissionRequestSHA256: %v", err)
+	}
+	assessment := executionPermissionTestAssessment(request, requestSHA, now)
+	if _, err := NewExecutionPermission(job, request, requestSHA, assessment, now); err == nil {
+		t.Fatal("Worktree path outside the exact approved Task resource was accepted")
+	}
+	if err := job.Validate(); err != nil {
+		t.Fatalf("rejected adopted Worktree path mutated Job: %v", err)
+	}
+}
