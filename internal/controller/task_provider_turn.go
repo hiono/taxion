@@ -58,7 +58,8 @@ func (c *ProviderController) SendTaskExecution(
 	request := provider.TurnRequest{
 		OperationID: domain.TaskTurnOperationID(commandID), TurnID: domain.TaskTurnIntentID(commandID),
 		SessionID: sessionID, PromptSHA256: promptSHA, Prompt: prompt,
-		MaxTokens: reservedTokens, Deadline: permission.ExpiresAt, RequireIdempotency: true,
+		MaxTokens: reservedTokens, Deadline: permission.ExpiresAt,
+		RequireIdempotency: capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive),
 	}
 	if err := request.Validate(); err != nil {
 		return store.CommandReceipt{}, domain.TaskTurnIntent{}, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrProviderInvalidRequest
@@ -117,8 +118,7 @@ func (c *ProviderController) SendTaskExecution(
 }
 
 func taskTurnCapabilitiesVerified(capabilities provider.Capabilities) bool {
-	return capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, provider.EvidenceLive) &&
-		capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive) &&
+	return capabilities.SupportsSafeSend() &&
 		capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, provider.EvidenceLive) &&
 		capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, provider.EvidenceLive) &&
 		capabilities.HasEvidenceAtLeast(provider.CapabilityUsageCompleteness, provider.EvidenceLive)
