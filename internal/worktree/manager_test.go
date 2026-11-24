@@ -377,3 +377,30 @@ func TestManagerAdoptsBranchAttachedWorktreeAndPreservesBranchIdentity(t *testin
 		t.Fatal("Worktree HEAD mode change was accepted")
 	}
 }
+
+func TestManagerRequiresPersistentReservationForAdoptedWorktree(t *testing.T) {
+	repository := initRepository(t)
+	worktreePath := filepath.Join(t.TempDir(), "reserved-worktree")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, "HEAD")
+	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_0123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := manager.Adopt(context.Background(), "job_0123456789abcdef", task, worktreePath)
+	if err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	reservationDirectory := filepath.Join(manager.root, ".adoptions")
+	entries, err := os.ReadDir(reservationDirectory)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("read adoption reservation: entries=%v err=%v", entries, err)
+	}
+	if err := os.Remove(filepath.Join(reservationDirectory, entries[0].Name())); err != nil {
+		t.Fatalf("remove adoption reservation: %v", err)
+	}
+	if err := manager.Verify(context.Background(), "job_0123456789abcdef", task, snapshot); err == nil ||
+		!strings.Contains(err.Error(), "adoption reservation") {
+		t.Fatalf("Verify without reservation error = %v", err)
+	}
+}
