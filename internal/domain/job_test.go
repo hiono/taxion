@@ -457,7 +457,6 @@ func TestPlanningAuthorizationCanReconstructExpiredIdempotentRetry(t *testing.T)
 	}
 }
 
-
 func TestRoleExecutionRequiresWorktreeID(t *testing.T) {
 	commandID := "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	job := Job{ID: "job_aaaaaaaaaaaaaaaa"}
