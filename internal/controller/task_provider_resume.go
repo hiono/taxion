@@ -141,14 +141,7 @@ func (c *ProviderController) ResumeTaskExecution(
 		}
 	}
 	if err := c.worktreeVerifier.Verify(ctx, latest.ID, currentTask, currentAssignment.Snapshot()); err != nil {
-		verifyErr := fmt.Errorf("reverify owned Task Worktree immediately before Resume: %w", err)
-		// The Provider has not been called. Persist a terminal local failure so
-		// this unsent intent cannot block a later Stop after its permission expires.
-		observation, persistErr := c.recordResumeObservation(
-			ctx, jobID, intent.ID, domain.PlanningResumeFailed,
-			providerResumeNotDispatchedEvidence(intent.ID, verifyErr), principal,
-		)
-		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(verifyErr, persistErr)
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, fmt.Errorf("reverify owned Task Worktree immediately before Resume: %w", err)
 	}
 
 	result, err := c.runtime.Resume(ctx, request)
