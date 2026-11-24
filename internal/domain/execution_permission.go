@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"fmt"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ type ExecutionPermissionRequest struct {
 	ReservedTurns       uint32    `json:"reserved_turns"`
 	ReservedTokens      uint64    `json:"reserved_tokens"`
 	ExpiresAt           time.Time `json:"expires_at"`
+	WorktreePath        string    `json:"worktree_path,omitempty"`
 }
 
 type ExecutionEffectAssessment struct {
@@ -150,6 +152,12 @@ func ValidateExecutionPermissionRequest(job Job, request ExecutionPermissionRequ
 	task, taskFound := taskByID(job, request.TaskID)
 	if !taskFound || task.ContractRevision != revision.Revision || task.JobApprovalID != approval.ID {
 		return errors.New("ExecutionPermission requires a Task bound to the current JobApproval and contract revision")
+	}
+	if request.WorktreePath != "" {
+		if !filepath.IsAbs(request.WorktreePath) || filepath.Clean(request.WorktreePath) != request.WorktreePath ||
+			!containsExact(task.Workspaces, request.WorktreePath) {
+			return errors.New("adopted Worktree path must be a canonical path explicitly included in the approved Task workspace scope")
+		}
 	}
 	now = now.UTC().Round(0)
 	expiresAt := request.ExpiresAt.UTC().Round(0)
