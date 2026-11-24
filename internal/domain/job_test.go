@@ -471,7 +471,7 @@ func TestRoleExecutionRequiresWorktreeID(t *testing.T) {
 		CreatedAt:                time.Unix(1, 0).UTC(),
 		CreatedRevision:          2,
 	}
-	if err := execution.Validate(job); err == nil {
-		t.Fatal("RoleExecution.Validate() accepted a Task execution without WorktreeID")
+	if err := execution.Validate(job); err == nil || !strings.Contains(err.Error(), "Task RoleExecution requires TaskID, WorktreeID, and ExecutionPermissionID") {
+		t.Fatalf("RoleExecution.Validate() error = %v, want missing WorktreeID rejection", err)
 	}
 }
