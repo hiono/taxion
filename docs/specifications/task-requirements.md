@@ -59,11 +59,11 @@ AcceptanceCriteriaとRequiredEvidenceはTask固有の追加条件です。Task c
 Task creationはWorktree、ExecutionPermission、RoleExecution、Provider operationを作成しません。実行開始は別Commandとします。
 
 - Task-bound executionはExecutionPermissionをTaskID、effective resource scope、budget、deadline、Provider identityへ束縛します。
-- TaskExecutionStartはtrusted TaskWorktreeManagerを必須とします。Managerはtrusted Repository registryからTaskのapproved target repositoryを解決し、Job / Taskごとのdetached Git Worktreeを作成または再検証します。
+- TaskExecutionStartはtrusted TaskWorktreeManagerを必須とします。Managerはtrusted Repository registryからTaskのapproved target repositoryを解決し、Job / TaskごとのWorktreeをCreateまたはAdoptします。Createはdetached Worktreeを生成し、Adoptは既存linked WorktreeのHEAD mode（detached / branch-attached）を保持します。
 - 現在の実装は単一repository Taskだけを許可します。複数repository Task、未登録Repository、canonical pathでないWorktreeは拒否します。
-- WorktreeAssignmentはrepository identity / path、Worktree path、baseline commit、owner RoleExecutionを保持します。WorktreeAssignment、RoleExecution、ProviderStartIntentは同一JobAggregate transactionで保存します。
+- WorktreeAssignmentはrepository identity / path、Worktree path、baseline commit、provenance、初期state digest、HEAD mode / branch ref、owner RoleExecutionを保持します。WorktreeAssignment、RoleExecution、ProviderStartIntentは同一JobAggregate transactionで保存します。
 - RoleExecution.WorktreeIDとProviderStartIntent.WorktreeIDは同じWorktreeAssignmentを参照します。exact replayでは保存済みWorktreeを再検証し、同一Taskへの別RoleExecutionによる再取得はhandoffが成立するまで拒否します。
-- Provider dispatchはtrusted Worktree verifierでassignment owner、Repository identity、Worktree path、baseline ancestry、detached stateを再検証します。
+- Provider dispatchはtrusted Worktree verifierでassignment owner、Repository identity、Worktree path、baseline ancestry、登録時のHEAD mode / branch refを再検証します。
 - Provider StartRequestにはRepositoryID、WorktreePath、baseline commitを含めます。Worktree付きStartはTask Worktree capabilityの証拠がE4以上の場合だけ許可します。Start idempotency / lookup capabilityは別途検証します。
 - Worktree lifecycle enforcement開始前に作成された既存RoleExecutionは読み戻せます。ただしWorktree assignmentを持たない既存ExecutionからProvider dispatchは許可しません。
 - Worktreeの生成元（Taxion生成 / 既存linked Worktree）は信頼性判定に使用しません。既存Worktreeは明示的Adopt CommandでTaskのapproved repositoryへ照合し、Repository / Worktree identity、canonical path、Git metadata、HEAD / tree、HEAD mode / ref、baseline ancestry、index・working-tree・untracked state digestを検証した後に限り利用できます。
@@ -71,7 +71,8 @@ Task creationはWorktree、ExecutionPermission、RoleExecution、Provider operat
 - CreateとAdoptの登録後は同じownership・Provider検証・停止・成果Evidence契約を適用します。一つのWorktreeを複数Job / Taskへ同時登録してはなりません。
 - WorktreeAssignmentのownerを直接変更しません。ownership transferは旧owner / 新owner / Worktree identity / Provider停止・Quiescent / event / final Result / complete Usage / output identityを束縛したappend-only factとして記録し、UNKNOWNやEvidence欠落時は拒否またはquarantineします。
 - Reviewerはmutable Worktreeを使用せず、Coder JobOutputのimmutable snapshotを独立read-only executionで評価します。Reviewer終了後のCoder再開は、Reviewer停止・結果・Usageを照合した明示的Handoff後に限ります。
-- 現行実装はAdopt、ownership transfer、release、quarantine、orphan recoveryに未対応です。対応するCommandと検証が実装されるまでは、既存Worktreeの登録・Role間再割当てを許可しません。
+- 現行実装はTaskExecutionStart requestのWorktreePathによるAdoptに対応します。WorktreePathはcanonical absolute pathであり、ExecutionPermissionのResourceおよびTask approved TargetResourcesに同一値を含める必要があります。Managerは既存linked Worktreeのidentityとstaged / unstaged / untracked state digestを検証し、既存ファイル・index・HEAD・branch refを変更せず登録します。
+- Adoptは現時点でTask-bound Coder Startに統合されており、独立した事前登録Commandではありません。ownership transfer、release、quarantine、orphan recoveryおよびReviewer専用snapshot executionは未実装です。
 - Reviewer dispatchはimmutable commit / tree snapshotとread-only enforcementが成立するまで拒否します。
 - Provider停止、event、final result、Usage、review target identityを照合できないWorktreeは保持します。handoff、quarantine、release、orphan cleanupは別の実装単位とし、未解決Worktreeを自動削除しません。
 
