@@ -36,12 +36,20 @@ func prepareTaskResumeTurn(t *testing.T, f *taskProviderStopFixture) {
 
 func enableTaskResumeE5(f *taskProviderStopFixture) {
 	f.runtime.capabilities.CrossProcessSessionReattach = true
+	f.runtime.capabilities.ResumeIdempotency = true
 	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence, provider.CapabilityEvidence{
 		Capability:     provider.CapabilitySessionReattach,
 		Identity:       f.runtime.identity,
 		TestID:         "task-resume-e5",
 		EvidenceSHA256: strings.Repeat("f", 64),
 		EvidenceLevel:  provider.EvidenceDurable,
+		VerifiedAt:     f.controller.now(),
+	}, provider.CapabilityEvidence{
+		Capability:     provider.CapabilityResumeIdempotency,
+		Identity:       f.runtime.identity,
+		TestID:         "task-resume-idempotency",
+		EvidenceSHA256: strings.Repeat("e", 64),
+		EvidenceLevel:  provider.EvidenceLive,
 		VerifiedAt:     f.controller.now(),
 	})
 }
@@ -140,6 +148,16 @@ func TestTaskProviderResumeRequiresMatchingE5CapabilityEvidence(t *testing.T) {
 					f.runtime.capabilities.Evidence[i].EvidenceLevel = provider.EvidenceLive
 				}
 			}
+		}},
+		{name: "Resume idempotency evidence missing", mutate: func(f *taskProviderStopFixture) {
+			f.runtime.capabilities.ResumeIdempotency = false
+			filtered := f.runtime.capabilities.Evidence[:0]
+			for _, evidence := range f.runtime.capabilities.Evidence {
+				if evidence.Capability != provider.CapabilityResumeIdempotency {
+					filtered = append(filtered, evidence)
+				}
+			}
+			f.runtime.capabilities.Evidence = filtered
 		}},
 	}
 	for _, test := range tests {
