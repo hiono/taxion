@@ -118,6 +118,10 @@ func TestProviderResultAndUsageFactsPersistAtomicallyAndRestore(t *testing.T) {
 		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_turn_1", 21, false, evidence, principal); err == nil {
 		t.Fatal("Provider Usage accepted an observation after Complete=true")
 	}
+	if _, _, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
+		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_turn_2", 22, true, strings.Repeat("3", 64), principal); err == nil {
+		t.Fatal("Task Turn accepted a second complete Provider Usage with a different UsageID")
+	}
 	if _, _, err := database.AddProviderResultObservation(ctx, jobID, job.Revision,
 		roleExecutionID, turn.OperationID, turn.ID, sessionID, "different final", resultDigest("different final"), true, evidence, principal); err == nil {
 		t.Fatal("Provider Result accepted a second terminal result for the same Turn")
