@@ -190,6 +190,14 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 	if record.Origin != "" && record.Origin != origin {
 		return errors.New("Worktree provenance differs from its persisted registration")
 	}
+	if record.InitialStateSHA256 != "" && snapshot.InitialStateSHA256 != "" &&
+		record.InitialStateSHA256 != snapshot.InitialStateSHA256 {
+		return errors.New("Worktree initial state digest differs from its persisted registration")
+	}
+	if record.HeadMode != "" && snapshot.HeadMode != "" &&
+		(record.HeadMode != snapshot.HeadMode || record.HeadRef != snapshot.HeadRef) {
+		return errors.New("Worktree HEAD mode or reference differs from its persisted registration")
+	}
 	if origin != domain.WorktreeOriginTaxionCreated && origin != domain.WorktreeOriginAdopted {
 		return errors.New("Worktree provenance is invalid")
 	}
