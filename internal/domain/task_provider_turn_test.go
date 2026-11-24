@@ -130,6 +130,10 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.ProviderResultObservations = append(job.ProviderResultObservations, result)
 	job.Revision++
 	job.UpdatedAt = result.CreatedAt
+	if _, err := NewProviderUsageObservation(job, execution.ID, principalID, turn.OperationID, turn.ID,
+		turn.ProviderSessionID, "usage_task_turn_over_limit", 81, true, strings.Repeat("6", 64), now.Add(3*time.Minute)); err == nil {
+		t.Fatal("complete Provider Usage exceeded the Task Turn reserved token budget")
+	}
 	usage, err := NewProviderUsageObservation(job, execution.ID, principalID, turn.OperationID, turn.ID,
 		turn.ProviderSessionID, "usage_task_turn", 75, true, strings.Repeat("7", 64), now.Add(3*time.Minute))
 	if err != nil {

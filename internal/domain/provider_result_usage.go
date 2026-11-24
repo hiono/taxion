@@ -199,6 +199,12 @@ func (o ProviderUsageObservation) Validate(job Job) error {
 		return errors.New("Provider Usage observation does not follow its accepted Provider operation")
 	}
 	if o.TurnID != "" {
+		reservedTokens, found := providerTurnReservedTokens(job, o.TurnID)
+		if !found || o.Tokens > reservedTokens {
+			return errors.New("Provider Usage exceeds its reserved Turn token budget")
+		}
+	}
+	if o.TurnID != "" {
 		for _, existing := range job.ProviderUsageObservations {
 			if existing.OperationID == o.OperationID && existing.TurnID == o.TurnID &&
 				existing.Complete && existing.CreatedRevision < o.CreatedRevision {
@@ -328,6 +334,28 @@ func providerResultUsageBinding(job Job, roleExecutionID, operationID, turnID, s
 		return start, accepted, minimumRevision, minimumTime, nil
 	}
 	return ProviderStartIntent{}, nil, 0, time.Time{}, errors.New("Provider observation Turn intent was not found")
+}
+
+func providerTurnReservedTokens(job Job, turnID string) (uint64, bool) {
+	var reserved uint64
+	found := false
+	for _, turn := range job.PlanningTurnIntents {
+		if turn.ID == turnID {
+			if found {
+				return 0, false
+			}
+			reserved, found = turn.ReservedTokens, true
+		}
+	}
+	for _, turn := range job.TaskTurnIntents {
+		if turn.ID == turnID {
+			if found {
+				return 0, false
+			}
+			reserved, found = turn.ReservedTokens, true
+		}
+	}
+	return reserved, found
 }
 
 func sha256HexDomain(value string) string {
