@@ -222,9 +222,6 @@ func (i ProviderStopIntent) Validate(job Job) error {
 		i.CreatedAt.Before(start.CreatedAt) || i.CreatedAt.Before(startObservation.CreatedAt) {
 		return errors.New("Provider Stop intent does not follow the accepted Start Session")
 	}
-	if err := validateNoUnresolvedTaskTurnBeforeStop(job, i.RoleExecutionID, i.SessionID); err != nil {
-		return err
-	}
 	for _, turn := range job.PlanningTurnIntents {
 		if turn.RoleExecutionID == i.RoleExecutionID && turn.ProviderSessionID == i.SessionID &&
 			turn.CreatedRevision >= i.CreatedRevision {
