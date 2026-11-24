@@ -163,7 +163,7 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 		}
 		return Snapshot{}, fmt.Errorf("create detached Task Worktree: %w", err)
 	}
-	if err := m.Verify(ctx, jobID, task, snapshot); err != nil {
+	if err := m.verify(ctx, jobID, task, snapshot); err != nil {
 		return Snapshot{}, fmt.Errorf("verify newly created Task Worktree: %w", err)
 	}
 	return snapshot, nil
