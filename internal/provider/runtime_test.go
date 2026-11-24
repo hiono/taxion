@@ -516,7 +516,14 @@ func TestRuntimeRequiresDurableEvidenceForResume(t *testing.T) {
 }
 
 func TestRuntimeResumeRequiresVerifiedIdempotencyForTaskReattachment(t *testing.T) {
-	adapter := newTestAdapter(CapabilitySessionReattach)
+	adapter := newTestAdapter(CapabilitySessionReattach, CapabilityResumeIdempotency)
+	evidence := adapter.capabilities.Evidence[:0]
+	for _, candidate := range adapter.capabilities.Evidence {
+		if candidate.Capability != CapabilityResumeIdempotency {
+			evidence = append(evidence, candidate)
+		}
+	}
+	adapter.capabilities.Evidence = evidence
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
 	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
@@ -600,7 +607,14 @@ func TestRuntimeRejectsEventReplayWithoutDurableEvidenceBeforeCredentialAcquisit
 }
 
 func TestRuntimeStartRequiresVerifiedIdempotencyForTaskDispatch(t *testing.T) {
-	adapter := newTestAdapter(CapabilityStartLookup)
+	adapter := newTestAdapter(CapabilityStartLookup, CapabilityStartIdempotency)
+	evidence := adapter.capabilities.Evidence[:0]
+	for _, candidate := range adapter.capabilities.Evidence {
+		if candidate.Capability != CapabilityStartIdempotency {
+			evidence = append(evidence, candidate)
+		}
+	}
+	adapter.capabilities.Evidence = evidence
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
 	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
@@ -617,7 +631,14 @@ func TestRuntimeStartRequiresVerifiedIdempotencyForTaskDispatch(t *testing.T) {
 }
 
 func TestRuntimeSendRequiresVerifiedIdempotencyForRetry(t *testing.T) {
-	adapter := newTestAdapter(CapabilitySendLookup)
+	adapter := newTestAdapter(CapabilitySendLookup, CapabilitySendIdempotency)
+	evidence := adapter.capabilities.Evidence[:0]
+	for _, candidate := range adapter.capabilities.Evidence {
+		if candidate.Capability != CapabilitySendIdempotency {
+			evidence = append(evidence, candidate)
+		}
+	}
+	adapter.capabilities.Evidence = evidence
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
 	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
