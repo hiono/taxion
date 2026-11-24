@@ -666,16 +666,23 @@ func TestManagerAdoptRecoversOrphanedTaskReservationAfterGitDirConflict(t *testi
 	reservationDirectory := filepath.Join(manager.root, ".adoptions")
 	taskKey := sha256.Sum256([]byte(jobA + "\x00" + taskA.ID))
 	taskReservationPath := filepath.Join(reservationDirectory, "task-"+hex.EncodeToString(taskKey[:])+".json")
+	gitDirKeyA := sha256.Sum256([]byte(gitDirA))
+	gitDirReservationPath := filepath.Join(reservationDirectory, "gitdir-"+hex.EncodeToString(gitDirKeyA[:])+".json")
 	if _, err := writeAdoptionReservation(taskReservationPath, orphan); err != nil {
 		t.Fatalf("write interrupted Task reservation: %v", err)
+	}
+	if _, err := writeAdoptionReservation(gitDirReservationPath, orphan); err != nil {
+		t.Fatalf("write interrupted Git directory reservation: %v", err)
 	}
 
 	if _, err := manager.Adopt(context.Background(), jobA, taskA, worktreeB); err == nil ||
 		!strings.Contains(err.Error(), "already reserved") {
 		t.Fatalf("Adopt accepted another Task's reserved Git directory: %v", err)
 	}
-	if _, err := os.Stat(taskReservationPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("orphaned Task reservation remained after conflict: stat err=%v", err)
+	for _, path := range []string{taskReservationPath, gitDirReservationPath} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("orphaned adoption reservation %s remained after conflict: stat err=%v", path, err)
+		}
 	}
 	if _, err := manager.Adopt(context.Background(), jobA, taskA, worktreeC); err != nil {
 		t.Fatalf("Adopt retry with a different Worktree after orphan recovery: %v", err)
@@ -683,7 +690,8 @@ func TestManagerAdoptRecoversOrphanedTaskReservationAfterGitDirConflict(t *testi
 }
 
 func TestManagerOrphanedReservationCleanupPreservesCommittedAdoption(t *testing.T) {
-	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), nil)
+	repository := initRepository(t)
+	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
