@@ -60,6 +60,7 @@ Task-bound Coder Start fixtureはACTIVE Job、最新JobApproval、Task、JobAppr
 | DOM-014 | Event cursor | cursor欠落・逆行・分岐 | 拒否 |
 | DOM-015 | Start binding | accepted Start observationなしでTurn intent作成 | 拒否 |
 | DOM-016 | Session binding | accepted Start observationと異なるSessionIDでTurn intent作成 | 拒否 |
+| DOM-017 | Task Resume evidence | Coder ATTACHED observation | Provider応答のOperationID / SessionID / Attached / EvidenceSHA256が一致する場合のみ保存。Planner用観測経路からCoderを拒否 |
 | DOM-018 | UNKNOWN history | 同一OperationIDでUNKNOWNを追記しterminal evidenceで解消 | 既存factを変更せずappend-onlyで解消 |
 | DOM-019 | Stop intent | accepted Sessionなし、同一Sessionへの二重Stop、Stop後のTurn / Resume | 拒否 |
 | DOM-020 | Stop observation | UNKNOWN解消のOperationID不一致、Quiescent=trueかつStopped=false、evidence欠落 | 拒否 |
