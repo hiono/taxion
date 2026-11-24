@@ -442,11 +442,6 @@ func TestTaskProviderTurnRejectsLookupResultDigestMismatch(t *testing.T) {
 		Content: "mismatched final provider result", ResultSHA256: sha256String("mismatched final provider result"),
 		Final: true, EvidenceSHA256: strings.Repeat("d", 64),
 	}
-	f.runtime.resultResult = provider.Result{
-		OperationID: turn.OperationID, SessionID: turn.ProviderSessionID, TurnID: turn.ID,
-		Content: "mismatched final provider result", ResultSHA256: sha256String("mismatched final provider result"),
-		Final: true, EvidenceSHA256: strings.Repeat("d", 64),
-	}
 	_, recoveredTurn, observation, _, err := f.controller.SendTaskExecution(
 		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
 		prompt, f.permissionRequest, 100, f.principal,
