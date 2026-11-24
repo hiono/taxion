@@ -301,8 +301,16 @@ func TestManagerAdoptsExistingLinkedWorktreeWithoutChangingItsState(t *testing.T
 		t.Fatalf("write untracked file: %v", err)
 	}
 	beforeHEAD := gitTestOutput(t, worktreePath, "rev-parse", "HEAD")
-	beforeStatus := gitTestOutput(t, worktreePath, "status", "--porcelain=v2", "--untracked-files=all")
-	beforeStaged := gitTestOutput(t, worktreePath, "diff", "--cached", "--stat", "HEAD")
+	beforeStatus := gitTestOutput(t, worktreePath, "--no-optional-locks", "status", "--porcelain=v2", "--untracked-files=all", "--ignore-submodules=none")
+	beforeStaged := gitTestOutput(t, worktreePath, "--no-optional-locks", "diff", "--cached", "--stat", "--ignore-submodules=none", "HEAD")
+	indexPath := gitTestOutput(t, worktreePath, "rev-parse", "--git-path", "index")
+	if !filepath.IsAbs(indexPath) {
+		indexPath = filepath.Join(worktreePath, indexPath)
+	}
+	beforeIndex, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read Worktree index before adoption: %v", err)
+	}
 	beforeTracked, err := os.ReadFile(filepath.Join(worktreePath, "README.md"))
 	if err != nil {
 		t.Fatalf("read tracked file before adoption: %v", err)
@@ -331,11 +339,15 @@ func TestManagerAdoptsExistingLinkedWorktreeWithoutChangingItsState(t *testing.T
 	if got := gitTestOutput(t, worktreePath, "rev-parse", "HEAD"); got != beforeHEAD {
 		t.Fatalf("adoption changed HEAD: got %s, want %s", got, beforeHEAD)
 	}
-	if got := gitTestOutput(t, worktreePath, "status", "--porcelain=v2", "--untracked-files=all"); got != beforeStatus {
+	if got := gitTestOutput(t, worktreePath, "--no-optional-locks", "status", "--porcelain=v2", "--untracked-files=all", "--ignore-submodules=none"); got != beforeStatus {
 		t.Fatalf("adoption changed Worktree status: got %q, want %q", got, beforeStatus)
 	}
-	if got := gitTestOutput(t, worktreePath, "diff", "--cached", "--stat", "HEAD"); got != beforeStaged {
+	if got := gitTestOutput(t, worktreePath, "--no-optional-locks", "diff", "--cached", "--stat", "--ignore-submodules=none", "HEAD"); got != beforeStaged {
 		t.Fatalf("adoption changed index: got %q, want %q", got, beforeStaged)
+	}
+	afterIndex, err := os.ReadFile(indexPath)
+	if err != nil || string(afterIndex) != string(beforeIndex) {
+		t.Fatalf("adoption changed Git index bytes: err=%v", err)
 	}
 	afterTracked, err := os.ReadFile(filepath.Join(worktreePath, "README.md"))
 	if err != nil || string(afterTracked) != string(beforeTracked) {
@@ -347,6 +359,13 @@ func TestManagerAdoptsExistingLinkedWorktreeWithoutChangingItsState(t *testing.T
 	}
 	if err := manager.Verify(context.Background(), jobID, task, snapshot); err != nil {
 		t.Fatalf("Verify adopted Worktree: %v", err)
+	}
+	beforeWorktreeList := gitTestOutput(t, repository, "worktree", "list", "--porcelain")
+	if _, err := manager.Prepare(context.Background(), jobID, task); err == nil {
+		t.Fatal("Prepare created a second managed Worktree for an adopted Task")
+	}
+	if afterWorktreeList := gitTestOutput(t, repository, "worktree", "list", "--porcelain"); afterWorktreeList != beforeWorktreeList {
+		t.Fatalf("Prepare changed Git Worktree registrations for adopted Task: before=%q after=%q", beforeWorktreeList, afterWorktreeList)
 	}
 	replayed, err := manager.Adopt(context.Background(), jobID, task, worktreePath)
 	if err != nil || replayed != snapshot {
@@ -397,7 +416,7 @@ func TestManagerRequiresPersistentReservationForAdoptedWorktree(t *testing.T) {
 	}
 	reservationDirectory := filepath.Join(manager.root, ".adoptions")
 	entries, err := os.ReadDir(reservationDirectory)
-	if err != nil || len(entries) != 1 {
+	if err != nil || len(entries) != 2 {
 		t.Fatalf("read adoption reservation: entries=%v err=%v", entries, err)
 	}
 	if err := os.Remove(filepath.Join(reservationDirectory, entries[0].Name())); err != nil {
@@ -408,3 +427,92 @@ func TestManagerRequiresPersistentReservationForAdoptedWorktree(t *testing.T) {
 		t.Fatalf("Verify without reservation error = %v", err)
 	}
 }
+
+func TestManagerAdoptionReservationsAreUniqueByTaskAndGitAdminDirectory(t *testing.T) {
+	repository := initRepository(t)
+	worktreeA := filepath.Join(t.TempDir(), "adoption-a")
+	worktreeB := filepath.Join(t.TempDir(), "adoption-b")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreeA, "HEAD")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreeB, "HEAD")
+	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_1111111111111111", TargetRepositories: []string{"repo.primary"}}
+	jobID := "job_1111111111111111"
+	type adoptResult struct {
+		snapshot Snapshot
+		err      error
+	}
+	results := make(chan adoptResult, 2)
+	go func() {
+		snapshot, err := manager.Adopt(context.Background(), jobID, task, worktreeA)
+		results <- adoptResult{snapshot: snapshot, err: err}
+	}()
+	go func() {
+		snapshot, err := manager.Adopt(context.Background(), jobID, task, worktreeB)
+		results <- adoptResult{snapshot: snapshot, err: err}
+	}()
+	first, second := <-results, <-results
+	if (first.err == nil) == (second.err == nil) {
+		t.Fatalf("concurrent adoption did not select exactly one Worktree: first=%v second=%v", first.err, second.err)
+	}
+	winner := first
+	if winner.err != nil {
+		winner = second
+	}
+	reservationDirectory := filepath.Join(manager.root, ".adoptions")
+	entries, err := os.ReadDir(reservationDirectory)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("losing Task reservation was not cleaned up: entries=%d err=%v", len(entries), err)
+	}
+	movedPath := filepath.Join(t.TempDir(), "adoption-moved")
+	gitTestRun(t, repository, "worktree", "move", winner.snapshot.WorktreePath, movedPath)
+	otherTask := domain.Task{ID: "task_2222222222222222", TargetRepositories: []string{"repo.primary"}}
+	if _, err := manager.Adopt(context.Background(), "job_2222222222222222", otherTask, movedPath); err == nil {
+		t.Fatal("the same Git admin directory was adopted after its Worktree path changed")
+	}
+	entries, err = os.ReadDir(reservationDirectory)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("losing Git admin directory reservation was not cleaned up: entries=%d err=%v", len(entries), err)
+	}
+}
+
+func TestManagerCaptureOutputRejectsDirtySubmodule(t *testing.T) {
+	repository := initRepository(t)
+	submodule := initRepository(t)
+	gitTestRun(t, repository, "-c", "protocol.file.allow=always", "submodule", "add", submodule, "nested")
+	gitTestRun(t, repository, "commit", "-m", "add submodule")
+	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_3333333333333333", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := manager.Prepare(context.Background(), "job_3333333333333333", task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "nested", "untracked.txt"), []byte("dirty submodule\n"), 0o600); err != nil {
+		t.Fatalf("write dirty submodule file: %v", err)
+	}
+	if _, err := manager.CaptureOutput(context.Background(), "job_3333333333333333", task, snapshot); err == nil ||
+		!strings.Contains(err.Error(), "clean") {
+		t.Fatalf("CaptureOutput accepted a dirty submodule: %v", err)
+	}
+}
+
+func TestWriteExclusiveAtomicDoesNotOverwriteExistingRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "record.json")
+	first := []byte("{\"state\":\"complete\"}")
+	if err := writeExclusiveAtomic(path, first, 0o600); err != nil {
+		t.Fatalf("write first atomic record: %v", err)
+	}
+	if err := writeExclusiveAtomic(path, []byte("{\"state\":\"partial\"}"), 0o600); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("second atomic write error = %v, want os.ErrExist", err)
+	}
+	actual, err := os.ReadFile(path)
+	if err != nil || string(actual) != string(first) {
+		t.Fatalf("atomic record was overwritten or incomplete: data=%q err=%v", actual, err)
+	}
+}
+
