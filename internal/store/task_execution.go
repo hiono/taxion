@@ -33,9 +33,6 @@ func (s *Store) StartTaskExecution(
 			job.WorktreeAssignments = append(job.WorktreeAssignments, start.WorktreeAssignment)
 			job.RoleExecutions = append(job.RoleExecutions, start.RoleExecution)
 			job.ProviderStartIntents = append(job.ProviderStartIntents, start.ProviderStartIntent)
-			if job.ProviderLifecycleEnforcedFromRevision == 0 {
-				job.ProviderLifecycleEnforcedFromRevision = start.ProviderStartIntent.CreatedRevision
-			}
 		},
 		func(job domain.Job) (domain.TaskExecutionStart, bool) {
 			for _, execution := range job.RoleExecutions {
