@@ -21,6 +21,7 @@ const (
 	addPlanningTurnObservationCommandType  = "AddPlanningTurnObservation"
 	addPlanningEffectDecisionCommandType   = "AddPlanningEffectDecision"
 	addPlanningResumeIntentCommandType     = "AddPlanningResumeIntent"
+	addTaskProviderResumeObservationCommandType = "AddTaskProviderResumeObservation"
 )
 
 func (s *Store) AddPlanningTurnIntent(ctx context.Context, jobID string, expectedRevision uint64, roleExecutionID, providerSessionID, commandID, promptSHA256 string, reservedTokens uint64, principal auth.AuthenticatedPrincipal) (CommandReceipt, domain.PlanningTurnIntent, error) {
@@ -324,7 +325,7 @@ func (s *Store) AddTaskProviderResumeObservation(
 		Status: status, EvidenceSHA256: evidenceSHA256,
 		Response: response, ReconcilesUnknown: reconcilesUnknown,
 	}
-	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, "AddTaskProviderResumeObservation", request,
+	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addTaskProviderResumeObservationCommandType, request,
 		func(job domain.Job, now time.Time) (domain.PlanningResumeObservation, error) {
 			return domain.NewTaskProviderResumeObservation(
 				job, resumeID, commandID, status, evidenceSHA256, response, reconcilesUnknown, now,
