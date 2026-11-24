@@ -146,7 +146,7 @@ func (c *ProviderController) ResumeTaskExecution(
 		verifyErr := fmt.Errorf("reverify owned Task Worktree immediately before Resume: %w", err)
 		observation, persistErr := c.recordResumeObservation(
 			ctx, jobID, intent.ID, domain.PlanningResumeNotDispatched,
-			providerResumeNotDispatchedEvidence(intent.ID, verifyErr), principal,
+			providerResumeNotDispatchedEvidence(intent.ID, verifyErr), provider.ResumeResult{}, principal,
 		)
 		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(verifyErr, persistErr)
 	}
@@ -155,7 +155,7 @@ func (c *ProviderController) ResumeTaskExecution(
 	if err != nil {
 		if evidence, definitive := providerResumeDefinitiveFailureEvidence(intent.OperationID, err); definitive {
 			observation, persistErr := c.recordResumeObservation(
-				ctx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, principal,
+				ctx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, provider.ResumeResult{}, principal,
 			)
 			if persistErr != nil {
 				return receipt, intent, observation, provider.ResumeResult{}, errors.Join(err, persistErr)
@@ -163,7 +163,7 @@ func (c *ProviderController) ResumeTaskExecution(
 			return receipt, intent, observation, provider.ResumeResult{}, err
 		}
 		observation, persistErr := c.recordResumeObservation(
-			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", principal,
+			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", provider.ResumeResult{}, principal,
 		)
 		if persistErr != nil {
 			return receipt, intent, observation, provider.ResumeResult{}, errors.Join(provider.ErrResumeUnconfirmed, err, persistErr)
@@ -173,7 +173,7 @@ func (c *ProviderController) ResumeTaskExecution(
 	if result.OperationID != intent.OperationID || result.SessionID != intent.ProviderSessionID ||
 		!result.Attached || !validProviderSHA256(result.EvidenceSHA256) {
 		observation, persistErr := c.recordResumeObservation(
-			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", principal,
+			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", provider.ResumeResult{}, principal,
 		)
 		if persistErr != nil {
 			return receipt, intent, observation, provider.ResumeResult{}, errors.Join(provider.ErrResumeUnconfirmed, persistErr)
@@ -181,11 +181,11 @@ func (c *ProviderController) ResumeTaskExecution(
 		return receipt, intent, observation, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
 	}
 	observation, err := c.recordResumeObservation(
-		ctx, jobID, intent.ID, domain.PlanningResumeAttached, result.EvidenceSHA256, principal,
+		ctx, jobID, intent.ID, domain.PlanningResumeAttached, result.EvidenceSHA256, result, principal,
 	)
 	if err != nil {
 		unknown, persistErr := c.recordResumeObservation(
-			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", principal,
+			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", provider.ResumeResult{}, principal,
 		)
 		if persistErr != nil {
 			return receipt, intent, unknown, provider.ResumeResult{}, errors.Join(err, persistErr)
