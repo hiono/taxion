@@ -105,6 +105,11 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 	registrationPath := adoptionRegistrationPath(m.root, jobID, task.ID)
 	baselinePath := registrationPath + ".baseline.json"
 	record, readErr := readBaselineRecord(baselinePath)
+	registrationCreated := false
+	reservation := adoptionReservation{
+		JobID: jobID, TaskID: task.ID, RepositoryID: repositoryID,
+		WorktreePath: worktreePath, GitDir: resolvedGitDir,
+	}
 	if readErr == nil {
 		if record.Origin != domain.WorktreeOriginAdopted || record.WorktreePath != worktreePath ||
 			record.BaselineCommit != head || record.InitialStateSHA256 != stateDigest ||
@@ -115,10 +120,6 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 			return Snapshot{}, err
 		}
 	} else if errors.Is(readErr, os.ErrNotExist) {
-		reservation := adoptionReservation{
-			JobID: jobID, TaskID: task.ID, RepositoryID: repositoryID,
-			WorktreePath: worktreePath, GitDir: resolvedGitDir,
-		}
 		if err := m.recoverOrphanedAdoptionReservations(reservation); err != nil {
 			return Snapshot{}, fmt.Errorf("recover interrupted Worktree adoption reservation: %w", err)
 		}
@@ -152,6 +153,8 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 					fmt.Errorf("persist adopted Worktree registration: %w", err), cleanupErr,
 				)
 			}
+		} else {
+			registrationCreated = true
 		}
 	} else {
 		return Snapshot{}, fmt.Errorf("read adopted Worktree registration: %w", readErr)
@@ -163,7 +166,19 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 		HeadMode: record.HeadMode, HeadRef: record.HeadRef,
 	}
 	if err := m.verify(ctx, jobID, task, snapshot); err != nil {
-		return Snapshot{}, fmt.Errorf("verify adopted Worktree: %w", err)
+		verifyErr := fmt.Errorf("verify adopted Worktree: %w", err)
+		if registrationCreated {
+			removeErr := os.Remove(baselinePath)
+			if errors.Is(removeErr, os.ErrNotExist) {
+				removeErr = nil
+			}
+			if removeErr == nil {
+				removeErr = syncDirectory(filepath.Dir(baselinePath))
+			}
+			cleanupErr := m.removeOrphanedAdoptionReservation(reservation)
+			return Snapshot{}, errors.Join(verifyErr, removeErr, cleanupErr)
+		}
+		return Snapshot{}, verifyErr
 	}
 	return snapshot, nil
 }
@@ -202,8 +217,16 @@ func (m *Manager) recoverOrphanedAdoptionReservations(reservation adoptionReserv
 
 func (m *Manager) removeOrphanedAdoptionReservation(reservation adoptionReservation) error {
 	baselinePath := adoptionRegistrationPath(m.root, reservation.JobID, reservation.TaskID) + ".baseline.json"
-	if _, err := os.Stat(baselinePath); err == nil {
-		return nil
+	record, err := readBaselineRecord(baselinePath)
+	if err == nil {
+		if record.RepositoryID == reservation.RepositoryID &&
+			record.WorktreePath == reservation.WorktreePath &&
+			(record.Origin == domain.WorktreeOriginAdopted || record.Origin == domain.WorktreeOriginTaxionCreated) {
+			return nil
+		}
+		if record.Origin != domain.WorktreeOriginTaxionCreated {
+			return errors.New("existing adopted Worktree registration does not match its ownership reservation; refusing cleanup")
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("inspect Worktree adoption baseline before reservation cleanup: %w", err)
 	}
@@ -360,25 +383,44 @@ func readWorktreeHeadMode(ctx context.Context, path string) (string, string, err
 	return "", "", fmt.Errorf("inspect Worktree HEAD mode: %w", err)
 }
 
+func verifyWorktreeIndexFlags(ctx context.Context, path string) error {
+	check := func(entries []byte) error {
+		for _, entry := range strings.Split(string(entries), "\x00") {
+			if len(entry) == 0 {
+				continue
+			}
+			switch entry[0] {
+			case 'h':
+				return errors.New("Worktree contains assume-unchanged tracked files")
+			case 'S':
+				return errors.New("Worktree contains skip-worktree tracked files")
+			case 's':
+				return errors.New("Worktree contains skip-worktree and assume-unchanged tracked files")
+			}
+		}
+		return nil
+	}
+	entries, err := gitBytes(ctx, path, "--no-optional-locks", "ls-files", "-v", "-z")
+	if err != nil {
+		return fmt.Errorf("inspect Worktree index flags: %w", err)
+	}
+	if err := check(entries); err != nil {
+		return err
+	}
+	submoduleEntries, err := gitBytes(
+		ctx, path, "--no-optional-locks", "submodule", "foreach", "--quiet", "--recursive", "git ls-files -v -z",
+	)
+	if err != nil {
+		return fmt.Errorf("inspect recursive submodule index flags: %w", err)
+	}
+	return check(submoduleEntries)
+}
+
 func initialWorktreeStateSHA256(
 	ctx context.Context, path, head, tree, headMode, headRef string,
 ) (string, error) {
-	indexEntries, err := gitBytes(ctx, path, "--no-optional-locks", "ls-files", "-v", "-z")
-	if err != nil {
-		return "", fmt.Errorf("inspect Worktree index flags: %w", err)
-	}
-	for _, entry := range strings.Split(string(indexEntries), "\x00") {
-		if len(entry) == 0 {
-			continue
-		}
-		switch entry[0] {
-		case 'h':
-			return "", errors.New("Worktree contains assume-unchanged tracked files")
-		case 'S':
-			return "", errors.New("Worktree contains skip-worktree tracked files")
-		case 's':
-			return "", errors.New("Worktree contains skip-worktree and assume-unchanged tracked files")
-		}
+	if err := verifyWorktreeIndexFlags(ctx, path); err != nil {
+		return "", err
 	}
 	status, err := gitBytes(ctx, path, "--no-optional-locks", "status", "--porcelain=v2", "--untracked-files=all", "--ignore-submodules=none", "-z")
 	if err != nil {
@@ -412,9 +454,13 @@ func initialWorktreeStateSHA256(
 	if len(dirtySubmodules) > 0 {
 		return "", errors.New("Worktree contains a dirty submodule")
 	}
+	submoduleIndexEntries, err := gitBytes(ctx, path, "--no-optional-locks", "ls-files", "--stage", "-z")
+	if err != nil {
+		return "", fmt.Errorf("capture stable submodule gitlink identities: %w", err)
+	}
 	hash := sha256.New()
 	for _, part := range [][]byte{
-		[]byte(head), []byte(tree), []byte(headMode), []byte(headRef), status, staged, working, submoduleStatus,
+		[]byte(head), []byte(tree), []byte(headMode), []byte(headRef), status, staged, working, submoduleIndexEntries,
 	} {
 		writeDigestPart(hash, part)
 	}
