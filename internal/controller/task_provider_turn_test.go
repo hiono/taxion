@@ -131,10 +131,14 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	}
 	if !taskResultFound || len(job.ProviderUsageObservations) != 1 ||
 		!job.ProviderUsageObservations[0].Complete || len(job.TaskTurnObservations) != 1 ||
+		len(job.TaskTurnDispatchClaims) != 1 || len(job.TaskTurnDispatchReleases) != 1 ||
 		runtime.sendCalls != 1 || runtime.resultCalls != 1 || runtime.usageCalls != 1 {
-		t.Fatalf("Task Turn facts or Provider calls are incomplete: taskResult=%v results=%d usage=%d observations=%d calls=%d/%d/%d",
+		t.Fatalf("Task Turn facts or Provider calls are incomplete: taskResult=%v results=%d usage=%d observations=%d claims=%d releases=%d calls=%d/%d/%d",
 			taskResultFound, len(job.ProviderResultObservations), len(job.ProviderUsageObservations), len(job.TaskTurnObservations),
-			runtime.sendCalls, runtime.resultCalls, runtime.usageCalls)
+			len(job.TaskTurnDispatchClaims), len(job.TaskTurnDispatchReleases), runtime.sendCalls, runtime.resultCalls, runtime.usageCalls)
+	}
+	if _, active := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID); active {
+		t.Fatal("completed Task Turn retained an active dispatch claim")
 	}
 	runtime.capabilities.CrossProcessSessionReattach = false
 	if _, _, _, _, err := providerController.ResumeTaskExecution(
