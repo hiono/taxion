@@ -106,6 +106,11 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		t.Fatalf("NewProviderControllerWithExecutionAndWorktree: %v", err)
 	}
 
+	if _, _, err := providerController.DispatchTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, permissionRequest,
+	); err != nil {
+		t.Fatalf("DispatchTaskExecution: %v", err)
+	}
 	completeCapabilities := runtime.capabilities
 	runtime.capabilities.SendLookup = false
 	runtime.capabilities.SendIdempotency = false
@@ -132,11 +137,6 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		t.Fatalf("missing FinalOutput capability persisted a Turn intent: intents=%d err=%v", len(job.TaskTurnIntents), err)
 	}
 	runtime.capabilities = completeCapabilities
-	if _, _, err := providerController.DispatchTaskExecution(
-		ctx, jobID, execution.ID, permission.ID, permissionRequest,
-	); err != nil {
-		t.Fatalf("DispatchTaskExecution: %v", err)
-	}
 	worktree.failAt = worktree.verifyCalls + 1
 	worktree.failErr = errors.New("temporary pre-dispatch Worktree verification failure")
 	if _, _, _, _, err := providerController.SendTaskExecution(
@@ -430,6 +430,11 @@ func TestTaskProviderTurnRejectsLookupResultDigestMismatch(t *testing.T) {
 		ReceiptID: "receipt_1", SessionID: "session_1", TurnID: turn.ID,
 		ResultSHA256: strings.Repeat("f", 64), UsageID: "usage_mismatch",
 		EvidenceSHA256: strings.Repeat("e", 64),
+	}
+	f.runtime.resultResult = provider.Result{
+		OperationID: turn.OperationID, SessionID: turn.ProviderSessionID, TurnID: turn.ID,
+		Content: "mismatched final provider result", ResultSHA256: sha256String("mismatched final provider result"),
+		Final: true, EvidenceSHA256: strings.Repeat("d", 64),
 	}
 	_, recoveredTurn, observation, _, err := f.controller.SendTaskExecution(
 		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,

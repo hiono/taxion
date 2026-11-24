@@ -101,6 +101,7 @@ func executionPermissionTestAssessment(request ExecutionPermissionRequest, reque
 func TestLegacyTaskRoleExecutionWithoutWorktreeRemainsReadable(t *testing.T) {
 	job, task, now := approvedJobWithTaskForExecutionPermission(t)
 	request := executionPermissionTestRequest(job, now)
+	request.WorktreePath = "/worktrees/legacy-task"
 	requestSHA, err := ExecutionPermissionRequestSHA256(request)
 	if err != nil {
 		t.Fatalf("ExecutionPermissionRequestSHA256: %v", err)
@@ -116,7 +117,7 @@ func TestLegacyTaskRoleExecutionWithoutWorktreeRemainsReadable(t *testing.T) {
 
 	snapshot := WorktreeSnapshot{
 		RepositoryID: task.TargetRepositories[0], RepositoryPath: "/repositories/project",
-		WorktreePath: "/worktrees/legacy-task", BaselineCommit: strings.Repeat("a", 40),
+		WorktreePath: permission.WorktreePath, BaselineCommit: strings.Repeat("a", 40),
 		Origin: WorktreeOriginTaxionCreated, InitialStateSHA256: strings.Repeat("b", 64),
 		HeadMode: WorktreeHeadDetached,
 	}
