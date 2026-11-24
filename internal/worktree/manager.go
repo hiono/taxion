@@ -158,7 +158,7 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 	if err := runGit(ctx, repositoryPath, "worktree", "add", "--detach", worktreePath, baseline); err != nil {
 		// Git serializes updates to the shared repository metadata. A concurrent
 		// provisioner may have completed this exact deterministic Worktree first.
-		if verifyErr := m.Verify(ctx, jobID, task, snapshot); verifyErr == nil {
+		if verifyErr := m.verify(ctx, jobID, task, snapshot); verifyErr == nil {
 			return snapshot, nil
 		}
 		return Snapshot{}, fmt.Errorf("create detached Task Worktree: %w", err)
