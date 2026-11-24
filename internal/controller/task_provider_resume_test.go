@@ -227,7 +227,7 @@ func TestTaskProviderResumePersistsDefinitiveFailureAndAllowsStop(t *testing.T) 
 	}
 	f.runtime.resumeErr = failure
 	commandID := "cmd_34343434343434343434343434343434"
-	_, intent, observation, _, resumeErr := f.resume(commandID)
+	_, intent, observation, resumeErr := f.resume(commandID)
 	if !errors.Is(resumeErr, failure) || observation.Status != domain.PlanningResumeFailed ||
 		observation.ResumeID != intent.ID || f.runtime.resumeCalls != 1 {
 		t.Fatalf("definitive Resume failure was not persisted: intent=%#v observation=%#v calls=%d err=%v",
