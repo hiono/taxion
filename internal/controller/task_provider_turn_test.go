@@ -393,10 +393,14 @@ func TestTaskProviderTurnRejectsLookupResultDigestMismatch(t *testing.T) {
 	f.runtime.capabilities.SendLookup = true
 	f.runtime.capabilities.SendIdempotency = true
 	f.runtime.capabilities.FinalOutputRetrieval = true
+	f.runtime.capabilities.UsageIdentity = true
+	f.runtime.capabilities.UsageCompleteness = true
 	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence,
 		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "turn-result-digest", EvidenceSHA256: strings.Repeat("1", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		provider.CapabilityEvidence{Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity, TestID: "turn-result-digest", EvidenceSHA256: strings.Repeat("2", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: f.runtime.identity, TestID: "turn-result-digest", EvidenceSHA256: strings.Repeat("3", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "turn-result-digest", EvidenceSHA256: strings.Repeat("4", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "turn-result-digest", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 	)
 	job, err := f.database.GetJob(f.ctx, f.jobID)
 	if err != nil {
@@ -437,19 +441,37 @@ func TestTaskProviderTurnRejectsLookupResultDigestMismatch(t *testing.T) {
 			recoveredTurn, observation, f.runtime.resultCalls, f.runtime.usageCalls, err)
 	}
 	job, err = f.database.GetJob(f.ctx, f.jobID)
-	matchedResult := false
-	for _, result := range job.ProviderResultObservations {
-		if result.TurnID == turn.ID {
-			matchedResult = result.ContentSHA256 != strings.Repeat("f", 64)
-			break
-		}
-	}
-	if err != nil || !matchedResult || len(job.ProviderUsageObservations) != 0 {
-		t.Fatalf("mismatched final Result or Usage facts were persisted: results=%d usage=%d matched=%v err=%v",
-			len(job.ProviderResultObservations), len(job.ProviderUsageObservations), matchedResult, err)
+	if err != nil || len(job.ProviderResultObservations) != 0 || len(job.ProviderUsageObservations) != 0 {
+		t.Fatalf("mismatched final Result or Usage facts were persisted: results=%d usage=%d err=%v",
+			len(job.ProviderResultObservations), len(job.ProviderUsageObservations), err)
 	}
 	if _, active := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID); !active {
 		t.Fatal("ambiguous Task Turn released its dispatch claim")
+	}
+
+	correctedSHA := strings.Repeat("7", 64)
+	f.runtime.lookupResult.ResultSHA256 = correctedSHA
+	f.runtime.lookupResult.UsageID = "usage_corrected"
+	f.runtime.resultResult = provider.Result{
+		OperationID: turn.OperationID, SessionID: turn.ProviderSessionID, TurnID: turn.ID,
+		Content: "corrected final provider result", ResultSHA256: correctedSHA,
+		Final: true, EvidenceSHA256: strings.Repeat("8", 64),
+	}
+	f.runtime.capabilities.UsageIdentity = true
+	f.runtime.capabilities.UsageCompleteness = true
+	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "turn-result-digest", EvidenceSHA256: strings.Repeat("9", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "turn-result-digest", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	f.runtime.usageResult = provider.Usage{
+		UsageID: "usage_corrected", Tokens: 12, Complete: true, EvidenceSHA256: strings.Repeat("b", 64),
+	}
+	_, _, recovered, _, retryErr := f.controller.SendTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		prompt, f.permissionRequest, 100, f.principal,
+	)
+	if retryErr != nil || recovered.Status != domain.TaskTurnCompleted {
+		t.Fatalf("corrected final Result could not recover the same Turn: observation=%#v err=%v", recovered, retryErr)
 	}
 }
 

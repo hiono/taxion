@@ -344,9 +344,10 @@ func TestPlanningResumeNotDispatchedMayBeFollowedByAttached(t *testing.T) {
 
 	invalid := job
 	invalid.PlanningResumeObservations = append([]PlanningResumeObservation(nil), job.PlanningResumeObservations...)
-	invalid.PlanningResumeObservations[1].ReconcilesUnknown = true
+	invalid.PlanningResumeObservations[1].Status = PlanningResumeNotDispatched
+	invalid.PlanningResumeObservations[1].EvidenceSHA256 = strings.Repeat("d", 64)
 	if err := invalid.Validate(); err == nil {
-		t.Fatal("Job.Validate accepted NOT_DISPATCHED as reconciliation of an UNKNOWN Provider outcome")
+		t.Fatal("Job.Validate accepted repeated NOT_DISPATCHED observations")
 	}
 }
 

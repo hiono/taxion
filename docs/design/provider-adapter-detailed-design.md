@@ -250,13 +250,14 @@ Reviewer Startは、ADR-408 / ADR-507に従うimmutable Worktree snapshotとread
 ### 8.2 Send（実装済み）
 
 1. 最新Job、grant、RoleExecution、accepted Session、turn budget、deadlineを検証する。
-2. E4 Send idempotencyまたはSend lookup capabilityを確認する。
+2. 新しいTurn intentを保存する前に、E4 Send LookupまたはSend Idempotencyに加え、Final Output、Usage Identity、Usage CompletenessのE4 capability evidenceを確認する。既存intentのterminal observation replayではProvider capabilityを要求しない。
 3. immutable Turn intentとCommand receiptを同一transactionで保存する。
-4. commit確認後に最新Jobとauthorityを再検証する。
-5. 同一OperationID / TurnIDを使い、Lookupで未実行を確認した場合またはSend idempotencyが検証済みの場合だけ送信する。
-6. terminal responseはPlanningTurnObservationへ保存し、terminal resultとUsageは別々のObservationとして取得・保存する。
-7. UNKNOWN中は同じTurnIDで照合し、新しいTurnIDで再送しない。Lookupでterminal statusが見つかった場合もUsage Complete=trueを確認するまでturnを確定しない。
-8. Runtime.SendがFailureDefinitiveを返した場合は、当該Dispatch ClaimだけをEvidence digest付きで解放し、UNKNOWN observationを追加しない。同じimmutable Turn intent / OperationIDは未dispatchとして再試行できる。FailureAmbiguousまたは分類不能なエラーではUNKNOWN observationとClaimを保持する。
+4. commit確認後に最新Jobとauthorityを再検証し、Worktree検証後にも同じTurnの履歴を再評価する。未dispatch条件が崩れている場合はSendせず、Lookup / idempotencyによる再照合へ移行する。
+5. Dispatch Claim取得後にJobを再読込し、exact claim、permission、Task、Worktree、Stop intent、Resume状態を再検証する。
+6. 同一OperationID / TurnIDを使い、E4 LookupのNOT_FOUNDとSend Idempotencyが両方検証された場合だけ曖昧な送信を再試行する。NOT_FOUND単独ではClaimを解放しない。
+7. terminal responseはPlanningTurnObservationへ保存し、terminal resultとUsageは別々のObservationとして取得・保存する。LookupのResult digestがある場合は、ResultをJobAggregateへ保存する前に一致を検証する。
+8. UNKNOWNは同じTurnIDで照合し、新しいTurnIDで再送しない。Lookupでterminal statusが見つかった場合もUsage Complete=trueを確認するまでturnを確定しない。
+9. Runtime.SendがFailureDefinitiveを返した場合は、当該Dispatch Claimに属する証拠だけで解放する。FailureAmbiguousまたは分類不能なエラーではUNKNOWN observationとClaimを保持する。
 
 ### 8.3 Stop / Resume（Controller実装済み）
 

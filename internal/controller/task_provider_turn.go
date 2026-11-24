@@ -595,9 +595,12 @@ func (c *ProviderController) finalizeTaskTurn(
 		return receipt, turn, observation, provider.TurnResult{}, errors.Join(errors.New("Provider Turn is not terminal"), err)
 	}
 	resultObservation, resultFound := taskProviderResultObservation(job, turn)
+	if resultFound && expectedResultSHA256 != "" && resultObservation.ContentSHA256 != expectedResultSHA256 {
+		resultFound = false
+	}
 	if !resultFound {
 		var resultErr error
-		_, resultObservation, resultErr = c.RetrieveTaskProviderResult(ctx, job.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, turn.ProviderSessionID, turn.ID, principal)
+		_, resultObservation, resultErr = c.retrieveTaskProviderResult(ctx, job.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, turn.ProviderSessionID, turn.ID, expectedResultSHA256, principal)
 		if resultErr != nil {
 			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
 			return receipt, turn, observation, provider.TurnResult{}, errors.Join(resultErr, persistErr)
@@ -641,6 +644,18 @@ func (c *ProviderController) RetrieveTaskProviderResult(
 	sessionID, turnID string,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.ProviderResultObservation, error) {
+	return c.retrieveTaskProviderResult(
+		ctx, jobID, roleExecutionID, permissionID, permissionRequest, sessionID, turnID, "", principal,
+	)
+}
+
+func (c *ProviderController) retrieveTaskProviderResult(
+	ctx context.Context,
+	jobID, roleExecutionID, permissionID string,
+	permissionRequest domain.ExecutionPermissionRequest,
+	sessionID, turnID, expectedResultSHA256 string,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.ProviderResultObservation, error) {
 	job, execution, _, _, _, start, acceptedSession, err := c.taskProviderExecutionTarget(
 		ctx, jobID, roleExecutionID, permissionID, permissionRequest, principal,
 	)
@@ -667,7 +682,8 @@ func (c *ProviderController) RetrieveTaskProviderResult(
 	if err != nil {
 		return store.CommandReceipt{}, domain.ProviderResultObservation{}, err
 	}
-	if result.OperationID != turn.OperationID || result.SessionID != sessionID || result.TurnID != turn.ID {
+	if result.OperationID != turn.OperationID || result.SessionID != sessionID || result.TurnID != turn.ID ||
+		(expectedResultSHA256 != "" && result.ResultSHA256 != expectedResultSHA256) {
 		return store.CommandReceipt{}, domain.ProviderResultObservation{}, provider.ErrProviderInvalidResult
 	}
 	current, _, _, _, _, _, currentSession, err := c.taskProviderExecutionTarget(
