@@ -245,7 +245,7 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 - PR #25: Taskless PLANNER Start intent、DRAFT維持、idempotency
 - PR #28: turn / effect / resume lifecycle、UNKNOWN、boundary denial、revision順序
 - ADR-201 / ADR-202: JobAggregate唯一正本、append-only、transaction、recovery
-- ADR-500: DRAFT read-only、禁止副作用、権限拡張禁止
+- ADR-505 / ADR-507: DRAFT read-only、禁止副作用、権限拡張禁止
 
 既存テストを削除・弱体化して新テストを通さない。
 

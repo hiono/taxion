@@ -1,4 +1,4 @@
-# ADR-500: Job承認境界と禁止副作用を中心に実行権限を強制する
+# ADR-500: Jobの承認範囲と禁止副作用を中心に権限を強制する
 
 Date: 2026-11-20
 
@@ -8,55 +8,18 @@ Accepted
 
 ## Context
 
-通常操作の静的allowlistは承認済みJob内の作業まで不必要に停止させます。一方、Agentの判断だけに権限を委ねると、対象境界、人間承認、禁止副作用を維持できません。
+Agentへ静的な操作許可一覧だけを与えると、承認済みJob内の通常作業を不必要に制限します。一方、Agentの自己判断だけに権限を委ねると、利用者の承認範囲や安全境界を維持できません。
 
 ## Decision
 
-**承認済みJobの範囲内でAgentが通常操作の手段を選択し、Controllerと実行基盤がJob境界および禁止副作用を強制します。**
+**Taxionの権限は、認証済みPrincipalによるJobの明示的承認を基礎とし、Controllerと実行基盤が承認済みscopeおよび禁止副作用を強制します。**
 
-### JobApproval
-
-JobApprovalはimmutable JobContract revisionのcanonical hashへ束縛し、approver identity / source / reason / timeを記録します。契約には目的、制約、受入条件、対象repository / resource、作業領域、budget、concurrency ceiling、deadline、禁止事項、人間承認が必要な副作用を含めます。
-
-TaskはJobの境界を狭められますが拡張できません。契約の対象、権限、予算、期限を実質的に変更する場合は新revisionと再承認を要求します。
-
-### Normal operations and prohibited effects
-
-承認済みJobの対象・資源・作業領域内にある可逆的な通常操作は、個別allowlistへの登録なしで実行できます。Role-to-operation ACLやTool allowlistをJob authorityの正本にしません。
-
-ControllerはJob境界外アクセス、他Jobへの不正アクセス、秘密情報の不正取得・送信、権限昇格、sandbox bypass、未承認の外部変更・publish、provenance改変、二重所有、実行状態不明の再送などの禁止副作用を強制します。不可逆操作や承認範囲を変える操作は人間承認へ送ります。
-
-未知のOperationは名称だけで拒否せず、副作用、封じ込め可能性、承認境界で判断します。影響を判定できず実行基盤でも封じ込められない場合は承認要求または拒否とします。
-
-### PlanningAuthorization
-
-JobApproval前のDRAFT Jobでは、明示的に開始されたrequest intakeに対してTaskless PLANNERのbounded read-only executionを許可できます。PlanningAuthorizationはJobID、原文依頼hash、認証済みHUMAN Principal、Provider / account / configuration、repository、read-only boundary、budget、deadlineへ束縛したimmutable grantです。
-
-PlanningAuthorizationはJobをACTIVEにせず、実装Task、Coder / Reviewer、repository write、validation、commit、publication、外部mutationを許可しません。Providerがread-onlyを強制できない場合はimmutable snapshotまたは明示的context documentsを使用し、それも強制できなければrepository contextを渡しません。
-
-Provider credentialと通信はController / Provider Adapterが仲介し、Model / Sandboxへ露出させません。grantはProvider start、turn、effect、resume前に再検証します。
-
-### JobQuestionAuthorization
-
-承認済みJob内でRoleからTaskless PLANNERへread-only context acquisitionを伴う質問を行う場合、JobApproval、Planner RoleExecution、元Question、Provider / account / configuration、context、budget、deadlineに束縛したJobQuestionAuthorizationを別途発行できます。Question本文やMessageKindだけでは発行せず、他のgrantやscopeを拡張しません。
-
-### Observation, Conformance, Admission, Execution Permission
-
-- Observationは対象の状態とprovenanceを記録します。
-- Conformanceは観測事実を契約・受入条件に照らして評価します。
-- Admissionは対象と証拠が次の仕事の入力として利用可能かを判断します。
-- Execution Permissionは現在のJobApproval、scope、budget、deadline、Provider、effectを検証して実行可否を判断します。
-
-各段階の判定を相互に代替しません。Admissionのacceptは実行許可を意味しません。
-
-### Collaboration
-
-情報不足は質問、仮定の明示、部分作業によって解消します。identity、認可、provenance、承認、禁止副作用、データ整合性、実行状態が不明な場合はfail-closedとします。Reviewerは固定された成果物を独立したContext / sessionとread-only boundaryで評価します。
+認証と認可を分離し、計画・質問・実行に必要な権限をそれぞれ独立して扱います。Agentは承認済みJobの範囲内で作業手段を選択できますが、Job scopeの拡張、禁止副作用、未承認の不可逆操作を自己判断で許可できません。
 
 ## Consequences
 
-Agentの作業上の自由と人間の承認境界を両立します。通常操作の網羅的な許可集合ではなく、Job scope、禁止副作用、実行基盤の強制境界を中心に認可します。
+Agentの作業上の自由と、人間が定める承認境界を両立します。個別のauthority契約はADR-501およびADR-503〜507で定義し、実装・テストの詳細は製品仕様と詳細設計へ配置します。
 
 ## Relationship to other ADRs
 
-ADR-400はExecution & Runtimeの基本方針、ADR-201はJob内のauthority facts、ADR-202は全状態経路の不変条件、ADR-408はWorktree境界、ADR-501はHUMAN Principal、ADR-800は受入れ証拠を定義します。
+ADR-400はExecution & Runtimeの基本方針、ADR-201はJob内のauthority facts、ADR-202はドメイン不変条件、ADR-408はWorktree境界、ADR-501はHUMAN Principal、ADR-503はACTIVE Jobの契約変更、ADR-504〜507は個別の認可判断を定義します。

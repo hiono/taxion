@@ -3,7 +3,7 @@
 Date: 2026-11-21
 Status: Draft
 対象Issue: #29
-基準ADR: ADR-201 / ADR-202 / ADR-400 / ADR-500 / ADR-800
+基準ADR: ADR-201 / ADR-202 / ADR-400 / ADR-409 / ADR-500 / ADR-504 / ADR-505 / ADR-506 / ADR-507 / ADR-801
 上位仕様: Product Contract §4.2 / §4.7、Product Acceptance AT-002 / AT-008 / AT-012 / AT-019
 
 ## 1. 目的
@@ -96,7 +96,7 @@ CapabilityはProvider ID、account identity、SDK / protocol version、configura
 
 Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定しない。あるCapabilityの証拠不足によって、独立した別Capabilityの利用まで一律に無効化しない。
 
-証拠水準はADR-800に従う。E2 synthetic、E3 SDK compatibility、E4 Live Provider、E5 Durable recoveryを混同しない。Provider自身の自己申告だけを検証済み証拠として扱わない。Runtimeは信頼されたCapability検証結果を受け取り、必要な最低水準を満たす操作だけを許可する。
+証拠水準はADR-801に従う。E2 synthetic、E3 SDK compatibility、E4 Live Provider、E5 Durable recoveryを混同しない。Provider自身の自己申告だけを検証済み証拠として扱わない。Runtimeは信頼されたCapability検証結果を受け取り、必要な最低水準を満たす操作だけを許可する。
 
 最低水準:
 - Start / Send / Stop / Lookup / Result / Usage: E4
@@ -192,9 +192,9 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 | JobAggregate / Command / Operation intent | ADR-201 |
 | 全状態経路の不変条件 | ADR-202 |
 | Controller / Runtime境界 | ADR-400、docs/design/runtime-boundaries.md |
-| Job authority / prohibited effects | ADR-500 |
-| Evidence level | ADR-800 |
+| Job authority / prohibited effects | ADR-500 / ADR-504 / ADR-505 / ADR-506 / ADR-507 |
+| Evidence level | ADR-801 |
 | Bounded planning | Product Contract §4.2、AT-002 |
 | Interruption / recovery | Product Contract §4.7、AT-008、AT-012 |
 | Credential isolation | Product Acceptance AT-019 |
-| 実Provider受入れ | ADR-800、AT-013 |
+| 実Provider受入れ | ADR-801、AT-013 |
