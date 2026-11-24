@@ -1,3 +1,22 @@
+func (c *ProviderController) releasePlanningResumeDispatchClaim(
+	ctx context.Context,
+	jobID string,
+	intent domain.PlanningResumeIntent,
+	outcome string,
+	principal auth.AuthenticatedPrincipal,
+) error {
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	claim, active := domain.ActivePlanningResumeDispatchClaim(job, intent.OperationID)
+	if !active || claim.ResumeID != intent.ID {
+		return nil
+	}
+	_, _, err = c.store.ReleasePlanningResumeDispatchClaim(ctx, jobID, claim.ID, principal, outcome)
+	return err
+}
+
 package controller
 
 import (
@@ -50,7 +69,8 @@ func (c *ProviderController) ResumeTaskExecution(
 			existing.ExecutionPermissionID != permission.ID {
 			return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, errors.New("existing Task Resume intent is bound to another Task authority or Session")
 		}
-		if previous, found := latestProviderResumeObservation(job, existing.ID); found && previous.Status != domain.PlanningResumeUnknown && previous.Status != domain.PlanningResumeNotDispatched {
+		if previous, found := latestProviderResumeObservation(job, existing.ID); found &&
+			previous.Status != domain.PlanningResumeUnknown && previous.Status != domain.PlanningResumeNotDispatched {
 			receipt, intent, err := c.store.AddPlanningResumeIntent(
 				ctx, job.ID, job.Revision, execution.ID, sessionID, commandID,
 				existing.CapabilityEvidenceSHA256, true, principal,
@@ -58,10 +78,14 @@ func (c *ProviderController) ResumeTaskExecution(
 			if err != nil {
 				return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
 			}
+			outcome := domain.PlanningResumeDispatchReleasedAttached
+			resultErr := error(nil)
 			if previous.Status == domain.PlanningResumeFailed {
-				return receipt, intent, previous, resumeResultFromObservation(previous), errors.New("Task Provider Resume previously failed")
+				outcome = domain.PlanningResumeDispatchReleasedFailed
+				resultErr = errors.New("Task Provider Resume previously failed")
 			}
-			return receipt, intent, previous, resumeResultFromObservation(previous), nil
+			releaseErr := c.releasePlanningResumeDispatchClaim(ctx, job.ID, intent, outcome, principal)
+			return receipt, intent, previous, resumeResultFromObservation(previous), errors.Join(resultErr, releaseErr)
 		}
 	}
 
@@ -108,11 +132,16 @@ func (c *ProviderController) ResumeTaskExecution(
 	if err := intent.Validate(current); err != nil {
 		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
 	}
-	if previous, found := latestProviderResumeObservation(current, intent.ID); found && previous.Status != domain.PlanningResumeUnknown && previous.Status != domain.PlanningResumeNotDispatched {
+	if previous, found := latestProviderResumeObservation(current, intent.ID); found &&
+		previous.Status != domain.PlanningResumeUnknown && previous.Status != domain.PlanningResumeNotDispatched {
+		outcome := domain.PlanningResumeDispatchReleasedAttached
+		resultErr := error(nil)
 		if previous.Status == domain.PlanningResumeFailed {
-			return receipt, intent, previous, resumeResultFromObservation(previous), errors.New("Task Provider Resume previously failed")
+			outcome = domain.PlanningResumeDispatchReleasedFailed
+			resultErr = errors.New("Task Provider Resume previously failed")
 		}
-		return receipt, intent, previous, resumeResultFromObservation(previous), nil
+		releaseErr := c.releasePlanningResumeDispatchClaim(ctx, current.ID, intent, outcome, principal)
+		return receipt, intent, previous, resumeResultFromObservation(previous), errors.Join(resultErr, releaseErr)
 	}
 
 	request := provider.ResumeRequest{
@@ -143,12 +172,40 @@ func (c *ProviderController) ResumeTaskExecution(
 		}
 	}
 	if err := c.worktreeVerifier.Verify(ctx, latest.ID, currentTask, currentAssignment.Snapshot()); err != nil {
-		verifyErr := fmt.Errorf("reverify owned Task Worktree immediately before Resume: %w", err)
-		observation, persistErr := c.recordResumeObservation(
-			ctx, jobID, intent.ID, domain.PlanningResumeNotDispatched,
-			providerResumeNotDispatchedEvidence(intent.ID, verifyErr), provider.ResumeResult{}, principal,
-		)
-		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(verifyErr, persistErr)
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{},
+			fmt.Errorf("reverify owned Task Worktree immediately before Resume: %w", err)
+	}
+
+	latest, err = c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	claimCommandID := domain.PlanningResumeDispatchClaimCommandID(intent.ID)
+	_, claim, _, err := c.store.AddPlanningResumeDispatchClaim(
+		ctx, latest.ID, latest.Revision, intent.ID, claimCommandID, principal,
+	)
+	if err != nil {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	claimedJob, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	activeClaim, active := domain.ActivePlanningResumeDispatchClaim(claimedJob, intent.OperationID)
+	if !active || activeClaim.ID != claim.ID {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
+	}
+	_, claimedExecution, claimedPermission, claimedTask, claimedAssignment, claimedStart, claimedSession, err :=
+		c.taskProviderExecutionTarget(ctx, jobID, roleExecutionID, permissionID, permissionRequest, principal)
+	if err != nil || claimedJob.ID != latest.ID || claimedExecution.ID != execution.ID ||
+		claimedPermission.ID != permission.ID || claimedTask.ID != task.ID ||
+		claimedAssignment != assignment || claimedStart.ID != start.ID || claimedSession != sessionID {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{},
+			errors.Join(errors.New("Task Resume authority changed after acquiring dispatch claim"), err)
+	}
+	if err := c.worktreeVerifier.Verify(ctx, claimedJob.ID, claimedTask, claimedAssignment.Snapshot()); err != nil {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{},
+			fmt.Errorf("reverify owned Task Worktree after Resume dispatch claim: %w", err)
 	}
 
 	result, err := c.runtime.Resume(ctx, request)
@@ -160,7 +217,10 @@ func (c *ProviderController) ResumeTaskExecution(
 			if persistErr != nil {
 				return receipt, intent, observation, provider.ResumeResult{}, errors.Join(err, persistErr)
 			}
-			return receipt, intent, observation, provider.ResumeResult{}, err
+			releaseErr := c.releasePlanningResumeDispatchClaim(
+				ctx, jobID, intent, domain.PlanningResumeDispatchReleasedFailed, principal,
+			)
+			return receipt, intent, observation, provider.ResumeResult{}, errors.Join(err, releaseErr)
 		}
 		observation, persistErr := c.recordResumeObservation(
 			ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", provider.ResumeResult{}, principal,
@@ -192,5 +252,8 @@ func (c *ProviderController) ResumeTaskExecution(
 		}
 		return receipt, intent, unknown, provider.ResumeResult{}, err
 	}
-	return receipt, intent, observation, result, nil
+	releaseErr := c.releasePlanningResumeDispatchClaim(
+		ctx, jobID, intent, domain.PlanningResumeDispatchReleasedAttached, principal,
+	)
+	return receipt, intent, observation, result, releaseErr
 }
