@@ -423,7 +423,7 @@ func (c *ProviderController) dispatchTaskTurn(
 	}
 	if result.OperationID != turn.OperationID || result.TurnID != turn.ID ||
 		result.SessionID != turn.ProviderSessionID {
-		observation, persistErr := c.recordTaskTurnObservation(ctx, current.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+		observation, persistErr := c.recordTaskTurnObservation(ctx, current.ID, turn.ID, claim.ID, domain.TaskTurnUnknown, 0, "", false)
 		if persistErr != nil {
 			return receipt, turn, observation, provider.TurnResult{}, errors.Join(provider.ErrProviderInvalidResult, persistErr)
 		}
