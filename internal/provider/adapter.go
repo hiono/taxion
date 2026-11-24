@@ -435,8 +435,8 @@ type StopRequest struct {
 }
 
 func (r StopRequest) Validate() error {
-	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) || r.FencingToken == 0 {
-		return errors.New("Provider Stop request identity and dispatch fencing token are required")
+	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) || (r.RequireFencing && r.FencingToken == 0) {
+		return errors.New("Provider Stop request identity is required, and fencing requires a non-zero token")
 	}
 	return nil
 }
