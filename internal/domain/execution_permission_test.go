@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -272,7 +273,7 @@ func TestExecutionPermissionRejectsMutatingReviewerAndAllowsContainedUnknownEffe
 func TestExecutionPermissionRejectsUnapprovedAdoptedWorktreePath(t *testing.T) {
 	job, _, now := approvedJobWithTaskForExecutionPermission(t)
 	request := executionPermissionTestRequest(job, now)
-	request.WorktreePath = "/tmp/external-worktree"
+	request.WorktreePath = filepath.Join(t.TempDir(), "external-worktree")
 	requestSHA, err := ExecutionPermissionRequestSHA256(request)
 	if err != nil {
 		t.Fatalf("ExecutionPermissionRequestSHA256: %v", err)
@@ -287,7 +288,7 @@ func TestExecutionPermissionRejectsUnapprovedAdoptedWorktreePath(t *testing.T) {
 }
 
 func TestExecutionPermissionBindsAdoptedWorktreeToApprovedTaskResource(t *testing.T) {
-	worktreePath := "/tmp/taxion-approved-existing-worktree"
+	worktreePath := filepath.Join(t.TempDir(), "taxion-approved-existing-worktree")
 	job, execution, result, baseTime := jobWithAcceptedPlanner(t)
 	contract := validJobContract(baseTime)
 	contract.TargetResources = []string{worktreePath}
@@ -375,7 +376,7 @@ func TestExecutionPermissionBindsAdoptedWorktreeToApprovedTaskResource(t *testin
 	}
 
 	snapshot := WorktreeSnapshot{
-		RepositoryID: task.TargetRepositories[0], RepositoryPath: "/tmp/taxion-source",
+		RepositoryID: task.TargetRepositories[0], RepositoryPath: filepath.Join(filepath.Dir(worktreePath), "taxion-source"),
 		WorktreePath: worktreePath + "-mismatch", BaselineCommit: strings.Repeat("a", 40),
 	}
 	commandID := "cmd_d1010101010101010101010101010101"

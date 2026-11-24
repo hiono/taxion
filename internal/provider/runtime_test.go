@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -287,7 +288,7 @@ func validResultRequest() ResultRequest {
 func TestRuntimeRequiresVerifiedTaskWorktreeCapabilityAndPassesBinding(t *testing.T) {
 	request := validStartRequest()
 	request.RepositoryID = "repo.primary"
-	request.WorktreePath = "/tmp/taxion-worktrees/task-1"
+	request.WorktreePath = filepath.Join(t.TempDir(), "taxion-worktrees", "task-1")
 	request.BaselineCommit = strings.Repeat("a", 40)
 
 	adapter := newTestAdapter(CapabilityStartIdempotency)
@@ -321,13 +322,14 @@ func TestRuntimeRequiresVerifiedTaskWorktreeCapabilityAndPassesBinding(t *testin
 
 func TestStartRequestRejectsPartialOrNonCanonicalWorktreeBinding(t *testing.T) {
 	request := validStartRequest()
-	request.WorktreePath = "/tmp/taxion-worktrees/task-1"
+	request.WorktreePath = filepath.Join(t.TempDir(), "taxion-worktrees", "task-1")
 	if err := request.Validate(); err == nil {
 		t.Fatal("partial Worktree binding was accepted")
 	}
 	request.RepositoryID = "repo.primary"
 	request.BaselineCommit = strings.Repeat("a", 40)
-	request.WorktreePath = "/tmp/../outside"
+	basePath := filepath.Join(t.TempDir(), "taxion-worktrees")
+	request.WorktreePath = basePath + string(filepath.Separator) + ".." + string(filepath.Separator) + "outside"
 	if err := request.Validate(); err == nil {
 		t.Fatal("non-canonical Worktree path was accepted")
 	}
@@ -336,7 +338,7 @@ func TestStartRequestRejectsPartialOrNonCanonicalWorktreeBinding(t *testing.T) {
 func TestRuntimeRequiresVerifiedReviewerReadOnlySnapshotBeforeCredentialAcquisition(t *testing.T) {
 	request := validStartRequest()
 	request.RepositoryID = "repo.primary"
-	request.WorktreePath = "/tmp/taxion-worktrees/reviewer-1"
+	request.WorktreePath = filepath.Join(t.TempDir(), "taxion-worktrees", "reviewer-1")
 	request.BaselineCommit = strings.Repeat("a", 40)
 	request.ReadOnlySnapshot = &ReadOnlySnapshot{
 		JobOutputID: "job_output_1",
@@ -375,7 +377,7 @@ func TestRuntimeRequiresVerifiedReviewerReadOnlySnapshotBeforeCredentialAcquisit
 func TestStartRequestRejectsInvalidReadOnlySnapshotIdentity(t *testing.T) {
 	request := validStartRequest()
 	request.RepositoryID = "repo.primary"
-	request.WorktreePath = "/tmp/taxion-worktrees/reviewer-1"
+	request.WorktreePath = filepath.Join(t.TempDir(), "taxion-worktrees", "reviewer-1")
 	request.BaselineCommit = strings.Repeat("a", 40)
 	request.ReadOnlySnapshot = &ReadOnlySnapshot{
 		JobOutputID: "job_output_1",
