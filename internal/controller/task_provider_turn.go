@@ -368,17 +368,31 @@ func (c *ProviderController) dispatchTaskTurn(
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{},
 			errors.Join(errors.New("Task Provider Send requires the latest Resume to be ATTACHED"), releaseErr)
 	}
+	_, started, err := c.recordTaskTurnDispatchObservation(
+		ctx, postClaimJob.ID, claim.ID, domain.TaskTurnDispatchObservationStarted, "", principal,
+	)
+	if err != nil || !started {
+		if err == nil {
+			err = provider.ErrStopUnconfirmed
+		}
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+	}
 	current = postClaimJob
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
 		if evidenceSHA256, definitive := providerTurnDefinitiveFailureEvidence(turn.OperationID, err); definitive {
+			_, dispatchErr := c.recordTaskTurnDispatchObservation(ctx, current.ID, claim.ID,
+				domain.TaskTurnDispatchObservationDefinitiveFailure, evidenceSHA256, principal)
+			if dispatchErr != nil {
+				return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, dispatchErr)
+			}
 			_, _, releaseErr := c.store.ReleaseTaskTurnDispatchClaim(
 				ctx, current.ID, claim.ID, principal,
 				domain.TaskTurnDispatchReleasedDefinitiveFailure, evidenceSHA256,
 			)
 			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, releaseErr)
 		}
-		observation, persistErr := c.recordTaskTurnObservation(ctx, current.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+		observation, persistErr := c.recordTaskTurnObservation(ctx, current.ID, turn.ID, claim.ID, domain.TaskTurnUnknown, 0, "", false)
 		if persistErr != nil {
 			return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, persistErr)
 		}
@@ -393,7 +407,7 @@ func (c *ProviderController) dispatchTaskTurn(
 		return receipt, turn, observation, provider.TurnResult{}, provider.ErrProviderInvalidResult
 	}
 	receipt, turn, observation, result, finalizeErr := c.finalizeTaskTurn(
-		ctx, receipt, current, turn, result, "", "", permissionRequest, principal,
+		ctx, receipt, current, turn, claim.ID, result, "", "", permissionRequest, principal,
 	)
 	if observation.Status == domain.TaskTurnCompleted || observation.Status == domain.TaskTurnFailed {
 		finalizeErr = errors.Join(finalizeErr, c.releaseTaskTurnDispatchClaim(ctx, current.ID, turn, observation, principal))
@@ -411,11 +425,17 @@ func (c *ProviderController) reconcileTaskTurn(
 	principal auth.AuthenticatedPrincipal,
 	capabilities provider.Capabilities,
 ) (store.CommandReceipt, domain.TaskTurnIntent, domain.TaskTurnObservation, provider.TurnResult, error) {
+	claim, activeClaim := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID)
+	if !activeClaim {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
+	}
+	claimID := claim.ID
 	if capabilities.Identity != c.runtime.Identity() {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
 	}
 	canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, provider.EvidenceLive)
 	canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive)
+	lookupEvidence := ""
 	if canLookup {
 		lookupRequest := provider.LookupRequest{
 			Purpose: provider.LookupPurposeTurn, OperationID: turn.OperationID,
@@ -423,14 +443,14 @@ func (c *ProviderController) reconcileTaskTurn(
 		}
 		lookup, err := c.runtime.Lookup(ctx, lookupRequest)
 		if err != nil {
-			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
 			if persistErr != nil {
 				return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, persistErr)
 			}
 			return receipt, turn, observation, provider.TurnResult{}, err
 		}
 		if validationErr := lookup.Validate(lookupRequest); validationErr != nil {
-			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
 			if persistErr != nil {
 				return receipt, turn, observation, provider.TurnResult{}, errors.Join(provider.ErrProviderInvalidResult, validationErr, persistErr)
 			}
@@ -443,22 +463,31 @@ func (c *ProviderController) reconcileTaskTurn(
 					ReceiptID: lookup.ReceiptID, Status: lookup.Status, EvidenceSHA256: lookup.EvidenceSHA256,
 				}
 				receipt, turn, observation, result, finalizeErr := c.finalizeTaskTurn(
-					ctx, receipt, job, turn, result, lookup.UsageID, lookup.ResultSHA256, permissionRequest, principal,
+					ctx, receipt, job, turn, claimID, result, lookup.UsageID, lookup.ResultSHA256, permissionRequest, principal,
 				)
 				if observation.Status == domain.TaskTurnCompleted || observation.Status == domain.TaskTurnFailed {
 					finalizeErr = errors.Join(finalizeErr, c.releaseTaskTurnDispatchClaim(ctx, job.ID, turn, observation, principal))
 				}
 				return receipt, turn, observation, result, finalizeErr
 			}
-			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
 			if persistErr != nil {
 				return receipt, turn, observation, provider.TurnResult{}, persistErr
 			}
 			return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Send lookup has not confirmed a terminal Turn")
 		}
+		lookupEvidence = lookup.EvidenceSHA256
+	}
+	if canLookup {
+		if _, found := taskTurnDispatchObservation(job, claimID, domain.TaskTurnDispatchObservationLookupNotFound); !found {
+			if _, persistErr := c.recordTaskTurnDispatchObservation(ctx, job.ID, claimID,
+				domain.TaskTurnDispatchObservationLookupNotFound, lookupEvidence, principal); persistErr != nil {
+				return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, persistErr
+			}
+		}
 	}
 	if !canLookup || !canRetry {
-		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
 		if persistErr != nil {
 			return receipt, turn, observation, provider.TurnResult{}, persistErr
 		}
@@ -534,8 +563,14 @@ func (c *ProviderController) releaseTaskTurnDispatchClaimBeforeSend(
 	if !active || activeClaim.ID != claimID {
 		return nil
 	}
+	evidenceSHA256 := sha256String("taxion:task-turn-pre-dispatch-failure:" + claimID)
+	_, dispatchErr := c.recordTaskTurnDispatchObservation(ctx, jobID, claimID,
+		domain.TaskTurnDispatchObservationPreDispatchFailure, evidenceSHA256, principal)
+	if dispatchErr != nil {
+		return dispatchErr
+	}
 	_, _, err = c.store.ReleaseTaskTurnDispatchClaim(
-		ctx, jobID, claimID, principal, domain.TaskTurnDispatchReleasedDefinitiveFailure, "",
+		ctx, jobID, claimID, principal, domain.TaskTurnDispatchReleasedDefinitiveFailure, evidenceSHA256,
 	)
 	return err
 }
@@ -585,13 +620,14 @@ func (c *ProviderController) finalizeTaskTurn(
 	receipt store.CommandReceipt,
 	job domain.Job,
 	turn domain.TaskTurnIntent,
+	claimID string,
 	result provider.TurnResult,
 	expectedUsageID, expectedResultSHA256 string,
 	permissionRequest domain.ExecutionPermissionRequest,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.TaskTurnIntent, domain.TaskTurnObservation, provider.TurnResult, error) {
 	if result.Status != domain.TaskTurnCompleted && result.Status != domain.TaskTurnFailed {
-		observation, err := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+		observation, err := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
 		return receipt, turn, observation, provider.TurnResult{}, errors.Join(errors.New("Provider Turn is not terminal"), err)
 	}
 	resultObservation, resultFound := taskProviderResultObservation(job, turn)
@@ -602,18 +638,18 @@ func (c *ProviderController) finalizeTaskTurn(
 		var resultErr error
 		_, resultObservation, resultErr = c.retrieveTaskProviderResult(ctx, job.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, turn.ProviderSessionID, turn.ID, expectedResultSHA256, principal)
 		if resultErr != nil {
-			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
 			return receipt, turn, observation, provider.TurnResult{}, errors.Join(resultErr, persistErr)
 		}
 	}
 	if expectedResultSHA256 != "" && resultObservation.ContentSHA256 != expectedResultSHA256 {
-		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
 		return receipt, turn, observation, provider.TurnResult{},
 			errors.Join(provider.ErrProviderInvalidResult, errors.New("Provider Lookup Result digest differs from final Result"), persistErr)
 	}
 	_, usage, usageErr := c.RetrieveTaskProviderUsage(ctx, job.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, turn.ProviderSessionID, turn.ID, expectedUsageID, principal)
 	if usageErr != nil || !usage.Complete {
-		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
 		if usageErr == nil {
 			usageErr = errors.New("Provider Usage is incomplete")
 		}
@@ -627,9 +663,9 @@ func (c *ProviderController) finalizeTaskTurn(
 	if result.Status == domain.TaskTurnFailed {
 		status = domain.TaskTurnFailed
 	}
-	observation, err := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, status, usage.Tokens, evidenceSHA256, false)
+	observation, err := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, status, usage.Tokens, evidenceSHA256, false)
 	if err != nil {
-		unknown, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+		unknown, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
 		return receipt, turn, unknown, provider.TurnResult{}, errors.Join(err, persistErr)
 	}
 	result.TokensUsed = usage.Tokens
@@ -778,9 +814,47 @@ func (c *ProviderController) RetrieveTaskProviderUsage(
 	)
 }
 
+func (c *ProviderController) recordTaskTurnDispatchObservation(
+	ctx context.Context,
+	jobID, claimID, status, evidenceSHA256 string,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, bool, error) {
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return store.CommandReceipt{}, false, err
+	}
+	for _, existing := range job.TaskTurnDispatchObservations {
+		if existing.ClaimID == claimID && existing.Status == status {
+			if existing.EvidenceSHA256 != evidenceSHA256 {
+				return store.CommandReceipt{}, false, errors.New("Task Turn dispatch observation evidence changed")
+			}
+			return store.CommandReceipt{}, false, nil
+		}
+	}
+	commandID := domain.TaskTurnDispatchObservationCommandID(claimID, status)
+	receipt, _, created, err := c.store.AddTaskTurnDispatchObservation(
+		ctx, jobID, job.Revision, claimID, commandID, status, evidenceSHA256, principal,
+	)
+	return receipt, created, err
+}
+
+func taskTurnDispatchObservation(
+	job domain.Job, claimID, status string,
+) (domain.TaskTurnDispatchObservation, bool) {
+	var latest domain.TaskTurnDispatchObservation
+	found := false
+	for _, observation := range job.TaskTurnDispatchObservations {
+		if observation.ClaimID == claimID && observation.Status == status &&
+			(!found || observation.CreatedRevision > latest.CreatedRevision) {
+			latest, found = observation, true
+		}
+	}
+	return latest, found
+}
+
 func (c *ProviderController) recordTaskTurnObservation(
 	ctx context.Context,
-	jobID, turnID, status string,
+	jobID, turnID, claimID, status string,
 	tokensUsed uint64,
 	evidenceSHA256 string,
 	reconcilesUnknown bool,
@@ -803,8 +877,8 @@ func (c *ProviderController) recordTaskTurnObservation(
 		reconcilesUnknown = true
 	}
 	commandID := taskTurnObservationCommandID(turnID, status, tokensUsed, evidenceSHA256, reconcilesUnknown)
-	_, observation, err := c.store.AddTaskTurnObservation(
-		ctx, jobID, job.Revision, turnID, commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown,
+	_, observation, err := c.store.AddTaskTurnObservationForClaim(
+		ctx, jobID, job.Revision, turnID, claimID, commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown,
 	)
 	return observation, err
 }
