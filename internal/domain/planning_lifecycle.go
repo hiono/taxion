@@ -136,6 +136,7 @@ type PlanningResumeObservation struct {
 	CommandID         string                  `json:"command_id"`
 	JobID             string                  `json:"job_id"`
 	ResumeID          string                  `json:"resume_id"`
+	DispatchClaimID   string                  `json:"dispatch_claim_id,omitempty"`
 	OperationID       string                  `json:"operation_id"`
 	RoleExecutionID   string                  `json:"role_execution_id"`
 	ProviderSessionID string                  `json:"provider_session_id"`
@@ -686,6 +687,9 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 	if providerStopIntentExists(job, execution.ID, providerSessionID, job.Revision+1) {
 		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "provider_session_stopped", Cause: errors.New("Provider Session cannot be resumed after a Stop intent")}
 	}
+	if _, active := ActivePlanningResumeDispatchClaimForSession(job, execution.ID, providerSessionID); active {
+		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "resume_dispatch_in_progress", Cause: errors.New("Provider Resume dispatch is already in progress for this Session")}
+	}
 	for _, previous := range job.PlanningResumeIntents {
 		if previous.RoleExecutionID != execution.ID {
 			continue
@@ -701,8 +705,12 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 				lastStatus = observation.Status
 			}
 		}
-		if observations == 0 || lastStatus == PlanningResumeUnknown {
-			return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "previous_resume_unknown", Cause: errors.New("previous Provider resume is unresolved; reconcile the same OperationID before another resume")}
+		sameAuthority := previous.ExecutionPermissionID == executionPermissionID &&
+			previous.PlanningAuthorizationID == planningAuthorizationID
+		if (observations == 0 && sameAuthority) ||
+			lastStatus == PlanningResumeUnknown ||
+			(lastStatus == PlanningResumeNotDispatched && sameAuthority) {
+			return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "previous_resume_unknown", Cause: errors.New("previous Provider resume is unresolved under the same authority; reconcile or renew its authority before another resume")}
 		}
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
@@ -1030,7 +1038,7 @@ func NewPlanningResumeObservation(job Job, resumeID, principalID, commandID, sta
 	if authorizedPrincipalID != principalID {
 		return PlanningResumeObservation{}, errors.New("Provider Resume observation Principal does not match its execution authority")
 	}
-	return newPlanningResumeObservation(job, resume, commandID, status, evidenceSHA256, nil, reconcilesUnknown, now)
+	return newPlanningResumeObservation(job, resume, commandID, status, evidenceSHA256, nil, "", reconcilesUnknown, now)
 }
 
 func NewTaskProviderResumeObservation(
@@ -1080,7 +1088,11 @@ func NewTaskProviderResumeObservation(
 	} else if response != (ProviderResumeResponse{}) {
 		return PlanningResumeObservation{}, errors.New("non-ATTACHED Task Resume observation cannot contain a Provider response")
 	}
-	return newPlanningResumeObservation(job, resume, commandID, status, evidenceSHA256, providerResponse, reconcilesUnknown, now)
+	claim, active := ActivePlanningResumeDispatchClaim(job, resume.OperationID)
+	if !active || claim.ResumeID != resume.ID {
+		return PlanningResumeObservation{}, errors.New("Task Provider Resume observation requires its active dispatch claim")
+	}
+	return newPlanningResumeObservation(job, resume, commandID, status, evidenceSHA256, providerResponse, claim.ID, reconcilesUnknown, now)
 }
 
 func newPlanningResumeObservation(
@@ -1088,6 +1100,7 @@ func newPlanningResumeObservation(
 	resume PlanningResumeIntent,
 	commandID, status, evidenceSHA256 string,
 	providerResponse *ProviderResumeResponse,
+	dispatchClaimID string,
 	reconcilesUnknown bool,
 	now time.Time,
 ) (PlanningResumeObservation, error) {
@@ -1134,7 +1147,8 @@ func newPlanningResumeObservation(
 		JobID: job.ID, ResumeID: resume.ID, OperationID: resume.OperationID,
 		RoleExecutionID: resume.RoleExecutionID, ProviderSessionID: resume.ProviderSessionID,
 		Status: status, EvidenceSHA256: evidenceSHA256, ProviderResponse: providerResponse,
-		ReconcilesUnknown: reconcilesUnknown, CreatedAt: now, CreatedRevision: job.Revision + 1,
+		DispatchClaimID: dispatchClaimID, ReconcilesUnknown: reconcilesUnknown,
+		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
 	if err := observation.Validate(job, resume); err != nil {
 		return PlanningResumeObservation{}, err
@@ -1167,6 +1181,17 @@ func (o PlanningResumeObservation) Validate(job Job, resume PlanningResumeIntent
 			return errors.New("Planner Resume observation cannot contain a Task Provider response")
 		}
 	} else if execution.Role == RoleCoder {
+		if o.DispatchClaimID == "" {
+			if o.Status != PlanningResumeNotDispatched {
+				return errors.New("Task Coder Resume observation requires a matching dispatch claim")
+			}
+		} else {
+			resumeClaim, foundClaim := planningResumeDispatchClaimByID(job, o.DispatchClaimID)
+			if !foundClaim || resumeClaim.ResumeID != o.ResumeID ||
+				o.CreatedRevision <= resumeClaim.CreatedRevision {
+				return errors.New("Task Coder Resume observation does not match its dispatch claim")
+			}
+		}
 		if o.Status == PlanningResumeAttached {
 			response := o.ProviderResponse
 			if response == nil || response.OperationID != o.OperationID ||
