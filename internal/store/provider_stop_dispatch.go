@@ -119,7 +119,7 @@ func (s *Store) AddProviderStopDispatchReleaseAt(
 	}
 	request := struct {
 		JobID, ClaimID, CommandID, Outcome, EvidenceSHA256, PrincipalID string
-		LookupObservedAt time.Time
+		LookupObservedAt                                                time.Time
 	}{jobID, claimID, commandID, outcome, evidenceSHA256, principal.PrincipalID(), lookupObservedAt}
 	return persistPlanningFactWithStatus(
 		ctx, s, jobID, expectedRevision, commandID, addProviderStopDispatchReleaseCommandType, request,
