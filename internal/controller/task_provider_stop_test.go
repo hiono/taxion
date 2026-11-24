@@ -171,6 +171,9 @@ func (r *blockingTaskStopRuntime) Stop(ctx context.Context, request provider.Sto
 
 func TestTaskProviderStopDispatchClaimPreventsConcurrentDuplicate(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
+	workerCtx, cancelWorker := context.WithCancel(f.ctx)
+	f.ctx = workerCtx
+	t.Cleanup(cancelWorker)
 	blocking := &blockingTaskStopRuntime{
 		fakePlanningProviderRuntime: f.runtime,
 		entered:                     make(chan struct{}, 1),
@@ -312,6 +315,9 @@ func TestTaskProviderStopRetainsUnknownWhenNotFoundRetryIsAmbiguous(t *testing.T
 
 func TestTaskProviderStopCannotCommitWhileSendDispatchIsActive(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
+	workerCtx, cancelWorker := context.WithCancel(f.ctx)
+	f.ctx = workerCtx
+	t.Cleanup(cancelWorker)
 	now := time.Now().UTC().Round(0)
 	f.runtime.capabilities.SendLookup = true
 	f.runtime.capabilities.SendIdempotency = true
@@ -531,7 +537,7 @@ func TestTaskProviderStopCapabilityAndWorktreeGatesHaveNoProviderSideEffect(t *t
 	}
 }
 
-func TestTaskProviderStopWorktreeRevalidationFailureAfterIntentCannotRetryStop(t *testing.T) {
+func TestTaskProviderStopWorktreeRevalidationFailureAfterIntentCanRetryAfterLookupNotFound(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	f.worktree.failAt = f.worktree.verifyCalls + 2
 	f.worktree.verifyErr = errors.New("Worktree changed immediately before Provider Stop")
@@ -547,11 +553,38 @@ func TestTaskProviderStopWorktreeRevalidationFailureAfterIntentCannotRetryStop(t
 	if len(job.ProviderStopIntents) != 1 || len(job.ProviderStopObservations) != 0 {
 		t.Fatalf("intent-first boundary was not preserved: intents=%d observations=%d", len(job.ProviderStopIntents), len(job.ProviderStopObservations))
 	}
-	_, replayIntent, unknown, err := f.stop(commandID, domain.ProviderStopReasonTaskComplete)
+	enableTaskStopLookup(&f)
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: intent.OperationID, SessionID: "session_1",
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("8", 64),
+	}
+	_, replayIntent, observation, err := f.stop(commandID, domain.ProviderStopReasonTaskComplete)
+	if err != nil || replayIntent.ID != intent.ID || !observation.Stopped || !observation.Quiescent ||
+		f.runtime.stopCalls != 1 || f.worktree.verifyCalls < 4 {
+		t.Fatalf("retry did not reverify Worktree and complete Stop after verified NOT_FOUND: intent=%#v observation=%#v verifies=%d calls=%d err=%v",
+			replayIntent, observation, f.worktree.verifyCalls, f.runtime.stopCalls, err)
+	}
+}
+
+func TestTaskProviderStopRejectsInvalidLookupAfterWorktreeRevalidationFailure(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	f.worktree.failAt = f.worktree.verifyCalls + 2
+	f.worktree.verifyErr = errors.New("Worktree changed immediately before Provider Stop")
+	commandID := "cmd_f3030303030303030303030303030303"
+	_, intent, _, err := f.stop(commandID, domain.ProviderStopReasonTaskComplete)
+	if err == nil || f.runtime.stopCalls != 0 {
+		t.Fatalf("Provider Stop crossed a failed final Worktree check: calls=%d err=%v", f.runtime.stopCalls, err)
+	}
+	enableTaskStopLookup(&f)
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: "wrong_operation", SessionID: "session_1",
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("8", 64),
+	}
+	_, replayIntent, observation, err := f.stop(commandID, domain.ProviderStopReasonTaskComplete)
 	if !errors.Is(err, provider.ErrStopUnconfirmed) || replayIntent.ID != intent.ID ||
-		!providerStopObservationUnknown(unknown) || f.runtime.stopCalls != 0 {
-		t.Fatalf("retry after unresolved Stop intent was not conservative: intent=%#v observation=%#v calls=%d err=%v",
-			replayIntent, unknown, f.runtime.stopCalls, err)
+		!providerStopObservationUnknown(observation) || f.runtime.stopCalls != 0 {
+		t.Fatalf("invalid Lookup evidence was treated as Worktree recovery: intent=%#v observation=%#v calls=%d err=%v",
+			replayIntent, observation, f.runtime.stopCalls, err)
 	}
 }
 
@@ -795,7 +828,7 @@ func TestTaskProviderStopReclaimsStartedClaimWithProviderFencing(t *testing.T) {
 		t.Fatalf("persist old dispatch claim: claim=%#v created=%v err=%v", oldClaim, created, err)
 	}
 	if _, _, started, err := f.database.StartProviderStopDispatchClaim(
-		f.ctx, f.jobID, oldClaim.ID, f.principal,
+		f.ctx, f.jobID, oldClaim.ID, strings.Repeat("9", 64), f.principal,
 	); err != nil || !started {
 		t.Fatalf("persist old dispatch-start fact: started=%v err=%v", started, err)
 	}
@@ -817,7 +850,9 @@ func TestTaskProviderStopReclaimsStartedClaimWithProviderFencing(t *testing.T) {
 		t.Fatalf("GetJob after fenced Stop recovery: %v", err)
 	}
 	if len(job.ProviderStopDispatchClaims) != 2 || len(job.ProviderStopDispatchStarts) != 2 ||
-		len(job.ProviderStopDispatchReleases) != 2 {
+		len(job.ProviderStopDispatchReleases) != 2 ||
+		job.ProviderStopDispatchStarts[0].FencingEvidenceSHA256 != strings.Repeat("9", 64) ||
+		job.ProviderStopDispatchStarts[1].FencingEvidenceSHA256 != strings.Repeat("9", 64) {
 		t.Fatalf("fenced recovery facts mismatch: claims=%d starts=%d releases=%d",
 			len(job.ProviderStopDispatchClaims), len(job.ProviderStopDispatchStarts), len(job.ProviderStopDispatchReleases))
 	}
@@ -831,18 +866,19 @@ func TestTaskProviderStopReclaimsStartedClaimWithProviderFencing(t *testing.T) {
 		t.Fatalf("replacement claim did not advance fencing token: old=%d new=%d",
 			oldClaim.CreatedRevision, newClaim.CreatedRevision)
 	}
-	if len(f.runtime.stopRequests) != 1 || f.runtime.stopRequests[0].FencingToken != newClaim.CreatedRevision {
+	if len(f.runtime.stopRequests) != 1 || f.runtime.stopRequests[0].FencingToken != newClaim.CreatedRevision ||
+		!f.runtime.stopRequests[0].RequireFencing {
 		t.Fatalf("Provider Stop did not receive replacement fencing token: requests=%#v claim=%#v",
 			f.runtime.stopRequests, newClaim)
 	}
 	duplicate, duplicateErr := f.runtime.Stop(f.ctx, provider.StopRequest{
-		OperationID: intent.OperationID, SessionID: "session_1", FencingToken: newClaim.CreatedRevision,
+		OperationID: intent.OperationID, SessionID: "session_1", FencingToken: newClaim.CreatedRevision, RequireFencing: true,
 	})
 	if duplicateErr != nil || duplicate.OperationID != intent.OperationID || f.runtime.stopCalls != 1 {
 		t.Fatalf("same operation was not deduplicated: result=%#v calls=%d err=%v", duplicate, f.runtime.stopCalls, duplicateErr)
 	}
 	_, staleErr := f.runtime.Stop(f.ctx, provider.StopRequest{
-		OperationID: intent.OperationID, SessionID: "session_1", FencingToken: oldClaim.CreatedRevision,
+		OperationID: intent.OperationID, SessionID: "session_1", FencingToken: oldClaim.CreatedRevision, RequireFencing: true,
 	})
 	if staleErr == nil || f.runtime.stopCalls != 1 {
 		t.Fatalf("stale caller was not fenced after recovery: calls=%d err=%v", f.runtime.stopCalls, staleErr)
@@ -875,7 +911,7 @@ func TestTaskProviderStopDoesNotReclaimClaimAfterDispatchStart(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("persist dispatch claim: claim=%#v created=%v err=%v", claim, created, err)
 	}
-	if _, _, started, err := f.database.StartProviderStopDispatchClaim(f.ctx, f.jobID, claim.ID, f.principal); err != nil || !started {
+	if _, _, started, err := f.database.StartProviderStopDispatchClaim(f.ctx, f.jobID, claim.ID, "", f.principal); err != nil || !started {
 		t.Fatalf("persist dispatch-start fact: started=%v err=%v", started, err)
 	}
 	if _, _, err := f.database.ReleaseProviderStopDispatchClaim(
