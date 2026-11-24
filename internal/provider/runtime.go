@@ -76,7 +76,11 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 	if err != nil {
 		return StartResult{}, err
 	}
-	if !capabilities.HasEvidenceAtLeast(CapabilityStartIdempotency, r.minimumEvidence) &&
+	if request.RequireIdempotency {
+		if !capabilities.HasEvidenceAtLeast(CapabilityStartIdempotency, EvidenceLive) {
+			return StartResult{}, ErrUnsupportedCapability
+		}
+	} else if !capabilities.HasEvidenceAtLeast(CapabilityStartIdempotency, r.minimumEvidence) &&
 		!capabilities.HasEvidenceAtLeast(CapabilityStartLookup, r.minimumEvidence) {
 		return StartResult{}, ErrUnsupportedCapability
 	}
