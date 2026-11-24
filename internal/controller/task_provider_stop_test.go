@@ -795,7 +795,7 @@ func TestTaskProviderStopRecoversClaimCommittedBeforeDispatchAfterRestart(t *tes
 	if _, started := domain.ProviderStopDispatchStartedForClaim(job, job.ProviderStopDispatchClaims[1].ID); !started {
 		t.Fatal("replacement claim has no durable dispatch-start fact")
 	}
-	if _, _, _, err := f.database.StartProviderStopDispatchClaim(f.ctx, f.jobID, claim.ID, f.principal); err == nil {
+	if _, _, _, err := f.database.StartProviderStopDispatchClaim(f.ctx, f.jobID, claim.ID, "", f.principal); err == nil {
 		t.Fatal("released stale claim was allowed to cross the dispatch-start fence")
 	}
 }
