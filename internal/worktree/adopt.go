@@ -271,6 +271,23 @@ func readWorktreeHeadMode(ctx context.Context, path string) (string, string, err
 func initialWorktreeStateSHA256(
 	ctx context.Context, path, head, tree, headMode, headRef string,
 ) (string, error) {
+	indexEntries, err := gitBytes(ctx, path, "--no-optional-locks", "ls-files", "-v", "-z")
+	if err != nil {
+		return "", fmt.Errorf("inspect Worktree index flags: %w", err)
+	}
+	for _, entry := range strings.Split(string(indexEntries), "\x00") {
+		if len(entry) == 0 {
+			continue
+		}
+		switch entry[0] {
+		case 'h':
+			return "", errors.New("Worktree contains assume-unchanged tracked files")
+		case 'S':
+			return "", errors.New("Worktree contains skip-worktree tracked files")
+		case 's':
+			return "", errors.New("Worktree contains skip-worktree and assume-unchanged tracked files")
+		}
+	}
 	status, err := gitBytes(ctx, path, "--no-optional-locks", "status", "--porcelain=v2", "--untracked-files=all", "--ignore-submodules=none", "-z")
 	if err != nil {
 		return "", err
@@ -324,13 +341,32 @@ func initialWorktreeStateSHA256(
 		if !info.Mode().IsRegular() {
 			return "", errors.New("untracked Worktree contains a symlink or non-regular file")
 		}
-		content, err := os.ReadFile(filePath)
+		file, err := os.Open(filePath)
 		if err != nil {
-			return "", fmt.Errorf("read untracked Worktree file: %w", err)
+			return "", fmt.Errorf("open untracked Worktree file: %w", err)
+		}
+		openedInfo, statErr := file.Stat()
+		if statErr != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) || openedInfo.Size() != info.Size() {
+			_ = file.Close()
+			return "", errors.New("untracked Worktree file changed before it could be hashed")
 		}
 		writeDigestPart(hash, []byte(relative))
 		writeDigestPart(hash, []byte(info.Mode().Perm().String()))
-		writeDigestPart(hash, content)
+		if _, err := fmt.Fprintf(hash, "%d:", info.Size()); err != nil {
+			_ = file.Close()
+			return "", fmt.Errorf("write untracked Worktree file length to digest: %w", err)
+		}
+		written, copyErr := io.CopyBuffer(hash, file, make([]byte, 64*1024))
+		afterInfo, afterStatErr := file.Stat()
+		closeErr := file.Close()
+		if copyErr != nil {
+			return "", fmt.Errorf("hash untracked Worktree file: %w", copyErr)
+		}
+		if afterStatErr != nil || closeErr != nil || written != info.Size() ||
+			!os.SameFile(info, afterInfo) || afterInfo.Size() != info.Size() ||
+			!afterInfo.ModTime().Equal(info.ModTime()) {
+			return "", errors.New("untracked Worktree file changed while it was being hashed")
+		}
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }

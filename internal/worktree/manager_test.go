@@ -583,3 +583,49 @@ func TestManagerAdoptRejectsDirtySubmoduleState(t *testing.T) {
 		t.Fatalf("Adopt accepted changed submodule contents: %v", err)
 	}
 }
+
+func TestManagerAdoptRejectsIndexFlagsAndStreamsLargeUntrackedFiles(t *testing.T) {
+	repository := initRepository(t)
+	worktreePath := filepath.Join(t.TempDir(), "adopt-index-flags")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, "HEAD")
+	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_5555555555555555", TargetRepositories: []string{"repo.primary"}}
+	jobID := "job_5555555555555555"
+	readme := filepath.Join(worktreePath, "README.md")
+	if err := os.WriteFile(readme, []byte("hidden tracked change\n"), 0o600); err != nil {
+		t.Fatalf("write tracked change: %v", err)
+	}
+	gitTestRun(t, worktreePath, "update-index", "--assume-unchanged", "README.md")
+	if _, err := manager.Adopt(context.Background(), jobID, task, worktreePath); err == nil ||
+		!strings.Contains(err.Error(), "assume-unchanged") {
+		t.Fatalf("Adopt accepted assume-unchanged tracked content: %v", err)
+	}
+	gitTestRun(t, worktreePath, "update-index", "--no-assume-unchanged", "README.md")
+	gitTestRun(t, worktreePath, "checkout", "--", "README.md")
+
+	if err := os.WriteFile(readme, []byte("hidden skip-worktree change\n"), 0o600); err != nil {
+		t.Fatalf("write skip-worktree change: %v", err)
+	}
+	gitTestRun(t, worktreePath, "update-index", "--skip-worktree", "README.md")
+	if _, err := manager.Adopt(context.Background(), jobID, task, worktreePath); err == nil ||
+		!strings.Contains(err.Error(), "skip-worktree") {
+		t.Fatalf("Adopt accepted skip-worktree tracked content: %v", err)
+	}
+	gitTestRun(t, worktreePath, "update-index", "--no-skip-worktree", "README.md")
+	gitTestRun(t, worktreePath, "checkout", "--", "README.md")
+
+	largePath := filepath.Join(worktreePath, "large-untracked.bin")
+	if err := os.WriteFile(largePath, []byte(strings.Repeat("x", 4*1024*1024)), 0o600); err != nil {
+		t.Fatalf("write large untracked file: %v", err)
+	}
+	snapshot, err := manager.Adopt(context.Background(), jobID, task, worktreePath)
+	if err != nil {
+		t.Fatalf("Adopt with large untracked file: %v", err)
+	}
+	if err := manager.Verify(context.Background(), jobID, task, snapshot); err != nil {
+		t.Fatalf("Verify adopted Worktree with large untracked file: %v", err)
+	}
+}
