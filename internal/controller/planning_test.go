@@ -16,8 +16,10 @@ type fakePlanningLifecycleStore struct {
 	job               domain.Job
 	turnErr           error
 	effect            domain.PlanningEffectDecision
-	resumeErr         error
-	boundaryDecisions []domain.PlanningBoundaryDecision
+	resumeErr              error
+	resumeIntentCalls      int
+	resumeObservationCalls int
+	boundaryDecisions      []domain.PlanningBoundaryDecision
 }
 
 func (f *fakePlanningLifecycleStore) GetJob(context.Context, string) (domain.Job, error) {
@@ -53,10 +55,12 @@ func (f *fakePlanningLifecycleStore) AddPlanningEffectDecision(context.Context, 
 }
 
 func (f *fakePlanningLifecycleStore) AddPlanningResumeIntent(context.Context, string, uint64, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningResumeIntent, error) {
+	f.resumeIntentCalls++
 	return store.CommandReceipt{}, domain.PlanningResumeIntent{}, f.resumeErr
 }
 
 func (f *fakePlanningLifecycleStore) AddPlanningResumeObservation(context.Context, string, uint64, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningResumeObservation, error) {
+	f.resumeObservationCalls++
 	return store.CommandReceipt{}, domain.PlanningResumeObservation{}, nil
 }
 
@@ -127,7 +131,7 @@ func TestAuthorizeEffectFailsClosedOnDeniedDecision(t *testing.T) {
 
 func TestResumePersistsTypedBoundaryDenial(t *testing.T) {
 	fake := &fakePlanningLifecycleStore{
-		job: domain.Job{ID: "job_1", Revision: 5},
+		job: domain.Job{ID: "job_1", Revision: 5, RoleExecutions: []domain.RoleExecution{{ID: "role_1", Role: domain.RolePlanner}}},
 		resumeErr: &domain.PlanningBoundaryError{
 			Boundary:   domain.PlanningBoundaryResume,
 			ReasonCode: "provider_session_mismatch",
@@ -144,5 +148,44 @@ func TestResumePersistsTypedBoundaryDenial(t *testing.T) {
 	}
 	if len(fake.boundaryDecisions) != 1 || fake.boundaryDecisions[0].ReasonCode != "provider_session_mismatch" {
 		t.Fatalf("resume denial was not persisted: %#v", fake.boundaryDecisions)
+	}
+}
+
+func TestPlanningControllerRejectsTaskCoderResumeIntent(t *testing.T) {
+	fake := &fakePlanningLifecycleStore{
+		job: domain.Job{ID: "job_1", Revision: 5, RoleExecutions: []domain.RoleExecution{{ID: "role_1", Role: domain.RoleCoder}}},
+	}
+	controller, err := NewPlanningController(fake)
+	if err != nil {
+		t.Fatalf("NewPlanningController: %v", err)
+	}
+	if _, _, err := controller.Resume(context.Background(), "job_1", "role_1", "session_1",
+		"cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("a", 64), true, auth.AuthenticatedPrincipal{}); err == nil {
+		t.Fatal("PlanningController accepted a Task Coder Resume intent")
+	}
+	if fake.resumeIntentCalls != 0 {
+		t.Fatalf("PlanningController persisted %d Task Coder Resume intents", fake.resumeIntentCalls)
+	}
+}
+
+func TestPlanningControllerRejectsTaskCoderResumeObservation(t *testing.T) {
+	fake := &fakePlanningLifecycleStore{
+		job: domain.Job{
+			ID: "job_1", Revision: 5,
+			RoleExecutions: []domain.RoleExecution{{ID: "role_1", Role: domain.RoleCoder}},
+			PlanningResumeIntents: []domain.PlanningResumeIntent{{ID: "resume_1", RoleExecutionID: "role_1"}},
+		},
+	}
+	controller, err := NewPlanningController(fake)
+	if err != nil {
+		t.Fatalf("NewPlanningController: %v", err)
+	}
+	if _, _, err := controller.RecordResumeObservation(context.Background(), "job_1", "resume_1",
+		"cmd_ffffffffffffffffffffffffffffffff", domain.PlanningResumeAttached, strings.Repeat("b", 64), false,
+		auth.AuthenticatedPrincipal{}); err == nil {
+		t.Fatal("PlanningController accepted a Task Coder ATTACHED observation")
+	}
+	if fake.resumeObservationCalls != 0 {
+		t.Fatalf("PlanningController persisted %d Task Coder Resume observations", fake.resumeObservationCalls)
 	}
 }
