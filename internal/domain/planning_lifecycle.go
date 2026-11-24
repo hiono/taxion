@@ -1030,55 +1030,7 @@ func NewPlanningResumeObservation(job Job, resumeID, principalID, commandID, sta
 	if authorizedPrincipalID != principalID {
 		return PlanningResumeObservation{}, errors.New("Provider Resume observation Principal does not match its execution authority")
 	}
-	if status != PlanningResumeUnknown && status != PlanningResumeNotDispatched &&
-		status != PlanningResumeAttached && status != PlanningResumeFailed {
-		return PlanningResumeObservation{}, errors.New("unsupported Provider resume observation status")
-	}
-	if status == PlanningResumeUnknown {
-		if evidenceSHA256 != "" || reconcilesUnknown {
-			return PlanningResumeObservation{}, errors.New("UNKNOWN resume observation cannot claim terminal evidence")
-		}
-	} else if !validSHA256(evidenceSHA256) {
-		return PlanningResumeObservation{}, errors.New("terminal resume observation requires evidence")
-	} else if status == PlanningResumeNotDispatched && reconcilesUnknown {
-		return PlanningResumeObservation{}, errors.New("NOT_DISPATCHED resume observation cannot reconcile Provider UNKNOWN")
-	}
-	var previous *PlanningResumeObservation
-	for i := range job.PlanningResumeObservations {
-		candidate := &job.PlanningResumeObservations[i]
-		if candidate.ResumeID == resumeID {
-			previous = candidate
-		}
-	}
-	if previous == nil {
-		if reconcilesUnknown {
-			return PlanningResumeObservation{}, errors.New("first resume observation cannot reconcile UNKNOWN")
-		}
-	} else if previous.Status == PlanningResumeUnknown {
-		if status == PlanningResumeUnknown || !reconcilesUnknown || !validSHA256(evidenceSHA256) {
-			return PlanningResumeObservation{}, errors.New("only UNKNOWN may be reconciled by same-operation evidence; blind replay is prohibited")
-		}
-	} else if previous.Status == PlanningResumeNotDispatched {
-		if reconcilesUnknown || status == PlanningResumeNotDispatched {
-			return PlanningResumeObservation{}, errors.New("NOT_DISPATCHED may only be followed by a new dispatch observation")
-		}
-	} else {
-		return PlanningResumeObservation{}, errors.New("terminal Provider Resume observation cannot be replaced")
-	}
-	if job.Revision >= uint64(^uint64(0)>>1) {
-		return PlanningResumeObservation{}, errors.New("Job revision exhausted")
-	}
-	observation := PlanningResumeObservation{
-		ID: PlanningResumeObservationID(commandID), CommandID: commandID,
-		JobID: job.ID, ResumeID: resume.ID, OperationID: resume.OperationID,
-		RoleExecutionID: resume.RoleExecutionID, ProviderSessionID: resume.ProviderSessionID,
-		Status: status, EvidenceSHA256: evidenceSHA256, ReconcilesUnknown: reconcilesUnknown,
-		CreatedAt: now, CreatedRevision: job.Revision + 1,
-	}
-	if err := observation.Validate(job, resume); err != nil {
-		return PlanningResumeObservation{}, err
-	}
-	return observation, nil
+	return newPlanningResumeObservation(job, resume, commandID, status, evidenceSHA256, nil, reconcilesUnknown, now)
 }
 
 func NewTaskProviderResumeObservation(
@@ -1117,54 +1069,62 @@ func NewTaskProviderResumeObservation(
 	if !foundExecution || execution.Role != RoleCoder {
 		return PlanningResumeObservation{}, errors.New("Task Provider Resume observation requires a Coder execution")
 	}
+	var providerResponse *ProviderResumeResponse
+	if status == PlanningResumeAttached {
+		if response.OperationID != resume.OperationID || response.SessionID != resume.ProviderSessionID ||
+			!response.Attached || !validSHA256(response.EvidenceSHA256) ||
+			response.EvidenceSHA256 != evidenceSHA256 {
+			return PlanningResumeObservation{}, errors.New("ATTACHED Task Resume observation requires the exact Provider response")
+		}
+		providerResponse = &response
+	} else if response != (ProviderResumeResponse{}) {
+		return PlanningResumeObservation{}, errors.New("non-ATTACHED Task Resume observation cannot contain a Provider response")
+	}
+	return newPlanningResumeObservation(job, resume, commandID, status, evidenceSHA256, providerResponse, reconcilesUnknown, now)
+}
+
+func newPlanningResumeObservation(
+	job Job,
+	resume PlanningResumeIntent,
+	commandID, status, evidenceSHA256 string,
+	providerResponse *ProviderResumeResponse,
+	reconcilesUnknown bool,
+	now time.Time,
+) (PlanningResumeObservation, error) {
 	if status != PlanningResumeUnknown && status != PlanningResumeNotDispatched &&
 		status != PlanningResumeAttached && status != PlanningResumeFailed {
-		return PlanningResumeObservation{}, errors.New("unsupported Task Provider Resume observation status")
+		return PlanningResumeObservation{}, errors.New("unsupported Provider resume observation status")
 	}
-	var providerResponse *ProviderResumeResponse
 	if status == PlanningResumeUnknown {
-		if evidenceSHA256 != "" || reconcilesUnknown || response != (ProviderResumeResponse{}) {
-			return PlanningResumeObservation{}, errors.New("UNKNOWN Task Resume observation cannot claim terminal Provider response evidence")
+		if evidenceSHA256 != "" || reconcilesUnknown {
+			return PlanningResumeObservation{}, errors.New("UNKNOWN resume observation cannot claim terminal evidence")
 		}
-	} else {
-		if !validSHA256(evidenceSHA256) {
-			return PlanningResumeObservation{}, errors.New("terminal Task Resume observation requires evidence")
-		}
-		if status == PlanningResumeAttached {
-			if response.OperationID != resume.OperationID || response.SessionID != resume.ProviderSessionID ||
-				!response.Attached || !validSHA256(response.EvidenceSHA256) ||
-				response.EvidenceSHA256 != evidenceSHA256 {
-				return PlanningResumeObservation{}, errors.New("ATTACHED Task Resume observation requires the exact Provider response")
-			}
-			providerResponse = &response
-		} else if response != (ProviderResumeResponse{}) {
-			return PlanningResumeObservation{}, errors.New("non-ATTACHED Task Resume observation cannot contain a Provider response")
-		}
-		if status == PlanningResumeNotDispatched && reconcilesUnknown {
-			return PlanningResumeObservation{}, errors.New("NOT_DISPATCHED Task Resume observation cannot reconcile Provider UNKNOWN")
-		}
+	} else if !validSHA256(evidenceSHA256) {
+		return PlanningResumeObservation{}, errors.New("terminal resume observation requires evidence")
+	} else if status == PlanningResumeNotDispatched && reconcilesUnknown {
+		return PlanningResumeObservation{}, errors.New("NOT_DISPATCHED resume observation cannot reconcile Provider UNKNOWN")
 	}
 	var previous *PlanningResumeObservation
 	for i := range job.PlanningResumeObservations {
 		candidate := &job.PlanningResumeObservations[i]
-		if candidate.ResumeID == resumeID {
+		if candidate.ResumeID == resume.ID {
 			previous = candidate
 		}
 	}
 	if previous == nil {
 		if reconcilesUnknown {
-			return PlanningResumeObservation{}, errors.New("first Task Resume observation cannot reconcile UNKNOWN")
+			return PlanningResumeObservation{}, errors.New("first resume observation cannot reconcile UNKNOWN")
 		}
 	} else if previous.Status == PlanningResumeUnknown {
 		if status == PlanningResumeUnknown || !reconcilesUnknown || !validSHA256(evidenceSHA256) {
-			return PlanningResumeObservation{}, errors.New("only UNKNOWN may be reconciled by same-operation Provider evidence")
+			return PlanningResumeObservation{}, errors.New("only UNKNOWN may be reconciled by same-operation evidence; blind replay is prohibited")
 		}
 	} else if previous.Status == PlanningResumeNotDispatched {
 		if reconcilesUnknown || status == PlanningResumeNotDispatched {
-			return PlanningResumeObservation{}, errors.New("NOT_DISPATCHED may only be followed by a new Task Provider Resume observation")
+			return PlanningResumeObservation{}, errors.New("NOT_DISPATCHED may only be followed by a new dispatch observation")
 		}
 	} else {
-		return PlanningResumeObservation{}, errors.New("terminal Task Provider Resume observation cannot be replaced")
+		return PlanningResumeObservation{}, errors.New("terminal Provider Resume observation cannot be replaced")
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return PlanningResumeObservation{}, errors.New("Job revision exhausted")
