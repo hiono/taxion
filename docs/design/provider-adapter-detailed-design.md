@@ -256,6 +256,7 @@ Reviewer Startは、ADR-408 / ADR-507に従うimmutable Worktree snapshotとread
 5. 同一OperationID / TurnIDを使い、Lookupで未実行を確認した場合またはSend idempotencyが検証済みの場合だけ送信する。
 6. terminal responseはPlanningTurnObservationへ保存し、terminal resultとUsageは別々のObservationとして取得・保存する。
 7. UNKNOWN中は同じTurnIDで照合し、新しいTurnIDで再送しない。Lookupでterminal statusが見つかった場合もUsage Complete=trueを確認するまでturnを確定しない。
+8. Runtime.SendがFailureDefinitiveを返した場合は、当該Dispatch ClaimだけをEvidence digest付きで解放し、UNKNOWN observationを追加しない。同じimmutable Turn intent / OperationIDは未dispatchとして再試行できる。FailureAmbiguousまたは分類不能なエラーではUNKNOWN observationとClaimを保持する。
 
 ### 8.3 Stop / Resume（Controller実装済み）
 
