@@ -101,6 +101,10 @@ func (c *PlanningController) Resume(ctx context.Context, jobID, roleExecutionID,
 	if err != nil {
 		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, err
 	}
+	execution, found := planningControllerRoleExecution(job, roleExecutionID)
+	if !found || execution.Role != domain.RolePlanner {
+		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, errors.New("PlanningController Resume is restricted to Planner executions; Task Coder Resume requires ProviderController")
+	}
 	receipt, resume, err := c.store.AddPlanningResumeIntent(ctx, jobID, job.Revision, roleExecutionID, providerSessionID, commandID, capabilityEvidenceSHA256, reattachmentSupported, principal)
 	if err != nil {
 		return receipt, resume, c.recordBoundaryDenial(ctx, jobID, roleExecutionID, commandID, err, principal)
@@ -113,7 +117,31 @@ func (c *PlanningController) RecordResumeObservation(ctx context.Context, jobID,
 	if err != nil {
 		return store.CommandReceipt{}, domain.PlanningResumeObservation{}, err
 	}
+	var resume domain.PlanningResumeIntent
+	foundResume := false
+	for _, candidate := range job.PlanningResumeIntents {
+		if candidate.ID == resumeID {
+			resume, foundResume = candidate, true
+			break
+		}
+	}
+	if !foundResume {
+		return store.CommandReceipt{}, domain.PlanningResumeObservation{}, errors.New("PlanningResumeIntent was not found")
+	}
+	execution, found := planningControllerRoleExecution(job, resume.RoleExecutionID)
+	if !found || execution.Role != domain.RolePlanner {
+		return store.CommandReceipt{}, domain.PlanningResumeObservation{}, errors.New("PlanningController cannot record Provider Resume observations for Task Coder executions")
+	}
 	return c.store.AddPlanningResumeObservation(ctx, jobID, job.Revision, resumeID, commandID, status, evidenceSHA256, reconcilesUnknown, principal)
+}
+
+func planningControllerRoleExecution(job domain.Job, roleExecutionID string) (domain.RoleExecution, bool) {
+	for _, execution := range job.RoleExecutions {
+		if execution.ID == roleExecutionID {
+			return execution, true
+		}
+	}
+	return domain.RoleExecution{}, false
 }
 
 func (c *PlanningController) recordBoundaryDenial(ctx context.Context, jobID, roleExecutionID, sourceCommandID string, cause error, principal auth.AuthenticatedPrincipal) error {
