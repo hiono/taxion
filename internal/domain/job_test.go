@@ -456,3 +456,23 @@ func TestPlanningAuthorizationCanReconstructExpiredIdempotentRetry(t *testing.T)
 		t.Fatal("ValidateFor() accepted an expired grant")
 	}
 }
+
+
+func TestRoleExecutionRequiresWorktreeID(t *testing.T) {
+	commandID := "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	job := Job{ID: "job_aaaaaaaaaaaaaaaa"}
+	execution := RoleExecution{
+		ID:                       RoleExecutionID(commandID),
+		CommandID:                commandID,
+		JobID:                    job.ID,
+		Role:                     RoleCoder,
+		TaskID:                   "task_aaaaaaaaaaaaaaaa",
+		ExecutionPermissionID:    "execperm_aaaaaaaaaaaaaaaa",
+		ProviderStartOperationID: ProviderStartOperationID(commandID),
+		CreatedAt:                time.Unix(1, 0).UTC(),
+		CreatedRevision:          2,
+	}
+	if err := execution.Validate(job); err == nil {
+		t.Fatal("RoleExecution.Validate() accepted a Task execution without WorktreeID")
+	}
+}
