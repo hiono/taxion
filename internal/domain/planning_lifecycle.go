@@ -906,20 +906,6 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 	if providerStopIntentExists(job, r.RoleExecutionID, r.ProviderSessionID, r.CreatedRevision) {
 		return errors.New("Provider Resume cannot be created after a Provider Stop intent")
 	}
-	var startIntent ProviderStartIntent
-	foundStart := false
-	for _, candidate := range job.ProviderStartIntents {
-		if candidate.RoleExecutionID == r.RoleExecutionID {
-			startIntent, foundStart = candidate, true
-			break
-		}
-	}
-	if !foundStart {
-		return errors.New("PlanningResumeIntent has no Provider Start intent")
-	}
-	if err := validateProviderStartSession(job, startIntent, r.ProviderSessionID, r.CreatedRevision, r.CreatedAt); err != nil {
-		return err
-	}
 	return nil
 }
 
