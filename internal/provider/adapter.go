@@ -37,6 +37,7 @@ const (
 	CapabilitySendIdempotency          Capability = "send.idempotency"
 	CapabilitySendLookup               Capability = "send.lookup"
 	CapabilitySessionReattach          Capability = "session.cross_process_reattachment"
+	CapabilityResumeIdempotency        Capability = "resume.idempotency"
 	CapabilityEventReplay              Capability = "event.replay"
 	CapabilityStopProof                Capability = "stop.proof"
 	CapabilityStopLookup               Capability = "stop.lookup"
@@ -73,6 +74,7 @@ type Capabilities struct {
 	SendIdempotency             bool
 	SendLookup                  bool
 	CrossProcessSessionReattach bool
+	ResumeIdempotency            bool
 	EventReplay                 bool
 	StopProof                   bool
 	StopLookup                  bool
@@ -138,6 +140,8 @@ func (c Capabilities) Has(capability Capability) bool {
 		return c.SendLookup
 	case CapabilitySessionReattach:
 		return c.CrossProcessSessionReattach
+	case CapabilityResumeIdempotency:
+		return c.ResumeIdempotency
 	case CapabilityEventReplay:
 		return c.EventReplay
 	case CapabilityStopProof:
@@ -238,6 +242,8 @@ func setCapability(capabilities *Capabilities, capability Capability) {
 		capabilities.SendLookup = true
 	case CapabilitySessionReattach:
 		capabilities.CrossProcessSessionReattach = true
+	case CapabilityResumeIdempotency:
+		capabilities.ResumeIdempotency = true
 	case CapabilityEventReplay:
 		capabilities.EventReplay = true
 	case CapabilityStopProof:
@@ -316,7 +322,7 @@ func (c Capabilities) Validate(expected Identity) error {
 var allCapabilities = []Capability{
 	CapabilityStartIdempotency, CapabilityStartLookup, CapabilityTaskWorktree,
 	CapabilitySendIdempotency, CapabilitySendLookup,
-	CapabilitySessionReattach, CapabilityEventReplay,
+	CapabilitySessionReattach, CapabilityResumeIdempotency, CapabilityEventReplay,
 	CapabilityStopProof, CapabilityStopLookup, CapabilityStopDispatchFencing, CapabilityReviewerReadOnlySnapshot, CapabilityFinalOutput,
 	CapabilityUsageIdentity, CapabilityUsageCompleteness,
 }
@@ -452,9 +458,10 @@ type StopResult struct {
 }
 
 type ResumeRequest struct {
-	OperationID string
-	SessionID   string
-	Deadline    time.Time
+	OperationID        string
+	SessionID          string
+	Deadline           time.Time
+	RequireIdempotency bool
 }
 
 func (r ResumeRequest) Validate() error {
@@ -730,6 +737,7 @@ type Adapter interface {
 	// Send must deduplicate when RequireIdempotency is true; Runtime verifies the matching capability before credential acquisition.
 	Send(context.Context, TurnRequest, CredentialLease) (TurnResult, error)
 	Stop(context.Context, StopRequest, CredentialLease) (StopResult, error)
+	// Resume must deduplicate when RequireIdempotency is true; Runtime verifies the matching capability before credential acquisition.
 	Resume(context.Context, ResumeRequest, CredentialLease) (ResumeResult, error)
 	Lookup(context.Context, LookupRequest, CredentialLease) (LookupResult, error)
 	Result(context.Context, ResultRequest, CredentialLease) (Result, error)
