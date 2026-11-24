@@ -1122,3 +1122,62 @@ func TestTaskProviderSendRevalidatesWorktreeAfterClaimBeforeDispatch(t *testing.
 		t.Fatalf("pre-dispatch verification failure release outcome = %q", job.TaskTurnDispatchReleases[0].Outcome)
 	}
 }
+
+func TestTaskProviderUsageCompletesPersistedPartialUsage(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	prompt := "Exercise partial Usage completion."
+	digest := sha256.Sum256([]byte(prompt))
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	_, turn, created, err := f.database.AddTaskTurnIntentWithStatus(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, f.permission.ID, "session_1",
+		"cmd_89898989898989898989898989898989", hex.EncodeToString(digest[:]), 50,
+	)
+	if err != nil || !created {
+		t.Fatalf("AddTaskTurnIntent: created=%v err=%v", created, err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before partial Usage: %v", err)
+	}
+	if _, _, err := f.database.AddProviderUsageObservation(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, turn.OperationID, turn.ID, "session_1",
+		"usage_partial", 9, false, strings.Repeat("a", 64), f.principal,
+	); err != nil {
+		t.Fatalf("persist partial Usage: %v", err)
+	}
+	f.runtime.capabilities.UsageIdentity = true
+	f.runtime.capabilities.UsageCompleteness = true
+	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity,
+			TestID: "partial-usage-completion", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: f.controller.now()},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity,
+			TestID: "partial-usage-completion", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: f.controller.now()},
+	)
+	f.runtime.usageResult = provider.Usage{
+		OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID,
+		UsageID: "usage_partial", Tokens: 15, Complete: true, EvidenceSHA256: strings.Repeat("d", 64),
+	}
+	_, usage, err := f.controller.RetrieveTaskProviderUsage(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, f.permissionRequest,
+		"session_1", turn.ID, "usage_partial", f.principal,
+	)
+	if err != nil || !usage.Complete || usage.Tokens != 15 || f.runtime.usageCalls != 1 {
+		t.Fatalf("partial Usage was replayed instead of completed: usage=%#v calls=%d err=%v", usage, f.runtime.usageCalls, err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after complete Usage: %v", err)
+	}
+	completeCount := 0
+	for _, observation := range job.ProviderUsageObservations {
+		if observation.TurnID == turn.ID && observation.Complete {
+			completeCount++
+		}
+	}
+	if completeCount != 1 {
+		t.Fatalf("complete Usage count for Turn = %d, want 1", completeCount)
+	}
+}

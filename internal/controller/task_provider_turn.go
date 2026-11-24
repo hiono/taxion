@@ -333,15 +333,24 @@ func (c *ProviderController) reconcileTaskTurn(
 	canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, provider.EvidenceLive)
 	canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive)
 	if canLookup {
-		lookup, err := c.runtime.Lookup(ctx, provider.LookupRequest{
-			OperationID: turn.OperationID, SessionID: turn.ProviderSessionID, TurnID: turn.ID,
-		})
+		lookupRequest := provider.LookupRequest{
+			Purpose: provider.LookupPurposeTurn, OperationID: turn.OperationID,
+			SessionID: turn.ProviderSessionID, TurnID: turn.ID,
+		}
+		lookup, err := c.runtime.Lookup(ctx, lookupRequest)
 		if err != nil {
 			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
 			if persistErr != nil {
 				return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, persistErr)
 			}
 			return receipt, turn, observation, provider.TurnResult{}, err
+		}
+		if validationErr := lookup.Validate(lookupRequest); validationErr != nil {
+			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
+			if persistErr != nil {
+				return receipt, turn, observation, provider.TurnResult{}, errors.Join(provider.ErrProviderInvalidResult, validationErr, persistErr)
+			}
+			return receipt, turn, observation, provider.TurnResult{}, errors.Join(provider.ErrProviderInvalidResult, validationErr)
 		}
 		if lookup.Found {
 			if lookup.Status == domain.TaskTurnCompleted || lookup.Status == domain.TaskTurnFailed {
