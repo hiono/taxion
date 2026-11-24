@@ -231,6 +231,55 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 	}
 }
 
+func TestExecutionControllerRejectsReviewerBeforePreparingMutableWorktree(t *testing.T) {
+	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
+	now := time.Now().UTC().Round(0)
+	worktrees := &fakeTaskWorktreeVerifier{}
+	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
+		Reversible: true, Mutating: false, ValidUntil: now.Add(45 * time.Minute),
+	}}
+	controller, err := NewExecutionControllerWithWorktree(database, assessor, worktrees)
+	if err != nil {
+		t.Fatalf("NewExecutionControllerWithWorktree: %v", err)
+	}
+	controller.now = func() time.Time { return now }
+	request := domain.ExecutionPermissionRequest{
+		JobID: jobID, TaskID: task.ID, CommandID: "cmd_b7070707070707070707070707070707",
+		Role: "REVIEWER", Effect: "repository.read",
+		Resource: revision.Contract.TargetRepositories[0],
+		ProviderID: "provider.test", AccountID: "account.primary",
+		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
+		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+	}
+	_, permission, err := controller.Authorize(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Authorize read-only Reviewer permission: %v", err)
+	}
+	before, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob before rejected Reviewer start: %v", err)
+	}
+	if _, _, _, err := controller.StartTaskExecution(
+		context.Background(), permission.ID, "cmd_b8080808080808080808080808080808", request,
+	); err == nil {
+		t.Fatal("Reviewer was started on a mutable Coder Worktree")
+	}
+	after, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after rejected Reviewer start: %v", err)
+	}
+	if worktrees.prepareCalls != 0 || worktrees.verifyCalls != 0 {
+		t.Fatalf("rejected Reviewer start touched mutable Worktree: prepare=%d verify=%d",
+			worktrees.prepareCalls, worktrees.verifyCalls)
+	}
+	if after.Revision != before.Revision || len(after.RoleExecutions) != len(before.RoleExecutions) ||
+		len(after.ProviderStartIntents) != len(before.ProviderStartIntents) ||
+		len(after.WorktreeAssignments) != len(before.WorktreeAssignments) ||
+		len(after.ExecutionPermissions) != len(before.ExecutionPermissions) {
+		t.Fatalf("rejected Reviewer start mutated Job: before=%#v after=%#v", before, after)
+	}
+}
+
 func TestExecutionControllerRejectsScopeAndAssessmentFailuresWithoutMutation(t *testing.T) {
 	tests := []struct {
 		name   string

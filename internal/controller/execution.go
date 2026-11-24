@@ -124,6 +124,9 @@ func (c *ExecutionController) StartTaskExecution(
 	permissionID, commandID string,
 	request domain.ExecutionPermissionRequest,
 ) (store.CommandReceipt, domain.RoleExecution, domain.ProviderStartIntent, error) {
+	if request.Role != domain.RoleCoder {
+		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, errors.New("Reviewer execution requires an immutable JobOutput snapshot and enforced read-only boundary")
+	}
 	if c.worktrees == nil {
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, errors.New("Task execution start requires a trusted Worktree manager")
 	}

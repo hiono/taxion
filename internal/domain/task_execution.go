@@ -38,9 +38,8 @@ func NewTaskRoleExecutionStart(
 		return TaskExecutionStart{}, errors.New("Task execution start requires a Task in the latest approved contract revision")
 	}
 	permission, permissionFound := executionPermissionByID(job, permissionID)
-	if !permissionFound || permission.TaskID != task.ID ||
-		(permission.Role != RoleCoder && permission.Role != RoleReviewer) {
-		return TaskExecutionStart{}, errors.New("ExecutionPermission does not authorize this Task RoleExecution")
+	if !permissionFound || permission.TaskID != task.ID || permission.Role != RoleCoder {
+		return TaskExecutionStart{}, errors.New("mutable Task Worktree execution is restricted to Coder; Reviewer requires an immutable snapshot boundary")
 	}
 	now = now.UTC().Round(0)
 	if err := permission.ValidateFor(job, permission.OperationID, requestSHA256, now); err != nil {
