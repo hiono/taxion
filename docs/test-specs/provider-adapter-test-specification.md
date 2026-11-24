@@ -221,7 +221,7 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-026 | Usage completion — 同一UsageIDのComplete=false後にComplete=true | 既存factを変更せず新Observationを追加 |
 | CTR-027 | Capability gate — Result / Usage capability不足 | credential / Adapter呼出し前に拒否 |
 | CTR-028 | Provider retrieval failure — Result / Usage取得時にRuntime error | 成功Observationを追加しない |
-| CTR-029 | Send recovery — UNKNOWN Turnに対して同じOperationID / TurnIDでLookup | 新しいTurnIDを発行せず、verified NOT_FOUND後だけ再送 |
+| CTR-029 | Send recovery — UNKNOWN Turnに対して同じOperationID / TurnIDでLookup | E4 NOT_FOUNDとSendIdempotencyの両方が検証済みの場合だけ、同じOperationID / TurnIDで再送。SendIdempotency不足時はUNKNOWNを保持し、再送しない |
 | CTR-030 | Send capability gate — Send idempotency / lookupのE4 evidence不足 | Turn intent作成・Runtime.Send前に拒否 |
 | CTR-031 | Resume intent ordering — E5 SessionReattach evidence / accepted Session一致 | Runtime.Resume前にResume intentとreceiptを永続化 |
 | CTR-032 | Resume ambiguity — Runtime.Resumeのambiguous failure | 同じOperationIDのUNKNOWN observationを保存 |
@@ -240,7 +240,7 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-045 | Stop restart reconciliation — Stop intent commit後、Provider Stop成功・Observation保存前にprocess crash | E4 Stop Lookupで同一OperationID / SessionIDのSTOPPED / Quiescentを確認し、terminal Observationをappend |
 | CTR-046 | Stop restart retry — Claim commit後、DispatchStart前にprocess crash | E4 Stop LookupのNOT_FOUND後に旧Claimを未dispatchとして解放し、同じOperationID / SessionIDで再dispatch |
 | CTR-047 | Stop restart retry — DispatchStart後、Provider Stop前にprocess crash、fencing capabilityなし | E4 NOT_FOUNDでもClaimを保持し、Stopを再実行しない |
-| CTR-048 | Stop restart retry — DispatchStart後、Provider Stop前にprocess crash、fencing capabilityあり | E4 NOT_FOUNDとE4 Stop Dispatch Fencingで旧Claimを解放し、新Claimのfencing tokenで再dispatch。遅延した旧tokenは拒否 |
+| CTR-048 | Stop restart retry — DispatchStart後、Provider Stop前にprocess crash、fencing capabilityあり | 元DispatchStart factのfencing evidence digest、DispatchStart後のE4 NOT_FOUND（観測時刻をrelease factへ保存）、E4 Stop Dispatch Fencingを要求。後続DispatchStartにもfencing evidenceを要求し、旧tokenを拒否 |
 | CTR-049 | Stop dispatch fencing — 同一OperationID / SessionIDへの同一・古いtoken要求 | 同一operationへ収束し、古いtokenによる追加副作用を拒否 |
 
 ## 11. Regression tests
@@ -272,3 +272,5 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 Windows buildとGoReleaser cross-build（macOS targetを含む）は、リリース準備段階で検証を再開する。macOS native検証は任意とする。
 
 CI成功はE2の証拠である。E4 / E5 / E6の完了を意味しない。
+| CTR-050 | Stop definitive failure release retry — definitive failure Observation保存後にClaim releaseの永続化が失敗し、同一commandを再実行 | 保存済みEvidenceSHA256で同じClaimを解放し、追加のProvider Stop / Lookupを送信しない |
+| CTR-051 | Stop dispatch revision binding — Claim後の権限 / Worktree検証中にJob revisionが変化 | stale expected revisionでDispatchStartを拒否し、Provider Stopを呼び出さず、Claimを未dispatchの回復可能状態で保持 |

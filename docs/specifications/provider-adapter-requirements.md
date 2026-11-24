@@ -128,8 +128,10 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 - ResumeがATTACHEDと確定する前に新しいturnを開始しない。
 - Stopの成功は単なるcancel通知では認定しない。Stop proof、terminal result、Usageを照合する。
 - Stop intent後のprocess restartではE4 Stop lookupを必須とする。STOPPED / Stopped=true / Quiescent=trueの証拠で既存intentを解消する。
-- DispatchStartのないClaimは、E4 NOT_FOUNDの後に未dispatchとして解放できる。DispatchStart済みClaimは、E4 Stop LookupのNOT_FOUNDとE4 Stop Dispatch Fencingの両方がある場合だけ、fencing tokenを進めて同じOperationID / SessionIDで再試行する。
+- DispatchStartのないClaimは、E4 NOT_FOUNDの後に未dispatchとして解放できる。DispatchStart済みClaimは、元DispatchStart factにE4 Stop Dispatch Fencing evidence digestが保存されている場合に限り、DispatchStartより後に観測されたE4 Stop Lookup NOT_FOUNDとE4 Stop Dispatch Fencingの両方がある場合だけ、fencing tokenを進めて同じOperationID / SessionIDで再試行する。Lookupの観測時刻はrelease factに保存し、DispatchStartより後であることを検証する。fenced_not_found後の同一OperationIDに対する後続DispatchStartにもE4 fencing evidenceを必須とする。
 - StopRequest.RequireFencing=trueの場合、RuntimeはE4 Stop Dispatch Fencing evidenceを再検証してからcredentialを取得する。ProviderはOperationID / SessionID単位でfencing tokenを原子的に比較し、古いtokenの遅延要求を副作用前に拒否し、同一operationの要求を重複実行せず同じreceipt / resultへ収束させる。fencing capabilityがない場合はClaimを保持し、NOT_FOUNDだけで再dispatchしない。
+- DefinitiveFailure Observationの永続化後にClaim releaseが失敗した場合、再試行は保存済みEvidenceSHA256を使ってreleaseを完了し、Provider StopやLookupを再送信しない。
+- Stop DispatchStartは、Claim後に再取得・検証したJob revisionをexpected revisionとして追加する。権限またはWorktreeの再検証後にJob revisionが変化した場合はDispatchStartを拒否し、Provider Stopを呼び出さない。
 - Stop lookupが未対応・未検証、応答不整合、UNKNOWNの場合はStopを再実行せず、Worktree ownershipを保持する。
 - Stop状態またはresultが不明な資源は未解決として保持し、再利用・所有権解放を行わない。
 
