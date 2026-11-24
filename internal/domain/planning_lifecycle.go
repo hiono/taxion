@@ -132,19 +132,19 @@ type ProviderResumeResponse struct {
 }
 
 type PlanningResumeObservation struct {
-	ID                string                 `json:"id"`
-	CommandID         string                 `json:"command_id"`
-	JobID             string                 `json:"job_id"`
-	ResumeID          string                 `json:"resume_id"`
-	OperationID       string                 `json:"operation_id"`
-	RoleExecutionID   string                 `json:"role_execution_id"`
-	ProviderSessionID string                 `json:"provider_session_id"`
-	Status            string                 `json:"status"`
-	EvidenceSHA256    string                 `json:"evidence_sha256,omitempty"`
+	ID                string                  `json:"id"`
+	CommandID         string                  `json:"command_id"`
+	JobID             string                  `json:"job_id"`
+	ResumeID          string                  `json:"resume_id"`
+	OperationID       string                  `json:"operation_id"`
+	RoleExecutionID   string                  `json:"role_execution_id"`
+	ProviderSessionID string                  `json:"provider_session_id"`
+	Status            string                  `json:"status"`
+	EvidenceSHA256    string                  `json:"evidence_sha256,omitempty"`
 	ProviderResponse  *ProviderResumeResponse `json:"provider_response,omitempty"`
-	ReconcilesUnknown bool                   `json:"reconciles_unknown,omitempty"`
-	CreatedAt         time.Time              `json:"created_at"`
-	CreatedRevision   uint64                 `json:"created_revision"`
+	ReconcilesUnknown bool                    `json:"reconciles_unknown,omitempty"`
+	CreatedAt         time.Time               `json:"created_at"`
+	CreatedRevision   uint64                  `json:"created_revision"`
 }
 
 type PlanningResumeIntent struct {
