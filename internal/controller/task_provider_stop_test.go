@@ -955,7 +955,7 @@ func TestTaskProviderStopDoesNotReclaimClaimAfterDispatchStart(t *testing.T) {
 
 func TestTaskProviderStopRevalidatesWorktreeAfterClaimBeforeDispatch(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
-	f.worktree.failAt = 3
+	f.worktree.failAt = f.worktree.verifyCalls + 3
 	f.worktree.verifyErr = errors.New("Worktree changed after claim")
 	_, intent, _, err := f.stop("cmd_56565656565656565656565656565656", domain.ProviderStopReasonTaskComplete)
 	if intent.ID == "" || err == nil || f.runtime.stopCalls != 0 {
