@@ -368,3 +368,54 @@ func TestProviderCapabilityEvidenceSHA256AcceptsEvidenceAtLeastLive(t *testing.T
 		})
 	}
 }
+
+func TestReleaseTaskTurnDispatchClaimBeforeSendDoesNotReleaseReplacementClaim(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	prepareTaskResumeTurn(t, &f)
+
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before first claim: %v", err)
+	}
+	turn := job.TaskTurnIntents[0]
+	_, firstClaim, _, err := f.database.AddTaskTurnDispatchClaim(
+		f.ctx, f.jobID, job.Revision, turn.ID,
+		"cmd_78787878787878787878787878787878", f.principal,
+	)
+	if err != nil {
+		t.Fatalf("Add first dispatch claim: %v", err)
+	}
+	if _, _, err := f.database.ReleaseTaskTurnDispatchClaim(
+		f.ctx, f.jobID, firstClaim.ID, f.principal,
+		domain.TaskTurnDispatchReleasedIdempotentRetry, strings.Repeat("a", 64),
+	); err != nil {
+		t.Fatalf("release first dispatch claim: %v", err)
+	}
+
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before replacement claim: %v", err)
+	}
+	_, replacementClaim, _, err := f.database.AddTaskTurnDispatchClaim(
+		f.ctx, f.jobID, job.Revision, turn.ID,
+		"cmd_79797979797979797979797979797979", f.principal,
+	)
+	if err != nil {
+		t.Fatalf("Add replacement dispatch claim: %v", err)
+	}
+	if err := f.controller.releaseTaskTurnDispatchClaimBeforeSend(
+		f.ctx, f.jobID, turn, firstClaim.ID, f.principal,
+	); err != nil {
+		t.Fatalf("release stale pre-send claim: %v", err)
+	}
+
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after stale release: %v", err)
+	}
+	activeClaim, active := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID)
+	if !active || activeClaim.ID != replacementClaim.ID {
+		t.Fatalf("stale pre-send cleanup changed replacement claim: active=%v claim=%#v want=%#v",
+			active, activeClaim, replacementClaim)
+	}
+}

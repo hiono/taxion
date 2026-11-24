@@ -270,20 +270,20 @@ func (c *ProviderController) dispatchTaskTurn(
 		c.taskProviderExecutionTarget(ctx, latest.ID, turn.RoleExecutionID, turn.ExecutionPermissionID, permissionRequest, principal)
 	if postErr != nil || postClaimJob.ID != latest.ID || postExecution.ID != turn.RoleExecutionID ||
 		postPermission.ID != permission.ID || postTask.ID != task.ID || postAssignment.ID != assignment.ID || postSession != turn.ProviderSessionID {
-		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, principal)
+		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(errors.New("Task Send authority or Worktree changed after dispatch claim acquisition"), postErr, releaseErr)
 	}
 	if err := postPermission.ValidateFor(postClaimJob, postPermission.OperationID, postPermission.RequestSHA256, c.now()); err != nil {
-		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, principal)
+		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, releaseErr)
 	}
 	if err := c.worktreeVerifier.Verify(ctx, postClaimJob.ID, postTask, postAssignment.Snapshot()); err != nil {
-		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, principal)
+		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(fmt.Errorf("reverify Task Worktree after Send claim acquisition: %w", err), releaseErr)
 	}
 	for _, stopIntent := range postClaimJob.ProviderStopIntents {
 		if stopIntent.RoleExecutionID == turn.RoleExecutionID && stopIntent.SessionID == turn.ProviderSessionID {
-			releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, principal)
+			releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
 			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(errors.New("Task Provider Send is blocked by a Stop intent saved after claim acquisition"), releaseErr)
 		}
 	}
@@ -431,18 +431,19 @@ func (c *ProviderController) releaseTaskTurnDispatchClaimBeforeSend(
 	ctx context.Context,
 	jobID string,
 	turn domain.TaskTurnIntent,
+	claimID string,
 	principal auth.AuthenticatedPrincipal,
 ) error {
 	job, err := c.store.GetJob(ctx, jobID)
 	if err != nil {
 		return err
 	}
-	claim, active := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID)
-	if !active {
+	activeClaim, active := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID)
+	if !active || activeClaim.ID != claimID {
 		return nil
 	}
 	_, _, err = c.store.ReleaseTaskTurnDispatchClaim(
-		ctx, jobID, claim.ID, principal, domain.TaskTurnDispatchReleasedDefinitiveFailure, "",
+		ctx, jobID, claimID, principal, domain.TaskTurnDispatchReleasedDefinitiveFailure, "",
 	)
 	return err
 }
