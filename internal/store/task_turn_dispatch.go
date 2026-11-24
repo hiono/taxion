@@ -85,19 +85,19 @@ func (s *Store) AddTaskTurnDispatchRelease(
 	ctx context.Context,
 	jobID string,
 	expectedRevision uint64,
-	claimID, commandID, outcome, evidenceSHA256 string,
+	claimID, commandID, outcome, evidenceSHA256, lookupEvidenceSHA256 string,
 	principal auth.AuthenticatedPrincipal,
 ) (CommandReceipt, domain.TaskTurnDispatchRelease, bool, error) {
 	if err := principal.Validate(); err != nil {
 		return CommandReceipt{}, domain.TaskTurnDispatchRelease{}, false, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
 	}
 	request := struct {
-		JobID, ClaimID, CommandID, Outcome, EvidenceSHA256, PrincipalID string
-	}{jobID, claimID, commandID, outcome, evidenceSHA256, principal.PrincipalID()}
+		JobID, ClaimID, CommandID, Outcome, EvidenceSHA256, LookupEvidenceSHA256, PrincipalID string
+	}{jobID, claimID, commandID, outcome, evidenceSHA256, lookupEvidenceSHA256, principal.PrincipalID()}
 	return persistPlanningFactWithStatus(
 		ctx, s, jobID, expectedRevision, commandID, addTaskTurnDispatchReleaseCommandType, request,
 		func(job domain.Job, now time.Time) (domain.TaskTurnDispatchRelease, error) {
-			return domain.NewTaskTurnDispatchRelease(job, claimID, principal.PrincipalID(), commandID, outcome, evidenceSHA256, now)
+			return domain.NewTaskTurnDispatchRelease(job, claimID, principal.PrincipalID(), commandID, outcome, evidenceSHA256, lookupEvidenceSHA256, now)
 		},
 		func(job *domain.Job, release domain.TaskTurnDispatchRelease) {
 			job.TaskTurnDispatchReleases = append(job.TaskTurnDispatchReleases, release)
@@ -117,7 +117,7 @@ func (s *Store) ReleaseTaskTurnDispatchClaim(
 	ctx context.Context,
 	jobID, claimID string,
 	principal auth.AuthenticatedPrincipal,
-	outcome, evidenceSHA256 string,
+	outcome, evidenceSHA256, lookupEvidenceSHA256 string,
 ) (CommandReceipt, domain.TaskTurnDispatchRelease, error) {
 	if claimID == "" || outcome == "" {
 		return CommandReceipt{}, domain.TaskTurnDispatchRelease{}, errors.New("Task Turn dispatch claim and outcome are required")
@@ -128,7 +128,7 @@ func (s *Store) ReleaseTaskTurnDispatchClaim(
 		return CommandReceipt{}, domain.TaskTurnDispatchRelease{}, err
 	}
 	receipt, release, _, err := s.AddTaskTurnDispatchRelease(
-		ctx, jobID, job.Revision, claimID, commandID, outcome, evidenceSHA256, principal,
+		ctx, jobID, job.Revision, claimID, commandID, outcome, evidenceSHA256, lookupEvidenceSHA256, principal,
 	)
 	return receipt, release, err
 }
