@@ -196,9 +196,83 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	}
 	if _, err := domain.NewTaskTurnIntent(
 		job, execution.ID, permission.ID, turn.ProviderSessionID,
-		"cmd_f5050505050505050505050505050505", strings.Repeat("4", 64), 100, now.Add(time.Second),
+		"cmd_f5050505050505050505050505050505", strings.Repeat("4", 64), 100, job.UpdatedAt.Add(time.Second),
 	); err != nil {
 		t.Fatalf("Task Turn was not allowed after ATTACHED Resume: %v", err)
+	}
+	if len(job.ProviderUsageObservations) != 1 {
+		t.Fatalf("unexpected initial usage count: %d", len(job.ProviderUsageObservations))
+	}
+	_, replayedUsage, err := providerController.RetrieveTaskProviderUsage(
+		ctx, jobID, execution.ID, permission.ID, permissionRequest,
+		turn.ProviderSessionID, turn.ID, job.ProviderUsageObservations[0].UsageID, principal,
+	)
+	if err != nil || replayedUsage.ID != job.ProviderUsageObservations[0].ID || runtime.usageCalls != 1 {
+		t.Fatalf("completed Turn Usage replay called Provider or changed observation: usage=%#v calls=%d err=%v",
+			replayedUsage, runtime.usageCalls, err)
+	}
+	if _, _, err := providerController.RetrieveTaskProviderUsage(
+		ctx, jobID, execution.ID, permission.ID, permissionRequest,
+		turn.ProviderSessionID, turn.ID, "usage_after_terminal", principal,
+	); err == nil || runtime.usageCalls != 1 {
+		t.Fatalf("new Usage was accepted after terminal Turn: calls=%d err=%v", runtime.usageCalls, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Task Turn dispatch recovery: %v", err)
+	}
+	nextCommandID := "cmd_f5050505050505050505050505050505"
+	_, nextTurn, created, err := database.AddTaskTurnIntentWithStatus(
+		ctx, jobID, job.Revision, execution.ID, permission.ID, turn.ProviderSessionID,
+		nextCommandID, strings.Repeat("4", 64), 50,
+	)
+	if err != nil || !created {
+		t.Fatalf("persist second Task Turn intent: created=%v err=%v", created, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before simulated dispatch crash: %v", err)
+	}
+	oldClaimCommandID := "cmd_17171717171717171717171717171717"
+	_, oldClaim, claimCreated, err := database.AddTaskTurnDispatchClaim(
+		ctx, jobID, job.Revision, nextTurn.ID, oldClaimCommandID, principal,
+	)
+	if err != nil || !claimCreated {
+		t.Fatalf("persist pre-dispatch Task Turn claim: created=%v err=%v", claimCreated, err)
+	}
+	runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: nextTurn.OperationID, SessionID: turn.ProviderSessionID,
+		TurnID: nextTurn.ID, Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("9", 64),
+	}
+	runtime.usageResult = provider.Usage{
+		UsageID: "usage_2", Tokens: 8, Complete: true, EvidenceSHA256: strings.Repeat("a", 64),
+	}
+	_, recoveredTurn, recoveredObservation, _, err := providerController.SendTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, nextCommandID,
+		"Implement the approved Task changes again.", permissionRequest, 50, principal,
+	)
+	if err != nil || recoveredTurn.ID != nextTurn.ID || recoveredObservation.Status != domain.TaskTurnCompleted {
+		t.Fatalf("SendIdempotency did not recover an active dispatch claim: turn=%#v observation=%#v err=%v",
+			recoveredTurn, recoveredObservation, err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Task Turn dispatch recovery: %v", err)
+	}
+	idempotentReleaseFound := false
+	for _, release := range job.TaskTurnDispatchReleases {
+		if release.ClaimID == oldClaim.ID &&
+			release.Outcome == domain.TaskTurnDispatchReleasedIdempotentRetry &&
+			release.EvidenceSHA256 == strings.Repeat("e", 64) {
+			idempotentReleaseFound = true
+		}
+	}
+	if !idempotentReleaseFound || len(job.TaskTurnDispatchClaims) != 3 ||
+		len(job.TaskTurnDispatchReleases) != 3 || len(job.TaskTurnObservations) != 2 ||
+		runtime.sendCalls != 2 || runtime.resultCalls != 2 || runtime.usageCalls != 2 {
+		t.Fatalf("Task Turn idempotent recovery facts are incomplete: released=%v claims=%d releases=%d observations=%d calls=%d/%d/%d",
+			idempotentReleaseFound, len(job.TaskTurnDispatchClaims), len(job.TaskTurnDispatchReleases),
+			len(job.TaskTurnObservations), runtime.sendCalls, runtime.resultCalls, runtime.usageCalls)
 	}
 	runtime.capabilities.StopProof = false
 	if _, _, _, err := providerController.StopTaskExecution(
@@ -252,7 +326,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	}
 	if _, _, err := database.AddTaskTurnIntent(
 		ctx, jobID, job.Revision, execution.ID, permission.ID, turn.ProviderSessionID,
-		"cmd_f5050505050505050505050505050505", strings.Repeat("4", 64), 100,
+		"cmd_18181818181818181818181818181818", strings.Repeat("4", 64), 100,
 	); err == nil {
 		t.Fatal("Task Turn was accepted after Provider Stop intent")
 	}
