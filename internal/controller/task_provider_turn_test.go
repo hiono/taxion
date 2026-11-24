@@ -84,7 +84,8 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		Identity:    runtime.identity,
 		StartLookup: true, StartIdempotency: true, TaskWorktree: true,
 		SendLookup: true, SendIdempotency: true, FinalOutputRetrieval: true,
-		UsageIdentity: true, UsageCompleteness: true, StopProof: true, CrossProcessSessionReattach: true,
+		UsageIdentity: true, UsageCompleteness: true, StopProof: true,
+		CrossProcessSessionReattach: true, ResumeIdempotency: true,
 		Evidence: []provider.CapabilityEvidence{
 			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
@@ -96,6 +97,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 			{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("2", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityStopProof, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("3", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilitySessionReattach, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceDurable, VerifiedAt: now},
+			{Capability: provider.CapabilityResumeIdempotency, Identity: runtime.identity, TestID: "task-turn-test", EvidenceSHA256: strings.Repeat("6", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		},
 	}
 	runtime.lookupResult = provider.LookupResult{Found: false, OperationID: permission.OperationID, Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("3", 64)}
