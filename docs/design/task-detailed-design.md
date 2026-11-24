@@ -99,8 +99,5 @@ TaskTurnIntentの作成・復元検証は、同一RoleExecutionのlatest Plannin
 ## 9. Non-goals
 
 - Task status / progress state machine
-- Worktree ownership handoff / quarantine / release
-- Reviewer用immutable commit / tree snapshotとread-only enforcement
-- Worktree orphan reconciliation / cleanup
 - Task editing / supersession
 - Schedulerによる独立Task並列化
