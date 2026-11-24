@@ -676,8 +676,9 @@ func (c *ProviderController) StopPlanning(
 		return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
 	}
 	stopResult, stopErr := c.runtime.Stop(ctx, provider.StopRequest{
-		OperationID: intent.OperationID,
-		SessionID:   sessionID,
+		OperationID:  intent.OperationID,
+		SessionID:    sessionID,
+		FencingToken: intent.CreatedRevision,
 	})
 	if stopErr != nil {
 		if providerOperationMayHaveStarted(stopErr) {

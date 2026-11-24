@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -88,12 +89,24 @@ func (s *Store) ReleaseTaskTurnDispatchClaim(
 		return CommandReceipt{}, domain.TaskTurnDispatchRelease{}, fmt.Errorf("Task Turn dispatch claim and outcome are required")
 	}
 	commandID := domain.TaskTurnDispatchReleaseCommandID(claimID, outcome)
-	job, err := s.GetJob(ctx, jobID)
-	if err != nil {
-		return CommandReceipt{}, domain.TaskTurnDispatchRelease{}, err
+	var lastConflict error
+	for attempt := 0; attempt < 5; attempt++ {
+		job, err := s.GetJob(ctx, jobID)
+		if err != nil {
+			return CommandReceipt{}, domain.TaskTurnDispatchRelease{}, err
+		}
+		receipt, release, _, err := s.AddTaskTurnDispatchRelease(
+			ctx, jobID, job.Revision, claimID, commandID, outcome, evidenceSHA256, principal,
+		)
+		if err == nil {
+			return receipt, release, nil
+		}
+		if !errors.Is(err, ErrIdempotencyConflict) {
+			return CommandReceipt{}, domain.TaskTurnDispatchRelease{}, err
+		}
+		lastConflict = err
 	}
-	receipt, release, _, err := s.AddTaskTurnDispatchRelease(
-		ctx, jobID, job.Revision, claimID, commandID, outcome, evidenceSHA256, principal,
+	return CommandReceipt{}, domain.TaskTurnDispatchRelease{}, fmt.Errorf(
+		"retry Task Turn dispatch claim release after concurrent Job revisions: %w", lastConflict,
 	)
-	return receipt, release, err
 }

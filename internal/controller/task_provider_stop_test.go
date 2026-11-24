@@ -1240,6 +1240,12 @@ func TestProviderStopFencedRecoveryRequiresFencingOnSubsequentDispatchAndRecords
 		t.Fatalf("persist first dispatch start: started=%v err=%v", started, err)
 	}
 	lookupObservedAt := time.Now().UTC().Round(0)
+	if _, _, err := f.database.ReleaseProviderStopDispatchClaim(
+		f.ctx, f.jobID, firstClaim.ID, f.principal,
+		domain.ProviderStopDispatchReleasedFencedNotFound, strings.Repeat("8", 64),
+	); err == nil {
+		t.Fatal("fenced NOT_FOUND release accepted a missing Lookup observation timestamp")
+	}
 	if !lookupObservedAt.After(firstStart.CreatedAt) {
 		t.Fatalf("test lookup time did not follow DispatchStart: start=%s lookup=%s", firstStart.CreatedAt, lookupObservedAt)
 	}

@@ -1153,6 +1153,9 @@ func TestProviderControllerStopsPlanningIntentOnlyAfterPersistingStopIntent(t *t
 		if len(job.ProviderStopObservations) != 0 {
 			return errors.New("Stop observation exists before the Provider call")
 		}
+		if request.FencingToken == 0 || request.RequireFencing {
+			return errors.New("Planning Stop must provide a non-zero request token without requiring dispatch fencing")
+		}
 		return nil
 	}
 	receipt, intent, observation, err := controller.StopPlanning(
