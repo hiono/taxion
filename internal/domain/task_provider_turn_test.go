@@ -397,7 +397,6 @@ func TestTaskCoderResumeCanUseAcceptedStartBeforeFirstTurn(t *testing.T) {
 	}
 }
 
-
 func TestTaskCoderResumeObservationRequiresProviderResponsePath(t *testing.T) {
 	job, execution, permission, now := taskTurnFixture(t)
 	principalID := job.IntakeProvenance.PrincipalID
